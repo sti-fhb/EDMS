@@ -1,0 +1,10 @@
+# Windows / OneDrive 系統產物
+desktop.ini
+Thumbs.db
+ehthumbs.db
+
+# macOS
+.DS_Store
+
+# Wireframe 暫存工作目錄（截圖產生用，非版控內容）
+docs/wireframes/**/temp/
