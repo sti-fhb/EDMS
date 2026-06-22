@@ -1,0 +1,11 @@
+{
+  "name": "et-temp",
+  "version": "1.0.0",
+  "main": "take_screenshots.mjs",
+  "scripts": {
+    "shot": "node take_screenshots.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}

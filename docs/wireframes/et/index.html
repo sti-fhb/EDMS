@@ -1,0 +1,3280 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>國軍捐血管理系統 — 教育訓練模組 Wireframe</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <style>
+    :root {
+      --tsbms-green: #2e7d32;
+      --tsbms-green-dark: #1b5e20;
+      --tsbms-green-light: #4caf50;
+      --sidebar-width: 260px;
+      --navbar-height: 48px;
+    }
+    body { font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; background: #f5f5f5; }
+    .bg-tsbms-green { background-color: var(--tsbms-green) !important; color: #fff !important; }
+    .text-tsbms-green { color: var(--tsbms-green) !important; }
+
+    /* ET02 檢視模式（唯讀） — 所有編輯控制項禁用 */
+    .et02-readonly input,
+    .et02-readonly select,
+    .et02-readonly textarea {
+      pointer-events: none;
+      background-color: #f8f9fa !important;
+      color: #6c757d !important;
+    }
+    .et02-readonly .chapter-grip,
+    .et02-readonly .chapter-title-input {
+      pointer-events: none;
+    }
+    .et02-readonly .chapter-title-input {
+      background-color: transparent !important;
+      border-color: transparent !important;
+    }
+    .et02-readonly .btn-tsbms,
+    .et02-readonly .btn-danger,
+    .et02-readonly .btn-outline-danger,
+    .et02-readonly .btn-outline-primary {
+      display: none !important;
+    }
+    .et02-readonly .field-helper { opacity: 0.6; }
+
+    /* Top Navbar */
+    .navbar-tsbms {
+      background: linear-gradient(135deg, var(--tsbms-green-dark), var(--tsbms-green));
+      height: var(--navbar-height); min-height: var(--navbar-height);
+      padding: 0 1rem; flex-wrap: nowrap;
+    }
+    .navbar-tsbms .navbar-brand { color: #fff; font-weight: bold; font-size: 1.1rem; padding: 0; white-space: nowrap; }
+    .user-badge { color: rgba(255,255,255,0.9); font-size: 0.82rem; white-space: nowrap; }
+    .et-badge { background: #fff; color: var(--tsbms-green-dark); font-size: 0.72rem; padding: 1px 6px; border-radius: 3px; font-weight: 700; margin-left: 0.3rem; }
+    .role-switch-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
+      font-size: 0.78rem; padding: 0.2rem 0.6rem;
+      cursor: pointer; white-space: nowrap;
+    }
+    .role-switch-btn:hover { background: rgba(255,255,255,0.25); }
+
+    /* Sidebar */
+    
+    .sidebar {
+      position: fixed; top: var(--navbar-height); left: 0; bottom: 0;
+      width: var(--sidebar-width); background: #fff;
+      border-right: 1px solid #dee2e6; overflow: hidden;
+      z-index: 100; transition: transform 0.25s ease;
+      display: flex; flex-direction: column;
+    }
+    .sidebar.hidden { transform: translateX(-100%); }
+    .sidebar-nav { flex: 1; overflow-y: auto; padding: 0.25rem 0 2rem; }
+
+    .module-header {
+      display: flex; align-items: center; padding: 0.5rem 0.75rem;
+      cursor: pointer; color: var(--tsbms-green-dark); font-weight: 700;
+      font-size: 0.82rem; border: none; background: none; width: 100%;
+      text-align: left;
+    }
+    .module-header i.module-icon { font-size: 1.1rem; width: 24px; text-align: center; flex-shrink: 0; }
+    .module-header .module-label { margin-left: 0.6rem; flex: 1; white-space: nowrap; }
+
+    .sidebar .nav-link {
+      color: #333; padding: 0.5rem 0.75rem 0.5rem 2.5rem; font-size: 0.88rem;
+      border-left: 3px solid transparent; transition: all 0.15s;
+      white-space: nowrap; display: flex; align-items: center;
+    }
+    .sidebar .nav-link i { width: 20px; text-align: center; flex-shrink: 0; margin-right: 0.5rem; font-size: 1rem; }
+    .sidebar .nav-link:hover { background: #e8f5e9; color: var(--tsbms-green); }
+    .sidebar .nav-link.active {
+      background: #e8f5e9; color: var(--tsbms-green-dark);
+      border-left-color: var(--tsbms-green); font-weight: 600;
+    }
+
+    /* Main Content */
+    .main-content {
+      margin-left: var(--sidebar-width); margin-top: var(--navbar-height);
+      padding: 1.5rem; min-height: calc(100vh - var(--navbar-height));
+    }
+
+    /* Screens */
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .screen-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      border-bottom: 2px solid var(--tsbms-green); padding-bottom: 0.5rem; margin-bottom: 1rem;
+    }
+    .screen-title { font-size: 1.3rem; font-weight: 700; color: #333; }
+    .screen-meta { font-size: 0.75rem; color: #999; text-align: right; }
+
+    /* Wireframe components */
+    .wf-card { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .wf-placeholder {
+      background: #f5f5f5; border: 1px dashed #ccc; border-radius: 8px;
+      padding: 2rem; text-align: center; color: #999;
+    }
+    .wf-status-msg { padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .wf-status-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+    .wf-status-info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+    .wf-status-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+    table.wf-table { font-size: 0.88rem; }
+    table.wf-table th { background: #f8f9fa; white-space: nowrap; }
+    .btn-tsbms { background: var(--tsbms-green); color: #fff; border: none; }
+    .btn-tsbms:hover { background: var(--tsbms-green-dark); color: #fff; }
+
+    .wf-screen-note {
+      margin-top: 1.5rem; padding: 1rem 1.2rem;
+      border: 2px dashed #b0bec5; border-radius: 8px;
+      background: #f5f7fa; color: #546e7a; font-size: 0.82rem; line-height: 1.7;
+    }
+    .wf-screen-note summary {
+      font-weight: 700; font-size: 0.88rem; color: #37474f; cursor: pointer;
+    }
+
+    /* Status pills */
+    .status-pill {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .status-draft { background: #eceff1; color: #455a64; }
+    .status-published { background: #e8f5e9; color: #1b5e20; }
+    .status-closed { background: #fce4ec; color: #880e4f; }
+    .status-inprogress { background: #fff3e0; color: #e65100; }
+    .status-completed { background: #c8e6c9; color: #1b5e20; }
+    .status-notstarted { background: #f5f5f5; color: #757575; }
+    .status-locked { background: #ffebee; color: #c62828; }
+    .status-passed { background: #c8e6c9; color: #1b5e20; }
+    .status-failed { background: #ffcdd2; color: #b71c1c; }
+
+    /* Course card (ET01) */
+    .course-card {
+      background: #fff; border: 1px solid #dee2e6; border-radius: 8px;
+      overflow: hidden; transition: all 0.15s; cursor: pointer;
+      height: 100%; display: flex; flex-direction: column;
+    }
+    .course-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: var(--tsbms-green-light); }
+    .course-cover {
+      height: 110px;
+      background: linear-gradient(135deg, #81c784, #2e7d32);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 2rem;
+    }
+    .course-card-body { padding: 0.75rem 1rem; flex: 1; display: flex; flex-direction: column; }
+    .course-card-title { font-weight: 700; color: #333; margin-bottom: 0.35rem; font-size: 0.95rem; }
+    .course-card-meta { font-size: 0.78rem; color: #6c757d; }
+    .course-card-meta i { margin-right: 0.2rem; }
+    .course-progress { height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; margin-top: 0.5rem; }
+    .course-progress-bar { height: 100%; background: var(--tsbms-green); }
+    .course-card-footer {
+      padding: 0.4rem 1rem; background: #fafafa;
+      border-top: 1px solid #f0f0f0;
+      font-size: 0.78rem; color: #6c757d;
+      display: flex; justify-content: space-between;
+    }
+
+    /* Chapter editor (ET02) */
+    .chapter-card {
+      background: #fff; border: 1px solid #dee2e6; border-radius: 6px;
+      margin-bottom: 0.75rem;
+    }
+    .chapter-header {
+      padding: 0.6rem 0.9rem; background: #f1f8e9;
+      border-bottom: 1px solid #e0e0e0; border-radius: 6px 6px 0 0;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .chapter-grip { cursor: grab; color: #9e9e9e; }
+    .chapter-grip:hover { color: var(--tsbms-green-dark); }
+    .chapter-title-input {
+      flex: 1; border: 1px solid transparent; padding: 0.2rem 0.5rem;
+      font-weight: 700; background: transparent; font-size: 0.95rem;
+    }
+    .chapter-title-input:hover { background: #fff; border-color: #ced4da; }
+    .chapter-title-input:focus { background: #fff; border-color: var(--tsbms-green-light); outline: none; }
+    .chapter-body { padding: 0.5rem 0.9rem 0.9rem; }
+    .chapter-item {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.45rem 0.6rem; margin: 0.3rem 0;
+      background: #fafafa; border: 1px solid #f0f0f0; border-radius: 4px;
+      font-size: 0.88rem;
+    }
+    .chapter-item .item-icon { width: 1.4rem; text-align: center; }
+    .chapter-item .item-name { flex: 1; }
+    .chapter-item .item-meta { color: #999; font-size: 0.78rem; }
+    .chapter-item-video .item-icon { color: #c62828; }
+    .chapter-item-doc .item-icon { color: #1565c0; }
+    .chapter-item-page .item-icon { color: #e65100; }
+    .chapter-item-quiz .item-icon { color: #2e7d32; }
+
+    /* Video player placeholder */
+    .video-player {
+      background: #000; border-radius: 6px;
+      aspect-ratio: 16 / 9;
+      display: flex; align-items: center; justify-content: center;
+      color: #666; position: relative;
+    }
+    .video-player i { font-size: 3rem; }
+    .video-controls {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.7));
+      padding: 1.5rem 1rem 0.6rem; color: #fff; font-size: 0.85rem;
+    }
+    .video-progress { height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; margin-bottom: 0.4rem; }
+    .video-progress-bar { height: 100%; background: #f44336; width: 65%; }
+
+    /* Learning sidebar (ET05) */
+    .learn-sidebar {
+      background: #fff; border: 1px solid #dee2e6; border-radius: 8px;
+      max-height: calc(100vh - 9rem); overflow-y: auto;
+    }
+    .learn-chapter {
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .learn-chapter-header {
+      padding: 0.6rem 0.9rem; background: #f8f9fa;
+      font-weight: 700; font-size: 0.88rem; color: #333;
+      cursor: pointer; display: flex; align-items: center; gap: 0.4rem;
+    }
+    .learn-chapter-header:hover { background: #f1f8e9; }
+    .learn-item {
+      padding: 0.5rem 0.9rem 0.5rem 1.6rem;
+      font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem;
+      cursor: pointer; border-left: 3px solid transparent;
+    }
+    .learn-item:hover { background: #f5f5f5; }
+    .learn-item.active { background: #e8f5e9; border-left-color: var(--tsbms-green); font-weight: 600; }
+    .learn-item.completed { color: #4caf50; }
+    .learn-item.locked { color: #bbb; cursor: not-allowed; }
+    .learn-item-icon { width: 1.2rem; text-align: center; flex-shrink: 0; }
+
+    /* Quiz (ET06) */
+    .quiz-question {
+      background: #fff; border: 1px solid #dee2e6; border-radius: 8px;
+      padding: 1.5rem; margin-bottom: 1rem;
+    }
+    .quiz-question-num {
+      display: inline-block; padding: 2px 10px; border-radius: 12px;
+      background: var(--tsbms-green); color: #fff;
+      font-weight: 700; font-size: 0.85rem; margin-bottom: 0.6rem;
+    }
+    .quiz-option {
+      display: block; padding: 0.6rem 1rem;
+      border: 1px solid #dee2e6; border-radius: 6px;
+      margin-bottom: 0.5rem; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .quiz-option:hover { border-color: var(--tsbms-green-light); background: #f1f8e9; }
+    .quiz-option input { margin-right: 0.6rem; }
+    .quiz-option.correct { background: #e8f5e9; border-color: #4caf50; }
+    .quiz-option.incorrect { background: #ffebee; border-color: #ef5350; }
+
+    /* Quiz navigator (ET06) — 左側題號導覽 */
+    .quiz-nav-btn {
+      width: 2.4rem; height: 2.4rem; border-radius: 6px;
+      border: 1px solid #dee2e6; background: #fff;
+      font-weight: 700; font-size: 0.9rem; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .quiz-nav-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .quiz-nav-unanswered { background: #fff; color: #6c757d; border-color: #ced4da; }
+    .quiz-nav-answered { background: #c8e6c9; color: #1b5e20; border-color: #81c784; }
+    .quiz-nav-current { background: var(--tsbms-green); color: #fff; border-color: var(--tsbms-green-dark); }
+    .quiz-nav-legend {
+      display: inline-block; width: 0.9rem; height: 0.9rem; border-radius: 3px;
+      vertical-align: middle; margin-right: 0.3rem;
+      border: 1px solid #ced4da;
+    }
+    .quiz-nav-legend.quiz-nav-answered { background: #c8e6c9; border-color: #81c784; }
+    .quiz-nav-legend.quiz-nav-current { background: var(--tsbms-green); border-color: var(--tsbms-green-dark); }
+    .quiz-nav-legend.quiz-nav-unanswered { background: #fff; border-color: #ced4da; }
+
+    /* Stat card */
+    .stat-card {
+      background: #fff; border: 1px solid #dee2e6; border-radius: 8px;
+      padding: 1rem; text-align: center; height: 100%;
+    }
+    .stat-card .stat-num { font-size: 1.8rem; font-weight: 700; color: var(--tsbms-green-dark); }
+    .stat-card .stat-label { font-size: 0.85rem; color: #6c757d; margin-top: 0.25rem; }
+    .stat-card .stat-icon { font-size: 1.4rem; color: var(--tsbms-green-light); margin-bottom: 0.25rem; }
+
+    /* Login Overlay (沿用 DM 設計) */
+    .login-overlay {
+      position: fixed; inset: 0;
+      background: #f5f0e6;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 2000;
+      padding: 1rem;
+    }
+    .login-card {
+      background: #fff; border-radius: 12px;
+      padding: 2rem 2rem 3rem;
+      width: 400px; max-width: 100%;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+      position: relative;
+    }
+    .login-logo {
+      text-align: center; margin-bottom: 1.2rem;
+    }
+    .login-logo i {
+      font-size: 2.4rem; color: var(--tsbms-green-dark);
+    }
+    .login-card h3 {
+      text-align: center; font-size: 1.25rem; font-weight: 700;
+      margin-bottom: 1.5rem; color: #333;
+    }
+    .login-step-indicator {
+      display: flex; justify-content: center; gap: 0.4rem;
+      margin-bottom: 1.2rem;
+    }
+    .login-step-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #dee2e6;
+      transition: all 0.2s;
+    }
+    .login-step-dot.active {
+      background: var(--tsbms-green); width: 24px; border-radius: 4px;
+    }
+    .login-step-dot.done { background: var(--tsbms-green-light); }
+    .login-step-title {
+      font-size: 1rem; font-weight: 600; color: #333;
+      margin-bottom: 1rem; text-align: center;
+    }
+    .login-card .form-label-sm { font-size: 0.85rem; color: #555; font-weight: 500; }
+    .login-forgot-link {
+      position: absolute; bottom: 1.2rem; left: 1.5rem;
+      font-size: 0.82rem; color: #6c757d; text-decoration: none;
+    }
+    .login-forgot-link:hover { color: var(--tsbms-green-dark); text-decoration: underline; }
+    .login-auth-hint {
+      margin-top: 1.2rem; padding-top: 1rem;
+      border-top: 1px dashed #e0e0e0;
+      font-size: 0.72rem; color: #999; text-align: center; line-height: 1.7;
+    }
+    .login-auth-hint i { color: var(--tsbms-green-light); }
+    .login-greeting {
+      text-align: center; font-size: 0.85rem; color: #6c757d;
+      margin-bottom: 1rem;
+    }
+    .login-greeting strong { color: #1b5e20; }
+
+    /* Toast */
+    .et-toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      background: #323232; color: #fff;
+      padding: 0.75rem 1.25rem; border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      font-size: 0.9rem; z-index: 9999;
+      opacity: 0; transform: translateY(20px);
+      transition: all 0.25s;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .et-toast.show { opacity: 1; transform: translateY(0); }
+    .et-toast .bi-check-circle-fill { color: #81c784; font-size: 1.1rem; }
+
+    .field-helper {
+      font-size: 0.75rem; color: #6c757d; margin-top: 0.2rem;
+      display: flex; align-items: flex-start; gap: 0.3rem;
+    }
+    .field-helper i { color: #90caf9; flex-shrink: 0; margin-top: 0.1rem; }
+
+    /* Invite code box */
+    .invite-code-box {
+      background: #fff8e1; border: 2px dashed #ffc107;
+      border-radius: 6px; padding: 0.8rem 1rem;
+      font-family: 'Courier New', monospace; font-weight: 700;
+      font-size: 1.3rem; letter-spacing: 0.2rem;
+      color: #e65100; text-align: center;
+    }
+
+    @media (max-width: 991.98px) {
+      .sidebar { transform: translateX(-100%); }
+      .sidebar.mobile-open { transform: translateX(0); }
+      .main-content { margin-left: 0 !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== Login Overlay (預設顯示，登入後隱藏) ===== -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <div class="login-logo"><i class="bi bi-mortarboard-fill"></i></div>
+    <h3>教育訓練系統</h3>
+
+    <!-- Tab 切換：登入 / 註冊 -->
+    <ul class="nav nav-tabs nav-justified mb-3" id="login-tabs">
+      <li class="nav-item">
+        <a class="nav-link active" href="#" onclick="loginShowTab('login'); return false;" id="login-tab-login">
+          <i class="bi bi-box-arrow-in-right me-1"></i>登入
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#" onclick="loginShowTab('register'); return false;" id="login-tab-register">
+          <i class="bi bi-person-plus me-1"></i>註冊
+        </a>
+      </li>
+    </ul>
+
+    <!-- 登入 tab：帳號 + 密碼 -->
+    <div id="login-step-1">
+      <div class="mb-3">
+        <label class="form-label form-label-sm">帳號（Email）</label>
+        <input type="email" class="form-control" placeholder="user@example.com" value="chendh@example.com" id="login-email">
+      </div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">密碼</label>
+        <input type="password" class="form-control" placeholder="••••••••" value="demopass" id="login-password">
+      </div>
+      <!-- 錯誤訊息區（動態顯示）-->
+      <div class="alert alert-danger py-2 px-3 mb-3" id="login-error" style="display:none; font-size:0.875rem;">
+        <i class="bi bi-exclamation-circle me-1"></i><span id="login-error-text"></span>
+      </div>
+      <button class="btn btn-tsbms w-100" onclick="loginSubmit()">
+        <i class="bi bi-box-arrow-in-right me-1"></i>登入
+      </button>
+      <div class="login-auth-hint">
+        <i class="bi bi-info-circle me-1"></i>使用者首次登入請點上方「<strong>註冊</strong>」建立帳號；ET 與 DM 共用 user table，註冊一次即可登入兩系統
+      </div>
+
+      <!-- demo: 觸發錯誤訊息（正式系統不顯示） -->
+      <div class="mt-2" style="font-size:0.75rem; color:#999; text-align:center;">
+        demo 觸發錯誤：
+        <a href="#" onclick="loginShowError('no_account'); return false;">查無帳號</a> ｜
+        <a href="#" onclick="loginShowError('wrong_password'); return false;">密碼錯誤</a> ｜
+        <a href="#" onclick="loginShowError(null); return false;">清除</a>
+      </div>
+    </div>
+
+    <!-- 註冊 tab：填寫基本資料 -->
+    <div id="login-register" style="display:none;">
+      <div class="mb-3">
+        <label class="form-label form-label-sm">帳號（Email）<span class="text-danger">*</span></label>
+        <input type="email" class="form-control" placeholder="user@example.com">
+      </div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">密碼 <span class="text-danger">*</span></label>
+        <input type="password" class="form-control" placeholder="至少 8 字元">
+      </div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">確認密碼 <span class="text-danger">*</span></label>
+        <input type="password" class="form-control" placeholder="再次輸入密碼">
+      </div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">姓名 <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" placeholder="如：陳大華">
+      </div>
+      <button class="btn btn-tsbms w-100" onclick="loginRegisterSubmit()">
+        <i class="bi bi-person-plus me-1"></i>建立帳號
+      </button>
+      <div class="login-auth-hint">
+        <i class="bi bi-info-circle me-1"></i>註冊成功後自動以「學員」角色登入；如需教師或管理者權限請聯絡管理者
+      </div>
+    </div>
+
+    <!-- Forgot 1: 輸入帳號 -->
+    <div id="login-forgot-1" style="display:none;">
+      <div class="login-step-title">
+        <i class="bi bi-key text-warning me-1"></i>忘記密碼
+      </div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">請輸入您的帳號（Email）</label>
+        <input type="email" class="form-control" placeholder="user@example.com">
+        <div class="field-helper mt-2">
+          <i class="bi bi-info-circle"></i>系統將寄出密碼重設連結至該 Email，30 分鐘內有效。
+        </div>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" onclick="loginBackToLogin()" title="返回登入">
+          <i class="bi bi-arrow-left"></i>
+        </button>
+        <button class="btn btn-tsbms flex-grow-1" onclick="loginForgotSubmit()">
+          <i class="bi bi-envelope me-1"></i>送出
+        </button>
+      </div>
+    </div>
+
+    <!-- Forgot 2: 完成提示 -->
+    <div id="login-forgot-2" style="display:none;">
+      <div class="text-center" style="padding: 0.5rem 0 1rem;">
+        <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
+        <h5 class="mt-3 mb-2" style="font-size:1.05rem;">已送出</h5>
+        <p class="text-muted small mb-0">
+          系統已將密碼重設連結寄至您的 Email，<br>
+          請於 30 分鐘內完成重設。
+        </p>
+      </div>
+      <button class="btn btn-outline-secondary w-100" onclick="loginBackToLogin()">
+        <i class="bi bi-arrow-left me-1"></i>返回登入
+      </button>
+    </div>
+
+    <!-- 忘記密碼連結 (左下角，僅登入 tab 顯示) -->
+    <a href="#" class="login-forgot-link" id="login-forgot-link" onclick="loginForgotPw(); return false;">
+      忘記密碼？
+    </a>
+  </div>
+</div>
+
+<!-- ===== Top Navbar ===== -->
+<nav class="navbar navbar-tsbms fixed-top d-flex align-items-center">
+  <button class="btn btn-sm me-2" onclick="toggleSidebar()" style="color:rgba(255,255,255,0.85); border:none; font-size:1.1rem; padding:0.2rem 0.5rem;">
+    <i class="bi bi-list"></i>
+  </button>
+  <a class="navbar-brand" href="#"><i class="bi bi-mortarboard-fill me-2"></i>教育訓練系統 <span class="et-badge">ET</span></a>
+  <div class="dropdown ms-3">
+    <button class="role-switch-btn dropdown-toggle" type="button" data-bs-toggle="dropdown" title="切換視角（demo 用，模擬不同角色組合）">
+      <i class="bi bi-arrow-left-right me-1"></i>切換視角：<span id="current-role">管理者 + 教師</span>
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end small">
+      <li><h6 class="dropdown-header">demo 視角</h6></li>
+      <li><a class="dropdown-item" href="#" onclick="switchRole('admin+teacher','陳大華','管理者 + 教師'); return false;">管理者 + 教師 <small class="text-muted">(陳大華)</small></a></li>
+      <li><a class="dropdown-item" href="#" onclick="switchRole('student','王曉明','學員'); return false;">學員 <small class="text-muted">(王曉明)</small></a></li>
+    </ul>
+  </div>
+  <div class="ms-auto me-2 d-flex align-items-center gap-2 flex-shrink-0">
+    <span class="user-badge"><i class="bi bi-shield-lock me-1"></i>SSO 已驗證　|　<i class="bi bi-person-circle me-1"></i><span id="user-name">陳大華（管理者 + 教師）</span></span>
+    <button class="btn btn-sm p-1 ms-1" onclick="loginLogout()" style="color:rgba(255,255,255,0.85); border:none; background:transparent;">
+      <i class="bi bi-box-arrow-right"></i>
+    </button>
+  </div>
+</nav>
+
+<!-- ===== Sidebar (依角色顯示對應群組；可多重) ===== -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-nav">
+
+    <!-- 教師專屬選單（建/編課程、學員管理） -->
+    <div id="sidebar-teacher" data-role="teacher">
+      <button class="module-header">
+        <i class="bi bi-collection-play module-icon"></i>
+        <span class="module-label">課程管理</span>
+      </button>
+      <a class="nav-link active" href="#" data-screen="et-courses-admin"><i class="bi bi-grid"></i><span>課程列表</span></a>
+      <a class="nav-link" href="#" data-screen="et-students"><i class="bi bi-people-fill"></i><span>學員</span></a>
+    </div>
+
+    <!-- 管理者專屬選單（權限管理） -->
+    <div id="sidebar-admin" data-role="admin">
+      <button class="module-header mt-2">
+        <i class="bi bi-gear module-icon"></i>
+        <span class="module-label">系統設定</span>
+      </button>
+      <a class="nav-link" href="#" data-screen="et-permissions"><i class="bi bi-shield-lock"></i><span>權限管理</span></a>
+    </div>
+
+    <!-- 學員專屬選單 -->
+    <div id="sidebar-student" data-role="student" style="display:none;">
+      <button class="module-header mt-2">
+        <i class="bi bi-book module-icon"></i>
+        <span class="module-label">學員功能</span>
+      </button>
+      <a class="nav-link" href="#" data-screen="et-courses-student"><i class="bi bi-collection"></i><span>我的課程</span></a>
+    </div>
+
+    <!-- 個人專區（所有角色共用） -->
+    <div id="sidebar-common">
+      <button class="module-header mt-2">
+        <i class="bi bi-person-workspace module-icon"></i>
+        <span class="module-label">個人專區</span>
+      </button>
+      <a class="nav-link" href="#" data-screen="et-profile"><i class="bi bi-person-gear"></i><span>個人資料維護</span></a>
+    </div>
+  </div>
+</nav>
+
+<!-- ===== Main Content ===== -->
+<div class="main-content">
+
+<!-- ==================== ET01 課程列表（教師） ==================== -->
+<div class="screen active" id="et-courses-admin">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-grid me-2"></i>課程列表</div>
+    <div class="screen-meta">et/courses.jsp (ET01)</div>
+  </div>
+
+  <!-- 範圍篩選 tab -->
+  <ul class="nav nav-tabs mb-2" id="et-courses-tabs">
+    <li class="nav-item">
+      <a class="nav-link active" href="#" data-filter="mine" onclick="filterCourses('mine'); return false;"><i class="bi bi-person-check me-1"></i>我建立的</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="#" data-filter="all" onclick="filterCourses('all'); return false;"><i class="bi bi-people me-1"></i>全部課程</a>
+    </li>
+  </ul>
+
+  <div class="wf-status-msg wf-status-info mb-2">
+    <i class="bi bi-info-circle me-1"></i>點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；點擊<strong>他人建立</strong>之課程進入<strong>檢視模式（唯讀）</strong>，僅可閱覽不可編輯內容。
+  </div>
+
+  <!-- 搜尋列 -->
+  <div class="wf-card">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label small">關鍵字</label>
+        <div class="input-group input-group-sm">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="text" class="form-control" placeholder="課程名稱 / 描述">
+        </div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">關聯模組</label>
+        <select class="form-select form-select-sm">
+          <option>全部</option>
+          <option>採血</option>
+          <option>成分</option>
+          <option>檢驗</option>
+          <option>供應</option>
+          <option>醫務</option>
+          <option>報表與標籤</option>
+          <option>其他</option>
+        </select>
+      </div>
+      <div class="col-md-2" id="et-filter-creator" style="display:none;">
+        <label class="form-label small">建立者</label>
+        <select class="form-select form-select-sm">
+          <option>全部</option>
+          <option>陳大華（您）</option>
+          <option>林助教</option>
+          <option>陳怡君</option>
+        </select>
+      </div>
+      <div class="col-md-2 text-end">
+        <button class="btn btn-tsbms btn-sm w-100" onclick="goScreen('et-course-create')"><i class="bi bi-plus-circle me-1"></i>新增課程</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 課程清單（依模組分組） -->
+
+  <!-- 採血 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-droplet me-1"></i>採血 <small class="text-muted fw-normal">（2 門課程）</small></h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4 course-card-col" data-owner="me">
+      <div class="course-card" onclick="openCourse('採血作業新進人員訓練 v2.0', '陳大華', true)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-published">已發布</span></div>
+          <div class="course-card-title mt-2">採血作業新進人員訓練 v2.0</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 陳大華（您） ｜ <i class="bi bi-list-ol"></i> 5 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 28 位學員</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 course-card-col" data-owner="other">
+      <div class="course-card" onclick="openCourse('捐血人健康評估標準教學', '林助教', false)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-published">已發布</span><span class="badge bg-light text-muted ms-1" style="font-size:0.65rem;"><i class="bi bi-eye"></i> 檢視</span></div>
+          <div class="course-card-title mt-2">捐血人健康評估標準教學</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 林助教 ｜ <i class="bi bi-list-ol"></i> 3 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 15 位學員</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成分 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-diagram-3 me-1"></i>成分 <small class="text-muted fw-normal">（1 門課程）</small></h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4 course-card-col" data-owner="other">
+      <div class="course-card" onclick="openCourse('成分製備標準作業教學', '陳怡君', false)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-published">已發布</span><span class="badge bg-light text-muted ms-1" style="font-size:0.65rem;"><i class="bi bi-eye"></i> 檢視</span></div>
+          <div class="course-card-title mt-2">成分製備標準作業教學</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 陳怡君 ｜ <i class="bi bi-list-ol"></i> 4 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 8 位學員</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 檢驗 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-clipboard2-pulse me-1"></i>檢驗 <small class="text-muted fw-normal">（1 門課程）</small></h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4 course-card-col" data-owner="other">
+      <div class="course-card" onclick="openCourse('TL01 檢驗登錄培訓', '林助教', false)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-published">已發布</span><span class="badge bg-light text-muted ms-1" style="font-size:0.65rem;"><i class="bi bi-eye"></i> 檢視</span></div>
+          <div class="course-card-title mt-2">TL01 檢驗登錄培訓</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 林助教 ｜ <i class="bi bi-list-ol"></i> 3 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 10 位學員</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 供應 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-box-seam me-1"></i>供應 <small class="text-muted fw-normal">（2 門課程）</small></h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4 course-card-col" data-owner="me">
+      <div class="course-card" onclick="openCourse('BS04 領血掃血袋實務培訓', '陳大華', false, true)" style="opacity:0.85;">
+        <div class="course-card-body">
+          <div><span class="status-pill status-closed"><i class="bi bi-slash-circle me-1"></i>已停課</span><span class="badge bg-light text-muted ms-1" style="font-size:0.65rem;"><i class="bi bi-eye"></i> 檢視</span></div>
+          <div class="course-card-title mt-2">BS04 領血掃血袋實務培訓</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 陳大華（您） ｜ <i class="bi bi-list-ol"></i> 3 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 12 位學員（歷史）</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 course-card-col" data-owner="me">
+      <div class="course-card" onclick="openCourse('戰時血品緊急配送 SOP 教學', '陳大華', true)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-draft">草稿</span></div>
+          <div class="course-card-title mt-2">戰時血品緊急配送 SOP 教學</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 陳大華（您） ｜ <i class="bi bi-list-ol"></i> 4 章節（編輯中）
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span class="text-muted"><i class="bi bi-pencil"></i> 編輯中</span>
+          <span class="text-muted">尚未發布</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 醫務 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-shield-plus me-1"></i>醫務 <small class="text-muted fw-normal">（2 門課程）</small></h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4 course-card-col" data-owner="other">
+      <div class="course-card" onclick="openCourse('血品安全與品保概論', '陳怡君', false)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-published">已發布</span><span class="badge bg-light text-muted ms-1" style="font-size:0.65rem;"><i class="bi bi-eye"></i> 檢視</span></div>
+          <div class="course-card-title mt-2">血品安全與品保概論</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 陳怡君 ｜ <i class="bi bi-list-ol"></i> 4 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 22 位學員</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 course-card-col" data-owner="me">
+      <div class="course-card" onclick="openCourse('輸血反應處置流程培訓', '陳大華', true)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-draft">草稿</span></div>
+          <div class="course-card-title mt-2">輸血反應處置流程培訓</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 陳大華（您） ｜ <i class="bi bi-list-ol"></i> 3 章節（編輯中）
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span class="text-muted"><i class="bi bi-pencil"></i> 編輯中</span>
+          <span class="text-muted">尚未發布</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 其他 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-folder me-1"></i>其他 <small class="text-muted fw-normal">（1 門課程）</small></h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4 course-card-col" data-owner="other">
+      <div class="course-card" onclick="openCourse('資訊系統使用培訓（基礎）', '林助教', false)">
+        <div class="course-card-body">
+          <div><span class="status-pill status-published">已發布</span><span class="badge bg-light text-muted ms-1" style="font-size:0.65rem;"><i class="bi bi-eye"></i> 檢視</span></div>
+          <div class="course-card-title mt-2">資訊系統使用培訓（基礎）</div>
+          <div class="course-card-meta">
+            <i class="bi bi-person"></i> 林助教 ｜ <i class="bi bi-list-ol"></i> 2 章節
+          </div>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-people"></i> 35 位學員</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>教師課程列表，顯示<strong>所有教師建立</strong>之課程（含草稿與已發布）<br>
+    <strong>範圍篩選 tab：</strong>「我建立的」僅顯示 owner = 當前使用者；「全部課程」顯示所有教師之課程<br>
+    <strong>分類沿用主系統模組：</strong>採血 / 成分 / 檢驗 / 供應 / 醫務 / 報表與標籤 / 其他，與 DM 模組一致；課程依「關聯模組」分區呈現<br>
+    <strong>建立者顯示：</strong>每張卡片顯示「建立者：xxx」；自己建立顯示「（您）」<br>
+    <strong>點擊課程卡片之行為依擁有權判定：</strong>
+    <ul style="margin:0.25rem 0 0.5rem 1.2rem;">
+      <li><strong>自己建立</strong> → 進入 ET02 <strong>編輯模式</strong>（全功能）</li>
+      <li><strong>他人建立</strong> → 進入 ET02 <strong>檢視模式</strong>（唯讀，僅可閱覽不可編輯）</li>
+    </ul>
+    <strong>新增課程：</strong>右上「+ 新增課程」進入課程新增頁，所有欄位空白；填完基本資料後可繼續新增章節<br>
+    <strong>對應需求：</strong>RQET001（課程建立）、RQET007（教師視角）
+  </details>
+</div>
+
+<!-- ==================== ET04 我的課程（學員） ==================== -->
+<div class="screen" id="et-courses-student">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-collection me-2"></i>我的課程</div>
+    <div class="screen-meta">et/myCourses.jsp (ET04)</div>
+  </div>
+
+  <!-- 統計 + 加入課程 -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-3 col-6">
+      <div class="stat-card">
+        <div class="stat-icon"><i class="bi bi-book"></i></div>
+        <div class="stat-num">3</div>
+        <div class="stat-label">已加入課程</div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="stat-card">
+        <div class="stat-icon text-success"><i class="bi bi-check-circle"></i></div>
+        <div class="stat-num text-success">1</div>
+        <div class="stat-label">已完成</div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="stat-card">
+        <div class="stat-icon text-warning"><i class="bi bi-hourglass-split"></i></div>
+        <div class="stat-num text-warning">2</div>
+        <div class="stat-label">進行中</div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="stat-card" onclick="openJoinCourseModal()" style="cursor:pointer; border-color: var(--tsbms-green); background: #f1f8e9;">
+        <div class="stat-icon text-success"><i class="bi bi-plus-circle"></i></div>
+        <div class="stat-num text-success">+</div>
+        <div class="stat-label">加入新課程<br><small class="text-muted">輸入邀請碼</small></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 課程清單（依模組分組） -->
+
+  <!-- 採血 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-droplet me-1"></i>採血</h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4">
+      <div class="course-card" onclick="goScreen('et-learn')">
+        <div class="course-cover"><i class="bi bi-droplet"></i></div>
+        <div class="course-card-body">
+          <div><span class="status-pill status-inprogress">進行中</span></div>
+          <div class="course-card-title mt-2">採血作業新進人員訓練 v2.0</div>
+          <div class="course-card-meta">
+            <i class="bi bi-calendar"></i> 加入 2026-04-20
+          </div>
+          <div class="course-progress mt-2"><div class="course-progress-bar" style="width:75%;"></div></div>
+          <small class="text-muted">完成 75% ｜ 第 4 章學習中</small>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-list-ol"></i> 5 章節</span>
+          <span class="text-tsbms-green">繼續學習 →</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 供應 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-box-seam me-1"></i>供應</h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4">
+      <div class="course-card" onclick="goScreen('et-learn')">
+        <div class="course-cover" style="background: linear-gradient(135deg, #ce93d8, #6a1b9a);"><i class="bi bi-box-seam"></i></div>
+        <div class="course-card-body">
+          <div><span class="status-pill status-completed"><i class="bi bi-check-circle me-1"></i>已完成</span></div>
+          <div class="course-card-title mt-2">BS04 領血掃血袋實務培訓</div>
+          <div class="course-card-meta">
+            <i class="bi bi-trophy"></i> 結業日 2026-03-15 ｜ 平均成績 92 分
+          </div>
+          <div class="course-progress mt-2"><div class="course-progress-bar" style="width:100%; background:#1b5e20;"></div></div>
+          <small class="text-success"><i class="bi bi-check-circle-fill"></i> 已完成</small>
+        </div>
+        <div class="course-card-footer">
+          <span>3 章節 ｜ 4 測驗</span>
+          <span>查看證書 →</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 醫務 -->
+  <h6 class="fw-bold mt-3 mb-2 text-tsbms-green"><i class="bi bi-shield-plus me-1"></i>醫務</h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-4">
+      <div class="course-card" onclick="goScreen('et-learn')">
+        <div class="course-cover" style="background: linear-gradient(135deg, #80cbc4, #00695c);"><i class="bi bi-shield-plus"></i></div>
+        <div class="course-card-body">
+          <div><span class="status-pill status-inprogress">進行中</span></div>
+          <div class="course-card-title mt-2">血品安全與品保概論</div>
+          <div class="course-card-meta">
+            <i class="bi bi-calendar"></i> 加入 2026-05-10
+          </div>
+          <div class="course-progress mt-2"><div class="course-progress-bar" style="width:20%;"></div></div>
+          <small class="text-muted">完成 20% ｜ 第 1 章學習中</small>
+        </div>
+        <div class="course-card-footer">
+          <span><i class="bi bi-list-ol"></i> 4 章節</span>
+          <span class="text-tsbms-green">繼續學習 →</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>學員首頁，顯示自己已加入的所有課程與整體學習進度<br>
+    <strong>頂部統計卡：</strong>已加入、已完成、進行中課程數；最後一張為「加入新課程」入口（輸入邀請碼）<br>
+    <strong>分組顯示：</strong>已加入的課程依「關聯模組」分區呈現；卡片本身不再顯示模組 pill（避免冗餘）<br>
+    <strong>點擊課程卡：</strong>進入 ET05 課程學習頁（從上次進度繼續）<br>
+    <strong>對應需求：</strong>RQET007（學員視角）
+  </details>
+</div>
+
+<!-- ==================== ET02-N 課程新增（空白） ==================== -->
+<div class="screen" id="et-course-create">
+  <div class="screen-header">
+    <div>
+      <div class="screen-title">
+        <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-courses-admin')"><i class="bi bi-arrow-left"></i></button>
+        <i class="bi bi-plus-circle me-2"></i>新增課程
+      </div>
+    </div>
+    <div class="screen-meta">et/courseCreate.jsp (ET02-N)</div>
+  </div>
+
+  <div class="wf-status-msg wf-status-info">
+    <i class="bi bi-info-circle me-1"></i>填寫基本資料 + 章節後可選擇「儲存草稿」稍後再編輯，或直接「儲存並發布」上架。
+  </div>
+
+  <!-- 基本資料卡 -->
+  <div class="wf-card">
+    <details open>
+      <summary style="cursor:pointer; font-weight:700; color:#333;"><i class="bi bi-card-text me-1"></i>基本資料</summary>
+      <div class="row g-3 mt-2">
+        <div class="col-md-7">
+          <label class="form-label small">課程名稱 <span class="text-danger">*</span></label>
+          <input type="text" class="form-control form-control-sm" placeholder="例：採血作業新進人員訓練 v1.0">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">關聯模組 <span class="text-danger">*</span></label>
+          <select class="form-select form-select-sm">
+            <option value="" selected>-- 請選擇 --</option>
+            <option>採血</option>
+            <option>成分</option>
+            <option>檢驗</option>
+            <option>供應</option>
+            <option>醫務</option>
+            <option>報表與標籤</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">狀態</label>
+          <input type="text" class="form-control form-control-sm" value="草稿" disabled>
+        </div>
+        <div class="col-md-12">
+          <label class="form-label small">課程描述</label>
+          <textarea class="form-control form-control-sm" rows="2" placeholder="簡述課程目標、適用對象與內容重點"></textarea>
+        </div>
+      </div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>開課日期不需填寫，系統將以「<strong>首次發布</strong>」之時間戳自動寫入。</div>
+    </details>
+  </div>
+
+  <!-- 章節編排（空白狀態） -->
+  <div class="wf-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="fw-bold mb-0"><i class="bi bi-list-ol me-1"></i>章節編排</h6>
+      <button class="btn btn-tsbms btn-sm" onclick="openChapterModal()"><i class="bi bi-plus-circle me-1"></i>新增章節</button>
+    </div>
+    <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>系統規則：學員須依序完成每個章節後才能進入下一章（RQET004 強制完成邏輯系統內建，無需逐章設定）。</div>
+
+    <div class="wf-placeholder" style="padding:2.5rem 1rem;">
+      <i class="bi bi-folder2-open" style="font-size:2.5rem; color:#bbb;"></i>
+      <div class="mt-2"><strong class="text-muted">尚未新增章節</strong></div>
+      <div class="text-muted small mt-1">點上方「+ 新增章節」開始建立課程內容</div>
+    </div>
+  </div>
+
+  <!-- Sticky 動作列 -->
+  <div class="wf-card" style="position:sticky; bottom:0; box-shadow:0 -2px 10px rgba(0,0,0,0.05);">
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="text-muted small"><i class="bi bi-info-circle me-1"></i>儲存草稿可隨時繼續編輯；確認內容完整後可直接發布</div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="goScreen('et-courses-admin')">取消</button>
+        <button class="btn btn-outline-primary btn-sm" onclick="showCourseCreatedSuccess('draft')"><i class="bi bi-save me-1"></i>儲存草稿</button>
+        <button class="btn btn-tsbms btn-sm" onclick="showCourseCreatedSuccess('published')"><i class="bi bi-check2-circle me-1"></i>儲存並發布</button>
+      </div>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>新增課程（ET01-A「+ 新增課程」按鈕觸發）；所有欄位皆為空白<br>
+    <strong>必填欄位：</strong>課程名稱、關聯模組（其他選填）<br>
+    <strong>狀態：</strong>儲存草稿後為「草稿」狀態；確認內容完整可直接「儲存並發布」，課程立即上架供學員加入<br>
+    <strong>章節編排空白狀態：</strong>顯示「尚未新增章節」提示與引導按鈕；點「新增章節」後可<strong>連續新增多個章節</strong>（modal 中按「儲存並繼續新增」會留在 modal 重設欄位）<br>
+    <strong>儲存後：</strong>回到課程列表，新課程出現在對應模組分類下；再次點擊進入 ET02 編輯頁可繼續調整內容或發布
+  </details>
+</div>
+
+<!-- ==================== ET02-S 課程建立完成 ==================== -->
+<div class="screen" id="et-course-create-success">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-check-circle-fill text-success me-2"></i>課程已建立</div>
+    <div class="screen-meta">et/courseCreated.jsp (ET02-S)</div>
+  </div>
+
+  <div class="wf-card text-center" style="padding:2.5rem 1rem;">
+    <i class="bi bi-check-circle-fill text-success" style="font-size:4rem;"></i>
+    <h4 class="mt-3 mb-2">課程建立成功！</h4>
+    <p class="text-muted mb-4">
+      課程「<strong class="text-tsbms-green" id="created-course-name">採血作業新進人員訓練 v2.0</strong>」已成功建立<br>
+      狀態：<span class="status-pill" id="created-course-status">已發布</span>
+    </p>
+
+    <!-- 課程摘要 -->
+    <div class="d-inline-block text-start bg-light rounded p-3 mb-4" style="min-width:300px;">
+      <div class="small mb-1"><i class="bi bi-grid-3x3-gap text-success me-1"></i><span class="text-muted">關聯模組：</span><strong>採血</strong></div>
+      <div class="small mb-1"><i class="bi bi-list-ol text-success me-1"></i><span class="text-muted">章節數：</span><strong>3 章</strong></div>
+      <div class="small mb-1"><i class="bi bi-collection-play text-success me-1"></i><span class="text-muted">教材項目：</span><strong>7 個（含 2 個測驗）</strong></div>
+      <div class="small mb-0"><i class="bi bi-file-text text-muted me-1"></i><span class="text-muted">狀態：</span><strong>草稿（發布後自動寫入開課日期）</strong></div>
+    </div>
+
+    <!-- 接下來要做什麼 -->
+    <h6 class="fw-bold mb-3"><i class="bi bi-arrow-right-circle me-1"></i>接下來要做什麼？</h6>
+    <div class="d-flex justify-content-center gap-2 flex-wrap">
+      <button class="btn btn-outline-secondary" onclick="goScreen('et-courses-admin')">
+        <i class="bi bi-grid me-1"></i>回到課程列表
+      </button>
+      <button class="btn btn-outline-primary" onclick="goScreen('et-course-edit')">
+        <i class="bi bi-pencil-square me-1"></i>繼續編輯此課程
+      </button>
+      <button class="btn btn-tsbms" onclick="resetAndCreateAnotherCourse()">
+        <i class="bi bi-plus-circle me-1"></i>新增另一門課程
+      </button>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>新增課程儲存成功後的確認畫面，提供使用者三個後續動作選項<br>
+    <strong>進入時機：</strong>從 ET02-N 點「儲存草稿」或「儲存並發布」後自動進入；狀態 pill 依當下選擇顯示「草稿」或「已發布」<br>
+    <strong>課程摘要：</strong>列出剛建立的課程關鍵資訊（模組、章節數、教材項目數、狀態），讓使用者確認資料正確；開課日期不由教師填寫，發布後系統自動以發布時間戳寫入<br>
+    <strong>三個下一步選項：</strong><br>
+    <span style="margin-left:1rem;">• <strong>回到課程列表</strong>：返回 ET01-A，看到新建課程已出現在對應模組分類下</span><br>
+    <span style="margin-left:1rem;">• <strong>繼續編輯此課程</strong>：進入 ET02 編輯頁，可繼續調整內容或變更狀態</span><br>
+    <span style="margin-left:1rem;">• <strong>新增另一門課程</strong>：清空 ET02-N 表單、返回新增頁，方便連續建立多門課程</span>
+  </details>
+</div>
+
+<!-- ==================== ET02 課程編輯 ==================== -->
+<div class="screen" id="et-course-edit">
+  <div class="screen-header">
+    <div>
+      <div class="screen-title">
+        <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-courses-admin')"><i class="bi bi-arrow-left"></i></button>
+        <i class="bi bi-pencil-square me-2" id="et02-mode-icon"></i><span id="et02-mode-label">課程編輯</span> — <span class="text-tsbms-green" id="et02-course-name">採血作業新進人員訓練 v2.0</span>
+        <span class="status-pill status-published ms-2">已發布</span>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <button class="btn btn-tsbms btn-sm" id="et02-invite-btn" onclick="openInviteModal()" title="僅已發布課程顯示">
+        <i class="bi bi-person-plus me-1"></i>邀請學員
+      </button>
+      <button class="btn btn-outline-danger btn-sm" id="et02-close-btn" onclick="openCloseCourseModal()" title="僅已發布課程顯示；停課不可逆">
+        <i class="bi bi-slash-circle me-1"></i>停課
+      </button>
+      <div class="screen-meta ms-2">et/courseEdit.jsp (ET02)</div>
+    </div>
+  </div>
+
+  <!-- 檢視模式 banner（非 owner 時顯示） -->
+  <div id="et02-view-banner" class="wf-status-msg wf-status-warn mb-3" style="display:none;">
+    <i class="bi bi-eye-fill me-1"></i><strong>檢視模式</strong> — 此課程由 <strong id="et02-creator-name">林助教</strong> 建立，您僅可閱覽，無法編輯。
+  </div>
+
+  <!-- 已停課 banner（已停課時顯示） -->
+  <div id="et02-closed-banner" class="wf-status-msg wf-status-warn mb-3" style="display:none;">
+    <i class="bi bi-slash-circle me-1"></i><strong>本課程已停課</strong> — 內容已凍結、無法再編輯或發布；已加入學員之歷史紀錄保留供查詢。
+  </div>
+
+  <!-- 基本資料卡（可摺疊） -->
+  <div class="wf-card">
+    <details open>
+      <summary style="cursor:pointer; font-weight:700; color:#333;"><i class="bi bi-card-text me-1"></i>基本資料</summary>
+      <div class="row g-3 mt-2">
+        <div class="col-md-7">
+          <label class="form-label small">課程名稱 <span class="text-danger">*</span></label>
+          <input type="text" class="form-control form-control-sm" value="採血作業新進人員訓練 v2.0">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">關聯模組 <span class="text-danger">*</span></label>
+          <select class="form-select form-select-sm">
+            <option selected>採血</option>
+            <option>成分</option>
+            <option>檢驗</option>
+            <option>供應</option>
+            <option>醫務</option>
+            <option>報表與標籤</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">狀態</label>
+          <input type="text" class="form-control form-control-sm" value="已發布" disabled>
+        </div>
+        <div class="col-md-12">
+          <label class="form-label small">課程描述</label>
+          <textarea class="form-control form-control-sm" rows="2">本課程介紹採血作業之標準流程、相關器材使用、捐血人健康評估與採血後處理。適用於新進採血人員。</textarea>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">開課日期</label>
+          <input type="text" class="form-control form-control-sm" value="2026-04-15（首次發布）" disabled>
+        </div>
+      </div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>開課日期由系統以「首次發布」之時間戳自動寫入；草稿狀態為空。</div>
+    </details>
+  </div>
+
+  <!-- 章節編排（主要區塊） -->
+  <div class="wf-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="fw-bold mb-0"><i class="bi bi-list-ol me-1"></i>章節編排 <small class="text-muted fw-normal">（拖拉手把可調整順序）</small></h6>
+      <button class="btn btn-tsbms btn-sm" onclick="openChapterModal()"><i class="bi bi-plus-circle me-1"></i>新增章節</button>
+    </div>
+    <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>系統規則：學員須依序完成每個章節後才能進入下一章（RQET004 強制完成邏輯系統內建，無需逐章設定）。</div>
+
+    <!-- 章節 1 -->
+    <div class="chapter-card">
+      <div class="chapter-header">
+        <i class="bi bi-grip-vertical chapter-grip"></i>
+        <span class="text-muted small">第 1 章</span>
+        <input type="text" class="chapter-title-input" value="採血基本流程概論">
+        <span class="badge bg-light text-dark"><i class="bi bi-clock"></i> 約 18 分</span>
+        <button class="btn btn-sm btn-link p-0 text-danger" title="刪除章節" onclick="openDeleteChapterModal('第 1 章 採血基本流程概論')"><i class="bi bi-trash"></i></button>
+      </div>
+      <div class="chapter-body">
+        <div class="chapter-item chapter-item-video">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">採血流程概論</span>
+          <span class="item-meta">10:30</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openMaterialModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('採血流程概論')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="chapter-item chapter-item-page">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">採血器材說明</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openMaterialModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('採血器材說明')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="chapter-item chapter-item-quiz">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">基本概念測驗</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openQuizModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('基本概念測驗')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-plus me-1"></i>新增項目</button>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item small" href="#" onclick="openMaterialModal(); return false;"><i class="bi bi-book text-primary me-1"></i> 教材 <small class="text-muted">(影片/圖片/文件/說明文字)</small></a></li>
+            <li><a class="dropdown-item small" href="#" onclick="openQuizModal(); return false;"><i class="bi bi-check-square text-success me-1"></i> 測驗</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 章節 2 -->
+    <div class="chapter-card">
+      <div class="chapter-header">
+        <i class="bi bi-grip-vertical chapter-grip"></i>
+        <span class="text-muted small">第 2 章</span>
+        <input type="text" class="chapter-title-input" value="捐血人健康評估">
+        <span class="badge bg-light text-dark"><i class="bi bi-clock"></i> 約 25 分</span>
+        <button class="btn btn-sm btn-link p-0 text-danger" title="刪除章節" onclick="openDeleteChapterModal('第 2 章 捐血人健康評估')"><i class="bi bi-trash"></i></button>
+      </div>
+      <div class="chapter-body">
+        <div class="chapter-item chapter-item-page">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">健康評估標準</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openMaterialModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('健康評估標準')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="chapter-item chapter-item-doc">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">血液品質檢驗 SOP</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openMaterialModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('血液品質檢驗 SOP')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="chapter-item chapter-item-video">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">實際操作示範</span>
+          <span class="item-meta">15:45</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openMaterialModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('實際操作示範')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="chapter-item chapter-item-quiz">
+          <i class="bi bi-grip-vertical chapter-grip"></i>
+          <span class="item-name">實務情境題</span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openQuizModal()" title="編輯"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openDeleteItemModal('實務情境題')" title="刪除"><i class="bi bi-trash"></i></button>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-plus me-1"></i>新增項目</button>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item small" href="#" onclick="openMaterialModal(); return false;"><i class="bi bi-book text-primary me-1"></i> 教材 <small class="text-muted">(影片/圖片/文件/說明文字)</small></a></li>
+            <li><a class="dropdown-item small" href="#" onclick="openQuizModal(); return false;"><i class="bi bi-check-square text-success me-1"></i> 測驗</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 章節 3（簡略） -->
+    <div class="chapter-card">
+      <div class="chapter-header">
+        <i class="bi bi-grip-vertical chapter-grip"></i>
+        <span class="text-muted small">第 3 章</span>
+        <input type="text" class="chapter-title-input" value="採血後處理與器材消毒">
+        <span class="badge bg-light text-dark"><i class="bi bi-clock"></i> 約 20 分</span>
+        <button class="btn btn-sm btn-link p-0 text-danger" title="刪除章節" onclick="openDeleteChapterModal('第 3 章 採血後處理與器材消毒')"><i class="bi bi-trash"></i></button>
+      </div>
+      <div class="chapter-body">
+        <div class="text-muted small">（共 3 個項目 — 摺疊中）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sticky 動作列 -->
+  <div class="wf-card" style="position:sticky; bottom:0; box-shadow:0 -2px 10px rgba(0,0,0,0.05);">
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>最後儲存：2026-05-22 14:35</div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-primary"><i class="bi bi-save me-1"></i>儲存草稿</button>
+        <button class="btn btn-tsbms btn-sm" onclick="showToast('已儲存並發布最新版本')"><i class="bi bi-check2-circle me-1"></i>儲存並發布</button>
+      </div>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>教師編輯課程內容，採單頁 scroll 設計（不用 tab，方便拖拉編排）<br>
+    <strong>編輯 vs 檢視模式：</strong>
+    <ul style="margin:0.25rem 0 0.5rem 1.2rem;">
+      <li><strong>編輯模式</strong>（owner 進入）：全功能可用，所有編輯控制項可操作</li>
+      <li><strong>檢視模式</strong>（非 owner 進入）：頂部顯示黃色 banner、所有編輯控制項禁用；新增 / 刪除 / 儲存 / 發布 / 邀請 / 停課 等所有按鈕皆隱藏，僅可閱覽內容</li>
+    </ul>
+    <strong>右上「邀請學員」按鈕：</strong><strong class="text-danger">僅已發布的課程顯示</strong>；草稿狀態下隱藏。點擊開啟邀請 modal，含 Email 邀請 + 邀請碼兩分頁<br>
+    <strong>基本資料（摺疊式）：</strong>名稱、關聯模組、狀態、課程描述；開課日期由系統自動以首次發布時間寫入（唯讀顯示）；預設展開、可摺疊讓編排區佔比較大空間<br>
+    <strong>章節編排（主區塊）：</strong>RQET002 拖拉式介面<br>
+    <span style="margin-left:1rem;">• 章節層級：拖動 grip 調整章節順序；強制完成（須依序完成每章後才能進下一章）為系統內建規則，不需逐章設定（RQET004）</span><br>
+    <span style="margin-left:1rem;">• 章節內項目層級：拖動 grip 可在章節內或跨章節移動；每個項目 icon 顯示類型（影片/文件/圖文/測驗）</span><br>
+    <span style="margin-left:1rem;">• 新增項目：點下拉選單選類型（教材 / 測驗）→ 開對應 modal；教材 modal 可同時包含說明文字、本地上傳影片、與多份 DM 訓練教材文件（RQET003）</span><br>
+    <strong>教材文件來源：</strong>教材所引用的文件（PDF / PPT 等）<strong>統一由 DM 模組提供</strong>（同一 DB）；ET 端下拉清單僅顯示 DM「訓練教材」分類之已發布文件，點選即建立關聯；DM 端發布新版時，教材自動帶最新版<br>
+    <strong>Sticky 動作列：</strong>常用動作（儲存草稿、儲存並發布）固定在頁底，scroll 時不消失；學員管理請從左側 sidebar 進入<br>
+    <strong>對應需求：</strong>RQET001（影片本地上傳）、RQET002（拖拉）、RQET003（混合媒材）、RQET004（強制完成，系統內建）
+  </details>
+</div>
+
+<!-- ==================== ET03 學員 ==================== -->
+<div class="screen" id="et-students">
+  <div class="screen-header">
+    <div>
+      <div class="screen-title">
+        <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-course-edit')"><i class="bi bi-arrow-left"></i></button>
+        <i class="bi bi-people me-2"></i>學員 — <span class="text-tsbms-green">採血作業新進人員訓練 v2.0</span>
+      </div>
+    </div>
+    <div class="screen-meta">et/students.jsp (ET03)</div>
+  </div>
+
+  <!-- 學員清單 -->
+  <div class="wf-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <ul class="nav nav-tabs flex-grow-1" role="tablist" style="border-bottom:none;">
+        <li class="nav-item">
+          <a class="nav-link active" data-bs-toggle="tab" href="#students-joined">
+            <i class="bi bi-people-fill me-1"></i>已加入 <span class="badge bg-secondary ms-1">28</span>
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-bs-toggle="tab" href="#students-invited">
+            <i class="bi bi-envelope me-1"></i>待加入 <span class="badge bg-warning text-dark ms-1">3</span>
+          </a>
+        </li>
+      </ul>
+      <div class="d-flex gap-2">
+        <select class="form-select form-select-sm" style="width: 16rem;" onchange="showToast('已切換顯示課程：' + this.value)">
+          <option selected>採血作業新進人員訓練 v2.0</option>
+          <option>捐血人健康評估標準教學</option>
+          <option>成分製備標準作業教學</option>
+          <option>TL01 檢驗登錄培訓</option>
+          <option>BS04 領血掃血袋實務培訓</option>
+          <option>戰時血品緊急配送 SOP 教學（草稿）</option>
+          <option>血品安全與品保概論</option>
+          <option>輸血反應處置流程培訓（草稿）</option>
+          <option>資訊系統使用培訓（基礎）</option>
+        </select>
+        <div class="input-group input-group-sm" style="width: 14rem;">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="text" class="form-control" placeholder="搜尋學員姓名 / Email">
+        </div>
+        <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>匯出 CSV</button>
+      </div>
+    </div>
+
+    <div class="tab-content">
+
+      <!-- Tab 1: 已加入學員 -->
+      <div class="tab-pane fade show active" id="students-joined">
+        <table class="table table-sm wf-table mb-0">
+          <thead>
+            <tr>
+              <th>學員</th>
+              <th>加入日期</th>
+              <th>完課狀態</th>
+              <th>學習進度</th>
+              <th>平均成績</th>
+              <th>最後活動</th>
+              <th style="width:8.5rem;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><i class="bi bi-person-circle me-1"></i><strong>林助教</strong> <small class="text-muted">(linst)</small></td>
+              <td class="small">2026-04-21</td>
+              <td><span class="status-pill status-completed"><i class="bi bi-check-circle me-1"></i>已完成</span></td>
+              <td>
+                <div class="course-progress" style="width:100px;"><div class="course-progress-bar" style="width:100%; background:#1b5e20;"></div></div>
+                <small class="text-success">100%</small>
+              </td>
+              <td><strong>95</strong> 分</td>
+              <td class="small text-muted">2026-05-18</td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openResetQuizModal('林助教')" title="重置重考次數"><i class="bi bi-arrow-counterclockwise"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('林助教')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><i class="bi bi-person-circle me-1"></i><strong>王曉明</strong> <small class="text-muted">(wangxm)</small></td>
+              <td class="small">2026-04-21</td>
+              <td><span class="status-pill status-inprogress">進行中</span></td>
+              <td>
+                <div class="course-progress" style="width:100px;"><div class="course-progress-bar" style="width:75%;"></div></div>
+                <small class="text-muted">75%（第 4 章）</small>
+              </td>
+              <td><strong>82</strong> 分</td>
+              <td class="small text-muted">2026-05-22</td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openResetQuizModal('王曉明')" title="重置重考次數"><i class="bi bi-arrow-counterclockwise"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('王曉明')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><i class="bi bi-person-circle me-1"></i><strong>張士民</strong> <small class="text-muted">(zhangsm)</small></td>
+              <td class="small">2026-04-25</td>
+              <td><span class="status-pill status-inprogress">進行中</span></td>
+              <td>
+                <div class="course-progress" style="width:100px;"><div class="course-progress-bar" style="width:45%;"></div></div>
+                <small class="text-muted">45%（第 2 章）</small>
+              </td>
+              <td><strong>78</strong> 分</td>
+              <td class="small text-muted">2026-05-20</td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openResetQuizModal('張士民')" title="重置重考次數"><i class="bi bi-arrow-counterclockwise"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('張士民')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><i class="bi bi-person-circle me-1"></i><strong>陳怡君</strong> <small class="text-muted">(chenyj)</small></td>
+              <td class="small">2026-05-10</td>
+              <td><span class="status-pill status-notstarted">未開始</span></td>
+              <td>
+                <div class="course-progress" style="width:100px;"><div class="course-progress-bar" style="width:0%;"></div></div>
+                <small class="text-muted">0%</small>
+              </td>
+              <td class="text-muted">—</td>
+              <td class="small text-muted">—</td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary" disabled title="尚未作答測驗，無需重置"><i class="bi bi-arrow-counterclockwise"></i></button>
+                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('陳怡君')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <small class="text-muted">顯示 1–4 筆，共 28 筆</small>
+      </div>
+
+      <!-- Tab 2: 待加入學員（已寄出邀請信但尚未加入） -->
+      <div class="tab-pane fade" id="students-invited">
+        <div class="wf-status-msg wf-status-info">
+          <i class="bi bi-info-circle me-1"></i>以下學員已收到邀請信但尚未點擊連結加入課程。可再次寄送邀請或撤回邀請。
+        </div>
+        <table class="table table-sm wf-table mb-0">
+          <thead>
+            <tr>
+              <th>收件 Email</th>
+              <th>邀請寄出日</th>
+              <th>動作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><i class="bi bi-envelope me-1 text-muted"></i><strong>chenmh@military.gov.tw</strong></td>
+              <td class="small">2026-05-20</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showToast('已再次寄送邀請信至 chenmh@military.gov.tw')"><i class="bi bi-arrow-clockwise me-1"></i>再次寄送</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="showToast('已撤回對 chenmh@military.gov.tw 的邀請')" title="撤回邀請"><i class="bi bi-x-circle"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><i class="bi bi-envelope me-1 text-muted"></i><strong>liutc@military.gov.tw</strong></td>
+              <td class="small">2026-05-22</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showToast('已再次寄送邀請信至 liutc@military.gov.tw')"><i class="bi bi-arrow-clockwise me-1"></i>再次寄送</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="showToast('已撤回對 liutc@military.gov.tw 的邀請')" title="撤回邀請"><i class="bi bi-x-circle"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><i class="bi bi-envelope me-1 text-muted"></i><strong>wangmm@military.gov.tw</strong></td>
+              <td class="small">2026-04-25</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showToast('已再次寄送邀請信至 wangmm@military.gov.tw')"><i class="bi bi-arrow-clockwise me-1"></i>再次寄送</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="showToast('已撤回對 wangmm@military.gov.tw 的邀請')" title="撤回邀請"><i class="bi bi-x-circle"></i></button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <small class="text-muted">顯示 1–3 筆，共 3 筆</small>
+          <button class="btn btn-sm btn-outline-primary" onclick="showToast('已再次寄送 3 封邀請信')"><i class="bi bi-send me-1"></i>全部再次寄送</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>學員管理介面，分兩個 tab 顯示<strong>已加入</strong>與<strong>待加入</strong>學員。<strong>本頁涵蓋 RFP 2.9.4 完課率統計（RQET008）</strong>；邀請學員（RQET006）入口在 ET02 課程編輯頁<br>
+    <strong>Tab 1「已加入」：</strong>顯示每位學員的完課狀態（已完成 / 進行中 / 未開始）、學習進度 %、平均成績、最後活動時間 — 即「哪些學員已完成、哪些尚未通過測驗」之呈現<br>
+    <span style="margin-left:1rem;">• <strong>重置重考次數</strong>（↻）：學員達測驗重考次數上限仍未及格時，可恢復其可用次數；尚未作答學員按鈕停用</span><br>
+    <span style="margin-left:1rem;">• <strong>移除學員</strong>（✕）：將學員自本課程移除，保留學習歷史紀錄；移除後該學員端不再顯示該課程</span><br>
+    <strong>Tab 2「待加入」：</strong>顯示<strong>已寄出邀請信但尚未點連結加入</strong>之學員清單，欄位含 Email、邀請寄出日、動作<br>
+    <span style="margin-left:1rem;">• <strong>再次寄送</strong>：學員可能遺漏 Email，admin 可重新觸發寄送</span><br>
+    <span style="margin-left:1rem;">• <strong>撤回邀請</strong>：終止此邀請，token 失效；學員無法再透過此連結加入</span><br>
+    <span style="margin-left:1rem;">• <strong>全部再次寄送</strong>：底部批次按鈕，一鍵重發所有待加入邀請</span><br>
+    <strong>清單篩選：</strong>頂部下拉以「課程」過濾兩個 tab 共用；搜尋框支援姓名或 Email<br>
+    <strong>邀請學員入口：</strong>新邀請仍從 ET02 課程編輯頁右上方「邀請學員」按鈕觸發；每門課程獨立邀請碼<br>
+    <strong>對應需求：</strong>RQET006（邀請追蹤）、RQET008（完課率）
+  </details>
+</div>
+
+
+<!-- ==================== ET07 權限管理（管理者） ==================== -->
+<div class="screen" id="et-permissions">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-shield-lock me-2"></i>權限管理 <small class="badge bg-warning text-dark ms-2" style="font-size:0.7rem;">admin only</small></div>
+    <div class="screen-meta">et/permissions.jsp (ET07)</div>
+  </div>
+
+  <div class="wf-status-msg wf-status-info">
+    <i class="bi bi-info-circle me-1"></i>設定每個帳號在 ET 教育訓練模組的<strong>角色</strong>（管理者 / 教師 / 學員）與<strong>隸屬之業務模組</strong>（BC / CP / TL / BS / MA / LB，影響課程「關聯模組」自動帶入；詳見 §1.2 模組人員對應）。
+  </div>
+
+  <!-- 角色定義 -->
+  <div class="wf-card">
+    <h6 class="fw-bold mb-2"><i class="bi bi-info-square me-1"></i>角色定義 <small class="text-muted fw-normal">(同一帳號可同時擁有多個角色)</small></h6>
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr><th style="width:15%;">角色</th><th>主要職責</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge bg-danger">管理者</span></td>
+          <td class="small"><strong>權限管理</strong> — 設定其他帳號於 ET 的角色（包含指派其他管理者 / 教師 / 學員）</td>
+        </tr>
+        <tr>
+          <td><span class="badge bg-success">教師</span></td>
+          <td class="small"><strong>課程安排</strong> — 建立 / 編輯課程；編排章節、教材、測驗；邀請學員、查看學員學習進度與成績</td>
+        </tr>
+        <tr>
+          <td><span class="badge bg-secondary">學員</span></td>
+          <td class="small">加入課程、觀看教材、進行測驗、查看自己的學習進度與成績</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>角色可重複，例如同時為「管理者 + 教師」的人既能維護權限又能建立課程；勾選後權限取聯集。三個角色都未勾選的帳號登入後將顯示「請聯絡管理員開通權限」。</div>
+  </div>
+
+  <!-- 使用者清單 -->
+  <div class="wf-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="fw-bold mb-0"><i class="bi bi-people me-1"></i>使用者角色設定 <span class="badge bg-secondary ms-1">42 人</span></h6>
+      <div class="d-flex gap-2">
+        <select class="form-select form-select-sm" style="width: 9rem;">
+          <option>全部角色</option>
+          <option>管理者</option>
+          <option>教師</option>
+          <option>學員</option>
+        </select>
+        <select class="form-select form-select-sm" style="width: 9rem;">
+          <option>全部模組</option>
+          <option>BC 採血</option>
+          <option>CP 成分</option>
+          <option>TL 檢驗</option>
+          <option>BS 供應</option>
+          <option>MA 醫務</option>
+          <option>LB 標籤</option>
+          <option>未指派</option>
+        </select>
+        <div class="input-group input-group-sm" style="width: 14rem;">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="text" class="form-control" placeholder="搜尋姓名 / 帳號">
+        </div>
+        <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>匯出 CSV</button>
+      </div>
+    </div>
+
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr>
+          <th>姓名</th>
+          <th>帳號</th>
+          <th class="text-center" style="width:5rem;">管理者</th>
+          <th class="text-center" style="width:5rem;">教師</th>
+          <th class="text-center" style="width:5rem;">學員</th>
+          <th style="width:14rem;">業務模組</th>
+          <th style="width:11rem;">最後修改</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>陳大華</strong> <span class="badge bg-light text-muted small">您</span></td>
+          <td class="small">chendh</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked disabled title="無法停用自己的管理者角色"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 陳大華 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 陳大華 學員角色')"></td>
+          <td>
+            <span class="badge bg-tsbms-green me-1">BC</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openModuleModal('陳大華', ['BC'])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">2026-04-01 (系統初建)</td>
+        </tr>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>李主任</strong></td>
+          <td class="small">leecy</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 李主任 管理者角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 李主任 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 李主任 學員角色')"></td>
+          <td>
+            <span class="badge bg-tsbms-green me-1">BC</span>
+            <span class="badge bg-tsbms-green me-1">BS</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openModuleModal('李主任', ['BC','BS'])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">2026-05-10 陳大華</td>
+        </tr>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>林助教</strong></td>
+          <td class="small">linst</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 林助教 管理者角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 林助教 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 林助教 學員角色')"></td>
+          <td>
+            <span class="badge bg-tsbms-green me-1">CP</span>
+            <span class="badge bg-tsbms-green me-1">TL</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openModuleModal('林助教', ['CP','TL'])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">2026-04-21 陳大華</td>
+        </tr>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>王曉明</strong></td>
+          <td class="small">wangxm</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 王曉明 管理者角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 王曉明 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 王曉明 學員角色')"></td>
+          <td>
+            <span class="badge bg-tsbms-green me-1">BC</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openModuleModal('王曉明', ['BC'])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">2026-04-21 陳大華</td>
+        </tr>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>張士民</strong></td>
+          <td class="small">zhangsm</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 張士民 管理者角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 張士民 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 張士民 學員角色')"></td>
+          <td>
+            <span class="badge bg-tsbms-green me-1">BS</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openModuleModal('張士民', ['BS'])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">2026-04-25 李主任</td>
+        </tr>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>陳怡君</strong></td>
+          <td class="small">chenyj</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 陳怡君 管理者角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 陳怡君 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 陳怡君 學員角色')"></td>
+          <td>
+            <span class="badge bg-tsbms-green me-1">MA</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openModuleModal('陳怡君', ['MA'])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">2026-05-10 李主任</td>
+        </tr>
+        <tr style="color:#999;">
+          <td><i class="bi bi-person-circle me-1"></i><strong>劉建廷</strong></td>
+          <td class="small">liujt</td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 劉建廷 管理者角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 劉建廷 教師角色')"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 劉建廷 學員角色')"></td>
+          <td>
+            <span class="text-muted small">未指派</span>
+            <button class="btn btn-link btn-sm p-0 align-baseline ms-1" onclick="openModuleModal('劉建廷', [])" title="編輯模組對應"><i class="bi bi-pencil-square"></i> 編輯</button>
+          </td>
+          <td class="small text-muted">—</td>
+        </tr>
+      </tbody>
+    </table>
+    <small class="text-muted">顯示 1–7 筆，共 42 筆</small>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>管理者設定每個帳號在 ET 中的<strong>角色</strong>（管理者 / 教師 / 學員，可多重指派）與<strong>隸屬之業務模組</strong>（BC / CP / TL / BS / MA / LB，多對多），對應 RQET007 角色分級與 §1.2 模組人員對應<br>
+    <strong>使用者來源：</strong>清單顯示<strong>所有 ET / DM 共用 user table 中的使用者</strong>；ET 不自建帳號，僅維護角色與模組對應<br>
+    <strong>角色變更：</strong>勾選 / 取消三角色 checkbox → 立即生效；該使用者下次登入即套用新角色<br>
+    <strong>模組對應：</strong>點「業務模組」欄之「編輯」開啟 modal，以核取方塊勾選該帳號隸屬之業務模組；用途為教師建立課程時選「關聯模組」後系統自動將該模組所有人員加入課程，免個別邀請<br>
+    <strong>自我保護：</strong>當前登入者（如「您」標記）無法更改自己的管理者角色（避免誤把自己降為學員後失去管理權）<br>
+    <strong>預設行為：</strong>新使用者首次登入 ET 自動授予「學員」角色一筆，模組對應預設為「未指派」<br>
+    <strong>稽核紀錄：</strong>每筆角色 / 模組變更記錄修改者與時間（最後修改欄）；完整變更歷史可由系統稽核 log 查閱<br>
+    <strong>對應需求：</strong>RQET007（管理者 / 教師 / 學員 三種權限分級）；§1.2 模組人員對應（ET_USER_MODULE 多對多表）
+  </details>
+</div>
+
+<!-- ==================== ET08 個人資料維護（所有角色） ==================== -->
+<div class="screen" id="et-profile">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-person-gear me-2"></i>個人資料維護</div>
+    <div class="screen-meta">et/profile.jsp (ET08)</div>
+  </div>
+
+  <div class="wf-status-msg wf-status-info mb-2">
+    <i class="bi bi-info-circle me-1"></i>本頁編輯之內容（帳號 / 姓名 / 密碼）同步寫入共用 user table，<strong>DM 端同步生效</strong>。
+  </div>
+
+  <div class="wf-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="fw-bold mb-0"><i class="bi bi-person-gear text-info me-1"></i>個人資料維護</h6>
+      <small class="text-muted">所有 3 角色皆可使用</small>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label small fw-bold">帳號（Email）</label>
+        <div class="input-group input-group-sm">
+          <input type="email" class="form-control" value="chendh@example.com" id="et-profile-email">
+          <button class="btn btn-outline-primary" onclick="etChangeProfileEmail()" title="變更帳號需寄驗證信至新 Email">
+            <i class="bi bi-envelope-arrow-up me-1"></i>變更
+          </button>
+        </div>
+        <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>變更時系統寄驗證信至新 Email，點連結後新帳號才生效</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label small fw-bold">姓名</label>
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control" value="陳大華" id="et-profile-name">
+          <button class="btn btn-outline-primary" onclick="etSaveProfileName()">
+            <i class="bi bi-check2 me-1"></i>儲存
+          </button>
+        </div>
+      </div>
+      <div class="col-12">
+        <label class="form-label small fw-bold">密碼</label>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <button class="btn btn-outline-primary btn-sm" onclick="etOpenPasswordChangeModal()">
+            <i class="bi bi-key me-1"></i>變更密碼
+          </button>
+          <span class="text-muted small">忘記密碼請至登入頁使用「忘記密碼」功能</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>所有登入使用者編輯自己的帳號 / 姓名 / 密碼<br>
+    <strong>共用 user table：</strong>變更後同步寫入 user table，**DM 端亦同步生效**（兩系統共用同帳號）<br>
+    <strong>帳號（Email）：</strong>寄驗證信至新 Email，點連結後新帳號才生效（避免誤輸入鎖死帳號）<br>
+    <strong>姓名：</strong>直接編輯儲存<br>
+    <strong>密碼：</strong>跳 modal，須填舊密碼 + 新密碼 + 確認新密碼（驗證舊密碼避免他人冒用 session 改密碼）<br>
+    <strong>忘記密碼：</strong>不在本頁；改走登入頁「忘記密碼」連結
+  </details>
+</div>
+
+<!-- ==================== ET05 課程學習頁（學員） ==================== -->
+<div class="screen" id="et-learn">
+  <div class="screen-header">
+    <div class="screen-title">
+      <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-courses-student')"><i class="bi bi-arrow-left"></i></button>
+      <i class="bi bi-book me-2"></i>採血作業新進人員訓練 v2.0
+    </div>
+    <div class="screen-meta">et/learn.jsp (ET05)</div>
+  </div>
+
+  <div class="row g-3">
+    <!-- 左欄：章節導覽 -->
+    <div class="col-lg-3">
+      <div class="learn-sidebar">
+        <div class="p-3" style="border-bottom:1px solid #e0e0e0;">
+          <strong class="small">課程進度</strong>
+          <div class="course-progress mt-2"><div class="course-progress-bar" style="width:75%;"></div></div>
+          <small class="text-muted">完成 75%（9/12 項）</small>
+        </div>
+
+        <!-- 第 1 章（已完成） -->
+        <div class="learn-chapter">
+          <div class="learn-chapter-header">
+            <i class="bi bi-check-circle-fill text-success"></i>
+            第 1 章 採血基本流程概論
+          </div>
+          <div class="learn-item completed">
+            <i class="bi bi-check-circle learn-item-icon"></i>
+            <i class="bi bi-play-circle"></i> 採血流程概論
+          </div>
+          <div class="learn-item completed">
+            <i class="bi bi-check-circle learn-item-icon"></i>
+            <i class="bi bi-file-text"></i> 採血器材說明
+          </div>
+          <div class="learn-item completed" onclick="goScreen('et-quiz-intro')" style="cursor:pointer;" title="點擊 demo 進入測驗開始頁">
+            <i class="bi bi-check-circle learn-item-icon"></i>
+            <i class="bi bi-check-square"></i> 基本概念測驗 <small class="ms-1 text-success">85 分</small>
+          </div>
+        </div>
+
+        <!-- 第 2 章（學習中） -->
+        <div class="learn-chapter">
+          <div class="learn-chapter-header">
+            <i class="bi bi-hourglass-split text-warning"></i>
+            第 2 章 捐血人健康評估
+          </div>
+          <div class="learn-item completed">
+            <i class="bi bi-check-circle learn-item-icon"></i>
+            <i class="bi bi-file-text"></i> 健康評估標準
+          </div>
+          <div class="learn-item completed">
+            <i class="bi bi-check-circle learn-item-icon"></i>
+            <i class="bi bi-file-earmark-pdf"></i> 血液品質檢驗 SOP
+          </div>
+          <div class="learn-item active">
+            <i class="bi bi-arrow-right-circle-fill learn-item-icon text-tsbms-green"></i>
+            <i class="bi bi-play-circle"></i> 實際操作示範
+          </div>
+          <div class="learn-item locked">
+            <i class="bi bi-lock-fill learn-item-icon"></i>
+            <i class="bi bi-check-square"></i> 實務情境題
+          </div>
+        </div>
+
+        <!-- 第 3 章（鎖定） -->
+        <div class="learn-chapter">
+          <div class="learn-chapter-header">
+            <i class="bi bi-lock-fill text-muted"></i>
+            第 3 章 採血後處理與器材消毒
+          </div>
+          <div class="learn-item locked">
+            <i class="bi bi-lock-fill learn-item-icon"></i>
+            <small class="text-muted">完成前一章後解鎖</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右欄：主內容（影片播放） -->
+    <div class="col-lg-9">
+      <div class="wf-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <small class="text-muted">第 2 章 第 3 個項目</small>
+            <h5 class="fw-bold mb-0">實際操作示範</h5>
+          </div>
+          <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>強制觀看：須看完才能進下一項</span>
+        </div>
+
+        <div class="video-player">
+          <i class="bi bi-play-circle"></i>
+          <div class="video-controls">
+            <div class="video-progress"><div class="video-progress-bar"></div></div>
+            <div class="d-flex justify-content-between align-items-center">
+              <span><i class="bi bi-pause-fill"></i> 10:15 / 15:45</span>
+              <span><i class="bi bi-volume-up"></i> <i class="bi bi-fullscreen ms-2"></i></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 small text-muted">
+          <i class="bi bi-info-circle"></i> 本影片為「強制觀看」項目，需播放至結束系統才會標記為完成。播放進度由系統即時追蹤，可暫停與重看。
+        </div>
+
+        <div class="d-flex justify-content-between mt-3">
+          <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> 上一項：血液品質檢驗 SOP</button>
+          <button class="btn btn-tsbms btn-sm" disabled><i class="bi bi-lock-fill me-1"></i>看完影片後解鎖下一項</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>學員觀看課程內容（影片 / 文件 / 圖文）<br>
+    <strong>左欄章節導覽：</strong>呈現各章節項目，icon 表示狀態 — 已完成 ✓、進行中 →、鎖定 🔒<br>
+    <strong>右欄主內容：</strong>依項目類型動態切換（影片播放器 / PDF 預覽 / HTML 圖文）<br>
+    <span style="margin-left:1rem;">• 強制觀看影片：進度條須跑完才能解鎖下一項 — RQET004</span><br>
+    <span style="margin-left:1rem;">• 文件項目：嵌入 PDF/PPT 預覽，可下載；若引用自 DM，自動帶最新版</span><br>
+    <span style="margin-left:1rem;">• 圖文項目：渲染 HTML 內容（含文字、圖片、內嵌影片）— RQET003</span><br>
+    <span style="margin-left:1rem;">• 測驗項目：顯示「開始測驗」按鈕 → 進入 ET06-A 引導頁（顯示題數/時長/及格分數/注意事項）→ 按「開始作答」進 ET06 正式作答</span><br>
+    <strong>對應需求：</strong>RQET001、RQET003、RQET004
+  </details>
+</div>
+
+<!-- ==================== ET06-A 測驗開始前引導頁（學員） ==================== -->
+<div class="screen" id="et-quiz-intro">
+  <div class="screen-header">
+    <div class="screen-title">
+      <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-learn')"><i class="bi bi-arrow-left"></i></button>
+      <i class="bi bi-check-square me-2"></i>線上測驗 — <span class="text-tsbms-green">基本概念測驗</span>
+    </div>
+    <div class="screen-meta">et/quizIntro.jsp (ET06-A)</div>
+  </div>
+
+  <div class="wf-card" style="max-width: 720px; margin: 0 auto; padding: 2rem;">
+
+    <div class="text-center mb-4">
+      <i class="bi bi-clipboard-check text-success" style="font-size:3.5rem;"></i>
+      <h4 class="mt-3 mb-1">基本概念測驗</h4>
+      <p class="text-muted small mb-0">第 1 章 採血基本流程概論 ｜ 採血作業新進人員訓練 v2.0</p>
+    </div>
+
+    <!-- 測驗描述 -->
+    <div class="mb-4">
+      <p class="small mb-0">本測驗為第 1 章內容之自我檢核，包含 5 題（單選 + 多選）。請於 10 分鐘內完成；通過後即解鎖第 2 章。</p>
+    </div>
+
+    <!-- 測驗資訊（grid） -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-3 col-6">
+        <div class="bg-light rounded p-3 text-center">
+          <i class="bi bi-list-ol text-tsbms-green" style="font-size:1.5rem;"></i>
+          <div class="mt-1"><strong class="fs-5">5</strong></div>
+          <small class="text-muted">題數</small>
+        </div>
+      </div>
+      <div class="col-md-3 col-6">
+        <div class="bg-light rounded p-3 text-center">
+          <i class="bi bi-clock-fill text-warning" style="font-size:1.5rem;"></i>
+          <div class="mt-1"><strong class="fs-5">10</strong> <small>分</small></div>
+          <small class="text-muted">作答時間</small>
+        </div>
+      </div>
+      <div class="col-md-3 col-6">
+        <div class="bg-light rounded p-3 text-center">
+          <i class="bi bi-trophy-fill text-warning" style="font-size:1.5rem;"></i>
+          <div class="mt-1"><strong class="fs-5">80</strong> <small>分</small></div>
+          <small class="text-muted">及格分數</small>
+        </div>
+      </div>
+      <div class="col-md-3 col-6">
+        <div class="bg-light rounded p-3 text-center">
+          <i class="bi bi-arrow-clockwise text-info" style="font-size:1.5rem;"></i>
+          <div class="mt-1"><strong class="fs-5">3</strong> <small>次</small></div>
+          <small class="text-muted">可重考</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- 注意事項 -->
+    <div class="wf-status-msg wf-status-warn mb-4">
+      <strong class="d-block mb-2"><i class="bi bi-exclamation-triangle me-1"></i>作答注意事項</strong>
+      <ul class="small mb-0 ps-3">
+        <li>點擊「開始作答」後立即計時，中途離開或關閉視窗仍持續扣時間</li>
+        <li>作答時請勿重新整理或返回上一頁，避免遺失作答狀態</li>
+        <li>未達及格分數時，可依重考次數重新作答；以最高分為結業成績</li>
+        <li>提交後立即顯示成績與每題對錯明細</li>
+      </ul>
+    </div>
+
+    <!-- 動作 -->
+    <div class="d-flex justify-content-center gap-2">
+      <button class="btn btn-outline-secondary" onclick="goScreen('et-learn')">
+        <i class="bi bi-arrow-left me-1"></i>取消
+      </button>
+      <button class="btn btn-tsbms btn-lg px-4" onclick="goScreen('et-quiz')">
+        <i class="bi bi-play-fill me-1"></i>開始作答
+      </button>
+    </div>
+
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>學員按下「開始測驗」後的引導頁；說明測驗規則與計時邏輯，按確認後正式開始計時並進入 ET06 作答頁<br>
+    <strong>進入時機：</strong>從 ET05 課程學習頁的測驗項目「開始測驗」按鈕觸發<br>
+    <strong>測驗資訊區（grid）：</strong>視覺化呈現題數、作答時間、及格分數、可重考次數 — 來自管理者於 ET02 測驗 modal 之設定<br>
+    <strong>注意事項：</strong>明確告知作答規則（計時、不可中斷、提交後即時閱卷）— 避免學員誤觸<br>
+    <strong>動作：</strong>取消（回 ET05）/ 開始作答（進 ET06，從此刻開始倒數計時）<br>
+    <strong>對應需求：</strong>RQET005（線上測驗）
+  </details>
+</div>
+
+<!-- ==================== ET06 測驗作答 ==================== -->
+<div class="screen" id="et-quiz">
+  <div class="screen-header">
+    <div class="screen-title">
+      <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-learn')"><i class="bi bi-arrow-left"></i></button>
+      <i class="bi bi-check-square me-2"></i>線上測驗 — <span class="text-tsbms-green">基本概念測驗</span>
+    </div>
+    <div class="screen-meta">et/quiz.jsp (ET06)</div>
+  </div>
+
+  <!-- 上方狀態列：題號進度 + 倒數計時 + 提交 -->
+  <div class="wf-card" style="background:#f1f8e9;">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <div>
+        <strong class="me-2">題號進度</strong>
+        <span class="fs-5 fw-bold text-tsbms-green">2 / 5</span>
+        <span class="ms-3 small text-muted">及格分數：80 分 ｜ 剩餘重考次數：3 次</span>
+      </div>
+      <div class="text-center">
+        <i class="bi bi-clock-fill text-danger"></i>
+        <strong class="ms-1">剩餘時間：</strong>
+        <span class="fs-5 text-danger fw-bold" id="quiz-countdown">08:42</span>
+      </div>
+      <div>
+        <button class="btn btn-tsbms" onclick="openQuizSubmitModal()"><i class="bi bi-check2-circle me-1"></i>提交</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- 左側題目導覽列 -->
+    <div class="col-md-3">
+      <div class="wf-card" style="position: sticky; top: 1rem;">
+        <h6 class="fw-bold small mb-2"><i class="bi bi-list-ol me-1"></i>題目導覽</h6>
+        <div class="d-flex flex-wrap gap-2 mb-3" id="quiz-nav">
+          <button type="button" class="quiz-nav-btn quiz-nav-answered" onclick="jumpQuestion(1)" title="已答">1</button>
+          <button type="button" class="quiz-nav-btn quiz-nav-current" onclick="jumpQuestion(2)" title="當前題目">2</button>
+          <button type="button" class="quiz-nav-btn quiz-nav-unanswered" onclick="jumpQuestion(3)" title="未答">3</button>
+          <button type="button" class="quiz-nav-btn quiz-nav-unanswered" onclick="jumpQuestion(4)" title="未答">4</button>
+          <button type="button" class="quiz-nav-btn quiz-nav-unanswered" onclick="jumpQuestion(5)" title="未答">5</button>
+        </div>
+        <div class="small">
+          <div class="mb-1"><span class="quiz-nav-legend quiz-nav-answered"></span> 已答（1）</div>
+          <div class="mb-1"><span class="quiz-nav-legend quiz-nav-current"></span> 當前題</div>
+          <div><span class="quiz-nav-legend quiz-nav-unanswered"></span> 未答（3）</div>
+        </div>
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>切換題目時系統自動暫存當前作答；可任意跳題。</div>
+      </div>
+    </div>
+
+    <!-- 右側題目卡片 -->
+    <div class="col-md-9">
+      <div class="quiz-question">
+        <div>
+          <span class="quiz-question-num">Q2 / 5</span>
+          <span class="badge bg-info ms-2">多選題</span>
+          <span class="ms-2 text-muted small">配分：20 分</span>
+        </div>
+        <p class="fs-6 mt-3 mb-3"><strong>採血前對捐血人進行健康評估時，以下哪些項目<u>必須</u>檢查？（可複選）</strong></p>
+
+        <label class="quiz-option">
+          <input type="checkbox" name="q2"> A. 體溫、血壓、脈搏
+        </label>
+        <label class="quiz-option">
+          <input type="checkbox" name="q2"> B. 血紅素 (Hb) 濃度
+        </label>
+        <label class="quiz-option">
+          <input type="checkbox" name="q2"> C. 體重（須≥ 50 公斤）
+        </label>
+        <label class="quiz-option">
+          <input type="checkbox" name="q2"> D. 視力檢查
+        </label>
+        <label class="quiz-option">
+          <input type="checkbox" name="q2"> E. 24 小時內飲食狀況
+        </label>
+
+        <!-- 上一題 / 下一題 -->
+        <div class="d-flex justify-content-between mt-3">
+          <button class="btn btn-outline-secondary btn-sm" onclick="jumpQuestion(1)"><i class="bi bi-arrow-left me-1"></i>上一題</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="jumpQuestion(3)">下一題 <i class="bi bi-arrow-right ms-1"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 作答結果（隱藏，點下一題到最後一題時顯示 demo） -->
+  <div id="quiz-result" style="display:none;">
+    <div class="wf-card text-center" style="padding: 2rem;">
+      <i class="bi bi-emoji-frown-fill text-danger" style="font-size:4rem;"></i>
+      <h3 class="mt-3">測驗完成</h3>
+      <h2 class="text-danger mt-2">75 / 100 分</h2>
+      <span class="status-pill status-failed" style="font-size:1rem; padding:6px 16px;"><i class="bi bi-x-circle me-1"></i>不合格（及格分數 80）</span>
+      <div class="mt-3 text-muted">本次作答時間：03:28 ｜ 剩餘重考次數：3 次</div>
+      <div class="mt-4">
+        <button class="btn btn-tsbms me-2"><i class="bi bi-arrow-clockwise me-1"></i>重新作答</button>
+        <button class="btn btn-outline-secondary" onclick="goScreen('et-learn')"><i class="bi bi-arrow-right me-1"></i>回到課程</button>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <h6 class="fw-bold"><i class="bi bi-list-check me-1"></i>答題明細 <small class="text-muted fw-normal">(點任一列檢視題目與選項，複習檢討)</small></h6>
+      <table class="table table-sm wf-table mb-0 table-hover" style="cursor:pointer;">
+        <thead><tr><th>題號</th><th>題型</th><th>你的答案</th><th>正確答案</th><th>結果</th><th>得分</th><th></th></tr></thead>
+        <tbody>
+          <tr onclick="openQuizReview('Q1')"><td><strong>Q1</strong></td><td>單選</td><td>B</td><td>B</td><td><span class="text-success"><i class="bi bi-check-circle-fill"></i> 答對</span></td><td>20 / 20</td><td class="text-muted"><i class="bi bi-chevron-right"></i></td></tr>
+          <tr onclick="openQuizReview('Q2')"><td><strong>Q2</strong></td><td>多選</td><td>A, B, C</td><td>A, B, C, E</td><td><span class="text-warning"><i class="bi bi-dash-circle-fill"></i> 部分對</span></td><td>15 / 20</td><td class="text-muted"><i class="bi bi-chevron-right"></i></td></tr>
+          <tr onclick="openQuizReview('Q3')"><td><strong>Q3</strong></td><td>單選</td><td>C</td><td>C</td><td><span class="text-success"><i class="bi bi-check-circle-fill"></i> 答對</span></td><td>20 / 20</td><td class="text-muted"><i class="bi bi-chevron-right"></i></td></tr>
+          <tr onclick="openQuizReview('Q4')"><td><strong>Q4</strong></td><td>單選</td><td>A</td><td>D</td><td><span class="text-danger"><i class="bi bi-x-circle-fill"></i> 答錯</span></td><td>0 / 20</td><td class="text-muted"><i class="bi bi-chevron-right"></i></td></tr>
+          <tr onclick="openQuizReview('Q5')"><td><strong>Q5</strong></td><td>多選</td><td>A, B</td><td>A, B</td><td><span class="text-success"><i class="bi bi-check-circle-fill"></i> 答對</span></td><td>20 / 20</td><td class="text-muted"><i class="bi bi-chevron-right"></i></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0;">
+    <strong>本畫面用途：</strong>學員作答線上測驗<br>
+    <strong>上方狀態列：</strong>題號進度（如 2 / 5）、倒數計時（若有限時）、「**提交**」按鈕；右上恆顯示，方便隨時提交<br>
+    <strong>左側題目導覽列：</strong>列出所有題號方塊，依狀態著色（已答 = 綠 / 當前題 = 深綠 / 未答 = 白），可任意點擊跳題<br>
+    <strong>題目卡：</strong>顯示題型 badge（單選/多選）、配分；單選用 radio、多選用 checkbox；切換題目時系統自動暫存當前作答<br>
+    <strong>時間到自動提交：</strong>若啟用時間限制，倒數歸零時系統以當前作答狀態自動提交<br>
+    <strong>離開頁面警示：</strong>作答中切換頁面或關閉視窗時瀏覽器提示確認（避免誤觸遺失作答）<br>
+    <strong>作答結果（提交後）：</strong>即時閱卷、顯示成績與通過/未通過、答題明細<br>
+    <strong>答題明細可點選複習：</strong>點任一列開啟「題目檢討」modal，顯示題目原文 + 所有選項，並依狀態以不同視覺標示區分四種情境：你選對、你漏選正確答案、你選錯、未選錯誤；modal 內可上一題/下一題切換複習
+  </details>
+</div>
+
+</div><!-- end .main-content -->
+
+<!-- ==================== Modals ==================== -->
+
+<!-- 教材編輯 Modal -->
+<div class="modal fade" id="materialModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil-square text-primary me-2"></i><span id="material-modal-title">編輯教材</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- 共用欄位 -->
+        <div class="mb-3">
+          <label class="form-label small">項目標題 <span class="text-danger">*</span></label>
+          <input type="text" class="form-control form-control-sm" value="實際操作示範">
+        </div>
+
+        <!-- 說明文字（上方） -->
+        <div class="mb-3">
+          <label class="form-label small fw-bold"><i class="bi bi-file-text text-success me-1"></i>說明文字 <small class="text-muted fw-normal">(支援格式化)</small></label>
+          <div class="wf-placeholder" style="padding:0.75rem; text-align:left; min-height:140px;">
+            <div class="border-bottom pb-1 mb-2 small text-muted">
+              <i class="bi bi-type-bold me-2"></i>
+              <i class="bi bi-type-italic me-2"></i>
+              <i class="bi bi-type-h1 me-2"></i>
+              <i class="bi bi-list-ul me-2"></i>
+              <i class="bi bi-list-ol me-2"></i>
+              <i class="bi bi-link-45deg me-2"></i>
+              <span class="ms-2 text-muted small">| 粗體 / 斜體 / 標題 / 列表 / 連結</span>
+            </div>
+            <p class="small mb-1"><strong>本教材重點：</strong></p>
+            <ul class="small mb-1">
+              <li>觀看下方影片後請對照圖片，記住採血袋規格</li>
+              <li>實際操作前，請先閱讀附件之「採血器材說明」</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- 影片檔（本地上傳） -->
+        <div class="mb-3">
+          <label class="form-label small fw-bold"><i class="bi bi-camera-video text-danger me-1"></i>影片檔 <small class="text-muted fw-normal">(選填，本地上傳)</small></label>
+          <div class="wf-placeholder mb-2" style="padding:1.2rem;">
+            <i class="bi bi-cloud-arrow-up" style="font-size:1.8rem; color:#a5d6a7;"></i>
+            <div class="mt-1 small">拖拉上傳影片檔或<a href="#" class="ms-1">點擊選擇</a></div>
+            <div class="text-muted small mt-1">支援 mp4 / webm，單檔最大 500 MB</div>
+          </div>
+          <div class="bg-light p-2 rounded small d-flex align-items-center justify-content-between mb-1">
+            <span><i class="bi bi-play-circle-fill text-danger me-1"></i><strong>video_demo_15min.mp4</strong> <span class="text-muted">(180 MB ｜ 15:45)</span></span>
+            <button class="btn btn-sm btn-link p-0 text-danger"><i class="bi bi-x"></i></button>
+          </div>
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>影片儲存於 ET 系統內部（不使用外部影音平台，符合資安要求）；學員播放進度由 HTML5 video API 追蹤，RQET004 強制觀看由系統內建處理。</div>
+        </div>
+
+        <!-- 教材文件（從 DM 選取或上傳） -->
+        <div class="mb-2">
+          <label class="form-label small fw-bold"><i class="bi bi-folder-fill text-primary me-1"></i>教材文件 <small class="text-muted fw-normal">(從 DM 文件管理之「訓練教材」分類選取)</small></label>
+
+          <!-- 下拉選取 DM 訓練教材 -->
+          <div class="input-group input-group-sm mb-2">
+            <span class="input-group-text"><i class="bi bi-folder2-open"></i></span>
+            <div class="dropdown flex-grow-1">
+              <button class="btn form-select form-select-sm text-start w-100 rounded-0 rounded-end"
+                      type="button"
+                      data-bs-toggle="dropdown"
+                      data-bs-display="static"
+                      data-bs-auto-close="true"
+                      aria-expanded="false"
+                      style="cursor:pointer;">
+                <span class="text-muted">-- 選擇要連結的訓練教材 --</span>
+              </button>
+              <ul class="dropdown-menu w-100 shadow-sm" style="max-height: 280px; overflow-y: auto;">
+                <li><h6 class="dropdown-header small">DM 訓練教材清單 (依發布日期排序)</h6></li>
+                <li><a class="dropdown-item small d-flex justify-content-between align-items-center" href="#" onclick="showToast('已連結:採血流程訓練教材'); return false;">
+                  <span><i class="bi bi-file-earmark-ppt-fill text-warning me-1"></i><strong>採血流程訓練教材</strong></span>
+                  <small class="text-muted">DM-TRAINING-000201 v2.0 ｜ 2026-04-08</small>
+                </a></li>
+                <li><a class="dropdown-item small d-flex justify-content-between align-items-center" href="#" onclick="showToast('已連結:新進人員血品安全訓練教材'); return false;">
+                  <span><i class="bi bi-file-earmark-ppt-fill text-warning me-1"></i><strong>新進人員血品安全訓練教材</strong></span>
+                  <small class="text-muted">DM-TRAINING-000178 v1.3 ｜ 2026-03-20</small>
+                </a></li>
+                <li><a class="dropdown-item small d-flex justify-content-between align-items-center" href="#" onclick="showToast('已連結:採血器材說明'); return false;">
+                  <span><i class="bi bi-file-earmark-text-fill text-primary me-1"></i><strong>採血器材說明</strong></span>
+                  <small class="text-muted">DM-TRAINING-000789 v1.2 ｜ 2026-02-15</small>
+                </a></li>
+                <li><a class="dropdown-item small d-flex justify-content-between align-items-center" href="#" onclick="showToast('已連結:血品品質保證培訓教材'); return false;">
+                  <span><i class="bi bi-file-earmark-ppt-fill text-warning me-1"></i><strong>血品品質保證培訓教材</strong></span>
+                  <small class="text-muted">DM-TRAINING-000165 v1.0 ｜ 2026-01-22</small>
+                </a></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>下拉清單僅顯示 DM 文件管理中分類為「訓練教材」的已發布文件（ET 與 DM 共用同一 DB，即時查詢）；點選即建立關聯，DM 發布新版時教材自動帶最新版。</div>
+
+          <!-- 已連結 DM 文件清單 -->
+          <div class="d-flex flex-column gap-1">
+            <div class="bg-light p-2 rounded small d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-file-earmark-pdf-fill text-primary me-1"></i><strong>血液品質檢驗 SOP</strong> <small class="text-muted">(DM-SOP-000123 v2.1 ｜ 永遠帶最新版)</small></span>
+              <button class="btn btn-sm btn-link p-0 text-danger"><i class="bi bi-x"></i></button>
+            </div>
+            <div class="bg-light p-2 rounded small d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-image-fill text-warning me-1"></i><strong>採血袋_示意圖.png</strong> <small class="text-muted">(DM-OTHER-000456 v1.0)</small></span>
+              <button class="btn btn-sm btn-link p-0 text-danger"><i class="bi bi-x"></i></button>
+            </div>
+            <div class="bg-light p-2 rounded small d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-file-earmark-text-fill text-primary me-1"></i><strong>採血器材說明.pdf</strong> <small class="text-muted">(DM-TRAINING-000789 v1.2 ｜ 永遠帶最新版)</small></span>
+              <button class="btn btn-sm btn-link p-0 text-danger"><i class="bi bi-x"></i></button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('materialModal')).hide(); showToast('已儲存教材');"><i class="bi bi-check2 me-1"></i>儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 測驗編輯 Modal -->
+<div class="modal fade" id="quizModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-check-square text-success me-2"></i>編輯測驗 — 基本概念測驗</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#quiz-setting"><i class="bi bi-sliders me-1"></i>測驗設定</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#quiz-questions"><i class="bi bi-list-ol me-1"></i>題庫管理</a></li>
+        </ul>
+
+        <div class="tab-content">
+
+          <!-- 測驗設定 -->
+          <div class="tab-pane fade show active" id="quiz-setting">
+            <div class="row g-3">
+              <div class="col-md-12">
+                <label class="form-label small">測驗名稱 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" value="基本概念測驗">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">及格分數 <span class="text-danger">*</span></label>
+                <div class="input-group input-group-sm">
+                  <input type="number" class="form-control" value="80">
+                  <span class="input-group-text">分</span>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">作答時間限制 <span class="text-danger">*</span></label>
+                <div class="input-group input-group-sm">
+                  <input type="number" class="form-control" value="10">
+                  <span class="input-group-text">分鐘</span>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">重考次數</label>
+                <input type="number" class="form-control form-control-sm" value="3">
+                <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>未及格時允許重考次數</div>
+              </div>
+              <div class="col-md-12">
+                <div class="field-helper"><i class="bi bi-info-circle"></i><strong>題目順序皆為隨機</strong>：系統內建機制，學員每次作答時題目順序自動洗牌，無需教師設定。</div>
+              </div>
+              <div class="col-md-12">
+                <label class="form-label small">測驗說明（顯示於開始前）</label>
+                <textarea class="form-control form-control-sm" rows="2">本測驗為第 1 章內容之自我檢核，包含 5 題（單選 + 多選）。請於 10 分鐘內完成。</textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- 題庫管理 -->
+          <div class="tab-pane fade" id="quiz-questions">
+            <div class="d-flex justify-content-between mb-3">
+              <strong>題目清單（共 5 題）</strong>
+              <button class="btn btn-tsbms btn-sm"><i class="bi bi-plus-circle me-1"></i>新增題目</button>
+            </div>
+
+            <!-- Q1 -->
+            <div class="wf-card" style="padding:0.8rem;">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi bi-grip-vertical text-muted" style="cursor:grab;"></i>
+                <strong class="small">Q1</strong>
+                <select class="form-select form-select-sm" style="width:6rem;">
+                  <option>單選</option>
+                  <option>多選</option>
+                </select>
+                <input type="text" class="form-control form-control-sm flex-grow-1" value="採血前最重要的消毒步驟是？">
+                <div class="input-group input-group-sm" style="width:6rem;">
+                  <input type="number" class="form-control" value="20">
+                  <span class="input-group-text">分</span>
+                </div>
+                <button class="btn btn-sm btn-link p-0 text-danger"><i class="bi bi-trash"></i></button>
+              </div>
+              <div class="ms-3">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                  <input type="radio" name="q1-correct">
+                  <input type="text" class="form-control form-control-sm" value="A. 用清水沖洗即可">
+                </div>
+                <div class="d-flex align-items-center gap-2 mb-1">
+                  <input type="radio" name="q1-correct" checked>
+                  <input type="text" class="form-control form-control-sm" value="B. 以碘酊由內向外環形消毒兩次">
+                  <span class="badge bg-success">正確</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 mb-1">
+                  <input type="radio" name="q1-correct">
+                  <input type="text" class="form-control form-control-sm" value="C. 以酒精棉片擦拭一次">
+                </div>
+                <button class="btn btn-sm btn-link p-0"><i class="bi bi-plus-circle me-1"></i>新增選項</button>
+              </div>
+            </div>
+
+            <!-- Q2（簡略） -->
+            <div class="wf-card" style="padding:0.8rem;">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-grip-vertical text-muted"></i>
+                <strong class="small">Q2</strong>
+                <span class="badge bg-info">多選</span>
+                <span class="flex-grow-1 small">採血前對捐血人進行健康評估時，以下哪些項目必須檢查？...</span>
+                <small class="text-muted">20 分</small>
+                <button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-sm btn-link p-0 text-danger"><i class="bi bi-trash"></i></button>
+              </div>
+            </div>
+
+            <div class="text-muted small mt-2">（Q3 - Q5 摺疊中）</div>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('quizModal')).hide(); showToast('已儲存測驗');"><i class="bi bi-check2 me-1"></i>儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- 新增/編輯章節 Modal -->
+<div class="modal fade" id="chapterModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-list-ol text-primary me-2"></i><span id="chapter-modal-title">新增章節</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label small fw-bold">章節名稱 <span class="text-danger">*</span></label>
+          <input type="text" class="form-control form-control-sm" id="chapter-name" placeholder="例：採血基本流程概論">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">章節描述 <small class="text-muted fw-normal">(選填)</small></label>
+          <textarea class="form-control form-control-sm" id="chapter-desc" rows="3" placeholder="簡述本章節學習目標與內容重點"></textarea>
+        </div>
+        <div class="field-helper">
+          <i class="bi bi-info-circle"></i>新增後章節將自動排在最後一章，可從章節編排頁拖拉調整順序；建立後可繼續新增章節內的「教材」或「測驗」項目。
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-outline-success btn-sm" onclick="saveChapter('add-material')">
+          <i class="bi bi-collection me-1"></i>儲存並新增教材
+        </button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="saveChapter('done')">
+          <i class="bi bi-check2 me-1"></i>確認新增
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 邀請學員 Modal（每門課程獨立邀請碼，ET02 觸發；Email / 邀請碼 兩分頁切換）-->
+<div class="modal fade" id="inviteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-plus text-success me-2"></i>邀請學員 — <span class="text-tsbms-green">採血作業新進人員訓練 v2.0</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <ul class="nav nav-tabs mb-3" role="tablist">
+          <li class="nav-item">
+            <a class="nav-link active" data-bs-toggle="tab" href="#invite-tab-email">
+              <i class="bi bi-envelope me-1"></i>Email 邀請
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#invite-tab-code">
+              <i class="bi bi-key me-1"></i>邀請碼
+            </a>
+          </li>
+        </ul>
+
+        <div class="tab-content">
+
+          <!-- Tab 1: Email 邀請（收件人 + 可編輯預覽） -->
+          <div class="tab-pane fade show active" id="invite-tab-email">
+
+            <!-- 收件人 -->
+            <div class="mb-3">
+              <label class="form-label small fw-bold">學員 Email <small class="text-muted fw-normal">（每行一筆或以逗號分隔）</small></label>
+              <textarea class="form-control form-control-sm" rows="3" placeholder="user1@military.gov.tw&#10;user2@military.gov.tw">linst@military.gov.tw
+wangxm@military.gov.tw
+zhangsm@military.gov.tw</textarea>
+            </div>
+
+            <!-- 寄送預覽（主旨與內文可直接編輯） -->
+            <label class="form-label small fw-bold mb-1">寄送預覽 <small class="text-muted fw-normal">（可直接編輯主旨與內文）</small></label>
+            <div class="bg-light border rounded p-3 mb-2" style="font-size:0.85rem;">
+              <div class="border-bottom pb-2 mb-2 small">
+                <div class="mb-1"><span class="text-muted">寄件人：</span>教育訓練系統 &lt;noreply@et.tsbms.local&gt;</div>
+                <div class="mb-1"><span class="text-muted">收件人：</span>linst@military.gov.tw <small class="text-muted">（以第 1 筆收件人為預覽範例）</small></div>
+                <div class="d-flex align-items-center">
+                  <span class="text-muted me-2" style="white-space:nowrap;">主旨：</span>
+                  <input type="text" id="invite-subject-edit" class="form-control form-control-sm border-0 bg-transparent fw-bold p-0" value="【ET】陳大華 邀請您參加「採血作業新進人員訓練 v2.0」" style="font-size:0.85rem;">
+                </div>
+              </div>
+              <textarea id="invite-body-edit" class="form-control border-0 bg-transparent p-0" rows="11" style="font-size:0.85rem; font-family:inherit; resize:vertical;">您好,
+
+陳大華 邀請您參加以下課程:
+
+  課程:採血作業新進人員訓練 v2.0
+  模組:採血
+  預估時長:約 90 分鐘
+
+點此加入課程: https://et.tsbms.local/join?token=abc123xyz
+或於系統內輸入邀請碼: BLOOD-2026-ABCD
+
+此連結僅限本信件收件人使用,有效期至 2026-06-25。
+
+教育訓練系統 ET</textarea>
+            </div>
+            <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>實際寄出時，系統會為每位收件人產生獨立邀請連結與專屬 token；預覽僅以第 1 筆收件人示意。</div>
+
+            <div class="d-flex justify-content-between align-items-center pt-2" style="border-top:1px solid #e0e0e0;">
+              <small class="text-muted">將寄出 <strong>3</strong> 封邀請信</small>
+              <button class="btn btn-tsbms btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('inviteModal')).hide(); showToast('已寄出 3 封邀請信');">
+                <i class="bi bi-send me-1"></i>確認寄出
+              </button>
+            </div>
+          </div>
+
+          <!-- Tab 2: 邀請碼 -->
+          <div class="tab-pane fade" id="invite-tab-code">
+            <label class="form-label small fw-bold">本課程邀請碼</label>
+            <div class="invite-code-box mb-2">BLOOD-2026-ABCD</div>
+            <div class="d-flex gap-2 mb-2">
+              <button class="btn btn-sm btn-outline-primary flex-grow-1" onclick="showToast('已複製邀請連結')">
+                <i class="bi bi-clipboard me-1"></i>複製邀請連結
+              </button>
+              <button class="btn btn-sm btn-outline-secondary" title="重新產生邀請碼">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
+            <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>每門課程的邀請碼皆不同；學員可至「我的課程 → 加入新課程」輸入此邀請碼自行加入課程。</div>
+          </div>
+
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 題目檢討 Modal（ET06 答題明細點選後開啟） -->
+<div class="modal fade" id="quizReviewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-clipboard-check text-primary me-2"></i>題目檢討 — <span id="review-question-num">Q2</span> <span class="badge bg-info ms-2" id="review-question-type">多選題</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- 題目 -->
+        <div class="mb-3 p-3 bg-light rounded">
+          <small class="text-muted">題目</small>
+          <p class="mb-0 mt-1" id="review-question-text">採血前對捐血人進行健康評估時，以下哪些項目<u>必須</u>檢查？（可複選）</p>
+        </div>
+
+        <!-- 選項 -->
+        <div class="mb-3">
+          <small class="text-muted mb-2 d-block">選項（依顏色判讀對錯）</small>
+          <div id="review-options"></div>
+        </div>
+
+        <!-- 結果摘要 -->
+        <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded">
+          <div class="small">
+            <span class="text-muted">你的答案：</span><strong id="review-user-answer">A, B, C</strong>
+            <span class="mx-2 text-muted">|</span>
+            <span class="text-muted">正確答案：</span><strong class="text-success" id="review-correct-answer">A, B, C, E</strong>
+          </div>
+          <div>
+            <span class="text-muted small">本題得分：</span>
+            <strong class="fs-5" id="review-score">15 / 20</strong>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="reviewPrev()"><i class="bi bi-arrow-left me-1"></i>上一題</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="reviewNext()">下一題 <i class="bi bi-arrow-right ms-1"></i></button>
+        <button type="button" class="btn btn-tsbms btn-sm" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 刪除項目確認 Modal -->
+<div class="modal fade" id="deleteItemModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>刪除項目</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-warn">
+          <i class="bi bi-exclamation-triangle me-1"></i>即將刪除項目 <strong id="delete-item-name">項目名稱</strong>。<strong class="text-danger">此操作不可復原。</strong>
+        </div>
+        <p class="small mb-0">刪除後同時移除學員於本項目之學習進度（與測驗成績，如為測驗）。同章節其他項目不受影響。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteItem()"><i class="bi bi-trash me-1"></i>確認刪除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 刪除章節確認 Modal -->
+<div class="modal fade" id="deleteChapterModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>刪除章節</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-warn">
+          <i class="bi bi-exclamation-triangle me-1"></i>即將刪除章節 <strong id="delete-chapter-name">第 X 章 名稱</strong>。<strong class="text-danger">此操作不可復原。</strong>
+        </div>
+        <p class="small mb-2">刪除後將同時移除：</p>
+        <ul class="small mb-0">
+          <li>本章節下所有教材（影片 / 圖片 / 文件 / 說明文字）</li>
+          <li>本章節下所有測驗與題庫</li>
+          <li>學員於本章節之學習進度與測驗成績</li>
+        </ul>
+        <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>後續章節的順序將自動往前遞補。</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteChapter()"><i class="bi bi-trash me-1"></i>確認刪除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 加入課程 Modal -->
+<div class="modal fade" id="joinCourseModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-plus-circle text-success me-2"></i>加入新課程</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">輸入管理者提供的課程邀請碼，或點選 Email 中的邀請連結加入：</p>
+        <label class="form-label small">邀請碼 <span class="text-danger">*</span></label>
+        <input type="text" class="form-control text-center" style="font-family:'Courier New',monospace; font-size:1.2rem; letter-spacing:0.2rem;" placeholder="BLOOD-XXXX-XXXX">
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>邀請碼格式：英文+數字組合，由管理者於課程內生成。</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('joinCourseModal')).hide(); showToast('已成功加入課程：採血作業新進人員訓練');"><i class="bi bi-check2 me-1"></i>確認加入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 模組人員對應 Modal -->
+<div class="modal fade" id="moduleAssignmentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-diagram-3 text-tsbms-green me-2"></i>編輯模組對應 — <span id="module-modal-user">使用者</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-info mb-3">
+          <i class="bi bi-info-circle me-1"></i>勾選該帳號隸屬之業務模組（可多選）。教師建立課程時選「關聯模組」後，系統自動將所有該模組人員加入課程，免個別邀請。
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="mod-bc"><label class="form-check-label" for="mod-bc"><span class="badge bg-tsbms-green me-1">BC</span>採血</label></div>
+          </div>
+          <div class="col-6">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="mod-cp"><label class="form-check-label" for="mod-cp"><span class="badge bg-tsbms-green me-1">CP</span>成分</label></div>
+          </div>
+          <div class="col-6">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="mod-tl"><label class="form-check-label" for="mod-tl"><span class="badge bg-tsbms-green me-1">TL</span>檢驗</label></div>
+          </div>
+          <div class="col-6">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="mod-bs"><label class="form-check-label" for="mod-bs"><span class="badge bg-tsbms-green me-1">BS</span>供應</label></div>
+          </div>
+          <div class="col-6">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="mod-ma"><label class="form-check-label" for="mod-ma"><span class="badge bg-tsbms-green me-1">MA</span>醫務</label></div>
+          </div>
+          <div class="col-6">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="mod-lb"><label class="form-check-label" for="mod-lb"><span class="badge bg-tsbms-green me-1">LB</span>標籤列印</label></div>
+          </div>
+        </div>
+        <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>儲存於 <code>ET_USER_MODULE</code> 多對多對應表；模組對應與角色（管理者 / 教師 / 學員）為兩個獨立維度。</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="saveModuleAssignment()"><i class="bi bi-check2 me-1"></i>儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 停課 確認 Modal -->
+<div class="modal fade" id="closeCourseModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-slash-circle text-danger me-2"></i>停課</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-warn mb-3">
+          <i class="bi bi-exclamation-triangle me-1"></i>停課後此課程將<strong>自動下架、無法再編輯</strong>。此操作<strong>不可逆</strong>。
+        </div>
+        <ul class="small mb-0">
+          <li>ET01 課程列表此課程將顯示「<strong>已停課</strong>」狀態 pill，僅可進入檢視模式</li>
+          <li>學員端 ET04 我的課程之「進行中 / 未開始」分區不再顯示本課程；「已完成課程」分區仍保留歷史紀錄</li>
+          <li>學員嘗試開啟此課程時顯示「<strong>此課程已停止開放</strong>」</li>
+          <li>ET03 學員教師端可繼續查看已加入學員之完課狀態 / 平均成績，<strong>但無法再邀請新學員</strong></li>
+          <li>已加入學員之歷史學習紀錄與測驗成績<strong>完整保留</strong></li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmCloseCourse()"><i class="bi bi-slash-circle me-1"></i>確認停課</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ET08 變更密碼 Modal -->
+<div class="modal fade" id="etPasswordChangeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-key text-primary me-2"></i>變更密碼</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label small fw-bold">舊密碼 <span class="text-danger">*</span></label>
+          <input type="password" class="form-control form-control-sm" placeholder="輸入目前的密碼" id="et-pw-old">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">新密碼 <span class="text-danger">*</span></label>
+          <input type="password" class="form-control form-control-sm" placeholder="至少 8 字元" id="et-pw-new">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-bold">確認新密碼 <span class="text-danger">*</span></label>
+          <input type="password" class="form-control form-control-sm" placeholder="再次輸入新密碼" id="et-pw-new-confirm">
+        </div>
+        <div class="field-helper"><i class="bi bi-info-circle"></i>變更後同步更新共用 user table（ET 與 DM 一致）</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="etSavePasswordChange()"><i class="bi bi-check2 me-1"></i>儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 重置重考次數 確認 Modal -->
+<div class="modal fade" id="resetQuizModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise text-secondary me-2"></i>重置重考次數</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-info mb-3">
+          <i class="bi bi-info-circle me-1"></i>即將為 <strong id="reset-quiz-user">學員</strong> 重置該課程內<strong>所有測驗</strong>的可用重考次數。
+        </div>
+        <ul class="small mb-0">
+          <li>此操作會將剩餘重考次數恢復為「重考次數上限」設定值</li>
+          <li>歷次成績紀錄保留，仍以最高分為準</li>
+          <li>系統將記錄修改者與時間於稽核 log</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="confirmResetQuiz()"><i class="bi bi-check2 me-1"></i>確認重置</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 移除學員 確認 Modal -->
+<div class="modal fade" id="removeStudentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-x-fill text-danger me-2"></i>移除學員</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-warn mb-3">
+          <i class="bi bi-exclamation-triangle me-1"></i>即將將 <strong id="remove-student-user">學員</strong> 自本課程移除。
+        </div>
+        <ul class="small mb-0">
+          <li>該學員端不再顯示此課程</li>
+          <li>學習歷程與測驗紀錄<strong>保留於稽核 log</strong>，不會刪除</li>
+          <li>若該學員為「模組預設帶入」加入，移除後仍可能於模組對應重新計算時被自動帶回</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmRemoveStudent()"><i class="bi bi-person-x me-1"></i>確認移除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="et-toast" id="et-toast"><i class="bi bi-check-circle-fill"></i><span id="et-toast-text">已儲存</span></div>
+
+<!-- ===== JavaScript ===== -->
+<script>
+/* 當前角色：admin / student */
+var currentRole = 'admin';
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Sidebar 點擊
+  var sidebar = document.getElementById('sidebar');
+  var links = sidebar.querySelectorAll('.nav-link');
+  links.forEach(function(link) {
+    link.addEventListener('click', function(e) {
+      var screenId = this.getAttribute('data-screen');
+      if (!screenId) return;
+      e.preventDefault();
+      goScreen(screenId);
+    });
+  });
+
+  // ET01 課程列表預設只顯示「我建立的」
+  if (typeof filterCourses === 'function') filterCourses('mine');
+});
+
+function goScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  var target = document.getElementById(id);
+  if (target) target.classList.add('active');
+
+  // 更新 sidebar active
+  document.querySelectorAll('.sidebar .nav-link').forEach(function(l) {
+    l.classList.toggle('active', l.getAttribute('data-screen') === id);
+  });
+
+  // 隱藏 quiz 結果（每次切回都重設）
+  var quizResult = document.getElementById('quiz-result');
+  if (quizResult) quizResult.style.display = 'none';
+
+  // ET02 視角切換（檢視 / 編輯）
+  if (id === 'et-course-edit') applyEt02Mode();
+
+  window.scrollTo(0, 0);
+}
+
+/* ET01 課程列表：開啟課程（依擁有權決定編輯 / 檢視模式） */
+function openCourse(courseName, creator, isOwner, isClosed) {
+  sessionStorage.setItem('et02CourseName', courseName);
+  sessionStorage.setItem('et02CreatorName', creator);
+  sessionStorage.setItem('et02IsOwner', isOwner ? '1' : '0');
+  sessionStorage.setItem('et02IsClosed', isClosed ? '1' : '0');
+  goScreen('et-course-edit');
+}
+
+/* ET01 課程列表：篩選 tab（我建立的 / 全部課程） */
+function filterCourses(filter) {
+  document.querySelectorAll('#et-courses-tabs .nav-link').forEach(function(t) {
+    t.classList.toggle('active', t.getAttribute('data-filter') === filter);
+  });
+  document.querySelectorAll('#et-courses-admin .course-card-col').forEach(function(col) {
+    var owner = col.getAttribute('data-owner');
+    col.style.display = (filter === 'all' || owner === 'me') ? '' : 'none';
+  });
+  // 建立者篩選欄位僅「全部」tab 顯示
+  var creatorFilter = document.getElementById('et-filter-creator');
+  if (creatorFilter) creatorFilter.style.display = (filter === 'all') ? '' : 'none';
+  // 隱藏空的模組分組標題
+  document.querySelectorAll('#et-courses-admin h6').forEach(function(h) {
+    var group = h.nextElementSibling;
+    if (!group) return;
+    var visibleCards = group.querySelectorAll('.course-card-col:not([style*="display: none"])');
+    h.style.display = visibleCards.length === 0 ? 'none' : '';
+    group.style.display = visibleCards.length === 0 ? 'none' : '';
+  });
+}
+
+/* ET02：依 sessionStorage 切換編輯 / 檢視模式 */
+function applyEt02Mode() {
+  var isOwner = sessionStorage.getItem('et02IsOwner') !== '0';
+  var isClosed = sessionStorage.getItem('et02IsClosed') === '1';
+  var creator = sessionStorage.getItem('et02CreatorName') || '陳大華';
+  var courseName = sessionStorage.getItem('et02CourseName') || '採血作業新進人員訓練 v2.0';
+
+  var banner = document.getElementById('et02-view-banner');
+  var inviteBtn = document.getElementById('et02-invite-btn');
+  var closeBtn = document.getElementById('et02-close-btn');
+  var closedBanner = document.getElementById('et02-closed-banner');
+  var modeIcon = document.getElementById('et02-mode-icon');
+  var modeLabel = document.getElementById('et02-mode-label');
+  var courseNameEl = document.getElementById('et02-course-name');
+  var creatorNameEl = document.getElementById('et02-creator-name');
+  var editScreen = document.getElementById('et-course-edit');
+
+  if (courseNameEl) courseNameEl.textContent = courseName;
+  if (creatorNameEl) creatorNameEl.textContent = creator;
+
+  // 預設兩個 banner 隱藏
+  if (banner) banner.style.display = 'none';
+  if (closedBanner) closedBanner.style.display = 'none';
+
+  if (isClosed) {
+    // 已停課 — 唯讀，banner 顯示
+    if (closedBanner) closedBanner.style.display = '';
+    if (inviteBtn) inviteBtn.style.display = 'none';
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (modeIcon) modeIcon.className = 'bi bi-slash-circle me-2';
+    if (modeLabel) modeLabel.textContent = '課程檢視（已停課）';
+    if (editScreen) editScreen.classList.add('et02-readonly');
+  } else if (isOwner) {
+    // 編輯模式
+    if (inviteBtn) inviteBtn.style.display = '';
+    if (closeBtn) closeBtn.style.display = '';
+    if (modeIcon) modeIcon.className = 'bi bi-pencil-square me-2';
+    if (modeLabel) modeLabel.textContent = '課程編輯';
+    if (editScreen) editScreen.classList.remove('et02-readonly');
+  } else {
+    // 檢視模式（唯讀，非 owner）
+    if (banner) banner.style.display = '';
+    if (inviteBtn) inviteBtn.style.display = 'none';
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (modeIcon) modeIcon.className = 'bi bi-eye me-2';
+    if (modeLabel) modeLabel.textContent = '課程檢視';
+    if (editScreen) editScreen.classList.add('et02-readonly');
+  }
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('hidden');
+}
+
+/* 切換角色組合（多重）— wireframe demo 用
+   roles: 'admin' / 'teacher' / 'student' 以 + 串接，例如 'admin+teacher' */
+function switchRole(roles, userName, label) {
+  var hasAdmin   = roles.indexOf('admin')   !== -1;
+  var hasTeacher = roles.indexOf('teacher') !== -1;
+  var hasStudent = roles.indexOf('student') !== -1;
+  document.getElementById('sidebar-admin').style.display   = hasAdmin   ? '' : 'none';
+  document.getElementById('sidebar-teacher').style.display = hasTeacher ? '' : 'none';
+  document.getElementById('sidebar-student').style.display = hasStudent ? '' : 'none';
+  document.getElementById('current-role').textContent = label;
+  document.getElementById('user-name').textContent = userName + '（' + label + '）';
+
+  // 跳到該角色預設首頁
+  if (hasTeacher) goScreen('et-courses-admin');
+  else if (hasAdmin) goScreen('et-permissions');
+  else if (hasStudent) goScreen('et-courses-student');
+}
+
+/* 教材編輯 modal — 單頁式，可同時管理影片、圖片、文件、說明文字 */
+function openMaterialModal() {
+  document.getElementById('material-modal-title').textContent = '編輯教材';
+  new bootstrap.Modal(document.getElementById('materialModal')).show();
+}
+
+/* ET02-N 儲存成功 → 進入確認畫面 */
+function showCourseCreatedSuccess(status) {
+  // 從 ET02-N 表單抓欄位（簡化：直接抓第一個 input 與下拉選單）
+  var inputs = document.querySelectorAll('#et-course-create .form-control');
+  var courseName = (inputs[0] && inputs[0].value.trim()) || '採血作業新進人員訓練 v2.0';
+  document.getElementById('created-course-name').textContent = courseName;
+
+  // 設定狀態 pill
+  var statusEl = document.getElementById('created-course-status');
+  if (status === 'published') {
+    statusEl.textContent = '已發布';
+    statusEl.className = 'status-pill status-published';
+  } else {
+    statusEl.textContent = '草稿';
+    statusEl.className = 'status-pill status-draft';
+  }
+
+  showToast(status === 'published' ? '已建立並發布課程' : '已建立課程草稿');
+  goScreen('et-course-create-success');
+}
+
+/* 「新增另一門課程」— 清空 ET02-N 表單並返回 */
+function resetAndCreateAnotherCourse() {
+  // 清空課程名稱、描述、日期
+  var screen = document.getElementById('et-course-create');
+  screen.querySelectorAll('input[type=text], input[type=date], textarea').forEach(function(el) {
+    el.value = '';
+  });
+  // 關聯模組重設為 placeholder
+  var moduleSelect = screen.querySelector('select');
+  if (moduleSelect) moduleSelect.selectedIndex = 0;
+  goScreen('et-course-create');
+}
+
+/* 新增章節 modal */
+function openChapterModal() {
+  document.getElementById('chapter-modal-title').textContent = '新增章節';
+  document.getElementById('chapter-name').value = '';
+  document.getElementById('chapter-desc').value = '';
+  new bootstrap.Modal(document.getElementById('chapterModal')).show();
+}
+
+function saveChapter(action) {
+  var name = document.getElementById('chapter-name').value.trim();
+  if (!name) {
+    alert('請填寫章節名稱');
+    document.getElementById('chapter-name').focus();
+    return;
+  }
+  var chapterModal = bootstrap.Modal.getInstance(document.getElementById('chapterModal'));
+
+  if (action === 'add-material') {
+    // 儲存並新增教材：關閉本 modal、開啟教材編輯 modal
+    showToast('已新增章節:' + name + ' ｜ 接著新增教材');
+    chapterModal.hide();
+    setTimeout(function() {
+      document.getElementById('material-modal-title').textContent = '新增教材 — ' + name;
+      new bootstrap.Modal(document.getElementById('materialModal')).show();
+    }, 350);
+  } else {
+    // 確認新增（完成）
+    showToast('已新增章節:' + name);
+    chapterModal.hide();
+  }
+}
+
+/* 邀請學員 modal — ET02 觸發；Email 預覽主旨/內文可直接編輯 */
+function openInviteModal() {
+  new bootstrap.Modal(document.getElementById('inviteModal')).show();
+}
+
+/* 刪除項目 confirm modal */
+function openDeleteItemModal(itemName) {
+  document.getElementById('delete-item-name').textContent = itemName || '本項目';
+  new bootstrap.Modal(document.getElementById('deleteItemModal')).show();
+}
+function confirmDeleteItem() {
+  var name = document.getElementById('delete-item-name').textContent;
+  bootstrap.Modal.getInstance(document.getElementById('deleteItemModal')).hide();
+  showToast('已刪除項目：' + name);
+}
+
+/* 刪除章節 confirm modal */
+function openDeleteChapterModal(chapterName) {
+  document.getElementById('delete-chapter-name').textContent = chapterName || '本章節';
+  new bootstrap.Modal(document.getElementById('deleteChapterModal')).show();
+}
+function confirmDeleteChapter() {
+  var name = document.getElementById('delete-chapter-name').textContent;
+  bootstrap.Modal.getInstance(document.getElementById('deleteChapterModal')).hide();
+  showToast('已刪除：' + name);
+}
+
+/* 測驗編輯 modal */
+function openQuizModal() {
+  new bootstrap.Modal(document.getElementById('quizModal')).show();
+}
+
+/* 加入課程 modal */
+function openJoinCourseModal() {
+  new bootstrap.Modal(document.getElementById('joinCourseModal')).show();
+}
+
+/* ET06 題目檢討 — 答題明細點選後開啟 modal，呈現題目、選項、對錯狀態 */
+var _quizReviewData = {
+  Q1: {
+    type: '單選題', typeBadge: 'bg-primary',
+    question: '採血前最重要的消毒步驟是？',
+    options: [
+      { label: 'A. 用清水沖洗即可', state: 'unselected' },
+      { label: 'B. 以碘酊由內向外環形消毒兩次', state: 'correct-selected' },
+      { label: 'C. 以酒精棉片擦拭一次', state: 'unselected' }
+    ],
+    userAnswer: 'B', correctAnswer: 'B', score: '20 / 20'
+  },
+  Q2: {
+    type: '多選題', typeBadge: 'bg-info',
+    question: '採血前對捐血人進行健康評估時，以下哪些項目<u>必須</u>檢查？（可複選）',
+    options: [
+      { label: 'A. 體溫、血壓、脈搏', state: 'correct-selected' },
+      { label: 'B. 血紅素 (Hb) 濃度', state: 'correct-selected' },
+      { label: 'C. 體重（須≥ 50 公斤）', state: 'correct-selected' },
+      { label: 'D. 視力檢查', state: 'unselected' },
+      { label: 'E. 24 小時內飲食狀況', state: 'correct-missed' }
+    ],
+    userAnswer: 'A, B, C', correctAnswer: 'A, B, C, E', score: '15 / 20'
+  },
+  Q3: {
+    type: '單選題', typeBadge: 'bg-primary',
+    question: '採血量上限為體重的多少 %？',
+    options: [
+      { label: 'A. 8%', state: 'unselected' },
+      { label: 'B. 12%', state: 'unselected' },
+      { label: 'C. 13%', state: 'correct-selected' }
+    ],
+    userAnswer: 'C', correctAnswer: 'C', score: '20 / 20'
+  },
+  Q4: {
+    type: '單選題', typeBadge: 'bg-primary',
+    question: '採血後針孔按壓時間至少應為？',
+    options: [
+      { label: 'A. 1 分鐘', state: 'incorrect-selected' },
+      { label: 'B. 3 分鐘', state: 'unselected' },
+      { label: 'C. 5 分鐘', state: 'unselected' },
+      { label: 'D. 10 分鐘', state: 'correct-missed' }
+    ],
+    userAnswer: 'A', correctAnswer: 'D', score: '0 / 20'
+  },
+  Q5: {
+    type: '多選題', typeBadge: 'bg-info',
+    question: '以下哪些情況應「暫緩」採血？（可複選）',
+    options: [
+      { label: 'A. 24 小時內有發燒', state: 'correct-selected' },
+      { label: 'B. 體溫高於 37.5℃', state: 'correct-selected' },
+      { label: 'C. 已飲酒', state: 'unselected' }
+    ],
+    userAnswer: 'A, B', correctAnswer: 'A, B', score: '20 / 20'
+  }
+};
+var _quizReviewKeys = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'];
+var _quizReviewCurrent = 'Q2';
+
+function openQuizReview(qid) {
+  _quizReviewCurrent = qid;
+  var data = _quizReviewData[qid];
+  if (!data) return;
+
+  document.getElementById('review-question-num').textContent = qid;
+  var typeBadge = document.getElementById('review-question-type');
+  typeBadge.textContent = data.type;
+  typeBadge.className = 'badge ms-2 ' + data.typeBadge;
+  document.getElementById('review-question-text').innerHTML = data.question;
+  document.getElementById('review-user-answer').textContent = data.userAnswer;
+  document.getElementById('review-correct-answer').textContent = data.correctAnswer;
+  document.getElementById('review-score').textContent = data.score;
+
+  // 渲染選項
+  var optionsHtml = data.options.map(function(opt) {
+    var bg = '', icon = '', note = '';
+    if (opt.state === 'correct-selected') {
+      bg = 'background:#e8f5e9; border:1px solid #4caf50;';
+      icon = '<i class="bi bi-check-circle-fill text-success me-1"></i>';
+      note = '<span class="badge bg-success ms-2">你的答案 ✓ 正確</span>';
+    } else if (opt.state === 'correct-missed') {
+      bg = 'background:#fff8e1; border:1px solid #ffc107;';
+      icon = '<i class="bi bi-exclamation-circle-fill text-warning me-1"></i>';
+      note = '<span class="badge bg-warning text-dark ms-2">正確答案 ⚠ 你漏選</span>';
+    } else if (opt.state === 'incorrect-selected') {
+      bg = 'background:#ffebee; border:1px solid #ef5350;';
+      icon = '<i class="bi bi-x-circle-fill text-danger me-1"></i>';
+      note = '<span class="badge bg-danger ms-2">你的答案 ✗ 錯誤</span>';
+    } else {
+      bg = 'background:#f8f9fa; border:1px solid #dee2e6;';
+      icon = '<i class="bi bi-circle text-muted me-1"></i>';
+      note = '';
+    }
+    return '<div class="p-2 mb-2 rounded d-flex justify-content-between align-items-center" style="' + bg + '">' +
+           '<span>' + icon + opt.label + '</span>' + note + '</div>';
+  }).join('');
+  document.getElementById('review-options').innerHTML = optionsHtml;
+
+  new bootstrap.Modal(document.getElementById('quizReviewModal')).show();
+}
+
+function reviewPrev() {
+  var idx = _quizReviewKeys.indexOf(_quizReviewCurrent);
+  if (idx > 0) openQuizReview(_quizReviewKeys[idx - 1]);
+}
+function reviewNext() {
+  var idx = _quizReviewKeys.indexOf(_quizReviewCurrent);
+  if (idx < _quizReviewKeys.length - 1) openQuizReview(_quizReviewKeys[idx + 1]);
+}
+
+/* 測驗作答完成 demo — 顯示結果 */
+function showQuizResult() {
+  document.getElementById('quiz-result').style.display = '';
+  window.scrollTo({ top: document.getElementById('quiz-result').offsetTop - 70, behavior: 'smooth' });
+}
+
+/* Toast */
+function showToast(text) {
+  var toast = document.getElementById('et-toast');
+  document.getElementById('et-toast-text').textContent = text;
+  toast.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 2200);
+}
+
+/* 權限管理：模組人員對應 modal */
+var _moduleModalUser = '';
+function openModuleModal(userName, currentMods) {
+  _moduleModalUser = userName;
+  document.getElementById('module-modal-user').textContent = userName;
+  ['BC','CP','TL','BS','MA','LB'].forEach(function(m) {
+    var cb = document.getElementById('mod-' + m.toLowerCase());
+    if (cb) cb.checked = (currentMods || []).indexOf(m) > -1;
+  });
+  var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('moduleAssignmentModal'));
+  modal.show();
+}
+function saveModuleAssignment() {
+  var picked = [];
+  ['BC','CP','TL','BS','MA','LB'].forEach(function(m) {
+    var cb = document.getElementById('mod-' + m.toLowerCase());
+    if (cb && cb.checked) picked.push(m);
+  });
+  bootstrap.Modal.getInstance(document.getElementById('moduleAssignmentModal')).hide();
+  showToast('已更新 ' + _moduleModalUser + ' 業務模組：' + (picked.length ? picked.join(' / ') : '未指派'));
+}
+
+/* ET08 個人資料維護 */
+function etChangeProfileEmail() {
+  var email = document.getElementById('et-profile-email').value;
+  if (!email) { alert('請輸入新 Email'); return; }
+  showToast('已寄驗證信至 ' + email + '，點連結後新帳號才生效');
+}
+function etSaveProfileName() {
+  var name = document.getElementById('et-profile-name').value;
+  if (!name) { alert('請輸入姓名'); return; }
+  showToast('姓名已更新：' + name);
+}
+function etOpenPasswordChangeModal() {
+  ['et-pw-old', 'et-pw-new', 'et-pw-new-confirm'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('etPasswordChangeModal')).show();
+}
+function etSavePasswordChange() {
+  var oldPw = document.getElementById('et-pw-old').value;
+  var newPw = document.getElementById('et-pw-new').value;
+  var confirmPw = document.getElementById('et-pw-new-confirm').value;
+  if (!oldPw || !newPw || !confirmPw) { alert('請填寫所有欄位'); return; }
+  if (newPw !== confirmPw) { alert('新密碼與確認密碼不一致'); return; }
+  bootstrap.Modal.getInstance(document.getElementById('etPasswordChangeModal')).hide();
+  showToast('密碼已變更');
+}
+
+/* ET02 停課 */
+function openCloseCourseModal() {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('closeCourseModal')).show();
+}
+function confirmCloseCourse() {
+  bootstrap.Modal.getInstance(document.getElementById('closeCourseModal')).hide();
+  showToast('本課程已停課；列表狀態將顯示「已停課」');
+  // demo：模擬停課後 UI 變化（隱藏邀請學員 / 停課按鈕，顯示停課 banner，凍結編輯）
+  var inviteBtn = document.getElementById('et02-invite-btn');
+  var closeBtn = document.getElementById('et02-close-btn');
+  var closedBanner = document.getElementById('et02-closed-banner');
+  if (inviteBtn) inviteBtn.style.display = 'none';
+  if (closeBtn) closeBtn.style.display = 'none';
+  if (closedBanner) closedBanner.style.display = '';
+  var editScreen = document.getElementById('et-course-edit');
+  if (editScreen) editScreen.classList.add('et02-readonly');
+}
+
+/* ET06 答題介面 */
+function jumpQuestion(n) {
+  showToast('已跳至第 ' + n + ' 題（demo：實際系統會切換題目卡）');
+}
+function openQuizSubmitModal() {
+  if (confirm('確認提交？提交後將立即閱卷，不可再修改答案。')) {
+    showQuizResult();
+  }
+}
+
+/* ET03 學員：重置重考次數 / 移除學員 */
+var _studentActionUser = '';
+function openResetQuizModal(userName) {
+  _studentActionUser = userName;
+  document.getElementById('reset-quiz-user').textContent = userName;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('resetQuizModal')).show();
+}
+function confirmResetQuiz() {
+  bootstrap.Modal.getInstance(document.getElementById('resetQuizModal')).hide();
+  showToast('已重置 ' + _studentActionUser + ' 之測驗重考次數');
+}
+function openRemoveStudentModal(userName) {
+  _studentActionUser = userName;
+  document.getElementById('remove-student-user').textContent = userName;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('removeStudentModal')).show();
+}
+function confirmRemoveStudent() {
+  bootstrap.Modal.getInstance(document.getElementById('removeStudentModal')).hide();
+  showToast('已將 ' + _studentActionUser + ' 自本課程移除');
+}
+
+/* 登入流程（demo 用，與 DM 同步） */
+function _loginShow(id) {
+  ['login-step-1', 'login-register', 'login-forgot-1', 'login-forgot-2'].forEach(function(k) {
+    var el = document.getElementById(k);
+    if (el) el.style.display = (k === id ? '' : 'none');
+  });
+  // 忘記密碼連結僅登入主畫面顯示
+  var link = document.getElementById('login-forgot-link');
+  if (link) link.style.display = (id === 'login-step-1' ? '' : 'none');
+  // Tab active state
+  var tabLogin = document.getElementById('login-tab-login');
+  var tabReg = document.getElementById('login-tab-register');
+  var tabs = document.getElementById('login-tabs');
+  if (tabs) {
+    if (id === 'login-step-1') {
+      tabLogin && tabLogin.classList.add('active');
+      tabReg && tabReg.classList.remove('active');
+      tabs.style.display = '';
+    } else if (id === 'login-register') {
+      tabLogin && tabLogin.classList.remove('active');
+      tabReg && tabReg.classList.add('active');
+      tabs.style.display = '';
+    } else {
+      // 忘記密碼流程隱藏 tabs
+      tabs.style.display = 'none';
+    }
+  }
+  // 切換時清掉錯誤訊息
+  loginShowError(null);
+}
+function loginShowTab(name) {
+  if (name === 'register') _loginShow('login-register');
+  else _loginShow('login-step-1');
+}
+function loginShowError(type) {
+  var box = document.getElementById('login-error');
+  var txt = document.getElementById('login-error-text');
+  if (!box || !txt) return;
+  if (!type) {
+    box.style.display = 'none';
+    txt.textContent = '';
+    return;
+  }
+  var msgs = {
+    'no_account': '查無此帳號，請先註冊',
+    'wrong_password': '密碼錯誤'
+  };
+  txt.textContent = msgs[type] || '登入失敗';
+  box.style.display = '';
+}
+function loginForgotPw()     { _loginShow('login-forgot-1'); }
+function loginForgotSubmit() { _loginShow('login-forgot-2'); }
+function loginBackToLogin()  { _loginShow('login-step-1'); }
+function loginSubmit() {
+  document.getElementById('login-overlay').style.display = 'none';
+  _loginShow('login-step-1'); // 重設供下次再開啟
+}
+function loginRegisterSubmit() {
+  // 註冊成功 → 跳回登入頁請使用者以新建帳號登入
+  var regEmail = document.querySelector('#login-register input[type="email"]');
+  var loginEmailInput = document.getElementById('login-email');
+  var loginPwInput = document.getElementById('login-password');
+  if (regEmail && loginEmailInput) loginEmailInput.value = regEmail.value || '';
+  if (loginPwInput) loginPwInput.value = '';
+  _loginShow('login-step-1');
+  showToast('註冊成功！請以新建帳號登入');
+}
+function loginLogout() {
+  document.getElementById('login-overlay').style.display = '';
+  _loginShow('login-step-1');
+}
+
+/* 自訂 CSS class helper */
+document.querySelectorAll('.text-tsbms-green').forEach(function(el) {
+  el.style.color = '#2e7d32';
+  el.style.fontWeight = '600';
+});
+</script>
+
+</body>
+</html>
