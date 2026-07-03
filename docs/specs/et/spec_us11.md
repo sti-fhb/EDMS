@@ -51,6 +51,21 @@
 
 ---
 
+## Functional Requirements
+
+- **FR-ET-US11-01**: 「關閉課程」按鈕 MUST 僅於課程狀態為「已發布」時顯示於 ET02 頁面右上；草稿與已關閉狀態 MUST NOT 顯示；已關閉狀態改顯示「再開課」按鈕
+- **FR-ET-US11-02**: 教師手動關閉須先經 confirm modal 確認；確認後系統 MUST 立即將課程狀態 PUBLISHED → CLOSED 並寫入 ET_COURSE.CLOSED_AT（不延遲、不進入過渡狀態）
+- **FR-ET-US11-03**: 課程到達 OPEN_END_AT 時，系統 MUST 由 SCHET002 每日排程自動將狀態 PUBLISHED → CLOSED 並寫入 CLOSED_AT，並輔以應用層即時判定（學員存取時檢核 OPEN_END_AT 已過即視同關閉），不受排程間隔影響
+- **FR-ET-US11-04**: 關閉當下（手動或到期）作答中之 attempt，系統 MUST 沿用 Attempt Snapshot 允許完成並計分（含 timeout 自動提交）計入歷史紀錄；提交後 MUST NOT 再開新 attempt
+- **FR-ET-US11-05**: 課程關閉後對學員端 MUST 進入唯讀模式：可唯讀回看已學過內容（教材重看、歷次作答明細、已填問卷），但 MUST NOT 累積進度、作答測驗、解鎖新章節或填寫問卷；已關閉課程 MUST 仍顯示於 ET04 我的課程列表並標示「已關閉」
+- **FR-ET-US11-06**: 課程關閉期間邀請碼 MUST 失效；學員以邀請碼加入時系統 MUST 阻擋並提示課程已關閉
+- **FR-ET-US11-07**: 課程關閉後教師（owner）端 MUST 保留課程內容可編輯（非唯讀）並可於 US9 查看學員歷史完課狀態 / 成績 / 作答明細 / 問卷結果，但 MUST NOT 再邀請新學員或重置重考次數；ET01 課程卡片 MUST 顯示「已關閉」狀態
+- **FR-ET-US11-08**: 課程關閉期間 SCHET001 / SCHET002 MUST NOT 將該課程納入每週統計、週報與各項提醒
+- **FR-ET-US11-09**: 教師執行「再開課」時系統 MUST 強制要求重新設定一組新的 OPEN_START_AT / OPEN_END_AT，未填妥 MUST NOT 送出；確認後 MUST 將狀態 CLOSED → PUBLISHED、學員進度接續保留（不歸零）、ET_COURSE.URGENT_REMIND_SENT 歸 false、邀請碼恢復有效、SCHET001 / SCHET002 排程恢復納入
+- **FR-ET-US11-10**: 關閉 / 再開課 MUST 可重複多次；CLOSED_AT MUST 記錄最近一次關閉時間，再開課後保留供追溯
+
+---
+
 ## 系統訊息
 
 各訊息類型（錯誤 / 警告 / 確認 / 成功 / 提示）定義見 [spec.md](spec.md) §Requirements。ET02 為多 US 共用畫面，本 US（課程關閉與再開課）使用流水號區段 201–299。

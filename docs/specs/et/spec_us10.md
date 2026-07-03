@@ -33,6 +33,18 @@
 
 ---
 
+## Functional Requirements
+
+- **FR-ET-US10-01**: 系統 MUST 提供使用者於 ET08 編輯自己之姓名，儲存後更新共用 USER.NAME 並同步生效於 ET / DM 兩系統（共用 user table）
+- **FR-ET-US10-02**: 帳號（Email）變更 MUST 採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制；提交新 Email 時系統 MUST 寫入 USER.EMAIL_PENDING_CHANGE、產生 EMAIL_PENDING_TOKEN 與 EMAIL_PENDING_EXPIRES_AT（當下 + 30 分鐘，TTL 由 ET_PARAM.PASSWORD_RESET_TTL_MIN 控制），且 USER.EMAIL（舊值）MUST 維持不變
+- **FR-ET-US10-03**: 系統 MUST 將驗證信寄至新 Email；使用者於期限內點驗證連結後，系統 MUST 將 USER.EMAIL 更新為新值、清除 PENDING 欄位並強制登出當前 session，須以新 Email 重新登入
+- **FR-ET-US10-04**: PENDING 期間（驗證未完成）系統 MUST 允許使用者以舊 Email 正常登入（變更尚未生效）
+- **FR-ET-US10-05**: 驗證連結逾期未點時，系統 MUST 於下次與該帳號相關之認證 / 變更動作時即時檢核並清理 PENDING 欄位，變更請求視為作廢、舊 Email 永久維持有效
+- **FR-ET-US10-06**: PENDING 期間再次提交新變更請求時，系統 MUST 取代前次 PENDING 紀錄並將新驗證連結重新計時 30 分鐘
+- **FR-ET-US10-07**: 密碼變更 MUST 要求舊密碼 + 新密碼 + 確認新密碼三欄位並檢核舊密碼正確且新密碼兩次一致後更新 USER.PASSWORD_HASH；系統 MUST NOT 在舊密碼錯誤或新密碼兩次不一致時更新密碼，並須回覆對應錯誤訊息
+
+---
+
 ## 系統訊息
 
 各訊息類型（錯誤 / 警告 / 確認 / 成功 / 提示）定義見 [spec.md](spec.md) §Requirements。

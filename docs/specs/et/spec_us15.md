@@ -42,6 +42,21 @@
 
 ---
 
+## Functional Requirements
+
+- **FR-ET-US15-01**: 系統 MUST 於 ET09「通知範本」分頁列出 6 類內建範本（COURSE_INVITE、COURSE_INVITE_DIGEST、COURSE_UPDATE、WEEKLY_REMIND、URGENT_REMIND、WEEKLY_REPORT）並提供編輯各範本之主旨與內文；MUST NOT 提供新增或刪除範本代碼之功能（範本代碼固定）
+- **FR-ET-US15-02**: 系統 MUST 於範本編輯頁列出該範本可用之變數清單（如 `{{COURSE_NAME}}`、`{{OPEN_START_AT}}`、`{{OPEN_END_AT}}`、`{{COURSE_URL}}`、`{{USER_NAME}}`），並支援點擊插入
+- **FR-ET-US15-03**: 系統 MUST 於儲存範本時檢核主旨與內文皆不可為空，通過後寫入 ET_NOTIFY_TEMPLATE 並更新版本號；之後所有該類信件 MUST 依新內容渲染
+- **FR-ET-US15-04**: 內文含未定義變數時，系統 MUST 提示警告但仍允許儲存，並於寄出時將該變數以空字串帶入
+- **FR-ET-US15-05**: 系統 MUST 以版本號（樂觀鎖）控制並行編輯；後儲存者版本不符時 MUST 拒絕儲存並提示「內容已被其他使用者變更，請重新整理後再儲存」
+- **FR-ET-US15-06**: 系統 MUST 提供各範本之啟用 / 停用開關；停用（IS_ACTIVE = false）時該類信件 MUST NOT 寄送，惟其觸發事件（如課程發布之自動加入學員）MUST 照常運作；切回啟用（IS_ACTIVE = true）後 MUST 恢復寄送
+- **FR-ET-US15-07**: 系統 MUST 將密碼重設（US2）與帳號變更驗證（US10）信件排除於 ET09 清單之外，採系統固定範本，MUST NOT 開放編輯或啟用 / 停用（帳號安全信件）
+- **FR-ET-US15-08**: 系統 MUST 提供排程參數調整：週報執行時間（`WEEKLY_STAT_DAY_TIME`）供 SCHET001 下次依新時間執行、加急提醒天數（`URGENT_REMIND_DAYS`，須為正整數）供 SCHET002 依新天數判定加急提醒時點
+- **FR-ET-US15-09**: 系統 MUST 僅允許管理者存取 ET09；非管理者角色（教師 / 學員）MUST 被拒絕存取且選單不顯示
+- **FR-ET-US15-10**: 系統 MUST 使所有寄出信件一律依 ET_NOTIFY_TEMPLATE 統一範本渲染；教師於 ET02 Email 邀請（[US8](spec_us8.md)）等情境僅可預覽，MUST NOT 逐課編輯主旨與內文
+
+---
+
 ## 系統訊息
 
 各訊息類型（錯誤 / 警告 / 確認 / 成功 / 提示）定義見 [spec.md](spec.md) §Requirements。

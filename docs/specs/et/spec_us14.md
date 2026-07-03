@@ -54,6 +54,21 @@
 
 ---
 
+## Functional Requirements
+
+- **FR-ET-US14-01**: 系統 MUST 僅對「開放中」（已發布且於起訖期間內）之課程執行 SCHET001 與 SCHET002 之統計與提醒；已關閉或尚未到起始時間之課程 MUST NOT 納入統計與提醒
+- **FR-ET-US14-02**: 系統 MUST 於排定時間（每週一 10:00，`ET_PARAM.WEEKLY_STAT_DAY_TIME` 可調）執行 SCHET001，對每門開放中課程統計平均看課進度%、未開始 / 進行中 / 已完課人數、完課率與已加入人數（不含已移除）
+- **FR-ET-US14-03**: 系統 MUST 於每次 SCHET001 統計完成時，為每門課程以 append-only 方式 INSERT 一筆 `ET_WEEKLY_STAT` 快照（課程 × 統計日期唯一），MUST NOT 回頭修改既有快照
+- **FR-ET-US14-04**: 系統 MUST 於快照寫入後寄送週報：每位教師收到一封（僅含自己建立之開放中課程）、每位管理者收到一封全域週報；內文 MUST 含各課程平均看課進度%（含與上週快照比較之增減）、人數分布、完課率、距訖止天數與未開始名單，並附逐學員 CSV 明細；當該課程無上週快照時「與上週比較」MUST 顯示「—」而非錯誤
+- **FR-ET-US14-05**: 系統 MUST 於 SCHET001 提醒階段，對進度為 0%（完全未開始）之學員寄送一封彙整未看提醒信（範本 `WEEKLY_REMIND`，列出其所有未開始課程與各課程截止時間）；進度 > 0%、已完課或已被移除者 MUST NOT 就該課程列入週提醒
+- **FR-ET-US14-06**: 系統 MUST 於 SCHET002 每日執行時，將 `OPEN_END_AT` 已過且狀態仍為 PUBLISHED 之課程自動轉為 CLOSED（行為依 [US11](spec_us11.md)）
+- **FR-ET-US14-07**: 系統 MUST 於課程進入「訖止前 N 天」（`ET_PARAM.URGENT_REMIND_DAYS` 可調）且 `URGENT_REMIND_SENT = false` 時，對該課程所有未完課學員（不含已移除）寄送加急提醒信（範本 `URGENT_REMIND`，標明課程名稱與截止時間），並將 `URGENT_REMIND_SENT` 置 true
+- **FR-ET-US14-08**: 系統 MUST 於 `URGENT_REMIND_SENT = true` 時不重複寄送加急提醒；課程執行「再開課」（重設起訖）時 MUST 將 `URGENT_REMIND_SENT` 歸 false，使新時窗之加急提醒重新計算
+- **FR-ET-US14-09**: 系統 MUST 將統計快照與寄信作業分離；週報 / 提醒信寄送失敗（Email Server 異常）時 MUST 將失敗紀錄寫入系統 log，且 MUST NOT 影響已寫入之統計快照資料
+- **FR-ET-US14-10**: 系統 MUST 一律依 [US15](spec_us15.md) 之 `ET_NOTIFY_TEMPLATE` 統一範本渲染所有排程寄出信件（WEEKLY_REPORT / WEEKLY_REMIND / URGENT_REMIND）
+
+---
+
 ## 系統訊息
 
 本 US 為純排程作業、**無 UI 畫面**，功能作業碼採 `SCH`。下列為排程寄送之信件與執行結果 log；信件內容一律依 [spec_us15.md](spec_us15.md) US15 之 `ET_NOTIFY_TEMPLATE` 統一範本渲染。訊息類型定義見 [spec.md](spec.md) §Requirements。

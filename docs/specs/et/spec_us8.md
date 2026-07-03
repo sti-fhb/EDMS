@@ -45,6 +45,22 @@
 
 ---
 
+## Functional Requirements
+
+- **FR-ET-US8-01**: 系統 MUST 僅於課程「已發布」狀態顯示「邀請學員」按鈕；草稿與已關閉狀態 MUST NOT 顯示（再開課後恢復）
+- **FR-ET-US8-02**: 課程發布時系統 MUST 依所掛受訓單位標籤（`ET_COURSE_TAG`）取對應人員（`ET_USER_TAG`；限具「學員」角色者）之聯集、去重，批次寫入 ET_ENROLLMENT（加入來源「標籤帶入」），同屬多標籤者僅加入一次；「全體」標籤 MUST 展開為全部具「學員」角色之使用者
+- **FR-ET-US8-03**: 標籤自動邀請完成後系統 MUST 對每位被加入學員各寄送一封通知信（統一範本 `COURSE_INVITE`，含課程名稱、起訖時間、學習連結）；寄送 MUST 非同步執行，寄送失敗 MUST NOT 影響學員之已加入狀態
+- **FR-ET-US8-04**: 已發布課程新增受訓單位標籤時系統 MUST 對該標籤對應人員執行補邀請（既有學員不重複加入）並寄送通知信
+- **FR-ET-US8-05**: 管理者新增某使用者 × 標籤對應時系統 MUST 自動將該使用者補加入該標籤所有「已發布且未關閉」課程，並寄送彙整一封通知信（範本 `COURSE_INVITE_DIGEST`，列出所有新加入課程）
+- **FR-ET-US8-06**: 管理者移除某使用者 × 標籤對應時系統 MUST NOT 變動既有課程之學員名單（已加入者可繼續學習），且之後新發布之該標籤課程 MUST NOT 自動邀請該使用者
+- **FR-ET-US8-07**: Email 邀請 MUST 提供 Email 清單輸入（多筆以分行或逗號分隔），並於下一步顯示依統一範本 `COURSE_INVITE` 渲染之邀請信預覽（含課程名稱、邀請連結、邀請碼）；教師 MUST NOT 編輯邀請信之主旨與內文
+- **FR-ET-US8-08**: 教師寄出 Email 邀請時系統 MUST 對每個 Email 建立 ET_INVITATION 紀錄（狀態＝待加入）並寄信，寄信成功 / 失敗皆 MUST 寫入 status_code；寄送失敗之 Email MUST 列入 [spec_us12.md](spec_us12.md) US12 待加入清單
+- **FR-ET-US8-09**: 學員點擊 Email 邀請連結時系統 MUST 驗證 token 後自動加入課程，寫入 ET_ENROLLMENT（加入來源「Email 邀請」）並更新 ET_INVITATION 狀態為「已加入」；已加入之學員再次點擊時 MUST 直接導向 [spec_us5.md](spec_us5.md) US5 學習頁
+- **FR-ET-US8-10**: 課程發布時系統 MUST 自動產生唯一 8 碼純數字邀請碼寫入 ET_COURSE.INVITATION_CODE，且 MUST NOT 提供手動指定或重新產生功能；學員於 ET04 以邀請碼加入時 ET_ENROLLMENT 加入來源 MUST 記為「邀請碼」
+- **FR-ET-US8-11**: 課程「已關閉」期間系統 MUST 拒絕以該課程邀請碼加入並提示課程關閉中；課程再開課後邀請碼 MUST 恢復有效
+
+---
+
 ## 系統訊息
 
 各訊息類型（錯誤 / 警告 / 確認 / 成功 / 提示）定義見 [spec.md](spec.md) §Requirements。ET02 為多 US 共用畫面，本 US（邀請學員）使用流水號區段 101–199。
