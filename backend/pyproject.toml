@@ -1,0 +1,73 @@
+[project]
+name = "edms-backend"
+version = "0.1.0"
+description = "EDMS — 教育訓練文件管理系統 後端"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "fastapi[standard]>=0.135.2",
+    "greenlet>=3.0.0",
+    "pydantic-settings>=2.14.2",
+    "sqlalchemy[asyncio]>=2.0.48",
+]
+
+# 說明：認證/加密/寄信/排程等依賴（PyJWT、passlib、cryptography、fastapi-mail、
+# apscheduler、croniter、email-validator、openpyxl）留待「認證 task」與對應功能 task
+# 引入，避免骨架階段揹負未使用的依賴。
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.5",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    "alembic/versions/",  # 自動產生的 migration 檔案，不做 lint
+]
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "S",    # flake8-bandit（安全性）
+    "B",    # flake8-bugbear
+    "C90",  # mccabe 圈複雜度
+    "RUF100",  # 偵測過時的 noqa
+]
+ignore = [
+    "B008",  # FastAPI Depends() 寫在參數預設值是標準用法
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**" = ["F811", "S101", "S105", "S106"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+markers = [
+    "unit: 單元測試，不依賴外部資源",
+    "integration: 整合測試，需要資料庫連線",
+]
+
+[tool.coverage.run]
+source = ["app"]
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = true

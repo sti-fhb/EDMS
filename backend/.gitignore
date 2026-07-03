@@ -1,0 +1,27 @@
+# 環境變數（含機密，絕不進 git）
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 測試 / 覆蓋率
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# uv
+.uv/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
