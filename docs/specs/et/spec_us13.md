@@ -1,6 +1,6 @@
 # User Story 13 — UCET013 課後問卷填寫（ET05）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET013 ｜ 功能選項：ET05（課後問卷填寫）｜ Priority：P2 ｜ Wireframe：[章節學習－課後問卷](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 新增（客戶需求變更 item 5：課後滿意度 / 回饋問卷）。
 
 學員**完課後**（該課程所有章節含測驗皆通過），若課程建有課後問卷（由 [spec_us3.md](spec_us3.md) US3 建立）且問卷啟用中，ET05 章節導覽列顯示「填寫課後問卷」入口。學員進入問卷頁逐題**單選**作答（如：滿意 / 普通 / 不滿意），全部題目作答後送出；填答**具名**、一人**一次**、送出後**不可修改**（可回看）。課程**關閉後不可填寫**（已填內容仍可唯讀回看）。填寫問卷**不是完課條件**、不計入學習進度。教師於 [spec_us9.md](spec_us9.md) US9「問卷結果」檢視統計與具名明細。
@@ -80,3 +80,13 @@
 - 課程問卷已由 [spec_us3.md](spec_us3.md) US3 建立（0～1 份 / 課程）
 - 學員完課判定依 [spec.md](spec.md) §完課定義與完課率計算
 - 教師端檢視於 [spec_us9.md](spec_us9.md) US9「已加入」頁籤之問卷結果區塊
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

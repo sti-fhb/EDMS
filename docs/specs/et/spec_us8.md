@@ -1,6 +1,6 @@
 # User Story 8 — UCET004 邀請學員（ET02）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET004 ｜ 功能選項：ET02（邀請學員視窗）｜ Priority：P2 ｜ Wireframe：[課程編輯－邀請學員](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 變更：主要機制改為「發布時標籤自動邀請＋每人寄通知信」；原「模組預設帶入」廢除；Email 邀請降為補件手段且改採統一範本（教師不可編輯主旨內文）；邀請碼於課程關閉期間失效、再開課後恢復。
 
 課程學員之加入以**標籤自動邀請**為主：課程發布時，系統依課程所掛受訓單位標籤（`ET_COURSE_TAG`）取對應人員（`ET_USER_TAG`；限具「學員」角色者；「全體」標籤展開為全部具學員角色者）之**聯集、去重**，自動加入課程並**每人寄一封通知信**（統一範本，含課程名稱、起訖時間、學習連結）。管理者事後為使用者**新增標籤**時，系統自動補加入該標籤所有「已發布且未關閉」課程並寄**彙整一封**通知信。輔助手段：（A）Email 邀請（教師輸入 Email 清單、以統一範本寄出，供臨時追加不在標籤內的人）；（B）邀請碼（課程發布時系統自動產生 8 碼純數字，學員自行於 ET04 加入）。「邀請學員」按鈕僅於已發布狀態顯示；草稿與已關閉狀態下隱藏。寄信失敗之 Email 列入 [spec_us12.md](spec_us12.md) US12 待加入清單。
@@ -91,3 +91,13 @@
 - 受訓單位標籤庫與使用者×標籤對應由 [spec_us1.md](spec_us1.md) US1 維護
 - 通知信範本由 [spec_us15.md](spec_us15.md) US15 維護（內建 seed 即可運作）
 - Email Server 介接已配置
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

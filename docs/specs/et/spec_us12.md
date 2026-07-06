@@ -1,6 +1,6 @@
 # User Story 12 — UCET006 待加入邀請追蹤（ET03）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET006 ｜ 功能選項：ET03（待加入邀請追蹤）｜ Priority：P3 ｜ Wireframe：[學員－待加入分頁](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 
 教師於 ET03 學員頁切至「待加入」分頁，可查看已寄出 Email 邀請但尚未加入之學員清單（Email、寄送時間、邀請狀態）。教師可對個別邀請執行「再次寄送」（系統重新呼叫 Email Server 依統一範本寄出邀請信、寄送時間更新；教師不可編輯主旨與內文）或「撤回邀請」（ET_INVITATION 狀態更新為「已撤回」，原邀請連結失效，學員若點擊將顯示邀請已撤回）。學員透過邀請連結加入後，系統自動將其從「待加入」移至「已加入」分頁（屬 [spec_us9.md](spec_us9.md) US9）。
 
@@ -60,3 +60,13 @@
 
 - 教師已於 [spec_us8.md](spec_us8.md) US8 寄出 Email 邀請
 - Email Server 介接已配置
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

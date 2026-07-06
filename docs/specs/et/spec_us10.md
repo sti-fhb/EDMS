@@ -1,6 +1,6 @@
 # User Story 10 — UCET011 個人資料維護（ET08）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET011 ｜ 功能選項：ET08（個人資料維護）｜ Priority：P2 ｜ Wireframe：[個人資料維護畫面](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 
 所有登入使用者於 ET08 個人資料維護頁可編輯自己之姓名、帳號（Email）、密碼。變更同步寫入共用 user table，DM 端同步生效。帳號（Email）變更採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制：使用者提交新 Email 後系統寄出驗證信至**新 Email**（30 分鐘有效），**舊 Email 變更期間仍可正常登入**；學員 30 分鐘內點驗證連結後 USER.EMAIL 更新為新值並強制登出，須以新 Email 重新登入；未點驗證連結則變更請求視為作廢、舊 Email 永遠維持有效；變更期間再次提交新請求取代前次。密碼變更須填舊密碼 + 新密碼 + 確認新密碼，系統檢核舊密碼正確、新密碼兩次一致後儲存。忘記密碼改走 [spec_us2.md](spec_us2.md) US2 登入頁之「忘記密碼」連結。
 
@@ -70,3 +70,13 @@
 
 - 使用者已於 [spec_us2.md](spec_us2.md) US2 註冊並登入
 - Email Server 介接已配置
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

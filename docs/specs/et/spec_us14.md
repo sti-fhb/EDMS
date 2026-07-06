@@ -1,6 +1,6 @@
 # User Story 14 — UCET014 排程統計與提醒（SCHET001 / SCHET002）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET014 ｜ 功能選項：SCH（排程統計與提醒，無操作畫面）｜ Priority：P2 ｜ Wireframe：排程作業，無操作畫面 ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 新增（客戶需求變更 item 4：每週自動統計看課百分比並回傳，同時通知未看者）。
 
 系統以兩支排程自動統計看課狀況並寄發提醒，**僅針對開放中**（已發布且於起訖期間內）之課程執行：**SCHET001 每週統計與週報**（每週一 10:00，`ET_PARAM.WEEKLY_STAT_DAY_TIME` 可調）——統計各開放中課程並留存快照 `ET_WEEKLY_STAT`，寄週報予教師（自己建立之課程）與管理者（全域），並對**進度 0%（完全未開始）**之學員寄未看提醒（一人一信彙整）；**SCHET002 每日課程時窗檢查**（每日執行）——到期課程自動轉 CLOSED（→ [spec_us11.md](spec_us11.md) US11），並於**訖止前 3 天**（`ET_PARAM.URGENT_REMIND_DAYS` 可調）對未完課學員寄加急提醒（每課只寄一次）。本 US 無 UI 畫面（純排程作業）；信件採 [spec_us15.md](spec_us15.md) US15 統一範本。
@@ -97,3 +97,13 @@
 - 學員進度資料由 [spec_us5.md](spec_us5.md) / [spec_us6.md](spec_us6.md) 產生
 - 信件範本（WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT）由 [spec_us15.md](spec_us15.md) US15 維護
 - Email Server 介接已配置
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

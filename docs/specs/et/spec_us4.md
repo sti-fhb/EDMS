@@ -1,6 +1,6 @@
 # User Story 4 — UCET007 我的課程與加入新課程（ET04）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET007 ｜ 功能選項：ET04（我的課程與加入新課程）｜ Priority：P1 ｜ Wireframe：[我的課程畫面](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 
 學員登入後預設首頁為 ET04 我的課程，呈現自己已加入之所有課程與學習狀態（進行中 / 未開始 / 已完成三區）。下方呈現各課程卡片（課程名稱、**受訓單位標籤 badges**、當前進度、章節、**課程起訖時間**等），點擊進入 ET05 章節學習頁面。**起始時間未到**之課程對學員不可見（我的課程清單不顯示）；**已關閉**課程顯示「已關閉」標示，點擊可**唯讀回看**已學過的內容（不能累積進度 / 作答 / 解鎖 / 填問卷）。本作業亦提供「加入新課程」入口：學員輸入 8 碼純數字邀請碼，系統驗證後顯示課程資訊（課程名稱、教師、章節數等），學員確認後加入；加入後該課程出現於「未開始」分區。學員無主動退出課程之能力；如需退出，由教師於 [spec_us9.md](spec_us9.md) US9 執行「移除學員」。
 
@@ -66,3 +66,13 @@
 
 - 學員已於 [spec_us2.md](spec_us2.md) US2 註冊並登入
 - 課程已由 [spec_us3.md](spec_us3.md) US3 發布（狀態為「已發布」）；學員端可見性另受課程起始時間限制
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

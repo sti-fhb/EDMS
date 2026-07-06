@@ -1,6 +1,6 @@
 # User Story 15 — UCET015 通知信範本維護（系統設定 -「通知範本」分頁，ET09）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET015 ｜ 功能選項：ET09（通知信範本維護）｜ Priority：P3 ｜ Wireframe：通知範本（wireframe 未含此畫面，屬系統設定分頁）｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 新增（客戶需求變更 items 2/4 之配套：所有通知信採統一範本，由管理者維護）。
 > ET07（權限與標籤）與 ET09（通知範本）合併於管理者單一「**系統設定**」畫面之分頁（比照 DM09）；本 US 對應「**通知範本**」分頁。功能作業代碼 ET09 沿用。
 
@@ -87,3 +87,13 @@
 - 6 類可維護範本 seed 已於部署時寫入（per [plan.md](plan.md) §系統初始化）；密碼重設 / 帳號變更驗證採系統固定範本，不在本畫面
 - 排程 SCHET001 / SCHET002 已註冊（[spec_us14.md](spec_us14.md) US14）
 - 管理者角色由 [spec_us1.md](spec_us1.md) US1 指派
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

@@ -1,6 +1,6 @@
 # User Story 11 — UCET003 課程關閉與再開課（ET02）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET003 ｜ 功能選項：ET02（課程關閉與再開課）｜ Priority：P3 ｜ Wireframe：[課程編輯－關閉／再開課](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 
 課程關閉有**兩種觸發、效果相同**：（1）**到期自動關閉**——課程到達訖止時間（`OPEN_END_AT`）時，由 SCHET002 每日排程自動將狀態 `PUBLISHED` → `CLOSED`，並輔以應用層即時判定（學員存取時檢核 `OPEN_END_AT` 已過即視同關閉），避免排程間隔造成的邊界誤差；（2）**手動關閉**——教師於 ET02 頁面右上點「關閉課程」按鈕（僅已發布狀態顯示）＋ confirm modal。關閉後課程進入**唯讀模式**：學員仍可見課程並回看已學過的內容，但不能再累積進度、作答測驗、解鎖新章節、填寫問卷；關閉當下作答中之 attempt 沿用 Attempt Snapshot **允許完成並計分**，之後不可開新 attempt。**關閉可逆**：教師可於已關閉課程執行「再開課」，強制重設一組新的起訖時間後狀態回 `PUBLISHED`，學員進度接續保留；關閉 / 再開課可重複多次（2026-07-02 變更：原「停課不可逆」與 `PENDING_CLOSE` 過渡狀態廢除）。
 
@@ -95,3 +95,13 @@
 - 課程已由 [spec_us3.md](spec_us3.md) US3 發布，且已設定起訖時間（發布檢核必填）
 - 學員 attempt 由 [spec_us6.md](spec_us6.md) US6 寫入並提交
 - SCHET002 每日課程時窗檢查排程已部署（[spec_us14.md](spec_us14.md) US14 / [spec.md](spec.md) §排程作業總覽）
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

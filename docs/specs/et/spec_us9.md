@@ -1,6 +1,6 @@
 # User Story 9 — UCET005 學員學習狀況追蹤（ET03）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET005 ｜ 功能選項：ET03（學員學習狀況追蹤）｜ Priority：P2 ｜ Wireframe：[學員畫面](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 變更：ET03 改為「已加入」「待加入」**兩個 tab**；「問卷結果」由獨立 tab **併入「已加入」頁籤**。「已加入」頁籤為一個課程之完整資料視圖，分**三區塊**：①已加入學員 ②作答明細 ③問卷結果。
 
 教師於 ET03 學員頁透過下拉選單切換要檢視之課程；「已加入」「待加入」兩個 tab 同步以該課程過濾。「**已加入**」頁籤為該課程之完整資料視圖，分三區塊呈現：
@@ -115,3 +115,13 @@
 - 課程已由 [spec_us3.md](spec_us3.md) US3 發布且有學員加入
 - 學員學習進度由 [spec_us5.md](spec_us5.md) US5 與 [spec_us6.md](spec_us6.md) US6 寫入
 - 「問卷結果」區塊需課程設有課後問卷（[spec_us3.md](spec_us3.md) US3 建立）；填答資料由 US13（spec_us13.md）寫入
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

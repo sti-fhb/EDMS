@@ -1,6 +1,6 @@
 # User Story 5 — UCET008 章節學習（ET05）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET008 ｜ 功能選項：ET05（章節學習）｜ Priority：P1 ｜ Wireframe：[章節學習畫面](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 
 學員於 ET04 點擊課程卡片進入 ET05 章節學習頁。系統載入該課程之章節導覽列（左側），中間內容區顯示當前章節之教材（影片 / DM 文件 / 說明文字）。學員依章節順序學習，章節解鎖規則為：含影片之章節需所有影片**累計覆蓋率 ≥ 80%**（實際播放區段聯集 ÷ 影片總長；允許拉進度條跳轉但**僅實際播放區段計入、直接拉到結尾不算看過**；允許倍速播放且**倍速照算覆蓋率**，倍速選項 0.75 / 1 / 1.25 / 1.5 / 2、上限 2 倍；重複觀看不加成）；僅含文件 / 說明文字之章節，學員開啟即視為已閱讀（純記錄不強制）；含測驗之章節須測驗達及格分數方可解鎖下一章節（測驗作答屬 [spec_us6.md](spec_us6.md) US6）。學員觀看位置跨 session 保留，返回時自動恢復。學員**完課後**（課程有課後問卷時）章節導覽列顯示「**填寫課後問卷**」入口，導向 US13（spec_us13.md）填寫。課程**已關閉**時內容轉**唯讀回看**（可重看已學過的教材），不再累積進度、不可作答、不可解鎖新章節、不可填問卷。
 
@@ -104,3 +104,13 @@
 - 學員已加入課程（[spec_us4.md](spec_us4.md) US4 / [spec_us8.md](spec_us8.md) US8）
 - 章節含測驗時，US6 線上測驗作答之解鎖判定依賴測驗結果
 - 課後問卷已由 [spec_us3.md](spec_us3.md) US3 建立時，完課後之填寫流程屬 US13（spec_us13.md）
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)

@@ -1,6 +1,6 @@
 # User Story 7 — UCET001 課程列表瀏覽（ET01）
 
-> 返回總檔：[spec.md](spec.md) | 模組：教育訓練文件管理（ET）
+> 對應 UC：UCET001 ｜ 功能選項：ET01（課程列表瀏覽）｜ Priority：P2 ｜ Wireframe：[課程列表畫面](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 變更：關聯模組移除，改受訓單位標籤（多標籤 badges）；卡片新增起訖時間；狀態改為 草稿 / 已發布 / 已關閉（可逆）；列表不再依模組分組。
 
 教師登入後預設首頁為 ET01 課程列表。本頁為新增與編輯之入口。教師於頁面上方分頁切換「我建立的 / 全部課程」：**「我建立的」顯示當前使用者建立之全部狀態課程（草稿 / 已發布 / 已關閉），供本人管理**；**「全部課程」僅顯示所有教師之「已發布」課程（草稿與已關閉不列入）**，供跨教師瀏覽觀摩。下方搜尋區提供關鍵字（課程名稱）與**受訓單位標籤**篩選，「全部課程」分頁額外提供「建立者」篩選。課程以卡片網格呈現（**不分組**）；卡片含課程名稱、**受訓單位標籤 badges（可多個）**、章節數、課程狀態（草稿 / 已發布 / **已關閉**）、**課程起訖時間**、學員人數、建立者姓名。他人建立之課程可進入瀏覽（唯讀），無法編輯；自己建立之已關閉課程可於「我建立的」進入並執行「再開課」（→ [spec_us11.md](spec_us11.md) US11）。
@@ -62,3 +62,13 @@
 - 教師已於 [spec_us1.md](spec_us1.md) US1 被授予「教師」角色
 - 受訓單位標籤庫已由 [spec_us1.md](spec_us1.md) US1 維護（含內建種子）
 - 至少有一門課程已建立（由 [spec_us3.md](spec_us3.md) US3）
+
+---
+
+## 相關文件
+
+- 模組總覽與跨 US 規則：[spec.md](spec.md)
+- 資料模型：[data-model.md](data-model.md)
+- 需求清單：[../../requirements/RQET.md](../../requirements/RQET.md)
+- 使用案例：[../../use-cases/et/usecases.md](../../use-cases/et/usecases.md)
+- 畫面 Wireframe：[ET wireframe](../../wireframes/et/index.html)
