@@ -247,7 +247,7 @@
 
 **業務規則**:
 - 該測驗下各 ET_QUESTION 之配分總和須等於 100（發布前由系統檢核）
-- TIME_LIMIT_MIN = 0 之測驗於章節學習頁直接隱藏（視同無測驗、不阻擋下一章節解鎖）
+- 作答時間限制為兩態：空白（NULL）= 不限時、≥ 1 = 限時 N 分鐘；停用測驗請刪除該測驗項目（不以時間限制表達）
 
 ---
 
@@ -411,12 +411,14 @@
 | 7 | 最近寄出時間 | LAST_SENT_AT | TIMESTAMP | Y | 最近一次寄出時間（再次寄送時更新）|
 | 8 | 加入時間 | JOINED_AT | TIMESTAMP | N | 學員點擊連結加入課程之時間 |
 | 9 | 撤回時間 | REVOKED_AT | TIMESTAMP | N | 教師撤回邀請之時間 |
+| 10 | 寄送結果碼 | SEND_STATUS_CODE | VARCHAR(20) | N | 最近一次寄信結果（成功 / 失敗原因碼）；寄送失敗時記錄，供 US12 待加入清單顯示與重寄判斷 |
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
 - STATUS 流轉：PENDING → JOINED 或 REVOKED；JOINED / REVOKED 為終態
 - 「再次寄送」更新 LAST_SENT_AT，不建新紀錄
 - 「撤回」更新 STATUS = REVOKED 與 REVOKED_AT；該 token 失效
+- 每次寄送（含首次與再次寄送）更新 SEND_STATUS_CODE；寄送失敗時 STATUS 維持 PENDING（列於 US12 待加入清單、可重寄），不因寄信失敗回滾邀請
 
 ---
 

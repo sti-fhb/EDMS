@@ -1,6 +1,6 @@
 # User Story 2 — UCET012 登入 / 註冊 / 忘記密碼
 
-> 對應 UC：UCET012 ｜ 功能選項：登入頁（LOGIN）｜ Priority：P1 ｜ Wireframe：登入頁（wireframe 未含此畫面）｜ 返回總檔：[spec.md](spec.md)
+> 對應 UC：UCET012 ｜ 功能選項：登入頁（LOGIN）｜ Priority：P1 ｜ Wireframe：[登入頁](../../wireframes/et/index.html)｜ 返回總檔：[spec.md](spec.md)
 
 ET 與 DM 共用 user table，使用者於 ET 登入頁可執行三項動作：登入（驗證帳號 / 密碼後依角色導向預設首頁）、註冊（首次使用之新使用者建立共用 USER 紀錄，ET 端自動授予「學員」角色）、忘記密碼（輸入註冊 Email，系統寄出 30 分鐘有效之密碼重設連結）。多重角色使用者登入後由側邊選單自行切換角色預設頁面。
 
