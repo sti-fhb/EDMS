@@ -27,13 +27,6 @@
     .user-badge { color: rgba(255,255,255,0.9); font-size: 0.82rem; white-space: nowrap; }
     .dm-badge { background: #fff; color: var(--tsbms-green-dark); font-size: 0.72rem; padding: 1px 6px; border-radius: 3px; font-weight: 700; margin-left: 0.3rem; }
 
-    .content-breadcrumb {
-      color: #999; font-size: 0.78rem;
-      margin-bottom: -0.25rem; margin-top: -1rem;
-      display: none;
-    }
-    body.sidebar-hidden .content-breadcrumb { display: block; }
-
     /* Sidebar */
     .sidebar {
       position: fixed; top: var(--navbar-height); left: 0; bottom: 0;
@@ -142,6 +135,7 @@
     /* 標籤組顏色（依組別配色） */
     .tag-grp-module   { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
     .tag-grp-role     { background: #e3f2fd; color: #1565c0; border-color: #90caf9; }
+    .tag-grp-audience { background: #e8eaf6; color: #303f9f; border-color: #9fa8da; }
     .tag-grp-nature   { background: #fff3e0; color: #e65100; border-color: #ffcc80; }
     .tag-grp-legal    { background: #fce4ec; color: #c2185b; border-color: #f48fb1; }
     .doc-tag-group-label { font-size: 0.78rem; color: #6c757d; margin-right: 0.5rem; min-width: 5.5rem; display: inline-block; }
@@ -150,6 +144,14 @@
       display: inline-block; padding: 2px 8px; border-radius: 4px;
       font-size: 0.72rem; font-weight: 600;
     }
+    /* 可見對象/單位 badge（對齊 ET 受訓單位標籤樣式） */
+    .tag-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 0.72rem; font-weight: 600;
+      background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7;
+      margin-right: 0.25rem;
+    }
+    .tag-badge.tag-all { background: #e3f2fd; color: #0d47a1; border-color: #90caf9; }
     .status-draft { background: #eceff1; color: #455a64; }
     .status-pending { background: #fff3e0; color: #e65100; }
     .status-approved { background: #e8f5e9; color: #2e7d32; }
@@ -542,6 +544,7 @@
       <a class="nav-link" href="#" data-screen="dm-dashboard" data-tooltip="個人專區"><i class="bi bi-person-workspace"></i><span class="link-text">個人專區</span></a>
       <a class="nav-link" href="#" data-screen="dm-obsolete" data-tooltip="已廢止文件查詢（DM_ADMIN）"><i class="bi bi-archive"></i><span class="link-text">已廢止文件查詢 <small class="text-muted">(admin)</small></span></a>
       <a class="nav-link" href="#" data-screen="dm-audit" data-tooltip="文件變更歷程查詢（DM_ADMIN）"><i class="bi bi-search"></i><span class="link-text">文件變更歷程查詢 <small class="text-muted">(admin)</small></span></a>
+      <a class="nav-link" href="#" data-screen="dm-kpi" data-tooltip="閱讀統計 KPI（DM_ADMIN）"><i class="bi bi-bar-chart-line"></i><span class="link-text">閱讀統計 KPI <small class="text-muted">(admin)</small></span></a>
       <a class="nav-link" href="#" data-screen="dm-admin" data-tooltip="系統設定（DM_ADMIN）"><i class="bi bi-sliders"></i><span class="link-text">系統設定 <small class="text-muted">(admin)</small></span></a>
     </div>
   </div>
@@ -551,7 +554,6 @@
 
 <!-- ===== Main Content ===== -->
 <div class="main-content">
-  <div class="content-breadcrumb" id="nav-breadcrumb"></div>
 
 <!-- ==================== DM00 儀表板 ==================== -->
 <div class="screen" id="dm-overview">
@@ -611,7 +613,7 @@
     <ul class="list-group list-group-flush">
       <li class="list-group-item d-flex justify-content-between align-items-start px-0" onclick="goScreen('dm-detail')" style="cursor:pointer;">
         <div>
-          <div class="fw-bold"><i class="bi bi-file-earmark-pdf text-danger me-1"></i>領血確認標準作業程序 <span class="badge bg-primary ms-1" style="font-size:0.65rem;">新版本 v2.1</span></div>
+          <div class="fw-bold"><i class="bi bi-file-earmark-pdf text-danger me-1"></i>領血確認標準作業程序 <span class="badge bg-primary ms-1" style="font-size:0.65rem;">新版本 2026 v2.1</span></div>
           <small class="text-muted">補充第 5 點異常通報流程；新增 30 分鐘時效規定</small>
           <div class="small text-muted mt-1"><i class="bi bi-calendar me-1"></i>2026-05-26 　<i class="bi bi-person me-1"></i>陳大華　<span class="doc-category-pill cat-sop ms-1">SOP</span></div>
         </div>
@@ -619,7 +621,7 @@
       </li>
       <li class="list-group-item d-flex justify-content-between align-items-start px-0" onclick="goScreen('dm-detail')" style="cursor:pointer;">
         <div>
-          <div class="fw-bold"><i class="bi bi-file-earmark-text text-primary me-1"></i>BS04 領血掃血袋線上系統操作手冊 <span class="badge bg-primary ms-1" style="font-size:0.65rem;">新版本 v006</span></div>
+          <div class="fw-bold"><i class="bi bi-file-earmark-text text-primary me-1"></i>BS04 領血掃血袋線上系統操作手冊 <span class="badge bg-primary ms-1" style="font-size:0.65rem;">新版本 2026 v006</span></div>
           <small class="text-muted">介面文字微調：將「掃描」統一為「掃碼」；補充常見錯誤訊息對照表</small>
           <div class="small text-muted mt-1"><i class="bi bi-calendar me-1"></i>2026-05-19　<i class="bi bi-person me-1"></i>王曉明　<span class="doc-category-pill cat-manual ms-1">系統操作手冊</span></div>
         </div>
@@ -627,7 +629,7 @@
       </li>
       <li class="list-group-item d-flex justify-content-between align-items-start px-0" onclick="goScreen('dm-detail')" style="cursor:pointer;">
         <div>
-          <div class="fw-bold"><i class="bi bi-file-earmark-ppt text-warning me-1"></i>用血回報訓練教材 <span class="badge bg-success ms-1" style="font-size:0.65rem;">新增 v1.0</span></div>
+          <div class="fw-bold"><i class="bi bi-file-earmark-ppt text-warning me-1"></i>用血回報訓練教材 <span class="badge bg-success ms-1" style="font-size:0.65rem;">新增 2026 v1.0</span></div>
           <small class="text-muted">新進人員用血回報訓練教材；涵蓋通報時機、表單填寫與異常處理</small>
           <div class="small text-muted mt-1"><i class="bi bi-calendar me-1"></i>2026-05-12　<i class="bi bi-person me-1"></i>林助教　<span class="doc-category-pill cat-training ms-1">訓練教材</span></div>
         </div>
@@ -635,7 +637,7 @@
       </li>
       <li class="list-group-item d-flex justify-content-between align-items-start px-0" onclick="goScreen('dm-detail')" style="cursor:pointer;">
         <div>
-          <div class="fw-bold"><i class="bi bi-file-earmark-pdf text-danger me-1"></i>入庫作業 SOP <span class="badge bg-primary ms-1" style="font-size:0.65rem;">新版本 v1.4</span></div>
+          <div class="fw-bold"><i class="bi bi-file-earmark-pdf text-danger me-1"></i>入庫作業 SOP <span class="badge bg-primary ms-1" style="font-size:0.65rem;">新版本 2026 v1.4</span></div>
           <small class="text-muted">補充戰時模式入庫規則，含異常掃碼處理與雙人覆核時機</small>
           <div class="small text-muted mt-1"><i class="bi bi-calendar me-1"></i>2026-05-08　<i class="bi bi-person me-1"></i>品保室　<span class="doc-category-pill cat-sop ms-1">SOP</span></div>
         </div>
@@ -705,12 +707,6 @@
               <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm01-tag-mod-tl" data-group="module" data-name="檢驗"><label class="form-check-label small" for="dm01-tag-mod-tl">檢驗</label></div>
               <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm01-tag-mod-bs" data-group="module" data-name="供應" checked><label class="form-check-label small" for="dm01-tag-mod-bs">供應</label></div>
               <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm01-tag-mod-ma" data-group="module" data-name="醫務"><label class="form-check-label small" for="dm01-tag-mod-ma">醫務</label></div>
-            </div>
-            <div class="small fw-bold mb-1" style="color:#1565c0;"><i class="bi bi-person-badge me-1"></i>適用角色</div>
-            <div class="ms-1 mb-2">
-              <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm01-tag-role-nu" data-group="role" data-name="護理師"><label class="form-check-label small" for="dm01-tag-role-nu">護理師</label></div>
-              <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm01-tag-role-bb" data-group="role" data-name="血庫人員" checked><label class="form-check-label small" for="dm01-tag-role-bb">血庫人員</label></div>
-              <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm01-tag-role-dr" data-group="role" data-name="醫師"><label class="form-check-label small" for="dm01-tag-role-dr">醫師</label></div>
             </div>
             <div class="small fw-bold mb-1" style="color:#e65100;"><i class="bi bi-flag me-1"></i>文件性質</div>
             <div class="ms-1 mb-2">
@@ -904,10 +900,11 @@
     <span style="margin-left:1rem;">• <strong>舊版本（已被取代）</strong> — 進入文件詳細頁的「版本歷程」抽屜查閱（同一個 DOC_ID 下的歷史版本）</span><br>
     <span style="margin-left:1rem;">• <strong>已廢止文件</strong> — DM01 完全查不到；僅 DM_ADMIN 可至 sidebar「已廢止文件查詢」（DM06）read-only 查看，含完整版本歷程</span><br>
     <strong>列表欄位：</strong>文件名稱 / 分類 / 狀態 / 發布日期 / 作者（系統操作手冊額外顯示對應 func_name）；下方另顯示已掛標籤 pills，可一眼識別文件適用情境<br>
-    <strong>標籤搜尋：</strong>下拉 multi-select checkbox；按鈕顯示已選個數，下拉內容依標籤組（適用模組／適用角色／文件性質／法規關聯）分群列出 checkbox。選取後於按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck 下拉內 checkbox）。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM_ADMIN 於 DM09 維護<br>
+    <strong>標籤搜尋：</strong>下拉 multi-select checkbox（僅列<strong>檢索標籤</strong>：適用模組／文件性質／法規關聯）；按鈕顯示已選個數，選取後於按鈕下方以 pill 列出，點 pill 的 × 可移除。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM_ADMIN 於 DM09 維護。「可見對象/單位」為權限標籤、不列入此檢索下拉<br>
+    <strong>可見範圍（標籤式可見性）：</strong><strong>閱覽者</strong>只看得到「全體」或與自己被授予之「可見對象/單位」相符（OR 比對）之文件；<strong>編輯者／審核者／管理者不受此限，可見全部</strong>。可見對象授權由 DM_ADMIN 於 DM09 權限管理維護<br>
     <strong>顯示原則：</strong>列表預設僅顯示目前發布版本（CURRENT），不混雜歷史版本；歷史版本可進入文件詳細頁透過「版本歷程」抽屜查閱<br>
     <strong>點擊單筆文件：</strong>進入文件詳細頁（DM02）<br>
-    <strong>權限說明：</strong>所有登入使用者皆可閱讀；新增/編輯按鈕僅 DM_EDITOR 角色顯示；已廢止文件本畫面一律不顯示，DM_ADMIN 須另從 sidebar「已廢止文件查詢」（DM06）進入
+    <strong>權限說明：</strong>登入使用者依可見範圍閱讀（見上）；新增/編輯按鈕僅 DM_EDITOR 角色顯示；已廢止文件本畫面一律不顯示，DM_ADMIN 須另從 sidebar「已廢止文件查詢」（DM06）進入
   </details>
 </div>
 
@@ -919,7 +916,7 @@
       <!-- 標題列僅放識別 / 狀態資訊；描述性 metadata（分類 / 作者 / 核准者 / 發布日期等）統一於右側「文件資訊」呈現，不重複 -->
       <div class="text-muted small mt-1">
         <span>DOC_ID: DM-SOP-000123</span>
-        <span class="ms-2">目前版本：<strong class="text-success">v2.1</strong></span>
+        <span class="ms-2">目前版本：<strong class="text-success">2026 v2.1</strong></span>
         <span class="ms-2"><span class="status-pill status-published" id="detail-status-published">已發布</span><span class="status-pill status-obsolete" id="detail-status-obsolete" style="display:none;">已廢止</span></span>
       </div>
     </div>
@@ -929,7 +926,7 @@
   <!-- 已廢止 banner（僅 read-only 模式顯示） -->
   <div class="wf-status-msg" id="detail-obsolete-banner" style="display:none; background:#ffebee; color:#b71c1c; border:1px solid #ef9a9a;">
     <i class="bi bi-archive me-1"></i>本文件已 <strong>廢止</strong>，僅供稽核 / 法規追溯查閱。<strong>所有版本（含廢止前最後發布版本）一律僅可預覽、不開放下載</strong>；原發布版本與歷史版本均永久保留，但本文件已不在文件庫主清單中提供。
-    <span class="ms-2 small">廢止時間：2026-04-10 11:15 ｜ 廢止申請人：王曉明 ｜ 核准者：李主任 ｜ 廢止原因：院內已停止實施門急診獨立用血流程</span>
+    <span class="ms-2 small">廢止時間：2026-04-10 11:15 ｜ 廢止申請人：王曉明 ｜ 核准者：李主任 ｜ 廢止原因：院內已停止實施門急診獨立用血流程 ｜ 廢止附件：<a href="#" onclick="showToast('下載廢止附件（demo）'); return false;"><i class="bi bi-paperclip"></i> 停辦函文.pdf</a></span>
   </div>
 
   <!-- 操作列 -->
@@ -950,7 +947,7 @@
         <div class="doc-preview-frame" style="display:flex; align-items:center; justify-content:center; min-height:280px; text-align:center;">
           <div>
             <i class="bi bi-file-earmark-pdf text-danger" style="font-size:3rem;"></i>
-            <div class="mt-2 fw-bold">SOP-領血確認-v2.1.pdf</div>
+            <div class="mt-2 fw-bold">SOP-領血確認-2026 v2.1.pdf</div>
             <div class="text-muted small mt-1">2.2 MB ｜ 上傳時間 2026-04-15 10:30</div>
             <button class="btn btn-tsbms btn-sm mt-3 js-detail-download-only"><i class="bi bi-download me-1"></i>下載查看</button>
             <button class="btn btn-outline-primary btn-sm mt-3 js-detail-preview-only" style="display:none;"><i class="bi bi-eye me-1"></i>預覽</button>
@@ -1004,7 +1001,7 @@
         <div class="version-body current">
           <div class="d-flex justify-content-between">
             <div>
-              <span class="version-num">v2.1</span>
+              <span class="version-num">2026 v2.1</span>
               <span class="status-pill status-published ms-2">目前發布版本</span>
             </div>
             <div>
@@ -1021,7 +1018,7 @@
         <div class="version-body">
           <div class="d-flex justify-content-between">
             <div>
-              <span class="version-num">v2.0</span>
+              <span class="version-num">2026 v2.0</span>
               <span class="status-pill status-superseded ms-2">已被取代</span>
             </div>
             <div>
@@ -1037,7 +1034,7 @@
         <div class="version-body">
           <div class="d-flex justify-content-between">
             <div>
-              <span class="version-num">v1.2</span>
+              <span class="version-num">2025 v1.2</span>
               <span class="status-pill status-superseded ms-2">已被取代</span>
             </div>
             <div>
@@ -1053,7 +1050,7 @@
         <div class="version-body">
           <div class="d-flex justify-content-between">
             <div>
-              <span class="version-num">v1.1 / v1.0</span>
+              <span class="version-num">2025 v1.1 / 2025 v1.0</span>
               <span class="text-muted small ms-2">點擊展開更早歷程</span>
             </div>
             <div>
@@ -1071,7 +1068,7 @@
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>本畫面用途：</strong>單一文件詳細頁，呈現目前發布版本內容、版本歷程與關聯資訊<br>
     <strong>關聯資訊：</strong>僅「系統操作手冊」分類顯示「關聯作業項目」（單一 func_name）；其他分類無關聯資訊區塊<br>
-    <strong>頁首標題列：</strong>僅顯示識別與狀態資訊「DOC_ID / 目前版本 / 狀態」；描述性 metadata（分類、作者、核准者、發布日期、核准時間、標籤）統一由右側「文件資訊」呈現，不於頁首重複。作者 / 核准者 / 發布日期皆指目前發布版本（v2.1）；歷史版本之撰寫者於版本歷程中各自列出<br>
+    <strong>頁首標題列：</strong>僅顯示識別與狀態資訊「DOC_ID / 目前版本 / 狀態」；描述性 metadata（分類、作者、核准者、發布日期、核准時間、標籤）統一由右側「文件資訊」呈現，不於頁首重複。作者 / 核准者 / 發布日期皆指目前發布版本（2026 v2.1）；歷史版本之撰寫者於版本歷程中各自列出<br>
     <strong>文件檔案 / 文件資訊（正常模式）：</strong>左大區顯示檔案資訊（名稱、大小、上傳時間）+「下載查看」按鈕；右側欄顯示分類、作者、發布日期、核准者、核准時間、標籤<br>
     <strong>已廢止文件 read-only 模式：</strong><strong>整段「文件檔案 + 文件資訊」隱藏</strong>，直接呈現版本歷程（自動展開）；稽核者直接看到所有版本（含廢止前最後發布版本）的脈絡<br>
     <strong>版本歷程：</strong>正常模式預設收合，點擊「版本歷程」按鈕展開；read-only 模式自動展開；列出所有版本（含已被取代與廢止紀錄）<br>
@@ -1080,9 +1077,9 @@
     <span style="margin-left:1rem;">• <strong>已廢止文件</strong>：所有版本（含廢止前最後發布版本）一律僅可預覽、不開放下載；資料永久保留供稽核</span><br>
     <span style="margin-left:1rem;">• <strong>整份文件廢止</strong>時，版本歷程末尾新增廢止紀錄（廢止者、時間、原因）</span><br>
     <strong>本頁不另設「變更歷程」區塊：</strong>所有公開變更（發布／廢止）資訊已整合進版本歷程；DM_ADMIN 完整稽核請至 sidebar「文件變更歷程查詢」（DM08）<br>
-    <strong>編輯新版本：</strong>DM_EDITOR 可點擊進入 DM03 編輯模式（帶 doc_id 參數），新版號由系統自動產生（撰寫者只選 Major / Minor）<br>
-    <strong>廢止此文件：</strong><strong>DM_EDITOR</strong> 可發起；點擊「廢止此文件」跳出確認 modal，須<strong>必填廢止原因</strong>後送出。送審期間文件狀態為「<strong>廢止待簽核</strong>」，<strong>原發布版本仍持續對外提供</strong>不受影響。通知該文件之指定審核者，於簽核中心（DM04）處理：<br>
-    <span style="margin-left:1rem;">• <strong>核准</strong>：文件正式廢止、不再出現於文件庫主清單；版本歷程末尾新增廢止紀錄（含申請人、申請時間、廢止原因、核准者、核准時間）並通知撰寫者</span><br>
+    <strong>編輯新版本：</strong>DM_EDITOR 可點擊進入 DM03 編輯模式（帶 doc_id 參數），新版號由撰寫者自行輸入（自由格式，無系統自動建議 / Major / Minor）<br>
+    <strong>廢止此文件：</strong><strong>DM_EDITOR</strong> 可發起；點擊「廢止此文件」跳出確認 modal，須<strong>必填廢止原因</strong>（可<strong>選填附加檔案</strong>，如函文公文，格式 / 大小比照文件上傳）後送出。送審期間文件狀態為「<strong>廢止待簽核</strong>」，<strong>原發布版本仍持續對外提供</strong>不受影響。通知該文件之指定審核者，於簽核中心（DM04）處理：<br>
+    <span style="margin-left:1rem;">• <strong>核准</strong>：文件正式廢止、不再出現於文件庫主清單；版本歷程末尾新增廢止紀錄（含申請人、申請時間、廢止原因、廢止附件（如有）、核准者、核准時間）並通知撰寫者</span><br>
     <span style="margin-left:1rem;">• <strong>退回</strong>：文件回到「已發布」狀態，撰寫者收到退回通知與退回原因</span><br>
     <strong>撰寫過程動作：</strong>上傳／編輯／送審／退回等個人視角紀錄請至 DM07 儀表板「文件草稿」區塊查看（不在本頁顯示）
   </details>
@@ -1117,10 +1114,10 @@
 
   <!-- 編輯模式提示 -->
   <div class="wf-status-msg wf-status-info" id="upload-banner-edit">
-    <i class="bi bi-info-circle me-1"></i>正在編輯 <strong>領血確認標準作業程序</strong> 的新版本（目前發布版：v2.1）。發布後將自動成為新的「目前發布版本」，舊版本將標記為「已被取代」並永久保留。
+    <i class="bi bi-info-circle me-1"></i>正在編輯 <strong>領血確認標準作業程序</strong> 的新版本（目前發布版：2026 v2.1）。發布後將自動成為新的「目前發布版本」，舊版本將標記為「已被取代」並永久保留。
   </div>
   <div class="wf-status-msg wf-status-success" id="upload-banner-create" style="display:none;">
-    <i class="bi bi-plus-circle me-1"></i>新增一份文件。完成後送交簽核，核准後以撰寫者指定的版本號（預設建議 <strong>v1.0</strong>）首次發布。
+    <i class="bi bi-plus-circle me-1"></i>新增一份文件。完成後送交簽核，核准後以撰寫者<strong>自行輸入</strong>的版本號（格式「年 v版號」，如 2026 v1.0）首次發布。
   </div>
 
   <div class="row">
@@ -1181,9 +1178,37 @@
         </div>
       </div>
 
-      <!-- 標籤（多選下拉；選完於下方顯示已選） -->
+      <!-- 可見對象/單位（權限，必填至少 1；決定哪些閱覽者看得到） -->
       <div class="wf-card">
-        <h6 class="fw-bold mb-3"><i class="bi bi-tags me-1"></i>標籤 <small class="text-muted fw-normal">（多選下拉，選完於下方顯示；受控詞彙由 DM_ADMIN 於 DM09 維護）</small></h6>
+        <h6 class="fw-bold mb-3"><i class="bi bi-people-fill me-1"></i>可見對象/單位 <span class="text-danger">*</span> <small class="text-muted fw-normal">（必填至少 1 項；決定哪些閱覽者看得到此文件，受控詞彙由 DM_ADMIN 於 DM09 維護）</small></h6>
+        <div class="tag-picker" data-tag-scope="dm03aud">
+          <div class="dropdown">
+            <button class="form-select form-select-sm text-start" type="button"
+                    data-bs-toggle="dropdown" data-bs-display="static"
+                    data-bs-auto-close="outside" aria-expanded="false">
+              <span class="tag-picker-summary text-muted">選擇可見對象...</span>
+            </button>
+            <div class="dropdown-menu p-2 w-100" style="max-height:320px; overflow-y:auto;">
+              <div class="small fw-bold mb-1" style="color:#1565c0;"><i class="bi bi-people me-1"></i>可見對象/單位</div>
+              <div class="ms-1 mb-1">
+                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-all" data-group="audience" data-name="全體"><label class="form-check-label small" for="dm03-aud-all">全體</label></div>
+                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-nu" data-group="audience" data-name="護理師"><label class="form-check-label small" for="dm03-aud-nu">護理師</label></div>
+                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-mil" data-group="audience" data-name="軍人"><label class="form-check-label small" for="dm03-aud-mil">軍人</label></div>
+                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-mt" data-group="audience" data-name="醫檢師" checked><label class="form-check-label small" for="dm03-aud-mt">醫檢師</label></div>
+                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-adm" data-group="audience" data-name="行政人員"><label class="form-check-label small" for="dm03-aud-adm">行政人員</label></div>
+              </div>
+            </div>
+          </div>
+          <div class="tag-picker-selected mt-2 d-flex flex-wrap align-items-center" style="min-height:1.6rem;">
+            <span class="tag-picker-empty text-muted small" style="display:none;">尚未選擇任何可見對象</span>
+          </div>
+        </div>
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>可見對象決定文件的可見範圍：閱覽者僅能看到「全體」或與自己被授予之可見對象相符的文件；編輯者／審核者／管理者不受此限。掛「全體」則所有閱覽者可見。</div>
+      </div>
+
+      <!-- 檢索標籤（多選下拉；選完於下方顯示已選） -->
+      <div class="wf-card">
+        <h6 class="fw-bold mb-3"><i class="bi bi-tags me-1"></i>檢索標籤 <small class="text-muted fw-normal">（選填；供 DM01 搜尋用，不影響可見性；受控詞彙由 DM_ADMIN 於 DM09 維護）</small></h6>
 
         <div class="tag-picker" data-tag-scope="dm03">
           <div class="dropdown">
@@ -1200,12 +1225,6 @@
                 <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-tag-mod-tl" data-group="module" data-name="檢驗"><label class="form-check-label small" for="dm03-tag-mod-tl">檢驗</label></div>
                 <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-tag-mod-bs" data-group="module" data-name="供應" checked><label class="form-check-label small" for="dm03-tag-mod-bs">供應</label></div>
                 <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-tag-mod-ma" data-group="module" data-name="醫務"><label class="form-check-label small" for="dm03-tag-mod-ma">醫務</label></div>
-              </div>
-              <div class="small fw-bold mb-1" style="color:#1565c0;"><i class="bi bi-person-badge me-1"></i>適用角色</div>
-              <div class="ms-1 mb-2">
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-tag-role-nu" data-group="role" data-name="護理師"><label class="form-check-label small" for="dm03-tag-role-nu">護理師</label></div>
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-tag-role-bb" data-group="role" data-name="血庫人員" checked><label class="form-check-label small" for="dm03-tag-role-bb">血庫人員</label></div>
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-tag-role-dr" data-group="role" data-name="醫師"><label class="form-check-label small" for="dm03-tag-role-dr">醫師</label></div>
               </div>
               <div class="small fw-bold mb-1" style="color:#e65100;"><i class="bi bi-flag me-1"></i>文件性質</div>
               <div class="ms-1 mb-2">
@@ -1228,26 +1247,18 @@
         <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>標籤為受控詞彙，撰寫者只能從本清單挑選；若需新增標籤請聯絡 DM_ADMIN 於系統設定中維護。</div>
       </div>
 
+
       <!-- 版本升版（編輯模式才顯示） -->
       <div class="wf-card" id="version-card-edit">
         <h6 class="fw-bold mb-3"><i class="bi bi-tag me-1"></i>版本資訊</h6>
         <div class="row g-3 align-items-end">
-          <div class="col-md-3">
-            <label class="form-label small">目前版本</label>
-            <input type="text" class="form-control form-control-sm" value="v2.1" disabled>
-          </div>
-          <div class="col-md-5">
-            <label class="form-label small">升版類型</label>
-            <div class="btn-group w-100" role="group">
-              <input type="radio" class="btn-check" name="bump-type" id="bump-minor" checked onclick="updateNextVersion('minor')">
-              <label class="btn btn-outline-secondary btn-sm" for="bump-minor">Minor (+0.1)</label>
-              <input type="radio" class="btn-check" name="bump-type" id="bump-major" onclick="updateNextVersion('major')">
-              <label class="btn btn-outline-secondary btn-sm" for="bump-major">Major (+1.0)</label>
-            </div>
-          </div>
           <div class="col-md-4">
+            <label class="form-label small">目前版本</label>
+            <input type="text" class="form-control form-control-sm" value="2026 v2.1" disabled>
+          </div>
+          <div class="col-md-8">
             <label class="form-label small">新版本號 <span class="text-danger">*</span></label>
-            <input type="text" class="form-control form-control-sm" id="next-version" value="v2.2" placeholder="可自由輸入" style="font-weight:600;">
+            <input type="text" class="form-control form-control-sm" id="next-version" placeholder="請自行輸入（格式「年 v版號」，如 2026 v2.2）" style="font-weight:600;">
           </div>
           <div class="col-md-12">
             <label class="form-label small">變更摘要 <span class="text-danger">*</span></label>
@@ -1255,7 +1266,7 @@
           </div>
         </div>
         <div class="field-helper mt-2">
-          <i class="bi bi-info-circle"></i>系統依升版類型自動建議版號（Minor → v2.2、Major → v3.0），撰寫者可採用建議值或自行修改（如 v2.2-RC1、v003 等）。
+          <i class="bi bi-info-circle"></i>版本號由撰寫者自行輸入（格式「年 v版號」，如 2026 v2.2、2026 v1.0）；系統不自動建議、無 Major / Minor 升版，僅檢核非空且同文件內不重複。
         </div>
       </div>
 
@@ -1265,7 +1276,7 @@
         <div class="row g-3 align-items-end">
           <div class="col-md-4">
             <label class="form-label small">首次發布版本 <span class="text-danger">*</span></label>
-            <input type="text" class="form-control form-control-sm" value="v1.0" placeholder="可自由輸入" style="font-weight:600;">
+            <input type="text" class="form-control form-control-sm" placeholder="請自行輸入（格式「年 v版號」，如 2026 v1.0）" style="font-weight:600;">
           </div>
           <div class="col-md-12">
             <label class="form-label small">首版摘要 <span class="text-danger">*</span></label>
@@ -1273,7 +1284,7 @@
           </div>
         </div>
         <div class="field-helper mt-2">
-          <i class="bi bi-info-circle"></i>系統建議首版號為 v1.0，撰寫者可自行修改為其他格式（如 v001、v0.1 等）。
+          <i class="bi bi-info-circle"></i>版本號由撰寫者自行輸入（格式「年 v版號」，如 2026 v1.0）；系統不自動帶入建議值，僅檢核非空且同文件內不重複。
         </div>
       </div>
 
@@ -1295,7 +1306,7 @@
         </div>
         <div class="mt-2" id="upload-file-edit">
           <div class="d-flex align-items-center justify-content-between bg-light p-2 rounded">
-            <div><i class="bi bi-file-earmark-pdf text-danger me-2" id="upload-file-icon"></i><strong id="upload-file-name">SOP-領血確認-v2.2.pdf</strong> <small class="text-muted" id="upload-file-size">(2.3 MB)</small></div>
+            <div><i class="bi bi-file-earmark-pdf text-danger me-2" id="upload-file-icon"></i><strong id="upload-file-name">SOP-領血確認-2026 v2.2.pdf</strong> <small class="text-muted" id="upload-file-size">(2.3 MB)</small></div>
             <button class="btn btn-sm btn-outline-danger" onclick="clearUploadFile()"><i class="bi bi-x"></i></button>
           </div>
         </div>
@@ -1335,9 +1346,9 @@
         <table class="table table-sm wf-table mb-0">
           <thead><tr><th>版本</th><th>狀態</th><th>發布日期</th></tr></thead>
           <tbody>
-            <tr><td><strong>v2.1</strong></td><td><span class="status-pill status-published">已發布</span></td><td>2026-04-15</td></tr>
-            <tr><td>v2.0</td><td><span class="status-pill status-superseded">已被取代</span></td><td>2026-02-10</td></tr>
-            <tr><td>v1.2</td><td><span class="status-pill status-superseded">已被取代</span></td><td>2025-10-08</td></tr>
+            <tr><td><strong>2026 v2.1</strong></td><td><span class="status-pill status-published">已發布</span></td><td>2026-04-15</td></tr>
+            <tr><td>2026 v2.0</td><td><span class="status-pill status-superseded">已被取代</span></td><td>2026-02-10</td></tr>
+            <tr><td>2025 v1.2</td><td><span class="status-pill status-superseded">已被取代</span></td><td>2025-10-08</td></tr>
           </tbody>
         </table>
       </div>
@@ -1348,15 +1359,15 @@
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>兩種進入模式：</strong><br>
-    <span style="margin-left:1rem;">①<strong>新增模式</strong>：URL <code>dm/upload.jsp</code>（無 doc_id 參數），由 DM01「新增文件」按鈕進入。標題顯示「新增文件」，隱藏「目前版本/升版類型」區塊，預設版本為 v1.0 或 v001（依分類）</span><br>
-    <span style="margin-left:1rem;">②<strong>編輯模式</strong>：URL <code>dm/upload.jsp?doc_id=DM-SOP-000123</code>，由 DM02「編輯新版本」按鈕進入。標題顯示「編輯文件 — {文件名}」，預先帶入上一版的所有欄位，顯示升版類型與系統自動產生版號<br>
+    <span style="margin-left:1rem;">①<strong>新增模式</strong>：URL <code>dm/upload.jsp</code>（無 doc_id 參數），由 DM01「新增文件」按鈕進入。標題顯示「新增文件」，隱藏「目前版本」區塊，首版版號由撰寫者自行輸入（無預設值）</span><br>
+    <span style="margin-left:1rem;">②<strong>編輯模式</strong>：URL <code>dm/upload.jsp?doc_id=DM-SOP-000123</code>，由 DM02「編輯新版本」按鈕進入。標題顯示「編輯文件 — {文件名}」，預先帶入上一版的所有欄位；顯示「目前版本」（唯讀）與「新版本號」（撰寫者自行輸入）<br>
     <span style="margin-left:1rem;">（右上角「切換新增/切換編輯」按鈕僅 wireframe 用，正式系統不會出現）</span><br>
-    <strong>版本號規則：</strong>系統依升版類型自動建議版號（Minor / Major），撰寫者可採用建議值或直接編輯版本號欄位（如 v2.2-RC1、v003 等任意格式）。版本號送審後不可修改<br>
+    <strong>版本號規則：</strong>版本號由撰寫者自行輸入（格式「年 v版號」，如 2026 v1.0 / 2026 v2.1）；系統不自動建議、無 Major / Minor 升版，僅檢核非空且同文件內不重複。版本號送審後不可修改<br>
     <strong>變更摘要必填：</strong>會顯示於版本歷程與發布通知信中<br>
     <strong>關聯欄位：</strong><br>
     <span style="margin-left:1rem;">• <strong>SOP / 訓練教材 / 其他</strong>三類無關聯欄位</span><br>
     <span style="margin-left:1rem;">• <strong>系統操作手冊</strong>分類額外顯示「關聯作業項目（func_name）」單選下拉，對應主系統作業功能</span><br>
-    <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（適用模組／適用角色／文件性質／法規關聯）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM_ADMIN 於 DM09「標籤維護」維護，供 DM01 搜尋使用<br>
+    <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（可見對象/單位〔權限・必填〕＋適用模組／文件性質／法規關聯〔檢索〕）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM_ADMIN 於 DM09「標籤維護」維護，供 DM01 搜尋使用<br>
     <strong>權限：</strong>本畫面僅 DM_EDITOR 角色可進入；角色由管理者於 DM09 權限管理指派<br>
     <strong>內容輸入：</strong>僅支援上傳檔案（PDF/Word/Excel/PPT/圖片，單檔最大 50 MB）；不提供線上編輯功能<br>
     <span style="margin-left:1rem;">• <strong>不支援預覽格式提醒</strong>：上傳 Office 格式（Word/Excel/PPT）檔案時，系統跳出提醒視窗告知「閱讀者於 DM02 將無法線上預覽，僅能下載原檔」；撰寫者可選「重新選擇」改傳 PDF，或選「仍要使用此檔案」繼續送審。確認後檔案下方顯示橘色警示條（持續提示）。PDF 與圖片可線上預覽，不觸發提醒</span><br>
@@ -1406,7 +1417,7 @@
               <td><i class="bi bi-chevron-right text-muted"></i></td>
               <td><span class="badge bg-primary me-1">新版本</span><strong>領血確認標準作業程序</strong><br><small class="text-muted">補充異常通報流程；更新時效規定（Minor）</small></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v2.2</td>
+              <td>2026 v2.2</td>
               <td>陳大華</td>
               <td>2026-05-18 16:42</td>
               <td><span class="badge bg-light text-dark">1 天</span></td>
@@ -1415,7 +1426,7 @@
               <td><i class="bi bi-chevron-right text-muted"></i></td>
               <td><span class="badge bg-primary me-1">新版本</span><strong>入庫作業 SOP</strong><br><small class="text-muted">補充戰時模式入庫規則（Minor）</small></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v1.4</td>
+              <td>2026 v1.4</td>
               <td>品保室</td>
               <td>2026-05-15 09:20</td>
               <td><span class="badge bg-danger" title="超過 7 天未處理；系統已自動發催辦信"><i class="bi bi-exclamation-triangle me-1"></i>12 天</span></td>
@@ -1424,7 +1435,7 @@
               <td><i class="bi bi-chevron-right text-muted"></i></td>
               <td><span class="badge bg-primary me-1">新版本</span><strong>BS04 領血掃血袋線上系統操作手冊</strong><br><small class="text-muted">介面文字微調</small></td>
               <td><span class="doc-category-pill cat-manual">系統操作手冊</span></td>
-              <td>v006</td>
+              <td>2026 v006</td>
               <td>王曉明</td>
               <td>2026-05-19 08:15</td>
               <td><span class="badge bg-light text-dark">當日</span></td>
@@ -1433,7 +1444,7 @@
               <td><i class="bi bi-chevron-right text-muted"></i></td>
               <td><span class="badge bg-danger me-1">廢止</span><strong>舊版急救血品 SOP</strong><br><small class="text-muted">院內急救血品儲備業務已停止本院辦理，申請整份廢止</small></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v1.5（目前發布版）</td>
+              <td>2026 v1.5（目前發布版）</td>
               <td>陳大華</td>
               <td>2026-05-22 10:05</td>
               <td><span class="badge bg-light text-dark">當日</span></td>
@@ -1442,7 +1453,7 @@
               <td><i class="bi bi-chevron-right text-muted"></i></td>
               <td><span class="badge bg-success me-1">新增</span><strong>用血回報訓練教材</strong><br><small class="text-muted">新進人員用血回報訓練；首次提交</small></td>
               <td><span class="doc-category-pill cat-training">訓練教材</span></td>
-              <td>v1.0（首版）</td>
+              <td>2026 v1.0（首版）</td>
               <td>林助教</td>
               <td>2026-05-26 13:42</td>
               <td><span class="badge bg-light text-dark">1 天</span></td>
@@ -1455,7 +1466,7 @@
       <div class="wf-card" id="review-detail" style="display:none; border-left: 4px solid var(--tsbms-green);">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h6 class="fw-bold mb-0">
-            <i class="bi bi-file-earmark me-1"></i>簽核明細 — <span id="review-detail-title">領血確認標準作業程序 v2.2</span>
+            <i class="bi bi-file-earmark me-1"></i>簽核明細 — <span id="review-detail-title">領血確認標準作業程序 2026 v2.2</span>
             <span id="review-detail-type-badge" class="badge bg-primary ms-2">新版本</span>
           </h6>
           <button class="btn btn-sm btn-outline-secondary" onclick="hideReviewDetail()" title="收合"><i class="bi bi-x"></i></button>
@@ -1474,17 +1485,17 @@
             <thead><tr><th>版本</th><th>狀態</th><th>檔案</th><th>動作</th></tr></thead>
             <tbody>
               <tr>
-                <td><strong>v2.1</strong></td>
+                <td><strong>2026 v2.1</strong></td>
                 <td><span class="status-pill status-published">目前發布版</span></td>
-                <td>SOP-領血確認-v2.1.pdf <small class="text-muted">(2.2 MB)</small></td>
+                <td>SOP-領血確認-2026 v2.1.pdf <small class="text-muted">(2.2 MB)</small></td>
                 <td>
                   <button class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> 下載</button>
                 </td>
               </tr>
               <tr style="background:#fffde7;">
-                <td><strong>v2.2</strong></td>
+                <td><strong>2026 v2.2</strong></td>
                 <td><span class="status-pill status-pending">待審新版</span></td>
-                <td>SOP-領血確認-v2.2.pdf <small class="text-muted">(2.3 MB)</small></td>
+                <td>SOP-領血確認-2026 v2.2.pdf <small class="text-muted">(2.3 MB)</small></td>
                 <td>
                   <button class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> 下載</button>
                 </td>
@@ -1501,9 +1512,9 @@
             <thead><tr><th>首版版本</th><th>狀態</th><th>檔案</th><th>動作</th></tr></thead>
             <tbody>
               <tr style="background:#fffde7;">
-                <td><strong id="review-new-version">v1.0</strong></td>
+                <td><strong id="review-new-version">2026 v1.0</strong></td>
                 <td><span class="status-pill status-pending">待審首版</span></td>
-                <td><span id="review-new-file">訓練教材-用血回報-v1.0.pdf</span> <small class="text-muted">(3.5 MB)</small></td>
+                <td><span id="review-new-file">訓練教材-用血回報-2026 v1.0.pdf</span> <small class="text-muted">(3.5 MB)</small></td>
                 <td>
                   <button class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> 下載</button>
                 </td>
@@ -1520,16 +1531,17 @@
             <thead><tr><th>目前發布版</th><th>狀態</th><th>檔案</th><th>動作</th></tr></thead>
             <tbody>
               <tr>
-                <td><strong id="review-obsolete-version">v1.5</strong></td>
+                <td><strong id="review-obsolete-version">2026 v1.5</strong></td>
                 <td><span class="status-pill status-published">將被廢止</span></td>
-                <td><span id="review-obsolete-file">SOP-急救血品-v1.5.pdf</span> <small class="text-muted">(1.8 MB)</small></td>
+                <td><span id="review-obsolete-file">SOP-急救血品-2026 v1.5.pdf</span> <small class="text-muted">(1.8 MB)</small></td>
                 <td>
                   <button class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> 下載</button>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>核准後整份文件廢止；歷史版本永久保留，可於文件詳細頁版本歷程查閱。</div>
+          <div class="mb-2"><span class="small text-muted">廢止附件：</span><a href="#" class="small" onclick="showToast('下載廢止附件（demo）'); return false;"><i class="bi bi-paperclip"></i> 停辦函文.pdf</a> <small class="text-muted">(0.6 MB)</small></div>
+          <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>核准後整份文件廢止；歷史版本永久保留，可於文件詳細頁版本歷程查閱。廢止原因與附件（如有）寫入紀錄，供日後稽核。</div>
         </div>
 
         <!-- 動作按鈕（新版本：核准並發布） -->
@@ -1582,7 +1594,7 @@
             <tr>
               <td><span class="badge bg-primary me-1">新版本</span><strong>BS04 領血掃血袋線上系統操作手冊</strong></td>
               <td><span class="doc-category-pill cat-manual">系統操作手冊</span></td>
-              <td>v005</td>
+              <td>2026 v005</td>
               <td>王曉明</td>
               <td>2026-05-02 10:30</td>
               <td><span class="status-pill status-approved">已發布</span></td>
@@ -1591,7 +1603,7 @@
             <tr>
               <td><span class="badge bg-primary me-1">新版本</span><strong>採血流程訓練教材</strong></td>
               <td><span class="doc-category-pill cat-training">訓練教材</span></td>
-              <td>v002</td>
+              <td>2026 v002</td>
               <td>林助教</td>
               <td>2026-04-25 14:12</td>
               <td><span class="status-pill status-approved">已發布</span></td>
@@ -1600,7 +1612,7 @@
             <tr>
               <td><span class="badge bg-primary me-1">新版本</span><strong>入庫作業 SOP</strong></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v1.3</td>
+              <td>2026 v1.3</td>
               <td>品保室</td>
               <td>2026-03-12 09:40</td>
               <td><span class="status-pill status-approved">已發布</span></td>
@@ -1609,7 +1621,7 @@
             <tr>
               <td><span class="badge bg-primary me-1">新版本</span><strong>領血確認標準作業程序</strong></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v2.1</td>
+              <td>2026 v2.1</td>
               <td>陳大華</td>
               <td>2026-04-15 10:30</td>
               <td><span class="status-pill status-approved">已發布</span></td>
@@ -1618,7 +1630,7 @@
             <tr>
               <td><span class="badge bg-danger me-1">廢止</span><strong>過期門急診用血流程 SOP</strong></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v3.2</td>
+              <td>2026 v3.2</td>
               <td>王曉明</td>
               <td>2026-04-10 11:15</td>
               <td><span class="status-pill status-obsolete">已廢止</span></td>
@@ -1627,7 +1639,7 @@
             <tr>
               <td><span class="badge bg-primary me-1">新版本</span><strong>出庫作業 SOP</strong></td>
               <td><span class="doc-category-pill cat-sop">SOP</span></td>
-              <td>v2.0</td>
+              <td>2026 v2.0</td>
               <td>庫管室</td>
               <td>2026-04-08 16:25</td>
               <td><span class="status-pill status-rejected">已退回</span></td>
@@ -1655,7 +1667,7 @@
     <strong>本畫面用途：</strong>簽核中心，審查者（DM_REVIEWER）處理待簽核文件，含兩個分頁：<strong>待簽核</strong> / <strong>已完成</strong><br>
     <strong>指定審核者：</strong>每筆送審項目由撰寫者於 DM03 指定一名審核者；本清單<strong>僅顯示「指定審核者 = 當前登入者」之項目</strong>。撰寫者送出時系統會 Email + 系統內訊息通知該指定審核者；其他審核者不會看到此項目。<strong>因本頁為審核者本人視角、清單內每筆必然指派給自己，故不另列「指定審核者」欄</strong><br>
     <strong>申請類型：</strong>同一清單同時處理三種申請：<br>
-    <span style="margin-left:1rem;">• <span class="badge bg-success">新增</span> — 撰寫者於 DM01 點「新增文件」首次提交；核准後以撰寫者指定版號（預設 v1.0）首次發布</span><br>
+    <span style="margin-left:1rem;">• <span class="badge bg-success">新增</span> — 撰寫者於 DM01 點「新增文件」首次提交；核准後以撰寫者指定版號（預設 2026 v1.0）首次發布</span><br>
     <span style="margin-left:1rem;">• <span class="badge bg-primary">新版本</span> — 撰寫者於 DM02 詳細頁點「編輯新版本」送審；核准後執行版本切換（依 §8.3 原子操作），舊版自動標記「已被取代」</span><br>
     <span style="margin-left:1rem;">• <span class="badge bg-danger">廢止</span> — 撰寫者於 DM02 詳細頁點「廢止此文件」發起；核准後整份文件廢止，不再出現於文件庫主清單</span><br>
     <strong>待簽核分頁：</strong>列出所有送審中項目。<strong>點擊任一列</strong>展開「簽核明細」面板（同時間只展開一筆）；面板會依申請類型動態切換：<br>
@@ -1730,13 +1742,13 @@
         <ul class="list-group list-group-flush small mb-0">
           <li class="list-group-item d-flex justify-content-between align-items-center" style="background:#fff8e1;">
             <span>
-              <strong>BS04 領血掃血袋線上系統操作手冊 v006</strong>
+              <strong>BS04 領血掃血袋線上系統操作手冊 2026 v006</strong>
               <span class="badge bg-warning text-dark ms-1"><i class="bi bi-arrow-counterclockwise me-1"></i>已撤回</span>
               <br><small class="text-muted">於 2026-05-27 撤回送審（原指定審核者：吳醫師）｜ 可重新編輯與改選新審核者再送</small>
             </span>
             <span class="d-flex gap-2">
               <a href="#" class="btn btn-sm btn-outline-primary" onclick="goScreen('dm-upload'); return false;">繼續編輯</a>
-              <a href="#" class="btn btn-sm btn-outline-danger" onclick="deleteDraft('BS04 領血掃血袋線上系統操作手冊 v006'); return false;" title="刪除草稿"><i class="bi bi-trash"></i></a>
+              <a href="#" class="btn btn-sm btn-outline-danger" onclick="deleteDraft('BS04 領血掃血袋線上系統操作手冊 2026 v006'); return false;" title="刪除草稿"><i class="bi bi-trash"></i></a>
             </span>
           </li>
           <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -1785,19 +1797,19 @@
             <ul class="list-group list-group-flush small mb-0">
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#fff8e1;">
                 <span>
-                  <strong>舊版急救血品 SOP v1.5</strong>
+                  <strong>舊版急救血品 SOP 2026 v1.5</strong>
                   <span class="badge bg-danger ms-1">廢止</span>
                   <span class="status-pill status-pending ms-1">廢止待簽核</span>
                   <br><small class="text-muted">送出廢止申請 2026-05-22 10:05 ｜ 指定審核者：李主任 ｜ 廢止原因：院內急救血品儲備業務已停止本院辦理</small>
                 </span>
                 <span class="d-flex gap-2">
                   <a href="#" class="small" onclick="goScreen('dm-detail'); return false;">查看</a>
-                  <a href="#" class="small text-warning" onclick="withdrawSubmission('舊版急救血品 SOP v1.5（廢止申請）'); return false;" title="撤回廢止申請後文件回到「已發布」"><i class="bi bi-arrow-counterclockwise me-1"></i>撤回送審</a>
+                  <a href="#" class="small text-warning" onclick="withdrawSubmission('舊版急救血品 SOP 2026 v1.5（廢止申請）'); return false;" title="撤回廢止申請後文件回到「已發布」"><i class="bi bi-arrow-counterclockwise me-1"></i>撤回送審</a>
                 </span>
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#fff0f0;">
                 <span>
-                  <strong>過期門急診用血流程 SOP v3.2</strong>
+                  <strong>過期門急診用血流程 SOP 2026 v3.2</strong>
                   <span class="badge bg-danger ms-1">廢止</span>
                   <span class="status-pill status-obsolete ms-1">已廢止</span>
                   <br><small class="text-muted">核准者：李主任 ｜ 2026-04-10 11:15 ｜ 廢止原因：院內已停止實施門急診獨立用血流程</small>
@@ -1806,7 +1818,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#e8f5e9;">
                 <span>
-                  <strong>領血確認標準作業程序 v2.1</strong>
+                  <strong>領血確認標準作業程序 2026 v2.1</strong>
                   <span class="badge bg-primary ms-1">新版本</span>
                   <span class="status-pill status-approved ms-1">已核准發布</span>
                   <br><small class="text-muted">核准者：李主任 ｜ 2026-04-15 10:30</small>
@@ -1815,7 +1827,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#ffebee;">
                 <span>
-                  <strong>採血流程 SOP v003-draft</strong>
+                  <strong>採血流程 SOP 2026 v003-draft</strong>
                   <span class="badge bg-primary ms-1">新版本</span>
                   <span class="status-pill status-rejected ms-1">已退回</span>
                   <br><small class="text-muted">退回原因：欠缺戰時模式說明 ｜ 2026-04-08</small>
@@ -1824,7 +1836,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#fff8e1;">
                 <span>
-                  <strong>BS04 領血掃血袋線上系統操作手冊 v006</strong>
+                  <strong>BS04 領血掃血袋線上系統操作手冊 2026 v006</strong>
                   <span class="badge bg-primary ms-1">新版本</span>
                   <span class="badge bg-warning text-dark ms-1"><i class="bi bi-arrow-counterclockwise me-1"></i>已撤回送審</span>
                   <br><small class="text-muted">2026-05-27 撤回送審（原指定審核者：吳醫師久未處理）｜ 文件已回到草稿區可繼續編輯</small>
@@ -1840,7 +1852,7 @@
             <ul class="list-group list-group-flush small mb-0">
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#e3f2fd;">
                 <span>
-                  <strong>領血確認標準作業程序 v2.2</strong>
+                  <strong>領血確認標準作業程序 2026 v2.2</strong>
                   <span class="badge bg-info text-dark ms-1"><i class="bi bi-inbox me-1"></i>被指派審核</span>
                   <br><small class="text-muted">送審 2026-05-18 16:42 ｜ 撰寫者：陳大華 ｜ 等候我處理（停留 1 天）</small>
                 </span>
@@ -1848,7 +1860,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#ffebee;">
                 <span>
-                  <strong>入庫作業 SOP v1.4</strong>
+                  <strong>入庫作業 SOP 2026 v1.4</strong>
                   <span class="badge bg-info text-dark ms-1"><i class="bi bi-inbox me-1"></i>被指派審核</span>
                   <span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle me-1"></i>催辦中</span>
                   <br><small class="text-muted">送審 2026-05-15 09:20 ｜ 撰寫者：品保室 ｜ 已停留 12 天，系統每日寄催辦信</small>
@@ -1857,7 +1869,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#fff8e1;">
                 <span>
-                  <strong>BS04 領血掃血袋線上系統操作手冊 v006</strong>
+                  <strong>BS04 領血掃血袋線上系統操作手冊 2026 v006</strong>
                   <span class="badge bg-warning text-dark ms-1"><i class="bi bi-arrow-counterclockwise me-1"></i>已被撰寫者撤回</span>
                   <br><small class="text-muted">2026-05-27 ｜ 撰寫者：王曉明 ｜ 此項目已從您的待簽核清單移除</small>
                 </span>
@@ -1865,7 +1877,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#e8f5e9;">
                 <span>
-                  <strong>BS01 入庫作業線上系統操作手冊 v003</strong>
+                  <strong>BS01 入庫作業線上系統操作手冊 2026 v003</strong>
                   <span class="badge bg-success ms-1"><i class="bi bi-check2-circle me-1"></i>我已核准並發布</span>
                   <br><small class="text-muted">核准時間：2026-04-22 16:00 ｜ 撰寫者：王曉明</small>
                 </span>
@@ -1873,7 +1885,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#fff0f0;">
                 <span>
-                  <strong>出庫作業 SOP v2.0</strong>
+                  <strong>出庫作業 SOP 2026 v2.0</strong>
                   <span class="badge bg-danger ms-1"><i class="bi bi-x-circle me-1"></i>我已退回</span>
                   <br><small class="text-muted">退回時間：2026-04-08 16:25 ｜ 撰寫者：庫管室 ｜ 退回原因：欠缺戰時模式說明</small>
                 </span>
@@ -1881,7 +1893,7 @@
               </li>
               <li class="list-group-item d-flex justify-content-between align-items-start" style="background:#fff0f0;">
                 <span>
-                  <strong>過期門急診用血流程 SOP v3.2</strong>
+                  <strong>過期門急診用血流程 SOP 2026 v3.2</strong>
                   <span class="badge bg-danger ms-1"><i class="bi bi-archive me-1"></i>我已核准並廢止</span>
                   <br><small class="text-muted">核准廢止時間：2026-04-10 11:15 ｜ 廢止申請人：王曉明 ｜ 廢止原因：院內已停止實施門急診獨立用血流程</small>
                 </span>
@@ -1977,17 +1989,17 @@
       </thead>
       <tbody>
         <tr onclick="goObsoleteDetail()" style="cursor:pointer;">
-          <td><strong>過期門急診用血流程 SOP</strong><br><small class="text-muted">末版 v3.2</small></td>
+          <td><strong>過期門急診用血流程 SOP</strong><br><small class="text-muted">末版 2026 v3.2</small></td>
           <td><span class="doc-category-pill cat-sop">SOP</span></td>
           <td>王曉明</td>
           <td>2026-04-10 11:15</td>
           <td>王曉明</td>
           <td>李主任</td>
-          <td class="small text-muted">院內已停止實施此流程</td>
+          <td class="small text-muted">院內已停止實施此流程 <br><a href="#" onclick="event.stopPropagation(); showToast('下載廢止附件（demo）'); return false;"><i class="bi bi-paperclip"></i> 停辦函文.pdf</a></td>
           <td><i class="bi bi-chevron-right text-muted"></i></td>
         </tr>
         <tr onclick="goObsoleteDetail()" style="cursor:pointer;">
-          <td><strong>舊版 急救血品 SOP</strong><br><small class="text-muted">末版 v1.5</small></td>
+          <td><strong>舊版 急救血品 SOP</strong><br><small class="text-muted">末版 2026 v1.5</small></td>
           <td><span class="doc-category-pill cat-sop">SOP</span></td>
           <td>陳大華</td>
           <td>2026-03-22 09:30</td>
@@ -1997,7 +2009,7 @@
           <td><i class="bi bi-chevron-right text-muted"></i></td>
         </tr>
         <tr onclick="goObsoleteDetail()" style="cursor:pointer;">
-          <td><strong>戰時模式採血流程</strong><br><small class="text-muted">末版 v2.0</small></td>
+          <td><strong>戰時模式採血流程</strong><br><small class="text-muted">末版 2026 v2.0</small></td>
           <td><span class="doc-category-pill cat-sop">SOP</span></td>
           <td>採血科</td>
           <td>2026-02-28 16:00</td>
@@ -2007,7 +2019,7 @@
           <td><i class="bi bi-chevron-right text-muted"></i></td>
         </tr>
         <tr onclick="goObsoleteDetail()" style="cursor:pointer;">
-          <td><strong>停用機型 ABC-200 系統操作手冊</strong><br><small class="text-muted">末版 v004</small></td>
+          <td><strong>停用機型 ABC-200 系統操作手冊</strong><br><small class="text-muted">末版 2026 v004</small></td>
           <td><span class="doc-category-pill cat-manual">系統操作手冊</span></td>
           <td>王曉明</td>
           <td>2026-01-15 14:25</td>
@@ -2017,7 +2029,7 @@
           <td><i class="bi bi-chevron-right text-muted"></i></td>
         </tr>
         <tr onclick="goObsoleteDetail()" style="cursor:pointer;">
-          <td><strong>舊版 新進人員血品安全訓練</strong><br><small class="text-muted">末版 v1.3</small></td>
+          <td><strong>舊版 新進人員血品安全訓練</strong><br><small class="text-muted">末版 2026 v1.3</small></td>
           <td><span class="doc-category-pill cat-training">訓練教材</span></td>
           <td>林助教</td>
           <td>2025-12-08 10:00</td>
@@ -2042,7 +2054,7 @@
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>本畫面用途：</strong>已廢止文件查詢（僅 DM_ADMIN），供稽核、醫療糾紛追溯、法規查核使用<br>
-    <strong>清單欄位：</strong>文件名稱（含末版版號）/ 分類 / 原作者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因<br>
+    <strong>清單欄位：</strong>文件名稱（含末版版號）/ 分類 / 原作者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因（含廢止附件下載，如有）<br>
     <strong>點擊任一列：</strong>進入 DM02 文件詳細頁的 <strong>read-only 模式</strong>：<br>
     <span style="margin-left:1rem;">• 顯示「已廢止」banner，標題狀態 pill 改為已廢止</span><br>
     <span style="margin-left:1rem;">• 隱藏「廢止此文件 / 編輯新版本」按鈕（廢止文件不再產生新版本）</span><br>
@@ -2109,25 +2121,25 @@
         <tr>
           <td>2026-05-15 14:30</td><td>陳大華</td><td>李主任</td>
           <td><span class="badge bg-danger">廢止</span></td>
-          <td>舊版 急救血品 SOP</td><td>v1.5</td>
+          <td>舊版 急救血品 SOP</td><td>2026 v1.5</td>
           <td class="small"><span class="text-muted">廢止原因：</span>院內急救業務調整，本流程不再執行</td>
         </tr>
         <tr>
           <td>2026-04-22 16:00</td><td>王曉明</td><td>李主任</td>
           <td><span class="badge bg-success">發布</span></td>
-          <td>BS01 入庫作業線上系統操作手冊</td><td>v003</td>
+          <td>BS01 入庫作業線上系統操作手冊</td><td>2026 v003</td>
           <td class="small"><span class="text-muted">摘要：</span>介面文字微調：將「掃描」統一為「掃碼」；補充常見錯誤訊息對照表。</td>
         </tr>
         <tr>
           <td>2026-04-15 10:30</td><td>陳大華</td><td>李主任</td>
           <td><span class="badge bg-success">發布</span></td>
-          <td>領血確認 SOP</td><td>v2.1</td>
+          <td>領血確認 SOP</td><td>2026 v2.1</td>
           <td class="small"><span class="text-muted">摘要：</span>補充第 5 點異常通報流程；新增 30 分鐘時效規定。（Minor 升版）</td>
         </tr>
         <tr>
           <td>2026-02-10 14:20</td><td>陳大華</td><td>李主任</td>
           <td><span class="badge bg-success">發布</span></td>
-          <td>領血確認 SOP</td><td>v2.0</td>
+          <td>領血確認 SOP</td><td>2026 v2.0</td>
           <td class="small"><span class="text-muted">摘要：</span>改版重寫；對齊新版供應模組 BS04 流程。（Major 改版）</td>
         </tr>
       </tbody>
@@ -2143,6 +2155,121 @@
     <strong>紀錄欄位：</strong>操作時間、申請人、核准人、操作類型、操作對象（文件+版本）、備註（發布 → 摘要；廢止 → 廢止原因）<br>
     <strong>系統設定變更：</strong>DM_ADMIN 對分類、角色、通知範本之設定變更僅記錄異動者 / 異動時間（寫入異動紀錄），DM 不另設查詢頁；完整歷史保留於 DB 供 IT / 稽核查核，本查詢頁不顯示此類變更<br>
     <strong>匯出：</strong>支援 CSV 匯出供資安稽核
+  </details>
+</div>
+
+<!-- ==================== DM10 閱讀統計 KPI ==================== -->
+<div class="screen" id="dm-kpi">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-bar-chart-line me-2"></i>閱讀統計 KPI</div>
+    <div class="screen-meta">dm/kpi.jsp (DM10)</div>
+  </div>
+
+  <div class="wf-status-msg wf-status-info">
+    <i class="bi bi-info-circle me-1"></i>統計各文件之閱讀率（<strong>已看＝下載目前發布版</strong>；預覽不計）。<strong>應看</strong>＝該文件可見對象相符之閱覽者（掛「全體」→所有閱覽者，不排除任何人）。發布新版本後該文件已看重置。範圍為<strong>全部已發布文件</strong>。僅 DM_ADMIN 可見。
+  </div>
+
+  <!-- 摘要卡 -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-3 col-6"><div class="stat-card"><div class="stat-num">76</div><div class="stat-label">已發布文件數</div></div></div>
+    <div class="col-md-3 col-6"><div class="stat-card"><div class="stat-num">68%</div><div class="stat-label">整體平均閱讀率</div></div></div>
+    <div class="col-md-3 col-6"><div class="stat-card"><div class="stat-num text-danger">12</div><div class="stat-label">閱讀率 &lt; 50% 文件</div></div></div>
+    <div class="col-md-3 col-6"><div class="stat-card"><div class="stat-num">2026-06-29</div><div class="stat-label">上次寄送週報</div></div></div>
+  </div>
+
+  <div class="wf-card">
+    <div class="row g-2 align-items-end mb-2">
+      <div class="col-md-5">
+        <label class="form-label small">關鍵字（文件名）</label>
+        <input type="text" class="form-control form-control-sm" placeholder="文件名稱">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">分類</label>
+        <select class="form-select form-select-sm"><option>全部</option><option>SOP</option><option>系統操作手冊</option><option>訓練教材</option><option>其他</option></select>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-tsbms btn-sm w-100"><i class="bi bi-search me-1"></i>查詢</button>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-outline-secondary btn-sm w-100"><i class="bi bi-download me-1"></i>匯出 CSV</button>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm wf-table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>文件名稱</th>
+            <th>分類</th>
+            <th>目前版本</th>
+            <th class="text-end">應看</th>
+            <th class="text-end">已看</th>
+            <th class="text-end">未看</th>
+            <th style="min-width:8rem;">閱讀率</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>領血確認標準作業程序</td>
+            <td><span class="doc-category-pill cat-sop">SOP</span></td>
+            <td>2026 v2.1</td>
+            <td class="text-end">48</td>
+            <td class="text-end">45</td>
+            <td class="text-end text-danger">3</td>
+            <td><div class="progress" style="height:1rem;"><div class="progress-bar bg-success" style="width:94%">94%</div></div></td>
+          </tr>
+          <tr>
+            <td>BS04 領血掃血袋線上系統操作手冊</td>
+            <td><span class="doc-category-pill cat-manual">系統操作手冊</span></td>
+            <td>2026 v006</td>
+            <td class="text-end">30</td>
+            <td class="text-end">18</td>
+            <td class="text-end text-danger">12</td>
+            <td><div class="progress" style="height:1rem;"><div class="progress-bar bg-warning" style="width:60%">60%</div></div></td>
+          </tr>
+          <tr>
+            <td>入庫作業 SOP</td>
+            <td><span class="doc-category-pill cat-sop">SOP</span></td>
+            <td>2026 v1.4</td>
+            <td class="text-end">52</td>
+            <td class="text-end">19</td>
+            <td class="text-end text-danger">33</td>
+            <td><div class="progress" style="height:1rem;"><div class="progress-bar bg-danger" style="width:37%">37%</div></div></td>
+          </tr>
+          <tr>
+            <td>用血回報訓練教材</td>
+            <td><span class="doc-category-pill cat-training">訓練教材</span></td>
+            <td>2026 v1.0</td>
+            <td class="text-end">120</td>
+            <td class="text-end">86</td>
+            <td class="text-end text-danger">34</td>
+            <td><div class="progress" style="height:1rem;"><div class="progress-bar bg-warning" style="width:72%">72%</div></div></td>
+          </tr>
+          <tr>
+            <td>戰時特殊血品調度規範</td>
+            <td><span class="doc-category-pill cat-sop">SOP</span></td>
+            <td>2026 v1.0</td>
+            <td class="text-end">0</td>
+            <td class="text-end">0</td>
+            <td class="text-end">0</td>
+            <td><span class="text-muted small">—（無對應閱覽者）</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="text-end mt-2"><small class="text-muted">共 76 筆，顯示 1–4</small></div>
+  </div>
+
+  <details class="wf-screen-note" open>
+    <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
+    <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
+    <strong>本畫面用途：</strong>管理者專屬閱讀 KPI 儀表板（DM10）；逐文件呈現 應看 / 已看 / 未看 / 閱讀率，可依關鍵字 / 分類查詢、匯出 CSV<br>
+    <strong>應看＝0：</strong>文件掛了可見對象但無任何閱覽者被授予該對象時，閱讀率顯示「—（無對應閱覽者）」，且不列入整體平均閱讀率<br>
+    <strong>空資料：</strong>查詢無符合文件時顯示「查無符合條件之文件統計」（DM-MSG-DM10-001）<br>
+    <strong>已看認定：</strong>使用者<strong>下載目前發布版</strong>即計為已看（預覽不計）；同人同版本以一次計；發布新版本後該文件已看歸零（需重新下載新版）<br>
+    <strong>應看（分母）：</strong>該文件可見對象相符之閱覽者（掛「全體」→所有閱覽者）；<strong>不排除</strong>兼具編輯 / 審核 / 管理者者（與發布通知一致）<br>
+    <strong>每週排程（SCHDM001，每週執行；星期＋時間可於 DM09 通知範本設定，預設週一 10:00，共用）：</strong>寄 KPI 週報予管理者（Email：內文摘要 + CSV 附件）、寄未讀提醒予未看之閱覽者（Email：一人一信彙整，<strong>涵蓋全部已發布文件</strong>；是否寄送由管理者於 DM09 通知範本「未讀提醒」啟用/停用統一控制）；大量寄信非同步<br>
+    <strong>權限：</strong>僅 DM_ADMIN；一般使用者導覽不顯示且後端擋直接 URL 存取
   </details>
 </div>
 
@@ -2177,137 +2304,156 @@
         </div>
       </div>
 
-      <!-- 搜尋列 -->
-      <div class="row g-2 align-items-end mb-3">
-        <div class="col-md-5">
-          <label class="form-label small">搜尋帳號 / 姓名</label>
-          <input type="text" class="form-control form-control-sm" placeholder="輸入帳號或姓名">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label small">部門</label>
-          <select class="form-select form-select-sm">
-            <option>全部</option>
-            <option>血庫</option>
-            <option>採血科</option>
-            <option>品保室</option>
-            <option>訓練組</option>
-            <option>檢驗科</option>
-          </select>
-        </div>
-        <div class="col-md-2">
-          <label class="form-label small">角色</label>
-          <select class="form-select form-select-sm">
-            <option>全部</option>
+      <!-- 使用者清單標題 + 搜尋列（靠右，對齊 ET 權限管理） -->
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-bold mb-0"><i class="bi bi-people me-1"></i>使用者角色設定 <span class="badge bg-secondary ms-1">8 人</span></h6>
+        <div class="d-flex gap-2">
+          <select class="form-select form-select-sm" style="width:8rem;">
+            <option>全部角色</option>
             <option>管理者</option>
             <option>編輯者</option>
             <option>審核者</option>
             <option>閱覽者</option>
           </select>
-        </div>
-        <div class="col-md-2">
-          <button class="btn btn-tsbms btn-sm w-100"><i class="bi bi-search me-1"></i>搜尋</button>
+          <select class="form-select form-select-sm" style="width:9rem;">
+            <option>全部可見對象</option>
+            <option>全體</option>
+            <option>護理師</option>
+            <option>軍人</option>
+            <option>醫檢師</option>
+            <option>行政人員</option>
+            <option>未指派</option>
+          </select>
+          <div class="input-group input-group-sm" style="width:14rem;">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" placeholder="搜尋姓名 / 帳號">
+          </div>
         </div>
       </div>
 
-      <!-- 使用者清單 -->
+      <!-- 使用者清單（角色 + 可見對象/單位 同列設定，對齊 ET 權限管理） -->
       <table class="table table-sm wf-table mb-0">
         <thead>
           <tr>
-            <th>帳號</th>
-            <th>姓名</th>
-            <th>部門</th>
-            <th class="text-center" style="width:6rem;">管理者</th>
-            <th class="text-center" style="width:6rem;">編輯者</th>
-            <th class="text-center" style="width:6rem;">審核者</th>
-            <th class="text-center" style="width:6rem;">閱覽者</th>
-            <th>最後異動</th>
+            <th style="width:8rem;">帳號</th>
+            <th style="width:8rem;">姓名</th>
+            <th class="text-center" style="width:4.5rem;">管理者</th>
+            <th class="text-center" style="width:4.5rem;">編輯者</th>
+            <th class="text-center" style="width:4.5rem;">審核者</th>
+            <th class="text-center" style="width:4.5rem;">閱覽者</th>
+            <th style="width:22rem;">可見對象/單位</th>
+            <th style="width:11rem;">最後異動</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><code>chendh</code></td>
-            <td>陳大華</td>
-            <td>血庫</td>
+            <td class="small">chendh</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>陳大華</strong></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 陳大華 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 陳大華 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 陳大華 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 陳大華 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">軍人</span><span class="tag-badge">醫檢師</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('陳大華', ['軍人','醫檢師'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">李主任 ｜ 2026-04-15</td>
           </tr>
           <tr style="background:#fff8e1;">
-            <td><code>lichef</code></td>
-            <td>李主任 <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;"><i class="bi bi-shield-lock me-1"></i>admin</span></td>
-            <td>血庫</td>
+            <td class="small">lichef</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>李主任</strong> <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;"><i class="bi bi-shield-lock me-1"></i>admin</span></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 李主任 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 李主任 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 李主任 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 李主任 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">護理師</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('李主任', ['護理師'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">系統 ｜ 2026-03-08</td>
           </tr>
           <tr>
-            <td><code>wangxm</code></td>
-            <td>王曉明</td>
-            <td>品保室</td>
+            <td class="small">wangxm</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>王曉明</strong></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 王曉明 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 王曉明 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 王曉明 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 王曉明 閱覽者角色')"></td>
+            <td>
+              <span class="text-muted small">未指派</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline ms-1" onclick="openAudienceModal('王曉明', [])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">李主任 ｜ 2026-04-22</td>
           </tr>
           <tr>
-            <td><code>lintc</code></td>
-            <td>林助教</td>
-            <td>訓練組</td>
+            <td class="small">lintc</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>林助教</strong></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 林助教 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 林助教 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 林助教 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 林助教 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">行政人員</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('林助教', ['行政人員'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">李主任 ｜ 2026-02-12</td>
           </tr>
           <tr style="background:#fff8e1;">
-            <td><code>qabox</code></td>
-            <td>品保室 <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;"><i class="bi bi-shield-lock me-1"></i>admin</span></td>
-            <td>品保室</td>
+            <td class="small">qabox</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>品保室</strong> <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;"><i class="bi bi-shield-lock me-1"></i>admin</span></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 品保室 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 品保室 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 品保室 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 品保室 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">行政人員</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('品保室', ['行政人員'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">李主任 ｜ 2026-01-20</td>
           </tr>
           <tr>
-            <td><code>nursea1</code></td>
-            <td>張護理師</td>
-            <td>血庫</td>
+            <td class="small">nursea1</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>張護理師</strong></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 張護理師 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 張護理師 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 張護理師 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 張護理師 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">護理師</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('張護理師', ['護理師'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">系統 ｜ 2026-05-02（首次登入自動授予閱覽者）</td>
           </tr>
           <tr>
-            <td><code>nurseb2</code></td>
-            <td>黃護理師</td>
-            <td>採血科</td>
+            <td class="small">nurseb2</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>黃護理師</strong></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 黃護理師 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 黃護理師 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 黃護理師 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 黃護理師 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">護理師</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('黃護理師', ['護理師'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">系統 ｜ 2026-05-02（首次登入自動授予閱覽者）</td>
           </tr>
           <tr>
-            <td><code>doctorw</code></td>
-            <td>吳醫師</td>
-            <td>檢驗科</td>
+            <td class="small">doctorw</td>
+            <td><i class="bi bi-person-circle me-1"></i><strong>吳醫師</strong></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 吳醫師 管理者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" onchange="showToast('已更新 吳醫師 編輯者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 吳醫師 審核者角色')"></td>
             <td class="text-center"><input class="form-check-input" type="checkbox" checked onchange="showToast('已更新 吳醫師 閱覽者角色')"></td>
+            <td>
+              <span class="tag-badge">醫檢師</span>
+              <button class="btn btn-link btn-sm p-0 align-baseline" onclick="openAudienceModal('吳醫師', ['醫檢師'])" title="編輯可見對象/單位"><i class="bi bi-pencil-square"></i> 編輯</button>
+            </td>
             <td class="small text-muted">李主任 ｜ 2026-03-28</td>
           </tr>
         </tbody>
       </table>
 
-      <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>勾選 / 取消即時生效並寫入異動紀錄；無刪除功能 — 若使用者離職 / 調職，由共用 user table 之管理介面停用該帳號即可（DM 不另外處理）。<br><strong>管理者</strong>欄位淡黃底色標示目前具管理者權限之使用者；建置時系統會預設指派 1–2 位初始管理者，之後管理者可互相指派／取消。</div>
+      <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>角色勾選 / 取消、可見對象/單位編輯皆即時生效並寫入異動紀錄；無刪除功能 — 若使用者離職 / 調職，由共用 user table 之管理介面停用該帳號即可（DM 不另外處理）。<br><strong>可見對象/單位</strong>（＝使用者所屬單位；受控標籤庫，於「參數設定 > 標籤維護」維護，比照 ET 模組「受訓單位標籤」）決定閱覽者於文件庫之可見範圍：閱覽者僅見「全體」或與自己可見對象相符之文件；編輯者／審核者／管理者不受限。「全體」為文件端通用值，不需逐人指派。<br><strong>管理者</strong>欄位淡黃底色標示目前具管理者權限之使用者；建置時系統會預設指派 1–2 位初始管理者，之後管理者可互相指派／取消。</div>
 
       <nav class="text-center mt-3">
         <ul class="pagination pagination-sm justify-content-center mb-0">
@@ -2325,81 +2471,69 @@
 
   <div class="wf-card">
     <div class="d-flex justify-content-between mb-2">
-      <strong>通知範本清單</strong>
-      <small class="text-muted">系統內建七項事件（含廢止流程 3 項與系統自動催辦 1 項）；點「<i class="bi bi-pencil"></i>」可編輯主旨/內文，並可<strong>啟用/停用</strong>。自動催辦信另含「催辦門檻天數」設定</small>
+      <strong>通知範本</strong>
+      <small class="text-muted">系統內建 9 項事件；<strong>左側選事件、右側編輯</strong>主旨/內文並可<strong>啟用/停用</strong>。自動催辦信另含「催辦門檻天數」</small>
     </div>
-    <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>可使用變數：<code>{{doc_name}}</code> <code>{{version}}</code> <code>{{author}}</code> <code>{{reviewer}}</code> <code>{{summary}}</code> <code>{{stay_days}}</code> <code>{{url}}</code> <code>{{reason}}</code></div>
-    <table class="table table-sm wf-table">
-      <thead>
-        <tr><th>事件</th><th>觸發時機</th><th>主旨範本</th><th>通知對象</th><th>管道</th><th>啟用</th><th>動作</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>文件送審</strong></td>
-          <td class="small text-muted">撰寫者送交簽核時</td>
-          <td>【DM】{{doc_name}} 待您簽核</td>
-          <td>該文件之<strong>指定審核者</strong></td>
-          <td>Email + 系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('submit')" title="編輯範本"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-        <tr>
-          <td><strong>文件退回</strong></td>
-          <td class="small text-muted">審核者按「退回」時</td>
-          <td>【DM】{{doc_name}} 已退回，請修改</td>
-          <td>該文件撰寫者</td>
-          <td>Email + 系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('reject')" title="編輯範本"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-        <tr>
-          <td><strong>文件發布</strong></td>
-          <td class="small text-muted">審核者按「核准並發布」時</td>
-          <td>【DM】{{doc_name}} v{{version}} 已發布</td>
-          <td>該文件撰寫者</td>
-          <td>Email + 系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('publish')" title="編輯範本"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-        <tr>
-          <td><strong>廢止申請送審</strong></td>
-          <td class="small text-muted">撰寫者送出廢止申請時</td>
-          <td>【DM】{{doc_name}} 廢止申請待您簽核</td>
-          <td>該文件之<strong>指定審核者</strong></td>
-          <td>Email + 系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('obsolete-submit')" title="編輯範本"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-        <tr>
-          <td><strong>廢止核准</strong></td>
-          <td class="small text-muted">審核者按「核准並廢止」時</td>
-          <td>【DM】{{doc_name}} 已正式廢止</td>
-          <td>該文件撰寫者</td>
-          <td>Email + 系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('obsolete-approve')" title="編輯範本"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-        <tr>
-          <td><strong>廢止退回</strong></td>
-          <td class="small text-muted">審核者退回廢止申請時</td>
-          <td>【DM】{{doc_name}} 廢止申請已退回</td>
-          <td>該文件撰寫者</td>
-          <td>Email + 系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('obsolete-reject')" title="編輯範本"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-        <tr style="background:#fff8e1;">
-          <td><strong>自動催辦信</strong><br><small class="text-muted">系統自動</small></td>
-          <td class="small text-muted">送審項目停留 ≥ <strong>催辦門檻天數</strong>（目前 <strong>7 天</strong>）且未處理；每日固定時間寄送</td>
-          <td>【DM 催辦】{{doc_name}} 已停留 {{stay_days}} 天，待您處理</td>
-          <td>該文件之<strong>指定審核者</strong></td>
-          <td>系統內</td>
-          <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="openNotifyModal('remind')" title="編輯範本與催辦門檻"><i class="bi bi-pencil"></i></button></td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>本系統<strong>不支援訂閱機制</strong>，通知對象僅限工作流相關人員（撰寫者、該文件之指定審核者）。<strong>自動催辦信</strong>為系統定時觸發（每日掃描停留天數 ≥ <strong>催辦門檻天數</strong>之送審項目）；同一項目每日寄一次直到處理完。<strong>催辦門檻天數</strong>於該事件之編輯視窗內調整（預設 7 天，可調 1–30 天）。</div>
+    <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>可使用變數：<code>{{doc_name}}</code> <code>{{version}}</code> <code>{{category}}</code> <code>{{author}}</code> <code>{{reviewer}}</code> <code>{{summary}}</code> <code>{{reason}}</code> <code>{{stay_days}}</code> <code>{{week}}</code> <code>{{unread_count}}</code> <code>{{unread_list}}</code> <code>{{url}}</code></div>
+
+    <div class="row g-3">
+      <!-- 左：範本清單 -->
+      <div class="col-md-4">
+        <div class="list-group" id="notify-tpl-list">
+          <button type="button" class="list-group-item list-group-item-action" data-key="submit" onclick="selectNotifyTemplate('submit', this)">文件送審 <br><small class="text-muted">指定審核者 ｜ Email+站內</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="reject" onclick="selectNotifyTemplate('reject', this)">文件退回 <br><small class="text-muted">撰寫者 ｜ Email+站內</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="publish" onclick="selectNotifyTemplate('publish', this)">文件發布通知 <span class="badge bg-success" style="font-size:0.6rem;">發布</span><br><small class="text-muted">撰寫者+相符閱覽者 ｜ 僅 Email</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="obsolete-submit" onclick="selectNotifyTemplate('obsolete-submit', this)">廢止申請送審 <br><small class="text-muted">指定審核者 ｜ Email+站內</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="obsolete-approve" onclick="selectNotifyTemplate('obsolete-approve', this)">廢止核准 <br><small class="text-muted">撰寫者 ｜ Email+站內</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="obsolete-reject" onclick="selectNotifyTemplate('obsolete-reject', this)">廢止退回 <br><small class="text-muted">撰寫者 ｜ Email+站內</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="kpi-weekly" onclick="selectNotifyTemplate('kpi-weekly', this)">KPI 週報 <span class="badge bg-primary" style="font-size:0.6rem;">排程</span><br><small class="text-muted">管理者 ｜ 僅 Email</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="unread-remind" onclick="selectNotifyTemplate('unread-remind', this)">未讀提醒 <span class="badge bg-primary" style="font-size:0.6rem;">排程</span><br><small class="text-muted">未看閱覽者 ｜ 僅 Email</small></button>
+          <button type="button" class="list-group-item list-group-item-action" data-key="remind" onclick="selectNotifyTemplate('remind', this)">自動催辦信 <span class="badge bg-warning text-dark" style="font-size:0.6rem;">系統</span><br><small class="text-muted">指定審核者 ｜ 僅站內</small></button>
+        </div>
+      </div>
+
+      <!-- 右：範本詳情（可編輯） -->
+      <div class="col-md-8">
+        <div class="wf-card mb-0" style="background:#fafafa;">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <h6 class="fw-bold mb-0" id="nt-name">—</h6>
+            <div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" id="nt-enabled" checked><label class="form-check-label small" for="nt-enabled">啟用</label></div>
+          </div>
+          <div class="small text-muted mb-1"><i class="bi bi-lightning-charge me-1"></i>觸發：<span id="nt-trigger"></span></div>
+          <div class="small text-muted mb-1"><i class="bi bi-people me-1"></i>對象：<span id="nt-target"></span></div>
+          <div class="small text-muted mb-3"><i class="bi bi-send me-1"></i>管道：<span id="nt-channel"></span></div>
+
+          <label class="form-label small fw-bold">主旨</label>
+          <input type="text" class="form-control form-control-sm mb-3" id="nt-subject">
+
+          <label class="form-label small fw-bold">內文</label>
+          <textarea class="form-control form-control-sm" id="nt-body" rows="10" style="font-family:inherit;"></textarea>
+
+          <div class="mt-3" id="nt-threshold-row" style="display:none;">
+            <label class="form-label small fw-bold"><i class="bi bi-clock-history me-1"></i>催辦門檻天數 <span class="text-danger">*</span></label>
+            <input type="number" class="form-control form-control-sm" id="nt-threshold-days" min="1" max="30" style="max-width:8rem;">
+            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>送審停留達此天數起每日催辦（1–30 天）；同時影響 DM04 待簽核清單「停留天數」標紅</div>
+          </div>
+
+          <div class="mt-3" id="nt-sched-row" style="display:none;">
+            <label class="form-label small fw-bold"><i class="bi bi-calendar-week me-1"></i>每週執行時間 <small class="text-muted fw-normal">（KPI 週報與未讀提醒共用）</small></label>
+            <div class="input-group input-group-sm" style="max-width:16rem;">
+              <select class="form-select" id="nt-sched-day">
+                <option>週一</option><option>週二</option><option>週三</option><option>週四</option><option>週五</option><option>週六</option><option>週日</option>
+              </select>
+              <input type="time" class="form-control" id="nt-sched-time" value="10:00">
+            </div>
+            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於 <code>DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME</code>（預設週一 10:00）；SCHDM001 之 KPI 週報與未讀提醒同批於此時間執行</div>
+          </div>
+
+          <div class="text-end mt-3">
+            <button class="btn btn-tsbms btn-sm" onclick="saveNotifyTemplate()"><i class="bi bi-check2 me-1"></i>儲存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>本系統<strong>不支援訂閱機制</strong>。工作流事件通知對象為撰寫者 / 該文件之指定審核者；<strong>文件發布通知</strong>於核准發布時<strong>非同步僅以 Email</strong> 通知<strong>撰寫者 + 可見對象相符之閱覽者</strong>（掛「全體」→ 所有閱覽者），廢止不通知。<strong>KPI 週報 / 未讀提醒</strong>由每週排程（SCHDM001）觸發、僅 Email、非同步；<strong>每週執行時間（星期＋時間）可於本頁範本設定</strong>（預設週一 10:00，兩者共用）。<strong>自動催辦信</strong>僅站內、每日觸發直到處理完。</div>
   </div>
   </div>
 
@@ -2413,13 +2547,57 @@
       <button class="btn btn-tsbms btn-sm" onclick="openCategoryModal('create')"><i class="bi bi-plus-circle me-1"></i>新增分類</button>
     </div>
     <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>系統不支援刪除分類（避免既有文件失去引用）；如需淘汰請改為「停用」 — 停用後該分類於 DM01 搜尋、DM03 新增/編輯之分類下拉中均不顯示，DB 中既有文件仍保留原引用。</div>
-    <div class="opt-list">
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">標準作業程序</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openCategoryModal('edit', 'SOP')" title="編輯分類名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">系統操作手冊</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openCategoryModal('edit', 'MANUAL')" title="編輯分類名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">訓練教材</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openCategoryModal('edit', 'TRAINING')" title="編輯分類名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">其他</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openCategoryModal('edit', 'OTHER')" title="編輯分類名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row" style="opacity:0.55;"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">外部文件 <small class="text-muted">（已停用）</small></span><button class="btn btn-sm btn-outline-primary me-2" onclick="openCategoryModal('edit', 'EXT')" title="編輯分類名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch"></div></div>
-    </div>
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr>
+          <th>分類名稱</th>
+          <th style="width:8rem;">啟用狀態</th>
+          <th style="width:12rem;">動作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>標準作業程序</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openCategoryModal('edit', 'SOP')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「標準作業程序」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>系統操作手冊</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openCategoryModal('edit', 'MANUAL')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「系統操作手冊」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>訓練教材</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openCategoryModal('edit', 'TRAINING')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「訓練教材」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>其他</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openCategoryModal('edit', 'OTHER')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「其他」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr style="color:#999;">
+          <td>外部文件</td>
+          <td><span class="badge bg-secondary">已停用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openCategoryModal('edit', 'EXT')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-success" onclick="showToast('已啟用分類「外部文件」')"><i class="bi bi-play-circle"></i> 啟用</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 
   <!-- 區塊 B：關聯作業項目維護 -->
@@ -2429,25 +2607,34 @@
       <button class="btn btn-tsbms btn-sm"><i class="bi bi-plus-circle me-1"></i>新增作業項目</button>
     </div>
     <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>新增時請依主系統實際功能代號填寫（格式：代號 — 名稱）；DM03 編輯系統操作手冊類文件時可下拉選用，供讀者於 DM01 依作業項目搜尋對應手冊。系統不支援刪除，如需淘汰請改為「停用」 — 停用後該項目於 DM03 系統操作手冊分類之「關聯作業項目」下拉中不顯示，DB 中既有關聯仍保留。</div>
-    <div class="opt-list">
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BC01 — 捐血人報到</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BC01 — 捐血人報到')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row" style="opacity:0.55;"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BC02 — 採血作業 <small class="text-muted">（已停用）</small></span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BC02 — 採血作業')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch"></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">CP01 — 血品分離</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'CP01 — 血品分離')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">CP02 — 成分製備</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'CP02 — 成分製備')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">TL01 — 檢驗登錄</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'TL01 — 檢驗登錄')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BS01 — 入庫作業</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BS01 — 入庫作業')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BS02 — 訂血作業</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BS02 — 訂血作業')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BS03 — 出庫作業</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BS03 — 出庫作業')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BS04 — 領血確認</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BS04 — 領血確認')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">BS05 — 用血回報</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'BS05 — 用血回報')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">MA01 — 安全檢核</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('func', 'MA01 — 安全檢核')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-    </div>
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr>
+          <th>作業項目（代號 — 名稱）</th>
+          <th style="width:8rem;">啟用狀態</th>
+          <th style="width:12rem;">動作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>BC01 — 捐血人報到</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BC01 — 捐血人報到')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BC01」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr style="color:#999;"><td>BC02 — 採血作業</td><td><span class="badge bg-secondary">已停用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BC02 — 採血作業')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-success" onclick="showToast('已啟用作業項目「BC02」')"><i class="bi bi-play-circle"></i> 啟用</button></td></tr>
+        <tr><td>CP01 — 血品分離</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'CP01 — 血品分離')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「CP01」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>CP02 — 成分製備</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'CP02 — 成分製備')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「CP02」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>TL01 — 檢驗登錄</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'TL01 — 檢驗登錄')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「TL01」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>BS01 — 入庫作業</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BS01 — 入庫作業')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BS01」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>BS02 — 訂血作業</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BS02 — 訂血作業')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BS02」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>BS03 — 出庫作業</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BS03 — 出庫作業')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BS03」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>BS04 — 領血確認</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BS04 — 領血確認')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BS04」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>BS05 — 用血回報</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'BS05 — 用血回報')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BS05」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        <tr><td>MA01 — 安全檢核</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="openParamModal('func', 'MA01 — 安全檢核')"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「MA01」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <!-- 區塊 C：標籤維護 -->
   <div class="wf-card">
     <div class="d-flex justify-content-between mb-2">
-      <h6 class="fw-bold mb-0"><i class="bi bi-tags-fill me-1"></i>標籤維護 <small class="text-muted fw-normal ms-1">（用於 DM01 搜尋與 DM03 文件分類）</small></h6>
+      <h6 class="fw-bold mb-0"><i class="bi bi-tags-fill me-1"></i>標籤維護 <small class="text-muted fw-normal ms-1">（可見對象/單位＝權限；適用模組／文件性質／法規關聯＝檢索）</small></h6>
       <div class="d-flex gap-2">
         <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-folder-plus me-1"></i>新增標籤組</button>
         <button class="btn btn-tsbms btn-sm"><i class="bi bi-plus-circle me-1"></i>新增標籤</button>
@@ -2455,70 +2642,141 @@
     </div>
     <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>受控詞彙：撰寫者只能從本清單挑選標籤，避免「採血/抽血/捐血」同義詞造成搜尋碎裂。系統不支援刪除標籤或標籤組（避免既有文件失去引用），如需淘汰請改為「停用」 — 停用後該標籤於 DM01 搜尋與 DM03 編輯之多選下拉中不顯示，DB 中既有文件的引用仍保留。</div>
 
-    <!-- 適用模組 -->
-    <div class="mb-3">
-      <div class="d-flex justify-content-between align-items-center mb-1">
-        <strong class="small"><span class="doc-tag tag-grp-module">適用模組</span></strong>
-        <div class="d-flex align-items-center gap-2">
-          <small class="text-muted">5 個標籤</small>
-          <div class="form-check form-switch mb-0" title="停用整個標籤組"><input class="form-check-input" type="checkbox" role="switch" checked></div>
-        </div>
-      </div>
-      <div class="opt-list">
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">採血</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '採血')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">成分</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '成分')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">檢驗</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '檢驗')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">供應</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '供應')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">醫務</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '醫務')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      </div>
-    </div>
-
-    <!-- 適用角色 -->
-    <div class="mb-3">
-      <div class="d-flex justify-content-between align-items-center mb-1">
-        <strong class="small"><span class="doc-tag tag-grp-role">適用角色</span></strong>
-        <div class="d-flex align-items-center gap-2">
-          <small class="text-muted">3 個標籤</small>
-          <div class="form-check form-switch mb-0" title="停用整個標籤組"><input class="form-check-input" type="checkbox" role="switch" checked></div>
-        </div>
-      </div>
-      <div class="opt-list">
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">護理師</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '護理師')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">血庫人員</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '血庫人員')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">醫師</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '醫師')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      </div>
-    </div>
-
-    <!-- 文件性質 -->
-    <div class="mb-3">
-      <div class="d-flex justify-content-between align-items-center mb-1">
-        <strong class="small"><span class="doc-tag tag-grp-nature">文件性質</span></strong>
-        <div class="d-flex align-items-center gap-2">
-          <small class="text-muted">4 個標籤</small>
-          <div class="form-check form-switch mb-0" title="停用整個標籤組"><input class="form-check-input" type="checkbox" role="switch" checked></div>
-        </div>
-      </div>
-      <div class="opt-list">
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">戰時</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '戰時')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">緊急</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '緊急')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">平時</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '平時')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-        <div class="opt-row" style="opacity:0.55;"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">訓練 <small class="text-muted">（已停用）</small></span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '訓練')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch"></div></div>
-      </div>
-    </div>
-
-    <!-- 法規關聯 -->
-    <div class="mb-0">
-      <div class="d-flex justify-content-between align-items-center mb-1">
-        <strong class="small"><span class="doc-tag tag-grp-legal">法規關聯</span></strong>
-        <div class="d-flex align-items-center gap-2">
-          <small class="text-muted">1 個標籤</small>
-          <div class="form-check form-switch mb-0" title="停用整個標籤組"><input class="form-check-input" type="checkbox" role="switch" checked></div>
-        </div>
-      </div>
-      <div class="opt-list">
-        <div class="opt-row"><i class="bi bi-grip-vertical text-muted"></i><span class="opt-name flex-grow-1 small">衛福部</span><button class="btn btn-sm btn-outline-primary me-2" onclick="openParamModal('tag', '衛福部')" title="編輯名稱"><i class="bi bi-pencil"></i></button><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" checked></div></div>
-      </div>
-    </div>
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr>
+          <th>標籤名稱</th>
+          <th style="width:8rem;">啟用狀態</th>
+          <th style="width:12rem;">動作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="table-light"><td colspan="3"><span class="doc-tag tag-grp-audience">可見對象/單位</span> <span class="badge bg-primary" style="font-size:0.6rem;">權限</span></td></tr>
+        <tr>
+          <td>全體 <small class="text-muted">（通用值：掛上即所有閱覽者可見）</small></td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" disabled title="「全體」為通用值，不可修改"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" disabled title="「全體」不可停用"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>護理師</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '護理師')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「護理師」（soft-retire：不收回既有可見性，僅停止後續指派）')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>軍人</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '軍人')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「軍人」（soft-retire）')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>醫檢師</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '醫檢師')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「醫檢師」（soft-retire）')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>行政人員</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '行政人員')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「行政人員」（soft-retire）')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr class="table-light"><td colspan="3"><span class="doc-tag tag-grp-module">適用模組</span> <span class="badge bg-secondary" style="font-size:0.6rem;">檢索</span></td></tr>
+        <tr>
+          <td>採血</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '採血')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「採血」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>成分</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '成分')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「成分」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>檢驗</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '檢驗')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「檢驗」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>供應</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '供應')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「供應」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>醫務</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '醫務')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「醫務」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr class="table-light"><td colspan="3"><span class="doc-tag tag-grp-nature">文件性質</span> <span class="badge bg-secondary" style="font-size:0.6rem;">檢索</span></td></tr>
+        <tr>
+          <td>戰時</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '戰時')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「戰時」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>緊急</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '緊急')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「緊急」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr>
+          <td>平時</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '平時')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「平時」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+        <tr style="color:#999;">
+          <td>訓練</td>
+          <td><span class="badge bg-secondary">已停用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '訓練')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-success" onclick="showToast('已啟用標籤「訓練」')"><i class="bi bi-play-circle"></i> 啟用</button>
+          </td>
+        </tr>
+        <tr class="table-light"><td colspan="3"><span class="doc-tag tag-grp-legal">法規關聯</span> <span class="badge bg-secondary" style="font-size:0.6rem;">檢索</span></td></tr>
+        <tr>
+          <td>衛福部</td>
+          <td><span class="badge bg-success">啟用</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="openParamModal('tag', '衛福部')"><i class="bi bi-pencil"></i> 修改</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「衛福部」')"><i class="bi bi-pause-circle"></i> 停用</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
   </div>
 
@@ -2535,20 +2793,22 @@
     <span style="margin-left:1rem;">• <strong>新增功能保持原樣</strong>：建立新項目時仍需提供代碼（建立後不可改）與名稱</span><br>
     <span style="margin-left:1rem;">• 清單畫面<strong>不顯示代碼</strong>，僅顯示名稱（管理者透過名稱辨識；代碼為內部技術鍵）</span><br>
     各區塊說明：<br>
-    <span style="margin-left:1rem;">• <strong>文件分類維護</strong>：可啟用/停用、編輯名稱；停用之分類於 DM01/DM03 分類下拉中不顯示</span><br>
-    <span style="margin-left:1rem;">• <strong>關聯作業項目維護</strong>：可啟用/停用、編輯名稱；func_name 代碼仍可見於名稱前段（格式 BS04 — 領血確認），方便 DM03 編輯時撰寫者選用、DM01 讀者依作業項目搜尋對應手冊</span><br>
-    <span style="margin-left:1rem;">• <strong>標籤維護</strong>：受控標籤庫；以「標籤組」為單位管理，撰寫者於 DM03 從本清單挑選，DM01 可用標籤搜尋。標籤組與單一標籤皆有獨立的啟用/停用 toggle（停用整組 → 整組消失於使用者介面；停用單一標籤 → 該標籤消失但同組其他標籤照常）</span><br>
+    <span style="margin-left:1rem;">• 三個維護區塊皆採<strong>表格式版面（對齊 ET）</strong>：欄位為「名稱 / 啟用狀態 / 動作」，動作提供「修改」與「停用/啟用」按鈕（取代原 toggle）</span><br>
+    <span style="margin-left:1rem;">• <strong>文件分類維護</strong>：可修改名稱、啟用/停用；停用之分類於 DM01/DM03 分類下拉中不顯示；內建 4 類、自訂可新增</span><br>
+    <span style="margin-left:1rem;">• <strong>關聯作業項目維護</strong>：可修改名稱、啟用/停用；代號 — 名稱（如 BS04 — 領血確認），供 DM03 編輯時選用、DM01 依作業項目搜尋對應手冊</span><br>
+    <span style="margin-left:1rem;">• <strong>標籤維護</strong>：受控標籤庫，單一表格內以<strong>組別小標題列</strong>分段（可見對象/單位＝權限；適用模組／文件性質／法規關聯＝檢索）；每筆可修改、啟用/停用。「全體」為通用值不可修改/停用；可見對象值停用採 soft-retire（不收回既有可見性）</span><br>
 
-    <strong>2. 權限管理：</strong>管理者對 user table 使用者帳號指派 DM 模組角色 — <strong>管理者 / 編輯者 / 審核者 / 閱覽者</strong>四種可複選。<br>
+    <strong>2. 權限管理：</strong>管理者對 user table 使用者帳號於<strong>同一列</strong>設定 DM 模組角色（<strong>管理者 / 編輯者 / 審核者 / 閱覽者</strong>四種可複選）與<strong>可見對象/單位</strong>（版面對齊 ET 權限管理）。<br>
     <span style="margin-left:1rem;">• 四個角色獨立勾選 checkbox，互不互斥；同一帳號可同時是管理者 + 編輯者 + 審核者 + 閱覽者</span><br>
+    <span style="margin-left:1rem;">• <strong>可見對象/單位</strong>：同列以 badge 顯示、點「編輯」開視窗勾選（護理師 / 軍人 / 醫檢師 / 行政人員…，受控標籤庫於「參數設定 > 標籤維護」維護，比照 ET「受訓單位標籤」）；決定該閱覽者於文件庫之可見範圍。「全體」為文件端通用值、不需逐人指派。原「部門」欄（無外部資料來源）已移除</span><br>
     <span style="margin-left:1rem;">• <strong>管理者</strong>：可進入 DM09 指派角色、維護分類/標籤/通知範本、查詢已廢止文件與變更歷程；<strong>管理者可彼此指派或取消管理者角色</strong>（建置時系統預設指派 1–2 位初始管理者）</span><br>
     <span style="margin-left:1rem;">• <strong>編輯者</strong>：可在 DM01 新增文件、於 DM02 編輯新版本、發起廢止申請</span><br>
     <span style="margin-left:1rem;">• <strong>審核者</strong>：可於 DM04 簽核中心處理新增/新版本/廢止三類待簽核項目</span><br>
     <span style="margin-left:1rem;">• <strong>閱覽者</strong>：可閱讀文件庫之已發布文件；<strong>使用者首次登入 DM 時系統自動授予閱覽者角色</strong>（不需 admin 手動勾選）</span><br>
     <span style="margin-left:1rem;">• 勾選/取消即時生效並寫入異動紀錄；本頁無刪除功能 — 離職/調職由共用 user table 之管理介面停用該帳號即可</span><br>
 
-    <strong>3. 通知範本：</strong>系統內建七項事件之 Email / 系統內訊息範本 — 新增/新版本流程 3 項（送審/退回/發布）+ 廢止流程 3 項（廢止申請送審/廢止核准/廢止退回）+ 系統自動 1 項（自動催辦信）。每列點「<i class="bi bi-pencil"></i>」開啟編輯視窗，可修改主旨/內文範本與啟用狀態；事件項目固定不可新增，但<strong>個別範本可停用</strong>（admin 可依院內偏好關閉某類通知）<br>
-    <span style="margin-left:1rem;">• <strong>自動催辦門檻</strong>：於「自動催辦信」事件之編輯視窗內調整（預設 7 天，範圍 1–30 天），調整後系統每日掃描時以新門檻判定；同時影響 DM04 待簽核清單之「停留天數」標紅警示</span><br>
+    <strong>3. 通知範本：</strong>系統內建 <strong>9 項</strong>事件之 Email / 系統內訊息範本 — 新增/新版本 3 項（送審/退回/<strong>發布通知＝撰寫者+相符閱覽者</strong>）+ 廢止 3 項（廢止申請送審/核准/退回）+ 每週排程 2 項（KPI 週報 / 未讀提醒）+ 系統自動 1 項（自動催辦信）。採 <strong>master-detail 版面</strong>：<strong>左側點選事件、右側就地編輯</strong>主旨/內文與啟用狀態；事件項目固定不可新增，但<strong>個別範本可停用</strong>（admin 可依院內偏好關閉某類通知）<br>
+    <span style="margin-left:1rem;">• <strong>自動催辦門檻</strong>：於「自動催辦信」事件之右側詳情調整（預設 7 天，範圍 1–30 天），調整後系統每日掃描時以新門檻判定；同時影響 DM04 待簽核清單之「停留天數」標紅警示</span><br>
 
     <strong>不在本頁設定</strong>：<br>
     <span style="margin-left:1rem;">• <strong>帳號本身</strong>：DM 與 ET 共用之 user table 維護（使用者於 DM07 個人專區或 ET 端可改自己的帳號 / 姓名 / 密碼）；本頁僅指派 DM 角色，無法新增/刪除帳號</span><br>
@@ -2686,73 +2946,29 @@
   </div>
 </div>
 
-<!-- ===== 通知範本編輯 Modal（DM09 Tab 3 每列「動作」按鈕觸發） ===== -->
-<div class="modal fade" id="notifyModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+<!-- ===== 可見對象/單位 指派 Modal（DM09 權限管理「編輯」觸發；對齊 ET 受訓單位標籤指派） ===== -->
+<div class="modal fade" id="audienceModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-bell text-primary me-2"></i>編輯通知範本：<span id="notify-modal-event">—</span></h5>
+        <h5 class="modal-title"><i class="bi bi-people-fill text-primary me-2"></i>編輯可見對象/單位 — <span id="aud-modal-user">使用者</span></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-
-        <!-- 唯讀欄位：事件 / 觸發時機 / 通知對象 / 管道 -->
-        <div class="row g-2 mb-3 small">
-          <div class="col-md-6">
-            <div class="text-muted">觸發時機</div>
-            <div id="notify-modal-trigger" class="fw-bold">—</div>
-          </div>
-          <div class="col-md-3">
-            <div class="text-muted">通知對象</div>
-            <div id="notify-modal-target" class="fw-bold">—</div>
-          </div>
-          <div class="col-md-3">
-            <div class="text-muted">管道</div>
-            <div class="fw-bold">Email + 系統內</div>
-          </div>
+        <div class="wf-status-msg wf-status-info mb-3">
+          <i class="bi bi-info-circle me-1"></i>勾選該使用者所屬之可見對象/單位（可複選、可全不勾即「未指派」）。決定該<strong>閱覽者</strong>於文件庫看得到哪些文件（文件掛「全體」或可見對象相符者可見）。
         </div>
-
-        <!-- 催辦門檻天數（僅自動催辦信顯示） -->
-        <div class="mb-3" id="notify-threshold-row" style="display:none; background:#fff8e1; border:1px solid #f0d870; border-radius:6px; padding:0.75rem;">
-          <label class="form-label small fw-bold"><i class="bi bi-clock-history me-1"></i>催辦門檻天數 <span class="text-danger">*</span></label>
-          <div class="row g-2 align-items-center">
-            <div class="col-auto">
-              <div class="input-group input-group-sm" style="width:140px;">
-                <input type="number" class="form-control" id="notify-threshold-days" value="7" min="1" max="30">
-                <span class="input-group-text">天</span>
-              </div>
-            </div>
-            <div class="col">
-              <div class="field-helper mb-0"><i class="bi bi-info-circle"></i>送審項目停留 ≥ 此天數時，系統每日自動觸發此通知，並於 DM04 待簽核清單標紅警示。範圍 1–30 天。</div>
-            </div>
-          </div>
+        <div class="row g-2">
+          <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="aud-nurse"><label class="form-check-label" for="aud-nurse"><span class="tag-badge">護理師</span></label></div></div>
+          <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="aud-sol"><label class="form-check-label" for="aud-sol"><span class="tag-badge">軍人</span></label></div></div>
+          <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="aud-med"><label class="form-check-label" for="aud-med"><span class="tag-badge">醫檢師</span></label></div></div>
+          <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="aud-adm"><label class="form-check-label" for="aud-adm"><span class="tag-badge">行政人員</span></label></div></div>
         </div>
-
-        <!-- 啟用 switch -->
-        <div class="mb-3">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch" id="notify-enabled" checked>
-            <label class="form-check-label small" for="notify-enabled"><strong>啟用此通知</strong> — 停用後該事件不發 Email，但系統內訊息仍正常顯示於「我的文件動態」</label>
-          </div>
-        </div>
-
-        <!-- 主旨範本 -->
-        <div class="mb-3">
-          <label class="form-label small fw-bold">主旨範本 <span class="text-danger">*</span></label>
-          <input type="text" class="form-control form-control-sm" id="notify-subject">
-        </div>
-
-        <!-- 內文範本 -->
-        <div class="mb-3">
-          <label class="form-label small fw-bold">內文範本 <span class="text-danger">*</span></label>
-          <textarea class="form-control form-control-sm" id="notify-body" rows="7"></textarea>
-          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>可使用變數：<code>{{doc_name}}</code> <code>{{version}}</code> <code>{{author}}</code> <code>{{reviewer}}</code> <code>{{summary}}</code> <code>{{stay_days}}</code> <code>{{url}}</code> <code>{{reason}}</code>（依事件不同，部分變數可能無值）</div>
-        </div>
-
+        <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>儲存於 <code>DM_USER_TAG</code>（使用者 × 可見對象/單位多對多）；標籤與角色（管理者 / 編輯者 / 審核者 / 閱覽者）為兩個獨立維度。「全體」為文件端通用值（所有閱覽者可見），不需逐人指派故不在此勾選。可見對象值於「參數設定 > 標籤維護」維護（比照 ET「受訓單位標籤」）；停用某值採 soft-retire，不收回既有可見性。</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-tsbms btn-sm" onclick="saveNotifyTemplate()"><i class="bi bi-check2 me-1"></i>儲存</button>
+        <button type="button" class="btn btn-tsbms btn-sm" onclick="saveAudienceAssignment()"><i class="bi bi-check2 me-1"></i>儲存</button>
       </div>
     </div>
   </div>
@@ -2778,6 +2994,9 @@
         </ul>
         <label class="form-label small fw-bold">廢止原因 <span class="text-danger">*</span></label>
         <textarea class="form-control form-control-sm" id="obsolete-reason" rows="3" placeholder="必填，請說明廢止原因（如：流程已正式停止實施、設備已停用、規範變更不再適用等。註：若僅是內容更新，請改用「編輯新版本」）"></textarea>
+        <label class="form-label small fw-bold mt-3">廢止附件 <small class="text-muted fw-normal">（選填，單檔）</small></label>
+        <input type="file" class="form-control form-control-sm" id="obsolete-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif">
+        <div class="field-helper mt-1"><i class="bi bi-paperclip"></i>如為函文 / 公文要求廢止，可附上正式檔案；格式與大小上限比照文件上傳（PDF / Word / Excel / PowerPoint / 圖片，單檔 ≤ 50 MB）。附件將隨核准紀錄保存，供簽核明細與已廢止查詢下載。</div>
         <label class="form-label small fw-bold mt-3">指定審核者 <span class="text-danger">*</span></label>
         <select class="form-select form-select-sm" id="obsolete-reviewer">
           <option value="">請選擇審核者…</option>
@@ -2819,7 +3038,6 @@ document.addEventListener('DOMContentLoaded', function() {
       if (target) target.classList.add('active');
 
       if (isMobile()) closeMobileSidebar();
-      updateBreadcrumb(this);
 
       // 重設版本歷程抽屜
       var hist = document.getElementById('version-history-panel');
@@ -2849,7 +3067,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function syncTagPicker(picker) {
-  var groupColorClass = { module: 'tag-grp-module', role: 'tag-grp-role', nature: 'tag-grp-nature', legal: 'tag-grp-legal' };
+  var groupColorClass = { audience: 'tag-grp-audience', module: 'tag-grp-module', role: 'tag-grp-role', nature: 'tag-grp-nature', legal: 'tag-grp-legal' };
   var groupOrder = ['module', 'role', 'nature', 'legal'];
   var selected = [];
   picker.querySelectorAll('.js-tag-checkbox').forEach(function(cb) {
@@ -2890,25 +3108,12 @@ function syncTagPicker(picker) {
   });
 }
 
-function updateBreadcrumb(linkEl) {
-  var bc = document.getElementById('nav-breadcrumb');
-  if (!bc) return;
-  var moduleItems = linkEl.closest('.module-items');
-  if (!moduleItems) return;
-  var moduleHeader = moduleItems.previousElementSibling;
-  var moduleName = moduleHeader ? moduleHeader.getAttribute('data-tooltip') : '';
-  var screenName = linkEl.getAttribute('data-tooltip') || '';
-  bc.innerHTML = '<i class="bi bi-folder2-open me-1"></i>' + moduleName + ' &gt; ' + screenName;
-}
-
 /* ===== 回到儀表板（navbar home icon / brand 點擊用；儀表板無 sidebar 入口） ===== */
 function goHome() {
   document.querySelectorAll('.sidebar .nav-link').forEach(function(l) { l.classList.remove('active'); });
   document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
   var target = document.getElementById('dm-overview');
   if (target) target.classList.add('active');
-  var bc = document.getElementById('nav-breadcrumb');
-  if (bc) bc.innerHTML = '<i class="bi bi-house-door me-1"></i>儀表板';
   window.scrollTo(0, 0);
   if (isMobile()) closeMobileSidebar();
 }
@@ -3090,8 +3295,8 @@ function saveParamItem() {
 
 /* ===== DM03 上傳檔案 demo 切換（含不支援預覽格式提醒） ===== */
 var UPLOAD_FILE_SAMPLES = {
-  'pdf':  { name: 'SOP-領血確認-v2.2.pdf', size: '2.3 MB', icon: 'bi-file-earmark-pdf', iconCls: 'text-danger' },
-  'docx': { name: 'SOP-領血確認-v2.2.docx', size: '1.4 MB', icon: 'bi-file-earmark-word', iconCls: 'text-primary' },
+  'pdf':  { name: 'SOP-領血確認-2026 v2.2.pdf', size: '2.3 MB', icon: 'bi-file-earmark-pdf', iconCls: 'text-danger' },
+  'docx': { name: 'SOP-領血確認-2026 v2.2.docx', size: '1.4 MB', icon: 'bi-file-earmark-word', iconCls: 'text-primary' },
   'xlsx': { name: '領血確認-檢核表.xlsx', size: '0.6 MB', icon: 'bi-file-earmark-excel', iconCls: 'text-success' },
   'pptx': { name: '領血確認-教育訓練簡報.pptx', size: '4.8 MB', icon: 'bi-file-earmark-ppt', iconCls: 'text-warning' },
   'png':  { name: '領血流程圖.png', size: '0.9 MB', icon: 'bi-file-earmark-image', iconCls: 'text-info' }
@@ -3142,7 +3347,7 @@ function clearUploadFile() {
   document.getElementById('upload-nonpdf-warn').style.display = 'none';
 }
 
-/* ===== DM09 Tab 3「通知範本」編輯 modal ===== */
+/* ===== DM09 Tab 3「通知範本」master-detail（左選右編輯） ===== */
 var NOTIFY_TEMPLATES = {
   'submit': {
     name: '文件送審',
@@ -3159,11 +3364,27 @@ var NOTIFY_TEMPLATES = {
     body: '您好 {{author}}，\n\n您送審的文件「{{doc_name}}」已被審核者 {{reviewer}} 退回，請依退回原因修改後重新送審。\n\n退回原因：{{reason}}\n編輯連結：{{url}}\n\n— DM 文件管理系統'
   },
   'publish': {
-    name: '文件發布',
-    trigger: '審核者按「核准並發布」時',
-    target: '該文件撰寫者',
+    name: '文件發布通知',
+    trigger: '核准並發布時（新增首版 / 新版本；廢止不觸發）；非同步批次寄送',
+    target: '撰寫者 + 相符閱覽者（掛「全體」→ 所有閱覽者）',
     subject: '【DM】{{doc_name}} v{{version}} 已發布',
-    body: '您好 {{author}}，\n\n您送審的文件「{{doc_name}}」已由審核者 {{reviewer}} 核准並發布為 v{{version}}。\n\n文件連結：{{url}}\n\n— DM 文件管理系統'
+    body: '您好，\n\n文件「{{doc_name}}」已發布 v{{version}}（分類：{{category}}）。\n\n變更摘要：{{summary}}\n文件連結：{{url}}\n\n— DM 文件管理系統\n（本信僅以 Email 通知；如不需接收請洽管理者調整可見對象授權）'
+  },
+  'kpi-weekly': {
+    name: 'KPI 週報',
+    trigger: '每週排程（SCHDM001，執行時間可設定，預設週一 10:00）；全部已發布文件',
+    target: '管理者（DM_ADMIN）',
+    hasSchedule: true,
+    subject: '【DM】文件閱讀 KPI 週報（{{week}}）',
+    body: '管理者您好，\n\n本週文件閱讀率摘要：\n- 已發布文件數：{{total_docs}}\n- 整體平均閱讀率：{{avg_rate}}\n- 閱讀率最低前 5 份：\n{{lowest_list}}\n\n完整逐文件明細請見附件 CSV，或開啟 KPI 儀表板：{{url}}\n\n— DM 文件管理系統（本信僅以 Email 發送）'
+  },
+  'unread-remind': {
+    name: '未讀提醒',
+    trigger: '每週排程（SCHDM001，執行時間可設定，預設週一 10:00）；涵蓋全部已發布文件；由管理者以本範本啟用/停用統一控制',
+    target: '未看之閱覽者（一人一信彙整）',
+    hasSchedule: true,
+    subject: '【DM】您有 {{unread_count}} 份文件尚未閱讀',
+    body: '您好，\n\n以下文件您尚未閱讀（下載），請撥空查閱：\n{{unread_list}}\n\n登入查看：{{url}}\n\n— DM 文件管理系統（本信僅以 Email 發送；如不需接收特定文件提醒，請洽該文件編輯者或管理者）'
   },
   'obsolete-submit': {
     name: '廢止申請送審',
@@ -3196,37 +3417,87 @@ var NOTIFY_TEMPLATES = {
     thresholdDays: 7
   }
 };
-function openNotifyModal(key) {
+var NOTIFY_CHANNEL = {
+  'submit': 'Email + 系統內訊息', 'reject': 'Email + 系統內訊息',
+  'publish': '僅 Email（非同步批次）',
+  'obsolete-submit': 'Email + 系統內訊息', 'obsolete-approve': 'Email + 系統內訊息', 'obsolete-reject': 'Email + 系統內訊息',
+  'kpi-weekly': '僅 Email（每週排程）', 'unread-remind': '僅 Email（每週排程）',
+  'remind': '僅系統內訊息'
+};
+/* master-detail：左側選事件 → 右側就地編輯 */
+function selectNotifyTemplate(key, el) {
   var tpl = NOTIFY_TEMPLATES[key];
   if (!tpl) return;
-  document.getElementById('notify-modal-event').textContent = tpl.name;
-  document.getElementById('notify-modal-trigger').textContent = tpl.trigger;
-  document.getElementById('notify-modal-target').textContent = tpl.target;
-  document.getElementById('notify-subject').value = tpl.subject;
-  document.getElementById('notify-body').value = tpl.body;
-  document.getElementById('notify-enabled').checked = true;
-  var thresholdRow = document.getElementById('notify-threshold-row');
+  var list = document.getElementById('notify-tpl-list');
+  if (list) list.querySelectorAll('.list-group-item').forEach(function(b) { b.classList.remove('active'); });
+  var target = el || (list && list.querySelector('[data-key="' + key + '"]'));
+  if (target) target.classList.add('active');
+  document.getElementById('nt-name').textContent = tpl.name;
+  document.getElementById('nt-trigger').textContent = tpl.trigger;
+  document.getElementById('nt-target').textContent = tpl.target;
+  document.getElementById('nt-channel').textContent = NOTIFY_CHANNEL[key] || '';
+  document.getElementById('nt-subject').value = tpl.subject;
+  document.getElementById('nt-body').value = tpl.body;
+  var thr = document.getElementById('nt-threshold-row');
   if (tpl.hasThreshold) {
-    thresholdRow.style.display = '';
-    document.getElementById('notify-threshold-days').value = tpl.thresholdDays || 7;
+    thr.style.display = '';
+    document.getElementById('nt-threshold-days').value = tpl.thresholdDays || 7;
   } else {
-    thresholdRow.style.display = 'none';
+    thr.style.display = 'none';
   }
-  new bootstrap.Modal(document.getElementById('notifyModal')).show();
+  var sched = document.getElementById('nt-sched-row');
+  if (tpl.hasSchedule) {
+    sched.style.display = '';
+    document.getElementById('nt-sched-day').value = tpl.schedDay || '週一';
+    document.getElementById('nt-sched-time').value = tpl.schedTime || '10:00';
+  } else {
+    sched.style.display = 'none';
+  }
 }
 function saveNotifyTemplate() {
-  var subject = document.getElementById('notify-subject').value.trim();
-  var body = document.getElementById('notify-body').value.trim();
-  if (!subject) { alert('請填寫主旨範本'); return; }
-  if (!body) { alert('請填寫內文範本'); return; }
-  var name = document.getElementById('notify-modal-event').textContent;
-  var thresholdRow = document.getElementById('notify-threshold-row');
-  if (thresholdRow && thresholdRow.style.display !== 'none') {
-    var d = parseInt(document.getElementById('notify-threshold-days').value, 10);
+  var subject = document.getElementById('nt-subject').value.trim();
+  var body = document.getElementById('nt-body').value.trim();
+  if (!subject) { alert('請填寫主旨'); return; }
+  if (!body) { alert('請填寫內文'); return; }
+  var thr = document.getElementById('nt-threshold-row');
+  if (thr && thr.style.display !== 'none') {
+    var d = parseInt(document.getElementById('nt-threshold-days').value, 10);
     if (isNaN(d) || d < 1 || d > 30) { alert('催辦門檻天數必須介於 1–30 天之間'); return; }
   }
-  bootstrap.Modal.getInstance(document.getElementById('notifyModal')).hide();
-  showToast('已儲存通知範本：' + name);
+  var sched = document.getElementById('nt-sched-row');
+  if (sched && sched.style.display !== 'none') {
+    if (!document.getElementById('nt-sched-time').value) { alert('請設定每週執行時間'); return; }
+  }
+  showToast('已儲存通知範本：' + document.getElementById('nt-name').textContent);
+}
+/* 預設載入第一個範本至右側詳情 */
+document.addEventListener('DOMContentLoaded', function() { selectNotifyTemplate('submit'); });
+
+/* ===== DM09 權限管理：可見對象/單位 指派 modal（對齊 ET 受訓單位標籤） ===== */
+var _audModalUser = '';
+var _audDefs = [
+  { id: 'aud-nurse', name: '護理師' },
+  { id: 'aud-sol',   name: '軍人' },
+  { id: 'aud-med',   name: '醫檢師' },
+  { id: 'aud-adm',   name: '行政人員' }
+];
+function openAudienceModal(userName, currentTags) {
+  _audModalUser = userName;
+  document.getElementById('aud-modal-user').textContent = userName;
+  _audDefs.forEach(function(t) {
+    var cb = document.getElementById(t.id);
+    if (cb) cb.checked = (currentTags || []).indexOf(t.name) > -1;
+  });
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('audienceModal')).show();
+}
+function saveAudienceAssignment() {
+  var picked = [];
+  _audDefs.forEach(function(t) {
+    var cb = document.getElementById(t.id);
+    if (cb && cb.checked) picked.push(t.name);
+  });
+  bootstrap.Modal.getInstance(document.getElementById('audienceModal')).hide();
+  showToast('已更新 ' + _audModalUser + ' 可見對象/單位：' + (picked.length ? picked.join(' / ') : '未指派'));
 }
 
 /* ===== 進入 DM03 並設定模式（新增 / 編輯） ===== */
@@ -3252,6 +3523,7 @@ function enterEditMode(docId) {
 /* ===== DM02 申請廢止 modal（DM_EDITOR 發起；送 DM_REVIEWER 簽核） ===== */
 function openObsoleteModal() {
   document.getElementById('obsolete-reason').value = '';
+  var of = document.getElementById('obsolete-file'); if (of) of.value = '';
   new bootstrap.Modal(document.getElementById('obsoleteModal')).show();
 }
 function confirmObsolete() {
@@ -3268,7 +3540,7 @@ function confirmObsolete() {
 function updateNextVersion(type) {
   var input = document.getElementById('next-version');
   if (!input) return;
-  input.value = type === 'major' ? 'v3.0' : 'v2.2';
+  input.value = type === 'major' ? '2026 v3.0' : '2026 v2.2';
 }
 
 /* ===== DM03 上傳/編輯：模式切換（新增 / 編輯） ===== */
@@ -3387,11 +3659,11 @@ function withdrawSubmission(docTitle) {
 
 /* ===== DM04 簽核中心：展開/收合簽核明細、核准、退回 ===== */
 var _reviewDocs = {
-  1: { type: 'version', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '領血確認標準作業程序 v2.2', summary: '補充第 5 點異常通報流程；新增 30 分鐘時效規定；對齊新版供應模組 BS04 流程。' },
-  2: { type: 'version', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '入庫作業 SOP v1.4', summary: '補充戰時模式入庫規則，含異常掃碼處理與雙人覆核時機。' },
-  3: { type: 'version', category: 'MANUAL', categoryClass: 'cat-manual', categoryLabel: '系統操作手冊', title: 'BS04 領血掃血袋線上系統操作手冊 v006', summary: '介面文字微調：將「掃描」統一為「掃碼」；補充常見錯誤訊息對照表。' },
-  4: { type: 'obsolete', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '舊版急救血品 SOP（廢止申請）', targetVersion: 'v1.5', targetFile: 'SOP-急救血品-v1.5.pdf', summary: '院內急救血品儲備業務已停止本院辦理，本院端 SOP 不再需要維護，申請整份廢止以避免讀者誤用。' },
-  5: { type: 'new', category: 'TRAINING', categoryClass: 'cat-training', categoryLabel: '訓練教材', title: '用血回報訓練教材 v1.0', newVersion: 'v1.0', newFile: '訓練教材-用血回報-v1.0.pdf', summary: '新進人員用血回報訓練教材；涵蓋用血通報時機、表單填寫、異常處理流程，搭配影片與測驗題使用。' }
+  1: { type: 'version', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '領血確認標準作業程序 2026 v2.2', summary: '補充第 5 點異常通報流程；新增 30 分鐘時效規定；對齊新版供應模組 BS04 流程。' },
+  2: { type: 'version', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '入庫作業 SOP 2026 v1.4', summary: '補充戰時模式入庫規則，含異常掃碼處理與雙人覆核時機。' },
+  3: { type: 'version', category: 'MANUAL', categoryClass: 'cat-manual', categoryLabel: '系統操作手冊', title: 'BS04 領血掃血袋線上系統操作手冊 2026 v006', summary: '介面文字微調：將「掃描」統一為「掃碼」；補充常見錯誤訊息對照表。' },
+  4: { type: 'obsolete', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '舊版急救血品 SOP（廢止申請）', targetVersion: '2026 v1.5', targetFile: 'SOP-急救血品-2026 v1.5.pdf', summary: '院內急救血品儲備業務已停止本院辦理，本院端 SOP 不再需要維護，申請整份廢止以避免讀者誤用。' },
+  5: { type: 'new', category: 'TRAINING', categoryClass: 'cat-training', categoryLabel: '訓練教材', title: '用血回報訓練教材 2026 v1.0', newVersion: '2026 v1.0', newFile: '訓練教材-用血回報-2026 v1.0.pdf', summary: '新進人員用血回報訓練教材；涵蓋用血通報時機、表單填寫、異常處理流程，搭配影片與測驗題使用。' }
 };
 var _currentReviewId = null;
 
