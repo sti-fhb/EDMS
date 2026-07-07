@@ -511,41 +511,64 @@
   <button class="btn btn-sm me-2" onclick="goHome()" title="回到儀表板" style="color:rgba(255,255,255,0.85); border:none; font-size:1.1rem; padding:0.2rem 0.5rem;">
     <i class="bi bi-house-door"></i>
   </button>
-  <a class="navbar-brand" href="#" onclick="goHome(); return false;"><i class="bi bi-folder-fill me-2"></i>文件管理系統 <span class="dm-badge">DM</span></a>
+  <a class="navbar-brand" href="#" onclick="goHome(); return false;"><i class="bi bi-droplet-fill me-2"></i>教育訓練文件管理系統</a>
   <div class="ms-auto me-2 d-flex align-items-center gap-2 flex-shrink-0">
-    <span class="user-badge"><i class="bi bi-person-circle me-1"></i>陳大華（撰寫者）</span>
-    <button class="btn btn-sm p-1 ms-1" onclick="loginLogout()" title="返回登入頁（demo）" style="color:rgba(255,255,255,0.85); border:none; background:transparent;">
-      <i class="bi bi-box-arrow-right"></i>
-    </button>
+    <div class="dropdown">
+      <button class="btn btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" style="color:rgba(255,255,255,0.9); border:1px solid rgba(255,255,255,0.3); border-radius:4px; font-size:0.82rem; padding:0.2rem 0.6rem;">
+        <i class="bi bi-person-circle me-1"></i>陳大華
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end small">
+        <li><a class="dropdown-item" href="#" onclick="goScreen('dm-profile'); return false;"><i class="bi bi-person-gear me-2"></i>個人資料維護</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="#" onclick="loginLogout(); return false;"><i class="bi bi-box-arrow-right me-2"></i>登出</a></li>
+      </ul>
+    </div>
   </div>
 </nav>
 
 <!-- ===== Sidebar ===== -->
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-nav">
-    <!-- 文件作業 -->
-    <button class="module-header" onclick="toggleModule(this)" data-tooltip="文件作業">
-      <i class="bi bi-folder2-open module-icon"></i>
-      <span class="module-label">文件作業</span>
+    <!-- 教育訓練（他模組：細項列出，本檔點擊無反應）-->
+    <button class="module-header collapsed" onclick="toggleModule(this)">
+      <i class="bi bi-mortarboard module-icon"></i>
+      <span class="module-label">教育訓練</span>
       <i class="bi bi-chevron-down module-arrow"></i>
     </button>
-    <div class="module-items">
-      <a class="nav-link" href="#" data-screen="dm-library" data-tooltip="文件庫"><i class="bi bi-collection"></i><span class="link-text">文件庫</span></a>
-      <a class="nav-link" href="#" data-screen="dm-review" data-tooltip="簽核中心"><i class="bi bi-check2-square"></i><span class="link-text">簽核中心</span></a>
+    <div class="module-items collapsed">
+      <a class="nav-link" href="#"><i class="bi bi-grid"></i><span class="link-text">課程列表</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-people-fill"></i><span class="link-text">學員</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span class="link-text">系統設定</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-collection"></i><span class="link-text">我的課程</span></a>
     </div>
 
-    <!-- 管理 -->
-    <button class="module-header" onclick="toggleModule(this)" data-tooltip="管理">
-      <i class="bi bi-gear module-icon"></i>
-      <span class="module-label">管理</span>
+    <!-- 文件管理（本檔：功能可跳畫面）-->
+    <button class="module-header" onclick="toggleModule(this)">
+      <i class="bi bi-folder2-open module-icon"></i>
+      <span class="module-label">文件管理</span>
       <i class="bi bi-chevron-down module-arrow"></i>
     </button>
     <div class="module-items">
-      <a class="nav-link" href="#" data-screen="dm-dashboard" data-tooltip="個人專區"><i class="bi bi-person-workspace"></i><span class="link-text">個人專區</span></a>
-      <a class="nav-link" href="#" data-screen="dm-obsolete" data-tooltip="已廢止文件查詢（DM_ADMIN）"><i class="bi bi-archive"></i><span class="link-text">已廢止文件查詢 <small class="text-muted">(admin)</small></span></a>
-      <a class="nav-link" href="#" data-screen="dm-audit" data-tooltip="文件變更歷程查詢（DM_ADMIN）"><i class="bi bi-search"></i><span class="link-text">文件變更歷程查詢 <small class="text-muted">(admin)</small></span></a>
-      <a class="nav-link" href="#" data-screen="dm-kpi" data-tooltip="閱讀統計 KPI（DM_ADMIN）"><i class="bi bi-bar-chart-line"></i><span class="link-text">閱讀統計 KPI <small class="text-muted">(admin)</small></span></a>
-      <a class="nav-link" href="#" data-screen="dm-admin" data-tooltip="系統設定（DM_ADMIN）"><i class="bi bi-sliders"></i><span class="link-text">系統設定 <small class="text-muted">(admin)</small></span></a>
+      <a class="nav-link" href="#" data-screen="dm-library"><i class="bi bi-collection"></i><span class="link-text">文件庫</span></a>
+      <a class="nav-link" href="#" data-screen="dm-review"><i class="bi bi-check2-square"></i><span class="link-text">簽核中心</span></a>
+      <a class="nav-link" href="#" data-screen="dm-dashboard"><i class="bi bi-person-workspace"></i><span class="link-text">個人專區</span></a>
+      <a class="nav-link" href="#" data-screen="dm-obsolete"><i class="bi bi-archive"></i><span class="link-text">已廢止文件查詢 <small class="text-muted">(admin)</small></span></a>
+      <a class="nav-link" href="#" data-screen="dm-audit"><i class="bi bi-search"></i><span class="link-text">文件變更歷程查詢 <small class="text-muted">(admin)</small></span></a>
+      <a class="nav-link" href="#" data-screen="dm-kpi"><i class="bi bi-bar-chart-line"></i><span class="link-text">閱讀統計 KPI <small class="text-muted">(admin)</small></span></a>
+      <a class="nav-link" href="#" data-screen="dm-admin"><i class="bi bi-sliders"></i><span class="link-text">系統設定 <small class="text-muted">(admin)</small></span></a>
+    </div>
+
+    <!-- 平台管理（他模組：細項列出，本檔點擊無反應）-->
+    <button class="module-header collapsed" onclick="toggleModule(this)">
+      <i class="bi bi-hdd-network module-icon"></i>
+      <span class="module-label">平台管理</span>
+      <i class="bi bi-chevron-down module-arrow"></i>
+    </button>
+    <div class="module-items collapsed">
+      <a class="nav-link" href="#"><i class="bi bi-people-fill"></i><span class="link-text">使用者管理</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span class="link-text">系統參數維護</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-journal-text"></i><span class="link-text">操作記錄</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-clock-history"></i><span class="link-text">排程作業總覽</span></a>
     </div>
   </div>
 </nav>
@@ -554,6 +577,47 @@
 
 <!-- ===== Main Content ===== -->
 <div class="main-content">
+
+<!-- ==================== 個人資料維護（右上使用者選單；帳號＝共用 DP_USER） ==================== -->
+<div class="screen" id="dm-profile">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-person-gear me-2"></i>個人資料維護</div>
+    <div class="screen-meta">帳號功能 ｜ 所有登入者</div>
+  </div>
+  <div class="alert alert-info py-2 small"><i class="bi bi-info-circle me-1"></i>姓名 / 帳號 / 密碼為共用帳號（<code>DP_USER</code>），變更後於 ET / DM 兩端同步生效。</div>
+  <div class="card mb-3"><div class="card-body">
+    <label class="form-label small mb-1">姓名</label>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-6"><input class="form-control form-control-sm" id="dm-profile-name" value="陳大華"></div>
+      <div class="col-md-6"><button class="btn btn-sm btn-tsbms" onclick="dmSaveName()"><i class="bi bi-save me-1"></i>儲存姓名</button></div>
+    </div>
+  </div></div>
+  <div class="card mb-3"><div class="card-body">
+    <label class="form-label small mb-1">目前帳號（Email）</label>
+    <input class="form-control form-control-sm mb-2" value="chen@example.com" disabled>
+    <label class="form-label small mb-1">變更為新 Email</label>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-6"><input class="form-control form-control-sm" id="dm-profile-email" placeholder="new@example.com"></div>
+      <div class="col-md-6"><button class="btn btn-sm btn-outline-secondary" onclick="dmChangeEmail()"><i class="bi bi-envelope-check me-1"></i>寄驗證信</button></div>
+    </div>
+    <div class="text-muted small mt-2"><i class="bi bi-info-circle me-1"></i>寄驗證信至新 Email，點連結後才切換（延遲生效）；期間舊 Email 仍可登入。</div>
+  </div></div>
+  <div class="card mb-3"><div class="card-body">
+    <label class="form-label small mb-1 d-block">密碼</label>
+    <button class="btn btn-sm btn-outline-secondary" onclick="dmOpenPasswordModal()"><i class="bi bi-shield-lock me-1"></i>變更密碼</button>
+  </div></div>
+</div>
+
+<!-- 變更密碼 modal -->
+<div class="modal fade" id="dmPasswordModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-shield-lock text-success me-2"></i>變更密碼</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="mb-2"><label class="form-label small mb-1">舊密碼</label><input type="password" class="form-control form-control-sm" id="dm-pw-old"></div>
+    <div class="mb-2"><label class="form-label small mb-1">新密碼</label><input type="password" class="form-control form-control-sm" id="dm-pw-new"></div>
+    <div class="mb-2"><label class="form-label small mb-1">確認新密碼</label><input type="password" class="form-control form-control-sm" id="dm-pw-confirm"></div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="dmSavePassword()">儲存</button></div>
+</div></div></div>
 
 <!-- ==================== DM00 儀表板 ==================== -->
 <div class="screen" id="dm-overview">
@@ -3130,6 +3194,12 @@ function goScreen(id) {
     if (target) { target.classList.add('active'); window.scrollTo(0, 0); }
   }
 }
+
+/* ===== 個人資料維護（右上使用者選單）===== */
+function dmSaveName() { var n = document.getElementById('dm-profile-name').value; if (!n) { alert('請輸入姓名'); return; } (window.showToast || alert)('姓名已更新：' + n + '（ET / DM 同步）'); }
+function dmChangeEmail() { var e = document.getElementById('dm-profile-email').value; if (!e) { alert('請輸入新 Email'); return; } (window.showToast || alert)('已寄驗證信至 ' + e + '，點連結後才切換；期間舊 Email 仍可登入'); }
+function dmOpenPasswordModal() { ['dm-pw-old', 'dm-pw-new', 'dm-pw-confirm'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; }); bootstrap.Modal.getOrCreateInstance(document.getElementById('dmPasswordModal')).show(); }
+function dmSavePassword() { var o = document.getElementById('dm-pw-old').value, n = document.getElementById('dm-pw-new').value, c = document.getElementById('dm-pw-confirm').value; if (!o || !n || !c) { alert('請填寫所有欄位'); return; } if (n !== c) { alert('新密碼與確認密碼不一致'); return; } bootstrap.Modal.getInstance(document.getElementById('dmPasswordModal')).hide(); (window.showToast || alert)('密碼已變更'); }
 
 /* ===== DM02 read-only 模式（從 DM06 已廢止文件查詢進入） ===== */
 var _detailReadOnly = false;

@@ -82,16 +82,23 @@
     .module-header .module-label { margin-left: 0.6rem; flex: 1; white-space: nowrap; }
 
     .sidebar .nav-link {
-      color: #333; padding: 0.5rem 0.75rem 0.5rem 2.5rem; font-size: 0.88rem;
+      color: #333; padding: 0.375rem 0.75rem 0.375rem 2.5rem; font-size: 0.85rem;
       border-left: 3px solid transparent; transition: all 0.15s;
       white-space: nowrap; display: flex; align-items: center;
     }
-    .sidebar .nav-link i { width: 20px; text-align: center; flex-shrink: 0; margin-right: 0.5rem; font-size: 1rem; }
+    .sidebar .nav-link i { width: 20px; text-align: center; flex-shrink: 0; margin-right: 0.5rem; font-size: 0.95rem; }
     .sidebar .nav-link:hover { background: #e8f5e9; color: var(--tsbms-green); }
     .sidebar .nav-link.active {
       background: #e8f5e9; color: var(--tsbms-green-dark);
       border-left-color: var(--tsbms-green); font-weight: 600;
     }
+    /* 模組下拉（比照主專案：可收合＋高度過渡動畫）*/
+    .module-header { justify-content: space-between; }
+    .module-header > span { display: flex; align-items: center; }
+    .module-header .caret { font-size: 0.85rem; color: #90a4ae; transition: transform 0.2s; }
+    .module-header.collapsed .caret { transform: rotate(-90deg); }
+    .module-items { overflow: hidden; max-height: 800px; transition: max-height 0.28s ease; }
+    .module-items.collapsed { max-height: 0; }
 
     /* Main Content */
     .main-content {
@@ -538,22 +545,19 @@
   <button class="btn btn-sm me-2" onclick="toggleSidebar()" style="color:rgba(255,255,255,0.85); border:none; font-size:1.1rem; padding:0.2rem 0.5rem;">
     <i class="bi bi-list"></i>
   </button>
-  <a class="navbar-brand" href="#"><i class="bi bi-mortarboard-fill me-2"></i>教育訓練系統 <span class="et-badge">ET</span></a>
-  <div class="dropdown ms-3">
-    <button class="role-switch-btn dropdown-toggle" type="button" data-bs-toggle="dropdown" title="切換視角（demo 用，模擬不同角色組合）">
-      <i class="bi bi-arrow-left-right me-1"></i>切換視角：<span id="current-role">管理者 + 教師</span>
-    </button>
-    <ul class="dropdown-menu dropdown-menu-end small">
-      <li><h6 class="dropdown-header">demo 視角</h6></li>
-      <li><a class="dropdown-item" href="#" onclick="switchRole('admin+teacher','陳大華','管理者 + 教師'); return false;">管理者 + 教師 <small class="text-muted">(陳大華)</small></a></li>
-      <li><a class="dropdown-item" href="#" onclick="switchRole('student','王曉明','學員'); return false;">學員 <small class="text-muted">(王曉明)</small></a></li>
-    </ul>
-  </div>
+  <a class="navbar-brand" href="#"><i class="bi bi-droplet-fill me-2"></i>教育訓練文件管理系統</a>
   <div class="ms-auto me-2 d-flex align-items-center gap-2 flex-shrink-0">
-    <span class="user-badge"><i class="bi bi-shield-lock me-1"></i>SSO 已驗證　|　<i class="bi bi-person-circle me-1"></i><span id="user-name">陳大華（管理者 + 教師）</span></span>
-    <button class="btn btn-sm p-1 ms-1" onclick="loginLogout()" style="color:rgba(255,255,255,0.85); border:none; background:transparent;">
-      <i class="bi bi-box-arrow-right"></i>
-    </button>
+    <span class="user-badge d-none d-md-inline"><i class="bi bi-shield-lock me-1"></i>SSO 已驗證</span>
+    <div class="dropdown">
+      <button class="role-switch-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
+        <i class="bi bi-person-circle me-1"></i><span id="user-name">陳大華</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end small">
+        <li><a class="dropdown-item" href="#" onclick="goScreen('et-profile'); return false;"><i class="bi bi-person-gear me-2"></i>個人資料維護</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="#" onclick="loginLogout(); return false;"><i class="bi bi-box-arrow-right me-2"></i>登出</a></li>
+      </ul>
+    </div>
   </div>
 </nav>
 
@@ -561,41 +565,34 @@
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-nav">
 
-    <!-- 教師專屬選單（建/編課程、學員管理） -->
-    <div id="sidebar-teacher" data-role="teacher">
-      <button class="module-header">
-        <i class="bi bi-collection-play module-icon"></i>
-        <span class="module-label">課程管理</span>
-      </button>
+    <!-- 教育訓練（本檔：功能可跳畫面）-->
+    <button class="module-header" onclick="toggleModule('et')"><span><i class="bi bi-mortarboard module-icon"></i><span class="module-label">教育訓練</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <div class="module-items" id="mod-et">
       <a class="nav-link active" href="#" data-screen="et-courses-admin"><i class="bi bi-grid"></i><span>課程列表</span></a>
       <a class="nav-link" href="#" data-screen="et-students"><i class="bi bi-people-fill"></i><span>學員</span></a>
-    </div>
-
-    <!-- 管理者專屬選單（權限管理） -->
-    <div id="sidebar-admin" data-role="admin">
-      <button class="module-header mt-2">
-        <i class="bi bi-gear module-icon"></i>
-        <span class="module-label">系統設定</span>
-      </button>
       <a class="nav-link" href="#" data-screen="et-admin"><i class="bi bi-sliders"></i><span>系統設定</span></a>
-    </div>
-
-    <!-- 學員專屬選單 -->
-    <div id="sidebar-student" data-role="student" style="display:none;">
-      <button class="module-header mt-2">
-        <i class="bi bi-book module-icon"></i>
-        <span class="module-label">學員功能</span>
-      </button>
       <a class="nav-link" href="#" data-screen="et-courses-student"><i class="bi bi-collection"></i><span>我的課程</span></a>
     </div>
 
-    <!-- 個人專區（所有角色共用） -->
-    <div id="sidebar-common">
-      <button class="module-header mt-2">
-        <i class="bi bi-person-workspace module-icon"></i>
-        <span class="module-label">個人專區</span>
-      </button>
-      <a class="nav-link" href="#" data-screen="et-profile"><i class="bi bi-person-gear"></i><span>個人資料維護</span></a>
+    <!-- 文件管理（他模組：細項列出，本檔點擊無反應）-->
+    <button class="module-header collapsed" onclick="toggleModule('dm')"><span><i class="bi bi-folder2 module-icon"></i><span class="module-label">文件管理</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <div class="module-items collapsed" id="mod-dm">
+      <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>文件庫</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-check2-square"></i><span>簽核中心</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-person-workspace"></i><span>個人專區</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-archive"></i><span>已廢止文件查詢</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-search"></i><span>文件變更歷程查詢</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-bar-chart-line"></i><span>閱讀統計 KPI</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span>系統設定</span></a>
+    </div>
+
+    <!-- 平台管理（他模組：細項列出，本檔點擊無反應）-->
+    <button class="module-header collapsed" onclick="toggleModule('dp')"><span><i class="bi bi-hdd-network module-icon"></i><span class="module-label">平台管理</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <div class="module-items collapsed" id="mod-dp">
+      <a class="nav-link" href="#"><i class="bi bi-people-fill"></i><span>使用者管理</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span>系統參數維護</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-journal-text"></i><span>操作記錄</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-clock-history"></i><span>排程作業總覽</span></a>
     </div>
   </div>
 </nav>
@@ -3383,10 +3380,9 @@ document.addEventListener('DOMContentLoaded', function() {
   var links = sidebar.querySelectorAll('.nav-link');
   links.forEach(function(link) {
     link.addEventListener('click', function(e) {
-      var screenId = this.getAttribute('data-screen');
-      if (!screenId) return;
       e.preventDefault();
-      goScreen(screenId);
+      var screenId = this.getAttribute('data-screen');
+      if (screenId) goScreen(screenId);  // 他模組項目無 data-screen → 點擊無反應（對齊主專案：跨檔不跳轉）
     });
   });
 
@@ -3501,23 +3497,15 @@ function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('hidden');
 }
 
-/* 切換角色組合（多重）— wireframe demo 用
-   roles: 'admin' / 'teacher' / 'student' 以 + 串接，例如 'admin+teacher' */
-function switchRole(roles, userName, label) {
-  var hasAdmin   = roles.indexOf('admin')   !== -1;
-  var hasTeacher = roles.indexOf('teacher') !== -1;
-  var hasStudent = roles.indexOf('student') !== -1;
-  document.getElementById('sidebar-admin').style.display   = hasAdmin   ? '' : 'none';
-  document.getElementById('sidebar-teacher').style.display = hasTeacher ? '' : 'none';
-  document.getElementById('sidebar-student').style.display = hasStudent ? '' : 'none';
-  document.getElementById('current-role').textContent = label;
-  document.getElementById('user-name').textContent = userName + '（' + label + '）';
-
-  // 跳到該角色預設首頁
-  if (hasTeacher) goScreen('et-courses-admin');
-  else if (hasAdmin) goScreen('et-admin');
-  else if (hasStudent) goScreen('et-courses-student');
+/* 模組下拉展開 / 收合（比照主專案）*/
+function toggleModule(mod) {
+  var items = document.getElementById('mod-' + mod);
+  if (!items) return;
+  items.classList.toggle('collapsed');
+  var header = items.previousElementSibling;
+  if (header) header.classList.toggle('collapsed');
 }
+
 
 /* 教材編輯 modal — 單頁式，可同時管理影片、圖片、文件、說明文字 */
 function openMaterialModal() {
