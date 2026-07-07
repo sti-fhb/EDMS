@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EDMS — 平台模組（DP）Wireframe</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <style>
+    :root {
+      --tsbms-green: #2e7d32;
+      --tsbms-green-dark: #1b5e20;
+      --tsbms-green-light: #4caf50;
+      --sidebar-width: 260px;
+      --navbar-height: 48px;
+    }
+    body { font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; background: #f5f5f5; }
+    .btn-tsbms { background: var(--tsbms-green); color: #fff; border: none; }
+    .btn-tsbms:hover { background: var(--tsbms-green-dark); color: #fff; }
+
+    /* Top Navbar */
+    .navbar-tsbms {
+      background: linear-gradient(135deg, var(--tsbms-green-dark), var(--tsbms-green));
+      height: var(--navbar-height); min-height: var(--navbar-height);
+      padding: 0 1rem; flex-wrap: nowrap;
+    }
+    .navbar-tsbms .navbar-brand { color: #fff; font-weight: bold; font-size: 1.1rem; padding: 0; white-space: nowrap; }
+    .user-badge { color: rgba(255,255,255,0.9); font-size: 0.82rem; white-space: nowrap; }
+    .dp-badge { background: #fff; color: var(--tsbms-green-dark); font-size: 0.72rem; padding: 1px 6px; border-radius: 3px; font-weight: 700; margin-left: 0.3rem; }
+    .role-switch-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
+      font-size: 0.78rem; padding: 0.2rem 0.6rem; cursor: pointer; white-space: nowrap;
+    }
+    .role-switch-btn:hover { background: rgba(255,255,255,0.25); }
+
+    /* Sidebar */
+    .sidebar {
+      position: fixed; top: var(--navbar-height); left: 0; bottom: 0;
+      width: var(--sidebar-width); background: #fff;
+      border-right: 1px solid #dee2e6; overflow: hidden;
+      z-index: 100; transition: transform 0.25s ease;
+      display: flex; flex-direction: column;
+    }
+    .sidebar.hidden { transform: translateX(-100%); }
+    .sidebar-nav { flex: 1; overflow-y: auto; padding: 0.25rem 0 2rem; }
+    .module-header {
+      display: flex; align-items: center; padding: 0.5rem 0.75rem;
+      color: var(--tsbms-green-dark); font-weight: 700;
+      font-size: 0.82rem; border: none; background: none; width: 100%; text-align: left;
+    }
+    .module-header i.module-icon { font-size: 1.1rem; width: 24px; text-align: center; flex-shrink: 0; }
+    .module-header .module-label { margin-left: 0.6rem; flex: 1; white-space: nowrap; }
+    .sidebar .nav-link {
+      color: #333; padding: 0.375rem 0.75rem 0.375rem 2.5rem; font-size: 0.85rem;
+      border-left: 3px solid transparent; transition: all 0.15s;
+      white-space: nowrap; display: flex; align-items: center;
+    }
+    .sidebar .nav-link i { width: 20px; text-align: center; flex-shrink: 0; margin-right: 0.5rem; font-size: 0.95rem; }
+    .sidebar .nav-link:hover { background: #e8f5e9; color: var(--tsbms-green); }
+    .sidebar .nav-link.active {
+      background: #e8f5e9; color: var(--tsbms-green-dark);
+      border-left-color: var(--tsbms-green); font-weight: 600;
+    }
+    /* 模組下拉（比照主專案：模組為可收合下拉，點擊展開細項）*/
+    .module-header { cursor: pointer; justify-content: space-between; }
+    .module-header > span { display: flex; align-items: center; }
+    .module-header .caret { font-size: 0.8rem; color: #90a4ae; transition: transform 0.2s; }
+    .module-header .caret { font-size: 0.85rem; }
+    .module-header.collapsed .caret { transform: rotate(-90deg); }
+    /* 模組展開動畫：比照主專案 MUI <Collapse> 之高度過渡（捲簾式滑出）*/
+    .module-items { overflow: hidden; max-height: 600px; transition: max-height 0.28s ease; }
+    .module-items.collapsed { max-height: 0; }
+    .module-empty { padding: 0.5rem 0.9rem 0.5rem 2.1rem; font-size: 0.88rem; color: #9e9e9e; font-style: italic; }
+
+    /* Main Content */
+    .main-content {
+      margin-left: var(--sidebar-width); margin-top: var(--navbar-height);
+      padding: 1.5rem; min-height: calc(100vh - var(--navbar-height));
+      transition: margin-left 0.25s ease;
+    }
+    .sidebar.hidden ~ .main-content { margin-left: 0; }
+
+    /* Screens */
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .screen-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      border-bottom: 2px solid var(--tsbms-green); padding-bottom: 0.5rem; margin-bottom: 1rem;
+    }
+    .screen-title { font-size: 1.3rem; font-weight: 700; color: #333; }
+    .screen-meta { font-size: 0.75rem; color: #999; text-align: right; }
+
+    /* Wireframe components */
+    .wf-card { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .wf-card-title { font-weight: 700; color: var(--tsbms-green-dark); font-size: 0.95rem; margin-bottom: 0.75rem; }
+    .wf-status-msg { padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 0.75rem; font-size: 0.88rem; }
+    .wf-status-info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+    .wf-status-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+    table.wf-table { font-size: 0.92rem; }
+    table.wf-table th { background: #f8f9fa; white-space: nowrap; }
+
+    .wf-screen-note {
+      margin-top: 1.5rem; padding: 1rem 1.2rem;
+      border: 2px dashed #a5d6a7; border-radius: 8px;
+      background: #f1f8e9; color: #33691e; font-size: 0.82rem; line-height: 1.7;
+    }
+    .wf-screen-note summary { font-weight: 700; font-size: 0.88rem; color: #1b5e20; cursor: pointer; font-style: italic; }
+
+    /* Status pills（帳號狀態）*/
+    .status-pill { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+    .status-active { background: #e8f5e9; color: #1b5e20; }
+    .status-disabled { background: #eceff1; color: #607d8b; }
+    .status-locked { background: #ffebee; color: #c62828; }
+
+    /* 稽核類別 badge */
+    .audit-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+    .audit-login { background: #e3f2fd; color: #1565c0; }
+    .audit-create { background: #e8f5e9; color: #1b5e20; }
+    .audit-update { background: #fff3e0; color: #e65100; }
+    .audit-delete { background: #ffebee; color: #c62828; }
+
+    .field-helper { font-size: 0.75rem; color: #6c757d; margin-top: 0.2rem; display: flex; align-items: flex-start; gap: 0.3rem; }
+    .field-helper i { color: #90caf9; flex-shrink: 0; margin-top: 0.1rem; }
+
+    /* Login Overlay（共用登入，沿用 ET/DM 設計） */
+    .login-overlay { position: fixed; inset: 0; background: #f5f0e6; display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 1rem; }
+    .login-card { background: #fff; border-radius: 12px; padding: 2rem 2rem 3rem; width: 400px; max-width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.25); position: relative; }
+    .login-logo { text-align: center; margin-bottom: 1.2rem; }
+    .login-logo i { font-size: 2.4rem; color: var(--tsbms-green-dark); }
+    .login-card h3 { text-align: center; font-size: 1.25rem; font-weight: 700; margin-bottom: 1.5rem; color: #333; }
+    .login-step-title { font-size: 1rem; font-weight: 600; color: #333; margin-bottom: 1rem; text-align: center; }
+    .login-card .form-label-sm { font-size: 0.85rem; color: #555; font-weight: 500; }
+    .login-forgot-link { position: absolute; bottom: 1.2rem; left: 1.5rem; font-size: 0.82rem; color: #6c757d; text-decoration: none; }
+    .login-forgot-link:hover { color: var(--tsbms-green-dark); text-decoration: underline; }
+    .login-auth-hint { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px dashed #e0e0e0; font-size: 0.72rem; color: #999; text-align: center; line-height: 1.7; }
+    .login-auth-hint i { color: var(--tsbms-green-light); }
+
+    /* Toast */
+    .et-toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #323232; color: #fff; padding: 0.75rem 1.25rem; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); font-size: 0.9rem; z-index: 9999; opacity: 0; transform: translateY(20px); transition: all 0.25s; display: flex; align-items: center; gap: 0.5rem; }
+    .et-toast.show { opacity: 1; transform: translateY(0); }
+    .et-toast .bi-check-circle-fill { color: #81c784; font-size: 1.1rem; }
+
+    @media (max-width: 991.98px) {
+      .sidebar { transform: translateX(-100%); }
+      .sidebar.mobile-open { transform: translateX(0); }
+      .main-content { margin-left: 0 !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== Login Overlay（共用登入：ET / DM / 平台 同一套帳號；簡單 JWT、無 MFA / 無站點選擇） ===== -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <div class="login-logo"><i class="bi bi-shield-lock-fill"></i></div>
+    <h3>EDMS 系統登入</h3>
+
+    <ul class="nav nav-tabs nav-justified mb-3" id="login-tabs">
+      <li class="nav-item"><a class="nav-link active" href="#" onclick="loginShowTab('login'); return false;" id="login-tab-login"><i class="bi bi-box-arrow-in-right me-1"></i>登入</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="loginShowTab('register'); return false;" id="login-tab-register"><i class="bi bi-person-plus me-1"></i>註冊</a></li>
+    </ul>
+
+    <!-- 登入 -->
+    <div id="login-step-1">
+      <div class="mb-3">
+        <label class="form-label form-label-sm">帳號（Email）</label>
+        <input type="email" class="form-control" placeholder="user@example.com" value="admin@example.com" id="login-email">
+      </div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">密碼</label>
+        <input type="password" class="form-control" placeholder="••••••••" value="demopass" id="login-password">
+      </div>
+      <div class="alert alert-danger py-2 px-3 mb-3" id="login-error" style="display:none; font-size:0.875rem;">
+        <i class="bi bi-exclamation-circle me-1"></i><span id="login-error-text"></span>
+      </div>
+      <button class="btn btn-tsbms w-100" onclick="loginSubmit()"><i class="bi bi-box-arrow-in-right me-1"></i>登入</button>
+      <div class="login-auth-hint">
+        <i class="bi bi-info-circle me-1"></i>ET / DM 共用同一組帳號，一次註冊即可登入兩系統；平台採簡單 JWT，無二次驗證（MFA）
+      </div>
+      <div class="mt-2" style="font-size:0.75rem; color:#999; text-align:center;">
+        demo 觸發錯誤：
+        <a href="#" onclick="loginShowError('no_account'); return false;">查無帳號</a> ｜
+        <a href="#" onclick="loginShowError('wrong_password'); return false;">密碼錯誤</a> ｜
+        <a href="#" onclick="loginShowError('locked'); return false;">帳號鎖定</a> ｜
+        <a href="#" onclick="loginShowError(null); return false;">清除</a>
+      </div>
+    </div>
+
+    <!-- 註冊（自助註冊即用） -->
+    <div id="login-register" style="display:none;">
+      <div class="mb-3"><label class="form-label form-label-sm">帳號（Email）<span class="text-danger">*</span></label><input type="email" class="form-control" placeholder="user@example.com"></div>
+      <div class="mb-3"><label class="form-label form-label-sm">密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="至少 8 字元（含大小寫 / 數字 / 符號 ≥ 3 種）"></div>
+      <div class="mb-3"><label class="form-label form-label-sm">確認密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="再次輸入密碼"></div>
+      <div class="mb-3"><label class="form-label form-label-sm">姓名 <span class="text-danger">*</span></label><input type="text" class="form-control" placeholder="如：陳大華"></div>
+      <button class="btn btn-tsbms w-100" onclick="loginRegisterSubmit()"><i class="bi bi-person-plus me-1"></i>建立帳號</button>
+      <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>註冊成功即可登入（自助註冊即用），自動取得所屬模組預設角色（如 ET 學員）；業務角色由各模組管理者指派</div>
+    </div>
+
+    <!-- 忘記密碼 1 -->
+    <div id="login-forgot-1" style="display:none;">
+      <div class="login-step-title"><i class="bi bi-key text-warning me-1"></i>忘記密碼</div>
+      <div class="mb-3">
+        <label class="form-label form-label-sm">請輸入您的帳號（Email）</label>
+        <input type="email" class="form-control" placeholder="user@example.com">
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>不論帳號是否存在皆回覆相同訊息（防帳號列舉）；連結為一次性、30 分鐘內有效。</div>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" onclick="loginBackToLogin()" title="返回登入"><i class="bi bi-arrow-left"></i></button>
+        <button class="btn btn-tsbms flex-grow-1" onclick="loginForgotSubmit()"><i class="bi bi-envelope me-1"></i>送出</button>
+      </div>
+    </div>
+
+    <!-- 忘記密碼 2 -->
+    <div id="login-forgot-2" style="display:none;">
+      <div class="text-center" style="padding: 0.5rem 0 1rem;">
+        <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
+        <h5 class="mt-3 mb-2" style="font-size:1.05rem;">已送出</h5>
+        <p class="text-muted small mb-0">若該 Email 已註冊，密碼重設連結將寄至信箱，<br>請於 30 分鐘內完成重設。</p>
+      </div>
+      <button class="btn btn-outline-secondary w-100" onclick="loginBackToLogin()"><i class="bi bi-arrow-left me-1"></i>返回登入</button>
+    </div>
+
+    <a href="#" class="login-forgot-link" id="login-forgot-link" onclick="loginForgotPw(); return false;">忘記密碼？</a>
+  </div>
+</div>
+
+<!-- ===== Top Navbar ===== -->
+<nav class="navbar navbar-tsbms fixed-top d-flex align-items-center">
+  <button class="btn btn-sm me-2" onclick="toggleSidebar()" style="color:rgba(255,255,255,0.85); border:none; font-size:1.1rem; padding:0.2rem 0.5rem;"><i class="bi bi-list"></i></button>
+  <a class="navbar-brand" href="#"><i class="bi bi-droplet-fill me-2"></i>教育訓練文件管理系統</a>
+  <div class="ms-auto me-2 d-flex align-items-center gap-2 flex-shrink-0">
+    <span class="user-badge d-none d-md-inline"><i class="bi bi-shield-check me-1"></i>JWT 已驗證</span>
+    <div class="dropdown">
+      <button class="role-switch-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
+        <i class="bi bi-person-circle me-1"></i><span id="user-name">陳大華</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end small">
+        <li><a class="dropdown-item" href="#" onclick="goScreen('dp-profile'); return false;"><i class="bi bi-person-gear me-2"></i>個人資料維護</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="#" onclick="loginLogout(); return false;"><i class="bi bi-box-arrow-right me-2"></i>登出</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- ===== Sidebar ===== -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-nav">
+    <!-- 教育訓練（他模組：細項列出，本檔點擊無反應）-->
+    <button class="module-header collapsed" onclick="toggleModule('et')"><span><i class="bi bi-mortarboard module-icon"></i><span class="module-label">教育訓練</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <div class="module-items collapsed" id="mod-et">
+      <a class="nav-link" href="#"><i class="bi bi-grid"></i><span>課程列表</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-people-fill"></i><span>學員</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span>系統設定</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>我的課程</span></a>
+    </div>
+
+    <!-- 文件管理（他模組：細項列出，本檔點擊無反應）-->
+    <button class="module-header collapsed" onclick="toggleModule('dm')"><span><i class="bi bi-folder2 module-icon"></i><span class="module-label">文件管理</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <div class="module-items collapsed" id="mod-dm">
+      <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>文件庫</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-check2-square"></i><span>簽核中心</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-person-workspace"></i><span>個人專區</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-archive"></i><span>已廢止文件查詢</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-search"></i><span>文件變更歷程查詢</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-bar-chart-line"></i><span>閱讀統計 KPI</span></a>
+      <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span>系統設定</span></a>
+    </div>
+
+    <!-- 平台管理（本檔：展開，功能可跳畫面）-->
+    <button class="module-header" onclick="toggleModule('dp')"><span><i class="bi bi-hdd-network module-icon"></i><span class="module-label">平台管理</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <div class="module-items" id="mod-dp">
+      <a class="nav-link active" href="#" data-screen="dp-users"><i class="bi bi-people-fill"></i><span>使用者管理</span></a>
+      <a class="nav-link" href="#" data-screen="dp-params"><i class="bi bi-sliders"></i><span>系統參數維護</span></a>
+      <a class="nav-link" href="#" data-screen="dp-audit"><i class="bi bi-journal-text"></i><span>操作記錄</span></a>
+      <a class="nav-link" href="#" data-screen="dp-schedule"><i class="bi bi-clock-history"></i><span>排程作業總覽</span></a>
+    </div>
+  </div>
+</nav>
+
+<!-- ===== Main Content ===== -->
+<main class="main-content">
+
+  <!-- ============ dp-users 使用者管理（UCDP005） ============ -->
+  <div id="dp-users" class="screen active">
+    <div class="screen-header">
+      <div class="screen-title"><i class="bi bi-people-fill text-tsbms-green me-2"></i>使用者管理</div>
+      <div class="screen-meta">UCDP005 ｜ 系統管理者</div>
+    </div>
+
+    <div class="wf-card">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-4"><label class="form-label small mb-1">關鍵字（姓名 / Email）</label><input type="text" class="form-control form-control-sm" placeholder="搜尋…"></div>
+        <div class="col-md-3"><label class="form-label small mb-1">帳號狀態</label>
+          <select class="form-select form-select-sm"><option>全部</option><option>啟用中</option><option>已停用</option><option>已鎖定</option></select>
+        </div>
+        <div class="col-md-5 text-end">
+          <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search me-1"></i>查詢</button>
+          <button class="btn btn-sm btn-tsbms" onclick="openCreateUser()"><i class="bi bi-person-plus me-1"></i>建立帳號</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card p-0">
+      <table class="table table-hover wf-table mb-0 align-middle">
+        <thead><tr>
+          <th>姓名</th><th>帳號（Email）</th><th>狀態</th><th>最後登入</th><th>建立日期</th><th class="text-end">操作</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td>陳大華</td><td>admin@example.com</td>
+            <td><span class="status-pill status-active">啟用中</span></td>
+            <td>2026-07-06 09:12</td><td>2026-05-01</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-secondary" onclick="openDisableUser('陳大華')"><i class="bi bi-pause-circle me-1"></i>停用</button>
+            </td>
+          </tr>
+          <tr>
+            <td>王曉明</td><td>ming@example.com</td>
+            <td><span class="status-pill status-active">啟用中</span></td>
+            <td>2026-07-05 14:03</td><td>2026-05-10</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-secondary" onclick="openDisableUser('王曉明')"><i class="bi bi-pause-circle me-1"></i>停用</button>
+            </td>
+          </tr>
+          <tr>
+            <td>林小美</td><td>mei@example.com</td>
+            <td><span class="status-pill status-locked">已鎖定</span> <span class="text-muted small">（連續失敗 5 次）</span></td>
+            <td>2026-07-04 22:41</td><td>2026-06-02</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-danger" onclick="unlockUser('林小美')"><i class="bi bi-unlock me-1"></i>解鎖</button>
+            </td>
+          </tr>
+          <tr class="text-muted">
+            <td>張志豪</td><td>hao@example.com</td>
+            <td><span class="status-pill status-disabled">已停用</span></td>
+            <td>—</td><td>2026-06-20</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-success" onclick="enableUser('張志豪')"><i class="bi bi-play-circle me-1"></i>啟用</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <details class="wf-screen-note">
+      <summary>💡 內部設計註記（UCDP005 使用者管理）</summary>
+      <ul class="mb-0 mt-2">
+        <li>帳號為 <code>DP_USER</code>，ET / DM 共用；<strong>停用後兩系統同步失效</strong>。</li>
+        <li>帳號權限以<strong>最小權限</strong>為原則；唯一識別、不得共用帳號。</li>
+        <li>連續登入失敗達上限（參數，預設 5）自動鎖定 → 此頁可<strong>手動解鎖</strong>；亦可逾時自動解鎖。</li>
+        <li>連續 <strong>90 日未登入</strong>之帳號由系統自動停用 / 鎖定。</li>
+        <li>使用者可<strong>自助註冊即用</strong>；管理者代建之帳號亦直接可用（<strong>不寄開通確認信</strong>）。</li>
+        <li><strong>此頁不設角色指派</strong>——ET / DM 之業務角色（教師/學員、DM 各角色）由各模組自己的權限管理頁（如 ET07）維護（權限完全分開做）；平台不碰角色、不做全域選單 RBAC。</li>
+        <li>所有帳號異動寫入操作記錄（<code>DP_AUDIT_LOG</code>）。</li>
+      </ul>
+    </details>
+  </div>
+
+  <!-- ============ dp-params 系統參數維護（UCDP006） ============ -->
+  <div id="dp-params" class="screen">
+    <div class="screen-header">
+      <div class="screen-title"><i class="bi bi-sliders text-tsbms-green me-2"></i>系統參數維護</div>
+      <div class="screen-meta">UCDP006 ｜ 系統管理者 ｜ 平台級參數</div>
+    </div>
+
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>此處僅維護<strong>平台級</strong>共用參數；模組自有參數（如 ET 影片大小上限、排程時間）由各模組自行維護。</div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-shield-lock me-1"></i>密碼安全策略</div>
+      <div class="row g-3">
+        <div class="col-md-4"><label class="form-label small mb-1">密碼最小長度（一般使用者）</label><input type="number" class="form-control form-control-sm" value="8"></div>
+        <div class="col-md-4"><label class="form-label small mb-1">密碼最小長度（特權帳號）</label><input type="number" class="form-control form-control-sm" value="12">
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>特權（系統管理者）帳號要求更長，對齊資安法規</div></div>
+        <div class="col-md-4"><label class="form-label small mb-1">字元組合要求（種類數）</label><input type="number" class="form-control form-control-sm" value="3">
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>大小寫英文 / 數字 / 特殊符號 至少 N 種</div></div>
+        <div class="col-md-4"><label class="form-label small mb-1">密碼歷史記憶次數</label><input type="number" class="form-control form-control-sm" value="3">
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>禁止與前 N 次相同（DP_PWD_HIST）</div></div>
+        <div class="col-md-4"><label class="form-label small mb-1">密碼最長效期（天）</label><input type="number" class="form-control form-control-sm" value="90"></div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-lock me-1"></i>帳號鎖定</div>
+      <div class="row g-3">
+        <div class="col-md-4"><label class="form-label small mb-1">登入失敗鎖定次數</label><input type="number" class="form-control form-control-sm" value="5"></div>
+        <div class="col-md-4"><label class="form-label small mb-1">帳號鎖定時間（分鐘）</label><input type="number" class="form-control form-control-sm" value="30">
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>逾時自動解鎖；管理者亦可手動解鎖</div></div>
+        <div class="col-md-4"><label class="form-label small mb-1">閒置停用天數</label><input type="number" class="form-control form-control-sm" value="90"></div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-shield-check me-1"></i>認證</div>
+      <div class="row g-3">
+        <div class="col-md-4"><label class="form-label small mb-1">JWT 有效時間（小時）</label><input type="number" class="form-control form-control-sm" value="8"></div>
+        <div class="col-md-4"><label class="form-label small mb-1">密碼重設連結有效時間（分鐘）</label><input type="number" class="form-control form-control-sm" value="30"></div>
+        <div class="col-md-4"><label class="form-label small mb-1">閒置自動登出（分鐘）</label><input type="number" class="form-control form-control-sm" value="15">
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>閒置逾時自動登出；含敏感資料系統 ≤ 15 分（資安法規）</div></div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-envelope me-1"></i>帳號類信件範本（系統固定）</div>
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>密碼重設信、帳號變更驗證信為<strong>系統固定範本</strong>（帳號安全信件）；可編輯主旨與內文，但不可停用。課程 / 文件之業務通知信範本由各模組（如 ET 通知範本）維護，不在此。</div>
+      <div class="mb-2"><label class="form-label small mb-1">密碼重設信 — 主旨</label><input type="text" class="form-control form-control-sm" value="【EDMS】密碼重設連結"></div>
+      <div class="mb-2"><label class="form-label small mb-1">密碼重設信 — 內文（支援變數 {{USER_NAME}} / {{RESET_LINK}} / {{TTL_MIN}}）</label>
+        <textarea class="form-control form-control-sm" rows="3">{{USER_NAME}} 您好，請於 {{TTL_MIN}} 分鐘內點擊以下連結重設密碼：{{RESET_LINK}}</textarea></div>
+      <div class="mb-2"><label class="form-label small mb-1">帳號變更驗證信 — 主旨</label><input type="text" class="form-control form-control-sm" value="【EDMS】帳號（Email）變更驗證"></div>
+    </div>
+
+    <div class="text-end"><button class="btn btn-tsbms" onclick="showToast('平台參數已儲存並即時生效')"><i class="bi bi-save me-1"></i>儲存</button></div>
+
+    <details class="wf-screen-note">
+      <summary>💡 內部設計註記（UCDP006 系統參數維護）</summary>
+      <ul class="mb-0 mt-2">
+        <li>參數表 <code>DP_PARAM_M</code> / <code>DP_PARAM_D</code>；異動記錄歷程（稽核）。</li>
+        <li>密碼長度分級（一般 8 / 特權 12）保留以對齊國防部資安法規。</li>
+        <li>帳號類信件（密碼重設 / 帳號變更驗證）為系統固定範本、不可停用；業務通知信範本歸各模組（如 ET 通知範本維護）。</li>
+        <li>模組自有參數（ET 影片大小、排程時間 <code>ET_PARAM.WEEKLY_STAT_DAY_TIME</code> 等）不在此頁。</li>
+      </ul>
+    </details>
+  </div>
+
+  <!-- ============ dp-audit 操作記錄查詢（UCDP007） ============ -->
+  <div id="dp-audit" class="screen">
+    <div class="screen-header">
+      <div class="screen-title"><i class="bi bi-journal-text text-tsbms-green me-2"></i>操作記錄（稽核）</div>
+      <div class="screen-meta">UCDP007 ｜ 系統管理者 / 授權人員</div>
+    </div>
+
+    <div class="wf-card">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3"><label class="form-label small mb-1">操作者</label><input type="text" class="form-control form-control-sm" placeholder="姓名 / Email"></div>
+        <div class="col-md-2"><label class="form-label small mb-1">模組</label><select class="form-select form-select-sm"><option>全部</option><option>DP 平台</option><option>ET 教育訓練</option><option>DM 文件管理</option></select></div>
+        <div class="col-md-2"><label class="form-label small mb-1">操作類別</label><select class="form-select form-select-sm"><option>全部</option><option>LOGIN</option><option>LOGOUT</option><option>CREATE</option><option>UPDATE</option><option>DELETE</option></select></div>
+        <div class="col-md-3"><label class="form-label small mb-1">期間（起 ～ 訖）</label>
+          <div class="d-flex align-items-center gap-1"><input type="date" class="form-control form-control-sm"><span>～</span><input type="date" class="form-control form-control-sm"></div>
+        </div>
+        <div class="col-md-2 text-end">
+          <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search me-1"></i>查詢</button>
+          <button class="btn btn-sm btn-tsbms" onclick="showToast('已依當前條件匯出 CSV')"><i class="bi bi-download me-1"></i>匯出</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card p-0">
+      <table class="table table-hover wf-table mb-0 align-middle">
+        <thead><tr>
+          <th>時間</th><th>操作者</th><th>模組</th><th>功能</th><th>類別</th><th>對象</th><th>來源 IP</th><th class="text-end">明細</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td>2026-07-06 09:12:03</td><td>陳大華</td><td>DP</td><td>登入</td>
+            <td><span class="audit-badge audit-login">LOGIN</span></td><td>—</td><td>10.1.2.33</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
+          </tr>
+          <tr>
+            <td>2026-07-06 09:15:22</td><td>陳大華</td><td>DP</td><td>使用者管理</td>
+            <td><span class="audit-badge audit-update">UPDATE</span></td><td>USER: 林小美</td><td>10.1.2.33</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
+          </tr>
+          <tr>
+            <td>2026-07-06 10:02:41</td><td>王曉明</td><td>ET</td><td>課程建立</td>
+            <td><span class="audit-badge audit-create">CREATE</span></td><td>COURSE: 採血新訓 v2</td><td>10.1.2.51</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
+          </tr>
+          <tr>
+            <td>2026-07-06 11:20:08</td><td>李文彬</td><td>DM</td><td>文件廢止</td>
+            <td><span class="audit-badge audit-delete">DELETE</span></td><td>DOC: 採血 SOP v3</td><td>10.1.2.60</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <details class="wf-screen-note">
+      <summary>💡 內部設計註記（UCDP007 操作記錄 / 稽核）</summary>
+      <ul class="mb-0 mt-2">
+        <li><strong>平台共用一張</strong> <code>DP_AUDIT_LOG</code>：ET / DM 之業務異動亦寫入本表，於此統一查詢。</li>
+        <li><strong>append-only</strong>：不可竄改、不可刪除；以雜湊等方式確保完整性。</li>
+        <li>至少稽核：更改密碼、登入成功 / 失敗、系統存取成功 / 失敗。</li>
+        <li>記錄項目：使用者 ID（非個資型）、時間至秒、功能 / 資源、結果、來源與目的位址、異動前後值（JSONB）。</li>
+        <li>至少保留 1 年；每日備份至不同實體並加密。</li>
+      </ul>
+    </details>
+  </div>
+
+  <!-- ============ dp-schedule 排程作業總覽（UCDP008，系統自動，唯讀檢視） ============ -->
+  <div id="dp-schedule" class="screen">
+    <div class="screen-header">
+      <div class="screen-title"><i class="bi bi-clock-history text-tsbms-green me-2"></i>排程作業總覽</div>
+      <div class="screen-meta">UCDP008 ｜ 系統自動（唯讀檢視）</div>
+    </div>
+
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>排程<strong>執行引擎與 job 註冊機制由平台提供</strong>；各模組的排程作業（job 邏輯）由各模組註冊，平台不含業務邏輯。本頁僅供檢視已註冊排程與執行狀態（無排程 CRUD / UI 維護）。</div>
+
+    <div class="wf-card p-0">
+      <table class="table wf-table mb-0 align-middle">
+        <thead><tr>
+          <th>Job</th><th>所屬模組</th><th>Cron</th><th>最近執行</th><th>結果</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>SCHET001 每週統計與週報</td><td>ET</td><td>0 10 * * 1</td><td>2026-07-06 10:00</td><td><span class="status-pill status-active">成功</span></td></tr>
+          <tr><td>SCHET002 每日課程時窗檢查 / 加急提醒</td><td>ET</td><td>0 2 * * *</td><td>2026-07-06 02:00</td><td><span class="status-pill status-active">成功</span></td></tr>
+          <tr><td>DM 寄信排程（退信處理等）</td><td>DM</td><td>*/15 * * * *</td><td>2026-07-06 11:15</td><td><span class="status-pill status-active">成功</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <details class="wf-screen-note">
+      <summary>💡 內部設計註記（UCDP008 排程基礎建設）</summary>
+      <ul class="mb-0 mt-2">
+        <li>平台提供<strong>單一排程執行引擎</strong>（如 APScheduler）＋ <strong>job 註冊介面</strong>；多實例部署時以 <strong>leader 選舉</strong>確保只有一個實例觸發（單一實例可簡化）。</li>
+        <li>各模組於啟動時向平台註冊 job（cron + 執行函式）；<strong>job 邏輯留在各模組</strong>（ET SCHET001/002、DM 寄信排程），平台不 import 業務模組。</li>
+        <li>平台記錄執行歷程（起訖 / 成功失敗 / 錯誤）；排程時間參數由各模組自己的參數表控制。</li>
+        <li>不做 DB 排程主檔與 UI 排程維護（採程式註冊）——故本頁為唯讀檢視。</li>
+      </ul>
+    </details>
+  </div>
+
+  <!-- ============ dp-profile 個人資料維護（UCDP004） ============ -->
+  <div id="dp-profile" class="screen">
+    <div class="screen-header">
+      <div class="screen-title"><i class="bi bi-person-gear text-tsbms-green me-2"></i>個人資料維護</div>
+      <div class="screen-meta">UCDP004 ｜ 所有登入使用者</div>
+    </div>
+
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>姓名 / 帳號 / 密碼為共用 <code>DP_USER</code>，變更後於 ET / DM 兩端同步生效。</div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-person me-1"></i>姓名</div>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-6"><input type="text" class="form-control form-control-sm" id="dp-profile-name" value="陳大華"></div>
+        <div class="col-md-6"><button class="btn btn-sm btn-tsbms" onclick="dpSaveName()"><i class="bi bi-save me-1"></i>儲存姓名</button></div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-envelope-at me-1"></i>帳號（Email）</div>
+      <div class="mb-2"><label class="form-label small mb-1">目前帳號</label><input type="email" class="form-control form-control-sm" value="admin@example.com" disabled></div>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-6"><label class="form-label small mb-1">變更為新 Email</label><input type="email" class="form-control form-control-sm" id="dp-profile-email" placeholder="new@example.com"></div>
+        <div class="col-md-6"><button class="btn btn-sm btn-outline-secondary" onclick="dpChangeEmail()"><i class="bi bi-envelope-check me-1"></i>寄驗證信</button></div>
+      </div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>寄驗證信至<strong>新 Email</strong>，點連結後才切換（延遲生效）；驗證期間<strong>舊 Email 仍可登入</strong>；逾時未驗證則變更作廢。</div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-key me-1"></i>密碼</div>
+      <button class="btn btn-sm btn-outline-secondary" onclick="dpOpenPasswordModal()"><i class="bi bi-shield-lock me-1"></i>變更密碼</button>
+    </div>
+
+    <details class="wf-screen-note">
+      <summary>💡 內部設計註記（UCDP004 個人資料維護）</summary>
+      <ul class="mb-0 mt-2">
+        <li>本畫面為平台能力；<strong>ET 的「個人資料維護（ET08）」為本 UC 之各模組 UI 入口</strong>，實體同為 <code>DP_USER</code>。</li>
+        <li>帳號（Email）變更採<strong>雙信箱驗證後切換</strong>（延遲生效）。</li>
+        <li>密碼變更需驗舊密碼、兩次一致、符合複雜度與重複性；密碼一律雜湊儲存。</li>
+        <li>忘記密碼走登入頁流程（UCDP003）。</li>
+      </ul>
+    </details>
+  </div>
+
+</main>
+
+<!-- ===== Modals ===== -->
+<!-- 建立帳號 -->
+<div class="modal fade" id="createUserModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-person-plus text-tsbms-green me-2"></i>建立帳號</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="mb-2"><label class="form-label small mb-1">帳號（Email）<span class="text-danger">*</span></label><input type="email" class="form-control form-control-sm" placeholder="user@example.com"></div>
+    <div class="mb-2"><label class="form-label small mb-1">姓名 <span class="text-danger">*</span></label><input type="text" class="form-control form-control-sm"></div>
+    <div class="mb-2"><label class="form-label small mb-1">初始密碼 <span class="text-danger">*</span></label><input type="password" class="form-control form-control-sm" placeholder="至少 8 字元（一般）/ 12 字元（特權）"></div>
+    <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>建立後帳號<strong>直接可用</strong>（不寄開通確認信）；業務角色請至各模組指派。</div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="confirmCreateUser()">建立</button></div>
+</div></div></div>
+
+<!-- 停用帳號確認 -->
+<div class="modal fade" id="disableUserModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pause-circle text-warning me-2"></i>停用帳號</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">確定停用 <strong id="disable-user-name">使用者</strong> 的帳號？停用後該帳號於 <strong>ET / DM 兩端同步失效</strong>，可隨時再啟用。</div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-warning btn-sm" onclick="confirmDisableUser()">確定停用</button></div>
+</div></div></div>
+
+<!-- 變更密碼 -->
+<div class="modal fade" id="passwordModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-shield-lock text-tsbms-green me-2"></i>變更密碼</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="mb-2"><label class="form-label small mb-1">舊密碼</label><input type="password" class="form-control form-control-sm" id="dp-pw-old"></div>
+    <div class="mb-2"><label class="form-label small mb-1">新密碼</label><input type="password" class="form-control form-control-sm" id="dp-pw-new"></div>
+    <div class="mb-2"><label class="form-label small mb-1">確認新密碼</label><input type="password" class="form-control form-control-sm" id="dp-pw-confirm"></div>
+    <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>需符合密碼複雜度且不可與前 N 次相同（DP_PWD_HIST）。</div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="dpSavePassword()">儲存</button></div>
+</div></div></div>
+
+<!-- 稽核明細 -->
+<div class="modal fade" id="auditDetailModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-journal-text text-tsbms-green me-2"></i>操作記錄明細</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <table class="table table-sm wf-table"><tbody>
+      <tr><th style="width:130px;">時間</th><td>2026-07-06 09:15:22</td></tr>
+      <tr><th>操作者</th><td>陳大華（USER_ID: 1001）</td></tr>
+      <tr><th>模組 / 功能</th><td>DP / 使用者管理</td></tr>
+      <tr><th>操作類別</th><td><span class="audit-badge audit-update">UPDATE</span></td></tr>
+      <tr><th>對象</th><td>USER: 林小美（USER_ID: 1042）</td></tr>
+      <tr><th>來源 IP</th><td>10.1.2.33</td></tr>
+    </tbody></table>
+    <label class="form-label small mb-1">異動前後值（JSONB）</label>
+    <pre class="bg-light p-2 rounded small mb-0" style="border:1px solid #dee2e6;">{
+  "before": { "status": "LOCKED", "fail_count": 5 },
+  "after":  { "status": "ACTIVE", "fail_count": 0 }
+}</pre>
+  </div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">關閉</button></div>
+</div></div></div>
+
+<!-- Toast -->
+<div class="et-toast" id="et-toast"><i class="bi bi-check-circle-fill"></i><span id="et-toast-text"></span></div>
+
+<script>
+/* ===== 畫面切換 ===== */
+document.addEventListener('DOMContentLoaded', function() {
+  var sidebar = document.getElementById('sidebar');
+  sidebar.querySelectorAll('.nav-link').forEach(function(link) {
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      var screenId = this.getAttribute('data-screen');
+      if (screenId) goScreen(screenId);  // 他模組項目無 data-screen → 點擊無反應（對齊主專案：跨檔不跳轉）
+    });
+  });
+});
+function goScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  var target = document.getElementById(id);
+  if (target) target.classList.add('active');
+  document.querySelectorAll('.sidebar .nav-link').forEach(function(l) {
+    l.classList.toggle('active', l.getAttribute('data-screen') === id);
+  });
+  window.scrollTo(0, 0);
+}
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('hidden'); }
+
+/* ===== 模組下拉展開 / 收合 ===== */
+function toggleModule(mod) {
+  var items = document.getElementById('mod-' + mod);
+  var header = items && items.previousElementSibling;
+  if (!items) return;
+  items.classList.toggle('collapsed');
+  if (header) header.classList.toggle('collapsed');
+}
+
+/* ===== Toast ===== */
+function showToast(text) {
+  var toast = document.getElementById('et-toast');
+  document.getElementById('et-toast-text').textContent = text;
+  toast.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 2400);
+}
+
+/* ===== 使用者管理 ===== */
+function openCreateUser() { bootstrap.Modal.getOrCreateInstance(document.getElementById('createUserModal')).show(); }
+function confirmCreateUser() { bootstrap.Modal.getInstance(document.getElementById('createUserModal')).hide(); showToast('已建立帳號（直接可用；未寄開通信）'); }
+var _disableUser = '';
+function openDisableUser(name) { _disableUser = name; document.getElementById('disable-user-name').textContent = name; bootstrap.Modal.getOrCreateInstance(document.getElementById('disableUserModal')).show(); }
+function confirmDisableUser() { bootstrap.Modal.getInstance(document.getElementById('disableUserModal')).hide(); showToast('已停用 ' + _disableUser + '（ET / DM 兩端同步失效）'); }
+function enableUser(name) { showToast('已啟用 ' + name); }
+function unlockUser(name) { showToast('已解鎖 ' + name + '，失敗計數歸零'); }
+
+/* ===== 系統參數 / 稽核 ===== */
+function openAuditDetail() { bootstrap.Modal.getOrCreateInstance(document.getElementById('auditDetailModal')).show(); }
+
+/* ===== 個人資料維護 ===== */
+function dpSaveName() {
+  var n = document.getElementById('dp-profile-name').value;
+  if (!n) { alert('請輸入姓名'); return; }
+  showToast('姓名已更新：' + n + '（ET / DM 同步）');
+}
+function dpChangeEmail() {
+  var email = document.getElementById('dp-profile-email').value;
+  if (!email) { alert('請輸入新 Email'); return; }
+  showToast('已寄驗證信至 ' + email + '；點連結後才切換，舊 Email 期間仍可登入');
+}
+function dpOpenPasswordModal() {
+  ['dp-pw-old', 'dp-pw-new', 'dp-pw-confirm'].forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('passwordModal')).show();
+}
+function dpSavePassword() {
+  var o = document.getElementById('dp-pw-old').value, n = document.getElementById('dp-pw-new').value, c = document.getElementById('dp-pw-confirm').value;
+  if (!o || !n || !c) { alert('請填寫所有欄位'); return; }
+  if (n !== c) { alert('新密碼與確認密碼不一致'); return; }
+  bootstrap.Modal.getInstance(document.getElementById('passwordModal')).hide();
+  showToast('密碼已變更');
+}
+
+/* ===== 登入流程（demo；與 ET / DM 同套） ===== */
+function _loginShow(id) {
+  ['login-step-1', 'login-register', 'login-forgot-1', 'login-forgot-2'].forEach(function(k) {
+    var el = document.getElementById(k); if (el) el.style.display = (k === id ? '' : 'none');
+  });
+  var link = document.getElementById('login-forgot-link');
+  if (link) link.style.display = (id === 'login-step-1' ? '' : 'none');
+  var tabLogin = document.getElementById('login-tab-login'), tabReg = document.getElementById('login-tab-register'), tabs = document.getElementById('login-tabs');
+  if (tabs) {
+    if (id === 'login-step-1') { tabLogin.classList.add('active'); tabReg.classList.remove('active'); tabs.style.display = ''; }
+    else if (id === 'login-register') { tabLogin.classList.remove('active'); tabReg.classList.add('active'); tabs.style.display = ''; }
+    else { tabs.style.display = 'none'; }
+  }
+  loginShowError(null);
+}
+function loginShowTab(name) { _loginShow(name === 'register' ? 'login-register' : 'login-step-1'); }
+function loginShowError(type) {
+  var box = document.getElementById('login-error'), txt = document.getElementById('login-error-text');
+  if (!box || !txt) return;
+  if (!type) { box.style.display = 'none'; txt.textContent = ''; return; }
+  var msgs = { 'no_account': '查無此帳號，請先註冊', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請聯絡管理者或稍後再試' };
+  txt.textContent = msgs[type] || '登入失敗'; box.style.display = '';
+}
+function loginForgotPw()     { _loginShow('login-forgot-1'); }
+function loginForgotSubmit() { _loginShow('login-forgot-2'); }
+function loginBackToLogin()  { _loginShow('login-step-1'); }
+function loginSubmit()       { document.getElementById('login-overlay').style.display = 'none'; _loginShow('login-step-1'); }
+function loginRegisterSubmit() {
+  var regEmail = document.querySelector('#login-register input[type="email"]');
+  var loginEmailInput = document.getElementById('login-email'), loginPwInput = document.getElementById('login-password');
+  if (regEmail && loginEmailInput) loginEmailInput.value = regEmail.value || '';
+  if (loginPwInput) loginPwInput.value = '';
+  _loginShow('login-step-1'); showToast('註冊成功！請以新建帳號登入');
+}
+function loginLogout() { document.getElementById('login-overlay').style.display = ''; _loginShow('login-step-1'); }
+
+/* 自訂 class helper */
+document.querySelectorAll('.text-tsbms-green').forEach(function(el) { el.style.color = '#2e7d32'; el.style.fontWeight = '600'; });
+</script>
+</body>
+</html>
