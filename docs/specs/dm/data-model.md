@@ -10,7 +10,7 @@
 
 DM 以 `DP_USER`（由平台模組 DP 定義、非 DM 自有）為共用使用者主檔，DM 僅以 `USER_ID` 為 FK 引用；DM 自身持有文件、版本、分類 / func_name / 標籤受控資料、閱覽者可見對象授權、送審、公開變更歷程、閱讀紀錄、角色與其異動等業務表。
 
-> **系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08 集中化決策，見 [`_refs/09-平台模組.md`](../../_refs/09-平台模組.md) 決策紀錄）**：DM 不再自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`。DM 參數改存平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）、通知範本改存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、非同步寄送改用平台 outbox `DP_EMAIL_LOG`、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行；完整欄位見平台 DP data-model，DM 僅維護自己 `MODULE=DM` / `DM_` 前綴之列（維護 UI 仍在 DM09）。
+> **系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08 集中化決策，見 [`_refs/09-平台模組.md`](../../_refs/09-平台模組.md) 決策紀錄）**：DM 不再自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`。DM 參數改存平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）、通知範本改存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、非同步寄送改用平台 outbox `DP_EMAIL_LOG`、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行；完整欄位見平台 DP data-model，DM 僅維護自己 `MODULE=DM` / `DM_` 前綴之列（維護 UI 於平台 DP 後台，按模組過濾）。
 
 > **標準欄位之調整（見 [research.md §1](research.md)）**：各表標準欄位**對齊 EDMS 平台模組 DP**（平台無 SITE / HOSPITAL 概念、無 DP_SITE / DP_HOSPITAL），故**省略 `CREATED_SITE` / `CREATED_HOSPITAL`**（及對應 UPDATED_*），採下列集合；append-only 記錄表（`DM_CHANGE_LOG`、`DM_USER_ROLE_LOG`）不含 UPDATED_* / DELETED。
 
@@ -286,7 +286,7 @@ erDiagram
 
 ## DD — DM_USER_TAG（閱覽者可見對象授權，明細）
 
-使用者 × 「可見對象/單位」標籤多對多；由管理者於 DM09 維護，決定閱覽者於文件庫之可見範圍（見〈標籤式可見性〉）。
+使用者 × 「可見對象/單位」標籤多對多；由管理者於平台 DP 後台「權限管理」維護（按模組過濾），決定閱覽者於文件庫之可見範圍（見〈標籤式可見性〉）。
 
 | 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
 |----------|----------|----------|------|------|------|
@@ -354,7 +354,7 @@ erDiagram
 
 - **通知範本 → `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）**：DM 9 項內建事件（`DOC_SUBMIT` / `DOC_REJECT` / `DOC_PUBLISH` / `OBS_SUBMIT` / `OBS_APPROVE` / `OBS_REJECT` / `KPI_WEEKLY` / `UNREAD_REMIND` / `AUTO_REMIND`）改存 `DP_NOTIFY_TEMPLATE`，欄位含 `EVENT_NAME` / `SUBJECT` / `BODY` / `CHANNEL`（EMAIL_MSG＝Email+站內 / MSG_ONLY＝僅站內，自動催辦用 / EMAIL_ONLY＝僅 Email，文件發布通知 / KPI 週報 / 未讀提醒用）/ `IS_ENABLED` 由 DP 表提供。編輯 UI 仍在 DM09「通知範本」分頁（DM 管理者只編輯 `MODULE=DM` 的列）。`DOC_PUBLISH`（核准發布時觸發，發撰寫者 + 相符閱覽者）、`KPI_WEEKLY` / `UNREAD_REMIND`（排程 SCHDM001 觸發）皆 CHANNEL=EMAIL_ONLY、非同步批次寄送。原「文件發布(撰寫者,EMAIL_MSG)」與「發布通知閱覽者」已於 2026-06-29 合併為單一 `DOC_PUBLISH`。
 - **寄件佇列 → 平台 outbox `DP_EMAIL_LOG`**：DM 之非同步寄送（`DOC_PUBLISH` / `KPI_WEEKLY` / `UNREAD_REMIND`）改呼叫平台唯一發信服務（傳 `template_code`），由平台 outbox 非同步寄送並記錄狀態 / 重試 / `CALLER_MODULE=DM`。原 worker「寄送時即時組信」（未讀提醒即時算該收件人未看清單、KPI 週報即時算統計 + CSV）之行為改由平台發信服務承載；發布通知之收件名單仍於發布當下組出（快照）。
-- **系統參數 → 平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）**：DM 參數改存 `DP_PARAM`，平台提供唯讀查詢服務；維護 UI 仍在 DM09 系統設定（DM 管理者只看 DM 參數）。DM 參數 key：`DM_REMIND_THRESHOLD`（催辦門檻）、`DM_FILE_MAX_MB`、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`（KPI 週報 / 未讀提醒每週執行時間，格式 `星期,HH:MM`，如 `週一,10:00`，預設 `週一,10:00`，由管理者於 DM09 通知範本設定、兩者共用）。原發信引擎調校 `DM_MAIL_MAX_RETRY` / `DM_MAIL_RATE_PER_MIN` / `DM_MAIL_FAIL_ALERT_PCT` 屬發信引擎，因發信引擎集中於平台，已改為**平台級 `DP_` 參數**（不再掛 `DM_`），凡引用處改述為「平台發信引擎參數」。
+- **系統參數 → 平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）**：DM 參數改存 `DP_PARAM`，平台提供唯讀查詢服務；維護介面於平台 DP 後台（DM 管理者只看 DM 參數，按模組過濾）。DM 參數 key：`DM_REMIND_THRESHOLD`（催辦門檻）、`DM_FILE_MAX_MB`、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`（KPI 週報 / 未讀提醒每週執行時間，格式 `星期,HH:MM`，如 `週一,10:00`，預設 `週一,10:00`，由管理者於平台 DP 後台通知範本設定、兩者共用）。原發信引擎調校 `DM_MAIL_MAX_RETRY` / `DM_MAIL_RATE_PER_MIN` / `DM_MAIL_FAIL_ALERT_PCT` 屬發信引擎，因發信引擎集中於平台，已改為**平台級 `DP_` 參數**（不再掛 `DM_`），凡引用處改述為「平台發信引擎參數」。
 
 ---
 

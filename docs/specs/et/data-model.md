@@ -6,7 +6,7 @@
 
 > **2026-07-02 變更摘要**：移除 ET_MODULE / ET_USER_MODULE 與 ET_COURSE.MODULE_CODE，新增 ET_TAG / ET_USER_TAG / ET_COURSE_TAG（受訓單位標籤）；ET_COURSE 新增起訖時間、狀態機改可逆（移除 PENDING_CLOSE）；新增課後問卷五表（ET_SURVEY*）、週統計快照（ET_WEEKLY_STAT）。
 
-> **2026-07-08 集中化變更摘要**：系統參數、通知範本、發信、排程集中於平台模組 DP（見 `../../requirements/RQDP.md`、`../../_refs/09-平台模組.md`）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：ET 參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`）、ET 6 類通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信改走平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。維護 UI 仍留在 ET 系統設定頁；`ET_WEEKLY_STAT`（業務快照）不受影響。
+> **2026-07-08 集中化變更摘要**：系統參數、通知範本、發信、排程集中於平台模組 DP（見 `../../requirements/RQDP.md`、`../../_refs/09-平台模組.md`）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：ET 參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`）、ET 6 類通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信改走平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。維護介面於平台 DP 後台（按模組過濾）；`ET_WEEKLY_STAT`（業務快照）不受影響。
 
 > **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`（無 SITE / HOSPITAL 概念，對齊平台模組 DP）。
 
@@ -41,8 +41,8 @@
 | 問卷填答主檔 | ET_SURVEY_RESPONSE_M | 主表（主+明細）| 問卷填答 | 學員（具名）對某問卷之一次填答；一人一次 |
 | 問卷填答明細 | ET_SURVEY_RESPONSE_D | 明細 | 填答明細 | 該次填答之各題選擇 |
 | 週統計快照 | ET_WEEKLY_STAT | 主表 | 週統計快照 | 每週排程之課程統計快照（課程×週次），供週報比較與歷史回查 |
-| 通知信範本 | DP_NOTIFY_TEMPLATE | 平台主表（DP 定義）| 通知信範本 | 由平台模組 DP 定義；ET 6 類通知範本存 `MODULE=ET`；完整欄位見平台 DP data-model；ET 於 US15（ET09）維護 `MODULE=ET` 之列 |
-| 系統參數 | DP_PARAM | 平台主表（DP 定義）| 系統參數 | 由平台模組 DP 定義；ET 參數以 `PARAM_ID` 前綴 `ET_` 存放（影片格式 / 大小上限 / 排程時間等）；完整欄位見平台 DP data-model；ET 於系統設定頁維護前綴 `ET_` 之列 |
+| 通知信範本 | DP_NOTIFY_TEMPLATE | 平台主表（DP 定義）| 通知信範本 | 由平台模組 DP 定義；ET 6 類通知範本存 `MODULE=ET`；完整欄位見平台 DP data-model；`MODULE=ET` 之列由 ET 管理者於平台 DP 後台「通知範本」維護（按模組過濾）|
+| 系統參數 | DP_PARAM | 平台主表（DP 定義）| 系統參數 | 由平台模組 DP 定義；ET 參數以 `PARAM_ID` 前綴 `ET_` 存放（影片格式 / 大小上限 / 排程時間等）；完整欄位見平台 DP data-model；前綴 `ET_` 之列由 ET 管理者於平台 DP 後台維護（按模組過濾）|
 
 ---
 
@@ -564,7 +564,7 @@
 
 ### 系統參數（DP_PARAM，前綴 `ET_`）
 
-> **由平台模組 DP 定義**（`DP_PARAM_M` / `DP_PARAM_D`；`PARAM_ID` / `PARAM_VALUE` / 說明 / 稽核歷程等）；ET 不自持參數表。ET 參數以 `PARAM_ID` 前綴 `ET_` 集中存於平台表，平台提供唯讀查詢服務供 ET 讀取；完整欄位見平台 DP data-model。**維護 UI 仍在 ET 系統設定頁**（ET 管理者只看 / 編輯前綴 `ET_` 的參數）（2026-07-08 集中化）。
+> **由平台模組 DP 定義**（`DP_PARAM_M` / `DP_PARAM_D`；`PARAM_ID` / `PARAM_VALUE` / 說明 / 稽核歷程等）；ET 不自持參數表。ET 參數以 `PARAM_ID` 前綴 `ET_` 集中存於平台表，平台提供唯讀查詢服務供 ET 讀取；完整欄位見平台 DP data-model。**維護介面於平台 DP 後台**（系統參數與清單，ET 管理者只看 / 編輯前綴 `ET_` 的參數，按模組過濾）（2026-07-08 集中化）。
 
 **ET 參數**（部署時由平台 seed，前綴 `ET_`）：
 

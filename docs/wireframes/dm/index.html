@@ -539,7 +539,7 @@
         <option value="BS05">BS05 — 用血回報</option>
         <option value="MA01">MA01 — 安全檢核</option>
       </select>
-      <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>選項來自 DM09 維護之受控清單（func_name），不可自由輸入；讀者可依作業項目快速找到對應系統操作手冊</div>
+      <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>選項來自 平台 DP 後台維護之受控清單（func_name），不可自由輸入；讀者可依作業項目快速找到對應系統操作手冊</div>
     </div>
 
     <div class="row g-2 align-items-end mt-2">
@@ -695,8 +695,8 @@
     <span style="margin-left:1rem;">• <strong>舊版本（已被取代）</strong> — 進入文件詳細頁的「版本歷程」抽屜查閱（同一個 DOC_ID 下的歷史版本）</span><br>
     <span style="margin-left:1rem;">• <strong>已廢止文件</strong> — DM01 完全查不到；僅 DM_ADMIN 可至 sidebar「已廢止文件查詢」（DM06）read-only 查看，含完整版本歷程</span><br>
     <strong>列表欄位：</strong>文件名稱 / 分類 / 狀態 / 發布日期 / 作者（系統操作手冊額外顯示對應 func_name）；下方另顯示已掛標籤 pills，可一眼識別文件適用情境<br>
-    <strong>標籤搜尋：</strong>下拉 multi-select checkbox（僅列<strong>檢索標籤</strong>：適用模組／文件性質／法規關聯）；按鈕顯示已選個數，選取後於按鈕下方以 pill 列出，點 pill 的 × 可移除。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM_ADMIN 於 DM09 維護。「可見對象/單位」為權限標籤、不列入此檢索下拉<br>
-    <strong>可見範圍（標籤式可見性）：</strong><strong>閱覽者</strong>只看得到「全體」或與自己被授予之「可見對象/單位」相符（OR 比對）之文件；<strong>編輯者／審核者／管理者不受此限，可見全部</strong>。可見對象授權由 DM_ADMIN 於 DM09 權限管理維護<br>
+    <strong>標籤搜尋：</strong>下拉 multi-select checkbox（僅列<strong>檢索標籤</strong>：適用模組／文件性質／法規關聯）；按鈕顯示已選個數，選取後於按鈕下方以 pill 列出，點 pill 的 × 可移除。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM 管理者於平台 DP 後台維護。「可見對象/單位」為權限標籤、不列入此檢索下拉<br>
+    <strong>可見範圍（標籤式可見性）：</strong><strong>閱覽者</strong>只看得到「全體」或與自己被授予之「可見對象/單位」相符（OR 比對）之文件；<strong>編輯者／審核者／管理者不受此限，可見全部</strong>。可見對象授權由 DM_ADMIN 於 平台 DP 後台權限管理維護<br>
     <strong>顯示原則：</strong>列表預設僅顯示目前發布版本（CURRENT），不混雜歷史版本；歷史版本可進入文件詳細頁透過「版本歷程」抽屜查閱<br>
     <strong>點擊單筆文件：</strong>進入文件詳細頁（DM02）<br>
     <strong>權限說明：</strong>登入使用者依可見範圍閱讀（見上）；新增/編輯按鈕僅 DM_EDITOR 角色顯示；已廢止文件本畫面一律不顯示，DM_ADMIN 須另從 sidebar「已廢止文件查詢」（DM06）進入
@@ -975,7 +975,7 @@
 
       <!-- 可見對象/單位（權限，必填至少 1；決定哪些閱覽者看得到） -->
       <div class="wf-card">
-        <h6 class="fw-bold mb-3"><i class="bi bi-people-fill me-1"></i>可見對象/單位 <span class="text-danger">*</span> <small class="text-muted fw-normal">（必填至少 1 項；決定哪些閱覽者看得到此文件，受控詞彙由 DM_ADMIN 於 DM09 維護）</small></h6>
+        <h6 class="fw-bold mb-3"><i class="bi bi-people-fill me-1"></i>可見對象/單位 <span class="text-danger">*</span> <small class="text-muted fw-normal">（必填至少 1 項；決定哪些閱覽者看得到此文件，受控詞彙由 DM 管理者於平台 DP 後台維護）</small></h6>
         <div class="tag-picker" data-tag-scope="dm03aud">
           <div class="dropdown">
             <button class="form-select form-select-sm text-start" type="button"
@@ -1003,7 +1003,7 @@
 
       <!-- 檢索標籤（多選下拉；選完於下方顯示已選） -->
       <div class="wf-card">
-        <h6 class="fw-bold mb-3"><i class="bi bi-tags me-1"></i>檢索標籤 <small class="text-muted fw-normal">（選填；供 DM01 搜尋用，不影響可見性；受控詞彙由 DM_ADMIN 於 DM09 維護）</small></h6>
+        <h6 class="fw-bold mb-3"><i class="bi bi-tags me-1"></i>檢索標籤 <small class="text-muted fw-normal">（選填；供 DM01 搜尋用，不影響可見性；受控詞彙由 DM 管理者於平台 DP 後台維護）</small></h6>
 
         <div class="tag-picker" data-tag-scope="dm03">
           <div class="dropdown">
@@ -1124,7 +1124,7 @@
           <option value="doctorw">吳醫師（檢驗科）</option>
           <option value="qabox">品保室</option>
         </select>
-        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>下拉清單僅顯示具備「審核者」角色之使用者（由 DM09 權限管理指派），且<strong>排除撰寫者本人</strong>（不可自審自核）。送出後系統僅通知本筆指定審核者；該審核者於 DM04 簽核中心可看到此項目。</div>
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>下拉清單僅顯示具備「審核者」角色之使用者（由 平台 DP 後台權限管理指派），且<strong>排除撰寫者本人</strong>（不可自審自核）。送出後系統僅通知本筆指定審核者；該審核者於 DM04 簽核中心可看到此項目。</div>
       </div>
 
       <div class="wf-card">
@@ -1162,13 +1162,13 @@
     <strong>關聯欄位：</strong><br>
     <span style="margin-left:1rem;">• <strong>SOP / 訓練教材 / 其他</strong>三類無關聯欄位</span><br>
     <span style="margin-left:1rem;">• <strong>系統操作手冊</strong>分類額外顯示「關聯作業項目（func_name）」單選下拉，對應主系統作業功能</span><br>
-    <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（可見對象/單位〔權限・必填〕＋適用模組／文件性質／法規關聯〔檢索〕）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM_ADMIN 於 DM09「標籤維護」維護，供 DM01 搜尋使用<br>
-    <strong>權限：</strong>本畫面僅 DM_EDITOR 角色可進入；角色由管理者於 DM09 權限管理指派<br>
+    <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（可見對象/單位〔權限・必填〕＋適用模組／文件性質／法規關聯〔檢索〕）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM 管理者於平台 DP 後台維護，供 DM01 搜尋使用<br>
+    <strong>權限：</strong>本畫面僅 DM_EDITOR 角色可進入；角色由管理者於 平台 DP 後台權限管理指派<br>
     <strong>內容輸入：</strong>僅支援上傳檔案（PDF/Word/Excel/PPT/圖片，單檔最大 50 MB）；不提供線上編輯功能<br>
     <span style="margin-left:1rem;">• <strong>不支援預覽格式提醒</strong>：上傳 Office 格式（Word/Excel/PPT）檔案時，系統跳出提醒視窗告知「閱讀者於 DM02 將無法線上預覽，僅能下載原檔」；撰寫者可選「重新選擇」改傳 PDF，或選「仍要使用此檔案」繼續送審。確認後檔案下方顯示橘色警示條（持續提示）。PDF 與圖片可線上預覽，不觸發提醒</span><br>
     <span style="margin-left:1rem;">• <strong>demo 模式</strong>：上傳區域提供 PDF / Word / Excel / PPT / 圖片五種範例切換連結，方便客戶確認提醒視窗與警示條樣式（正式系統不顯示此 demo 連結）</span><br>
     <strong>取消編輯：</strong>若有未儲存變更，跳 confirm「離開將遺失未儲存的修改」→ 確定後返回（編輯模式返回 DM02，新增模式返回 DM01）；無變更直接返回不跳 confirm<br>
-    <strong>指定審核者：</strong>送交簽核前必選；下拉清單為 DM09 權限管理中具「審核者」角色之使用者，且<strong>排除撰寫者本人</strong>（職責分離，不可自審自核）。送出後系統<strong>只通知該指定審核者</strong>（不再通知所有審核者）；該審核者於 DM04 簽核中心可看到此項目<br>
+    <strong>指定審核者：</strong>送交簽核前必選；下拉清單為 平台 DP 後台權限管理中具「審核者」角色之使用者，且<strong>排除撰寫者本人</strong>（職責分離，不可自審自核）。送出後系統<strong>只通知該指定審核者</strong>（不再通知所有審核者）；該審核者於 DM04 簽核中心可看到此項目<br>
     <strong>送交簽核：</strong>狀態變為「送審中」，系統 Email + 系統內訊息通知指定審核者<br>
     <strong>新版本發布原子操作：</strong>核准後系統自動執行（1）插入新版本紀錄；（2）原版本狀態改「已被取代」；（3）更新主檔 CURRENT_VERSION_ID 指標。外部 URL 完全不變
   </details>
@@ -1475,7 +1475,7 @@
     <strong>狀態機：</strong><br>
     <span style="margin-left:1rem;">• 新增 / 新版本：草稿 → 送審中 → 已核准/退回 → 已發布</span><br>
     <span style="margin-left:1rem;">• 廢止：已發布 → 廢止待簽核 → 已廢止/已發布（退回回原狀）</span><br>
-    <strong>停留天數：</strong>顯示送審後經過的天數；**超過 7 天**之項目標紅警示（紅底 + ⚠️ icon），且系統會**自動發催辦信給指定審核者**（每日寄一次直到處理完，詳見 DM09 通知範本「自動催辦信」事件）<br>
+    <strong>停留天數：</strong>顯示送審後經過的天數；**超過 7 天**之項目標紅警示（紅底 + ⚠️ icon），且系統會**自動發催辦信給指定審核者**（每日寄一次直到處理完，詳見 平台 DP 後台通知範本「自動催辦信」事件）<br>
     <strong>卡住怎麼辦：</strong>若指定審核者長期未處理，**撰寫者**可至 DM07「我的文件動態」對該筆送審項目點「<strong>撤回送審</strong>」（撤回後文件回到草稿，撰寫者可重新編輯與選擇新審核者再送）；DM_ADMIN 不介入個別簽核項目
   </details>
 </div>
@@ -1821,7 +1821,7 @@
     <strong>空資料：</strong>查詢無符合文件時顯示「查無符合條件之文件統計」（DM-MSG-DM10-001）<br>
     <strong>已看認定：</strong>使用者<strong>下載目前發布版</strong>即計為已看（預覽不計）；同人同版本以一次計；發布新版本後該文件已看歸零（需重新下載新版）<br>
     <strong>應看（分母）：</strong>該文件可見對象相符之閱覽者（掛「全體」→所有閱覽者）；<strong>不排除</strong>兼具編輯 / 審核 / 管理者者（與發布通知一致）<br>
-    <strong>每週排程（SCHDM001，每週執行；星期＋時間可於 DM09 通知範本設定，預設週一 10:00，共用；於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行、job handler 由 DM 提供）：</strong>寄 KPI 週報予管理者（Email：內文摘要 + CSV 附件）、寄未讀提醒予未看之閱覽者（Email：一人一信彙整，<strong>涵蓋全部已發布文件</strong>；是否寄送由管理者於 DM09 通知範本「未讀提醒」啟用/停用統一控制）；大量寄信經平台發信服務 + outbox <code>DP_EMAIL_LOG</code> 非同步<br>
+    <strong>每週排程（SCHDM001，每週執行；星期＋時間可於 平台 DP 後台通知範本設定，預設週一 10:00，共用；於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行、job handler 由 DM 提供）：</strong>寄 KPI 週報予管理者（Email：內文摘要 + CSV 附件）、寄未讀提醒予未看之閱覽者（Email：一人一信彙整，<strong>涵蓋全部已發布文件</strong>；是否寄送由管理者於 平台 DP 後台通知範本「未讀提醒」啟用/停用統一控制）；大量寄信經平台發信服務 + outbox <code>DP_EMAIL_LOG</code> 非同步<br>
     <strong>權限：</strong>僅 DM_ADMIN；一般使用者導覽不顯示且後端擋直接 URL 存取
   </details>
 </div>

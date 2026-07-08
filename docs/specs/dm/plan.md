@@ -66,7 +66,7 @@ specs/dm/
 
 ```text
 use-cases/dm/usecases.md   # 使用案例（UCDM01~12 + RQ 追蹤矩陣）
-wireframes/dm/index.html   # 畫面原型（DM00 儀表板 / DM01 文件庫 / DM02 詳細頁 / DM03 新增編輯 / DM04 簽核 / DM06 已廢止 / DM07 個人專區 / DM08 變更歷程 / DM09 系統設定）
+wireframes/dm/index.html   # 畫面原型（DM00 儀表板 / DM01 文件庫 / DM02 詳細頁 / DM03 新增編輯 / DM04 簽核 / DM06 已廢止 / DM08 變更歷程 / DM10 閱讀 KPI）；登入 / 個人資料 / 系統設定(DM09) 已移至平台 DP 後台
 requirements/RQDM.md       # 需求清單
 _refs/11-文件管理模組.md   # 分析資料（source of truth）
 docs/deliverables/需求規格確認書/交付版本/需求規格確認書_文件管理模組.docx  # 交付確認書

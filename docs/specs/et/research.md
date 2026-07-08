@@ -216,13 +216,13 @@
 
 ### 13. 系統參數 / 通知範本 / 排程 / 發信集中於平台 DP（2026-07-08 變更，取代原「ET_PARAM 不依賴 DP」決策）
 
-**決策（2026-07-08 更新）**: ET 系統參數集中於平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`：影片格式 / 大小上限 / 倍速上限 / 排程時間 / 加急提醒天數等），平台提供唯讀查詢服務供 ET 讀取；**維護 UI 仍留在 ET 系統設定頁**（ET 管理者只看前綴 `ET_` 的參數）。通知範本集中於平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、發信呼叫平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程於平台 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。密碼重設 / Email 變更驗證連結有效時間改為平台級 `DP_` 參數（認證 TTL 由平台 DP 提供）。
+**決策（2026-07-08 更新）**: ET 系統參數集中於平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`：影片格式 / 大小上限 / 倍速上限 / 排程時間 / 加急提醒天數等），平台提供唯讀查詢服務供 ET 讀取；**維護介面於平台 DP 後台**（系統參數與清單，ET 管理者只看前綴 `ET_` 的參數，按模組過濾）。通知範本集中於平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、發信呼叫平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程於平台 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。密碼重設 / Email 變更驗證連結有效時間改為平台級 `DP_` 參數（認證 TTL 由平台 DP 提供）。
 
 > **原決策（已作廢）**：ET 曾規劃以自管之 `ET_PARAM` 表儲存參數、不呼叫 DP。2026-07-08 集中化決策後改為集中儲存於平台 DP（見 [../../requirements/RQDP.md](../../requirements/RQDP.md)、[../../_refs/09-平台模組.md](../../_refs/09-平台模組.md)）；集中的是「儲存與引擎」，各模組業務內容（參數值、範本文案、job 邏輯）與維護 UI 仍由 ET 自理。
 
 **理由（集中化後）**:
 - 全平台參數 / 範本 / 排程 / 發信統一儲存與引擎，避免各模組重複造輪、便於資安稽核與運維
-- ET 仍保有業務自主：維護 UI 留在 ET、參數以前綴 `ET_` / 範本以 `MODULE=ET` 隔離，ET 管理者只看自己的列
+- ET 仍保有業務自主：維護 UI 於平台 DP 後台（按模組過濾）、參數以前綴 `ET_` / 範本以 `MODULE=ET` 隔離，ET 管理者只看自己的列
 - 認證相關 TTL 歸平台級（登入 / 忘記密碼 / Email 變更驗證由平台 DP 提供），語意更正確
 
 **排除方案**:
@@ -386,6 +386,6 @@
 | 議題 | 決策 |
 |------|------|
 | ET 與 DM 帳號共用範圍 | 共用 `DP_USER` 主檔 + 密碼變更同步；角色與受訓單位標籤各自管理（標籤不共用，per #17）|
-| ET 與平台 DP 之依賴 | 帳號 / 認證共用平台 DP；系統參數集中於 `DP_PARAM`（前綴 `ET_`）、通知範本集中於 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、發信走平台唯一發信服務（`DP_EMAIL_LOG`）、排程於 `DP_SCHEDULE` 註冊由平台引擎執行（2026-07-08 集中化，取代原「ET_PARAM 自管、不呼叫 DP」決策）；維護 UI 仍留在 ET |
+| ET 與平台 DP 之依賴 | 帳號 / 認證共用平台 DP；系統參數集中於 `DP_PARAM`（前綴 `ET_`）、通知範本集中於 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、發信走平台唯一發信服務（`DP_EMAIL_LOG`）、排程於 `DP_SCHEDULE` 註冊由平台引擎執行（2026-07-08 集中化，取代原「ET_PARAM 自管、不呼叫 DP」決策）；維護 UI 於平台 DP 後台（按模組過濾）|
 | ET 與主系統業務模組（BC / CP / TL / BS / MA / LB） | 完全不依賴；受訓單位標籤（ET_TAG）為 ET 自定，不對應主系統任何 table |
 | ET 與 Email Server | 不直接介接 SMTP，改呼叫平台唯一發信服務（傳 `template_code`）經 `DP_EMAIL_LOG` outbox 寄送；不引入 MQ 或事件匯流排；排程（SCHET001 / SCHET002）於平台 `DP_SCHEDULE` 註冊、由平台引擎執行 |
