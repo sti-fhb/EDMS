@@ -379,7 +379,7 @@ erDiagram
 | DM_ADMIN | 管理者 |
 | DM_EDITOR | 編輯者 |
 | DM_REVIEWER | 審核者 |
-| DM_VIEWER | 閱覽者（首次登入自動授予）|
+| DM_VIEWER | 閱覽者（由管理者開通，無自動授予）|
 
 ### 送審類型（DM_REVIEW.REVIEW_TYPE）
 

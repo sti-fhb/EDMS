@@ -32,7 +32,7 @@
 
 > 為所有 User Story 之阻斷性前置（SSO 認證、授權、檔案、DOC_ID、通知、狀態機）。
 
-- [ ] T014 [P] 實作 SSO 認證接入 dm/middleware/auth：共用 `DP_USER` 驗證帳密、未登入擋下、首次登入自動授予閱覽者；**DM 權限自管、與平台 DP 只共用帳號與認證**，對應 spec_us2 FR-001~003
+- [ ] T014 [P] 實作 SSO 認證接入 dm/middleware/auth：共用 `DP_USER` 驗證帳密、未登入擋下、無任何 DM 角色者拒絕進入（原「首次登入自動授予閱覽者」已作廢，DM 角色一律由管理者開通）；**DM 權限自管、與平台 DP 只共用帳號與認證**，對應 spec_us2 FR-001~003
 - [ ] T015 [P] 實作角色授權工具 dm/util/authz：4 角色（DM_ADMIN/EDITOR/REVIEWER/VIEWER）複選聯集判定；提供「指定審核者排除本人」與「管理者自我保護」共用檢核，對應 spec_us1 FR-005/006、spec_us5 FR-006
 - [ ] T016 [P] 實作檔案儲存服務 dm/service/file_store：上傳至檔案系統 / 物件儲存、DB 存 metadata（FILE_*）、單檔上限讀平台 `DP_PARAM.DM_FILE_MAX_MB`（前綴 `DM_`，經平台唯讀查詢服務）、依 MIME 判定可預覽（PDF/圖片）/ 僅下載（Office），參照 research §3/§10
 - [ ] T017 [P] 實作 DOC_ID 產生器 dm/util/docid：`DM-{分類碼}-{6 位流水號}`、流水號依分類各自獨立、草稿建立時配號，參照 research §2
