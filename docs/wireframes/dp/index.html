@@ -420,9 +420,10 @@
       <table class="table table-sm wf-table mb-2 align-middle">
         <thead><tr><th style="width:140px;">分類碼</th><th>分類名稱</th><th class="text-end">操作</th></tr></thead>
         <tbody>
-          <tr><td><code>SOP</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>標準作業程序</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td><code>WI</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>工作指引</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td><code>FORM</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>表單</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>SOP</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>標準作業程序（SOP）</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>MANUAL</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>系統操作手冊</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>TRAIN</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>訓練教材</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>OTHER</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>其他</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
         </tbody>
       </table>
       <div class="field-helper mb-2"><i class="bi bi-lock-fill"></i><strong>分類碼</strong>建立後鎖定（<code>DP_PARAM_M.DETAIL_LOCK</code>）＝唯讀，僅可改名稱；因分類碼會嵌入 <code>DOC_ID</code>（產碼規則屬 DM 業務）。</div>
@@ -432,10 +433,10 @@
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-list-check me-1"></i>DM 關聯作業項目清單 <code>DM_FUNC_NAME</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
-        <thead><tr><th>func_name</th><th class="text-end">操作</th></tr></thead>
+        <thead><tr><th style="width:140px;">func_name</th><th>說明</th><th class="text-end">操作</th></tr></thead>
         <tbody>
-          <tr><td>採血作業</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>檢驗作業</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>BS04</code></td><td>對應主系統作業功能代號</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>BC01</code></td><td>對應主系統作業功能代號</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
         </tbody>
       </table>
       <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>func_name <strong>唯一手冊檢核</strong>之業務規則由 DM 於讀取後執行。</div>
@@ -449,6 +450,7 @@
         <tbody>
           <tr><td>全體 <span class="text-muted small">（通用值）</span></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
           <tr><td>護理師</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>軍人</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
           <tr><td>醫檢師</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
           <tr><td>行政人員</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
         </tbody>
@@ -478,6 +480,7 @@
           <tr><td>全體 <span class="status-pill status-active">IS_ALL</span> <span class="text-muted small">（特殊項）</span></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
           <tr><td>護理師</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
           <tr><td>行政人員</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>軍人</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
           <tr><td>醫檢師</td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
         </tbody>
       </table>
@@ -538,23 +541,78 @@
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
           </tr>
           <tr>
-            <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_INVITE</code></td><td>【EDMS】課程邀請通知</td>
+            <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_INVITE</code></td><td>課程邀請通知</td>
+            <td>Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_INVITE_DIGEST</code></td><td>課程邀請彙整通知（事後貼標）</td>
+            <td>Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_UPDATE</code></td><td>課程內容更新通知</td>
+            <td>Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-create">ET</span></td><td><code>WEEKLY_REMIND</code></td><td>每週未看提醒</td>
+            <td>Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-create">ET</span></td><td><code>URGENT_REMIND</code></td><td>截止前加急提醒</td>
+            <td>Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-create">ET</span></td><td><code>WEEKLY_REPORT</code></td><td>週報（教師 / 管理者）</td>
+            <td>Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_SUBMIT</code></td><td>文件送審通知</td>
             <td>Email + 站內</td><td><span class="status-pill status-active">啟用</span></td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
           </tr>
           <tr>
-            <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_URGENT</code></td><td>【EDMS】課程即將截止提醒</td>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_REJECT</code></td><td>文件退回通知</td>
             <td>Email + 站內</td><td><span class="status-pill status-active">啟用</span></td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
           </tr>
           <tr>
-            <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_SUBMIT</code></td><td>【EDMS】文件送審通知</td>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_PUBLISH</code></td><td>文件發布通知（撰寫者 + 相符閱覽者）</td>
+            <td>僅 Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>OBS_SUBMIT</code></td><td>廢止申請送審</td>
             <td>Email + 站內</td><td><span class="status-pill status-active">啟用</span></td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
           </tr>
           <tr>
-            <td><span class="audit-badge audit-login">DM</span></td><td><code>KPI_WEEKLY</code></td><td>【EDMS】KPI 週報 / 未讀提醒</td>
-            <td>Email</td><td><span class="status-pill status-disabled">停用</span></td>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>OBS_APPROVE</code></td><td>廢止核准通知</td>
+            <td>Email + 站內</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>OBS_REJECT</code></td><td>廢止退回通知</td>
+            <td>Email + 站內</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>KPI_WEEKLY</code></td><td>KPI 週報（管理者）</td>
+            <td>僅 Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>UNREAD_REMIND</code></td><td>未讀提醒（閱覽者）</td>
+            <td>僅 Email</td><td><span class="status-pill status-active">啟用</span></td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-login">DM</span></td><td><code>AUTO_REMIND</code></td><td>自動催辦信（指定審核者）</td>
+            <td>僅站內</td><td><span class="status-pill status-active">啟用</span></td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
           </tr>
         </tbody>
