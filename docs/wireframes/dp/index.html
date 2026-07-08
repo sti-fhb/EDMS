@@ -287,7 +287,7 @@
   <div id="dp-users" class="screen active">
     <div class="screen-header">
       <div class="screen-title"><i class="bi bi-people-fill text-tsbms-green me-2"></i>使用者管理</div>
-      <div class="screen-meta">UCDP005 ｜ 系統管理者</div>
+      <div class="screen-meta">UCDP005 ｜ 平台管理員</div>
     </div>
 
     <div class="wf-card">
@@ -353,7 +353,8 @@
         <li>連續登入失敗達上限（參數，預設 5）自動鎖定 → 此頁可<strong>手動解鎖</strong>；亦可逾時自動解鎖。</li>
         <li>連續 <strong>90 日未登入</strong>之帳號由系統自動停用 / 鎖定。</li>
         <li>使用者可<strong>自助註冊即用</strong>；管理者代建之帳號亦直接可用（<strong>不寄開通確認信</strong>）。</li>
-        <li><strong>此頁不設角色指派</strong>——ET / DM 之業務角色（教師/學員、DM 各角色）由各模組自己的權限管理頁（如 ET07）維護（權限完全分開做）；平台不碰角色、不做全域選單 RBAC。</li>
+        <li><strong>此頁不設角色指派</strong>——ET / DM 之業務角色（教師/學員、DM 各角色）由各模組自己的權限管理頁（如 ET07）維護（權限完全分開做）；平台不碰業務角色、不做全域選單 RBAC。</li>
+        <li>DP 自身功能（使用者管理 / 系統參數 / 操作記錄）以 <code>DP_USER.IS_PLATFORM_ADMIN</code> 旗標把關（平台管理員，非業務角色體系）；平台管理員<strong>看不到</strong> ET / DM 業務參數與範本。</li>
         <li>所有帳號異動寫入操作記錄（<code>DP_AUDIT_LOG</code>）。</li>
       </ul>
     </details>
@@ -363,17 +364,17 @@
   <div id="dp-params" class="screen">
     <div class="screen-header">
       <div class="screen-title"><i class="bi bi-sliders text-tsbms-green me-2"></i>系統參數維護</div>
-      <div class="screen-meta">UCDP006 ｜ 系統管理者 ｜ 平台級參數</div>
+      <div class="screen-meta">UCDP006 ｜ 平台管理員 ｜ 平台級參數（DP_）</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>此處僅維護<strong>平台級</strong>共用參數；模組自有參數（如 ET 影片大小上限、排程時間）由各模組自行維護。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>此頁只顯示 / 維護<strong>平台級 <code>DP_</code> 參數</strong>；ET / DM 模組參數（如影片大小上限、催辦門檻、排程時間）雖同存 <code>DP_PARAM</code>（前綴 <code>ET_</code> / <code>DM_</code>），由各模組管理者於自己的系統設定頁維護，<strong>此頁不顯示</strong>。</div>
 
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-shield-lock me-1"></i>密碼安全策略</div>
       <div class="row g-3">
         <div class="col-md-4"><label class="form-label small mb-1">密碼最小長度（一般使用者）</label><input type="number" class="form-control form-control-sm" value="8"></div>
         <div class="col-md-4"><label class="form-label small mb-1">密碼最小長度（特權帳號）</label><input type="number" class="form-control form-control-sm" value="12">
-          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>特權（系統管理者）帳號要求更長，對齊資安法規</div></div>
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>特權（平台管理員）帳號要求更長，對齊資安法規</div></div>
         <div class="col-md-4"><label class="form-label small mb-1">字元組合要求（種類數）</label><input type="number" class="form-control form-control-sm" value="3">
           <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>大小寫英文 / 數字 / 特殊符號 至少 N 種</div></div>
         <div class="col-md-4"><label class="form-label small mb-1">密碼歷史記憶次數</label><input type="number" class="form-control form-control-sm" value="3">
@@ -403,8 +404,8 @@
     </div>
 
     <div class="wf-card">
-      <div class="wf-card-title"><i class="bi bi-envelope me-1"></i>帳號類信件範本（系統固定）</div>
-      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>密碼重設信、帳號變更驗證信為<strong>系統固定範本</strong>（帳號安全信件）；可編輯主旨與內文，但不可停用。課程 / 文件之業務通知信範本由各模組（如 ET 通知範本）維護，不在此。</div>
+      <div class="wf-card-title"><i class="bi bi-envelope me-1"></i>DP 系統信範本（<code>DP_NOTIFY_TEMPLATE</code> MODULE=DP）</div>
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>密碼重設信、帳號變更驗證信為 DP 自身系統信（帳號安全信件，<code>MODULE=DP</code>）；平台管理員<strong>可編輯主旨 / 內文</strong>，但<strong>不可停用 / 刪除</strong>，各模組亦不可編輯。課程 / 文件之業務通知範本由各模組於 ET09 / DM09 維護（<code>MODULE=ET</code> / <code>DM</code>），不在此。所有信件統一經平台發信引擎（<code>DP_EMAIL_LOG</code> outbox）寄送。</div>
       <div class="mb-2"><label class="form-label small mb-1">密碼重設信 — 主旨</label><input type="text" class="form-control form-control-sm" value="【EDMS】密碼重設連結"></div>
       <div class="mb-2"><label class="form-label small mb-1">密碼重設信 — 內文（支援變數 {{USER_NAME}} / {{RESET_LINK}} / {{TTL_MIN}}）</label>
         <textarea class="form-control form-control-sm" rows="3">{{USER_NAME}} 您好，請於 {{TTL_MIN}} 分鐘內點擊以下連結重設密碼：{{RESET_LINK}}</textarea></div>
@@ -418,8 +419,8 @@
       <ul class="mb-0 mt-2">
         <li>參數表 <code>DP_PARAM_M</code> / <code>DP_PARAM_D</code>；異動記錄歷程（稽核）。</li>
         <li>密碼長度分級（一般 8 / 特權 12）保留以對齊國防部資安法規。</li>
-        <li>帳號類信件（密碼重設 / 帳號變更驗證）為系統固定範本、不可停用；業務通知信範本歸各模組（如 ET 通知範本維護）。</li>
-        <li>模組自有參數（ET 影片大小、排程時間 <code>ET_PARAM.WEEKLY_STAT_DAY_TIME</code> 等）不在此頁。</li>
+        <li>通知範本統一存 <code>DP_NOTIFY_TEMPLATE</code>（<code>MODULE</code> 分 DP / ET / DM）；DP 系統信（<code>MODULE=DP</code>）平台管理員可編輯、不可停用 / 刪除；業務範本（ET / DM）於各模組 ET09 / DM09 編輯。發信統一經平台發信服務 + <code>DP_EMAIL_LOG</code> outbox。</li>
+        <li>ET / DM 模組參數（如 <code>ET_VIDEO_MAX_SIZE_MB</code>、<code>ET_WEEKLY_STAT_DAY_TIME</code>、<code>DM_REMIND_THRESHOLD</code>）同存 <code>DP_PARAM</code>（前綴分模組），但不在此頁——由各模組系統設定頁維護；平台提供唯讀查詢服務供各模組讀取。</li>
       </ul>
     </details>
   </div>
@@ -428,7 +429,7 @@
   <div id="dp-audit" class="screen">
     <div class="screen-header">
       <div class="screen-title"><i class="bi bi-journal-text text-tsbms-green me-2"></i>操作記錄（稽核）</div>
-      <div class="screen-meta">UCDP007 ｜ 系統管理者 / 授權人員</div>
+      <div class="screen-meta">UCDP007 ｜ 平台管理員 / 授權人員</div>
     </div>
 
     <div class="wf-card">
@@ -495,7 +496,7 @@
       <div class="screen-meta">UCDP008 ｜ 系統自動（唯讀檢視）</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>排程<strong>執行引擎與 job 註冊機制由平台提供</strong>；各模組的排程作業（job 邏輯）由各模組註冊，平台不含業務邏輯。本頁僅供檢視已註冊排程與執行狀態（無排程 CRUD / UI 維護）。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>排程<strong>引擎 + <code>DP_SCHEDULE</code> 註冊表由平台提供</strong>；各模組排程作業於註冊表登錄、job handler 由各模組提供（需要業務資料時反向 import 模組 service）。本頁供檢視已註冊排程與執行狀態（<code>DP_SCHEDULE_LOG</code>）。</div>
 
     <div class="wf-card p-0">
       <table class="table wf-table mb-0 align-middle">
@@ -505,7 +506,7 @@
         <tbody>
           <tr><td>SCHET001 每週統計與週報</td><td>ET</td><td>0 10 * * 1</td><td>2026-07-06 10:00</td><td><span class="status-pill status-active">成功</span></td></tr>
           <tr><td>SCHET002 每日課程時窗檢查 / 加急提醒</td><td>ET</td><td>0 2 * * *</td><td>2026-07-06 02:00</td><td><span class="status-pill status-active">成功</span></td></tr>
-          <tr><td>DM 寄信排程（退信處理等）</td><td>DM</td><td>*/15 * * * *</td><td>2026-07-06 11:15</td><td><span class="status-pill status-active">成功</span></td></tr>
+          <tr><td>SCHDM001 KPI 週報 / 未讀提醒</td><td>DM</td><td>0 10 * * 1</td><td>2026-07-06 10:00</td><td><span class="status-pill status-active">成功</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -513,10 +514,10 @@
     <details class="wf-screen-note">
       <summary>💡 內部設計註記（UCDP008 排程基礎建設）</summary>
       <ul class="mb-0 mt-2">
-        <li>平台提供<strong>單一排程執行引擎</strong>（如 APScheduler）＋ <strong>job 註冊介面</strong>；多實例部署時以 <strong>leader 選舉</strong>確保只有一個實例觸發（單一實例可簡化）。</li>
-        <li>各模組於啟動時向平台註冊 job（cron + 執行函式）；<strong>job 邏輯留在各模組</strong>（ET SCHET001/002、DM 寄信排程），平台不 import 業務模組。</li>
-        <li>平台記錄執行歷程（起訖 / 成功失敗 / 錯誤）；排程時間參數由各模組自己的參數表控制。</li>
-        <li>不做 DB 排程主檔與 UI 排程維護（採程式註冊）——故本頁為唯讀檢視。</li>
+        <li>平台提供<strong>單一排程執行引擎</strong>（如 APScheduler）＋ <strong><code>DP_SCHEDULE</code> DB 註冊表</strong>（cron / 執行程式 / 啟停）；多實例部署時以 <strong>leader 選舉</strong>確保只有一個實例觸發（單一實例可簡化）。</li>
+        <li>各模組排程 job（ET SCHET001/002、DM SCHDM001）於 <code>DP_SCHEDULE</code> 登錄；job handler 由各模組提供，需要業務資料時<strong>反向 import 模組 service</strong>（平台 job → 模組 service）。</li>
+        <li>平台以 <code>DP_SCHEDULE_LOG</code> 記錄執行歷程（起訖 / 成功失敗 / 錯誤）；排程時間參數存 <code>DP_PARAM</code>（前綴分模組，如 <code>ET_WEEKLY_STAT_DAY_TIME</code> / <code>DM_WEEKLY_SCHED_DAY_TIME</code>）。</li>
+        <li>本頁為唯讀檢視（排程定義隨部署 seed / 由後端管理，無前台 CRUD）。</li>
       </ul>
     </details>
   </div>
