@@ -371,10 +371,19 @@
       <div class="screen-meta">UCDP006 ｜ 平台級：共用 ｜ 模組級：按模組過濾</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>平台級（無前綴 <code>DP_</code>）</strong>兩管理者共用可改；<strong>模組級（<code>ET_</code> / <code>DM_</code>）</strong>按登入身分過濾——ET 管理者只顯示 ET_ 區、DM 管理者只顯示 DM_ 區，互不可見。全平台參數與清單定義統一存 <code>DP_PARAM</code>（前綴分模組）。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>依模組分三頁籤：<strong>平台（DP，共用）</strong>兩管理者皆可見可改；<strong>ET</strong> / <strong>DM</strong> 頁籤按登入身分過濾——ET 管理者只見「平台 + ET」頁籤、DM 管理者只見「平台 + DM」，對方模組頁籤不顯示。全平台參數與清單定義統一存 <code>DP_PARAM</code>（前綴分模組）。</div>
 
-    <!-- ====== 平台級（共用）====== -->
-    <h6 class="fw-bold text-tsbms-green mt-1 mb-2"><i class="bi bi-hdd-network me-1"></i>平台級參數（無前綴 <code>DP_</code>，兩管理者共用）</h6>
+    <!-- ====== 三頁籤：平台 / ET / DM（按模組區分）====== -->
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#param-dp" type="button"><i class="bi bi-hdd-network me-1"></i>平台（DP，共用）</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#param-et" type="button"><i class="bi bi-mortarboard me-1"></i>教育訓練（ET_）</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#param-dm" type="button"><i class="bi bi-folder2 me-1"></i>文件管理（DM_）</button></li>
+    </ul>
+
+    <div class="tab-content">
+    <!-- ===== 平台頁籤 ===== -->
+    <div class="tab-pane fade show active" id="param-dp" role="tabpanel">
+      <div class="wf-status-msg wf-status-info"><i class="bi bi-people me-1"></i>平台級參數（無前綴 <code>DP_</code>）——ET / DM 管理者<strong>皆可見可改</strong>（共用項）。</div>
 
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-shield-lock me-1"></i>密碼安全策略</div>
@@ -410,11 +419,12 @@
       </div>
     </div>
 
-    <!-- ====== 模組清單與參數（按模組過濾）====== -->
-    <h6 class="fw-bold text-tsbms-green mt-4 mb-2"><i class="bi bi-funnel me-1"></i>模組清單與參數（<code>ET_</code> / <code>DM_</code>，按登入身分過濾）</h6>
-    <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>以下區塊示意「兩模組全貌」；實際操作時<strong>只顯示登入身分所屬模組</strong>（ET 管理者見 ET_ 區、DM 管理者見 DM_ 區）。清單「定義」（有哪些）在此維護，寫入 <code>DP_PARAM</code>；套用清單之「業務規則」（DOC_ID 產碼、<code>IS_ALL</code> 展開與自動邀請、func_name 唯一手冊檢核）由各模組於讀取後執行。</div>
+    </div><!-- /param-dp -->
 
-    <!-- DM 區 -->
+    <!-- ===== DM 頁籤 ===== -->
+    <div class="tab-pane fade" id="param-dm" role="tabpanel">
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>DM 管理者於此維護 DM 清單定義與參數（前綴 <code>DM_</code>）。清單「定義」（有哪些）寫入 <code>DP_PARAM</code>；套用之業務規則（DOC_ID 產碼、func_name 唯一手冊檢核、可見對象授權比對）由 DM 於讀取後執行。<strong>ET 管理者看不到本頁籤</strong>。</div>
+
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-folder2 me-1"></i>DM 文件分類清單 <code>DM_DOC_CATEGORY</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
@@ -471,7 +481,12 @@
       </div>
     </div>
 
-    <!-- ET 區 -->
+    </div><!-- /param-dm -->
+
+    <!-- ===== ET 頁籤 ===== -->
+    <div class="tab-pane fade" id="param-et" role="tabpanel">
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>ET 管理者於此維護 ET 清單定義與參數（前綴 <code>ET_</code>）。清單「定義」寫入 <code>DP_PARAM</code>；「全體」<code>IS_ALL</code> 展開與自動邀請等業務規則由 ET 執行；「誰配哪個標籤」之關聯留 ET。<strong>DM 管理者看不到本頁籤</strong>。</div>
+
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-tags me-1"></i>ET 受訓單位標籤名稱清單 <code>ET_TRAINING_UNIT</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
@@ -499,6 +514,8 @@
           <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>對應排程 SCHET002</div></div>
       </div>
     </div>
+    </div><!-- /param-et -->
+    </div><!-- /tab-content -->
 
     <div class="text-end"><button class="btn btn-tsbms" onclick="showToast('參數與清單已儲存並即時生效')"><i class="bi bi-save me-1"></i>儲存</button></div>
 
@@ -506,7 +523,7 @@
       <summary>💡 內部設計註記（UCDP006 系統參數與清單維護）</summary>
       <ul class="mb-0 mt-2">
         <li>全平台參數值與清單定義統一存 <code>DP_PARAM_M</code> / <code>DP_PARAM_D</code>，以 <code>PARAM_ID</code> 前綴分模組（無前綴 <code>DP_</code> 平台級 / <code>ET_</code> / <code>DM_</code>）；清單型（分類 / 標籤名稱 / func_name / 可見對象）以一個 <code>PARAM_ID</code> 下多筆 <code>PARAM_KEY</code> 表達。異動寫入稽核。</li>
-        <li><strong>可見過濾</strong>：登入為 ET 管理者只顯示 ET_ 區、DM 管理者只顯示 DM_ 區（互不可見）；平台級 <code>DP_</code> 參數兩者共用可改。</li>
+        <li><strong>三頁籤按模組區分</strong>：平台（共用）/ ET / DM 三頁籤；登入為 ET 管理者只顯示「平台 + ET」頁籤、DM 管理者只顯示「平台 + DM」（對方模組頁籤不顯示、互不可見）；平台級 <code>DP_</code> 參數兩者共用可改。</li>
         <li><strong>鎖定碼</strong>：需鎖定之碼（如文件分類碼建立後不可改）以 <code>DP_PARAM_M.DETAIL_LOCK</code> 標記，UI 呈唯讀鎖 <i class="bi bi-lock-fill"></i>。</li>
         <li><strong>定義 vs 關聯分層</strong>：清單「定義」（有哪些）在 DP_PARAM；「誰配誰」關聯（文件屬哪分類、使用者 × 標籤、課程 × 標籤、閱覽者 × 可見對象）與<strong>套用規則</strong>（DOC_ID 產碼、<code>IS_ALL</code> 展開與自動邀請、func_name 唯一手冊檢核）留各模組。</li>
         <li>密碼長度分級（一般 8 / 特權 12）保留以對齊國防部資安法規；密碼重設 TTL、發信調校（重試 / 速率 / 告警）改列平台級 <code>DP_</code>（<code>LOGIN</code> / <code>MAIL</code>）。</li>
