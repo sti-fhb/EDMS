@@ -20,7 +20,7 @@
 4. **Given** 文件發布新版本，**When** KPI 重算，**Then** 改以新版（目前發布版）計算，原僅下載舊版者對新版視為未看
 5. **Given** 排程設定之每週執行時間（預設週一 10:00，可由管理者設定），**When** `SCHDM001` 觸發，**Then** 系統計算全部已發布文件 KPI，產生 **KPI 週報**（Email 予所有具 DM_ADMIN 角色者：內文摘要〔總文件數 / 整體平均閱讀率 / 閱讀率**最低前 5 份** / 儀表板連結〕+ **CSV 附件**逐文件明細）
 6. **Given** 同一次排程，**When** 產生未讀提醒，**Then** 對**每位有未看文件之閱覽者**寄**一封彙整信**（Email，列出其所有未看文件）；**涵蓋全部已發布文件**；無未看者不寄；若管理者已停用「未讀提醒」範本則整批不寄
-7. **Given** 排程需寄大量 Email，**When** 執行，**Then** 收件逐筆寫入 `DM_NOTIFY_QUEUE` 由背景批次寄送，不阻塞排程主流程
+7. **Given** 排程需寄大量 Email，**When** 執行，**Then** 收件經平台唯一發信服務、由 outbox `DP_EMAIL_LOG` 背景批次寄送，不阻塞排程主流程
 8. **Given** 管理者於 DM09 停用「KPI 週報」或「未讀提醒」範本，**When** 排程執行，**Then** 對應 Email 不寄（KPI 計算與 DM10 儀表板仍正常）
 
 ## Functional Requirements
@@ -28,11 +28,11 @@
 - **FR-001**: 系統 MUST 於使用者下載「目前發布版」時寫入一筆 `DM_DOC_READ`（`DOC_ID` / `VERSION_ID` + 標準 `CREATED_USER`＝下載者 / `CREATED_DATE`＝下載時間）；**預覽不記**；唯一約束 (DOC_ID, VERSION_ID, CREATED_USER) 使同人同版本重複下載不重複計人
 - **FR-002**: 系統 MUST 提供 KPI 儀表板（DM10，**僅 DM_ADMIN**，後端擋直接 URL 存取）：逐文件呈現 文件 / 分類 / 應看 / 已看 / 未看 / 百分比，支援關鍵字 / 分類**查詢**與 **CSV 匯出**；範圍為**全部已發布文件**
 - **FR-003**: 「應看」名單 MUST 為該文件可見對象相符之閱覽者（掛「全體」→ 所有閱覽者；OR 比對，per [spec_us3.md](spec_us3.md) FR-008），**不排除**兼具其他角色者；「已看」MUST 以是否下載**目前發布版**判定（distinct `CREATED_USER`）；發布新版本後 MUST 以新版重算（舊版已看不計入新版）。**應看＝0**（文件無任何對應閱覽者）時 MUST 顯示「—（無對應閱覽者）」且**不列入整體平均閱讀率**計算
-- **FR-004**: 系統 MUST 提供排程 `SCHDM001`（**每週執行，星期＋時間可設定，預設週一 10:00**）：計算全部已發布文件 KPI，產生並寄送 ① **KPI 週報**（Email 予**所有具 DM_ADMIN 角色者**，內文摘要〔含閱讀率**最低前 5 份**〕 + CSV 附件）② **未讀提醒**（Email 予未看之閱覽者，一人一信、彙整其未看文件）
-- **FR-004a**: `SCHDM001` 之每週執行時間（星期＋時間）MUST 可由管理者於 DM09 通知範本（KPI 週報 / 未讀提醒）設定，存於 `DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（格式 `星期,HH:MM`，預設 `週一,10:00`）；**KPI 週報與未讀提醒共用同一時間**、同批執行
+- **FR-004**: 系統 MUST 提供排程 `SCHDM001`（**每週執行，星期＋時間可設定，預設週一 10:00**；於平台 `DP_SCHEDULE` 註冊表登錄、由平台排程引擎執行、`DP_SCHEDULE_LOG` 記錄執行歷程，job handler 由 DM 提供〔需要業務資料時反向 import DM service〕）：計算全部已發布文件 KPI，產生並寄送 ① **KPI 週報**（Email 予**所有具 DM_ADMIN 角色者**，內文摘要〔含閱讀率**最低前 5 份**〕 + CSV 附件）② **未讀提醒**（Email 予未看之閱覽者，一人一信、彙整其未看文件）
+- **FR-004a**: `SCHDM001` 之每週執行時間（星期＋時間）MUST 可由管理者於 DM09 通知範本（KPI 週報 / 未讀提醒）設定，存於 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（前綴 `DM_`，格式 `星期,HH:MM`，預設 `週一,10:00`）；**KPI 週報與未讀提醒共用同一時間**、同批執行
 - **FR-005**: 未讀提醒 MUST **涵蓋全部已發布文件**（不設文件層個別開關）；是否寄送由管理者於通知範本「未讀提醒」**啟用 / 停用**統一控制（停用則整批不寄，KPI 統計 / DM10 儀表板 / KPI 週報不受影響）
-- **FR-006**: 排程寄信 MUST 逐筆寫入 `DM_NOTIFY_QUEUE`、由背景批次非同步寄送（沿用 [spec_us6.md](spec_us6.md) FR-008 之 outbox 機制）；佇列**不存內容快照**，worker 寄送時依 `TEMPLATE_CODE` + `RECIPIENT_USER_ID` **即時組信**（未讀提醒即時算該人未看清單、KPI 週報即時算統計 + CSV；佇列 `DOC_ID` 僅發布通知填、其餘為 null）。「KPI 週報」「未讀提醒」為 `DM_NOTIFY_TEMPLATE` 之內建事件（CHANNEL=EMAIL_ONLY），可由管理者於 [spec_us1.md](spec_us1.md) 啟用 / 停用、編輯主旨內文
-- **FR-007**: outbox 寄送 MUST 具**韌性**：最大重試 `DM_MAIL_MAX_RETRY`（預設 5，超過標 FAILED）、指數退避、批次限流 `DM_MAIL_RATE_PER_MIN`（預設 60/分）、單次排程 FAILED 比率 > `DM_MAIL_FAIL_ALERT_PCT`（預設 20%）時告警管理者 / IT（詳見 research §9d）
+- **FR-006**: 排程寄信 MUST 呼叫平台唯一發信服務（傳 `template_code`）、由 outbox `DP_EMAIL_LOG` 背景批次非同步寄送（沿用 [spec_us6.md](spec_us6.md) FR-008 之集中 outbox 機制）；平台發信服務於寄送時依 `template_code` + 收件人 **即時組信**（未讀提醒即時算該人未看清單、KPI 週報即時算統計 + CSV）。「KPI 週報」「未讀提醒」為 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）之內建事件（CHANNEL=EMAIL_ONLY），可由管理者於 [spec_us1.md](spec_us1.md) 啟用 / 停用、編輯主旨內文（編輯 UI 仍在 DM09）
+- **FR-007**: outbox 寄送之**韌性**（最大重試、指數退避、批次限流、FAILED 比率告警）由**平台發信引擎**負責，調校參數屬**平台級 `DP_` 參數**（重試 `DP_MAIL_MAX_RETRY` 預設 5、限流 `DP_MAIL_RATE_PER_MIN` 預設 60/分、失敗告警門檻 `DP_MAIL_FAIL_ALERT_PCT` 預設 20%），由平台管理員維護；DM 不自持此類發信引擎參數（詳見 research §9d 與平台 DP 規格）
 
 ## 系統訊息
 
@@ -46,4 +46,4 @@
 - 可見性 / 可見對象授權見 [spec_us1.md](spec_us1.md)（FR-009）、[spec_us3.md](spec_us3.md)（FR-008）——決定「應看」名單
 - 下載動作見 [spec_us4.md](spec_us4.md)（寫 `DM_DOC_READ`）
 - 通知範本（KPI 週報 / 未讀提醒）維護與啟用 / 停用見 [spec_us1.md](spec_us1.md)；outbox 寄送見 [spec_us6.md](spec_us6.md) FR-008
-- 資料表 `DM_DOC_READ` / `DM_NOTIFY_QUEUE` 定義見 [data-model.md](data-model.md)
+- 資料表 `DM_DOC_READ` 定義見 [data-model.md](data-model.md)；寄件 outbox `DP_EMAIL_LOG`、通知範本 `DP_NOTIFY_TEMPLATE`（MODULE=DM）、排程 `DP_SCHEDULE`、參數 `DP_PARAM`（前綴 `DM_`）由平台模組 DP 定義（見平台 DP data-model）

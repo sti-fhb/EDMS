@@ -2332,7 +2332,7 @@
     <strong>空資料：</strong>查詢無符合文件時顯示「查無符合條件之文件統計」（DM-MSG-DM10-001）<br>
     <strong>已看認定：</strong>使用者<strong>下載目前發布版</strong>即計為已看（預覽不計）；同人同版本以一次計；發布新版本後該文件已看歸零（需重新下載新版）<br>
     <strong>應看（分母）：</strong>該文件可見對象相符之閱覽者（掛「全體」→所有閱覽者）；<strong>不排除</strong>兼具編輯 / 審核 / 管理者者（與發布通知一致）<br>
-    <strong>每週排程（SCHDM001，每週執行；星期＋時間可於 DM09 通知範本設定，預設週一 10:00，共用）：</strong>寄 KPI 週報予管理者（Email：內文摘要 + CSV 附件）、寄未讀提醒予未看之閱覽者（Email：一人一信彙整，<strong>涵蓋全部已發布文件</strong>；是否寄送由管理者於 DM09 通知範本「未讀提醒」啟用/停用統一控制）；大量寄信非同步<br>
+    <strong>每週排程（SCHDM001，每週執行；星期＋時間可於 DM09 通知範本設定，預設週一 10:00，共用；於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行、job handler 由 DM 提供）：</strong>寄 KPI 週報予管理者（Email：內文摘要 + CSV 附件）、寄未讀提醒予未看之閱覽者（Email：一人一信彙整，<strong>涵蓋全部已發布文件</strong>；是否寄送由管理者於 DM09 通知範本「未讀提醒」啟用/停用統一控制）；大量寄信經平台發信服務 + outbox <code>DP_EMAIL_LOG</code> 非同步<br>
     <strong>權限：</strong>僅 DM_ADMIN；一般使用者導覽不顯示且後端擋直接 URL 存取
   </details>
 </div>
@@ -2539,6 +2539,7 @@
       <small class="text-muted">系統內建 9 項事件；<strong>左側選事件、右側編輯</strong>主旨/內文並可<strong>啟用/停用</strong>。自動催辦信另含「催辦門檻天數」</small>
     </div>
     <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>可使用變數：<code>{{doc_name}}</code> <code>{{version}}</code> <code>{{category}}</code> <code>{{author}}</code> <code>{{reviewer}}</code> <code>{{summary}}</code> <code>{{reason}}</code> <code>{{stay_days}}</code> <code>{{week}}</code> <code>{{unread_count}}</code> <code>{{unread_list}}</code> <code>{{url}}</code></div>
+    <div class="field-helper mb-3" style="color:#1b5e20;font-style:italic;"><i class="bi bi-lightbulb"></i>💡 內部設計註記（2026-07-08 集中化）：本分頁讀寫平台 <code>DP_NOTIFY_TEMPLATE</code>（<code>MODULE=DM</code>），DM 管理者只編輯 MODULE=DM 的列；非同步寄送（文件發布通知 / KPI 週報 / 未讀提醒）改呼叫平台唯一發信服務並經 outbox <code>DP_EMAIL_LOG</code>。編輯 UI 仍在此，範本本體集中於平台 DP。</div>
 
     <div class="row g-3">
       <!-- 左：範本清單 -->
@@ -2587,7 +2588,7 @@
               </select>
               <input type="time" class="form-control" id="nt-sched-time" value="10:00">
             </div>
-            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於 <code>DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME</code>（預設週一 10:00）；SCHDM001 之 KPI 週報與未讀提醒同批於此時間執行</div>
+            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於平台 <code>DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME</code>（前綴 <code>DM_</code>，預設週一 10:00）；SCHDM001 於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行，KPI 週報與未讀提醒同批於此時間執行</div>
           </div>
 
           <div class="text-end mt-3">
@@ -2597,12 +2598,14 @@
       </div>
     </div>
 
-    <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>本系統<strong>不支援訂閱機制</strong>。工作流事件通知對象為撰寫者 / 該文件之指定審核者；<strong>文件發布通知</strong>於核准發布時<strong>非同步僅以 Email</strong> 通知<strong>撰寫者 + 可見對象相符之閱覽者</strong>（掛「全體」→ 所有閱覽者），廢止不通知。<strong>KPI 週報 / 未讀提醒</strong>由每週排程（SCHDM001）觸發、僅 Email、非同步；<strong>每週執行時間（星期＋時間）可於本頁範本設定</strong>（預設週一 10:00，兩者共用）。<strong>自動催辦信</strong>僅站內、每日觸發直到處理完。</div>
+    <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>本系統<strong>不支援訂閱機制</strong>。工作流事件通知對象為撰寫者 / 該文件之指定審核者；<strong>文件發布通知</strong>於核准發布時<strong>非同步僅以 Email</strong> 通知<strong>撰寫者 + 可見對象相符之閱覽者</strong>（掛「全體」→ 所有閱覽者），廢止不通知。<strong>KPI 週報 / 未讀提醒</strong>由每週排程（SCHDM001，於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行）觸發、僅 Email、非同步（經平台發信服務 + outbox <code>DP_EMAIL_LOG</code>）；<strong>每週執行時間（星期＋時間）可於本頁範本設定</strong>（預設週一 10:00，兩者共用）。<strong>自動催辦信</strong>僅站內、每日觸發直到處理完。</div>
   </div>
   </div>
 
   <!-- ========== Tab 1: 參數設定（含分類維護 + 關聯作業項目維護） ========== -->
   <div class="tab-pane fade show active" id="admin-param">
+
+  <div class="field-helper mb-3" style="color:#1b5e20;font-style:italic;"><i class="bi bi-lightbulb"></i>💡 內部設計註記（2026-07-08 集中化）：本分頁之<strong>純參數</strong>（催辦門檻 <code>DM_REMIND_THRESHOLD</code>、檔案大小上限 / 格式 <code>DM_FILE_MAX_MB</code> / <code>DM_FILE_TYPES</code> 等）讀寫平台 <code>DP_PARAM</code>（前綴 <code>DM_</code>，平台提供唯讀查詢服務、維護 UI 仍在此）；<strong>分類 / func_name / 標籤 / 可見對象</strong>為 DM 業務資料，仍由 DM 自持不變。發信引擎調校參數屬平台級 <code>DP_</code>。</div>
 
   <!-- 區塊 A：文件分類維護 -->
   <div class="wf-card">

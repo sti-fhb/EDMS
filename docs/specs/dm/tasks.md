@@ -3,7 +3,7 @@
 **模組代碼**: DM | **日期**: 2026-06-24
 **規格**: [spec.md](spec.md) | **計畫**: [plan.md](plan.md) | **資料模型**: [data-model.md](data-model.md) | **研究**: [research.md](research.md) | **契約**: [contracts/document-service.md](contracts/document-service.md)
 
-> DM **權限自管（自己的 4 角色）**、與平台模組 DP 只共用帳號與認證，與 ET 共用 `DP_USER`（SSO）；自身 17 張表（含 `DM_USER_TAG` 可見對象授權、`DM_DOC_READ` 閱讀紀錄、`DM_NOTIFY_QUEUE` 寄件 outbox）+ 排程 `SCHDM001`。標準欄位省略 SITE / HOSPITAL（對齊平台 DP，research §1）。檔案存檔案系統 / DB 存 metadata。
+> DM **權限自管（自己的 4 角色）**、與平台模組 DP 只共用帳號與認證，與 ET 共用 `DP_USER`（SSO）；自身 14 張業務表（含 `DM_USER_TAG` 可見對象授權、`DM_DOC_READ` 閱讀紀錄）+ 排程 `SCHDM001`。**系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08）**：DM 不建 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE` migration，改用平台 `DP_PARAM`（前綴 `DM_`）/ `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）/ outbox `DP_EMAIL_LOG`，`SCHDM001` 於 `DP_SCHEDULE` 註冊由平台引擎執行（job handler 由 DM 提供）。標準欄位省略 SITE / HOSPITAL（對齊平台 DP，research §1）。檔案存檔案系統 / DB 存 metadata。
 
 ---
 
@@ -22,9 +22,9 @@
 - [ ] T009b [P] 建立資料庫 Migration：`DM_DOC_READ`（append-only 閱讀紀錄：DOC_ID/VERSION_ID + 標準 CREATED_USER/CREATED_DATE〔即下載者/下載時間，不另設 USER_ID/READ_TIME〕、省 UPDATED_*/DELETED、唯一約束 (DOC_ID,VERSION_ID,CREATED_USER)），參照 data-model.md
 - [ ] T010 [P] 建立資料庫 Migration：`DM_REVIEW`（送審週期：REVIEW_TYPE、ASSIGNED_REVIEWER、APPROVER、STATUS、SUBMIT/COMPLETE_DATE、REASON、**廢止附件 OBSOLETE_FILE_NAME/PATH/SIZE/MIME**），參照 data-model.md
 - [ ] T011 [P] 建立資料庫 Migration：`DM_CHANGE_LOG`（append-only 公開變更歷程：OPERATION、APPLICANT、APPROVER、NOTE），參照 data-model.md
-- [ ] T012 [P] 建立資料庫 Migration：`DM_NOTIFY_TEMPLATE`（TEMPLATE_CODE PK、SUBJECT/BODY、CHANNEL〔EMAIL_MSG/MSG_ONLY/EMAIL_ONLY〕、IS_ENABLED）與 `DM_PARAM`（PARAM_ID PK，前綴 DM_），參照 data-model.md
-- [ ] T012a [P] 建立資料庫 Migration：`DM_NOTIFY_QUEUE`（Email outbox：TEMPLATE_CODE、**DOC_ID/VERSION_ID 可空（僅發布通知填）**、RECIPIENT_USER_ID/RECIPIENT_EMAIL、STATUS〔PENDING/SENT/FAILED〕、RETRY_COUNT、SENT_TIME；索引 STATUS；不存內容快照），參照 data-model.md
-- [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）、9 通知範本（`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM_PARAM（`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、`DM_MAIL_MAX_RETRY`=5、`DM_MAIL_RATE_PER_MIN`=60、`DM_MAIL_FAIL_ALERT_PCT`=20、`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`），參照 data-model.md 代碼表
+- [ ] T012 ~~建立 `DM_NOTIFY_TEMPLATE` / `DM_PARAM` Migration~~ **已廢除（2026-07-08 集中化）**：通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、系統參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`），由平台 DP 建 migration；DM 不建此二表。維護 / 編輯 UI 仍在 DM09。
+- [ ] T012a ~~建立 `DM_NOTIFY_QUEUE` Migration~~ **已廢除（2026-07-08 集中化）**：非同步寄送改用平台 outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務、傳 `template_code`）；DM 不建佇列表。
+- [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）為 DM 業務種子。**通知範本 / 參數種子改由平台 DP 建（2026-07-08 集中化）**：9 通知範本寫入 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`；`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM 參數寫入 `DP_PARAM`（前綴 `DM_`：`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`）；發信引擎調校參數（重試 / 限流 / 失敗告警）屬平台級 `DP_`（`DP_MAIL_MAX_RETRY`=5、`DP_MAIL_RATE_PER_MIN`=60、`DP_MAIL_FAIL_ALERT_PCT`=20），由 DP 種子建立。參照 data-model.md 代碼表與平台 DP 規格
 
 ---
 
@@ -34,10 +34,10 @@
 
 - [ ] T014 [P] 實作 SSO 認證接入 dm/middleware/auth：共用 `DP_USER` 驗證帳密、未登入擋下、首次登入自動授予閱覽者；**DM 權限自管、與平台 DP 只共用帳號與認證**，對應 spec_us2 FR-001~003
 - [ ] T015 [P] 實作角色授權工具 dm/util/authz：4 角色（DM_ADMIN/EDITOR/REVIEWER/VIEWER）複選聯集判定；提供「指定審核者排除本人」與「管理者自我保護」共用檢核，對應 spec_us1 FR-005/006、spec_us5 FR-006
-- [ ] T016 [P] 實作檔案儲存服務 dm/service/file_store：上傳至檔案系統 / 物件儲存、DB 存 metadata（FILE_*）、單檔上限讀 `DM_FILE_MAX_MB`、依 MIME 判定可預覽（PDF/圖片）/ 僅下載（Office），參照 research §3/§10
+- [ ] T016 [P] 實作檔案儲存服務 dm/service/file_store：上傳至檔案系統 / 物件儲存、DB 存 metadata（FILE_*）、單檔上限讀平台 `DP_PARAM.DM_FILE_MAX_MB`（前綴 `DM_`，經平台唯讀查詢服務）、依 MIME 判定可預覽（PDF/圖片）/ 僅下載（Office），參照 research §3/§10
 - [ ] T017 [P] 實作 DOC_ID 產生器 dm/util/docid：`DM-{分類碼}-{6 位流水號}`、流水號依分類各自獨立、草稿建立時配號，參照 research §2
-- [ ] T018 [P] 實作通知服務 dm/service/notify：依 `DM_NOTIFY_TEMPLATE` 組信、依 CHANNEL 發送（EMAIL_MSG＝Email+站內、MSG_ONLY＝僅站內、EMAIL_ONLY＝僅 Email）；停用範本不發，對應 spec_us1 FR-007、research §9
-- [ ] T018a [P] 實作 outbox 背景寄送 dm/worker/notify_queue：輪詢 `DM_NOTIFY_QUEUE` STATUS=PENDING 批次寄 Email、標記 SENT / FAILED；**寄送時依 TEMPLATE_CODE + RECIPIENT_USER_ID（+發布通知之 DOC_ID）即時組信**（未讀提醒算未看清單、KPI 週報算統計+CSV）；**韌性**：最大重試 `DM_MAIL_MAX_RETRY`（預設 5，超過標 FAILED）、指數退避、限流 `DM_MAIL_RATE_PER_MIN`（預設 60/分）、單次 FAILED 比率 > `DM_MAIL_FAIL_ALERT_PCT`（預設 20%）告警管理者/IT；與核准發布交易解耦，對應 spec_us6 FR-008、spec_us13 FR-006/007、research §9b/§9d
+- [ ] T018 [P] 實作通知服務 dm/service/notify：呼叫平台唯一發信服務（傳 `template_code`，範本存 `DP_NOTIFY_TEMPLATE` MODULE=DM）；站內訊息由 DM 自理，依 CHANNEL 發送（EMAIL_MSG＝Email+站內、MSG_ONLY＝僅站內、EMAIL_ONLY＝僅 Email）；停用範本不發，對應 spec_us1 FR-007、research §9
+- [ ] T018a ~~實作 outbox 背景寄送 worker~~ **改由平台承載（2026-07-08 集中化）**：非同步寄送統一由平台 outbox `DP_EMAIL_LOG` + 平台發信引擎執行（輪詢待寄、批次寄送、標記狀態、最大重試 / 指數退避 / 限流 / 失敗告警之韌性均為平台級 `DP_` 參數）；平台發信服務**寄送時依 `template_code` + 收件人即時組信**（未讀提醒算未看清單、KPI 週報算統計+CSV，需業務資料時反向 import DM service）。DM 端僅需呼叫平台發信服務並傳 `template_code` + 收件名單，與核准發布交易解耦，對應 spec_us6 FR-008、spec_us13 FR-006/007、research §9b/§9d
 - [ ] T019 [P] 實作送審週期 / 狀態機服務 dm/service/review：DM_REVIEW 建立 / 核准 / 退回 / 撤回；約束「同一文件不可同時兩種送審」（單一 PENDING_*），參照 research §4
 - [ ] T020 [P] 實作受控資料維護共用 dm/service/catalog：分類 / func_name / 標籤之新增 / 改名 / 啟用停用、**不開放刪除**、停用後既有引用保留、僅影響後續下拉；**AUDIENCE 組之停用採 soft-retire**（不收回既有可見性、僅擋後續指派、停用時回傳受影響文件 / 閱覽者數），對應 spec_us1 FR-001/FR-010、research §參數維護
 - [ ] T020a [P] 實作標籤式可見性判定共用 dm/util/visibility：給定使用者回傳其可見文件之查詢條件——文件掛「全體」 OR（文件 `DM_DOC_TAG` 之 AUDIENCE 標籤 ∩ 使用者 `DM_USER_TAG` ≠ 空）；閱覽者套用、編輯者/審核者/管理者略過，對應 spec_us3 FR-008、research §5b
@@ -64,10 +64,10 @@
 > **前置**: Phase 2 授權（T015）、受控資料維護（T020）、通知（T018）
 
 - [ ] T024 [US1] 實作參數設定頁 dm/admin/params：分類（含唯一分類碼、建立後鎖定）/ func_name / 標籤之共通維護（T020），對應 FR-001~003
-- [ ] T025 [US1] 實作催辦門檻設定：值域 1–30 天（預設 7）、寫 `DM_PARAM.DM_REMIND_THRESHOLD`，對應 FR-004
+- [ ] T025 [US1] 實作催辦門檻設定：值域 1–30 天（預設 7）、寫平台 `DP_PARAM.DM_REMIND_THRESHOLD`（前綴 `DM_`，經平台參數服務），維護 UI 在 DM09，對應 FR-004
 - [ ] T026 [US1] 實作權限管理頁 dm/admin/roles：列共用 `DP_USER` 使用者、4 角色複選即時生效、寫 `DM_USER_ROLE_LOG`、顯示「最後異動」欄、自我保護、不檢核 0 管理者，對應 FR-005/006/008
-- [ ] T027 [US1] 實作通知範本維護 dm/admin/templates：9 內建事件主旨 / 內文編輯與啟用停用（「文件發布通知」＝撰寫者+相符閱覽者、含「KPI 週報」「未讀提醒」＝EMAIL_ONLY）、自動催辦含門檻，對應 FR-007
-- [ ] T027b [US1] 實作 KPI 週報 / 未讀提醒之「每週執行時間」設定（於通知範本 detail：星期下拉＋時間，兩者共用）：寫 `DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（格式 `星期,HH:MM`，預設 `週一,10:00`），供 SCHDM001 讀取，對應 spec_us13 FR-004a
+- [ ] T027 [US1] 實作通知範本維護 dm/admin/templates：9 內建事件主旨 / 內文編輯與啟用停用（「文件發布通知」＝撰寫者+相符閱覽者、含「KPI 週報」「未讀提醒」＝EMAIL_ONLY）、自動催辦含門檻；**編輯 UI 在 DM09，讀寫平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`，只操作 MODULE=DM 的列）**，對應 FR-007
+- [ ] T027b [US1] 實作 KPI 週報 / 未讀提醒之「每週執行時間」設定（於通知範本 detail：星期下拉＋時間，兩者共用）：寫平台 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（前綴 `DM_`，格式 `星期,HH:MM`，預設 `週一,10:00`），供 SCHDM001 讀取，對應 spec_us13 FR-004a
 - [ ] T027a [US1] 實作閱覽者可見對象授權 dm/admin/audience：使用者 × 可見對象（AUDIENCE 組）勾選、即時生效、寫異動紀錄、顯示「最後異動」欄；AUDIENCE 值停用時提示受影響文件 / 閱覽者數，對應 FR-009/FR-010
 
 ---
@@ -126,7 +126,7 @@
 - [ ] T040 [US6] 實作待簽核清單 dm/review：僅顯示指定審核者 = 當前登入者之項目、欄位（文件 / 分類 / 版本 / 送審者 / 送審時間 / 停留天數）、無「指定審核者」欄，對應 FR-001
 - [ ] T041 [US6] 實作簽核明細：下載送審檔案（不預覽）、新版本新舊版並列下載比對、廢止對象與原因、**廢止附件下載（如有）**，對應 FR-002
 - [ ] T042 [US6] 實作核准並發布 / 廢止：**單一交易**完成版本切換（新版 PUBLISHED、舊版 SUPERSEDED、更新 CURRENT_VERSION_ID）/ 廢止下架、寫 `DM_CHANGE_LOG`、通知撰寫者，對應 FR-003/005、research §6
-- [ ] T042a [US6] 實作文件發布通知：核准並發布（新增首版 / 新版本，廢止不含）時，於**發布當下**組出收件名單＝**撰寫者 + 可見性判定（T020a）之相符閱覽者**（掛「全體」→全部；不排除兼編輯/審核者），以單一 `DOC_PUBLISH` 逐筆寫入 `DM_NOTIFY_QUEUE`（快照 Email），交由 T018a 背景寄送，對應 FR-008、research §9b
+- [ ] T042a [US6] 實作文件發布通知：核准並發布（新增首版 / 新版本，廢止不含）時，於**發布當下**組出收件名單＝**撰寫者 + 可見性判定（T020a）之相符閱覽者**（掛「全體」→全部；不排除兼編輯/審核者），以單一 `DOC_PUBLISH`（`DP_NOTIFY_TEMPLATE` MODULE=DM）呼叫平台唯一發信服務（傳 `template_code` + 收件名單快照），經平台 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-008、research §9b
 - [ ] T043 [US6] 實作退回：必填退回原因、回對應狀態（草稿 / 已發布）、通知撰寫者，對應 FR-004
 - [ ] T044 [US6] 實作自動催辦排程 + 「已完成」頁籤：每日掃 DM_REVIEW 停留 ≥ 門檻發站內訊息並標紅、已完成項目唯讀，對應 FR-006/007、research §9
 
@@ -213,7 +213,7 @@
 
 - [ ] T059a [US13] 實作閱讀 KPI 計算 dm/service/kpi：依可見性名單（含「全體」、不排除任何人）× 目前發布版之 `DM_DOC_READ`（distinct CREATED_USER）算應看/已看/未看/百分比；發新版以新版計；**應看＝0 顯示「—（無對應閱覽者）」且不列入整體平均閱讀率**，對應 FR-001/003
 - [ ] T059b [US13] 實作 KPI 儀表板 dm/kpi（DM10，**僅 DM_ADMIN、後端擋 URL**）：逐文件應看/已看/未看/百分比、關鍵字/分類查詢、CSV 匯出、空資料提示（DM-MSG-DM10-001），對應 FR-002
-- [ ] T059c [US13] 實作排程 `SCHDM001`（每週執行，執行時間讀 `DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME`，預設週一 10:00）：算全部已發布文件 KPI → KPI 週報入 `DM_NOTIFY_QUEUE`（管理者，內文摘要 + CSV）+ 未讀提醒入佇列（未看閱覽者，一人一信彙整，**涵蓋全部已發布文件；「未讀提醒」範本停用則整批不寄**），由 T018a 背景寄送，對應 FR-004/004a/005/006、research §9c
+- [ ] T059c [US13] 實作排程 `SCHDM001` 之 **DM job handler**（於平台 `DP_SCHEDULE` 註冊、由平台引擎每週執行、`DP_SCHEDULE_LOG` 記錄；執行時間讀平台 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`，前綴 `DM_`，預設週一 10:00）：算全部已發布文件 KPI → KPI 週報（管理者，內文摘要 + CSV）+ 未讀提醒（未看閱覽者，一人一信彙整，**涵蓋全部已發布文件；「未讀提醒」範本停用則整批不寄**）呼叫平台唯一發信服務、經 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-004/004a/005/006、research §9c
 
 ---
 
@@ -224,7 +224,7 @@
 - [ ] T062 整合測試：跨模組 SRVDM001 / SRVDM002 與 DM 發布新版後 ET 取最新版（無快取延遲）
 - [ ] T063 權限與職責分離驗證：指定審核者排除自審、角色複選聯集、已廢止 / 變更歷程 URL 僅管理者、純閱覽者 / 管理者分區可見性
 - [ ] T063a 標籤式可見性驗證：閱覽者依可見對象授權（OR + 「全體」）只見允許文件、未授予者僅見「全體」、編輯者 / 審核者 / 管理者見全部；AUDIENCE 停用 soft-retire 不收回既有可見性；後端 API 亦套過濾（防繞過 UI），對應 spec.md SC-010
-- [ ] T063b 閱讀 KPI 與排程驗證：下載記已看（預覽不記、同人同版去重）、發新版重置；DM10 應看/已看/未看/百分比正確；SCHDM001 於管理者設定之每週時間（預設週一 10:00、可改）寄管理者週報（內文+CSV）與未看閱覽者提醒（彙整、全部已發布文件；停用範本則不寄），經 outbox 非同步不阻塞，對應 spec.md SC-011
+- [ ] T063b 閱讀 KPI 與排程驗證：下載記已看（預覽不記、同人同版去重）、發新版重置；DM10 應看/已看/未看/百分比正確；SCHDM001 於管理者設定之每週時間（預設週一 10:00、可改）寄管理者週報（內文+CSV）與未看閱覽者提醒（彙整、全部已發布文件；停用範本則不寄），經平台 outbox `DP_EMAIL_LOG` 非同步不阻塞，對應 spec.md SC-011
 - [ ] T064 永久保留驗證：版本軟刪除不可實體刪、`DM_CHANGE_LOG` / `DM_USER_ROLE_LOG` append-only 不可竄改 / 刪除
 - [ ] T065 func_name 唯一性驗證：並發發布同 func_name 由部分唯一索引把關 + 友善訊息
 - [ ] T066 安全性檢查：SSO 認證邊界、檔案上傳大小 / 類型限制、密碼雜湊、個資（Email / 姓名）處理
@@ -281,9 +281,9 @@ Phase 15 (整合收尾)
 
 | 項目 | 數量 |
 |------|------|
-| 總任務數 | 82（77 + 閱讀 KPI 6 − 移除 T036a 未看提醒旗標）|
-| Phase 1 設定 | 16（+T006a DM_USER_TAG、+T009b DM_DOC_READ、+T012a DM_NOTIFY_QUEUE）|
-| Phase 2 共用 | 9（+T020a 可見性判定、+T018a 發布通知 outbox worker）|
+| 總任務數 | 79（82 − 3：T012 範本/參數 migration、T012a 佇列 migration、T018a outbox worker 於 2026-07-08 集中化改由平台 DP 承載）|
+| Phase 1 設定 | 14（+T006a DM_USER_TAG、+T009b DM_DOC_READ；T012 範本/參數、T012a 佇列 migration 已廢除——集中於平台 DP）|
+| Phase 2 共用 | 8（+T020a 可見性判定；T018a outbox worker 改由平台發信引擎承載，DM 僅呼叫平台發信服務）|
 | US2 登入 / 註冊 / 忘記密碼 | 3 |
 | US1 系統設定 | 5（+T027a 閱覽者可見對象授權）|
 | US3 文件庫與檢索 | 4（+T028a 可見性過濾）|

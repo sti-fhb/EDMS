@@ -8,7 +8,9 @@
 
 ## 概述
 
-DM 以 `DP_USER`（由平台模組 DP 定義、非 DM 自有）為共用使用者主檔，DM 僅以 `USER_ID` 為 FK 引用；DM 自身持有文件、版本、分類 / func_name / 標籤受控資料、閱覽者可見對象授權、送審、公開變更歷程、閱讀紀錄、角色與其異動、通知範本 / 寄件佇列、系統參數等表。
+DM 以 `DP_USER`（由平台模組 DP 定義、非 DM 自有）為共用使用者主檔，DM 僅以 `USER_ID` 為 FK 引用；DM 自身持有文件、版本、分類 / func_name / 標籤受控資料、閱覽者可見對象授權、送審、公開變更歷程、閱讀紀錄、角色與其異動等業務表。
+
+> **系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08 集中化決策，見 [`_refs/09-平台模組.md`](../../_refs/09-平台模組.md) 決策紀錄）**：DM 不再自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`。DM 參數改存平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）、通知範本改存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、非同步寄送改用平台 outbox `DP_EMAIL_LOG`、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行；完整欄位見平台 DP data-model，DM 僅維護自己 `MODULE=DM` / `DM_` 前綴之列（維護 UI 仍在 DM09）。
 
 > **標準欄位之調整（見 [research.md §1](research.md)）**：各表標準欄位**對齊 EDMS 平台模組 DP**（平台無 SITE / HOSPITAL 概念、無 DP_SITE / DP_HOSPITAL），故**省略 `CREATED_SITE` / `CREATED_HOSPITAL`**（及對應 UPDATED_*），採下列集合；append-only 記錄表（`DM_CHANGE_LOG`、`DM_USER_ROLE_LOG`）不含 UPDATED_* / DELETED。
 
@@ -43,9 +45,6 @@ erDiagram
     DM_DOC_VERSION ||--o| DM_REVIEW : "送審版本"
     DM_DOCUMENT ||--o{ DM_CHANGE_LOG : "公開變更"
     DP_USER ||--o{ DM_USER_ROLE_LOG : "角色異動"
-    DM_NOTIFY_TEMPLATE ||--o{ DM_NOTIFY_QUEUE : "套用範本"
-    DM_DOCUMENT ||--o{ DM_NOTIFY_QUEUE : "發布通知"
-    DP_USER ||--o{ DM_NOTIFY_QUEUE : "收件"
     DM_DOCUMENT ||--o{ DM_DOC_READ : "被閱讀"
     DM_DOC_VERSION ||--o{ DM_DOC_READ : "版本被下載"
     DP_USER ||--o{ DM_DOC_READ : "下載(CREATED_USER)"
@@ -146,30 +145,10 @@ erDiagram
         TIMESTAMP OPERATION_TIME
         TEXT NOTE
     }
-    DM_NOTIFY_TEMPLATE {
-        VARCHAR TEMPLATE_CODE PK
-        VARCHAR EVENT_NAME
-        VARCHAR SUBJECT
-        TEXT BODY
-        VARCHAR CHANNEL
-        BOOLEAN IS_ENABLED
-    }
-    DM_NOTIFY_QUEUE {
-        BIGINT QUEUE_ID PK
-        VARCHAR TEMPLATE_CODE FK
-        VARCHAR DOC_ID FK
-        BIGINT VERSION_ID FK
-        VARCHAR RECIPIENT_USER_ID FK
-        VARCHAR STATUS
-        TIMESTAMP SENT_TIME
-    }
-    DM_PARAM {
-        VARCHAR PARAM_ID PK
-        VARCHAR PARAM_VALUE
-    }
 ```
 
 > ER 圖省略標準欄位；各表業務欄位見下方 DD。
+> **通知範本 / 寄件佇列 / 系統參數不在此 ERD**：`DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE` / `DM_PARAM` 已廢除，改由平台 DP 集中定義（`DP_NOTIFY_TEMPLATE` MODULE=DM / outbox `DP_EMAIL_LOG` / `DP_PARAM` 前綴 `DM_`），比照 `DP_USER` 為外部平台表、完整欄位見平台 DP data-model。
 
 ---
 
@@ -285,7 +264,7 @@ erDiagram
 | CHANGE_SUMMARY | 變更摘要 / 首版摘要 | TEXT | Y | | 同欄；UI label 依首版 / 新版本切換 |
 | FILE_NAME | 檔名 | VARCHAR(255) | Y | | 原始檔名 |
 | FILE_PATH | 檔案路徑 | VARCHAR(500) | Y | | 檔案系統 / 物件儲存路徑（不存 BLOB）|
-| FILE_SIZE | 檔案大小 | BIGINT | Y | | 位元組；上限由 DM_PARAM 控制 |
+| FILE_SIZE | 檔案大小 | BIGINT | Y | | 位元組；上限由 `DP_PARAM`（`DM_FILE_MAX_MB`）控制 |
 | FILE_MIME | 檔案 MIME | VARCHAR(100) | Y | | 供預覽 / 下載判定（PDF / 圖片可預覽）|
 | STATUS | 版本狀態 | VARCHAR(20) | Y | DRAFT | DRAFT / PENDING_REVIEW / PUBLISHED（目前發布版）/ SUPERSEDED（已被新版取代）/ REJECTED（送審被退回）。**文件廢止後**，廢止前最後發布版**維持 PUBLISHED**（廢止屬文件層、該版未被取代）|
 | APPROVER_USER_ID | 核准者 | VARCHAR(20) | N | | FK→ DP_USER；核准發布時寫入（自 Session）|
@@ -335,7 +314,7 @@ erDiagram
 | REASON | 原因 | TEXT | N | | 退回原因 或 廢止原因 |
 | OBSOLETE_FILE_NAME | 廢止附件檔名 | VARCHAR(255) | N | | 僅廢止類（REVIEW_TYPE=OBSOLETE）之選填單檔；原始檔名 |
 | OBSOLETE_FILE_PATH | 廢止附件路徑 | VARCHAR(500) | N | | 檔案系統 / 物件儲存路徑（不存 BLOB）|
-| OBSOLETE_FILE_SIZE | 廢止附件大小 | BIGINT | N | | 位元組；上限比照文件上傳（DM_PARAM）|
+| OBSOLETE_FILE_SIZE | 廢止附件大小 | BIGINT | N | | 位元組；上限比照文件上傳（`DP_PARAM` 之 `DM_FILE_MAX_MB`）|
 | OBSOLETE_FILE_MIME | 廢止附件 MIME | VARCHAR(100) | N | | 格式比照文件上傳（PDF / Office / 圖片）|
 
 > 含標準欄位。應用層約束：同一 DOC_ID 不可同時存在兩筆 STATUS=PENDING（單一送審週期，research.md §4）。廢止附件為選填單檔，格式 / 大小比照 `DM_DOC_VERSION` 之檔案規範（沿用檔案儲存服務）；於 DM04 簽核明細與 US10 已廢止查詢可下載。
@@ -369,51 +348,13 @@ erDiagram
 
 > **標準欄位即業務欄位**：本表為 append-only 閱讀事件，紀錄於「下載當下」建立，故其**下載者＝標準 `CREATED_USER`、下載時間＝標準 `CREATED_DATE`**，不另設 `USER_ID` / `READ_TIME`（避免重複，見 research §1）；為 append-only 故省 `UPDATED_*` / `DELETED`（比照 `DM_CHANGE_LOG`）。唯一約束 **(DOC_ID, VERSION_ID, CREATED_USER)**（同人同版本以一次已看計；重複下載不重複計人）。KPI 已看＝該文件目前發布版之 distinct `CREATED_USER` ∩ 應看名單；發新版本後 VERSION_ID 改變、已看自然重置。
 
-## DD — DM_NOTIFY_TEMPLATE（通知範本）
+## 引用 — 通知範本 / 寄件佇列 / 系統參數（由平台模組 DP 集中定義）
 
-9 項內建事件；主旨 / 內文可編輯、可啟用停用；事件固定不可新增。
+> **2026-07-08 集中化**：以下三者由平台模組 DP 定義（非 DM 自持），DM 僅維護自己 `MODULE=DM` / `DM_` 前綴之列；完整欄位表見平台 DP data-model。
 
-| 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
-|----------|----------|----------|------|------|------|
-| TEMPLATE_CODE | 範本代碼 | VARCHAR(30) | Y | | PK（DOC_SUBMIT / DOC_REJECT / **DOC_PUBLISH** / OBS_SUBMIT / OBS_APPROVE / OBS_REJECT / **KPI_WEEKLY** / **UNREAD_REMIND** / AUTO_REMIND）|
-| EVENT_NAME | 事件名稱 | VARCHAR(50) | Y | | 文件送審 / 退回 / **文件發布通知（撰寫者+相符閱覽者）** / KPI 週報 / 未讀提醒…|
-| SUBJECT | 主旨 | VARCHAR(200) | Y | | 可含變數如 {{doc_name}} |
-| BODY | 內文 | TEXT | Y | | 可含變數（{{doc_name}} / {{version}} / {{category}} / {{summary}} / {{url}} / {{unread_list}} / {{stats}}）|
-| CHANNEL | 通知管道 | VARCHAR(20) | Y | EMAIL_MSG | EMAIL_MSG（Email + 站內）/ MSG_ONLY（僅站內，自動催辦用）/ **EMAIL_ONLY（僅 Email；文件發布通知 / KPI 週報 / 未讀提醒用）** |
-| IS_ENABLED | 是否啟用 | BOOLEAN | Y | true | 停用後不發該 Email，站內訊息仍顯示（EMAIL_ONLY 停用後即不發）|
-
-> 含標準欄位。`DOC_PUBLISH`（核准發布時觸發，**發撰寫者 + 相符閱覽者**）、`KPI_WEEKLY` / `UNREAD_REMIND`（排程 SCHDM001 觸發）皆 CHANNEL=EMAIL_ONLY，非同步批次寄送（見 `DM_NOTIFY_QUEUE`）。原「文件發布(撰寫者,EMAIL_MSG)」與「發布通知閱覽者」已於 2026-06-29 合併為單一 `DOC_PUBLISH`。
-
-## DD — DM_NOTIFY_QUEUE（通知寄件佇列 / Email outbox）
-
-Email 寄送 outbox；承載「文件發布通知」（撰寫者+相符閱覽者）、KPI 週報、未讀提醒之收件人，逐筆入列後由背景批次寄送並標記狀態，使發布 / 排程不因大量寄信而阻塞、且寄送可重試不遺漏。
-
-| 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
-|----------|----------|----------|------|------|------|
-| QUEUE_ID | 佇列 ID | BIGINT | Y | 序號 | PK |
-| TEMPLATE_CODE | 範本代碼 | VARCHAR(30) | Y | | FK→ DM_NOTIFY_TEMPLATE（DOC_PUBLISH / KPI_WEEKLY / UNREAD_REMIND）|
-| DOC_ID | 文件編號 | VARCHAR(20) | N | | FK→ DM_DOCUMENT.DOC_ID；**僅發布通知填**；KPI 週報 / 未讀提醒為 null（彙整多份或全部文件）|
-| VERSION_ID | 版本 ID | BIGINT | N | | FK→ DM_DOC_VERSION；僅發布通知填 |
-| RECIPIENT_USER_ID | 收件人 | VARCHAR(20) | Y | | FK→ DP_USER |
-| RECIPIENT_EMAIL | 收件 Email | VARCHAR(200) | Y | | 入列當下之 Email（快照）|
-| STATUS | 寄送狀態 | VARCHAR(20) | Y | PENDING | PENDING / SENT / FAILED |
-| RETRY_COUNT | 重試次數 | INT | Y | 0 | 失敗重試計數；上限 `DM_MAIL_MAX_RETRY`（預設 5），超過標 FAILED |
-| SENT_TIME | 寄送時間 | TIMESTAMP | N | | 成功寄出時間 |
-
-> 含標準欄位。索引：`(STATUS)` 供背景 worker 撈取待寄。**不存內容快照**：worker 於寄送時依 `TEMPLATE_CODE` + `RECIPIENT_USER_ID`（+ 發布通知之 DOC_ID）**即時組信**——未讀提醒即時算該收件人未看清單、KPI 週報即時算全部文件統計 + CSV。發布通知之收件名單於**發布當下**入列（快照）；寄送時點與入列時點之未看數字若有微幅差異可接受。
-
-## DD — DM_PARAM（系統參數）
-
-DM 內部參數；PARAM_ID 前綴 `DM_`、一律大寫（CLAUDE.md）。由 IT / 管理者維護。
-
-| 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
-|----------|----------|----------|------|------|------|
-| PARAM_ID | 參數代碼 | VARCHAR(30) | Y | | PK；前綴 DM_（如 DM_REMIND_THRESHOLD / DM_FILE_MAX_MB / DM_FILE_TYPES / DM_MAIL_MAX_RETRY / DM_MAIL_RATE_PER_MIN / DM_MAIL_FAIL_ALERT_PCT / DM_WEEKLY_SCHED_DAY_TIME）|
-| PARAM_VALUE | 參數值 | VARCHAR(200) | Y | | |
-| PARAM_DESC | 說明 | VARCHAR(200) | N | | |
-
-> 含標準欄位。
-> `DM_WEEKLY_SCHED_DAY_TIME`：SCHDM001（KPI 週報＋未讀提醒）每週執行時間，格式 `星期,HH:MM`（如 `週一,10:00`），預設 `週一,10:00`；由管理者於 DM09 通知範本（KPI 週報 / 未讀提醒）設定，兩者共用。
+- **通知範本 → `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）**：DM 9 項內建事件（`DOC_SUBMIT` / `DOC_REJECT` / `DOC_PUBLISH` / `OBS_SUBMIT` / `OBS_APPROVE` / `OBS_REJECT` / `KPI_WEEKLY` / `UNREAD_REMIND` / `AUTO_REMIND`）改存 `DP_NOTIFY_TEMPLATE`，欄位含 `EVENT_NAME` / `SUBJECT` / `BODY` / `CHANNEL`（EMAIL_MSG＝Email+站內 / MSG_ONLY＝僅站內，自動催辦用 / EMAIL_ONLY＝僅 Email，文件發布通知 / KPI 週報 / 未讀提醒用）/ `IS_ENABLED` 由 DP 表提供。編輯 UI 仍在 DM09「通知範本」分頁（DM 管理者只編輯 `MODULE=DM` 的列）。`DOC_PUBLISH`（核准發布時觸發，發撰寫者 + 相符閱覽者）、`KPI_WEEKLY` / `UNREAD_REMIND`（排程 SCHDM001 觸發）皆 CHANNEL=EMAIL_ONLY、非同步批次寄送。原「文件發布(撰寫者,EMAIL_MSG)」與「發布通知閱覽者」已於 2026-06-29 合併為單一 `DOC_PUBLISH`。
+- **寄件佇列 → 平台 outbox `DP_EMAIL_LOG`**：DM 之非同步寄送（`DOC_PUBLISH` / `KPI_WEEKLY` / `UNREAD_REMIND`）改呼叫平台唯一發信服務（傳 `template_code`），由平台 outbox 非同步寄送並記錄狀態 / 重試 / `CALLER_MODULE=DM`。原 worker「寄送時即時組信」（未讀提醒即時算該收件人未看清單、KPI 週報即時算統計 + CSV）之行為改由平台發信服務承載；發布通知之收件名單仍於發布當下組出（快照）。
+- **系統參數 → 平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）**：DM 參數改存 `DP_PARAM`，平台提供唯讀查詢服務；維護 UI 仍在 DM09 系統設定（DM 管理者只看 DM 參數）。DM 參數 key：`DM_REMIND_THRESHOLD`（催辦門檻）、`DM_FILE_MAX_MB`、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`（KPI 週報 / 未讀提醒每週執行時間，格式 `星期,HH:MM`，如 `週一,10:00`，預設 `週一,10:00`，由管理者於 DM09 通知範本設定、兩者共用）。原發信引擎調校 `DM_MAIL_MAX_RETRY` / `DM_MAIL_RATE_PER_MIN` / `DM_MAIL_FAIL_ALERT_PCT` 屬發信引擎，因發信引擎集中於平台，已改為**平台級 `DP_` 參數**（不再掛 `DM_`），凡引用處改述為「平台發信引擎參數」。
 
 ---
 
@@ -448,7 +389,7 @@ DM 內部參數；PARAM_ID 前綴 `DM_`、一律大寫（CLAUDE.md）。由 IT /
 | NEW_VERSION | 新版本 |
 | OBSOLETE | 廢止 |
 
-### 通知事件（DM_NOTIFY_TEMPLATE.TEMPLATE_CODE）
+### 通知事件（`DP_NOTIFY_TEMPLATE` MODULE=DM 之 TEMPLATE_CODE）
 
 | 代碼 | 事件 | 對象 | 管道 |
 |------|------|------|------|
@@ -477,7 +418,7 @@ DM 內部參數；PARAM_ID 前綴 `DM_`、一律大寫（CLAUDE.md）。由 IT /
 
 | 代碼 | 名稱 | 週期 | 說明 |
 |------|------|------|------|
-| SCHDM001 | 閱讀 KPI 週報與未讀提醒 | 每週執行（星期＋時間可設定，預設週一 10:00，存於 `DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME`）| 計算全部已發布文件之閱讀 KPI；寄 KPI 週報予管理者（內文摘要 + CSV）、未讀提醒予未看閱覽者（一人一信彙整、涵蓋全部已發布文件；未讀提醒範本停用則不寄）；寄信經 `DM_NOTIFY_QUEUE` 非同步 |
+| SCHDM001 | 閱讀 KPI 週報與未讀提醒 | 每週執行（星期＋時間可設定，預設週一 10:00，存於 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`）；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供 | 計算全部已發布文件之閱讀 KPI；寄 KPI 週報予管理者（內文摘要 + CSV）、未讀提醒予未看閱覽者（一人一信彙整、涵蓋全部已發布文件；未讀提醒範本停用則不寄）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步 |
 
 ---
 

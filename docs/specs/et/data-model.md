@@ -4,7 +4,9 @@
 **規格**: [spec.md](spec.md)
 **模組代碼**: ET（教育訓練文件管理）
 
-> **2026-07-02 變更摘要**：移除 ET_MODULE / ET_USER_MODULE 與 ET_COURSE.MODULE_CODE，新增 ET_TAG / ET_USER_TAG / ET_COURSE_TAG（受訓單位標籤）；ET_COURSE 新增起訖時間、狀態機改可逆（移除 PENDING_CLOSE）；新增課後問卷五表（ET_SURVEY*）、週統計快照（ET_WEEKLY_STAT）、通知範本（ET_NOTIFY_TEMPLATE）。
+> **2026-07-02 變更摘要**：移除 ET_MODULE / ET_USER_MODULE 與 ET_COURSE.MODULE_CODE，新增 ET_TAG / ET_USER_TAG / ET_COURSE_TAG（受訓單位標籤）；ET_COURSE 新增起訖時間、狀態機改可逆（移除 PENDING_CLOSE）；新增課後問卷五表（ET_SURVEY*）、週統計快照（ET_WEEKLY_STAT）。
+
+> **2026-07-08 集中化變更摘要**：系統參數、通知範本、發信、排程集中於平台模組 DP（見 `../../requirements/RQDP.md`、`../../_refs/09-平台模組.md`）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：ET 參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`）、ET 6 類通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信改走平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。維護 UI 仍留在 ET 系統設定頁；`ET_WEEKLY_STAT`（業務快照）不受影響。
 
 > **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`（無 SITE / HOSPITAL 概念，對齊平台模組 DP）。
 
@@ -39,8 +41,8 @@
 | 問卷填答主檔 | ET_SURVEY_RESPONSE_M | 主表（主+明細）| 問卷填答 | 學員（具名）對某問卷之一次填答；一人一次 |
 | 問卷填答明細 | ET_SURVEY_RESPONSE_D | 明細 | 填答明細 | 該次填答之各題選擇 |
 | 週統計快照 | ET_WEEKLY_STAT | 主表 | 週統計快照 | 每週排程之課程統計快照（課程×週次），供週報比較與歷史回查 |
-| 通知信範本 | ET_NOTIFY_TEMPLATE | 主表 | 通知信範本 | 各類通知信之統一範本（主旨＋內文＋變數）；管理者維護 |
-| 系統參數 | ET_PARAM | Lookup | 系統參數 | 影片格式 / 大小上限 / TTL / 排程時間等系統參數 |
+| 通知信範本 | DP_NOTIFY_TEMPLATE | 平台主表（DP 定義）| 通知信範本 | 由平台模組 DP 定義；ET 6 類通知範本存 `MODULE=ET`；完整欄位見平台 DP data-model；ET 於 US15（ET09）維護 `MODULE=ET` 之列 |
+| 系統參數 | DP_PARAM | 平台主表（DP 定義）| 系統參數 | 由平台模組 DP 定義；ET 參數以 `PARAM_ID` 前綴 `ET_` 存放（影片格式 / 大小上限 / 排程時間等）；完整欄位見平台 DP data-model；ET 於系統設定頁維護前綴 `ET_` 之列 |
 
 ---
 
@@ -214,7 +216,7 @@
 
 **業務規則**:
 - 三類媒材（影片 / DM 文件 / 說明文字）皆可選填且可組合（同一教材可同時含多支影片 / 多份 DM 文件 / 說明文字）
-- 影片上傳時檢核格式（per `ET_PARAM.VIDEO_ALLOWED_FORMATS`）與大小（per `ET_PARAM.VIDEO_MAX_SIZE_MB`）
+- 影片上傳時檢核格式（per `DP_PARAM.ET_VIDEO_ALLOWED_FORMATS`）與大小（per `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`）
 - DM 文件廢止狀態於發布前由系統檢核（阻擋發布）；學員端仍可閱讀廢止前最後版本
 - 影片儲存策略（本地檔案系統 vs. 物件儲存）由 plan 階段決定
 
@@ -536,19 +538,11 @@
 
 ---
 
-### 通知信範本（ET_NOTIFY_TEMPLATE）（2026-07-02 新增）
+### 通知信範本（DP_NOTIFY_TEMPLATE，`MODULE=ET`）
 
-| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
-|---|---------|---------|---------|------|------|
-| 1 | 範本代碼 | TEMPLATE_CODE | VARCHAR(30) | PK | 主鍵（見下表內建範本）|
-| 2 | 範本名稱 | TEMPLATE_NAME | VARCHAR(50) | Y | 顯示名稱 |
-| 3 | 信件主旨 | SUBJECT | VARCHAR(200) | Y | 支援變數（如 `{{COURSE_NAME}}`）|
-| 4 | 信件內文 | BODY | TEXT | Y | 支援變數：課程名稱 / 起訖時間 / 學習連結 / 學員姓名等 |
-| 5 | 是否啟用 | IS_ACTIVE | BOOLEAN | Y | 預設 true；**停用（false）則該類信件不寄送**（觸發事件照常運作，僅不發此信）。管理者於 US15 切換（比照 DM）（2026-07-02 新增）|
-| 6 | 版本號 | VERSION | INT | Y | 樂觀鎖 |
-| - | 標準欄位 | — | — | — | （同上）|
+> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 6 類通知範本以 `MODULE=ET` 存於平台集中表；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET09 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
 
-**內建範本**（部署時 seed；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **6 類**：
+**ET 內建範本**（部署時由平台 seed，`MODULE=ET`；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **6 類**：
 
 | TEMPLATE_CODE | 名稱 | 觸發 |
 |---------------|------|------|
@@ -560,35 +554,31 @@
 | WEEKLY_REPORT | 週報 | SCHET001（教師 / 管理者）|
 
 **業務規則**:
-- 教師不可逐課修改信件內容；寄出一律採本表範本
-- 範本代碼固定（seed），管理者僅能編輯 SUBJECT / BODY 與切換 IS_ACTIVE（啟用 / 停用）
-- **停用（IS_ACTIVE=false）之範本，其對應信件不寄送**（如停用「課程邀請通知」則發布仍自動加入學員但不寄邀請信；停用「每週未看提醒」則 SCHET001 不寄該提醒但仍照常統計 / 寄週報）——各範本獨立（2026-07-02 新增）
-- **密碼重設（US2）與帳號變更驗證（US10）之信件不納入本表**，此二者屬帳號類固定信件，**由平台模組 DP 提供，ET 不另維護**（系統預設固定範本、不開放任何人於 UI 編輯、不可停用）——內容固定以確保一致與防偽
+- 教師不可逐課修改信件內容；寄出一律採平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）範本
+- 範本代碼固定（seed），管理者僅能編輯 SUBJECT / BODY 與切換 IS_ACTIVE（啟用 / 停用）；僅可維護 `MODULE=ET` 的列
+- **停用（IS_ACTIVE=false）之範本，其對應信件不寄送**（如停用「課程邀請通知」則發布仍自動加入學員但不寄邀請信；停用「每週未看提醒」則 SCHET001 不寄該提醒但仍照常統計 / 寄週報）——各範本獨立
+- ET 寄信一律呼叫平台唯一發信服務（傳 `template_code`），經平台 outbox `DP_EMAIL_LOG` 寄送；ET 不自建寄件佇列
+- **密碼重設（US2）與帳號變更驗證（US10）之信件不納入 `MODULE=ET` 清單**，此二者屬帳號類固定信件，為平台系統信（`MODULE=DP`）**由平台模組 DP 提供與維護，ET 不另維護**（ET 管理者不可於 UI 編輯、不可停用）——內容固定以確保一致與防偽
 
 ---
 
-### 系統參數（ET_PARAM）
+### 系統參數（DP_PARAM，前綴 `ET_`）
 
-| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
-|---|---------|---------|---------|------|------|
-| 1 | 參數鍵 | PARAM_KEY | VARCHAR(50) | PK | 參數識別代碼（如 VIDEO_MAX_SIZE_MB）|
-| 2 | 參數值 | PARAM_VALUE | TEXT | Y | 參數值（依參數類型解析；如數字 / CSV / 字串）|
-| 3 | 參數說明 | DESCRIPTION | TEXT | N | 說明用途 |
-| - | 標準欄位 | — | — | — | （同上）|
+> **由平台模組 DP 定義**（`DP_PARAM_M` / `DP_PARAM_D`；`PARAM_ID` / `PARAM_VALUE` / 說明 / 稽核歷程等）；ET 不自持參數表。ET 參數以 `PARAM_ID` 前綴 `ET_` 集中存於平台表，平台提供唯讀查詢服務供 ET 讀取；完整欄位見平台 DP data-model。**維護 UI 仍在 ET 系統設定頁**（ET 管理者只看 / 編輯前綴 `ET_` 的參數）（2026-07-08 集中化）。
 
-**初始參數**（部署時 seed）：
+**ET 參數**（部署時由平台 seed，前綴 `ET_`）：
 
-| PARAM_KEY | PARAM_VALUE | 說明 |
+| PARAM_ID | PARAM_VALUE | 說明 |
 |-----------|-------------|------|
-| `VIDEO_ALLOWED_FORMATS` | `mp4,webm` | 教材影片允許之上傳格式 |
-| `VIDEO_MAX_SIZE_MB` | `500` | 教材影片單檔大小上限 |
-| `VIDEO_PLAYBACK_MAX_RATE` | `2` | 影片播放倍速上限（播放器提供 0.75–2x）|
-| `PASSWORD_RESET_TTL_MIN` | `30` | 密碼重設連結 / Email 變更驗證連結有效時間（分鐘）|
-| `INVITATION_CODE_LENGTH` | `8` | 邀請碼長度（純數字）|
-| `WEEKLY_STAT_DAY_TIME` | `MON 10:00` | SCHET001 每週統計與週報執行時間 |
-| `URGENT_REMIND_DAYS` | `3` | SCHET002 截止前加急提醒天數（訖止前 N 天）|
+| `ET_VIDEO_ALLOWED_FORMATS` | `mp4,webm` | 教材影片允許之上傳格式 |
+| `ET_VIDEO_MAX_SIZE_MB` | `500` | 教材影片單檔大小上限 |
+| `ET_VIDEO_PLAYBACK_MAX_RATE` | `2` | 影片播放倍速上限（播放器提供 0.75–2x）|
+| `ET_INVITATION_CODE_LENGTH` | `8` | 邀請碼長度（純數字）|
+| `ET_WEEKLY_STAT_DAY_TIME` | `MON 10:00` | SCHET001 每週統計與週報執行時間 |
+| `ET_URGENT_REMIND_DAYS` | `3` | SCHET002 截止前加急提醒天數（訖止前 N 天）|
 
-> 信件範本已移至 `ET_NOTIFY_TEMPLATE`（2026-07-02）；原 `EMAIL_NOTIFY_*` 參數廢除。
+> **密碼重設 / Email 變更驗證連結有效時間**改為**平台級 `DP_` 參數**（認證 TTL 由平台 DP 提供，見 [spec_us2.md](spec_us2.md)、[spec_us10.md](spec_us10.md)），不再掛 ET 參數。
+> 通知範本改存 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）；原 `EMAIL_NOTIFY_*` 參數廢除。
 
 ---
 
@@ -710,7 +700,7 @@ erDiagram
 | 規則名 | 描述 |
 |--------|------|
 | 軟刪除分流 | 章節 / 題目本體軟刪除（DELETED=1）；學員紀錄與成績連同 hard delete |
-| 樂觀鎖 | ET_COURSE / ET_CHAPTER / ET_ITEM / ET_QUIZ / ET_QUESTION / ET_SURVEY* / ET_NOTIFY_TEMPLATE 每寫入時 VERSION + 1 |
+| 樂觀鎖 | ET_COURSE / ET_CHAPTER / ET_ITEM / ET_QUIZ / ET_QUESTION / ET_SURVEY* 每寫入時 VERSION + 1（通知範本之樂觀鎖由平台 `DP_NOTIFY_TEMPLATE` 提供）|
 | Attempt Snapshot | ET_QUIZ_ATTEMPT_M 與 _D 於 STARTED_AT 時凍結題目 + 選項 + 配分 + 順序 + PASS_SCORE + TIME_LIMIT |
 | 多選題部分計分 | `SCORE = max(0, (對 − 誤) ÷ 應選 × POINTS)`；建立時強制至少 1 正確選項 |
 | 影片 80% 累計覆蓋 | 由 ET_PROGRESS_INTERVAL 聚合計算；學員離開頁面時 normalize；倍速（上限 2x）照算、拉到底不算（無播放區段）|

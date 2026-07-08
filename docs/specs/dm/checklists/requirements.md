@@ -35,3 +35,4 @@
 - **已完成**：spec_us1~12.md 全數產出（各含 User Story 描述、Acceptance Scenarios、Functional Requirements FR-xxx、系統訊息表 DM-MSG-…）；三輪 clarify 共 7 條已回填 spec.md 並傳播至 _refs/RQDM/usecases/wireframe。
 - 規格階段可進入 `/speckit.plan`（產 plan.md + research.md + data-model.md + contracts/）。
 - 來源可追溯：spec 內容對應 requirements/RQDM.md、use-cases/dm/usecases.md、_refs/11-文件管理模組.md 與交付確認書，無新增未授權範圍（統計報表已依交付確認書排除）。
+- **2026-07-08 集中化對齊**：系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP——DM 不再自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`，改引用 `DP_PARAM`（前綴 `DM_`）/ `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）/ outbox `DP_EMAIL_LOG`，`SCHDM001` 掛 `DP_SCHEDULE`；維護 / 編輯 UI 仍留 DM09。Key Entities 與 data-model 已對齊（比照 `DP_USER` 引用而非定義）；業務表（分類 / 標籤 / 角色 / 文件 / 版本 / 歷程 / 閱讀）不動。

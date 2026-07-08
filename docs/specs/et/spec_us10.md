@@ -38,7 +38,7 @@
 ## Functional Requirements
 
 - **FR-ET-US10-01**: 系統 MUST 提供使用者於 ET08 編輯自己之姓名，儲存後更新共用 DP_USER.NAME 並同步生效於 ET / DM 兩系統（共用平台 DP 之 DP_USER）
-- **FR-ET-US10-02**: 帳號（Email）變更 MUST 採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制；提交新 Email 時系統 MUST 寫入 DP_USER.EMAIL_PENDING_CHANGE、產生 EMAIL_PENDING_TOKEN 與 EMAIL_PENDING_EXPIRES_AT（當下 + 30 分鐘，TTL 由 ET_PARAM.PASSWORD_RESET_TTL_MIN 控制），且 DP_USER.EMAIL（舊值）MUST 維持不變
+- **FR-ET-US10-02**: 帳號（Email）變更 MUST 採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制；提交新 Email 時系統 MUST 寫入 DP_USER.EMAIL_PENDING_CHANGE、產生 EMAIL_PENDING_TOKEN 與 EMAIL_PENDING_EXPIRES_AT（當下 + 30 分鐘，TTL 由**平台參數（DP 提供之認證 TTL，`DP_PARAM.DP_PASSWORD_RESET_TTL_MIN`，平台級）**控制），且 DP_USER.EMAIL（舊值）MUST 維持不變
 - **FR-ET-US10-03**: 系統 MUST 將驗證信寄至新 Email；使用者於期限內點驗證連結後，系統 MUST 將 DP_USER.EMAIL 更新為新值、清除 PENDING 欄位並強制登出當前 session，須以新 Email 重新登入
 - **FR-ET-US10-04**: PENDING 期間（驗證未完成）系統 MUST 允許使用者以舊 Email 正常登入（變更尚未生效）
 - **FR-ET-US10-05**: 驗證連結逾期未點時，系統 MUST 於下次與該帳號相關之認證 / 變更動作時即時檢核並清理 PENDING 欄位，變更請求視為作廢、舊 Email 永久維持有效
@@ -64,7 +64,7 @@
 ## 相關 Clarifications 摘錄
 
 - ET / DM 共用平台 DP 之 DP_USER；姓名 / Email / 密碼變更皆同步生效於兩系統
-- Email 變更採雙信箱共存模式；驗證連結 TTL 由 `ET_PARAM.PASSWORD_RESET_TTL_MIN` 控制（與密碼重設同 30 分鐘）
+- Email 變更採雙信箱共存模式；驗證連結 TTL 由**平台參數（DP 提供之認證 TTL，`DP_PARAM.DP_PASSWORD_RESET_TTL_MIN`，平台級）**控制（與密碼重設同 30 分鐘；認證由平台 DP 提供）
 
 ---
 

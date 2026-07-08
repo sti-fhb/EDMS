@@ -20,7 +20,7 @@
 
 ### 影片播放
 
-4. **Given** 學員開啟影片教材，**When** 系統載入，**Then** 以 HTML5 video player 呈現（含播放 / 暫停 / 調速 / 音量 / 全螢幕控制）；倍速選項為 **0.75 / 1 / 1.25 / 1.5 / 2**（上限 2 倍，由 `ET_PARAM.VIDEO_PLAYBACK_MAX_RATE` 控制）
+4. **Given** 學員開啟影片教材，**When** 系統載入，**Then** 以 HTML5 video player 呈現（含播放 / 暫停 / 調速 / 音量 / 全螢幕控制）；倍速選項為 **0.75 / 1 / 1.25 / 1.5 / 2**（上限 2 倍，由 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE` 控制）
 5. **Given** 學員播放影片並暫停 / 跳轉 / 結束，**When** 系統偵測動作，**Then** 對應之播放區段以 INSERT 寫入 ET_PROGRESS_INTERVAL
 6. **Given** 學員離開頁面（瀏覽器 unload 事件），**When** 系統收到，**Then** 對該影片之 ET_PROGRESS_INTERVAL 執行 normalize：SELECT 全部 → 排序 → 合併重疊 / 鄰近區段 → DELETE 全部 → INSERT 合併後結果
 7. **Given** 學員瀏覽器強制關閉 / 斷網未正常離開，**When** 學員下次開啟並離開該影片，**Then** 系統補做 normalize；覆蓋率計算前後皆正確
@@ -60,7 +60,7 @@
 
 - **FR-ET-US5-01**: 系統 MUST 於載入 ET05 時呈現左側章節導覽列（含章節 / 教材 / 測驗清單，並標示已完成 / 進行中 / 未解鎖狀態）與中間內容區。
 - **FR-ET-US5-02**: 系統 MUST 於學員首次進入時定位至第 1 章節之第 1 項目，已學習過者定位至上次觀看位置（依 ET_PROGRESS 之 LAST_POSITION）；觀看位置 MUST 跨 session 保留、返回時自動恢復。
-- **FR-ET-US5-03**: 系統 MUST 以 HTML5 video player 呈現影片教材（含播放 / 暫停 / 調速 / 音量 / 全螢幕控制），倍速選項為 0.75 / 1 / 1.25 / 1.5 / 2，上限 2 倍由 `ET_PARAM.VIDEO_PLAYBACK_MAX_RATE` 控制。
+- **FR-ET-US5-03**: 系統 MUST 以 HTML5 video player 呈現影片教材（含播放 / 暫停 / 調速 / 音量 / 全螢幕控制），倍速選項為 0.75 / 1 / 1.25 / 1.5 / 2，上限 2 倍由 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE` 控制。
 - **FR-ET-US5-04**: 系統 MUST 於學員暫停 / 跳轉 / 結束播放時將對應播放區段以 INSERT 寫入 ET_PROGRESS_INTERVAL；並於學員離開頁面時對該影片執行 normalize（SELECT 全部 → 排序 → 合併重疊 / 鄰近區段 → DELETE 全部 → INSERT 合併後結果），異常離開（強制關閉 / 斷網）者 MUST 於下次離開該影片時補做 normalize，確保覆蓋率計算正確。
 - **FR-ET-US5-05**: 系統 MUST 以累計覆蓋率（實際播放區段聯集 ÷ 影片總長）判定含影片章節之解鎖，達 80% 方解鎖下一章節，未達時 MUST 阻擋切換至下一章節。
 - **FR-ET-US5-06**: 系統 MUST NOT 將未實際播放之區段（含直接拉進度條至結尾所跳過之區段）計入覆蓋率，亦 MUST NOT 因重複觀看同一區段而重複累計（區段聯集去重、重複觀看不加成）。
@@ -90,7 +90,7 @@
 ## 相關 Clarifications 摘錄
 
 - 影片 80% 採累計覆蓋率（實際播放區段聯集 ÷ 影片總長；區段聯集去重）；允許拉進度條跳轉但僅實際播放區段計入、**直接拉到結尾不算看過**；重複觀看不加成；不採「結束時間 − 開始時間」之牆鐘時間計算（2026-07-02 明文化）
-- 倍速播放照算覆蓋率（2 倍速實際看完全片 = 覆蓋率 100%）；倍速選項 0.75 / 1 / 1.25 / 1.5 / 2，上限 2 倍由 `ET_PARAM.VIDEO_PLAYBACK_MAX_RATE` 控制（2026-07-02 明文化）
+- 倍速播放照算覆蓋率（2 倍速實際看完全片 = 覆蓋率 100%）；倍速選項 0.75 / 1 / 1.25 / 1.5 / 2，上限 2 倍由 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE` 控制（2026-07-02 明文化）
 - ET_PROGRESS_INTERVAL 不限區段筆數；學員離開頁面時 normalize
 - 教材內容可重複觀看；跨章節保持上次觀看位置
 - 完課後（課程有問卷時）章節導覽列顯示「填寫課後問卷」入口（2026-07-02 新增）；填寫流程屬 US13；填寫問卷**不是**完課條件、不計入學習進度 %

@@ -34,7 +34,8 @@
 - spec.md（索引）已完成：模組定位、主要角色（管理者 / 教師 / 學員 / 系統自動）、User Stories 索引（15 US / P1~P3）、優先級總覽、Key Entities、全模組業務規則（受訓單位標籤 / 起訖時間與可逆狀態機 / 強制完成解鎖 80% 累計覆蓋率 / 課後回饋問卷 / 排程統計與提醒 / 通知信統一範本 / 多選題部分計分 / 洗牌與 Attempt Snapshot / 閱卷明細 / 軟刪除分流 / 並發處理 / 樂觀鎖 / 管理者保護 / DM 文件廢止 / 邀請與加入 / 完課率 / 章節異動 / 系統初始化 / Email 變更）、Success Criteria、Assumptions、跨模組介接、排程作業總覽、RQ 追蹤矩陣。
 - **已完成**：spec_us1 ~ 15.md 全數產出（各含 User Story 描述、Acceptance Scenarios、系統訊息表 ET-MSG-…、前置依賴）；data-model.md（27 表 + Lookup + ERD）、plan.md、research.md、tasks.md、issues.md、contracts/（SRVDM001 / SRVDM002 / EXT-ET-EMAIL）、wireframes/et/index.html。
 - **2026-07-02 客戶 6 項需求變更**已傳播至 spec / data-model / plan / tasks / wireframe / research（受訓單位標籤取代業務模組、發布標籤自動邀請＋寄信、起訖時間與可逆關閉、課後問卷、排程統計與提醒、每次作答明細、通知範本、影片倍速）。
-- **2026-07-03 交付前自檢後續**：（1）通知 Email 契約 `ext-et-email-server.md` 已整份改寫對齊 2026-07-02（統一範本 / ET_NOTIFY_TEMPLATE / 排程信 / IS_ACTIVE）；（2）US13 課後問卷填寫頁已補入 wireframe（`et-survey` / ET05-Q）；（3）本檢核清單補建；（4）**S1 已補**：15 檔各補 `## Functional Requirements` 區塊，編號 `FR-ET-US{N}-NN`（共 146 條）。
+- **2026-07-03 交付前自檢後續**：（1）通知 Email 契約 `ext-et-email-server.md` 已整份改寫對齊 2026-07-02（統一範本 / 通知範本 / 排程信 / IS_ACTIVE）；（2）US13 課後問卷填寫頁已補入 wireframe（`et-survey` / ET05-Q）；（3）本檢核清單補建；（4）**S1 已補**：15 檔各補 `## Functional Requirements` 區塊，編號 `FR-ET-US{N}-NN`（共 146 條）。
+- **2026-07-08 集中化對齊**：系統參數、通知範本、發信、排程集中於平台 DP（見 [../../../requirements/RQDP.md](../../../requirements/RQDP.md)、[../../../_refs/09-平台模組.md](../../../_refs/09-平台模組.md)）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：參數存平台 `DP_PARAM`（前綴 `ET_`）、通知範本存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信走平台唯一發信服務（`DP_EMAIL_LOG`）、排程於平台 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG`）；密碼重設 / Email 變更驗證 TTL 改平台級 `DP_` 參數。維護 UI 仍留在 ET（參數於系統設定頁、範本於 ET09）。已傳播至 spec / data-model / plan / research / tasks / issues / contracts / RQET / usecases / wireframe。
 - **已補（原 SA precheck 建議項）**：
   - ~~**S1**：各 spec_us 之功能需求編號~~ ✅ **已補**（2026-07-03；採 `FR-ET-US{N}-NN`，15 檔共 146 條 FR）。
 - **待補（不擋 SD 開發、建議補強）**：

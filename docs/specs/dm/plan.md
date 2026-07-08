@@ -9,7 +9,9 @@
 
 文件管理模組（DM）提供院方 SOP、系統操作手冊、訓練教材、其他等文件之集中儲存、版本管控、單層簽核發布與線上閱覽。本模組**獨立於主系統 TBMS 部署**，與教育訓練模組（ET）共用同一帳號系統與資料庫（SSO）；ET 之訓練教材統一引用 DM 文件（依 DOC_ID 取最新發布版）。
 
-DM 自身持有 17 張表：共用 `USER`（與 ET 共用）、角色 `DM_USER_ROLE` + 異動紀錄 `DM_USER_ROLE_LOG`、受控資料 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`、閱覽者可見對象授權 `DM_USER_TAG`、文件 `DM_DOCUMENT` + 版本 `DM_DOC_VERSION` + 標籤關聯 `DM_DOC_TAG`、閱讀紀錄 `DM_DOC_READ`、送審 `DM_REVIEW`、公開變更歷程 `DM_CHANGE_LOG`、通知範本 `DM_NOTIFY_TEMPLATE` + 寄件佇列 `DM_NOTIFY_QUEUE`、系統參數 `DM_PARAM`。核心作業對應 13 個 User Story（UCDM01~13）；另有排程 `SCHDM001`（閱讀 KPI 週報與未讀提醒）。
+DM 自身持有 14 張業務表：共用 `DP_USER`（平台 DP 定義、與 ET 共用）、角色 `DM_USER_ROLE` + 異動紀錄 `DM_USER_ROLE_LOG`、受控資料 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`、閱覽者可見對象授權 `DM_USER_TAG`、文件 `DM_DOCUMENT` + 版本 `DM_DOC_VERSION` + 標籤關聯 `DM_DOC_TAG`、閱讀紀錄 `DM_DOC_READ`、送審 `DM_REVIEW`、公開變更歷程 `DM_CHANGE_LOG`。核心作業對應 13 個 User Story（UCDM01~13）；另有排程 `SCHDM001`（閱讀 KPI 週報與未讀提醒）。
+
+> **系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08 集中化）**：DM 不自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`（DM 不建這三張表之 migration）。改用平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`）、`DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務）；`SCHDM001` 於平台 `DP_SCHEDULE` 註冊、由平台引擎執行、`DP_SCHEDULE_LOG` 記錄（job handler 由 DM 提供）。維護 / 編輯 UI 仍留 DM09。發信引擎調校參數屬平台級 `DP_`。
 
 ---
 
@@ -82,7 +84,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 | DM → ET | 教育訓練模組（ET）| **SRVDM001** | 內部服務（ET 呼叫）| 依 DOC_ID 取文件當前發布版（CURRENT_VERSION_ID）之 metadata 與檔案位置 | [contracts/document-service.md](contracts/document-service.md) |
 | DM → ET | 教育訓練模組（ET）| **SRVDM002** | 內部服務（ET 呼叫）| 取「訓練教材」分類之有效文件清單（ET 教材下拉用）| [contracts/document-service.md](contracts/document-service.md) |
 | DM → Email Server | 外部郵件系統 | — | SMTP | 送審 / 退回 / 廢止通知、文件發布通知（撰寫者+相符閱覽者）、KPI 週報、未讀提醒、密碼重設信、帳號變更驗證信 | 外部介接（部署設定）|
-| 排程器 → DM | 系統排程 | **SCHDM001** | 每週觸發（星期＋時間可設定，預設週一 10:00，存 `DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME`）| 計算閱讀 KPI、產生 KPI 週報與未讀提醒入 `DM_NOTIFY_QUEUE` | 部署設定（cron / scheduler）|
+| 平台排程引擎 → DM job | `DP_SCHEDULE` | **SCHDM001** | 每週觸發（星期＋時間可設定，預設週一 10:00，存 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`）；平台引擎執行、`DP_SCHEDULE_LOG` 記錄、job handler 由 DM 提供 | 計算閱讀 KPI、產生 KPI 週報與未讀提醒經平台發信服務 + outbox `DP_EMAIL_LOG` 寄送 | 平台排程集中 |
 
 > **2026-06-26 變更**：移除原「DM → 主系統各畫面 func_name 反查」介接列；DM 與主系統 TBMS 各業務模組無業務介接。func_name 僅供 DM01 內部檢索。
 > **2026-06-29 變更**：文件發布通知改發撰寫者+相符閱覽者（原兩範本合併）、新增 KPI 週報 / 未讀提醒（皆 Email、非同步）與排程 `SCHDM001`。
@@ -148,5 +150,5 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 | func_name 部分唯一索引 | DM01 依作業項目檢索須唯一手冊；DB 約束防並發雙發布 | 草稿 / 已廢止不佔用；應用層另給友善訊息 |
 | 檔案存檔案系統而非 DB | 遵循型別規範、利備份效能 | DB 存 metadata + 路徑；單版本單檔 |
 | 標籤式可見性專用 `AUDIENCE` 組 + `DM_USER_TAG` | 權限與檢索解耦，避免「改標籤＝改權限」；OR 比對＋「全體」值 | 僅作用於閱覽者；AUDIENCE 停用採 soft-retire；research §5b（2026-06-29）|
-| 文件發布通知（撰寫者+相符閱覽者）採 `DM_NOTIFY_QUEUE` outbox 非同步 | 一次發布（尤其「全體」）可能通知上千人，同步寄信會阻塞 / 回滾核准交易；撰寫者與閱覽者合併為單一範本省維護 | 僅 Email、發布當下快照名單、廢止不通知；原兩範本合併為 `DOC_PUBLISH`；research §9b（2026-06-29）|
+| 文件發布通知（撰寫者+相符閱覽者）經平台 outbox `DP_EMAIL_LOG` 非同步 | 一次發布（尤其「全體」）可能通知上千人，同步寄信會阻塞 / 回滾核准交易；撰寫者與閱覽者合併為單一範本省維護 | 僅 Email、發布當下快照名單、廢止不通知；原兩範本合併為 `DOC_PUBLISH`（存 `DP_NOTIFY_TEMPLATE` MODULE=DM）；research §9b（2026-06-29）；發信集中平台（2026-07-08）|
 | 閱讀 KPI：下載記 `DM_DOC_READ` + 排程 `SCHDM001` | 客戶要已看/未看 KPI + 每週回報 + 催未看；下載較預覽明確 | 已看綁目前發布版（發新版重置）；統計與提醒均涵蓋全部已發布文件、未讀提醒由管理者以範本啟用/停用統一控制（2026-07-02 移除文件層旗標）；outbox 非同步；research §9c |

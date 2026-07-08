@@ -2082,8 +2082,9 @@
   <div class="wf-card">
     <div class="d-flex justify-content-between mb-2">
       <strong>通知範本</strong>
-      <small class="text-muted">系統內建 6 類可維護範本；<strong>左側選事件、右側編輯</strong>主旨/內文並可<strong>啟用/停用</strong>。排程類另含執行時間 / 天數參數</small>
+      <small class="text-muted">ET 內建 6 類可維護範本；<strong>左側選事件、右側編輯</strong>主旨/內文並可<strong>啟用/停用</strong>。排程類另含執行時間 / 天數參數</small>
     </div>
+    <div class="field-helper mb-2" style="color:#1b5e20;font-style:italic;">💡 本分頁讀寫平台 <code>DP_NOTIFY_TEMPLATE</code>（<code>MODULE=ET</code>）之列（2026-07-08 集中化）；ET 管理者只編輯 <code>MODULE=ET</code> 的 6 類範本。密碼重設 / 帳號變更驗證為平台系統信（<code>MODULE=DP</code>），由平台管理員維護、不在本清單。寄信一律呼叫平台唯一發信服務（傳 <code>template_code</code>，經 <code>DP_EMAIL_LOG</code> outbox）。</div>
     <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>可使用變數：<code>{{USER_NAME}}</code> <code>{{COURSE_NAME}}</code> <code>{{OPEN_START_AT}}</code> <code>{{OPEN_END_AT}}</code> <code>{{COURSE_URL}}</code> <code>{{INVITE_CODE}}</code> <code>{{COURSE_LIST}}</code> <code>{{CHAPTER_NAME}}</code> <code>{{UNREAD_LIST}}</code> <code>{{TEACHER_NAME}}</code></div>
 
     <div class="row g-3">
@@ -2126,7 +2127,7 @@
               </select>
               <input type="time" class="form-control" id="et-nt-sched-time" value="10:00">
             </div>
-            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於 ET_PARAM.WEEKLY_STAT_DAY_TIME（預設週一 10:00）；每週統計快照＋週報＋未看提醒同批執行</div>
+            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於平台 <code>DP_PARAM.ET_WEEKLY_STAT_DAY_TIME</code>（預設週一 10:00）；每週統計快照＋週報＋未看提醒同批執行（SCHET001 於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行）</div>
           </div>
           <!-- 排程參數：加急提醒天數 -->
           <div class="mt-3" id="et-nt-urgent-row" style="display:none;">
@@ -2136,7 +2137,7 @@
               <input type="number" class="form-control" id="et-nt-urgent-days" min="1" max="30" value="3">
               <span class="input-group-text">天</span>
             </div>
-            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於 ET_PARAM.URGENT_REMIND_DAYS（預設 3 天）；課程進入訖止前 N 天對所有未完課學員寄送，每課只寄一次</div>
+            <div class="field-helper mt-1" style="font-size:0.7rem;"><i class="bi bi-info-circle"></i>存於平台 <code>DP_PARAM.ET_URGENT_REMIND_DAYS</code>（預設 3 天）；課程進入訖止前 N 天對所有未完課學員寄送，每課只寄一次（SCHET002 於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行）</div>
           </div>
 
           <div class="text-end mt-3">
@@ -2152,11 +2153,11 @@
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
-    <strong>本畫面用途（2026-07-02 新增）：</strong>管理者維護各類系統通知信之<strong>統一範本</strong>；版型比照 <strong>DM09 通知範本</strong>之 master-detail（<strong>左側選事件、右側就地編輯</strong>主旨/內文）；教師不可逐課修改，寄出內容統一<br>
-    <strong>範本清單（6 類）：</strong>課程邀請通知 / 邀請彙整通知（事後貼標）/ 課程內容更新通知 / 每週未看提醒 / 截止前加急提醒 / 週報；<strong>密碼重設 / 帳號變更驗證</strong>採系統預設固定範本、不開放編輯，故不列入（2026-07-02 變更）<br>
+    <strong>本畫面用途（2026-07-02 新增；2026-07-08 集中化）：</strong>管理者維護各類系統通知信之<strong>統一範本</strong>；範本存平台 <code>DP_NOTIFY_TEMPLATE</code>（<code>MODULE=ET</code>），本頁讀寫 <code>MODULE=ET</code> 的列；版型比照 <strong>DM09 通知範本</strong>之 master-detail（<strong>左側選事件、右側就地編輯</strong>主旨/內文）；教師不可逐課修改，寄出內容統一，經平台唯一發信服務（<code>DP_EMAIL_LOG</code>）寄送<br>
+    <strong>範本清單（6 類，<code>MODULE=ET</code>）：</strong>課程邀請通知 / 邀請彙整通知（事後貼標）/ 課程內容更新通知 / 每週未看提醒 / 截止前加急提醒 / 週報；<strong>密碼重設 / 帳號變更驗證</strong>為平台系統信（<code>MODULE=DP</code>）、由平台管理員維護、不在本清單（2026-07-08 集中化）<br>
     <strong>右側詳情：</strong>顯示觸發 / 對象 / 管道，可編輯主旨與內文並<strong>啟用 / 停用</strong>該範本（停用後該類信件不寄送，觸發事件照常運作）；內文以 <code>{{變數}}</code> 佔位（課程名稱、起訖時間、學習連結等），寄出時由系統帶入實際值<br>
-    <strong>排程參數（依範本 inline 顯示，比照 DM「催辦門檻天數」）：</strong>選「每週未看提醒 / 週報」顯示 <strong>SCHET001 每週執行時間</strong>（ET_PARAM.WEEKLY_STAT_DAY_TIME，預設週一 10:00）；選「截止前加急提醒」顯示 <strong>加急提醒天數</strong>（ET_PARAM.URGENT_REMIND_DAYS，預設訖止前 3 天）；ET / DM 獨立於主系統，不依賴 DP 模組參數機制<br>
-    <strong>對應需求：</strong>2026-07-02 客戶變更 #2（發布自動邀請＋寄信之統一範本）、#4（每週統計與提醒排程）
+    <strong>排程參數（依範本 inline 顯示，比照 DM「催辦門檻天數」）：</strong>選「每週未看提醒 / 週報」顯示 <strong>SCHET001 每週執行時間</strong>（<code>DP_PARAM.ET_WEEKLY_STAT_DAY_TIME</code>，預設週一 10:00）；選「截止前加急提醒」顯示 <strong>加急提醒天數</strong>（<code>DP_PARAM.ET_URGENT_REMIND_DAYS</code>，預設訖止前 3 天）；排程參數集中於平台 <code>DP_PARAM</code>（前綴 <code>ET_</code>）、排程於平台 <code>DP_SCHEDULE</code> 執行，維護 UI 仍在 ET09<br>
+    <strong>對應需求：</strong>2026-07-02 客戶變更 #2（發布自動邀請＋寄信之統一範本）、#4（每週統計與提醒排程）；2026-07-08 集中化（參數 / 範本 / 發信 / 排程集中於平台 DP）
   </details>
   </div><!-- /Tab 3 通知範本 -->
 
