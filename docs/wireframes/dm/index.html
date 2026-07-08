@@ -2359,12 +2359,12 @@
       <div class="field-helper mb-3">
         <i class="bi bi-info-circle"></i>
         <div>
-          使用者帳號由 DM 與 ET 共用之 user table 維護，本頁僅指派 DM 模組角色；<strong>四種角色可複選、互不互斥</strong>：<br>
+          使用者帳號由 DM 與 ET 共用之 DP_USER（平台帳號主檔）維護，本頁僅指派 DM 模組角色；<strong>四種角色可複選、互不互斥</strong>：<br>
           <strong>管理者</strong>：可進入本頁指派角色 / 維護分類、標籤、通知範本 / 查詢已廢止文件與變更歷程；管理者可彼此指派或取消管理者角色<br>
           <strong>編輯者</strong>：可新增/編輯文件並送簽核、發起廢止申請<br>
           <strong>審核者</strong>：可於簽核中心處理待簽核項目（核准/退回）<br>
           <strong>閱覽者</strong>：可閱讀文件庫；<strong>使用者首次登入 DM 時系統自動授予閱覽者角色</strong>（不需 admin 手動勾選）<br>
-          <strong>無刪除帳號功能</strong>：離職 / 調職由 user table 停用該帳號即可；DM 端僅維護角色對應
+          <strong>無刪除帳號功能</strong>：離職 / 調職由 DP_USER 停用該帳號即可；DM 端僅維護角色對應
         </div>
       </div>
 
@@ -2517,7 +2517,7 @@
         </tbody>
       </table>
 
-      <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>角色勾選 / 取消、可見對象/單位編輯皆即時生效並寫入異動紀錄；無刪除功能 — 若使用者離職 / 調職，由共用 user table 之管理介面停用該帳號即可（DM 不另外處理）。<br><strong>可見對象/單位</strong>（＝使用者所屬單位；受控標籤庫，於「參數設定 > 標籤維護」維護，比照 ET 模組「受訓單位標籤」）決定閱覽者於文件庫之可見範圍：閱覽者僅見「全體」或與自己可見對象相符之文件；編輯者／審核者／管理者不受限。「全體」為文件端通用值，不需逐人指派。<br><strong>管理者</strong>欄位淡黃底色標示目前具管理者權限之使用者；建置時系統會預設指派 1–2 位初始管理者，之後管理者可互相指派／取消。</div>
+      <div class="field-helper mt-3"><i class="bi bi-info-circle"></i>角色勾選 / 取消、可見對象/單位編輯皆即時生效並寫入異動紀錄；無刪除功能 — 若使用者離職 / 調職，由共用 DP_USER 之管理介面停用該帳號即可（DM 不另外處理）。<br><strong>可見對象/單位</strong>（＝使用者所屬單位；受控標籤庫，於「參數設定 > 標籤維護」維護，比照 ET 模組「受訓單位標籤」）決定閱覽者於文件庫之可見範圍：閱覽者僅見「全體」或與自己可見對象相符之文件；編輯者／審核者／管理者不受限。「全體」為文件端通用值，不需逐人指派。<br><strong>管理者</strong>欄位淡黃底色標示目前具管理者權限之使用者；建置時系統會預設指派 1–2 位初始管理者，之後管理者可互相指派／取消。</div>
 
       <nav class="text-center mt-3">
         <ul class="pagination pagination-sm justify-content-center mb-0">
@@ -2862,20 +2862,20 @@
     <span style="margin-left:1rem;">• <strong>關聯作業項目維護</strong>：可修改名稱、啟用/停用；代號 — 名稱（如 BS04 — 領血確認），供 DM03 編輯時選用、DM01 依作業項目搜尋對應手冊</span><br>
     <span style="margin-left:1rem;">• <strong>標籤維護</strong>：受控標籤庫，單一表格內以<strong>組別小標題列</strong>分段（可見對象/單位＝權限；適用模組／文件性質／法規關聯＝檢索）；每筆可修改、啟用/停用。「全體」為通用值不可修改/停用；可見對象值停用採 soft-retire（不收回既有可見性）</span><br>
 
-    <strong>2. 權限管理：</strong>管理者對 user table 使用者帳號於<strong>同一列</strong>設定 DM 模組角色（<strong>管理者 / 編輯者 / 審核者 / 閱覽者</strong>四種可複選）與<strong>可見對象/單位</strong>（版面對齊 ET 權限管理）。<br>
+    <strong>2. 權限管理：</strong>管理者對 DP_USER 使用者帳號於<strong>同一列</strong>設定 DM 模組角色（<strong>管理者 / 編輯者 / 審核者 / 閱覽者</strong>四種可複選）與<strong>可見對象/單位</strong>（版面對齊 ET 權限管理）。<br>
     <span style="margin-left:1rem;">• 四個角色獨立勾選 checkbox，互不互斥；同一帳號可同時是管理者 + 編輯者 + 審核者 + 閱覽者</span><br>
     <span style="margin-left:1rem;">• <strong>可見對象/單位</strong>：同列以 badge 顯示、點「編輯」開視窗勾選（護理師 / 軍人 / 醫檢師 / 行政人員…，受控標籤庫於「參數設定 > 標籤維護」維護，比照 ET「受訓單位標籤」）；決定該閱覽者於文件庫之可見範圍。「全體」為文件端通用值、不需逐人指派。原「部門」欄（無外部資料來源）已移除</span><br>
     <span style="margin-left:1rem;">• <strong>管理者</strong>：可進入 DM09 指派角色、維護分類/標籤/通知範本、查詢已廢止文件與變更歷程；<strong>管理者可彼此指派或取消管理者角色</strong>（建置時系統預設指派 1–2 位初始管理者）</span><br>
     <span style="margin-left:1rem;">• <strong>編輯者</strong>：可在 DM01 新增文件、於 DM02 編輯新版本、發起廢止申請</span><br>
     <span style="margin-left:1rem;">• <strong>審核者</strong>：可於 DM04 簽核中心處理新增/新版本/廢止三類待簽核項目</span><br>
     <span style="margin-left:1rem;">• <strong>閱覽者</strong>：可閱讀文件庫之已發布文件；<strong>使用者首次登入 DM 時系統自動授予閱覽者角色</strong>（不需 admin 手動勾選）</span><br>
-    <span style="margin-left:1rem;">• 勾選/取消即時生效並寫入異動紀錄；本頁無刪除功能 — 離職/調職由共用 user table 之管理介面停用該帳號即可</span><br>
+    <span style="margin-left:1rem;">• 勾選/取消即時生效並寫入異動紀錄；本頁無刪除功能 — 離職/調職由共用 DP_USER 之管理介面停用該帳號即可</span><br>
 
     <strong>3. 通知範本：</strong>系統內建 <strong>9 項</strong>事件之 Email / 系統內訊息範本 — 新增/新版本 3 項（送審/退回/<strong>發布通知＝撰寫者+相符閱覽者</strong>）+ 廢止 3 項（廢止申請送審/核准/退回）+ 每週排程 2 項（KPI 週報 / 未讀提醒）+ 系統自動 1 項（自動催辦信）。採 <strong>master-detail 版面</strong>：<strong>左側點選事件、右側就地編輯</strong>主旨/內文與啟用狀態；事件項目固定不可新增，但<strong>個別範本可停用</strong>（admin 可依院內偏好關閉某類通知）<br>
     <span style="margin-left:1rem;">• <strong>自動催辦門檻</strong>：於「自動催辦信」事件之右側詳情調整（預設 7 天，範圍 1–30 天），調整後系統每日掃描時以新門檻判定；同時影響 DM04 待簽核清單之「停留天數」標紅警示</span><br>
 
     <strong>不在本頁設定</strong>：<br>
-    <span style="margin-left:1rem;">• <strong>帳號本身</strong>：DM 與 ET 共用之 user table 維護（使用者於 DM07 個人專區或 ET 端可改自己的帳號 / 姓名 / 密碼）；本頁僅指派 DM 角色，無法新增/刪除帳號</span><br>
+    <span style="margin-left:1rem;">• <strong>帳號本身</strong>：DM 與 ET 共用之 DP_USER 維護（使用者於 DM07 個人專區或 ET 端可改自己的帳號 / 姓名 / 密碼）；本頁僅指派 DM 角色，無法新增/刪除帳號</span><br>
     <span style="margin-left:1rem;">• <strong>系統部署參數</strong>（檔案大小上限、URL 前綴等）為部署時固定設定，不開放 UI 線上維護</span>
   </details>
 </div>
@@ -2924,7 +2924,7 @@
           <label class="form-label small fw-bold">確認新密碼 <span class="text-danger">*</span></label>
           <input type="password" class="form-control form-control-sm" placeholder="再次輸入新密碼" id="pw-new-confirm">
         </div>
-        <div class="field-helper"><i class="bi bi-info-circle"></i>變更後同步更新共用 user table（DM 與 ET 一致）</div>
+        <div class="field-helper"><i class="bi bi-info-circle"></i>變更後同步更新共用 DP_USER（DM 與 ET 一致）</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>

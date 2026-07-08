@@ -8,10 +8,10 @@
 
 ---
 
-## §1 稽核標準欄位之調整（DM 獨立於 DP）
+## §1 稽核標準欄位之調整（對齊平台模組 DP）
 
-- **Decision**: DM 各表標準欄位採 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`，**省略 `CREATED_SITE` / `CREATED_HOSPITAL`**（及對應 UPDATED_*）。`CREATED_USER` / `UPDATED_USER` 指向共用 `USER.USER_ID`。
-- **Rationale**: DM 與 ET **獨立部署、不依賴主系統 DP**（無 DP RBAC、登入不選站點 / 院區、無 DP_SITE / DP_HOSPITAL）。CLAUDE.md 標準欄位之 `CREATED_SITE`（FK→ DP_SITE）在 DM 無對應來源，強行加入將造成懸空 FK。DM 使用者經 SSO 登入、無站點隸屬概念。
+- **Decision**: DM 各表標準欄位採 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`，**省略 `CREATED_SITE` / `CREATED_HOSPITAL`**（及對應 UPDATED_*）。`CREATED_USER` / `UPDATED_USER` 指向共用 `DP_USER.USER_ID`。
+- **Rationale**: DM 各表標準欄位**對齊 EDMS 平台模組 DP**（`DP_USER`；平台無 SITE / HOSPITAL 概念、無 DP_SITE / DP_HOSPITAL）。CLAUDE.md 標準欄位之 `CREATED_SITE`（FK→ DP_SITE）在 EDMS 平台無對應來源，強行加入將造成懸空 FK。DM 權限自管（自己之 4 角色），與平台 DP 只共用帳號與認證，使用者無站點隸屬概念。
 - **Alternatives**: (a) 保留 CREATED_SITE 但填 null → 違反必填且 FK 無意義；(b) 自建 DM 站點表 → DM 無站點業務，過度設計。均否決。
 - **append-only 事件表之標準欄位（2026-06-29 補充）**：`DM_CHANGE_LOG` / `DM_USER_ROLE_LOG` / `DM_DOC_READ` 屬只新增、不改不刪之事件紀錄，**省略 `UPDATED_*` / `DELETED`**。其中 **`DM_DOC_READ`**（下載即建立一列）之「下載者 / 下載時間」即標準 `CREATED_USER` / `CREATED_DATE`，故**不另設 `USER_ID` / `READ_TIME`**（避免同值重複欄位）；KPI 已看以 `CREATED_USER`（＝下載者）判定。
 
@@ -62,10 +62,10 @@
 - **Rationale**: spec Clarify「永久保留」；「至少 1 年」為法規下限，永久保留自然滿足。角色異動之完整歷史寫入 `DM_USER_ROLE_LOG`，但**不提供 DM 查詢 UI**（僅 DM09 顯示「最後異動」欄、完整歷史供 IT / 稽核由 DB 查）。
 - **Alternatives**: 滿 1 年清除（否決，spec Clarify）。
 
-## §8 SSO 與共用 user table
+## §8 SSO 與共用 `DP_USER`
 
-- **Decision**: `USER` 為 DM 與 ET **共用**之 user table（USER_ID 穩定識別碼、帳號 Email、密碼雜湊、姓名）；DM 僅管理自己之角色（`DM_USER_ROLE`），ET 角色獨立。
-- **Rationale**: spec：註冊一次登兩系統、角色不共用。DM 不持有 USER 之獨佔權；帳號 / 密碼 / 姓名變更於兩系統同步生效。
+- **Decision**: `DP_USER` 為 DM 與 ET **共用**之使用者主檔（**由平台模組 DP 定義**；USER_ID 穩定識別碼、帳號 Email、密碼雜湊、姓名）；登入 / 註冊 / 忘記密碼 / 個資維護之認證由平台 DP 以**簡單 JWT** 統一提供（UCDP001–004），DM 僅管理自己之角色（`DM_USER_ROLE`），ET 角色獨立。
+- **Rationale**: spec：註冊一次登兩系統、角色不共用。DM 不持有 `DP_USER` 之獨佔權；帳號 / 密碼 / 姓名變更於兩系統同步生效。
 - **Alternatives**: DM 自建帳號（否決，與 ET 重複、違 SSO 設計）。
 
 ## §9 通知與自動催辦

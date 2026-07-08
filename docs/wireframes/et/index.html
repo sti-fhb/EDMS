@@ -458,7 +458,7 @@
         <i class="bi bi-box-arrow-in-right me-1"></i>登入
       </button>
       <div class="login-auth-hint">
-        <i class="bi bi-info-circle me-1"></i>使用者首次登入請點上方「<strong>註冊</strong>」建立帳號；ET 與 DM 共用 user table，註冊一次即可登入兩系統
+        <i class="bi bi-info-circle me-1"></i>使用者首次登入請點上方「<strong>註冊</strong>」建立帳號；ET 與 DM 共用 DP_USER（平台帳號主檔），註冊一次即可登入兩系統
       </div>
 
       <!-- demo: 觸發錯誤訊息（正式系統不顯示） -->
@@ -2064,7 +2064,7 @@
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
     <strong>本畫面用途（權限管理分頁）：</strong>管理者設定每個帳號在 ET 中的<strong>角色</strong>（管理者 / 教師 / 學員，可多重指派）與<strong>受訓單位標籤指派</strong>（多對多，2026-07-02 變更：取代原「業務模組」對應）；<strong>標籤庫維護</strong>已移至「<strong>參數設定</strong>」分頁<br>
-    <strong>使用者來源：</strong>清單顯示<strong>所有 ET / DM 共用 user table 中的使用者</strong>；ET 不自建帳號，僅維護角色與標籤對應<br>
+    <strong>使用者來源：</strong>清單顯示<strong>所有 ET / DM 共用 DP_USER 中的使用者</strong>；ET 不自建帳號，僅維護角色與標籤對應<br>
     <strong>角色變更：</strong>勾選 / 取消三角色 checkbox → 立即生效；該使用者下次登入即套用新角色<br>
     <strong>標籤指派（2026-07-02 變更）：</strong>點「受訓單位標籤」欄之「編輯」開啟 modal，以核取方塊勾選（可複選、可全不勾即「未指派」）；標籤與角色為<strong>獨立兩個維度</strong>（角色決定能做什麼、標籤決定隸屬哪個受訓單位）；用途為課程發布時之<strong>標籤自動邀請</strong><br>
     <strong>貼標追溯（2026-07-02 新增）：</strong><strong>新增</strong>人×標籤時，系統自動將其補加入該標籤所有「已發布且未關閉」課程並寄<strong>彙整一封</strong>通知信；<strong>移除</strong>人×標籤時既有課程學員名單不變動，之後新發布之該標籤課程不再自動邀請<br>
@@ -2171,7 +2171,7 @@
   </div>
 
   <div class="wf-status-msg wf-status-info mb-2">
-    <i class="bi bi-info-circle me-1"></i>本頁編輯之內容（帳號 / 姓名 / 密碼）同步寫入共用 user table，<strong>DM 端同步生效</strong>。
+    <i class="bi bi-info-circle me-1"></i>本頁編輯之內容（帳號 / 姓名 / 密碼）同步寫入共用 DP_USER，<strong>DM 端同步生效</strong>。
   </div>
 
   <div class="wf-card">
@@ -2215,7 +2215,7 @@
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
     <strong>本畫面用途：</strong>所有登入使用者編輯自己的帳號 / 姓名 / 密碼<br>
-    <strong>共用 user table：</strong>變更後同步寫入 user table，**DM 端亦同步生效**（兩系統共用同帳號）<br>
+    <strong>共用 DP_USER：</strong>變更後同步寫入 DP_USER，**DM 端亦同步生效**（兩系統共用同帳號）<br>
     <strong>帳號（Email）：</strong>寄驗證信至新 Email，點連結後新帳號才生效（避免誤輸入鎖死帳號）<br>
     <strong>姓名：</strong>直接編輯儲存<br>
     <strong>密碼：</strong>跳 modal，須填舊密碼 + 新密碼 + 確認新密碼（驗證舊密碼避免他人冒用 session 改密碼）<br>
@@ -3304,7 +3304,7 @@ zhangsm@military.gov.tw</textarea>
           <label class="form-label small fw-bold">確認新密碼 <span class="text-danger">*</span></label>
           <input type="password" class="form-control form-control-sm" placeholder="再次輸入新密碼" id="et-pw-new-confirm">
         </div>
-        <div class="field-helper"><i class="bi bi-info-circle"></i>變更後同步更新共用 user table（ET 與 DM 一致）</div>
+        <div class="field-helper"><i class="bi bi-info-circle"></i>變更後同步更新共用 DP_USER（ET 與 DM 一致）</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>

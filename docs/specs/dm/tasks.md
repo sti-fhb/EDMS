@@ -3,7 +3,7 @@
 **模組代碼**: DM | **日期**: 2026-06-24
 **規格**: [spec.md](spec.md) | **計畫**: [plan.md](plan.md) | **資料模型**: [data-model.md](data-model.md) | **研究**: [research.md](research.md) | **契約**: [contracts/document-service.md](contracts/document-service.md)
 
-> DM **獨立於主系統 DP** 部署，與 ET 共用 user table（SSO）；自身 17 張表（含 `DM_USER_TAG` 可見對象授權、`DM_DOC_READ` 閱讀紀錄、`DM_NOTIFY_QUEUE` 寄件 outbox）+ 排程 `SCHDM001`。標準欄位省略 SITE / HOSPITAL（research §1）。檔案存檔案系統 / DB 存 metadata。
+> DM **權限自管（自己的 4 角色）**、與平台模組 DP 只共用帳號與認證，與 ET 共用 `DP_USER`（SSO）；自身 17 張表（含 `DM_USER_TAG` 可見對象授權、`DM_DOC_READ` 閱讀紀錄、`DM_NOTIFY_QUEUE` 寄件 outbox）+ 排程 `SCHDM001`。標準欄位省略 SITE / HOSPITAL（對齊平台 DP，research §1）。檔案存檔案系統 / DB 存 metadata。
 
 ---
 
@@ -32,7 +32,7 @@
 
 > 為所有 User Story 之阻斷性前置（SSO 認證、授權、檔案、DOC_ID、通知、狀態機）。
 
-- [ ] T014 [P] 實作 SSO 認證接入 dm/middleware/auth：共用 user table 驗證帳密、未登入擋下、首次登入自動授予閱覽者；**獨立於 DP、不走 DP RBAC**，對應 spec_us2 FR-001~003
+- [ ] T014 [P] 實作 SSO 認證接入 dm/middleware/auth：共用 `DP_USER` 驗證帳密、未登入擋下、首次登入自動授予閱覽者；**DM 權限自管、與平台 DP 只共用帳號與認證**，對應 spec_us2 FR-001~003
 - [ ] T015 [P] 實作角色授權工具 dm/util/authz：4 角色（DM_ADMIN/EDITOR/REVIEWER/VIEWER）複選聯集判定；提供「指定審核者排除本人」與「管理者自我保護」共用檢核，對應 spec_us1 FR-005/006、spec_us5 FR-006
 - [ ] T016 [P] 實作檔案儲存服務 dm/service/file_store：上傳至檔案系統 / 物件儲存、DB 存 metadata（FILE_*）、單檔上限讀 `DM_FILE_MAX_MB`、依 MIME 判定可預覽（PDF/圖片）/ 僅下載（Office），參照 research §3/§10
 - [ ] T017 [P] 實作 DOC_ID 產生器 dm/util/docid：`DM-{分類碼}-{6 位流水號}`、流水號依分類各自獨立、草稿建立時配號，參照 research §2
@@ -50,8 +50,8 @@
 > **獨立測試**: 既有帳密登入導向 DM00；未註冊 Email 得提示；註冊後以新帳號登入；忘記密碼於連結有效期內重設
 > **對應 FR**: spec_us2 FR-001~006
 
-- [ ] T021 [US2] 實作登入頁與驗證 dm/login：帳密驗證共用 user table、錯誤分流（查無帳號 / 密碼錯誤）、成功寫 session 並導向 DM00，對應 FR-001~003
-- [ ] T022 [US2] 實作註冊流程：Email 唯一檢核、兩次密碼一致、建立 user table 紀錄並授予閱覽者、跳回登入頁預填 Email，對應 FR-004
+- [ ] T021 [US2] 實作登入頁與驗證 dm/login：帳密驗證共用 `DP_USER`、錯誤分流（查無帳號 / 密碼錯誤）、成功寫 session 並導向 DM00，對應 FR-001~003
+- [ ] T022 [US2] 實作註冊流程：Email 唯一檢核、兩次密碼一致、建立 `DP_USER` 紀錄並授予閱覽者、跳回登入頁預填 Email，對應 FR-004
 - [ ] T023 [US2] 實作忘記密碼：寄密碼重設連結至 Email（30 分鐘有效）、逾時拒絕、重設密碼頁，對應 FR-005
 
 ---
@@ -65,7 +65,7 @@
 
 - [ ] T024 [US1] 實作參數設定頁 dm/admin/params：分類（含唯一分類碼、建立後鎖定）/ func_name / 標籤之共通維護（T020），對應 FR-001~003
 - [ ] T025 [US1] 實作催辦門檻設定：值域 1–30 天（預設 7）、寫 `DM_PARAM.DM_REMIND_THRESHOLD`，對應 FR-004
-- [ ] T026 [US1] 實作權限管理頁 dm/admin/roles：列共用 user table 使用者、4 角色複選即時生效、寫 `DM_USER_ROLE_LOG`、顯示「最後異動」欄、自我保護、不檢核 0 管理者，對應 FR-005/006/008
+- [ ] T026 [US1] 實作權限管理頁 dm/admin/roles：列共用 `DP_USER` 使用者、4 角色複選即時生效、寫 `DM_USER_ROLE_LOG`、顯示「最後異動」欄、自我保護、不檢核 0 管理者，對應 FR-005/006/008
 - [ ] T027 [US1] 實作通知範本維護 dm/admin/templates：9 內建事件主旨 / 內文編輯與啟用停用（「文件發布通知」＝撰寫者+相符閱覽者、含「KPI 週報」「未讀提醒」＝EMAIL_ONLY）、自動催辦含門檻，對應 FR-007
 - [ ] T027b [US1] 實作 KPI 週報 / 未讀提醒之「每週執行時間」設定（於通知範本 detail：星期下拉＋時間，兩者共用）：寫 `DM_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（格式 `星期,HH:MM`，預設 `週一,10:00`），供 SCHDM001 讀取，對應 spec_us13 FR-004a
 - [ ] T027a [US1] 實作閱覽者可見對象授權 dm/admin/audience：使用者 × 可見對象（AUDIENCE 組）勾選、即時生效、寫異動紀錄、顯示「最後異動」欄；AUDIENCE 值停用時提示受影響文件 / 閱覽者數，對應 FR-009/FR-010
@@ -162,7 +162,7 @@
 > **對應 FR**: spec_us9 FR-001~007
 > **前置**: Phase 2、US5（草稿）、US6（送審撤回）
 
-- [ ] T049 [US9] 實作個人資料維護 dm/profile：姓名直接存、Email 變更新信箱驗證後切換（30 分鐘）、密碼變更驗舊密碼並同步 user table，對應 FR-001~003
+- [ ] T049 [US9] 實作個人資料維護 dm/profile：姓名直接存、Email 變更新信箱驗證後切換（30 分鐘）、密碼變更驗舊密碼並同步 `DP_USER`，對應 FR-001~003
 - [ ] T050 [US9] 實作文件草稿區（編輯者）：未送審 / 被退回 / 已撤回三類、續編進 DM03、刪除須確認不可復原，對應 FR-004
 - [ ] T051 [US9] 實作撤回送審：回對應狀態（草稿 / 已發布）、站內訊息通知原審核者、可改選新審核者再送，對應 FR-005
 - [ ] T052 [US9] 實作我的文件動態（撰寫者 / 審核者視角 tab、近 30 天）+ 分區可見性（純閱覽者 / 管理者僅個人資料維護），對應 FR-006/007

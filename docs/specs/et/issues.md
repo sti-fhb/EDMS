@@ -40,12 +40,12 @@
 **階段**：Setup + Foundational（為所有 Issue 之前置）
 **前置條件**：
 - PostgreSQL 已建置；應用伺服器環境就緒
-- 與 DM 模組已協調共用 USER 主檔之 schema 定義
+- `DP_USER` 由平台模組 DP 建立與定義（ET 以 USER_ID 引用、不自建帳號表）
 - SMTP 伺服器資訊就緒
 
 **涵蓋 Tasks**：
 - T001 建立 ET 模組專案結構（controllers / services / repositories / models / migrations / templates）
-- T002 ~ T020 建立 19 份 Migration（共用 USER + ET 18 張表；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
+- T002 ~ T020 建立 ET 18 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
 - T125 ~ T129 建立 2026-07-02 新增 8 張表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT、ET_NOTIFY_TEMPLATE + 6 類可維護範本 seed）
 - T021 ~ T023 建立 Lookup 代碼、ET_TAG（5 筆種子：全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）、ET_PARAM 初始資料
 - T024 系統初始化第一個管理者 Seed Script
@@ -54,7 +54,7 @@
 **驗收條件**：
 1. 27 張資料表全部建立；標準稽核欄位（CREATED_USER / CREATED_DATE / UPDATED_USER / UPDATED_DATE）齊備
 2. 8 類 Lookup 代碼資料、5 筆 ET_TAG 種子、ET_PARAM、6 類 ET_NOTIFY_TEMPLATE 範本 seed 載入成功
-3. IT 透過 Seed Script 寫入 USER + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
+3. IT 透過 Seed Script 寫入 `DP_USER` + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
 4. SSO 認證中介層可驗證 session 並注入 USER_ID 與角色清單
 5. 樂觀鎖工具於版本不符時回傳明確衝突訊息
 6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與內容
@@ -70,10 +70,10 @@
 **對應規格**：[spec_us2.md](spec_us2.md)、UCET012、畫面：登入頁
 **階段**：P1-核心
 **前置條件**：
-- Issue #0 完成（USER / ET_USER_ROLE 表 + SSO 認證中介層 + Email Server Client 就緒）
+- Issue #0 完成（`DP_USER` / ET_USER_ROLE 表 + SSO 認證中介層 + Email Server Client 就緒）
 
 **涵蓋 Tasks**：
-- T033 USER Repository（含 PASSWORD_RESET_* 欄位）
+- T033 `DP_USER` Repository（含 PASSWORD_RESET_* 欄位）
 - T034 ET_USER_ROLE Repository
 - T035 登入 Endpoint（驗證 + session + 角色導向預設首頁）
 - T036 登入頁前端（登入 / 註冊 / 忘記密碼三項；錯誤訊息分流）
@@ -120,7 +120,7 @@
 5. 移除使用者×標籤 → 既有 ET_ENROLLMENT 不變動；之後新發布之該標籤課程不自動邀請
 6. 標籤庫維護：可新增 / 修改 / 停用 / 啟用；TAG_NAME 唯一；「全體」不可停用刪除；停用標籤不可掛新課程、既有課程不受影響
 7. 使用者首次登入後自動列於本頁，預設僅「學員」角色勾選、標籤未指派
-8. 使用者離職由共用 user table 停用該帳號，DM / ET 同步生效
+8. 使用者離職由共用 `DP_USER` 停用該帳號，DM / ET 同步生效
 9. 標籤對應變更 / 角色變更均寫入「最後修改」欄（修改者、時間）
 
 **Labels**：`P1-核心`, `US1`, `UCET010`, `admin`, `permission`, `frontend`, `backend`
@@ -269,7 +269,7 @@
 8. 未及格且剩餘重考次數 > 0 → 顯示「重新作答」按鈕；點擊立即建立新 attempt 並重新洗牌（無 cooldown）
 9. 學員作答中教師修改測驗 → 當前 attempt 沿用快照不受影響
 10. 學員作答中課程被關閉（到期 / 手動）→ 當前 attempt 沿用快照可完成並計分；之後不可開新作答（2026-07-02 更新）
-11. 結業成績取該 USER × QUIZ 之最高分 attempt
+11. 結業成績取該 `DP_USER` × QUIZ 之最高分 attempt
 12. 每次 attempt 完整保留於歷史紀錄；學員可回看自己**每一次** attempt 之成績與逐題明細（依快照渲染，不限最近一次）（2026-07-02 更新）
 
 **Labels**：`P1-核心`, `US6`, `UCET009`, `student`, `quiz`, `auto-grading`, `frontend`, `backend`
@@ -382,12 +382,12 @@
 - T101 Email 變更驗證信系統固定範本（ET_EMAIL_CHANGE；不入 ET_NOTIFY_TEMPLATE、不可 UI 編輯）
 
 **驗收條件**：
-1. 使用者編輯姓名後直接儲存 → 同步寫入共用 user table，DM / ET 兩端皆生效
+1. 使用者編輯姓名後直接儲存 → 同步寫入共用 `DP_USER`，DM / ET 兩端皆生效
 2. 變更帳號（Email）：系統寄發驗證信至新 Email，PASSWORD_RESET_TTL_MIN 內有效
 3. Email 變更期間舊 Email 仍可登入（雙信箱共存）
-4. 點擊驗證連結 → USER.EMAIL 更新為新值、清除 PENDING、強制當前 session 登出
+4. 點擊驗證連結 → `DP_USER.EMAIL` 更新為新值、清除 PENDING、強制當前 session 登出
 5. 連結逾時或被新請求取代 → 該請求作廢，舊 Email 維持不變
-6. 變更密碼：驗證舊密碼 → 新密碼兩次一致 → 雜湊更新；同步寫入共用 user table（DM 同步生效）
+6. 變更密碼：驗證舊密碼 → 新密碼兩次一致 → 雜湊更新；同步寫入共用 `DP_USER`（DM 同步生效）
 7. 舊密碼錯誤 → 顯示「舊密碼不正確」
 8. 忘記密碼改走 Issue #1 之忘記密碼流程
 

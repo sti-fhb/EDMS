@@ -10,7 +10,7 @@
 ## Phase 1: 專案設定
 
 - [ ] T001 建立 ET 模組專案結構，依 plan.md 文件結構建立 et/ 目錄與子目錄（controllers / services / repositories / models / migrations / templates）
-- [ ] T002 [P] 建立資料庫 Migration：**USER**（共用 user table；含 EMAIL_PENDING_* 與 PASSWORD_RESET_* 欄位），參照 data-model.md；協調 DM 模組共識定義
+- [ ] T002 [P] **(移除／改由平台 DP 負責)** 帳號主檔 migration：ET **不建立**帳號表 migration；`DP_USER`（帳號 Email / 密碼雜湊 / 姓名 / 狀態 / Email 變更 PENDING 等欄位）由**平台模組 DP** 建立與維護，ET 各表一律以 USER_ID（VARCHAR(20)）FK 引用；原「協調 DM 模組共識定義」改由平台 DP 統一定義
 - [ ] T003 [P] 建立資料庫 Migration：**ET_USER_ROLE** 使用者角色，含 (USER_ID, ROLE) 邏輯唯一索引
 - [ ] T004 [P] 建立資料庫 Migration：**ET_TAG** 受訓單位標籤（TAG_NAME 唯一、IS_ACTIVE / IS_ALL / IS_BUILTIN）（2026-07-02 改寫，原 ET_USER_MODULE 廢除）
 - [ ] T005 [P] 建立資料庫 Migration：**ET_USER_TAG** 使用者標籤對應，含 (USER_ID, TAG_ID) 邏輯唯一索引（2026-07-02 改寫，原 ET_MODULE 廢除）
@@ -32,13 +32,13 @@
 - [ ] T021 建立 Lookup 代碼初始資料（ET_USER_ROLE_TYPE、ET_COURSE_STATUS（DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除）、ET_ENROLLMENT_SOURCE（含 TAG_DEFAULT）、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類），參照 data-model.md Lookup 表
 - [ ] T022 建立 ET_TAG 初始資料（5 筆：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師，皆 IS_BUILTIN），參照 data-model.md（2026-07-02 改寫，原 ET_MODULE 7 筆廢除）
 - [ ] T023 建立 ET_PARAM 初始資料（VIDEO_ALLOWED_FORMATS / VIDEO_MAX_SIZE_MB / VIDEO_PLAYBACK_MAX_RATE / PASSWORD_RESET_TTL_MIN / INVITATION_CODE_LENGTH / WEEKLY_STAT_DAY_TIME / URGENT_REMIND_DAYS），參照 data-model.md（2026-07-02 更新：EMAIL_NOTIFY_* 移至 ET_NOTIFY_TEMPLATE）
-- [ ] T024 建立**系統初始化第一個管理者** Migration / Seed Script：寫入 USER（IT 部署時提供 Email / 初始密碼 hash）+ ET_USER_ROLE（ROLE=ADMIN）
+- [ ] T024 建立**系統初始化第一個管理者** Migration / Seed Script：寫入 `DP_USER`（帳號主檔由平台模組 DP 定義；IT 部署時提供 Email / 初始密碼 hash）+ ET_USER_ROLE（ROLE=ADMIN）
 
 ---
 
 ## Phase 2: 基礎共用元件
 
-- [ ] T025 [P] 實作 SSO 認證中介層：登入 session 管理、密碼雜湊（建議 bcrypt 或 argon2）、與 DM 共用 USER 主檔之 read / write 邏輯
+- [ ] T025 [P] 實作 SSO 認證中介層：登入 session 管理、密碼雜湊（建議 bcrypt 或 argon2）、與 DM 共用 `DP_USER` 主檔之 read / write 邏輯
 - [ ] T026 [P] 實作角色權限檢查中介層：依登入 session 之 ET_USER_ROLE 判斷 endpoint 存取權（2026-07-02：ET_USER_MODULE 改 ET_USER_TAG，標籤僅供邀請不涉權限）
 - [ ] T027 [P] 實作 ET_PARAM 載入工具：應用啟動時 cache 系統參數，提供 get(key) 介面；變更後可手動 reload
 - [ ] T028 [P] 實作樂觀鎖檢核工具：寫入時 WHERE VERSION = ?，不等則回傳衝突訊息
@@ -56,13 +56,13 @@
 > **規格子檔**: [spec_us2.md](spec_us2.md) | **驗收情境**: 10 條
 > **前置**: Phase 1-2 完成；Email Server 已配置
 
-- [ ] T033 [US2] 實作 USER Repository（CRUD、依 EMAIL 查詢、PASSWORD_RESET_* 欄位寫入）
+- [ ] T033 [US2] 實作 `DP_USER` Repository（CRUD、依 EMAIL 查詢、PASSWORD_RESET_* 欄位寫入）
 - [ ] T034 [US2] 實作 ET_USER_ROLE Repository（依 USER_ID 查角色清單、寫入新角色）
 - [ ] T035 [US2] 實作登入 Endpoint：驗證帳號 / 密碼、產生 session、依角色導向預設首頁（管理者 → ET07、教師 → ET01、學員 → ET04）
 - [ ] T036 [US2] 實作登入頁前端（et/login）：登入 / 註冊 / 忘記密碼三項動作；錯誤訊息分流（查無此帳號 / 密碼錯誤）
 - [ ] T037 [US2] 實作註冊 Endpoint：檢核 EMAIL 未存在、密碼兩次一致、雜湊儲存；ET_USER_ROLE 自動授予 STUDENT
-- [ ] T038 [US2] 實作忘記密碼 Endpoint：寄送密碼重設信至 Email（30 分鐘有效，TTL 由 ET_PARAM 控制）；token 寫入 USER.PASSWORD_RESET_TOKEN / EXPIRES_AT
-- [ ] T039 [US2] 實作密碼重設頁面（et/reset-password）：驗證 token 有效性、輸入新密碼、雜湊更新 USER.PASSWORD_HASH
+- [ ] T038 [US2] 實作忘記密碼 Endpoint：寄送密碼重設信至 Email（30 分鐘有效，TTL 由 ET_PARAM 控制）；token 寫入 `DP_USER.PASSWORD_RESET_TOKEN` / EXPIRES_AT
+- [ ] T039 [US2] 實作密碼重設頁面（et/reset-password）：驗證 token 有效性、輸入新密碼、雜湊更新 `DP_USER.PASSWORD_HASH`
 - [ ] T040 [US2] 實作忘記密碼 Email **系統固定範本**（`ET_PASSWORD_RESET`；含 user_name、reset_link、ttl_min 變數）——不入 ET_NOTIFY_TEMPLATE、不開放 UI 編輯（2026-07-02）
 
 ---
@@ -197,7 +197,7 @@
 > **規格子檔**: [spec_us9.md](spec_us9.md) | **驗收情境**: 25 條
 > **前置**: US3 / US4 / US5 / US6 完成
 
-- [ ] T092 [US9] 實作已加入學員查詢 Service：依 COURSE_ID 列出 ET_ENROLLMENT（過濾 IS_REMOVED）；JOIN USER 取姓名；計算完課狀態 / 學習進度（依 ET_PROGRESS 占比）/ 平均成績（已作答測驗最高分平均，排除未作答）/ 最後活動時間
+- [ ] T092 [US9] 實作已加入學員查詢 Service：依 COURSE_ID 列出 ET_ENROLLMENT（過濾 IS_REMOVED）；JOIN `DP_USER` 取姓名；計算完課狀態 / 學習進度（依 ET_PROGRESS 占比）/ 平均成績（已作答測驗最高分平均，排除未作答）/ 最後活動時間
 - [ ] T093 [US9] 實作重置重考次數 Service：限定條件「該學員於該測驗已用重考次數 = 上限且尚未及格」；重置即新增允許之 attempt 額度（具體實作可用 ET_QUIZ_ATTEMPT_M 新增允許之計數欄位，或於 Service 端動態計算）。UI 按鈕位於區塊 2 作答明細之各測驗標題列（以測驗為單位；2026-07-02 移入 → T149）
 - [ ] T094 [US9] 實作移除學員 Service：寫入 ET_ENROLLMENT.IS_REMOVED = true、REMOVED_AT；若該學員有 IN_PROGRESS attempt 跳警告但允許完成
 - [ ] T095 [US9] 實作匯出 CSV Service：依當前篩選條件產生 CSV（含完整欄位）
@@ -212,9 +212,9 @@
 > **規格子檔**: [spec_us10.md](spec_us10.md) | **驗收情境**: 10 條
 > **前置**: US2 完成；Email Server 已配置
 
-- [ ] T097 [US10] 實作 Email 變更 Service：寫入 USER.EMAIL_PENDING_CHANGE / TOKEN / EXPIRES_AT；舊 EMAIL 不變；寄送驗證信至新 Email；舊請求被新請求取代
-- [ ] T098 [US10] 實作 Email 變更驗證 Endpoint：驗證 token 與 expires_at；通過則 USER.EMAIL 更新為新值、清除 PENDING；強制當前 session 登出
-- [ ] T099 [US10] 實作密碼變更 Service：檢核舊密碼、新密碼兩次一致、雜湊更新 USER.PASSWORD_HASH
+- [ ] T097 [US10] 實作 Email 變更 Service：寫入 `DP_USER.EMAIL_PENDING_CHANGE` / TOKEN / EXPIRES_AT；舊 EMAIL 不變；寄送驗證信至新 Email；舊請求被新請求取代
+- [ ] T098 [US10] 實作 Email 變更驗證 Endpoint：驗證 token 與 expires_at；通過則 `DP_USER.EMAIL` 更新為新值、清除 PENDING；強制當前 session 登出
+- [ ] T099 [US10] 實作密碼變更 Service：檢核舊密碼、新密碼兩次一致、雜湊更新 `DP_USER.PASSWORD_HASH`
 - [ ] T100 [US10] 實作 ET08 個人資料頁面：姓名 / Email / 變更密碼三區塊；Email 變更後顯示「PENDING：請至新信箱點擊驗證連結」狀態
 - [ ] T101 [US10] 實作 Email 變更驗證信 **系統固定範本**（`ET_EMAIL_CHANGE`；含 user_name、verify_link、old_email、new_email、ttl_min 變數）——不入 ET_NOTIFY_TEMPLATE、不開放 UI 編輯（2026-07-02）
 

@@ -6,7 +6,7 @@
 
 > **2026-07-02 變更摘要**：移除 ET_MODULE / ET_USER_MODULE 與 ET_COURSE.MODULE_CODE，新增 ET_TAG / ET_USER_TAG / ET_COURSE_TAG（受訓單位標籤）；ET_COURSE 新增起訖時間、狀態機改可逆（移除 PENDING_CLOSE）；新增課後問卷五表（ET_SURVEY*）、週統計快照（ET_WEEKLY_STAT）、通知範本（ET_NOTIFY_TEMPLATE）。
 
-> **標準欄位偏差說明**：ET 與 DM 獨立於主系統部署，與主系統 TBMS 各業務模組之 `HOSPITAL_CODE` / `SITE_ID` 概念無對應；本模組各 Table 之標準欄位 `CREATED_HOSPITAL` / `UPDATED_HOSPITAL` 一律以 NULL 寫入（DB constraint 設為 NULLable）。本偏差為 ET / DM 共用設計，文件管理模組（DM）亦同。
+> **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`（無 SITE / HOSPITAL 概念，對齊平台模組 DP）。
 
 ---
 
@@ -14,7 +14,7 @@
 
 | 實體名稱 | Code | 檔案類別 | 對應 Key Entity | 說明 |
 |---------|------|---------|----------------|------|
-| 共用使用者 | USER | 主表（與 DM 共用） | 使用者主檔 | USER_ID / 帳號 / 密碼 / 姓名；共用 user table，註冊一次可登入 ET / DM 兩系統 |
+| 共用使用者 | DP_USER | 平台主表（DP 定義） | 使用者主檔 | 由平台模組 DP 定義（帳號 / 密碼 / 姓名 / 狀態等）；ET 僅以 USER_ID（VARCHAR20）為 FK 引用，註冊一次可登入 ET / DM 兩系統 |
 | 使用者角色 | ET_USER_ROLE | 對應檔 | 角色指派 | 使用者於 ET 之角色（管理者 / 教師 / 學員，可多重指派）|
 | 受訓單位標籤 | ET_TAG | 主表 | 受訓單位標籤 | 標籤庫；管理者維護（新增 / 修改 / 停用 / 啟用）；內建種子：全體 / 護理師 / 行政人員 / 軍人 / 醫檢師 |
 | 使用者標籤 | ET_USER_TAG | 對應檔 | 使用者標籤 | 使用者 × 受訓單位標籤多對多關聯 |
@@ -46,28 +46,17 @@
 
 ## 業務實體
 
-### 共用使用者（USER）
+### 共用使用者（DP_USER）
 
-> 與 DM 共用之 user table；ET / DM 各自管理自己的角色與受訓單位標籤
+> **DP_USER 由平台模組 DP 定義**（帳號 Email / 密碼雜湊 / 姓名 / 狀態 / 鎖定 / Email 變更 PENDING 等帳號安全欄位），ET 僅以 `USER_ID`（VARCHAR20）為 FK 引用；完整欄位見平台 DP data-model。
 
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
-| 1 | 使用者 ID | USER_ID | BIGINT | PK | 主鍵，BIGSERIAL |
-| 2 | 帳號（Email）| EMAIL | VARCHAR(255) | Y | 唯一鍵；登入帳號 |
-| 3 | 姓名 | NAME | VARCHAR(100) | Y | 顯示用姓名 |
-| 4 | 密碼雜湊 | PASSWORD_HASH | VARCHAR(255) | Y | 雜湊後密碼（bcrypt / argon2，由 plan 階段選定）|
-| 5 | 待變更 Email | EMAIL_PENDING_CHANGE | VARCHAR(255) | N | 變更 Email 流程之 PENDING 新值 |
-| 6 | 待變更 token | EMAIL_PENDING_TOKEN | VARCHAR(64) | N | 變更 Email 驗證之 token |
-| 7 | 待變更到期時間 | EMAIL_PENDING_EXPIRES_AT | TIMESTAMP | N | 驗證連結有效期；TTL 由 `ET_PARAM.PASSWORD_RESET_TTL_MIN` 控制 |
-| 8 | 密碼重設 token | PASSWORD_RESET_TOKEN | VARCHAR(64) | N | 忘記密碼流程之 token |
-| 9 | 密碼重設到期時間 | PASSWORD_RESET_EXPIRES_AT | TIMESTAMP | N | 同上 |
-| - | 標準欄位 | — | — | — | CREATED_USER / CREATED_DATE / CREATED_HOSPITAL / UPDATED_USER / UPDATED_DATE / UPDATED_HOSPITAL / RES_ID / DELETED |
+| 1 | 使用者 ID | USER_ID | VARCHAR(20) | PK | 平台 DP 定義之主鍵；ET 各表以此為 FK 引用 |
 
 **業務規則**:
-- EMAIL 為唯一鍵；註冊時檢核未存在於系統
-- PASSWORD_HASH 不可逆向解出；登入時以雜湊比對
-- EMAIL_PENDING_* 三欄之變更採延遲生效流程，詳見 [spec_us10.md](spec_us10.md)
-- 此 table 由 ET / DM 共同使用，PK / 唯一鍵約束由兩模組共識定義
+- 帳號 / 密碼 / 姓名 / 狀態 / Email 變更 PENDING 等欄位與其約束（唯一鍵、雜湊、延遲生效流程等）**一律由平台模組 DP 定義與維護**，ET 不重複定義
+- ET 端登入 / 註冊 / 忘記密碼 / 個人資料維護之認證能力由平台 DP 統一提供（詳見 [spec_us2.md](spec_us2.md)、[spec_us10.md](spec_us10.md)）；ET 僅以 `USER_ID` 引用
 
 ---
 
@@ -76,7 +65,7 @@
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 角色 ID | ROLE_ID | BIGINT | PK | 主鍵 |
-| 2 | 使用者 ID | USER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 2 | 使用者 ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 角色 | ROLE | VARCHAR(20) | Y | 參見 Lookup `ET_USER_ROLE_TYPE`（ADMIN / TEACHER / STUDENT）|
 | 4 | 是否啟用 | IS_ACTIVE | BOOLEAN | Y | 預設 true |
 | - | 標準欄位 | — | — | — | （同上）|
@@ -114,7 +103,7 @@
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 對應 ID | USER_TAG_ID | BIGINT | PK | 主鍵 |
-| 2 | 使用者 ID | USER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 2 | 使用者 ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 標籤 ID | TAG_ID | BIGINT | Y | FK → ET_TAG.TAG_ID |
 | - | 標準欄位 | — | — | — | （同上）|
 
@@ -153,7 +142,7 @@
 | 4 | 課程狀態 | STATUS | VARCHAR(20) | Y | 參見 Lookup `ET_COURSE_STATUS`（DRAFT / PUBLISHED / CLOSED；PUBLISHED ⇄ CLOSED 可逆）|
 | 5 | 開放起始時間 | OPEN_START_AT | TIMESTAMP | N | 閱課期間起；發布時必填（應用層檢核）；起始前學員不可見 |
 | 6 | 開放訖止時間 | OPEN_END_AT | TIMESTAMP | N | 閱課期間迄；發布時必填；到期系統自動轉 CLOSED；再開課時重設 |
-| 7 | 擁有者 ID | OWNER_ID | BIGINT | Y | FK → USER.USER_ID；建立當下記錄；本欄位永久不可變更（管理者代為轉讓為例外，需寫 ET_OWNER_TRANSFER）|
+| 7 | 擁有者 ID | OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID；建立當下記錄；本欄位永久不可變更（管理者代為轉讓為例外，需寫 ET_OWNER_TRANSFER）|
 | 8 | 邀請碼 | INVITATION_CODE | VARCHAR(8) | N | 8 碼純數字，唯一；**草稿無碼、課程發布時系統自動產生**（發布後永久不可變更）；DB 設 NULLable，發布後之非空由應用層保證；課程關閉期間失效 |
 | 9 | 首次發布時間 | FIRST_PUBLISHED_AT | TIMESTAMP | N | 第一次發布之時間戳；**僅供稽核、不顯示於 UI**（開課日期語意已移交 OPEN_START_AT；歷經再開課不變）|
 | 10 | 最近關閉時間 | CLOSED_AT | TIMESTAMP | N | 最近一次狀態變更為 CLOSED 之時間戳（再開課後保留供追溯）|
@@ -293,7 +282,7 @@
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 選課 ID | ENROLLMENT_ID | BIGINT | PK | 主鍵 |
-| 2 | 學員 USER_ID | USER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
 | 4 | 加入來源 | JOIN_SOURCE | VARCHAR(30) | Y | 參見 Lookup `ET_ENROLLMENT_SOURCE`（EMAIL_INVITE / INVITATION_CODE / TAG_DEFAULT）|
 | 5 | 加入時間 | JOINED_AT | TIMESTAMP | Y | |
@@ -317,7 +306,7 @@
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 進度 ID | PROGRESS_ID | BIGINT | PK | 主鍵 |
-| 2 | 學員 USER_ID | USER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
 | 4 | 章節項目 ID | ITEM_ID | BIGINT | Y | FK → ET_ITEM.ITEM_ID |
 | 5 | 是否完成 | IS_COMPLETED | BOOLEAN | Y | 影片教材：覆蓋率 ≥ 80%；文件 / 說明文字：開啟即 true；測驗：及格即 true |
@@ -336,7 +325,7 @@
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 區段 ID | INTERVAL_ID | BIGINT | PK | 主鍵 |
-| 2 | 學員 USER_ID | USER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 章節項目 ID | ITEM_ID | BIGINT | Y | FK → ET_ITEM.ITEM_ID（影片教材）|
 | 4 | 起始秒 | START_SEC | INT | Y | 該段播放之起始秒（≥ 0）|
 | 5 | 結束秒 | END_SEC | INT | Y | 該段播放之結束秒（> START_SEC）|
@@ -355,7 +344,7 @@
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | Attempt ID | ATTEMPT_ID | BIGINT | PK | 主鍵 |
-| 2 | 學員 USER_ID | USER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
 | 4 | 測驗 ID | QUIZ_ID | BIGINT | Y | FK → ET_QUIZ.QUIZ_ID |
 | 5 | 開始時間 | STARTED_AT | TIMESTAMP | Y | 學員點「開始測驗」之時間 |
@@ -428,10 +417,10 @@
 |---|---------|---------|---------|------|------|
 | 1 | 轉讓 ID | TRANSFER_ID | BIGINT | PK | 主鍵 |
 | 2 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
-| 3 | 轉讓前擁有者 | FROM_OWNER_ID | BIGINT | Y | FK → USER.USER_ID |
-| 4 | 轉讓後擁有者 | TO_OWNER_ID | BIGINT | Y | FK → USER.USER_ID |
+| 3 | 轉讓前擁有者 | FROM_OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
+| 4 | 轉讓後擁有者 | TO_OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 5 | 轉讓原因 | REASON | TEXT | Y | 管理者填寫之原因（如「原教師離職」）|
-| 6 | 執行管理者 | EXECUTED_BY | BIGINT | Y | FK → USER.USER_ID；執行轉讓之管理者 |
+| 6 | 執行管理者 | EXECUTED_BY | VARCHAR(20) | Y | FK → DP_USER.USER_ID；執行轉讓之管理者 |
 | 7 | 執行時間 | EXECUTED_AT | TIMESTAMP | Y | |
 | - | 標準欄位 | — | — | — | （同上）|
 
@@ -499,7 +488,7 @@
 |---|---------|---------|---------|------|------|
 | 1 | 填答 ID | RESPONSE_ID | BIGINT | PK | 主鍵 |
 | 2 | 問卷 ID | SURVEY_ID | BIGINT | Y | FK → ET_SURVEY.SURVEY_ID |
-| 3 | 學員 USER_ID | USER_ID | BIGINT | Y | FK → USER.USER_ID（**具名**）|
+| 3 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID（**具名**）|
 | 4 | 送出時間 | SUBMITTED_AT | TIMESTAMP | Y | |
 | - | 標準欄位 | — | — | — | （同上）|
 
@@ -574,7 +563,7 @@
 - 教師不可逐課修改信件內容；寄出一律採本表範本
 - 範本代碼固定（seed），管理者僅能編輯 SUBJECT / BODY 與切換 IS_ACTIVE（啟用 / 停用）
 - **停用（IS_ACTIVE=false）之範本，其對應信件不寄送**（如停用「課程邀請通知」則發布仍自動加入學員但不寄邀請信；停用「每週未看提醒」則 SCHET001 不寄該提醒但仍照常統計 / 寄週報）——各範本獨立（2026-07-02 新增）
-- **密碼重設（US2）與帳號變更驗證（US10）之信件不納入本表**，改採**系統預設固定範本**（不開放任何人於 UI 編輯、**不可停用**；2026-07-02 變更）——此二者屬帳號安全信件，內容固定以確保一致與防偽
+- **密碼重設（US2）與帳號變更驗證（US10）之信件不納入本表**，此二者屬帳號類固定信件，**由平台模組 DP 提供，ET 不另維護**（系統預設固定範本、不開放任何人於 UI 編輯、不可停用）——內容固定以確保一致與防偽
 
 ---
 
@@ -673,14 +662,14 @@
 
 ```mermaid
 erDiagram
-    USER ||--o{ ET_USER_ROLE : has
-    USER ||--o{ ET_USER_TAG : has
-    USER ||--o{ ET_ENROLLMENT : enrolls
-    USER ||--o{ ET_PROGRESS : progresses
-    USER ||--o{ ET_QUIZ_ATTEMPT_M : attempts
-    USER ||--o{ ET_PROGRESS_INTERVAL : watches
-    USER ||--o{ ET_SURVEY_RESPONSE_M : responds
-    USER ||--o{ ET_COURSE : owns
+    DP_USER ||--o{ ET_USER_ROLE : has
+    DP_USER ||--o{ ET_USER_TAG : has
+    DP_USER ||--o{ ET_ENROLLMENT : enrolls
+    DP_USER ||--o{ ET_PROGRESS : progresses
+    DP_USER ||--o{ ET_QUIZ_ATTEMPT_M : attempts
+    DP_USER ||--o{ ET_PROGRESS_INTERVAL : watches
+    DP_USER ||--o{ ET_SURVEY_RESPONSE_M : responds
+    DP_USER ||--o{ ET_COURSE : owns
 
     ET_TAG ||--o{ ET_USER_TAG : maps_user
     ET_TAG ||--o{ ET_COURSE_TAG : maps_course
@@ -729,17 +718,17 @@ erDiagram
 | 標籤自動邀請 | 發布時 ET_COURSE_TAG × ET_USER_TAG 聯集去重（限學員角色）批次加入＋每人寄通知信；貼標追溯補加入寄彙整信 |
 | 問卷題目凍結 | ET_SURVEY 有任何填答後題目 / 選項不可修改；一人一次（(SURVEY_ID, USER_ID) 唯一）；具名 |
 | 週統計快照 | SCHET001 每週寫入 ET_WEEKLY_STAT（課程×週次）；append-only；週報比較用 |
-| 帳號變更雙信箱共存 | USER.EMAIL_PENDING_* 三欄；舊 Email 變更期間仍可登入；30 分鐘 TTL；未驗證視為作廢 |
+| 帳號變更雙信箱共存 | 由平台模組 DP 提供（DP_USER 帳號安全欄位）；舊 Email 變更期間仍可登入；30 分鐘 TTL；未驗證視為作廢；ET 僅以 USER_ID 引用 |
 | 完課率計算 | 已完課 ÷ 已加入（不含已移除）；100% 章節含測驗皆通過（問卷不是完課條件）|
 | 平均成績計算 | 已作答測驗之最高分平均；未作答測驗排除（不視為 0）|
 
 ---
 
-## 與 DM 共用範圍
+## 共用使用者主檔（平台 DP）
 
-- USER 主檔：USER_ID / EMAIL / NAME / PASSWORD_HASH 為 ET / DM 共同使用之欄位
-- USER.EMAIL_PENDING_* 三欄、USER.PASSWORD_RESET_* 兩欄之 PK / 唯一鍵 / 索引約束由 ET / DM 共識定義
-- 此 table 之 DDL 建議由 ET 或 DM 任一方主導 schema 定義；另一方僅 reference
+- `DP_USER` 主檔由**平台模組 DP 定義與維護**（USER_ID / EMAIL / NAME / PASSWORD_HASH / 帳號安全欄位等）；ET 與 DM 皆為使用者，僅以 `USER_ID`（VARCHAR20）為 FK 引用
+- 帳號 Email / 密碼 / Email 變更 PENDING 等欄位之 schema、約束、DDL 一律由平台 DP 定義；ET 不重複定義、不主導 schema
+- 完整欄位定義見平台 DP data-model
 
 ---
 

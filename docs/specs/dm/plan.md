@@ -18,7 +18,7 @@ DM 自身持有 17 張表：共用 `USER`（與 ET 共用）、角色 `DM_USER_R
 **介接方式**: DM 後端對前端提供 RESTful API；對 ET 提供內部服務（依 DOC_ID 取文件當前發布版）；對外寄送經 Email Server（SMTP）
 **前端**: Web 應用程式；PDF / 圖片內嵌預覽、檔案上傳（單檔 ≤ 50 MB）、多條件檢索、版本歷程抽屜
 **資料庫**: PostgreSQL（命名 / 型別遵循 CLAUDE.md；不使用 JSONB；檔案存檔案系統 / 物件儲存，DB 僅存 metadata）
-**認證**: SSO，與 ET 共用 user table；**獨立於主系統 DP**（無 DP RBAC、無站點 / 院區）；DM 僅管理自己之 4 角色
+**認證**: SSO，與 ET 共用 `DP_USER`（認證由平台模組 DP 以簡單 JWT 統一提供）；DM 權限自管（自己的 4 角色），不繼承平台 DP 之角色；平台無站點 / 院區概念
 **保留**: 版本、公開變更歷程、角色異動紀錄**永久保留**（不可竄改 / 刪除）
 **專案類型**: Web 應用程式（文件協作與簽核）+ 對 ET 之內部服務
 **模組代碼**: DM（文件管理）
@@ -78,7 +78,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 
 | 方向 | 介接對象 | 編碼 | 介接方式 | 說明 | 契約位置 |
 |------|----------|------|----------|------|---------|
-| DM ↔ ET | 教育訓練模組（ET）| — | 共用 user table（SSO）| USER_ID / 帳號 / 密碼 / 姓名；DM / ET 各管自己角色 | DM 與 ET 共同維護 `USER` schema |
+| DM ↔ ET | 教育訓練模組（ET）| — | 共用 `DP_USER`（SSO）| USER_ID / 帳號 / 密碼 / 姓名；DM / ET 各管自己角色 | `DP_USER` 由平台模組 DP 定義，DM / ET 皆引用 |
 | DM → ET | 教育訓練模組（ET）| **SRVDM001** | 內部服務（ET 呼叫）| 依 DOC_ID 取文件當前發布版（CURRENT_VERSION_ID）之 metadata 與檔案位置 | [contracts/document-service.md](contracts/document-service.md) |
 | DM → ET | 教育訓練模組（ET）| **SRVDM002** | 內部服務（ET 呼叫）| 取「訓練教材」分類之有效文件清單（ET 教材下拉用）| [contracts/document-service.md](contracts/document-service.md) |
 | DM → Email Server | 外部郵件系統 | — | SMTP | 送審 / 退回 / 廢止通知、文件發布通知（撰寫者+相符閱覽者）、KPI 週報、未讀提醒、密碼重設信、帳號變更驗證信 | 外部介接（部署設定）|
@@ -95,7 +95,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 
 | 議題 | 決策 |
 |------|------|
-| 稽核標準欄位（DM 獨立於 DP）| 省略 CREATED_SITE / CREATED_HOSPITAL（無 DP_SITE / DP_HOSPITAL 來源）；採 CREATED_USER / DATE、UPDATED_USER / DATE、RES_ID、DELETED（research §1）|
+| 稽核標準欄位（對齊平台模組 DP）| 省略 CREATED_SITE / CREATED_HOSPITAL（對齊平台模組 DP，平台無 SITE / HOSPITAL 概念）；採 CREATED_USER / DATE、UPDATED_USER / DATE、RES_ID、DELETED（research §1）|
 | DOC_ID 產生 | `DM-{分類碼}-{6 位流水號}`、流水號依分類獨立、草稿建立時配號（research §2）|
 | 檔案儲存 | 單版本單檔；檔案存檔案系統 / 物件儲存，DB 存 metadata（不存 BLOB）（research §3）|
 | func_name 唯一性 | 部分唯一索引（MANUAL + PUBLISHED）+ 應用層檢核（research §5）|
@@ -111,7 +111,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 
 | 群組 | User Story | 對應作業 | 說明 |
 |------|------------|---------|------|
-| 登入與帳號 | US2 | 登入頁 | SSO 共用 user table、註冊授閱覽者、忘記密碼 |
+| 登入與帳號 | US2 | 登入頁 | SSO 共用 `DP_USER`、註冊授閱覽者、忘記密碼 |
 | 系統設定 | US1 | DM09 | 分類 / func_name / 標籤 / 催辦門檻 / 角色指派（含異動紀錄）/ 通知範本 |
 | 文件庫與檢索 | US3 | DM01 | 多條件 AND、僅顯示已發布、func_name 下拉檢索 |
 | 文件詳細頁 | US4 | DM02 | 預覽 / 下載規則、版本歷程、read-only 模式 |
@@ -142,8 +142,8 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 
 | 設計決策 | 理由 | 備註 |
 |----------|------|------|
-| 標準欄位省略 SITE / HOSPITAL | DM 獨立於 DP、無站點 / 院區概念，FK 無對應來源 | 與 CLAUDE.md 標準欄位之差異已於 research §1 載明；CREATED_USER 指向共用 USER |
-| 角色異動另立 append-only log（DM_USER_ROLE_LOG）| 滿足「完整異動歷史永久保留」；DM 獨立、無主系統 SRVDP003 / DP_AUDIT_LOG 可用 | 不提供查詢 UI；DM09 僅顯示「最後異動」欄 |
+| 標準欄位省略 SITE / HOSPITAL | 對齊平台模組 DP，平台無站點 / 院區概念，FK 無對應來源 | 與 CLAUDE.md 標準欄位之差異已於 research §1 載明；CREATED_USER 指向共用 `DP_USER` |
+| 角色異動另立 append-only log（DM_USER_ROLE_LOG）| 滿足「完整異動歷史永久保留」；`DM_USER_ROLE_LOG` 為 DM 業務層角色指派歷史，資安類事件另對齊寫入平台共用稽核表 `DP_AUDIT_LOG` | 不提供查詢 UI；DM09 僅顯示「最後異動」欄 |
 | 文件 / 版本雙層 STATUS | 支援「已發布 + 新版本送審中」並存之狀態表達 | 文件層 STATUS + 版本層 STATUS；單一送審週期由 DM_REVIEW 約束 |
 | func_name 部分唯一索引 | DM01 依作業項目檢索須唯一手冊；DB 約束防並發雙發布 | 草稿 / 已廢止不佔用；應用層另給友善訊息 |
 | 檔案存檔案系統而非 DB | 遵循型別規範、利備份效能 | DB 存 metadata + 路徑；單版本單檔 |
