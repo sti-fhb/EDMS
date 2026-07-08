@@ -428,12 +428,12 @@
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-folder2 me-1"></i>DM 文件分類清單 <code>DM_DOC_CATEGORY</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
-        <thead><tr><th style="width:140px;">分類碼</th><th>分類名稱</th><th style="width:80px;">狀態</th><th class="text-end">操作</th></tr></thead>
+        <thead><tr><th style="width:140px;">分類碼</th><th>分類名稱</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
         <tbody>
-          <tr><td><code>SOP</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>標準作業程序（SOP）</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td><code>MANUAL</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>系統操作手冊</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td><code>TRAIN</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>訓練教材</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td><code>OTHER</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>其他</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>SOP</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>標準作業程序（SOP）</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「標準作業程序」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td><code>MANUAL</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>系統操作手冊</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「系統操作手冊」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td><code>TRAIN</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>訓練教材</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用分類「訓練教材」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr style="color:#999;"><td><code>OTHER</code> <i class="bi bi-lock-fill text-muted" title="分類碼建立後鎖定（DETAIL_LOCK），唯讀"></i></td><td>其他</td><td><span class="badge bg-secondary">已停用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-success" onclick="showToast('已啟用分類「其他」')"><i class="bi bi-play-circle"></i> 啟用</button></td></tr>
         </tbody>
       </table>
       <div class="field-helper mb-2"><i class="bi bi-lock-fill"></i><strong>分類碼</strong>建立後鎖定（<code>DP_PARAM_M.DETAIL_LOCK</code>）＝唯讀，僅可改名稱；因分類碼會嵌入 <code>DOC_ID</code>（產碼規則屬 DM 業務）。</div>
@@ -443,10 +443,10 @@
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-list-check me-1"></i>DM 關聯作業項目清單 <code>DM_FUNC_NAME</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
-        <thead><tr><th style="width:140px;">func_name</th><th>說明</th><th style="width:80px;">狀態</th><th class="text-end">操作</th></tr></thead>
+        <thead><tr><th style="width:140px;">func_name</th><th>說明</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
         <tbody>
-          <tr><td><code>BS04</code></td><td>對應主系統作業功能代號</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td><code>BC01</code></td><td>對應主系統作業功能代號</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td><code>BS04</code></td><td>對應主系統作業功能代號</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BS04」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td><code>BC01</code></td><td>對應主系統作業功能代號</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用作業項目「BC01」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
         </tbody>
       </table>
       <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>func_name <strong>唯一手冊檢核</strong>之業務規則由 DM 於讀取後執行。</div>
@@ -456,13 +456,13 @@
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-people me-1"></i>DM 可見對象清單 <code>DM_AUDIENCE</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
-        <thead><tr><th>可見對象 / 單位</th><th style="width:80px;">狀態</th><th class="text-end">操作</th></tr></thead>
+        <thead><tr><th>可見對象 / 單位</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
         <tbody>
-          <tr><td>全體 <span class="text-muted small">（通用值）</span></td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked disabled title="通用值不可停用"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>護理師</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用採 soft-retire）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>軍人</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用採 soft-retire）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>醫檢師</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用採 soft-retire）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>行政人員</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用採 soft-retire）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>全體 <span class="text-muted small">（通用值）</span></td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="通用值不可停用"><i class="bi bi-lock"></i> 停用</button></td></tr>
+          <tr><td>護理師</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「護理師」（soft-retire，既有可見性不收回）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>軍人</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「軍人」（soft-retire，既有可見性不收回）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>醫檢師</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「醫檢師」（soft-retire，既有可見性不收回）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>行政人員</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「行政人員」（soft-retire，既有可見性不收回）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
         </tbody>
       </table>
       <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>只存「有哪些對象」；「某閱覽者被授權哪些對象」之關聯留 DM 業務表。</div>
@@ -490,13 +490,13 @@
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-tags me-1"></i>ET 受訓單位標籤名稱清單 <code>ET_TRAINING_UNIT</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
-        <thead><tr><th>標籤名稱</th><th style="width:80px;">狀態</th><th class="text-end">操作</th></tr></thead>
+        <thead><tr><th>標籤名稱</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
         <tbody>
-          <tr><td>全體 <span class="status-pill status-active">IS_ALL</span> <span class="text-muted small">（特殊項）</span></td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked disabled title="「全體」不可停用 / 刪除"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>護理師</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用後不可掛新課程，既有不受影響）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>行政人員</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用後不可掛新課程，既有不受影響）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>軍人</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用後不可掛新課程，既有不受影響）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
-          <tr><td>醫檢師</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用（停用後不可掛新課程，既有不受影響）"></div></td><td class="text-end"><button class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>全體 <span class="status-pill status-active">IS_ALL</span> <span class="text-muted small">（特殊項）</span></td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="「全體」不可停用 / 刪除"><i class="bi bi-lock"></i> 停用</button></td></tr>
+          <tr><td>護理師</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「護理師」（不可掛新課程，既有不受影響）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>行政人員</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「行政人員」（不可掛新課程，既有不受影響）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr style="color:#999;"><td>軍人</td><td><span class="badge bg-secondary">已停用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-success" onclick="showToast('已啟用標籤「軍人」')"><i class="bi bi-play-circle"></i> 啟用</button></td></tr>
+          <tr><td>醫檢師</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用標籤「醫檢師」（不可掛新課程，既有不受影響）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
         </tbody>
       </table>
       <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>只存「標籤名稱清單」；「全體」為 <code>IS_ALL</code> 特殊項，其<strong>展開與自動邀請</strong>之業務規則由 ET 執行。「王小明屬護理師」「課程 A 掛護理師」之關聯留 ET（<code>ET_USER_TAG</code> / <code>ET_COURSE_TAG</code>）。</div>
@@ -525,7 +525,7 @@
         <li>全平台參數值與清單定義統一存 <code>DP_PARAM_M</code> / <code>DP_PARAM_D</code>，以 <code>PARAM_ID</code> 前綴分模組（無前綴 <code>DP_</code> 平台級 / <code>ET_</code> / <code>DM_</code>）；清單型（分類 / 標籤名稱 / func_name / 可見對象）以一個 <code>PARAM_ID</code> 下多筆 <code>PARAM_KEY</code> 表達。異動寫入稽核。</li>
         <li><strong>三頁籤按模組區分</strong>：平台（共用）/ ET / DM 三頁籤；登入為 ET 管理者只顯示「平台 + ET」頁籤、DM 管理者只顯示「平台 + DM」（對方模組頁籤不顯示、互不可見）；平台級 <code>DP_</code> 參數兩者共用可改。</li>
         <li><strong>鎖定碼</strong>：需鎖定之碼（如文件分類碼建立後不可改）以 <code>DP_PARAM_M.DETAIL_LOCK</code> 標記，UI 呈唯讀鎖 <i class="bi bi-lock-fill"></i>。</li>
-        <li><strong>啟用 / 停用</strong>：清單項目（分類 / func_name / 標籤 / 可見對象）以 <code>DP_PARAM_D.IS_ACTIVE</code> 開關切換——<strong>停用不刪除、既有引用保留</strong>，僅不出現在後續新增 / 搜尋下拉；可見對象停用採 <strong>soft-retire</strong>（不收回既有可見性）；ET / DM「全體」（<code>IS_ALL</code> / 通用值）不可停用（開關鎖定）。</li>
+        <li><strong>啟用 / 停用</strong>：清單項目（分類 / func_name / 標籤 / 可見對象）以動作欄「停用 / 啟用」按鈕切換 <code>DP_PARAM_D.IS_ACTIVE</code>——<strong>停用不刪除、既有引用保留</strong>，僅不出現在後續新增 / 搜尋下拉；可見對象停用採 <strong>soft-retire</strong>（不收回既有可見性）；ET / DM「全體」（<code>IS_ALL</code> / 通用值）不可停用（按鈕鎖定）。</li>
         <li><strong>定義 vs 關聯分層</strong>：清單「定義」（有哪些）在 DP_PARAM；「誰配誰」關聯（文件屬哪分類、使用者 × 標籤、課程 × 標籤、閱覽者 × 可見對象）與<strong>套用規則</strong>（DOC_ID 產碼、<code>IS_ALL</code> 展開與自動邀請、func_name 唯一手冊檢核）留各模組。</li>
         <li>密碼長度分級（一般 8 / 特權 12）保留以對齊國防部資安法規；密碼重設 TTL、發信調校（重試 / 速率 / 告警）改列平台級 <code>DP_</code>（<code>LOGIN</code> / <code>MAIL</code>）。</li>
         <li>帳號類信件（密碼重設 / 帳號驗證）不列為參數，已改為通知範本（<code>DP_NOTIFY_TEMPLATE</code> <code>MODULE=DP</code>），於「通知範本」畫面維護。</li>
@@ -545,93 +545,93 @@
     <div class="wf-card p-0">
       <table class="table table-hover wf-table mb-0 align-middle">
         <thead><tr>
-          <th>MODULE</th><th>範本代碼</th><th>主旨</th><th>管道</th><th>狀態</th><th class="text-end">操作</th>
+          <th>MODULE</th><th>範本代碼</th><th>主旨</th><th>管道</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th>
         </tr></thead>
         <tbody>
           <tr>
             <td><span class="audit-badge audit-update">DP</span></td><td><code>PWD_RESET</code></td><td>【EDMS】密碼重設連結</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked disabled title="系統信不可停用 / 刪除"></div> <i class="bi bi-lock-fill text-muted"></i></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="系統信不可停用 / 刪除"><i class="bi bi-lock"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-update">DP</span></td><td><code>ACCOUNT_VERIFY</code></td><td>【EDMS】帳號（Email）變更驗證</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked disabled title="系統信不可停用 / 刪除"></div> <i class="bi bi-lock-fill text-muted"></i></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="系統信不可停用 / 刪除"><i class="bi bi-lock"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_INVITE</code></td><td>課程邀請通知</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_INVITE_DIGEST</code></td><td>課程邀請彙整通知（事後貼標）</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-create">ET</span></td><td><code>COURSE_UPDATE</code></td><td>課程內容更新通知</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-create">ET</span></td><td><code>WEEKLY_REMIND</code></td><td>每週未看提醒</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-create">ET</span></td><td><code>URGENT_REMIND</code></td><td>截止前加急提醒</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-create">ET</span></td><td><code>WEEKLY_REPORT</code></td><td>週報（教師 / 管理者）</td>
-            <td>Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_SUBMIT</code></td><td>文件送審通知</td>
-            <td>Email + 站內</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email + 站內</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_REJECT</code></td><td>文件退回通知</td>
-            <td>Email + 站內</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email + 站內</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>DOC_PUBLISH</code></td><td>文件發布通知（撰寫者 + 相符閱覽者）</td>
-            <td>僅 Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>僅 Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>OBS_SUBMIT</code></td><td>廢止申請送審</td>
-            <td>Email + 站內</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email + 站內</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>OBS_APPROVE</code></td><td>廢止核准通知</td>
-            <td>Email + 站內</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email + 站內</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>OBS_REJECT</code></td><td>廢止退回通知</td>
-            <td>Email + 站內</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>Email + 站內</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>KPI_WEEKLY</code></td><td>KPI 週報（管理者）</td>
-            <td>僅 Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>僅 Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>UNREAD_REMIND</code></td><td>未讀提醒（閱覽者）</td>
-            <td>僅 Email</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>僅 Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
           <tr>
             <td><span class="audit-badge audit-login">DM</span></td><td><code>AUTO_REMIND</code></td><td>自動催辦信（指定審核者）</td>
-            <td>僅站內</td><td><div class="form-check form-switch d-inline-block m-0"><input class="form-check-input" type="checkbox" role="switch" checked title="啟用 / 停用"></div></td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openTemplateEdit()"><i class="bi bi-pencil me-1"></i>編輯</button></td>
+            <td>僅站內</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用此通知範本（觸發事件照常運作，僅不寄此信）')"><i class="bi bi-pause-circle"></i> 停用</button></td>
           </tr>
         </tbody>
       </table>
@@ -642,7 +642,7 @@
       <ul class="mb-0 mt-2">
         <li>範本存 <code>DP_NOTIFY_TEMPLATE</code>，PK＝<code>MODULE</code> + <code>TEMPLATE_CODE</code>；欄位含主旨 / 內文 / 可用變數 / 管道（Email / 站內 / 兩者）/ 啟停 / 版本（樂觀鎖）。內容不同的通知＝同表不同列。</li>
         <li><strong>過濾</strong>：ET 管理者編輯 <code>MODULE=ET</code>、DM 管理者編輯 <code>MODULE=DM</code>；<code>MODULE=DP</code> 系統信（密碼重設 / 帳號驗證）兩者皆見、<strong>可編輯主旨 / 內文但不可停用 / 刪除</strong>（帳號安全信，UI 以鎖 <i class="bi bi-lock-fill"></i> 標示）。</li>
-        <li><strong>啟用 / 停用</strong>：ET / DM 範本以 <code>DP_NOTIFY_TEMPLATE.IS_ENABLED</code> 開關切換（狀態欄 toggle）——<strong>停用後不寄該信、但其觸發事件（如課程發布自動加入學員、文件簽核流程）照常運作</strong>；<code>MODULE=DP</code> 系統信開關鎖定、不可停用。</li>
+        <li><strong>啟用 / 停用</strong>：ET / DM 範本以動作欄「停用 / 啟用」按鈕切換 <code>DP_NOTIFY_TEMPLATE.IS_ENABLED</code>——<strong>停用後不寄該信、但其觸發事件（如課程發布自動加入學員、文件簽核流程）照常運作</strong>；<code>MODULE=DP</code> 系統信按鈕鎖定、不可停用。</li>
         <li>各模組僅呼叫平台唯一發信服務 <code>send_email(recipients, template_code, params)</code> 並傳 <code>template_code</code>，不自持範本表、不自建 outbox；寄件經 <code>DP_EMAIL_LOG</code>（非同步批次 / 狀態 / 重試 / <code>CALLER_MODULE</code>）。</li>
         <li>發信引擎調校（重試上限 / 速率 / 失敗告警比例）屬平台級 <code>DP_</code> 參數（<code>MAIL</code>），於系統參數頁維護。</li>
       </ul>
