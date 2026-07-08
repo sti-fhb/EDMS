@@ -470,6 +470,47 @@
     </div>
 
     <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-tags me-1"></i>DM 檢索標籤（檢視用；不影響可見性）</div>
+      <div class="wf-status-msg wf-status-info mb-2"><i class="bi bi-info-circle me-1"></i>對齊 DM 受控標籤庫之<strong>檢索標籤</strong>（純供 DM01 搜尋 / 檢視，<strong>不影響文件可見性</strong>）；與「可見對象/單位」（權限標籤，見上）分開維護。分三組：適用模組 / 文件性質 / 法規關聯。</div>
+
+      <div class="small fw-bold mb-1" style="color:#2e7d32;"><i class="bi bi-puzzle me-1"></i>適用模組 <code>DM_TAG_MODULE</code></div>
+      <table class="table table-sm wf-table mb-2 align-middle">
+        <thead><tr><th>標籤名稱</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
+        <tbody>
+          <tr><td>採血</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「採血」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>成分</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「成分」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>檢驗</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「檢驗」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>供應</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「供應」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>醫務</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「醫務」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        </tbody>
+      </table>
+      <button class="btn btn-sm btn-outline-secondary mb-3"><i class="bi bi-plus-lg me-1"></i>新增「適用模組」標籤</button>
+
+      <div class="small fw-bold mb-1" style="color:#e65100;"><i class="bi bi-flag me-1"></i>文件性質 <code>DM_TAG_NATURE</code></div>
+      <table class="table table-sm wf-table mb-2 align-middle">
+        <thead><tr><th>標籤名稱</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
+        <tbody>
+          <tr><td>戰時</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「戰時」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>緊急</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「緊急」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>平時</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「平時」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr style="color:#999;"><td>訓練</td><td><span class="badge bg-secondary">已停用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-success" onclick="showToast('已啟用檢索標籤「訓練」')"><i class="bi bi-play-circle"></i> 啟用</button></td></tr>
+        </tbody>
+      </table>
+      <button class="btn btn-sm btn-outline-secondary mb-3"><i class="bi bi-plus-lg me-1"></i>新增「文件性質」標籤</button>
+
+      <div class="small fw-bold mb-1" style="color:#c2185b;"><i class="bi bi-shield-check me-1"></i>法規關聯 <code>DM_TAG_LEGAL</code></div>
+      <table class="table table-sm wf-table mb-2 align-middle">
+        <thead><tr><th>標籤名稱</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
+        <tbody>
+          <tr><td>衛福部</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用檢索標籤「衛福部」')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+        </tbody>
+      </table>
+      <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-plus-lg me-1"></i>新增「法規關聯」標籤</button>
+
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>檢索標籤僅供搜尋 / 篩選，停用不刪除、既有引用保留；「文件屬哪些檢索標籤」之關聯留 DM 業務表。權限標籤（可見對象/單位）見上方獨立清單。</div>
+    </div>
+
+    <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-sliders2 me-1"></i>DM 參數</div>
       <div class="row g-3">
         <div class="col-md-4"><label class="form-label small mb-1">自動催辦停留門檻（天）<code class="ms-1">DM_REMIND_THRESHOLD</code></label><input type="number" class="form-control form-control-sm" value="7">
@@ -656,7 +697,7 @@
       <div class="screen-meta">UCDP010 ｜ 按模組過濾</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>指派畫面在 DP 後台，<strong>按登入身分過濾</strong>：ET 管理者只見 / 只改 ET 角色核取方塊、DM 管理者只見 DM 角色。角色種類為固定 enum（無新增角色種類）；同一使用者可多角色，權限取聯集。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>於此**同時指派角色與標籤/可見對象**（對齊 ET / DM 現行權限管理）。分兩頁籤按模組過濾：ET 管理者只見 ET 頁籤（角色＋受訓單位標籤）、DM 管理者只見 DM 頁籤（角色＋可見對象/單位）。角色為固定 enum、可多角色（權限取聯集）；<strong>角色與標籤為獨立維度，可各自獨立設定</strong>。</div>
 
     <div class="wf-card">
       <div class="row g-2 align-items-end">
@@ -665,47 +706,107 @@
       </div>
     </div>
 
-    <div class="wf-card p-0">
-      <table class="table table-hover wf-table mb-0 align-middle">
-        <thead><tr>
-          <th>姓名</th><th>帳號（Email）</th>
-          <th class="text-center">ET 管理者</th><th class="text-center">ET 教師</th><th class="text-center">ET 學員</th>
-          <th class="text-center">DM 管理者</th><th class="text-center">DM 編輯者</th><th class="text-center">DM 審核者</th><th class="text-center">DM 閱覽者</th>
-        </tr></thead>
-        <tbody>
-          <tr>
-            <td>陳大華</td><td>admin@example.com</td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input"></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input"></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-          </tr>
-          <tr>
-            <td>王曉明</td><td>ming@example.com</td>
-            <td class="text-center"><input type="checkbox" class="form-check-input"></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-            <td class="text-center"><input type="checkbox" class="form-check-input" disabled></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>示意「兩模組全貌」；實際登入為 ET 管理者時，DM 各欄<strong>隱藏</strong>（此處以 disabled 灰階示意 DM 欄不可由 ET 管理者操作）。</div>
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#role-et" type="button"><i class="bi bi-mortarboard me-1"></i>教育訓練（ET）</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#role-dm" type="button"><i class="bi bi-folder2 me-1"></i>文件管理（DM）</button></li>
+    </ul>
 
-    <div class="text-end mt-2"><button class="btn btn-tsbms" onclick="showToast('角色指派已儲存（寫入模組角色表）')"><i class="bi bi-save me-1"></i>儲存指派</button></div>
+    <div class="tab-content">
+    <!-- ===== ET 權限管理（角色 + 受訓單位標籤）===== -->
+    <div class="tab-pane fade show active" id="role-et" role="tabpanel">
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>ET 管理者於此指派 ET 角色與<strong>受訓單位標籤</strong>；標籤用於課程發布自動邀請。DM 管理者看不到本頁籤。指派寫入 <code>ET_USER_ROLE</code> / <code>ET_USER_TAG</code>。</div>
+      <div class="wf-card p-0">
+        <table class="table table-hover wf-table mb-0 align-middle">
+          <thead><tr>
+            <th style="width:8rem;">帳號</th><th style="width:7rem;">姓名</th>
+            <th class="text-center" style="width:4.5rem;">管理者</th><th class="text-center" style="width:4.5rem;">教師</th><th class="text-center" style="width:4.5rem;">學員</th>
+            <th style="width:16rem;">受訓單位標籤</th><th style="width:10rem;">最後異動</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="small">ming</td><td><i class="bi bi-person-circle me-1"></i>王曉明</td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 ET 管理者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 王曉明 教師角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 王曉明 學員角色')"></td>
+              <td><span class="badge bg-light text-dark border me-1">護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 王曉明 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td class="small text-muted">陳大華 ｜ 2026-06-30</td>
+            </tr>
+            <tr>
+              <td class="small">admin</td><td><i class="bi bi-person-circle me-1"></i>陳大華</td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 陳大華 ET 管理者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 教師角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 學員角色')"></td>
+              <td><span class="text-muted small">未指派</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td class="small text-muted">系統 ｜ 2026-05-01</td>
+            </tr>
+            <tr>
+              <td class="small">linst</td><td><i class="bi bi-person-circle me-1"></i>林學員</td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 林學員 ET 管理者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 林學員 教師角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 林學員 學員角色')"></td>
+              <td><span class="badge bg-light text-dark border me-1">軍人</span><span class="badge bg-light text-dark border me-1">醫檢師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 林學員 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td class="small text-muted">陳大華 ｜ 2026-07-02</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <!-- ===== DM 權限管理（角色 + 可見對象/單位）===== -->
+    <div class="tab-pane fade" id="role-dm" role="tabpanel">
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>DM 管理者於此指派 DM 角色與<strong>可見對象/單位授權</strong>；可見對象主要對「閱覽者」有意義（決定其於 DM01 可見範圍）。ET 管理者看不到本頁籤。指派寫入 <code>DM_USER_ROLE</code> / DM 可見對象授權。</div>
+      <div class="wf-card p-0">
+        <table class="table table-hover wf-table mb-0 align-middle">
+          <thead><tr>
+            <th style="width:8rem;">帳號</th><th style="width:7rem;">姓名</th>
+            <th class="text-center" style="width:4.5rem;">管理者</th><th class="text-center" style="width:4.5rem;">編輯者</th><th class="text-center" style="width:4.5rem;">審核者</th><th class="text-center" style="width:4.5rem;">閱覽者</th>
+            <th style="width:16rem;">可見對象 / 單位</th><th style="width:10rem;">最後異動</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td class="small">admin</td><td><i class="bi bi-person-circle me-1"></i>陳大華</td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 DM 管理者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 陳大華 編輯者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 審核者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 陳大華 閱覽者角色')"></td>
+              <td><span class="badge bg-light text-dark border me-1">軍人</span><span class="badge bg-light text-dark border me-1">醫檢師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 可見對象/單位')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td class="small text-muted">李主任 ｜ 2026-04-15</td>
+            </tr>
+            <tr>
+              <td class="small">lichef</td><td><i class="bi bi-person-circle me-1"></i>李主任</td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 DM 管理者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 編輯者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 審核者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 閱覽者角色')"></td>
+              <td><span class="badge bg-light text-dark border me-1">護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 李主任 可見對象/單位')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td class="small text-muted">系統 ｜ 2026-03-08</td>
+            </tr>
+            <tr>
+              <td class="small">ming</td><td><i class="bi bi-person-circle me-1"></i>王曉明</td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 DM 管理者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 編輯者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 審核者角色')"></td>
+              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 王曉明 閱覽者角色')"></td>
+              <td><span class="badge bg-light text-dark border me-1">護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 王曉明 可見對象/單位')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td class="small text-muted">李主任 ｜ 2026-06-20</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </div><!-- /tab-content -->
+
+    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>wireframe 呈現兩頁籤全貌；實際登入僅顯示所屬模組頁籤。角色寫模組角色表、標籤/可見對象寫模組關聯表（<code>ET_USER_TAG</code> / DM 可見對象授權）。</div>
+
+    <div class="text-end mt-2"><button class="btn btn-tsbms" onclick="showToast('已儲存：角色寫模組角色表、標籤/可見對象寫模組關聯表')"><i class="bi bi-save me-1"></i>儲存</button></div>
 
     <details class="wf-screen-note">
-      <summary>💡 內部設計註記（UCDP010 權限管理 / 角色指派）</summary>
+      <summary>💡 內部設計註記（UCDP010 權限管理：角色 + 標籤/可見對象指派）</summary>
       <ul class="mb-0 mt-2">
-        <li><strong>指派畫面在 DP 後台</strong>，按模組過濾；但<strong>資料寫入模組角色表</strong>（<code>ET_USER_ROLE</code> / <code>DM_USER_ROLE</code>），<strong>「某角色能做什麼」之判定與 enforce 在模組</strong>——平台不做全域 RBAC、不定義業務角色能力。</li>
-        <li>角色種類為固定 enum（ET：管理者 / 教師 / 學員；DM：管理者 / 編輯者 / 審核者 / 閱覽者），無「新增角色種類」功能；同一使用者可多角色，權限取聯集。</li>
-        <li>角色指派異動屬<strong>資安事件</strong>，寫入 <code>DP_AUDIT_LOG</code>。</li>
+        <li><strong>角色與標籤同頁指派</strong>（對齊 ET / DM 現行權限管理）：ET＝角色＋受訓單位標籤；DM＝角色＋可見對象/單位。<strong>角色與標籤為獨立維度、可各自獨立設定</strong>。</li>
+        <li><strong>指派畫面在 DP 後台</strong>，按模組過濾；<strong>資料寫入模組表</strong>——角色 → <code>ET_USER_ROLE</code> / <code>DM_USER_ROLE</code>；標籤指派 → <code>ET_USER_TAG</code>；可見對象授權 → DM 授權表。標籤/可見對象之「定義清單」在 <code>DP_PARAM</code>（此處只做「指派」）。</li>
+        <li>「某角色能做什麼」之判定與 enforce 在模組——平台不做全域 RBAC、不定義業務角色能力。角色種類為固定 enum，可多角色（權限取聯集）。</li>
+        <li>DM 可見對象授權主要對「<strong>閱覽者</strong>」有意義（決定其可見範圍）；未授予任何可見對象之閱覽者僅能看掛「全體」之文件。</li>
+        <li>角色 / 標籤指派異動屬<strong>資安事件</strong>，寫入 <code>DP_AUDIT_LOG</code>。</li>
       </ul>
     </details>
   </div>
