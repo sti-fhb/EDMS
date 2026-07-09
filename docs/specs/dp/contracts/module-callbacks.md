@@ -49,7 +49,7 @@ def assign_roles_audiences(user_id, roles: set[str], audiences: set[str], operat
 def has_any_role(user_id: str) -> bool
 ```
 
-- 入口頁據以顯示 DM 入口（具任一 DM 角色才顯示）；ET 恆有（學員預設）
+- 入口頁據以決定 DM 卡狀態：具任一 DM 角色＝可進入；無＝「未開通」鎖定卡（引導洽管理者，2026-07-09 釐清第 4 輪）；ET 恆可用（學員預設）。模組側欄之 DM 組顯示與否亦由各模組以同一判定 enforce
 
 ## 5. 排程 job handler（US11 引擎動態載入）
 
