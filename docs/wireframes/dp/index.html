@@ -273,8 +273,8 @@
       <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>我的課程</span></a>
     </div>
 
-    <!-- 文件管理（他模組：細項列出，本檔點擊無反應）-->
-    <button class="module-header collapsed" onclick="toggleModule('dm')"><span><i class="bi bi-folder2 module-icon"></i><span class="module-label">文件管理</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <!-- 文件管理（他模組：細項列出，本檔點擊無反應；僅具任一 DM 角色者顯示此組——demo 由入口頁勾選切換，2026-07-09 釐清第 4 輪定案）-->
+    <button class="module-header collapsed" id="mod-dm-header" onclick="toggleModule('dm')"><span><i class="bi bi-folder2 module-icon"></i><span class="module-label">文件管理</span></span><i class="bi bi-chevron-down caret"></i></button>
     <div class="module-items collapsed" id="mod-dm">
       <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>文件庫</span></a>
       <a class="nav-link" href="#"><i class="bi bi-check2-square"></i><span>簽核中心</span></a>
@@ -285,8 +285,8 @@
       <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span>系統設定</span></a>
     </div>
 
-    <!-- 系統管理後台（本檔：展開，功能可跳畫面；由 ET / DM 管理者進入，按模組過濾）-->
-    <button class="module-header" onclick="toggleModule('dp')"><span><i class="bi bi-hdd-network module-icon"></i><span class="module-label">系統管理後台</span></span><i class="bi bi-chevron-down caret"></i></button>
+    <!-- 系統管理後台（本檔：展開，功能可跳畫面；僅 ET / DM 管理者顯示此組、按模組過濾——demo 由入口頁勾選切換）-->
+    <button class="module-header" id="mod-dp-header" onclick="toggleModule('dp')"><span><i class="bi bi-hdd-network module-icon"></i><span class="module-label">系統管理後台</span></span><i class="bi bi-chevron-down caret"></i></button>
     <div class="module-items" id="mod-dp">
       <a class="nav-link active" href="#" data-screen="dp-users"><i class="bi bi-people-fill"></i><span>使用者管理</span></a>
       <a class="nav-link" href="#" data-screen="dp-roles"><i class="bi bi-person-badge"></i><span>權限管理</span></a>
@@ -308,11 +308,22 @@
       <div class="screen-meta">UCDP001 ｜ 登入後落點（無來源模組時）｜ 所有登入使用者</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>自 ET / DM 被導來登入者<strong>直接返回原模組</strong>（不經本頁）；直接於 DP 登入且無來源者顯示本頁。<strong>ET 入口恆顯示</strong>（人人具 ET 學員預設角色）、<strong>DM 入口僅對具任一 DM 角色者顯示</strong>（由管理者於權限管理開通）、個人資料維護恆顯示；<strong>不顯示系統管理後台入口</strong>（後台入口僅設於 ET / DM 介面之管理選單）。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時而被攔到登入頁者</strong>（點通知信連結、開書籤、逾時重登），登入後<strong>返回原本要去的頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊使用者）顯示本頁。<strong>ET 入口恆顯示</strong>（人人具 ET 學員預設角色）、<strong>DM 卡恆顯示——未具任何 DM 角色者顯示為「未開通」鎖定狀態</strong>（引導洽管理者，不進入）、個人資料維護恆顯示；<strong>不顯示系統管理後台入口</strong>（後台入口僅設於 ET / DM 介面之管理選單）。</div>
 
-    <div class="form-check mb-3" style="font-size:0.85rem;">
-      <input class="form-check-input" type="checkbox" id="portal-demo-dm" checked onchange="dpPortalToggleDm(this)">
-      <label class="form-check-label" for="portal-demo-dm"><em>（wireframe 展示切換）模擬使用者具任一 DM 角色</em></label>
+    <div class="alert alert-success py-2 px-3" style="font-size:0.9rem;">
+      <button type="button" class="btn-close float-end" style="font-size:0.7rem;" onclick="this.parentElement.style.display='none'"></button>
+      <i class="bi bi-stars me-1"></i><strong>歡迎使用 EDMS！</strong>您已可使用「教育訓練」（學員）。如需使用文件管理或其他權限，請洽您的單位主管或管理者開通。<span class="text-muted small">（首次登入顯示一次，可關閉）</span>
+    </div>
+
+    <div class="d-flex gap-4 mb-3" style="font-size:0.85rem;">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="portal-demo-dm" onchange="dpPortalToggleDm(this)">
+        <label class="form-check-label" for="portal-demo-dm"><em>（展示切換）模擬具任一 DM 角色</em></label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="portal-demo-admin" checked onchange="dpPortalToggleAdmin(this)">
+        <label class="form-check-label" for="portal-demo-admin"><em>（展示切換）模擬具 ET / DM 管理者角色（影響側欄「系統管理後台」組）</em></label>
+      </div>
     </div>
 
     <div class="row g-3">
@@ -324,10 +335,17 @@
         </div>
       </div>
       <div class="col-md-4" id="portal-dm-card">
-        <div class="wf-card h-100 text-center py-4" style="cursor:pointer;" onclick="showToast('導向文件管理（DM00 系統儀表板）')">
+        <!-- 已開通狀態（具任一 DM 角色）-->
+        <div class="wf-card h-100 text-center py-4" id="portal-dm-unlocked" style="cursor:pointer; display:none;" onclick="showToast('導向文件管理（DM00 系統儀表板）')">
           <div style="font-size:2.2rem; color:#2e7d32;"><i class="bi bi-folder2"></i></div>
           <div class="fw-bold mt-2">文件管理</div>
-          <div class="text-muted small mt-1">文件庫、簽核與版本管控<br>（僅具任一 DM 角色者可見）</div>
+          <div class="text-muted small mt-1">文件庫、簽核與版本管控</div>
+        </div>
+        <!-- 未開通鎖定狀態（無任何 DM 角色；預設展示此狀態）-->
+        <div class="wf-card h-100 text-center py-4" id="portal-dm-locked" style="background:#f5f5f5; border:1px dashed #bdbdbd; color:#9e9e9e; cursor:default;" onclick="showToast('尚未開通文件管理權限，請洽您的單位主管或管理者')">
+          <div style="font-size:2.2rem;"><i class="bi bi-lock"></i></div>
+          <div class="fw-bold mt-2">文件管理（未開通）</div>
+          <div class="small mt-1">如需使用文件管理，請洽您的<br><strong>單位主管或管理者</strong>開通權限</div>
         </div>
       </div>
       <div class="col-md-4">
@@ -340,11 +358,15 @@
     </div>
 
     <details class="wf-screen-note">
-      <summary>💡 內部設計註記（UCDP001 模組入口頁）</summary>
+      <summary>💡 內部設計註記（UCDP001 模組入口頁；鎖定卡與側欄規則已於 2026-07-09 釐清第 4 輪定案）</summary>
       <ul class="mb-0 mt-2">
-        <li>登入端點支援 <code>redirect</code>（來源模組路徑，白名單檢核防 open redirect）：有來源→返回原模組；無來源→本頁。</li>
-        <li>本頁載入時呼叫「我的模組角色摘要」端點（聚合 ET / DM <code>has_any_role</code>）決定 DM 入口顯示與否；ET 恆有（學員為帳號建立時授予之唯一預設角色）。</li>
-        <li>實際頁面<strong>無側欄</strong>（僅上方導覽 + 三卡）；側欄之「模組入口頁」連結僅供 wireframe 檢視切換。</li>
+        <li>登入端點支援 <code>redirect</code>（原目標頁面路徑，白名單檢核防 open redirect）。觸發情境：① 通知信連結（課程 / 文件）未登入點擊；② <strong>閒置 15 分逾時重新登入（最頻繁）</strong>；③ 書籤 / 直接輸入模組網址。有 redirect→登入後返回原頁面；無（直接開系統、新註冊）→本頁。</li>
+        <li>本頁載入時呼叫「我的模組角色摘要」端點（聚合 ET / DM <code>has_any_role</code>）決定 DM 卡狀態；ET 恆可用（學員為帳號建立時授予之唯一預設角色）。</li>
+        <li><strong>DM 卡雙狀態</strong>：具任一 DM 角色＝可點入；無任何 DM 角色＝<strong>「未開通」鎖定卡</strong>（灰卡 + 鎖頭 + 引導洽單位主管 / 管理者，DP-MSG-LOGIN-008），點擊僅提示不進入。只揭露模組存在、不揭露任何文件內容（存取控制仍由 DM 端 enforce）。</li>
+        <li><strong>歡迎橫幅</strong>：首次登入顯示一次、可關閉（「已顯示過」旗標儲存位置於實作定）。</li>
+        <li><strong>側欄可見性（適用 ET / DM 介面內之側欄，由各模組 enforce）</strong>：教育訓練組人人可見；<strong>文件管理組僅具任一 DM 角色者可見（未開通＝隱藏，非鎖定顯示）</strong>——引導職責歸入口頁鎖定卡，側欄保持乾淨；系統管理後台組僅 ET / DM 管理者可見。本頁上方兩個勾選為展示切換。</li>
+        <li>未來擴充（backlog，不在本期）：鎖定卡加「申請開通」按鈕（寄信通知該模組全部管理者；不建申請單、不追蹤狀態）。</li>
+        <li>實際入口頁<strong>無側欄</strong>（僅上方導覽 + 三卡）；wireframe 側欄之「模組入口頁」連結僅供檢視切換。</li>
         <li>DP 後台入口不在本頁——僅設於 ET / DM 介面之管理選單（2026-07-08 釐清第 2 輪 Q4）。</li>
       </ul>
     </details>
@@ -1238,7 +1260,23 @@ function loginForceChangeSubmit() {
   document.getElementById('login-overlay').style.display = 'none'; _loginShow('login-step-1');
   goScreen('dp-portal'); showToast('密碼已更新');
 }
-function dpPortalToggleDm(cb) { var el = document.getElementById('portal-dm-card'); if (el) el.style.display = cb.checked ? '' : 'none'; }
+function dpPortalToggleDm(cb) {
+  var u = document.getElementById('portal-dm-unlocked'), l = document.getElementById('portal-dm-locked');
+  if (u) u.style.display = cb.checked ? '' : 'none';
+  if (l) l.style.display = cb.checked ? 'none' : '';
+  var h = document.getElementById('mod-dm-header'), g = document.getElementById('mod-dm');
+  if (h) h.style.display = cb.checked ? '' : 'none';
+  if (g) g.style.display = cb.checked ? '' : 'none';
+}
+function dpPortalToggleAdmin(cb) {
+  var h = document.getElementById('mod-dp-header'), g = document.getElementById('mod-dp');
+  if (h) h.style.display = cb.checked ? '' : 'none';
+  if (g) g.style.display = cb.checked ? '' : 'none';
+}
+/* 初始狀態：模擬新註冊使用者（無 DM 角色 → 側欄隱藏文件管理組、入口頁顯示鎖定卡）*/
+document.addEventListener('DOMContentLoaded', function() {
+  var cb = document.getElementById('portal-demo-dm'); if (cb) dpPortalToggleDm(cb);
+});
 function loginRegisterSubmit() {
   var regEmail = document.querySelector('#login-register input[type="email"]');
   var loginEmailInput = document.getElementById('login-email'), loginPwInput = document.getElementById('login-password');

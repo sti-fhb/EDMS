@@ -58,8 +58,8 @@
 - [ ] T021 [US1] 實作登入端點 dp/user：帳密驗證（錯誤分流 LOGIN-001/002、bcrypt 比對）、鎖定判定（LOCKED_UNTIL 逾時視為已解鎖）、失敗計數 / 達 `FAIL_LOCK_COUNT` 自動鎖定、成功歸零計數 + 更新 LAST_LOGIN + 核發 JWT + LOGIN 稽核（含 FAIL 事件），對應 FR-02/04/05/08
 - [ ] T022 [US1] 實作換發端點 `renew`（T013 驗證邏輯 + 帳號狀態檢核）與登出端點（LOGOUT 稽核；前端丟棄 token），對應 FR-03/10
 - [ ] T023 [US1] 實作強制變更密碼閘：登入時檢核 `MUST_CHANGE_PWD` / `PWD_CHANGED_DATE` 逾效期 → 回應強制變更旗標；未完成變更前其他端點拒絕（middleware 檢核），對應 FR-06、spec_us8 FR-DP-US8-08
-- [ ] T024 [US1] 實作登入頁前端：帳密遮蔽、錯誤訊息（DP-MSG-LOGIN-001~007）、redirect 白名單返回原模組、前端閒置換發計時器（到期前有操作即呼叫 renew）、掛速率限制（T015），對應 FR-01/07/09、research §12
-- [ ] T025 [US1] 實作模組入口頁：後端「我的模組角色摘要」端點（聚合模組 `has_any_role`，stub 先行）+ 前端入口頁（ET 恆顯、DM 具任一角色才顯、個資恆顯、**不顯後台入口**），對應 FR-07、contracts/module-callbacks §4
+- [ ] T024 [US1] 實作登入頁前端：帳密遮蔽、錯誤訊息（DP-MSG-LOGIN-001~008）、redirect 白名單返回原目標頁面（通知信連結 / 書籤 / 逾時重登）、前端閒置換發計時器（到期前有操作即呼叫 renew）、掛速率限制（T015），對應 FR-01/07/09、research §12
+- [ ] T025 [US1] 實作模組入口頁：後端「我的模組角色摘要」端點（聚合模組 `has_any_role`，stub 先行）+ 前端入口頁（ET 恆顯、**DM 卡雙狀態**〔無角色呈「未開通」鎖定卡＋引導洽管理者，DP-MSG-LOGIN-008〕、個資恆顯、**不顯後台入口**、首次登入歡迎橫幅一次〔已顯示旗標儲存位置實作定〕），對應 FR-07、contracts/module-callbacks §4、research §12（2026-07-09 釐清第 4 輪）
 
 ---
 
