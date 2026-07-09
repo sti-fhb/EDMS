@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +25,24 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
     DB_POOL_RECYCLE: int = Field(default=1800, ge=60)
+
+    # 認證（簡單 JWT）
+    # 各環境獨立產生、不進 git；缺少時 fail-fast（見 _build_settings）。
+    # access token TTL / 閒置逾時 / 換發上限等存 DP_PARAM（`JWT` 參數，見
+    # docs/specs/dp/data-model.md），非環境變數。
+    JWT_SECRET_KEY: str
+    # 限對稱演算法（EDMS 採簡單對稱 JWT，見 research §2）；收斂為 Literal 使誤設
+    # 非對稱 / none 於啟動即被 Pydantic 擋下，杜絕 algorithm confusion 隱患。
+    JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = "HS256"
+
+    # 寄信（SMTP）— 由平台發信引擎（#16 T018 起）使用；
+    # 未設定時不影響應用啟動，實際寄送於發信 task 接上。
+    MAIL_HOST: str = ""
+    MAIL_PORT: int = Field(default=587, ge=1, le=65535)
+    MAIL_USERNAME: str = ""
+    MAIL_PASSWORD: str = ""
+    MAIL_FROM: str = "noreply@edms.local"
+    MAIL_STARTTLS: bool = True
 
     @property
     def cors_origins_list(self) -> list[str]:

@@ -15,3 +15,5 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://test:test@localhost/test_edms",
 )
+# JWT_SECRET_KEY 為必填設定；unit 測試以固定測試值滿足載入，不用於任何真實簽章。
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-not-for-production")

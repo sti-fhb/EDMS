@@ -84,23 +84,23 @@ raise AppError(status_code=404, detail="站點不存在", error_code="DP_SITE_00
 ---
 
 ### `BaseModel` / `BaseModelNoResId` / `BaseModelHardDelete` / `AuditLogBaseModel` · `app/core/base_model.py`
-所有 Table 必須繼承下表其中一個 base，共用的標準欄位（`CREATED_USER`、`CREATED_DATE`、`CREATED_SITE`、`UPDATED_USER`、`UPDATED_DATE`、`UPDATED_SITE`、`RES_ID`、`DELETED`）自動取得，**不需重複定義**。
+所有 Table 必須繼承下表其中一個 base，共用的標準欄位（`CREATED_USER`、`CREATED_DATE`、`UPDATED_USER`、`UPDATED_DATE`、`RES_ID`、`DELETED`）自動取得，**不需重複定義**。（EDMS 為單一組織、無站點維度，標準欄位不含 SITE；見 docs/specs/dp/data-model.md、research.md §1。）
 
 | 基底 | 適用情境 |
 |------|----------|
 | `BaseModel` | 一般 Table（含 `RES_ID` + `DELETED`），新模組預設使用 |
-| `BaseModelNoResId` | `RES_ID` 已被業務欄位佔用的 Table（如 DP_MENU、DP_ROLE_MENUS、DP_SESSION） |
-| `BaseModelHardDelete` | 硬刪除例外表（含 `RES_ID`，**無 `DELETED`**），如 LB_PRINTER |
-| `AuditLogBaseModel` | Audit Log（append-only），僅含 `CREATED_USER`、`CREATED_DATE`、`CREATED_SITE` |
+| `BaseModelNoResId` | `RES_ID` 已被業務欄位佔用的 Table |
+| `BaseModelHardDelete` | 硬刪除例外表（含 `RES_ID`，**無 `DELETED`**）|
+| `AuditLogBaseModel` | append-only 記錄表（如 `DP_AUDIT_LOG` / `DP_PWD_HIST` / `DP_SCHEDULE_LOG`），僅含 `CREATED_USER`、`CREATED_DATE` |
 
 ```python
 from app.core.base_model import BaseModel
 
 # 一般 Table（含 RES_ID + DELETED）— 新模組最常見場景
-class Site(BaseModel):
-    __tablename__ = "DP_SITE"
-    SITE_ID: Mapped[str] = mapped_column("SITE_ID", String(10), primary_key=True)
-    # 8 個標準欄位自動繼承，不需重複定義
+class DpParamMaster(BaseModel):
+    __tablename__ = "DP_PARAM_M"
+    PARAM_ID: Mapped[str] = mapped_column("PARAM_ID", String(50), primary_key=True)
+    # 標準欄位自動繼承，不需重複定義
 ```
 
 > `BaseModelNoResId` / `BaseModelHardDelete` / `AuditLogBaseModel` 的 code 範例與適用情境：見 `docs/ref/sti-backend-ref.md#basemodel-用法`

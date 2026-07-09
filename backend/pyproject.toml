@@ -6,16 +6,22 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.4",
+    "apscheduler>=3.11.0",
     "asyncpg>=0.31.0",
+    "bcrypt>=4.0.1,<5",
+    "fastapi-mail>=1.5.0",
     "fastapi[standard]>=0.135.2",
     "greenlet>=3.0.0",
+    "passlib[bcrypt]>=1.7.4",
     "pydantic-settings>=2.14.2",
+    "pyjwt>=2.13.0",
     "sqlalchemy[asyncio]>=2.0.48",
 ]
 
-# 說明：認證/加密/寄信/排程等依賴（PyJWT、passlib、cryptography、fastapi-mail、
-# apscheduler、croniter、email-validator、openpyxl）留待「認證 task」與對應功能 task
-# 引入，避免骨架階段揹負未使用的依賴。
+# 說明：認證/寄信/排程依賴於 DP Foundation（#16 T001）引入——
+#   pyjwt（簡單 JWT）、passlib[bcrypt]（密碼雜湊；bcrypt 釘 <5 因 passlib 1.7.4 與
+#   bcrypt 5.0 不相容）、fastapi-mail（發信引擎）、apscheduler（排程引擎）。
+#   cryptography 為 bcrypt/fastapi-mail 之傳遞依賴，不列直接依賴（EDMS Email 不加密）。
 
 [dependency-groups]
 dev = [
