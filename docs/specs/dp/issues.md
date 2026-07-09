@@ -51,7 +51,7 @@
 ### 範圍
 
 **後端**：
-- T001 骨架：pyproject 依賴（SQLAlchemy async / asyncpg / Alembic / PyJWT / passlib[bcrypt] / fastapi-mail / APScheduler）、core（db / base_model / pagination / exceptions / config）、Alembic 骨架（**versions 清空重建**）
+- T001 調整既有骨架（`fa9b398` 已建最小骨架，改為補缺口）：**首步修 `core/base_model.py` 移除 `CREATED_SITE` / `UPDATED_SITE`（四基底類別，TBMS 殘留）**、pyproject 補 PyJWT / passlib[bcrypt] / fastapi-mail / APScheduler、config 與 `.env.example` 補 JWT / SMTP 設定；db / pagination / exceptions / conftest 沿用
 - T002~T008 Migration：`DP_USER`（無 DP_SESSION）、`DP_PWD_RESET` + `DP_PWD_HIST`、`DP_AUDIT_LOG`（TEXT 存 JSON + ROW_HASH + DB 帳號僅 INSERT/SELECT）、`DP_PARAM_M/D`、`DP_NOTIFY_TEMPLATE`、`DP_EMAIL_LOG`、`DP_SCHEDULE` + `DP_SCHEDULE_LOG`
 - T009 種子：平台級參數（`JWT` / `PWD_POLICY` / `LOGIN` / `MAIL` / `ACTION_TYPE` 全預設值，見 data-model §種子）、DP 系統信 3 支（`PWD_RESET` / `EMAIL_CHANGE_VERIFY` / `PWD_EXPIRY_REMIND`，IS_SYSTEM=true）、排程 job 4 筆
 - T011 SRVDP003 稽核服務（鏈式 ROW_HASH）
@@ -89,6 +89,7 @@
 ### 注意事項
 
 - **遷移裁剪清單**（research §1）為本 Issue 最高風險點——照舊清單誤帶 `DP_SESSION` / RBAC / MFA / 開通信會與 spec 直接矛盾
+- **既有骨架的 `base_model.py` 含 SITE 欄位**（TBMS 原封帶殘留，`CREATED_SITE` 還是必填）——T001 首步移除，否則 10 張 DP 表全會多兩個無資料來源的欄位（2026-07-09 現況盤點）
 - 稽核前後值以 **TEXT 存 JSON**（型別規範不用 JSONB，research §6）
 - 表 / 欄位命名 UPPER_SNAKE_CASE、型別限用集合，依 `sti-naming-conventions` 與 data-model DD
 - Alembic 依 `sti-alembic-rules`；後端分層依 `sti-backend-modules` / `sti-backend-boundaries`（ET / DM 僅可經 SRVDP 介面使用平台能力）

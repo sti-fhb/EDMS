@@ -9,7 +9,7 @@
 
 ## Phase 1: 專案設定
 
-- [ ] T001 建立後端骨架（EDMS-MIGRATION §3）：`backend/pyproject.toml` 依賴（SQLAlchemy async / asyncpg / Alembic / PyJWT / passlib[bcrypt] / fastapi-mail / APScheduler）、core 帶入（db / base_model / pagination / exceptions / config——config 刪 TBMS 業務項、補 JWT / SMTP 設定）、Alembic 骨架（**versions 清空重建**、target_metadata 指向 EDMS Base）、測試 DB 骨架（test_edms）
+- [ ] T001 調整既有後端骨架（**2026-07-09 盤點：`fa9b398` 已建最小骨架**——core 七檔 / Alembic 空 versions / tests unit，本任務由「全新建立」改為「補缺口」）：**首步修 `core/base_model.py` 四個基底類別移除 `CREATED_SITE` / `UPDATED_SITE`**（TBMS 原封帶殘留，EDMS 單一組織無站點，對齊 data-model 標準欄位；docstring「選單 / Session」殘留字眼一併清）、pyproject 補認證 / 寄信 / 排程依賴（PyJWT / passlib[bcrypt] / fastapi-mail / APScheduler）、config 與 `.env.example` 補 JWT / SMTP 設定；db / pagination / exceptions / conftest 沿用既有
 - [ ] T002 [P] 建立資料庫 Migration：`DP_USER`（USER_ID PK、EMAIL UNIQUE **不加密**、PWD_HASH、STATUS、LOGIN_FAIL_COUNT、LOCKED_UNTIL、LAST_LOGIN_DATE、PENDING_EMAIL、PWD_CHANGED_DATE、MUST_CHANGE_PWD），參照 data-model.md；**不建 `DP_SESSION`**（research §1）
 - [ ] T003 [P] 建立資料庫 Migration：`DP_PWD_RESET`（TOKEN_HASH PK、TOKEN_TYPE＝PWD_RESET / EMAIL_CHANGE、NEW_EMAIL、EXPIRES / USED_DATE）與 `DP_PWD_HIST`（USER_ID + SEQ_NO，append-only），參照 data-model.md、research §5
 - [ ] T004 [P] 建立資料庫 Migration：`DP_AUDIT_LOG`（append-only；BEFORE / AFTER_VALUE **TEXT 存 JSON**、ROW_HASH、索引×3）+ 應用 DB 帳號對本表僅 GRANT INSERT / SELECT，參照 data-model.md、research §6

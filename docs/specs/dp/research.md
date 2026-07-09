@@ -19,6 +19,7 @@
   | `DP_USER.EMAIL` 之 `EncryptedString`（AES-256-GCM）| ❌ 不用——Email / 姓名屬一般個資、不加密儲存（`core/encryption.py` 仍帶入備用）| spec Assumptions |
   | `refresh_token` 端點 | ✂ 改為 `renew` 換發端點（驗現行 token + `auth_time` 上限，§2）| spec 釐清第 1 輪 Q3 |
   | `IS_PLATFORM_ADMIN` 等平台管理員概念 | ❌ 不帶——DP 後台由 ET / DM 管理者進入 | 2026-07-08 決策 |
+  | `core/base_model.py` 之 `CREATED_SITE` / `UPDATED_SITE`（四個基底類別，隨骨架 `fa9b398` 原封帶入）| ✂ **移除**——EDMS 單一組織無站點；docstring「選單 / Session」殘留字眼一併清（T001 首步，2026-07-09 盤點發現）| data-model 標準欄位、`_refs/09` §1.4 |
 - **Rationale**: 遷移清單以「照抄可用」為目標，spec 隨後拍板之簡化（簡單 JWT、無 RBAC、共管後台）使部分起手包項目失效；於此一次載明避免實作時照清單誤帶。
 - **保留項**: `core/db.py` / `base_model.py` / `pagination.py` / `exceptions.py`、`auth.py`（decode_jwt 等，改造 payload）、`request_context.py`、`operator.py`、`password_policy.py`、寄信基礎（`fastapi-mail`）、Alembic 骨架與測試 DB 骨架——依 EDMS-MIGRATION §3 / §4 帶入。
 
