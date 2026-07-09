@@ -32,7 +32,7 @@
 - **FR-004a**: `SCHDM001` 之每週執行時間（星期＋時間）MUST 可由管理者於平台 DP 系統管理後台通知範本（KPI 週報 / 未讀提醒，按模組過濾）設定，存於 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（前綴 `DM_`，格式 `星期,HH:MM`，預設 `週一,10:00`）；**KPI 週報與未讀提醒共用同一時間**、同批執行
 - **FR-005**: 未讀提醒 MUST **涵蓋全部已發布文件**（不設文件層個別開關）；是否寄送由管理者於通知範本「未讀提醒」**啟用 / 停用**統一控制（停用則整批不寄，KPI 統計 / DM10 儀表板 / KPI 週報不受影響）
 - **FR-006**: 排程寄信 MUST 呼叫平台唯一發信服務（傳 `template_code`）、由 outbox `DP_EMAIL_LOG` 背景批次非同步寄送（沿用 [spec_us6.md](spec_us6.md) FR-008 之集中 outbox 機制）；平台發信服務於寄送時依 `template_code` + 收件人 **即時組信**（未讀提醒即時算該人未看清單、KPI 週報即時算統計 + CSV）。「KPI 週報」「未讀提醒」為 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）之內建事件（CHANNEL=EMAIL_ONLY），可由管理者於平台 DP 系統管理後台「通知範本」（按模組過濾，見 [spec_us1.md](spec_us1.md)）啟用 / 停用、編輯主旨內文
-- **FR-007**: outbox 寄送之**韌性**（最大重試、指數退避、批次限流、FAILED 比率告警）由**平台發信引擎**負責，調校參數屬**平台級 `DP_` 參數**（重試 `DP_MAIL_MAX_RETRY` 預設 5、限流 `DP_MAIL_RATE_PER_MIN` 預設 60/分、失敗告警門檻 `DP_MAIL_FAIL_ALERT_PCT` 預設 20%），於平台 DP 系統管理後台維護（平台級 `DP_` 參數為共用項，ET / DM 管理者皆可維護）；DM 不自持此類發信引擎參數（詳見 research §9d 與平台 DP 規格）
+- **FR-007**: outbox 寄送之**韌性**（最大重試、重試間隔、批次限流）由**平台發信引擎**負責，調校參數屬**平台級 `MAIL` 參數組**（`RETRY_MAX` 預設 5、`RATE_PER_MIN` 預設 60/分、`RETRY_INTERVAL_MIN` 預設 2 分），於平台 DP 系統管理後台維護（平台級參數為共用項，ET / DM 管理者皆可維護）；**FAILED 比率不做系統內告警，由 IT 監控機制負責**（2026-07-09 對齊平台，原失敗告警參數作廢）；DM 不自持此類發信引擎參數（詳見 research §9d 註記與平台 DP 規格）
 
 ## 系統訊息
 

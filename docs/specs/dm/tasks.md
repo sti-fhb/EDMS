@@ -24,7 +24,7 @@
 - [ ] T011 [P] 建立資料庫 Migration：`DM_CHANGE_LOG`（append-only 公開變更歷程：OPERATION、APPLICANT、APPROVER、NOTE），參照 data-model.md
 - [ ] T012 ~~建立 `DM_NOTIFY_TEMPLATE` / `DM_PARAM` Migration~~ **已廢除（2026-07-08 集中化）**：通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、系統參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`），由平台 DP 建 migration；DM 不建此二表。維護 / 編輯 UI 仍在 DM09。
 - [ ] T012a ~~建立 `DM_NOTIFY_QUEUE` Migration~~ **已廢除（2026-07-08 集中化）**：非同步寄送改用平台 outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務、傳 `template_code`）；DM 不建佇列表。
-- [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）為 DM 業務種子。**通知範本 / 參數種子改由平台 DP 建（2026-07-08 集中化）**：9 通知範本寫入 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`；`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM 參數寫入 `DP_PARAM`（前綴 `DM_`：`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`）；發信引擎調校參數（重試 / 限流 / 失敗告警）屬平台級 `DP_`（`DP_MAIL_MAX_RETRY`=5、`DP_MAIL_RATE_PER_MIN`=60、`DP_MAIL_FAIL_ALERT_PCT`=20），由 DP 種子建立。參照 data-model.md 代碼表與平台 DP 規格
+- [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）為 DM 業務種子。**通知範本 / 參數種子改由平台 DP 建（2026-07-08 集中化）**：9 通知範本寫入 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`；`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM 參數寫入 `DP_PARAM`（前綴 `DM_`：`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`）；發信引擎調校參數（重試 / 限流 / 重試間隔）屬平台級 `MAIL` 參數組（`RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2；無失敗告警參數——失敗率由 IT 監控負責，2026-07-09 對齊平台），由 DP 種子建立。參照 data-model.md 代碼表與平台 DP 規格
 
 ---
 
@@ -37,7 +37,7 @@
 - [ ] T016 [P] 實作檔案儲存服務 dm/service/file_store：上傳至檔案系統 / 物件儲存、DB 存 metadata（FILE_*）、單檔上限讀平台 `DP_PARAM.DM_FILE_MAX_MB`（前綴 `DM_`，經平台唯讀查詢服務）、依 MIME 判定可預覽（PDF/圖片）/ 僅下載（Office），參照 research §3/§10
 - [ ] T017 [P] 實作 DOC_ID 產生器 dm/util/docid：`DM-{分類碼}-{6 位流水號}`、流水號依分類各自獨立、草稿建立時配號，參照 research §2
 - [ ] T018 [P] 實作通知服務 dm/service/notify：呼叫平台唯一發信服務（傳 `template_code`，範本存 `DP_NOTIFY_TEMPLATE` MODULE=DM）；站內訊息由 DM 自理，依 CHANNEL 發送（EMAIL_MSG＝Email+站內、MSG_ONLY＝僅站內、EMAIL_ONLY＝僅 Email）；停用範本不發，對應 spec_us1 FR-007、research §9
-- [ ] T018a ~~實作 outbox 背景寄送 worker~~ **改由平台承載（2026-07-08 集中化）**：非同步寄送統一由平台 outbox `DP_EMAIL_LOG` + 平台發信引擎執行（輪詢待寄、批次寄送、標記狀態、最大重試 / 指數退避 / 限流 / 失敗告警之韌性均為平台級 `DP_` 參數）；平台發信服務**寄送時依 `template_code` + 收件人即時組信**（未讀提醒算未看清單、KPI 週報算統計+CSV，需業務資料時反向 import DM service）。DM 端僅需呼叫平台發信服務並傳 `template_code` + 收件名單，與核准發布交易解耦，對應 spec_us6 FR-008、spec_us13 FR-006/007、research §9b/§9d
+- [ ] T018a ~~實作 outbox 背景寄送 worker~~ **改由平台承載（2026-07-08 集中化）**：非同步寄送統一由平台 outbox `DP_EMAIL_LOG` + 平台發信引擎執行（輪詢待寄、批次寄送、標記狀態、最大重試 / 重試間隔 / 限流之韌性均為平台級 `MAIL` 參數；失敗率告警由 IT 監控負責）；平台發信服務**寄送時依 `template_code` + 收件人即時組信**（未讀提醒算未看清單、KPI 週報算統計+CSV，需業務資料時反向 import DM service）。DM 端僅需呼叫平台發信服務並傳 `template_code` + 收件名單，與核准發布交易解耦，對應 spec_us6 FR-008、spec_us13 FR-006/007、research §9b/§9d
 - [ ] T019 [P] 實作送審週期 / 狀態機服務 dm/service/review：DM_REVIEW 建立 / 核准 / 退回 / 撤回；約束「同一文件不可同時兩種送審」（單一 PENDING_*），參照 research §4
 - [ ] T020 [P] 實作受控資料維護共用 dm/service/catalog：分類 / func_name / 標籤之新增 / 改名 / 啟用停用、**不開放刪除**、停用後既有引用保留、僅影響後續下拉；**AUDIENCE 組之停用採 soft-retire**（不收回既有可見性、僅擋後續指派、停用時回傳受影響文件 / 閱覽者數），對應 spec_us1 FR-001/FR-010、research §參數維護
 - [ ] T020a [P] 實作標籤式可見性判定共用 dm/util/visibility：給定使用者回傳其可見文件之查詢條件——文件掛「全體」 OR（文件 `DM_DOC_TAG` 之 AUDIENCE 標籤 ∩ 使用者 `DM_USER_TAG` ≠ 空）；閱覽者套用、編輯者/審核者/管理者略過，對應 spec_us3 FR-008、research §5b

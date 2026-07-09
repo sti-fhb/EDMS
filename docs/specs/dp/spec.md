@@ -94,7 +94,7 @@
 | US10 | 操作記錄查詢（稽核，共用項）| UCDP007 | P2 | [spec_us10.md](spec_us10.md) |
 | US11 | 排程作業執行與總覽（引擎 + 唯讀總覽畫面）| UCDP008 | P2 | [spec_us11.md](spec_us11.md) |
 
-> US 編號依優先級重新排序（P1 → P2），不對應 UC 編號順序。各 `spec_us{N}.md` 待後續產出。
+> US 編號依優先級重新排序（P1 → P2），不對應 UC 編號順序。
 
 ---
 
@@ -143,17 +143,17 @@
 | 實體 | 業務定位 |
 |------|---------|
 | 使用者主檔（DP_USER）| ET / DM 共用帳號；USER_ID（系統內穩定識別碼）、帳號（Email）、密碼雜湊、姓名、狀態（啟用 / 停用）、登入失敗計數、鎖定狀態、最後登入時間、Email 變更之待生效欄位。無平台管理員旗標 |
-| 密碼重設 Token（DP_PWD_RESET）| 忘記密碼之一次性時效 token（TOKEN_TYPE 現僅 `PWD_RESET`）|
+| 驗證 Token（DP_PWD_RESET）| 一次性時效 token（TOKEN_TYPE：`PWD_RESET` 忘記密碼 / `EMAIL_CHANGE` 帳號變更驗證；plan 階段依 US8 需求擴充，見 research §5）|
 | 密碼歷程（DP_PWD_HIST）| 前 N 次密碼雜湊（append-only、精簡版），供密碼重複性檢核 |
 | 操作歷程（DP_AUDIT_LOG）| 平台共用資安稽核日誌（append-only、不可竄改刪除）；操作者、時間至秒、功能 / 模組代碼、操作類別（LOGIN / LOGOUT / CREATE / UPDATE / DELETE）、來源 IP、異動對象、異動前後值（JSONB）；ET / DM 資安事件亦寫入本表 |
 | 功能參數主檔（DP_PARAM_M）| 全平台參數 / 清單定義之分類（`PARAM_ID` 前綴：無前綴 `DP_` 平台級 / `ET_` / `DM_` 模組級）；`DETAIL_LOCK` 標記鎖定碼（如文件分類碼建立後不可改）|
 | 功能參數明細（DP_PARAM_D）| 參數值與清單項（`PARAM_ID` + `PARAM_KEY`）；分類 / func_name / 標籤名稱 / 可見對象值 / DM 檢索標籤皆為此表之列 |
 | 通知範本（DP_NOTIFY_TEMPLATE）| 全平台通知範本（`MODULE`：`DP` / `ET` / `DM` + `TEMPLATE_CODE`）；主旨、內文、可用變數、管道（Email / 站內 / 兩者）、啟用停用、版本（樂觀鎖）；內容不同的通知＝同表不同列 |
-| 寄件 outbox（DP_EMAIL_LOG）| 平台發信引擎之寄件佇列與結果（append-only）；收件人、狀態（PENDING / SENT / FAILED）、重試次數、錯誤訊息、`CALLER_MODULE` |
+| 寄件 outbox（DP_EMAIL_LOG）| 平台發信引擎之寄件佇列與結果（僅新增與狀態欄更新，不刪除）；收件人、渲染快照、狀態（PENDING / SENT / FAILED）、重試次數、錯誤訊息、`CALLER_MODULE` |
 | 排程註冊表（DP_SCHEDULE）| 排程 job 定義（`JOB_ID`、cron、執行程式參照、啟停、上次執行時間 / 結果）；各模組 job 與平台自身 job（`SCHDP001`）於此登錄 |
 | 排程執行歷程（DP_SCHEDULE_LOG）| 各 job 之執行紀錄（起訖時間、成功 / 失敗、錯誤訊息，append-only）；供查詢與補跑判斷 |
 
-> **關聯 / 指派資料不在 DP**：使用者×角色（`ET_USER_ROLE` / `DM_USER_ROLE`）、使用者×標籤（`ET_USER_TAG`）、使用者×可見對象授權（DM 授權表）、課程×標籤、文件×分類等皆留各模組業務表，引用 `DP_PARAM` 之碼。各實體完整欄位定義於 `data-model.md`（待 `/speckit.plan` 階段產出）。
+> **關聯 / 指派資料不在 DP**：使用者×角色（`ET_USER_ROLE` / `DM_USER_ROLE`）、使用者×標籤（`ET_USER_TAG`）、使用者×可見對象授權（DM 授權表）、課程×標籤、文件×分類等皆留各模組業務表，引用 `DP_PARAM` 之碼。各實體完整欄位定義於 [data-model.md](data-model.md)。
 
 ---
 
@@ -163,7 +163,7 @@
 - **認證統一由 DP 提供**：登入 / 註冊 / 忘記密碼之畫面與流程皆為 DP（UCDP001–003）；個人資料維護為 DP（UCDP004）；ET / DM 不自設登入 / 個資畫面，僅以連結導向
 - **角色分治**：平台不做全域 RBAC、不定義角色能力；角色種類為固定 enum（無新增角色種類），同一使用者可多角色、權限取聯集；判定與 enforce 由各模組於業務操作時執行
 - **稽核欄位**：所有資料異動自動記錄建立者 / 異動者、建立時間 / 異動時間；EDMS 單一組織，無站點 / 院區維度
-- **軟刪除**：預設軟刪除（`DELETED=1`）、查詢預設過濾；append-only 記錄表（`DP_AUDIT_LOG` / `DP_PWD_HIST` / `DP_EMAIL_LOG` / `DP_SCHEDULE_LOG`）僅含 CREATED 欄位、無 UPDATED / DELETED
+- **軟刪除**：預設軟刪除（`DELETED=1`）、查詢預設過濾；append-only 記錄表（`DP_AUDIT_LOG` / `DP_PWD_HIST` / `DP_SCHEDULE_LOG`）僅含 CREATED 欄位、無 UPDATED / DELETED；`DP_EMAIL_LOG` 為 outbox——僅新增與狀態欄更新（PENDING → SENT / FAILED）、不刪除（含 UPDATED_*、無 DELETED）
 
 ### 認證機制（簡單 JWT）
 
@@ -277,7 +277,7 @@
 - **IT 維運範圍**：稽核日誌每日備份（至不同實體並加密）、發信失敗率 / 稽核容量等系統性告警監控——由 IT 以 log / 監控工具負責，不屬系統功能（2026-07-08 釐清第 2 輪）
 - **需求編號**：DP 為模組拆分後新增之共用層，無 RFP RQ 編號（TBMS `RQ0.md` 之 RQDP001–063 屬主專案「資訊模組」，不沿用）；需求追蹤以 RQDP.md 功能章節為單位（見〈US → RQDP 章節對照〉）
 - **數量 / 長度上限延遲決定**：參數值長度、範本內文長度、outbox 保留期、速率限制門檻等於 `/speckit.plan` 與 data-model 階段依效能與業務情境決定，spec 階段不預先綁定
-- **跨模組互動細節**：唯讀參數服務、發信服務、角色指派寫入模組表之介面格式與錯誤碼由 `specs/dp/contracts/` 規範（待 `/speckit.plan` 階段產出）
+- **跨模組互動細節**：唯讀參數服務、發信服務、角色指派寫入模組表之介面格式由 [contracts/](contracts/) 規範（platform-services / module-callbacks / ext-dp-email-server）；錯誤碼依 `sti-error-codes` 於實作定義
 
 ---
 
@@ -347,9 +347,11 @@
 - 來源分析資料：[../../_refs/09-平台模組.md](../../_refs/09-平台模組.md)（source of truth）
 - Wireframe：[../../wireframes/dp/index.html](../../wireframes/dp/index.html)（登入 / 個人資料 / 使用者管理 / 權限管理 / 操作記錄 / 通知範本 / 排程作業 / 系統參數）
 - 對應之各模組規格：[../et/spec.md](../et/spec.md)、[../dm/spec.md](../dm/spec.md)
-- 跨模組依賴明細：plan.md §跨模組依賴摘要（待 `/speckit.plan` 階段產出）
-- 各 Service 介接契約：contracts/（待 `/speckit.plan` 階段產出）
-- 各實體完整欄位定義：data-model.md（待 `/speckit.plan` 階段產出）
+- 實作計畫：[plan.md](plan.md)（§跨模組依賴摘要、§功能分群與開發順序）
+- 研究決策：[research.md](research.md)（12 項，含遷移起手包裁剪）
+- 各 Service 介接契約：[contracts/](contracts/)（SRVDP001–003、模組回呼、SMTP）
+- 各實體完整欄位定義：[data-model.md](data-model.md)（10 張表 + 種子）
+- 開發任務清單：[tasks.md](tasks.md)（54 項，Phase 1–14）
 
 ---
 
@@ -361,3 +363,7 @@
 | 2026-07-08 | 釐清第 1 輪：代建帳號初始密碼（管理者設定 + 首次登入強制變更）與特權帳號定義；預設角色改為首次進入模組時授予＋新增模組入口頁；閒置登出改短 TTL + 活動換發（15 分鐘、單日上限 8 小時）；站內訊息留各模組；US11 納入排程總覽唯讀畫面、新增平台自身排程 `SCHDP001`（閒置帳號禁用 + 密碼效期提醒）|
 | 2026-07-08 | 釐清第 2 輪：系統性告警（發信失敗率 / 稽核容量）改由 IT 監控負責、不做系統內通報；密碼效期到期後登入強制變更（到期前 7 天寄提醒、新增 DP 系統信「密碼到期提醒」）；登入端點伺服器端速率限制（不採 CAPTCHA）；DP 後台入口僅設於 ET / DM 管理選單 |
 | 2026-07-08 | 釐清第 3 輪（推翻第 1 輪 Q2）：新使用者預設角色僅 **ET 學員**（帳號建立當下授予）；其他角色（ET 教師 / 管理者、DM 全部四角色含閱覽者）一律由管理者於 US7 開通；模組入口頁之 DM 入口僅對具 DM 角色者顯示 |
+| 2026-07-09 | 展開 spec_us1.md–spec_us11.md：各 US 之 User Story / Acceptance Scenarios / Functional Requirements（FR-DP-US{N}-NN）/ 系統訊息（DP-MSG-{語意碼}-NNN）/ 依賴 |
+| 2026-07-09 | `/speckit.plan` 產出：plan.md（開發順序 Foundation→P1→P2）、research.md（12 項決策，含遷移起手包裁剪與短 TTL 換發機制）、data-model.md（10 表 ERD + DD + 種子）、contracts/（SRVDP001–003、模組回呼、SMTP）|
+| 2026-07-09 | `/speckit.tasks` 產出：tasks.md（54 任務、Phase 1–14、5 Sprint 增量交付；模組回呼以 stub 先行）|
+| 2026-07-09 | 跨文件一致性檢查修正：Key Entities `DP_PWD_RESET` 補 `EMAIL_CHANGE` 類型（對齊 research §5）、`DP_EMAIL_LOG` 改「新增 + 狀態更新」（原誤標 append-only）、plan.md 文件樹過期註記、tasks T035 補 FR-07 稽核歸屬 |
