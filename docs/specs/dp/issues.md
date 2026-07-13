@@ -31,6 +31,9 @@
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #2 | — | 待補 |
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
+| F1 | 開發流程 CI 基礎建設（local-ci / ci.yml 預備 / PR 模板 / error-codes 骨架）| — | Foundation-infra | —（不對應 tasks.md 業務 task）| 無 | [#18](https://github.com/sti-fhb/EDMS/issues/18) | 🔨 開發中 |
+
+> **F 系列＝Foundation-infra**（開發流程 / CI/CD，非業務 task）。F1 只做 repo 側、不依賴 runner；runner 註冊 + CD + branch protection 於未來 GCP 環境就緒後處理（EDMS 自有 ci/cd，不共用 TBMS）。
 
 ---
 

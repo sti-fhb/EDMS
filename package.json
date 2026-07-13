@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "ci:local": "bash scripts/local-ci.sh all",
+    "ci:quick": "bash scripts/local-ci.sh quick",
+    "ci:backend": "bash scripts/local-ci.sh backend",
+    "ci:frontend": "bash scripts/local-ci.sh frontend"
+  }
+}

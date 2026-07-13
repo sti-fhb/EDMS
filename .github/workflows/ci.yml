@@ -1,0 +1,213 @@
+# ============================================================
+# EDMS CI Pipeline
+#
+# ⚠️ 預備檔，尚未啟用 ─────────────────────────────────────────
+#   此 workflow 需要 self-hosted runner（label: [self-hosted, ci]）才會執行。
+#   EDMS 的 runner / GCP 環境於未來（GCP dev/prod 就緒後）架設；在 runner 上線前：
+#     - PR 上此 workflow 會顯示「等待 runner」，屬正常
+#     - 【勿】在 branch ruleset 把 "all-checks" 設為 required check，
+#       否則所有 PR 會卡在等 runner、擋死 merge
+#   runner 上線後，才於 GitHub → Settings → Rules 設 "all-checks" 為必需。
+#   本機開發請用 `pnpm ci:local`（scripts/local-ci.sh），檢查項與本檔一致。
+#
+# Runner：self-hosted [ci]（EDMS 自有 ci/cd，不共用 TBMS）
+# 觸發：PR 開啟 / 更新（目標 main，draft PR 除外）
+# 路徑過濾（dorny/paths-filter）：只改 .md / docs/ 時跳過 lint/test，
+#   all-checks 仍回報成功、不卡 merge。
+#
+# 工作流程：
+#   changes ─┬─ backend  (ruff + alembic heads + unit/integration tests)
+#            └─ frontend (ESLint + type-check + tests；frontend/ 建立後才觸發)
+#                                                          └─► all-checks
+#
+# 註：E2E job 待 ET/DM 有 UI + e2e/ 目錄後再補（見 issue 追蹤）。
+# ============================================================
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+# 同一個 PR 若有新 push，取消舊的執行以節省資源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # 路徑偵測：判斷哪些目錄有變更，決定要跑哪些 job
+  # 只改 .md / docs/ 等非程式碼時，backend/frontend 皆為 false
+  # ──────────────────────────────────────────────────────────
+  changes:
+    name: Detect Changes
+    if: github.event.pull_request.draft != true
+    runs-on: [self-hosted, ci]
+    permissions:
+      pull-requests: read
+      contents: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout 原始碼
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: 偵測變更路徑
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+  # ──────────────────────────────────────────────────────────
+  # 後端：Lint + Tests（單一 job，依賴只安裝一次）
+  #
+  # 步驟順序刻意把 lint / format / Alembic heads 排在測試之前：
+  #   不需要 DB、速度最快，能在跑完整測試前先攔下格式與 migration 問題。
+  # Integration tests 需要真實 PostgreSQL；diff-cover 只檢查本次 PR 新增/修改的行。
+  # ──────────────────────────────────────────────────────────
+  backend:
+    name: Backend Lint & Tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: [self-hosted, ci]
+    defaults:
+      run:
+        working-directory: backend
+
+    # 啟動 PostgreSQL 17 Docker service（runner 需有 Docker）
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: edms
+          POSTGRES_PASSWORD: edms
+          POSTGRES_DB: test_edms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      # fetch-depth: 0 取得完整歷史，確保 diff-cover 能正確計算 merge-base
+      - name: Checkout 原始碼
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+
+      - name: 安裝 Python 依賴（含 dev 套件）
+        run: uv sync --dev
+
+      # ── Lint（不需 DB，最快，提前 fail-fast）──
+      - name: 執行 ruff lint
+        run: uv run ruff check .
+
+      - name: 執行 ruff format 檢查
+        run: uv run ruff format --check .
+
+      - name: 檢查 Alembic heads（多 head 時提前阻擋）
+        run: |
+          HEAD_COUNT=$(uv run alembic heads | wc -l)
+          if [ "$HEAD_COUNT" -gt 1 ]; then
+            echo "::error::發現 ${HEAD_COUNT} 個 Alembic head，請先合併後再提交 PR"
+            uv run alembic heads
+            exit 1
+          fi
+          echo "✅ Alembic head 正常（單一 head 或尚無 migration）"
+
+      # ── Tests（unit + integration，含覆蓋率）──
+      # EDMS 認證用簡單 JWT；Email 不加密（無 ENCRYPTION_KEY）、無全域 RBAC（無 ADMIN_ROLE）
+      - name: 執行 Alembic migration
+        env:
+          DATABASE_URL: postgresql+asyncpg://edms:edms@localhost:5432/test_edms
+          JWT_SECRET_KEY: ci-test-secret-key
+        run: uv run alembic upgrade head
+
+      # -n auto：pytest-xdist 依核心數並行跑（integration 為 I/O-bound）
+      - name: 執行所有測試（含覆蓋率）
+        env:
+          DATABASE_URL: postgresql+asyncpg://edms:edms@localhost:5432/test_edms
+          JWT_SECRET_KEY: ci-test-secret-key
+        run: uv run pytest -v -n auto --cov --cov-report=xml --cov-report=term-missing
+
+      # 只檢查本次 PR 新增/修改的行是否達 80% 覆蓋率；整體覆蓋率不設門檻
+      - name: 執行 diff-cover（僅檢查本次 PR 變更的行）
+        if: github.event_name == 'pull_request'
+        run: uv run diff-cover coverage.xml --compare-branch=origin/main --fail-under=80
+
+  # ──────────────────────────────────────────────────────────
+  # 前端：ESLint + type-check + Tests
+  # frontend/ 建立後（T010）才會被 paths-filter 觸發；在此之前恆 skip。
+  # ──────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend Lint, Type Check & Tests
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: [self-hosted, ci]
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout 原始碼
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: 安裝 pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320  # v5.0.0
+
+      - name: 安裝 Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: 22
+
+      - name: 安裝前端依賴
+        run: pnpm install --frozen-lockfile
+
+      - name: 執行 ESLint
+        run: pnpm lint
+
+      - name: 執行 TypeScript 型別檢查
+        run: pnpm type-check
+
+      - name: 執行前端測試
+        run: pnpm test
+
+  # ──────────────────────────────────────────────────────────
+  # 彙總：所有 job 通過才算 CI 綠燈
+  # Branch ruleset 只需設定 "all-checks" 這一個 status check（runner 上線後才設）。
+  # 被 skip 的 job（路徑過濾）result 為 "skipped"，不算 failure。
+  # ──────────────────────────────────────────────────────────
+  all-checks:
+    name: all-checks
+    runs-on: [self-hosted, ci]
+    needs:
+      - changes
+      - backend
+      - frontend
+    if: always()
+
+    steps:
+      - name: 確認所有 job 皆成功
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more jobs failed. Check the logs above."
+            exit 1
+          elif [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more jobs were cancelled."
+            exit 1
+          else
+            echo "All checks passed (skipped jobs are OK)."
+          fi
