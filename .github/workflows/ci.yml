@@ -1,16 +1,14 @@
 # ============================================================
 # EDMS CI Pipeline
 #
-# ⚠️ 預備檔，尚未啟用 ─────────────────────────────────────────
-#   此 workflow 需要 self-hosted runner（label: [self-hosted, ci]）才會執行。
-#   EDMS 的 runner / GCP 環境於未來（GCP dev/prod 就緒後）架設；在 runner 上線前：
-#     - PR 上此 workflow 會顯示「等待 runner」，屬正常
-#     - 【勿】在 branch ruleset 把 "all-checks" 設為 required check，
-#       否則所有 PR 會卡在等 runner、擋死 merge
-#   runner 上線後，才於 GitHub → Settings → Rules 設 "all-checks" 為必需。
+# Runner：GitHub-hosted（ubuntu-latest）
+#   測試所需的 PostgreSQL 以 service container 啟動（見 backend job），
+#   不依賴任何自架 runner 或內網資源。
 #   本機開發請用 `pnpm ci:local`（scripts/local-ci.sh），檢查項與本檔一致。
 #
-# Runner：self-hosted [ci]（EDMS 自有 ci/cd，不共用 TBMS）
+# Branch ruleset 只需把 "all-checks" 設為 main 的 required status check，
+#   即可讓「CI 綠燈才能 merge」生效。
+#
 # 觸發：PR 開啟 / 更新（目標 main，draft PR 除外）
 # 路徑過濾（dorny/paths-filter）：只改 .md / docs/ 時跳過 lint/test，
 #   all-checks 仍回報成功、不卡 merge。
@@ -45,7 +43,7 @@ jobs:
   changes:
     name: Detect Changes
     if: github.event.pull_request.draft != true
-    runs-on: [self-hosted, ci]
+    runs-on: ubuntu-latest
     permissions:
       pull-requests: read
       contents: read
@@ -77,12 +75,12 @@ jobs:
     name: Backend Lint & Tests
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: [self-hosted, ci]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
 
-    # 啟動 PostgreSQL 17 Docker service（runner 需有 Docker）
+    # 啟動 PostgreSQL 17 service container（ubuntu-latest 預裝 Docker）
     services:
       postgres:
         image: postgres:17
@@ -156,7 +154,7 @@ jobs:
     name: Frontend Lint, Type Check & Tests
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: [self-hosted, ci]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
@@ -192,7 +190,7 @@ jobs:
   # ──────────────────────────────────────────────────────────
   all-checks:
     name: all-checks
-    runs-on: [self-hosted, ci]
+    runs-on: ubuntu-latest
     needs:
       - changes
       - backend
