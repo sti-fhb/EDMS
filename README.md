@@ -249,6 +249,30 @@ pnpm ci:frontend   # 只跑前端
 
 涵蓋的檢查與覆蓋率門檻同 TBMS 慣例（diff-cover ≥ 80%）。
 
+### 整合測試環境設定（integration tests）
+
+整合測試（`pytest -m integration`）需要真實 PostgreSQL 與獨立測試庫，首次執行前需：
+
+1. **建立 `backend/.env.test`**（本機檔，已被 `.gitignore` 排除）：
+   ```bash
+   cd backend
+   cp .env.example .env.test
+   # 編輯 .env.test，將 DATABASE_URL 的庫名改為 test_edms（保留本機帳密）：
+   # DATABASE_URL=postgresql+asyncpg://postgres:<你的密碼>@localhost:5432/test_edms
+   ```
+   > 庫名**必須含 `test`**，`apply_migrations` fixture 會 assert 防呆，避免誤動正式庫。測試庫不存在時 fixture 會自動建立。
+
+2. **確認 `psql` 在 PATH**：conftest 以 `psql` 子程序做建庫 / DROP SCHEMA 維護。
+   Windows 若已裝 PostgreSQL，將 `C:\Program Files\PostgreSQL\<版本>\bin` 加入使用者 PATH 即可（免另裝）。
+
+3. **執行**：
+   ```bash
+   uv run pytest -m integration      # 只跑整合測試
+   uv run pytest -n auto             # 全套並行（每個 xdist worker 自帶獨立庫 test_edms_gwNN）
+   ```
+
+> CI（GitHub-hosted）不讀 `.env.test`，改由 workflow 直接注入 `DATABASE_URL`；runner 已內建 `psql`。
+
 ---
 
 ## 常用指令
