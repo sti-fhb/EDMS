@@ -62,17 +62,9 @@
 
 ### 步驟 1：判複雜度，選模板
 
-對照下表打分：
+複雜度分級表見 `/sti-common`「複雜度分級（預判 issue 規模）」（三支指令共用，避免 drift）：
 
-| 指標 | 簡單（10 節）| 複雜（18 節）|
-|------|-------------|-------------|
-| FR 數 | ≤ 5 | > 5 |
-| AC 數 | ≤ 5 | > 5 |
-| 訊息類型 | ≤ 5 | > 10 |
-| 跨模組依賴 | 無 | 有 |
-| 獨有業務邏輯主題 | 0 | ≥ 2 |
-
-→ 多數簡單用 10 節；任一達複雜門檻用 18 節。顯示判定結果與選用模板。
+→ 多數指標為簡單用 10 節；任一達複雜門檻用 18 節。顯示判定結果與選用模板。
 
 ---
 
@@ -145,12 +137,16 @@
 
 於 #{N} 規劃留言中盤點到以下 N 點 spec 未明寫且影響業務行為，請 SA 確認。
 
+> 每題標「阻塞類型」（固定列舉，供 `/sti-implement` 解析「未回覆的 Q 卡到哪」，勿用自由文字）：
+> `backend-schema`（卡後端 schema / API 介面）｜`frontend-ux`（純前端狀態 / UX，不卡後端）｜`cross-module`（卡跨模組依賴）｜`none`（不卡骨架，可先開工）
+
 > **自我驗證紀錄**：初版列 X 條候選，對照 spec / data-model / contracts / wireframe 後撤回 Y 條：
 > - 撤回項 1（理由）
 
 ---
 
 ## Q1：{標題}
+**阻塞類型**：`backend-schema`
 **現況**：...
 **選項**：A / B / C
 **請 SA 裁示**：...
@@ -195,14 +191,14 @@ gh issue comment {N} -R sti-fhb/EDMS --body-file /tmp/issue{N}/sa_questions.md
 
 ### 步驟 6：建議下一步（銜接 /sti-implement）
 
-依步驟 4 的真 Q 與後端 / 前端依賴判斷，輸出建議：
+依步驟 4 各 Q 的「阻塞類型」與後端 / 前端依賴判斷，輸出建議（下表情境與阻塞類型列舉一一對應）：
 
-| 情境 | 輸出 |
+| 阻塞類型（情境）| 輸出 |
 |------|------|
-| 無真 SA Q，或 Q 不卡後端骨架 | `✅ 盤點完成。可直接開工：/sti-implement #{N}` |
-| Q 卡後端 schema / API 介面 | `⏳ Q{n} 卡後端介面，建議等 SA 回覆後再執行 /sti-implement #{N}` |
-| Q 是純前端狀態 / UX | `✅ 可先做 Phase 1 後端：/sti-implement #{N}；Phase 2 等 SA` |
-| Q 卡跨模組依賴 | `⚠ 依賴 {工具/表} 未交付，先確認是否影響 critical path` |
+| `none`（或無真 SA Q，不卡任何骨架）| `✅ 盤點完成。可直接開工：/sti-implement #{N}` |
+| `backend-schema`（卡後端 schema / API 介面）| `⏳ Q{n} 卡後端介面，建議等 SA 回覆後再執行 /sti-implement #{N}` |
+| `frontend-ux`（純前端狀態 / UX，不卡後端）| `✅ 可先做 Phase 1 後端：/sti-implement #{N}；前端 Phase 2 等 SA` |
+| `cross-module`（卡跨模組依賴）| `⚠ 依賴 {工具/表} 未交付，先確認是否影響 critical path` |
 
 ---
 
