@@ -20,7 +20,7 @@ async def test_notify_template_insert_and_query(db):
     db.add(
         DpNotifyTemplate(
             module="DP",
-            template_code="PWD_RESET",
+            template_code="SMOKE_TEST",
             template_name="密碼重設信",
             subject="【EDMS】密碼重設通知",
             body="您好 {user_name}，請點擊連結重設密碼：{reset_link}",
@@ -40,7 +40,7 @@ async def test_notify_template_insert_and_query(db):
         await db.execute(
             select(DpNotifyTemplate).where(
                 DpNotifyTemplate.module == "DP",
-                DpNotifyTemplate.template_code == "PWD_RESET",
+                DpNotifyTemplate.template_code == "SMOKE_TEST",
             )
         )
     ).scalar_one()

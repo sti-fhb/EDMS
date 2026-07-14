@@ -19,7 +19,7 @@ async def test_schedule_and_log_insert_and_query(db):
     now = utcnow()
     db.add(
         DpSchedule(
-            job_id="SCHDP001",
+            job_id="SCHZZ001",
             job_name="密碼到期提醒",
             module="DP",
             cron_expr="0 8 * * *",
@@ -33,7 +33,7 @@ async def test_schedule_and_log_insert_and_query(db):
     await db.flush()
 
     log = DpScheduleLog(
-        job_id="SCHDP001",
+        job_id="SCHZZ001",
         start_date=now,
         end_date=utcnow(),
         status="SUCCESS",
@@ -45,13 +45,13 @@ async def test_schedule_and_log_insert_and_query(db):
     assert log.log_id is not None and log.log_id > 0
 
     # DP_SCHEDULE 可更新 LAST_RUN_*（BaseModel）
-    schedule = (await db.execute(select(DpSchedule).where(DpSchedule.job_id == "SCHDP001"))).scalar_one()
+    schedule = (await db.execute(select(DpSchedule).where(DpSchedule.job_id == "SCHZZ001"))).scalar_one()
     schedule.last_run_date = utcnow()
     schedule.last_run_status = "SUCCESS"
     schedule.updated_user = "SYSTEM"
     schedule.updated_date = utcnow()
     await db.flush()
 
-    fetched_log = (await db.execute(select(DpScheduleLog).where(DpScheduleLog.job_id == "SCHDP001"))).scalar_one()
+    fetched_log = (await db.execute(select(DpScheduleLog).where(DpScheduleLog.job_id == "SCHZZ001"))).scalar_one()
     assert fetched_log.status == "SUCCESS"
     assert schedule.last_run_status == "SUCCESS"
