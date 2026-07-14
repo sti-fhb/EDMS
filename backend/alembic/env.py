@@ -13,6 +13,7 @@ from app.core.db import Base
 from app.dp.audit.models import DpAuditLog  # noqa: F401
 from app.dp.notify.models import DpEmailLog, DpNotifyTemplate  # noqa: F401
 from app.dp.params.models import DpParamDetail, DpParamMaster  # noqa: F401
+from app.dp.schedules.models import DpSchedule, DpScheduleLog  # noqa: F401
 from app.dp.user.models import DpPwdHistory, DpPwdReset  # noqa: F401
 from app.dp.users.models import DpUser  # noqa: F401
 
