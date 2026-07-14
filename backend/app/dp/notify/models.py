@@ -1,9 +1,10 @@
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Integer, PrimaryKeyConstraint, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Identity, Index, Integer, PrimaryKeyConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import BaseModel
+from app.core.base_model import BaseModel, BaseModelNoDelete
 
 
 class DpNotifyTemplate(BaseModel):
@@ -29,3 +30,30 @@ class DpNotifyTemplate(BaseModel):
     is_enabled: Mapped[bool] = mapped_column("IS_ENABLED", Boolean, nullable=False, default=True)
     is_system: Mapped[bool] = mapped_column("IS_SYSTEM", Boolean, nullable=False, default=False)
     version: Mapped[int] = mapped_column("VERSION", Integer, nullable=False, default=1)
+
+
+class DpEmailLog(BaseModelNoDelete):
+    """寄件 outbox（DP_EMAIL_LOG）。
+
+    一列一收件人，單筆失敗獨立重試。新增後只更新狀態（STATUS / RETRY_COUNT /
+    ERROR_MSG / SENT_DATE），保留全部紀錄、永不刪除（故用 BaseModelNoDelete）。
+    SUBJECT / BODY 為渲染後快照。worker 以 (STATUS, CREATED_DATE) 索引輪詢待寄件。
+    """
+
+    __tablename__ = "DP_EMAIL_LOG"
+    __table_args__ = (
+        PrimaryKeyConstraint("MESSAGE_ID", name="PK_DP_EMAIL_LOG"),
+        Index("IX_DP_EMAIL_LOG_STATUS_CREATED", "STATUS", "CREATED_DATE"),
+    )
+
+    message_id: Mapped[int] = mapped_column("MESSAGE_ID", BigInteger, Identity(), nullable=False)
+    module: Mapped[str] = mapped_column("MODULE", String(5), nullable=False)
+    template_code: Mapped[str] = mapped_column("TEMPLATE_CODE", String(30), nullable=False)
+    caller_module: Mapped[str] = mapped_column("CALLER_MODULE", String(5), nullable=False)
+    recipient: Mapped[str] = mapped_column("RECIPIENT", String(255), nullable=False)
+    subject: Mapped[str] = mapped_column("SUBJECT", String(200), nullable=False)
+    body: Mapped[str] = mapped_column("BODY", Text, nullable=False)
+    status: Mapped[str] = mapped_column("STATUS", String(10), nullable=False, default="PENDING")
+    retry_count: Mapped[int] = mapped_column("RETRY_COUNT", Integer, nullable=False, default=0)
+    error_msg: Mapped[Optional[str]] = mapped_column("ERROR_MSG", String(500), nullable=True)
+    sent_date: Mapped[Optional[datetime]] = mapped_column("SENT_DATE", DateTime(timezone=True), nullable=True)

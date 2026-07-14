@@ -63,3 +63,19 @@ class BaseModelHardDelete(Base):
     updated_user: Mapped[Optional[str]] = mapped_column("UPDATED_USER", String(20), nullable=True)
     updated_date: Mapped[Optional[datetime]] = mapped_column("UPDATED_DATE", DateTime(timezone=True), nullable=True)
     res_id: Mapped[Optional[str]] = mapped_column("RES_ID", String(30), nullable=True)
+
+
+class BaseModelNoDelete(Base):
+    """可更新但永不刪除的表專用基底（含 CREATED_* / UPDATED_*，**無 RES_ID / 無 DELETED**）。
+
+    適用：outbox / log 類——新增後只更新狀態、保留全部紀錄、不軟刪也不硬刪
+    （如 DP_EMAIL_LOG）。與 BaseModelHardDelete 的差異：後者語意為「刪除即下線」，
+    本基底語意為「永不刪除」，且不帶 RES_ID。
+    """
+
+    __abstract__ = True
+
+    created_user: Mapped[str] = mapped_column("CREATED_USER", String(20), nullable=False)
+    created_date: Mapped[datetime] = mapped_column("CREATED_DATE", DateTime(timezone=True), nullable=False)
+    updated_user: Mapped[Optional[str]] = mapped_column("UPDATED_USER", String(20), nullable=True)
+    updated_date: Mapped[Optional[datetime]] = mapped_column("UPDATED_DATE", DateTime(timezone=True), nullable=True)

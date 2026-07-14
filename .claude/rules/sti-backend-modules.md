@@ -91,6 +91,7 @@ raise AppError(status_code=404, detail="站點不存在", error_code="DP_SITE_00
 | `BaseModel` | 一般 Table（含 `RES_ID` + `DELETED`），新模組預設使用 |
 | `BaseModelNoResId` | `RES_ID` 已被業務欄位佔用的 Table |
 | `BaseModelHardDelete` | 硬刪除例外表（含 `RES_ID`，**無 `DELETED`**）|
+| `BaseModelNoDelete` | 可更新但永不刪除的 outbox / log 表（含 `UPDATED_*`，**無 `RES_ID` / 無 `DELETED`**，如 `DP_EMAIL_LOG`）|
 | `AuditLogBaseModel` | append-only 記錄表（如 `DP_AUDIT_LOG` / `DP_PWD_HIST` / `DP_SCHEDULE_LOG`），僅含 `CREATED_USER`、`CREATED_DATE` |
 
 ```python
