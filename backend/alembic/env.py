@@ -10,6 +10,7 @@ from app.core.db import Base
 # 匯入所有 model，讓 Alembic autogenerate 能掃描到。
 # 每新增一個 module 的 model，在此處加上 import（並於行末以 noqa 抑制 F401），例如：
 #   from app.et.courses.models import Course
+from app.dp.audit.models import DpAuditLog  # noqa: F401
 from app.dp.user.models import DpPwdHistory, DpPwdReset  # noqa: F401
 from app.dp.users.models import DpUser  # noqa: F401
 
