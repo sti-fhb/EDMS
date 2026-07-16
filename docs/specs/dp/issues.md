@@ -125,7 +125,7 @@
 ### 範圍
 
 **後端**：
-- **T018 [US6] SRVDP002 `send_email`**（`app/dp/notify/`，經 `app/services/__init__.py` 出口暴露）：依 `module` + `template_code` 查 `DP_NOTIFY_TEMPLATE` 啟用中範本（不存在 → raise `AppError`；停用 → 回 `skipped_reason="TEMPLATE_DISABLED"` 不寄不報錯）、以 `params` 渲染主旨 / 內文、**逐收件人**寫 `DP_EMAIL_LOG`（PENDING、渲染快照 SUBJECT/BODY、`CALLER_MODULE`）即返回；對應 FR-01~04
+- **T018 [US6] SRVDP002 `send_email`**（`app/dp/notify/`，經 `app/services/__init__.py` 出口暴露）：依 `module` + `template_code` 查 `DP_NOTIFY_TEMPLATE` 啟用中範本（不存在 → raise `AppError`；停用 → `skipped_reason="TEMPLATE_DISABLED"`、`CHANNEL` 不含 Email → `skipped_reason="CHANNEL_NOT_EMAIL"`，皆不寄不報錯）、以 `params` 渲染主旨 / 內文、**逐收件人**寫 `DP_EMAIL_LOG`（PENDING、渲染快照 SUBJECT/BODY、`CALLER_MODULE`）即返回；對應 FR-01~04
 - **T019 [US6] 常駐寄送 worker**（FastAPI lifespan 啟動之 asyncio task，**不入 `DP_SCHEDULE`**）：輪詢 PENDING，依平台級 `MAIL` 參數（`RATE_PER_MIN` / `RETRY_MAX` / `RETRY_INTERVAL_MIN`）限速 / 重試 / 間隔，經 SMTP 寄送更新 SENT / FAILED（單筆失敗不影響同批；變數缺漏該列標 FAILED 留錯誤訊息）；不內建告警（失敗率 / 積壓由 IT 監控）；對應 FR-02 / 05 / 06、research §8
 - **T020 [US6] SMTP 介接**：`.env.example` 補 SMTP 連線設定、以渲染快照寄送；SMTP 不可用時信件停留 outbox、恢復後續寄不遺失；參照 [contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)
 
@@ -138,7 +138,7 @@
 ### 驗收條件
 
 - [ ] `send_email(recipients, template_code, module, params, caller_module)` 對存在且啟用之範本，逐收件人寫 `DP_EMAIL_LOG`（PENDING、渲染快照、`CALLER_MODULE`）後**立即返回**，不同步寄送、不阻塞呼叫方交易
-- [ ] `template_code` 不存在 → raise `AppError`（error_code 依 `sti-error-codes`）；範本停用 → 回 `skipped_reason="TEMPLATE_DISABLED"`、不寄、呼叫方流程照常
+- [ ] `template_code` 不存在 → raise `AppError`（error_code 依 `sti-error-codes`）；範本停用 → 回 `skipped_reason="TEMPLATE_DISABLED"`、範本 `CHANNEL` 不含 Email（`MSG`）→ 回 `skipped_reason="CHANNEL_NOT_EMAIL"`，兩者皆不寫 outbox、不寄、呼叫方流程照常
 - [ ] 常駐 worker（lifespan asyncio task，**不在 `DP_SCHEDULE`**）輪詢 PENDING，依 `MAIL` 參數限速 / 重試 / 間隔寄送，成功更新 SENT（記寄出時間）
 - [ ] SMTP 失敗未達 `RETRY_MAX` 依 `RETRY_INTERVAL_MIN` 延遲重試（累計次數）；逾上限標 FAILED 並保留錯誤訊息
 - [ ] 單筆收件人 / 變數缺漏失敗，同批其他收件人不受影響（該列 FAILED、其餘照寄）
@@ -183,3 +183,4 @@
 | 2026-07-09 | 補 Issue 開立規則（標題 `[{階段}] {模組代碼} — {功能名稱}`、Labels 階段+`DP-平台`+US、依序開立標依賴編號）；總覽表加 GitHub # 欄；Issue #0 已開立為 GitHub #16 並依規則更名、換 labels（`priority:P0` + `DP-平台`）|
 | 2026-07-16 | #0（#16）實作驗證完成並合併後，依增量模式補入 Issue #1（通知發送服務 / US6）完整 body |
 | 2026-07-16 | 收斂郵件環境變數命名為 fastapi-mail 慣例：`config.py` `MAIL_HOST`→`MAIL_SERVER`、`.env.example` 同步、ext 契約 / tasks T020 之 `SMTP_*`→`MAIL_*`（`MAIL_SSL_TLS` / `MAIL_SUPPRESS_SEND` 待 T020 依需要補）|
+| 2026-07-16 | US6 交付前自檢（`/sti-sa-precheck dp us6`）補唯一缺口：spec_us6 FR-03 + AC4、contracts SRVDP002、本 Issue #1 驗收條件補明 `CHANNEL` 不含 Email（`MSG`）時不寄（`skipped_reason="CHANNEL_NOT_EMAIL"`）|
