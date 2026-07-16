@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     MAIL_PASSWORD: str = ""
     MAIL_FROM: str = "noreply@edms.local"
     MAIL_STARTTLS: bool = True
+    # implicit TLS（如埠 465）；與 STARTTLS 互斥，兩者不可同時 true
+    MAIL_SSL_TLS: bool = False
+    # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
+    MAIL_SUPPRESS_SEND: bool = False
 
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
@@ -58,6 +62,27 @@ class Settings(BaseSettings):
         min_bytes = _MIN_JWT_KEY_BYTES[self.JWT_ALGORITHM]
         if len(self.JWT_SECRET_KEY.encode("utf-8")) < min_bytes:
             raise ValueError(f"JWT_SECRET_KEY too short for {self.JWT_ALGORITHM}: requires >= {min_bytes} bytes")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_mail_tls(self) -> "Settings":
+        """MAIL 傳輸層 TLS 設定檢查：
+
+        1. STARTTLS 與 SSL_TLS 互斥（STARTTLS 為明文升級、SSL_TLS 為 implicit TLS）。
+        2. production（非 DEBUG、非 SUPPRESS_SEND）且已設定 MAIL_SERVER 時，至少一種 TLS 需啟用，
+           禁止明文 SMTP 傳輸（帳密與信件內容明文上線）。
+        """
+        if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
+            raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
+        if (
+            self.MAIL_SERVER
+            and not self.DEBUG
+            and not self.MAIL_SUPPRESS_SEND
+            and not (self.MAIL_STARTTLS or self.MAIL_SSL_TLS)
+        ):
+            raise ValueError(
+                "production 已設定 MAIL_SERVER 時，MAIL_STARTTLS 或 MAIL_SSL_TLS 至少一為 true（禁明文 SMTP）"
+            )
         return self
 
     @property

@@ -55,6 +55,47 @@ def test_jwt_secret_length_threshold_follows_algorithm() -> None:
         _settings_with_key(key, "HS512")
 
 
+def test_mail_starttls_and_ssl_tls_mutually_exclusive() -> None:
+    """MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時 true。"""
+    with pytest.raises(ValueError, match="不可同時"):
+        Settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            MAIL_STARTTLS=True,
+            MAIL_SSL_TLS=True,
+        )
+
+
+def test_mail_plaintext_rejected_in_production() -> None:
+    """production 已設 MAIL_SERVER 但兩種 TLS 皆關 → 拒絕（禁明文 SMTP）。"""
+    with pytest.raises(ValueError, match="至少一為 true"):
+        Settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=False,
+            MAIL_SERVER="smtp.example.com",
+            MAIL_STARTTLS=False,
+            MAIL_SSL_TLS=False,
+        )
+
+
+def test_mail_plaintext_allowed_when_suppress_send() -> None:
+    """MAIL_SUPPRESS_SEND（測試 / E2E）時允許無 TLS（不實際連線）。"""
+    s = Settings(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        MAIL_SERVER="smtp.example.com",
+        MAIL_STARTTLS=False,
+        MAIL_SSL_TLS=False,
+        MAIL_SUPPRESS_SEND=True,
+    )
+    assert s.MAIL_SUPPRESS_SEND is True
+
+
 def test_build_settings_rejects_short_key_as_invalid() -> None:
     """短密鑰經 _build_settings 轉為安全 RuntimeError（歸為 invalid，不回顯密鑰值）。"""
     with pytest.raises(RuntimeError) as exc_info:

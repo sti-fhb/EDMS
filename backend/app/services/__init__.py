@@ -5,6 +5,7 @@ repository / model（sti-backend-boundaries API-First 隔離）。
 """
 
 from app.dp.audit.service import AuditLogService
+from app.dp.notify.service import NotifyService
 from app.dp.params.service import ParamService
 
-__all__ = ["AuditLogService", "ParamService"]
+__all__ = ["AuditLogService", "NotifyService", "ParamService"]
