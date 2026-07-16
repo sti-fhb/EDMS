@@ -75,6 +75,31 @@ git log origin/{headRefName}..HEAD --oneline
 - 若 `git status --porcelain` 有輸出 → 停止並提示「工作區有未提交的變更，請先 commit/stash」
 - 若 `git log` 有輸出 → 停止並提示「有本地 commit 未 push，請先 `git push`」
 
+#### main 漂移偵測（防「本地綠 → 遠端紅」）
+
+> **背景**：轉正會觸發遠端 CI，而遠端跑的是 **PR merge ref（分支 ∪ 最新 main）**。若 PR 開啟期間 main 又合入與本分支同父的 migration，遠端會偵測到 alembic 雙 head 而紅，本地卻看不到。此為觸發遠端 CI 前的最後一道守門。
+
+```bash
+git fetch origin main
+git diff --name-only --diff-filter=A --no-renames HEAD...origin/main -- backend/alembic/versions/
+git log HEAD..origin/main --oneline
+```
+
+- 若第一條指令**有輸出**（main 有本分支未含的新 migration）→ **停止**並提示：
+  ```
+  ❌ 偵測到 origin/main 有本分支未含的新 migration：
+     {檔案清單}
+  轉正後遠端 CI 可能因 alembic 雙 head 而紅。請先執行：
+     git merge origin/main
+     pnpm ci:local        # 重跑本地 CI 確認
+  完成並 push 後再重新執行 /sti-pr-ready #{編號}。
+  ```
+- 若第一條無輸出、但 `git log HEAD..origin/main` **有輸出**（分支落後 main、無新 migration）→ 顯示建議後**照常繼續**（非阻塞）：
+  ```
+  ⚠️ 分支落後 origin/main {N} 個 commit（無新 migration）。建議轉正前先 git merge origin/main 降低整合風險。
+  ```
+- 若兩者皆無輸出 → 分支已含最新 main，繼續。
+
 ---
 
 ### 步驟 3：選擇是否跑本地 CI
