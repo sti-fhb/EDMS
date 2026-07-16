@@ -1,4 +1,6 @@
-from sqlalchemy import select
+from datetime import datetime, timedelta
+
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
@@ -22,11 +24,21 @@ class NotifyRepository:
         db.add(DpEmailLog(**values))
         await db.flush()
 
-    async def list_pending(self, db: AsyncSession, limit: int) -> list[DpEmailLog]:
-        """取待寄（PENDING）信件，依建立時間序（用 (STATUS, CREATED_DATE) 索引）。"""
+    async def list_pending_for_attempt(
+        self, db: AsyncSession, *, limit: int, interval_minutes: int, now: datetime
+    ) -> list[DpEmailLog]:
+        """取可嘗試寄送的 PENDING 信件（用 (STATUS, CREATED_DATE) 索引，依建立序）。
+
+        重試間隔：從未嘗試（UPDATED_DATE 為 NULL）或距上次嘗試已逾 interval_minutes 者才撿起，
+        避免對剛失敗的信件過於頻繁重試。
+        """
+        cutoff = now - timedelta(minutes=interval_minutes)
         stmt = (
             select(DpEmailLog)
-            .where(DpEmailLog.status == "PENDING")
+            .where(
+                DpEmailLog.status == "PENDING",
+                or_(DpEmailLog.updated_date.is_(None), DpEmailLog.updated_date <= cutoff),
+            )
             .order_by(DpEmailLog.created_date, DpEmailLog.message_id)
             .limit(limit)
         )
