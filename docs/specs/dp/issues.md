@@ -19,7 +19,7 @@
 | # | 標題 | 對應 | 階段 | 涵蓋 Tasks | 主要前置 | GitHub # | 狀態 |
 |---|------|------|------|-----------|---------|----------|------|
 | 0 | 專案建置與平台基礎建設 | — | Setup + Foundational | T001 ~ T017（17 任務）| 無 | [#16](https://github.com/sti-fhb/EDMS/issues/16) | ✅ 已開立 |
-| 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | — | 待補 |
+| 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | — | 📝 body 已撰寫（待開立）|
 | 2 | 登入 / 登出與模組入口頁 | US1 / UCDP001 | P1-核心 | T021 ~ T025（5 任務）| #0 | — | 待補 |
 | 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | — | 待補 |
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | — | 待補 |
@@ -108,9 +108,70 @@
 
 ---
 
-## Issue #1 ~ #12：待補（增量模式）
+## Issue #1：[P1-核心] DP — 通知發送服務（發信引擎 + outbox）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us6.md](spec_us6.md)（US6 / UCDP009，FR-DP-US6-01~06）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002）；[contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)；[research.md](research.md) §8；[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE` / `DP_EMAIL_LOG`）
+**階段**：P1-核心（`SRVDP002` 為 US3 密碼重設信、US8 帳號變更驗證信、SCHDP001 密碼到期提醒及各模組業務通知之前置；plan.md 開發順序 Foundation → **US6** → US1–US3）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_NOTIFY_TEMPLATE` / `DP_EMAIL_LOG` 表與 `MAIL` 平台參數種子、`SRVDP001` 參數服務、`app/services/__init__.py` 出口皆就緒
+- 外部 SMTP 主機資訊可設定於 `backend/.env`
+
+### 任務說明
+
+實作全 EDMS 唯一發信服務 **SRVDP002 `send_email`** 與其非同步寄送管線：服務僅「渲染範本 + 逐收件人寫入 outbox（`DP_EMAIL_LOG` PENDING）」即返回，不阻塞呼叫方交易；實際寄送由 **FastAPI lifespan 常駐 asyncio worker**（非排程 job）依平台級 `MAIL` 參數輪詢 outbox、經外部 SMTP 寄送並更新 SENT / FAILED。完成後 ET / DM 及 DP 自身（US3 / US8 / SCHDP001）一律經此服務寄信，模組不自持範本、不自建佇列、不直連 SMTP。
+
+> ℹ️ 本 US 為**背景服務、無使用者介面**（範本維護 UI 屬 US9 / Issue #9）；垂直切割在此為「服務 + outbox + worker + SMTP 介接」，無前端。
+
+### 範圍
+
+**後端**：
+- **T018 [US6] SRVDP002 `send_email`**（`app/dp/notify/`，經 `app/services/__init__.py` 出口暴露）：依 `module` + `template_code` 查 `DP_NOTIFY_TEMPLATE` 啟用中範本（不存在 → raise `AppError`；停用 → 回 `skipped_reason="TEMPLATE_DISABLED"` 不寄不報錯）、以 `params` 渲染主旨 / 內文、**逐收件人**寫 `DP_EMAIL_LOG`（PENDING、渲染快照 SUBJECT/BODY、`CALLER_MODULE`）即返回；對應 FR-01~04
+- **T019 [US6] 常駐寄送 worker**（FastAPI lifespan 啟動之 asyncio task，**不入 `DP_SCHEDULE`**）：輪詢 PENDING，依平台級 `MAIL` 參數（`RATE_PER_MIN` / `RETRY_MAX` / `RETRY_INTERVAL_MIN`）限速 / 重試 / 間隔，經 SMTP 寄送更新 SENT / FAILED（單筆失敗不影響同批；變數缺漏該列標 FAILED 留錯誤訊息）；不內建告警（失敗率 / 積壓由 IT 監控）；對應 FR-02 / 05 / 06、research §8
+- **T020 [US6] SMTP 介接**：`.env.example` 補 SMTP 連線設定、以渲染快照寄送；SMTP 不可用時信件停留 outbox、恢復後續寄不遺失；參照 [contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)
+
+**前端**：無（純服務、無畫面）。
+
+**測試**：
+- 單元：範本渲染（變數代入 / 缺漏）、範本不存在 raise / 停用 skipped、渲染快照正確
+- 整合（真實 DB）：`send_email` 逐收件人寫 PENDING 即返回（呼叫方交易未被阻塞）；worker 將 PENDING → SENT（SMTP 以測試替身 / mock 攔截）、失敗重試至上限標 FAILED；單筆失敗不影響同批；大量收件人全進 outbox
+
+### 驗收條件
+
+- [ ] `send_email(recipients, template_code, module, params, caller_module)` 對存在且啟用之範本，逐收件人寫 `DP_EMAIL_LOG`（PENDING、渲染快照、`CALLER_MODULE`）後**立即返回**，不同步寄送、不阻塞呼叫方交易
+- [ ] `template_code` 不存在 → raise `AppError`（error_code 依 `sti-error-codes`）；範本停用 → 回 `skipped_reason="TEMPLATE_DISABLED"`、不寄、呼叫方流程照常
+- [ ] 常駐 worker（lifespan asyncio task，**不在 `DP_SCHEDULE`**）輪詢 PENDING，依 `MAIL` 參數限速 / 重試 / 間隔寄送，成功更新 SENT（記寄出時間）
+- [ ] SMTP 失敗未達 `RETRY_MAX` 依 `RETRY_INTERVAL_MIN` 延遲重試（累計次數）；逾上限標 FAILED 並保留錯誤訊息
+- [ ] 單筆收件人 / 變數缺漏失敗，同批其他收件人不受影響（該列 FAILED、其餘照寄）
+- [ ] SMTP 長時間不可用時 PENDING 信件停留 outbox，SMTP 恢復後續寄、不遺失
+- [ ] `uv run pytest -q` 全綠；ruff / ESLint 通過（CI 合規門檻）
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：`DP_NOTIFY_TEMPLATE` / `DP_EMAIL_LOG` 表、`MAIL` 參數種子、`SRVDP001`、`AppError`、`app/services` 出口
+- 外部 SMTP 郵件伺服器（跨系統介接，[contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)）
+
+### 注意事項
+
+- ✅ **環境變數命名已收斂**（2026-07-16）：統一為 fastapi-mail 慣例 `MAIL_SERVER` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM` / `MAIL_STARTTLS`——`config.py` 之 `MAIL_HOST` 已更名 `MAIL_SERVER`，ext 契約 / tasks T020 之 `SMTP_*` 已同步改為 `MAIL_*`。`MAIL_SSL_TLS`（SSL 埠 465）/ `MAIL_SUPPRESS_SEND`（測試抑制送信）等 fastapi-mail 額外鍵，待 T020 實作接 fastapi-mail 時依需要再補。
+- worker 為**常駐 asyncio task 非排程 job**（research §8）：秒級輪詢與 cron 語意不合，MUST NOT 登錄 `DP_SCHEDULE`；亦不引入 Celery / MQ（過度設計）。
+- `DP_EMAIL_LOG` 允許狀態欄更新（含 `UPDATED_*`）、**不刪除**（outbox 歷程保留，data-model §標準欄位）；渲染以快照存 outbox，事後改範本不影響已排隊信件。
+- 呼叫方 MUST 於自身交易 **commit 後**呼叫 `send_email`（避免業務回滾但信已排隊，contracts SRVDP002 規則）。
+- 渲染變數來源為呼叫方 `params`，範本變數以定義為準；避免將未跳脫的使用者輸入直接注入 HTML 主旨 / 內文（安全，交由 Security Review 於實作把關）。
+- SMTP 帳密走 `config` / `.env`，禁硬編碼；`PWD_HASH` / SMTP 密碼 / 收件人完整個資之寫 log 規範依 `sti-backend-logging`。
+
+### 相關文件
+
+- [spec_us6.md](spec_us6.md)、[spec.md](spec.md) §通知範本與發信引擎、[plan.md](plan.md)、[research.md](research.md) §8、[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE` / `DP_EMAIL_LOG`）、[tasks.md](tasks.md) Phase 3（T018~T020）
+- [contracts/platform-services.md](contracts/platform-services.md)（SRVDP002）、[contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)
+- 需求：[RQDP.md](../../requirements/RQDP.md) §通知範本與發信引擎；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP009
+
+**Labels**：`P1-核心`, `DP-平台`, `US6`
+
+---
+
+## Issue #2 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -120,3 +181,5 @@
 |------|------|
 | 2026-07-09 | 首版：總覽表（#0–#12）+ Issue #0（Foundation）完整撰寫；採增量模式，#1 起待 #0 驗證後補入 |
 | 2026-07-09 | 補 Issue 開立規則（標題 `[{階段}] {模組代碼} — {功能名稱}`、Labels 階段+`DP-平台`+US、依序開立標依賴編號）；總覽表加 GitHub # 欄；Issue #0 已開立為 GitHub #16 並依規則更名、換 labels（`priority:P0` + `DP-平台`）|
+| 2026-07-16 | #0（#16）實作驗證完成並合併後，依增量模式補入 Issue #1（通知發送服務 / US6）完整 body |
+| 2026-07-16 | 收斂郵件環境變數命名為 fastapi-mail 慣例：`config.py` `MAIL_HOST`→`MAIL_SERVER`、`.env.example` 同步、ext 契約 / tasks T020 之 `SMTP_*`→`MAIL_*`（`MAIL_SSL_TLS` / `MAIL_SUPPRESS_SEND` 待 T020 依需要補）|
