@@ -42,6 +42,7 @@
 | COMMON_004 | 422 | limit 不得超過 100 |
 | COMMON_005 | 400 | 不允許更新的欄位 |
 | COMMON_422 | 422 | 請求格式驗證失敗 |
+| COMMON_429 | 429 | 操作過於頻繁，請稍後再試 |
 | COMMON_500 | 500 | Internal Server Error |
 
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
