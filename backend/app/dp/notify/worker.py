@@ -59,7 +59,8 @@ class EmailWorker:
         Args:
             db: AsyncSession。
             mailer: 寄送器（注入）。
-            max_retry: 重試上限（DP_PARAM MAIL.RETRY_MAX）。
+            max_retry: 總嘗試次數上限（DP_PARAM MAIL.RETRY_MAX，**含首次嘗試**）；
+                首次失敗即 retry_count=1，達 max_retry 標 FAILED（如 max_retry=1＝首次失敗即 FAILED）。
             interval_minutes: 重試間隔分鐘（DP_PARAM MAIL.RETRY_INTERVAL_MIN）。
             now: 目前時間（預設 utcnow()，測試可注入）。
             limit: 單輪批量上限（近似 RATE_PER_MIN 限速；正式迴圈間隔搭配控制速率）。

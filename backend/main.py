@@ -31,10 +31,15 @@ async def lifespan(app: "FastAPI"):
     try:
         yield
     finally:
+        # 先請 worker 優雅收斂（跑完當前 cycle 並 commit），逾時才強制取消——
+        # 避免在「已透過 SMTP 寄出、尚未 commit」的空窗被 cancel 導致 rollback 後重送。
         stop_event.set()
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        try:
+            await asyncio.wait_for(task, timeout=30)
+        except TimeoutError:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 class VersionResponse(BaseModel):

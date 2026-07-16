@@ -64,6 +64,27 @@ class Settings(BaseSettings):
             raise ValueError(f"JWT_SECRET_KEY too short for {self.JWT_ALGORITHM}: requires >= {min_bytes} bytes")
         return self
 
+    @model_validator(mode="after")
+    def _validate_mail_tls(self) -> "Settings":
+        """MAIL 傳輸層 TLS 設定檢查：
+
+        1. STARTTLS 與 SSL_TLS 互斥（STARTTLS 為明文升級、SSL_TLS 為 implicit TLS）。
+        2. production（非 DEBUG、非 SUPPRESS_SEND）且已設定 MAIL_SERVER 時，至少一種 TLS 需啟用，
+           禁止明文 SMTP 傳輸（帳密與信件內容明文上線）。
+        """
+        if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
+            raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
+        if (
+            self.MAIL_SERVER
+            and not self.DEBUG
+            and not self.MAIL_SUPPRESS_SEND
+            and not (self.MAIL_STARTTLS or self.MAIL_SSL_TLS)
+        ):
+            raise ValueError(
+                "production 已設定 MAIL_SERVER 時，MAIL_STARTTLS 或 MAIL_SSL_TLS 至少一為 true（禁明文 SMTP）"
+            )
+        return self
+
     @property
     def cors_origins_list(self) -> list[str]:
         """將逗號分隔的 CORS_ORIGINS 字串解析為 list，自動去除前後空白。

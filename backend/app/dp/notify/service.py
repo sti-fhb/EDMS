@@ -5,6 +5,8 @@
 實際寄送由常駐 worker（見 worker.py）非同步執行。模組不自持範本、不自建佇列、不直連 SMTP。
 """
 
+import string
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -15,10 +17,42 @@ from app.dp.notify.schemas import SendResult
 # 系統作業建立者（DP_EMAIL_LOG 標準欄位 CREATED_USER）；實際觸發模組記於 CALLER_MODULE。
 _SYSTEM_USER = "SYSTEM"
 
+# 收件人單次上限（防呼叫方 bug / 濫用一次寫入海量 outbox 拖垮 worker，對齊 TBMS 慣例）
+_MAX_RECIPIENTS = 50
+
+
+class _SafeFormatter(string.Formatter):
+    """安全範本格式器：僅允許具名佔位 `{var}`，封鎖範本注入攻擊面。
+
+    範本（SUBJECT/BODY）由 US9 後台可編輯，等同不受信任的 format string；原生 str.format
+    允許屬性 / 索引存取（`{x.__class__.__globals__...}` 可讀 JWT_SECRET_KEY）與格式規格
+    （`{v:>200000000}` 可 OOM 常駐 worker）。本格式器：
+    - 佔位僅接受合法識別字（拒 `{0}` / `{}` / `{a.b}` / `{a[0]}`）
+    - 禁格式規格（拒 `{v:...}`）
+    - 值一律 str() 後代入（即便呼叫方誤傳非 str 物件，亦無屬性存取路徑）
+    """
+
+    def get_field(self, field_name: str, args, kwargs):
+        if not field_name.isidentifier():
+            raise ValueError(f"範本佔位僅允許具名變數，禁屬性 / 索引 / 位置: {{{field_name}}}")
+        return kwargs[field_name], field_name
+
+    def format_field(self, value, format_spec: str) -> str:
+        if format_spec:
+            raise ValueError("範本佔位不得含格式規格")
+        return str(value)
+
+
+_formatter = _SafeFormatter()
+
 
 def _render(text: str, params: dict[str, str]) -> str:
-    """以 params 代入範本佔位（`{var}`）；範本需要而 params 未提供的變數 → 拋 KeyError。"""
-    return text.format(**params)
+    """以 params 代入範本具名佔位（`{var}`）。
+
+    範本需要而 params 未提供 → KeyError；範本含屬性 / 索引 / 格式規格 / 未閉合大括號 → ValueError。
+    兩者由呼叫端捕捉標該批 FAILED（不外拋阻斷呼叫方）。
+    """
+    return _formatter.vformat(text, (), params)
 
 
 def _channel_allows_email(channel: str) -> bool:
@@ -60,6 +94,8 @@ class NotifyService:
         Raises:
             AppError: template_code 不存在（404 / DP_MAIL_001）。
         """
+        if len(recipients) > _MAX_RECIPIENTS:
+            raise AppError(status_code=422, detail="收件人數超過單次上限", error_code="DP_MAIL_002")
         template = await self._repo.get_template(db, module, template_code)
         if template is None:
             raise AppError(status_code=404, detail="通知範本不存在", error_code="DP_MAIL_001")
@@ -68,12 +104,14 @@ class NotifyService:
         if not _channel_allows_email(template.channel):
             return SendResult(queued_count=0, skipped_reason="CHANNEL_NOT_EMAIL")
 
-        # 渲染一次（同批 params 相同）；缺變數 → 整批寫 FAILED 記錄、不拋錯不阻斷呼叫方（FR-06）
+        # 渲染一次（同批 params 相同）；渲染失敗 → 整批寫 FAILED 記錄、不拋錯不阻斷呼叫方（FR-06）。
+        # KeyError：範本需要的變數缺漏；ValueError/IndexError：範本含未跳脫大括號（如 HTML inline CSS）
+        # 或位置佔位——一律視為渲染失敗，不得外拋讓呼叫方交易 500。
         try:
             subject = _render(template.subject, params)
             body = _render(template.body, params)
-        except KeyError as exc:
-            error_msg = f"範本變數缺漏: {exc.args[0]}"[:500]
+        except (KeyError, ValueError, IndexError) as exc:
+            error_msg = f"範本渲染失敗: {exc}"[:500]
             await self._write_logs(db, recipients, module, template_code, caller_module, "", "", "FAILED", error_msg)
             return SendResult(queued_count=0, skipped_reason=None)
 

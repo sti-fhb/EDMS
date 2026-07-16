@@ -23,8 +23,8 @@ dependencies = [
 #   pyjwt（簡單 JWT）、passlib[bcrypt]（密碼雜湊；bcrypt 釘 <5 因 passlib 1.7.4 與
 #   bcrypt 5.0 不相容）、fastapi-mail（發信引擎）、apscheduler（排程引擎）。
 #   cryptography 為 bcrypt/fastapi-mail 之傳遞依賴，不列直接依賴（EDMS Email 不加密）。
-#   aiosmtplib（#16 T020 US6 發信 worker 實際寄送用；借 fastapi-mail 之 MessageSchema 組裝、
-#   自行以 aiosmtplib 送信，避開 FastMail.send_message 之重複 Message-ID）。
+#   aiosmtplib（#16 T020 US6 發信 worker 實際寄送用；自建 stdlib email.message.EmailMessage
+#   以 aiosmtplib 送信，不用 fastapi-mail 的 FastMail.send_message，避開其重複 Message-ID）。
 
 [dependency-groups]
 dev = [

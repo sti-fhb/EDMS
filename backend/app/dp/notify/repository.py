@@ -41,6 +41,9 @@ class NotifyRepository:
             )
             .order_by(DpEmailLog.created_date, DpEmailLog.message_id)
             .limit(limit)
+            # FOR UPDATE SKIP LOCKED：鎖住撿起的列直到本輪 commit，多實例 worker 併發時
+            # 各自跳過對方鎖定的列，避免同一封信被重複寄送（canonical outbox 消費模式）。
+            .with_for_update(skip_locked=True)
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())

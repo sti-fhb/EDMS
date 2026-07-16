@@ -122,3 +122,36 @@ async def test_missing_var_writes_failed(db):
     assert len(logs) == 1
     assert logs[0].status == "FAILED"
     assert logs[0].error_msg is not None
+
+
+async def test_exceeds_recipient_limit_raises(db):
+    """收件人超過單次上限 → AppError DP_MAIL_002（不寫 outbox）。"""
+    await _make_template(db, code="T_MANY")
+    with pytest.raises(AppError) as exc:
+        await NotifyService().send_email(
+            db,
+            recipients=[f"u{i}@x.com" for i in range(51)],
+            template_code="T_MANY",
+            module="DP",
+            params={"name": "x", "code": "1"},
+            caller_module="DP",
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DP_MAIL_002"
+    assert await _fetch_logs(db) == []
+
+
+async def test_unbalanced_brace_writes_failed(db):
+    """範本含未閉合大括號 → 渲染 ValueError 被捕捉、該批寫 FAILED，不拋錯不阻斷呼叫方。"""
+    await _make_template(db, code="T_CSS", subject="嗨", body="<p>{name</p>")
+    result = await NotifyService().send_email(
+        db,
+        recipients=["a@x.com"],
+        template_code="T_CSS",
+        module="DP",
+        params={"name": "小明"},
+        caller_module="DP",
+    )
+    assert result.queued_count == 0
+    logs = await _fetch_logs(db)
+    assert len(logs) == 1 and logs[0].status == "FAILED" and logs[0].error_msg is not None
