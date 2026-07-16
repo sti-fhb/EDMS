@@ -44,7 +44,7 @@
 
 - [ ] T018 [US6] 實作 **SRVDP002** `send_email` dp/mail：範本查詢（MODULE + TEMPLATE_CODE；不存在 raise AppError、停用回 skipped）、變數渲染、**逐收件人**寫 `DP_EMAIL_LOG`（PENDING、渲染快照、CALLER_MODULE）即返回，對應 FR-01~04
 - [ ] T019 [US6] 實作常駐寄送 worker（FastAPI lifespan asyncio task，**不入排程表**）：輪詢 PENDING、依 `MAIL` 參數限速 / 重試 / 間隔、SMTP 寄送更新 SENT / FAILED（單筆失敗不影響同批）；變數缺漏該列 FAILED，對應 FR-02/05/06、research §8
-- [ ] T020 [US6] SMTP 介接設定：`.env.example` 補 `SMTP_HOST / PORT / USER / PASSWORD / MAIL_FROM`；SMTP 不可用時信件停留 outbox 恢復續寄，參照 [contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)
+- [ ] T020 [US6] SMTP 介接設定：`.env.example` 之 `MAIL_SERVER / MAIL_PORT / MAIL_USERNAME / MAIL_PASSWORD / MAIL_FROM`（對齊 fastapi-mail 慣例，Foundation 已宣告）；SMTP 不可用時信件停留 outbox 恢復續寄，參照 [contracts/ext-dp-email-server.md](contracts/ext-dp-email-server.md)
 
 ---
 

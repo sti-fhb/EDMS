@@ -8,7 +8,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 協定 | SMTP（TLS；主機 / 埠 / 帳密 / 寄件者於 `backend/.env` 設定：`SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM`）|
+| 協定 | SMTP（TLS；主機 / 埠 / 帳密 / 寄件者於 `backend/.env` 設定：`MAIL_SERVER` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM`；對齊 fastapi-mail 慣例）|
 | 方向 | DP worker → eMail Server（單向送信；不收信、無退信解析）|
 | 內容 | `DP_EMAIL_LOG` 之渲染快照（SUBJECT / BODY，HTML）；收件人一列一信 |
 | 速率 / 重試 | 依平台級 `MAIL` 參數（`RATE_PER_MIN` / `RETRY_MAX` / `RETRY_INTERVAL_MIN`）|

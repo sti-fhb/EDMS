@@ -15,7 +15,7 @@ def test_new_settings_defaults() -> None:
         JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
     )
     assert s.JWT_ALGORITHM == "HS256"
-    assert s.MAIL_HOST == ""
+    assert s.MAIL_SERVER == ""
     assert s.MAIL_PORT == 587
     assert s.MAIL_FROM == "noreply@edms.local"
     assert s.MAIL_STARTTLS is True

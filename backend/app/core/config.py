@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # 寄信（SMTP）— 由平台發信引擎（#16 T018 起）使用；
     # 未設定時不影響應用啟動，實際寄送於發信 task 接上。
-    MAIL_HOST: str = ""
+    MAIL_SERVER: str = ""
     MAIL_PORT: int = Field(default=587, ge=1, le=65535)
     MAIL_USERNAME: str = ""
     MAIL_PASSWORD: str = ""
