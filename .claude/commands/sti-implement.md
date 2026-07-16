@@ -423,6 +423,8 @@ git rev-parse HEAD
 3. 重構（IMPROVE） → 確認測試仍通過
 ```
 
+**測試分層閘門（寫測試前逐條過）**：每條候選測試（含 issue / 規劃列出的）先問「拿掉真 DB 還驗得了嗎？」——驗得了 → 寫 unit，不寫 integration。逐條依 `.claude/rules/sti-testing.md`「integration vs unit 取捨」的禁則清單過濾後，再決定放 unit 或 integration。
+
 **後端測試執行**（提示使用者執行）：
 - Worktree 模式：`cd ../worktrees/{slug}/backend && uv run pytest {測試檔案} -v`
 - Branch 模式：`cd backend && uv run pytest {測試檔案} -v`

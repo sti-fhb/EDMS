@@ -29,6 +29,24 @@ paths:
 2. **Integration Tests** — API Endpoint + 真實 DB，放 `tests/integration/`，加 `pytestmark = pytest.mark.integration`
 3. **E2E Tests** — Playwright，關鍵業務流程（規劃中）
 
+### integration vs unit 取捨
+
+新增整合測試前先自問：**拿掉真 DB，這條還驗得了嗎？** 驗得了 → 寫成 unit，不寫 integration。
+
+整合測試只驗「接線」，每個端點僅保留：
+- happy path：寫入後讀回，驗證確實持久化
+- 一條代表性的 DB 相關業務規則（重複 → 409、軟刪除後查不到、流水號遞增等）
+- auth 邊界抽樣驗一次（同模組不必每端點都重測 401）
+
+以下一律寫 unit，禁止寫成 integration：
+- 輸入驗證（422：缺必填、空 body、多餘欄位、`limit` 超上限）
+- Pydantic schema 形狀、欄位互斥
+- 純函式業務規則、error code 對應
+- 重複的 401（同一 auth dependency 已被其他 test 覆蓋）
+
+以下一律**不寫任何測試**（unit / integration 皆不寫）：
+- migration / seed 的 schema 驗收（表存在、欄位型別、欄位數、PK / FK、`DELETED` 有無、某 seed 已存在、某型別已轉成 timestamptz）；schema 與 seed 變更由對應模組的 service / API integration test 間接覆蓋，詳見 `sti-alembic-rules.md`
+
 ### 測試目錄結構
 
 - 新模組測試檔案必須放置於 `backend/tests/{integration|unit}/{module}/` 子目錄，不得平鋪於 `integration/`、`unit/` 上層。
