@@ -43,6 +43,7 @@ async def send_email(
 規則：
 - **非同步**：渲染 + 寫入 `DP_EMAIL_LOG`（PENDING）即返回；實際寄送由常駐 worker 依平台級 `MAIL` 參數執行（見 research §8）
 - 範本停用（IS_ENABLED=false）→ 回 `skipped_reason="TEMPLATE_DISABLED"`、不寄、不視為錯誤（呼叫方業務照常）
+- 範本 `CHANNEL` 不含 Email（`MSG`，僅站內訊息）→ 回 `skipped_reason="CHANNEL_NOT_EMAIL"`、不寄、不視為錯誤（`EMAIL` / `BOTH` 才寄）
 - `template_code` 不存在 → raise `AppError`（錯誤碼依 `sti-error-codes` 於實作定義）；變數缺漏 → 該收件人列標 FAILED、不中斷其他收件人
 - 渲染內容以快照存 outbox；事後改範本不影響已排隊信件
 - 呼叫方 MUST 於自身交易 commit 後呼叫（避免業務回滾但信已排隊）
