@@ -19,7 +19,7 @@
 | # | 標題 | 對應 | 階段 | 涵蓋 Tasks | 主要前置 | GitHub # | 狀態 |
 |---|------|------|------|-----------|---------|----------|------|
 | 0 | 專案建置與平台基礎建設 | — | Setup + Foundational | T001 ~ T017（17 任務）| 無 | [#16](https://github.com/sti-fhb/EDMS/issues/16) | ✅ 已開立 |
-| 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | — | 📝 body 已撰寫（待開立）|
+| 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | [#27](https://github.com/sti-fhb/EDMS/issues/27) | ✅ 已開立 |
 | 2 | 登入 / 登出與模組入口頁 | US1 / UCDP001 | P1-核心 | T021 ~ T025（5 任務）| #0 | — | 待補 |
 | 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | — | 待補 |
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | — | 待補 |
@@ -184,3 +184,4 @@
 | 2026-07-16 | #0（#16）實作驗證完成並合併後，依增量模式補入 Issue #1（通知發送服務 / US6）完整 body |
 | 2026-07-16 | 收斂郵件環境變數命名為 fastapi-mail 慣例：`config.py` `MAIL_HOST`→`MAIL_SERVER`、`.env.example` 同步、ext 契約 / tasks T020 之 `SMTP_*`→`MAIL_*`（`MAIL_SSL_TLS` / `MAIL_SUPPRESS_SEND` 待 T020 依需要補）|
 | 2026-07-16 | US6 交付前自檢（`/sti-sa-precheck dp us6`）補唯一缺口：spec_us6 FR-03 + AC4、contracts SRVDP002、本 Issue #1 驗收條件補明 `CHANNEL` 不含 Email（`MSG`）時不寄（`skipped_reason="CHANNEL_NOT_EMAIL"`）|
+| 2026-07-16 | Issue #1（US6 發信服務）已開立為 GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，回填總覽表 GitHub # 欄與狀態 |
