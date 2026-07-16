@@ -131,14 +131,14 @@ jobs:
       - name: 執行 Alembic migration
         env:
           DATABASE_URL: postgresql+asyncpg://edms:edms@localhost:5432/test_edms
-          JWT_SECRET_KEY: ci-test-secret-key
+          JWT_SECRET_KEY: ci-test-secret-key-at-least-32-bytes-long
         run: uv run alembic upgrade head
 
       # -n auto：pytest-xdist 依核心數並行跑（integration 為 I/O-bound）
       - name: 執行所有測試（含覆蓋率）
         env:
           DATABASE_URL: postgresql+asyncpg://edms:edms@localhost:5432/test_edms
-          JWT_SECRET_KEY: ci-test-secret-key
+          JWT_SECRET_KEY: ci-test-secret-key-at-least-32-bytes-long
         run: uv run pytest -v -n auto --cov --cov-report=xml --cov-report=term-missing
 
       # 只檢查本次 PR 新增/修改的行是否達 80% 覆蓋率；整體覆蓋率不設門檻

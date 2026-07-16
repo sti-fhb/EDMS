@@ -1,5 +1,6 @@
 {
   "private": true,
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "ci:local": "bash scripts/local-ci.sh all",
     "ci:quick": "bash scripts/local-ci.sh quick",

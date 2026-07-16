@@ -42,6 +42,7 @@
 | COMMON_004 | 422 | limit 不得超過 100 |
 | COMMON_005 | 400 | 不允許更新的欄位 |
 | COMMON_422 | 422 | 請求格式驗證失敗 |
+| COMMON_429 | 429 | 操作過於頻繁，請稍後再試 |
 | COMMON_500 | 500 | Internal Server Error |
 
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
@@ -54,7 +55,16 @@
 
 | error_code | HTTP | error_message |
 |------------|------|---------------|
-| _(待各 DP task 增補)_ | | |
+| DP_AUTH_001 | 401 | 帳號或密碼錯誤 |
+| DP_AUTH_002 | 401 | 登入憑證無效或已逾時，請重新登入 |
+| DP_AUTH_003 | 401 | 已達單次登入時數上限，請重新登入 |
+| DP_AUTH_004 | 403 | 帳號已停用 |
+| DP_AUTH_005 | 403 | 帳號已鎖定 |
+| DP_AUTH_006 | 403 | 需要模組管理者權限 |
+| DP_PWD_001 | 422 | 密碼長度不足 |
+| DP_PWD_002 | 422 | 密碼複雜度不足 |
+| DP_PWD_003 | 422 | 不可使用近期用過的密碼 |
+| DP_PWD_004 | 422 | 密碼長度超過上限 |
 
 ---
 

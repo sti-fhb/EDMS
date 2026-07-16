@@ -1,7 +1,10 @@
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# HMAC 密鑰最小長度（bytes）對齊 RFC 7518 §3.2 各演算法輸出長度，防過短/未替換密鑰。
+_MIN_JWT_KEY_BYTES = {"HS256": 32, "HS384": 48, "HS512": 64}
 
 
 class Settings(BaseSettings):
@@ -25,6 +28,37 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
     DB_POOL_RECYCLE: int = Field(default=1800, ge=60)
+
+    # 認證（簡單 JWT）
+    # 各環境獨立產生、不進 git；缺少時 fail-fast（見 _build_settings）。
+    # access token TTL / 閒置逾時 / 換發上限等存 DP_PARAM（`JWT` 參數，見
+    # docs/specs/dp/data-model.md），非環境變數。
+    JWT_SECRET_KEY: str
+    # 限對稱演算法（EDMS 採簡單對稱 JWT，見 research §2）；收斂為 Literal 使誤設
+    # 非對稱 / none 於啟動即被 Pydantic 擋下，杜絕 algorithm confusion 隱患。
+    JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = "HS256"
+
+    # 寄信（SMTP）— 由平台發信引擎（#16 T018 起）使用；
+    # 未設定時不影響應用啟動，實際寄送於發信 task 接上。
+    MAIL_HOST: str = ""
+    MAIL_PORT: int = Field(default=587, ge=1, le=65535)
+    MAIL_USERNAME: str = ""
+    MAIL_PASSWORD: str = ""
+    MAIL_FROM: str = "noreply@edms.local"
+    MAIL_STARTTLS: bool = True
+
+    @model_validator(mode="after")
+    def _validate_jwt_secret_strength(self) -> "Settings":
+        """依所選演算法強制 HMAC 密鑰最小長度，啟動即擋弱 / 未替換的預設密鑰。
+
+        缺值已由必填 fail-fast 擋下；本驗證補「弱密鑰被靜默接受」缺口
+        （PyJWT 對過短密鑰僅發 warning、仍照常簽發）。訊息僅含欄位名與門檻，
+        不 echo 密鑰值（沿用本檔不洩漏機密原則；_build_settings 會歸為 invalid）。
+        """
+        min_bytes = _MIN_JWT_KEY_BYTES[self.JWT_ALGORITHM]
+        if len(self.JWT_SECRET_KEY.encode("utf-8")) < min_bytes:
+            raise ValueError(f"JWT_SECRET_KEY too short for {self.JWT_ALGORITHM}: requires >= {min_bytes} bytes")
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -55,7 +89,13 @@ def _build_settings(**kwargs: Any) -> Settings:
         return Settings(**kwargs)
     except ValidationError as exc:
         missing = [".".join(str(part) for part in err["loc"]) for err in exc.errors() if err["type"] == "missing"]
-        invalid = [".".join(str(part) for part in err["loc"]) for err in exc.errors() if err["type"] != "missing"]
+        # model 級 validator（如 JWT 密鑰長度）之 loc 為空，退回用 err["msg"]（我方 validator
+        # 訊息僅含欄位名與門檻、不含值），確保運維看得到是哪個設定出錯；仍不讀 err["input"]（含機密）。
+        invalid = [
+            (".".join(str(part) for part in err["loc"]) or err["msg"])
+            for err in exc.errors()
+            if err["type"] != "missing"
+        ]
         details: list[str] = []
         if missing:
             details.append(f"missing required environment variables: {', '.join(missing)}")
