@@ -51,16 +51,16 @@ async def some_resource(
 ---
 
 ### `get_jwt_payload` · `app/core/auth.py`
-所有需要認證的 endpoint 一律使用。驗證 Access Token（15min JWT），不查 DB。`payload.sub` 與 `payload.site_id` 均為 `str`，不需型別轉換。
+所有需要認證的 endpoint 一律使用。驗證 Access Token（短 TTL JWT）後，**每請求查 `DP_USER` 狀態**（research §3：停用 / 鎖定下次請求即拒，不快取）：查無 / 已刪 → 401（`DP_AUTH_002`）；`STATUS` 停用 → 403（`DP_AUTH_004`）；`LOCKED_UNTIL` 未逾時 → 403（`DP_AUTH_005`）。
+
+`JwtPayload` 僅含 `sub`（USER_ID，`str`）、`auth_time`、`iat`、`exp`——**不含角色 / site**（EDMS 單一組織、無全域 RBAC；角色即時由模組 `is_module_admin` 判定，見 research §4）。
 
 ```python
 from app.core.auth import JwtPayload, get_jwt_payload
 
 @router.get("/items")
 async def get_items(payload: JwtPayload = Depends(get_jwt_payload), db: AsyncSession = Depends(get_db)):
-    user_id = payload.sub       # str
-    site_id = payload.site_id   # str
-    roles   = payload.roles     # list[str]
+    user_id = payload.sub       # str（USER_ID）
 ```
 禁止將 payload 標註為 `dict`，禁止自行解析 Authorization header。
 

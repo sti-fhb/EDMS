@@ -12,10 +12,18 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
+
+# 認證閘天生綁定平台身分表 DP_USER；此為 core 對平台身分表之唯讀查詢（非跨業務模組耦合）。
+from app.dp.users.models import DpUser
 
 
 @dataclass(frozen=True)
@@ -98,3 +106,39 @@ def renew_access_token(token: str, *, ttl_minutes: int, renew_max_hours: int) ->
     if utcnow() - payload.auth_time >= timedelta(hours=renew_max_hours):
         raise AppError(status_code=401, detail="已達單次登入時數上限，請重新登入", error_code="DP_AUTH_003")
     return create_access_token(sub=payload.sub, ttl_minutes=ttl_minutes, auth_time=payload.auth_time)
+
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def get_jwt_payload(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> JwtPayload:
+    """所有需認證端點的統一認證閘。
+
+    驗 Bearer token 後，**每請求**查 DP_USER 狀態（research §3：停用 / 鎖定下次請求即拒，
+    不做行程內快取）。缺 token / 簽章過期竄改 / 查無 / 已刪 → 401（DP_AUTH_002，不洩帳號
+    存在性）；停用 → 403（DP_AUTH_004）；鎖定中 → 403（DP_AUTH_005，LOCKED_UNTIL 逾時視為自動解鎖）。
+
+    Returns:
+        通過驗證的 JwtPayload。
+
+    Raises:
+        AppError: 認證失敗（401）或帳號狀態不允許（403）。
+    """
+    if credentials is None:
+        raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
+
+    payload = decode_access_token(credentials.credentials)
+
+    result = await db.execute(select(DpUser).where(DpUser.user_id == payload.sub, DpUser.deleted == 0))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
+    if user.status != "ACTIVE":
+        raise AppError(status_code=403, detail="帳號已停用", error_code="DP_AUTH_004")
+    if user.locked_until is not None and user.locked_until > utcnow():
+        raise AppError(status_code=403, detail="帳號已鎖定", error_code="DP_AUTH_005")
+
+    return payload
