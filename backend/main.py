@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import tomllib
 import traceback
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,8 +17,24 @@ from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip, set_client_ip
+from app.dp.notify.mailer import SmtpMailer
+from app.dp.notify.worker import run_forever
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: "FastAPI"):
+    """啟停常駐發信 worker（SRVDP002 outbox 消費者，非排程 job）。"""
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 class VersionResponse(BaseModel):
@@ -46,6 +64,7 @@ _APP_VERSION = _read_version()
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
+    lifespan=lifespan,
 )
 
 app.add_middleware(

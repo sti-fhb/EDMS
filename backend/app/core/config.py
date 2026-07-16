@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     MAIL_PASSWORD: str = ""
     MAIL_FROM: str = "noreply@edms.local"
     MAIL_STARTTLS: bool = True
+    # implicit TLS（如埠 465）；與 STARTTLS 互斥，兩者不可同時 true
+    MAIL_SSL_TLS: bool = False
+    # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
+    MAIL_SUPPRESS_SEND: bool = False
 
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
