@@ -204,9 +204,4 @@ gh issue comment {N} -R sti-fhb/EDMS --body-file /tmp/issue{N}/sa_questions.md
 
 ## 不適用盤點的情境（直接跳過，改用 /sti-implement）
 
-- 純 bug fix，根因明確、改動 < 100 行
-- 純樣式調整（CSS / 文字）
-- 跟版 / 套件升級
-- 單純 refactor，不改外部行為
-
-判斷句：「這個 issue 開工前我需要對齊什麼東西嗎？」答「沒有」就跳過盤點。
+清單見 `/sti-common`「不適用『開工前盤點 / 交付前自檢』的情境」（與 `/sti-sa-precheck` 共用）。

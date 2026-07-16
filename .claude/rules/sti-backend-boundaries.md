@@ -33,3 +33,12 @@ class ModuleBService:
 # ❌ 禁止：直接 import 其他模組的 Repository
 from app.repositories.module_a_repository import SomeRepository
 ```
+
+## 例外：報表/查詢類功能（唯讀）
+
+報表與跨模組查詢功能得直接 JOIN 其他模組 table，條件：
+
+- 僅限 SELECT，禁止任何 INSERT / UPDATE / DELETE
+- 不得在 SQL 內重新實作他模組的業務規則（狀態判斷等一律以擁有者模組定義為準）
+- 該功能 spec 須列出所引用的外模組 table 清單
+- 寫入路徑與業務邏輯不適用本例外，仍一律走對方模組 Service；查詢結果若作為寫入或狀態判斷的依據，同樣視為業務邏輯
