@@ -48,6 +48,7 @@
 | Spec / UC / RQ 文件撰寫（禁建模工具字眼與 GUID） | `.claude/rules/sti-spec-style.md` |
 | Spec / Wireframe 目錄結構（對齊 BS 典範模式） | `.claude/rules/sti-spec-structure.md` |
 | Git 工作流程（commit 格式） | `.claude/rules/git-workflow.md` |
+| GitHub Issue Label 使用規範 | `.claude/rules/sti-label-rules.md` |
 
 ## 參考文件
 

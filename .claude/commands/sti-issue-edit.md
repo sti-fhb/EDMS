@@ -56,6 +56,8 @@ gh issue view {編號} --json number,title,labels,body
 
 依使用者選擇，逐一詢問新的值（每次一個，等待回答後再問下一個）。
 
+若選擇「Label（新增）」，先執行 `gh label list` 列出現有清單供使用者挑選，不得自創語意相近的新 label；確實需要新分類時先向使用者確認。
+
 ---
 
 ### 步驟 5：顯示預覽並確認

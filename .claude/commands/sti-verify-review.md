@@ -16,6 +16,7 @@
 | ⏳ **STALE** | 問題曾經存在，但已在後續 commit 中修正（Review 基於舊版） |
 | ❌ **HALLUCINATION** | 問題在所有版本的程式碼中都不存在（AI 幻覺） |
 | ⚪ **UNVERIFIABLE** | 主觀建議（DESIGN / STYLE 類），無法以程式碼比對判定對錯 |
+| 🔵 **INTEGRATION** | reviewer 標為「🔵 整合/Sync 後待辦」的項目，非 PR 缺陷、不驗證、不計入可信度 |
 
 ## 執行步驟
 
@@ -98,16 +99,23 @@ gh pr view {編號} --json headRefOid --jq '.headRefOid'
 - 標題以 `### 🟠 HIGH` 開頭（完整格式：`### 🟠 HIGH（強烈建議修正）`）
 - 標題以 `### 🟡 MEDIUM` 開頭（完整格式：`### 🟡 MEDIUM（建議改善）`）
 - 標題以 `### 🟢 LOW` 開頭（完整格式：`### 🟢 LOW（可選改善）`）
-- 每項發現含 `- **檔案**：`、`- **問題**：`、`- **建議修正**：`
+- 標題以 `### 🔵 整合/Sync 後待辦` 開頭（完整格式：`### 🔵 整合/Sync 後待辦（非 PR 現有缺陷）`）
+- 每項發現含 `- **檔案**：`、`- **問題**：`、`- **建議修正**：`（🔵 區塊另含 `- **來源**：`）
 
 解析規則：
 1. 依嚴重等級標題切分區塊
 2. 在每個區塊內，依 `**檔案**：` 欄位分割每項發現
 3. 提取：
-   - **severity**：從區塊標題取得（CRITICAL / HIGH / MEDIUM / LOW）
+   - **severity**：從區塊標題取得（CRITICAL / HIGH / MEDIUM / LOW / INTEGRATION）
    - **編號**：如 `C-1`、`HIGH-1`、`M-2`、`LOW-3`（若報告中有編號則沿用，否則自動產生）
    - **file_path**：從 `**檔案**：` 提取（格式 `file_path:line_number`）
    - **claim**：從 `**問題**：` 提取（review 對程式碼的斷言/描述）
+
+> **🔵 整合/Sync 後待辦（severity=INTEGRATION）特別處理**：此類項目是 reviewer 明確標示「非 PR 現有缺陷、根植於 main-merge」的整合提醒，**不代表 PR 缺陷**。
+> - **不**以 PR 真實 HEAD 當「PR 缺陷」驗證（跳過步驟 5 的 CONFIRMED / HALLUCINATION 判定）。
+> - **不計入**可信度計算的分母（比照 UNVERIFIABLE 排除）。
+> - 於報告「驗證結果」表另列一列，判定欄標 `🔵 整合待辦（未驗）`，證據欄註明來源檔案。
+> - 若 reviewer 把整合待辦誤放進 🔴/🟠/🟡/🟢 缺陷區塊（未歸類到 🔵），仍照該等級正常驗證——本規則只認 reviewer 主動標示的 🔵 分類。
 
 #### 4b. 非結構化格式（降級解析）
 
@@ -130,7 +138,7 @@ gh pr view {編號} --json headRefOid --jq '.headRefOid'
 
 ### 5. 逐項驗證
 
-**此步驟為核心**。對每項可驗證的發現（排除 `DESIGN` 類），從 PR 分支最新 HEAD 讀取實際程式碼進行比對。
+**此步驟為核心**。對每項可驗證的發現（排除 `DESIGN` 類與 🔵 INTEGRATION 類），從 PR 分支最新 HEAD 讀取實際程式碼進行比對。
 
 > **重要**：此步驟使用 `git show` 唯讀讀取程式碼，不需建 worktree。需要先 fetch PR 分支。
 >
@@ -246,6 +254,7 @@ git show {older_sha}:{file_path}
 | ⏳ STALE | {N} | {X}% |
 | ❌ HALLUCINATION | {N} | {X}% |
 | ⚪ UNVERIFIABLE | {N} | {X}% |
+| 🔵 INTEGRATION（整合待辦，未驗） | {N} | {X}% |
 
 ### STALE 詳情（若有）
 

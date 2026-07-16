@@ -5,6 +5,7 @@ description: >
   或討論 DB schema 變更時，主動載入此規則。
 paths:
   - "backend/alembic/versions/*.py"
+  - "backend/app/**/models.py"
 ---
 
 # Alembic Migration 規範
@@ -308,6 +309,27 @@ Create Date: 2026-04-15
 - 若有非標準處理（分步驟、手動修正 autogenerate），說明原因
 
 ---
+
+## 禁止修改已 merge 的 Migration 檔
+
+修改任何 `backend/alembic/versions/*.py` 之前，先確認是否已在 `origin/main`：
+
+```bash
+git log origin/main -- backend/alembic/versions/<檔名>.py
+```
+
+- **有輸出** → 已 merge，禁止修改（含改 `down_revision`），一律開新 migration 補救（`alembic revision --autogenerate -m "{scope}_fix_{原因}"`）
+- **無輸出** → 尚未 merge，可修改
+
+## 解雙 head 用 merge migration
+
+`alembic heads` 出現多個 head，一律新增匯流節點合併，禁止改已 merge 檔的 `down_revision` 收斂：
+
+```bash
+cd backend && alembic merge -m "merge_{headA}_and_{headB}" <headA> <headB>
+```
+
+只有尚未 merge、自己分支剛建的 migration 可改 `down_revision`。
 
 ## 不撰寫 migration 一次性驗收測試
 

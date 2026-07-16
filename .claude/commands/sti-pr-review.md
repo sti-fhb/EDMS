@@ -128,27 +128,64 @@ fi
 
 # ── 統一後處理：merge main + submodule + meta ──
 # 使用 $NEW_SHA 作為 reset 目標，避免 per-worktree FETCH_HEAD 不一致
+#
+# ⚠️ 雙 SHA 區分（避免 reviewer 把 main-merge 內容誤判為 PR 缺陷）：
+#   - PR_HEAD_SHA（= NEW_SHA）：PR 真實 HEAD，provenance / 祖先鏈判斷的唯一依據
+#   - MERGED_SHA：merge origin/main 後的 worktree HEAD（reviewer 實際讀到的狀態）
+# merge origin/main 為刻意設計（抓整合漂移），不得移除；此處只做「標記」。
 (
   cd "$REVIEW_DIR" || exit 1
   git reset --hard "$NEW_SHA"
 
+  PR_HEAD_SHA="$NEW_SHA"        # PR 真實 HEAD
+  MERGED_SHA="$NEW_SHA"
+  MERGE_IMPACT="no-change"      # merged / no-change / conflict-aborted
+
   if ! git merge origin/main --no-edit 2>&1; then
     echo "WARNING: 與 main 存在衝突，以 PR 原始狀態進行 review"
     git merge --abort 2>/dev/null || git reset --hard "$NEW_SHA"
+    MERGE_IMPACT="conflict-aborted"
+  else
+    MERGED_SHA=$(git rev-parse HEAD)
+    [ "$MERGED_SHA" != "$PR_HEAD_SHA" ] && MERGE_IMPACT="merged"
   fi
 
   # Submodule 初始化（防禦性處理，若無 submodule 則無副作用）
   git submodule update --init --recursive 2>/dev/null || true
 
+  # 本次 merge 由 main 帶進 / 動到的檔案清單
+  # 含「PR 與 main 都改過而被合併」的檔案（reviewer 會看到兩邊變更交纏，最易誤判）
+  MERGE_FILES=""
+  if [ "$MERGE_IMPACT" = "merged" ]; then
+    MERGE_FILES=$(git diff "$PR_HEAD_SHA" "$MERGED_SHA" --name-only)
+  fi
+
+  # 供上層 Claude 擷取後寫入步驟 4a 的 meta.json
+  echo "PR_HEAD_SHA=$PR_HEAD_SHA"
+  echo "MERGED_SHA=$MERGED_SHA"
+  echo "MERGE_IMPACT=$MERGE_IMPACT"
+  echo "REVIEW_ROOT=$REVIEW_DIR"
+  echo "MERGE_BROUGHT_FILES<<EOF"
+  echo "$MERGE_FILES"
+  echo "EOF"
+
+  # .review-meta.json 的 head_sha 一律存 PR_HEAD_SHA，
+  # 使 re-review 的 PREV_SHA 比對永遠對齊 PR 真實 HEAD（不受 merge 影響）
   if command -v jq &>/dev/null; then
-    jq -n --arg sha "$NEW_SHA" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{"head_sha": $sha, "reviewed_at": $ts}' > .review-meta.json
+    jq -n --arg sha "$PR_HEAD_SHA" --arg merged "$MERGED_SHA" \
+          --arg impact "$MERGE_IMPACT" --arg files "$MERGE_FILES" \
+          --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{head_sha: $sha, merged_sha: $merged, merge_impact: $impact,
+        merge_files: ($files | split("\n") | map(select(length > 0))),
+        reviewed_at: $ts}' > .review-meta.json
   else
-    printf '{"head_sha": "%s", "reviewed_at": "%s"}\n' \
-      "$NEW_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .review-meta.json
+    printf '{"head_sha": "%s", "merged_sha": "%s", "merge_impact": "%s", "reviewed_at": "%s"}\n' \
+      "$PR_HEAD_SHA" "$MERGED_SHA" "$MERGE_IMPACT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .review-meta.json
   fi
 )
 ```
+
+> **步驟 2 產出（供步驟 4a 使用）**：`PR_HEAD_SHA`、`MERGED_SHA`、`MERGE_IMPACT`、`REVIEW_ROOT`（= worktree 絕對路徑）、`MERGE_BROUGHT_FILES`（`MERGE_BROUGHT_FILES<<EOF` 與 `EOF` 之間逐行）。後續步驟凡提到「步驟 2 記錄的 SHA」，`head_sha` 一律指 `PR_HEAD_SHA`。
 
 若輸出 `REVIEW_STATUS=NO_NEW_COMMITS`，詢問使用者：
 ```
@@ -277,7 +314,11 @@ gh pr diff {編號} > /tmp/review-pr-{編號}-diff.patch
   "pr_number": {編號},
   "branch": "{headRefName}",
   "issue_number": null,
-  "head_sha": "{步驟 2 記錄的 NEW_SHA}",
+  "head_sha": "{步驟 2 的 PR_HEAD_SHA（PR 真實 HEAD）}",
+  "merged_sha": "{步驟 2 的 MERGED_SHA（merge origin/main 後的 worktree HEAD）}",
+  "merge_impact": "{步驟 2 的 MERGE_IMPACT：merged / no-change / conflict-aborted}",
+  "merge_files": ["{步驟 2 MERGE_BROUGHT_FILES 逐行；merge_impact 非 merged 時為空陣列}"],
+  "review_root": "{步驟 2 的 REVIEW_ROOT（worktree 絕對路徑，reviewer 讀檔的唯一根目錄）}",
   "ci_status": "{gh pr checks 摘要：success / failure / pending / unknown}",
   "implementation_summary": "{PR body 摘要}",
   "diff_file": "/tmp/review-pr-{編號}-diff.patch",
@@ -285,6 +326,10 @@ gh pr diff {編號} > /tmp/review-pr-{編號}-diff.patch
   "created_at": "{ISO 8601 時間}"
 }
 ```
+
+> - `head_sha` 是 PR 真實 HEAD，供 reviewer 做 provenance / 祖先鏈判斷；`merged_sha` 只是 reviewer 實際讀到的合併狀態，**不得**當祖先鏈依據。
+> - `review_root` 釘死 reviewer 讀檔根目錄，確保 `merge_files` 清單與 reviewer 實際讀到的檔案一致。
+> - `diff_file`（`gh pr diff`，three-dot）是乾淨的 PR-only diff，不含 main 獨立前進；`merge_files` 才是 main-merge 帶進的部分。
 
 #### 4b. Spawn code-reviewer agent
 
@@ -299,6 +344,22 @@ gh pr diff {編號} > /tmp/review-pr-{編號}-diff.patch
 
 請先用 Read tool 讀取 meta.json 和 diff 檔案，確認讀取成功後再開始審查。
 CI 檢查狀態：{ci_status}（若 CI 已回報 Lint 錯誤，直接整合進報告，重點放在 CI 抓不到的問題）。
+
+【整合上下文 — 務必先讀懂再審查（來自 meta.json）】
+- PR 真實 HEAD：{head_sha}
+- 合併後 HEAD：{merged_sha}（merge_impact={merge_impact}）
+- 讀檔根目錄（review_root）：{review_root}
+  → 需要 diff 以外的上下文時，一律從 review_root 讀取，不要用其他目錄或當前分支。
+- 本次 main-merge 帶進 / 動到的檔案（merge_files，內含非 PR 的變更）：
+  {merge_files 逐行；若 merge_impact 非 merged，寫「本次 merge 無影響，無帶進檔案」}
+
+⚠️ 硬規則（違反即為錯誤 review）：
+1. 你讀到的 review_root 是「PR + 最新 origin/main 合併後」的狀態，非 PR 真實內容。
+2. 凡「根植於上列 merge_files 檔案」或「需依賴 main 新變更才成立」的問題 →
+   一律歸到報告的「🔵 整合/Sync 後待辦（非 PR 現有缺陷）」分類，不得列為 PR 現有缺陷。
+3. 不得宣稱某 commit「已在 PR 祖先鏈 / 已在 PR HEAD 祖先」，除非以 PR 真實 HEAD（{head_sha}）
+   驗證；worktree HEAD（{merged_sha}）的祖先鏈含 main 獨立前進，不可作為 PR provenance 依據。
+4. 純 PR 內檔案（不在 merge_files 清單）的真實缺陷照常回報，不得因本規則被過度抑制。
 
 ⚠️ 若 meta.json 包含 review_history，代表這是第 {round} 輪 Review，請嚴格遵守「多輪 Review 收斂規則」：
 - 不得重提 status=deferred 的項目
@@ -460,4 +521,5 @@ rmdir "$REVIEW_WORKTREE_ROOT" 2>/dev/null || true
 - 在任意分支上執行，review 上下文都基於最新 main + PR 變更，不受 reviewer 當前分支影響。
 - Merge main 時若有衝突，自動放棄並保持 PR 原始狀態，不阻擋 review 流程。
 - **已知限制**：此 Agent 的 review 結果非確定性，相同 PR 不同執行可能產生不同深度的報告。CI 靜態檢查結果（`gh pr checks`）是唯一具確定性的品質依據，應優先信任。
-- **格式契約**：報告格式（`### 🔴 CRITICAL` 等前綴）為 `/sti-verify-review` 的解析依據，修改格式前需同步更新 `sti-verify-review.md`。
+- **格式契約**：報告格式（`### 🔴 CRITICAL`、`### 🔵 整合/Sync 後待辦` 等前綴）為 `/sti-verify-review` 的解析依據，修改格式前需同步更新 `sti-verify-review.md`。
+- **整合/Sync 後待辦**：worktree 為「PR + main merge」狀態（刻意設計，抓整合漂移）。code-reviewer 已被要求把「根植於 main-merge 檔案或依賴 main 新變更」的問題歸為 `### 🔵 整合/Sync 後待辦（非 PR 現有缺陷）`，不列為 PR 缺陷；provenance / 祖先鏈判斷一律以 `head_sha`（PR 真實 HEAD）為準，不用 `merged_sha`。
