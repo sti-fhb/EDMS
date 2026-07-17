@@ -6,6 +6,7 @@
 """
 
 from datetime import timedelta
+from typing import NoReturn
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,15 +51,12 @@ class AuthService:
         now = utcnow()
         user = await self._repo.get_by_email(db, email)
         if user is None:
-            await self._audit_login(db, _SYSTEM_USER, "FAIL", ip, "帳號不存在")
-            raise AppError(status_code=401, detail="查無此帳號，請先註冊", error_code="DP_AUTH_007")
+            await self._fail(db, _SYSTEM_USER, ip, "帳號不存在", 401, "查無此帳號，請先註冊", "DP_AUTH_007")
 
         if user.locked_until is not None and user.locked_until > now:
-            await self._audit_login(db, user.user_id, "FAIL", ip, "帳號鎖定中")
-            raise AppError(status_code=403, detail="帳號已鎖定，請洽管理者或稍後再試", error_code="DP_AUTH_005")
+            await self._fail(db, user.user_id, ip, "帳號鎖定中", 403, "帳號已鎖定，請洽管理者或稍後再試", "DP_AUTH_005")
         if user.status != "ACTIVE":
-            await self._audit_login(db, user.user_id, "FAIL", ip, "帳號已停用")
-            raise AppError(status_code=403, detail="帳號已停用，請洽管理者", error_code="DP_AUTH_004")
+            await self._fail(db, user.user_id, ip, "帳號已停用", 403, "帳號已停用，請洽管理者", "DP_AUTH_004")
 
         if not verify_password(password, user.pwd_hash):
             user.login_fail_count += 1
@@ -70,11 +68,9 @@ class AuthService:
                 reason = "連續失敗達上限，帳號鎖定"
             user.updated_user = _SYSTEM_USER
             user.updated_date = now
-            await db.flush()
-            await self._audit_login(db, user.user_id, "FAIL", ip, reason)
-            raise AppError(status_code=401, detail="密碼錯誤", error_code="DP_AUTH_008")
+            await self._fail(db, user.user_id, ip, reason, 401, "密碼錯誤", "DP_AUTH_008")
 
-        # 成功：重設計數 / 清鎖 / 更新 last_login、核發 JWT
+        # 成功：重設計數 / 清鎖 / 更新 last_login、核發 JWT（提交由 get_db 於請求成功時負責）
         user.login_fail_count = 0
         user.locked_until = None
         user.last_login_date = now
@@ -85,8 +81,29 @@ class AuthService:
         expiry_days = await self._int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_EXPIRY_DAYS)
         must_change = user.must_change_pwd or is_password_expired(user.pwd_changed_date, expiry_days, now=now)
         await db.flush()
-        await self._audit_login(db, user.user_id, "SUCCESS", ip, None)
+        await self._audit_auth(db, user.user_id, "LOGIN", "SUCCESS", ip, None)
         return LoginResponse(access_token=token, must_change_pwd=must_change)
+
+    async def _fail(
+        self,
+        db: AsyncSession,
+        operator_id: str,
+        ip: str | None,
+        reason: str,
+        status_code: int,
+        detail: str,
+        error_code: str,
+    ) -> NoReturn:
+        """寫 LOGIN FAIL 稽核並**提交**後拋 AppError。
+
+        登入失敗的副作用（鎖定計數 / 鎖定時間 / FAIL 稽核）必須在本請求以錯誤回應時仍落地——
+        否則 get_db 對 AppError 的 rollback 會一併抹除，造成帳號鎖定機制失效、失敗稽核漏記。
+        故此處顯式 commit；測試以 savepoint 隔離（見 conftest db fixture），commit 僅釋放 savepoint
+        不破壞隔離。
+        """
+        await self._audit_auth(db, operator_id, "LOGIN", "FAIL", ip, reason)
+        await db.commit()
+        raise AppError(status_code=status_code, detail=detail, error_code=error_code)
 
     async def _int_param(self, db: AsyncSession, param_id: str, key: str, default: int) -> int:
         raw = await self._params.get_param_value(db, param_id, key)
@@ -95,14 +112,20 @@ class AuthService:
         except ValueError:
             return default
 
-    async def _audit_login(
-        self, db: AsyncSession, operator_id: str, result: str, ip: str | None, desc: str | None
+    async def _audit_auth(
+        self,
+        db: AsyncSession,
+        operator_id: str,
+        action_type: str,
+        result: str,
+        ip: str | None,
+        desc: str | None,
     ) -> None:
         await self._audit.log_action(
             db,
             module="DP",
             func_name="DP-AUTH",
-            action_type="LOGIN",
+            action_type=action_type,
             result=result,
             operator_id=operator_id,
             description=desc,

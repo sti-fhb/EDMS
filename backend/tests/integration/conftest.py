@@ -138,12 +138,14 @@ async def test_engine(apply_migrations):
 async def db(test_engine):
     """每個 test 取得獨立連線，結束後 rollback，不污染資料庫。
 
-    ⚠️ 測試中禁止呼叫 `db.commit()`：本 fixture 靠結束時 rollback 隔離資料，
-    一旦 commit 資料會真正落地、無法回滾，造成跨 test 污染。
+    採 `join_transaction_mode="create_savepoint"`：session 於外層交易內建立 SAVEPOINT，
+    被測程式呼叫的 `db.commit()`（如登入失敗須落地的鎖定計數 / FAIL 稽核）只釋放 savepoint、
+    不動外層交易，故本 fixture 結束時 `conn.rollback()` 仍能清掉所有測試資料、維持隔離。
+    因此測試中呼叫 `commit()` 是安全的（真正落地由外層交易的 rollback 攔下）。
     """
     async with test_engine.connect() as conn:
         await conn.begin()
-        session = AsyncSession(bind=conn, expire_on_commit=False)
+        session = AsyncSession(bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint")
         try:
             yield session
         finally:

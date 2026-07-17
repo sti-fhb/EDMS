@@ -2,10 +2,14 @@
 
 from datetime import timedelta
 
+import httpx
 import pytest
+from httpx import ASGITransport
 from sqlalchemy import select
 
+import main
 from app.core.auth import decode_access_token
+from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
@@ -14,6 +18,29 @@ from app.dp.user.service import AuthService
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+async def client(db):
+    """綁測試 session 的 ASGI client；get_db override 複刻 production 的 commit/rollback 語意。
+
+    override 對成功請求 commit、對例外 rollback，與真實 get_db 一致；因測試 session 採
+    savepoint 隔離（conftest），可如實驗證「登入失敗經 rollback 後副作用是否仍落地」。
+    """
+
+    async def _override_get_db():
+        try:
+            yield db
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    main.app.dependency_overrides[get_db] = _override_get_db
+    transport = ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        yield c
+    main.app.dependency_overrides.clear()
 
 
 async def _make_user(
@@ -125,3 +152,28 @@ async def test_login_pwd_expired_flag(db):
     await _make_user(db, email="old@edms.local", password="Abcd1234", pwd_changed_days_ago=91)
     result = await AuthService().login(db, email="old@edms.local", password="Abcd1234")
     assert result.must_change_pwd is True
+
+
+async def test_login_wrong_password_persists_through_request(client, db):
+    """回歸：經真實端點（get_db 對 AppError rollback）打錯密碼後，失敗計數與 FAIL 稽核仍須落地。
+
+    修正前：service 在同交易 flush 後 raise，get_db rollback 抹除計數 → 鎖定機制形同虛設。
+    """
+    await _make_user(db, email="ep@edms.local", password="Abcd1234")
+    r = await client.post("/api/login", json={"email": "ep@edms.local", "password": "WRONG"})
+    assert r.status_code == 401 and r.json()["error_code"] == "DP_AUTH_008"
+    user = (await db.execute(select(DpUser).where(DpUser.email == "ep@edms.local"))).scalar_one()
+    assert user.login_fail_count == 1  # 未被請求層 rollback 抹除
+    fail_audit = [a for a in await _audit_rows(db) if a.action_type == "LOGIN" and a.result == "FAIL"]
+    assert fail_audit and fail_audit[-1].description == "密碼錯誤"
+
+
+async def test_login_success_through_request(client, db):
+    """回歸：經真實端點成功登入回 200 + token，且計數重設 / last_login 落地。"""
+    await _make_user(db, email="eps@edms.local", password="Abcd1234", fail_count=2)
+    r = await client.post("/api/login", json={"email": "eps@edms.local", "password": "Abcd1234"})
+    assert r.status_code == 200
+    body = r.json()
+    assert decode_access_token(body["access_token"]).sub == "eps" and body["must_change_pwd"] is False
+    user = (await db.execute(select(DpUser).where(DpUser.email == "eps@edms.local"))).scalar_one()
+    assert user.login_fail_count == 0 and user.last_login_date is not None
