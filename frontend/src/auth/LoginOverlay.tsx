@@ -1,3 +1,4 @@
+import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Card from "@mui/material/Card"
@@ -9,21 +10,35 @@ import { useState } from "react"
 import type { FormEvent } from "react"
 
 import { useAuth } from "./useAuth"
+import { toApiError } from "../services/http"
 
 /**
- * 登入 overlay 骨架（全畫面遮罩）。
- * 僅 UI 殼：email + 密碼 + 忘記密碼連結。實際登入 / JWT / redirect 屬 US1 + T013/T014，
- * 目前送出僅以假 token 進入後台供骨架瀏覽。
+ * 登入 overlay（全畫面遮罩）：帳密登入 + 錯誤提示 + 逾時重登提示。
+ * 錯誤訊息直接採後端 error_message（已對齊 spec 訊息表 DP-MSG-LOGIN-001~007）；
+ * 查無帳號（DP_AUTH_007）額外提供註冊入口。成功後由 AuthProvider 更新狀態、overlay 自動撤除。
  */
 export function LoginOverlay() {
-  const { setToken } = useAuth()
+  const { login, sessionExpired } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    // TODO(US1/T013): 呼叫登入 API 取得 JWT；此處為骨架佔位。
-    setToken("dev-skeleton-token")
+    setErrorCode(null)
+    setErrorMessage(null)
+    setSubmitting(true)
+    try {
+      await login(email, password)
+    } catch (err) {
+      const apiError = toApiError(err)
+      setErrorCode(apiError.errorCode)
+      setErrorMessage(apiError.errorMessage)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -43,6 +58,23 @@ export function LoginOverlay() {
         <Typography variant="h6" align="center" gutterBottom>
           EDMS 登入
         </Typography>
+        {sessionExpired && errorMessage === null && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            閒置逾時已自動登出，請重新登入
+          </Alert>
+        )}
+        {errorMessage !== null && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {errorMessage}
+            {errorCode === "DP_AUTH_007" && (
+              <Box component="span" sx={{ ml: 1 }}>
+                <Link href="/register" underline="hover">
+                  前往註冊
+                </Link>
+              </Box>
+            )}
+          </Alert>
+        )}
         <form onSubmit={handleSubmit}>
           <Stack spacing={2}>
             <TextField
@@ -61,10 +93,10 @@ export function LoginOverlay() {
               fullWidth
               autoComplete="current-password"
             />
-            <Button type="submit" variant="contained" size="large" fullWidth>
+            <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
               登入
             </Button>
-            <Link href="#" underline="hover" variant="body2">
+            <Link href="/forgot-password" underline="hover" variant="body2">
               忘記密碼？
             </Link>
           </Stack>
