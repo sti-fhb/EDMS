@@ -10,13 +10,13 @@ from typing import NoReturn
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import create_access_token
+from app.core.auth import JwtPayload, create_access_token
 from app.core.exceptions import AppError
 from app.core.password_policy import is_password_expired, verify_password
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.repository import AuthRepository
-from app.dp.user.schemas import LoginResponse
+from app.dp.user.schemas import LoginResponse, TokenResponse
 from app.services import AuditLogService, ParamService
 
 _SYSTEM_USER = "SYSTEM"
@@ -25,6 +25,7 @@ _DEFAULT_FAIL_LOCK_COUNT = 5
 _DEFAULT_LOCK_MINUTES = 30
 _DEFAULT_ACCESS_TTL_MIN = 15
 _DEFAULT_EXPIRY_DAYS = 90
+_DEFAULT_RENEW_MAX_HOURS = 8
 
 
 class AuthService:
@@ -83,6 +84,26 @@ class AuthService:
         await db.flush()
         await self._audit_auth(db, user.user_id, "LOGIN", "SUCCESS", ip, None)
         return LoginResponse(access_token=token, must_change_pwd=must_change)
+
+    async def renew(self, db: AsyncSession, *, payload: JwtPayload) -> TokenResponse:
+        """活動換發：沿用原 auth_time 重簽、套用單日換發上限。
+
+        DP_USER 狀態閘（停用 / 鎖定 / 已刪）由端點層 get_jwt_payload 於本方法前完成（#16 Security L-1）；
+        此處僅檢核距 auth_time 是否逾單日換發上限。無 DB 寫入，逾限拋錯不需落地。
+
+        Raises:
+            AppError: 距 auth_time 已逾換發上限（401 DP_AUTH_003）。
+        """
+        renew_max = await self._int_param(db, "JWT", "RENEW_MAX_HOURS", _DEFAULT_RENEW_MAX_HOURS)
+        if utcnow() - payload.auth_time >= timedelta(hours=renew_max):
+            raise AppError(status_code=401, detail="已達單次登入時數上限，請重新登入", error_code="DP_AUTH_003")
+        ttl = await self._int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
+        token = create_access_token(sub=payload.sub, ttl_minutes=ttl, auth_time=payload.auth_time)
+        return TokenResponse(access_token=token)
+
+    async def logout(self, db: AsyncSession, *, user_id: str) -> None:
+        """登出：寫 LOGOUT 稽核（無狀態 JWT，不做伺服端撤銷）。提交由 get_db 於請求成功時負責。"""
+        await self._audit_auth(db, user_id, "LOGOUT", "SUCCESS", get_client_ip(), None)
 
     async def _fail(
         self,

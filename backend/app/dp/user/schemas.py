@@ -13,3 +13,9 @@ class LoginResponse(BaseModel):
 
     access_token: str
     must_change_pwd: bool
+
+
+class TokenResponse(BaseModel):
+    """換發回應：僅新 JWT access token（沿用原 auth_time）。"""
+
+    access_token: str

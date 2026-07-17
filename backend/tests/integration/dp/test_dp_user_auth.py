@@ -2,14 +2,10 @@
 
 from datetime import timedelta
 
-import httpx
 import pytest
-from httpx import ASGITransport
 from sqlalchemy import select
 
-import main
 from app.core.auth import decode_access_token
-from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
@@ -18,29 +14,6 @@ from app.dp.user.service import AuthService
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-async def client(db):
-    """綁測試 session 的 ASGI client；get_db override 複刻 production 的 commit/rollback 語意。
-
-    override 對成功請求 commit、對例外 rollback，與真實 get_db 一致；因測試 session 採
-    savepoint 隔離（conftest），可如實驗證「登入失敗經 rollback 後副作用是否仍落地」。
-    """
-
-    async def _override_get_db():
-        try:
-            yield db
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
-
-    main.app.dependency_overrides[get_db] = _override_get_db
-    transport = ASGITransport(app=main.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        yield c
-    main.app.dependency_overrides.clear()
 
 
 async def _make_user(

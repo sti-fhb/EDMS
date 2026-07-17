@@ -151,3 +151,32 @@ async def db(test_engine):
         finally:
             await session.close()
             await conn.rollback()
+
+
+@pytest.fixture
+async def client(db):
+    """綁測試 session 的 ASGI client；get_db override 複刻 production 的 commit/rollback 語意。
+
+    override 對成功請求 commit、對例外 rollback，與真實 get_db 一致；因測試 session 採
+    savepoint 隔離（見 db fixture），可如實驗證「請求失敗經 rollback 後副作用是否仍落地」。
+    lifespan（發信 worker）不隨 ASGITransport 啟動，避免測試期常駐背景任務。
+    """
+    import httpx
+    from httpx import ASGITransport
+
+    import main
+    from app.core.db import get_db
+
+    async def _override_get_db():
+        try:
+            yield db
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    main.app.dependency_overrides[get_db] = _override_get_db
+    transport = ASGITransport(app=main.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        yield c
+    main.app.dependency_overrides.clear()
