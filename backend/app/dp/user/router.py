@@ -1,12 +1,14 @@
-"""認證端點（US1）：登入（匿名）/ 換發 / 登出。module-summary 於 T025 補。"""
+"""認證端點（US1）：登入（匿名）/ 換發 / 登出 / 入口頁模組摘要。"""
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
+from app.core.module_roles import module_role_gate
+from app.core.password_gate import require_password_current
 from app.core.rate_limit import LOGIN_RATE_MAX, RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
-from app.dp.user.schemas import LoginRequest, LoginResponse, TokenResponse
+from app.dp.user.schemas import LoginRequest, LoginResponse, ModuleRoleStatus, ModuleSummary, TokenResponse
 from app.dp.user.service import AuthService
 
 # 登入限流器（行程內；IP 與帳號維度共用同一器、以 key 前綴區分）
@@ -43,3 +45,20 @@ async def logout(
 ) -> None:
     """登出：需認證。寫 LOGOUT 稽核後回 204（無狀態 JWT，前端自行丟棄 token）。"""
     await _service.logout(db, user_id=payload.sub)
+
+
+@router.get("/dp/user/module-summary", response_model=ModuleSummary)
+async def module_summary(
+    payload: JwtPayload = Depends(require_password_current),
+    db: AsyncSession = Depends(get_db),
+) -> ModuleSummary:
+    """入口頁模組摘要：需認證且密碼現行有效（強制變更者擋於閘）。
+
+    ET 恆可用（學員預設，contracts §4）；DM 具任一角色才可進入，經 has_any_role 判定閘聚合
+    （ET / DM 模組未接線前 fail-closed 回 False＝未開通，待 US7 + 模組 service 落地）。
+    """
+    dm_has_role = await module_role_gate.has_any_role("DM", payload.sub, db)
+    return ModuleSummary(
+        et=ModuleRoleStatus(has_role=True),
+        dm=ModuleRoleStatus(has_role=dm_has_role),
+    )
