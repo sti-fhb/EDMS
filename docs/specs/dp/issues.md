@@ -19,8 +19,8 @@
 | # | 標題 | 對應 | 階段 | 涵蓋 Tasks | 主要前置 | GitHub # | 狀態 |
 |---|------|------|------|-----------|---------|----------|------|
 | 0 | 專案建置與平台基礎建設 | — | Setup + Foundational | T001 ~ T017（17 任務）| 無 | [#16](https://github.com/sti-fhb/EDMS/issues/16) | ✅ 已開立 |
-| 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | [#27](https://github.com/sti-fhb/EDMS/issues/27) | ✅ 已開立 |
-| 2 | 登入 / 登出與模組入口頁 | US1 / UCDP001 | P1-核心 | T021 ~ T025（5 任務）| #0 | — | 待補 |
+| 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | [#27](https://github.com/sti-fhb/EDMS/issues/27) | ✅ 已合併（PR #29）|
+| 2 | 登入 / 登出與模組入口頁 | US1 / UCDP001 | P1-核心 | T021 ~ T025（5 任務）| #0 | — | 📝 body 已撰寫（待開立）|
 | 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | — | 待補 |
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | — | 待補 |
 | 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | — | 待補 |
@@ -169,9 +169,77 @@
 
 ---
 
-## Issue #2 ~ #12：待補（增量模式）
+## Issue #2：[P1-核心] DP — 登入 / 登出與模組入口頁
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us1.md](spec_us1.md)（US1 / UCDP001，FR-DP-US1-01~11、AC 1~12、DP-MSG-LOGIN-001~008）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（is_module_admin）/ §4（has_any_role）；[research.md](research.md) §2（短 TTL + 活動換發）/ §3（每請求查 DP_USER）/ §12（redirect + 入口頁）；[data-model.md](data-model.md)（`DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁 + 模組入口頁）
+**階段**：P1-核心（全系統存取基礎；認證鏈 US1 → US2 → US3 起點）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：JWT 基礎（T013）、認證閘 `get_jwt_payload`（T014）、速率限制（T015）、密碼策略（T016）、模組管理者判定閘（T017）、`SRVDP001`、`DP_USER` 表皆就緒
+- 帳號來源：US2 自助註冊 / US4 代建（測試期可直接建 `DP_USER`）
+
+### 任務說明
+
+實作帳密登入核發 JWT、活動換發 / 登出、帳號鎖定與強制變更密碼閘、以及登入後的模組入口頁。登入驗 `DP_USER`（bcrypt 比對）、區分帳號不存在 / 密碼錯誤、失敗計數達上限自動鎖定、成功歸零計數 + 更新 `LAST_LOGIN` + 核發 JWT（`auth_time` + 15 分 TTL）+ 寫登入稽核；換發沿用 T013 邏輯 + 帳號狀態檢核；登出寫稽核（前端丟棄 token）。前端登入頁掛速率限制 + redirect 白名單返回原頁 + 閒置換發計時器；入口頁 ET 恆顯、DM 卡雙狀態（未開通鎖定卡）、不顯後台入口、首次登入歡迎橫幅一次。
+
+> ℹ️ 全端 issue：後端登入 / 換發 / 登出 / 強制變更閘 / 模組角色摘要端點 + 前端登入頁 / 入口頁。跨模組 `is_module_admin` / `has_any_role` 以 **stub 先行**（ET/DM 未實作，經 T017 判定閘注入）。
+
+### 範圍
+
+**後端**：
+- **T021 登入端點**（`dp/user`）：帳密驗證（bcrypt）、錯誤分流（帳號不存在 / 密碼錯誤）、鎖定判定（`LOCKED_UNTIL` 逾時視為已解鎖）、失敗計數 / 達 `FAIL_LOCK_COUNT` 自動鎖定、成功歸零 + 更新 `LAST_LOGIN` + 核發 JWT + LOGIN 稽核（含 FAIL 事件、來源 IP）；對應 FR-02/04/05/08
+- **T022 換發 `renew` + 登出端點**：renew 走 T013 `renew_access_token`（驗現行 token + 8h 上限）+ 帳號狀態檢核；登出寫 LOGOUT 稽核（前端丟 token）；對應 FR-03/10
+- **T023 強制變更密碼閘**：登入 / 每請求檢核 `MUST_CHANGE_PWD` 或 `PWD_CHANGED_DATE` 逾效期 → 回強制變更旗標；未完成變更前其他端點拒絕；對應 FR-06、spec_us8 FR-DP-US8-08
+- **T025 後端「我的模組角色摘要」端點**：聚合各模組 `has_any_role`（經 T017 閘 / stub）決定入口頁 DM 卡狀態；對應 FR-07、module-callbacks §4
+
+**前端**：
+- **T024 登入頁**：帳密欄（密碼遮蔽）、錯誤訊息（DP-MSG-LOGIN-001~008）、redirect 白名單返回原目標頁（通知信連結 / 書籤 / 逾時重登）、閒置換發計時器（到期前有操作即 renew）、掛速率限制回應（429 → LOGIN-007）；對應 FR-01/07/09
+- **T025 模組入口頁**：ET 入口恆顯、**DM 卡雙狀態**（無 DM 角色呈「未開通」鎖定卡 + 引導文字 DP-MSG-LOGIN-008、點擊不進入）、個資恆顯、**不顯 DP 後台入口**、首次登入歡迎橫幅一次（已顯示旗標儲存位置實作定）；對應 FR-07、research §12
+
+**測試**：
+- 後端：登入成功 / 帳號不存在 / 密碼錯誤 / 失敗計數→鎖定 / 鎖定逾時解鎖 / 停用拒絕 / 強制變更旗標 / 換發沿用 auth_time / 逾 8h 拒絕 / 登出稽核；速率限制 429；角色摘要端點（stub）
+- 前端：登入流程（MSW）、錯誤訊息呈現、redirect 返回、入口頁 DM 卡雙狀態
+
+### 驗收條件
+
+- [ ] 正確帳密 → 核發 JWT（含 `auth_time`、TTL 15 分）、重設失敗計數、更新 `LAST_LOGIN`、寫 LOGIN 稽核
+- [ ] 帳號不存在 / 密碼錯誤 → 分別回對應訊息（DP-MSG-LOGIN-001 / 002）；密碼錯誤累計失敗計數
+- [ ] 連續失敗達 `FAIL_LOCK_COUNT`（預設 5）→ 自動鎖定 + 稽核；鎖定中 / 停用 / 閒置逾 90 日禁用 → 拒絕登入（LOGIN-003 / 004）；`LOCKED_UNTIL` 逾時自動解鎖
+- [ ] 密碼逾效期 / 初始密碼（`MUST_CHANGE_PWD`）登入 → 導向強制變更、未完成前其他端點拒絕（LOGIN-005）
+- [ ] 閒置逾 15 分 token 自然失效；有操作靜默換發；自登入起換發逾 8h 上限 → 拒絕需重登
+- [ ] 登入端點以「IP + 帳號」速率限制超限回 429（LOGIN-007）
+- [ ] 登出 → 前端丟 token + 寫 LOGOUT 稽核；停用帳號之未逾期 token 下次請求被拒（T014 閘）
+- [ ] 登入後 redirect：被攔者返回原目標頁（白名單防 open redirect）；無目標 → 入口頁
+- [ ] 入口頁：ET 恆顯、DM 卡無角色呈未開通鎖定卡（點擊 LOGIN-008 不進入）、不顯後台入口、首次登入歡迎橫幅一次
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：JWT / 認證閘 / 速率限制 / 密碼策略 / 模組管理者閘 / SRVDP001 / DP_USER
+- **跨模組（stub 先行）**：ET / DM 之 `is_module_admin`、`has_any_role`（module-callbacks §1 / §4）——ET/DM 未實作，經 T017 判定閘注入 stub；入口頁 DM 卡完整狀態待 US7 + 模組 service 到位
+- 帳號資料：US2 / US4（測試期可自建）
+
+### 注意事項
+
+- ✅ **帳號列舉：採明確訊息**（已於 `spec_us1` Clarification 2026-07-16 定案）：區分「帳號不存在（LOGIN-001）/ 密碼錯誤（LOGIN-002）」——內部系統易用性優先；列舉風險以**帳號維度速率限制**緩解（先 hit 帳號限流、後查存在性，避免以 429 反推；#23）。error code 採分離碼（帳號不存在 / 密碼錯誤各一，非合併的 `DP_AUTH_001`）；`DP_AUTH_004`（停用）/ `DP_AUTH_005`（鎖定）/ `COMMON_429`（速率）已就緒。強制變更為回應旗標、非 error。
+- ✅ **強制變更密碼範圍**（已於 `spec_us1` Clarification 定案）：US1 做**閘 + 導向 + 頁面殼**（檢核 `MUST_CHANGE_PWD` / 逾效期 → 擋下其他端點 + 導向）；**實際變更提交端點與檢核屬 US8**。US8 未就緒時以最小提交 / stub 先行，US1 驗收以「閘正確擋下 + 導向」為準。
+- **換發端點狀態閘**（Foundation #16 Security L-1 前瞻）：`renew` MUST 先過 DP_USER 狀態檢核，否則停用 / 鎖定帳號可持有效 token 自我續票。
+- **登入速率限制帳號維度防列舉**（#23 相關）：登入須「先 hit 帳號限流、後查帳號存在性」，避免以 429 觸發與否探測帳號存在。
+- 稽核：登入 / 登出 / 鎖定 / 解鎖經 `SRVDP003.log_action`（含來源 IP，走 request_context）。
+- 密碼 / token 不入 log（sti-backend-logging）；HTTPS 傳輸、redirect open-redirect 白名單。
+
+### 相關文件
+
+- [spec_us1.md](spec_us1.md)、[spec.md](spec.md) §認證機制、[research.md](research.md) §2/§3/§12、[data-model.md](data-model.md)（DP_USER）、[tasks.md](tasks.md) Phase 4（T021~T025）
+- [contracts/module-callbacks.md](contracts/module-callbacks.md)（is_module_admin / has_any_role）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §登入認證 / §帳號鎖定；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP001
+
+**Labels**：`P1-核心`, `DP-平台`, `US1`
+
+---
+
+## Issue #3 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1 / #2，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -185,3 +253,4 @@
 | 2026-07-16 | 收斂郵件環境變數命名為 fastapi-mail 慣例：`config.py` `MAIL_HOST`→`MAIL_SERVER`、`.env.example` 同步、ext 契約 / tasks T020 之 `SMTP_*`→`MAIL_*`（`MAIL_SSL_TLS` / `MAIL_SUPPRESS_SEND` 待 T020 依需要補）|
 | 2026-07-16 | US6 交付前自檢（`/sti-sa-precheck dp us6`）補唯一缺口：spec_us6 FR-03 + AC4、contracts SRVDP002、本 Issue #1 驗收條件補明 `CHANNEL` 不含 Email（`MSG`）時不寄（`skipped_reason="CHANNEL_NOT_EMAIL"`）|
 | 2026-07-16 | Issue #1（US6 發信服務）已開立為 GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，回填總覽表 GitHub # 欄與狀態 |
+| 2026-07-16 | Issue #1（US6）實作完成並合併（PR #29 squash），總覽表狀態更新；依增量模式補入 Issue #2（US1 登入 / 登出與模組入口頁）完整 body |
