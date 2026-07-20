@@ -83,7 +83,14 @@ export function PortalPage() {
           <Card
             sx={{ flex: 1, opacity: 0.6, cursor: "not-allowed" }}
             onClick={() => setLockedHint(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                setLockedHint(true)
+              }
+            }}
             role="button"
+            tabIndex={0}
             aria-label="文件管理未開通"
           >
             <CardContent>

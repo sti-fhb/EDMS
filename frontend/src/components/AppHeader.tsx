@@ -12,14 +12,14 @@ import { useAuth } from "../auth/useAuth"
 
 /** 頂列：系統標題 + 右上個資選單（個人資料 / 登出）。 */
 export function AppHeader() {
-  const { setToken } = useAuth()
+  const { logout } = useAuth()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const open = Boolean(anchorEl)
 
   const handleLogout = () => {
     setAnchorEl(null)
-    // 骨架：僅清除前端 token；實際登出稽核（LOGOUT）屬 US1
-    setToken(null)
+    // 呼叫登出：寫 LOGOUT 稽核並清除 memory-only token（US1）
+    void logout()
   }
 
   return (
