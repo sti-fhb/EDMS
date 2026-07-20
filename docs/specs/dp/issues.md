@@ -237,9 +237,71 @@
 
 ---
 
-## Issue #3 ~ #12：待補（增量模式）
+## Issue #3：[P1-核心] DP — 使用者自助註冊
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1 / #2，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us2.md](spec_us2.md)（US2 / UCDP002，FR-DP-US2-01~06、DP-MSG-REGISTER-001~004）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §2（`grant_default_student_role`）；[data-model.md](data-model.md)（`DP_USER` / `DP_PWD_HIST`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁・註冊頁籤）
+**階段**：P1-核心（帳號來源主路徑；認證鏈 US1 登入 → **US2 註冊** → US3 忘記密碼）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：密碼策略工具（T016，複雜度 / bcrypt / `DP_PWD_HIST` 歷程）、`SRVDP003` 稽核、`DP_USER` / `DP_PWD_HIST` 表、`SRVDP001` 平台參數皆就緒
+- Issue #2（GitHub [#31](https://github.com/sti-fhb/EDMS/issues/31)）已合併：登入頁 overlay（「註冊」為其頁籤）、前端 `authService` / `http` client 結構
+- 跨模組 ET `grant_default_student_role`（module-callbacks §2）——ET 未實作，以 **stub 先行**
+
+### 任務說明
+
+實作登入頁「註冊」頁籤之自助註冊：伺服器端檢核 Email 未被註冊（`DP_USER` 唯一）、密碼符合複雜度、兩次輸入一致；通過後建立 `DP_USER`（bcrypt 雜湊、狀態 ACTIVE）、寫入 `DP_PWD_HIST` 首筆（作為後續密碼重複性檢核基準）、於**帳號建立當下**透過 ET service 授予「學員」（唯一預設角色，受訓單位標籤預設「未指派」）、寫 CREATE 稽核；成功後跳回登入頁預填 Email（**註冊即用，不寄帳號開通確認信**）。
+
+> ℹ️ 全端 issue：後端註冊端點 + 前端註冊頁籤。跨模組 ET `grant_default_student_role` 以 **stub 先行**（ET 未實作，依 module-callbacks §2 簽章注入；模組實作跟進後於 T047 回歸）；**MUST NOT 授予任何 DM 角色或 ET 教師 / 管理者角色**（DM 存取一律由管理者於 US7 開通）。
+
+### 範圍
+
+**後端**：
+- **T026 註冊端點**（`dp/user`）：伺服器端檢核 Email 唯一（`DP_USER`）/ 密碼複雜度（一般使用者，`SRVDP001` 讀 `MIN_LEN`=8 / `CHAR_TYPES`=3，**不套** `ADMIN_MIN_LEN`）/ 兩次一致；通過建 `DP_USER`（bcrypt 雜湊、`STATUS`=ACTIVE）+ `DP_PWD_HIST` 首筆 + 呼叫 ET `grant_default_student_role`（stub）+ CREATE 稽核（帳號建立 + 角色授予）；對應 FR-02/03/05/06
+- **T027 前端註冊頁籤**：登入頁「註冊」頁籤欄位（Email 必填 + 格式、姓名必填、密碼 / 確認密碼遮蔽），Zod 前端驗證 + 錯誤訊息（DP-MSG-REGISTER-001~004），成功跳回登入頁預填 Email；對應 FR-01/04
+
+**測試**：
+- 後端：未註冊 Email + 合規密碼 → 建帳號（bcrypt 雜湊、ACTIVE）+ ET 學員授予（驗 stub 被呼叫）+ `DP_PWD_HIST` 首筆 + CREATE 稽核；Email 重複拒（REGISTER-001）；密碼不合規拒（REGISTER-002）；兩次不一致拒（REGISTER-003）；**不授予任何 DM 角色**
+- 前端：註冊流程（MSW）、各錯誤訊息呈現、成功跳回登入頁且預填 Email
+
+### 驗收條件
+
+- [ ] 未註冊 Email + 密碼合規（複雜度 + 兩次一致）→ 建立 `DP_USER`（密碼 bcrypt 雜湊、`STATUS`=ACTIVE）、透過 ET service 授予 ET 學員（受訓單位標籤「未指派」）、寫 `DP_PWD_HIST` 首筆、寫 CREATE 稽核，回 REGISTER-004 並跳回登入頁預填 Email
+- [ ] 註冊完成之新使用者僅具 ET 學員角色；**DM 四角色皆未授予**（不自動授予，DM 存取須管理者於 US7 開通）
+- [ ] Email 已被註冊 → 阻擋並提示 REGISTER-001（引導改走登入 / 忘記密碼）
+- [ ] 密碼不符複雜度（一般使用者至少 8 字元、至少 3 種字元組合）→ 阻擋並提示 REGISTER-002
+- [ ] 兩次密碼輸入不一致 → 阻擋並提示 REGISTER-003
+- [ ] 三項檢核（Email 唯一 / 複雜度 / 兩次一致）MUST 於**伺服器端**執行；**不寄帳號開通確認信**（註冊即用）
+- [ ] 帳號建立與 ET 學員角色授予皆寫入 `DP_AUDIT_LOG`
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：密碼策略工具（T016）、`SRVDP001`（`PWD_POLICY` 參數）、`SRVDP003` 稽核、`DP_USER` / `DP_PWD_HIST` 表
+- **Issue #2（GitHub #31）**：登入頁 overlay（註冊為其頁籤）、前端 `authService` / `http` client
+- **跨模組（stub 先行）**：ET `grant_default_student_role`（module-callbacks §2）——ET 未實作以 stub（冪等，已存在不重複）注入，完整驗收待 ET service 就緒後於 T047 回歸；**DM 無對應介面**（DM 角色一律 US7 開通）
+
+### 注意事項
+
+- **預設角色僅 ET 學員、帳號建立當下授予**（`spec.md` Clarifications 釐清第 3 輪）：MUST NOT 授予 DM 或 ET 教師 / 管理者角色；ET service 未就緒前以 contracts §2 簽章 stub 先行、冪等。
+- **角色授予稽核由 DP 端寫**（`spec_us2` Clarifications 2026-07-20）：DP 呼叫 `grant_default_student_role`（stub）後於**同交易**自行經 `SRVDP003` 寫「授予預設 ET 學員角色」稽核（`MODULE=DP`）→ stub 期即可驗 AC6；稽核 `operator_id` 填**新使用者本人 USER_ID**（自助註冊為本人行為）。
+- **密碼複雜度為平台級參數**（`SRVDP001`）：一般使用者用 `MIN_LEN`=8 / `CHAR_TYPES`=3；註冊者非管理者，不套 `ADMIN_MIN_LEN`=12。
+- **帳號建立 + 角色授予 + 首筆歷程 + 稽核同交易**：確保「建帳號但漏授角色 / 漏寫歷程」不發生；Email 唯一由 DB `UNIQUE` + 伺服器端檢核雙重把關。
+- **Error codes**（實作 / `/sti-plan` 時對齊 `sti-error-codes`）：密碼複雜度可重用 `DP_PWD_001`（長度）/ `DP_PWD_002`（複雜度）；Email 重複新增碼（409，如 `DP_USER_*`）；兩次不一致以前端 Zod + 後端 422 把關。
+- **前端表單驗證用 Zod**（`sti-zod-conventions`，`LoginRequest`→`RegisterRequestSchema` 命名對齊後端 Pydantic）；密碼 / token 不入 log（sti-backend-logging）。
+- 稽核經 `SRVDP003.log_action`（`res_id` 必填、含來源 IP，走 request_context）。
+
+### 相關文件
+
+- [spec_us2.md](spec_us2.md)、[spec.md](spec.md) Clarifications 釐清第 3 輪、[data-model.md](data-model.md)（`DP_USER` / `DP_PWD_HIST`）、[tasks.md](tasks.md) Phase 5（T026~T027）
+- [contracts/module-callbacks.md](contracts/module-callbacks.md) §2（`grant_default_student_role`）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §使用者 / 帳號管理；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP002
+
+**Labels**：`P1-核心`, `DP-平台`, `US2`
+
+---
+
+## Issue #4 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1 / #2 / #3，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -253,4 +315,5 @@
 | 2026-07-16 | 收斂郵件環境變數命名為 fastapi-mail 慣例：`config.py` `MAIL_HOST`→`MAIL_SERVER`、`.env.example` 同步、ext 契約 / tasks T020 之 `SMTP_*`→`MAIL_*`（`MAIL_SSL_TLS` / `MAIL_SUPPRESS_SEND` 待 T020 依需要補）|
 | 2026-07-16 | US6 交付前自檢（`/sti-sa-precheck dp us6`）補唯一缺口：spec_us6 FR-03 + AC4、contracts SRVDP002、本 Issue #1 驗收條件補明 `CHANNEL` 不含 Email（`MSG`）時不寄（`skipped_reason="CHANNEL_NOT_EMAIL"`）|
 | 2026-07-16 | Issue #1（US6 發信服務）已開立為 GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，回填總覽表 GitHub # 欄與狀態 |
+| 2026-07-20 | Issue #2（US1 登入）已合併（PR #33 / #36）；依增量模式補入 Issue #3（使用者自助註冊 / US2）完整 body（T026~T027，前置 #0 / #2 + ET `grant_default_student_role` stub）|
 | 2026-07-16 | Issue #1（US6）實作完成並合併（PR #29 squash），總覽表狀態更新；依增量模式補入 Issue #2（US1 登入 / 登出與模組入口頁）完整 body |

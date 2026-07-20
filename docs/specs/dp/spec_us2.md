@@ -28,6 +28,16 @@
 - **FR-DP-US2-05**: 帳號建立與預設角色授予 MUST 寫入 `DP_AUDIT_LOG`
 - **FR-DP-US2-06**: 首筆密碼雜湊 MUST 寫入 `DP_PWD_HIST`，作為後續密碼重複性檢核基準
 
+## Clarifications
+
+### Session 2026-07-20（US2 開工前自檢釐清）
+
+- **Q（FR-05 角色授予稽核歸屬）**：「授予 ET 學員」這筆稽核由 DP 還是 ET 寫？（US2 開發時 ET 以 stub 先行、stub 不會寫任何稽核，若期待 ET 寫則 AC6 於 US2 無法驗）
+  → **A：由 DP 於註冊流程寫入**。DP 呼叫 ET `grant_default_student_role`（stub）後，於**同交易內**自行經 `SRVDP003.log_action` 寫一筆「授予預設 ET 學員角色」稽核（`MODULE=DP`）。如此 ET 尚為 stub 時 AC6（存在角色授予紀錄）即可驗；ET 模組實作後是否於自身另記由 ET 自理、不影響 US2 驗收。兩筆稽核（帳號 CREATE + 角色授予）皆經 SRVDP003 寫入 `DP_AUDIT_LOG`。
+
+- **Q（自助註冊稽核 operator_id）**：自助註冊無登入操作者，CREATE / 角色授予稽核之 `operator_id`（`CREATED_USER`）填誰？
+  → **A：填新建立之使用者本人 USER_ID**。自助註冊為本人行為，operator 即該新帳號，語意最準且稽核可追溯至帳號自身。（對照：US4 管理者代建填管理者 USER_ID。）
+
 ## 系統訊息
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
