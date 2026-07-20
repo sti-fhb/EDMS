@@ -1,12 +1,14 @@
 import { ThemeProvider } from "@mui/material/styles"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import type { ReactNode } from "react"
 import { describe, expect, it } from "vitest"
 
 import { PortalPage } from "./PortalPage"
 import { server } from "../test/server"
+import { STORAGE_KEYS } from "../constants/storage"
 import { muiTheme } from "../styles/muiTheme"
 
 function renderPortal(ui: ReactNode) {
@@ -38,8 +40,25 @@ describe("PortalPage", () => {
     expect(screen.getAllByRole("link", { name: "進入" })).toHaveLength(2)
   })
 
-  it("顯示歡迎橫幅", async () => {
+  it("首次登入顯示歡迎橫幅", async () => {
     renderPortal(<PortalPage />)
     expect(await screen.findByText("歡迎使用 EDMS 教育訓練文件管理系統")).toBeInTheDocument()
+  })
+
+  it("關閉歡迎橫幅後寫入旗標、不再顯示", async () => {
+    const user = userEvent.setup()
+    renderPortal(<PortalPage />)
+    await screen.findByText("歡迎使用 EDMS 教育訓練文件管理系統")
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    expect(localStorage.getItem(STORAGE_KEYS.WELCOME_DISMISSED)).toBe("1")
+    expect(screen.queryByText("歡迎使用 EDMS 教育訓練文件管理系統")).not.toBeInTheDocument()
+  })
+
+  it("已顯示過（旗標存在）→ 不顯示歡迎橫幅", async () => {
+    localStorage.setItem(STORAGE_KEYS.WELCOME_DISMISSED, "1")
+    renderPortal(<PortalPage />)
+    // 等入口頁載入完成（ET 卡出現）後，確認橫幅不在
+    expect(await screen.findByText("教育訓練（ET）")).toBeInTheDocument()
+    expect(screen.queryByText("歡迎使用 EDMS 教育訓練文件管理系統")).not.toBeInTheDocument()
   })
 })

@@ -13,6 +13,7 @@ import { useState } from "react"
 
 import { authApi } from "../auth/authService"
 import { QUERY_KEYS } from "../constants/queryKeys"
+import { STORAGE_KEYS } from "../constants/storage"
 
 /**
  * 登入後模組入口頁（spec_us1 FR-07）。
@@ -24,8 +25,16 @@ export function PortalPage() {
     queryKey: QUERY_KEYS.auth.moduleSummary(),
     queryFn: authApi.moduleSummary,
   })
-  const [showWelcome, setShowWelcome] = useState(true)
+  // 首次登入顯示一次歡迎橫幅：以 localStorage 旗標記住「已顯示過」，關閉後不再出現。
+  const [showWelcome, setShowWelcome] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.WELCOME_DISMISSED) === null,
+  )
   const [lockedHint, setLockedHint] = useState(false)
+
+  const dismissWelcome = () => {
+    localStorage.setItem(STORAGE_KEYS.WELCOME_DISMISSED, "1")
+    setShowWelcome(false)
+  }
 
   if (isPending) {
     return (
@@ -48,7 +57,7 @@ export function PortalPage() {
   return (
     <Container maxWidth="md" sx={{ py: 6 }}>
       {showWelcome && (
-        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setShowWelcome(false)}>
+        <Alert severity="success" sx={{ mb: 3 }} onClose={dismissWelcome}>
           歡迎使用 EDMS 教育訓練文件管理系統
         </Alert>
       )}
