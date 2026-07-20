@@ -21,7 +21,7 @@
 | 0 | 專案建置與平台基礎建設 | — | Setup + Foundational | T001 ~ T017（17 任務）| 無 | [#16](https://github.com/sti-fhb/EDMS/issues/16) | ✅ 已開立 |
 | 1 | 通知發送服務（發信引擎 + outbox）| US6 / UCDP009 | P1-核心 | T018 ~ T020（3 任務）| #0 | [#27](https://github.com/sti-fhb/EDMS/issues/27) | ✅ 已合併（PR #29）|
 | 2 | 登入 / 登出與模組入口頁 | US1 / UCDP001 | P1-核心 | T021 ~ T025（5 任務）| #0 | [#31](https://github.com/sti-fhb/EDMS/issues/31) | ✅ 已開立 |
-| 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | — | 待補 |
+| 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | [#39](https://github.com/sti-fhb/EDMS/issues/39) | ✅ 已開立 |
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | — | 待補 |
 | 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | — | 待補 |
 | 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #2 | — | 待補 |
@@ -316,4 +316,5 @@
 | 2026-07-16 | US6 交付前自檢（`/sti-sa-precheck dp us6`）補唯一缺口：spec_us6 FR-03 + AC4、contracts SRVDP002、本 Issue #1 驗收條件補明 `CHANNEL` 不含 Email（`MSG`）時不寄（`skipped_reason="CHANNEL_NOT_EMAIL"`）|
 | 2026-07-16 | Issue #1（US6 發信服務）已開立為 GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，回填總覽表 GitHub # 欄與狀態 |
 | 2026-07-20 | Issue #2（US1 登入）已合併（PR #33 / #36）；依增量模式補入 Issue #3（使用者自助註冊 / US2）完整 body（T026~T027，前置 #0 / #2 + ET `grant_default_student_role` stub）|
+| 2026-07-20 | Issue #3（US2 自助註冊）已開立為 GitHub [#39](https://github.com/sti-fhb/EDMS/issues/39)，回填總覽表 GitHub # 欄與狀態 |
 | 2026-07-16 | Issue #1（US6）實作完成並合併（PR #29 squash），總覽表狀態更新；依增量模式補入 Issue #2（US1 登入 / 登出與模組入口頁）完整 body |
