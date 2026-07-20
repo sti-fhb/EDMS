@@ -1131,8 +1131,8 @@
       <div class="col-md-8"><label class="form-label small mb-1">範本代碼</label><input type="text" class="form-control form-control-sm" value="PWD_RESET" disabled></div>
     </div>
     <div class="mb-2"><label class="form-label small mb-1">主旨</label><input type="text" class="form-control form-control-sm" value="【EDMS】密碼重設連結"></div>
-    <div class="mb-2"><label class="form-label small mb-1">內文（支援變數 {{USER_NAME}} / {{RESET_LINK}} / {{TTL_MIN}}）</label>
-      <textarea class="form-control form-control-sm" rows="3">{{USER_NAME}} 您好，請於 {{TTL_MIN}} 分鐘內點擊以下連結重設密碼：{{RESET_LINK}}</textarea></div>
+    <div class="mb-2"><label class="form-label small mb-1">內文（支援變數 {user_name} / {reset_link} / {expiry_minutes}）</label>
+      <textarea class="form-control form-control-sm" rows="3">{user_name} 您好，請於 {expiry_minutes} 分鐘內點擊以下連結重設密碼：{reset_link}</textarea></div>
     <div class="row g-2 align-items-end">
       <div class="col-md-6"><label class="form-label small mb-1">管道</label><select class="form-select form-select-sm"><option>Email</option><option>站內</option><option>兩者</option></select></div>
       <div class="col-md-6"><div class="form-check mt-3"><input type="checkbox" class="form-check-input" id="tpl-enabled" checked disabled><label class="form-check-label small" for="tpl-enabled">啟用</label></div></div>

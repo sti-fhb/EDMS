@@ -299,9 +299,77 @@
 
 ---
 
-## Issue #4 ~ #12：待補（增量模式）
+## Issue #4：[P1-核心] DP — 忘記密碼
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1 / #2 / #3，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us3.md](spec_us3.md)（US3 / UCDP003，FR-DP-US3-01~08、DP-MSG-FORGOT-001~006）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 發信）；[research.md](research.md) §5（token 明文入信 / SHA-256 入庫）；[data-model.md](data-model.md)（`DP_PWD_RESET` / `DP_PWD_HIST` / `DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁・忘記密碼 + 重設密碼頁）
+**階段**：P1-核心（帳號自救路徑；認證鏈 US1 登入 → US2 註冊 → **US3 忘記密碼**，補齊 P1 認證鏈 MVP）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_PWD_RESET` / `DP_PWD_HIST` 表、密碼策略工具（T016，複雜度 / 重複性 / bcrypt）、速率限制（T015）、`SRVDP001`（`LOGIN.RESET_TOKEN_TTL_MIN`=30 / `PWD_POLICY.HISTORY_COUNT`=3 參數）、`SRVDP003` 稽核
+- Issue #1（GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)）已合併：`SRVDP002` 發信服務 + outbox + `DP` 密碼重設範本（`PWD_RESET`，變數 `user_name / reset_link / expiry_minutes`）——**非 stub、可直接呼叫**
+- Issue #2（GitHub [#31](https://github.com/sti-fhb/EDMS/issues/31)）已合併：登入 overlay（「忘記密碼」為其入口）
+
+### 任務說明
+
+實作忘記密碼自救：申請端點（輸入 Email → 防列舉統一回覆 → 存在帳號才產生一次性時效 token 並經 SRVDP002 寄重設信）與重設端點 / 頁面（驗 token → 檢核新密碼複雜度 + 重複性 → 更新 `DP_USER` + 追加 `DP_PWD_HIST` + 作廢 token + 寫密碼重置稽核）。token 明文僅入信中連結、DB 只存其 SHA-256（research §5）；同帳號重新申請舊 token 立即失效；**密碼重設 MUST NOT 解除鎖定 / 停用**。
+
+> ℹ️ 全端 issue：後端申請 / 重設兩端點 + 前端忘記密碼表單 / 重設密碼頁。發信經 **SRVDP002（US6 已交付、非 stub）**；申請與重設端點皆掛速率限制（IP + 帳號）。
+
+### 範圍
+
+**後端**（`app/dp/user/`）：
+- **T028 申請端點**：輸入 Email → **防列舉統一回覆**（DP-MSG-FORGOT-001，不論存在與否；帳號不存在不產 token / 不寄信）；存在帳號產生一次性時效 token（明文入信、SHA-256 入 `DP_PWD_RESET`，TOKEN_TYPE=`PWD_RESET`，EXPIRES_DATE=now+`RESET_TOKEN_TTL_MIN`）、**同帳號同型舊 token 立即作廢**、經 `SRVDP002` 寄 `PWD_RESET` 範本；掛速率限制（IP + 帳號，先限流後查存在性）；對應 FR-01~04/08
+- **T029 重設端點**：驗 token（查 SHA-256、未逾時、未使用；否則 FORGOT-002）→ 新密碼複雜度（`validate_password_strength`）+ 重複性（`is_reused` 查最近 `HISTORY_COUNT` 筆 `DP_PWD_HIST`）→ 更新 `DP_USER.PWD_HASH` / `PWD_CHANGED_DATE`、追加 `DP_PWD_HIST`、作廢 token（設 USED_DATE）、寫密碼重置稽核；**不解除 `LOCKED_UNTIL` / `STATUS`**；對應 FR-05~07
+
+**前端**（`frontend/src/auth/`）：
+- **T028 前端** 忘記密碼表單：登入 overlay 內「忘記密碼」→ 輸入 Email → 送出後顯示統一提示（FORGOT-001，防列舉）
+- **T029 前端** 重設密碼頁：信中連結落點（帶 token）→ 新密碼 / 確認密碼（Zod：複雜度 + 兩次一致）→ 送出；成功提示（FORGOT-005）跳回登入；token 失效顯示 FORGOT-002
+
+**測試**：
+- 後端 int：申請（存在→產 token + 寄信 + 舊 token 作廢；不存在→同訊息不產 token；限流 429）；重設（成功更新 + 歷程 + 稽核 + token 作廢；逾時 / 已用 token 拒；複雜度 / 重複性拒；鎖定 / 停用帳號重設成功但狀態不變）
+- 前端：忘記密碼流程（MSW）統一提示；重設頁複雜度 / 兩次一致錯誤 / 成功跳回；token 失效態
+
+### 驗收條件
+
+- [ ] 申請忘記密碼：不論 Email 是否存在皆回相同訊息（FORGOT-001，防列舉）；存在帳號才產生一次性時效 token（TTL `RESET_TOKEN_TTL_MIN`，預設 30 分）寫入 `DP_PWD_RESET`（SHA-256）並經 SRVDP002 寄 `PWD_RESET` 範本
+- [ ] token 明文僅存於信中連結，DB 僅存 SHA-256；同帳號重新申請 → 舊 token 立即失效（一次性）
+- [ ] 效期內點連結、token 驗證通過 → 進重設頁；輸入新密碼通過複雜度 + 重複性（禁最近 `HISTORY_COUNT` 次）→ 更新 `DP_USER` + 追加 `DP_PWD_HIST` + 作廢 token + 寫密碼重置稽核，提示 FORGOT-005
+- [ ] token 逾時 / 已使用 → 拒絕並提示 FORGOT-002
+- [ ] 新密碼不符複雜度 / 與最近 N 次相同 → 阻擋並提示 FORGOT-003 / 004；檢核皆伺服器端
+- [ ] 帳號鎖定 / 停用時仍回相同申請訊息；重設成功**不解除**鎖定 / 停用（`LOCKED_UNTIL` / `STATUS` 不變）
+- [ ] 忘記密碼申請 / 重設端點以「IP + 帳號」速率限制超限回 429（FORGOT-006）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：`DP_PWD_RESET` / `DP_PWD_HIST` 表、密碼策略（複雜度 / `is_reused`）、速率限制、`SRVDP001`（TTL / HISTORY_COUNT 參數）、`SRVDP003`
+- **Issue #1（GitHub #27）**：`SRVDP002` 發信 + `PWD_RESET` 範本（**非 stub、直接呼叫**）
+- **Issue #2（GitHub #31）**：登入 overlay（忘記密碼入口）
+- 外部 SMTP 可用（US6 已介接）
+
+### 注意事項
+
+- **防帳號列舉**（FR-03）：申請一律回 FORGOT-001（成功語氣）、不因帳號存在與否改變回應或時序；帳號維度速率限制先 hit 後查存在性（同 US1，#23 相關）。不存在帳號**不產 token、不寄信**。
+- **token 安全**（research §5）：明文 token 僅入信中連結，DB 存 SHA-256（`DP_PWD_RESET.TOKEN_HASH`）；一次性（USED_DATE）＋時效（EXPIRES_DATE）；同帳號重新申請作廢舊 token（作廢舊列 USED_DATE 或刪除，查 `(USER_ID, TOKEN_TYPE, USED_DATE)` 索引）。
+- **重設不改帳號狀態**（FR-07）：即使帳號鎖定 / 停用，重設密碼成功也 MUST NOT 清 `LOCKED_UNTIL` / 改 `STATUS`（解鎖 / 啟用屬 US4 管理者）。
+- **reset_link 組法**（spec_us3 Clarifications 2026-07-20）：後端組 `reset_link = {FRONTEND_BASE_URL}/reset-password?token=<明文>`；`FRONTEND_BASE_URL` 為**後端設定**（`config.py` + `.env`，dev 預設 `http://localhost:5173`），**不放 DP_PARAM**（base URL 因部署環境而異，性質同 DATABASE_URL / CORS_ORIGINS）。範本變數以種子為準：`user_name / reset_link / expiry_minutes`（單括號 `{var}`）。
+- **重設密碼頁 UI**（spec_us3 Clarifications 2026-07-20）：沿用 US1 強制變更頁殼樣式（`login-force-change`：新密碼 + 確認 + 警告 Alert），為 token 落點獨立頁；token 失效顯 FORGOT-002、成功顯 FORGOT-005 後導回登入。
+- **Error codes**（對齊 `sti-error-codes`）：token 逾時 / 已用新增碼（如 `DP_PWD_005`，400/410）；複雜度重用 `DP_PWD_001/002`、重複性重用 `DP_PWD_003`；限流 `COMMON_429`。FORGOT-001/005 為提示 / 成功、非 error。
+- 密碼 / token 不入 log / 稽核（sti-backend-logging）；稽核經 `SRVDP003.log_action`（含來源 IP）。
+- 前端表單用 Zod（`sti-zod-conventions`）；密碼欄遮蔽。
+
+### 相關文件
+
+- [spec_us3.md](spec_us3.md)、[research.md](research.md) §5、[data-model.md](data-model.md)（`DP_PWD_RESET`）、[tasks.md](tasks.md) Phase 6（T028~T029）
+- [contracts/platform-services.md](contracts/platform-services.md)（SRVDP002）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §忘記密碼；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP003
+
+**Labels**：`P1-核心`, `DP-平台`, `US3`
+
+---
+
+## Issue #5 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1 / #2 / #3 / #4，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -317,4 +385,5 @@
 | 2026-07-16 | Issue #1（US6 發信服務）已開立為 GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，回填總覽表 GitHub # 欄與狀態 |
 | 2026-07-20 | Issue #2（US1 登入）已合併（PR #33 / #36）；依增量模式補入 Issue #3（使用者自助註冊 / US2）完整 body（T026~T027，前置 #0 / #2 + ET `grant_default_student_role` stub）|
 | 2026-07-20 | Issue #3（US2 自助註冊）已開立為 GitHub [#39](https://github.com/sti-fhb/EDMS/issues/39)，回填總覽表 GitHub # 欄與狀態 |
+| 2026-07-20 | Issue #3（US2）已合併（PR #42）並 close（#39）；依增量模式補入 Issue #4（忘記密碼 / US3）完整 body（T028~T029，前置 #0 / #1〔SRVDP002 非 stub〕/ #2）|
 | 2026-07-16 | Issue #1（US6）實作完成並合併（PR #29 squash），總覽表狀態更新；依增量模式補入 Issue #2（US1 登入 / 登出與模組入口頁）完整 body |
