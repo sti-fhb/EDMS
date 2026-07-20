@@ -1,10 +1,17 @@
 import "@testing-library/jest-dom/vitest"
 
 import { cleanup } from "@testing-library/react"
-import { afterEach } from "vitest"
+import { afterAll, afterEach, beforeAll } from "vitest"
 
-// 每個 test 後清理 DOM，避免互相污染。
-// 註：MSW（API 網路層 mock）於首個實際呼叫 API 的頁面 test 引入，骨架階段尚無 API。
+import { server } from "./server"
+
+// MSW：啟動 mock server（未定義的請求視為錯誤，強制每支測試明確 mock）。
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+
+// 每個 test 後清理 DOM 並重置 handlers，避免互相污染。
 afterEach(() => {
   cleanup()
+  server.resetHandlers()
 })
+
+afterAll(() => server.close())
