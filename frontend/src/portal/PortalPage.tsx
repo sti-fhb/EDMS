@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { authApi } from "../auth/authService"
+import { useAuth } from "../auth/useAuth"
 import { QUERY_KEYS } from "../constants/queryKeys"
 import { STORAGE_KEYS } from "../constants/storage"
 
@@ -21,9 +22,14 @@ import { STORAGE_KEYS } from "../constants/storage"
  * 卡片狀態由 module-summary 端點決定；首次登入顯示歡迎橫幅（可關閉）。DP 後台入口不設於此。
  */
 export function PortalPage() {
+  const { isAuthenticated } = useAuth()
+  // 僅在已登入時查詢 module-summary：token 為 memory-only（重整即失效），未登入時
+  // 發此受保護端點只會拿到 401，且該錯誤會被 React Query 記為 query 錯誤狀態，登入後
+  // 露出本頁時殘留為「無法載入模組資訊」（#41）。以 enabled 從源頭擋掉登入前的請求。
   const { data, isPending, isError } = useQuery({
     queryKey: QUERY_KEYS.auth.moduleSummary(),
     queryFn: authApi.moduleSummary,
+    enabled: isAuthenticated,
   })
   // 首次登入顯示一次歡迎橫幅：以 localStorage 旗標記住「已顯示過」，關閉後不再出現。
   const [showWelcome, setShowWelcome] = useState(
