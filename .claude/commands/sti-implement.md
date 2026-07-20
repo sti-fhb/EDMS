@@ -1,4 +1,4 @@
-執行以下步驟，引導完成從「了解需求 → 建立分支 → 確認環境 → 安裝依賴 → 查閱文件（條件式）→ 規劃實作 → TDD → Code Review → Security Review → 本地 CI（可跳過）→ Commit & PR」的完整開發流程。
+執行以下步驟，引導完成從「了解需求 → 建立分支 → 確認環境 → 安裝依賴 → 查閱文件（條件式）→ 規劃實作 → TDD → Code Review → Security Review → AC 逐條盤點 → 本地 CI（可跳過）→ Commit & PR」的完整開發流程。
 
 ## 確認機制
 
@@ -559,6 +559,31 @@ rm -f /tmp/review-local-${BRANCH_SLUG}-meta.json /tmp/review-local-${BRANCH_SLUG
 
 ---
 
+### 步驟 10.5：AC 逐條盤點驗收
+
+⚠️ **強制步驟，在 Security Review 後、本地 CI 前執行。** 目的：趁 PR 尚未開立 / 合併，把「AC 漏做」類缺口補在**同一支 PR**，避免合併後才由 `/sti-issue-close` 盤點時發現、得另開 follow-up PR。
+
+從步驟 1 的 Issue body「## 驗收條件」取出所有 `- [ ]` 條目，逐條對照本次實作，產出對照表：
+
+| # | 驗收條件 | 狀態 | 落地位置（檔案 / 測試）|
+|---|---------|------|----------------------|
+| 1 | ... | ✅ / 🔵 / ❌ | ... |
+
+判定原則：
+- **✅ 已達成**：指出對應實作檔案與驗證測試（沒有對應測試者視為未驗證，補測試）
+- **🔵 部分達成 / ❌ 未達成**：**回步驟 8（TDD）補實作**，補完回到本步驟重新盤點；全數 ✅ 才進步驟 11
+- **架構差異**（AC 以不同方式達成、非漏做，如以登入 overlay 取代 `?redirect=` 參數）：標註並記錄理由，供步驟 13 PR 說明與日後 `/sti-issue-close` 摘要引用，不視為缺口
+
+向使用者展示對照表後詢問：
+```
+  1. 全部 ✅（或架構差異已記錄）→ 進入本地 CI
+  2. 有 🔵 / ❌ → 回步驟 8 補實作
+```
+
+> **範圍界定**：本步驟只抓「AC 逐條可對照」的缺口（如某 AC 的 UI / 持久化漏做）。實作中才會浮現的 bug（如交易 rollback 邊界）靠 TDD / Code Review 抓；本質為跨 US / 需獨立追蹤的加固項（如安全 review 的 MEDIUM/LOW）仍走 follow-up issue，不硬塞本 PR。
+
+---
+
 ### 步驟 11：本地 CI 驗證
 
 ⚠️ **此步驟在 Code Review / Security Review 全部修正完成後才執行**，避免 review 議題修正後又要重跑一次完整 CI（含 integration tests）。
@@ -611,17 +636,17 @@ rm -f /tmp/review-local-${BRANCH_SLUG}-meta.json /tmp/review-local-${BRANCH_SLUG
 
 **正常情境**（步驟 11 選擇 1，CI 通過）：
 ```
-✅ 所有驗收條件已實作
 ✅ Code Review 完成
 ✅ Security Review 完成
+✅ AC 逐條盤點通過（全 ✅ / 架構差異已記錄）
 ✅ Local CI 通過
 ```
 
 **CI 跳過情境**（步驟 11 選擇 2）：
 ```
-✅ 所有驗收條件已實作
 ✅ Code Review 完成
 ✅ Security Review 完成
+✅ AC 逐條盤點通過（全 ✅ / 架構差異已記錄）
 ⚠️ Local CI 已跳過（請確認本次變更為純文件 / 註解 / 空白異動，否則建議在 push 前手動跑 pnpm ci:local）
 ```
 
