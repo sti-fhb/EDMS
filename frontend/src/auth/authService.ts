@@ -14,6 +14,13 @@ export interface TokenResponse {
   access_token: string
 }
 
+export interface RegisterRequest {
+  email: string
+  user_name: string
+  password: string
+  confirm_password: string
+}
+
 export interface ModuleRoleStatus {
   has_role: boolean
 }
@@ -25,6 +32,9 @@ export interface ModuleSummary {
 
 /** 認證 API（US1）：登入 / 換發 / 登出 / 入口頁模組摘要。路徑相對於 baseURL（/api）。 */
 export const authApi = {
+  async register(payload: RegisterRequest): Promise<void> {
+    await http.post("/register", payload)
+  },
   async login(payload: LoginRequest): Promise<LoginResponse> {
     const { data } = await http.post<LoginResponse>("/login", payload)
     return data

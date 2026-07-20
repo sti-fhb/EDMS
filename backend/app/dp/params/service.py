@@ -32,6 +32,14 @@ class ParamService:
             return None
         return detail.param_value
 
+    async def get_int_param(self, db: AsyncSession, param_id: str, key: str, default: int) -> int:
+        """取整數參數；查無 / 停用 / 非整數字串一律回 default（利呼叫方安全 fallback）。"""
+        raw = await self.get_param_value(db, param_id, key)
+        try:
+            return int(raw) if raw is not None else default
+        except ValueError:
+            return default
+
     async def get_param_list(self, db: AsyncSession, param_id: str, enabled_only: bool = True) -> list[ParamItem]:
         """取清單型參數定義，依 SORT_ORDER 排序。
 

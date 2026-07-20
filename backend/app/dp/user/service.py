@@ -61,10 +61,10 @@ class AuthService:
 
         if not verify_password(password, user.pwd_hash):
             user.login_fail_count += 1
-            fail_lock = await self._int_param(db, "LOGIN", "FAIL_LOCK_COUNT", _DEFAULT_FAIL_LOCK_COUNT)
+            fail_lock = await self._params.get_int_param(db, "LOGIN", "FAIL_LOCK_COUNT", _DEFAULT_FAIL_LOCK_COUNT)
             reason = "密碼錯誤"
             if user.login_fail_count >= fail_lock:
-                lock_min = await self._int_param(db, "LOGIN", "LOCK_MINUTES", _DEFAULT_LOCK_MINUTES)
+                lock_min = await self._params.get_int_param(db, "LOGIN", "LOCK_MINUTES", _DEFAULT_LOCK_MINUTES)
                 user.locked_until = now + timedelta(minutes=lock_min)
                 reason = "連續失敗達上限，帳號鎖定"
             user.updated_user = _SYSTEM_USER
@@ -77,9 +77,9 @@ class AuthService:
         user.last_login_date = now
         user.updated_user = _SYSTEM_USER
         user.updated_date = now
-        ttl = await self._int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
+        ttl = await self._params.get_int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
         token = create_access_token(sub=user.user_id, ttl_minutes=ttl)
-        expiry_days = await self._int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_EXPIRY_DAYS)
+        expiry_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_EXPIRY_DAYS)
         must_change = user.must_change_pwd or is_password_expired(user.pwd_changed_date, expiry_days, now=now)
         await db.flush()
         await self._audit_auth(db, user.user_id, "LOGIN", "SUCCESS", ip, None)
@@ -94,10 +94,10 @@ class AuthService:
         Raises:
             AppError: 距 auth_time 已逾換發上限（401 DP_AUTH_003）。
         """
-        renew_max = await self._int_param(db, "JWT", "RENEW_MAX_HOURS", _DEFAULT_RENEW_MAX_HOURS)
+        renew_max = await self._params.get_int_param(db, "JWT", "RENEW_MAX_HOURS", _DEFAULT_RENEW_MAX_HOURS)
         if utcnow() - payload.auth_time >= timedelta(hours=renew_max):
             raise AppError(status_code=401, detail="已達單次登入時數上限，請重新登入", error_code="DP_AUTH_003")
-        ttl = await self._int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
+        ttl = await self._params.get_int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
         token = create_access_token(sub=payload.sub, ttl_minutes=ttl, auth_time=payload.auth_time)
         return TokenResponse(access_token=token)
 
@@ -125,13 +125,6 @@ class AuthService:
         await self._audit_auth(db, operator_id, "LOGIN", "FAIL", ip, reason)
         await db.commit()
         raise AppError(status_code=status_code, detail=detail, error_code=error_code)
-
-    async def _int_param(self, db: AsyncSession, param_id: str, key: str, default: int) -> int:
-        raw = await self._params.get_param_value(db, param_id, key)
-        try:
-            return int(raw) if raw is not None else default
-        except ValueError:
-            return default
 
     async def _audit_auth(
         self,

@@ -176,7 +176,9 @@ async def client(db):
             raise
 
     main.app.dependency_overrides[get_db] = _override_get_db
-    transport = ASGITransport(app=main.app)
+    # raise_app_exceptions=False：未處理例外由 app 的 exception_handler 轉為 500 回應（貼近真實 HTTP），
+    # 而非 re-raise 到測試；使「例外 → 500 + 交易回滾」路徑可被驗證。
+    transport = ASGITransport(app=main.app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         yield c
     main.app.dependency_overrides.clear()
