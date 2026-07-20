@@ -117,11 +117,18 @@ QUERY_KEYS.xxx.detail(id)              // 單筆
 ---
 
 ### `STORAGE_KEYS` · `src/constants/storage.ts`
-localStorage 存取一律用此常數，禁止硬編碼字串。
+localStorage 存取一律用此常數，禁止硬編碼字串。**僅用於非敏感的 UI 偏好 / 一次性旗標**
+（如歡迎橫幅已顯示、清單頁面大小），禁止存放認證 token 或任何機密。
 
 ```tsx
-localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, token)
+localStorage.setItem(STORAGE_KEYS.WELCOME_DISMISSED, "1")
 ```
+
+> ⚠️ **Access token 一律 memory-only，禁止落 localStorage**（US1 決策）。
+> JWT access token 只存記憶體（`AuthProvider` React state ＋ `services/http.ts` 模組變數），
+> 由 `setAuthToken()` 同步給 axios interceptor；重整即失效、需重新登入。理由：localStorage 對所有同源
+> JS 完全可讀，是 XSS 竊取 session token 的頭號目標；memory-only 把 token 暴露窗口縮到最短，
+> 搭配短 TTL（15 分）＋ 活動換發維持體驗。參考實作見 `src/auth/AuthProvider.tsx`、`src/services/http.ts`。
 
 ---
 
