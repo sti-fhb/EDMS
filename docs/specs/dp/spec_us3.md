@@ -31,6 +31,19 @@
 - **FR-DP-US3-07**: 密碼重設 MUST NOT 解除帳號之鎖定 / 停用狀態
 - **FR-DP-US3-08**: 忘記密碼端點 MUST 實施伺服器端速率限制（來源 IP + 帳號）
 
+## Clarifications
+
+### Session 2026-07-20（US3 開工前自檢釐清）
+
+- **Q（FR-05 重設密碼頁 UI）**：信中連結落點的「設定新密碼」頁 wireframe 未畫專屬 screen，UI 如何定？
+  → **A：沿用 US1 強制變更頁殼樣式**（`wireframes/dp/index.html` 之 `login-force-change`：新密碼 + 確認新密碼 + 警告 Alert）。重設頁為 token 落點的獨立頁（非 overlay 分頁），欄位與版式比照強制變更頁殼；token 失效顯示 FORGOT-002、成功顯示 FORGOT-005 後導回登入。業務行為以 FR-05/06 為準，wireframe 缺 screen 不影響開發。
+
+- **Q（FR-04 reset_link base URL 來源）**：重設信連結需前端重設頁完整 URL，base（scheme+host）從哪來？
+  → **A：後端設定（`config.py` + `.env`）新增 `FRONTEND_BASE_URL`**，由後端組 `reset_link = {FRONTEND_BASE_URL}/reset-password?token=<明文token>`。**不放 DP_PARAM**——base URL 因部署環境而異（dev / staging / prod 不同），性質同 `DATABASE_URL` / `CORS_ORIGINS` / `MAIL_SERVER`，屬部署設定；dev 預設 `http://localhost:5173`（對齊既有 `CORS_ORIGINS`）。
+
+- **Q（範本變數）**：`PWD_RESET` 範本變數以何為準？
+  → **A：以種子為準**：`user_name` / `reset_link` / `expiry_minutes`，語法為單括號 `{var}`（US6 `_SafeFormatter`）。wireframe 範本編輯 modal 之示範文字 `{{TTL_MIN}}` 等為舊 mockup、已校正對齊種子。
+
 ## 系統訊息
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
