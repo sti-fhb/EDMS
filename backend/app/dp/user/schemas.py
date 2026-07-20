@@ -8,6 +8,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    """自助註冊請求（US2）。Email 格式由前端 Zod 把關，後端沿用 str 避免 email-validator 依賴。"""
+
+    email: str
+    user_name: str
+    password: str
+    confirm_password: str
+
+
 class LoginResponse(BaseModel):
     """登入回應：JWT access token + 是否需強制變更密碼。"""
 

@@ -1,4 +1,4 @@
-"""認證端點（US1）：登入（匿名）/ 換發 / 登出 / 入口頁模組摘要。"""
+"""認證端點（US1 / US2）：登入 / 註冊（匿名）/ 換發 / 登出 / 入口頁模組摘要。"""
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,14 +8,25 @@ from app.core.db import get_db
 from app.core.module_roles import module_role_gate
 from app.core.password_gate import require_password_current
 from app.core.rate_limit import LOGIN_RATE_MAX, RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
-from app.dp.user.schemas import LoginRequest, LoginResponse, ModuleRoleStatus, ModuleSummary, TokenResponse
+from app.dp.user.register_service import RegisterService
+from app.dp.user.schemas import (
+    LoginRequest,
+    LoginResponse,
+    ModuleRoleStatus,
+    ModuleSummary,
+    RegisterRequest,
+    TokenResponse,
+)
 from app.dp.user.service import AuthService
 
 # 登入限流器（行程內；IP 與帳號維度共用同一器、以 key 前綴區分）
 _login_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# 註冊限流器（IP 維度；防批量灌帳號）
+_register_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 
 router = APIRouter(prefix="/api", tags=["auth"])
 _service = AuthService()
+_register_service = RegisterService()
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -27,6 +38,22 @@ async def login(
     """帳密登入（匿名端點）。IP + 帳號雙維度限流；帳號維度**先 hit 限流、後查存在性**防列舉。"""
     _login_limiter.hit(f"login:acct:{data.email}")
     return await _service.login(db, email=data.email, password=data.password)
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(
+    data: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+    _ip_limit: None = Depends(rate_limit_by_ip(_register_limiter, "register")),
+) -> None:
+    """自助註冊（匿名端點，IP 限流防批量灌帳號）。伺服器端檢核 → 建帳號 + 授 ET 學員 + 雙稽核，回 201。"""
+    await _register_service.register(
+        db,
+        email=data.email,
+        user_name=data.user_name,
+        password=data.password,
+        confirm_password=data.confirm_password,
+    )
 
 
 @router.post("/dp/user/renew", response_model=TokenResponse)
