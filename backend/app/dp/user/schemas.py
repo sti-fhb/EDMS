@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, StringConstraints
 
 
 class LoginRequest(BaseModel):
@@ -9,10 +11,20 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """自助註冊請求（US2）。Email 格式由前端 Zod 把關，後端沿用 str 避免 email-validator 依賴。"""
+    """自助註冊請求（US2）。
 
-    email: str
-    user_name: str
+    匿名端點可繞過前端，故後端於 schema 層即把關長度與 Email 基本格式（去頭尾空白後）：
+    - EMAIL / USER_NAME 對齊 DP_USER 欄位長度（255 / 50），不合規走 422（RequestValidationError），
+      避免超長字串落到 DB 層例外變成 500。
+    - Email 格式以輕量 regex 檢核（不引 email-validator 依賴，沿用 US1 決策）。
+    - password 不 strip（前後空白可為合法密碼字元）；複雜度 / 兩次一致由服務層權威檢核。
+    """
+
+    email: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
+    ]
+    user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
     password: str
     confirm_password: str
 

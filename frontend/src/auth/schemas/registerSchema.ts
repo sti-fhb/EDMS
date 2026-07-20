@@ -8,10 +8,13 @@ export const RegisterRequestSchema = z
   .object({
     email: z
       .string()
+      .trim()
       .min(1, { message: "請輸入 Email" })
+      .max(255, { message: "Email 長度不可超過 255 字元" })
       .email({ message: "Email 格式不正確" }),
     user_name: z
       .string()
+      .trim()
       .min(1, { message: "請輸入姓名" })
       .max(50, { message: "姓名長度不可超過 50 字元" }),
     password: z

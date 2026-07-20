@@ -10,6 +10,7 @@ from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.user.models import DpPwdHistory
 from app.dp.user.register_service import RegisterService
+from app.dp.user.repository import AuthRepository
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
@@ -120,3 +121,49 @@ async def test_register_unprovisioned_module_noop(db):
     )
     user = (await db.execute(select(DpUser).where(DpUser.email == "noet@edms.local"))).scalar_one()
     assert user.status == "ACTIVE"
+
+
+async def test_register_grant_failure_rolls_back(client, db):
+    """已註冊 ET granter 拋例外 → 整筆交易回滾（帳號 / 歷程 / 稽核皆不落地），回 500。"""
+
+    async def _boom(_db, _user_id):
+        raise RuntimeError("ET service down")
+
+    module_provisioning_gate.register("ET", _boom)
+    try:
+        r = await client.post("/api/register", json=_payload(email="rollback@edms.local"))
+    finally:
+        module_provisioning_gate.unregister("ET")
+    assert r.status_code == 500  # granter 例外 → 通用 500（get_db rollback）
+    # 整筆回滾：帳號 / 首筆歷程 / 稽核皆未落地
+    assert (await db.execute(select(DpUser).where(DpUser.email == "rollback@edms.local"))).scalar_one_or_none() is None
+    assert (await db.execute(select(DpPwdHistory).where(DpPwdHistory.user_id == "rollback"))).first() is None
+
+
+async def test_register_email_race_maps_to_409(db, et_stub):
+    """TOCTOU 競態：email_exists 檢查時不存在、寫入時已存在 → IntegrityError 轉乾淨 409（非 500）。"""
+    now = utcnow()
+    db.add(
+        DpUser(
+            user_id="racer1",
+            email="race@edms.local",
+            pwd_hash=hash_password(_GOOD_PWD),
+            user_name="既有",
+            status="ACTIVE",
+            login_fail_count=0,
+            pwd_changed_date=now,
+            created_user="admin01",
+            created_date=now,
+        )
+    )
+    await db.flush()
+
+    class _RaceRepo(AuthRepository):
+        async def email_exists(self, _db, _email):
+            return False  # 模擬檢查瞬間查無、寫入瞬間已被搶註
+
+    with pytest.raises(AppError) as exc:
+        await RegisterService(repository=_RaceRepo()).register(
+            db, email="race@edms.local", user_name="競態", password=_GOOD_PWD, confirm_password=_GOOD_PWD
+        )
+    assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_001"
