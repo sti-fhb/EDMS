@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173"
 
+    # 前端公開 base URL（組信中連結，如密碼重設頁）；因部署環境而異，dev 預設對齊前端 dev server
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
+
     # 資料庫
     DATABASE_URL: str
 

@@ -10,6 +10,20 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    """忘記密碼申請請求（US3）。僅需 Email；一律回相同訊息（防列舉）。"""
+
+    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
+
+
+class ResetPasswordRequest(BaseModel):
+    """密碼重設請求（US3）。token 為信中連結明文；新密碼複雜度 / 重複性由服務層權威檢核。"""
+
+    token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    new_password: str
+    confirm_password: str
+
+
 class RegisterRequest(BaseModel):
     """自助註冊請求（US2）。
 
