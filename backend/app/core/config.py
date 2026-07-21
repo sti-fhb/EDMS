@@ -19,10 +19,11 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173"
+    # dev 預設對齊前端 dev server（vite.config 用 5174，刻意與同機 TBMS 5173 錯開）
+    CORS_ORIGINS: str = "http://localhost:5174"
 
-    # 前端公開 base URL（組信中連結，如密碼重設頁）；因部署環境而異，dev 預設對齊前端 dev server
-    FRONTEND_BASE_URL: str = "http://localhost:5173"
+    # 前端公開 base URL（組信中連結，如密碼重設頁）；因部署環境而異，dev 預設對齊前端 dev server（5174）
+    FRONTEND_BASE_URL: str = "http://localhost:5174"
 
     # 資料庫
     DATABASE_URL: str
@@ -98,7 +99,7 @@ class Settings(BaseSettings):
         if "*" in origins:
             raise ValueError(
                 "CORS_ORIGINS 不可包含 '*'，因為已啟用 allow_credentials=True。\n"
-                "請明確列出允許的 origin，例如：http://localhost:5173,https://edms.example.com"
+                "請明確列出允許的 origin，例如：http://localhost:5174,https://edms.example.com"
             )
         return origins
 
