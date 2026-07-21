@@ -11,6 +11,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import type { FormEvent } from "react"
 
+import { ForgotPasswordForm } from "./ForgotPasswordForm"
 import { RegisterForm } from "./RegisterForm"
 import { useAuth } from "./useAuth"
 import { toApiError } from "../services/http"
@@ -28,6 +29,7 @@ export function LoginOverlay() {
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [registeredMessage, setRegisteredMessage] = useState<string | null>(null)
+  const [forgotMode, setForgotMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e: FormEvent) => {
@@ -71,6 +73,10 @@ export function LoginOverlay() {
         <Typography variant="h6" align="center" gutterBottom>
           EDMS
         </Typography>
+        {forgotMode ? (
+          <ForgotPasswordForm onBack={() => setForgotMode(false)} />
+        ) : (
+          <>
         <Tabs
           value={tab}
           onChange={(_e, v) => {
@@ -130,7 +136,17 @@ export function LoginOverlay() {
                 <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
                   登入
                 </Button>
-                <Link href="/forgot-password" underline="hover" variant="body2">
+                <Link
+                  component="button"
+                  type="button"
+                  underline="hover"
+                  variant="body2"
+                  onClick={() => {
+                    setForgotMode(true)
+                    setErrorMessage(null)
+                    setRegisteredMessage(null)
+                  }}
+                >
                   忘記密碼？
                 </Link>
               </Stack>
@@ -138,6 +154,8 @@ export function LoginOverlay() {
           </>
         ) : (
           <RegisterForm onSuccess={handleRegistered} />
+        )}
+          </>
         )}
       </Card>
     </Box>
