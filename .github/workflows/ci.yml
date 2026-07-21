@@ -18,7 +18,7 @@
 #            └─ frontend (ESLint + type-check + tests；frontend/ 建立後才觸發)
 #                                                          └─► all-checks
 #
-# 註：E2E job 待 ET/DM 有 UI + e2e/ 目錄後再補（見 issue 追蹤）。
+# 註：E2E job 待 ET/DM 有 UI + e2e/ 目錄後再補（見 #57）。
 # ============================================================
 
 name: CI
