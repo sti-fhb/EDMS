@@ -1,6 +1,8 @@
 """一次性驗證 token 工具（US3 忘記密碼 / 後續 EMAIL_CHANGE 共用）。
 
-明文 token 僅存在於信中連結，DB 只存其 SHA-256（research §5）——即使 DB 外洩也無法反推明文。
+明文 token 僅入信中連結，`DP_PWD_RESET` 表只存其 SHA-256（research §5），故該表外洩無法反推明文。
+⚠️ 殘餘風險：寄出的信件內文（含明文 reset_link）會以快照存於 `DP_EMAIL_LOG.BODY`（US6 outbox），
+在 token 有效期內具可用性——此為 outbox 架構取捨，敏感信 body 之遮罩 / 清除與存取控管另立 follow-up。
 """
 
 import hashlib

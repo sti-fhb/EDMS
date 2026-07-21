@@ -11,9 +11,12 @@ class LoginRequest(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    """忘記密碼申請請求（US3）。僅需 Email；一律回相同訊息（防列舉）。"""
+    """忘記密碼申請請求（US3）。僅需 Email；一律回相同訊息（防列舉）。格式把關與 RegisterRequest 一致。"""
 
-    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
+    email: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
+    ]
 
 
 class ResetPasswordRequest(BaseModel):

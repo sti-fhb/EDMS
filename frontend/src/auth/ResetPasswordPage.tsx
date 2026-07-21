@@ -6,7 +6,7 @@ import Link from "@mui/material/Link"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
 import { useSearchParams } from "react-router-dom"
 
@@ -22,7 +22,11 @@ import { getFieldErrors } from "../utils/zodUtils"
  */
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams()
-  const token = searchParams.get("token") ?? ""
+  // 只在首次 render 擷取 token，隨即從網址移除，避免 token 殘留於瀏覽器歷史 / Referer（Security M-2）
+  const [token] = useState(() => searchParams.get("token") ?? "")
+  useEffect(() => {
+    if (token) window.history.replaceState(null, "", window.location.pathname)
+  }, [token])
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})

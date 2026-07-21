@@ -101,14 +101,16 @@ class ResetPasswordService:
         if new_password != confirm_password:
             raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
 
-        row = await self._repo.get_reset_token_by_hash(db, hash_token(token), _TOKEN_TYPE)
+        token_hash = hash_token(token)
+        row = await self._repo.get_reset_token_by_hash(db, token_hash, _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= now:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         user = await self._repo.get_by_user_id(db, row.user_id)
         if user is None:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
-        # 複雜度（一般使用者）+ 重複性（禁最近 HISTORY_COUNT 次）
+        # 複雜度（一般使用者）+ 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
+        # 使複雜度 / 重複失敗時不白白作廢 token（使用者可用同連結重試）。
         min_len = await self._params.get_int_param(db, "PWD_POLICY", "MIN_LEN", _DEFAULT_MIN_LEN)
         char_types = await self._params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES)
         validate_password_strength(new_password, min_length=min_len, required_char_types=char_types)
@@ -117,14 +119,17 @@ class ResetPasswordService:
         if is_reused(new_password, recent):
             raise AppError(status_code=422, detail="不可與最近使用過之密碼相同", error_code="DP_PWD_003")
 
-        # 更新（不改鎖定 / 停用）+ 追加歷程 + 作廢 token + 稽核
+        # 原子消費 token（關閉「查→標用」TOCTOU；並發同 token 只有一個成功）→ 作為後續寫入的閘
+        if await self._repo.consume_reset_token(db, token_hash=token_hash, token_type=_TOKEN_TYPE, now=now) is None:
+            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+
+        # 更新（不改鎖定 / 停用）+ 追加歷程 + 稽核
         new_hash = hash_password(new_password)
         await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user.user_id, now=now)
         seq_no = await self._repo.next_pwd_seq_no(db, user.user_id)
         await self._repo.add_pwd_history(
             db, user_id=user.user_id, seq_no=seq_no, pwd_hash=new_hash, operator_id=user.user_id, now=now
         )
-        await self._repo.mark_reset_token_used(db, token=row, now=now)
         await self._audit.log_action(
             db,
             module="DP",

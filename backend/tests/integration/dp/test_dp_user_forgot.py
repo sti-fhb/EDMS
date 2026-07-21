@@ -133,6 +133,19 @@ async def test_reset_success(db):
     assert audit and audit[-1].action_type == "UPDATE" and audit[-1].result == "SUCCESS"
 
 
+async def test_reset_endpoint_success(client, db):
+    """端點：有效 token + 合規新密碼 → 200 + 訊息，密碼實際更新（驗 router→schema→service 串接）。"""
+    await _make_user(db, user_id="ep", email="ep@edms.local")
+    plaintext = await _make_token(db, user_id="ep")
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200 and "密碼已更新" in r.json()["message"]
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "ep"))).scalar_one()
+    assert verify_password(_NEW_PWD, user.pwd_hash)
+
+
 async def test_reset_expired_token(db):
     """token 逾時 → DP_PWD_005。"""
     await _make_user(db, user_id="ex2", email="ex2@edms.local")

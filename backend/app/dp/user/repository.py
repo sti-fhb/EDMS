@@ -142,7 +142,24 @@ class AuthRepository:
         stmt = select(DpPwdReset).where(DpPwdReset.token_hash == token_hash, DpPwdReset.token_type == token_type)
         return (await db.execute(stmt)).scalar_one_or_none()
 
-    async def mark_reset_token_used(self, db: AsyncSession, *, token: DpPwdReset, now: datetime) -> None:
-        """標記 token 已使用（作廢）。"""
-        token.used_date = now
-        await db.flush()
+    async def consume_reset_token(
+        self, db: AsyncSession, *, token_hash: str, token_type: str, now: datetime
+    ) -> str | None:
+        """原子作廢並取回 token 對應 USER_ID：僅當「未使用且未逾時」才成功（RETURNING）。
+
+        以單一條件式 UPDATE 關閉「查詢未使用 → 標記已用」之間的 TOCTOU 空窗——並發提交同一 token 時，
+        只有第一個請求會更新到列（拿到 user_id），其餘回 None，確保一次性 token 不變量在並發下成立。
+        回 None 代表 token 不存在 / 已用 / 已逾時（呼叫方一律轉 DP_PWD_005）。
+        """
+        stmt = (
+            update(DpPwdReset)
+            .where(
+                DpPwdReset.token_hash == token_hash,
+                DpPwdReset.token_type == token_type,
+                DpPwdReset.used_date.is_(None),
+                DpPwdReset.expires_date > now,
+            )
+            .values(used_date=now)
+            .returning(DpPwdReset.user_id)
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
