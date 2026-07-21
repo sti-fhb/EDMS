@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from "react-router-dom"
 
 import { DpLayout } from "./layouts/DpLayout"
+import { PortalLayout } from "./layouts/PortalLayout"
 import { RootLayout } from "./layouts/RootLayout"
 import { AuditPage } from "./dp/audit/AuditPage"
 import { TemplatesPage } from "./dp/notify/TemplatesPage"
@@ -15,7 +16,11 @@ export const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
       { index: true, element: <Navigate to="/portal" replace /> },
-      { path: "portal", element: <PortalPage /> },
+      {
+        path: "portal",
+        element: <PortalLayout />,
+        children: [{ index: true, element: <PortalPage /> }],
+      },
       {
         path: "dp",
         element: <DpLayout />,

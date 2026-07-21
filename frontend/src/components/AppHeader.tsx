@@ -10,8 +10,8 @@ import { useState } from "react"
 
 import { useAuth } from "../auth/useAuth"
 
-/** 頂列：系統標題 + 右上個資選單（個人資料 / 登出）。 */
-export function AppHeader() {
+/** 頂列：系統標題 + 右上個資選單（個人資料 / 登出）。title 預設為後台語意，入口頁等情境可覆寫。 */
+export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
   const { logout } = useAuth()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const open = Boolean(anchorEl)
@@ -26,7 +26,7 @@ export function AppHeader() {
     <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Toolbar>
         <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          EDMS 平台後台
+          {title}
         </Typography>
         <Box>
           <IconButton
