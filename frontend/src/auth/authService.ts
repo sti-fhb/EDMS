@@ -21,6 +21,12 @@ export interface RegisterRequest {
   confirm_password: string
 }
 
+export interface ResetPasswordRequest {
+  token: string
+  new_password: string
+  confirm_password: string
+}
+
 export interface ModuleRoleStatus {
   has_role: boolean
 }
@@ -34,6 +40,12 @@ export interface ModuleSummary {
 export const authApi = {
   async register(payload: RegisterRequest): Promise<void> {
     await http.post("/register", payload)
+  },
+  async forgotPassword(email: string): Promise<void> {
+    await http.post("/forgot-password", { email })
+  },
+  async resetPassword(payload: ResetPasswordRequest): Promise<void> {
+    await http.post("/reset-password", payload)
   },
   async login(payload: LoginRequest): Promise<LoginResponse> {
     const { data } = await http.post<LoginResponse>("/login", payload)

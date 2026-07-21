@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dp.user.models import DpPwdHistory
+from app.dp.user.models import DpPwdHistory, DpPwdReset
 from app.dp.users.models import DpUser
 
 
@@ -69,3 +69,97 @@ class AuthRepository:
             )
         )
         await db.flush()
+
+    async def next_pwd_seq_no(self, db: AsyncSession, user_id: str) -> int:
+        """該使用者密碼歷程的下一個 SEQ_NO（現有最大 +1；無歷程回 1）。"""
+        stmt = select(func.max(DpPwdHistory.seq_no)).where(DpPwdHistory.user_id == user_id)
+        return ((await db.execute(stmt)).scalar_one() or 0) + 1
+
+    async def recent_pwd_hashes(self, db: AsyncSession, user_id: str, limit: int) -> list[str]:
+        """取該使用者最近 limit 筆密碼雜湊（SEQ_NO 由大到小），供重複性檢核。"""
+        stmt = (
+            select(DpPwdHistory.pwd_hash)
+            .where(DpPwdHistory.user_id == user_id)
+            .order_by(DpPwdHistory.seq_no.desc())
+            .limit(limit)
+        )
+        return list((await db.execute(stmt)).scalars().all())
+
+    async def update_password(
+        self, db: AsyncSession, *, user: DpUser, pwd_hash: str, operator_id: str, now: datetime
+    ) -> None:
+        """更新使用者密碼與變更時間；清 MUST_CHANGE_PWD（使用者已自設密碼）。**不動鎖定 / 停用狀態**。"""
+        user.pwd_hash = pwd_hash
+        user.pwd_changed_date = now
+        user.must_change_pwd = False
+        user.updated_user = operator_id
+        user.updated_date = now
+        await db.flush()
+
+    # --- 密碼重設 token（DP_PWD_RESET）---
+
+    async def invalidate_active_reset_tokens(
+        self, db: AsyncSession, *, user_id: str, token_type: str, now: datetime
+    ) -> None:
+        """作廢同使用者同型別所有未使用的 token（一次性：新申請前先廢舊）。"""
+        stmt = (
+            update(DpPwdReset)
+            .where(
+                DpPwdReset.user_id == user_id,
+                DpPwdReset.token_type == token_type,
+                DpPwdReset.used_date.is_(None),
+            )
+            .values(used_date=now)
+        )
+        await db.execute(stmt)
+
+    async def create_reset_token(
+        self,
+        db: AsyncSession,
+        *,
+        token_hash: str,
+        user_id: str,
+        token_type: str,
+        expires_date: datetime,
+        operator_id: str,
+        now: datetime,
+    ) -> None:
+        """新增一次性重設 token（僅存 SHA-256）。"""
+        db.add(
+            DpPwdReset(
+                token_hash=token_hash,
+                user_id=user_id,
+                token_type=token_type,
+                expires_date=expires_date,
+                created_user=operator_id,
+                created_date=now,
+            )
+        )
+        await db.flush()
+
+    async def get_reset_token_by_hash(self, db: AsyncSession, token_hash: str, token_type: str) -> DpPwdReset | None:
+        """以 SHA-256 查 token 列（不論是否逾時 / 已用，效期與使用狀態由服務層判定）；不存在回 None。"""
+        stmt = select(DpPwdReset).where(DpPwdReset.token_hash == token_hash, DpPwdReset.token_type == token_type)
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def consume_reset_token(
+        self, db: AsyncSession, *, token_hash: str, token_type: str, now: datetime
+    ) -> str | None:
+        """原子作廢並取回 token 對應 USER_ID：僅當「未使用且未逾時」才成功（RETURNING）。
+
+        以單一條件式 UPDATE 關閉「查詢未使用 → 標記已用」之間的 TOCTOU 空窗——並發提交同一 token 時，
+        只有第一個請求會更新到列（拿到 user_id），其餘回 None，確保一次性 token 不變量在並發下成立。
+        回 None 代表 token 不存在 / 已用 / 已逾時（呼叫方一律轉 DP_PWD_005）。
+        """
+        stmt = (
+            update(DpPwdReset)
+            .where(
+                DpPwdReset.token_hash == token_hash,
+                DpPwdReset.token_type == token_type,
+                DpPwdReset.used_date.is_(None),
+                DpPwdReset.expires_date > now,
+            )
+            .values(used_date=now)
+            .returning(DpPwdReset.user_id)
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()

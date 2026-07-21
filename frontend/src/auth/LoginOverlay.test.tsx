@@ -126,4 +126,15 @@ describe("LoginOverlay", () => {
     expect(await screen.findByText("兩次輸入之密碼不一致")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "建立帳號" })).toBeInTheDocument()
   })
+
+  it("忘記密碼 → 送出後顯示統一提示（防列舉）", async () => {
+    renderLogin()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "忘記密碼？" }))
+    await user.type(screen.getByLabelText("帳號（Email）"), "any@edms.local")
+    await user.click(screen.getByRole("button", { name: "送出" }))
+    expect(
+      await screen.findByText("若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"),
+    ).toBeInTheDocument()
+  })
 })
