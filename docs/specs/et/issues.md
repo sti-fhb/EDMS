@@ -31,6 +31,8 @@
 | 15 | 課後問卷（建立 / 填寫）| US13 / UCET013（建立屬 US3）| P2-延伸 | T141 ~ T143（3 任務）| #3, #5 |
 | 16 | 排程統計與提醒（SCHET001 / SCHET002）| US14 / UCET014 | P2-延伸 | T139, T145 ~ T148（5 任務）| #4, #5, #17 |
 | 17 | ET09 通知範本維護 | US15 / UCET015 | P3-輔助 | T151（1 任務）| #0 |
+| 18 | ET03 學員線下考核核可 | US16 / UCET016 | P2-延伸 | T156 ~ T161, T163（7 任務）| #3, #6, #17 |
+| 19 | ET10 核可查詢 | US17 / UCET017 | P2-延伸 | T162（1 任務）| #18 |
 
 ---
 
@@ -46,14 +48,15 @@
 **涵蓋 Tasks**：
 - T001 建立 ET 模組專案結構（controllers / services / repositories / models / migrations / templates）
 - T002 ~ T020 建立 ET 18 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
-- T125 ~ T129 建立 2026-07-02 新增表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT）；通知範本改 seed 至平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，6 類可維護範本；表由平台 DP 建，ET 不自建，2026-07-08 集中化）
+- T125 ~ T129 建立 2026-07-02 新增表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT）；通知範本改 seed 至平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，7 類可維護範本〔2026-07-17 增列 APPROVAL_PASSED〕；表由平台 DP 建，ET 不自建，2026-07-08 集中化）
+  > 線下核可表 ET_APPROVAL 與 ET_COURSE.REQUIRE_APPROVAL 欄位之 Migration（T156）於 Issue #18 建立（2026-07-17）
 - T021 ~ T023 建立 Lookup 代碼、ET_TAG（5 筆種子：全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）；ET 系統參數（前綴 `ET_`）seed 至平台 `DP_PARAM`（ET 不自建參數表）
 - T024 系統初始化第一個管理者 Seed Script
 - T025 ~ T032 共用元件（8 項）：SSO 認證中介層、角色權限檢查、ET 參數載入工具（透過平台 `DP_PARAM` 唯讀查詢）、樂觀鎖檢核、DM Service Client、平台發信服務 Client（經 `DP_EMAIL_LOG`）、Token 產生器、邀請碼產生器
 
 **驗收條件**：
-1. 27 張資料表全部建立；標準稽核欄位（CREATED_USER / CREATED_DATE / UPDATED_USER / UPDATED_DATE）齊備
-2. 8 類 Lookup 代碼資料、5 筆 ET_TAG 種子載入成功；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）、6 類通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`）seed 由平台 DP 載入成功
+1. 27 張資料表全部建立（線下核可 ET_APPROVAL 於 Issue #18 建立，全模組共 28 張）；標準稽核欄位（CREATED_USER / CREATED_DATE / UPDATED_USER / UPDATED_DATE）齊備
+2. 9 類 Lookup 代碼資料（2026-07-17 增列 ET_APPROVAL_RESULT）、5 筆 ET_TAG 種子載入成功；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）、7 類通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`；含 APPROVAL_PASSED）seed 由平台 DP 載入成功
 3. IT 透過 Seed Script 寫入 `DP_USER` + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
 4. SSO 認證中介層可驗證 session 並注入 USER_ID 與角色清單
 5. 樂觀鎖工具於版本不符時回傳明確衝突訊息
@@ -579,14 +582,14 @@
 **對應規格**：[spec_us15.md](spec_us15.md)、UCET015、畫面：系統設定「通知範本」分頁（ET09；與 ET07 合併於單一系統設定畫面，比照 DM09）
 **階段**：P3-輔助
 **前置條件**：
-- Issue #0 完成（平台 `DP_NOTIFY_TEMPLATE` 表由平台 DP 建立、ET 6 類可維護範本 `MODULE=ET` seed 已建）
+- Issue #0 完成（平台 `DP_NOTIFY_TEMPLATE` 表由平台 DP 建立、ET 7 類可維護範本 `MODULE=ET` seed 已建；2026-07-17 增列 APPROVAL_PASSED）
 - 當前登入者具備管理者角色
 
 **涵蓋 Tasks**：
 - T151 ET09 通知範本維護頁（讀寫平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`；範本清單、主旨 / 內文編輯、變數插入、排程參數調整）
 
 **驗收條件**：
-1. 列出平台 `DP_NOTIFY_TEMPLATE` 中 `MODULE=ET` 之 6 類內建範本（COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT）；不可新增 / 刪除範本代碼；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）不在清單（由平台維護、ET 不可編輯 / 停用）
+1. 列出平台 `DP_NOTIFY_TEMPLATE` 中 `MODULE=ET` 之 7 類內建範本（COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT / APPROVAL_PASSED）；不可新增 / 刪除範本代碼；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）不在清單（由平台維護、ET 不可編輯 / 停用）
 1a. 每範本可**啟用 / 停用**（IS_ACTIVE，比照 DM）；停用後該類信件不寄送（觸發事件照常運作），清單標示「已停用」（2026-07-02 新增）
 2. 管理者可編輯主旨與內文（支援變數如 {{COURSE_NAME}}；未定義變數儲存時警告）
 3. 儲存後所有該類信件依新內容渲染；樂觀鎖防多人同時編輯覆蓋
@@ -594,6 +597,53 @@
 5. 教師 / 學員無法進入 ET09（選單不顯示、endpoint 拒絕）；教師於 US8 僅可預覽不可編輯信件內容
 
 **Labels**：`P3-輔助`, `US15`, `UCET015`, `admin`, `notification`, `frontend`, `backend`
+
+---
+
+## Issue #18：ET03 學員線下考核核可（2026-07-17 新增）
+
+**對應規格**：[spec_us16.md](spec_us16.md)、UCET016、畫面：ET03「已加入」頁籤（核可狀態欄與核可 / 撤銷操作）
+**階段**：P2-延伸
+**前置條件**：
+- Issue #3（課程建立，含 `REQUIRE_APPROVAL` 開關 T161）、Issue #6（測驗，完課判定基礎）完成
+- Issue #17 / #0（平台 `DP_NOTIFY_TEMPLATE` 之 `APPROVAL_PASSED` 範本 seed 已建）
+
+**涵蓋 Tasks**：
+- T156 [P] Migration：ET_APPROVAL（(COURSE_ID, USER_ID) 唯一）＋ ET_COURSE.REQUIRE_APPROVAL 欄位
+- T157 [US16] ET_APPROVAL Repository + 核可 Service（前提檢核完課、通過 / 不通過寫入、批次、樂觀鎖）
+- T158 [US16] 撤銷 Service（IS_REVOKED、撤銷原因必填、回「待核可」、可重核）
+- T159 [US16] 核可通過寄信（平台範本 `APPROVAL_PASSED`；不通過 / 撤銷不寄）
+- T160 [US16] ET03 核可 UI（核可狀態欄、通過 / 不通過、批次核可、撤銷 modal；未完課不顯示核可鈕；課程關閉唯讀）
+- T161 [US3] ET02 「是否需線下核可」（REQUIRE_APPROVAL）開關
+- T163 整合測試：線下核可（完課前提、通過寄信、不通過留紀錄、撤銷需原因、完課回退不失效、關閉唯讀、獨立於完課率）
+
+**驗收條件**：
+1. 僅 `REQUIRE_APPROVAL = true` 之課程於 ET03 顯示核可欄；未完課學員不顯示核可鈕（狀態「未達核可資格」）
+2. 對已完課學員可核可通過 / 不通過（可批次）；通過寄 `APPROVAL_PASSED` 通知、不通過留紀錄不寄信
+3. 撤銷須填原因，撤銷後回「待核可」可重核；核可 / 撤銷記錄執行者與時間
+4. 核可為獨立維度：不影響完課率 / 平均成績 / 問卷 / 週報；完課回退不使核可失效
+5. 課程 CLOSED 期間核可狀態可閱覽、不可新增核可 / 撤銷；再開課恢復
+6. 非該課程 owner 之教師不顯示核可操作；(COURSE_ID, USER_ID) 唯一、樂觀鎖防並發
+
+**Labels**：`P2-延伸`, `US16`, `UCET016`, `teacher`, `admin`, `approval`, `notification`, `frontend`, `backend`
+
+---
+
+## Issue #19：ET10 核可查詢（2026-07-17 新增）
+
+**對應規格**：[spec_us17.md](spec_us17.md)、UCET017、畫面：ET10 核可查詢（教師 / 管理者 + 學員自查）
+**階段**：P2-延伸
+**前置條件**：Issue #18 完成（ET_APPROVAL 已有資料）
+
+**涵蓋 Tasks**：
+- T162 [US17] ET10 核可查詢：教師 / 管理者依姓名查全部學員（含通過 / 不通過 / 撤銷）；學員自查僅「已通過」；後端依身分控管查詢範圍
+
+**驗收條件**：
+1. 教師 / 管理者依學員姓名查得核可課程（課程、結果、核可時間、核可人；撤銷者標示與原因）
+2. 學員僅見自己「已通過（有效未撤銷）」課程，查不到不通過 / 撤銷、亦查不到他人（後端控管，非僅前端隱藏）
+3. 查無資料顯示空狀態；不提供核可證明 / 結業證書輸出
+
+**Labels**：`P2-延伸`, `US17`, `UCET017`, `teacher`, `admin`, `student`, `approval`, `frontend`, `backend`
 
 ---
 
@@ -628,6 +678,9 @@
 
 #17 ET09 通知範本維護（依賴 #0；範本 seed 先行可用）
 #16 排程統計與提醒（依賴 #4, #5, #17）
+#18 ET03 線下核可（依賴 #3, #6, #17）
+    ↓
+#19 ET10 核可查詢（依賴 #18）
 #13 補強（依賴 #3, #2）
     ↓
 #14 整合測試 + 安全 + 部署（依賴全部）
@@ -646,10 +699,10 @@
 | Label 類別 | 範例 |
 |----------|------|
 | 階段 | `P1-核心`, `P2-延伸`, `P3-輔助`, `補強`, `收尾`, `priority:P0`（基礎建設）|
-| User Story | `US1` ~ `US15` |
-| Use Case | `UCET001` ~ `UCET015` |
+| User Story | `US1` ~ `US17` |
+| Use Case | `UCET001` ~ `UCET017` |
 | 角色 | `admin`, `teacher`, `student`, `auth`, `profile` |
-| 技術領域 | `frontend`, `backend`, `db`, `email`, `video`, `quiz`, `auto-grading`, `csv-export`, `notification`, `audit`, `survey`, `schedule`, `report`, `course-lifecycle` |
+| 技術領域 | `frontend`, `backend`, `db`, `email`, `video`, `quiz`, `auto-grading`, `csv-export`, `notification`, `audit`, `survey`, `schedule`, `report`, `course-lifecycle`, `approval` |
 | 跨類 | `foundational`, `setup`, `infra`, `e2e-test`, `performance`, `security`, `deployment`, `documentation` |
 
 ---
@@ -658,11 +711,11 @@
 
 | 項目 | 數量 |
 |------|------|
-| 總 Issue 數 | 18（#0 ~ #17；#15 ~ #17 為 2026-07-02 新增）|
+| 總 Issue 數 | 20（#0 ~ #19；#15 ~ #17 為 2026-07-02 新增、#18 ~ #19 為 2026-07-17 線下核可新增）|
 | P1 核心 | 6（#1 ~ #6）|
-| P2 延伸 | 6（#7 ~ #10, #15, #16）|
+| P2 延伸 | 8（#7 ~ #10, #15, #16, #18, #19）|
 | P3 輔助 | 3（#11, #12, #17）|
 | 補強 | 1（#13）|
 | 收尾 | 1（#14）|
 | 基礎建設 | 1（#0）|
-| 涵蓋 Task 總數 | 150（T001 ~ T155；T091 廢除、T132 ~ T135 / T140 保留未用）|
+| 涵蓋 Task 總數 | 158（T001 ~ T163；T091 廢除、T132 ~ T135 / T140 保留未用）|

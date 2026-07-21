@@ -283,7 +283,7 @@
 - [ ] T126 [P] 建立資料庫 Migration：**ET_SURVEY**（含 COURSE_ID 唯一約束）/ **ET_SURVEY_QUESTION** / **ET_SURVEY_OPTION** 課後問卷三表
 - [ ] T127 [P] 建立資料庫 Migration：**ET_SURVEY_RESPONSE_M**（含 (SURVEY_ID, USER_ID) 唯一約束）/ **ET_SURVEY_RESPONSE_D**（含 (RESPONSE_ID, SQ_ID) 唯一約束）
 - [ ] T128 [P] 建立資料庫 Migration：**ET_WEEKLY_STAT** 週統計快照，含 (COURSE_ID, STAT_DATE) 唯一索引
-- [ ] T129 [P] ~~建立 ET_NOTIFY_TEMPLATE 通知範本 Migration~~ **廢除建表**：通知範本表由平台 DP 建立（`DP_NOTIFY_TEMPLATE`）。本任務改為：seed ET **6 類**可維護範本至 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`；COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT，皆預設啟用）；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）由平台維護、不在 ET 清單（2026-07-08 集中化）
+- [ ] T129 [P] ~~建立 ET_NOTIFY_TEMPLATE 通知範本 Migration~~ **廢除建表**：通知範本表由平台 DP 建立（`DP_NOTIFY_TEMPLATE`）。本任務改為：seed ET **7 類**可維護範本至 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`；COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT / APPROVAL_PASSED〔2026-07-17 增列〕，皆預設啟用）；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）由平台維護、不在 ET 清單（2026-07-08 集中化）
 
 ### 標籤（US1 / US3）
 
@@ -321,7 +321,7 @@
 
 ### 通知範本維護（US15）
 
-- [ ] T151 [US15] 實作 ET09 通知範本維護頁（讀寫平台 `DP_NOTIFY_TEMPLATE`，僅 `MODULE=ET` 的列）：6 類範本清單（密碼重設 / 帳號變更驗證為平台系統信 `MODULE=DP`、不列入）、主旨/內文編輯（變數插入、未定義變數警告、樂觀鎖）、**啟用 / 停用開關（IS_ACTIVE；停用則該類信件不寄送）**、排程參數調整（平台 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `DP_PARAM.ET_URGENT_REMIND_DAYS`）；僅管理者可存取。各寄信點（T136 邀請 / T112 內容更新 / T146 週報 / T147 週提醒 / T148 加急）寄送前檢查對應範本 IS_ACTIVE
+- [ ] T151 [US15] 實作 ET09 通知範本維護頁（讀寫平台 `DP_NOTIFY_TEMPLATE`，僅 `MODULE=ET` 的列）：7 類範本清單（含 APPROVAL_PASSED；密碼重設 / 帳號變更驗證為平台系統信 `MODULE=DP`、不列入）、主旨/內文編輯（變數插入、未定義變數警告、樂觀鎖）、**啟用 / 停用開關（IS_ACTIVE；停用則該類信件不寄送）**、排程參數調整（平台 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `DP_PARAM.ET_URGENT_REMIND_DAYS`）；僅管理者可存取。各寄信點（T136 邀請 / T112 內容更新 / T146 週報 / T147 週提醒 / T148 加急 / T159 核可通過）寄送前檢查對應範本 IS_ACTIVE
 
 ### 整合測試（2026-07-02 新增情境）
 
@@ -329,6 +329,32 @@
 - [ ] T153 整合測試：課程時窗（起始前不可見、到期自動關閉、關閉唯讀、作答中關閉可完成計分、再開課續學、邀請碼失效恢復）
 - [ ] T154 整合測試：課後問卷（完課後入口、一人一次、凍結檢核、關閉不可填、教師統計與具名明細）
 - [ ] T155 整合測試：排程（週統計快照與上週比較、週報收件範圍、0% 週提醒彙整、加急提醒只寄一次與再開課重計）
+
+---
+
+## Phase 18: 2026-07-17 需求變更新增任務（線下核可 US16 / US17）
+
+> 對應客戶線下核可需求；相依 Phase 5（US3 建課）、Phase 8（US6 完課判定）、Phase 17（範本 seed）。
+
+### Migration 與欄位
+
+- [ ] T156 [P] 建立資料庫 Migration：**ET_APPROVAL** 線下核可紀錄（含 (COURSE_ID, USER_ID) 邏輯唯一索引、VERSION 樂觀鎖）＋ **ET_COURSE.REQUIRE_APPROVAL** 欄位（BOOLEAN，預設 false）；Lookup 增列 `ET_APPROVAL_RESULT`（PASS / FAIL）
+
+### 核可作業（US16）
+
+- [ ] T157 [US16] 實作 ET_APPROVAL Repository + 核可 Service：前提檢核（僅 COMPLETION_STATUS=COMPLETED 可核可）、通過 / 不通過寫入（(COURSE_ID, USER_ID) 唯一、樂觀鎖）、批次核可（未完課者跳過並回報）
+- [ ] T158 [US16] 實作撤銷 Service：IS_REVOKED、撤銷原因必填檢核、寫 REVOKED_BY / REVOKED_AT、回「待核可」；撤銷後可重核（同筆更新）
+- [ ] T159 [US16] 實作核可通過寄信：結果 PASS 且非撤銷時以平台範本 `APPROVAL_PASSED`（`MODULE=ET`）經平台發信服務寄送；FAIL / 撤銷不寄；寄前檢查 IS_ACTIVE（per T151）
+- [ ] T160 [US16] 實作 ET03 核可 UI（「已加入」頁籤區塊 1）：核可狀態欄（未達核可資格 / 待核可 / 已通過 / 未通過）、通過 / 不通過鈕（未完課不顯示核可鈕）、批次核可、撤銷 modal（原因必填）；課程 CLOSED 時唯讀（不可核可 / 撤銷）；僅 owner / 管理者顯示操作
+- [ ] T161 [US3] 實作 ET02 「是否需線下核可」（REQUIRE_APPROVAL）開關：課程基本資料可於任一狀態調整；不影響完課判定
+
+### 核可查詢（US17）
+
+- [ ] T162 [US17] 實作 ET10 核可查詢：教師 / 管理者依姓名查全部學員核可課程（含通過 / 不通過 / 撤銷紀錄）；學員自查僅「已通過（有效未撤銷）」；後端依登入身分控管查詢範圍（拒絕學員查他人 / 不通過 / 撤銷）
+
+### 整合測試（2026-07-17 新增情境）
+
+- [ ] T163 整合測試：線下核可（完課前提、通過寄信 / 不通過留紀錄不寄、撤銷需填原因並回待核可、完課回退不使核可失效、課程關閉唯讀、學員只見自己已通過、核可不計入完課率 / 週報）
 
 ---
 
@@ -357,10 +383,12 @@ Phase 15 (跨 US 補強)
     ↓
 Phase 17 (2026-07-02 變更：標籤 / 自動邀請 / 時窗 / 問卷 / 排程 / 明細 / 範本)
     ↓
-Phase 16 (整合收尾，含 T152~T155 新增情境)
+Phase 18 (2026-07-17 線下核可：US16 核可作業 + US17 核可查詢；依賴 US3 / US6 / 範本 seed)
+    ↓
+Phase 16 (整合收尾，含 T152~T155、T163 新增情境)
 ```
 
-> Phase 17 之 Migrations（T125~T129）可與 Phase 1 同批執行；功能任務依所屬 US 之 Phase 順序插入開發。
+> Phase 17 之 Migrations（T125~T129）與 Phase 18 之 Migration（T156）可與 Phase 1 同批執行；功能任務依所屬 US 之 Phase 順序插入開發。
 
 **可平行開發機會**：
 
@@ -394,7 +422,7 @@ Phase 16 (整合收尾，含 T152~T155 新增情境)
 
 | 項目 | 數量 |
 |------|------|
-| 總任務數 | 150（T001~T155，T091 廢除併入 T136；T132~T135、T140 保留未用）|
+| 總任務數 | 158（T001~T163，T091 廢除併入 T136；T132~T135、T140 保留未用）|
 | Phase 1 設定（Migrations / Seed）| 24 |
 | Phase 2 共用元件 | 8 |
 | US2 登入 / 註冊 / 忘記密碼（P1）| 8 |
@@ -412,4 +440,5 @@ Phase 16 (整合收尾，含 T152~T155 新增情境)
 | 跨 US 補強（章節通知 / 擁有者轉讓）| 4 |
 | 整合與收尾 | 9 |
 | Phase 17：2026-07-02 變更新增 | 26（Migrations 5、標籤 2、自動邀請 2、時窗 2、問卷 4、排程 4、明細 2、範本 1、整測 4）|
+| Phase 18：2026-07-17 線下核可（US16 / US17）| 8（Migration 1、核可作業 5、查詢 1、整測 1）|
 | 可平行機會 | Phase 1（22 組 Migration）、Phase 2（8 組工具）、Phase 7+9+10、Phase 11+12、Phase 13+14 |

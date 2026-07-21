@@ -6,6 +6,8 @@
 
 > **2026-07-02 變更摘要**：移除 ET_MODULE / ET_USER_MODULE 與 ET_COURSE.MODULE_CODE，新增 ET_TAG / ET_USER_TAG / ET_COURSE_TAG（受訓單位標籤）；ET_COURSE 新增起訖時間、狀態機改可逆（移除 PENDING_CLOSE）；新增課後問卷五表（ET_SURVEY*）、週統計快照（ET_WEEKLY_STAT）。
 
+> **2026-07-17 變更摘要（線下核可）**：ET_COURSE 新增 `REQUIRE_APPROVAL`（是否需線下核可）；新增 `ET_APPROVAL`（線下核可紀錄，學員×課程 0～1 筆，通過 / 不通過二態、可撤銷需填原因）；新增 Lookup `ET_APPROVAL_RESULT`；通知範本 `MODULE=ET` 由 6 類增為 **7 類**（新增 `APPROVAL_PASSED` 核可通過通知）。核可為獨立維度，不影響完課率 / 問卷 / 週報。
+
 > **2026-07-08 集中化變更摘要**：系統參數、通知範本、發信、排程集中於平台模組 DP（見 `../../requirements/RQDP.md`、`../../_refs/09-平台模組.md`）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：ET 參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`）、ET 6 類通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信改走平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。維護介面於平台 DP 後台（按模組過濾）；`ET_WEEKLY_STAT`（業務快照）不受影響。
 
 > **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`（無 SITE / HOSPITAL 概念，對齊平台模組 DP）。
@@ -29,6 +31,7 @@
 | 題目 | ET_QUESTION | 主表 | 題目 | 測驗下之題目（單選 / 多選、題幹、配分）|
 | 選項 | ET_OPTION | 明細 | 選項 | 題目之選項（選項文字、是否正確）|
 | 選課關聯 | ET_ENROLLMENT | 對應檔 | 學員 × 課程 | 學員加入課程之記錄（含來源、狀態、移除標記）|
+| 線下核可紀錄 | ET_APPROVAL | 主表 | 線下核可紀錄 | 學員 × 課程之線下考核核可（0～1 筆）；通過 / 不通過、可撤銷需填原因；以線上完課為前提；獨立於完課 |
 | 學習進度 | ET_PROGRESS | 主表 | 學習進度 | 學員於各章節項目之學習進度 |
 | 影片觀看區段 | ET_PROGRESS_INTERVAL | 明細 | 影片觀看區段 | 學員於影片教材之已觀看播放區段（每段一筆）|
 | 測驗作答 | ET_QUIZ_ATTEMPT_M | 主表（主+明細）| 測驗作答主檔 | 學員某次測驗 attempt（含快照、得分、是否及格）|
@@ -41,7 +44,7 @@
 | 問卷填答主檔 | ET_SURVEY_RESPONSE_M | 主表（主+明細）| 問卷填答 | 學員（具名）對某問卷之一次填答；一人一次 |
 | 問卷填答明細 | ET_SURVEY_RESPONSE_D | 明細 | 填答明細 | 該次填答之各題選擇 |
 | 週統計快照 | ET_WEEKLY_STAT | 主表 | 週統計快照 | 每週排程之課程統計快照（課程×週次），供週報比較與歷史回查 |
-| 通知信範本 | DP_NOTIFY_TEMPLATE | 平台主表（DP 定義）| 通知信範本 | 由平台模組 DP 定義；ET 6 類通知範本存 `MODULE=ET`；完整欄位見平台 DP data-model；`MODULE=ET` 之列由 ET 管理者於平台 DP 後台「通知範本」維護（按模組過濾）|
+| 通知信範本 | DP_NOTIFY_TEMPLATE | 平台主表（DP 定義）| 通知信範本 | 由平台模組 DP 定義；ET 7 類通知範本存 `MODULE=ET`（2026-07-17 增列核可通過通知）；完整欄位見平台 DP data-model；`MODULE=ET` 之列由 ET 管理者於平台 DP 後台「通知範本」維護（按模組過濾）|
 | 系統參數 | DP_PARAM | 平台主表（DP 定義）| 系統參數 | 由平台模組 DP 定義；ET 參數以 `PARAM_ID` 前綴 `ET_` 存放（影片格式 / 大小上限 / 排程時間等）；完整欄位見平台 DP data-model；前綴 `ET_` 之列由 ET 管理者於平台 DP 後台維護（按模組過濾）|
 
 ---
@@ -150,10 +153,12 @@
 | 10 | 最近關閉時間 | CLOSED_AT | TIMESTAMP | N | 最近一次狀態變更為 CLOSED 之時間戳（再開課後保留供追溯）|
 | 11 | 加急提醒已寄 | URGENT_REMIND_SENT | BOOLEAN | Y | 預設 false；訖止前 3 天加急提醒寄出後為 true；再開課重設起訖時歸 false |
 | 12 | 版本號 | VERSION | INT | Y | 樂觀鎖；每次寫入 +1，預設 0 |
+| 13 | 是否需線下核可 | REQUIRE_APPROVAL | BOOLEAN | Y | 預設 false；true = 本課程於線上完課後需教師 / 管理者手動核可（US16）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
 - INVITATION_CODE 須為 8 碼純數字（regex `^\d{8}$`），全域唯一
+- REQUIRE_APPROVAL = true 時，學員於本課程之綜合結業狀態需再經 ET_APPROVAL 核可（見 ET_APPROVAL）；= false 時無核可流程；此旗標**不影響完課判定**（完課仍為線上學習完成）
 - STATUS 流轉：DRAFT → PUBLISHED ⇄ CLOSED（2026-07-02 變更：關閉可逆，原 PENDING_CLOSE 過渡狀態移除）
 - 關閉觸發：到達 OPEN_END_AT 系統自動轉 CLOSED（SCHET002 每日檢查＋應用層存取時即時判定）；或教師手動關閉
 - 關閉後唯讀：學員可回看已學內容，不能累積進度 / 作答 / 解鎖 / 填問卷；關閉當下作答中 attempt 允許完成並計分
@@ -300,6 +305,37 @@
 - IS_REMOVED = true 之紀錄前台不顯示，但學習歷史紀錄完整保留
 - 移除學員後不計入完課率分母
 - 標籤自動邀請（2026-07-02）：課程發布時依 ET_COURSE_TAG × ET_USER_TAG 取聯集去重（限具學員角色者；「全體」展開為全部學員角色者）批次 INSERT（JOIN_SOURCE = TAG_DEFAULT），每人寄一封通知信；事後貼標補加入寄彙整一封
+
+---
+
+### 線下核可紀錄（ET_APPROVAL）（2026-07-17 新增）
+
+| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
+|---|---------|---------|---------|------|------|
+| 1 | 核可 ID | APPROVAL_ID | BIGINT | PK | 主鍵 |
+| 2 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
+| 3 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
+| 4 | 核可結果 | RESULT | VARCHAR(20) | Y | 參見 Lookup `ET_APPROVAL_RESULT`（PASS 通過 / FAIL 不通過）|
+| 5 | 核可備註 | RESULT_NOTE | TEXT | N | 選填（如不通過原因、考核情形）|
+| 6 | 是否已撤銷 | IS_REVOKED | BOOLEAN | Y | 預設 false；true = 此核可已撤銷（學員回到「待核可」）|
+| 7 | 撤銷原因 | REVOKE_REASON | TEXT | N | IS_REVOKED = true 時**必填**（應用層檢核）|
+| 8 | 核可執行者 | APPROVED_BY | VARCHAR(20) | Y | FK → DP_USER.USER_ID；執行核可之教師（owner）或管理者 |
+| 9 | 核可時間 | APPROVED_AT | TIMESTAMP | Y | 最近一次核可（含撤銷後重核）之時間 |
+| 10 | 撤銷執行者 | REVOKED_BY | VARCHAR(20) | N | FK → DP_USER.USER_ID |
+| 11 | 撤銷時間 | REVOKED_AT | TIMESTAMP | N | |
+| 12 | 版本號 | VERSION | INT | Y | 樂觀鎖 |
+| - | 標準欄位 | — | — | — | （同上）|
+
+**業務規則**:
+- (COURSE_ID, USER_ID) **邏輯唯一**：一位學員於一門課程 0～1 筆核可紀錄
+- **前提檢核**：僅當該學員 ET_ENROLLMENT.COMPLETION_STATUS = COMPLETED（線上完課）且 ET_COURSE.REQUIRE_APPROVAL = true 時可寫入核可
+- **結果二態**：RESULT ∈ {PASS, FAIL}；不記考核分數；FAIL（不通過）亦留紀錄
+- **撤銷**：IS_REVOKED = true 時 REVOKE_REASON 必填、寫入 REVOKED_BY / REVOKED_AT；撤銷後學員綜合狀態回到「待核可」，可重新核可（重核時 update 本筆：IS_REVOKED 回 false、更新 RESULT / APPROVED_BY / APPROVED_AT、清 REVOKE_* 欄位）
+- **通知**：RESULT = PASS 且非撤銷狀態時，寄「核可通過通知」（`DP_NOTIFY_TEMPLATE`，`MODULE=ET`，`APPROVAL_PASSED`）；FAIL 與撤銷不寄信
+- **獨立於完課**：本表不影響 ET_ENROLLMENT.COMPLETION_STATUS、完課率、平均成績、課後問卷開放與週報統計；教師新增章節致完課回退時，本核可紀錄**不失效**（比照課後問卷）
+- **課程關閉**：CLOSED 期間不可新增核可 / 撤銷（唯讀閱覽）；再開課後恢復
+- **綜合狀態為衍生值**（未達核可資格 / 待核可 / 已通過 / 未通過），由 COMPLETION_STATUS + 本表即時判定，不另存欄位
+- 稽核完整性：核可 / 撤銷之執行者與時間均記錄；歷程另依標準稽核 log 保留
 
 ---
 
@@ -540,9 +576,9 @@
 
 ### 通知信範本（DP_NOTIFY_TEMPLATE，`MODULE=ET`）
 
-> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 6 類通知範本以 `MODULE=ET` 存於平台集中表；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET09 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
+> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 7 類通知範本以 `MODULE=ET` 存於平台集中表（2026-07-17 增列核可通過通知）；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET09 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
 
-**ET 內建範本**（部署時由平台 seed，`MODULE=ET`；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **6 類**：
+**ET 內建範本**（部署時由平台 seed，`MODULE=ET`；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **7 類**：
 
 | TEMPLATE_CODE | 名稱 | 觸發 |
 |---------------|------|------|
@@ -552,6 +588,7 @@
 | WEEKLY_REMIND | 每週未看提醒 | SCHET001（一人一信彙整）|
 | URGENT_REMIND | 截止前加急提醒 | SCHET002（訖止前 3 天）|
 | WEEKLY_REPORT | 週報 | SCHET001（教師 / 管理者）|
+| APPROVAL_PASSED | 核可通過通知 | US16 核可「通過」時（不通過 / 撤銷不寄）|
 
 **業務規則**:
 - 教師不可逐課修改信件內容；寄出一律採平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）範本
@@ -646,6 +683,15 @@
 | IN_PROGRESS | 進行中 | 學員學習中或未全部完課 |
 | COMPLETED | 已完成 | 所有章節含測驗皆通過 |
 
+### ET_APPROVAL_RESULT（2026-07-17 新增）
+
+| 代碼 | 顯示名稱 | 說明 |
+|------|---------|------|
+| PASS | 通過 | 線下考核核可通過（寄核可通過通知）|
+| FAIL | 不通過 | 線下考核核可不通過（留紀錄、不寄信）|
+
+> 學員於需核可課程之**綜合狀態**（未達核可資格 / 待核可 / 已通過 / 未通過）為衍生值，非 Lookup、不另存欄位（見 ET_APPROVAL 業務規則）。
+
 ---
 
 ## ERD（Mermaid）
@@ -660,6 +706,7 @@ erDiagram
     DP_USER ||--o{ ET_PROGRESS_INTERVAL : watches
     DP_USER ||--o{ ET_SURVEY_RESPONSE_M : responds
     DP_USER ||--o{ ET_COURSE : owns
+    DP_USER ||--o{ ET_APPROVAL : approved
 
     ET_TAG ||--o{ ET_USER_TAG : maps_user
     ET_TAG ||--o{ ET_COURSE_TAG : maps_course
@@ -671,6 +718,7 @@ erDiagram
     ET_COURSE ||--o{ ET_OWNER_TRANSFER : transfers
     ET_COURSE ||--o| ET_SURVEY : has_survey
     ET_COURSE ||--o{ ET_WEEKLY_STAT : snapshots
+    ET_COURSE ||--o{ ET_APPROVAL : approves
 
     ET_SURVEY ||--o{ ET_SURVEY_QUESTION : contains
     ET_SURVEY_QUESTION ||--o{ ET_SURVEY_OPTION : has
@@ -700,7 +748,7 @@ erDiagram
 | 規則名 | 描述 |
 |--------|------|
 | 軟刪除分流 | 章節 / 題目本體軟刪除（DELETED=1）；學員紀錄與成績連同 hard delete |
-| 樂觀鎖 | ET_COURSE / ET_CHAPTER / ET_ITEM / ET_QUIZ / ET_QUESTION / ET_SURVEY* 每寫入時 VERSION + 1（通知範本之樂觀鎖由平台 `DP_NOTIFY_TEMPLATE` 提供）|
+| 樂觀鎖 | ET_COURSE / ET_CHAPTER / ET_ITEM / ET_QUIZ / ET_QUESTION / ET_SURVEY* / ET_APPROVAL 每寫入時 VERSION + 1（通知範本之樂觀鎖由平台 `DP_NOTIFY_TEMPLATE` 提供）|
 | Attempt Snapshot | ET_QUIZ_ATTEMPT_M 與 _D 於 STARTED_AT 時凍結題目 + 選項 + 配分 + 順序 + PASS_SCORE + TIME_LIMIT |
 | 多選題部分計分 | `SCORE = max(0, (對 − 誤) ÷ 應選 × POINTS)`；建立時強制至少 1 正確選項 |
 | 影片 80% 累計覆蓋 | 由 ET_PROGRESS_INTERVAL 聚合計算；學員離開頁面時 normalize；倍速（上限 2x）照算、拉到底不算（無播放區段）|
@@ -711,6 +759,7 @@ erDiagram
 | 帳號變更雙信箱共存 | 由平台模組 DP 提供（DP_USER 帳號安全欄位）；舊 Email 變更期間仍可登入；30 分鐘 TTL；未驗證視為作廢；ET 僅以 USER_ID 引用 |
 | 完課率計算 | 已完課 ÷ 已加入（不含已移除）；100% 章節含測驗皆通過（問卷不是完課條件）|
 | 平均成績計算 | 已作答測驗之最高分平均；未作答測驗排除（不視為 0）|
+| 線下核可 | ET_APPROVAL（(COURSE_ID, USER_ID) 唯一）；以線上完課為前提、REQUIRE_APPROVAL=true 之課程；通過 / 不通過二態、可撤銷需填原因；通過寄信；獨立於完課、不隨完課回退失效；綜合狀態為衍生值 |
 
 ---
 

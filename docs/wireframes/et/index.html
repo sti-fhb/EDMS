@@ -129,6 +129,7 @@
     .wf-status-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
     .wf-status-info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
     .wf-status-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+    .internal-note { color: #1b5e20; font-style: italic; font-size: 0.78rem; line-height: 1.6; }
     table.wf-table { font-size: 0.88rem; }
     table.wf-table th { background: #f8f9fa; white-space: nowrap; }
     .btn-tsbms { background: var(--tsbms-green); color: #fff; border: none; }
@@ -391,6 +392,7 @@
     <div class="module-items" id="mod-et">
       <a class="nav-link active" href="#" data-screen="et-courses-admin"><i class="bi bi-grid"></i><span>課程列表</span></a>
       <a class="nav-link" href="#" data-screen="et-students"><i class="bi bi-people-fill"></i><span>學員</span></a>
+      <a class="nav-link" href="#" data-screen="et-approval-query"><i class="bi bi-patch-check"></i><span>核可查詢</span></a>
       <a class="nav-link" href="#" data-screen="et-courses-student"><i class="bi bi-collection"></i><span>我的課程</span></a>
     </div>
 
@@ -1270,20 +1272,34 @@
 
         <!-- 區塊 1：已加入學員 -->
         <h6 class="fw-bold mb-2"><span class="badge bg-secondary me-1">區塊 1</span>已加入學員 <small class="text-muted fw-normal">（本課程已加入之學員清單、完課狀態與進度）</small></h6>
+
+        <!-- 線下核可工具列（僅「需線下核可」課程顯示；US16） -->
+        <div class="wf-status-msg wf-status-info d-flex justify-content-between align-items-center mb-2" id="et03-approval-toolbar">
+          <span><i class="bi bi-patch-check me-1"></i>本課程<strong>需線下核可</strong>（實機 / 口頭考核）：勾選<strong>已完課</strong>學員可批次核可。</span>
+          <span class="d-flex gap-2">
+            <button class="btn btn-tsbms btn-sm" onclick="openApprovalModal('批次（已勾選）','batch','pass')"><i class="bi bi-check2-circle me-1"></i>批次核可通過</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="openApprovalModal('批次（已勾選）','batch','fail')"><i class="bi bi-x-circle me-1"></i>批次不通過</button>
+          </span>
+        </div>
+        <div class="internal-note mb-2"><i class="bi bi-lightbulb"></i> 「核可狀態」欄與核可操作<strong>僅於課程 REQUIRE_APPROVAL=true 時顯示</strong>；核可以「線上完課」為前提，未完課者顯示「未達核可資格」且按鈕停用。核可為獨立維度，不影響完課狀態 / 完課率 / 平均成績。已關閉課程僅可閱覽、不可核可 / 撤銷。</div>
+
         <table class="table table-sm wf-table mb-0">
           <thead>
             <tr>
+              <th style="width:2rem;"><input type="checkbox" class="form-check-input" title="全選已完課學員"></th>
               <th>學員</th>
               <th>加入日期</th>
               <th>完課狀態</th>
               <th>學習進度</th>
               <th>平均成績</th>
+              <th>核可狀態</th>
               <th>最後活動</th>
-              <th style="width:5rem;">操作</th>
+              <th style="width:9rem;">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr>
+              <td><input type="checkbox" class="form-check-input" checked></td>
               <td><i class="bi bi-person-circle me-1"></i><strong>林助教</strong> <small class="text-muted">(linst)</small></td>
               <td class="small">2026-04-21</td>
               <td><span class="status-pill status-completed"><i class="bi bi-check-circle me-1"></i>已完成</span></td>
@@ -1292,12 +1308,33 @@
                 <small class="text-success">100%</small>
               </td>
               <td><strong>95</strong> 分</td>
+              <td><span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>待核可</span></td>
               <td class="small text-muted">2026-05-18</td>
-              <td>
-                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('林助教')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              <td class="text-nowrap">
+                <button class="btn btn-sm btn-tsbms" onclick="openApprovalModal('林助教','single','pass')" title="核可通過"><i class="bi bi-check2"></i> 通過</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="openApprovalModal('林助教','single','fail')" title="核可不通過"><i class="bi bi-x-circle"></i> 不通過</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openRemoveStudentModal('林助教')" title="移除學員"><i class="bi bi-person-x"></i></button>
               </td>
             </tr>
             <tr>
+              <td><input type="checkbox" class="form-check-input" checked></td>
+              <td><i class="bi bi-person-circle me-1"></i><strong>李佳蓉</strong> <small class="text-muted">(leejr)</small></td>
+              <td class="small">2026-04-21</td>
+              <td><span class="status-pill status-completed"><i class="bi bi-check-circle me-1"></i>已完成</span></td>
+              <td>
+                <div class="course-progress" style="width:100px;"><div class="course-progress-bar" style="width:100%; background:#1b5e20;"></div></div>
+                <small class="text-success">100%</small>
+              </td>
+              <td><strong>90</strong> 分</td>
+              <td><span class="status-pill status-passed"><i class="bi bi-patch-check me-1"></i>已通過</span><br><small class="text-muted">王主任 核可 05-19</small></td>
+              <td class="small text-muted">2026-05-19</td>
+              <td class="text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openRevokeApprovalModal('李佳蓉')" title="撤銷核可（須填原因）"><i class="bi bi-arrow-counterclockwise"></i> 撤銷</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openRemoveStudentModal('李佳蓉')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox" class="form-check-input" disabled title="未完課，無法核可"></td>
               <td><i class="bi bi-person-circle me-1"></i><strong>王曉明</strong> <small class="text-muted">(wangxm)</small></td>
               <td class="small">2026-04-21</td>
               <td><span class="status-pill status-inprogress">進行中</span></td>
@@ -1306,12 +1343,14 @@
                 <small class="text-muted">75%（第 4 章）</small>
               </td>
               <td><strong>82</strong> 分</td>
+              <td><small class="text-muted"><i class="bi bi-dash-circle me-1"></i>未達核可資格</small></td>
               <td class="small text-muted">2026-05-22</td>
-              <td>
-                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('王曉明')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              <td class="text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openRemoveStudentModal('王曉明')" title="移除學員"><i class="bi bi-person-x"></i></button>
               </td>
             </tr>
             <tr>
+              <td><input type="checkbox" class="form-check-input" disabled title="未完課，無法核可"></td>
               <td><i class="bi bi-person-circle me-1"></i><strong>張士民</strong> <small class="text-muted">(zhangsm)</small></td>
               <td class="small">2026-04-25</td>
               <td><span class="status-pill status-inprogress">進行中</span></td>
@@ -1320,12 +1359,14 @@
                 <small class="text-muted">45%（第 2 章）</small>
               </td>
               <td><strong>78</strong> 分</td>
+              <td><small class="text-muted"><i class="bi bi-dash-circle me-1"></i>未達核可資格</small></td>
               <td class="small text-muted">2026-05-20</td>
-              <td>
-                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('張士民')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              <td class="text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openRemoveStudentModal('張士民')" title="移除學員"><i class="bi bi-person-x"></i></button>
               </td>
             </tr>
             <tr>
+              <td><input type="checkbox" class="form-check-input" disabled title="未完課，無法核可"></td>
               <td><i class="bi bi-person-circle me-1"></i><strong>陳怡君</strong> <small class="text-muted">(chenyj)</small></td>
               <td class="small">2026-05-10</td>
               <td><span class="status-pill status-notstarted">未開始</span></td>
@@ -1334,14 +1375,15 @@
                 <small class="text-muted">0%</small>
               </td>
               <td class="text-muted">—</td>
+              <td><small class="text-muted"><i class="bi bi-dash-circle me-1"></i>未達核可資格</small></td>
               <td class="small text-muted">—</td>
-              <td>
-                <button class="btn btn-sm btn-outline-danger" onclick="openRemoveStudentModal('陳怡君')" title="移除學員"><i class="bi bi-person-x"></i></button>
+              <td class="text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openRemoveStudentModal('陳怡君')" title="移除學員"><i class="bi bi-person-x"></i></button>
               </td>
             </tr>
           </tbody>
         </table>
-        <small class="text-muted">顯示 1–4 筆，共 28 筆</small>
+        <small class="text-muted">顯示 1–5 筆，共 28 筆</small>
 
         <!-- 區塊 2：作答明細 -->
         <hr class="my-4">
@@ -1629,6 +1671,104 @@
   </details>
 </div>
 
+
+<!-- ==================== ET10 核可查詢（教師 / 管理者 + 學員自查；2026-07-17 新增 US17） ==================== -->
+<div class="screen" id="et-approval-query">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-patch-check me-2"></i>核可查詢</div>
+    <div class="screen-meta">et/approvalQuery.jsp (ET10)</div>
+  </div>
+
+  <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> 本畫面依登入角色顯示不同視角：<strong>教師 / 管理者</strong>可依姓名查全部學員之核可課程（含通過 / 不通過 / 已撤銷）；<strong>學員</strong>僅見自己「已通過」的課程（不顯示不通過 / 撤銷、不得查他人）。此處同時呈現兩視角供 review；正式畫面依角色擇一。查詢範圍由後端依身分控管（不以前端隱藏為唯一防線）。不提供核可證明 / 結業證書輸出。</div>
+
+  <!-- 視角 A：教師 / 管理者 -->
+  <div class="wf-card mb-3">
+    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-1"></i>教師 / 管理者視角 — 依姓名查全部學員</h6>
+    <div class="d-flex gap-2 mb-3">
+      <div class="input-group input-group-sm" style="width: 20rem;">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" class="form-control" placeholder="輸入學員姓名（可模糊）" value="林">
+      </div>
+      <select class="form-select form-select-sm" style="width: 10rem;">
+        <option selected>全部結果</option>
+        <option>僅通過</option>
+        <option>僅不通過</option>
+        <option>僅已撤銷</option>
+      </select>
+      <button class="btn btn-tsbms btn-sm" onclick="showToast('查詢核可紀錄（demo）')"><i class="bi bi-search me-1"></i>查詢</button>
+    </div>
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr>
+          <th>學員</th>
+          <th>課程</th>
+          <th>核可結果</th>
+          <th>核可時間</th>
+          <th>核可人</th>
+          <th>狀態</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>林佳蓉</strong> <small class="text-muted">(leejr)</small></td>
+          <td>採血作業新進人員訓練 v2.0</td>
+          <td><span class="status-pill status-passed"><i class="bi bi-patch-check me-1"></i>通過</span></td>
+          <td class="small">2026-05-19 14:20</td>
+          <td class="small">王主任</td>
+          <td><span class="badge bg-success">有效</span></td>
+        </tr>
+        <tr>
+          <td><i class="bi bi-person-circle me-1"></i><strong>林志豪</strong> <small class="text-muted">(linzh)</small></td>
+          <td>成分製備標準作業教學</td>
+          <td><span class="status-pill status-failed"><i class="bi bi-x-circle me-1"></i>不通過</span></td>
+          <td class="small">2026-05-12 10:05</td>
+          <td class="small">陳教官</td>
+          <td><span class="badge bg-success">有效</span><br><small class="text-muted">備註：實機操作需再加強</small></td>
+        </tr>
+        <tr class="text-muted">
+          <td><i class="bi bi-person-circle me-1"></i><strong>林小美</strong> <small class="text-muted">(linxm)</small></td>
+          <td>捐血人健康評估標準教學</td>
+          <td><span class="status-pill status-passed"><i class="bi bi-patch-check me-1"></i>通過</span></td>
+          <td class="small">2026-04-30 09:00</td>
+          <td class="small">王主任</td>
+          <td><span class="badge bg-secondary">已撤銷</span><br><small>李管理員 05-02 撤銷｜原因：核可對象誤植</small></td>
+        </tr>
+      </tbody>
+    </table>
+    <small class="text-muted">符合「林」之核可紀錄，共 3 筆</small>
+  </div>
+
+  <!-- 視角 B：學員自查 -->
+  <div class="wf-card">
+    <h6 class="fw-bold mb-3"><i class="bi bi-mortarboard me-1"></i>學員視角 — 我已通過核可的課程</h6>
+    <div class="internal-note mb-2"><i class="bi bi-lightbulb"></i> 學員端僅列出自己「已通過（有效未撤銷）」之課程；不通過 / 已撤銷不顯示。</div>
+    <table class="table table-sm wf-table mb-0">
+      <thead>
+        <tr>
+          <th>課程</th>
+          <th>受訓單位標籤</th>
+          <th>核可結果</th>
+          <th>核可時間</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>採血作業新進人員訓練 v2.0</td>
+          <td><span class="badge bg-light text-dark border">護理師</span></td>
+          <td><span class="status-pill status-passed"><i class="bi bi-patch-check me-1"></i>已通過</span></td>
+          <td class="small">2026-05-19</td>
+        </tr>
+        <tr>
+          <td>血品安全與品保概論</td>
+          <td><span class="badge bg-light text-dark border">全體</span></td>
+          <td><span class="status-pill status-passed"><i class="bi bi-patch-check me-1"></i>已通過</span></td>
+          <td class="small">2026-03-11</td>
+        </tr>
+      </tbody>
+    </table>
+    <small class="text-muted">您已通過核可的課程，共 2 筆</small>
+  </div>
+</div>
 
 <!-- ==================== ET05 課程學習頁（學員） ==================== -->
 <div class="screen" id="et-learn">
@@ -2637,6 +2777,62 @@ zhangsm@military.gov.tw</textarea>
   </div>
 </div>
 
+<!-- 線下核可 Modal（US16） -->
+<div class="modal fade" id="approvalModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-patch-check text-tsbms-green me-2"></i>線下考核核可</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-info mb-3">
+          即將對 <strong id="approval-target">學員</strong> 核可為 <strong id="approval-result-label">通過</strong>。
+        </div>
+        <ul class="small">
+          <li>僅<strong>已線上完課</strong>之學員可核可；批次核可時未完課者將自動跳過</li>
+          <li>核可結果為<strong>通過</strong>時，系統寄「核可通過通知」給學員；<strong>不通過</strong>不寄信</li>
+          <li>核可為獨立維度，<strong>不影響</strong>完課狀態 / 完課率 / 平均成績</li>
+        </ul>
+        <div class="mb-2">
+          <label class="form-label small mb-1">備註（選填；不通過建議填寫原因）</label>
+          <textarea class="form-control form-control-sm" rows="2" placeholder="例：實機操作熟練、口頭考核通過"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-tsbms btn-sm" data-bs-dismiss="modal" onclick="showToast('已完成核可')"><i class="bi bi-check2 me-1"></i>確認核可</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 撤銷核可 Modal（US16；撤銷須填原因） -->
+<div class="modal fade" id="revokeApprovalModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise text-danger me-2"></i>撤銷核可</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="wf-status-msg wf-status-warn mb-3">
+          <i class="bi bi-exclamation-triangle me-1"></i>即將撤銷 <strong id="revoke-target">學員</strong> 之核可，撤銷後該學員回到「待核可」。
+        </div>
+        <div class="mb-2">
+          <label class="form-label small mb-1">撤銷原因 <span class="text-danger">*</span>（必填）</label>
+          <textarea class="form-control form-control-sm" rows="2" placeholder="例：核可對象誤植、需重新考核"></textarea>
+        </div>
+        <div class="internal-note"><i class="bi bi-lightbulb"></i> 撤銷原因為必填；空白時系統阻擋（ET-MSG-ET03-305）。撤銷不寄信；學員端「已通過」清單即時移除。</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-danger btn-sm" data-bs-dismiss="modal" onclick="showToast('已撤銷核可')"><i class="bi bi-arrow-counterclockwise me-1"></i>確認撤銷</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="et-toast" id="et-toast"><i class="bi bi-check-circle-fill"></i><span id="et-toast-text">已儲存</span></div>
 
@@ -3067,6 +3263,17 @@ function openRemoveStudentModal(userName) {
 function confirmRemoveStudent() {
   bootstrap.Modal.getInstance(document.getElementById('removeStudentModal')).hide();
   showToast('已將 ' + _studentActionUser + ' 自本課程移除');
+}
+
+/* 線下核可（US16） */
+function openApprovalModal(target, mode, result) {
+  document.getElementById('approval-target').textContent = target;
+  document.getElementById('approval-result-label').textContent = (result === 'fail') ? '不通過' : '通過';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('approvalModal')).show();
+}
+function openRevokeApprovalModal(target) {
+  document.getElementById('revoke-target').textContent = target;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('revokeApprovalModal')).show();
 }
 
 /* 自訂 CSS class helper */
