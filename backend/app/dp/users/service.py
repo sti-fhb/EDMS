@@ -6,6 +6,7 @@ module_provisioning 授學員邏輯，僅差異：operator = 管理者、MUST_CH
 授權：依暫行規則僅認證、不掛 admin 閘（SA 裁示 Q1=A，待 T049 回歸）。
 """
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -77,16 +78,21 @@ class UsersService:
         pwd_hash = hash_password(data.password)
 
         # 建帳號（重用 #56；管理者代建 → MUST_CHANGE_PWD=true、operator=管理者）
-        user = await self._auth_repo.create_user(
-            db,
-            user_id=user_id,
-            email=data.email,
-            user_name=data.user_name,
-            pwd_hash=pwd_hash,
-            operator_id=operator.user_id,
-            now=now,
-            must_change_pwd=True,
-        )
+        # email_taken 檢查與 flush 之間有 TOCTOU 空窗：並發代建同 Email → 撞 UQ_DP_USER_EMAIL。
+        # 比照 verify_service 兜底轉乾淨 409（否則落全域 500），交 get_db rollback。
+        try:
+            user = await self._auth_repo.create_user(
+                db,
+                user_id=user_id,
+                email=data.email,
+                user_name=data.user_name,
+                pwd_hash=pwd_hash,
+                operator_id=operator.user_id,
+                now=now,
+                must_change_pwd=True,
+            )
+        except IntegrityError as exc:
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007") from exc
         await self._auth_repo.add_pwd_history(
             db, user_id=user_id, seq_no=1, pwd_hash=pwd_hash, operator_id=operator.user_id, now=now
         )
@@ -153,9 +159,13 @@ class UsersService:
 
         before = {"user_name": user.user_name, "email": user.email}
         now = utcnow()
-        await self._repo.update_basic(
-            db, user=user, user_name=data.user_name, email=data.email, operator_id=operator.user_id, now=now
-        )
+        # 同 create：email_taken 與 flush 間 TOCTOU 空窗 → 撞 UQ 兜底轉 409
+        try:
+            await self._repo.update_basic(
+                db, user=user, user_name=data.user_name, email=data.email, operator_id=operator.user_id, now=now
+            )
+        except IntegrityError as exc:
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007") from exc
         await self._log(
             db, operator.user_id, user_id, get_client_ip(), "UPDATE", "維護帳號基本資料",
             before=before, after={"user_name": data.user_name, "email": data.email},

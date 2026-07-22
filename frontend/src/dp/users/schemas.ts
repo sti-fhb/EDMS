@@ -23,6 +23,7 @@ export const UserCreateSchema = z.object({
   password: z
     .string()
     .min(8, { message: "初始密碼至少 8 字元" })
+    .max(72, { message: "密碼長度不可超過 72 字元" }) // 對齊後端 bcrypt 上限
     .refine((p) => CHAR_CLASSES.filter((re) => re.test(p)).length >= 3, {
       message: "密碼須含大小寫英文 / 數字 / 特殊符號至少 3 種",
     }),

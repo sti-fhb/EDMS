@@ -68,7 +68,9 @@ export function useUsers() {
             message.success("帳號已停用")
             invalidate()
           } catch (err) {
+            // 顯示錯誤並 rethrow：NotificationContext 據此保留對話框、解除 loading 供重試
             message.error(toApiError(err).errorMessage)
+            throw err
           }
         },
       })

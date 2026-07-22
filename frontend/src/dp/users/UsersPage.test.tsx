@@ -74,6 +74,36 @@ describe("UsersPage 使用者操作流程", () => {
     expect(await screen.findByText("帳號已解鎖")).toBeInTheDocument()
   })
 
+  it("啟用：對已停用帳號送出並提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("張志豪")
+
+    await user.click(screen.getByRole("button", { name: "啟用" }))
+
+    expect(await screen.findByText("帳號已啟用")).toBeInTheDocument()
+  })
+
+  it("編輯：開啟表單預填、修改後送出提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    // 點第一列（啟用中）的編輯
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    // 表單預填現有 Email
+    const emailInput = await screen.findByLabelText("帳號（Email）")
+    expect(emailInput).toHaveValue("active@edms.local")
+    // 編輯不顯示初始密碼欄位
+    expect(screen.queryByLabelText(/初始密碼/)).not.toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText("姓名"))
+    await user.type(screen.getByLabelText("姓名"), "陳大華改")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(await screen.findByText(/已更新帳號基本資料/)).toBeInTheDocument()
+  })
+
   it("Email 重複時顯示後端錯誤訊息", async () => {
     const user = userEvent.setup()
     server.use(
