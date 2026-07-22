@@ -12,11 +12,11 @@ import { toApiError } from "../services/http"
 import { getFieldErrors } from "../utils/zodUtils"
 
 /**
- * 自助註冊表單（US2，登入 overlay 的「註冊」分頁）。
- * 前端 Zod 驗證（Email 格式 / 必填 / 複雜度 / 兩次一致）→ 後端伺服器端權威檢核；
- * 成功後由父層跳回登入分頁並預填 Email。錯誤訊息直接採後端 error_message（對齊 DP-MSG-REGISTER）。
+ * 自助註冊表單（US2 #56，登入 overlay 的「註冊」分頁）。
+ * 前端 Zod 驗證 → 後端伺服器端權威檢核。方案 B：送出成功後**不建帳號、不跳登入**，
+ * 改顯示「驗證信已寄」狀態並提供重寄；使用者需點信中連結完成驗證後才能登入。
  */
-export function RegisterForm({ onSuccess }: { onSuccess: (email: string) => void }) {
+export function RegisterForm() {
   const [email, setEmail] = useState("")
   const [userName, setUserName] = useState("")
   const [password, setPassword] = useState("")
@@ -24,6 +24,9 @@ export function RegisterForm({ onSuccess }: { onSuccess: (email: string) => void
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [apiError, setApiError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // 註冊成功後記住 Email，切換為「驗證信已寄」狀態（可重寄）
+  const [sentEmail, setSentEmail] = useState<string | null>(null)
+  const [resendNote, setResendNote] = useState<string | null>(null)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -36,12 +39,40 @@ export function RegisterForm({ onSuccess }: { onSuccess: (email: string) => void
     setSubmitting(true)
     try {
       await authApi.register(parsed.data)
-      onSuccess(email)
+      setSentEmail(email)
     } catch (err) {
       setApiError(toApiError(err).errorMessage)
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleResend = async () => {
+    if (sentEmail === null) return
+    setResendNote(null)
+    try {
+      await authApi.resendVerification(sentEmail)
+      setResendNote("已重新寄出驗證信，請至信箱查收")
+    } catch (err) {
+      setResendNote(toApiError(err).errorMessage)
+    }
+  }
+
+  if (sentEmail !== null) {
+    return (
+      <Stack spacing={2}>
+        <Alert severity="success">
+          驗證信已寄至 <strong>{sentEmail}</strong>，請於 30 分鐘內點信中連結完成驗證後即可登入。
+        </Alert>
+        {resendNote !== null && <Alert severity="info">{resendNote}</Alert>}
+        <Typography variant="body2" color="text.secondary">
+          沒收到信？請檢查垃圾郵件匣，或重新寄送。
+        </Typography>
+        <Button variant="outlined" onClick={handleResend}>
+          重寄驗證信
+        </Button>
+      </Stack>
+    )
   }
 
   return (
@@ -94,7 +125,7 @@ export function RegisterForm({ onSuccess }: { onSuccess: (email: string) => void
           建立帳號
         </Button>
         <Typography variant="caption" color="text.secondary">
-          註冊成功即可登入（自助註冊即用），自動取得 ET 學員預設角色；其他角色由管理者於權限管理開通。
+          註冊後需完成 Email 驗證才能登入；驗證後自動取得 ET 學員預設角色，其他角色由管理者於權限管理開通。
         </Typography>
       </Stack>
     </form>

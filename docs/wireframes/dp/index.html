@@ -191,14 +191,25 @@
       </div>
     </div>
 
-    <!-- 註冊（自助註冊即用） -->
+    <!-- 註冊（Email 驗證後啟用，#56） -->
     <div id="login-register" style="display:none;">
       <div class="mb-3"><label class="form-label form-label-sm">帳號（Email）<span class="text-danger">*</span></label><input type="email" class="form-control" placeholder="user@example.com"></div>
       <div class="mb-3"><label class="form-label form-label-sm">密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="至少 8 字元（含大小寫 / 數字 / 符號 ≥ 3 種）"></div>
       <div class="mb-3"><label class="form-label form-label-sm">確認密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="再次輸入密碼"></div>
       <div class="mb-3"><label class="form-label form-label-sm">姓名 <span class="text-danger">*</span></label><input type="text" class="form-control" placeholder="如：陳大華"></div>
       <button class="btn btn-tsbms w-100" onclick="loginRegisterSubmit()"><i class="bi bi-person-plus me-1"></i>建立帳號</button>
-      <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>註冊成功即可登入（自助註冊即用），自動取得 ET 學員預設角色；其他角色（ET 教師 / 管理者、DM 各角色含閱覽者）由管理者於權限管理開通</div>
+      <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>註冊後需完成 Email 驗證才能登入；驗證通過後自動取得 ET 學員預設角色，其他角色由管理者於權限管理開通</div>
+      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 送出後於分頁內切換為「驗證信已寄」狀態（下方），不建 DP_USER、不跳登入（方案 B：驗證前資料存 DP_PENDING_REGISTRATION）</div>
+    </div>
+
+    <!-- 註冊送出後：驗證信已寄（分頁內狀態，#56） -->
+    <div id="login-register-sent" style="display:none;">
+      <div class="text-center" style="padding: 0.5rem 0 1rem;">
+        <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
+        <h5 class="mt-3 mb-2" style="font-size:1.05rem;">驗證信已寄出</h5>
+        <p class="text-muted small mb-0">驗證信已寄至您的信箱，<br>請於 30 分鐘內點連結完成驗證後即可登入。（DP-MSG-REGISTER-004）</p>
+      </div>
+      <button class="btn btn-outline-secondary w-100" onclick="loginResendVerify()"><i class="bi bi-arrow-repeat me-1"></i>重寄驗證信</button>
     </div>
 
     <!-- 忘記密碼 1 -->
@@ -233,6 +244,17 @@
       <div class="mb-3"><label class="form-label form-label-sm">確認新密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" id="login-fc-confirm" placeholder="再次輸入新密碼"></div>
       <button class="btn btn-tsbms w-100" onclick="loginForceChangeSubmit()"><i class="bi bi-shield-lock me-1"></i>變更並繼續</button>
       <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>不可與最近 3 次使用過之密碼相同；完成變更前無法存取其他功能</div>
+    </div>
+
+    <!-- 註冊驗證落點（信中連結 /verify-email?token=... 之落點；獨立公開頁，非登入分頁，#56） -->
+    <div id="login-verify-result" style="display:none;">
+      <div class="text-center" style="padding: 0.5rem 0 1rem;">
+        <i class="bi bi-patch-check text-success" style="font-size: 3rem;"></i>
+        <h5 class="mt-3 mb-2" style="font-size:1.05rem;">帳號已啟用</h5>
+        <p class="text-muted small mb-0">Email 驗證成功，請以新帳號登入。（DP-MSG-REGISTER-005）<br><span class="text-danger">連結無效 / 逾時時改顯示 DP-MSG-REGISTER-006 / 007 + 重新註冊指引。</span></p>
+      </div>
+      <button class="btn btn-tsbms w-100" onclick="loginBackToLogin()"><i class="bi bi-box-arrow-in-right me-1"></i>前往登入</button>
+      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；驗證通過才建 DP_USER + 授 ET 學員 + 雙稽核 + 首筆歷程（方案 B 啟用副作用）。未驗證帳號登入 → DP-MSG-REGISTER-008（DP_AUTH_010）+ 重寄。</div>
     </div>
 
     <a href="#" class="login-forgot-link" id="login-forgot-link" onclick="loginForgotPw(); return false;">忘記密碼？</a>
@@ -444,7 +466,7 @@
         <li>帳號權限以<strong>最小權限</strong>為原則；唯一識別、不得共用帳號。</li>
         <li>連續登入失敗達上限（參數，預設 5）自動鎖定 → 此頁可<strong>手動解鎖</strong>；亦可逾時自動解鎖。</li>
         <li>連續 <strong>90 日未登入</strong>之帳號由系統自動停用 / 鎖定。</li>
-        <li>使用者可<strong>自助註冊即用</strong>；管理者代建之帳號亦直接可用（<strong>不寄開通確認信</strong>）。</li>
+        <li>使用者可<strong>自助註冊</strong>，須完成 <strong>Email 驗證後啟用</strong>（#56，寄驗證信 → 點連結建 DP_USER）；管理者代建之帳號直接可用（首次登入強制改密，不寄開通確認信）。</li>
         <li><strong>此頁不設角色指派</strong>——ET / DM 之業務角色（教師 / 學員、DM 各角色）於 DP 後台「<strong>權限管理</strong>」畫面按模組過濾指派，寫入模組角色表（<code>ET_USER_ROLE</code> / <code>DM_USER_ROLE</code>）；權限判定與 enforce 在模組，平台不做全域 RBAC。</li>
         <li>所有帳號異動寫入操作記錄（<code>DP_AUDIT_LOG</code>）。</li>
       </ul>
@@ -685,6 +707,11 @@
           </tr>
           <tr>
             <td><span class="audit-badge audit-update">DP</span></td><td><code>EMAIL_CHANGE_VERIFY</code></td><td>【EDMS】帳號（Email）變更驗證</td>
+            <td>Email</td><td><span class="badge bg-success">啟用</span></td>
+            <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="系統信不可停用 / 刪除"><i class="bi bi-lock"></i> 停用</button></td>
+          </tr>
+          <tr>
+            <td><span class="audit-badge audit-update">DP</span></td><td><code>ACCOUNT_VERIFY</code></td><td>【EDMS】帳號註冊驗證</td>
             <td>Email</td><td><span class="badge bg-success">啟用</span></td>
             <td><button class="btn btn-sm btn-outline-primary" onclick="openTemplateEdit()"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="系統信不可停用 / 刪除"><i class="bi bi-lock"></i> 停用</button></td>
           </tr>
@@ -1227,7 +1254,7 @@ function dpSavePassword() {
 
 /* ===== 登入流程（demo；與 ET / DM 同套） ===== */
 function _loginShow(id) {
-  ['login-step-1', 'login-register', 'login-forgot-1', 'login-forgot-2', 'login-force-change'].forEach(function(k) {
+  ['login-step-1', 'login-register', 'login-register-sent', 'login-verify-result', 'login-forgot-1', 'login-forgot-2', 'login-force-change'].forEach(function(k) {
     var el = document.getElementById(k); if (el) el.style.display = (k === id ? '' : 'none');
   });
   var link = document.getElementById('login-forgot-link');
@@ -1278,12 +1305,11 @@ document.addEventListener('DOMContentLoaded', function() {
   var cb = document.getElementById('portal-demo-dm'); if (cb) dpPortalToggleDm(cb);
 });
 function loginRegisterSubmit() {
-  var regEmail = document.querySelector('#login-register input[type="email"]');
-  var loginEmailInput = document.getElementById('login-email'), loginPwInput = document.getElementById('login-password');
-  if (regEmail && loginEmailInput) loginEmailInput.value = regEmail.value || '';
-  if (loginPwInput) loginPwInput.value = '';
-  _loginShow('login-step-1'); showToast('註冊成功！請以新建帳號登入');
+  // 方案 B（#56）：送出後切換為「驗證信已寄」狀態，不建帳號、不跳登入
+  _loginShow('login-register-sent'); showToast('驗證信已寄出，請至信箱點連結完成驗證');
 }
+function loginResendVerify()  { showToast('已重新寄出驗證信，請至信箱查收'); }
+function loginVerifyResult()  { _loginShow('login-verify-result'); }  // demo：模擬點信中連結之落點
 function loginLogout() { document.getElementById('login-overlay').style.display = ''; _loginShow('login-step-1'); }
 
 /* 自訂 class helper */

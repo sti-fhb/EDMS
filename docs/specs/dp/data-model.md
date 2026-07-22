@@ -173,6 +173,20 @@ erDiagram
 
 索引：`(USER_ID, TOKEN_TYPE, USED_DATE)`。
 
+### DP_PENDING_REGISTRATION — 待驗證的自助註冊（#56，方案 B；硬刪除、無 DELETED）
+
+US2 改「Email 驗證後啟用」：註冊當下**不寫 `DP_USER`**，先把註冊申請暫存於本表；點驗證連結通過才建 `DP_USER`。一 Email 一筆待驗證（EMAIL UNIQUE），重新註冊 / 重寄以 Email 覆蓋；consume / 逾時後硬刪除（逾期未驗證列由排程清理）。
+
+| 欄位 | 型別 | 必填 | 說明 |
+|------|------|------|------|
+| TOKEN_HASH | VARCHAR(64) | Y | PK；驗證 token 之 SHA-256（明文僅入信中連結）|
+| EMAIL | VARCHAR(255) | Y | UNIQUE；待驗證帳號 Email（驗證通過後成為 `DP_USER.EMAIL`）|
+| USER_NAME | VARCHAR(50) | Y | 姓名（驗證通過搬入 `DP_USER`）|
+| PWD_HASH | VARCHAR(100) | Y | bcrypt 雜湊（驗證通過搬入 `DP_USER`）|
+| EXPIRES_DATE | TIMESTAMP | Y | 驗證連結逾期即失效（TTL 平台級參數，沿用 30 分鐘）|
+
+索引 / 約束：`PK(TOKEN_HASH)`、`UNIQUE(EMAIL)`。標準欄位含 `CREATED_* / UPDATED_* / RES_ID`（`BaseModelHardDelete`，**無 `DELETED`**）。
+
 ### DP_PWD_HIST — 密碼歷程（append-only；僅 CREATED_*）
 
 | 欄位 | 型別 | 必填 | 說明 |
@@ -332,6 +346,7 @@ erDiagram
 |---------------|------|------|
 | `PWD_RESET` | 密碼重設 | US3 忘記密碼 |
 | `EMAIL_CHANGE_VERIFY` | 帳號變更驗證 | US8 Email 變更 |
+| `ACCOUNT_VERIFY` | 帳號註冊驗證 | US2 自助註冊（#56，Email 驗證後啟用）|
 | `PWD_EXPIRY_REMIND` | 密碼到期提醒 | US11 `SCHDP001` |
 
 > ET / DM 業務範本（`MODULE=ET` / `DM`）之事件清單由各模組規格定義（如 DM 9 項），種子於各模組 migration 建立。

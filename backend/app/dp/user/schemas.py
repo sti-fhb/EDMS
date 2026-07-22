@@ -46,6 +46,21 @@ class RegisterRequest(BaseModel):
     confirm_password: str
 
 
+class VerifyEmailRequest(BaseModel):
+    """註冊驗證請求（US2 #56）。token 為信中連結明文；效期 / 有效性由服務層權威檢核。"""
+
+    token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+
+
+class ResendVerificationRequest(BaseModel):
+    """重寄註冊驗證信請求（US2 #56）。僅需 Email；一律回相同訊息（防列舉）。格式同 RegisterRequest。"""
+
+    email: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
+    ]
+
+
 class LoginResponse(BaseModel):
     """登入回應：JWT access token + 是否需強制變更密碼。"""
 

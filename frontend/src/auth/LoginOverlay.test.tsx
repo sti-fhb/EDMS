@@ -86,6 +86,24 @@ describe("LoginOverlay", () => {
     expect(screen.getByText("強制變更頁殼")).toBeInTheDocument()
   })
 
+  it("未驗證帳號登入（DP_AUTH_010）→ 顯示提示並提供重寄驗證信", async () => {
+    server.use(
+      http.post("/api/login", () =>
+        HttpResponse.json(
+          {
+            error_code: "DP_AUTH_010",
+            error_message: "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送",
+          },
+          { status: 401 },
+        ),
+      ),
+    )
+    renderLogin()
+    await submitLogin()
+    expect(await screen.findByText(/尚未完成 Email 驗證/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
+  })
+
   async function fillRegister(user: ReturnType<typeof userEvent.setup>, over: Partial<Record<string, string>> = {}) {
     await user.click(screen.getByRole("tab", { name: "註冊" }))
     await user.type(screen.getByLabelText("帳號（Email）"), over.email ?? "new@edms.local")
@@ -95,13 +113,13 @@ describe("LoginOverlay", () => {
     await user.click(screen.getByRole("button", { name: "建立帳號" }))
   }
 
-  it("註冊成功 → 跳回登入分頁、預填 Email、顯示成功提示", async () => {
+  it("註冊成功 → 分頁內顯示「驗證信已寄」+ 重寄（不跳登入、方案 B）", async () => {
     renderLogin()
     const user = userEvent.setup()
     await fillRegister(user, { email: "grad@edms.local" })
-    expect(await screen.findByText("註冊成功，請以新帳號登入")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "登入" })).toBeInTheDocument()
-    expect(screen.getByLabelText("帳號（Email）")).toHaveValue("grad@edms.local")
+    // 顯示已寄至該 Email（不再跳登入分頁）
+    expect(await screen.findByText("grad@edms.local")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
   })
 
   it("註冊 Email 重複 → 顯示錯誤訊息（DP_USER_001）", async () => {
