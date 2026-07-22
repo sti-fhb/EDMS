@@ -98,15 +98,18 @@ class UsersService:
         )
         await module_provisioning_gate.grant_default_role(_ET_MODULE, user_id, db)
         await self._log(
-            db, operator.user_id, user_id, ip, "CREATE", "管理者代建帳號",
+            db,
+            operator.user_id,
+            user_id,
+            ip,
+            "CREATE",
+            "管理者代建帳號",
             after={"email": data.email, "user_name": data.user_name, "status": "ACTIVE", "must_change_pwd": True},
         )
         await self._log(db, operator.user_id, user_id, ip, "CREATE", "授予預設 ET 學員角色")
         return UserResponse.model_validate(user)
 
-    async def set_status(
-        self, db: AsyncSession, *, user_id: str, action: str, operator: OperatorInfo
-    ) -> UserResponse:
+    async def set_status(self, db: AsyncSession, *, user_id: str, action: str, operator: OperatorInfo) -> UserResponse:
         """停用 / 啟用帳號。停用有自我保護（不可停用自己，403 DP_USER_006）。
 
         action 已由 UserStatusUpdate（Literal）收斂為 disable / enable，非法值於 422 擋下。
@@ -123,9 +126,14 @@ class UsersService:
         now = utcnow()
         await self._repo.set_status(db, user=user, status=new_status, operator_id=operator.user_id, now=now)
         await self._log(
-            db, operator.user_id, user_id, get_client_ip(), "UPDATE",
+            db,
+            operator.user_id,
+            user_id,
+            get_client_ip(),
+            "UPDATE",
             "停用帳號" if action == "disable" else "啟用帳號",
-            before=before, after={"status": new_status},
+            before=before,
+            after={"status": new_status},
         )
         return UserResponse.model_validate(user)
 
@@ -140,8 +148,14 @@ class UsersService:
         now = utcnow()
         await self._repo.unlock(db, user=user, operator_id=operator.user_id, now=now)
         await self._log(
-            db, operator.user_id, user_id, get_client_ip(), "UPDATE", "解鎖帳號",
-            before=before, after={"login_fail_count": 0, "locked_until": None},
+            db,
+            operator.user_id,
+            user_id,
+            get_client_ip(),
+            "UPDATE",
+            "解鎖帳號",
+            before=before,
+            after={"login_fail_count": 0, "locked_until": None},
         )
         return UserResponse.model_validate(user)
 
@@ -167,8 +181,14 @@ class UsersService:
         except IntegrityError as exc:
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007") from exc
         await self._log(
-            db, operator.user_id, user_id, get_client_ip(), "UPDATE", "維護帳號基本資料",
-            before=before, after={"user_name": data.user_name, "email": data.email},
+            db,
+            operator.user_id,
+            user_id,
+            get_client_ip(),
+            "UPDATE",
+            "維護帳號基本資料",
+            before=before,
+            after={"user_name": data.user_name, "email": data.email},
         )
         return UserResponse.model_validate(user)
 

@@ -30,7 +30,9 @@ class UsersRepository:
         elif status == "disabled":
             conditions.append(DpUser.status == "DISABLED")
         elif status == "locked":
-            conditions.append(and_(DpUser.status == "ACTIVE", DpUser.locked_until.is_not(None), DpUser.locked_until > now))
+            conditions.append(
+                and_(DpUser.status == "ACTIVE", DpUser.locked_until.is_not(None), DpUser.locked_until > now)
+            )
 
         return select(DpUser).where(*conditions).order_by(DpUser.created_date.desc(), DpUser.user_id)
 

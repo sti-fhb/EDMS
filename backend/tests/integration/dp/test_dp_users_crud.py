@@ -66,6 +66,7 @@ async def _count_audit(db, target_id, action_type=None):
 
 # ---- 代建帳號（AC2）----
 
+
 async def test_create_user_builds_active_must_change_grants_and_audits(db, et_stub):
     svc = UsersService()
     resp = await svc.create_user(
@@ -98,6 +99,7 @@ async def test_create_user_duplicate_email_rejected(db, et_stub):
 
 # ---- 查詢（AC1）----
 
+
 async def test_list_filters_by_keyword_and_status(db):
     await _make_user(db, "a1", email="alice@edms.local", name="Alice")
     await _make_user(db, "b1", email="bob@edms.local", name="Bob", status="DISABLED")
@@ -119,6 +121,7 @@ async def test_list_filters_by_keyword_and_status(db):
 
 
 # ---- 停用 / 啟用（AC3/4/7）----
+
 
 async def test_disable_then_enable_with_audit(db):
     await _make_user(db, "t1")
@@ -144,6 +147,7 @@ async def test_disable_self_blocked(db):
 
 # ---- 解鎖（AC5）----
 
+
 async def test_unlock_resets_fail_count_and_locked(db):
     await _make_user(db, "lk", locked_until=utcnow() + timedelta(minutes=30))
     svc = UsersService()
@@ -155,6 +159,7 @@ async def test_unlock_resets_fail_count_and_locked(db):
 
 
 # ---- 基本資料（AC6）----
+
 
 async def test_update_basic_direct_and_email_unique(db):
     await _make_user(db, "e1", email="e1@edms.local", name="舊名")
@@ -175,6 +180,7 @@ async def test_update_basic_direct_and_email_unique(db):
 
 # ---- 不存在 ----
 
+
 async def test_status_on_missing_user_404(db):
     svc = UsersService()
     with pytest.raises(AppError) as exc:
@@ -184,6 +190,7 @@ async def test_status_on_missing_user_404(db):
 
 
 # ---- HTTP 接線抽樣（分頁回應 + 認證）----
+
 
 async def test_list_users_http_paged(db, client):
     await _make_user(db, "admin01")  # operator 本人（get_jwt_payload 查得到）
