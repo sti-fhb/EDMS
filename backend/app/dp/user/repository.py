@@ -1,10 +1,12 @@
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dp.user.models import DpPwdHistory, DpPwdReset
+from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
 from app.dp.users.models import DpUser
+
+_SYSTEM_USER = "SYSTEM"
 
 
 class AuthRepository:
@@ -94,6 +96,51 @@ class AuthRepository:
         user.must_change_pwd = False
         user.updated_user = operator_id
         user.updated_date = now
+        await db.flush()
+
+    # --- 待驗證註冊（DP_PENDING_REGISTRATION，#56 方案 B）---
+
+    async def get_pending_by_email(self, db: AsyncSession, email: str) -> DpPendingRegistration | None:
+        """以 Email 查待驗證註冊；不存在回 None（供登入未驗證提示、重寄）。"""
+        stmt = select(DpPendingRegistration).where(DpPendingRegistration.email == email)
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def get_pending_by_token_hash(self, db: AsyncSession, token_hash: str) -> DpPendingRegistration | None:
+        """以 token 之 SHA-256 查待驗證註冊；效期判定由服務層負責。不存在回 None。"""
+        stmt = select(DpPendingRegistration).where(DpPendingRegistration.token_hash == token_hash)
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def delete_pending_by_email(self, db: AsyncSession, email: str) -> None:
+        """刪除某 Email 的待驗證註冊（重新註冊 / 重寄前先清舊列，維持 EMAIL 唯一）。"""
+        await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.email == email))
+
+    async def delete_pending_by_token_hash(self, db: AsyncSession, token_hash: str) -> None:
+        """驗證通過後刪除該待驗證註冊列（已消費）。"""
+        await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.token_hash == token_hash))
+
+    async def create_pending_registration(
+        self,
+        db: AsyncSession,
+        *,
+        token_hash: str,
+        email: str,
+        user_name: str,
+        pwd_hash: str,
+        expires_date: datetime,
+        now: datetime,
+    ) -> None:
+        """新增一筆待驗證註冊（token 僅存 SHA-256）；呼叫方須先清同 Email 舊列。"""
+        db.add(
+            DpPendingRegistration(
+                token_hash=token_hash,
+                email=email,
+                user_name=user_name,
+                pwd_hash=pwd_hash,
+                expires_date=expires_date,
+                created_user=_SYSTEM_USER,
+                created_date=now,
+            )
+        )
         await db.flush()
 
     # --- 密碼重設 token（DP_PWD_RESET）---

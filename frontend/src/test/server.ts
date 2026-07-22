@@ -9,7 +9,13 @@ export const handlers = [
   http.post("/api/login", () =>
     HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false }),
   ),
-  http.post("/api/register", () => new HttpResponse(null, { status: 201 })),
+  http.post("/api/register", () =>
+    HttpResponse.json({ message: "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證" }, { status: 202 }),
+  ),
+  http.post("/api/verify-email", () => HttpResponse.json({ message: "帳號已啟用，請以新帳號登入" })),
+  http.post("/api/resend-verification", () =>
+    HttpResponse.json({ message: "若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證" }),
+  ),
   http.post("/api/forgot-password", () =>
     HttpResponse.json({ message: "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設" }),
   ),

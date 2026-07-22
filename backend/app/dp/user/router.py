@@ -17,10 +17,13 @@ from app.dp.user.schemas import (
     ModuleRoleStatus,
     ModuleSummary,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     TokenResponse,
+    VerifyEmailRequest,
 )
 from app.dp.user.service import AuthService
+from app.dp.user.verify_service import ResendVerificationService, VerifyService
 
 # 登入限流器（行程內；IP 與帳號維度共用同一器、以 key 前綴區分）
 _login_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
@@ -29,14 +32,21 @@ _register_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window
 # 忘記密碼申請 / 重設限流器（IP + 帳號維度；防列舉與暴力）
 _forgot_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 _reset_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# 註冊驗證端點限流器（IP 維度）；重寄另加帳號維度防濫發
+_verify_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_resend_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 
 router = APIRouter(prefix="/api", tags=["auth"])
 _service = AuthService()
 _register_service = RegisterService()
+_verify_service = VerifyService()
+_resend_service = ResendVerificationService()
 _forgot_service = ForgotPasswordService()
 _reset_service = ResetPasswordService()
 
 _FORGOT_MESSAGE = "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"
+_REGISTER_MESSAGE = "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證"
+_RESEND_MESSAGE = "若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證"
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -50,13 +60,21 @@ async def login(
     return await _service.login(db, email=data.email, password=data.password)
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=status.HTTP_202_ACCEPTED)
 async def register(
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
     _ip_limit: None = Depends(rate_limit_by_ip(_register_limiter, "register")),
-) -> None:
-    """自助註冊（匿名端點，IP 限流防批量灌帳號）。伺服器端檢核 → 建帳號 + 授 ET 學員 + 雙稽核，回 201。"""
+) -> dict[str, str]:
+    """自助註冊（匿名端點，IP 限流防批量灌帳號）。
+
+    方案 B（#56）：檢核 → 寫待驗證表 + 寄驗證信（**不建 DP_USER**），回 202（已受理、待驗證）。
+    使用者點信中連結經 /verify-email 通過後才建帳號並啟用。
+
+    帳號維度限流（先 hit、後查）：防輪換 IP 對單一 Email 反覆觸發驗證信（email-bombing），
+    與 forgot / resend 一致。
+    """
+    _register_limiter.hit(f"register:acct:{data.email}")
     await _register_service.register(
         db,
         email=data.email,
@@ -64,6 +82,33 @@ async def register(
         password=data.password,
         confirm_password=data.confirm_password,
     )
+    return {"message": _REGISTER_MESSAGE}
+
+
+@router.post("/verify-email")
+async def verify_email(
+    data: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    _ip_limit: None = Depends(rate_limit_by_ip(_verify_limiter, "verify")),
+) -> dict[str, str]:
+    """驗證註冊 token（匿名，持信中連結 token）→ 建 DP_USER + 授 ET 學員 + 雙稽核 + 刪待驗證列。"""
+    await _verify_service.verify(db, token=data.token)
+    return {"message": "帳號已啟用，請以新帳號登入"}
+
+
+@router.post("/resend-verification")
+async def resend_verification(
+    data: ResendVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+    _ip_limit: None = Depends(rate_limit_by_ip(_resend_limiter, "resend")),
+) -> dict[str, str]:
+    """重寄註冊驗證信（匿名）。一律回相同訊息（防列舉）；僅對待驗證帳號作廢舊 token、產新並重寄。
+
+    帳號維度**先 hit 限流、後查存在性**（同 forgot，防以 429 反推）。
+    """
+    _resend_limiter.hit(f"resend:acct:{data.email}")
+    await _resend_service.resend(db, email=data.email)
+    return {"message": _RESEND_MESSAGE}
 
 
 @router.post("/forgot-password")

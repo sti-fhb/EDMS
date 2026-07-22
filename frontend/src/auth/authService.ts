@@ -41,6 +41,12 @@ export const authApi = {
   async register(payload: RegisterRequest): Promise<void> {
     await http.post("/register", payload)
   },
+  async verifyEmail(token: string): Promise<void> {
+    await http.post("/verify-email", { token })
+  },
+  async resendVerification(email: string): Promise<void> {
+    await http.post("/resend-verification", { email })
+  },
   async forgotPassword(email: string): Promise<void> {
     await http.post("/forgot-password", { email })
   },

@@ -74,7 +74,7 @@
 ### Session 2026-07-06（模組成立）
 
 - Q: 認證機制採什麼？ → A: 簡單 JWT——驗證帳密後核發一顆 access token（TTL 由參數控制）；**不採 MFA、不採 Refresh Token / 伺服器端 session**；登出＝前端丟棄 token
-- Q: 帳號如何啟用？ → A: 自助註冊即用（〔預設角色部分以釐清第 3 輪為準：帳號建立時授予 ET 學員、唯一預設〕）；管理者代建之帳號亦直接可用，不寄開通確認信
+- Q: 帳號如何啟用？ → A: 〔**自助註冊部分已被 2026-07-21（#56）推翻**：改為「Email 驗證後啟用」——未驗證註冊暫存於 `DP_PENDING_REGISTRATION`、寄驗證信、點連結驗證通過才建 `DP_USER` 並授 ET 學員，詳見 [spec_us2](spec_us2.md) Clarifications 2026-07-21〕；管理者代建之帳號仍直接可用（`MUST_CHANGE_PWD` 首次登入強制改密），不寄開通確認信
 - Q: 平台是否做全域 RBAC？ → A: 否。角色能力定義 / 指派資料 / 判定皆由各模組（ET / DM）自理；平台不設 `DP_ROLE` / `DP_MENU` 等全域角色選單表
 - Q: 稽核如何集中？ → A: 平台共用一張 `DP_AUDIT_LOG`（append-only）；ET / DM 之**資安稽核事件**亦寫入本表統一查詢；**業務歷程**（DM 文件變更歷程 / 閱讀紀錄、ET 學習 / 作答紀錄）留各模組
 - Q: 標準欄位是否含站點？ → A: 否。EDMS 單一組織，標準欄位為 CREATED_USER/DATE、UPDATED_USER/DATE、RES_ID、DELETED（無站點 / 院區維度）
@@ -377,4 +377,5 @@
 | 2026-07-09 | `/speckit.plan` 產出：plan.md（開發順序 Foundation→P1→P2）、research.md（12 項決策，含遷移起手包裁剪與短 TTL 換發機制）、data-model.md（10 表 ERD + DD + 種子）、contracts/（SRVDP001–003、模組回呼、SMTP）|
 | 2026-07-09 | `/speckit.tasks` 產出：tasks.md（54 任務、Phase 1–14、5 Sprint 增量交付；模組回呼以 stub 先行）|
 | 2026-07-09 | 跨文件一致性檢查修正：Key Entities `DP_PWD_RESET` 補 `EMAIL_CHANGE` 類型（對齊 research §5）、`DP_EMAIL_LOG` 改「新增 + 狀態更新」（原誤標 append-only）、plan.md 文件樹過期註記、tasks T035 補 FR-07 稽核歸屬 |
+| 2026-07-21 | #56：自助註冊改「Email 驗證後啟用」（**推翻**「註冊即用 / 不寄開通確認信」）；新增待驗證表 `DP_PENDING_REGISTRATION`（方案 B，驗證前不寫 `DP_USER`）、DP 系統信範本 `ACCOUNT_VERIFY`；新增 `DP_AUTH_010`（未驗證登入）、`DP_USER_003/004`（驗證連結無效 / 逾時）；詳見 [spec_us2](spec_us2.md) |
 | 2026-07-09 | 釐清第 4 輪（首次註冊引導）：入口頁 DM 卡改「未開通鎖定卡」（取代第 3 輪隱藏式）、首次登入歡迎橫幅、模組側欄可見性規則（DM 組未開通隱藏）、redirect 語意精確化（逾時重登 / 通知連結返回原頁面）；開通申請流程列為未來擴充 backlog |

@@ -52,6 +52,18 @@ class AuthService:
         now = utcnow()
         user = await self._repo.get_by_email(db, email)
         if user is None:
+            # 方案 B：未驗證帳號不在 DP_USER，僅在待驗證表。若該 Email 有待驗證列 → 專屬提示（引導驗證 / 重寄），
+            # 而非誤導的「查無此帳號」（#56）。
+            if await self._repo.get_pending_by_email(db, email) is not None:
+                await self._fail(
+                    db,
+                    _SYSTEM_USER,
+                    ip,
+                    "帳號未驗證",
+                    401,
+                    "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送",
+                    "DP_AUTH_010",
+                )
             await self._fail(db, _SYSTEM_USER, ip, "帳號不存在", 401, "查無此帳號，請先註冊", "DP_AUTH_007")
 
         if user.locked_until is not None and user.locked_until > now:

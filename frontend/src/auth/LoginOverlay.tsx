@@ -13,13 +13,14 @@ import type { FormEvent } from "react"
 
 import { ForgotPasswordForm } from "./ForgotPasswordForm"
 import { RegisterForm } from "./RegisterForm"
+import { authApi } from "./authService"
 import { useAuth } from "./useAuth"
 import { toApiError } from "../services/http"
 
 /**
  * 登入 overlay（全畫面遮罩）：登入 / 註冊分頁。
- * 登入：帳密 + 錯誤提示（後端 error_message，對齊 DP-MSG-LOGIN）+ 逾時重登提示；查無帳號可切註冊分頁。
- * 註冊（US2）：RegisterForm，成功後跳回登入分頁並預填 Email。成功登入由 AuthProvider 撤除 overlay。
+ * 登入：帳密 + 錯誤提示（後端 error_message）；查無帳號可切註冊、未驗證（DP_AUTH_010）可重寄驗證信。
+ * 註冊（US2 #56）：RegisterForm，送出後於分頁內顯示「驗證信已寄」（不跳登入，需驗證後才能登入）。
  */
 export function LoginOverlay() {
   const { login, sessionExpired } = useAuth()
@@ -28,7 +29,7 @@ export function LoginOverlay() {
   const [password, setPassword] = useState("")
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [registeredMessage, setRegisteredMessage] = useState<string | null>(null)
+  const [resendNote, setResendNote] = useState<string | null>(null)
   const [forgotMode, setForgotMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -36,6 +37,7 @@ export function LoginOverlay() {
     e.preventDefault()
     setErrorCode(null)
     setErrorMessage(null)
+    setResendNote(null)
     setSubmitting(true)
     try {
       await login(email, password)
@@ -48,12 +50,14 @@ export function LoginOverlay() {
     }
   }
 
-  const handleRegistered = (registeredEmail: string) => {
-    setTab("login")
-    setEmail(registeredEmail)
-    setErrorCode(null)
-    setErrorMessage(null)
-    setRegisteredMessage("註冊成功，請以新帳號登入")
+  const handleResendVerification = async () => {
+    setResendNote(null)
+    try {
+      await authApi.resendVerification(email)
+      setResendNote("若該 Email 有待驗證的註冊，已重新寄出驗證信，請至信箱查收")
+    } catch (err) {
+      setResendNote(toApiError(err).errorMessage)
+    }
   }
 
   return (
@@ -77,84 +81,91 @@ export function LoginOverlay() {
           <ForgotPasswordForm onBack={() => setForgotMode(false)} />
         ) : (
           <>
-        <Tabs
-          value={tab}
-          onChange={(_e, v) => {
-            setTab(v as "login" | "register")
-            setErrorMessage(null)
-            setRegisteredMessage(null)
-          }}
-          variant="fullWidth"
-          sx={{ mb: 2 }}
-        >
-          <Tab value="login" label="登入" />
-          <Tab value="register" label="註冊" />
-        </Tabs>
+            <Tabs
+              value={tab}
+              onChange={(_e, v) => {
+                setTab(v as "login" | "register")
+                setErrorMessage(null)
+                setResendNote(null)
+              }}
+              variant="fullWidth"
+              sx={{ mb: 2 }}
+            >
+              <Tab value="login" label="登入" />
+              <Tab value="register" label="註冊" />
+            </Tabs>
 
-        {tab === "login" ? (
-          <>
-            {registeredMessage !== null && (
-              <Alert severity="success" sx={{ mb: 2 }}>
-                {registeredMessage}
-              </Alert>
-            )}
-            {sessionExpired && errorMessage === null && registeredMessage === null && (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                閒置逾時已自動登出，請重新登入
-              </Alert>
-            )}
-            {errorMessage !== null && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {errorMessage}
-                {errorCode === "DP_AUTH_007" && (
-                  <Box component="span" sx={{ ml: 1 }}>
-                    <Link component="button" type="button" underline="hover" onClick={() => setTab("register")}>
-                      前往註冊
-                    </Link>
-                  </Box>
+            {tab === "login" ? (
+              <>
+                {sessionExpired && errorMessage === null && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    閒置逾時已自動登出，請重新登入
+                  </Alert>
                 )}
-              </Alert>
+                {resendNote !== null && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    {resendNote}
+                  </Alert>
+                )}
+                {errorMessage !== null && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {errorMessage}
+                    {errorCode === "DP_AUTH_007" && (
+                      <Box component="span" sx={{ ml: 1 }}>
+                        <Link component="button" type="button" underline="hover" onClick={() => setTab("register")}>
+                          前往註冊
+                        </Link>
+                      </Box>
+                    )}
+                    {errorCode === "DP_AUTH_010" && (
+                      <Box component="span" sx={{ ml: 1 }}>
+                        <Link component="button" type="button" underline="hover" onClick={handleResendVerification}>
+                          重寄驗證信
+                        </Link>
+                      </Box>
+                    )}
+                  </Alert>
+                )}
+                <form onSubmit={handleSubmit}>
+                  <Stack spacing={2}>
+                    <TextField
+                      label="帳號（Email）"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      fullWidth
+                      autoComplete="username"
+                    />
+                    <TextField
+                      label="密碼"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      fullWidth
+                      autoComplete="current-password"
+                    />
+                    <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
+                      登入
+                    </Button>
+                    <Link
+                      component="button"
+                      type="button"
+                      underline="hover"
+                      variant="body2"
+                      onClick={() => {
+                        setForgotMode(true)
+                        setErrorMessage(null)
+                        setResendNote(null)
+                      }}
+                    >
+                      忘記密碼？
+                    </Link>
+                  </Stack>
+                </form>
+              </>
+            ) : (
+              <RegisterForm />
             )}
-            <form onSubmit={handleSubmit}>
-              <Stack spacing={2}>
-                <TextField
-                  label="帳號（Email）"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  fullWidth
-                  autoComplete="username"
-                />
-                <TextField
-                  label="密碼"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  fullWidth
-                  autoComplete="current-password"
-                />
-                <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
-                  登入
-                </Button>
-                <Link
-                  component="button"
-                  type="button"
-                  underline="hover"
-                  variant="body2"
-                  onClick={() => {
-                    setForgotMode(true)
-                    setErrorMessage(null)
-                    setRegisteredMessage(null)
-                  }}
-                >
-                  忘記密碼？
-                </Link>
-              </Stack>
-            </form>
-          </>
-        ) : (
-          <RegisterForm onSuccess={handleRegistered} />
-        )}
           </>
         )}
       </Card>

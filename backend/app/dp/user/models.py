@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import AuditLogBaseModel, BaseModel
+from app.core.base_model import AuditLogBaseModel, BaseModel, BaseModelHardDelete
 
 
 class DpPwdReset(BaseModel):
@@ -32,6 +32,31 @@ class DpPwdReset(BaseModel):
     new_email: Mapped[Optional[str]] = mapped_column("NEW_EMAIL", String(255), nullable=True)
     expires_date: Mapped[datetime] = mapped_column("EXPIRES_DATE", DateTime(timezone=True), nullable=False)
     used_date: Mapped[Optional[datetime]] = mapped_column("USED_DATE", DateTime(timezone=True), nullable=True)
+
+
+class DpPendingRegistration(BaseModelHardDelete):
+    """待驗證的自助註冊（DP_PENDING_REGISTRATION）。
+
+    US2 改為「Email 驗證後啟用」（#56，方案 B）：註冊當下**不寫 DP_USER**，先把註冊申請
+    （Email / 姓名 / 密碼雜湊 + 一次性驗證 token）暫存於本表；點驗證連結通過才 INSERT DP_USER。
+    如此 DP_USER 只存已驗證帳號，登入 / 忘記密碼 / 使用者管理等不必處理未驗證半成品。
+
+    一 Email 一筆待驗證（EMAIL UNIQUE）：重新註冊 / 重寄時以 Email 覆蓋（刪舊列 + 插新）。
+    明文 token 僅入信中連結，本表只存其 SHA-256（同 DP_PWD_RESET）。consume / 逾時後硬刪除
+    （BaseModelHardDelete，無 DELETED），逾期未驗證列由排程清理。
+    """
+
+    __tablename__ = "DP_PENDING_REGISTRATION"
+    __table_args__ = (
+        PrimaryKeyConstraint("TOKEN_HASH", name="PK_DP_PENDING_REGISTRATION"),
+        UniqueConstraint("EMAIL", name="UQ_DP_PENDING_REGISTRATION_EMAIL"),
+    )
+
+    token_hash: Mapped[str] = mapped_column("TOKEN_HASH", String(64), nullable=False)
+    email: Mapped[str] = mapped_column("EMAIL", String(255), nullable=False)
+    user_name: Mapped[str] = mapped_column("USER_NAME", String(50), nullable=False)
+    pwd_hash: Mapped[str] = mapped_column("PWD_HASH", String(100), nullable=False)
+    expires_date: Mapped[datetime] = mapped_column("EXPIRES_DATE", DateTime(timezone=True), nullable=False)
 
 
 class DpPwdHistory(AuditLogBaseModel):
