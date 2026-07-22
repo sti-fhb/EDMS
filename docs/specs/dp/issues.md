@@ -23,7 +23,7 @@
 | 2 | 登入 / 登出與模組入口頁 | US1 / UCDP001 | P1-核心 | T021 ~ T025（5 任務）| #0 | [#31](https://github.com/sti-fhb/EDMS/issues/31) | ✅ 已開立 |
 | 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | [#39](https://github.com/sti-fhb/EDMS/issues/39) | ✅ 已開立 |
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | [#47](https://github.com/sti-fhb/EDMS/issues/47) | ✅ 已開立 |
-| 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | — | 待補 |
+| 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | [#61](https://github.com/sti-fhb/EDMS/issues/61) | ✅ 已開立 |
 | 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #2 | — | 待補 |
 | 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2（模組 service 以 stub）| — | 待補 |
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #1, #2 | — | 待補 |
@@ -367,9 +367,85 @@
 
 ---
 
-## Issue #5 ~ #12：待補（增量模式）
+## Issue #5：[P1-核心] DP — 使用者管理（dp-users）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 / #1 / #2 / #3 / #4，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us4.md](spec_us4.md)（US4 / UCDP005，FR-DP-US4-01~09、DP-MSG-USERS-001~005）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §2（`grant_default_student_role`）；[data-model.md](data-model.md)（`DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-users`）
+**階段**：P1-核心（管理者日常必要作業：建帳號 / 停用 / 解鎖 / 維護；帳號為 ET / DM 共用項）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_USER` 表、密碼策略（複雜度 / bcrypt）、`SRVDP001`（PWD_POLICY）、`SRVDP003` 稽核、`paginate()`、模組管理者判定閘 `module_admin_gate`（T017，`is_module_admin`）
+- Issue #2（GitHub [#31](https://github.com/sti-fhb/EDMS/issues/31)）已合併：登入（管理者需登入操作）、後台 layout 骨架（`DpLayout` / `Sidebar` / `AppHeader`，T010）
+- Issue #3（GitHub [#39](https://github.com/sti-fhb/EDMS/issues/39)）已合併：`module_provisioning` 授予閘 + `ids.generate_user_id` + 密碼歷程寫入（**US4 代建帳號沿用 US2 這套授學員邏輯**）
+
+### 任務說明
+
+DP 後台使用者管理頁（ET / DM 共用）：查詢（Email / 姓名 / 狀態，後端分頁）、建立帳號（管理者設初始密碼 + `MUST_CHANGE_PWD` + 授 ET 學員）、停用 / 啟用、解鎖、基本資料維護（姓名 / Email 直接生效、不走驗證信），全數寫稽核（含前後值）。**自我保護**：不可停用 / 鎖定自己；**不檢核**「至少保留 1 名管理者」。角色指派不在本頁（屬 US7）。
+
+> ⚠️ **本 issue 是第一個 DP 後台 CRUD 頁，需一併 bootstrap 前後端 CRUD 共用基礎設施**（見範圍）——這批共用元件將被 US5 / US7 / US9 / US10 後續後台頁沿用，故投資一次、之後複用。
+
+### 範圍
+
+**後端**（`app/dp/users/` — 人員管理 CRUD，與 `dp/user` 認證模組分開；`DpUser` model 已在此）：
+- **共用 bootstrap**：`app/core/operator.py`（**新**：`OperatorInfo` + `get_operator` Dependency，寫入型 API 填 `CREATED_*` / `UPDATED_*` 用，sti-backend-modules 規範；目前 core 尚無此檔）
+- **T030 查詢端點**：`GET /api/dp/users`（Email / 姓名 / 狀態篩選 + `paginate()` 後端分頁）；回列表（Email、姓名、狀態、鎖定狀態、最後登入）；`router → service → repository`
+- **T031 建立帳號**：`POST /api/dp/users`（管理者設初始密碼〔複雜度〕→ 建 `DP_USER`〔`MUST_CHANGE_PWD=true`〕+ 授 ET 學員〔`module_provisioning`，同 US2〕+ 首筆 `DP_PWD_HIST` + CREATE 稽核；Email 唯一 USERS-005，`operator`=管理者）
+- **T032 停用 / 啟用 / 解鎖 / 基本資料**：停用（`STATUS=DISABLED`，**自我保護** USERS-001）/ 啟用 / 解鎖（`login_fail_count=0` + `locked_until=None`，USERS-004）/ 維護姓名 / Email（直接生效、Email 唯一、不走驗證信）；全寫稽核（**含 before / after value**）
+
+**前端**（`frontend/src/dp/users/` + 共用）：
+- **共用 bootstrap（第一個 CRUD 頁）**：依 [sti-frontend-modules](../../../.claude/rules/sti-frontend-modules.md) / [sti-ui-design](../../../.claude/rules/sti-ui-design.md) 建立 `CrudPageLayout`、`AppTable`、`Pagination`、`FormCard`、`CrudActions`、`useCrudForm`、`usePagedQuery`、`useNotification`（含確認對話框）、`columnFactories`（statusColumn）、`QUERY_KEYS.users`——目前皆尚未建立
+- **T030 前端** 填實 `UsersPage`（現為 stub）：`CrudPageLayout` 清單 + 篩選（Email / 姓名 / 狀態）+ 後端分頁
+- **T031 前端** 建立帳號表單（`FormCard`，Zod：Email / 姓名 / 初始密碼複雜度）
+- **T032 前端** 停用二次確認（`useNotification.confirm`，USERS-002）、解鎖 / 啟用按鈕、編輯表單；成功 / 錯誤訊息（USERS-001~005）
+
+**測試**：
+- 後端 int：查詢（篩選 + 分頁）；建立（`MUST_CHANGE_PWD` + 授學員 + 首筆歷程 + Email 重複 409 + 稽核）；停用（+ 自我保護擋自己）；啟用；解鎖（計數歸零）；基本資料（Email 唯一、before/after 稽核）
+- 前端：清單 / 篩選（MSW）、建立、停用確認、解鎖 / 啟用、編輯
+
+### 驗收條件
+
+- [ ] 查詢（Email / 姓名 / 狀態，後端分頁）列出使用者（Email、姓名、狀態、鎖定狀態、最後登入）；ET / DM 管理者所見相同
+- [ ] 建立帳號：管理者設初始密碼（複雜度）→ 建 `DP_USER` + `MUST_CHANGE_PWD=true` + 依 US2 規則授 ET 學員 + 首筆 `DP_PWD_HIST`；Email 重複 → USERS-005；成功 → USERS-003；**不寄開通確認信**
+- [ ] 停用：二次確認（USERS-002）→ `STATUS=DISABLED`，ET / DM 兩端同步失效（每請求查 DP_USER 狀態，T014）；寫稽核
+- [ ] 啟用：停用（含閒置 90 日禁用）帳號恢復可登入；寫稽核
+- [ ] 解鎖：`login_fail_count` 歸零 + 解除 `LOCKED_UNTIL` → USERS-004；寫稽核
+- [ ] 基本資料：管理者代改姓名 / Email 直接生效（不走驗證信）；Email 重複擋（USERS-005）；寫稽核
+- [ ] **自我保護**：不可停用 / 鎖定自己（USERS-001）
+- [ ] **不檢核**「至少保留 1 名管理者」（0 名時允許，由 IT 經 DB 恢復）
+- [ ] 建立 / 停用 / 啟用 / 解鎖 / 基本資料異動皆寫 `DP_AUDIT_LOG`（含異動前後值）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（#16）**：`DP_USER`、密碼策略、`SRVDP001` / `SRVDP003`、`paginate()`、`module_admin_gate`
+- **Issue #2（#31）**：登入、後台 layout 骨架
+- **Issue #3（#39）+ US2 #56**：`module_provisioning`（授學員）+ `ids.generate_user_id` + 密碼歷程寫入（代建沿用）。#56 已把「建帳號 + 啟用副作用」落地於 `AuthRepository`（`dp/user`），代建**重用勿重寫**：`create_user()`（建 `DP_USER` ACTIVE）、`add_pwd_history()`（首筆歷程）、`module_provisioning_gate.grant_default_role("ET", ...)`、雙稽核樣式（`verify_service._audit_register`）。
+- **跨模組（stub 先行）**：ET `grant_default_student_role`（同 US2，stub）；`is_module_admin`（ET / DM checker stub，見注意事項）——完整 admin 驗收待模組 service 就緒於 T049 回歸
+
+### 注意事項
+
+- ⚠️ **admin 授權閘（開發前須釐清，列為 SA Q）**：FR-01 要求「ET / DM 管理者皆可、一般使用者不可」。`module_admin_gate`（T017）提供 `is_module_admin`，但 ET / DM checker 為 **stub（fail-closed False）** → 若直接掛「須 ET 或 DM 管理者」閘，現況無人可通過、頁面無法驗收。且 [sti-backend-modules 暫行授權規則](../../../.claude/rules/sti-backend-modules.md)明訂「全域授權機制未實作前，CUD 僅注入 `get_operator`、**不加** `require_admin`」。→ 二擇一待 `/sti-plan` 釐清：(a) 依暫行規則先以 `get_jwt_payload` 認證、admin 閘待模組 service（T049 回歸）；(b) 掛 `require_module_admin`（ET 或 DM）+ 測試注入 stub。
+- ⚠️ **第一個 CRUD 頁 = 前後端 CRUD 基礎設施 bootstrap**：前端 CrudPageLayout / AppTable / Pagination / FormCard / CrudActions / useCrudForm / usePagedQuery / useNotification / columnFactories、後端 `core/operator.py`（`get_operator`/`OperatorInfo`）皆尚未建立；多由 TBMS 既有實作**移植**（API 已驗證，見 sti-frontend-modules / sti-backend-modules）；後續 US5 / US7 / US9 / US10 後台頁沿用。
+  - **交付方式（決策 2026-07-21）**：於 **US4 同一分支拆兩支 PR**——**PR1** 移植 CRUD toolkit + `get_operator`（由 US4 當首個消費者驗證、只移植 US4 需要的最小集，不臆測擴充）；**PR2** US4 使用者管理功能（T030~T032）。不另開獨立 infra issue（避免無消費者的臆測抽象；對齊 US1 於功能內 bootstrap 資料層之先例）。`/sti-plan` 時據此排實作順序。
+- **停用「ET / DM 同步失效」**非本 issue 新增機制：靠 `get_jwt_payload` 每請求查 `DP_USER.STATUS`（T014），停用即下次請求 403。
+- **代建 operator = 管理者**（對照 US2 自助註冊 operator = 本人）；建帳號重用 #56 的 `create_user` + `module_provisioning` + `generate_user_id` + `add_pwd_history`，惟 `MUST_CHANGE_PWD=true`（初始密碼強制變更）。
+  - ⚠️ **`create_user` 需加參數**：#56 的 `AuthRepository.create_user` 寫死 `must_change_pwd=False`（自助註冊者自設密碼、不強制變更，屬正確設計）。US4 代建須傳 `True` → 為 `create_user` 補一個 `must_change_pwd: bool = False` 參數（預設不變、不影響 US2），**勿另寫一份建帳號邏輯**。
+  - **首登強制變更為分析文件明載需求**（來源：[spec.md](spec.md#L59) 釐清第 1 輪 2026-07-08、[data-model.md](data-model.md#L159) `MUST_CHANGE_PWD`、FR-DP-US4-03、FR-DP-US1-06、FR-DP-US8-08）。閘與頁殼 US1 已備（`core/password_gate.py` T023 → 403 `DP_AUTH_009`、前端 `ForceChangePasswordShell`）；US4 建的帳號一登入即被 gate 導向。實際變更提交端點屬 US8。
+- **Email 唯一**：DB `UNIQUE` + 伺服器端檢核（建立同 US2；編輯時排除自己）。
+- 稽核經 `SRVDP003.log_action`（`res_id`=USER_ID 必填、含 before/after value、來源 IP）；密碼不入 log。
+- 角色指派 MUST NOT 於本頁（US7）；目錄 `dp/users`（CRUD）與 `dp/user`（認證）分開（sti-api-routes）。
+
+### 相關文件
+
+- [spec_us4.md](spec_us4.md)、[spec.md](spec.md) §模組過濾與共用項 / §帳號鎖定與閒置控管、[data-model.md](data-model.md)（`DP_USER`）、[tasks.md](tasks.md) Phase 7（T030~T032）
+- [contracts/module-callbacks.md](contracts/module-callbacks.md) §1 / §2
+- 需求：[RQDP.md](../../requirements/RQDP.md) §使用者 / 帳號管理 / §帳號鎖定；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP005
+
+**Labels**：`P1-核心`, `DP-平台`, `US4`
+
+---
+
+## Issue #6 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #5，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -387,4 +463,5 @@
 | 2026-07-20 | Issue #3（US2 自助註冊）已開立為 GitHub [#39](https://github.com/sti-fhb/EDMS/issues/39)，回填總覽表 GitHub # 欄與狀態 |
 | 2026-07-20 | Issue #3（US2）已合併（PR #42）並 close（#39）；依增量模式補入 Issue #4（忘記密碼 / US3）完整 body（T028~T029，前置 #0 / #1〔SRVDP002 非 stub〕/ #2）|
 | 2026-07-20 | Issue #4（US3 忘記密碼）已開立為 GitHub [#47](https://github.com/sti-fhb/EDMS/issues/47)，回填總覽表 GitHub # 欄與狀態 |
+| 2026-07-21 | Issue #4（US3）已合併（PR #51）並 close（#47）；依增量模式補入 Issue #5（使用者管理 / US4）完整 body（T030~T032；標註為首個後台 CRUD 頁、需 bootstrap 前後端 CRUD 共用基礎設施 + get_operator；admin 授權閘列為開工前釐清）|
 | 2026-07-16 | Issue #1（US6）實作完成並合併（PR #29 squash），總覽表狀態更新；依增量模式補入 Issue #2（US1 登入 / 登出與模組入口頁）完整 body |
