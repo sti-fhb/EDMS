@@ -3,4 +3,7 @@ export const QUERY_KEYS = {
   auth: {
     moduleSummary: () => ["auth", "module-summary"] as const,
   },
+  users: {
+    list: (params: Record<string, unknown>) => ["users", "list", params] as const,
+  },
 } as const
