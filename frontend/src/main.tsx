@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client"
 import { RouterProvider } from "react-router-dom"
 
 import { AuthProvider } from "./auth/AuthProvider"
+import { NotificationProvider } from "./contexts/NotificationContext"
 import { router } from "./router"
 import { muiTheme } from "./styles/muiTheme"
 
@@ -21,9 +22,11 @@ createRoot(rootEl).render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={muiTheme}>
         <CssBaseline />
-        <AuthProvider>
-          <RouterProvider router={router} />
-        </AuthProvider>
+        <NotificationProvider>
+          <AuthProvider>
+            <RouterProvider router={router} />
+          </AuthProvider>
+        </NotificationProvider>
       </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
