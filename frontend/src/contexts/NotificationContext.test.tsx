@@ -56,4 +56,18 @@ describe("NotificationContext", () => {
 
     expect(onOk).not.toHaveBeenCalled()
   })
+
+  it("onOk 失敗時保留對話框並解除 loading（供呼叫端顯示錯誤後重試）", async () => {
+    const user = userEvent.setup()
+    const onOk = vi.fn().mockRejectedValue(new Error("停用失敗"))
+    renderWithProviders(<Harness onOk={onOk} />)
+
+    await user.click(screen.getByRole("button", { name: "觸發確認" }))
+    await user.click(await screen.findByRole("button", { name: "確認" }))
+
+    await waitFor(() => expect(onOk).toHaveBeenCalledTimes(1))
+    // 對話框仍在、確認鈕解除 disabled（可重試）
+    expect(screen.getByText("確定停用")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("button", { name: "確認" })).toBeEnabled())
+  })
 })

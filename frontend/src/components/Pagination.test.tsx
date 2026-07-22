@@ -21,4 +21,25 @@ describe("Pagination", () => {
 
     expect(onPageChange).toHaveBeenCalledWith(2)
   })
+
+  it("切換每頁筆數時回傳新筆數並重置回第 1 頁", async () => {
+    const user = userEvent.setup()
+    const onPageChange = vi.fn()
+    const onPageSizeChange = vi.fn()
+    renderWithProviders(
+      <Pagination
+        page={3}
+        total={100}
+        pageSize={10}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />,
+    )
+
+    await user.click(screen.getByLabelText("每頁筆數"))
+    await user.click(await screen.findByRole("option", { name: "20" }))
+
+    expect(onPageSizeChange).toHaveBeenCalledWith(20)
+    expect(onPageChange).toHaveBeenCalledWith(1)
+  })
 })
