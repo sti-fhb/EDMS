@@ -25,6 +25,88 @@ export const handlers = [
   http.get("/api/dp/user/module-summary", () =>
     HttpResponse.json({ et: { has_role: true }, dm: { has_role: false } }),
   ),
+  // US4 使用者管理（預設 happy path；含啟用中 / 已鎖定 / 已停用三態供 UI 驗證）
+  http.get("/api/dp/users", () =>
+    HttpResponse.json({
+      data: [
+        {
+          user_id: "u-active",
+          user_name: "陳大華",
+          email: "active@edms.local",
+          status: "ACTIVE",
+          locked_until: null,
+          last_login_date: "2026-07-06T09:12:00Z",
+          created_date: "2026-05-01T00:00:00Z",
+        },
+        {
+          user_id: "u-locked",
+          user_name: "林小美",
+          email: "locked@edms.local",
+          status: "ACTIVE",
+          locked_until: "2099-01-01T00:00:00Z",
+          last_login_date: null,
+          created_date: "2026-06-02T00:00:00Z",
+        },
+        {
+          user_id: "u-disabled",
+          user_name: "張志豪",
+          email: "disabled@edms.local",
+          status: "DISABLED",
+          locked_until: null,
+          last_login_date: null,
+          created_date: "2026-06-20T00:00:00Z",
+        },
+      ],
+      meta: { total: 3, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.post("/api/dp/users", () =>
+    HttpResponse.json(
+      {
+        user_id: "u-new",
+        user_name: "新人",
+        email: "new@edms.local",
+        status: "ACTIVE",
+        locked_until: null,
+        last_login_date: null,
+        created_date: "2026-07-22T00:00:00Z",
+      },
+      { status: 201 },
+    ),
+  ),
+  http.patch("/api/dp/users/:id/status", () =>
+    HttpResponse.json({
+      user_id: "u-active",
+      user_name: "陳大華",
+      email: "active@edms.local",
+      status: "DISABLED",
+      locked_until: null,
+      last_login_date: null,
+      created_date: "2026-05-01T00:00:00Z",
+    }),
+  ),
+  http.patch("/api/dp/users/:id/unlock", () =>
+    HttpResponse.json({
+      user_id: "u-locked",
+      user_name: "林小美",
+      email: "locked@edms.local",
+      status: "ACTIVE",
+      locked_until: null,
+      last_login_date: null,
+      created_date: "2026-06-02T00:00:00Z",
+    }),
+  ),
+  http.patch("/api/dp/users/:id", () =>
+    HttpResponse.json({
+      user_id: "u-active",
+      user_name: "陳大華改",
+      email: "active2@edms.local",
+      status: "ACTIVE",
+      locked_until: null,
+      last_login_date: null,
+      created_date: "2026-05-01T00:00:00Z",
+    }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

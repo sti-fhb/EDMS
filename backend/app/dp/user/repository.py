@@ -39,8 +39,13 @@ class AuthRepository:
         pwd_hash: str,
         operator_id: str,
         now: datetime,
+        must_change_pwd: bool = False,
     ) -> DpUser:
-        """建立啟用中（ACTIVE）使用者並 flush；PWD_CHANGED_DATE 設為建立當下。"""
+        """建立啟用中（ACTIVE）使用者並 flush；PWD_CHANGED_DATE 設為建立當下。
+
+        must_change_pwd 預設 False（US2 自助註冊者自設密碼）；US4 管理者代建初始密碼時傳 True
+        （首次登入強制變更，spec.md 釐清第 1 輪 / FR-DP-US4-03）。
+        """
         user = DpUser(
             user_id=user_id,
             email=email,
@@ -49,7 +54,7 @@ class AuthRepository:
             status="ACTIVE",
             login_fail_count=0,
             pwd_changed_date=now,
-            must_change_pwd=False,
+            must_change_pwd=must_change_pwd,
             created_user=operator_id,
             created_date=now,
         )

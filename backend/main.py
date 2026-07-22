@@ -20,6 +20,7 @@ from app.core.request_context import get_client_ip, set_client_ip
 from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.worker import run_forever
 from app.dp.user.router import router as dp_user_router
+from app.dp.users.router import router as dp_users_router
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ app.add_middleware(
 
 # 業務模組 router
 app.include_router(dp_user_router)
+app.include_router(dp_users_router)
 
 
 @app.middleware("http")
