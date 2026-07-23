@@ -238,6 +238,24 @@ async def test_update_missing_param_404(db, admin_gate):
     assert exc.value.status_code == 404 and exc.value.error_code == "DP_PARAM_004"
 
 
+async def test_update_no_fields_rejected(db, admin_gate):
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(), operator=_OP
+        )
+    assert exc.value.status_code == 422 and exc.value.error_code == "COMMON_001"
+
+
+async def test_create_on_missing_param_404(db, admin_gate):
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().create_detail(
+            db, param_id="NOPE", data=ParamDetailCreate(param_key="X", param_value="y"), operator=_OP
+        )
+    assert exc.value.status_code == 404 and exc.value.error_code == "DP_PARAM_004"
+
+
 # ---- HTTP 接線抽樣（認證 + 列表回應）----
 
 

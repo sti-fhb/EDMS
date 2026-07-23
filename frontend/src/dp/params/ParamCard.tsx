@@ -33,7 +33,8 @@ export function ParamCard({ master, onSaveValue, onToggle, onAdd }: ParamCardPro
   const handleSave = (paramKey: string, original: string | null) => {
     const value = valueOf(paramKey, original)
     if (!ParamValueSchema.safeParse(value).success) return
-    void onSaveValue(master, paramKey, value.trim())
+    // 錯誤已由 useParams 內部以 toast 呈現並 rethrow（供 confirm 保留重試）；此處吞掉 rejection 避免未捕捉警告
+    void Promise.resolve(onSaveValue(master, paramKey, value.trim())).catch(() => {})
   }
 
   const handleAdd = () => {
@@ -44,10 +45,13 @@ export function ParamCard({ master, onSaveValue, onToggle, onAdd }: ParamCardPro
       return
     }
     setAddErrors({})
-    void onAdd(master, result.data).then(() => {
-      setNewKey("")
-      setNewValue("")
-    })
+    // 成功才清空輸入；失敗 toast 已於 hook 呈現，保留輸入供修正（catch 吞掉 rethrow 的 rejection）
+    void onAdd(master, result.data)
+      .then(() => {
+        setNewKey("")
+        setNewValue("")
+      })
+      .catch(() => {})
   }
 
   const isList = master.param_type === "LIST"

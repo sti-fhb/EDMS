@@ -5,6 +5,7 @@
   DP 內部使用，不經 app.services 出口暴露（唯讀契約不受污染）。
 """
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -208,15 +209,20 @@ class ParamAdminService:
             raise AppError(status_code=409, detail=_DUP_MSG, error_code="DP_PARAM_005")
 
         now = utcnow()
-        detail = await self._repo.create_detail(
-            db,
-            param_id=param_id,
-            param_key=data.param_key,
-            param_value=data.param_value,
-            sort_order=data.sort_order,
-            operator_id=operator.user_id,
-            now=now,
-        )
+        # get_detail 檢查與 flush 之間有 TOCTOU 空窗：並發新增同碼 → 撞 PK_DP_PARAM_D。
+        # 比照 users/verify_service 兜底轉乾淨 409（否則落全域 500），交 get_db rollback。
+        try:
+            detail = await self._repo.create_detail(
+                db,
+                param_id=param_id,
+                param_key=data.param_key,
+                param_value=data.param_value,
+                sort_order=data.sort_order,
+                operator_id=operator.user_id,
+                now=now,
+            )
+        except IntegrityError as exc:
+            raise AppError(status_code=409, detail=_DUP_MSG, error_code="DP_PARAM_005") from exc
         await self._log(
             db,
             operator.user_id,
