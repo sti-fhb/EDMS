@@ -53,6 +53,20 @@ export function UsersPage() {
   const [status, setStatus] = useState("")
   const [inviteKeyword, setInviteKeyword] = useState("")
 
+  // 切頁籤 / 查詢 / 重新整理時，收起可能開著的編輯（建立）表單，避免停留在上一情境
+  const handleTabChange = (v: number) => {
+    accounts.closeForm()
+    setTab(v)
+  }
+  const searchAccounts = () => {
+    accounts.closeForm()
+    accounts.search(keyword, status)
+  }
+  const searchInvites = () => {
+    accounts.closeForm()
+    invites.search(inviteKeyword)
+  }
+
   const accountColumns = useMemo<AppColumn<UserRow>[]>(
     () => [
       { key: "user_name", title: "姓名", dataIndex: "user_name" },
@@ -124,7 +138,7 @@ export function UsersPage() {
   )
 
   const tabsBar = (
-    <Tabs value={tab} onChange={(_e, v) => setTab(v)}>
+    <Tabs value={tab} onChange={(_e, v) => handleTabChange(v)}>
       <Tab label="帳號" />
       <Tab
         label={
@@ -142,7 +156,7 @@ export function UsersPage() {
       <CrudPageLayout
         icon={<PeopleIcon color="primary" />}
         title="使用者管理"
-        actions={<CrudActions onRefresh={() => invites.search(inviteKeyword)} onAdd={accounts.openCreate} addLabel="建立帳號" />}
+        actions={<CrudActions onRefresh={searchInvites} onAdd={accounts.openCreate} addLabel="建立帳號" />}
         filterContent={
           <>
             {tabsBar}
@@ -155,7 +169,7 @@ export function UsersPage() {
                 onChange={(e) => setInviteKeyword(e.target.value)}
                 sx={{ minWidth: 240 }}
               />
-              <Button variant="outlined" size="small" onClick={() => invites.search(inviteKeyword)}>
+              <Button variant="outlined" size="small" onClick={searchInvites}>
                 查詢
               </Button>
             </Stack>
@@ -174,6 +188,7 @@ export function UsersPage() {
         form={
           accounts.formVisible && (
             <UsersForm
+              key={accounts.editingRecord?.user_id ?? "create"}
               editingRecord={accounts.editingRecord}
               saving={accounts.saving}
               onSave={accounts.handleSave}
@@ -190,7 +205,7 @@ export function UsersPage() {
     <CrudPageLayout
       icon={<PeopleIcon color="primary" />}
       title="使用者管理"
-      actions={<CrudActions onRefresh={() => accounts.search(keyword, status)} onAdd={accounts.openCreate} addLabel="建立帳號" />}
+      actions={<CrudActions onRefresh={searchAccounts} onAdd={accounts.openCreate} addLabel="建立帳號" />}
       filterContent={
         <>
           {tabsBar}
@@ -217,7 +232,7 @@ export function UsersPage() {
                 </MenuItem>
               ))}
             </TextField>
-            <Button variant="outlined" size="small" onClick={() => accounts.search(keyword, status)}>
+            <Button variant="outlined" size="small" onClick={searchAccounts}>
               查詢
             </Button>
           </Stack>
@@ -236,6 +251,7 @@ export function UsersPage() {
       form={
         accounts.formVisible && (
           <UsersForm
+            key={accounts.editingRecord?.user_id ?? "create"}
             editingRecord={accounts.editingRecord}
             saving={accounts.saving}
             onSave={accounts.handleSave}

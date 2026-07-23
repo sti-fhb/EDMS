@@ -55,7 +55,7 @@ export function useUsers() {
         setSaving(false)
       }
     },
-    [editingRecord, message, closeForm, invalidate, setSaving],
+    [editingRecord, message, closeForm, queryClient, setSaving],
   )
 
   const disableUser = useCallback(

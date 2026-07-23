@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -113,6 +113,32 @@ describe("UsersPage 使用者操作流程", () => {
     await user.click(screen.getByRole("button", { name: "儲存" }))
 
     expect(await screen.findByText(/已更新姓名/)).toBeInTheDocument()
+  })
+
+  it("編輯中直接點另一列的編輯 → 表單切換到新帳號（不停留舊的）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    // 先編輯第一列（陳大華 active@edms.local）
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    expect(await screen.findByLabelText("帳號（Email）")).toHaveValue("active@edms.local")
+
+    // 不按取消，直接點第三列（張志豪 disabled@edms.local）的編輯 → 表單應切換
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[2])
+    await waitFor(() => expect(screen.getByLabelText("帳號（Email）")).toHaveValue("disabled@edms.local"))
+  })
+
+  it("編輯中點查詢 → 表單收起", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    expect(await screen.findByLabelText("帳號（Email）")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+    await waitFor(() => expect(screen.queryByLabelText("帳號（Email）")).not.toBeInTheDocument())
   })
 
   // ---- 待啟用邀請頁籤（#67）----
