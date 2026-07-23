@@ -107,6 +107,47 @@ export const handlers = [
       created_date: "2026-05-01T00:00:00Z",
     }),
   ),
+  // US5 系統參數維護（預設 happy path；含平台 VALUE / LIST 與 DM 鎖定清單供 UI 驗證）
+  http.get("/api/dp/params", () =>
+    HttpResponse.json([
+      {
+        param_id: "JWT",
+        param_name: "JWT 設定",
+        param_type: "VALUE",
+        detail_lock: false,
+        description: "JWT 存取與換發相關參數",
+        scope: "platform",
+        details: [
+          { param_key: "ACCESS_TTL_MIN", param_value: "15", sort_order: null, is_enabled: true },
+          { param_key: "RENEW_MAX_HOURS", param_value: "8", sort_order: null, is_enabled: true },
+        ],
+      },
+      {
+        param_id: "ACTION_TYPE",
+        param_name: "操作類別",
+        param_type: "LIST",
+        detail_lock: false,
+        description: null,
+        scope: "platform",
+        details: [{ param_key: "LOGIN", param_value: "登入", sort_order: 1, is_enabled: true }],
+      },
+      {
+        param_id: "DM_DOC_CATEGORY",
+        param_name: "文件分類",
+        param_type: "LIST",
+        detail_lock: true,
+        description: null,
+        scope: "DM",
+        details: [{ param_key: "SOP", param_value: "標準作業程序", sort_order: 1, is_enabled: true }],
+      },
+    ]),
+  ),
+  http.put("/api/dp/params/:id/details/:key", () =>
+    HttpResponse.json({ param_key: "ACCESS_TTL_MIN", param_value: "10", sort_order: null, is_enabled: true }),
+  ),
+  http.post("/api/dp/params/:id/details", () =>
+    HttpResponse.json({ param_key: "EXPORT", param_value: "匯出", sort_order: null, is_enabled: true }, { status: 201 }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

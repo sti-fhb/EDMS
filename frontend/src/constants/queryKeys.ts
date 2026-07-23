@@ -6,4 +6,7 @@ export const QUERY_KEYS = {
   users: {
     list: (params: Record<string, unknown>) => ["users", "list", params] as const,
   },
+  params: {
+    list: () => ["params", "list"] as const,
+  },
 } as const

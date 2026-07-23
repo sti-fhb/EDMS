@@ -1,0 +1,62 @@
+import { screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it } from "vitest"
+
+import { ParamsPage } from "./ParamsPage"
+import { renderWithProviders } from "../../test/renderWithProviders"
+
+describe("ParamsPage 系統參數維護流程", () => {
+  it("載入後平台頁籤顯示 VALUE 參數與影響全平台警告，並有 DM 頁籤", async () => {
+    renderWithProviders(<ParamsPage />)
+
+    expect(await screen.findByText("JWT 設定")).toBeInTheDocument()
+    expect(screen.getByLabelText("ACCESS_TTL_MIN")).toBeInTheDocument()
+    expect(screen.getByText(/變更將影響全平台/)).toBeInTheDocument()
+    // 分頁籤：平台 + DM（皆有資料）
+    expect(screen.getByRole("tab", { name: "平台（共用）" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "文件管理（DM）" })).toBeInTheDocument()
+  })
+
+  it("編輯平台參數值 → 先出現影響全平台確認 → 確認後提示已即時生效", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    const field = await screen.findByLabelText("ACCESS_TTL_MIN")
+
+    await user.clear(field)
+    await user.type(field, "10")
+    await user.click(screen.getAllByRole("button", { name: "儲存" })[0])
+
+    // 平台級警告確認對話框（PARAMS-005）
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/影響全平台/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "確定儲存" }))
+
+    expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
+  })
+
+  it("DM 鎖定清單：代碼唯讀、無新增入口", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("JWT 設定")
+
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    expect(await screen.findByText("文件分類")).toBeInTheDocument()
+    expect(screen.getByText("SOP")).toBeInTheDocument()
+    expect(screen.getByText("代碼鎖定")).toBeInTheDocument()
+    // 鎖定清單不提供新增入口
+    expect(screen.queryByRole("button", { name: "新增" })).not.toBeInTheDocument()
+  })
+
+  it("平台清單新增項目 → 提示已即時生效", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("操作類別")
+
+    await user.type(screen.getByLabelText("新增代碼"), "EXPORT")
+    await user.type(screen.getByLabelText("新增名稱"), "匯出")
+    await user.click(screen.getByRole("button", { name: "新增" }))
+
+    expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
+  })
+})
