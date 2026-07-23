@@ -153,7 +153,7 @@
 | 使用者主檔（DP_USER）| ET / DM 共用帳號；USER_ID（系統內穩定識別碼）、帳號（Email）、密碼雜湊、姓名、狀態（啟用 / 停用）、登入失敗計數、鎖定狀態、最後登入時間、Email 變更之待生效欄位。無平台管理員旗標 |
 | 驗證 Token（DP_PWD_RESET）| 一次性時效 token（TOKEN_TYPE：`PWD_RESET` 忘記密碼 / `EMAIL_CHANGE` 帳號變更驗證；plan 階段依 US8 需求擴充，見 research §5）|
 | 密碼歷程（DP_PWD_HIST）| 前 N 次密碼雜湊（append-only、精簡版），供密碼重複性檢核 |
-| 操作歷程（DP_AUDIT_LOG）| 平台共用資安稽核日誌（append-only、不可竄改刪除）；操作者、時間至秒、功能 / 模組代碼、操作類別（LOGIN / LOGOUT / CREATE / UPDATE / DELETE）、來源 IP、異動對象、異動前後值（JSONB）；ET / DM 資安事件亦寫入本表 |
+| 操作歷程（DP_AUDIT_LOG）| 平台共用資安稽核日誌（append-only、不可竄改刪除）；操作者、時間至秒、功能 / 模組代碼、操作類別（LOGIN / LOGOUT / CREATE / UPDATE / DELETE）、來源 IP、異動對象、異動前後值（TEXT 存 JSON，非 JSONB，見 [research.md](research.md) §6）；ET / DM 資安事件亦寫入本表 |
 | 功能參數主檔（DP_PARAM_M）| 全平台參數 / 清單定義之分類（`PARAM_ID` 前綴：無前綴 `DP_` 平台級 / `ET_` / `DM_` 模組級）；`DETAIL_LOCK` 標記鎖定碼（如文件分類碼建立後不可改）|
 | 功能參數明細（DP_PARAM_D）| 參數值與清單項（`PARAM_ID` + `PARAM_KEY`）；分類 / func_name / 標籤名稱 / 可見對象值 / DM 檢索標籤皆為此表之列 |
 | 通知範本（DP_NOTIFY_TEMPLATE）| 全平台通知範本（`MODULE`：`DP` / `ET` / `DM` + `TEMPLATE_CODE`）；主旨、內文、可用變數、管道（Email / 站內 / 兩者）、啟用停用、版本（樂觀鎖）；內容不同的通知＝同表不同列 |
@@ -234,7 +234,7 @@
 ### 稽核（操作記錄）規則
 
 - 至少稽核：更改密碼、登入成功 / 失敗、系統存取成功 / 失敗、帳號建立 / 停用、角色 / 權限修改、密碼重置、系統參數 / 清單 / 範本異動；採單一日誌機制（`DP_AUDIT_LOG`）、格式一致、僅授權使用者可存取
-- 日誌項目：使用者 ID（非個資型）、時間至秒、功能 / 資源名稱、執行結果 / 事件描述、網路來源與目的位址、異動前後值（JSONB）
+- 日誌項目：使用者 ID（非個資型）、時間至秒、功能 / 資源名稱、執行結果 / 事件描述、網路來源與目的位址、異動前後值（TEXT 存 JSON，非 JSONB，見 [research.md](research.md) §6）
 - **append-only**：不得由管理者刪除 / 竄改；須特定授權人員才可異動並留軌跡，以雜湊等方式確保完整性
 - 保留：至少 1 年以上；容量失效時自動因應（如覆寫最舊）並留軌跡，容量告警由 IT 監控機制負責；每日備份至不同實體並加密（**備份與告警屬 IT 維運範圍**，不屬系統功能，不入排程表）
 - **業務歷程不併入本表**：DM 文件變更歷程（`DM_CHANGE_LOG`）、閱讀紀錄、ET 學習 / 作答 / 擁有者轉讓等為業務資料，留各模組、面向使用者查詢

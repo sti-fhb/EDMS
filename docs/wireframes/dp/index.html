@@ -566,6 +566,7 @@
     <!-- ===== 平台頁籤 ===== -->
     <div class="tab-pane fade show active" id="param-dp" role="tabpanel">
       <div class="wf-status-msg wf-status-info"><i class="bi bi-people me-1"></i>平台級參數（無前綴 <code>DP_</code>）——ET / DM 管理者<strong>皆可見可改</strong>（共用項）。</div>
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i><strong>平台級參數變更將影響全平台（ET 與 DM）</strong>——儲存前系統會再次提示確認（DP-MSG-PARAMS-005）。</div>
 
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-shield-lock me-1"></i>密碼安全策略</div>
@@ -748,7 +749,7 @@
         <li>全平台參數值與清單定義統一存 <code>DP_PARAM_M</code> / <code>DP_PARAM_D</code>，以 <code>PARAM_ID</code> 前綴分模組（無前綴 <code>DP_</code> 平台級 / <code>ET_</code> / <code>DM_</code>）；清單型（分類 / 標籤名稱 / func_name / 可見對象）以一個 <code>PARAM_ID</code> 下多筆 <code>PARAM_KEY</code> 表達。異動寫入稽核。</li>
         <li><strong>三頁籤按模組區分</strong>：平台（共用）/ ET / DM 三頁籤；登入為 ET 管理者只顯示「平台 + ET」頁籤、DM 管理者只顯示「平台 + DM」（對方模組頁籤不顯示、互不可見）；平台級 <code>DP_</code> 參數兩者共用可改。</li>
         <li><strong>鎖定碼</strong>：需鎖定之碼（如文件分類碼建立後不可改）以 <code>DP_PARAM_M.DETAIL_LOCK</code> 標記，UI 呈唯讀鎖 <i class="bi bi-lock-fill"></i>。</li>
-        <li><strong>啟用 / 停用</strong>：清單項目（分類 / func_name / 標籤 / 可見對象）以動作欄「停用 / 啟用」按鈕切換 <code>DP_PARAM_D.IS_ACTIVE</code>——<strong>停用不刪除、既有引用保留</strong>，僅不出現在後續新增 / 搜尋下拉；可見對象停用採 <strong>soft-retire</strong>（不收回既有可見性）；ET / DM「全體」（<code>IS_ALL</code> / 通用值）不可停用（按鈕鎖定）。</li>
+        <li><strong>啟用 / 停用</strong>：清單項目（分類 / func_name / 標籤 / 可見對象）以動作欄「停用 / 啟用」按鈕切換 <code>DP_PARAM_D.IS_ENABLED</code>——<strong>停用不刪除、既有引用保留</strong>，僅不出現在後續新增 / 搜尋下拉；可見對象停用採 <strong>soft-retire</strong>（不收回既有可見性）；ET / DM「全體」（<code>IS_ALL</code> / 通用值）不可停用（按鈕鎖定）。</li>
         <li><strong>定義 vs 關聯分層</strong>：清單「定義」（有哪些）在 DP_PARAM；「誰配誰」關聯（文件屬哪分類、使用者 × 標籤、課程 × 標籤、閱覽者 × 可見對象）與<strong>套用規則</strong>（DOC_ID 產碼、<code>IS_ALL</code> 展開與自動邀請、func_name 唯一手冊檢核）留各模組。</li>
         <li>密碼長度分級（一般 8 / 特權 12）保留以對齊國防部資安法規；密碼重設 TTL、發信調校（重試 / 速率 / 告警）改列平台級 <code>DP_</code>（<code>LOGIN</code> / <code>MAIL</code>）。</li>
         <li>帳號類信件（密碼重設 / 帳號驗證）不列為參數，已改為通知範本（<code>DP_NOTIFY_TEMPLATE</code> <code>MODULE=DP</code>），於「通知範本」畫面維護。</li>
