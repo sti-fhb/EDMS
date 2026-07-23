@@ -69,7 +69,9 @@ async def activate_pending_account(
     await module_provisioning_gate.grant_default_role(_ET_MODULE, user_id, db)
     await _audit(db, audit, func_name=func_name, user_id=user_id, ip=ip, desc=create_desc)
     await _audit(db, audit, func_name=func_name, user_id=user_id, ip=ip, desc="授予預設 ET 學員角色")
-    await repo.delete_pending_by_token_hash(db, pending.token_hash)
+    # 以 Email（而非 token_hash）刪 pending：若啟用與管理者重寄競態、pending 列已被換成新 token，
+    # 以 token_hash 刪會 no-op 而殘留一筆已無意義的邀請列；以 Email 刪可清掉該 Email 之任何 pending 列。
+    await repo.delete_pending_by_email(db, pending.email)
     return user_id
 
 

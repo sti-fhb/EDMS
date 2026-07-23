@@ -1,4 +1,4 @@
-"""US4 使用者管理整合測試（#67 邀請流程）：查詢 / 建立邀請 / 待啟用清單 / 重寄 / 取消 / 停用 / 啟用 / 解鎖 / 改姓名 + 稽核。
+"""US4 使用者管理整合測試（#67 邀請流程）：查詢 / 建立邀請 / 待啟用清單 / 重寄 / 取消 / 停用啟用解鎖 / 改姓名 + 稽核。
 
 多以 UsersService + 真實 DB 直測業務規則與稽核落地；另抽樣一條 HTTP 驗 router 接線與分頁回應。
 建立 / 重寄邀請注入假 NotifyService（不實際寫 outbox），只驗「有無寄、寄哪個範本」。
@@ -154,6 +154,13 @@ async def test_cancel_invite_deletes_pending(db):
 async def test_resend_missing_invite_404(db):
     with pytest.raises(AppError) as exc:
         await _svc().resend_invite(db, res_id="ghost", operator=_OP)
+    assert exc.value.status_code == 404
+    assert exc.value.error_code == "DP_USER_009"
+
+
+async def test_cancel_missing_invite_404(db):
+    with pytest.raises(AppError) as exc:
+        await _svc().cancel_invite(db, res_id="ghost", operator=_OP)
     assert exc.value.status_code == 404
     assert exc.value.error_code == "DP_USER_009"
 

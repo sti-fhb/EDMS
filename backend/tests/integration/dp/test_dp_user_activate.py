@@ -16,6 +16,7 @@ from app.dp.audit.models import DpAuditLog
 from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import hash_token
+from app.dp.user.verify_service import VerifyService
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
@@ -55,9 +56,7 @@ async def _make_invite(db, *, token="invite-tok", email="invitee@edms.local", na
 
 async def test_activate_builds_user_grants_and_deletes_pending(db, et_stub):
     await _make_invite(db)
-    await ActivateAccountService().activate(
-        db, token="invite-tok", new_password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
+    await ActivateAccountService().activate(db, token="invite-tok", new_password=_GOOD_PWD, confirm_password=_GOOD_PWD)
 
     user = (await db.execute(select(DpUser).where(DpUser.email == "invitee@edms.local"))).scalar_one()
     assert user.status == "ACTIVE"
@@ -104,11 +103,21 @@ async def test_activate_rejects_self_register_token(db, et_stub):
 async def test_activate_expired_token(db, et_stub):
     await _make_invite(db, token="old-tok", ttl_min=-1)  # 已逾期
     with pytest.raises(AppError) as exc:
-        await ActivateAccountService().activate(
-            db, token="old-tok", new_password=_GOOD_PWD, confirm_password=_GOOD_PWD
-        )
+        await ActivateAccountService().activate(db, token="old-tok", new_password=_GOOD_PWD, confirm_password=_GOOD_PWD)
     assert exc.value.status_code == 400
     assert exc.value.error_code == "DP_USER_004"
+
+
+async def test_verify_email_rejects_admin_invite_token(db, et_stub):
+    # 反向守衛（安全 LOW-3）：管理者邀請 token 丟到 /verify-email 端點應被拒（DP_USER_003），
+    # 不靠 DP_USER.PWD_HASH NOT NULL 約束兜底
+    await _make_invite(db, token="inv-for-verify")
+    with pytest.raises(AppError) as exc:
+        await VerifyService().verify(db, token="inv-for-verify")
+    assert exc.value.status_code == 400
+    assert exc.value.error_code == "DP_USER_003"
+    # pending 未被消費（交易語意）
+    assert await AuthRepository().get_pending_by_email(db, "invitee@edms.local") is not None
 
 
 async def test_activate_password_mismatch(db, et_stub):
@@ -119,3 +128,17 @@ async def test_activate_password_mismatch(db, et_stub):
         )
     assert exc.value.status_code == 422
     assert exc.value.error_code == "DP_USER_002"
+
+
+async def test_activate_account_endpoint(client, db, et_stub):
+    """/api/activate-account 端點（HTTP 層接線）：有效邀請 token + 合規密碼 → 200 + 建立 DP_USER。"""
+    await _make_invite(db, token="http-tok")
+    r = await client.post(
+        "/api/activate-account",
+        json={"token": "http-tok", "new_password": _GOOD_PWD, "confirm_password": _GOOD_PWD},
+    )
+    assert r.status_code == 200
+    assert "message" in r.json()
+    assert (
+        await db.execute(select(DpUser).where(DpUser.email == "invitee@edms.local"))
+    ).scalar_one_or_none() is not None

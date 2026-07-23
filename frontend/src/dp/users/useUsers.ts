@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -13,6 +14,7 @@ const DEFAULT_LIMIT = 20
 /** 使用者管理頁狀態與操作（查詢 / 建立 / 停用 / 啟用 / 解鎖 / 編輯）。 */
 export function useUsers() {
   const { message, confirm } = useNotification()
+  const queryClient = useQueryClient()
   const { formVisible, editingRecord, saving, setSaving, openCreate, openEdit, closeForm } = useCrudForm<UserRow>()
 
   // 已送出的查詢條件（與輸入分離：按「查詢」才套用）
@@ -45,7 +47,8 @@ export function useUsers() {
           message.success("邀請信已寄出，使用者需經連結設定密碼後啟用")
         }
         closeForm()
-        invalidate()
+        // 以 ["users"] 前綴一併失效清單與待啟用邀請 cache：建立邀請成功後，即使停在「待啟用邀請」頁籤也即時刷新
+        queryClient.invalidateQueries({ queryKey: ["users"] })
       } catch (err) {
         message.error(toApiError(err).errorMessage)
       } finally {

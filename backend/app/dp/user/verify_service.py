@@ -53,7 +53,9 @@ class VerifyService:
         now = utcnow()
         ip = get_client_ip()
         pending = await self._repo.get_pending_by_token_hash(db, hash_token(token))
-        if pending is None:
+        # 僅自助註冊 token 走本端點；管理者邀請（ADMIN_INVITE）token 一律視為無效（該走 /activate-account）。
+        # 明確檢查而非靠 DP_USER.PWD_HASH NOT NULL 兜底（pwd_hash 於邀請列為 NULL），語意清楚、不依賴 DB 約束。
+        if pending is None or pending.kind != _KIND_SELF_REGISTER:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_USER_003")
         if pending.expires_date <= now:
             raise AppError(status_code=400, detail=_TOKEN_EXPIRED_MSG, error_code="DP_USER_004")
