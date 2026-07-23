@@ -253,6 +253,11 @@ class ParamAdminService:
         before: dict | None = None,
         after: dict | None = None,
     ) -> None:
+        # 決策紀錄（2026-07-23，Security Review MEDIUM）：稽核前後值含 param_value 明文。
+        # sti-backend-logging 將 DP_PARAM_D.PARAM_VALUE 列為敏感，但目前所有平台級 seed 參數
+        # （JWT / PWD_POLICY / LOGIN / MAIL 數值、ACTION_TYPE 清單）皆非機密，故不遮罩（不為
+        # 不存在情境預寫防禦碼，sti-coding-style）。日後若引入以 PARAM_VALUE 存放機密（如通關
+        # 密碼雜湊）之參數，MUST 於此對該類 param_id 遮罩後再寫稽核（機密改走 config/.env 為上策）。
         await self._audit.log_action(
             db,
             module="DP",
