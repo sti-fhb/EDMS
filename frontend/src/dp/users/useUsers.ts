@@ -38,11 +38,11 @@ export function useUsers() {
       setSaving(true)
       try {
         if (editingRecord) {
-          await usersApi.updateBasic(editingRecord.user_id, values as UserUpdatePayload)
-          message.success("已更新帳號基本資料")
+          await usersApi.updateName(editingRecord.user_id, values as UserUpdatePayload)
+          message.success("已更新姓名")
         } else {
           await usersApi.create(values as UserCreatePayload)
-          message.success("帳號已建立；使用者以初始密碼首次登入時須變更密碼")
+          message.success("邀請信已寄出，使用者需經連結設定密碼後啟用")
         }
         closeForm()
         invalidate()

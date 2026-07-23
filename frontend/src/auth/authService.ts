@@ -27,6 +27,13 @@ export interface ResetPasswordRequest {
   confirm_password: string
 }
 
+/** 帳號啟用請求（US4 #67 管理者邀請）。受邀者持邀請 token 自設密碼。 */
+export interface ActivateAccountRequest {
+  token: string
+  new_password: string
+  confirm_password: string
+}
+
 export interface ModuleRoleStatus {
   has_role: boolean
 }
@@ -52,6 +59,9 @@ export const authApi = {
   },
   async resetPassword(payload: ResetPasswordRequest): Promise<void> {
     await http.post("/reset-password", payload)
+  },
+  async activateAccount(payload: ActivateAccountRequest): Promise<void> {
+    await http.post("/activate-account", payload)
   },
   async login(payload: LoginRequest): Promise<LoginResponse> {
     const { data } = await http.post<LoginResponse>("/login", payload)

@@ -1,8 +1,12 @@
 import PeopleIcon from "@mui/icons-material/People"
+import Badge from "@mui/material/Badge"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
+import Divider from "@mui/material/Divider"
 import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
+import Tab from "@mui/material/Tab"
+import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import { useMemo, useState } from "react"
 
@@ -13,8 +17,9 @@ import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { formatDateTime } from "../../utils/date"
 import { UsersForm } from "./UsersForm"
+import { useInvites } from "./useInvites"
 import { useUsers } from "./useUsers"
-import type { UserRow } from "./usersService"
+import type { InviteRow, UserRow } from "./usersService"
 
 const STATUS_OPTIONS = [
   { value: "", label: "全部" },
@@ -28,37 +33,27 @@ function isLocked(row: UserRow): boolean {
   return row.status === "ACTIVE" && row.locked_until !== null && new Date(row.locked_until) > new Date()
 }
 
-/** 衍生狀態 Chip：已停用 / 已鎖定 / 啟用中。 */
 function StatusChip({ row }: { row: UserRow }) {
   if (row.status === "DISABLED") return <Chip size="small" label="已停用" />
   if (isLocked(row)) return <Chip size="small" color="warning" label="已鎖定" />
   return <Chip size="small" color="success" label="啟用中" />
 }
 
+/** 邀請是否逾期（expires_date 已過）。 */
+function isExpired(row: InviteRow): boolean {
+  return new Date(row.expires_date) <= new Date()
+}
+
 export function UsersPage() {
-  const {
-    items,
-    total,
-    loading,
-    page,
-    setPage,
-    search,
-    formVisible,
-    editingRecord,
-    saving,
-    openCreate,
-    openEdit,
-    closeForm,
-    handleSave,
-    disableUser,
-    enableUser,
-    unlockUser,
-  } = useUsers()
+  const [tab, setTab] = useState(0)
+  const accounts = useUsers()
+  const invites = useInvites(tab === 1)
 
   const [keyword, setKeyword] = useState("")
   const [status, setStatus] = useState("")
+  const [inviteKeyword, setInviteKeyword] = useState("")
 
-  const columns = useMemo<AppColumn<UserRow>[]>(
+  const accountColumns = useMemo<AppColumn<UserRow>[]>(
     () => [
       { key: "user_name", title: "姓名", dataIndex: "user_name" },
       { key: "email", title: "帳號（Email）", dataIndex: "email" },
@@ -72,66 +67,180 @@ export function UsersPage() {
         render: (_v, r) => (
           <Stack direction="row" spacing={1} justifyContent="flex-end">
             {r.status === "DISABLED" ? (
-              <Button size="small" color="success" onClick={() => enableUser(r)}>
+              <Button size="small" color="success" onClick={() => accounts.enableUser(r)}>
                 啟用
               </Button>
             ) : isLocked(r) ? (
-              <Button size="small" color="warning" onClick={() => unlockUser(r)}>
+              <Button size="small" color="warning" onClick={() => accounts.unlockUser(r)}>
                 解鎖
               </Button>
             ) : (
-              <Button size="small" onClick={() => disableUser(r)}>
+              <Button size="small" onClick={() => accounts.disableUser(r)}>
                 停用
               </Button>
             )}
-            <Button size="small" onClick={() => openEdit(r)}>
+            <Button size="small" onClick={() => accounts.openEdit(r)}>
               編輯
             </Button>
           </Stack>
         ),
       },
     ],
-    [enableUser, unlockUser, disableUser, openEdit],
+    [accounts],
   )
 
+  const inviteColumns = useMemo<AppColumn<InviteRow>[]>(
+    () => [
+      { key: "user_name", title: "姓名", dataIndex: "user_name" },
+      { key: "email", title: "帳號（Email）", dataIndex: "email" },
+      { key: "invited", title: "邀請寄出時間", render: (_v, r) => formatDateTime(r.created_date) },
+      {
+        key: "invite_status",
+        title: "邀請狀態",
+        render: (_v, r) =>
+          isExpired(r) ? (
+            <Chip size="small" color="warning" label="已逾期" />
+          ) : (
+            <Chip size="small" color="info" label="有效中" />
+          ),
+      },
+      {
+        key: "actions",
+        title: "操作",
+        align: "right",
+        render: (_v, r) => (
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            <Button size="small" onClick={() => invites.resendInvite(r)}>
+              重寄邀請
+            </Button>
+            <Button size="small" color="error" onClick={() => invites.cancelInvite(r)}>
+              取消邀請
+            </Button>
+          </Stack>
+        ),
+      },
+    ],
+    [invites],
+  )
+
+  const tabsBar = (
+    <Tabs value={tab} onChange={(_e, v) => setTab(v)}>
+      <Tab label="帳號" />
+      <Tab
+        label={
+          <Badge color="secondary" badgeContent={invites.total} showZero={false} sx={{ pr: invites.total ? 1.5 : 0 }}>
+            待啟用邀請
+          </Badge>
+        }
+      />
+    </Tabs>
+  )
+
+  if (tab === 1) {
+    // 待啟用邀請頁籤
+    return (
+      <CrudPageLayout
+        icon={<PeopleIcon color="primary" />}
+        title="使用者管理"
+        actions={<CrudActions onRefresh={() => invites.search(inviteKeyword)} onAdd={accounts.openCreate} addLabel="建立帳號" />}
+        filterContent={
+          <>
+            {tabsBar}
+            <Divider sx={{ mb: 2 }} />
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "flex-end" }}>
+              <TextField
+                size="small"
+                label="關鍵字（姓名 / Email）"
+                value={inviteKeyword}
+                onChange={(e) => setInviteKeyword(e.target.value)}
+                sx={{ minWidth: 240 }}
+              />
+              <Button variant="outlined" size="small" onClick={() => invites.search(inviteKeyword)}>
+                查詢
+              </Button>
+            </Stack>
+          </>
+        }
+        table={
+          <AppTable
+            columns={inviteColumns}
+            data={invites.items}
+            rowKey="res_id"
+            loading={invites.loading}
+            emptyText="目前無待啟用邀請"
+          />
+        }
+        pagination={<Pagination page={invites.page} total={invites.total} onPageChange={invites.setPage} />}
+        form={
+          accounts.formVisible && (
+            <UsersForm
+              editingRecord={accounts.editingRecord}
+              saving={accounts.saving}
+              onSave={accounts.handleSave}
+              onCancel={accounts.closeForm}
+            />
+          )
+        }
+      />
+    )
+  }
+
+  // 帳號頁籤
   return (
     <CrudPageLayout
       icon={<PeopleIcon color="primary" />}
       title="使用者管理"
-      actions={<CrudActions onRefresh={() => search(keyword, status)} onAdd={openCreate} addLabel="建立帳號" />}
+      actions={<CrudActions onRefresh={() => accounts.search(keyword, status)} onAdd={accounts.openCreate} addLabel="建立帳號" />}
       filterContent={
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "flex-end" }}>
-          <TextField
-            size="small"
-            label="關鍵字（姓名 / Email）"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            sx={{ minWidth: 240 }}
-          />
-          <TextField
-            select
-            size="small"
-            label="帳號狀態"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            sx={{ minWidth: 160 }}
-          >
-            {STATUS_OPTIONS.map((opt) => (
-              <MenuItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </MenuItem>
-            ))}
-          </TextField>
-          <Button variant="outlined" size="small" onClick={() => search(keyword, status)}>
-            查詢
-          </Button>
-        </Stack>
+        <>
+          {tabsBar}
+          <Divider sx={{ mb: 2 }} />
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "flex-end" }}>
+            <TextField
+              size="small"
+              label="關鍵字（姓名 / Email）"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              sx={{ minWidth: 240 }}
+            />
+            <TextField
+              select
+              size="small"
+              label="帳號狀態"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              sx={{ minWidth: 160 }}
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button variant="outlined" size="small" onClick={() => accounts.search(keyword, status)}>
+              查詢
+            </Button>
+          </Stack>
+        </>
       }
-      table={<AppTable columns={columns} data={items} rowKey="user_id" loading={loading} emptyText="查無使用者" />}
-      pagination={<Pagination page={page} total={total} onPageChange={setPage} />}
+      table={
+        <AppTable
+          columns={accountColumns}
+          data={accounts.items}
+          rowKey="user_id"
+          loading={accounts.loading}
+          emptyText="查無使用者"
+        />
+      }
+      pagination={<Pagination page={accounts.page} total={accounts.total} onPageChange={accounts.setPage} />}
       form={
-        formVisible && (
-          <UsersForm editingRecord={editingRecord} saving={saving} onSave={handleSave} onCancel={closeForm} />
+        accounts.formVisible && (
+          <UsersForm
+            editingRecord={accounts.editingRecord}
+            saving={accounts.saving}
+            onSave={accounts.handleSave}
+            onCancel={accounts.closeForm}
+          />
         )
       }
     />

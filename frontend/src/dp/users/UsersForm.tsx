@@ -1,3 +1,5 @@
+import LockIcon from "@mui/icons-material/Lock"
+import InputAdornment from "@mui/material/InputAdornment"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import { useState } from "react"
@@ -8,7 +10,7 @@ import { UserCreateSchema, UserUpdateSchema } from "./schemas"
 import type { UserCreatePayload, UserRow, UserUpdatePayload } from "./usersService"
 
 interface UsersFormProps {
-  /** 有值＝編輯基本資料（姓名 / Email）；null＝建立帳號（Email / 姓名 / 初始密碼）。 */
+  /** 有值＝編輯（僅改姓名，Email 唯讀）；null＝建立帳號（Email + 姓名，寄邀請信）。 */
   editingRecord: UserRow | null
   saving: boolean
   onSave: (values: UserCreatePayload | UserUpdatePayload) => void
@@ -16,26 +18,23 @@ interface UsersFormProps {
 }
 
 /**
- * 使用者建立 / 編輯表單。
- * - 建立：Email + 姓名 + 初始密碼（帳號建立後首次登入強制變更）。
- * - 編輯：姓名 + Email（管理者代改直接生效，不走驗證信）。
+ * 使用者建立 / 編輯表單（US4 #67）。
+ * - 建立：Email + 姓名 → 送出後寄邀請信，使用者自設密碼啟用（管理者不設密碼）。
+ * - 編輯：僅可改姓名；Email 為登入帳號、唯讀不可代改（本人變更走個人資料維護）。
  */
 export function UsersForm({ editingRecord, saving, onSave, onCancel }: UsersFormProps) {
   const isEdit = editingRecord !== null
   const [email, setEmail] = useState(editingRecord?.email ?? "")
   const [userName, setUserName] = useState(editingRecord?.user_name ?? "")
-  const [password, setPassword] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const handleSave = () => {
     if (isEdit) {
-      const values = { user_name: userName, email }
-      const parsed = UserUpdateSchema.safeParse(values)
+      const parsed = UserUpdateSchema.safeParse({ user_name: userName })
       setFieldErrors(getFieldErrors(parsed.success ? null : parsed.error))
       if (parsed.success) onSave(parsed.data)
     } else {
-      const values = { email, user_name: userName, password }
-      const parsed = UserCreateSchema.safeParse(values)
+      const parsed = UserCreateSchema.safeParse({ email, user_name: userName })
       setFieldErrors(getFieldErrors(parsed.success ? null : parsed.error))
       if (parsed.success) onSave(parsed.data)
     }
@@ -43,11 +42,11 @@ export function UsersForm({ editingRecord, saving, onSave, onCancel }: UsersForm
 
   return (
     <FormCard
-      title={isEdit ? "編輯帳號基本資料" : "建立帳號"}
+      title={isEdit ? "編輯帳號" : "建立帳號（寄送邀請）"}
       onSave={handleSave}
       onCancel={onCancel}
       saving={saving}
-      saveLabel={isEdit ? "儲存" : "建立"}
+      saveLabel={isEdit ? "儲存" : "寄送邀請"}
     >
       <Stack spacing={2}>
         <TextField
@@ -56,7 +55,20 @@ export function UsersForm({ editingRecord, saving, onSave, onCancel }: UsersForm
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           error={Boolean(fieldErrors.email)}
-          helperText={fieldErrors.email}
+          // 編輯時 Email 唯讀（登入帳號不可代改）；建立時可填並提示將寄邀請信
+          helperText={
+            isEdit ? "Email 為登入帳號，不可修改；使用者可於個人資料維護自行變更" : fieldErrors.email ?? "將寄送邀請信至此 Email"
+          }
+          disabled={isEdit}
+          InputProps={
+            isEdit
+              ? { readOnly: true, startAdornment: (
+                  <InputAdornment position="start">
+                    <LockIcon fontSize="small" color="disabled" />
+                  </InputAdornment>
+                ) }
+              : undefined
+          }
           fullWidth
         />
         <TextField
@@ -68,18 +80,6 @@ export function UsersForm({ editingRecord, saving, onSave, onCancel }: UsersForm
           helperText={fieldErrors.user_name}
           fullWidth
         />
-        {!isEdit && (
-          <TextField
-            label="初始密碼"
-            type="password"
-            size="small"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            error={Boolean(fieldErrors.password)}
-            helperText={fieldErrors.password ?? "至少 8 字元，含大小寫 / 數字 / 特殊符號至少 3 種"}
-            fullWidth
-          />
-        )}
       </Stack>
     </FormCard>
   )
