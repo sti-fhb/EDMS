@@ -173,16 +173,21 @@ erDiagram
 
 索引：`(USER_ID, TOKEN_TYPE, USED_DATE)`。
 
-### DP_PENDING_REGISTRATION — 待驗證的自助註冊（#56，方案 B；硬刪除、無 DELETED）
+### DP_PENDING_REGISTRATION — 待驗證 / 待啟用的帳號（#56 自助註冊 + US4 管理者邀請；硬刪除、無 DELETED）
 
-US2 改「Email 驗證後啟用」：註冊當下**不寫 `DP_USER`**，先把註冊申請暫存於本表；點驗證連結通過才建 `DP_USER`。一 Email 一筆待驗證（EMAIL UNIQUE），重新註冊 / 重寄以 Email 覆蓋；consume / 逾時後硬刪除（逾期未驗證列由排程清理）。
+帳號啟用前**不寫 `DP_USER`**，先把申請暫存於本表；點連結通過才建 `DP_USER`。兩種來源以 `KIND` 區分：
+- `SELF_REGISTER`（US2 自助註冊）：註冊當下即帶密碼雜湊（`PWD_HASH` 有值），驗證通過搬入 `DP_USER`。
+- `ADMIN_INVITE`（US4 管理者邀請）：建立時**不帶密碼**（`PWD_HASH` 為 NULL），使用者於啟用連結**自設密碼**才回填並建 `DP_USER`。
+
+一 Email 一筆待驗證（EMAIL UNIQUE），重新申請 / 重寄以 Email 覆蓋；consume / 逾時後硬刪除（逾期未驗證列由排程清理）。使用者管理頁「待啟用邀請」頁籤只撈 `KIND=ADMIN_INVITE`。
 
 | 欄位 | 型別 | 必填 | 說明 |
 |------|------|------|------|
 | TOKEN_HASH | VARCHAR(64) | Y | PK；驗證 token 之 SHA-256（明文僅入信中連結）|
 | EMAIL | VARCHAR(255) | Y | UNIQUE；待驗證帳號 Email（驗證通過後成為 `DP_USER.EMAIL`）|
 | USER_NAME | VARCHAR(50) | Y | 姓名（驗證通過搬入 `DP_USER`）|
-| PWD_HASH | VARCHAR(100) | Y | bcrypt 雜湊（驗證通過搬入 `DP_USER`）|
+| PWD_HASH | VARCHAR(100) | N | bcrypt 雜湊（驗證通過搬入 `DP_USER`）；`ADMIN_INVITE` 於建立時為 NULL、啟用設密碼時回填 |
+| KIND | VARCHAR(20) | Y | 來源：`SELF_REGISTER` / `ADMIN_INVITE`（決定啟用流程與清單過濾）|
 | EXPIRES_DATE | TIMESTAMP | Y | 驗證連結逾期即失效（TTL 平台級參數，沿用 30 分鐘）|
 
 索引 / 約束：`PK(TOKEN_HASH)`、`UNIQUE(EMAIL)`。標準欄位含 `CREATED_* / UPDATED_* / RES_ID`（`BaseModelHardDelete`，**無 `DELETED`**）。
