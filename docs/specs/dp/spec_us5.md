@@ -31,6 +31,42 @@
 - **FR-DP-US5-06**: 所有參數 / 清單異動 MUST 寫入 `DP_AUDIT_LOG`（含異動前後值）並即時生效
 - **FR-DP-US5-07**: 編輯平台級參數 MUST 先顯示影響全平台之警告
 
+## 參數型別 / 值域驗證規則（FR-DP-US5-03 落地）
+
+> **驗證規則存放**：主檔參數（`DP_PARAM_M`）為種子固定集、維護 UI **不新增主檔**（僅編輯值 / 維護清單項），故 FR-03 之型別 / 值域驗證規則以**程式碼側 registry 按 `PARAM_ID` + `PARAM_KEY` 維護**（非存於 `DP_PARAM_M` 之欄位）；不合法回 DP-MSG-PARAMS-001。以下為**平台級**參數之規則；模組級（`ET_` / `DM_`）參數值域由各模組規格定義。
+
+### 平台級 VALUE 參數（多鍵參數組，PARAM_TYPE=VALUE）
+
+| PARAM_ID | PARAM_KEY | 型別 | 值域 | 依據 |
+|----------|-----------|------|------|------|
+| `JWT` | `ACCESS_TTL_MIN` | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）|
+| `JWT` | `RENEW_MAX_HOURS` | 正整數（時）| 1–24 | 建議（單日上限）|
+| `PWD_POLICY` | `MIN_LEN` | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）|
+| `PWD_POLICY` | `ADMIN_MIN_LEN` | 正整數 | ≥ `MIN_LEN`（預設 12）| spec 明載（特權 12）|
+| `PWD_POLICY` | `CHAR_TYPES` | 正整數 | 1–4（大小寫 / 數字 / 符號 4 類）| spec 明載 |
+| `PWD_POLICY` | `HISTORY_COUNT` | 非負整數 | 0–24（預設 3）| 建議 |
+| `PWD_POLICY` | `EXPIRY_DAYS` | 正整數（天）| 1–90 | spec 明載（最短 1、最長 90）|
+| `PWD_POLICY` | `EXPIRY_REMIND_DAYS` | 正整數（天）| 1 ≤ 值 < `EXPIRY_DAYS`（預設 7）| 建議（須早於到期）|
+| `LOGIN` | `FAIL_LOCK_COUNT` | 正整數 | ≥ 1（預設 5，建議 3–10）| spec 明載（預設 5）|
+| `LOGIN` | `LOCK_MINUTES` | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
+| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
+| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
+| `LOGIN` | `IDLE_DISABLE_DAYS` | 正整數（天）| ≥ 1（預設 90）| spec 明載 |
+| `MAIL` | `RATE_PER_MIN` | 正整數 | ≥ 1（預設 60）| 建議 |
+| `MAIL` | `RETRY_MAX` | 非負整數 | 0–10（預設 5）| 建議 |
+| `MAIL` | `RETRY_INTERVAL_MIN` | 正整數（分）| ≥ 1（預設 2）| 建議 |
+
+### 跨欄位一致性（同 PARAM_ID 內）
+
+- `PWD_POLICY.ADMIN_MIN_LEN` ≥ `PWD_POLICY.MIN_LEN`
+- `PWD_POLICY.EXPIRY_REMIND_DAYS` < `PWD_POLICY.EXPIRY_DAYS`
+
+### LIST 型（清單定義）之驗證
+
+- `ACTION_TYPE` 等平台級清單、`ET_` / `DM_` 清單：新增 / 改名時 `PARAM_KEY`（碼）非空且同 `PARAM_ID` 內唯一、`PARAM_VALUE`（名稱）非空；`DETAIL_LOCK=true` 者碼值建立後不可改（DP-MSG-PARAMS-002）
+
+> 「建議」值域為 SD 實作之 sanity guard 上限；型別 / 下限 / 跨欄位規則為硬性檢核。若業務需調整「建議」上限，實作時回報 SA 更新本表。
+
 ## 系統訊息
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
