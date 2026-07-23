@@ -1,12 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
 from app.dp.users.models import DpUser
 
 _SYSTEM_USER = "SYSTEM"
+_KIND_SELF_REGISTER = "SELF_REGISTER"
+_KIND_ADMIN_INVITE = "ADMIN_INVITE"
 
 
 class AuthRepository:
@@ -130,23 +132,60 @@ class AuthRepository:
         token_hash: str,
         email: str,
         user_name: str,
-        pwd_hash: str,
+        pwd_hash: str | None,
         expires_date: datetime,
         now: datetime,
+        kind: str = _KIND_SELF_REGISTER,
+        res_id: str | None = None,
+        operator_id: str = _SYSTEM_USER,
     ) -> None:
-        """新增一筆待驗證註冊（token 僅存 SHA-256）；呼叫方須先清同 Email 舊列。"""
+        """新增一筆待驗證 / 待啟用列（token 僅存 SHA-256）；呼叫方須先清同 Email 舊列。
+
+        kind＝SELF_REGISTER（US2 自助註冊，建立即帶 pwd_hash）或 ADMIN_INVITE（US4 邀請，
+        pwd_hash 為 None、res_id 作為對外識別碼、operator_id 為管理者）。
+        """
         db.add(
             DpPendingRegistration(
                 token_hash=token_hash,
                 email=email,
                 user_name=user_name,
                 pwd_hash=pwd_hash,
+                kind=kind,
+                res_id=res_id,
                 expires_date=expires_date,
-                created_user=_SYSTEM_USER,
+                created_user=operator_id,
                 created_date=now,
             )
         )
         await db.flush()
+
+    # --- 管理者邀請（ADMIN_INVITE）專用查詢（US4 #67）---
+
+    def build_invite_list_stmt(self, *, keyword: str | None) -> Select:
+        """組「待啟用邀請」清單 Select（僅 ADMIN_INVITE，不含 offset/limit，交 paginate）。
+
+        keyword：對姓名 / Email 不分大小寫模糊比對。依邀請寄出時間新到舊排序。
+        """
+        conditions = [DpPendingRegistration.kind == _KIND_ADMIN_INVITE]
+        if keyword:
+            pattern = f"%{keyword}%"
+            conditions.append(
+                func.lower(DpPendingRegistration.user_name).like(func.lower(pattern))
+                | func.lower(DpPendingRegistration.email).like(func.lower(pattern))
+            )
+        return (
+            select(DpPendingRegistration)
+            .where(*conditions)
+            .order_by(DpPendingRegistration.created_date.desc(), DpPendingRegistration.email)
+        )
+
+    async def get_invite_by_res_id(self, db: AsyncSession, res_id: str) -> DpPendingRegistration | None:
+        """以 RES_ID 查邀請中列（僅 ADMIN_INVITE）；不存在回 None。"""
+        stmt = select(DpPendingRegistration).where(
+            DpPendingRegistration.res_id == res_id,
+            DpPendingRegistration.kind == _KIND_ADMIN_INVITE,
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
 
     # --- 密碼重設 token（DP_PWD_RESET）---
 

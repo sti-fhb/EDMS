@@ -8,9 +8,11 @@ from app.core.db import get_db
 from app.core.module_roles import module_role_gate
 from app.core.password_gate import require_password_current
 from app.core.rate_limit import LOGIN_RATE_MAX, RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.forgot_service import ForgotPasswordService, ResetPasswordService
 from app.dp.user.register_service import RegisterService
 from app.dp.user.schemas import (
+    ActivateAccountRequest,
     ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
@@ -35,6 +37,8 @@ _reset_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_se
 # 註冊驗證端點限流器（IP 維度）；重寄另加帳號維度防濫發
 _verify_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 _resend_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# 帳號啟用端點限流器（IP 維度；受邀者持 token 設密碼）
+_activate_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 
 router = APIRouter(prefix="/api", tags=["auth"])
 _service = AuthService()
@@ -43,6 +47,7 @@ _verify_service = VerifyService()
 _resend_service = ResendVerificationService()
 _forgot_service = ForgotPasswordService()
 _reset_service = ResetPasswordService()
+_activate_service = ActivateAccountService()
 
 _FORGOT_MESSAGE = "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"
 _REGISTER_MESSAGE = "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證"
@@ -137,6 +142,23 @@ async def reset_password(
         db, token=data.token, new_password=data.new_password, confirm_password=data.confirm_password
     )
     return {"message": "密碼已更新，請以新密碼登入"}
+
+
+@router.post("/activate-account")
+async def activate_account(
+    data: ActivateAccountRequest,
+    db: AsyncSession = Depends(get_db),
+    _ip_limit: None = Depends(rate_limit_by_ip(_activate_limiter, "activate")),
+) -> dict[str, str]:
+    """帳號啟用（匿名，持邀請信連結 token，US4 #67）。
+
+    受邀者自設密碼 → 驗 token（僅 ADMIN_INVITE）+ 效期 + 複雜度 → 建 DP_USER(ACTIVE) + 授 ET 學員
+    + 雙稽核 + 首筆 PWD_HIST + 刪待邀請列（重用 activate_pending_account）。
+    """
+    await _activate_service.activate(
+        db, token=data.token, new_password=data.new_password, confirm_password=data.confirm_password
+    )
+    return {"message": "帳號已啟用，請以新密碼登入"}
 
 
 @router.post("/dp/user/renew", response_model=TokenResponse)

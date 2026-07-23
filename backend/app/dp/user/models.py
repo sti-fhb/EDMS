@@ -44,6 +44,10 @@ class DpPendingRegistration(BaseModelHardDelete):
     一 Email 一筆待驗證（EMAIL UNIQUE）：重新註冊 / 重寄時以 Email 覆蓋（刪舊列 + 插新）。
     明文 token 僅入信中連結，本表只存其 SHA-256（同 DP_PWD_RESET）。consume / 逾時後硬刪除
     （BaseModelHardDelete，無 DELETED），逾期未驗證列由排程清理。
+
+    兩種來源以 KIND 區分（US4 #67）：
+    - SELF_REGISTER（US2 自助註冊）：建立即帶 PWD_HASH，啟用時搬入 DP_USER。
+    - ADMIN_INVITE（US4 管理者邀請）：建立時 PWD_HASH 為 NULL，使用者於啟用連結自設密碼才回填。
     """
 
     __tablename__ = "DP_PENDING_REGISTRATION"
@@ -55,7 +59,9 @@ class DpPendingRegistration(BaseModelHardDelete):
     token_hash: Mapped[str] = mapped_column("TOKEN_HASH", String(64), nullable=False)
     email: Mapped[str] = mapped_column("EMAIL", String(255), nullable=False)
     user_name: Mapped[str] = mapped_column("USER_NAME", String(50), nullable=False)
-    pwd_hash: Mapped[str] = mapped_column("PWD_HASH", String(100), nullable=False)
+    # ADMIN_INVITE 建立時為 NULL（使用者啟用時自設密碼回填）；SELF_REGISTER 建立即有值
+    pwd_hash: Mapped[Optional[str]] = mapped_column("PWD_HASH", String(100), nullable=True)
+    kind: Mapped[str] = mapped_column("KIND", String(20), nullable=False)
     expires_date: Mapped[datetime] = mapped_column("EXPIRES_DATE", DateTime(timezone=True), nullable=False)
 
 

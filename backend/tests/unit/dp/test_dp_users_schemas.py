@@ -9,7 +9,8 @@ pytestmark = pytest.mark.unit
 
 
 def test_user_create_valid():
-    m = UserCreate(email="a@b.com", user_name=" 小明 ", password="Abcd1234")
+    # #67 邀請流程：管理者不設密碼，UserCreate 僅 email / user_name
+    m = UserCreate(email="a@b.com", user_name=" 小明 ")
     assert m.email == "a@b.com"
     assert m.user_name == "小明"  # 去頭尾空白
 
@@ -17,17 +18,22 @@ def test_user_create_valid():
 @pytest.mark.parametrize("email", ["not-an-email", "a@b", "@b.com", "a b@c.com"])
 def test_user_create_bad_email_rejected(email):
     with pytest.raises(ValidationError):
-        UserCreate(email=email, user_name="小明", password="Abcd1234")
+        UserCreate(email=email, user_name="小明")
 
 
 def test_user_create_empty_name_rejected():
     with pytest.raises(ValidationError):
-        UserCreate(email="a@b.com", user_name="   ", password="Abcd1234")
+        UserCreate(email="a@b.com", user_name="   ")
 
 
-def test_user_update_requires_name_and_email():
+def test_user_update_only_name():
+    # #67：僅可改姓名（Email 唯讀不在此 schema）；有姓名即合法
+    assert UserUpdate(user_name="小明").user_name == "小明"
+
+
+def test_user_update_missing_name_rejected():
     with pytest.raises(ValidationError):
-        UserUpdate(user_name="只有姓名")  # 缺 email
+        UserUpdate()
 
 
 @pytest.mark.parametrize("action", ["disable", "enable"])

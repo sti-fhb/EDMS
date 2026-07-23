@@ -1,8 +1,5 @@
 import { z } from "zod"
 
-// 密碼字元類型（大小寫 / 數字 / 特殊符號），對齊後端 password_policy 複雜度判定（同 registerSchema）。
-const CHAR_CLASSES = [/[a-z]/, /[A-Z]/, /\d/, /[^a-zA-Z0-9\s]/]
-
 const emailField = z
   .string()
   .trim()
@@ -16,23 +13,15 @@ const nameField = z
   .min(1, { message: "請輸入姓名" })
   .max(50, { message: "姓名長度不可超過 50 字元" })
 
-/** 建立帳號表單驗證（US4 FR-03），命名對齊後端 `UserCreate`。 */
+/** 建立帳號表單驗證（US4 #67 邀請流程）：管理者不設密碼，僅 Email / 姓名。命名對齊後端 `UserCreate`。 */
 export const UserCreateSchema = z.object({
   email: emailField,
   user_name: nameField,
-  password: z
-    .string()
-    .min(8, { message: "初始密碼至少 8 字元" })
-    .max(72, { message: "密碼長度不可超過 72 字元" }) // 對齊後端 bcrypt 上限
-    .refine((p) => CHAR_CLASSES.filter((re) => re.test(p)).length >= 3, {
-      message: "密碼須含大小寫英文 / 數字 / 特殊符號至少 3 種",
-    }),
 })
 
-/** 基本資料維護表單驗證（US4 FR-06）。 */
+/** 編輯表單驗證（US4 #67）：僅可改姓名；Email 為登入帳號、唯讀不在此 schema。 */
 export const UserUpdateSchema = z.object({
   user_name: nameField,
-  email: emailField,
 })
 
 export type UserCreateValues = z.infer<typeof UserCreateSchema>
