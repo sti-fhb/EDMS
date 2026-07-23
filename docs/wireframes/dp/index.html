@@ -113,6 +113,7 @@
     .status-active { background: #e8f5e9; color: #1b5e20; }
     .status-disabled { background: #eceff1; color: #607d8b; }
     .status-locked { background: #ffebee; color: #c62828; }
+    .status-pending { background: #e8eaf6; color: #3949ab; }
 
     /* 稽核類別 badge */
     .audit-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
@@ -236,10 +237,10 @@
       <button class="btn btn-outline-secondary w-100" onclick="loginBackToLogin()"><i class="bi bi-arrow-left me-1"></i>返回登入</button>
     </div>
 
-    <!-- 強制變更密碼（密碼逾效期 / 管理者代建初始密碼首次登入；未完成不得進入系統，UCDP001 / UCDP004） -->
+    <!-- 強制變更密碼（密碼逾效期；未完成不得進入系統，UCDP001 / UCDP004。US4 改邀請流程後管理者不代設初始密碼，已無「首次以初始密碼登入」觸發） -->
     <div id="login-force-change" style="display:none;">
       <div class="login-step-title"><i class="bi bi-shield-exclamation text-warning me-1"></i>請立即變更密碼</div>
-      <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:0.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>密碼已逾效期（或首次以初始密碼登入），請立即變更密碼方可繼續使用（DP-MSG-LOGIN-005）</div>
+      <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:0.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>密碼已逾效期，請立即變更密碼方可繼續使用（DP-MSG-LOGIN-005）</div>
       <div class="mb-3"><label class="form-label form-label-sm">新密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" id="login-fc-new" placeholder="至少 8 字元（管理者 12）、含 3 種字元組合"></div>
       <div class="mb-3"><label class="form-label form-label-sm">確認新密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" id="login-fc-confirm" placeholder="再次輸入新密碼"></div>
       <button class="btn btn-tsbms w-100" onclick="loginForceChangeSubmit()"><i class="bi bi-shield-lock me-1"></i>變更並繼續</button>
@@ -255,6 +256,18 @@
       </div>
       <button class="btn btn-tsbms w-100" onclick="loginBackToLogin()"><i class="bi bi-box-arrow-in-right me-1"></i>前往登入</button>
       <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；驗證通過才建 DP_USER + 授 ET 學員 + 雙稽核 + 首筆歷程（方案 B 啟用副作用）。未驗證帳號登入 → DP-MSG-REGISTER-008（DP_AUTH_010）+ 重寄。</div>
+    </div>
+
+    <!-- 帳號啟用落點（管理者邀請信連結 /activate?token=... 之落點；US4 邀請流程，使用者自設密碼） -->
+    <div id="login-activate" style="display:none;">
+      <div class="login-step-title"><i class="bi bi-person-check text-tsbms-green me-1"></i>歡迎加入，請設定密碼</div>
+      <div class="alert alert-success py-2 px-3 mb-3" style="font-size:0.85rem;"><i class="bi bi-envelope-open me-1"></i>您已被邀請建立 EDMS 帳號，設定密碼即可啟用並登入。</div>
+      <div class="mb-3"><label class="form-label form-label-sm">帳號（Email）<i class="bi bi-lock-fill text-muted ms-1" title="唯讀"></i></label><input type="email" class="form-control" value="tina@example.com" disabled></div>
+      <div class="mb-3"><label class="form-label form-label-sm">設定密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="至少 8 字元、含 3 種字元組合"></div>
+      <div class="mb-3"><label class="form-label form-label-sm">確認密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="再次輸入密碼"></div>
+      <button class="btn btn-tsbms w-100" onclick="loginActivateSubmit()"><i class="bi bi-shield-check me-1"></i>設定密碼並啟用</button>
+      <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>密碼複雜度讀平台參數（PWD_POLICY）；設定後即可用此 Email 直接登入，無須再次強制變更。</div>
+      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此端點 = US2 `verify`（消 token、建 <code>ACTIVE</code> DP_USER、雙稽核）＋ US3 `reset-password`（收密碼、驗複雜度）合體；啟用副作用僅在此步落地（建 DP_USER + 首筆 PWD_HIST + <strong>授 ET 學員</strong> + 刪 pending 列）。不需 MUST_CHANGE_PWD。逾期 → 提示重新申請，由管理者於清單「重寄邀請」。</div>
     </div>
 
     <a href="#" class="login-forgot-link" id="login-forgot-link" onclick="loginForgotPw(); return false;">忘記密碼？</a>
@@ -401,61 +414,118 @@
       <div class="screen-meta">UCDP005 ｜ ET / DM 管理者（共用）</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>帳號（<code>DP_USER</code>）為 ET / DM <strong>共用項</strong>，<strong>任一管理者</strong>皆可建立 / 停用 / 解鎖；停用後兩模組同步失效。此頁只處理帳號本身，<strong>角色指派移至「權限管理」畫面</strong>。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>帳號（<code>DP_USER</code>）為 ET / DM <strong>共用項</strong>，<strong>任一管理者</strong>皆可建立 / 停用 / 解鎖；停用後兩模組同步失效。建立採<strong>邀請連結信</strong>（使用者自設密碼後啟用），啟用前列於「<strong>待啟用</strong>」。此頁只處理帳號本身，<strong>角色指派移至「權限管理」畫面</strong>。</div>
 
-    <div class="wf-card">
-      <div class="row g-2 align-items-end">
-        <div class="col-md-4"><label class="form-label small mb-1">關鍵字（姓名 / Email）</label><input type="text" class="form-control form-control-sm" placeholder="搜尋…"></div>
-        <div class="col-md-3"><label class="form-label small mb-1">帳號狀態</label>
-          <select class="form-select form-select-sm"><option>全部</option><option>啟用中</option><option>已停用</option><option>已鎖定</option></select>
+    <!-- 兩頁籤：正式帳號（DP_USER） / 待啟用邀請（DP_PENDING_REGISTRATION，kind=ADMIN_INVITE）分開呈現 -->
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#users-active" type="button"><i class="bi bi-people-fill me-1"></i>帳號</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#users-pending" type="button"><i class="bi bi-envelope-paper me-1"></i>待啟用邀請 <span class="badge bg-secondary ms-1">2</span></button></li>
+    </ul>
+
+    <div class="tab-content">
+    <!-- ===== 頁籤 1：正式帳號 ===== -->
+    <div class="tab-pane fade show active" id="users-active" role="tabpanel">
+      <div class="wf-card">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4"><label class="form-label small mb-1">關鍵字（姓名 / Email）</label><input type="text" class="form-control form-control-sm" placeholder="搜尋…"></div>
+          <div class="col-md-3"><label class="form-label small mb-1">帳號狀態</label>
+            <select class="form-select form-select-sm"><option>全部</option><option>啟用中</option><option>已停用</option><option>已鎖定</option></select>
+          </div>
+          <div class="col-md-5 text-end">
+            <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search me-1"></i>查詢</button>
+            <button class="btn btn-sm btn-tsbms" onclick="openCreateUser()"><i class="bi bi-person-plus me-1"></i>建立帳號</button>
+          </div>
         </div>
-        <div class="col-md-5 text-end">
-          <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search me-1"></i>查詢</button>
-          <button class="btn btn-sm btn-tsbms" onclick="openCreateUser()"><i class="bi bi-person-plus me-1"></i>建立帳號</button>
-        </div>
+      </div>
+
+      <div class="wf-card p-0">
+        <table class="table table-hover wf-table mb-0 align-middle">
+          <thead><tr>
+            <th>姓名</th><th>帳號（Email）</th><th>狀態</th><th>最後登入</th><th>建立日期</th><th class="text-end">操作</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td>陳大華</td><td>admin@example.com</td>
+              <td><span class="status-pill status-active">啟用中</span></td>
+              <td>2026-07-06 09:12</td><td>2026-05-01</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openEditUser('陳大華','admin@example.com')"><i class="bi bi-pencil me-1"></i>編輯</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openDisableUser('陳大華')"><i class="bi bi-pause-circle me-1"></i>停用</button>
+              </td>
+            </tr>
+            <tr>
+              <td>王曉明</td><td>ming@example.com</td>
+              <td><span class="status-pill status-active">啟用中</span></td>
+              <td>2026-07-05 14:03</td><td>2026-05-10</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openEditUser('王曉明','ming@example.com')"><i class="bi bi-pencil me-1"></i>編輯</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openDisableUser('王曉明')"><i class="bi bi-pause-circle me-1"></i>停用</button>
+              </td>
+            </tr>
+            <tr>
+              <td>林小美</td><td>mei@example.com</td>
+              <td><span class="status-pill status-locked">已鎖定</span> <span class="text-muted small">（連續失敗 5 次）</span></td>
+              <td>2026-07-04 22:41</td><td>2026-06-02</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary" onclick="openEditUser('林小美','mei@example.com')"><i class="bi bi-pencil me-1"></i>編輯</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="unlockUser('林小美')"><i class="bi bi-unlock me-1"></i>解鎖</button>
+              </td>
+            </tr>
+            <tr class="text-muted">
+              <td>張志豪</td><td>hao@example.com</td>
+              <td><span class="status-pill status-disabled">已停用</span></td>
+              <td>—</td><td>2026-06-20</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-success" onclick="enableUser('張志豪')"><i class="bi bi-play-circle me-1"></i>啟用</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <div class="wf-card p-0">
-      <table class="table table-hover wf-table mb-0 align-middle">
-        <thead><tr>
-          <th>姓名</th><th>帳號（Email）</th><th>狀態</th><th>最後登入</th><th>建立日期</th><th class="text-end">操作</th>
-        </tr></thead>
-        <tbody>
-          <tr>
-            <td>陳大華</td><td>admin@example.com</td>
-            <td><span class="status-pill status-active">啟用中</span></td>
-            <td>2026-07-06 09:12</td><td>2026-05-01</td>
-            <td class="text-end">
-              <button class="btn btn-sm btn-outline-secondary" onclick="openDisableUser('陳大華')"><i class="bi bi-pause-circle me-1"></i>停用</button>
-            </td>
-          </tr>
-          <tr>
-            <td>王曉明</td><td>ming@example.com</td>
-            <td><span class="status-pill status-active">啟用中</span></td>
-            <td>2026-07-05 14:03</td><td>2026-05-10</td>
-            <td class="text-end">
-              <button class="btn btn-sm btn-outline-secondary" onclick="openDisableUser('王曉明')"><i class="bi bi-pause-circle me-1"></i>停用</button>
-            </td>
-          </tr>
-          <tr>
-            <td>林小美</td><td>mei@example.com</td>
-            <td><span class="status-pill status-locked">已鎖定</span> <span class="text-muted small">（連續失敗 5 次）</span></td>
-            <td>2026-07-04 22:41</td><td>2026-06-02</td>
-            <td class="text-end">
-              <button class="btn btn-sm btn-outline-danger" onclick="unlockUser('林小美')"><i class="bi bi-unlock me-1"></i>解鎖</button>
-            </td>
-          </tr>
-          <tr class="text-muted">
-            <td>張志豪</td><td>hao@example.com</td>
-            <td><span class="status-pill status-disabled">已停用</span></td>
-            <td>—</td><td>2026-06-20</td>
-            <td class="text-end">
-              <button class="btn btn-sm btn-outline-success" onclick="enableUser('張志豪')"><i class="bi bi-play-circle me-1"></i>啟用</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- ===== 頁籤 2：待啟用邀請 ===== -->
+    <div class="tab-pane fade" id="users-pending" role="tabpanel">
+      <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>管理者已寄出邀請、<strong>尚未設定密碼啟用</strong>的帳號；使用者點邀請連結自設密碼後即建立正式帳號並移入「帳號」頁籤。此處資料存 <code>DP_PENDING_REGISTRATION</code>，尚無 <code>USER_ID</code>。</div>
+
+      <div class="wf-card">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-6"><label class="form-label small mb-1">關鍵字（姓名 / Email）</label><input type="text" class="form-control form-control-sm" placeholder="搜尋…"></div>
+          <div class="col-md-6 text-end">
+            <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search me-1"></i>查詢</button>
+            <button class="btn btn-sm btn-tsbms" onclick="openCreateUser()"><i class="bi bi-person-plus me-1"></i>建立帳號</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wf-card p-0">
+        <table class="table table-hover wf-table mb-0 align-middle">
+          <thead><tr>
+            <th>姓名</th><th>帳號（Email）</th><th>邀請寄出時間</th><th>邀請狀態</th><th class="text-end">操作</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td>周雅婷</td><td>tina@example.com</td>
+              <td>2026-07-06 10:20</td>
+              <td><span class="status-pill status-pending">有效中</span> <span class="text-muted small">（30 分鐘內）</span></td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-primary" onclick="resendInvite('周雅婷')"><i class="bi bi-envelope-arrow-up me-1"></i>重寄邀請</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="cancelInvite('周雅婷')"><i class="bi bi-x-circle me-1"></i>取消邀請</button>
+              </td>
+            </tr>
+            <tr>
+              <td>李國豪</td><td>kuo@example.com</td>
+              <td>2026-07-05 16:02</td>
+              <td><span class="status-pill status-locked">已逾期</span> <span class="text-muted small">（連結失效，請重寄）</span></td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-primary" onclick="resendInvite('李國豪')"><i class="bi bi-envelope-arrow-up me-1"></i>重寄邀請</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="cancelInvite('李國豪')"><i class="bi bi-x-circle me-1"></i>取消邀請</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
     </div>
 
     <details class="wf-screen-note">
@@ -466,7 +536,10 @@
         <li>帳號權限以<strong>最小權限</strong>為原則；唯一識別、不得共用帳號。</li>
         <li>連續登入失敗達上限（參數，預設 5）自動鎖定 → 此頁可<strong>手動解鎖</strong>；亦可逾時自動解鎖。</li>
         <li>連續 <strong>90 日未登入</strong>之帳號由系統自動停用 / 鎖定。</li>
-        <li>使用者可<strong>自助註冊</strong>，須完成 <strong>Email 驗證後啟用</strong>（#56，寄驗證信 → 點連結建 DP_USER）；管理者代建之帳號直接可用（首次登入強制改密，不寄開通確認信）。</li>
+        <li>使用者可<strong>自助註冊</strong>，須完成 <strong>Email 驗證後啟用</strong>（#56，寄驗證信 → 點連結建 DP_USER）；<strong>管理者代建改為邀請連結信</strong>——只填 Email / 姓名 → 寄邀請信 → 使用者<strong>自設密碼</strong>後才建 <code>DP_USER</code>（<code>ACTIVE</code>）並啟用，管理者不再代設初始密碼。</li>
+        <li><strong>「待啟用邀請」獨立頁籤</strong>資料來自 <code>DP_PENDING_REGISTRATION</code>（<code>kind=ADMIN_INVITE</code>，只撈管理者邀請、不含自助註冊進行中列），與正式帳號（<code>DP_USER</code>）<strong>分表分頁籤</strong>呈現；此表尚無 <code>USER_ID</code>，識別碼用 pending 列 id，故不列入 <code>DP_USER.STATUS</code>（值域仍只有 <code>ACTIVE</code> / <code>DISABLED</code>）。「邀請狀態」（有效中 / 已逾期）由 <code>expires_date</code> 與現在時間衍生。</li>
+        <li><strong>重寄邀請</strong>為管理者動作（掛 <code>dp/users</code>、需 JWT、不防列舉），重用 US2 token 作廢→重產→重寄機制，與 US2 匿名公開重寄端點不同；<strong>取消邀請</strong>刪除該 pending 列。</li>
+        <li><strong>編輯帳號</strong>僅可改<strong>姓名</strong>；<strong>Email（登入帳號）唯讀</strong>不可代改——本人換 Email 走「個人資料維護（UCDP004）」雙信箱驗證流程。</li>
         <li><strong>此頁不設角色指派</strong>——ET / DM 之業務角色（教師 / 學員、DM 各角色）於 DP 後台「<strong>權限管理</strong>」畫面按模組過濾指派，寫入模組角色表（<code>ET_USER_ROLE</code> / <code>DM_USER_ROLE</code>）；權限判定與 enforce 在模組，平台不做全域 RBAC。</li>
         <li>所有帳號異動寫入操作記錄（<code>DP_AUDIT_LOG</code>）。</li>
       </ul>
@@ -1097,16 +1170,28 @@
 </main>
 
 <!-- ===== Modals ===== -->
-<!-- 建立帳號 -->
+<!-- 建立帳號（寄送邀請；管理者不設密碼，使用者經邀請連結自設） -->
 <div class="modal fade" id="createUserModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
-  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-person-plus text-tsbms-green me-2"></i>建立帳號</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-person-plus text-tsbms-green me-2"></i>建立帳號（寄送邀請）</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
   <div class="modal-body">
     <div class="mb-2"><label class="form-label small mb-1">帳號（Email）<span class="text-danger">*</span></label><input type="email" class="form-control form-control-sm" placeholder="user@example.com"></div>
     <div class="mb-2"><label class="form-label small mb-1">姓名 <span class="text-danger">*</span></label><input type="text" class="form-control form-control-sm"></div>
-    <div class="mb-2"><label class="form-label small mb-1">初始密碼 <span class="text-danger">*</span></label><input type="password" class="form-control form-control-sm" placeholder="至少 8 字元（一般）/ 12 字元（特權）"></div>
-    <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>建立後帳號<strong>直接可用</strong>（不寄開通確認信）；業務角色請至各模組指派。</div>
+    <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>送出後寄「帳號邀請信」至該 Email，使用者點連結<strong>自行設定密碼</strong>後啟用；管理者不代設密碼。業務角色於啟用時授予 ET 學員，其餘至各模組指派。</div>
+    <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 送出 → 寫 <code>DP_PENDING_REGISTRATION</code>（<code>kind=ADMIN_INVITE</code>、<code>pwd_hash</code> 留空）+ 寄邀請信；<strong>不建 DP_USER、不授角色</strong>（比照 US2 register_service）。成功訊息 DP-MSG-USERS-003 改為「邀請信已寄出，使用者需經連結設定密碼後啟用」。Email 唯一性檢查照舊（DP-MSG-USERS-005）。</div>
   </div>
-  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="confirmCreateUser()">建立</button></div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="confirmCreateUser()"><i class="bi bi-envelope-arrow-up me-1"></i>寄送邀請</button></div>
+</div></div></div>
+
+<!-- 編輯帳號（僅改姓名；Email 為登入帳號，唯讀） -->
+<div class="modal fade" id="editUserModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil text-tsbms-green me-2"></i>編輯帳號</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="mb-2"><label class="form-label small mb-1">姓名 <span class="text-danger">*</span></label><input type="text" class="form-control form-control-sm" id="edit-user-name"></div>
+    <div class="mb-2"><label class="form-label small mb-1">帳號（Email）<i class="bi bi-lock-fill text-muted ms-1" title="唯讀"></i></label><input type="email" class="form-control form-control-sm" id="edit-user-email" disabled></div>
+    <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>Email 為登入帳號，管理者<strong>不可修改</strong>；使用者可於「個人資料維護」自行變更（雙信箱驗證後切換）。</div>
+    <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 <code>UserUpdate</code> 僅含 <code>user_name</code>；姓名異動寫 <code>DP_AUDIT_LOG</code>（含前後值，FR-08）。避免管理者把登入身分導向未經證實的信箱。</div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="confirmEditUser()">儲存</button></div>
 </div></div></div>
 
 <!-- 停用帳號確認 -->
@@ -1215,7 +1300,20 @@ function showToast(text) {
 
 /* ===== 使用者管理 ===== */
 function openCreateUser() { bootstrap.Modal.getOrCreateInstance(document.getElementById('createUserModal')).show(); }
-function confirmCreateUser() { bootstrap.Modal.getInstance(document.getElementById('createUserModal')).hide(); showToast('已建立帳號（直接可用；未寄開通信）'); }
+function confirmCreateUser() { bootstrap.Modal.getInstance(document.getElementById('createUserModal')).hide(); showToast('邀請信已寄出，使用者需經連結設定密碼後啟用'); }
+function openEditUser(name, email) {
+  document.getElementById('edit-user-name').value = name;
+  document.getElementById('edit-user-email').value = email;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('editUserModal')).show();
+}
+function confirmEditUser() {
+  var n = document.getElementById('edit-user-name').value;
+  if (!n) { alert('請輸入姓名'); return; }
+  bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+  showToast('姓名已更新：' + n + '（已寫稽核）');
+}
+function resendInvite(name) { showToast('已重寄邀請信給 ' + name + '（舊連結失效、重新計時）'); }
+function cancelInvite(name) { showToast('已取消 ' + name + ' 的邀請（刪除待驗證列）'); }
 var _disableUser = '';
 function openDisableUser(name) { _disableUser = name; document.getElementById('disable-user-name').textContent = name; bootstrap.Modal.getOrCreateInstance(document.getElementById('disableUserModal')).show(); }
 function confirmDisableUser() { bootstrap.Modal.getInstance(document.getElementById('disableUserModal')).hide(); showToast('已停用 ' + _disableUser + '（ET / DM 兩端同步失效）'); }
@@ -1254,7 +1352,7 @@ function dpSavePassword() {
 
 /* ===== 登入流程（demo；與 ET / DM 同套） ===== */
 function _loginShow(id) {
-  ['login-step-1', 'login-register', 'login-register-sent', 'login-verify-result', 'login-forgot-1', 'login-forgot-2', 'login-force-change'].forEach(function(k) {
+  ['login-step-1', 'login-register', 'login-register-sent', 'login-verify-result', 'login-activate', 'login-forgot-1', 'login-forgot-2', 'login-force-change'].forEach(function(k) {
     var el = document.getElementById(k); if (el) el.style.display = (k === id ? '' : 'none');
   });
   var link = document.getElementById('login-forgot-link');
@@ -1310,6 +1408,8 @@ function loginRegisterSubmit() {
 }
 function loginResendVerify()  { showToast('已重新寄出驗證信，請至信箱查收'); }
 function loginVerifyResult()  { _loginShow('login-verify-result'); }  // demo：模擬點信中連結之落點
+function loginActivate()       { document.getElementById('login-overlay').style.display = ''; _loginShow('login-activate'); }  // demo：模擬點管理者邀請信連結之落點
+function loginActivateSubmit() { _loginShow('login-step-1'); showToast('帳號已啟用，請以新密碼登入'); }
 function loginLogout() { document.getElementById('login-overlay').style.display = ''; _loginShow('login-step-1'); }
 
 /* 自訂 class helper */
