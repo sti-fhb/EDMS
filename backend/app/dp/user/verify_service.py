@@ -15,19 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.module_provisioning import module_provisioning_gate
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
-from app.dp.user.ids import generate_user_id
+from app.dp.user.activation import activate_pending_account
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
 
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _FUNC_NAME = "DP-REGISTER"
-_ET_MODULE = "ET"
+_KIND_SELF_REGISTER = "SELF_REGISTER"
 _DEFAULT_TTL_MIN = 30
-_ALREADY_MSG = "此 Email 已被註冊，請直接登入或使用忘記密碼"
 _TOKEN_INVALID_MSG = "驗證連結無效"  # noqa: S105 — 使用者訊息，非密碼
 _TOKEN_EXPIRED_MSG = "驗證連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
 
@@ -44,7 +42,9 @@ class VerifyService:
         self._audit = audit or AuditLogService()
 
     async def verify(self, db: AsyncSession, *, token: str) -> None:
-        """驗證註冊 token → 啟用帳號。
+        """驗證註冊 token → 啟用帳號（啟用副作用重用 `activate_pending_account`，#67）。
+
+        密碼來源＝pending.pwd_hash（註冊時所填）。
 
         Raises:
             AppError: token 無效（400 DP_USER_003）、逾時（400 DP_USER_004）、
@@ -58,42 +58,16 @@ class VerifyService:
         if pending.expires_date <= now:
             raise AppError(status_code=400, detail=_TOKEN_EXPIRED_MSG, error_code="DP_USER_004")
 
-        user_id = generate_user_id()
-        try:
-            # 建 DP_USER（ACTIVE）——撞 UQ_DP_USER_EMAIL 代表已被驗證 / 競態，冪等拒絕
-            await self._repo.create_user(
-                db,
-                user_id=user_id,
-                email=pending.email,
-                user_name=pending.user_name,
-                pwd_hash=pending.pwd_hash,
-                operator_id=user_id,
-                now=now,
-            )
-        except IntegrityError as exc:
-            raise AppError(status_code=409, detail=_ALREADY_MSG, error_code="DP_USER_001") from exc
-
-        # 啟用副作用（僅驗證步落地）：首筆 PWD_HIST + 授 ET 學員 + 雙稽核
-        await self._repo.add_pwd_history(
-            db, user_id=user_id, seq_no=1, pwd_hash=pending.pwd_hash, operator_id=user_id, now=now
-        )
-        await module_provisioning_gate.grant_default_role(_ET_MODULE, user_id, db)
-        await self._audit_register(db, user_id, ip, "使用者自助註冊（Email 驗證通過）")
-        await self._audit_register(db, user_id, ip, "授予預設 ET 學員角色")
-        # 消費待驗證列
-        await self._repo.delete_pending_by_token_hash(db, pending.token_hash)
-
-    async def _audit_register(self, db: AsyncSession, user_id: str, ip: str | None, desc: str) -> None:
-        await self._audit.log_action(
+        await activate_pending_account(
             db,
-            module="DP",
+            pending=pending,
+            pwd_hash=pending.pwd_hash,
+            now=now,
+            ip=ip,
+            repo=self._repo,
+            audit=self._audit,
             func_name=_FUNC_NAME,
-            action_type="CREATE",
-            result="SUCCESS",
-            operator_id=user_id,
-            target_id=user_id,
-            description=desc,
-            source_ip=ip,
+            create_desc="使用者自助註冊（Email 驗證通過）",
         )
 
 
@@ -111,9 +85,13 @@ class ResendVerificationService:
         self._notify = notify or NotifyService()
 
     async def resend(self, db: AsyncSession, *, email: str) -> None:
-        """重寄：pending 存在才作廢舊 token、產新並重寄；不存在則靜默（防列舉）。"""
+        """重寄：pending 存在才作廢舊 token、產新並重寄；不存在則靜默（防列舉）。
+
+        僅處理自助註冊（SELF_REGISTER）；管理者邀請（ADMIN_INVITE）之重寄走使用者管理頁（US4 #67），
+        不經此匿名端點，故遇邀請列一律靜默（等同不存在，維持防列舉）。
+        """
         pending = await self._repo.get_pending_by_email(db, email)
-        if pending is None:
+        if pending is None or pending.kind != _KIND_SELF_REGISTER:
             return
 
         now = utcnow()
