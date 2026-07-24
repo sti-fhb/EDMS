@@ -118,8 +118,22 @@ export const handlers = [
         description: "JWT 存取與換發相關參數",
         scope: "platform",
         details: [
-          { param_key: "ACCESS_TTL_MIN", param_value: "15", sort_order: null, is_enabled: true },
-          { param_key: "RENEW_MAX_HOURS", param_value: "8", sort_order: null, is_enabled: true },
+          {
+            param_key: "ACCESS_TTL_MIN",
+            param_name: "閒置自動登出（分鐘）",
+            param_value: "15",
+            description: null,
+            sort_order: null,
+            is_enabled: true,
+          },
+          {
+            param_key: "RENEW_MAX_HOURS",
+            param_name: "單次登入時效上限（小時）",
+            param_value: "8",
+            description: null,
+            sort_order: null,
+            is_enabled: true,
+          },
         ],
       },
       {
@@ -129,7 +143,9 @@ export const handlers = [
         detail_lock: false,
         description: null,
         scope: "ET",
-        details: [{ param_key: "NURSE", param_value: "護理師", sort_order: 1, is_enabled: true }],
+        details: [
+          { param_key: "NURSE", param_name: "護理師", param_value: null, description: null, sort_order: 1, is_enabled: true },
+        ],
       },
       {
         param_id: "DM_DOC_CATEGORY",
@@ -138,15 +154,27 @@ export const handlers = [
         detail_lock: true,
         description: null,
         scope: "DM",
-        details: [{ param_key: "SOP", param_value: "標準作業程序", sort_order: 1, is_enabled: true }],
+        details: [
+          { param_key: "SOP", param_name: "標準作業程序", param_value: null, description: null, sort_order: 1, is_enabled: true },
+        ],
       },
     ]),
   ),
   http.put("/api/dp/params/:id/details/:key", () =>
-    HttpResponse.json({ param_key: "ACCESS_TTL_MIN", param_value: "10", sort_order: null, is_enabled: true }),
+    HttpResponse.json({
+      param_key: "ACCESS_TTL_MIN",
+      param_name: "閒置自動登出（分鐘）",
+      param_value: "10",
+      description: null,
+      sort_order: null,
+      is_enabled: true,
+    }),
   ),
   http.post("/api/dp/params/:id/details", () =>
-    HttpResponse.json({ param_key: "EXPORT", param_value: "匯出", sort_order: null, is_enabled: true }, { status: 201 }),
+    HttpResponse.json(
+      { param_key: "DOCTOR", param_name: "醫師", param_value: null, description: null, sort_order: null, is_enabled: true },
+      { status: 201 },
+    ),
   ),
 ]
 

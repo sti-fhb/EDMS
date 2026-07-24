@@ -27,7 +27,7 @@ const SCOPE_TABS: { scope: Scope; label: string }[] = [
  * 版面因「頁籤 + 分組卡片」異於標準 CRUD 列表，故不套 CrudPageLayout，改採一致的標題列 + Tabs。
  */
 export function ParamsPage() {
-  const { masters, loading, saveValue, toggleItem, addItem } = useParams()
+  const { masters, loading, saveDetail, toggleItem, addItem } = useParams()
   const [scope, setScope] = useState<Scope>("platform")
 
   // 僅顯示「有資料」的頁籤（模組級無管理者權限時後端不回該前綴 → 不顯示該頁籤）
@@ -69,7 +69,7 @@ export function ParamsPage() {
           )}
 
           {shown.map((m) => (
-            <ParamCard key={m.param_id} master={m} onSaveValue={saveValue} onToggle={toggleItem} onAdd={addItem} />
+            <ParamCard key={m.param_id} master={m} onSaveDetail={saveDetail} onToggle={toggleItem} onAdd={addItem} />
           ))}
         </>
       )}

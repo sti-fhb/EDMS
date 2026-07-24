@@ -5,12 +5,12 @@ import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { paramsApi } from "./paramsService"
-import type { DetailCreatePayload, ParamMaster } from "./paramsService"
+import type { DetailCreatePayload, DetailUpdatePayload, ParamMaster } from "./paramsService"
 
 const _SAVED_MSG = "已儲存並即時生效"
 const _PLATFORM_WARN = "此為平台級參數，變更將影響全平台（ET 與 DM）。確定儲存？"
 
-/** 系統參數維護頁狀態與操作（查詢 / 改值 / 清單項新增改名啟停）。 */
+/** 系統參數維護頁狀態與操作（查詢 / 改值改名 / 清單項新增啟停）。 */
 export function useParams() {
   const { message, confirm } = useNotification()
   const qc = useQueryClient()
@@ -24,12 +24,12 @@ export function useParams() {
     qc.invalidateQueries({ queryKey: QUERY_KEYS.params.list() })
   }, [qc])
 
-  /** 更新明細值 / 名稱；平台級先跳影響全平台警告（PARAMS-005）後才送出。 */
-  const saveValue = useCallback(
-    async (master: ParamMaster, paramKey: string, value: string) => {
+  /** 更新明細（改值 / 改名 / 說明）；平台級先跳影響全平台警告（PARAMS-005）後才送出。 */
+  const saveDetail = useCallback(
+    async (master: ParamMaster, paramKey: string, payload: DetailUpdatePayload) => {
       const doSave = async () => {
         try {
-          await paramsApi.updateDetail(master.param_id, paramKey, { param_value: value })
+          await paramsApi.updateDetail(master.param_id, paramKey, payload)
           message.success(_SAVED_MSG)
           invalidate()
         } catch (err) {
@@ -78,7 +78,7 @@ export function useParams() {
   return {
     masters: data ?? [],
     loading: isPending,
-    saveValue,
+    saveDetail,
     toggleItem,
     addItem,
   }

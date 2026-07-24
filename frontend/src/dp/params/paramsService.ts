@@ -1,9 +1,11 @@
 import { http } from "../../services/http"
 
-/** 參數明細（對齊後端 ParamDetailResponse）。 */
+/** 參數明細（對齊後端 ParamDetailResponse）。param_name＝中文顯示名稱；param_value＝實際值（可空）。 */
 export interface ParamDetail {
   param_key: string
+  param_name: string
   param_value: string | null
+  description: string | null
   sort_order: number | null
   is_enabled: boolean
 }
@@ -20,13 +22,17 @@ export interface ParamMaster {
 }
 
 export interface DetailUpdatePayload {
+  param_name?: string
   param_value?: string
+  description?: string
   is_enabled?: boolean
 }
 
 export interface DetailCreatePayload {
   param_key: string
-  param_value: string
+  param_name: string
+  param_value?: string
+  description?: string
   sort_order?: number
 }
 
