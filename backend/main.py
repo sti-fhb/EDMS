@@ -113,14 +113,14 @@ async def client_ip_middleware(request: Request, call_next):
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """將 AppError 統一轉換為標準錯誤回應格式。
 
-    回傳格式：{"error_code": "...", "error_message": "..."}
+    回傳格式：{"error_code": "...", "error_message": "..."}；限流 / 冷卻類 429 另帶 retry_after。
     debug log 保留完整錯誤細節供後端排查，不對外暴露。
     """
     logger.debug("AppError %s %s: [%s] %s", request.method, request.url.path, exc.error_code, exc.detail)
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error_code": exc.error_code, "error_message": exc.detail},
-    )
+    content: dict[str, object] = {"error_code": exc.error_code, "error_message": exc.detail}
+    if exc.retry_after is not None:
+        content["retry_after"] = exc.retry_after
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 @app.exception_handler(StarletteHTTPException)

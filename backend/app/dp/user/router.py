@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, get_jwt_payload
+from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
 from app.core.module_roles import module_role_gate
 from app.core.password_gate import require_password_current
@@ -26,6 +27,7 @@ from app.dp.user.schemas import (
 )
 from app.dp.user.service import AuthService
 from app.dp.user.verify_service import ResendVerificationService, VerifyService
+from app.services import ParamService
 
 # 登入限流器（行程內；IP 與帳號維度共用同一器、以 key 前綴區分）
 _login_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
@@ -39,6 +41,17 @@ _verify_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_s
 _resend_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 帳號啟用端點限流器（IP 維度；受邀者持 token 設密碼）
 _activate_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# 驗證信寄送冷卻（#74）：register 與 resend 共用同一器、同一 Email key，
+# 600 秒內對同一 Email 只放行一封（堵「以重新註冊繞過重寄冷卻」）
+_verify_send_cooldown = VerifySendCooldown()
+_params = ParamService()
+_VERIFY_SEND_COOLDOWN_DEFAULT = 600
+
+
+def _verify_send_key(email: str) -> str:
+    """驗證信寄送冷卻分桶鍵（register / resend 共用同一 Email 額度）。"""
+    return f"verify-send:acct:{email}"
+
 
 router = APIRouter(prefix="/api", tags=["auth"])
 _service = AuthService()
@@ -70,7 +83,7 @@ async def register(
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
     _ip_limit: None = Depends(rate_limit_by_ip(_register_limiter, "register")),
-) -> dict[str, str]:
+) -> dict[str, object]:
     """自助註冊（匿名端點，IP 限流防批量灌帳號）。
 
     方案 B（#56）：檢核 → 寫待驗證表 + 寄驗證信（**不建 DP_USER**），回 202（已受理、待驗證）。
@@ -78,8 +91,14 @@ async def register(
 
     帳號維度限流（先 hit、後查）：防輪換 IP 對單一 Email 反覆觸發驗證信（email-bombing），
     與 forgot / resend 一致。
+
+    驗證信寄送冷卻（#74）：check 於檢核前（防列舉）、record 於送信成功後——註冊檢核失敗
+    （422/409）不 record，不誤觸冷卻；與 resend 共用同一 Email 額度，堵住繞道重發。
     """
     _register_limiter.hit(f"register:acct:{data.email}")
+    cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
+    key = _verify_send_key(data.email)
+    _verify_send_cooldown.check(key, cooldown_sec)
     await _register_service.register(
         db,
         email=data.email,
@@ -87,7 +106,8 @@ async def register(
         password=data.password,
         confirm_password=data.confirm_password,
     )
-    return {"message": _REGISTER_MESSAGE}
+    _verify_send_cooldown.record(key)
+    return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
 
 @router.post("/verify-email")
@@ -106,14 +126,22 @@ async def resend_verification(
     data: ResendVerificationRequest,
     db: AsyncSession = Depends(get_db),
     _ip_limit: None = Depends(rate_limit_by_ip(_resend_limiter, "resend")),
-) -> dict[str, str]:
+) -> dict[str, object]:
     """重寄註冊驗證信（匿名）。一律回相同訊息（防列舉）；僅對待驗證帳號作廢舊 token、產新並重寄。
 
     帳號維度**先 hit 限流、後查存在性**（同 forgot，防以 429 反推）。
+
+    驗證信寄送冷卻（#74）：check 於查存在性前、record 於服務返回後——對存在 / 不存在的
+    Email 皆 record，故 429 不因帳號是否存在而異（防列舉）；與 register 共用同一 Email 額度。
+    成功回應帶 retry_after（＝完整冷卻秒數）供前端起算倒數。
     """
     _resend_limiter.hit(f"resend:acct:{data.email}")
+    cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
+    key = _verify_send_key(data.email)
+    _verify_send_cooldown.check(key, cooldown_sec)
     await _resend_service.resend(db, email=data.email)
-    return {"message": _RESEND_MESSAGE}
+    _verify_send_cooldown.record(key)
+    return {"message": _RESEND_MESSAGE, "retry_after": cooldown_sec}
 
 
 @router.post("/forgot-password")

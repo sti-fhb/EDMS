@@ -155,4 +155,77 @@ describe("LoginOverlay", () => {
       await screen.findByText("若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"),
     ).toBeInTheDocument()
   })
+
+  it("重寄驗證信成功回 retry_after → 連結進入冷卻（disabled + 倒數）", async () => {
+    server.use(
+      http.post("/api/login", () =>
+        HttpResponse.json(
+          { error_code: "DP_AUTH_010", error_message: "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送" },
+          { status: 401 },
+        ),
+      ),
+      http.post("/api/resend-verification", () => HttpResponse.json({ message: "已重新寄出", retry_after: 600 })),
+    )
+    renderLogin()
+    const user = userEvent.setup()
+    await submitLogin()
+    await user.click(await screen.findByRole("button", { name: "重寄驗證信" }))
+    // 冷卻中：連結 disabled 且顯示倒數（不斷言確切秒數，避免 tick flaky）
+    await waitFor(() => expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled())
+  })
+
+  it("重寄驗證信遇冷卻 429 → 顯示訊息且連結進入冷卻", async () => {
+    server.use(
+      http.post("/api/login", () =>
+        HttpResponse.json(
+          { error_code: "DP_AUTH_010", error_message: "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送" },
+          { status: 401 },
+        ),
+      ),
+      http.post("/api/resend-verification", () =>
+        HttpResponse.json(
+          { error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試", retry_after: 300 },
+          { status: 429 },
+        ),
+      ),
+    )
+    renderLogin()
+    const user = userEvent.setup()
+    await submitLogin()
+    await user.click(await screen.findByRole("button", { name: "重寄驗證信" }))
+    expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled())
+  })
+
+  it("註冊成功回 retry_after → 「驗證信已寄」的重寄鈕進入冷卻", async () => {
+    server.use(
+      http.post("/api/register", () => HttpResponse.json({ message: "ok", retry_after: 600 }, { status: 202 })),
+    )
+    renderLogin()
+    const user = userEvent.setup()
+    await fillRegister(user, { email: "cooldown@edms.local" })
+    expect(await screen.findByText("cooldown@edms.local")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled()
+  })
+
+  it("冷卻綁定 Email：換一個 Email 後「建立帳號」不被前一個 Email 的冷卻誤擋", async () => {
+    // 對 aaa 觸發 429 冷卻；換成從未觸發冷卻的 bbb 時，送出鈕應恢復可用（回歸：冷卻須綁定 Email）
+    server.use(
+      http.post("/api/register", () =>
+        HttpResponse.json(
+          { error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試", retry_after: 600 },
+          { status: 429 },
+        ),
+      ),
+    )
+    renderLogin()
+    const user = userEvent.setup()
+    await fillRegister(user, { email: "aaa@edms.local" })
+    await waitFor(() => expect(screen.getByRole("button", { name: /建立帳號.*後/ })).toBeDisabled())
+
+    const emailInput = screen.getByLabelText("帳號（Email）")
+    await user.clear(emailInput)
+    await user.type(emailInput, "bbb@edms.local")
+    expect(screen.getByRole("button", { name: "建立帳號" })).toBeEnabled()
+  })
 })
