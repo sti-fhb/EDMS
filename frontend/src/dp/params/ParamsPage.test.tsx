@@ -60,6 +60,8 @@ describe("ParamsPage 系統參數維護流程", () => {
 
     expect(await screen.findByText("請輸入內容")).toBeInTheDocument()
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    // 空值不留白，還原為原值 15
+    expect(screen.getByLabelText("閒置自動登出（分鐘）")).toHaveValue("15")
   })
 
   it("DM 鎖定清單：代碼唯讀、無新增入口", async () => {

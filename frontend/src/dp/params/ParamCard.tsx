@@ -51,6 +51,7 @@ export function ParamCard({ master, onSaveDetail, onToggle, onAdd }: ParamCardPr
   const handleSave = (paramKey: string, edited: string) => {
     if (!ParamValueSchema.safeParse(edited).success) {
       message.error("請輸入內容")
+      revertEdit(paramKey) // 空值不留白，還原為原值
       return
     }
     // VALUE 型送 param_value（實際值）；LIST 型送 param_name（中文名稱）
