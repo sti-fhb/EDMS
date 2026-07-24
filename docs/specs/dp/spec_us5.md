@@ -23,38 +23,38 @@
 
 ## Functional Requirements
 
-- **FR-DP-US5-01**: 全平台參數與清單定義 MUST 統一存 `DP_PARAM_M/D`，以 `PARAM_ID` 前綴（無前綴 `DP_` 平台級 / `ET_` / `DM_` 模組級）區分歸屬；清單型以一個 `PARAM_ID` 下多筆 `PARAM_KEY` 表達
+- **FR-DP-US5-01**: 全平台參數與清單定義 MUST 統一存 `DP_PARAM_M/D`，以 `PARAM_ID` 前綴（無前綴 `DP_` 平台級 / `ET_` / `DM_` 模組級）區分歸屬；清單型以一個 `PARAM_ID` 下多筆 `PARAM_KEY` 表達；**每筆明細 MUST 含中文顯示名稱（`PARAM_NAME`）供維護頁與各模組下拉呈現（自描述、不由前端硬編碼）；`PARAM_VALUE` 專職實際值（VALUE 型放值、LIST 型可空或放業務碼值）**
 - **FR-DP-US5-02**: 維護頁 MUST 按模組過濾——模組級項僅該模組管理者可見可改（互不可見）；平台級項兩管理者皆可見可改；過濾 MUST 於伺服器端 enforce（直接呼叫 API 之越權一律拒絕）
 - **FR-DP-US5-03**: 參數值儲存前 MUST 於伺服器端驗證合法性（型別 / 值域 / 必填）；不合法 MUST 拒絕
-- **FR-DP-US5-04**: 清單項 MUST 支援新增 / 改名 / 啟用 / 停用；MUST NOT 開放刪除；`DETAIL_LOCK` 標記之碼建立後 MUST NOT 允許修改碼值（僅名稱 / 停用）
+- **FR-DP-US5-04**: 清單項 MUST 支援新增 / 改名（改 `PARAM_NAME` 中文名稱）/ 啟用 / 停用；MUST NOT 開放刪除；`DETAIL_LOCK` 標記之碼 `PARAM_KEY` 建立後 MUST NOT 允許修改碼值（僅改名稱 / 停用）
 - **FR-DP-US5-05**: 平台 MUST 提供唯讀查詢服務供各模組讀取自己前綴之定義；讀取後之業務規則套用（分類碼嵌入 DOC_ID、func_name 唯一手冊檢核、`IS_ALL` 展開與自動邀請等）歸各模組
 - **FR-DP-US5-06**: 所有參數 / 清單異動 MUST 寫入 `DP_AUDIT_LOG`（含異動前後值）並即時生效
 - **FR-DP-US5-07**: 編輯平台級參數 MUST 先顯示影響全平台之警告
 
 ## 參數型別 / 值域驗證規則（FR-DP-US5-03 落地）
 
-> **驗證規則存放**：主檔參數（`DP_PARAM_M`）為種子固定集、維護 UI **不新增主檔**（僅編輯值 / 維護清單項），故 FR-03 之型別 / 值域驗證規則以**程式碼側 registry 按 `PARAM_ID` + `PARAM_KEY` 維護**（非存於 `DP_PARAM_M` 之欄位）；不合法回 DP-MSG-PARAMS-001。以下為**平台級**參數之規則；模組級（`ET_` / `DM_`）參數值域由各模組規格定義。
+> **驗證規則存放**：主檔參數（`DP_PARAM_M`）為種子固定集、維護 UI **不新增主檔**（僅編輯值 / 維護清單項），故 FR-03 之型別 / 值域驗證規則以**程式碼側 registry 按 `PARAM_ID` + `PARAM_KEY` 維護**（非存於 `DP_PARAM_M` 之欄位）；不合法回 DP-MSG-PARAMS-001。以下為**平台級**參數之規則；模組級（`ET_` / `DM_`）參數值域由各模組規格定義。下表「中文名稱」欄即 `DP_PARAM_D.PARAM_NAME` 之種子值——顯示名稱存於資料、非前端硬編碼。
 
 ### 平台級 VALUE 參數（多鍵參數組，PARAM_TYPE=VALUE）
 
-| PARAM_ID | PARAM_KEY | 型別 | 值域 | 依據 |
-|----------|-----------|------|------|------|
-| `JWT` | `ACCESS_TTL_MIN` | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）|
-| `JWT` | `RENEW_MAX_HOURS` | 正整數（時）| 1–24 | 建議（單日上限）|
-| `PWD_POLICY` | `MIN_LEN` | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）|
-| `PWD_POLICY` | `ADMIN_MIN_LEN` | 正整數 | ≥ `MIN_LEN`（預設 12）| spec 明載（特權 12）|
-| `PWD_POLICY` | `CHAR_TYPES` | 正整數 | 1–4（大小寫 / 數字 / 符號 4 類）| spec 明載 |
-| `PWD_POLICY` | `HISTORY_COUNT` | 非負整數 | 0–24（預設 3）| 建議 |
-| `PWD_POLICY` | `EXPIRY_DAYS` | 正整數（天）| 1–90 | spec 明載（最短 1、最長 90）|
-| `PWD_POLICY` | `EXPIRY_REMIND_DAYS` | 正整數（天）| 1 ≤ 值 < `EXPIRY_DAYS`（預設 7）| 建議（須早於到期）|
-| `LOGIN` | `FAIL_LOCK_COUNT` | 正整數 | ≥ 1（預設 5，建議 3–10）| spec 明載（預設 5）|
-| `LOGIN` | `LOCK_MINUTES` | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
-| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
-| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
-| `LOGIN` | `IDLE_DISABLE_DAYS` | 正整數（天）| ≥ 1（預設 90）| spec 明載 |
-| `MAIL` | `RATE_PER_MIN` | 正整數 | ≥ 1（預設 60）| 建議 |
-| `MAIL` | `RETRY_MAX` | 非負整數 | 0–10（預設 5）| 建議 |
-| `MAIL` | `RETRY_INTERVAL_MIN` | 正整數（分）| ≥ 1（預設 2）| 建議 |
+| PARAM_ID | PARAM_KEY | 中文名稱（PARAM_NAME）| 型別 | 值域 | 依據 |
+|----------|-----------|------------------|------|------|------|
+| `JWT` | `ACCESS_TTL_MIN` | 閒置自動登出（分鐘） | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）|
+| `JWT` | `RENEW_MAX_HOURS` | 單次登入時效上限（小時） | 正整數（時）| 1–24 | 建議（單日上限）|
+| `PWD_POLICY` | `MIN_LEN` | 密碼最小長度（一般使用者） | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）|
+| `PWD_POLICY` | `ADMIN_MIN_LEN` | 密碼最小長度（特權帳號） | 正整數 | ≥ `MIN_LEN`（預設 12）| spec 明載（特權 12）|
+| `PWD_POLICY` | `CHAR_TYPES` | 字元組合要求（種類數） | 正整數 | 1–4（大小寫 / 數字 / 符號 4 類）| spec 明載 |
+| `PWD_POLICY` | `HISTORY_COUNT` | 密碼歷史記憶次數 | 非負整數 | 0–24（預設 3）| 建議 |
+| `PWD_POLICY` | `EXPIRY_DAYS` | 密碼最長效期（天） | 正整數（天）| 1–90 | spec 明載（最短 1、最長 90）|
+| `PWD_POLICY` | `EXPIRY_REMIND_DAYS` | 密碼到期提醒天數（天） | 正整數（天）| 1 ≤ 值 < `EXPIRY_DAYS`（預設 7）| 建議（須早於到期）|
+| `LOGIN` | `FAIL_LOCK_COUNT` | 登入失敗鎖定次數 | 正整數 | ≥ 1（預設 5，建議 3–10）| spec 明載（預設 5）|
+| `LOGIN` | `LOCK_MINUTES` | 帳號鎖定時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
+| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 密碼重設連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
+| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
+| `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| ≥ 1（預設 90）| spec 明載 |
+| `MAIL` | `RATE_PER_MIN` | 每分鐘寄信上限（封） | 正整數 | ≥ 1（預設 60）| 建議 |
+| `MAIL` | `RETRY_MAX` | 寄信重試上限次數 | 非負整數 | 0–10（預設 5）| 建議 |
+| `MAIL` | `RETRY_INTERVAL_MIN` | 寄信重試間隔（分鐘） | 正整數（分）| ≥ 1（預設 2）| 建議 |
 
 ### 跨欄位一致性（同 PARAM_ID 內）
 
@@ -63,7 +63,7 @@
 
 ### LIST 型（清單定義）之驗證
 
-- `ACTION_TYPE` 等平台級清單、`ET_` / `DM_` 清單：新增 / 改名時 `PARAM_KEY`（碼）非空且同 `PARAM_ID` 內唯一、`PARAM_VALUE`（名稱）非空；`DETAIL_LOCK=true` 者碼值建立後不可改（DP-MSG-PARAMS-002）
+- `ACTION_TYPE` 等平台級清單、`ET_` / `DM_` 清單：新增 / 改名時 `PARAM_KEY`（碼）非空且同 `PARAM_ID` 內唯一、`PARAM_NAME`（中文名稱）非空、`PARAM_VALUE`（值）可空；`DETAIL_LOCK=true` 者碼值建立後不可改（DP-MSG-PARAMS-002）
 
 > 「建議」值域為 SD 實作之 sanity guard 上限；型別 / 下限 / 跨欄位規則為硬性檢核。若業務需調整「建議」上限，實作時回報 SA 更新本表。
 

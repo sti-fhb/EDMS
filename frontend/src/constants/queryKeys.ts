@@ -7,4 +7,7 @@ export const QUERY_KEYS = {
     list: (params: Record<string, unknown>) => ["users", "list", params] as const,
     invites: (params: Record<string, unknown>) => ["users", "invites", params] as const,
   },
+  params: {
+    list: () => ["params", "list"] as const,
+  },
 } as const
