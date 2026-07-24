@@ -69,7 +69,13 @@ class ParamService:
         """
         details = await self._repo.list_details(db, param_id, enabled_only)
         return [
-            ParamItem(key=d.param_key, value=d.param_value, is_enabled=d.is_enabled, sort_order=d.sort_order)
+            ParamItem(
+                key=d.param_key,
+                name=d.param_name,
+                value=d.param_value,
+                is_enabled=d.is_enabled,
+                sort_order=d.sort_order,
+            )
             for d in details
         ]
 
@@ -92,6 +98,16 @@ def _scope(param_id: str) -> str:
     if param_id.startswith("DM_"):
         return "DM"
     return "platform"
+
+
+def _detail_snapshot(detail) -> dict:
+    """明細可異動欄位快照（供稽核 before / after）。"""
+    return {
+        "param_name": detail.param_name,
+        "param_value": detail.param_value,
+        "description": detail.description,
+        "is_enabled": detail.is_enabled,
+    }
 
 
 class ParamAdminService:
@@ -175,16 +191,9 @@ class ParamAdminService:
             validate_param_value(param_id, param_key, new_value)
             await self._validate_group(db, master, param_key, new_value)
 
-        before = {"param_value": detail.param_value, "is_enabled": detail.is_enabled}
+        before = _detail_snapshot(detail)
         now = utcnow()
-        await self._repo.update_detail(
-            db,
-            detail=detail,
-            param_value=new_value,
-            is_enabled=fields.get("is_enabled"),
-            operator_id=operator.user_id,
-            now=now,
-        )
+        await self._repo.update_detail(db, detail=detail, fields=fields, operator_id=operator.user_id, now=now)
         await self._log(
             db,
             operator.user_id,
@@ -193,7 +202,7 @@ class ParamAdminService:
             "UPDATE",
             "維護參數明細",
             before=before,
-            after={"param_value": detail.param_value, "is_enabled": detail.is_enabled},
+            after=_detail_snapshot(detail),
         )
         return ParamDetailResponse.model_validate(detail)
 
@@ -222,7 +231,9 @@ class ParamAdminService:
                 db,
                 param_id=param_id,
                 param_key=data.param_key,
+                param_name=data.param_name,
                 param_value=data.param_value,
+                description=data.description,
                 sort_order=data.sort_order,
                 operator_id=operator.user_id,
                 now=now,
@@ -236,7 +247,7 @@ class ParamAdminService:
             data.param_key,
             "CREATE",
             "新增參數清單項",
-            after={"param_value": data.param_value, "is_enabled": True},
+            after=_detail_snapshot(detail),
         )
         return ParamDetailResponse.model_validate(detail)
 

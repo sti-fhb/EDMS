@@ -49,16 +49,14 @@ class ParamRepository:
         db: AsyncSession,
         *,
         detail: DpParamDetail,
-        param_value: str | None,
-        is_enabled: bool | None,
+        fields: dict,
         operator_id: str,
         now: datetime,
     ) -> None:
-        """更新明細值 / 啟停（None 代表該欄不更動）+ 稽核欄位並 flush。"""
-        if param_value is not None:
-            detail.param_value = param_value
-        if is_enabled is not None:
-            detail.is_enabled = is_enabled
+        """更新明細欄位（fields 僅含要更動的鍵：名稱/值/說明/啟停）+ 稽核欄位並 flush。"""
+        for attr in ("param_name", "param_value", "description", "is_enabled"):
+            if attr in fields:
+                setattr(detail, attr, fields[attr])
         detail.updated_user = operator_id
         detail.updated_date = now
         await db.flush()
@@ -69,7 +67,9 @@ class ParamRepository:
         *,
         param_id: str,
         param_key: str,
-        param_value: str,
+        param_name: str,
+        param_value: str | None,
+        description: str | None,
         sort_order: int | None,
         operator_id: str,
         now: datetime,
@@ -78,7 +78,9 @@ class ParamRepository:
         detail = DpParamDetail(
             param_id=param_id,
             param_key=param_key,
+            param_name=param_name,
             param_value=param_value,
+            description=description,
             sort_order=sort_order,
             is_enabled=True,
             created_user=operator_id,

@@ -30,12 +30,12 @@ async def test_param_master_detail_insert_and_query(db):
     )
     await db.flush()
 
-    for key, value, order in (("MANUAL", "手冊", 1), ("FORM", "表單", 2)):
+    for key, name, order in (("MANUAL", "手冊", 1), ("FORM", "表單", 2)):
         db.add(
             DpParamDetail(
                 param_id="DM_DOC_CATEGORY",
                 param_key=key,
-                param_value=value,
+                param_name=name,
                 sort_order=order,
                 is_enabled=True,
                 created_user="SYSTEM",
@@ -57,4 +57,4 @@ async def test_param_master_detail_insert_and_query(db):
         .all()
     )
     assert [r.param_key for r in rows] == ["MANUAL", "FORM"]
-    assert rows[0].param_value == "手冊"
+    assert rows[0].param_name == "手冊"

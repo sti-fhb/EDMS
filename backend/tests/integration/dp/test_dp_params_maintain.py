@@ -60,6 +60,7 @@ async def _make_master(db, param_id, *, param_type="VALUE", detail_lock=False, n
             DpParamDetail(
                 param_id=param_id,
                 param_key=key,
+                param_name=value or key,  # 測試明細名稱：有值用值、否則用碼（僅需非空）
                 param_value=value,
                 sort_order=sort_order,
                 is_enabled=is_enabled,
@@ -144,15 +145,15 @@ async def test_create_rename_disable_list_item(db, admin_gate):
     await _make_master(db, "ET_UNIT", param_type="LIST", name="ET 單位")
     svc = ParamAdminService()
     await svc.create_detail(
-        db, param_id="ET_UNIT", data=ParamDetailCreate(param_key="EXPORT", param_value="匯出"), operator=_OP
+        db, param_id="ET_UNIT", data=ParamDetailCreate(param_key="EXPORT", param_name="匯出"), operator=_OP
     )
     detail = await svc._repo.get_detail(db, "ET_UNIT", "EXPORT")
-    assert detail is not None and detail.is_enabled is True
-    # 改名
+    assert detail is not None and detail.is_enabled is True and detail.param_name == "匯出"
+    # 改名（改 PARAM_NAME 中文名稱）
     await svc.update_detail(
-        db, param_id="ET_UNIT", param_key="EXPORT", data=ParamDetailUpdate(param_value="資料匯出"), operator=_OP
+        db, param_id="ET_UNIT", param_key="EXPORT", data=ParamDetailUpdate(param_name="資料匯出"), operator=_OP
     )
-    assert (await svc._repo.get_detail(db, "ET_UNIT", "EXPORT")).param_value == "資料匯出"
+    assert (await svc._repo.get_detail(db, "ET_UNIT", "EXPORT")).param_name == "資料匯出"
     # 停用
     await svc.update_detail(
         db, param_id="ET_UNIT", param_key="EXPORT", data=ParamDetailUpdate(is_enabled=False), operator=_OP
@@ -169,7 +170,7 @@ async def test_create_duplicate_key_rejected(db, admin_gate):
     svc = ParamAdminService()
     with pytest.raises(AppError) as exc:
         await svc.create_detail(
-            db, param_id="ET_UNIT", data=ParamDetailCreate(param_key="A", param_value="重複"), operator=_OP
+            db, param_id="ET_UNIT", data=ParamDetailCreate(param_key="A", param_name="重複"), operator=_OP
         )
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_PARAM_005"
 
@@ -184,7 +185,7 @@ async def test_action_type_excluded_from_maintenance(db, admin_gate):
     # 直呼 API 維護 ACTION_TYPE → 404（視為不存在於維護面）
     with pytest.raises(AppError) as exc:
         await svc.create_detail(
-            db, param_id="ACTION_TYPE", data=ParamDetailCreate(param_key="X", param_value="x"), operator=_OP
+            db, param_id="ACTION_TYPE", data=ParamDetailCreate(param_key="X", param_name="測試"), operator=_OP
         )
     assert exc.value.status_code == 404 and exc.value.error_code == "DP_PARAM_004"
 
@@ -194,7 +195,7 @@ async def test_create_on_value_type_rejected(db, admin_gate):
     svc = ParamAdminService()
     with pytest.raises(AppError) as exc:
         await svc.create_detail(
-            db, param_id="JWT", data=ParamDetailCreate(param_key="FOO", param_value="x"), operator=_OP
+            db, param_id="JWT", data=ParamDetailCreate(param_key="FOO", param_name="測試"), operator=_OP
         )
     assert exc.value.status_code == 400 and exc.value.error_code == "DP_PARAM_006"
 
@@ -207,7 +208,7 @@ async def test_detail_lock_blocks_new_code(db, admin_gate):
     await _make_master(db, "LOCKED_LIST", param_type="LIST", detail_lock=True, details=[("SOP", "程序", 1, True)])
     with pytest.raises(AppError) as exc:
         await ParamAdminService().create_detail(
-            db, param_id="LOCKED_LIST", data=ParamDetailCreate(param_key="NEW", param_value="新"), operator=_OP
+            db, param_id="LOCKED_LIST", data=ParamDetailCreate(param_key="NEW", param_name="新"), operator=_OP
         )
     assert exc.value.status_code == 403 and exc.value.error_code == "DP_PARAM_002"
 
@@ -221,11 +222,11 @@ async def test_detail_lock_allows_rename_and_disable(db, admin_gate):
         db,
         param_id="LOCKED_LIST",
         param_key="SOP",
-        data=ParamDetailUpdate(param_value="標準程序", is_enabled=False),
+        data=ParamDetailUpdate(param_name="標準程序", is_enabled=False),
         operator=_OP,
     )
     d = await svc._repo.get_detail(db, "LOCKED_LIST", "SOP")
-    assert d.param_value == "標準程序" and d.is_enabled is False
+    assert d.param_name == "標準程序" and d.is_enabled is False
 
 
 # ---- 越權（AC7）----
@@ -267,7 +268,7 @@ async def test_create_on_missing_param_404(db, admin_gate):
     admin_gate()
     with pytest.raises(AppError) as exc:
         await ParamAdminService().create_detail(
-            db, param_id="NOPE", data=ParamDetailCreate(param_key="X", param_value="y"), operator=_OP
+            db, param_id="NOPE", data=ParamDetailCreate(param_key="X", param_name="測試"), operator=_OP
         )
     assert exc.value.status_code == 404 and exc.value.error_code == "DP_PARAM_004"
 

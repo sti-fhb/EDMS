@@ -15,7 +15,7 @@ def get_param_value(param_id: str, key: str = "VALUE") -> str | None
     """取單值參數；不存在或停用回 None。"""
 
 def get_param_list(param_id: str, enabled_only: bool = True) -> list[ParamItem]
-    """取清單定義（依 SORT_ORDER 排序）。ParamItem: key / value / is_enabled / sort_order。"""
+    """取清單定義（依 SORT_ORDER 排序）。ParamItem: key / name（中文顯示名稱）/ value（值，可空）/ is_enabled / sort_order。"""
 ```
 
 規則：
