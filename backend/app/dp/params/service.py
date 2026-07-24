@@ -81,6 +81,8 @@ _LOCKED_MSG = "此代碼已鎖定，不可修改代碼值"
 _DUP_MSG = "清單項代碼已存在"
 _TYPE_MSG = "此參數不支援清單項維護"
 _NO_FIELD_MSG = "未提供任何更新欄位"
+# 系統寫死的 enum 清單（後端稽核直接寫碼、非管理者維護對象），一律排除於維護面（見 /sti-plan #68 §9）
+_SYSTEM_PARAM_IDS = frozenset({"ACTION_TYPE"})
 
 
 def _scope(param_id: str) -> str:
@@ -119,6 +121,8 @@ class ParamAdminService:
         masters = await self._repo.list_masters(db)
         result: list[ParamMasterResponse] = []
         for m in masters:
+            if m.param_id in _SYSTEM_PARAM_IDS:
+                continue  # 系統 enum 不納維護頁
             scope = _scope(m.param_id)
             if not self._visible(scope, is_et, is_dm):
                 continue
@@ -137,7 +141,9 @@ class ParamAdminService:
         return result
 
     async def _require_visible_master(self, db: AsyncSession, param_id: str, user_id: str) -> DpParamMaster:
-        """載入主檔並檢核操作者可見；不存在 404 DP_PARAM_004、越權 403 DP_PARAM_003。"""
+        """載入主檔並檢核操作者可見；系統 enum / 不存在 404 DP_PARAM_004、越權 403 DP_PARAM_003。"""
+        if param_id in _SYSTEM_PARAM_IDS:
+            raise AppError(status_code=404, detail=_NOT_FOUND_MSG, error_code="DP_PARAM_004")  # 不開放維護
         master = await self._repo.get_master(db, param_id)
         if master is None:
             raise AppError(status_code=404, detail=_NOT_FOUND_MSG, error_code="DP_PARAM_004")

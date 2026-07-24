@@ -123,13 +123,13 @@ export const handlers = [
         ],
       },
       {
-        param_id: "ACTION_TYPE",
-        param_name: "操作類別",
+        param_id: "ET_TRAINING_UNIT",
+        param_name: "受訓單位標籤",
         param_type: "LIST",
         detail_lock: false,
         description: null,
-        scope: "platform",
-        details: [{ param_key: "LOGIN", param_value: "登入", sort_order: 1, is_enabled: true }],
+        scope: "ET",
+        details: [{ param_key: "NURSE", param_value: "護理師", sort_order: 1, is_enabled: true }],
       },
       {
         param_id: "DM_DOC_CATEGORY",

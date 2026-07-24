@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
 import { getFieldErrors } from "../../utils/zodUtils"
+import { paramLabel } from "./paramLabels"
 import { ParamItemCreateSchema, ParamValueSchema } from "./schemas"
 import type { DetailCreatePayload, ParamMaster } from "./paramsService"
 
@@ -85,10 +86,10 @@ export function ParamCard({ master, onSaveValue, onToggle, onAdd }: ParamCardPro
               )}
               <TextField
                 size="small"
-                label={isList ? `${d.param_key} 名稱` : d.param_key}
+                label={isList ? `${d.param_key} 名稱` : paramLabel(master.param_id, d.param_key)}
                 value={valueOf(d.param_key, d.param_value)}
                 onChange={(e) => setEdit(d.param_key, e.target.value)}
-                sx={{ minWidth: 220 }}
+                sx={{ minWidth: 240 }}
               />
               <Button size="small" variant="outlined" onClick={() => handleSave(d.param_key, d.param_value)}>
                 儲存

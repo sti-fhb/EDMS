@@ -140,37 +140,53 @@ async def test_update_cross_field_invariant_rejected(db, admin_gate):
 
 
 async def test_create_rename_disable_list_item(db, admin_gate):
-    admin_gate()
-    # ACTION_TYPE 為平台級 LIST（種子），新增一項
+    admin_gate(et_admins=("admin01",))  # 模組級清單維護：operator 為 ET 管理者
+    await _make_master(db, "ET_UNIT", param_type="LIST", name="ET 單位")
     svc = ParamAdminService()
     await svc.create_detail(
-        db, param_id="ACTION_TYPE", data=ParamDetailCreate(param_key="EXPORT", param_value="匯出"), operator=_OP
+        db, param_id="ET_UNIT", data=ParamDetailCreate(param_key="EXPORT", param_value="匯出"), operator=_OP
     )
-    detail = await svc._repo.get_detail(db, "ACTION_TYPE", "EXPORT")
+    detail = await svc._repo.get_detail(db, "ET_UNIT", "EXPORT")
     assert detail is not None and detail.is_enabled is True
     # 改名
     await svc.update_detail(
-        db, param_id="ACTION_TYPE", param_key="EXPORT", data=ParamDetailUpdate(param_value="資料匯出"), operator=_OP
+        db, param_id="ET_UNIT", param_key="EXPORT", data=ParamDetailUpdate(param_value="資料匯出"), operator=_OP
     )
-    assert (await svc._repo.get_detail(db, "ACTION_TYPE", "EXPORT")).param_value == "資料匯出"
+    assert (await svc._repo.get_detail(db, "ET_UNIT", "EXPORT")).param_value == "資料匯出"
     # 停用
     await svc.update_detail(
-        db, param_id="ACTION_TYPE", param_key="EXPORT", data=ParamDetailUpdate(is_enabled=False), operator=_OP
+        db, param_id="ET_UNIT", param_key="EXPORT", data=ParamDetailUpdate(is_enabled=False), operator=_OP
     )
-    assert (await svc._repo.get_detail(db, "ACTION_TYPE", "EXPORT")).is_enabled is False
+    assert (await svc._repo.get_detail(db, "ET_UNIT", "EXPORT")).is_enabled is False
     # 稽核：1 CREATE + 2 UPDATE
-    assert await _count_audit(db, "ACTION_TYPE.EXPORT", "CREATE") == 1
-    assert await _count_audit(db, "ACTION_TYPE.EXPORT", "UPDATE") == 2
+    assert await _count_audit(db, "ET_UNIT.EXPORT", "CREATE") == 1
+    assert await _count_audit(db, "ET_UNIT.EXPORT", "UPDATE") == 2
 
 
 async def test_create_duplicate_key_rejected(db, admin_gate):
-    admin_gate()
+    admin_gate(et_admins=("admin01",))
+    await _make_master(db, "ET_UNIT", param_type="LIST", details=[("A", "甲", 1, True)])
     svc = ParamAdminService()
     with pytest.raises(AppError) as exc:
         await svc.create_detail(
-            db, param_id="ACTION_TYPE", data=ParamDetailCreate(param_key="LOGIN", param_value="重複"), operator=_OP
+            db, param_id="ET_UNIT", data=ParamDetailCreate(param_key="A", param_value="重複"), operator=_OP
         )
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_PARAM_005"
+
+
+async def test_action_type_excluded_from_maintenance(db, admin_gate):
+    admin_gate()
+    svc = ParamAdminService()
+    # 系統 enum ACTION_TYPE 不出現在維護清單
+    ids = {m.param_id for m in await svc.list_visible(db, "admin01")}
+    assert "ACTION_TYPE" not in ids
+    assert "JWT" in ids  # 一般平台級參數照常可見
+    # 直呼 API 維護 ACTION_TYPE → 404（視為不存在於維護面）
+    with pytest.raises(AppError) as exc:
+        await svc.create_detail(
+            db, param_id="ACTION_TYPE", data=ParamDetailCreate(param_key="X", param_value="x"), operator=_OP
+        )
+    assert exc.value.status_code == 404 and exc.value.error_code == "DP_PARAM_004"
 
 
 async def test_create_on_value_type_rejected(db, admin_gate):

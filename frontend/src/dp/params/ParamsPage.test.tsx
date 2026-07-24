@@ -10,7 +10,7 @@ describe("ParamsPage 系統參數維護流程", () => {
     renderWithProviders(<ParamsPage />)
 
     expect(await screen.findByText("JWT 設定")).toBeInTheDocument()
-    expect(screen.getByLabelText("ACCESS_TTL_MIN")).toBeInTheDocument()
+    expect(screen.getByLabelText("閒置自動登出（分鐘）")).toBeInTheDocument()
     expect(screen.getByText(/變更將影響全平台/)).toBeInTheDocument()
     // 分頁籤：平台 + DM（皆有資料）
     expect(screen.getByRole("tab", { name: "平台（共用）" })).toBeInTheDocument()
@@ -20,7 +20,7 @@ describe("ParamsPage 系統參數維護流程", () => {
   it("編輯平台參數值 → 先出現影響全平台確認 → 確認後提示已即時生效", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
-    const field = await screen.findByLabelText("ACCESS_TTL_MIN")
+    const field = await screen.findByLabelText("閒置自動登出（分鐘）")
 
     await user.clear(field)
     await user.type(field, "10")
@@ -48,13 +48,16 @@ describe("ParamsPage 系統參數維護流程", () => {
     expect(screen.queryByRole("button", { name: "新增" })).not.toBeInTheDocument()
   })
 
-  it("平台清單新增項目 → 提示已即時生效", async () => {
+  it("模組清單新增項目 → 提示已即時生效", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
-    await screen.findByText("操作類別")
+    await screen.findByText("JWT 設定")
 
-    await user.type(screen.getByLabelText("新增代碼"), "EXPORT")
-    await user.type(screen.getByLabelText("新增名稱"), "匯出")
+    // 清單維護在模組頁籤（平台頁籤僅 VALUE 參數，不含系統 enum）
+    await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
+    await screen.findByText("受訓單位標籤")
+    await user.type(screen.getByLabelText("新增代碼"), "DOCTOR")
+    await user.type(screen.getByLabelText("新增名稱"), "醫師")
     await user.click(screen.getByRole("button", { name: "新增" }))
 
     expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
