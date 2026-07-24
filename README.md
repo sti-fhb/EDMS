@@ -163,10 +163,12 @@ Migration 執行完成後，會自動建立以下 seed 資料：
 ### 後端（終端機 1）
 ```bash
 cd backend
-uv run fastapi dev main.py
+uv run fastapi dev main.py --port 8001 --host 127.0.0.1
 ```
 - API：`http://localhost:8001`
 - Swagger 文件：`http://localhost:8001/docs`
+
+> **務必加 `--host 127.0.0.1`**：不指定時 `fastapi dev` 的綁定位址會在不同次啟動間飄移（127.0.0.1 或 ::1）。前端 vite proxy 已固定連 `127.0.0.1`（見 `frontend/vite.config.ts`），後端也釘 `127.0.0.1` 兩邊才一致，否則登入 / `/api` 請求會出現「系統連線異常」（Windows 上 `localhost` 優先解析成 IPv6 `::1` 之坑）。
 
 ### 前端（終端機 2）
 ```bash
