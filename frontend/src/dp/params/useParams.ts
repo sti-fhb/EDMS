@@ -24,9 +24,10 @@ export function useParams() {
     qc.invalidateQueries({ queryKey: QUERY_KEYS.params.list() })
   }, [qc])
 
-  /** 更新明細（改值 / 改名 / 說明）；平台級先跳影響全平台警告（PARAMS-005）後才送出。 */
+  /** 更新明細（改值 / 改名 / 說明）；平台級先跳影響全平台警告（PARAMS-005）後才送出。
+   * onCancel：平台級警告被取消時回呼（供頁面還原未儲存的欄位）。 */
   const saveDetail = useCallback(
-    async (master: ParamMaster, paramKey: string, payload: DetailUpdatePayload) => {
+    async (master: ParamMaster, paramKey: string, payload: DetailUpdatePayload, onCancel?: () => void) => {
       const doSave = async () => {
         try {
           await paramsApi.updateDetail(master.param_id, paramKey, payload)
@@ -38,7 +39,7 @@ export function useParams() {
         }
       }
       if (master.scope === "platform") {
-        confirm({ title: "變更平台級參數", content: _PLATFORM_WARN, okText: "確定儲存", onOk: doSave })
+        confirm({ title: "變更平台級參數", content: _PLATFORM_WARN, okText: "確定儲存", onOk: doSave, onCancel })
       } else {
         await doSave()
       }

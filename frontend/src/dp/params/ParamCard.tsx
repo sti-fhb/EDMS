@@ -8,13 +8,19 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
+import { useNotification } from "../../contexts/NotificationContext"
 import { getFieldErrors } from "../../utils/zodUtils"
 import { ParamItemCreateSchema, ParamValueSchema } from "./schemas"
 import type { DetailCreatePayload, DetailUpdatePayload, ParamMaster } from "./paramsService"
 
 interface ParamCardProps {
   master: ParamMaster
-  onSaveDetail: (master: ParamMaster, paramKey: string, payload: DetailUpdatePayload) => void | Promise<void>
+  onSaveDetail: (
+    master: ParamMaster,
+    paramKey: string,
+    payload: DetailUpdatePayload,
+    onCancel?: () => void,
+  ) => void | Promise<void>
   onToggle: (master: ParamMaster, paramKey: string, isEnabled: boolean) => void | Promise<void>
   onAdd: (master: ParamMaster, payload: DetailCreatePayload) => Promise<void>
 }
@@ -25,6 +31,7 @@ interface ParamCardProps {
  * - LIST 型：清單項改名（param_name）/ 啟停 / 新增（DETAIL_LOCK 時碼唯讀、不可新增）
  */
 export function ParamCard({ master, onSaveDetail, onToggle, onAdd }: ParamCardProps) {
+  const { message } = useNotification()
   const isList = master.param_type === "LIST"
   // 各明細的編輯值（key→輸入值）：VALUE 型編輯 param_value、LIST 型編輯 param_name
   const [edits, setEdits] = useState<Record<string, string>>({})
@@ -34,13 +41,23 @@ export function ParamCard({ master, onSaveDetail, onToggle, onAdd }: ParamCardPr
 
   const editedOf = (key: string, original: string | null) => edits[key] ?? original ?? ""
   const setEdit = (key: string, v: string) => setEdits((prev) => ({ ...prev, [key]: v }))
+  const revertEdit = (key: string) =>
+    setEdits((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
 
   const handleSave = (paramKey: string, edited: string) => {
-    if (!ParamValueSchema.safeParse(edited).success) return
+    if (!ParamValueSchema.safeParse(edited).success) {
+      message.error("請輸入內容")
+      return
+    }
     // VALUE 型送 param_value（實際值）；LIST 型送 param_name（中文名稱）
     const payload: DetailUpdatePayload = isList ? { param_name: edited.trim() } : { param_value: edited.trim() }
+    // onCancel：平台級警告被取消時還原欄位（避免 UI 顯示未儲存值誤導）
     // 錯誤已由 useParams 內部以 toast 呈現並 rethrow；此處吞掉 rejection 避免未捕捉警告
-    void Promise.resolve(onSaveDetail(master, paramKey, payload)).catch(() => {})
+    void Promise.resolve(onSaveDetail(master, paramKey, payload, () => revertEdit(paramKey))).catch(() => {})
   }
 
   const handleAdd = () => {

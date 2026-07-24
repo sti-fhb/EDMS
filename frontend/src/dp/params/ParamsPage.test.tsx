@@ -34,6 +34,34 @@ describe("ParamsPage 系統參數維護流程", () => {
     expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
   })
 
+  it("取消平台級警告 → 欄位還原為原值、不儲存", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    const field = await screen.findByLabelText("閒置自動登出（分鐘）")
+
+    await user.clear(field)
+    await user.type(field, "9")
+    await user.click(screen.getAllByRole("button", { name: "儲存" })[0])
+
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "取消" }))
+
+    // 還原為原值 15（不因取消而殘留未儲存的 9）
+    expect(screen.getByLabelText("閒置自動登出（分鐘）")).toHaveValue("15")
+  })
+
+  it("清空欄位儲存 → 提示請輸入內容、不跳確認", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    const field = await screen.findByLabelText("閒置自動登出（分鐘）")
+
+    await user.clear(field)
+    await user.click(screen.getAllByRole("button", { name: "儲存" })[0])
+
+    expect(await screen.findByText("請輸入內容")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
   it("DM 鎖定清單：代碼唯讀、無新增入口", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
