@@ -38,8 +38,10 @@ class AuthRepository:
         延遲切換下 `email_exists` 只查 EMAIL 會漏「他人已申請改為同一新信箱、尚未驗證」的窗口
         （US8 code review）；故一併查他人 PENDING_EMAIL（排除自己，允許本人重複申請同一新信箱）。
         """
-        stmt = select(func.count()).select_from(DpUser).where(
-            (DpUser.email == email) | ((DpUser.pending_email == email) & (DpUser.user_id != requester_id))
+        stmt = (
+            select(func.count())
+            .select_from(DpUser)
+            .where((DpUser.email == email) | ((DpUser.pending_email == email) & (DpUser.user_id != requester_id)))
         )
         return (await db.execute(stmt)).scalar_one() > 0
 

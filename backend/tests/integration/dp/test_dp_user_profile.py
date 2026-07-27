@@ -131,8 +131,11 @@ async def test_change_password_reused(db):
     user = await _make_user(db, user_id="ru", email="ru@edms.local")
     db.add(
         DpPwdHistory(
-            user_id=user.user_id, seq_no=1, pwd_hash=hash_password(_NEW_PWD),
-            created_user=user.user_id, created_date=utcnow(),
+            user_id=user.user_id,
+            seq_no=1,
+            pwd_hash=hash_password(_NEW_PWD),
+            created_user=user.user_id,
+            created_date=utcnow(),
         )
     )
     await db.flush()
@@ -274,9 +277,13 @@ async def test_email_change_verify_expired(db):
     now = utcnow()
     db.add(
         DpPwdReset(
-            token_hash=hash_token("expired-tok"), user_id=user.user_id, token_type="EMAIL_CHANGE",
-            new_email="never@edms.local", expires_date=now - timedelta(minutes=1),
-            created_user=user.user_id, created_date=now,
+            token_hash=hash_token("expired-tok"),
+            user_id=user.user_id,
+            token_type="EMAIL_CHANGE",
+            new_email="never@edms.local",
+            expires_date=now - timedelta(minutes=1),
+            created_user=user.user_id,
+            created_date=now,
         )
     )
     await db.flush()
