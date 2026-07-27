@@ -124,6 +124,75 @@ export const handlers = [
       created_date: "2026-05-01T00:00:00Z",
     }),
   ),
+  // US5 系統參數維護（預設 happy path；含平台 VALUE / LIST 與 DM 鎖定清單供 UI 驗證）
+  http.get("/api/dp/params", () =>
+    HttpResponse.json([
+      {
+        param_id: "JWT",
+        param_name: "JWT 設定",
+        param_type: "VALUE",
+        detail_lock: false,
+        description: "JWT 存取與換發相關參數",
+        scope: "platform",
+        details: [
+          {
+            param_key: "ACCESS_TTL_MIN",
+            param_name: "閒置自動登出（分鐘）",
+            param_value: "15",
+            description: null,
+            sort_order: null,
+            is_enabled: true,
+          },
+          {
+            param_key: "RENEW_MAX_HOURS",
+            param_name: "單次登入時效上限（小時）",
+            param_value: "8",
+            description: null,
+            sort_order: null,
+            is_enabled: true,
+          },
+        ],
+      },
+      {
+        param_id: "ET_TRAINING_UNIT",
+        param_name: "受訓單位標籤",
+        param_type: "LIST",
+        detail_lock: false,
+        description: null,
+        scope: "ET",
+        details: [
+          { param_key: "NURSE", param_name: "護理師", param_value: null, description: null, sort_order: 1, is_enabled: true },
+        ],
+      },
+      {
+        param_id: "DM_DOC_CATEGORY",
+        param_name: "文件分類",
+        param_type: "LIST",
+        detail_lock: true,
+        description: null,
+        scope: "DM",
+        details: [
+          { param_key: "SOP", param_name: "標準作業程序", param_value: null, description: null, sort_order: 1, is_enabled: true },
+        ],
+      },
+    ]),
+  ),
+  http.put("/api/dp/params/:id/details/:key", () =>
+    HttpResponse.json({
+      param_key: "ACCESS_TTL_MIN",
+      param_name: "閒置自動登出（分鐘）",
+      param_value: "10",
+      description: null,
+      sort_order: null,
+      is_enabled: true,
+    }),
+  ),
+  http.post("/api/dp/params/:id/details", () =>
+    HttpResponse.json(
+      { param_key: "DOCTOR", param_name: "醫師", param_value: null, description: null, sort_order: null, is_enabled: true },
+      { status: 201 },
+    ),
+  ),
 ]
 
 export const server = setupServer(...handlers)

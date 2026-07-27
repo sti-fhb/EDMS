@@ -28,6 +28,8 @@ interface ConfirmOptions {
   danger?: boolean
   /** 按下確認後執行；可為 async，執行期間確認鈕顯示 loading，成功後自動關閉。 */
   onOk: () => void | Promise<void>
+  /** 取消 / 關閉對話框時執行（如還原未儲存的編輯）。 */
+  onCancel?: () => void
 }
 
 export interface NotificationApi {
@@ -83,6 +85,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setConfirmState((prev) => (prev ? { ...prev, open: false } : null))
   }, [])
 
+  const handleCancel = useCallback(() => {
+    // 取消 / 關閉（非確認成功）時觸發 onCancel（如還原未儲存的欄位）
+    confirmState?.onCancel?.()
+    closeConfirm()
+  }, [confirmState, closeConfirm])
+
   const handleConfirmOk = useCallback(async () => {
     if (confirmState === null) return
     setConfirmState((prev) => (prev ? { ...prev, loading: true } : null))
@@ -114,13 +122,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           {snackbar.text}
         </Alert>
       </Snackbar>
-      <Dialog open={confirmState?.open ?? false} onClose={closeConfirm}>
+      <Dialog open={confirmState?.open ?? false} onClose={handleCancel}>
         <DialogTitle>{confirmState?.title}</DialogTitle>
         <DialogContent>
           <DialogContentText component="div">{confirmState?.content}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeConfirm} disabled={confirmState?.loading}>
+          <Button onClick={handleCancel} disabled={confirmState?.loading}>
             {confirmState?.cancelText ?? "取消"}
           </Button>
           <Button

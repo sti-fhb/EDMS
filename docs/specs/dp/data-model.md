@@ -89,7 +89,9 @@ erDiagram
     DP_PARAM_D {
         VARCHAR PARAM_ID PK "複合PK,FK"
         VARCHAR PARAM_KEY PK
-        VARCHAR PARAM_VALUE
+        VARCHAR PARAM_NAME "中文顯示名稱"
+        VARCHAR PARAM_VALUE "實際值"
+        VARCHAR DESCRIPTION
         INT SORT_ORDER
         BOOLEAN IS_ENABLED
     }
@@ -235,7 +237,9 @@ erDiagram
 |------|------|------|------|------|
 | PARAM_ID | VARCHAR(50) | Y | — | 複合 PK；FK → DP_PARAM_M |
 | PARAM_KEY | VARCHAR(50) | Y | — | 複合 PK；單值參數固定 `VALUE`；清單型＝清單項代碼（特殊項以慣例 key 表達，如 `ALL`＝全體）|
-| PARAM_VALUE | VARCHAR(500) | N | — | 參數值 / 清單項名稱 |
+| PARAM_NAME | VARCHAR(100) | Y | — | 明細中文顯示名稱（自描述，供維護頁與各模組下拉呈現；取代前端硬編碼標籤）|
+| PARAM_VALUE | VARCHAR(500) | N | — | 實際值：VALUE 型放參數值（如 `15`）；LIST 型可空或放業務碼值（**不再兼作名稱**）|
+| DESCRIPTION | VARCHAR(500) | N | — | 明細補充說明 |
 | SORT_ORDER | INT | N | — | 清單顯示排序 |
 | IS_ENABLED | BOOLEAN | Y | true | 清單項啟用 / 停用（不開放刪除，淘汰改停用）|
 
@@ -337,9 +341,11 @@ erDiagram
 | `PWD_POLICY` | VALUE 組 | `MIN_LEN`=8、`ADMIN_MIN_LEN`=12、`CHAR_TYPES`=3、`HISTORY_COUNT`=3、`EXPIRY_DAYS`=90、`EXPIRY_REMIND_DAYS`=7 |
 | `LOGIN` | VALUE 組 | `FAIL_LOCK_COUNT`=5、`LOCK_MINUTES`=30、`RESET_TOKEN_TTL_MIN`=30、`EMAIL_CHANGE_TTL_MIN`=30、`IDLE_DISABLE_DAYS`=90 |
 | `MAIL` | VALUE 組 | `RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2（分；部署可再調校）。無失敗告警參數——失敗率由 IT 監控負責（spec 釐清第 2 輪）|
-| `ACTION_TYPE` | LIST | LOGIN / LOGOUT / CREATE / UPDATE / DELETE |
+| `ACTION_TYPE` | LIST | LOGIN / LOGOUT / CREATE / UPDATE / DELETE（`PARAM_NAME`：登入 / 登出 / 新增 / 修改 / 刪除）|
 
 > 多鍵參數組以一個 PARAM_ID 下多筆 PARAM_KEY 表達（PARAM_TYPE=VALUE 之慣例延伸）。
+>
+> **每筆明細之 `PARAM_NAME`（中文顯示名稱）為必填**：VALUE 明細之中文名稱見 [spec_us5.md §參數型別 / 值域驗證規則](spec_us5.md)（含中文名稱欄）；LIST 明細名稱如上（`ACTION_TYPE`）與各模組清單種子。`PARAM_VALUE` 專職實際值（VALUE 型放值；LIST 型可空）。
 
 ### 模組級參數與清單（`ET_` / `DM_` 前綴；依 [`_refs/09-平台模組.md`](../../_refs/09-平台模組.md) §5.2）
 

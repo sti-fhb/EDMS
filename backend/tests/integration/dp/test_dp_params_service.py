@@ -37,7 +37,7 @@ async def test_get_param_list_sorted(db):
     items = await ParamService().get_param_list(db, "ACTION_TYPE")
     assert [i.key for i in items] == ["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE"]
     assert [i.sort_order for i in items] == [1, 2, 3, 4, 5]
-    assert items[0].value == "登入"
+    assert items[0].name == "登入"
     assert all(i.is_enabled for i in items)
 
 
