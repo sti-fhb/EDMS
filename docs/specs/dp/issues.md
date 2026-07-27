@@ -24,8 +24,8 @@
 | 3 | 使用者自助註冊 | US2 / UCDP002 | P1-核心 | T026 ~ T027（2 任務）| #2 | [#39](https://github.com/sti-fhb/EDMS/issues/39) | ✅ 已開立 |
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | [#47](https://github.com/sti-fhb/EDMS/issues/47) | ✅ 已開立 |
 | 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | [#61](https://github.com/sti-fhb/EDMS/issues/61) | ✅ 已開立 |
-| 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #0, #2, #5 | [#68](https://github.com/sti-fhb/EDMS/issues/68) | ✅ 已開立 |
-| 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2（模組 service 以 stub）| — | 待補 |
+| 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #0, #2, #5 | [#68](https://github.com/sti-fhb/EDMS/issues/68) | ✅ 已合併（PR #73）|
+| 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #1, #2 | — | 待補 |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 待補 |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #2 | — | 待補 |
@@ -518,9 +518,86 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 
 ---
 
-## Issue #7 ~ #12：待補（增量模式）
+## Issue #7：[P1-核心] DP — 權限管理（dp-roles）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #6，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us7.md](spec_us7.md)（US7 / UCDP010，FR-DP-US7-01~07、DP-MSG-ROLES-001~003）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §3（`get_user_roles_tags` / `assign_roles_tags`；`get_user_roles_audiences` / `assign_roles_audiences`）；[research.md](research.md) §4（角色即時由模組判定，JWT 不含角色）；[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-roles`）
+**階段**：P1-核心（ET 學員以外**所有**角色〔ET 教師 / 管理者、DM 四角色〕之唯一開通路徑；「畫面在 DP、資料與判定在模組」2026-07-08 決策）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：模組管理者判定閘 `module_admin_gate`（T017）、`SRVDP001`（讀 `DP_PARAM` 標籤清單）、`SRVDP003` 稽核、認證 / `get_operator`
+- Issue #2（GitHub [#31](https://github.com/sti-fhb/EDMS/issues/31)）已合併：登入 + 後台 layout；`dp-roles` sidebar 連結（現為 `StubPage`）
+- Issue #6（GitHub [#68](https://github.com/sti-fhb/EDMS/issues/68)）已合併：`DP_PARAM` 標籤 / 可見對象清單之維護與唯讀查詢（US7 讀啟用中項）；前後端 CRUD toolkit
+- **跨模組（stub 先行）**：ET `get_user_roles_tags` / `assign_roles_tags`、DM `get_user_roles_audiences` / `assign_roles_audiences`、`is_module_admin`（[module-callbacks](contracts/module-callbacks.md) §1 / §3）——ET / DM 未實作，以 stub 註冊、模組實作跟進後於 T049 回歸
+
+### 任務說明
+
+DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 → 於**同一列**指派本模組**角色**（固定 enum 核取）+ **標籤 / 可見對象**（多選，清單讀 `DP_PARAM` 啟用中項）。DP 為**轉接層**：載入現況呼叫模組 `get_user_roles_*`、儲存呼叫模組 `assign_roles_*`，資料寫**模組表**（`ET_USER_ROLE` / `DM_USER_ROLE` / `ET_USER_TAG` / DM 授權表）。DP **MUST NOT 自持指派資料、不做全域 RBAC、不定義角色能力**（判定與 enforce 在模組）。自我保護（取消自己管理者）與「不檢核至少 1 名管理者」由**模組 service** 判定、DP 呈現模組回傳訊息。模組過濾伺服器端 enforce（越權 403）。
+
+> ℹ️ 全端 issue：後端轉接端點（`roles` router → 模組角色 service 閘）+ 前端 `dp-roles` 頁。**核心邏輯（角色 enum、自我保護、標籤值檢核、寫模組表 + 稽核）在模組**；DP 僅呼叫 + 呈現 + 模組過濾。ET / DM service 未就緒前**全程 stub**，完整驗收待 T049。
+
+### 範圍
+
+**後端**（`app/dp/roles/` — 轉接層，不建角色 / 指派表）：
+- **T035 權限管理轉接端點**：
+  - 查使用者 + 現況：`GET`（呼叫模組 `get_user_roles_tags` / `get_user_roles_audiences`，經模組角色 service 閘 / stub）
+  - 儲存：`PUT`（呼叫模組 `assign_roles_tags` / `assign_roles_audiences`；模組 `AppError` 透傳為 ROLES-001〔自我保護〕）
+  - 模組過濾 enforce（T017 `is_module_admin`）：越權 403＝ROLES-003
+  - 標籤 / 可見對象可選清單讀 `DP_PARAM` 啟用中項（`SRVDP001`，T012）
+  - 指派異動之稽核**由模組側**於同交易呼叫 `SRVDP003` 寫入（FR-07，per contracts §3）——DP 不重複寫
+  - 模組角色 service 閘（`core/module_roles.py` 或類似）：註冊 ET / DM 的 get / assign callbacks，未註冊 fail-closed；stub 可注入
+
+**前端**（`frontend/src/dp/roles/` — 沿用 #5 / #6 CRUD toolkit）：
+- **T036 `dp-roles` 頁**：查使用者清單 → 每列「**角色核取 + 標籤 / 可見對象多選**」雙維度；按模組分區（平台 / ET / DM，兼具者雙區）；固定 enum、**無「新增角色」入口**；即時生效提示（ROLES-002）
+
+**測試**：
+- 後端 int：查現況（stub 回假資料）；儲存呼叫模組 `assign`（驗 stub 被呼叫、參數正確）；模組 `AppError` 透傳 ROLES-001（自我保護）；越權直呼他模組 → 403 ROLES-003；標籤清單讀 `DP_PARAM` 啟用中項
+- 前端：雙維度指派（MSW）、模組分區、即時生效提示、無新增角色入口
+
+### 驗收條件
+
+- [ ] ET 管理者查使用者 → 每列顯示 ET 角色（管理者 / 教師 / 學員）核取 + 受訓單位標籤多選；**不顯示** DM 區（FR-01、AC1）
+- [ ] DM 管理者 → 顯示 DM 角色（管理者 / 編輯者 / 審核者 / 閱覽者）+ 可見對象 / 單位授權多選；不顯示 ET 區；兼具者兩區皆見（FR-01、AC2）
+- [ ] 同一列勾選 / 取消角色 + 標籤（兩維度獨立）→ 儲存經模組 service 寫模組表 → 即時生效 ROLES-002（FR-02/03、AC3）
+- [ ] 多角色允許（權限取聯集）；角色固定 enum、無新增角色入口（FR-04、AC4）
+- [ ] 取消自己之管理者角色 → 模組 service 阻擋、DP 呈現 ROLES-001（自我保護，**判定在模組**）（FR-06、AC5）
+- [ ] **不檢核**「至少 1 名管理者」（取消他人管理者允許）（AC6）
+- [ ] 標籤 / 可見對象可選清單讀 `DP_PARAM` 啟用中項（US5）（FR-05）
+- [ ] 越權（直呼他模組角色指派）→ 403 ROLES-003（伺服器端 enforce，非僅前端）（FR-01、AC8）
+- [ ] 指派異動寫 `DP_AUDIT_LOG`（含前後值）——由**模組側**於同交易寫（FR-07、AC7）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：`module_admin_gate`（T017）、`SRVDP001`、`SRVDP003`、認證 / `get_operator`
+- **Issue #2（GitHub #31）**：登入 + 後台 layout；`dp-roles` sidebar 連結
+- **Issue #6（GitHub #68）**：`DP_PARAM` 標籤 / 可見對象清單（US7 讀啟用中項）；前後端 CRUD toolkit
+- **跨模組（stub 先行）**：ET / DM `get_user_roles_*` / `assign_roles_*` / `is_module_admin`（module-callbacks §1 / §3）——完整驗收待模組 service 就緒於 T049 回歸
+
+### 注意事項
+
+- ⚠️ **全程 stub 驅動、完整驗收待 T049**：US7 的核心（角色 enum、自我保護、標籤值檢核、寫模組表 + 稽核）**全在 ET / DM 模組**；ET / DM 未實作前，DP 只能對 stub 驗「轉接接線 + 模組過濾 + 錯誤透傳 + UI」。真正的角色寫入、自我保護、稽核落地待模組 service 就緒（T049 回歸）。**比 #5 / #6 更 stub-heavy**（#5 / #6 至少平台級可實測；US7 幾乎全靠 stub）。
+- ⚠️ **admin 授權閘 + 模組過濾（同 #5 / #6 SA Q，開發前釐清）**：模組過濾依 T017 `is_module_admin`（fail-closed stub）；沿用 US4 / US5 裁示（暫行僅 `get_jwt_payload` 認證、admin 閘待 T049）或掛 `require_module_admin` + stub 驗；待 `/sti-plan` 對齊一致策略。
+- **DP 為轉接、非權威**：DP MUST NOT 自持指派資料 / 全域 RBAC / 角色能力定義；僅呼叫模組 service + 呈現模組錯誤。自我保護、至少-1-管理者、標籤值合法性**判定皆在模組**（contracts §3），DP 不重複實作。
+- **稽核由模組側寫**（FR-07、contracts §3）：指派異動之 `DP_AUDIT_LOG` 由**模組**於同交易呼叫 `SRVDP003`（事件歸屬各自 MODULE），DP 端不重複寫；stub 期以 stub 內呼叫驗證或標記待回歸。
+- **標籤 / 可見對象值來源**：讀 `DP_PARAM` 啟用中項（`SRVDP001`）；本頁只做「誰配誰」指派，清單定義維護在 US5（dp-params）。
+- **角色 enum**：ET＝ADMIN / TEACHER / STUDENT；DM＝ADMIN / EDITOR / REVIEWER / VIEWER（固定，畫面無新增角色）。
+- **Error codes**（實作 / `/sti-plan` 對齊 `sti-error-codes`）：新增 `DP_ROLE_*`（越權 403）；自我保護 ROLES-001 為**模組 raise 之 `AppError` 透傳**（DP 呈現）；ROLES-002 成功、非 error。
+- **ET 學員預設角色非本頁**：於帳號建立當下授予（US2 / US4 `module_provisioning`）；本頁開通「學員以外」所有角色。
+- 目錄 `app/dp/roles`（轉接）；資料在模組表，DP 不建角色 / 指派表（定義 vs 關聯分層）。
+
+### 相關文件
+
+- [spec_us7.md](spec_us7.md)、[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）、[tasks.md](tasks.md) Phase 9（T035~T036）
+- [contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）§3（get / assign roles）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §權限管理；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP010
+- 模組端：ET / DM 之角色管理規格（跨模組）
+
+**Labels**：`P1-核心`, `DP-平台`, `US7`
+
+---
+
+## Issue #8 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #7，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -542,3 +619,5 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 | 2026-07-16 | Issue #1（US6）實作完成並合併（PR #29 squash），總覽表狀態更新；依增量模式補入 Issue #2（US1 登入 / 登出與模組入口頁）完整 body |
 | 2026-07-22 | Issue #5（US4 使用者管理）已開立為 GitHub [#61](https://github.com/sti-fhb/EDMS/issues/61) 並完成開發合併（PR #63 / #64）；依增量模式補入 Issue #6（系統參數與清單維護 / US5）完整 body（T033~T034；讀取服務 SRVDP001 已於 Foundation 就緒，本 issue 補維護 UI + 寫入端點；模組過濾 admin 授權閘同 #5 列為開工前釐清；CRUD toolkit 沿用 #5、不再 bootstrap）|
 | 2026-07-23 | US5 交付前自檢（`/sti-sa-precheck`）補缺口：spec_us5 新增「參數型別 / 值域驗證規則」章節（FR-03 落地，平台級逐項對照表 + 跨欄位一致性 + code-registry 宣告）；wireframe `dp-params` 補平台級警告（PARAMS-005）、`IS_ACTIVE`→`IS_ENABLED`；spec.md 稽核前後值 `JSONB`→`TEXT`（對齊 research §6）；Issue #6 body 對齊（分區→三頁籤、VALUE 多鍵參數組澄清）。Issue #6 已開立為 GitHub [#68](https://github.com/sti-fhb/EDMS/issues/68)，回填總覽表 |
+| 2026-07-27 | Issue #6（US5 系統參數與清單維護）完成開發並**合併（PR [#73](https://github.com/sti-fhb/EDMS/pull/73)）**、close（#68）；實作期對齊 TBMS（`DP_PARAM_D` 補 `PARAM_NAME`/`DESCRIPTION` 自描述、刪前端硬編碼；ACTION_TYPE 系統 enum 不納維護；`VERIFY_SEND_COOLDOWN_SEC` 納入維護），詳見 spec_us5 §參數型別 / 值域驗證規則。總覽表 #6 狀態更新為已合併 |
+| 2026-07-27 | 依增量模式補入 Issue #7（權限管理 / US7 / dp-roles）完整 body（T035~T036）：DP 為**轉接層**（畫面在 DP、資料與判定在模組），全程對 ET/DM `get_user_roles_*` / `assign_roles_*` stub 驗接線，自我保護 / 標籤值檢核 / 稽核皆在模組（contracts §3）；標籤清單讀 DP_PARAM（US5）；admin 授權閘同 #5/#6 列為開工前釐清；完整驗收待 T049 |
