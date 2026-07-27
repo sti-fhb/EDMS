@@ -28,7 +28,7 @@
 - **FR-DP-US7-03**: 指派結果 MUST 透過模組 service 寫入模組表（`ET_USER_ROLE` / `DM_USER_ROLE` / `ET_USER_TAG` / DM 可見對象授權）；平台 MUST NOT 自持指派資料、MUST NOT 做全域 RBAC、MUST NOT 定義角色能力（判定與 enforce 在模組）
 - **FR-DP-US7-04**: 角色種類 MUST 為固定 enum（無新增角色種類）；同一使用者可多角色、權限取聯集；勾選 / 取消 MUST 即時生效
 - **FR-DP-US7-05**: 標籤 / 可見對象之可選清單 MUST 讀自 `DP_PARAM` 定義（僅列啟用中項，US5）；本頁只做「指派（誰配誰）」
-- **FR-DP-US7-06**: 「取消自己之管理者角色」之阻擋（自我保護）與「不檢核至少 1 名管理者」由**模組 service** 判定（比照 ET FR-ET-US1-04/05、DM FR-006）；DP 畫面 MUST 呈現模組回傳之阻擋訊息
+- **FR-DP-US7-06**: 「取消自己之管理者角色」之阻擋（自我保護）與「不檢核至少 1 名管理者」由**模組 service** 判定（比照 ET FR-ET-US1-04/05、DM FR-006）；模組 raise 自我保護 `AppError`（約定 error_code），**DP 統一映射為 `DP-MSG-ROLES-001` 呈現**（非逐字透傳模組訊息，確保平台訊息一致）
 - **FR-DP-US7-07**: 角色 / 標籤指派異動屬資安事件，MUST 寫入 `DP_AUDIT_LOG`（含異動前後值）
 
 ## 系統訊息

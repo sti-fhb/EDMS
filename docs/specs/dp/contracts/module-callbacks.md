@@ -29,16 +29,35 @@ def grant_default_student_role(user_id: str) -> None
 
 ```python
 # ET 提供
-def get_user_roles_tags(user_id: str) -> EtRoleTagView          # 現況（供畫面載入）
-def assign_roles_tags(user_id, roles: set[str], tags: set[str], operator_id) -> None
+def get_users_roles_tags(user_ids: list[str]) -> dict[str, EtRoleTagView]   # 批次載入一頁使用者之現況（避免逐列 N+1）
+def assign_roles_tags(user_id: str, roles: set[str], tags: set[str], operator_id: str) -> None
 
 # DM 提供
-def get_user_roles_audiences(user_id: str) -> DmRoleAudienceView
-def assign_roles_audiences(user_id, roles: set[str], audiences: set[str], operator_id) -> None
+def get_users_roles_audiences(user_ids: list[str]) -> dict[str, DmRoleAudienceView]
+def assign_roles_audiences(user_id: str, roles: set[str], audiences: set[str], operator_id: str) -> None
 ```
 
+### 回傳型別（現況載入用）
+
+```python
+class EtRoleTagView:
+    roles: set[str]                     # 現有 ET 角色；子集 {ADMIN, TEACHER, STUDENT}
+    tags: set[str]                      # 現有受訓單位標籤：DP_PARAM `ET_` 前綴清單之 PARAM_KEY 集合
+    last_modified_by: str | None        # 最後異動者 USER_ID（來源模組表 UPDATED_USER）
+    last_modified_date: datetime | None # 最後異動時間（UPDATED_DATE）
+
+class DmRoleAudienceView:
+    roles: set[str]                     # 子集 {ADMIN, EDITOR, REVIEWER, VIEWER}
+    audiences: set[str]                 # 現有可見對象 / 單位：DP_PARAM `DM_` 前綴清單之 PARAM_KEY 集合
+    last_modified_by: str | None
+    last_modified_date: datetime | None
+```
+
+- **批次讀取（決策 3=B）**：一次回一頁使用者之現況，key＝`user_id`；查無指派者回**空集合之 View**（非缺 key）。避免清單頁逐列 N+1。`assign_*` 仍為單筆（一次改一位）。
+- **標籤 / 可見對象回「代碼」而非名稱（決策 1=A）**：View 之 `tags` / `audiences` 為 `DP_PARAM` 之 **PARAM_KEY 集合**；**中文顯示名由 DP 讀 `DP_PARAM`（SRVDP001, US5 之 `PARAM_NAME`）對應**——名稱權威在 DP_PARAM、模組不重複回名稱、不會不同步。
+- **最後異動欄（決策 2=A）**：View 帶 `last_modified_by` / `last_modified_date`（來源模組表 `UPDATED_*`），供 dp-roles 表格「最後異動」欄呈現。
 - 角色種類為固定 enum（ET：ADMIN / TEACHER / STUDENT；DM：ADMIN / EDITOR / REVIEWER / VIEWER）
-- **自我保護判定在模組**：operator 取消自己之管理者角色 → 模組 raise `AppError`（DP 呈現 DP-MSG-ROLES-001）；不檢核「至少 1 名管理者」
+- **自我保護判定在模組**：operator 取消自己之管理者角色 → 模組 raise `AppError`（error_code 由各模組於其 contracts 定案，如 SRVET / SRVDM 之自我保護碼）；**DP 端統一映射為 `DP-MSG-ROLES-001` 呈現**（非逐字透傳模組訊息，見 spec_us7 FR-06）。不檢核「至少 1 名管理者」。
 - 標籤 / 可見對象值 MUST 屬 `DP_PARAM` 啟用中清單項（模組寫入前檢核）
 - 指派異動由**模組**於同交易內呼叫 SRVDP003 寫稽核（事件歸屬各自 MODULE）
 
@@ -68,3 +87,4 @@ async def run() -> None      # SCHET001 / SCHET002 / SCHDM001；SCHDP001 由 DP 
 | 日期 | 異動 |
 |------|------|
 | 2026-07-09 | 首版；SRVET / SRVDM 正式編碼待各模組 contracts 定案回填 |
+| 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補 §3：定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位（roles / tags｜audiences 之 PARAM_KEY 集合 + last_modified_*）；讀取改**批次** `get_users_roles_*(user_ids)`（避免 N+1，決策 3=B）；標籤回代碼、名稱由 DP 讀 DP_PARAM 對應（決策 1=A）；自我保護錯誤由 DP 統一映射為 DP-MSG-ROLES-001（同步 spec_us7 FR-06）|

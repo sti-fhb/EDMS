@@ -520,13 +520,13 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 
 ## Issue #7：[P1-核心] DP — 權限管理（dp-roles）
 
-**對應規格**：[spec_us7.md](spec_us7.md)（US7 / UCDP010，FR-DP-US7-01~07、DP-MSG-ROLES-001~003）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §3（`get_user_roles_tags` / `assign_roles_tags`；`get_user_roles_audiences` / `assign_roles_audiences`）；[research.md](research.md) §4（角色即時由模組判定，JWT 不含角色）；[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-roles`）
+**對應規格**：[spec_us7.md](spec_us7.md)（US7 / UCDP010，FR-DP-US7-01~07、DP-MSG-ROLES-001~003）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §3（`get_users_roles_tags` / `assign_roles_tags`；`get_users_roles_audiences` / `assign_roles_audiences`）；[research.md](research.md) §4（角色即時由模組判定，JWT 不含角色）；[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-roles`）
 **階段**：P1-核心（ET 學員以外**所有**角色〔ET 教師 / 管理者、DM 四角色〕之唯一開通路徑；「畫面在 DP、資料與判定在模組」2026-07-08 決策）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：模組管理者判定閘 `module_admin_gate`（T017）、`SRVDP001`（讀 `DP_PARAM` 標籤清單）、`SRVDP003` 稽核、認證 / `get_operator`
 - Issue #2（GitHub [#31](https://github.com/sti-fhb/EDMS/issues/31)）已合併：登入 + 後台 layout；`dp-roles` sidebar 連結（現為 `StubPage`）
 - Issue #6（GitHub [#68](https://github.com/sti-fhb/EDMS/issues/68)）已合併：`DP_PARAM` 標籤 / 可見對象清單之維護與唯讀查詢（US7 讀啟用中項）；前後端 CRUD toolkit
-- **跨模組（stub 先行）**：ET `get_user_roles_tags` / `assign_roles_tags`、DM `get_user_roles_audiences` / `assign_roles_audiences`、`is_module_admin`（[module-callbacks](contracts/module-callbacks.md) §1 / §3）——ET / DM 未實作，以 stub 註冊、模組實作跟進後於 T049 回歸
+- **跨模組（stub 先行）**：ET `get_users_roles_tags` / `assign_roles_tags`、DM `get_users_roles_audiences` / `assign_roles_audiences`、`is_module_admin`（[module-callbacks](contracts/module-callbacks.md) §1 / §3）——ET / DM 未實作，以 stub 註冊、模組實作跟進後於 T049 回歸
 
 ### 任務說明
 
@@ -538,7 +538,7 @@ DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 �
 
 **後端**（`app/dp/roles/` — 轉接層，不建角色 / 指派表）：
 - **T035 權限管理轉接端點**：
-  - 查使用者 + 現況：`GET`（呼叫模組 `get_user_roles_tags` / `get_user_roles_audiences`，經模組角色 service 閘 / stub）
+  - 查使用者 + 現況：`GET`（呼叫模組 `get_users_roles_tags` / `get_users_roles_audiences`，經模組角色 service 閘 / stub）
   - 儲存：`PUT`（呼叫模組 `assign_roles_tags` / `assign_roles_audiences`；模組 `AppError` 透傳為 ROLES-001〔自我保護〕）
   - 模組過濾 enforce（T017 `is_module_admin`）：越權 403＝ROLES-003
   - 標籤 / 可見對象可選清單讀 `DP_PARAM` 啟用中項（`SRVDP001`，T012）
@@ -570,7 +570,7 @@ DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 �
 - **Issue #0（GitHub #16）**：`module_admin_gate`（T017）、`SRVDP001`、`SRVDP003`、認證 / `get_operator`
 - **Issue #2（GitHub #31）**：登入 + 後台 layout；`dp-roles` sidebar 連結
 - **Issue #6（GitHub #68）**：`DP_PARAM` 標籤 / 可見對象清單（US7 讀啟用中項）；前後端 CRUD toolkit
-- **跨模組（stub 先行）**：ET / DM `get_user_roles_*` / `assign_roles_*` / `is_module_admin`（module-callbacks §1 / §3）——完整驗收待模組 service 就緒於 T049 回歸
+- **跨模組（stub 先行）**：ET / DM `get_users_roles_*` / `assign_roles_*` / `is_module_admin`（module-callbacks §1 / §3）——完整驗收待模組 service 就緒於 T049 回歸
 
 ### 注意事項
 
@@ -578,7 +578,8 @@ DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 �
 - ⚠️ **admin 授權閘 + 模組過濾（同 #5 / #6 SA Q，開發前釐清）**：模組過濾依 T017 `is_module_admin`（fail-closed stub）；沿用 US4 / US5 裁示（暫行僅 `get_jwt_payload` 認證、admin 閘待 T049）或掛 `require_module_admin` + stub 驗；待 `/sti-plan` 對齊一致策略。
 - **DP 為轉接、非權威**：DP MUST NOT 自持指派資料 / 全域 RBAC / 角色能力定義；僅呼叫模組 service + 呈現模組錯誤。自我保護、至少-1-管理者、標籤值合法性**判定皆在模組**（contracts §3），DP 不重複實作。
 - **稽核由模組側寫**（FR-07、contracts §3）：指派異動之 `DP_AUDIT_LOG` 由**模組**於同交易呼叫 `SRVDP003`（事件歸屬各自 MODULE），DP 端不重複寫；stub 期以 stub 內呼叫驗證或標記待回歸。
-- **標籤 / 可見對象值來源**：讀 `DP_PARAM` 啟用中項（`SRVDP001`）；本頁只做「誰配誰」指派，清單定義維護在 US5（dp-params）。
+- **標籤 / 可見對象值來源**：讀 `DP_PARAM` 啟用中項（`SRVDP001`）；本頁只做「誰配誰」指派，清單定義維護在 US5（dp-params）。⚠️ 選項清單（`ET_` / `DM_` 前綴，如 `ET_TRAINING_UNIT` / `DM_AUDIENCE`）**由 ET / DM 模組 migration seed 或管理者於 US5 手動建**——**DP-only 開發期這些 row 不存在、標籤下拉會是空的**；stub 期可先於 `DP_PARAM` 手動建幾筆 `ET_` / `DM_` 假清單驗證下拉綁定。
+- **模組讀取為批次 + View 形狀**：`get_users_roles_*(user_ids)` 一次回一頁使用者現況（避免 N+1）；`EtRoleTagView` / `DmRoleAudienceView` 帶 `roles` / `tags`（或 `audiences`）之 PARAM_KEY 集合 + `last_modified_by/date`；標籤中文名由 DP 讀 `DP_PARAM` 對應（見 [contracts/module-callbacks.md](contracts/module-callbacks.md) §3）。
 - **角色 enum**：ET＝ADMIN / TEACHER / STUDENT；DM＝ADMIN / EDITOR / REVIEWER / VIEWER（固定，畫面無新增角色）。
 - **Error codes**（實作 / `/sti-plan` 對齊 `sti-error-codes`）：新增 `DP_ROLE_*`（越權 403）；自我保護 ROLES-001 為**模組 raise 之 `AppError` 透傳**（DP 呈現）；ROLES-002 成功、非 error。
 - **ET 學員預設角色非本頁**：於帳號建立當下授予（US2 / US4 `module_provisioning`）；本頁開通「學員以外」所有角色。
