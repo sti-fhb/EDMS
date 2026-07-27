@@ -19,6 +19,7 @@ pytestmark = pytest.mark.unit
         ("PWD_POLICY", "MIN_LEN", "8"),  # 僅下限
         ("PWD_POLICY", "CHAR_TYPES", "4"),
         ("MAIL", "RETRY_MAX", "0"),  # 非負下限
+        ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "600"),  # 冷卻秒數（60–3600）
     ],
 )
 def test_valid_values_pass(param_id, param_key, value):
@@ -36,6 +37,8 @@ def test_valid_values_pass(param_id, param_key, value):
         ("JWT", "ACCESS_TTL_MIN", "abc"),  # 非整數
         ("JWT", "ACCESS_TTL_MIN", "15.5"),  # 浮點
         ("MAIL", "RETRY_MAX", "-1"),  # 負數
+        ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "59"),  # 低於 60
+        ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "3601"),  # 超過 3600
     ],
 )
 def test_invalid_values_raise(param_id, param_key, value):

@@ -35,6 +35,7 @@ _RULES: dict[tuple[str, str], IntRule] = {
     ("LOGIN", "RESET_TOKEN_TTL_MIN"): IntRule(1),
     ("LOGIN", "EMAIL_CHANGE_TTL_MIN"): IntRule(1),
     ("LOGIN", "IDLE_DISABLE_DAYS"): IntRule(1),
+    ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC"): IntRule(60, 3600),
     ("MAIL", "RATE_PER_MIN"): IntRule(1),
     ("MAIL", "RETRY_MAX"): IntRule(0, 10),
     ("MAIL", "RETRY_INTERVAL_MIN"): IntRule(1),

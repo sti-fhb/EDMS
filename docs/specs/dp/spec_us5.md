@@ -52,6 +52,7 @@
 | `LOGIN` | `RESET_TOKEN_TTL_MIN` | 密碼重設連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
 | `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
 | `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| ≥ 1（預設 90）| spec 明載 |
+| `LOGIN` | `VERIFY_SEND_COOLDOWN_SEC` | 驗證信重寄冷卻（秒） | 正整數（秒）| 60–3600（預設 600）| #74 / #76 |
 | `MAIL` | `RATE_PER_MIN` | 每分鐘寄信上限（封） | 正整數 | ≥ 1（預設 60）| 建議 |
 | `MAIL` | `RETRY_MAX` | 寄信重試上限次數 | 非負整數 | 0–10（預設 5）| 建議 |
 | `MAIL` | `RETRY_INTERVAL_MIN` | 寄信重試間隔（分鐘） | 正整數（分）| ≥ 1（預設 2）| 建議 |
