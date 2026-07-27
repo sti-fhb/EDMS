@@ -30,21 +30,39 @@ class UserResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    """管理者代建帳號請求（US4 FR-03）。初始密碼複雜度 / Email 唯一由服務層權威檢核。"""
+    """管理者建立帳號請求（US4 FR-03，#67 改邀請流程）。
+
+    管理者**不設密碼**——僅填 Email / 姓名，系統寄邀請信、使用者自設密碼後啟用。
+    Email 唯一由服務層權威檢核。
+    """
 
     email: _EmailStr
     user_name: _NameStr
-    password: str
 
 
 class UserUpdate(BaseModel):
-    """管理者維護基本資料請求（US4 FR-06）。姓名 / Email 直接生效（不走驗證信）。"""
+    """管理者維護基本資料請求（US4 FR-12，#67）。僅可改**姓名**；Email 為登入帳號、唯讀不可代改。"""
 
     user_name: _NameStr
-    email: _EmailStr
 
 
 class UserStatusUpdate(BaseModel):
     """停用 / 啟用請求（US4 FR-04）。action 由 schema 收斂，非法值於 422 擋下。"""
 
     action: Literal["disable", "enable"]
+
+
+class InviteResponse(BaseModel):
+    """待啟用邀請清單回應（US4 #67，ADMIN_INVITE）。
+
+    來源為 `DP_PENDING_REGISTRATION`（尚無 USER_ID，以 `res_id` 為對外識別碼）。
+    「邀請狀態」（有效中 / 已逾期）由前端以 `expires_date` vs now 衍生（同 UserResponse.locked_until）。
+    """
+
+    model_config = {"from_attributes": True}
+
+    res_id: Optional[str]
+    email: str
+    user_name: str
+    created_date: Optional[datetime]
+    expires_date: datetime

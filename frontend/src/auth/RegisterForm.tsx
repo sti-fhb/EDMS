@@ -8,6 +8,7 @@ import type { FormEvent } from "react"
 
 import { authApi } from "./authService"
 import { RegisterRequestSchema } from "./schemas/registerSchema"
+import { useCooldown, formatCountdown } from "../hooks/useCooldown"
 import { toApiError } from "../services/http"
 import { getFieldErrors } from "../utils/zodUtils"
 
@@ -27,6 +28,11 @@ export function RegisterForm() {
   // 註冊成功後記住 Email，切換為「驗證信已寄」狀態（可重寄）
   const [sentEmail, setSentEmail] = useState<string | null>(null)
   const [resendNote, setResendNote] = useState<string | null>(null)
+  // 驗證信寄送冷卻（#74）：register 成功 / 重寄成功皆起算；冷卻中（429）依 retry_after 起算。
+  // 冷卻綁定起算時的 Email——換 Email 後合法操作不被前一個 Email 的冷卻誤擋。
+  const cooldown = useCooldown()
+  const submitCoolingDown = cooldown.active && cooldown.key === email
+  const resendCoolingDown = cooldown.active && cooldown.key === sentEmail
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -38,23 +44,30 @@ export function RegisterForm() {
 
     setSubmitting(true)
     try {
-      await authApi.register(parsed.data)
+      const retryAfter = await authApi.register(parsed.data)
       setSentEmail(email)
+      if (retryAfter) cooldown.start(retryAfter, email)
     } catch (err) {
-      setApiError(toApiError(err).errorMessage)
+      const apiError = toApiError(err)
+      setApiError(apiError.errorMessage)
+      // 冷卻中重複註冊（429）→ 起算倒數（綁定此 Email）並暫時 disable 送出
+      if (apiError.retryAfter) cooldown.start(apiError.retryAfter, email)
     } finally {
       setSubmitting(false)
     }
   }
 
   const handleResend = async () => {
-    if (sentEmail === null) return
+    if (sentEmail === null || resendCoolingDown) return
     setResendNote(null)
     try {
-      await authApi.resendVerification(sentEmail)
+      const retryAfter = await authApi.resendVerification(sentEmail)
       setResendNote("已重新寄出驗證信，請至信箱查收")
+      if (retryAfter) cooldown.start(retryAfter, sentEmail)
     } catch (err) {
-      setResendNote(toApiError(err).errorMessage)
+      const apiError = toApiError(err)
+      setResendNote(apiError.errorMessage)
+      if (apiError.retryAfter) cooldown.start(apiError.retryAfter, sentEmail)
     }
   }
 
@@ -68,8 +81,8 @@ export function RegisterForm() {
         <Typography variant="body2" color="text.secondary">
           沒收到信？請檢查垃圾郵件匣，或重新寄送。
         </Typography>
-        <Button variant="outlined" onClick={handleResend}>
-          重寄驗證信
+        <Button variant="outlined" onClick={handleResend} disabled={resendCoolingDown}>
+          {resendCoolingDown ? `重寄驗證信（${formatCountdown(cooldown.remaining)} 後）` : "重寄驗證信"}
         </Button>
       </Stack>
     )
@@ -121,8 +134,8 @@ export function RegisterForm() {
           fullWidth
           autoComplete="new-password"
         />
-        <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
-          建立帳號
+        <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting || submitCoolingDown}>
+          {submitCoolingDown ? `建立帳號（${formatCountdown(cooldown.remaining)} 後）` : "建立帳號"}
         </Button>
         <Typography variant="caption" color="text.secondary">
           註冊後需完成 Email 驗證才能登入；驗證後自動取得 ET 學員預設角色，其他角色由管理者於權限管理開通。

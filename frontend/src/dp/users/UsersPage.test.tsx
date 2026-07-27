@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -12,28 +12,27 @@ describe("UsersPage 使用者操作流程", () => {
     renderWithProviders(<UsersPage />)
 
     expect(await screen.findByText("陳大華")).toBeInTheDocument()
-    // 三態 chip
     expect(screen.getByText("啟用中")).toBeInTheDocument()
     expect(screen.getByText("已鎖定")).toBeInTheDocument()
     expect(screen.getByText("已停用")).toBeInTheDocument()
-    // 依狀態的操作鈕
     expect(screen.getByRole("button", { name: "停用" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "解鎖" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "啟用" })).toBeInTheDocument()
   })
 
-  it("建立帳號：填表送出後顯示成功訊息", async () => {
+  it("建立帳號＝寄邀請：填 Email/姓名（無密碼欄）送出後顯示邀請已寄", async () => {
     const user = userEvent.setup()
     renderWithProviders(<UsersPage />)
     await screen.findByText("陳大華")
 
     await user.click(screen.getByRole("button", { name: /建立帳號/ }))
+    // 建立表單無「初始密碼」欄位（#67）
+    expect(screen.queryByLabelText(/密碼/)).not.toBeInTheDocument()
     await user.type(screen.getByLabelText("帳號（Email）"), "new@edms.local")
     await user.type(screen.getByLabelText("姓名"), "新人")
-    await user.type(screen.getByLabelText(/初始密碼/), "Abcd1234")
-    await user.click(screen.getByRole("button", { name: "建立" }))
+    await user.click(screen.getByRole("button", { name: "寄送邀請" }))
 
-    expect(await screen.findByText(/帳號已建立/)).toBeInTheDocument()
+    expect(await screen.findByText(/邀請信已寄出/)).toBeInTheDocument()
   })
 
   it("建立帳號：Email 格式錯誤時顯示欄位錯誤、不送出", async () => {
@@ -44,64 +43,9 @@ describe("UsersPage 使用者操作流程", () => {
     await user.click(screen.getByRole("button", { name: /建立帳號/ }))
     await user.type(screen.getByLabelText("帳號（Email）"), "bad-email")
     await user.type(screen.getByLabelText("姓名"), "新人")
-    await user.type(screen.getByLabelText(/初始密碼/), "Abcd1234")
-    await user.click(screen.getByRole("button", { name: "建立" }))
+    await user.click(screen.getByRole("button", { name: "寄送邀請" }))
 
     expect(await screen.findByText("Email 格式不正確")).toBeInTheDocument()
-  })
-
-  it("停用：二次確認後送出並提示成功", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<UsersPage />)
-    await screen.findByText("陳大華")
-
-    await user.click(screen.getByRole("button", { name: "停用" }))
-    // 確認對話框（USERS-002）
-    const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText(/兩端將同步失效/)).toBeInTheDocument()
-    await user.click(within(dialog).getByRole("button", { name: "確定停用" }))
-
-    expect(await screen.findByText("帳號已停用")).toBeInTheDocument()
-  })
-
-  it("解鎖：對已鎖定帳號送出並提示成功", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<UsersPage />)
-    await screen.findByText("林小美")
-
-    await user.click(screen.getByRole("button", { name: "解鎖" }))
-
-    expect(await screen.findByText("帳號已解鎖")).toBeInTheDocument()
-  })
-
-  it("啟用：對已停用帳號送出並提示成功", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<UsersPage />)
-    await screen.findByText("張志豪")
-
-    await user.click(screen.getByRole("button", { name: "啟用" }))
-
-    expect(await screen.findByText("帳號已啟用")).toBeInTheDocument()
-  })
-
-  it("編輯：開啟表單預填、修改後送出提示成功", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<UsersPage />)
-    await screen.findByText("陳大華")
-
-    // 點第一列（啟用中）的編輯
-    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
-    // 表單預填現有 Email
-    const emailInput = await screen.findByLabelText("帳號（Email）")
-    expect(emailInput).toHaveValue("active@edms.local")
-    // 編輯不顯示初始密碼欄位
-    expect(screen.queryByLabelText(/初始密碼/)).not.toBeInTheDocument()
-
-    await user.clear(screen.getByLabelText("姓名"))
-    await user.type(screen.getByLabelText("姓名"), "陳大華改")
-    await user.click(screen.getByRole("button", { name: "儲存" }))
-
-    expect(await screen.findByText(/已更新帳號基本資料/)).toBeInTheDocument()
   })
 
   it("Email 重複時顯示後端錯誤訊息", async () => {
@@ -117,9 +61,123 @@ describe("UsersPage 使用者操作流程", () => {
     await user.click(screen.getByRole("button", { name: /建立帳號/ }))
     await user.type(screen.getByLabelText("帳號（Email）"), "dup@edms.local")
     await user.type(screen.getByLabelText("姓名"), "重複")
-    await user.type(screen.getByLabelText(/初始密碼/), "Abcd1234")
-    await user.click(screen.getByRole("button", { name: "建立" }))
+    await user.click(screen.getByRole("button", { name: "寄送邀請" }))
 
     expect(await screen.findByText("此 Email 已被使用")).toBeInTheDocument()
+  })
+
+  it("停用：二次確認後送出並提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/兩端將同步失效/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "確定停用" }))
+
+    expect(await screen.findByText("帳號已停用")).toBeInTheDocument()
+  })
+
+  it("解鎖：對已鎖定帳號送出並提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("林小美")
+
+    await user.click(screen.getByRole("button", { name: "解鎖" }))
+    expect(await screen.findByText("帳號已解鎖")).toBeInTheDocument()
+  })
+
+  it("啟用：對已停用帳號送出並提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("張志豪")
+
+    await user.click(screen.getByRole("button", { name: "啟用" }))
+    expect(await screen.findByText("帳號已啟用")).toBeInTheDocument()
+  })
+
+  it("編輯：Email 唯讀不可改、無密碼欄，改姓名後提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    const emailInput = await screen.findByLabelText("帳號（Email）")
+    expect(emailInput).toHaveValue("active@edms.local")
+    expect(emailInput).toBeDisabled() // Email 唯讀（#67）
+    expect(screen.queryByLabelText(/密碼/)).not.toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText("姓名"))
+    await user.type(screen.getByLabelText("姓名"), "陳大華改")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(await screen.findByText(/已更新姓名/)).toBeInTheDocument()
+  })
+
+  it("編輯中直接點另一列的編輯 → 表單切換到新帳號（不停留舊的）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    // 先編輯第一列（陳大華 active@edms.local）
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    expect(await screen.findByLabelText("帳號（Email）")).toHaveValue("active@edms.local")
+
+    // 不按取消，直接點第三列（張志豪 disabled@edms.local）的編輯 → 表單應切換
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[2])
+    await waitFor(() => expect(screen.getByLabelText("帳號（Email）")).toHaveValue("disabled@edms.local"))
+  })
+
+  it("編輯中點查詢 → 表單收起", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    expect(await screen.findByLabelText("帳號（Email）")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+    await waitFor(() => expect(screen.queryByLabelText("帳號（Email）")).not.toBeInTheDocument())
+  })
+
+  // ---- 待啟用邀請頁籤（#67）----
+
+  it("切到待啟用邀請頁籤：顯示邀請列與有效中 / 已逾期狀態", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getByRole("tab", { name: /待啟用邀請/ }))
+
+    expect(await screen.findByText("周雅婷")).toBeInTheDocument()
+    expect(screen.getByText("李國豪")).toBeInTheDocument()
+    expect(screen.getByText("有效中")).toBeInTheDocument()
+    expect(screen.getByText("已逾期")).toBeInTheDocument()
+  })
+
+  it("待啟用邀請：重寄邀請提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+    await user.click(screen.getByRole("tab", { name: /待啟用邀請/ }))
+    await screen.findByText("周雅婷")
+
+    await user.click(screen.getAllByRole("button", { name: "重寄邀請" })[0])
+    expect(await screen.findByText("邀請信已重寄")).toBeInTheDocument()
+  })
+
+  it("待啟用邀請：取消邀請二次確認後提示成功", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+    await user.click(screen.getByRole("tab", { name: /待啟用邀請/ }))
+    await screen.findByText("周雅婷")
+
+    await user.click(screen.getAllByRole("button", { name: "取消邀請" })[0])
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "確定取消" }))
+
+    expect(await screen.findByText("已取消邀請")).toBeInTheDocument()
   })
 })

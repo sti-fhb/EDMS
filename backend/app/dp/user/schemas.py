@@ -52,6 +52,17 @@ class VerifyEmailRequest(BaseModel):
     token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
+class ActivateAccountRequest(BaseModel):
+    """帳號啟用請求（US4 #67 管理者邀請）。token 為邀請信連結明文；使用者於啟用頁自設密碼。
+
+    密碼複雜度 / 兩次一致 / token 有效性（僅 ADMIN_INVITE）由服務層權威檢核。
+    """
+
+    token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    new_password: str
+    confirm_password: str
+
+
 class ResendVerificationRequest(BaseModel):
     """重寄註冊驗證信請求（US2 #56）。僅需 Email；一律回相同訊息（防列舉）。格式同 RegisterRequest。"""
 

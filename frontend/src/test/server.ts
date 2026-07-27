@@ -60,20 +60,37 @@ export const handlers = [
       meta: { total: 3, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
+  // 建立帳號＝寄邀請（#67）：後端 202 + message，不回 UserRow
   http.post("/api/dp/users", () =>
-    HttpResponse.json(
-      {
-        user_id: "u-new",
-        user_name: "新人",
-        email: "new@edms.local",
-        status: "ACTIVE",
-        locked_until: null,
-        last_login_date: null,
-        created_date: "2026-07-22T00:00:00Z",
-      },
-      { status: 201 },
-    ),
+    HttpResponse.json({ message: "邀請信已寄出，使用者需經連結設定密碼後啟用" }, { status: 202 }),
   ),
+  // 待啟用邀請清單（ADMIN_INVITE）：含有效中 / 已逾期兩態供 UI 驗證
+  http.get("/api/dp/users/invites", () =>
+    HttpResponse.json({
+      data: [
+        {
+          res_id: "inv-valid",
+          user_name: "周雅婷",
+          email: "tina@edms.local",
+          created_date: "2026-07-06T10:20:00Z",
+          expires_date: "2099-01-01T00:00:00Z",
+        },
+        {
+          res_id: "inv-expired",
+          user_name: "李國豪",
+          email: "kuo@edms.local",
+          created_date: "2026-07-05T16:02:00Z",
+          expires_date: "2020-01-01T00:00:00Z",
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.post("/api/dp/users/invites/:id/resend", () =>
+    HttpResponse.json({ message: "邀請信已重寄" }, { status: 202 }),
+  ),
+  http.delete("/api/dp/users/invites/:id", () => new HttpResponse(null, { status: 204 })),
+  http.post("/api/activate-account", () => HttpResponse.json({ message: "帳號已啟用，請以新密碼登入" })),
   http.patch("/api/dp/users/:id/status", () =>
     HttpResponse.json({
       user_id: "u-active",

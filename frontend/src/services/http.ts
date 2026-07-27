@@ -43,14 +43,17 @@ export interface ApiError {
   status: number
   errorCode: string
   errorMessage: string
+  /** 限流 / 冷卻類 429 的可重試剩餘秒數（後端 body 帶回），供前端倒數；無則 undefined。 */
+  retryAfter?: number
 }
 
-/** 把 axios 例外正規化為 { status, errorCode, errorMessage }，供頁面顯示（對齊後端錯誤格式）。 */
+/** 把 axios 例外正規化為 { status, errorCode, errorMessage, retryAfter }，供頁面顯示（對齊後端錯誤格式）。 */
 export function toApiError(err: unknown): ApiError {
-  const axiosErr = err as AxiosError<{ error_code?: string; error_message?: string }>
+  const axiosErr = err as AxiosError<{ error_code?: string; error_message?: string; retry_after?: number }>
   return {
     status: axiosErr.response?.status ?? 0,
     errorCode: axiosErr.response?.data?.error_code ?? "NETWORK_ERROR",
     errorMessage: axiosErr.response?.data?.error_message ?? "系統連線異常，請稍後再試",
+    retryAfter: axiosErr.response?.data?.retry_after,
   }
 }

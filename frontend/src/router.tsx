@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom"
 
+import { ActivateAccountPage } from "./auth/ActivateAccountPage"
 import { ResetPasswordPage } from "./auth/ResetPasswordPage"
 import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { DpLayout } from "./layouts/DpLayout"
@@ -18,6 +19,8 @@ export const router = createBrowserRouter([
   { path: "reset-password", element: <ResetPasswordPage /> },
   // 註冊驗證落點頁（US2 #56）：信中連結落點，免登入，同置 RootLayout 外
   { path: "verify-email", element: <VerifyEmailPage /> },
+  // 帳號啟用落點頁（US4 #67）：管理者邀請信連結落點，免登入，同置 RootLayout 外
+  { path: "activate", element: <ActivateAccountPage /> },
   {
     element: <RootLayout />,
     children: [

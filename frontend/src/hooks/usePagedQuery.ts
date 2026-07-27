@@ -19,11 +19,17 @@ export interface PagedResult<T> {
  *
  * 禁止各頁裸用 `useQuery` 或於 `useEffect` 內呼叫 axios。
  */
-export function usePagedQuery<T>(queryKey: QueryKey, queryFn: () => Promise<PagedResult<T>>) {
+export function usePagedQuery<T>(
+  queryKey: QueryKey,
+  queryFn: () => Promise<PagedResult<T>>,
+  options?: { enabled?: boolean },
+) {
   const queryClient = useQueryClient()
-  const query = useQuery({ queryKey, queryFn })
+  const enabled = options?.enabled ?? true
+  const query = useQuery({ queryKey, queryFn, enabled })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey })
 
-  return { data: query.data, isPending: query.isPending, isError: query.isError, invalidate }
+  // enabled=false 時 useQuery 仍為 pending；以 enabled 收斂 loading，避免未啟用頁籤顯示載入中
+  return { data: query.data, isPending: enabled && query.isPending, isError: query.isError, invalidate }
 }

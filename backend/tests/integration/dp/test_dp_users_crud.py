@@ -1,6 +1,7 @@
-"""US4 使用者管理整合測試：查詢 / 代建 / 停用（自我保護）/ 啟用 / 解鎖 / 基本資料 + 稽核。
+"""US4 使用者管理整合測試（#67 邀請流程）：查詢 / 建立邀請 / 待啟用清單 / 重寄 / 取消 / 停用啟用解鎖 / 改姓名 + 稽核。
 
 多以 UsersService + 真實 DB 直測業務規則與稽核落地；另抽樣一條 HTTP 驗 router 接線與分頁回應。
+建立 / 重寄邀請注入假 NotifyService（不實際寫 outbox），只驗「有無寄、寄哪個範本」。
 """
 
 from datetime import timedelta
@@ -10,7 +11,6 @@ from sqlalchemy import func, select
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
-from app.core.module_provisioning import module_provisioning_gate
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
@@ -21,21 +21,21 @@ from app.dp.users.service import UsersService
 
 pytestmark = pytest.mark.integration
 
-_GOOD_PWD = "Abcd1234"
 _OP = OperatorInfo(user_id="admin01")
 
 
-@pytest.fixture
-def et_stub():
-    """註冊 ET grant_default_role stub，記錄被授權的 user_id。"""
-    granted: list[str] = []
+class _FakeNotify:
+    """假發信服務：記錄每次 send_email 的收件人 / 範本 / 參數，不實際寫 outbox。"""
 
-    async def _grant(_db, user_id):
-        granted.append(user_id)
+    def __init__(self):
+        self.calls: list[dict] = []
 
-    module_provisioning_gate.register("ET", _grant)
-    yield granted
-    module_provisioning_gate.unregister("ET")
+    async def send_email(self, _db, *, recipients, template_code, module, params, caller_module):
+        self.calls.append({"recipients": recipients, "template_code": template_code, "params": params})
+
+
+def _svc(notify=None) -> UsersService:
+    return UsersService(notify=notify or _FakeNotify())
 
 
 async def _make_user(db, user_id, *, email=None, status="ACTIVE", locked_until=None, name="測試員"):
@@ -64,37 +64,105 @@ async def _count_audit(db, target_id, action_type=None):
     return (await db.execute(stmt)).scalar_one()
 
 
-# ---- 代建帳號（AC2）----
+# ---- 建立邀請（AC2）----
 
 
-async def test_create_user_builds_active_must_change_grants_and_audits(db, et_stub):
-    svc = UsersService()
-    resp = await svc.create_user(
-        db, data=UserCreate(email="new@edms.local", user_name="新人", password=_GOOD_PWD), operator=_OP
-    )
+async def test_create_invite_writes_pending_no_user_sends_and_audits(db):
+    notify = _FakeNotify()
+    await _svc(notify).create_user(db, data=UserCreate(email="new@edms.local", user_name="新人"), operator=_OP)
 
-    user = (await db.execute(select(DpUser).where(DpUser.email == "new@edms.local"))).scalar_one()
-    assert user.status == "ACTIVE"
-    assert user.must_change_pwd is True  # 首次登入強制變更（FR-03）
-    assert resp.user_id == user.user_id
-    # 授 ET 學員（同 US2 規則）
-    assert user.user_id in et_stub
-    # 首筆密碼歷程
-    seq = await AuthRepository().next_pwd_seq_no(db, user.user_id)
-    assert seq == 2  # 已存在 seq=1 → 下一個為 2
-    # 雙稽核（帳號 CREATE + 角色授予）
-    assert await _count_audit(db, user.user_id, "CREATE") == 2
+    # 不建 DP_USER
+    cnt = (
+        await db.execute(select(func.count()).select_from(DpUser).where(DpUser.email == "new@edms.local"))
+    ).scalar_one()
+    assert cnt == 0
+    # 寫 pending：ADMIN_INVITE、pwd_hash 為 None、有 res_id
+    pending = await AuthRepository().get_pending_by_email(db, "new@edms.local")
+    assert pending is not None
+    assert pending.kind == "ADMIN_INVITE"
+    assert pending.pwd_hash is None
+    assert pending.res_id
+    # 寄邀請信（ACCOUNT_INVITE + activate_link）
+    assert len(notify.calls) == 1
+    assert notify.calls[0]["template_code"] == "ACCOUNT_INVITE"
+    assert "activate_link" in notify.calls[0]["params"]
+    # 稽核 CREATE（target = res_id）
+    assert await _count_audit(db, pending.res_id, "CREATE") == 1
 
 
-async def test_create_user_duplicate_email_rejected(db, et_stub):
+async def test_create_invite_duplicate_email_in_user_rejected(db):
     await _make_user(db, "u1", email="dup@edms.local")
-    svc = UsersService()
     with pytest.raises(AppError) as exc:
-        await svc.create_user(
-            db, data=UserCreate(email="dup@edms.local", user_name="重複", password=_GOOD_PWD), operator=_OP
-        )
+        await _svc().create_user(db, data=UserCreate(email="dup@edms.local", user_name="重複"), operator=_OP)
     assert exc.value.status_code == 409
     assert exc.value.error_code == "DP_USER_007"
+
+
+async def test_create_invite_duplicate_email_in_pending_rejected(db):
+    svc = _svc()
+    await svc.create_user(db, data=UserCreate(email="p@edms.local", user_name="a"), operator=_OP)
+    with pytest.raises(AppError) as exc:
+        await svc.create_user(db, data=UserCreate(email="p@edms.local", user_name="b"), operator=_OP)
+    assert exc.value.error_code == "DP_USER_007"
+
+
+# ---- 待啟用邀請清單 / 重寄 / 取消（AC10）----
+
+
+async def test_list_invites_only_admin_invite(db):
+    svc = _svc()
+    await svc.create_user(db, data=UserCreate(email="inv@edms.local", user_name="邀"), operator=_OP)
+    # 另塞一筆自助註冊 pending（SELF_REGISTER，不應出現在邀請清單）
+    await AuthRepository().create_pending_registration(
+        db,
+        token_hash="selfhash",
+        email="self@edms.local",
+        user_name="自助",
+        pwd_hash="x",
+        expires_date=utcnow() + timedelta(minutes=30),
+        now=utcnow(),
+    )
+    res = await svc.list_invites(db, keyword=None, page=1, limit=20)
+    emails = {r.email for r in res["data"]}
+    assert "inv@edms.local" in emails
+    assert "self@edms.local" not in emails
+
+
+async def test_resend_invite_rotates_token_keeps_res_id_and_resends(db):
+    notify = _FakeNotify()
+    svc = _svc(notify)
+    await svc.create_user(db, data=UserCreate(email="r@edms.local", user_name="R"), operator=_OP)
+    pending = await AuthRepository().get_pending_by_email(db, "r@edms.local")
+    old_hash, res_id = pending.token_hash, pending.res_id
+
+    await svc.resend_invite(db, res_id=res_id, operator=_OP)
+
+    new_pending = await AuthRepository().get_pending_by_email(db, "r@edms.local")
+    assert new_pending.token_hash != old_hash  # 舊 token 已作廢
+    assert new_pending.res_id == res_id  # res_id 不變（識別碼穩定）
+    assert len(notify.calls) == 2  # 建立 + 重寄各一封
+
+
+async def test_cancel_invite_deletes_pending(db):
+    svc = _svc()
+    await svc.create_user(db, data=UserCreate(email="c@edms.local", user_name="C"), operator=_OP)
+    pending = await AuthRepository().get_pending_by_email(db, "c@edms.local")
+    await svc.cancel_invite(db, res_id=pending.res_id, operator=_OP)
+    assert await AuthRepository().get_pending_by_email(db, "c@edms.local") is None
+
+
+async def test_resend_missing_invite_404(db):
+    with pytest.raises(AppError) as exc:
+        await _svc().resend_invite(db, res_id="ghost", operator=_OP)
+    assert exc.value.status_code == 404
+    assert exc.value.error_code == "DP_USER_009"
+
+
+async def test_cancel_missing_invite_404(db):
+    with pytest.raises(AppError) as exc:
+        await _svc().cancel_invite(db, res_id="ghost", operator=_OP)
+    assert exc.value.status_code == 404
+    assert exc.value.error_code == "DP_USER_009"
 
 
 # ---- 查詢（AC1）----
@@ -104,18 +172,14 @@ async def test_list_filters_by_keyword_and_status(db):
     await _make_user(db, "a1", email="alice@edms.local", name="Alice")
     await _make_user(db, "b1", email="bob@edms.local", name="Bob", status="DISABLED")
     await _make_user(db, "c1", email="carol@edms.local", name="Carol", locked_until=utcnow() + timedelta(minutes=30))
-    svc = UsersService()
+    svc = _svc()
 
-    # 關鍵字（Email 模糊）
     by_kw = await svc.list_users(db, keyword="alice", status=None, page=1, limit=20)
     assert by_kw["meta"]["total"] == 1 and by_kw["data"][0].email == "alice@edms.local"
-    # 狀態：已停用
     disabled = await svc.list_users(db, keyword=None, status="disabled", page=1, limit=20)
     assert {u.user_id for u in disabled["data"]} == {"b1"}
-    # 狀態：已鎖定（ACTIVE 且 locked_until > now）
     locked = await svc.list_users(db, keyword=None, status="locked", page=1, limit=20)
     assert {u.user_id for u in locked["data"]} == {"c1"}
-    # 狀態：啟用中（排除鎖定 / 停用）
     active = await svc.list_users(db, keyword=None, status="active", page=1, limit=20)
     assert {u.user_id for u in active["data"]} == {"a1"}
 
@@ -125,22 +189,18 @@ async def test_list_filters_by_keyword_and_status(db):
 
 async def test_disable_then_enable_with_audit(db):
     await _make_user(db, "t1")
-    svc = UsersService()
-
+    svc = _svc()
     await svc.set_status(db, user_id="t1", action="disable", operator=_OP)
     assert (await svc._repo.get_by_id(db, "t1")).status == "DISABLED"
-
     await svc.set_status(db, user_id="t1", action="enable", operator=_OP)
     assert (await svc._repo.get_by_id(db, "t1")).status == "ACTIVE"
-    # 停用 + 啟用各一筆 UPDATE 稽核
     assert await _count_audit(db, "t1", "UPDATE") == 2
 
 
 async def test_disable_self_blocked(db):
     await _make_user(db, "admin01")
-    svc = UsersService()
     with pytest.raises(AppError) as exc:
-        await svc.set_status(db, user_id="admin01", action="disable", operator=_OP)
+        await _svc().set_status(db, user_id="admin01", action="disable", operator=_OP)
     assert exc.value.status_code == 403
     assert exc.value.error_code == "DP_USER_006"
 
@@ -150,7 +210,7 @@ async def test_disable_self_blocked(db):
 
 async def test_unlock_resets_fail_count_and_locked(db):
     await _make_user(db, "lk", locked_until=utcnow() + timedelta(minutes=30))
-    svc = UsersService()
+    svc = _svc()
     await svc.unlock(db, user_id="lk", operator=_OP)
     user = await svc._repo.get_by_id(db, "lk")
     assert user.login_fail_count == 0
@@ -158,33 +218,25 @@ async def test_unlock_resets_fail_count_and_locked(db):
     assert await _count_audit(db, "lk", "UPDATE") == 1
 
 
-# ---- 基本資料（AC6）----
+# ---- 編輯：僅改姓名，Email 唯讀（AC6）----
 
 
-async def test_update_basic_direct_and_email_unique(db):
+async def test_update_only_name_email_unchanged(db):
     await _make_user(db, "e1", email="e1@edms.local", name="舊名")
-    await _make_user(db, "e2", email="e2@edms.local")
-    svc = UsersService()
-
-    # 直接更新姓名 / Email
-    await svc.update_basic(db, user_id="e1", data=UserUpdate(user_name="新名", email="e1new@edms.local"), operator=_OP)
+    svc = _svc()
+    await svc.update_basic(db, user_id="e1", data=UserUpdate(user_name="新名"), operator=_OP)
     user = await svc._repo.get_by_id(db, "e1")
-    assert user.user_name == "新名" and user.email == "e1new@edms.local"
+    assert user.user_name == "新名"
+    assert user.email == "e1@edms.local"  # Email 不因編輯而變
     assert await _count_audit(db, "e1", "UPDATE") == 1
-
-    # Email 撞他人 → 409
-    with pytest.raises(AppError) as exc:
-        await svc.update_basic(db, user_id="e1", data=UserUpdate(user_name="新名", email="e2@edms.local"), operator=_OP)
-    assert exc.value.error_code == "DP_USER_007"
 
 
 # ---- 不存在 ----
 
 
 async def test_status_on_missing_user_404(db):
-    svc = UsersService()
     with pytest.raises(AppError) as exc:
-        await svc.set_status(db, user_id="ghost", action="enable", operator=_OP)
+        await _svc().set_status(db, user_id="ghost", action="enable", operator=_OP)
     assert exc.value.status_code == 404
     assert exc.value.error_code == "DP_USER_008"
 
@@ -193,7 +245,7 @@ async def test_status_on_missing_user_404(db):
 
 
 async def test_list_users_http_paged(db, client):
-    await _make_user(db, "admin01")  # operator 本人（get_jwt_payload 查得到）
+    await _make_user(db, "admin01")
     await _make_user(db, "x1", email="x1@edms.local")
     token = create_access_token(sub="admin01", ttl_minutes=15)
 
@@ -202,5 +254,4 @@ async def test_list_users_http_paged(db, client):
     body = resp.json()
     assert "data" in body and "meta" in body
     assert body["meta"]["total"] >= 2
-    # 回應不外露密碼欄位
     assert all("pwd_hash" not in row for row in body["data"])

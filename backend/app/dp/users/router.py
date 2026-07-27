@@ -13,7 +13,7 @@ from app.core.auth import get_jwt_payload
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse
-from app.dp.users.schemas import UserCreate, UserResponse, UserStatusUpdate, UserUpdate
+from app.dp.users.schemas import InviteResponse, UserCreate, UserResponse, UserStatusUpdate, UserUpdate
 from app.dp.users.service import UsersService
 
 router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depends(get_jwt_payload)])
@@ -33,14 +33,47 @@ async def list_users(
     return await _service.list_users(db, keyword=q, status=account_status, page=page, limit=limit)
 
 
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def create_user(
     data: UserCreate,
     db: AsyncSession = Depends(get_db),
     operator: OperatorInfo = Depends(get_operator),
+) -> dict[str, str]:
+    """管理者建立帳號＝寄邀請信（#67）：寫待邀請列 + 寄 ACCOUNT_INVITE 信；不建 DP_USER。"""
+    await _service.create_user(db, data=data, operator=operator)
+    return {"message": "邀請信已寄出，使用者需經連結設定密碼後啟用"}
+
+
+@router.get("/invites", response_model=PagedResponse[InviteResponse])
+async def list_invites(
+    db: AsyncSession = Depends(get_db),
+    q: Optional[str] = Query(default=None, max_length=255),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=MAX_LIMIT),
 ):
-    """管理者代建帳號（初始密碼 + MUST_CHANGE_PWD + 授 ET 學員 + 首筆歷程 + 稽核）。"""
-    return await _service.create_user(db, data=data, operator=operator)
+    """查詢待啟用邀請清單（ADMIN_INVITE，姓名 / Email 關鍵字，後端分頁）。"""
+    return await _service.list_invites(db, keyword=q, page=page, limit=limit)
+
+
+@router.post("/invites/{res_id}/resend", status_code=status.HTTP_202_ACCEPTED)
+async def resend_invite(
+    res_id: str,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+) -> dict[str, str]:
+    """重寄邀請（作廢舊 token、產新並重寄）。"""
+    await _service.resend_invite(db, res_id=res_id, operator=operator)
+    return {"message": "邀請信已重寄"}
+
+
+@router.delete("/invites/{res_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_invite(
+    res_id: str,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+) -> None:
+    """取消邀請（刪除待邀請列）。"""
+    await _service.cancel_invite(db, res_id=res_id, operator=operator)
 
 
 @router.patch("/{user_id}/status", response_model=UserResponse)
@@ -71,5 +104,5 @@ async def update_user_basic(
     db: AsyncSession = Depends(get_db),
     operator: OperatorInfo = Depends(get_operator),
 ):
-    """維護基本資料（姓名 / Email 直接生效，不走驗證信）。"""
+    """維護基本資料（#67：僅可改姓名；Email 為登入帳號、唯讀不可代改）。"""
     return await _service.update_basic(db, user_id=user_id, data=data, operator=operator)

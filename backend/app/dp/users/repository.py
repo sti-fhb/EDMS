@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.users.models import DpUser
@@ -41,13 +41,6 @@ class UsersRepository:
         stmt = select(DpUser).where(DpUser.user_id == user_id, DpUser.deleted == 0)
         return (await db.execute(stmt)).scalar_one_or_none()
 
-    async def email_taken(self, db: AsyncSession, email: str, *, exclude_user_id: str | None = None) -> bool:
-        """該 Email 是否已被其他帳號使用（含軟刪除，對齊 EMAIL UNIQUE）；exclude 用於編輯時排除自己。"""
-        stmt = select(func.count()).select_from(DpUser).where(DpUser.email == email)
-        if exclude_user_id is not None:
-            stmt = stmt.where(DpUser.user_id != exclude_user_id)
-        return (await db.execute(stmt)).scalar_one() > 0
-
     async def set_status(self, db: AsyncSession, *, user: DpUser, status: str, operator_id: str, now: datetime) -> None:
         """更新帳號狀態（ACTIVE / DISABLED）+ 稽核欄位並 flush。"""
         user.status = status
@@ -63,12 +56,11 @@ class UsersRepository:
         user.updated_date = now
         await db.flush()
 
-    async def update_basic(
-        self, db: AsyncSession, *, user: DpUser, user_name: str, email: str, operator_id: str, now: datetime
+    async def update_name(
+        self, db: AsyncSession, *, user: DpUser, user_name: str, operator_id: str, now: datetime
     ) -> None:
-        """更新姓名 / Email（直接生效）+ 稽核欄位並 flush。"""
+        """更新姓名（#67：Email 為登入帳號、唯讀不可代改）+ 稽核欄位並 flush。"""
         user.user_name = user_name
-        user.email = email
         user.updated_user = operator_id
         user.updated_date = now
         await db.flush()
