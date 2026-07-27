@@ -7,14 +7,21 @@ import MenuItem from "@mui/material/MenuItem"
 import Toolbar from "@mui/material/Toolbar"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 
 import { useAuth } from "../auth/useAuth"
 
 /** 頂列：系統標題 + 右上個資選單（個人資料 / 登出）。title 預設為後台語意，入口頁等情境可覆寫。 */
 export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
   const { logout } = useAuth()
+  const navigate = useNavigate()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const open = Boolean(anchorEl)
+
+  const handleProfile = () => {
+    setAnchorEl(null)
+    navigate("/profile")
+  }
 
   const handleLogout = () => {
     setAnchorEl(null)
@@ -45,7 +52,7 @@ export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
             open={open}
             onClose={() => setAnchorEl(null)}
           >
-            <MenuItem onClick={() => setAnchorEl(null)}>個人資料</MenuItem>
+            <MenuItem onClick={handleProfile}>個人資料</MenuItem>
             <MenuItem onClick={handleLogout}>登出</MenuItem>
           </Menu>
         </Box>

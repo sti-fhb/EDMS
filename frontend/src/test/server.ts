@@ -25,6 +25,19 @@ export const handlers = [
   http.get("/api/dp/user/module-summary", () =>
     HttpResponse.json({ et: { has_role: true }, dm: { has_role: false } }),
   ),
+  // US8 個人資料維護（預設 happy path）
+  http.get("/api/dp/user/me", () =>
+    HttpResponse.json({ user_id: "u1", email: "me@example.com", user_name: "測試員", pending_email: null }),
+  ),
+  http.put("/api/dp/user/me", () => new HttpResponse(null, { status: 204 })),
+  http.put("/api/dp/user/me/password", () => new HttpResponse(null, { status: 204 })),
+  http.put("/api/dp/user/me/email", () =>
+    HttpResponse.json({ message: "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入" }, { status: 202 }),
+  ),
+  http.post("/api/verify-email-change", () => HttpResponse.json({ message: "Email 已變更，請以新 Email 登入" })),
+  http.get("/api/password-policy", () =>
+    HttpResponse.json({ min_len: 8, admin_min_len: 12, char_types: 3, history_count: 3, expiry_days: 90 }),
+  ),
   // US4 使用者管理（預設 happy path；含啟用中 / 已鎖定 / 已停用三態供 UI 驗證）
   http.get("/api/dp/users", () =>
     HttpResponse.json({

@@ -12,6 +12,8 @@ export interface AuthState {
   login: (email: string, password: string) => Promise<void>
   /** 登出：寫 LOGOUT 稽核（失敗仍清本地狀態）並清除 token。 */
   logout: () => Promise<void>
+  /** 清除強制變更旗標（US8：於強制變更頁完成密碼變更後呼叫，放行至一般功能）。 */
+  clearMustChangePwd: () => void
 }
 
 export const AuthContext = createContext<AuthState | undefined>(undefined)
