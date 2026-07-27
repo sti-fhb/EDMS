@@ -3,11 +3,8 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, StringConstraints
 
-# Email 格式：沿用 US1/US2 輕量 regex（不引 email-validator 依賴）
-_EmailStr = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
-]
+from app.core.schema_types import NormalizedEmailStr
+
 _NameStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
 
 
@@ -36,7 +33,7 @@ class UserCreate(BaseModel):
     Email 唯一由服務層權威檢核。
     """
 
-    email: _EmailStr
+    email: NormalizedEmailStr
     user_name: _NameStr
 
 
