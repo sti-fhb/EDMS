@@ -2,6 +2,10 @@
 
 email 正規化（#35）：一律 `strip + 轉小寫`，使查詢 / 限流 key / 冷卻 key / 儲存一致。
 格式檢核沿用既有輕量 regex，**不引 `EmailStr`**（避免 email-validator 依賴，見 US1 決策 / #35）。
+
+前提：email 視為 **ASCII**（EDMS 實務情境）。`to_lower` 底層為 Python `str.lower()`，對少數
+Unicode 特殊字元（如土耳其文 `İ`）之小寫規則可能與 Postgres `lower()`（見既有資料 migration）
+不完全一致；純 ASCII email 無此問題，屬已知取捨。
 """
 
 from typing import Annotated

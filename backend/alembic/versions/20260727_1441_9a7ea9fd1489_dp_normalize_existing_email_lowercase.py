@@ -11,6 +11,12 @@ Create Date: 2026-07-27 14:41:21.919339
 - 將既有 EMAIL 轉小寫，使正規化後（一律小寫）查詢仍命中舊帳號
 - 轉換前先偵測「僅大小寫不同」之碰撞列（lower 後會撞 EMAIL UNIQUE）；有碰撞則中止並列出，交人工處理
 - downgrade 不可逆（無法還原原始大小寫），不實作
+
+已知限制（code review MEDIUM）：碰撞偵測僅查**單表內**。若 DP_USER 與 DP_PENDING_REGISTRATION
+存在跨表大小寫變體（如 ACTIVE `foo@x.com` + pending `Foo@x.com`），本 migration 不會中止（各表
+UNIQUE 獨立、未違反）；該 pending 日後啟用時會於 activate_pending_account 撞 UQ_DP_USER_EMAIL、
+由既有 try/except 兜底回 409（不 500，pending 待逾期排程清理）。屬 #35 前既可能存在之資料、
+執行期已優雅降級，故不於此中止；如需排查，可另跑跨表 lower(EMAIL) 比對。
 """
 
 from typing import Sequence, Union
