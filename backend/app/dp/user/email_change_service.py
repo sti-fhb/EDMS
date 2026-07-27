@@ -9,6 +9,7 @@ PENDING_EMAIL、寄驗證信至**新信箱**；驗證前舊 Email 仍可登入�
 
 from datetime import timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -51,8 +52,8 @@ class EmailChangeService:
         user = await self._repo.get_by_user_id(db, user_id)
         if user is None:
             raise AppError(status_code=404, detail="查無此帳號", error_code="DP_USER_008")
-        # 新信箱唯一（含軟刪除，避免與既有帳號 EMAIL UNIQUE 衝突；亦擋「改為自己現用信箱」）
-        if await self._repo.email_exists(db, new_email):
+        # 新信箱唯一：已被任一帳號使用或他人待驗證中即擋（延遲切換窗口，含軟刪除；亦擋「改為自己現用信箱」）
+        if await self._repo.email_taken_for_change(db, new_email, requester_id=user_id):
             raise AppError(status_code=409, detail="此 Email 已被使用", error_code="DP_USER_007")
 
         ttl_min = await self._params.get_int_param(db, "LOGIN", "EMAIL_CHANGE_TTL_MIN", _DEFAULT_TTL_MIN)
@@ -97,7 +98,12 @@ class EmailChangeService:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
         before_email = user.email
-        await self._repo.switch_email(db, user=user, new_email=new_email, operator_id=user_id, now=now)
+        # 縱深防禦：request 時的唯一性檢核與此處消費間仍有 TTL 窗口，若期間他人搶用同一 Email，
+        # DB 之 UQ_DP_USER_EMAIL 會於 flush 拋 IntegrityError；攔下轉乾淨 409（避免落成未處理 500）。
+        try:
+            await self._repo.switch_email(db, user=user, new_email=new_email, operator_id=user_id, now=now)
+        except IntegrityError as exc:
+            raise AppError(status_code=409, detail="此 Email 已被使用", error_code="DP_USER_007") from exc
         await self._audit.log_action(
             db,
             module="DP",

@@ -117,11 +117,14 @@ class NameUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    """密碼變更請求（US8）。密碼不 strip（前後空白可為合法字元）；複雜度 / 重複性由服務層權威檢核。"""
+    """密碼變更請求（US8）。密碼不 strip（前後空白可為合法字元）；複雜度 / 重複性由服務層權威檢核。
 
-    old_password: str
-    new_password: str
-    confirm_password: str
+    僅於 schema 層擋空字串（min_length=1，讓明顯無效輸入更早以 422 攔下）；長度 / 複雜度門檻仍由 service 權威。
+    """
+
+    old_password: Annotated[str, StringConstraints(min_length=1)]
+    new_password: Annotated[str, StringConstraints(min_length=1)]
+    confirm_password: Annotated[str, StringConstraints(min_length=1)]
 
 
 class EmailChangeRequest(BaseModel):

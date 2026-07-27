@@ -231,6 +231,29 @@ async def test_email_change_duplicate_rejected(db):
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_007"
 
 
+async def test_email_change_rejects_others_pending(db):
+    """他人已申請改為同一新信箱（尚未驗證）→ 申請即擋 DP_USER_007（延遲切換窗口，code review M2）。"""
+    await _make_user(db, user_id="a1", email="a1@edms.local")
+    other = await _make_user(db, user_id="b1", email="b1@edms.local")
+    other.pending_email = "shared@edms.local"  # b1 已申請改為 shared@，尚未驗證
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await EmailChangeService().request(db, user_id="a1", new_email="shared@edms.local")
+    assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_007"
+
+
+async def test_email_change_verify_conflict_returns_409(db):
+    """TTL 窗口內他人搶用同一 Email → verify 切換撞 UNIQUE，攔 IntegrityError 轉 409（非 500，code review M2）。"""
+    await _make_user(db, user_id="cf", email="cf@edms.local")
+    notify = _NotifyStub()
+    await EmailChangeService(notify=notify).request(db, user_id="cf", new_email="race@edms.local")
+    token_plain = notify.calls[0]["params"]["verify_link"].split("token=")[1]
+    await _make_user(db, user_id="other", email="race@edms.local")  # 窗口內他人搶註冊
+    with pytest.raises(AppError) as exc:
+        await EmailChangeService().verify(db, token=token_plain)
+    assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_007"
+
+
 async def test_email_change_verify_switches(db):
     """點連結未逾時 → 切 EMAIL、清 PENDING、作廢 token、稽核。"""
     await _make_user(db, user_id="vf", email="old2@edms.local")

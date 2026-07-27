@@ -33,18 +33,23 @@ export function ProfilePage() {
   const [newEmail, setNewEmail] = useState("")
   const [nameError, setNameError] = useState<string | undefined>()
   const [emailError, setEmailError] = useState<string | undefined>()
+  const [savingName, setSavingName] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
   const [pwdOpen, setPwdOpen] = useState(false)
 
   const saveName = async () => {
     const parsed = NameSchema.safeParse({ user_name: name })
     setNameError(getFieldErrors(parsed.success ? null : parsed.error).user_name)
     if (!parsed.success) return
+    setSavingName(true)
     try {
       await profileApi.updateName(parsed.data.user_name)
       await qc.invalidateQueries({ queryKey: PROFILE_QUERY_KEY })
       message.success("姓名已更新")
     } catch (err) {
       message.error(toApiError(err).errorMessage)
+    } finally {
+      setSavingName(false)
     }
   }
 
@@ -52,6 +57,7 @@ export function ProfilePage() {
     const parsed = EmailChangeSchema.safeParse({ new_email: newEmail })
     setEmailError(getFieldErrors(parsed.success ? null : parsed.error).new_email)
     if (!parsed.success) return
+    setSendingEmail(true)
     try {
       await profileApi.requestEmailChange(parsed.data.new_email)
       await qc.invalidateQueries({ queryKey: PROFILE_QUERY_KEY })
@@ -59,6 +65,8 @@ export function ProfilePage() {
       message.success("驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入")
     } catch (err) {
       message.error(toApiError(err).errorMessage)
+    } finally {
+      setSendingEmail(false)
     }
   }
 
@@ -88,7 +96,7 @@ export function ProfilePage() {
                 helperText={nameError}
                 fullWidth
               />
-              <Button variant="contained" onClick={saveName} sx={{ flexShrink: 0 }}>
+              <Button variant="contained" onClick={saveName} disabled={savingName} sx={{ flexShrink: 0 }}>
                 儲存姓名
               </Button>
             </Stack>
@@ -120,7 +128,7 @@ export function ProfilePage() {
                   helperText={emailError ?? "寄驗證信至新 Email，點連結後才切換（延遲生效）；逾時未驗證則作廢"}
                   fullWidth
                 />
-                <Button variant="outlined" onClick={sendEmailVerify} sx={{ flexShrink: 0 }}>
+                <Button variant="outlined" onClick={sendEmailVerify} disabled={sendingEmail} sx={{ flexShrink: 0 }}>
                   寄驗證信
                 </Button>
               </Stack>
