@@ -616,12 +616,14 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 **後端**（`app/dp/user/` — 認證 / 個人資料之 /me 端點；與 `dp/users` 管理 CRUD 分開）：
 - **T037 姓名變更**：`PUT /api/dp/user/me`（姓名直接存 `DP_USER` + 稽核〔前後值〕；ET / DM 同步生效）
 - **T037 密碼變更**：`PUT /api/dp/user/me/password`（驗舊密碼〔bcrypt，錯→PROFILE-001〕 + 兩次一致〔PROFILE-002〕 + 複雜度〔特權 12 依 T017 `is_module_admin` 判定，PROFILE-003〕 + 重複性〔`is_reused` 查 `HISTORY_COUNT`，PROFILE-004〕 → 更新雜湊 + 追加 `DP_PWD_HIST` + 更新 `PWD_CHANGED_DATE` + 清 `MUST_CHANGE_PWD` + 稽核；掛速率限制 T015）
+- **T037 公開密碼政策端點**（併 #77 核心，US8 為首個消費者）：`GET /api/password-policy`（**免 JWT**，供變更密碼 / 註冊 / 重設頁動態渲染提示）→ 回 `min_len` / `admin_min_len` / `char_types` / `history_count` / `expiry_days`（值來源 `SRVDP001`、即時不快取）；僅回渲染提示所需之**非機密**數值
 - **T038 Email 變更申請**：`PUT /api/dp/user/me/email`（新 Email 唯一檢核〔PROFILE-006〕 → 產一次性 `EMAIL_CHANGE` token〔SHA-256 入 `DP_PWD_RESET`、`NEW_EMAIL`、`DP_USER.PENDING_EMAIL`、TTL `EMAIL_CHANGE_TTL_MIN`〕 → 經 SRVDP002 寄 `EMAIL_CHANGE_VERIFY` 至**新信箱** → 提示 PROFILE-005；舊 Email 仍可登入）
 - **T038 Email 變更驗證**：`POST /api/verify-email-change`（信中連結落點）：驗 token〔逾時 / 已用 → PROFILE-008〕 → 切換 `DP_USER.EMAIL`＝`NEW_EMAIL`、清 `PENDING_EMAIL`、作廢 token、稽核〔前後值〕
 - **T037 / T038 強制變更閘收尾**：US1 之 `password_gate`（T023）於逾效期 / `MUST_CHANGE_PWD` 擋下並導向；本頁密碼變更端點清 `MUST_CHANGE_PWD` 後放行
 
 **前端**（`frontend/src/dp/user/`〔或 `dp/profile`〕，沿用共用元件）：
 - **T039 `dp-profile` 頁**：三區（姓名編輯 / Email 變更〔送出後 PROFILE-005〕 / 密碼變更〔舊 + 新 + 確認，Zod：特權 12 對齊、兩次一致〕）；訊息 PROFILE-001~008
+- **T039 密碼提示動態化**（併 #77 核心）：`usePasswordPolicy` hook 讀 `GET /api/password-policy` + 提示組字工具；變更密碼頁之複雜度提示（`8` / `12` 字元、字元組合種類數等數字）**依參數即時渲染、非寫死**——管理者於 US5 改 `ADMIN_MIN_LEN` 提示跟著變（stub 期特權門檻顯示一般 8，見注意事項）
 - **T039 強制變更密碼頁**：US1 T023 導入點（填實 `ForceChangePasswordShell`）——未完成變更不得離開至其他功能（DP-MSG-LOGIN-005 / PROFILE-007）
 - **T039 Email 變更驗證落點頁**：信中連結落點 `/verify-email-change?token=`（沿用 US3 `reset-password` / US2 `verify-email` 之免登入落點頁殼模式，置於 `RootLayout` 外）——驗證成功切換提示、逾時 / 失效顯 PROFILE-008
 
@@ -655,6 +657,7 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 - **Email 變更重用既有 token 基礎**：`DP_PWD_RESET`（`TOKEN_TYPE=EMAIL_CHANGE` + `NEW_EMAIL`）+ `DP_USER.PENDING_EMAIL`（#16 已建）；`verify_link` 組法同 US3（`{FRONTEND_BASE_URL}/verify-email-change?token=<明文>`，`FRONTEND_BASE_URL` 為後端設定）；token 明文入信、SHA-256 入庫、一次性 + 時效。
 - **強制變更頁 US1 已備殼**：US1（#31）已建 `password_gate`（T023 → 403 `DP_AUTH_009`）+ 前端 `ForceChangePasswordShell`；US1 當時「以最小提交 / stub 先行」，**本 issue 填實提交端點 + 檢核 + 清 `MUST_CHANGE_PWD` / 更新 `PWD_CHANGED_DATE`**（spec_us1 已註明實際變更提交屬 US8）。強制變更**沿用同一 `PUT /api/dp/user/me/password` 端點、仍需舊密碼**——使用者剛以現行密碼登入（逾效期之密碼仍有效可作舊密碼、初始密碼由管理者代設使用者已知），非另設免驗舊之特殊端點。
 - **特權 12 字元於變更當下判定**（research §11）：依 `is_module_admin`（T017）判定；stub fail-closed → 過渡期一律套一般 8 字元，特權門檻待模組 service（T049 回歸）。
+- **併入 #77 核心（密碼規則提示動態化）**：本 issue 建「公開 `GET /api/password-policy` 端點 + `usePasswordPolicy` hook + 提示組字」，US8 變更密碼頁為**首個消費者**、提示數字**動態讀 `PWD_POLICY`**（非寫死）；[#77](https://github.com/sti-fhb/EDMS/issues/77) 隨後收斂為「retrofit 註冊（US2）/ 重設（US3）頁改用同一 hook」。⚠️ 提示**數字**動態（讀參數即時反映），但「顯示一般 8 或特權 12」之**選擇**仍依 `is_module_admin`（stub 期一律顯示一般 8）、特權門檻正確顯示待 T049。端點僅回非機密數值（勿回整包 `DP_PARAM`）。
 - **密碼 / token 不入 log / 稽核前後值**（sti-backend-logging）；姓名 / Email 前後值可入稽核。
 - **Email 延遲生效**（FR-03）：驗證前 `DP_USER.EMAIL` 不變（舊仍可登入）、`PENDING_EMAIL` 存新值；驗證成功才切換。逾時 / 重新申請作廢舊 token。
 - **Error codes**（實作 / `/sti-plan` 對齊 `sti-error-codes`）：驗舊失敗（`DP_AUTH_008` 密碼錯誤或新 `DP_PWD_*`）；複雜度 / 長度 / 重複重用 `DP_PWD_001/002/003`；Email 重複重用 `DP_USER_007`；token 逾時 / 已用重用 `DP_PWD_005`；PROFILE-005/007 為提示 / 成功、非 error。
@@ -699,4 +702,4 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 | 2026-07-27 | 依增量模式補入 Issue #7（權限管理 / US7 / dp-roles）完整 body（T035~T036）：DP 為**轉接層**（畫面在 DP、資料與判定在模組），全程對 ET/DM `get_user_roles_*` / `assign_roles_*` stub 驗接線，自我保護 / 標籤值檢核 / 稽核皆在模組（contracts §3）；標籤清單讀 DP_PARAM（US5）；admin 授權閘同 #5/#6 列為開工前釐清；完整驗收待 T049 |
 | 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補缺（PR #80）：contracts §3 定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位 + 讀取改批次 `get_users_roles_*`（決策 3=B）+ 標籤回代碼、名稱由 DP 讀 DP_PARAM（1=A）+ 含 last_modified（2=A）；spec_us7 FR-06 自我保護訊息統一映射 DP-MSG-ROLES-001；wireframe dp-roles 補 AC5 呈現；Issue #7 body 同步（批次更名 + 標籤依賴提醒）|
 | 2026-07-27 | 依增量模式補入 Issue #8（個人資料維護 + 強制變更密碼 / US8 / dp-profile）完整 body（T037~T039）：姓名直接存、Email 新信箱驗證延遲切換（重用 `DP_PWD_RESET` EMAIL_CHANGE token + `PENDING_EMAIL`）、密碼變更驗舊 + 特權 12 + 重複性 + 清 `MUST_CHANGE_PWD`；承載 US1 強制變更頁（填實 `ForceChangePasswordShell` 提交端點）；發信 SRVDP002 非 stub；特權門檻依 is_module_admin（stub 期套一般 8、待 T049）|
-| 2026-07-27 | US8 交付前自檢（`/sti-sa-precheck #8`）：結論規格齊備、無必補；補 2 項澄清進 Issue #8 body ——「強制變更沿用同一 `PUT /me/password` 端點、仍需舊密碼」+「Email 變更驗證落點頁 `/verify-email-change`（沿用 US3 免登入落點頁殼）」。data-model / wireframe / 契約（SRVDP002 非 stub）皆已齊備 |
+| 2026-07-27 | US8 交付前自檢（`/sti-sa-precheck #8`）：結論規格齊備、無必補；補 2 項澄清進 Issue #8 body ——「強制變更沿用同一 `PUT /me/password` 端點、仍需舊密碼」+「Email 變更驗證落點頁 `/verify-email-change`（沿用 US3 免登入落點頁殼）」。data-model / wireframe / 契約（SRVDP002 非 stub）皆已齊備。另決議將 [#77](https://github.com/sti-fhb/EDMS/issues/77)（密碼規則提示動態化）**核心併入 US8**：建公開 `GET /api/password-policy` 端點 + `usePasswordPolicy` hook，US8 變更密碼頁提示數字動態讀 `PWD_POLICY`；#77 收斂為 retrofit US2 / US3 |
