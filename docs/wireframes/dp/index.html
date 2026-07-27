@@ -927,8 +927,8 @@
               <td class="small text-muted">陳大華 ｜ 2026-06-30</td>
             </tr>
             <tr>
-              <td class="small">admin</td><td><i class="bi bi-person-circle me-1"></i>陳大華</td>
-              <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 陳大華 ET 管理者角色')"></td>
+              <td class="small">admin</td><td><i class="bi bi-person-circle me-1"></i>陳大華 <span class="badge bg-info text-dark">目前登入者</span></td>
+              <td class="text-center" title="自我保護：不可取消自己的管理者角色（DP-MSG-ROLES-001）"><input type="checkbox" class="form-check-input" checked onchange="this.checked=true; showToast('無法取消自己的管理者角色（DP-MSG-ROLES-001）')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 教師角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 學員角色')"></td>
               <td><span class="text-muted small">未指派</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
@@ -1001,7 +1001,8 @@
         <li><strong>指派畫面在 DP 後台</strong>，按模組過濾；<strong>資料寫入模組表</strong>——角色 → <code>ET_USER_ROLE</code> / <code>DM_USER_ROLE</code>；標籤指派 → <code>ET_USER_TAG</code>；可見對象授權 → DM 授權表。標籤/可見對象之「定義清單」在 <code>DP_PARAM</code>（此處只做「指派」）。</li>
         <li>「某角色能做什麼」之判定與 enforce 在模組——平台不做全域 RBAC、不定義業務角色能力。角色種類為固定 enum，可多角色（權限取聯集）。</li>
         <li>DM 可見對象授權主要對「<strong>閱覽者</strong>」有意義（決定其可見範圍）；未授予任何可見對象之閱覽者僅能看掛「全體」之文件。</li>
-        <li>角色 / 標籤指派異動屬<strong>資安事件</strong>，寫入 <code>DP_AUDIT_LOG</code>。</li>
+        <li><strong>自我保護（AC5）</strong>：當前登入之管理者<strong>不可取消自己（本模組）的管理者角色</strong>——自己那列的「管理者」勾選取消時被擋、顯示 <code>DP-MSG-ROLES-001</code>（判定在模組、DP 統一映射呈現）；上表以「陳大華（目前登入者）」示意。<strong>不檢核「至少 1 名管理者」</strong>（取消他人管理者允許）。</li>
+        <li>角色 / 標籤指派異動屬<strong>資安事件</strong>，寫入 <code>DP_AUDIT_LOG</code>（由模組於同交易寫，事件歸屬各自 MODULE）。</li>
       </ul>
     </details>
   </div>
