@@ -26,7 +26,7 @@
 | 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | [#61](https://github.com/sti-fhb/EDMS/issues/61) | ✅ 已開立 |
 | 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #0, #2, #5 | [#68](https://github.com/sti-fhb/EDMS/issues/68) | ✅ 已合併（PR #73）|
 | 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
-| 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 📝 body 已補（待開立）|
+| 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 待補 |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #2 | — | 待補 |
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
@@ -596,7 +596,7 @@ DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 �
 
 ---
 
-## Issue #8：[P2-延伸] DP — 個人資料維護 + 強制變更密碼（dp-profile）
+## Issue #8：[P2-延伸] DP — 個人資料維護 + 強制變更密碼（dp-profile）（GitHub [#83](https://github.com/sti-fhb/EDMS/issues/83)）
 
 **對應規格**：[spec_us8.md](spec_us8.md)（US8 / UCDP004，FR-DP-US8-01~08、DP-MSG-PROFILE-001~008）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 發信）；[research.md](research.md) §5（一次性 token）/ §11（密碼策略）；[data-model.md](data-model.md)（`DP_USER`.PENDING_EMAIL / `DP_PWD_RESET`〔EMAIL_CHANGE〕/ `DP_PWD_HIST`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-profile`）
 **階段**：P2-延伸（使用者自助作業；登入 / 註冊 P1 先行、個資維護隨後。ET / DM 不自設個資畫面、皆導向本頁）
