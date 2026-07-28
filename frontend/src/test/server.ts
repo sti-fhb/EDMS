@@ -32,7 +32,10 @@ export const handlers = [
   http.put("/api/dp/user/me", () => new HttpResponse(null, { status: 204 })),
   http.put("/api/dp/user/me/password", () => new HttpResponse(null, { status: 204 })),
   http.put("/api/dp/user/me/email", () =>
-    HttpResponse.json({ message: "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入" }, { status: 202 }),
+    HttpResponse.json(
+      { message: "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入", retry_after: 600 },
+      { status: 202 },
+    ),
   ),
   http.post("/api/verify-email-change", () => HttpResponse.json({ message: "Email 已變更，請以新 Email 登入" })),
   http.get("/api/password-policy", () =>

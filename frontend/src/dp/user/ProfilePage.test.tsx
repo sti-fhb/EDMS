@@ -34,6 +34,8 @@ describe("ProfilePage 個人資料維護", () => {
     await user.click(screen.getByRole("button", { name: "寄驗證信" }))
 
     expect(await screen.findByText(/驗證信已寄至新 Email/)).toBeInTheDocument()
+    // 成功後寄信按鈕進入冷卻：disable + 顯示倒數（#74，回應帶 retry_after）
+    await waitFor(() => expect(screen.getByRole("button", { name: /寄驗證信（.+ 後）/ })).toBeDisabled())
   })
 
   it("新 Email 已被使用 → 顯示後端錯誤（PROFILE-006）", async () => {

@@ -36,8 +36,10 @@ export const profileApi = {
   async changePassword(payload: PasswordChangeRequest): Promise<void> {
     await http.put("/dp/user/me/password", payload)
   },
-  async requestEmailChange(newEmail: string): Promise<void> {
-    await http.put("/dp/user/me/email", { new_email: newEmail })
+  // 回傳後端 retry_after（寄信冷卻秒數，#74），供前端起算倒數；無則 undefined。
+  async requestEmailChange(newEmail: string): Promise<number | undefined> {
+    const { data } = await http.put<{ retry_after?: number }>("/dp/user/me/email", { new_email: newEmail })
+    return data.retry_after
   },
   async verifyEmailChange(token: string): Promise<void> {
     await http.post("/verify-email-change", { token })

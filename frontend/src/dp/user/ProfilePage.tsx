@@ -15,6 +15,7 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog"
 import { profileApi } from "./profileService"
 import { EmailChangeSchema, NameSchema } from "./schemas/profileSchemas"
 import { useNotification } from "../../contexts/NotificationContext"
+import { formatCountdown, useCooldown } from "../../hooks/useCooldown"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
 
@@ -39,6 +40,8 @@ export function ProfilePage() {
   const [savingName, setSavingName] = useState(false)
   const [sendingEmail, setSendingEmail] = useState(false)
   const [pwdOpen, setPwdOpen] = useState(false)
+  // 寄驗證信冷卻（#74）：成功寄出 / 冷卻中（429）皆依 retry_after 起算，倒數期間 disable 按鈕
+  const cooldown = useCooldown()
 
   const saveName = async () => {
     const parsed = NameSchema.safeParse({ user_name: name })
@@ -62,14 +65,17 @@ export function ProfilePage() {
     if (!parsed.success) return
     setSendingEmail(true)
     try {
-      await profileApi.requestEmailChange(parsed.data.new_email)
+      const retryAfter = await profileApi.requestEmailChange(parsed.data.new_email)
       await qc.invalidateQueries({ queryKey: PROFILE_QUERY_KEY })
       setNewEmail("")
+      if (retryAfter) cooldown.start(retryAfter) // 成功寄出 → 起算冷卻倒數
       message.success("驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入")
     } catch (err) {
       const apiErr = toApiError(err)
       // Email 已被使用（PROFILE-006）→ 清空欄位，提示使用者換一個（該值已知不可用）
       if (apiErr.errorCode === "DP_USER_007") setNewEmail("")
+      // 冷卻中（429）→ 依 retry_after 起算倒數，disable 按鈕
+      if (apiErr.retryAfter) cooldown.start(apiErr.retryAfter)
       message.error(apiErr.errorMessage)
     } finally {
       setSendingEmail(false)
@@ -137,8 +143,13 @@ export function ProfilePage() {
                   helperText={emailError ?? "寄驗證信至新 Email，點連結後才切換（延遲生效）；逾時未驗證則作廢"}
                   fullWidth
                 />
-                <Button variant="outlined" onClick={sendEmailVerify} disabled={sendingEmail} sx={{ flexShrink: 0 }}>
-                  寄驗證信
+                <Button
+                  variant="outlined"
+                  onClick={sendEmailVerify}
+                  disabled={sendingEmail || cooldown.active}
+                  sx={{ flexShrink: 0, whiteSpace: "nowrap" }}
+                >
+                  {cooldown.active ? `寄驗證信（${formatCountdown(cooldown.remaining)} 後）` : "寄驗證信"}
                 </Button>
               </Stack>
             </Stack>
