@@ -18,7 +18,7 @@ import { getFieldErrors } from "../utils/zodUtils"
 
 /**
  * 帳號啟用頁（US4 #67，管理者邀請信連結落點 /activate?token=xxx）。
- * 受邀者自設密碼啟用帳號：沿用重設密碼頁殼（置中卡片 + 新密碼 / 確認），複雜度驗證重用 ResetPasswordSchema。
+ * 受邀者自設密碼啟用帳號：沿用重設密碼頁殼（置中卡片 + 新密碼 / 確認），複雜度驗證重用 makeResetPasswordSchema（依 PWD_POLICY 動態）。
  * 成功導回登入；token 無效 / 逾期顯示錯誤並引導洽管理者重寄（後端 DP_USER_003/004）。
  */
 export function ActivateAccountPage() {
