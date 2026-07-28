@@ -84,8 +84,8 @@ export function ProfilePage() {
 
   return (
     <Box sx={{ p: 3, maxWidth: 640, mx: "auto" }}>
-      <Button startIcon={<ArrowBackIcon />} onClick={() => navigate("/portal")} sx={{ mb: 1 }}>
-        返回主頁
+      <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)} sx={{ mb: 1 }}>
+        返回上一頁
       </Button>
       <Typography variant="h5" gutterBottom>
         個人資料維護

@@ -8,9 +8,9 @@ import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
 describe("ProfilePage 個人資料維護", () => {
-  it("提供返回主頁按鈕", async () => {
+  it("提供返回上一頁按鈕", async () => {
     renderWithProviders(<ProfilePage />)
-    expect(await screen.findByRole("button", { name: /返回主頁/ })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: /返回上一頁/ })).toBeInTheDocument()
   })
 
   it("載入後帶入現值，姓名可更新並提示成功", async () => {

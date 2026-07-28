@@ -7,6 +7,7 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import type { FormEvent } from "react"
+import { useNavigate } from "react-router-dom"
 
 import { useAuth } from "./useAuth"
 import { profileApi } from "../dp/user/profileService"
@@ -23,6 +24,7 @@ import { getFieldErrors } from "../utils/zodUtils"
  */
 export function ForceChangePasswordShell() {
   const { logout, clearMustChangePwd } = useAuth()
+  const navigate = useNavigate()
   const { policy, hint } = usePasswordPolicy()
   const [oldPassword, setOldPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -47,6 +49,8 @@ export function ForceChangePasswordShell() {
     try {
       await profileApi.changePassword(parsed.data)
       clearMustChangePwd() // 清旗標 → RootLayout 撤下頁殼、放行一般功能
+      // 頁殼為覆蓋當前 URL 的 overlay，完成後導主頁——否則會停在底下殘留的 URL（如 /profile）
+      navigate("/portal")
     } catch (err) {
       setApiError(toApiError(err).errorMessage)
     } finally {
