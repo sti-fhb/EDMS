@@ -89,3 +89,55 @@ class ModuleSummary(BaseModel):
 
     et: ModuleRoleStatus
     dm: ModuleRoleStatus
+
+
+class MeResponse(BaseModel):
+    """個人資料（US8）：本人姓名 / 帳號（Email）/ 待驗證新信箱。"""
+
+    model_config = {"from_attributes": True}
+
+    user_id: str
+    email: str
+    user_name: str
+    # 有值代表已申請 Email 變更、尚未驗證（供前端顯示「變更審核中」）；None 代表無待驗證變更。
+    pending_email: str | None = None
+
+
+class NameUpdate(BaseModel):
+    """姓名變更請求（US8）。長度對齊 DP_USER.USER_NAME（50）。"""
+
+    user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+
+
+class PasswordChange(BaseModel):
+    """密碼變更請求（US8）。密碼不 strip（前後空白可為合法字元）；複雜度 / 重複性由服務層權威檢核。
+
+    僅於 schema 層擋空字串（min_length=1，讓明顯無效輸入更早以 422 攔下）；長度 / 複雜度門檻仍由 service 權威。
+    """
+
+    old_password: Annotated[str, StringConstraints(min_length=1)]
+    new_password: Annotated[str, StringConstraints(min_length=1)]
+    confirm_password: Annotated[str, StringConstraints(min_length=1)]
+
+
+class EmailChangeRequest(BaseModel):
+    """Email 變更申請請求（US8）。新 Email 正規化同註冊（#35：strip + lower），使儲存 / 唯一性檢核
+    與登入（LoginEmailStr）一致——否則存入混合大小寫，登入以小寫查詢會對不上。唯一性由服務層權威檢核。"""
+
+    new_email: NormalizedEmailStr
+
+
+class EmailChangeVerify(BaseModel):
+    """Email 變更驗證請求（US8）。token 為信中連結明文；效期 / 有效性由服務層權威檢核。"""
+
+    token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+
+
+class PasswordPolicyResponse(BaseModel):
+    """公開密碼政策（US8 / 併 #77）：供變更密碼 / 註冊 / 重設頁動態渲染提示；僅非機密數值。"""
+
+    min_len: int
+    admin_min_len: int
+    char_types: int
+    history_count: int
+    expiry_days: int

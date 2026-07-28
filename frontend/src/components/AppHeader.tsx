@@ -7,19 +7,29 @@ import MenuItem from "@mui/material/MenuItem"
 import Toolbar from "@mui/material/Toolbar"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 
 import { useAuth } from "../auth/useAuth"
 
 /** 頂列：系統標題 + 右上個資選單（個人資料 / 登出）。title 預設為後台語意，入口頁等情境可覆寫。 */
 export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
   const { logout } = useAuth()
+  const navigate = useNavigate()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const open = Boolean(anchorEl)
+
+  const handleProfile = () => {
+    setAnchorEl(null)
+    navigate("/profile")
+  }
 
   const handleLogout = () => {
     setAnchorEl(null)
     // 呼叫登出：寫 LOGOUT 稽核並清除 memory-only token（US1）
     void logout()
+    // 導回主頁：手動登出時避免停在 /profile 等深層路由，重新登入後被留在該頁（應回主頁）。
+    // 用 /portal（真實路由）而非 /；idle-timeout 自動登出不走此路徑、保留原頁（US1 意圖）。
+    navigate("/portal")
   }
 
   return (
@@ -45,7 +55,7 @@ export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
             open={open}
             onClose={() => setAnchorEl(null)}
           >
-            <MenuItem onClick={() => setAnchorEl(null)}>個人資料</MenuItem>
+            <MenuItem onClick={handleProfile}>個人資料</MenuItem>
             <MenuItem onClick={handleLogout}>登出</MenuItem>
           </Menu>
         </Box>

@@ -22,6 +22,7 @@ function makeAuth(isAuthenticated: boolean): AuthState {
     sessionExpired: false,
     login: async () => {},
     logout: async () => {},
+    clearMustChangePwd: () => {},
   }
 }
 

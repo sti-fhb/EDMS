@@ -45,6 +45,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMustChangePwd(false)
   }, [applyToken])
 
+  // US8：強制變更頁完成密碼變更後清旗標，RootLayout 即撤下頁殼、放行一般功能（不需重登）。
+  const clearMustChangePwd = useCallback(() => setMustChangePwd(false), [])
+
   // 401（憑證失效 / 閒置逾時 / 換發逾限）→ 清狀態並提示重新登入（DP-MSG-LOGIN-006）。
   useEffect(() => {
     setOnUnauthorized(() => {
@@ -93,8 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sessionExpired,
       login,
       logout,
+      clearMustChangePwd,
     }),
-    [token, mustChangePwd, sessionExpired, login, logout],
+    [token, mustChangePwd, sessionExpired, login, logout, clearMustChangePwd],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -22,14 +22,16 @@ import { STORAGE_KEYS } from "../constants/storage"
  * 卡片狀態由 module-summary 端點決定；首次登入顯示歡迎橫幅（可關閉）。DP 後台入口不設於此。
  */
 export function PortalPage() {
-  const { isAuthenticated } = useAuth()
-  // 僅在已登入時查詢 module-summary：token 為 memory-only（重整即失效），未登入時
+  const { isAuthenticated, mustChangePwd } = useAuth()
+  // 僅在已登入且非強制變更密碼時查詢 module-summary：token 為 memory-only（重整即失效），未登入時
   // 發此受保護端點只會拿到 401，且該錯誤會被 React Query 記為 query 錯誤狀態，登入後
-  // 露出本頁時殘留為「無法載入模組資訊」（#41）。以 enabled 從源頭擋掉登入前的請求。
+  // 露出本頁時殘留為「無法載入模組資訊」（#41）。強制變更期間端點受 password_gate 擋（403
+  // DP_AUTH_009），變更完成撤下頁殼露出本頁時同樣會殘留該錯誤（US8 手測）；故一併以 !mustChangePwd
+  // 從源頭擋掉，待旗標清除後 enabled 轉真、query 自動發動並成功。
   const { data, isPending, isError } = useQuery({
     queryKey: QUERY_KEYS.auth.moduleSummary(),
     queryFn: authApi.moduleSummary,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !mustChangePwd,
   })
   // 首次登入顯示一次歡迎橫幅：以 localStorage 旗標記住「已顯示過」，關閉後不再出現。
   const [showWelcome, setShowWelcome] = useState(

@@ -9,6 +9,7 @@ from app.dp.users.models import DpUser
 _SYSTEM_USER = "SYSTEM"
 _KIND_SELF_REGISTER = "SELF_REGISTER"
 _KIND_ADMIN_INVITE = "ADMIN_INVITE"
+_TOKEN_TYPE_EMAIL_CHANGE = "EMAIL_CHANGE"  # noqa: S105 — DP_PWD_RESET.TOKEN_TYPE 值，非密碼
 
 
 class AuthRepository:
@@ -29,6 +30,19 @@ class AuthRepository:
     async def email_exists(self, db: AsyncSession, email: str) -> bool:
         """該 Email 是否已被註冊（含軟刪除，避免與既有帳號 EMAIL UNIQUE 衝突）。"""
         stmt = select(func.count()).select_from(DpUser).where(DpUser.email == email)
+        return (await db.execute(stmt)).scalar_one() > 0
+
+    async def email_taken_for_change(self, db: AsyncSession, email: str, *, requester_id: str) -> bool:
+        """Email 變更之目標唯一性：已被任一帳號使用（EMAIL）或**他人**待驗證中（PENDING_EMAIL）即為已占用。
+
+        延遲切換下 `email_exists` 只查 EMAIL 會漏「他人已申請改為同一新信箱、尚未驗證」的窗口
+        （US8 code review）；故一併查他人 PENDING_EMAIL（排除自己，允許本人重複申請同一新信箱）。
+        """
+        stmt = (
+            select(func.count())
+            .select_from(DpUser)
+            .where((DpUser.email == email) | ((DpUser.pending_email == email) & (DpUser.user_id != requester_id)))
+        )
         return (await db.execute(stmt)).scalar_one() > 0
 
     async def create_user(
@@ -101,6 +115,34 @@ class AuthRepository:
         user.pwd_hash = pwd_hash
         user.pwd_changed_date = now
         user.must_change_pwd = False
+        user.updated_user = operator_id
+        user.updated_date = now
+        await db.flush()
+
+    async def update_name(
+        self, db: AsyncSession, *, user: DpUser, user_name: str, operator_id: str, now: datetime
+    ) -> None:
+        """更新使用者姓名（US8 個資維護，直接生效、ET / DM 共用同表）。"""
+        user.user_name = user_name
+        user.updated_user = operator_id
+        user.updated_date = now
+        await db.flush()
+
+    async def set_pending_email(
+        self, db: AsyncSession, *, user: DpUser, pending_email: str, operator_id: str, now: datetime
+    ) -> None:
+        """設定待驗證新信箱（US8 Email 變更申請，尚未生效；供前端顯示與防同時多筆）。"""
+        user.pending_email = pending_email
+        user.updated_user = operator_id
+        user.updated_date = now
+        await db.flush()
+
+    async def switch_email(
+        self, db: AsyncSession, *, user: DpUser, new_email: str, operator_id: str, now: datetime
+    ) -> None:
+        """切換登入 Email 為新值並清 PENDING_EMAIL（US8 Email 變更驗證通過，延遲生效落地）。"""
+        user.email = new_email
+        user.pending_email = None
         user.updated_user = operator_id
         user.updated_date = now
         await db.flush()
@@ -259,13 +301,18 @@ class AuthRepository:
         expires_date: datetime,
         operator_id: str,
         now: datetime,
+        new_email: str | None = None,
     ) -> None:
-        """新增一次性重設 token（僅存 SHA-256）。"""
+        """新增一次性重設 token（僅存 SHA-256）。
+
+        new_email 僅 EMAIL_CHANGE 型帶值（待驗證之新信箱，驗證通過才切換 DP_USER.EMAIL）。
+        """
         db.add(
             DpPwdReset(
                 token_hash=token_hash,
                 user_id=user_id,
                 token_type=token_type,
+                new_email=new_email,
                 expires_date=expires_date,
                 created_user=operator_id,
                 created_date=now,
@@ -299,3 +346,28 @@ class AuthRepository:
             .returning(DpPwdReset.user_id)
         )
         return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def consume_email_change_token(
+        self, db: AsyncSession, *, token_hash: str, now: datetime
+    ) -> tuple[str, str] | None:
+        """原子作廢 EMAIL_CHANGE token 並取回 (USER_ID, NEW_EMAIL)：僅當「未使用且未逾時」才成功。
+
+        同 consume_reset_token 以單一條件式 UPDATE 關閉 TOCTOU；並發同 token 只有一個成功。
+        回 None 代表 token 不存在 / 已用 / 已逾時（呼叫方轉 DP_PWD_005）。NEW_EMAIL 理論上非空
+        （EMAIL_CHANGE 建立時必帶），為型別安全仍防呆：缺值視同無效 token。
+        """
+        stmt = (
+            update(DpPwdReset)
+            .where(
+                DpPwdReset.token_hash == token_hash,
+                DpPwdReset.token_type == _TOKEN_TYPE_EMAIL_CHANGE,
+                DpPwdReset.used_date.is_(None),
+                DpPwdReset.expires_date > now,
+            )
+            .values(used_date=now)
+            .returning(DpPwdReset.user_id, DpPwdReset.new_email)
+        )
+        row = (await db.execute(stmt)).first()
+        if row is None or row.new_email is None:
+            return None
+        return (row.user_id, row.new_email)

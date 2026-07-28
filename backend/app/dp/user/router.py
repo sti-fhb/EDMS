@@ -7,18 +7,27 @@ from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
 from app.core.module_roles import module_role_gate
+from app.core.operator import OperatorInfo, get_operator
 from app.core.password_gate import require_password_current
 from app.core.rate_limit import LOGIN_RATE_MAX, RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.dp.user.activate_service import ActivateAccountService
+from app.dp.user.email_change_service import EmailChangeService
 from app.dp.user.forgot_service import ForgotPasswordService, ResetPasswordService
+from app.dp.user.profile_service import ProfileService
 from app.dp.user.register_service import RegisterService
 from app.dp.user.schemas import (
     ActivateAccountRequest,
+    EmailChangeRequest,
+    EmailChangeVerify,
     ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
+    MeResponse,
     ModuleRoleStatus,
     ModuleSummary,
+    NameUpdate,
+    PasswordChange,
+    PasswordPolicyResponse,
     RegisterRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
@@ -41,6 +50,13 @@ _verify_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_s
 _resend_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 帳號啟用端點限流器（IP 維度；受邀者持 token 設密碼）
 _activate_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# 密碼變更 / Email 變更申請限流器（IP + 帳號維度；US8 FR-07 防高頻嘗試）
+_pwd_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_email_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# Email 變更驗證端點限流器（IP 維度；公開落點）
+_verify_email_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# Email 變更寄信冷卻（比照註冊 #74）：同帳號兩次寄驗證信間隔至少 VERIFY_SEND_COOLDOWN_SEC（預設 10 分）
+_email_change_cooldown = VerifySendCooldown()
 # 驗證信寄送冷卻（#74）：register 與 resend 共用同一器、同一 Email key，
 # 600 秒內對同一 Email 只放行一封（堵「以重新註冊繞過重寄冷卻」）
 _verify_send_cooldown = VerifySendCooldown()
@@ -61,6 +77,14 @@ _resend_service = ResendVerificationService()
 _forgot_service = ForgotPasswordService()
 _reset_service = ResetPasswordService()
 _activate_service = ActivateAccountService()
+_profile_service = ProfileService()
+_email_change_service = EmailChangeService()
+
+_DEFAULT_MIN_LEN = 8
+_DEFAULT_ADMIN_MIN_LEN = 12
+_DEFAULT_CHAR_TYPES = 3
+_DEFAULT_HISTORY_COUNT = 3
+_DEFAULT_EXPIRY_DAYS = 90
 
 _FORGOT_MESSAGE = "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"
 _REGISTER_MESSAGE = "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證"
@@ -221,4 +245,95 @@ async def module_summary(
     return ModuleSummary(
         et=ModuleRoleStatus(has_role=True),
         dm=ModuleRoleStatus(has_role=dm_has_role),
+    )
+
+
+# --- 個人資料維護（US8 /me；需認證，不套 require_password_current 逃生門） ---
+
+
+@router.get("/dp/user/me", response_model=MeResponse)
+async def get_me(
+    payload: JwtPayload = Depends(get_jwt_payload),
+    db: AsyncSession = Depends(get_db),
+) -> MeResponse:
+    """本人個人資料：姓名 / 帳號（Email）/ 待驗證新信箱。"""
+    user = await _profile_service.get_me(db, user_id=payload.sub)
+    return MeResponse.model_validate(user)
+
+
+@router.put("/dp/user/me", status_code=status.HTTP_204_NO_CONTENT)
+async def update_me(
+    data: NameUpdate,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+) -> None:
+    """變更姓名（直接生效、ET / DM 同步）+ 稽核。"""
+    await _profile_service.update_name(db, user_id=operator.user_id, user_name=data.user_name)
+
+
+@router.put("/dp/user/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    data: PasswordChange,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+    _ip_limit: None = Depends(rate_limit_by_ip(_pwd_change_limiter, "pwd-change")),
+) -> None:
+    """變更密碼（含強制變更收尾）：驗舊 + 兩次一致 + 複雜度（特權 12）+ 重複性。
+
+    IP + 帳號雙維度限流（FR-07）；帳號維度先 hit 後執行。
+    """
+    _pwd_change_limiter.hit(f"pwd-change:acct:{operator.user_id}")
+    await _profile_service.change_password(
+        db,
+        user_id=operator.user_id,
+        old_password=data.old_password,
+        new_password=data.new_password,
+        confirm_password=data.confirm_password,
+    )
+
+
+@router.put("/dp/user/me/email", status_code=status.HTTP_202_ACCEPTED)
+async def change_email(
+    data: EmailChangeRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+    _ip_limit: None = Depends(rate_limit_by_ip(_email_change_limiter, "email-change")),
+) -> dict[str, object]:
+    """申請 Email 變更（延遲生效）：唯一檢核 → 產 token + PENDING_EMAIL → 寄驗證信至新信箱。
+
+    寄信冷卻（#74，預設 10 分）：check 於送信前擋、record 於送信成功後蓋章——唯一性失敗（409）
+    不誤觸冷卻。成功回應帶 retry_after（＝冷卻秒數）供前端起算倒數。
+    """
+    _email_change_limiter.hit(f"email-change:acct:{operator.user_id}")
+    cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
+    key = f"email-change-send:acct:{operator.user_id}"
+    _email_change_cooldown.check(key, cooldown_sec)
+    await _email_change_service.request(db, user_id=operator.user_id, new_email=data.new_email)
+    _email_change_cooldown.record(key)
+    return {
+        "message": "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入",
+        "retry_after": cooldown_sec,
+    }
+
+
+@router.post("/verify-email-change")
+async def verify_email_change(
+    data: EmailChangeVerify,
+    db: AsyncSession = Depends(get_db),
+    _ip_limit: None = Depends(rate_limit_by_ip(_verify_email_change_limiter, "verify-email-change")),
+) -> dict[str, str]:
+    """完成 Email 變更（公開，持信中連結 token）：消 token → 切 EMAIL + 稽核。"""
+    await _email_change_service.verify(db, token=data.token)
+    return {"message": "Email 已變更，請以新 Email 登入"}
+
+
+@router.get("/password-policy", response_model=PasswordPolicyResponse)
+async def get_password_policy(db: AsyncSession = Depends(get_db)) -> PasswordPolicyResponse:
+    """公開密碼政策（併 #77 核心）：供變更密碼 / 註冊 / 重設頁動態渲染提示；僅非機密數值、即時不快取。"""
+    return PasswordPolicyResponse(
+        min_len=await _params.get_int_param(db, "PWD_POLICY", "MIN_LEN", _DEFAULT_MIN_LEN),
+        admin_min_len=await _params.get_int_param(db, "PWD_POLICY", "ADMIN_MIN_LEN", _DEFAULT_ADMIN_MIN_LEN),
+        char_types=await _params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES),
+        history_count=await _params.get_int_param(db, "PWD_POLICY", "HISTORY_COUNT", _DEFAULT_HISTORY_COUNT),
+        expiry_days=await _params.get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_EXPIRY_DAYS),
     )
