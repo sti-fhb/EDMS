@@ -2,21 +2,20 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
+from app.core.schema_types import LoginEmailStr, NormalizedEmailStr
+
 
 class LoginRequest(BaseModel):
-    """登入請求。"""
+    """登入請求。email 正規化（#35）：strip + lower（不做格式驗證，格式錯→認證失敗）。"""
 
-    email: str
+    email: LoginEmailStr
     password: str
 
 
 class ForgotPasswordRequest(BaseModel):
-    """忘記密碼申請請求（US3）。僅需 Email；一律回相同訊息（防列舉）。格式把關與 RegisterRequest 一致。"""
+    """忘記密碼申請請求（US3）。僅需 Email；一律回相同訊息（防列舉）。email 正規化同註冊（#35）。"""
 
-    email: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
-    ]
+    email: NormalizedEmailStr
 
 
 class ResetPasswordRequest(BaseModel):
@@ -33,14 +32,11 @@ class RegisterRequest(BaseModel):
     匿名端點可繞過前端，故後端於 schema 層即把關長度與 Email 基本格式（去頭尾空白後）：
     - EMAIL / USER_NAME 對齊 DP_USER 欄位長度（255 / 50），不合規走 422（RequestValidationError），
       避免超長字串落到 DB 層例外變成 500。
-    - Email 格式以輕量 regex 檢核（不引 email-validator 依賴，沿用 US1 決策）。
+    - Email 格式以輕量 regex 檢核（不引 email-validator 依賴，沿用 US1 決策）；並 strip + lower 正規化（#35）。
     - password 不 strip（前後空白可為合法密碼字元）；複雜度 / 兩次一致由服務層權威檢核。
     """
 
-    email: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
-    ]
+    email: NormalizedEmailStr
     user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
     password: str
     confirm_password: str
@@ -64,12 +60,9 @@ class ActivateAccountRequest(BaseModel):
 
 
 class ResendVerificationRequest(BaseModel):
-    """重寄註冊驗證信請求（US2 #56）。僅需 Email；一律回相同訊息（防列舉）。格式同 RegisterRequest。"""
+    """重寄註冊驗證信請求（US2 #56）。僅需 Email；一律回相同訊息（防列舉）。email 正規化同註冊（#35）。"""
 
-    email: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
-    ]
+    email: NormalizedEmailStr
 
 
 class LoginResponse(BaseModel):
