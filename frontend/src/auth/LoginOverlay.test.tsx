@@ -1,4 +1,5 @@
 import { ThemeProvider } from "@mui/material/styles"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
@@ -23,12 +24,15 @@ function Harness() {
 }
 
 function renderLogin() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ThemeProvider theme={muiTheme}>
-      <AuthProvider>
-        <Harness />
-      </AuthProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={muiTheme}>
+        <AuthProvider>
+          <Harness />
+        </AuthProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
   )
 }
 

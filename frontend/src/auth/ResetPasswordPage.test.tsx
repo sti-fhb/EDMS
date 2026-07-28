@@ -1,4 +1,5 @@
 import { ThemeProvider } from "@mui/material/styles"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
@@ -12,14 +13,17 @@ import { muiTheme } from "../styles/muiTheme"
 const _NEW_PWD = "Xyz98765!"
 
 function renderReset(entry: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ThemeProvider theme={muiTheme}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-        </Routes>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={muiTheme}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -30,6 +34,16 @@ async function fillReset(user: ReturnType<typeof userEvent.setup>, pwd = _NEW_PW
 }
 
 describe("ResetPasswordPage", () => {
+  it("密碼規則提示依 PWD_POLICY 動態（#77）：改回傳值 → 提示數字跟著變", async () => {
+    server.use(
+      http.get("/api/password-policy", () =>
+        HttpResponse.json({ min_len: 12, admin_min_len: 12, char_types: 4, history_count: 3, expiry_days: 90 }),
+      ),
+    )
+    renderReset("/reset-password?token=validtoken")
+    expect(await screen.findByText(/至少 12 字元.*至少 4 種/)).toBeInTheDocument()
+  })
+
   it("有效 token + 合規新密碼 → 顯示成功、提供返回登入", async () => {
     renderReset("/reset-password?token=validtoken")
     const user = userEvent.setup()

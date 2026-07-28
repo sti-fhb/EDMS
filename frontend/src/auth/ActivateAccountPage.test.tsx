@@ -1,4 +1,5 @@
 import { ThemeProvider } from "@mui/material/styles"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
@@ -12,14 +13,17 @@ import { muiTheme } from "../styles/muiTheme"
 const _PWD = "Xyz98765!"
 
 function renderActivate(entry: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ThemeProvider theme={muiTheme}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/activate" element={<ActivateAccountPage />} />
-        </Routes>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={muiTheme}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/activate" element={<ActivateAccountPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   )
 }
 
