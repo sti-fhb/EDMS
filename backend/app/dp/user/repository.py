@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
@@ -104,6 +104,51 @@ class AuthRepository:
         user.updated_user = operator_id
         user.updated_date = now
         await db.flush()
+
+    async def increment_login_fail(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        threshold: int,
+        lock_until: datetime,
+        operator_id: str,
+        now: datetime,
+    ) -> int | None:
+        """原子遞增登入失敗計數；遞增後達門檻時，於同一 UPDATE 設 locked_until。回傳遞增後的新計數。
+
+        以 DB 端 `login_fail_count + 1` 計算（非 ORM 讀改寫），消除並發同帳號錯密碼時的
+        lost update——避免鎖定門檻延遲或不觸發（#34）。locked_until 以 CASE 依「遞增後值 >= 門檻」
+        條件設定，未達門檻保留原值；RETURNING 取回更新後計數以供上層判定稽核 reason。
+
+        以 `synchronize_session="fetch"` 讓同 session 內已載入的 user 物件之 login_fail_count /
+        locked_until 依 DB 實際值同步——CASE 運算式無法於 Python 端 evaluate，若用預設 "auto"
+        會把 locked_until 標記為 expired，後續於 async context 同步存取將拋 MissingGreenlet。
+
+        Args:
+            user_id: 目標帳號。
+            threshold: 鎖定門檻（FAIL_LOCK_COUNT）；遞增後計數達此值即鎖定。
+            lock_until: 達門檻時要寫入的鎖定截止時間。
+            operator_id: 稽核操作者（登入失敗為 SYSTEM）。
+            now: 本次更新時間戳。
+
+        Returns:
+            遞增後的 login_fail_count；若該帳號已不存在（並發軟刪、WHERE 比對 0 列）則回 None。
+        """
+        new_count = DpUser.login_fail_count + 1
+        stmt = (
+            update(DpUser)
+            .where(DpUser.user_id == user_id, DpUser.deleted == 0)
+            .values(
+                login_fail_count=new_count,
+                locked_until=case((new_count >= threshold, lock_until), else_=DpUser.locked_until),
+                updated_user=operator_id,
+                updated_date=now,
+            )
+            .returning(DpUser.login_fail_count)
+            .execution_options(synchronize_session="fetch")
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
 
     # --- 待驗證註冊（DP_PENDING_REGISTRATION，#56 方案 B）---
 

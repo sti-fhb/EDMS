@@ -72,15 +72,22 @@ class AuthService:
             await self._fail(db, user.user_id, ip, "帳號已停用", 403, "帳號已停用，請洽管理者", "DP_AUTH_004")
 
         if not verify_password(password, user.pwd_hash):
-            user.login_fail_count += 1
             fail_lock = await self._params.get_int_param(db, "LOGIN", "FAIL_LOCK_COUNT", _DEFAULT_FAIL_LOCK_COUNT)
-            reason = "密碼錯誤"
-            if user.login_fail_count >= fail_lock:
-                lock_min = await self._params.get_int_param(db, "LOGIN", "LOCK_MINUTES", _DEFAULT_LOCK_MINUTES)
-                user.locked_until = now + timedelta(minutes=lock_min)
-                reason = "連續失敗達上限，帳號鎖定"
-            user.updated_user = _SYSTEM_USER
-            user.updated_date = now
+            lock_min = await self._params.get_int_param(db, "LOGIN", "LOCK_MINUTES", _DEFAULT_LOCK_MINUTES)
+            # 原子遞增：以 DB 端 count+1 判定並鎖定，消除 ORM 讀改寫的 lost update（並發同帳號錯密碼時
+            # 門檻延遲/不觸發）。達門檻於同一 UPDATE 設 locked_until，回傳新計數決定稽核 reason（#34）。
+            new_count = await self._repo.increment_login_fail(
+                db,
+                user_id=user.user_id,
+                threshold=fail_lock,
+                lock_until=now + timedelta(minutes=lock_min),
+                operator_id=_SYSTEM_USER,
+                now=now,
+            )
+            if new_count is None:
+                # 密碼驗證與遞增之間帳號遭並發軟刪（極罕見）：對齊帳號不存在路徑（consume_reset_token 同慣例）
+                await self._fail(db, user.user_id, ip, "帳號不存在", 401, "查無此帳號，請先註冊", "DP_AUTH_007")
+            reason = "連續失敗達上限，帳號鎖定" if new_count >= fail_lock else "密碼錯誤"
             await self._fail(db, user.user_id, ip, reason, 401, "密碼錯誤", "DP_AUTH_008")
 
         # 成功：重設計數 / 清鎖 / 更新 last_login、核發 JWT（提交由 get_db 於請求成功時負責）
