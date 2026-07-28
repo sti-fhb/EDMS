@@ -94,8 +94,10 @@ class ProfileService:
         if user is None:
             raise AppError(status_code=404, detail="查無此帳號", error_code="DP_USER_008")
 
+        # 舊密碼錯用 422（非 401）：401 於前端 http interceptor 代表「session 失效 → 自動登出」，
+        # 若舊密碼錯回 401 會被誤判為逾時而登出、吞掉「舊密碼不正確」訊息（US8 手測發現）。
         if not verify_password(old_password, user.pwd_hash):
-            raise AppError(status_code=401, detail="密碼錯誤", error_code="DP_AUTH_008")
+            raise AppError(status_code=422, detail="舊密碼不正確", error_code="DP_PWD_006")
         if new_password != confirm_password:
             raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
 

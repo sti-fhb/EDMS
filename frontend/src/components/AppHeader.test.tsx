@@ -19,14 +19,14 @@ const authStub: AuthState = {
   clearMustChangePwd: () => {},
 }
 
-function renderHeader() {
+function renderHeader(overrides: Partial<AuthState> = {}) {
   return render(
     <ThemeProvider theme={muiTheme}>
-      <AuthContext.Provider value={authStub}>
-        <MemoryRouter initialEntries={["/portal"]}>
+      <AuthContext.Provider value={{ ...authStub, ...overrides }}>
+        <MemoryRouter initialEntries={["/profile"]}>
           <Routes>
-            <Route path="/portal" element={<AppHeader />} />
-            <Route path="/profile" element={<div>個人資料頁</div>} />
+            <Route path="/profile" element={<AppHeader />} />
+            <Route path="/portal" element={<div>主頁</div>} />
           </Routes>
         </MemoryRouter>
       </AuthContext.Provider>
@@ -37,9 +37,28 @@ function renderHeader() {
 describe("AppHeader 個資選單", () => {
   it("點『個人資料』導向 /profile", async () => {
     const user = userEvent.setup()
-    renderHeader()
+    render(
+      <ThemeProvider theme={muiTheme}>
+        <AuthContext.Provider value={authStub}>
+          <MemoryRouter initialEntries={["/portal"]}>
+            <Routes>
+              <Route path="/portal" element={<AppHeader />} />
+              <Route path="/profile" element={<div>個人資料頁</div>} />
+            </Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </ThemeProvider>,
+    )
     await user.click(screen.getByRole("button", { name: "個資選單" }))
     await user.click(screen.getByRole("menuitem", { name: "個人資料" }))
     expect(await screen.findByText("個人資料頁")).toBeInTheDocument()
+  })
+
+  it("登出後導回主頁（避免停在 /profile 深層路由）", async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    await user.click(screen.getByRole("button", { name: "個資選單" }))
+    await user.click(screen.getByRole("menuitem", { name: "登出" }))
+    expect(await screen.findByText("主頁")).toBeInTheDocument()
   })
 })

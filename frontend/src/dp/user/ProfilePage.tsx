@@ -6,8 +6,10 @@ import CardContent from "@mui/material/CardContent"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
+import ArrowBackIcon from "@mui/icons-material/ArrowBack"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 
 import { ChangePasswordDialog } from "./ChangePasswordDialog"
 import { profileApi } from "./profileService"
@@ -25,6 +27,7 @@ const PROFILE_QUERY_KEY = ["profile", "me"] as const
 export function ProfilePage() {
   const { message } = useNotification()
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { data: me } = useQuery({ queryKey: PROFILE_QUERY_KEY, queryFn: profileApi.getMe })
 
   // 姓名顯示值：使用者編輯過用草稿，否則帶伺服器現值（避免以 effect 同步 query→state）
@@ -64,7 +67,10 @@ export function ProfilePage() {
       setNewEmail("")
       message.success("驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入")
     } catch (err) {
-      message.error(toApiError(err).errorMessage)
+      const apiErr = toApiError(err)
+      // Email 已被使用（PROFILE-006）→ 清空欄位，提示使用者換一個（該值已知不可用）
+      if (apiErr.errorCode === "DP_USER_007") setNewEmail("")
+      message.error(apiErr.errorMessage)
     } finally {
       setSendingEmail(false)
     }
@@ -72,6 +78,9 @@ export function ProfilePage() {
 
   return (
     <Box sx={{ p: 3, maxWidth: 640, mx: "auto" }}>
+      <Button startIcon={<ArrowBackIcon />} onClick={() => navigate("/portal")} sx={{ mb: 1 }}>
+        返回主頁
+      </Button>
       <Typography variant="h5" gutterBottom>
         個人資料維護
       </Typography>

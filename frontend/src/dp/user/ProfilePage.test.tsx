@@ -8,6 +8,11 @@ import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
 describe("ProfilePage 個人資料維護", () => {
+  it("提供返回主頁按鈕", async () => {
+    renderWithProviders(<ProfilePage />)
+    expect(await screen.findByRole("button", { name: /返回主頁/ })).toBeInTheDocument()
+  })
+
   it("載入後帶入現值，姓名可更新並提示成功", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ProfilePage />)
@@ -39,10 +44,13 @@ describe("ProfilePage 個人資料維護", () => {
     )
     const user = userEvent.setup()
     renderWithProviders(<ProfilePage />)
-    await user.type(await screen.findByLabelText("變更為新 Email"), "taken@example.com")
+    const emailInput = await screen.findByLabelText("變更為新 Email")
+    await user.type(emailInput, "taken@example.com")
     await user.click(screen.getByRole("button", { name: "寄驗證信" }))
 
     expect(await screen.findByText("此 Email 已被使用")).toBeInTheDocument()
+    // 已被使用 → 欄位清空（該值已知不可用）
+    await waitFor(() => expect(emailInput).toHaveValue(""))
   })
 
   it("待驗證變更中 → 顯示審核中橫幅", async () => {

@@ -97,13 +97,13 @@ async def test_change_password_success(db):
 
 
 async def test_change_password_wrong_old(db):
-    """舊密碼錯 → DP_AUTH_008（PROFILE-001）。"""
+    """舊密碼錯 → 422 DP_PWD_006（PROFILE-001）。用 422 非 401：401 於前端代表 session 失效會誤登出。"""
     await _make_user(db, user_id="wo", email="wo@edms.local")
     with pytest.raises(AppError) as exc:
         await ProfileService().change_password(
             db, user_id="wo", old_password="WrongOld9", new_password=_NEW_PWD, confirm_password=_NEW_PWD
         )
-    assert exc.value.status_code == 401 and exc.value.error_code == "DP_AUTH_008"
+    assert exc.value.status_code == 422 and exc.value.error_code == "DP_PWD_006"
 
 
 async def test_change_password_mismatch(db):
@@ -304,6 +304,22 @@ async def test_verify_email_change_endpoint(client, db):
     assert r.status_code == 200
     user = (await db.execute(select(DpUser).where(DpUser.user_id == "ve"))).scalar_one()
     assert user.email == "ne2@edms.local"
+
+
+async def test_email_change_cooldown(client, db):
+    """寄驗證信有冷卻（#74）：成功寄一次後，冷卻內再寄 → 429（防狂發）。"""
+    from app.dp.user.router import _email_change_cooldown
+
+    await _make_user(db, user_id="cd", email="cd@edms.local")
+    key = "email-change-send:acct:cd"
+    _email_change_cooldown._last.pop(key, None)
+    try:
+        r1 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new@edms.local"}, headers=_bearer("cd"))
+        assert r1.status_code == 202
+        r2 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new2@edms.local"}, headers=_bearer("cd"))
+        assert r2.status_code == 429
+    finally:
+        _email_change_cooldown._last.pop(key, None)
 
 
 # --- 公開密碼政策（併 #77） ---

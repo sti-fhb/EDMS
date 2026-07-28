@@ -55,6 +55,8 @@ _pwd_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, wind
 _email_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # Email 變更驗證端點限流器（IP 維度；公開落點）
 _verify_email_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# Email 變更寄信冷卻（比照註冊 #74）：同帳號兩次寄驗證信間隔至少 VERIFY_SEND_COOLDOWN_SEC（預設 10 分）
+_email_change_cooldown = VerifySendCooldown()
 # 驗證信寄送冷卻（#74）：register 與 resend 共用同一器、同一 Email key，
 # 600 秒內對同一 Email 只放行一封（堵「以重新註冊繞過重寄冷卻」）
 _verify_send_cooldown = VerifySendCooldown()
@@ -296,11 +298,22 @@ async def change_email(
     db: AsyncSession = Depends(get_db),
     operator: OperatorInfo = Depends(get_operator),
     _ip_limit: None = Depends(rate_limit_by_ip(_email_change_limiter, "email-change")),
-) -> dict[str, str]:
-    """申請 Email 變更（延遲生效）：唯一檢核 → 產 token + PENDING_EMAIL → 寄驗證信至新信箱。"""
+) -> dict[str, object]:
+    """申請 Email 變更（延遲生效）：唯一檢核 → 產 token + PENDING_EMAIL → 寄驗證信至新信箱。
+
+    寄信冷卻（#74，預設 10 分）：check 於送信前擋、record 於送信成功後蓋章——唯一性失敗（409）
+    不誤觸冷卻。成功回應帶 retry_after（＝冷卻秒數）供前端起算倒數。
+    """
     _email_change_limiter.hit(f"email-change:acct:{operator.user_id}")
+    cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
+    key = f"email-change-send:acct:{operator.user_id}"
+    _email_change_cooldown.check(key, cooldown_sec)
     await _email_change_service.request(db, user_id=operator.user_id, new_email=data.new_email)
-    return {"message": "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入"}
+    _email_change_cooldown.record(key)
+    return {
+        "message": "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入",
+        "retry_after": cooldown_sec,
+    }
 
 
 @router.post("/verify-email-change")

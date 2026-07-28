@@ -45,10 +45,11 @@ describe("ForceChangePasswordShell 強制變更密碼（US8 填實提交）", ()
     await waitFor(() => expect(screen.queryByRole("alert")).not.toHaveTextContent(/失敗|錯誤|不正確/))
   })
 
-  it("舊密碼錯（DP_AUTH_008）→ 顯示後端錯誤訊息", async () => {
+  it("舊密碼錯（422 DP_PWD_006，非 401）→ 顯示錯誤訊息、不觸發自動登出", async () => {
+    // 舊密碼錯刻意用 422 而非 401：401 於 http interceptor 代表 session 失效會自動登出、吞掉此訊息
     server.use(
       http.put("/api/dp/user/me/password", () =>
-        HttpResponse.json({ error_code: "DP_AUTH_008", error_message: "舊密碼不正確" }, { status: 401 }),
+        HttpResponse.json({ error_code: "DP_PWD_006", error_message: "舊密碼不正確" }, { status: 422 }),
       ),
     )
     const user = userEvent.setup()

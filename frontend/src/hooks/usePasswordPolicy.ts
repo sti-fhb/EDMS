@@ -17,7 +17,9 @@ export function usePasswordPolicy(): { policy: PasswordPolicy | undefined; hint:
   const { data: policy } = useQuery({
     queryKey: ["password-policy"],
     queryFn: profileApi.getPasswordPolicy,
-    staleTime: 5 * 60 * 1000, // 政策不常變；5 分鐘內共用快取即可
+    // 每次開啟變更密碼 / 強制變更頁即重取，確保提示數字反映管理者最新的 PWD_POLICY 參數（併 #77 即時性）。
+    // 端點輕量（僅回 5 個數值），refetch 成本可忽略。
+    staleTime: 0,
   })
   const hint = buildPasswordHint(policy)
   return { policy, hint }
