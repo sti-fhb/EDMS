@@ -121,12 +121,10 @@ class PasswordChange(BaseModel):
 
 
 class EmailChangeRequest(BaseModel):
-    """Email 變更申請請求（US8）。格式把關同 RegisterRequest；唯一性由服務層權威檢核。"""
+    """Email 變更申請請求（US8）。新 Email 正規化同註冊（#35：strip + lower），使儲存 / 唯一性檢核
+    與登入（LoginEmailStr）一致——否則存入混合大小寫，登入以小寫查詢會對不上。唯一性由服務層權威檢核。"""
 
-    new_email: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
-    ]
+    new_email: NormalizedEmailStr
 
 
 class EmailChangeVerify(BaseModel):

@@ -294,6 +294,15 @@ async def test_email_change_verify_expired(db):
     assert user.email == "keep@edms.local"
 
 
+async def test_email_change_endpoint_normalizes_email(client, db):
+    """端點：新 Email 大小寫正規化（#35）→ 存入 PENDING_EMAIL 為 strip+lower，與登入查詢一致。"""
+    await _make_user(db, user_id="nz", email="nz@edms.local")
+    r = await client.put("/api/dp/user/me/email", json={"new_email": "  New.Case@Edms.Local  "}, headers=_bearer("nz"))
+    assert r.status_code == 202
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "nz"))).scalar_one()
+    assert user.pending_email == "new.case@edms.local"
+
+
 async def test_verify_email_change_endpoint(client, db):
     """端點：公開落點，有效 token → 200 + EMAIL 切換。"""
     await _make_user(db, user_id="ve", email="oe@edms.local")
