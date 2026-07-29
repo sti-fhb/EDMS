@@ -7,8 +7,9 @@ import { useState } from "react"
 import type { FormEvent } from "react"
 
 import { authApi } from "./authService"
-import { RegisterRequestSchema } from "./schemas/registerSchema"
+import { makeRegisterRequestSchema } from "./schemas/registerSchema"
 import { useCooldown, formatCountdown } from "../hooks/useCooldown"
+import { usePasswordPolicy } from "../hooks/usePasswordPolicy"
 import { toApiError } from "../services/http"
 import { getFieldErrors } from "../utils/zodUtils"
 
@@ -33,12 +34,14 @@ export function RegisterForm() {
   const cooldown = useCooldown()
   const submitCoolingDown = cooldown.active && cooldown.key === email
   const resendCoolingDown = cooldown.active && cooldown.key === sentEmail
+  // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）：管理者改參數後前端跟著變、非寫死
+  const { policy, hint } = usePasswordPolicy()
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setApiError(null)
     const values = { email, user_name: userName, password, confirm_password: confirmPassword }
-    const parsed = RegisterRequestSchema.safeParse(values)
+    const parsed = makeRegisterRequestSchema(policy?.min_len, policy?.char_types).safeParse(values)
     setFieldErrors(getFieldErrors(parsed.success ? null : parsed.error))
     if (!parsed.success) return
 
@@ -120,7 +123,7 @@ export function RegisterForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={"password" in fieldErrors}
-          helperText={fieldErrors.password ?? "至少 8 字元，含大小寫英文 / 數字 / 特殊符號至少 3 種"}
+          helperText={fieldErrors.password ?? hint}
           fullWidth
           autoComplete="new-password"
         />

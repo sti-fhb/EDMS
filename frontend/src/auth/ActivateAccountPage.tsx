@@ -11,13 +11,14 @@ import type { FormEvent } from "react"
 import { useSearchParams } from "react-router-dom"
 
 import { authApi } from "./authService"
-import { ResetPasswordSchema } from "./schemas/resetPasswordSchema"
+import { makeResetPasswordSchema } from "./schemas/resetPasswordSchema"
+import { usePasswordPolicy } from "../hooks/usePasswordPolicy"
 import { toApiError } from "../services/http"
 import { getFieldErrors } from "../utils/zodUtils"
 
 /**
  * 帳號啟用頁（US4 #67，管理者邀請信連結落點 /activate?token=xxx）。
- * 受邀者自設密碼啟用帳號：沿用重設密碼頁殼（置中卡片 + 新密碼 / 確認），複雜度驗證重用 ResetPasswordSchema。
+ * 受邀者自設密碼啟用帳號：沿用重設密碼頁殼（置中卡片 + 新密碼 / 確認），複雜度驗證重用 makeResetPasswordSchema（依 PWD_POLICY 動態）。
  * 成功導回登入；token 無效 / 逾期顯示錯誤並引導洽管理者重寄（後端 DP_USER_003/004）。
  */
 export function ActivateAccountPage() {
@@ -33,11 +34,16 @@ export function ActivateAccountPage() {
   const [apiError, setApiError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）
+  const { policy, hint } = usePasswordPolicy()
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setApiError(null)
-    const parsed = ResetPasswordSchema.safeParse({ new_password: newPassword, confirm_password: confirmPassword })
+    const parsed = makeResetPasswordSchema(policy?.min_len, policy?.char_types).safeParse({
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    })
     setFieldErrors(getFieldErrors(parsed.success ? null : parsed.error))
     if (!parsed.success) return
 
@@ -80,7 +86,7 @@ export function ActivateAccountPage() {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 error={"new_password" in fieldErrors}
-                helperText={fieldErrors.new_password ?? "至少 8 字元，含大小寫英文 / 數字 / 特殊符號至少 3 種"}
+                helperText={fieldErrors.new_password ?? hint}
                 fullWidth
                 autoComplete="new-password"
               />
