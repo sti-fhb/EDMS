@@ -3,7 +3,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, StringConstraints
 
 _SubjectStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-_BodyStr = Annotated[str, StringConstraints(min_length=1)]
+_BodyStr = Annotated[str, StringConstraints(min_length=1, max_length=10000)]
 Channel = Literal["EMAIL", "MSG", "BOTH"]
 
 

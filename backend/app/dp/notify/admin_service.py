@@ -75,8 +75,10 @@ class TemplateAdminService:
         if module not in self._visible_modules(is_et, is_dm):
             raise AppError(status_code=403, detail=_FORBIDDEN_MSG, error_code="DP_MAIL_005")
 
-        # 系統信（IS_SYSTEM）：擋停用（is_enabled=false）；主旨 / 內文 / 管道仍可改。旗標驅動、不硬編碼碼清單。
-        if template.is_system and not data.is_enabled:
+        # 系統信（IS_SYSTEM）保護：擋停用（is_enabled=false）與「移除 Email 通道」——channel 改為 MSG
+        # 會使系統信 Email 靜默不寄、實質等同停用（Security Review），故一併擋（須保留 EMAIL / BOTH）。
+        # 旗標驅動、不硬編碼碼清單；主旨 / 內文仍可編。
+        if template.is_system and (not data.is_enabled or data.channel == "MSG"):
             raise AppError(status_code=403, detail=_SYSTEM_MSG, error_code="DP_MAIL_003")
 
         before = _snapshot(template)

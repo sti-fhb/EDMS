@@ -11,6 +11,7 @@ from app.core.auth import create_access_token
 from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
 from app.core.operator import OperatorInfo
+from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.notify.admin_service import TemplateAdminService
@@ -134,6 +135,17 @@ async def test_system_template_block_disable(db, admin_gate):
     assert exc.value.status_code == 403 and exc.value.error_code == "DP_MAIL_003"
 
 
+async def test_system_template_block_channel_msg(db, admin_gate):
+    """系統信不可把 channel 改為 MSG（移除 Email 通道＝實質停用）→ DP_MAIL_003（Security Review）。"""
+    admin_gate()
+    await _make_template(db, module="DP", code="SYS_CH", is_system=True, version=1)
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db, module="DP", template_code="SYS_CH", data=_upd(channel="MSG", is_enabled=True, version=1), operator=_OP
+        )
+    assert exc.value.status_code == 403 and exc.value.error_code == "DP_MAIL_003"
+
+
 async def test_system_template_subject_editable(db, admin_gate):
     """系統信主旨 / 內文仍可編（僅擋停用）。"""
     admin_gate()
@@ -205,8 +217,6 @@ async def test_update_channel_both_allowed(db, admin_gate):
 
 
 async def _make_user(db, user_id):
-    from app.core.password_policy import hash_password
-
     db.add(
         DpUser(
             user_id=user_id,
@@ -255,4 +265,13 @@ async def test_no_create_endpoint(client, db, admin_gate):
     await _make_user(db, "tadmin2")
     headers = {"Authorization": f"Bearer {create_access_token(sub='tadmin2', ttl_minutes=15)}"}
     r = await client.post("/api/dp/notify/templates", json={}, headers=headers)
+    assert r.status_code == 405
+
+
+async def test_no_delete_endpoint(client, db, admin_gate):
+    """無刪除範本端點（AC6）：DELETE 單筆 → 405。"""
+    admin_gate(et_admins=("tadmin3",))
+    await _make_user(db, "tadmin3")
+    headers = {"Authorization": f"Bearer {create_access_token(sub='tadmin3', ttl_minutes=15)}"}
+    r = await client.delete("/api/dp/notify/templates/ET/ET_EP", headers=headers)
     assert r.status_code == 405

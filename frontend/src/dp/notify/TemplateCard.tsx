@@ -103,7 +103,8 @@ export function TemplateCard({
               onChange={(e) => setChannel(e.target.value as Channel)}
               sx={{ minWidth: 140 }}
             >
-              {CHANNELS.map((c) => (
+              {/* 系統信須保留 Email 通道（不可改為僅站內、否則等同停用），排除「站內」選項 */}
+              {CHANNELS.filter((c) => !(template.is_system && c.value === "MSG")).map((c) => (
                 <MenuItem key={c.value} value={c.value}>
                   {c.label}
                 </MenuItem>
