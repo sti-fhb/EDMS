@@ -24,6 +24,9 @@ export interface PasswordPolicy {
   expiry_days: number
 }
 
+/** getMe 的共用 query key；WelcomePage / ProfilePage 共用同一快取（單一事實來源，避免字面值漂移）。 */
+export const PROFILE_ME_QUERY_KEY = ["profile", "me"] as const
+
 /** 個人資料 API（US8）。路徑相對於 baseURL（/api）。 */
 export const profileApi = {
   async getMe(): Promise<MeResponse> {

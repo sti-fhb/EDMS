@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { authApi } from "../auth/authService"
 import { useAuth } from "../auth/useAuth"
-import { profileApi } from "../dp/user/profileService"
+import { PROFILE_ME_QUERY_KEY, profileApi } from "../dp/user/profileService"
 
 const TAGLINE = "教育訓練與文件管理系統"
 
@@ -18,7 +18,7 @@ export function WelcomePage() {
   // 本頁為 index 路由、未登入時亦已掛載（被 LoginOverlay 覆蓋）；enabled 僅在已登入且非強制變更
   // 密碼時才發查詢，避免無謂 401（比照 #41 的取捨）。
   const enabled = isAuthenticated && !mustChangePwd
-  const { data: me } = useQuery({ queryKey: ["profile", "me"], queryFn: profileApi.getMe, enabled })
+  const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe, enabled })
   const { data: version } = useQuery({ queryKey: ["app", "version"], queryFn: authApi.version, enabled })
 
   const greeting = me?.user_name ? `歡迎，${me.user_name}` : "歡迎"
