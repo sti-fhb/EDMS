@@ -27,9 +27,9 @@ export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
     setAnchorEl(null)
     // 呼叫登出：寫 LOGOUT 稽核並清除 memory-only token（US1）
     void logout()
-    // 導回主頁：手動登出時避免停在 /profile 等深層路由，重新登入後被留在該頁（應回主頁）。
-    // 用 /portal（真實路由）而非 /；idle-timeout 自動登出不走此路徑、保留原頁（US1 意圖）。
-    navigate("/portal")
+    // 導回主頁（/ ＝中性歡迎頁）：手動登出時避免停在 /profile 等深層路由，重新登入後被留在該頁。
+    // idle-timeout 自動登出不走此路徑、保留原頁（US1 意圖）。
+    navigate("/")
   }
 
   return (

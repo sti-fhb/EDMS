@@ -6,17 +6,17 @@ import type { UserEvent } from "@testing-library/user-event"
 import { RouterProvider, createMemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 
-import { PortalLayout } from "./PortalLayout"
+import { AppShell } from "./AppShell"
 import { RootLayout } from "./RootLayout"
 import { AuthProvider } from "../auth/AuthProvider"
-import { PortalPage } from "../portal/PortalPage"
+import { WelcomePage } from "../home/WelcomePage"
 import { muiTheme } from "../styles/muiTheme"
 
 const HEADER_TITLE = "EDMS 教育訓練文件管理系統"
 
 /**
- * 以真實 AuthProvider + memory router 渲染「RootLayout → PortalLayout → PortalPage」，
- * 貼近正式 provider 疊法（見 main.tsx）。不 mock service，登入 / 登出走 MSW（test/server.ts）。
+ * 以真實 AuthProvider + memory router 渲染「RootLayout → AppShell → WelcomePage」，
+ * 貼近正式 provider 疊法（見 main.tsx）。不 mock service，登入 / 登出 / getMe / version 走 MSW。
  */
 function renderApp() {
   const router = createMemoryRouter(
@@ -25,14 +25,13 @@ function renderApp() {
         element: <RootLayout />,
         children: [
           {
-            path: "portal",
-            element: <PortalLayout />,
-            children: [{ index: true, element: <PortalPage /> }],
+            element: <AppShell />,
+            children: [{ index: true, element: <WelcomePage /> }],
           },
         ],
       },
     ],
-    { initialEntries: ["/portal"] },
+    { initialEntries: ["/"] },
   )
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -52,29 +51,28 @@ async function login(user: UserEvent) {
   await user.click(screen.getByRole("button", { name: "登入" }))
 }
 
-describe("PortalLayout", () => {
-  it("登入後入口頁：顯示全域頂列與登出、模組卡片，且無側欄", async () => {
+describe("AppShell 統一導覽殼", () => {
+  it("登入後：全域頂列 + 常駐側欄（後台群組）+ 中性歡迎頁", async () => {
     const user = userEvent.setup()
     renderApp()
     await login(user)
-    // 全域頂列（對齊 wireframe brand）與入口頁內容
+    // 全域頂列品牌
     expect(await screen.findByText(HEADER_TITLE)).toBeInTheDocument()
-    expect(await screen.findByText("教育訓練（ET）")).toBeInTheDocument()
-    // 頂列右上個資選單內含登出
-    await user.click(screen.getByRole("button", { name: "個資選單" }))
-    expect(screen.getByRole("menuitem", { name: "登出" })).toBeInTheDocument()
-    // 入口頁無左側側欄（僅頂列 + 卡片），對齊 wireframe
-    expect(document.querySelector(".MuiDrawer-root")).toBeNull()
+    // 中性歡迎頁：問候帶姓名（MSW /me = 測試員）+ 系統定位
+    expect(await screen.findByText("歡迎，測試員")).toBeInTheDocument()
+    expect(screen.getByText("教育訓練與文件管理系統")).toBeInTheDocument()
+    // 側欄常駐（與舊入口頁「無側欄」相反）：後台群組 + Drawer 存在
+    expect(screen.getByText("系統管理者後台")).toBeInTheDocument()
+    expect(document.querySelector(".MuiDrawer-root")).not.toBeNull()
   })
 
-  it("入口頁點登出 → 清狀態、回到登入頁", async () => {
+  it("點登出 → 清狀態、回登入頁", async () => {
     const user = userEvent.setup()
     renderApp()
     await login(user)
     await screen.findByText(HEADER_TITLE)
     // 已登入：登入表單已撤除
     expect(screen.queryByLabelText("帳號（Email）")).not.toBeInTheDocument()
-    // 開個資選單 → 登出
     await user.click(screen.getByRole("button", { name: "個資選單" }))
     await user.click(screen.getByRole("menuitem", { name: "登出" }))
     // 登出後 LoginOverlay 重現（回登入頁）

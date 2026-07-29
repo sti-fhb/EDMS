@@ -3,37 +3,38 @@ import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 
-import { DP_NAV_ITEMS } from "../layouts/navItems"
+import { NAV_GROUPS } from "../layouts/navItems"
 import { muiTheme } from "../styles/muiTheme"
 import { Sidebar } from "./Sidebar"
 
-describe("Sidebar", () => {
-  it("渲染 DP 後台六個導覽項目並對齊 wireframe 畫面", () => {
-    render(
-      <ThemeProvider theme={muiTheme}>
-        <MemoryRouter>
-          <Sidebar />
-        </MemoryRouter>
-      </ThemeProvider>,
-    )
+function renderSidebar() {
+  return render(
+    <ThemeProvider theme={muiTheme}>
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    </ThemeProvider>,
+  )
+}
 
-    expect(DP_NAV_ITEMS).toHaveLength(6)
-    for (const item of DP_NAV_ITEMS) {
+describe("Sidebar", () => {
+  it("渲染「系統管理者後台」群組標題與其六個導覽項目", () => {
+    renderSidebar()
+    const adminGroup = NAV_GROUPS.find((g) => g.title === "系統管理者後台")
+    expect(adminGroup).toBeDefined()
+    expect(screen.getByText("系統管理者後台")).toBeInTheDocument()
+    expect(adminGroup?.items).toHaveLength(6)
+    for (const item of adminGroup?.items ?? []) {
       expect(screen.getByText(item.label)).toBeInTheDocument()
     }
   })
 
   it("每個導覽項目連到對應 /dp 路由", () => {
-    render(
-      <ThemeProvider theme={muiTheme}>
-        <MemoryRouter>
-          <Sidebar />
-        </MemoryRouter>
-      </ThemeProvider>,
-    )
-
-    for (const item of DP_NAV_ITEMS) {
-      expect(screen.getByRole("link", { name: item.label })).toHaveAttribute("href", item.path)
+    renderSidebar()
+    for (const group of NAV_GROUPS) {
+      for (const item of group.items) {
+        expect(screen.getByRole("link", { name: item.label })).toHaveAttribute("href", item.path)
+      }
     }
   })
 })

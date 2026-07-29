@@ -296,8 +296,8 @@
 <!-- ===== Sidebar ===== -->
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-nav">
-    <!-- 模組入口頁（登入後落點；實際頁面無側欄，此連結僅供 wireframe 檢視切換）-->
-    <a class="nav-link" href="#" data-screen="dp-portal"><i class="bi bi-door-open"></i><span>模組入口頁（登入後落點）</span></a>
+    <!-- 登入後主頁（中性歡迎頁；統一 shell 下側欄常駐，本連結即主頁）-->
+    <a class="nav-link" href="#" data-screen="dp-portal"><i class="bi bi-house-door"></i><span>登入後主頁（歡迎頁）</span></a>
 
     <!-- 教育訓練（他模組：細項列出，本檔點擊無反應）-->
     <button class="module-header collapsed" onclick="toggleModule('et')"><span><i class="bi bi-mortarboard module-icon"></i><span class="module-label">教育訓練</span></span><i class="bi bi-chevron-down caret"></i></button>
@@ -308,7 +308,7 @@
       <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>我的課程</span></a>
     </div>
 
-    <!-- 文件管理（他模組：細項列出，本檔點擊無反應；僅具任一 DM 角色者顯示此組——demo 由入口頁勾選切換，2026-07-09 釐清第 4 輪定案）-->
+    <!-- 文件管理（他模組：細項列出，本檔點擊無反應；僅具任一 DM 角色者顯示此組——無 DM 角色者完全隱藏此群組，最小知悉，導覽重構 #89 D1）-->
     <button class="module-header collapsed" id="mod-dm-header" onclick="toggleModule('dm')"><span><i class="bi bi-folder2 module-icon"></i><span class="module-label">文件管理</span></span><i class="bi bi-chevron-down caret"></i></button>
     <div class="module-items collapsed" id="mod-dm">
       <a class="nav-link" href="#"><i class="bi bi-collection"></i><span>文件庫</span></a>
@@ -320,7 +320,7 @@
       <a class="nav-link" href="#"><i class="bi bi-sliders"></i><span>系統設定</span></a>
     </div>
 
-    <!-- 系統管理後台（本檔：展開，功能可跳畫面；僅 ET / DM 管理者顯示此組、按模組過濾——demo 由入口頁勾選切換）-->
+    <!-- 系統管理者後台（統一 shell 常駐側欄群組；僅 is_module_admin 顯示，T049 接線前之過渡期先對所有登入者顯示——導覽重構 #89 D2）-->
     <button class="module-header" id="mod-dp-header" onclick="toggleModule('dp')"><span><i class="bi bi-hdd-network module-icon"></i><span class="module-label">系統管理後台</span></span><i class="bi bi-chevron-down caret"></i></button>
     <div class="module-items" id="mod-dp">
       <a class="nav-link active" href="#" data-screen="dp-users"><i class="bi bi-people-fill"></i><span>使用者管理</span></a>
@@ -336,73 +336,31 @@
 <!-- ===== Main Content ===== -->
 <main class="main-content">
 
-  <!-- ============ dp-portal 模組入口頁（UCDP001 登入後落點；直接於 DP 登入且無來源時顯示） ============ -->
+  <!-- ============ dp-portal 登入後主頁（UCDP001 登入後落點；中性歡迎頁，統一 shell 內容區） ============ -->
   <div id="dp-portal" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-door-open text-tsbms-green me-2"></i>模組入口頁</div>
+      <div class="screen-title"><i class="bi bi-house-door text-tsbms-green me-2"></i>登入後主頁（中性歡迎頁）</div>
       <div class="screen-meta">UCDP001 ｜ 登入後落點（無來源模組時）｜ 所有登入使用者</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時而被攔到登入頁者</strong>（點通知信連結、開書籤、逾時重登），登入後<strong>返回原本要去的頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊使用者）顯示本頁。<strong>ET 入口恆顯示</strong>（人人具 ET 學員預設角色）、<strong>DM 卡恆顯示——未具任何 DM 角色者顯示為「未開通」鎖定狀態</strong>（引導洽管理者，不進入）、個人資料維護恆顯示；<strong>不顯示系統管理後台入口</strong>（後台入口僅設於 ET / DM 介面之管理選單）。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時被攔到登入頁者</strong>（通知信連結、書籤、逾時重登）登入後<strong>返回原目標頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊）顯示本頁。登入後採<strong>統一 shell</strong>（頂列 + 依權限側欄 + 內容區），主頁為<strong>中性歡迎頁</strong>（問候 + 系統定位 + 版本），不綁任何模組權限、永遠存在。<strong>側欄依權限顯示</strong>：無某模組角色者<strong>完全看不到該模組群組</strong>（最小知悉，不呈鎖定卡）；「系統管理者後台」群組僅管理者可見（過渡期先對所有登入者顯示）。（導覽重構 #89，取代原卡片入口頁）</div>
 
-    <div class="alert alert-success py-2 px-3" style="font-size:0.9rem;">
-      <button type="button" class="btn-close float-end" style="font-size:0.7rem;" onclick="this.parentElement.style.display='none'"></button>
-      <i class="bi bi-stars me-1"></i><strong>歡迎使用 EDMS！</strong>您已可使用「教育訓練」（學員）。如需使用文件管理或其他權限，請洽您的單位主管或管理者開通。<span class="text-muted small">（首次登入顯示一次，可關閉）</span>
+    <!-- 中性歡迎頁內容（顯示於統一 shell 內容區；左側常駐側欄見本 wireframe 左欄） -->
+    <div class="wf-card p-4" style="max-width:640px;">
+      <div class="h4 mb-1">歡迎，王小明</div>
+      <div class="text-muted">教育訓練與文件管理系統</div>
+      <div class="text-muted small mt-3">版本 1.0.0</div>
     </div>
-
-    <div class="d-flex gap-4 mb-3" style="font-size:0.85rem;">
-      <div class="form-check">
-        <input class="form-check-input" type="checkbox" id="portal-demo-dm" onchange="dpPortalToggleDm(this)">
-        <label class="form-check-label" for="portal-demo-dm"><em>（展示切換）模擬具任一 DM 角色</em></label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" type="checkbox" id="portal-demo-admin" checked onchange="dpPortalToggleAdmin(this)">
-        <label class="form-check-label" for="portal-demo-admin"><em>（展示切換）模擬具 ET / DM 管理者角色（影響側欄「系統管理後台」組）</em></label>
-      </div>
-    </div>
-
-    <div class="row g-3">
-      <div class="col-md-4">
-        <div class="wf-card h-100 text-center py-4" style="cursor:pointer;" onclick="showToast('導向教育訓練（依 ET 角色進入預設首頁）')">
-          <div style="font-size:2.2rem; color:#2e7d32;"><i class="bi bi-mortarboard"></i></div>
-          <div class="fw-bold mt-2">教育訓練</div>
-          <div class="text-muted small mt-1">課程學習、測驗與問卷<br>（依 ET 角色導向預設首頁）</div>
-        </div>
-      </div>
-      <div class="col-md-4" id="portal-dm-card">
-        <!-- 已開通狀態（具任一 DM 角色）-->
-        <div class="wf-card h-100 text-center py-4" id="portal-dm-unlocked" style="cursor:pointer; display:none;" onclick="showToast('導向文件管理（DM00 系統儀表板）')">
-          <div style="font-size:2.2rem; color:#2e7d32;"><i class="bi bi-folder2"></i></div>
-          <div class="fw-bold mt-2">文件管理</div>
-          <div class="text-muted small mt-1">文件庫、簽核與版本管控</div>
-        </div>
-        <!-- 未開通鎖定狀態（無任何 DM 角色；預設展示此狀態）-->
-        <div class="wf-card h-100 text-center py-4" id="portal-dm-locked" style="background:#f5f5f5; border:1px dashed #bdbdbd; color:#9e9e9e; cursor:default;" onclick="showToast('尚未開通文件管理權限，請洽您的單位主管或管理者')">
-          <div style="font-size:2.2rem;"><i class="bi bi-lock"></i></div>
-          <div class="fw-bold mt-2">文件管理（未開通）</div>
-          <div class="small mt-1">如需使用文件管理，請洽您的<br><strong>單位主管或管理者</strong>開通權限</div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="wf-card h-100 text-center py-4" style="cursor:pointer;" onclick="goScreen('dp-profile')">
-          <div style="font-size:2.2rem; color:#6c757d;"><i class="bi bi-person-gear"></i></div>
-          <div class="fw-bold mt-2">個人資料維護</div>
-          <div class="text-muted small mt-1">姓名、帳號（Email）、密碼</div>
-        </div>
-      </div>
-    </div>
+    <div class="text-muted small mt-2"><em>💡 P2+ 再於此依權限疊加「管理者概況」「ET / DM 儀表板」widget（空卡不顯示）。</em></div>
 
     <details class="wf-screen-note">
-      <summary>💡 內部設計註記（UCDP001 模組入口頁；鎖定卡與側欄規則已於 2026-07-09 釐清第 4 輪定案）</summary>
+      <summary>💡 內部設計註記（UCDP001 登入後主頁；導覽重構 #89 D1 / D2，2026-07-28 定案，取代 2026-07-09 第 4 輪卡片頁）</summary>
       <ul class="mb-0 mt-2">
-        <li>登入端點支援 <code>redirect</code>（原目標頁面路徑，白名單檢核防 open redirect）。觸發情境：① 通知信連結（課程 / 文件）未登入點擊；② <strong>閒置 15 分逾時重新登入（最頻繁）</strong>；③ 書籤 / 直接輸入模組網址。有 redirect→登入後返回原頁面；無（直接開系統、新註冊）→本頁。</li>
-        <li>本頁載入時呼叫「我的模組角色摘要」端點（聚合 ET / DM <code>has_any_role</code>）決定 DM 卡狀態；ET 恆可用（學員為帳號建立時授予之唯一預設角色）。</li>
-        <li><strong>DM 卡雙狀態</strong>：具任一 DM 角色＝可點入；無任何 DM 角色＝<strong>「未開通」鎖定卡</strong>（灰卡 + 鎖頭 + 引導洽單位主管 / 管理者，DP-MSG-LOGIN-008），點擊僅提示不進入。只揭露模組存在、不揭露任何文件內容（存取控制仍由 DM 端 enforce）。</li>
-        <li><strong>歡迎橫幅</strong>：首次登入顯示一次、可關閉（「已顯示過」旗標儲存位置於實作定）。</li>
-        <li><strong>側欄可見性（適用 ET / DM 介面內之側欄，由各模組 enforce）</strong>：教育訓練組人人可見；<strong>文件管理組僅具任一 DM 角色者可見（未開通＝隱藏，非鎖定顯示）</strong>——引導職責歸入口頁鎖定卡，側欄保持乾淨；系統管理後台組僅 ET / DM 管理者可見。本頁上方兩個勾選為展示切換。</li>
-        <li>未來擴充（backlog，不在本期）：鎖定卡加「申請開通」按鈕（寄信通知該模組全部管理者；不建申請單、不追蹤狀態）。</li>
-        <li>實際入口頁<strong>無側欄</strong>（僅上方導覽 + 三卡）；wireframe 側欄之「模組入口頁」連結僅供檢視切換。</li>
-        <li>DP 後台入口不在本頁——僅設於 ET / DM 介面之管理選單（2026-07-08 釐清第 2 輪 Q4）。</li>
+        <li>登入端點支援 <code>redirect</code>（原目標頁面路徑，白名單檢核防 open redirect）。有 redirect→登入後返回原頁；無（直接開系統、新註冊）→本頁。</li>
+        <li><strong>統一 shell</strong>：登入後所有頁（歡迎頁 / 個人資料 / 各模組 / 系統管理者後台）共用同一頂列 + 常駐側欄 + 內容區，取代原「模組入口卡片頁（無側欄）+ 分離後台」，導覽不再割裂。</li>
+        <li><strong>中性歡迎頁</strong>：問候（姓名取自 <code>GET /dp/user/me</code>）+ 系統定位一句話 + 版本（<code>GET /version</code>）。不綁模組權限、永遠存在（用不到某模組的主管其權限被關也仍有主頁）。不再使用可關閉的一次性歡迎橫幅。</li>
+        <li><strong>側欄依權限（最小知悉）</strong>：無某模組角色者<strong>完全隱藏</strong>該模組群組（不呈「未開通」鎖定卡；<strong>DP-MSG-LOGIN-008 已廢除</strong>）。「系統管理者後台」群組僅 <code>is_module_admin</code> 可見；該判定接線（T049）前之<strong>過渡期先對所有登入者顯示</strong>。</li>
+        <li><strong>分階段</strong>：P1＝統一 shell + 中性歡迎頁 + 後台側欄群組（本畫面）；P2＝管理者概況 widget（帳號 4 指標）+ 後台群組改真 gate；P3 / P4＝教育訓練 / 文件管理側欄群組 + 內嵌各模組儀表板。ET / DM 儀表板實際內容由各模組 spec 定義。</li>
       </ul>
     </details>
   </div>

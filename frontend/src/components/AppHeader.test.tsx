@@ -26,7 +26,7 @@ function renderHeader(overrides: Partial<AuthState> = {}) {
         <MemoryRouter initialEntries={["/profile"]}>
           <Routes>
             <Route path="/profile" element={<AppHeader />} />
-            <Route path="/portal" element={<div>主頁</div>} />
+            <Route path="/" element={<div>主頁</div>} />
           </Routes>
         </MemoryRouter>
       </AuthContext.Provider>
@@ -40,9 +40,9 @@ describe("AppHeader 個資選單", () => {
     render(
       <ThemeProvider theme={muiTheme}>
         <AuthContext.Provider value={authStub}>
-          <MemoryRouter initialEntries={["/portal"]}>
+          <MemoryRouter initialEntries={["/"]}>
             <Routes>
-              <Route path="/portal" element={<AppHeader />} />
+              <Route path="/" element={<AppHeader />} />
               <Route path="/profile" element={<div>個人資料頁</div>} />
             </Routes>
           </MemoryRouter>
@@ -54,7 +54,7 @@ describe("AppHeader 個資選單", () => {
     expect(await screen.findByText("個人資料頁")).toBeInTheDocument()
   })
 
-  it("登出後導回主頁（避免停在 /profile 深層路由）", async () => {
+  it("登出後導回主頁（/ ＝中性歡迎頁，避免停在 /profile 深層路由）", async () => {
     const user = userEvent.setup()
     renderHeader()
     await user.click(screen.getByRole("button", { name: "個資選單" }))
