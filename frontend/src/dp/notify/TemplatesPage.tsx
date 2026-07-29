@@ -1,8 +1,6 @@
 import EmailIcon from "@mui/icons-material/Email"
-import LockIcon from "@mui/icons-material/Lock"
 import Alert from "@mui/material/Alert"
 import Button from "@mui/material/Button"
-import Chip from "@mui/material/Chip"
 import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
@@ -58,20 +56,20 @@ export function TemplatesPage() {
           <Stack direction="row" alignItems="center" spacing={1}>
             <span style={{ fontFamily: "monospace" }}>{r.template_code}</span>
             <span>{r.template_name}</span>
-            {r.is_system && <Chip icon={<LockIcon />} label="系統信" size="small" />}
           </Stack>
         ),
       },
       {
         key: "channel",
         title: "管道",
+        width: 220,
         render: (_v, r) => (
           <TextField
             select
             size="small"
             value={r.channel}
             onChange={(e) => changeChannel(r, e.target.value as Channel)}
-            sx={{ minWidth: 150 }}
+            sx={{ width: 190 }}
           >
             {/* 系統信須保留 Email 通道（不可改為僅系統內部、否則等同停用），排除「系統內部」選項 */}
             {CHANNELS.filter((c) => !(r.is_system && c.value === "MSG")).map((c) => (

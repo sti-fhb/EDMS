@@ -12,11 +12,12 @@ async function gotoEtTab(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
-  it("依 MODULE 分頁條列；DP 系統信標記系統信、停用鈕禁用（不可停用）", async () => {
+  it("依 MODULE 分頁條列；DP 系統信之停用鈕禁用（不可停用；系統信身分由分頁標示、列上不重複標記）", async () => {
     renderWithProviders(<TemplatesPage />)
-    // DP 頁籤預設：見系統信 PWD_RESET + 系統信標記
+    // DP 頁籤預設：見系統信 PWD_RESET
     expect(await screen.findByText("PWD_RESET")).toBeInTheDocument()
-    expect(screen.getByText("系統信")).toBeInTheDocument()
+    // 列上不再重複「系統信」標記（已在「系統信（共用）」分頁下）
+    expect(screen.queryByText("系統信")).not.toBeInTheDocument()
     // 系統信「停用」鈕禁用
     expect(screen.getByRole("button", { name: "停用" })).toBeDisabled()
   })
