@@ -15,7 +15,7 @@
 1. **Given** ET 管理者進入通知範本頁，**When** 頁面載入，**Then** 列出 `MODULE=ET` 之範本與 `MODULE=DP` 系統信；`MODULE=DM` 範本**不顯示**；DM 管理者反之（見 DM + DP）
 2. **Given** 管理者選取範本編輯主旨、內文、管道（Email / 站內 / 兩者）、啟用停用，**When** 儲存且版本未衝突，**Then** 寫入 `DP_NOTIFY_TEMPLATE`（版本 +1）、寫入稽核、提示（DP-MSG-TEMPLATES-003）；後續 US6 發信即以新範本渲染
 3. **Given** 範本被停用，**When** 模組觸發該事件，**Then** 該類 Email 不寄、觸發事件照常運作（見 US6）
-4. **Given** 範本為 DP 系統信（`MODULE=DP`：密碼重設 / 帳號變更驗證 / 密碼到期提醒），**When** 管理者嘗試停用或刪除，**Then** 阻擋並提示（DP-MSG-TEMPLATES-001）；主旨 / 內文仍可編輯（兩管理者皆可，共用項）
+4. **Given** 範本為 DP 系統信（`MODULE=DP`、`IS_SYSTEM=true` 之帳號安全信：密碼重設 / 帳號註冊驗證 / 帳號變更驗證 / 密碼到期提醒），**When** 管理者嘗試停用或刪除，**Then** 阻擋並提示（DP-MSG-TEMPLATES-001）；主旨 / 內文仍可編輯（兩管理者皆可，共用項）
 5. **Given** 兩管理者同時編輯同一範本，**When** 後儲存者之版本落後，**Then** 拒絕儲存並提示重新載入（DP-MSG-TEMPLATES-002，樂觀鎖）
 6. **Given** 管理者檢視範本清單，**When** 尋找新增 / 刪除範本功能，**Then** 無此功能——事件（`TEMPLATE_CODE`）固定，內容不同的通知＝同表不同列，由系統種子資料建立
 7. **Given** ET 管理者以直接呼叫 API 之方式編輯 `MODULE=DM` 範本，**When** 請求到達，**Then** 伺服器端拒絕（DP-MSG-TEMPLATES-004）
@@ -25,7 +25,7 @@
 
 - **FR-DP-US9-01**: 通知範本 MUST 統一存 `DP_NOTIFY_TEMPLATE`（`MODULE` + `TEMPLATE_CODE` 唯一），欄位含主旨、內文、可用變數、管道、啟用停用、版本
 - **FR-DP-US9-02**: 編輯頁 MUST 按 `MODULE` 過濾——ET 管理者編輯 `MODULE=ET`、DM 管理者編輯 `MODULE=DM`，互不可見；`MODULE=DP` 系統信為共用項、兩管理者皆可編輯；過濾 MUST 於伺服器端 enforce
-- **FR-DP-US9-03**: `MODULE=DP` 系統信（密碼重設 / 帳號變更驗證 / 密碼到期提醒）MUST NOT 允許停用或刪除（帳號安全信）；主旨 / 內文可編輯
+- **FR-DP-US9-03**: 標記為系統信者（`IS_SYSTEM=true`，即 `MODULE=DP` 帳號安全信：密碼重設 `PWD_RESET` / 帳號註冊驗證 `ACCOUNT_VERIFY` / 帳號變更驗證 `EMAIL_CHANGE_VERIFY` / 密碼到期提醒 `PWD_EXPIRY_REMIND`）MUST NOT 允許停用或刪除；主旨 / 內文可編輯。系統信保護 MUST 依 `IS_SYSTEM` 旗標判定，MUST NOT 於程式硬編碼 `TEMPLATE_CODE` 清單（日後新增系統信只需種子設 `IS_SYSTEM=true`，無須改碼）
 - **FR-DP-US9-04**: 事件（`TEMPLATE_CODE`）MUST 固定不可新增 / 刪除；各模組事件之啟停語意由模組規格定義（如 DM 9 項事件、未讀提醒之統一控制）
 - **FR-DP-US9-05**: 儲存 MUST 採版本樂觀鎖；版本衝突 MUST 拒絕並提示重載
 - **FR-DP-US9-06**: 範本異動 MUST 寫入 `DP_AUDIT_LOG`（含異動前後值）；儲存後 US6 發信 MUST 即以最新啟用中範本渲染
@@ -43,7 +43,7 @@
 ## 前置依賴
 
 - 操作者具 ET 或 DM 管理者角色並已登入（US1 / US7）
-- 範本種子資料（DP 系統信 3 支 + ET / DM 各模組事件）於 data-model / migration 階段定義
+- 範本種子資料（DP 系統信 4 支：`PWD_RESET` / `ACCOUNT_VERIFY` / `EMAIL_CHANGE_VERIFY` / `PWD_EXPIRY_REMIND` + ET / DM 各模組事件）於 data-model / migration 階段定義
 - 發信渲染為 US6；DM 事件之啟停業務語意見 [../dm/spec_us1.md](../dm/spec_us1.md) FR-007
 
 ## 相關文件
