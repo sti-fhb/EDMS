@@ -84,7 +84,7 @@ export function TemplatesPage() {
         key: "actions",
         title: "操作",
         render: (_v, r) => (
-          <Stack direction="row" spacing={1} justifyContent="flex-start">
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
             {r.is_enabled ? (
               <Button
                 size="small"
