@@ -6,20 +6,17 @@ import CardContent from "@mui/material/CardContent"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
-import ArrowBackIcon from "@mui/icons-material/ArrowBack"
+import ManageAccountsIcon from "@mui/icons-material/ManageAccounts"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
 
 import { ChangePasswordDialog } from "./ChangePasswordDialog"
-import { profileApi } from "./profileService"
+import { PROFILE_ME_QUERY_KEY, profileApi } from "./profileService"
 import { EmailChangeSchema, NameSchema } from "./schemas/profileSchemas"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatCountdown, useCooldown } from "../../hooks/useCooldown"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
-
-const PROFILE_QUERY_KEY = ["profile", "me"] as const
 
 /**
  * 個人資料維護頁（US8 / UCDP004，dp-profile）。所有登入者維護**自己的**姓名 / Email / 密碼。
@@ -28,8 +25,7 @@ const PROFILE_QUERY_KEY = ["profile", "me"] as const
 export function ProfilePage() {
   const { message } = useNotification()
   const qc = useQueryClient()
-  const navigate = useNavigate()
-  const { data: me } = useQuery({ queryKey: PROFILE_QUERY_KEY, queryFn: profileApi.getMe })
+  const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe })
 
   // 姓名顯示值：使用者編輯過用草稿，否則帶伺服器現值（避免以 effect 同步 query→state）
   const [nameDraft, setNameDraft] = useState<string | null>(null)
@@ -50,7 +46,7 @@ export function ProfilePage() {
     setSavingName(true)
     try {
       await profileApi.updateName(parsed.data.user_name)
-      await qc.invalidateQueries({ queryKey: PROFILE_QUERY_KEY })
+      await qc.invalidateQueries({ queryKey: PROFILE_ME_QUERY_KEY })
       message.success("姓名已更新")
     } catch (err) {
       message.error(toApiError(err).errorMessage)
@@ -66,7 +62,7 @@ export function ProfilePage() {
     setSendingEmail(true)
     try {
       const retryAfter = await profileApi.requestEmailChange(parsed.data.new_email)
-      await qc.invalidateQueries({ queryKey: PROFILE_QUERY_KEY })
+      await qc.invalidateQueries({ queryKey: PROFILE_ME_QUERY_KEY })
       setNewEmail("")
       if (retryAfter) cooldown.start(retryAfter) // 成功寄出 → 起算冷卻倒數
       message.success("驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入")
@@ -83,13 +79,13 @@ export function ProfilePage() {
   }
 
   return (
-    <Box sx={{ p: 3, maxWidth: 640, mx: "auto" }}>
-      <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)} sx={{ mb: 1 }}>
-        返回上一頁
-      </Button>
-      <Typography variant="h5" gutterBottom>
-        個人資料維護
-      </Typography>
+    <Box sx={{ p: 3 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+        <ManageAccountsIcon color="primary" />
+        <Typography variant="h5" component="h1">
+          個人資料維護
+        </Typography>
+      </Stack>
       <Alert severity="info" sx={{ mb: 2 }}>
         姓名 / 帳號 / 密碼為共用資料，變更後於 ET / DM 兩端同步生效。
       </Alert>

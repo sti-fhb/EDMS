@@ -4,8 +4,7 @@ import { ActivateAccountPage } from "./auth/ActivateAccountPage"
 import { ResetPasswordPage } from "./auth/ResetPasswordPage"
 import { VerifyEmailChangePage } from "./auth/VerifyEmailChangePage"
 import { VerifyEmailPage } from "./auth/VerifyEmailPage"
-import { DpLayout } from "./layouts/DpLayout"
-import { PortalLayout } from "./layouts/PortalLayout"
+import { AppShell } from "./layouts/AppShell"
 import { RootLayout } from "./layouts/RootLayout"
 import { AuditPage } from "./dp/audit/AuditPage"
 import { TemplatesPage } from "./dp/notify/TemplatesPage"
@@ -14,7 +13,7 @@ import { RolesPage } from "./dp/roles/RolesPage"
 import { SchedulePage } from "./dp/schedules/SchedulePage"
 import { ProfilePage } from "./dp/user/ProfilePage"
 import { UsersPage } from "./dp/users/UsersPage"
-import { PortalPage } from "./portal/PortalPage"
+import { WelcomePage } from "./home/WelcomePage"
 
 export const router = createBrowserRouter([
   // 密碼重設頁：信中連結落點，免登入（置於 RootLayout 外，不被登入 overlay 覆蓋）
@@ -28,29 +27,26 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
-      { index: true, element: <Navigate to="/portal" replace /> },
       {
-        path: "portal",
-        element: <PortalLayout />,
-        children: [{ index: true, element: <PortalPage /> }],
-      },
-      {
-        // 個人資料維護（US8）：所有登入者可用，沿用入口頁頂列（無側欄）
-        path: "profile",
-        element: <PortalLayout />,
-        children: [{ index: true, element: <ProfilePage /> }],
-      },
-      {
-        path: "dp",
-        element: <DpLayout />,
+        // 統一 shell（#89 導覽重構）：登入後所有頁共用頂列 + 常駐側欄
+        element: <AppShell />,
         children: [
-          { index: true, element: <Navigate to="/dp/users" replace /> },
-          { path: "users", element: <UsersPage /> },
-          { path: "params", element: <ParamsPage /> },
-          { path: "templates", element: <TemplatesPage /> },
-          { path: "roles", element: <RolesPage /> },
-          { path: "audit", element: <AuditPage /> },
-          { path: "schedule", element: <SchedulePage /> },
+          // 主頁＝中性歡迎頁（取代原 portal 卡片頁）
+          { index: true, element: <WelcomePage /> },
+          // 個人資料維護（US8）：所有登入者可用，改入統一 shell（側欄常駐）
+          { path: "profile", element: <ProfilePage /> },
+          {
+            path: "dp",
+            children: [
+              { index: true, element: <Navigate to="/dp/users" replace /> },
+              { path: "users", element: <UsersPage /> },
+              { path: "params", element: <ParamsPage /> },
+              { path: "templates", element: <TemplatesPage /> },
+              { path: "roles", element: <RolesPage /> },
+              { path: "audit", element: <AuditPage /> },
+              { path: "schedule", element: <SchedulePage /> },
+            ],
+          },
         ],
       },
     ],

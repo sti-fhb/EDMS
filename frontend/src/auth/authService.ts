@@ -34,16 +34,7 @@ export interface ActivateAccountRequest {
   confirm_password: string
 }
 
-export interface ModuleRoleStatus {
-  has_role: boolean
-}
-
-export interface ModuleSummary {
-  et: ModuleRoleStatus
-  dm: ModuleRoleStatus
-}
-
-/** 認證 API（US1）：登入 / 換發 / 登出 / 入口頁模組摘要。路徑相對於 baseURL（/api）。 */
+/** 認證 API（US1）：登入 / 換發 / 登出 / 系統版本。路徑相對於 baseURL（/api）。 */
 export const authApi = {
   // register / resendVerification 回傳後端 retry_after（驗證信寄送冷卻秒數，#74），供前端起算倒數；無則 undefined。
   async register(payload: RegisterRequest): Promise<number | undefined> {
@@ -77,8 +68,8 @@ export const authApi = {
   async logout(): Promise<void> {
     await http.post("/dp/user/logout")
   },
-  async moduleSummary(): Promise<ModuleSummary> {
-    const { data } = await http.get<ModuleSummary>("/dp/user/module-summary")
-    return data
+  async version(): Promise<string> {
+    const { data } = await http.get<{ version: string }>("/version")
+    return data.version
   },
 }

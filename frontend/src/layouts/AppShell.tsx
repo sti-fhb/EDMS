@@ -8,11 +8,15 @@ import { Sidebar } from "../components/Sidebar"
 
 const DRAWER_WIDTH = 220
 
-/** DP 後台 layout：頂列 + 左側 sidebar + 主內容 Outlet。 */
-export function DpLayout() {
+/**
+ * 統一 App Shell（#89 導覽重構）：全域頂列 + 常駐側欄 + 主內容。
+ * 取代原分離的 PortalLayout（無側欄卡片頁）與 DpLayout（後台側欄）——登入後各頁（歡迎頁 /
+ * 個人資料 / DP 後台）共用同一 shell、側欄常駐，解決跨區導覽割裂（如個資頁返回不回原側欄）。
+ */
+export function AppShell() {
   return (
     <Box sx={{ display: "flex" }}>
-      <AppHeader />
+      <AppHeader title="EDMS 教育訓練文件管理系統" />
       <Drawer
         variant="permanent"
         sx={{
@@ -24,7 +28,7 @@ export function DpLayout() {
         <Toolbar />
         <Sidebar />
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
+      <Box component="main" sx={{ flexGrow: 1, p: 3, minHeight: "100vh", bgcolor: "background.default" }}>
         <Toolbar />
         <Outlet />
       </Box>

@@ -1,6 +1,7 @@
 import AccountCircle from "@mui/icons-material/AccountCircle"
 import AppBar from "@mui/material/AppBar"
 import Box from "@mui/material/Box"
+import ButtonBase from "@mui/material/ButtonBase"
 import IconButton from "@mui/material/IconButton"
 import Menu from "@mui/material/Menu"
 import MenuItem from "@mui/material/MenuItem"
@@ -27,17 +28,23 @@ export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
     setAnchorEl(null)
     // 呼叫登出：寫 LOGOUT 稽核並清除 memory-only token（US1）
     void logout()
-    // 導回主頁：手動登出時避免停在 /profile 等深層路由，重新登入後被留在該頁（應回主頁）。
-    // 用 /portal（真實路由）而非 /；idle-timeout 自動登出不走此路徑、保留原頁（US1 意圖）。
-    navigate("/portal")
+    // 導回主頁（/ ＝中性歡迎頁）：手動登出時避免停在 /profile 等深層路由，重新登入後被留在該頁。
+    // idle-timeout 自動登出不走此路徑、保留原頁（US1 意圖）。
+    navigate("/")
   }
 
   return (
     <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Toolbar>
-        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          {title}
-        </Typography>
+        <ButtonBase
+          onClick={() => navigate("/")}
+          aria-label="回主頁"
+          sx={{ flexGrow: 1, justifyContent: "flex-start", color: "inherit" }}
+        >
+          <Typography variant="h6" component="div">
+            {title}
+          </Typography>
+        </ButtonBase>
         <Box>
           <IconButton
             size="large"

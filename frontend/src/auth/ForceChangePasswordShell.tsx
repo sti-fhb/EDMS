@@ -49,8 +49,8 @@ export function ForceChangePasswordShell() {
     try {
       await profileApi.changePassword(parsed.data)
       clearMustChangePwd() // 清旗標 → RootLayout 撤下頁殼、放行一般功能
-      // 頁殼為覆蓋當前 URL 的 overlay，完成後導主頁——否則會停在底下殘留的 URL（如 /profile）
-      navigate("/portal")
+      // 頁殼為覆蓋當前 URL 的 overlay，完成後導主頁（/）——否則會停在底下殘留的 URL（如 /profile）
+      navigate("/")
     } catch (err) {
       setApiError(toApiError(err).errorMessage)
     } finally {
