@@ -28,7 +28,7 @@
 | 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
-| 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | — | 📝 body 已補（待開立）|
+| 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | — | 🚀 已開立 [#97](https://github.com/sti-fhb/EDMS/issues/97) |
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
 | F1 | 開發流程 CI 基礎建設（local-ci / ci.yml 預備 / PR 模板 / error-codes 骨架）| — | Foundation-infra | —（不對應 tasks.md 業務 task）| 無 | [#18](https://github.com/sti-fhb/EDMS/issues/18) | 🔨 開發中 |
@@ -749,7 +749,7 @@ DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本�
 
 ---
 
-## Issue #10：[P2-延伸] DP — 操作記錄查詢（dp-audit）（GitHub 待開立）
+## Issue #10：[P2-延伸] DP — 操作記錄查詢（dp-audit）（GitHub [#97](https://github.com/sti-fhb/EDMS/issues/97)）
 
 **對應規格**：[spec_us10.md](spec_us10.md)（US10 / UCDP007，FR-DP-US10-01~06、DP-MSG-AUDIT-001~002）；[data-model.md](data-model.md)（`DP_AUDIT_LOG`：append-only〔僅 `CREATED_*`〕、`MODULE` / `FUNC_NAME` / `ACTION_TYPE`〔LOGIN..DELETE〕/ `TARGET_ID` / `SOURCE_IP` / `BEFORE_VALUE` / `AFTER_VALUE`〔JSON 字串〕/ `ROW_HASH` 鏈式雜湊；索引 `(CREATED_DATE)`、`(CREATED_USER, CREATED_DATE)`、`(MODULE, ACTION_TYPE, CREATED_DATE)`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-audit`）
 **階段**：P2-延伸（稽核**寫入**於各 US 內建，不依賴本 US；查詢 / 匯出介面於核心作業之後交付）
