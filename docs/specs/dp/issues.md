@@ -27,7 +27,7 @@
 | 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #0, #2, #5 | [#68](https://github.com/sti-fhb/EDMS/issues/68) | ✅ 已合併（PR #73）|
 | 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
-| 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 📝 body 已補（待開立）|
+| 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #2 | — | 待補 |
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
@@ -674,9 +674,9 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 
 ---
 
-## Issue #9：[P2-延伸] DP — 通知範本維護（dp-templates）
+## Issue #9：[P2-延伸] DP — 通知範本維護（dp-templates）（GitHub [#92](https://github.com/sti-fhb/EDMS/issues/92)）
 
-**對應規格**：[spec_us9.md](spec_us9.md)（US9 / UCDP011，FR-DP-US9-01~07、DP-MSG-TEMPLATES-001~004）；[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE`：`MODULE`+`TEMPLATE_CODE` 複合 PK、`IS_SYSTEM`、`VERSION` 樂觀鎖、DP 系統信 3 支種子）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 以範本渲染）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-templates`）
+**對應規格**：[spec_us9.md](spec_us9.md)（US9 / UCDP011，FR-DP-US9-01~07、DP-MSG-TEMPLATES-001~004）；[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE`：`MODULE`+`TEMPLATE_CODE` 複合 PK、`IS_SYSTEM`、`VERSION` 樂觀鎖、DP 系統信 4 支種子）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 以範本渲染）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-templates`）
 **階段**：P2-延伸（範本已有內建種子即可運作；編輯功能於發信服務 P1〔US6〕之後交付）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_NOTIFY_TEMPLATE` 表 + **4 支 DP 系統信種子**（`PWD_RESET` / `ACCOUNT_VERIFY` / `EMAIL_CHANGE_VERIFY` / `PWD_EXPIRY_REMIND`，`MODULE=DP`、`IS_SYSTEM=true`）+ `VERSION` 樂觀鎖欄位（ORM `version_id_col` 待本 issue 接）+ 模組管理者判定閘（T017 `module_admin_gate`）
@@ -723,10 +723,10 @@ DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本�
 
 ### 依賴
 
-- **Issue #0（GitHub #16）**：`DP_NOTIFY_TEMPLATE` 表 + 3 支 DP 系統信種子 + `VERSION` 欄 + `module_admin_gate`（T017）
+- **Issue #0（GitHub #16）**：`DP_NOTIFY_TEMPLATE` 表 + 4 支 DP 系統信種子 + `VERSION` 欄 + `module_admin_gate`（T017）
 - **Issue #1（GitHub #27，US6）**：`SRVDP002` `get_template` 渲染（儲存後即時反映，無需額外接線）
 - **跨模組（stub 先行）**：`is_module_admin`（`module_admin_gate`，T017 fail-closed）——過渡期一律回 False，A-strict 下**無人被判為管理者**；比照 US5 dp-params 暫行案（端點對登入者開放、MODULE 過濾邏輯就緒，特權判定待 T049 回歸）
-- **ET / DM 範本種子**：目前僅 DP 系統信 3 支；`MODULE=ET` / `DM` 範本由各模組於其 migration 種子建立（未建前 ET / DM 管理者僅見 DP 系統信）
+- **ET / DM 範本種子**：目前僅 DP 系統信 4 支；`MODULE=ET` / `DM` 範本由各模組於其 migration 種子建立（未建前 ET / DM 管理者僅見 DP 系統信）
 
 ### 注意事項
 
