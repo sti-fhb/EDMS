@@ -28,7 +28,7 @@ export function AppShell() {
         <Toolbar />
         <Sidebar />
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
+      <Box component="main" sx={{ flexGrow: 1, p: 3, minHeight: "100vh", bgcolor: "background.default" }}>
         <Toolbar />
         <Outlet />
       </Box>

@@ -61,4 +61,11 @@ describe("AppHeader 個資選單", () => {
     await user.click(screen.getByRole("menuitem", { name: "登出" }))
     expect(await screen.findByText("主頁")).toBeInTheDocument()
   })
+
+  it("點左上系統標題導回主頁（/）", async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    await user.click(screen.getByRole("button", { name: "回主頁" }))
+    expect(await screen.findByText("主頁")).toBeInTheDocument()
+  })
 })

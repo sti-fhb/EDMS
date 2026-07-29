@@ -1,6 +1,7 @@
 import AccountCircle from "@mui/icons-material/AccountCircle"
 import AppBar from "@mui/material/AppBar"
 import Box from "@mui/material/Box"
+import ButtonBase from "@mui/material/ButtonBase"
 import IconButton from "@mui/material/IconButton"
 import Menu from "@mui/material/Menu"
 import MenuItem from "@mui/material/MenuItem"
@@ -35,9 +36,15 @@ export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
   return (
     <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Toolbar>
-        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          {title}
-        </Typography>
+        <ButtonBase
+          onClick={() => navigate("/")}
+          aria-label="回主頁"
+          sx={{ flexGrow: 1, justifyContent: "flex-start", color: "inherit" }}
+        >
+          <Typography variant="h6" component="div">
+            {title}
+          </Typography>
+        </ButtonBase>
         <Box>
           <IconButton
             size="large"
