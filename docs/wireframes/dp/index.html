@@ -979,10 +979,11 @@
         <div class="col-md-3"><label class="form-label small mb-1">操作者</label><input type="text" class="form-control form-control-sm" placeholder="姓名 / Email"></div>
         <div class="col-md-2"><label class="form-label small mb-1">模組</label><select class="form-select form-select-sm"><option>全部</option><option>DP 平台</option><option>ET 教育訓練</option><option>DM 文件管理</option></select></div>
         <div class="col-md-2"><label class="form-label small mb-1">操作類別</label><select class="form-select form-select-sm"><option>全部</option><option>LOGIN</option><option>LOGOUT</option><option>CREATE</option><option>UPDATE</option><option>DELETE</option></select></div>
+        <div class="col-md-2"><label class="form-label small mb-1">執行結果</label><select class="form-select form-select-sm"><option>全部</option><option>SUCCESS</option><option>FAIL</option></select></div>
         <div class="col-md-3"><label class="form-label small mb-1">期間（起 ～ 訖）</label>
           <div class="d-flex align-items-center gap-1"><input type="date" class="form-control form-control-sm"><span>～</span><input type="date" class="form-control form-control-sm"></div>
         </div>
-        <div class="col-md-2 text-end">
+        <div class="col-md-12 text-end">
           <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search me-1"></i>查詢</button>
           <button class="btn btn-sm btn-tsbms" onclick="showToast('已依當前條件匯出 CSV')"><i class="bi bi-download me-1"></i>匯出</button>
         </div>
@@ -992,27 +993,32 @@
     <div class="wf-card p-0">
       <table class="table table-hover wf-table mb-0 align-middle">
         <thead><tr>
-          <th>時間</th><th>操作者</th><th>模組</th><th>功能</th><th>類別</th><th>對象</th><th>來源 IP</th><th class="text-end">明細</th>
+          <th>時間</th><th>操作者</th><th>模組</th><th>功能</th><th>類別</th><th>結果</th><th>對象</th><th>來源 IP</th><th class="text-end">明細</th>
         </tr></thead>
         <tbody>
           <tr>
             <td>2026-07-06 09:12:03</td><td>陳大華</td><td>DP</td><td>登入</td>
-            <td><span class="audit-badge audit-login">LOGIN</span></td><td>—</td><td>10.1.2.33</td>
+            <td><span class="audit-badge audit-login">LOGIN</span></td><td><span class="status-pill status-active">SUCCESS</span></td><td>—</td><td>10.1.2.33</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
+          </tr>
+          <tr>
+            <td>2026-07-06 09:13:55</td><td>（未知：user@example.com）</td><td>DP</td><td>登入</td>
+            <td><span class="audit-badge audit-login">LOGIN</span></td><td><span class="status-pill status-locked">FAIL</span></td><td>—</td><td>203.0.113.9</td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
           </tr>
           <tr>
             <td>2026-07-06 09:15:22</td><td>陳大華</td><td>DP</td><td>使用者管理</td>
-            <td><span class="audit-badge audit-update">UPDATE</span></td><td>USER: 林小美</td><td>10.1.2.33</td>
+            <td><span class="audit-badge audit-update">UPDATE</span></td><td><span class="status-pill status-active">SUCCESS</span></td><td>USER: 林小美</td><td>10.1.2.33</td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
           </tr>
           <tr>
             <td>2026-07-06 10:02:41</td><td>王曉明</td><td>ET</td><td>課程建立</td>
-            <td><span class="audit-badge audit-create">CREATE</span></td><td>COURSE: 採血新訓 v2</td><td>10.1.2.51</td>
+            <td><span class="audit-badge audit-create">CREATE</span></td><td><span class="status-pill status-active">SUCCESS</span></td><td>COURSE: 採血新訓 v2</td><td>10.1.2.51</td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
           </tr>
           <tr>
             <td>2026-07-06 11:20:08</td><td>李文彬</td><td>DM</td><td>文件廢止</td>
-            <td><span class="audit-badge audit-delete">DELETE</span></td><td>DOC: 採血 SOP v3</td><td>10.1.2.60</td>
+            <td><span class="audit-badge audit-delete">DELETE</span></td><td><span class="status-pill status-active">SUCCESS</span></td><td>DOC: 採血 SOP v3</td><td>10.1.2.60</td>
             <td class="text-end"><button class="btn btn-sm btn-outline-secondary" onclick="openAuditDetail()"><i class="bi bi-eye"></i></button></td>
           </tr>
         </tbody>
@@ -1028,7 +1034,7 @@
         <li><strong>共用可見</strong>：ET / DM 管理者<strong>皆可查全部</strong>（含登入等不分模組之事件），資安監督需要全視野。</li>
         <li><strong>append-only</strong>：不可竄改、不可刪除；以雜湊等方式確保完整性。</li>
         <li>至少稽核：更改密碼、登入成功 / 失敗、系統存取成功 / 失敗、角色 / 權限異動、系統參數 / 清單異動。</li>
-        <li>記錄項目：使用者 ID（非個資型）、時間至秒、功能 / 資源、結果、來源與目的位址、異動前後值（JSONB）。</li>
+        <li>記錄項目：使用者 ID（非個資型）、時間至秒、功能 / 資源、結果、來源與目的位址、異動前後值（JSON 字串，`TEXT` 欄；非 JSONB，見 research §6）。</li>
         <li>至少保留 1 年；每日備份至不同實體並加密。</li>
       </ul>
     </details>
@@ -1182,10 +1188,12 @@
       <tr><th>操作者</th><td>陳大華（USER_ID: 1001）</td></tr>
       <tr><th>模組 / 功能</th><td>DP / 使用者管理</td></tr>
       <tr><th>操作類別</th><td><span class="audit-badge audit-update">UPDATE</span></td></tr>
+      <tr><th>執行結果</th><td><span class="status-pill status-active">SUCCESS</span></td></tr>
       <tr><th>對象</th><td>USER: 林小美（USER_ID: 1042）</td></tr>
       <tr><th>來源 IP</th><td>10.1.2.33</td></tr>
+      <tr><th>事件描述</th><td>手動解鎖帳號、失敗計數歸零</td></tr>
     </tbody></table>
-    <label class="form-label small mb-1">異動前後值（JSONB）</label>
+    <label class="form-label small mb-1">異動前後值（JSON 字串）</label>
     <pre class="bg-light p-2 rounded small mb-0" style="border:1px solid #dee2e6;">{
   "before": { "status": "LOCKED", "fail_count": 5 },
   "after":  { "status": "ACTIVE", "fail_count": 0 }

@@ -28,7 +28,7 @@
 | 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
-| 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #2 | — | 待補 |
+| 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | — | 📝 body 已補（待開立）|
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
 | F1 | 開發流程 CI 基礎建設（local-ci / ci.yml 預備 / PR 模板 / error-codes 骨架）| — | Foundation-infra | —（不對應 tasks.md 業務 task）| 無 | [#18](https://github.com/sti-fhb/EDMS/issues/18) | 🔨 開發中 |
@@ -749,9 +749,78 @@ DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本�
 
 ---
 
-## Issue #10 ~ #12：待補（增量模式）
+## Issue #10：[P2-延伸] DP — 操作記錄查詢（dp-audit）（GitHub 待開立）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #9，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us10.md](spec_us10.md)（US10 / UCDP007，FR-DP-US10-01~06、DP-MSG-AUDIT-001~002）；[data-model.md](data-model.md)（`DP_AUDIT_LOG`：append-only〔僅 `CREATED_*`〕、`MODULE` / `FUNC_NAME` / `ACTION_TYPE`〔LOGIN..DELETE〕/ `TARGET_ID` / `SOURCE_IP` / `BEFORE_VALUE` / `AFTER_VALUE`〔JSON 字串〕/ `ROW_HASH` 鏈式雜湊；索引 `(CREATED_DATE)`、`(CREATED_USER, CREATED_DATE)`、`(MODULE, ACTION_TYPE, CREATED_DATE)`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-audit`）
+**階段**：P2-延伸（稽核**寫入**於各 US 內建，不依賴本 US；查詢 / 匯出介面於核心作業之後交付）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_AUDIT_LOG` 表 + `AuditLogService.log_action`（**寫入路徑**，各 US CUD 已呼叫）+ 模組管理者判定閘（T017 `module_admin_gate`）
+- **各 US 稽核寫入已內建**（US1–US9 已合併、US11 內建）：本 issue 為**唯讀查詢**，查詢對象（`DP_AUDIT_LOG` 列）已由各 US 持續累積，無其他前置
+
+### 任務說明
+
+DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件**（操作者、期間**起訖**、模組、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE）查詢全平台 `DP_AUDIT_LOG`（後端分頁、時間倒序），展開單筆明細檢視**異動前後值**（JSON），並依當前查詢條件**匯出 CSV**。稽核為**共用項**——**兩管理者皆可查全部**（含登入等不分模組事件；資安監督需全視野），此與 US5（dp-params）/ US9（dp-templates）之 `MODULE` 過濾**不同**：`模組`在此僅為**查詢條件**、非存取控制。日誌 **append-only**：介面與 API **無任何刪除 / 修改功能**。填實既有 `AuditPage` stub。
+
+> ℹ️ 全端 issue：後端 `dp/audit` 補**查詢 / 匯出端點**（既有模組僅 `AuditLogService` 寫入、無 query router）+ 前端填實 `AuditPage`。**無新表 / migration**（表 + 寫入於 #0 已建）。唯讀、不分模組、無刪改——業務邏輯較 US5 / US9 單純（無樂觀鎖、無 MODULE 過濾），新元素為 **CSV 匯出** 與 **明細前後值展開**。
+
+### 範圍
+
+**後端**（`app/dp/audit/` — 補查詢 / 匯出，與既有 `log_action` 寫入同模組）：
+- **T042 稽核查詢**：`GET /api/dp/audit/logs`——多條件（`operator`〔姓名 / Email / ID〕、`date_from` / `date_to`、`module`、`action_type`、`result`〔SUCCESS / FAIL〕）+ `paginate()` 後端分頁（**依 `CREATED_DATE` 倒序**）；列表回：時間（至秒）/ 操作者 / 模組 / 功能（`FUNC_NAME`）/ 類別 / **結果（`RESULT`）** / 對象（`TARGET_ID`）/ 來源 IP；明細（同筆或展開）回 **`RESULT` / `DESCRIPTION`** / `BEFORE_VALUE` / `AFTER_VALUE`（JSON 字串，`TEXT` 欄）；**僅管理者**（AUDIT-002）；**不提供任何刪改端點**（對應 FR-01/02/04/05）
+- **T043 CSV 匯出**：`GET /api/dp/audit/logs/export`——**依查詢條件全量**（無分頁上限）匯出符合紀錄；欄位對齊列表 + 前後值；`text/csv`、UTF-8（含 BOM 供 Excel 正確顯示中文，編碼細節 SD 自決）（對應 FR-02/03）
+
+**前端**（`frontend/src/dp/audit/`，填實 `AuditPage` stub）：
+- **T043 查詢列**：操作者（文字）/ 模組（全部 / DP / ET / DM 下拉）/ 操作類別（全部 / LOGIN / LOGOUT / CREATE / UPDATE / DELETE 下拉）/ **執行結果（全部 / SUCCESS / FAIL 下拉）** / 期間起訖（date ～ date）+ 查詢 / 匯出鈕
+- **T043 列表**：欄位 時間 / 操作者 / 模組 / 功能 / 類別（badge）/ **結果（SUCCESS / FAIL badge）** / 對象 / 來源 IP / 明細；後端分頁（`usePagedQuery`）、時間倒序；**無新增 / 編輯 / 刪除任何按鈕**
+- **T043 明細展開**：檢視完整欄位（含**執行結果 / 事件描述**）+ 異動前後值（JSON 格式化呈現）；空狀態提示（AUDIT-001）
+
+**測試**：
+- 後端 int：多條件查得對應紀錄 + 時間倒序；明細含前後值；CSV 內容與查詢結果一致；一般使用者（非管理者）被擋（AUDIT-002）；**無刪改端點**（POST / PUT / DELETE 回 405 / 不存在）
+- 前端：查詢 + 後端分頁、明細展開前後值、空狀態 AUDIT-001、匯出 CSV 觸發（MSW）；介面無刪改功能
+
+### 驗收條件
+
+- [ ] 以多條件（操作者、期間起訖、模組、操作類別、**執行結果 SUCCESS / FAIL**）查詢 → 列出符合之 `DP_AUDIT_LOG`（後端分頁、時間倒序，列表含結果欄）；**兩管理者皆可查全部**（含不分模組之登入等事件）（FR-01/02、AC1）
+- [ ] 展開單筆明細 → 顯示完整欄位：操作者、時間（至秒）、功能 / 模組代碼、操作類別、**執行結果（SUCCESS / FAIL）**、**事件描述**、來源 IP、異動對象、**異動前後值（JSON 字串）**（FR-02/05、AC2）
+- [ ] 點「匯出 CSV」→ 依**當前查詢條件**匯出全部符合紀錄，內容與查詢結果一致（FR-03、AC3）
+- [ ] 查無符合紀錄 → 顯示空狀態提示 DP-MSG-AUDIT-001（FR-02、AC4）
+- [ ] 頁面與 API **無任何刪除 / 修改功能**——日誌 append-only、不可於介面竄改 / 刪除（FR-04、AC5）
+- [ ] ET / DM 資安事件（帳號 / 角色權限 / 系統操作）統一寫入同一張 `DP_AUDIT_LOG`、本頁可查；業務歷程（DM 文件變更 / 閱讀、ET 學習 / 作答）**不在此**（FR-05、AC6）
+- [ ] 非管理者之一般使用者存取本頁或查詢 API → 伺服器端拒絕 DP-MSG-AUDIT-002（FR-01、AC7）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：`DP_AUDIT_LOG` 表 + `AuditLogService.log_action`（寫入路徑）+ `module_admin_gate`（T017）
+- **各 US 稽核寫入（US1–US9 已合併、US11 內建）**：本 issue 為唯讀查詢，查詢對象已由各 US 持續累積，**無其他前置**
+- **跨模組（stub 先行）**：`is_module_admin`（`module_admin_gate`，T017 fail-closed）——過渡期一律回 False；本頁「僅管理者」姿態之 interim 處理見注意事項（暫行案）
+
+### 注意事項
+
+- **與 US5 / US9 的關鍵差異——不分模組（共用可見）**：稽核為**共用項**，ET / DM 管理者**皆可查全部**（資安監督需全視野），**不做 `MODULE` 過濾**。`模組`只是**查詢條件**（篩選要看哪個模組的紀錄），**非存取控制**。務必勿套用 dp-params / dp-templates 的 `list_visible` MODULE 過濾邏輯。
+- **append-only、無刪改**（FR-04、AC5）：`DP_AUDIT_LOG` 僅 `CREATED_*`；後端**不提供 POST / PUT / DELETE**，前端無任何新增 / 編輯 / 刪除按鈕。`ROW_HASH` 鏈式完整性由**寫入端**（`AuditLogService._compute_row_hash`）維護，**查詢頁僅顯示、不驗鏈**（鏈驗證 / 竄改稽核非本 issue 範圍）。
+- **「僅管理者」（AUDIT-002）vs DP 暫行案 A**（需 SA 裁示，`/sti-plan` 列 SA Q）：本頁 gate 比 dp-params / dp-templates **更嚴**——spec AC7 明訂「非管理者 MUST NOT 存取」。但 `is_module_admin`（T017）為 fail-closed stub、過渡期無人被判管理者，兩案擇一：
+  - **方案 A（建議）**：比照整個 DP 模組 US5~US9 一致之暫行案——端點對**登入者**開放、`module_admin_gate` 判定邏輯就緒但特權判定待 **T049** 回歸真 gate；此時 AUDIT-002 之「非管理者被擋」以「未登入被擋」先行、管理者細分待 T049。頁面於 interim 可測。
+  - **方案 B**：fail-closed 真擋——interim 無人可存取本頁（與模組其他頁不一致、無法手動驗證）。
+  - → 傾向方案 A（與模組一致、頁面可測），T049 統一回歸；最終裁示由 SA 於 `/sti-plan` SA Q 確認。
+- **執行結果 / 事件描述必呈現**（FR-05；`/sti-sa-precheck #10` 補）：`DP_AUDIT_LOG` 之 `RESULT`（SUCCESS / FAIL）與 `DESCRIPTION`（事件描述）為 FR-05 明訂記錄欄位，**列表 + 明細皆須呈現**、且 `result` 為查詢條件——否則「查失敗登入 / 越權拒絕」等核心資安稽核情境無法在頁面辨識。`RESULT` 值域見 data-model 代碼表（登入成功 / 失敗以 `RESULT` 區分，非 ACTION_TYPE）。
+- **CSV 匯出**（FR-03）：依查詢條件**全量**（無分頁），與列表同條件；`text/csv` + UTF-8 BOM（Excel 中文）；欄位含結果 / 事件描述 / 前後值。大量匯出之上限 / 串流細節 SD 自決（可先全量、後續視效能加上限）。
+- **Error codes**（實作 / `/sti-plan` 對齊 `sti-error-codes`）：越權（AUDIT-002）可**重用 `DP_AUTH_006`（需模組管理者權限，403）**或新增 `DP_AUDIT_001`（SD / SA 定）；AUDIT-001（查無紀錄）為**空結果 UI 提示、非 error code**（列表回空 `data` + `meta.total=0`）。
+- **保留期 / 容量**（FR-06）：日誌保留 ≥ 1 年、容量失效自動因應（覆寫最舊）並留軌跡、每日備份與容量告警——屬 **IT 維運範圍**，spec 明列**不屬系統功能**，本 issue **不實作**（僅標註）。
+- **前端路由已備**：`/dp/audit` 路由 + `AuditPage` stub 已存在（#0 骨架），本 issue 填實。
+
+### 相關文件
+
+- [spec_us10.md](spec_us10.md)、[spec.md](spec.md) §稽核（操作記錄）規則、[data-model.md](data-model.md)（`DP_AUDIT_LOG`）、[tasks.md](tasks.md) Phase 12（T042~T043）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §操作記錄（稽核）；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP007
+
+**Labels**：`P2-延伸`, `DP-平台`, `US10`
+
+---
+
+## Issue #11 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #10，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -781,3 +850,5 @@ DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本�
 | 2026-07-29 | US8（#83 / PR #87）與 #77（PR #90）已合併進 main；依增量模式補入 Issue #9（通知範本維護 / US9 / dp-templates）完整 body（T040~T041）：既有 `DP_NOTIFY_TEMPLATE` 表 + 種子（#0）之 MODULE 過濾維護（A-strict，比照 US5）、`IS_SYSTEM` 系統信保護（不可停用 / 刪除）、`VERSION` 樂觀鎖（衝突 409）、無新增 / 刪除範本、稽核；無新表 / migration；填實 `TemplatesPage` stub；error codes 建議 `DP_MAIL_003`（系統信保護）/ `DP_MAIL_004`（版本衝突）、越權重用 `DP_AUTH_006`；特權判定同 stub 過渡待 T049 |
 | 2026-07-29 | US9 交付前自檢（`/sti-sa-precheck #9`）修 1 必補：spec_us9 FR-03 / AC4 / 前置依賴之「DP 系統信 3 支」→ **4 支**（補 `ACCOUNT_VERIFY` 帳號註冊驗證，對齊 data-model / wireframe / 實際 seed），並改為**系統信保護依 `IS_SYSTEM` 旗標判定、不硬編碼 `TEMPLATE_CODE` 清單**；Issue #9 body 同步（前置 4 支 + 注意事項旗標驅動 + 樂觀鎖 409 回最新版本 + CHANNEL 站內為前瞻欄位）|
 | 2026-07-29 | US9 開發手測回饋修正：(1) DP 系統信實為 **5 支**（precheck 仍漏 `ACCOUNT_INVITE` 帳號邀請 / US4 #67）—— data-model / spec_us9 / issues.md「4 支」全數更正為 5、補 `ACCOUNT_INVITE`；(2) 範本 `VARIABLES` 加中文名稱（自描述，migration `9b309342e9f3` 更新 5 支 DP 範本，比照 US5 PARAM_NAME）；(3) 前端管道 label「站內→系統內部、兩者→系統內部+email」；`PWD_EXPIRY_REMIND` 之寄送待 US11 SCHDP001（排程未實作）|
+| 2026-07-29 | US9（#92 / PR #95）已合併進 main；依增量模式補入 Issue #10（操作記錄查詢 / US10 / dp-audit）完整 body（T042~T043）：唯讀多條件查詢（操作者 / 期間起訖 / 模組 / 操作類別）+ 後端分頁時間倒序 + 明細前後值（JSON）+ CSV 匯出；**與 US5/US9 關鍵差異＝不分模組共用可見**（兩管理者皆查全部，`模組`僅為查詢條件非存取控制）；append-only、後端無刪改端點、ROW_HASH 鏈由寫入端維護（查詢頁不驗鏈）；無新表 / migration（表 + `AuditLogService` 寫入於 #0 已建）；填實 `AuditPage` stub；「僅管理者 AUDIT-002」vs 暫行案 A 之 interim 姿態列為 SA Q（傾向方案 A、gate 待 T049）；error codes 越權建議重用 `DP_AUTH_006` 或新增 `DP_AUDIT_001`；總覽 #10 主要前置補 `#0`（原僅列 #2）|
+| 2026-07-29 | US10 交付前自檢（`/sti-sa-precheck dp us10`）修 2 必補一致性缺口：(1) **`RESULT`（執行結果 SUCCESS/FAIL）+ `DESCRIPTION`（事件描述）**——data-model 有欄、FR-05 明訂記錄、SRVDP003 已寫入，但 spec_us10 AC2 / wireframe 明細 modal 皆漏呈現 → spec_us10 AC1/AC2/FR-02 補為查詢條件 + 列表欄 + 明細欄，wireframe `dp-audit` 查詢列補「執行結果」下拉、列表補「結果」欄（加登入 FAIL 示例）、明細 modal 補執行結果 / 事件描述兩列；(2) **「JSONB」用語收斂**——spec_us10（AC2/FR-02）+ wireframe（內部註記 + 明細 label）之「JSONB」改「JSON 字串（`TEXT` 欄）」，對齊 data-model / spec.md / research §6。Issue #10 body 同步（T042/T043 範圍 + AC + 注意事項）|
