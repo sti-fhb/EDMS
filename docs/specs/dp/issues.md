@@ -27,7 +27,7 @@
 | 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #0, #2, #5 | [#68](https://github.com/sti-fhb/EDMS/issues/68) | ✅ 已合併（PR #73）|
 | 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
-| 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 待補 |
+| 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #2 | — | 待補 |
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
@@ -674,9 +674,84 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 
 ---
 
-## Issue #9 ~ #12：待補（增量模式）
+## Issue #9：[P2-延伸] DP — 通知範本維護（dp-templates）（GitHub [#92](https://github.com/sti-fhb/EDMS/issues/92)）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #8，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us9.md](spec_us9.md)（US9 / UCDP011，FR-DP-US9-01~07、DP-MSG-TEMPLATES-001~004）；[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE`：`MODULE`+`TEMPLATE_CODE` 複合 PK、`IS_SYSTEM`、`VERSION` 樂觀鎖、DP 系統信 5 支種子）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 以範本渲染）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-templates`）
+**階段**：P2-延伸（範本已有內建種子即可運作；編輯功能於發信服務 P1〔US6〕之後交付）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_NOTIFY_TEMPLATE` 表 + **5 支 DP 系統信種子**（`PWD_RESET` / `ACCOUNT_VERIFY` / `ACCOUNT_INVITE` / `EMAIL_CHANGE_VERIFY` / `PWD_EXPIRY_REMIND`，`MODULE=DP`、`IS_SYSTEM=true`）+ `VERSION` 樂觀鎖欄位（ORM `version_id_col` 待本 issue 接）+ 模組管理者判定閘（T017 `module_admin_gate`）
+- Issue #1（GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，US6）已合併：`SRVDP002` 以 `get_template` 渲染——本 issue 儲存後，US6 發信即以最新啟用中範本渲染（無需額外接線）
+
+### 任務說明
+
+DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本模組通知範本之**主旨 / 內文 / 管道 / 啟停**，通知內容集中維護。按 `MODULE` 過濾（ET 管理者見 / 編 `ET`＋`DP`、DM 管理者見 / 編 `DM`＋`DP`，A-strict、伺服器端 enforce）；**`MODULE=DP` 系統信（`IS_SYSTEM`）主旨 / 內文可編、但不可停用 / 刪除**（帳號安全信）；儲存採 **`VERSION` 樂觀鎖**防並行覆寫；事件（`TEMPLATE_CODE`）固定，**無新增 / 刪除範本**（內容不同的通知＝同表不同列，由種子建立）。填實既有 `TemplatesPage` stub。
+
+> ℹ️ 全端 issue：後端 `dp/notify` 範本查詢 / 編輯端點 + 前端填實 `TemplatesPage`。**無新表 / migration**（表 + 種子於 #0 已建）；管道「站內」欄位**僅作為該事件是否寄 Email 之開關**，站內訊息之儲存 / 呈現由各模組自理（DP 不設站內訊息表）。與 US5（dp-params）高度相似（既有種子表的 MODULE 過濾維護 + A-strict + 稽核），差異為 US9 多**樂觀鎖**與**系統信保護**。
+
+### 範圍
+
+**後端**（`app/dp/notify/` — 範本維護；與 US6 發信服務同模組）：
+- **T040 範本清單**：`GET /api/dp/notify/templates`（依操作者模組管理者身分過濾 `MODULE`：ET→`ET`+`DP`、DM→`DM`+`DP`；A-strict、`module_admin_gate` 判定；回主旨 / 內文 / 管道 / 啟停 / `IS_SYSTEM` / `VERSION` / 變數說明）
+- **T040 範本編輯**：`PUT /api/dp/notify/templates/{module}/{template_code}`（主旨 / 內文 / 管道〔Email / 站內 / 兩者〕/ 啟停）——
+  - `IS_SYSTEM=true` 之範本：擋停用 / 刪除（TEMPLATES-001），主旨 / 內文仍可編（兩管理者皆可，`MODULE=DP` 共用）
+  - **`VERSION` 樂觀鎖**：req 帶當前 `version`，不符回衝突 409（TEMPLATES-002）；成功 `VERSION+1`
+  - 越權（改非本模組範本）→ 403（TEMPLATES-004，`module_admin_gate` enforce）
+  - **無新增 / 刪除範本端點**（事件固定）；異動寫 `DP_AUDIT_LOG`（前後值）
+- 樂觀鎖落地：接 ORM `version_id_col`（#0 已建 `VERSION` 欄、註明待接）或服務層 `WHERE VERSION=:v` 條件式 UPDATE + RETURNING（比對 0 列＝衝突）
+
+**前端**（`frontend/src/dp/notify/`，填實 `TemplatesPage` stub）：
+- **T041 清單**：依 `MODULE` 分組（DP 系統信 / 本模組事件）；欄位 MODULE / 範本代碼 / 主旨 / 管道 / 啟用狀態 / 動作
+- **T041 編輯**：主旨 / 內文 / 管道（Email / 站內 / 兩者）/ 啟停；**變數說明顯示**（`VARIABLES`，如 `user_name` / `verify_link`）；系統信隱藏 / 禁用「停用」動作
+- 樂觀鎖衝突 → 提示重新載入（TEMPLATES-002）；儲存成功（TEMPLATES-003）；管道欄註記「站內訊息由模組自理」
+
+**測試**：
+- 後端 int：MODULE 過濾（ET 看不到 DM）/ 越權 403；`IS_SYSTEM` 擋停用；樂觀鎖衝突 409；編輯主旨內文 + 稽核前後值；無新增 / 刪除端點（405 / 不存在）
+- 前端：清單分組、編輯儲存（MSW）、系統信不可停用、衝突提示重載
+
+### 驗收條件
+
+- [ ] ET 管理者進頁 → 列 `MODULE=ET`＋`MODULE=DP`，**不顯示** `DM`；DM 管理者反之（FR-02、AC1）
+- [ ] 編輯主旨 / 內文 / 管道 / 啟停且版本未衝突 → 寫入 + `VERSION+1` + 稽核 + TEMPLATES-003；US6 後續以新範本渲染（FR-01/06、AC2）
+- [ ] 範本停用 → 該事件不寄 Email、觸發事件照常（語意；US6 已依 `IS_ENABLED` 略過）（FR-07、AC3）
+- [ ] `MODULE=DP` 系統信嘗試停用 / 刪除 → 阻擋 TEMPLATES-001；主旨 / 內文仍可編（FR-03、AC4）
+- [ ] 並行編輯、後儲存者版本落後 → 拒絕 + TEMPLATES-002（樂觀鎖）（FR-05、AC5）
+- [ ] 清單 / 編輯頁**無新增 / 刪除範本**功能；後端亦無對應端點（FR-04、AC6）
+- [ ] ET 管理者直接呼叫 API 編輯 `MODULE=DM` 範本 → 伺服器端拒絕 TEMPLATES-004（FR-02、AC7）
+- [ ] 管道含「站內」可儲存；欄位僅作是否寄 Email 開關（站內由模組自理）（FR-07、AC8）
+- [ ] 範本異動寫 `DP_AUDIT_LOG`（含前後值）（FR-06）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：`DP_NOTIFY_TEMPLATE` 表 + 5 支 DP 系統信種子 + `VERSION` 欄 + `module_admin_gate`（T017）
+- **Issue #1（GitHub #27，US6）**：`SRVDP002` `get_template` 渲染（儲存後即時反映，無需額外接線）
+- **跨模組（stub 先行）**：`is_module_admin`（`module_admin_gate`，T017 fail-closed）——過渡期一律回 False，A-strict 下**無人被判為管理者**；比照 US5 dp-params 暫行案（端點對登入者開放、MODULE 過濾邏輯就緒，特權判定待 T049 回歸）
+- **ET / DM 範本種子**：目前僅 DP 系統信 5 支；`MODULE=ET` / `DM` 範本由各模組於其 migration 種子建立（未建前 ET / DM 管理者僅見 DP 系統信）
+
+### 注意事項
+
+- **與 US5 dp-params 對稱**：既有種子表的 MODULE 過濾維護 + A-strict + 稽核 + 無新增刪除；可沿用 US5 的 `list_visible` / `update_detail` 服務結構與前端 tab 分組模式。差異：US9 多 **`VERSION` 樂觀鎖** 與 **`IS_SYSTEM` 系統信保護**。
+- **樂觀鎖**（FR-05）：儲存以 req body 帶入之 `version` 比對 DB；建議條件式 `UPDATE ... WHERE MODULE=:m AND TEMPLATE_CODE=:c AND VERSION=:v ... RETURNING`（比對 0 列＝衝突 409），關閉「查→改」TOCTOU（比照 US8 token 原子消費）。衝突 409 回應建議帶回**最新版本內容**供前端提示 diff / 重載（SD 自決回應形狀）。
+- **系統信保護**（FR-03）：擋停用 / 刪除**依 `IS_SYSTEM` 旗標判定，不硬編碼 `TEMPLATE_CODE` 清單**（目前 `IS_SYSTEM=true` 為 `MODULE=DP` 5 支：`PWD_RESET` / `ACCOUNT_VERIFY` / `ACCOUNT_INVITE` / `EMAIL_CHANGE_VERIFY` / `PWD_EXPIRY_REMIND`；日後新增系統信只需種子設旗標）；主旨 / 內文 / 管道仍可編。
+- **CHANNEL 站內為前瞻欄位**：`CHANNEL` 值域 `EMAIL` / `MSG` / `BOTH`，但**本期所有種子範本皆 `EMAIL`、DP 不處理站內發送**（站內由各模組自理，FR-07）；實務上僅「是否寄 Email」toggle 生效，`MSG` / `BOTH` 之站內效果待各模組落地。
+- **無新增 / 刪除範本**：事件 `TEMPLATE_CODE` 固定（種子建立）；後端不提供 POST / DELETE 範本端點。
+- **管道「站內」**（FR-07）：`CHANNEL` 僅作是否寄 Email 開關依據；DP 不儲存 / 不呈現站內訊息（各模組自理）。
+- **Error codes**（實作 / `/sti-plan` 對齊 `sti-error-codes`）：越權重用 `DP_AUTH_006`（需模組管理者權限）；系統信保護 / 樂觀鎖衝突為 US9 新增（如 `DP_MAIL_003` 系統信不可停用〔403〕、`DP_MAIL_004` 版本衝突〔409〕，流水號接 `DP_MAIL_002` 之後）；範本不存在沿用 `DP_MAIL_001`。
+- **前端路由已備**：`/dp/templates` 路由 + `TemplatesPage` stub 已存在（#0 骨架），本 issue 填實。
+
+### 相關文件
+
+- [spec_us9.md](spec_us9.md)、[spec.md](spec.md) §通知範本與發信引擎、[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE` / DP 系統信種子）、[tasks.md](tasks.md) Phase 11（T040~T041）
+- [contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 渲染）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §通知範本與發信引擎；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP011
+
+**Labels**：`P2-延伸`, `DP-平台`, `US9`
+
+---
+
+## Issue #10 ~ #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #9，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -703,3 +778,6 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 | 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補缺（PR #80）：contracts §3 定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位 + 讀取改批次 `get_users_roles_*`（決策 3=B）+ 標籤回代碼、名稱由 DP 讀 DP_PARAM（1=A）+ 含 last_modified（2=A）；spec_us7 FR-06 自我保護訊息統一映射 DP-MSG-ROLES-001；wireframe dp-roles 補 AC5 呈現；Issue #7 body 同步（批次更名 + 標籤依賴提醒）|
 | 2026-07-27 | 依增量模式補入 Issue #8（個人資料維護 + 強制變更密碼 / US8 / dp-profile）完整 body（T037~T039）：姓名直接存、Email 新信箱驗證延遲切換（重用 `DP_PWD_RESET` EMAIL_CHANGE token + `PENDING_EMAIL`）、密碼變更驗舊 + 特權 12 + 重複性 + 清 `MUST_CHANGE_PWD`；承載 US1 強制變更頁（填實 `ForceChangePasswordShell` 提交端點）；發信 SRVDP002 非 stub；特權門檻依 is_module_admin（stub 期套一般 8、待 T049）|
 | 2026-07-27 | US8 交付前自檢（`/sti-sa-precheck #8`）：結論規格齊備、無必補；補 2 項澄清進 Issue #8 body ——「強制變更沿用同一 `PUT /me/password` 端點、仍需舊密碼」+「Email 變更驗證落點頁 `/verify-email-change`（沿用 US3 免登入落點頁殼）」。data-model / wireframe / 契約（SRVDP002 非 stub）皆已齊備。另決議將 [#77](https://github.com/sti-fhb/EDMS/issues/77)（密碼規則提示動態化）**核心併入 US8**：建公開 `GET /api/password-policy` 端點 + `usePasswordPolicy` hook，US8 變更密碼頁提示數字動態讀 `PWD_POLICY`；#77 收斂為 retrofit US2 / US3 |
+| 2026-07-29 | US8（#83 / PR #87）與 #77（PR #90）已合併進 main；依增量模式補入 Issue #9（通知範本維護 / US9 / dp-templates）完整 body（T040~T041）：既有 `DP_NOTIFY_TEMPLATE` 表 + 種子（#0）之 MODULE 過濾維護（A-strict，比照 US5）、`IS_SYSTEM` 系統信保護（不可停用 / 刪除）、`VERSION` 樂觀鎖（衝突 409）、無新增 / 刪除範本、稽核；無新表 / migration；填實 `TemplatesPage` stub；error codes 建議 `DP_MAIL_003`（系統信保護）/ `DP_MAIL_004`（版本衝突）、越權重用 `DP_AUTH_006`；特權判定同 stub 過渡待 T049 |
+| 2026-07-29 | US9 交付前自檢（`/sti-sa-precheck #9`）修 1 必補：spec_us9 FR-03 / AC4 / 前置依賴之「DP 系統信 3 支」→ **4 支**（補 `ACCOUNT_VERIFY` 帳號註冊驗證，對齊 data-model / wireframe / 實際 seed），並改為**系統信保護依 `IS_SYSTEM` 旗標判定、不硬編碼 `TEMPLATE_CODE` 清單**；Issue #9 body 同步（前置 4 支 + 注意事項旗標驅動 + 樂觀鎖 409 回最新版本 + CHANNEL 站內為前瞻欄位）|
+| 2026-07-29 | US9 開發手測回饋修正：(1) DP 系統信實為 **5 支**（precheck 仍漏 `ACCOUNT_INVITE` 帳號邀請 / US4 #67）—— data-model / spec_us9 / issues.md「4 支」全數更正為 5、補 `ACCOUNT_INVITE`；(2) 範本 `VARIABLES` 加中文名稱（自描述，migration `9b309342e9f3` 更新 5 支 DP 範本，比照 US5 PARAM_NAME）；(3) 前端管道 label「站內→系統內部、兩者→系統內部+email」；`PWD_EXPIRY_REMIND` 之寄送待 US11 SCHDP001（排程未實作）|
