@@ -209,6 +209,50 @@ export const handlers = [
       { status: 201 },
     ),
   ),
+  // US9 通知範本維護（預設 happy path：一支 DP 系統信 + 一支 ET 範本）
+  http.get("/api/dp/notify/templates", () =>
+    HttpResponse.json([
+      {
+        module: "DP",
+        template_code: "PWD_RESET",
+        template_name: "密碼重設",
+        subject: "【EDMS】密碼重設連結",
+        body: "您好 {user_name}，請點連結重設密碼。",
+        variables: "user_name, reset_link",
+        channel: "EMAIL",
+        is_enabled: true,
+        is_system: true,
+        version: 1,
+      },
+      {
+        module: "ET",
+        template_code: "COURSE_INVITE",
+        template_name: "課程邀請通知",
+        subject: "課程邀請",
+        body: "您好 {user_name}，您有新課程。",
+        variables: "user_name",
+        channel: "EMAIL",
+        is_enabled: true,
+        is_system: false,
+        version: 1,
+      },
+    ]),
+  ),
+  http.put("/api/dp/notify/templates/:module/:code", async ({ params, request }) => {
+    const body = (await request.json()) as { subject: string; body: string; channel: string; version: number }
+    return HttpResponse.json({
+      module: params.module,
+      template_code: params.code,
+      template_name: "範本",
+      subject: body.subject,
+      body: body.body,
+      variables: "user_name",
+      channel: body.channel,
+      is_enabled: true,
+      is_system: params.module === "DP",
+      version: body.version + 1,
+    })
+  }),
 ]
 
 export const server = setupServer(...handlers)
