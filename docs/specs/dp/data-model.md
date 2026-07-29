@@ -356,9 +356,10 @@ erDiagram
 | TEMPLATE_CODE | 名稱 | 觸發 |
 |---------------|------|------|
 | `PWD_RESET` | 密碼重設 | US3 忘記密碼 |
-| `EMAIL_CHANGE_VERIFY` | 帳號變更驗證 | US8 Email 變更 |
 | `ACCOUNT_VERIFY` | 帳號註冊驗證 | US2 自助註冊（#56，Email 驗證後啟用）|
-| `PWD_EXPIRY_REMIND` | 密碼到期提醒 | US11 `SCHDP001` |
+| `ACCOUNT_INVITE` | 帳號邀請 | US4 管理者代建（#67，寄邀請連結設密碼啟用）|
+| `EMAIL_CHANGE_VERIFY` | 帳號變更驗證 | US8 Email 變更 |
+| `PWD_EXPIRY_REMIND` | 密碼到期提醒 | US11 `SCHDP001`（排程未實作前不寄）|
 
 > ET / DM 業務範本（`MODULE=ET` / `DM`）之事件清單由各模組規格定義（如 DM 9 項），種子於各模組 migration 建立。
 

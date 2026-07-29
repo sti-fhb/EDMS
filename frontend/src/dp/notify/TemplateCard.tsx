@@ -18,8 +18,8 @@ import { getFieldErrors } from "../../utils/zodUtils"
 
 const CHANNELS: { value: Channel; label: string }[] = [
   { value: "EMAIL", label: "Email" },
-  { value: "MSG", label: "站內" },
-  { value: "BOTH", label: "兩者" },
+  { value: "MSG", label: "系統內部" },
+  { value: "BOTH", label: "系統內部+email" },
 ]
 
 /**
@@ -103,7 +103,7 @@ export function TemplateCard({
               onChange={(e) => setChannel(e.target.value as Channel)}
               sx={{ minWidth: 140 }}
             >
-              {/* 系統信須保留 Email 通道（不可改為僅站內、否則等同停用），排除「站內」選項 */}
+              {/* 系統信須保留 Email 通道（不可改為僅系統內部、否則等同停用），排除「系統內部」選項 */}
               {CHANNELS.filter((c) => !(template.is_system && c.value === "MSG")).map((c) => (
                 <MenuItem key={c.value} value={c.value}>
                   {c.label}
@@ -126,7 +126,7 @@ export function TemplateCard({
             </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary">
-            管道之「站內」訊息由各模組自理；此欄僅作為是否寄 Email 之開關依據。
+            管道之「系統內部」訊息由各模組自理；此欄僅作為是否寄 Email 之開關依據。
           </Typography>
         </Stack>
       </CardContent>
