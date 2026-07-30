@@ -58,14 +58,17 @@ export function UsersPage() {
   // 篩選條件變動視為情境切換，一併收起可能開著的編輯 / 建立表單（避免停留在已被篩掉的列）。
   const debouncedKeyword = useDebouncedValue(keyword, 350)
   const debouncedInviteKeyword = useDebouncedValue(inviteKeyword, 350)
+  // 解構出穩定的 useCallback 參照供 effect 依賴（accounts / invites 物件每次 render 重建，方法本身穩定）
+  const { search: searchAccountsQuery, closeForm: closeAccountsForm } = accounts
+  const { search: searchInvitesQuery } = invites
   useEffect(() => {
-    accounts.closeForm()
-    accounts.search(debouncedKeyword, status)
-  }, [debouncedKeyword, status, accounts.search, accounts.closeForm])
+    closeAccountsForm()
+    searchAccountsQuery(debouncedKeyword, status)
+  }, [debouncedKeyword, status, searchAccountsQuery, closeAccountsForm])
   useEffect(() => {
-    accounts.closeForm()
-    invites.search(debouncedInviteKeyword)
-  }, [debouncedInviteKeyword, invites.search, accounts.closeForm])
+    closeAccountsForm()
+    searchInvitesQuery(debouncedInviteKeyword)
+  }, [debouncedInviteKeyword, searchInvitesQuery, closeAccountsForm])
 
   // 切頁籤 / 重新整理時，收起可能開著的編輯（建立）表單，避免停留在上一情境
   const handleTabChange = (v: number) => {
