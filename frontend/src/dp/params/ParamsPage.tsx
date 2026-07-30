@@ -84,7 +84,6 @@ export function ParamsPage() {
       {
         key: "actions",
         title: "操作",
-        align: "right",
         render: (_v, r) => (
           <Button size="small" onClick={() => openEdit(r)}>
             編輯

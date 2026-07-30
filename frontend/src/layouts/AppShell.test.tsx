@@ -78,4 +78,20 @@ describe("AppShell 統一導覽殼", () => {
     // 登出後 LoginOverlay 重現（回登入頁）
     await waitFor(() => expect(screen.getByLabelText("帳號（Email）")).toBeInTheDocument())
   })
+
+  it("點三條線 icon → 收合 / 展開側欄", async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await login(user)
+    await screen.findByText(HEADER_TITLE)
+    expect(screen.getByText("系統管理者後台")).toBeInTheDocument()
+
+    // 收合：側欄不再渲染
+    await user.click(screen.getByRole("button", { name: "切換側欄" }))
+    await waitFor(() => expect(screen.queryByText("系統管理者後台")).not.toBeInTheDocument())
+
+    // 再展開：側欄回來
+    await user.click(screen.getByRole("button", { name: "切換側欄" }))
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
+  })
 })

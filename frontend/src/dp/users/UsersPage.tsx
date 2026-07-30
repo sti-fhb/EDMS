@@ -94,9 +94,8 @@ export function UsersPage() {
       {
         key: "actions",
         title: "操作",
-        align: "right",
         render: (_v, r) => (
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
+          <Stack direction="row" spacing={1} justifyContent="flex-start">
             {r.status === "DISABLED" ? (
               <Button size="small" color="success" onClick={() => accounts.enableUser(r)}>
                 啟用
@@ -138,9 +137,8 @@ export function UsersPage() {
       {
         key: "actions",
         title: "操作",
-        align: "right",
         render: (_v, r) => (
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
+          <Stack direction="row" spacing={1} justifyContent="flex-start">
             <Button size="small" onClick={() => invites.resendInvite(r)}>
               重寄邀請
             </Button>
