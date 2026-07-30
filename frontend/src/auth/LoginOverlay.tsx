@@ -77,8 +77,8 @@ export function LoginOverlay() {
       sx={{
         position: "fixed",
         inset: 0,
-        // 綠→白漸層底（對齊 TBMS 登入頁風格），取代原純色背景
-        background: "linear-gradient(160deg, #1b5e20 0%, #4c8c4a 35%, #f5f5f5 100%)",
+        // 淡漸層底（對齊 TBMS 登入頁：淺綠 → 米白 → 淺粉）
+        background: "linear-gradient(135deg, #e4eadc 0%, #f2f5ee 40%, #fdf2f2 100%)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -87,10 +87,10 @@ export function LoginOverlay() {
       }}
     >
       <Card sx={{ width: 400, maxWidth: "100%", p: 4, position: "relative" }}>
-        <Typography variant="h6" align="center">
+        <Typography variant="h5" align="center" sx={{ fontWeight: 600, color: "#1b5e20" }}>
           EDMS
         </Typography>
-        <Typography variant="body2" align="center" color="text.secondary" gutterBottom>
+        <Typography align="center" sx={{ color: "#78716c", fontSize: 13, mb: 2 }}>
           教育文件管理系統
         </Typography>
         {forgotMode ? (

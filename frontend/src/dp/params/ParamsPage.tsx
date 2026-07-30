@@ -63,11 +63,23 @@ export function ParamsPage() {
 
   const columns = useMemo<AppColumn<ParamRow>[]>(
     () => [
-      { key: "name", title: "參數", render: (_v, r) => (r.kind === "value" ? r.detail.param_name : r.master.param_name) },
+      {
+        key: "code",
+        title: "參數代碼",
+        render: (_v, r) => (
+          <span style={{ fontFamily: "monospace" }}>{r.kind === "value" ? r.detail.param_key : r.master.param_id}</span>
+        ),
+      },
+      { key: "name", title: "中文名稱", render: (_v, r) => (r.kind === "value" ? r.detail.param_name : r.master.param_name) },
       {
         key: "value",
-        title: "目前值",
+        title: "參數值",
         render: (_v, r) => (r.kind === "value" ? (r.detail.param_value ?? "—") : `${r.master.details.length} 項`),
+      },
+      {
+        key: "desc",
+        title: "說明",
+        render: (_v, r) => (r.kind === "value" ? (r.detail.description ?? "—") : (r.master.description ?? "—")),
       },
       {
         key: "actions",
