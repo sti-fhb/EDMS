@@ -18,7 +18,7 @@ describe("AuditPage 操作記錄查詢（唯讀）", () => {
     // 無 operator_name / email 之列（SYSTEM）fallback 顯示原 ID
     expect(screen.getByText("SYSTEM")).toBeInTheDocument()
     // 功能顯示中文（func_label），非原碼 DP-USERS
-    expect(screen.getByText("使用者管理")).toBeInTheDocument()
+    expect(screen.getByText("DP-使用者管理")).toBeInTheDocument()
     expect(screen.queryByText("DP-USERS")).not.toBeInTheDocument()
     // 對象顯示解析後名稱（target_display）
     expect(screen.getByText("林小美")).toBeInTheDocument()

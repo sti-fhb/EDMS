@@ -7,6 +7,7 @@ operator / target 皆解析為可讀名稱（姓名 / email / 中文），使用
 
 import csv
 import io
+import json
 from datetime import date, datetime
 
 from sqlalchemy import Row
@@ -17,20 +18,46 @@ from app.dp.audit.repository import AuditLogRepository, build_audit_conditions
 from app.dp.audit.schemas import AuditLogResponse
 from app.dp.audit.target_resolver import resolve_target_displays
 
-# func_name → 中文顯示名（功能名已含模組前綴，UI 不另列模組欄）；未知碼（未來 ET-/DM-）原樣回傳。
+# func_name → 中文顯示名（保留模組前綴 DP-，UI 不另列模組欄）；未知碼（未來 ET-/DM-）原樣回傳。
 _FUNC_LABELS: dict[str, str] = {
-    "DP-USERS": "使用者管理",
-    "DP-PARAMS": "系統參數",
-    "DP-TEMPLATES": "通知範本",
-    "DP-PROFILE": "個人資料",
-    "DP-FORGOT": "忘記密碼",
-    "DP-REGISTER": "自助註冊",
-    "DP-AUTH": "登入登出",
+    "DP-USERS": "DP-使用者管理",
+    "DP-PARAMS": "DP-系統參數",
+    "DP-TEMPLATES": "DP-通知範本",
+    "DP-PROFILE": "DP-個人資料",
+    "DP-FORGOT": "DP-忘記密碼",
+    "DP-REGISTER": "DP-自助註冊",
+    "DP-AUTH": "DP-登入登出",
 }
+
+# 供前端「功能」查詢下拉（value=func_name、label=中文）。
+FUNC_OPTIONS: list[dict[str, str]] = [{"value": code, "label": label} for code, label in _FUNC_LABELS.items()]
+
+# 對象解析失敗時，從稽核列自身 before/after JSON 撈可讀名稱之鍵（優先序）。
+_TARGET_NAME_KEYS = ("user_name", "template_name", "param_name", "name", "email")
 
 
 def _func_label(func_name: str) -> str:
     return _FUNC_LABELS.get(func_name, func_name)
+
+
+def _display_from_values(before_value: str | None, after_value: str | None) -> str | None:
+    """從稽核列 before/after JSON 撈可讀名稱（供對象已被硬刪、活表查不到時 fallback）。
+
+    如取消邀請：pending 列已硬刪，但 before_value 留有 {"email": ...}。after 優先於 before（較貼近結果）。
+    """
+    for raw in (after_value, before_value):
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict):
+            for key in _TARGET_NAME_KEYS:
+                value = data.get(key)
+                if value:
+                    return str(value)
+    return None
 
 
 # CSV 欄位（欄位名 → 標頭）：操作時間 / 操作者帳號(email) / 功能 / 操作類別 / 執行結果 / 對象 / 來源 IP / 前後值。
@@ -87,6 +114,7 @@ class AuditQueryService:
         *,
         operator: str | None,
         module: str | None,
+        func_name: str | None,
         action_type: str | None,
         result: str | None,
         date_from: date | None,
@@ -98,6 +126,7 @@ class AuditQueryService:
         conditions = build_audit_conditions(
             operator=operator,
             module=module,
+            func_name=func_name,
             action_type=action_type,
             result=result,
             date_from=date_from,
@@ -123,6 +152,7 @@ class AuditQueryService:
         *,
         operator: str | None,
         module: str | None,
+        func_name: str | None,
         action_type: str | None,
         result: str | None,
         date_from: date | None,
@@ -132,6 +162,7 @@ class AuditQueryService:
         conditions = build_audit_conditions(
             operator=operator,
             module=module,
+            func_name=func_name,
             action_type=action_type,
             result=result,
             date_from=date_from,
@@ -159,7 +190,12 @@ class AuditQueryService:
         log, operator_name, operator_email = row
         target_display = None
         if log.target_id:
-            target_display = target_map.get((log.func_name, log.target_id), log.target_id)
+            # 活表解析 → 稽核列自身 JSON（對象已硬刪時仍留痕，如取消邀請）→ 原 target_id
+            target_display = (
+                target_map.get((log.func_name, log.target_id))
+                or _display_from_values(log.before_value, log.after_value)
+                or log.target_id
+            )
         return AuditLogResponse(
             log_id=log.log_id,
             created_date=log.created_date,

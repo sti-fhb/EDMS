@@ -20,7 +20,17 @@ import type { AuditLogRow } from "./auditService"
 import { EMPTY_AUDIT_FILTERS, useAuditLogs } from "./useAuditLogs"
 import type { AuditFilters } from "./useAuditLogs"
 
-const MODULE_OPTIONS = ["全部", "DP", "ET", "DM"]
+// 功能查詢選項（value=func_name、label=中文，含模組前綴）；「全部」＝不指定
+const FUNC_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "全部" },
+  { value: "DP-USERS", label: "DP-使用者管理" },
+  { value: "DP-PARAMS", label: "DP-系統參數" },
+  { value: "DP-TEMPLATES", label: "DP-通知範本" },
+  { value: "DP-PROFILE", label: "DP-個人資料" },
+  { value: "DP-FORGOT", label: "DP-忘記密碼" },
+  { value: "DP-REGISTER", label: "DP-自助註冊" },
+  { value: "DP-AUTH", label: "DP-登入登出" },
+]
 const ACTION_OPTIONS = ["全部", "LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE"]
 const RESULT_OPTIONS = ["全部", "SUCCESS", "FAIL"]
 
@@ -106,14 +116,14 @@ export function AuditPage() {
             <TextField
               select
               size="small"
-              label="模組"
-              value={displayValue(filters.module)}
-              onChange={(e) => setField("module", selectValue(e.target.value))}
-              sx={{ minWidth: 120 }}
+              label="功能"
+              value={filters.func}
+              onChange={(e) => setField("func", e.target.value)}
+              sx={{ minWidth: 160 }}
             >
-              {MODULE_OPTIONS.map((o) => (
-                <MenuItem key={o} value={o}>
-                  {o}
+              {FUNC_OPTIONS.map((o) => (
+                <MenuItem key={o.value} value={o.value}>
+                  {o.label}
                 </MenuItem>
               ))}
             </TextField>

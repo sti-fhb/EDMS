@@ -78,6 +78,7 @@ def _q(**kw):
     base = dict(
         operator=None,
         module=None,
+        func_name=None,
         action_type=None,
         result=None,
         date_from=None,
@@ -211,7 +212,7 @@ async def test_export_csv_matches_query(db):
     await _insert_log(db, module="ET", result="FAIL")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module="ET", action_type=None, result=None, date_from=None, date_to=None
+        db, operator=None, module="ET", func_name=None, action_type=None, result=None, date_from=None, date_to=None
     )
 
     assert csv_text.startswith("﻿")  # UTF-8 BOM
@@ -229,19 +230,44 @@ async def test_csv_operator_account_is_email(db):
     await _insert_log(db, operator_id="op01")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module=None, action_type=None, result=None, date_from=None, date_to=None
+        db, operator=None, module=None, func_name=None, action_type=None, result=None, date_from=None, date_to=None
     )
 
     assert "ming@edms.local" in csv_text
 
 
 async def test_func_label_chinese(db):
-    """#3：func_name 回中文 func_label。"""
+    """#2/#3：func_name 回中文 func_label（保留 DP- 模組前綴）。"""
     await _insert_log(db, func_name="DP-USERS")
 
     res = await _service.query_logs(db, **_q())
 
-    assert res["data"][0].func_label == "使用者管理"
+    assert res["data"][0].func_label == "DP-使用者管理"
+
+
+async def test_query_filters_by_func_name(db):
+    """#4：以功能（func_name）精確過濾。"""
+    await _insert_log(db, func_name="DP-USERS")
+    hit = await _insert_log(db, func_name="DP-PARAMS")
+
+    res = await _service.query_logs(db, **_q(func_name="DP-PARAMS"))
+
+    assert [r.log_id for r in res["data"]] == [hit.log_id]
+
+
+async def test_target_display_fallback_to_audit_json(db):
+    """#1：對象活表查無（如取消邀請、pending 已硬刪）→ 從稽核列 before/after JSON 撈姓名 / email。"""
+    await _insert_log(
+        db,
+        func_name="DP-USERS",
+        action_type="DELETE",
+        target_id="res-gone",
+        before_value='{"email": "invited@edms.local"}',
+    )
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "invited@edms.local"
 
 
 async def test_target_display_resolves_user_name(db):
@@ -305,7 +331,7 @@ async def test_export_csv_formula_injection_sanitized(db):
     await _insert_log(db, before_value="=1+2", func_name="DP-X")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module=None, action_type=None, result=None, date_from=None, date_to=None
+        db, operator=None, module=None, func_name=None, action_type=None, result=None, date_from=None, date_to=None
     )
 
     assert "'=1+2" in csv_text

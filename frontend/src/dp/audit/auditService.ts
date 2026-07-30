@@ -24,7 +24,7 @@ export interface AuditLogRow {
 /** 查詢條件（空字串欄位於送出前轉為 undefined，不帶入 query string）。 */
 export interface AuditFilterParams {
   operator?: string
-  module?: string
+  func_name?: string
   action_type?: string
   result?: string
   date_from?: string

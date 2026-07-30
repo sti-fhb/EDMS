@@ -15,6 +15,7 @@ def build_audit_conditions(
     *,
     operator: str | None,
     module: str | None,
+    func_name: str | None,
     action_type: str | None,
     result: str | None,
     date_from: date | None,
@@ -40,6 +41,8 @@ def build_audit_conditions(
         conditions.append(or_(DpAuditLog.created_user.ilike(pattern), DpAuditLog.created_user.in_(matching_users)))
     if module:
         conditions.append(DpAuditLog.module == module)
+    if func_name:
+        conditions.append(DpAuditLog.func_name == func_name)
     if action_type:
         conditions.append(DpAuditLog.action_type == action_type)
     if result:
