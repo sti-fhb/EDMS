@@ -126,6 +126,7 @@ export function ParamsPage() {
         formVisible &&
         liveRow && (
           <ParamEditPanel
+            key={liveRow.rowKey}
             row={liveRow}
             onSaveDetail={saveDetail}
             onToggle={toggleItem}

@@ -78,6 +78,22 @@ describe("ParamsPage 系統參數維護流程", () => {
     expect(screen.getByLabelText("閒置自動登出（分鐘）")).toHaveValue("15")
   })
 
+  it("編輯中切換到另一列 → 欄位顯示新列原值（不殘留舊輸入）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+
+    // 開第一列、輸入未儲存的值
+    await openEditByRow(user, "閒置自動登出（分鐘）")
+    const first = await screen.findByLabelText("閒置自動登出（分鐘）")
+    await user.clear(first)
+    await user.type(first, "999")
+
+    // 直接切到另一列（同為 platform VALUE）：面板應以新列原值重掛，不殘留 999
+    await openEditByRow(user, "單次登入時效上限（小時）")
+    expect(await screen.findByLabelText("單次登入時效上限（小時）")).toHaveValue("8")
+  })
+
   it("DM 鎖定清單：編輯展開後代碼唯讀、無新增入口", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
