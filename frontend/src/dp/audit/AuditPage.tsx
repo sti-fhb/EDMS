@@ -33,6 +33,7 @@ function displayValue(v: string): string {
 
 export function AuditPage() {
   const audit = useAuditLogs()
+  const { setSelected } = audit
   const [filters, setFilters] = useState<AuditFilters>(EMPTY_AUDIT_FILTERS)
 
   const setField = (key: keyof AuditFilters, value: string) => setFilters((prev) => ({ ...prev, [key]: value }))
@@ -56,13 +57,13 @@ export function AuditPage() {
         title: "明細",
         align: "right",
         render: (_v, r) => (
-          <IconButton size="small" aria-label="明細" onClick={() => audit.setSelected(r)}>
+          <IconButton size="small" aria-label="明細" onClick={() => setSelected(r)}>
             <VisibilityIcon fontSize="small" />
           </IconButton>
         ),
       },
     ],
-    [audit],
+    [setSelected],
   )
 
   return (
@@ -133,7 +134,7 @@ export function AuditPage() {
               label="起日"
               value={filters.date_from}
               onChange={(e) => setField("date_from", e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
             <TextField
               type="date"
@@ -141,7 +142,7 @@ export function AuditPage() {
               label="訖日"
               value={filters.date_to}
               onChange={(e) => setField("date_to", e.target.value)}
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
             <Button variant="outlined" size="small" onClick={() => audit.search(filters)}>
               查詢

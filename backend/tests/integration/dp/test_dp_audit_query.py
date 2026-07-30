@@ -56,7 +56,7 @@ async def _insert_log(
     return log
 
 
-async def _seed_user(db, *, user_id, user_name, email):
+async def _seed_user(db, *, user_id, user_name, email, deleted=0):
     now = utcnow()
     db.add(
         DpUser(
@@ -68,7 +68,7 @@ async def _seed_user(db, *, user_id, user_name, email):
             pwd_changed_date=now,
             created_user="seed",
             created_date=now,
-            deleted=0,
+            deleted=deleted,
         )
     )
     await db.flush()
@@ -143,6 +143,20 @@ async def test_query_operator_search_by_name(db):
 
     assert [r.log_id for r in res["data"]] == [hit.log_id]
     assert res["data"][0].operator_name == "陳大華"
+
+
+async def test_operator_search_matches_soft_deleted_user(db):
+    """AC1：以已軟刪除（deleted=1）使用者之姓名搜尋，仍命中其歷史稽核並解析當時姓名。
+
+    稽核為歷史留痕：operator join / 搜尋子查詢皆刻意不濾 DP_USER.deleted。
+    """
+    await _seed_user(db, user_id="gone01", user_name="離職者", email="gone@example.com", deleted=1)
+    hit = await _insert_log(db, operator_id="gone01")
+
+    res = await _service.query_logs(db, **_q(operator="離職"))
+
+    assert [r.log_id for r in res["data"]] == [hit.log_id]
+    assert res["data"][0].operator_name == "離職者"
 
 
 # ── AC2：明細欄位（含 result / description / 前後值）────────────────────────
