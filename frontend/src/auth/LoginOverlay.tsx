@@ -8,6 +8,7 @@ import Tab from "@mui/material/Tab"
 import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
+import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import type { FormEvent } from "react"
 
@@ -25,6 +26,8 @@ import { toApiError } from "../services/http"
  */
 export function LoginOverlay() {
   const { login, sessionExpired } = useAuth()
+  // 版號：公開端點（未登入可取），顯示於登入卡「忘記密碼」下方
+  const { data: version } = useQuery({ queryKey: ["app", "version"], queryFn: authApi.version })
   const [tab, setTab] = useState<"login" | "register">("login")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -74,7 +77,8 @@ export function LoginOverlay() {
       sx={{
         position: "fixed",
         inset: 0,
-        bgcolor: "background.default",
+        // 淡漸層底（對齊 TBMS 登入頁：淺綠 → 米白 → 淺粉）
+        background: "linear-gradient(135deg, #e4eadc 0%, #f2f5ee 40%, #fdf2f2 100%)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -83,8 +87,11 @@ export function LoginOverlay() {
       }}
     >
       <Card sx={{ width: 400, maxWidth: "100%", p: 4, position: "relative" }}>
-        <Typography variant="h6" align="center" gutterBottom>
+        <Typography variant="h5" align="center" sx={{ fontWeight: 600, color: "#1b5e20" }}>
           EDMS
+        </Typography>
+        <Typography align="center" sx={{ color: "#78716c", fontSize: 13, mb: 2 }}>
+          教育文件管理系統
         </Typography>
         {forgotMode ? (
           <ForgotPasswordForm onBack={() => setForgotMode(false)} />
@@ -178,6 +185,11 @@ export function LoginOverlay() {
                     >
                       忘記密碼？
                     </Link>
+                    {version !== undefined && (
+                      <Typography variant="caption" align="center" color="text.secondary">
+                        版本 {version}
+                      </Typography>
+                    )}
                   </Stack>
                 </form>
               </>

@@ -129,7 +129,7 @@ describe("UsersPage 使用者操作流程", () => {
     await waitFor(() => expect(screen.getByLabelText("帳號（Email）")).toHaveValue("disabled@edms.local"))
   })
 
-  it("編輯中點查詢 → 表單收起", async () => {
+  it("編輯中改篩選（關鍵字）→ 表單收起", async () => {
     const user = userEvent.setup()
     renderWithProviders(<UsersPage />)
     await screen.findByText("陳大華")
@@ -137,8 +137,37 @@ describe("UsersPage 使用者操作流程", () => {
     await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
     expect(await screen.findByLabelText("帳號（Email）")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "查詢" }))
+    // 改篩選視為情境切換：即時查詢並收起表單（免「查詢」鈕）
+    await user.type(screen.getByLabelText("關鍵字（姓名 / Email）"), "陳")
     await waitFor(() => expect(screen.queryByLabelText("帳號（Email）")).not.toBeInTheDocument())
+  })
+
+  it("輸入關鍵字即時過濾列表（免按「查詢」）", async () => {
+    const user = userEvent.setup()
+    // 依 q 過濾的 handler（模擬後端行為）
+    server.use(
+      http.get("/api/dp/users", ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? ""
+        const all = [
+          { user_id: "u1", user_name: "陳大華", email: "chen@edms.local", status: "ACTIVE", locked_until: null, last_login_date: null, created_date: "2026-05-01T00:00:00Z" },
+          { user_id: "u2", user_name: "林小美", email: "lin@edms.local", status: "ACTIVE", locked_until: null, last_login_date: null, created_date: "2026-05-01T00:00:00Z" },
+        ]
+        const data = all.filter((u) => u.user_name.includes(q) || u.email.includes(q))
+        return HttpResponse.json({ data, meta: { total: data.length, page: 1, limit: 20, total_pages: 1 } })
+      }),
+    )
+    renderWithProviders(<UsersPage />)
+    expect(await screen.findByText("陳大華")).toBeInTheDocument()
+    expect(screen.getByText("林小美")).toBeInTheDocument()
+    // 無「查詢」按鈕
+    expect(screen.queryByRole("button", { name: "查詢" })).not.toBeInTheDocument()
+
+    // 打字（去抖後）即時過濾：等最終狀態（避免刷新 loading 空窗的 race）——只剩符合者
+    await user.type(screen.getByLabelText("關鍵字（姓名 / Email）"), "林")
+    await waitFor(() => {
+      expect(screen.getByText("林小美")).toBeInTheDocument()
+      expect(screen.queryByText("陳大華")).not.toBeInTheDocument()
+    })
   })
 
   // ---- 待啟用邀請頁籤（#67）----
