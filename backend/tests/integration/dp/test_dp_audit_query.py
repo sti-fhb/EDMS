@@ -236,6 +236,19 @@ async def test_csv_operator_account_is_email(db):
     assert "ming@edms.local" in csv_text
 
 
+async def test_csv_target_uses_display_name(db):
+    """CSV「對象」欄與畫面一致，顯示解析後姓名（非原始 ID）。"""
+    await _seed_user(db, user_id="tgt01", user_name="林小美", email="mei@edms.local")
+    await _insert_log(db, func_name="DP-USERS", target_id="tgt01")
+
+    csv_text = await _service.export_csv(
+        db, operator=None, module=None, func_name=None, action_type=None, result=None, date_from=None, date_to=None
+    )
+
+    assert "林小美" in csv_text
+    assert "tgt01" not in csv_text  # 不顯示原始 ID
+
+
 async def test_func_label_chinese(db):
     """#2/#3：func_name 回中文 func_label（保留 DP- 模組前綴）。"""
     await _insert_log(db, func_name="DP-USERS")
