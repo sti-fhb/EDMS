@@ -1,4 +1,4 @@
-import Container from "@mui/material/Container"
+import Box from "@mui/material/Box"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 
@@ -24,7 +24,7 @@ export function WelcomePage() {
   const greeting = me?.user_name ? `歡迎，${me.user_name}` : "歡迎"
 
   return (
-    <Container maxWidth="md" sx={{ py: 6 }}>
+    <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
         {greeting}
       </Typography>
@@ -36,6 +36,6 @@ export function WelcomePage() {
           版本 {version}
         </Typography>
       )}
-    </Container>
+    </Box>
   )
 }
