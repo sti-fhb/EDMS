@@ -147,7 +147,15 @@ class UsersService:
         except IntegrityError as exc:
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007") from exc
         await self._send_invite(db, email=invite.email, user_name=invite.user_name, token=plaintext, ttl_min=ttl_min)
-        await self._log(db, operator.user_id, res_id, ip, "UPDATE", "重寄帳號邀請", after={"email": invite.email})
+        await self._log(
+            db,
+            operator.user_id,
+            res_id,
+            ip,
+            "UPDATE",
+            "重寄帳號邀請",
+            after={"email": invite.email, "user_name": invite.user_name},
+        )
 
     async def cancel_invite(self, db: AsyncSession, *, res_id: str, operator: OperatorInfo) -> None:
         """取消邀請：刪除該待邀請列（硬刪）。
@@ -158,7 +166,13 @@ class UsersService:
         invite = await self._require_invite(db, res_id)
         await self._auth_repo.delete_pending_by_email(db, invite.email)
         await self._log(
-            db, operator.user_id, res_id, get_client_ip(), "DELETE", "取消帳號邀請", before={"email": invite.email}
+            db,
+            operator.user_id,
+            res_id,
+            get_client_ip(),
+            "DELETE",
+            "取消帳號邀請",
+            before={"email": invite.email, "user_name": invite.user_name},
         )
 
     async def set_status(self, db: AsyncSession, *, user_id: str, action: str, operator: OperatorInfo) -> UserResponse:
