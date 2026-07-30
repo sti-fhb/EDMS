@@ -50,6 +50,13 @@ describe("LoginOverlay", () => {
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authed"))
   })
 
+  it("顯示副標「教育文件管理系統」與版號（忘記密碼下方）", async () => {
+    renderLogin()
+    expect(screen.getByText("教育文件管理系統")).toBeInTheDocument()
+    // 版號取自公開 /api/version（MSW 預設 1.0.0-test）
+    expect(await screen.findByText("版本 1.0.0-test")).toBeInTheDocument()
+  })
+
   it("密碼錯誤 → 顯示錯誤訊息、維持未登入", async () => {
     server.use(
       http.post("/api/login", () =>

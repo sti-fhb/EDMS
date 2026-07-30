@@ -8,13 +8,14 @@ import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
 import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { AppTable } from "../../components/AppTable"
 import type { AppColumn } from "../../components/AppTable"
 import { CrudActions } from "../../components/CrudActions"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
+import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { formatDateTime } from "../../utils/date"
 import { UsersForm } from "./UsersForm"
 import { useInvites } from "./useInvites"
@@ -53,16 +54,32 @@ export function UsersPage() {
   const [status, setStatus] = useState("")
   const [inviteKeyword, setInviteKeyword] = useState("")
 
-  // 切頁籤 / 查詢 / 重新整理時，收起可能開著的編輯（建立）表單，避免停留在上一情境
+  // 即時查詢：關鍵字去抖（350ms）避免每字元一次 request；帳號狀態變動即時反映，免按「查詢」。
+  // 篩選條件變動視為情境切換，一併收起可能開著的編輯 / 建立表單（避免停留在已被篩掉的列）。
+  const debouncedKeyword = useDebouncedValue(keyword, 350)
+  const debouncedInviteKeyword = useDebouncedValue(inviteKeyword, 350)
+  // 解構出穩定的 useCallback 參照供 effect 依賴（accounts / invites 物件每次 render 重建，方法本身穩定）
+  const { search: searchAccountsQuery, closeForm: closeAccountsForm } = accounts
+  const { search: searchInvitesQuery } = invites
+  useEffect(() => {
+    closeAccountsForm()
+    searchAccountsQuery(debouncedKeyword, status)
+  }, [debouncedKeyword, status, searchAccountsQuery, closeAccountsForm])
+  useEffect(() => {
+    closeAccountsForm()
+    searchInvitesQuery(debouncedInviteKeyword)
+  }, [debouncedInviteKeyword, searchInvitesQuery, closeAccountsForm])
+
+  // 切頁籤 / 重新整理時，收起可能開著的編輯（建立）表單，避免停留在上一情境
   const handleTabChange = (v: number) => {
     accounts.closeForm()
     setTab(v)
   }
-  const searchAccounts = () => {
+  const refreshAccounts = () => {
     accounts.closeForm()
     accounts.search(keyword, status)
   }
-  const searchInvites = () => {
+  const refreshInvites = () => {
     accounts.closeForm()
     invites.search(inviteKeyword)
   }
@@ -77,9 +94,8 @@ export function UsersPage() {
       {
         key: "actions",
         title: "操作",
-        align: "right",
         render: (_v, r) => (
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
+          <Stack direction="row" spacing={1} justifyContent="flex-start">
             {r.status === "DISABLED" ? (
               <Button size="small" color="success" onClick={() => accounts.enableUser(r)}>
                 啟用
@@ -121,9 +137,8 @@ export function UsersPage() {
       {
         key: "actions",
         title: "操作",
-        align: "right",
         render: (_v, r) => (
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
+          <Stack direction="row" spacing={1} justifyContent="flex-start">
             <Button size="small" onClick={() => invites.resendInvite(r)}>
               重寄邀請
             </Button>
@@ -156,7 +171,7 @@ export function UsersPage() {
       <CrudPageLayout
         icon={<PeopleIcon color="primary" />}
         title="使用者管理"
-        actions={<CrudActions onRefresh={searchInvites} onAdd={accounts.openCreate} addLabel="建立帳號" />}
+        actions={<CrudActions onRefresh={refreshInvites} onAdd={accounts.openCreate} addLabel="建立帳號" />}
         filterContent={
           <>
             {tabsBar}
@@ -169,9 +184,6 @@ export function UsersPage() {
                 onChange={(e) => setInviteKeyword(e.target.value)}
                 sx={{ minWidth: 240 }}
               />
-              <Button variant="outlined" size="small" onClick={searchInvites}>
-                查詢
-              </Button>
             </Stack>
           </>
         }
@@ -205,7 +217,7 @@ export function UsersPage() {
     <CrudPageLayout
       icon={<PeopleIcon color="primary" />}
       title="使用者管理"
-      actions={<CrudActions onRefresh={searchAccounts} onAdd={accounts.openCreate} addLabel="建立帳號" />}
+      actions={<CrudActions onRefresh={refreshAccounts} onAdd={accounts.openCreate} addLabel="建立帳號" />}
       filterContent={
         <>
           {tabsBar}
@@ -232,9 +244,6 @@ export function UsersPage() {
                 </MenuItem>
               ))}
             </TextField>
-            <Button variant="outlined" size="small" onClick={searchAccounts}>
-              查詢
-            </Button>
           </Stack>
         </>
       }

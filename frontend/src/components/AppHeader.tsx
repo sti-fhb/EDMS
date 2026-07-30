@@ -1,4 +1,5 @@
 import AccountCircle from "@mui/icons-material/AccountCircle"
+import MenuIcon from "@mui/icons-material/Menu"
 import AppBar from "@mui/material/AppBar"
 import Box from "@mui/material/Box"
 import ButtonBase from "@mui/material/ButtonBase"
@@ -12,8 +13,11 @@ import { useNavigate } from "react-router-dom"
 
 import { useAuth } from "../auth/useAuth"
 
-/** 頂列：系統標題 + 右上個資選單（個人資料 / 登出）。title 預設為後台語意，入口頁等情境可覆寫。 */
-export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
+/**
+ * 頂列：（可選）側欄切換鈕 + 系統標題 + 右上個資選單（個人資料 / 登出）。
+ * `onMenuClick` 有值時於左上顯示三條線 icon，供收合 / 展開側欄（對齊 TBMS）。
+ */
+export function AppHeader({ title = "EDMS 平台後台", onMenuClick }: { title?: string; onMenuClick?: () => void }) {
   const { logout } = useAuth()
   const navigate = useNavigate()
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
@@ -36,6 +40,11 @@ export function AppHeader({ title = "EDMS 平台後台" }: { title?: string }) {
   return (
     <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Toolbar>
+        {onMenuClick && (
+          <IconButton edge="start" color="inherit" aria-label="切換側欄" onClick={onMenuClick} sx={{ mr: 1 }}>
+            <MenuIcon />
+          </IconButton>
+        )}
         <ButtonBase
           onClick={() => navigate("/")}
           aria-label="回主頁"
