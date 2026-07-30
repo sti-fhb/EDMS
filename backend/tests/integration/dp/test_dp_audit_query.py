@@ -76,8 +76,14 @@ async def _seed_user(db, *, user_id, user_name, email, deleted=0):
 
 def _q(**kw):
     base = dict(
-        operator=None, module=None, action_type=None, result=None,
-        date_from=None, date_to=None, page=1, limit=20,
+        operator=None,
+        module=None,
+        action_type=None,
+        result=None,
+        date_from=None,
+        date_to=None,
+        page=1,
+        limit=20,
     )
     base.update(kw)
     return base

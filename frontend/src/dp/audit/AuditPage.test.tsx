@@ -56,7 +56,7 @@ describe("AuditPage 操作記錄查詢（唯讀）", () => {
     const createUrl = vi.fn(() => "blob:audit")
     // @ts-expect-error jsdom 未實作 createObjectURL，測試以 mock 補上
     global.URL.createObjectURL = createUrl
-    // @ts-expect-error 同上
+    // @ts-expect-error jsdom 未實作 revokeObjectURL，測試以 mock 補上
     global.URL.revokeObjectURL = vi.fn()
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
 

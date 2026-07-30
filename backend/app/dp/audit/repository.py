@@ -37,9 +37,7 @@ def build_audit_conditions(
                 DpUser.email.ilike(pattern),
             )
         )
-        conditions.append(
-            or_(DpAuditLog.created_user.ilike(pattern), DpAuditLog.created_user.in_(matching_users))
-        )
+        conditions.append(or_(DpAuditLog.created_user.ilike(pattern), DpAuditLog.created_user.in_(matching_users)))
     if module:
         conditions.append(DpAuditLog.module == module)
     if action_type:
@@ -47,7 +45,9 @@ def build_audit_conditions(
     if result:
         conditions.append(DpAuditLog.result == result)
     if date_from:
-        conditions.append(DpAuditLog.created_date >= datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc))
+        conditions.append(
+            DpAuditLog.created_date >= datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
+        )
     if date_to:
         upper = datetime(date_to.year, date_to.month, date_to.day, tzinfo=timezone.utc) + timedelta(days=1)
         conditions.append(DpAuditLog.created_date < upper)
@@ -101,9 +101,7 @@ class AuditLogRepository:
 
     async def count_logs(self, db: AsyncSession, *, conditions: list[ColumnElement[bool]]) -> int:
         """符合條件之總筆數（供手動分頁 meta）。"""
-        count_stmt = select(func.count()).select_from(
-            select(DpAuditLog.log_id).where(*conditions).subquery()
-        )
+        count_stmt = select(func.count()).select_from(select(DpAuditLog.log_id).where(*conditions).subquery())
         raw = await db.scalar(count_stmt)
         return raw if raw is not None else 0
 

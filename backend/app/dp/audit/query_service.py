@@ -86,9 +86,7 @@ class AuditQueryService:
         if total == 0 or page > total_pages:
             data: list[AuditLogResponse] = []
         else:
-            rows = await self._repo.list_logs(
-                db, conditions=conditions, offset=(page - 1) * limit, limit=limit
-            )
+            rows = await self._repo.list_logs(db, conditions=conditions, offset=(page - 1) * limit, limit=limit)
             data = [self._to_response(row) for row in rows]
 
         return {
