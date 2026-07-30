@@ -7,11 +7,14 @@ export interface AuditLogRow {
   created_date: string
   operator_id: string
   operator_name: string | null
+  operator_email: string | null
   module: string
   func_name: string
+  func_label: string
   action_type: string
   result: string
   target_id: string | null
+  target_display: string | null
   source_ip: string | null
   description: string | null
   before_value: string | null

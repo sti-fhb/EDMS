@@ -51,15 +51,11 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
                 </TableRow>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>操作者</TableCell>
-                  <TableCell>
-                    {log.operator_name ? `${log.operator_name}（${log.operator_id}）` : log.operator_id}
-                  </TableCell>
+                  <TableCell>{log.operator_name ?? log.operator_email ?? log.operator_id}</TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>模組 / 功能</TableCell>
-                  <TableCell>
-                    {log.module} / {log.func_name}
-                  </TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>功能</TableCell>
+                  <TableCell>{log.func_label}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>操作類別</TableCell>
@@ -79,7 +75,7 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
                 </TableRow>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>對象</TableCell>
-                  <TableCell>{log.target_id ?? "—"}</TableCell>
+                  <TableCell>{log.target_display ?? "—"}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>來源 IP</TableCell>

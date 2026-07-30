@@ -88,12 +88,16 @@ class AuditLogRepository:
 
     @staticmethod
     def _select_with_operator(conditions: list[ColumnElement[bool]]) -> Select:
-        """組「稽核 + 操作者姓名」查詢：LEFT JOIN DP_USER 解析 operator_name，時間倒序。
+        """組「稽核 + 操作者姓名 / email」查詢：LEFT JOIN DP_USER，時間倒序。
 
         LEFT JOIN 不濾 DP_USER.deleted：操作者事後被軟刪除時仍呈現當時姓名（歷史留痕）。
         """
         return (
-            select(DpAuditLog, DpUser.user_name.label("operator_name"))
+            select(
+                DpAuditLog,
+                DpUser.user_name.label("operator_name"),
+                DpUser.email.label("operator_email"),
+            )
             .outerjoin(DpUser, DpAuditLog.created_user == DpUser.user_id)
             .where(*conditions)
             .order_by(DpAuditLog.created_date.desc(), DpAuditLog.log_id.desc())

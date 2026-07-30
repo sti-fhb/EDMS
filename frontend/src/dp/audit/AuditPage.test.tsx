@@ -9,14 +9,19 @@ import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
 describe("AuditPage 操作記錄查詢（唯讀）", () => {
-  it("列出稽核紀錄，含執行結果 badge（SUCCESS / FAIL）與操作者", async () => {
+  it("列出稽核紀錄：結果 badge、操作者姓名、功能中文、對象解析名", async () => {
     renderWithProviders(<AuditPage />)
 
     expect(await screen.findByText("SUCCESS")).toBeInTheDocument()
     expect(screen.getByText("FAIL")).toBeInTheDocument()
     expect(screen.getByText("陳大華")).toBeInTheDocument()
-    // 無 operator_name 之列 fallback 顯示 operator_id
+    // 無 operator_name / email 之列（SYSTEM）fallback 顯示原 ID
     expect(screen.getByText("SYSTEM")).toBeInTheDocument()
+    // 功能顯示中文（func_label），非原碼 DP-USERS
+    expect(screen.getByText("使用者管理")).toBeInTheDocument()
+    expect(screen.queryByText("DP-USERS")).not.toBeInTheDocument()
+    // 對象顯示解析後名稱（target_display）
+    expect(screen.getByText("林小美")).toBeInTheDocument()
   })
 
   it("查無紀錄 → 顯示空狀態提示（AUDIT-001）", async () => {
@@ -48,6 +53,20 @@ describe("AuditPage 操作記錄查詢（唯讀）", () => {
     await screen.findByText("SUCCESS")
 
     expect(screen.queryByRole("button", { name: /新增|建立|編輯|刪除/ })).not.toBeInTheDocument()
+  })
+
+  it("即時篩選：無「查詢」按鈕，有「清除篩選」；點清除重置條件", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("SUCCESS")
+
+    expect(screen.queryByRole("button", { name: "查詢" })).not.toBeInTheDocument()
+    const operatorInput = screen.getByLabelText("操作者（姓名 / Email）")
+    await user.type(operatorInput, "王")
+    expect(operatorInput).toHaveValue("王")
+
+    await user.click(screen.getByRole("button", { name: "清除篩選" }))
+    expect(operatorInput).toHaveValue("")
   })
 
   it("點匯出 → 取回 CSV blob 並觸發下載", async () => {

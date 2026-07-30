@@ -1,4 +1,5 @@
 import JournalIcon from "@mui/icons-material/Article"
+import ClearIcon from "@mui/icons-material/FilterAltOff"
 import DownloadIcon from "@mui/icons-material/Download"
 import VisibilityIcon from "@mui/icons-material/Visibility"
 import Button from "@mui/material/Button"
@@ -7,7 +8,7 @@ import IconButton from "@mui/material/IconButton"
 import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { AppTable } from "../../components/AppTable"
 import type { AppColumn } from "../../components/AppTable"
@@ -31,26 +32,42 @@ function displayValue(v: string): string {
   return v === "" ? "全部" : v
 }
 
+/** 操作者顯示：姓名 → email →（皆無，如 SYSTEM）原 ID。 */
+function operatorText(r: AuditLogRow): string {
+  return r.operator_name ?? r.operator_email ?? r.operator_id
+}
+
+/** 今日（yyyy-mm-dd），供日期上限。 */
+function today(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
 export function AuditPage() {
   const audit = useAuditLogs()
-  const { setSelected } = audit
+  const { setSelected, search } = audit
   const [filters, setFilters] = useState<AuditFilters>(EMPTY_AUDIT_FILTERS)
 
   const setField = (key: keyof AuditFilters, value: string) => setFilters((prev) => ({ ...prev, [key]: value }))
+  const clearFilters = () => setFilters(EMPTY_AUDIT_FILTERS)
+
+  // 即時篩選：篩選欄異動即（防抖）套用查詢，無「查詢」按鈕
+  useEffect(() => {
+    const timer = setTimeout(() => search(filters), 400)
+    return () => clearTimeout(timer)
+  }, [filters, search])
 
   const columns = useMemo<AppColumn<AuditLogRow>[]>(
     () => [
       { key: "created_date", title: "時間", render: (_v, r) => formatDateTime(r.created_date) },
-      { key: "operator", title: "操作者", render: (_v, r) => r.operator_name ?? r.operator_id },
-      { key: "module", title: "模組", dataIndex: "module" },
-      { key: "func_name", title: "功能", dataIndex: "func_name" },
+      { key: "operator", title: "操作者", render: (_v, r) => operatorText(r) },
+      { key: "func_label", title: "功能", dataIndex: "func_label" },
       { key: "action_type", title: "類別", render: (_v, r) => <Chip size="small" label={r.action_type} /> },
       {
         key: "result",
         title: "結果",
         render: (_v, r) => <Chip size="small" color={r.result === "FAIL" ? "error" : "success"} label={r.result} />,
       },
-      { key: "target_id", title: "對象", render: (_v, r) => r.target_id ?? "—" },
+      { key: "target", title: "對象", render: (_v, r) => r.target_display ?? "—" },
       { key: "source_ip", title: "來源 IP", render: (_v, r) => r.source_ip ?? "—" },
       {
         key: "detail",
@@ -134,7 +151,7 @@ export function AuditPage() {
               label="起日"
               value={filters.date_from}
               onChange={(e) => setField("date_from", e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.date_to || today() } }}
             />
             <TextField
               type="date"
@@ -142,10 +159,10 @@ export function AuditPage() {
               label="訖日"
               value={filters.date_to}
               onChange={(e) => setField("date_to", e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.date_from || undefined, max: today() } }}
             />
-            <Button variant="outlined" size="small" onClick={() => audit.search(filters)}>
-              查詢
+            <Button variant="outlined" size="small" startIcon={<ClearIcon />} onClick={clearFilters}>
+              清除篩選
             </Button>
             <Button
               variant="contained"

@@ -206,7 +206,7 @@ async def test_operator_name_none_for_unknown_user(db):
 
 
 async def test_export_csv_matches_query(db):
-    """AC3：CSV 依條件全量、內容與查詢一致（含 BOM 與中文標頭）。"""
+    """AC3：CSV 依條件全量、內容與查詢一致（含 BOM 與指定中文標頭欄位）。"""
     await _insert_log(db, module="DP", result="SUCCESS")
     await _insert_log(db, module="ET", result="FAIL")
 
@@ -216,15 +216,93 @@ async def test_export_csv_matches_query(db):
 
     assert csv_text.startswith("﻿")  # UTF-8 BOM
     lines = [ln for ln in csv_text.splitlines() if ln.strip()]
-    assert "執行結果" in lines[0] and "事件描述" in lines[0]
+    # 指定欄位：操作時間 / 操作者帳號 / 功能 / 操作類別 / 執行結果 / 對象 / 來源 IP / 異動前值 / 異動後值
+    assert lines[0].lstrip("﻿") == "操作時間,操作者帳號,功能,操作類別,執行結果,對象,來源 IP,異動前值,異動後值"
     # 標頭 + 1 筆 ET（module=ET 過濾）
     assert len(lines) == 2
-    assert "ET" in lines[1]
+    assert "FAIL" in lines[1]
+
+
+async def test_csv_operator_account_is_email(db):
+    """AC/#4：CSV「操作者帳號」欄取操作者 email（非 USER_ID）。"""
+    await _seed_user(db, user_id="op01", user_name="王小明", email="ming@edms.local")
+    await _insert_log(db, operator_id="op01")
+
+    csv_text = await _service.export_csv(
+        db, operator=None, module=None, action_type=None, result=None, date_from=None, date_to=None
+    )
+
+    assert "ming@edms.local" in csv_text
+
+
+async def test_func_label_chinese(db):
+    """#3：func_name 回中文 func_label。"""
+    await _insert_log(db, func_name="DP-USERS")
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].func_label == "使用者管理"
+
+
+async def test_target_display_resolves_user_name(db):
+    """#1：使用者類對象 → 解析為姓名。"""
+    await _seed_user(db, user_id="u77", user_name="林小美", email="mei@edms.local")
+    await _insert_log(db, func_name="DP-USERS", target_id="u77")
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "林小美"
+
+
+async def test_target_display_resolves_param_name(db):
+    """#1：DP-PARAMS 對象（param_id.param_key）→ 解析為 PARAM_NAME 中文。"""
+    from app.dp.params.models import DpParamDetail, DpParamMaster
+
+    # 用不與 seed 衝突的 param_id；DP_PARAM_D 有 FK → DP_PARAM_M，需先建主檔
+    now = utcnow()
+    db.add(
+        DpParamMaster(
+            param_id="ZZ_AUDIT_TEST",
+            param_name="稽核測試主檔",
+            param_type="LIST",
+            created_user="seed",
+            created_date=now,
+        )
+    )
+    await db.flush()
+    db.add(
+        DpParamDetail(
+            param_id="ZZ_AUDIT_TEST",
+            param_key="K1",
+            param_name="稽核測試參數",
+            param_value="v",
+            created_user="seed",
+            created_date=now,
+        )
+    )
+    await db.flush()
+    await _insert_log(db, func_name="DP-PARAMS", target_id="ZZ_AUDIT_TEST.K1")
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "稽核測試參數"
+
+
+async def test_target_display_fallback_raw_when_unresolved(db):
+    """#1：查無對應主檔（如已刪 / 邀請未種）→ target_display fallback 原 target_id。"""
+    await _insert_log(db, func_name="DP-USERS", target_id="ghost-id")
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "ghost-id"
 
 
 async def test_export_csv_formula_injection_sanitized(db):
-    """AC3 / 安全：CSV cell 以危險字元開頭者前置單引號（formula injection 防護）。"""
-    await _insert_log(db, description="=1+2", func_name="DP-X")
+    """AC3 / 安全：CSV cell 以危險字元開頭者前置單引號（formula injection 防護）。
+
+    以匯出欄位之一 before_value 承載危險前導字元（description 已非匯出欄位）。
+    """
+    await _insert_log(db, before_value="=1+2", func_name="DP-X")
 
     csv_text = await _service.export_csv(
         db, operator=None, module=None, action_type=None, result=None, date_from=None, date_to=None
