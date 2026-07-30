@@ -20,9 +20,9 @@ import type { AuditLogRow } from "./auditService"
 import { EMPTY_AUDIT_FILTERS, useAuditLogs } from "./useAuditLogs"
 import type { AuditFilters } from "./useAuditLogs"
 
-// 功能查詢選項（value=func_name、label=中文，含模組前綴）；「全部」＝不指定
+// 功能查詢選項（value=func_name、label=中文，含模組前綴）；「全部」以 sentinel 呈現（同操作類別，避免空值不顯示 label）
 const FUNC_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "全部" },
+  { value: "全部", label: "全部" },
   { value: "DP-USERS", label: "DP-使用者管理" },
   { value: "DP-PARAMS", label: "DP-系統參數" },
   { value: "DP-TEMPLATES", label: "DP-通知範本" },
@@ -117,8 +117,8 @@ export function AuditPage() {
               select
               size="small"
               label="功能"
-              value={filters.func}
-              onChange={(e) => setField("func", e.target.value)}
+              value={filters.func === "" ? "全部" : filters.func}
+              onChange={(e) => setField("func", e.target.value === "全部" ? "" : e.target.value)}
               sx={{ minWidth: 160 }}
             >
               {FUNC_OPTIONS.map((o) => (

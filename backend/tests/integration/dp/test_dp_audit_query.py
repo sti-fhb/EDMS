@@ -256,18 +256,21 @@ async def test_query_filters_by_func_name(db):
 
 
 async def test_target_display_fallback_to_audit_json(db):
-    """#1：對象活表查無（如取消邀請、pending 已硬刪）→ 從稽核列 before/after JSON 撈姓名 / email。"""
+    """#1：對象活表查無（如取消邀請、pending 已硬刪）→ 從稽核列 before/after JSON 撈可讀名。
+
+    取消邀請之稽核已補記 user_name，故優先顯示姓名（無姓名時退 email）。
+    """
     await _insert_log(
         db,
         func_name="DP-USERS",
         action_type="DELETE",
         target_id="res-gone",
-        before_value='{"email": "invited@edms.local"}',
+        before_value='{"email": "invited@edms.local", "user_name": "受邀者"}',
     )
 
     res = await _service.query_logs(db, **_q())
 
-    assert res["data"][0].target_display == "invited@edms.local"
+    assert res["data"][0].target_display == "受邀者"
 
 
 async def test_target_display_resolves_user_name(db):
