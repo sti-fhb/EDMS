@@ -251,6 +251,49 @@ export const handlers = [
       version: body.version + 1,
     })
   }),
+  // US10 操作記錄查詢（預設 happy path：一筆 SUCCESS + 一筆 FAIL 供 UI 驗證）
+  http.get("/api/dp/audit/logs", () =>
+    HttpResponse.json({
+      data: [
+        {
+          log_id: 2,
+          created_date: "2026-07-06T09:15:22Z",
+          operator_id: "u001",
+          operator_name: "陳大華",
+          module: "DP",
+          func_name: "DP-USERS",
+          action_type: "UPDATE",
+          result: "SUCCESS",
+          target_id: "USER:1042",
+          source_ip: "10.1.2.33",
+          description: "手動解鎖帳號",
+          before_value: '{"status": "LOCKED"}',
+          after_value: '{"status": "ACTIVE"}',
+        },
+        {
+          log_id: 1,
+          created_date: "2026-07-06T09:13:55Z",
+          operator_id: "SYSTEM",
+          operator_name: null,
+          module: "DP",
+          func_name: "DP-LOGIN",
+          action_type: "LOGIN",
+          result: "FAIL",
+          target_id: null,
+          source_ip: "203.0.113.9",
+          description: "密碼錯誤",
+          before_value: null,
+          after_value: null,
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dp/audit/logs/export", () =>
+    HttpResponse.text("﻿LOG_ID,時間\n2,2026-07-06 09:15:22\n", {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

@@ -10,4 +10,7 @@ export const QUERY_KEYS = {
   templates: {
     list: () => ["templates", "list"] as const,
   },
+  audit: {
+    list: (params: Record<string, unknown>) => ["audit", "list", params] as const,
+  },
 } as const
