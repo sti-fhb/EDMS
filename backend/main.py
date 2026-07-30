@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip, set_client_ip
+from app.dp.audit.router import router as dp_audit_router
 from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.router import router as dp_templates_router
 from app.dp.notify.worker import run_forever
@@ -89,6 +90,7 @@ app.include_router(dp_user_router)
 app.include_router(dp_users_router)
 app.include_router(dp_params_router)
 app.include_router(dp_templates_router)
+app.include_router(dp_audit_router)
 
 
 @app.middleware("http")
