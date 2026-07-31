@@ -142,29 +142,27 @@ it('伺服器錯誤時顯示錯誤訊息', async () => {
 
 ### MUI 共用元件測試方式
 
-MUI 共用元件（AppHeader、Sidebar、Pagination、Breadcrumb 等）使用 MUI ThemeProvider + WarModeProvider。
+MUI 共用元件（AppHeader、Sidebar、Pagination、AppTable 等）需 MUI ThemeProvider（部分還需 Query / Notification / Router）。
 
 **使用 `renderWithProviders`（推薦）：**
 ```tsx
 import { renderWithProviders } from '../../test/renderWithProviders'
-// 已包含 MUI ThemeProvider + WarModeProvider + NotificationProvider + MemoryRouter
+// 已包含 MUI ThemeProvider + TanStack Query + NotificationProvider + MemoryRouter
+// （EDMS 無 war-mode，故無 WarModeProvider）
 renderWithProviders(<SomeMuiComponent />)
 ```
 
-**或手動包裝：**
+**或手動包裝**（僅需 Theme 的元件）：
 ```tsx
 import { ThemeProvider } from '@mui/material/styles'
 import { muiTheme } from '../styles/muiTheme'
-import { WarModeProvider } from '../contexts/WarModeContext'
 
 const renderComponent = () =>
   render(
     <ThemeProvider theme={muiTheme}>
-      <WarModeProvider>
-        <MemoryRouter>
-          <SomeComponent />
-        </MemoryRouter>
-      </WarModeProvider>
+      <MemoryRouter>
+        <SomeComponent />
+      </MemoryRouter>
     </ThemeProvider>
   )
 ```
