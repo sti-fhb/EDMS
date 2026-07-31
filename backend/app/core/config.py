@@ -1,3 +1,4 @@
+import ipaddress
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -106,17 +107,21 @@ class Settings(BaseSettings):
 
         以解析 host（轉小寫）精確比對：避免大小寫（`HTTP://LOCALHOST`）漏擋，
         亦避免正式網域含 "localhost" 子字串（如 my-localhost-proxy.example.com）被誤擋。
+        可解析為 IP 的 host 以 `ipaddress.is_loopback` 判定，涵蓋 127.0.0.0/8 與 IPv6 `::1`。
         """
         if not self.DEBUG:
             raw = self.FRONTEND_BASE_URL.strip()
             host = (urlparse(raw).hostname or "").lower()
-            is_loopback = (
-                host in {"localhost", "127.0.0.1"}
-                or host.endswith(".localhost")
-                or host.startswith("127.")
-                # host 解析不到（缺 scheme 等）時退回整串小寫子字串比對，避免漏擋
-                or (not host and ("localhost" in raw.lower() or "127.0.0.1" in raw.lower()))
-            )
+            is_loopback = host == "localhost" or host.endswith(".localhost")
+            if not is_loopback and host:
+                try:
+                    is_loopback = ipaddress.ip_address(host).is_loopback
+                except ValueError:
+                    is_loopback = False  # 非 IP 字面（正式網域）→ 交由上面的名稱判定
+            # host 解析不到（缺 scheme 等）時退回整串小寫子字串比對，避免漏擋
+            if not host and raw:
+                low = raw.lower()
+                is_loopback = "localhost" in low or "127.0.0.1" in low or "::1" in low
             if not raw or is_loopback:
                 raise ValueError(
                     "FRONTEND_BASE_URL 在 production（DEBUG=false）不得為空或指向 localhost / 127.0.0.1；"

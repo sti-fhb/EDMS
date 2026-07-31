@@ -134,6 +134,12 @@ def test_frontend_base_url_uppercase_localhost_rejected_in_production() -> None:
         _settings_with_frontend("HTTP://LOCALHOST:5174", debug=False)
 
 
+def test_frontend_base_url_ipv6_loopback_rejected_in_production() -> None:
+    """IPv6 loopback [::1] 於 production 被擋（ipaddress.is_loopback 判定）。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("http://[::1]:5174", debug=False)
+
+
 def test_frontend_base_url_domain_containing_localhost_allowed() -> None:
     """正式網域名稱恰含 'localhost' 子字串（非 loopback host）不應誤擋。"""
     s = _settings_with_frontend("https://my-localhost-proxy.example.com", debug=False)
