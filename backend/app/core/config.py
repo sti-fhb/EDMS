@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
 
+    # 邀請端點加固（US4 dp-users，#72）——建立 / 重寄邀請以「操作者」維度限流，防單一使用者濫寄。
+    # 走 config（deploy 時可調）而非 DP_PARAM，貼合「依部署環境 / 寄信額度定」語意且免 migration。
+    # 預設保守可跑；正式值待部署環境調整。視窗沿用限流器共用的 RATE_WINDOW_SECONDS（預設 60s）。
+    INVITE_RATE_MAX: int = Field(default=10, ge=1)
+    INVITE_RESEND_COOLDOWN_SEC: int = Field(default=60, ge=0)
+
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
         """依所選演算法強制 HMAC 密鑰最小長度，啟動即擋弱 / 未替換的預設密鑰。
