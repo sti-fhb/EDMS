@@ -29,7 +29,7 @@ export function SchedulePage() {
 
   const columns = useMemo<AppColumn<ScheduleRow>[]>(
     () => [
-      { key: "job_id", title: "Job", render: (_v, r) => `${r.job_id}　${r.job_name}` },
+      { key: "job_id", title: "Job", render: (_v, r) => `${r.job_id} — ${r.job_name}` },
       { key: "module", title: "所屬模組", dataIndex: "module" },
       { key: "cron_expr", title: "Cron", dataIndex: "cron_expr" },
       {
@@ -75,7 +75,7 @@ export function SchedulePage() {
       />
 
       <Dialog open={s.selectedJob !== null} onClose={s.closeLogs} maxWidth="md" fullWidth>
-        <DialogTitle>執行歷程　{s.selectedJob}</DialogTitle>
+        <DialogTitle>執行歷程 {s.selectedJob}</DialogTitle>
         <DialogContent dividers>
           <AppTable
             columns={logColumns}
