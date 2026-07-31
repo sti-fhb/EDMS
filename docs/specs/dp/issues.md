@@ -29,7 +29,7 @@
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | [#97](https://github.com/sti-fhb/EDMS/issues/97) | ✅ 已合併（PR [#100](https://github.com/sti-fhb/EDMS/pull/100)）|
-| 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 📝 body 已補（待開立）|
+| 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | [#106](https://github.com/sti-fhb/EDMS/issues/106) | 🚀 已開立 [#106](https://github.com/sti-fhb/EDMS/issues/106) |
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
 | F1 | 開發流程 CI 基礎建設（local-ci / ci.yml 預備 / PR 模板 / error-codes 骨架）| — | Foundation-infra | —（不對應 tasks.md 業務 task）| 無 | [#18](https://github.com/sti-fhb/EDMS/issues/18) | 🔨 開發中 |
 
@@ -818,7 +818,7 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 
 ---
 
-## Issue #11：[P2-延伸] DP — 排程引擎與總覽 + SCHDP001（dp-schedule）（GitHub 待開立）
+## Issue #11：[P2-延伸] DP — 排程引擎與總覽 + SCHDP001（dp-schedule）（GitHub [#106](https://github.com/sti-fhb/EDMS/issues/106)）
 
 **對應規格**：[spec_us11.md](spec_us11.md)（US11 / UCDP008，FR-DP-US11-01~07、DP-MSG-SCHEDULE-001）；[data-model.md](data-model.md)（`DP_SCHEDULE`：`JOB_ID` PK / `JOB_NAME` / `MODULE` / `CRON_EXPR` / `HANDLER_REF`〔dotted path〕/ `IS_ENABLED` / `LAST_RUN_DATE` / `LAST_RUN_STATUS`；`DP_SCHEDULE_LOG`：append-only、`JOB_ID` FK / `START_DATE` / `END_DATE` / `STATUS`〔SUCCESS / FAILED / SKIPPED〕/ `ERROR_MSG`）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §5（job handler `async def run()`）；[research.md](research.md) §9（APScheduler + DB 註冊表 + leader）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-schedule`，唯讀總覽）
 **階段**：P2-延伸（承載 ET / DM 各模組排程與平台自身 `SCHDP001`；各模組排程功能上線前完成即可）
