@@ -128,6 +128,18 @@ def test_frontend_base_url_empty_rejected_in_production() -> None:
         _settings_with_frontend("", debug=False)
 
 
+def test_frontend_base_url_uppercase_localhost_rejected_in_production() -> None:
+    """大小寫不敏感：HTTP://LOCALHOST 於 production 仍被擋（解析 host 後小寫比對）。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("HTTP://LOCALHOST:5174", debug=False)
+
+
+def test_frontend_base_url_domain_containing_localhost_allowed() -> None:
+    """正式網域名稱恰含 'localhost' 子字串（非 loopback host）不應誤擋。"""
+    s = _settings_with_frontend("https://my-localhost-proxy.example.com", debug=False)
+    assert s.FRONTEND_BASE_URL == "https://my-localhost-proxy.example.com"
+
+
 def test_frontend_base_url_localhost_allowed_in_debug() -> None:
     """dev（DEBUG=true）保留 localhost 便利，不擋。"""
     s = _settings_with_frontend("http://localhost:5174", debug=True)

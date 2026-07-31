@@ -1,4 +1,5 @@
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -102,10 +103,21 @@ class Settings(BaseSettings):
         此 URL 用於組信中連結（密碼重設 / 註冊驗證 / 帳號啟用邀請等，見 forgot / register /
         users service）。prod 忘設正式網域時，localhost 預設會靜默寄出指向使用者本機的死連結；
         此處 fail-loud，啟動即擋。dev（DEBUG=true）維持 localhost 便利。
+
+        以解析 host（轉小寫）精確比對：避免大小寫（`HTTP://LOCALHOST`）漏擋，
+        亦避免正式網域含 "localhost" 子字串（如 my-localhost-proxy.example.com）被誤擋。
         """
         if not self.DEBUG:
-            url = self.FRONTEND_BASE_URL.strip()
-            if not url or "localhost" in url or "127.0.0.1" in url:
+            raw = self.FRONTEND_BASE_URL.strip()
+            host = (urlparse(raw).hostname or "").lower()
+            is_loopback = (
+                host in {"localhost", "127.0.0.1"}
+                or host.endswith(".localhost")
+                or host.startswith("127.")
+                # host 解析不到（缺 scheme 等）時退回整串小寫子字串比對，避免漏擋
+                or (not host and ("localhost" in raw.lower() or "127.0.0.1" in raw.lower()))
+            )
+            if not raw or is_loopback:
                 raise ValueError(
                     "FRONTEND_BASE_URL 在 production（DEBUG=false）不得為空或指向 localhost / 127.0.0.1；"
                     "請於 .env 設為正式前端網域（見 backend/.env.example）"

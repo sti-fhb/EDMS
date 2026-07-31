@@ -19,6 +19,10 @@ os.environ.setdefault(
 )
 # JWT_SECRET_KEY 為必填設定；unit 測試以固定測試值滿足載入，不用於任何真實簽章。
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-not-for-production")
+# DEBUG：測試 / CI 屬非 production。設 true 以免 FRONTEND_BASE_URL 的 production 護欄
+# （見 app.core.config._validate_frontend_base_url）在 CI（無 .env、FRONTEND_BASE_URL 落回
+# localhost 預設）擋下 settings 載入，導致全數測試 collection error。
+os.environ.setdefault("DEBUG", "true")
 
 # pytest-xdist 並行：每個 worker 改用自己的資料庫，避免多行程互相 DROP SCHEMA。
 # 必須在 app.core.config.settings 第一次 import 之前改寫（否則 settings 會 cache 舊庫名）。
