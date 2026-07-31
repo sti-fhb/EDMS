@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.users.models import DpUser
@@ -64,3 +64,33 @@ class UsersRepository:
         user.updated_user = operator_id
         user.updated_date = now
         await db.flush()
+
+    # ── 平台每日排程 SCHDP001（US11）用之查詢 ─────────────────────────────
+
+    async def find_idle_active(self, db: AsyncSession, *, idle_before: datetime) -> list[DpUser]:
+        """閒置逾期之啟用帳號：`ACTIVE` 且 `COALESCE(LAST_LOGIN_DATE, CREATED_DATE) < idle_before`。
+
+        從未登入（LAST_LOGIN_DATE 為 null）者以 CREATED_DATE 為閒置起算基準（spec_us11 FR-05）。
+        """
+        stmt = select(DpUser).where(
+            DpUser.deleted == 0,
+            DpUser.status == "ACTIVE",
+            func.coalesce(DpUser.last_login_date, DpUser.created_date) < idle_before,
+        )
+        return list((await db.execute(stmt)).scalars().all())
+
+    async def find_pwd_expiring(
+        self, db: AsyncSession, *, not_expired_after: datetime, remind_on_or_before: datetime
+    ) -> list[DpUser]:
+        """密碼即將到期（尚未到期、且落在提醒窗）之啟用帳號。
+
+        到期日＝`PWD_CHANGED_DATE + EXPIRY_DAYS`；提醒窗＝到期前 `EXPIRY_REMIND_DAYS` 天內。
+        以 `PWD_CHANGED_DATE >= not_expired_after`（尚未到期）AND `<= remind_on_or_before`（已進窗）表達。
+        """
+        stmt = select(DpUser).where(
+            DpUser.deleted == 0,
+            DpUser.status == "ACTIVE",
+            DpUser.pwd_changed_date >= not_expired_after,
+            DpUser.pwd_changed_date <= remind_on_or_before,
+        )
+        return list((await db.execute(stmt)).scalars().all())
