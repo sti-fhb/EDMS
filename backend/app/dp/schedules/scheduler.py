@@ -7,10 +7,11 @@ APScheduler（`AsyncIOScheduler`）於 FastAPI lifespan 啟動時自 `DP_SCHEDUL
 - 多實例以 `scheduler_leader.is_leader()` 確保只有 leader 觸發（EDMS 單實例直跑）。
 """
 
+import asyncio
 import importlib
 import logging
 
-from apscheduler.events import EVENT_JOB_MAX_INSTANCES, JobExecutionEvent
+from apscheduler.events import EVENT_JOB_MAX_INSTANCES, JobSubmissionEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,14 +27,31 @@ _STATUS_SUCCESS = "SUCCESS"
 _STATUS_FAILED = "FAILED"
 _STATUS_SKIPPED = "SKIPPED"
 
+# 動態 import 之縱深防禦：HANDLER_REF 僅允許平台 / 模組命名空間（縱使 DB 註冊表遭竄改亦無法載入
+# os / subprocess 等任意模組。CWE-470 Unsafe Reflection）。
+_ALLOWED_HANDLER_PREFIXES = ("app.dp.", "app.et.", "app.dm.")
+
 _repo = ScheduleRepository()
+
+# 進行中的 job task（供 lifespan 收斂時等待其寫完歷程，見 shutdown_scheduler）。
+_inflight: set[asyncio.Task] = set()
+# 排程引擎所在之 event loop（供同步 listener 以 run_coroutine_threadsafe 排非同步任務）。
+_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _resolve_handler(handler_ref: str):
-    """完整 dotted path → async 無參 callable（相容種子 `...daily_platform_job` 與慣例名 `run`）。"""
+    """完整 dotted path → async 無參 callable（相容種子 `...daily_platform_job` 與慣例名 `run`）。
+
+    白名單限縮 importlib 之 blast radius（縱深防禦，見 _ALLOWED_HANDLER_PREFIXES）。
+    """
+    if not handler_ref.startswith(_ALLOWED_HANDLER_PREFIXES):
+        raise ValueError(f"HANDLER_REF 不在允許命名空間內：{handler_ref}")
     module_path, _, attr = handler_ref.rpartition(".")
     module = importlib.import_module(module_path)
-    return getattr(module, attr)
+    handler = getattr(module, attr)
+    if not callable(handler):
+        raise TypeError(f"HANDLER_REF 非 callable：{handler_ref}")
+    return handler
 
 
 async def run_and_log(db: AsyncSession, job_id: str, handler_ref: str) -> str:
@@ -47,7 +65,7 @@ async def run_and_log(db: AsyncSession, job_id: str, handler_ref: str) -> str:
     try:
         handler = _resolve_handler(handler_ref)
         await handler()
-    except Exception as exc:  # noqa: BLE001 — 逐 job 隔離，任何例外皆記 FAILED、不外拋
+    except Exception as exc:  # 逐 job 隔離：任何例外皆記 FAILED、不外拋阻斷排程器
         status = _STATUS_FAILED
         error_msg = str(exc)[:1000]
         logger.exception("排程 job 執行失敗 job_id=%s", job_id)
@@ -72,13 +90,19 @@ async def write_skipped_log(db: AsyncSession, job_id: str) -> None:
 
 
 async def _run_job(job_id: str, handler_ref: str) -> None:
-    """排程觸發之入口（自持 session + commit）；核心邏輯見 run_and_log。"""
+    """排程觸發之入口（自持 session + commit）；登記進行中 task 供收斂等待。核心見 run_and_log。"""
+    task = asyncio.current_task()
+    if task is not None:
+        _inflight.add(task)
     try:
         async with AsyncSessionLocal() as db:
             await run_and_log(db, job_id, handler_ref)
             await db.commit()
     except Exception:
         logger.exception("排程 job 歷程寫入失敗 job_id=%s", job_id)
+    finally:
+        if task is not None:
+            _inflight.discard(task)
 
 
 async def _write_skipped(job_id: str) -> None:
@@ -91,19 +115,20 @@ async def _write_skipped(job_id: str) -> None:
         logger.exception("排程 SKIPPED 歷程寫入失敗 job_id=%s", job_id)
 
 
-def _on_max_instances(event: JobExecutionEvent) -> None:
-    """`EVENT_JOB_MAX_INSTANCES` 同步 listener → 排非同步任務寫 SKIPPED。"""
-    import asyncio
-
-    asyncio.get_event_loop().create_task(_write_skipped(event.job_id))
+def _on_max_instances(event: JobSubmissionEvent) -> None:
+    """`EVENT_JOB_MAX_INSTANCES` 同步 listener → 於引擎 loop 排非同步任務寫 SKIPPED。"""
+    if _loop is not None:
+        asyncio.run_coroutine_threadsafe(_write_skipped(event.job_id), _loop)
 
 
 async def start_scheduler() -> AsyncIOScheduler | None:
     """lifespan 啟動：載入啟用中 job、註冊 cron、啟動引擎。非 leader 則不啟動（回 None）。"""
+    global _loop
     if not scheduler_leader.is_leader():
         logger.info("本實例非排程 leader，略過排程引擎啟動")
         return None
 
+    _loop = asyncio.get_running_loop()
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_listener(_on_max_instances, EVENT_JOB_MAX_INSTANCES)
 
@@ -128,7 +153,17 @@ async def start_scheduler() -> AsyncIOScheduler | None:
 
 
 async def shutdown_scheduler(scheduler: AsyncIOScheduler | None) -> None:
-    """lifespan 收斂：等待當前 job 跑完後關閉。"""
+    """lifespan 收斂：暫停觸發新 job → **等進行中的 job 寫完歷程** → 關閉引擎。
+
+    註：APScheduler 之 `AsyncIOExecutor.shutdown(wait=True)` 實際不等待、會 cancel 進行中的 task，
+    故本函式自行 `gather` 追蹤中的 `_run_job` task 以確保 FR-03「每次執行 MUST 記錄」不因關閉遺失。
+    """
+    global _loop
     if scheduler is not None:
-        scheduler.shutdown(wait=True)
+        scheduler.pause()  # 停止觸發新 job（已進行中的續跑）
+        pending = [task for task in _inflight if not task.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        scheduler.shutdown(wait=False)
         logger.info("排程引擎已關閉")
+    _loop = None

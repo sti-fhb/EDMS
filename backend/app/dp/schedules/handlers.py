@@ -14,15 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 async def daily_platform_job() -> None:
-    """平台每日作業：閒置禁用 + 密碼到期提醒（兩批次分開交易，互不影響）。"""
+    """平台每日作業：閒置禁用 + 密碼到期提醒（兩批次分開 session、逐筆 commit 於 UsersService 內）。"""
     service = UsersService()
 
     async with AsyncSessionLocal() as db:
         disabled = await service.disable_idle_accounts(db)
-        await db.commit()
 
     async with AsyncSessionLocal() as db:
         reminded = await service.send_pwd_expiry_reminders(db)
-        await db.commit()
 
     logger.info("SCHDP001 完成：閒置禁用 %d 筆、密碼到期提醒 %d 筆", disabled, reminded)

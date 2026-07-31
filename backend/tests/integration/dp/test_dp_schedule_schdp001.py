@@ -1,6 +1,6 @@
 """US11 SCHDP001 平台每日作業整合測試（handler / UsersService）。
 
-直測 `UsersService.disable_idle_accounts` / `send_pwd_expiry_reminders`（接收 db、savepoint 逐筆容錯）。
+直測 `UsersService.disable_idle_accounts` / `send_pwd_expiry_reminders`（接收 db、逐筆 commit 容錯）。
 涵蓋 AC6①（閒置禁用 + 稽核 func_name=DP-USERS + null→CREATED_DATE 基準）/ AC6②（到期提醒→EMAIL_LOG PENDING）。
 """
 
@@ -57,10 +57,14 @@ async def test_disables_idle_over_threshold(db):
     assert disabled == 1
     assert (await _get(db, "idle1")).status == "DISABLED"
     audits = (
-        await db.execute(
-            select(DpAuditLog).where(DpAuditLog.func_name == "DP-USERS", DpAuditLog.target_id == "idle1")
+        (
+            await db.execute(
+                select(DpAuditLog).where(DpAuditLog.func_name == "DP-USERS", DpAuditLog.target_id == "idle1")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audits) == 1
     assert audits[0].created_user == "SYSTEM" and audits[0].action_type == "UPDATE"
 
@@ -100,9 +104,7 @@ async def test_disabled_account_skipped(db):
 
 async def _reminder_logs(db):
     return list(
-        (
-            await db.execute(select(DpEmailLog).where(DpEmailLog.template_code == "PWD_EXPIRY_REMIND"))
-        ).scalars().all()
+        (await db.execute(select(DpEmailLog).where(DpEmailLog.template_code == "PWD_EXPIRY_REMIND"))).scalars().all()
     )
 
 
@@ -134,5 +136,29 @@ async def test_already_expired_no_reminder(db):
     """已過期（超過 90 天）→ 不在提醒窗（登入時強制變更處理），不寄。"""
     now = utcnow()
     await _seed_user(db, user_id="over1", email="over1@x.com", pwd_changed=now - timedelta(days=100))
+
+    assert await _service.send_pwd_expiry_reminders(db) == 0
+
+
+async def test_reminder_boundary_near_expiry(db):
+    """邊界：89 天前變更（明日到期、距到期 1 天）→ 窗內，寄（避免恰 90 天之 now() 微秒漂移）。"""
+    now = utcnow()
+    await _seed_user(db, user_id="edge89", email="edge89@x.com", pwd_changed=now - timedelta(days=89))
+
+    assert await _service.send_pwd_expiry_reminders(db) == 1
+
+
+async def test_reminder_boundary_window_first_day(db):
+    """邊界：剛好 83 天前變更（距到期 7 天，提醒窗第一天）→ 寄。"""
+    now = utcnow()
+    await _seed_user(db, user_id="edge83", email="edge83@x.com", pwd_changed=now - timedelta(days=83))
+
+    assert await _service.send_pwd_expiry_reminders(db) == 1
+
+
+async def test_reminder_just_outside_window(db):
+    """邊界外：82 天前變更（距到期 8 天 > 提醒窗 7 天）→ 不寄。"""
+    now = utcnow()
+    await _seed_user(db, user_id="edge82", email="edge82@x.com", pwd_changed=now - timedelta(days=82))
 
     assert await _service.send_pwd_expiry_reminders(db) == 0
