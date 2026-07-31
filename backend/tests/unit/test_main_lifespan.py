@@ -18,6 +18,7 @@ async def test_lifespan_starts_and_stops_worker(monkeypatch):
         await stop_event.wait()  # 收到停止訊號才返回（模擬優雅收斂）
 
     monkeypatch.setattr("main.run_forever", _fake_run)
+
     # 排程引擎（US11）需連 DB 載入 DP_SCHEDULE，於本「免連 DB」lifespan 單元測試以 stub 隔離
     # （引擎有專屬整合測試 test_dp_schedule_engine.py）。
     async def _fake_start():
