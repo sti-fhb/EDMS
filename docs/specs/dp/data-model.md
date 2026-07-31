@@ -155,7 +155,7 @@ erDiagram
 | STATUS | VARCHAR(10) | Y | ACTIVE | ACTIVE / DISABLED（停用含閒置 90 日自動禁用）|
 | LOGIN_FAIL_COUNT | INT | Y | 0 | 連續登入失敗計數；成功登入 / 解鎖歸零 |
 | LOCKED_UNTIL | TIMESTAMP | N | — | 鎖定截止時間；null=未鎖定；now < 值＝鎖定中（逾時自動解鎖）；手動解鎖清空 |
-| LAST_LOGIN_DATE | TIMESTAMP | N | — | 最後成功登入時間（閒置 90 日判定基準）|
+| LAST_LOGIN_DATE | TIMESTAMP | N | — | 最後成功登入時間（閒置 90 日判定基準；**null＝從未登入，改以 `CREATED_DATE` 為基準**）|
 | PENDING_EMAIL | VARCHAR(255) | N | — | Email 變更待驗證之新信箱（驗證後寫入 EMAIL 並清空；逾時作廢清空）|
 | PWD_CHANGED_DATE | TIMESTAMP | Y | — | 最後一次密碼設定時間（效期 90 日起算）|
 | MUST_CHANGE_PWD | BOOLEAN | Y | false | 首次登入強制變更旗標（管理者代建初始密碼時為 true，變更後歸 false）|
@@ -376,7 +376,7 @@ erDiagram
 ## 業務規則對照
 
 - **鎖定判定**：登入時 `LOCKED_UNTIL` 非空且 > now → 拒絕；≤ now → 視為已自動解鎖（清空並歸零計數後繼續驗證）
-- **閒置禁用**：`SCHDP001` 每日掃 `LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS` → STATUS=DISABLED + 稽核
+- **閒置禁用**：`SCHDP001` 每日掃 `ACTIVE` 帳號，`LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`（預設 90 日）→ STATUS=DISABLED + 稽核（`func_name=DP-USERS`、operator=SYSTEM，供操作記錄以姓名呈現對象）。**`LAST_LOGIN_DATE` 為 null（活化後從未登入）者，以 `CREATED_DATE` 為閒置起算基準**（休眠邀請 / 註冊帳號同樣於 90 日後禁用）
 - **密碼效期**：登入時 `PWD_CHANGED_DATE` + `EXPIRY_DAYS` < now 或 `MUST_CHANGE_PWD`=true → 導強制變更
 - **模組過濾**：`DP_PARAM` 以 PARAM_ID 前綴、`DP_NOTIFY_TEMPLATE` 以 MODULE 欄，伺服器端依操作者之模組管理者身分（research §4）過濾與擋寫
 - **樂觀鎖**：`DP_NOTIFY_TEMPLATE.VERSION` 儲存時比對，不符回衝突

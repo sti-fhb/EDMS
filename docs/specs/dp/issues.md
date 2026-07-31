@@ -29,7 +29,7 @@
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | [#97](https://github.com/sti-fhb/EDMS/issues/97) | ✅ 已合併（PR [#100](https://github.com/sti-fhb/EDMS/pull/100)）|
-| 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 待補 |
+| 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | — | 📝 body 已補（待開立）|
 | 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
 | F1 | 開發流程 CI 基礎建設（local-ci / ci.yml 預備 / PR 模板 / error-codes 骨架）| — | Foundation-infra | —（不對應 tasks.md 業務 task）| 無 | [#18](https://github.com/sti-fhb/EDMS/issues/18) | 🔨 開發中 |
 
@@ -818,9 +818,84 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 
 ---
 
-## Issue #11 ~ #12：待補（增量模式）
+## Issue #11：[P2-延伸] DP — 排程引擎與總覽 + SCHDP001（dp-schedule）（GitHub 待開立）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後逐張補入完整 body（格式同 Issue #0 ~ #10，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us11.md](spec_us11.md)（US11 / UCDP008，FR-DP-US11-01~07、DP-MSG-SCHEDULE-001）；[data-model.md](data-model.md)（`DP_SCHEDULE`：`JOB_ID` PK / `JOB_NAME` / `MODULE` / `CRON_EXPR` / `HANDLER_REF`〔dotted path〕/ `IS_ENABLED` / `LAST_RUN_DATE` / `LAST_RUN_STATUS`；`DP_SCHEDULE_LOG`：append-only、`JOB_ID` FK / `START_DATE` / `END_DATE` / `STATUS`〔SUCCESS / FAILED / SKIPPED〕/ `ERROR_MSG`）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §5（job handler `async def run()`）；[research.md](research.md) §9（APScheduler + DB 註冊表 + leader）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-schedule`，唯讀總覽）
+**階段**：P2-延伸（承載 ET / DM 各模組排程與平台自身 `SCHDP001`；各模組排程功能上線前完成即可）
+**前置條件**：
+- Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_SCHEDULE` + `DP_SCHEDULE_LOG` 表（T008）+ **種子（T009）**：`SCHDP001` 啟用（cron `0 8 * * *`、`HANDLER_REF=app.dp.schedules.handlers.daily_platform_job`）、`SCHET001` / `SCHET002` / `SCHDM001` 為 **`IS_ENABLED=false` 預留列**（handler 待各模組提供）+ 平台級參數（`LOGIN.IDLE_DISABLE_DAYS=90`、`PWD_POLICY.EXPIRY_DAYS=90` / `EXPIRY_REMIND_DAYS=7`）+ `apscheduler>=3.11` 依賴 + `scheduler_leader.py` 起手包
+- Issue #1（GitHub [#27](https://github.com/sti-fhb/EDMS/issues/27)，US6）已合併：`SRVDP002` 發信服務——`SCHDP001` 之密碼到期提醒經此寄出
+- Issue #9（US9）已合併：`MODULE=DP` **`PWD_EXPIRY_REMIND`「密碼到期提醒」範本**（種子於 #0、內容可於 US9 維護）——本 issue 為其**首個實際寄送點**（US9 手測時確認寄送 await 排程，於此補齊）
+
+### 任務說明
+
+平台**單一排程執行引擎** + **平台自身排程 `SCHDP001`** + **唯讀排程總覽**（`dp-schedule`）。引擎以 APScheduler（`AsyncIOScheduler`）於 FastAPI lifespan 啟動時自 `DP_SCHEDULE` 載入**啟用中** job（cron + `HANDLER_REF` 動態 import 各模組 / 平台 handler），`max_instances=1` + coalesce 落實「前次未完成跳過本次」（跳過亦記 `SKIPPED`），每次執行寫 `DP_SCHEDULE_LOG`（起訖 / 結果 / 錯誤）並更新 `DP_SCHEDULE.LAST_RUN_*`，**單一 job 失敗隔離不影響其他**；多實例以 leader 選舉確保只觸發一次（EDMS 預設單一實例直跑）。`SCHDP001`（每日）執行①閒置帳號禁用②密碼到期提醒。ET / DM 管理者於總覽頁**唯讀**檢視 job 清單與執行歷程，**無 UI 啟停 / 補跑**（啟停由 DB / 部署管理）。填實既有 `SchedulePage` stub。
+
+> ℹ️ 全端 issue（引擎 + handler + 唯讀 UI）。**本 issue 交付「引擎 + `SCHDP001`（DP 自持）+ 總覽」**；`SCHET001` / `SCHET002` / `SCHDM001` 之 handler 由 **ET / DM 模組後補**（預留列 `IS_ENABLED=false`、引擎自動略過），不阻塞本 issue。**無新表 / migration**（表 + 種子於 #0 已建）。與既有 US6 outbox worker（常駐 asyncio task）同屬 lifespan 背景元件、併存。
+
+### 範圍
+
+**後端**（`app/dp/schedules/` — 引擎 + handler + 總覽端點；模型於 #0 已建）：
+- **T044 排程引擎** `core/scheduler`：`AsyncIOScheduler`；FastAPI lifespan 啟動時自 `DP_SCHEDULE` 載入 `IS_ENABLED=true` job（`CronTrigger.from_crontab(CRON_EXPR)` + `HANDLER_REF` 動態 import 取 `run` callable）；每 job `max_instances=1` + `coalesce`（前次未完成 → 本次跳過、寫 `DP_SCHEDULE_LOG`（`SKIPPED` + 原因））；執行以獨立交易包裹、寫 `DP_SCHEDULE_LOG`（`START_DATE` / `END_DATE` / `STATUS` / `ERROR_MSG`）+ 更新 `LAST_RUN_DATE` / `LAST_RUN_STATUS`；**例外捕捉、單 job 失敗不影響其他**；`scheduler_leader.py`（單實例直跑、多實例 leader 選舉，起手包沿用），對應 FR-01~04
+- **T045 `SCHDP001` handler** `app.dp.schedules.handlers.daily_platform_job`（每日）：① `ACTIVE` 帳號 `LAST_LOGIN_DATE` 逾 `LOGIN.IDLE_DISABLE_DAYS`（90）→ `STATUS=DISABLED` + 寫 `DP_AUDIT_LOG`（**`func_name=DP-USERS`**、operator=SYSTEM，使 dp-audit 對象顯示姓名）；**`LAST_LOGIN_DATE` 為 null（從未登入）以 `CREATED_DATE` 為基準**；② `PWD_CHANGED_DATE` 距 `PWD_POLICY.EXPIRY_DAYS`（90）剩 ≤ `EXPIRY_REMIND_DAYS`（7）之使用者 → 經 `SRVDP002` 寄 `PWD_EXPIRY_REMIND`（**每日跑均寄、直至變更 / 到期**）；兩批次**各自逐筆容錯**（單一使用者失敗不擋其他），對應 FR-05
+- **T046 總覽端點**：`GET /api/dp/schedules`（job 清單：`JOB_ID` / `JOB_NAME` / `MODULE` / `CRON_EXPR` / `IS_ENABLED` / `LAST_RUN_DATE` / `LAST_RUN_STATUS`）+ `GET /api/dp/schedules/{job_id}/logs`（該 job 執行歷程，後端分頁時間倒序）；**唯讀、無啟停 / 補跑端點**；共用項（`get_jwt_payload`、不分模組），對應 FR-06/07
+
+**前端**（`frontend/src/dp/schedules/`，填實 `SchedulePage` stub）：
+- 唯讀 job 清單（`JOB_ID` / 說明〔`JOB_NAME`〕/ cron / 啟停狀態 / 上次執行時間 + 結果 badge）+ 點列**展開執行歷程**（`DP_SCHEDULE_LOG`：起訖 / 結果 / 錯誤）+ 空狀態提示（SCHEDULE-001）
+- **全頁無啟停 / 手動補跑任何按鈕**（唯讀）
+
+**測試**：
+- 後端 int：cron 觸發 → 寫 `DP_SCHEDULE_LOG` 起訖 + `SUCCESS` + 更新 `LAST_RUN_*`；job 失敗 → `FAILED` + 錯誤訊息、**其他 job 照常**；前次未完成 → `SKIPPED`；`IS_ENABLED=false` 不觸發；`SCHDP001`：種閒置 > 90 日帳號 → `DISABLED` + 稽核、種密碼將到期使用者 → `DP_EMAIL_LOG` PENDING（`PWD_EXPIRY_REMIND`）；總覽端點唯讀（**無啟停 / 補跑端點** → 405 / 不存在）；未登入 401
+- 前端：job 清單 + 歷程展開 + 空狀態 SCHEDULE-001；介面無操作按鈕
+
+### 驗收條件
+
+- [ ] job 於 `DP_SCHEDULE` 登錄且啟用、cron 到期 → 引擎觸發，`DP_SCHEDULE_LOG` 留起訖與 `SUCCESS`、更新 `LAST_RUN_*`；多實例僅 leader 觸發一次（單實例直跑）（FR-01/02/03、AC1/2）
+- [ ] job 執行失敗 → `DP_SCHEDULE_LOG` 記 `FAILED` + 錯誤訊息，**不影響其他 job**（FR-03、AC3）
+- [ ] 前次執行未完成、下次 cron 到期 → 跳過本次並記 `SKIPPED`（不重複執行同一 job）（FR-03、AC4）
+- [ ] `IS_ENABLED=false` 之 job → cron 到期不觸發（FR-01、AC5）
+- [ ] `SCHDP001`（每日）→ ① 連續 90 日未登入帳號自動 `DISABLED` + 稽核（`LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`；**null 從未登入以 `CREATED_DATE` 為基準**）；② 密碼到期前 7 天起經 US6 寄 `PWD_EXPIRY_REMIND`（`MODULE=DP`，每日跑均寄至變更 / 到期）（FR-05、AC6）
+- [ ] ET / DM 管理者進總覽 → 唯讀列各 job（`JOB_ID` / 說明 / cron / 啟停 / 上次時間 + 結果）並可展開歷程；**無啟停 / 補跑操作**；無紀錄顯示空狀態 SCHEDULE-001（FR-06、AC7）
+- [ ] 排程時間等參數存 `DP_PARAM`（模組前綴），引擎於觸發時讀最新值（FR-07）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
+
+### 依賴
+
+- **Issue #0（GitHub #16）**：`DP_SCHEDULE` / `DP_SCHEDULE_LOG` 表 + 種子（`SCHDP001` 啟用 + ET/DM 預留列 + 相關參數）+ `apscheduler` 依賴 + `scheduler_leader.py` 起手包
+- **Issue #1（GitHub #27，US6）**：`SRVDP002`（密碼到期提醒寄送）
+- **Issue #9（US9）**：`PWD_EXPIRY_REMIND` 範本（本 issue 首個實際寄送點）
+- **Issue #6（US5）**：平台級參數（`IDLE_DISABLE_DAYS` / `EXPIRY_DAYS` / `EXPIRY_REMIND_DAYS`；已種子、可維護）
+- **ET / DM job handler（各模組後補）**：`SCHET001` / `SCHET002` / `SCHDM001` handler 由 ET / DM 提供（`async def run()`，contracts §5）；本 issue 僅交付引擎 + `SCHDP001`，預留列 `IS_ENABLED=false` 引擎自動略過，**不阻塞**
+
+### 注意事項
+
+- **交付邊界**：本 issue = **引擎 + `SCHDP001`（DP 自持）+ 唯讀總覽**。ET / DM 的 `SCHET` / `SCHDM` handler 由各模組於其開發時提供並將對應 `DP_SCHEDULE` 列 `IS_ENABLED=true`；引擎對 `HANDLER_REF` 動態 import，預留列停用故不觸發、亦不需其 handler 存在。
+- **`PWD_EXPIRY_REMIND` 首落地**：US9 已備範本 + 維護，但「密碼到期提醒」之**寄送**待本排程（US9 手測時已確認未實作）；本 issue 之 `SCHDP001` ② 補齊寄送鏈（經 `SRVDP002` → `DP_EMAIL_LOG` → outbox worker 寄出）。
+- **引擎與 lifespan**：`AsyncIOScheduler` 於 FastAPI lifespan 啟動 / 收斂，與 US6 outbox 常駐 worker **併存**（兩者皆 lifespan 背景元件，非互相依賴）。`max_instances=1` + `coalesce` 落實 FR-03「前次未完成跳過」；**`SKIPPED` 亦寫 `DP_SCHEDULE_LOG`**（非靜默略過）。
+- **leader 選舉**（FR-02）：沿用 TBMS `core/scheduler_leader.py` 起手包；**EDMS 預設單一實例直跑**（多實例 leader 為前瞻，避免多實例重複觸發）。
+- **失敗隔離與交易邊界**（FR-03）：每 job 執行以獨立交易、例外由引擎捕捉記 `FAILED`，不影響排程器與其他 job；`SCHDP001` 內「閒置禁用批次」與「到期提醒批次」各自逐筆容錯（單一使用者失敗不擋其餘）。
+- **閒置基準 null 處理**（`/sti-sa-precheck dp us11` 補）：`last_login_date` 僅於**登入成功**時設，活化不設 → 活化但從未登入之帳號 `LAST_LOGIN_DATE=null`；`SCHDP001` 對此類帳號**以 `CREATED_DATE` 為閒置起算基準**（休眠邀請 / 註冊帳號同樣 90 日後禁用）。
+- **閒置禁用稽核 `func_name=DP-USERS`**（跨 issue 一致）：US10 dp-audit 之對象解析器依 `func_name ∈ 使用者類` 才把 target 解析為姓名；SCHDP001 禁用寫稽核用 `func_name=DP-USERS`、operator=`SYSTEM`，操作記錄「對象」欄方顯示被禁用者姓名而非原始 USER_ID。
+- **密碼到期提醒為每日重寄**（FR-05）：`SCHDP001` 每日跑，落在「到期前 `EXPIRY_REMIND_DAYS` 天」窗內之使用者**每日均寄**一封，直至其變更密碼或密碼到期（非單次；避免遺漏、亦符「持續提醒」意圖）。
+- **`DP_SCHEDULE` 異動＝重啟生效（MVP）**：引擎於 lifespan 啟動時載入 `DP_SCHEDULE`，runtime 改 `CRON_EXPR` / `IS_ENABLED` **不熱重載、需重啟生效**。SCHDP001 為固定每日不受影響；**cron 熱重載（watcher 式）留 ET/DM param-driven cron 落地時評估**（本 issue 範圍外）。
+- **唯讀總覽 + 暫行案 A**（FR-06）：總覽為共用項、**無啟停 / 補跑端點**（啟停由 DB / 部署）；授權比照 dp-audit / dp-params 之暫行案 A（router 僅 `get_jwt_payload`、不掛 admin 閘，真 gate 待 **T049** 回歸、重用 `DP_AUTH_006`）。
+- **稽核 vs 排程歷程**：閒置禁用寫 `DP_AUDIT_LOG`（資安事件、operator=SYSTEM）；排程**執行歷程**寫 `DP_SCHEDULE_LOG`（非稽核表、無 ROW_HASH 鏈）。
+- **Error codes**：排程執行本身**無使用者介面錯誤碼**（結果記 `DP_SCHEDULE_LOG` 與應用層 log）；總覽越權待 T049 重用 `DP_AUTH_006`；SCHEDULE-001 為空狀態 UI 提示、非 error code。
+- **前端路由已備**：`/dp/schedule` 路由 + `SchedulePage` stub 已存在（#0 骨架），本 issue 填實。
+
+### 相關文件
+
+- [spec_us11.md](spec_us11.md)、[spec.md](spec.md) §排程引擎、[data-model.md](data-model.md)（`DP_SCHEDULE` / `DP_SCHEDULE_LOG`）、[tasks.md](tasks.md) Phase 13（T044~T046）
+- [contracts/module-callbacks.md](contracts/module-callbacks.md) §5（job handler）、[research.md](research.md) §9（APScheduler + leader）
+- 需求：[RQDP.md](../../requirements/RQDP.md) §排程基礎建設；使用案例：[usecases.md](../../use-cases/dp/usecases.md) UCDP008
+
+**Labels**：`P2-延伸`, `DP-平台`, `US11`
+
+---
+
+## Issue #12：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 ~ #11，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -853,3 +928,5 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 | 2026-07-29 | US9（#92 / PR #95）已合併進 main；依增量模式補入 Issue #10（操作記錄查詢 / US10 / dp-audit）完整 body（T042~T043）：唯讀多條件查詢（操作者 / 期間起訖 / 模組 / 操作類別）+ 後端分頁時間倒序 + 明細前後值（JSON）+ CSV 匯出；**與 US5/US9 關鍵差異＝不分模組共用可見**（兩管理者皆查全部，`模組`僅為查詢條件非存取控制）；append-only、後端無刪改端點、ROW_HASH 鏈由寫入端維護（查詢頁不驗鏈）；無新表 / migration（表 + `AuditLogService` 寫入於 #0 已建）；填實 `AuditPage` stub；「僅管理者 AUDIT-002」vs 暫行案 A 之 interim 姿態列為 SA Q（傾向方案 A、gate 待 T049）；error codes 越權建議重用 `DP_AUTH_006` 或新增 `DP_AUDIT_001`；總覽 #10 主要前置補 `#0`（原僅列 #2）|
 | 2026-07-29 | US10 交付前自檢（`/sti-sa-precheck dp us10`）修 2 必補一致性缺口：(1) **`RESULT`（執行結果 SUCCESS/FAIL）+ `DESCRIPTION`（事件描述）**——data-model 有欄、FR-05 明訂記錄、SRVDP003 已寫入，但 spec_us10 AC2 / wireframe 明細 modal 皆漏呈現 → spec_us10 AC1/AC2/FR-02 補為查詢條件 + 列表欄 + 明細欄，wireframe `dp-audit` 查詢列補「執行結果」下拉、列表補「結果」欄（加登入 FAIL 示例）、明細 modal 補執行結果 / 事件描述兩列；(2) **「JSONB」用語收斂**——spec_us10（AC2/FR-02）+ wireframe（內部註記 + 明細 label）之「JSONB」改「JSON 字串（`TEXT` 欄）」，對齊 data-model / spec.md / research §6。Issue #10 body 同步（T042/T043 範圍 + AC + 注意事項）|
 | 2026-07-30 | Issue #10（US10 dp-audit）已開立 [#97](https://github.com/sti-fhb/EDMS/issues/97) 並**開發合併（PR [#100](https://github.com/sti-fhb/EDMS/pull/100)）**；總覽 #10 狀態更新為已合併。後端 `app/dp/audit/` 補查詢 router + CSV 匯出（無新表 / migration）；SA 裁示 Q1=A（暫行案 A、AUDIT-002 真 gate 待 T049）。**3 輪手測回饋**落地：對象 / 操作者解析為可讀名（使用者姓名→email、參數 / 範本中文、邀請經 pending 或稽核 JSON fallback）、功能顯示中文含 `DP-` 前綴、列表移除模組欄、查詢「模組」改「功能」下拉、即時篩選（防抖 + 清除篩選、無查詢鈕）、期間起訖互相約束且不超過當日、CSV 精簡為 9 欄（操作者帳號=email、對象=姓名）、`cancel_invite`/`resend_invite` 稽核補記 `user_name`（US4）；登入登出依 FR-05 保留。CSV 全量匯出加固（CWE-400）開 follow-up [#102](https://github.com/sti-fhb/EDMS/issues/102)（隨 T049）|
+| 2026-07-30 | 依增量模式補入 Issue #11（排程引擎與總覽 + SCHDP001 / US11 / dp-schedule）完整 body（T044~T046）：APScheduler 單一引擎（lifespan 載入 `DP_SCHEDULE` 啟用中 job、`HANDLER_REF` 動態 import、`max_instances=1`+coalesce→SKIPPED、寫 `DP_SCHEDULE_LOG`+`LAST_RUN_*`、失敗隔離、`scheduler_leader` 單實例直跑）+ `SCHDP001`（每日：閒置 90 日禁用 + 稽核、密碼到期前 7 天寄 `PWD_EXPIRY_REMIND`）+ 唯讀總覽（無啟停 / 補跑）；**無新表 / migration**（表 + 種子〔SCHDP001 啟用、ET/DM 預留列〕+ apscheduler 依賴於 #0 已建）；**交付邊界＝引擎 + SCHDP001（DP 自持）+ 總覽**，ET/DM handler 由各模組後補（預留列停用不阻塞）；`PWD_EXPIRY_REMIND` 首落地寄送點（US9 已備範本）；授權暫行案 A（總覽越權待 T049 重用 `DP_AUTH_006`）；填實 `SchedulePage` stub |
+| 2026-07-30 | US11 交付前自檢（`/sti-sa-precheck dp us11`）修 1 必補 + 3 建議：**必補**——`last_login_date` 僅登入時設、活化不設，故活化未登入帳號 `LAST_LOGIN_DATE=null`，`SCHDP001` 閒置判定對 null 未定義 → spec_us11 FR-05 / AC6 + data-model（閒置禁用規則 + 欄位說明）明訂 **null 以 `CREATED_DATE` 為閒置起算基準**；**建議**——(1) 密碼到期提醒 spec 明訂「每日跑均寄、直至變更 / 到期」（非單次）；(2) 閒置禁用稽核 `func_name=DP-USERS`、operator=SYSTEM（使 US10 dp-audit 對象顯示姓名）；(3) `DP_SCHEDULE` 異動 MVP 重啟生效、cron 熱重載留 ET/DM 落地評估。Issue #11 body 同步（AC6 + T045 範圍 + 注意事項）|
