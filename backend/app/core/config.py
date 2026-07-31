@@ -89,6 +89,23 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_frontend_base_url(self) -> "Settings":
+        """production（非 DEBUG）護欄：FRONTEND_BASE_URL 不得為空、不得指向 localhost / 127.0.0.1。
+
+        此 URL 用於組信中連結（密碼重設 / 註冊驗證 / 帳號啟用邀請等，見 forgot / register /
+        users service）。prod 忘設正式網域時，localhost 預設會靜默寄出指向使用者本機的死連結；
+        此處 fail-loud，啟動即擋。dev（DEBUG=true）維持 localhost 便利。
+        """
+        if not self.DEBUG:
+            url = self.FRONTEND_BASE_URL.strip()
+            if not url or "localhost" in url or "127.0.0.1" in url:
+                raise ValueError(
+                    "FRONTEND_BASE_URL 在 production（DEBUG=false）不得為空或指向 localhost / 127.0.0.1；"
+                    "請於 .env 設為正式前端網域（見 backend/.env.example）"
+                )
+        return self
+
     @property
     def cors_origins_list(self) -> list[str]:
         """將逗號分隔的 CORS_ORIGINS 字串解析為 list，自動去除前後空白。
