@@ -10,6 +10,7 @@ import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
 import { useSearchParams } from "react-router-dom"
 
+import { AUTH_BG_GRADIENT } from "./authBackground"
 import { authApi } from "./authService"
 import { makeResetPasswordSchema } from "./schemas/resetPasswordSchema"
 import { usePasswordPolicy } from "../hooks/usePasswordPolicy"
@@ -59,7 +60,7 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", p: 2 }}>
+    <Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", p: 2, background: AUTH_BG_GRADIENT }}>
       <Card sx={{ width: 440, maxWidth: "100%", p: 4 }}>
         <Typography variant="h6" gutterBottom>
           重設密碼

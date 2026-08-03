@@ -27,6 +27,7 @@ _FUNC_LABELS: dict[str, str] = {
     "DP-FORGOT": "DP-忘記密碼",
     "DP-REGISTER": "DP-自助註冊",
     "DP-AUTH": "DP-登入登出",
+    "DP-SCHEDULE": "DP-排程管理",
 }
 
 # 供前端「功能」查詢下拉（value=func_name、label=中文）。

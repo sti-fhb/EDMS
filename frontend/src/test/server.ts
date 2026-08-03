@@ -311,6 +311,7 @@ export const handlers = [
         is_enabled: true,
         last_run_date: "2026-07-06T08:00:41Z",
         last_run_status: "SUCCESS",
+        next_run_date: "2026-08-01T08:00:00Z",
       },
       {
         job_id: "SCHET001",
@@ -320,9 +321,23 @@ export const handlers = [
         is_enabled: false,
         last_run_date: null,
         last_run_status: null,
+        next_run_date: null,
       },
     ]),
   ),
+  http.put("/api/dp/schedules/:jobId", async ({ params, request }) => {
+    const body = (await request.json()) as { job_name: string; cron_expr: string; is_enabled: boolean }
+    return HttpResponse.json({
+      job_id: params.jobId,
+      job_name: body.job_name,
+      module: "DP",
+      cron_expr: body.cron_expr,
+      is_enabled: body.is_enabled,
+      last_run_date: null,
+      last_run_status: null,
+      next_run_date: body.is_enabled ? "2026-08-02T02:30:00Z" : null,
+    })
+  }),
   http.get("/api/dp/schedules/SCHDP001/logs", () =>
     HttpResponse.json({
       data: [

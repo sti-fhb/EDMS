@@ -18,7 +18,7 @@
 4. **Given** 前次執行尚未完成，**When** 下次 cron 到期，**Then** 跳過本次並記錄（不重複執行同一 job）
 5. **Given** job 於 `DP_SCHEDULE` 為停用狀態，**When** cron 到期，**Then** 不觸發
 6. **Given** 平台自身排程 `SCHDP001`（每日）執行，**When** 檢核全部帳號，**Then** ① 連續 90 日未登入之帳號自動禁用並寫稽核（`LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`；**null＝從未登入則以 `CREATED_DATE` 為基準**）；② 密碼將於 N 天內到期（預設 7 天）之使用者經發信服務（US6）寄「密碼到期提醒」（`MODULE=DP` 範本）；提醒於到期前每日跑均寄出（達成前每日提醒，非單次）
-7. **Given** ET 或 DM 管理者進入排程總覽頁（共用項），**When** 頁面載入，**Then** 唯讀列出各 job（`JOB_ID` / 說明 / cron / 啟停狀態 / 上次執行時間與結果）並可展開執行歷程；**無啟停 / 手動補跑操作**（啟停由 DB / 部署管理）；無紀錄時顯示空狀態（DP-MSG-SCHEDULE-001）
+7. **Given** ET 或 DM 管理者進入排程總覽頁（共用項），**When** 頁面載入，**Then** 列出各 job（`JOB_ID` / 說明 / cron / 狀態〔啟用停用〕/ 上次執行時間 / **下次執行時間** / 執行歷程）；**可編輯 `JOB_NAME` / `CRON_EXPR` / 啟停**（cron 即時生效）；**MUST NOT 提供手動補跑；`HANDLER_REF` / `MODULE` / `JOB_ID` 不可改**；無紀錄時顯示空狀態（DP-MSG-SCHEDULE-001）
 
 ## Functional Requirements
 
@@ -27,7 +27,7 @@
 - **FR-DP-US11-03**: 每次執行 MUST 於 `DP_SCHEDULE_LOG` 記錄起訖時間、成功 / 失敗、錯誤訊息（append-only）；單一 job 失敗 MUST NOT 影響其他 job；前次未完成時 MUST 跳過本次並記錄
 - **FR-DP-US11-04**: job handler 由所屬模組提供並向引擎註冊；需要業務資料時反向 import 模組 service（平台 job → 模組 service）
 - **FR-DP-US11-05**: 平台自身排程 `SCHDP001`（每日）MUST 執行：① 閒置帳號禁用（`ACTIVE` 帳號 `LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`，天數為平台級參數；**`LAST_LOGIN_DATE` 為 null〔從未登入〕時以 `CREATED_DATE` 為閒置起算基準**；禁用寫稽核 `func_name=DP-USERS`、operator=SYSTEM）；② 密碼效期到期前提醒（`PWD_CHANGED_DATE`+`EXPIRY_DAYS` 距今 ≤ `EXPIRY_REMIND_DAYS`，預設到期前 7 天起、**每日跑均寄出直至變更 / 到期**，經 US6 寄 `MODULE=DP`「密碼到期提醒」）；兩者結果寫入稽核 / outbox，各批次逐筆容錯（單一使用者失敗不擋其他）
-- **FR-DP-US11-06**: DP 後台 MUST 提供排程總覽**唯讀**畫面（共用項，ET / DM 管理者皆可檢視）：job 清單與執行歷程；MUST NOT 提供 UI 啟停或手動補跑（啟停由 DB / 部署管理）
+- **FR-DP-US11-06**: DP 後台 MUST 提供排程總覽畫面（共用項，ET / DM 管理者皆可檢視）：job 清單（含下次執行時間）與執行歷程；**MAY 編輯 `JOB_NAME` / `CRON_EXPR` / 啟停（`IS_ENABLED`）**，`CRON_EXPR` / `IS_ENABLED` 變更即時套到運行中的引擎；**MUST NOT 提供手動補跑**（補跑各模組自理，FR-03）；**`HANDLER_REF` / `MODULE` / `JOB_ID` MUST NOT 可經 UI 修改**（`HANDLER_REF` 改＝任意程式執行風險）
 - **FR-DP-US11-07**: 排程時間等業務參數存 `DP_PARAM`（前綴分模組，如 `ET_WEEKLY_STAT_DAY_TIME`、`DM_WEEKLY_SCHED_DAY_TIME`），由各模組管理者於 US5 維護；引擎 MUST 於觸發時讀取最新值
 
 ## 系統訊息

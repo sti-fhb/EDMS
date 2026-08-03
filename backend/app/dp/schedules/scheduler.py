@@ -10,6 +10,7 @@ APScheduler（`AsyncIOScheduler`）於 FastAPI lifespan 啟動時自 `DP_SCHEDUL
 import asyncio
 import importlib
 import logging
+from datetime import datetime
 
 from apscheduler.events import EVENT_JOB_MAX_INSTANCES, JobSubmissionEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -37,6 +38,48 @@ _repo = ScheduleRepository()
 _inflight: set[asyncio.Task] = set()
 # 排程引擎所在之 event loop（供同步 listener 以 run_coroutine_threadsafe 排非同步任務）。
 _loop: asyncio.AbstractEventLoop | None = None
+# 運行中的 scheduler 單例（供編輯端點即時 reschedule / add / remove；引擎未啟動時為 None）。
+_scheduler: AsyncIOScheduler | None = None
+
+
+def validate_cron(cron_expr: str) -> None:
+    """驗證 cron 表達式合法；非法拋 ValueError（呼叫端轉 422）。"""
+    CronTrigger.from_crontab(cron_expr, timezone="UTC")
+
+
+def next_run(cron_expr: str) -> "datetime | None":
+    """由 cron 算「現在起」之下次觸發時間（供總覽顯示）；非法 cron 回 None。"""
+    try:
+        trigger = CronTrigger.from_crontab(cron_expr, timezone="UTC")
+    except ValueError:
+        return None
+    return trigger.get_next_fire_time(None, utcnow())
+
+
+def apply_job_change(job_id: str, *, cron_expr: str, is_enabled: bool, handler_ref: str) -> None:
+    """將 DP_SCHEDULE 之變更即時套到運行中的引擎（啟用→add/reschedule、停用→remove）。
+
+    引擎未啟動（如測試 / 非 leader）則 no-op——DB 已更新，於下次 start_scheduler 生效。
+    """
+    if _scheduler is None:
+        return
+    existing = _scheduler.get_job(job_id)
+    if is_enabled:
+        trigger = CronTrigger.from_crontab(cron_expr, timezone="UTC")
+        if existing is not None:
+            _scheduler.reschedule_job(job_id, trigger=trigger)
+        else:
+            _scheduler.add_job(
+                _run_job,
+                trigger=trigger,
+                args=[job_id, handler_ref],
+                id=job_id,
+                max_instances=1,
+                coalesce=True,
+                replace_existing=True,
+            )
+    elif existing is not None:
+        _scheduler.remove_job(job_id)
 
 
 def _resolve_handler(handler_ref: str):
@@ -123,7 +166,7 @@ def _on_max_instances(event: JobSubmissionEvent) -> None:
 
 async def start_scheduler() -> AsyncIOScheduler | None:
     """lifespan 啟動：載入啟用中 job、註冊 cron、啟動引擎。非 leader 則不啟動（回 None）。"""
-    global _loop
+    global _loop, _scheduler
     if not scheduler_leader.is_leader():
         logger.info("本實例非排程 leader，略過排程引擎啟動")
         return None
@@ -148,6 +191,7 @@ async def start_scheduler() -> AsyncIOScheduler | None:
         logger.info("已註冊排程 job_id=%s cron=%s", job.job_id, job.cron_expr)
 
     scheduler.start()
+    _scheduler = scheduler
     logger.info("排程引擎啟動，載入 %d 個啟用中 job", len(jobs))
     return scheduler
 
@@ -158,7 +202,7 @@ async def shutdown_scheduler(scheduler: AsyncIOScheduler | None) -> None:
     註：APScheduler 之 `AsyncIOExecutor.shutdown(wait=True)` 實際不等待、會 cancel 進行中的 task，
     故本函式自行 `gather` 追蹤中的 `_run_job` task 以確保 FR-03「每次執行 MUST 記錄」不因關閉遺失。
     """
-    global _loop
+    global _loop, _scheduler
     if scheduler is not None:
         scheduler.pause()  # 停止觸發新 job（已進行中的續跑）
         pending = [task for task in _inflight if not task.done()]
@@ -167,3 +211,4 @@ async def shutdown_scheduler(scheduler: AsyncIOScheduler | None) -> None:
         scheduler.shutdown(wait=False)
         logger.info("排程引擎已關閉")
     _loop = None
+    _scheduler = None

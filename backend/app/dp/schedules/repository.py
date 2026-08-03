@@ -61,6 +61,25 @@ class ScheduleRepository:
         )
         await db.flush()
 
+    async def update_job(
+        self,
+        db: AsyncSession,
+        *,
+        job: DpSchedule,
+        job_name: str,
+        cron_expr: str,
+        is_enabled: bool,
+        operator_id: str,
+        now: datetime,
+    ) -> None:
+        """編輯排程定義（僅 JOB_NAME / CRON_EXPR / IS_ENABLED；其餘不可改）+ 稽核欄位並 flush。"""
+        job.job_name = job_name
+        job.cron_expr = cron_expr
+        job.is_enabled = is_enabled
+        job.updated_user = operator_id
+        job.updated_date = now
+        await db.flush()
+
     async def update_last_run(self, db: AsyncSession, *, job_id: str, run_date: datetime, status: str) -> None:
         """更新 DP_SCHEDULE 之 LAST_RUN_DATE / LAST_RUN_STATUS（+ 稽核欄位 SYSTEM）並 flush。"""
         job = await self.get(db, job_id)

@@ -1,3 +1,4 @@
+import EditIcon from "@mui/icons-material/Edit"
 import HistoryIcon from "@mui/icons-material/History"
 import ScheduleIcon from "@mui/icons-material/Schedule"
 import Button from "@mui/material/Button"
@@ -7,6 +8,7 @@ import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
 import IconButton from "@mui/material/IconButton"
+import Stack from "@mui/material/Stack"
 import { useMemo } from "react"
 
 import { AppTable } from "../../components/AppTable"
@@ -14,6 +16,7 @@ import type { AppColumn } from "../../components/AppTable"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { formatDateTime } from "../../utils/date"
+import { ScheduleEditDialog } from "./ScheduleEditDialog"
 import { useSchedules } from "./useSchedules"
 import type { ScheduleLogRow, ScheduleRow } from "./schedulesService"
 
@@ -34,20 +37,25 @@ export function SchedulePage() {
       { key: "cron_expr", title: "Cron", dataIndex: "cron_expr" },
       {
         key: "is_enabled",
-        title: "啟停",
+        title: "狀態",
         render: (_v, r) =>
           r.is_enabled ? <Chip size="small" color="success" label="啟用" /> : <Chip size="small" label="停用" />,
       },
       { key: "last_run_date", title: "最近執行", render: (_v, r) => formatDateTime(r.last_run_date) },
-      { key: "last_run_status", title: "結果", render: (_v, r) => <ResultChip status={r.last_run_status} /> },
+      { key: "next_run_date", title: "下次執行", render: (_v, r) => formatDateTime(r.next_run_date) },
       {
-        key: "logs",
-        title: "歷程",
+        key: "actions",
+        title: "操作",
         align: "right",
         render: (_v, r) => (
-          <IconButton size="small" aria-label="執行歷程" onClick={() => s.openLogs(r.job_id)}>
-            <HistoryIcon fontSize="small" />
-          </IconButton>
+          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+            <IconButton size="small" aria-label="執行歷程" onClick={() => s.openLogs(r.job_id)}>
+              <HistoryIcon fontSize="small" />
+            </IconButton>
+            <IconButton size="small" aria-label="編輯" onClick={() => s.openEdit(r)}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </Stack>
         ),
       },
     ],
@@ -73,6 +81,16 @@ export function SchedulePage() {
           <AppTable columns={columns} data={s.jobs} rowKey="job_id" loading={s.jobsLoading} emptyText="尚無排程作業" />
         }
       />
+
+      {s.formVisible && s.editingRecord && (
+        <ScheduleEditDialog
+          key={s.editingRecord.job_id}
+          job={s.editingRecord}
+          saving={s.saving}
+          onSave={s.handleSave}
+          onCancel={s.closeForm}
+        />
+      )}
 
       <Dialog open={s.selectedJob !== null} onClose={s.closeLogs} maxWidth="md" fullWidth>
         <DialogTitle>執行歷程 {s.selectedJob}</DialogTitle>

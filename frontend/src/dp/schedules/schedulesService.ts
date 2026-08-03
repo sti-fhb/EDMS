@@ -10,6 +10,14 @@ export interface ScheduleRow {
   is_enabled: boolean
   last_run_date: string | null
   last_run_status: string | null
+  next_run_date: string | null
+}
+
+/** 編輯排程 payload（僅 name / cron / 啟停可改）。 */
+export interface ScheduleUpdatePayload {
+  job_name: string
+  cron_expr: string
+  is_enabled: boolean
 }
 
 /** 排程執行歷程（對齊後端 ScheduleLogResponse）。 */
@@ -30,6 +38,10 @@ export const schedulesApi = {
   },
   async logs(jobId: string, params: { page: number; limit: number }): Promise<PagedResult<ScheduleLogRow>> {
     const { data } = await http.get<PagedResult<ScheduleLogRow>>(`/dp/schedules/${jobId}/logs`, { params })
+    return data
+  },
+  async update(jobId: string, payload: ScheduleUpdatePayload): Promise<ScheduleRow> {
+    const { data } = await http.put<ScheduleRow>(`/dp/schedules/${jobId}`, payload)
     return data
   },
 }
