@@ -1,4 +1,6 @@
+import ipaddress
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -55,6 +57,11 @@ class Settings(BaseSettings):
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
 
+    # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（res_id）重寄的最小間隔秒數，
+    # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
+    # 走 config（deploy 時可調）而非 DP_PARAM，貼合「依部署環境 / 寄信額度定」語意且免 migration。
+    INVITE_RESEND_COOLDOWN_SEC: int = Field(default=600, ge=0)
+
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
         """依所選演算法強制 HMAC 密鑰最小長度，啟動即擋弱 / 未替換的預設密鑰。
@@ -87,6 +94,38 @@ class Settings(BaseSettings):
             raise ValueError(
                 "production 已設定 MAIL_SERVER 時，MAIL_STARTTLS 或 MAIL_SSL_TLS 至少一為 true（禁明文 SMTP）"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_frontend_base_url(self) -> "Settings":
+        """production（非 DEBUG）護欄：FRONTEND_BASE_URL 不得為空、不得指向 localhost / 127.0.0.1。
+
+        此 URL 用於組信中連結（密碼重設 / 註冊驗證 / 帳號啟用邀請等，見 forgot / register /
+        users service）。prod 忘設正式網域時，localhost 預設會靜默寄出指向使用者本機的死連結；
+        此處 fail-loud，啟動即擋。dev（DEBUG=true）維持 localhost 便利。
+
+        以解析 host（轉小寫）精確比對：避免大小寫（`HTTP://LOCALHOST`）漏擋，
+        亦避免正式網域含 "localhost" 子字串（如 my-localhost-proxy.example.com）被誤擋。
+        可解析為 IP 的 host 以 `ipaddress.is_loopback` 判定，涵蓋 127.0.0.0/8 與 IPv6 `::1`。
+        """
+        if not self.DEBUG:
+            raw = self.FRONTEND_BASE_URL.strip()
+            host = (urlparse(raw).hostname or "").lower()
+            is_loopback = host == "localhost" or host.endswith(".localhost")
+            if not is_loopback and host:
+                try:
+                    is_loopback = ipaddress.ip_address(host).is_loopback
+                except ValueError:
+                    is_loopback = False  # 非 IP 字面（正式網域）→ 交由上面的名稱判定
+            # host 解析不到（缺 scheme 等）時退回整串小寫子字串比對，避免漏擋
+            if not host and raw:
+                low = raw.lower()
+                is_loopback = "localhost" in low or "127.0.0.1" in low or "::1" in low
+            if not raw or is_loopback:
+                raise ValueError(
+                    "FRONTEND_BASE_URL 在 production（DEBUG=false）不得為空或指向 localhost / 127.0.0.1；"
+                    "請於 .env 設為正式前端網域（見 backend/.env.example）"
+                )
         return self
 
     @property

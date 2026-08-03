@@ -13,6 +13,7 @@ def test_new_settings_defaults() -> None:
         _env_file=None,  # 不讀真實 .env，確保 hermetic
         DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
         JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=True,  # dev context：允許 FRONTEND_BASE_URL 預設 localhost（見 _validate_frontend_base_url）
     )
     assert s.JWT_ALGORITHM == "HS256"
     assert s.MAIL_SERVER == ""
@@ -32,6 +33,7 @@ def _settings_with_key(key: str, algorithm: str = "HS256") -> Settings:
         DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
         JWT_SECRET_KEY=key,
         JWT_ALGORITHM=algorithm,
+        DEBUG=True,  # 聚焦 JWT 驗證，dev context 免受 FRONTEND_BASE_URL prod 護欄干擾
     )
 
 
@@ -75,6 +77,7 @@ def test_mail_plaintext_rejected_in_production() -> None:
             DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
             JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
             DEBUG=False,
+            FRONTEND_BASE_URL="https://edms.example.com",  # 聚焦 MAIL 明文檢查，避開 prod frontend 護欄
             MAIL_SERVER="smtp.example.com",
             MAIL_STARTTLS=False,
             MAIL_SSL_TLS=False,
@@ -88,12 +91,71 @@ def test_mail_plaintext_allowed_when_suppress_send() -> None:
         DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
         JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
         DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",  # DEBUG=false 下需正式網域，避開 prod frontend 護欄
         MAIL_SERVER="smtp.example.com",
         MAIL_STARTTLS=False,
         MAIL_SSL_TLS=False,
         MAIL_SUPPRESS_SEND=True,
     )
     assert s.MAIL_SUPPRESS_SEND is True
+
+
+def _settings_with_frontend(url: str, *, debug: bool) -> Settings:
+    return Settings(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=debug,
+        FRONTEND_BASE_URL=url,
+    )
+
+
+def test_frontend_base_url_localhost_rejected_in_production() -> None:
+    """production（DEBUG=false）時 FRONTEND_BASE_URL 指向 localhost → 拒絕（防組信寄出指向使用者本機的死連結）。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("http://localhost:5174", debug=False)
+
+
+def test_frontend_base_url_loopback_ip_rejected_in_production() -> None:
+    """production 時指向 127.0.0.1 亦拒絕。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("http://127.0.0.1:5174", debug=False)
+
+
+def test_frontend_base_url_empty_rejected_in_production() -> None:
+    """production 時空字串拒絕（忘設正式網域）。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("", debug=False)
+
+
+def test_frontend_base_url_uppercase_localhost_rejected_in_production() -> None:
+    """大小寫不敏感：HTTP://LOCALHOST 於 production 仍被擋（解析 host 後小寫比對）。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("HTTP://LOCALHOST:5174", debug=False)
+
+
+def test_frontend_base_url_ipv6_loopback_rejected_in_production() -> None:
+    """IPv6 loopback [::1] 於 production 被擋（ipaddress.is_loopback 判定）。"""
+    with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+        _settings_with_frontend("http://[::1]:5174", debug=False)
+
+
+def test_frontend_base_url_domain_containing_localhost_allowed() -> None:
+    """正式網域名稱恰含 'localhost' 子字串（非 loopback host）不應誤擋。"""
+    s = _settings_with_frontend("https://my-localhost-proxy.example.com", debug=False)
+    assert s.FRONTEND_BASE_URL == "https://my-localhost-proxy.example.com"
+
+
+def test_frontend_base_url_localhost_allowed_in_debug() -> None:
+    """dev（DEBUG=true）保留 localhost 便利，不擋。"""
+    s = _settings_with_frontend("http://localhost:5174", debug=True)
+    assert "localhost" in s.FRONTEND_BASE_URL
+
+
+def test_frontend_base_url_production_domain_accepted() -> None:
+    """production 設正式網域 → 通過。"""
+    s = _settings_with_frontend("https://edms.example.com", debug=False)
+    assert s.FRONTEND_BASE_URL == "https://edms.example.com"
 
 
 def test_build_settings_rejects_short_key_as_invalid() -> None:
