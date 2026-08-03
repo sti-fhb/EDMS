@@ -7,6 +7,7 @@
 授權：依暫行規則僅認證、不掛 admin 閘（SA 裁示 Q1=A，待 T049 回歸）。
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -25,9 +26,13 @@ from app.dp.users.repository import UsersRepository
 from app.dp.users.schemas import InviteResponse, UserCreate, UserResponse, UserUpdate
 from app.services import AuditLogService, NotifyService, ParamService
 
+logger = logging.getLogger(__name__)
+
 _FUNC_NAME = "DP-USERS"
 _INVITE_TEMPLATE = "ACCOUNT_INVITE"
+_PWD_EXPIRY_TEMPLATE = "PWD_EXPIRY_REMIND"  # noqa: S105 — 通知範本代碼，非密碼
 _KIND_ADMIN_INVITE = "ADMIN_INVITE"
+_SYSTEM_USER = "SYSTEM"
 _EMAIL_TAKEN_MSG = "此 Email 已被使用"
 _NOT_FOUND_MSG = "查無此帳號"
 _INVITE_NOT_FOUND_MSG = "查無此邀請"
@@ -248,6 +253,82 @@ class UsersService:
             after={"user_name": data.user_name},
         )
         return UserResponse.model_validate(user)
+
+    # ── 平台每日排程 SCHDP001（US11）：閒置禁用 + 密碼到期提醒 ─────────────
+    # 由 app.dp.schedules handler（daily_platform_job）呼叫；operator=SYSTEM、逐筆容錯（savepoint）。
+
+    async def disable_idle_accounts(self, db: AsyncSession) -> int:
+        """閒置逾 `LOGIN.IDLE_DISABLE_DAYS`（預設 90）之啟用帳號自動禁用 + 稽核（`func_name=DP-USERS`）。
+
+        從未登入者以 CREATED_DATE 為基準（見 repository.find_idle_active）。**逐筆各自 commit**：
+        單一帳號失敗 rollback 不擋其餘，且每筆結束即釋放稽核 chain 之 advisory xact lock（避免整批
+        持鎖阻塞並行登入稽核）。回傳成功禁用筆數。
+        """
+        idle_days = await self._params.get_int_param(db, "LOGIN", "IDLE_DISABLE_DAYS", 90)
+        now = utcnow()
+        idle_before = now - timedelta(days=idle_days)
+        users = await self._repo.find_idle_active(db, idle_before=idle_before)
+
+        disabled = 0
+        for user in users:
+            try:
+                await self._repo.set_status(db, user=user, status="DISABLED", operator_id=_SYSTEM_USER, now=now)
+                await self._audit.log_action(
+                    db,
+                    module="DP",
+                    func_name=_FUNC_NAME,
+                    action_type="UPDATE",
+                    result="SUCCESS",
+                    operator_id=_SYSTEM_USER,
+                    target_id=user.user_id,
+                    description=f"閒置逾 {idle_days} 日自動禁用",
+                    before_value={"status": "ACTIVE"},
+                    after_value={"status": "DISABLED"},
+                )
+                await db.commit()
+                disabled += 1
+            except Exception:
+                await db.rollback()
+                logger.exception("SCHDP001 閒置禁用失敗 user_id=%s", user.user_id)
+        return disabled
+
+    async def send_pwd_expiry_reminders(self, db: AsyncSession) -> int:
+        """密碼將於 `EXPIRY_REMIND_DAYS`（預設 7）天內到期之啟用帳號經 SRVDP002 寄 `PWD_EXPIRY_REMIND`。
+
+        每日跑均寄（不去重，spec_us11 FR-05）；**逐筆各自 commit**、失敗 rollback 不擋其餘。回傳寄出筆數。
+        """
+        expiry_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", 90)
+        remind_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_REMIND_DAYS", 7)
+        now = utcnow()
+        not_expired_after = now - timedelta(days=expiry_days)
+        remind_on_or_before = now - timedelta(days=expiry_days - remind_days)
+        users = await self._repo.find_pwd_expiring(
+            db, not_expired_after=not_expired_after, remind_on_or_before=remind_on_or_before
+        )
+
+        sent = 0
+        for user in users:
+            expiry_date = user.pwd_changed_date + timedelta(days=expiry_days)
+            days_left = max((expiry_date - now).days, 0)
+            try:
+                await self._notify.send_email(
+                    db,
+                    recipients=[user.email],
+                    template_code=_PWD_EXPIRY_TEMPLATE,
+                    module="DP",
+                    params={
+                        "user_name": user.user_name,
+                        "expiry_date": expiry_date.strftime("%Y-%m-%d"),
+                        "days_left": str(days_left),
+                    },
+                    caller_module="DP",
+                )
+                await db.commit()
+                sent += 1
+            except Exception:
+                await db.rollback()
+                logger.exception("SCHDP001 密碼到期提醒寄送失敗 user_id=%s", user.user_id)
+        return sent
 
     async def _send_invite(self, db: AsyncSession, *, email: str, user_name: str, token: str, ttl_min: int) -> None:
         """寄帳號邀請信（ACCOUNT_INVITE，US6 發信引擎）；連結以設定檔組（防 Host 注入）。"""

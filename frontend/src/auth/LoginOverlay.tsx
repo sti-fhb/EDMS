@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import type { FormEvent } from "react"
 
+import { AUTH_BG_GRADIENT } from "./authBackground"
 import { ForgotPasswordForm } from "./ForgotPasswordForm"
 import { RegisterForm } from "./RegisterForm"
 import { authApi } from "./authService"
@@ -78,7 +79,7 @@ export function LoginOverlay() {
         position: "fixed",
         inset: 0,
         // 淡漸層底（對齊 TBMS 登入頁：淺綠 → 米白 → 淺粉）
-        background: "linear-gradient(135deg, #e4eadc 0%, #f2f5ee 40%, #fdf2f2 100%)",
+        background: AUTH_BG_GRADIENT,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

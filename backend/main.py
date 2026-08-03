@@ -22,6 +22,8 @@ from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.router import router as dp_templates_router
 from app.dp.notify.worker import run_forever
 from app.dp.params.router import router as dp_params_router
+from app.dp.schedules.router import router as dp_schedule_router
+from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
 
@@ -30,14 +32,19 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: "FastAPI"):
-    """啟停常駐發信 worker（SRVDP002 outbox 消費者，非排程 job）。"""
+    """啟停常駐發信 worker（SRVDP002 outbox 消費者）與排程引擎（US11，APScheduler）。
+
+    兩者皆 lifespan 背景元件、互不依賴：worker 消 DP_EMAIL_LOG、scheduler 依 DP_SCHEDULE 觸發 job。
+    """
     stop_event = asyncio.Event()
     task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
+    scheduler = await start_scheduler()
     try:
         yield
     finally:
-        # 先請 worker 優雅收斂（跑完當前 cycle 並 commit），逾時才強制取消——
-        # 避免在「已透過 SMTP 寄出、尚未 commit」的空窗被 cancel 導致 rollback 後重送。
+        # 先關排程引擎（等當前 job 跑完），再請 worker 優雅收斂（跑完當前 cycle 並 commit），
+        # 逾時才強制取消——避免在「已透過 SMTP 寄出、尚未 commit」的空窗被 cancel 導致 rollback 後重送。
+        await shutdown_scheduler(scheduler)
         stop_event.set()
         try:
             await asyncio.wait_for(task, timeout=30)
@@ -91,6 +98,7 @@ app.include_router(dp_users_router)
 app.include_router(dp_params_router)
 app.include_router(dp_templates_router)
 app.include_router(dp_audit_router)
+app.include_router(dp_schedule_router)
 
 
 @app.middleware("http")

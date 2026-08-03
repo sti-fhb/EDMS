@@ -300,6 +300,62 @@ export const handlers = [
       headers: { "Content-Type": "text/csv; charset=utf-8" },
     }),
   ),
+  // US11 排程總覽（預設 happy path：SCHDP001 啟用 + ET/DM 預留停用）
+  http.get("/api/dp/schedules", () =>
+    HttpResponse.json([
+      {
+        job_id: "SCHDP001",
+        job_name: "平台每日作業（閒置帳號禁用 + 密碼到期提醒）",
+        module: "DP",
+        cron_expr: "0 8 * * *",
+        is_enabled: true,
+        last_run_date: "2026-07-06T08:00:41Z",
+        last_run_status: "SUCCESS",
+        next_run_date: "2026-08-01T08:00:00Z",
+      },
+      {
+        job_id: "SCHET001",
+        job_name: "ET 週報 / 提醒（預留）",
+        module: "ET",
+        cron_expr: "0 8 * * 1",
+        is_enabled: false,
+        last_run_date: null,
+        last_run_status: null,
+        next_run_date: null,
+      },
+    ]),
+  ),
+  http.put("/api/dp/schedules/:jobId", async ({ params, request }) => {
+    const body = (await request.json()) as { job_name: string; cron_expr: string; is_enabled: boolean }
+    return HttpResponse.json({
+      job_id: params.jobId,
+      job_name: body.job_name,
+      module: "DP",
+      cron_expr: body.cron_expr,
+      is_enabled: body.is_enabled,
+      last_run_date: null,
+      last_run_status: null,
+      next_run_date: body.is_enabled ? "2026-08-02T02:30:00Z" : null,
+    })
+  }),
+  http.get("/api/dp/schedules/SCHDP001/logs", () =>
+    HttpResponse.json({
+      data: [
+        {
+          log_id: 2,
+          job_id: "SCHDP001",
+          start_date: "2026-07-06T08:00:00Z",
+          end_date: "2026-07-06T08:00:41Z",
+          status: "SUCCESS",
+          error_msg: null,
+        },
+      ],
+      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dp/schedules/SCHET001/logs", () =>
+    HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
+import { AUTH_BG_GRADIENT } from "./authBackground"
 import { authApi } from "./authService"
 import { toApiError } from "../services/http"
 
@@ -59,7 +60,7 @@ export function VerifyEmailPage() {
       sx={{
         position: "fixed",
         inset: 0,
-        bgcolor: "background.default",
+        background: AUTH_BG_GRADIENT,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
