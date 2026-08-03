@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.cooldown import VerifySendCooldown
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
@@ -33,16 +34,25 @@ _INVITE_TEMPLATE = "ACCOUNT_INVITE"
 _PWD_EXPIRY_TEMPLATE = "PWD_EXPIRY_REMIND"  # noqa: S105 — 通知範本代碼，非密碼
 _KIND_ADMIN_INVITE = "ADMIN_INVITE"
 _SYSTEM_USER = "SYSTEM"
+_PENDING_INVITE_MSG = "此 Email 已有待啟用邀請，請改用重寄"
 _EMAIL_TAKEN_MSG = "此 Email 已被使用"
 _NOT_FOUND_MSG = "查無此帳號"
 _INVITE_NOT_FOUND_MSG = "查無此邀請"
 _SELF_PROTECT_MSG = "無法停用或鎖定自己的帳號"
 _DEFAULT_TTL_MIN = 30
+# 邀請效期下限：DP_PARAM 誤設 0 / 負值時，邀請一建立即逾期，會使「逾期→重新邀請」變成
+# 每次 POST 都重寄的無節流迴圈（#111 review M3），故強制夾住下限。
+_MIN_TTL_MIN = 1
 
 
 def _iso(value: object) -> object:
     """稽核 before/after 值序列化：datetime → ISO 字串（供 JSONB 儲存），其餘原樣。"""
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _send_cooldown_key(email: str) -> str:
+    """建立 / 重新邀請的冷卻分桶鍵（Email 維度）。"""
+    return f"invite:send:{email}"
 
 
 class UsersService:
@@ -55,12 +65,15 @@ class UsersService:
         audit: AuditLogService | None = None,
         params: ParamService | None = None,
         notify: NotifyService | None = None,
+        invite_cooldown: VerifySendCooldown | None = None,
     ) -> None:
         self._repo = repository or UsersRepository()
         self._auth_repo = auth_repository or AuthRepository()
         self._audit = audit or AuditLogService()
         self._params = params or ParamService()
         self._notify = notify or NotifyService()
+        # 行程內冷卻狀態；由 router 以模組級單例注入（存活於整個 app 生命週期），測試各自新建即天然隔離
+        self._invite_cooldown = invite_cooldown or VerifySendCooldown()
 
     async def list_users(
         self, db: AsyncSession, *, keyword: str | None, status: str | None, page: int, limit: int
@@ -73,20 +86,53 @@ class UsersService:
         """管理者建立帳號＝寄邀請信（#67）：檢 Email 未被佔用 → 寫 pending（ADMIN_INVITE、pwd_hash=NULL）
         + 寄 ACCOUNT_INVITE 邀請信 + 稽核。**不建 DP_USER、不授角色**（啟用時才落地）。
 
+        重複 Email 分四種情況（#111）：
+        - 已啟用（DP_USER 存在）→ 409 DP_USER_007（真重複）。
+        - 待啟用列存在但**非 ADMIN_INVITE**（使用者自助註冊中）→ 409 DP_USER_007（維持既有語意）。
+        - 待啟用邀請**未逾期** → 409 DP_USER_010（引導改用重寄）。
+        - 待啟用邀請**已逾期** → 視為**重新邀請**：沿用原 res_id、作廢舊列、換新 token/效期並重寄。
+
         Raises:
-            AppError: Email 已被使用（DP_USER 已存在或已在待驗證表，409 DP_USER_007）。
+            AppError: Email 已被啟用帳號 / 自助註冊佔用（409 DP_USER_007）；已有未逾期待啟用邀請
+                （409 DP_USER_010）；重新邀請仍在寄信冷卻內（429 COMMON_429）。
         """
-        # Email 不得已在 DP_USER（已啟用）或待驗證表（處理中）；pending EMAIL UNIQUE 為底層保證
-        if await self._auth_repo.email_exists(db, data.email) or (
-            await self._auth_repo.get_pending_by_email(db, data.email) is not None
-        ):
+        if await self._auth_repo.email_exists(db, data.email):
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007")
 
         now = utcnow()
+        existing = await self._auth_repo.get_pending_by_email(db, data.email)
+        if existing is not None and existing.kind != _KIND_ADMIN_INVITE:
+            # 自助註冊（SELF_REGISTER）處理中：該列不在邀請清單（build_invite_list_stmt 濾 kind）、
+            # res_id 為 NULL，管理者既無可重寄對象也不應覆蓋他人註冊列，故維持「Email 已被使用」
+            # 而非回 DP_USER_010（會把管理者導向不存在的重寄動作）。
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007")
+
+        reinvite = existing is not None
+        before: dict | None = None
+        if existing is not None:
+            if existing.expires_date > now:
+                # 未逾期：已有處理中的待啟用邀請，引導改用重寄（與「已啟用」的 007 區分）
+                raise AppError(status_code=409, detail=_PENDING_INVITE_MSG, error_code="DP_USER_010")
+            # 逾期重新邀請＝對同一信箱再寄一封（等同重寄），故套用與 resend 相同的冷卻政策。
+            # 冷卻檢查刻意置於「已確定走重新邀請」之後：若前置於 router，未逾期的重複建立會被 429
+            # 蓋掉 AC1 要求的 409 DP_USER_010，反而失去「請改用重寄」的導引作用。
+            self._invite_cooldown.check(_send_cooldown_key(data.email), settings.INVITE_RESEND_COOLDOWN_SEC)
+            # 舊列快照須在刪除前取（供稽核 before），避免刪後讀到過期狀態
+            before = {
+                "user_name": existing.user_name,
+                "kind": existing.kind,
+                "expires_date": _iso(existing.expires_date),
+            }
+            # 沿用原 res_id（識別碼穩定），作廢舊列後重寫
+            res_id = existing.res_id or generate_user_id()
+            await self._auth_repo.delete_pending_by_email(db, data.email)
+        else:
+            res_id = generate_user_id()
+
         ip = get_client_ip()
-        res_id = generate_user_id()
         plaintext = generate_reset_token()
-        ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
+        ttl_min = await self._invite_ttl_min(db)
+        expires_date = now + timedelta(minutes=ttl_min)
 
         # check→insert 間 TOCTOU 空窗：並發同 Email → 撞 UQ_DP_PENDING_REGISTRATION_EMAIL，兜底轉 409
         try:
@@ -96,7 +142,7 @@ class UsersService:
                 email=data.email,
                 user_name=data.user_name,
                 pwd_hash=None,
-                expires_date=now + timedelta(minutes=ttl_min),
+                expires_date=expires_date,
                 now=now,
                 kind=_KIND_ADMIN_INVITE,
                 res_id=res_id,
@@ -106,14 +152,23 @@ class UsersService:
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007") from exc
 
         await self._send_invite(db, email=data.email, user_name=data.user_name, token=plaintext, ttl_min=ttl_min)
+        # 每次成功寄出都蓋章（含首次邀請）：冷卻起點才能涵蓋「首寄 → 逾期後重新邀請」的間隔
+        self._invite_cooldown.record(_send_cooldown_key(data.email))
         await self._log(
             db,
             operator.user_id,
             res_id,
             ip,
-            "CREATE",
-            "管理者發出帳號邀請",
-            after={"email": data.email, "user_name": data.user_name, "kind": _KIND_ADMIN_INVITE},
+            # 重新邀請本質為「刪舊列 + 寫新列 + 重寄」，與 resend_invite 同性質，故同記 UPDATE
+            "UPDATE" if reinvite else "CREATE",
+            "逾期重新邀請（等同重寄）" if reinvite else "管理者發出帳號邀請",
+            before=before,
+            after={
+                "email": data.email,
+                "user_name": data.user_name,
+                "kind": _KIND_ADMIN_INVITE,
+                "expires_date": _iso(expires_date),
+            },
         )
 
     async def list_invites(
@@ -133,7 +188,7 @@ class UsersService:
         now = utcnow()
         ip = get_client_ip()
         plaintext = generate_reset_token()
-        ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
+        ttl_min = await self._invite_ttl_min(db)
         # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原 res_id / 姓名寫新列
         await self._auth_repo.delete_pending_by_email(db, invite.email)
         try:
@@ -329,6 +384,15 @@ class UsersService:
                 await db.rollback()
                 logger.exception("SCHDP001 密碼到期提醒寄送失敗 user_id=%s", user.user_id)
         return sent
+
+    async def _invite_ttl_min(self, db: AsyncSession) -> int:
+        """邀請 / 重寄連結效期（分鐘），下限 `_MIN_TTL_MIN`。
+
+        DP_PARAM 的 `LOGIN.RESET_TOKEN_TTL_MIN` 由管理者可編輯，誤設 0 / 負值會讓邀請一建立即逾期；
+        配合 #111 的「逾期→重新邀請」會變成每次 POST 都重寄的無節流迴圈，故在此夾住下限。
+        """
+        ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
+        return max(ttl_min, _MIN_TTL_MIN)
 
     async def _send_invite(self, db: AsyncSession, *, email: str, user_name: str, token: str, ttl_min: int) -> None:
         """寄帳號邀請信（ACCOUNT_INVITE，US6 發信引擎）；連結以設定檔組（防 Host 注入）。"""
