@@ -196,6 +196,26 @@ describe("UsersPage 使用者操作流程", () => {
     expect(await screen.findByText("邀請信已重寄")).toBeInTheDocument()
   })
 
+  it("待啟用邀請：重寄冷卻中（429 帶 retry_after）顯示剩餘時間提示", async () => {
+    server.use(
+      http.post("/api/dp/users/invites/:id/resend", () =>
+        HttpResponse.json(
+          { error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試", retry_after: 600 },
+          { status: 429 },
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+    await user.click(screen.getByRole("tab", { name: /待啟用邀請/ }))
+    await screen.findByText("周雅婷")
+
+    await user.click(screen.getAllByRole("button", { name: "重寄邀請" })[0])
+    // retry_after=600s → 約 10 分鐘；驗證顯示剩餘時間而非籠統訊息
+    expect(await screen.findByText(/請於約 10 分鐘後再試/)).toBeInTheDocument()
+  })
+
   it("待啟用邀請：取消邀請二次確認後提示成功", async () => {
     const user = userEvent.setup()
     renderWithProviders(<UsersPage />)

@@ -30,7 +30,13 @@ export function useInvites(enabled: boolean) {
         message.success("邀請信已重寄")
         invalidate()
       } catch (err) {
-        message.error(toApiError(err).errorMessage)
+        // 冷卻中（429 帶 retry_after，#72）→ 以剩餘時間提示，取代籠統的「操作過於頻繁」
+        const e = toApiError(err)
+        if (e.status === 429 && e.retryAfter) {
+          message.error(`此邀請剛重寄過，請於約 ${Math.ceil(e.retryAfter / 60)} 分鐘後再試`)
+        } else {
+          message.error(e.errorMessage)
+        }
       }
     },
     [message, invalidate],
