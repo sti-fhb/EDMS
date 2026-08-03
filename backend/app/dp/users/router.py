@@ -15,7 +15,6 @@ from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse
-from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter
 from app.dp.users.schemas import InviteResponse, UserCreate, UserResponse, UserStatusUpdate, UserUpdate
 from app.dp.users.service import UsersService
 
@@ -23,11 +22,10 @@ router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depe
 
 _service = UsersService()
 
-# 邀請端點加固（#72）：以「操作者」維度限流建立 / 重寄邀請，防單一使用者濫寄邀請信。
-# 邀請端點為認證端點、且來源 IP 未強化前不可信（見 #23），故用 operator.user_id 而非 IP 分桶。
-# 門檻走 config（deploy 可調、免 migration，見 config.INVITE_RATE_MAX）；視窗沿用共用 RATE_WINDOW_SECONDS。
-_invite_limiter = SlidingWindowRateLimiter(max_requests=settings.INVITE_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
-# 重寄再加「單筆邀請（res_id）」冷卻，防對同一邀請短時間反覆重寄（email-bombing）。
+# 邀請端點加固（#72）：對「單筆邀請（res_id）」重寄設冷卻，防對同一受邀信箱短時間反覆轟炸。
+# 刻意**不設操作者總量限流**（PO 決策）：管理者一次為多位不同使用者建帳號屬正常作業，
+# 不應以總量節流；「同帳號防轟炸」由「建立時同 Email 重複 → 409」＋本冷卻共同達成。
+# 冷卻秒數走 config（deploy 可調、免 migration，見 config.INVITE_RESEND_COOLDOWN_SEC）。
 _invite_resend_cooldown = VerifySendCooldown()
 
 
@@ -51,9 +49,8 @@ async def create_user(
 ) -> dict[str, str]:
     """管理者建立帳號＝寄邀請信（#67）：寫待邀請列 + 寄 ACCOUNT_INVITE 信；不建 DP_USER。
 
-    操作者維度限流（#72）：先 hit、超限拋 429，防單一使用者濫寄邀請信。
+    不設總量限流（#72 PO 決策）：批次為多人建帳號屬正常；對同一 Email 重複建立由服務層 409 擋下。
     """
-    _invite_limiter.hit(f"invite:user:{operator.user_id}")
     await _service.create_user(db, data=data, operator=operator)
     return {"message": "邀請信已寄出，使用者需經連結設定密碼後啟用"}
 
@@ -77,11 +74,10 @@ async def resend_invite(
 ) -> dict[str, object]:
     """重寄邀請（作廢舊 token、產新並重寄）。
 
-    雙重加固（#72）：先操作者維度限流（同建立），再對「單筆邀請 res_id」冷卻
-    ——check 前置（冷卻中拋 429 帶 retry_after）、record 於服務成功後，防對同一邀請反覆重寄。
+    對「單筆邀請 res_id」冷卻（#72）：check 前置（冷卻中拋 429 帶 retry_after）、record 於服務
+    成功後（重寄失敗如 404 不誤觸冷卻），防對同一受邀信箱短時間反覆轟炸。
     成功回應帶 retry_after（＝完整冷卻秒數）供前端起算倒數。
     """
-    _invite_limiter.hit(f"invite:user:{operator.user_id}")
     cooldown_key = f"invite:resend:{res_id}"
     _invite_resend_cooldown.check(cooldown_key, settings.INVITE_RESEND_COOLDOWN_SEC)
     await _service.resend_invite(db, res_id=res_id, operator=operator)
