@@ -30,7 +30,8 @@
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | [#97](https://github.com/sti-fhb/EDMS/issues/97) | ✅ 已合併（PR [#100](https://github.com/sti-fhb/EDMS/pull/100)）|
 | 11 | 排程引擎與總覽 + SCHDP001（dp-schedule）| US11 / UCDP008 | P2-延伸 | T044 ~ T046（3 任務）| #0, #1 | [#106](https://github.com/sti-fhb/EDMS/issues/106) | ✅ 已合併（PR [#108](https://github.com/sti-fhb/EDMS/pull/108)）|
-| 12 | 整合測試 + 安全 + 收尾 | — | 收尾 | T047 ~ T054（8 任務）| 全部 | — | 待補 |
+| 12 | 整合測試 + 稽核驗鏈工具 + 安全驗收（不含 T049 / ET-DM 回歸）| — | 收尾 | T047 ~ T048, T050 ~ T054（T049 → follow-up）| 全部 | [#114](https://github.com/sti-fhb/EDMS/issues/114) | 🚀 已開立 [#114](https://github.com/sti-fhb/EDMS/issues/114) |
+| 12-F | 真授權閘掛 router + ET/DM 回歸（T049 follow-up）| — | 收尾 | T049 | #114；ET / DM 模組 | [#113](https://github.com/sti-fhb/EDMS/issues/113) | ⏸️ 已開立（待 ET/DM 落地）|
 | F1 | 開發流程 CI 基礎建設（local-ci / ci.yml 預備 / PR 模板 / error-codes 骨架）| — | Foundation-infra | —（不對應 tasks.md 業務 task）| 無 | [#18](https://github.com/sti-fhb/EDMS/issues/18) | 🔨 開發中 |
 
 > **F 系列＝Foundation-infra**（開發流程 / CI/CD，非業務 task）。F1 只做 repo 側、不依賴 runner；runner 註冊 + CD + branch protection 於未來 GCP 環境就緒後處理（EDMS 自有 ci/cd，不共用 TBMS）。
@@ -893,9 +894,74 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 
 ---
 
-## Issue #12：待補（增量模式）
+## Issue #12：[收尾] DP — 整合測試 + 稽核驗鏈工具 + 安全驗收（不含 T049 / ET-DM 回歸）（GitHub [#114](https://github.com/sti-fhb/EDMS/issues/114)；T049 follow-up [#113](https://github.com/sti-fhb/EDMS/issues/113)）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 ~ #11，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec.md](spec.md) §Success Criteria（SC-001~011）；[tasks.md](tasks.md) Phase 14（T047~T054）；[data-model.md](data-model.md)（`DP_AUDIT_LOG` ROW_HASH 鏈）；各 US spec（本 issue 為既有實作之端到端驗收，不新增業務功能）
+**階段**：收尾（DP 各 US〔#0~#11〕已合併後之整合驗收與淨新增工具）
+**前置條件**：
+- Issue #0~#11 全數已合併（認證鏈 US1~US3、使用者管理 US4、參數 US5、發信 US6、權限 US7、個資 US8、範本 US9、稽核 US10、排程 US11）
+- 各 US 之 per-feature 整合測試已就緒（`backend/tests/integration/dp/`）；本 issue 補**跨 US 端到端**串接與淨新增之驗鏈工具
+
+### 任務說明
+
+DP 模組**收尾整合驗收**：以跨 US 端到端整合測試驗證各 Success Criteria 已真正貫通（認證鏈、鎖定失效、發信 outbox、排程、參數即時性、安全防護），並**淨新增稽核 ROW_HASH 驗鏈工具**（目前僅寫入端建鏈、無驗證端）。本 issue **不新增業務功能**，產出為整合測試檔 + 驗鏈工具 + 安全姿態文件化。
+
+> ⚠️ **範圍裁示（2026-08-03）**：`backend/app/et/`、`backend/app/dm/` **尚未存在**，跨模組 checker（`is_module_admin` / `has_any_role` / `grant_default_student_role`）在生產環境未註冊、一律 fail-closed。故 tasks.md 原列 T049 之兩項**排除於本 issue、另立 follow-up**（待 ET/DM 落地）：
+> 1. **T049 真授權閘掛 router**：`is_module_admin` gate 與模組過濾邏輯**已就緒**，但各 DP router 仍掛暫行案 A（`get_jwt_payload`，任何登入者可存取）。現在改掛 `require_module_admin` 會因無 checker 註冊 → 每個後台端點對所有人 403、鎖死 DP 後台。
+> 2. **T047/T051 之 ET/DM 回歸**：ET `grant_default_student_role`、DM `has_any_role`、`SCHET*/SCHDM*` handler 待各模組提供，本 issue 僅對現有 stub 驗接線。
+
+### 範圍
+
+**淨新增工具（後端）**：
+- **T052 稽核 ROW_HASH 驗鏈工具** `app/dp/audit/`：`AuditLogService.verify_chain(db)`（依插入序走訪 `DP_AUDIT_LOG`、逐列以 `_compute_row_hash` 重算並比對存檔 `ROW_HASH`、串接 prev hash，回報總筆數 / 首個斷鏈列〔`ID` / `LOG_TIME` / `FUNC_NAME`〕/ OK|BROKEN）+ 可執行入口（`python -m app.dp.audit.verify_chain`，ops 例行稽核用）；唯讀、不改資料
+
+**整合測試（後端 `backend/tests/integration/dp/`，跨 US 端到端）**：
+- **T047 認證鏈端到端**：`e2e` — ① 自助註冊 → 驗證信 → 登入 → 操作換發 → 閒置逾時失效 → 忘記密碼 → 重設 → 新密碼登入；② 管理者代建帳號 → 初始密碼首登 → 強制變更 → 正常使用（SC-001/003/004/005）
+- **T048 鎖定與失效端到端**：錯 5 次自動鎖定 → 逾時 / 管理者解鎖後可再登入；停用帳號下次請求即拒（`get_jwt_payload` 閘）；換發逾單日 8h 上限拒絕（SC-002/005/006）
+- **T050 發信引擎端到端**：`send_email` 不阻塞呼叫方（PENDING 立即返回、worker 非同步寄）、重試逾上限 → `FAILED` 留錯誤、停用範本 → skip 事件照常、範本改後新信以新內容渲染、**已寄快照不受事後改範本影響**（SC-009）
+- **T051 排程端到端（單實例）**：cron 觸發僅一次、單 job 失敗不影響其他、重疊 → `SKIPPED`、`SCHDP001` 兩職責（閒置禁用 + 到期提醒）、`DP_SCHEDULE_LOG` 完整（SC-011；多實例 leader 為前瞻，單實例直跑驗證）
+- **T052 稽核驗鏈端到端**：多 US 事件寫入後 `verify_chain` 回 OK；人為竄改一列 before/after 值 → `verify_chain` 精準指出斷鏈列；append-only（repo 無 update/delete、端點 405）（SC-010）
+- **T053 安全性驗收**：速率限制生效（登入 / 忘記密碼 / 密碼變更 IP + 帳號維度）、防帳號列舉回覆一致（忘記密碼 / 註冊；**登入分流訊息為 spec_us1 明訂 UX、非盲點**，測試中標註）、token 一次性 + 雜湊儲存、密碼策略 / 歷程 N 次、系統錯誤僅簡短訊息 + 代碼、輸入驗證皆伺服器端
+- **T054 參數即時性**：US5 儲存後 `SRVDP001` 讀取即時反映（無快取延遲）、`DETAIL_LOCK` 之碼建立後不可改（SC-008）
+
+**文件化（安全姿態，非程式碼缺口者明載為部署 / 遞延）**：
+- **DB 層 append-only GRANT**（`DP_AUDIT_LOG` 僅 INSERT/SELECT）屬 **ops / 部署層**（非 migration），本 issue 於 `docs/ref/` 記錄應套用之 GRANT，實際套用隨部署
+- **T049 + ET/DM 回歸** follow-up issue 連結（收尾時開立）
+
+### 驗收條件
+
+- [ ] `AuditLogService.verify_chain(db)` 實作 + 單元 / 整合測試：完整鏈回 OK；竄改任一列 → 精準回報首個斷鏈列（`ID` / `LOG_TIME` / `FUNC_NAME`）；空表回 OK（T052、SC-010）
+- [ ] 可執行入口 `python -m app.dp.audit.verify_chain` 輸出人可讀結果（總筆數 / 狀態 / 斷鏈位置），供 ops 例行稽核
+- [ ] T047 認證鏈端到端整合測試綠：自助註冊→登入→換發→閒置失效→忘記密碼→重設→登入；代建→首登→強制變更→正常使用（SC-001/003/004/005）
+- [ ] T048 鎖定與失效端到端綠：5 次鎖定→解鎖→再登入；停用即拒；換發逾 8h 拒（SC-002/005/006）
+- [ ] T050 發信端到端綠：不阻塞、重試 FAILED、停用範本 skip、範本改後新內容、快照不受事後改動（SC-009）
+- [ ] T051 排程端到端綠：觸發一次、失敗隔離、重疊 SKIPPED、SCHDP001 兩職責、LOG 完整（SC-011）
+- [ ] T053 安全驗收綠：限流、防列舉一致（登入分流已標註為刻意 UX）、token 一次性 + 雜湊、密碼策略 / 歷程、伺服器端驗證（SC-004 + 安全）
+- [ ] T054 參數即時性綠：US5 存後 SRVDP001 即時反映、`DETAIL_LOCK` 碼不可改（SC-008）
+- [ ] DB append-only GRANT 記於 `docs/ref/`（標明部署層套用）；T049 + ET/DM 回歸 follow-up issue 已開立並於本 issue close 摘要連結
+- [ ] `uv run pytest -q` 全綠；ruff / 覆蓋率門檻通過
+
+### 依賴
+
+- **Issue #0~#11（全部已合併）**：本 issue 為其端到端整合驗收
+- **ET / DM 模組（未落地）**：T049 真授權閘 + `grant_default_student_role` / `has_any_role` / `SCHET*/SCHDM*` handler 回歸皆待 ET/DM，**排除於本 issue**、另立 follow-up
+
+### 注意事項
+
+- **本 issue 不新增業務功能**：產出＝跨 US 整合測試 + 稽核驗鏈工具 + 安全姿態文件化。既有各 US 實作已於各自 issue 交付並有 per-feature 測試，本 issue 補「端到端貫通」與「淨新增驗鏈工具」。
+- **T049 為 follow-up 非本 issue**（2026-08-03 使用者裁示範圍 A）：授權閘骨架（`is_module_admin` fail-closed gate + `require_module_admin` factory + service 層模組過濾）**已就緒**，缺的只是「掛上 router」與「ET/DM 註冊 checker」。因 ET/DM 未落地，現在掛閘會鎖死後台，故遞延；暫行案 A（`get_jwt_payload`）維持不動。
+- **稽核鏈為單一全域鏈**：`DP_AUDIT_LOG` 以 advisory lock 序列化寫入、`ROW_HASH` 串接前一列 hash（非 per-func_name 分鏈）；`verify_chain` 依插入序（`ID`）走訪全表重算。竄改偵測涵蓋 before/after 值、`FUNC_NAME`、`ACTION_TYPE` 等入 hash 之欄位。
+- **無狀態 JWT、無 refresh token**：T047 換發驗收針對「以現行有效 access token 靜默換新」+ 單日 8h 上限（`DP_AUTH_003`），非 refresh token 機制。
+- **登入訊息分流非防列舉盲點**：登入對「帳號不存在 / 未驗證 / 密碼錯誤」回不同訊息（`DP_AUTH_007/010/008`）為 spec_us1 Clarification 明訂之 UX；忘記密碼 / 註冊維持防列舉一致訊息。T053 測試須同時涵蓋兩種策略並註記差異為刻意設計。
+- **DB append-only GRANT 屬部署層**：應用層已落地 append-only（repo 無 update/delete、端點 405）；DB 層 `GRANT INSERT, SELECT`（撤 UPDATE/DELETE）於 ops 套用，本 issue 只文件化不落 migration。
+- **無新表 / migration**：驗鏈工具為讀取端；整合測試不改 schema。
+
+### 相關文件
+
+- [spec.md](spec.md) §Success Criteria（SC-001~011）、[tasks.md](tasks.md) Phase 14（T047~T054）、[data-model.md](data-model.md)（`DP_AUDIT_LOG`）
+- [contracts/module-callbacks.md](contracts/module-callbacks.md)（ET/DM 回歸接口）、各 US spec（端到端驗收對象）
+
+**Labels**：`收尾`, `DP-平台`
 
 ---
 
@@ -932,3 +998,5 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 | 2026-07-30 | US11 交付前自檢（`/sti-sa-precheck dp us11`）修 1 必補 + 3 建議：**必補**——`last_login_date` 僅登入時設、活化不設，故活化未登入帳號 `LAST_LOGIN_DATE=null`，`SCHDP001` 閒置判定對 null 未定義 → spec_us11 FR-05 / AC6 + data-model（閒置禁用規則 + 欄位說明）明訂 **null 以 `CREATED_DATE` 為閒置起算基準**；**建議**——(1) 密碼到期提醒 spec 明訂「每日跑均寄、直至變更 / 到期」（非單次）；(2) 閒置禁用稽核 `func_name=DP-USERS`、operator=SYSTEM（使 US10 dp-audit 對象顯示姓名）；(3) `DP_SCHEDULE` 異動 MVP 重啟生效、cron 熱重載留 ET/DM 落地評估。Issue #11 body 同步（AC6 + T045 範圍 + 注意事項）|
 | 2026-07-31 | US11（#106）開發 + 手測回饋擴充（PR #108）：**總覽由「唯讀」改為「可編排程管理頁」**——新增 `PUT /api/dp/schedules/{job_id}` 編輯 `JOB_NAME` / `CRON_EXPR` / `IS_ENABLED`（cron 驗證 + 稽核 `func_name=DP-SCHEDULE` + `apply_job_change` 即時 reschedule/add/remove 生效，暴露 scheduler 單例）+ 清單加**下次執行時間**（cron 計算）；前端欄位「啟停→狀態」、移除「結果」欄、加編輯 Dialog（JOB_ID 唯讀）；error codes `DP_SCHED_001/002`；US10 dp-audit `func_label` 加 `DP-SCHEDULE→DP-排程管理`。**仍不提供手動補跑**（冪等性因 job 而異，如到期提醒重跑會重複寄信）、**`HANDLER_REF`/`MODULE` 永不可經 UI 改**（RCE 防護 + `_resolve_handler` 白名單）。spec_us11 FR-06/AC7 + spec.md §排程引擎同步為「可編」。另修 `scheduler_leader.py` 前置敘述（#0 未實際建、本 issue 自建最小版）。**登入漸層背景統一**至信中連結落點頁（`ResetPasswordPage` / `VerifyEmailPage` / `ActivateAccountPage` / `VerifyEmailChangePage`，抽 `AUTH_BG_GRADIENT` 共用常數）。Code+Security review 全修（HIGH: shutdown 真等待；SECURITY: HANDLER_REF 白名單）|
 | 2026-08-03 | Issue #11（US11 dp-schedule）已**合併（PR [#108](https://github.com/sti-fhb/EDMS/pull/108) squash）**、close（#106）；總覽 #11 狀態更新為已合併。手測 E2E 驗證到期帳號正常發信（`PWD_EXPIRY_REMIND`）。DP 模組 US 全數交付，僅餘 Issue #12（整合測試 + 安全 + 收尾）|
+| 2026-08-03 | 補入 Issue #12 完整 body（收尾）。**範圍裁示 A**：因 `backend/app/{et,dm}/` 尚未存在、跨模組 checker 生產環境未註冊（fail-closed），將 tasks.md 原 T049 之「真授權閘掛 router」與「T047/T051 之 ET/DM 回歸」**排除、另立 follow-up**（現在掛 `require_module_admin` 會因無 checker → 全端點 403 鎖死後台）。#12 交付＝跨 US 端到端整合測試（T047/T048/T050/T051/T053/T054，對 SC-001~011）+ **淨新增稽核 ROW_HASH `verify_chain` 驗鏈工具 + `python -m` 入口**（目前僅寫入端建鏈、無驗證端）+ 安全姿態文件化（DB append-only GRANT 標為部署層）。**不新增業務功能 / 無 migration**。總覽 #12 涵蓋 Tasks 改列 T047~T048, T050~T054、狀態 📝 body 已補（待開立）。盤點依據：既有實作已就緒可測者＝T048 鎖定解鎖 / T053 限流·token·防列舉 / T047 換發（無 refresh token）；淨新增＝T052 驗鏈工具 + 跨 US e2e 測試 |
+| 2026-08-03 | Issue #12 已開立為 GitHub [#114](https://github.com/sti-fhb/EDMS/issues/114)；T049 遞延項另立 follow-up [#113](https://github.com/sti-fhb/EDMS/issues/113)（真授權閘掛 router + ET/DM 回歸，⏸️ 待 ET/DM 落地）。回填總覽表 GitHub # 欄與 body header；總覽新增 #12-F 列追蹤 follow-up |
