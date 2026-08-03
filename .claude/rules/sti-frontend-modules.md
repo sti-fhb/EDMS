@@ -9,39 +9,31 @@ paths:
 
 開發新功能前先確認是否有現成模組，禁止重複造輪子。
 
+> **本清單以 EDMS 實際程式碼為準**（前端 toolkit 自 US4 起逐步 bootstrap）。EDMS 為單一組織、無 station /
+> war-mode 維度。文末「規劃中／尚未實作」列出目前**不存在**、勿直接引用的符號。
+
 ---
 
 ### `CrudPageLayout` · `src/components/CrudPageLayout.tsx`
-所有 CRUD 列表頁骨架。**禁止手動拼裝 `<Box>` + `<Paper>`，一律用此元件。**
+CRUD 列表頁骨架（標題列 + 篩選 / 操作 + 表格 + 分頁 + 表單 slot）。**禁止手動拼裝 `<Box>` + `<Paper>`。**
+目前僅 **props 版 API**（無 compound 子元件、無 `editMode` prop、無 `usePageTitle`；`title` 傳純字串直接顯示）。
 
 ```tsx
-// 標準用法（80%）
 <CrudPageLayout
-  icon={<Settings />} title="頁面標題"
-  filterContent={...} actions={...}
+  icon={<Settings />}
+  title="頁面標題"
+  filterContent={...}          // 篩選列（TextField / Tabs 等）
+  actions={<CrudActions .../>} // 右上操作區
   table={<AppTable columns={columns} data={items} rowKey="id" loading={isPending} />}
   pagination={<Pagination page={page} total={meta?.total ?? 0} onPageChange={setPage} />}
-  form={formVisible && <SomeForm />}
+  form={formVisible && <SomeForm />}  // 表格下方展開的表單
 />
-
-// 客製化用法（20%）
-<CrudPageLayout>
-  <CrudPageLayout.Header icon={...} title="..." />
-  <CrudPageLayout.Filter>...</CrudPageLayout.Filter>
-  <CrudPageLayout.Actions>...</CrudPageLayout.Actions>
-  <CrudPageLayout.Content>...</CrudPageLayout.Content>
-  <CrudPageLayout.Pagination>...</CrudPageLayout.Pagination>
-</CrudPageLayout>
 ```
-`editMode="formCard"`（預設）或 `"inline"`（行內編輯，搭配 `useInlineEdit`）
-
-**注意**：`title` 傳純字串即可，內部自動呼叫 `usePageTitle` 解析標題與功能代碼，不需手動呼叫。
 
 ---
 
 ### `useCrudForm<T>` · `src/hooks/useCrudForm.ts`
 CRUD 表單狀態管理。**新建 CRUD hook 時一律使用，禁止手寫 formVisible / editingRecord / saving 開關邏輯。**
-
 不包含 `handleSave`（各頁 API 簽名不同），由各頁 hook 自行實作。
 
 ```tsx
@@ -61,32 +53,41 @@ const openCreate = useCallback(() => { resetExtra(); baseOpenCreate() }, [baseOp
 
 ---
 
+### `AppTable<T>` · `src/components/AppTable.tsx`
+統一表格。欄位以 `AppColumn<T>` 定義；`rowKey` 取列的唯一鍵（欄位名或函式）。
+
+```tsx
+import type { AppColumn } from "../../components/AppTable"
+
+const columns: AppColumn<Row>[] = [
+  { key: "name", title: "名稱", dataIndex: "name" },          // dataIndex 直取值
+  { key: "status", title: "狀態", render: (_v, r) => <Chip .../> }, // render 優先於 dataIndex
+  { key: "actions", title: "操作", render: (_v, r) => <Button .../> },
+]
+<AppTable columns={columns} data={items} rowKey="id" loading={isPending} emptyText="查無資料" />
+```
+`AppColumn`：`{ key, title, dataIndex?, align?, width?, render? }`。
+
+---
+
+### `FormCard` · `src/components/FormCard.tsx`
+CRUD 表單卡片殼（**非 Modal**，綠色 2px 邊框、展開時捲動至此、Enter 送出）。單一 `onSave` / `onCancel`。
+
+```tsx
+<FormCard title="編輯" onSave={handleSave} onCancel={closeForm} saving={saving}>
+  <TextField ... />
+</FormCard>
+```
+
+---
+
 ### `CrudActions` · `src/components/CrudActions.tsx`
-「重新整理 + 新增」按鈕組。**CRUD 頁面 actions 一律使用，禁止手寫重複的 Button 組合。**
+「重新整理 + 新增」按鈕組。**CRUD 頁面 actions 一律使用。**
 
 ```tsx
 <CrudActions onRefresh={refresh} onAdd={openCreate} />
+<CrudActions onRefresh={refresh} onAdd={openCreate} addLabel="建立帳號" />  // 自訂新增鈕文字
 <CrudActions onRefresh={refresh} />  // 唯讀頁面，省略 onAdd 不渲染新增按鈕
-```
-
----
-
-### `statusColumn<T>()` · `src/utils/columnFactories.tsx`
-is_active 狀態欄位工廠。**表格有 is_active 欄位時一律使用，禁止手寫 StatusChip 渲染。**
-
-```tsx
-statusColumn<Site>()                    // 預設讀取 is_active（T 須含 is_active: number）
-statusColumn<Device>("device_status")   // 指定其他欄位
-```
-
----
-
-### `useInlineEdit` · `src/hooks/useInlineEdit.ts`
-管理行內新增/編輯狀態，搭配 `editMode="inline"` 使用。
-
-```tsx
-const { isAdding, editingId, editValues, saving, startAdd, startEdit, cancel, setField, save } =
-  useInlineEdit<T>({ onSave: async (values) => { /* call API */ } })
 ```
 
 ---
@@ -96,7 +97,7 @@ const { isAdding, editingId, editValues, saving, startAdd, startEdit, cancel, se
 ESLint `no-restricted-syntax` 會攔截直接呼叫 `fetch`/`axios`，但別名匯入（如 `import api from '../services/http'`）無法攔截，需 Code Review 把關。
 
 ```tsx
-const { data, isPending } = usePagedQuery(
+const { data, isPending, invalidate } = usePagedQuery(
   QUERY_KEYS.xxx.list({ page, limit }),
   () => xxxApi.list({ page, limit }),
 )
@@ -106,34 +107,27 @@ const meta  = data?.meta  // { total, page, limit, total_pages }
 
 ---
 
+### `useDebouncedValue<T>` · `src/hooks/useDebouncedValue.ts`
+去抖動值：`value` 停止變動 `delayMs` 後才更新回傳值。用於輸入即時查詢（避免每字元一次 request）。
+
+```tsx
+const debounced = useDebouncedValue(keyword, 350)
+useEffect(() => { search(debounced) }, [debounced, search])
+```
+
+---
+
 ### `QUERY_KEYS` · `src/constants/queryKeys.ts`
 所有 query key 統一管理。新增模組時在此補上對應群組（全小寫 + 連字號）。
 
 ```tsx
 QUERY_KEYS.xxx.list({ page, limit })   // 列表
-QUERY_KEYS.xxx.detail(id)              // 單筆
 ```
-
----
-
-### `STORAGE_KEYS` · `src/constants/storage.ts`
-localStorage 存取一律用此常數，禁止硬編碼字串。**僅用於非敏感的 UI 偏好 / 一次性旗標**
-（如歡迎橫幅已顯示、清單頁面大小），禁止存放認證 token 或任何機密。
-
-```tsx
-localStorage.setItem(STORAGE_KEYS.WELCOME_DISMISSED, "1")
-```
-
-> ⚠️ **Access token 一律 memory-only，禁止落 localStorage**（US1 決策）。
-> JWT access token 只存記憶體（`AuthProvider` React state ＋ `services/http.ts` 模組變數），
-> 由 `setAuthToken()` 同步給 axios interceptor；重整即失效、需重新登入。理由：localStorage 對所有同源
-> JS 完全可讀，是 XSS 竊取 session token 的頭號目標；memory-only 把 token 暴露窗口縮到最短，
-> 搭配短 TTL（15 分）＋ 活動換發維持體驗。參考實作見 `src/auth/AuthProvider.tsx`、`src/services/http.ts`。
 
 ---
 
 ### `Pagination` · `src/components/Pagination.tsx`
-`total === 0` 時自動隱藏。切換 pageSize 時元件內部自動 `onPageChange(1)`。
+`total === 0` 時自動隱藏。切換 pageSize 時自動回第 1 頁。
 
 ```tsx
 <Pagination page={page} total={meta?.total ?? 0} onPageChange={setPage} />
@@ -154,136 +148,77 @@ confirm({ title: '確認刪除', content: '...', okText: '確認', danger: true,
 
 ---
 
-### `extractApiError` · `src/utils/extractApiError.ts`
-從 catch 提取後端錯誤訊息（優先讀 `error_message`，其次 `detail`）。
+### `toApiError` · `src/services/http.ts`
+把 axios 例外正規化為 `{ status, errorCode, errorMessage, retryAfter? }`（對齊後端 `error_code` / `error_message`）。
 
 ```tsx
-catch (err) { message.error(extractApiError(err, '操作失敗')) }
+import { toApiError } from "../services/http"
+catch (err) { message.error(toApiError(err).errorMessage) }
 ```
 
 ---
 
-### `useAuth` · `src/hooks/useAuth.ts`
-取得登入者資訊，module-level 快取。登出時須呼叫 `clearUserCache()`。
+### `useAuth` · `src/auth/useAuth.ts`
+取得認證狀態（`AuthContext`），須在 `<AuthProvider>` 內使用。**回傳 `AuthState`**（非使用者個資）：
 
 ```tsx
-const { user, loading } = useAuth()
-// user: { full_name, station_name, roles } | null
+const { token, isAuthenticated, mustChangePwd, sessionExpired, login, logout, clearMustChangePwd } = useAuth()
 ```
-
----
-
-### `useMenu` · `src/hooks/useMenu.ts`
-取得角色選單樹。登出時須呼叫 `clearMenuCache()`。
-
-```tsx
-const { menu, loading } = useMenu()
-const label = getMenuLabelByPath('/donors')
-```
-**登出時**：必須同時呼叫 `clearUserCache()` 與 `clearMenuCache()`。
-
----
-
-### `useWarMode` · `src/contexts/WarModeContext.tsx`
-
-```tsx
-const { isWarMode, toggleWarMode } = useWarMode()
-```
-
----
-
-### `ProtectedRoute` · `src/components/ProtectedRoute.tsx`
-未登入自動導向 `/login`，包住所有需要登入的路由。
-
-```tsx
-// router/index.tsx
-<Route element={<ProtectedRoute />}>
-  <Route path="/dp/sites" element={<SiteListPage />} />
-</Route>
-```
+> Access token 為 **memory-only**（`AuthProvider` state ＋ `services/http.ts` 模組變數），重整即失效、需重新登入——不落 localStorage（XSS 防護，US1 決策）。
+> 使用者個資（姓名 / Email）另由 `GET /dp/user/me`（`profileApi.getMe`，`PROFILE_ME_QUERY_KEY`）取得，非放在 `useAuth`。
 
 ---
 
 ### `date.ts` · `src/utils/date.ts`
-時間顯示一律用此模組，禁止 `new Date(...).toLocaleString(...)` 或自行時區換算。
-
-| 場景 | 工具 |
-|------|------|
-| 完整時間（`YYYY/MM/DD HH:mm:ss` 本地） | `formatLocalDatetime(value)` |
-| 僅日期 | `formatDate(value)` |
-| 日期時間無秒 | `formatDateTime(value)` |
-| 相對時間 | `fromNow(value)` |
-| `datetime-local` input → API | `localInputToUTC(value)` |
-| API → `datetime-local` input | `utcToLocalInput(value)` |
+時間顯示用此模組，禁止 `new Date(...).toLocaleString(...)` 或自行時區換算。
+目前僅提供 **`formatDateTime(value)`**（`YYYY/MM/DD HH:mm` 本地，null/undefined 回空字串）。其餘格式化函式尚未建，需要時於此新增。
 
 ---
 
-### `AppLayout` · `src/components/AppLayout.tsx`
-Sidebar（260px）+ Navbar（48px）+ Content 主佈局，直接使用，不需自行組裝。
-
 ### `Sidebar` · `src/components/Sidebar.tsx`
-新增模組時在 `src/components/sidebarIcons.ts` 補上 icon 映射（key = `MenuItem.name`）。
+統一 shell 左側導覽，於 `src/layouts/AppShell.tsx` 使用。導覽項目來自 **`src/layouts/navItems.ts` 的 `NAV_GROUPS`**（模組群組可收合），非 API 選單樹、無 icon 映射檔。新增後台功能項在 `navItems.ts` 的對應群組補上即可。
 
 ---
 
 ## 頁面組合範本
 
-> 以下為 `useCrudForm` + `CrudPageLayout` + `CrudActions` + `statusColumn` + `usePagedQuery` + `useNotification` 的標準組合。
+> `useCrudForm` + `CrudPageLayout` + `CrudActions` + `AppTable` + `usePagedQuery` + `useNotification` 的標準組合。
 
 ```tsx
 // ── Hook（useXxx.ts）──
 export function useXxx() {
-  const { message, confirm } = useNotification()
-  const {
-    formVisible, editingRecord, saving, setSaving,
-    openCreate, openEdit, closeForm,
-  } = useCrudForm<Xxx>()
+  const { message } = useNotification()
+  const { formVisible, editingRecord, saving, setSaving, openCreate, openEdit, closeForm } = useCrudForm<Xxx>()
 
   const [page, setPage] = useState(1)
-  const [limit, setLimit] = useState(10)
-
   const { data, isPending, invalidate } = usePagedQuery(
-    QUERY_KEYS.xxx.list({ page, limit }),
-    () => xxxApi.list({ page, limit }),
+    QUERY_KEYS.xxx.list({ page }),
+    () => xxxApi.list({ page }),
   )
   const items = data?.data ?? []
-  const meta = data?.meta
 
   const handleSave = useCallback(async (values: XxxCreate | XxxUpdate) => {
     setSaving(true)
     try {
-      if (editingRecord) {
-        await xxxApi.update(editingRecord.id, values as XxxUpdate)
-        message.success('更新成功')
-      } else {
-        await xxxApi.create(values as XxxCreate)
-        message.success('新增成功')
-      }
-      closeForm()
-      invalidate()
+      if (editingRecord) { await xxxApi.update(editingRecord.id, values as XxxUpdate); message.success('更新成功') }
+      else { await xxxApi.create(values as XxxCreate); message.success('新增成功') }
+      closeForm(); invalidate()
     } catch (err) {
-      message.error(extractApiError(err, editingRecord ? '更新失敗' : '新增失敗'))
-    } finally {
-      setSaving(false)
-    }
+      message.error(toApiError(err).errorMessage)
+    } finally { setSaving(false) }
   }, [editingRecord, message, closeForm, invalidate, setSaving])
 
-  return {
-    items, loading: isPending, total: meta?.total ?? 0, page, setPage,
-    refresh: invalidate, formVisible, editingRecord, saving,
-    openCreate, openEdit, closeForm, handleSave,
-  }
+  return { items, loading: isPending, total: data?.meta?.total ?? 0, page, setPage,
+    refresh: invalidate, formVisible, editingRecord, saving, openCreate, openEdit, closeForm, handleSave }
 }
 
 // ── Page（XxxListPage.tsx）──
 export const XxxListPage = () => {
   const { items, loading, total, page, setPage, refresh,
-    formVisible, editingRecord, saving, openCreate, openEdit, closeForm, handleSave,
-  } = useXxx()
+    formVisible, editingRecord, saving, openCreate, openEdit, closeForm, handleSave } = useXxx()
 
   const columns: AppColumn<Xxx>[] = useMemo(() => [
     { key: 'name', title: '名稱', dataIndex: 'name' },
-    statusColumn<Xxx>(),
     { key: 'actions', title: '操作', render: (_v, r) => (
       <Button size="small" onClick={() => openEdit(r)}>編輯</Button>
     )},
@@ -291,8 +226,7 @@ export const XxxListPage = () => {
 
   return (
     <CrudPageLayout
-      icon={<Settings />}
-      title="XXX 管理"
+      icon={<Settings />} title="XXX 管理"
       actions={<CrudActions onRefresh={refresh} onAdd={openCreate} />}
       table={<AppTable columns={columns} data={items} rowKey="id" loading={loading} />}
       pagination={<Pagination page={page} total={total} onPageChange={setPage} />}
@@ -302,3 +236,19 @@ export const XxxListPage = () => {
   )
 }
 ```
+
+---
+
+## 規劃中／尚未實作（勿直接引用）
+
+以下符號目前**不存在於 EDMS 前端**（多為 TBMS 母專案有、EDMS 尚未 bootstrap 或不適用）。實作後再補回本清單：
+
+| 符號 | 狀態 |
+|------|------|
+| `statusColumn` / `utils/columnFactories.tsx` | 未建（EDMS 狀態多為衍生值，非 `is_active`）|
+| `useInlineEdit`、`CrudPageLayout` 的 `editMode` / compound 子元件（`.Header`…）| 未建（CrudPageLayout 僅 props 版）|
+| `usePageTitle` | 未建 |
+| `extractApiError`、`STORAGE_KEYS` / `constants/storage.ts` | 不存在（用 `toApiError`；localStorage 目前無共用常數）|
+| `useMenu`、`useWarMode` / `WarModeContext`、`ProtectedRoute`、`AppLayout`、`sidebarIcons.ts` | 不存在（EDMS 無 API 選單樹 / war-mode；登入守衛由 `RootLayout` + `LoginOverlay` 處理；shell 為 `AppShell`）|
+| `useAuth` 回 `{ full_name, station_name, roles }` + `clearUserCache` | 錯誤形狀（實為 `AuthState`，見上）|
+| `date.ts` 的 `formatLocalDatetime` / `formatDate` / `fromNow` / `localInputToUTC` / `utcToLocalInput` | 未建（僅 `formatDateTime`）|
