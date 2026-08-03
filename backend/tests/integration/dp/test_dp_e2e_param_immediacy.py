@@ -51,9 +51,7 @@ async def _make_master(db, param_id, *, param_type="LIST", detail_lock=False, de
 
 async def test_maintenance_write_immediately_reflected_in_srvdp001(db):
     """US5 寫入（改值 / 停用 / 新增）→ SRVDP001 讀取即時反映，無快取延遲（SC-008）。"""
-    await _make_master(
-        db, "E2E_IMM", param_type="LIST", details=[("A", "aval", 1, True), ("B", "bval", 2, True)]
-    )
+    await _make_master(db, "E2E_IMM", param_type="LIST", details=[("A", "aval", 1, True), ("B", "bval", 2, True)])
     read = ParamService()
     admin = ParamAdminService()
 
@@ -63,18 +61,25 @@ async def test_maintenance_write_immediately_reflected_in_srvdp001(db):
     assert await read.get_param_value(db, "E2E_IMM", "A") == "aval"
 
     # ① 改值 → SRVDP001 即時讀到新值
-    await admin.update_detail(db, param_id="E2E_IMM", param_key="A", data=ParamDetailUpdate(param_value="aval2"), operator=_OP)
+    await admin.update_detail(
+        db, param_id="E2E_IMM", param_key="A", data=ParamDetailUpdate(param_value="aval2"), operator=_OP
+    )
     assert await read.get_param_value(db, "E2E_IMM", "A") == "aval2"
 
     # ② 停用 B → SRVDP001 啟用清單即時排除、單值讀回 None
-    await admin.update_detail(db, param_id="E2E_IMM", param_key="B", data=ParamDetailUpdate(is_enabled=False), operator=_OP)
+    await admin.update_detail(
+        db, param_id="E2E_IMM", param_key="B", data=ParamDetailUpdate(is_enabled=False), operator=_OP
+    )
     keys_after = {item.key for item in await read.get_param_list(db, "E2E_IMM", enabled_only=True)}
     assert keys_after == {"A"}
     assert await read.get_param_value(db, "E2E_IMM", "B") is None
 
     # ③ 新增 C → SRVDP001 即時納入
     await admin.create_detail(
-        db, param_id="E2E_IMM", data=ParamDetailCreate(param_key="C", param_name="新項", param_value="cval"), operator=_OP
+        db,
+        param_id="E2E_IMM",
+        data=ParamDetailCreate(param_key="C", param_name="新項", param_value="cval"),
+        operator=_OP,
     )
     keys_final = {item.key for item in await read.get_param_list(db, "E2E_IMM", enabled_only=True)}
     assert keys_final == {"A", "C"}

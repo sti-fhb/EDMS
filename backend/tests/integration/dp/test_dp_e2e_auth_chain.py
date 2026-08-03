@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from app.core.auth import JwtPayload, create_access_token, decode_access_token
+from app.core.auth import create_access_token, decode_access_token
 from app.core.exceptions import AppError
 from app.core.module_provisioning import module_provisioning_gate
 from app.core.password_policy import hash_password

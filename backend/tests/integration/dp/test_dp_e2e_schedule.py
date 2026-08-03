@@ -123,9 +123,7 @@ async def test_schdp001_dual_mandate_composed(db):
     assert audit.created_user == "SYSTEM"
 
     # 職責②：將到期者收到 PWD_EXPIRY_REMIND（EMAIL_LOG PENDING）
-    mail = (
-        await db.execute(select(DpEmailLog).where(DpEmailLog.recipient == "expiring_e2e@x.com"))
-    ).scalar_one()
+    mail = (await db.execute(select(DpEmailLog).where(DpEmailLog.recipient == "expiring_e2e@x.com"))).scalar_one()
     assert mail.template_code == "PWD_EXPIRY_REMIND" and mail.status == "PENDING"
 
     # 且將到期者「未」被誤禁用（兩職責對象互不干擾）

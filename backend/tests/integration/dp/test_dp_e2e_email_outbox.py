@@ -76,9 +76,7 @@ async def test_sent_snapshot_unaffected_by_later_template_edit(db):
     )
 
     # 事後修改範本 body
-    tmpl = (
-        await db.execute(select(DpNotifyTemplate).where(DpNotifyTemplate.template_code == "E2E_EDIT"))
-    ).scalar_one()
+    tmpl = (await db.execute(select(DpNotifyTemplate).where(DpNotifyTemplate.template_code == "E2E_EDIT"))).scalar_one()
     tmpl.body = "版本二 {name}"
     await db.flush()
 
