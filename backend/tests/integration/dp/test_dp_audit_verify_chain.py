@@ -5,13 +5,26 @@
 竄改以測試專用 raw UPDATE 模擬（正式 repo append-only 無 update 途徑）。
 """
 
+from contextlib import asynccontextmanager
+
 import pytest
 from sqlalchemy import text
 
+import app.core.db as core_db
 from app.dp.audit.service import AuditLogService
-from app.dp.audit.verify import verify_chain
+from app.dp.audit.verify import _amain, verify_chain
 
 pytestmark = pytest.mark.integration
+
+
+def _patch_session_local(monkeypatch, db):
+    """把 CLI 入口用的 AsyncSessionLocal 導向測試 session（savepoint 隔離）。"""
+
+    @asynccontextmanager
+    async def _fake_session():
+        yield db
+
+    monkeypatch.setattr(core_db, "AsyncSessionLocal", lambda: _fake_session())
 
 
 async def _write_rows(db, n: int) -> None:
@@ -112,3 +125,35 @@ async def test_verify_reports_first_break_only(db):
     result = await verify_chain(db)
     assert result.status == "BROKEN"
     assert result.first_broken_log_id == log_ids[1]
+
+
+# ── CLI 入口 `python -m app.dp.audit.verify`（_amain 組裝層 + 退出碼語意）──────────
+
+
+async def test_amain_ok_returns_exit_0(db, monkeypatch):
+    """完整鏈 → CLI 退出碼 0。"""
+    await _write_rows(db, 3)
+    _patch_session_local(monkeypatch, db)
+    assert await _amain() == 0
+
+
+async def test_amain_broken_returns_exit_1(db, monkeypatch):
+    """斷鏈 → CLI 退出碼 1。"""
+    await _write_rows(db, 3)
+    victim = (await db.execute(text('SELECT "LOG_ID" FROM "DP_AUDIT_LOG" ORDER BY "LOG_ID" ASC'))).scalars().first()
+    await db.execute(
+        text('UPDATE "DP_AUDIT_LOG" SET "AFTER_VALUE" = :v WHERE "LOG_ID" = :id'),
+        {"v": '{"tampered": 1}', "id": victim},
+    )
+    _patch_session_local(monkeypatch, db)
+    assert await _amain() == 1
+
+
+async def test_amain_execution_error_returns_exit_2(db, monkeypatch):
+    """執行錯誤（如 DB 連線失敗）→ CLI 退出碼 2，與斷鏈(1)區隔。"""
+
+    def _boom():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(core_db, "AsyncSessionLocal", _boom)
+    assert await _amain() == 2

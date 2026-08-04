@@ -9,7 +9,7 @@
 
 ops 例行稽核 / CI 可直接執行：
     python -m app.dp.audit.verify
-退出碼：0＝完好（OK / 空表 EMPTY）、1＝斷鏈（BROKEN）。
+退出碼：0＝完好（OK / 空表 EMPTY）、1＝斷鏈（BROKEN）、2＝執行錯誤（如 DB 連線失敗，非斷鏈）。
 """
 
 from dataclasses import dataclass
@@ -47,33 +47,38 @@ async def verify_chain(db: AsyncSession) -> ChainVerifyResult:
     prev_hash: str | None = None
     total = 0
 
+    # 顯式關閉 server-side cursor：偵測到斷鏈會提早 return，try/finally 確保 stream 於任一
+    # 離開路徑都關閉，使 verify_chain 可安全地接受外部長生命週期 session（如未來包成 ops 端點）。
     result = await db.stream(stmt)
-    async for row in result.scalars():
-        total += 1
-        expected = _compute_row_hash(
-            prev_hash=prev_hash,
-            module=row.module,
-            func_name=row.func_name,
-            action_type=row.action_type,
-            result=row.result,
-            operator_id=row.created_user,
-            target_id=row.target_id,
-            description=row.description,
-            source_ip=row.source_ip,
-            before_json=row.before_value,
-            after_json=row.after_value,
-            created_date=row.created_date,
-        )
-        if expected != row.row_hash:
-            return ChainVerifyResult(
-                status="BROKEN",
-                total=total,
-                first_broken_log_id=row.log_id,
-                first_broken_created_date=row.created_date,
-                first_broken_func_name=row.func_name,
+    try:
+        async for row in result.scalars():
+            total += 1
+            expected = _compute_row_hash(
+                prev_hash=prev_hash,
+                module=row.module,
+                func_name=row.func_name,
+                action_type=row.action_type,
+                result=row.result,
+                operator_id=row.created_user,
+                target_id=row.target_id,
+                description=row.description,
+                source_ip=row.source_ip,
+                before_json=row.before_value,
+                after_json=row.after_value,
+                created_date=row.created_date,
             )
-        # 用「存檔」hash 接下一列：竄改列即使自身 hash 被一併改，下一列 prev 仍會對不上
-        prev_hash = row.row_hash
+            if expected != row.row_hash:
+                return ChainVerifyResult(
+                    status="BROKEN",
+                    total=total,
+                    first_broken_log_id=row.log_id,
+                    first_broken_created_date=row.created_date,
+                    first_broken_func_name=row.func_name,
+                )
+            # 用「存檔」hash 接下一列：竄改列即使自身 hash 被一併改，下一列 prev 仍會對不上
+            prev_hash = row.row_hash
+    finally:
+        await result.close()
 
     return ChainVerifyResult(status="EMPTY" if total == 0 else "OK", total=total)
 
@@ -93,11 +98,19 @@ def render_result(result: ChainVerifyResult) -> tuple[str, int]:
 
 
 async def _amain() -> int:
-    """CLI 進入點：開 session → 驗鏈 → 印結果 → 回退出碼。"""
+    """CLI 進入點：開 session → 驗鏈 → 印結果 → 回退出碼。
+
+    退出碼：0＝完好（OK/EMPTY）、1＝斷鏈（BROKEN）、2＝執行錯誤（如 DB 連線失敗）。
+    以 2 區隔「執行錯誤」與「斷鏈」，避免 ops/CI 僅看退出碼時把連線失敗誤判為稽核鏈遭竄改。
+    """
     from app.core.db import AsyncSessionLocal
 
-    async with AsyncSessionLocal() as db:
-        result = await verify_chain(db)
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await verify_chain(db)
+    except Exception as exc:
+        print(f"⚠️ 驗鏈執行錯誤（非斷鏈）：{exc}")
+        return 2
     message, code = render_result(result)
     print(message)
     return code
