@@ -35,27 +35,47 @@ export function useUsers() {
 
   const setPage = useCallback((page: number) => setQuery((prev) => ({ ...prev, page })), [])
 
+  /** 建立 / 編輯一律先跳二次確認（#112），確認後才送出；取消則保留表單與未儲存輸入。 */
   const handleSave = useCallback(
     async (values: UserCreatePayload | UserUpdatePayload) => {
-      setSaving(true)
-      try {
-        if (editingRecord) {
-          await usersApi.updateName(editingRecord.user_id, values as UserUpdatePayload)
-          message.success("已更新姓名")
-        } else {
-          await usersApi.create(values as UserCreatePayload)
-          message.success("邀請信已寄出，使用者需經連結設定密碼後啟用")
+      const isEdit = editingRecord !== null
+      const submit = async () => {
+        setSaving(true)
+        try {
+          if (editingRecord) {
+            await usersApi.updateName(editingRecord.user_id, values as UserUpdatePayload)
+            message.success("已更新姓名")
+          } else {
+            await usersApi.create(values as UserCreatePayload)
+            message.success("邀請信已寄出，使用者需經連結設定密碼後啟用")
+          }
+          closeForm()
+          // 以 ["users"] 前綴一併失效清單與待啟用邀請 cache：建立邀請成功後，即使停在「待啟用邀請」頁籤也即時刷新
+          queryClient.invalidateQueries({ queryKey: ["users"] })
+        } catch (err) {
+          message.error(toApiError(err).errorMessage)
+        } finally {
+          setSaving(false)
         }
-        closeForm()
-        // 以 ["users"] 前綴一併失效清單與待啟用邀請 cache：建立邀請成功後，即使停在「待啟用邀請」頁籤也即時刷新
-        queryClient.invalidateQueries({ queryKey: ["users"] })
-      } catch (err) {
-        message.error(toApiError(err).errorMessage)
-      } finally {
-        setSaving(false)
       }
+
+      confirm(
+        isEdit
+          ? {
+              title: "儲存帳號變更",
+              content: `確定儲存「${editingRecord.user_name}」的帳號變更？`,
+              okText: "確定儲存",
+              onOk: submit,
+            }
+          : {
+              title: "建立帳號",
+              content: `確定建立帳號並寄出邀請信至「${(values as UserCreatePayload).email}」？`,
+              okText: "確定寄送",
+              onOk: submit,
+            },
+      )
     },
-    [editingRecord, message, closeForm, queryClient, setSaving],
+    [editingRecord, message, closeForm, queryClient, setSaving, confirm],
   )
 
   const disableUser = useCallback(
@@ -63,7 +83,6 @@ export function useUsers() {
       confirm({
         title: "停用帳號",
         content: `確定停用「${row.user_name}」的帳號？停用後 ET / DM 兩端將同步失效。`,
-        danger: true,
         okText: "確定停用",
         onOk: async () => {
           try {

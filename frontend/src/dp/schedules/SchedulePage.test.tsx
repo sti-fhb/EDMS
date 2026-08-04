@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -80,8 +80,25 @@ describe("SchedulePage 排程作業總覽（可編輯）", () => {
     await user.clear(name)
     await user.type(name, "平台每日作業（改）")
     await user.click(within(dialog).getByRole("button", { name: "儲存" }))
+    const confirmDialog = await screen.findByRole("dialog", { name: "儲存排程變更" })
+    await user.click(within(confirmDialog).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText("排程已更新")).toBeInTheDocument()
+  })
+
+  it("排程按儲存 → 先跳二次確認；取消則不送出", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<SchedulePage />)
+    await screen.findByText(/SCHDP001/)
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    const editDialog = await screen.findByRole("dialog")
+    await user.click(within(editDialog).getByRole("button", { name: "儲存" }))
+
+    const confirmDialog = await screen.findByRole("dialog", { name: "儲存排程變更" })
+    await user.click(within(confirmDialog).getByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(screen.queryByText("排程已更新")).not.toBeInTheDocument())
   })
 
   it("執行歷程結果顯示中文（成功 / 失敗 / 跳過），不顯示英文碼", async () => {

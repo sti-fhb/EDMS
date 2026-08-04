@@ -7,7 +7,9 @@ import { UsersPage } from "./UsersPage"
 import { server } from "../../test/server"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
-describe("UsersPage 使用者操作流程", () => {
+// 二次確認（#112）讓多數流程多一輪 dialog 往返，加上 userEvent 逐字輸入，
+// 預設 5s testTimeout 在機器負載高時會逾時（非斷言失敗）→ 本檔放寬至 15s。
+describe("UsersPage 使用者操作流程", { timeout: 15_000 }, () => {
   it("載入清單並依狀態顯示三態與對應操作", async () => {
     renderWithProviders(<UsersPage />)
 
@@ -31,6 +33,7 @@ describe("UsersPage 使用者操作流程", () => {
     await user.type(screen.getByLabelText("帳號（Email）"), "new@edms.local")
     await user.type(screen.getByLabelText("姓名"), "新人")
     await user.click(screen.getByRole("button", { name: "寄送邀請" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定寄送" }))
 
     expect(await screen.findByText(/邀請信已寄出/)).toBeInTheDocument()
   })
@@ -62,6 +65,7 @@ describe("UsersPage 使用者操作流程", () => {
     await user.type(screen.getByLabelText("帳號（Email）"), "dup@edms.local")
     await user.type(screen.getByLabelText("姓名"), "重複")
     await user.click(screen.getByRole("button", { name: "寄送邀請" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定寄送" }))
 
     expect(await screen.findByText("此 Email 已被使用")).toBeInTheDocument()
   })
@@ -111,8 +115,65 @@ describe("UsersPage 使用者操作流程", () => {
     await user.clear(screen.getByLabelText("姓名"))
     await user.type(screen.getByLabelText("姓名"), "陳大華改")
     await user.click(screen.getByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText(/已更新姓名/)).toBeInTheDocument()
+  })
+
+  it("編輯姓名按儲存 → 先跳二次確認；取消則不送出", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    await user.clear(await screen.findByLabelText("姓名"))
+    await user.type(screen.getByLabelText("姓名"), "陳大華改")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("儲存帳號變更")).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(screen.queryByText(/已更新姓名/)).not.toBeInTheDocument())
+    // 取消後表單保留，未儲存的輸入不消失
+    expect(screen.getByLabelText("姓名")).toHaveValue("陳大華改")
+  })
+
+  it("建立帳號按寄送邀請 → 先跳二次確認，確認後才寄出", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getByRole("button", { name: /建立帳號/ }))
+    await user.type(screen.getByLabelText("帳號（Email）"), "new@edms.local")
+    await user.type(screen.getByLabelText("姓名"), "新同事")
+    await user.click(screen.getByRole("button", { name: "寄送邀請" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/邀請信/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "確定寄送" }))
+
+    expect(await screen.findByText(/邀請信已寄出/)).toBeInTheDocument()
+  })
+
+  it("停用 / 取消邀請的確定鈕為主色（綠），不再使用警示色", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+    const disableOk = within(await screen.findByRole("dialog")).getByRole("button", { name: "確定停用" })
+    expect(disableOk).toHaveClass("MuiButton-colorPrimary")
+    expect(disableOk).not.toHaveClass("MuiButton-colorWarning")
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "取消" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+    await user.click(await screen.findByRole("tab", { name: /待啟用邀請/ }))
+    await screen.findByText("周雅婷")
+    await user.click(screen.getAllByRole("button", { name: "取消邀請" })[0])
+    const cancelOk = within(await screen.findByRole("dialog")).getByRole("button", { name: "確定取消" })
+    expect(cancelOk).toHaveClass("MuiButton-colorPrimary")
+    expect(cancelOk).not.toHaveClass("MuiButton-colorWarning")
   })
 
   it("編輯中直接點另一列的編輯 → 表單切換到新帳號（不停留舊的）", async () => {

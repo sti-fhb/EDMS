@@ -179,6 +179,27 @@ describe("ParamsPage 系統參數維護流程", () => {
     await waitFor(() => expect(bodies).toHaveLength(1))
     expect(bodies[0]).toEqual({ param_value: "10", description: "閒置逾時自動登出" })
     expect(await screen.findByText("閒置逾時自動登出")).toBeInTheDocument()
+    // 儲存成功後編輯面板收起（對齊通知範本）
+    await waitFor(() => expect(screen.queryByLabelText("說明")).not.toBeInTheDocument())
+  })
+
+  it("VALUE 型：驗證失敗 / 取消確認時面板不收起", async () => {
+    useStatefulValueParam()
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+
+    // 值清空 → 驗證失敗，面板保留
+    await openEditByRow(user, "閒置自動登出（分鐘）")
+    await user.clear(await screen.findByLabelText("閒置自動登出（分鐘）"))
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    expect(await screen.findByText("請輸入內容")).toBeInTheDocument()
+    expect(screen.getByLabelText("說明")).toBeInTheDocument()
+
+    // 平台級確認按取消 → 面板保留
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "取消" }))
+    expect(screen.getByLabelText("說明")).toBeInTheDocument()
   })
 
   it("清空說明 → 送出 null，表格說明欄回顯 —", async () => {
@@ -239,6 +260,8 @@ describe("ParamsPage 系統參數維護流程", () => {
 
     expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
     expect(bodies[0]).toEqual({ param_name: "護理師", description: "臨床護理人員" })
+    // LIST 型一個面板管多筆、逐項儲存，存完不收起
+    expect(screen.getByLabelText("NURSE 說明")).toBeInTheDocument()
   })
 
   it("LIST 型清空說明 → 送出 null（與 VALUE 型語意一致）", async () => {

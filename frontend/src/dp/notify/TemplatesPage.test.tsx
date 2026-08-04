@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -56,6 +56,7 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     await user.clear(subject)
     await user.type(subject, "課程邀請（改）")
     await user.click(screen.getByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText("範本已更新")).toBeInTheDocument()
   })
@@ -86,8 +87,28 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     await gotoEtTab(user)
     await user.click(await screen.findByRole("button", { name: "編輯" }))
     await user.click(await screen.findByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText("內容已被他人修改，請重新載入後再儲存")).toBeInTheDocument()
+  })
+
+  it("範本按儲存 → 先跳二次確認；取消則不送出、表單保留", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<TemplatesPage />)
+    await gotoEtTab(user)
+    await user.click(await screen.findByRole("button", { name: "編輯" }))
+
+    const subject = await screen.findByLabelText("主旨")
+    await user.clear(subject)
+    await user.type(subject, "課程邀請（改）")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("儲存範本變更")).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(screen.queryByText("範本已更新")).not.toBeInTheDocument())
+    expect(screen.getByLabelText("主旨")).toHaveValue("課程邀請（改）")
   })
 
   it("行內停用非系統信範本 → 即時儲存成功", async () => {

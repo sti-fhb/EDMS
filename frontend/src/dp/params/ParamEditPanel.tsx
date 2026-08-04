@@ -28,7 +28,7 @@ interface ParamEditPanelProps {
     master: ParamMaster,
     paramKey: string,
     payload: DetailUpdatePayload,
-    onCancel?: () => void,
+    callbacks?: { onCancel?: () => void; onSaved?: () => void },
   ) => void | Promise<void>
   onToggle: (master: ParamMaster, paramKey: string, isEnabled: boolean) => void | Promise<void>
   onAdd: (master: ParamMaster, payload: DetailCreatePayload) => Promise<void>
@@ -84,14 +84,15 @@ function ValueEditBody({
       return
     }
     setDescError(undefined)
-    // 平台級：onSaveDetail 內部跳確認，取消時 onCancel 還原欄位。儲存後面板保留（不自動關）。
+    // 平台級：onSaveDetail 內部跳確認，取消時 onCancel 還原欄位。
     // 值與說明合併為單次 PUT，平台級確認只跳一次；說明留白送 null（清空），回顯統一為「—」。
     void Promise.resolve(
       onSaveDetail(
         master,
         detail.param_key,
         { param_value: value.trim(), description: parsedDesc.data || null },
-        restore,
+        // onSaved 才收面板：平台級 confirm 同步返回，不能用 then 判成敗；取消 / 驗證失敗時面板保留
+        { onCancel: restore, onSaved: onClose },
       ),
     ).catch(() => {})
   }
@@ -165,11 +166,12 @@ function ListEdit({ row, onSaveDetail, onToggle, onAdd, onClose }: ParamEditPane
     setDescErrors(dropKey(paramKey))
     // 名稱與說明合併為單次 PUT；說明留白送 null（清空）
     void Promise.resolve(
+      // LIST 型一個面板管多筆、逐項儲存，故不傳 onSaved（存完不收面板）
       onSaveDetail(
         master,
         paramKey,
-        { param_name: edited.trim(), description: parsedDesc.data || null },
-        () => revertEdit(paramKey),
+        { param_name: parsedName.data, description: parsedDesc.data || null },
+        { onCancel: () => revertEdit(paramKey) },
       ),
     ).catch(() => {})
   }
