@@ -16,6 +16,7 @@ import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { formatDateTime } from "../../utils/date"
 import { AuditDetailDialog } from "./AuditDetailDialog"
+import { ACTION_OPTIONS, RESULT_OPTIONS, actionLabel, resultLabel } from "./auditLabels"
 import type { AuditLogRow } from "./auditService"
 import { EMPTY_AUDIT_FILTERS, useAuditLogs } from "./useAuditLogs"
 import type { AuditFilters } from "./useAuditLogs"
@@ -31,8 +32,6 @@ const FUNC_OPTIONS: { value: string; label: string }[] = [
   { value: "DP-REGISTER", label: "DP-自助註冊" },
   { value: "DP-AUTH", label: "DP-登入登出" },
 ]
-const ACTION_OPTIONS = ["全部", "LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE"]
-const RESULT_OPTIONS = ["全部", "SUCCESS", "FAIL"]
 
 /** 「全部」對應空字串（不帶入查詢）。 */
 function selectValue(v: string): string {
@@ -71,11 +70,14 @@ export function AuditPage() {
       { key: "created_date", title: "時間", render: (_v, r) => formatDateTime(r.created_date) },
       { key: "operator", title: "操作者", render: (_v, r) => operatorText(r) },
       { key: "func_label", title: "功能", dataIndex: "func_label" },
-      { key: "action_type", title: "類別", render: (_v, r) => <Chip size="small" label={r.action_type} /> },
+      { key: "action_type", title: "類別", render: (_v, r) => <Chip size="small" label={actionLabel(r.action_type)} /> },
       {
         key: "result",
         title: "結果",
-        render: (_v, r) => <Chip size="small" color={r.result === "FAIL" ? "error" : "success"} label={r.result} />,
+        // 配色仍依原英文碼判定，label 才轉中文
+        render: (_v, r) => (
+          <Chip size="small" color={r.result === "FAIL" ? "error" : "success"} label={resultLabel(r.result)} />
+        ),
       },
       { key: "target", title: "對象", render: (_v, r) => r.target_display ?? "—" },
       { key: "source_ip", title: "來源 IP", render: (_v, r) => r.source_ip ?? "—" },
@@ -136,8 +138,8 @@ export function AuditPage() {
               sx={{ minWidth: 130 }}
             >
               {ACTION_OPTIONS.map((o) => (
-                <MenuItem key={o} value={o}>
-                  {o}
+                <MenuItem key={o.value} value={o.value}>
+                  {o.label}
                 </MenuItem>
               ))}
             </TextField>
@@ -150,8 +152,8 @@ export function AuditPage() {
               sx={{ minWidth: 120 }}
             >
               {RESULT_OPTIONS.map((o) => (
-                <MenuItem key={o} value={o}>
-                  {o}
+                <MenuItem key={o.value} value={o.value}>
+                  {o.label}
                 </MenuItem>
               ))}
             </TextField>

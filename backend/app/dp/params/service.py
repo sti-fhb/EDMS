@@ -275,6 +275,11 @@ class ParamAdminService:
         # （JWT / PWD_POLICY / LOGIN / MAIL 數值、ACTION_TYPE 清單）皆非機密，故不遮罩（不為
         # 不存在情境預寫防禦碼，sti-coding-style）。日後若引入以 PARAM_VALUE 存放機密（如通關
         # 密碼雜湊）之參數，MUST 於此對該類 param_id 遮罩後再寫稽核（機密改走 config/.env 為上策）。
+        #
+        # 補充（2026-08-04，#112 Security Review MEDIUM）：description 自 #112 起開放維護頁編輯，
+        # 屬使用者自由文字且同樣以明文入稽核。AuditLogService 的遮罩為 key 子字串比對
+        # （password / secret / token…），"description" 不命中、架構上也抓不到自由文字內容，
+        # 故改以 UI 提示（維護頁「說明」欄 helperText）勸阻填入機密，此處不加遮罩。
         await self._audit.log_action(
             db,
             module="DP",

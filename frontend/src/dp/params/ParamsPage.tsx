@@ -79,7 +79,8 @@ export function ParamsPage() {
       {
         key: "desc",
         title: "說明",
-        render: (_v, r) => (r.kind === "value" ? (r.detail.description ?? "—") : (r.master.description ?? "—")),
+        // 用 || 而非 ??：說明清空後為空字串，也應回顯「—」
+        render: (_v, r) => (r.kind === "value" ? r.detail.description || "—" : r.master.description || "—"),
       },
       {
         key: "actions",

@@ -24,7 +24,8 @@ export interface ParamMaster {
 export interface DetailUpdatePayload {
   param_name?: string
   param_value?: string
-  description?: string
+  /** null＝清空說明（後端寫回 NULL）；省略＝不異動。 */
+  description?: string | null
   is_enabled?: boolean
 }
 

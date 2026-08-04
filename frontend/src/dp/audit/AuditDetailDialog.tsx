@@ -12,6 +12,7 @@ import TableRow from "@mui/material/TableRow"
 import Typography from "@mui/material/Typography"
 
 import { formatDateTime } from "../../utils/date"
+import { actionLabel, resultLabel } from "./auditLabels"
 import type { AuditLogRow } from "./auditService"
 
 /** JSON 字串格式化呈現；parse 失敗則原樣顯示（none → 「—」）。 */
@@ -60,7 +61,7 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>操作類別</TableCell>
                   <TableCell>
-                    <Chip size="small" label={log.action_type} />
+                    <Chip size="small" label={actionLabel(log.action_type)} />
                   </TableCell>
                 </TableRow>
                 <TableRow>
@@ -69,7 +70,7 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
                     <Chip
                       size="small"
                       color={log.result === "FAIL" ? "error" : "success"}
-                      label={log.result}
+                      label={resultLabel(log.result)}
                     />
                   </TableCell>
                 </TableRow>

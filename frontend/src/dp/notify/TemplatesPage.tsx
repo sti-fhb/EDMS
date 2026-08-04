@@ -1,5 +1,4 @@
 import EmailIcon from "@mui/icons-material/Email"
-import Alert from "@mui/material/Alert"
 import Button from "@mui/material/Button"
 import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
@@ -49,16 +48,8 @@ export function TemplatesPage() {
 
   const columns = useMemo<AppColumn<Template>[]>(
     () => [
-      {
-        key: "name",
-        title: "範本名稱",
-        render: (_v, r) => (
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <span style={{ fontFamily: "monospace" }}>{r.template_code}</span>
-            <span>{r.template_name}</span>
-          </Stack>
-        ),
-      },
+      // 只顯示中文名稱；範本代碼為技術識別碼，不對維護者呈現（#112）
+      { key: "name", title: "範本名稱", dataIndex: "template_name" },
       {
         key: "channel",
         title: "管道",
@@ -122,18 +113,13 @@ export function TemplatesPage() {
       title="通知範本維護"
       actions={<CrudActions onRefresh={refresh} />}
       filterContent={
-        <>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            通知範本按 MODULE 過濾；DP 系統信兩管理者皆可編主旨 / 內文，但不可停用 / 刪除。事件固定，無新增 / 刪除範本。
-          </Alert>
-          {visibleTabs.length > 0 && (
-            <Tabs value={activeModule} onChange={(_e, v: string) => handleTabChange(v)}>
-              {visibleTabs.map((t) => (
-                <Tab key={t.module} value={t.module} label={t.label} />
-              ))}
-            </Tabs>
-          )}
-        </>
+        visibleTabs.length > 0 && (
+          <Tabs value={activeModule} onChange={(_e, v: string) => handleTabChange(v)}>
+            {visibleTabs.map((t) => (
+              <Tab key={t.module} value={t.module} label={t.label} />
+            ))}
+          </Tabs>
+        )
       }
       table={
         <AppTable
