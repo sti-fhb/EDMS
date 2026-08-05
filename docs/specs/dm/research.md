@@ -59,7 +59,7 @@
 ## §7 永久保留與不可竄改（版本 / 變更歷程 / 角色異動）
 
 - **Decision**: 所有版本（`DM_DOC_VERSION`）以軟刪除永久保留（DELETED=0、不實體刪除）；`DM_CHANGE_LOG`（公開發布 / 廢止）與 `DM_USER_ROLE_LOG`（角色異動）為 **append-only**、永久保留、不提供修改 / 刪除。
-- **Rationale**: spec Clarify「永久保留」；「至少 1 年」為法規下限，永久保留自然滿足。角色異動之完整歷史寫入 `DM_USER_ROLE_LOG`，但**不提供 DM 查詢 UI**（僅 DM09 顯示「最後異動」欄、完整歷史供 IT / 稽核由 DB 查）。
+- **Rationale**: spec Clarify「永久保留」；「至少 1 年」為法規下限，永久保留自然滿足。角色異動之完整歷史寫入 `DM_USER_ROLE_LOG`，但**不提供 DM 查詢 UI**（僅平台 DP 後台權限管理清單顯示「最後異動」欄、完整歷史供 IT / 稽核由 DB 查）。
 - **Alternatives**: 滿 1 年清除（否決，spec Clarify）。
 
 ## §8 SSO 與共用 `DP_USER`

@@ -11,7 +11,7 @@
 
 DM 自身持有 14 張業務表：共用 `DP_USER`（平台 DP 定義、與 ET 共用）、角色 `DM_USER_ROLE` + 異動紀錄 `DM_USER_ROLE_LOG`、受控資料 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`、閱覽者可見對象授權 `DM_USER_TAG`、文件 `DM_DOCUMENT` + 版本 `DM_DOC_VERSION` + 標籤關聯 `DM_DOC_TAG`、閱讀紀錄 `DM_DOC_READ`、送審 `DM_REVIEW`、公開變更歷程 `DM_CHANGE_LOG`。核心作業對應 13 個 User Story（UCDM01~13）；另有排程 `SCHDM001`（閱讀 KPI 週報與未讀提醒）。
 
-> **系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08 集中化）**：DM 不自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`（DM 不建這三張表之 migration）。改用平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`）、`DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務）；`SCHDM001` 於平台 `DP_SCHEDULE` 註冊、由平台引擎執行、`DP_SCHEDULE_LOG` 記錄（job handler 由 DM 提供）。維護 / 編輯 UI 仍留 DM09。發信引擎調校參數屬平台級 `DP_`。
+> **系統參數 / 通知範本 / 寄件佇列 / 排程集中於平台 DP（2026-07-08 集中化）**：DM 不自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`（DM 不建這三張表之 migration）。改用平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`）、`DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務）；`SCHDM001` 於平台 `DP_SCHEDULE` 註冊、由平台引擎執行、`DP_SCHEDULE_LOG` 記錄（job handler 由 DM 提供）。**參數 / 範本 / 權限之維護 / 編輯 UI 於平台 DP 系統管理後台**（按模組過濾，DM 不自設系統設定畫面，原 DM09 已作廢）。發信引擎調校參數屬平台級 `DP_`。
 
 ---
 
@@ -113,8 +113,8 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 
 | 群組 | User Story | 對應作業 | 說明 |
 |------|------------|---------|------|
-| 登入與帳號 | US2 | 登入頁 | SSO 共用 `DP_USER`、註冊授閱覽者、忘記密碼 |
-| 系統設定 | US1 | DM09 | 分類 / func_name / 標籤 / 催辦門檻 / 角色指派（含異動紀錄）/ 通知範本 |
+| 登入與帳號 | US2 | 平台 DP 提供 | 登入 / 註冊 / 忘記密碼由平台 DP（UCDP001–003、SSO 共用 `DP_USER`）；**DM 僅存取閘**（無 DM 角色者拒絕進入，併入 Foundation） |
+| 系統設定 | US1 | 平台 DP 後台 | 分類 / func_name / 標籤 / 催辦門檻 / 角色指派 / 通知範本之**維護 UI 於平台 DP 後台**（按模組過濾）；DM 做業務規則 + 轉接層模組端回呼（`DM_USER_ROLE` / `DM_USER_TAG` 判定）+ 種子（`DP_PARAM(DM_)` / `DP_NOTIFY_TEMPLATE(MODULE=DM)`）|
 | 文件庫與檢索 | US3 | DM01 | 多條件 AND、僅顯示已發布、func_name 下拉檢索 |
 | 文件詳細頁 | US4 | DM02 | 預覽 / 下載規則、版本歷程、read-only 模式 |
 | 文件新增與編輯 | US5 | DM03 | DOC_ID 配號、身份欄唯讀、func_name 唯一檢核、單檔上傳、審核者排除自己 |
@@ -126,7 +126,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 |------|------------|---------|------|
 | 系統儀表板 | US7 | DM00 | 各類型總數 + 近 30 天公告 |
 | 文件廢止申請 | US8 | DM02 | 整份廢止、廢止待簽核仍對外、撤回 |
-| 個人專區 | US9 | DM07 | 個人資料維護 / 草稿 / 撤回送審 / 我的文件動態 / 可見性 |
+| 個人專區 | US9 | DM07 | 草稿匣 / 撤回送審 / 我的文件動態 / 入口可見性（僅編輯者 / 審核者；個人資料維護為另一功能由平台 DP 提供）|
 | 已廢止文件查詢 | US10 | DM06 | 管理者稽核查閱、CSV、read-only、URL 擋 |
 
 ### 第三階段（P3 跨文件稽核 / 跨模組）
@@ -145,7 +145,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 | 設計決策 | 理由 | 備註 |
 |----------|------|------|
 | 標準欄位省略 SITE / HOSPITAL | 對齊平台模組 DP，平台無站點 / 院區概念，FK 無對應來源 | 與 CLAUDE.md 標準欄位之差異已於 research §1 載明；CREATED_USER 指向共用 `DP_USER` |
-| 角色異動另立 append-only log（DM_USER_ROLE_LOG）| 滿足「完整異動歷史永久保留」；`DM_USER_ROLE_LOG` 為 DM 業務層角色指派歷史，資安類事件另對齊寫入平台共用稽核表 `DP_AUDIT_LOG` | 不提供查詢 UI；DM09 僅顯示「最後異動」欄 |
+| 角色異動另立 append-only log（DM_USER_ROLE_LOG）| 滿足「完整異動歷史永久保留」；`DM_USER_ROLE_LOG` 為 DM 業務層角色指派歷史，資安類事件另對齊寫入平台共用稽核表 `DP_AUDIT_LOG` | 不提供查詢 UI；平台 DP 後台權限管理清單僅顯示「最後異動」欄 |
 | 文件 / 版本雙層 STATUS | 支援「已發布 + 新版本送審中」並存之狀態表達 | 文件層 STATUS + 版本層 STATUS；單一送審週期由 DM_REVIEW 約束 |
 | func_name 部分唯一索引 | DM01 依作業項目檢索須唯一手冊；DB 約束防並發雙發布 | 草稿 / 已廢止不佔用；應用層另給友善訊息 |
 | 檔案存檔案系統而非 DB | 遵循型別規範、利備份效能 | DB 存 metadata + 路徑；單版本單檔 |

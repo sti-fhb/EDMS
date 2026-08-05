@@ -21,7 +21,7 @@
     .navbar-tsbms {
       background: linear-gradient(135deg, var(--tsbms-green-dark), var(--tsbms-green));
       height: var(--navbar-height); min-height: var(--navbar-height);
-      padding: 0 1rem; flex-wrap: nowrap; overflow: hidden;
+      padding: 0 1rem; flex-wrap: nowrap;
     }
     .navbar-tsbms .navbar-brand { color: #fff; font-weight: bold; font-size: 1.1rem; padding: 0; white-space: nowrap; }
     .user-badge { color: rgba(255,255,255,0.9); font-size: 0.82rem; white-space: nowrap; }
@@ -318,6 +318,7 @@
     <div class="module-items">
       <a class="nav-link" href="#" data-screen="dm-library"><i class="bi bi-collection"></i><span class="link-text">文件庫</span></a>
       <a class="nav-link" href="#" data-screen="dm-review"><i class="bi bi-check2-square"></i><span class="link-text">簽核中心</span></a>
+      <a class="nav-link" href="#" data-screen="dm-personal"><i class="bi bi-person-workspace"></i><span class="link-text">個人專區 <small class="text-muted">(編輯者/審核者)</small></span></a>
       <a class="nav-link" href="#" data-screen="dm-obsolete"><i class="bi bi-archive"></i><span class="link-text">已廢止文件查詢 <small class="text-muted">(admin)</small></span></a>
       <a class="nav-link" href="#" data-screen="dm-audit"><i class="bi bi-search"></i><span class="link-text">文件變更歷程查詢 <small class="text-muted">(admin)</small></span></a>
       <a class="nav-link" href="#" data-screen="dm-kpi"><i class="bi bi-bar-chart-line"></i><span class="link-text">閱讀統計 KPI <small class="text-muted">(admin)</small></span></a>
@@ -1480,6 +1481,147 @@
   </details>
 </div>
 
+<!-- ==================== DM07 個人專區（我的文件動態 + 草稿匣 + 撤回送審）==================== -->
+<div class="screen" id="dm-personal">
+  <div class="screen-header">
+    <div class="screen-title"><i class="bi bi-person-workspace me-2"></i>個人專區</div>
+    <div class="screen-meta">dm/personal.jsp (DM07)</div>
+  </div>
+
+  <p class="text-muted fst-italic small">
+    💡 個人專區為編輯者 / 審核者之個人工作區，僅具此二角色者於左側可見（純閱覽者 / 純管理者不顯示此入口）。
+    「個人資料維護」（姓名 / Email / 密碼）為另一功能、由平台 DP 提供，入口在<strong>右上使用者選單</strong>，不在本頁。
+  </p>
+
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#personal-activity"><i class="bi bi-activity me-1"></i>我的文件動態</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#personal-drafts"><i class="bi bi-file-earmark-text me-1"></i>草稿匣 <span class="badge bg-secondary ms-1">3</span></a></li>
+  </ul>
+
+  <div class="tab-content">
+
+    <!-- ===== 我的文件動態 ===== -->
+    <div class="tab-pane fade show active" id="personal-activity">
+      <ul class="nav nav-pills mb-3" role="tablist">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="pill" href="#activity-author"><i class="bi bi-pencil me-1"></i>撰寫者視角</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#activity-reviewer"><i class="bi bi-check2-square me-1"></i>審核者視角</a></li>
+      </ul>
+      <div class="tab-content">
+        <!-- 撰寫者視角 -->
+        <div class="tab-pane fade show active" id="activity-author">
+          <div class="wf-card">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>近 30 天動態（撰寫者視角）</strong>
+              <small class="text-muted">送審中項目可撤回送審</small>
+            </div>
+            <table class="table table-hover wf-table mb-0">
+              <thead><tr><th>文件名稱</th><th>類型</th><th>狀態</th><th>指定審核者</th><th>時間</th><th style="width:110px;">操作</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>領血確認標準作業程序</strong></td>
+                  <td><span class="badge bg-primary">新版本</span></td>
+                  <td><span class="badge bg-warning text-dark">送審中（停留 9 天 ⚠️）</span></td>
+                  <td>王審核</td>
+                  <td>2026-05-10 14:20</td>
+                  <td><button class="btn btn-sm btn-outline-danger" onclick="withdrawSubmit('領血確認標準作業程序')">撤回送審</button></td>
+                </tr>
+                <tr>
+                  <td><strong>血品保存操作手冊</strong></td>
+                  <td><span class="badge bg-success">新增</span></td>
+                  <td><span class="badge bg-success">核准發布</span></td>
+                  <td>王審核</td>
+                  <td>2026-05-08 09:15</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><strong>捐血者健康評估準則</strong></td>
+                  <td><span class="badge bg-primary">新版本</span></td>
+                  <td><span class="badge bg-danger">退回待修改</span></td>
+                  <td>李審核</td>
+                  <td>2026-05-06 16:40</td>
+                  <td>—</td>
+                </tr>
+                <tr>
+                  <td><strong>過期血袋處理程序</strong></td>
+                  <td><span class="badge bg-dark">廢止</span></td>
+                  <td><span class="badge bg-secondary">廢止待簽核</span></td>
+                  <td>王審核</td>
+                  <td>2026-05-05 11:00</td>
+                  <td><button class="btn btn-sm btn-outline-danger" onclick="withdrawSubmit('過期血袋處理程序')">撤回送審</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- 審核者視角 -->
+        <div class="tab-pane fade" id="activity-reviewer">
+          <div class="wf-card">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>近 30 天動態（審核者視角）</strong>
+              <small class="text-muted">待處理項目至「簽核中心」處理</small>
+            </div>
+            <table class="table table-hover wf-table mb-0">
+              <thead><tr><th>文件名稱</th><th>類型</th><th>狀態</th><th>送審者</th><th>時間</th></tr></thead>
+              <tbody>
+                <tr><td><strong>輸血反應通報流程</strong></td><td><span class="badge bg-success">新增</span></td><td><span class="badge bg-warning text-dark">待處理</span></td><td>陳大華</td><td>2026-05-11 10:05</td></tr>
+                <tr><td><strong>血液庫存盤點作業</strong></td><td><span class="badge bg-primary">新版本</span></td><td><span class="badge bg-danger">催辦中（12 天 ⚠️）</span></td><td>林小美</td><td>2026-04-30 08:30</td></tr>
+                <tr><td><strong>領血確認標準作業程序</strong></td><td><span class="badge bg-primary">新版本</span></td><td><span class="badge bg-secondary">已被撰寫者撤回</span></td><td>陳大華</td><td>2026-05-10 14:20</td></tr>
+                <tr><td><strong>血品保存操作手冊</strong></td><td><span class="badge bg-success">新增</span></td><td><span class="badge bg-success">已處理（核准）</span></td><td>陳大華</td><td>2026-05-08 09:15</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 草稿匣 ===== -->
+    <div class="tab-pane fade" id="personal-drafts">
+      <div class="wf-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>草稿匣</strong>
+          <small class="text-muted">未送審 / 被退回待修改 / 已撤回送審</small>
+        </div>
+        <table class="table table-hover wf-table mb-0">
+          <thead><tr><th>文件名稱</th><th>分類</th><th>草稿類型</th><th>最後編輯</th><th style="width:170px;">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>血液成分分離作業程序</strong></td>
+              <td><span class="doc-category-pill cat-sop">SOP</span></td>
+              <td><span class="badge bg-light text-dark">未送審草稿</span></td>
+              <td>2026-05-12 15:30</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="goScreen('dm-upload')">繼續編輯</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteDraft('血液成分分離作業程序')">刪除</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>捐血者健康評估準則</strong></td>
+              <td><span class="doc-category-pill cat-sop">SOP</span></td>
+              <td><span class="badge bg-danger">被退回待修改</span></td>
+              <td>2026-05-06 16:45</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="goScreen('dm-upload')">修改</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteDraft('捐血者健康評估準則')">刪除</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>領血確認標準作業程序</strong></td>
+              <td><span class="doc-category-pill cat-sop">SOP</span></td>
+              <td><span class="badge bg-info text-dark">已撤回送審</span></td>
+              <td>2026-05-10 14:25</td>
+              <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="goScreen('dm-upload')">繼續編輯</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteDraft('領血確認標準作業程序')">刪除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ==================== DM06 已廢止文件查詢 ==================== -->
 <div class="screen" id="dm-obsolete">
   <div class="screen-header">
@@ -2274,8 +2416,20 @@ function _doUploadCancel() {
 function saveDraft() {
   showToast('儲存成功');
   _uploadFormDirty = false;
-  // 0.6 秒讓 toast 顯示後跳回文件庫（個人專區/草稿匣已移至平台 DP）
-  setTimeout(function() { goScreen('dm-library'); }, 600);
+  // 0.6 秒讓 toast 顯示後跳至個人專區「草稿匣」（草稿為 DM 業務、置於個人專區）
+  setTimeout(function() { goScreen('dm-personal'); }, 600);
+}
+
+function withdrawSubmit(name) {
+  if (confirm('確定撤回「' + name + '」的送審？撤回後文件回到草稿，可重新編輯與改選審核者再送。')) {
+    showToast('已撤回送審，已通知原指派審核者');
+  }
+}
+
+function deleteDraft(name) {
+  if (confirm('確定刪除草稿「' + name + '」？刪除後不可復原（僅影響草稿、不影響已發布版本）。')) {
+    showToast('草稿已刪除');
+  }
 }
 
 function cancelEdit() {
