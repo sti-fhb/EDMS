@@ -36,7 +36,7 @@
 - **FR-003**: 系統 MUST 維護 func_name 受控清單（對應主系統作業功能代號），供 DM03 系統操作手冊類文件單選指定、DM01 依作業項目檢索；func_name 不可自由輸入
 - **FR-004**: 系統 MUST 提供自動催辦門檻設定，值域 **1–30 天（預設 7）**、單一全域；超出值域時阻擋並提示；值存平台 `DP_PARAM.DM_REMIND_THRESHOLD`（前綴 `DM_`），維護 UI 於平台 DP 系統管理後台（按模組過濾，見〈spec.md 跨模組共用規則〉集中化）
 - **FR-005**: 系統 MUST 於權限管理列出共用 `DP_USER` 之使用者，對每人提供 4 角色（管理者 / 編輯者 / 審核者 / 閱覽者）**複選**勾選（互不互斥、權限取聯集）；勾選 / 取消**即時生效**並**寫入異動紀錄**（記異動者 / 異動時間）；清單顯示「最後異動」欄；DM **不另設**權限變更查詢介面，完整歷史永久保留於 DB 供稽核
-- **FR-006**: 系統 MUST 阻擋當前登入管理者停用**自己**之管理者角色；管理者間可互相停用，系統 MUST NOT 檢核「至少保留 1 名管理者」（若意外造成 0 名，由 IT 經 DB 恢復）
+- **FR-006**: 系統 MUST 阻擋當前登入管理者停用**自己**之管理者角色（自我保護判定在 DM 端 `assign_roles_audiences` 轉接層回呼，raise `AppError` **`DM_ROLE_001`**；DP 端統一映射為 **`DP-MSG-ROLES-001`** 呈現，見 [../dp/contracts/module-callbacks.md](../dp/contracts/module-callbacks.md) §3 與平台 spec_us7 FR-06）；管理者間可互相停用，系統 MUST NOT 檢核「至少保留 1 名管理者」（若意外造成 0 名，由 IT 經 DB 恢復）
 - **FR-007**: 系統 MUST 提供 9 項內建通知範本事件（文件送審 / 退回、**文件發布通知**、廢止申請送審 / 核准 / 退回、**KPI 週報**、**未讀提醒**、自動催辦），主旨 / 內文可編輯、可啟用 / 停用（停用後不發該 Email，系統內訊息仍顯示）；事件固定**不可新增**；自動催辦僅以系統內訊息發送並含門檻天數設定；**「KPI 週報」「未讀提醒」另含「每週執行時間」（星期＋時間，兩者共用，寫 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`，預設週一 10:00）設定**；**「文件發布通知」（發撰寫者+相符閱覽者）「KPI 週報」「未讀提醒」皆僅 Email、非同步批次寄送**（詳見 [spec_us6.md](spec_us6.md) FR-008、[spec_us13.md](spec_us13.md)）。範本本體集中存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`），DM 管理者只編輯 MODULE=DM 的列、**編輯 UI 於平台 DP 系統管理後台「通知範本」**（按模組過濾，集中化見〈spec.md 跨模組共用規則〉）
 - **FR-008**: DM 角色（含閱覽者）MUST 一律由管理者於權限管理開通，系統 MUST NOT 自動授予（2026-07-08 平台釐清，作廢原「首次登入自動授予閱覽者」；新帳號預設僅 ET 學員，由平台 DP 於帳號建立時授予）；離職 / 調職由共用 `DP_USER` 之管理介面停用帳號，DM 不另處理
 - **FR-009**: 系統 MUST 於權限管理提供「閱覽者可見對象授權」維護（使用者 × 「可見對象/單位」標籤，多選）；勾選 / 取消**即時生效**並**寫入異動紀錄**；未被授予任何可見對象之閱覽者僅能看到掛「全體」之文件；此授權即〈標籤式可見性〉之比對基準（見 [spec_us3.md](spec_us3.md)）
@@ -51,7 +51,7 @@
 | DM-MSG-DM09-003 | 提示 | 已停用；既有文件之標記不受影響，新增 / 搜尋下拉將不再顯示此項 | FR-001 停用分類 / func_name / 標籤 |
 | DM-MSG-DM09-004 | 錯誤 | 催辦門檻須介於 1–30 天 | FR-004 值域超出 |
 | DM-MSG-DM09-005 | 成功 | 角色已更新並即時生效 | FR-005 角色指派 |
-| DM-MSG-DM09-006 | 錯誤 | 無法停用自己之管理者角色 | FR-006 自我保護 |
+| DM-MSG-DM09-006 | 錯誤 | 無法停用自己之管理者角色 | FR-006 自我保護（DM 端 error_code `DM_ROLE_001`；維護 UI 在 DP 後台，實際由 DP 統一顯示 `DP-MSG-ROLES-001`）|
 | DM-MSG-DM09-007 | 成功 | 通知範本已儲存 | FR-007 範本編輯 |
 | DM-MSG-DM09-008 | 成功 | 可見對象授權已更新並即時生效 | FR-009 閱覽者可見對象授權 |
 | DM-MSG-DM09-009 | 提示 | 已停用此可見對象；既有文件與授權之可見性不變，僅停止後續指派（受影響：N 份文件 / M 位閱覽者）| FR-010 可見對象 soft-retire |
@@ -60,3 +60,4 @@
 
 - 使用者主檔（`DP_USER`，平台模組 DP 定義）由 [spec_us2.md](spec_us2.md) US2 註冊或系統初始化寫入；第一位管理者由 IT 經 DB 寫入
 - 分類碼 / func_name / 標籤為 DOC_ID 與 [spec_us5.md](spec_us5.md)（新增編輯）、[spec_us3.md](spec_us3.md)（檢索）之前置受控資料
+- **權限 / 可見對象轉接層契約**：DM 端 MUST 實作 [../dp/contracts/module-callbacks.md](../dp/contracts/module-callbacks.md) §3 之 `get_users_roles_audiences(user_ids)` / `assign_roles_audiences(user_id, roles, audiences, operator_id)`（回 `DmRoleAudienceView`：roles ⊂ {ADMIN/EDITOR/REVIEWER/VIEWER}、audiences＝`DP_PARAM(DM_)` 之 PARAM_KEY 集合、last_modified_*）+ §4 `has_any_role`；供平台 DP dp-roles（US7）呼叫，維護 UI 在 DP 後台。**可見對象值 MUST 屬 `DP_PARAM` 啟用中清單；指派異動由 DM 於同交易寫 SRVDP003 稽核（`MODULE=DM`）**

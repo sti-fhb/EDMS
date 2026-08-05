@@ -103,7 +103,7 @@
 - **集中化裁剪**：不建 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`；參數 / 範本 / outbox / 排程集中於平台 DP（見上）。
 - **省略 SITE / HOSPITAL 欄位**（對齊平台 DP，research §1）；標準欄位依平台 BaseModel 慣例。
 - **存取閘 = US2 之全部 DM 工作**：登入 / 註冊 / 忘記密碼由 DP 提供，DM 不實作；「首次登入自動授予閱覽者」已作廢——新帳號預設僅 ET 學員，DM 角色一律由管理者於 DP 後台權限管理開通。
-- **跨模組種子落點**（DM 範本 / 參數寫 DP 表）與 **US1 轉接層契約**（dp-roles 呼叫 DM `get_users_roles_DM` / `assign_roles_DM` 之介面、DETAIL_LOCK 碼鎖定 / soft-retire 對應）留待對應 issue 之 `/sti-plan` 與 SA 確認。
+- **跨模組種子落點**（DM 範本 / 參數寫 DP 表）與 **US1 轉接層契約落地**（DM 端實作 `../dp/contracts/module-callbacks.md` §3 之 `get_users_roles_audiences` / `assign_roles_audiences` + `DmRoleAudienceView` + `has_any_role`；DETAIL_LOCK 碼鎖定對應、AUDIENCE soft-retire 跨模組落點）留待對應 issue 之 `/sti-plan` 與 SA 確認。
 - **檔案儲存**：每版本單檔、PDF / 圖片可預覽、Office 僅下載；上限 / 格式由 `DP_PARAM.DM_FILE_MAX_MB` / `DM_FILE_TYPES` 控制。
 
 ### 相關文件
