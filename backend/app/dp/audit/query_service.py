@@ -36,6 +36,21 @@ FUNC_OPTIONS: list[dict[str, str]] = [{"value": code, "label": label} for code, 
 # 對象解析失敗時，從稽核列自身 before/after JSON 撈可讀名稱之鍵（優先序）。
 _TARGET_NAME_KEYS = ("user_name", "template_name", "param_name", "name", "email")
 
+# 操作類別 / 執行結果 → 中文，僅供 CSV 匯出呈現（與畫面一致）；API 收發一律維持英文碼。未知碼原樣輸出。
+# ⚠️ 同一份對照另存於前端 frontend/src/dp/audit/auditLabels.ts。新增或修改列舉值時兩邊必須同步，
+# 否則畫面與匯出檔會一邊中文、一邊原碼（未知碼 fallback 不報錯，只會靜默不一致）。
+_ACTION_LABELS: dict[str, str] = {
+    "LOGIN": "登入",
+    "LOGOUT": "登出",
+    "CREATE": "新增",
+    "UPDATE": "修改",
+    "DELETE": "刪除",
+}
+_RESULT_LABELS: dict[str, str] = {"SUCCESS": "成功", "FAIL": "失敗"}
+
+# CSV 欄位 → 中文對照表（_csv_cell 依此決定是否轉換）。
+_CSV_CODE_LABELS: dict[str, dict[str, str]] = {"action_type": _ACTION_LABELS, "result": _RESULT_LABELS}
+
 
 def _func_label(func_name: str) -> str:
     return _FUNC_LABELS.get(func_name, func_name)
@@ -95,11 +110,14 @@ def _sanitize_csv_cell(text: str) -> str:
 
 
 def _csv_cell(resp: AuditLogResponse, field: str) -> str:
-    """取 CSV 欄位值並套注入防護（操作者帳號取 email、退 operator_id）。"""
+    """取 CSV 欄位值並套注入防護（操作者帳號取 email、退 operator_id；代碼欄轉中文）。"""
     if field == "operator_account":
         value: object = resp.operator_email or resp.operator_id
     else:
         value = getattr(resp, field)
+    labels = _CSV_CODE_LABELS.get(field)
+    if labels is not None and isinstance(value, str):
+        value = labels.get(value, value)
     return _sanitize_csv_cell(_format_value(field, value))
 
 

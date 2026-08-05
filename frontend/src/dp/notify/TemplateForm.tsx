@@ -32,7 +32,7 @@ export function TemplateForm({ editingRecord, saving, onSave, onCancel }: Templa
 
   return (
     <FormCard
-      title={`編輯範本 — ${editingRecord.template_code} ${editingRecord.template_name}`}
+      title={`編輯範本 — ${editingRecord.template_name}`}
       onSave={handleSave}
       onCancel={onCancel}
       saving={saving}

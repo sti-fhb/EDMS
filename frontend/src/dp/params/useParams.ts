@@ -25,21 +25,37 @@ export function useParams() {
   }, [qc])
 
   /** 更新明細（改值 / 改名 / 說明）；平台級先跳影響全平台警告（PARAMS-005）後才送出。
-   * onCancel：平台級警告被取消時回呼（供頁面還原未儲存的欄位）。 */
+   *
+   * callbacks.onCancel：平台級警告被取消時回呼（供頁面還原未儲存的欄位）。
+   * callbacks.onSaved：**確實儲存成功後**才回呼（供 VALUE 型收起編輯面板）。平台級的 `confirm`
+   * 是開對話框即同步返回，呼叫端無法以 await / then 判斷成敗，故成功訊號一律由此回呼傳出。
+   */
   const saveDetail = useCallback(
-    async (master: ParamMaster, paramKey: string, payload: DetailUpdatePayload, onCancel?: () => void) => {
+    async (
+      master: ParamMaster,
+      paramKey: string,
+      payload: DetailUpdatePayload,
+      callbacks?: { onCancel?: () => void; onSaved?: () => void },
+    ) => {
       const doSave = async () => {
         try {
           await paramsApi.updateDetail(master.param_id, paramKey, payload)
           message.success(_SAVED_MSG)
           invalidate()
+          callbacks?.onSaved?.()
         } catch (err) {
           message.error(toApiError(err).errorMessage)
           throw err // rethrow：讓 confirm 對話框保留供重試
         }
       }
       if (master.scope === "platform") {
-        confirm({ title: "變更平台級參數", content: _PLATFORM_WARN, okText: "確定儲存", onOk: doSave, onCancel })
+        confirm({
+          title: "變更平台級參數",
+          content: _PLATFORM_WARN,
+          okText: "確定儲存",
+          onOk: doSave,
+          onCancel: callbacks?.onCancel,
+        })
       } else {
         await doSave()
       }
