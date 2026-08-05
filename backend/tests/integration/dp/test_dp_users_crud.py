@@ -4,6 +4,7 @@
 建立 / 重寄邀請注入假 NotifyService（不實際寫 outbox），只驗「有無寄、寄哪個範本」。
 """
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -14,7 +15,9 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
+from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.repository import AuthRepository
+from app.dp.user.token import hash_token
 from app.dp.users.models import DpUser
 from app.dp.users.schemas import UserCreate, UserUpdate
 from app.dp.users.service import UsersService
@@ -64,6 +67,12 @@ async def _count_audit(db, target_id, action_type=None):
     return (await db.execute(stmt)).scalar_one()
 
 
+async def _latest_audit(db, target_id):
+    """取該 target 最新一筆稽核列（before/after 為 JSON 字串，呼叫端自行 json.loads）。"""
+    stmt = select(DpAuditLog).where(DpAuditLog.target_id == target_id).order_by(DpAuditLog.log_id.desc()).limit(1)
+    return (await db.execute(stmt)).scalars().first()
+
+
 # ---- 建立邀請（AC2）----
 
 
@@ -98,12 +107,107 @@ async def test_create_invite_duplicate_email_in_user_rejected(db):
     assert exc.value.error_code == "DP_USER_007"
 
 
-async def test_create_invite_duplicate_email_in_pending_rejected(db):
+async def test_create_invite_on_active_pending_returns_409_guide_resend(db):
+    """未逾期待啟用邀請重複建立 → 409 DP_USER_010（引導改用重寄，#111）；與『已啟用』的 007 區分。"""
     svc = _svc()
     await svc.create_user(db, data=UserCreate(email="p@edms.local", user_name="a"), operator=_OP)
     with pytest.raises(AppError) as exc:
         await svc.create_user(db, data=UserCreate(email="p@edms.local", user_name="b"), operator=_OP)
+    assert exc.value.status_code == 409
+    assert exc.value.error_code == "DP_USER_010"
+
+
+async def test_create_invite_on_expired_pending_reinvites(db):
+    """已逾期待啟用邀請重複建立 ＝ 重新邀請（#111）：沿用原 res_id、換新 token/效期、用新姓名、重寄、稽核。"""
+    notify = _FakeNotify()
+    svc = _svc(notify)
+    # 塞一筆已逾期的 ADMIN_INVITE pending
+    await AuthRepository().create_pending_registration(
+        db,
+        token_hash="oldhash",
+        email="exp@edms.local",
+        user_name="舊名",
+        pwd_hash=None,
+        expires_date=utcnow() - timedelta(minutes=1),
+        now=utcnow(),
+        kind="ADMIN_INVITE",
+        res_id="oldres1",
+        operator_id="admin01",
+    )
+
+    await svc.create_user(db, data=UserCreate(email="exp@edms.local", user_name="新名"), operator=_OP)
+
+    pending = await AuthRepository().get_pending_by_email(db, "exp@edms.local")
+    assert pending is not None
+    assert pending.res_id == "oldres1"  # 沿用原 res_id（識別碼穩定）
+    assert pending.token_hash != "oldhash"  # 舊 token 已作廢
+    assert pending.expires_date > utcnow()  # 效期重設為未來
+    assert pending.user_name == "新名"  # 用本次請求的姓名
+    assert len(notify.calls) == 1  # 重寄 ACCOUNT_INVITE
+    assert notify.calls[0]["template_code"] == "ACCOUNT_INVITE"
+    # 稽核記 UPDATE（與同性質的 resend_invite 一致，非 CREATE），且帶被覆蓋掉的舊列快照
+    assert await _count_audit(db, "oldres1", "UPDATE") == 1
+    audit = await _latest_audit(db, "oldres1")
+    before, after = json.loads(audit.before_value), json.loads(audit.after_value)
+    assert before["user_name"] == "舊名"
+    assert before["kind"] == "ADMIN_INVITE"
+    assert after["user_name"] == "新名"
+    assert after["expires_date"] > before["expires_date"]  # ISO 字串可直接比大小
+
+
+@pytest.mark.parametrize("expired", [False, True], ids=["active", "expired"])
+async def test_create_invite_on_self_register_pending_rejected(db, expired):
+    """Email 正被**自助註冊**（SELF_REGISTER）佔用 → 409 DP_USER_007（#111）。
+
+    不可回 DP_USER_010：該列不在邀請清單、res_id 為 NULL，管理者根本無可重寄對象；
+    逾期亦不得走「重新邀請」覆蓋他人的自助註冊列（含其 pwd_hash）。
+    """
+    offset = -timedelta(minutes=1) if expired else timedelta(minutes=30)
+    await AuthRepository().create_pending_registration(
+        db,
+        token_hash="selfhash",
+        email="selfreg@edms.local",
+        user_name="自助",
+        pwd_hash="x",
+        expires_date=utcnow() + offset,
+        now=utcnow(),
+    )
+
+    with pytest.raises(AppError) as exc:
+        await _svc().create_user(db, data=UserCreate(email="selfreg@edms.local", user_name="管建"), operator=_OP)
+
+    assert exc.value.status_code == 409
     assert exc.value.error_code == "DP_USER_007"
+    # 他人的自助註冊列未被覆蓋
+    pending = await AuthRepository().get_pending_by_email(db, "selfreg@edms.local")
+    assert pending.kind == "SELF_REGISTER"
+    assert pending.token_hash == "selfhash"
+
+
+async def test_reinvite_invalidates_old_invite_token(db):
+    """重新邀請後**舊邀請連結必須失效**（#111）：以舊明文 token 啟用 → 400 DP_USER_003（查無此 token）。"""
+    svc = _svc()
+    await AuthRepository().create_pending_registration(
+        db,
+        token_hash=hash_token("old-plain-token"),
+        email="tok@edms.local",
+        user_name="舊名",
+        pwd_hash=None,
+        expires_date=utcnow() - timedelta(minutes=1),
+        now=utcnow(),
+        kind="ADMIN_INVITE",
+        res_id="oldres2",
+        operator_id="admin01",
+    )
+
+    await svc.create_user(db, data=UserCreate(email="tok@edms.local", user_name="新名"), operator=_OP)
+
+    with pytest.raises(AppError) as exc:
+        await ActivateAccountService().activate(
+            db, token="old-plain-token", new_password="Abcd1234", confirm_password="Abcd1234"
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.error_code == "DP_USER_003"
 
 
 # ---- 待啟用邀請清單 / 重寄 / 取消（AC10）----

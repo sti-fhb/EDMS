@@ -20,13 +20,18 @@ from app.dp.users.service import UsersService
 
 router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depends(get_jwt_payload)])
 
-_service = UsersService()
-
 # 邀請端點加固（#72）：對「單筆邀請（res_id）」重寄設冷卻，防對同一受邀信箱短時間反覆轟炸。
 # 刻意**不設操作者總量限流**（PO 決策）：管理者一次為多位不同使用者建帳號屬正常作業，
-# 不應以總量節流；「同帳號防轟炸」由「建立時同 Email 重複 → 409」＋本冷卻共同達成。
-# 冷卻秒數走 config（deploy 可調、免 migration，見 config.INVITE_RESEND_COOLDOWN_SEC）。
+# 不應以總量節流。冷卻秒數走 config（deploy 可調、免 migration，見 config.INVITE_RESEND_COOLDOWN_SEC）。
 _invite_resend_cooldown = VerifySendCooldown()
+
+# 「同帳號防轟炸」原由「建立時同 Email 重複 → 409」＋上述重寄冷卻共同達成；#111 讓**已逾期**的
+# 待啟用邀請改走「重新邀請」後，該 409 不再全擋，故建立端點補一組 Email 維度冷卻，套用同一冷卻
+# 秒數。冷卻**在服務層的重新邀請分支**才檢查（見 UsersService.create_user）：置於此處前置檢查會
+# 用 429 蓋掉「未逾期重複建立 → 409 DP_USER_010（請改用重寄）」的導引訊息。
+_invite_send_cooldown = VerifySendCooldown()
+
+_service = UsersService(invite_cooldown=_invite_send_cooldown)
 
 
 @router.get("", response_model=PagedResponse[UserResponse])
@@ -49,7 +54,9 @@ async def create_user(
 ) -> dict[str, str]:
     """管理者建立帳號＝寄邀請信（#67）：寫待邀請列 + 寄 ACCOUNT_INVITE 信；不建 DP_USER。
 
-    不設總量限流（#72 PO 決策）：批次為多人建帳號屬正常；對同一 Email 重複建立由服務層 409 擋下。
+    不設總量限流（#72 PO 決策）：批次為多人建帳號屬正常。同一 Email 重複建立由服務層分流：
+    已啟用 / 自助註冊中 → 409；未逾期邀請 → 409 引導改用重寄；已逾期邀請 → 重新邀請（#111，
+    受 Email 維度寄信冷卻約束，冷卻內回 429）。
     """
     await _service.create_user(db, data=data, operator=operator)
     return {"message": "邀請信已寄出，使用者需經連結設定密碼後啟用"}

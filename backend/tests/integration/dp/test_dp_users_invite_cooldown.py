@@ -1,11 +1,15 @@
-"""#72 邀請端點加固——router 接線整合測試。
+"""#72 / #111 邀請端點加固——router 接線整合測試。
 
 驗「接線」：
 - 建立邀請**不設操作者總量限流**（PO 決策）：同一操作者批次建立多筆不同 Email 皆放行。
 - 重寄邀請掛「res_id 維度」冷卻（冷卻中 429 帶 retry_after），防對同一受邀信箱反覆轟炸。
+- 對**已逾期**待啟用邀請重複建立 → 走「重新邀請」並回 202（#111 AC2）；該路徑受「Email 維度」
+  寄信冷卻約束，冷卻內回 429（#111 補洞：逾期後原本擋住重複建立的 409 已不再全擋）。
 冷卻邏輯本身的邊界（剩餘秒計算、視窗刷新）已由 tests/unit/test_core_cooldown.py 覆蓋，
 此處只驗 dp-users 端點有無掛對。
 """
+
+from datetime import timedelta
 
 import pytest
 
@@ -49,13 +53,18 @@ class _FakeNotify:
 
 @pytest.fixture(autouse=True)
 def _reset_invite_guards():
-    """隔離 module-level 冷卻單例狀態，並以假發信取代真 NotifyService（避免寫 outbox / 連 SMTP）。"""
+    """隔離 module-level 冷卻單例狀態，並以假發信取代真 NotifyService（避免寫 outbox / 連 SMTP）。
+
+    替身 service 仍注入 router 的 `_invite_send_cooldown` 單例，讓測試能觀察 / 清除建立端點的冷卻。
+    """
     orig_service = users_router._service
-    users_router._service = UsersService(notify=_FakeNotify())
+    users_router._service = UsersService(notify=_FakeNotify(), invite_cooldown=users_router._invite_send_cooldown)
     users_router._invite_resend_cooldown._last.clear()
+    users_router._invite_send_cooldown._last.clear()
     yield
     users_router._service = orig_service
     users_router._invite_resend_cooldown._last.clear()
+    users_router._invite_send_cooldown._last.clear()
 
 
 def _auth(user_id: str = "admin01") -> dict[str, str]:
@@ -112,3 +121,45 @@ async def test_resend_cooldown_is_per_invite(client, db):
     assert (await client.post(f"/api/dp/users/invites/{res_a}/resend", headers=headers)).status_code == 202
     assert (await client.post(f"/api/dp/users/invites/{res_a}/resend", headers=headers)).status_code == 429
     assert (await client.post(f"/api/dp/users/invites/{res_b}/resend", headers=headers)).status_code == 202
+
+
+# ---- #111 逾期待啟用邀請 → 重新邀請 ----
+
+
+async def _expire_invite(db, email: str) -> None:
+    """把某 Email 的待啟用邀請效期改為過去（模擬邀請連結逾期）。"""
+    pending = await AuthRepository().get_pending_by_email(db, email)
+    pending.expires_date = utcnow() - timedelta(minutes=1)
+    await db.flush()
+
+
+async def test_create_on_expired_pending_reinvites_with_202(client, db):
+    """已逾期待啟用邀請重複建立 → 走重新邀請並回 **202**（#111 AC2：等同 resend 效果）。"""
+    await _seed_operator(db, "admin01")
+    headers = _auth()
+    body = {"email": "exp@edms.local", "user_name": "初"}
+    assert (await client.post("/api/dp/users", json=body, headers=headers)).status_code == 202
+    await _expire_invite(db, "exp@edms.local")
+    # 邀請逾期意味「距上次寄出已過一個完整效期（預設 30 分 > 冷卻 10 分）」，故清狀態模擬時間經過
+    users_router._invite_send_cooldown._last.clear()
+
+    again = await client.post("/api/dp/users", json={"email": "exp@edms.local", "user_name": "再"}, headers=headers)
+
+    assert again.status_code == 202
+
+
+async def test_reinvite_within_send_cooldown_returns_429(client, db):
+    """重新邀請受「Email 維度」寄信冷卻約束（#111）：冷卻內 → 429 COMMON_429。
+
+    效期被調短到冷卻以下（TTL 誤設）時，此冷卻是唯一阻止對同一信箱反覆寄信的防線。
+    """
+    await _seed_operator(db, "admin01")
+    headers = _auth()
+    body = {"email": "bomb@edms.local", "user_name": "初"}
+    assert (await client.post("/api/dp/users", json=body, headers=headers)).status_code == 202
+    await _expire_invite(db, "bomb@edms.local")
+
+    again = await client.post("/api/dp/users", json={"email": "bomb@edms.local", "user_name": "再"}, headers=headers)
+
+    assert again.status_code == 429
+    assert again.json()["error_code"] == "COMMON_429"
