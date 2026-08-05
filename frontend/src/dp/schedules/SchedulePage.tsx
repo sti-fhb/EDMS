@@ -16,7 +16,7 @@ import type { AppColumn } from "../../components/AppTable"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { formatDateTime } from "../../utils/date"
-import { ScheduleEditDialog } from "./ScheduleEditDialog"
+import { ScheduleForm } from "./ScheduleForm"
 import { useSchedules } from "./useSchedules"
 import type { ScheduleLogRow, ScheduleRow } from "./schedulesService"
 
@@ -87,17 +87,19 @@ export function SchedulePage() {
         table={
           <AppTable columns={columns} data={s.jobs} rowKey="job_id" loading={s.jobsLoading} emptyText="尚無排程作業" />
         }
+        form={
+          s.formVisible &&
+          s.editingRecord && (
+            <ScheduleForm
+              key={s.editingRecord.job_id}
+              job={s.editingRecord}
+              saving={s.saving}
+              onSave={s.handleSave}
+              onCancel={s.closeForm}
+            />
+          )
+        }
       />
-
-      {s.formVisible && s.editingRecord && (
-        <ScheduleEditDialog
-          key={s.editingRecord.job_id}
-          job={s.editingRecord}
-          saving={s.saving}
-          onSave={s.handleSave}
-          onCancel={s.closeForm}
-        />
-      )}
 
       <Dialog open={s.selectedJob !== null} onClose={s.closeLogs} maxWidth="md" fullWidth>
         <DialogTitle>執行歷程 {s.selectedJob}</DialogTitle>

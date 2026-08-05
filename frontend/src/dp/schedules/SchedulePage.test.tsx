@@ -67,38 +67,67 @@ describe("SchedulePage 排程作業總覽（可編輯）", () => {
     expect(await screen.findByText("尚無排程執行紀錄")).toBeInTheDocument()
   })
 
-  it("點編輯 → 開 Dialog（JOB_ID 唯讀）→ 改名/cron/啟停儲存 → 成功提示", async () => {
+  it("點編輯 → 表格下方展開編輯卡片（非 Modal、JOB_ID 唯讀）→ 改名儲存 → 成功提示", async () => {
     const user = userEvent.setup()
     renderWithProviders(<SchedulePage />)
     await screen.findByText(/SCHDP001/)
 
     await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
-    const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Job ID")).toBeDisabled()
 
-    const name = within(dialog).getByLabelText(/作業名稱/)
+    // 展開式卡片而非 Dialog（對齊其他維護頁）
+    expect(await screen.findByText("編輯排程 — SCHDP001")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Job ID")).toBeDisabled()
+
+    const name = screen.getByLabelText(/作業名稱/)
     await user.clear(name)
     await user.type(name, "平台每日作業（改）")
-    await user.click(within(dialog).getByRole("button", { name: "儲存" }))
+    await user.click(screen.getByRole("button", { name: "儲存" }))
     const confirmDialog = await screen.findByRole("dialog", { name: "儲存排程變更" })
     await user.click(within(confirmDialog).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText("排程已更新")).toBeInTheDocument()
   })
 
-  it("排程按儲存 → 先跳二次確認；取消則不送出", async () => {
+  it("排程按儲存 → 先跳二次確認；取消則不送出、卡片保留", async () => {
     const user = userEvent.setup()
     renderWithProviders(<SchedulePage />)
     await screen.findByText(/SCHDP001/)
 
     await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
-    const editDialog = await screen.findByRole("dialog")
-    await user.click(within(editDialog).getByRole("button", { name: "儲存" }))
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
 
     const confirmDialog = await screen.findByRole("dialog", { name: "儲存排程變更" })
     await user.click(within(confirmDialog).getByRole("button", { name: "取消" }))
 
     await waitFor(() => expect(screen.queryByText("排程已更新")).not.toBeInTheDocument())
+    expect(screen.getByText("編輯排程 — SCHDP001")).toBeInTheDocument()
+  })
+
+  it("編輯卡片：作業名稱或 cron 清空 → Zod 擋下、不跳確認", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<SchedulePage />)
+    await screen.findByText(/SCHDP001/)
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    await user.clear(await screen.findByLabelText(/作業名稱/))
+    await user.clear(screen.getByLabelText(/Cron 表達式/))
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(await screen.findByText("請輸入作業名稱")).toBeInTheDocument()
+    expect(screen.getByText("請輸入 cron 表達式")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("編輯卡片按取消 → 收起，不留在畫面上", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<SchedulePage />)
+    await screen.findByText(/SCHDP001/)
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    await user.click(await screen.findByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(screen.queryByText("編輯排程 — SCHDP001")).not.toBeInTheDocument())
   })
 
   it("執行歷程結果顯示中文（成功 / 失敗 / 跳過），不顯示英文碼", async () => {
