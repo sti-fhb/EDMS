@@ -22,7 +22,7 @@
 - [ ] T009b [P] 建立資料庫 Migration：`DM_DOC_READ`（append-only 閱讀紀錄：DOC_ID/VERSION_ID + 標準 CREATED_USER/CREATED_DATE〔即下載者/下載時間，不另設 USER_ID/READ_TIME〕、省 UPDATED_*/DELETED、唯一約束 (DOC_ID,VERSION_ID,CREATED_USER)），參照 data-model.md
 - [ ] T010 [P] 建立資料庫 Migration：`DM_REVIEW`（送審週期：REVIEW_TYPE、ASSIGNED_REVIEWER、APPROVER、STATUS、SUBMIT/COMPLETE_DATE、REASON、**廢止附件 OBSOLETE_FILE_NAME/PATH/SIZE/MIME**），參照 data-model.md
 - [ ] T011 [P] 建立資料庫 Migration：`DM_CHANGE_LOG`（append-only 公開變更歷程：OPERATION、APPLICANT、APPROVER、NOTE），參照 data-model.md
-- [ ] T012 ~~建立 `DM_NOTIFY_TEMPLATE` / `DM_PARAM` Migration~~ **已廢除（2026-07-08 集中化）**：通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、系統參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`），由平台 DP 建 migration；DM 不建此二表。維護 / 編輯 UI 仍在 DM09。
+- [ ] T012 ~~建立 `DM_NOTIFY_TEMPLATE` / `DM_PARAM` Migration~~ **已廢除（2026-07-08 集中化）**：通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、系統參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`），由平台 DP 建 migration；DM 不建此二表。維護 / 編輯 UI 於平台 DP 系統管理後台（按模組過濾，DM 不自設系統設定畫面）。
 - [ ] T012a ~~建立 `DM_NOTIFY_QUEUE` Migration~~ **已廢除（2026-07-08 集中化）**：非同步寄送改用平台 outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務、傳 `template_code`）；DM 不建佇列表。
 - [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）為 DM 業務種子。**通知範本 / 參數種子改由平台 DP 建（2026-07-08 集中化）**：9 通知範本寫入 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`；`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM 參數寫入 `DP_PARAM`（前綴 `DM_`：`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`）；發信引擎調校參數（重試 / 限流 / 重試間隔）屬平台級 `MAIL` 參數組（`RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2；無失敗告警參數——失敗率由 IT 監控負責，2026-07-09 對齊平台），由 DP 種子建立。參照 data-model.md 代碼表與平台 DP 規格
 

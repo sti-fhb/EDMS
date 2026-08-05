@@ -24,8 +24,6 @@ interface ConfirmOptions {
   content: ReactNode
   okText?: string
   cancelText?: string
-  /** 危險操作（如停用）以警示色呈現確認鈕。 */
-  danger?: boolean
   /** 按下確認後執行；可為 async，執行期間確認鈕顯示 loading，成功後自動關閉。 */
   onOk: () => void | Promise<void>
   /** 取消 / 關閉對話框時執行（如還原未儲存的編輯）。 */
@@ -56,7 +54,8 @@ const INITIAL_SNACKBAR: SnackbarState = { open: false, text: "", severity: "info
  * 全域通知與確認對話框 Provider。
  *
  * 取代原生 `alert` / `confirm`：`message.*` 以 Snackbar 呈現短暫提示，
- * `confirm` 以 Dialog 呈現二次確認（支援 async onOk 與 danger 樣式）。
+ * `confirm` 以 Dialog 呈現二次確認（支援 async onOk）。確認鈕一律主色，
+ * 不分破壞性與否（#112 定案：停用 / 取消邀請亦用主色，與儲存類一致）。
  */
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [snackbar, setSnackbar] = useState<SnackbarState>(INITIAL_SNACKBAR)
@@ -133,7 +132,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           </Button>
           <Button
             onClick={handleConfirmOk}
-            color={confirmState?.danger ? "warning" : "primary"}
+            color="primary"
             variant="contained"
             disabled={confirmState?.loading}
           >

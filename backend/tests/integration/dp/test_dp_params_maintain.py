@@ -4,6 +4,8 @@
 前綴過濾（A-strict）以注入 module_admin_gate stub 驗證（ET/DM checker 正式版未就緒，見 SA Q1）。
 """
 
+import json
+
 import pytest
 from sqlalchemy import func, select
 
@@ -116,6 +118,51 @@ async def test_update_value_valid_audits_and_takes_effect(db, admin_gate):
     assert await _count_audit(db, "JWT.ACCESS_TTL_MIN", "UPDATE") == 1
     # SRVDP001 即時讀到新值（同交易、不快取）
     assert await ParamService().get_int_param(db, "JWT", "ACCESS_TTL_MIN", 15) == 10
+
+
+async def test_update_description_audits_before_after(db, admin_gate):
+    """#112：說明（DESCRIPTION）異動寫入稽核前後值——維護頁開放編輯說明之依據。
+
+    平台級 VALUE 明細之說明已由 migration abe854a7da34（#99）回填，故 before 非 None；
+    此處以「改動前實際值」比對，避免測試耦合特定種子文字。
+    """
+    admin_gate()
+    seeded = (
+        await db.execute(
+            select(DpParamDetail.description).where(
+                DpParamDetail.param_id == "JWT", DpParamDetail.param_key == "ACCESS_TTL_MIN"
+            )
+        )
+    ).scalar_one()
+    assert seeded is not None  # 前提：種子已回填說明
+
+    await ParamAdminService().update_detail(
+        db,
+        param_id="JWT",
+        param_key="ACCESS_TTL_MIN",
+        data=ParamDetailUpdate(param_value="10", description="閒置逾時自動登出"),
+        operator=_OP,
+    )
+    log = (
+        await db.execute(
+            select(DpAuditLog).where(DpAuditLog.target_id == "JWT.ACCESS_TTL_MIN", DpAuditLog.action_type == "UPDATE")
+        )
+    ).scalar_one()
+    assert json.loads(log.before_value)["description"] == seeded
+    assert json.loads(log.after_value)["description"] == "閒置逾時自動登出"
+
+
+async def test_update_description_cleared_to_null(db, admin_gate):
+    """#112：說明送 null＝清空（前端留白時之語意），回寫 NULL。"""
+    admin_gate()
+    svc = ParamAdminService()
+    await svc.update_detail(
+        db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(description="先填"), operator=_OP
+    )
+    result = await svc.update_detail(
+        db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(description=None), operator=_OP
+    )
+    assert result.description is None
 
 
 async def test_update_value_out_of_range_rejected(db, admin_gate):

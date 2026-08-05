@@ -13,7 +13,7 @@ function Harness({ onOk }: { onOk?: () => void | Promise<void> }) {
       <Button onClick={() => message.success("操作成功")}>觸發成功</Button>
       <Button
         onClick={() =>
-          confirm({ title: "確定停用", content: "停用後兩端同步失效", danger: true, onOk: onOk ?? (() => {}) })
+          confirm({ title: "確定停用", content: "停用後兩端同步失效", onOk: onOk ?? (() => {}) })
         }
       >
         觸發確認

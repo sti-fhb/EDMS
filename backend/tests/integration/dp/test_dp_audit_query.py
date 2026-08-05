@@ -221,7 +221,9 @@ async def test_export_csv_matches_query(db):
     assert lines[0].lstrip("﻿") == "操作時間,操作者帳號,功能,操作類別,執行結果,對象,來源 IP,異動前值,異動後值"
     # 標頭 + 1 筆 ET（module=ET 過濾）
     assert len(lines) == 2
-    assert "FAIL" in lines[1]
+    # 執行結果以中文輸出（#112，與畫面一致）
+    assert "失敗" in lines[1]
+    assert "FAIL" not in lines[1]
 
 
 async def test_csv_operator_account_is_email(db):

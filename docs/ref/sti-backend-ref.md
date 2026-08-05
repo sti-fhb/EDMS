@@ -32,3 +32,32 @@
 ## AuditLogService 用法
 
 跨模組經 `app.services.AuditLogService` 呼叫；`log_action(db, module, func_name, action_type, result, operator_id, target_id=, description=, source_ip=)`。`action_type` 用 `DP_PARAM.ACTION_TYPE` 代碼（LOGIN/LOGOUT/CREATE/UPDATE/DELETE）；停用啟用、鎖定解鎖、密碼重置等以 `func_name` + `description` 細分。自助註冊 / 驗證等無登入操作者之情境，`operator_id` 填該帳號本人 USER_ID（見 spec_us2 Clarifications）。
+
+## 稽核鏈完整性（`DP_AUDIT_LOG` ROW_HASH）
+
+`DP_AUDIT_LOG` 為 append-only、每列 `ROW_HASH` 為「本列內容 + 前列 ROW_HASH」之 SHA-256 鏈式雜湊（依 `LOG_ID` 遞增串接，`AuditLogService.log_action` 以 advisory lock 序列化寫入）。完整性由兩層保護：
+
+### 1. 應用層 append-only（已落地）
+
+`AuditLogRepository` 刻意不提供 update / delete；查詢端無寫入端點（改 / 刪一律 405）。
+
+### 2. DB 層 GRANT（部署 / ops 層，非 migration）
+
+應用連線 DB 帳號對本表**僅授予 `INSERT` / `SELECT`**、撤除 `UPDATE` / `DELETE`，使即便應用碼遭繞過亦無法竄改既有稽核（縱深防禦）。隨部署套用，例：
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON "DP_AUDIT_LOG" FROM <app_role>;
+GRANT INSERT, SELECT ON "DP_AUDIT_LOG" TO <app_role>;
+```
+
+> 不落 Alembic migration：migration 以 schema owner 執行 DDL，GRANT / REVOKE 屬部署環境之角色治理（見 issue #22）。
+
+### 3. 驗鏈工具 `verify_chain`（T052）
+
+`app.dp.audit.verify.verify_chain(db)` 唯讀走訪全表（`LOG_ID` ASC）重算並比對 `ROW_HASH`，回 `ChainVerifyResult`（`status`＝OK｜BROKEN｜EMPTY、`total`、首斷點 `LOG_ID` / `LOG_TIME` / `FUNC_NAME`）。任一列遭竄改（含攻擊者一併改該列自身 hash）都會在該列或下一列現形。
+
+ops 例行稽核 / CI 可直接執行（退出碼 0＝完好、1＝斷鏈）：
+
+```bash
+python -m app.dp.audit.verify
+```

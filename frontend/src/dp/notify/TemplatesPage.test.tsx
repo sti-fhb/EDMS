@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -14,12 +14,36 @@ async function gotoEtTab(user: ReturnType<typeof userEvent.setup>) {
 describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
   it("依 MODULE 分頁條列；DP 系統信之停用鈕禁用（不可停用；系統信身分由分頁標示、列上不重複標記）", async () => {
     renderWithProviders(<TemplatesPage />)
-    // DP 頁籤預設：見系統信 PWD_RESET
-    expect(await screen.findByText("PWD_RESET")).toBeInTheDocument()
+    // DP 頁籤預設：見系統信「密碼重設」
+    expect(await screen.findByText("密碼重設")).toBeInTheDocument()
     // 列上不再重複「系統信」標記（已在「系統信（共用）」分頁下）
     expect(screen.queryByText("系統信")).not.toBeInTheDocument()
     // 系統信「停用」鈕禁用
     expect(screen.getByRole("button", { name: "停用" })).toBeDisabled()
+  })
+
+  it("範本名稱只顯示中文，不含英文範本代碼", async () => {
+    renderWithProviders(<TemplatesPage />)
+
+    expect(await screen.findByText("密碼重設")).toBeInTheDocument()
+    expect(screen.queryByText("PWD_RESET")).not.toBeInTheDocument()
+  })
+
+  it("頁面不再顯示「通知範本按 MODULE 過濾…」提示區塊", async () => {
+    renderWithProviders(<TemplatesPage />)
+    await screen.findByText("密碼重設")
+
+    expect(screen.queryByText(/通知範本按 MODULE 過濾/)).not.toBeInTheDocument()
+  })
+
+  it("編輯表單標題只顯示中文名稱，不含英文範本代碼", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<TemplatesPage />)
+    await gotoEtTab(user)
+    await user.click(await screen.findByRole("button", { name: "編輯" }))
+
+    expect(await screen.findByText("編輯範本 — 課程邀請通知")).toBeInTheDocument()
+    expect(screen.queryByText(/COURSE_INVITE/)).not.toBeInTheDocument()
   })
 
   it("點編輯 → 展開表單改主旨儲存 → 成功提示", async () => {
@@ -32,6 +56,7 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     await user.clear(subject)
     await user.type(subject, "課程邀請（改）")
     await user.click(screen.getByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText("範本已更新")).toBeInTheDocument()
   })
@@ -62,8 +87,28 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     await gotoEtTab(user)
     await user.click(await screen.findByRole("button", { name: "編輯" }))
     await user.click(await screen.findByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
 
     expect(await screen.findByText("內容已被他人修改，請重新載入後再儲存")).toBeInTheDocument()
+  })
+
+  it("範本按儲存 → 先跳二次確認；取消則不送出、表單保留", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<TemplatesPage />)
+    await gotoEtTab(user)
+    await user.click(await screen.findByRole("button", { name: "編輯" }))
+
+    const subject = await screen.findByLabelText("主旨")
+    await user.clear(subject)
+    await user.type(subject, "課程邀請（改）")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("儲存範本變更")).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(screen.queryByText("範本已更新")).not.toBeInTheDocument())
+    expect(screen.getByLabelText("主旨")).toHaveValue("課程邀請（改）")
   })
 
   it("行內停用非系統信範本 → 即時儲存成功", async () => {

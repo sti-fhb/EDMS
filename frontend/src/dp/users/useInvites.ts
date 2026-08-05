@@ -47,7 +47,6 @@ export function useInvites(enabled: boolean) {
       confirm({
         title: "取消邀請",
         content: `確定取消「${row.user_name}」（${row.email}）的邀請？`,
-        danger: true,
         okText: "確定取消",
         onOk: async () => {
           try {

@@ -12,7 +12,7 @@ const _SAVED_MSG = "範本已更新"
 
 /** 通知範本維護頁狀態與操作（查詢 / 行內改管道啟停 / 編輯主旨內文；含樂觀鎖衝突處理）。 */
 export function useTemplates() {
-  const { message } = useNotification()
+  const { message, confirm } = useNotification()
   const qc = useQueryClient()
   const { formVisible, editingRecord, saving, setSaving, openEdit, closeForm } = useCrudForm<Template>()
 
@@ -57,17 +57,24 @@ export function useTemplates() {
   /** 行內啟用 / 停用（即時儲存；系統信由後端擋 + 前端 disable）。 */
   const toggleEnabled = useCallback((t: Template) => save(t, { is_enabled: !t.is_enabled }), [save])
 
-  /** 編輯表單儲存（主旨 / 內文）；成功後收起表單。 */
+  /** 編輯表單儲存（主旨 / 內文）：先跳二次確認（#112），成功後收起表單；取消則保留表單與輸入。 */
   const saveContent = useCallback(
     async (t: Template, content: { subject: string; body: string }) => {
-      setSaving(true)
-      try {
-        if (await save(t, content)) closeForm()
-      } finally {
-        setSaving(false)
-      }
+      confirm({
+        title: "儲存範本變更",
+        content: `確定儲存「${t.template_name}」的主旨與內文？儲存後發信即以新內容渲染。`,
+        okText: "確定儲存",
+        onOk: async () => {
+          setSaving(true)
+          try {
+            if (await save(t, content)) closeForm()
+          } finally {
+            setSaving(false)
+          }
+        },
+      })
     },
-    [save, setSaving, closeForm],
+    [save, setSaving, closeForm, confirm],
   )
 
   return {
