@@ -40,9 +40,6 @@ _NOT_FOUND_MSG = "查無此帳號"
 _INVITE_NOT_FOUND_MSG = "查無此邀請"
 _SELF_PROTECT_MSG = "無法停用或鎖定自己的帳號"
 _DEFAULT_TTL_MIN = 30
-# 邀請效期下限：DP_PARAM 誤設 0 / 負值時，邀請一建立即逾期，會使「逾期→重新邀請」變成
-# 每次 POST 都重寄的無節流迴圈（#111 review M3），故強制夾住下限。
-_MIN_TTL_MIN = 1
 
 
 def _iso(value: object) -> object:
@@ -386,13 +383,12 @@ class UsersService:
         return sent
 
     async def _invite_ttl_min(self, db: AsyncSession) -> int:
-        """邀請 / 重寄連結效期（分鐘），下限 `_MIN_TTL_MIN`。
+        """邀請 / 重寄連結效期（分鐘）。
 
-        DP_PARAM 的 `LOGIN.RESET_TOKEN_TTL_MIN` 由管理者可編輯，誤設 0 / 負值會讓邀請一建立即逾期；
-        配合 #111 的「逾期→重新邀請」會變成每次 POST 都重寄的無節流迴圈，故在此夾住下限。
+        值域下限由參數維護的寫入驗證把關（param_rules 之 `LOGIN.RESET_TOKEN_TTL_MIN` = IntRule(1)），
+        此處不再重複夾制——依 sti-coding-style「不為不存在的情境寫防禦碼」。
         """
-        ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
-        return max(ttl_min, _MIN_TTL_MIN)
+        return await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
 
     async def _send_invite(self, db: AsyncSession, *, email: str, user_name: str, token: str, ttl_min: int) -> None:
         """寄帳號邀請信（ACCOUNT_INVITE，US6 發信引擎）；連結以設定檔組（防 Host 注入）。"""
