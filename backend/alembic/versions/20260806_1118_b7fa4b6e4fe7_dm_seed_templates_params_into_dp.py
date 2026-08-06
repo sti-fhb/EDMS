@@ -137,8 +137,8 @@ _TEMPLATES = [
         "KPI_WEEKLY",
         "閱讀 KPI 週報",
         "【KPI 週報】文件閱讀率統計",
-        "管理者您好：\n\n本週文件閱讀 KPI 摘要：總文件數 {total_docs}、整體平均閱讀率 {avg_rate}。閱讀率最低前 5 份請見附件 CSV。儀表板：{dashboard_link}"
-        + _FOOTER,
+        "管理者您好：\n\n本週文件閱讀 KPI 摘要：總文件數 {total_docs}、整體平均閱讀率 {avg_rate}。"
+        "閱讀率最低前 5 份請見附件 CSV。儀表板：{dashboard_link}" + _FOOTER,
         "total_docs,avg_rate,dashboard_link",
         "EMAIL_ONLY",
         True,
