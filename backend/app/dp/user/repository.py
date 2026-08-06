@@ -208,6 +208,25 @@ class AuthRepository:
         """刪除某 Email 的待驗證註冊（重新註冊 / 重寄前先清舊列，維持 EMAIL 唯一）。"""
         await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.email == email))
 
+    async def delete_pending_unless_active_invite(self, db: AsyncSession, email: str, now: datetime) -> None:
+        """刪除某 Email 的待驗證列，但**保留仍有效的管理者邀請**（#125）。
+
+        專供自助註冊覆蓋舊列使用。register_service 已於前置檢查擋下有效邀請，但檢查與此處
+        刪除之間存在 TOCTOU 空窗；若該空窗內管理者剛好發出邀請，無條件刪除會靜默吃掉它
+        （正是 #125 要修的 bug）。改為條件式刪除後該列得以存活，後續 insert 會撞
+        UQ_DP_PENDING_REGISTRATION_EMAIL → IntegrityError → 由呼叫方轉 409，不會靜默成功。
+
+        Args:
+            email: 待清除的 Email。
+            now: 判定邀請是否仍有效的基準時間（與 EXPIRES_DATE 比較）。
+        """
+        await db.execute(
+            delete(DpPendingRegistration).where(
+                DpPendingRegistration.email == email,
+                ~((DpPendingRegistration.kind == _KIND_ADMIN_INVITE) & (DpPendingRegistration.expires_date > now)),
+            )
+        )
+
     async def delete_pending_by_token_hash(self, db: AsyncSession, token_hash: str) -> None:
         """驗證通過後刪除該待驗證註冊列（已消費）。"""
         await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.token_hash == token_hash))

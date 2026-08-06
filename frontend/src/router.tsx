@@ -6,12 +6,6 @@ import { VerifyEmailChangePage } from "./auth/VerifyEmailChangePage"
 import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { AppShell } from "./layouts/AppShell"
 import { RootLayout } from "./layouts/RootLayout"
-import { DmChangeLogPage } from "./dm/changelog/DmChangeLogPage"
-import { DmKpiPage } from "./dm/kpi/DmKpiPage"
-import { DmLibraryPage } from "./dm/library/DmLibraryPage"
-import { DmObsoletePage } from "./dm/obsolete/DmObsoletePage"
-import { DmPersonalPage } from "./dm/personal/DmPersonalPage"
-import { DmReviewPage } from "./dm/review/DmReviewPage"
 import { AuditPage } from "./dp/audit/AuditPage"
 import { TemplatesPage } from "./dp/notify/TemplatesPage"
 import { ParamsPage } from "./dp/params/ParamsPage"
@@ -51,19 +45,6 @@ export const router = createBrowserRouter([
               { path: "roles", element: <RolesPage /> },
               { path: "audit", element: <AuditPage /> },
               { path: "schedule", element: <SchedulePage /> },
-            ],
-          },
-          {
-            // 文件管理模組殼（#127 Foundation）：路由骨架，各頁為 StubPage，功能於對應 US issue 填實
-            path: "dm",
-            children: [
-              { index: true, element: <Navigate to="/dm/library" replace /> },
-              { path: "library", element: <DmLibraryPage /> },
-              { path: "review", element: <DmReviewPage /> },
-              { path: "me", element: <DmPersonalPage /> },
-              { path: "obsolete", element: <DmObsoletePage /> },
-              { path: "change-log", element: <DmChangeLogPage /> },
-              { path: "kpi", element: <DmKpiPage /> },
             ],
           },
         ],
