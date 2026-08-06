@@ -26,15 +26,15 @@ async def test_dm_templates_seeded_in_dp_table(db):
 
 
 async def test_dm_template_channels(db):
-    """CHANNEL 正確：AUTO_REMIND=MSG_ONLY、DOC_PUBLISH/KPI/未讀=EMAIL_ONLY、送審=EMAIL_MSG。"""
+    """CHANNEL 沿用平台詞彙：AUTO_REMIND=MSG（僅站內）、發布/KPI/未讀=EMAIL、送審=BOTH（Email+站內）。"""
     rows = {
         r.template_code: r
         for r in (await db.execute(select(DpNotifyTemplate).where(DpNotifyTemplate.module == "DM"))).scalars().all()
     }
-    assert rows["AUTO_REMIND"].channel == "MSG_ONLY"
-    assert rows["DOC_PUBLISH"].channel == "EMAIL_ONLY"
-    assert rows["KPI_WEEKLY"].channel == "EMAIL_ONLY"
-    assert rows["DOC_SUBMIT"].channel == "EMAIL_MSG"
+    assert rows["AUTO_REMIND"].channel == "MSG"
+    assert rows["DOC_PUBLISH"].channel == "EMAIL"
+    assert rows["KPI_WEEKLY"].channel == "EMAIL"
+    assert rows["DOC_SUBMIT"].channel == "BOTH"
     assert all(not r.is_system for r in rows.values())  # DM 範本非系統信、可停用
 
 
