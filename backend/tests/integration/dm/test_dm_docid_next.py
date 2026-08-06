@@ -3,6 +3,7 @@
 import pytest
 
 from app.core.utils import utcnow
+from app.dm.catalog.models import DmCategory, DmFunc  # noqa: F401  # 註冊 DM_DOCUMENT 之 FK 目標表
 from app.dm.document.docid import next_doc_id
 from app.dm.document.models import DmDocument
 
