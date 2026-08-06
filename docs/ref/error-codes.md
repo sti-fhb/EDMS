@@ -119,5 +119,7 @@
 | DM_REVIEW_003 | 409 | 此送審已非待審核狀態，無法處理 |
 | DM_CATALOG_001 | 409 | 受控項目代碼已存在 |
 | DM_CATALOG_002 | 404 | 查無此受控項目 |
+| DM_FILE_001 | 422 | 檔案大小超過上限 |
+| DM_FILE_002 | 422 | 不支援的檔案格式 |
 
 > `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-ROLES-001` 呈現（見 spec_us7 FR-06）。
