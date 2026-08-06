@@ -29,7 +29,19 @@ describe("Sidebar", () => {
     }
   })
 
-  it("每個導覽項目連到對應 /dp 路由", () => {
+  it("渲染「文件管理」群組標題與其六個 /dm 導覽項目", () => {
+    renderSidebar()
+    const dmGroup = NAV_GROUPS.find((g) => g.title === "文件管理")
+    expect(dmGroup).toBeDefined()
+    expect(screen.getByText("文件管理")).toBeInTheDocument()
+    expect(dmGroup?.items).toHaveLength(6)
+    for (const item of dmGroup?.items ?? []) {
+      expect(item.path.startsWith("/dm/")).toBe(true)
+      expect(screen.getByText(item.label)).toBeInTheDocument()
+    }
+  })
+
+  it("每個導覽項目連到對應路由", () => {
     renderSidebar()
     for (const group of NAV_GROUPS) {
       for (const item of group.items) {
