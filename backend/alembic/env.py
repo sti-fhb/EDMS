@@ -7,6 +7,7 @@ from alembic import context
 from app.core.config import settings
 from app.core.db import Base
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup  # noqa: F401
+from app.dm.document.models import DmDocRead, DmDocTag, DmDocument, DmDocVersion  # noqa: F401
 
 # DM 模組
 from app.dm.roles.models import DmUserRole, DmUserRoleLog  # noqa: F401
