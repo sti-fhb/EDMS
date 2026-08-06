@@ -7,6 +7,7 @@
 維護 UI 於平台 DP 後台「系統參數與清單」畫面，經 catalog 轉接層呼叫本服務（比照 roles 轉接層）。
 """
 
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import func, select
@@ -17,6 +18,9 @@ from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmCategory, DmTag
 from app.dm.document.models import DmDocTag
+
+# 分類碼字元集：僅英數（作為 PK、且下游 next_doc_id 以此碼組 LIKE pattern，須排除萬用字元）
+_CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
 
 
 @dataclass(frozen=True)
@@ -31,7 +35,9 @@ class CatalogService:
     """受控資料維護（分類為代表；func / tag 同一機制）。"""
 
     async def create_category(self, db: AsyncSession, *, code: str, name: str, operator: str) -> DmCategory:
-        """新增自訂分類（分類碼建立後鎖定＝PK；重複碼 409 DM_CATALOG_001）。"""
+        """新增自訂分類（分類碼建立後鎖定＝PK；格式須英數 422 DM_CATALOG_003；重複碼 409 DM_CATALOG_001）。"""
+        if not _CODE_PATTERN.match(code):
+            raise AppError(status_code=422, detail="代碼格式不合法，僅允許英文與數字", error_code="DM_CATALOG_003")
         exists = await db.scalar(select(DmCategory.category_code).where(DmCategory.category_code == code))
         if exists is not None:
             raise AppError(status_code=409, detail="此分類碼已存在，請使用其他分類碼", error_code="DM_CATALOG_001")

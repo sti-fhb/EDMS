@@ -226,7 +226,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 精確刪除本 migration 所種之列（比對 PK），不用寬鬆 MODULE / LIKE 範圍刪除——
+    # 避免誤刪日後 DP 後台管理者在 MODULE=DM 新增之範本、或 DM_ 參數下新增之其他 PARAM_KEY
+    # （對齊平台前例 dp_seed_platform_data 之精確 downgrade 慣例）。
     conn = op.get_bind()
-    conn.execute(text('DELETE FROM "DP_NOTIFY_TEMPLATE" WHERE "MODULE" = \'DM\''))
-    conn.execute(text('DELETE FROM "DP_PARAM_D" WHERE "PARAM_ID" LIKE \'DM\\_%\''))
-    conn.execute(text('DELETE FROM "DP_PARAM_M" WHERE "PARAM_ID" LIKE \'DM\\_%\''))
+    for module, template_code, *_ in _TEMPLATES:
+        conn.execute(
+            text('DELETE FROM "DP_NOTIFY_TEMPLATE" WHERE "MODULE" = :m AND "TEMPLATE_CODE" = :c'),
+            {"m": module, "c": template_code},
+        )
+    for param_id, param_key, *_ in _PARAM_D:
+        conn.execute(
+            text('DELETE FROM "DP_PARAM_D" WHERE "PARAM_ID" = :id AND "PARAM_KEY" = :k'),
+            {"id": param_id, "k": param_key},
+        )
+    for param_id, *_ in _PARAM_M:
+        conn.execute(text('DELETE FROM "DP_PARAM_M" WHERE "PARAM_ID" = :id'), {"id": param_id})

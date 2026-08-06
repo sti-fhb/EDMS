@@ -8,6 +8,7 @@ DM_REVIEW 建立 / 核准 / 退回 / 撤回；核心約束「**同一文件不�
 """
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -36,6 +37,10 @@ class ReviewService:
 
         Raises:
             AppError: 審核者為撰寫者本人（422 DM_REVIEW_001）、該文件已有進行中送審（409 DM_REVIEW_002）。
+
+        Note:
+            「同文件至多一筆 PENDING」以 DB partial unique index（UX_DM_REVIEW_ONE_PENDING）保證。
+            先以 count 給友善錯誤，再以 IntegrityError 為並發後盾（兩個並發 submit 只會有一筆成功）。
         """
         ensure_reviewer_not_author(assigned_reviewer, author_id)
         pending = await db.scalar(
@@ -57,7 +62,13 @@ class ReviewService:
             created_date=utcnow(),
         )
         db.add(review)
-        await db.flush()
+        try:
+            async with db.begin_nested():  # SAVEPOINT：唯一索引衝突時只回退本次 INSERT，不毀呼叫方交易
+                await db.flush()
+        except IntegrityError as exc:
+            raise AppError(
+                status_code=409, detail="此文件已有進行中之送審，無法同時送出另一種送審", error_code="DM_REVIEW_002"
+            ) from exc
         return review
 
     async def _complete(

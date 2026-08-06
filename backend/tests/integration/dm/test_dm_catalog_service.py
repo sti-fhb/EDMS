@@ -36,6 +36,14 @@ async def test_rename_and_disable_keeps_code(db):
     assert disabled.is_enabled is False and disabled.category_code == "ZTREN"
 
 
+async def test_create_category_rejects_non_alnum_code(db):
+    """分類碼含非英數字元（下游 next_doc_id 以此碼組 LIKE）→ 422 DM_CATALOG_003。"""
+    for bad in ("ZT_X", "ZT%", "ZT-1", "類別"):
+        with pytest.raises(AppError) as e:
+            await _svc.create_category(db, code=bad, name="x", operator="a")
+        assert e.value.error_code == "DM_CATALOG_003"
+
+
 async def test_require_category_404(db):
     with pytest.raises(AppError) as e:
         await _svc.rename_category(db, code="NOPE", new_name="x", operator="a")

@@ -4,11 +4,13 @@
 """
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmCategory, DmFunc  # noqa: F401  # 註冊 FK 目標
 from app.dm.document.models import DmDocument
+from app.dm.review.models import DmReview
 from app.dm.review.service import ReviewService
 
 pytestmark = pytest.mark.integration
@@ -51,6 +53,27 @@ async def test_single_pending_constraint(db):
     with pytest.raises(AppError) as e:
         await _svc.submit(db, doc_id=doc_id, review_type="OBSOLETE", assigned_reviewer="rev2", author_id="author")
     assert e.value.error_code == "DM_REVIEW_002"
+
+
+async def test_db_partial_unique_blocks_second_pending(db):
+    """DB 級保證：繞過應用層 count 檢查，直插第二筆同文件 PENDING → partial unique index 擋下。
+
+    這是並發雙送審（兩個 submit 同時通過 count）的最終防線；submit() 以 IntegrityError 後盾轉譯為 DM_REVIEW_002。
+    """
+    doc_id = await _doc(db)
+    await _svc.submit(db, doc_id=doc_id, review_type="NEW", assigned_reviewer="rev1", author_id="author")
+    dup = DmReview(
+        doc_id=doc_id,
+        review_type="OBSOLETE",
+        assigned_reviewer="rev2",
+        status="PENDING",
+        submit_date=utcnow(),
+        created_user="author",
+        created_date=utcnow(),
+    )
+    db.add(dup)
+    with pytest.raises(IntegrityError):
+        await db.flush()
 
 
 async def test_approve_then_resubmit_allowed(db):

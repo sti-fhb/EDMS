@@ -5,6 +5,13 @@
 或僅下載（Office）。研究 §3 / §10。
 
 實際落盤 I/O（寫檔案系統 / 物件儲存）屬部署層，Foundation 提供可測核心：預覽判定 + 上傳檢核。
+
+⚠️ 安全契約（落盤層須遵守，見 sti-backend-ref 待補）：
+- 副檔名白名單檢核**非充分條件**——落盤前應另以 content-type / magic bytes 驗證真實型別
+  （防 evil.exe 改名 evil.pdf）。
+- 檔名不得用於組路徑：一律以系統產生之 FILE_ID 命名，避免 `../` 路徑穿越。
+- `DM_FILE_TYPES` 參數若被清空 / 停用，本函式會跳過格式檢核（fail-open）；正式落地時
+  落盤層應確保該參數恆有值，或改為 fail-closed 之安全預設白名單。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession

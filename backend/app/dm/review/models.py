@@ -1,14 +1,15 @@
 """DM 簽核 / 變更歷程 model（DM_REVIEW / DM_CHANGE_LOG）。
 
 DM_REVIEW 一列代表一次送審週期（新增 / 新版本 / 廢止）；撤回重送以新列記錄、原列保留。
-「同一文件不可同時兩種送審」以應用層約束（單一 STATUS=PENDING）落實。
+「同一文件不可同時兩種送審」以 **DB partial unique index**（同 DOC_ID 至多一筆 STATUS=PENDING）
+保證，應用層再以 count 快速判斷給友善錯誤（DM_REVIEW_002），並以 IntegrityError 為並發後盾。
 DM_CHANGE_LOG 為對外發布 / 廢止事件之公開變更歷程（append-only、不可竄改）。
 """
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, PrimaryKeyConstraint, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, PrimaryKeyConstraint, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.base_model import AuditLogBaseModel, BaseModelNoResId
@@ -27,6 +28,8 @@ class DmReview(BaseModelNoResId):
         Index("IX_DM_REVIEW_DOC", "DOC_ID"),
         Index("IX_DM_REVIEW_STATUS", "STATUS"),
         Index("IX_DM_REVIEW_REVIEWER", "ASSIGNED_REVIEWER"),
+        # 同一文件至多一筆進行中送審：DB 級保證（partial unique index），杜絕並發雙送審
+        Index("UX_DM_REVIEW_ONE_PENDING", "DOC_ID", unique=True, postgresql_where=text("\"STATUS\" = 'PENDING'")),
     )
 
     review_id: Mapped[int] = mapped_column("REVIEW_ID", BigInteger, Identity(), nullable=False)

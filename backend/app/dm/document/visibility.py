@@ -5,6 +5,10 @@
 - 閱覽者：文件掛「全體」 OR（文件 DM_DOC_TAG 之 AUDIENCE 標籤 ∩ 使用者 DM_USER_TAG ≠ 空）
 
 後端 API 亦套此過濾（防繞過 UI），對應 spec_us3 FR-008 / research §5b。
+
+⚠️ 契約：本條件**僅**處理 AUDIENCE 標籤可見性，不含文件狀態（STATUS）。呼叫端對閱覽者
+（VIEWER）**必須另外 AND `DM_DOCUMENT.STATUS = 'PUBLISHED'`**，否則閱覽者將看見草稿 / 未發布
+文件（US3 查詢端點須含此過濾並附測試）。編輯者 / 審核者 / 管理者回 None 不過濾，其可見範圍由端點自訂。
 """
 
 from collections.abc import Iterable

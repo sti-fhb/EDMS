@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dm.document.models import DmDocument
 
 _PREFIX = "DM"
+# LIKE 萬用字元轉義：分類碼受控為英數（見 catalog.create_category），此為防禦性後盾，
+# 避免日後若有含 % / _ 的碼污染流水號比對範圍。
+_LIKE_ESCAPE = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_"})
 
 
 def format_doc_id(category_code: str, seq: int) -> str:
@@ -22,8 +25,8 @@ def format_doc_id(category_code: str, seq: int) -> str:
 
 async def next_doc_id(db: AsyncSession, category_code: str) -> str:
     """取該分類下一個 DOC_ID（現有最大流水號 + 1；無則從 000001 起）。"""
-    pattern = f"{_PREFIX}-{category_code}-%"
-    max_id = await db.scalar(select(func.max(DmDocument.doc_id)).where(DmDocument.doc_id.like(pattern)))
+    pattern = f"{_PREFIX}-{category_code.translate(_LIKE_ESCAPE)}-%"
+    max_id = await db.scalar(select(func.max(DmDocument.doc_id)).where(DmDocument.doc_id.like(pattern, escape="\\")))
     if max_id is None:
         return format_doc_id(category_code, 1)
     seq = int(max_id.rsplit("-", 1)[1]) + 1
