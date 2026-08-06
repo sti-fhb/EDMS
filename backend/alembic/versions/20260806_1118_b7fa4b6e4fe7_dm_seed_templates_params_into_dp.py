@@ -10,8 +10,9 @@ DM 範本 / 參數種子寫入平台 DP 共用表（依 TBMS 前例：各模組 
   DM_FILE_TYPES / DM_WEEKLY_SCHED_DAY_TIME=週一,10:00（單值參數、PARAM_KEY=VALUE）
 - DP_NOTIFY_TEMPLATE（MODULE=DM）：9 內建事件範本（DOC_SUBMIT / DOC_REJECT / DOC_PUBLISH /
   OBS_SUBMIT / OBS_APPROVE / OBS_REJECT / KPI_WEEKLY / UNREAD_REMIND / AUTO_REMIND）；
-  CHANNEL：EMAIL_MSG（Email+站內）/ MSG_ONLY（僅站內，自動催辦）/ EMAIL_ONLY（僅 Email，
-  發布通知 / KPI 週報 / 未讀提醒）；IS_SYSTEM=false（可停用、不可新增，事件固定）
+  CHANNEL 沿用平台正規詞彙 Literal["EMAIL", "MSG", "BOTH"]（見 dp/notify/schemas.py）：
+  BOTH（Email+站內）/ MSG（僅站內，自動催辦）/ EMAIL（僅 Email，發布通知 / KPI 週報 / 未讀提醒）；
+  平台 send_email 僅對 EMAIL / BOTH 寄信。IS_SYSTEM=false（可停用、不可新增，事件固定）
 
 SCHDM001 排程已由平台 DP #0 種（預留、IS_ENABLED=false，handler 待 US13 提供），此處不重種。
 維護 UI 於平台 DP 後台（按模組過濾、DM 只見 DM 的列）。
@@ -65,7 +66,7 @@ _TEMPLATES = [
         "{reviewer_name} 您好：\n\n{author_name} 送審之文件「{doc_name}」（{review_type}）待您審核，請至簽核中心處理。"
         + _FOOTER,
         "reviewer_name,author_name,doc_name,review_type",
-        "EMAIL_MSG",
+        "BOTH",
         True,
         False,
         1,
@@ -78,7 +79,7 @@ _TEMPLATES = [
         "{author_name} 您好：\n\n您送審之文件「{doc_name}」已被審核者退回。退回原因：{reason}。請修改後重新送審。"
         + _FOOTER,
         "author_name,doc_name,reason",
-        "EMAIL_MSG",
+        "BOTH",
         True,
         False,
         1,
@@ -90,7 +91,7 @@ _TEMPLATES = [
         "【文件發布】{doc_name} 已發布",
         "您好：\n\n文件「{doc_name}」（版本 {version_no}）已核准發布。變更摘要：{change_summary}。" + _FOOTER,
         "doc_name,version_no,change_summary",
-        "EMAIL_ONLY",
+        "EMAIL",
         True,
         False,
         1,
@@ -102,7 +103,7 @@ _TEMPLATES = [
         "【廢止簽核】{doc_name} 廢止待您審核",
         "{reviewer_name} 您好：\n\n{applicant_name} 申請廢止文件「{doc_name}」待您審核。廢止原因：{reason}。" + _FOOTER,
         "reviewer_name,applicant_name,doc_name,reason",
-        "EMAIL_MSG",
+        "BOTH",
         True,
         False,
         1,
@@ -114,7 +115,7 @@ _TEMPLATES = [
         "【廢止核准】{doc_name} 已廢止",
         "{applicant_name} 您好：\n\n您申請廢止之文件「{doc_name}」已核准，該文件已下架。" + _FOOTER,
         "applicant_name,doc_name",
-        "EMAIL_MSG",
+        "BOTH",
         True,
         False,
         1,
@@ -127,7 +128,7 @@ _TEMPLATES = [
         "{applicant_name} 您好：\n\n您申請廢止之文件「{doc_name}」已被退回，文件維持發布狀態。退回原因：{reason}。"
         + _FOOTER,
         "applicant_name,doc_name,reason",
-        "EMAIL_MSG",
+        "BOTH",
         True,
         False,
         1,
@@ -140,7 +141,7 @@ _TEMPLATES = [
         "管理者您好：\n\n本週文件閱讀 KPI 摘要：總文件數 {total_docs}、整體平均閱讀率 {avg_rate}。"
         "閱讀率最低前 5 份請見附件 CSV。儀表板：{dashboard_link}" + _FOOTER,
         "total_docs,avg_rate,dashboard_link",
-        "EMAIL_ONLY",
+        "EMAIL",
         True,
         False,
         1,
@@ -153,7 +154,7 @@ _TEMPLATES = [
         "{viewer_name} 您好：\n\n您有 {unread_count} 份已發布文件尚未閱讀，清單如下：\n{unread_list}\n請撥空閱讀。"
         + _FOOTER,
         "viewer_name,unread_count,unread_list",
-        "EMAIL_ONLY",
+        "EMAIL",
         True,
         False,
         1,
@@ -165,7 +166,7 @@ _TEMPLATES = [
         "【催辦】{doc_name} 待簽核已逾 {days} 天",
         "{reviewer_name} 您好：\n\n文件「{doc_name}」送審已停留 {days} 天，請儘速至簽核中心處理。" + _FOOTER,
         "reviewer_name,doc_name,days",
-        "MSG_ONLY",
+        "MSG",
         True,
         False,
         1,
