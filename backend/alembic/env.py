@@ -7,6 +7,9 @@ from alembic import context
 from app.core.config import settings
 from app.core.db import Base
 
+# DM 模組
+from app.dm.roles.models import DmUserRole, DmUserRoleLog  # noqa: F401
+
 # 匯入所有 model，讓 Alembic autogenerate 能掃描到。
 # 每新增一個 module 的 model，在此處加上 import（並於行末以 noqa 抑制 F401），例如：
 #   from app.et.courses.models import Course
