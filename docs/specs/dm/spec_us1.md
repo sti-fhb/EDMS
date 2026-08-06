@@ -3,7 +3,7 @@
 > 返回總檔：[spec.md](spec.md) | 模組：文件管理（DM）
 
 > **平台對齊（DP，2026-07-08 集中化）**：**DM 系統設定之維護介面已移至平台 DP 系統管理後台**——**權限管理**（DM 四角色＋可見對象授權指派）於 DP 後台「權限管理」畫面、**系統參數與清單**（文件分類 / func_name / 可見對象 / 檢索標籤定義、催辦門檻 / 排程參數）於 DP 後台「系統參數與清單」畫面、**通知範本**（9 項事件）於 DP 後台「通知範本」畫面；DM 管理者於 DP 後台操作、**按模組過濾**（只見 / 只改 `MODULE=DM` / `DM_` 前綴的項，與 ET / 平台互不可見）。**DM 不自設系統設定畫面（原 DM09）**。
-> 本 US 保留之內容為 **DM 業務規則**：分類碼嵌入 DOC_ID 並鎖定、func_name 唯一手冊、標籤式可見性與四角色 / 可見對象授權語意、9 項通知事件與觸發、催辦 / 週報排程語意——DP 後台依此維護、DM 執行時依此運作。**「定義」（分類 / func_name / 可見對象 / 檢索標籤清單、範本）存 `DP_PARAM` / `DP_NOTIFY_TEMPLATE`；「指派 / 關聯」（使用者×角色 `DM_USER_ROLE`、使用者×可見對象授權 `DM_USER_TAG`）與判定仍屬 DM**。
+> 本 US 保留之內容為 **DM 業務規則**：分類碼嵌入 DOC_ID 並鎖定、func_name 唯一手冊、標籤式可見性與四角色 / 可見對象授權語意、9 項通知事件與觸發、催辦 / 週報排程語意——DP 後台依此維護、DM 執行時依此運作。**通用參數（催辦門檻 / 排程時間 / 檔案上限：`DM_REMIND_THRESHOLD` / `DM_WEEKLY_SCHED_DAY_TIME` / `DM_FILE_MAX_MB` / `DM_FILE_TYPES`）存 `DP_PARAM`（前綴 `DM_`）、通知範本存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）；分類 / func_name / 可見對象 / 檢索標籤等受控主檔為 DM 自持表（`DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`，含 `IS_BUILTIN` / `GROUP_TYPE` 等富語意欄位），其維護經 catalog 轉接層由 DP 後台呼叫 DM（比照 roles 轉接層）；「指派 / 關聯」（使用者×角色 `DM_USER_ROLE`、使用者×可見對象授權 `DM_USER_TAG`）與判定仍屬 DM**（2026-08-06 #127 對齊 [spec.md §跨模組共用規則](spec.md)：受控主檔為 DM 表、非 DP_PARAM；原「分類/func/標籤清單存 DP_PARAM」措辭過寬已修正）。
 
 ## User Story
 
@@ -60,4 +60,4 @@
 
 - 使用者主檔（`DP_USER`，平台模組 DP 定義）由 [spec_us2.md](spec_us2.md) US2 註冊或系統初始化寫入；第一位管理者由 IT 經 DB 寫入
 - 分類碼 / func_name / 標籤為 DOC_ID 與 [spec_us5.md](spec_us5.md)（新增編輯）、[spec_us3.md](spec_us3.md)（檢索）之前置受控資料
-- **權限 / 可見對象轉接層契約**：DM 端 MUST 實作 [../dp/contracts/module-callbacks.md](../dp/contracts/module-callbacks.md) §3 之 `get_users_roles_audiences(user_ids)` / `assign_roles_audiences(user_id, roles, audiences, operator_id)`（回 `DmRoleAudienceView`：roles ⊂ {ADMIN/EDITOR/REVIEWER/VIEWER}、audiences＝`DP_PARAM(DM_)` 之 PARAM_KEY 集合、last_modified_*）+ §4 `has_any_role`；供平台 DP dp-roles（US7）呼叫，維護 UI 在 DP 後台。**可見對象值 MUST 屬 `DP_PARAM` 啟用中清單；指派異動由 DM 於同交易寫 SRVDP003 稽核（`MODULE=DM`）**
+- **權限 / 可見對象轉接層契約**：DM 端 MUST 實作 [../dp/contracts/module-callbacks.md](../dp/contracts/module-callbacks.md) §3 之 `get_users_roles_audiences(user_ids)` / `assign_roles_audiences(user_id, roles, audiences, operator_id)`（回 `DmRoleAudienceView`：roles ⊂ {ADMIN/EDITOR/REVIEWER/VIEWER}、**audiences＝`DM_TAG`（AUDIENCE 組）之 TAG_ID 集合**〔DM 自持表，非 DP_PARAM〕、last_modified_*）、**§3.1 catalog 轉接層**（`list_controlled` / `create` / `rename` / `set_controlled_enabled` / `list_audiences`，供 DP 後台維護 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG` 與取可見對象清單）+ §4 `has_any_role`；供平台 DP dp-roles（US7）呼叫，維護 UI 在 DP 後台。**可見對象值 MUST 屬 `DM_TAG`（AUDIENCE 組、`IS_ENABLED=true`）啟用中清單；指派異動由 DM 於同交易寫 SRVDP003 稽核（`MODULE=DM`）**
