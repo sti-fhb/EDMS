@@ -1,6 +1,7 @@
 """DM 簽核 / 變更歷程 / 可見對象授權表整合測試（DM_REVIEW / DM_CHANGE_LOG / DM_USER_TAG）。
 
 驗證 migration 建表 + FK + append-only 變更歷程 + 可見對象授權唯一約束 (USER_ID, TAG_ID)。
+分類（SOP）與可見對象（護理師）引用業務種子既有列，避開 PK 衝突。
 """
 
 import pytest
@@ -9,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
-from app.dm.catalog.models import DmCategory, DmTag, DmTagGroup
+from app.dm.catalog.models import DmTag
 from app.dm.document.models import DmDocument
 from app.dm.review.models import DmChangeLog, DmReview
 
@@ -17,9 +18,7 @@ pytestmark = pytest.mark.integration
 
 
 async def _seed_doc(db):
-    now = utcnow()
-    db.add(DmCategory(category_code="SOP", category_name="SOP", created_user="s", created_date=now))
-    await db.flush()
+    # SOP 分類已由業務種子建立，直接引用；此處只建文件
     db.add(
         DmDocument(
             doc_id="DM-SOP-000001",
@@ -27,7 +26,7 @@ async def _seed_doc(db):
             category_code="SOP",
             status="DRAFT",
             created_user="e",
-            created_date=now,
+            created_date=utcnow(),
         )
     )
     await db.flush()
@@ -74,21 +73,11 @@ async def test_change_log_append(db):
 
 
 async def test_user_tag_unique(db):
-    """可見對象授權唯一約束 (USER_ID, TAG_ID)：同人同標籤重複被擋。"""
+    """可見對象授權唯一約束 (USER_ID, TAG_ID)：同人同標籤重複被擋（引用種子之「護理師」標籤）。"""
     now = utcnow()
-    db.add(
-        DmTagGroup(
-            tag_group_code="AUDIENCE",
-            tag_group_name="可見對象",
-            group_type="AUDIENCE",
-            created_user="s",
-            created_date=now,
-        )
-    )
-    await db.flush()
-    db.add(DmTag(tag_group_code="AUDIENCE", tag_name="護理師", created_user="s", created_date=now))
-    await db.flush()
-    tag = (await db.execute(select(DmTag).where(DmTag.tag_name == "護理師"))).scalar_one()
+    tag = (
+        await db.execute(select(DmTag).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == "護理師"))
+    ).scalar_one()
     db.add(DmUserTag(user_id="viewer1", tag_id=tag.tag_id, created_user="admin", created_date=now))
     await db.flush()
     db.add(DmUserTag(user_id="viewer1", tag_id=tag.tag_id, created_user="admin", created_date=now))

@@ -9,20 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.utils import utcnow
-from app.dm.catalog.models import DmCategory, DmFunc
+from app.dm.catalog.models import DmFunc
 from app.dm.document.models import DmDocRead, DmDocument, DmDocVersion
 
 pytestmark = pytest.mark.integration
 
 
 async def _seed_catalog(db):
-    now = utcnow()
-    db.add(
-        DmCategory(
-            category_code="MANUAL", category_name="系統操作手冊", is_builtin=True, created_user="s", created_date=now
-        )
-    )
-    db.add(DmFunc(func_code="BS04", func_name="領血確認", created_user="s", created_date=now))
+    # MANUAL 分類已由業務種子建立，此處只補測試用 func（func 不在種子內）
+    db.add(DmFunc(func_code="BS04", func_name="領血確認", created_user="s", created_date=utcnow()))
     await db.flush()
 
 
