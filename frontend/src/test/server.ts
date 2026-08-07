@@ -23,6 +23,10 @@ export const handlers = [
   http.post("/api/dp/user/renew", () => HttpResponse.json({ access_token: "renewed-token" })),
   http.post("/api/dp/user/logout", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/version", () => HttpResponse.json({ version: "1.0.0-test" })),
+  // 入口頁 / 側欄模組摘要（預設具 DM 權限；個別測試以 server.use 覆蓋）
+  http.get("/api/dp/user/module-summary", () =>
+    HttpResponse.json({ et: { has_role: true }, dm: { has_role: true } }),
+  ),
   // US8 個人資料維護（預設 happy path）
   http.get("/api/dp/user/me", () =>
     HttpResponse.json({ user_id: "u1", email: "me@example.com", user_name: "測試員", pending_email: null }),

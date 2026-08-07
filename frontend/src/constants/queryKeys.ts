@@ -17,4 +17,7 @@ export const QUERY_KEYS = {
     list: () => ["schedule", "list"] as const,
     logs: (params: Record<string, unknown>) => ["schedule", "logs", params] as const,
   },
+  moduleSummary: {
+    get: () => ["module-summary"] as const,
+  },
 } as const
