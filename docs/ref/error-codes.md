@@ -114,6 +114,15 @@
 
 | error_code | HTTP | error_message |
 |------------|------|---------------|
+| DM_AUTH_001 | 403 | 需要文件管理模組權限 |
 | DM_ROLE_001 | 403 | 無法停用自己之管理者角色 |
+| DM_REVIEW_001 | 422 | 指定審核者不可為文件撰寫者本人 |
+| DM_REVIEW_002 | 409 | 此文件已有進行中之送審，無法同時送出另一種送審 |
+| DM_REVIEW_003 | 409 | 此送審已非待審核狀態，無法處理 |
+| DM_CATALOG_001 | 409 | 受控項目代碼已存在 |
+| DM_CATALOG_002 | 404 | 查無此受控項目 |
+| DM_CATALOG_003 | 422 | 代碼格式不合法，僅允許英文與數字 |
+| DM_FILE_001 | 422 | 檔案大小超過上限 |
+| DM_FILE_002 | 422 | 不支援的檔案格式 |
 
 > `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-ROLES-001` 呈現（見 spec_us7 FR-06）。
