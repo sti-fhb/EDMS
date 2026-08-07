@@ -25,7 +25,7 @@
 | 4 | 忘記密碼 | US3 / UCDP003 | P1-核心 | T028 ~ T029（2 任務）| #1, #2 | [#47](https://github.com/sti-fhb/EDMS/issues/47) | ✅ 已開立 |
 | 5 | 使用者管理（dp-users）| US4 / UCDP005 | P1-核心 | T030 ~ T032（3 任務）| #2, #3 | [#61](https://github.com/sti-fhb/EDMS/issues/61) | ✅ 已開立 |
 | 6 | 系統參數與清單維護（dp-params）| US5 / UCDP006 | P1-核心 | T033 ~ T034（2 任務）| #0, #2, #5 | [#68](https://github.com/sti-fhb/EDMS/issues/68) | ✅ 已合併（PR #73）|
-| 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；模組 service stub | — | 📝 body 已補（待開立）|
+| 7 | 權限管理（dp-roles）| US7 / UCDP010 | P1-核心 | T035 ~ T036（2 任務）| #2, #6（DP_PARAM 標籤清單）；DM provider（US1 #133 已交付）/ ET fail-closed | [#140](https://github.com/sti-fhb/EDMS/issues/140) | 🚀 已開立 [#140](https://github.com/sti-fhb/EDMS/issues/140) |
 | 8 | 個人資料維護 + 強制變更密碼（dp-profile）| US8 / UCDP004 | P2-延伸 | T037 ~ T039（3 任務）| #0, #1, #2 | — | 🚀 已開立 [#83](https://github.com/sti-fhb/EDMS/issues/83) |
 | 9 | 通知範本維護（dp-templates）| US9 / UCDP011 | P2-延伸 | T040 ~ T041（2 任務）| #1, #2 | — | 🚀 已開立 [#92](https://github.com/sti-fhb/EDMS/issues/92) |
 | 10 | 操作記錄查詢（dp-audit）| US10 / UCDP007 | P2-延伸 | T042 ~ T043（2 任務）| #0, #2 | [#97](https://github.com/sti-fhb/EDMS/issues/97) | ✅ 已合併（PR [#100](https://github.com/sti-fhb/EDMS/pull/100)）|
@@ -519,7 +519,7 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 
 ---
 
-## Issue #7：[P1-核心] DP — 權限管理（dp-roles）
+## Issue #7：[P1-核心] DP — 權限管理（dp-roles）（GitHub [#140](https://github.com/sti-fhb/EDMS/issues/140)）
 
 **對應規格**：[spec_us7.md](spec_us7.md)（US7 / UCDP010，FR-DP-US7-01~07、DP-MSG-ROLES-001~003）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §3（`get_users_roles_tags` / `assign_roles_tags`；`get_users_roles_audiences` / `assign_roles_audiences`）；[research.md](research.md) §4（角色即時由模組判定，JWT 不含角色）；[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-roles`）
 **階段**：P1-核心（ET 學員以外**所有**角色〔ET 教師 / 管理者、DM 四角色〕之唯一開通路徑；「畫面在 DP、資料與判定在模組」2026-07-08 決策）
