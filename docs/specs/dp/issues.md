@@ -527,24 +527,24 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：模組管理者判定閘 `module_admin_gate`（T017）、`SRVDP001`（讀 `DP_PARAM` 標籤清單）、`SRVDP003` 稽核、認證 / `get_operator`
 - Issue #2（GitHub [#31](https://github.com/sti-fhb/EDMS/issues/31)）已合併：登入 + 後台 layout；`dp-roles` sidebar 連結（現為 `StubPage`）
 - Issue #6（GitHub [#68](https://github.com/sti-fhb/EDMS/issues/68)）已合併：`DP_PARAM` 標籤 / 可見對象清單之維護與唯讀查詢（US7 讀啟用中項）；前後端 CRUD toolkit
-- **跨模組（stub 先行）**：ET `get_users_roles_tags` / `assign_roles_tags`、DM `get_users_roles_audiences` / `assign_roles_audiences`、`is_module_admin`（[module-callbacks](contracts/module-callbacks.md) §1 / §3）——ET / DM 未實作，以 stub 註冊、模組實作跟進後於 T049 回歸
+- **跨模組指派轉接層 registry**（`core/module_assign.py` `module_assign_registry`，DM US1 [#133](https://github.com/sti-fhb/EDMS/issues/133) 建）+ `is_module_admin` 閘（`module_admin_gate`，T017）：US7 泛用消費 registry，**已註冊模組→整合、未註冊→fail-closed**（不硬編哪個模組 real）。當下狀態：**DM 已就緒**（US1 已註冊 `DmAssignProvider`，可 end-to-end 驗）；**ET 未就緒**（ET 模組未開發，fail-closed / UI 不顯示 ET 區，待 ET 落地自動接上、US7 不需改）
 
 ### 任務說明
 
 DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 → 於**同一列**指派本模組**角色**（固定 enum 核取）+ **標籤 / 可見對象**（多選，清單讀 `DP_PARAM` 啟用中項）。DP 為**轉接層**：載入現況呼叫模組 `get_user_roles_*`、儲存呼叫模組 `assign_roles_*`，資料寫**模組表**（`ET_USER_ROLE` / `DM_USER_ROLE` / `ET_USER_TAG` / DM 授權表）。DP **MUST NOT 自持指派資料、不做全域 RBAC、不定義角色能力**（判定與 enforce 在模組）。自我保護（取消自己管理者）與「不檢核至少 1 名管理者」由**模組 service** 判定、DP 呈現模組回傳訊息。模組過濾伺服器端 enforce（越權 403）。
 
-> ℹ️ 全端 issue：後端轉接端點（`roles` router → 模組角色 service 閘）+ 前端 `dp-roles` 頁。**核心邏輯（角色 enum、自我保護、標籤值檢核、寫模組表 + 稽核）在模組**；DP 僅呼叫 + 呈現 + 模組過濾。ET / DM service 未就緒前**全程 stub**，完整驗收待 T049。
+> ℹ️ 全端 issue：後端轉接端點（`roles` router → `module_assign_registry` provider）+ 前端 `dp-roles` 頁。**核心邏輯（角色 enum、自我保護、標籤值檢核、寫模組表 + 稽核）在模組**；DP 僅呼叫 + 呈現 + 模組過濾。**驗收範圍依當下已註冊模組**：DM 已就緒→可實測 end-to-end；ET 未就緒→該區 fail-closed 隱藏（待 ET 落地回歸，US7 程式碼不需改）。
 
 ### 範圍
 
 **後端**（`app/dp/roles/` — 轉接層，不建角色 / 指派表）：
-- **T035 權限管理轉接端點**：
-  - 查使用者 + 現況：`GET`（呼叫模組 `get_users_roles_tags` / `get_users_roles_audiences`，經模組角色 service 閘 / stub）
-  - 儲存：`PUT`（呼叫模組 `assign_roles_tags` / `assign_roles_audiences`；模組 `AppError` 透傳為 ROLES-001〔自我保護〕）
+- **T035 權限管理轉接端點**（經 `module_assign_registry.get(module)` 取 provider，泛用呼叫）：
+  - 查使用者 + 現況：`GET` → `provider.get_users_assignments(user_ids)` 批次回 `AssignmentView`（`roles` + `groups`〔DM groups＝可見對象 TAG_ID、ET groups＝受訓單位標籤〕+ `last_modified_*`）
+  - 儲存：`PUT` → `provider.assign(user_id, roles, groups, operator_id)`；模組 `AppError` 透傳為 ROLES-001〔自我保護〕
+  - 可選清單：DM 經 `provider.list_audiences()`（DM_TAG AUDIENCE）；ET 經 `DP_PARAM`（`ET_` 前綴、`SRVDP001`）——來源依模組不同
   - 模組過濾 enforce（T017 `is_module_admin`）：越權 403＝ROLES-003
-  - 標籤 / 可見對象可選清單讀 `DP_PARAM` 啟用中項（`SRVDP001`，T012）
-  - 指派異動之稽核**由模組側**於同交易呼叫 `SRVDP003` 寫入（FR-07，per contracts §3）——DP 不重複寫
-  - 模組角色 service 閘（`core/module_roles.py` 或類似）：註冊 ET / DM 的 get / assign callbacks，未註冊 fail-closed；stub 可注入
+  - 指派異動之稽核**由模組 provider 側**於同交易呼叫 `SRVDP003` 寫入（FR-07，DM US1 已落地）——DP 不重複寫
+  - registry（`core/module_assign.py`，US1 已建）：ET / DM 於啟動註冊 provider，未註冊 `get()` 回 None → fail-closed（該模組區不顯示）
 
 **前端**（`frontend/src/dp/roles/` — 沿用 #5 / #6 CRUD toolkit）：
 - **T036 `dp-roles` 頁**：查使用者清單 → 每列「**角色核取 + 標籤 / 可見對象多選**」雙維度；按模組分區（平台 / ET / DM，兼具者雙區）；固定 enum、**無「新增角色」入口**；即時生效提示（ROLES-002）
@@ -571,11 +571,11 @@ DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 �
 - **Issue #0（GitHub #16）**：`module_admin_gate`（T017）、`SRVDP001`、`SRVDP003`、認證 / `get_operator`
 - **Issue #2（GitHub #31）**：登入 + 後台 layout；`dp-roles` sidebar 連結
 - **Issue #6（GitHub #68）**：`DP_PARAM` 標籤 / 可見對象清單（US7 讀啟用中項）；前後端 CRUD toolkit
-- **跨模組（stub 先行）**：ET / DM `get_users_roles_*` / `assign_roles_*` / `is_module_admin`（module-callbacks §1 / §3）——完整驗收待模組 service 就緒於 T049 回歸
+- **跨模組指派 registry**（`core/module_assign.py`，DM US1 [#133](https://github.com/sti-fhb/EDMS/issues/133) 已建並註冊 DM provider）+ `is_module_admin`（module-callbacks §1 / §3）。當下：**DM real、ET fail-closed（未開發）**；ET 落地後自動接上、US7 不需改
 
 ### 注意事項
 
-- ⚠️ **全程 stub 驅動、完整驗收待 T049**：US7 的核心（角色 enum、自我保護、標籤值檢核、寫模組表 + 稽核）**全在 ET / DM 模組**；ET / DM 未實作前，DP 只能對 stub 驗「轉接接線 + 模組過濾 + 錯誤透傳 + UI」。真正的角色寫入、自我保護、稽核落地待模組 service 就緒（T049 回歸）。**比 #5 / #6 更 stub-heavy**（#5 / #6 至少平台級可實測；US7 幾乎全靠 stub）。
+- ⚠️ **泛用 + fail-closed（不硬編哪個模組 real）**：US7 的核心（角色 enum、自我保護、標籤值檢核、寫模組表 + 稽核）**全在各模組 provider**；US7 泛用消費 `module_assign_registry`，**已註冊模組整合、未註冊 fail-closed（該區不顯示）**。**驗收範圍依當下已註冊模組**：**DM 已就緒（US1 [#133](https://github.com/sti-fhb/EDMS/issues/133) merged）→ 可實測 DM 角色/可見對象指派 end-to-end（含自我保護 DM_ROLE_001、SRVDP003 稽核）**；**ET 未開發 → ET 區 fail-closed 隱藏**，待 ET 落地註冊 provider 後自動接上（US7 程式碼與 body 皆不需再改）。原「全程 stub、待 T049」前提已隨 DM US1 交付而部分解除。
 - ⚠️ **admin 授權閘 + 模組過濾（同 #5 / #6 SA Q，開發前釐清）**：模組過濾依 T017 `is_module_admin`（fail-closed stub）；沿用 US4 / US5 裁示（暫行僅 `get_jwt_payload` 認證、admin 閘待 T049）或掛 `require_module_admin` + stub 驗；待 `/sti-plan` 對齊一致策略。
 - **DP 為轉接、非權威**：DP MUST NOT 自持指派資料 / 全域 RBAC / 角色能力定義；僅呼叫模組 service + 呈現模組錯誤。自我保護、至少-1-管理者、標籤值合法性**判定皆在模組**（contracts §3），DP 不重複實作。
 - **稽核由模組側寫**（FR-07、contracts §3）：指派異動之 `DP_AUDIT_LOG` 由**模組**於同交易呼叫 `SRVDP003`（事件歸屬各自 MODULE），DP 端不重複寫；stub 期以 stub 內呼叫驗證或標記待回歸。
@@ -990,6 +990,7 @@ DP 模組**收尾整合驗收**：以跨 US 端到端整合測試驗證各 Succe
 | 2026-07-27 | US8 交付前自檢（`/sti-sa-precheck #8`）：結論規格齊備、無必補；補 2 項澄清進 Issue #8 body ——「強制變更沿用同一 `PUT /me/password` 端點、仍需舊密碼」+「Email 變更驗證落點頁 `/verify-email-change`（沿用 US3 免登入落點頁殼）」。data-model / wireframe / 契約（SRVDP002 非 stub）皆已齊備。另決議將 [#77](https://github.com/sti-fhb/EDMS/issues/77)（密碼規則提示動態化）**核心併入 US8**：建公開 `GET /api/password-policy` 端點 + `usePasswordPolicy` hook，US8 變更密碼頁提示數字動態讀 `PWD_POLICY`；#77 收斂為 retrofit US2 / US3 |
 | 2026-07-29 | US8（#83 / PR #87）與 #77（PR #90）已合併進 main；依增量模式補入 Issue #9（通知範本維護 / US9 / dp-templates）完整 body（T040~T041）：既有 `DP_NOTIFY_TEMPLATE` 表 + 種子（#0）之 MODULE 過濾維護（A-strict，比照 US5）、`IS_SYSTEM` 系統信保護（不可停用 / 刪除）、`VERSION` 樂觀鎖（衝突 409）、無新增 / 刪除範本、稽核；無新表 / migration；填實 `TemplatesPage` stub；error codes 建議 `DP_MAIL_003`（系統信保護）/ `DP_MAIL_004`（版本衝突）、越權重用 `DP_AUTH_006`；特權判定同 stub 過渡待 T049 |
 | 2026-07-29 | US9 交付前自檢（`/sti-sa-precheck #9`）修 1 必補：spec_us9 FR-03 / AC4 / 前置依賴之「DP 系統信 3 支」→ **4 支**（補 `ACCOUNT_VERIFY` 帳號註冊驗證，對齊 data-model / wireframe / 實際 seed），並改為**系統信保護依 `IS_SYSTEM` 旗標判定、不硬編碼 `TEMPLATE_CODE` 清單**；Issue #9 body 同步（前置 4 支 + 注意事項旗標驅動 + 樂觀鎖 409 回最新版本 + CHANNEL 站內為前瞻欄位）|
+| 2026-08-07 | Issue #7（US7 dp-roles）body 對齊：DM US1（[#133](https://github.com/sti-fhb/EDMS/issues/133)）已交付合併，故將原「全程 stub、完整驗收待 T049」之**快照式**前提改為**不變框架**——US7 泛用消費 `core/module_assign.py` `module_assign_registry`（US1 建，generic `ModuleAssignProvider`：`get_users_assignments` / `assign` / `list_controlled` / `list_audiences`），**已註冊模組整合、未註冊 fail-closed**；當下 DM real（可 end-to-end 驗）、ET fail-closed（未開發）。ET 落地後自動接上、US7 不需再改（body 與程式碼皆不重寫）。registry 名由原「`core/module_roles.py` 或類似」更正為 `core/module_assign.py`。尚未開立 GitHub issue |
 | 2026-07-29 | US9 開發手測回饋修正：(1) DP 系統信實為 **5 支**（precheck 仍漏 `ACCOUNT_INVITE` 帳號邀請 / US4 #67）—— data-model / spec_us9 / issues.md「4 支」全數更正為 5、補 `ACCOUNT_INVITE`；(2) 範本 `VARIABLES` 加中文名稱（自描述，migration `9b309342e9f3` 更新 5 支 DP 範本，比照 US5 PARAM_NAME）；(3) 前端管道 label「站內→系統內部、兩者→系統內部+email」；`PWD_EXPIRY_REMIND` 之寄送待 US11 SCHDP001（排程未實作）|
 | 2026-07-29 | US9（#92 / PR #95）已合併進 main；依增量模式補入 Issue #10（操作記錄查詢 / US10 / dp-audit）完整 body（T042~T043）：唯讀多條件查詢（操作者 / 期間起訖 / 模組 / 操作類別）+ 後端分頁時間倒序 + 明細前後值（JSON）+ CSV 匯出；**與 US5/US9 關鍵差異＝不分模組共用可見**（兩管理者皆查全部，`模組`僅為查詢條件非存取控制）；append-only、後端無刪改端點、ROW_HASH 鏈由寫入端維護（查詢頁不驗鏈）；無新表 / migration（表 + `AuditLogService` 寫入於 #0 已建）；填實 `AuditPage` stub；「僅管理者 AUDIT-002」vs 暫行案 A 之 interim 姿態列為 SA Q（傾向方案 A、gate 待 T049）；error codes 越權建議重用 `DP_AUTH_006` 或新增 `DP_AUDIT_001`；總覽 #10 主要前置補 `#0`（原僅列 #2）|
 | 2026-07-29 | US10 交付前自檢（`/sti-sa-precheck dp us10`）修 2 必補一致性缺口：(1) **`RESULT`（執行結果 SUCCESS/FAIL）+ `DESCRIPTION`（事件描述）**——data-model 有欄、FR-05 明訂記錄、SRVDP003 已寫入，但 spec_us10 AC2 / wireframe 明細 modal 皆漏呈現 → spec_us10 AC1/AC2/FR-02 補為查詢條件 + 列表欄 + 明細欄，wireframe `dp-audit` 查詢列補「執行結果」下拉、列表補「結果」欄（加登入 FAIL 示例）、明細 modal 補執行結果 / 事件描述兩列；(2) **「JSONB」用語收斂**——spec_us10（AC2/FR-02）+ wireframe（內部註記 + 明細 label）之「JSONB」改「JSON 字串（`TEXT` 欄）」，對齊 data-model / spec.md / research §6。Issue #10 body 同步（T042/T043 範圍 + AC + 注意事項）|
