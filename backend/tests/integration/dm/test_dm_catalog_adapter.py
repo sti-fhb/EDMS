@@ -90,7 +90,7 @@ async def test_maintenance_writes_audit(db):
     cnt = await db.scalar(
         text(
             'SELECT count(*) FROM "DP_AUDIT_LOG" '
-            "WHERE \"MODULE\"='DM' AND \"FUNC_NAME\"='DM-CATALOG' AND \"TARGET_ID\"=:t"
+            'WHERE "MODULE"=\'DM\' AND "FUNC_NAME"=\'DM-CATALOG\' AND "TARGET_ID"=:t'
         ),
         {"t": "ZTAU"},
     )
