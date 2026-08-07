@@ -21,7 +21,7 @@
 | # | 標題 | 對應 | 階段 | 涵蓋 Tasks | 主要前置 | GitHub # | 狀態 |
 |---|------|------|------|-----------|---------|----------|------|
 | 0 | 專案建置與文件管理基礎建設 | — | Setup + Foundational | T001 ~ T020a（含 13 表 migration + 業務種子 + SSO 存取閘 / 授權 / 檔案 / DOC_ID / 通知接線 / 狀態機 / 可見性）| 平台 DP #0~#12（已交付）| [#127](https://github.com/sti-fhb/EDMS/issues/127) | 🚀 已開立 [#127](https://github.com/sti-fhb/EDMS/issues/127) |
-| 1 | 系統設定（轉接層模組端 + 業務規則 + 種子驗證）| US1 / UCDM11 | P1-核心 | T024 ~ T027b | #0；DP dp-params / dp-roles / dp-templates | — | 📝 body 已撰寫（待 /sti-plan → 開立）|
+| 1 | 系統設定（轉接層模組端 + 業務規則 + 種子驗證）| US1 / UCDM11 | P1-核心 | T024 ~ T027b | #0；DP dp-params / dp-roles / dp-templates | [#133](https://github.com/sti-fhb/EDMS/issues/133) | 🚀 已開立 [#133](https://github.com/sti-fhb/EDMS/issues/133) |
 | 2 | 文件庫與檢索 | US3 / UCDM03 | P1-核心 | T028 ~ T030 | #0, #4 | — | 待補 |
 | 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 ~ T034 | #0 | — | 待補 |
 | 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039 | #0 | — | 待補 |
@@ -116,7 +116,7 @@
 
 ---
 
-## Issue #1：[P1-核心] DM — 系統設定（轉接層模組端 + 業務規則 + 種子驗證）
+## Issue #1：[P1-核心] DM — 系統設定（轉接層模組端 + 業務規則 + 種子驗證）（GitHub [#133](https://github.com/sti-fhb/EDMS/issues/133)）
 
 **對應規格**：[spec_us1.md](spec_us1.md)（FR-001~010 / UCDM11）；[../dp/contracts/module-callbacks.md](../dp/contracts/module-callbacks.md) §3（角色 / 可見對象指派回呼）、§4（`has_any_role`）；[data-model.md](data-model.md)（`DM_USER_ROLE` / `DM_USER_ROLE_LOG` / `DM_USER_TAG` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`）
 **對應畫面**：**無獨立 DM 畫面**——維護 UI 全在平台 DP 系統管理後台，按 `MODULE=DM` / `DM_` 前綴過濾：「權限管理」（角色 + 可見對象指派）、「系統參數與清單」（分類 / func_name / 標籤 / 催辦門檻）、「通知範本」（9 事件）
@@ -139,8 +139,8 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ### 範圍
 
 **後端 — 權限轉接層（T026，FR-005 / 006 / 008）**：
-- 實作 [module-callbacks.md](../dp/contracts/module-callbacks.md) §3 `get_users_roles_audiences(user_ids)` → `dict[user_id, DmRoleAudienceView]`（`roles` ⊂ {ADMIN/EDITOR/REVIEWER/VIEWER}、`audiences`＝`DP_PARAM` `DM_` 前綴之 PARAM_KEY 集、`last_modified_by/date` 取自模組表 `UPDATED_*`）；**批次**載入一頁使用者避 N+1、查無指派回**空集合 View**（非缺 key）
-- `assign_roles_audiences(user_id, roles, audiences, operator_id)`：寫 `DM_USER_ROLE` + `DM_USER_ROLE_LOG`（append-only 異動）、**即時生效**、記「最後異動」；**自我保護**（operator 取消自己管理者角色 → raise `AppError` `DM_ROLE_001`，DP 端映射 `DP-MSG-ROLES-001`）；**不檢核**「至少 1 名管理者」；audience 值 MUST 屬 `DP_PARAM` 啟用中清單（寫入前檢核）；**同交易**呼叫 SRVDP003 寫稽核（`MODULE=DM`）
+- 實作 [module-callbacks.md](../dp/contracts/module-callbacks.md) §3 `get_users_roles_audiences(user_ids)` → `dict[user_id, DmRoleAudienceView]`（`roles` ⊂ {ADMIN/EDITOR/REVIEWER/VIEWER}、`audiences`＝`DM_TAG`（AUDIENCE 組）之 `TAG_ID` 集〔DM 自持表，非 DP_PARAM〕、`last_modified_by/date` 取自模組表 `UPDATED_*`）；**批次**載入一頁使用者避 N+1、查無指派回**空集合 View**（非缺 key）
+- `assign_roles_audiences(user_id, roles, audiences, operator_id)`：寫 `DM_USER_ROLE` + `DM_USER_ROLE_LOG`（append-only 異動）、**即時生效**、記「最後異動」；**自我保護**（operator 取消自己管理者角色 → raise `AppError` `DM_ROLE_001`，DP 端映射 `DP-MSG-ROLES-001`）；**不檢核**「至少 1 名管理者」；audience 值 MUST 屬 `DM_TAG`（AUDIENCE 組、`IS_ENABLED=true`）啟用中清單（寫入前檢核）；**同交易**呼叫 SRVDP003 寫稽核（`MODULE=DM`）
 - §4 `has_any_role(user_id)`：入口頁 DM 卡狀態 + 側欄 DM 組可見性判定（包裝 #127 `authz.has_any_dm_role`）
 - 回呼註冊至 DP 呼叫之 registry（與 ET 同機制）
 
@@ -149,7 +149,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - AUDIENCE 值停用採 **soft-retire**（包裝 #127 `CatalogService.soft_retire_audience_tag`）：既有文件 / 授權可見性不變、僅停後續指派，回傳受影響文件 / 閱覽者數
 
 **後端 — catalog 轉接層（T024，FR-001 / 002 / 003）**：
-- 供 DP「系統參數與清單」維護 DM 分類 / func_name / 標籤之模組端回呼（包裝 #127 `CatalogService`）：新增 / 改名 / 啟停、**不開放刪除**、分類碼英數唯一 + 建立後鎖定（`DM_CATALOG_003` / `001`）、停用後既有引用 100% 保留
+- 實作 [module-callbacks.md §3.1](../dp/contracts/module-callbacks.md)（`list_controlled` / `create_controlled` / `rename_controlled` / `set_controlled_enabled` / `list_audiences`），供 DP「系統參數與清單」維護 DM 分類 / func_name / 標籤（包裝 #127 `CatalogService`）：新增 / 改名 / 啟停、**不開放刪除**、分類碼英數唯一 + 建立後鎖定（`DM_CATALOG_003` / `001`）、停用後既有引用 100% 保留；`list_audiences` 供權限管理可見對象核取清單
 
 **後端 — 參數 / 範本維護驗證（T025 / T027 / T027b，FR-004 / 007）**：
 - 催辦門檻 `DP_PARAM.DM_REMIND_THRESHOLD`（1–30、預設 7）、每週執行時間 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（`星期,HH:MM`、預設 `週一,10:00`，供 SCHDM001 讀取）、9 通知範本（`MODULE=DM`，「文件發布通知」＝撰寫者+相符閱覽者、「KPI 週報」「未讀提醒」＝僅 Email、自動催辦含門檻）——皆 #127 已種；本 Issue **驗證**經 DP 後台按模組過濾可正確維護（值域校驗落點依 `/sti-plan`）
@@ -168,7 +168,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 - [ ] DP 後台「權限管理」（DM 模組）經 `get_users_roles_audiences` 批次列出使用者之 DM 4 角色 + 可見對象 + 「最後異動」
 - [ ] 指派 / 取消角色即時生效、寫 `DM_USER_ROLE_LOG`、同交易 SRVDP003 稽核（`MODULE=DM`）；管理者取消自己 → `DM_ROLE_001`（DP 顯示 `DP-MSG-ROLES-001`）；管理者間可互相停用、不檢核「至少 1 名管理者」
-- [ ] 可見對象授權指派即時生效、寫異動；AUDIENCE 值停用 soft-retire 回傳受影響文件 / 閱覽者數、既有可見性不變；audience 值非 `DP_PARAM` 啟用清單則拒絕
+- [ ] 可見對象授權指派即時生效、寫異動；AUDIENCE 值停用 soft-retire 回傳受影響文件 / 閱覽者數、既有可見性不變；audience 值非 `DM_TAG`（AUDIENCE 組）啟用清單則拒絕
 - [ ] DP 後台「系統參數與清單」（DM 模組）可維護 DM 分類 / func_name / 標籤（新增 / 改名 / 啟停、**不刪除**、分類碼英數唯一 + 建立後鎖定）；停用後既有文件引用保留
 - [ ] 催辦門檻（1–30、預設 7）、每週執行時間（預設 `週一,10:00`）經 DP 後台按模組過濾維護、經 SRVDP001 讀回正確
 - [ ] 9 通知範本（`MODULE=DM`）經 DP 後台「通知範本」按模組過濾可編輯主旨 / 內文 / 啟停；只見 / 只改 `MODULE=DM` 的列
@@ -217,3 +217,4 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 | 2026-08-05 | Issue #0（Foundation）已開立為 GitHub [#127](https://github.com/sti-fhb/EDMS/issues/127)（labels `priority:P0` + `DM-文件管理`），回填總覽表 GitHub # 欄與 body header |
 | 2026-08-06 | Issue #0（#127）已交付合併（PR #129）。撰寫 Issue #1（US1 系統設定）完整 body：對應 spec_us1 FR-001~010 + module-callbacks §3/§4；涵蓋 T024~T027b。**切分要點**：US1 無獨立 DM 畫面（維護 UI 全在 DP 後台按模組過濾），淨新增主體為權限 / 可見對象**轉接層回呼**（`get_users_roles_audiences` / `assign_roles_audiences` / `has_any_role`）+ catalog 轉接層，其餘為 #127 已種之範本 / 參數 / 分類之維護驗證。Labels `P1-核心` + `DM-文件管理` + `US1` |
 | 2026-08-06 | US1 交付前自檢（`/sti-sa-precheck dm us1`）3 必補（皆 #127 集中化修正未回傳造成的 drift）：**(1)** spec_us1 開頭「定義存 DP_PARAM」措辭過寬 → 對齊 spec.md §跨模組共用規則（分類/func/標籤/可見對象＝DM 自持表）；**(2)** module-callbacks §3 `DmRoleAudienceView.audiences` 來源 DP_PARAM → `DM_TAG`（AUDIENCE 組）TAG_ID；**(3)** 新增 module-callbacks §3.1 catalog 轉接層契約（受控主檔維護 + `list_audiences` + AUDIENCE soft-retire 觸發落點）。開工前 3 項 SA Q 已定案 2 項（catalog 轉接層 / soft-retire 落點），剩「參數值域校驗落點」待 `/sti-plan` |
+| 2026-08-06 | Issue #1（US1）開立為 GitHub [#133](https://github.com/sti-fhb/EDMS/issues/133)（labels `P1-核心` + `DM-文件管理` + `US1`），回填總覽表與 body header。開立前同步修正 Issue #1 body 內殘留 drift（範圍/驗收條件之 `audiences`＝DP_PARAM → `DM_TAG` TAG_ID、catalog 轉接層引 §3.1），與交付前自檢後之 spec_us1 / module-callbacks 一致 |
