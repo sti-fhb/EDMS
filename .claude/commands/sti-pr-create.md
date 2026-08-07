@@ -16,7 +16,7 @@
 
 | 參數 | 說明 | 範例 |
 |------|------|------|
-| `#Issue編號` | 關聯的 Issue 編號（選填，自動帶入 `close #xx`）| `/sti-pr-create #25` |
+| `#Issue編號` | 關聯的 Issue 編號（選填，自動帶入 `Refs #xx`）| `/sti-pr-create #25` |
 
 ---
 
@@ -61,7 +61,7 @@ git log HEAD..origin/main --oneline
 
 **優先順序**：
 - 若 `$ARGUMENTS` 有傳入 Issue 編號 → 直接使用
-- 否則，從 git log 掃描 `close #xx` 找出 Issue 編號：
+- 否則，從 git log 掃描 `refs #xx` 找出 Issue 編號：
   ```bash
   git log main..HEAD --oneline | grep -oE "#[0-9]+" | head -1
   ```
@@ -90,7 +90,7 @@ cat .github/pull_request_template.md
 ```
 
 以 template 結構為 body 骨架，將蒐集到的資訊填入對應欄位：
-- `## 對應 Issue` → 填入 `Closes #{Issue編號}`
+- `## 對應 Issue` → 填入 `Refs #{Issue編號}`（**不可用 `Closes`**：PR body 的關閉關鍵字同樣會讓 merge 自動關閉 issue）
 - `## 變更說明` → 填入本次變更摘要（從 commit 歷史與 Issue 說明整理）
 - `## 變更類型` → 勾選對應類型（`- [x]`）
 - `## PR Checklist` → 保留所有項目為 `- [ ]`（由人工逐項確認）
@@ -144,7 +144,7 @@ gh api repos/{owner}/{repo}/collaborators --jq '.[].login'
 gh pr create --title "{標題}" --base {目標分支} --body "$(cat <<'EOF'
 ## 對應 Issue
 
-Closes #{Issue編號}
+Refs #{Issue編號}
 
 ## 變更說明
 

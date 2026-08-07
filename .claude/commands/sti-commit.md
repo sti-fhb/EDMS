@@ -146,7 +146,7 @@ git log main..HEAD --oneline | grep -oE "#[0-9]+" | head -1
 ```
 {type}: {描述}
 
-[close #{Issue編號}]
+[refs #{Issue編號}]
 ```
 
 ---
@@ -164,7 +164,7 @@ git log main..HEAD --oneline | grep -oE "#[0-9]+" | head -1
 
 Message：
   {type}: {描述}
-  [close #{Issue編號}]
+  [refs #{Issue編號}]
 ```
 
 詢問使用者：
