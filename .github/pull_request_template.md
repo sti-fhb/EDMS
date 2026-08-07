@@ -1,8 +1,11 @@
 ## 對應 Issue
 
-<!-- 填入對應的 Issue 編號，例如 Closes #123 -->
+<!-- 填入對應的 Issue 編號，例如 Refs #123 -->
+<!-- ⚠️ 請勿使用 Closes / Fixes / Resolves——本專案不讓 merge 自動關閉 issue，
+     改由合併後執行 /sti-issue-close 完成盤點與收尾摘要後才關閉。
+     見 .claude/rules/sti-issue-close-checklist.md「觸發時機」 -->
 <!-- 若無對應 Issue 可刪除此段 -->
-Closes #
+Refs #
 
 ## 變更說明
 

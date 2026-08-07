@@ -669,7 +669,7 @@ rm -f /tmp/review-local-${BRANCH_SLUG}-meta.json /tmp/review-local-${BRANCH_SLUG
 > 若步驟 11 設 `CI_SKIPPED=true`，在委派 `/sti-commit` 的 commit 描述與 `/sti-pr-create` 的變更說明中標註「⚠️ Local CI 已跳過」。
 
 - **選擇 1** → 依序委派：
-  1. 執行 **`/sti-commit`** 流程（在 `{WORKTREE}` 下）：走其步驟 2 安全檢查 → 選檔 → commit（type 由使用者選，建議帶入 Issue 標題與 `close #{Issue 編號}`）→ push。
+  1. 執行 **`/sti-commit`** 流程（在 `{WORKTREE}` 下）：走其步驟 2 安全檢查 → 選檔 → commit（type 由使用者選，建議帶入 Issue 標題與 `refs #{Issue 編號}`——**不可用 `close`**，否則 merge 會自動關閉 issue、繞過 `/sti-issue-close` 的盤點）→ push。
   2. commit + push 完成後，執行 **`/sti-pr-create #{Issue 編號}`**：預設 draft，由其讀 `.github/pull_request_template.md`、從 Issue 自動預填、建立 Draft PR 並顯示下一步指引。
 - **選擇 2** → 只委派 **`/sti-commit`**（commit + push），完成後提示：
   ```

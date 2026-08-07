@@ -4,6 +4,23 @@ description: Close GitHub Issue 前的強制檢查 SOP，避免漏接早期留�
 
 # Close GitHub Issue 強制檢查 SOP
 
+## 觸發時機（何時該跑這套 SOP）
+
+**PR 合併後，issue 仍為 open —— 此時執行 `/sti-issue-close #{編號}` 完成盤點、貼收尾摘要並關閉。**
+
+本專案**刻意不讓 merge 自動關閉 issue**：
+
+| 位置 | 寫法 | 原因 |
+|------|------|------|
+| commit message | `refs #{編號}` | `close` / `fix` / `resolve` 系列關鍵字會讓 merge 自動關閉 |
+| PR body「對應 Issue」 | `Refs #{編號}` | PR body 的關閉關鍵字同樣會觸發自動關閉 |
+
+> **為什麼要這樣設計**：2026-08-06 盤點發現，EDMS 已關閉的 31 張 DP issue 中只有 9 張附收尾摘要，母專案 TBMS 更低（40 張中 6 張）。追查後確認**沒有人執行過 `/sti-issue-close`** —— 那些摘要全是事後憑印象補的。根因是 `Closes #NNN` 讓 issue 在 merge 當下就關掉，本 SOP 的觸發時機從未被定義，寫摘要因此永遠是可跳過的額外工作。
+>
+> 改為 `Refs` 後，**issue 會停留在 open 直到有人跑完本 SOP** —— 未關閉的狀態本身就是待辦訊號，寫摘要落在「關閉 issue」的必經路徑上，而非靠當下記不記得。
+
+**例外**：非開發型 issue（如純討論、重複、不修）可直接 `gh issue close`，不需盤點。
+
 ## 為何需要此規則
 
 GitHub Issue 經過多個 PR、多輪 review 累積留言時，容易發生：

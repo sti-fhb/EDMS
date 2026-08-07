@@ -49,7 +49,8 @@
 
 偵測優先順序：
 1. `$ARGUMENTS` 傳入的 Issue 編號（優先）
-2. 掃描 git log 找出 `close #xx`：
+2. 掃描 git log 找出 `refs #xx`：
+   > 用 `refs` 而非 `close`：後者會讓 merge 自動關閉 issue，繞過 `/sti-issue-close` 的盤點 SOP。
    ```
    git log main..HEAD --oneline | grep -oE "#[0-9]+" | head -1
    ```
