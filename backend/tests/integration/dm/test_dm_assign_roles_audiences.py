@@ -105,13 +105,39 @@ async def test_assign_audience_and_disabled_rejected(db):
     assert e.value.error_code == "DM_ROLE_002"
 
 
-async def test_assign_writes_audit(db):
-    """指派於同交易寫 SRVDP003 稽核（MODULE=DM）。"""
+async def _audit_count(db, target: str) -> int:
     from sqlalchemy import text
 
-    await _svc.assign_roles_audiences(db, user_id="AS_AUD", roles={DM_EDITOR}, audiences=set(), operator_id="ADMIN")
-    cnt = await db.scalar(
-        text('SELECT count(*) FROM "DP_AUDIT_LOG" WHERE "MODULE"=\'DM\' AND "TARGET_ID"=:t'),
-        {"t": "AS_AUD"},
+    return await db.scalar(
+        text('SELECT count(*) FROM "DP_AUDIT_LOG" WHERE "MODULE"=\'DM\' AND "TARGET_ID"=:t'), {"t": target}
     )
-    assert cnt >= 1
+
+
+async def test_assign_writes_audit(db):
+    """指派於同交易寫 SRVDP003 稽核（MODULE=DM）。"""
+    await _svc.assign_roles_audiences(db, user_id="AS_AUD", roles={DM_EDITOR}, audiences=set(), operator_id="ADMIN")
+    assert await _audit_count(db, "AS_AUD") >= 1
+
+
+async def test_invalid_role_rejected(db):
+    """角色非 DM_ROLES enum → DM_ROLE_003。"""
+    with pytest.raises(AppError) as e:
+        await _svc.assign_roles_audiences(db, user_id="AS_IR", roles={"BOGUS"}, audiences=set(), operator_id="ADMIN")
+    assert e.value.error_code == "DM_ROLE_003"
+
+
+async def test_non_numeric_audience_rejected(db):
+    """可見對象值非數字 TAG_ID → DM_ROLE_002（不丟 500）。"""
+    with pytest.raises(AppError) as e:
+        await _svc.assign_roles_audiences(
+            db, user_id="AS_NA", roles={DM_EDITOR}, audiences={"abc"}, operator_id="ADMIN"
+        )
+    assert e.value.error_code == "DM_ROLE_002"
+
+
+async def test_noop_assign_writes_no_audit(db):
+    """目標集合與現況相同（無 diff）→ 不新增稽核。"""
+    await _svc.assign_roles_audiences(db, user_id="AS_NOOP", roles={DM_EDITOR}, audiences=set(), operator_id="ADMIN")
+    before = await _audit_count(db, "AS_NOOP")
+    await _svc.assign_roles_audiences(db, user_id="AS_NOOP", roles={DM_EDITOR}, audiences=set(), operator_id="ADMIN")
+    assert await _audit_count(db, "AS_NOOP") == before

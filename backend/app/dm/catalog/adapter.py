@@ -18,6 +18,7 @@ from app.core.module_assign import ControlledItemView, SetEnabledResult
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
 from app.dm.catalog.service import CatalogService
+from app.services import AuditLogService
 
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
 _KINDS = ("CATEGORY", "FUNC", "TAG")
@@ -25,10 +26,15 @@ _AUDIENCE = "AUDIENCE"
 
 
 class CatalogAdapter:
-    """受控主檔維護轉接層（§3.1）；分類委派 CatalogService，func / tag 於此落地。"""
+    """受控主檔維護轉接層（§3.1）；分類委派 CatalogService，func / tag 於此落地。
 
-    def __init__(self, catalog: CatalogService | None = None) -> None:
+    維護異動（新增 / 改名 / 啟停 / soft-retire）於同交易呼叫 SRVDP003 寫稽核（`MODULE=DM`），
+    與角色指派一致（module-callbacks §3.1）。
+    """
+
+    def __init__(self, catalog: CatalogService | None = None, audit: AuditLogService | None = None) -> None:
         self._catalog = catalog or CatalogService()
+        self._audit = audit or AuditLogService()
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False
@@ -68,19 +74,18 @@ class CatalogAdapter:
         _ensure_kind(kind)
         if kind == "CATEGORY":
             await self._catalog.create_category(db, code=code, name=name, operator=operator_id)
-            return
-        if kind == "FUNC":
+        elif kind == "FUNC":
             _ensure_code(code)
             if await db.scalar(select(DmFunc.func_code).where(DmFunc.func_code == code)) is not None:
                 raise AppError(status_code=409, detail="受控項目代碼已存在", error_code="DM_CATALOG_001")
             db.add(DmFunc(func_code=code, func_name=name, created_user=operator_id, created_date=utcnow()))
             await db.flush()
-            return
-        # TAG：code 為所屬標籤組
-        if await db.scalar(select(DmTagGroup.tag_group_code).where(DmTagGroup.tag_group_code == code)) is None:
-            raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
-        db.add(DmTag(tag_group_code=code, tag_name=name, created_user=operator_id, created_date=utcnow()))
-        await db.flush()
+        else:  # TAG：code 為所屬標籤組
+            if await db.scalar(select(DmTagGroup.tag_group_code).where(DmTagGroup.tag_group_code == code)) is None:
+                raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+            db.add(DmTag(tag_group_code=code, tag_name=name, created_user=operator_id, created_date=utcnow()))
+            await db.flush()
+        await self._log(db, "CREATE", operator_id, target=code, after={"kind": kind, "name": name})
 
     async def rename_controlled(
         self, db: AsyncSession, kind: str, *, code: str, new_name: str, operator_id: str
@@ -89,43 +94,68 @@ class CatalogAdapter:
         _ensure_kind(kind)
         if kind == "CATEGORY":
             await self._catalog.rename_category(db, code=code, new_name=new_name, operator=operator_id)
-            return
-        obj = await self._require(db, kind, code)
-        if kind == "FUNC":
-            obj.func_name = new_name
         else:
-            obj.tag_name = new_name
-        obj.updated_user, obj.updated_date = operator_id, utcnow()
-        await db.flush()
+            obj = await self._require(db, kind, code)
+            if kind == "FUNC":
+                obj.func_name = new_name
+            else:
+                obj.tag_name = new_name
+            obj.updated_user, obj.updated_date = operator_id, utcnow()
+            await db.flush()
+        await self._log(db, "UPDATE", operator_id, target=code, after={"kind": kind, "name": new_name})
 
     async def set_controlled_enabled(
         self, db: AsyncSession, kind: str, *, code: str, enabled: bool, operator_id: str
     ) -> SetEnabledResult:
         """啟停（不刪除；停用後既有引用保留）。AUDIENCE 標籤停用採 soft-retire、回傳受影響數。"""
         _ensure_kind(kind)
+        after = {"kind": kind, "enabled": enabled}
         if kind == "CATEGORY":
             await self._catalog.set_category_enabled(db, code=code, enabled=enabled, operator=operator_id)
+            await self._log(db, "UPDATE", operator_id, target=code, after=after)
             return SetEnabledResult()
         obj = await self._require(db, kind, code)
         if kind == "TAG" and not enabled:
             group = await db.scalar(select(DmTagGroup).where(DmTagGroup.tag_group_code == obj.tag_group_code))
             if group is not None and group.group_type == _AUDIENCE:
-                r = await self._catalog.soft_retire_audience_tag(db, tag_id=int(code), operator=operator_id)
+                r = await self._catalog.soft_retire_audience_tag(db, tag_id=_tag_id(code), operator=operator_id)
+                await self._log(db, "UPDATE", operator_id, target=code, after={**after, "soft_retire": True})
                 return SetEnabledResult(affected_docs=r.affected_docs, affected_viewers=r.affected_viewers)
         obj.is_enabled = enabled
         obj.updated_user, obj.updated_date = operator_id, utcnow()
         await db.flush()
+        await self._log(db, "UPDATE", operator_id, target=code, after=after)
         return SetEnabledResult()
 
+    async def _log(self, db: AsyncSession, action_type: str, operator_id: str, *, target: str, after: dict) -> None:
+        """受控主檔維護異動於同交易寫 SRVDP003 稽核（MODULE=DM）。"""
+        await self._audit.log_action(
+            db,
+            module="DM",
+            func_name="DM-CATALOG",
+            action_type=action_type,
+            result="SUCCESS",
+            operator_id=operator_id,
+            target_id=target,
+            after_value=after,
+        )
+
     async def _require(self, db: AsyncSession, kind: str, code: str):
-        """取 FUNC / TAG 物件；查無 404 DM_CATALOG_002。"""
+        """取 FUNC / TAG 物件；查無 / 代碼格式非法 404 DM_CATALOG_002。"""
         if kind == "FUNC":
             obj = await db.scalar(select(DmFunc).where(DmFunc.func_code == code))
         else:
-            obj = await db.scalar(select(DmTag).where(DmTag.tag_id == int(code)))
+            obj = await db.scalar(select(DmTag).where(DmTag.tag_id == _tag_id(code)))
         if obj is None:
             raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
         return obj
+
+
+def _tag_id(code: str) -> int:
+    """TAG code（TAG_ID 字串）轉 int；非數字 → 404 DM_CATALOG_002（避免 int() 丟未攔截 500）。"""
+    if not code.isdigit():
+        raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+    return int(code)
 
 
 def _ensure_kind(kind: str) -> None:

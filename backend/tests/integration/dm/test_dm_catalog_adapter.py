@@ -82,6 +82,28 @@ async def test_list_audiences_only_audience_group(db):
     assert len(auds) >= 1 and all(a.group_type == "AUDIENCE" for a in auds)
 
 
+async def test_maintenance_writes_audit(db):
+    """受控主檔維護（新增 / 改名 / 啟停）於同交易寫 SRVDP003 稽核（MODULE=DM / DM-CATALOG）。"""
+    from sqlalchemy import text
+
+    await _svc.create_controlled(db, "CATEGORY", code="ZTAU", name="稽核類", operator_id="admin")
+    cnt = await db.scalar(
+        text(
+            'SELECT count(*) FROM "DP_AUDIT_LOG" '
+            "WHERE \"MODULE\"='DM' AND \"FUNC_NAME\"='DM-CATALOG' AND \"TARGET_ID\"=:t"
+        ),
+        {"t": "ZTAU"},
+    )
+    assert cnt >= 1
+
+
+async def test_non_numeric_tag_code_rejected(db):
+    """TAG 操作之 code 非數字 → 404 DM_CATALOG_002（不丟 500）。"""
+    with pytest.raises(AppError) as e:
+        await _svc.set_controlled_enabled(db, "TAG", code="abc", enabled=False, operator_id="admin")
+    assert e.value.error_code == "DM_CATALOG_002"
+
+
 async def test_provider_registered(db):
     """DM provider 已註冊進 module_assign_registry。"""
     register_dm_module()

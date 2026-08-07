@@ -21,7 +21,7 @@ from app.core.module_assign import AssignmentView
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.roles.authz import ensure_not_self_admin_removal
+from app.dm.roles.authz import DM_ROLES, ensure_not_self_admin_removal
 from app.dm.roles.models import DmUserRole, DmUserRoleLog
 from app.services import AuditLogService
 
@@ -79,12 +79,17 @@ class AssignService:
         Raises:
             AppError: operator 取消自己之管理者角色（403 DM_ROLE_001）、可見對象無效 / 未啟用（422 DM_ROLE_002）。
         """
+        # 輸入防呆（本轉接層為 DM_USER_ROLE / DM_USER_TAG 之權威寫入口，不信任呼叫端）
+        _ensure_valid_roles(roles)
+        _ensure_numeric_ids(audiences)
         # 自我保護先於任何寫入：若 operator 對自己儲存之角色集不含 DM_ADMIN 即拒絕
         ensure_not_self_admin_removal(operator_id, user_id, roles)
 
         current = (await self.get_users_roles_audiences(db, [user_id]))[user_id]
         roles_add, roles_remove = roles - current.roles, current.roles - roles
         aud_add, aud_remove = audiences - current.groups, current.groups - audiences
+        if not (roles_add or roles_remove or aud_add or aud_remove):
+            return  # 無實際異動：不寫入、不記稽核（僅記真正的指派異動）
 
         await self._validate_audiences_enabled(db, aud_add)
 
@@ -101,8 +106,8 @@ class AssignService:
         await self._audit.log_action(
             db,
             module="DM",
-            func_name="ROLES",
-            action_type="ASSIGN",
+            func_name="DM-ROLES",
+            action_type="UPDATE",
             result="SUCCESS",
             operator_id=operator_id,
             target_id=user_id,
@@ -168,6 +173,18 @@ class AssignService:
         valid_ids = set(valid.scalars())
         if ints - valid_ids:
             raise AppError(status_code=422, detail="指定之可見對象無效或未啟用", error_code="DM_ROLE_002")
+
+
+def _ensure_valid_roles(roles: set[str]) -> None:
+    """角色 MUST 屬固定 enum DM_ROLES；否則 DM_ROLE_003。"""
+    if roles - DM_ROLES:
+        raise AppError(status_code=422, detail="指定之角色代碼無效", error_code="DM_ROLE_003")
+
+
+def _ensure_numeric_ids(tag_ids: set[str]) -> None:
+    """可見對象值 MUST 為數字 TAG_ID；否則 DM_ROLE_002（避免 int() 轉型丟未攔截 500）。"""
+    if any(not t.isdigit() for t in tag_ids):
+        raise AppError(status_code=422, detail="指定之可見對象無效或未啟用", error_code="DM_ROLE_002")
 
 
 def _track_last(
