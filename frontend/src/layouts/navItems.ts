@@ -4,9 +4,13 @@ export interface NavItem {
   path: string
 }
 
+/** 模組門檻：需具該模組任一角色才顯示此群組（經 module-summary 判定）。未設＝恆顯示。 */
+export type ModuleKey = "DM" | "ET"
+
 export interface NavGroup {
   title: string
   items: readonly NavItem[]
+  requiresModule?: ModuleKey
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
@@ -23,8 +27,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
   {
     // 文件管理（#127 Foundation）：對齊 wireframe DM 側欄 6 項；各頁目前為骨架佔位。
-    // 權限可見性（如管理者專屬項）於後續 US 依 DM 角色決定顯示與否，此處先全列。
+    // requiresModule=DM（US1）：無任一 DM 角色者，整個群組不顯示（module-summary 判定）。
     title: "文件管理",
+    requiresModule: "DM",
     items: [
       { label: "文件庫", path: "/dm/library" },
       { label: "簽核中心", path: "/dm/review" },

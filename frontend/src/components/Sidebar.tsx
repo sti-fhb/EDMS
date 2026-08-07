@@ -11,8 +11,10 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 
-import type { NavGroup } from "../layouts/navItems"
+import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
+import type { ModuleSummary } from "../layouts/useModuleSummary"
+import { useModuleSummary } from "../layouts/useModuleSummary"
 
 // 側欄配色：對齊 TBMS 母專案 layoutTokens 平時態（PEACE）。EDMS 暫不做作業模式三態，寫死此組。
 const SIDEBAR = {
@@ -94,15 +96,24 @@ function NavGroupSection({ group }: { group: NavGroup }) {
   )
 }
 
+/** 群組是否顯示：無模組門檻恆顯示；有門檻則需 module-summary 回該模組具權限（未載入前先不顯示，避免閃現）。 */
+function isGroupVisible(requires: ModuleKey | undefined, summary: ModuleSummary | undefined): boolean {
+  if (!requires) return true
+  if (!summary) return false
+  return requires === "DM" ? summary.dm.has_role : summary.et.has_role
+}
+
 /**
  * 統一 shell 左側導覽（#89）：模組群組可收合下拉、功能項縮排，對齊 TBMS 母專案側欄。
- * P1 僅「系統管理者後台」群組（過渡期對所有登入者顯示，案 A）；ET / DM 群組於 P3 / P4 加入、
- * 屆時依權限決定是否顯示（無權限者完全看不到，最小知悉）。
+ * 「系統管理者後台」過渡期對所有登入者顯示；「文件管理」（DM）依 module-summary 之 has_role 決定顯示
+ * （US1，§4）——無任一 DM 角色者完全看不到 DM 功能列（最小知悉）。
  */
 export function Sidebar() {
+  const { data: summary } = useModuleSummary()
+  const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary))
   return (
     <Box component="nav" aria-label="主導覽" sx={{ py: 0.5 }}>
-      {NAV_GROUPS.map((group) => (
+      {visibleGroups.map((group) => (
         <NavGroupSection key={group.title} group={group} />
       ))}
     </Box>
