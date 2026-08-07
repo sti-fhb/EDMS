@@ -5,16 +5,19 @@
 """
 
 from app.core.module_admin import module_admin_gate
+from app.core.module_assign import module_assign_registry
 from app.core.module_roles import module_role_gate
+from app.dm.provider import DmAssignProvider
 from app.dm.roles.gate import dm_has_any_role, dm_is_module_admin
 
 _MODULE = "DM"
 
 
 def register_dm_module() -> None:
-    """註冊 DM 之模組判定閘 checker（§1 is_module_admin / §4 has_any_role）。
+    """註冊 DM 之模組判定閘 checker（§1 / §4）與指派轉接層 provider（§3 / §3.1）。
 
-    冪等：重複呼叫僅覆蓋同一 checker（供測試重入）。§3 assign provider 之註冊於 Phase 2 追加。
+    冪等：重複呼叫僅覆蓋同一 checker / provider（供測試重入）。供 DP 入口頁 / 後台呼叫。
     """
     module_role_gate.register(_MODULE, dm_has_any_role)
     module_admin_gate.register(_MODULE, dm_is_module_admin)
+    module_assign_registry.register(_MODULE, DmAssignProvider())

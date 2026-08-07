@@ -9,7 +9,6 @@ provider 內部以各自 model 落地，registry 不涉模組表。
 """
 
 import logging
-from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -76,7 +75,9 @@ class ModuleAssignProvider(Protocol):
 
     async def set_controlled_enabled(
         self, db: AsyncSession, kind: str, *, code: str, enabled: bool, operator_id: str
-    ) -> Awaitable[SetEnabledResult] | SetEnabledResult: ...
+    ) -> SetEnabledResult: ...
+
+    async def list_audiences(self, db: AsyncSession, *, enabled_only: bool = True) -> list[ControlledItemView]: ...
 
 
 class ModuleAssignRegistry:
