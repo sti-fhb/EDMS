@@ -1,0 +1,56 @@
+# Dependabot 設定
+#
+# 目的：workflow 內的 GitHub Actions 已釘死 commit SHA（供應鏈安全，防 tag 被改指向惡意
+# commit），由 Dependabot 定期檢查上游有無新版並自動開 PR 升級 SHA（保留 `# v7.0.0`
+# 版本註解），避免「釘死後卡在舊版、拿不到上游安全修補」。
+#
+# 注意：這是設定檔，不是 workflow；不會在每次 PR 時執行，而是按下方 schedule 自行排程
+# 檢查，有更新才另外開 PR，經 CI 與人工 review 後才 merge。
+#
+# 本檔目前**僅納管 github-actions**。npm（frontend）與 uv（backend）的「版本更新」
+# 刻意不納管——那會讓每個有新版的套件都開一張 PR（2026-08-10 實測 frontend 有 19 個
+# 套件有新版），PR 噪音會淹沒真正需要看的東西。依賴的「安全更新」由 repo 層級的
+# Dependabot security updates 處理，未被涵蓋的部分由 dependency-alerts.yml 定期提醒
+# 人工處理（見 #143）。
+#
+# 對齊主專案 TBMS 的 .github/dependabot.yml，差異三處：
+#   1. TBMS 亦僅納管 github-actions，本檔相同
+#   2. TBMS 對 pnpm/action-setup 設 major ignore（其 v6 self-installer 改走 npm，會踩到
+#      self-hosted runner 內建 node24 的半殘 npm 而爆 CI）。EDMS 全部 job 使用
+#      ubuntu-latest（GitHub-hosted），該限制不適用，故不照抄
+#   3. 明確指定 commit-message.prefix 為 chore，以符合本專案的 commit 類型規範
+#      （見 .claude/rules/git-workflow.md）
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/" # workflow 位於 .github/workflows/，根目錄即可掃到全部
+    schedule:
+      interval: "weekly"
+    # 供應鏈冷卻：新發布的版本先等 7 天再提 PR，避開剛被投毒 / 不穩定的新版。
+    # 代價：github-actions 生態的安全修補多半以普通版本號發布、不開 GHSA，這類會被
+    # 延後 7 天（本檔只管 version updates；有 GHSA 的走 repo 層級的 security updates，
+    # 不受此 cooldown 約束）。以本 repo 僅 5 個 action 的規模，此取捨合理。
+    cooldown:
+      default-days: 7
+    # 把多個 action 的升級合併成單一 PR，降低 PR 數量。
+    # 合併不會降低 review 品質——SHA 本來就不可能靠肉眼看出善惡，分幾張 PR 都一樣，
+    # 而 Dependabot 的 grouped PR body 仍會逐套件附上 release notes 與 commit 清單。
+    #
+    # ⚠️ merge 前的實際防線（SHA pinning 保護不到的部分）：
+    #   SHA pinning 保護的是「已 merge 的 pin 不被上游追溯竄改」，**不保護升級動作本身**。
+    #   Dependabot 是去解析新 tag 當下指向的 commit——若上游維護者把 tag 推向惡意 commit，
+    #   Dependabot 會忠實地提案那個惡意 SHA。因此 merge 前請逐個 action：
+    #     1. 確認新 SHA 確實存在於上游的 default branch
+    #     2. 讀過該版本的 release notes
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore"
+    # 明確指定 label，否則 Dependabot 會自行建立 `github_actions` label——與
+    # .claude/rules/sti-label-rules.md「禁止自創語意相近的新 label」抵觸。
+    # `dependencies` 為 repo 既有 label。
+    labels:
+      - "dependencies"
