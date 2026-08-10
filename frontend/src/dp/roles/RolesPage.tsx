@@ -85,8 +85,17 @@ function AssignmentsTab({ module }: { module: string }) {
   })
 
   const assignMut = useMutation({
-    mutationFn: ({ userId, roles, groups }: { userId: string; roles: string[]; groups: string[] }) =>
-      rolesApi.assign(module, userId, { roles, groups }),
+    // source 標記本次是改「角色」還是「可見對象」，供畫面只 disable 對應維度（存可見對象時角色不閃）
+    mutationFn: ({
+      userId,
+      roles,
+      groups,
+    }: {
+      userId: string
+      roles: string[]
+      groups: string[]
+      source: "role" | "group"
+    }) => rolesApi.assign(module, userId, { roles, groups }),
     onSuccess: () => {
       message.success("角色 / 標籤已更新並即時生效")
       qc.invalidateQueries({ queryKey: ["roles", module, "assignments"] })
@@ -102,7 +111,7 @@ function AssignmentsTab({ module }: { module: string }) {
 
   const toggleRole = (row: AssignmentRow, role: string) => {
     const roles = row.roles.includes(role) ? row.roles.filter((r) => r !== role) : [...row.roles, role]
-    assignMut.mutate({ userId: row.user_id, roles, groups: row.groups })
+    assignMut.mutate({ userId: row.user_id, roles, groups: row.groups, source: "role" })
   }
 
   const roleDefs = MODULE_ROLES[module] ?? []
@@ -160,7 +169,12 @@ function AssignmentsTab({ module }: { module: string }) {
                   <Checkbox
                     size="small"
                     checked={row.roles.includes(r.code)}
-                    disabled={assignMut.isPending}
+                    // 只在「正對本列做角色操作」時 disable；存可見對象（source==="group"）不影響角色 checkbox（不閃）
+                    disabled={
+                      assignMut.isPending &&
+                      assignMut.variables?.userId === row.user_id &&
+                      assignMut.variables?.source === "role"
+                    }
                     onChange={() => toggleRole(row, r.code)}
                     slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
                   />
@@ -205,7 +219,7 @@ function AssignmentsTab({ module }: { module: string }) {
           options={groupOptions ?? []}
           onClose={() => setEditing(null)}
           onSave={(groups) => {
-            assignMut.mutate({ userId: editing.user_id, roles: editing.roles, groups })
+            assignMut.mutate({ userId: editing.user_id, roles: editing.roles, groups, source: "group" })
             setEditing(null)
           }}
         />
@@ -232,7 +246,7 @@ function GroupEditDialog({
 
   return (
     <Dialog open onClose={onClose}>
-      <DialogTitle>編輯</DialogTitle>
+      <DialogTitle>編輯可見對象</DialogTitle>
       <DialogContent>
         {options.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
