@@ -41,6 +41,9 @@ class RolesService:
         rows = users["data"]  # PaginatedResult 為 TypedDict
         user_ids = [u.user_id for u in rows]
         views = await provider.get_users_assignments(db, user_ids) if user_ids else {}
+        # 最後異動者 USER_ID → 顯示名（姓名 / email），供畫面顯示人名而非原始 ID（與 dp-audit 對象解析同慣例）
+        modifier_ids = {v.last_modified_by for v in views.values() if v.last_modified_by}
+        name_by_id = await self._users.resolve_display_names(db, modifier_ids)
         items = [
             AssignmentItem(
                 user_id=u.user_id,
@@ -49,6 +52,9 @@ class RolesService:
                 roles=sorted(views[u.user_id].roles) if u.user_id in views else [],
                 groups=sorted(views[u.user_id].groups) if u.user_id in views else [],
                 last_modified_by=views[u.user_id].last_modified_by if u.user_id in views else None,
+                last_modified_by_name=(
+                    name_by_id.get(views[u.user_id].last_modified_by) if u.user_id in views else None
+                ),
                 last_modified_date=views[u.user_id].last_modified_date if u.user_id in views else None,
             )
             for u in rows

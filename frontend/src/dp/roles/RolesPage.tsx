@@ -148,7 +148,7 @@ function AssignmentsTab({ module }: { module: string }) {
         <TableBody>
           {rows.map((row) => (
             <TableRow key={row.user_id}>
-              <TableCell>{row.user_id}</TableCell>
+              <TableCell>{row.email}</TableCell>
               <TableCell>{row.user_name}</TableCell>
               {roleDefs.map((r) => (
                 <TableCell key={r.code} align="center">
@@ -182,7 +182,9 @@ function AssignmentsTab({ module }: { module: string }) {
               </TableCell>
               <TableCell>
                 <Typography variant="caption" color="text.secondary">
-                  {row.last_modified_by ? `${row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}` : "—"}
+                  {row.last_modified_by
+                    ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
+                    : "—"}
                 </Typography>
               </TableCell>
             </TableRow>

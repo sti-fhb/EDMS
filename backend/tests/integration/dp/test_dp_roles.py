@@ -142,6 +142,20 @@ async def test_list_assignments_merges_current(db, dm_registered):
     assert row is not None and DM_EDITOR in row.roles
 
 
+async def test_list_assignments_resolves_modifier_name(db, dm_registered):
+    """最後異動者 USER_ID 解析為顯示名（姓名，無則 email）——畫面顯示人名而非原始 ID。"""
+    await _seed_user(db, "op_adm")  # 操作者須為 DP_USER 才解析得到姓名
+    await _grant_dm(db, "op_adm", DM_ADMIN)
+    await _seed_user(db, "u_mod")
+    op = OperatorInfo(user_id="op_adm")
+    await _svc.assign(db, module="DM", user_id="u_mod", roles=[DM_EDITOR], groups=[], operator=op)
+    result = await _svc.list_assignments(db, module="DM", keyword="u_mod", page=1, limit=20, operator=op)
+    row = next((i for i in result["data"] if i.user_id == "u_mod"), None)
+    assert row is not None
+    assert row.last_modified_by == "op_adm"  # 原始 USER_ID 仍保留
+    assert row.last_modified_by_name == "用戶op_adm"  # 解析姓名（_seed_user 設 user_name=用戶{id}）
+
+
 async def test_http_requires_auth(db, dm_registered, client):
     """router 掛認證：未帶 token → 401。"""
     resp = await client.get("/api/dp/roles/modules")

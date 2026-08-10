@@ -39,6 +39,7 @@ export const handlers = [
           roles: ["DM_EDITOR"],
           groups: [],
           last_modified_by: "admin",
+          last_modified_by_name: "系統管理員",
           last_modified_date: "2026-06-30T00:00:00Z",
         },
       ],

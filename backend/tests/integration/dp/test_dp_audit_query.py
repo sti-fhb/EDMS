@@ -260,6 +260,18 @@ async def test_func_label_chinese(db):
     assert res["data"][0].func_label == "DP-使用者管理"
 
 
+async def test_dm_roles_func_label_and_target_name(db):
+    """DM 角色/權限稽核（DM-ROLES）：func_label 顯示中文、對象（被指派者 USER_ID）解析為姓名。"""
+    await _seed_user(db, user_id="u_dm", user_name="王小明", email="ming@edms.local")
+    await _insert_log(db, module="DM", func_name="DM-ROLES", target_id="u_dm")
+
+    res = await _service.query_logs(db, **_q())
+
+    row = next(r for r in res["data"] if r.func_name == "DM-ROLES")
+    assert row.func_label == "DM-角色/權限"
+    assert row.target_display == "王小明"
+
+
 async def test_query_filters_by_func_name(db):
     """#4：以功能（func_name）精確過濾。"""
     await _insert_log(db, func_name="DP-USERS")

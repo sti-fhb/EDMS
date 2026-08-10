@@ -23,6 +23,9 @@ from app.services import AuditLogService
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
 _KINDS = ("CATEGORY", "FUNC", "TAG")
 _AUDIENCE = "AUDIENCE"
+# 通用值「全體」為**文件端**語意（文件掛上即所有閱覽者可見），非「指派給某使用者」的可見對象，
+# 故不列入權限管理可見對象核取清單。與 app.dm.document.visibility._ALL_AUDIENCE_TAG 同一語意。
+_ALL_AUDIENCE_TAG = "全體"
 
 
 class CatalogAdapter:
@@ -59,8 +62,15 @@ class CatalogAdapter:
         ]
 
     async def list_audiences(self, db: AsyncSession, *, enabled_only: bool = True) -> list[ControlledItemView]:
-        """列出 AUDIENCE 組標籤（供權限管理可見對象核取清單）。"""
-        stmt = select(DmTag).join(DmTagGroup).where(DmTagGroup.group_type == _AUDIENCE)
+        """列出 AUDIENCE 組標籤（供權限管理可見對象核取清單）。
+
+        排除通用值「全體」——它是文件端「所有閱覽者可見」的語意，不是可指派給個別使用者的可見對象。
+        """
+        stmt = (
+            select(DmTag)
+            .join(DmTagGroup)
+            .where(DmTagGroup.group_type == _AUDIENCE, DmTag.tag_name != _ALL_AUDIENCE_TAG)
+        )
         if enabled_only:
             stmt = stmt.where(DmTag.is_enabled.is_(True))
         rows = (await db.execute(stmt)).scalars()

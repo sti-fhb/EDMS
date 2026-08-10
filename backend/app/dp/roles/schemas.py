@@ -17,7 +17,8 @@ class AssignmentItem(BaseModel):
     email: str
     roles: list[str]
     groups: list[str]  # DM＝可見對象 TAG_ID；ET＝受訓單位標籤代碼
-    last_modified_by: str | None = None
+    last_modified_by: str | None = None  # 最後異動者 USER_ID（原始碼）
+    last_modified_by_name: str | None = None  # 最後異動者顯示名（姓名，無則 email；查無則 None）
     last_modified_date: datetime | None = None
 
 

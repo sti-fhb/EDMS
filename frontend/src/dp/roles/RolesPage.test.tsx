@@ -45,6 +45,14 @@ describe("RolesPage 權限管理", () => {
     expect(screen.queryByText("文件管理（DM）")).not.toBeInTheDocument()
   })
 
+  it("帳號欄顯示 email、最後異動顯示操作者姓名（非原始 ID）", async () => {
+    renderWithProviders(<RolesPage />)
+    await screen.findByText("王曉明")
+    expect(screen.getByText("ming@example.com")).toBeInTheDocument() // 帳號欄＝email
+    expect(screen.getByText(/系統管理員/)).toBeInTheDocument() // 最後異動＝姓名（非 "admin"）
+    expect(screen.queryByText(/^admin｜/)).not.toBeInTheDocument()
+  })
+
   it("無新增角色入口（角色為固定 enum）", async () => {
     renderWithProviders(<RolesPage />)
     await screen.findByText("王曉明")

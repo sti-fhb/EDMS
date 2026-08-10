@@ -82,6 +82,12 @@ async def test_list_audiences_only_audience_group(db):
     assert len(auds) >= 1 and all(a.group_type == "AUDIENCE" for a in auds)
 
 
+async def test_list_audiences_excludes_all_universal_tag(db):
+    """list_audiences 排除通用值「全體」——它是文件端「所有閱覽者可見」，非可指派給個別使用者之可見對象。"""
+    auds = await _svc.list_audiences(db)
+    assert "全體" not in {a.name for a in auds}
+
+
 async def test_maintenance_writes_audit(db):
     """受控主檔維護（新增 / 改名 / 啟停）於同交易寫 SRVDP003 稽核（MODULE=DM / DM-CATALOG）。"""
     from sqlalchemy import text

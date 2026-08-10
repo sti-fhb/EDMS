@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
@@ -14,6 +15,7 @@ const RENEW_INTERVAL_MS = 4 * 60 * 1000
  * token 僅存記憶體（模組變數 + React state），重整即需重新登入。
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient()
   const [token, setTokenState] = useState<string | null>(null)
   const [mustChangePwd, setMustChangePwd] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
@@ -29,10 +31,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionExpired(false)
       const res = await authApi.login({ email, password })
       lastActivityRef.current = Date.now()
+      // 清掉上一個 session 的查詢快取，確保新登入者的模組摘要 / 權限等以新身分重新抓取，
+      // 避免出現「剛授權卻要等舊快取過期才更新側欄 / 頁籤」（授權後重登入 DM 畫面延遲顯示）。
+      queryClient.clear()
       applyToken(res.access_token)
       setMustChangePwd(res.must_change_pwd)
     },
-    [applyToken],
+    [applyToken, queryClient],
   )
 
   const logout = useCallback(async () => {
@@ -43,7 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     applyToken(null)
     setMustChangePwd(false)
-  }, [applyToken])
+    queryClient.clear() // 清快取，避免下一位登入者短暫看到前一位的資料
+  }, [applyToken, queryClient])
 
   // US8：強制變更頁完成密碼變更後清旗標，RootLayout 即撤下頁殼、放行一般功能（不需重登）。
   const clearMustChangePwd = useCallback(() => setMustChangePwd(false), [])

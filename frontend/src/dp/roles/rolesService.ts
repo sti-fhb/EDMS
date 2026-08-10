@@ -9,6 +9,7 @@ export interface AssignmentRow {
   roles: string[]
   groups: string[]
   last_modified_by: string | null
+  last_modified_by_name: string | null
   last_modified_date: string | null
 }
 
