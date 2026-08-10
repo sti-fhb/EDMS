@@ -24,6 +24,7 @@ import { useState } from "react"
 import { MODULE_LABELS, MODULE_ROLES, rolesApi } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
+import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 
@@ -89,6 +90,9 @@ function AssignmentsTab({ module }: { module: string }) {
     onSuccess: () => {
       message.success("角色 / 標籤已更新並即時生效")
       qc.invalidateQueries({ queryKey: ["roles", module, "assignments"] })
+      // 角色異動可能改變「當前使用者自己」的模組權限（如把自己加/移 DM 角色）→ 讓側欄 module-summary
+      // 重抓，側欄 DM 功能群組即時顯示/隱藏，不必重登或硬重整（module-summary 由側欄常駐觀察）。
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.moduleSummary.get() })
     },
     onError: (err) => {
       message.error(toApiError(err).errorMessage)
