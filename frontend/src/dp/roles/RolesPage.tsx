@@ -245,7 +245,7 @@ function GroupEditDialog({
     setSelected((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]))
 
   return (
-    <Dialog open onClose={onClose}>
+    <Dialog open onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>編輯可見對象</DialogTitle>
       <DialogContent>
         {options.length === 0 ? (
