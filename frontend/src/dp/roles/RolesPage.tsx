@@ -1,10 +1,258 @@
-import { StubPage } from "../../components/StubPage"
+import Alert from "@mui/material/Alert"
+import Box from "@mui/material/Box"
+import Button from "@mui/material/Button"
+import Checkbox from "@mui/material/Checkbox"
+import Chip from "@mui/material/Chip"
+import Dialog from "@mui/material/Dialog"
+import DialogActions from "@mui/material/DialogActions"
+import DialogContent from "@mui/material/DialogContent"
+import DialogTitle from "@mui/material/DialogTitle"
+import FormControlLabel from "@mui/material/FormControlLabel"
+import Stack from "@mui/material/Stack"
+import Tab from "@mui/material/Tab"
+import Table from "@mui/material/Table"
+import TableBody from "@mui/material/TableBody"
+import TableCell from "@mui/material/TableCell"
+import TableHead from "@mui/material/TableHead"
+import TableRow from "@mui/material/TableRow"
+import Tabs from "@mui/material/Tabs"
+import TextField from "@mui/material/TextField"
+import Typography from "@mui/material/Typography"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 
+import { MODULE_LABELS, MODULE_ROLES, rolesApi } from "./rolesService"
+import type { AssignmentRow, GroupOption } from "./rolesService"
+import { Pagination } from "../../components/Pagination"
+import { useNotification } from "../../contexts/NotificationContext"
+import { toApiError } from "../../services/http"
+
+/**
+ * 權限管理（dp-roles，US7）：ET / DM 共用之角色 / 群組指派入口。
+ * DP 為轉接層——僅顯示當前使用者「可管理的模組」頁籤（後端 is_module_admin 過濾），
+ * 每列角色核取 + 群組多選兩維度獨立、即時生效；核心寫入與自我保護在各模組 provider。
+ */
 export function RolesPage() {
+  const { data: modules, isPending } = useQuery({ queryKey: ["roles", "modules"], queryFn: rolesApi.modules })
+  const [active, setActive] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (modules && modules.length > 0 && active === null) setActive(modules[0])
+  }, [modules, active])
+
+  if (isPending) return null
+  if (!modules || modules.length === 0) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography variant="h5" gutterBottom>
+          權限管理
+        </Typography>
+        <Alert severity="info">您目前無可管理的模組權限。</Alert>
+      </Box>
+    )
+  }
+
   return (
-    <StubPage
-      title="角色 / 權限管理"
-      note="US7：ET / DM 角色與標籤 / 可見對象指派（寫各模組表 ET_USER_ROLE / DM_USER_ROLE，經模組 service）；完整功能待 ET / DM 模組到位。"
-    />
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h5" gutterBottom>
+        權限管理（角色指派）
+      </Typography>
+      <Tabs value={active ?? modules[0]} onChange={(_, v) => setActive(v)} sx={{ mb: 2 }}>
+        {modules.map((m) => (
+          <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />
+        ))}
+      </Tabs>
+      {active && <AssignmentsTab module={active} />}
+    </Box>
+  )
+}
+
+/** 單一模組之權限指派表（查使用者 + 角色核取 + 群組多選）。 */
+function AssignmentsTab({ module }: { module: string }) {
+  const qc = useQueryClient()
+  const { message } = useNotification()
+  const [keyword, setKeyword] = useState("")
+  const [search, setSearch] = useState("")
+  const [page, setPage] = useState(1)
+  const [editing, setEditing] = useState<AssignmentRow | null>(null)
+
+  const { data } = useQuery({
+    queryKey: ["roles", module, "assignments", { keyword: search, page }],
+    queryFn: () => rolesApi.list({ module, keyword: search, page, limit: 20 }),
+  })
+  const { data: groupOptions } = useQuery({
+    queryKey: ["roles", module, "group-options"],
+    queryFn: () => rolesApi.groupOptions(module),
+  })
+
+  const assignMut = useMutation({
+    mutationFn: ({ userId, roles, groups }: { userId: string; roles: string[]; groups: string[] }) =>
+      rolesApi.assign(module, userId, { roles, groups }),
+    onSuccess: () => {
+      message.success("角色 / 標籤已更新並即時生效")
+      qc.invalidateQueries({ queryKey: ["roles", module, "assignments"] })
+    },
+    onError: (err) => {
+      message.error(toApiError(err).errorMessage)
+      qc.invalidateQueries({ queryKey: ["roles", module, "assignments"] }) // 還原勾選（如自我保護擋下）
+    },
+  })
+
+  const toggleRole = (row: AssignmentRow, role: string) => {
+    const roles = row.roles.includes(role) ? row.roles.filter((r) => r !== role) : [...row.roles, role]
+    assignMut.mutate({ userId: row.user_id, roles, groups: row.groups })
+  }
+
+  const roleDefs = MODULE_ROLES[module] ?? []
+  const rows = data?.data ?? []
+
+  return (
+    <Stack spacing={2}>
+      <Box sx={{ display: "flex", gap: 1 }}>
+        <TextField
+          size="small"
+          label="關鍵字（姓名 / Email）"
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              setSearch(keyword)
+              setPage(1)
+            }
+          }}
+        />
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => {
+            setSearch(keyword)
+            setPage(1)
+          }}
+        >
+          查詢
+        </Button>
+      </Box>
+
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>帳號</TableCell>
+            <TableCell>姓名</TableCell>
+            {roleDefs.map((r) => (
+              <TableCell key={r.code} align="center">
+                {r.label}
+              </TableCell>
+            ))}
+            <TableCell>群組（標籤 / 可見對象）</TableCell>
+            <TableCell>最後異動</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.user_id}>
+              <TableCell>{row.user_id}</TableCell>
+              <TableCell>{row.user_name}</TableCell>
+              {roleDefs.map((r) => (
+                <TableCell key={r.code} align="center">
+                  <Checkbox
+                    size="small"
+                    checked={row.roles.includes(r.code)}
+                    disabled={assignMut.isPending}
+                    onChange={() => toggleRole(row, r.code)}
+                    slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
+                  />
+                </TableCell>
+              ))}
+              <TableCell>
+                {row.groups.length === 0 ? (
+                  <Typography variant="caption" color="text.secondary">
+                    未指派
+                  </Typography>
+                ) : (
+                  row.groups.map((g) => (
+                    <Chip
+                      key={g}
+                      size="small"
+                      label={groupOptions?.find((o) => o.code === g)?.name ?? g}
+                      sx={{ mr: 0.5 }}
+                    />
+                  ))
+                )}
+                <Button size="small" onClick={() => setEditing(row)}>
+                  編輯
+                </Button>
+              </TableCell>
+              <TableCell>
+                <Typography variant="caption" color="text.secondary">
+                  {row.last_modified_by ? `${row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}` : "—"}
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      {data && (
+        <Pagination page={data.meta.page} total={data.meta.total} pageSize={data.meta.limit} onPageChange={setPage} />
+      )}
+
+      {editing && (
+        <GroupEditDialog
+          row={editing}
+          options={groupOptions ?? []}
+          onClose={() => setEditing(null)}
+          onSave={(groups) => {
+            assignMut.mutate({ userId: editing.user_id, roles: editing.roles, groups })
+            setEditing(null)
+          }}
+        />
+      )}
+    </Stack>
+  )
+}
+
+/** 群組多選 dialog（可見對象 / 標籤指派）。 */
+function GroupEditDialog({
+  row,
+  options,
+  onClose,
+  onSave,
+}: {
+  row: AssignmentRow
+  options: GroupOption[]
+  onClose: () => void
+  onSave: (groups: string[]) => void
+}) {
+  const [selected, setSelected] = useState<string[]>(row.groups)
+  const toggle = (code: string) =>
+    setSelected((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]))
+
+  return (
+    <Dialog open onClose={onClose}>
+      <DialogTitle>編輯 {row.user_name} 的群組</DialogTitle>
+      <DialogContent>
+        {options.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            尚無可選群組。
+          </Typography>
+        ) : (
+          <Stack>
+            {options.map((o) => (
+              <FormControlLabel
+                key={o.code}
+                control={<Checkbox checked={selected.includes(o.code)} onChange={() => toggle(o.code)} />}
+                label={o.name}
+              />
+            ))}
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>取消</Button>
+        <Button variant="contained" onClick={() => onSave(selected)}>
+          儲存
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

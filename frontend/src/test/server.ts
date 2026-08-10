@@ -27,6 +27,28 @@ export const handlers = [
   http.get("/api/dp/user/module-summary", () =>
     HttpResponse.json({ et: { has_role: true }, dm: { has_role: true } }),
   ),
+  // US7 權限管理（dp-roles）：預設 DM 可管理、一筆使用者；個別測試以 server.use 覆蓋
+  http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
+  http.get("/api/dp/roles/:module/assignments", () =>
+    HttpResponse.json({
+      data: [
+        {
+          user_id: "u1",
+          user_name: "王曉明",
+          email: "ming@example.com",
+          roles: ["DM_EDITOR"],
+          groups: [],
+          last_modified_by: "admin",
+          last_modified_date: "2026-06-30T00:00:00Z",
+        },
+      ],
+      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dp/roles/:module/group-options", () =>
+    HttpResponse.json([{ code: "5", name: "護理師" }]),
+  ),
+  http.put("/api/dp/roles/:module/assignments/:userId", () => new HttpResponse(null, { status: 204 })),
   // US8 個人資料維護（預設 happy path）
   http.get("/api/dp/user/me", () =>
     HttpResponse.json({ user_id: "u1", email: "me@example.com", user_name: "測試員", pending_email: null }),
