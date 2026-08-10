@@ -31,10 +31,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionExpired(false)
       const res = await authApi.login({ email, password })
       lastActivityRef.current = Date.now()
-      // 清掉上一個 session 的查詢快取，確保新登入者的模組摘要 / 權限等以新身分重新抓取，
-      // 避免出現「剛授權卻要等舊快取過期才更新側欄 / 頁籤」（授權後重登入 DM 畫面延遲顯示）。
-      queryClient.clear()
+      // 先套用新 token（applyToken 同步寫入 http 的 Authorization 來源），再清快取——
+      // 順序很重要：clear() 會令使用中的查詢（如側欄 module-summary）立即以新身分重抓，
+      // 若在 token 設定前 clear，重抓會搶先送出而未帶新 token（401 / 空資料），側欄 DM 群組因而抓不到。
+      // 如此可修正「剛授權卻要等舊快取過期才更新側欄 / 頁籤」，且不會反而抓不到。
       applyToken(res.access_token)
+      queryClient.clear()
       setMustChangePwd(res.must_change_pwd)
     },
     [applyToken, queryClient],
