@@ -19,7 +19,7 @@ import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { MODULE_LABELS, MODULE_ROLES, rolesApi } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
@@ -34,11 +34,9 @@ import { toApiError } from "../../services/http"
  */
 export function RolesPage() {
   const { data: modules, isPending } = useQuery({ queryKey: ["roles", "modules"], queryFn: rolesApi.modules })
-  const [active, setActive] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (modules && modules.length > 0 && active === null) setActive(modules[0])
-  }, [modules, active])
+  const [selected, setSelected] = useState<string | null>(null)
+  // 於 render 期衍生 active（避免 effect 內 setState）：使用者選過用其值，否則預設第一個
+  const active = selected ?? (modules && modules.length > 0 ? modules[0] : null)
 
   if (isPending) return null
   if (!modules || modules.length === 0) {
@@ -57,7 +55,7 @@ export function RolesPage() {
       <Typography variant="h5" gutterBottom>
         權限管理（角色指派）
       </Typography>
-      <Tabs value={active ?? modules[0]} onChange={(_, v) => setActive(v)} sx={{ mb: 2 }}>
+      <Tabs value={active ?? modules[0]} onChange={(_, v) => setSelected(v)} sx={{ mb: 2 }}>
         {modules.map((m) => (
           <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />
         ))}
