@@ -18,7 +18,9 @@ from app.dp.audit.repository import AuditLogRepository, build_audit_conditions
 from app.dp.audit.schemas import AuditLogResponse
 from app.dp.audit.target_resolver import resolve_target_displays
 
-# func_name → 中文顯示名（保留模組前綴 DP-，UI 不另列模組欄）；未知碼（未來 ET-/DM-）原樣回傳。
+# func_name → 中文顯示名（保留模組前綴，UI 不另列模組欄）；未知碼（未來 ET-）原樣回傳。
+# 各模組上線、開始寫稽核時，於此登記自己的功能標籤（同時進「功能」查詢下拉）；未寫稽核的模組不列，
+# 避免下拉出現篩不到資料的死選項。DM 已透過 US1（角色/受控清單）寫稽核，故列於此；ET 待其模組落地再加。
 _FUNC_LABELS: dict[str, str] = {
     "DP-USERS": "DP-使用者管理",
     "DP-PARAMS": "DP-系統參數",
@@ -28,6 +30,8 @@ _FUNC_LABELS: dict[str, str] = {
     "DP-REGISTER": "DP-自助註冊",
     "DP-AUTH": "DP-登入登出",
     "DP-SCHEDULE": "DP-排程管理",
+    "DM-ROLES": "DM-角色/權限",
+    "DM-CATALOG": "DM-受控清單",
 }
 
 # 供前端「功能」查詢下拉（value=func_name、label=中文）。

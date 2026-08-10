@@ -8,6 +8,7 @@
 """
 
 import logging
+from collections.abc import Collection
 from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -78,6 +79,13 @@ class UsersService:
         """查詢正式帳號清單（DP_USER；姓名 / Email 關鍵字 + 狀態篩選，後端分頁）。"""
         stmt = self._repo.build_list_stmt(keyword=keyword, status=status, now=utcnow())
         return await paginate(db, stmt, page=page, limit=limit, schema=UserResponse)
+
+    async def resolve_display_names(self, db: AsyncSession, user_ids: Collection[str]) -> dict[str, str]:
+        """批次解析 USER_ID → 顯示名（姓名，無姓名時退 email）；查無者不放入。
+
+        供權限管理「最後異動者」等需將操作者 ID 轉可讀名稱之場景（與 dp-audit target_resolver 同一慣例）。
+        """
+        return await self._repo.fetch_display_names(db, user_ids)
 
     async def create_user(self, db: AsyncSession, *, data: UserCreate, operator: OperatorInfo) -> None:
         """管理者建立帳號＝寄邀請信（#67）：檢 Email 未被佔用 → 寫 pending（ADMIN_INVITE、pwd_hash=NULL）
