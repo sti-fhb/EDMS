@@ -100,6 +100,10 @@ class ModuleAssignRegistry:
         """取某模組 provider；未註冊回 None（呼叫端 fail-closed 處理）。"""
         return self._providers.get(module)
 
+    def registered_modules(self) -> list[str]:
+        """已註冊 provider 之模組代碼（DP 權限管理據以列出可管理模組；未註冊者不出現）。"""
+        return list(self._providers)
+
 
 # 全域單例：各模組啟動時 register 自己的 provider，DP 後台經此聚合。
 module_assign_registry = ModuleAssignRegistry()

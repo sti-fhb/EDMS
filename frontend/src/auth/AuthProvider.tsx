@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
@@ -14,6 +15,7 @@ const RENEW_INTERVAL_MS = 4 * 60 * 1000
  * token 僅存記憶體（模組變數 + React state），重整即需重新登入。
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient()
   const [token, setTokenState] = useState<string | null>(null)
   const [mustChangePwd, setMustChangePwd] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
@@ -29,10 +31,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionExpired(false)
       const res = await authApi.login({ email, password })
       lastActivityRef.current = Date.now()
+      // 先套用新 token（applyToken 同步寫入 http 的 Authorization 來源），再清快取——
+      // 順序很重要：clear() 會令使用中的查詢（如側欄 module-summary）立即以新身分重抓，
+      // 若在 token 設定前 clear，重抓會搶先送出而未帶新 token（401 / 空資料），側欄 DM 群組因而抓不到。
+      // 如此可修正「剛授權卻要等舊快取過期才更新側欄 / 頁籤」，且不會反而抓不到。
       applyToken(res.access_token)
+      queryClient.clear()
       setMustChangePwd(res.must_change_pwd)
     },
-    [applyToken],
+    [applyToken, queryClient],
   )
 
   const logout = useCallback(async () => {
@@ -43,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     applyToken(null)
     setMustChangePwd(false)
-  }, [applyToken])
+    queryClient.clear() // 清快取，避免下一位登入者短暫看到前一位的資料
+  }, [applyToken, queryClient])
 
   // US8：強制變更頁完成密碼變更後清旗標，RootLayout 即撤下頁殼、放行一般功能（不需重登）。
   const clearMustChangePwd = useCallback(() => setMustChangePwd(false), [])

@@ -22,7 +22,9 @@ from app.dp.user.models import DpPendingRegistration
 from app.dp.users.models import DpUser
 
 # target_id 指向使用者（USER_ID 或邀請 res_id）之 func_name。
-_USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER"})
+# DM-ROLES（角色/可見對象指派）target_id 即被指派之 USER_ID，故一併解析為姓名（對象顯示人名而非原始 ID）。
+# DM-CATALOG target_id 為受控項代碼（分類 / func / TAG_ID），非使用者，不列入。
+_USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER", "DM-ROLES"})
 
 # (func_name, target_id) → 顯示名稱
 _DisplayMap = dict[tuple[str, str], str]

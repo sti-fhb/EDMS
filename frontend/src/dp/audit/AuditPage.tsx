@@ -22,6 +22,9 @@ import { EMPTY_AUDIT_FILTERS, useAuditLogs } from "./useAuditLogs"
 import type { AuditFilters } from "./useAuditLogs"
 
 // 功能查詢選項（value=func_name、label=中文，含模組前綴）；「全部」以 sentinel 呈現（同操作類別，避免空值不顯示 label）
+// ⚠️ 與後端 app/dp/audit/query_service.py 的 _FUNC_LABELS **手動同步**——新模組上線寫稽核時兩邊都要補，
+//    否則下拉少選項或 label 一邊中文一邊原碼。ET 待其模組寫稽核再補。
+// TODO(#140-followup): 由後端 _FUNC_LABELS 出一個端點供前端抓，消除此雙寫（ET 落地即自動出現）。
 const FUNC_OPTIONS: { value: string; label: string }[] = [
   { value: "全部", label: "全部" },
   { value: "DP-USERS", label: "DP-使用者管理" },
@@ -31,6 +34,9 @@ const FUNC_OPTIONS: { value: string; label: string }[] = [
   { value: "DP-FORGOT", label: "DP-忘記密碼" },
   { value: "DP-REGISTER", label: "DP-自助註冊" },
   { value: "DP-AUTH", label: "DP-登入登出" },
+  { value: "DP-SCHEDULE", label: "DP-排程管理" },
+  { value: "DM-ROLES", label: "DM-角色/權限" },
+  { value: "DM-CATALOG", label: "DM-受控清單" },
 ]
 
 /** 「全部」對應空字串（不帶入查詢）。 */

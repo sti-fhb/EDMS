@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import Select, and_, func, or_, select
@@ -40,6 +41,15 @@ class UsersRepository:
         """以 USER_ID 查使用者（排除軟刪除）；不存在回 None。"""
         stmt = select(DpUser).where(DpUser.user_id == user_id, DpUser.deleted == 0)
         return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def fetch_display_names(self, db: AsyncSession, user_ids: Collection[str]) -> dict[str, str]:
+        """批次取 USER_ID → 顯示名（姓名，無姓名時退 email）；查無者不放入。供「最後異動者」顯示。"""
+        if not user_ids:
+            return {}
+        rows = (
+            await db.execute(select(DpUser.user_id, DpUser.user_name, DpUser.email).where(DpUser.user_id.in_(user_ids)))
+        ).all()
+        return {uid: (name or email) for uid, name, email in rows}
 
     async def set_status(self, db: AsyncSession, *, user: DpUser, status: str, operator_id: str, now: datetime) -> None:
         """更新帳號狀態（ACTIVE / DISABLED）+ 稽核欄位並 flush。"""
