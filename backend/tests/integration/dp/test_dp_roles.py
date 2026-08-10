@@ -80,8 +80,7 @@ async def test_manageable_modules_non_admin_empty(db, dm_registered):
 
 
 async def test_require_manageable_enforces(db, dm_registered):
-    """非 DM 管理者操作 DM → 403 DP_ROLE_001；未註冊模組 → 404。"""
-    op = OperatorInfo(user_id="nobody")
+    """非 DM 管理者操作 DM → 403 DP_ROLE_001；未註冊模組（ET）→ 404 DP_ROLE_003。"""
     with pytest.raises(AppError) as e1:
         await _svc.group_options(db, module="DM", user_id="nobody")
     assert e1.value.status_code == 403 and e1.value.error_code == "DP_ROLE_001"
@@ -90,8 +89,7 @@ async def test_require_manageable_enforces(db, dm_registered):
         await _svc.list_assignments(
             db, module="ET", keyword=None, page=1, limit=20, operator=OperatorInfo(user_id="adm")
         )
-    assert e2.value.status_code == 404  # ET 未註冊 provider
-    _ = op
+    assert e2.value.status_code == 404 and e2.value.error_code == "DP_ROLE_003"  # ET 未註冊 provider
 
 
 async def test_assign_delegates_to_dm_provider_and_audits(db, dm_registered):
@@ -157,3 +155,15 @@ async def test_http_modules_authed(db, dm_registered, client):
     token = create_access_token(sub="httpadm", ttl_minutes=15)
     resp = await client.get("/api/dp/roles/modules", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200 and "DM" in resp.json()
+
+
+async def test_http_put_non_admin_forbidden(db, dm_registered, client):
+    """越權：非 DM 管理者 HTTP PUT 指派 DM 角色 → 403（router→service 串接 enforce）。"""
+    await _seed_user(db, "httpnon")
+    token = create_access_token(sub="httpnon", ttl_minutes=15)
+    resp = await client.put(
+        "/api/dp/roles/DM/assignments/victim",
+        json={"roles": ["DM_ADMIN"], "groups": []},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403

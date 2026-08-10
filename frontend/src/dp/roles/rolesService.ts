@@ -53,7 +53,12 @@ export const rolesApi = {
   },
 }
 
-/** 各模組固定角色 enum（畫面無新增角色入口；對齊 spec_us7 / DM authz / ET 規格）。 */
+/**
+ * 各模組固定角色 enum（畫面無新增角色入口；對齊 spec_us7 / DM authz / ET 規格）。
+ * ⚠️ 與後端權威定義（`backend/app/dm/roles/authz.py` `DM_ROLES` 等）**手動同步**——
+ * 後端角色 enum 調整時須一併更新此處，否則前端會少顯示欄位或送出後端 422（DM_ROLE_003）。
+ * TODO(#140-followup): 評估由 `/dp/roles/modules` 或新端點一併回傳角色 metadata，消除雙寫。
+ */
 export const MODULE_ROLES: Record<string, { code: string; label: string }[]> = {
   DM: [
     { code: "DM_ADMIN", label: "管理者" },

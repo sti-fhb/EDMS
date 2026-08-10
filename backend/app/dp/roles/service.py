@@ -72,9 +72,9 @@ class RolesService:
                 db, user_id=user_id, roles=set(roles), groups=set(groups), operator_id=operator.user_id
             )
         except AppError as exc:
-            # FR-DP-US7-06：模組自我保護（唯一於 assign 拋 403 之情形）統一映射為 DP 訊息；
-            # 其餘（如群組/角色值不合法 422）原樣透傳。
-            if exc.status_code == 403:
+            # FR-DP-US7-06：模組自我保護統一映射為 DP 訊息。以 error_code 慣例 `{MODULE}_ROLE_001`
+            # 判別（非僅 status 403），避免日後模組於 assign 因其他理由拋 403 時被誤映射。
+            if (exc.error_code or "").endswith("_ROLE_001"):
                 raise AppError(status_code=403, detail="無法取消自己的管理者角色", error_code="DP_ROLE_002") from exc
             raise
 
@@ -85,10 +85,10 @@ class RolesService:
         return [GroupOption(code=a.code, name=a.name) for a in audiences]
 
     async def _require_manageable(self, db: AsyncSession, module: str, user_id: str) -> ModuleAssignProvider:
-        """模組過濾閘：未註冊 provider → 404；非該模組管理者 → 403（越權 ROLES-003）。"""
+        """模組過濾閘：未註冊 provider → 404 DP_ROLE_003；非該模組管理者 → 403 DP_ROLE_001（越權，ROLES-003 呈現）。"""
         provider = module_assign_registry.get(module)
         if provider is None:
-            raise AppError(status_code=404, detail="查無此模組或尚未提供角色管理", error_code="DP_ROLE_001")
+            raise AppError(status_code=404, detail="查無此模組或尚未提供角色管理", error_code="DP_ROLE_003")
         if not await module_admin_gate.is_module_admin(module, user_id, db):
             raise AppError(status_code=403, detail="無權限維護此模組之角色指派", error_code="DP_ROLE_001")
         return provider
