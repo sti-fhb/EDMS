@@ -23,6 +23,7 @@ from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.router import router as dp_templates_router
 from app.dp.notify.worker import run_forever
 from app.dp.params.router import router as dp_params_router
+from app.dp.roles.router import router as dp_roles_router
 from app.dp.schedules.router import router as dp_schedule_router
 from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
@@ -97,6 +98,7 @@ app.add_middleware(
 app.include_router(dp_user_router)
 app.include_router(dp_users_router)
 app.include_router(dp_params_router)
+app.include_router(dp_roles_router)
 app.include_router(dp_templates_router)
 app.include_router(dp_audit_router)
 app.include_router(dp_schedule_router)
