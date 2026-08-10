@@ -135,18 +135,19 @@ function AssignmentsTab({ module }: { module: string }) {
         </Button>
       </Box>
 
-      <Table size="small">
+      {/* 固定表格版面：欄寬由表頭決定、不隨儲存格內容（可見對象標籤數）變動，避免加標籤時其他欄位位移 */}
+      <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
         <TableHead>
           <TableRow>
-            <TableCell>帳號</TableCell>
-            <TableCell>姓名</TableCell>
+            <TableCell sx={{ width: "20%" }}>帳號</TableCell>
+            <TableCell sx={{ width: "10%" }}>姓名</TableCell>
             {roleDefs.map((r) => (
-              <TableCell key={r.code} align="center">
+              <TableCell key={r.code} align="center" sx={{ width: "7%" }}>
                 {r.label}
               </TableCell>
             ))}
-            <TableCell>群組（標籤 / 可見對象）</TableCell>
-            <TableCell>最後異動</TableCell>
+            <TableCell sx={{ width: "26%" }}>可見對象</TableCell>
+            <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -165,24 +166,22 @@ function AssignmentsTab({ module }: { module: string }) {
                   />
                 </TableCell>
               ))}
-              <TableCell>
-                {row.groups.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">
-                    未指派
-                  </Typography>
-                ) : (
-                  row.groups.map((g) => (
-                    <Chip
-                      key={g}
-                      size="small"
-                      label={groupOptions?.find((o) => o.code === g)?.name ?? g}
-                      sx={{ mr: 0.5 }}
-                    />
-                  ))
-                )}
-                <Button size="small" onClick={() => setEditing(row)}>
-                  編輯
-                </Button>
+              <TableCell sx={{ verticalAlign: "top" }}>
+                {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
+                <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
+                  {row.groups.length === 0 ? (
+                    <Typography variant="caption" color="text.secondary">
+                      未指派
+                    </Typography>
+                  ) : (
+                    row.groups.map((g) => (
+                      <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
+                    ))
+                  )}
+                  <Button size="small" onClick={() => setEditing(row)}>
+                    編輯
+                  </Button>
+                </Box>
               </TableCell>
               <TableCell>
                 <Typography variant="caption" color="text.secondary">
@@ -233,7 +232,7 @@ function GroupEditDialog({
 
   return (
     <Dialog open onClose={onClose}>
-      <DialogTitle>編輯 {row.user_name} 的群組</DialogTitle>
+      <DialogTitle>編輯</DialogTitle>
       <DialogContent>
         {options.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
