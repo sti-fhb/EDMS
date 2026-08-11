@@ -18,6 +18,7 @@ from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip, set_client_ip
 from app.dm.bootstrap import register_dm_module
+from app.dm.library.router import router as dm_library_router
 from app.dp.audit.router import router as dp_audit_router
 from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.router import router as dp_templates_router
@@ -102,6 +103,7 @@ app.include_router(dp_roles_router)
 app.include_router(dp_templates_router)
 app.include_router(dp_audit_router)
 app.include_router(dp_schedule_router)
+app.include_router(dm_library_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()

@@ -27,6 +27,48 @@ export const handlers = [
   http.get("/api/dp/user/module-summary", () =>
     HttpResponse.json({ et: { has_role: true }, dm: { has_role: true } }),
   ),
+  // US3 文件庫與檢索（dm-library）：預設兩筆（含手冊）+ 選項 + 可新增；個別測試以 server.use 覆蓋
+  http.get("/api/dm/library/documents", () =>
+    HttpResponse.json({
+      data: [
+        {
+          doc_id: "DM-SOP-000001",
+          doc_name: "領血確認標準作業程序",
+          category_code: "SOP",
+          category_name: "SOP",
+          published_date: "2026-04-15T00:00:00Z",
+          author_id: "u1",
+          author_name: "陳大華",
+          func_code: null,
+          func_name: null,
+          tags: ["供應", "平時"],
+        },
+        {
+          doc_id: "DM-MANUAL-000002",
+          doc_name: "BS04 領血掃血袋線上系統操作手冊",
+          category_code: "MANUAL",
+          category_name: "系統操作手冊",
+          published_date: "2026-05-02T00:00:00Z",
+          author_id: "u2",
+          author_name: "王曉明",
+          func_code: "BS04",
+          func_name: "領血確認",
+          tags: ["供應"],
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dm/library/func-options", () =>
+    HttpResponse.json([{ code: "BS04", name: "領血確認", group_code: null }]),
+  ),
+  http.get("/api/dm/library/retrieval-tags", () =>
+    HttpResponse.json([
+      { code: "10", name: "供應", group_code: "MODULE" },
+      { code: "20", name: "平時", group_code: "NATURE" },
+    ]),
+  ),
+  http.get("/api/dm/library/capabilities", () => HttpResponse.json({ can_create: true })),
   // US7 權限管理（dp-roles）：預設 DM 可管理、一筆使用者；個別測試以 server.use 覆蓋
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
