@@ -3,6 +3,7 @@ import Autocomplete from "@mui/material/Autocomplete"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
+import CircularProgress from "@mui/material/CircularProgress"
 import MenuItem from "@mui/material/MenuItem"
 import Paper from "@mui/material/Paper"
 import Table from "@mui/material/Table"
@@ -39,7 +40,7 @@ export function DmLibraryPage() {
   const { data: capabilities } = useLibraryCapabilities()
   const { data: tagOptions } = useRetrievalTags()
   const { data: funcOptions } = useFuncOptions(draft.category === MANUAL_CATEGORY)
-  const { data } = useLibrarySearch({ ...applied, page, limit: PAGE_SIZE })
+  const { data, isPending, isError } = useLibrarySearch({ ...applied, page, limit: PAGE_SIZE })
 
   const setField = (key: keyof LibraryFilters, value: string) => setDraft((prev) => ({ ...prev, [key]: value }))
 
@@ -167,7 +168,13 @@ export function DmLibraryPage() {
           )}
         </Box>
 
-        {rows.length === 0 ? (
+        {isPending ? (
+          <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+            <CircularProgress size={28} />
+          </Box>
+        ) : isError ? (
+          <Alert severity="error">載入失敗，請稍後再試。</Alert>
+        ) : rows.length === 0 ? (
           <Alert severity="info">查無符合條件之文件。</Alert>
         ) : (
           <>

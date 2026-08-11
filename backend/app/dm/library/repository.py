@@ -57,14 +57,20 @@ class LibraryRepository:
             conds.append(func.date(DmDocVersion.published_date) >= date_from)
         if date_to:
             conds.append(func.date(DmDocVersion.published_date) <= date_to)
-        # 多標籤 AND：每一選定標籤各一 EXISTS（皆須掛）
+        # 多標籤 AND：每一選定標籤各一 EXISTS（皆須掛）。EXISTS 內 join 標籤組並限 RETRIEVAL，
+        # 確保只有「檢索標籤」能作為搜尋條件——即使呼叫端直傳 AUDIENCE（可見對象）之 tag_id 亦不生效（FR-009）。
         for tag_id in tag_ids:
             conds.append(
                 exists(
-                    select(DmDocTag.doc_tag_id).where(
+                    select(DmDocTag.doc_tag_id)
+                    .select_from(DmDocTag)
+                    .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+                    .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                    .where(
                         DmDocTag.doc_id == DmDocument.doc_id,
                         DmDocTag.tag_id == tag_id,
                         DmDocTag.deleted == 0,
+                        DmTagGroup.group_type == _RETRIEVAL,
                     )
                 )
             )
@@ -113,7 +119,11 @@ class LibraryRepository:
         return list((await db.execute(stmt)).all())
 
     async def fetch_retrieval_tags(self, db: AsyncSession, doc_ids: Sequence[str]) -> dict[str, list[str]]:
-        """批次取各文件之**檢索標籤**名稱（不含 AUDIENCE 權限標籤）；供清單灰字頓號呈現。"""
+        """批次取各文件之**檢索標籤**名稱（不含 AUDIENCE 權限標籤）；供清單灰字頓號呈現。
+
+        **不濾 is_enabled**：此為「既有文件已掛標記」之顯示，標籤停用後既有引用 100% 保留
+        （spec_us1 FR-001 / DM-MSG-DM09-003：停用僅影響後續新增/搜尋下拉，不動既有標記）。
+        """
         if not doc_ids:
             return {}
         stmt = (
@@ -125,7 +135,6 @@ class LibraryRepository:
                 DmDocTag.doc_id.in_(doc_ids),
                 DmDocTag.deleted == 0,
                 DmTagGroup.group_type == _RETRIEVAL,
-                DmTag.is_enabled.is_(True),
             )
             .order_by(DmDocTag.doc_id, DmTag.tag_id)
         )

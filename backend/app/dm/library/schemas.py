@@ -48,4 +48,3 @@ class Capabilities(BaseModel):
     """當前使用者於文件庫之操作能力（供前端決定入口顯示）。"""
 
     can_create: bool  # 具編輯者角色（DM_EDITOR）→ 顯示「新增文件」入口（FR-006 / AC8）
-

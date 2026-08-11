@@ -20,9 +20,9 @@ _service = LibraryService()
 
 @router.get("/documents", response_model=PagedResponse[DocumentListItem])
 async def search_documents(
-    keyword: str | None = Query(default=None),
+    keyword: str | None = Query(default=None, max_length=200),  # 上限防過長 ILIKE（Security LOW）
     category: str | None = Query(default=None),
-    author: str | None = Query(default=None),
+    author: str | None = Query(default=None, max_length=100),
     tag_ids: list[int] = Query(default=[]),
     func_code: str | None = Query(default=None),
     date_from: date | None = Query(default=None),

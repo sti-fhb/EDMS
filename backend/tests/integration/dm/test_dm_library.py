@@ -270,6 +270,26 @@ async def test_list_item_shows_retrieval_tags_only(db):
     assert item.tags == ["平時X"]  # 只檢索標籤，無「全體」
 
 
+async def test_disabled_retrieval_tag_still_shown_on_existing_doc(db):
+    """檢索標籤停用後：既有掛該標籤之文件清單**仍顯示**（FR-001 既有引用保留），但下拉不再列出。"""
+    t = await _make_retrieval_tag(db, "將停用X")
+    await _seed_doc(db, doc_id="DM-SOP-000120", name="doc-disabled-tag", retrieval_tag_ids=[t])
+    tag = await db.scalar(select(DmTag).where(DmTag.tag_id == t))
+    tag.is_enabled = False
+    await db.flush()
+    res = await _svc.search(db, query=_q(keyword="doc-disabled-tag"), ctx=_admin_ctx(), page=1, limit=20)
+    item = next(i for i in res["data"] if i.doc_id == "DM-SOP-000120")
+    assert item.tags == ["將停用X"]  # 既有標記仍顯示
+    assert "將停用X" not in {o.name for o in await _svc.list_retrieval_tags(db)}  # 下拉不再列出
+
+
+async def test_audience_tag_id_not_usable_as_search_filter(db):
+    """直傳 AUDIENCE（可見對象）標籤 id 作 tag_ids 不生效（FR-009 僅檢索標籤可搜尋）→ 不匹配。"""
+    await _seed_doc(db, doc_id="DM-SOP-000130", name="nurse-doc", audience_tags=["護理師"])
+    nurse = await _audience_tag_id(db, "護理師")
+    assert await _ids(db, tag_ids=[nurse]) == set()
+
+
 # ── 操作能力（新增文件入口）───────────────────────────────
 
 
