@@ -23,6 +23,9 @@ export const libraryApi = {
         page: p.page,
         limit: p.limit,
       },
+      // 陣列參數用重複格式 tag_ids=6&tag_ids=7（indexes:null），對齊 FastAPI list[int]=Query()；
+      // 預設 axios 會序列化成 tag_ids[]=6 帶括號，FastAPI 不認 → 過濾失效。
+      paramsSerializer: { indexes: null },
     })
     return data
   },
