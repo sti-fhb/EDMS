@@ -112,7 +112,7 @@ export function DmLibraryPage() {
             getOptionLabel={(o) => o.name}
             isOptionEqualToValue={(a, b) => a.code === b.code}
             groupBy={(o) => TAG_GROUP_LABELS[o.group_code ?? ""] ?? "標籤"}
-            renderInput={(params) => <TextField {...params} label="檢索標籤（多選 AND）" />}
+            renderInput={(params) => <TextField {...params} label="檢索標籤（多選；任一符合）" />}
           />
         </Box>
 

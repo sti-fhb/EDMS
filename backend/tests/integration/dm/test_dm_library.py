@@ -165,13 +165,17 @@ async def test_filter_by_author_name(db):
     assert await _ids(db, author="王曉") == {"DM-SOP-000030"}
 
 
-async def test_filter_by_retrieval_tags_and(db):
-    """多檢索標籤 AND：僅同時掛兩標籤者命中。"""
+async def test_filter_by_retrieval_tags_or(db):
+    """多檢索標籤 OR：命中任一標籤即列出（spec_us3 FR-001）；無任一標籤者不列。"""
     t_normal = await _make_retrieval_tag(db, "平時")
     t_war = await _make_retrieval_tag(db, "戰時")
     await _seed_doc(db, doc_id="DM-SOP-000040", name="both", retrieval_tag_ids=[t_normal, t_war])
-    await _seed_doc(db, doc_id="DM-SOP-000041", name="one", retrieval_tag_ids=[t_normal])
-    assert await _ids(db, tag_ids=[t_normal, t_war]) == {"DM-SOP-000040"}
+    await _seed_doc(db, doc_id="DM-SOP-000041", name="normal-only", retrieval_tag_ids=[t_normal])
+    await _seed_doc(db, doc_id="DM-SOP-000043", name="war-only", retrieval_tag_ids=[t_war])
+    await _seed_doc(db, doc_id="DM-SOP-000042", name="none", retrieval_tag_ids=[])
+    ids = await _ids(db, tag_ids=[t_normal, t_war])
+    assert ids == {"DM-SOP-000040", "DM-SOP-000041", "DM-SOP-000043"}  # 任一命中；無標籤者不列
+    assert await _ids(db, tag_ids=[t_war]) == {"DM-SOP-000040", "DM-SOP-000043"}  # 單標籤：掛戰時者
 
 
 async def test_filter_by_date_range(db):

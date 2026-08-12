@@ -57,9 +57,9 @@ class LibraryRepository:
             conds.append(func.date(DmDocVersion.published_date) >= date_from)
         if date_to:
             conds.append(func.date(DmDocVersion.published_date) <= date_to)
-        # 多標籤 AND：每一選定標籤各一 EXISTS（皆須掛）。EXISTS 內 join 標籤組並限 RETRIEVAL，
-        # 確保只有「檢索標籤」能作為搜尋條件——即使呼叫端直傳 AUDIENCE（可見對象）之 tag_id 亦不生效（FR-009）。
-        for tag_id in tag_ids:
+        # 多標籤 OR：命中任一選定檢索標籤即列出（spec_us3 FR-001）。單一 EXISTS + tag_id IN，
+        # 並 join 標籤組限 RETRIEVAL——即使呼叫端直傳 AUDIENCE（可見對象）之 tag_id 亦不生效（FR-009）。
+        if tag_ids:
             conds.append(
                 exists(
                     select(DmDocTag.doc_tag_id)
@@ -68,7 +68,7 @@ class LibraryRepository:
                     .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                     .where(
                         DmDocTag.doc_id == DmDocument.doc_id,
-                        DmDocTag.tag_id == tag_id,
+                        DmDocTag.tag_id.in_(tag_ids),
                         DmDocTag.deleted == 0,
                         DmTagGroup.group_type == _RETRIEVAL,
                     )
