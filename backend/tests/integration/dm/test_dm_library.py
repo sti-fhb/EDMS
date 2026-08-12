@@ -215,6 +215,18 @@ async def test_viewer_no_audience_sees_only_all(db):
     assert await _ids(db, ctx=viewer) == {"DM-SOP-000070"}
 
 
+async def test_revoked_audience_grant_not_visible(db):
+    """撤銷（DELETED=1）之可見對象授權不再賦予可見性——閱覽者僅有軍人（護理師已撤）→ 看不到護理師文件。"""
+    await _seed_doc(db, doc_id="DM-SOP-000140", name="nurse-doc", audience_tags=["護理師"])
+    army = await _audience_tag_id(db, "軍人")
+    nurse = await _audience_tag_id(db, "護理師")
+    db.add(DmUserTag(user_id="v_rev", tag_id=army, created_user="a", created_date=utcnow()))  # 有效：軍人
+    db.add(DmUserTag(user_id="v_rev", tag_id=nurse, created_user="a", created_date=utcnow(), deleted=1))  # 撤銷：護理師
+    await db.flush()
+    viewer = DmContext(user_id="v_rev", roles=frozenset({DM_VIEWER}))
+    assert "DM-SOP-000140" not in await _ids(db, ctx=viewer)  # 護理師授權已撤 → 看不到
+
+
 async def test_pending_obsolete_visible_to_viewer(db):
     """廢止待簽核（PENDING_OBSOLETE）文件對閱覽者仍可見（狀態集合與可見性分開 AND）。"""
     await _seed_doc(db, doc_id="DM-SOP-000080", name="po", status="PENDING_OBSOLETE", audience_tags=["全體"])

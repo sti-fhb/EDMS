@@ -39,13 +39,15 @@ def visible_docs_condition(user_id: str, roles: Iterable[str]) -> ColumnElement[
     if set(roles) & _UNFILTERED_ROLES:
         return None
 
-    user_audience_tags = select(DmUserTag.tag_id).where(DmUserTag.user_id == user_id)
+    # 僅計有效授權 / 有效文件標籤（DELETED=0）：撤銷之可見對象授權、移除之文件標籤皆不再賦予可見性。
+    user_audience_tags = select(DmUserTag.tag_id).where(DmUserTag.user_id == user_id, DmUserTag.deleted == 0)
     return exists(
         select(1)
         .select_from(DmDocTag)
         .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
         .where(
             DmDocTag.doc_id == DmDocument.doc_id,
+            DmDocTag.deleted == 0,
             DmTag.tag_group_code == _AUDIENCE_GROUP,
             or_(DmTag.tag_name == _ALL_AUDIENCE_TAG, DmTag.tag_id.in_(user_audience_tags)),
         )
