@@ -23,7 +23,7 @@
 | 0 | 專案建置與文件管理基礎建設 | — | Setup + Foundational | T001 ~ T020a（含 13 表 migration + 業務種子 + SSO 存取閘 / 授權 / 檔案 / DOC_ID / 通知接線 / 狀態機 / 可見性）| 平台 DP #0~#12（已交付）| [#127](https://github.com/sti-fhb/EDMS/issues/127) | 🚀 已開立 [#127](https://github.com/sti-fhb/EDMS/issues/127) |
 | 1 | 系統設定（轉接層模組端 + 業務規則 + 種子驗證）| US1 / UCDM11 | P1-核心 | T024 ~ T027b | #0；DP dp-params / dp-roles / dp-templates | [#133](https://github.com/sti-fhb/EDMS/issues/133) | 🚀 已開立 [#133](https://github.com/sti-fhb/EDMS/issues/133) |
 | 2 | 文件庫與檢索 | US3 / UCDM03 | P1-核心 | T028 / T028a / T029 / T030 | #0；#4（資料來源）| [#150](https://github.com/sti-fhb/EDMS/issues/150) | 🚀 已開立 [#150](https://github.com/sti-fhb/EDMS/issues/150) |
-| 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| — | 📝 body 已撰寫（待開立）|
+| 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| [#155](https://github.com/sti-fhb/EDMS/issues/155) | 🚀 已開立 [#155](https://github.com/sti-fhb/EDMS/issues/155) |
 | 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039 | #0 | — | 待補 |
 | 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | — | 待補 |
 | 6 | 系統儀表板 | US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5 | — | 待補 |
@@ -292,7 +292,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #3：[P1-核心] DM — 文件詳細頁瀏覽（US4 / UCDM04 / DM02）
+## Issue #3：[P1-核心] DM — 文件詳細頁瀏覽（US4 / UCDM04 / DM02）（GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)）
 
 **對應規格**：[spec_us4.md](spec_us4.md)（FR-001~007，UCDM04，訊息 DM-MSG-DM02-001~003）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_DOC_READ` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §3（單版本單檔 / 檔案存檔案系統）
 **對應畫面**：**DM02 文件詳細頁**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-detail`）——標題列 + 右側資訊面板 + 文件檔案區（預覽 / 下載）+ 版本歷程抽屜 +（編輯者）動作入口 / read-only 廢止模式
@@ -399,3 +399,4 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 | 2026-08-11 | 撰寫 Issue #2（US3 文件庫與檢索 / DM01）完整 body：對應 spec_us3 FR-001~009 + UCDM03；涵蓋 T028 / T028a / T029 / T030。**切分要點**：讀取型全端（搜尋端點 + DM01 頁），核心可見性判定重用 #0 T020a、不改文件/版本寫入（屬 US5/US6）；狀態集合 `{PUBLISHED, PENDING_OBSOLETE}`、檢索標籤僅 RETRIEVAL（AUDIENCE 不入檢索下拉）、閱覽者套可見性過濾。前置 #0（必要）+ #4/#5（資料來源，以種子/fixture 獨立測試）。開工前 SA Q 候選：狀態集合 vs 可見性 STATUS AND 之交互（PENDING_OBSOLETE 對閱覽者可見）。Labels `P1-核心` + `DM-文件管理` + `US3`。總覽表 Issue #2 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #2（US3 文件庫與檢索）開立為 GitHub [#150](https://github.com/sti-fhb/EDMS/issues/150)（labels `P1-核心` + `DM-文件管理` + `US3`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us3`）結論 ✅ 齊備、無必補 |
 | 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM02）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM02 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
+| 2026-08-11 | Issue #3（US4 文件詳細頁瀏覽）開立為 GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)（labels `P1-核心` + `DM-文件管理` + `US4`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us4`）結論 ✅ 齊備、無必補 |
