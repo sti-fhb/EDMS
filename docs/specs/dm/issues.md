@@ -23,7 +23,7 @@
 | 0 | 專案建置與文件管理基礎建設 | — | Setup + Foundational | T001 ~ T020a（含 13 表 migration + 業務種子 + SSO 存取閘 / 授權 / 檔案 / DOC_ID / 通知接線 / 狀態機 / 可見性）| 平台 DP #0~#12（已交付）| [#127](https://github.com/sti-fhb/EDMS/issues/127) | 🚀 已開立 [#127](https://github.com/sti-fhb/EDMS/issues/127) |
 | 1 | 系統設定（轉接層模組端 + 業務規則 + 種子驗證）| US1 / UCDM11 | P1-核心 | T024 ~ T027b | #0；DP dp-params / dp-roles / dp-templates | [#133](https://github.com/sti-fhb/EDMS/issues/133) | 🚀 已開立 [#133](https://github.com/sti-fhb/EDMS/issues/133) |
 | 2 | 文件庫與檢索 | US3 / UCDM03 | P1-核心 | T028 / T028a / T029 / T030 | #0；#4（資料來源）| [#150](https://github.com/sti-fhb/EDMS/issues/150) | 🚀 已開立 [#150](https://github.com/sti-fhb/EDMS/issues/150) |
-| 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 ~ T034 | #0 | — | 待補 |
+| 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| — | 📝 body 已撰寫（待開立）|
 | 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039 | #0 | — | 待補 |
 | 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | — | 待補 |
 | 6 | 系統儀表板 | US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5 | — | 待補 |
@@ -292,9 +292,96 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #3 ~ #13：待補（增量模式）
+## Issue #3：[P1-核心] DM — 文件詳細頁瀏覽（US4 / UCDM04 / DM02）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 / #1 / #2，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us4.md](spec_us4.md)（FR-001~007，UCDM04，訊息 DM-MSG-DM02-001~003）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_DOC_READ` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §3（單版本單檔 / 檔案存檔案系統）
+**對應畫面**：**DM02 文件詳細頁**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-detail`）——標題列 + 右側資訊面板 + 文件檔案區（預覽 / 下載）+ 版本歷程抽屜 +（編輯者）動作入口 / read-only 廢止模式
+**階段**：P1-核心
+**涵蓋 Tasks**：T031（詳細頁版面）、T032（檔案區：預覽 / 下載 + 寫 `DM_DOC_READ`）、T033（版本歷程抽屜）、T034（動作入口 + read-only 模式）
+
+### 任務說明
+
+實作 **DM02 文件詳細頁**：閱讀目前發布版本、依格式線上預覽（PDF / 圖片）或下載原檔（Office 僅下載），展開版本歷程檢視所有版本，具編輯者角色者見「編輯新版本」/「廢止此文件」入口。上方標題列僅顯示識別與狀態（文件名稱 / DOC_ID / 目前版本 / 狀態），描述性 metadata 統一由右側「文件資訊」面板呈現（不重複）。**僅目前發布版可下載**（舊版僅預覽）；**下載目前發布版**寫一筆 `DM_DOC_READ`（KPI「已看」判定、預覽不記、同人同版去重）。自「已廢止文件查詢」（US10）進入時以 **read-only 模式**呈現。
+
+> ℹ️ **讀取型全端 issue**：後端詳細 / 版本 / 檔案存取端點（唯讀查詢 + 下載記錄 `DM_DOC_READ` 為唯一寫入）+ 前端 DM02 頁。檔案預覽 / 下載重用 #0 檔案儲存服務（T016）；本 issue 不改文件 / 版本寫入（屬 US5 / US6）、不實作編輯 / 廢止動作本身（僅入口導向 US5 / US8）。
+
+**前置條件**：
+- **#0 Foundation（[#127](https://github.com/sti-fhb/EDMS/issues/127)，已交付合併）**：`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_DOC_READ` / `DM_REVIEW` / 受控主檔表；**檔案儲存服務 `dm/service/file_store`（T016，MIME 判可預覽 / 僅下載、檔案系統存取）**、角色授權 `authz`（T015）、**標籤式可見性 `visibility`（T020a）**（存取控制：閱覽者不可開啟未授權可見對象之文件）、DM 模組殼與路由骨架
+- **文件 / 版本資料來源**：US5（[#4] 新增編輯）+ US6（[#5] 簽核發布）產生已發布文件與版本；本 issue 之整合測試以**種子 / fixture 直接寫入文件 + 版本 + 檔案 metadata** 獨立驗證
+- **入口來源 / 去向**：由 US3（[#2] 文件庫）點列進入；動作入口導向 US5（[#4] 編輯）/ US8（[#7] 廢止申請）；read-only 模式由 US10（[#9] 已廢止查詢）進入
+
+### 範圍
+
+**後端 — 詳細頁資料（T031，FR-001）** `app/dm/detail`（router → service → repository，唯讀）：
+- `GET /api/dm/documents/{doc_id}`：回標題列（`DOC_NAME` / `DOC_ID` / 目前版本 `VERSION_NO` / `STATUS`）+ 資訊面板（分類名 / 作者姓名〔唯讀 join `DP_USER`〕/ 發布日期 / 核准者姓名 / 核准時間 / 標籤）+ 目前版本檔案 metadata（`FILE_NAME` / `FILE_MIME` / 可預覽旗標）+ **操作能力**（`can_edit`：編輯者且無進行中送審週期）
+- **存取控制**：套 `visible_docs_condition`（閱覽者不可存取未授權可見對象之文件 → 404 / 403 `DM_DOC_001`）；編輯 / 審核 / 管理不過濾
+
+**後端 — 檔案存取 + 閱讀記錄（T032，FR-002 / 004 / 007）**：
+- `GET /api/dm/documents/{doc_id}/versions/{version_id}/file?disposition=preview|download`：經 `file_store` 串流檔案；**PDF / 圖片**可 `preview`（inline）+ `download`；**Office** 僅 `download`（`preview` → 提示 DM-MSG-DM02-001）
+- **僅目前發布版可下載**：舊版本 `download` → 403 `DM_DOC_002`（提示 DM-MSG-DM02-002「聯絡管理者」）；舊版本僅 `preview`
+- **下載目前發布版** → 寫一筆 `DM_DOC_READ`（`DOC_ID` × `VERSION_ID` × `CREATED_USER` × 時間；**預覽不寫**；唯一約束 DOC×VERSION×USER 天然去重）
+
+**後端 — 版本歷程（T033，FR-003 / 004）**：
+- `GET /api/dm/documents/{doc_id}/versions`：列該文件**所有版本**（含 SUPERSEDED 歷史版本）之 `VERSION_NO` / 變更摘要 / 撰寫者姓名 / 核准者姓名 / 發布時間；標示目前發布版（可下載）vs 舊版（僅預覽）
+
+**後端 — read-only / 廢止資訊（T034，FR-005 / 006）**：
+- 動作入口能力：`can_edit`（編輯者且**無進行中 PENDING 送審週期**〔查 `DM_REVIEW`，非看文件 STATUS〕）；送審中 / 廢止待簽核 → 入口失效
+- 已廢止（`OBSOLETE`）文件之 read-only 資料：廢止 banner（廢止時間 / 申請人 / 核准者 / 廢止原因 / **廢止附件下載，如有**〔取自 `DM_REVIEW` 廢止類〕）
+
+**前端 — DM02 詳細頁（T031~T034）** `frontend/src/dm/detail`：
+- 標題列（識別 + 狀態）+ 右側「文件資訊」面板（描述性 metadata、不與標題重複）
+- 文件檔案區：PDF / 圖片內嵌預覽 + 下載鈕；Office 顯示「下載原檔以本機應用程式開啟」+ DM-MSG-DM02-001（不預覽）
+- 版本歷程抽屜（時間軸）：所有版本；目前版可下載、舊版僅預覽（點下載 → DM-MSG-DM02-002）
+- 動作入口（依 `can_edit`）：「編輯新版本」→ US5 編輯模式、「廢止此文件」→ US8；送審中 / 廢止待簽核時失效（灰階 + 提示）
+- **read-only 模式**（自 US10 進入，如 route 參數）：隱藏「文件檔案 + 文件資訊」整段、**自動展開版本歷程**、所有版本僅預覽、上方紅色廢止 banner（DM-MSG-DM02-003）
+
+**測試**：
+- 後端 int：詳細資料（標題 / 資訊面板不重複欄位）；**存取控制**（閱覽者未授權可見對象 → 擋；編輯者見全部）；檔案存取（PDF / 圖片可預覽、Office 僅下載；舊版下載 403、僅預覽）；**下載目前版寫 `DM_DOC_READ` + 預覽不寫 + 同人同版去重**；版本歷程列所有版本；`can_edit`（編輯者且無 PENDING 送審 → true；有 PENDING → false）；廢止文件 read-only 資料（banner + 附件）
+- 前端：標題 vs 資訊面板欄位分工；檔案區依 MIME（預覽 / 僅下載）；版本歷程抽屜（目前版可下載 / 舊版僅預覽）；動作入口依 `can_edit` 顯示 / 失效；read-only 模式（隱藏檔案+資訊、自動展開歷程、廢止 banner）
+
+### 驗收條件
+
+- [ ] 標題列僅顯示 文件名稱 / DOC_ID / 目前版本 / 狀態；描述性 metadata（分類 / 作者 / 發布日期 / 核准者 / 核准時間 / 標籤）僅於右側資訊面板、不重複（FR-001、AC1）
+- [ ] PDF / 圖片提供線上預覽 + 下載；Office 檔僅下載（DM-MSG-DM02-001、不預覽）（FR-002、AC2 / 3）
+- [ ] 版本歷程抽屜列**所有版本**（含歷史）之 版號 / 變更摘要 / 撰寫者 / 核准者 / 發布時間（FR-003、AC4）
+- [ ] **僅目前發布版可下載**；舊版僅預覽、下載被擋（DM-MSG-DM02-002 / `DM_DOC_002`）（FR-004、AC5）
+- [ ] **下載目前發布版**寫一筆 `DM_DOC_READ`（預覽不寫；同人同版去重）（FR-007）
+- [ ] 具編輯者角色顯示「編輯新版本」/「廢止此文件」入口（→ US5 / US8）；送審中 / 廢止待簽核（`DM_REVIEW` 有 PENDING）時入口失效（FR-005、AC6 / 7）
+- [ ] 閱覽者不可存取未授權可見對象之文件（後端 enforce）；編輯 / 審核 / 管理不受限（存取控制對齊 US3）
+- [ ] 自 US10 進入以 read-only 模式：隱藏檔案 + 資訊、自動展開版本歷程、所有版本僅預覽、紅色廢止 banner（廢止時間 / 申請人 / 核准者 / 原因 / 附件）（FR-006、AC8、DM-MSG-DM02-003）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+### 依賴
+
+- **#0 Foundation（[#127](https://github.com/sti-fhb/EDMS/issues/127)，已交付）**：文件 / 版本 / 標籤 / `DM_DOC_READ` / `DM_REVIEW` 表、**檔案儲存服務（T016）**、授權（T015）、可見性判定（T020a）、DM 模組殼 / 路由
+- **US5（[#4]，文件資料來源）+ US6（[#5]，發布）**：實際文件 + 版本 + 檔案之產生路徑；本 issue 以種子 / fixture 獨立測試、不阻塞
+- **US3（[#2]，入口）**：由文件庫點列進入（US3 已交付、點列導向本頁）
+- **US5（[#4]）/ US8（[#7]）**：編輯 / 廢止入口之目的頁；**US10（[#9]）**：read-only 模式之進入來源——未交付前入口 / read-only 以骨架 / route 參數承接
+
+### 注意事項
+
+- ⚠️ **送審中 / 廢止待簽核之入口失效判定以「該文件是否已存在進行中（PENDING）之 `DM_REVIEW`」為準**（spec.md §狀態三維度），**非以文件 STATUS 判定**——已發布文件之新版本送審期間文件層 STATUS 仍為 PUBLISHED。
+- ⚠️ **存取控制須與 US3 一致**：詳細頁 / 檔案下載端點 MUST 套 `visible_docs_condition`（防閱覽者直呼 API 取未授權可見對象之文件 / 檔案）；且沿用 US3 修正之 `visibility.py`（撤銷授權 / 移除標籤已濾 `DELETED`）。
+- **`DM_DOC_READ` 只記「下載目前發布版」**：預覽（PDF / 圖片 inline）不記；發新版後 KPI「已看」綁新版本（US13 語意），本頁僅負責寫下載事件。
+- **舊版本永久保留但僅預覽**：稽核取得舊版原始檔須聯絡 DM_ADMIN（spec_us4 FR-004）；本頁不提供舊版下載途徑。
+- **檔案存取重用 #0 `file_store`（T016）**：單版本單檔、依 MIME 判可預覽（PDF / 圖片）/ 僅下載（Office）；不於本 issue 重造檔案服務。
+- **Error codes（開工前 `/sti-plan` 對齊）**：新增 `DM_DOC_001`（查無此文件或無權存取，404 / 403）、`DM_DOC_002`（舊版本不可下載，403）；訊息 DM-MSG-DM02-001~003 為 UI 提示。
+- **read-only 模式進入來源為 US10**（未交付）：本 issue 交付 read-only **渲染能力** + 廢止 banner 資料，實際入口待 US10 落地（架構差異、不阻塞）。
+- **省略 SITE / HOSPITAL 欄位**（對齊平台 DP，research §1）。
+
+### 相關文件
+
+- [spec_us4.md](spec_us4.md)（FR-001~007）、[data-model.md](data-model.md)（`DM_DOC_VERSION` / `DM_DOC_READ` / `DM_REVIEW`）、[research.md](research.md) §3（檔案儲存）
+- [tasks.md](tasks.md) Phase 6（T031~T034）、[spec_us5.md](spec_us5.md)（編輯入口）、[spec_us8.md](spec_us8.md)（廢止入口）、[spec_us10.md](spec_us10.md)（read-only 進入）、[spec_us13.md](spec_us13.md)（`DM_DOC_READ` KPI 語意）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-detail`）
+
+**Labels**：`P1-核心`, `DM-文件管理`, `US4`
+
+---
+
+## Issue #4 ~ #13：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 / #1 / #2 / #3，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -311,3 +398,4 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 | 2026-08-11 | 補「US2 → Foundation #0（#127）落地對照」表於 US2 說明段：逐條列 spec_us2 FR-001/002、DM-MSG-LOGIN-007、AC1~3 之落地位置與狀態，強化可追溯性。維持 US2 **不開獨立 issue** 之切分（DM 端僅存取閘 T014、已隨 #127 / PR #129 交付；AC1 導向之 DM00 儀表板屬 US7 / #6）。未新增總覽表列 |
 | 2026-08-11 | 撰寫 Issue #2（US3 文件庫與檢索 / DM01）完整 body：對應 spec_us3 FR-001~009 + UCDM03；涵蓋 T028 / T028a / T029 / T030。**切分要點**：讀取型全端（搜尋端點 + DM01 頁），核心可見性判定重用 #0 T020a、不改文件/版本寫入（屬 US5/US6）；狀態集合 `{PUBLISHED, PENDING_OBSOLETE}`、檢索標籤僅 RETRIEVAL（AUDIENCE 不入檢索下拉）、閱覽者套可見性過濾。前置 #0（必要）+ #4/#5（資料來源，以種子/fixture 獨立測試）。開工前 SA Q 候選：狀態集合 vs 可見性 STATUS AND 之交互（PENDING_OBSOLETE 對閱覽者可見）。Labels `P1-核心` + `DM-文件管理` + `US3`。總覽表 Issue #2 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #2（US3 文件庫與檢索）開立為 GitHub [#150](https://github.com/sti-fhb/EDMS/issues/150)（labels `P1-核心` + `DM-文件管理` + `US3`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us3`）結論 ✅ 齊備、無必補 |
+| 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM02）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM02 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
