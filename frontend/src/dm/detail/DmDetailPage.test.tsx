@@ -1,0 +1,180 @@
+import { screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { http, HttpResponse } from "msw"
+import { describe, expect, it, vi } from "vitest"
+
+import { DmDetailPage } from "./DmDetailPage"
+import { renderWithProviders } from "../../test/renderWithProviders"
+import { server } from "../../test/server"
+
+const { navigateSpy } = vi.hoisted(() => ({ navigateSpy: vi.fn() }))
+vi.mock("react-router-dom", async (orig) => {
+  const actual = await orig<typeof import("react-router-dom")>()
+  return { ...actual, useNavigate: () => navigateSpy, useParams: () => ({ docId: "DM-SOP-000001" }) }
+})
+
+describe("DmDetailPage 文件詳細頁", () => {
+  it("標題列（識別+狀態）+ 資訊面板（描述性 metadata）+ 檔案區（PDF 可預覽+下載）", async () => {
+    renderWithProviders(<DmDetailPage />)
+    expect(await screen.findByText("領血確認標準作業程序")).toBeInTheDocument()
+    expect(screen.getByText("DOC_ID: DM-SOP-000001")).toBeInTheDocument()
+    expect(screen.getByText("已發布")).toBeInTheDocument()
+    // 資訊面板
+    expect(screen.getByText("陳大華")).toBeInTheDocument()
+    expect(screen.getByText("李主任")).toBeInTheDocument()
+    expect(screen.getByText("平時")).toBeInTheDocument()
+    // 檔案區：PDF 可預覽 → 預覽 + 下載
+    expect(screen.getByText("SOP-v2.1.pdf")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "預覽" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "下載" })).toBeInTheDocument()
+  })
+
+  it("編輯者：顯示「編輯新版本」/「廢止此文件」入口", async () => {
+    renderWithProviders(<DmDetailPage />)
+    expect(await screen.findByRole("button", { name: "編輯新版本" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "廢止此文件" })).toBeInTheDocument()
+  })
+
+  it("can_edit=false（或送審中）→ 無編輯/廢止入口", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "只讀文件",
+          status: "PUBLISHED",
+          current_version_no: "1.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: "2026-04-15T10:30:00Z",
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 1,
+            file_name: "a.pdf",
+            file_mime: "application/pdf",
+            file_size: 1000,
+            uploaded_at: null,
+            previewable: true,
+          },
+          can_edit: false,
+          is_obsolete: false,
+          obsolete_info: null,
+        }),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("只讀文件")
+    expect(screen.queryByRole("button", { name: "編輯新版本" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "廢止此文件" })).not.toBeInTheDocument()
+  })
+
+  it("版本歷程：展開列所有版本；目前版可下載、舊版僅預覽", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("領血確認標準作業程序")
+    await user.click(screen.getByRole("button", { name: "版本歷程" }))
+    expect(await screen.findByText("2.1")).toBeInTheDocument()
+    expect(screen.getByText("2.0")).toBeInTheDocument()
+    expect(screen.getByText("目前發布版本")).toBeInTheDocument()
+    expect(screen.getByText("已被取代")).toBeInTheDocument()
+  })
+
+  it("Office 檔：不提供預覽、顯示下載提示", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "Word文件",
+          status: "PUBLISHED",
+          current_version_no: "1.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: null,
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 1,
+            file_name: "a.docx",
+            file_mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_size: 1000,
+            uploaded_at: null,
+            previewable: false,
+          },
+          can_edit: false,
+          is_obsolete: false,
+          obsolete_info: null,
+        }),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("Word文件")
+    expect(screen.getByText(/無法線上預覽/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "預覽" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "下載" })).toBeInTheDocument()
+  })
+
+  it("已廢止 read-only：紅色 banner + 隱藏檔案/資訊 + 版本歷程自動展開", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "廢止文件",
+          status: "OBSOLETE",
+          current_version_no: "3.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: null,
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 3,
+            file_name: "a.pdf",
+            file_mime: "application/pdf",
+            file_size: 1000,
+            uploaded_at: null,
+            previewable: true,
+          },
+          can_edit: false,
+          is_obsolete: true,
+          obsolete_info: {
+            obsolete_time: "2026-04-10T11:15:00Z",
+            applicant_id: "u1",
+            applicant_name: "王曉明",
+            approver_name: "李主任",
+            reason: "院內停用",
+            has_attachment: true,
+          },
+        }),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("廢止文件")
+    expect(screen.getByText(/僅供稽核查閱/)).toBeInTheDocument()
+    expect(screen.getByText(/院內停用/)).toBeInTheDocument()
+    // 檔案區隱藏（不出現「文件檔案」標題）
+    expect(screen.queryByText("文件檔案")).not.toBeInTheDocument()
+    // 版本歷程自動展開（read-only 提示）
+    expect(await screen.findByText(/已廢止：所有版本僅供預覽/)).toBeInTheDocument()
+    await screen.findByText("2.1") // 版本載入
+    // read-only：所有版本僅預覽、無下載鈕
+    expect(screen.queryByRole("button", { name: "下載" })).not.toBeInTheDocument()
+  })
+})

@@ -7,6 +7,7 @@ import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { AppShell } from "./layouts/AppShell"
 import { RootLayout } from "./layouts/RootLayout"
 import { DmChangeLogPage } from "./dm/changelog/DmChangeLogPage"
+import { DmDetailPage } from "./dm/detail/DmDetailPage"
 import { DmKpiPage } from "./dm/kpi/DmKpiPage"
 import { DmLibraryPage } from "./dm/library/DmLibraryPage"
 import { DmObsoletePage } from "./dm/obsolete/DmObsoletePage"
@@ -59,6 +60,7 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="/dm/library" replace /> },
               { path: "library", element: <DmLibraryPage /> },
+              { path: "documents/:docId", element: <DmDetailPage /> },
               { path: "review", element: <DmReviewPage /> },
               { path: "me", element: <DmPersonalPage /> },
               { path: "obsolete", element: <DmObsoletePage /> },
