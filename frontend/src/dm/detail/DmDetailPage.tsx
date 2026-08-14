@@ -267,7 +267,8 @@ function InfoPanel({ detail }: { detail: DetailResponse }) {
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <TableRow>
-      <TableCell sx={{ width: "35%", color: "text.secondary", border: 0, py: 0.5 }}>{label}</TableCell>
+      {/* 標籤欄用主要文字色（同「文件資訊」標題），不用淡灰以免不明顯 */}
+      <TableCell sx={{ width: "35%", color: "text.primary", fontWeight: 500, border: 0, py: 0.5 }}>{label}</TableCell>
       <TableCell sx={{ border: 0, py: 0.5 }}>{value}</TableCell>
     </TableRow>
   )
