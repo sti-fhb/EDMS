@@ -140,6 +140,8 @@ export function DmDetailPage() {
                 reason={detail.edit_lock_reason}
                 onClick={() => navigate(`/dm/documents/${docId}/edit`)}
               />
+              {/* 彈性間隔：把「廢止此文件」推到橫幅最右邊（比 ml:auto 更不受 Stack spacing 影響） */}
+              <Box sx={{ flexGrow: 1 }} />
               <LockableButton
                 label="廢止此文件"
                 icon={<ArchiveIcon />}
@@ -147,7 +149,6 @@ export function DmDetailPage() {
                 disabled={!detail.can_edit}
                 reason={detail.edit_lock_reason}
                 onClick={() => navigate(`/dm/documents/${docId}/obsolete`)}
-                pushRight
               />
             </>
           )}
@@ -203,7 +204,16 @@ function FileArea({
           尚無檔案。
         </Typography>
       ) : (
-        <Box sx={{ textAlign: "center", py: 3 }}>
+        <Box
+          sx={{
+            textAlign: "center",
+            py: 4,
+            bgcolor: "action.hover",
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+          }}
+        >
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             {f.file_name}
           </Typography>
@@ -267,9 +277,21 @@ function InfoPanel({ detail }: { detail: DetailResponse }) {
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <TableRow>
-      {/* 標籤欄用主要文字色（同「文件資訊」標題），不用淡灰以免不明顯 */}
-      <TableCell sx={{ width: "35%", color: "text.primary", fontWeight: 500, border: 0, py: 0.5 }}>{label}</TableCell>
-      <TableCell sx={{ border: 0, py: 0.5 }}>{value}</TableCell>
+      {/* 欄位名稱：主要文字色（同「文件資訊」標題）+ 右側直線分隔 + 底線 */}
+      <TableCell
+        sx={{
+          width: "35%",
+          color: "text.primary",
+          fontWeight: 500,
+          borderRight: 1,
+          borderBottom: 1,
+          borderColor: "divider",
+          py: 0.75,
+        }}
+      >
+        {label}
+      </TableCell>
+      <TableCell sx={{ borderBottom: 1, borderColor: "divider", py: 0.75 }}>{value}</TableCell>
     </TableRow>
   )
 }
@@ -341,7 +363,6 @@ function LockableButton({
   reason,
   onClick,
   color,
-  pushRight,
 }: {
   label: string
   icon: ReactNode
@@ -349,11 +370,10 @@ function LockableButton({
   reason: string | null
   onClick: () => void
   color?: "error"
-  pushRight?: boolean
 }) {
   return (
     <Tooltip title={disabled && reason ? reason : ""}>
-      <Box component="span" sx={{ display: "inline-flex", ml: pushRight ? "auto" : undefined }}>
+      <Box component="span" sx={{ display: "inline-flex" }}>
         <Button size="small" variant="outlined" color={color} startIcon={icon} disabled={disabled} onClick={onClick}>
           {label}
         </Button>
