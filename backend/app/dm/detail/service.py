@@ -11,11 +11,13 @@ from app.dm.deps import DmContext
 from app.dm.detail.repository import DetailRepository
 from app.dm.detail.schemas import DetailResponse, FileMeta, ObsoleteInfo, VersionItem
 from app.dm.document.file_store import is_previewable
-from app.dm.document.visibility import is_privileged
 from app.dm.roles.authz import DM_EDITOR
 
 _OBSOLETE = "OBSOLETE"
+_PENDING_OBSOLETE = "PENDING_OBSOLETE"
 _NOT_FOUND = AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
+_LOCK_OBSOLETE = "此文件廢止待簽核，暫無法編輯或再次廢止"
+_LOCK_REVIEW = "此文件新版本送審中，暫無法編輯或廢止"
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,13 @@ class DetailService:
         if row is None:
             raise _NOT_FOUND  # 查無或無權（存取控制）
         tags = await self._repo.get_retrieval_tags(db, doc_id)
-        can_edit = DM_EDITOR in ctx.roles and not await self._repo.has_pending_review(db, doc_id)
+        is_editor = DM_EDITOR in ctx.roles
+        has_pending = await self._repo.has_pending_review(db, doc_id)
+        can_edit = is_editor and not has_pending
+        # 入口失效原因（供前端灰階提示，非隱藏）：廢止待簽核 vs 新版本送審中。
+        edit_lock_reason = None
+        if is_editor and has_pending:
+            edit_lock_reason = _LOCK_OBSOLETE if row.status == _PENDING_OBSOLETE else _LOCK_REVIEW
         is_obsolete = row.status == _OBSOLETE
 
         obsolete_info = None
@@ -83,7 +91,9 @@ class DetailService:
             func_code=row.func_code,
             func_name=row.func_name,
             file=file_meta,
+            is_editor=is_editor,
             can_edit=can_edit,
+            edit_lock_reason=edit_lock_reason,
             is_obsolete=is_obsolete,
             obsolete_info=obsolete_info,
         )
@@ -93,13 +103,14 @@ class DetailService:
         if meta is None:
             raise _NOT_FOUND
         current_id = meta.current_version_id
-        # 純閱覽者僅見歷來發布版；編輯 / 審核 / 管理者見全部版本（含進行中）。
-        rows = await self._repo.get_versions(db, doc_id, include_unpublished=is_privileged(ctx.roles))
+        # 版本歷程不分角色僅列歷來發布版（PUBLISHED / SUPERSEDED）。
+        rows = await self._repo.get_versions(db, doc_id)
         return [
             VersionItem(
                 version_id=r.version_id,
                 version_no=r.version_no,
                 change_summary=r.change_summary,
+                file_name=r.file_name,
                 author_id=r.author_id,
                 author_name=r.author_name,
                 approver_name=r.approver_name,
@@ -115,8 +126,8 @@ class DetailService:
         meta = await self._repo.get_document_meta(db, doc_id, ctx.user_id, ctx.roles)
         if meta is None:
             raise _NOT_FOUND
-        # 純閱覽者不得取進行中 / 未通過版本之檔案（防洩未發布檔）；privileged 不限。
-        vfile = await self._repo.get_version_file(db, doc_id, version_id, include_unpublished=is_privileged(ctx.roles))
+        # 僅供歷來發布版（PUBLISHED / SUPERSEDED）取檔；進行中 / 未通過版本一律不供（不分角色）。
+        vfile = await self._repo.get_version_file(db, doc_id, version_id)
         if vfile is None:
             raise _NOT_FOUND
         is_current = version_id == meta.current_version_id

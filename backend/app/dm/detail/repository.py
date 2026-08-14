@@ -21,12 +21,12 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外）
 _RETRIEVAL = "RETRIEVAL"
 _PENDING = "PENDING"
 _OBSOLETE = "OBSOLETE"
-# 閱覽者於詳細頁可見之文件狀態：已發布 + 廢止待簽核 + 已廢止（後者仍需 read-only 查閱）；
-# 排除 DRAFT / PENDING_REVIEW（尚未發布，不得外洩）。編輯 / 審核 / 管理者不套此限（visibility=None）。
-# 見 dm/document/visibility 契約：visible_docs_condition 僅處理 AUDIENCE，STATUS 須由呼叫端補。
-_VIEWER_DOC_STATUSES = ("PUBLISHED", "PENDING_OBSOLETE", "OBSOLETE")
-# 版本歷程 / 檔案可揭露之版本狀態：已發布 + 已被取代（歷來發布版）；
-# 排除 DRAFT / PENDING_REVIEW / REJECTED（進行中 / 未通過之新版本，不列入歷程亦不供取檔）。
+# DM02 詳細頁可瀏覽之文件狀態（**不分角色**）：已發布 + 廢止待簽核（皆外顯「已發布」）+ 已廢止
+# （僅 US10 read-only 進入）。DRAFT / PENDING_REVIEW（首版未發布）不在此瀏覽，改於作者個人專區（US9）/
+# 審核者簽核中心（US6）呈現，故此處對所有角色一律排除（spec.md 狀態三維度 L190-192、spec_us4 進入來源）。
+_BROWSABLE_STATUSES = ("PUBLISHED", "PENDING_OBSOLETE", "OBSOLETE")
+# 版本歷程 / 檔案可揭露之版本狀態（**不分角色**）：已發布 + 已被取代（歷來發布版）；排除 DRAFT /
+# PENDING_REVIEW / REJECTED（進行中 / 未通過之新版本，屬個人專區 / 簽核中心，不列入歷程亦不供取檔）。
 _PUBLISHED_VERSION_STATUSES = ("PUBLISHED", "SUPERSEDED")
 
 
@@ -34,11 +34,15 @@ class DetailRepository:
     """文件詳細 / 版本 / 送審狀態 / 廢止資訊 / 檔案 / 閱讀紀錄。"""
 
     def _access_conditions(self, doc_id: str, user_id: str, roles: Iterable[str]) -> list[ColumnElement[bool]]:
-        conds: list[ColumnElement[bool]] = [DmDocument.doc_id == doc_id, DmDocument.deleted == 0]
-        visibility = visible_docs_condition(user_id, roles)  # 閱覽者過濾；其餘 None
-        if visibility is not None:  # 純閱覽者：契約要求另 AND 文件狀態，防讀取未發布草稿
+        # 文件狀態限制對所有角色一律套用（DM02 僅瀏覽已發布生命週期文件）。
+        conds: list[ColumnElement[bool]] = [
+            DmDocument.doc_id == doc_id,
+            DmDocument.deleted == 0,
+            DmDocument.status.in_(_BROWSABLE_STATUSES),
+        ]
+        visibility = visible_docs_condition(user_id, roles)  # 閱覽者另受可見對象過濾；privileged 為 None
+        if visibility is not None:
             conds.append(visibility)
-            conds.append(DmDocument.status.in_(_VIEWER_DOC_STATUSES))
         return conds
 
     async def get_document(self, db: AsyncSession, doc_id: str, user_id: str, roles: Iterable[str]) -> Row | None:
@@ -88,23 +92,21 @@ class DetailRepository:
         )
         return list((await db.execute(stmt)).scalars().all())
 
-    async def get_versions(self, db: AsyncSession, doc_id: str, *, include_unpublished: bool) -> list[Row]:
-        """該文件版本歷程（發布時間 DESC；含撰寫者 / 核准者姓名）。
+    async def get_versions(self, db: AsyncSession, doc_id: str) -> list[Row]:
+        """該文件版本歷程（發布時間 DESC；含撰寫者 / 核准者姓名 / 檔名）。
 
-        `include_unpublished`（編輯 / 審核 / 管理者）為 True 時列全部版本；純閱覽者為 False，
-        僅列歷來發布版（PUBLISHED / SUPERSEDED），不洩進行中 / 未通過之新版本。
+        **不分角色**僅列歷來發布版（PUBLISHED / SUPERSEDED）；進行中 / 未通過之新版本
+        （DRAFT / PENDING_REVIEW / REJECTED）屬個人專區 / 簽核中心，不列入版本歷程。
         """
         author = aliased(DpUser)
         approver = aliased(DpUser)
-        conds: list[ColumnElement[bool]] = [DmDocVersion.doc_id == doc_id, DmDocVersion.deleted == 0]
-        if not include_unpublished:
-            conds.append(DmDocVersion.status.in_(_PUBLISHED_VERSION_STATUSES))
         stmt = (
             select(
                 DmDocVersion.version_id,
                 DmDocVersion.version_no,
                 DmDocVersion.change_summary,
                 DmDocVersion.published_date,
+                DmDocVersion.file_name,
                 DmDocVersion.file_mime,
                 DmDocVersion.created_user.label("author_id"),
                 author.user_name.label("author_name"),
@@ -113,7 +115,11 @@ class DetailRepository:
             .select_from(DmDocVersion)
             .outerjoin(author, DmDocVersion.created_user == author.user_id)
             .outerjoin(approver, DmDocVersion.approver_user_id == approver.user_id)
-            .where(*conds)
+            .where(
+                DmDocVersion.doc_id == doc_id,
+                DmDocVersion.deleted == 0,
+                DmDocVersion.status.in_(_PUBLISHED_VERSION_STATUSES),
+            )
             .order_by(DmDocVersion.published_date.desc().nullslast(), DmDocVersion.version_id.desc())
         )
         return list((await db.execute(stmt)).all())
@@ -152,21 +158,17 @@ class DetailRepository:
         )
         return (await db.execute(stmt)).first()
 
-    async def get_version_file(
-        self, db: AsyncSession, doc_id: str, version_id: int, *, include_unpublished: bool
-    ) -> Row | None:
-        """取某版本之檔案 metadata（file_path / mime / name）；限本文件、未刪除。
+    async def get_version_file(self, db: AsyncSession, doc_id: str, version_id: int) -> Row | None:
+        """取某版本之檔案 metadata（file_path / mime / name）；限本文件、未刪除、且屬歷來發布版。
 
-        `include_unpublished` 為 False（純閱覽者）時另限歷來發布版，進行中 / 未通過版本不供取檔（防洩未發布檔）。
+        **不分角色**僅供 PUBLISHED / SUPERSEDED 版本取檔；進行中 / 未通過版本不供取檔（防洩未發布檔）。
         """
-        conds: list[ColumnElement[bool]] = [
+        stmt = select(DmDocVersion.file_path, DmDocVersion.file_mime, DmDocVersion.file_name).where(
             DmDocVersion.version_id == version_id,
             DmDocVersion.doc_id == doc_id,
             DmDocVersion.deleted == 0,
-        ]
-        if not include_unpublished:
-            conds.append(DmDocVersion.status.in_(_PUBLISHED_VERSION_STATUSES))
-        stmt = select(DmDocVersion.file_path, DmDocVersion.file_mime, DmDocVersion.file_name).where(*conds)
+            DmDocVersion.status.in_(_PUBLISHED_VERSION_STATUSES),
+        )
         return (await db.execute(stmt)).first()
 
     async def write_read(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:

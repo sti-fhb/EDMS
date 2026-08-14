@@ -17,6 +17,7 @@ import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
 import TableRow from "@mui/material/TableRow"
+import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import type { ReactNode } from "react"
@@ -27,6 +28,13 @@ import { DOC_STATUS_LABELS } from "./schemas"
 import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
 import { useNotification } from "../../contexts/NotificationContext"
+
+/** 檔案存取失敗訊息：缺檔（404）明確提示「查無檔案」，避免誤導為系統故障。 */
+function fileErrorMessage(err: unknown, action: string): string {
+  const status = (err as { response?: { status?: number } } | null)?.response?.status
+  if (status === 404) return "查無檔案，可能已被移除，請聯絡管理者"
+  return `檔案${action}失敗，請稍後再試`
+}
 
 /**
  * 文件詳細頁瀏覽（US4 / DM02）：標題列 + 右側資訊面板 + 檔案區（PDF/圖片預覽、Office 僅下載）+
@@ -47,15 +55,15 @@ export function DmDetailPage() {
   const onDownload = async (versionId: number, filename: string) => {
     try {
       await downloadVersionFile(docId, versionId, filename)
-    } catch {
-      message.error("檔案下載失敗，請稍後再試")
+    } catch (err) {
+      message.error(fileErrorMessage(err, "下載"))
     }
   }
   const onPreview = async (versionId: number) => {
     try {
       await previewVersionFile(docId, versionId)
-    } catch {
-      message.error("檔案預覽失敗，請稍後再試")
+    } catch (err) {
+      message.error(fileErrorMessage(err, "預覽"))
     }
   }
 
@@ -118,25 +126,25 @@ export function DmDetailPage() {
           <Button size="small" startIcon={<HistoryIcon />} onClick={() => setHistoryOpen((v) => !v)}>
             版本歷程
           </Button>
-          {detail.can_edit && !readOnly && (
+          {/* 編輯者入口：送審中 / 廢止待簽核時灰階 + 提示原因（非隱藏，FR-005）；已廢止則整段不顯示 */}
+          {detail.is_editor && !readOnly && (
             <>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={<EditIcon />}
+              <LockableButton
+                label="編輯新版本"
+                icon={<EditIcon />}
+                disabled={!detail.can_edit}
+                reason={detail.edit_lock_reason}
                 onClick={() => navigate(`/dm/documents/${docId}/edit`)}
-              >
-                編輯新版本
-              </Button>
-              <Button
-                size="small"
+              />
+              <LockableButton
+                label="廢止此文件"
+                icon={<ArchiveIcon />}
                 color="error"
-                startIcon={<ArchiveIcon />}
+                disabled={!detail.can_edit}
+                reason={detail.edit_lock_reason}
                 onClick={() => navigate(`/dm/documents/${docId}/obsolete`)}
-                sx={{ ml: "auto" }}
-              >
-                廢止此文件
-              </Button>
+                pushRight
+              />
             </>
           )}
         </Stack>
@@ -300,7 +308,7 @@ function VersionRow({
               size="small"
               variant="text"
               startIcon={<DownloadIcon />}
-              onClick={() => onDownload(v.version_id, `${v.version_no}`)}
+              onClick={() => onDownload(v.version_id, v.file_name)}
             >
               下載
             </Button>
@@ -315,5 +323,37 @@ function VersionRow({
         {v.change_summary}
       </Typography>
     </Box>
+  )
+}
+
+/**
+ * 編輯者動作入口按鈕：失效時灰階（disabled）並以 tooltip 提示原因（送審中 / 廢止待簽核），非隱藏。
+ * disabled 的 MUI Button 不觸發 tooltip 事件，故以 span 包裹作為事件與 flex 佈局載體。
+ */
+function LockableButton({
+  label,
+  icon,
+  disabled,
+  reason,
+  onClick,
+  color,
+  pushRight,
+}: {
+  label: string
+  icon: ReactNode
+  disabled: boolean
+  reason: string | null
+  onClick: () => void
+  color?: "error"
+  pushRight?: boolean
+}) {
+  return (
+    <Tooltip title={disabled && reason ? reason : ""}>
+      <Box component="span" sx={{ display: "inline-flex", ml: pushRight ? "auto" : undefined }}>
+        <Button size="small" color={color} startIcon={icon} disabled={disabled} onClick={onClick}>
+          {label}
+        </Button>
+      </Box>
+    </Tooltip>
   )
 }

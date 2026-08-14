@@ -35,7 +35,9 @@ export interface DetailResponse {
   func_code: string | null
   func_name: string | null
   file: FileMeta | null
+  is_editor: boolean
   can_edit: boolean
+  edit_lock_reason: string | null
   is_obsolete: boolean
   obsolete_info: ObsoleteInfo | null
 }
@@ -44,6 +46,7 @@ export interface VersionItem {
   version_id: number
   version_no: string
   change_summary: string
+  file_name: string
   author_id: string
   author_name: string | null
   approver_name: string | null
@@ -52,9 +55,12 @@ export interface VersionItem {
   previewable: boolean
 }
 
-/** 文件狀態碼 → 中文（標題列狀態 pill）。 */
+/**
+ * 文件狀態碼 → 中文（標題列狀態 pill，FR-001 僅「已發布 / 已廢止」）。
+ * 廢止待簽核（PENDING_OBSOLETE）仍在架、對讀者顯示「已發布」，不外顯內部簽核狀態。
+ */
 export const DOC_STATUS_LABELS: Record<string, string> = {
   PUBLISHED: "已發布",
-  PENDING_OBSOLETE: "廢止待簽核",
+  PENDING_OBSOLETE: "已發布",
   OBSOLETE: "已廢止",
 }

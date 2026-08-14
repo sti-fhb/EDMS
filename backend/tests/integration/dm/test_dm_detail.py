@@ -191,39 +191,36 @@ async def test_editor_sees_any(db):
 
 
 @pytest.mark.parametrize("doc_status", ["DRAFT", "PENDING_REVIEW"])
-async def test_viewer_cannot_see_unpublished_doc(db, doc_status):
-    """未發布文件（草稿 / 送審中）即使掛「全體」可見對象，閱覽者仍不得經 detail / versions / file 讀取。"""
+async def test_unpublished_doc_not_browsable_any_role(db, doc_status):
+    """未發布文件（草稿 / 送審中）不在 DM02 瀏覽——不分角色（閱覽者 / 編輯者 / 管理者）皆 404。
+
+    草稿 / 送審中屬作者個人專區（US9）/ 審核者簽核中心（US6），不由詳細頁呈現。
+    """
     doc_id = f"DM-SOP-0001{'2' if doc_status == 'DRAFT' else '3'}"
     _, vid = await _seed_doc(db, doc_id=doc_id, status=doc_status, audience_tags=["全體"])
     viewer = DmContext(user_id="v_all", roles=frozenset({DM_VIEWER}))
-    for call in (
-        lambda: _svc.get_detail(db, doc_id=doc_id, ctx=viewer),
-        lambda: _svc.list_versions(db, doc_id=doc_id, ctx=viewer),
-        lambda: _svc.prepare_file(db, doc_id=doc_id, version_id=vid, disposition="preview", ctx=viewer),
-    ):
+    for ctx in (viewer, _editor(), _admin()):
         with pytest.raises(AppError) as e:
-            await call()
+            await _svc.get_detail(db, doc_id=doc_id, ctx=ctx)
         assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
-    # 管理者不受狀態限制（證明擋下者為狀態過濾、非可見對象）
-    assert (await _svc.get_detail(db, doc_id=doc_id, ctx=_admin())).doc_id == doc_id
+    # 版本 / 檔案端點同樣擋
+    with pytest.raises(AppError):
+        await _svc.list_versions(db, doc_id=doc_id, ctx=_admin())
+    with pytest.raises(AppError):
+        await _svc.prepare_file(db, doc_id=doc_id, version_id=vid, disposition="preview", ctx=_admin())
 
 
-async def test_inflight_version_hidden_from_viewer_visible_to_privileged(db):
-    """進行中新版本（PENDING_REVIEW）：純閱覽者版本歷程不列、亦不供取檔；編輯 / 審核 / 管理者見全部（AC4）。"""
+async def test_inflight_version_never_in_history_any_role(db):
+    """進行中新版本（PENDING_REVIEW）不列入版本歷程、亦不供取檔——不分角色（版本歷程僅歷來發布版）。"""
     _, cur = await _seed_doc(db, doc_id="DM-SOP-000014", audience_tags=["全體"])
     pending = await _add_version(db, "DM-SOP-000014", "2.0-draft", status="PENDING_REVIEW")
     viewer = DmContext(user_id="v_all", roles=frozenset({DM_VIEWER}))
-    # 閱覽者：僅目前發布版、未含進行中版本
-    v_vers = await _svc.list_versions(db, doc_id="DM-SOP-000014", ctx=viewer)
-    assert {v.version_id for v in v_vers} == {cur}
-    with pytest.raises(AppError) as e:
-        await _svc.prepare_file(db, doc_id="DM-SOP-000014", version_id=pending, disposition="preview", ctx=viewer)
-    assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
-    # 編輯 / 審核 / 管理者：版本歷程含進行中版本、可預覽
-    a_vers = await _svc.list_versions(db, doc_id="DM-SOP-000014", ctx=_editor())
-    assert {v.version_id for v in a_vers} == {cur, pending}
-    f = await _svc.prepare_file(db, doc_id="DM-SOP-000014", version_id=pending, disposition="preview", ctx=_editor())
-    assert f.inline is True
+    for ctx in (viewer, _editor(), _admin()):
+        vers = await _svc.list_versions(db, doc_id="DM-SOP-000014", ctx=ctx)
+        assert {v.version_id for v in vers} == {cur}  # 僅目前發布版，無進行中版本
+        with pytest.raises(AppError) as e:
+            await _svc.prepare_file(db, doc_id="DM-SOP-000014", version_id=pending, disposition="preview", ctx=ctx)
+        assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
 
 
 # ── 檔案存取 + 閱讀記錄 ────────────────────────────
@@ -309,15 +306,28 @@ async def test_versions_list_marks_current(db):
 
 async def test_can_edit_editor_no_pending(db):
     await _seed_doc(db, doc_id="DM-SOP-000040")
-    assert (await _svc.get_detail(db, doc_id="DM-SOP-000040", ctx=_editor())).can_edit is True
-    # 非編輯者 → False
-    assert (await _svc.get_detail(db, doc_id="DM-SOP-000040", ctx=_admin())).can_edit is False
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000040", ctx=_editor())
+    assert d.is_editor is True and d.can_edit is True and d.edit_lock_reason is None
+    # 非編輯者（管理者）→ 無編輯入口、不可點
+    a = await _svc.get_detail(db, doc_id="DM-SOP-000040", ctx=_admin())
+    assert a.is_editor is False and a.can_edit is False
 
 
 async def test_can_edit_false_when_pending_review(db):
+    """新版本送審中：編輯者仍為 is_editor，但入口失效並帶送審中原因（供前端灰階提示）。"""
     await _seed_doc(db, doc_id="DM-SOP-000041")
     await _add_review(db, "DM-SOP-000041", review_type="NEW_VERSION", status="PENDING")
-    assert (await _svc.get_detail(db, doc_id="DM-SOP-000041", ctx=_editor())).can_edit is False
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000041", ctx=_editor())
+    assert d.is_editor is True and d.can_edit is False
+    assert d.edit_lock_reason is not None and "送審中" in d.edit_lock_reason
+
+
+async def test_edit_lock_reason_pending_obsolete(db):
+    """廢止待簽核：入口失效原因標示為廢止待簽核（非送審中）。"""
+    await _seed_doc(db, doc_id="DM-SOP-000042", status="PENDING_OBSOLETE")
+    await _add_review(db, "DM-SOP-000042", review_type="OBSOLETE", status="PENDING")
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000042", ctx=_editor())
+    assert d.can_edit is False and d.edit_lock_reason is not None and "廢止待簽核" in d.edit_lock_reason
 
 
 # ── 廢止 read-only 資訊 ────────────────────────────

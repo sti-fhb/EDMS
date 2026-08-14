@@ -35,7 +35,7 @@ describe("DmDetailPage 文件詳細頁", () => {
     expect(screen.getByRole("button", { name: "廢止此文件" })).toBeInTheDocument()
   })
 
-  it("can_edit=false（或送審中）→ 無編輯/廢止入口", async () => {
+  it("非編輯者（is_editor=false）→ 無編輯/廢止入口", async () => {
     server.use(
       http.get("/api/dm/documents/:docId", ({ params }) =>
         HttpResponse.json({
@@ -62,7 +62,9 @@ describe("DmDetailPage 文件詳細頁", () => {
             uploaded_at: null,
             previewable: true,
           },
+          is_editor: false,
           can_edit: false,
+          edit_lock_reason: null,
           is_obsolete: false,
           obsolete_info: null,
         }),
@@ -72,6 +74,47 @@ describe("DmDetailPage 文件詳細頁", () => {
     await screen.findByText("只讀文件")
     expect(screen.queryByRole("button", { name: "編輯新版本" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "廢止此文件" })).not.toBeInTheDocument()
+  })
+
+  it("編輯者且送審中：入口顯示但灰階（disabled），非隱藏", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "送審中文件",
+          status: "PUBLISHED",
+          current_version_no: "1.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: "2026-04-15T10:30:00Z",
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 1,
+            file_name: "a.pdf",
+            file_mime: "application/pdf",
+            file_size: 1000,
+            uploaded_at: null,
+            previewable: true,
+          },
+          is_editor: true,
+          can_edit: false,
+          edit_lock_reason: "此文件新版本送審中，暫無法編輯或廢止",
+          is_obsolete: false,
+          obsolete_info: null,
+        }),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("送審中文件")
+    expect(await screen.findByRole("button", { name: "編輯新版本" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "廢止此文件" })).toBeDisabled()
   })
 
   it("版本歷程：展開列所有版本；目前版可下載、舊版僅預覽", async () => {
