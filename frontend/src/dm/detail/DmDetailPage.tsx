@@ -24,7 +24,6 @@ import type { ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { downloadVersionFile, previewVersionFile } from "./detailService"
-import { DOC_STATUS_LABELS } from "./schemas"
 import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -94,11 +93,6 @@ export function DmDetailPage() {
           <Typography variant="caption" color="text.secondary">
             目前版本：{detail.current_version_no ?? "—"}
           </Typography>
-          <Chip
-            size="small"
-            label={DOC_STATUS_LABELS[detail.status] ?? detail.status}
-            color={detail.is_obsolete ? "default" : "success"}
-          />
         </Stack>
       </Box>
 
@@ -119,11 +113,21 @@ export function DmDetailPage() {
 
       {/* 操作列 */}
       <Paper sx={{ p: 1.5, mb: 2 }}>
-        <Stack direction="row" spacing={1} flexWrap="wrap">
-          <Button size="small" startIcon={<ArrowBackIcon />} onClick={() => navigate("/dm/library")}>
+        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => navigate("/dm/library")}
+          >
             返回文件庫
           </Button>
-          <Button size="small" startIcon={<HistoryIcon />} onClick={() => setHistoryOpen((v) => !v)}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={() => setHistoryOpen((v) => !v)}
+          >
             版本歷程
           </Button>
           {/* 編輯者入口：送審中 / 廢止待簽核時灰階 + 提示原因（非隱藏，FR-005）；已廢止則整段不顯示 */}
@@ -241,9 +245,8 @@ function InfoPanel({ detail }: { detail: DetailResponse }) {
         <TableBody>
           <InfoRow label="分類" value={<Chip size="small" label={detail.category_name} />} />
           <InfoRow label="作者" value={detail.author_name ?? detail.author_id} />
-          <InfoRow label="發布日期" value={detail.published_date?.slice(0, 10) ?? "—"} />
           <InfoRow label="核准者" value={detail.approver_name ?? "—"} />
-          <InfoRow label="核准時間" value={detail.approve_time?.slice(0, 16).replace("T", " ") ?? "—"} />
+          <InfoRow label="發布時間" value={detail.published_date?.slice(0, 16).replace("T", " ") ?? "—"} />
           <InfoRow
             label="標籤"
             value={
@@ -350,7 +353,7 @@ function LockableButton({
   return (
     <Tooltip title={disabled && reason ? reason : ""}>
       <Box component="span" sx={{ display: "inline-flex", ml: pushRight ? "auto" : undefined }}>
-        <Button size="small" color={color} startIcon={icon} disabled={disabled} onClick={onClick}>
+        <Button size="small" variant="outlined" color={color} startIcon={icon} disabled={disabled} onClick={onClick}>
           {label}
         </Button>
       </Box>

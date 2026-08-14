@@ -18,7 +18,6 @@ describe("DmDetailPage 文件詳細頁", () => {
     renderWithProviders(<DmDetailPage />)
     expect(await screen.findByText("領血確認標準作業程序")).toBeInTheDocument()
     expect(screen.getByText("DOC_ID: DM-SOP-000001")).toBeInTheDocument()
-    expect(screen.getByText("已發布")).toBeInTheDocument()
     // 資訊面板
     expect(screen.getByText("陳大華")).toBeInTheDocument()
     expect(screen.getByText("李主任")).toBeInTheDocument()
