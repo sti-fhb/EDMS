@@ -26,6 +26,14 @@ _ALL_AUDIENCE_TAG = "全體"
 _UNFILTERED_ROLES = frozenset({DM_ADMIN, DM_EDITOR, DM_REVIEWER})
 
 
+def is_privileged(roles: Iterable[str]) -> bool:
+    """是否具編輯 / 審核 / 管理者角色（不受可見性與未發布內容限制）。
+
+    純閱覽者回 False——其可見範圍受 `visible_docs_condition` 過濾，且不得見未發布之文件 / 版本。
+    """
+    return bool(set(roles) & _UNFILTERED_ROLES)
+
+
 def visible_docs_condition(user_id: str, roles: Iterable[str]) -> ColumnElement[bool] | None:
     """回傳套用於 DM_DOCUMENT 之可見性條件。
 
