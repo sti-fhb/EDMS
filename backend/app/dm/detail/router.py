@@ -3,6 +3,7 @@
 掛 DM 存取閘 `get_dm_context`（需任一 DM 角色）；閱覽者結果 / 檔案由 service 套可見性存取控制。
 """
 
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.exceptions import AppError
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.detail.schemas import DetailResponse, VersionItem
 from app.dm.detail.service import DetailService
@@ -48,6 +50,9 @@ async def get_version_file(
 ) -> FileResponse:
     """檔案存取：PDF/圖片可 preview（inline）；download 僅限目前發布版（寫 DM_DOC_READ），舊版下載 403。"""
     served = await _service.prepare_file(db, doc_id=doc_id, version_id=version_id, disposition=disposition, ctx=ctx)
+    # 實體檔缺失（DB↔磁碟不一致）：回統一 404，避免 FileResponse 拋出含落盤路徑的 500（不洩路徑）。
+    if not Path(served.path).is_file():
+        raise AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
     return FileResponse(
         served.path,
         media_type=served.mime,

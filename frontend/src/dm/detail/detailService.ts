@@ -43,4 +43,6 @@ export async function previewVersionFile(docId: string, versionId: number): Prom
   const blob = await detailApi.fetchFileBlob(docId, versionId, "preview")
   const url = URL.createObjectURL(blob)
   window.open(url, "_blank", "noopener")
+  // 延遲回收 blob URL：確保新分頁已載入後才釋放，避免記憶體洩漏（多次預覽累積）。
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }

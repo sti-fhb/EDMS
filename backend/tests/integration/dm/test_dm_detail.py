@@ -63,6 +63,7 @@ async def _add_version(
     author="u_author",
     summary="摘要",
     published=None,
+    status="PUBLISHED",
 ):
     v = DmDocVersion(
         doc_id=doc_id,
@@ -72,7 +73,7 @@ async def _add_version(
         file_path=path,
         file_size=100,
         file_mime=mime,
-        status="PUBLISHED",
+        status=status,
         approver_user_id=approver,
         published_date=published or utcnow(),
         created_user=author,
@@ -187,6 +188,42 @@ async def test_editor_sees_any(db):
     await _seed_doc(db, doc_id="DM-SOP-000011", audience_tags=["護理師"])
     d = await _svc.get_detail(db, doc_id="DM-SOP-000011", ctx=_editor())
     assert d.doc_id == "DM-SOP-000011"
+
+
+@pytest.mark.parametrize("doc_status", ["DRAFT", "PENDING_REVIEW"])
+async def test_viewer_cannot_see_unpublished_doc(db, doc_status):
+    """未發布文件（草稿 / 送審中）即使掛「全體」可見對象，閱覽者仍不得經 detail / versions / file 讀取。"""
+    doc_id = f"DM-SOP-0001{'2' if doc_status == 'DRAFT' else '3'}"
+    _, vid = await _seed_doc(db, doc_id=doc_id, status=doc_status, audience_tags=["全體"])
+    viewer = DmContext(user_id="v_all", roles=frozenset({DM_VIEWER}))
+    for call in (
+        lambda: _svc.get_detail(db, doc_id=doc_id, ctx=viewer),
+        lambda: _svc.list_versions(db, doc_id=doc_id, ctx=viewer),
+        lambda: _svc.prepare_file(db, doc_id=doc_id, version_id=vid, disposition="preview", ctx=viewer),
+    ):
+        with pytest.raises(AppError) as e:
+            await call()
+        assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
+    # 管理者不受狀態限制（證明擋下者為狀態過濾、非可見對象）
+    assert (await _svc.get_detail(db, doc_id=doc_id, ctx=_admin())).doc_id == doc_id
+
+
+async def test_inflight_version_hidden_from_viewer_visible_to_privileged(db):
+    """進行中新版本（PENDING_REVIEW）：純閱覽者版本歷程不列、亦不供取檔；編輯 / 審核 / 管理者見全部（AC4）。"""
+    _, cur = await _seed_doc(db, doc_id="DM-SOP-000014", audience_tags=["全體"])
+    pending = await _add_version(db, "DM-SOP-000014", "2.0-draft", status="PENDING_REVIEW")
+    viewer = DmContext(user_id="v_all", roles=frozenset({DM_VIEWER}))
+    # 閱覽者：僅目前發布版、未含進行中版本
+    v_vers = await _svc.list_versions(db, doc_id="DM-SOP-000014", ctx=viewer)
+    assert {v.version_id for v in v_vers} == {cur}
+    with pytest.raises(AppError) as e:
+        await _svc.prepare_file(db, doc_id="DM-SOP-000014", version_id=pending, disposition="preview", ctx=viewer)
+    assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
+    # 編輯 / 審核 / 管理者：版本歷程含進行中版本、可預覽
+    a_vers = await _svc.list_versions(db, doc_id="DM-SOP-000014", ctx=_editor())
+    assert {v.version_id for v in a_vers} == {cur, pending}
+    f = await _svc.prepare_file(db, doc_id="DM-SOP-000014", version_id=pending, disposition="preview", ctx=_editor())
+    assert f.inline is True
 
 
 # ── 檔案存取 + 閱讀記錄 ────────────────────────────
@@ -349,3 +386,33 @@ async def test_http_file_download_serves(db, client, tmp_path):
     )
     assert resp.status_code == 200 and resp.content == b"%PDF-1.4 test"
     assert "attachment" in resp.headers.get("content-disposition", "")
+
+
+async def test_http_missing_physical_file_returns_404_not_500(db, client):
+    """DB 有版本 metadata 但實體檔缺失：回 404 DM_DOC_001，非 500，且不洩露落盤路徑。"""
+    secret_path = "/nonexistent/secret/vault/a.pdf"
+    doc = DmDocument(
+        doc_id="DM-SOP-000061",
+        doc_name="d",
+        category_code="SOP",
+        current_version_id=None,
+        status="PUBLISHED",
+        created_user="u_author",
+        created_date=utcnow(),
+    )
+    db.add(doc)
+    await db.flush()
+    vid = await _add_version(db, "DM-SOP-000061", "1.0", path=secret_path)
+    doc.current_version_id = vid
+    await db.flush()
+    await _seed_user(db, "role2", "有角色2")
+    db.add(DmUserRole(user_id="role2", role_code=DM_EDITOR, created_user="a", created_date=utcnow()))
+    await db.flush()
+    token = create_access_token(sub="role2", ttl_minutes=15)
+    resp = await client.get(
+        f"/api/dm/documents/DM-SOP-000061/versions/{vid}/file?disposition=preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error_code"] == "DM_DOC_001"
+    assert "secret" not in resp.text  # 落盤路徑不外洩

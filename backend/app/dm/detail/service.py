@@ -11,6 +11,7 @@ from app.dm.deps import DmContext
 from app.dm.detail.repository import DetailRepository
 from app.dm.detail.schemas import DetailResponse, FileMeta, ObsoleteInfo, VersionItem
 from app.dm.document.file_store import is_previewable
+from app.dm.document.visibility import is_privileged
 from app.dm.roles.authz import DM_EDITOR
 
 _OBSOLETE = "OBSOLETE"
@@ -92,7 +93,8 @@ class DetailService:
         if meta is None:
             raise _NOT_FOUND
         current_id = meta.current_version_id
-        rows = await self._repo.get_versions(db, doc_id)
+        # 純閱覽者僅見歷來發布版；編輯 / 審核 / 管理者見全部版本（含進行中）。
+        rows = await self._repo.get_versions(db, doc_id, include_unpublished=is_privileged(ctx.roles))
         return [
             VersionItem(
                 version_id=r.version_id,
@@ -113,7 +115,8 @@ class DetailService:
         meta = await self._repo.get_document_meta(db, doc_id, ctx.user_id, ctx.roles)
         if meta is None:
             raise _NOT_FOUND
-        vfile = await self._repo.get_version_file(db, doc_id, version_id)
+        # 純閱覽者不得取進行中 / 未通過版本之檔案（防洩未發布檔）；privileged 不限。
+        vfile = await self._repo.get_version_file(db, doc_id, version_id, include_unpublished=is_privileged(ctx.roles))
         if vfile is None:
             raise _NOT_FOUND
         is_current = version_id == meta.current_version_id

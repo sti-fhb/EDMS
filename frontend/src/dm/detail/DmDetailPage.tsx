@@ -118,7 +118,7 @@ export function DmDetailPage() {
           <Button size="small" startIcon={<HistoryIcon />} onClick={() => setHistoryOpen((v) => !v)}>
             版本歷程
           </Button>
-          {detail.can_edit && (
+          {detail.can_edit && !readOnly && (
             <>
               <Button
                 size="small"
