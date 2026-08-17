@@ -22,6 +22,8 @@ _PENDING = "PENDING"
 _OBSOLETE = "OBSOLETE"
 _PUBLISHED = "PUBLISHED"
 _MANUAL = "MANUAL"
+_AUDIENCE = "AUDIENCE"
+_RETRIEVAL = "RETRIEVAL"
 
 
 class EditorRepository:
@@ -84,12 +86,41 @@ class EditorRepository:
         await db.flush()
         return ver
 
-    async def add_tags(self, db: AsyncSession, *, doc_id: str, tag_ids: Sequence[int], op: OperatorInfo) -> None:
-        """掛文件標籤（可見對象 + 檢索，去重）。"""
+    async def set_tags(self, db: AsyncSession, *, doc_id: str, tag_ids: Sequence[int], op: OperatorInfo) -> None:
+        """設定文件標籤為指定集合（可見對象 + 檢索）——差異式覆寫。
+
+        標籤為**文件層**（DM_DOC_TAG 無 version_id），編輯新版本改標籤即改此。採軟刪除復用避開
+        UQ(DOC_ID, TAG_ID)：目標集內既有列復活（deleted=0）/ 新列插入、目標集外之有效列軟刪除。
+        新增文件（無既有列）時等同全插入。
+        """
         now = utcnow()
-        for tid in dict.fromkeys(tag_ids):  # 去重、保序
-            db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=op.user_id, created_date=now))
+        wanted = list(dict.fromkeys(tag_ids))  # 去重、保序
+        wanted_set = set(wanted)
+        existing = {
+            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
+        }
+        for tid in wanted:
+            row = existing.get(tid)
+            if row is None:
+                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=op.user_id, created_date=now))
+            elif row.deleted != 0:
+                row.deleted = 0
+                row.updated_user, row.updated_date = op.user_id, now
+        for tid, row in existing.items():
+            if tid not in wanted_set and row.deleted == 0:
+                row.deleted = 1
+                row.updated_user, row.updated_date = op.user_id, now
         await db.flush()
+
+    async def has_audience_tag(self, db: AsyncSession, doc_id: str) -> bool:
+        """該文件是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。"""
+        got = await db.scalar(
+            select(DmDocTag.doc_tag_id)
+            .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0, DmTagGroup.group_type == _AUDIENCE)
+        )
+        return got is not None
 
     async def get_document(self, db: AsyncSession, doc_id: str) -> DmDocument | None:
         """取文件主檔（未刪除）。"""
@@ -190,6 +221,50 @@ class EditorRepository:
         )
         return list((await db.execute(stmt)).all())
 
-    async def get_user_email(self, db: AsyncSession, user_id: str) -> str | None:
-        """取使用者 Email（送簽通知收件人）。"""
-        return await db.scalar(select(DpUser.email).where(DpUser.user_id == user_id, DpUser.deleted == 0))
+    async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
+        """取使用者姓名 + Email（送簽通知收件人與範本變數）；查無 None。"""
+        return (
+            await db.execute(
+                select(DpUser.user_name, DpUser.email).where(DpUser.user_id == user_id, DpUser.deleted == 0)
+            )
+        ).first()
+
+    # ── 表單受控下拉（啟用中）─────────────────────────────
+
+    async def list_categories(self, db: AsyncSession) -> list[Row]:
+        """分類下拉（啟用中，依碼排序）。"""
+        from app.dm.catalog.models import DmCategory
+
+        stmt = (
+            select(DmCategory.category_code, DmCategory.category_name)
+            .where(DmCategory.is_enabled.is_(True))
+            .order_by(DmCategory.category_code)
+        )
+        return list((await db.execute(stmt)).all())
+
+    async def list_funcs(self, db: AsyncSession) -> list[Row]:
+        """關聯作業項目下拉（啟用中，依碼排序）。"""
+        from app.dm.catalog.models import DmFunc
+
+        stmt = select(DmFunc.func_code, DmFunc.func_name).where(DmFunc.is_enabled.is_(True)).order_by(DmFunc.func_code)
+        return list((await db.execute(stmt)).all())
+
+    async def list_audience_tags(self, db: AsyncSession) -> list[Row]:
+        """可見對象下拉（AUDIENCE 組、啟用中；**含通用值「全體」**，文件掛上即所有閱覽者可見）。"""
+        stmt = (
+            select(DmTag.tag_id, DmTag.tag_name)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmTagGroup.group_type == _AUDIENCE, DmTag.is_enabled.is_(True))
+            .order_by(DmTag.tag_id)
+        )
+        return list((await db.execute(stmt)).all())
+
+    async def list_retrieval_tags(self, db: AsyncSession) -> list[Row]:
+        """檢索標籤下拉（RETRIEVAL 型、啟用中，含所屬組供分組）。"""
+        stmt = (
+            select(DmTag.tag_id, DmTag.tag_name, DmTag.tag_group_code)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmTagGroup.group_type == _RETRIEVAL, DmTag.is_enabled.is_(True))
+            .order_by(DmTag.tag_group_code, DmTag.tag_id)
+        )
+        return list((await db.execute(stmt)).all())
