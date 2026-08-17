@@ -104,7 +104,7 @@ class RegisterService:
                 action_type="DELETE",
                 result="SUCCESS",
                 operator_id=_SYSTEM_USER,
-                target_id=pending.res_id,
+                target_id=pending.invite_id,
                 description="逾期管理者邀請被自助註冊覆蓋",
                 before_value={
                     "kind": pending.kind,

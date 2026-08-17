@@ -7,10 +7,10 @@
 from sqlalchemy import BigInteger, Boolean, ForeignKey, Identity, Index, PrimaryKeyConstraint, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import BaseModelNoResId
+from app.core.base_model import BaseModel
 
 
-class DmCategory(BaseModelNoResId):
+class DmCategory(BaseModel):
     """文件分類（DM_CATEGORY）。
 
     4 內建（SOP / MANUAL / TRAINING / OTHER）+ 管理者自訂（平面）。CATEGORY_CODE 為 PK、
@@ -26,7 +26,7 @@ class DmCategory(BaseModelNoResId):
     is_enabled: Mapped[bool] = mapped_column("IS_ENABLED", Boolean, nullable=False, default=True)
 
 
-class DmFunc(BaseModelNoResId):
+class DmFunc(BaseModel):
     """關聯作業項目 / func_name（DM_FUNC）。
 
     系統操作手冊類文件可標記之主系統作業功能代號；受控、不可自由輸入；不刪除只停用。
@@ -40,7 +40,7 @@ class DmFunc(BaseModelNoResId):
     is_enabled: Mapped[bool] = mapped_column("IS_ENABLED", Boolean, nullable=False, default=True)
 
 
-class DmTagGroup(BaseModelNoResId):
+class DmTagGroup(BaseModel):
     """標籤組（DM_TAG_GROUP）。
 
     4 內建組（AUDIENCE / MODULE / NATURE / LEGAL）；GROUP_TYPE 分權限（AUDIENCE，可見對象/單位）
@@ -56,7 +56,7 @@ class DmTagGroup(BaseModelNoResId):
     is_builtin: Mapped[bool] = mapped_column("IS_BUILTIN", Boolean, nullable=False, default=True)
 
 
-class DmTag(BaseModelNoResId):
+class DmTag(BaseModel):
     """標籤（DM_TAG）。
 
     受控標籤庫；撰寫者只能挑選不可自由輸入；不刪除只停用。AUDIENCE 組之停用採 soft-retire

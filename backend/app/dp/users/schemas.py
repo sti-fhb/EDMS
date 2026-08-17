@@ -52,13 +52,13 @@ class UserStatusUpdate(BaseModel):
 class InviteResponse(BaseModel):
     """待啟用邀請清單回應（US4 #67，ADMIN_INVITE）。
 
-    來源為 `DP_PENDING_REGISTRATION`（尚無 USER_ID，以 `res_id` 為對外識別碼）。
+    來源為 `DP_PENDING_REGISTRATION`（尚無 USER_ID，以 `invite_id` 為對外識別碼）。
     「邀請狀態」（有效中 / 已逾期）由前端以 `expires_date` vs now 衍生（同 UserResponse.locked_until）。
     """
 
     model_config = {"from_attributes": True}
 
-    res_id: Optional[str]
+    invite_id: Optional[str]
     email: str
     user_name: str
     created_date: Optional[datetime]

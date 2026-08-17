@@ -83,32 +83,33 @@ raise AppError(status_code=404, detail="站點不存在", error_code="DP_SITE_00
 
 ---
 
-### `BaseModel` / `BaseModelNoResId` / `BaseModelHardDelete` / `AuditLogBaseModel` · `app/core/base_model.py`
-所有 Table 必須繼承下表其中一個 base，共用的標準欄位（`CREATED_USER`、`CREATED_DATE`、`UPDATED_USER`、`UPDATED_DATE`、`RES_ID`、`DELETED`）自動取得，**不需重複定義**。（EDMS 為單一組織、無站點維度，標準欄位不含 SITE；見 docs/specs/dp/data-model.md、research.md §1。）
+### `BaseModel` / `BaseModelHardDelete` / `BaseModelNoDelete` / `AuditLogBaseModel` · `app/core/base_model.py`
+所有 Table 必須繼承下表其中一個 base，共用的標準欄位（`CREATED_USER`、`CREATED_DATE`、`UPDATED_USER`、`UPDATED_DATE`、`DELETED`）自動取得，**不需重複定義**。（EDMS 為單一組織、無站點維度，標準欄位不含 SITE；見 docs/specs/dp/data-model.md、research.md §1。）
+
+> **標準欄位不含 `RES_ID`**（#158 移除）：該欄源自 TBMS「來源功能 ID」（FK → `DP_MENU`），EDMS 不設 `DP_MENU`（無全域 RBAC / 功能選單），來源功能改記於 `DP_AUDIT_LOG.FUNC_NAME`。**新表不得自行加回 `RES_ID`**；表若需要自己的對外識別碼，用業務語意命名（如 `DP_PENDING_REGISTRATION.INVITE_ID`）。
 
 | 基底 | 適用情境 |
 |------|----------|
-| `BaseModel` | 一般 Table（含 `RES_ID` + `DELETED`），新模組預設使用 |
-| `BaseModelNoResId` | `RES_ID` 已被業務欄位佔用的 Table |
-| `BaseModelHardDelete` | 硬刪除例外表（含 `RES_ID`，**無 `DELETED`**）|
-| `BaseModelNoDelete` | 可更新但永不刪除的 outbox / log 表（含 `UPDATED_*`，**無 `RES_ID` / 無 `DELETED`**，如 `DP_EMAIL_LOG`）|
+| `BaseModel` | 一般 Table（含 `DELETED`），新模組預設使用 |
+| `BaseModelHardDelete` | 硬刪除例外表（**無 `DELETED`**）|
+| `BaseModelNoDelete` | 可更新但永不刪除的 outbox / log 表（含 `UPDATED_*`，**無 `DELETED`**，如 `DP_EMAIL_LOG`）|
 | `AuditLogBaseModel` | append-only 記錄表（如 `DP_AUDIT_LOG` / `DP_PWD_HIST` / `DP_SCHEDULE_LOG`），僅含 `CREATED_USER`、`CREATED_DATE` |
 
 ```python
 from app.core.base_model import BaseModel
 
-# 一般 Table（含 RES_ID + DELETED）— 新模組最常見場景
+# 一般 Table（含 DELETED）— 新模組最常見場景
 class DpParamMaster(BaseModel):
     __tablename__ = "DP_PARAM_M"
     PARAM_ID: Mapped[str] = mapped_column("PARAM_ID", String(50), primary_key=True)
     # 標準欄位自動繼承，不需重複定義
 ```
 
-> `BaseModelNoResId` / `BaseModelHardDelete` / `AuditLogBaseModel` 的 code 範例與適用情境：見 `docs/ref/sti-backend-ref.md#basemodel-用法`
+> `BaseModelHardDelete` / `AuditLogBaseModel` 的 code 範例與適用情境：見 `docs/ref/sti-backend-ref.md#basemodel-用法`
 
 **刪除策略**：
 - 預設軟刪除（`DELETED = 1`）；所有查詢預設加 `WHERE DELETED = 0`；Service 層 `delete` 方法改為 `update DELETED = 1`
-- 不在例外清單內的表一律軟刪除，且必須繼承 `BaseModel` / `BaseModelNoResId` / `BaseModelHardDelete` / `AuditLogBaseModel` 之一
+- 不在例外清單內的表一律軟刪除，且必須繼承 `BaseModel` / `BaseModelHardDelete` / `BaseModelNoDelete` / `AuditLogBaseModel` 之一
 - 既有「無 DELETED 例外表」與「無 BaseModel 例外表」清單，以及新增例外時的更新點：見 `docs/ref/sti-backend-ref.md#刪除策略例外表清單`
 
 ---

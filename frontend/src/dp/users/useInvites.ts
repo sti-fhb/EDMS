@@ -26,7 +26,7 @@ export function useInvites(enabled: boolean) {
   const resendInvite = useCallback(
     async (row: InviteRow) => {
       try {
-        await usersApi.resendInvite(row.res_id)
+        await usersApi.resendInvite(row.invite_id)
         message.success("邀請信已重寄")
         invalidate()
       } catch (err) {
@@ -50,7 +50,7 @@ export function useInvites(enabled: boolean) {
         okText: "確定取消",
         onOk: async () => {
           try {
-            await usersApi.cancelInvite(row.res_id)
+            await usersApi.cancelInvite(row.invite_id)
             message.success("已取消邀請")
             invalidate()
           } catch (err) {

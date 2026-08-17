@@ -49,7 +49,7 @@ async def _make_invite(db, *, token="invite-tok", email="invitee@edms.local", na
         expires_date=now + timedelta(minutes=ttl_min),
         now=now,
         kind="ADMIN_INVITE",
-        res_id="inv-res-1",
+        invite_id="inv-res-1",
         operator_id="admin01",
     )
 

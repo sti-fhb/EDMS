@@ -97,7 +97,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 
 | 議題 | 決策 |
 |------|------|
-| 稽核標準欄位（對齊平台模組 DP）| 省略 CREATED_SITE / CREATED_HOSPITAL（對齊平台模組 DP，平台無 SITE / HOSPITAL 概念）；採 CREATED_USER / DATE、UPDATED_USER / DATE、RES_ID、DELETED（research §1）|
+| 稽核標準欄位（對齊平台模組 DP）| 省略 CREATED_SITE / CREATED_HOSPITAL（對齊平台模組 DP，平台無 SITE / HOSPITAL 概念）；採 CREATED_USER / DATE、UPDATED_USER / DATE、DELETED（research §1；標準欄位不含 RES_ID，見 #158）|
 | DOC_ID 產生 | `DM-{分類碼}-{6 位流水號}`、流水號依分類獨立、草稿建立時配號（research §2）|
 | 檔案儲存 | 單版本單檔；檔案存檔案系統 / 物件儲存，DB 存 metadata（不存 BLOB）（research §3）|
 | func_name 唯一性 | 部分唯一索引（MANUAL + PUBLISHED）+ 應用層檢核（research §5）|

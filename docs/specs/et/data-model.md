@@ -10,7 +10,7 @@
 
 > **2026-07-08 集中化變更摘要**：系統參數、通知範本、發信、排程集中於平台模組 DP（見 `../../requirements/RQDP.md`、`../../_refs/09-平台模組.md`）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：ET 參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`）、ET 6 類通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信改走平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。維護介面於平台 DP 後台（按模組過濾）；`ET_WEEKLY_STAT`（業務快照）不受影響。
 
-> **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`（無 SITE / HOSPITAL 概念，對齊平台模組 DP）。
+> **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `DELETED`（無 SITE / HOSPITAL 概念，亦不含 `RES_ID`，對齊平台模組 DP，見 #158）。
 
 ---
 

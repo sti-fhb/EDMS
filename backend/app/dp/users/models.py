@@ -12,7 +12,7 @@ class DpUser(BaseModel):
 
     EDMS 單一組織、無站點維度；EMAIL 為帳號且一般個資不加密儲存。
     不建 DP_SESSION（無 Refresh Token，改以 JWT auth_time 換發，見 research §1）。
-    標準欄位（CREATED_* / UPDATED_* / RES_ID / DELETED）由 BaseModel 繼承。
+    標準欄位（CREATED_* / UPDATED_* / DELETED）由 BaseModel 繼承。
     """
 
     __tablename__ = "DP_USER"

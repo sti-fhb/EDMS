@@ -2,7 +2,7 @@
 
 驗「接線」：
 - 建立邀請**不設操作者總量限流**（PO 決策）：同一操作者批次建立多筆不同 Email 皆放行。
-- 重寄邀請掛「res_id 維度」冷卻（冷卻中 429 帶 retry_after），防對同一受邀信箱反覆轟炸。
+- 重寄邀請掛「invite_id 維度」冷卻（冷卻中 429 帶 retry_after），防對同一受邀信箱反覆轟炸。
 - 對**已逾期**待啟用邀請重複建立 → 走「重新邀請」並回 202（#111 AC2）；該路徑受「Email 維度」
   寄信冷卻約束，冷卻內回 429（#111 補洞：逾期後原本擋住重複建立的 409 已不再全擋）。
 冷卻邏輯本身的邊界（剩餘秒計算、視窗刷新）已由 tests/unit/test_core_cooldown.py 覆蓋，
@@ -86,17 +86,17 @@ async def test_create_invite_not_rate_limited_for_batch(client, db):
 
 
 async def test_resend_within_cooldown_returns_429_with_retry_after(client, db):
-    """同一邀請 res_id 於冷卻內重寄 → 429 帶 retry_after；首次重寄回 retry_after＝完整冷卻秒（600）。"""
+    """同一邀請 invite_id 於冷卻內重寄 → 429 帶 retry_after；首次重寄回 retry_after＝完整冷卻秒（600）。"""
     await _seed_operator(db, "admin01")
     headers = _auth()
-    # 先建立一筆邀請，取得 res_id
+    # 先建立一筆邀請，取得 invite_id
     created = await client.post("/api/dp/users", json={"email": "res@edms.local", "user_name": "重寄"}, headers=headers)
     assert created.status_code == 202
     pending = await AuthRepository().get_pending_by_email(db, "res@edms.local")
-    res_id = pending.res_id
+    invite_id = pending.invite_id
 
-    first = await client.post(f"/api/dp/users/invites/{res_id}/resend", headers=headers)
-    second = await client.post(f"/api/dp/users/invites/{res_id}/resend", headers=headers)
+    first = await client.post(f"/api/dp/users/invites/{invite_id}/resend", headers=headers)
+    second = await client.post(f"/api/dp/users/invites/{invite_id}/resend", headers=headers)
 
     assert first.status_code == 202
     assert first.json()["retry_after"] == 600  # 預設 INVITE_RESEND_COOLDOWN_SEC
@@ -107,15 +107,15 @@ async def test_resend_within_cooldown_returns_429_with_retry_after(client, db):
 
 
 async def test_resend_cooldown_is_per_invite(client, db):
-    """冷卻以 res_id 分桶：一筆冷卻中不影響對「另一筆邀請」重寄（批次重寄不同人不被擋）。"""
+    """冷卻以 invite_id 分桶：一筆冷卻中不影響對「另一筆邀請」重寄（批次重寄不同人不被擋）。"""
     await _seed_operator(db, "admin01")
     headers = _auth()
     for email in ("inv-a@edms.local", "inv-b@edms.local"):
         r = await client.post("/api/dp/users", json={"email": email, "user_name": "X"}, headers=headers)
         assert r.status_code == 202
     repo = AuthRepository()
-    res_a = (await repo.get_pending_by_email(db, "inv-a@edms.local")).res_id
-    res_b = (await repo.get_pending_by_email(db, "inv-b@edms.local")).res_id
+    res_a = (await repo.get_pending_by_email(db, "inv-a@edms.local")).invite_id
+    res_b = (await repo.get_pending_by_email(db, "inv-b@edms.local")).invite_id
 
     # A 重寄兩次 → 第二次冷卻 429；B 首次重寄仍 202（獨立桶）
     assert (await client.post(f"/api/dp/users/invites/{res_a}/resend", headers=headers)).status_code == 202

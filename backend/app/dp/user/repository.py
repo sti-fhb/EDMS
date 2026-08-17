@@ -242,13 +242,13 @@ class AuthRepository:
         expires_date: datetime,
         now: datetime,
         kind: str = _KIND_SELF_REGISTER,
-        res_id: str | None = None,
+        invite_id: str | None = None,
         operator_id: str = _SYSTEM_USER,
     ) -> None:
         """新增一筆待驗證 / 待啟用列（token 僅存 SHA-256）；呼叫方須先清同 Email 舊列。
 
         kind＝SELF_REGISTER（US2 自助註冊，建立即帶 pwd_hash）或 ADMIN_INVITE（US4 邀請，
-        pwd_hash 為 None、res_id 作為對外識別碼、operator_id 為管理者）。
+        pwd_hash 為 None、invite_id 作為對外識別碼、operator_id 為管理者）。
         """
         db.add(
             DpPendingRegistration(
@@ -257,7 +257,7 @@ class AuthRepository:
                 user_name=user_name,
                 pwd_hash=pwd_hash,
                 kind=kind,
-                res_id=res_id,
+                invite_id=invite_id,
                 expires_date=expires_date,
                 created_user=operator_id,
                 created_date=now,
@@ -285,10 +285,10 @@ class AuthRepository:
             .order_by(DpPendingRegistration.created_date.desc(), DpPendingRegistration.email)
         )
 
-    async def get_invite_by_res_id(self, db: AsyncSession, res_id: str) -> DpPendingRegistration | None:
-        """以 RES_ID 查邀請中列（僅 ADMIN_INVITE）；不存在回 None。"""
+    async def get_invite_by_invite_id(self, db: AsyncSession, invite_id: str) -> DpPendingRegistration | None:
+        """以 INVITE_ID 查邀請中列（僅 ADMIN_INVITE）；不存在回 None。"""
         stmt = select(DpPendingRegistration).where(
-            DpPendingRegistration.res_id == res_id,
+            DpPendingRegistration.invite_id == invite_id,
             DpPendingRegistration.kind == _KIND_ADMIN_INVITE,
         )
         return (await db.execute(stmt)).scalar_one_or_none()

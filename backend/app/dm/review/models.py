@@ -12,10 +12,10 @@ from typing import Optional
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, PrimaryKeyConstraint, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import AuditLogBaseModel, BaseModelNoResId
+from app.core.base_model import AuditLogBaseModel, BaseModel
 
 
-class DmReview(BaseModelNoResId):
+class DmReview(BaseModel):
     """送審紀錄（DM_REVIEW）。
 
     REVIEW_TYPE：NEW / NEW_VERSION / OBSOLETE。STATUS：PENDING / APPROVED / REJECTED / WITHDRAWN。

@@ -63,6 +63,10 @@ class DpPendingRegistration(BaseModelHardDelete):
     pwd_hash: Mapped[Optional[str]] = mapped_column("PWD_HASH", String(100), nullable=True)
     kind: Mapped[str] = mapped_column("KIND", String(20), nullable=False)
     expires_date: Mapped[datetime] = mapped_column("EXPIRES_DATE", DateTime(timezone=True), nullable=False)
+    # 邀請之對外識別碼：待啟用邀請尚無 USER_ID，故另給一鍵供重寄 / 取消端點指認單筆邀請，
+    # 亦為稽核 target_id 之來源。**僅 KIND=ADMIN_INVITE 有值**（自助註冊不需被管理者操作，維持 NULL）。
+    # 原名 RES_ID（TBMS 標準欄位遺留），#158 正名。
+    invite_id: Mapped[Optional[str]] = mapped_column("INVITE_ID", String(30), nullable=True)
 
 
 class DpPwdHistory(AuditLogBaseModel):

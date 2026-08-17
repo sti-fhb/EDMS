@@ -10,7 +10,7 @@
 
 ## §1 稽核標準欄位之調整（對齊平台模組 DP）
 
-- **Decision**: DM 各表標準欄位採 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `RES_ID` / `DELETED`，**省略 `CREATED_SITE` / `CREATED_HOSPITAL`**（及對應 UPDATED_*）。`CREATED_USER` / `UPDATED_USER` 指向共用 `DP_USER.USER_ID`。
+- **Decision**: DM 各表標準欄位採 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `DELETED`，**省略 `CREATED_SITE` / `CREATED_HOSPITAL`**（亦不含 `RES_ID`，見 #158）（及對應 UPDATED_*）。`CREATED_USER` / `UPDATED_USER` 指向共用 `DP_USER.USER_ID`。
 - **Rationale**: DM 各表標準欄位**對齊 EDMS 平台模組 DP**（`DP_USER`；平台無 SITE / HOSPITAL 概念、無 DP_SITE / DP_HOSPITAL）。CLAUDE.md 標準欄位之 `CREATED_SITE`（FK→ DP_SITE）在 EDMS 平台無對應來源，強行加入將造成懸空 FK。DM 權限自管（自己之 4 角色），與平台 DP 只共用帳號與認證，使用者無站點隸屬概念。
 - **Alternatives**: (a) 保留 CREATED_SITE 但填 null → 違反必填且 FK 無意義；(b) 自建 DM 站點表 → DM 無站點業務，過度設計。均否決。
 - **append-only 事件表之標準欄位（2026-06-29 補充）**：`DM_CHANGE_LOG` / `DM_USER_ROLE_LOG` / `DM_DOC_READ` 屬只新增、不改不刪之事件紀錄，**省略 `UPDATED_*` / `DELETED`**。其中 **`DM_DOC_READ`**（下載即建立一列）之「下載者 / 下載時間」即標準 `CREATED_USER` / `CREATED_DATE`，故**不另設 `USER_ID` / `READ_TIME`**（避免同值重複欄位）；KPI 已看以 `CREATED_USER`（＝下載者）判定。

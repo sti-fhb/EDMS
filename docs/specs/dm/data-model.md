@@ -22,8 +22,9 @@ DM 以 `DP_USER`（由平台模組 DP 定義、非 DM 自有）為共用使用�
 | CREATED_DATE | TIMESTAMP | Y | 建立時間 |
 | UPDATED_USER | VARCHAR(20) | N | 最後異動者 USER_ID |
 | UPDATED_DATE | TIMESTAMP | N | 最後異動時間 |
-| RES_ID | VARCHAR(30) | N | 來源功能 ID（DM00~DM09）|
 | DELETED | INT | N | 軟刪除（0=正常, 1=已刪除）|
+
+> **標準欄位不含 `RES_ID`**（2026-08-13 移除，#158）：原列「來源功能 ID（DM00~DM09）」為主系統 TBMS 用法之誤植——DM 各業務表實際上從未具備此欄位，且 EDMS 不設功能選單表 `DP_MENU`。來源功能於 EDMS 記於 `DP_AUDIT_LOG.FUNC_NAME`（DM 使用 `DM-ROLES` / `DM-CATALOG` 等語意碼）。
 
 ---
 

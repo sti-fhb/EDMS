@@ -148,7 +148,7 @@ async def _make_admin_invite(db, email: str, *, minutes: int):
         expires_date=now + timedelta(minutes=minutes),
         now=now,
         kind="ADMIN_INVITE",
-        res_id="u-invited-001",
+        invite_id="u-invited-001",
         operator_id="admin01",
     )
     await db.flush()

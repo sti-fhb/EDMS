@@ -77,7 +77,7 @@
 - Q: 帳號如何啟用？ → A: 〔**自助註冊部分已被 2026-07-21（#56）推翻**：改為「Email 驗證後啟用」——未驗證註冊暫存於 `DP_PENDING_REGISTRATION`、寄驗證信、點連結驗證通過才建 `DP_USER` 並授 ET 學員，詳見 [spec_us2](spec_us2.md) Clarifications 2026-07-21〕；管理者代建之帳號仍直接可用（`MUST_CHANGE_PWD` 首次登入強制改密），不寄開通確認信
 - Q: 平台是否做全域 RBAC？ → A: 否。角色能力定義 / 指派資料 / 判定皆由各模組（ET / DM）自理；平台不設 `DP_ROLE` / `DP_MENU` 等全域角色選單表
 - Q: 稽核如何集中？ → A: 平台共用一張 `DP_AUDIT_LOG`（append-only）；ET / DM 之**資安稽核事件**亦寫入本表統一查詢；**業務歷程**（DM 文件變更歷程 / 閱讀紀錄、ET 學習 / 作答紀錄）留各模組
-- Q: 標準欄位是否含站點？ → A: 否。EDMS 單一組織，標準欄位為 CREATED_USER/DATE、UPDATED_USER/DATE、RES_ID、DELETED（無站點 / 院區維度）
+- Q: 標準欄位是否含站點？ → A: 否。EDMS 單一組織，標準欄位為 CREATED_USER/DATE、UPDATED_USER/DATE、DELETED（無站點 / 院區維度；RES_ID 於 2026-08-13 移除，見 #158）
 - Q: 密碼重複性如何檢核？ → A: 以 `DP_PWD_HIST` 精簡保存前 N 次密碼雜湊（append-only），禁止與過去 N 次（預設 3）相同
 
 > 其他低影響項採合理預設（不另設問）：密碼雜湊採 bcrypt 或等效不可逆演算法；預設值——登入失敗鎖定 5 次、鎖定 30 分鐘自動解鎖、重設 token 30 分鐘、Email 變更驗證連結 30 分鐘、token TTL＝閒置逾時 15 分鐘、單日換發上限 8 小時、閒置帳號 90 日禁用、密碼到期前 7 天提醒（皆為平台級參數可調）。

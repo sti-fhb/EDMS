@@ -213,14 +213,14 @@ export const handlers = [
     HttpResponse.json({
       data: [
         {
-          res_id: "inv-valid",
+          invite_id: "inv-valid",
           user_name: "周雅婷",
           email: "tina@edms.local",
           created_date: "2026-07-06T10:20:00Z",
           expires_date: "2099-01-01T00:00:00Z",
         },
         {
-          res_id: "inv-expired",
+          invite_id: "inv-expired",
           user_name: "李國豪",
           email: "kuo@edms.local",
           created_date: "2026-07-05T16:02:00Z",

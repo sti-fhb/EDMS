@@ -7,10 +7,10 @@
 from sqlalchemy import BigInteger, ForeignKey, Identity, Index, PrimaryKeyConstraint, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import BaseModelNoResId
+from app.core.base_model import BaseModel
 
 
-class DmUserTag(BaseModelNoResId):
+class DmUserTag(BaseModel):
     """閱覽者可見對象授權（DM_USER_TAG，明細）。
 
     唯一約束 (USER_ID, TAG_ID)。TAG_ID 限 AUDIENCE 組（應用層檢核）。未授予任何列之閱覽者

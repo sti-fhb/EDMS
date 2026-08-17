@@ -13,20 +13,11 @@ class BaseModel(Base):
 
     EDMS 為單一組織、無站點 / 院區維度，標準欄位不含 SITE
     （見 docs/specs/dp/data-model.md 標準欄位、research.md §1）。
+
+    標準欄位亦不含 RES_ID：該欄位源自 TBMS「來源功能 ID」（FK → DP_MENU），
+    但 EDMS 不設 DP_MENU（無全域 RBAC / 功能選單），來源功能改記於
+    DP_AUDIT_LOG.FUNC_NAME，故該欄位無存在依據，已於 #158 移除。
     """
-
-    __abstract__ = True
-
-    created_user: Mapped[str] = mapped_column("CREATED_USER", String(20), nullable=False)
-    created_date: Mapped[datetime] = mapped_column("CREATED_DATE", DateTime(timezone=True), nullable=False)
-    updated_user: Mapped[Optional[str]] = mapped_column("UPDATED_USER", String(20), nullable=True)
-    updated_date: Mapped[Optional[datetime]] = mapped_column("UPDATED_DATE", DateTime(timezone=True), nullable=True)
-    res_id: Mapped[Optional[str]] = mapped_column("RES_ID", String(30), nullable=True)
-    deleted: Mapped[int] = mapped_column("DELETED", Integer, default=0, nullable=False)
-
-
-class BaseModelNoResId(Base):
-    """標準欄位（不含 RES_ID），用於業務欄位已佔用 RES_ID 的 Table。"""
 
     __abstract__ = True
 
@@ -40,7 +31,6 @@ class BaseModelNoResId(Base):
 class AuditLogBaseModel(Base):
     """append-only 記錄表專用基底（如 DP_AUDIT_LOG / DP_PWD_HIST / DP_SCHEDULE_LOG）。
     僅含 CREATED 兩欄，無 UPDATED_* / DELETED。
-    RES_ID 若為業務所需，由該表自行定義。
     """
 
     __abstract__ = True
@@ -50,7 +40,7 @@ class AuditLogBaseModel(Base):
 
 
 class BaseModelHardDelete(Base):
-    """硬刪除例外表標準欄位（含 RES_ID，**不含 DELETED**）。
+    """硬刪除例外表標準欄位（**不含 DELETED**）。
 
     適用：刪除即下線、不需保留歷史的 Table。
     硬刪除清單與理由詳見 sti-backend-modules.md §刪除策略。
@@ -62,15 +52,14 @@ class BaseModelHardDelete(Base):
     created_date: Mapped[datetime] = mapped_column("CREATED_DATE", DateTime(timezone=True), nullable=False)
     updated_user: Mapped[Optional[str]] = mapped_column("UPDATED_USER", String(20), nullable=True)
     updated_date: Mapped[Optional[datetime]] = mapped_column("UPDATED_DATE", DateTime(timezone=True), nullable=True)
-    res_id: Mapped[Optional[str]] = mapped_column("RES_ID", String(30), nullable=True)
 
 
 class BaseModelNoDelete(Base):
-    """可更新但永不刪除的表專用基底（含 CREATED_* / UPDATED_*，**無 RES_ID / 無 DELETED**）。
+    """可更新但永不刪除的表專用基底（含 CREATED_* / UPDATED_*，**無 DELETED**）。
 
     適用：outbox / log 類——新增後只更新狀態、保留全部紀錄、不軟刪也不硬刪
     （如 DP_EMAIL_LOG）。與 BaseModelHardDelete 的差異：後者語意為「刪除即下線」，
-    本基底語意為「永不刪除」，且不帶 RES_ID。
+    本基底語意為「永不刪除」。
     """
 
     __abstract__ = True

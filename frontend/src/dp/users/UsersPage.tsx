@@ -191,7 +191,7 @@ export function UsersPage() {
           <AppTable
             columns={inviteColumns}
             data={invites.items}
-            rowKey="res_id"
+            rowKey="invite_id"
             loading={invites.loading}
             emptyText="目前無待啟用邀請"
           />
