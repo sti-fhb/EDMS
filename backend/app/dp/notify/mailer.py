@@ -1,8 +1,9 @@
 """SMTP 寄送器（T020）。
 
-以 aiosmtplib 直送 stdlib EmailMessage（不用 fastapi-mail 的 FastMail.send_message，
-其 MIME 組裝會產生重複 Message-ID 遭部分 MTA 退信）。連線參數取自 settings；
-MAIL_SUPPRESS_SEND=true 時跳過實際寄送（測試 / E2E）。
+以 aiosmtplib 直送 stdlib EmailMessage，不經任何發信框架——T001 原引入的 fastapi-mail，
+其 FastMail.send_message 在 MIME 組裝時會產生重複 Message-ID 而遭部分 MTA 退信，故此處
+自建 EmailMessage。該套件自本檔改走 aiosmtplib 後即未再被使用，已於 #146 移出依賴。
+連線參數取自 settings；MAIL_SUPPRESS_SEND=true 時跳過實際寄送（測試 / E2E）。
 """
 
 import logging

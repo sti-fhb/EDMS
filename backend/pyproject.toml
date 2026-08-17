@@ -10,7 +10,6 @@ dependencies = [
     "apscheduler>=3.11.0",
     "asyncpg>=0.31.0",
     "bcrypt>=4.0.1,<5",
-    "fastapi-mail>=1.5.0",
     "fastapi[standard]>=0.135.2",
     "greenlet>=3.0.0",
     "passlib[bcrypt]>=1.7.4",
@@ -21,10 +20,19 @@ dependencies = [
 
 # 說明：認證/寄信/排程依賴於 DP Foundation（#16 T001）引入——
 #   pyjwt（簡單 JWT）、passlib[bcrypt]（密碼雜湊；bcrypt 釘 <5 因 passlib 1.7.4 與
-#   bcrypt 5.0 不相容）、fastapi-mail（發信引擎）、apscheduler（排程引擎）。
-#   cryptography 為 bcrypt/fastapi-mail 之傳遞依賴，不列直接依賴（EDMS Email 不加密）。
+#   bcrypt 5.0 不相容）、apscheduler（排程引擎）。
 #   aiosmtplib（#16 T020 US6 發信 worker 實際寄送用；自建 stdlib email.message.EmailMessage
-#   以 aiosmtplib 送信，不用 fastapi-mail 的 FastMail.send_message，避開其重複 Message-ID）。
+#   以 aiosmtplib 送信，不經任何發信框架，避開 MIME 組裝產生重複 Message-ID 的問題）。
+#
+# fastapi-mail 已於 #146 移除：T001 當初以它為發信引擎，但 T020 改用 aiosmtplib 直送後
+#   它就再也沒被 import 過（僅存在於註解）。它是 cryptography 在本專案的唯一上游，且把版本
+#   鎖在 >=49.0.0,<50.0.0——上限排除 GHSA-g6cj-pr64-35w5 / CVE-2026-69247（PKCS#7
+#   EnvelopedData 解密的 Bleichenbacher oracle，HIGH）的修補版 50.0.0，下限讓降級逃逸也
+#   不可能，使該告警無解。移除後 cryptography 連同 blinker / regex / cffi / pycparser 一併
+#   退出依賴樹（76→70），告警自然消失而非只是 dismiss。
+#   ⚠️ 會讓 cryptography 回來的路徑有三條，屆時須重新評估其 CVE 狀態：重新引入發信框架、
+#   JWT 改用非對稱演算法（RS*/PS*/ES*/EdDSA）、引入 TOTP MFA（passlib[totp] 相依它）。
+#   詳見 EDMS-MIGRATION.md §4.1。
 
 [dependency-groups]
 dev = [

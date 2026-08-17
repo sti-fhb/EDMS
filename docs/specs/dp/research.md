@@ -22,6 +22,7 @@
   | `core/base_model.py` 之 `CREATED_SITE` / `UPDATED_SITE`（四個基底類別，隨骨架 `fa9b398` 原封帶入）| ✂ **移除**——EDMS 單一組織無站點；docstring「選單 / Session」殘留字眼一併清（T001 首步，2026-07-09 盤點發現）| data-model 標準欄位、`_refs/09` §1.4 |
 - **Rationale**: 遷移清單以「照抄可用」為目標，spec 隨後拍板之簡化（簡單 JWT、無 RBAC、共管後台）使部分起手包項目失效；於此一次載明避免實作時照清單誤帶。
 - **保留項**: `core/db.py` / `base_model.py` / `pagination.py` / `exceptions.py`、`auth.py`（decode_jwt 等，改造 payload）、`request_context.py`、`operator.py`、`password_policy.py`、寄信基礎（`fastapi-mail`）、Alembic 骨架與測試 DB 骨架——依 EDMS-MIGRATION §3 / §4 帶入。
+  - ⚠️ **後續變更（2026-08-11 / #146）**：`fastapi-mail` **已自依賴移除**。T020 實作發信 worker 時改以 `aiosmtplib` 直送 stdlib `EmailMessage`（其 `FastMail.send_message` 之 MIME 組裝會產生重複 Message-ID、遭部分 MTA 退信），此後該套件即未再被 import。它同時是 `cryptography` 在本專案的唯一上游、將其鎖在 `>=49.0.0,<50.0.0`，使 GHSA-g6cj-pr64-35w5（HIGH）無從修補，故一併移除。**上行保留原貌以記錄當初的遷移決策；日後勿照該清單重新引入**，詳見 EDMS-MIGRATION.md §4.1。
 
 ## §2 閒置自動登出：短 TTL + 活動換發（無 Refresh Token）
 
