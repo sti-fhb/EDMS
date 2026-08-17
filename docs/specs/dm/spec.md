@@ -31,6 +31,12 @@
 
 ## Clarifications
 
+### Session 2026-08-14（US4 詳細頁狀態語意收緊）
+
+- Q: DM02 詳細頁 / DM01 文件庫是否呈現 DRAFT / PENDING_REVIEW 文件？ → A: **否，不分角色**。此二畫面僅呈現已發布後生命週期（PUBLISHED / PENDING_OBSOLETE / OBSOLETE）；DRAFT / PENDING_REVIEW 於作者個人專區（US9）/ 審核者簽核中心（US6）檢視。狀態限制對閱覽者與編輯 / 審核 / 管理者一致；僅「可見對象過濾」才是閱覽者專屬。（收緊 §狀態三維度 ①、[spec_us4.md](spec_us4.md) FR-003 措辭；緣由：US4 開發曾因原措辭誤讀。）
+- Q: 版本歷程列哪些版本？ → A: **僅已發布版本（現行 PUBLISHED + 已被取代 SUPERSEDED），不分角色**；進行中 / 未通過版本（DRAFT / PENDING_REVIEW / REJECTED）不列入。
+- Q: 廢止待簽核（PENDING_OBSOLETE）之狀態 pill 顯示？ → A: 對讀者顯示「**已發布**」，不外顯內部簽核狀態（FR-001）。
+
 ### Session 2026-07-08（平台 DP 釐清對齊）
 
 - Q: 閱覽者是否於首次登入 DM 時自動授予？ → A: **否（作廢原規則）**。新帳號預設僅具 **ET 學員**角色（平台 DP 於帳號建立時授予）；DM 全部四角色（含閱覽者）一律由管理者於平台 DP 後台權限管理開通，未開通者無法進入 DM（詳見平台 [specs/dp/spec.md](../dp/spec.md) Clarifications 釐清第 3 輪）
@@ -187,7 +193,8 @@ DM 同時處理三類送審：**新增 / 新版本 / 廢止**
 - **廢止待簽核期間文件仍正常對外提供**（仍顯示於文件庫、仍可下載目前發布版本），直到核准後才轉「已廢止」並下架
 - **同一文件不可同時進行兩種送審**：新版本送審中時不可同時發起廢止；廢止待簽核時不可同時編輯新版本（DM02 對應入口暫時失效）。此擋擋判定**以「該文件是否已存在進行中（PENDING）之送審週期」為準**（查 DM_REVIEW），非以文件狀態判定——新增 / 新版本 / 廢止送審皆會建立一筆 PENDING 送審週期
 
-> **狀態以三個正交維度表達**：① 文件生命週期（DM_DOCUMENT.STATUS：PUBLISHED / PENDING_OBSOLETE / OBSOLETE）；② 版本自身結果（DM_DOC_VERSION.STATUS：DRAFT / PENDING_REVIEW / PUBLISHED / SUPERSEDED / REJECTED）；③ 進行中送審週期（DM_REVIEW）。
+> **狀態以三個正交維度表達**：① 文件生命週期（DM_DOCUMENT.STATUS 完整列舉：DRAFT / PENDING_REVIEW / PUBLISHED / PENDING_OBSOLETE / OBSOLETE）；② 版本自身結果（DM_DOC_VERSION.STATUS：DRAFT / PENDING_REVIEW / PUBLISHED / SUPERSEDED / REJECTED）；③ 進行中送審週期（DM_REVIEW）。
+> - **可瀏覽子集（DM01 文件庫 / DM02 詳細頁）**：此二畫面**不分角色**僅呈現 **PUBLISHED / PENDING_OBSOLETE / OBSOLETE**（已發布後生命週期）；DRAFT / PENDING_REVIEW 為首版未發布前之過渡狀態，**不在文件庫 / 詳細頁呈現**，改於作者個人專區（US9 草稿匣）/ 審核者簽核中心（US6）檢視。此狀態限制對閱覽者與編輯 / 審核 / 管理者一致；「可見對象（AUDIENCE）過濾」才是僅套於閱覽者、privileged 略過。
 > - **已發布文件之新版本送審期間**：文件層維持 **PUBLISHED**（現行版仍在架可下載），新版本以版本層 PENDING_REVIEW + 一筆 PENDING 送審週期表示；文件層 PENDING_REVIEW **僅用於首版**（尚無目前發布版）送審。
 > - **文件廢止後**：文件層轉 **OBSOLETE**（整份下架、僅 DM06 read-only 查），廢止前最後發布版之版本狀態**維持 PUBLISHED**（廢止屬文件層動作、該版未被新版取代故非 SUPERSEDED）；不可下載由 DM06 read-only 模式控制。
 
