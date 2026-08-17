@@ -13,12 +13,12 @@
 ### Acceptance Scenarios
 
 1. **Given** ET 管理者進入通知範本頁，**When** 頁面載入，**Then** 列出 `MODULE=ET` 之範本與 `MODULE=DP` 系統信；`MODULE=DM` 範本**不顯示**；DM 管理者反之（見 DM + DP）
-2. **Given** 管理者選取範本編輯主旨、內文、管道（Email / 站內 / 兩者）、啟用停用，**When** 儲存且版本未衝突，**Then** 寫入 `DP_NOTIFY_TEMPLATE`（版本 +1）、寫入稽核、提示（DP-MSG-TEMPLATES-003）；後續 US6 發信即以新範本渲染
+2. **Given** 管理者選取範本編輯主旨、內文、管道（Email / 站內 / 兩者）、啟用停用，**When** 儲存且版本未衝突，**Then** 寫入 `DP_NOTIFY_TEMPLATE`（版本 +1）、寫入稽核、提示（DP-MSG-DP08-003）；後續 US6 發信即以新範本渲染
 3. **Given** 範本被停用，**When** 模組觸發該事件，**Then** 該類 Email 不寄、觸發事件照常運作（見 US6）
-4. **Given** 範本為 DP 系統信（`MODULE=DP`、`IS_SYSTEM=true` 之帳號安全信：密碼重設 / 帳號註冊驗證 / 帳號邀請 / 帳號變更驗證 / 密碼到期提醒），**When** 管理者嘗試停用或刪除，**Then** 阻擋並提示（DP-MSG-TEMPLATES-001）；主旨 / 內文仍可編輯（兩管理者皆可，共用項）
-5. **Given** 兩管理者同時編輯同一範本，**When** 後儲存者之版本落後，**Then** 拒絕儲存並提示重新載入（DP-MSG-TEMPLATES-002，樂觀鎖）
+4. **Given** 範本為 DP 系統信（`MODULE=DP`、`IS_SYSTEM=true` 之帳號安全信：密碼重設 / 帳號註冊驗證 / 帳號邀請 / 帳號變更驗證 / 密碼到期提醒），**When** 管理者嘗試停用或刪除，**Then** 阻擋並提示（DP-MSG-DP08-001）；主旨 / 內文仍可編輯（兩管理者皆可，共用項）
+5. **Given** 兩管理者同時編輯同一範本，**When** 後儲存者之版本落後，**Then** 拒絕儲存並提示重新載入（DP-MSG-DP08-002，樂觀鎖）
 6. **Given** 管理者檢視範本清單，**When** 尋找新增 / 刪除範本功能，**Then** 無此功能——事件（`TEMPLATE_CODE`）固定，內容不同的通知＝同表不同列，由系統種子資料建立
-7. **Given** ET 管理者以直接呼叫 API 之方式編輯 `MODULE=DM` 範本，**When** 請求到達，**Then** 伺服器端拒絕（DP-MSG-TEMPLATES-004）
+7. **Given** ET 管理者以直接呼叫 API 之方式編輯 `MODULE=DM` 範本，**When** 請求到達，**Then** 伺服器端拒絕（DP-MSG-DP08-004）
 8. **Given** 範本管道設定含「站內」，**When** 儲存，**Then** 允許——惟站內訊息之發送與呈現由各模組自理，本欄位僅作為該事件是否寄 Email 之開關依據
 
 ## Functional Requirements
@@ -35,10 +35,10 @@
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
 |---------|------|---------|---------------|
-| DP-MSG-TEMPLATES-001 | 錯誤 | 系統信不可停用或刪除（主旨與內文可編輯）| FR-DP-US9-03 系統信保護 |
-| DP-MSG-TEMPLATES-002 | 警告 | 內容已被他人修改，請重新載入後再儲存 | FR-DP-US9-05 版本衝突 |
-| DP-MSG-TEMPLATES-003 | 成功 | 範本已更新 | FR-DP-US9-06 儲存完成 |
-| DP-MSG-TEMPLATES-004 | 錯誤 | 無權限編輯此模組之範本 | FR-DP-US9-02 越權 |
+| DP-MSG-DP08-001 | 錯誤 | 系統信不可停用或刪除（主旨與內文可編輯）| FR-DP-US9-03 系統信保護 |
+| DP-MSG-DP08-002 | 警告 | 內容已被他人修改，請重新載入後再儲存 | FR-DP-US9-05 版本衝突 |
+| DP-MSG-DP08-003 | 成功 | 範本已更新 | FR-DP-US9-06 儲存完成 |
+| DP-MSG-DP08-004 | 錯誤 | 無權限編輯此模組之範本 | FR-DP-US9-02 越權 |
 
 ## 前置依賴
 

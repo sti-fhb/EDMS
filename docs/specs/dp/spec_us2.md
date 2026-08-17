@@ -12,21 +12,21 @@
 
 ### Acceptance Scenarios
 
-1. **Given** 訪客於「註冊」頁籤填寫 Email / 姓名 / 密碼 / 確認密碼，**When** Email 未被已驗證帳號佔用且密碼合規（複雜度 + 兩次一致），**Then** 寫入待驗證表（**不建 `DP_USER`**）、寄「註冊驗證信」至該 Email、分頁內提示驗證信已寄（DP-MSG-REGISTER-004）
-2. **Given** 已寫入待驗證表，**When** 使用者點驗證連結且未逾時，**Then** 建立 `DP_USER`（`ACTIVE`）、透過 ET service 授予 **ET 學員**、寫首筆歷程與雙稽核、刪待驗證列、提示帳號已啟用（DP-MSG-REGISTER-005）並導登入
-3. **Given** 未驗證帳號（僅在待驗證表），**When** 以其 Email 嘗試登入，**Then** 回專屬提示「尚未完成 Email 驗證」（DP-MSG-REGISTER-008 / DP_AUTH_010）並提供重寄，MUST NOT 回「查無此帳號」
-4. **Given** 驗證連結逾時 / 無效，**When** 點連結，**Then** 阻擋並提示（DP-MSG-REGISTER-006 / 007）；使用者可自助重寄（DP-MSG-REGISTER-009，防列舉）
+1. **Given** 訪客於「註冊」頁籤填寫 Email / 姓名 / 密碼 / 確認密碼，**When** Email 未被已驗證帳號佔用且密碼合規（複雜度 + 兩次一致），**Then** 寫入待驗證表（**不建 `DP_USER`**）、寄「註冊驗證信」至該 Email、分頁內提示驗證信已寄（DP-MSG-DP02-004）
+2. **Given** 已寫入待驗證表，**When** 使用者點驗證連結且未逾時，**Then** 建立 `DP_USER`（`ACTIVE`）、透過 ET service 授予 **ET 學員**、寫首筆歷程與雙稽核、刪待驗證列、提示帳號已啟用（DP-MSG-DP02-005）並導登入
+3. **Given** 未驗證帳號（僅在待驗證表），**When** 以其 Email 嘗試登入，**Then** 回專屬提示「尚未完成 Email 驗證」（DP-MSG-DP02-008 / DP_AUTH_010）並提供重寄，MUST NOT 回「查無此帳號」
+4. **Given** 驗證連結逾時 / 無效，**When** 點連結，**Then** 阻擋並提示（DP-MSG-DP02-006 / 007）；使用者可自助重寄（DP-MSG-DP02-009，防列舉）
 5. **Given** 驗證完成之新使用者，**When** 管理者檢視權限管理（US7），**Then** 該使用者僅具 ET 學員角色；DM 四角色皆未勾選（不自動授予）
-6. **Given** 註冊時 Email 已被**已驗證帳號**佔用，**When** 送出，**Then** 阻擋並提示（DP-MSG-REGISTER-001）；已在待驗證表（未驗證）→ 覆蓋 + 重寄（新註冊語意）
-6a. **Given** 註冊時該 Email 已有**管理者發出且未逾期**之待啟用邀請（`KIND=ADMIN_INVITE`），**When** 送出，**Then** 阻擋並提示（DP-MSG-REGISTER-010），**MUST NOT 覆蓋該邀請**——原邀請信連結須維持可用；邀請**已逾期**者不在此限，回歸情境 6 之覆蓋語意（邀請既已失效，不應讓該 Email 被永久佔住）
-7. **Given** 密碼不符複雜度 / 兩次不一致，**When** 送出，**Then** 阻擋並提示（DP-MSG-REGISTER-002 / 003）
+6. **Given** 註冊時 Email 已被**已驗證帳號**佔用，**When** 送出，**Then** 阻擋並提示（DP-MSG-DP02-001）；已在待驗證表（未驗證）→ 覆蓋 + 重寄（新註冊語意）
+6a. **Given** 註冊時該 Email 已有**管理者發出且未逾期**之待啟用邀請（`KIND=ADMIN_INVITE`），**When** 送出，**Then** 阻擋並提示（DP-MSG-DP02-010），**MUST NOT 覆蓋該邀請**——原邀請信連結須維持可用；邀請**已逾期**者不在此限，回歸情境 6 之覆蓋語意（邀請既已失效，不應讓該 Email 被永久佔住）
+7. **Given** 密碼不符複雜度 / 兩次不一致，**When** 送出，**Then** 阻擋並提示（DP-MSG-DP02-002 / 003）
 8. **Given** 驗證通過（AC2），**When** 檢視稽核（US10），**Then** 存在該帳號之建立紀錄（CREATE）與 ET 學員角色授予紀錄
 
 ## Functional Requirements
 
 - **FR-DP-US2-01**: 登入頁 MUST 提供「註冊」頁籤，欄位：帳號（Email，必填、格式檢核）、姓名（必填）、密碼、確認密碼（必填、遮蔽顯示）
 - **FR-DP-US2-02**: 系統 MUST 檢核 Email 未被註冊（`DP_USER` 唯一）、密碼符合複雜度、兩次輸入一致；檢核 MUST 於伺服器端執行
-- **FR-DP-US2-03**: 檢核通過 MUST **不建立 `DP_USER`**，改將註冊申請（Email / 姓名 / 密碼不可逆雜湊 + 一次性驗證 token 之 SHA-256 + 效期）寫入待驗證表 `DP_PENDING_REGISTRATION`（EMAIL 唯一）；Email 已在 pending（未驗證）→ 覆蓋該筆（換新 token）＝重寄語意（2026-07-21 釐清，方案 B）。**例外**：該 pending 列若為 `KIND=ADMIN_INVITE` 且**未逾期**，MUST NOT 覆蓋，改阻擋並提示（DP-MSG-REGISTER-010）——覆蓋會靜默刪除管理者發出的邀請（該列自「待啟用邀請」清單消失、原邀請信連結失效），且管理者無從得知（#125）
+- **FR-DP-US2-03**: 檢核通過 MUST **不建立 `DP_USER`**，改將註冊申請（Email / 姓名 / 密碼不可逆雜湊 + 一次性驗證 token 之 SHA-256 + 效期）寫入待驗證表 `DP_PENDING_REGISTRATION`（EMAIL 唯一）；Email 已在 pending（未驗證）→ 覆蓋該筆（換新 token）＝重寄語意（2026-07-21 釐清，方案 B）。**例外**：該 pending 列若為 `KIND=ADMIN_INVITE` 且**未逾期**，MUST NOT 覆蓋，改阻擋並提示（DP-MSG-DP02-010）——覆蓋會靜默刪除管理者發出的邀請（該列自「待啟用邀請」清單消失、原邀請信連結失效），且管理者無從得知（#125）
 - **FR-DP-US2-04**: 註冊成功 MUST 寄「註冊驗證信」（經 US6 發信、範本 `MODULE=DP`「ACCOUNT_VERIFY」）至該 Email，內含一次性時效驗證連結（TTL 平台級參數，預設 30 分鐘）；**帳號於驗證通過前不可登入**（Email 驗證後啟用，**推翻原「註冊即用、不寄開通確認信」**）
 - **FR-DP-US2-04a**: 使用者點驗證連結且未逾時，系統 MUST 建立 `DP_USER`（狀態 `ACTIVE`、密碼不可逆雜湊）、透過 ET service 授予「學員」（唯一預設角色）、寫首筆 `DP_PWD_HIST`、寫入雙稽核（帳號 CREATE + 角色授予），並刪除待驗證列；MUST NOT 授予任何 DM 角色或 ET 教師 / 管理者角色。冪等：建 `DP_USER` 撞 `UQ_DP_USER_EMAIL`（重複 / 競態確認）→ 乾淨拒絕、不重複建
 - **FR-DP-US2-04b**: 驗證連結逾時 / 無效 MUST 拒絕並提示；使用者 MUST 可自助**重寄**驗證信（僅對待驗證帳號、作廢舊 token 產新、防列舉——無論 Email 是否有待驗證列一律回相同訊息）。**驗證信寄送冷卻**：同一 Email 兩次寄送 MUST 間隔至少冷卻秒數（平台級參數 `LOGIN / VERIFY_SEND_COOLDOWN_SEC`，預設 600 秒 / 10 分），冷卻內再次寄送回 429（帶可重試剩餘秒數供前端倒數）；註冊（`/register` 對 pending Email 覆蓋重發）與重寄 MUST **共用同一 Email 冷卻額度**，避免以重新註冊繞過重寄冷卻。防列舉：冷卻判定 MUST 於查存在性前，對存在 / 不存在的 Email 行為一致
@@ -63,16 +63,16 @@
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
 |---------|------|---------|---------------|
-| DP-MSG-REGISTER-001 | 錯誤 | 此 Email 已被註冊，請直接登入或使用忘記密碼 | FR-DP-US2-02 Email 重複 |
-| DP-MSG-REGISTER-002 | 錯誤 | 密碼不符合複雜度要求（至少 8 字元、含大小寫英文 / 數字 / 特殊符號至少 3 種）| FR-DP-US2-02 複雜度 |
-| DP-MSG-REGISTER-003 | 錯誤 | 兩次輸入之密碼不一致 | FR-DP-US2-02 不一致 |
-| DP-MSG-REGISTER-004 | 提示 | 驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證 | FR-DP-US2-04 註冊送出 |
-| DP-MSG-REGISTER-005 | 成功 | 帳號已啟用，請以新帳號登入 | FR-DP-US2-04a 驗證通過 |
-| DP-MSG-REGISTER-006 | 錯誤 | 驗證連結無效 | FR-DP-US2-04b token 無效 |
-| DP-MSG-REGISTER-007 | 錯誤 | 驗證連結已失效，請重新申請 | FR-DP-US2-04b 逾時 |
-| DP-MSG-REGISTER-008 | 錯誤 | 此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送 | FR-DP-US2-04c 未驗證登入 |
-| DP-MSG-REGISTER-009 | 提示 | 若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證 | FR-DP-US2-04b 重寄（防列舉） |
-| DP-MSG-REGISTER-010 | 錯誤 | 此 Email 已有待完成的帳號啟用程序，請至信箱收取信件完成啟用（匿名端點刻意不提「管理者邀請」，避免揭露組織脈絡；認證後之 DP_USER_010 則可明說）| FR-DP-US2-03 例外：未逾期之 `ADMIN_INVITE` 不可被覆蓋（#125）|
+| DP-MSG-DP02-001 | 錯誤 | 此 Email 已被註冊，請直接登入或使用忘記密碼 | FR-DP-US2-02 Email 重複 |
+| DP-MSG-DP02-002 | 錯誤 | 密碼不符合複雜度要求（至少 8 字元、含大小寫英文 / 數字 / 特殊符號至少 3 種）| FR-DP-US2-02 複雜度 |
+| DP-MSG-DP02-003 | 錯誤 | 兩次輸入之密碼不一致 | FR-DP-US2-02 不一致 |
+| DP-MSG-DP02-004 | 提示 | 驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證 | FR-DP-US2-04 註冊送出 |
+| DP-MSG-DP02-005 | 成功 | 帳號已啟用，請以新帳號登入 | FR-DP-US2-04a 驗證通過 |
+| DP-MSG-DP02-006 | 錯誤 | 驗證連結無效 | FR-DP-US2-04b token 無效 |
+| DP-MSG-DP02-007 | 錯誤 | 驗證連結已失效，請重新申請 | FR-DP-US2-04b 逾時 |
+| DP-MSG-DP02-008 | 錯誤 | 此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送 | FR-DP-US2-04c 未驗證登入 |
+| DP-MSG-DP02-009 | 提示 | 若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證 | FR-DP-US2-04b 重寄（防列舉） |
+| DP-MSG-DP02-010 | 錯誤 | 此 Email 已有待完成的帳號啟用程序，請至信箱收取信件完成啟用（匿名端點刻意不提「管理者邀請」，避免揭露組織脈絡；認證後之 DP_USER_010 則可明說）| FR-DP-US2-03 例外：未逾期之 `ADMIN_INVITE` 不可被覆蓋（#125）|
 
 ## 前置依賴
 

@@ -172,7 +172,7 @@
 
 ## Issue #2：[P1-核心] DP — 登入 / 登出與模組入口頁
 
-**對應規格**：[spec_us1.md](spec_us1.md)（US1 / UCDP001，FR-DP-US1-01~11、AC 1~12、DP-MSG-LOGIN-001~008）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（is_module_admin）/ §4（has_any_role）；[research.md](research.md) §2（短 TTL + 活動換發）/ §3（每請求查 DP_USER）/ §12（redirect + 入口頁）；[data-model.md](data-model.md)（`DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁 + 模組入口頁）
+**對應規格**：[spec_us1.md](spec_us1.md)（US1 / UCDP001，FR-DP-US1-01~11、AC 1~12、DP-MSG-DP01-001~008）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（is_module_admin）/ §4（has_any_role）；[research.md](research.md) §2（短 TTL + 活動換發）/ §3（每請求查 DP_USER）/ §12（redirect + 入口頁）；[data-model.md](data-model.md)（`DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁 + 模組入口頁）
 **階段**：P1-核心（全系統存取基礎；認證鏈 US1 → US2 → US3 起點）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：JWT 基礎（T013）、認證閘 `get_jwt_payload`（T014）、速率限制（T015）、密碼策略（T016）、模組管理者判定閘（T017）、`SRVDP001`、`DP_USER` 表皆就緒
@@ -193,8 +193,8 @@
 - **T025 後端「我的模組角色摘要」端點**：聚合各模組 `has_any_role`（經 T017 閘 / stub）決定入口頁 DM 卡狀態；對應 FR-07、module-callbacks §4
 
 **前端**：
-- **T024 登入頁**：帳密欄（密碼遮蔽）、錯誤訊息（DP-MSG-LOGIN-001~008）、redirect 白名單返回原目標頁（通知信連結 / 書籤 / 逾時重登）、閒置換發計時器（到期前有操作即 renew）、掛速率限制回應（429 → LOGIN-007）；對應 FR-01/07/09
-- **T025 模組入口頁**：ET 入口恆顯、**DM 卡雙狀態**（無 DM 角色呈「未開通」鎖定卡 + 引導文字 DP-MSG-LOGIN-008、點擊不進入）、個資恆顯、**不顯 DP 後台入口**、首次登入歡迎橫幅一次（已顯示旗標儲存位置實作定）；對應 FR-07、research §12
+- **T024 登入頁**：帳密欄（密碼遮蔽）、錯誤訊息（DP-MSG-DP01-001~008）、redirect 白名單返回原目標頁（通知信連結 / 書籤 / 逾時重登）、閒置換發計時器（到期前有操作即 renew）、掛速率限制回應（429 → LOGIN-007）；對應 FR-01/07/09
+- **T025 模組入口頁**：ET 入口恆顯、**DM 卡雙狀態**（無 DM 角色呈「未開通」鎖定卡 + 引導文字 DP-MSG-DP01-008、點擊不進入）、個資恆顯、**不顯 DP 後台入口**、首次登入歡迎橫幅一次（已顯示旗標儲存位置實作定）；對應 FR-07、research §12
 
 **測試**：
 - 後端：登入成功 / 帳號不存在 / 密碼錯誤 / 失敗計數→鎖定 / 鎖定逾時解鎖 / 停用拒絕 / 強制變更旗標 / 換發沿用 auth_time / 逾 8h 拒絕 / 登出稽核；速率限制 429；角色摘要端點（stub）
@@ -203,7 +203,7 @@
 ### 驗收條件
 
 - [ ] 正確帳密 → 核發 JWT（含 `auth_time`、TTL 15 分）、重設失敗計數、更新 `LAST_LOGIN`、寫 LOGIN 稽核
-- [ ] 帳號不存在 / 密碼錯誤 → 分別回對應訊息（DP-MSG-LOGIN-001 / 002）；密碼錯誤累計失敗計數
+- [ ] 帳號不存在 / 密碼錯誤 → 分別回對應訊息（DP-MSG-DP01-001 / 002）；密碼錯誤累計失敗計數
 - [ ] 連續失敗達 `FAIL_LOCK_COUNT`（預設 5）→ 自動鎖定 + 稽核；鎖定中 / 停用 / 閒置逾 90 日禁用 → 拒絕登入（LOGIN-003 / 004）；`LOCKED_UNTIL` 逾時自動解鎖
 - [ ] 密碼逾效期 / 初始密碼（`MUST_CHANGE_PWD`）登入 → 導向強制變更、未完成前其他端點拒絕（LOGIN-005）
 - [ ] 閒置逾 15 分 token 自然失效；有操作靜默換發；自登入起換發逾 8h 上限 → 拒絕需重登
@@ -240,7 +240,7 @@
 
 ## Issue #3：[P1-核心] DP — 使用者自助註冊
 
-**對應規格**：[spec_us2.md](spec_us2.md)（US2 / UCDP002，FR-DP-US2-01~06、DP-MSG-REGISTER-001~004）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §2（`grant_default_student_role`）；[data-model.md](data-model.md)（`DP_USER` / `DP_PWD_HIST`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁・註冊頁籤）
+**對應規格**：[spec_us2.md](spec_us2.md)（US2 / UCDP002，FR-DP-US2-01~06、DP-MSG-DP02-001~004）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §2（`grant_default_student_role`）；[data-model.md](data-model.md)（`DP_USER` / `DP_PWD_HIST`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁・註冊頁籤）
 **階段**：P1-核心（帳號來源主路徑；認證鏈 US1 登入 → **US2 註冊** → US3 忘記密碼）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：密碼策略工具（T016，複雜度 / bcrypt / `DP_PWD_HIST` 歷程）、`SRVDP003` 稽核、`DP_USER` / `DP_PWD_HIST` 表、`SRVDP001` 平台參數皆就緒
@@ -257,7 +257,7 @@
 
 **後端**：
 - **T026 註冊端點**（`dp/user`）：伺服器端檢核 Email 唯一（`DP_USER`）/ 密碼複雜度（一般使用者，`SRVDP001` 讀 `MIN_LEN`=8 / `CHAR_TYPES`=3，**不套** `ADMIN_MIN_LEN`）/ 兩次一致；通過建 `DP_USER`（bcrypt 雜湊、`STATUS`=ACTIVE）+ `DP_PWD_HIST` 首筆 + 呼叫 ET `grant_default_student_role`（stub）+ CREATE 稽核（帳號建立 + 角色授予）；對應 FR-02/03/05/06
-- **T027 前端註冊頁籤**：登入頁「註冊」頁籤欄位（Email 必填 + 格式、姓名必填、密碼 / 確認密碼遮蔽），Zod 前端驗證 + 錯誤訊息（DP-MSG-REGISTER-001~004），成功跳回登入頁預填 Email；對應 FR-01/04
+- **T027 前端註冊頁籤**：登入頁「註冊」頁籤欄位（Email 必填 + 格式、姓名必填、密碼 / 確認密碼遮蔽），Zod 前端驗證 + 錯誤訊息（DP-MSG-DP02-001~004），成功跳回登入頁預填 Email；對應 FR-01/04
 
 **測試**：
 - 後端：未註冊 Email + 合規密碼 → 建帳號（bcrypt 雜湊、ACTIVE）+ ET 學員授予（驗 stub 被呼叫）+ `DP_PWD_HIST` 首筆 + CREATE 稽核；Email 重複拒（REGISTER-001）；密碼不合規拒（REGISTER-002）；兩次不一致拒（REGISTER-003）；**不授予任何 DM 角色**
@@ -302,7 +302,7 @@
 
 ## Issue #4：[P1-核心] DP — 忘記密碼
 
-**對應規格**：[spec_us3.md](spec_us3.md)（US3 / UCDP003，FR-DP-US3-01~08、DP-MSG-FORGOT-001~006）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 發信）；[research.md](research.md) §5（token 明文入信 / SHA-256 入庫）；[data-model.md](data-model.md)（`DP_PWD_RESET` / `DP_PWD_HIST` / `DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁・忘記密碼 + 重設密碼頁）
+**對應規格**：[spec_us3.md](spec_us3.md)（US3 / UCDP003，FR-DP-US3-01~08、DP-MSG-DP03-001~006）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 發信）；[research.md](research.md) §5（token 明文入信 / SHA-256 入庫）；[data-model.md](data-model.md)（`DP_PWD_RESET` / `DP_PWD_HIST` / `DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（登入頁・忘記密碼 + 重設密碼頁）
 **階段**：P1-核心（帳號自救路徑；認證鏈 US1 登入 → US2 註冊 → **US3 忘記密碼**，補齊 P1 認證鏈 MVP）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_PWD_RESET` / `DP_PWD_HIST` 表、密碼策略工具（T016，複雜度 / 重複性 / bcrypt）、速率限制（T015）、`SRVDP001`（`LOGIN.RESET_TOKEN_TTL_MIN`=30 / `PWD_POLICY.HISTORY_COUNT`=3 參數）、`SRVDP003` 稽核
@@ -318,7 +318,7 @@
 ### 範圍
 
 **後端**（`app/dp/user/`）：
-- **T028 申請端點**：輸入 Email → **防列舉統一回覆**（DP-MSG-FORGOT-001，不論存在與否；帳號不存在不產 token / 不寄信）；存在帳號產生一次性時效 token（明文入信、SHA-256 入 `DP_PWD_RESET`，TOKEN_TYPE=`PWD_RESET`，EXPIRES_DATE=now+`RESET_TOKEN_TTL_MIN`）、**同帳號同型舊 token 立即作廢**、經 `SRVDP002` 寄 `PWD_RESET` 範本；掛速率限制（IP + 帳號，先限流後查存在性）；對應 FR-01~04/08
+- **T028 申請端點**：輸入 Email → **防列舉統一回覆**（DP-MSG-DP03-001，不論存在與否；帳號不存在不產 token / 不寄信）；存在帳號產生一次性時效 token（明文入信、SHA-256 入 `DP_PWD_RESET`，TOKEN_TYPE=`PWD_RESET`，EXPIRES_DATE=now+`RESET_TOKEN_TTL_MIN`）、**同帳號同型舊 token 立即作廢**、經 `SRVDP002` 寄 `PWD_RESET` 範本；掛速率限制（IP + 帳號，先限流後查存在性）；對應 FR-01~04/08
 - **T029 重設端點**：驗 token（查 SHA-256、未逾時、未使用；否則 FORGOT-002）→ 新密碼複雜度（`validate_password_strength`）+ 重複性（`is_reused` 查最近 `HISTORY_COUNT` 筆 `DP_PWD_HIST`）→ 更新 `DP_USER.PWD_HASH` / `PWD_CHANGED_DATE`、追加 `DP_PWD_HIST`、作廢 token（設 USED_DATE）、寫密碼重置稽核；**不解除 `LOCKED_UNTIL` / `STATUS`**；對應 FR-05~07
 
 **前端**（`frontend/src/auth/`）：
@@ -370,7 +370,7 @@
 
 ## Issue #5：[P1-核心] DP — 使用者管理（dp-users）
 
-**對應規格**：[spec_us4.md](spec_us4.md)（US4 / UCDP005，FR-DP-US4-01~09、DP-MSG-USERS-001~005）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §2（`grant_default_student_role`）；[data-model.md](data-model.md)（`DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-users`）
+**對應規格**：[spec_us4.md](spec_us4.md)（US4 / UCDP005，FR-DP-US4-01~09、DP-MSG-DP05-001~005）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §2（`grant_default_student_role`）；[data-model.md](data-model.md)（`DP_USER`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-users`）
 **階段**：P1-核心（管理者日常必要作業：建帳號 / 停用 / 解鎖 / 維護；帳號為 ET / DM 共用項）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_USER` 表、密碼策略（複雜度 / bcrypt）、`SRVDP001`（PWD_POLICY）、`SRVDP003` 稽核、`paginate()`、模組管理者判定閘 `module_admin_gate`（T017，`is_module_admin`）
@@ -446,7 +446,7 @@ DP 後台使用者管理頁（ET / DM 共用）：查詢（Email / 姓名 / 狀�
 
 ## Issue #6：[P1-核心] DP — 系統參數與清單維護（dp-params）
 
-**對應規格**：[spec_us5.md](spec_us5.md)（US5 / UCDP006，FR-DP-US5-01~07、DP-MSG-PARAMS-001~005）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP001）；[research.md](research.md) §7（`DP_PARAM` M/D 二層 / 前綴歸屬 / `DETAIL_LOCK` / 唯讀不快取）；[data-model.md](data-model.md)（`DP_PARAM_M` / `DP_PARAM_D`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-params`）
+**對應規格**：[spec_us5.md](spec_us5.md)（US5 / UCDP006，FR-DP-US5-01~07、DP-MSG-DP07-001~005）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP001）；[research.md](research.md) §7（`DP_PARAM` M/D 二層 / 前綴歸屬 / `DETAIL_LOCK` / 唯讀不快取）；[data-model.md](data-model.md)（`DP_PARAM_M` / `DP_PARAM_D`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-params`）
 **階段**：P1-核心（全平台參數與清單定義之單一維護入口；ET / DM 業務下拉 / 產碼 / 檢核之資料來源。**讀取服務 SRVDP001 已於 Foundation 就緒**，本 issue 補「維護 UI + 寫入端點」）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_PARAM_M` / `DP_PARAM_D` 表 + 平台級參數種子（`JWT` / `PWD_POLICY` / `LOGIN` / `MAIL` / `ACTION_TYPE`）、`SRVDP001` 唯讀查詢服務（`get_param_value` / `get_int_param` / `get_param_list`，**不快取**）、`SRVDP003` 稽核、`paginate()`、模組管理者判定閘 `module_admin_gate`（T017，`is_module_admin`）、`core/operator.py`（`get_operator`）
@@ -521,7 +521,7 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 
 ## Issue #7：[P1-核心] DP — 權限管理（dp-roles）（GitHub [#140](https://github.com/sti-fhb/EDMS/issues/140)）
 
-**對應規格**：[spec_us7.md](spec_us7.md)（US7 / UCDP010，FR-DP-US7-01~07、DP-MSG-ROLES-001~003）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §3（`get_users_roles_tags` / `assign_roles_tags`；`get_users_roles_audiences` / `assign_roles_audiences`）；[research.md](research.md) §4（角色即時由模組判定，JWT 不含角色）；[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-roles`）
+**對應規格**：[spec_us7.md](spec_us7.md)（US7 / UCDP010，FR-DP-US7-01~07、DP-MSG-DP06-001~003）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §1（`is_module_admin`）/ §3（`get_users_roles_tags` / `assign_roles_tags`；`get_users_roles_audiences` / `assign_roles_audiences`）；[research.md](research.md) §4（角色即時由模組判定，JWT 不含角色）；[spec.md](spec.md) §定義 vs 關聯分層 / §跨模組共用規則（角色分治）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-roles`）
 **階段**：P1-核心（ET 學員以外**所有**角色〔ET 教師 / 管理者、DM 四角色〕之唯一開通路徑；「畫面在 DP、資料與判定在模組」2026-07-08 決策）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：模組管理者判定閘 `module_admin_gate`（T017）、`SRVDP001`（讀 `DP_PARAM` 標籤清單）、`SRVDP003` 稽核、認證 / `get_operator`
@@ -599,7 +599,7 @@ DP 後台權限管理頁（`dp-roles`，ET / DM 共用入口）：查使用者 �
 
 ## Issue #8：[P2-延伸] DP — 個人資料維護 + 強制變更密碼（dp-profile）（GitHub [#83](https://github.com/sti-fhb/EDMS/issues/83)）
 
-**對應規格**：[spec_us8.md](spec_us8.md)（US8 / UCDP004，FR-DP-US8-01~08、DP-MSG-PROFILE-001~008）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 發信）；[research.md](research.md) §5（一次性 token）/ §11（密碼策略）；[data-model.md](data-model.md)（`DP_USER`.PENDING_EMAIL / `DP_PWD_RESET`〔EMAIL_CHANGE〕/ `DP_PWD_HIST`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-profile`）
+**對應規格**：[spec_us8.md](spec_us8.md)（US8 / UCDP004，FR-DP-US8-01~08、DP-MSG-DP04-001~008）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 發信）；[research.md](research.md) §5（一次性 token）/ §11（密碼策略）；[data-model.md](data-model.md)（`DP_USER`.PENDING_EMAIL / `DP_PWD_RESET`〔EMAIL_CHANGE〕/ `DP_PWD_HIST`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-profile`）
 **階段**：P2-延伸（使用者自助作業；登入 / 註冊 P1 先行、個資維護隨後。ET / DM 不自設個資畫面、皆導向本頁）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：密碼策略工具（T016，複雜度〔特權 12〕/ 重複性 / bcrypt / 歷程）、速率限制（T015）、模組管理者判定閘（T017，特權門檻判定）、`DP_PWD_RESET`（`TOKEN_TYPE=EMAIL_CHANGE` + `NEW_EMAIL`）/ `DP_PWD_HIST` / `DP_USER.PENDING_EMAIL` 表、`SRVDP001`（`EMAIL_CHANGE_TTL_MIN` / `PWD_POLICY` 參數）、`SRVDP003` 稽核
@@ -625,7 +625,7 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 **前端**（`frontend/src/dp/user/`〔或 `dp/profile`〕，沿用共用元件）：
 - **T039 `dp-profile` 頁**：三區（姓名編輯 / Email 變更〔送出後 PROFILE-005〕 / 密碼變更〔舊 + 新 + 確認，Zod：特權 12 對齊、兩次一致〕）；訊息 PROFILE-001~008
 - **T039 密碼提示動態化**（併 #77 核心）：`usePasswordPolicy` hook 讀 `GET /api/password-policy` + 提示組字工具；變更密碼頁之複雜度提示（`8` / `12` 字元、字元組合種類數等數字）**依參數即時渲染、非寫死**——管理者於 US5 改 `ADMIN_MIN_LEN` 提示跟著變（stub 期特權門檻顯示一般 8，見注意事項）
-- **T039 強制變更密碼頁**：US1 T023 導入點（填實 `ForceChangePasswordShell`）——未完成變更不得離開至其他功能（DP-MSG-LOGIN-005 / PROFILE-007）
+- **T039 強制變更密碼頁**：US1 T023 導入點（填實 `ForceChangePasswordShell`）——未完成變更不得離開至其他功能（DP-MSG-DP01-005 / PROFILE-007）
 - **T039 Email 變更驗證落點頁**：信中連結落點 `/verify-email-change?token=`（沿用 US3 `reset-password` / US2 `verify-email` 之免登入落點頁殼模式，置於 `RootLayout` 外）——驗證成功切換提示、逾時 / 失效顯 PROFILE-008
 
 **測試**：
@@ -677,7 +677,7 @@ DP 個人資料頁（`dp-profile`，所有登入者維護**自己的**姓名 / E
 
 ## Issue #9：[P2-延伸] DP — 通知範本維護（dp-templates）（GitHub [#92](https://github.com/sti-fhb/EDMS/issues/92)）
 
-**對應規格**：[spec_us9.md](spec_us9.md)（US9 / UCDP011，FR-DP-US9-01~07、DP-MSG-TEMPLATES-001~004）；[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE`：`MODULE`+`TEMPLATE_CODE` 複合 PK、`IS_SYSTEM`、`VERSION` 樂觀鎖、DP 系統信 5 支種子）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 以範本渲染）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-templates`）
+**對應規格**：[spec_us9.md](spec_us9.md)（US9 / UCDP011，FR-DP-US9-01~07、DP-MSG-DP08-001~004）；[data-model.md](data-model.md)（`DP_NOTIFY_TEMPLATE`：`MODULE`+`TEMPLATE_CODE` 複合 PK、`IS_SYSTEM`、`VERSION` 樂觀鎖、DP 系統信 5 支種子）；[contracts/platform-services.md](contracts/platform-services.md)（SRVDP002 以範本渲染）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-templates`）
 **階段**：P2-延伸（範本已有內建種子即可運作；編輯功能於發信服務 P1〔US6〕之後交付）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_NOTIFY_TEMPLATE` 表 + **5 支 DP 系統信種子**（`PWD_RESET` / `ACCOUNT_VERIFY` / `ACCOUNT_INVITE` / `EMAIL_CHANGE_VERIFY` / `PWD_EXPIRY_REMIND`，`MODULE=DP`、`IS_SYSTEM=true`）+ `VERSION` 樂觀鎖欄位（ORM `version_id_col` 待本 issue 接）+ 模組管理者判定閘（T017 `module_admin_gate`）
@@ -752,7 +752,7 @@ DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本�
 
 ## Issue #10：[P2-延伸] DP — 操作記錄查詢（dp-audit）（GitHub [#97](https://github.com/sti-fhb/EDMS/issues/97)）
 
-**對應規格**：[spec_us10.md](spec_us10.md)（US10 / UCDP007，FR-DP-US10-01~06、DP-MSG-AUDIT-001~002）；[data-model.md](data-model.md)（`DP_AUDIT_LOG`：append-only〔僅 `CREATED_*`〕、`MODULE` / `FUNC_NAME` / `ACTION_TYPE`〔LOGIN..DELETE〕/ `TARGET_ID` / `SOURCE_IP` / `BEFORE_VALUE` / `AFTER_VALUE`〔JSON 字串〕/ `ROW_HASH` 鏈式雜湊；索引 `(CREATED_DATE)`、`(CREATED_USER, CREATED_DATE)`、`(MODULE, ACTION_TYPE, CREATED_DATE)`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-audit`）
+**對應規格**：[spec_us10.md](spec_us10.md)（US10 / UCDP007，FR-DP-US10-01~06、DP-MSG-DP09-001~002）；[data-model.md](data-model.md)（`DP_AUDIT_LOG`：append-only〔僅 `CREATED_*`〕、`MODULE` / `FUNC_NAME` / `ACTION_TYPE`〔LOGIN..DELETE〕/ `TARGET_ID` / `SOURCE_IP` / `BEFORE_VALUE` / `AFTER_VALUE`〔JSON 字串〕/ `ROW_HASH` 鏈式雜湊；索引 `(CREATED_DATE)`、`(CREATED_USER, CREATED_DATE)`、`(MODULE, ACTION_TYPE, CREATED_DATE)`）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-audit`）
 **階段**：P2-延伸（稽核**寫入**於各 US 內建，不依賴本 US；查詢 / 匯出介面於核心作業之後交付）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_AUDIT_LOG` 表 + `AuditLogService.log_action`（**寫入路徑**，各 US CUD 已呼叫）+ 模組管理者判定閘（T017 `module_admin_gate`）
@@ -784,10 +784,10 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 - [ ] 以多條件（操作者、期間起訖、模組、操作類別、**執行結果 SUCCESS / FAIL**）查詢 → 列出符合之 `DP_AUDIT_LOG`（後端分頁、時間倒序，列表含結果欄）；**兩管理者皆可查全部**（含不分模組之登入等事件）（FR-01/02、AC1）
 - [ ] 展開單筆明細 → 顯示完整欄位：操作者、時間（至秒）、功能 / 模組代碼、操作類別、**執行結果（SUCCESS / FAIL）**、**事件描述**、來源 IP、異動對象、**異動前後值（JSON 字串）**（FR-02/05、AC2）
 - [ ] 點「匯出 CSV」→ 依**當前查詢條件**匯出全部符合紀錄，內容與查詢結果一致（FR-03、AC3）
-- [ ] 查無符合紀錄 → 顯示空狀態提示 DP-MSG-AUDIT-001（FR-02、AC4）
+- [ ] 查無符合紀錄 → 顯示空狀態提示 DP-MSG-DP09-001（FR-02、AC4）
 - [ ] 頁面與 API **無任何刪除 / 修改功能**——日誌 append-only、不可於介面竄改 / 刪除（FR-04、AC5）
 - [ ] ET / DM 資安事件（帳號 / 角色權限 / 系統操作）統一寫入同一張 `DP_AUDIT_LOG`、本頁可查；業務歷程（DM 文件變更 / 閱讀、ET 學習 / 作答）**不在此**（FR-05、AC6）
-- [ ] 非管理者之一般使用者存取本頁或查詢 API → 伺服器端拒絕 DP-MSG-AUDIT-002（FR-01、AC7）
+- [ ] 非管理者之一般使用者存取本頁或查詢 API → 伺服器端拒絕 DP-MSG-DP09-002（FR-01、AC7）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check 通過
 
 ### 依賴
@@ -821,7 +821,7 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 
 ## Issue #11：[P2-延伸] DP — 排程引擎與總覽 + SCHDP001（dp-schedule）（GitHub [#106](https://github.com/sti-fhb/EDMS/issues/106)）
 
-**對應規格**：[spec_us11.md](spec_us11.md)（US11 / UCDP008，FR-DP-US11-01~07、DP-MSG-SCHEDULE-001）；[data-model.md](data-model.md)（`DP_SCHEDULE`：`JOB_ID` PK / `JOB_NAME` / `MODULE` / `CRON_EXPR` / `HANDLER_REF`〔dotted path〕/ `IS_ENABLED` / `LAST_RUN_DATE` / `LAST_RUN_STATUS`；`DP_SCHEDULE_LOG`：append-only、`JOB_ID` FK / `START_DATE` / `END_DATE` / `STATUS`〔SUCCESS / FAILED / SKIPPED〕/ `ERROR_MSG`）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §5（job handler `async def run()`）；[research.md](research.md) §9（APScheduler + DB 註冊表 + leader）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-schedule`，唯讀總覽）
+**對應規格**：[spec_us11.md](spec_us11.md)（US11 / UCDP008，FR-DP-US11-01~07、DP-MSG-DP10-001）；[data-model.md](data-model.md)（`DP_SCHEDULE`：`JOB_ID` PK / `JOB_NAME` / `MODULE` / `CRON_EXPR` / `HANDLER_REF`〔dotted path〕/ `IS_ENABLED` / `LAST_RUN_DATE` / `LAST_RUN_STATUS`；`DP_SCHEDULE_LOG`：append-only、`JOB_ID` FK / `START_DATE` / `END_DATE` / `STATUS`〔SUCCESS / FAILED / SKIPPED〕/ `ERROR_MSG`）；[contracts/module-callbacks.md](contracts/module-callbacks.md) §5（job handler `async def run()`）；[research.md](research.md) §9（APScheduler + DB 註冊表 + leader）；[wireframes/dp/index.html](../../wireframes/dp/index.html)（`dp-schedule`，唯讀總覽）
 **階段**：P2-延伸（承載 ET / DM 各模組排程與平台自身 `SCHDP001`；各模組排程功能上線前完成即可）
 **前置條件**：
 - Issue #0（GitHub [#16](https://github.com/sti-fhb/EDMS/issues/16)）已合併：`DP_SCHEDULE` + `DP_SCHEDULE_LOG` 表（T008）+ **種子（T009）**：`SCHDP001` 啟用（cron `0 8 * * *`、`HANDLER_REF=app.dp.schedules.handlers.daily_platform_job`）、`SCHET001` / `SCHET002` / `SCHDM001` 為 **`IS_ENABLED=false` 預留列**（handler 待各模組提供）+ 平台級參數（`LOGIN.IDLE_DISABLE_DAYS=90`、`PWD_POLICY.EXPIRY_DAYS=90` / `EXPIRY_REMIND_DAYS=7`）+ `apscheduler>=3.11` 依賴（註：`scheduler_leader.py` #0 實際未建，本 issue 自建 `is_leader()` 恆 True 之最小版）
@@ -985,7 +985,7 @@ DP 模組**收尾整合驗收**：以跨 US 端到端整合測試驗證各 Succe
 | 2026-07-23 | US5 交付前自檢（`/sti-sa-precheck`）補缺口：spec_us5 新增「參數型別 / 值域驗證規則」章節（FR-03 落地，平台級逐項對照表 + 跨欄位一致性 + code-registry 宣告）；wireframe `dp-params` 補平台級警告（PARAMS-005）、`IS_ACTIVE`→`IS_ENABLED`；spec.md 稽核前後值 `JSONB`→`TEXT`（對齊 research §6）；Issue #6 body 對齊（分區→三頁籤、VALUE 多鍵參數組澄清）。Issue #6 已開立為 GitHub [#68](https://github.com/sti-fhb/EDMS/issues/68)，回填總覽表 |
 | 2026-07-27 | Issue #6（US5 系統參數與清單維護）完成開發並**合併（PR [#73](https://github.com/sti-fhb/EDMS/pull/73)）**、close（#68）；實作期對齊 TBMS（`DP_PARAM_D` 補 `PARAM_NAME`/`DESCRIPTION` 自描述、刪前端硬編碼；ACTION_TYPE 系統 enum 不納維護；`VERIFY_SEND_COOLDOWN_SEC` 納入維護），詳見 spec_us5 §參數型別 / 值域驗證規則。總覽表 #6 狀態更新為已合併 |
 | 2026-07-27 | 依增量模式補入 Issue #7（權限管理 / US7 / dp-roles）完整 body（T035~T036）：DP 為**轉接層**（畫面在 DP、資料與判定在模組），全程對 ET/DM `get_user_roles_*` / `assign_roles_*` stub 驗接線，自我保護 / 標籤值檢核 / 稽核皆在模組（contracts §3）；標籤清單讀 DP_PARAM（US5）；admin 授權閘同 #5/#6 列為開工前釐清；完整驗收待 T049 |
-| 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補缺（PR #80）：contracts §3 定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位 + 讀取改批次 `get_users_roles_*`（決策 3=B）+ 標籤回代碼、名稱由 DP 讀 DP_PARAM（1=A）+ 含 last_modified（2=A）；spec_us7 FR-06 自我保護訊息統一映射 DP-MSG-ROLES-001；wireframe dp-roles 補 AC5 呈現；Issue #7 body 同步（批次更名 + 標籤依賴提醒）|
+| 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補缺（PR #80）：contracts §3 定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位 + 讀取改批次 `get_users_roles_*`（決策 3=B）+ 標籤回代碼、名稱由 DP 讀 DP_PARAM（1=A）+ 含 last_modified（2=A）；spec_us7 FR-06 自我保護訊息統一映射 DP-MSG-DP06-001；wireframe dp-roles 補 AC5 呈現；Issue #7 body 同步（批次更名 + 標籤依賴提醒）|
 | 2026-07-27 | 依增量模式補入 Issue #8（個人資料維護 + 強制變更密碼 / US8 / dp-profile）完整 body（T037~T039）：姓名直接存、Email 新信箱驗證延遲切換（重用 `DP_PWD_RESET` EMAIL_CHANGE token + `PENDING_EMAIL`）、密碼變更驗舊 + 特權 12 + 重複性 + 清 `MUST_CHANGE_PWD`；承載 US1 強制變更頁（填實 `ForceChangePasswordShell` 提交端點）；發信 SRVDP002 非 stub；特權門檻依 is_module_admin（stub 期套一般 8、待 T049）|
 | 2026-07-27 | US8 交付前自檢（`/sti-sa-precheck #8`）：結論規格齊備、無必補；補 2 項澄清進 Issue #8 body ——「強制變更沿用同一 `PUT /me/password` 端點、仍需舊密碼」+「Email 變更驗證落點頁 `/verify-email-change`（沿用 US3 免登入落點頁殼）」。data-model / wireframe / 契約（SRVDP002 非 stub）皆已齊備。另決議將 [#77](https://github.com/sti-fhb/EDMS/issues/77)（密碼規則提示動態化）**核心併入 US8**：建公開 `GET /api/password-policy` 端點 + `usePasswordPolicy` hook，US8 變更密碼頁提示數字動態讀 `PWD_POLICY`；#77 收斂為 retrofit US2 / US3 |
 | 2026-07-29 | US8（#83 / PR #87）與 #77（PR #90）已合併進 main；依增量模式補入 Issue #9（通知範本維護 / US9 / dp-templates）完整 body（T040~T041）：既有 `DP_NOTIFY_TEMPLATE` 表 + 種子（#0）之 MODULE 過濾維護（A-strict，比照 US5）、`IS_SYSTEM` 系統信保護（不可停用 / 刪除）、`VERSION` 樂觀鎖（衝突 409）、無新增 / 刪除範本、稽核；無新表 / migration；填實 `TemplatesPage` stub；error codes 建議 `DP_MAIL_003`（系統信保護）/ `DP_MAIL_004`（版本衝突）、越權重用 `DP_AUTH_006`；特權判定同 stub 過渡待 T049 |

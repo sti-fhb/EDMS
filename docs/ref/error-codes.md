@@ -133,4 +133,4 @@
 | DM_DOC_002 | 403 | 舊版本不可下載，請聯絡管理者 |
 | DM_DOC_003 | 422 | 此檔案格式無法線上預覽，請下載原檔 |
 
-> `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-ROLES-001` 呈現（見 spec_us7 FR-06）。
+> `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 spec_us7 FR-06）。

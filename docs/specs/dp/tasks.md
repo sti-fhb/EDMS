@@ -58,8 +58,8 @@
 - [ ] T021 [US1] 實作登入端點 dp/user：帳密驗證（錯誤分流 LOGIN-001/002、bcrypt 比對）、鎖定判定（LOCKED_UNTIL 逾時視為已解鎖）、失敗計數 / 達 `FAIL_LOCK_COUNT` 自動鎖定、成功歸零計數 + 更新 LAST_LOGIN + 核發 JWT + LOGIN 稽核（含 FAIL 事件），對應 FR-02/04/05/08
 - [ ] T022 [US1] 實作換發端點 `renew`（T013 驗證邏輯 + 帳號狀態檢核）與登出端點（LOGOUT 稽核；前端丟棄 token），對應 FR-03/10
 - [ ] T023 [US1] 實作強制變更密碼閘：登入時檢核 `MUST_CHANGE_PWD` / `PWD_CHANGED_DATE` 逾效期 → 回應強制變更旗標；未完成變更前其他端點拒絕（middleware 檢核），對應 FR-06、spec_us8 FR-DP-US8-08
-- [ ] T024 [US1] 實作登入頁前端：帳密遮蔽、錯誤訊息（DP-MSG-LOGIN-001~008）、redirect 白名單返回原目標頁面（通知信連結 / 書籤 / 逾時重登）、前端閒置換發計時器（到期前有操作即呼叫 renew）、掛速率限制（T015），對應 FR-01/07/09、research §12
-- [ ] T025 [US1] 實作模組入口頁：後端「我的模組角色摘要」端點（聚合模組 `has_any_role`，stub 先行）+ 前端入口頁（ET 恆顯、**DM 卡雙狀態**〔無角色呈「未開通」鎖定卡＋引導洽管理者，DP-MSG-LOGIN-008〕、個資恆顯、**不顯後台入口**、首次登入歡迎橫幅一次〔已顯示旗標儲存位置實作定〕），對應 FR-07、contracts/module-callbacks §4、research §12（2026-07-09 釐清第 4 輪）
+- [ ] T024 [US1] 實作登入頁前端：帳密遮蔽、錯誤訊息（DP-MSG-DP01-001~008）、redirect 白名單返回原目標頁面（通知信連結 / 書籤 / 逾時重登）、前端閒置換發計時器（到期前有操作即呼叫 renew）、掛速率限制（T015），對應 FR-01/07/09、research §12
+- [ ] T025 [US1] 實作模組入口頁：後端「我的模組角色摘要」端點（聚合模組 `has_any_role`，stub 先行）+ 前端入口頁（ET 恆顯、**DM 卡雙狀態**〔無角色呈「未開通」鎖定卡＋引導洽管理者，DP-MSG-DP01-008〕、個資恆顯、**不顯後台入口**、首次登入歡迎橫幅一次〔已顯示旗標儲存位置實作定〕），對應 FR-07、contracts/module-callbacks §4、research §12（2026-07-09 釐清第 4 輪）
 
 ---
 
@@ -71,7 +71,7 @@
 > **前置**: Phase 2（T016 密碼）、ET `grant_default_student_role`（stub 可）
 
 - [ ] T026 [US2] 實作註冊端點：Email 唯一 / 複雜度 / 兩次一致（伺服器端）、建 `DP_USER`（雜湊、ACTIVE）+ `DP_PWD_HIST` 首筆 + 呼叫 ET `grant_default_student_role`（**不授予任何 DM 角色**）+ CREATE 稽核，對應 FR-02/03/05/06
-- [ ] T027 [US2] 實作註冊前端頁籤：欄位與訊息（DP-MSG-REGISTER-001~004）、成功跳回登入頁預填 Email，對應 FR-01/04
+- [ ] T027 [US2] 實作註冊前端頁籤：欄位與訊息（DP-MSG-DP02-001~004）、成功跳回登入頁預填 Email，對應 FR-01/04
 
 ---
 
@@ -82,7 +82,7 @@
 > **對應 FR**: spec_us3 FR-DP-US3-01~08
 > **前置**: Phase 3（US6 發信）、Phase 2（T015 / T016）
 
-- [ ] T028 [US3] 實作申請端點：防列舉統一回覆（DP-MSG-FORGOT-001）、token 產生（明文入信、SHA-256 入 `DP_PWD_RESET`、同人同型舊 token 作廢）、經 SRVDP002 寄 `PWD_RESET` 範本、掛速率限制，對應 FR-01~04/08
+- [ ] T028 [US3] 實作申請端點：防列舉統一回覆（DP-MSG-DP03-001）、token 產生（明文入信、SHA-256 入 `DP_PWD_RESET`、同人同型舊 token 作廢）、經 SRVDP002 寄 `PWD_RESET` 範本、掛速率限制，對應 FR-01~04/08
 - [ ] T029 [US3] 實作重設端點與頁面：token 驗證（逾時 / 已用 FORGOT-002）、新密碼複雜度 + 重複性（T016）、更新 + `DP_PWD_HIST` + 密碼重置稽核 + token 作廢；**不解除鎖定 / 停用**，對應 FR-05~07
 
 ---
@@ -95,7 +95,7 @@
 > **前置**: Phase 2（T016 / T017）、Phase 5（授予學員共用邏輯）
 
 - [ ] T030 [US4] 實作使用者查詢端點 + dp-users 前端清單：Email / 姓名 / 狀態條件、後端分頁、共用項（兩模組管理者可用、一般使用者擋），對應 FR-01/02
-- [ ] T031 [US4] 實作建立帳號：管理者設初始密碼（複雜度檢核）+ `MUST_CHANGE_PWD`=true + ET 學員授予（同 T026 邏輯）+ 稽核，訊息 DP-MSG-USERS-003/005，對應 FR-03/07
+- [ ] T031 [US4] 實作建立帳號：管理者設初始密碼（複雜度檢核）+ `MUST_CHANGE_PWD`=true + ET 學員授予（同 T026 邏輯）+ 稽核，訊息 DP-MSG-DP05-003/005，對應 FR-03/07
 - [ ] T032 [US4] 實作停用 / 啟用 / 解鎖 / 基本資料維護：停用二次確認（USERS-002）、**自我保護**（不可停用 / 鎖定自己，USERS-001）、解鎖歸零計數（USERS-004）、管理者代改姓名 / Email（直接生效、Email 唯一檢核）、全數寫稽核（含前後值），對應 FR-04~06/08
 
 ---
@@ -133,7 +133,7 @@
 
 - [ ] T037 [US8] 實作姓名 / 密碼變更端點：姓名直接存 + 稽核；密碼驗舊（PROFILE-001）+ 複雜度（特權 12 字元，PROFILE-003）+ 重複性（PROFILE-004）+ `DP_PWD_HIST` + 稽核 + 清 `MUST_CHANGE_PWD`、掛速率限制，對應 FR-01/02/04~07
 - [ ] T038 [US8] 實作 Email 變更流程：新 Email 唯一檢核（PROFILE-006）、`EMAIL_CHANGE` token（`NEW_EMAIL` + `PENDING_EMAIL`）、經 SRVDP002 寄 `EMAIL_CHANGE_VERIFY` 至**新信箱**（PROFILE-005）、驗證端點切換（舊失效）/ 逾時作廢（PROFILE-008）、稽核，對應 FR-03
-- [ ] T039 [US8] 實作 dp-profile 前端 + **強制變更密碼頁**（US1 T023 導入點；未完成不得離開，訊息 DP-MSG-LOGIN-005 / PROFILE-007），對應 FR-08
+- [ ] T039 [US8] 實作 dp-profile 前端 + **強制變更密碼頁**（US1 T023 導入點；未完成不得離開，訊息 DP-MSG-DP01-005 / PROFILE-007），對應 FR-08
 
 ---
 

@@ -90,17 +90,17 @@
 
 | US | 作業 | 涵蓋 UC | Priority | 規格檔 |
 |----|------|---------|---------|--------|
-| US1 | 使用者登入 / 登出 | UCDP001 | P1 | [spec_us1.md](spec_us1.md) |
-| US2 | 使用者自助註冊 | UCDP002 | P1 | [spec_us2.md](spec_us2.md) |
-| US3 | 忘記密碼 | UCDP003 | P1 | [spec_us3.md](spec_us3.md) |
-| US4 | 使用者管理（共用項）| UCDP005 | P1 | [spec_us4.md](spec_us4.md) |
-| US5 | 系統參數與清單維護 | UCDP006 | P1 | [spec_us5.md](spec_us5.md) |
-| US6 | 通知發送服務（發信引擎，無畫面）| UCDP009 | P1 | [spec_us6.md](spec_us6.md) |
-| US7 | 權限管理（角色 + 標籤 / 可見對象指派）| UCDP010 | P1 | [spec_us7.md](spec_us7.md) |
-| US8 | 個人資料維護 | UCDP004 | P2 | [spec_us8.md](spec_us8.md) |
-| US9 | 通知範本維護 | UCDP011 | P2 | [spec_us9.md](spec_us9.md) |
-| US10 | 操作記錄查詢（稽核，共用項）| UCDP007 | P2 | [spec_us10.md](spec_us10.md) |
-| US11 | 排程作業執行與總覽（引擎 + 唯讀總覽畫面）| UCDP008 | P2 | [spec_us11.md](spec_us11.md) |
+| US1 | DP01 使用者登入 / 登出 | UCDP001 | P1 | [spec_us1.md](spec_us1.md) |
+| US2 | DP02 使用者自助註冊 | UCDP002 | P1 | [spec_us2.md](spec_us2.md) |
+| US3 | DP03 忘記密碼 | UCDP003 | P1 | [spec_us3.md](spec_us3.md) |
+| US4 | DP05 使用者管理（共用項）| UCDP005 | P1 | [spec_us4.md](spec_us4.md) |
+| US5 | DP07 系統參數與清單維護 | UCDP006 | P1 | [spec_us5.md](spec_us5.md) |
+| US6 | 通知發送服務（發信引擎，**無畫面**）| UCDP009 | P1 | [spec_us6.md](spec_us6.md) |
+| US7 | DP06 權限管理（角色 + 標籤 / 可見對象指派）| UCDP010 | P1 | [spec_us7.md](spec_us7.md) |
+| US8 | DP04 個人資料維護 | UCDP004 | P2 | [spec_us8.md](spec_us8.md) |
+| US9 | DP08 通知範本維護 | UCDP011 | P2 | [spec_us9.md](spec_us9.md) |
+| US10 | DP09 操作記錄查詢（稽核，共用項）| UCDP007 | P2 | [spec_us10.md](spec_us10.md) |
+| US11 | DP10 排程作業執行與總覽（引擎 + 唯讀總覽畫面）| UCDP008 | P2 | [spec_us11.md](spec_us11.md) |
 
 > US 編號依優先級重新排序（P1 → P2），不對應 UC 編號順序。
 
@@ -142,7 +142,33 @@
 | 成功 | 🟢 綠（`alert-success`）| Inline alert（顯示於按鈕附近）| 否 | 主動操作完成之回饋 |
 | 提示 | 🔷 淺藍（`alert-info`）| Inline alert / 列表空白狀態提示 | 否 | 正常流程告知（查詢結果、彙總、引導）|
 
-訊息代碼格式：`DP-MSG-{功能語意碼}-{流水號}`，例 `DP-MSG-LOGIN-001`。DP 無數字型畫面編碼，`{功能語意碼}` 一律採語意碼：`LOGIN`（登入 / 登出）、`REGISTER`（註冊）、`FORGOT`（忘記密碼）、`PROFILE`（個人資料）、`USERS`（使用者管理）、`PARAMS`（系統參數與清單）、`ROLES`（權限管理）、`TEMPLATES`（通知範本）、`AUDIT`（操作記錄）、`MAIL`（發信服務）、`SCHEDULE`（排程）。
+訊息代碼格式：`DP-MSG-{畫面碼}-{流水號}`，例 `DP-MSG-DP01-001`。`{畫面碼}` 用下方〈畫面代號對照表〉之 `DP00`–`DP10`；**無對應畫面者以功能語意碼替代**（比照 DM 規則）——目前僅發信服務（US6，無畫面）之 `MAIL`。
+
+> 2026-08-13（#156）：原採純語意碼（`DP-MSG-LOGIN-001` 等），與 ET（`ET01`–`ET10`）/ DM（`DM00`–`DM12`）不一致，交付甲方文件時無作業編號可標。已改為畫面碼，**流水號與訊息內容不變**（`DP-MSG-LOGIN-006` → `DP-MSG-DP01-006`）。
+
+### 畫面代號對照表
+
+依使用者操作動線編號（登入 → 註冊 → 個資 → 後台各畫面）。**不對齊主系統 TBMS**——兩邊 DP 的畫面集合本就不同（EDMS 無站點 / 選單 / API Key，另有自助註冊 / 權限管理 / 通知範本）。
+
+| 畫面碼 | 畫面名稱 | 對應 US | Wireframe |
+|--------|---------|---------|-----------|
+| DP00 | 登入後主頁（模組入口頁）| —（跨 US 之共用入口）| `dp-portal` |
+| DP01 | 使用者登入 / 登出 | US1 | 登入頁 |
+| DP02 | 使用者自助註冊 | US2 | 登入頁・註冊頁籤 |
+| DP03 | 忘記密碼 | US3 | 登入頁・忘記密碼 |
+| DP04 | 個人資料維護 | US8 | `dp-profile` |
+| DP05 | 使用者管理 | US4 | `dp-users` |
+| DP06 | 權限管理 | US7 | `dp-roles` |
+| DP07 | 系統參數與清單維護 | US5 | `dp-params` |
+| DP08 | 通知範本維護 | US9 | `dp-templates` |
+| DP09 | 操作記錄查詢 | US10 | `dp-audit` |
+| DP10 | 排程作業總覽 | US11 | `dp-schedule` |
+
+> **US6（通知發送服務）不編號**：為發信引擎、無畫面，訊息碼沿用語意碼 `MAIL`。
+>
+> ⚠️ **與主系統 TBMS 不同號**：EDMS `DP09` 為操作記錄查詢、`DP07` 為系統參數；TBMS 之 `DP09` 為系統參數維護作業、`DP03` 為使用者維護作業。交付文件若同時提及兩系統，須標明系統別。
+>
+> **畫面碼不進資料庫**：本表為文件層權威定義。稽核之來源功能記於 `DP_AUDIT_LOG.FUNC_NAME`（語意碼 `DP-USERS` 等，粒度為功能領域、比畫面粗，且含排程等無畫面來源），與畫面碼是兩套編碼、不互相對應。
 
 ---
 
@@ -379,3 +405,4 @@
 | 2026-07-09 | 跨文件一致性檢查修正：Key Entities `DP_PWD_RESET` 補 `EMAIL_CHANGE` 類型（對齊 research §5）、`DP_EMAIL_LOG` 改「新增 + 狀態更新」（原誤標 append-only）、plan.md 文件樹過期註記、tasks T035 補 FR-07 稽核歸屬 |
 | 2026-07-21 | #56：自助註冊改「Email 驗證後啟用」（**推翻**「註冊即用 / 不寄開通確認信」）；新增待驗證表 `DP_PENDING_REGISTRATION`（方案 B，驗證前不寫 `DP_USER`）、DP 系統信範本 `ACCOUNT_VERIFY`；新增 `DP_AUTH_010`（未驗證登入）、`DP_USER_003/004`（驗證連結無效 / 逾時）；詳見 [spec_us2](spec_us2.md) |
 | 2026-07-09 | 釐清第 4 輪（首次註冊引導）：入口頁 DM 卡改「未開通鎖定卡」（取代第 3 輪隱藏式）、首次登入歡迎橫幅、模組側欄可見性規則（DM 組未開通隱藏）、redirect 語意精確化（逾時重登 / 通知連結返回原頁面）；開通申請流程列為未來擴充 backlog |
+| 2026-08-13 | #156：訊息代碼由語意碼改為**畫面碼**（`DP-MSG-LOGIN-001` → `DP-MSG-DP01-001`，流水號與訊息內容不變，158 處）；新增〈畫面代號對照表〉（`DP00`–`DP10`，依操作動線編號、不對齊主系統 TBMS）；US 索引補畫面碼；US6 發信服務無畫面、沿用語意碼 `MAIL`。`RES_ID` 不在本次範圍（見 #158）|
