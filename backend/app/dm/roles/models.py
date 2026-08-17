@@ -9,10 +9,10 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, Identity, Index, PrimaryKeyConstraint, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import AuditLogBaseModel, BaseModelNoResId
+from app.core.base_model import AuditLogBaseModel, BaseModel
 
 
-class DmUserRole(BaseModelNoResId):
+class DmUserRole(BaseModel):
     """DM 使用者角色指派（DM_USER_ROLE）。
 
     同一使用者可多列（複選、聯集）；唯一約束 (USER_ID, ROLE_CODE)。

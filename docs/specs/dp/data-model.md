@@ -22,8 +22,9 @@ DP 持有 10 張平台表：共用使用者 `DP_USER`、驗證 token `DP_PWD_RES
 | CREATED_DATE | TIMESTAMP | Y | 建立時間 |
 | UPDATED_USER | VARCHAR(20) | N | 最後異動者 USER_ID |
 | UPDATED_DATE | TIMESTAMP | N | 最後異動時間 |
-| RES_ID | VARCHAR(30) | N | 來源功能 ID（如 `DP-USERS`、`DP-PARAMS`，同訊息語意碼）|
 | DELETED | INT | N | 軟刪除（0=正常, 1=已刪除）|
+
+> **標準欄位不含 `RES_ID`**（2026-08-13 移除，#158）：該欄源自主系統 TBMS 之「來源功能 ID」（外鍵指向功能選單表 `DP_MENU`），但 EDMS **不設 `DP_MENU`**（無全域 RBAC 與功能選單，見上方分層說明與 spec Out of Scope），欄位失去指向對象；來源功能於 EDMS 記於 `DP_AUDIT_LOG.FUNC_NAME`（語意碼如 `DP-USERS`）。原唯一有值者 `DP_PENDING_REGISTRATION.RES_ID` 語意實為「邀請之對外識別碼」，已正名為 `INVITE_ID`（見該表 DD）。
 
 ---
 
@@ -191,8 +192,9 @@ erDiagram
 | PWD_HASH | VARCHAR(100) | N | bcrypt 雜湊（驗證通過搬入 `DP_USER`）；`ADMIN_INVITE` 於建立時為 NULL、啟用設密碼時回填 |
 | KIND | VARCHAR(20) | Y | 來源：`SELF_REGISTER` / `ADMIN_INVITE`（決定啟用流程與清單過濾）|
 | EXPIRES_DATE | TIMESTAMP | Y | 驗證連結逾期即失效（TTL 平台級參數，沿用 30 分鐘）|
+| INVITE_ID | VARCHAR(30) | N | 邀請之對外識別碼；**僅 `KIND=ADMIN_INVITE` 有值**（自助註冊列維持 NULL）。待啟用邀請尚無 `USER_ID`，故另給一鍵供重寄 / 取消端點（`/invites/{invite_id}/…`）指認單筆邀請，亦為稽核 `TARGET_ID` 之來源。原名 `RES_ID`，2026-08-13 正名（#158）|
 
-索引 / 約束：`PK(TOKEN_HASH)`、`UNIQUE(EMAIL)`。標準欄位含 `CREATED_* / UPDATED_* / RES_ID`（`BaseModelHardDelete`，**無 `DELETED`**）。
+索引 / 約束：`PK(TOKEN_HASH)`、`UNIQUE(EMAIL)`。標準欄位含 `CREATED_* / UPDATED_*`（`BaseModelHardDelete`，**無 `DELETED`**）。
 
 ### DP_PWD_HIST — 密碼歷程（append-only；僅 CREATED_*）
 

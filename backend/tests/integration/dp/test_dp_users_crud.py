@@ -85,18 +85,18 @@ async def test_create_invite_writes_pending_no_user_sends_and_audits(db):
         await db.execute(select(func.count()).select_from(DpUser).where(DpUser.email == "new@edms.local"))
     ).scalar_one()
     assert cnt == 0
-    # 寫 pending：ADMIN_INVITE、pwd_hash 為 None、有 res_id
+    # 寫 pending：ADMIN_INVITE、pwd_hash 為 None、有 invite_id
     pending = await AuthRepository().get_pending_by_email(db, "new@edms.local")
     assert pending is not None
     assert pending.kind == "ADMIN_INVITE"
     assert pending.pwd_hash is None
-    assert pending.res_id
+    assert pending.invite_id
     # 寄邀請信（ACCOUNT_INVITE + activate_link）
     assert len(notify.calls) == 1
     assert notify.calls[0]["template_code"] == "ACCOUNT_INVITE"
     assert "activate_link" in notify.calls[0]["params"]
-    # 稽核 CREATE（target = res_id）
-    assert await _count_audit(db, pending.res_id, "CREATE") == 1
+    # 稽核 CREATE（target = invite_id）
+    assert await _count_audit(db, pending.invite_id, "CREATE") == 1
 
 
 async def test_create_invite_duplicate_email_in_user_rejected(db):
@@ -118,7 +118,7 @@ async def test_create_invite_on_active_pending_returns_409_guide_resend(db):
 
 
 async def test_create_invite_on_expired_pending_reinvites(db):
-    """已逾期待啟用邀請重複建立 ＝ 重新邀請（#111）：沿用原 res_id、換新 token/效期、用新姓名、重寄、稽核。"""
+    """已逾期待啟用邀請重複建立 ＝ 重新邀請（#111）：沿用原 invite_id、換新 token/效期、用新姓名、重寄、稽核。"""
     notify = _FakeNotify()
     svc = _svc(notify)
     # 塞一筆已逾期的 ADMIN_INVITE pending
@@ -131,7 +131,7 @@ async def test_create_invite_on_expired_pending_reinvites(db):
         expires_date=utcnow() - timedelta(minutes=1),
         now=utcnow(),
         kind="ADMIN_INVITE",
-        res_id="oldres1",
+        invite_id="oldres1",
         operator_id="admin01",
     )
 
@@ -139,7 +139,7 @@ async def test_create_invite_on_expired_pending_reinvites(db):
 
     pending = await AuthRepository().get_pending_by_email(db, "exp@edms.local")
     assert pending is not None
-    assert pending.res_id == "oldres1"  # 沿用原 res_id（識別碼穩定）
+    assert pending.invite_id == "oldres1"  # 沿用原 invite_id（識別碼穩定）
     assert pending.token_hash != "oldhash"  # 舊 token 已作廢
     assert pending.expires_date > utcnow()  # 效期重設為未來
     assert pending.user_name == "新名"  # 用本次請求的姓名
@@ -159,7 +159,7 @@ async def test_create_invite_on_expired_pending_reinvites(db):
 async def test_create_invite_on_self_register_pending_rejected(db, expired):
     """Email 正被**自助註冊**（SELF_REGISTER）佔用 → 409 DP_USER_007（#111）。
 
-    不可回 DP_USER_010：該列不在邀請清單、res_id 為 NULL，管理者根本無可重寄對象；
+    不可回 DP_USER_010：該列不在邀請清單、invite_id 為 NULL，管理者根本無可重寄對象；
     逾期亦不得走「重新邀請」覆蓋他人的自助註冊列（含其 pwd_hash）。
     """
     offset = -timedelta(minutes=1) if expired else timedelta(minutes=30)
@@ -196,7 +196,7 @@ async def test_reinvite_invalidates_old_invite_token(db):
         expires_date=utcnow() - timedelta(minutes=1),
         now=utcnow(),
         kind="ADMIN_INVITE",
-        res_id="oldres2",
+        invite_id="oldres2",
         operator_id="admin01",
     )
 
@@ -232,18 +232,18 @@ async def test_list_invites_only_admin_invite(db):
     assert "self@edms.local" not in emails
 
 
-async def test_resend_invite_rotates_token_keeps_res_id_and_resends(db):
+async def test_resend_invite_rotates_token_keeps_invite_id_and_resends(db):
     notify = _FakeNotify()
     svc = _svc(notify)
     await svc.create_user(db, data=UserCreate(email="r@edms.local", user_name="R"), operator=_OP)
     pending = await AuthRepository().get_pending_by_email(db, "r@edms.local")
-    old_hash, res_id = pending.token_hash, pending.res_id
+    old_hash, invite_id = pending.token_hash, pending.invite_id
 
-    await svc.resend_invite(db, res_id=res_id, operator=_OP)
+    await svc.resend_invite(db, invite_id=invite_id, operator=_OP)
 
     new_pending = await AuthRepository().get_pending_by_email(db, "r@edms.local")
     assert new_pending.token_hash != old_hash  # 舊 token 已作廢
-    assert new_pending.res_id == res_id  # res_id 不變（識別碼穩定）
+    assert new_pending.invite_id == invite_id  # invite_id 不變（識別碼穩定）
     assert len(notify.calls) == 2  # 建立 + 重寄各一封
 
 
@@ -251,20 +251,20 @@ async def test_cancel_invite_deletes_pending(db):
     svc = _svc()
     await svc.create_user(db, data=UserCreate(email="c@edms.local", user_name="C"), operator=_OP)
     pending = await AuthRepository().get_pending_by_email(db, "c@edms.local")
-    await svc.cancel_invite(db, res_id=pending.res_id, operator=_OP)
+    await svc.cancel_invite(db, invite_id=pending.invite_id, operator=_OP)
     assert await AuthRepository().get_pending_by_email(db, "c@edms.local") is None
 
 
 async def test_resend_missing_invite_404(db):
     with pytest.raises(AppError) as exc:
-        await _svc().resend_invite(db, res_id="ghost", operator=_OP)
+        await _svc().resend_invite(db, invite_id="ghost", operator=_OP)
     assert exc.value.status_code == 404
     assert exc.value.error_code == "DP_USER_009"
 
 
 async def test_cancel_missing_invite_404(db):
     with pytest.raises(AppError) as exc:
-        await _svc().cancel_invite(db, res_id="ghost", operator=_OP)
+        await _svc().cancel_invite(db, invite_id="ghost", operator=_OP)
     assert exc.value.status_code == 404
     assert exc.value.error_code == "DP_USER_009"
 

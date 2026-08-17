@@ -95,7 +95,7 @@ class UsersService:
         - 已啟用（DP_USER 存在）→ 409 DP_USER_007（真重複）。
         - 待啟用列存在但**非 ADMIN_INVITE**（使用者自助註冊中）→ 409 DP_USER_007（維持既有語意）。
         - 待啟用邀請**未逾期** → 409 DP_USER_010（引導改用重寄）。
-        - 待啟用邀請**已逾期** → 視為**重新邀請**：沿用原 res_id、作廢舊列、換新 token/效期並重寄。
+        - 待啟用邀請**已逾期** → 視為**重新邀請**：沿用原 invite_id、作廢舊列、換新 token/效期並重寄。
 
         Raises:
             AppError: Email 已被啟用帳號 / 自助註冊佔用（409 DP_USER_007）；已有未逾期待啟用邀請
@@ -108,7 +108,7 @@ class UsersService:
         existing = await self._auth_repo.get_pending_by_email(db, data.email)
         if existing is not None and existing.kind != _KIND_ADMIN_INVITE:
             # 自助註冊（SELF_REGISTER）處理中：該列不在邀請清單（build_invite_list_stmt 濾 kind）、
-            # res_id 為 NULL，管理者既無可重寄對象也不應覆蓋他人註冊列，故維持「Email 已被使用」
+            # invite_id 為 NULL，管理者既無可重寄對象也不應覆蓋他人註冊列，故維持「Email 已被使用」
             # 而非回 DP_USER_010（會把管理者導向不存在的重寄動作）。
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007")
 
@@ -128,11 +128,11 @@ class UsersService:
                 "kind": existing.kind,
                 "expires_date": _iso(existing.expires_date),
             }
-            # 沿用原 res_id（識別碼穩定），作廢舊列後重寫
-            res_id = existing.res_id or generate_user_id()
+            # 沿用原 invite_id（識別碼穩定），作廢舊列後重寫
+            invite_id = existing.invite_id or generate_user_id()
             await self._auth_repo.delete_pending_by_email(db, data.email)
         else:
-            res_id = generate_user_id()
+            invite_id = generate_user_id()
 
         ip = get_client_ip()
         plaintext = generate_reset_token()
@@ -150,7 +150,7 @@ class UsersService:
                 expires_date=expires_date,
                 now=now,
                 kind=_KIND_ADMIN_INVITE,
-                res_id=res_id,
+                invite_id=invite_id,
                 operator_id=operator.user_id,
             )
         except IntegrityError as exc:
@@ -162,7 +162,7 @@ class UsersService:
         await self._log(
             db,
             operator.user_id,
-            res_id,
+            invite_id,
             ip,
             # 重新邀請本質為「刪舊列 + 寫新列 + 重寄」，與 resend_invite 同性質，故同記 UPDATE
             "UPDATE" if reinvite else "CREATE",
@@ -183,18 +183,18 @@ class UsersService:
         stmt = self._auth_repo.build_invite_list_stmt(keyword=keyword)
         return await paginate(db, stmt, page=page, limit=limit, schema=InviteResponse)
 
-    async def resend_invite(self, db: AsyncSession, *, res_id: str, operator: OperatorInfo) -> None:
-        """重寄邀請：作廢舊 token、產新並重寄（沿用同 res_id / Email / 姓名）。
+    async def resend_invite(self, db: AsyncSession, *, invite_id: str, operator: OperatorInfo) -> None:
+        """重寄邀請：作廢舊 token、產新並重寄（沿用同 invite_id / Email / 姓名）。
 
         Raises:
             AppError: 邀請不存在（404 DP_USER_009）。
         """
-        invite = await self._require_invite(db, res_id)
+        invite = await self._require_invite(db, invite_id)
         now = utcnow()
         ip = get_client_ip()
         plaintext = generate_reset_token()
         ttl_min = await self._invite_ttl_min(db)
-        # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原 res_id / 姓名寫新列
+        # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原 invite_id / 姓名寫新列
         await self._auth_repo.delete_pending_by_email(db, invite.email)
         try:
             await self._auth_repo.create_pending_registration(
@@ -206,7 +206,7 @@ class UsersService:
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
                 kind=_KIND_ADMIN_INVITE,
-                res_id=res_id,
+                invite_id=invite_id,
                 operator_id=operator.user_id,
             )
         except IntegrityError as exc:
@@ -215,25 +215,25 @@ class UsersService:
         await self._log(
             db,
             operator.user_id,
-            res_id,
+            invite_id,
             ip,
             "UPDATE",
             "重寄帳號邀請",
             after={"email": invite.email, "user_name": invite.user_name},
         )
 
-    async def cancel_invite(self, db: AsyncSession, *, res_id: str, operator: OperatorInfo) -> None:
+    async def cancel_invite(self, db: AsyncSession, *, invite_id: str, operator: OperatorInfo) -> None:
         """取消邀請：刪除該待邀請列（硬刪）。
 
         Raises:
             AppError: 邀請不存在（404 DP_USER_009）。
         """
-        invite = await self._require_invite(db, res_id)
+        invite = await self._require_invite(db, invite_id)
         await self._auth_repo.delete_pending_by_email(db, invite.email)
         await self._log(
             db,
             operator.user_id,
-            res_id,
+            invite_id,
             get_client_ip(),
             "DELETE",
             "取消帳號邀請",
@@ -417,9 +417,9 @@ class UsersService:
             raise AppError(status_code=404, detail=_NOT_FOUND_MSG, error_code="DP_USER_008")
         return user
 
-    async def _require_invite(self, db: AsyncSession, res_id: str):
+    async def _require_invite(self, db: AsyncSession, invite_id: str):
         """載入待啟用邀請，不存在拋 404 DP_USER_009。"""
-        invite = await self._auth_repo.get_invite_by_res_id(db, res_id)
+        invite = await self._auth_repo.get_invite_by_invite_id(db, invite_id)
         if invite is None:
             raise AppError(status_code=404, detail=_INVITE_NOT_FOUND_MSG, error_code="DP_USER_009")
         return invite

@@ -50,4 +50,4 @@ paths:
 
 - **前端檔案禁止使用 `.js` / `.jsx`**，一律 `.ts` / `.tsx`
 - **後端 class 用單數**：`RolesService` → 應為 `RoleService`（複數僅 Table 名稱使用）
-- **共用欄位**（`CREATED_USER`、`CREATED_DATE`、`UPDATED_USER`、`UPDATED_DATE`、`RES_ID`、`DELETED`）由 `BaseModel` 統一繼承，不重複定義，詳見 `sti-backend-modules.md`（EDMS 單一組織、無 SITE 維度）
+- **共用欄位**（`CREATED_USER`、`CREATED_DATE`、`UPDATED_USER`、`UPDATED_DATE`、`DELETED`）由 `BaseModel` 統一繼承，不重複定義，詳見 `sti-backend-modules.md`（EDMS 單一組織、無 SITE 維度；標準欄位不含 `RES_ID`，該欄源自 TBMS 之 `DP_MENU` 外鍵、EDMS 無此表，已於 #158 移除）

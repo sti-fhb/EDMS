@@ -20,7 +20,7 @@ from app.dp.users.service import UsersService
 
 router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depends(get_jwt_payload)])
 
-# 邀請端點加固（#72）：對「單筆邀請（res_id）」重寄設冷卻，防對同一受邀信箱短時間反覆轟炸。
+# 邀請端點加固（#72）：對「單筆邀請（invite_id）」重寄設冷卻，防對同一受邀信箱短時間反覆轟炸。
 # 刻意**不設操作者總量限流**（PO 決策）：管理者一次為多位不同使用者建帳號屬正常作業，
 # 不應以總量節流。冷卻秒數走 config（deploy 可調、免 migration，見 config.INVITE_RESEND_COOLDOWN_SEC）。
 _invite_resend_cooldown = VerifySendCooldown()
@@ -73,33 +73,33 @@ async def list_invites(
     return await _service.list_invites(db, keyword=q, page=page, limit=limit)
 
 
-@router.post("/invites/{res_id}/resend", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/invites/{invite_id}/resend", status_code=status.HTTP_202_ACCEPTED)
 async def resend_invite(
-    res_id: str,
+    invite_id: str,
     db: AsyncSession = Depends(get_db),
     operator: OperatorInfo = Depends(get_operator),
 ) -> dict[str, object]:
     """重寄邀請（作廢舊 token、產新並重寄）。
 
-    對「單筆邀請 res_id」冷卻（#72）：check 前置（冷卻中拋 429 帶 retry_after）、record 於服務
+    對「單筆邀請 invite_id」冷卻（#72）：check 前置（冷卻中拋 429 帶 retry_after）、record 於服務
     成功後（重寄失敗如 404 不誤觸冷卻），防對同一受邀信箱短時間反覆轟炸。
     成功回應帶 retry_after（＝完整冷卻秒數）供前端起算倒數。
     """
-    cooldown_key = f"invite:resend:{res_id}"
+    cooldown_key = f"invite:resend:{invite_id}"
     _invite_resend_cooldown.check(cooldown_key, settings.INVITE_RESEND_COOLDOWN_SEC)
-    await _service.resend_invite(db, res_id=res_id, operator=operator)
+    await _service.resend_invite(db, invite_id=invite_id, operator=operator)
     _invite_resend_cooldown.record(cooldown_key)
     return {"message": "邀請信已重寄", "retry_after": settings.INVITE_RESEND_COOLDOWN_SEC}
 
 
-@router.delete("/invites/{res_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_invite(
-    res_id: str,
+    invite_id: str,
     db: AsyncSession = Depends(get_db),
     operator: OperatorInfo = Depends(get_operator),
 ) -> None:
     """取消邀請（刪除待邀請列）。"""
-    await _service.cancel_invite(db, res_id=res_id, operator=operator)
+    await _service.cancel_invite(db, invite_id=invite_id, operator=operator)
 
 
 @router.patch("/{user_id}/status", response_model=UserResponse)

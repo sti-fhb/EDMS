@@ -3,7 +3,7 @@
 `target_id` 為原始識別碼，使用者看原始 ID 無意義，故依 `func_name` 分派、**批次**查對應主檔解析為可讀名稱：
 
 - 使用者類（DP-USERS / DP-PROFILE / DP-FORGOT / DP-REGISTER）→ DP_USER 姓名 →（無姓名）email；
-  邀請（`res_id` 非 DP_USER）→ DP_PENDING_REGISTRATION 姓名 → email
+  邀請（`invite_id` 非 DP_USER）→ DP_PENDING_REGISTRATION 姓名 → email
 - DP-PARAMS（`param_id.param_key`）→ DP_PARAM_D.PARAM_NAME（中文，對齊 dp-params）
 - DP-TEMPLATES（`module.template_code`）→ DP_NOTIFY_TEMPLATE.TEMPLATE_NAME（中文）
 - 其餘 / 查無 → 原 `target_id`（呼叫端 fallback）
@@ -21,7 +21,7 @@ from app.dp.params.models import DpParamDetail
 from app.dp.user.models import DpPendingRegistration
 from app.dp.users.models import DpUser
 
-# target_id 指向使用者（USER_ID 或邀請 res_id）之 func_name。
+# target_id 指向使用者（USER_ID 或邀請 invite_id）之 func_name。
 # DM-ROLES（角色/可見對象指派）target_id 即被指派之 USER_ID，故一併解析為姓名（對象顯示人名而非原始 ID）。
 # DM-CATALOG target_id 為受控項代碼（分類 / func / TAG_ID），非使用者，不列入。
 _USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER", "DM-ROLES"})
@@ -60,7 +60,7 @@ async def resolve_target_displays(db: AsyncSession, pairs: Iterable[tuple[str, s
 
 
 async def _resolve_users(db: AsyncSession, pairs: list[tuple[str, str]]) -> _DisplayMap:
-    """使用者類：DP_USER 姓名→email；未命中者再查邀請 pending（res_id）。"""
+    """使用者類：DP_USER 姓名→email；未命中者再查邀請 pending（invite_id）。"""
     if not pairs:
         return {}
     ids = {tid for _, tid in pairs}
@@ -76,13 +76,13 @@ async def _resolve_users(db: AsyncSession, pairs: list[tuple[str, str]]) -> _Dis
         prows = (
             await db.execute(
                 select(
-                    DpPendingRegistration.res_id, DpPendingRegistration.user_name, DpPendingRegistration.email
-                ).where(DpPendingRegistration.res_id.in_(unresolved))
+                    DpPendingRegistration.invite_id, DpPendingRegistration.user_name, DpPendingRegistration.email
+                ).where(DpPendingRegistration.invite_id.in_(unresolved))
             )
         ).all()
-        for res_id, user_name, email in prows:
-            if res_id is not None:
-                name_by_id[res_id] = user_name or email
+        for invite_id, user_name, email in prows:
+            if invite_id is not None:
+                name_by_id[invite_id] = user_name or email
 
     return {(func_name, tid): name_by_id[tid] for func_name, tid in pairs if tid in name_by_id}
 

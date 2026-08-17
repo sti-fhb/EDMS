@@ -14,7 +14,7 @@ export interface UserRow {
 
 /** 待啟用邀請列（對齊後端 InviteResponse，ADMIN_INVITE）。邀請狀態由 expires_date 衍生。 */
 export interface InviteRow {
-  res_id: string
+  invite_id: string
   email: string
   user_name: string
   created_date: string | null
@@ -72,10 +72,10 @@ export const usersApi = {
     const { data } = await http.get<PagedResult<InviteRow>>("/dp/users/invites", { params })
     return data
   },
-  async resendInvite(resId: string): Promise<void> {
-    await http.post(`/dp/users/invites/${resId}/resend`)
+  async resendInvite(inviteId: string): Promise<void> {
+    await http.post(`/dp/users/invites/${inviteId}/resend`)
   },
-  async cancelInvite(resId: string): Promise<void> {
-    await http.delete(`/dp/users/invites/${resId}`)
+  async cancelInvite(inviteId: string): Promise<void> {
+    await http.delete(`/dp/users/invites/${inviteId}`)
   },
 }

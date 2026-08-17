@@ -72,7 +72,7 @@ def log_action(
 規則：
 - 服務內計算 `ROW_HASH`（鏈式雜湊，research §6）；呼叫方不涉入
 - **寫入範圍**：資安類事件（帳號 / 角色權限 / 系統操作 / 登入登出 / 參數範本異動）；**業務歷程**（DM_CHANGE_LOG、閱讀、學習紀錄）MUST NOT 寫入本表、留各模組
-- 呼叫時機：於呼叫方 Service 層 CUD 完成時（同交易內），對齊 TBMS `AuditLogService` 慣例；`res_id` 隨標準欄位寫入
+- 呼叫時機：於呼叫方 Service 層 CUD 完成時（同交易內），對齊 TBMS `AuditLogService` 慣例（`DP_AUDIT_LOG` 為 append-only、僅含 `CREATED_*`，無 `RES_ID`）
 - 無查詢介面於本契約——查詢僅經 DP 後台 US10
 
 ---

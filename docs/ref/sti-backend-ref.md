@@ -6,11 +6,12 @@
 
 各 BaseModel 變體的欄位組成見 `backend/app/core/base_model.py` 與 `sti-backend-modules.md` 的對照表。原則：
 
-- `BaseModel`：一般業務表（含 `RES_ID` + `DELETED`），新表預設。
-- `BaseModelNoResId`：`RES_ID` 已被業務欄位佔用。
-- `BaseModelHardDelete`：硬刪除例外表（含 `RES_ID`，**無 `DELETED`**）——刪除即下線、不保留歷史。
+- `BaseModel`：一般業務表（含 `DELETED`），新表預設。
+- `BaseModelHardDelete`：硬刪除例外表（**無 `DELETED`**）——刪除即下線、不保留歷史。
 - `BaseModelNoDelete`：可更新但永不刪除的 outbox / log 表（如 `DP_EMAIL_LOG`）。
 - `AuditLogBaseModel`：append-only 記錄表（僅 `CREATED_*`）。
+
+> **`RES_ID` 已自標準欄位移除**（2026-08-13，#158），`BaseModelNoResId` 亦一併刪除（移除 `RES_ID` 後與 `BaseModel` 等價）。該欄源自主系統 TBMS 之「來源功能 ID」（外鍵指向功能選單表 `DP_MENU`），EDMS 不設 `DP_MENU`（無全域 RBAC / 功能選單），來源功能改記於 `DP_AUDIT_LOG.FUNC_NAME`（語意碼 `DP-USERS` / `DM-CATALOG` 等）。**新表不得加回 `RES_ID`**；需要自己的對外識別碼時以業務語意命名（如 `DP_PENDING_REGISTRATION.INVITE_ID`）。
 
 ## 刪除策略例外表清單
 

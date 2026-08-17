@@ -22,10 +22,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import AuditLogBaseModel, BaseModelNoResId
+from app.core.base_model import AuditLogBaseModel, BaseModel
 
 
-class DmDocument(BaseModelNoResId):
+class DmDocument(BaseModel):
     """文件主檔（DM_DOCUMENT）。
 
     DOC_ID 格式 `DM-{分類碼}-{6位流水號}`（草稿建立時配號）。STATUS：DRAFT / PENDING_REVIEW
@@ -63,7 +63,7 @@ class DmDocument(BaseModelNoResId):
     status: Mapped[str] = mapped_column("STATUS", String(20), nullable=False, default="DRAFT")
 
 
-class DmDocVersion(BaseModelNoResId):
+class DmDocVersion(BaseModel):
     """文件版本（DM_DOC_VERSION）。
 
     每版本單一檔案（DB 存 metadata、檔案存檔案系統）；所有版本永久保留（DELETED=0）。
@@ -93,7 +93,7 @@ class DmDocVersion(BaseModelNoResId):
     published_date: Mapped[Optional[datetime]] = mapped_column("PUBLISHED_DATE", DateTime(timezone=True), nullable=True)
 
 
-class DmDocTag(BaseModelNoResId):
+class DmDocTag(BaseModel):
     """文件標籤關聯（DM_DOC_TAG，明細）。
 
     文件 × 標籤多對多；含權限（AUDIENCE，必填≥1）與檢索（多選 AND）兩類。唯一約束 (DOC_ID, TAG_ID)。
