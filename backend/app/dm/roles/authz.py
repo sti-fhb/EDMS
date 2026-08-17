@@ -42,7 +42,7 @@ def ensure_not_self_admin_removal(operator_id: str, target_id: str, roles_after:
     當 operator 對自己（target）儲存後之角色集不含 DM_ADMIN 時視為自我移除管理者。
 
     Raises:
-        AppError: 移除自己之管理者角色（403 DM_ROLE_001；DP 端映射 DP-MSG-ROLES-001）。
+        AppError: 移除自己之管理者角色（403 DM_ROLE_001；DP 端映射 DP-MSG-DP06-001）。
     """
     if operator_id == target_id and DM_ADMIN not in set(roles_after):
         raise AppError(status_code=403, detail="無法停用自己之管理者角色", error_code="DM_ROLE_001")

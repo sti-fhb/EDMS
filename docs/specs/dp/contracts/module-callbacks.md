@@ -60,7 +60,7 @@ class DmRoleAudienceView:
   - 各模組不重複回名稱、名稱權威在各自來源；此為 ET（DP_PARAM）與 DM（DM_TAG）之刻意差異。
 - **最後異動欄（決策 2=A）**：View 帶 `last_modified_by` / `last_modified_date`（來源模組表 `UPDATED_*`），供 dp-roles 表格「最後異動」欄呈現。
 - 角色種類為固定 enum（ET：ADMIN / TEACHER / STUDENT；DM：ADMIN / EDITOR / REVIEWER / VIEWER）
-- **自我保護判定在模組**：operator 取消自己之管理者角色 → 模組 raise `AppError`（error_code 由各模組於其 contracts 定案，如 SRVET / SRVDM 之自我保護碼）；**DP 端統一映射為 `DP-MSG-ROLES-001` 呈現**（非逐字透傳模組訊息，見 spec_us7 FR-06）。不檢核「至少 1 名管理者」。
+- **自我保護判定在模組**：operator 取消自己之管理者角色 → 模組 raise `AppError`（error_code 由各模組於其 contracts 定案，如 SRVET / SRVDM 之自我保護碼）；**DP 端統一映射為 `DP-MSG-DP06-001` 呈現**（非逐字透傳模組訊息，見 spec_us7 FR-06）。不檢核「至少 1 名管理者」。
 - 指派值 MUST 屬啟用中清單項（模組寫入前檢核）：**ET** `tags` 屬 `DP_PARAM`（`ET_` 前綴）啟用項；**DM** `audiences` 屬 `DM_TAG`（`AUDIENCE` 組、`IS_ENABLED=true`）——soft-retire 之值不可**新增**指派，但既有指派保留（見 §3.1）
 - 指派異動由**模組**於同交易內呼叫 SRVDP003 寫稽核（事件歸屬各自 MODULE）
 
@@ -124,4 +124,4 @@ async def run() -> None      # SCHET001 / SCHET002 / SCHDM001；SCHDP001 由 DP 
 |------|------|
 | 2026-07-09 | 首版；SRVET / SRVDM 正式編碼待各模組 contracts 定案回填 |
 | 2026-08-06 | DM US1 交付前自檢（`/sti-sa-precheck dm us1`）修 3 處 #127 集中化後之 drift：**§3** `DmRoleAudienceView.audiences` 來源由「`DP_PARAM` `DM_` 前綴 PARAM_KEY」更正為 **`DM_TAG`（AUDIENCE 組）之 TAG_ID**（DM 自持表；顯示名與清單由 DM 經 §3.1 提供，非 DP 讀 DP_PARAM）——標明 ET（DP_PARAM）/ DM（DM_TAG）刻意差異；新增 **§3.1 受控主檔維護轉接層**（`list_controlled` / `create` / `rename` / `set_controlled_enabled` / `list_audiences` + `ControlledItemView` / `SetEnabledResult`），定義 DP 後台呼叫 DM 維護 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG` 及 AUDIENCE soft-retire 觸發落點（DP 呼叫 → DM 執行回受影響數）|
-| 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補 §3：定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位（roles / tags｜audiences 之 PARAM_KEY 集合 + last_modified_*）；讀取改**批次** `get_users_roles_*(user_ids)`（避免 N+1，決策 3=B）；標籤回代碼、名稱由 DP 讀 DP_PARAM 對應（決策 1=A）；自我保護錯誤由 DP 統一映射為 DP-MSG-ROLES-001（同步 spec_us7 FR-06）|
+| 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補 §3：定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位（roles / tags｜audiences 之 PARAM_KEY 集合 + last_modified_*）；讀取改**批次** `get_users_roles_*(user_ids)`（避免 N+1，決策 3=B）；標籤回代碼、名稱由 DP 讀 DP_PARAM 對應（決策 1=A）；自我保護錯誤由 DP 統一映射為 DP-MSG-DP06-001（同步 spec_us7 FR-06）|

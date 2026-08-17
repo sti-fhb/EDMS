@@ -208,7 +208,7 @@
       <div class="text-center" style="padding: 0.5rem 0 1rem;">
         <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
         <h5 class="mt-3 mb-2" style="font-size:1.05rem;">驗證信已寄出</h5>
-        <p class="text-muted small mb-0">驗證信已寄至您的信箱，<br>請於 30 分鐘內點連結完成驗證後即可登入。（DP-MSG-REGISTER-004）</p>
+        <p class="text-muted small mb-0">驗證信已寄至您的信箱，<br>請於 30 分鐘內點連結完成驗證後即可登入。（DP-MSG-DP02-004）</p>
       </div>
       <button class="btn btn-outline-secondary w-100" onclick="loginResendVerify()"><i class="bi bi-arrow-repeat me-1"></i>重寄驗證信</button>
     </div>
@@ -240,7 +240,7 @@
     <!-- 強制變更密碼（密碼逾效期；未完成不得進入系統，UCDP001 / UCDP004。US4 改邀請流程後管理者不代設初始密碼，已無「首次以初始密碼登入」觸發） -->
     <div id="login-force-change" style="display:none;">
       <div class="login-step-title"><i class="bi bi-shield-exclamation text-warning me-1"></i>請立即變更密碼</div>
-      <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:0.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>密碼已逾效期，請立即變更密碼方可繼續使用（DP-MSG-LOGIN-005）</div>
+      <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:0.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>密碼已逾效期，請立即變更密碼方可繼續使用（DP-MSG-DP01-005）</div>
       <div class="mb-3"><label class="form-label form-label-sm">新密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" id="login-fc-new" placeholder="至少 8 字元（管理者 12）、含 3 種字元組合"></div>
       <div class="mb-3"><label class="form-label form-label-sm">確認新密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" id="login-fc-confirm" placeholder="再次輸入新密碼"></div>
       <button class="btn btn-tsbms w-100" onclick="loginForceChangeSubmit()"><i class="bi bi-shield-lock me-1"></i>變更並繼續</button>
@@ -252,10 +252,10 @@
       <div class="text-center" style="padding: 0.5rem 0 1rem;">
         <i class="bi bi-patch-check text-success" style="font-size: 3rem;"></i>
         <h5 class="mt-3 mb-2" style="font-size:1.05rem;">帳號已啟用</h5>
-        <p class="text-muted small mb-0">Email 驗證成功，請以新帳號登入。（DP-MSG-REGISTER-005）<br><span class="text-danger">連結無效 / 逾時時改顯示 DP-MSG-REGISTER-006 / 007 + 重新註冊指引。</span></p>
+        <p class="text-muted small mb-0">Email 驗證成功，請以新帳號登入。（DP-MSG-DP02-005）<br><span class="text-danger">連結無效 / 逾時時改顯示 DP-MSG-DP02-006 / 007 + 重新註冊指引。</span></p>
       </div>
       <button class="btn btn-tsbms w-100" onclick="loginBackToLogin()"><i class="bi bi-box-arrow-in-right me-1"></i>前往登入</button>
-      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；驗證通過才建 DP_USER + 授 ET 學員 + 雙稽核 + 首筆歷程（方案 B 啟用副作用）。未驗證帳號登入 → DP-MSG-REGISTER-008（DP_AUTH_010）+ 重寄。</div>
+      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；驗證通過才建 DP_USER + 授 ET 學員 + 雙稽核 + 首筆歷程（方案 B 啟用副作用）。未驗證帳號登入 → DP-MSG-DP02-008（DP_AUTH_010）+ 重寄。</div>
     </div>
 
     <!-- 帳號啟用落點（管理者邀請信連結 /activate?token=... 之落點；US4 邀請流程，使用者自設密碼） -->
@@ -285,7 +285,7 @@
         <i class="bi bi-person-circle me-1"></i><span id="user-name">陳大華</span>
       </button>
       <ul class="dropdown-menu dropdown-menu-end small">
-        <li><a class="dropdown-item" href="#" onclick="goScreen('dp-profile'); return false;"><i class="bi bi-person-gear me-2"></i>個人資料維護</a></li>
+        <li><a class="dropdown-item" href="#" onclick="goScreen('dp-profile'); return false;"><i class="bi bi-person-gear me-2"></i>DP04 個人資料維護</a></li>
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="#" onclick="loginLogout(); return false;"><i class="bi bi-box-arrow-right me-2"></i>登出</a></li>
       </ul>
@@ -297,7 +297,7 @@
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-nav">
     <!-- 登入後主頁（中性歡迎頁；統一 shell 下側欄常駐，本連結即主頁）-->
-    <a class="nav-link" href="#" data-screen="dp-portal"><i class="bi bi-house-door"></i><span>登入後主頁（歡迎頁）</span></a>
+    <a class="nav-link" href="#" data-screen="dp-portal"><i class="bi bi-house-door"></i><span>DP00 登入後主頁（歡迎頁）</span></a>
 
     <!-- 教育訓練（他模組：細項列出，本檔點擊無反應）-->
     <button class="module-header collapsed" onclick="toggleModule('et')"><span><i class="bi bi-mortarboard module-icon"></i><span class="module-label">教育訓練</span></span><i class="bi bi-chevron-down caret"></i></button>
@@ -323,12 +323,12 @@
     <!-- 系統管理者後台（統一 shell 常駐側欄群組；僅 is_module_admin 顯示，T049 接線前之過渡期先對所有登入者顯示——導覽重構 #89 D2）-->
     <button class="module-header" id="mod-dp-header" onclick="toggleModule('dp')"><span><i class="bi bi-hdd-network module-icon"></i><span class="module-label">系統管理後台</span></span><i class="bi bi-chevron-down caret"></i></button>
     <div class="module-items" id="mod-dp">
-      <a class="nav-link active" href="#" data-screen="dp-users"><i class="bi bi-people-fill"></i><span>使用者管理</span></a>
-      <a class="nav-link" href="#" data-screen="dp-roles"><i class="bi bi-person-badge"></i><span>權限管理</span></a>
-      <a class="nav-link" href="#" data-screen="dp-audit"><i class="bi bi-journal-text"></i><span>操作記錄</span></a>
-      <a class="nav-link" href="#" data-screen="dp-templates"><i class="bi bi-envelope-paper"></i><span>通知範本</span></a>
-      <a class="nav-link" href="#" data-screen="dp-schedule"><i class="bi bi-clock-history"></i><span>排程作業總覽</span></a>
-      <a class="nav-link" href="#" data-screen="dp-params"><i class="bi bi-sliders"></i><span>系統參數與清單維護</span></a>
+      <a class="nav-link active" href="#" data-screen="dp-users"><i class="bi bi-people-fill"></i><span>DP05 使用者管理</span></a>
+      <a class="nav-link" href="#" data-screen="dp-roles"><i class="bi bi-person-badge"></i><span>DP06 權限管理</span></a>
+      <a class="nav-link" href="#" data-screen="dp-audit"><i class="bi bi-journal-text"></i><span>DP09 操作記錄</span></a>
+      <a class="nav-link" href="#" data-screen="dp-templates"><i class="bi bi-envelope-paper"></i><span>DP08 通知範本</span></a>
+      <a class="nav-link" href="#" data-screen="dp-schedule"><i class="bi bi-clock-history"></i><span>DP10 排程作業總覽</span></a>
+      <a class="nav-link" href="#" data-screen="dp-params"><i class="bi bi-sliders"></i><span>DP07 系統參數與清單維護</span></a>
     </div>
   </div>
 </nav>
@@ -339,7 +339,7 @@
   <!-- ============ dp-portal 登入後主頁（UCDP001 登入後落點；中性歡迎頁，統一 shell 內容區） ============ -->
   <div id="dp-portal" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-house-door text-tsbms-green me-2"></i>登入後主頁（中性歡迎頁）</div>
+      <div class="screen-title"><i class="bi bi-house-door text-tsbms-green me-2"></i>DP00 登入後主頁（中性歡迎頁）</div>
       <div class="screen-meta">UCDP001 ｜ 登入後落點（無來源模組時）｜ 所有登入使用者</div>
     </div>
 
@@ -359,7 +359,7 @@
         <li>登入端點支援 <code>redirect</code>（原目標頁面路徑，白名單檢核防 open redirect）。有 redirect→登入後返回原頁；無（直接開系統、新註冊）→本頁。</li>
         <li><strong>統一 shell</strong>：登入後所有頁（歡迎頁 / 個人資料 / 各模組 / 系統管理者後台）共用同一頂列 + 常駐側欄 + 內容區，取代原「模組入口卡片頁（無側欄）+ 分離後台」，導覽不再割裂。</li>
         <li><strong>中性歡迎頁</strong>：問候（姓名取自 <code>GET /dp/user/me</code>）+ 系統定位一句話 + 版本（<code>GET /version</code>）。不綁模組權限、永遠存在（用不到某模組的主管其權限被關也仍有主頁）。不再使用可關閉的一次性歡迎橫幅。</li>
-        <li><strong>側欄依權限（最小知悉）</strong>：無某模組角色者<strong>完全隱藏</strong>該模組群組（不呈「未開通」鎖定卡；<strong>DP-MSG-LOGIN-008 已廢除</strong>）。「系統管理者後台」群組僅 <code>is_module_admin</code> 可見；該判定接線（T049）前之<strong>過渡期先對所有登入者顯示</strong>。</li>
+        <li><strong>側欄依權限（最小知悉）</strong>：無某模組角色者<strong>完全隱藏</strong>該模組群組（不呈「未開通」鎖定卡；<strong>DP-MSG-DP01-008 已廢除</strong>）。「系統管理者後台」群組僅 <code>is_module_admin</code> 可見；該判定接線（T049）前之<strong>過渡期先對所有登入者顯示</strong>。</li>
         <li><strong>分階段</strong>：P1＝統一 shell + 中性歡迎頁 + 後台側欄群組（本畫面）；P2＝管理者概況 widget（帳號 4 指標）+ 後台群組改真 gate；P3 / P4＝教育訓練 / 文件管理側欄群組 + 內嵌各模組儀表板。ET / DM 儀表板實際內容由各模組 spec 定義。</li>
       </ul>
     </details>
@@ -368,7 +368,7 @@
   <!-- ============ dp-users 使用者管理（UCDP005） ============ -->
   <div id="dp-users" class="screen active">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-people-fill text-tsbms-green me-2"></i>使用者管理</div>
+      <div class="screen-title"><i class="bi bi-people-fill text-tsbms-green me-2"></i>DP05 使用者管理</div>
       <div class="screen-meta">UCDP005 ｜ ET / DM 管理者（共用）</div>
     </div>
 
@@ -507,7 +507,7 @@
   <!-- ============ dp-params 系統參數與清單維護（UCDP006） ============ -->
   <div id="dp-params" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-sliders text-tsbms-green me-2"></i>系統參數與清單維護</div>
+      <div class="screen-title"><i class="bi bi-sliders text-tsbms-green me-2"></i>DP07 系統參數與清單維護</div>
       <div class="screen-meta">UCDP006 ｜ 平台級：共用 ｜ 模組級：按模組過濾</div>
     </div>
 
@@ -524,7 +524,7 @@
     <!-- ===== 平台頁籤 ===== -->
     <div class="tab-pane fade show active" id="param-dp" role="tabpanel">
       <div class="wf-status-msg wf-status-info"><i class="bi bi-people me-1"></i>平台級參數（無前綴 <code>DP_</code>）——ET / DM 管理者<strong>皆可見可改</strong>（共用項）。</div>
-      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i><strong>平台級參數變更將影響全平台（ET 與 DM）</strong>——儲存前系統會再次提示確認（DP-MSG-PARAMS-005）。</div>
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i><strong>平台級參數變更將影響全平台（ET 與 DM）</strong>——儲存前系統會再次提示確認（DP-MSG-DP07-005）。</div>
 
     <div class="wf-card">
       <div class="wf-card-title"><i class="bi bi-shield-lock me-1"></i>密碼安全策略</div>
@@ -718,11 +718,11 @@
   <!-- ============ dp-templates 通知範本維護（UCDP011；發送服務 UCDP009 為系統自動、無畫面） ============ -->
   <div id="dp-templates" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-envelope-paper text-tsbms-green me-2"></i>通知範本維護</div>
+      <div class="screen-title"><i class="bi bi-envelope-paper text-tsbms-green me-2"></i>DP08 通知範本維護</div>
       <div class="screen-meta">UCDP011 ｜ ET / DM 管理者 ｜ 按 MODULE 過濾（DP 系統信兩者皆見）</div>
     </div>
 
-    <div class="alert alert-warning py-2 px-3" style="font-size:0.875rem;"><i class="bi bi-exclamation-triangle me-1"></i><strong>版本衝突（狀態示意）</strong>：內容已被他人修改，請重新載入後再儲存（<code>VERSION</code> 樂觀鎖，DP-MSG-TEMPLATES-002）</div>
+    <div class="alert alert-warning py-2 px-3" style="font-size:0.875rem;"><i class="bi bi-exclamation-triangle me-1"></i><strong>版本衝突（狀態示意）</strong>：內容已被他人修改，請重新載入後再儲存（<code>VERSION</code> 樂觀鎖，DP-MSG-DP08-002）</div>
 
     <ul class="nav nav-tabs mb-3" role="tablist">
       <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tpl-dp" type="button"><i class="bi bi-shield-lock me-1"></i>系統信（共用）</button></li>
@@ -878,7 +878,7 @@
   <!-- ============ dp-roles 權限管理（角色指派，UCDP010） ============ -->
   <div id="dp-roles" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-person-badge text-tsbms-green me-2"></i>權限管理（角色指派）</div>
+      <div class="screen-title"><i class="bi bi-person-badge text-tsbms-green me-2"></i>DP06 權限管理（角色指派）</div>
       <div class="screen-meta">UCDP010 ｜ 按模組過濾</div>
     </div>
 
@@ -918,7 +918,7 @@
             </tr>
             <tr>
               <td class="small">admin</td><td><i class="bi bi-person-circle me-1"></i>陳大華 <span class="badge bg-info text-dark">目前登入者</span></td>
-              <td class="text-center" title="自我保護：不可取消自己的管理者角色（DP-MSG-ROLES-001）"><input type="checkbox" class="form-check-input" checked onchange="this.checked=true; showToast('無法取消自己的管理者角色（DP-MSG-ROLES-001）')"></td>
+              <td class="text-center" title="自我保護：不可取消自己的管理者角色（DP-MSG-DP06-001）"><input type="checkbox" class="form-check-input" checked onchange="this.checked=true; showToast('無法取消自己的管理者角色（DP-MSG-DP06-001）')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 教師角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 學員角色')"></td>
               <td><span class="text-muted small">未指派</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
@@ -991,7 +991,7 @@
         <li><strong>指派畫面在 DP 後台</strong>，按模組過濾；<strong>資料寫入模組表</strong>——角色 → <code>ET_USER_ROLE</code> / <code>DM_USER_ROLE</code>；標籤指派 → <code>ET_USER_TAG</code>；可見對象授權 → DM 授權表。標籤/可見對象之「定義清單」在 <code>DP_PARAM</code>（此處只做「指派」）。</li>
         <li>「某角色能做什麼」之判定與 enforce 在模組——平台不做全域 RBAC、不定義業務角色能力。角色種類為固定 enum，可多角色（權限取聯集）。</li>
         <li>DM 可見對象授權主要對「<strong>閱覽者</strong>」有意義（決定其可見範圍）；未授予任何可見對象之閱覽者僅能看掛「全體」之文件。</li>
-        <li><strong>自我保護（AC5）</strong>：當前登入之管理者<strong>不可取消自己（本模組）的管理者角色</strong>——自己那列的「管理者」勾選取消時被擋、顯示 <code>DP-MSG-ROLES-001</code>（判定在模組、DP 統一映射呈現）；上表以「陳大華（目前登入者）」示意。<strong>不檢核「至少 1 名管理者」</strong>（取消他人管理者允許）。</li>
+        <li><strong>自我保護（AC5）</strong>：當前登入之管理者<strong>不可取消自己（本模組）的管理者角色</strong>——自己那列的「管理者」勾選取消時被擋、顯示 <code>DP-MSG-DP06-001</code>（判定在模組、DP 統一映射呈現）；上表以「陳大華（目前登入者）」示意。<strong>不檢核「至少 1 名管理者」</strong>（取消他人管理者允許）。</li>
         <li>角色 / 標籤指派異動屬<strong>資安事件</strong>，寫入 <code>DP_AUDIT_LOG</code>（由模組於同交易寫，事件歸屬各自 MODULE）。</li>
       </ul>
     </details>
@@ -1000,7 +1000,7 @@
   <!-- ============ dp-audit 操作記錄查詢（UCDP007） ============ -->
   <div id="dp-audit" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-journal-text text-tsbms-green me-2"></i>操作記錄（稽核）</div>
+      <div class="screen-title"><i class="bi bi-journal-text text-tsbms-green me-2"></i>DP09 操作記錄（稽核）</div>
       <div class="screen-meta">UCDP007 ｜ ET / DM 管理者（共用可見）</div>
     </div>
 
@@ -1057,7 +1057,7 @@
       </table>
     </div>
 
-    <div class="alert alert-info py-2 px-3" style="font-size:0.875rem;"><i class="bi bi-info-circle me-1"></i><strong>（空狀態示意）</strong>查無符合條件之紀錄（DP-MSG-AUDIT-001）</div>
+    <div class="alert alert-info py-2 px-3" style="font-size:0.875rem;"><i class="bi bi-info-circle me-1"></i><strong>（空狀態示意）</strong>查無符合條件之紀錄（DP-MSG-DP09-001）</div>
 
     <details class="wf-screen-note">
       <summary>💡 內部設計註記（UCDP007 操作記錄 / 稽核）</summary>
@@ -1075,7 +1075,7 @@
   <!-- ============ dp-schedule 排程作業總覽（UCDP008，系統自動，唯讀檢視） ============ -->
   <div id="dp-schedule" class="screen">
     <div class="screen-header">
-      <div class="screen-title"><i class="bi bi-clock-history text-tsbms-green me-2"></i>排程作業總覽</div>
+      <div class="screen-title"><i class="bi bi-clock-history text-tsbms-green me-2"></i>DP10 排程作業總覽</div>
       <div class="screen-meta">UCDP008 ｜ ET / DM 管理者（唯讀檢視，系統自動執行）</div>
     </div>
 
@@ -1107,7 +1107,7 @@
       </table>
     </div>
 
-    <div class="alert alert-info py-2 px-3" style="font-size:0.875rem;"><i class="bi bi-info-circle me-1"></i><strong>（空狀態示意）</strong>尚無排程執行紀錄（DP-MSG-SCHEDULE-001）</div>
+    <div class="alert alert-info py-2 px-3" style="font-size:0.875rem;"><i class="bi bi-info-circle me-1"></i><strong>（空狀態示意）</strong>尚無排程執行紀錄（DP-MSG-DP10-001）</div>
 
     <details class="wf-screen-note">
       <summary>💡 內部設計註記（UCDP008 排程基礎建設）</summary>
@@ -1175,7 +1175,7 @@
     <div class="mb-2"><label class="form-label small mb-1">帳號（Email）<span class="text-danger">*</span></label><input type="email" class="form-control form-control-sm" placeholder="user@example.com"></div>
     <div class="mb-2"><label class="form-label small mb-1">姓名 <span class="text-danger">*</span></label><input type="text" class="form-control form-control-sm"></div>
     <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>送出後寄「帳號邀請信」至該 Email，使用者點連結<strong>自行設定密碼</strong>後啟用；管理者不代設密碼。業務角色於啟用時授予 ET 學員，其餘至各模組指派。</div>
-    <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 送出 → 寫 <code>DP_PENDING_REGISTRATION</code>（<code>kind=ADMIN_INVITE</code>、<code>pwd_hash</code> 留空）+ 寄邀請信；<strong>不建 DP_USER、不授角色</strong>（比照 US2 register_service）。成功訊息 DP-MSG-USERS-003 改為「邀請信已寄出，使用者需經連結設定密碼後啟用」。Email 唯一性檢查照舊（DP-MSG-USERS-005）。</div>
+    <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 送出 → 寫 <code>DP_PENDING_REGISTRATION</code>（<code>kind=ADMIN_INVITE</code>、<code>pwd_hash</code> 留空）+ 寄邀請信；<strong>不建 DP_USER、不授角色</strong>（比照 US2 register_service）。成功訊息 DP-MSG-DP05-003 改為「邀請信已寄出，使用者需經連結設定密碼後啟用」。Email 唯一性檢查照舊（DP-MSG-DP05-005）。</div>
   </div>
   <div class="modal-footer"><button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button><button class="btn btn-tsbms btn-sm" onclick="confirmCreateUser()"><i class="bi bi-envelope-arrow-up me-1"></i>寄送邀請</button></div>
 </div></div></div>
@@ -1242,13 +1242,13 @@
     <div class="mb-2"><label class="form-label small mb-1">內文</label>
       <textarea class="form-control form-control-sm" rows="3">{user_name} 您好，請於 {expiry_minutes} 分鐘內點擊以下連結重設密碼：{reset_link}</textarea></div>
     <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>可用變數：user_name, reset_link, expiry_minutes</div>
-    <div class="field-helper mt-2"><i class="bi bi-lock-fill"></i>此為 DP 系統信（<code>MODULE=DP</code>）：可編輯主旨 / 內文，但<strong>不可停用 / 刪除</strong>（DP-MSG-TEMPLATES-001）。<strong>管道與啟停於列表行內操作</strong>，不在本表單內。</div>
+    <div class="field-helper mt-2"><i class="bi bi-lock-fill"></i>此為 DP 系統信（<code>MODULE=DP</code>）：可編輯主旨 / 內文，但<strong>不可停用 / 刪除</strong>（DP-MSG-DP08-001）。<strong>管道與啟停於列表行內操作</strong>，不在本表單內。</div>
     <details class="wf-screen-note mt-2">
       <summary>💡 內部設計註記（編輯表單型態）</summary>
       <ul class="mb-0 mt-2">
         <li>實作為<strong>表格下方展開之卡片</strong>（非 Modal，對齊 sti-ui-design §5）；此處以 Modal 呈現僅為 wireframe 之互動示意。</li>
         <li>標題帶<strong>中文範本名稱</strong>，不顯示 <code>TEMPLATE_CODE</code>（技術識別碼不對維護者呈現）。</li>
-        <li>儲存採 <code>VERSION</code> 樂觀鎖；衝突回 DP-MSG-TEMPLATES-002 並提示重載。儲存前跳二次確認。</li>
+        <li>儲存採 <code>VERSION</code> 樂觀鎖；衝突回 DP-MSG-DP08-002 並提示重載。儲存前跳二次確認。</li>
       </ul>
     </details>
   </div>

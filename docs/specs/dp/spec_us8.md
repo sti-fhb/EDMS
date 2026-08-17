@@ -13,11 +13,11 @@
 ### Acceptance Scenarios
 
 1. **Given** 使用者進入個人資料頁編輯**姓名**，**When** 儲存，**Then** 直接更新 `DP_USER`（ET / DM 兩端同步生效）並寫入稽核
-2. **Given** 使用者變更**帳號（Email）**輸入新 Email，**When** 新 Email 未被他人使用，**Then** 寄驗證信至**新 Email**（連結預設 30 分鐘有效，經 US6 發信、範本 `MODULE=DP`「帳號變更驗證」），提示（DP-MSG-PROFILE-005）；期間**舊 Email 仍可登入**（延遲生效）
-3. **Given** 使用者點驗證連結且未逾時，**When** 驗證通過，**Then** 新 Email 生效、舊 Email 失效、寫入稽核；**When** 連結逾時未點，**Then** 變更作廢、舊 Email 維持（DP-MSG-PROFILE-008）
-4. **Given** 新 Email 已被他人註冊，**When** 送出變更，**Then** 阻擋並提示（DP-MSG-PROFILE-006）
-5. **Given** 使用者變更**密碼**（輸入舊密碼 + 新密碼 + 確認新密碼），**When** 舊密碼正確、兩次一致、符合複雜度與重複性（不與最近 N 次相同），**Then** 更新密碼雜湊、追加 `DP_PWD_HIST`、寫入稽核、提示（DP-MSG-PROFILE-007）
-6. **Given** 舊密碼錯誤 / 兩次不一致 / 不符複雜度 / 與近期密碼重複，**When** 送出，**Then** 阻擋並提示對應訊息（DP-MSG-PROFILE-001～004）
+2. **Given** 使用者變更**帳號（Email）**輸入新 Email，**When** 新 Email 未被他人使用，**Then** 寄驗證信至**新 Email**（連結預設 30 分鐘有效，經 US6 發信、範本 `MODULE=DP`「帳號變更驗證」），提示（DP-MSG-DP04-005）；期間**舊 Email 仍可登入**（延遲生效）
+3. **Given** 使用者點驗證連結且未逾時，**When** 驗證通過，**Then** 新 Email 生效、舊 Email 失效、寫入稽核；**When** 連結逾時未點，**Then** 變更作廢、舊 Email 維持（DP-MSG-DP04-008）
+4. **Given** 新 Email 已被他人註冊，**When** 送出變更，**Then** 阻擋並提示（DP-MSG-DP04-006）
+5. **Given** 使用者變更**密碼**（輸入舊密碼 + 新密碼 + 確認新密碼），**When** 舊密碼正確、兩次一致、符合複雜度與重複性（不與最近 N 次相同），**Then** 更新密碼雜湊、追加 `DP_PWD_HIST`、寫入稽核、提示（DP-MSG-DP04-007）
+6. **Given** 舊密碼錯誤 / 兩次不一致 / 不符複雜度 / 與近期密碼重複，**When** 送出，**Then** 阻擋並提示對應訊息（DP-MSG-DP04-001～004）
 7. **Given** 使用者具 ET 或 DM 管理者角色（特權帳號），**When** 變更密碼，**Then** 新密碼最小長度門檻為 **12 字元**（一般使用者 8 字元）
 8. **Given** 密碼變更端點被高頻嘗試，**When** 超過速率限制，**Then** 暫時拒絕（比照 US1 / US3 速率限制）
 
@@ -36,14 +36,14 @@
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
 |---------|------|---------|---------------|
-| DP-MSG-PROFILE-001 | 錯誤 | 舊密碼不正確 | FR-DP-US8-04 驗舊失敗 |
-| DP-MSG-PROFILE-002 | 錯誤 | 兩次輸入之新密碼不一致 | FR-DP-US8-04 不一致 |
-| DP-MSG-PROFILE-003 | 錯誤 | 密碼不符合複雜度要求（一般至少 8 字元、管理者至少 12 字元，含 3 種字元組合）| FR-DP-US8-04 / 05 複雜度 |
-| DP-MSG-PROFILE-004 | 錯誤 | 不可與最近使用過之密碼相同 | FR-DP-US8-04 重複性 |
-| DP-MSG-PROFILE-005 | 提示 | 驗證信已寄至新 Email，請於 30 分鐘內完成驗證；驗證前原 Email 仍可登入 | FR-DP-US8-03 變更送出 |
-| DP-MSG-PROFILE-006 | 錯誤 | 此 Email 已被使用 | FR-DP-US8-03 重複 |
-| DP-MSG-PROFILE-007 | 成功 | 密碼已更新 | FR-DP-US8-04 完成 |
-| DP-MSG-PROFILE-008 | 錯誤 | 驗證連結已失效，Email 變更作廢，原 Email 維持有效 | FR-DP-US8-03 逾時 |
+| DP-MSG-DP04-001 | 錯誤 | 舊密碼不正確 | FR-DP-US8-04 驗舊失敗 |
+| DP-MSG-DP04-002 | 錯誤 | 兩次輸入之新密碼不一致 | FR-DP-US8-04 不一致 |
+| DP-MSG-DP04-003 | 錯誤 | 密碼不符合複雜度要求（一般至少 8 字元、管理者至少 12 字元，含 3 種字元組合）| FR-DP-US8-04 / 05 複雜度 |
+| DP-MSG-DP04-004 | 錯誤 | 不可與最近使用過之密碼相同 | FR-DP-US8-04 重複性 |
+| DP-MSG-DP04-005 | 提示 | 驗證信已寄至新 Email，請於 30 分鐘內完成驗證；驗證前原 Email 仍可登入 | FR-DP-US8-03 變更送出 |
+| DP-MSG-DP04-006 | 錯誤 | 此 Email 已被使用 | FR-DP-US8-03 重複 |
+| DP-MSG-DP04-007 | 成功 | 密碼已更新 | FR-DP-US8-04 完成 |
+| DP-MSG-DP04-008 | 錯誤 | 驗證連結已失效，Email 變更作廢，原 Email 維持有效 | FR-DP-US8-03 逾時 |
 
 ## 前置依賴
 

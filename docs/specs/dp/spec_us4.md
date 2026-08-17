@@ -13,15 +13,15 @@
 ### Acceptance Scenarios
 
 1. **Given** ET 或 DM 管理者進入 DP 後台使用者管理頁，**When** 以 Email / 姓名 / 狀態（啟用 / 停用 / 鎖定）查詢，**Then** 列出符合之使用者清單（後端分頁）；帳號為共用項，兩模組管理者所見相同
-2. **Given** 管理者點「建立帳號」填寫 Email / 姓名（**不設密碼**），**When** Email 未被使用，**Then** 寫入待驗證表（`DP_PENDING_REGISTRATION`，`kind=ADMIN_INVITE`）並寄「帳號邀請信」（**不建 `DP_USER`、不授角色**）、提示（DP-MSG-USERS-003）；Email 重複則阻擋（DP-MSG-USERS-005）
-3. **Given** 管理者對某帳號執行停用，**When** 確認（DP-MSG-USERS-002），**Then** 帳號停用、ET / DM 兩端同步失效（其未逾期 token 於下次請求被拒），寫入稽核
+2. **Given** 管理者點「建立帳號」填寫 Email / 姓名（**不設密碼**），**When** Email 未被使用，**Then** 寫入待驗證表（`DP_PENDING_REGISTRATION`，`kind=ADMIN_INVITE`）並寄「帳號邀請信」（**不建 `DP_USER`、不授角色**）、提示（DP-MSG-DP05-003）；Email 重複則阻擋（DP-MSG-DP05-005）
+3. **Given** 管理者對某帳號執行停用，**When** 確認（DP-MSG-DP05-002），**Then** 帳號停用、ET / DM 兩端同步失效（其未逾期 token 於下次請求被拒），寫入稽核
 4. **Given** 管理者對停用（含閒置 90 日被自動禁用）帳號執行啟用，**When** 確認，**Then** 帳號恢復可登入，寫入稽核
-5. **Given** 某帳號因登入失敗達上限被鎖定，**When** 管理者執行「解鎖」，**Then** 失敗計數歸零、帳號即可登入，寫入稽核（DP-MSG-USERS-004）
+5. **Given** 某帳號因登入失敗達上限被鎖定，**When** 管理者執行「解鎖」，**Then** 失敗計數歸零、帳號即可登入，寫入稽核（DP-MSG-DP05-004）
 6. **Given** 管理者編輯某使用者之基本資料，**When** 儲存，**Then** 僅更新**姓名**並寫入稽核；**Email（登入帳號）為唯讀、管理者不可修改**（本人變更 Email 走個人資料維護 UCDP004 之雙信箱驗證流程）
-7. **Given** 管理者對**自己的帳號**執行停用或鎖定，**When** 送出，**Then** 系統阻擋並提示（DP-MSG-USERS-001，自我保護）
+7. **Given** 管理者對**自己的帳號**執行停用或鎖定，**When** 送出，**Then** 系統阻擋並提示（DP-MSG-DP05-001，自我保護）
 8. **Given** 停用他人帳號造成某模組 0 名管理者，**When** 送出，**Then** 系統允許（不檢核「至少保留 1 名管理者」，0 名時由 IT 經 DB 恢復，比照 ET / DM）
 9. **Given** 受邀使用者點邀請信連結進入啟用頁，**When** 於效期內設定符合複雜度之密碼，**Then** 建立 `DP_USER`（`ACTIVE`）、依 US2 規則授予 ET 學員、寫入稽核、消費待驗證列，使用者可即以該 Email 登入（**無須再強制變更密碼**）
-10. **Given** 邀請逾期或使用者未收到信，**When** 管理者於「待啟用邀請」頁籤執行**重寄邀請**或**取消邀請**，**Then** 重寄＝作廢舊 token、產新並重寄（DP-MSG-USERS-006）；取消＝刪除該待驗證列（DP-MSG-USERS-007）
+10. **Given** 邀請逾期或使用者未收到信，**When** 管理者於「待啟用邀請」頁籤執行**重寄邀請**或**取消邀請**，**Then** 重寄＝作廢舊 token、產新並重寄（DP-MSG-DP05-006）；取消＝刪除該待驗證列（DP-MSG-DP05-007）
 
 ## Functional Requirements
 
@@ -42,13 +42,13 @@
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
 |---------|------|---------|---------------|
-| DP-MSG-USERS-001 | 錯誤 | 無法停用或鎖定自己的帳號 | FR-DP-US4-06 自我保護 |
-| DP-MSG-USERS-002 | 確認 | 確定停用此帳號？停用後 ET / DM 兩端將同步失效 | FR-DP-US4-04 停用確認 |
-| DP-MSG-USERS-003 | 成功 | 邀請信已寄出，使用者需經連結設定密碼後啟用 | FR-DP-US4-03 邀請寄送 |
-| DP-MSG-USERS-004 | 成功 | 帳號已解鎖 | FR-DP-US4-05 解鎖完成 |
-| DP-MSG-USERS-005 | 錯誤 | 此 Email 已被使用 | FR-DP-US4-03 建立 Email 重複（編輯不觸發，Email 唯讀）|
-| DP-MSG-USERS-006 | 成功 | 邀請信已重寄 | FR-DP-US4-11 重寄邀請 |
-| DP-MSG-USERS-007 | 成功 | 已取消邀請 | FR-DP-US4-11 取消邀請 |
+| DP-MSG-DP05-001 | 錯誤 | 無法停用或鎖定自己的帳號 | FR-DP-US4-06 自我保護 |
+| DP-MSG-DP05-002 | 確認 | 確定停用此帳號？停用後 ET / DM 兩端將同步失效 | FR-DP-US4-04 停用確認 |
+| DP-MSG-DP05-003 | 成功 | 邀請信已寄出，使用者需經連結設定密碼後啟用 | FR-DP-US4-03 邀請寄送 |
+| DP-MSG-DP05-004 | 成功 | 帳號已解鎖 | FR-DP-US4-05 解鎖完成 |
+| DP-MSG-DP05-005 | 錯誤 | 此 Email 已被使用 | FR-DP-US4-03 建立 Email 重複（編輯不觸發，Email 唯讀）|
+| DP-MSG-DP05-006 | 成功 | 邀請信已重寄 | FR-DP-US4-11 重寄邀請 |
+| DP-MSG-DP05-007 | 成功 | 已取消邀請 | FR-DP-US4-11 取消邀請 |
 
 ## 前置依賴
 

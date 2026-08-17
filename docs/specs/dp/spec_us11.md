@@ -18,7 +18,7 @@
 4. **Given** 前次執行尚未完成，**When** 下次 cron 到期，**Then** 跳過本次並記錄（不重複執行同一 job）
 5. **Given** job 於 `DP_SCHEDULE` 為停用狀態，**When** cron 到期，**Then** 不觸發
 6. **Given** 平台自身排程 `SCHDP001`（每日）執行，**When** 檢核全部帳號，**Then** ① 連續 90 日未登入之帳號自動禁用並寫稽核（`LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`；**null＝從未登入則以 `CREATED_DATE` 為基準**）；② 密碼將於 N 天內到期（預設 7 天）之使用者經發信服務（US6）寄「密碼到期提醒」（`MODULE=DP` 範本）；提醒於到期前每日跑均寄出（達成前每日提醒，非單次）
-7. **Given** ET 或 DM 管理者進入排程總覽頁（共用項），**When** 頁面載入，**Then** 列出各 job（`JOB_ID` / 說明 / cron / 狀態〔啟用停用〕/ 上次執行時間 / **下次執行時間** / 執行歷程）；**可編輯 `JOB_NAME` / `CRON_EXPR` / 啟停**（cron 即時生效）；**MUST NOT 提供手動補跑；`HANDLER_REF` / `MODULE` / `JOB_ID` 不可改**；無紀錄時顯示空狀態（DP-MSG-SCHEDULE-001）
+7. **Given** ET 或 DM 管理者進入排程總覽頁（共用項），**When** 頁面載入，**Then** 列出各 job（`JOB_ID` / 說明 / cron / 狀態〔啟用停用〕/ 上次執行時間 / **下次執行時間** / 執行歷程）；**可編輯 `JOB_NAME` / `CRON_EXPR` / 啟停**（cron 即時生效）；**MUST NOT 提供手動補跑；`HANDLER_REF` / `MODULE` / `JOB_ID` 不可改**；無紀錄時顯示空狀態（DP-MSG-DP10-001）
 
 ## Functional Requirements
 
@@ -34,7 +34,7 @@
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
 |---------|------|---------|---------------|
-| DP-MSG-SCHEDULE-001 | 提示 | 尚無排程執行紀錄 | FR-DP-US11-06 空狀態 |
+| DP-MSG-DP10-001 | 提示 | 尚無排程執行紀錄 | FR-DP-US11-06 空狀態 |
 
 > 排程執行本身無使用者介面訊息；執行結果以 `DP_SCHEDULE_LOG` 與應用層 log 表達。
 

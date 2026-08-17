@@ -12,7 +12,7 @@ const FORGOT_MESSAGE = "若該 Email 已註冊，密碼重設信將寄至信箱�
 
 /**
  * 忘記密碼申請表單（US3，登入 overlay 內）。
- * 送出後一律顯示相同提示（DP-MSG-FORGOT-001，防帳號列舉）；不因帳號是否存在改變畫面。
+ * 送出後一律顯示相同提示（DP-MSG-DP03-001，防帳號列舉）；不因帳號是否存在改變畫面。
  */
 export function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
   const [email, setEmail] = useState("")
