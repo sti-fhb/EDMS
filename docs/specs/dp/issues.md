@@ -74,7 +74,7 @@
 
 ### 驗收條件
 
-- [ ] `uv run alembic upgrade head` 成功建立 10 張 DP 表；標準欄位齊備（CREATED/UPDATED_USER/DATE、RES_ID、DELETED，**無 SITE 欄位**）；**不存在** `DP_SESSION` / `DP_ROLE` / `DP_MENU` 表
+- [ ] `uv run alembic upgrade head` 成功建立 10 張 DP 表；標準欄位齊備（CREATED/UPDATED_USER/DATE、DELETED，**無 SITE 欄位**；`RES_ID` 已於 #158 移除）；**不存在** `DP_SESSION` / `DP_ROLE` / `DP_MENU` 表
 - [ ] 種子載入成功：平台級參數（含 `ACCESS_TTL_MIN`=15、`RENEW_MAX_HOURS`=8、`FAIL_LOCK_COUNT`=5、`LOCK_MINUTES`=30、`MIN_LEN`=8 / `ADMIN_MIN_LEN`=12、`HISTORY_COUNT`=3、`EXPIRY_DAYS`=90、`RETRY_MAX`=5 / `RATE_PER_MIN`=60 / `RETRY_INTERVAL_MIN`=2）、DP 系統信 3 支（IS_SYSTEM=true）、排程 job 4 筆（SCHDP001 / SCHET001 / SCHET002 / SCHDM001）
 - [ ] SRVDP003 `log_action` 寫入 `DP_AUDIT_LOG` 含鏈式 ROW_HASH（驗證工具可證前列被改即斷鏈）；應用 DB 帳號對本表僅可 INSERT / SELECT
 - [ ] SRVDP001 `get_param_value` / `get_param_list` 讀取種子正確；停用清單項於 enabled_only 過濾；PARAM_ID 不存在回空非例外
@@ -288,7 +288,7 @@
 - **帳號建立 + 角色授予 + 首筆歷程 + 稽核同交易**：確保「建帳號但漏授角色 / 漏寫歷程」不發生；Email 唯一由 DB `UNIQUE` + 伺服器端檢核雙重把關。
 - **Error codes**（實作 / `/sti-plan` 時對齊 `sti-error-codes`）：密碼複雜度可重用 `DP_PWD_001`（長度）/ `DP_PWD_002`（複雜度）；Email 重複新增碼（409，如 `DP_USER_*`）；兩次不一致以前端 Zod + 後端 422 把關。
 - **前端表單驗證用 Zod**（`sti-zod-conventions`，`LoginRequest`→`RegisterRequestSchema` 命名對齊後端 Pydantic）；密碼 / token 不入 log（sti-backend-logging）。
-- 稽核經 `SRVDP003.log_action`（`res_id` 必填、含來源 IP，走 request_context）。
+- 稽核經 `SRVDP003.log_action`（`target_id` 必填、含來源 IP，走 request_context）。
 
 ### 相關文件
 
@@ -431,7 +431,7 @@ DP 後台使用者管理頁（ET / DM 共用）：查詢（Email / 姓名 / 狀�
   - ⚠️ **`create_user` 需加參數**：#56 的 `AuthRepository.create_user` 寫死 `must_change_pwd=False`（自助註冊者自設密碼、不強制變更，屬正確設計）。US4 代建須傳 `True` → 為 `create_user` 補一個 `must_change_pwd: bool = False` 參數（預設不變、不影響 US2），**勿另寫一份建帳號邏輯**。
   - **首登強制變更為分析文件明載需求**（來源：[spec.md](spec.md#L59) 釐清第 1 輪 2026-07-08、[data-model.md](data-model.md#L159) `MUST_CHANGE_PWD`、FR-DP-US4-03、FR-DP-US1-06、FR-DP-US8-08）。閘與頁殼 US1 已備（`core/password_gate.py` T023 → 403 `DP_AUTH_009`、前端 `ForceChangePasswordShell`）；US4 建的帳號一登入即被 gate 導向。實際變更提交端點屬 US8。
 - **Email 唯一**：DB `UNIQUE` + 伺服器端檢核（建立同 US2；編輯時排除自己）。
-- 稽核經 `SRVDP003.log_action`（`res_id`=USER_ID 必填、含 before/after value、來源 IP）；密碼不入 log。
+- 稽核經 `SRVDP003.log_action`（`target_id`=USER_ID 必填、含 before/after value、來源 IP）；密碼不入 log。
 - 角色指派 MUST NOT 於本頁（US7）；目錄 `dp/users`（CRUD）與 `dp/user`（認證）分開（sti-api-routes）。
 
 ### 相關文件
@@ -506,7 +506,7 @@ DP 後台系統參數與清單維護頁（`dp-params`，ET / DM 共用入口）�
 - **分頁策略**：參數 / 清單為管理類小表（< 200 筆），依 [CLAUDE.md](../../../CLAUDE.md) 可用 `usePagination` client-side 分頁；若日後量大改後端 `paginate()`。
 - **Error codes**（實作 / `/sti-plan` 時對齊 `sti-error-codes`）：新增 `DP_PARAM_*` 碼——值不合法（422/400）、`DETAIL_LOCK` 鎖定碼值（409/403）、模組越權（403）；PARAMS-004 / 005 為成功 / 警告提示、非 error。
 - **前綴歸屬判定**：無前綴＝平台級（共用）、`ET_` / `DM_`＝模組級；過濾以 `PARAM_ID` 前綴 + 操作者模組管理者身分（research §4）於伺服器端 enforce（data-model §模組過濾）。
-- **稽核與敏感值**：異動經 `SRVDP003.log_action`（`res_id` 必填、含 before / after value、來源 IP）；`PARAM_VALUE` 可能含機密（如通關密碼雜湊），**禁寫入應用 log**（`sti-backend-logging` 明列 `DP_PARAM_D.PARAM_VALUE`）；稽核前後值若涉機密性參數之遮罩策略，於 `/sti-plan` 或 Security Review 把關。
+- **稽核與敏感值**：異動經 `SRVDP003.log_action`（`target_id` 必填、含 before / after value、來源 IP）；`PARAM_VALUE` 可能含機密（如通關密碼雜湊），**禁寫入應用 log**（`sti-backend-logging` 明列 `DP_PARAM_D.PARAM_VALUE`）；稽核前後值若涉機密性參數之遮罩策略，於 `/sti-plan` 或 Security Review 把關。
 - 目錄 `app/dp/params`（SRVDP001 已在此）+ `frontend/src/dp/params`（現 stub）；角色 / 標籤指派 MUST NOT 於本頁（屬 US7）。
 
 ### 相關文件
