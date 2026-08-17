@@ -220,7 +220,7 @@ router = APIRouter(
 - 角色異動（新增、修改、刪除）
 - 權限異動（角色功能權限變更，如 set_menus）
 
-> 詳細用法（呼叫範例、`action_type` / `res_id` 來源、`before_value` / `after_value` 原則）：見 `docs/ref/sti-backend-ref.md#auditlogservice-用法`
+> 詳細用法（呼叫範例、`action_type` / `target_id` 來源、`before_value` / `after_value` 原則）：見 `docs/ref/sti-backend-ref.md#auditlogservice-用法`
 
 ---
 
