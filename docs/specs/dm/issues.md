@@ -24,7 +24,7 @@
 | 1 | 系統設定（轉接層模組端 + 業務規則 + 種子驗證）| US1 / UCDM11 | P1-核心 | T024 ~ T027b | #0；DP dp-params / dp-roles / dp-templates | [#133](https://github.com/sti-fhb/EDMS/issues/133) | 🚀 已開立 [#133](https://github.com/sti-fhb/EDMS/issues/133) |
 | 2 | 文件庫與檢索 | US3 / UCDM03 | P1-核心 | T028 / T028a / T029 / T030 | #0；#4（資料來源）| [#150](https://github.com/sti-fhb/EDMS/issues/150) | 🚀 已開立 [#150](https://github.com/sti-fhb/EDMS/issues/150) |
 | 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| [#155](https://github.com/sti-fhb/EDMS/issues/155) | 🚀 已開立 [#155](https://github.com/sti-fhb/EDMS/issues/155) |
-| 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039 | #0 | — | 待補 |
+| 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039（含 T035a）| #0；#3/#5（入口/去向）| — | 📝 body 已撰寫（待開立）|
 | 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | — | 待補 |
 | 6 | 系統儀表板 | US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5 | — | 待補 |
 | 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5 | — | 待補 |
@@ -379,9 +379,99 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #4 ~ #13：待補（增量模式）
+## Issue #4：[P1-核心] DM — 文件新增與編輯（US5 / UCDM06 / DM03）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 / #1 / #2 / #3，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us5.md](spec_us5.md)（FR-001~009，UCDM06，訊息 DM-MSG-DM03-001~009）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §4（單一送審週期）、§5（手冊唯一）
+**對應畫面**：**DM03 文件新增 / 編輯**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-upload`）——雙模式表單（新增：DOC_ID 配號 + 首版；編輯：身份欄唯讀 + 新版本）+ 可見對象 / 檢索標籤 + 單檔上傳（Office 警示）+ 指定審核者 + 存草稿 / 送簽
+**階段**：P1-核心
+**涵蓋 Tasks**：T035（新增模式 / DOC_ID 配號）、T035a（可見對象必填檢核）、T036（編輯模式 / 版本號檢核）、T037（func_name 單選 + 唯一檢核）、T038（單檔上傳 / Office 提醒）、T039（審核者排除自己 + 存草稿 + 送簽）
+
+## 任務說明
+
+實作 **DM03 文件新增與編輯**：編輯者新增文件（建 DOC_ID、首版）或對既有文件上傳新版本，填必填欄位、選受控標籤（可見對象必填 ≥1、檢索標籤選填），指定審核者後送簽，或存為草稿續編。**新增模式**必填 文件名稱 / 分類 / 首版摘要 / 可見對象 ≥1，選填檢索標籤，首版版號由撰寫者自行輸入；分類為「系統操作手冊（MANUAL）」時額外單選 func_name。**編輯模式**（自 US4 詳細頁「編輯新版本」進入）文件名稱 / 分類 / func_name 唯讀，僅可改 檔案 / 變更摘要 / 標籤 / 指定審核者 / 版本號。送簽建立一筆 PENDING `DM_REVIEW`（NEW / NEW_VERSION）並通知指定審核者，文件 / 版本進入送審中。
+
+> ℹ️ **寫入型全端 issue（DM 第一個寫入功能）**：後端新增 `app/dm/editor`（建立 / 編輯 / 存草稿 / 送簽，寫 `DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` + 呼叫送審）+ 前端 DM03 表單。**組裝重用 #127 Foundation 既有工具**（DOC_ID 產生器 T017、file_store T016、ReviewService T019、authz T015、notify T018、catalog 轉接層、DB 約束），本 issue 不重造底層；**不含核准 / 發布**（屬 US6）、不含草稿匣列表 / 撤回（屬 US9）。
+
+**前置條件**：
+- **#127 Foundation（已交付合併）**：`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW` 表 + DB 約束（`UX_DM_DOCUMENT_MANUAL_FUNC` 手冊唯一、`UQ_DM_DOC_VERSION_DOC_NO` 版本號唯一、`UQ_DM_DOC_TAG_DOC_TAG`）；**DOC_ID 產生器 `document/docid.py`（T017：`next_doc_id` MAX+1、並發由 PK 擋、呼叫端重試）**、**檔案儲存 `document/file_store.py`（T016：`validate_upload` 大小 `DM_FILE_001` / 副檔名 `DM_FILE_002`、`is_previewable`）**、**送審狀態機 `review/service.py`（T019：`submit` 審核者≠撰寫者 `DM_REVIEW_001` / 單一 PENDING 閘門 `DM_REVIEW_002`）**、**授權 `roles/authz.py`（T015）**、**通知 `notify/service.py`（T018：`DmNotifier.notify` 送簽用 `DOC_SUBMIT` 範本）**、catalog 轉接層（受控 func / tag / audience 下拉來源）
+- **入口來源（已交付）**：US3 文件庫「新增文件」（新增模式）+ US4 詳細頁「編輯新版本」（編輯模式、帶 doc_id）
+- **去向**：送簽後核准 / 退回 / 發布見 US6（#5，未交付）；存草稿續編 / 撤回見 US9（未交付）——本 issue 交付草稿寫入，草稿匣列表屬 US9
+
+## 範圍
+
+**後端 — 新增模式（T035 / T035a，FR-001 / 009）** `app/dm/editor`（router → service → repository，寫入）：
+- `POST /api/dm/documents`：建立草稿文件——配 DOC_ID（`next_doc_id` + 唯一衝突重試）、寫 `DM_DOCUMENT`（STATUS=DRAFT、CREATED_USER=撰寫者）+ 首版 `DM_DOC_VERSION`（STATUS=DRAFT、版本號自行輸入）+ `DM_DOC_TAG`（可見對象 ≥1 + 檢索標籤）；必填檢核（名稱 / 分類 / 首版摘要）未填 → 422（訊息 DM-MSG-DM03-001）；可見對象 <1 → 422（DM-MSG-DM03-008）
+- 寫入操作注入 `OperatorInfo` 填 `CREATED_*`；CUD 於 Service 層寫 AuditLog
+
+**後端 — 編輯模式（T036，FR-003 / 004）**：
+- `POST /api/dm/documents/{doc_id}/versions`：對既有文件新增一版（STATUS=DRAFT）——身份欄（名稱 / 分類 / func）不接受變更（唯讀，只吃 檔案 / 摘要 / 標籤 / 審核者 / 版本號）；版本號非空 + 同文件不重複（DB `UQ_DM_DOC_VERSION_DOC_NO` + 應用層友善 DM-MSG-DM03-009）；廢止待簽核（該 doc 有 PENDING OBSOLETE review）→ 阻擋 DM-MSG-DM03-004
+- 存取控制：僅 DM_EDITOR 可寫（存取閘 + 角色判定）
+
+**後端 — func 唯一 + 上傳（T037 / T038，FR-002 / 005）**：
+- MANUAL 分類：func_name 必填單選 + **送簽 / 發布前唯一檢核**（查 DM_DOCUMENT：同 func_code 於 CATEGORY=MANUAL AND STATUS=PUBLISHED 無他份；DB `UX_DM_DOCUMENT_MANUAL_FUNC` 雙保險）→ 重複阻擋 DM-MSG-DM03-003
+- 上傳：`file_store.validate_upload`（單檔 ≤ `DM_FILE_MAX_MB` 預設 50MB、副檔名白名單）；回可預覽旗標（`is_previewable`）供前端 Office 警示；每版本單檔
+
+**後端 — 存草稿 + 送簽（T039，FR-006 / 007 / 008）**：
+- `PATCH /api/dm/documents/{doc_id}/draft`：更新草稿續編（不送簽）
+- `POST /api/dm/documents/{doc_id}/submit`：送簽——呼叫 `ReviewService.submit(review_type=NEW|NEW_VERSION, assigned_reviewer, author_id, version_id)`（內含審核者≠撰寫者 `DM_REVIEW_001`、單一 PENDING `DM_REVIEW_002`）；送簽前檢核 可見對象 ≥1 / 版本號 / func 唯一；成功 → 版本轉 PENDING_REVIEW、文件轉送審中（首版 PENDING_REVIEW；已發布文件之新版維持 PUBLISHED）、`DmNotifier.notify(DOC_SUBMIT)` 通知指定審核者
+- 指定審核者下拉來源：具 DM_REVIEWER 角色且排除本人
+
+**前端 — DM03 表單（T035~T039）** `frontend/src/dm/editor`：
+- 雙模式頁（新增 `/dm/documents/new`、編輯 `/dm/documents/:docId/edit`）：新增全欄可填；編輯 名稱/分類/func 唯讀、預帶上版、顯示目前版本 + 新版號輸入
+- 分類選 MANUAL → 條件式顯示 func_name 單選；可見對象多選（必填 ≥1、含全體）；檢索標籤多選（模組/性質/法規，選填）
+- 版本號自行輸入（無系統建議）；變更摘要 label 依模式切「首版摘要 / 變更摘要」
+- 單檔上傳（拖拉）；Office 檔 → 橘色警示條 + Modal 提醒（DM-MSG-DM03-002），可續行或改傳
+- 指定審核者下拉（排除自己）；動作：儲存為草稿（DM-MSG-DM03-007）/ 送交簽核（DM-MSG-DM03-006）/ 取消（dirty 追蹤 → 二次確認 DM-MSG-DM03-005）
+
+**測試**：
+- 後端 int：新增建 DOC_ID + 首版 + 標籤（可見對象 ≥1）；可見對象缺漏擋；編輯模式身份欄唯讀 + 版本號空 / 重複擋；MANUAL func 唯一擋；上傳大小 / 型別擋 + 可預覽旗標；送簽建 PENDING review + 通知 + 審核者≠撰寫者擋 + 已有 PENDING 擋；廢止待簽核擋新版本；存草稿不送簽
+- 前端：雙模式欄位（新增全填 / 編輯唯讀）；MANUAL 條件式 func；可見對象必填；版本號輸入；Office 警示 + Modal；審核者排除自己；存草稿 / 送簽 / 取消二次確認
+
+## 驗收條件
+
+- [ ] 新增模式建立 DOC_ID（`DM-{分類碼}-{6位流水號}`、依分類獨立、草稿即配號）+ 首版；必填 名稱 / 分類 / 首版摘要，未填擋（FR-001、AC1/3、DM-MSG-DM03-001）
+- [ ] 可見對象 / 單位必填 ≥1（含「全體」）；送簽 / 發布前未掛則擋（FR-009、AC3a、DM-MSG-DM03-008）
+- [ ] 分類 MANUAL 額外單選 func_name；送簽 / 發布前檢核同 func 至多一份已發布手冊，重複擋（FR-002、AC2/7、DM-MSG-DM03-003）
+- [ ] 編輯模式 名稱 / 分類 / func 唯讀，僅可改 檔案 / 摘要 / 標籤 / 審核者 / 版號（FR-003、AC4）
+- [ ] 版本號撰寫者自行輸入、無系統建議；非空且同文件不重複，否則擋（FR-004、AC4a、DM-MSG-DM03-009）
+- [ ] 上傳支援 PDF/Word/Excel/PPT/圖片、單版本單檔、上限 `DM_FILE_MAX_MB`（預設 50MB）；非預覽 Office 跳提醒 + 橘色警示條，PDF/圖片不觸發（FR-005、AC5、DM-MSG-DM03-002）
+- [ ] 指定審核者下拉僅列審核者角色且排除本人（FR-006、AC6）
+- [ ] 支援存草稿（不送簽、可續編）；送簽轉送審中 + 建 PENDING `DM_REVIEW`（NEW/NEW_VERSION）+ 通知指定審核者（FR-007、AC8、DM-MSG-DM03-006/007）
+- [ ] 廢止待簽核時擋上傳新版本（不可兩送審週期並存）；取消有未存變更 → 二次確認（FR-008、AC9/10、DM-MSG-DM03-004/005）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#127 Foundation（已交付）**：DOC_ID 產生器（T017）、file_store（T016）、ReviewService（T019）、authz（T015）、notify（T018）、catalog 轉接層、`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW` 表 + DB 約束
+- **入口（已交付）**：US3 文件庫「新增文件」+ US4 詳細頁「編輯新版本」
+- **US6（#5，未交付）**：送簽後核准 / 退回 / 發布——本 issue 只到「送審中」，發布不在範圍；以獨立測試驗證送簽建 review
+- **US9（未交付）**：草稿匣列表 / 撤回送審——本 issue 交付草稿寫入，列表 / 續編入口待 US9
+
+## 注意事項
+
+- ⚠️ **送審週期衝突以 `DM_REVIEW` PENDING 判定**（非文件 STATUS）：已由 `ReviewService.submit` 之單一 PENDING 閘門（`DM_REVIEW_002` + DB partial unique `UX_DM_REVIEW_ONE_PENDING`）保證；廢止待簽核擋新版本亦同此判定。
+- ⚠️ **本 issue 不發布**：送簽只建 PENDING review + 轉送審中；核准 → PUBLISHED / SUPERSEDED 屬 US6。首版送審文件層 STATUS=PENDING_REVIEW，已發布文件之新版送審文件層維持 PUBLISHED（新版在版本層 PENDING_REVIEW）。
+- ⚠️ **DOC_ID 並發配號**：`next_doc_id` 為 MAX+1，同分類並發可能撞號 → 由 PK 擋、**本 issue 呼叫端須以重試（catch IntegrityError 重取號）處理**。
+- ⚠️ **func 唯一 / 版本號唯一雙層**：DB 約束為底、應用層先查給友善訊息（DM-MSG-DM03-003 / 009），並以 IntegrityError 為並發後盾。
+- **檔案落盤**：`validate_upload` 僅驗大小 / 副檔名；實際 byte 落盤 + magic-bytes 驗真實型別屬部署 / 落盤層（見 #160 storage-root 圍籬 follow-up）。本 issue `FILE_PATH` 寫入策略須與落盤層一致（開工前 `/sti-plan` 對齊）。
+- **Error codes（開工前 `/sti-plan` 對齊）**：沿用 `DM_FILE_001/002`、`DM_REVIEW_001/002`；US5 新增之寫入專屬 code（必填缺漏 / 可見對象缺漏 / 版本號重複 / 身份欄唯讀違反 / 廢止待簽核擋）須登記 `docs/ref/error-codes.md`（比照 US4 `DM_DOC_00x`）。
+- **存草稿亦須附檔（現況）**：每版本單一檔案、`DM_DOC_VERSION.FILE_NAME/PATH/SIZE/MIME` 皆 NOT NULL；存草稿即建立版本列（首版 / 新版本）故**須先上傳檔案**，無檔草稿非現行支援（如需放寬須改 data-model 為 nullable，屬 SA 業務決定）。已發布文件必有檔（發布版即帶檔之版本列）。
+- **指定審核者清單來源（無現成端點，US5 需新做）**：現有 DM 端點無「列 reviewer」來源；US5 須新增讀取路徑（如 `GET /api/dm/reviewers`）——查 `DM_USER_ROLE`（`ROLE_CODE='DM_REVIEWER'`）join `DP_USER.USER_NAME`、**排除當前使用者**。**`DM_USER_ROLE` 為 DM 自持表、直接查即可（非跨模組、不經 DP）**；送簽時另由 `ReviewService.submit` 擋自審（`DM_REVIEW_001`）雙保險。
+- **省略 SITE / HOSPITAL 欄位**（對齊平台 DP，research §1）。
+
+## 相關文件
+
+- [spec_us5.md](spec_us5.md)（FR-001~009）、[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW`）、[research.md](research.md) §4（單一送審週期）/ §5（手冊唯一）
+- [tasks.md](tasks.md)（T035~T039 含 T035a）、[spec_us6.md](spec_us6.md)（簽核發布）、[spec_us9.md](spec_us9.md)（草稿匣 / 撤回）、[spec_us3.md](spec_us3.md)（新增入口）、[spec_us4.md](spec_us4.md)（編輯入口）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-upload`）
+
+**Labels**：`P1-核心`, `DM-文件管理`, `US5`
+
+---
+
+## Issue #5 ~ #13：待補（增量模式）
+
+依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 / #1 / #2 / #3 / #4，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -400,3 +490,4 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 | 2026-08-11 | Issue #2（US3 文件庫與檢索）開立為 GitHub [#150](https://github.com/sti-fhb/EDMS/issues/150)（labels `P1-核心` + `DM-文件管理` + `US3`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us3`）結論 ✅ 齊備、無必補 |
 | 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM02）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM02 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #3（US4 文件詳細頁瀏覽）開立為 GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)（labels `P1-核心` + `DM-文件管理` + `US4`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us4`）結論 ✅ 齊備、無必補 |
+| 2026-08-17 | 撰寫 Issue #4（US5 文件新增與編輯 / DM03）完整 body：對應 spec_us5 FR-001~009 + UCDM06；涵蓋 T035/T035a/T036/T037/T038/T039。**切分要點**：DM 第一個**寫入型** issue，主體為組裝 #127 Foundation 既有工具（DOC_ID 產生器 T017、file_store T016 上傳驗證、ReviewService T019 送簽、notify T018 `DOC_SUBMIT`、DB 約束 手冊唯一/版本號唯一）；範圍到「送審中」為止——核准/發布屬 US6、草稿匣列表/撤回屬 US9。前置 #0（必要）+ #3/#5（入口/去向，以獨立測試不阻塞）。新增寫入專屬 error code 待開工前 `/sti-plan` 對齊登記 `docs/ref/error-codes.md`。Labels `P1-核心` + `DM-文件管理` + `US5`。總覽表 Issue #4 狀態改「📝 body 已撰寫（待開立）」 |
