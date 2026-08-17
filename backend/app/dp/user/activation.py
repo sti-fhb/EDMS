@@ -50,6 +50,10 @@ async def activate_pending_account(
     Raises:
         AppError: Email 已完成啟用 / 競態（409 DP_USER_001）
     """
+    # 刻意重新產生，**不沿用** pending.invite_id（US4 管理者邀請時配發之邀請識別碼）：
+    # 邀請可能永遠不會啟用（Email 打錯、逾時未點連結），沿用會讓未啟用帳號的 ID 提前
+    # 佔用正式帳號的號碼空間，違反 #56 方案 B「驗證通過前不寫 DP_USER、DP_USER 只存已
+    # 驗證帳號」之設計。邀請與帳號為兩個不同實體、識別碼分開存放，兩者以 Email 關聯。
     user_id = generate_user_id()
     try:
         # 撞 UQ_DP_USER_EMAIL 代表已被啟用 / 競態，冪等拒絕
