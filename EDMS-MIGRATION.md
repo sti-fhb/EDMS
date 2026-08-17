@@ -112,8 +112,26 @@
 ### 4.1 依賴
 - [ ] `PyJWT>=2.13.0`
 - [ ] `passlib[bcrypt]>=1.7.4`
-- [ ] `cryptography>=48.0.1`（DB 起手包已含）
-- [ ] `fastapi-mail`（寄信）
+- [ ] `aiosmtplib>=3.0.0`（寄信）
+
+> ⚠️ **勿引入 `fastapi-mail` 與 `cryptography`** —— 原清單列有此二項，已於 #146 自本專案移除。
+>
+> - **`fastapi-mail`**：其 `FastMail.send_message` 在 MIME 組裝時會產生重複 Message-ID、遭部分
+>   MTA 退信。EDMS 實際寄信走 `aiosmtplib` 直送 stdlib `EmailMessage`
+>   （`backend/app/dp/notify/mailer.py`），該套件自 T020 起即未再被 import。
+> - **`cryptography`**：它在本專案的唯一上游就是 `fastapi-mail`，且被鎖在
+>   `>=49.0.0,<50.0.0` —— 上限排除 GHSA-g6cj-pr64-35w5 / CVE-2026-69247（PKCS#7
+>   EnvelopedData 解密的 Bleichenbacher oracle，HIGH）的修補版 50.0.0，下限則讓降級逃逸
+>   也不可能，可滿足的版本 100% 落在該 advisory 的受影響區間 `>=44.0.0,<50.0.0`。
+>   原註記「DB 起手包已含」在 EDMS 不成立 —— `bcrypt` 與 `passlib[bcrypt]` 皆不相依它
+>   （`passlib` 的 cryptography 只落在 `extra == 'totp'`，`extra == 'bcrypt'` 僅帶 `bcrypt`）。
+>   本專案 JWT 使用 HS256/384/512（HMAC），PyJWT 於此情境不需要 `cryptography`
+>   （`jwt.algorithms.has_crypto=False` 下 HS\* 仍可正常簽驗，走 stdlib `hmac`）。
+>
+> **唯二會讓 `cryptography` 回來的路徑，屆時需重新評估 CVE 狀態**：
+> 1. JWT 改用 RS\*／PS\*／ES\*／EdDSA 等非對稱演算法（`JWT_ALGORITHM` 目前為
+>    `Literal["HS256","HS384","HS512"]`，型別上已擋住）
+> 2. 引入 TOTP MFA —— `passlib[totp]` 這個 extra 相依 `cryptography`
 
 ### 4.2 core 認證基礎建設
 原封帶：
