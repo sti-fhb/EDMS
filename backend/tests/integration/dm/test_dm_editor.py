@@ -239,13 +239,10 @@ async def _publish_doc(db, doc_id, *, category="SOP", func_code=None, author="ed
     return doc
 
 
-async def _add_version(db, doc_id, *, version_no="2.0", audience=("全體",), retrieval=(), op=None, mime=_PDF):
-    aud_ids = [await _audience_id(db, n) for n in audience]
+async def _add_version(db, doc_id, *, version_no="2.0", op=None, mime=_PDF):
     return await _svc.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=aud_ids,
-        retrieval_ids=list(retrieval),
         version_no=version_no,
         change_summary="改版",
         file_name="v2.pdf",
@@ -264,16 +261,16 @@ async def test_add_version_creates_draft_keeps_doc_published(db):
     assert doc.status == "PUBLISHED"  # 已發布文件之新版草稿不動文件狀態
 
 
-async def test_add_version_replaces_doc_tags(db):
+async def test_add_version_inherits_doc_tags_untouched(db):
+    """新版本沿用文件既有標籤、不動可見性（避免草稿期靜默清空已發布文件標籤）。"""
     await _publish_doc(db, "DM-SOP-000101", audience=("全體",))
-    await _add_version(db, "DM-SOP-000101", audience=("護理師",))
-    # 文件層標籤覆寫：全體軟刪、護理師有效
+    await _add_version(db, "DM-SOP-000101", version_no="2.0")
     active = await db.scalars(
         select(DmTag.tag_name)
         .join(DmDocTag, DmDocTag.tag_id == DmTag.tag_id)
         .where(DmDocTag.doc_id == "DM-SOP-000101", DmDocTag.deleted == 0)
     )
-    assert set(active.all()) == {"護理師"}
+    assert set(active.all()) == {"全體"}  # 標籤原封不動
 
 
 async def test_add_version_duplicate_version_no_blocked(db):

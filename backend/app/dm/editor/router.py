@@ -73,20 +73,16 @@ async def add_version(
     version_no: Annotated[str, Form()],
     change_summary: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
-    audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
-    retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
-    """編輯模式：既有文件加 DRAFT 版本（身份欄不吃）+ 文件層標籤覆寫。"""
+    """編輯模式：既有文件加 DRAFT 版本（身份欄 / 標籤不吃，標籤沿用文件既有）。"""
     _ensure_editor(ctx)
     data = await file.read()
     return await _service.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=audience_ids,
-        retrieval_ids=retrieval_ids,
         version_no=version_no,
         change_summary=change_summary,
         file_name=file.filename or "",

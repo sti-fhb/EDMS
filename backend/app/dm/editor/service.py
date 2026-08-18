@@ -130,8 +130,6 @@ class EditorService:
         db: AsyncSession,
         *,
         doc_id: str,
-        audience_ids: Sequence[int],
-        retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
         file_name: str,
@@ -139,7 +137,12 @@ class EditorService:
         file_mime: str,
         op: OperatorInfo,
     ) -> VersionResult:
-        """既有文件新增 DRAFT 版本（身份欄不吃）+ 文件層標籤覆寫。"""
+        """既有文件新增 DRAFT 版本（身份欄不吃）。
+
+        標籤 / 可見性為文件層且與目前發布版共用（DM_DOC_TAG 無 version_id），新版本一律**沿用**
+        文件既有標籤、不於此變更——避免草稿期即改動已發布文件之可見性，且文件詳細（US4）未提供
+        既有標籤 ID 供前端預帶。可見性 / 標籤之維護待專屬讀 API 到位後另議（見 PR 差異紀錄）。
+        """
         version_no = (version_no or "").strip()
         change_summary = (change_summary or "").strip()
         _require(版本號=version_no, 變更摘要=change_summary)
@@ -156,7 +159,6 @@ class EditorService:
             )
         if await self._repo.version_no_taken(db, doc_id, version_no):
             raise AppError(status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006")
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
         await validate_upload(db, size_bytes=len(file_bytes), filename=file_name)
 
         file_path = save_upload(doc_id=doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes)
@@ -171,7 +173,6 @@ class EditorService:
             file_mime=file_mime,
             op=op,
         )
-        await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)
         return VersionResult(version_id=ver.version_id, previewable=is_previewable(file_mime))
 
     # ── 送簽 ──────────────────────────────────────────
