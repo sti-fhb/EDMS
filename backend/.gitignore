@@ -25,3 +25,6 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+
+# DM 上傳落盤根目錄（DM_FILE_STORAGE_ROOT 預設 ./var/dm_files；勿把上傳文件 commit 進版控）
+var/

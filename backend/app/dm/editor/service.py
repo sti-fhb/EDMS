@@ -12,6 +12,7 @@
 交易由 `get_db` 於請求結束統一 commit；本層僅 flush，故送審 + 狀態轉移 + 通知同一交易原子成立。
 """
 
+import asyncio
 from collections.abc import Sequence
 
 from sqlalchemy.exc import IntegrityError
@@ -34,6 +35,8 @@ from app.dm.editor.schemas import (
 from app.dm.editor.storage import generate_file_id, save_upload
 from app.dm.notify.service import DmNotifier
 from app.dm.review.service import ReviewService
+from app.dm.roles.authz import ensure_reviewer_not_author
+from app.services import AuditLogService
 
 _DRAFT = "DRAFT"
 _PENDING_REVIEW = "PENDING_REVIEW"
@@ -57,10 +60,25 @@ class EditorService:
         repository: EditorRepository | None = None,
         reviews: ReviewService | None = None,
         notifier: DmNotifier | None = None,
+        audit: AuditLogService | None = None,
     ) -> None:
         self._repo = repository or EditorRepository()
         self._reviews = reviews or ReviewService()
         self._notifier = notifier or DmNotifier()
+        self._audit = audit or AuditLogService()
+
+    async def _log(self, db: AsyncSession, *, action_type: str, operator_id: str, target: str, after: dict) -> None:
+        """寫入型操作於同交易寫 SRVDP003 稽核（MODULE=DM、FUNC=DM-EDITOR、res_id=DOC_ID）。"""
+        await self._audit.log_action(
+            db,
+            module="DM",
+            func_name="DM-EDITOR",
+            action_type=action_type,
+            result="SUCCESS",
+            operator_id=operator_id,
+            target_id=target,
+            after_value=after,
+        )
 
     # ── 新增模式 ──────────────────────────────────────
 
@@ -93,7 +111,10 @@ class EditorService:
         doc = await self._create_doc_with_retry(
             db, category_code=category_code, doc_name=doc_name, func_code=func_code, op=op
         )
-        file_path = save_upload(doc_id=doc.doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes)
+        # 落盤為同步阻塞 I/O，卸載至 thread 以免阻塞事件迴圈（大檔 ≤ DM_FILE_MAX_MB）。
+        file_path = await asyncio.to_thread(
+            save_upload, doc_id=doc.doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes
+        )
         ver = await self._repo.add_version(
             db,
             doc_id=doc.doc_id,
@@ -106,6 +127,13 @@ class EditorService:
             op=op,
         )
         await self._repo.set_tags(db, doc_id=doc.doc_id, tag_ids=tag_ids, op=op)
+        await self._log(
+            db,
+            action_type="CREATE",
+            operator_id=op.user_id,
+            target=doc.doc_id,
+            after={"doc_name": doc_name, "category_code": category_code, "version_no": version_no},
+        )
         return CreateResult(doc_id=doc.doc_id, version_id=ver.version_id, previewable=is_previewable(file_mime))
 
     async def _create_doc_with_retry(
@@ -161,17 +189,38 @@ class EditorService:
             raise AppError(status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006")
         await validate_upload(db, size_bytes=len(file_bytes), filename=file_name)
 
-        file_path = save_upload(doc_id=doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes)
-        ver = await self._repo.add_version(
+        # 落盤為同步阻塞 I/O，卸載至 thread 以免阻塞事件迴圈。
+        file_path = await asyncio.to_thread(
+            save_upload, doc_id=doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes
+        )
+        try:
+            async with db.begin_nested():  # SAVEPOINT：並發撞版號 / 撞單一草稿只回退本次 INSERT
+                ver = await self._repo.add_version(
+                    db,
+                    doc_id=doc_id,
+                    version_no=version_no,
+                    change_summary=change_summary,
+                    file_name=file_name,
+                    file_path=file_path,
+                    file_size=len(file_bytes),
+                    file_mime=file_mime,
+                    op=op,
+                )
+        except IntegrityError as exc:
+            # 並發後盾（DB UQ / 單一草稿部分唯一索引）：回退後重查判定友善錯誤。
+            if await self._repo.version_no_taken(db, doc_id, version_no):
+                raise AppError(
+                    status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006"
+                ) from exc
+            raise AppError(
+                status_code=409, detail="此文件已有未送簽之草稿版本，請續編既有草稿", error_code="DM_DOC_009"
+            ) from exc
+        await self._log(
             db,
-            doc_id=doc_id,
-            version_no=version_no,
-            change_summary=change_summary,
-            file_name=file_name,
-            file_path=file_path,
-            file_size=len(file_bytes),
-            file_mime=file_mime,
-            op=op,
+            action_type="CREATE",
+            operator_id=op.user_id,
+            target=doc_id,
+            after={"version_id": ver.version_id, "version_no": version_no},
         )
         return VersionResult(version_id=ver.version_id, previewable=is_previewable(file_mime))
 
@@ -195,6 +244,9 @@ class EditorService:
             raise AppError(
                 status_code=409, detail="此文件已有進行中之送審，無法同時送出另一種送審", error_code="DM_REVIEW_002"
             )
+        # 指定審核者不可為「該版本撰寫者」本人（FR-006 不可自審）——以版本 CREATED_USER 為準，
+        # 而非送簽者：他人代送草稿時，仍須排除實際撰寫者。ReviewService.submit 另擋送簽者本人。
+        ensure_reviewer_not_author(assigned_reviewer, ver.created_user)
 
         # 送簽前檢核
         if not await self._repo.has_audience_tag(db, doc_id):
@@ -225,8 +277,25 @@ class EditorService:
             doc.updated_user, doc.updated_date = op.user_id, now
         await db.flush()
 
+        await self._log(
+            db,
+            action_type="UPDATE",
+            operator_id=op.user_id,
+            target=doc_id,
+            after={
+                "review_id": review.review_id,
+                "review_type": review_type,
+                "version_id": version_id,
+                "assigned_reviewer": assigned_reviewer,
+            },
+        )
+
         notified = await self._notify_submit(
-            db, reviewer_id=assigned_reviewer, author_id=op.user_id, doc_name=doc.doc_name, review_type=review_type
+            db,
+            reviewer_id=assigned_reviewer,
+            author_id=ver.created_user,  # 通知顯示實際撰寫者（非代送者）
+            doc_name=doc.doc_name,
+            review_type=review_type,
         )
         return SubmitResult(review_id=review.review_id, notified=notified)
 

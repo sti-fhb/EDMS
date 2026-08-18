@@ -76,6 +76,13 @@ class DmDocVersion(BaseModel):
         PrimaryKeyConstraint("VERSION_ID", name="PK_DM_DOC_VERSION"),
         UniqueConstraint("DOC_ID", "VERSION_NO", name="UQ_DM_DOC_VERSION_DOC_NO"),
         Index("IX_DM_DOC_VERSION_DOC", "DOC_ID"),
+        # 單一草稿（US5 Q1=A）：同 DOC_ID 至多一筆 STATUS='DRAFT'——並發後盾（應用層另給友善 DM_DOC_009）
+        Index(
+            "UX_DM_DOC_VERSION_ONE_DRAFT",
+            "DOC_ID",
+            unique=True,
+            postgresql_where=text("\"STATUS\" = 'DRAFT'"),
+        ),
     )
 
     version_id: Mapped[int] = mapped_column("VERSION_ID", BigInteger, Identity(), nullable=False)

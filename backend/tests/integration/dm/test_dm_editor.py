@@ -1,9 +1,9 @@
 """文件新增與編輯（US5 / DM03）整合測試（真實 DB）。
 
-涵蓋 8 條 AC：新增 + DOC_ID 配號（含並發流水號遞增）、必填 / 分類 / 標籤檢核、MANUAL func 條件式必填、
-編輯新版本（身份欄不吃 / 單一草稿 / 廢止待簽核擋 / 版號重複）、送簽（建 review + 狀態轉移 + 通知 +
-可見對象≥1 / func 唯一 / 審核者排除本人 / 單一 PENDING）、reviewer 下拉排除自己、表單受控下拉、
-存取閘（HTTP 401 / 403）與 multipart 落盤。
+涵蓋 8 條 AC：新增 + DOC_ID 配號（循序遞增）、必填 / 分類 / 標籤檢核、MANUAL func 條件式必填、
+編輯新版本（身份欄不吃 / 單一草稿 / 廢止待簽核擋 / 版號重複 / IntegrityError 並發後盾映射）、
+送簽（建 review + 狀態轉移 + 通知 + 稽核 + 可見對象≥1 / func 唯一 / 審核者排除撰寫者本人 /
+單一 PENDING）、reviewer 下拉排除自己、表單受控下拉、存取閘（HTTP 401 / 403）與 multipart 落盤。
 """
 
 import pytest
@@ -273,6 +273,29 @@ async def test_add_version_inherits_doc_tags_untouched(db):
     assert set(active.all()) == {"全體"}  # 標籤原封不動
 
 
+@pytest.mark.parametrize(
+    ("taken_side_effect", "expected"),
+    [([False, True], "DM_DOC_006"), ([False, False], "DM_DOC_009")],
+)
+async def test_add_version_integrity_race_maps_friendly(db, monkeypatch, taken_side_effect, expected):
+    """並發後盾：實際 INSERT 撞 DB 約束（IntegrityError）→ 回退後重查映射友善錯誤（版號重複 / 單一草稿）。"""
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy.exc import IntegrityError
+
+    await _publish_doc(db, "DM-SOP-000110")
+
+    async def _boom(*a, **k):
+        raise IntegrityError("INSERT", {}, Exception("duplicate"))
+
+    monkeypatch.setattr(_svc._repo, "add_version", _boom)
+    # 前置 version_no_taken 回 False（過檢核）；except 內重查依情境回 False/True
+    monkeypatch.setattr(_svc._repo, "version_no_taken", AsyncMock(side_effect=taken_side_effect))
+    with pytest.raises(AppError) as e:
+        await _add_version(db, "DM-SOP-000110", version_no="2.0")
+    assert e.value.error_code == expected
+
+
 async def test_add_version_duplicate_version_no_blocked(db):
     await _publish_doc(db, "DM-SOP-000102")
     with pytest.raises(AppError) as e:
@@ -364,6 +387,18 @@ async def test_submit_reviewer_is_author_blocked(db):
     assert e.value.error_code == "DM_REVIEW_001"
 
 
+async def test_submit_reviewer_is_version_author_blocked_even_if_other_submits(db):
+    """代送情境：他人（editor B）代送 A 撰寫之草稿，指派 A 為審核者 → 仍擋（排除撰寫者本人）。"""
+    await _seed_user(db, "A", "撰寫者A")
+    await _seed_user(db, "B", "代送者B")
+    await _grant(db, "A", DM_REVIEWER)
+    r = await _create(db, op=_op("A"), name="A的草稿", audience=("全體",))  # 版本 CREATED_USER = A
+    with pytest.raises(AppError) as e:
+        # B 送簽、指派 A（實際撰寫者）為審核者 → 擋
+        await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="A", op=_op("B"))
+    assert e.value.error_code == "DM_REVIEW_001"
+
+
 async def test_submit_manual_func_conflict_blocked(db):
     await _seed_user(db, "ed", "撰寫")
     await _seed_user(db, "rev1", "審核", email="rev@e.com")
@@ -409,6 +444,27 @@ async def test_list_reviewers_excludes_self(db):
     got = await _svc.list_reviewers(db, op=_op("me"))
     ids = {x.user_id for x in got}
     assert ids == {"r1", "r2"}  # 排除自己
+
+
+async def test_writes_are_audited(db):
+    """新增 / 加版 / 送簽皆寫 DP_AUDIT_LOG（MODULE=DM、FUNC=DM-EDITOR、target=DOC_ID）。"""
+    r = await _prep_submit(db, "x")  # create（1 筆 CREATE）
+    await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    creates = await db.scalar(
+        text(
+            'SELECT count(*) FROM "DP_AUDIT_LOG" WHERE "FUNC_NAME"=\'DM-EDITOR\' '
+            'AND "ACTION_TYPE"=\'CREATE\' AND "TARGET_ID"=:d'
+        ),
+        {"d": r.doc_id},
+    )
+    updates = await db.scalar(
+        text(
+            'SELECT count(*) FROM "DP_AUDIT_LOG" WHERE "FUNC_NAME"=\'DM-EDITOR\' '
+            'AND "ACTION_TYPE"=\'UPDATE\' AND "TARGET_ID"=:d'
+        ),
+        {"d": r.doc_id},
+    )
+    assert creates == 1 and updates == 1  # 新增 1 筆 CREATE、送簽 1 筆 UPDATE
 
 
 async def test_get_options_returns_controlled_lists(db):
@@ -470,3 +526,42 @@ async def test_http_create_multipart_success(db, client):
     assert resp.status_code == 201
     body = resp.json()
     assert body["doc_id"] == "DM-SOP-000001" and body["previewable"] is True
+
+
+async def test_http_add_version_requires_auth(db, client):
+    resp = await client.post(
+        "/api/dm/documents/DM-SOP-000001/versions",
+        data={"version_no": "2.0", "change_summary": "x"},
+        files={"file": ("a.pdf", b"%PDF-1.4 x", _PDF)},
+    )
+    assert resp.status_code == 401
+
+
+async def test_http_add_version_forbidden_without_editor(db, client):
+    await _seed_user(db, "viewer2", "純閱覽")
+    await _grant(db, "viewer2", DM_VIEWER)
+    token = create_access_token(sub="viewer2", ttl_minutes=15)
+    resp = await client.post(
+        "/api/dm/documents/DM-SOP-000001/versions",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"version_no": "2.0", "change_summary": "x"},
+        files={"file": ("a.pdf", b"%PDF-1.4 x", _PDF)},
+    )
+    assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_002"
+
+
+async def test_http_submit_requires_auth(db, client):
+    resp = await client.post("/api/dm/documents/DM-SOP-000001/submit", json={"version_id": 1, "assigned_reviewer": "r"})
+    assert resp.status_code == 401
+
+
+async def test_http_submit_forbidden_without_editor(db, client):
+    await _seed_user(db, "viewer3", "純閱覽")
+    await _grant(db, "viewer3", DM_VIEWER)
+    token = create_access_token(sub="viewer3", ttl_minutes=15)
+    resp = await client.post(
+        "/api/dm/documents/DM-SOP-000001/submit",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"version_id": 1, "assigned_reviewer": "r"},
+    )
+    assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_002"

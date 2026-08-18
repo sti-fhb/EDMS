@@ -46,11 +46,15 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
         寫入檔案之絕對路徑（供 DB FILE_PATH 記錄）。
     """
     root = os.path.abspath(settings.DM_FILE_STORAGE_ROOT)
-    doc_dir = os.path.join(root, doc_id)
-    os.makedirs(doc_dir, exist_ok=True)
     ext = _safe_ext(filename)
     name = f"{file_id}.{ext}" if ext else file_id
-    path = os.path.join(doc_dir, name)
+    path = os.path.abspath(os.path.join(root, doc_id, name))
+    # 圍籬（防禦深度、不依賴呼叫端）：解析後之目錄與檔案路徑一律須落在 root 內，
+    # 否則視為受污染之 doc_id / file_id 之路徑穿越，拒絕落盤。
+    doc_dir = os.path.dirname(path)
+    if os.path.commonpath([root, path]) != root or os.path.commonpath([root, doc_dir]) != root:
+        raise ValueError("不合法的落盤路徑（疑似路徑穿越）")
+    os.makedirs(doc_dir, exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
     return path

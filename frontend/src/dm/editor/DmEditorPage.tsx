@@ -75,12 +75,21 @@ export function DmEditorPage() {
     [options?.retrieval_tags, form.retrieval_ids],
   )
 
+  // 草稿內容欄位（會寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG）：變更後清草稿快取，
+  // 使下次送簽重新建立、避免沿用已過時之草稿。
   const setField = <K extends keyof EditorForm>(key: K, value: EditorForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
     setDirty(true)
-    // 使用者已建草稿後又改內容：清快取使下次送簽重新建立（避免沿用舊草稿）——僅在尚未成功送出時。
     persisted.current = null
     setErrors((prev) => ({ ...prev, [key as string]: "" }))
+  }
+
+  // 審核者僅為 submit 參數、不屬草稿內容：變更**不可**清草稿快取，否則送簽失敗後改審核者重試
+  // 會重複建立文件（新增模式）或誤觸單一草稿擋（編輯模式）。
+  const setReviewer = (value: string) => {
+    setForm((prev) => ({ ...prev, reviewer_id: value }))
+    setDirty(true)
+    setErrors((prev) => ({ ...prev, reviewer_id: "" }))
   }
 
   const onCategoryChange = (value: string) => {
@@ -413,7 +422,7 @@ export function DmEditorPage() {
               fullWidth
               size="small"
               value={form.reviewer_id}
-              onChange={(e) => setField("reviewer_id", e.target.value)}
+              onChange={(e) => setReviewer(e.target.value)}
               error={!!errors.reviewer_id}
               helperText={errors.reviewer_id || "送簽時必填；不含您本人"}
             >

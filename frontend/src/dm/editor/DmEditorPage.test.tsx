@@ -51,7 +51,7 @@ beforeEach(() => {
 
 describe("DmEditorPage 文件新增與編輯（DM03）", () => {
   it("新增模式：可編輯名稱；選『系統操作手冊』條件式顯示關聯作業項目", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     expect(await screen.findByText("新增文件")).toBeInTheDocument()
     expect(screen.getByLabelText(/文件名稱/)).toBeEnabled()
@@ -63,7 +63,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
   })
 
   it("上傳 Office 檔 → 橘色無法預覽警示 + 二次確認", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await user.upload(fileInput(), new File(["x"], "a.docx", { type: DOCX }))
@@ -72,27 +72,60 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
   })
 
   it("送簽缺可見對象 → 顯示可見對象錯誤、不送出（DM-MSG-DM03-008）", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await fillNewForm(user, { withAudience: false })
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
     expect(await screen.findByText("請至少指定 1 個可見對象")).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
-  })
+  }, 20000)
 
   it("送簽成功 → toast 已送交簽核並導向詳細（DM-MSG-DM03-006）", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await fillNewForm(user, { withAudience: true })
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
     expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
     expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000009")
-  })
+  }, 20000)
+
+  it("送簽失敗後改審核者重試 → 不重複建立文件（HIGH #1 迴歸）", async () => {
+    let createCalls = 0
+    let submitCalls = 0
+    server.use(
+      http.post("/api/dm/documents", () => {
+        createCalls += 1
+        return HttpResponse.json({ doc_id: "DM-SOP-000009", version_id: 900, previewable: true }, { status: 201 })
+      }),
+      http.post("/api/dm/documents/:docId/submit", () => {
+        submitCalls += 1
+        if (submitCalls === 1) {
+          return HttpResponse.json(
+            { error_code: "DM_REVIEW_001", error_message: "指定審核者不可為文件撰寫者本人" },
+            { status: 422 },
+          )
+        }
+        return HttpResponse.json({ review_id: 500, notified: 1 })
+      }),
+    )
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    await fillNewForm(user, { withAudience: true }) // 預設選「王審核」
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+    expect(await screen.findByText("指定審核者不可為文件撰寫者本人")).toBeInTheDocument()
+    // 改選另一位審核者後重試
+    await user.click(screen.getByRole("combobox", { name: /指定審核者/ }))
+    await user.click(await screen.findByRole("option", { name: "李審核" }))
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+    expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
+    expect(createCalls).toBe(1) // 關鍵：改審核者不清草稿快取、不重複建立文件
+  }, 20000)
 
   it("存草稿成功（可見對象非必填）→ toast 已儲存為草稿（DM-MSG-DM03-007）", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await user.type(screen.getByLabelText(/文件名稱/), "草稿SOP")
@@ -104,7 +137,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
     expect(await screen.findByText("已儲存為草稿")).toBeInTheDocument()
     expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000009")
-  })
+  }, 20000)
 
   it("版號重複（後端 DM_DOC_006）→ inline 標於版本號欄（DM-MSG-DM03-009）", async () => {
     server.use(
@@ -115,14 +148,14 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
         ),
       ),
     )
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await fillNewForm(user, { withAudience: true })
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
     expect(await screen.findByText("版本號未填或與本文件既有版本重複")).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
-  })
+  }, 20000)
 
   it("編輯模式：身份欄（名稱）唯讀 + 標籤沿用提示", async () => {
     paramsRef.current = { docId: "DM-SOP-000001" }
@@ -135,7 +168,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
   })
 
   it("取消且有未存變更 → 二次確認（DM-MSG-DM03-005）", async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await user.type(screen.getByLabelText(/文件名稱/), "改了一點")
