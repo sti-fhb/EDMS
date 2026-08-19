@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # 走 config（deploy 時可調）而非 DP_PARAM，貼合「依部署環境 / 寄信額度定」語意且免 migration。
     INVITE_RESEND_COOLDOWN_SEC: int = Field(default=600, ge=0)
 
+    # DM 文件上傳落盤根目錄（US5）——上傳之檔案位元組寫入此根下、以系統產生之 FILE_ID 命名，
+    # DB 僅存相對 FILE_PATH。走 config（依部署環境定；正式可換物件儲存）。#160 將對讀取端加根目錄圍籬。
+    DM_FILE_STORAGE_ROOT: str = "./var/dm_files"
+
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
         """依所選演算法強制 HMAC 密鑰最小長度，啟動即擋弱 / 未替換的預設密鑰。

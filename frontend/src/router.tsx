@@ -8,6 +8,7 @@ import { AppShell } from "./layouts/AppShell"
 import { RootLayout } from "./layouts/RootLayout"
 import { DmChangeLogPage } from "./dm/changelog/DmChangeLogPage"
 import { DmDetailPage } from "./dm/detail/DmDetailPage"
+import { DmEditorPage } from "./dm/editor/DmEditorPage"
 import { DmKpiPage } from "./dm/kpi/DmKpiPage"
 import { DmLibraryPage } from "./dm/library/DmLibraryPage"
 import { DmObsoletePage } from "./dm/obsolete/DmObsoletePage"
@@ -60,6 +61,9 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="/dm/library" replace /> },
               { path: "library", element: <DmLibraryPage /> },
+              // US5 新增 / 編輯（靜態 new 置於動態 :docId 前，避免被誤捕）
+              { path: "documents/new", element: <DmEditorPage /> },
+              { path: "documents/:docId/edit", element: <DmEditorPage /> },
               { path: "documents/:docId", element: <DmDetailPage /> },
               { path: "review", element: <DmReviewPage /> },
               { path: "me", element: <DmPersonalPage /> },

@@ -74,8 +74,25 @@ class DmDocVersion(BaseModel):
     __tablename__ = "DM_DOC_VERSION"
     __table_args__ = (
         PrimaryKeyConstraint("VERSION_ID", name="PK_DM_DOC_VERSION"),
-        UniqueConstraint("DOC_ID", "VERSION_NO", name="UQ_DM_DOC_VERSION_DOC_NO"),
         Index("IX_DM_DOC_VERSION_DOC", "DOC_ID"),
+        # 版本號唯一「只對已發布版本生效」（US5）：同 DOC_ID 之 PUBLISHED/SUPERSEDED 版本號不重複。
+        # 草稿 / 送審中 / 退回可自由重複或留空（多人各自草稿皆可填同版號），送簽時才檢核不與已發布重複。
+        Index(
+            "UX_DM_DOC_VERSION_RELEASED_NO",
+            "DOC_ID",
+            "VERSION_NO",
+            unique=True,
+            postgresql_where=text("\"STATUS\" IN ('PUBLISHED', 'SUPERSEDED')"),
+        ),
+        # 每人每文件一份草稿（US5）：同 (DOC_ID, CREATED_USER) 至多一筆 STATUS='DRAFT'——並發後盾
+        # （應用層另給友善 DM_DOC_009）。不同撰寫者可各自開草稿、互不阻擋。
+        Index(
+            "UX_DM_DOC_VERSION_ONE_DRAFT",
+            "DOC_ID",
+            "CREATED_USER",
+            unique=True,
+            postgresql_where=text("\"STATUS\" = 'DRAFT'"),
+        ),
     )
 
     version_id: Mapped[int] = mapped_column("VERSION_ID", BigInteger, Identity(), nullable=False)
@@ -84,10 +101,11 @@ class DmDocVersion(BaseModel):
     )
     version_no: Mapped[str] = mapped_column("VERSION_NO", String(20), nullable=False)
     change_summary: Mapped[str] = mapped_column("CHANGE_SUMMARY", Text, nullable=False)
-    file_name: Mapped[str] = mapped_column("FILE_NAME", String(255), nullable=False)
-    file_path: Mapped[str] = mapped_column("FILE_PATH", String(500), nullable=False)
-    file_size: Mapped[int] = mapped_column("FILE_SIZE", BigInteger, nullable=False)
-    file_mime: Mapped[str] = mapped_column("FILE_MIME", String(100), nullable=False)
+    # 檔案 metadata：草稿可暫無檔案（US5「存草稿不卡」），送簽 / 發布時才必備；故 FILE_* 可空。
+    file_name: Mapped[Optional[str]] = mapped_column("FILE_NAME", String(255), nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column("FILE_PATH", String(500), nullable=True)
+    file_size: Mapped[Optional[int]] = mapped_column("FILE_SIZE", BigInteger, nullable=True)
+    file_mime: Mapped[Optional[str]] = mapped_column("FILE_MIME", String(100), nullable=True)
     status: Mapped[str] = mapped_column("STATUS", String(20), nullable=False, default="DRAFT")
     approver_user_id: Mapped[Optional[str]] = mapped_column("APPROVER_USER_ID", String(20), nullable=True)
     published_date: Mapped[Optional[datetime]] = mapped_column("PUBLISHED_DATE", DateTime(timezone=True), nullable=True)

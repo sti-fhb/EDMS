@@ -131,6 +131,42 @@ export const handlers = [
     ]),
   ),
   // US7 權限管理（dp-roles）：預設 DM 可管理、一筆使用者；個別測試以 server.use 覆蓋
+  // US5 文件新增與編輯（dm-editor）：受控下拉 / 審核者 / 新增 / 加版 / 送簽（happy path）
+  http.get("/api/dm/editor/options", () =>
+    HttpResponse.json({
+      categories: [
+        { code: "SOP", name: "標準作業程序" },
+        { code: "MANUAL", name: "系統操作手冊" },
+        { code: "TRAINING", name: "訓練教材" },
+        { code: "OTHER", name: "其他" },
+      ],
+      funcs: [{ code: "BS04", name: "領血確認", group_code: null }],
+      audiences: [
+        { code: "1", name: "全體", group_code: null },
+        { code: "2", name: "護理師", group_code: null },
+      ],
+      retrieval_tags: [
+        { code: "10", name: "供應", group_code: "MODULE" },
+        { code: "20", name: "平時", group_code: "NATURE" },
+      ],
+    }),
+  ),
+  http.get("/api/dm/reviewers", () =>
+    HttpResponse.json([
+      { user_id: "rev1", user_name: "王審核" },
+      { user_id: "rev2", user_name: "李審核" },
+    ]),
+  ),
+  http.post("/api/dm/documents", () =>
+    HttpResponse.json({ doc_id: "DM-SOP-000009", version_id: 900, previewable: true }, { status: 201 }),
+  ),
+  http.post("/api/dm/documents/:docId/versions", () =>
+    HttpResponse.json({ version_id: 901, previewable: true }, { status: 201 }),
+  ),
+  http.post("/api/dm/documents/:docId/submit", () => HttpResponse.json({ review_id: 500, notified: 1 })),
+  http.get("/api/dm/editor/documents/:docId/tags", () =>
+    HttpResponse.json({ audience_ids: ["1"], retrieval_ids: ["20"] }),
+  ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
     HttpResponse.json({
