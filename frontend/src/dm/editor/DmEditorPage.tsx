@@ -1,3 +1,4 @@
+import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined"
 import Alert from "@mui/material/Alert"
 import Autocomplete from "@mui/material/Autocomplete"
 import Box from "@mui/material/Box"
@@ -9,8 +10,8 @@ import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
-import { useMemo, useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
 import { EMPTY_EDITOR_FORM, isPreviewableMime, makeEditorSchema, MANUAL_CATEGORY } from "./schemas"
 import type { EditorForm, OptionItem } from "./schemas"
@@ -19,7 +20,7 @@ import { useEditorOptions, useReviewers } from "./useEditor"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
-import { useDetail } from "../detail/useDetail"
+import { useDetail, useVersions } from "../detail/useDetail"
 
 const TAG_GROUP_LABELS: Record<string, string> = { MODULE: "適用模組", NATURE: "文件性質", LEGAL: "法規關聯" }
 
@@ -51,15 +52,19 @@ export function DmEditorPage() {
   const { data: options } = useEditorOptions()
   const { data: reviewers } = useReviewers()
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!)
+  const { data: recentVersions } = useVersions(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
   const [file, setFile] = useState<File | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   // 已建立之草稿識別（送簽失敗重試時沿用，避免重複建立 / 單一草稿擋）
   const persisted = useRef<{ doc_id: string; version_id: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // 我方主動導向（存草稿 / 送簽成功、取消確認後）→ 略過離開攔截，避免自家導向被再次攔問。
+  const bypassGuard = useRef(false)
 
   const isManual = isNew && form.category_code === MANUAL_CATEGORY
   const fileNotPreviewable = file !== null && !isPreviewableMime(file.type)
@@ -161,7 +166,15 @@ export function DmEditorPage() {
     return ids
   }
 
-  const destAfter = (id: string) => (isNew ? `/dm/documents/${id}` : `/dm/documents/${docId}`)
+  // 成功後導向：新增模式回文件庫（草稿 / 送審中不在詳細頁呈現，US4 對未發布一律 404）；
+  // 編輯模式回原文件詳細頁（文件仍為已發布，可見送審中鎖定狀態）。
+  const destAfter = () => (isNew ? "/dm/library" : `/dm/documents/${docId}`)
+
+  // 我方主動導向：先舉旗略過離開攔截再 navigate。
+  const go = (path: string) => {
+    bypassGuard.current = true
+    navigate(path)
+  }
 
   function validate(forSubmit: boolean): boolean {
     const schema = makeEditorSchema({ isNew, isManual, forSubmit })
@@ -180,7 +193,7 @@ export function DmEditorPage() {
       if (!ids) return
       message.success("已儲存為草稿") // DM-MSG-DM03-007
       setDirty(false)
-      navigate(destAfter(ids.doc_id))
+      go(destAfter())
     } catch (e) {
       applyApiError(e)
     } finally {
@@ -197,7 +210,7 @@ export function DmEditorPage() {
       await editorApi.submit(ids.doc_id, { version_id: ids.version_id, assigned_reviewer: form.reviewer_id })
       message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM03-006
       setDirty(false)
-      navigate(destAfter(ids.doc_id))
+      go(destAfter())
     } catch (e) {
       applyApiError(e)
     } finally {
@@ -206,20 +219,39 @@ export function DmEditorPage() {
   }
 
   function handleCancel() {
-    const leave = () => navigate(isNew ? "/dm/library" : `/dm/documents/${docId}`)
+    // 取消鈕：回來源頁（新增→文件庫、編輯→原詳細頁）。有未存變更先二次確認（DM-MSG-DM03-005），
+    // 確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
+    const leave = () => go(isNew ? "/dm/library" : `/dm/documents/${docId}`)
     if (!dirty) {
       leave()
       return
     }
-    // 有未存變更 → 二次確認（DM-MSG-DM03-005）
     confirm({
-      title: "放棄未儲存的變更？",
-      content: "此表單有尚未儲存的變更，離開將不會保留。確定要離開嗎？",
+      title: "尚未儲存",
+      content: "編輯項目將不會保留，確定要離開嗎？",
       okText: "離開不儲存",
       cancelText: "繼續編輯",
       onOk: leave,
     })
   }
+
+  // 離開攔截（DM-MSG-DM03-005）：表單有未存變更且非我方主動導向（go）時，攔下其他 in-app 導向
+  //（左側功能列切換、瀏覽器返回等），彈同款二次確認。取消鈕自帶確認、走 go() 不重複攔問。
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && !bypassGuard.current && currentLocation.pathname !== nextLocation.pathname,
+  )
+  useEffect(() => {
+    if (blocker.state !== "blocked") return
+    confirm({
+      title: "尚未儲存",
+      content: "編輯項目將不會保留，確定要離開嗎？",
+      okText: "離開不儲存",
+      cancelText: "繼續編輯",
+      onOk: () => blocker.proceed(),
+      onCancel: () => blocker.reset(),
+    })
+  }, [blocker, confirm])
 
   if (!isNew && detailLoading) {
     return (
@@ -230,7 +262,7 @@ export function DmEditorPage() {
   }
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1100, mx: "auto" }}>
+    <Box sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
         {isNew ? "新增文件" : `編輯文件 — ${detail?.doc_name ?? ""}`}
       </Typography>
@@ -334,9 +366,6 @@ export function DmEditorPage() {
                     disabled
                   />
                 )}
-                <Alert severity="info">
-                  可見對象與檢索標籤沿用文件既有設定，於此不變更。
-                </Alert>
               </Stack>
             )}
           </Paper>
@@ -383,28 +412,72 @@ export function DmEditorPage() {
 
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle2" gutterBottom>
-              文件檔案
+              文件內容（上傳檔案）
             </Typography>
             <Stack spacing={1}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <Button variant="outlined" component="label" size="small">
-                  選擇檔案
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    hidden
-                    onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
-                  />
-                </Button>
-                <Typography variant="body2" color={file ? "text.primary" : "text.secondary"}>
-                  {file ? file.name : "尚未選擇檔案（單檔）"}
-                </Typography>
+              <Box
+                component="label"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragOver(true)
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOver(false)
+                  onPickFile(e.dataTransfer.files?.[0] ?? null)
+                }}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 0.5,
+                  py: 4,
+                  px: 2,
+                  border: "2px dashed",
+                  borderColor: dragOver ? "primary.main" : errors.file ? "error.main" : "divider",
+                  borderRadius: 1,
+                  bgcolor: dragOver ? "action.selected" : "action.hover",
+                  cursor: "pointer",
+                  textAlign: "center",
+                  transition: "border-color .15s, background-color .15s",
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  hidden
+                  onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+                />
+                <CloudUploadOutlinedIcon sx={{ fontSize: 44, color: "action.active", mb: 0.5 }} />
+                {file ? (
+                  <>
+                    <Typography variant="body2" color="text.primary">
+                      已選擇：{file.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      點擊或拖拉可重新選擇
+                    </Typography>
+                  </>
+                ) : (
+                  <>
+                    <Typography variant="body2" color="text.secondary">
+                      拖拉檔案至此或<Box component="span" sx={{ color: "primary.main" }}>點擊選擇</Box>
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      支援 PDF / Word / Excel / PPT / 圖片，單檔最大 50 MB
+                    </Typography>
+                  </>
+                )}
               </Box>
-              {errors.file && <Typography variant="caption" color="error">{errors.file}</Typography>}
+              {errors.file && (
+                <Typography variant="caption" color="error">
+                  {errors.file}
+                </Typography>
+              )}
               {fileNotPreviewable && (
-                <Alert severity="warning">
-                  此檔案格式（如 Word / Excel）無法線上預覽，閱覽者僅能下載。
-                </Alert>
+                <Alert severity="warning">此檔案格式（如 Word / Excel）無法線上預覽，閱覽者僅能下載。</Alert>
               )}
             </Stack>
           </Paper>
@@ -445,6 +518,33 @@ export function DmEditorPage() {
               </Button>
             </Stack>
           </Paper>
+
+          {/* 最近版本（編輯模式）：呈現本文件近期版本 / 狀態 / 發布日期，供撰寫者對照定版號 */}
+          {!isNew && (recentVersions?.length ?? 0) > 0 && (
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                最近版本
+              </Typography>
+              <Stack divider={<Divider flexItem />} spacing={1}>
+                {(recentVersions ?? []).slice(0, 5).map((v) => (
+                  <Box
+                    key={v.version_id}
+                    sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}
+                  >
+                    <Box>
+                      <Typography variant="body2">{v.version_no}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {v.published_date?.slice(0, 10) ?? "—"}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color={v.is_current ? "success.main" : "text.secondary"}>
+                      {v.is_current ? "目前發布版" : "已被取代"}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Paper>
+          )}
         </Stack>
       </Box>
     </Box>

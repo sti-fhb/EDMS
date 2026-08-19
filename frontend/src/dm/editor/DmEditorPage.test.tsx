@@ -14,7 +14,13 @@ const { navigateSpy, paramsRef } = vi.hoisted(() => ({
 }))
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigateSpy, useParams: () => paramsRef.current }
+  return {
+    ...actual,
+    useNavigate: () => navigateSpy,
+    useParams: () => paramsRef.current,
+    // MemoryRouter 非 data router，useBlocker 會拋錯；測試以永不攔截取代（離開攔截屬 e2e 行為）
+    useBlocker: () => ({ state: "unblocked", proceed: () => {}, reset: () => {} }),
+  }
 })
 
 const PDF = "application/pdf"
@@ -88,7 +94,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     await fillNewForm(user, { withAudience: true })
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
     expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
-    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000009")
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/library") // 新增模式送出後回文件庫（草稿/送審中不在詳細頁）
   }, 20000)
 
   it("送簽失敗後改審核者重試 → 不重複建立文件（HIGH #1 迴歸）", async () => {
@@ -136,7 +142,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     await user.upload(fileInput(), pdfFile())
     await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
     expect(await screen.findByText("已儲存為草稿")).toBeInTheDocument()
-    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000009")
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/library")
   }, 20000)
 
   it("版號重複（後端 DM_DOC_006）→ inline 標於版本號欄（DM-MSG-DM03-009）", async () => {
@@ -157,14 +163,16 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(navigateSpy).not.toHaveBeenCalled()
   }, 20000)
 
-  it("編輯模式：身份欄（名稱）唯讀 + 標籤沿用提示", async () => {
+  it("編輯模式：身份欄（名稱）唯讀、無可見對象下拉、顯示最近版本", async () => {
     paramsRef.current = { docId: "DM-SOP-000001" }
     renderWithProviders(<DmEditorPage />)
     expect(await screen.findByText(/編輯文件 —/)).toBeInTheDocument()
     expect(screen.getByLabelText(/文件名稱/)).toBeDisabled()
-    expect(screen.getByText(/沿用文件既有設定/)).toBeInTheDocument()
     // 編輯模式無可見對象下拉（沿用文件既有）
     expect(screen.queryByRole("combobox", { name: /可見對象/ })).not.toBeInTheDocument()
+    // 最近版本面板（來自 US4 versions 端點：2.1 目前發布版 + 2.0 已被取代）
+    expect(await screen.findByText("最近版本")).toBeInTheDocument()
+    expect(screen.getByText("目前發布版")).toBeInTheDocument()
   })
 
   it("取消且有未存變更 → 二次確認（DM-MSG-DM03-005）", async () => {
@@ -173,7 +181,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     await screen.findByText("新增文件")
     await user.type(screen.getByLabelText(/文件名稱/), "改了一點")
     await user.click(screen.getByRole("button", { name: "取消" }))
-    expect(await screen.findByText(/尚未儲存的變更/)).toBeInTheDocument()
+    expect(await screen.findByText(/編輯項目將不會保留/)).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
   })
 })
