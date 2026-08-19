@@ -553,6 +553,36 @@ async def test_http_create_multipart_success(db, client):
     assert body["doc_id"] == "DM-SOP-000001" and body["previewable"] is True
 
 
+async def test_http_edit_add_version_then_submit_happy(db, client):
+    """編輯模式 HTTP happy path：加版（multipart 含標籤）→ 送簽（JSON）皆 200/201。"""
+    await _seed_user(db, "editor2", "編輯者2")
+    await _seed_user(db, "rev9", "審核九", email="rev9@e.com")
+    await _grant(db, "editor2", DM_EDITOR)
+    await _grant(db, "rev9", DM_REVIEWER)
+    await _publish_doc(db, "DM-SOP-000700", author="editor2", audience=("全體",))
+    token = create_access_token(sub="editor2", ttl_minutes=15)
+    aud = await _audience_id(db, "全體")
+    resp = await client.post(
+        "/api/dm/documents/DM-SOP-000700/versions",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"version_no": "2.0", "change_summary": "改版", "audience_ids": [aud]},
+        files={"file": ("v2.pdf", b"%PDF-1.4 v2", _PDF)},
+    )
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["version_id"]
+    resp2 = await client.post(
+        "/api/dm/documents/DM-SOP-000700/submit",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"version_id": vid, "assigned_reviewer": "rev9"},
+    )
+    assert resp2.status_code == 200, resp2.text
+    # 標籤預帶端點
+    resp3 = await client.get(
+        "/api/dm/editor/documents/DM-SOP-000700/tags", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp3.status_code == 200 and str(aud) in resp3.json()["audience_ids"]
+
+
 async def test_http_add_version_requires_auth(db, client):
     resp = await client.post(
         "/api/dm/documents/DM-SOP-000001/versions",
