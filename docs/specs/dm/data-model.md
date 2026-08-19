@@ -255,23 +255,23 @@ erDiagram
 
 ## DD — DM_DOC_VERSION（文件版本）
 
-文件之各版本；每版本單一檔案；所有版本永久保留（DELETED=0、不實體刪除）。
+文件之各版本；每版本單一檔案（**草稿可暫無檔**）；所有版本永久保留（DELETED=0、不實體刪除）。
 
 | 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
 |----------|----------|----------|------|------|------|
 | VERSION_ID | 版本 ID | BIGINT | Y | 序號 | PK |
 | DOC_ID | 文件編號 | VARCHAR(20) | Y | | FK→ DM_DOCUMENT.DOC_ID |
-| VERSION_NO | 版本號 | VARCHAR(20) | Y | | 撰寫者自行輸入之自由文字（如 v1.0 / 2026v1.0 / v2.0-RC1）；無系統自動建議 / 大小號；同一 DOC_ID 內不重複 |
+| VERSION_NO | 版本號 | VARCHAR(20) | Y | | 撰寫者自行輸入之自由文字（如 v1.0 / 2026v1.0 / v2.0-RC1）；無系統自動建議 / 大小號；**唯一性只對已發布版本（PUBLISHED / SUPERSEDED）**——草稿 / 送審中 / 退回可留空或與其他草稿重複 |
 | CHANGE_SUMMARY | 變更摘要 / 首版摘要 | TEXT | Y | | 同欄；UI label 依首版 / 新版本切換 |
-| FILE_NAME | 檔名 | VARCHAR(255) | Y | | 原始檔名 |
-| FILE_PATH | 檔案路徑 | VARCHAR(500) | Y | | 檔案系統 / 物件儲存路徑（不存 BLOB）|
-| FILE_SIZE | 檔案大小 | BIGINT | Y | | 位元組；上限由 `DP_PARAM`（`DM_FILE_MAX_MB`）控制 |
-| FILE_MIME | 檔案 MIME | VARCHAR(100) | Y | | 供預覽 / 下載判定（PDF / 圖片可預覽）|
+| FILE_NAME | 檔名 | VARCHAR(255) | N | | 原始檔名；**草稿可暫無檔**（送簽 / 發布時才必備）|
+| FILE_PATH | 檔案路徑 | VARCHAR(500) | N | | 檔案系統 / 物件儲存路徑（不存 BLOB）；草稿可暫無檔 |
+| FILE_SIZE | 檔案大小 | BIGINT | N | | 位元組；上限由 `DP_PARAM`（`DM_FILE_MAX_MB`）控制；草稿可暫無檔 |
+| FILE_MIME | 檔案 MIME | VARCHAR(100) | N | | 供預覽 / 下載判定（PDF / 圖片可預覽）；草稿可暫無檔 |
 | STATUS | 版本狀態 | VARCHAR(20) | Y | DRAFT | DRAFT / PENDING_REVIEW / PUBLISHED（目前發布版）/ SUPERSEDED（已被新版取代）/ REJECTED（送審被退回）。**文件廢止後**，廢止前最後發布版**維持 PUBLISHED**（廢止屬文件層、該版未被取代）|
 | APPROVER_USER_ID | 核准者 | VARCHAR(20) | N | | FK→ DP_USER；核准發布時寫入（自 Session）|
 | PUBLISHED_DATE | 發布時間 | TIMESTAMP | N | | 即核准時間 |
 
-> 含標準欄位（CREATED_USER = 該版本撰寫者 / 作者）。唯一約束 (DOC_ID, VERSION_NO)（版本號同文件內不重複；應用層另給友善訊息 DM-MSG-DM03-009）。
+> 含標準欄位（CREATED_USER = 該版本撰寫者 / 作者）。**版本號唯一只對已發布版本**：partial unique index `UX_DM_DOC_VERSION_RELEASED_NO (DOC_ID, VERSION_NO) WHERE STATUS IN ('PUBLISHED','SUPERSEDED')`；草稿可留空 / 重複，送簽時應用層檢核不與已發布重複（DM-MSG-DM03-009）。**每人每文件一份草稿**：partial unique index `UX_DM_DOC_VERSION_ONE_DRAFT (DOC_ID, CREATED_USER) WHERE STATUS='DRAFT'`（不同撰寫者可各自開草稿、互不阻擋；應用層另給 DM_DOC_009）。
 
 ## DD — DM_DOC_TAG（文件標籤關聯，明細）
 
