@@ -14,8 +14,8 @@
 | # | 標題 | 對應 | 階段 | 涵蓋 Tasks | 主要前置 |
 |---|------|------|------|-----------|---------|
 | 0 | 專案建置與基礎建設 | — | Setup + Foundational | T001 ~ T032 + T125 ~ T129（37 任務）| 無 |
-| 1 | 登入頁（登入 / 註冊 / 忘記密碼）| US2 / UCET012 | P1-核心 | T033 ~ T040（8 任務）| #0 |
-| 2 | ET07 權限管理與標籤維護 | US1 / UCET010 | P1-核心 | T041 ~ T045 + T130（6 任務）| #1 |
+| 1 | ET 登入後角色導向與學員角色自動授予 | US2 / UCET012 | P1-核心 | T034, T035, T037（3 任務；T033 / T036 / T038 ~ T040 廢除）| #0 |
+| 2 | ET 權限與標籤指派轉接層（DP 後台呼叫）| US1 / UCET010 | P1-核心 | T041 ~ T045 + T130（6 任務；T045 / T130 改寫為轉接層）| #0 |
 | 3 | ET02 課程建立與編輯（含標籤 / 起訖 / 問卷建立）| US3 / UCET002 | P1-核心 | T046 ~ T057 + T131, T138, T142（15 任務）| #2 |
 | 4 | ET04 我的課程與加入新課程 | US4 / UCET007 | P1-核心 | T058 ~ T062（5 任務）| #3 |
 | 5 | ET05 章節學習 | US5 / UCET008 | P1-核心 | T063 ~ T072（10 任務）| #3, #4 |
@@ -23,14 +23,16 @@
 | 7 | ET01 課程列表瀏覽 | US7 / UCET001 | P2-延伸 | T084 ~ T085（2 任務）| #3 |
 | 8 | ET02 邀請學員（標籤自動邀請＋寄信）| US8 / UCET004 | P2-延伸 | T086 ~ T090, T136, T137（7 任務；T091 廢除）| #3, #2 |
 | 9 | ET03 學員學習狀況追蹤（含作答明細 / 問卷結果）| US9 / UCET005 | P2-延伸 | T092 ~ T096 + T144, T149（7 任務）| #3, #4, #5, #6, #15 |
-| 10 | ET08 個人資料維護 | US10 / UCET011 | P2-延伸 | T097 ~ T101（5 任務）| #1 |
+| 10 | 個人資料維護導向連結 | US10 / UCET011 | P2-延伸 | T100（1 任務；T097 ~ T099 / T101 廢除）| — |
 | 11 | ET02 課程關閉與再開課 | US11 / UCET003 | P3-輔助 | T102 ~ T106（5 任務）| #3, #6 |
 | 12 | ET03 待加入邀請追蹤 | US12 / UCET006 | P3-輔助 | T107 ~ T111（5 任務）| #8 |
 | 13 | 跨 US 補強：章節更新通知 + 擁有者轉讓 | — | 補強 | T112 ~ T115（4 任務）| #3, #2 |
 | 14 | 整合測試 + 安全 + 部署 | — | 收尾 | T116 ~ T124 + T152 ~ T155（13 任務）| 全部 |
 | 15 | 課後問卷（建立 / 填寫）| US13 / UCET013（建立屬 US3）| P2-延伸 | T141 ~ T143（3 任務）| #3, #5 |
-| 16 | 排程統計與提醒（SCHET001 / SCHET002）| US14 / UCET014 | P2-延伸 | T139, T145 ~ T148（5 任務）| #4, #5, #17 |
-| 17 | ET09 通知範本維護 | US15 / UCET015 | P3-輔助 | T151（1 任務）| #0 |
+| 16 | 排程統計與提醒（SCHET001 / SCHET002）| US14 / UCET014 | P2-延伸 | T139, T145 ~ T148, T164（6 任務）| #4, #5, #17 |
+
+> **2026-08-19 交付前自檢調整**：(1) #1 / #2 / #10 / #17 依 2026-07-08 集中化**大幅裁減或改寫**——登入 / 註冊 / 忘記密碼、個人資料維護、權限管理 UI、通知範本 UI 皆已由平台 DP 上線提供，ET 改為「轉接層 provider + 業務規則」；共廢除 9 項任務。(2) Issue #0 新增 4 張表（T165 ~ T168）。(3) Issue #16 新增週報 CSV 下載端點（T164，取代郵件附件）。
+| 17 | ET 通知範本 seed 與啟停檢查 | US15 / UCET015 | P3-輔助 | T151（1 任務，改寫）| #0 |
 | 18 | ET03 學員線下考核核可 | US16 / UCET016 | P2-延伸 | T156 ~ T161, T163（7 任務）| #3, #6, #17 |
 | 19 | ET10 核可查詢 | US17 / UCET017 | P2-延伸 | T162（1 任務）| #18 |
 
@@ -46,8 +48,8 @@
 - SMTP 伺服器資訊就緒
 
 **涵蓋 Tasks**：
-- T001 建立 ET 模組專案結構（controllers / services / repositories / models / migrations / templates）
-- T002 ~ T020 建立 ET 18 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
+- T001 建立 ET 模組專案結構（`backend/app/et/{功能}/` router / service / repository / schemas / models + deps / bootstrap / provider；migration 於 `backend/alembic/versions/`；前端 `frontend/src/et/{功能}/`）（2026-08-19 對齊專案實際結構）
+- T002 ~ T020、T165 ~ T168 建立 ET 22 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
 - T125 ~ T129 建立 2026-07-02 新增表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT）；通知範本改 seed 至平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，7 類可維護範本〔2026-07-17 增列 APPROVAL_PASSED〕；表由平台 DP 建，ET 不自建，2026-07-08 集中化）
   > 線下核可表 ET_APPROVAL 與 ET_COURSE.REQUIRE_APPROVAL 欄位之 Migration（T156）於 Issue #18 建立（2026-07-17）
 - T021 ~ T023 建立 Lookup 代碼、ET_TAG（5 筆種子：全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）；ET 系統參數（前綴 `ET_`）seed 至平台 `DP_PARAM`（ET 不自建參數表）
@@ -55,10 +57,11 @@
 - T025 ~ T032 共用元件（8 項）：SSO 認證中介層、角色權限檢查、ET 參數載入工具（透過平台 `DP_PARAM` 唯讀查詢）、樂觀鎖檢核、DM Service Client、平台發信服務 Client（經 `DP_EMAIL_LOG`）、Token 產生器、邀請碼產生器
 
 **驗收條件**：
-1. 27 張資料表全部建立（線下核可 ET_APPROVAL 於 Issue #18 建立，全模組共 28 張）；標準稽核欄位（CREATED_USER / CREATED_DATE / UPDATED_USER / UPDATED_DATE）齊備
+1. **28 張** ET 業務表全部建立（線下核可 ET_APPROVAL 於 Issue #18 建立，**ET 業務表共 29 張**；另引用平台 DP 之 `DP_USER` / `DP_PARAM` / `DP_NOTIFY_TEMPLATE`，ET 不自建）；標準稽核欄位（CREATED_USER / CREATED_DATE / UPDATED_USER / UPDATED_DATE）齊備
+   > **2026-08-19 新增 4 張**：`ET_MATERIAL_VIDEO`（含 **DURATION_SEC**，覆蓋率分母）、`ET_MATERIAL_DOC`（`DOC_ID` VARCHAR(20)）、`ET_PROGRESS_VIDEO`（逐支影片覆蓋率）、`ET_QUIZ_RETRY_RESET`（重考次數重置基準，append-only）——對應 T165 ~ T168
 2. 9 類 Lookup 代碼資料（2026-07-17 增列 ET_APPROVAL_RESULT）、5 筆 ET_TAG 種子載入成功；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）、7 類通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`；含 APPROVAL_PASSED）seed 由平台 DP 載入成功
 3. IT 透過 Seed Script 寫入 `DP_USER` + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
-4. SSO 認證中介層可驗證 session 並注入 USER_ID 與角色清單
+4. ET 模組存取閘可驗證平台 DP 之 JWT（重用 `get_jwt_payload`）並注入 USER_ID 與 ET 角色清單；未具任何 ET 角色者回 403
 5. 樂觀鎖工具於版本不符時回傳明確衝突訊息
 6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與內容
 7. Email Server Client 可寄送一封測試信至指定信箱（TLS 連線、模板渲染）
@@ -68,44 +71,42 @@
 
 ---
 
-## Issue #1：登入頁（登入 / 註冊 / 忘記密碼）
+## Issue #1：ET 登入後角色導向與學員角色自動授予（2026-08-19 大幅裁減）
 
-**對應規格**：[spec_us2.md](spec_us2.md)、UCET012、畫面：登入頁
+**對應規格**：[spec_us2.md](spec_us2.md)、UCET012、畫面：**無（登入頁由平台 DP 提供，畫面碼 DP01–DP03）**
 **階段**：P1-核心
 **前置條件**：
-- Issue #0 完成（`DP_USER` / ET_USER_ROLE 表 + SSO 認證中介層 + Email Server Client 就緒）
+- Issue #0 完成（ET_USER_ROLE 表 + ET 模組存取閘就緒）
+- 平台 DP 之登入 / 註冊 / 忘記密碼已上線（DP Issue #31 / #39 / #47 / #56，**均已完成**）
+
+> **2026-08-19 裁減說明**：本 issue 原名「登入頁（登入 / 註冊 / 忘記密碼）」、涵蓋 T033 ~ T040 共 8 項，要求 ET 自建登入頁與帳密驗證 / 註冊 / 忘記密碼 endpoint。2026-07-08 集中化後規格已改為「由平台 DP 提供」，但任務與 issue 未同步裁減；交付前自檢確認 **DP 對應功能皆已上線**，故本 issue 縮為 ET 專屬的兩項業務規則。
 
 **涵蓋 Tasks**：
-- T033 `DP_USER` Repository（含 PASSWORD_RESET_* 欄位）
-- T034 ET_USER_ROLE Repository
-- T035 登入 Endpoint（驗證 + session + 角色導向預設首頁）
-- T036 登入頁前端（登入 / 註冊 / 忘記密碼三項；錯誤訊息分流）
-- T037 註冊 Endpoint（EMAIL 唯一檢核、密碼雜湊、自動授予 STUDENT）
-- T038 忘記密碼 Endpoint（寄送 30 分鐘有效之重設信）
-- T039 密碼重設頁面（驗證 token + 雜湊更新）
-- T040 忘記密碼 Email 為平台系統信（`DP_NOTIFY_TEMPLATE`，`MODULE=DP`；由平台 DP 維護、不在 ET `MODULE=ET` 清單、ET 不可 UI 編輯）
+- T034 ET_USER_ROLE Repository（依 USER_ID 查角色清單、寫入新角色）
+- T035 ET 登入後角色導向（管理者 → ET07、教師 → ET01、學員 → ET04；多重角色預設教師 ET01）
+- T037 ET 端自動授予「學員」角色（帳號建立當下寫入 ET_USER_ROLE，受訓單位標籤預設「未指派」）
+- ~~T033 / T036 / T038 / T039 / T040~~ — 廢除（登入頁 UI、帳密驗證、忘記密碼、密碼重設頁與信件範本皆由平台 DP 提供）
 
 **驗收條件**：
-1. 正確帳號 / 密碼登入成功，依角色（管理者 → ET07、教師 → ET01、學員 → ET04）導向預設首頁
-2. 錯誤帳號顯示「查無此帳號，請先註冊」；錯誤密碼顯示「密碼錯誤」（不洩漏帳號存在性）
-3. 註冊成功後自動授予「學員」角色；跳回登入頁並預填新 Email
-4. 重複註冊既有 Email 系統阻擋並提示
-5. 忘記密碼後 30 分鐘內點擊重設連結可重設成功
-6. 重設連結逾 30 分鐘失效，顯示「連結已失效，請重新申請」
-7. 密碼採雜湊儲存（bcrypt 或 argon2）
-8. 防帳號列舉：忘記密碼對不存在之 Email 仍回應正常訊息
+1. 使用者於**平台 DP 登入頁**登入成功後進入 ET，依 ET 角色導向預設首頁（管理者 → ET07、教師 → ET01、學員 → ET04）
+2. 具多重角色者預設導向教師首頁（ET01），其餘角色首頁可由 ET 側邊選單切換
+3. 新帳號建立（DP 自助註冊或管理者代建）後，ET_USER_ROLE 自動出現一筆 ROLE=STUDENT，受訓單位標籤為「未指派」
+4. 未具任何 ET 角色之已登入使用者存取 ET 端點時被 ET 模組存取閘擋下（403）
+5. **不驗收**帳密驗證 / 防帳號列舉 / 密碼雜湊 / 重設連結 TTL —— 屬平台 DP 職責，已於 DP Issue #31 / #47 驗收
 
-**Labels**：`P1-核心`, `US2`, `UCET012`, `auth`, `frontend`, `backend`
+**Labels**：`P1-核心`, `US2`, `UCET012`, `backend`
 
 ---
 
-## Issue #2：ET07 權限管理與標籤維護（2026-07-02 更新）
+## Issue #2：ET 權限與標籤指派轉接層（2026-08-19 改寫）
 
-**對應規格**：[spec_us1.md](spec_us1.md)、UCET010、畫面：系統設定「參數設定」（標籤庫）＋「權限管理」（角色與標籤指派）分頁（ET07；系統設定 3 分頁＝參數設定 / 權限管理 / 通知範本，比照 DM09）
+**對應規格**：[spec_us1.md](spec_us1.md)、UCET010、畫面：**平台 DP 後台「權限管理」＋「系統參數與清單」**（ET07 為文件層對照碼；ET 不自建系統設定畫面）
 **階段**：P1-核心
 **前置條件**：
-- Issue #1 完成（使用者主檔已建立）
-- 當前登入者具備管理者角色
+- Issue #0 完成（ET_USER_ROLE / ET_TAG / ET_USER_TAG 表 + 啟動期 registry 註冊就緒）
+- 平台 DP 後台已上線（DP Issue #140 dp-roles 權限管理、#68 dp-params 系統參數與清單，**均已完成**）
+
+> **2026-08-19 改寫說明**：本 issue 原要求 ET 自建「系統設定」3 分頁（參數設定 / 權限管理 / 通知範本，比照 DM09）。2026-07-08 集中化後維護介面已移至平台 DP 後台並按模組過濾，且 DP 側已上線。ET 端**改為提供轉接層 provider**（比照 DM `DmAssignProvider` / `CatalogAdapter`）——`app/core/module_assign.py` 之 registry 註解已明文預留「ET＝受訓單位標籤」。**「誰配誰」之業務判定（貼標追溯、自動邀請）仍留 ET**。
 
 **涵蓋 Tasks**：
 - T041 ET_USER_TAG Repository
@@ -346,7 +347,7 @@
 
 **涵蓋 Tasks**：
 - T092 已加入學員查詢 Service（含完課狀態 / 進度 / 平均成績計算）
-- T093 重置重考次數 Service（限上限已用且未及格時可重置）
+- T093 重置重考次數 Service（限上限已用且未及格時可重置；以 `ET_QUIZ_RETRY_RESET` 記基準，**不刪 attempt**）
 - T094 移除學員 Service（IS_REMOVED + REMOVED_AT；IN_PROGRESS attempt 跳警告但允許完成）
 - T095 匯出 CSV Service
 - T096 ET03 學員頁面（課程下拉 + 學員清單 + 操作按鈕 + 匯出 CSV）
@@ -359,7 +360,7 @@
 3. 平均成績以已作答測驗之最高分平均（排除未作答測驗）
 4. 教師點擊學員可展開其各測驗之**歷次 attempt 清單**（作答時間 / 總分 / 是否及格），點入單次檢視**逐題明細**（題目 / 學員作答 / 正確答案 / 對錯 / 得分，依快照渲染）（2026-07-02 新增）
 5. 「問卷結果」區塊（「已加入」頁籤區塊 3）：各題選項分布統計（人數 / 百分比、已填未填人數）＋逐學員（具名）明細＋匯出 CSV；課程無問卷時本區塊隱藏（2026-07-02 新增）
-6. 「重置重考次數」僅當該學員之測驗已用次數 = 上限且尚未及格時可用
+6. 「重置重考次數」僅當該學員之測驗已用次數 = 上限且尚未及格時可用；重置後該學員可再作答，且**歷次 attempt 明細仍完整可回看**（重置不刪除任何作答紀錄）
 7. 「移除學員」寫入 IS_REMOVED；若該學員有 IN_PROGRESS attempt 跳警告但允許完成
 8. 移除後該學員 ET_ENROLLMENT 不再列入完課率統計，學習歷史保留
 9. 「匯出 CSV」依當前篩選條件產生 CSV，含完整欄位
@@ -369,32 +370,25 @@
 
 ---
 
-## Issue #10：ET08 個人資料維護
+## Issue #10：個人資料維護導向連結（2026-08-19 大幅裁減）
 
-**對應規格**：[spec_us10.md](spec_us10.md)、UCET011、畫面：ET08
+**對應規格**：[spec_us10.md](spec_us10.md)、UCET011、畫面：**ET08（由平台 DP 提供，平台畫面碼 DP04）**
 **階段**：P2-延伸
 **前置條件**：
-- Issue #1 完成
-- Email Server 已配置
+- 平台 DP 個人資料維護已上線（DP Issue #83 dp-profile，**已完成**）
+
+> **2026-08-19 裁減說明**：本 issue 原涵蓋 T097 ~ T101 共 5 項，要求 ET 自建個資頁與 Email 雙信箱共存變更流程。該能力已由平台 DP 完整提供並上線，ET **無後端開發項**。
 
 **涵蓋 Tasks**：
-- T097 Email 變更 Service（雙信箱共存模式：EMAIL_PENDING_CHANGE / TOKEN / EXPIRES_AT）
-- T098 Email 變更驗證 Endpoint（驗證後切換 + 強制 session 登出）
-- T099 密碼變更 Service（驗證舊密碼 + 雜湊更新）
-- T100 ET08 個人資料頁面（姓名 / Email / 變更密碼三區塊 + PENDING 狀態）
-- T101 Email 變更驗證信為平台系統信（`DP_NOTIFY_TEMPLATE`，`MODULE=DP`；由平台 DP 維護、不在 ET `MODULE=ET` 清單、ET 不可 UI 編輯）
+- T100 ET 側欄 / 右上選單之「個人資料」導向連結（指向平台 DP 個資頁）
+- ~~T097 / T098 / T099 / T101~~ — 廢除（Email 變更、密碼變更、驗證信範本皆由平台 DP 提供）
 
 **驗收條件**：
-1. 使用者編輯姓名後直接儲存 → 同步寫入共用 `DP_USER`，DM / ET 兩端皆生效
-2. 變更帳號（Email）：系統寄發驗證信至新 Email，平台級 `DP_PARAM.DP_PASSWORD_RESET_TTL_MIN`（認證 TTL 由平台 DP 提供）內有效
-3. Email 變更期間舊 Email 仍可登入（雙信箱共存）
-4. 點擊驗證連結 → `DP_USER.EMAIL` 更新為新值、清除 PENDING、強制當前 session 登出
-5. 連結逾時或被新請求取代 → 該請求作廢，舊 Email 維持不變
-6. 變更密碼：驗證舊密碼 → 新密碼兩次一致 → 雜湊更新；同步寫入共用 `DP_USER`（DM 同步生效）
-7. 舊密碼錯誤 → 顯示「舊密碼不正確」
-8. 忘記密碼改走 Issue #1 之忘記密碼流程
+1. ET 側欄 / 右上個資選單提供「個人資料」入口，點擊後導向平台 DP 個資頁
+2. 使用者於平台 DP 變更姓名 / Email / 密碼後，ET 端顯示之姓名同步更新（ET 唯讀引用 `DP_USER`）
+3. **不驗收**雙信箱共存流程、驗證信 TTL、舊密碼檢核 —— 屬平台 DP 職責，已於 DP Issue #83 驗收
 
-**Labels**：`P2-延伸`, `US10`, `UCET011`, `profile`, `email-change`, `frontend`, `backend`
+**Labels**：`P2-延伸`, `US10`, `UCET011`, `frontend`
 
 ---
 
@@ -558,7 +552,8 @@
 
 **涵蓋 Tasks**：
 - T145 SCHET001 統計快照 Service（開放中課程 → ET_WEEKLY_STAT，append-only；job handler 於平台 `DP_SCHEDULE` 註冊）
-- T146 週報產生與寄送（教師自己課程 / 管理者全域；內文摘要＋CSV＋與上週比較；經平台發信服務）
+- T146 週報產生與寄送（教師自己課程 / 管理者全域；內文摘要＋逐學員明細 CSV **下載連結**＋與上週比較；經平台發信服務）
+- T164 週報逐學員明細 CSV **下載端點**（需登入；教師限自己課程 / 管理者全域；內容即時產生）（2026-08-19 新增，取代原郵件附件設計）
 - T147 每週未看提醒（進度 0% 者一人一信彙整）
 - T139 到期自動關閉（SCHET002 內；→ Issue #11 驗收 3）
 - T148 截止前加急提醒（訖止前 N 天、所有未完課者、每課一次）
@@ -566,37 +561,39 @@
 **驗收條件**：
 1. SCHET001 於每週一 10:00（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 可調）由平台排程引擎執行（於 `DP_SCHEDULE` 註冊、`DP_SCHEDULE_LOG` 記錄）；僅統計開放中課程
 2. 每門課程寫入一筆 ET_WEEKLY_STAT（課程×統計日期唯一；含平均進度%、三態人數、完課率、已加入數）
-3. 教師收到自己開放中課程之週報、管理者收到全域週報；內文含平均進度%（與上週比較）、人數分布、完課率、距訖止天數、未開始名單；附 CSV 逐學員明細
-4. 首次統計（無上週快照）時「與上週比較」顯示「—」
-5. 週提醒僅寄**進度 0%** 學員；一人一信彙整列出所有未開始課程；>0% / 已完課 / 已移除不寄
-6. SCHET002 每日執行：到期課程自動轉 CLOSED；訖止前 3 天（`DP_PARAM.ET_URGENT_REMIND_DAYS` 可調）對所有未完課學員寄加急提醒（經平台發信服務）
-7. 加急提醒每門課程只寄一次（URGENT_REMIND_SENT 防重複）；再開課重設起訖後歸零重計
-8. 已關閉 / 未到起始課程不納入統計與提醒；寄送失敗寫入 log、不影響快照
+3. 教師收到自己開放中課程之週報、管理者收到全域週報；內文含平均進度%（與上週比較）、人數分布、完課率、距訖止天數、未開始名單，以及逐學員明細 **CSV 下載連結**（`{{REPORT_CSV_URL}}`；**非郵件附件**——平台唯一發信服務不支援附件）
+4. 點擊週報之 CSV 下載連結需登入方可取得；教師僅能下載自己為擁有者之課程明細、管理者可下載全域；越權存取被擋
+5. 首次統計（無上週快照）時「與上週比較」顯示「—」
+6. 週提醒僅寄**進度 0%** 學員；一人一信彙整列出所有未開始課程；>0% / 已完課 / 已移除不寄
+7. SCHET002 每日執行：到期課程自動轉 CLOSED；訖止前 3 天（`DP_PARAM.ET_URGENT_REMIND_DAYS` 可調）對所有未完課學員寄加急提醒（經平台發信服務）
+8. 加急提醒每門課程只寄一次（URGENT_REMIND_SENT 防重複）；再開課重設起訖後歸零重計
+9. 已關閉 / 未到起始課程不納入統計與提醒；寄送失敗寫入 log、不影響快照
 
 **Labels**：`P2-延伸`, `US14`, `UCET014`, `schedule`, `report`, `notification`, `backend`
 
 ---
 
-## Issue #17：ET09 通知範本維護（2026-07-02 新增）
+## Issue #17：ET 通知範本 seed 與啟停檢查（2026-08-19 改寫）
 
-**對應規格**：[spec_us15.md](spec_us15.md)、UCET015、畫面：系統設定「通知範本」分頁（ET09；與 ET07 合併於單一系統設定畫面，比照 DM09）
+**對應規格**：[spec_us15.md](spec_us15.md)、UCET015、畫面：**平台 DP 後台「通知範本」**（ET09 為文件層對照碼；ET 不自建維護畫面）
 **階段**：P3-輔助
 **前置條件**：
-- Issue #0 完成（平台 `DP_NOTIFY_TEMPLATE` 表由平台 DP 建立、ET 7 類可維護範本 `MODULE=ET` seed 已建；2026-07-17 增列 APPROVAL_PASSED）
-- 當前登入者具備管理者角色
+- Issue #0 完成（平台 `DP_NOTIFY_TEMPLATE` 表由平台 DP 建立）
+- 平台 DP 通知範本維護已上線（DP Issue #92 dp-templates，**已完成**）
+
+> **2026-08-19 改寫說明**：本 issue 原要求 ET 自建 ET09 通知範本維護頁（範本清單、主旨 / 內文編輯、變數插入、樂觀鎖、排程參數調整）。該 UI 已由平台 DP 後台「通知範本」統一提供（按模組過濾，ET 管理者只見 `MODULE=ET` 的列），排程參數則於 DP 後台「系統參數與清單」調整。ET 端只剩 **seed 與寄送前檢查**。
 
 **涵蓋 Tasks**：
-- T151 ET09 通知範本維護頁（讀寫平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`；範本清單、主旨 / 內文編輯、變數插入、排程參數調整）
+- T151 ET 7 類通知範本之 seed（`MODULE=ET`）與各寄信點寄送前之 `IS_ACTIVE` 檢查
 
 **驗收條件**：
-1. 列出平台 `DP_NOTIFY_TEMPLATE` 中 `MODULE=ET` 之 7 類內建範本（COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT / APPROVAL_PASSED）；不可新增 / 刪除範本代碼；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）不在清單（由平台維護、ET 不可編輯 / 停用）
-1a. 每範本可**啟用 / 停用**（IS_ACTIVE，比照 DM）；停用後該類信件不寄送（觸發事件照常運作），清單標示「已停用」（2026-07-02 新增）
-2. 管理者可編輯主旨與內文（支援變數如 {{COURSE_NAME}}；未定義變數儲存時警告）
-3. 儲存後所有該類信件依新內容渲染；樂觀鎖防多人同時編輯覆蓋
-4. 可調整排程參數（平台 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `DP_PARAM.ET_URGENT_REMIND_DAYS`，正整數檢核；維護 UI 在 ET09）
-5. 教師 / 學員無法進入 ET09（選單不顯示、endpoint 拒絕）；教師於 US8 僅可預覽不可編輯信件內容
+1. 部署後平台 `DP_NOTIFY_TEMPLATE` 存在 `MODULE=ET` 之 7 類範本：COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT / APPROVAL_PASSED；範本代碼固定、不可由 ET 新增或刪除
+2. ET 管理者於**平台 DP 後台「通知範本」**可見且僅可編輯 `MODULE=ET` 之列；密碼重設 / 帳號變更驗證（`MODULE=DP`）不在其可編輯範圍
+3. 各寄信點（T136 邀請 / T112 內容更新 / T146 週報 / T147 週提醒 / T148 加急 / T159 核可通過）於寄送前檢查對應範本之 `IS_ACTIVE`；停用時**不寄該類信件**，但觸發事件（自動加入學員、統計快照等）照常運作
+4. 排程參數（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `ET_URGENT_REMIND_DAYS`）於 DP 後台「系統參數與清單」調整後，ET 排程於下次執行即套用
+5. **不驗收**範本編輯 UI、變數插入、未定義變數警告、樂觀鎖 —— 屬平台 DP 職責，已於 DP Issue #92 驗收
 
-**Labels**：`P3-輔助`, `US15`, `UCET015`, `admin`, `notification`, `frontend`, `backend`
+**Labels**：`P3-輔助`, `US15`, `UCET015`, `notification`, `backend`
 
 ---
 

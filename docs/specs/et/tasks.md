@@ -9,7 +9,7 @@
 
 ## Phase 1: 專案設定
 
-- [ ] T001 建立 ET 模組專案結構，依 plan.md 文件結構建立 et/ 目錄與子目錄（controllers / services / repositories / models / migrations / templates）
+- [ ] T001 建立 ET 模組專案結構（2026-08-19 對齊專案實際結構，比照 DM）：後端 `backend/app/et/{功能}/`（`router.py` / `service.py` / `repository.py` / `schemas.py` / `models.py`）+ `deps.py`（模組存取閘）+ `bootstrap.py`（啟動期 registry 註冊）+ `provider.py`（DP 後台轉接層）；Migration 置於 `backend/alembic/versions/`；前端 `frontend/src/et/{功能}/`（TypeScript，依功能組織）。~~原：controllers / repositories / templates 目錄~~ **廢除**——非本專案結構；`templates/` 尤其不需要（通知範本存平台 `DP_NOTIFY_TEMPLATE`，ET 不自持）
 - [ ] T002 [P] **(移除／改由平台 DP 負責)** 帳號主檔 migration：ET **不建立**帳號表 migration；`DP_USER`（帳號 Email / 密碼雜湊 / 姓名 / 狀態 / Email 變更 PENDING 等欄位）由**平台模組 DP** 建立與維護，ET 各表一律以 USER_ID（VARCHAR(20)）FK 引用；原「協調 DM 模組共識定義」改由平台 DP 統一定義
 - [ ] T003 [P] 建立資料庫 Migration：**ET_USER_ROLE** 使用者角色，含 (USER_ID, ROLE) 邏輯唯一索引
 - [ ] T004 [P] 建立資料庫 Migration：**ET_TAG** 受訓單位標籤（TAG_NAME 唯一、IS_ACTIVE / IS_ALL / IS_BUILTIN）（2026-07-02 改寫，原 ET_USER_MODULE 廢除）
@@ -17,14 +17,14 @@
 - [ ] T006 [P] 建立資料庫 Migration：**ET_COURSE** 課程主檔，含 VERSION 樂觀鎖欄位、INVITATION_CODE 唯一索引、OPEN_START_AT / OPEN_END_AT / URGENT_REMIND_SENT（2026-07-02 增欄）
 - [ ] T007 [P] 建立資料庫 Migration：**ET_CHAPTER** 章節，含 (COURSE_ID, SORT_ORDER) 邏輯唯一索引
 - [ ] T008 [P] 建立資料庫 Migration：**ET_ITEM** 章節項目，含 (CHAPTER_ID, SORT_ORDER) 邏輯唯一索引；ITEM_TYPE / MATERIAL_ID / QUIZ_ID 互斥 CHECK constraint
-- [ ] T009 [P] 建立資料庫 Migration：**ET_MATERIAL** 教材內容
+- [ ] T009 [P] 建立資料庫 Migration：**ET_MATERIAL** 教材內容（2026-08-19 拆表：本表僅存 MATERIAL_NAME / DESCRIPTION_HTML / VERSION，影片與 DM 文件移至子表 → T165 / T166）
 - [ ] T010 [P] 建立資料庫 Migration：**ET_QUIZ** 測驗主檔
 - [ ] T011 [P] 建立資料庫 Migration：**ET_QUESTION** 題目
 - [ ] T012 [P] 建立資料庫 Migration：**ET_OPTION** 選項
 - [ ] T013 [P] 建立資料庫 Migration：**ET_ENROLLMENT** 選課關聯，含 (USER_ID, COURSE_ID) 邏輯唯一索引
-- [ ] T014 [P] 建立資料庫 Migration：**ET_PROGRESS** 學習進度，含 (USER_ID, ITEM_ID) 邏輯唯一索引
-- [ ] T015 [P] 建立資料庫 Migration：**ET_PROGRESS_INTERVAL** 影片觀看區段，含 (USER_ID, ITEM_ID) 索引
-- [ ] T016 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_M** 測驗作答主檔（含 QUESTION_ORDER / OPTION_ORDER / 規則快照欄位）
+- [ ] T014 [P] 建立資料庫 Migration：**ET_PROGRESS** 學習進度（**項目層**），含 (USER_ID, ITEM_ID) 邏輯唯一索引（2026-08-19：LAST_POSITION_SEC / COVERAGE_PCT 移至 ET_PROGRESS_VIDEO → T167）
+- [ ] T015 [P] 建立資料庫 Migration：**ET_PROGRESS_INTERVAL** 影片觀看區段，含 (USER_ID, **VIDEO_ID**) 索引（2026-08-19 變更：原掛 ITEM_ID，多支影片時無法區辨）
+- [ ] T016 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_M** 測驗作答主檔（含 **ATTEMPT_NO**〔(USER_ID, QUIZ_ID, ATTEMPT_NO) 邏輯唯一〕、QUESTION_ORDER / OPTION_ORDER / 規則快照欄位）（2026-08-19 補 ATTEMPT_NO）
 - [ ] T017 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_D** 作答明細（含題目 / 選項 / 配分快照欄位）
 - [ ] T018 [P] 建立資料庫 Migration：**ET_INVITATION** 邀請紀錄，含 TOKEN 唯一索引
 - [ ] T019 [P] 建立資料庫 Migration：**ET_OWNER_TRANSFER** 擁有者轉讓稽核紀錄
@@ -32,19 +32,23 @@
 - [ ] T021 建立 Lookup 代碼初始資料（ET_USER_ROLE_TYPE、ET_COURSE_STATUS（DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除）、ET_ENROLLMENT_SOURCE（含 TAG_DEFAULT）、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類），參照 data-model.md Lookup 表
 - [ ] T022 建立 ET_TAG 初始資料（5 筆：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師，皆 IS_BUILTIN），參照 data-model.md（2026-07-02 改寫，原 ET_MODULE 7 筆廢除）
 - [ ] T023 建立 ET 系統參數 seed（於平台 `DP_PARAM`，前綴 `ET_`：ET_VIDEO_ALLOWED_FORMATS / ET_VIDEO_MAX_SIZE_MB / ET_VIDEO_PLAYBACK_MAX_RATE / ET_INVITATION_CODE_LENGTH / ET_WEEKLY_STAT_DAY_TIME / ET_URGENT_REMIND_DAYS），參照 data-model.md（2026-07-08 集中化：ET 不自建參數表；密碼重設 TTL 改平台級 `DP_` 參數；EMAIL_NOTIFY_* 已移至 `DP_NOTIFY_TEMPLATE`）
+- [ ] T165 [P] 建立資料庫 Migration：**ET_MATERIAL_VIDEO** 教材影片子表（FILE_PATH / FILE_NAME / **DURATION_SEC** / FILE_SIZE_BYTES / SORT_ORDER；(MATERIAL_ID, SORT_ORDER) 邏輯唯一）（2026-08-19 新增，S4 拆表結案）
+- [ ] T166 [P] 建立資料庫 Migration：**ET_MATERIAL_DOC** 教材引用文件子表（**DOC_ID VARCHAR(20)**，非 DB 外鍵；(MATERIAL_ID, DOC_ID) 邏輯唯一）（2026-08-19 新增）
+- [ ] T167 [P] 建立資料庫 Migration：**ET_PROGRESS_VIDEO** 影片進度（COVERAGE_PCT / LAST_POSITION_SEC；(USER_ID, VIDEO_ID) 邏輯唯一）（2026-08-19 新增）
+- [ ] T168 [P] 建立資料庫 Migration：**ET_QUIZ_RETRY_RESET** 重考次數重置紀錄（append-only；ATTEMPT_COUNT_AT_RESET / EXECUTED_BY / EXECUTED_AT；索引 (USER_ID, QUIZ_ID)）（2026-08-19 新增）
 - [ ] T024 建立**系統初始化第一個管理者** Migration / Seed Script：寫入 `DP_USER`（帳號主檔由平台模組 DP 定義；IT 部署時提供 Email / 初始密碼 hash）+ ET_USER_ROLE（ROLE=ADMIN）
 
 ---
 
 ## Phase 2: 基礎共用元件
 
-- [ ] T025 [P] 實作 SSO 認證中介層：登入 session 管理、密碼雜湊（建議 bcrypt 或 argon2）、與 DM 共用 `DP_USER` 主檔之 read / write 邏輯
-- [ ] T026 [P] 實作角色權限檢查中介層：依登入 session 之 ET_USER_ROLE 判斷 endpoint 存取權（2026-07-02：ET_USER_MODULE 改 ET_USER_TAG，標籤僅供邀請不涉權限）
+- [ ] T025 [P] 實作 **ET 模組存取閘與啟動註冊**（比照 DM `app/dm/deps.py` + `bootstrap.py`）：認證重用平台 `get_jwt_payload`（DP 對稱 JWT，缺 token / 竄改 / 停用 / 鎖定由平台先擋）；授權查 `ET_USER_ROLE` 要求至少一個 ET 角色、否則 403；啟動期註冊 `module_role_gate` / `module_admin_gate` / `module_assign_registry`。~~原：SSO 認證中介層（session 管理、密碼雜湊、DP_USER read/write）~~ **（2026-08-19 廢除：交付前自檢確認此能力已由平台 DP 提供並已上線，ET 不重複實作）**——登入 / session / 密碼雜湊由平台 DP 以 JWT 提供
+- [ ] T026 [P] 實作**細粒度角色檢核工具**（比照 DM `dm.roles.authz.has_role`）：於 T025 存取閘注入之 ET 角色集上，逐端點檢核所需角色（管理者 / 教師 / 學員）；受訓單位標籤**僅供自動邀請、不涉權限判定**（2026-08-19 更正：原寫「依登入 session」，認證改為平台 DP 之 JWT；2026-07-02：ET_USER_MODULE 改 ET_USER_TAG）
 - [ ] T027 [P] 實作 ET 參數載入工具：透過平台 `DP_PARAM` 唯讀查詢服務讀取前綴 `ET_` 參數，應用啟動時 cache，提供 get(key) 介面；變更後可手動 reload（ET 不自建參數表）
 - [ ] T028 [P] 實作樂觀鎖檢核工具：寫入時 WHERE VERSION = ?，不等則回傳衝突訊息
-- [ ] T029 [P] 實作 DM Service Client：呼叫 SRVDM001 查詢訓練教材分類文件清單；呼叫 SRVDM002 取得文件最新版內容與廢止狀態（參照 contracts/srv-et-dm-document-*.md；DM 編碼待對齊）
+- [ ] T029 [P] 實作 DM Service Client（經 `app/services` 之 DM Service in-process 呼叫，**不打 DM HTTP 端點**——DM 存取閘要求呼叫者具 DM 角色，ET 學員未必具備）：呼叫 **SRVDM002** 查詢訓練教材分類（`category=TRAINING`）文件清單；呼叫 **SRVDM001** 依 `docId`（VARCHAR(20)）取當前發布版 metadata 與廢止狀態（`obsolete` / `status`）（參照 contracts/srv-et-dm-document-*.md；2026-08-19 已依 DM 定稿契約對齊編碼與型別）
 - [ ] T030 [P] 實作平台發信服務 Client：呼叫平台唯一發信服務（傳 `template_code` + 變數），經平台 outbox `DP_EMAIL_LOG` 非同步寄送、回報寄送結果；ET 不自建 SMTP 連線 / 寄件佇列（2026-07-08 集中化；參照 contracts/ext-et-email-server.md）
-- [ ] T031 [P] 實作 Token 產生器：邀請 token / 密碼重設 token / Email 變更驗證 token，cryptographically secure random（≥ 32 bytes）
+- [ ] T031 [P] 實作 **邀請 token** 產生器：cryptographically secure random（≥ 32 bytes）。~~密碼重設 token / Email 變更驗證 token~~ **（2026-08-19 廢除：交付前自檢確認此能力已由平台 DP 提供並已上線，ET 不重複實作）**（屬帳號安全，由平台 DP 產生與驗證）
 - [ ] T032 [P] 實作邀請碼產生器：8 碼純數字、全域唯一檢核（碰撞時重產）
 
 ---
@@ -56,14 +60,12 @@
 > **規格子檔**: [spec_us2.md](spec_us2.md) | **驗收情境**: 10 條
 > **前置**: Phase 1-2 完成；Email Server 已配置
 
-- [ ] T033 [US2] 實作 `DP_USER` Repository（CRUD、依 EMAIL 查詢、PASSWORD_RESET_* 欄位寫入）
+> **2026-08-19 大幅裁減**：登入 / 註冊 / 忘記密碼之 UI 與流程**已由平台 DP 完整提供並上線**（DP Issue #31 登入、#39 自助註冊、#47 忘記密碼、#56 Email 驗證啟用）。本 Phase 僅保留兩項 **ET 專屬業務規則**（per [spec_us2.md](spec_us2.md) 平台對齊註記）。
+
 - [ ] T034 [US2] 實作 ET_USER_ROLE Repository（依 USER_ID 查角色清單、寫入新角色）
-- [ ] T035 [US2] 實作登入 Endpoint：驗證帳號 / 密碼、產生 session、依角色導向預設首頁（管理者 → ET07、教師 → ET01、學員 → ET04）
-- [ ] T036 [US2] 實作登入頁前端（et/login）：登入 / 註冊 / 忘記密碼三項動作；錯誤訊息分流（查無此帳號 / 密碼錯誤）
-- [ ] T037 [US2] 實作註冊 Endpoint：檢核 EMAIL 未存在、密碼兩次一致、雜湊儲存；ET_USER_ROLE 自動授予 STUDENT
-- [ ] T038 [US2] 實作忘記密碼 Endpoint：寄送密碼重設信至 Email（30 分鐘有效，TTL 由平台級 `DP_PARAM.DP_PASSWORD_RESET_TTL_MIN` 控制，認證由平台 DP 提供）；token 寫入 `DP_USER.PASSWORD_RESET_TOKEN` / EXPIRES_AT
-- [ ] T039 [US2] 實作密碼重設頁面（et/reset-password）：驗證 token 有效性、輸入新密碼、雜湊更新 `DP_USER.PASSWORD_HASH`
-- [ ] T040 [US2] 忘記密碼 Email 為**平台系統信**（`DP_NOTIFY_TEMPLATE`，`MODULE=DP`；含 user_name、reset_link、ttl_min 變數）——由平台 DP 提供與維護，不在 ET `MODULE=ET` 清單、ET 不開放 UI 編輯（2026-07-08 集中化；ET 寄信呼叫平台發信服務傳 template_code）
+- [ ] T035 [US2] 實作 **ET 登入後角色導向**：讀當前使用者之 ET_USER_ROLE，依角色導向 ET 預設首頁（管理者 → ET07、教師 → ET01、學員 → ET04；多重角色預設教師 ET01）。~~原：登入 Endpoint（驗證帳號 / 密碼、產生 session）~~ **（2026-08-19 廢除：交付前自檢確認此能力已由平台 DP 提供並已上線，ET 不重複實作）**
+- [ ] T037 [US2] 實作 **ET 端自動授予「學員」角色**：於帳號建立（自助註冊 / 管理者代建）當下寫入 ET_USER_ROLE（ROLE=STUDENT）、受訓單位標籤預設「未指派」。~~原：註冊 Endpoint（EMAIL 唯一檢核、密碼雜湊）~~ **（2026-08-19 廢除：交付前自檢確認此能力已由平台 DP 提供並已上線，ET 不重複實作）**
+- [ ] ~~T033 `DP_USER` Repository~~ / ~~T036 登入頁前端~~ / ~~T038 忘記密碼 Endpoint~~ / ~~T039 密碼重設頁面~~ / ~~T040 密碼重設信範本~~ — 全數 **（2026-08-19 廢除：交付前自檢確認此能力已由平台 DP 提供並已上線，ET 不重複實作）**
 
 ---
 
@@ -80,7 +82,7 @@
   - **新增對應**：自動將使用者補加入該標籤所有「已發布且未關閉」課程（寫入 ET_ENROLLMENT，加入來源 = TAG_DEFAULT），並寄**彙整一封**通知信（範本 COURSE_INVITE_DIGEST，列出所有新加入課程）
   - **移除對應**：既有 ET_ENROLLMENT **不變動**；之後新發布之該標籤課程不自動邀請
 - [ ] T044 [US1] 實作權限管理 Endpoint（GET / POST）：列出所有使用者 + 角色 + 受訓單位標籤；變更紀錄寫入稽核 log
-- [ ] T045 [US1] 實作 ET07 權限管理頁面：使用者清單（含搜尋、標籤篩選）、角色核取方塊、受訓單位標籤展開設定（核取方塊多選）、最後修改欄位顯示
+- [ ] T045 [US1] 實作 **ET 指派轉接層 provider**（`EtAssignProvider`，比照 DM `app/dm/provider.py`）並註冊進 `module_assign_registry`：實作 `get_users_assignments`（回 roles + groups＝受訓單位標籤 + 最後修改者 / 時間）與 `assign`（角色 + 標籤指派、含自我保護檢核）。~~原：ET07 權限管理頁面（ET 自建 UI）~~ **（2026-08-19 改寫：維護介面由平台 DP 後台「權限管理」統一提供〔DP Issue #140 dp-roles 已上線〕，ET 只需提供轉接層；registry 註解已明文預留「ET＝受訓單位標籤」）**
 
 ---
 
@@ -97,9 +99,9 @@
 - [ ] T049 [US3] 實作 ET_MATERIAL Repository（CRUD、影片上傳整合、DM 文件引用清單）
 - [ ] T050 [US3] 實作 ET_QUIZ / ET_QUESTION / ET_OPTION Repository（CRUD、配分總和檢核、軟刪除、多選題至少 1 正確選項檢核）
 - [ ] T051 [US3] 實作影片上傳 Service：格式檢核（per `DP_PARAM.ET_VIDEO_ALLOWED_FORMATS`）、大小檢核（per `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`）、本地儲存 / OSS 路徑寫入 ET_MATERIAL
-- [ ] T052 [US3] 實作課程發布檢核 Service：「至少 1 章節 + 1 教材」+「**至少 1 個受訓單位標籤**」+「**起訖時間已填**」+「各測驗配分總和 = 100」+「無引用之廢止 DM 文件」（呼叫 SRVDM002 判定廢止狀態）；檢核通過後觸發標籤自動邀請（→ T136）（2026-07-02 更新）
+- [ ] T052 [US3] 實作課程發布檢核 Service：「至少 1 章節 + 1 教材」+「**至少 1 個受訓單位標籤**」+「**起訖時間已填**」+「各測驗配分總和 = 100」+「無引用之廢止 DM 文件」（呼叫 **SRVDM001** 依 `docId` 取 `obsolete` 判定廢止狀態）；檢核通過後觸發標籤自動邀請（→ T136）（2026-07-02 更新）
 - [ ] T053 [US3] 實作 ET02 課程編輯頁面：基本資料區（**受訓單位標籤多選 + 起訖時間**；已發布標籤可加不可移）+ 章節編排（拖拉式 sortable）+ 教材編輯視窗 + 測驗編輯視窗 + 課後問卷區塊（→ T142）+ 儲存草稿 / 發布按鈕（2026-07-02 更新）
-- [ ] T054 [US3] 實作教材編輯視窗：三類媒材組合（影片上傳、DM 文件下拉 from SRVDM001、WYSIWYG 說明文字）；廢止文件警告顯示
+- [ ] T054 [US3] 實作教材編輯視窗：三類媒材組合（影片上傳、DM 文件下拉 from **SRVDM002**、WYSIWYG 說明文字）；廢止文件警告顯示
 - [ ] T055 [US3] 實作測驗編輯視窗：測驗設定（及格分數 / 時間限制 / 重考次數）+ 題目編輯（單選 / 多選、題幹、選項、配分）+ 配分總和檢核
 - [ ] T056 [US3] 實作樂觀鎖衝突 UI：寫入失敗時跳出「內容已被其他裝置變更，請重新整理後再儲存」提示
 - [ ] T057 [US3] 實作章節 / 題目刪除 Service：軟刪除本體（DELETED=1）；學員 ET_PROGRESS / ET_QUIZ_ATTEMPT_D 連帶 hard delete
@@ -131,11 +133,11 @@
 - [ ] T063 [US5] 實作 ET_PROGRESS Repository（CRUD、依 USER_ID + COURSE_ID 查進度、依 USER_ID + ITEM_ID 更新）
 - [ ] T064 [US5] 實作 ET_PROGRESS_INTERVAL Repository（依 USER_ID + ITEM_ID INSERT / SELECT / DELETE）
 - [ ] T065 [US5] 實作章節學習頁面（ET05）：左側章節導覽列（已完成 / 進行中 / 未解鎖狀態標示）+ 中間內容區（影片播放器 / DM 文件預覽 / WYSIWYG 顯示）
-- [ ] T066 [US5] 實作 HTML5 影片播放器整合：暫停 / 跳轉 / 結束事件監聽 → INSERT ET_PROGRESS_INTERVAL；onbeforeunload 觸發 normalize；**倍速控制（0.75–2x，上限依 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE`）**（2026-07-02 更新）
-- [ ] T067 [US5] 實作影片覆蓋率計算 Service：聚合 ET_PROGRESS_INTERVAL 之區段聯集去重；更新 ET_PROGRESS.COVERAGE_PCT
+- [ ] T066 [US5] 實作 HTML5 影片播放器整合：暫停 / 跳轉 / 結束事件監聽 → INSERT ET_PROGRESS_INTERVAL（帶 **VIDEO_ID**）；多支影片時逐支播放、逐支記錄；onbeforeunload 觸發 normalize；**倍速控制（0.75–2x，上限依 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE`）**（2026-07-02 更新）
+- [ ] T067 [US5] 實作影片覆蓋率計算 Service：**逐支影片**聚合 ET_PROGRESS_INTERVAL 之區段聯集去重 ÷ `ET_MATERIAL_VIDEO.DURATION_SEC`；回寫 `ET_PROGRESS_VIDEO.COVERAGE_PCT`；再依「該教材**所有影片**皆 ≥ 80%」判定並更新 `ET_PROGRESS.IS_COMPLETED`（2026-08-19 改為逐支計算）
 - [ ] T068 [US5] 實作 ET_PROGRESS_INTERVAL normalize Service：SELECT → 排序 → 合併重疊 / 鄰近區段 → DELETE → INSERT（學員離開頁面或補做時呼叫）
 - [ ] T069 [US5] 實作章節解鎖判定 Service：依章節組成（含影片 / 僅文件 / 含測驗）判定解鎖條件；上一章節未通過時下一章節阻擋
-- [ ] T070 [US5] 實作 DM 文件嵌入：PDF 頁內預覽（呼叫 SRVDM002 取得 content_url）；非 PDF 提供「下載原檔」連結；廢止文件顯示「此文件已廢止」標籤
+- [ ] T070 [US5] 實作 DM 文件嵌入：呼叫 **SRVDM001** 取當前發布版 metadata（`currentVersionId` / `fileMime`），檔案本體經 DM 檔案存取能力取得（**不得直接讀回應之 `filePath`**——違反模組邊界且 DM #160 正做 storage-root 圍籬）；PDF 頁內預覽、非 PDF 提供「下載原檔」連結；`obsolete=true` 時顯示「此文件已廢止」標籤。⚠ **前置待議**：DM 現有檔案端點掛 DM 角色閘（403 `DM_AUTH_001`）會擋 ET 學員，需 DM 於 `app/services` 另暴露不掛該閘之檔案讀取 Service（見 contracts/srv-et-dm-document-content.md §檔案內容之取得）
 - [ ] T071 [US5] 實作上次觀看位置恢復：依 ET_PROGRESS.LAST_POSITION_SEC 與 ITEM_ID 自動定位
 - [ ] T072 [US5] 實作關閉唯讀處理（2026-07-02 改寫）：課程已關閉時學員仍可開啟並**唯讀回看**已學內容；禁止累積進度 / 作答 / 解鎖 / 填問卷；起始時間未到之課程不可進入
 
@@ -198,7 +200,7 @@
 > **前置**: US3 / US4 / US5 / US6 完成
 
 - [ ] T092 [US9] 實作已加入學員查詢 Service：依 COURSE_ID 列出 ET_ENROLLMENT（過濾 IS_REMOVED）；JOIN `DP_USER` 取姓名；計算完課狀態 / 學習進度（依 ET_PROGRESS 占比）/ 平均成績（已作答測驗最高分平均，排除未作答）/ 最後活動時間
-- [ ] T093 [US9] 實作重置重考次數 Service：限定條件「該學員於該測驗已用重考次數 = 上限且尚未及格」；重置即新增允許之 attempt 額度（具體實作可用 ET_QUIZ_ATTEMPT_M 新增允許之計數欄位，或於 Service 端動態計算）。UI 按鈕位於區塊 2 作答明細之各測驗標題列（以測驗為單位；2026-07-02 移入 → T149）
+- [ ] T093 [US9] 實作重置重考次數 Service（2026-08-19 定案實作方式）：限定條件「該學員於該測驗已用重考次數 = `MAX_RETRY` 且尚未及格」；重置時於 **`ET_QUIZ_RETRY_RESET`** INSERT 一筆（記錄當下 attempt 總數為新基準、執行者、時間），**不得刪除任何 attempt**；已用重考次數 = max(0, COUNT(attempt) − MAX(基準) − 1)。課程 CLOSED 期間停用。UI 按鈕位於區塊 2 作答明細之各測驗標題列（以測驗為單位；2026-07-02 移入 → T149）
 - [ ] T094 [US9] 實作移除學員 Service：寫入 ET_ENROLLMENT.IS_REMOVED = true、REMOVED_AT；若該學員有 IN_PROGRESS attempt 跳警告但允許完成
 - [ ] T095 [US9] 實作匯出 CSV Service：依當前篩選條件產生 CSV（含完整欄位）
 - [ ] T096 [US9] 實作 ET03 學員頁面（「已加入」頁籤區塊 1 學員清單 + 「待加入」頁籤）：課程下拉 + 學員清單 + 個別操作**僅移除學員**（區塊 1）+ 匯出 CSV 按鈕（依條件啟用 / 禁用；課程已關閉時僅可閱覽）（2026-07-02 更新；作答明細 → T149 區塊 2、重置重考次數按鈕併入 T149 各測驗標題列、問卷結果 → T144 區塊 3）
@@ -212,11 +214,10 @@
 > **規格子檔**: [spec_us10.md](spec_us10.md) | **驗收情境**: 10 條
 > **前置**: US2 完成；Email Server 已配置
 
-- [ ] T097 [US10] 實作 Email 變更 Service：寫入 `DP_USER.EMAIL_PENDING_CHANGE` / TOKEN / EXPIRES_AT；舊 EMAIL 不變；寄送驗證信至新 Email；舊請求被新請求取代
-- [ ] T098 [US10] 實作 Email 變更驗證 Endpoint：驗證 token 與 expires_at；通過則 `DP_USER.EMAIL` 更新為新值、清除 PENDING；強制當前 session 登出
-- [ ] T099 [US10] 實作密碼變更 Service：檢核舊密碼、新密碼兩次一致、雜湊更新 `DP_USER.PASSWORD_HASH`
-- [ ] T100 [US10] 實作 ET08 個人資料頁面：姓名 / Email / 變更密碼三區塊；Email 變更後顯示「PENDING：請至新信箱點擊驗證連結」狀態
-- [ ] T101 [US10] Email 變更驗證信為**平台系統信**（`DP_NOTIFY_TEMPLATE`，`MODULE=DP`；含 user_name、verify_link、old_email、new_email、ttl_min 變數）——由平台 DP 提供與維護，不在 ET `MODULE=ET` 清單、ET 不開放 UI 編輯（2026-07-08 集中化；ET 寄信呼叫平台發信服務傳 template_code）
+> **2026-08-19 全 Phase 裁減**：個人資料維護（姓名 / 帳號 Email / 密碼變更、雙信箱共存驗證流程）**已由平台 DP 完整提供並上線**（DP Issue #83 dp-profile 個人資料維護 + 強制變更密碼）。ET **無後端開發項**，僅需前端於側欄 / 右上個資選單提供導向平台 DP 個資頁之連結（ET08 畫面碼保留為文件層對照，per [spec_us10.md](spec_us10.md)）。
+
+- [ ] T100 [US10] 實作 **ET 側欄 / 右上選單之「個人資料」導向連結**（指向平台 DP 個資頁；ET 不自建個資畫面）
+- [ ] ~~T097 Email 變更 Service~~ / ~~T098 Email 變更驗證 Endpoint~~ / ~~T099 密碼變更 Service~~ / ~~T101 Email 變更驗證信範本~~ — 全數 **（2026-08-19 廢除：交付前自檢確認此能力已由平台 DP 提供並已上線，ET 不重複實作）**
 
 ---
 
@@ -287,7 +288,7 @@
 
 ### 標籤（US1 / US3）
 
-- [ ] T130 [US1] 實作 ET_TAG Repository 與標籤庫維護 Service + UI（系統設定「參數設定」分頁）：新增 / 修改 / 停用 / 啟用；「全體」不可停用刪除；TAG_NAME 唯一檢核
+- [ ] T130 [US1] 實作 ET_TAG Repository + **受控主檔轉接層**（`list_controlled` / `create_controlled` / `rename_controlled` / `set_controlled_enabled`，比照 DM `CatalogAdapter`）：新增 / 修改 / 停用 / 啟用；「全體」（IS_ALL）不可停用刪除；TAG_NAME 唯一檢核。~~原：ET 自建標籤庫維護 UI（系統設定「參數設定」分頁）~~ **（2026-08-19 改寫：維護介面由平台 DP 後台「系統參數與清單」統一提供〔DP Issue #68 dp-params 已上線〕，ET 只需提供轉接層）**
 - [ ] T131 [US3] 實作 ET_COURSE_TAG Repository 與課程標籤掛載 Service：草稿自由增刪；已發布可新增（觸發 T136 補邀請）不可移除；僅可掛啟用中標籤
 
 ### 標籤自動邀請（US8）
@@ -310,7 +311,8 @@
 ### 排程統計與提醒（US14）
 
 - [ ] T145 [US14] 實作 SCHET001 統計快照 Service（job handler 於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄）：統計開放中課程（平均進度%、三態人數、完課率、已加入數）寫入 ET_WEEKLY_STAT（append-only）
-- [ ] T146 [US14] 實作週報產生與寄送：教師（自己課程）/ 管理者（全域）各一封；內文摘要（含與上週比較、距訖止天數、未開始名單）+ CSV 逐學員明細；平台範本 WEEKLY_REPORT（`DP_NOTIFY_TEMPLATE` `MODULE=ET`），經平台發信服務寄送
+- [ ] T146 [US14] 實作週報產生與寄送：教師（自己課程）/ 管理者（全域）各一封；內文摘要（含與上週比較、距訖止天數、未開始名單）+ 逐學員明細 CSV **下載連結**（變數 `{{REPORT_CSV_URL}}`，非附件——平台發信服務不支援附件，見 T164）；平台範本 WEEKLY_REPORT（`DP_NOTIFY_TEMPLATE` `MODULE=ET`），經平台發信服務寄送
+- [ ] T164 [US14] 實作**週報逐學員明細 CSV 下載端點**（2026-08-19 新增，取代原郵件附件設計）：依課程產生逐學員 CSV（姓名、Email〔唯讀 join `DP_USER`〕、進度%、完課狀態、最後活動時間）；**需登入**（平台 DP JWT），未登入導向登入頁；授權由 ET 判定——教師僅限自己為 `ET_COURSE.OWNER_ID` 之課程、管理者全域，越權回無權限；內容於請求當下即時查詢（非寄信時凍結），課程關閉後仍可下載；端點 URL 由 T146 以 `{{REPORT_CSV_URL}}` 帶入週報內文
 - [ ] T147 [US14] 實作每週未看提醒：對進度 0% 學員一人一信彙整（平台範本 WEEKLY_REMIND，`MODULE=ET`）；>0% / 已完課 / 已移除不寄
 - [ ] T148 [US14] 實作截止前加急提醒（SCHET002 job handler 內）：訖止前 N 天（`DP_PARAM.ET_URGENT_REMIND_DAYS`）對所有未完課學員寄信（平台範本 URGENT_REMIND，`MODULE=ET`）；URGENT_REMIND_SENT 防重複；再開課歸零
 
@@ -321,7 +323,7 @@
 
 ### 通知範本維護（US15）
 
-- [ ] T151 [US15] 實作 ET09 通知範本維護頁（讀寫平台 `DP_NOTIFY_TEMPLATE`，僅 `MODULE=ET` 的列）：7 類範本清單（含 APPROVAL_PASSED；密碼重設 / 帳號變更驗證為平台系統信 `MODULE=DP`、不列入）、主旨/內文編輯（變數插入、未定義變數警告、樂觀鎖）、**啟用 / 停用開關（IS_ACTIVE；停用則該類信件不寄送）**、排程參數調整（平台 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `DP_PARAM.ET_URGENT_REMIND_DAYS`）；僅管理者可存取。各寄信點（T136 邀請 / T112 內容更新 / T146 週報 / T147 週提醒 / T148 加急 / T159 核可通過）寄送前檢查對應範本 IS_ACTIVE
+- [ ] T151 [US15] **ET 7 類通知範本之 seed 與寄送前 IS_ACTIVE 檢查**：部署時 seed 7 類 `MODULE=ET` 範本（含 APPROVAL_PASSED）至平台 `DP_NOTIFY_TEMPLATE`（範本代碼固定，管理者僅可編輯主旨 / 內文與啟停）。~~原：ET09 通知範本維護頁（ET 自建 UI，含變數插入 / 未定義變數警告 / 樂觀鎖 / 排程參數調整）~~ **（2026-08-19 改寫：維護 UI 由平台 DP 後台「通知範本」統一提供〔DP Issue #92 dp-templates 已上線〕、排程參數於 DP 後台「系統參數與清單」調整，ET 不自建）**。各寄信點（T136 邀請 / T112 內容更新 / T146 週報 / T147 週提醒 / T148 加急 / T159 核可通過）寄送前檢查對應範本 IS_ACTIVE
 
 ### 整合測試（2026-07-02 新增情境）
 
@@ -422,11 +424,11 @@ Phase 16 (整合收尾，含 T152~T155、T163 新增情境)
 
 | 項目 | 數量 |
 |------|------|
-| 總任務數 | 158（T001~T163，T091 廢除併入 T136；T132~T135、T140 保留未用）|
-| Phase 1 設定（Migrations / Seed）| 24 |
+| 總任務數 | **154**（T001~T168；T091 廢除併入 T136；T132~T135、T140 保留未用；**2026-08-19 再廢除 9 項**——T033 / T036 / T038 / T039 / T040 登入註冊、T097 / T098 / T099 / T101 個資，能力已由平台 DP 上線提供）|
+| Phase 1 設定（Migrations / Seed）| 28（含 2026-08-19 新增 T165~T168：ET_MATERIAL_VIDEO / ET_MATERIAL_DOC / ET_PROGRESS_VIDEO / ET_QUIZ_RETRY_RESET）|
 | Phase 2 共用元件 | 8 |
-| US2 登入 / 註冊 / 忘記密碼（P1）| 8 |
-| US1 權限管理（P1）| 5 |
+| US2 登入 / 註冊 / 忘記密碼（P1）| **2**（原 8，廢除 5、改寫 2；登入 / 註冊 / 忘記密碼由 DP 提供）|
+| US1 權限管理（P1）| 5（T045 / T130 改寫為 **DP 後台轉接層 provider**，非 ET 自建 UI）|
 | US3 課程建立與編輯（P1）| 12 |
 | US4 我的課程與加入（P1）| 5 |
 | US5 章節學習（P1）| 10 |
@@ -434,11 +436,11 @@ Phase 16 (整合收尾，含 T152~T155、T163 新增情境)
 | US7 課程列表瀏覽（P2）| 2 |
 | US8 邀請學員（P2）| 6 |
 | US9 學員學習狀況追蹤（P2）| 5 |
-| US10 個人資料維護（P2）| 5 |
+| US10 個人資料維護（P2）| **1**（原 5，廢除 4；個資維護由 DP 提供，ET 僅留導向連結）|
 | US11 課程關閉與再開課（P3）| 5 |
 | US12 待加入邀請追蹤（P3）| 5 |
 | 跨 US 補強（章節通知 / 擁有者轉讓）| 4 |
 | 整合與收尾 | 9 |
-| Phase 17：2026-07-02 變更新增 | 26（Migrations 5、標籤 2、自動邀請 2、時窗 2、問卷 4、排程 4、明細 2、範本 1、整測 4）|
+| Phase 17：2026-07-02 變更新增 | 27（Migrations 5、標籤 2、自動邀請 2、時窗 2、問卷 4、排程 4、明細 2、範本 1、整測 4、週報 CSV 下載端點 1〔T164，2026-08-19 新增〕）|
 | Phase 18：2026-07-17 線下核可（US16 / US17）| 8（Migration 1、核可作業 5、查詢 1、整測 1）|
 | 可平行機會 | Phase 1（22 組 Migration）、Phase 2（8 組工具）、Phase 7+9+10、Phase 11+12、Phase 13+14 |
