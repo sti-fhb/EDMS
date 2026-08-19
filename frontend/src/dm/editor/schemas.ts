@@ -23,6 +23,12 @@ export interface ReviewerItem {
   user_name: string
 }
 
+/** 文件現有標籤（TAG_ID 字串），供編輯模式預帶可改。 */
+export interface EditorDocTags {
+  audience_ids: string[]
+  retrieval_ids: string[]
+}
+
 /** 新增草稿文件結果。 */
 export interface CreateResult {
   doc_id: string
@@ -91,10 +97,9 @@ export function makeEditorSchema(opts: { isNew: boolean; isManual: boolean; forS
       func_code: z.string(),
       version_no: z.string().trim().min(1, { message: "請輸入版本號" }),
       change_summary: z.string().trim().min(1, { message: "請輸入變更摘要" }),
-      audience_ids:
-        forSubmit && isNew
-          ? z.array(z.string()).min(1, { message: "請至少指定 1 個可見對象" })
-          : z.array(z.string()),
+      audience_ids: forSubmit
+        ? z.array(z.string()).min(1, { message: "請至少指定 1 個可見對象" })
+        : z.array(z.string()),
       retrieval_ids: z.array(z.string()),
       reviewer_id: forSubmit ? z.string().min(1, { message: "請指定審核者" }) : z.string(),
     })

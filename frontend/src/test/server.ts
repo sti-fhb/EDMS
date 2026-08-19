@@ -164,6 +164,9 @@ export const handlers = [
     HttpResponse.json({ version_id: 901, previewable: true }, { status: 201 }),
   ),
   http.post("/api/dm/documents/:docId/submit", () => HttpResponse.json({ review_id: 500, notified: 1 })),
+  http.get("/api/dm/editor/documents/:docId/tags", () =>
+    HttpResponse.json({ audience_ids: ["1"], retrieval_ids: ["20"] }),
+  ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
     HttpResponse.json({

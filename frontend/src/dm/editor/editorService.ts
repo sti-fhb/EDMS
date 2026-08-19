@@ -1,4 +1,11 @@
-import type { CreateResult, EditorOptions, ReviewerItem, SubmitResult, VersionResult } from "./schemas"
+import type {
+  CreateResult,
+  EditorDocTags,
+  EditorOptions,
+  ReviewerItem,
+  SubmitResult,
+  VersionResult,
+} from "./schemas"
 import { http } from "../../services/http"
 
 /**
@@ -18,10 +25,12 @@ export interface CreateDocPayload {
   file: File
 }
 
-/** 編輯模式加新版本之表單欄位（身份欄 / 標籤不送，沿用文件既有）。 */
+/** 編輯模式加新版本之表單欄位（身份欄不送；標籤覆寫文件層）。 */
 export interface AddVersionPayload {
   version_no: string
   change_summary: string
+  audience_ids: string[]
+  retrieval_ids: string[]
   file: File
 }
 
@@ -58,8 +67,15 @@ export const editorApi = {
     const fd = new FormData()
     fd.append("version_no", payload.version_no)
     fd.append("change_summary", payload.change_summary)
+    payload.audience_ids.forEach((id) => fd.append("audience_ids", id))
+    payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
     fd.append("file", payload.file)
     const { data } = await http.post<VersionResult>(`/dm/documents/${docId}/versions`, fd)
+    return data
+  },
+
+  getDocTags: async (docId: string): Promise<EditorDocTags> => {
+    const { data } = await http.get<EditorDocTags>(`/dm/editor/documents/${docId}/tags`)
     return data
   },
 

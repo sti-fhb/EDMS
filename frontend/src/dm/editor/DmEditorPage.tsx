@@ -16,7 +16,7 @@ import { useBlocker, useNavigate, useParams } from "react-router-dom"
 import { EMPTY_EDITOR_FORM, isPreviewableMime, makeEditorSchema, MANUAL_CATEGORY } from "./schemas"
 import type { EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
-import { useEditorOptions, useReviewers } from "./useEditor"
+import { useDocTags, useEditorOptions, useReviewers } from "./useEditor"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
@@ -53,6 +53,7 @@ export function DmEditorPage() {
   const { data: reviewers } = useReviewers()
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, !isNew)
+  const { data: docTags } = useDocTags(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
   const [file, setFile] = useState<File | null>(null)
@@ -65,6 +66,8 @@ export function DmEditorPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   // 我方主動導向（存草稿 / 送簽成功、取消確認後）→ 略過離開攔截，避免自家導向被再次攔問。
   const bypassGuard = useRef(false)
+  // 編輯模式標籤只預帶一次，之後尊重使用者編輯（避免 refetch 覆蓋）。
+  const tagsPrefilled = useRef(false)
 
   const isManual = isNew && form.category_code === MANUAL_CATEGORY
   const fileNotPreviewable = file !== null && !isPreviewableMime(file.type)
@@ -158,6 +161,8 @@ export function DmEditorPage() {
       const r = await editorApi.addVersion(docId!, {
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
+        audience_ids: form.audience_ids,
+        retrieval_ids: form.retrieval_ids,
         file,
       })
       ids = { doc_id: docId!, version_id: r.version_id }
@@ -253,6 +258,13 @@ export function DmEditorPage() {
     })
   }, [blocker, confirm])
 
+  // 編輯模式：載入文件現有標籤 → 一次性預帶進表單（不標記 dirty，尊重後續使用者編輯）。
+  useEffect(() => {
+    if (isNew || tagsPrefilled.current || !docTags) return
+    tagsPrefilled.current = true
+    setForm((prev) => ({ ...prev, audience_ids: docTags.audience_ids, retrieval_ids: docTags.retrieval_ids }))
+  }, [isNew, docTags])
+
   if (!isNew && detailLoading) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
@@ -274,100 +286,104 @@ export function DmEditorPage() {
             <Typography variant="subtitle2" gutterBottom>
               基本資料
             </Typography>
-            {isNew ? (
-              <Stack spacing={2}>
-                <TextField
-                  label="文件名稱"
-                  required
-                  fullWidth
-                  size="small"
-                  value={form.doc_name}
-                  onChange={(e) => setField("doc_name", e.target.value)}
-                  error={!!errors.doc_name}
-                  helperText={errors.doc_name}
-                />
-                <TextField
-                  select
-                  label="分類"
-                  required
-                  fullWidth
-                  size="small"
-                  value={form.category_code}
-                  onChange={(e) => onCategoryChange(e.target.value)}
-                  error={!!errors.category_code}
-                  helperText={errors.category_code}
-                >
-                  {(options?.categories ?? []).map((c) => (
-                    <MenuItem key={c.code} value={c.code}>
-                      {c.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                {isManual && (
+            <Stack spacing={2}>
+              {isNew ? (
+                <>
+                  {/* 新增模式：身份欄可編 */}
                   <TextField
-                    select
-                    label="關聯作業項目"
+                    label="文件名稱"
                     required
                     fullWidth
                     size="small"
-                    value={form.func_code}
-                    onChange={(e) => setField("func_code", e.target.value)}
-                    error={!!errors.func_code}
-                    helperText={errors.func_code}
+                    value={form.doc_name}
+                    onChange={(e) => setField("doc_name", e.target.value)}
+                    error={!!errors.doc_name}
+                    helperText={errors.doc_name}
+                  />
+                  <TextField
+                    select
+                    label="分類"
+                    required
+                    fullWidth
+                    size="small"
+                    value={form.category_code}
+                    onChange={(e) => onCategoryChange(e.target.value)}
+                    error={!!errors.category_code}
+                    helperText={errors.category_code}
                   >
-                    {(options?.funcs ?? []).map((f) => (
-                      <MenuItem key={f.code} value={f.code}>
-                        {f.code} — {f.name}
+                    {(options?.categories ?? []).map((c) => (
+                      <MenuItem key={c.code} value={c.code}>
+                        {c.name}
                       </MenuItem>
                     ))}
                   </TextField>
-                )}
-                <Autocomplete
-                  multiple
-                  size="small"
-                  options={audienceOptions}
-                  value={selectedAudiences}
-                  onChange={(_, v: OptionItem[]) => setField("audience_ids", v.map((o) => o.code))}
-                  getOptionLabel={(o) => o.name}
-                  isOptionEqualToValue={(a, b) => a.code === b.code}
-                  renderInput={(params) => (
+                  {isManual && (
                     <TextField
-                      {...params}
-                      label="可見對象"
+                      select
+                      label="關聯作業項目"
                       required
-                      error={!!errors.audience_ids}
-                      helperText={errors.audience_ids || "至少指定 1 個；「全體」表示所有閱覽者可見"}
+                      fullWidth
+                      size="small"
+                      value={form.func_code}
+                      onChange={(e) => setField("func_code", e.target.value)}
+                      error={!!errors.func_code}
+                      helperText={errors.func_code}
+                    >
+                      {(options?.funcs ?? []).map((f) => (
+                        <MenuItem key={f.code} value={f.code}>
+                          {f.code} — {f.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* 編輯模式：身份欄唯讀（名稱 / 分類 / func） */}
+                  <TextField label="文件名稱" fullWidth size="small" value={detail?.doc_name ?? ""} disabled />
+                  <TextField label="分類" fullWidth size="small" value={detail?.category_name ?? ""} disabled />
+                  {detail?.func_code && (
+                    <TextField
+                      label="關聯作業項目"
+                      fullWidth
+                      size="small"
+                      value={`${detail.func_code} — ${detail.func_name ?? ""}`}
+                      disabled
                     />
                   )}
-                />
-                <Autocomplete
-                  multiple
-                  size="small"
-                  options={retrievalOptions}
-                  value={selectedRetrieval}
-                  onChange={(_, v: OptionItem[]) => setField("retrieval_ids", v.map((o) => o.code))}
-                  getOptionLabel={(o) => o.name}
-                  isOptionEqualToValue={(a, b) => a.code === b.code}
-                  groupBy={(o) => TAG_GROUP_LABELS[o.group_code ?? ""] ?? "標籤"}
-                  renderInput={(params) => <TextField {...params} label="檢索標籤（選填）" />}
-                />
-              </Stack>
-            ) : (
-              <Stack spacing={1.5}>
-                {/* 編輯模式：身份欄唯讀 */}
-                <TextField label="文件名稱" fullWidth size="small" value={detail?.doc_name ?? ""} disabled />
-                <TextField label="分類" fullWidth size="small" value={detail?.category_name ?? ""} disabled />
-                {detail?.func_code && (
+                </>
+              )}
+              {/* 可見對象 + 檢索標籤：新增與編輯模式皆可編（文件層屬性、即時生效） */}
+              <Autocomplete
+                multiple
+                size="small"
+                options={audienceOptions}
+                value={selectedAudiences}
+                onChange={(_, v: OptionItem[]) => setField("audience_ids", v.map((o) => o.code))}
+                getOptionLabel={(o) => o.name}
+                isOptionEqualToValue={(a, b) => a.code === b.code}
+                renderInput={(params) => (
                   <TextField
-                    label="關聯作業項目"
-                    fullWidth
-                    size="small"
-                    value={`${detail.func_code} — ${detail.func_name ?? ""}`}
-                    disabled
+                    {...params}
+                    label="可見對象"
+                    required
+                    error={!!errors.audience_ids}
+                    helperText={errors.audience_ids || "至少指定 1 個；「全體」表示所有閱覽者可見"}
                   />
                 )}
-              </Stack>
-            )}
+              />
+              <Autocomplete
+                multiple
+                size="small"
+                options={retrievalOptions}
+                value={selectedRetrieval}
+                onChange={(_, v: OptionItem[]) => setField("retrieval_ids", v.map((o) => o.code))}
+                getOptionLabel={(o) => o.name}
+                isOptionEqualToValue={(a, b) => a.code === b.code}
+                groupBy={(o) => TAG_GROUP_LABELS[o.group_code ?? ""] ?? "標籤"}
+                renderInput={(params) => <TextField {...params} label="檢索標籤（選填）" />}
+              />
+            </Stack>
           </Paper>
 
           <Paper sx={{ p: 2 }}>

@@ -239,10 +239,13 @@ async def _publish_doc(db, doc_id, *, category="SOP", func_code=None, author="ed
     return doc
 
 
-async def _add_version(db, doc_id, *, version_no="2.0", op=None, mime=_PDF):
+async def _add_version(db, doc_id, *, version_no="2.0", audience=("全體",), retrieval=(), op=None, mime=_PDF):
+    aud_ids = [await _audience_id(db, n) for n in audience]
     return await _svc.add_version(
         db,
         doc_id=doc_id,
+        audience_ids=aud_ids,
+        retrieval_ids=list(retrieval),
         version_no=version_no,
         change_summary="改版",
         file_name="v2.pdf",
@@ -261,16 +264,28 @@ async def test_add_version_creates_draft_keeps_doc_published(db):
     assert doc.status == "PUBLISHED"  # 已發布文件之新版草稿不動文件狀態
 
 
-async def test_add_version_inherits_doc_tags_untouched(db):
-    """新版本沿用文件既有標籤、不動可見性（避免草稿期靜默清空已發布文件標籤）。"""
+async def test_add_version_replaces_doc_tags(db):
+    """編輯模式覆寫文件層標籤（可見對象 / 檢索）——文件屬性、即時生效。"""
     await _publish_doc(db, "DM-SOP-000101", audience=("全體",))
-    await _add_version(db, "DM-SOP-000101", version_no="2.0")
+    await _add_version(db, "DM-SOP-000101", version_no="2.0", audience=("護理師",))
     active = await db.scalars(
         select(DmTag.tag_name)
         .join(DmDocTag, DmDocTag.tag_id == DmTag.tag_id)
         .where(DmDocTag.doc_id == "DM-SOP-000101", DmDocTag.deleted == 0)
     )
-    assert set(active.all()) == {"全體"}  # 標籤原封不動
+    assert set(active.all()) == {"護理師"}  # 全體軟刪、護理師有效
+
+
+async def test_get_doc_tags_for_edit_prefill(db):
+    """編輯模式預帶：回傳文件現有可見對象 / 檢索標籤 ID。"""
+    rid = await _make_retrieval_tag(db, "平時")
+    await _publish_doc(db, "DM-SOP-000105", audience=("全體",))
+    # 加一個檢索標籤到文件
+    db.add(DmDocTag(doc_id="DM-SOP-000105", tag_id=rid, created_user="ed", created_date=utcnow()))
+    await db.flush()
+    tags = await _svc.get_doc_tags(db, "DM-SOP-000105")
+    all_aud = str(await _audience_id(db, "全體"))
+    assert tags.audience_ids == [all_aud] and tags.retrieval_ids == [str(rid)]
 
 
 @pytest.mark.parametrize(
@@ -303,12 +318,22 @@ async def test_add_version_duplicate_version_no_blocked(db):
     assert e.value.error_code == "DM_DOC_006"
 
 
-async def test_add_version_single_draft_blocked(db):
+async def test_add_version_same_user_second_draft_blocked(db):
+    """每人每文件一份草稿：同一使用者已有未送簽草稿 → 擋（DM_DOC_009）。"""
     await _publish_doc(db, "DM-SOP-000103")
-    await _add_version(db, "DM-SOP-000103", version_no="2.0")  # 第一個草稿
+    await _add_version(db, "DM-SOP-000103", version_no="2.0", op=_op("ed"))
     with pytest.raises(AppError) as e:
-        await _add_version(db, "DM-SOP-000103", version_no="3.0")  # 已有未送簽草稿
+        await _add_version(db, "DM-SOP-000103", version_no="3.0", op=_op("ed"))
     assert e.value.error_code == "DM_DOC_009"
+
+
+async def test_add_version_other_user_draft_not_blocked(db):
+    """放寬重點：他人已有草稿時，另一使用者仍可對同文件開自己的草稿（不被卡）。"""
+    await _publish_doc(db, "DM-SOP-000106")
+    await _add_version(db, "DM-SOP-000106", version_no="2.0", op=_op("ed_a"))  # A 的草稿
+    r = await _add_version(db, "DM-SOP-000106", version_no="2.0-b", op=_op("ed_b"))  # B 仍可開
+    ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
+    assert ver.status == "DRAFT" and ver.created_user == "ed_b"
 
 
 async def test_add_version_pending_obsolete_blocked(db):

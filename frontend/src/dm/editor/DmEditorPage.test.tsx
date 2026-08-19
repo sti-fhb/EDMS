@@ -163,13 +163,14 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(navigateSpy).not.toHaveBeenCalled()
   }, 20000)
 
-  it("編輯模式：身份欄（名稱）唯讀、無可見對象下拉、顯示最近版本", async () => {
+  it("編輯模式：身份欄唯讀、可見對象可改且預帶既有、顯示最近版本", async () => {
     paramsRef.current = { docId: "DM-SOP-000001" }
     renderWithProviders(<DmEditorPage />)
     expect(await screen.findByText(/編輯文件 —/)).toBeInTheDocument()
     expect(screen.getByLabelText(/文件名稱/)).toBeDisabled()
-    // 編輯模式無可見對象下拉（沿用文件既有）
-    expect(screen.queryByRole("combobox", { name: /可見對象/ })).not.toBeInTheDocument()
+    // 可見對象下拉存在且預帶文件既有標籤（tags 端點回 audience_ids=["1"]＝全體）
+    expect(screen.getByRole("combobox", { name: /可見對象/ })).toBeInTheDocument()
+    expect(await screen.findByText("全體")).toBeInTheDocument() // 預帶的可見對象 chip
     // 最近版本面板（來自 US4 versions 端點：2.1 目前發布版 + 2.0 已被取代）
     expect(await screen.findByText("最近版本")).toBeInTheDocument()
     expect(screen.getByText("目前發布版")).toBeInTheDocument()

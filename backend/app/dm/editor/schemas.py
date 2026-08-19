@@ -43,6 +43,13 @@ class ReviewerItem(BaseModel):
     user_name: str
 
 
+class EditorDocTags(BaseModel):
+    """文件現有標籤（TAG_ID 字串），供編輯模式預帶可改。"""
+
+    audience_ids: list[str]
+    retrieval_ids: list[str]
+
+
 class OptionItem(BaseModel):
     """表單受控下拉項。"""
 

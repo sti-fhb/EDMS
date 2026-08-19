@@ -26,6 +26,7 @@ from app.dm.document.file_store import is_previewable, validate_upload
 from app.dm.editor.repository import EditorRepository
 from app.dm.editor.schemas import (
     CreateResult,
+    EditorDocTags,
     EditorOptions,
     OptionItem,
     ReviewerItem,
@@ -158,6 +159,8 @@ class EditorService:
         db: AsyncSession,
         *,
         doc_id: str,
+        audience_ids: Sequence[int],
+        retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
         file_name: str,
@@ -165,11 +168,10 @@ class EditorService:
         file_mime: str,
         op: OperatorInfo,
     ) -> VersionResult:
-        """既有文件新增 DRAFT 版本（身份欄不吃）。
+        """既有文件新增 DRAFT 版本（身份欄不吃）+ 覆寫文件層標籤（可見對象 / 檢索）。
 
-        標籤 / 可見性為文件層且與目前發布版共用（DM_DOC_TAG 無 version_id），新版本一律**沿用**
-        文件既有標籤、不於此變更——避免草稿期即改動已發布文件之可見性，且文件詳細（US4）未提供
-        既有標籤 ID 供前端預帶。可見性 / 標籤之維護待專屬讀 API 到位後另議（見 PR 差異紀錄）。
+        標籤 / 可見性為文件層（DM_DOC_TAG 無 version_id），屬文件屬性而非版本屬性；編輯時即時生效
+        （不隨新版本核准才套用）。前端編輯模式以 GET tags 端點預帶既有標籤供修改，避免誤清。
         """
         version_no = (version_no or "").strip()
         change_summary = (change_summary or "").strip()
@@ -180,13 +182,14 @@ class EditorService:
         # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
-        # 單一草稿（Q1=A）：已有未送簽草稿 → 擋，請續編既有草稿
-        if await self._repo.get_open_draft_version(db, doc_id) is not None:
+        # 每人每文件一份草稿：該使用者已有未送簽草稿 → 擋，請續編既有草稿（他人草稿不擋）
+        if await self._repo.get_open_draft_version(db, doc_id, op.user_id) is not None:
             raise AppError(
-                status_code=409, detail="此文件已有未送簽之草稿版本，請續編既有草稿", error_code="DM_DOC_009"
+                status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             )
         if await self._repo.version_no_taken(db, doc_id, version_no):
             raise AppError(status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006")
+        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
         await validate_upload(db, size_bytes=len(file_bytes), filename=file_name)
 
         # 落盤為同步阻塞 I/O，卸載至 thread 以免阻塞事件迴圈。
@@ -207,14 +210,15 @@ class EditorService:
                     op=op,
                 )
         except IntegrityError as exc:
-            # 並發後盾（DB UQ / 單一草稿部分唯一索引）：回退後重查判定友善錯誤。
+            # 並發後盾（DB UQ / 每人每文件一份草稿之部分唯一索引）：回退後重查判定友善錯誤。
             if await self._repo.version_no_taken(db, doc_id, version_no):
                 raise AppError(
                     status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006"
                 ) from exc
             raise AppError(
-                status_code=409, detail="此文件已有未送簽之草稿版本，請續編既有草稿", error_code="DM_DOC_009"
+                status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             ) from exc
+        await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)  # 文件層標籤覆寫（即時生效）
         await self._log(
             db,
             action_type="CREATE",
@@ -223,6 +227,13 @@ class EditorService:
             after={"version_id": ver.version_id, "version_no": version_no},
         )
         return VersionResult(version_id=ver.version_id, previewable=is_previewable(file_mime))
+
+    async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> EditorDocTags:
+        """取文件現有標籤（可見對象 / 檢索之 TAG_ID），供編輯模式表單預帶。查無文件 → 404。"""
+        if await self._repo.get_document(db, doc_id) is None:
+            raise _NOT_FOUND
+        tags = await self._repo.get_doc_tags(db, doc_id)
+        return EditorDocTags(audience_ids=tags["audience_ids"], retrieval_ids=tags["retrieval_ids"])
 
     # ── 送簽 ──────────────────────────────────────────
 

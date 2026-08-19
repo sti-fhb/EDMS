@@ -15,6 +15,7 @@ from app.core.operator import OperatorInfo, get_operator
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.editor.schemas import (
     CreateResult,
+    EditorDocTags,
     EditorOptions,
     ReviewerItem,
     SubmitReq,
@@ -73,16 +74,20 @@ async def add_version(
     version_no: Annotated[str, Form()],
     change_summary: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
+    audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
-    """編輯模式：既有文件加 DRAFT 版本（身份欄 / 標籤不吃，標籤沿用文件既有）。"""
+    """編輯模式：既有文件加 DRAFT 版本（身份欄不吃）+ 覆寫文件層標籤（可見對象 / 檢索）。"""
     _ensure_editor(ctx)
     data = await file.read()
     return await _service.add_version(
         db,
         doc_id=doc_id,
+        audience_ids=audience_ids,
+        retrieval_ids=retrieval_ids,
         version_no=version_no,
         change_summary=change_summary,
         file_name=file.filename or "",
@@ -105,6 +110,16 @@ async def submit_document(
     return await _service.submit(
         db, doc_id=doc_id, version_id=body.version_id, assigned_reviewer=body.assigned_reviewer, op=op
     )
+
+
+@router.get("/editor/documents/{doc_id}/tags", response_model=EditorDocTags)
+async def get_document_tags(
+    doc_id: str,
+    ctx: DmContext = Depends(get_dm_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """編輯模式預帶：文件現有可見對象 / 檢索標籤（TAG_ID）。"""
+    return await _service.get_doc_tags(db, doc_id)
 
 
 @router.get("/reviewers", response_model=list[ReviewerItem])

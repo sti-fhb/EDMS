@@ -134,13 +134,36 @@ class EditorRepository:
             )
         )
 
-    async def get_open_draft_version(self, db: AsyncSession, doc_id: str) -> DmDocVersion | None:
-        """取該文件既有之未送簽草稿版本（單一草稿規則：Q1=A）；無則 None。"""
+    async def get_open_draft_version(self, db: AsyncSession, doc_id: str, user_id: str) -> DmDocVersion | None:
+        """取「該使用者」於此文件既有之未送簽草稿版本（每人每文件至多一份草稿）；無則 None。
+
+        放寬自原「單一草稿」：不同撰寫者可各自對同一文件開新版本草稿、互不阻擋（避免有人留下
+        草稿或請假時卡住全部人）；真正互斥落在「同文件至多一筆進行中送審」(DM_REVIEW_002)。
+        """
         return await db.scalar(
             select(DmDocVersion).where(
-                DmDocVersion.doc_id == doc_id, DmDocVersion.status == _DRAFT, DmDocVersion.deleted == 0
+                DmDocVersion.doc_id == doc_id,
+                DmDocVersion.created_user == user_id,
+                DmDocVersion.status == _DRAFT,
+                DmDocVersion.deleted == 0,
             )
         )
+
+    async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> dict[str, list[str]]:
+        """取文件現有有效標籤，依組型分為可見對象 / 檢索（TAG_ID 字串），供編輯模式預帶。"""
+        rows = await db.execute(
+            select(DmTag.tag_id, DmTagGroup.group_type)
+            .select_from(DmDocTag)
+            .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
+            .order_by(DmTag.tag_id)
+        )
+        audience: list[str] = []
+        retrieval: list[str] = []
+        for tag_id, group_type in rows.all():
+            (audience if group_type == _AUDIENCE else retrieval).append(str(tag_id))
+        return {"audience_ids": audience, "retrieval_ids": retrieval}
 
     async def version_no_taken(self, db: AsyncSession, doc_id: str, version_no: str) -> bool:
         """同文件內版本號是否已存在（DM-MSG-DM03-009 友善檢核；DB UQ 為並發後盾）。"""

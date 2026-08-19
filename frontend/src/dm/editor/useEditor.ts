@@ -11,3 +11,12 @@ export function useEditorOptions() {
 export function useReviewers() {
   return useQuery({ queryKey: ["dm-editor", "reviewers"], queryFn: editorApi.listReviewers })
 }
+
+/** 編輯模式預帶：文件現有可見對象 / 檢索標籤（僅編輯模式啟用）。 */
+export function useDocTags(docId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["dm-editor", "doc-tags", docId],
+    queryFn: () => editorApi.getDocTags(docId),
+    enabled: enabled && !!docId,
+  })
+}
