@@ -38,7 +38,25 @@
 - **2026-07-08 集中化對齊**：系統參數、通知範本、發信、排程集中於平台 DP（見 [../../../requirements/RQDP.md](../../../requirements/RQDP.md)、[../../../_refs/09-平台模組.md](../../../_refs/09-平台模組.md)）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：參數存平台 `DP_PARAM`（前綴 `ET_`）、通知範本存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信走平台唯一發信服務（`DP_EMAIL_LOG`）、排程於平台 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG`）；密碼重設 / Email 變更驗證 TTL 改平台級 `DP_` 參數。維護 UI 於平台 DP 後台（參數於「系統參數與清單」、範本於「通知範本」，按模組過濾）。已傳播至 spec / data-model / plan / research / tasks / issues / contracts / RQET / usecases / wireframe。
 - **已補（原 SA precheck 建議項）**：
   - ~~**S1**：各 spec_us 之功能需求編號~~ ✅ **已補**（2026-07-03；採 `FR-ET-US{N}-NN`，15 檔共 146 條 FR）。
+- **2026-08-19 交付前自檢（全模組 17 US）已補**：
+  - ~~**跨模組契約與 DM 對調**~~ ✅ **已補**：ET 兩份 DM 契約依提供方 DM 之定稿契約（2026-06-24）整份對齊——編碼對調更正（SRVDM001 = 依 DOC_ID 取當前發布版、SRVDM002 = 取分類清單）、`docId` BIGINT → VARCHAR(20)、分類碼 `TRAINING_MATERIAL` → `TRAINING`、回應包裝 `documents` → `items`、廢止語意改採 DM 三態、移除 DM 不提供之欄位（分頁 / `file_type` / `file_size_bytes` / `content_url` / `content_base64`）與 401 錯誤碼；並補「經 `app/services` in-process 呼叫、不打 DM HTTP 端點」（DM 存取閘要求 DM 角色，ET 學員未必具備）。已傳播至 plan / tasks / data-model。
+  - ~~**週報 CSV 郵件附件**~~ ✅ **已改**：平台唯一發信服務不支援附件（`DP_EMAIL_LOG` 無附件欄位、`app/dp/notify/` 無附件實作），且 ET 不得自建寄件佇列 → 改為**內文 CSV 下載連結**（變數 `{{REPORT_CSV_URL}}`）；新增 FR-ET-US14-11（需登入、教師限自己課程 / 管理者全域、內容即時產生、不設連結有效期）與 T164（下載端點）。已傳播至 spec / spec_us14 / contracts / tasks / issues。
+  - ~~**影片覆蓋率無分母欄位**~~ ✅ **已補**：覆蓋率公式 `÷ VIDEO_DURATION` 原無任何表可存 → `ET_MATERIAL_VIDEO.DURATION_SEC`（必填，上傳時自 metadata 取得；取不到不得存檔）。
+  - ~~**「已用重考次數歸 0」與 attempt 永久保留互斥**~~ ✅ **已補**：新增 `ET_QUIZ_RETRY_RESET`（append-only 基準表）+ `ET_QUIZ_ATTEMPT_M.ATTEMPT_NO`；已用次數 = max(0, COUNT(attempt) − MAX(基準) − 1)，重置**不刪任何 attempt**。已更新 FR-ET-US9-06 / T093。
+  - ~~**S4**：`ET_MATERIAL` 多支影片 / 多份 DM 文件 1:N 拆表~~ ✅ **已補**：正式拆為 `ET_MATERIAL_VIDEO` / `ET_MATERIAL_DOC`。**連帶修正**影片進度層級——原 `ET_PROGRESS` / `ET_PROGRESS_INTERVAL` 掛 `ITEM_ID`，多支影片時無法分別判定 80%，改為新增 `ET_PROGRESS_VIDEO` + 區段改掛 `VIDEO_ID`。
+  - ~~**外模組 table 清單未列**~~ ✅ **已補**：spec.md 新增 §外模組 table 引用清單（A 唯讀 JOIN：`DP_USER`；B 經 `app/services` Service：`ParamService` / `NotifyService` / `AuditLogService`），滿足 `sti-backend-boundaries` 之明文要求；做法比照 DM 之 `author_name` 唯讀 join。
+  - ~~**稽核 `FUNC_NAME` 語意碼未定義**~~ ✅ **已補**：spec.md 新增 §稽核來源功能碼，定義 6 個語意碼（`ET-ROLES` / `ET-COURSE` / `ET-OWNER` / `ET-ENROLL` / `ET-QUIZ-RESET` / `ET-APPROVAL`），格式對齊平台既有慣例（`DM-CATALOG` / `DP-AUTH`）。
+  - ~~**tasks / issues 未隨 2026-07-08 集中化裁減**~~ ✅ **已補**：廢除 9 項任務（T033 / T036 / T038 ~ T040 登入註冊、T097 ~ T099 / T101 個資）；T045 / T130 改寫為 **DP 後台轉接層 provider**（比照 DM `DmAssignProvider` / `CatalogAdapter`）、T151 改為範本 seed 與啟停檢查；Issue #1 / #2 / #10 / #17 整段重寫。總任務數 158 → **154**（另新增 T164 ~ T168）。ET 業務表 25 → **29** 張。
+
+  - ~~**plan.md §技術背景陳舊**~~ ✅ **已修**：整表對齊 CLAUDE.md 與平台實況——前端 React 19 + MUI 7 + React Router v7 + TanStack Query v5、後端 FastAPI + SQLAlchemy 2 + Alembic、PostgreSQL 17、認證改平台 DP 對稱 JWT；新增 §程式碼落點（`backend/app/et/{功能}/` + `deps` / `bootstrap` / `provider`，比照 DM）；T001 / issues #0 之 `controllers / repositories / templates` 目錄改為專案實際結構。
+  - ~~**「session」措辭與平台機制矛盾**~~ ✅ **已修**（連帶修正）：平台 DP 明訂**不採 Refresh Token / 伺服器端 session**（登出＝前端丟棄 token），故原 spec 之「寫入 session」「強制當前 session 登出」為平台做不到的動作。已改為「DP 核發 JWT」「須以新 Email 重新登入（既有 JWT 失效方式由平台 DP 定義）」——涉 spec.md、spec_us2（AC1 / FR-01）、spec_us10（AC3 / FR-03）、tasks T026、issues #0 驗收 4。
+  - ~~**SC-004 陳舊**~~ ✅ **已修**：改為「經平台唯一發信服務寄送（`DP_EMAIL_LOG` outbox）」。**連帶** SC-002 去技術詞（原寫「以 HTML5 video player 提供」，與本清單「Success criteria are technology-agnostic」打勾不符）。
+
 - **待補（不擋 SD 開發、建議補強）**：
-  - **S4**：data-model `ET_MATERIAL` 之多支影片 / 多份 DM 文件 1:N 拆表於 plan / data-model phase 2 定案（目前以暫時欄位呈現概念）。
+  - **訊息類型表之 Bootstrap class 標註**（spec.md §Requirements）：ET / DM / DP **三模組 spec 用字完全相同**，屬跨模組共用慣例。ET 單方改為 MUI 會破壞一致性，故本次**不動**；若要更新應三模組同批處理（獨立議題）。
+  - ET → DP 之參數唯讀查詢與排程註冊（`DP_SCHEDULE` job handler 介面）無獨立契約檔（spec.md §跨模組介接總覽有列，DP 端已上線可直接參照實作）。
+  - `ET_INVITATION` 未定義同一課程重複邀請同一 Email 之行為（無 (COURSE_ID, EMAIL) 唯一約束）。
+  - JSON 字串欄位（`QUESTION_ORDER` / `OPTIONS_SNAPSHOT` 等）與「`ET_PROGRESS_INTERVAL` 刻意不用 JSON」原則不一致；專案為 PostgreSQL 17，JSONB 可用，建議 plan 階段統一表態。
+  - wireframe：空資料狀態偏少；側欄殘留「系統設定」死連結（該畫面已移交 DP）；plan.md 之 wireframe 描述與 checklists「待產出」標註陳舊。
 - **2026-07-17 客戶線下核可需求**已傳播至 spec（US16 / US17 索引、§線下核可規則、7 類範本、SC-013）、spec_us16 / spec_us17（新）、spec_us3（REQUIRE_APPROVAL 欄位 + FR-16）、spec_us9 / spec_us15（交叉引用 / 7 類）、data-model（ET_APPROVAL、ET_COURSE.REQUIRE_APPROVAL、ET_APPROVAL_RESULT）、plan / tasks（Phase 18、T156~T163）/ issues（#18 / #19）/ research（#23 走法 A）/ contracts（APPROVAL_PASSED）/ RQET / usecases（UCET016 / UCET017）/ wireframe（ET03 核可欄 + ET10 查詢）。核可為獨立維度，不影響完課率 / 問卷 / 週報。
 - 來源可追溯：spec 內容對應 requirements/RQET.md、use-cases/et/usecases.md、_refs/10-教育訓練文件管理模組.md（source of truth），無新增未授權範圍。

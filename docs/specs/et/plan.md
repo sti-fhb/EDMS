@@ -17,13 +17,16 @@
 
 ## 技術背景
 
+> **2026-08-19 更新**：本表原記載 Bootstrap 樣式、session 認證與 `templates/` 目錄，係模組規劃初期（2026-06）之假設，與專案實際技術棧（CLAUDE.md）及平台 DP 已上線之 JWT 認證不符，已整表對齊實況。
+
 | 項目 | 內容 |
 |------|------|
-| 介接方式 | RESTful API（前後端）+ 與 DM 共用之 `DP_USER` |
-| 前端 | Web 應用程式（教師 / 學員 / 管理者三套介面，需支援 Chrome、Edge、Firefox）；採 Bootstrap 樣式風格 |
-| 影片播放 | HTML5 video player（不串接 YouTube / Vimeo 等外部影音平台）|
-| 資料庫 | PostgreSQL（per CLAUDE.md 規範）|
-| 認證機制 | 與 DM SSO 共用帳號；密碼採雜湊儲存；登入採 session 機制 |
+| 介接方式 | RESTful API（前後端）；**跨模組（ET → DM / DP）走 `app/services` 公開 Service（in-process），不經 HTTP**（per `.claude/rules/sti-backend-boundaries.md`）|
+| 前端 | **React 19 + MUI 7 + React Router v7 + TanStack Query v5**（TypeScript，禁 `.js` / `.jsx`；per CLAUDE.md）；教師 / 學員 / 管理者三種角色視圖，需支援 Chrome、Edge、Firefox |
+| 後端 | **FastAPI 0.115+ + SQLAlchemy 2 + Alembic**（per CLAUDE.md）|
+| 影片播放 | 瀏覽器原生影片播放（不串接 YouTube / Vimeo 等外部影音平台；不需安裝外掛）|
+| 資料庫 | **PostgreSQL 17**（per CLAUDE.md 規範）|
+| 認證機制 | **由平台模組 DP 統一提供（對稱 JWT）**；ET 重用平台 `get_jwt_payload`，另以模組存取閘檢核 `ET_USER_ROLE`（至少一個 ET 角色，否則 403）。帳號 / 密碼雜湊 / 登入流程皆為 DP 職責，ET 不自建 |
 | 認證範圍 | 僅涵蓋 ET + DM 兩系統；與主系統 TBMS 各業務模組之帳號**完全切開** |
 | 安全性 | 所有操作留存稽核日誌（建立者 / 異動者、建立時間 / 異動時間）|
 | 可用性 | 內部訓練系統，營業時段內運作；無 24×7 高可用性要求 |
@@ -66,19 +69,33 @@ specs/et/
 ├── research.md          # Phase 0 研究成果（設計決策紀錄）
 ├── data-model.md        # Phase 1 資料模型（ERD + DD）
 ├── contracts/           # Phase 1 介面契約
-│   ├── srv-et-dm-document-list.md        # 查詢 DM「訓練教材」分類有效文件清單（ET → DM）
-│   ├── srv-et-dm-document-content.md     # 取得 DM 文件最新版內容（ET → DM）
-│   └── ext-et-email-server.md            # 寄送邀請信 / 密碼重設信 / 帳號變更驗證信（ET → Email Server）
+│   ├── srv-et-dm-document-list.md        # SRVDM002：查詢 DM「訓練教材」分類有效文件清單（ET → DM）
+│   ├── srv-et-dm-document-content.md     # SRVDM001：依 DOC_ID 取 DM 文件當前發布版 metadata 與廢止狀態（ET → DM）
+│   └── ext-et-email-server.md            # ET 經平台唯一發信服務寄送 Email（不支援附件）
 ├── checklists/
-│   └── requirements.md  # 規格品質檢核（待產出）
+│   └── requirements.md  # 規格品質檢核
 └── tasks.md             # Phase 2 開發任務清單
+```
+
+### 程式碼落點（對齊專案實際結構）
+
+```text
+backend/app/et/{功能}/          # router.py / service.py / repository.py / schemas.py / models.py
+                                # （比照 backend/app/dm/{library,detail,...}；ET 不設 templates/——通知範本存平台 DP_NOTIFY_TEMPLATE）
+backend/app/et/deps.py          # ET 模組存取閘（重用平台 get_jwt_payload + 檢核 ET_USER_ROLE）
+backend/app/et/bootstrap.py     # 啟動期註冊 module_role_gate / module_admin_gate / module_assign_registry
+backend/app/et/provider.py      # DP 後台轉接層（EtAssignProvider：角色 + 受訓單位標籤指派）
+backend/alembic/versions/       # Migration（ET 各表；per sti-alembic-rules）
+frontend/src/et/{功能}/         # 頁面 / hooks / services / schemas（依功能組織，per CLAUDE.md）
 ```
 
 ### 相關目錄
 
 ```text
 use-cases/et/            # 使用案例（已完成，含 17 條 UCET001 ~ UCET017；UCET016 / UCET017 為 2026-07-17 線下核可新增）
-wireframes/et/index.html # 畫面原型（ET01 ~ ET08、ET10 核可查詢〔2026-07-17〕，及管理者「系統設定」畫面含「參數設定（標籤庫）」「權限管理（ET07）」「通知範本（ET09）」三分頁，比照 DM09；2026-07-02）
+wireframes/et/index.html # 畫面原型（ET01 課程列表、ET02 課程建立與編輯、ET03 學員、ET04 我的課程、ET05 章節學習＋課後問卷、ET06 線上測驗、ET10 核可查詢）
+                         # 註：原型以 Bootstrap 繪製（wireframe 慣例，per sti-spec-structure），實作為 React + MUI；
+                         #     ET07 權限管理 / ET08 個資 / ET09 通知範本之維護畫面已於 2026-07-08 移至平台 DP 後台，ET 不自建
 requirements/RQET.md     # 需求清單（已完成）
 _refs/10-教育訓練文件管理模組.md  # 來源分析資料（source of truth）
 ```
@@ -92,10 +109,12 @@ _refs/10-教育訓練文件管理模組.md  # 來源分析資料（source of tru
 | 方向 | 介接對象 | 編碼 | 介接方式 | 說明 |
 |------|---------|------|---------|------|
 | ET ↔ DM | 文件管理模組（DM） | — | **共用 `DP_USER`** | USER_ID / 帳號 / 密碼 / 姓名共用（帳號主檔由平台模組 DP 定義，認證由平台 DP 以簡單 JWT 提供）；但 ET / DM **各自管理自己的角色與受訓單位標籤**，互不影響 |
-| ET → DM | 文件管理模組（DM） | SRVDM001 *(待 DM 編碼確認)* | 內部服務（主動呼叫） | 查詢「訓練教材」分類之有效文件清單（教師建立教材時下拉選取使用） |
-| ET → DM | 文件管理模組（DM） | SRVDM002 *(待 DM 編碼確認)* | 內部服務（主動呼叫） | 取得指定文件之最新版內容（學員端 ET05 章節學習頁顯示文件預覽 / 下載原檔）|
+| ET → DM | 文件管理模組（DM） | **SRVDM002** | 內部服務（經 `app/services` in-process 呼叫） | 查詢「訓練教材」分類（`category=TRAINING`）之有效文件清單（教師建立教材時下拉選取使用）|
+| ET → DM | 文件管理模組（DM） | **SRVDM001** | 內部服務（經 `app/services` in-process 呼叫） | 依 `docId`（VARCHAR(20)）取當前發布版 metadata 與廢止狀態；檔案本體另經 DM 檔案存取能力取得（學員端 ET05 文件預覽 / 下載原檔）|
 | ET → DM | 文件管理模組（DM） | — | 內部事件 / 查詢 | 偵測 DM 文件廢止狀態（教師端 ET02 編輯頁顯示警告、學員端 ET05 顯示「此文件已廢止」標籤）|
 | ET → 平台 DP（發信）| 平台模組（DP）| — | 平台唯一發信服務（經 `DP_EMAIL_LOG` outbox → 外部 SMTP）| 課程邀請通知（US8）、章節更新通知（US3）、每週未看提醒 / 加急提醒 / 週報（US14）、核可通過通知（US16）採 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）可維護範本（US15，共 7 類）；密碼重設信（US2）、帳號（Email）變更驗證信（US10）為平台系統信（`MODULE=DP`，不可編輯）；ET 不自建寄件佇列 |
+
+> **2026-08-19 編碼對齊**：ET 側原將 SRVDM001 標為「清單」、SRVDM002 標為「內容」，與提供方 DM 之定稿契約**恰好對調**。已依 [DM contracts/document-service.md](../dm/contracts/document-service.md) 更正——**SRVDM001 = 依 DOC_ID 取當前發布版、SRVDM002 = 取分類文件清單**。同時更正 `docId` 型別（BIGINT → VARCHAR(20)）、分類碼（`TRAINING_MATERIAL` → `TRAINING`），並改以 `app/services` in-process Service 呼叫（不打 DM HTTP 端點——DM 存取閘要求 DM 角色，ET 學員未必具備）。
 
 > 系統參數 / 通知範本 / 排程 / 發信集中於平台 DP（2026-07-08）：ET 影片格式 / 大小上限等參數存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`，平台提供唯讀查詢），維護介面於平台 DP 後台（系統參數與清單，按模組過濾）；帳號認證共用平台 DP（以簡單 JWT 提供）。
 

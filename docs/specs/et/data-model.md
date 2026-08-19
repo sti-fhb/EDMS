@@ -10,6 +10,8 @@
 
 > **2026-07-08 集中化變更摘要**：系統參數、通知範本、發信、排程集中於平台模組 DP（見 `../../requirements/RQDP.md`、`../../_refs/09-平台模組.md`）。ET 不再自持 `ET_PARAM` / `ET_NOTIFY_TEMPLATE`：ET 參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`）、ET 6 類通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）、寄信改走平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）、排程改於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄）。維護介面於平台 DP 後台（按模組過濾）；`ET_WEEKLY_STAT`（業務快照）不受影響。
 
+> **2026-08-19 變更摘要（交付前自檢補正）**：(1) `ET_MATERIAL` 之多支影片 / 多份 DM 文件由暫時欄位**正式拆為 1:N 子表** `ET_MATERIAL_VIDEO` / `ET_MATERIAL_DOC`（原 S4 待補項結案）；(2) 影片長度 `DURATION_SEC` 補入 `ET_MATERIAL_VIDEO`——覆蓋率公式之分母原無欄位可存；(3) 影片進度改為**逐支影片**計算：新增 `ET_PROGRESS_VIDEO`、`ET_PROGRESS_INTERVAL` 改掛 `VIDEO_ID`（原掛 `ITEM_ID`，多支影片時無法分別判定 80%）；(4) 新增 `ET_QUIZ_RETRY_RESET`（append-only）並於 `ET_QUIZ_ATTEMPT_M` 補 `ATTEMPT_NO`——原「重置重考次數歸 0」與「歷次 attempt 永久可回看」無法並存。ET 業務表 25 → **29** 張。
+
 > **標準稽核欄位**：本模組各 Table 之標準欄位為 `CREATED_USER` / `CREATED_DATE` / `UPDATED_USER` / `UPDATED_DATE` / `DELETED`（無 SITE / HOSPITAL 概念，亦不含 `RES_ID`，對齊平台模組 DP，見 #158）。
 
 ---
@@ -26,15 +28,19 @@
 | 課程主檔 | ET_COURSE | 主表 | 課程 | 教師建立之課程，含基本資料、狀態、邀請碼、擁有者 |
 | 章節 | ET_CHAPTER | 主表 | 章節 | 課程下之順序容器；學員須依序解鎖 |
 | 章節項目 | ET_ITEM | 主表 | 章節項目 | 章節下之教材或測驗項目（含順序、類型）|
-| 教材內容 | ET_MATERIAL | 主表 | 教材內容 | 教材項目之三類媒材（影片 / DM 文件引用 / 說明文字）|
+| 教材內容 | ET_MATERIAL | 主表 | 教材內容 | 教材項目之媒材容器（說明文字本體 + 影片 / DM 文件子表）|
+| 教材影片 | ET_MATERIAL_VIDEO | 明細 | 教材內容 | 教材下之影片（1:N；含檔案路徑、**影片長度**、順序）（2026-08-19 新增）|
+| 教材引用文件 | ET_MATERIAL_DOC | 明細 | 教材內容 | 教材下引用之 DM 文件（1:N；存 `DOC_ID` VARCHAR(20)、順序）（2026-08-19 新增）|
 | 測驗主檔 | ET_QUIZ | 主表 | 測驗 | 章節項目為測驗時之測驗設定（及格分數、時間限制、重考次數上限）|
 | 題目 | ET_QUESTION | 主表 | 題目 | 測驗下之題目（單選 / 多選、題幹、配分）|
 | 選項 | ET_OPTION | 明細 | 選項 | 題目之選項（選項文字、是否正確）|
 | 選課關聯 | ET_ENROLLMENT | 對應檔 | 學員 × 課程 | 學員加入課程之記錄（含來源、狀態、移除標記）|
 | 線下核可紀錄 | ET_APPROVAL | 主表 | 線下核可紀錄 | 學員 × 課程之線下考核核可（0～1 筆）；通過 / 不通過、可撤銷需填原因；以線上完課為前提；獨立於完課 |
-| 學習進度 | ET_PROGRESS | 主表 | 學習進度 | 學員於各章節項目之學習進度 |
+| 學習進度 | ET_PROGRESS | 主表 | 學習進度 | 學員於各章節項目之學習進度（項目層完成判定）|
+| 影片進度 | ET_PROGRESS_VIDEO | 明細 | 學習進度 | 學員於**單支影片**之覆蓋率與上次觀看位置（2026-08-19 新增）|
 | 影片觀看區段 | ET_PROGRESS_INTERVAL | 明細 | 影片觀看區段 | 學員於影片教材之已觀看播放區段（每段一筆）|
-| 測驗作答 | ET_QUIZ_ATTEMPT_M | 主表（主+明細）| 測驗作答主檔 | 學員某次測驗 attempt（含快照、得分、是否及格）|
+| 測驗作答 | ET_QUIZ_ATTEMPT_M | 主表（主+明細）| 測驗作答主檔 | 學員某次測驗 attempt（含次數、快照、得分、是否及格）|
+| 重考次數重置 | ET_QUIZ_RETRY_RESET | 明細 | 測驗作答主檔 | 教師重置某學員某測驗重考次數之紀錄（append-only，作為已用次數之計算基準）（2026-08-19 新增）|
 | 作答明細 | ET_QUIZ_ATTEMPT_D | 明細 | 各題作答明細 | 學員於某次 attempt 之各題作答內容與得分 |
 | 邀請紀錄 | ET_INVITATION | 主表 | Email 邀請 | Email 邀請寄送紀錄（含課程、Email、狀態）|
 | 擁有者轉讓紀錄 | ET_OWNER_TRANSFER | 主表 | 擁有者轉讓 | 管理者代為轉讓課程擁有者之稽核紀錄 |
@@ -213,19 +219,54 @@
 |---|---------|---------|---------|------|------|
 | 1 | 教材 ID | MATERIAL_ID | BIGINT | PK | 主鍵 |
 | 2 | 教材名稱 | MATERIAL_NAME | VARCHAR(100) | Y | 教材顯示名稱 |
-| 3 | 影片檔案路徑 | VIDEO_FILE_PATH | VARCHAR(500) | N | 本地儲存路徑或 OSS 路徑（多支影片以 ET_MATERIAL_VIDEO 子表儲存，由 plan 階段決定是否拆 1:N）|
-| 4 | DM 文件 ID 清單 | DM_DOC_IDS | TEXT | N | 引用之 DM 文件 ID 清單（CSV 或 JSON，由 plan 階段最終決定 1:N 子表 vs. 字串）|
-| 5 | 說明文字 | DESCRIPTION_HTML | TEXT | N | WYSIWYG 編輯之 HTML 內容 |
-| 6 | 版本號 | VERSION | INT | Y | 樂觀鎖 |
+| 3 | 說明文字 | DESCRIPTION_HTML | TEXT | N | WYSIWYG 編輯之 HTML 內容 |
+| 4 | 版本號 | VERSION | INT | Y | 樂觀鎖 |
+| - | 標準欄位 | — | — | — | （同上）|
+
+> **2026-08-19 拆表**：原欄位 `VIDEO_FILE_PATH`（單一路徑）與 `DM_DOC_IDS`（CSV / JSON 字串）**已移除**，改為 1:N 子表 `ET_MATERIAL_VIDEO` / `ET_MATERIAL_DOC`。原設計以暫時欄位表達「同一教材可含多支影片 / 多份 DM 文件」，但單一路徑欄位存不下多支影片、CSV 字串亦無法承載逐支影片之長度與順序（覆蓋率判定必需），故於本次交付前自檢正式拆表（原 S4 待補項結案）。
+
+**業務規則**:
+- 三類媒材（影片 / DM 文件 / 說明文字）皆可選填且可組合：影片見 `ET_MATERIAL_VIDEO`（0..N）、DM 文件見 `ET_MATERIAL_DOC`（0..N）、說明文字為本表 `DESCRIPTION_HTML`
+- 三者**至少擇一有值**方為有效教材（應用層檢核；空教材不得存檔）
+
+---
+
+### 教材影片（ET_MATERIAL_VIDEO）（2026-08-19 新增）
+
+| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
+|---|---------|---------|---------|------|------|
+| 1 | 影片 ID | VIDEO_ID | BIGINT | PK | 主鍵 |
+| 2 | 教材 ID | MATERIAL_ID | BIGINT | Y | FK → ET_MATERIAL.MATERIAL_ID |
+| 3 | 影片檔案路徑 | FILE_PATH | VARCHAR(500) | Y | 本地儲存路徑或物件儲存路徑 |
+| 4 | 原始檔名 | FILE_NAME | VARCHAR(200) | Y | 上傳時之原始檔名（供顯示 / 下載）|
+| 5 | **影片長度（秒）** | **DURATION_SEC** | **INT** | **Y** | **影片總長；為覆蓋率公式之分母**（覆蓋率 = 已觀看區段聯集秒數 ÷ DURATION_SEC）；上傳時由系統自檔案 metadata 取得並寫入 |
+| 6 | 檔案大小（位元組）| FILE_SIZE_BYTES | BIGINT | Y | 供上限檢核與顯示 |
+| 7 | 影片順序 | SORT_ORDER | INT | Y | 同教材下之播放順序，從 1 起 |
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- 三類媒材（影片 / DM 文件 / 說明文字）皆可選填且可組合（同一教材可同時含多支影片 / 多份 DM 文件 / 說明文字）
-- 影片上傳時檢核格式（per `DP_PARAM.ET_VIDEO_ALLOWED_FORMATS`）與大小（per `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`）
-- DM 文件廢止狀態於發布前由系統檢核（阻擋發布）；學員端仍可閱讀廢止前最後版本
+- 同 MATERIAL_ID 下 SORT_ORDER 不重複
+- 上傳時檢核格式（per `DP_PARAM.ET_VIDEO_ALLOWED_FORMATS`）與單檔大小（per `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`）
+- **DURATION_SEC 取得失敗（無法解析 metadata）時不得存檔**，並提示教師改用其他格式——否則該影片之覆蓋率無法計算、章節永遠無法解鎖
 - 影片儲存策略（本地檔案系統 vs. 物件儲存）由 plan 階段決定
+- 刪除影片時 DELETED=1（軟刪除）；學員於該影片之 ET_PROGRESS_VIDEO / ET_PROGRESS_INTERVAL 連帶 hard delete（比照章節 / 題目之軟刪除分流）
 
-> **註**：欄位 3 / 4 之 1:N 細分（多支影片、多份 DM 文件）由 plan / data-model 之 phase 2 細化；目前以暫時欄位呈現概念。
+---
+
+### 教材引用文件（ET_MATERIAL_DOC）（2026-08-19 新增）
+
+| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
+|---|---------|---------|---------|------|------|
+| 1 | 引用 ID | MAT_DOC_ID | BIGINT | PK | 主鍵 |
+| 2 | 教材 ID | MATERIAL_ID | BIGINT | Y | FK → ET_MATERIAL.MATERIAL_ID |
+| 3 | DM 文件編號 | DOC_ID | **VARCHAR(20)** | Y | DM 文件編號，格式 `DM-{分類碼}-{6位流水號}`（如 `DM-TRAINING-000007`）；**非數值型、非 DB 外鍵**（跨模組，經 SRVDM001 查詢，per sti-backend-boundaries）|
+| 4 | 顯示順序 | SORT_ORDER | INT | Y | 同教材下之顯示順序，從 1 起 |
+| - | 標準欄位 | — | — | — | （同上）|
+
+**業務規則**:
+- (MATERIAL_ID, DOC_ID) 邏輯唯一（同一教材不重複引用同一文件）
+- DOC_ID 僅存編號、不存文件內容與版本號——恆以 SRVDM001 取當前發布版（DM 發布新版 ET 自動取得最新版，無快取延遲）
+- 課程發布前由系統檢核所引用文件之廢止狀態（阻擋發布）；學員端仍可閱讀廢止前最後版本——判定依 SRVDM001 回傳之 `obsolete` / `status`（`PENDING_OBSOLETE` 廢止待簽核期間仍屬有效、不阻擋）
 
 ---
 
@@ -335,7 +376,7 @@
 - **獨立於完課**：本表不影響 ET_ENROLLMENT.COMPLETION_STATUS、完課率、平均成績、課後問卷開放與週報統計；教師新增章節致完課回退時，本核可紀錄**不失效**（比照課後問卷）
 - **課程關閉**：CLOSED 期間不可新增核可 / 撤銷（唯讀閱覽）；再開課後恢復
 - **綜合狀態為衍生值**（未達核可資格 / 待核可 / 已通過 / 未通過），由 COMPLETION_STATUS + 本表即時判定，不另存欄位
-- 稽核完整性：核可 / 撤銷之執行者與時間均記錄；歷程另依標準稽核 log 保留
+- 稽核完整性：核可 / 撤銷之執行者與時間均記錄於本表；**完整歷程（含撤銷後重核所覆寫之前次結果）另寫入平台 `DP_AUDIT_LOG`（`FUNC_NAME=ET-APPROVAL`）**——本表因 (COURSE_ID, USER_ID) 唯一而以 update 覆寫，歷程僅存於稽核 log（2026-08-19 明確落點）
 
 ---
 
@@ -347,14 +388,34 @@
 | 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
 | 4 | 章節項目 ID | ITEM_ID | BIGINT | Y | FK → ET_ITEM.ITEM_ID |
-| 5 | 是否完成 | IS_COMPLETED | BOOLEAN | Y | 影片教材：覆蓋率 ≥ 80%；文件 / 說明文字：開啟即 true；測驗：及格即 true |
-| 6 | 上次觀看位置（秒）| LAST_POSITION_SEC | INT | N | 影片播放位置；下次開啟自動定位 |
-| 7 | 影片覆蓋率（%） | COVERAGE_PCT | DECIMAL(5,2) | N | 學員於該影片教材之累計覆蓋率（百分比；由 ET_PROGRESS_INTERVAL 聚合計算）|
+| 5 | 是否完成 | IS_COMPLETED | BOOLEAN | Y | **項目層**完成判定：含影片之教材＝該教材**所有影片**覆蓋率皆 ≥ 80%；僅文件 / 說明文字＝開啟即 true；測驗＝及格即 true |
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
 - (USER_ID, ITEM_ID) 邏輯唯一
-- COVERAGE_PCT 由 ET_PROGRESS_INTERVAL 之區段聯集去重後聚合計算（normalize 後）
+- **本表為項目層**：逐支影片之覆蓋率與觀看位置存於 `ET_PROGRESS_VIDEO`（2026-08-19 變更）
+- 含影片之教材，`IS_COMPLETED` = 該 MATERIAL 下**所有未刪除影片**之 `ET_PROGRESS_VIDEO.COVERAGE_PCT` 皆 ≥ 80%（缺任一支影片之進度紀錄視為 0%）
+
+> **2026-08-19 變更**：原 `LAST_POSITION_SEC` / `COVERAGE_PCT` 掛於本表（項目層），在「同一教材含多支影片」時無法分別記錄各支影片之覆蓋率與續看位置，導致 [FR-ET-US5-05](spec_us5.md)「**所有影片**累計覆蓋率 ≥ 80%」無法判定。兩欄已移至 `ET_PROGRESS_VIDEO`。
+
+---
+
+### 影片進度（ET_PROGRESS_VIDEO）（2026-08-19 新增）
+
+| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
+|---|---------|---------|---------|------|------|
+| 1 | 影片進度 ID | PROGRESS_VIDEO_ID | BIGINT | PK | 主鍵 |
+| 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
+| 3 | 影片 ID | VIDEO_ID | BIGINT | Y | FK → ET_MATERIAL_VIDEO.VIDEO_ID |
+| 4 | 影片覆蓋率（%）| COVERAGE_PCT | DECIMAL(5,2) | Y | 該支影片之累計覆蓋率；預設 0；由 ET_PROGRESS_INTERVAL 區段聯集去重後聚合 ÷ `ET_MATERIAL_VIDEO.DURATION_SEC` |
+| 5 | 上次觀看位置（秒）| LAST_POSITION_SEC | INT | N | 該支影片之播放位置；下次開啟自動定位（跨 session 保留）|
+| - | 標準欄位 | — | — | — | （同上）|
+
+**業務規則**:
+- (USER_ID, VIDEO_ID) 邏輯唯一
+- COVERAGE_PCT 於學員離開頁面 normalize 後重算並寫回（快取值，供清單 / 統計快速讀取；權威來源仍為 ET_PROGRESS_INTERVAL）
+- 覆蓋率上限 100%（重複觀看不加成，區段聯集去重）
+- 影片軟刪除時本表連帶 hard delete（學員紀錄孤兒化無意義，per 軟刪除分流）
 
 ---
 
@@ -364,15 +425,16 @@
 |---|---------|---------|---------|------|------|
 | 1 | 區段 ID | INTERVAL_ID | BIGINT | PK | 主鍵 |
 | 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
-| 3 | 章節項目 ID | ITEM_ID | BIGINT | Y | FK → ET_ITEM.ITEM_ID（影片教材）|
+| 3 | 影片 ID | VIDEO_ID | BIGINT | Y | FK → ET_MATERIAL_VIDEO.VIDEO_ID（2026-08-19 變更：原掛 ET_ITEM.ITEM_ID，多支影片時無法區辨）|
 | 4 | 起始秒 | START_SEC | INT | Y | 該段播放之起始秒（≥ 0）|
 | 5 | 結束秒 | END_SEC | INT | Y | 該段播放之結束秒（> START_SEC）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- 每段播放（暫停 / 結束 / 跳轉）INSERT 一筆
-- 學員離開頁面時系統執行 normalize：SELECT (USER_ID, ITEM_ID) → 排序 → 合併重疊 / 鄰近區段 → DELETE → INSERT 合併後結果
-- 覆蓋率 = SUM(END_SEC − START_SEC) ÷ VIDEO_DURATION（normalize 前後皆可正確計算）
+- 每段播放（暫停 / 結束 / 跳轉）INSERT 一筆；索引 (USER_ID, VIDEO_ID)
+- 學員離開頁面時系統執行 normalize：SELECT (USER_ID, VIDEO_ID) → 排序 → 合併重疊 / 鄰近區段 → DELETE → INSERT 合併後結果，並回寫 `ET_PROGRESS_VIDEO.COVERAGE_PCT`
+- 覆蓋率 = SUM(END_SEC − START_SEC) ÷ **`ET_MATERIAL_VIDEO.DURATION_SEC`**（normalize 前後皆可正確計算）
+- END_SEC 不得超過該影片之 DURATION_SEC（應用層裁切，避免覆蓋率 > 100%）
 - 不限區段筆數（不裁切）
 
 ---
@@ -385,21 +447,50 @@
 | 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
 | 3 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
 | 4 | 測驗 ID | QUIZ_ID | BIGINT | Y | FK → ET_QUIZ.QUIZ_ID |
-| 5 | 開始時間 | STARTED_AT | TIMESTAMP | Y | 學員點「開始測驗」之時間 |
-| 6 | 提交時間 | SUBMITTED_AT | TIMESTAMP | N | 學員點「提交」或 timeout 自動提交之時間 |
-| 7 | 狀態 | STATUS | VARCHAR(20) | Y | 參見 Lookup `ET_ATTEMPT_STATUS`（IN_PROGRESS / SUBMITTED / TIMEOUT）|
-| 8 | 得分 | SCORE | DECIMAL(5,2) | N | 自動閱卷後之總分（0–100）|
-| 9 | 是否及格 | IS_PASS | BOOLEAN | N | 依該 attempt 之 PASS_SCORE_SNAPSHOT 判定 |
-| 10 | 快照 — 題目順序 | QUESTION_ORDER | TEXT | Y | JSON 字串：題目 ID 順序陣列，如 `[12, 5, 8, ...]` |
-| 11 | 快照 — 選項順序 | OPTION_ORDER | TEXT | Y | JSON 字串：每題之選項 ID 順序對應陣列 |
-| 12 | 快照 — 及格分數 | PASS_SCORE_SNAPSHOT | INT | Y | 開始作答時凍結之及格分數 |
-| 13 | 快照 — 作答時間限制 | TIME_LIMIT_SNAPSHOT | INT | Y | 開始作答時凍結之時間限制 |
+| 5 | 作答次序 | ATTEMPT_NO | INT | Y | 該學員於該測驗之第幾次作答（從 1 起，含首次）；**不因重置重考次數而歸零**（歷次 attempt 永久保留可回看，per [FR-ET-US9-05](spec_us9.md)）|
+| 6 | 開始時間 | STARTED_AT | TIMESTAMP | Y | 學員點「開始測驗」之時間 |
+| 7 | 提交時間 | SUBMITTED_AT | TIMESTAMP | N | 學員點「提交」或 timeout 自動提交之時間 |
+| 8 | 狀態 | STATUS | VARCHAR(20) | Y | 參見 Lookup `ET_ATTEMPT_STATUS`（IN_PROGRESS / SUBMITTED / TIMEOUT）|
+| 9 | 得分 | SCORE | DECIMAL(5,2) | N | 自動閱卷後之總分（0–100）|
+| 10 | 是否及格 | IS_PASS | BOOLEAN | N | 依該 attempt 之 PASS_SCORE_SNAPSHOT 判定 |
+| 11 | 快照 — 題目順序 | QUESTION_ORDER | TEXT | Y | JSON 字串：題目 ID 順序陣列，如 `[12, 5, 8, ...]` |
+| 12 | 快照 — 選項順序 | OPTION_ORDER | TEXT | Y | JSON 字串：每題之選項 ID 順序對應陣列 |
+| 13 | 快照 — 及格分數 | PASS_SCORE_SNAPSHOT | INT | Y | 開始作答時凍結之及格分數 |
+| 14 | 快照 — 作答時間限制 | TIME_LIMIT_SNAPSHOT | INT | Y | 開始作答時凍結之時間限制 |
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
+- (USER_ID, QUIZ_ID, ATTEMPT_NO) 邏輯唯一；ATTEMPT_NO 由該學員於該測驗之現有 attempt 數 + 1 產生
 - STATUS 流轉：IN_PROGRESS → SUBMITTED / TIMEOUT；TIMEOUT 為 timeout 自動提交之終態
 - 快照欄位於 STARTED_AT 時寫入並凍結，至 attempt 結束前不再變更
 - 題目 / 選項本體之 VARCHAR 內容快照由 ET_QUIZ_ATTEMPT_D 各題保存（避免 ET_QUIZ_ATTEMPT_M 單筆過大）
+- **本表 append-only，不因重置重考次數而刪除**（重置語意見 `ET_QUIZ_RETRY_RESET`）
+
+---
+
+### 重考次數重置紀錄（ET_QUIZ_RETRY_RESET）（2026-08-19 新增）
+
+| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
+|---|---------|---------|---------|------|------|
+| 1 | 重置 ID | RESET_ID | BIGINT | PK | 主鍵 |
+| 2 | 學員 USER_ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
+| 3 | 測驗 ID | QUIZ_ID | BIGINT | Y | FK → ET_QUIZ.QUIZ_ID |
+| 4 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID（查詢便利，避免多層 join）|
+| 5 | 重置時作答次數 | ATTEMPT_COUNT_AT_RESET | INT | Y | 重置當下該學員於該測驗之既有 attempt 總數；**作為已用次數之計算基準** |
+| 6 | 執行者 | EXECUTED_BY | VARCHAR(20) | Y | FK → DP_USER.USER_ID；執行重置之教師（owner）或管理者 |
+| 7 | 執行時間 | EXECUTED_AT | TIMESTAMP | Y | |
+| - | 標準欄位 | — | — | — | （同上）|
+
+**業務規則**:
+- **append-only**：每次重置 INSERT 一筆，不可修改 / 刪除（稽核完整性，比照 `ET_OWNER_TRANSFER`）；同一學員同一測驗可重置多次
+- **已用重考次數之計算**（取代原「歸 0」之刪除語意）：
+  - 總作答次數 `total` = COUNT(該學員該測驗之 ET_QUIZ_ATTEMPT_M)
+  - 基準 `base` = MAX(ATTEMPT_COUNT_AT_RESET)（無重置紀錄時為 0）
+  - **本輪已用作答次數** = `total − base`；**已用重考次數** = max(0, `total − base − 1`)（首次作答不計入重考，per `ET_QUIZ.MAX_RETRY` = 0 代表僅可作答 1 次）
+  - 學員可否再作答 = 本輪已用作答次數 ≤ `MAX_RETRY`
+- **可重置之條件**（per [FR-ET-US9-06](spec_us9.md)）：已用重考次數 = `MAX_RETRY` **且**該學員於該測驗尚未及格；已及格 / 未作答 / 次數未用盡時不可重置
+- 課程 CLOSED 期間不可重置（再開課後恢復）
+- 重置**不刪除任何 attempt**——歷次作答明細於 US6 / US9 永久可回看
 
 ---
 
@@ -703,7 +794,9 @@ erDiagram
     DP_USER ||--o{ ET_ENROLLMENT : enrolls
     DP_USER ||--o{ ET_PROGRESS : progresses
     DP_USER ||--o{ ET_QUIZ_ATTEMPT_M : attempts
+    DP_USER ||--o{ ET_PROGRESS_VIDEO : watches
     DP_USER ||--o{ ET_PROGRESS_INTERVAL : watches
+    DP_USER ||--o{ ET_QUIZ_RETRY_RESET : resets
     DP_USER ||--o{ ET_SURVEY_RESPONSE_M : responds
     DP_USER ||--o{ ET_COURSE : owns
     DP_USER ||--o{ ET_APPROVAL : approved
@@ -730,10 +823,15 @@ erDiagram
     ET_ITEM ||--o| ET_MATERIAL : refers
     ET_ITEM ||--o| ET_QUIZ : refers
     ET_ITEM ||--o{ ET_PROGRESS : tracks
-    ET_ITEM ||--o{ ET_PROGRESS_INTERVAL : tracks
+
+    ET_MATERIAL ||--o{ ET_MATERIAL_VIDEO : has_videos
+    ET_MATERIAL ||--o{ ET_MATERIAL_DOC : refers_docs
+    ET_MATERIAL_VIDEO ||--o{ ET_PROGRESS_VIDEO : tracked
+    ET_MATERIAL_VIDEO ||--o{ ET_PROGRESS_INTERVAL : watched
 
     ET_QUIZ ||--o{ ET_QUESTION : contains
     ET_QUIZ ||--o{ ET_QUIZ_ATTEMPT_M : attempted
+    ET_QUIZ ||--o{ ET_QUIZ_RETRY_RESET : reset_for
 
     ET_QUESTION ||--o{ ET_OPTION : has
     ET_QUESTION ||--o{ ET_QUIZ_ATTEMPT_D : answered
@@ -747,11 +845,13 @@ erDiagram
 
 | 規則名 | 描述 |
 |--------|------|
-| 軟刪除分流 | 章節 / 題目本體軟刪除（DELETED=1）；學員紀錄與成績連同 hard delete |
+| 軟刪除分流 | 章節 / 題目 / **教材影片**本體軟刪除（DELETED=1）；學員紀錄與成績連同 hard delete |
 | 樂觀鎖 | ET_COURSE / ET_CHAPTER / ET_ITEM / ET_QUIZ / ET_QUESTION / ET_SURVEY* / ET_APPROVAL 每寫入時 VERSION + 1（通知範本之樂觀鎖由平台 `DP_NOTIFY_TEMPLATE` 提供）|
 | Attempt Snapshot | ET_QUIZ_ATTEMPT_M 與 _D 於 STARTED_AT 時凍結題目 + 選項 + 配分 + 順序 + PASS_SCORE + TIME_LIMIT |
+| 重考次數與重置 | attempt **永不刪除**（append-only、ATTEMPT_NO 標次序）；「重置重考次數」改以 ET_QUIZ_RETRY_RESET 記下當下 attempt 數為基準，已用重考次數 = max(0, COUNT(attempt) − MAX(基準) − 1)（2026-08-19 新增：原「歸 0」語意與歷次明細永久可回看互斥）|
+| 教材媒材 1:N | 教材之影片 / DM 文件拆為 ET_MATERIAL_VIDEO / ET_MATERIAL_DOC 子表；影片必含 DURATION_SEC（覆蓋率分母）、DM 文件僅存 DOC_ID（VARCHAR(20)，非 DB 外鍵）（2026-08-19 拆表，原 S4 結案）|
 | 多選題部分計分 | `SCORE = max(0, (對 − 誤) ÷ 應選 × POINTS)`；建立時強制至少 1 正確選項 |
-| 影片 80% 累計覆蓋 | 由 ET_PROGRESS_INTERVAL 聚合計算；學員離開頁面時 normalize；倍速（上限 2x）照算、拉到底不算（無播放區段）|
+| 影片 80% 累計覆蓋 | **逐支影片**計算：ET_PROGRESS_INTERVAL（掛 VIDEO_ID）聚合 ÷ `ET_MATERIAL_VIDEO.DURATION_SEC`，結果快取於 ET_PROGRESS_VIDEO；學員離開頁面時 normalize；倍速（上限 2x）照算、拉到底不算（無播放區段）。教材項目之 `ET_PROGRESS.IS_COMPLETED` = 該教材**所有影片**皆 ≥ 80%（2026-08-19 拆表）|
 | 課程狀態可逆 | DRAFT → PUBLISHED ⇄ CLOSED；到期自動關閉（SCHET002＋應用層即時判定）；再開課重設起訖；關閉當下作答中 attempt 允許完成 |
 | 標籤自動邀請 | 發布時 ET_COURSE_TAG × ET_USER_TAG 聯集去重（限學員角色）批次加入＋每人寄通知信；貼標追溯補加入寄彙整信 |
 | 問卷題目凍結 | ET_SURVEY 有任何填答後題目 / 選項不可修改；一人一次（(SURVEY_ID, USER_ID) 唯一）；具名 |
