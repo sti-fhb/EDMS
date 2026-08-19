@@ -13,7 +13,7 @@ import { http } from "../../services/http"
  * 新增 / 加版以 multipart（FormData）送表單欄位 + 單一上傳檔；送簽以 JSON。
  */
 
-/** 新增草稿文件之表單欄位。 */
+/** 新增草稿文件之表單欄位（file 可為 null＝存草稿暫不附檔）。 */
 export interface CreateDocPayload {
   doc_name: string
   category_code: string
@@ -22,16 +22,16 @@ export interface CreateDocPayload {
   retrieval_ids: string[]
   version_no: string
   change_summary: string
-  file: File
+  file: File | null
 }
 
-/** 編輯模式加新版本之表單欄位（身份欄不送；標籤覆寫文件層）。 */
+/** 編輯模式加新版本之表單欄位（身份欄不送；標籤覆寫文件層；file 可為 null＝暫不附檔）。 */
 export interface AddVersionPayload {
   version_no: string
   change_summary: string
   audience_ids: string[]
   retrieval_ids: string[]
-  file: File
+  file: File | null
 }
 
 function buildCreateForm(p: CreateDocPayload): FormData {
@@ -43,7 +43,7 @@ function buildCreateForm(p: CreateDocPayload): FormData {
   p.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
   fd.append("version_no", p.version_no)
   fd.append("change_summary", p.change_summary)
-  fd.append("file", p.file)
+  if (p.file) fd.append("file", p.file)
   return fd
 }
 
@@ -69,7 +69,7 @@ export const editorApi = {
     fd.append("change_summary", payload.change_summary)
     payload.audience_ids.forEach((id) => fd.append("audience_ids", id))
     payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
-    fd.append("file", payload.file)
+    if (payload.file) fd.append("file", payload.file)
     const { data } = await http.post<VersionResult>(`/dm/documents/${docId}/versions`, fd)
     return data
   },

@@ -85,18 +85,20 @@ export const EMPTY_EDITOR_FORM: EditorForm = {
 /**
  * 依模式 / 分類 / 動作動態建構表單 schema。
  * - 新增模式：doc_name / category 必填；MANUAL 時 func 必填。
- * - 送簽（forSubmit）：另要求可見對象 ≥1（DM-MSG-DM03-008）與指定審核者。
- * - 編輯模式：身份欄唯讀（不驗），僅驗版本號 / 變更摘要。
+ * - **存草稿（forSubmit=false）不卡必填**：名稱 / 版號 / 摘要 / 可見對象 / func 皆可空（新增模式僅
+ *   分類必填——DOC_ID 配號用）；檔案於呼叫端另處理（草稿可不附）。
+ * - **送簽（forSubmit=true）** 完整檢核：名稱（新增）/ 版號 / 摘要 / 可見對象 ≥1 / 審核者 /（MANUAL）func。
  */
 export function makeEditorSchema(opts: { isNew: boolean; isManual: boolean; forSubmit: boolean }) {
   const { isNew, isManual, forSubmit } = opts
   return z
     .object({
-      doc_name: isNew ? z.string().trim().min(1, { message: "請輸入文件名稱" }) : z.string(),
+      doc_name: isNew && forSubmit ? z.string().trim().min(1, { message: "請輸入文件名稱" }) : z.string(),
+      // 分類為新增模式之結構必填（DOC_ID 配號用），草稿亦需
       category_code: isNew ? z.string().min(1, { message: "請選擇分類" }) : z.string(),
       func_code: z.string(),
-      version_no: z.string().trim().min(1, { message: "請輸入版本號" }),
-      change_summary: z.string().trim().min(1, { message: "請輸入變更摘要" }),
+      version_no: forSubmit ? z.string().trim().min(1, { message: "請輸入版本號" }) : z.string(),
+      change_summary: forSubmit ? z.string().trim().min(1, { message: "請輸入變更摘要" }) : z.string(),
       audience_ids: forSubmit
         ? z.array(z.string()).min(1, { message: "請至少指定 1 個可見對象" })
         : z.array(z.string()),
@@ -104,7 +106,7 @@ export function makeEditorSchema(opts: { isNew: boolean; isManual: boolean; forS
       reviewer_id: forSubmit ? z.string().min(1, { message: "請指定審核者" }) : z.string(),
     })
     .superRefine((val, ctx) => {
-      if (isNew && isManual && !val.func_code) {
+      if (forSubmit && isNew && isManual && !val.func_code) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["func_code"], message: "請選擇關聯作業項目" })
       }
     })

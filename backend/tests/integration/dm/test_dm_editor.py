@@ -89,8 +89,9 @@ async def _create(
     version_no="1.0",
     mime=_PDF,
     summary="首版",
+    with_file=True,
 ):
-    """呼叫 service.create_document 之精簡包裝（audience 以名稱轉 id）。"""
+    """呼叫 service.create_document 之精簡包裝（audience 以名稱轉 id）；with_file=False 為無檔案草稿。"""
     aud_ids = [await _audience_id(db, n) for n in audience]
     return await _svc.create_document(
         db,
@@ -101,9 +102,9 @@ async def _create(
         retrieval_ids=list(retrieval),
         version_no=version_no,
         change_summary=summary,
-        file_name="a.pdf" if mime == _PDF else "a.docx",
-        file_bytes=b"%PDF-1.4 x" if mime == _PDF else b"PK\x03\x04 x",
-        file_mime=mime,
+        file_name=("a.pdf" if mime == _PDF else "a.docx") if with_file else None,
+        file_bytes=(b"%PDF-1.4 x" if mime == _PDF else b"PK\x03\x04 x") if with_file else None,
+        file_mime=mime if with_file else None,
         op=op or _op(),
     )
 
@@ -131,10 +132,19 @@ async def test_doc_id_sequence_increments_per_category(db):
     assert (r1.doc_id, r2.doc_id) == ("DM-SOP-000001", "DM-SOP-000002")
 
 
-async def test_create_missing_required_blocked(db):
-    with pytest.raises(AppError) as e:
-        await _create(db, name="   ")
-    assert e.value.status_code == 422 and e.value.error_code == "DM_DOC_004"
+async def test_create_draft_allows_blank_optional_fields(db):
+    """存草稿不卡必填：名稱 / 版號 / 摘要空、且無檔案 → 仍可建草稿（分類必填）。"""
+    r = await _create(db, name="   ", version_no="", summary="", with_file=True)
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == r.doc_id))
+    ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
+    assert doc.status == "DRAFT" and doc.doc_name == "" and ver.version_no == ""
+
+
+async def test_create_draft_no_file_ok(db):
+    """存草稿允許連檔案都還沒上傳（FILE_* 可空）。"""
+    r = await _create(db, with_file=False)
+    ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
+    assert ver.file_path is None and r.previewable is False
 
 
 async def test_create_invalid_category_blocked(db):
@@ -143,12 +153,17 @@ async def test_create_invalid_category_blocked(db):
     assert e.value.error_code == "DM_DOC_010"
 
 
-# ── AC2/7：MANUAL func 條件式必填 ─────────────────────
+# ── AC2/7：MANUAL func（草稿不卡、送簽才要求） ─────────────
 
 
-async def test_create_manual_requires_func(db):
+async def test_create_manual_draft_without_func_ok_but_submit_requires(db):
+    """MANUAL 草稿可暫不指定 func（不卡）；送簽時才要求 func（DM_DOC_004）。"""
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核", email="rev@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)
+    r = await _create(db, op=_op("ed"), category="MANUAL", func_code=None, name="手冊草稿", audience=("全體",))
     with pytest.raises(AppError) as e:
-        await _create(db, category="MANUAL", func_code=None)
+        await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="rev1", op=_op("ed"))
     assert e.value.error_code == "DM_DOC_004"
 
 
@@ -288,14 +303,8 @@ async def test_get_doc_tags_for_edit_prefill(db):
     assert tags.audience_ids == [all_aud] and tags.retrieval_ids == [str(rid)]
 
 
-@pytest.mark.parametrize(
-    ("taken_side_effect", "expected"),
-    [([False, True], "DM_DOC_006"), ([False, False], "DM_DOC_009")],
-)
-async def test_add_version_integrity_race_maps_friendly(db, monkeypatch, taken_side_effect, expected):
-    """並發後盾：實際 INSERT 撞 DB 約束（IntegrityError）→ 回退後重查映射友善錯誤（版號重複 / 單一草稿）。"""
-    from unittest.mock import AsyncMock
-
+async def test_add_version_integrity_race_maps_to_single_draft(db, monkeypatch):
+    """並發後盾：實際 INSERT 撞每人一份草稿部分唯一索引（IntegrityError）→ 回退後映射 DM_DOC_009。"""
     from sqlalchemy.exc import IntegrityError
 
     await _publish_doc(db, "DM-SOP-000110")
@@ -304,18 +313,26 @@ async def test_add_version_integrity_race_maps_friendly(db, monkeypatch, taken_s
         raise IntegrityError("INSERT", {}, Exception("duplicate"))
 
     monkeypatch.setattr(_svc._repo, "add_version", _boom)
-    # 前置 version_no_taken 回 False（過檢核）；except 內重查依情境回 False/True
-    monkeypatch.setattr(_svc._repo, "version_no_taken", AsyncMock(side_effect=taken_side_effect))
     with pytest.raises(AppError) as e:
         await _add_version(db, "DM-SOP-000110", version_no="2.0")
-    assert e.value.error_code == expected
+    assert e.value.error_code == "DM_DOC_009"
 
 
-async def test_add_version_duplicate_version_no_blocked(db):
-    await _publish_doc(db, "DM-SOP-000102")
-    with pytest.raises(AppError) as e:
-        await _add_version(db, "DM-SOP-000102", version_no="1.0")  # 與目前版重號
-    assert e.value.error_code == "DM_DOC_006"
+async def test_add_version_draft_dup_version_no_ok(db):
+    """版號只卡與已發布重複：草稿階段填與目前發布版相同版號 → 允許（送簽時才擋）。"""
+    await _publish_doc(db, "DM-SOP-000102")  # 目前發布版 1.0
+    r = await _add_version(db, "DM-SOP-000102", version_no="1.0")  # 草稿也填 1.0 → 允許
+    ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
+    assert ver.status == "DRAFT" and ver.version_no == "1.0"
+
+
+async def test_two_users_same_draft_version_no_ok(db):
+    """版號跨草稿可重複：A、B 各自對同文件開 1.1 草稿皆可（不撞唯一約束）。"""
+    await _publish_doc(db, "DM-SOP-000107")
+    await _add_version(db, "DM-SOP-000107", version_no="1.1", op=_op("ed_a"))
+    r = await _add_version(db, "DM-SOP-000107", version_no="1.1", op=_op("ed_b"))
+    ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
+    assert ver.version_no == "1.1" and ver.created_user == "ed_b"
 
 
 async def test_add_version_same_user_second_draft_blocked(db):
@@ -403,6 +420,40 @@ async def test_submit_without_audience_blocked(db):
     with pytest.raises(AppError) as e:
         await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="rev1", op=_op("ed"))
     assert e.value.error_code == "DM_DOC_005"
+
+
+async def test_submit_empty_version_no_blocked(db):
+    """送簽時才要求版號非空（存草稿放行）→ DM_DOC_006。"""
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核", email="rev@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)
+    r = await _create(db, op=_op("ed"), version_no="", audience=("全體",))  # 草稿空版號
+    with pytest.raises(AppError) as e:
+        await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    assert e.value.error_code == "DM_DOC_006"
+
+
+async def test_submit_without_file_blocked(db):
+    """送簽時才要求檔案（存草稿可無檔）→ DM_DOC_004。"""
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核", email="rev@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)
+    r = await _create(db, op=_op("ed"), audience=("全體",), with_file=False)  # 草稿無檔
+    with pytest.raises(AppError) as e:
+        await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    assert e.value.error_code == "DM_DOC_004"
+
+
+async def test_submit_version_no_dup_published_blocked(db):
+    """版號與本文件「已發布」版本重複 → 送簽擋（DM_DOC_006）；草稿階段本可重複。"""
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核", email="rev@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)
+    await _publish_doc(db, "DM-SOP-000210", author="ed")  # 已發布 1.0
+    v = await _add_version(db, "DM-SOP-000210", version_no="1.0", op=_op("ed"))  # 草稿也 1.0（允許）
+    with pytest.raises(AppError) as e:
+        await _svc.submit(db, doc_id="DM-SOP-000210", version_id=v.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    assert e.value.error_code == "DM_DOC_006"
 
 
 async def test_submit_reviewer_is_author_blocked(db):

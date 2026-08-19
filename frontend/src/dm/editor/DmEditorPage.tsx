@@ -137,13 +137,9 @@ export function DmEditorPage() {
     }
   }
 
-  /** 建立 / 沿用草稿（新增→createDocument；編輯→addVersion）。回識別或 null（檔案缺）。 */
-  async function persistDraft(): Promise<{ doc_id: string; version_id: number } | null> {
+  /** 建立 / 沿用草稿（新增→createDocument；編輯→addVersion）。檔案可為 null（存草稿允許不附）。 */
+  async function persistDraft(): Promise<{ doc_id: string; version_id: number }> {
     if (persisted.current) return persisted.current
-    if (!file) {
-      setErrors((prev) => ({ ...prev, file: "請選擇要上傳的檔案" }))
-      return null
-    }
     let ids: { doc_id: string; version_id: number }
     if (isNew) {
       const r = await editorApi.createDocument({
@@ -185,7 +181,8 @@ export function DmEditorPage() {
     const schema = makeEditorSchema({ isNew, isManual, forSubmit })
     const result = schema.safeParse(form)
     const fieldErrors = getFieldErrors(result.success ? null : result.error)
-    if (!file && !persisted.current) fieldErrors.file = "請選擇要上傳的檔案"
+    // 檔案僅送簽時必填；存草稿可先不附檔（US5「存草稿不卡」）
+    if (forSubmit && !file && !persisted.current) fieldErrors.file = "請選擇要上傳的檔案"
     setErrors(fieldErrors)
     return Object.keys(fieldErrors).length === 0
   }
@@ -194,8 +191,7 @@ export function DmEditorPage() {
     if (!validate(false)) return
     setBusy(true)
     try {
-      const ids = await persistDraft()
-      if (!ids) return
+      await persistDraft()
       message.success("已儲存為草稿") // DM-MSG-DM03-007
       setDirty(false)
       go(destAfter())
@@ -211,7 +207,6 @@ export function DmEditorPage() {
     setBusy(true)
     try {
       const ids = await persistDraft()
-      if (!ids) return
       await editorApi.submit(ids.doc_id, { version_id: ids.version_id, assigned_reviewer: form.reviewer_id })
       message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM03-006
       setDirty(false)

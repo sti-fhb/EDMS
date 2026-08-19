@@ -62,13 +62,13 @@ class EditorRepository:
         doc_id: str,
         version_no: str,
         change_summary: str,
-        file_name: str,
-        file_path: str,
-        file_size: int,
-        file_mime: str,
+        file_name: str | None,
+        file_path: str | None,
+        file_size: int | None,
+        file_mime: str | None,
         op: OperatorInfo,
     ) -> DmDocVersion:
-        """新增一筆草稿版本（STATUS=DRAFT）。"""
+        """新增一筆草稿版本（STATUS=DRAFT）；檔案可暫無（存草稿不卡，送簽時才必備）。"""
         now = utcnow()
         ver = DmDocVersion(
             doc_id=doc_id,
@@ -166,10 +166,17 @@ class EditorRepository:
         return {"audience_ids": audience, "retrieval_ids": retrieval}
 
     async def version_no_taken(self, db: AsyncSession, doc_id: str, version_no: str) -> bool:
-        """同文件內版本號是否已存在（DM-MSG-DM03-009 友善檢核；DB UQ 為並發後盾）。"""
+        """版本號是否已被本文件之「已發布」版本使用（PUBLISHED / SUPERSEDED）。
+
+        僅卡與已發布版本重複——草稿 / 送審中 / 退回不計，故多人可各自草稿填同版號；送簽時據此檢核
+        （DM-MSG-DM03-009）。DB partial unique index（UX_DM_DOC_VERSION_RELEASED_NO）為並發後盾。
+        """
         got = await db.scalar(
             select(DmDocVersion.version_id).where(
-                DmDocVersion.doc_id == doc_id, DmDocVersion.version_no == version_no, DmDocVersion.deleted == 0
+                DmDocVersion.doc_id == doc_id,
+                DmDocVersion.version_no == version_no,
+                DmDocVersion.status.in_(("PUBLISHED", "SUPERSEDED")),
+                DmDocVersion.deleted == 0,
             )
         )
         return got is not None

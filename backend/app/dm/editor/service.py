@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +52,17 @@ _MAX_DOCID_RETRY = 3
 _NOT_FOUND = AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
 # 送審類型 → 通知範本人類可讀標籤（DOC_SUBMIT.review_type 變數）
 _REVIEW_TYPE_LABEL = {_NEW: "首次發布審核", _NEW_VERSION: "新版本審核"}
+
+
+@dataclass(frozen=True)
+class _FileMeta:
+    """落盤後之檔案 metadata（草稿無檔案時各欄為 None）。"""
+
+    path: str | None
+    name: str | None
+    size: int | None
+    mime: str | None
+    previewable: bool
 
 
 class EditorService:
@@ -94,37 +106,37 @@ class EditorService:
         retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
-        file_name: str,
-        file_bytes: bytes,
-        file_mime: str,
+        file_name: str | None,
+        file_bytes: bytes | None,
+        file_mime: str | None,
         op: OperatorInfo,
     ) -> CreateResult:
-        """新增草稿文件（配 DOC_ID + DRAFT 首版 + 標籤）。首版無重複版號之虞。"""
+        """新增草稿文件（配 DOC_ID + DRAFT 首版 + 標籤）。
+
+        存草稿不卡必填（US5）：名稱 / 版號 / 摘要 / 檔案皆可空，送簽時才完整檢核。分類必填（DOC_ID 配號用）。
+        """
         doc_name = (doc_name or "").strip()
         version_no = (version_no or "").strip()
         change_summary = (change_summary or "").strip()
-        _require(文件名稱=doc_name, 版本號=version_no, 變更摘要=change_summary)
         await self._ensure_category(db, category_code)
         func_code = await self._resolve_func(db, category_code, func_code)
         tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
-        await validate_upload(db, size_bytes=len(file_bytes), filename=file_name)
 
         doc = await self._create_doc_with_retry(
             db, category_code=category_code, doc_name=doc_name, func_code=func_code, op=op
         )
-        # 落盤為同步阻塞 I/O，卸載至 thread 以免阻塞事件迴圈（大檔 ≤ DM_FILE_MAX_MB）。
-        file_path = await asyncio.to_thread(
-            save_upload, doc_id=doc.doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes
+        fmeta = await self._store_file(
+            db, doc_id=doc.doc_id, file_name=file_name, file_bytes=file_bytes, file_mime=file_mime
         )
         ver = await self._repo.add_version(
             db,
             doc_id=doc.doc_id,
             version_no=version_no,
             change_summary=change_summary,
-            file_name=file_name,
-            file_path=file_path,
-            file_size=len(file_bytes),
-            file_mime=file_mime,
+            file_name=fmeta.name,
+            file_path=fmeta.path,
+            file_size=fmeta.size,
+            file_mime=fmeta.mime,
             op=op,
         )
         await self._repo.set_tags(db, doc_id=doc.doc_id, tag_ids=tag_ids, op=op)
@@ -135,7 +147,21 @@ class EditorService:
             target=doc.doc_id,
             after={"doc_name": doc_name, "category_code": category_code, "version_no": version_no},
         )
-        return CreateResult(doc_id=doc.doc_id, version_id=ver.version_id, previewable=is_previewable(file_mime))
+        return CreateResult(doc_id=doc.doc_id, version_id=ver.version_id, previewable=fmeta.previewable)
+
+    async def _store_file(
+        self, db: AsyncSession, *, doc_id: str, file_name: str | None, file_bytes: bytes | None, file_mime: str | None
+    ) -> _FileMeta:
+        """有檔案 → 檢核（大小 / 副檔名）+ 落盤（卸載至 thread）並回 metadata；無檔案 → 全 None（草稿允許）。"""
+        if not file_bytes:
+            return _FileMeta(path=None, name=None, size=None, mime=None, previewable=False)
+        await validate_upload(db, size_bytes=len(file_bytes), filename=file_name or "")
+        path = await asyncio.to_thread(
+            save_upload, doc_id=doc_id, file_id=generate_file_id(), filename=file_name or "", data=file_bytes
+        )
+        return _FileMeta(
+            path=path, name=file_name, size=len(file_bytes), mime=file_mime, previewable=is_previewable(file_mime or "")
+        )
 
     async def _create_doc_with_retry(
         self, db: AsyncSession, *, category_code: str, doc_name: str, func_code: str | None, op: OperatorInfo
@@ -163,19 +189,18 @@ class EditorService:
         retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
-        file_name: str,
-        file_bytes: bytes,
-        file_mime: str,
+        file_name: str | None,
+        file_bytes: bytes | None,
+        file_mime: str | None,
         op: OperatorInfo,
     ) -> VersionResult:
         """既有文件新增 DRAFT 版本（身份欄不吃）+ 覆寫文件層標籤（可見對象 / 檢索）。
 
-        標籤 / 可見性為文件層（DM_DOC_TAG 無 version_id），屬文件屬性而非版本屬性；編輯時即時生效
-        （不隨新版本核准才套用）。前端編輯模式以 GET tags 端點預帶既有標籤供修改，避免誤清。
+        存草稿不卡必填（US5）：版號 / 摘要 / 檔案皆可空，送簽時才完整檢核。標籤為文件層（DM_DOC_TAG
+        無 version_id），編輯時即時生效；前端編輯模式以 GET tags 端點預帶既有標籤供修改，避免誤清。
         """
         version_no = (version_no or "").strip()
         change_summary = (change_summary or "").strip()
-        _require(版本號=version_no, 變更摘要=change_summary)
         doc = await self._repo.get_document(db, doc_id)
         if doc is None:
             raise _NOT_FOUND
@@ -187,34 +212,25 @@ class EditorService:
             raise AppError(
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             )
-        if await self._repo.version_no_taken(db, doc_id, version_no):
-            raise AppError(status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006")
         tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
-        await validate_upload(db, size_bytes=len(file_bytes), filename=file_name)
-
-        # 落盤為同步阻塞 I/O，卸載至 thread 以免阻塞事件迴圈。
-        file_path = await asyncio.to_thread(
-            save_upload, doc_id=doc_id, file_id=generate_file_id(), filename=file_name, data=file_bytes
+        fmeta = await self._store_file(
+            db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes, file_mime=file_mime
         )
         try:
-            async with db.begin_nested():  # SAVEPOINT：並發撞版號 / 撞單一草稿只回退本次 INSERT
+            async with db.begin_nested():  # SAVEPOINT：並發撞單一草稿（同人）只回退本次 INSERT
                 ver = await self._repo.add_version(
                     db,
                     doc_id=doc_id,
                     version_no=version_no,
                     change_summary=change_summary,
-                    file_name=file_name,
-                    file_path=file_path,
-                    file_size=len(file_bytes),
-                    file_mime=file_mime,
+                    file_name=fmeta.name,
+                    file_path=fmeta.path,
+                    file_size=fmeta.size,
+                    file_mime=fmeta.mime,
                     op=op,
                 )
         except IntegrityError as exc:
-            # 並發後盾（DB UQ / 每人每文件一份草稿之部分唯一索引）：回退後重查判定友善錯誤。
-            if await self._repo.version_no_taken(db, doc_id, version_no):
-                raise AppError(
-                    status_code=422, detail="版本號未填或與本文件既有版本重複", error_code="DM_DOC_006"
-                ) from exc
+            # 並發後盾（每人每文件一份草稿之部分唯一索引）：回退後給友善錯誤。
             raise AppError(
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             ) from exc
@@ -226,7 +242,7 @@ class EditorService:
             target=doc_id,
             after={"version_id": ver.version_id, "version_no": version_no},
         )
-        return VersionResult(version_id=ver.version_id, previewable=is_previewable(file_mime))
+        return VersionResult(version_id=ver.version_id, previewable=fmeta.previewable)
 
     async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> EditorDocTags:
         """取文件現有標籤（可見對象 / 檢索之 TAG_ID），供編輯模式表單預帶。查無文件 → 404。"""
@@ -258,15 +274,7 @@ class EditorService:
         # 指定審核者不可為「該版本撰寫者」本人（FR-006 不可自審）——以版本 CREATED_USER 為準，
         # 而非送簽者：他人代送草稿時，仍須排除實際撰寫者。ReviewService.submit 另擋送簽者本人。
         ensure_reviewer_not_author(assigned_reviewer, ver.created_user)
-
-        # 送簽前檢核
-        if not await self._repo.has_audience_tag(db, doc_id):
-            raise AppError(status_code=422, detail="文件至少需掛 1 個可見對象", error_code="DM_DOC_005")
-        if doc.category_code == _MANUAL and doc.func_code:
-            if await self._repo.manual_func_published_elsewhere(db, doc.func_code, doc_id):
-                raise AppError(status_code=409, detail="此關聯作業項目已有對應之已發布手冊", error_code="DM_DOC_007")
-        if await self._repo.has_pending_obsolete(db, doc_id):
-            raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
+        await self._ensure_submittable(db, doc, ver)
 
         # 首版（文件仍 DRAFT）→ NEW；已發布文件之新版 → NEW_VERSION
         review_type = _NEW if doc.status == _DRAFT else _NEW_VERSION
@@ -309,6 +317,30 @@ class EditorService:
             review_type=review_type,
         )
         return SubmitResult(review_id=review.review_id, notified=notified)
+
+    async def _ensure_submittable(self, db: AsyncSession, doc, ver) -> None:
+        """送簽前完整檢核（存草稿階段皆放行、於此才要求）：版號 / 摘要 / 檔案 / MANUAL func /
+        可見對象 ≥1 / 手冊唯一 / 廢止互斥。"""
+        if not (ver.version_no or "").strip():
+            raise AppError(status_code=422, detail="請輸入版本號", error_code="DM_DOC_006")
+        if await self._repo.version_no_taken(db, doc.doc_id, ver.version_no):
+            raise AppError(status_code=422, detail="版本號與本文件已發布版本重複", error_code="DM_DOC_006")
+        if not (ver.change_summary or "").strip():
+            raise AppError(status_code=422, detail="請填寫變更摘要", error_code="DM_DOC_004")
+        if not ver.file_path:
+            raise AppError(status_code=422, detail="請先上傳文件檔案", error_code="DM_DOC_004")
+        if doc.category_code == _MANUAL and not doc.func_code:
+            raise AppError(status_code=422, detail="系統操作手冊須指定關聯作業項目", error_code="DM_DOC_004")
+        if not await self._repo.has_audience_tag(db, doc.doc_id):
+            raise AppError(status_code=422, detail="文件至少需掛 1 個可見對象", error_code="DM_DOC_005")
+        if (
+            doc.category_code == _MANUAL
+            and doc.func_code
+            and await self._repo.manual_func_published_elsewhere(db, doc.func_code, doc.doc_id)
+        ):
+            raise AppError(status_code=409, detail="此關聯作業項目已有對應之已發布手冊", error_code="DM_DOC_007")
+        if await self._repo.has_pending_obsolete(db, doc.doc_id):
+            raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
 
     async def _notify_submit(
         self, db: AsyncSession, *, reviewer_id: str, author_id: str, doc_name: str, review_type: str
@@ -361,12 +393,13 @@ class EditorService:
             raise AppError(status_code=422, detail="分類無效或已停用", error_code="DM_DOC_010")
 
     async def _resolve_func(self, db: AsyncSession, category_code: str, func_code: str | None) -> str | None:
-        """系統操作手冊（MANUAL）必填且啟用之 func；非手冊類一律清為 None（不吃 func）。"""
+        """非手冊類一律清為 None（不吃 func）；手冊類有填則驗證啟用（DM_DOC_010），未填允許
+        （存草稿不卡，送簽時才要求 func）。"""
         if category_code != _MANUAL:
             return None
         func_code = (func_code or "").strip()
         if not func_code:
-            raise AppError(status_code=422, detail="系統操作手冊須指定關聯作業項目", error_code="DM_DOC_004")
+            return None
         if not await self._repo.func_enabled(db, func_code):
             raise AppError(status_code=422, detail="關聯作業項目無效或已停用", error_code="DM_DOC_010")
         return func_code

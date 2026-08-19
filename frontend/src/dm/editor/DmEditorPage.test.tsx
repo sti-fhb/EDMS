@@ -145,6 +145,31 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(navigateSpy).toHaveBeenCalledWith("/dm/library")
   }, 20000)
 
+  it("存草稿不卡必填：只選分類、不填版號/摘要/不傳檔 → 仍可存草稿", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    // 只選分類，版號/摘要留空、不上傳檔案
+    await user.click(screen.getByRole("combobox", { name: /分類/ }))
+    await user.click(await screen.findByRole("option", { name: "標準作業程序" }))
+    await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
+    expect(await screen.findByText("已儲存為草稿")).toBeInTheDocument()
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/library")
+  }, 20000)
+
+  it("送簽仍要求版號/摘要/檔案（存草稿放行、送簽才卡）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    await user.click(screen.getByRole("combobox", { name: /分類/ }))
+    await user.click(await screen.findByRole("option", { name: "標準作業程序" }))
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+    expect(await screen.findByText("請輸入版本號")).toBeInTheDocument()
+    expect(screen.getByText("請輸入變更摘要")).toBeInTheDocument()
+    expect(screen.getByText("請選擇要上傳的檔案")).toBeInTheDocument()
+    expect(navigateSpy).not.toHaveBeenCalled()
+  }, 20000)
+
   it("版號重複（後端 DM_DOC_006）→ inline 標於版本號欄（DM-MSG-DM03-009）", async () => {
     server.use(
       http.post("/api/dm/documents", () =>
