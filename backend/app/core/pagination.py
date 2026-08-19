@@ -6,6 +6,10 @@
     return result
 """
 
+# 【驗證用，不會合併】此註解僅為觸發 CI 的 backend job，實測 PR #173 升級後的
+# astral-sh/setup-uv@v10.0.0 能否正常運作。paths-filter 只看 backend/** 與 frontend/**，
+# 故 #173 單改 .github/ 時兩個 job 都 skip，兩個新版 action 從未被實際執行過。
+
 from typing import Any, Generic, TypedDict, TypeVar
 
 from pydantic import BaseModel
