@@ -1,5 +1,8 @@
 """ET 選課與學習進度 model（ET_ENROLLMENT / ET_PROGRESS / 影片進度 / 觀看區段）。
 
+`ET_ENROLLMENT` 置於本檔而非獨立 `enrollment/` 套件：選課與進度在查詢上高度耦合
+（完課率 / 學習狀況追蹤一律同時取兩者），分檔只會讓 import 互相牽扯。
+
 **影片進度為逐支影片**（2026-08-19 #179 變更）：原 `ET_PROGRESS` 兼存
 `COVERAGE_PCT` / `LAST_POSITION_SEC`（項目層），在「同一教材含多支影片」時無法分別
 記錄，導致 FR-ET-US5-05「**所有影片**累計覆蓋率 ≥ 80%」無法判定。兩欄已移至

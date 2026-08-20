@@ -32,6 +32,10 @@ ET 角色 bootstrap（#185 T024，依 SA Q1 裁示）——兩件事：
 非業務上要阻擋，故一併回填。帳號狀態（停用 / 鎖定）**不納入判斷**——角色指派與帳號
 狀態為兩件事，帳號狀態由 DP 於登入時把關。
 
+但**已軟刪除之帳號（`DP_USER.DELETED = 1`）一律排除**：那些帳號不會再登入，回填只會
+在 ET 側留下永不使用的幽靈角色列，污染日後之使用者清單與稽核資料。與「停用 / 鎖定」
+不同——後者是暫時狀態、帳號仍存在。
+
 冪等：兩者皆以 `WHERE NOT EXISTS` 判重，重跑不重複。
 """
 
@@ -69,7 +73,8 @@ def upgrade() -> None:
         text(
             'INSERT INTO "ET_USER_ROLE" ("USER_ID", "ROLE", "IS_ACTIVE", "CREATED_USER", "CREATED_DATE", "DELETED") '
             'SELECT u."USER_ID", :role_val, true, :u, :d, 0 FROM "DP_USER" u '
-            'WHERE NOT EXISTS (SELECT 1 FROM "ET_USER_ROLE" r '
+            'WHERE u."DELETED" = 0 '
+            'AND NOT EXISTS (SELECT 1 FROM "ET_USER_ROLE" r '
             'WHERE r."USER_ID" = u."USER_ID" AND r."ROLE" = :role_chk)'
         ),
         {"role_val": _ROLE_STUDENT, "role_chk": _ROLE_STUDENT, "u": _SEED_USER, "d": now},
@@ -87,7 +92,7 @@ def upgrade() -> None:
 
     # Email 比對採小寫正規化，對齊平台 US1/US2 之 email 正規化慣例（#35）
     user_id = conn.execute(
-        text('SELECT "USER_ID" FROM "DP_USER" WHERE lower("EMAIL") = lower(:e)'),
+        text('SELECT "USER_ID" FROM "DP_USER" WHERE lower("EMAIL") = lower(:e) AND "DELETED" = 0'),
         {"e": admin_email},
     ).scalar()
 

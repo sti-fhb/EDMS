@@ -142,23 +142,17 @@ class TestAc4AdminCanAssign:
         register_et_module()
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
-            await provider.assign(
-                db, user_id="ET_AC4_X", roles={"SUPERUSER"}, groups=set(), operator_id="ET_AC4_OP"
-            )
+            await provider.assign(db, user_id="ET_AC4_X", roles={"SUPERUSER"}, groups=set(), operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_ROLE_003"
 
     async def test_未啟用標籤不可新增指派(self, db) -> None:
         register_et_module()
         provider = module_assign_registry.get("ET")
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "軍人"})
-        await db.execute(
-            text('UPDATE "ET_TAG" SET "IS_ACTIVE" = false WHERE "TAG_ID" = :t'), {"t": tag_id}
-        )
+        await db.execute(text('UPDATE "ET_TAG" SET "IS_ACTIVE" = false WHERE "TAG_ID" = :t'), {"t": tag_id})
         await db.flush()
         with pytest.raises(AppError) as e:
-            await provider.assign(
-                db, user_id="ET_AC4_Y", roles=set(), groups={str(tag_id)}, operator_id="ET_AC4_OP"
-            )
+            await provider.assign(db, user_id="ET_AC4_Y", roles=set(), groups={str(tag_id)}, operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_ROLE_002"
 
     async def test_全體標籤不可停用(self, db) -> None:
@@ -167,9 +161,7 @@ class TestAc4AdminCanAssign:
         provider = module_assign_registry.get("ET")
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "IS_ALL" = true'))
         with pytest.raises(AppError) as e:
-            await provider.set_controlled_enabled(
-                db, "TAG", code=str(tag_id), enabled=False, operator_id="ET_AC4_OP"
-            )
+            await provider.set_controlled_enabled(db, "TAG", code=str(tag_id), enabled=False, operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_TAG_001"
 
     async def test_可指派標籤清單排除全體(self, db) -> None:
@@ -178,6 +170,84 @@ class TestAc4AdminCanAssign:
         names = {i.name for i in await provider.list_audiences(db)}
         assert "全體" not in names, "「全體」代表所有學員角色者，不需逐人指派"
         assert "護理師" in names
+
+
+class TestCatalogMaintenance:
+    """受控主檔維護之業務保護與稽核（Code Review 補強：rename / create 原無測試）。"""
+
+    async def test_內建標籤不可改名(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "護理師"})
+        with pytest.raises(AppError) as e:
+            await provider.rename_controlled(db, "TAG", code=str(tag_id), new_name="護理人員", operator_id="ET_CAT_OP")
+        assert e.value.status_code == 422
+        assert e.value.error_code == "ET_TAG_001"
+
+    async def test_新增標籤名稱重複被擋(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        with pytest.raises(AppError) as e:
+            await provider.create_controlled(db, "TAG", code="", name="軍人", operator_id="ET_CAT_OP")
+        assert e.value.status_code == 409
+        assert e.value.error_code == "ET_TAG_002"
+
+    async def test_查無標籤回_404_專用碼(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        with pytest.raises(AppError) as e:
+            await provider.rename_controlled(db, "TAG", code="999999", new_name="X", operator_id="ET_CAT_OP")
+        assert e.value.status_code == 404
+        assert e.value.error_code == "ET_TAG_003"
+
+    async def test_非_tag_類別被擋(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        with pytest.raises(AppError) as e:
+            await provider.list_controlled(db, "CATEGORY")
+        assert e.value.error_code == "ET_TAG_003"
+
+    async def test_新增自訂標籤成功且非內建(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        await provider.create_controlled(db, "TAG", code="", name="放射師", operator_id="ET_CAT_OP")
+        items = {i.name: i for i in await provider.list_controlled(db, "TAG")}
+        assert "放射師" in items
+        assert items["放射師"].is_builtin is False
+        assert items["放射師"].is_enabled is True
+
+    async def test_稽核_func_name_區分指派與定義維護(self, db) -> None:
+        """ET-ROLES（指派）與 ET-CATALOG（標籤庫定義）須為不同稽核來源碼。
+
+        比照 DM 之 DM-ROLES / DM-CATALOG——否則稽核無法依 FUNC_NAME 區分兩類管理行為。
+        """
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        await provider.create_controlled(db, "TAG", code="", name="營養師", operator_id="ET_CAT_AUD")
+        await provider.assign(db, user_id="ET_CAT_TARGET", roles={ROLE_STUDENT}, groups=set(), operator_id="ET_CAT_AUD")
+        rows = await db.execute(
+            text('SELECT DISTINCT "FUNC_NAME" FROM "DP_AUDIT_LOG" WHERE "CREATED_USER" = :u'),
+            {"u": "ET_CAT_AUD"},
+        )
+        func_names = set(rows.scalars().all())
+        assert "ET-CATALOG" in func_names
+        assert "ET-ROLES" in func_names
+
+
+class TestLastModifiedFallback:
+    """Code Review 補強：新授予而未再異動之列，最後異動欄須回退至 CREATED_*。"""
+
+    async def test_僅建立未更新時回退至_created(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        # grant_default_student_role 建立之列只有 CREATED_*、無 UPDATED_*
+        from app.et.roles.provisioning import grant_default_student_role
+
+        await grant_default_student_role(db, "ET_LMF_U1")
+        view = (await provider.get_users_assignments(db, ["ET_LMF_U1"]))["ET_LMF_U1"]
+        assert view.roles == frozenset({ROLE_STUDENT})
+        assert view.last_modified_by == "SYSTEM", "應回退至 CREATED_USER，而非空白"
+        assert view.last_modified_date is not None
 
 
 class TestAc8NoSmtpInEt:

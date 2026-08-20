@@ -27,7 +27,10 @@ def generate_invitation_code(*, length: int, exists: Callable[[str], bool]) -> s
     Args:
         length: 碼長，來自 `DP_PARAM.ET_INVITATION_CODE_LENGTH`。
         exists: 唯一性判定 callable，回傳 True 表示該碼已被使用（呼叫端注入
-            repository 查詢，使本函式保持純粹、可單元測試）。
+            查詢，使本函式保持純粹、可單元測試）。
+            ⚠️ **本參數為同步 callable**：呼叫端應**先批次查出既有邀請碼集合**再包成
+            `lambda code: code in existing_codes`，不要在其中等待非同步 I/O
+            （包 `asyncio.run()` 會與既有事件迴圈衝突）。
 
     Raises:
         ValueError: `length` 不合法（< 1 或超過欄位上限）。

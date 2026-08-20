@@ -66,7 +66,8 @@ class EtAssignService:
         """批次載入一頁使用者之 ET 角色與標籤現況（避免逐列 N+1）。
 
         查無指派者回**空集合 View**（非缺 key），供 DP 端一致處理。
-        `last_modified_*` 取 `ET_USER_ROLE` / `ET_USER_TAG` 之 `UPDATED_*` 較新者。
+        `last_modified_*` 取 `ET_USER_ROLE` / `ET_USER_TAG` 之 `UPDATED_*` 較新者，
+        **無 UPDATED_* 時回退至 CREATED_***（比照 DM）——新授予之列尚未被異動過。
         """
         result: dict[str, AssignmentView] = {
             uid: AssignmentView(frozenset(), frozenset(), None, None) for uid in user_ids
@@ -86,25 +87,41 @@ class EtAssignService:
                 last_by_user[uid] = (who, when)
 
         role_rows = await db.execute(
-            select(EtUserRole.user_id, EtUserRole.role, EtUserRole.updated_user, EtUserRole.updated_date).where(
+            select(
+                EtUserRole.user_id,
+                EtUserRole.role,
+                EtUserRole.updated_user,
+                EtUserRole.updated_date,
+                EtUserRole.created_user,
+                EtUserRole.created_date,
+            ).where(
                 EtUserRole.user_id.in_(user_ids),
                 EtUserRole.is_active.is_(True),
                 EtUserRole.deleted == 0,
             )
         )
-        for uid, role, upd_user, upd_date in role_rows:
+        for uid, role, upd_user, upd_date, crt_user, crt_date in role_rows:
             roles_by_user[uid].add(role)
-            _track(uid, upd_user, upd_date)
+            # 回退至 CREATED_*：新授予而從未再異動之列（如 grant_default_student_role
+            # 或 bootstrap seed 所建）無 UPDATED_*，否則 DP 後台「最後異動」欄會空白
+            _track(uid, upd_user or crt_user, upd_date or crt_date)
 
         tag_rows = await db.execute(
-            select(EtUserTag.user_id, EtUserTag.tag_id, EtUserTag.updated_user, EtUserTag.updated_date).where(
+            select(
+                EtUserTag.user_id,
+                EtUserTag.tag_id,
+                EtUserTag.updated_user,
+                EtUserTag.updated_date,
+                EtUserTag.created_user,
+                EtUserTag.created_date,
+            ).where(
                 EtUserTag.user_id.in_(user_ids),
                 EtUserTag.deleted == 0,
             )
         )
-        for uid, tag_id, upd_user, upd_date in tag_rows:
+        for uid, tag_id, upd_user, upd_date, crt_user, crt_date in tag_rows:
             tags_by_user[uid].add(str(tag_id))
-            _track(uid, upd_user, upd_date)
+            _track(uid, upd_user or crt_user, upd_date or crt_date)
 
         for uid in user_ids:
             who, when = last_by_user[uid]

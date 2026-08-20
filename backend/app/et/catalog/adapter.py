@@ -16,7 +16,7 @@ DP 後台「系統參數與清單」，經本轉接層呼叫——**DP 不直接
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -26,7 +26,9 @@ from app.services import AuditLogService
 
 logger = logging.getLogger(__name__)
 
-_FUNC_NAME = "ET-ROLES"
+# 受控主檔「定義」維護之稽核碼，與角色 / 標籤「指派」（ET-ROLES）分開——
+# 比照 DM 之 DM-CATALOG vs DM-ROLES，使稽核可依 FUNC_NAME 區分兩類管理行為。
+_FUNC_NAME = "ET-CATALOG"
 _MODULE = "ET"
 _KIND_TAG = "TAG"
 
@@ -34,7 +36,7 @@ _KIND_TAG = "TAG"
 def _ensure_tag_kind(kind: str) -> None:
     """ET 僅有 `TAG` 一類受控主檔；其餘 kind 一律拒絕（fail-closed）。"""
     if kind != _KIND_TAG:
-        raise AppError(status_code=404, detail="查無此受控項目類別", error_code="ET_TAG_001")
+        raise AppError(status_code=404, detail="查無此受訓單位標籤或項目類別", error_code="ET_TAG_003")
 
 
 class EtCatalogAdapter:
@@ -96,7 +98,7 @@ class EtCatalogAdapter:
         now = datetime.now(timezone.utc)
         exists = await db.scalar(select(EtTag.tag_id).where(EtTag.tag_name == name, EtTag.deleted == 0))
         if exists is not None:
-            raise AppError(status_code=409, detail="受訓單位標籤名稱已存在", error_code="ET_TAG_001")
+            raise AppError(status_code=409, detail="受訓單位標籤名稱已存在", error_code="ET_TAG_002")
 
         max_order = await db.scalar(select(EtTag.display_order).order_by(EtTag.display_order.desc()).limit(1))
         db.add(
@@ -136,7 +138,7 @@ class EtCatalogAdapter:
             select(EtTag.tag_id).where(EtTag.tag_name == new_name, EtTag.tag_id != tag.tag_id, EtTag.deleted == 0)
         )
         if dup is not None:
-            raise AppError(status_code=409, detail="受訓單位標籤名稱已存在", error_code="ET_TAG_001")
+            raise AppError(status_code=409, detail="受訓單位標籤名稱已存在", error_code="ET_TAG_002")
 
         before = tag.tag_name
         tag.tag_name = new_name
@@ -179,15 +181,10 @@ class EtCatalogAdapter:
         tag.updated_date = datetime.now(timezone.utc)
         await db.flush()
 
-        affected = await db.scalar(
-            select(EtUserTag.user_tag_id).where(EtUserTag.tag_id == tag.tag_id, EtUserTag.deleted == 0).limit(1)
+        # 單次 count 查詢（比照 dm/catalog/service.py 之 soft_retire_audience_tag）
+        affected_count = await db.scalar(
+            select(func.count()).select_from(EtUserTag).where(EtUserTag.tag_id == tag.tag_id, EtUserTag.deleted == 0)
         )
-        affected_count = 0
-        if affected is not None:
-            rows = await db.scalars(
-                select(EtUserTag.user_tag_id).where(EtUserTag.tag_id == tag.tag_id, EtUserTag.deleted == 0)
-            )
-            affected_count = len(rows.all())
 
         await self._audit.log_action(
             db,
@@ -205,8 +202,8 @@ class EtCatalogAdapter:
     async def _require_tag(self, db: AsyncSession, code: str) -> EtTag:
         """依 `code`（TAG_ID 字串）取標籤；查無或格式錯誤一律 404。"""
         if not code.isdigit():
-            raise AppError(status_code=404, detail="查無此受訓單位標籤", error_code="ET_TAG_001")
+            raise AppError(status_code=404, detail="查無此受訓單位標籤或項目類別", error_code="ET_TAG_003")
         tag = await db.scalar(select(EtTag).where(EtTag.tag_id == int(code), EtTag.deleted == 0))
         if tag is None:
-            raise AppError(status_code=404, detail="查無此受訓單位標籤", error_code="ET_TAG_001")
+            raise AppError(status_code=404, detail="查無此受訓單位標籤或項目類別", error_code="ET_TAG_003")
         return tag
