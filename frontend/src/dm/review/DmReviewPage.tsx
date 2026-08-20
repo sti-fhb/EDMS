@@ -1,3 +1,4 @@
+import DownloadIcon from "@mui/icons-material/Download"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -7,7 +8,7 @@ import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
-import Divider from "@mui/material/Divider"
+import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
@@ -19,69 +20,140 @@ import TableRow from "@mui/material/TableRow"
 import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
+import CloseIcon from "@mui/icons-material/Close"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_STATUS_LABELS, REVIEW_TYPE_LABELS } from "./schemas"
 import type { ReviewDetail, VersionMeta } from "./schemas"
-import { reviewApi } from "./reviewService"
+import { downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
 import { Pagination } from "../../components/Pagination"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
-import { downloadVersionFile } from "../detail/detailService"
 
 const PAGE_SIZE = 20
 
-/** 版本下載列（版本號 / 狀態標籤 / 檔名 / 下載）。 */
-function VersionRow({ docId, meta, label }: { docId: string; meta: VersionMeta; label: string }) {
+/** 版本對照列（版本 / 狀態 / 檔案 / 下載）。 */
+function VersionCompareRow({
+  meta,
+  statusLabel,
+  statusColor,
+  highlight,
+  onDownload,
+}: {
+  meta: VersionMeta
+  statusLabel: string
+  statusColor: "success" | "warning"
+  highlight?: boolean
+  onDownload: (versionId: number, filename: string) => void
+}) {
   return (
-    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, py: 0.5 }}>
-      <Box>
-        <Typography variant="body2">
-          {meta.version_no ?? "—"} <Chip size="small" label={label} sx={{ ml: 1 }} />
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {meta.file_name ?? "（無檔案）"}
-        </Typography>
-      </Box>
-      {meta.file_name && (
-        <Button size="small" onClick={() => downloadVersionFile(docId, meta.version_id, meta.file_name ?? "file")}>
-          下載
-        </Button>
-      )}
-    </Box>
+    <TableRow sx={highlight ? { bgcolor: "action.hover" } : undefined}>
+      <TableCell sx={{ fontWeight: 600 }}>{meta.version_no ?? "—"}</TableCell>
+      <TableCell>
+        <Chip size="small" color={statusColor} label={statusLabel} />
+      </TableCell>
+      <TableCell>{meta.file_name ?? "（無檔案）"}</TableCell>
+      <TableCell align="right">
+        {meta.file_name && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={() => onDownload(meta.version_id, meta.file_name ?? "file")}
+          >
+            下載
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
   )
 }
 
-/** 簽核明細面板（變更摘要 + 新舊版下載 + 核准 / 退回）。 */
+/** 簽核明細面板（wireframe：標題 + 類型 badge + 右上角關閉 + 版本對照表 + 核准 / 退回）。 */
 function DetailPanel({
   detail,
   onApprove,
   onReject,
+  onClose,
+  onDownload,
   busy,
 }: {
   detail: ReviewDetail
   onApprove: () => void
   onReject: () => void
+  onClose: () => void
+  onDownload: (versionId: number, filename: string) => void
   busy: boolean
 }) {
+  const isNewVersion = detail.review_type === "NEW_VERSION"
   return (
-    <Paper variant="outlined" sx={{ p: 2, mt: 1 }}>
-      <Typography variant="subtitle2" gutterBottom>
-        簽核明細 — {detail.doc_name}（{REVIEW_TYPE_LABELS[detail.review_type] ?? detail.review_type}）
+    <Paper variant="outlined" sx={{ p: 2, mt: 2, borderLeft: 4, borderLeftColor: "success.main" }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          簽核明細 — {detail.doc_name}
+          <Chip
+            size="small"
+            color="primary"
+            label={REVIEW_TYPE_LABELS[detail.review_type] ?? detail.review_type}
+            sx={{ ml: 1 }}
+          />
+        </Typography>
+        <IconButton size="small" onClick={onClose} aria-label="收合" title="收合">
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Box>
+
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+        變更摘要 <Typography component="span" variant="caption" color="text.secondary">（撰寫者填寫）</Typography>
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        變更摘要：{detail.change_summary || "（無）"}
+      <Box
+        sx={{ borderLeft: 4, borderLeftColor: "success.main", bgcolor: "success.50", px: 2, py: 1, mb: 2, borderRadius: 1 }}
+      >
+        <Typography variant="body2">{detail.change_summary || "（無）"}</Typography>
+      </Box>
+
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+        {isNewVersion ? "版本對照" : "新增檔案"}
       </Typography>
-      <Divider sx={{ my: 1 }} />
-      {detail.new_version && <VersionRow docId={detail.doc_id} meta={detail.new_version} label="待審版本" />}
-      {detail.current_version && <VersionRow docId={detail.doc_id} meta={detail.current_version} label="目前發布版" />}
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-        需逐段比對請下載新舊版檔案分別檢視（不提供線上預覽）。
+      <Table size="small" sx={{ mb: 1 }}>
+        <TableHead>
+          <TableRow>
+            <TableCell>{isNewVersion ? "版本" : "首版版本"}</TableCell>
+            <TableCell>狀態</TableCell>
+            <TableCell>檔案</TableCell>
+            <TableCell align="right">動作</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {detail.current_version && (
+            <VersionCompareRow
+              meta={detail.current_version}
+              statusLabel="目前發布版"
+              statusColor="success"
+              onDownload={onDownload}
+            />
+          )}
+          {detail.new_version && (
+            <VersionCompareRow
+              meta={detail.new_version}
+              statusLabel={isNewVersion ? "待審新版" : "待審首版"}
+              statusColor="warning"
+              highlight
+              onDownload={onDownload}
+            />
+          )}
+        </TableBody>
+      </Table>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
+        {isNewVersion
+          ? "需要逐段比對請下載新舊版檔案分別檢視（不提供線上預覽）。"
+          : "本文件為首次提交，無舊版可比對；請依首版摘要與檔案內容判斷是否核准發布。"}
       </Typography>
-      <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+
+      <Stack direction="row" spacing={1}>
         <Button variant="contained" onClick={onApprove} disabled={busy}>
           核准並發布
         </Button>
@@ -148,6 +220,15 @@ export function DmReviewPage() {
       cancelText: "取消",
       onOk: () => approveMut.mutate(selectedId),
     })
+  }
+
+  const handleDownload = async (versionId: number, filename: string) => {
+    if (selectedId == null) return
+    try {
+      await downloadReviewFile(selectedId, versionId, filename)
+    } catch (e) {
+      message.error(toApiError(e).errorMessage) // 待審版取檔失敗（無權 / 檔案缺失）改以 toast 提示
+    }
   }
 
   const submitReject = () => {
@@ -237,7 +318,14 @@ export function DmReviewPage() {
                 </TableBody>
               </Table>
               {selectedId != null && detail && (
-                <DetailPanel detail={detail} onApprove={onApprove} onReject={() => setRejectOpen(true)} busy={busy} />
+                <DetailPanel
+                  detail={detail}
+                  onApprove={onApprove}
+                  onReject={() => setRejectOpen(true)}
+                  onClose={() => setSelectedId(null)}
+                  onDownload={handleDownload}
+                  busy={busy}
+                />
               )}
             </>
           )}

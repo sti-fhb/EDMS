@@ -30,4 +30,24 @@ export const reviewApi = {
     })
     return data
   },
+
+  fetchFileBlob: async (reviewId: number, versionId: number): Promise<Blob> => {
+    const { data } = await http.get<Blob>(`/dm/reviews/${reviewId}/versions/${versionId}/file`, {
+      responseType: "blob",
+    })
+    return data
+  },
+}
+
+/** 下載簽核明細之待審版 / 目前發布版檔案（走 US6 審核端點，可取未發布之待審版）。 */
+export async function downloadReviewFile(reviewId: number, versionId: number, filename: string): Promise<void> {
+  const blob = await reviewApi.fetchFileBlob(reviewId, versionId)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }

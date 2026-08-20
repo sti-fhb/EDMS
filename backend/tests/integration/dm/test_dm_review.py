@@ -179,6 +179,37 @@ async def test_detail_non_reviewer_blocked(db):
     assert e.value.error_code == "DM_REVIEW_005"
 
 
+# ── 明細檔案下載（待審版取檔）────────────────────────
+
+
+async def test_prepare_file_reviewer_gets_pending_and_current(db):
+    """指定審核者可取待審版（未發布）與目前發布版（供比對）。"""
+    await _seed_user(db, "ed", "撰寫")
+    _, cur, new, r = await _new_version_submission(db, "DM-SOP-000313")
+    pending = await _svc.prepare_file(db, review_id=r.review_id, version_id=new.version_id, op=_op("rev1"))
+    assert pending.path == new.file_path and pending.name == new.file_name
+    current = await _svc.prepare_file(db, review_id=r.review_id, version_id=cur.version_id, op=_op("rev1"))
+    assert current.path == cur.file_path
+
+
+async def test_prepare_file_non_reviewer_blocked(db):
+    await _seed_user(db, "ed", "撰寫")
+    _, v, r = await _new_submission(db, "DM-SOP-000314", reviewer="rev1")
+    with pytest.raises(AppError) as e:
+        await _svc.prepare_file(db, review_id=r.review_id, version_id=v.version_id, op=_op("other"))
+    assert e.value.error_code == "DM_REVIEW_005"
+
+
+async def test_prepare_file_version_not_in_review_rejected(db):
+    """越權索取非本送審之版本（不在白名單）→ 404，不外洩其他版本檔案。"""
+    await _seed_user(db, "ed", "撰寫")
+    _, v, r = await _new_submission(db, "DM-SOP-000315", reviewer="rev1")
+    other = await _add_version(db, v.doc_id, "9.9", status="DRAFT")
+    with pytest.raises(AppError) as e:
+        await _svc.prepare_file(db, review_id=r.review_id, version_id=other.version_id, op=_op("rev1"))
+    assert e.value.status_code == 404
+
+
 # ── 核准並發布 ────────────────────────────────────
 
 

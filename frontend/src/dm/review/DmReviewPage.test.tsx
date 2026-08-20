@@ -14,17 +14,21 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     expect(screen.getByText(/1 天/)).toBeInTheDocument()
   })
 
-  it("點列展開明細：變更摘要 + 新舊版下載 + 核准/退回入口", async () => {
+  it("點列展開明細：版本對照表（狀態 pill + 下載）+ 核准/退回 + X 收合", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmReviewPage />)
     await user.click(await screen.findByText("領血確認標準作業程序"))
     expect(await screen.findByText(/簽核明細 —/)).toBeInTheDocument()
     expect(screen.getByText(/補充第 5 點異常通報流程/)).toBeInTheDocument()
-    // 新舊版下載列
-    expect(screen.getByText("待審版本")).toBeInTheDocument()
+    // 版本對照表：目前發布版 + 待審新版 狀態 pill
+    expect(screen.getByText("待審新版")).toBeInTheDocument()
     expect(screen.getByText("目前發布版")).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: /下載/ }).length).toBeGreaterThanOrEqual(2)
     expect(screen.getByRole("button", { name: "核准並發布" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "退回" })).toBeInTheDocument()
+    // X 收合明細面板
+    await user.click(screen.getByRole("button", { name: "收合" }))
+    expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument()
   })
 
   it("核准並發布 → 二次確認 → 成功 toast（DM-MSG-DM04-001）", async () => {

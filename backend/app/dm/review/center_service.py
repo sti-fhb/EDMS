@@ -11,6 +11,8 @@ OBSOLETE 核准與撤回消失情境屬 US8 / US9，本服務以 DM_REVIEW_006 �
 結束統一 commit；本層僅 flush，故核准 + 版本切換 + 變更歷程 + 通知同一交易原子成立。
 """
 
+from dataclasses import dataclass
+
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult
@@ -38,6 +40,15 @@ _SUPERSEDED = "SUPERSEDED"
 _REJECTED = "REJECTED"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
+
+
+@dataclass(slots=True)
+class ReviewFile:
+    """簽核明細待審 / 比對檔案之落地資訊（供 router 組 FileResponse）。"""
+
+    path: str
+    mime: str
+    name: str
 
 
 class ReviewCenterService:
@@ -131,6 +142,32 @@ class ReviewCenterService:
             submitter_name=row.submitter_name,
             new_version=new_version,
             current_version=current_version,
+        )
+
+    async def prepare_file(self, db, *, review_id: int, version_id: int, op: OperatorInfo) -> ReviewFile:
+        """簽核明細檔案下載：僅指定審核者本人，且僅限本送審之待審版或（新版本申請）目前發布版。
+
+        US4 下載端點僅開放目前發布版（DM_DOC_002），無法取待審版；審核者須下載待審版方能審閱，故簽核中心
+        另設此端點。不寫 DM_DOC_READ（審閱非正式閱讀）；以 review 綁定 version 白名單，杜絕越權取任意版本。
+        """
+        review = await self._repo.get_review(db, review_id)
+        if review is None:
+            raise _NOT_FOUND
+        if review.assigned_reviewer != op.user_id:
+            raise AppError(status_code=403, detail="非指定審核者，不可下載此送審檔案", error_code="DM_REVIEW_005")
+        doc = await self._repo.get_document(db, review.doc_id)
+        allowed = {review.version_id}
+        if review.review_type == _NEW_VERSION and doc is not None and doc.current_version_id is not None:
+            allowed.add(doc.current_version_id)  # 新版本申請：另允許目前發布版供新舊比對
+        if version_id not in allowed:
+            raise _NOT_FOUND
+        version = await self._repo.get_version(db, version_id)
+        if version is None or not version.file_path:
+            raise _NOT_FOUND
+        return ReviewFile(
+            path=version.file_path,
+            mime=version.file_mime or "application/octet-stream",
+            name=version.file_name or "file",
         )
 
     async def list_completed(

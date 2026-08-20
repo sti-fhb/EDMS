@@ -247,6 +247,9 @@ export const handlers = [
   http.post("/api/dm/reviews/:reviewId/reject", ({ params }) =>
     HttpResponse.json({ review_id: Number(params.reviewId) }),
   ),
+  http.get("/api/dm/reviews/:reviewId/versions/:versionId/file", () =>
+    HttpResponse.arrayBuffer(new ArrayBuffer(8), { headers: { "Content-Type": "application/pdf" } }),
+  ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
     HttpResponse.json({

@@ -4,10 +4,14 @@
 指定審核者本人可操作（service 層以 `DM_REVIEW_005` 把關）。清單依 `assigned_reviewer=登入者` 過濾。
 """
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.dm.deps import DmContext, get_dm_context
@@ -57,6 +61,24 @@ async def get_detail(
 ):
     """簽核明細（僅指定審核者本人；新版本附目前發布版供比對）。"""
     return await _service.get_detail(db, review_id=review_id, op=op)
+
+
+@router.get("/{review_id}/versions/{version_id}/file")
+async def download_review_file(
+    review_id: int,
+    version_id: int,
+    ctx: DmContext = Depends(get_dm_context),
+    op: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """簽核明細下載：僅指定審核者本人，且僅限本送審之待審版 / 目前發布版（供新舊比對）。"""
+    served = await _service.prepare_file(db, review_id=review_id, version_id=version_id, op=op)
+    # 實體檔缺失（DB↔磁碟不一致）：回統一 404，避免 FileResponse 拋出含落盤路徑的 500（不洩路徑）。
+    if not Path(served.path).is_file():
+        raise AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
+    return FileResponse(
+        served.path, media_type=served.mime, filename=served.name, content_disposition_type="attachment"
+    )
 
 
 @router.post("/{review_id}/approve", response_model=ApproveResult)
