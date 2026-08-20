@@ -71,7 +71,8 @@ specs/et/
 ├── contracts/           # Phase 1 介面契約
 │   ├── srv-et-dm-document-list.md        # SRVDM002：查詢 DM「訓練教材」分類有效文件清單（ET → DM）
 │   ├── srv-et-dm-document-content.md     # SRVDM001：依 DOC_ID 取 DM 文件當前發布版 metadata 與廢止狀態（ET → DM）
-│   └── ext-et-email-server.md            # ET 經平台唯一發信服務寄送 Email（不支援附件）
+│   ├── ext-et-email-server.md            # ET 經平台唯一發信服務寄送 Email（不支援附件）
+│   └── srv-et-dp-module-callbacks.md     # SRVET001–006：ET 提供予平台 DP 之回呼介面（ET → DP）
 ├── checklists/
 │   └── requirements.md  # 規格品質檢核
 └── tasks.md             # Phase 2 開發任務清單
@@ -166,7 +167,7 @@ ET 參數集中於平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`；2026-07-08 集�
 |---------|------|--------|
 | `ET_VIDEO_ALLOWED_FORMATS` | 教材影片允許之上傳格式 | `mp4,webm` |
 | `ET_VIDEO_MAX_SIZE_MB` | 教材影片單檔大小上限 | `500` |
-| `ET_VIDEO_PLAYBACK_MAX_RATE` | 影片播放倍速上限 | `2` |
+| `ET_VIDEO_PLAYBACK_MAX_RATE` | 影片播放倍速上限（**只能往下限縮**，選項清單前端寫死）| `2` |
 | `ET_INVITATION_CODE_LENGTH` | 邀請碼長度（純數字）| `8` |
 | `ET_WEEKLY_STAT_DAY_TIME` | SCHET001 每週統計與週報執行時間 | `MON 10:00` |
 | `ET_URGENT_REMIND_DAYS` | SCHET002 截止前加急提醒天數 | `3` |

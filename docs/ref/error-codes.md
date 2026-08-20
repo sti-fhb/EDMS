@@ -103,11 +103,19 @@
 
 ## ET — 教育訓練模組
 
-> 隨各 ET US task 增補。
+> 隨各 ET US task 增補。下列為 ET 提供予平台 DP 之回呼介面所需（2026-08-19 #181 定案，見 [`../specs/et/contracts/srv-et-dp-module-callbacks.md`](../specs/et/contracts/srv-et-dp-module-callbacks.md)）；ET 模組尚未實作，實作時依此登記使用。
 
 | error_code | HTTP | error_message |
 |------------|------|---------------|
-| _(待各 ET task 增補)_ | | |
+| ET_AUTH_001 | 403 | 需要教育訓練模組權限 |
+| ET_ROLE_001 | 403 | 無法停用自己之管理者角色 |
+| ET_ROLE_002 | 422 | 指定之受訓單位標籤無效或未啟用 |
+| ET_ROLE_003 | 422 | 指定之角色代碼無效 |
+| ET_TAG_001 | 422 | 內建標籤不可停用或改名 |
+
+> `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
+>
+> `ET_TAG_001`（SRVET004）：「全體」等內建受訓單位標籤之停用 / 改名保護，於 ET 受控主檔轉接層伺服器端拒絕；DP 後台之前端隱藏僅為 UX。
 
 ---
 
