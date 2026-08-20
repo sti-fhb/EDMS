@@ -126,9 +126,7 @@ class EtQuizAttemptM(BaseModel):
     )
     attempt_no: Mapped[int] = mapped_column("ATTEMPT_NO", Integer, nullable=False)
     started_at: Mapped[datetime] = mapped_column("STARTED_AT", DateTime(timezone=True), nullable=False)
-    submitted_at: Mapped[Optional[datetime]] = mapped_column(
-        "SUBMITTED_AT", DateTime(timezone=True), nullable=True
-    )
+    submitted_at: Mapped[Optional[datetime]] = mapped_column("SUBMITTED_AT", DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column("STATUS", String(20), nullable=False)
     score: Mapped[Optional[Decimal]] = mapped_column("SCORE", Numeric(5, 2), nullable=True)
     is_pass: Mapped[Optional[bool]] = mapped_column("IS_PASS", Boolean, nullable=True)

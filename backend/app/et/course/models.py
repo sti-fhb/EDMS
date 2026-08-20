@@ -56,9 +56,7 @@ class EtCourse(BaseModel):
     course_name: Mapped[str] = mapped_column("COURSE_NAME", String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column("DESCRIPTION", Text, nullable=True)
     status: Mapped[str] = mapped_column("STATUS", String(20), nullable=False, default="DRAFT")
-    open_start_at: Mapped[Optional[datetime]] = mapped_column(
-        "OPEN_START_AT", DateTime(timezone=True), nullable=True
-    )
+    open_start_at: Mapped[Optional[datetime]] = mapped_column("OPEN_START_AT", DateTime(timezone=True), nullable=True)
     open_end_at: Mapped[Optional[datetime]] = mapped_column("OPEN_END_AT", DateTime(timezone=True), nullable=True)
     owner_id: Mapped[str] = mapped_column("OWNER_ID", String(20), nullable=False)
     invitation_code: Mapped[Optional[str]] = mapped_column("INVITATION_CODE", String(8), nullable=True)
@@ -66,9 +64,7 @@ class EtCourse(BaseModel):
         "FIRST_PUBLISHED_AT", DateTime(timezone=True), nullable=True
     )
     closed_at: Mapped[Optional[datetime]] = mapped_column("CLOSED_AT", DateTime(timezone=True), nullable=True)
-    urgent_remind_sent: Mapped[bool] = mapped_column(
-        "URGENT_REMIND_SENT", Boolean, nullable=False, default=False
-    )
+    urgent_remind_sent: Mapped[bool] = mapped_column("URGENT_REMIND_SENT", Boolean, nullable=False, default=False)
     version: Mapped[int] = mapped_column("VERSION", Integer, nullable=False, default=0)
     require_approval: Mapped[bool] = mapped_column("REQUIRE_APPROVAL", Boolean, nullable=False, default=False)
 
@@ -108,8 +104,8 @@ class EtItem(BaseModel):
         PrimaryKeyConstraint("ITEM_ID", name="PK_ET_ITEM"),
         UniqueConstraint("CHAPTER_ID", "SORT_ORDER", name="UQ_ET_ITEM_CHAPTER_ORDER"),
         CheckConstraint(
-            "(\"ITEM_TYPE\" = 'MATERIAL' AND \"MATERIAL_ID\" IS NOT NULL AND \"QUIZ_ID\" IS NULL) "
-            "OR (\"ITEM_TYPE\" = 'QUIZ' AND \"QUIZ_ID\" IS NOT NULL AND \"MATERIAL_ID\" IS NULL)",
+            '("ITEM_TYPE" = \'MATERIAL\' AND "MATERIAL_ID" IS NOT NULL AND "QUIZ_ID" IS NULL) '
+            'OR ("ITEM_TYPE" = \'QUIZ\' AND "QUIZ_ID" IS NOT NULL AND "MATERIAL_ID" IS NULL)',
             name="CK_ET_ITEM_TYPE_TARGET",
         ),
     )
