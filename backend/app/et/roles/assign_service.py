@@ -37,10 +37,25 @@ def _ensure_valid_roles(roles: set[str]) -> None:
         raise AppError(status_code=422, detail="指定之角色代碼無效", error_code="ET_ROLE_003")
 
 
+# BIGINT 上限；TAG_ID 為 Identity 正整數
+_MAX_BIGINT = 9_223_372_036_854_775_807
+# 一次指派之標籤數上限（防呆：實務上標籤庫僅個位數～數十筆）
+_MAX_GROUPS = 100
+
+
 def _ensure_numeric_tag_ids(groups: set[str]) -> None:
-    """群組（受訓單位標籤）以 `ET_TAG.TAG_ID` 字串化傳遞，須為數字。"""
-    if any(not g.isdigit() for g in groups):
+    """群組（受訓單位標籤）以 `ET_TAG.TAG_ID` 字串化傳遞，須為合法正整數。
+
+    **用 `isdecimal()` 而非 `isdigit()`**：後者對 `²`（U+00B2）、`①`（U+2460）等
+    Unicode 數字字元亦回 True，但 `int()` 會拋 ValueError → 未攔截的 500。
+    另加位數與 BIGINT 界限——超出範圍之值 `int()` 雖可轉換，仍會在 asyncpg 比對
+    BIGINT 時溢位。
+    """
+    if len(groups) > _MAX_GROUPS:
         raise AppError(status_code=422, detail="指定之受訓單位標籤無效或未啟用", error_code="ET_ROLE_002")
+    for g in groups:
+        if not (g.isdecimal() and len(g) <= 19 and 0 < int(g) <= _MAX_BIGINT):
+            raise AppError(status_code=422, detail="指定之受訓單位標籤無效或未啟用", error_code="ET_ROLE_002")
 
 
 def ensure_not_self_admin_removal(operator_id: str, user_id: str, roles: set[str]) -> None:

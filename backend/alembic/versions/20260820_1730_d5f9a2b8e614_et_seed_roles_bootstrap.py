@@ -92,7 +92,10 @@ def upgrade() -> None:
 
     # Email 比對採小寫正規化，對齊平台 US1/US2 之 email 正規化慣例（#35）
     user_id = conn.execute(
-        text('SELECT "USER_ID" FROM "DP_USER" WHERE lower("EMAIL") = lower(:e) AND "DELETED" = 0'),
+        text(
+            'SELECT "USER_ID" FROM "DP_USER" '
+            'WHERE lower("EMAIL") = lower(:e) AND "DELETED" = 0 AND "STATUS" = \'ACTIVE\''
+        ),
         {"e": admin_email},
     ).scalar()
 
@@ -123,9 +126,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """僅刪除本 migration 種入之列（`CREATED_USER='SYSTEM'`）。
+    """刪除 `CREATED_USER='SYSTEM'` 之 STUDENT / ADMIN 列。
 
-    不刪管理者後續於 DP 後台指派之角色——那些列之 `CREATED_USER` 為操作者 USER_ID。
+    管理者後續於 DP 後台指派之角色不受影響（那些列之 `CREATED_USER` 為操作者 USER_ID）。
+
+    ⚠️ **範圍略大於本 migration 所種**：`grant_default_student_role` 於帳號啟用時建立的列
+    `CREATED_USER` 同樣是 `SYSTEM`，故會一併刪除。實務上可自癒（下次 upgrade 會回填、
+    或下次帳號啟用會重新授予），但降級後至再升級之間，該期間新建帳號需重新登入才會補上。
     """
     conn = op.get_bind()
     conn.execute(

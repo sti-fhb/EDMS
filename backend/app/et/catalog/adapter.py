@@ -31,6 +31,22 @@ logger = logging.getLogger(__name__)
 _FUNC_NAME = "ET-CATALOG"
 _MODULE = "ET"
 _KIND_TAG = "TAG"
+_MAX_BIGINT = 9_223_372_036_854_775_807
+# 對應 ET_TAG.TAG_NAME 之 VARCHAR(50)
+_MAX_TAG_NAME_LEN = 50
+
+
+def _normalise_tag_name(name: str) -> str:
+    """標籤名稱正規化與驗證。
+
+    `strip()` 是必要的——否則 `"軍人 "` 可繞過 `TAG_NAME` 唯一約束與重複檢查，
+    建出視覺上重複的標籤。長度上限對應 `ET_TAG.TAG_NAME` 之 VARCHAR(50)，
+    未擋會在 DB 層炸成 500。
+    """
+    cleaned = (name or "").strip()
+    if not cleaned or len(cleaned) > _MAX_TAG_NAME_LEN:
+        raise AppError(status_code=422, detail="受訓單位標籤名稱不合法", error_code="ET_TAG_004")
+    return cleaned
 
 
 def _ensure_tag_kind(kind: str) -> None:
@@ -95,24 +111,24 @@ class EtCatalogAdapter:
         標籤以 `TAG_NAME` 唯一識別。新增之標籤 `IS_BUILTIN=false`、`IS_ALL=false`。
         """
         _ensure_tag_kind(kind)
+        name = _normalise_tag_name(name)
         now = datetime.now(timezone.utc)
         exists = await db.scalar(select(EtTag.tag_id).where(EtTag.tag_name == name, EtTag.deleted == 0))
         if exists is not None:
             raise AppError(status_code=409, detail="受訓單位標籤名稱已存在", error_code="ET_TAG_002")
 
         max_order = await db.scalar(select(EtTag.display_order).order_by(EtTag.display_order.desc()).limit(1))
-        db.add(
-            EtTag(
-                tag_name=name,
-                is_active=True,
-                is_all=False,
-                is_builtin=False,
-                display_order=(max_order or 0) + 1,
-                created_user=operator_id,
-                created_date=now,
-                deleted=0,
-            )
+        tag = EtTag(
+            tag_name=name,
+            is_active=True,
+            is_all=False,
+            is_builtin=False,
+            display_order=(max_order or 0) + 1,
+            created_user=operator_id,
+            created_date=now,
+            deleted=0,
         )
+        db.add(tag)
         await db.flush()
         await self._audit.log_action(
             db,
@@ -121,6 +137,7 @@ class EtCatalogAdapter:
             action_type="CREATE",
             result="SUCCESS",
             operator_id=operator_id,
+            target_id=str(tag.tag_id),
             description="新增受訓單位標籤",
             after_value={"tag_name": name},
         )
@@ -130,6 +147,7 @@ class EtCatalogAdapter:
     ) -> None:
         """標籤改名。**內建標籤（含「全體」）不可改名**。"""
         _ensure_tag_kind(kind)
+        new_name = _normalise_tag_name(new_name)
         tag = await self._require_tag(db, code)
         if tag.is_builtin:
             raise AppError(status_code=422, detail="內建標籤不可停用或改名", error_code="ET_TAG_001")
@@ -200,8 +218,12 @@ class EtCatalogAdapter:
         return SetEnabledResult(affected_viewers=affected_count)
 
     async def _require_tag(self, db: AsyncSession, code: str) -> EtTag:
-        """依 `code`（TAG_ID 字串）取標籤；查無或格式錯誤一律 404。"""
-        if not code.isdigit():
+        """依 `code`（TAG_ID 字串）取標籤；查無或格式錯誤一律 404。
+
+        用 `isdecimal()` 而非 `isdigit()`——後者對 Unicode 數字字元（`²` / `①`）回 True
+        但 `int()` 會拋 ValueError，形成未攔截的 500。並加 BIGINT 界限。
+        """
+        if not (code.isdecimal() and len(code) <= 19 and 0 < int(code) <= _MAX_BIGINT):
             raise AppError(status_code=404, detail="查無此受訓單位標籤或項目類別", error_code="ET_TAG_003")
         tag = await db.scalar(select(EtTag).where(EtTag.tag_id == int(code), EtTag.deleted == 0))
         if tag is None:

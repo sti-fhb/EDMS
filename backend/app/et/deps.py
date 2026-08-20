@@ -15,6 +15,7 @@ ET 全模組端點的統一進入閘（FastAPI `Depends`，非 ASGI middleware�
 > 存量帳號之學員角色由 ET 角色 seed 回填（#185 SA Q1 裁示）。
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from fastapi import Depends
@@ -63,3 +64,30 @@ async def get_et_context(
     if not roles:
         raise AppError(status_code=403, detail="需要教育訓練模組權限", error_code="ET_AUTH_001")
     return EtContext(user_id=payload.sub, roles=roles)
+
+
+def require_et_roles(*required: str) -> Callable[..., Awaitable[EtContext]]:
+    """端點層授權 dependency factory——**宣告即生效**，不必記得在 service 層自行比對。
+
+    `get_et_context` 只驗「是否為 ET 使用者」，而 ET 學員角色於帳號建立當下即自動授予、
+    存量帳號亦由 bootstrap seed 回填——**實務上任何登入者都持有至少一個 ET 角色**，
+    故單掛 `get_et_context` 幾乎等同「已登入」，不構成授權控制。
+
+    若端點需要特定角色（如管理者專屬、教師專屬），請改掛本工廠：
+
+        @router.post("/courses", dependencies=[Depends(require_et_roles(ET_ADMIN, ET_TEACHER))])
+
+    這樣「漏掉授權」會表現為「沒掛 dependency」（顯眼），而非「掛了但沒比對」（隱形）。
+
+    Raises:
+        AppError: 不具任一 required 角色（403 `ET_AUTH_001`）。
+    """
+
+    required_set = frozenset(required)
+
+    async def _dep(ctx: EtContext = Depends(get_et_context)) -> EtContext:
+        if not (ctx.roles & required_set):
+            raise AppError(status_code=403, detail="需要教育訓練模組權限", error_code="ET_AUTH_001")
+        return ctx
+
+    return _dep

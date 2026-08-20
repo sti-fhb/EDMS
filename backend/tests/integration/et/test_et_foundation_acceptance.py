@@ -234,6 +234,35 @@ class TestCatalogMaintenance:
         assert "ET-ROLES" in func_names
 
 
+class TestInputValidationHardening:
+    """Security Review 補強：輸入界限驗證（避免未攔截 500 / 視覺重複標籤）。"""
+
+    async def test_unicode_數字字元不得通過標籤_id_驗證(self, db) -> None:
+        """`'²'.isdigit()` 為 True 但 `int('²')` 會拋 ValueError → 原本會變成 500。"""
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        for bad in ("²", "①", "9" * 25):
+            with pytest.raises(AppError) as e:
+                await provider.assign(db, user_id="ET_VAL_U1", roles=set(), groups={bad}, operator_id="ET_VAL_OP")
+            assert e.value.error_code == "ET_ROLE_002", f"未擋下 {bad!r}"
+
+    async def test_標籤名稱前後空白被正規化_不得建出視覺重複(self, db) -> None:
+        """`"軍人 "` 若不 strip 會繞過唯一約束、建出看起來一樣的標籤。"""
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        with pytest.raises(AppError) as e:
+            await provider.create_controlled(db, "TAG", code="", name="  軍人  ", operator_id="ET_VAL_OP")
+        assert e.value.error_code == "ET_TAG_002", "strip 後應判定為重複"
+
+    async def test_空白或超長標籤名稱被擋(self, db) -> None:
+        register_et_module()
+        provider = module_assign_registry.get("ET")
+        for bad in ("", "   ", "x" * 51):
+            with pytest.raises(AppError) as e:
+                await provider.create_controlled(db, "TAG", code="", name=bad, operator_id="ET_VAL_OP")
+            assert e.value.error_code == "ET_TAG_004", f"未擋下 {bad!r}"
+
+
 class TestLastModifiedFallback:
     """Code Review 補強：新授予而未再異動之列，最後異動欄須回退至 CREATED_*。"""
 

@@ -195,7 +195,7 @@ def upgrade() -> None:
         sa.Column("INVITATION_ID", sa.BigInteger(), sa.Identity(always=False), nullable=False),
         sa.Column("COURSE_ID", sa.BigInteger(), nullable=False),
         sa.Column("EMAIL", sa.String(length=255), nullable=False),
-        sa.Column("TOKEN", sa.String(length=64), nullable=False),
+        sa.Column("TOKEN_HASH", sa.String(length=64), nullable=False),
         sa.Column("STATUS", sa.String(length=20), nullable=False),
         sa.Column("SENT_AT", sa.DateTime(timezone=True), nullable=False),
         sa.Column("LAST_SENT_AT", sa.DateTime(timezone=True), nullable=False),
@@ -209,7 +209,7 @@ def upgrade() -> None:
         sa.Column("DELETED", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["COURSE_ID"], ["ET_COURSE.COURSE_ID"], name="FK_ET_INVITATION_COURSE"),
         sa.PrimaryKeyConstraint("INVITATION_ID", name="PK_ET_INVITATION"),
-        sa.UniqueConstraint("TOKEN", name="UQ_ET_INVITATION_TOKEN"),
+        sa.UniqueConstraint("TOKEN_HASH", name="UQ_ET_INVITATION_TOKEN_HASH"),
     )
     op.create_index("IX_ET_INVITATION_COURSE", "ET_INVITATION", ["COURSE_ID"], unique=False)
     op.create_table(
