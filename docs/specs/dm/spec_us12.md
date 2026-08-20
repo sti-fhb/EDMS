@@ -15,26 +15,26 @@ ET 教師於教材編輯時引用 DM「訓練教材」分類之文件（依 DOC_
 1. **Given** ET 教師於教材編輯介面，**When** 從 DM「訓練教材」分類下拉選取既有文件，**Then** 建立對該 DOC_ID 之引用（下拉僅顯示「訓練教材」分類之有效文件）
 2. **Given** 學員於 ET 章節學習，**When** 開啟引用之教材，**Then** 系統依 DOC_ID 自動取得 DM 當前發布版本之檔案
 3. **Given** DM 編輯者上傳新版本並完成簽核發布（[spec_us6.md](spec_us6.md)），**When** ET 端引用該 DOC_ID 之教材被開啟，**Then** 自動取得最新發布版（依 CURRENT_VERSION_ID），ET 端不需手動更新、無快取延遲
-4. **Given** DM 文件被核准廢止，**When** ET 教材仍引用該 DOC_ID，**Then** ET 端仍呈現廢止前最後發布版本；DM 端通知 ET 教師檢視是否移除引用（DM-MSG-ETREF-001）
+4. **Given** DM 文件被核准廢止，**When** ET 教材仍引用該 DOC_ID，**Then** ET 端仍呈現廢止前最後發布版本，並依 `SRVDM001` 之 `obsolete` 旗標於 ET 端提示教師檢視是否移除引用（ET 端呈現；DM 不主動推播）
 5. **Given** DM 文件處於廢止待簽核期間，**When** ET 端取用，**Then** 仍取得廢止前最後發布版本（因文件仍對外有效）
 
 ## Functional Requirements
 
 - **FR-001**: DM MUST 提供「訓練教材」分類文件供 ET 引用；ET 依 DOC_ID 建立引用，且 ET 端下拉**僅顯示「訓練教材」分類之有效文件**（不含其他分類、不含已廢止）
 - **FR-002**: ET 取用 MUST 依 DOC_ID 解析至 DM 之當前發布版本（CURRENT_VERSION_ID）；DM 發布新版後 ET 自動取得最新版（無快取延遲、不需 ET 手動更新）
-- **FR-003**: DM 文件被廢止後，ET 端 MUST 仍能呈現廢止前最後發布版本；DM 端 MUST 通知 ET 教師檢視是否移除引用
+- **FR-003**: DM 文件被廢止後，ET 端 MUST 仍能呈現廢止前最後發布版本；**ET 端 MUST 依 `SRVDM001` 之 `obsolete` 旗標自行偵測廢止**（ET02 教師編輯提示、課程發布檢核阻擋引用已廢止文件，屬 ET 模組範圍）。**DM 端不主動推播通知**——DM 不持有 ET 引用關係，避免反向相依 ET（2026-08-20 交付前自檢裁示採此，見 #183）
 - **FR-004**: DM 文件處於廢止待簽核期間，ET 端 MUST 取得廢止前最後發布版本（文件仍對外有效）
-- **FR-005**: 跨模組取用之請求 / 回應格式由 `specs/dm/contracts/` 規範（待 `/speckit.plan` 階段產出）
+- **FR-005**: 跨模組取用之請求 / 回應格式由 [`contracts/document-service.md`](contracts/document-service.md) 規範（含 REST 端點對照、**in-process Service 介面**與 **ET 學員取檔授權路徑**）
 
 ## 系統訊息
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
 |---------|------|---------|---------------|
-| DM-MSG-ETREF-001 | 提示 | 本文件已廢止，請通知引用此文件之 ET 教師檢視是否移除引用 | FR-003 廢止後通知 |
+| DM-MSG-ETREF-001 | 提示 | 本文件已廢止，請檢視是否移除引用 | FR-003；**由 ET 端依 `obsolete` 旗標呈現，DM 不觸發**（裁示 A）|
 
-> 本 US 多為系統間自動行為，使用者可見訊息較少；ET 端之教材編輯 / 廢止標示行為詳見 ET 模組 spec「DM 文件廢止之 UI 規則」。
+> 本 US 多為系統間自動行為，DM 端幾無使用者可見訊息；廢止提示改由 ET 端依 `SRVDM001.obsolete` 自行呈現（DM 不主動推播）。ET 端之教材編輯 / 廢止標示行為詳見 ET 模組 spec「DM 文件廢止之 UI 規則」。
 
 ## 前置依賴
 
 - DM 文件發布 / 廢止狀態由 [spec_us6.md](spec_us6.md) 決定；分類「訓練教材」由 [spec_us1.md](spec_us1.md) 維護
-- 介接契約待 `/speckit.plan` 於 contracts/ 產出
+- 介接契約見 [`contracts/document-service.md`](contracts/document-service.md)（REST 對照 + in-process Service 介面 + ET 取檔授權路徑）
