@@ -112,6 +112,7 @@
 | ET_ROLE_002 | 422 | 指定之受訓單位標籤無效或未啟用 |
 | ET_ROLE_003 | 422 | 指定之角色代碼無效 |
 | ET_TAG_001 | 422 | 內建標籤不可停用或改名 |
+| ET_LOCK_001 | 409 | 資料已被其他使用者修改，請重新載入後再試 |
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
 >
