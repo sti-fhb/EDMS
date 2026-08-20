@@ -344,6 +344,22 @@ async def test_add_version_same_user_second_draft_blocked(db):
     assert e.value.error_code == "DM_DOC_009"
 
 
+async def test_add_version_blocked_when_author_has_pending_review(db):
+    """選項 A：撰寫者已有審核中版本 → 不可對同文件再開新草稿（DM_DOC_012）。
+
+    杜絕「送審後又另開草稿」→ 退回時無法一致把被退版本轉回草稿（會撞每人一份草稿唯一索引）之邊界。
+    """
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核", email="rev@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)
+    await _publish_doc(db, "DM-SOP-000107", author="ed")
+    v = await _add_version(db, "DM-SOP-000107", version_no="2.0", op=_op("ed"))
+    await _svc.submit(db, doc_id="DM-SOP-000107", version_id=v.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    with pytest.raises(AppError) as e:
+        await _add_version(db, "DM-SOP-000107", version_no="3.0", op=_op("ed"))
+    assert e.value.error_code == "DM_DOC_012"
+
+
 async def test_add_version_other_user_draft_not_blocked(db):
     """放寬重點：他人已有草稿時，另一使用者仍可對同文件開自己的草稿（不被卡）。"""
     await _publish_doc(db, "DM-SOP-000106")

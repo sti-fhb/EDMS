@@ -278,8 +278,9 @@ class ReviewCenterService:
         now = utcnow()
         new_ver = await self._repo.get_version(db, review.version_id)
         if new_ver is not None:
-            # 版本回草稿供續編。邊界：撰寫者若送審後又另開草稿，回草稿會撞「每人每文件一份草稿」唯一索引；
-            # 此時保留 REJECTED（撰寫者以既有草稿續作，極少見），使退回動作不因索引衝突失敗。
+            # 版本回草稿供續編。編輯器已於「開新草稿」擋掉撰寫者尚有審核中版本之情形（DM_DOC_012），故正常
+            # 流程下此處必無其他草稿、恆轉 DRAFT。此檢查為防禦：萬一資料異常另有草稿，保留 REJECTED 避免
+            # 撞「每人每文件一份草稿」唯一索引，使退回動作不因索引衝突失敗。
             has_other_draft = await self._repo.author_has_other_draft(
                 db, review.doc_id, review.created_user, exclude_version_id=new_ver.version_id
             )

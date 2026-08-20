@@ -18,6 +18,7 @@ from app.dm.roles.authz import DM_REVIEWER
 from app.dp.users.models import DpUser
 
 _DRAFT = "DRAFT"
+_PENDING_REVIEW = "PENDING_REVIEW"
 _PENDING = "PENDING"
 _OBSOLETE = "OBSOLETE"
 _PUBLISHED = "PUBLISHED"
@@ -134,17 +135,19 @@ class EditorRepository:
             )
         )
 
-    async def get_open_draft_version(self, db: AsyncSession, doc_id: str, user_id: str) -> DmDocVersion | None:
-        """取「該使用者」於此文件既有之未送簽草稿版本（每人每文件至多一份草稿）；無則 None。
+    async def get_author_open_version(self, db: AsyncSession, doc_id: str, user_id: str) -> DmDocVersion | None:
+        """取「該撰寫者」於此文件既有之進行中版本（草稿或審核中）；無則 None。
 
-        放寬自原「單一草稿」：不同撰寫者可各自對同一文件開新版本草稿、互不阻擋（避免有人留下
-        草稿或請假時卡住全部人）；真正互斥落在「同文件至多一筆進行中送審」(DM_REVIEW_002)。
+        每人每文件至多一份進行中版本：草稿（DRAFT）或已送審核中（PENDING_REVIEW）。同時擋審核中，
+        杜絕「送審後又另開草稿」使退回無法一致轉回草稿（會撞每人一份草稿唯一索引）之邊界。
+        放寬自原「單一草稿」：不同撰寫者可各自對同一文件開新版本、互不阻擋（避免有人留稿或請假時卡住
+        全部人）；同文件至多一筆進行中送審另由 DM_REVIEW_002 把關。回傳版本供呼叫端依 status 給對應訊息。
         """
         return await db.scalar(
             select(DmDocVersion).where(
                 DmDocVersion.doc_id == doc_id,
                 DmDocVersion.created_user == user_id,
-                DmDocVersion.status == _DRAFT,
+                DmDocVersion.status.in_((_DRAFT, _PENDING_REVIEW)),
                 DmDocVersion.deleted == 0,
             )
         )
