@@ -105,10 +105,11 @@ export function DmReviewPage() {
   const [rejectReason, setRejectReason] = useState("")
   const [rejectError, setRejectError] = useState("")
   const [page, setPage] = useState(1)
+  const [completedKeyword, setCompletedKeyword] = useState("")
 
   const { data: pending, isPending: pendingLoading } = usePending()
   const { data: detail } = useReviewDetail(tab === "pending" ? selectedId : null)
-  const { data: completed } = useCompleted(page, PAGE_SIZE)
+  const { data: completed } = useCompleted(page, PAGE_SIZE, completedKeyword)
 
   const afterAction = () => {
     setSelectedId(null)
@@ -242,8 +243,18 @@ export function DmReviewPage() {
         </Paper>
       ) : (
         <Paper sx={{ p: 2 }}>
+          <TextField
+            size="small"
+            label="搜尋文件名稱"
+            value={completedKeyword}
+            onChange={(e) => {
+              setCompletedKeyword(e.target.value)
+              setPage(1)
+            }}
+            sx={{ mb: 2, width: { xs: "100%", sm: 320 } }}
+          />
           {completedRows.length === 0 ? (
-            <Alert severity="info">尚無已完成之簽核。</Alert>
+            <Alert severity="info">{completedKeyword ? "查無符合搜尋之項目。" : "尚無已完成之簽核。"}</Alert>
           ) : (
             <>
               <Table size="small">

@@ -133,13 +133,16 @@ class ReviewCenterService:
             current_version=current_version,
         )
 
-    async def list_completed(self, db, *, op: OperatorInfo, page: int, limit: int) -> PaginatedResult[CompletedItem]:
-        """已完成清單（自己過往核准 / 退回、完成時間 DESC、後端分頁）。"""
-        total = await self._repo.count_completed(db, op.user_id)
+    async def list_completed(
+        self, db, *, op: OperatorInfo, page: int, limit: int, keyword: str = ""
+    ) -> PaginatedResult[CompletedItem]:
+        """已完成清單（自己過往核准 / 退回、完成時間 DESC、後端分頁、選填文件名搜尋）。"""
+        keyword = (keyword or "").strip()
+        total = await self._repo.count_completed(db, op.user_id, keyword=keyword)
         total_pages = (total + limit - 1) // limit if total > 0 else 0
         if total == 0 or page > total_pages:
             return {"data": [], "meta": {"total": total, "page": page, "limit": limit, "total_pages": total_pages}}
-        rows = await self._repo.list_completed(db, op.user_id, offset=(page - 1) * limit, limit=limit)
+        rows = await self._repo.list_completed(db, op.user_id, offset=(page - 1) * limit, limit=limit, keyword=keyword)
         data = [
             CompletedItem(
                 review_id=r.review_id,

@@ -96,16 +96,27 @@ class ReviewCenterRepository:
             )
         ).first()
 
-    async def count_completed(self, db: AsyncSession, reviewer_id: str) -> int:
-        """該審核者已完成（核准 / 退回）之總數。"""
+    @staticmethod
+    def _completed_where(reviewer_id: str, keyword: str):
+        """已完成清單之共用過濾條件（本人 + 終態 + 選填文件名關鍵字）。"""
+        conds = [DmReview.approver_user_id == reviewer_id, DmReview.status.in_(_COMPLETED_STATUSES)]
+        if keyword:
+            conds.append(DmDocument.doc_name.ilike(f"%{keyword}%"))
+        return conds
+
+    async def count_completed(self, db: AsyncSession, reviewer_id: str, *, keyword: str = "") -> int:
+        """該審核者已完成（核准 / 退回）之總數（選填文件名關鍵字）。"""
         return await db.scalar(
             select(func.count())
             .select_from(DmReview)
-            .where(DmReview.approver_user_id == reviewer_id, DmReview.status.in_(_COMPLETED_STATUSES))
+            .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
+            .where(*self._completed_where(reviewer_id, keyword))
         )
 
-    async def list_completed(self, db: AsyncSession, reviewer_id: str, *, offset: int, limit: int) -> list[Row]:
-        """該審核者已完成清單（完成時間 DESC、後端分頁）。"""
+    async def list_completed(
+        self, db: AsyncSession, reviewer_id: str, *, offset: int, limit: int, keyword: str = ""
+    ) -> list[Row]:
+        """該審核者已完成清單（完成時間 DESC、後端分頁、選填文件名關鍵字搜尋）。"""
         stmt = (
             select(
                 DmReview.review_id,
@@ -118,7 +129,7 @@ class ReviewCenterRepository:
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
-            .where(DmReview.approver_user_id == reviewer_id, DmReview.status.in_(_COMPLETED_STATUSES))
+            .where(*self._completed_where(reviewer_id, keyword))
             .order_by(DmReview.complete_date.desc())
             .offset(offset)
             .limit(limit)

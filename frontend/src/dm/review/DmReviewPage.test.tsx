@@ -58,5 +58,7 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     await user.click(await screen.findByRole("tab", { name: /已完成/ }))
     expect(await screen.findByText("舊案 SOP")).toBeInTheDocument()
     expect(screen.getByText("已核准")).toBeInTheDocument()
+    // AC8 搜尋分頁：提供文件名搜尋框
+    expect(screen.getByLabelText(/搜尋文件名稱/)).toBeInTheDocument()
   })
 })

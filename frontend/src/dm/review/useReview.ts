@@ -16,10 +16,10 @@ export function useReviewDetail(reviewId: number | null) {
   })
 }
 
-/** 已完成清單（後端分頁）。 */
-export function useCompleted(page: number, limit: number) {
+/** 已完成清單（後端分頁 + 文件名關鍵字搜尋）。 */
+export function useCompleted(page: number, limit: number, keyword = "") {
   return useQuery({
-    queryKey: ["dm-review", "completed", page, limit],
-    queryFn: () => reviewApi.listCompleted(page, limit),
+    queryKey: ["dm-review", "completed", page, limit, keyword],
+    queryFn: () => reviewApi.listCompleted(page, limit, keyword),
   })
 }

@@ -39,12 +39,13 @@ async def list_pending(
 async def list_completed(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
+    keyword: str = Query(default="", max_length=200),
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
-    """已完成頁籤：自己過往核准 / 退回（完成時間 DESC、後端分頁、不可再操作）。"""
-    return await _service.list_completed(db, op=op, page=page, limit=limit)
+    """已完成頁籤：自己過往核准 / 退回（完成時間 DESC、後端分頁、文件名搜尋、不可再操作）。"""
+    return await _service.list_completed(db, op=op, page=page, limit=limit, keyword=keyword)
 
 
 @router.get("/{review_id}", response_model=ReviewDetail)

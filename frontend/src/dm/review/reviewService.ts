@@ -24,8 +24,10 @@ export const reviewApi = {
     return data
   },
 
-  listCompleted: async (page: number, limit: number): Promise<PagedResult<CompletedItem>> => {
-    const { data } = await http.get<PagedResult<CompletedItem>>("/dm/reviews/completed", { params: { page, limit } })
+  listCompleted: async (page: number, limit: number, keyword = ""): Promise<PagedResult<CompletedItem>> => {
+    const { data } = await http.get<PagedResult<CompletedItem>>("/dm/reviews/completed", {
+      params: { page, limit, keyword: keyword || undefined },
+    })
     return data
   },
 }

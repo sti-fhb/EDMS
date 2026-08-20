@@ -300,6 +300,18 @@ async def test_completed_lists_own_processed(db):
     assert page["meta"]["total"] == 2 and statuses == {"APPROVED", "REJECTED"}
 
 
+async def test_completed_keyword_search(db):
+    """已完成頁籤支援文件名關鍵字搜尋（AC8 搜尋分頁）。"""
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, _, r1 = await _new_submission(db, "DM-SOP-000342")  # doc_name = 文件DM-SOP-000342
+    await _svc.approve(db, review_id=r1.review_id, op=_op("rev1"))
+    _, _, r2 = await _new_submission(db, "DM-MANUAL-000343")
+    await _svc.approve(db, review_id=r2.review_id, op=_op("rev1"))
+    page = await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20, keyword="MANUAL")
+    assert page["meta"]["total"] == 1 and page["data"][0].doc_id == "DM-MANUAL-000343"
+
+
 # ── 收件名單 ──────────────────────────────────────
 
 
