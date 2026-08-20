@@ -49,7 +49,7 @@
 - ~~SMTP 伺服器資訊就緒~~ **不需要**：ET 不自建 SMTP 連線與寄件佇列，寄信一律經平台 `NotifyService`（2026-07-08 集中化）
 
 **涵蓋 Tasks**：
-- T001 建立 ET 模組專案結構（`backend/app/et/{功能}/` router / service / repository / schemas / models + deps / bootstrap / provider；migration 於 `backend/alembic/versions/`；前端 `frontend/src/et/{功能}/`）（2026-08-19 對齊專案實際結構）
+- T001 建立 ET 模組專案結構（`backend/app/et/{功能}/` router / service / repository / schemas / models + deps / bootstrap / provider；migration 於 `backend/alembic/versions/`）（2026-08-19 對齊專案實際結構）。**前端不在本 issue 範圍**（2026-08-20 SA Q2 裁示，延至 #89 定案後）
 - T002 ~ T020、T165 ~ T168 建立 ET 22 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
 - T125 ~ T129 建立 2026-07-02 新增表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT）；通知範本改 seed 至平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，7 類可維護範本〔2026-07-17 增列 APPROVAL_PASSED〕；表由平台 DP 建，ET 不自建，2026-07-08 集中化）
   > 線下核可表 ET_APPROVAL 與 ET_COURSE.REQUIRE_APPROVAL 欄位之 Migration（T156）於 Issue #18 建立（2026-07-17）
