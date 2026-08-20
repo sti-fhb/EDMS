@@ -126,8 +126,23 @@ class DetailRepository:
         return list((await db.execute(stmt)).all())
 
     async def has_pending_review(self, db: AsyncSession, doc_id: str) -> bool:
-        """該文件是否有進行中（PENDING）之送審週期（決定編輯 / 廢止入口是否失效）。"""
+        """該文件是否有進行中（PENDING）之送審週期（不分申請人；決定編輯 / 廢止入口是否失效）。"""
         stmt = select(DmReview.review_id).where(DmReview.doc_id == doc_id, DmReview.status == _PENDING).limit(1)
+        return (await db.scalar(stmt)) is not None
+
+    async def author_has_open_draft(self, db: AsyncSession, doc_id: str, user_id: str) -> bool:
+        """該使用者於此文件是否已有未送簽草稿（DRAFT）；用於「編輯新版本」入口提前灰階（請續編既有草稿），
+        避免進編輯器填完才被 DM_DOC_009 擋。"""
+        stmt = (
+            select(DmDocVersion.version_id)
+            .where(
+                DmDocVersion.doc_id == doc_id,
+                DmDocVersion.created_user == user_id,
+                DmDocVersion.status == "DRAFT",
+                DmDocVersion.deleted == 0,
+            )
+            .limit(1)
+        )
         return (await db.scalar(stmt)) is not None
 
     async def get_obsolete_review(self, db: AsyncSession, doc_id: str) -> Row | None:
