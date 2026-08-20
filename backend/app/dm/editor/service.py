@@ -207,8 +207,16 @@ class EditorService:
         # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
-        # 每人每文件一份草稿：該使用者已有未送簽草稿 → 擋，請續編既有草稿（他人草稿不擋）
-        if await self._repo.get_open_draft_version(db, doc_id, op.user_id) is not None:
+        # 每人每文件一份進行中版本（他人不擋）：已有草稿 → 請續編（DM_DOC_009）；已有審核中版本 → 擋，
+        # 待審核結果再處理（DM_DOC_012）。同時擋審核中，杜絕「送審後又另開草稿」使退回無法一致轉回草稿。
+        open_ver = await self._repo.get_author_open_version(db, doc_id, op.user_id)
+        if open_ver is not None:
+            if open_ver.status == _PENDING_REVIEW:
+                raise AppError(
+                    status_code=409,
+                    detail="您對此文件已有審核中的版本，請待審核結果後再編輯",
+                    error_code="DM_DOC_012",
+                )
             raise AppError(
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             )

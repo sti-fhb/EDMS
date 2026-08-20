@@ -330,6 +330,17 @@ async def test_edit_lock_reason_pending_obsolete(db):
     assert d.can_edit is False and d.edit_lock_reason is not None and "廢止待簽核" in d.edit_lock_reason
 
 
+async def test_can_edit_false_when_own_draft_exists(db):
+    """本人已有未送簽草稿：編輯 / 廢止入口提前失效並提示請續編既有草稿（免進編輯器填完才被 DM_DOC_009 擋）。"""
+    await _seed_doc(db, doc_id="DM-SOP-000043")
+    await _add_version(db, "DM-SOP-000043", "2.0-draft", status="DRAFT", author="ed")
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000043", ctx=_editor("ed"))
+    assert d.can_edit is False and d.edit_lock_reason is not None and "續編" in d.edit_lock_reason
+    # 他人（無此草稿）不受影響、仍可編輯
+    other = await _svc.get_detail(db, doc_id="DM-SOP-000043", ctx=_editor("ed2"))
+    assert other.can_edit is True and other.edit_lock_reason is None
+
+
 # ── 廢止 read-only 資訊 ────────────────────────────
 
 

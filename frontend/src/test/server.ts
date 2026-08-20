@@ -167,6 +167,89 @@ export const handlers = [
   http.get("/api/dm/editor/documents/:docId/tags", () =>
     HttpResponse.json({ audience_ids: ["1"], retrieval_ids: ["20"] }),
   ),
+  // US6 簽核中心（dm-review）
+  http.get("/api/dm/reviews/pending", () =>
+    HttpResponse.json([
+      {
+        review_id: 501,
+        doc_id: "DM-SOP-000001",
+        doc_name: "領血確認標準作業程序",
+        category_code: "SOP",
+        review_type: "NEW_VERSION",
+        version_no: "2.2",
+        submitter_id: "u1",
+        submitter_name: "陳大華",
+        submit_date: "2026-08-18T16:42:00Z",
+        waiting_days: 1,
+      },
+      {
+        review_id: 502,
+        doc_id: "DM-SOP-000002",
+        doc_name: "入庫作業 SOP",
+        category_code: "SOP",
+        review_type: "NEW_VERSION",
+        version_no: "1.4",
+        submitter_id: "u2",
+        submitter_name: "品保室",
+        submit_date: "2026-08-01T09:20:00Z",
+        waiting_days: 12,
+      },
+    ]),
+  ),
+  http.get("/api/dm/reviews/completed", () =>
+    HttpResponse.json({
+      data: [
+        {
+          review_id: 400,
+          doc_id: "DM-SOP-000009",
+          doc_name: "舊案 SOP",
+          review_type: "NEW",
+          status: "APPROVED",
+          version_no: "1.0",
+          complete_date: "2026-08-10T10:00:00Z",
+        },
+      ],
+      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dm/reviews/:reviewId", ({ params }) =>
+    HttpResponse.json({
+      review_id: Number(params.reviewId),
+      doc_id: "DM-SOP-000001",
+      doc_name: "領血確認標準作業程序",
+      category_code: "SOP",
+      review_type: "NEW_VERSION",
+      change_summary: "補充第 5 點異常通報流程",
+      submit_date: "2026-08-18T16:42:00Z",
+      submitter_id: "u1",
+      submitter_name: "陳大華",
+      new_version: {
+        version_id: 22,
+        version_no: "2.2",
+        file_name: "SOP-2.2.pdf",
+        file_size: 2300000,
+        file_mime: "application/pdf",
+        previewable: true,
+      },
+      current_version: {
+        version_id: 21,
+        version_no: "2.1",
+        file_name: "SOP-2.1.pdf",
+        file_size: 2200000,
+        file_mime: "application/pdf",
+        previewable: true,
+      },
+    }),
+  ),
+  http.post("/api/dm/reviews/:reviewId/approve", () =>
+    HttpResponse.json({ published_version_id: 22, notified: 3 }),
+  ),
+  http.post("/api/dm/reviews/:reviewId/reject", ({ params }) =>
+    HttpResponse.json({ review_id: Number(params.reviewId) }),
+  ),
+  http.get("/api/dm/reviews/:reviewId/versions/:versionId/file", () =>
+    HttpResponse.arrayBuffer(new ArrayBuffer(8), { headers: { "Content-Type": "application/pdf" } }),
+  ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
     HttpResponse.json({

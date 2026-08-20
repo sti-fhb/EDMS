@@ -46,7 +46,8 @@ class DetailRepository:
         return conds
 
     async def get_document(self, db: AsyncSession, doc_id: str, user_id: str, roles: Iterable[str]) -> Row | None:
-        """目前發布版之詳細（含作者 / 核准者姓名 / 分類 / func / 檔案 meta）；套存取控制、查無回 None。"""
+        """目前發布版之詳細（作者 / 核准者 / 發布日期皆取目前發布版；歷史版本撰寫者於版本歷程各自列出）；
+        套存取控制、查無回 None。"""
         author = aliased(DpUser)
         approver = aliased(DpUser)
         stmt = (
@@ -56,7 +57,7 @@ class DetailRepository:
                 DmDocument.status,
                 DmDocument.category_code,
                 DmDocument.func_code,
-                DmDocument.created_user.label("author_id"),
+                DmDocVersion.created_user.label("author_id"),
                 DmCategory.category_name,
                 DmFunc.func_name,
                 DmDocVersion.version_id,
@@ -74,7 +75,7 @@ class DetailRepository:
             .outerjoin(DmDocVersion, DmDocument.current_version_id == DmDocVersion.version_id)
             .join(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmFunc, DmDocument.func_code == DmFunc.func_code)
-            .outerjoin(author, DmDocument.created_user == author.user_id)
+            .outerjoin(author, DmDocVersion.created_user == author.user_id)
             .outerjoin(approver, DmDocVersion.approver_user_id == approver.user_id)
             .where(*self._access_conditions(doc_id, user_id, roles))
         )
@@ -125,8 +126,23 @@ class DetailRepository:
         return list((await db.execute(stmt)).all())
 
     async def has_pending_review(self, db: AsyncSession, doc_id: str) -> bool:
-        """該文件是否有進行中（PENDING）之送審週期（決定編輯 / 廢止入口是否失效）。"""
+        """該文件是否有進行中（PENDING）之送審週期（不分申請人；決定編輯 / 廢止入口是否失效）。"""
         stmt = select(DmReview.review_id).where(DmReview.doc_id == doc_id, DmReview.status == _PENDING).limit(1)
+        return (await db.scalar(stmt)) is not None
+
+    async def author_has_open_draft(self, db: AsyncSession, doc_id: str, user_id: str) -> bool:
+        """該使用者於此文件是否已有未送簽草稿（DRAFT）；用於「編輯新版本」入口提前灰階（請續編既有草稿），
+        避免進編輯器填完才被 DM_DOC_009 擋。"""
+        stmt = (
+            select(DmDocVersion.version_id)
+            .where(
+                DmDocVersion.doc_id == doc_id,
+                DmDocVersion.created_user == user_id,
+                DmDocVersion.status == "DRAFT",
+                DmDocVersion.deleted == 0,
+            )
+            .limit(1)
+        )
         return (await db.scalar(stmt)) is not None
 
     async def get_obsolete_review(self, db: AsyncSession, doc_id: str) -> Row | None:

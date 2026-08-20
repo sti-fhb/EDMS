@@ -18,6 +18,7 @@ _PENDING_OBSOLETE = "PENDING_OBSOLETE"
 _NOT_FOUND = AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
 _LOCK_OBSOLETE = "此文件廢止待簽核，暫無法編輯或再次廢止"
 _LOCK_REVIEW = "此文件新版本送審中，暫無法編輯或廢止"
+_LOCK_OWN_DRAFT = "您已有此文件的未送簽草稿，請續編既有草稿"
 
 
 @dataclass(frozen=True)
@@ -43,11 +44,18 @@ class DetailService:
         tags = await self._repo.get_retrieval_tags(db, doc_id)
         is_editor = DM_EDITOR in ctx.roles
         has_pending = await self._repo.has_pending_review(db, doc_id)
-        can_edit = is_editor and not has_pending
-        # 入口失效原因（供前端灰階提示，非隱藏）：廢止待簽核 vs 新版本送審中。
+        # 本人已有未送簽草稿：編輯入口＝新開版本（addVersion），會被 DM_DOC_009 擋 → 提前灰階請續編既有草稿。
+        # 送審中（不分申請人）優先於本人草稿：文件層送審鎖對所有編輯者一致失效。
+        has_own_draft = (
+            is_editor and not has_pending and await self._repo.author_has_open_draft(db, doc_id, ctx.user_id)
+        )
+        can_edit = is_editor and not has_pending and not has_own_draft
+        # 入口失效原因（供前端灰階提示，非隱藏）：廢止待簽核 / 新版本送審中 / 本人已有草稿。
         edit_lock_reason = None
         if is_editor and has_pending:
             edit_lock_reason = _LOCK_OBSOLETE if row.status == _PENDING_OBSOLETE else _LOCK_REVIEW
+        elif has_own_draft:
+            edit_lock_reason = _LOCK_OWN_DRAFT
         is_obsolete = row.status == _OBSOLETE
 
         obsolete_info = None

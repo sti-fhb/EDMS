@@ -21,6 +21,7 @@ from app.dm.bootstrap import register_dm_module
 from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
 from app.dm.library.router import router as dm_library_router
+from app.dm.review.router import router as dm_review_router
 from app.dp.audit.router import router as dp_audit_router
 from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.router import router as dp_templates_router
@@ -108,6 +109,7 @@ app.include_router(dp_schedule_router)
 app.include_router(dm_library_router)
 app.include_router(dm_detail_router)
 app.include_router(dm_editor_router)
+app.include_router(dm_review_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()
