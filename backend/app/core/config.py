@@ -66,6 +66,17 @@ class Settings(BaseSettings):
     # DB 僅存相對 FILE_PATH。走 config（依部署環境定；正式可換物件儲存）。#160 將對讀取端加根目錄圍籬。
     DM_FILE_STORAGE_ROOT: str = "./var/dm_files"
 
+    # ET 教材影片落盤根目錄（#185）——比照 DM_FILE_STORAGE_ROOT，DB 僅存相對路徑。
+    # ⚠️ 影片單檔上限 500MB（DP_PARAM.ET_VIDEO_MAX_SIZE_MB），寫檔須**串流分塊**，
+    # 不可比照 dm/editor/storage.py 之 save_upload(data: bytes) 一次讀進記憶體。
+    ET_VIDEO_STORAGE_ROOT: str = "./var/et_videos"
+
+    # ET 首位管理者 bootstrap（#185 SA Q1 裁示）——ET 角色 seed 依此 Email 查 DP_USER 取
+    # USER_ID 後授予 ET 管理者，解開「要當管理者才能指派管理者」之死結（dp-roles 之
+    # _require_manageable 需 is_module_admin 為真，而該閘 fail-closed）。
+    # 未設定或查無帳號時 seed 跳過並記 log，不使 migration 失敗（CI / 新環境不受影響）。
+    ET_BOOTSTRAP_ADMIN_EMAIL: str = ""
+
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
         """依所選演算法強制 HMAC 密鑰最小長度，啟動即擋弱 / 未替換的預設密鑰。
