@@ -1,4 +1,11 @@
-/** 簽核處理（US6 / DM04）型別（對齊後端 app/dm/review/schemas.py）。 */
+/** 簽核處理（US6 / DM04）型別與表單驗證（對齊後端 app/dm/review/schemas.py）。 */
+
+import { z } from "zod"
+
+/** 退回原因表單驗證（必填非空；後端另有 max_length 500）。 */
+export const RejectReqSchema = z.object({
+  reason: z.string().trim().min(1, { message: "請填寫退回原因" }),
+})
 
 export interface PendingItem {
   review_id: number

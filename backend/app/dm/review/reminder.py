@@ -23,9 +23,7 @@ _DEFAULT_THRESHOLD_DAYS = 7
 async def run() -> None:
     """簽核催辦每日作業：停留 ≥ 門檻之 PENDING → AUTO_REMIND 通知指定審核者。"""
     async with AsyncSessionLocal() as db:
-        threshold = await ParamService().get_int_param(
-            db, _REMIND_THRESHOLD_PARAM, "VALUE", _DEFAULT_THRESHOLD_DAYS
-        )
+        threshold = await ParamService().get_int_param(db, _REMIND_THRESHOLD_PARAM, "VALUE", _DEFAULT_THRESHOLD_DAYS)
         count = await ReviewCenterService().scan_overdue_and_remind(db, threshold_days=threshold)
         await db.commit()
     logger.info("DM 簽核催辦完成：催辦 %d 筆（門檻 %d 天）", count, threshold)

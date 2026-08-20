@@ -271,8 +271,11 @@ class ReviewCenterService:
     # ── 共用檢核 ──────────────────────────────────────
 
     async def _ensure_actionable(self, db, review_id: int, op: OperatorInfo):
-        """取送審並確認可由本人處理：查無 404 / 非本人 403 / 廢止類本 issue 範圍外 409。"""
-        review = await self._repo.get_review(db, review_id)
+        """取送審並確認可由本人處理：查無 404 / 非本人 403 / 廢止類本 issue 範圍外 409。
+
+        以 FOR UPDATE 對 review 列上鎖（Sec M1）：序列化並發核准 / 退回，杜絕重複發布 / 通知 / 變更歷程。
+        """
+        review = await self._repo.get_review(db, review_id, for_update=True)
         if review is None:
             raise _NOT_FOUND
         if review.assigned_reviewer != op.user_id:

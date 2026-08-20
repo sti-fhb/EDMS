@@ -6,7 +6,7 @@
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import Row, and_, exists, func, or_, select
+from sqlalchemy import Row, and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils import utcnow
@@ -21,9 +21,12 @@ from app.dp.users.models import DpUser
 _PENDING = "PENDING"
 _PUBLISHED = "PUBLISHED"
 _SUPERSEDED = "SUPERSEDED"
+_OBSOLETE = "OBSOLETE"
 _AUDIENCE = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
+# LIKE 萬用字元轉義（keyword 搜尋防「% 命中全部」；值仍走參數化綁定）
+_LIKE_ESCAPE = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_"})
 
 
 class ReviewCenterRepository:
@@ -46,14 +49,28 @@ class ReviewCenterRepository:
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .outerjoin(DpUser, DmReview.created_user == DpUser.user_id)
-            .where(DmReview.assigned_reviewer == reviewer_id, DmReview.status == _PENDING)
+            # 排除 OBSOLETE（廢止類簽核屬 US8、本 issue approve/reject 會 409）——避免清單出現「看得到、
+            # 點了必被擋」之項目，與 _ensure_actionable 之範圍防禦保持一致。
+            .where(
+                DmReview.assigned_reviewer == reviewer_id,
+                DmReview.status == _PENDING,
+                DmReview.review_type != _OBSOLETE,
+            )
             .order_by(DmReview.submit_date.asc())
         )
         return list((await db.execute(stmt)).all())
 
-    async def get_review(self, db: AsyncSession, review_id: int) -> DmReview | None:
-        """取送審紀錄（供核准 / 退回之狀態轉移）。"""
-        return await db.scalar(select(DmReview).where(DmReview.review_id == review_id))
+    async def get_review(self, db: AsyncSession, review_id: int, *, for_update: bool = False) -> DmReview | None:
+        """取送審紀錄；for_update=True 時 SELECT ... FOR UPDATE 對列上鎖。
+
+        核准 / 退回路徑須以 for_update 序列化，杜絕同一審核者並發雙擊 / 重放造成重複發布、
+        重複 DM_CHANGE_LOG 與重複通知（TOCTOU）；第二筆將阻塞至第一筆 commit 後讀到終態、由
+        ReviewService 擋下（DM_REVIEW_003）。
+        """
+        stmt = select(DmReview).where(DmReview.review_id == review_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        return await db.scalar(stmt)
 
     async def get_detail_row(self, db: AsyncSession, review_id: int) -> Row | None:
         """取明細 enriched 列（review + 文件 + 送審版本 meta + 送審者姓名）。"""
@@ -98,10 +115,15 @@ class ReviewCenterRepository:
 
     @staticmethod
     def _completed_where(reviewer_id: str, keyword: str):
-        """已完成清單之共用過濾條件（本人 + 終態 + 選填文件名關鍵字）。"""
+        """已完成清單之共用過濾條件（本人 + 終態 + 選填文件名關鍵字）。
+
+        keyword 之 LIKE 萬用字元（% _ \\）先轉義再帶 escape，使其被當字面比對（Sec L2；值本已參數化綁定，
+        無 injection，此為避免使用者輸入 % 命中全部之行為性修正）。
+        """
         conds = [DmReview.approver_user_id == reviewer_id, DmReview.status.in_(_COMPLETED_STATUSES)]
         if keyword:
-            conds.append(DmDocument.doc_name.ilike(f"%{keyword}%"))
+            esc = keyword.translate(_LIKE_ESCAPE)
+            conds.append(DmDocument.doc_name.ilike(f"%{esc}%", escape="\\"))
         return conds
 
     async def count_completed(self, db: AsyncSession, reviewer_id: str, *, keyword: str = "") -> int:
@@ -159,7 +181,8 @@ class ReviewCenterRepository:
                 created_date=now,
             )
         )
-        await db.flush()
+        # 不於此 flush：呼叫端 approve 於本呼叫前已 flush 版本切換，後續稽核 / 通知查詢會 autoflush，
+        # 交易由 get_db 統一 commit（避免多一次 round-trip，Code Review LOW）。
 
     async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
         return (
@@ -212,7 +235,7 @@ class ReviewCenterRepository:
             .where(DpUser.deleted == 0, DmUserRole.deleted == 0, DpUser.email.isnot(None))
         )
         if not doc_has_all:
-            stmt = stmt.where(or_(viewer_match, DpUser.user_id == author_id))
+            stmt = stmt.where(viewer_match)  # 撰寫者由下方獨立查詢補上（其可能非閱覽者角色），此處僅列相符閱覽者
         emails = {e for e in (await db.scalars(stmt)).all() if e}
         # 撰寫者一定收（可能非閱覽者角色）
         author_email = await db.scalar(select(DpUser.email).where(DpUser.user_id == author_id, DpUser.deleted == 0))

@@ -22,13 +22,14 @@ import Typography from "@mui/material/Typography"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { REMIND_THRESHOLD_DAYS, REVIEW_STATUS_LABELS, REVIEW_TYPE_LABELS } from "./schemas"
+import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_STATUS_LABELS, REVIEW_TYPE_LABELS } from "./schemas"
 import type { ReviewDetail, VersionMeta } from "./schemas"
 import { reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
 import { Pagination } from "../../components/Pagination"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
+import { getFieldErrors } from "../../utils/zodUtils"
 import { downloadVersionFile } from "../detail/detailService"
 
 const PAGE_SIZE = 20
@@ -151,10 +152,10 @@ export function DmReviewPage() {
 
   const submitReject = () => {
     if (selectedId == null) return
-    if (!rejectReason.trim()) {
-      setRejectError("請填寫退回原因") // DM-MSG-DM04-004
-      return
-    }
+    const result = RejectReqSchema.safeParse({ reason: rejectReason }) // DM-MSG-DM04-004
+    const errs = getFieldErrors(result.success ? null : result.error)
+    setRejectError(errs.reason ?? "")
+    if (!result.success) return
     rejectMut.mutate({ reviewId: selectedId, reason: rejectReason.trim() })
   }
 

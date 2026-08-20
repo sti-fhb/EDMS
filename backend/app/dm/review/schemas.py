@@ -5,7 +5,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PendingItem(BaseModel):
@@ -53,7 +53,8 @@ class ReviewDetail(BaseModel):
 class RejectReq(BaseModel):
     """退回請求（JSON）。"""
 
-    reason: str
+    # 上限 500（Sec M2 輸入邊界）；空白 / 全空白由 service 檢核給 DM_REVIEW_004（保留友善欄位錯誤）
+    reason: str = Field(max_length=500)
 
 
 class ApproveResult(BaseModel):
