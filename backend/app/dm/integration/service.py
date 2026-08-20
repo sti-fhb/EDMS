@@ -20,6 +20,9 @@ from app.dm.integration.repository import IntegrationRepository
 
 _OBSOLETE = "OBSOLETE"
 _PUBLISHED = "PUBLISHED"
+# ET 教材可跨模組引用之分類白名單（US12 恆為 TRAINING）。角色閘已移除，此為 DM 端最後一道範圍防線：
+# 杜絕以可枚舉之 DOC_ID（DM-{分類碼}-{流水號}）跨分類（SOP/MANUAL/OTHER）取檔或窺視 metadata（Sec HIGH-1）。
+_REFERENCEABLE_CATEGORIES = frozenset({"TRAINING"})
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
 
@@ -68,8 +71,8 @@ class DmDocumentService:
     async def get_current_by_doc_id(self, db, doc_id: str) -> DmCurrentVersion:
         """SRVDM001：依 DOC_ID 取當前發布版；廢止仍回最後版 + obsolete=true；無發布版 → DM_DOC_013。"""
         doc = await self._repo.get_document(db, doc_id)
-        if doc is None:
-            raise _NOT_FOUND
+        if doc is None or doc.category_code not in _REFERENCEABLE_CATEGORIES:
+            raise _NOT_FOUND  # 非可引用分類：回 404 不洩漏該 doc 存在 / 分類（Sec HIGH-1 / MED-1）
         if doc.current_version_id is None:
             raise AppError(status_code=409, detail="文件尚無已發布版本", error_code="DM_DOC_013")
         ver = await self._repo.get_version(db, doc.current_version_id)
@@ -95,7 +98,8 @@ class DmDocumentService:
         """SRVDM002：取分類（預設 TRAINING）有當前發布版且在架之文件；分類不存在 → DM_DOC_010。"""
         category = (category or "TRAINING").strip()
         keyword = (keyword or "").strip()
-        if not await self._repo.category_exists(db, category):
+        # 僅允許可跨模組引用之分類（防以他分類列出 metadata，Sec HIGH-1）；非白名單一律 DM_DOC_010。
+        if category not in _REFERENCEABLE_CATEGORIES:
             raise AppError(status_code=422, detail="受控選項無效或已停用", error_code="DM_DOC_010")
         rows = await self._repo.list_training(db, category=category, keyword=keyword, func_code=func_code)
         return [
@@ -109,12 +113,13 @@ class DmDocumentService:
         OBSOLETE 文件仍可取（`CURRENT_VERSION_ID` 指廢止前最後發布版，FR-003 學員仍可閱讀）。
         """
         doc = await self._repo.get_document(db, doc_id)
-        if doc is None:
-            raise _NOT_FOUND
+        if doc is None or doc.category_code not in _REFERENCEABLE_CATEGORIES:
+            raise _NOT_FOUND  # 非可引用分類：回 404 不洩漏（Sec HIGH-1）
         if version_id != doc.current_version_id:  # D-1：僅目前發布版
             raise AppError(status_code=403, detail="舊版本不可下載，請聯絡管理者", error_code="DM_DOC_002")
         ver = await self._repo.get_version(db, version_id)
-        if ver is None or not ver.file_path:
+        # 併驗版本歸屬本文件（CURRENT_VERSION_ID 為邏輯 FK 無 DB 約束，防資料異常回錯檔，Sec LOW-1）
+        if ver is None or ver.doc_id != doc.doc_id or not ver.file_path:
             raise _NOT_FOUND
         # D-2：不寫 DM_DOC_READ——ET 代學員取檔不計入 DM 閱讀統計（US13），ET 端自行統計學習進度。
         return DmFileContent(

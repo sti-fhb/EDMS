@@ -6,7 +6,6 @@
 from sqlalchemy import Row, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dm.catalog.models import DmCategory
 from app.dm.document.models import DmDocument, DmDocVersion
 
 _PUBLISHED = "PUBLISHED"
@@ -26,12 +25,6 @@ class IntegrationRepository:
     async def get_version(self, db: AsyncSession, version_id: int) -> DmDocVersion | None:
         return await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == version_id))
 
-    async def category_exists(self, db: AsyncSession, category: str) -> bool:
-        """分類碼是否存在（SRVDM002 之 INVALID_CATEGORY 防呆）。"""
-        return bool(
-            await db.scalar(select(DmCategory.category_code).where(DmCategory.category_code == category).limit(1))
-        )
-
     async def list_training(self, db: AsyncSession, *, category: str, keyword: str, func_code: str | None) -> list[Row]:
         """列該分類「有當前發布版且在架」之文件（發布時間 DESC；選填名稱關鍵字 / func_code）。"""
         stmt = (
@@ -48,7 +41,8 @@ class IntegrationRepository:
                 DmDocument.current_version_id.is_not(None),
                 DmDocument.status.in_(_LIST_STATUSES),
             )
-            .order_by(DmDocVersion.published_date.desc())
+            # 次要鍵 doc_id：同秒發布時排序穩定（比照 library/repository.py 慣例）
+            .order_by(DmDocVersion.published_date.desc(), DmDocument.doc_id)
         )
         if keyword:
             esc = keyword.translate(_LIKE_ESCAPE)

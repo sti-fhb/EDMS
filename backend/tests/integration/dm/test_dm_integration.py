@@ -5,6 +5,8 @@ PENDING_OBSOLETE、排除 OBSOLETE / 草稿 / 送審）+ keyword + func_code + �
 取檔不掛角色閘、只給目前版、不寫 DM_DOC_READ、OBSOLETE 仍可取；門面自 app/services 匯出。
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import func, select
 
@@ -145,11 +147,29 @@ async def test_list_filters_status_and_category(db):
     assert names == {"A", "B"}
 
 
-async def test_list_keyword_and_desc_order(db):
+async def test_list_keyword_filter(db):
     await _published_doc(db, "DM-TRAINING-000020", name="用血回報教材", published=utcnow())
     await _published_doc(db, "DM-TRAINING-000021", name="成分製備教材", published=utcnow())
     items = await _svc.list_training_documents(db, keyword="用血")
     assert [i.doc_name for i in items] == ["用血回報教材"]
+
+
+async def test_list_desc_order_by_published_date(db):
+    """多筆不同發布時間 → 發布時間 DESC（新者在前）。"""
+    base = utcnow()
+    await _published_doc(db, "DM-TRAINING-000050", name="舊", published=base - timedelta(days=2))
+    await _published_doc(db, "DM-TRAINING-000051", name="新", published=base)
+    items = await _svc.list_training_documents(db)
+    assert [i.doc_name for i in items] == ["新", "舊"]
+
+
+async def test_list_tiebreak_by_doc_id(db):
+    """同秒發布 → 次要鍵 doc_id 確保排序穩定。"""
+    t = utcnow()
+    await _published_doc(db, "DM-TRAINING-000061", name="B", published=t)
+    await _published_doc(db, "DM-TRAINING-000060", name="A", published=t)
+    items = await _svc.list_training_documents(db)
+    assert [i.doc_id for i in items] == ["DM-TRAINING-000060", "DM-TRAINING-000061"]
 
 
 async def test_list_func_code_filter(db):
@@ -167,10 +187,13 @@ async def test_list_func_code_filter(db):
     assert [i.doc_name for i in items] == ["F1"]
 
 
-async def test_list_invalid_category_blocked(db):
-    with pytest.raises(AppError) as e:
-        await _svc.list_training_documents(db, category="NOPE")
-    assert e.value.error_code == "DM_DOC_010" and e.value.status_code == 422
+async def test_list_non_referenceable_category_blocked(db):
+    """不存在（NOPE）與存在但非可引用分類（SOP）皆擋 DM_DOC_010。"""
+    await _published_doc(db, "DM-SOP-000045", category="SOP", name="SOP文件")  # 存在但不可引用
+    for cat in ("NOPE", "SOP"):
+        with pytest.raises(AppError) as e:
+            await _svc.list_training_documents(db, category=cat)
+        assert e.value.error_code == "DM_DOC_010" and e.value.status_code == 422
 
 
 # ── read_file_for_reference ──────────────────────────
@@ -213,6 +236,25 @@ async def test_read_file_obsolete_still_readable(db):
     vid = await _published_doc(db, "DM-TRAINING-000044", version_no="v1.5", status="OBSOLETE")
     f = await _svc.read_file_for_reference(db, doc_id="DM-TRAINING-000044", version_id=vid)
     assert f.path.endswith("v1.5.pdf")
+
+
+# ── 分類白名單：跨分類越權防線（Sec HIGH-1）────────────
+
+
+async def test_read_file_non_referenceable_category_blocked(db):
+    """以他分類（SOP）doc_id 取檔 → 擋（回 404 不洩漏），防跨分類枚舉取檔。"""
+    vid = await _published_doc(db, "DM-SOP-000070", category="SOP", version_no="v1.0")
+    with pytest.raises(AppError) as e:
+        await _svc.read_file_for_reference(db, doc_id="DM-SOP-000070", version_id=vid)
+    assert e.value.error_code == "DM_DOC_001" and e.value.status_code == 404
+
+
+async def test_current_non_referenceable_category_blocked(db):
+    """以他分類（SOP）doc_id 取 metadata → 擋（回 404 不洩漏）。"""
+    await _published_doc(db, "DM-SOP-000071", category="SOP", version_no="v1.0")
+    with pytest.raises(AppError) as e:
+        await _svc.get_current_by_doc_id(db, "DM-SOP-000071")
+    assert e.value.error_code == "DM_DOC_001" and e.value.status_code == 404
 
 
 # ── 邊界隔離：門面經 app/services 匯出 ────────────────
