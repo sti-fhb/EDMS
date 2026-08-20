@@ -119,6 +119,84 @@ ET 教材引用 DM「訓練教材」分類之文件。ET 端以 **SRVDM002** 取
 
 ---
 
+## in-process Service 介面（ET 呼叫方式，**權威**）
+
+依 `.claude/rules/sti-backend-boundaries.md`（API-First 隔離），ET 與 DM 同屬單一 backend，**ET 一律經 `app/services/__init__.py` 匯出之 in-process DM Service 呼叫，不打上述 HTTP 端點**（HTTP 端點掛 `app/dm/deps.py` 存取閘，要求呼叫者具至少一個 DM 角色，否則 403 `DM_AUTH_001`；ET 師生未必具 DM 角色會被擋）。上述 REST 路徑為 **DM 自身前端**使用、語意等價，僅供對照。
+
+### 匯出
+
+```python
+# app/services/__init__.py（現僅匯出 DP 三個 Service，需新增 DM 門面）
+from app.dm.integration.service import DmDocumentService   # 實作位置 SD 可定，建議 app/dm/integration/
+```
+
+### 類別與方法簽章
+
+`DmDocumentService`：
+
+| 方法 | 對應 | 簽章 | 回傳 |
+|------|------|------|------|
+| `get_current_by_doc_id` | SRVDM001 | `(db, doc_id: str)` | `DmCurrentVersion` |
+| `list_training_documents` | SRVDM002 | `(db, *, category="TRAINING", keyword="", func_code=None)` | `list[DmDocItem]` |
+| `read_file_for_reference` | 取檔（見下節）| `(db, *, doc_id: str, version_id: int)` | `DmFileContent` |
+
+### 回傳型別（DTO）
+
+```python
+@dataclass(frozen=True)
+class DmCurrentVersion:       # get_current_by_doc_id
+    doc_id: str
+    doc_name: str
+    category_code: str
+    current_version_id: int
+    version_no: str
+    file_name: str
+    file_mime: str
+    published_date: datetime
+    status: str              # PUBLISHED / OBSOLETE
+    obsolete: bool
+
+@dataclass(frozen=True)
+class DmDocItem:             # list_training_documents 之清單項目
+    doc_id: str
+    doc_name: str
+    version_no: str
+    published_date: datetime
+
+@dataclass(frozen=True)
+class DmFileContent:         # read_file_for_reference
+    path: str               # 落地檔路徑；ET 以 FileResponse 回給學員，不自行解析路徑另作他用
+    mime: str
+    name: str
+```
+
+> DTO 欄位對應上方 REST JSON（camelCase → snake_case）；`list_training_documents` 之 `total` 由 `len(回傳 list)` 得出，不另包裝物件。
+
+### 錯誤對映（in-process 丟 `AppError`，非 REST 字串）
+
+| 上方 REST error | in-process `AppError`（status, error_code）|
+|-----------------|-------------------------------------------|
+| `DOC_NOT_FOUND` | 404, `DM_DOC_001`（查無此文件）|
+| `NO_PUBLISHED_VERSION` | 409, `DM_DOC_013`（文件尚無已發布版本）|
+| `INVALID_CATEGORY` | 400, `DM_DOC_010`（受控選項無效或已停用）|
+
+> ET 端以 `AppError.error_code` 判斷；error_code 對齊 `docs/ref/error-codes.md`（`DM_DOC_013` 為本 US 新增）。
+
+---
+
+## 檔案內容取用（ET 學員取教材檔）
+
+SRVDM001 只回 metadata，**不回檔案內容**。ET 學員端 ET05 呈現預覽 / 下載時，經 `read_file_for_reference(db, doc_id, version_id)` 取檔：
+
+- **不掛 DM 角色閘**：此方法不做 DM 角色 / DM 可見性檢查（與 DM 自身 HTTP 取檔端點不同）。**授權由 ET 端自行判定後才呼叫**（學員須為該課程已加入且未移除、章節已解鎖）；DM 端信任 ET 已把關，只負責交檔。
+- **僅限目前發布版**（決策 D-1）：`version_id` 必須等於該文件 `CURRENT_VERSION_ID`，否則 `AppError(403, DM_DOC_002)`。ET 教材恆取當前發布版，不需舊版。
+- **不寫 `DM_DOC_READ` 閱讀紀錄**（決策 D-2）：ET 代學員取檔不計入 DM 閱讀統計（US13）；ET 學員之學習 / 閱讀由 ET 端自行統計，避免 DM KPI 混入 ET 情境。
+- **實體檔缺失**回 `AppError(404, DM_DOC_001)`（統一 404、不外洩落地路徑）。
+
+> **決策紀錄**：D-1（限目前版）、D-2（不寫閱讀紀錄）於 2026-08-20 交付前自檢（`/sti-sa-precheck dm us12`）採預設建議定案。若 ET 日後需「舊版取用」或「ET 閱讀計入 DM KPI」，另議擴充。
+
+---
+
 ## 處理邏輯
 
 1. **SRVDM001**：依 docId 查 DM_DOCUMENT → 取 `CURRENT_VERSION_ID` 指向之 DM_DOC_VERSION（即現行 / 廢止前最後發布版，其版本 STATUS=PUBLISHED）；文件 STATUS=OBSOLETE 時 `obsolete=true`、仍回傳該版位置（廢止屬文件層、版本維持 PUBLISHED）；`CURRENT_VERSION_ID` 為 null（首版尚未發布）時回 NO_PUBLISHED_VERSION。
