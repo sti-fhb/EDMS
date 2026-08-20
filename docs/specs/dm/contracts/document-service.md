@@ -178,9 +178,12 @@ class DmFileContent:         # read_file_for_reference
 |-----------------|-------------------------------------------|
 | `DOC_NOT_FOUND` | 404, `DM_DOC_001`（查無此文件）|
 | `NO_PUBLISHED_VERSION` | 409, `DM_DOC_013`（文件尚無已發布版本）|
-| `INVALID_CATEGORY` | 400, `DM_DOC_010`（受控選項無效或已停用）|
+| `INVALID_CATEGORY` | 422, `DM_DOC_010`（受控選項無效或已停用；亦含非可跨模組引用之分類）|
 
 > ET 端以 `AppError.error_code` 判斷；error_code 對齊 `docs/ref/error-codes.md`（`DM_DOC_013` 為本 US 新增）。
+> **取用範圍**：跨模組引用限「訓練教材（TRAINING）」分類——`get_current_by_doc_id` / `read_file_for_reference`
+> 對非 TRAINING 之 DOC_ID 一律回 `DM_DOC_001`（不洩漏存在）；`list_training_documents` 對非 TRAINING 分類回
+> `DM_DOC_010`。此為角色閘移除後 DM 端之範圍防線（防以可枚舉 DOC_ID 跨分類取檔）。
 
 ---
 
