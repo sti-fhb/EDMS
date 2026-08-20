@@ -29,7 +29,7 @@
 - [ ] T018 [P] 建立資料庫 Migration：**ET_INVITATION** 邀請紀錄，含 TOKEN 唯一索引
 - [ ] T019 [P] 建立資料庫 Migration：**ET_OWNER_TRANSFER** 擁有者轉讓稽核紀錄
 - [ ] T020 [P] ~~建立 ET_PARAM 系統參數 Migration~~ **廢除**：系統參數集中於平台 `DP_PARAM`（前綴 `ET_`），由平台 DP 建表；ET 不建 param migration（2026-07-08 集中化）
-- [ ] T021 建立 Lookup 代碼初始資料（ET_USER_ROLE_TYPE、ET_COURSE_STATUS（DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除）、ET_ENROLLMENT_SOURCE（含 TAG_DEFAULT）、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類），參照 data-model.md Lookup 表
+- [ ] T021 定義 Lookup 代碼**應用層常數**（ET_USER_ROLE_TYPE、ET_COURSE_STATUS〔DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除〕、ET_ENROLLMENT_SOURCE〔含 TAG_DEFAULT〕、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類；另 T156 增列 ET_APPROVAL_RESULT，合計 9 類），參照 data-model.md §Lookup 代碼定義。**（2026-08-20 定案：不建 lookup 表、不 seed 資料——本專案無 lookup 表機制，比照 DM 以模組層常數表達，如 `app/dm/detail/repository.py` 之 `_OBSOLETE`；DB 欄位維持 `VARCHAR`、值域由應用層把關）**
 - [ ] T022 建立 ET_TAG 初始資料（5 筆：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師，皆 IS_BUILTIN），參照 data-model.md（2026-07-02 改寫，原 ET_MODULE 7 筆廢除）
 - [ ] T023 建立 ET 系統參數 seed（於平台 `DP_PARAM`，前綴 `ET_`：ET_VIDEO_ALLOWED_FORMATS / ET_VIDEO_MAX_SIZE_MB / ET_VIDEO_PLAYBACK_MAX_RATE / ET_INVITATION_CODE_LENGTH / ET_WEEKLY_STAT_DAY_TIME / ET_URGENT_REMIND_DAYS），參照 data-model.md（2026-07-08 集中化：ET 不自建參數表；密碼重設 TTL 改平台級 `DP_` 參數；EMAIL_NOTIFY_* 已移至 `DP_NOTIFY_TEMPLATE`）
 - [ ] T165 [P] 建立資料庫 Migration：**ET_MATERIAL_VIDEO** 教材影片子表（FILE_PATH / FILE_NAME / **DURATION_SEC** / FILE_SIZE_BYTES / SORT_ORDER；(MATERIAL_ID, SORT_ORDER) 邏輯唯一）（2026-08-19 新增，S4 拆表結案）
@@ -340,7 +340,7 @@
 
 ### Migration 與欄位
 
-- [ ] T156 [P] 建立資料庫 Migration：**ET_APPROVAL** 線下核可紀錄（含 (COURSE_ID, USER_ID) 邏輯唯一索引、VERSION 樂觀鎖）＋ **ET_COURSE.REQUIRE_APPROVAL** 欄位（BOOLEAN，預設 false）；Lookup 增列 `ET_APPROVAL_RESULT`（PASS / FAIL）
+- [ ] T156 [P] 建立資料庫 Migration：**ET_APPROVAL** 線下核可紀錄（含 (COURSE_ID, USER_ID) 邏輯唯一索引、VERSION 樂觀鎖）＋ **ET_COURSE.REQUIRE_APPROVAL** 欄位（BOOLEAN，預設 false）；Lookup 代碼常數增列 `ET_APPROVAL_RESULT`（PASS / FAIL，應用層常數、不建表）
 
 ### 核可作業（US16）
 

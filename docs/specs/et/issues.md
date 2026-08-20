@@ -45,29 +45,38 @@
 **前置條件**：
 - PostgreSQL 已建置；應用伺服器環境就緒
 - `DP_USER` 由平台模組 DP 建立與定義（ET 以 USER_ID 引用、不自建帳號表）
-- SMTP 伺服器資訊就緒
+- 平台 DP 已上線並**已為 ET 備妥掛鉤**（fail-closed，等 ET 註冊）：`module_admin_gate` / `module_provisioning_gate`（`dp/user/activation.py` 已在呼叫）/ `module_assign_registry` / `module_role_gate`；排程引擎白名單已含 `app.et.`、`DP_SCHEDULE` 已預留 SCHET001 / SCHET002 兩列（`IS_ENABLED=false`）
+- ~~SMTP 伺服器資訊就緒~~ **不需要**：ET 不自建 SMTP 連線與寄件佇列，寄信一律經平台 `NotifyService`（2026-07-08 集中化）
 
 **涵蓋 Tasks**：
 - T001 建立 ET 模組專案結構（`backend/app/et/{功能}/` router / service / repository / schemas / models + deps / bootstrap / provider；migration 於 `backend/alembic/versions/`；前端 `frontend/src/et/{功能}/`）（2026-08-19 對齊專案實際結構）
 - T002 ~ T020、T165 ~ T168 建立 ET 22 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
 - T125 ~ T129 建立 2026-07-02 新增表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT）；通知範本改 seed 至平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，7 類可維護範本〔2026-07-17 增列 APPROVAL_PASSED〕；表由平台 DP 建，ET 不自建，2026-07-08 集中化）
   > 線下核可表 ET_APPROVAL 與 ET_COURSE.REQUIRE_APPROVAL 欄位之 Migration（T156）於 Issue #18 建立（2026-07-17）
-- T021 ~ T023 建立 Lookup 代碼、ET_TAG（5 筆種子：全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）；ET 系統參數（前綴 `ET_`）seed 至平台 `DP_PARAM`（ET 不自建參數表）
+- T021 定義 Lookup 代碼**應用層常數**（9 類，**不建表、不 seed**——2026-08-20 定案，比照 DM 之模組層常數作法）；T022 ET_TAG 種子 5 筆（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）；T023 ET 系統參數（前綴 `ET_`）seed 至平台 `DP_PARAM`（ET 不自建參數表）
 - T024 系統初始化第一個管理者 Seed Script
-- T025 ~ T032 共用元件（8 項）：SSO 認證中介層、角色權限檢查、ET 參數載入工具（透過平台 `DP_PARAM` 唯讀查詢）、樂觀鎖檢核、DM Service Client、平台發信服務 Client（經 `DP_EMAIL_LOG`）、Token 產生器、邀請碼產生器
+- T025 ~ T032 共用元件（**2026-08-19 裁減後為 6 項**）：
+  - T025 **ET 模組存取閘與啟動註冊**（比照 DM `deps.py` + `bootstrap.py`）：重用平台 `get_jwt_payload`、查 `ET_USER_ROLE` 要求至少一個 ET 角色；啟動期註冊四個聚合閘 checker / provider
+  - T026 細粒度角色檢核工具（比照 DM `roles/authz.has_role`）
+  - T028 樂觀鎖檢核工具（`WHERE VERSION = ?`）
+  - T029 DM Service Client（⚠️ **被 #183 阻塞**，見下方注意事項）
+  - T031 邀請 token 產生器（≥ 32 bytes CSPRNG）
+  - T032 邀請碼產生器（8 碼純數字、全域唯一）
+  - ~~T027 ET 參數載入工具~~ **廢除**：直接用平台 `ParamService`（`get_param_value` / `get_int_param` / `get_param_list`）
+  - ~~T030 平台發信服務 Client~~ **廢除**：直接用平台 `NotifyService.send_email`
 
 **驗收條件**：
 1. **28 張** ET 業務表全部建立（線下核可 ET_APPROVAL 於 Issue #18 建立，**ET 業務表共 29 張**；另引用平台 DP 之 `DP_USER` / `DP_PARAM` / `DP_NOTIFY_TEMPLATE`，ET 不自建）；標準稽核欄位（CREATED_USER / CREATED_DATE / UPDATED_USER / UPDATED_DATE）齊備
    > **2026-08-19 新增 4 張**：`ET_MATERIAL_VIDEO`（含 **DURATION_SEC**，覆蓋率分母）、`ET_MATERIAL_DOC`（`DOC_ID` VARCHAR(20)）、`ET_PROGRESS_VIDEO`（逐支影片覆蓋率）、`ET_QUIZ_RETRY_RESET`（重考次數重置基準，append-only）——對應 T165 ~ T168
-2. 9 類 Lookup 代碼資料（2026-07-17 增列 ET_APPROVAL_RESULT）、5 筆 ET_TAG 種子載入成功；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）、7 類通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`；含 APPROVAL_PASSED）seed 由平台 DP 載入成功
+2. 9 類 Lookup 代碼以**應用層常數**定義完成（**不建表、不 seed**，比照 DM）；5 筆 ET_TAG 種子載入成功；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）、7 類通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`；含 APPROVAL_PASSED）seed 由平台 DP 載入成功
 3. IT 透過 Seed Script 寫入 `DP_USER` + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
 4. ET 模組存取閘可驗證平台 DP 之 JWT（重用 `get_jwt_payload`）並注入 USER_ID 與 ET 角色清單；未具任何 ET 角色者回 403
 5. 樂觀鎖工具於版本不符時回傳明確衝突訊息
-6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與內容
-7. Email Server Client 可寄送一封測試信至指定信箱（TLS 連線、模板渲染）
+6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與 metadata ⚠️ **本條被 #183 阻塞**（DM 端 T057 / T058 尚未實作，且 DM Service 尚未自 `app/services/__init__.py` 匯出）——交付時以 stub 開發並標外部阻塞，待 #183 完成後回歸驗證
+7. 經平台 `NotifyService.send_email` 可寄送一封測試信（傳 `template_code` + 變數，寫入 `DP_EMAIL_LOG` outbox 由平台 worker 寄出）；**ET 不直接連 SMTP**
 8. Token 產生器產出之 token 至少 32 bytes 且 cryptographically secure
 
-**Labels**：`foundational`, `setup`, `db`, `infra`, `priority:P0`
+**Labels**：`priority:P0`, `ET-教育訓練文件管理`（比照 DM Foundation #127）
 
 ---
 
