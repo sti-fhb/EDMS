@@ -27,6 +27,11 @@ ET 參數 / 通知範本種子寫入平台 DP 共用表（#185 T023）——依 
 > 規格值種入（#171 之分類表亦記為 `MON 10:00`）。
 """
 
+# ruff: noqa: S608
+# S608 說明：`_seed()` 以 f-string 組出 INSERT 骨架，但**代入的表名與欄位名皆為本檔內
+# 之常數字面量**（非外部輸入），實際「值」一律走 bindparams 參數化——無注入面。
+# 比照 DM #127 之 dm_seed_templates_params_into_dp 同一寫法與同一豁免。
+
 from datetime import datetime, timezone
 from typing import Sequence, Union
 
