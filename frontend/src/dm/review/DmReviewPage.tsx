@@ -30,7 +30,7 @@ import { downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
 import { Pagination } from "../../components/Pagination"
 import { useNotification } from "../../contexts/NotificationContext"
-import { toApiError } from "../../services/http"
+import { toApiError, toBlobApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
 
 const PAGE_SIZE = 20
@@ -109,9 +109,7 @@ function DetailPanel({
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
         變更摘要 <Typography component="span" variant="caption" color="text.secondary">（撰寫者填寫）</Typography>
       </Typography>
-      <Box
-        sx={{ borderLeft: 4, borderLeftColor: "success.main", bgcolor: "success.50", px: 2, py: 1, mb: 2, borderRadius: 1 }}
-      >
+      <Box sx={{ bgcolor: "grey.100", px: 2, py: 1, mb: 2, borderRadius: 1 }}>
         <Typography variant="body2">{detail.change_summary || "（無）"}</Typography>
       </Box>
 
@@ -227,7 +225,8 @@ export function DmReviewPage() {
     try {
       await downloadReviewFile(selectedId, versionId, filename)
     } catch (e) {
-      message.error(toApiError(e).errorMessage) // 待審版取檔失敗（無權 / 檔案缺失）改以 toast 提示
+      // 檔案下載為 blob 請求，錯誤 body 亦為 blob → 以 toBlobApiError 解出真因（如查無檔案），非籠統連線異常
+      message.error((await toBlobApiError(e)).errorMessage)
     }
   }
 

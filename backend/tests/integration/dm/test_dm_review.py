@@ -286,7 +286,7 @@ async def test_reject_first_version_doc_to_draft(db):
     doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000330"))
     v = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == v.version_id))
     review = await db.scalar(select(DmReview).where(DmReview.review_id == r.review_id))
-    assert doc.status == "DRAFT" and v.status == "REJECTED"
+    assert doc.status == "DRAFT" and v.status == "DRAFT"  # 退回 → 版本回草稿供續編（FR-004）
     assert review.status == "REJECTED" and review.reason == "需補充"
     # DOC_REJECT 通知撰寫者
     n = await db.scalar(
@@ -296,7 +296,7 @@ async def test_reject_first_version_doc_to_draft(db):
 
 
 async def test_reject_new_version_keeps_doc_published(db):
-    """Q2：退回 NEW_VERSION → 文件維持 PUBLISHED、現行發布版不動，只新版本 REJECTED。"""
+    """Q2：退回 NEW_VERSION → 文件維持 PUBLISHED、現行發布版不動；被退新版回 DRAFT 供續編。"""
     await _seed_user(db, "ed", "撰寫", email="ed@e.com")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
     doc, cur, new, r = await _new_version_submission(db, "DM-SOP-000331")
@@ -305,7 +305,19 @@ async def test_reject_new_version_keeps_doc_published(db):
     cur = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == cur.version_id))
     new = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == new.version_id))
     assert doc.status == "PUBLISHED" and doc.current_version_id == cur.version_id  # 不動
-    assert cur.status == "PUBLISHED" and new.status == "REJECTED"
+    assert cur.status == "PUBLISHED" and new.status == "DRAFT"  # 現行發布版不受影響、新版回草稿
+
+
+async def test_reject_keeps_rejected_when_author_has_other_draft(db):
+    """邊界：撰寫者送審後又另開草稿 → 退回不可轉 DRAFT（撞每人一份草稿索引），保留 REJECTED。"""
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    doc, cur, new, r = await _new_version_submission(db, "DM-SOP-000332")
+    # 送審後撰寫者於同文件另開一份草稿
+    await _add_version(db, doc.doc_id, "3.0", status="DRAFT", author="ed")
+    await _svc.reject(db, review_id=r.review_id, reason="不通過", op=_op("rev1"))
+    new = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == new.version_id))
+    assert new.status == "REJECTED"  # 保留、避免與既有草稿撞唯一索引
 
 
 async def test_reject_empty_reason_blocked(db):

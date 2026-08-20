@@ -164,6 +164,24 @@ class ReviewCenterRepository:
     async def get_version(self, db: AsyncSession, version_id: int) -> DmDocVersion | None:
         return await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == version_id))
 
+    async def author_has_other_draft(
+        self, db: AsyncSession, doc_id: str, author_id: str, *, exclude_version_id: int
+    ) -> bool:
+        """該撰寫者在此文件是否另有草稿版本（退回轉 DRAFT 前防撞每人一份草稿唯一索引）。"""
+        return bool(
+            await db.scalar(
+                select(
+                    exists().where(
+                        DmDocVersion.doc_id == doc_id,
+                        DmDocVersion.created_user == author_id,
+                        DmDocVersion.status == "DRAFT",
+                        DmDocVersion.version_id != exclude_version_id,
+                        DmDocVersion.deleted == 0,
+                    )
+                )
+            )
+        )
+
     async def write_change_log(
         self, db: AsyncSession, *, doc_id: str, version_id: int, operation: str, applicant: str, approver: str
     ) -> None:

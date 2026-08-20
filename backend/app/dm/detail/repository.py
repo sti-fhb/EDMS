@@ -46,7 +46,8 @@ class DetailRepository:
         return conds
 
     async def get_document(self, db: AsyncSession, doc_id: str, user_id: str, roles: Iterable[str]) -> Row | None:
-        """目前發布版之詳細（含作者 / 核准者姓名 / 分類 / func / 檔案 meta）；套存取控制、查無回 None。"""
+        """目前發布版之詳細（作者 / 核准者 / 發布日期皆取目前發布版；歷史版本撰寫者於版本歷程各自列出）；
+        套存取控制、查無回 None。"""
         author = aliased(DpUser)
         approver = aliased(DpUser)
         stmt = (
@@ -56,7 +57,7 @@ class DetailRepository:
                 DmDocument.status,
                 DmDocument.category_code,
                 DmDocument.func_code,
-                DmDocument.created_user.label("author_id"),
+                DmDocVersion.created_user.label("author_id"),
                 DmCategory.category_name,
                 DmFunc.func_name,
                 DmDocVersion.version_id,
@@ -74,7 +75,7 @@ class DetailRepository:
             .outerjoin(DmDocVersion, DmDocument.current_version_id == DmDocVersion.version_id)
             .join(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmFunc, DmDocument.func_code == DmFunc.func_code)
-            .outerjoin(author, DmDocument.created_user == author.user_id)
+            .outerjoin(author, DmDocVersion.created_user == author.user_id)
             .outerjoin(approver, DmDocVersion.approver_user_id == approver.user_id)
             .where(*self._access_conditions(doc_id, user_id, roles))
         )

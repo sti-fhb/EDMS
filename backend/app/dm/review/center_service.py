@@ -4,8 +4,9 @@
 
 - **核准並發布**（NEW / NEW_VERSION）：核准 → 版本切換（新版 PUBLISHED、舊發布版 SUPERSEDED、
   DM_DOCUMENT.CURRENT_VERSION_ID 指新版）→ 寫 DM_CHANGE_LOG(PUBLISH) → 組收件名單 → DOC_PUBLISH 通知。
-- **退回**：核准機關填原因 → 送審版本 REJECTED；首版（NEW）文件回 DRAFT，已發布文件之新版（NEW_VERSION）
-  **文件維持 PUBLISHED**（SA 裁示 Q2：不影響現有已發布版本）→ DOC_REJECT 通知撰寫者。
+- **退回**：核准機關填原因 → 送審版本回 DRAFT（供撰寫者續編再送或刪除，FR-004）；首版（NEW）文件亦回
+  DRAFT，已發布文件之新版（NEW_VERSION）**文件維持 PUBLISHED**（SA 裁示 Q2：不影響現有已發布版本）→
+  DOC_REJECT 通知撰寫者。
 
 OBSOLETE 核准與撤回消失情境屬 US8 / US9，本服務以 DM_REVIEW_006 擋 OBSOLETE。交易由 get_db 於請求
 結束統一 commit；本層僅 flush，故核准 + 版本切換 + 變更歷程 + 通知同一交易原子成立。
@@ -262,7 +263,12 @@ class ReviewCenterService:
     # ── 退回 ──────────────────────────────────────────
 
     async def reject(self, db, *, review_id: int, reason: str, op: OperatorInfo) -> RejectResult:
-        """退回：必填原因 → 版本 REJECTED；首版文件回 DRAFT、已發布文件之新版維持 PUBLISHED（Q2）。"""
+        """退回：必填原因 → 送審版本回草稿（供撰寫者續編再送或刪除）；首版文件亦回 DRAFT。
+
+        FR-004：新增與新版本退回一致——被退版本轉 DRAFT，出現於撰寫者個人專區草稿區（不再標 REJECTED）。
+        新版本退回不影響現有已發布版本（文件維持 PUBLISHED、CURRENT_VERSION_ID 不動，Q2）；首版退回文件
+        （本無發布版）回 DRAFT。退回結果（含原因）保存在 DM_REVIEW（狀態 REJECTED）。
+        """
         reason = (reason or "").strip()
         if not reason:
             raise AppError(status_code=422, detail="請填寫退回原因", error_code="DM_REVIEW_004")
@@ -272,7 +278,12 @@ class ReviewCenterService:
         now = utcnow()
         new_ver = await self._repo.get_version(db, review.version_id)
         if new_ver is not None:
-            new_ver.status = _REJECTED
+            # 版本回草稿供續編。邊界：撰寫者若送審後又另開草稿，回草稿會撞「每人每文件一份草稿」唯一索引；
+            # 此時保留 REJECTED（撰寫者以既有草稿續作，極少見），使退回動作不因索引衝突失敗。
+            has_other_draft = await self._repo.author_has_other_draft(
+                db, review.doc_id, review.created_user, exclude_version_id=new_ver.version_id
+            )
+            new_ver.status = _REJECTED if has_other_draft else _DRAFT
             new_ver.updated_user, new_ver.updated_date = op.user_id, now
         # 首版（NEW）退回 → 文件回 DRAFT；已發布文件之新版（NEW_VERSION）退回 → 文件維持 PUBLISHED（不動）
         if review.review_type == _NEW:

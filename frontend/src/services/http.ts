@@ -57,3 +57,27 @@ export function toApiError(err: unknown): ApiError {
     retryAfter: axiosErr.response?.data?.retry_after,
   }
 }
+
+/**
+ * 解析 `responseType: "blob"` 請求的錯誤回應。此類請求失敗時 `response.data` 是 Blob，
+ * `toApiError` 取不到 `error_message` 會一律落回「系統連線異常」而掩蓋真因；此函式先把 Blob
+ * 讀成文字再解析出後端錯誤碼 / 訊息（如 DM_DOC_001 查無檔案）。非 JSON body 則落回 `toApiError`。
+ */
+export async function toBlobApiError(err: unknown): Promise<ApiError> {
+  const axiosErr = err as AxiosError
+  const data = axiosErr.response?.data
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text()) as { error_code?: string; error_message?: string; retry_after?: number }
+      return {
+        status: axiosErr.response?.status ?? 0,
+        errorCode: parsed.error_code ?? "NETWORK_ERROR",
+        errorMessage: parsed.error_message ?? "系統連線異常，請稍後再試",
+        retryAfter: parsed.retry_after,
+      }
+    } catch {
+      // 非 JSON（如 HTML 錯誤頁）→ 落回一般處理
+    }
+  }
+  return toApiError(err)
+}
