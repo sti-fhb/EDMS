@@ -52,6 +52,12 @@
   - ~~**「session」措辭與平台機制矛盾**~~ ✅ **已修**（連帶修正）：平台 DP 明訂**不採 Refresh Token / 伺服器端 session**（登出＝前端丟棄 token），故原 spec 之「寫入 session」「強制當前 session 登出」為平台做不到的動作。已改為「DP 核發 JWT」「須以新 Email 重新登入（既有 JWT 失效方式由平台 DP 定義）」——涉 spec.md、spec_us2（AC1 / FR-01）、spec_us10（AC3 / FR-03）、tasks T026、issues #0 驗收 4。
   - ~~**SC-004 陳舊**~~ ✅ **已修**：改為「經平台唯一發信服務寄送（`DP_EMAIL_LOG` outbox）」。**連帶** SC-002 去技術詞（原寫「以 HTML5 video player 提供」，與本清單「Success criteria are technology-agnostic」打勾不符）。
 
+- **2026-08-19 第二輪補正（#181，比對規格與已上線程式碼）**：
+  - ~~**標籤歸屬 spec 與 data-model 自相矛盾**~~ ✅ **已修**：`spec.md` 原寫「受訓單位標籤庫清單存平台 `DP_PARAM`」，與 `data-model.md` 之 `ET_TAG` 自持表互斥。經三項佐證確認自持表為正（DP #171 附帶發現、DP `roles/service.py` `group_options()` 模組無關且不讀 `DP_PARAM`、DM 2026-08-06 #127 先例），已修 `spec.md` §跨模組共用規則與 `spec_us1.md`。DP 側文件對齊見 #182。
+  - ~~**DM 契約依賴陳述 stale**~~ ✅ **已修**：兩份契約原引用「DM #169 仍為 OPEN」，該 issue 已於 2026-08-19 07:07 關閉且屬 DM US5（非本服務所屬之 US12）。改指 **#183**（DM US12），並註明其前置為 #178。
+  - ~~**倍速參數語意誤導**~~ ✅ **已修**：`ET_VIDEO_PLAYBACK_MAX_RATE` 原讀起來像可自由調整，實際上前端選項清單寫死、只能往下限縮（此即 DP #171 判其為 `READONLY` 之理由）。已於 `data-model.md` / `plan.md` / `spec_us5.md` / `research.md` 補註。
+  - ~~**缺 ET → DP 回呼契約**~~ ✅ **已補**：新增 `contracts/srv-et-dp-module-callbacks.md`，回填 **SRVET001 ~ SRVET006** 編碼、定案 ET 端簽章與 `ET_TAG` 受控主檔語意、「全體」保護落點；並於 `docs/ref/error-codes.md` §ET 登記 5 個 error code（`ET_AUTH_001` / `ET_ROLE_001~003` / `ET_TAG_001`）。
+
 - **待補（不擋 SD 開發、建議補強）**：
   - **訊息類型表之 Bootstrap class 標註**（spec.md §Requirements）：ET / DM / DP **三模組 spec 用字完全相同**，屬跨模組共用慣例。ET 單方改為 MUI 會破壞一致性，故本次**不動**；若要更新應三模組同批處理（獨立議題）。
   - ET → DP 之參數唯讀查詢與排程註冊（`DP_SCHEDULE` job handler 介面）無獨立契約檔（spec.md §跨模組介接總覽有列，DP 端已上線可直接參照實作）。
