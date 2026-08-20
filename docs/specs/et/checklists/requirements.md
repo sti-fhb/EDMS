@@ -58,6 +58,9 @@
   - ~~**倍速參數語意誤導**~~ ✅ **已修**：`ET_VIDEO_PLAYBACK_MAX_RATE` 原讀起來像可自由調整，實際上前端選項清單寫死、只能往下限縮（此即 DP #171 判其為 `READONLY` 之理由）。已於 `data-model.md` / `plan.md` / `spec_us5.md` / `research.md` 補註。
   - ~~**缺 ET → DP 回呼契約**~~ ✅ **已補**：新增 `contracts/srv-et-dp-module-callbacks.md`，回填 **SRVET001 ~ SRVET006** 編碼、定案 ET 端簽章與 `ET_TAG` 受控主檔語意、「全體」保護落點；並於 `docs/ref/error-codes.md` §ET 登記 5 個 error code（`ET_AUTH_001` / `ET_ROLE_001~003` / `ET_TAG_001`）。
 
+- **2026-08-20 開工前裁決**：
+  - ~~**Lookup 代碼表機制不存在**~~ ✅ **已定案**：原 T021 要求「建立 9 類 Lookup 代碼初始資料」，但本專案無 lookup 表機制（DM 之狀態欄位為 `String(20)`，無 lookup 表 / CHECK / Enum，代碼以模組層常數表達）。裁決為**比照 DM，純應用層常數、不建表不 seed**；已更新 `data-model.md` §Lookup 代碼定義（含理由與落地方式）、`tasks.md` T021 / T156、`issues.md` Issue #0 涵蓋任務與驗收條件 2。避免 ET 平白多出 9 張表並與 DM / DP 做法分歧。
+
 - **待補（不擋 SD 開發、建議補強）**：
   - **訊息類型表之 Bootstrap class 標註**（spec.md §Requirements）：ET / DM / DP **三模組 spec 用字完全相同**，屬跨模組共用慣例。ET 單方改為 MUI 會破壞一致性，故本次**不動**；若要更新應三模組同批處理（獨立議題）。
   - ET → DP 之參數唯讀查詢與排程註冊（`DP_SCHEDULE` job handler 介面）無獨立契約檔（spec.md §跨模組介接總覽有列，DP 端已上線可直接參照實作）。

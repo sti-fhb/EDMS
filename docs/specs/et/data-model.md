@@ -710,7 +710,15 @@
 
 ---
 
-## Lookup 表
+## Lookup 代碼定義（**應用層常數，不建表**）
+
+> **2026-08-20 定案**：下列 9 類代碼**不建立資料表、不 seed 任何資料**，僅為**文件層之代碼定義**，實作時落為**應用層常數**。
+>
+> **理由**：本專案無 Lookup 代碼表機制——DM 之狀態欄位（`DM_DOCUMENT.STATUS` 等）為 `String(20)`，無 lookup 表、無 CHECK constraint、無 Enum，代碼以模組層常數表達（如 `app/dm/detail/repository.py` 之 `_OBSOLETE = "OBSOLETE"`、`_BROWSABLE_STATUSES`）。ET 若照原 T021 建 8~9 張 lookup 表，將與 DM / DP 之既有做法分歧、平白多出 9 張表與其維護成本。
+>
+> **落地方式**（比照 DM，細節由 SD 決定）：各代碼於使用它的功能模組內以常數表達；跨多個功能模組共用者（如 `ET_COURSE_STATUS`）可集中於 ET 模組層。DB 欄位維持 `VARCHAR`，值域由應用層把關。
+>
+> 各表欄位說明中的「參見 Lookup `XXX`」即指本節之代碼定義，**非指某張資料表**。
 
 ### ET_USER_ROLE_TYPE
 
