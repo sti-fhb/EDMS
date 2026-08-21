@@ -55,10 +55,15 @@ def _psql(dbname: str, sql: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "PGPASSWORD": c["password"]}
     result = subprocess.run(  # noqa: S603
         ["psql", "-U", c["user"], "-h", c["host"], "-p", c["port"], "-d", dbname, "-tAc", sql],  # noqa: S607
-        env=env,
+        env={**env, "PGCLIENTENCODING": "UTF8"},
         check=False,
         capture_output=True,
         text=True,
+        # 同 alembic 子程序之理由：psql 之 NOTICE / 錯誤訊息在 Windows 為 cp950 中文，
+        # 以 UTF-8 解碼會在 reader thread 拋 UnicodeDecodeError 並吃掉 stderr，
+        # 使上方「psql 指令失敗」的診斷訊息變成空的。
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(f"psql 指令失敗（db={dbname}, sql={sql}）:\n{result.stderr}")
@@ -109,11 +114,20 @@ def apply_migrations():
 
     # 以子程序執行，避免 asyncio.run() 與 pytest-asyncio session loop 衝突；
     # 繼承 os.environ 的 DATABASE_URL，alembic 據此連到測試庫。
+    #
+    # ⚠️ 明確指定 UTF-8 兩端：migration 內的 `logger` 訊息為繁體中文（如 ET bootstrap），
+    # Windows 上子程序預設以 cp950 輸出、而讀取端以 UTF-8 解碼 → reader thread 拋
+    # UnicodeDecodeError。該例外發生在 thread 內不會讓測試失敗，但會**吃掉 stdout**，
+    # 使下方 migration 失敗時的診斷訊息變成空的。`errors="replace"` 為最後一道保險：
+    # 寧可看到亂碼，也不要失去 alembic 的錯誤輸出。
     result = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],  # noqa: S607
         cwd=str(BACKEND_DIR),
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(f"alembic upgrade head 失敗:\nstdout: {result.stdout}\nstderr: {result.stderr}")
