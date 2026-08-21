@@ -12,6 +12,8 @@
 > #183 交付前本檔為 stub 契約測試；PR #189 合併後改為真實整合。
 """
 
+import os
+
 import pytest
 from sqlalchemy import select
 
@@ -22,6 +24,7 @@ from app.core.utils import utcnow
 # （DM_CATEGORY）進入 SQLAlchemy metadata。**這是測試 fixture、非應用碼**——
 # `app/et/**` 不得 import DM 內部，該約束由下方 test_et_模組未直接_import_dm_內部 把關。
 from app.dm.catalog.models import DmCategory  # noqa: F401
+from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.et.common.dm_client import TRAINING_CATEGORY, get_dm_document_client
 
@@ -51,7 +54,9 @@ async def _published_training_doc(db, doc_id: str, *, name="訓練教材", categ
         version_no="v1.0",
         change_summary="摘要",
         file_name="a.pdf",
-        file_path=f"/x/{doc_id}.pdf",
+        # 必須落在 storage root 內——#160 之 resolve_within_root 圍籬會把 root 外路徑
+        # 一律視為查無（404），root 外的測資會讓取檔測試假性失敗。
+        file_path=os.path.join(storage_root(), doc_id, "v1.0.pdf"),
         file_size=100,
         file_mime="application/pdf",
         status="PUBLISHED",
