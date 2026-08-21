@@ -7,7 +7,6 @@ import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { AppShell } from "./layouts/AppShell"
 import { RootLayout } from "./layouts/RootLayout"
 import { DmChangeLogPage } from "./dm/changelog/DmChangeLogPage"
-import { DmDashboardPage } from "./dm/dashboard/DmDashboardPage"
 import { DmDetailPage } from "./dm/detail/DmDetailPage"
 import { DmEditorPage } from "./dm/editor/DmEditorPage"
 import { DmKpiPage } from "./dm/kpi/DmKpiPage"
@@ -60,8 +59,9 @@ export const router = createBrowserRouter([
             // 文件管理模組殼（#127 Foundation）：路由骨架，各頁為 StubPage，功能於對應 US issue 填實
             path: "dm",
             children: [
-              // DM 模組落地頁＝DM00 系統儀表板（US7；無 sidebar 入口，FR-001）
-              { index: true, element: <DmDashboardPage /> },
+              // DM 儀表板（US7 / DM00）改為中性歡迎頁之依權限 widget（#89），不設獨立 /dm 落地頁；
+              // 裸 /dm 導向文件庫（既有行為）
+              { index: true, element: <Navigate to="/dm/library" replace /> },
               { path: "library", element: <DmLibraryPage /> },
               // US5 新增 / 編輯（靜態 new 置於動態 :docId 前，避免被誤捕）
               { path: "documents/new", element: <DmEditorPage /> },

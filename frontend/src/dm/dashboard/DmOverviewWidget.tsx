@@ -62,18 +62,20 @@ function AnnouncementRow({ item, onOpen }: { item: AnnouncementItem; onOpen: (do
 }
 
 /**
- * 系統儀表板（US7 / DM00）：DM 模組落地頁——上方各類型文件總數（4 內建分類 + 總計，純資訊不可點），
- * 下方最新更新公告（近 30 天已發布，含新增 / 新版本），點入詳細頁、「查看全部文件」進文件庫。
+ * DM 文件概況 widget（US7 / UCDM02）：中性歡迎頁依權限疊加之 DM 區塊（導覽重構 #89，非獨立落地頁）。
+ * 由呼叫端（WelcomePage）於使用者具任一 DM 角色時才渲染（FR-001 最小知悉）。
+ * 上方各類型文件總數（4 內建分類 + 總計，純資訊不可點）；下方近 30 天已發布公告（新增 / 新版本），
+ * 點入詳細頁、「查看全部文件」進文件庫；統計與公告皆由後端套可見性過濾。
  */
-export function DmDashboardPage() {
+export function DmOverviewWidget() {
   const navigate = useNavigate()
   const { data: stats, isPending: statsLoading, isError: statsError } = useDashboardStats()
   const { data: announcements, isPending: annLoading, isError: annError } = useAnnouncements()
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        系統儀表板
+    <Box sx={{ mt: 4 }}>
+      <Typography variant="h6" gutterBottom>
+        DM 文件概況
       </Typography>
 
       {/* 各類型文件總數 */}
