@@ -1,4 +1,4 @@
-"""US1 入口頁模組摘要（T025）整合測試：ET 恆可用 / DM has_any_role 聚合 / 認證 + 強制變更閘。"""
+"""US1 入口頁模組摘要（T025）整合測試：ET / DM 皆經 has_any_role 聚合 + 認證 / 強制變更閘。"""
 
 from datetime import timedelta
 
@@ -9,6 +9,9 @@ from app.core.module_roles import module_role_gate
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
+
+# teardown 還原用：ET 已於 main.py 註冊真實 checker，測試替換後須放回原樣（測試專用引用）
+from app.et.roles.gate import et_has_any_role
 
 pytestmark = pytest.mark.integration
 
@@ -38,13 +41,18 @@ def _bearer(user_id):
     return {"Authorization": f"Bearer {create_access_token(sub=user_id, ttl_minutes=15)}"}
 
 
-async def test_module_summary_default_dm_not_provisioned(client, db):
-    """未接線模組 → ET 恆可用 True、DM 未開通 False。"""
+async def test_module_summary_無任一模組角色時皆未開通(client, db):
+    """無 ET / DM 角色者兩者皆 False。
+
+    ET 原寫死 `True`（學員為預設角色、人人皆有），#185 接線後改為實查 `ET_USER_ROLE`
+    ——管理者於 DP 後台**取消**某人之學員角色後，側欄須隨之隱藏，否則該群組點進去
+    每個端點都被存取閘以 403 `ET_AUTH_001` 擋下（側欄承諾了存取閘不給的東西）。
+    """
     await _make_user(db, user_id="s1")
     r = await client.get(_URL, headers=_bearer("s1"))
     assert r.status_code == 200
     body = r.json()
-    assert body["et"]["has_role"] is True
+    assert body["et"]["has_role"] is False, "無任一 ET 角色者不應顯示 ET 側欄群組"
     assert body["dm"]["has_role"] is False
 
 
@@ -61,6 +69,27 @@ async def test_module_summary_dm_has_role(client, db):
     finally:
         module_role_gate.unregister("DM")
     assert r.status_code == 200 and r.json()["dm"]["has_role"] is True
+
+
+async def test_module_summary_et_has_role(client, db):
+    """ET 模組 has_any_role 回 True → 側欄顯示「教育訓練」群組。
+
+    以 stub 替換而非建真實 `ET_USER_ROLE` 列：本檔驗的是 **DP 的聚合行為**，ET 端
+    checker 對 `ET_USER_ROLE` 的實際查詢由 `tests/integration/et/test_et_access_gate.py`
+    覆蓋。teardown 還原 `main.py` 註冊之真實 checker（非 unregister——ET 已接線，
+    移除會讓後續測試看到未接線狀態）。
+    """
+    await _make_user(db, user_id="s3")
+
+    async def _et_stub(_db, _user_id):
+        return True
+
+    module_role_gate.register("ET", _et_stub)
+    try:
+        r = await client.get(_URL, headers=_bearer("s3"))
+    finally:
+        module_role_gate.register("ET", et_has_any_role)
+    assert r.status_code == 200 and r.json()["et"]["has_role"] is True
 
 
 async def test_module_summary_requires_token(client):

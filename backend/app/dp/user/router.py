@@ -236,14 +236,21 @@ async def module_summary(
     payload: JwtPayload = Depends(require_password_current),
     db: AsyncSession = Depends(get_db),
 ) -> ModuleSummary:
-    """入口頁模組摘要：需認證且密碼現行有效（強制變更者擋於閘）。
+    """入口頁 / 側欄模組摘要：需認證且密碼現行有效（強制變更者擋於閘）。
 
-    ET 恆可用（學員預設，contracts §4）；DM 具任一角色才可進入，經 has_any_role 判定閘聚合
-    （ET / DM 模組未接線前 fail-closed 回 False＝未開通，待 US7 + 模組 service 落地）。
+    ET / DM 皆經 `has_any_role` 判定閘聚合（contracts §4）；未註冊模組 fail-closed
+    回 False＝未開通。
+
+    > **ET 原為寫死 `True`**（理由：學員為預設角色、人人皆有），因當時 ET 尚未註冊
+    > checker、問閘必得 False，側欄會永遠不顯示「教育訓練」。#185 接線後該權宜前提
+    > 消失，且變成錯誤來源——管理者於 DP 後台**取消**某人之學員角色後（#185 開通此
+    > 能力），側欄仍會顯示 ET 群組，但其所有 ET 端點都會被存取閘以 403
+    > `ET_AUTH_001` 擋下。改為實查使 側欄與存取閘一致。
     """
+    et_has_role = await module_role_gate.has_any_role("ET", payload.sub, db)
     dm_has_role = await module_role_gate.has_any_role("DM", payload.sub, db)
     return ModuleSummary(
-        et=ModuleRoleStatus(has_role=True),
+        et=ModuleRoleStatus(has_role=et_has_role),
         dm=ModuleRoleStatus(has_role=dm_has_role),
     )
 
