@@ -140,7 +140,7 @@ class DetailService:
         if vfile is None:
             raise _NOT_FOUND
         # storage-root 圍籬（#160）：FILE_PATH 逃逸出根目錄 → 404，且在寫 DM_DOC_READ 等副作用前先擋。
-        safe_path = resolve_within_root(vfile.file_path)
+        safe_path = resolve_within_root(vfile.file_path, not_found=_NOT_FOUND)
         is_current = version_id == meta.current_version_id
 
         if disposition == "download":

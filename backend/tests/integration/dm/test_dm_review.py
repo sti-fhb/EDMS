@@ -6,6 +6,8 @@
 已完成清單、收件名單（全體 / 指定可見對象）、催辦掃描、授權（非本人 / OBSOLETE / 非 PENDING）、HTTP 存取閘。
 """
 
+import os
+
 import pytest
 from sqlalchemy import func, select, text
 
@@ -15,6 +17,7 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag
+from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmChangeLog, DmReview
@@ -57,13 +60,16 @@ async def _audience_id(db, name):
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == name))
 
 
-async def _add_version(db, doc_id, version_no, *, status, author="ed", summary="摘要", published=None):
+async def _add_version(db, doc_id, version_no, *, status, author="ed", summary="摘要", published=None, file_path=None):
+    # 預設落在 storage root 內（#160 圍籬會擋 root 外路徑）；測逃逸之案例自帶 file_path
+    if file_path is None:
+        file_path = os.path.join(storage_root(), doc_id, f"{version_no}.pdf")
     v = DmDocVersion(
         doc_id=doc_id,
         version_no=version_no,
         change_summary=summary,
         file_name=f"{version_no}.pdf",
-        file_path=f"/x/{version_no}.pdf",
+        file_path=file_path,
         file_size=100,
         file_mime=_PDF,
         status=status,
@@ -187,9 +193,22 @@ async def test_prepare_file_reviewer_gets_pending_and_current(db):
     await _seed_user(db, "ed", "撰寫")
     _, cur, new, r = await _new_version_submission(db, "DM-SOP-000313")
     pending = await _svc.prepare_file(db, review_id=r.review_id, version_id=new.version_id, op=_op("rev1"))
-    assert pending.path == new.file_path and pending.name == new.file_name
+    assert (
+        pending.path == os.path.realpath(new.file_path) and pending.name == new.file_name
+    )  # 回 fence 後 canonical 路徑
     current = await _svc.prepare_file(db, review_id=r.review_id, version_id=cur.version_id, op=_op("rev1"))
-    assert current.path == cur.file_path
+    assert current.path == os.path.realpath(cur.file_path)
+
+
+async def test_prepare_file_escaping_storage_root_blocked(db):
+    """storage-root 圍籬（#160，補齊第三條串流路徑）：待審版 FILE_PATH 逃逸出根目錄 → 404。"""
+    await _seed_user(db, "ed", "撰寫")
+    doc, _cur, new, r = await _new_version_submission(db, "DM-SOP-000317")
+    new.file_path = os.path.join(storage_root(), "..", "..", "etc", "secret.pdf")  # 污染待審版落盤路徑
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await _svc.prepare_file(db, review_id=r.review_id, version_id=new.version_id, op=_op("rev1"))
+    assert e.value.error_code == "DM_DOC_001" and e.value.status_code == 404
 
 
 async def test_prepare_file_non_reviewer_blocked(db):
