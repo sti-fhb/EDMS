@@ -40,7 +40,8 @@ function AnnouncementRow({ item, onOpen }: { item: AnnouncementItem; onOpen: (do
             </Typography>
             <Chip
               size="small"
-              color={item.kind === "NEW_VERSION" ? "primary" : "success"}
+              // 新版本＝藍（info；本主題 primary 為品牌綠、與 success 綠難分，故不用 primary）；新增＝綠（success）
+              color={item.kind === "NEW_VERSION" ? "info" : "success"}
               label={`${KIND_LABELS[item.kind] ?? item.kind} ${item.version_no}`}
             />
           </Box>

@@ -28,12 +28,15 @@ describe("DmOverviewWidget 中性歡迎頁之 DM 文件概況（DM00）", () => 
     expect(screen.getByText("76")).toBeInTheDocument()
   })
 
-  it("最新更新公告：列出近 30 天發布 + 新增/新版本 badge", async () => {
+  it("最新更新公告：列出近 30 天發布 + 新增(綠)/新版本(藍) badge", async () => {
     renderWithProviders(<DmOverviewWidget />)
     expect(await screen.findByText("用血回報訓練教材")).toBeInTheDocument()
     expect(screen.getByText("領血確認標準作業程序")).toBeInTheDocument()
-    expect(screen.getByText(/新增 1\.0/)).toBeInTheDocument()
-    expect(screen.getByText(/新版本 2\.1/)).toBeInTheDocument()
+    const addBadge = screen.getByText(/新增 1\.0/).closest(".MuiChip-root") as HTMLElement
+    const verBadge = screen.getByText(/新版本 2\.1/).closest(".MuiChip-root") as HTMLElement
+    // 新增＝success(綠)、新版本＝info(藍)；不得為 primary（本主題品牌綠、與 success 難分）
+    expect(addBadge).toHaveClass("MuiChip-colorSuccess")
+    expect(verBadge).toHaveClass("MuiChip-colorInfo")
     expect(screen.getByRole("button", { name: /查看全部文件/ })).toBeInTheDocument()
   })
 
