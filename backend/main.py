@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
@@ -117,16 +118,18 @@ register_dm_module()
 
 @app.middleware("http")
 async def client_ip_middleware(request: Request, call_next):
-    """每個 request 進入時自動記錄 client IP 至 contextvars。
+    """每個 request 進入時判定 client IP 並記錄至 contextvars。
 
-    優先從 X-Forwarded-For header 取得真實 IP（反向代理場景），
-    fallback 到 request.client.host。
+    safe-by-default（#23）：預設不採信可偽造的 X-Forwarded-For，一律用連線對端；
+    僅在部署方設定 TRUSTED_PROXY_COUNT 時，才採信我方代理鏈追加的段落。
+    判定邏輯見 app/core/client_ip.resolve_client_ip；設定於每個 request 讀取，
+    速率限制與稽核日誌共用此 contextvar，故兩者取得的 IP 恆一致。
     """
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-    else:
-        client_ip = request.client.host if request.client else None
+    client_ip = resolve_client_ip(
+        peer=request.client.host if request.client else None,
+        forwarded_for=request.headers.get("X-Forwarded-For"),
+        trusted_proxy_count=settings.TRUSTED_PROXY_COUNT,
+    )
     set_client_ip(client_ip)
     try:
         return await call_next(request)

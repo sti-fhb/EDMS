@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # 前端公開 base URL（組信中連結，如密碼重設頁）；因部署環境而異，dev 預設對齊前端 dev server（5174）
     FRONTEND_BASE_URL: str = "http://localhost:5174"
 
+    # 反向代理與 client IP（#23）——應用前方「我方掌控」的反向代理台數（含最靠近 app 的那一台）。
+    # 0（預設）表示應用直接對外：完全忽略可偽造的 X-Forwarded-For，一律用連線對端 IP。
+    # 設 >0 才從 XFF 右數第 N 段取 client IP（見 app/core/client_ip.py 與
+    # docs/ref/deployment-client-ip.md）。誤設過大只會退回連線對端，不會採信偽造值。
+    TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=8)
+
     # 資料庫
     DATABASE_URL: str
 

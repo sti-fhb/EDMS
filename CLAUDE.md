@@ -54,4 +54,5 @@
 
 - 認證機制（JWT + Refresh Token）：`docs/ref/jwt_refresh_token_說明.md`（待補：排到認證模組、開始設計登入時撰寫 EDMS 版）
 - UI 設計指引：`docs/ref/ui-design-guide.md`
+- 部署層 client IP 可信度（反向代理 / uvicorn / 限流前提）：`docs/ref/deployment-client-ip.md`
 - 後端共用模組補充（BaseModel 變體、刪除策略例外表、AuditLog 用法）：`docs/ref/sti-backend-ref.md`（待補：開發中遇到第一個刪除/加密例外時建檔）
