@@ -18,6 +18,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult
 from app.core.utils import utcnow
+from app.dm.document.file_paths import resolve_within_root
 from app.dm.document.file_store import is_previewable
 from app.dm.notify.service import DmNotifier
 from app.dm.review.repository import ReviewCenterRepository
@@ -165,8 +166,10 @@ class ReviewCenterService:
         version = await self._repo.get_version(db, version_id)
         if version is None or not version.file_path:
             raise _NOT_FOUND
+        # storage-root 圍籬（#160）：待審版為最新上傳、最貼近受污染路徑之威脅面，串流前一律過圍籬防逃逸
+        safe_path = resolve_within_root(version.file_path, not_found=_NOT_FOUND)
         return ReviewFile(
-            path=version.file_path,
+            path=safe_path,
             mime=version.file_mime or "application/octet-stream",
             name=version.file_name or "file",
         )

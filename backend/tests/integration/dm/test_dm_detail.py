@@ -5,15 +5,19 @@ Office 僅下載、舊版擋下載）、下載寫 DM_DOC_READ + 去重 + 預覽�
 廢止 read-only 資訊；另 HTTP 驗存取閘與 FileResponse。
 """
 
+import os
+
 import pytest
 from sqlalchemy import func, select
 
 from app.core.auth import create_access_token
+from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmTag
 from app.dm.deps import DmContext
 from app.dm.detail.service import DetailService
+from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocRead, DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
 from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, DM_VIEWER
@@ -58,13 +62,16 @@ async def _add_version(
     version_no,
     *,
     mime="application/pdf",
-    path="/x/a.pdf",
+    path=None,
     approver="appr",
     author="u_author",
     summary="摘要",
     published=None,
     status="PUBLISHED",
 ):
+    # 預設落在 storage root 內（#160 讀取端圍籬會擋 root 外路徑）；需測逃逸 / 實體檔的案例自帶 path
+    if path is None:
+        path = os.path.join(storage_root(), doc_id, f"{version_no}.pdf")
     v = DmDocVersion(
         doc_id=doc_id,
         version_no=version_no,
@@ -289,6 +296,20 @@ async def test_office_preview_blocked_download_ok(db):
     assert f.inline is False
 
 
+async def test_file_path_escaping_storage_root_blocked(db):
+    """storage-root 圍籬（#160）：FILE_PATH 逃逸出根目錄 → 404，不串流根外檔案。"""
+    doc, _ = await _seed_doc(db, doc_id="DM-SOP-000024")
+    # 目前版之 FILE_PATH 以 ../ 逃逸至根目錄外
+    escape = os.path.join(storage_root(), "..", "..", "etc", "secret.pdf")
+    vid = await _add_version(db, "DM-SOP-000024", "9.9", path=escape)
+    doc.current_version_id = vid
+    await db.flush()
+    for disp in ("download", "preview"):
+        with pytest.raises(AppError) as e:
+            await _svc.prepare_file(db, doc_id="DM-SOP-000024", version_id=vid, disposition=disp, ctx=_admin())
+        assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
+
+
 # ── 版本歷程 ──────────────────────────────────────
 
 
@@ -379,8 +400,9 @@ async def test_http_forbidden_without_dm_role(db, client):
     assert resp.status_code == 403
 
 
-async def test_http_file_download_serves(db, client, tmp_path):
+async def test_http_file_download_serves(db, client, tmp_path, monkeypatch):
     """FileResponse 實際串流：目前版下載 → 200 + attachment。"""
+    monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", str(tmp_path))  # 實體檔置於 root 內（#160 圍籬）
     f = tmp_path / "a.pdf"
     f.write_bytes(b"%PDF-1.4 test")
     doc = DmDocument(
