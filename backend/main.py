@@ -18,6 +18,7 @@ from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip, set_client_ip
 from app.dm.bootstrap import register_dm_module
+from app.dm.dashboard.router import router as dm_dashboard_router
 from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
 from app.dm.library.router import router as dm_library_router
@@ -107,6 +108,7 @@ app.include_router(dp_roles_router)
 app.include_router(dp_templates_router)
 app.include_router(dp_audit_router)
 app.include_router(dp_schedule_router)
+app.include_router(dm_dashboard_router)
 app.include_router(dm_library_router)
 app.include_router(dm_detail_router)
 app.include_router(dm_editor_router)
