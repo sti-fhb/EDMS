@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     # 反向代理與 client IP（#23）——應用前方「我方掌控」的反向代理台數（含最靠近 app 的那一台）。
     # 0（預設）表示應用直接對外：完全忽略可偽造的 X-Forwarded-For，一律用連線對端 IP。
     # 設 >0 才從 XFF 右數第 N 段取 client IP（見 app/core/client_ip.py 與
-    # docs/ref/deployment-client-ip.md）。誤設過大只會退回連線對端，不會採信偽造值。
+    # docs/ref/deployment-client-ip.md）。
+    # ⚠️ 必須精確等於實際追加段數：設過大**不是** fail-safe——攻擊者前置足夠段落把總段數
+    # 墊到 N 以上，右數第 N 段即落在他可控的段落上並被採信；設過小則把內層代理當 client
+    # （全體共用一個限流桶）。兩種誤設都危險。
     TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=8)
 
     # 資料庫
@@ -137,6 +140,23 @@ class Settings(BaseSettings):
                     "FRONTEND_BASE_URL 在 production（DEBUG=false）不得為空或指向 localhost / 127.0.0.1；"
                     "請於 .env 設為正式前端網域（見 backend/.env.example）"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_trusted_proxy_count_explicit(self) -> "Settings":
+        """production 護欄：`TRUSTED_PROXY_COUNT` 必須明示設定（設 0 亦可，但要寫出來）。
+
+        未設定時預設 0＝忽略 XFF，在「反向代理 → 應用」的部署下會**靜默塌縮**：
+        所有請求的 client IP 都是代理的 IP → IP 維度限流退化為全站共用一個桶
+        （登入門檻變成整個組織每分鐘 N 次）、稽核 SOURCE_IP 全為代理 IP 而失去意義。
+        此塌縮不會有任何錯誤訊息，故比照 JWT_SECRET_KEY / FRONTEND_BASE_URL 的既有作法
+        於啟動即擋，強迫部署方明確表態（見 docs/ref/deployment-client-ip.md）。
+        """
+        if not self.DEBUG and "TRUSTED_PROXY_COUNT" not in self.model_fields_set:
+            raise ValueError(
+                "TRUSTED_PROXY_COUNT 在 production（DEBUG=false）必須明示設定："
+                "應用直接對外設 0，反向代理後方設實際追加段數（見 docs/ref/deployment-client-ip.md）"
+            )
         return self
 
     @property

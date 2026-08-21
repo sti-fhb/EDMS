@@ -92,6 +92,7 @@ def test_mail_plaintext_allowed_when_suppress_send() -> None:
         JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
         DEBUG=False,
         FRONTEND_BASE_URL="https://edms.example.com",  # DEBUG=false 下需正式網域，避開 prod frontend 護欄
+        TRUSTED_PROXY_COUNT=0,  # DEBUG=false 下需明示（見 _validate_trusted_proxy_count_explicit）
         MAIL_SERVER="smtp.example.com",
         MAIL_STARTTLS=False,
         MAIL_SSL_TLS=False,
@@ -107,6 +108,7 @@ def _settings_with_frontend(url: str, *, debug: bool) -> Settings:
         JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
         DEBUG=debug,
         FRONTEND_BASE_URL=url,
+        TRUSTED_PROXY_COUNT=0,  # 聚焦 FRONTEND_BASE_URL 驗證，避開 production 明示設定護欄
     )
 
 
@@ -188,3 +190,42 @@ def test_build_settings_fail_fast_masks_secrets(monkeypatch: pytest.MonkeyPatch)
     # 確認錯誤訊息不回顯任何機密值（避免 boot log 洩漏）
     assert "dev-only" not in message
     assert "test-secret" not in message
+
+
+def _settings_for_proxy_count(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "FRONTEND_BASE_URL": "https://edms.example.com",
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_trusted_proxy_count_required_in_production() -> None:
+    """production 未明示 TRUSTED_PROXY_COUNT → 啟動即擋。
+
+    預設 0 在「反向代理 → 應用」部署下會靜默塌縮成「全站共用一個限流桶 +
+    稽核 SOURCE_IP 全為代理 IP」，無任何錯誤訊息，故強迫部署方表態。
+    """
+    with pytest.raises(ValueError, match="TRUSTED_PROXY_COUNT"):
+        _settings_for_proxy_count(DEBUG=False)
+
+
+def test_trusted_proxy_count_explicit_zero_accepted_in_production() -> None:
+    """production 明示設 0（應用直接對外）→ 通過。"""
+    s = _settings_for_proxy_count(DEBUG=False, TRUSTED_PROXY_COUNT=0)
+    assert s.TRUSTED_PROXY_COUNT == 0
+
+
+def test_trusted_proxy_count_not_required_in_debug() -> None:
+    """dev（DEBUG=true）維持免設定便利，預設 0＝忽略 XFF。"""
+    s = _settings_for_proxy_count(DEBUG=True)
+    assert s.TRUSTED_PROXY_COUNT == 0
+
+
+def test_trusted_proxy_count_upper_bound() -> None:
+    """上限 8：明顯誤設（如把毫秒數填進來）於啟動即擋。"""
+    with pytest.raises(ValueError):
+        _settings_for_proxy_count(DEBUG=True, TRUSTED_PROXY_COUNT=99)

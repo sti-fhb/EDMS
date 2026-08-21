@@ -234,8 +234,11 @@ XFF（`TRUSTED_PROXY_COUNT=0`），需依實際代理鏈設定。
 
 必要設定（詳見 [docs/ref/deployment-client-ip.md](docs/ref/deployment-client-ip.md)）：
 
-- `backend/.env` 設 `TRUSTED_PROXY_COUNT`（單台 nginx＝1；Cloudflare Tunnel → nginx＝2）
-- uvicorn 以 `--no-proxy-headers` 啟動（其內建 proxy-headers 預設開啟且會覆寫連線對端）
+- `backend/.env` 設 `TRUSTED_PROXY_COUNT`（單台 nginx＝1；Cloudflare Tunnel → nginx＝2）。
+  `DEBUG=false` 時**必須明示設定**，未設定啟動即擋；且必須精確等於實際追加段數——
+  設過小會讓全體共用一個限流桶，設過大則偽造成立（**不是** fail-safe）
+- uvicorn 以 `--no-proxy-headers` 啟動（其內建 proxy-headers 預設開啟且會覆寫連線對端），
+  並確認 `FORWARDED_ALLOW_IPS` 未設為 `*` 或內網 CIDR
 - uvicorn 以 `--workers 1` 啟動（限流計數存於行程記憶體，多 worker 會稀釋門檻）
 
 ---
