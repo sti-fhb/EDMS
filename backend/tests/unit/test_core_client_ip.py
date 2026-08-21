@@ -59,9 +59,7 @@ def test_falls_back_to_peer_when_segment_is_not_an_ip():
 def test_strips_port_and_brackets():
     """部分代理會附帶 port：IPv4 去尾 port、IPv6 去方括號，取回純 IP。"""
     assert resolve_client_ip(peer="10.0.0.9", forwarded_for="192.0.2.5:41234", trusted_proxy_count=1) == "192.0.2.5"
-    assert (
-        resolve_client_ip(peer="10.0.0.9", forwarded_for="[2001:db8::1]:443", trusted_proxy_count=1) == "2001:db8::1"
-    )
+    assert resolve_client_ip(peer="10.0.0.9", forwarded_for="[2001:db8::1]:443", trusted_proxy_count=1) == "2001:db8::1"
 
 
 def test_normalizes_ipv6_casing():
@@ -71,7 +69,9 @@ def test_normalizes_ipv6_casing():
 
 def test_ignores_empty_segments():
     """空白 / 連續逗號段落不計入段數。"""
-    assert resolve_client_ip(peer="10.0.0.9", forwarded_for=" , 203.0.113.7 ,, ", trusted_proxy_count=1) == "203.0.113.7"
+    assert (
+        resolve_client_ip(peer="10.0.0.9", forwarded_for=" , 203.0.113.7 ,, ", trusted_proxy_count=1) == "203.0.113.7"
+    )
 
 
 def test_returns_none_when_peer_unknown():

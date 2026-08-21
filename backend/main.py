@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import tomllib
-import traceback
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
+from app.core.log_redaction import format_exception_for_log
 from app.core.request_context import get_client_ip, set_client_ip
 from app.dm.bootstrap import register_dm_module
 from app.dm.detail.router import router as dm_detail_router
@@ -181,17 +181,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """攔截所有未預期例外，記錄完整 stack trace 後回傳通用 500。
+    """攔截所有未預期例外，記錄去識別化後的例外摘要與堆疊後回傳通用 500。
 
-    前端只看到 "Internal Server Error"，不洩漏內部細節；
-    後端 log 保留完整錯誤資訊供排查。
+    前端只看到 "Internal Server Error"，不洩漏內部細節。
+    後端 log 保留例外型別、遮罩後訊息與堆疊位置供排查；刻意不用 traceback.format_exc()
+    ——SQLAlchemy StatementError 的訊息含 SQL 與綁定參數，會把個資寫進 log（#123），
+    改由 app/core/log_redaction.format_exception_for_log 去識別化。
     AppError / HTTPException / RequestValidationError 均有專屬 handler，不會走到此處。
     """
     logger.error(
         "Unhandled exception on %s %s\n%s",
         request.method,
         request.url.path,
-        traceback.format_exc(),
+        format_exception_for_log(exc),
     )
     return JSONResponse(
         status_code=500,
