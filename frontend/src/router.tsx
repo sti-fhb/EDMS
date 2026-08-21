@@ -59,6 +59,8 @@ export const router = createBrowserRouter([
             // 文件管理模組殼（#127 Foundation）：路由骨架，各頁為 StubPage，功能於對應 US issue 填實
             path: "dm",
             children: [
+              // DM 儀表板（US7 / DM00）改為中性歡迎頁之依權限 widget（#89），不設獨立 /dm 落地頁；
+              // 裸 /dm 導向文件庫（既有行為）
               { index: true, element: <Navigate to="/dm/library" replace /> },
               { path: "library", element: <DmLibraryPage /> },
               // US5 新增 / 編輯（靜態 new 置於動態 :docId 前，避免被誤捕）

@@ -26,7 +26,7 @@
 | 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| [#155](https://github.com/sti-fhb/EDMS/issues/155) | 🚀 已開立 [#155](https://github.com/sti-fhb/EDMS/issues/155) |
 | 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039（含 T035a）| #0；#3/#5（入口/去向）| [#169](https://github.com/sti-fhb/EDMS/issues/169) | ✅ 已交付（PR #172；spec 對齊 #175/#176）|
 | 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | [#178](https://github.com/sti-fhb/EDMS/issues/178) | ✅ 已交付（PR #180；catalog 略）|
-| 6 | 系統儀表板 | US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5 | — | 📝 body 已撰寫（待開立）|
+| 6 | 系統儀表板（入口頁 DM 概況 widget，#89）| US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5；DP #89 | [#193](https://github.com/sti-fhb/EDMS/issues/193) | 🚀 已開立（開發中）|
 | 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5 | — | 待補 |
 | 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5 | — | 待補 |
 | 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | — | 待補 |
@@ -529,58 +529,58 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #6：[P2-延伸] DM — 系統儀表板（US7 / UCDM02 / DM00）
+## Issue #6：[P2-延伸] DM — 系統儀表板（入口頁 DM 文件概況 widget）（US7 / UCDM02）（GitHub [#193](https://github.com/sti-fhb/EDMS/issues/193)）
 
-**對應規格**：[spec_us7.md](spec_us7.md)（FR-001~004，UCDM02，訊息 DM-MSG-DM00-001）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_CATEGORY` / `DM_REVIEW`）
-**對應畫面**：**DM00 系統儀表板**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-overview`）——登入後落地頁；各類型文件總數（4 卡）+ 最新更新公告（近 30 天）
+**對應規格**：[spec_us7.md](spec_us7.md)（FR-001~004，UCDM02，訊息 DM-MSG-DM00-001）；DP [spec_us1.md](../dp/spec_us1.md)（導覽重構 #89：中性歡迎頁 + 依權限 widget）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_CATEGORY` / `DM_REVIEW`）
+**對應畫面**：中性歡迎頁（`/`）之**依權限 DM 文件概況 widget**（內容示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-overview`：各類型文件總數 4 卡 + 近 30 天公告）——**非獨立 DM00 落地頁**（#89）
 **階段**：P2-延伸
 **涵蓋 Tasks**：T045（統計卡區）、T046（最新更新公告區）
 
 ## 任務說明
 
-實作 **DM00 系統儀表板**（登入後落地頁）：上方顯示 4 內建分類（SOP / MANUAL 系統操作手冊 / TRAINING 訓練教材 / OTHER 其他）之**已發布目前版本**數量與總計（純資訊、不可點）；下方列出**近 30 天**已發布文件（含新增首版 / 新版本兩類事件），每筆含文件名 + 類型 badge + 摘要 + 發布日期 + 撰寫者 + 分類，點入 US4 詳細頁、「查看全部文件」進 US3 文件庫；近 30 天無事件顯示空狀態。本頁**純讀取**、無寫入、無 migration。
+實作**中性歡迎頁之 DM 文件概況 widget**（導覽重構 #89：不做獨立落地頁）：具任一 DM 角色之使用者於登入後之中性歡迎頁見此區塊——上方 4 內建分類（SOP / MANUAL / TRAINING / OTHER）之**已發布目前版本**數量與總計（純資訊、不可點）；下方近 30 天已發布文件公告（新增 / 新版本），點入 US4 詳細頁、「查看全部文件」進 US3 文件庫；近 30 天無事件顯示空狀態。**無任何 DM 角色者不顯示此區塊**（最小知悉）。純讀取、無寫入、無 migration。
 
-> ℹ️ **讀取型全端 issue（簡單）**：後端 2 支查詢（統計 + 公告）+ 前端 1 頁。重用既有 `DM_DOCUMENT` / `DM_DOC_VERSION` 查詢慣例；DM00 無 sidebar 入口，由 home icon / 系統名稱返回（導向 / 落地由平台 DP 登入後接 DM00）。
+> ℹ️ **讀取型全端 issue（簡單）**：後端 2 支唯讀查詢（統計 + 公告）+ 前端於中性歡迎頁疊加 DM widget（依 `has_any_role` 條件渲染）。重用既有 `DM_DOCUMENT` / `DM_DOC_VERSION` 查詢與 `visible_docs_condition` 可見性慣例。**設計依 DP #89**（原 spec_us7「登入自動導向 DM00 獨立頁」為 DM 單模組舊觀點、已於 spec_us7 更新對齊）。
 
 ## 範圍
 
 **後端**（`app/dm/dashboard`，router → service → repository，唯讀）：
-- **T045 統計卡**（FR-002）：`GET /api/dm/dashboard/stats` → 4 內建分類之「已發布目前版本」數 + 總計。計數口徑＝`DM_DOCUMENT` where `STATUS='PUBLISHED'`（含 `PENDING_OBSOLETE`＝仍在架）group by `CATEGORY_CODE`；**排除 `OBSOLETE` / 送審中 / 草稿 / 已被取代舊版**。回各分類 `category_code` / `category_name` / count + total。
-- **T046 最新更新公告**（FR-003/004）：`GET /api/dm/dashboard/announcements` → 近 30 天已發布版本。來源＝`DM_DOC_VERSION` where `STATUS='PUBLISHED'` AND `PUBLISHED_DATE >= now-30d`，依 `PUBLISHED_DATE` DESC（＋ doc_id 次要鍵）；每筆 join 文件（doc_name / category）+ 該版本 `CHANGE_SUMMARY` / `PUBLISHED_DATE` / 撰寫者（版本 `CREATED_USER`）+ **類型 badge**（join 該版本之 APPROVED `DM_REVIEW.REVIEW_TYPE`：NEW→新增 / NEW_VERSION→新版本；無對應 review 之種子版預設「新增」）。
-- 存取：掛 `get_dm_context`（任一 DM 角色可瀏覽，FR-001）；純讀取、不寫稽核。
+- **T045 統計卡**（FR-002）：`GET /api/dm/dashboard/stats` → 4 內建分類之「已發布目前版本」數 + 總計。計數＝`DM_DOCUMENT` STATUS in (PUBLISHED, PENDING_OBSOLETE)（含在架廢止待簽核）group by `CATEGORY_CODE`；排除 OBSOLETE / 送審 / 草稿 / 舊版；**套 `visible_docs_condition`**（閱覽者僅計其可見範圍）。
+- **T046 最新更新公告**（FR-003/004）：`GET /api/dm/dashboard/announcements` → 近 30 天已發布版本（`DM_DOC_VERSION` PUBLISHED AND published_date≥now-30d AND 文件在架），發布時間 DESC + doc_id 次要鍵；join 文件 / 版本摘要 / 撰寫者（版本 `CREATED_USER`）+ **badge**（join 該版本 APPROVED `DM_REVIEW.REVIEW_TYPE` in (NEW, NEW_VERSION)；無對應 review 預設 NEW）；**套 `visible_docs_condition`**。
+- 存取：掛 `get_dm_context`（任一 DM 角色，FR-001）；純讀取、不寫稽核。
 
-**前端**（`frontend/src/dm/dashboard`）：DM00 頁——上方 4 張統計卡（純資訊、不可點）+ 總計；下方最新更新公告清單（文件名 / 類型 badge / 摘要 / 發布日期 / 撰寫者 / 分類 pill，點入 US4）+「查看全部文件」→ US3；空狀態 DM-MSG-DM00-001（近 30 天無事件）。設為登入後落地路由；home icon / 系統名稱返回本頁。
+**前端**（`frontend/src/dm/dashboard` widget + 掛入中性歡迎頁）：於 **WelcomePage（`/`）** 依 `useModuleSummary().dm.has_role` 條件渲染「DM 文件概況」區塊——4 統計卡（純資訊、不可點）+ 總計；近 30 天公告清單（文件名 / badge / 摘要 / 發布日期 / 撰寫者 / 分類，點入 US4）+「查看全部文件」→ US3；空狀態 DM-MSG-DM00-001；載入失敗顯示 error 提示。**不設獨立 `/dm` 落地路由、不加側欄項**（#89 / FR-001）。
 
-**測試**：後端 int（統計只計已發布目前版、含 PENDING_OBSOLETE、排除 OBSOLETE/草稿/送審/舊版；公告近 30 天邊界、NEW/NEW_VERSION badge、DESC、空清單）+ 前端（4 卡渲染 + 總計、公告點入、查看全部導向、空狀態）。
+**測試**：後端 int（統計狀態過濾 + 可見性；公告近 30 天 / badge / DESC / 可見性 / 空；HTTP 401/403）+ 前端（widget 於有 DM 角色時渲染、無 DM 角色不渲染；4 卡 + 總計、公告點入 / 查看全部導向、空狀態、載入失敗）。
 
 ## 驗收條件
 
-- [ ] 登入後落地 DM00；本頁無 sidebar 入口、可由 home icon / 系統名稱返回（FR-001、AC1）
-- [ ] 4 張統計卡顯示各內建分類「已發布目前版本」數 + 總計；卡片純資訊不可點（FR-002、AC2/3）
-- [ ] 計數僅計已發布目前版（含 PENDING_OBSOLETE 在架；排除 OBSOLETE / 送審 / 草稿 / 已被取代舊版）（FR-002、AC3）
-- [ ] 公告列近 30 天已發布（新增首版 + 新版本兩類），每筆含 文件名 / 類型 badge / 摘要 / 發布日期 / 撰寫者 / 分類（FR-003、AC4）
+- [ ] 具任一 DM 角色者於中性歡迎頁顯示「DM 文件概況」區塊；**無 DM 角色者不顯示**（FR-001、AC1；#89 最小知悉）
+- [ ] 4 張統計卡 + 總計；卡片純資訊不可點（FR-002、AC2）
+- [ ] 計數僅計已發布目前版（含 PENDING_OBSOLETE、排除 OBSOLETE / 送審 / 草稿 / 舊版）+ **套可見性**（FR-002、AC3）
+- [ ] 公告近 30 天（新增 / 新版本），每筆含 文件名 / badge / 摘要 / 發布日期 / 撰寫者 / 分類 + **套可見性**（FR-003、AC4）
 - [ ] 點公告進 US4 詳細頁；「查看全部文件」進 US3 文件庫（FR-004、AC5）
 - [ ] 近 30 天無事件 → 空狀態「近期無新發布文件」（FR-004、AC6、DM-MSG-DM00-001）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
 ## 依賴
 
-- **#127 Foundation（已交付）**：存取閘、`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_CATEGORY`
-- **#4 US5（已交付）/ #5 US6（已交付）**：統計與公告之資料來源＝已發布文件（US6 簽核發布結果）；本 issue 以既有已發布資料 / fixture 獨立測試
-- **US4（#155，已交付）/ US3（#150，已交付）**：公告點入詳細頁 / 「查看全部」文件庫之去向
+- **#127 Foundation（已交付）**：存取閘、`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_CATEGORY`、`visible_docs_condition`
+- **DP #89 導覽重構（已落地）**：中性歡迎頁（WelcomePage）+ 依權限側欄 + `useModuleSummary`（`has_any_role`）——本 widget 掛入其上
+- **#4 US5 / #5 US6（已交付）**：資料來源＝已發布文件；**#155 US4 / #150 US3（已交付）**：公告點入 / 查看全部去向
 
 ## 注意事項
 
-- ⚠️ **類型 badge（新增/新版本）之來源**（交付前自檢建議）：`DM_CHANGE_LOG.OPERATION` 只有 PUBLISH/OBSOLETE、**不帶**新增/新版本；改由公告版本 join 其 **APPROVED `DM_REVIEW.REVIEW_TYPE`** 取得（NEW/NEW_VERSION）。種子 / 無對應 review 之發布版 badge 預設「新增」。
-- ⚠️ **統計 `PENDING_OBSOLETE` 計入**（交付前自檢釐清）：spec FR-002 明寫排除「已廢止」，`PENDING_OBSOLETE`（廢止待簽核）仍在架對外有效、**應計入**；只排除 `OBSOLETE`。開工前 `/sti-plan` 再確認。
-- ⚠️ **`spec.md` 畫面表「待辦彙總」措辭**：`spec.md` DM00 列曾述「公告區 + 待辦彙總」，但 spec_us7 無此 FR、wireframe DM00 亦無此區（待辦 / 動態屬 DM07 個人專區 US9）。**建議 SA 移除該詞或釐清**；本 issue 不含待辦彙總。
-- 撰寫者取該**版本** `CREATED_USER`（對齊「作者跟版本」慣例，非文件建立者）。
+- ⚠️ **設計取向（#89）**：DM 儀表板為**中性歡迎頁之依權限 widget**，非獨立落地頁 / 無側欄入口 / 無自動導向。spec_us7 原「自動導向 DM00」措辭已同步更新。
+- ⚠️ **可見性（Sec）**：統計與公告皆須套 `visible_docs_condition`，閱覽者不得見 / 計其不可見之受限可見對象文件（比照 library / detail 之 US3 FR-008）；privileged 不過濾。
+- **badge 來源**：`DM_CHANGE_LOG.OPERATION` 不帶新增 / 新版本；改由版本之 APPROVED `DM_REVIEW.REVIEW_TYPE` 取得（限 NEW / NEW_VERSION，避免 US8 OBSOLETE review 重複列）。
+- 統計 `PENDING_OBSOLETE` 計入（在架）；公告限文件在架（US8 廢止上線後不誤列）。撰寫者取版本 `CREATED_USER`。
 - 純讀取、無 migration、無稽核寫入。
 
 ## 相關文件
 
-- [spec_us7.md](spec_us7.md)（FR-001~004）、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T045/T046）、[spec_us4.md](spec_us4.md)（公告點入）、[spec_us3.md](spec_us3.md)（查看全部）
-- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-overview`）
+- [spec_us7.md](spec_us7.md)、DP [spec_us1.md](../dp/spec_us1.md)（#89）、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T045/T046）、[spec_us4.md](spec_us4.md) / [spec_us3.md](spec_us3.md)
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-overview`，內容示意）
 
 **Labels**：`P2-延伸`, `DM-文件管理`, `US7`
 
@@ -670,4 +670,5 @@ US13 閱讀統計與 KPI + 排程 SCHDM001（#12）/ 整合測試 + 安全 + 收
 | 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM02）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM02 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #3（US4 文件詳細頁瀏覽）開立為 GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)（labels `P1-核心` + `DM-文件管理` + `US4`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us4`）結論 ✅ 齊備、無必補 |
 | 2026-08-17 | 撰寫 Issue #4（US5 文件新增與編輯 / DM03）完整 body：對應 spec_us5 FR-001~009 + UCDM06；涵蓋 T035/T035a/T036/T037/T038/T039。**切分要點**：DM 第一個**寫入型** issue，主體為組裝 #127 Foundation 既有工具（DOC_ID 產生器 T017、file_store T016 上傳驗證、ReviewService T019 送簽、notify T018 `DOC_SUBMIT`、DB 約束 手冊唯一/版本號唯一）；範圍到「送審中」為止——核准/發布屬 US6、草稿匣列表/撤回屬 US9。前置 #0（必要）+ #3/#5（入口/去向，以獨立測試不阻塞）。新增寫入專屬 error code 待開工前 `/sti-plan` 對齊登記 `docs/ref/error-codes.md`。Labels `P1-核心` + `DM-文件管理` + `US5`。總覽表 Issue #4 狀態改「📝 body 已撰寫（待開立）」 |
+| 2026-08-21 | **US7 設計對齊導覽重構 #89**：DP spec_us1 FR-DP-US1-07（2026-07-28 D1/D2）定登入後主頁為中性歡迎頁、模組儀表板改為依權限疊加之 widget（不設獨立落地頁）；原 spec_us7「登入自動導向 DM00 獨立頁 / 無側欄入口 / home 返回」為 DM 單模組舊觀點、與 #89 衝突。據此更新 spec_us7（改為中性歡迎頁之 DM 文件概況 widget、加可見性要求）、spec.md（US7 描述 + DM00 畫面列移除「待辦彙總」）、issues.md Issue #6 body（前端改掛 WelcomePage widget、去獨立 `/dm` 落地）。後端 stats/announcements 端點不變。前端據此重塑（原 PR #195 之獨立頁改為 widget）|
 | 2026-08-21 | **回填 issues.md 至現況**（自 2026-08-17 後未維護、body 停在 Issue #4）：**(1)** 總覽表狀態 / GitHub # 更正——US5(#4)→已交付 [#169]（PR #172；spec 對齊 #175/#176）、US6(#5)→已交付 [#178]（PR #180）、US12(#11)→已交付 [#183]（PR #189；契約 #187；T059 範圍外）、US7(#6)→「body 已撰寫（待開立）」。**(2)** 補撰三張完整 body：Issue #5（US6 簽核處理 / DM04，含交付後差異：催辦排程 `SCHDM001`→`SCHDM002`、退回被退版本 `REJECTED`→`DRAFT` + 新增 `DM_DOC_012`）、Issue #6（US7 系統儀表板 / DM00，含交付前自檢建議：badge 來源 `DM_REVIEW.REVIEW_TYPE`、統計計入 `PENDING_OBSOLETE`、`spec.md` 待辦彙總措辭待 SA 修）、Issue #11（US12 跨模組引用，含 in-process Service 介面、TRAINING 分類白名單、T059 裁示 A 範圍外）。**(3)** 其餘未開工者維持待補：#7 US8 / #8 US9 / #9 US10 / #10 US11 / #12 US13 / #13 收尾。補強 follow-up #160（storage-root 圍籬，非 US）不列入總覽。US7 GitHub issue 尚未開立（依指示先補 issues.md、暫不開 issue）|

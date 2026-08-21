@@ -4,14 +4,17 @@ import { useQuery } from "@tanstack/react-query"
 
 import { authApi } from "../auth/authService"
 import { useAuth } from "../auth/useAuth"
+import { DmOverviewWidget } from "../dm/dashboard/DmOverviewWidget"
 import { PROFILE_ME_QUERY_KEY, profileApi } from "../dp/user/profileService"
+import { useModuleSummary } from "../layouts/useModuleSummary"
 
 const TAGLINE = "教育訓練與文件管理系統"
 
 /**
  * 中性歡迎頁（#89 P1）：登入後主頁，不綁任何模組權限、永遠存在。
  * 顯示問候（帶姓名）+ 系統定位 + 版本號。姓名 / 版本載入失敗時靜默保底（問候退回「歡迎」、
- * 版本行隱藏），不阻斷頁面。P2+ 再於此依權限疊加管理者概況 / ET / DM 儀表板。
+ * 版本行隱藏），不阻斷頁面。**具任一 DM 角色者於此依權限疊加「DM 文件概況」widget（US7 / #89）**，
+ * 無 DM 角色者不顯示（最小知悉）。
  */
 export function WelcomePage() {
   const { isAuthenticated, mustChangePwd } = useAuth()
@@ -20,6 +23,7 @@ export function WelcomePage() {
   const enabled = isAuthenticated && !mustChangePwd
   const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe, enabled })
   const { data: version } = useQuery({ queryKey: ["app", "version"], queryFn: authApi.version, enabled })
+  const { data: modules } = useModuleSummary()
 
   const greeting = me?.user_name ? `歡迎，${me.user_name}` : "歡迎"
 
@@ -36,6 +40,8 @@ export function WelcomePage() {
           版本 {version}
         </Typography>
       )}
+      {/* US7 / #89：具任一 DM 角色者才疊加「DM 文件概況」；無 DM 角色者不顯示（最小知悉）*/}
+      {enabled && modules?.dm.has_role && <DmOverviewWidget />}
     </Box>
   )
 }

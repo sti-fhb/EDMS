@@ -2,6 +2,7 @@ import { ThemeProvider } from "@mui/material/styles"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import { http, HttpResponse } from "msw"
+import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 
 import { WelcomePage } from "./WelcomePage"
@@ -29,7 +30,9 @@ function renderWelcome({ isAuthenticated = true }: { isAuthenticated?: boolean }
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={muiTheme}>
         <AuthContext.Provider value={makeAuth(isAuthenticated)}>
-          <WelcomePage />
+          <MemoryRouter>
+            <WelcomePage />
+          </MemoryRouter>
         </AuthContext.Provider>
       </ThemeProvider>
     </QueryClientProvider>,
@@ -66,5 +69,23 @@ describe("WelcomePage", () => {
     renderWelcome({ isAuthenticated: false })
     expect(await screen.findByText("歡迎")).toBeInTheDocument()
     expect(meRequested).toBe(false)
+  })
+
+  it("具 DM 角色 → 疊加「DM 文件概況」widget（US7 / #89）", async () => {
+    // 預設 module-summary dm.has_role=true
+    renderWelcome()
+    expect(await screen.findByText("DM 文件概況")).toBeInTheDocument()
+    expect(await screen.findByText("各類型文件總數")).toBeInTheDocument()
+  })
+
+  it("無 DM 角色 → 不顯示 DM 文件概況 widget（最小知悉）", async () => {
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({ et: { has_role: true }, dm: { has_role: false } }),
+      ),
+    )
+    renderWelcome()
+    expect(await screen.findByText("歡迎，測試員")).toBeInTheDocument()
+    expect(screen.queryByText("DM 文件概況")).not.toBeInTheDocument()
   })
 })
