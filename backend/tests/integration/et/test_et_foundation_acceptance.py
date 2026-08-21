@@ -1,7 +1,9 @@
 """ET Foundation 驗收測試（AC 2 / 3 / 4 / 8；#185）。
 
-涵蓋「反向驗證」類斷言——確認**不該存在的東西確實不存在**（未建 lookup 表、ET 無
-SMTP 連線碼）。這類缺口正向測試抓不到，故獨立成檔。
+涵蓋兩類正向測試不易觸及的斷言：
+
+1. **反向驗證**——確認不該存在的東西確實不存在（未建 lookup 表、ET 無 SMTP 連線碼）。
+2. **跨模組消費驗證**——ET 的通知範本經平台 `NotifyService` 不會靜默失敗（AC 8）。
 """
 
 from pathlib import Path
@@ -20,6 +22,7 @@ from app.et.bootstrap import register_et_module
 from app.et.constants import ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER
 from app.et.deps import load_et_roles
 from app.et.roles.models import EtUserRole
+from app.services import NotifyService
 
 pytestmark = pytest.mark.integration
 
@@ -293,3 +296,81 @@ class TestAc8NoSmtpInEt:
                 if needle in text_content:
                     offenders.append(f"{py.name}: {needle}")
         assert offenders == [], f"ET 不得自建 SMTP 連線，發現：{offenders}"
+
+
+class TestAc8TemplatesConsumableViaNotifyService:
+    """AC 8 正向驗證：ET 的通知範本經平台 `NotifyService` 確實渲染成功並排入 outbox。
+
+    **與「seed 已存在」之驗收不同**（後者依 sti-testing 一律不寫）：此處不斷言種了幾筆、
+    也不驗欄位型別，而是驗**行為**——範本被平台消費時不會靜默失敗。
+
+    **擋的是什麼**：`send_email` 於渲染失敗時**不拋錯**，而是整批寫 `FAILED` 後回
+    `SendResult(queued_count=0, skipped_reason=None)`。注意 `skipped_reason` 與成功時
+    同為 `None`，**只有 `queued_count` 分辨得出來**。因此若日後有人改了 `BODY` 的佔位
+    卻沒同步 `VARIABLES` 欄，照 `VARIABLES` 傳參的 ET 功能碼會讓整批信靜默進 `FAILED`：
+    收件人收不到、呼叫方也拿不到任何例外。本測試把該漂移變成 CI 失敗。
+
+    `queued_count == 1` 這一個斷言即同時涵蓋範本啟用中、`CHANNEL` 允許寄 Email
+    （否則回 `TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL`）與渲染成功三件事，故不另立測試。
+    """
+
+    async def _et_templates(self, db) -> list[tuple[str, str]]:
+        """取 ET 範本之 (TEMPLATE_CODE, VARIABLES)；VARIABLES 為呼叫端應傳的參數名清單。"""
+        rows = await db.execute(
+            text(
+                'SELECT "TEMPLATE_CODE", "VARIABLES" FROM "DP_NOTIFY_TEMPLATE" '
+                'WHERE "MODULE" = \'ET\' AND "DELETED" = 0 ORDER BY "TEMPLATE_CODE"'
+            )
+        )
+        return [(r[0], r[1] or "") for r in rows.all()]
+
+    @staticmethod
+    def _params_per_declaration(variables: str) -> dict[str, str]:
+        """模擬未來 ET 功能碼之行為：照 `VARIABLES` 欄宣告的變數名傳參。"""
+        return {v.strip(): "X" for v in variables.split(",") if v.strip()}
+
+    async def test_每個範本皆可以其宣告之參數成功排入_outbox(self, db) -> None:
+        templates = await self._et_templates(db)
+        assert templates, "ET 應有通知範本可驗（避免本測試空跑而假性通過）"
+
+        service = NotifyService()
+        failures: list[str] = []
+        for code, variables in templates:
+            result = await service.send_email(
+                db,
+                recipients=[f"ac8-{code.lower()}@example.invalid"],
+                template_code=code,
+                module="ET",
+                params=self._params_per_declaration(variables),
+                caller_module="ET",
+            )
+            if result.queued_count != 1:
+                failures.append(f"{code}（queued_count={result.queued_count}, skipped={result.skipped_reason}）")
+        assert failures == [], f"下列範本無法以其 VARIABLES 宣告之參數渲染，信會靜默進 FAILED：{failures}"
+
+    async def test_outbox_落_pending_且無殘留佔位(self, db) -> None:
+        """AC 8 字面要求「寫入 `DP_EMAIL_LOG` outbox」——驗狀態、來源模組與渲染結果。"""
+        templates = await self._et_templates(db)
+        code, variables = templates[0]
+        recipient = "ac8-outbox@example.invalid"
+        await NotifyService().send_email(
+            db,
+            recipients=[recipient],
+            template_code=code,
+            module="ET",
+            params=self._params_per_declaration(variables),
+            caller_module="ET",
+        )
+        status, error_msg, caller_module, subject = (
+            await db.execute(
+                text(
+                    'SELECT "STATUS", "ERROR_MSG", "CALLER_MODULE", "SUBJECT" '
+                    'FROM "DP_EMAIL_LOG" WHERE "RECIPIENT" = :r'
+                ),
+                {"r": recipient},
+            )
+        ).one()
+        assert status == "PENDING", f"應排入 PENDING，實為 {status}（ERROR_MSG={error_msg}）"
+        assert error_msg is None
+        assert caller_module == "ET", "CALLER_MODULE 須記為 ET，稽核才追得到是哪個模組發的"
+        assert "{" not in subject, "SUBJECT 不應殘留未代入之佔位"
