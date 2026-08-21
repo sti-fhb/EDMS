@@ -67,10 +67,13 @@ export const MODULE_ROLES: Record<string, { code: string; label: string }[]> = {
     { code: "DM_REVIEWER", label: "審核者" },
     { code: "DM_VIEWER", label: "閱覽者" },
   ],
+  // ⚠️ ET 角色碼**無 `ET_` 前綴**（與 DM 不同）——權威定義為 et/data-model.md
+  // Lookup `ET_USER_ROLE_TYPE` 與 `app/et/constants.py` 之 ALL_ROLES。
+  // #140 時 ET 尚未實作，此處曾誤植 `ET_ADMIN` 等前綴值，#185 依權威定義更正。
   ET: [
-    { code: "ET_ADMIN", label: "管理者" },
-    { code: "ET_TEACHER", label: "教師" },
-    { code: "ET_STUDENT", label: "學員" },
+    { code: "ADMIN", label: "管理者" },
+    { code: "TEACHER", label: "教師" },
+    { code: "STUDENT", label: "學員" },
   ],
 }
 

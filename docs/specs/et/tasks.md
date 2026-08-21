@@ -9,7 +9,7 @@
 
 ## Phase 1: 專案設定
 
-- [ ] T001 建立 ET 模組專案結構（2026-08-19 對齊專案實際結構，比照 DM）：後端 `backend/app/et/{功能}/`（`router.py` / `service.py` / `repository.py` / `schemas.py` / `models.py`）+ `deps.py`（模組存取閘）+ `bootstrap.py`（啟動期 registry 註冊）+ `provider.py`（DP 後台轉接層）；Migration 置於 `backend/alembic/versions/`；前端 `frontend/src/et/{功能}/`（TypeScript，依功能組織）。~~原：controllers / repositories / templates 目錄~~ **廢除**——非本專案結構；`templates/` 尤其不需要（通知範本存平台 `DP_NOTIFY_TEMPLATE`，ET 不自持）
+- [ ] T001 建立 ET 模組專案結構（2026-08-19 對齊專案實際結構，比照 DM）：後端 `backend/app/et/{功能}/`（`router.py` / `service.py` / `repository.py` / `schemas.py` / `models.py`）+ `deps.py`（模組存取閘）+ `bootstrap.py`（啟動期 registry 註冊）+ `provider.py`（DP 後台轉接層）；Migration 置於 `backend/alembic/versions/`。**前端不在本 issue 範圍**（2026-08-20 #185 SA Q2 裁示選 B：ET 前端殼延到 #89 導覽重構定案後、或第一個有實際 UI 的 ET issue；現在照現行 portal / router 結構做極可能重工）。~~原：controllers / repositories / templates 目錄~~ **廢除**——非本專案結構；`templates/` 尤其不需要（通知範本存平台 `DP_NOTIFY_TEMPLATE`，ET 不自持）
 - [ ] T002 [P] **(移除／改由平台 DP 負責)** 帳號主檔 migration：ET **不建立**帳號表 migration；`DP_USER`（帳號 Email / 密碼雜湊 / 姓名 / 狀態 / Email 變更 PENDING 等欄位）由**平台模組 DP** 建立與維護，ET 各表一律以 USER_ID（VARCHAR(20)）FK 引用；原「協調 DM 模組共識定義」改由平台 DP 統一定義
 - [ ] T003 [P] 建立資料庫 Migration：**ET_USER_ROLE** 使用者角色，含 (USER_ID, ROLE) 邏輯唯一索引
 - [ ] T004 [P] 建立資料庫 Migration：**ET_TAG** 受訓單位標籤（TAG_NAME 唯一、IS_ACTIVE / IS_ALL / IS_BUILTIN）（2026-07-02 改寫，原 ET_USER_MODULE 廢除）
