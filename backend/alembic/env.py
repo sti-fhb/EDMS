@@ -24,6 +24,41 @@ from app.dp.schedules.models import DpSchedule, DpScheduleLog  # noqa: F401
 from app.dp.user.models import DpPwdHistory, DpPwdReset  # noqa: F401
 from app.dp.users.models import DpUser  # noqa: F401
 
+# ET 模組（#185 Foundation，28 表）
+from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag  # noqa: F401
+from app.et.course.models import (  # noqa: F401
+    EtChapter,
+    EtCourse,
+    EtItem,
+    EtMaterial,
+    EtMaterialDoc,
+    EtMaterialVideo,
+)
+from app.et.invitation.models import EtInvitation, EtOwnerTransfer  # noqa: F401
+from app.et.progress.models import (  # noqa: F401
+    EtEnrollment,
+    EtProgress,
+    EtProgressInterval,
+    EtProgressVideo,
+)
+from app.et.quiz.models import (  # noqa: F401
+    EtOption,
+    EtQuestion,
+    EtQuiz,
+    EtQuizAttemptD,
+    EtQuizAttemptM,
+    EtQuizRetryReset,
+)
+from app.et.roles.models import EtUserRole  # noqa: F401
+from app.et.stats.models import EtWeeklyStat  # noqa: F401
+from app.et.survey.models import (  # noqa: F401
+    EtSurvey,
+    EtSurveyOption,
+    EtSurveyQuestion,
+    EtSurveyResponseD,
+    EtSurveyResponseM,
+)
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

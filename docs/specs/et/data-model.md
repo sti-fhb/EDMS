@@ -456,7 +456,7 @@
 | 11 | 快照 — 題目順序 | QUESTION_ORDER | TEXT | Y | JSON 字串：題目 ID 順序陣列，如 `[12, 5, 8, ...]` |
 | 12 | 快照 — 選項順序 | OPTION_ORDER | TEXT | Y | JSON 字串：每題之選項 ID 順序對應陣列 |
 | 13 | 快照 — 及格分數 | PASS_SCORE_SNAPSHOT | INT | Y | 開始作答時凍結之及格分數 |
-| 14 | 快照 — 作答時間限制 | TIME_LIMIT_SNAPSHOT | INT | Y | 開始作答時凍結之時間限制 |
+| 14 | 快照 — 作答時間限制 | TIME_LIMIT_SNAPSHOT | INT | **N** | 開始作答時凍結之時間限制；**可為 NULL＝不限時**（對應 `ET_QUIZ.TIME_LIMIT_MIN` 之 NULL 語意——不限時的測驗無值可凍結，故本欄不可為必填）（2026-08-20 #185 實作時更正，原標必填）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:

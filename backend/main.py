@@ -33,6 +33,7 @@ from app.dp.schedules.router import router as dp_schedule_router
 from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
+from app.et.bootstrap import register_et_module
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,11 @@ app.include_router(dm_review_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()
+
+# ET 模組啟動接線（#185）：註冊四個聚合閘 checker / provider（§1~§4）。
+# ⚠️ 本呼叫是 DP #113（真授權閘掛 router）之解鎖條件——閘為 fail-closed，
+# 無模組註冊時會使整個 DP 後台 403。ET 尚無業務 router，故此處僅接線、不 include_router。
+register_et_module()
 
 
 @app.middleware("http")

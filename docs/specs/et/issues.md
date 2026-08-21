@@ -49,7 +49,7 @@
 - ~~SMTP 伺服器資訊就緒~~ **不需要**：ET 不自建 SMTP 連線與寄件佇列，寄信一律經平台 `NotifyService`（2026-07-08 集中化）
 
 **涵蓋 Tasks**：
-- T001 建立 ET 模組專案結構（`backend/app/et/{功能}/` router / service / repository / schemas / models + deps / bootstrap / provider；migration 於 `backend/alembic/versions/`；前端 `frontend/src/et/{功能}/`）（2026-08-19 對齊專案實際結構）
+- T001 建立 ET 模組專案結構（`backend/app/et/{功能}/` router / service / repository / schemas / models + deps / bootstrap / provider；migration 於 `backend/alembic/versions/`）（2026-08-19 對齊專案實際結構）。**前端不在本 issue 範圍**（2026-08-20 SA Q2 裁示，延至 #89 定案後）
 - T002 ~ T020、T165 ~ T168 建立 ET 22 張表 Migration（帳號主檔 `DP_USER` 由平台模組 DP 建立、ET 引用不自建；T004 / T005 為 ET_TAG / ET_USER_TAG，2026-07-02 改寫）
 - T125 ~ T129 建立 2026-07-02 新增表 Migration（ET_COURSE_TAG、ET_SURVEY 五表、ET_WEEKLY_STAT）；通知範本改 seed 至平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，7 類可維護範本〔2026-07-17 增列 APPROVAL_PASSED〕；表由平台 DP 建，ET 不自建，2026-07-08 集中化）
   > 線下核可表 ET_APPROVAL 與 ET_COURSE.REQUIRE_APPROVAL 欄位之 Migration（T156）於 Issue #18 建立（2026-07-17）
@@ -72,7 +72,7 @@
 3. IT 透過 Seed Script 寫入 `DP_USER` + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
 4. ET 模組存取閘可驗證平台 DP 之 JWT（重用 `get_jwt_payload`）並注入 USER_ID 與 ET 角色清單；未具任何 ET 角色者回 403
 5. 樂觀鎖工具於版本不符時回傳明確衝突訊息
-6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與 metadata ⚠️ **本條被 #183 阻塞**（DM 端 T057 / T058 尚未實作，且 DM Service 尚未自 `app/services/__init__.py` 匯出）——交付時以 stub 開發並標外部阻塞，待 #183 完成後回歸驗證
+6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與 metadata，並經取檔 Service 取得教材檔案 ✅ **#183 已交付**（PR #189）：`DmDocumentService` 自 `app/services` 匯出，ET 已接上真實 Service、stub 移除
 7. 經平台 `NotifyService.send_email` 可寄送一封測試信（傳 `template_code` + 變數，寫入 `DP_EMAIL_LOG` outbox 由平台 worker 寄出）；**ET 不直接連 SMTP**
 8. Token 產生器產出之 token 至少 32 bytes 且 cryptographically secure
 

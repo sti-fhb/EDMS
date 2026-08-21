@@ -24,14 +24,14 @@
 | 1 | 系統設定（轉接層模組端 + 業務規則 + 種子驗證）| US1 / UCDM11 | P1-核心 | T024 ~ T027b | #0；DP dp-params / dp-roles / dp-templates | [#133](https://github.com/sti-fhb/EDMS/issues/133) | 🚀 已開立 [#133](https://github.com/sti-fhb/EDMS/issues/133) |
 | 2 | 文件庫與檢索 | US3 / UCDM03 | P1-核心 | T028 / T028a / T029 / T030 | #0；#4（資料來源）| [#150](https://github.com/sti-fhb/EDMS/issues/150) | 🚀 已開立 [#150](https://github.com/sti-fhb/EDMS/issues/150) |
 | 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| [#155](https://github.com/sti-fhb/EDMS/issues/155) | 🚀 已開立 [#155](https://github.com/sti-fhb/EDMS/issues/155) |
-| 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039（含 T035a）| #0；#3/#5（入口/去向）| — | 📝 body 已撰寫（待開立）|
-| 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | — | 待補 |
-| 6 | 系統儀表板 | US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5 | — | 待補 |
+| 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039（含 T035a）| #0；#3/#5（入口/去向）| [#169](https://github.com/sti-fhb/EDMS/issues/169) | ✅ 已交付（PR #172；spec 對齊 #175/#176）|
+| 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | [#178](https://github.com/sti-fhb/EDMS/issues/178) | ✅ 已交付（PR #180；catalog 略）|
+| 6 | 系統儀表板 | US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5 | — | 📝 body 已撰寫（待開立）|
 | 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5 | — | 待補 |
 | 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5 | — | 待補 |
 | 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | — | 待補 |
 | 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | — | 待補 |
-| 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3 | T057 ~ T059 | #5；ET 引用端 | — | 待補 |
+| 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3-輔助 | T057 ~ T059 | #5；ET 引用端 | [#183](https://github.com/sti-fhb/EDMS/issues/183) | ✅ 已交付（PR #189；契約 #187；T059 廢止通知範圍外＝裁示 A + 待 US8）|
 | 12 | 閱讀統計與 KPI + 排程 SCHDM001 | US13 / UCDM13 | P2-延伸 | T059a ~ T059c | #3；DP 排程引擎 | — | 待補 |
 | 13 | 整合測試 + 安全 + 收尾 | — | 收尾 | T060 ~ T067 | 全部 | — | 待補 |
 | — | ~~登入 / 註冊 / 忘記密碼~~ | US2 / UCDM01 | — | —（T014）| — | — | **不開獨立 issue**：登入 / 註冊 / 忘記密碼由平台 DP 提供（UCDP001–003）；DM 端僅存取閘（無 DM 角色者拒絕進入），併入 #0（T014）|
@@ -469,9 +469,188 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #5 ~ #13：待補（增量模式）
+## Issue #5：[P1-核心] DM — 簽核處理（US6 / UCDM07 / DM04）（GitHub [#178](https://github.com/sti-fhb/EDMS/issues/178)，✅ 已交付 PR #180）
 
-依總覽表順序，於前一張 Issue 實作驗證 OK 後補入完整 body（格式同 Issue #0 / #1 / #2 / #3 / #4，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us6.md](spec_us6.md)（FR-001~008，UCDM07，訊息 DM-MSG-DM04-001~006）；[data-model.md](data-model.md)（`DM_REVIEW` / `DM_DOC_VERSION` 狀態機 / `DM_DOCUMENT` / `DM_CHANGE_LOG`）；research §4（單一送審週期）
+**對應畫面**：**DM04 簽核中心**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-review`）——待簽核 / 已完成雙頁籤、清單 + 明細、核准並發布 / 退回
+**階段**：P1-核心
+**涵蓋 Tasks**：T040~T044
+
+## 任務說明
+
+實作 **DM04 簽核處理**：審核者於簽核中心處理**指派給自己**之送審，核准並發布（NEW 首版 / NEW_VERSION 新版本）或退回。核准發布原子完成版本切換（新版 PUBLISHED、舊版 SUPERSEDED、`CURRENT_VERSION_ID` 更新）、寫公開變更歷程、以 `DOC_PUBLISH` 通知撰寫者 + 可見對象相符閱覽者；退回必填原因、被退版本回草稿並 `DOC_REJECT` 通知撰寫者。停留逾門檻每日催辦；已完成頁籤回顧。組裝重用 #127 Foundation（`ReviewService.approve/reject`、`DmChangeLog`、`DOC_PUBLISH`/`DOC_REJECT`/`AUTO_REMIND` 範本、排程引擎、visibility）。
+
+> ℹ️ **範圍切分（precheck）**：交付 `NEW`/`NEW_VERSION` 之核准/退回/發布 + 催辦 + 已完成；**`OBSOLETE` 核准（待 US8）、AC7 撤回消失（待 US9）不在範圍**（`DM_REVIEW_006` 擋 OBSOLETE、清單亦排除）。
+
+## 範圍
+
+**後端** `app/dm/review`（router → service → repository）：
+- `GET /api/dm/reviews/pending`：僅 `assigned_reviewer=登入者` 之 PENDING（含停留天數、review_type、doc/version meta；排除 OBSOLETE）；不列「指定審核者」欄 — FR-001
+- `GET /api/dm/reviews/{id}`：明細（變更摘要 + 檔案 meta；新版本附目前發布版供比對）；非本人 `DM_REVIEW_005` — FR-002
+- `GET /api/dm/reviews/{id}/versions/{vid}/file`：**簽核明細取檔端點**（US4 端點僅開放目前發布版，審核者取不到待審版故另設；僅本人、版本白名單＝待審版＋目前發布版）
+- `POST /api/dm/reviews/{id}/approve`：核准並發布——`ReviewService.approve` → 版本切換 + `CURRENT_VERSION_ID` + `DM_CHANGE_LOG(PUBLISH)` + 收件名單 + `DOC_PUBLISH`（單一交易原子、`FOR UPDATE` 序列化防重複發布）— FR-003/005/008
+- `POST /api/dm/reviews/{id}/reject`：退回——必填原因（`DM_REVIEW_004`）→ 被退版本回 `DRAFT`（供續編再送 / 刪除，FR-004）；NEW 首版文件亦回 DRAFT、NEW_VERSION 文件維持 PUBLISHED（現行發布版不受影響）→ `DOC_REJECT` — FR-004/005
+- `GET /api/dm/reviews/completed`：已完成（APPROVED/REJECTED、文件名 keyword、後端分頁、不可再操作）— FR-007
+- 催辦 job `reminder.run`：每日掃停留 ≥ `DM_REMIND_THRESHOLD` → `AUTO_REMIND` Email；註冊於 `DP_SCHEDULE` **`SCHDM002`**（每日 08:00，migration `a1c8e6f4b920`）— FR-006
+
+**前端** `frontend/src/dm/review`：DM04 雙頁籤；待簽核主從明細（點列 → 變更摘要 + 版本對照表〔版本/狀態/檔案/動作〕+ X 收合）+ 核准二次確認 + 退回 Dialog（原因必填、Zod）+ 停留天數標紅；已完成唯讀 + 文件名搜尋 + 分頁。
+
+**測試**：後端 int（清單只列自己 PENDING / 核准原子切換 / 退回回 DRAFT + 通知 / 已完成搜尋分頁 / 收件名單全體+指定 / 催辦掃描 / 授權 / 取檔白名單 / HTTP）+ 前端（雙頁籤 / 核准二次確認 / 退回必填 / 停留標紅 / 明細下載）。
+
+## 驗收條件
+
+- [x] 待簽核僅列 `assigned_reviewer=登入者` 之 PENDING、不列指定審核者欄（FR-001）
+- [x] 明細可下載送審檔（新版本新舊並列）、不預覽（FR-002）
+- [x] 核准並發布（NEW/NEW_VERSION）二次確認後原子完成：新版 PUBLISHED + 舊版 SUPERSEDED + `CURRENT_VERSION_ID` + `DM_CHANGE_LOG(PUBLISH)` + `DOC_PUBLISH`（FR-003/005/008、DM-MSG-DM04-001）
+- [x] 退回必填原因 → 被退版本回 DRAFT、通知撰寫者（FR-004/005、DM-MSG-DM04-004/005）
+- [x] 已完成頁籤搜尋分頁、不可再操作（FR-007）
+- [x] 催辦：停留 ≥ `DM_REMIND_THRESHOLD` 每日 `AUTO_REMIND` + 清單標紅（FR-006）
+- [x] 僅指定審核者本人可核准/退回；核准者自 Session（FR-005、`DM_REVIEW_005`）
+- [x] CI 全綠
+- [ ] **（範圍外）** `OBSOLETE` 核准（待 US8）、AC7 撤回消失（待 US9）
+
+## 依賴
+
+- **#127 Foundation / #169 US5（已交付）**：`ReviewService`、`DmChangeLog`、通知範本、排程引擎、visibility、`DM_REMIND_THRESHOLD`；送審來源（NEW/NEW_VERSION 之 PENDING review）
+- **US8（未交付）**：`OBSOLETE` 送審來源；**US9（未交付）**：AC7 撤回消失、退回續編入口
+
+## 注意事項 / 實作與 spec 差異（交付後回填）
+
+- ⚠️ **催辦排程 job id：`SCHDM002`（非 spec_us6 FR-006 原寫的 `SCHDM001`）**——`SCHDM001` 種子實為「DM KPI 週報 + 未讀提醒（週一）」，簽核催辦（每日）另用新排程 `SCHDM002`。**建議 SA 同步 spec_us6 FR-006 措辭**。
+- ⚠️ **退回被退版本狀態＝`DRAFT`（非原述 `REJECTED`）**：符 FR-004「文件回草稿」供撰寫者續編/刪除；邊界（送審後又開草稿撞每人一份草稿唯一索引）保留 REJECTED；並連帶新增 `DM_DOC_012`（編輯器擋審核中再開草稿）。**建議 SA 同步 FR-004 措辭**。
+- 催辦免站內訊息表（SA 裁示 Q1）：清單標紅（即時算）+ AUTO_REMIND Email；審核者站內「催辦中」呈現屬 US9。
+- Error codes：新增 `DM_REVIEW_004/005/006`；取檔沿用 `DM_DOC_001/002`。
+
+## 相關文件
+
+- [spec_us6.md](spec_us6.md)、[data-model.md](data-model.md)、[wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-review`）、[spec_us9.md](spec_us9.md)（撤回 / 續編）、[spec_us8.md](spec_us8.md)（廢止）
+
+**Labels**：`P1-核心`, `DM-文件管理`, `US6`
+
+---
+
+## Issue #6：[P2-延伸] DM — 系統儀表板（US7 / UCDM02 / DM00）
+
+**對應規格**：[spec_us7.md](spec_us7.md)（FR-001~004，UCDM02，訊息 DM-MSG-DM00-001）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_CATEGORY` / `DM_REVIEW`）
+**對應畫面**：**DM00 系統儀表板**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-overview`）——登入後落地頁；各類型文件總數（4 卡）+ 最新更新公告（近 30 天）
+**階段**：P2-延伸
+**涵蓋 Tasks**：T045（統計卡區）、T046（最新更新公告區）
+
+## 任務說明
+
+實作 **DM00 系統儀表板**（登入後落地頁）：上方顯示 4 內建分類（SOP / MANUAL 系統操作手冊 / TRAINING 訓練教材 / OTHER 其他）之**已發布目前版本**數量與總計（純資訊、不可點）；下方列出**近 30 天**已發布文件（含新增首版 / 新版本兩類事件），每筆含文件名 + 類型 badge + 摘要 + 發布日期 + 撰寫者 + 分類，點入 US4 詳細頁、「查看全部文件」進 US3 文件庫；近 30 天無事件顯示空狀態。本頁**純讀取**、無寫入、無 migration。
+
+> ℹ️ **讀取型全端 issue（簡單）**：後端 2 支查詢（統計 + 公告）+ 前端 1 頁。重用既有 `DM_DOCUMENT` / `DM_DOC_VERSION` 查詢慣例；DM00 無 sidebar 入口，由 home icon / 系統名稱返回（導向 / 落地由平台 DP 登入後接 DM00）。
+
+## 範圍
+
+**後端**（`app/dm/dashboard`，router → service → repository，唯讀）：
+- **T045 統計卡**（FR-002）：`GET /api/dm/dashboard/stats` → 4 內建分類之「已發布目前版本」數 + 總計。計數口徑＝`DM_DOCUMENT` where `STATUS='PUBLISHED'`（含 `PENDING_OBSOLETE`＝仍在架）group by `CATEGORY_CODE`；**排除 `OBSOLETE` / 送審中 / 草稿 / 已被取代舊版**。回各分類 `category_code` / `category_name` / count + total。
+- **T046 最新更新公告**（FR-003/004）：`GET /api/dm/dashboard/announcements` → 近 30 天已發布版本。來源＝`DM_DOC_VERSION` where `STATUS='PUBLISHED'` AND `PUBLISHED_DATE >= now-30d`，依 `PUBLISHED_DATE` DESC（＋ doc_id 次要鍵）；每筆 join 文件（doc_name / category）+ 該版本 `CHANGE_SUMMARY` / `PUBLISHED_DATE` / 撰寫者（版本 `CREATED_USER`）+ **類型 badge**（join 該版本之 APPROVED `DM_REVIEW.REVIEW_TYPE`：NEW→新增 / NEW_VERSION→新版本；無對應 review 之種子版預設「新增」）。
+- 存取：掛 `get_dm_context`（任一 DM 角色可瀏覽，FR-001）；純讀取、不寫稽核。
+
+**前端**（`frontend/src/dm/dashboard`）：DM00 頁——上方 4 張統計卡（純資訊、不可點）+ 總計；下方最新更新公告清單（文件名 / 類型 badge / 摘要 / 發布日期 / 撰寫者 / 分類 pill，點入 US4）+「查看全部文件」→ US3；空狀態 DM-MSG-DM00-001（近 30 天無事件）。設為登入後落地路由；home icon / 系統名稱返回本頁。
+
+**測試**：後端 int（統計只計已發布目前版、含 PENDING_OBSOLETE、排除 OBSOLETE/草稿/送審/舊版；公告近 30 天邊界、NEW/NEW_VERSION badge、DESC、空清單）+ 前端（4 卡渲染 + 總計、公告點入、查看全部導向、空狀態）。
+
+## 驗收條件
+
+- [ ] 登入後落地 DM00；本頁無 sidebar 入口、可由 home icon / 系統名稱返回（FR-001、AC1）
+- [ ] 4 張統計卡顯示各內建分類「已發布目前版本」數 + 總計；卡片純資訊不可點（FR-002、AC2/3）
+- [ ] 計數僅計已發布目前版（含 PENDING_OBSOLETE 在架；排除 OBSOLETE / 送審 / 草稿 / 已被取代舊版）（FR-002、AC3）
+- [ ] 公告列近 30 天已發布（新增首版 + 新版本兩類），每筆含 文件名 / 類型 badge / 摘要 / 發布日期 / 撰寫者 / 分類（FR-003、AC4）
+- [ ] 點公告進 US4 詳細頁；「查看全部文件」進 US3 文件庫（FR-004、AC5）
+- [ ] 近 30 天無事件 → 空狀態「近期無新發布文件」（FR-004、AC6、DM-MSG-DM00-001）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#127 Foundation（已交付）**：存取閘、`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_CATEGORY`
+- **#4 US5（已交付）/ #5 US6（已交付）**：統計與公告之資料來源＝已發布文件（US6 簽核發布結果）；本 issue 以既有已發布資料 / fixture 獨立測試
+- **US4（#155，已交付）/ US3（#150，已交付）**：公告點入詳細頁 / 「查看全部」文件庫之去向
+
+## 注意事項
+
+- ⚠️ **類型 badge（新增/新版本）之來源**（交付前自檢建議）：`DM_CHANGE_LOG.OPERATION` 只有 PUBLISH/OBSOLETE、**不帶**新增/新版本；改由公告版本 join 其 **APPROVED `DM_REVIEW.REVIEW_TYPE`** 取得（NEW/NEW_VERSION）。種子 / 無對應 review 之發布版 badge 預設「新增」。
+- ⚠️ **統計 `PENDING_OBSOLETE` 計入**（交付前自檢釐清）：spec FR-002 明寫排除「已廢止」，`PENDING_OBSOLETE`（廢止待簽核）仍在架對外有效、**應計入**；只排除 `OBSOLETE`。開工前 `/sti-plan` 再確認。
+- ⚠️ **`spec.md` 畫面表「待辦彙總」措辭**：`spec.md` DM00 列曾述「公告區 + 待辦彙總」，但 spec_us7 無此 FR、wireframe DM00 亦無此區（待辦 / 動態屬 DM07 個人專區 US9）。**建議 SA 移除該詞或釐清**；本 issue 不含待辦彙總。
+- 撰寫者取該**版本** `CREATED_USER`（對齊「作者跟版本」慣例，非文件建立者）。
+- 純讀取、無 migration、無稽核寫入。
+
+## 相關文件
+
+- [spec_us7.md](spec_us7.md)（FR-001~004）、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T045/T046）、[spec_us4.md](spec_us4.md)（公告點入）、[spec_us3.md](spec_us3.md)（查看全部）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-overview`）
+
+**Labels**：`P2-延伸`, `DM-文件管理`, `US7`
+
+---
+
+## Issue #7 ~ #10：待補（增量模式）
+
+US8 文件廢止申請（#7）/ US9 個人專區（#8）/ US10 已廢止文件查詢（#9）/ US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
+
+---
+
+## Issue #11：[P3-輔助] DM — 跨模組教材引用（US12 / UCDM12）（GitHub [#183](https://github.com/sti-fhb/EDMS/issues/183)，✅ 已交付 PR #189）
+
+**對應規格**：[spec_us12.md](spec_us12.md)（FR-001~005，UCDM12，訊息 DM-MSG-ETREF-001）；[contracts/document-service.md](contracts/document-service.md)（SRVDM001 / SRVDM002，**權威**）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION`）
+**對應畫面**：無 DM 畫面（消費端 UI 在 ET 模組 ET02 / ET05）
+**階段**：P3-輔助
+**涵蓋 Tasks**：T057（SRVDM001）、T058（SRVDM002）、T059（廢止通知 ET，**範圍外**）
+
+## 任務說明
+
+DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `app/services/__init__.py` 匯出；ET 依 `sti-backend-boundaries` 不打掛 `DM_AUTH_001` 角色閘的 HTTP 端點）：SRVDM001 依 DOC_ID 取當前發布版、SRVDM002 取 TRAINING 分類清單、`read_file_for_reference` 供 ET 學員取教材檔。解鎖 ET #0（DM Service Client）/ #3（ET02 教材下拉）/ #5（ET05 取檔）。
+
+## 範圍
+
+**後端**（`app/dm/integration`，門面 → repository）：
+- **T057 `get_current_by_doc_id`**（SRVDM001）：依 DOC_ID 取當前發布版 metadata；廢止仍回廢止前最後版 + `obsolete=true`；無發布版 → `DM_DOC_013`（409）。
+- **T058 `list_training_documents`**（SRVDM002）：取 TRAINING 分類、有當前發布版且在架（PUBLISHED/PENDING_OBSOLETE）之清單；keyword（LIKE 轉義）/ func_code 過濾；發布時間 DESC + doc_id 次要鍵。
+- **取檔 `read_file_for_reference`**：供 ET 學員取檔——**不掛 DM 角色閘**（授權由 ET 自判）；**D-1 只給目前發布版**（非目前版 `DM_DOC_002`）、**D-2 不寫 `DM_DOC_READ`**；OBSOLETE 文件仍可取（FR-003）；經 storage-root 圍籬（#160）。
+- **分類白名單**（Security）：三方法僅允許 `TRAINING`（DOC_ID 內嵌分類碼可枚舉，防跨分類越權取檔/窺 metadata）；非 TRAINING 取檔/metadata → `DM_DOC_001`、清單 → `DM_DOC_010`。
+- `app/services/__init__.py` 匯出 `DmDocumentService`。
+
+**測試**：後端 int（SRVDM001 當前/廢止/無發布版；SRVDM002 分類+狀態過濾+keyword+func_code+DESC；取檔 D-1/D-2/OBSOLETE/跨分類越權；匯出）。
+
+**前端 / migration**：無。
+
+## 驗收條件
+
+- [x] SRVDM001 回當前發布版；廢止仍回最後版 + `obsolete`；無發布版 `DM_DOC_013`
+- [x] SRVDM002 回 TRAINING 有效清單（含 PENDING_OBSOLETE、排除 OBSOLETE/草稿/送審）
+- [x] DM Service 自 `app/services/__init__.py` 匯出、簽章與契約一致
+- [x] 無 DM 角色 ET 學員可經 `read_file_for_reference` 取檔（不被 `DM_AUTH_001` 擋）
+- [x] 回應欄位與契約一致（docId / items / obsolete / status）
+- [x] CI 綠
+- [ ] **（範圍外）** T059 DM 廢止後通知 ET 教師 → **裁示 A：ET 端依 `obsolete` 旗標自偵測、DM 不主動推播**；且相依 US8（廢止未交付）
+
+## 依賴
+
+- **#5 US6（已交付）**：發布 / `CURRENT_VERSION_ID` 維護
+- **契約 + `DM_DOC_013`（#187，已入 main）**：in-process Service 介面 + ET 取檔授權路徑（交付前自檢補正）
+- **US8（未交付）**：T059 廢止通知來源
+- **ET（消費端，未落地）**：ET #0/#3/#5 以此開發、回歸驗證
+
+## 注意事項 / 交付前自檢裁示
+
+- **必補 1/2（契約，#187）**：REST 契約補「in-process Service 介面」（類名/簽章/DTO/error 對映）；ET 取檔授權路徑定案 **D-1 只給目前版 / D-2 不寫 DM_DOC_READ**。
+- **必補 3（裁示 A）**：廢止通知採 ET 自偵測、DM 不推播；spec_us12 FR-003/AC4/`DM-MSG-ETREF-001` 已同步（#187）。
+- **follow-up**：Security MED-2（裸 file_path）已由 #160 storage-root 圍籬收斂；AUDIENCE 可見性下放 ET（契約假設）。
+
+## 相關文件
+
+- [spec_us12.md](spec_us12.md)、[contracts/document-service.md](contracts/document-service.md)、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T057~T059）
+- ET 側對齊契約：`docs/specs/et/contracts/srv-et-dm-document-list.md` / `srv-et-dm-document-content.md`
+
+**Labels**：`P3-輔助`, `DM-文件管理`, `ET-教育訓練文件管理`, `US12`
+
+---
+
+## Issue #12 ~ #13：待補（增量模式）
+
+US13 閱讀統計與 KPI + 排程 SCHDM001（#12）/ 整合測試 + 安全 + 收尾（#13）——尚未開工，於前置就緒後補入完整 body。
 
 ---
 
@@ -491,3 +670,4 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 | 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM02）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM02 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #3（US4 文件詳細頁瀏覽）開立為 GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)（labels `P1-核心` + `DM-文件管理` + `US4`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us4`）結論 ✅ 齊備、無必補 |
 | 2026-08-17 | 撰寫 Issue #4（US5 文件新增與編輯 / DM03）完整 body：對應 spec_us5 FR-001~009 + UCDM06；涵蓋 T035/T035a/T036/T037/T038/T039。**切分要點**：DM 第一個**寫入型** issue，主體為組裝 #127 Foundation 既有工具（DOC_ID 產生器 T017、file_store T016 上傳驗證、ReviewService T019 送簽、notify T018 `DOC_SUBMIT`、DB 約束 手冊唯一/版本號唯一）；範圍到「送審中」為止——核准/發布屬 US6、草稿匣列表/撤回屬 US9。前置 #0（必要）+ #3/#5（入口/去向，以獨立測試不阻塞）。新增寫入專屬 error code 待開工前 `/sti-plan` 對齊登記 `docs/ref/error-codes.md`。Labels `P1-核心` + `DM-文件管理` + `US5`。總覽表 Issue #4 狀態改「📝 body 已撰寫（待開立）」 |
+| 2026-08-21 | **回填 issues.md 至現況**（自 2026-08-17 後未維護、body 停在 Issue #4）：**(1)** 總覽表狀態 / GitHub # 更正——US5(#4)→已交付 [#169]（PR #172；spec 對齊 #175/#176）、US6(#5)→已交付 [#178]（PR #180）、US12(#11)→已交付 [#183]（PR #189；契約 #187；T059 範圍外）、US7(#6)→「body 已撰寫（待開立）」。**(2)** 補撰三張完整 body：Issue #5（US6 簽核處理 / DM04，含交付後差異：催辦排程 `SCHDM001`→`SCHDM002`、退回被退版本 `REJECTED`→`DRAFT` + 新增 `DM_DOC_012`）、Issue #6（US7 系統儀表板 / DM00，含交付前自檢建議：badge 來源 `DM_REVIEW.REVIEW_TYPE`、統計計入 `PENDING_OBSOLETE`、`spec.md` 待辦彙總措辭待 SA 修）、Issue #11（US12 跨模組引用，含 in-process Service 介面、TRAINING 分類白名單、T059 裁示 A 範圍外）。**(3)** 其餘未開工者維持待補：#7 US8 / #8 US9 / #9 US10 / #10 US11 / #12 US13 / #13 收尾。補強 follow-up #160（storage-root 圍籬，非 US）不列入總覽。US7 GitHub issue 尚未開立（依指示先補 issues.md、暫不開 issue）|
