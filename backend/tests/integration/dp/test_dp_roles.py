@@ -80,16 +80,22 @@ async def test_manageable_modules_non_admin_empty(db, dm_registered):
 
 
 async def test_require_manageable_enforces(db, dm_registered):
-    """非 DM 管理者操作 DM → 403 DP_ROLE_001；未註冊模組（ET）→ 404 DP_ROLE_003。"""
+    """非 DM 管理者操作 DM → 403 DP_ROLE_001；未註冊模組 → 404 DP_ROLE_003。
+
+    未註冊模組原以 "ET" 為例，**2026-08-20（#185）ET Foundation 落地後改用 "XX"**：
+    `main.py` 已於 module-level 呼叫 `register_et_module()`，任何 import main 之測試
+    （如 `client` fixture）都會使 ET 成為已註冊模組，該前提不再成立。改用一個
+    **永不會被註冊**的模組碼，才是對「未註冊 → 404」這條規則的穩定驗證。
+    """
     with pytest.raises(AppError) as e1:
         await _svc.group_options(db, module="DM", user_id="nobody")
     assert e1.value.status_code == 403 and e1.value.error_code == "DP_ROLE_001"
     await _grant_dm(db, "adm", DM_ADMIN)
     with pytest.raises(AppError) as e2:
         await _svc.list_assignments(
-            db, module="ET", keyword=None, page=1, limit=20, operator=OperatorInfo(user_id="adm")
+            db, module="XX", keyword=None, page=1, limit=20, operator=OperatorInfo(user_id="adm")
         )
-    assert e2.value.status_code == 404 and e2.value.error_code == "DP_ROLE_003"  # ET 未註冊 provider
+    assert e2.value.status_code == 404 and e2.value.error_code == "DP_ROLE_003"  # XX 永不註冊 provider
 
 
 async def test_assign_delegates_to_dm_provider_and_audits(db, dm_registered):

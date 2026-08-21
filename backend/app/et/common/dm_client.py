@@ -1,111 +1,54 @@
-"""DM 文件取用 Client（T029）——**目前為 stub，待 #183 交付後抽換為真呼叫**。
+"""ET → DM 文件取用（T029 / AC 10）——**已於 #183 交付後接上真實 Service**。
 
-ET 教材引用 DM「訓練教材」分類之文件，需 DM 提供兩支內部服務（見
-docs/specs/et/contracts/srv-et-dm-document-{list,content}.md，已依 DM 定稿契約對齊）：
+ET 教材引用 DM「訓練教材」分類之文件，經平台唯一跨模組出口 `app/services` 取得
+`DmDocumentService`（DM #183 / PR #189 交付）：
 
-- **SRVDM002**：取 `category=TRAINING` 之有效文件清單（ET02 教材下拉）
-- **SRVDM001**：依 `docId` 取當前發布版 metadata 與廢止狀態（ET02 發布檢核 / ET05 學員閱讀）
+| 方法 | 對應 | 用於 |
+|------|------|------|
+| `list_training_documents(db, category=..., keyword=..., func_code=...)` | SRVDM002 | ET02 教材下拉 |
+| `get_current_by_doc_id(db, doc_id)` | SRVDM001 | ET02 發布檢核（`obsolete`）/ ET05 學員閱讀 |
+| `read_file_for_reference(db, doc_id=..., version_id=...)` | 取檔 | ET05 學員取教材檔案 |
 
-## 為何是 stub
+## 為何不自行定義型別與 Protocol
 
-DM 端 `T057` / `T058` **尚未實作**（#183，其前置為 #178 DM US6 簽核處理），且 DM Service
-尚未自 `app/services/__init__.py` 匯出——目前該出口僅有 DP 三個 Service。ET 先以本模組
-定義呼叫介面與回傳型別，使上層（ET Issue #3 / #5）得以照介面開發；#183 交付後只需替換
-`_StubDmDocumentClient` 為真實實作，介面不變。
+`DmDocumentService` 已是**具型別的門面**（`DmCurrentVersion` / `DmDocItem` /
+`DmFileContent`），ET 若再包一層自己的 dataclass 只是重複維護、且兩邊欄位漂移時
+無人察覺。本模組因此只保留 ET 端的**使用約束**與取得入口。
 
-## 抽換時的兩項注意（已於契約標註）
+## 使用時的三項約束（DM 端已對應設計，勿繞過）
 
-1. **不得打 DM 的 HTTP 端點**——DM 存取閘（`app/dm/deps.py`）要求呼叫者具備任一 DM 角色，
-   ET 學員多半沒有，會被 403 `DM_AUTH_001` 擋下。須經 `app/services` 之 in-process Service。
-2. **不得直接讀回應之 `file_path`**——違反模組邊界，且 #160 正強化 storage-root 路徑穿越
-   圍籬。檔案本體須經 DM 提供之檔案存取能力取得。
+1. **授權由 ET 自判**——`read_file_for_reference` **刻意不掛 DM 角色閘**（ET 學員多半
+   無 DM 角色，掛了會被 403 `DM_AUTH_001`）。因此 ET 呼叫前**必須自行確認**：該學員
+   為此課程已加入且未移除之學員、且該章節已解鎖。
+2. **`DmCurrentVersion` 不含 `file_path`**——這是 DM 刻意的設計，檔案一律經
+   `read_file_for_reference` 取得。ET 不得繞過該方法自行組路徑（違反模組邊界，
+   且 #160 之 storage-root 圍籬會失效）。
+3. **取檔不計入 DM 閱讀統計**（DM 端 D-2）——ET 代學員取檔不寫 `DM_DOC_READ`，
+   學習進度由 ET 自行統計（`ET_PROGRESS` / `ET_PROGRESS_VIDEO`）。
+
+## 例外語意（與 stub 時期不同）
+
+DM 端以 `AppError` 表達失敗，**非回 None**：
+
+- 查無文件 / 非可引用分類 → **404**（刻意不洩漏該文件是否存在）
+- 文件存在但尚無發布版 → **409 `DM_DOC_013`**
+- 取非當前版之檔案 → **403 `DM_DOC_002`**
+- 分類不在白名單 → **422 `DM_DOC_010`**
+
+呼叫端須據此處理，不可再假設「回 None 代表查無」。
 """
 
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Protocol
+from app.services import DmDocumentService
 
-# ET 教材固定引用之 DM 分類碼（非 `TRAINING_MATERIAL`——2026-08-19 依 DM 定稿契約更正）
+# ET 教材固定引用之 DM 分類碼（非 `TRAINING_MATERIAL`——2026-08-19 依 DM 定稿契約更正）。
+# DM 端 `list_training_documents` 預設值亦為此，且僅白名單分類可跨模組引用。
 TRAINING_CATEGORY = "TRAINING"
 
 
-@dataclass(frozen=True)
-class DmDocumentListItem:
-    """SRVDM002 回應之清單列。
+def get_dm_document_client() -> DmDocumentService:
+    """取得 DM 文件取用 Service（經 `app/services` 唯一跨模組出口）。
 
-    `doc_id` 為 **VARCHAR(20) 字串**（格式 `DM-{分類碼}-{6位流水號}`），非數值型。
-    DM 端本服務不回傳 `file_type` / `file_size_bytes`。
+    保留本工廠而非讓呼叫端直接 `DmDocumentService()`：使「ET 如何取得 DM 文件」有單一
+    切入點，日後若需加入快取、重試或替換實作時不必改動各呼叫處。
     """
-
-    doc_id: str
-    doc_name: str
-    version_no: str
-    published_date: datetime | None
-
-
-@dataclass(frozen=True)
-class DmDocumentCurrent:
-    """SRVDM001 回應——文件當前發布版之 metadata 與廢止狀態。
-
-    `status` 為 `PUBLISHED`（含廢止待簽核期間，仍對外有效）或 `OBSOLETE`；
-    `obsolete=True` 時仍回傳廢止前最後發布版本之位置，ET 據此於學員端顯示
-    「此文件已廢止」標籤、於教師端阻擋課程發布。
-    """
-
-    doc_id: str
-    doc_name: str
-    category_code: str
-    current_version_id: int
-    version_no: str
-    file_name: str
-    file_path: str
-    file_mime: str
-    published_date: datetime | None
-    status: str
-    obsolete: bool
-
-
-class DmDocumentClient(Protocol):
-    """ET → DM 文件取用介面（#183 交付後由真實實作替換）。"""
-
-    async def list_training_documents(
-        self, *, keyword: str | None = None, func_code: str | None = None
-    ) -> list[DmDocumentListItem]:
-        """SRVDM002：取訓練教材分類之有效文件清單。
-
-        僅含**有當前發布版本**者；`PENDING_OBSOLETE`（廢止待簽核）仍列入、
-        `OBSOLETE`（已廢止）不列。依發布時間 DESC。
-        """
-        ...
-
-    async def get_current_version(self, doc_id: str) -> DmDocumentCurrent | None:
-        """SRVDM001：依 `doc_id` 取當前發布版；查無文件回 None。
-
-        文件存在但尚無已發布版本時，DM 端回 `NO_PUBLISHED_VERSION`——由實作決定
-        映射為 None 或拋出，介面契約於 #183 抽換時一併定案。
-        """
-        ...
-
-
-class _StubDmDocumentClient:
-    """暫用 stub：回固定測資，使上層開發與測試不被 #183 阻塞。
-
-    ⚠️ **不得用於正式環境**——`get_dm_document_client()` 於 #183 交付後改回真實實作。
-    """
-
-    async def list_training_documents(
-        self, *, keyword: str | None = None, func_code: str | None = None
-    ) -> list[DmDocumentListItem]:
-        return []
-
-    async def get_current_version(self, doc_id: str) -> DmDocumentCurrent | None:
-        return None
-
-
-def get_dm_document_client() -> DmDocumentClient:
-    """取得 DM 文件 Client。
-
-    TODO(#183): DM US12 交付且 DM Service 自 `app/services/__init__.py` 匯出後，
-    改回傳真實實作（經 in-process Service，不打 HTTP 端點）。
-    """
-    return _StubDmDocumentClient()
+    return DmDocumentService()

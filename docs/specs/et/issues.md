@@ -72,7 +72,7 @@
 3. IT 透過 Seed Script 寫入 `DP_USER` + ET_USER_ROLE（ROLE=ADMIN）後，第一位管理者可登入
 4. ET 模組存取閘可驗證平台 DP 之 JWT（重用 `get_jwt_payload`）並注入 USER_ID 與 ET 角色清單；未具任何 ET 角色者回 403
 5. 樂觀鎖工具於版本不符時回傳明確衝突訊息
-6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與 metadata ⚠️ **本條被 #183 阻塞**（DM 端 T057 / T058 尚未實作，且 DM Service 尚未自 `app/services/__init__.py` 匯出）——交付時以 stub 開發並標外部阻塞，待 #183 完成後回歸驗證
+6. DM Service Client 可成功呼叫 SRVDM001 / SRVDM002 取得文件清單與 metadata，並經取檔 Service 取得教材檔案 ✅ **#183 已交付**（PR #189）：`DmDocumentService` 自 `app/services` 匯出，ET 已接上真實 Service、stub 移除
 7. 經平台 `NotifyService.send_email` 可寄送一封測試信（傳 `template_code` + 變數，寫入 `DP_EMAIL_LOG` outbox 由平台 worker 寄出）；**ET 不直接連 SMTP**
 8. Token 產生器產出之 token 至少 32 bytes 且 cryptographically secure
 

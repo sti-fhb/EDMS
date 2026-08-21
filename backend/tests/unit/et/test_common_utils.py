@@ -11,7 +11,7 @@ import pytest
 from app.core.exceptions import AppError
 from app.et.common.invitation_code import INVITATION_CODE_MAX_LEN, generate_invitation_code
 from app.et.common.optimistic_lock import ensure_version_matched
-from app.et.common.tokens import generate_invitation_token
+from app.et.common.tokens import generate_invitation_token, hash_token
 
 
 class TestOptimisticLock:
@@ -40,6 +40,17 @@ class TestInvitationToken:
 
     def test_每次產出皆不同(self) -> None:
         assert len({generate_invitation_token() for _ in range(50)}) == 50
+
+    def test_雜湊為_64_字元十六進位且同輸入同輸出(self) -> None:
+        """DB 只存雜湊（ET_INVITATION.TOKEN_HASH VARCHAR(64)），驗證時重新雜湊比對。"""
+        token = generate_invitation_token()
+        h = hash_token(token)
+        assert len(h) == 64
+        assert re.fullmatch(r"[0-9a-f]{64}", h)
+        assert hash_token(token) == h, "同一 token 須得到相同雜湊，否則驗證永遠失敗"
+
+    def test_不同_token_雜湊相異(self) -> None:
+        assert hash_token("a") != hash_token("b")
 
 
 class TestInvitationCode:

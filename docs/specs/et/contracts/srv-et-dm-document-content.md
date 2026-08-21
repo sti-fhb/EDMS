@@ -110,9 +110,8 @@ DM 契約所列之 HTTP 路徑 `GET /api/dm/documents/{docId}/current` 為 DM �
 
 ## 依賴狀態（提醒 SD）
 
-⚠ **DM 端本服務尚未實作**：對應 DM tasks T057，隸屬 **DM US12（跨模組教材引用）**——該 US 已於 2026-08-19 開立 **#183**，其前置為 DM US6（#178，簽核處理）。ET Issue #0 之「DM Service Client 可成功呼叫」驗收條件在 #183 交付前無法達成，需以 mock / stub 開發並標註外部阻塞。
+✅ **DM 端已交付**（#183 / PR #189，2026-08-20 合併）：`DmDocumentService` 已自 `app/services/__init__.py` 匯出，ET 端 `app/et/common/dm_client.py` 已接上真實 Service（stub 移除）。接線測試見 `tests/integration/et/test_et_dm_integration.py`。
 
-> **2026-08-19 更正（#181）**：本段原引用「DM Issue #169『文件新增與編輯』仍為 OPEN」，兩處皆有誤——#169 已於 2026-08-19 07:07 關閉，且該 issue 屬 **DM US5**（文件新增與編輯），非本服務所屬之 US12。撰寫當下 US12 尚無 issue，現已補開 #183。
 
 ---
 

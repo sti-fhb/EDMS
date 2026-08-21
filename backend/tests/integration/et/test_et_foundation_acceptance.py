@@ -10,7 +10,10 @@ import pytest
 from sqlalchemy import text
 
 from app.core.exceptions import AppError
+from app.core.module_admin import module_admin_gate
 from app.core.module_assign import module_assign_registry
+from app.core.module_provisioning import module_provisioning_gate
+from app.core.module_roles import module_role_gate
 from app.core.utils import utcnow
 from app.et import constants as c
 from app.et.bootstrap import register_et_module
@@ -21,10 +24,25 @@ from app.et.roles.models import EtUserRole
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture
+def et_registered():
+    """註冊 ET 四閘 checker / provider；**teardown 清除避免污染其他模組測試**。
+
+    比照 `tests/integration/dp/test_dp_roles.py` 之 `dm_registered`。聚合閘為 module-level
+    單例，若不清除會讓「未註冊模組 → fail-closed」類測試在同一 worker 內失準。
+    """
+    register_et_module()
+    yield
+    module_assign_registry.unregister("ET")
+    module_admin_gate.unregister("ET")
+    module_role_gate.unregister("ET")
+    module_provisioning_gate.unregister("ET")
+
+
 class TestAc2LookupNotMaterialised:
     """AC 2：9 類 Lookup 為應用層常數——**不得**產生任何 lookup 資料表。"""
 
-    async def test_未建立任何_lookup_表(self, db) -> None:
+    async def test_未建立任何_lookup_表(self, db, et_registered) -> None:
         rows = await db.execute(
             text(
                 "SELECT table_name FROM information_schema.tables "
@@ -34,7 +52,7 @@ class TestAc2LookupNotMaterialised:
         )
         assert rows.scalars().all() == [], "Lookup 代碼應為應用層常數，不得建表"
 
-    async def test_九類常數皆有定義(self, db) -> None:
+    async def test_九類常數皆有定義(self, db, et_registered) -> None:
         assert len(c.LOOKUP_SETS) == 9
         assert all(values for values in c.LOOKUP_SETS.values())
 
@@ -42,7 +60,7 @@ class TestAc2LookupNotMaterialised:
 class TestAc3Seeds:
     """AC 3：ET_TAG 5 筆 + DP_PARAM 6 項 + DP_NOTIFY_TEMPLATE 7 類。"""
 
-    async def test_et_tag_五筆內建且全體為_is_all(self, db) -> None:
+    async def test_et_tag_五筆內建且全體為_is_all(self, db, et_registered) -> None:
         rows = await db.execute(
             text('SELECT "TAG_NAME", "IS_ALL", "IS_BUILTIN" FROM "ET_TAG" ORDER BY "DISPLAY_ORDER"')
         )
@@ -53,7 +71,7 @@ class TestAc3Seeds:
         assert sum(1 for t in tags if t[1]) == 1, "全系統僅 1 筆 IS_ALL"
         assert all(t[2] for t in tags), "種子皆為內建標籤"
 
-    async def test_et_參數六項種入平台表(self, db) -> None:
+    async def test_et_參數六項種入平台表(self, db, et_registered) -> None:
         rows = await db.execute(
             text('SELECT "PARAM_ID" FROM "DP_PARAM_M" WHERE "PARAM_ID" LIKE :p ORDER BY 1'), {"p": "ET\\_%"}
         )
@@ -66,7 +84,7 @@ class TestAc3Seeds:
             "ET_WEEKLY_STAT_DAY_TIME",
         ]
 
-    async def test_et_通知範本七類且_channel_為平台正規詞彙(self, db) -> None:
+    async def test_et_通知範本七類且_channel_為平台正規詞彙(self, db, et_registered) -> None:
         rows = await db.execute(
             text('SELECT "TEMPLATE_CODE", "CHANNEL", "IS_SYSTEM" FROM "DP_NOTIFY_TEMPLATE" WHERE "MODULE" = :m'),
             {"m": "ET"},
@@ -86,7 +104,7 @@ class TestAc3Seeds:
         assert all(i[1] in {"EMAIL", "MSG", "BOTH"} for i in items)
         assert not any(i[2] for i in items), "ET 7 類皆為管理者可維護，非平台系統信"
 
-    async def test_週報範本含_csv_下載連結變數(self, db) -> None:
+    async def test_週報範本含_csv_下載連結變數(self, db, et_registered) -> None:
         """2026-08-19 變更：郵件附件改為下載連結（平台發信不支援附件）。"""
         body = await db.scalar(
             text('SELECT "BODY" FROM "DP_NOTIFY_TEMPLATE" WHERE "MODULE" = :m AND "TEMPLATE_CODE" = :c'),
@@ -109,8 +127,7 @@ class TestAc4AdminCanAssign:
         )
         await db.flush()
 
-    async def test_管理者可經_provider_指派他人角色與標籤(self, db) -> None:
-        register_et_module()
+    async def test_管理者可經_provider_指派他人角色與標籤(self, db, et_registered) -> None:
         await self._grant(db, "ET_AC4_ADMIN", ROLE_ADMIN)
         provider = module_assign_registry.get("ET")
         assert provider is not None
@@ -128,8 +145,7 @@ class TestAc4AdminCanAssign:
         view = (await provider.get_users_assignments(db, ["ET_AC4_TARGET"]))["ET_AC4_TARGET"]
         assert view.groups == frozenset({str(tag_id)})
 
-    async def test_自我保護_不可取消自己的管理者角色(self, db) -> None:
-        register_et_module()
+    async def test_自我保護_不可取消自己的管理者角色(self, db, et_registered) -> None:
         await self._grant(db, "ET_AC4_SELF", ROLE_ADMIN)
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
@@ -138,15 +154,13 @@ class TestAc4AdminCanAssign:
             )
         assert e.value.error_code == "ET_ROLE_001"
 
-    async def test_無效角色代碼被擋(self, db) -> None:
-        register_et_module()
+    async def test_無效角色代碼被擋(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
             await provider.assign(db, user_id="ET_AC4_X", roles={"SUPERUSER"}, groups=set(), operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_ROLE_003"
 
-    async def test_未啟用標籤不可新增指派(self, db) -> None:
-        register_et_module()
+    async def test_未啟用標籤不可新增指派(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "軍人"})
         await db.execute(text('UPDATE "ET_TAG" SET "IS_ACTIVE" = false WHERE "TAG_ID" = :t'), {"t": tag_id})
@@ -155,17 +169,15 @@ class TestAc4AdminCanAssign:
             await provider.assign(db, user_id="ET_AC4_Y", roles=set(), groups={str(tag_id)}, operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_ROLE_002"
 
-    async def test_全體標籤不可停用(self, db) -> None:
+    async def test_全體標籤不可停用(self, db, et_registered) -> None:
         """ET 業務規則之伺服器端保護——DP 端旗標與前端隱藏僅為 UX。"""
-        register_et_module()
         provider = module_assign_registry.get("ET")
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "IS_ALL" = true'))
         with pytest.raises(AppError) as e:
             await provider.set_controlled_enabled(db, "TAG", code=str(tag_id), enabled=False, operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_TAG_001"
 
-    async def test_可指派標籤清單排除全體(self, db) -> None:
-        register_et_module()
+    async def test_可指派標籤清單排除全體(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         names = {i.name for i in await provider.list_audiences(db)}
         assert "全體" not in names, "「全體」代表所有學員角色者，不需逐人指派"
@@ -175,8 +187,7 @@ class TestAc4AdminCanAssign:
 class TestCatalogMaintenance:
     """受控主檔維護之業務保護與稽核（Code Review 補強：rename / create 原無測試）。"""
 
-    async def test_內建標籤不可改名(self, db) -> None:
-        register_et_module()
+    async def test_內建標籤不可改名(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "護理師"})
         with pytest.raises(AppError) as e:
@@ -184,31 +195,27 @@ class TestCatalogMaintenance:
         assert e.value.status_code == 422
         assert e.value.error_code == "ET_TAG_001"
 
-    async def test_新增標籤名稱重複被擋(self, db) -> None:
-        register_et_module()
+    async def test_新增標籤名稱重複被擋(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
             await provider.create_controlled(db, "TAG", code="", name="軍人", operator_id="ET_CAT_OP")
         assert e.value.status_code == 409
         assert e.value.error_code == "ET_TAG_002"
 
-    async def test_查無標籤回_404_專用碼(self, db) -> None:
-        register_et_module()
+    async def test_查無標籤回_404_專用碼(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
             await provider.rename_controlled(db, "TAG", code="999999", new_name="X", operator_id="ET_CAT_OP")
         assert e.value.status_code == 404
         assert e.value.error_code == "ET_TAG_003"
 
-    async def test_非_tag_類別被擋(self, db) -> None:
-        register_et_module()
+    async def test_非_tag_類別被擋(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
             await provider.list_controlled(db, "CATEGORY")
         assert e.value.error_code == "ET_TAG_003"
 
-    async def test_新增自訂標籤成功且非內建(self, db) -> None:
-        register_et_module()
+    async def test_新增自訂標籤成功且非內建(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         await provider.create_controlled(db, "TAG", code="", name="放射師", operator_id="ET_CAT_OP")
         items = {i.name: i for i in await provider.list_controlled(db, "TAG")}
@@ -216,12 +223,11 @@ class TestCatalogMaintenance:
         assert items["放射師"].is_builtin is False
         assert items["放射師"].is_enabled is True
 
-    async def test_稽核_func_name_區分指派與定義維護(self, db) -> None:
+    async def test_稽核_func_name_區分指派與定義維護(self, db, et_registered) -> None:
         """ET-ROLES（指派）與 ET-CATALOG（標籤庫定義）須為不同稽核來源碼。
 
         比照 DM 之 DM-ROLES / DM-CATALOG——否則稽核無法依 FUNC_NAME 區分兩類管理行為。
         """
-        register_et_module()
         provider = module_assign_registry.get("ET")
         await provider.create_controlled(db, "TAG", code="", name="營養師", operator_id="ET_CAT_AUD")
         await provider.assign(db, user_id="ET_CAT_TARGET", roles={ROLE_STUDENT}, groups=set(), operator_id="ET_CAT_AUD")
@@ -237,25 +243,22 @@ class TestCatalogMaintenance:
 class TestInputValidationHardening:
     """Security Review 補強：輸入界限驗證（避免未攔截 500 / 視覺重複標籤）。"""
 
-    async def test_unicode_數字字元不得通過標籤_id_驗證(self, db) -> None:
+    async def test_unicode_數字字元不得通過標籤_id_驗證(self, db, et_registered) -> None:
         """`'²'.isdigit()` 為 True 但 `int('²')` 會拋 ValueError → 原本會變成 500。"""
-        register_et_module()
         provider = module_assign_registry.get("ET")
         for bad in ("²", "①", "9" * 25):
             with pytest.raises(AppError) as e:
                 await provider.assign(db, user_id="ET_VAL_U1", roles=set(), groups={bad}, operator_id="ET_VAL_OP")
             assert e.value.error_code == "ET_ROLE_002", f"未擋下 {bad!r}"
 
-    async def test_標籤名稱前後空白被正規化_不得建出視覺重複(self, db) -> None:
+    async def test_標籤名稱前後空白被正規化_不得建出視覺重複(self, db, et_registered) -> None:
         """`"軍人 "` 若不 strip 會繞過唯一約束、建出看起來一樣的標籤。"""
-        register_et_module()
         provider = module_assign_registry.get("ET")
         with pytest.raises(AppError) as e:
             await provider.create_controlled(db, "TAG", code="", name="  軍人  ", operator_id="ET_VAL_OP")
         assert e.value.error_code == "ET_TAG_002", "strip 後應判定為重複"
 
-    async def test_空白或超長標籤名稱被擋(self, db) -> None:
-        register_et_module()
+    async def test_空白或超長標籤名稱被擋(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         for bad in ("", "   ", "x" * 51):
             with pytest.raises(AppError) as e:
@@ -266,8 +269,7 @@ class TestInputValidationHardening:
 class TestLastModifiedFallback:
     """Code Review 補強：新授予而未再異動之列，最後異動欄須回退至 CREATED_*。"""
 
-    async def test_僅建立未更新時回退至_created(self, db) -> None:
-        register_et_module()
+    async def test_僅建立未更新時回退至_created(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
         # grant_default_student_role 建立之列只有 CREATED_*、無 UPDATED_*
         from app.et.roles.provisioning import grant_default_student_role
@@ -282,7 +284,7 @@ class TestLastModifiedFallback:
 class TestAc8NoSmtpInEt:
     """AC 8 反向驗證：ET 不得自建 SMTP 連線——寄信一律經平台 NotifyService。"""
 
-    async def test_et_模組無_smtp_相關程式碼(self, db) -> None:
+    async def test_et_模組無_smtp_相關程式碼(self, db, et_registered) -> None:
         et_root = Path(__file__).resolve().parents[3] / "app" / "et"
         offenders: list[str] = []
         for py in et_root.rglob("*.py"):
