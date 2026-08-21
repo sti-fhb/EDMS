@@ -12,7 +12,7 @@
 import os
 import uuid
 
-from app.core.config import settings
+from app.dm.document.file_paths import is_within_root, storage_root
 
 # 副檔名白名單（與 DM_FILE_TYPES 語意一致；用於由原始檔名安全萃取副檔名，不接受其他字元）
 _ALLOWED_EXT_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789")
@@ -45,16 +45,15 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
     Returns:
         寫入檔案之絕對路徑（供 DB FILE_PATH 記錄）。
     """
-    root = os.path.abspath(settings.DM_FILE_STORAGE_ROOT)
+    root = storage_root()  # 與讀取端圍籬共用同一根目錄常數（file_store，避免 drift，#160）
     ext = _safe_ext(filename)
     name = f"{file_id}.{ext}" if ext else file_id
     path = os.path.abspath(os.path.join(root, doc_id, name))
     # 圍籬（防禦深度、不依賴呼叫端）：解析後之目錄與檔案路徑一律須落在 root 內，
     # 否則視為受污染之 doc_id / file_id 之路徑穿越，拒絕落盤。
-    doc_dir = os.path.dirname(path)
-    if os.path.commonpath([root, path]) != root or os.path.commonpath([root, doc_dir]) != root:
+    if not is_within_root(path) or not is_within_root(os.path.dirname(path)):
         raise ValueError("不合法的落盤路徑（疑似路徑穿越）")
-    os.makedirs(doc_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
     return path

@@ -5,6 +5,7 @@ PENDING_OBSOLETE、排除 OBSOLETE / 草稿 / 送審）+ keyword + func_code + �
 取檔不掛角色閘、只給目前版、不寫 DM_DOC_READ、OBSOLETE 仍可取；門面自 app/services 匯出。
 """
 
+import os
 from datetime import timedelta
 
 import pytest
@@ -13,6 +14,7 @@ from sqlalchemy import func, select
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmFunc
+from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocRead, DmDocument, DmDocVersion
 from app.dm.integration.service import DmDocumentService
 
@@ -21,14 +23,19 @@ pytestmark = pytest.mark.integration
 _svc = DmDocumentService()
 
 
-async def _version(db, doc_id, version_no, *, status="PUBLISHED", has_file=True, published=None, author="ed"):
+async def _version(
+    db, doc_id, version_no, *, status="PUBLISHED", has_file=True, published=None, author="ed", file_path=None
+):
     now = utcnow()
+    # 預設落在 storage root 內（#160 圍籬會擋 root 外路徑）；測逃逸之案例自帶 file_path
+    if has_file and file_path is None:
+        file_path = os.path.join(storage_root(), doc_id, f"{version_no}.pdf")
     v = DmDocVersion(
         doc_id=doc_id,
         version_no=version_no,
         change_summary="摘要",
         file_name=f"{version_no}.pdf" if has_file else None,
-        file_path=f"/x/{doc_id}-{version_no}.pdf" if has_file else None,
+        file_path=file_path if has_file else None,
         file_size=100 if has_file else None,
         file_mime="application/pdf" if has_file else None,
         status=status,
@@ -236,6 +243,19 @@ async def test_read_file_obsolete_still_readable(db):
     vid = await _published_doc(db, "DM-TRAINING-000044", version_no="v1.5", status="OBSOLETE")
     f = await _svc.read_file_for_reference(db, doc_id="DM-TRAINING-000044", version_id=vid)
     assert f.path.endswith("v1.5.pdf")
+
+
+async def test_read_file_path_escaping_storage_root_blocked(db):
+    """storage-root 圍籬（#160）：待審 / 教材檔 FILE_PATH 逃逸出根目錄 → 404（收斂 US12 Sec MED-2）。"""
+    escape = os.path.join(storage_root(), "..", "..", "etc", "secret.pdf")
+    await _doc(db, "DM-TRAINING-000046", status="PUBLISHED")
+    vid = await _version(db, "DM-TRAINING-000046", "v1.0", file_path=escape)
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-TRAINING-000046"))
+    doc.current_version_id = vid
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await _svc.read_file_for_reference(db, doc_id="DM-TRAINING-000046", version_id=vid)
+    assert e.value.error_code == "DM_DOC_001" and e.value.status_code == 404
 
 
 # ── 分類白名單：跨分類越權防線（Sec HIGH-1）────────────

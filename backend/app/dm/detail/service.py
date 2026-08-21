@@ -10,6 +10,7 @@ from app.core.exceptions import AppError
 from app.dm.deps import DmContext
 from app.dm.detail.repository import DetailRepository
 from app.dm.detail.schemas import DetailResponse, FileMeta, ObsoleteInfo, VersionItem
+from app.dm.document.file_paths import resolve_within_root
 from app.dm.document.file_store import is_previewable
 from app.dm.roles.authz import DM_EDITOR
 
@@ -138,15 +139,17 @@ class DetailService:
         vfile = await self._repo.get_version_file(db, doc_id, version_id)
         if vfile is None:
             raise _NOT_FOUND
+        # storage-root 圍籬（#160）：FILE_PATH 逃逸出根目錄 → 404，且在寫 DM_DOC_READ 等副作用前先擋。
+        safe_path = resolve_within_root(vfile.file_path)
         is_current = version_id == meta.current_version_id
 
         if disposition == "download":
             if not is_current:  # 舊版僅預覽、不開放下載（FR-004）
                 raise AppError(status_code=403, detail="舊版本不可下載，請聯絡管理者", error_code="DM_DOC_002")
             await self._repo.write_read(db, doc_id=doc_id, version_id=version_id, user_id=ctx.user_id)  # 已看
-            return FileServe(path=vfile.file_path, mime=vfile.file_mime, name=vfile.file_name, inline=False)
+            return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=False)
 
         # disposition == "preview"
         if not is_previewable(vfile.file_mime):  # Office 等無法線上預覽（FR-002 / DM-MSG-DM02-001）
             raise AppError(status_code=422, detail="此檔案格式無法線上預覽，請下載原檔", error_code="DM_DOC_003")
-        return FileServe(path=vfile.file_path, mime=vfile.file_mime, name=vfile.file_name, inline=True)
+        return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=True)
