@@ -63,7 +63,8 @@ class Settings(BaseSettings):
     INVITE_RESEND_COOLDOWN_SEC: int = Field(default=600, ge=0)
 
     # DM 文件上傳落盤根目錄（US5）——上傳之檔案位元組寫入此根下、以系統產生之 FILE_ID 命名，
-    # DB 僅存相對 FILE_PATH。走 config（依部署環境定；正式可換物件儲存）。#160 將對讀取端加根目錄圍籬。
+    # DB 存絕對 FILE_PATH（os.path.abspath，見 dm/editor/storage.py）。讀寫端皆經 dm/document/file_paths
+    # 之 storage-root 圍籬（#160）。走 config（依部署環境定；正式建議設絕對路徑、可換物件儲存）。
     DM_FILE_STORAGE_ROOT: str = "./var/dm_files"
 
     @model_validator(mode="after")
