@@ -27,6 +27,42 @@ export const handlers = [
   http.get("/api/dp/user/module-summary", () =>
     HttpResponse.json({ et: { has_role: true }, dm: { has_role: true } }),
   ),
+  // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
+  http.get("/api/dm/dashboard/stats", () =>
+    HttpResponse.json({
+      items: [
+        { category_code: "SOP", category_name: "SOP", count: 42 },
+        { category_code: "MANUAL", category_name: "系統操作手冊", count: 18 },
+        { category_code: "TRAINING", category_name: "訓練教材", count: 11 },
+        { category_code: "OTHER", category_name: "其他", count: 5 },
+      ],
+      total: 76,
+    }),
+  ),
+  http.get("/api/dm/dashboard/announcements", () =>
+    HttpResponse.json([
+      {
+        doc_id: "DM-TRAINING-000010",
+        doc_name: "用血回報訓練教材",
+        category_code: "TRAINING",
+        version_no: "1.0",
+        change_summary: "新進人員用血回報訓練教材",
+        published_date: "2026-05-12T10:00:00Z",
+        author_name: "林助教",
+        kind: "NEW",
+      },
+      {
+        doc_id: "DM-SOP-000010",
+        doc_name: "領血確認標準作業程序",
+        category_code: "SOP",
+        version_no: "2.1",
+        change_summary: "補充第 5 點異常通報流程",
+        published_date: "2026-05-08T09:00:00Z",
+        author_name: "陳大華",
+        kind: "NEW_VERSION",
+      },
+    ]),
+  ),
   // US3 文件庫與檢索（dm-library）：預設兩筆（含手冊）+ 選項 + 可新增；個別測試以 server.use 覆蓋
   http.get("/api/dm/library/documents", () =>
     HttpResponse.json({
