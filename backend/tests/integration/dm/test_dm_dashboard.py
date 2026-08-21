@@ -12,16 +12,27 @@ from sqlalchemy import select
 
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
+from app.dm.catalog.models import DmTag
 from app.dm.dashboard.service import DashboardService
-from app.dm.document.models import DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
-from app.dm.roles.authz import DM_VIEWER
+from app.dm.roles.authz import DM_ADMIN, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
 _svc = DashboardService()
+# privileged 呼叫者（不受可見性過濾）——多數統計/公告測試以此驗核心計數
+_PRIV = {"user_id": "adm", "roles": frozenset({DM_ADMIN})}
+
+
+async def _tag_doc(db, doc_id, audience_name, *, user="seed"):
+    tag_id = await db.scalar(
+        select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == audience_name)
+    )
+    db.add(DmDocTag(doc_id=doc_id, tag_id=tag_id, created_user=user, created_date=utcnow()))
+    await db.flush()
 
 
 async def _seed_user(db, uid, name):
@@ -118,7 +129,7 @@ async def test_stats_counts_live_docs_per_category(db):
     await _published_doc(db, "DM-SOP-000003", category="SOP", status="OBSOLETE")  # 已下架 → 不計
     await _doc(db, "DM-MANUAL-000002", category="MANUAL", status="DRAFT")  # 草稿 → 不計
     await _doc(db, "DM-SOP-000004", category="SOP", status="PENDING_REVIEW")  # 送審中 → 不計
-    stats = await _svc.get_stats(db)
+    stats = await _svc.get_stats(db, **_PRIV)
     by_code = {i.category_code: i.count for i in stats.items}
     assert by_code == {"SOP": 2, "MANUAL": 1, "TRAINING": 1, "OTHER": 0}
     assert [i.category_code for i in stats.items] == ["SOP", "MANUAL", "TRAINING", "OTHER"]  # 固定順序
@@ -126,7 +137,7 @@ async def test_stats_counts_live_docs_per_category(db):
 
 
 async def test_stats_all_zero_when_no_published(db):
-    stats = await _svc.get_stats(db)
+    stats = await _svc.get_stats(db, **_PRIV)
     assert stats.total == 0 and len(stats.items) == 4 and all(i.count == 0 for i in stats.items)
 
 
@@ -145,7 +156,7 @@ async def test_announcements_recent_with_badge_and_desc(db):
         db, "DM-TRAINING-000010", category="TRAINING", version_no="1.0", published=base, name="用血教材"
     )
     await _approved_review(db, "DM-TRAINING-000010", v2.version_id, "NEW")
-    items = await _svc.get_announcements(db)
+    items = await _svc.get_announcements(db, **_PRIV)
     assert [i.doc_id for i in items] == ["DM-TRAINING-000010", "DM-SOP-000010"]  # 新者在前
     assert items[0].kind == "NEW" and items[1].kind == "NEW_VERSION"
     assert items[0].author_name == "陳大華" and items[1].version_no == "2.0"
@@ -153,34 +164,68 @@ async def test_announcements_recent_with_badge_and_desc(db):
 
 async def test_announcements_excludes_older_than_30d(db):
     await _published_doc(db, "DM-SOP-000011", category="SOP", published=utcnow() - timedelta(days=40))
-    items = await _svc.get_announcements(db)
+    items = await _svc.get_announcements(db, **_PRIV)
     assert items == []
 
 
 async def test_announcements_kind_defaults_new_without_review(db):
     """發布版無對應 APPROVED review（種子）→ badge 預設 NEW。"""
     await _published_doc(db, "DM-SOP-000012", category="SOP", published=utcnow())
-    items = await _svc.get_announcements(db)
+    items = await _svc.get_announcements(db, **_PRIV)
     assert len(items) == 1 and items[0].kind == "NEW"
 
 
 async def test_announcements_empty_when_no_recent(db):
-    items = await _svc.get_announcements(db)
+    items = await _svc.get_announcements(db, **_PRIV)
     assert items == []
+
+
+# ── 可見性（Sec HIGH-1 / MEDIUM-1）──────────────────────
+
+
+async def test_stats_and_announcements_apply_visibility(db):
+    """閱覽者只見其可見範圍（全體 / 相符可見對象）；受限文件之計數與公告不外洩；privileged 見全部。"""
+    await _seed_user(db, "v1", "閱覽者")  # v1 未被授予任何可見對象
+    now = utcnow()
+    await _published_doc(db, "DM-SOP-000030", category="SOP", published=now, name="全體SOP")
+    await _tag_doc(db, "DM-SOP-000030", "全體")  # 全體 → 所有閱覽者可見
+    await _published_doc(db, "DM-SOP-000031", category="SOP", published=now, name="護理師SOP")
+    await _tag_doc(db, "DM-SOP-000031", "護理師")  # 僅護理師可見；v1 無此授權
+    viewer = {"user_id": "v1", "roles": frozenset({DM_VIEWER})}
+
+    v_stats = await _svc.get_stats(db, **viewer)
+    assert next(i.count for i in v_stats.items if i.category_code == "SOP") == 1  # 僅全體
+    v_ann = await _svc.get_announcements(db, **viewer)
+    assert {a.doc_id for a in v_ann} == {"DM-SOP-000030"}
+
+    p_stats = await _svc.get_stats(db, **_PRIV)
+    assert next(i.count for i in p_stats.items if i.category_code == "SOP") == 2  # privileged 見全部
+    p_ann = await _svc.get_announcements(db, **_PRIV)
+    assert {a.doc_id for a in p_ann} == {"DM-SOP-000030", "DM-SOP-000031"}
 
 
 # ── HTTP 存取閘 ──────────────────────────────────────
 
 
-async def test_http_stats_requires_dm_role(db, client):
+async def test_http_stats_requires_auth(db, client):
     resp = await client.get("/api/dm/dashboard/stats")
-    assert resp.status_code in (401, 403)
+    assert resp.status_code == 401  # 無 token
+
+
+async def test_http_forbidden_without_dm_role(db, client):
+    """已登入但無任何 DM 角色 → 403 DM_AUTH_001。"""
+    await _seed_user(db, "norole", "無角色")
+    await db.flush()
+    token = create_access_token(sub="norole", ttl_minutes=15)
+    resp = await client.get("/api/dm/dashboard/stats", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_001"
 
 
 async def test_http_stats_and_announcements_ok(db, client):
     await _seed_user(db, "viewer1", "閱覽者")
     db.add(DmUserRole(user_id="viewer1", role_code=DM_VIEWER, created_user="seed", created_date=utcnow()))
     await _published_doc(db, "DM-SOP-000020", category="SOP", published=utcnow(), author="viewer1")
+    await _tag_doc(db, "DM-SOP-000020", "全體")  # 掛全體 → 閱覽者可見（套可見性後始計入）
     await db.flush()
     token = create_access_token(sub="viewer1", ttl_minutes=15)
     h = {"Authorization": f"Bearer {token}"}

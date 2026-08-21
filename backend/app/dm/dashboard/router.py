@@ -21,7 +21,7 @@ async def get_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """各類型文件總數：4 內建分類之已發布目前版本數 + 總計（FR-002）。"""
-    return await _service.get_stats(db)
+    return await _service.get_stats(db, user_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.get("/announcements", response_model=list[AnnouncementItem])
@@ -30,4 +30,4 @@ async def get_announcements(
     db: AsyncSession = Depends(get_db),
 ):
     """最新更新公告：近 30 天已發布（新增/新版本），發布時間 DESC；無事件回空清單（FR-003/004）。"""
-    return await _service.get_announcements(db)
+    return await _service.get_announcements(db, user_id=ctx.user_id, roles=ctx.roles)

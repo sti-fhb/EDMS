@@ -4,6 +4,7 @@
 - 公告（FR-003）：近 30 天已發布版本（新增/新版本兩類），發布時間 DESC；空清單由前端呈現 DM-MSG-DM00-001。
 """
 
+from collections.abc import Iterable
 from datetime import timedelta
 
 from app.core.utils import utcnow
@@ -24,19 +25,21 @@ class DashboardService:
     def __init__(self, repository: DashboardRepository | None = None) -> None:
         self._repo = repository or DashboardRepository()
 
-    async def get_stats(self, db) -> DashboardStats:
-        """4 內建分類之已發布目前版本數 + 總計（0 亦顯示卡片；固定順序）。"""
-        counts = await self._repo.published_counts_by_category(db)
+    async def get_stats(self, db, *, user_id: str, roles: Iterable[str]) -> DashboardStats:
+        """4 內建分類之已發布目前版本數 + 總計（0 亦顯示卡片；固定順序；套可見性）。"""
+        counts = await self._repo.published_counts_by_category(db, user_id=user_id, roles=roles)
         cats = {code: name for code, name in await self._repo.builtin_categories(db)}
         ordered = [c for c in _CATEGORY_ORDER if c in cats] + [c for c in cats if c not in _CATEGORY_ORDER]
         items = [CategoryStat(category_code=c, category_name=cats[c], count=counts.get(c, 0)) for c in ordered]
         total = sum(i.count for i in items)
         return DashboardStats(items=items, total=total)
 
-    async def get_announcements(self, db) -> list[AnnouncementItem]:
-        """近 30 天已發布版本（新增/新版本），發布時間 DESC；無事件回空清單。"""
+    async def get_announcements(self, db, *, user_id: str, roles: Iterable[str]) -> list[AnnouncementItem]:
+        """近 30 天已發布版本（新增/新版本），發布時間 DESC；無事件回空清單；套可見性。"""
         cutoff = utcnow() - timedelta(days=_ANNOUNCE_DAYS)
-        rows = await self._repo.recent_announcements(db, cutoff=cutoff, limit=_ANNOUNCE_LIMIT)
+        rows = await self._repo.recent_announcements(
+            db, cutoff=cutoff, limit=_ANNOUNCE_LIMIT, user_id=user_id, roles=roles
+        )
         return [
             AnnouncementItem(
                 doc_id=r.doc_id,

@@ -67,8 +67,8 @@ function AnnouncementRow({ item, onOpen }: { item: AnnouncementItem; onOpen: (do
  */
 export function DmDashboardPage() {
   const navigate = useNavigate()
-  const { data: stats, isPending: statsLoading } = useDashboardStats()
-  const { data: announcements, isPending: annLoading } = useAnnouncements()
+  const { data: stats, isPending: statsLoading, isError: statsError } = useDashboardStats()
+  const { data: announcements, isPending: annLoading, isError: annError } = useAnnouncements()
 
   return (
     <Box sx={{ p: 3 }}>
@@ -90,6 +90,8 @@ export function DmDashboardPage() {
           <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
             <CircularProgress size={28} />
           </Box>
+        ) : statsError ? (
+          <Alert severity="error">載入失敗，請稍後再試。</Alert>
         ) : (
           <>
             <Box
@@ -128,6 +130,8 @@ export function DmDashboardPage() {
           <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
             <CircularProgress size={28} />
           </Box>
+        ) : annError ? (
+          <Alert severity="error">載入失敗，請稍後再試。</Alert>
         ) : (announcements ?? []).length === 0 ? (
           <Alert severity="info">近期無新發布文件</Alert>
         ) : (
