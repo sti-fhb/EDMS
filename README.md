@@ -226,6 +226,21 @@ docker compose exec edms-backend uv run alembic upgrade head
 - 後端 API：`http://localhost:8001`
 - PostgreSQL：`localhost:5441`（避免與 TBMS 5440、本機 5432 衝突）
 
+### 正式部署：client IP 與限流前提
+
+反向代理後方部署時，client IP 的可信度是**速率限制與稽核日誌的前提**：`X-Forwarded-For`
+可被用戶端偽造，偽造即可繞過 IP 維度限流（密碼噴灑）並污染稽核來源。應用預設完全忽略
+XFF（`TRUSTED_PROXY_COUNT=0`），需依實際代理鏈設定。
+
+必要設定（詳見 [docs/ref/deployment-client-ip.md](docs/ref/deployment-client-ip.md)）：
+
+- `backend/.env` 設 `TRUSTED_PROXY_COUNT`（單台 nginx＝1；Cloudflare Tunnel → nginx＝2）。
+  `DEBUG=false` 時**必須明示設定**，未設定啟動即擋；且必須精確等於實際追加段數——
+  設過小會讓全體共用一個限流桶，設過大則偽造成立（**不是** fail-safe）
+- uvicorn 以 `--no-proxy-headers` 啟動（其內建 proxy-headers 預設開啟且會覆寫連線對端），
+  並確認 `FORWARDED_ALLOW_IPS` 未設為 `*` 或內網 CIDR
+- uvicorn 以 `--workers 1` 啟動（限流計數存於行程記憶體，多 worker 會稀釋門檻）
+
 ---
 
 ## 常見問題

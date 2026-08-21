@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import tomllib
-import traceback
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -13,9 +12,11 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
+from app.core.log_redaction import format_exception_for_log
 from app.core.request_context import get_client_ip, set_client_ip
 from app.dm.bootstrap import register_dm_module
 from app.dm.dashboard.router import router as dm_dashboard_router
@@ -125,16 +126,21 @@ register_et_module()
 
 @app.middleware("http")
 async def client_ip_middleware(request: Request, call_next):
-    """每個 request 進入時自動記錄 client IP 至 contextvars。
+    """每個 request 進入時判定 client IP 並記錄至 contextvars。
 
-    優先從 X-Forwarded-For header 取得真實 IP（反向代理場景），
-    fallback 到 request.client.host。
+    safe-by-default（#23）：預設不採信可偽造的 X-Forwarded-For，一律用連線對端；
+    僅在部署方設定 TRUSTED_PROXY_COUNT 時，才採信我方代理鏈追加的段落。
+    判定邏輯見 app/core/client_ip.resolve_client_ip；設定於每個 request 讀取，
+    速率限制與稽核日誌共用此 contextvar，故兩者取得的 IP 恆一致。
     """
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-    else:
-        client_ip = request.client.host if request.client else None
+    client_ip = resolve_client_ip(
+        peer=request.client.host if request.client else None,
+        # 依 RFC 7230 §3.2.2：同名 header 多次出現等同以逗號依序併為單一清單。
+        # 不可用 headers.get()（只取第一個出現值）——攻擊者另送一個 X-Forwarded-For
+        # 即可讓代理追加的段落被忽略，繞過固定段數判定。
+        forwarded_for=", ".join(request.headers.getlist("X-Forwarded-For")) or None,
+        trusted_proxy_count=settings.TRUSTED_PROXY_COUNT,
+    )
     set_client_ip(client_ip)
     try:
         return await call_next(request)
@@ -186,17 +192,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """攔截所有未預期例外，記錄完整 stack trace 後回傳通用 500。
+    """攔截所有未預期例外，記錄去識別化後的例外摘要與堆疊後回傳通用 500。
 
-    前端只看到 "Internal Server Error"，不洩漏內部細節；
-    後端 log 保留完整錯誤資訊供排查。
+    前端只看到 "Internal Server Error"，不洩漏內部細節。
+    後端 log 保留例外型別、遮罩後訊息與堆疊位置供排查；刻意不用 traceback.format_exc()
+    ——SQLAlchemy StatementError 的訊息含 SQL 與綁定參數，會把個資寫進 log（#123），
+    改由 app/core/log_redaction.format_exception_for_log 去識別化。
     AppError / HTTPException / RequestValidationError 均有專屬 handler，不會走到此處。
     """
     logger.error(
         "Unhandled exception on %s %s\n%s",
         request.method,
         request.url.path,
-        traceback.format_exc(),
+        format_exception_for_log(exc),
     )
     return JSONResponse(
         status_code=500,
