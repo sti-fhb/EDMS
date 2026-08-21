@@ -127,7 +127,10 @@ async def client_ip_middleware(request: Request, call_next):
     """
     client_ip = resolve_client_ip(
         peer=request.client.host if request.client else None,
-        forwarded_for=request.headers.get("X-Forwarded-For"),
+        # 依 RFC 7230 §3.2.2：同名 header 多次出現等同以逗號依序併為單一清單。
+        # 不可用 headers.get()（只取第一個出現值）——攻擊者另送一個 X-Forwarded-For
+        # 即可讓代理追加的段落被忽略，繞過固定段數判定。
+        forwarded_for=", ".join(request.headers.getlist("X-Forwarded-For")) or None,
         trusted_proxy_count=settings.TRUSTED_PROXY_COUNT,
     )
     set_client_ip(client_ip)

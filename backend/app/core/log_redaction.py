@@ -26,7 +26,6 @@ _SENSITIVE_SECTION_RE = re.compile(
     re.DOTALL,
 )
 _SECTION_MARK = "[SQL 與參數已遮罩]"
-_BLANK_LINES_RE = re.compile(r"[ \t]*\n[ \t]*(?:\n[ \t]*)+")
 # 保守樣式：只認一般 Email 字面，避免誤傷檔名 / 網址
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
@@ -45,7 +44,9 @@ def redact_sensitive(text: str) -> str:
     """
     redacted, removed = _SENSITIVE_SECTION_RE.subn("", text)
     if removed:
-        redacted = f"{_BLANK_LINES_RE.sub(chr(10), redacted).rstrip()} {_SECTION_MARK}"
+        # 區段移除後常留下空行，壓成單行便於 grep；未移除者原樣回傳、不改寫一般訊息
+        kept = " ".join(line.strip() for line in redacted.splitlines() if line.strip())
+        redacted = f"{kept} {_SECTION_MARK}"
     return _EMAIL_RE.sub(_mask_email, redacted)
 
 

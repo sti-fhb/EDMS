@@ -50,3 +50,19 @@ async def test_setting_read_per_request(monkeypatch):
     assert await _get_client_ip({"X-Forwarded-For": "203.0.113.7"}) == _PEER
     monkeypatch.setattr(settings, "TRUSTED_PROXY_COUNT", 1)
     assert await _get_client_ip({"X-Forwarded-For": "203.0.113.7"}) == "203.0.113.7"
+
+
+async def test_multiple_forwarded_for_headers_are_joined(monkeypatch):
+    """攻擊者另送一個 X-Forwarded-For header 時，仍以代理追加的段落為準。
+
+    依 RFC 7230 §3.2.2，同名 header 多次出現等同以逗號依序併為單一清單；
+    若只取第一個出現值（headers.get），攻擊者即可讓代理追加的段落被忽略。
+    """
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_COUNT", 1)
+    transport = ASGITransport(app=app, client=(_PEER, 12345))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/api/client-info",
+            headers=[("X-Forwarded-For", "9.9.9.9"), ("X-Forwarded-For", "203.0.113.7")],
+        )
+    assert resp.json()["ip"] == "203.0.113.7"

@@ -91,8 +91,10 @@ class SlidingWindowRateLimiter:
 def rate_limit_by_ip(limiter: SlidingWindowRateLimiter, scope: str) -> Callable[[], Awaitable[None]]:
     """產生「依來源 IP 限流」的 FastAPI dependency。
 
-    IP 取自 `get_client_ip()`（由 main.py client_ip_middleware 設定，已處理反向代理
-    X-Forwarded-For，與稽核日誌 IP 一致）。scope 前綴使不同端點的計數互不污染。
+    IP 取自 `get_client_ip()`（由 main.py client_ip_middleware 設定，與稽核日誌 IP 一致）。
+    該 IP 預設為不可偽造的連線對端；僅在部署方設定 `TRUSTED_PROXY_COUNT` 時才採信
+    X-Forwarded-For 的固定段位（#23，見 app/core/client_ip.py）。
+    scope 前綴使不同端點的計數互不污染。
 
     Args:
         limiter: 共用的限流器實例。
