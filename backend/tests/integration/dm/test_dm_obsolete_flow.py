@@ -119,8 +119,7 @@ async def _email_count(db, template_code, recipient):
     # 限 STATUS='PENDING'：範本渲染失敗（缺 param key）會寫 STATUS='FAILED' + 空內容，若不篩會把失敗誤計為成功。
     return await db.scalar(
         text(
-            'SELECT count(*) FROM "DP_EMAIL_LOG" '
-            'WHERE "TEMPLATE_CODE"=:t AND "RECIPIENT"=:r AND "STATUS"=\'PENDING\''
+            'SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=:t AND "RECIPIENT"=:r AND "STATUS"=\'PENDING\''
         ).bindparams(t=template_code, r=recipient)
     )
 
@@ -134,8 +133,14 @@ async def test_initiate_transits_pending_obsolete_and_notifies(db):
     doc, _ = await _published_doc(db, "DM-SOP-000401")
 
     result = await _svc.initiate(
-        db, doc_id="DM-SOP-000401", reason="流程已停辦", reviewer_id="rev1",
-        file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+        db,
+        doc_id="DM-SOP-000401",
+        reason="流程已停辦",
+        reviewer_id="rev1",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op("ed"),
     )
 
     doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000401"))
@@ -148,9 +153,7 @@ async def test_initiate_transits_pending_obsolete_and_notifies(db):
     assert await _email_count(db, "OBS_SUBMIT", "rev1@e.com") == 1  # 通知指定審核者（STATUS=PENDING）
     # 內容驗證：確認 params key 對齊範本佔位（渲染成功、非空信）——堵住「author_name vs applicant_name」類回歸
     body = await db.scalar(
-        text(
-            'SELECT "BODY" FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'OBS_SUBMIT\' AND "RECIPIENT"=\'rev1@e.com\''
-        )
+        text('SELECT "BODY" FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'OBS_SUBMIT\' AND "RECIPIENT"=\'rev1@e.com\'')
     )
     assert body and "流程已停辦" in body and "文件DM-SOP-000401" in body
 
@@ -161,8 +164,14 @@ async def test_initiate_with_attachment_saves_obsolete_file(db):
     await _published_doc(db, "DM-SOP-000402")
 
     result = await _svc.initiate(
-        db, doc_id="DM-SOP-000402", reason="停辦函文", reviewer_id="rev1",
-        file_name="停辦函文.pdf", file_bytes=b"%PDF-1.4 letter", file_mime=_PDF, op=_op("ed"),
+        db,
+        doc_id="DM-SOP-000402",
+        reason="停辦函文",
+        reviewer_id="rev1",
+        file_name="停辦函文.pdf",
+        file_bytes=b"%PDF-1.4 letter",
+        file_mime=_PDF,
+        op=_op("ed"),
     )
 
     review = await db.scalar(select(DmReview).where(DmReview.review_id == result.review_id))
@@ -174,8 +183,14 @@ async def test_initiate_missing_reason_blocked(db):
     await _published_doc(db, "DM-SOP-000403")
     with pytest.raises(AppError) as e:
         await _svc.initiate(
-            db, doc_id="DM-SOP-000403", reason="  ", reviewer_id="rev1",
-            file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+            db,
+            doc_id="DM-SOP-000403",
+            reason="  ",
+            reviewer_id="rev1",
+            file_name=None,
+            file_bytes=None,
+            file_mime=None,
+            op=_op("ed"),
         )
     assert e.value.error_code == "DM_DOC_014"  # DM-MSG-DM02-011
 
@@ -184,8 +199,14 @@ async def test_initiate_missing_reviewer_blocked(db):
     await _published_doc(db, "DM-SOP-000404")
     with pytest.raises(AppError) as e:
         await _svc.initiate(
-            db, doc_id="DM-SOP-000404", reason="停辦", reviewer_id="",
-            file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+            db,
+            doc_id="DM-SOP-000404",
+            reason="停辦",
+            reviewer_id="",
+            file_name=None,
+            file_bytes=None,
+            file_mime=None,
+            op=_op("ed"),
         )
     assert e.value.error_code == "DM_DOC_015"  # DM-MSG-DM02-014
 
@@ -194,8 +215,14 @@ async def test_initiate_reviewer_is_self_blocked(db):
     await _published_doc(db, "DM-SOP-000405")
     with pytest.raises(AppError) as e:
         await _svc.initiate(
-            db, doc_id="DM-SOP-000405", reason="停辦", reviewer_id="ed",
-            file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+            db,
+            doc_id="DM-SOP-000405",
+            reason="停辦",
+            reviewer_id="ed",
+            file_name=None,
+            file_bytes=None,
+            file_mime=None,
+            op=_op("ed"),
         )
     assert e.value.error_code == "DM_REVIEW_001"  # 不可自審自核
 
@@ -205,8 +232,14 @@ async def test_initiate_non_published_doc_blocked(db):
     await _doc(db, "DM-SOP-000406", status="DRAFT", audience=("全體",))
     with pytest.raises(AppError) as e:
         await _svc.initiate(
-            db, doc_id="DM-SOP-000406", reason="停辦", reviewer_id="rev1",
-            file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+            db,
+            doc_id="DM-SOP-000406",
+            reason="停辦",
+            reviewer_id="rev1",
+            file_name=None,
+            file_bytes=None,
+            file_mime=None,
+            op=_op("ed"),
         )
     assert e.value.error_code == "DM_DOC_016"
 
@@ -217,16 +250,27 @@ async def test_initiate_blocked_when_new_version_in_review(db):
     nv = await _add_version(db, "DM-SOP-000407", "2.0", status="PENDING_REVIEW")
     db.add(
         DmReview(
-            doc_id="DM-SOP-000407", version_id=nv.version_id, review_type="NEW_VERSION",
-            assigned_reviewer="rev1", status="PENDING", submit_date=utcnow(),
-            created_user="ed", created_date=utcnow(),
+            doc_id="DM-SOP-000407",
+            version_id=nv.version_id,
+            review_type="NEW_VERSION",
+            assigned_reviewer="rev1",
+            status="PENDING",
+            submit_date=utcnow(),
+            created_user="ed",
+            created_date=utcnow(),
         )
     )
     await db.flush()
     with pytest.raises(AppError) as e:
         await _svc.initiate(
-            db, doc_id="DM-SOP-000407", reason="停辦", reviewer_id="rev1",
-            file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+            db,
+            doc_id="DM-SOP-000407",
+            reason="停辦",
+            reviewer_id="rev1",
+            file_name=None,
+            file_bytes=None,
+            file_mime=None,
+            op=_op("ed"),
         )
     assert e.value.error_code == "DM_REVIEW_002"
 
@@ -235,8 +279,14 @@ async def test_initiate_invalid_attachment_format_blocked(db):
     await _published_doc(db, "DM-SOP-000408")
     with pytest.raises(AppError) as e:
         await _svc.initiate(
-            db, doc_id="DM-SOP-000408", reason="停辦", reviewer_id="rev1",
-            file_name="evil.exe", file_bytes=b"MZ", file_mime="application/octet-stream", op=_op("ed"),
+            db,
+            doc_id="DM-SOP-000408",
+            reason="停辦",
+            reviewer_id="rev1",
+            file_name="evil.exe",
+            file_bytes=b"MZ",
+            file_mime="application/octet-stream",
+            op=_op("ed"),
         )
     assert e.value.error_code == "DM_FILE_002"
     # 檢核未過 → 不建立 review、文件維持已發布
@@ -252,8 +302,14 @@ async def _pending_obsolete(db, doc_id, *, reason="停辦", reviewer="rev1"):
     """已發布文件發起廢止後之狀態（review PENDING OBSOLETE + doc PENDING_OBSOLETE）。"""
     await _published_doc(db, doc_id)
     result = await _svc.initiate(
-        db, doc_id=doc_id, reason=reason, reviewer_id=reviewer,
-        file_name=None, file_bytes=None, file_mime=None, op=_op("ed"),
+        db,
+        doc_id=doc_id,
+        reason=reason,
+        reviewer_id=reviewer,
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op("ed"),
     )
     return result.review_id
 
@@ -297,8 +353,14 @@ async def test_reject_obsolete_restores_published(db):
 
 async def _obsolete_with_file(db, doc_id):
     result = await _svc.initiate(
-        db, doc_id=doc_id, reason="停辦函文", reviewer_id="rev1",
-        file_name="letter.pdf", file_bytes=b"%PDF-1.4 letter", file_mime=_PDF, op=_op("ed"),
+        db,
+        doc_id=doc_id,
+        reason="停辦函文",
+        reviewer_id="rev1",
+        file_name="letter.pdf",
+        file_bytes=b"%PDF-1.4 letter",
+        file_mime=_PDF,
+        op=_op("ed"),
     )
     return result.review_id
 
@@ -354,8 +416,14 @@ async def test_http_download_published_version_during_pending_obsolete(db, clien
     with open(v.file_path, "wb") as f:
         f.write(b"%PDF-1.4 doc")
     await _svc.initiate(
-        db, doc_id="DM-SOP-000441", reason="停辦", reviewer_id="rev1",
-        file_name=None, file_bytes=None, file_mime=None, op=_op("ed2"),
+        db,
+        doc_id="DM-SOP-000441",
+        reason="停辦",
+        reviewer_id="rev1",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op("ed2"),
     )
     token = create_access_token(sub="ed2", ttl_minutes=15)
     resp = await client.get(
