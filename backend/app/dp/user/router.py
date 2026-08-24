@@ -9,7 +9,13 @@ from app.core.db import get_db
 from app.core.module_roles import module_role_gate
 from app.core.operator import OperatorInfo, get_operator
 from app.core.password_gate import require_password_current
-from app.core.rate_limit import LOGIN_RATE_MAX, RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.core.rate_limit import (
+    LOGIN_RATE_MAX,
+    RATE_WINDOW_SECONDS,
+    REGISTER_RATE_MAX,
+    SlidingWindowRateLimiter,
+    rate_limit_by_ip,
+)
 from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.email_change_service import EmailChangeService
 from app.dp.user.forgot_service import ForgotPasswordService, ResetPasswordService
@@ -40,8 +46,10 @@ from app.services import ParamService
 
 # 登入限流器（行程內；IP 與帳號維度共用同一器、以 key 前綴區分）
 _login_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
-# 註冊限流器（IP 維度；防批量灌帳號）
-_register_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+# 註冊限流器（IP + 帳號雙維度共用此實例）。門檻與登入解耦、且刻意較登入寬鬆——
+# 自助註冊為主要入口，須容納「同一出口 IP 多人同時註冊」的正常尖峰；同一 Email 的
+# 重複註冊由下方 600 秒寄信冷卻把關，不靠本門檻（理由詳見 core/rate_limit.py 的 #44 段）
+_register_limiter = SlidingWindowRateLimiter(max_requests=REGISTER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 忘記密碼申請 / 重設限流器（IP + 帳號維度；防列舉與暴力）
 _forgot_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 _reset_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
@@ -118,8 +126,15 @@ async def register(
 
     驗證信寄送冷卻（#74）：check 於檢核前（防列舉）、record 於送信成功後——註冊檢核失敗
     （422/409）不 record，不誤觸冷卻；與 resend 共用同一 Email 額度，堵住繞道重發。
+
+    例外（#86）：**已驗證帳號**的存在性檢核置於冷卻之前。防列舉在此無實益——register 本來
+    就以 409「已被註冊」對外洩露已驗證 Email 的存在（冷卻窗外即可分辨），冷卻期擋著只是讓
+    使用者白等倒數。pending / 全新 Email 維持冷卻優先，防狂發語意不變。
     """
     _register_limiter.hit(f"register:acct:{data.email}")
+    # 已驗證帳號優先於冷卻回應（#86）：該狀態是終局的，等倒數結束也不會變，
+    # 且此路徑本來就不送信、冷卻無防狂發價值——先擋可免使用者白等一輪。
+    await _register_service.assert_email_not_registered(db, data.email)
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
     key = _verify_send_key(data.email)
     _verify_send_cooldown.check(key, cooldown_sec)
