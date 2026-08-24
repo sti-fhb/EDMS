@@ -13,6 +13,11 @@
 原本這兩個值分散在四個檔案各自定義，沒有任何機制保證一致。集中於此後，
 `tests/unit/dp/test_dp_user_pending_kinds.py` 會掃 `backend/app` 確保字面量不再出現於他處——
 要改值只能改這裡，改動者也就看得到上面的代價說明。
+
+護欄的射程僅及於 `backend/app`：`alembic/versions/` 內的字面量刻意不納入（migration 是
+歷史快照，不應依賴 app 常數，否則改常數會回頭改變既有 migration 的語意）。另外，值域
+**未在 DB 層封閉**（`KIND` 為 VARCHAR、無 CHECK），故本護欄證明的是「只定義一次」，
+不是「只有這兩個值進得了 DB」。
 """
 
 # US2 自助註冊：建立即帶 PWD_HASH，驗證通過後搬入 DP_USER

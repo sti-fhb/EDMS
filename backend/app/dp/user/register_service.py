@@ -28,7 +28,6 @@ _EMAIL_TAKEN_MSG = "此 Email 已被註冊，請直接登入或使用忘記密�
 # 措辭刻意不提「管理者邀請」：本端點為公開匿名，不對外揭露組織脈絡（該句型亦常被釣魚信複用）。
 # 認證後的管理者端點（DP_USER_010）則可明說，此不對稱為刻意設計。
 _INVITE_PENDING_MSG = "此 Email 已有待完成的帳號啟用程序，請至信箱收取信件完成啟用"
-# 待啟用列來源；與 repository / activate_service / users.service 同值（各模組自持，未共用常數）
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _DEFAULT_MIN_LEN = 8
 _DEFAULT_CHAR_TYPES = 3

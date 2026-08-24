@@ -103,6 +103,9 @@ class ResendVerificationService:
         # 用條件式刪除（非無條件版）：上面的 kind 檢查到此處之間隔著兩次 DB 讀取與 token 產生，
         # 若該空窗內原 SELF_REGISTER 列被驗證消耗、管理者又對同 Email 發出邀請，無條件刪除會
         # 吃掉那筆新邀請（與 #125 同一個 TOCTOU 形狀）。保留邀請後改由下方 UNIQUE 撞成 409。
+        # ⚠️ 與 register_service 的不對稱（刻意）：後者在覆蓋**逾期**邀請時補一筆 DELETE 稽核
+        # （#125，供管理者追查邀請為何消失）；本路徑不補——要走到「resend 刪掉逾期邀請」需三方
+        # 毫秒級競態，且本服務未持 AuditLogService。日後若要留痕，應與 register_service 對齊。
         await self._repo.delete_pending_unless_active_invite(db, email, now)
         try:
             await self._repo.create_pending_registration(
@@ -115,8 +118,10 @@ class ResendVerificationService:
                 now=now,
             )
         except IntegrityError as exc:
-            # 並發重寄 / 註冊競態：另一交易已搶插同 Email pending → 撞 UQ。轉乾淨 409（交 get_db
-            # rollback，避免對失敗 session commit）。僅發生於「pending 已存在」下的競態，不洩露存在性。
+            # 撞 UQ 的兩條路徑，皆為競態、皆不洩露存在性（攻擊者無法迫使其發生）：
+            # (1) 另一交易已搶插同 Email pending；
+            # (2) 條件式刪除保留了空窗內出現的**有效**管理者邀請（#137），故插不進去。
+            # 轉乾淨 409（交 get_db rollback，避免對失敗 session commit）。
             raise AppError(
                 status_code=409, detail="此 Email 註冊處理中，請稍後再試或直接登入", error_code="DP_USER_005"
             ) from exc
