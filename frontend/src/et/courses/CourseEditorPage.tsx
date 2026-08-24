@@ -34,6 +34,7 @@ import {
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
+import { fromDateTimeLocalInput, toDateTimeLocalInput } from "../../utils/date"
 
 /** 樂觀鎖衝突之 error code——後端 `ensure_version_matched` 於版本不符時回此碼。 */
 const LOCK_CONFLICT = "ET_LOCK_001"
@@ -45,11 +46,6 @@ const EMPTY_FORM = {
   open_end_at: "",
   require_approval: false,
   tag_ids: [] as number[],
-}
-
-/** `datetime-local` 需要 `YYYY-MM-DDTHH:mm`；後端回 ISO 8601（含秒與時區）。 */
-function toLocalInput(iso: string | null): string {
-  return iso ? iso.slice(0, 16) : ""
 }
 
 /**
@@ -95,8 +91,8 @@ export function EtCourseEditorPage() {
     setForm({
       course_name: course.course_name,
       description: course.description ?? "",
-      open_start_at: toLocalInput(course.open_start_at),
-      open_end_at: toLocalInput(course.open_end_at),
+      open_start_at: toDateTimeLocalInput(course.open_start_at),
+      open_end_at: toDateTimeLocalInput(course.open_end_at),
       require_approval: course.require_approval,
       tag_ids: course.tag_ids,
     })
@@ -125,8 +121,8 @@ export function EtCourseEditorPage() {
   const toPayload = (): CoursePayload => ({
     course_name: form.course_name.trim(),
     description: form.description.trim() || null,
-    open_start_at: form.open_start_at || null,
-    open_end_at: form.open_end_at || null,
+    open_start_at: fromDateTimeLocalInput(form.open_start_at),
+    open_end_at: fromDateTimeLocalInput(form.open_end_at),
     require_approval: form.require_approval,
     tag_ids: form.tag_ids,
   })

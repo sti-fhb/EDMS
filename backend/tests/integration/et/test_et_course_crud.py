@@ -97,6 +97,29 @@ class TestCreateDraft:
         r = await client.post(_URL, json={"course_name": "課程", "description": "字" * 501}, headers=_bearer(uid))
         assert r.status_code == 422
 
+    async def test_起訖時間一律以_aware_datetime_儲存(self, client, db) -> None:
+        """`OPEN_START_AT` / `OPEN_END_AT` 為 TIMESTAMPTZ；naive 值會被 PostgreSQL
+        以連線時區解讀而靜默位移，使 #204「起始時間前學員不可見」與 #16 到期自動關閉
+        算錯。schema 之 `_ensure_aware` 對 naive 補 UTC——此處驗兩種輸入皆落為同一時刻。
+        """
+        uid = await _user(db, "ETC_C7")
+        # 前端正常送帶時區之 ISO 8601；此處另送 naive 值模擬其他客戶端
+        r = await client.post(
+            _URL,
+            json={
+                "course_name": "課程",
+                "open_start_at": "2026-04-15T09:00:00Z",
+                "open_end_at": "2026-07-31T17:00",
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 201
+        course = await db.scalar(select(EtCourse).where(EtCourse.course_id == r.json()["course_id"]))
+        assert course.open_start_at.tzinfo is not None
+        assert course.open_end_at.tzinfo is not None
+        assert course.open_start_at.hour == 9, "帶 Z 之輸入不應被再次位移"
+        assert course.open_end_at.hour == 17, "naive 輸入應視為 UTC，不得依連線時區位移"
+
     async def test_掛停用標籤被擋(self, client, db) -> None:
         uid = await _user(db, "ETC_C6")
         now = utcnow()
@@ -116,6 +139,45 @@ class TestCreateDraft:
         r = await client.post(_URL, json={"course_name": "課程", "tag_ids": [disabled]}, headers=_bearer(uid))
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_COURSE_004"
+
+
+class TestInputBounds:
+    """輸入界限（Security Review，#202）。
+
+    這些界限的價值不在擋住惡意使用者，而在**讓越界回 4xx 而非未處理的 500**——
+    500 代表例外逃出應用層，既是放大攻擊面，也讓真正的錯誤被雜訊淹沒。
+    比照 #185 `assign` 之 `_MAX_GROUPS` / `_MAX_BIGINT` 前例。
+    """
+
+    async def test_超大_course_id_回_422_而非_500(self, client, db) -> None:
+        """路徑參數超出 BIGINT 時，asyncpg 比對會溢位；未設界限會成為未處理的 500。"""
+        uid = await _user(db, "ETC_B1")
+        r = await client.get(f"{_URL}/99999999999999999999999", headers=_bearer(uid))
+        assert r.status_code == 422
+
+    async def test_超長_tag_ids_被擋(self, client, db) -> None:
+        """數萬筆的 `IN (...)` 會讓 SQLAlchemy / asyncpg 拋未處理例外。"""
+        uid = await _user(db, "ETC_B2")
+        r = await client.post(
+            _URL, json={"course_name": "課程", "tag_ids": list(range(1, 50001))}, headers=_bearer(uid)
+        )
+        assert r.status_code == 422
+
+    async def test_非正數_tag_id_被擋(self, client, db) -> None:
+        """`TAG_ID` 為 Identity 正整數；負數 / 零屬不合法輸入。"""
+        uid = await _user(db, "ETC_B3")
+        r = await client.post(_URL, json={"course_name": "課程", "tag_ids": [-1]}, headers=_bearer(uid))
+        assert r.status_code == 422
+
+    async def test_超長_chapter_ids_被擋(self, client, db) -> None:
+        uid = await _user(db, "ETC_B4")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(uid))
+        r = await client.put(
+            f"{_URL}/{created.json()['course_id']}/chapters/order",
+            json={"chapter_ids": list(range(1, 50001)), "version": 0},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 422
 
 
 class TestReadAndOwnership:
@@ -147,6 +209,24 @@ class TestReadAndOwnership:
         r = await client.put(f"{_URL}/{cid}", json={"course_name": "改名", "version": ver}, headers=_bearer(other))
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_學員不可讀取課程詳細(self, client, db) -> None:
+        """ET02 為教師畫面。若只掛 ET 存取閘，人人皆有學員角色 → 任何登入者都能讀到
+        他人**草稿**課程，違反 spec_us3 AC 8「儲存草稿⋯⋯學員端不顯示」。
+        學員端之課程讀取有自己的可見性規則（PUBLISHED 且 now >= OPEN_START_AT），
+        屬 ET Issue #4 / #5 之端點。
+        """
+        owner = await _user(db, "ETC_R7")
+        student = await _user(db, "ETC_R8", roles=(ROLE_STUDENT,))
+        created = await client.post(_URL, json={"course_name": "草稿課"}, headers=_bearer(owner))
+        r = await client.get(f"{_URL}/{created.json()['course_id']}", headers=_bearer(student))
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"
+
+    async def test_學員不可取得標籤下拉(self, client, db) -> None:
+        student = await _user(db, "ETC_R9", roles=(ROLE_STUDENT,))
+        r = await client.get("/api/et/tags", headers=_bearer(student))
+        assert r.status_code == 403
 
     async def test_查無課程回_404(self, client, db) -> None:
         uid = await _user(db, "ETC_R6")

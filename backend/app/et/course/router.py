@@ -5,16 +5,24 @@ router-level 掛 `get_et_context`（需任一 ET 角色，無則 403 `ET_AUTH_00
 **建立課程另掛 `require_et_roles(ET_TEACHER)`**（SA 裁示 Q2，#202）：僅具教師角色者
 可建立；管理者若需建課程，於 DP 後台自行加掛教師角色即可（三角色可複選）。
 
+**讀取端亦限教師 / 管理者**：本 router 服務的是 ET02 教師編輯畫面。若只掛
+`get_et_context`，等同任何登入者（人人皆有學員角色）都能讀到他人的**草稿**課程，
+違反 spec_us3 AC 8「儲存草稿⋯⋯學員端不顯示」。學員端的課程讀取有自己的可見性規則
+（`STATUS=PUBLISHED` 且 `now >= OPEN_START_AT`），屬 ET Issue #4 / #5 之端點。
+
 編輯 / 刪除 / 章節操作之**擁有權**判定在 service（`ensure_owner`）——它需要先讀出
 課程才知道擁有者，無法以 dependency 表達。
 """
 
-from fastapi import APIRouter, Depends, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.et.course.schemas import (
+    MAX_BIGINT,
     ChapterCreateReq,
     ChapterItem,
     ChapterRenameReq,
@@ -27,15 +35,19 @@ from app.et.course.schemas import (
 )
 from app.et.course.service import EtCourseService
 from app.et.deps import EtContext, get_et_context, require_et_roles
-from app.et.roles.authz import ET_TEACHER
+from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
 
 
-@router.get("/tags", response_model=list[TagOption])
+@router.get(
+    "/tags",
+    response_model=list[TagOption],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
 async def list_tag_options(
-    course_id: int | None = None,
+    course_id: Annotated[int | None, Query(ge=1, le=MAX_BIGINT)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[TagOption]:
     """受訓單位標籤下拉。
@@ -46,9 +58,13 @@ async def list_tag_options(
     return await _service.list_tag_options(db, course_id=course_id)
 
 
-@router.get("/courses/{course_id}", response_model=CourseDetail)
+@router.get(
+    "/courses/{course_id}",
+    response_model=CourseDetail,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
 async def get_course(
-    course_id: int,
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> CourseDetail:
@@ -73,7 +89,7 @@ async def create_course(
 
 @router.put("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_course(
-    course_id: int,
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     req: CourseUpdateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -84,7 +100,7 @@ async def update_course(
 
 @router.delete("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_course(
-    course_id: int,
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -98,7 +114,7 @@ async def delete_course(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_chapter(
-    course_id: int,
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     req: ChapterCreateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -109,7 +125,7 @@ async def add_chapter(
 
 @router.put("/courses/{course_id}/chapters/order", status_code=status.HTTP_204_NO_CONTENT)
 async def reorder_chapters(
-    course_id: int,
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     req: ChapterReorderReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -120,7 +136,7 @@ async def reorder_chapters(
 
 @router.put("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def rename_chapter(
-    chapter_id: int,
+    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     req: ChapterRenameReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -131,7 +147,7 @@ async def rename_chapter(
 
 @router.delete("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chapter(
-    chapter_id: int,
+    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:

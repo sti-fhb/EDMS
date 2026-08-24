@@ -4,7 +4,7 @@
 `STATUS` 於本 issue 僅寫入 `DRAFT`——發布為 #204 之職責。
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,6 +13,15 @@ from pydantic import BaseModel, Field, field_validator
 DESCRIPTION_MAX_LEN = 500
 COURSE_NAME_MAX_LEN = 100
 CHAPTER_NAME_MAX_LEN = 100
+
+# 一次請求可帶的受訓單位標籤上限（比照 #185 `assign` 之 `_MAX_GROUPS`）。
+# 無上限時，數萬筆的 `IN (...)` 會讓 SQLAlchemy / asyncpg 拋未處理例外（500）——
+# 標籤庫實務上僅個位數～數十筆，此界限不影響正常使用。
+MAX_TAG_IDS = 100
+# 一門課程之章節數上限——重排送完整陣列，無界限同樣可被當成放大攻擊面。
+MAX_CHAPTER_IDS = 500
+# BIGINT 上限：路徑參數與 ID 超出時，asyncpg 比對會溢位成 500 而非 404。
+MAX_BIGINT = 9_223_372_036_854_775_807
 
 
 def _strip_or_none(value: str | None) -> str | None:
@@ -35,7 +44,7 @@ class CourseCreateReq(BaseModel):
     open_start_at: datetime | None = None
     open_end_at: datetime | None = None
     require_approval: bool = False
-    tag_ids: list[int] = Field(default_factory=list)
+    tag_ids: list[int] = Field(default_factory=list, max_length=MAX_TAG_IDS)
 
     @field_validator("course_name")
     @classmethod
@@ -50,6 +59,29 @@ class CourseCreateReq(BaseModel):
     @classmethod
     def _normalise_description(cls, v: str | None) -> str | None:
         return _strip_or_none(v)
+
+    @field_validator("tag_ids")
+    @classmethod
+    def _valid_tag_ids(cls, v: list[int]) -> list[int]:
+        """`TAG_ID` 為 Identity 正整數；非正數或超出 BIGINT 者於 DB 比對會溢位成 500。"""
+        if any(not (0 < tag_id <= MAX_BIGINT) for tag_id in v):
+            raise ValueError("受訓單位標籤 ID 不合法")
+        return v
+
+    @field_validator("open_start_at", "open_end_at")
+    @classmethod
+    def _ensure_aware(cls, v: datetime | None) -> datetime | None:
+        """外部進來的 naive datetime 補 UTC（`sti-backend-modules` §時間處理）。
+
+        `OPEN_START_AT` / `OPEN_END_AT` 於 DB 為 `TIMESTAMPTZ`；若收到無時區之值
+        （如 `<input type="datetime-local">` 原樣送出的 `2026-04-15T09:00`），
+        PostgreSQL 會以**連線時區**解讀而靜默位移，使「起始時間前學員不可見」
+        （#204）與「到期自動關閉」（#16 SCHET002）等時間判定算錯。
+
+        本專案前端已於 `utils/date.fromDateTimeLocalInput` 轉為帶時區之 ISO 8601；
+        此處為深度防禦，涵蓋其他客戶端與直呼 API 的情況。
+        """
+        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
 
 
 class CourseUpdateReq(CourseCreateReq):
@@ -89,7 +121,7 @@ class ChapterReorderReq(BaseModel):
     最後寫入者的完整意圖。`version` 為**課程層**版本——重排是課程結構的變更。
     """
 
-    chapter_ids: list[int]
+    chapter_ids: list[int] = Field(max_length=MAX_CHAPTER_IDS)
     version: int = Field(ge=0)
 
 

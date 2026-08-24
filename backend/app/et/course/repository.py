@@ -8,7 +8,7 @@
 使「版本不符」與「查無資料」的區辨留在 service。
 """
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
@@ -115,10 +115,16 @@ class EtCourseTagRepository:
                 )
                 .values(deleted=1, updated_user=operator.user_id, updated_date=now)
             )
+        if not to_add:
+            await db.flush()
+            return
+        # 一次撈出待新增者中「已存在（含已軟刪除）」之列，避免逐個 tag 各發一次 SELECT
+        existing_rows = await db.scalars(
+            select(EtCourseTag).where(EtCourseTag.course_id == course_id, EtCourseTag.tag_id.in_(to_add))
+        )
+        existing_by_tag = {row.tag_id: row for row in existing_rows}
         for tag_id in to_add:
-            existing = await db.scalar(
-                select(EtCourseTag).where(EtCourseTag.course_id == course_id, EtCourseTag.tag_id == tag_id)
-            )
+            existing = existing_by_tag.get(tag_id)
             if existing is None:
                 db.add(
                     EtCourseTag(
@@ -140,14 +146,16 @@ class EtCourseTagRepository:
         FR-ET-US3-03：停用標籤排除於**可選**清單，但課程既有已掛者保留、不受影響
         ——故編輯既有課程時仍須回傳那些停用標籤，否則前端無從顯示已掛的 chip。
         """
-        stmt = select(EtTag).where(EtTag.deleted == 0, EtTag.is_active.is_(True))
+        conds = [EtTag.is_active.is_(True)]
         if course_id is not None:
-            attached = select(EtCourseTag.tag_id).where(EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0)
-            stmt = select(EtTag).where(
-                EtTag.deleted == 0,
-                (EtTag.is_active.is_(True)) | (EtTag.tag_id.in_(attached)),
+            conds.append(
+                EtTag.tag_id.in_(
+                    select(EtCourseTag.tag_id).where(EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0)
+                )
             )
-        rows = await db.scalars(stmt.order_by(EtTag.display_order, EtTag.tag_id))
+        rows = await db.scalars(
+            select(EtTag).where(EtTag.deleted == 0, or_(*conds)).order_by(EtTag.display_order, EtTag.tag_id)
+        )
         return list(rows)
 
 
