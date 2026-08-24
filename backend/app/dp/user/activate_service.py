@@ -13,12 +13,12 @@ from app.core.password_policy import hash_password, validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.activation import activate_pending_account
+from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import hash_token
 from app.services import AuditLogService, ParamService
 
 _FUNC_NAME = "DP-USERS"
-_KIND_ADMIN_INVITE = "ADMIN_INVITE"
 _DEFAULT_MIN_LEN = 8
 _DEFAULT_CHAR_TYPES = 3
 _TOKEN_INVALID_MSG = "邀請連結無效"  # noqa: S105 — 使用者訊息，非密碼
@@ -50,7 +50,7 @@ class ActivateAccountService:
         ip = get_client_ip()
         pending = await self._repo.get_pending_by_token_hash(db, hash_token(token))
         # 僅 ADMIN_INVITE 走本端點；自助註冊 token 一律視為無效（該走 /verify-email）
-        if pending is None or pending.kind != _KIND_ADMIN_INVITE:
+        if pending is None or pending.kind != KIND_ADMIN_INVITE:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_USER_003")
         if pending.expires_date <= now:
             raise AppError(status_code=400, detail=_TOKEN_EXPIRED_MSG, error_code="DP_USER_004")

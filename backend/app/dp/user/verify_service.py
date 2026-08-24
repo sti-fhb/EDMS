@@ -18,13 +18,13 @@ from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.activation import activate_pending_account
+from app.dp.user.kinds import KIND_SELF_REGISTER
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
 
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _FUNC_NAME = "DP-REGISTER"
-_KIND_SELF_REGISTER = "SELF_REGISTER"
 _DEFAULT_TTL_MIN = 30
 _TOKEN_INVALID_MSG = "驗證連結無效"  # noqa: S105 — 使用者訊息，非密碼
 _TOKEN_EXPIRED_MSG = "驗證連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
@@ -55,7 +55,7 @@ class VerifyService:
         pending = await self._repo.get_pending_by_token_hash(db, hash_token(token))
         # 僅自助註冊 token 走本端點；管理者邀請（ADMIN_INVITE）token 一律視為無效（該走 /activate-account）。
         # 明確檢查而非靠 DP_USER.PWD_HASH NOT NULL 兜底（pwd_hash 於邀請列為 NULL），語意清楚、不依賴 DB 約束。
-        if pending is None or pending.kind != _KIND_SELF_REGISTER:
+        if pending is None or pending.kind != KIND_SELF_REGISTER:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_USER_003")
         if pending.expires_date <= now:
             raise AppError(status_code=400, detail=_TOKEN_EXPIRED_MSG, error_code="DP_USER_004")
@@ -93,14 +93,17 @@ class ResendVerificationService:
         不經此匿名端點，故遇邀請列一律靜默（等同不存在，維持防列舉）。
         """
         pending = await self._repo.get_pending_by_email(db, email)
-        if pending is None or pending.kind != _KIND_SELF_REGISTER:
+        if pending is None or pending.kind != KIND_SELF_REGISTER:
             return
 
         now = utcnow()
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
-        # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原姓名 / 密碼雜湊寫新列
-        await self._repo.delete_pending_by_email(db, email)
+        # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原姓名 / 密碼雜湊寫新列。
+        # 用條件式刪除（非無條件版）：上面的 kind 檢查到此處之間隔著兩次 DB 讀取與 token 產生，
+        # 若該空窗內原 SELF_REGISTER 列被驗證消耗、管理者又對同 Email 發出邀請，無條件刪除會
+        # 吃掉那筆新邀請（與 #125 同一個 TOCTOU 形狀）。保留邀請後改由下方 UNIQUE 撞成 409。
+        await self._repo.delete_pending_unless_active_invite(db, email, now)
         try:
             await self._repo.create_pending_registration(
                 db,
