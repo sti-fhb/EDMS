@@ -151,6 +151,17 @@ describe("ET02 課程編輯頁", () => {
     expect(screen.getByRole("button", { name: "儲存並繼續新增" })).toBeInTheDocument()
   })
 
+  it("新增模式顯示全部基本資料欄位且為空白 / 預設值", async () => {
+    renderNewEditor()
+    expect(await screen.findByRole("heading", { name: "新增課程" })).toBeInTheDocument()
+    expect(screen.getByLabelText(/課程名稱/)).toHaveValue("")
+    expect(screen.getByLabelText(/課程起始時間/)).toHaveValue("")
+    expect(screen.getByLabelText(/課程訖止時間/)).toHaveValue("")
+    expect(screen.getByLabelText(/課程描述/)).toHaveValue("")
+    expect(screen.getByLabelText("本課程需線下核可")).not.toBeChecked()
+    expect(screen.getByLabelText("狀態")).toHaveValue("草稿")
+  })
+
   it("章節名稱留空時於對話框內顯示錯誤且不關閉", async () => {
     const user = userEvent.setup()
     renderEditor()

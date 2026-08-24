@@ -20,6 +20,7 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
+import { moveId } from "./chapterOrder"
 import type { ChapterItem } from "./schemas"
 
 interface ChapterRowProps {
@@ -124,13 +125,12 @@ export function ChapterSection({
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) return
-    const ids = chapters.map((c) => c.chapter_id)
-    const from = ids.indexOf(Number(active.id))
-    const to = ids.indexOf(Number(over.id))
-    if (from < 0 || to < 0) return
-    const next = [...ids]
-    next.splice(to, 0, ...next.splice(from, 1))
-    onReorder(next)
+    const next = moveId(
+      chapters.map((c) => c.chapter_id),
+      Number(active.id),
+      Number(over.id),
+    )
+    if (next) onReorder(next)
   }
 
   return (
