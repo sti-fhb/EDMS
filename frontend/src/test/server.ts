@@ -641,6 +641,41 @@ export const handlers = [
   http.get("/api/dp/schedules/SCHET001/logs", () =>
     HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
   ),
+  // ET02 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
+  http.get("/api/et/tags", () =>
+    HttpResponse.json([
+      { tag_id: 1, tag_name: "全體", is_active: true },
+      { tag_id: 2, tag_name: "護理師", is_active: true },
+    ]),
+  ),
+  http.get("/api/et/courses/:courseId", ({ params }) =>
+    HttpResponse.json({
+      course_id: Number(params.courseId),
+      course_name: "採血作業訓練",
+      description: "課程說明",
+      status: "DRAFT",
+      open_start_at: null,
+      open_end_at: null,
+      require_approval: false,
+      version: 0,
+      owner_id: "U1",
+      owner_name: "王教師",
+      is_owner: true,
+      tag_ids: [2],
+      chapters: [
+        { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0 },
+        { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0 },
+      ],
+    }),
+  ),
+  http.post("/api/et/courses", () => HttpResponse.json({ course_id: 99, version: 0 }, { status: 201 })),
+  http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
+  http.post("/api/et/courses/:courseId/chapters", () =>
+    HttpResponse.json({ chapter_id: 13, chapter_name: "新章節", sort_order: 3, version: 0 }, { status: 201 }),
+  ),
+  http.put("/api/et/courses/:courseId/chapters/order", () => new HttpResponse(null, { status: 204 })),
+  http.put("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
+  http.delete("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
 ]
 
 export const server = setupServer(...handlers)
