@@ -19,10 +19,12 @@ import TableCell from "@mui/material/TableCell"
 import TableRow from "@mui/material/TableRow"
 import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
+import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import type { ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
+import { DmObsoleteDialog } from "./DmObsoleteDialog"
 import { downloadVersionFile, previewVersionFile } from "./detailService"
 import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
@@ -43,8 +45,10 @@ export function DmDetailPage() {
   const { docId = "" } = useParams()
   const navigate = useNavigate()
   const { message } = useNotification()
+  const queryClient = useQueryClient()
   const { data: detail, isPending, isError } = useDetail(docId)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [obsoleteOpen, setObsoleteOpen] = useState(false)
 
   const readOnly = detail?.is_obsolete ?? false
   // 已廢止：版本歷程自動展開
@@ -148,7 +152,7 @@ export function DmDetailPage() {
                 color="error"
                 disabled={!detail.can_edit}
                 reason={detail.edit_lock_reason}
-                onClick={() => navigate(`/dm/documents/${docId}/obsolete`)}
+                onClick={() => setObsoleteOpen(true)}
               />
             </>
           )}
@@ -180,6 +184,15 @@ export function DmDetailPage() {
           </Stack>
         </Paper>
       </Collapse>
+
+      {/* 廢止申請對話框（US8）：送出成功後刷新詳細頁為廢止待簽核 */}
+      <DmObsoleteDialog
+        open={obsoleteOpen}
+        docId={docId}
+        docName={detail.doc_name}
+        onClose={() => setObsoleteOpen(false)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["dm-detail", docId] })}
+      />
     </Box>
   )
 }
