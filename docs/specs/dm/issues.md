@@ -27,7 +27,7 @@
 | 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039（含 T035a）| #0；#3/#5（入口/去向）| [#169](https://github.com/sti-fhb/EDMS/issues/169) | ✅ 已交付（PR #172；spec 對齊 #175/#176）|
 | 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | [#178](https://github.com/sti-fhb/EDMS/issues/178) | ✅ 已交付（PR #180；catalog 略）|
 | 6 | 系統儀表板（入口頁 DM 概況 widget，#89）| US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5；DP #89 | [#193](https://github.com/sti-fhb/EDMS/issues/193) | 🚀 已開立（開發中）|
-| 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5 | — | 待補 |
+| 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5（本 issue 延伸 US6 核准 / 退回）| — | 📝 body 已撰寫（待開立）|
 | 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5 | — | 待補 |
 | 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | — | 待補 |
 | 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | — | 待補 |
@@ -586,9 +586,78 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #7 ~ #10：待補（增量模式）
+## Issue #7：[P2-延伸] DM — 文件廢止申請（US8 / UCDM05 / DM02）
 
-US8 文件廢止申請（#7）/ US9 個人專區（#8）/ US10 已廢止文件查詢（#9）/ US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us8.md](spec_us8.md)（FR-001~005，UCDM05，訊息 DM-MSG-DM02-011~015）；[data-model.md](data-model.md)（`DM_DOCUMENT` 狀態機 PENDING_OBSOLETE / OBSOLETE、`DM_REVIEW`（REVIEW_TYPE=OBSOLETE + `OBSOLETE_FILE_*`）、`DM_CHANGE_LOG`（OPERATION=OBSOLETE））
+**對應畫面**：DM02 文件詳細頁（[DmDetailPage](../../../frontend/src/dm/detail/DmDetailPage.tsx)）之「廢止此文件」→ 廢止申請確認 modal（內容示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `openObsoleteModal`：必填廢止原因 + 選填單檔附件 + 選指定審核者）；已廢止後之 read-only banner（申請人 / 核准者 / 原因 / 附件）由 DM02 呈現
+**階段**：P2-延伸
+**涵蓋 Tasks**：T047（廢止申請對話框：必填原因 + 選填附件 + 選審核者 + 轉 PENDING_OBSOLETE 並通知）、T048（廢止待簽核行為：仍在架可下載、阻擋同時新版本送審、核准 / 退回）
+
+## 任務說明
+
+實作**整份文件廢止申請**（編輯者由 DM02 發起）：必填廢止原因、選填單檔附件（格式 / 大小比照文件上傳）、選指定審核者（排除本人）→ 文件轉 **PENDING_OBSOLETE（廢止待簽核）** 並通知審核者。廢止待簽核期間**原發布版本仍持續對外**（在文件庫、可下載），至核准後才正式下架。核准 → 文件 **OBSOLETE（已廢止）** + 版本歷程末尾新增廢止紀錄（申請人 / 申請時間 / 原因 / 廢止附件（如有）/ 核准者 / 廢止時間）並通知撰寫者；退回 → 文件回 **PUBLISHED（已發布）** 並通知撰寫者。撤回交由 US9。
+
+> ⚠️ **本 issue 需延伸 US6（#178 已交付）之簽核處理**：US6 目前以 `DM_REVIEW_006`「廢止類送審之簽核暫未支援（待 US8）」在 [center_service.py](../../../backend/app/dm/review/center_service.py) `_ensure_actionable` **直接擋掉 OBSOLETE 的核准 / 退回**（同時 review 清單 repository 也排除 OBSOLETE）。spec_us8 FR-005 雖寫「核准 / 退回交由 US6」，但該路徑實為 stub——**US8 必須解除此封鎖並實作 OBSOLETE 核准 / 退回**（含版本歷程廢止紀錄與文件狀態轉換），此為本 issue 淨新增、非 US6 已完成之工作。
+
+## 範圍
+
+**後端**（`app/dm`，router → service → repository）：
+- **T047 發起廢止**（FR-001/002）：新增發起端點（如 `POST /api/dm/documents/{doc_id}/obsolete`），掛 `get_dm_context` + 編輯者權限：
+  - **必填廢止原因**（缺 → DM-MSG-DM02-011）；**必選指定審核者**（缺 → DM-MSG-DM02-014）、**排除撰寫者本人**（重用 `ensure_reviewer_not_author` → `DM_REVIEW_001`）。
+  - **選填單檔附件**：格式 / 大小比照文件上傳，重用 [file_store](../../../backend/app/dm/document/file_store.py) `validate_upload`（違規 → `DM_FILE_001` / `DM_FILE_002`，對映 DM-MSG-DM02-015）+ 落地經 **storage-root fence（#160）** `resolve_within_root`，存 `DM_REVIEW.OBSOLETE_FILE_*`（T010 已建欄位）。
+  - 重用 `ReviewService.submit(review_type="OBSOLETE", version_id=current_version_id, reason=...)` 建立送審週期；**阻擋同時新版本送審**由「一文件至多一筆 PENDING」唯一索引天然涵蓋（→ `DM_REVIEW_002`，對映 DM-MSG-DM02-012，FR-004）；成功後文件轉 **PENDING_OBSOLETE**、以 `DmNotifier` 通知審核者，回 DM-MSG-DM02-013。
+- **T048 廢止待簽核行為 + 核准 / 退回**（FR-003/005）：
+  - **仍對外**（FR-003）：驗證 PENDING_OBSOLETE 於文件庫（US3）/ 詳細頁（US4）仍列出且目前版本可下載（既有在架集合已含 PENDING_OBSOLETE，本 issue 驗證不回歸）。
+  - **解除 US6 之 OBSOLETE 封鎖**：移除 / 改寫 `_ensure_actionable` 的 `DM_REVIEW_006` 分支與 review repository 對 OBSOLETE 的排除，實作：
+    - **核准** → 文件轉 **OBSOLETE**；版本歷程末尾寫入廢止紀錄（申請人 / 申請時間 / 廢止原因 / 廢止附件 / 核准者 / 廢止時間）；`DM_CHANGE_LOG` OPERATION=OBSOLETE；通知撰寫者。
+    - **退回** → 文件回 **PUBLISHED**；通知撰寫者。
+  - **撤回**：範圍外，交由 US9。
+
+**前端**（`frontend/src/dm/detail` 廢止申請 modal + 落地入口）：
+- DM02「廢止此文件」（`detail.is_editor && detail.can_edit`）目前 `navigate` 到 `/dm/documents/:docId/obsolete`（**router 尚無此路由**）。US8 落地此流程——依 spec / wireframe 為**確認 modal**（必填原因 + 選填單檔附件 + 選指定審核者），Zod 驗證（原因必填、附件格式 / 大小），送出成功 → toast DM-MSG-DM02-013 並回文件庫 / 刷新詳細頁為廢止待簽核。**設計取向傾向 dialog（對齊 wireframe `openObsoleteModal`、免新增 route）**，最終落地方式（dialog vs 新增 page 路由）於 `/sti-plan` 定案。
+- 已廢止後之 read-only banner（申請人 / 核准者 / 原因 / 附件提示）DM02 已具備 `obsolete_info` 呈現，本 issue 提供其資料來源。
+
+**測試**：後端 int（發起 → PENDING_OBSOLETE + 通知；缺原因 / 缺審核者 / 選自己 / 附件格式或大小違規之錯誤；新版本送審中發起廢止被擋；PENDING_OBSOLETE 仍列於文件庫且目前版可下載；核准 → OBSOLETE + 版本歷程廢止紀錄 + 通知撰寫者；退回 → PUBLISHED + 通知；HTTP 401/403）+ 前端（廢止 modal 必填原因驗證、附件選填、送出成功 toast、無編輯權時不顯示入口）。
+
+## 驗收條件
+
+- [ ] 編輯者由 DM02 發起廢止：必填原因（缺 → DM-MSG-DM02-011）、選填單檔附件（格式 / 大小比照上傳，違規 → DM-MSG-DM02-015）、選審核者（缺 → DM-MSG-DM02-014、排除自己 → `DM_REVIEW_001`）（FR-001/002）
+- [ ] 送出成功 → 文件轉 PENDING_OBSOLETE、通知指定審核者、回 DM-MSG-DM02-013（FR-002）
+- [ ] 新版本送審進行中無法同時發起廢止（一文件一 PENDING）→ DM-MSG-DM02-012（`DM_REVIEW_002`，FR-004）
+- [ ] 廢止待簽核期間文件仍列於文件庫且目前版本可下載（FR-003）
+- [ ] 核准 → 文件 OBSOLETE + 版本歷程末尾廢止紀錄（申請人 / 申請時間 / 原因 / 附件 / 核准者 / 廢止時間）+ 通知撰寫者（FR-005）
+- [ ] 退回 → 文件回 PUBLISHED + 通知撰寫者（FR-005）
+- [ ] US6 原 `DM_REVIEW_006`「待 US8」封鎖已解除，OBSOLETE 核准 / 退回可正常處理；error-codes.md 之 `DM_REVIEW_006` 描述同步更新
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#127 Foundation（已交付）**：`DM_REVIEW`（REVIEW_TYPE=OBSOLETE + `OBSOLETE_FILE_*`，T010 migration 已建）、`DM_CHANGE_LOG`、file_store、**storage-root fence（#160）**、`DmNotifier`、狀態機
+- **#155 US4 詳細頁（已交付）**：廢止發起入口（DM02「廢止此文件」）與已廢止 read-only banner（`obsolete_info`）
+- **#178 US6 簽核處理（已交付，本 issue 需延伸）**：`ReviewService.submit` / 簽核中心核准 / 退回骨架——US8 解除其 `DM_REVIEW_006` OBSOLETE 封鎖並補實作核准 / 退回
+- **#169 US5（已交付）**：`file_store` 上傳驗證慣例（格式 / 大小）沿用於廢止附件
+
+## 注意事項
+
+- ⚠️ **延伸 US6（非新模組）**：核准 / 退回落在既有簽核中心流程；務必移除 `center_service._ensure_actionable` 的 `DM_REVIEW_006` 分支與 review repository 對 OBSOLETE 的排除，並同步更新 [error-codes.md](../../ref/error-codes.md) `DM_REVIEW_006` 描述（不再「待 US8」，或改標記為已停用）。
+- ⚠️ **廢止附件走 storage-root fence（#160）**：`OBSOLETE_FILE_PATH` 落地 / 讀取一律經 `resolve_within_root`，fail-closed。
+- **FR-004 由唯一索引天然涵蓋**：「一文件至多一筆 PENDING」（`UX_DM_REVIEW_ONE_PENDING`）已擋同時新版本送審 + 廢止；前端訊息對映 DM-MSG-DM02-012、後端沿用 `DM_REVIEW_002`。
+- **缺原因 / 缺審核者之 error_code**：DM-MSG-DM02-011 / 014 對應之後端 error_code 於 `/sti-plan` 定（可能新增 `DM_DOC_0xx` 或比照 `DM_DOC_004` 必填欄位樣式）；附件違規重用 `DM_FILE_001` / `DM_FILE_002`、選自己重用 `DM_REVIEW_001`、並發送審重用 `DM_REVIEW_002`。
+- **前端入口路由**：DM02 現有 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由；US8 落地時決定改 dialog（傾向）或補 page 路由（`/sti-plan` 定案）。
+- **版本歷程廢止紀錄**：核准後於版本歷程末尾呈現，非新增版本列；欄位取自 `DM_REVIEW`（申請人 `CREATED_USER` / `SUBMIT_DATE` / `REASON` / `OBSOLETE_FILE_*` / `APPROVER_USER_ID` / `COMPLETE_DATE`）。
+
+## 相關文件
+
+- [spec_us8.md](spec_us8.md)、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T047/T048）、[spec_us6.md](spec_us6.md)（簽核處理，本 issue 延伸）、[spec_us4.md](spec_us4.md)（詳細頁入口）、[spec_us9.md](spec_us9.md)（撤回）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`openObsoleteModal` 廢止確認 modal、`review-detail-obsolete-target` 簽核端廢止對象資訊、`detail-obsolete-banner` 已廢止橫幅）
+
+**Labels**：`P2-延伸`, `DM-文件管理`, `US8`
+
+---
+
+## Issue #8 ~ #10：待補（增量模式）
+
+US9 個人專區（#8）/ US10 已廢止文件查詢（#9）/ US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -672,3 +741,4 @@ US13 閱讀統計與 KPI + 排程 SCHDM001（#12）/ 整合測試 + 安全 + 收
 | 2026-08-17 | 撰寫 Issue #4（US5 文件新增與編輯 / DM03）完整 body：對應 spec_us5 FR-001~009 + UCDM06；涵蓋 T035/T035a/T036/T037/T038/T039。**切分要點**：DM 第一個**寫入型** issue，主體為組裝 #127 Foundation 既有工具（DOC_ID 產生器 T017、file_store T016 上傳驗證、ReviewService T019 送簽、notify T018 `DOC_SUBMIT`、DB 約束 手冊唯一/版本號唯一）；範圍到「送審中」為止——核准/發布屬 US6、草稿匣列表/撤回屬 US9。前置 #0（必要）+ #3/#5（入口/去向，以獨立測試不阻塞）。新增寫入專屬 error code 待開工前 `/sti-plan` 對齊登記 `docs/ref/error-codes.md`。Labels `P1-核心` + `DM-文件管理` + `US5`。總覽表 Issue #4 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-21 | **US7 設計對齊導覽重構 #89**：DP spec_us1 FR-DP-US1-07（2026-07-28 D1/D2）定登入後主頁為中性歡迎頁、模組儀表板改為依權限疊加之 widget（不設獨立落地頁）；原 spec_us7「登入自動導向 DM00 獨立頁 / 無側欄入口 / home 返回」為 DM 單模組舊觀點、與 #89 衝突。據此更新 spec_us7（改為中性歡迎頁之 DM 文件概況 widget、加可見性要求）、spec.md（US7 描述 + DM00 畫面列移除「待辦彙總」）、issues.md Issue #6 body（前端改掛 WelcomePage widget、去獨立 `/dm` 落地）。後端 stats/announcements 端點不變。前端據此重塑（原 PR #195 之獨立頁改為 widget）|
 | 2026-08-21 | **回填 issues.md 至現況**（自 2026-08-17 後未維護、body 停在 Issue #4）：**(1)** 總覽表狀態 / GitHub # 更正——US5(#4)→已交付 [#169]（PR #172；spec 對齊 #175/#176）、US6(#5)→已交付 [#178]（PR #180）、US12(#11)→已交付 [#183]（PR #189；契約 #187；T059 範圍外）、US7(#6)→「body 已撰寫（待開立）」。**(2)** 補撰三張完整 body：Issue #5（US6 簽核處理 / DM04，含交付後差異：催辦排程 `SCHDM001`→`SCHDM002`、退回被退版本 `REJECTED`→`DRAFT` + 新增 `DM_DOC_012`）、Issue #6（US7 系統儀表板 / DM00，含交付前自檢建議：badge 來源 `DM_REVIEW.REVIEW_TYPE`、統計計入 `PENDING_OBSOLETE`、`spec.md` 待辦彙總措辭待 SA 修）、Issue #11（US12 跨模組引用，含 in-process Service 介面、TRAINING 分類白名單、T059 裁示 A 範圍外）。**(3)** 其餘未開工者維持待補：#7 US8 / #8 US9 / #9 US10 / #10 US11 / #12 US13 / #13 收尾。補強 follow-up #160（storage-root 圍籬，非 US）不列入總覽。US7 GitHub issue 尚未開立（依指示先補 issues.md、暫不開 issue）|
+| 2026-08-24 | 撰寫 Issue #7（US8 文件廢止申請 / UCDM05 / DM02）完整 body：對應 spec_us8 FR-001~005 + 訊息 DM-MSG-DM02-011~015；涵蓋 T047（廢止申請對話框：必填原因 + 選填單檔附件 + 選審核者 → PENDING_OBSOLETE 並通知）/ T048（廢止待簽核行為：仍在架可下載、阻擋同時新版本送審、核准 / 退回）。**關鍵切分**：**本 issue 需延伸 US6（#178 已交付）**——US6 目前以 `DM_REVIEW_006`「待 US8」在 `center_service._ensure_actionable` 擋掉 OBSOLETE 核准 / 退回（review repository 亦排除 OBSOLETE），spec_us8 FR-005 雖寫「核准 / 退回交由 US6」實為 stub，故 US8 淨新增＝解除封鎖 + 實作核准（→OBSOLETE + 版本歷程廢止紀錄）/ 退回（→PUBLISHED）。**重用**：`ReviewService.submit(review_type=OBSOLETE)`、file_store 上傳驗證（`DM_FILE_001/002`）+ storage-root fence #160 存 `DM_REVIEW.OBSOLETE_FILE_*`（T010）、`DmNotifier`；FR-004 同時新版本送審由「一文件一 PENDING」唯一索引天然涵蓋（`DM_REVIEW_002` / DM-MSG-DM02-012）。**待 plan**：缺原因（DM-MSG-DM02-011）/ 缺審核者（DM-MSG-DM02-014）之後端 error_code；前端入口（DM02 現 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由）落地為 dialog（傾向、對齊 wireframe `openObsoleteModal`）或補 page 路由。Labels `P2-延伸` + `DM-文件管理` + `US8`。總覽表 Issue #7 狀態改「📝 body 已撰寫（待開立）」；placeholder 收斂為 #8~#10 |
