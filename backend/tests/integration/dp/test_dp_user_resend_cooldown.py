@@ -7,7 +7,10 @@
 
 import pytest
 
+from app.core.password_policy import hash_password
+from app.core.utils import utcnow
 from app.dp.user import router as auth_router
+from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
@@ -73,3 +76,49 @@ async def test_register_validation_failure_does_not_start_cooldown(client):
     # 因上一步未 record，冷卻未啟動 → resend 應放行（非 429）
     resend = await client.post("/api/resend-verification", json={"email": "cool-d@edms.local"})
     assert resend.status_code == 200
+
+
+async def test_verified_email_returns_409_even_within_cooldown(client, db):
+    """#86：已驗證帳號在冷卻內再註冊（含大小寫變體）→ 立即 409 DP_USER_001，不回 429、無倒數。
+
+    「已是正式帳號」是終局狀態，等冷卻結束也不會改變；且此路徑本來就不送信，
+    冷卻在此無防狂發價值，只會讓使用者白等一輪才被告知「已被註冊」。
+    """
+    email = "verified-user@edms.local"
+    now = utcnow()
+    db.add(
+        DpUser(
+            user_id="U0000000000000000001",
+            email=email,
+            pwd_hash=hash_password("Abcd1234"),
+            user_name="已驗證使用者",
+            status="ACTIVE",
+            login_fail_count=0,
+            pwd_changed_date=now,
+            must_change_pwd=False,
+            created_user="SYSTEM",
+            created_date=now,
+        )
+    )
+    await db.commit()
+
+    # 該 Email 的驗證信冷卻仍有效（例如當初 pending 階段剛寄過）
+    auth_router._verify_send_cooldown.record(auth_router._verify_send_key(email))
+
+    r = await client.post("/api/register", json=_reg_payload("VERIFIED-USER@edms.local"))
+    assert r.status_code == 409
+    body = r.json()
+    assert body["error_code"] == "DP_USER_001"
+    assert "retry_after" not in body
+
+
+async def test_new_email_still_blocked_by_cooldown(client):
+    """#86 的順序調整不影響防狂發：全新 / pending Email 於冷卻內再註冊仍為 429 + retry_after。"""
+    first = await client.post("/api/register", json=_reg_payload("cool-e@edms.local"))
+    assert first.status_code == 202
+
+    second = await client.post("/api/register", json=_reg_payload("cool-e@edms.local"))
+    assert second.status_code == 429
+    body = second.json()
+    assert body["error_code"] == "COMMON_429"
+    assert 1 <= body["retry_after"] <= 600

@@ -52,6 +52,18 @@ class RegisterService:
         self._notify = notify or NotifyService()
         self._audit = audit or AuditLogService()
 
+    async def assert_email_not_registered(self, db: AsyncSession, email: str) -> None:
+        """Email 已被「已驗證帳號」佔用 → 409 DP_USER_001；未佔用則靜默通過。
+
+        供 router 在「驗證信寄送冷卻」**之前**呼叫（#86）：「已是正式帳號」是終局狀態，
+        等冷卻倒數結束也不會改變，先擋掉可免使用者白等一輪才被告知「已被註冊」。
+        對已驗證帳號本來就直接 409、不會送信，冷卻在此無防狂發價值。
+
+        register() 內部亦呼叫本方法（單一 409 來源），故服務層獨立呼叫時語意不變。
+        """
+        if await self._repo.email_exists(db, email):
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
+
     async def register(
         self, db: AsyncSession, *, email: str, user_name: str, password: str, confirm_password: str
     ) -> None:
@@ -71,8 +83,7 @@ class RegisterService:
         if password != confirm_password:
             raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
         # 2. Email 未被「已驗證帳號」佔用（未驗證的 pending 列於 step 4 覆蓋，不擋）
-        if await self._repo.email_exists(db, email):
-            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
+        await self.assert_email_not_registered(db, email)
         # 2-1. 不得覆蓋管理者發出且仍有效的邀請（#125）。step 4 的覆蓋不分 kind，若不在此擋下，
         #      自助註冊會刪掉管理者的邀請列（該列從邀請清單消失、原邀請信連結失效），且管理者
         #      毫無感知。逾期的邀請則放行覆蓋——邀請既已失效，不應讓該 Email 被永久佔住。
