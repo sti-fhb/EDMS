@@ -121,11 +121,19 @@ class ObsoleteService:
             target_id=doc_id,
             after_value={"review_id": review.review_id, "review_type": _OBSOLETE, "doc_status": _PENDING_OBSOLETE},
         )
-        notified = await self._notify_submit(db, reviewer_id=reviewer_id, author_id=op.user_id, doc_name=doc.doc_name)
+        notified = await self._notify_submit(
+            db, reviewer_id=reviewer_id, author_id=op.user_id, doc_name=doc.doc_name, reason=reason
+        )
         return InitiateObsoleteResult(review_id=review.review_id, doc_status=_PENDING_OBSOLETE, notified=notified)
 
-    async def _notify_submit(self, db: AsyncSession, *, reviewer_id: str, author_id: str, doc_name: str) -> int:
-        """通知指定審核者（OBS_SUBMIT）；審核者查無 Email 則略過（回 0）。"""
+    async def _notify_submit(
+        self, db: AsyncSession, *, reviewer_id: str, author_id: str, doc_name: str, reason: str
+    ) -> int:
+        """通知指定審核者（OBS_SUBMIT）；審核者查無 Email 則略過（回 0）。
+
+        params 之 key 須與 OBS_SUBMIT 範本佔位一致（reviewer_name / applicant_name / doc_name / reason），
+        缺 key 會使範本渲染失敗（DP _SafeFormatter KeyError → 空信 FAILED）。
+        """
         reviewer = await self._repo.get_user_name_email(db, reviewer_id)
         if reviewer is None or not reviewer.email:
             return 0
@@ -136,8 +144,9 @@ class ObsoleteService:
             recipients=[reviewer.email],
             params={
                 "reviewer_name": reviewer.user_name,
-                "author_name": author.user_name if author else author_id,
+                "applicant_name": author.user_name if author else author_id,
                 "doc_name": doc_name,
+                "reason": reason,
             },
         )
         return result.queued_count

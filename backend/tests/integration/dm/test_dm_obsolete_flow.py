@@ -116,9 +116,11 @@ async def _published_doc(db, doc_id, *, author="ed", audience=("全體",)):
 
 
 async def _email_count(db, template_code, recipient):
+    # 限 STATUS='PENDING'：範本渲染失敗（缺 param key）會寫 STATUS='FAILED' + 空內容，若不篩會把失敗誤計為成功。
     return await db.scalar(
         text(
-            'SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=:t AND "RECIPIENT"=:r'
+            'SELECT count(*) FROM "DP_EMAIL_LOG" '
+            'WHERE "TEMPLATE_CODE"=:t AND "RECIPIENT"=:r AND "STATUS"=\'PENDING\''
         ).bindparams(t=template_code, r=recipient)
     )
 

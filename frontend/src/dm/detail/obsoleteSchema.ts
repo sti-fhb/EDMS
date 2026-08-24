@@ -1,6 +1,8 @@
 import { z } from "zod"
 
-/** 廢止附件格式白名單（比照文件上傳；與後端 DM_FILE_TYPES / wireframe accept 一致）。 */
+// 近似值：僅供 client-side 提前擋錯改善 UX，權威檢核仍在後端 file_store（DM_FILE_MAX_MB / DM_FILE_TYPES，
+// 管理者可於 DM03 調整）。若後端參數調整，此處需同步，否則會與後端行為落差（過嚴擋合法檔 / 過寬送出才被拒）。
+/** 廢止附件格式白名單（比照文件上傳；對齊後端 DM_FILE_TYPES 預設 / wireframe accept）。 */
 const ALLOWED_EXT = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "gif"]
 const MAX_MB = 50
 /** 附件格式 / 大小違規統一訊息（DM-MSG-DM02-015）。 */
