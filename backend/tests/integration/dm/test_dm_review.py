@@ -3,7 +3,8 @@
 涵蓋：待簽核清單（只列自己 PENDING + 停留天數）、明細（新版本附舊版比對 / 非本人擋）、
 核准並發布（首版 NEW / 新版 NEW_VERSION 之原子版本切換 + CURRENT_VERSION_ID + DM_CHANGE_LOG + 通知）、
 退回（版本 REJECTED；NEW→文件 DRAFT、NEW_VERSION→文件維持 PUBLISHED〔Q2〕；DOC_REJECT 通知 + 原因必填）、
-已完成清單、收件名單（全體 / 指定可見對象）、催辦掃描、授權（非本人 / OBSOLETE / 非 PENDING）、HTTP 存取閘。
+已完成清單、收件名單（全體 / 指定可見對象）、催辦掃描、授權（非本人 / 非 PENDING）、HTTP 存取閘。
+（US8 起 OBSOLETE 核准 / 退回已支援，廢止流程細節見 test_dm_obsolete_flow.py。）
 """
 
 import os
@@ -282,16 +283,17 @@ async def test_approve_non_reviewer_blocked(db):
     assert e.value.error_code == "DM_REVIEW_005"
 
 
-async def test_approve_obsolete_blocked_out_of_scope(db):
-    await _seed_user(db, "ed", "撰寫")
+async def test_approve_obsolete_now_supported_us8(db):
+    # US8：OBSOLETE 核准已支援（原 DM_REVIEW_006 封鎖已解除）→ 文件轉 OBSOLETE；廢止流程細節見 test_dm_obsolete_flow
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
     doc = await _doc(db, "DM-SOP-000324", status="PENDING_OBSOLETE", current_version_id=None)
     v = await _add_version(db, "DM-SOP-000324", "1.0", status="PUBLISHED", published=utcnow())
     doc.current_version_id = v.version_id
     await db.flush()
     r = await _review(db, "DM-SOP-000324", v.version_id, review_type="OBSOLETE", reviewer="rev1")
-    with pytest.raises(AppError) as e:
-        await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
-    assert e.value.error_code == "DM_REVIEW_006"
+    await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000324"))
+    assert doc.status == "OBSOLETE" and doc.current_version_id == v.version_id
 
 
 # ── 退回 ──────────────────────────────────────────
