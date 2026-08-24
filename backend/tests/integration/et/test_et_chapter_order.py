@@ -183,9 +183,10 @@ class TestDeleteChapter:
         assert [c["chapter_id"] for c in remaining] == [ids[1], ids[2]]
         assert [c["sort_order"] for c in remaining] == [1, 2], "後續章節順序自動往前遞補"
 
-    async def test_連帶軟刪項目並硬刪學員進度(self, client, db) -> None:
-        """data-model §ET_CHAPTER：項目軟刪、**學員紀錄硬刪**（與專案預設相反之刻意例外）。
+    async def test_連帶軟刪項目與學員進度(self, client, db) -> None:
+        """章節 / 項目 / 學員紀錄**四者皆軟刪除**（2026-08-24 變更，見 repository docstring）。
 
+        原 spec 規定學員紀錄 hard delete；改為軟刪除使誤刪章節可回復。
         本 issue 尚無建立項目之端點（屬 #203），故以 ORM 直接建測資——空表刪除永遠會過，
         不建測資等於沒測到這條規則。
         """
@@ -225,8 +226,10 @@ class TestDeleteChapter:
 
         await db.refresh(item)
         assert item.deleted == 1, "項目為軟刪除（連動）"
-        remaining_progress = await db.scalar(select(EtProgress).where(EtProgress.item_id == item.item_id))
-        assert remaining_progress is None, "學員進度須 hard delete，不得留下孤兒紀錄"
+        progress = await db.scalar(select(EtProgress).where(EtProgress.item_id == item.item_id))
+        assert progress is not None, "學員進度不得被銷毀——誤刪章節須可回復"
+        await db.refresh(progress)
+        assert progress.deleted == 1, "學員進度須連帶軟刪除，不再計入完課率與進度統計"
 
     async def test_他人不可刪章節(self, client, db) -> None:
         owner = await _user(db, "ETH_D3")

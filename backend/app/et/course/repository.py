@@ -8,7 +8,7 @@
 使「版本不符」與「查無資料」的區辨留在 service。
 """
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
@@ -240,23 +240,29 @@ class EtChapterRepository:
         await db.flush()
 
     async def soft_delete_with_cascade(self, db: AsyncSession, chapter_ids: list[int], operator: OperatorInfo) -> None:
-        """軟刪除章節，並依 data-model 之三段連動處理其下資料。
+        """軟刪除章節，並連動其下項目與學員紀錄——**四者皆軟刪除**。
 
-        1. `ET_ITEM` → 軟刪除（連動）
-        2. 學員 `ET_PROGRESS` → **hard delete**
-        3. 學員 `ET_QUIZ_ATTEMPT_M` → **hard delete**
+        1. `ET_ITEM` → `DELETED = 1`
+        2. 學員 `ET_PROGRESS` → `DELETED = 1`
+        3. 學員 `ET_QUIZ_ATTEMPT_M` → `DELETED = 1`
 
-        ⚠️ 第 2、3 點與專案預設之軟刪除策略**相反**，是 ET 的刻意例外
-        （data-model §ET_CHAPTER 業務規則）：章節已不存在，留著學員紀錄只會成為
-        永遠查不到對應項目的孤兒資料，污染日後的進度統計與成績查詢。
+        > **2026-08-24 變更（#202）**：原 spec 規定學員紀錄為 **hard delete**
+        > （見 research.md §4 之原決策）。改為軟刪除的理由：誤刪章節是可能發生的操作，
+        > 而學員成績不可重建——硬刪除把一個可回復的操作變成不可回復。原決策反對軟刪除的
+        > 理由是「孤兒化、無法顯示」，但軟刪除的紀錄本就不該顯示，加 `WHERE DELETED = 0`
+        > 是專案對所有表的預設作法。
+        >
+        > ⚠️ **代價是紀律**：完課率 / 進度統計 / 成績查詢**務必排除已軟刪除之紀錄**
+        > （分母以當前有效章節數計），否則會把已刪章節的進度算進去。此約束落在
+        > #5（章節學習）、#9（學習狀況追蹤）、#14（週報統計）。
 
         本 issue（#202）尚無建立項目之端點（屬 #203），故實務上 `item_ids` 目前恆為空；
-        邏輯仍寫在此處——刪除是本 issue 交付的路徑，#203 接上項目後即自動生效，
-        不必回頭補。
+        邏輯仍寫在此處——刪除是本 issue 交付的路徑，#203 接上項目後即自動生效。
         """
         if not chapter_ids:
             return
         now = utcnow()
+        audit = {"updated_user": operator.user_id, "updated_date": now}
 
         item_rows = await db.execute(
             select(EtItem.item_id, EtItem.quiz_id).where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
@@ -266,14 +272,18 @@ class EtChapterRepository:
         quiz_ids = [row.quiz_id for row in items if row.quiz_id is not None]
 
         if item_ids:
+            await db.execute(update(EtItem).where(EtItem.item_id.in_(item_ids)).values(deleted=1, **audit))
             await db.execute(
-                update(EtItem)
-                .where(EtItem.item_id.in_(item_ids))
-                .values(deleted=1, updated_user=operator.user_id, updated_date=now)
+                update(EtProgress)
+                .where(EtProgress.item_id.in_(item_ids), EtProgress.deleted == 0)
+                .values(deleted=1, **audit)
             )
-            await db.execute(delete(EtProgress).where(EtProgress.item_id.in_(item_ids)))
         if quiz_ids:
-            await db.execute(delete(EtQuizAttemptM).where(EtQuizAttemptM.quiz_id.in_(quiz_ids)))
+            await db.execute(
+                update(EtQuizAttemptM)
+                .where(EtQuizAttemptM.quiz_id.in_(quiz_ids), EtQuizAttemptM.deleted == 0)
+                .values(deleted=1, **audit)
+            )
 
         await db.execute(
             update(EtChapter)

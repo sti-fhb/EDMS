@@ -191,7 +191,7 @@ export function EtCourseEditorPage() {
   const handleDeleteChapter = (chapter: ChapterItem) => {
     confirm({
       title: "刪除章節",
-      content: "確定刪除此章節？學員於本章節之學習與成績將一併移除。",
+      content: "確定刪除此章節？學員於本章節之學習與成績將一併移除，且不再計入完課率。",
       okText: "刪除",
       onOk: async () => {
         try {
