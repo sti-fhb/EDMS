@@ -822,12 +822,20 @@
           <label class="form-label small">課程訖止時間 <span class="text-danger">*</span><small class="text-muted">（發布時必填）</small></label>
           <input type="datetime-local" class="form-control form-control-sm">
         </div>
+        <div class="col-md-4">
+          <label class="form-label small">是否需線下核可 <small class="text-muted">（2026-07-17 新增）</small></label>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input" type="checkbox" id="new-require-approval">
+            <label class="form-check-label small" for="new-require-approval"><i class="bi bi-patch-check me-1"></i>本課程需線下核可</label>
+          </div>
+        </div>
         <div class="col-md-12">
           <label class="form-label small">課程描述</label>
           <textarea class="form-control form-control-sm" rows="2" placeholder="簡述課程目標、適用對象與內容重點"></textarea>
         </div>
       </div>
       <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>課程起訖時間即「<strong>閱課期間</strong>」（2026-07-02 新增）：起始時間前學員看不到課程；到達訖止時間系統<strong>自動關閉</strong>閱課（關閉後可再開課）。草稿可留空，發布時必填。</div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i><strong>是否需線下核可（2026-07-17 新增）</strong>：開啟後，學員<strong>線上完課</strong>仍須由教師 / 管理者於 ET03 手動核可（實機 / 口頭考核）。核可為<strong>獨立維度</strong>——<strong>不併入完課定義</strong>，不影響完課率 / 課後問卷 / 週報 / 提醒；核可通過寄通知信。<strong>草稿 / 已發布 / 已關閉任一狀態皆可調整。</strong></div>
     </details>
   </div>
 
@@ -879,6 +887,7 @@
     <strong>受訓單位標籤（2026-07-02 變更）：</strong>原「關聯模組」單選改為標籤<strong>多選</strong>（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師…，標籤庫由管理者於平台 DP 後台維護）；發布時系統自動邀請標籤對應人員並寄通知信<br>
     <strong>課程起訖時間（2026-07-02 新增）：</strong>閱課期間；起始前學員不可見、到期系統自動關閉（可再開課）<br>
     <strong>課後問卷（2026-07-02 新增）：</strong>選配，一門課程至多 1 份；題目單選、選項自訂；學員完課後填寫（具名、一人一次）<br>
+    <strong>是否需線下核可（2026-07-17 新增）：</strong>開關，預設關閉；開啟後學員線上完課仍須教師 / 管理者於 ET03 手動核可（實機 / 口頭考核）。<strong>不併入完課定義</strong>、不影響完課率與統計；草稿 / 已發布 / 已關閉皆可調整<br>
     <strong>狀態：</strong>儲存草稿後為「草稿」狀態；「儲存並發布」時系統檢核（至少 1 章節 + 至少 1 教材 + 至少 1 標籤 + 起訖時間已填），通過即上架並觸發標籤自動邀請<br>
     <strong>章節編排空白狀態：</strong>顯示「尚未新增章節」提示與引導按鈕；點「新增章節」後可<strong>連續新增多個章節</strong>（modal 中按「儲存並繼續新增」會留在 modal 重設欄位）<br>
     <strong>儲存後：</strong>回到課程列表卡片網格；再次點擊進入 ET02 編輯頁可繼續調整內容或發布
@@ -1008,12 +1017,20 @@
           <label class="form-label small">課程訖止時間 <span class="text-danger">*</span></label>
           <input type="datetime-local" class="form-control form-control-sm" value="2026-07-31T17:00">
         </div>
+        <div class="col-md-4">
+          <label class="form-label small">是否需線下核可 <small class="text-muted">（2026-07-17 新增）</small></label>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input" type="checkbox" id="edit-require-approval" checked>
+            <label class="form-check-label small" for="edit-require-approval"><i class="bi bi-patch-check me-1"></i>本課程需線下核可</label>
+          </div>
+        </div>
         <div class="col-md-12">
           <label class="form-label small">課程描述</label>
           <textarea class="form-control form-control-sm" rows="2">本課程介紹採血作業之標準流程、相關器材使用、捐血人健康評估與採血後處理。適用於新進採血人員。</textarea>
         </div>
       </div>
       <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>課程起訖時間即「閱課期間」（2026-07-02 新增，發布時必填）：起始前學員不可見；到訖止時間系統<strong>自動關閉</strong>（狀態轉「已關閉」，可再開課）。</div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i><strong>是否需線下核可（2026-07-17 新增）</strong>：開啟後，學員<strong>線上完課</strong>仍須由教師 / 管理者於 ET03 手動核可（實機 / 口頭考核）。核可為<strong>獨立維度</strong>——<strong>不併入完課定義</strong>，不影響完課率 / 課後問卷 / 週報 / 提醒；核可通過寄通知信。<strong>草稿 / 已發布 / 已關閉任一狀態皆可調整。</strong></div>
     </details>
   </div>
 
