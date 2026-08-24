@@ -46,8 +46,9 @@ from app.services import ParamService
 
 # 登入限流器（行程內；IP 與帳號維度共用同一器、以 key 前綴區分）
 _login_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
-# 註冊限流器（IP 維度；防批量灌帳號）
-# 註冊為匿名寫入型端點，門檻較登入嚴（#44）；IP 與帳號兩維度共用此實例
+# 註冊限流器（IP + 帳號雙維度共用此實例）。門檻與登入解耦、且刻意較登入寬鬆——
+# 自助註冊為主要入口，須容納「同一出口 IP 多人同時註冊」的正常尖峰；同一 Email 的
+# 重複註冊由下方 600 秒寄信冷卻把關，不靠本門檻（理由詳見 core/rate_limit.py 的 #44 段）
 _register_limiter = SlidingWindowRateLimiter(max_requests=REGISTER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 忘記密碼申請 / 重設限流器（IP + 帳號維度；防列舉與暴力）
 _forgot_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
