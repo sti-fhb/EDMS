@@ -21,7 +21,6 @@ from app.dp.users.models import DpUser
 _PENDING = "PENDING"
 _PUBLISHED = "PUBLISHED"
 _SUPERSEDED = "SUPERSEDED"
-_OBSOLETE = "OBSOLETE"
 _AUDIENCE = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
@@ -49,12 +48,10 @@ class ReviewCenterRepository:
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .outerjoin(DpUser, DmReview.created_user == DpUser.user_id)
-            # 排除 OBSOLETE（廢止類簽核屬 US8、本 issue approve/reject 會 409）——避免清單出現「看得到、
-            # 點了必被擋」之項目，與 _ensure_actionable 之範圍防禦保持一致。
+            # US8 起 OBSOLETE（廢止類）亦可於簽核中心處理，故不再排除；approve / reject 依 review_type 分流。
             .where(
                 DmReview.assigned_reviewer == reviewer_id,
                 DmReview.status == _PENDING,
-                DmReview.review_type != _OBSOLETE,
             )
             .order_by(DmReview.submit_date.asc())
         )
@@ -80,6 +77,9 @@ class ReviewCenterRepository:
                 DmReview.doc_id,
                 DmReview.review_type,
                 DmReview.submit_date,
+                DmReview.reason,
+                DmReview.obsolete_file_name,
+                DmReview.obsolete_file_size,
                 DmReview.created_user.label("submitter_id"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
@@ -183,9 +183,20 @@ class ReviewCenterRepository:
         )
 
     async def write_change_log(
-        self, db: AsyncSession, *, doc_id: str, version_id: int, operation: str, applicant: str, approver: str
+        self,
+        db: AsyncSession,
+        *,
+        doc_id: str,
+        version_id: int | None,
+        operation: str,
+        applicant: str,
+        approver: str,
+        note: str | None = None,
     ) -> None:
-        """寫入公開變更歷程（append-only、發布 / 廢止事件）。"""
+        """寫入公開變更歷程（append-only、發布 / 廢止事件）。
+
+        note：發布＝變更摘要（目前不填）、廢止＝廢止原因（US8）；供 DM08 跨文件查詢（US11）。
+        """
         now = utcnow()
         db.add(
             DmChangeLog(
@@ -195,6 +206,7 @@ class ReviewCenterRepository:
                 applicant_user_id=applicant,
                 approver_user_id=approver,
                 operation_time=now,
+                note=note,
                 created_user=approver,
                 created_date=now,
             )

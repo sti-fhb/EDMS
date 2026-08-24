@@ -38,8 +38,12 @@ _NEW_VERSION = "NEW_VERSION"
 _OBSOLETE = "OBSOLETE"
 _DRAFT = "DRAFT"
 _PUBLISHED = "PUBLISHED"
+_PENDING_OBSOLETE = "PENDING_OBSOLETE"
 _SUPERSEDED = "SUPERSEDED"
 _REJECTED = "REJECTED"
+
+# 廢止附件下載授權（SA 裁示 Q1=C）：僅 DM_ADMIN 或該送審之指定審核者；發起人本人亦不可
+_DM_ADMIN = "DM_ADMIN"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
 
@@ -132,6 +136,7 @@ class ReviewCenterService:
                     file_mime=cv.file_mime,
                     previewable=is_previewable(cv.file_mime or ""),
                 )
+        is_obsolete = review.review_type == _OBSOLETE
         return ReviewDetail(
             review_id=row.review_id,
             doc_id=row.doc_id,
@@ -144,6 +149,10 @@ class ReviewCenterService:
             submitter_name=row.submitter_name,
             new_version=new_version,
             current_version=current_version,
+            # 廢止類：帶廢止原因 + 附件 metadata（附件下載走 /obsolete-file，授權 Q1=C）
+            obsolete_reason=row.reason if is_obsolete else None,
+            obsolete_file_name=row.obsolete_file_name if is_obsolete else None,
+            obsolete_file_size=row.obsolete_file_size if is_obsolete else None,
         )
 
     async def prepare_file(self, db, *, review_id: int, version_id: int, op: OperatorInfo) -> ReviewFile:
@@ -174,6 +183,26 @@ class ReviewCenterService:
             name=version.file_name or "file",
         )
 
+    async def prepare_obsolete_file(self, db, *, review_id: int, roles: list[str], op: OperatorInfo) -> ReviewFile:
+        """廢止附件下載（US8）：僅 DM_ADMIN 或該送審之指定審核者可下載（SA 裁示 Q1=C）。
+
+        附件屬稽核佐證公文、非文件本體，採最小揭露——**發起人本人與一般閱覽者皆不可下載**。
+        路徑串流前過 storage-root 圍籬（#160）防逃逸。供 DM04 簽核明細與 US10 已廢止查詢共用。
+        """
+        review = await self._repo.get_review(db, review_id)
+        if review is None or review.review_type != _OBSOLETE:
+            raise _NOT_FOUND
+        if _DM_ADMIN not in roles and review.assigned_reviewer != op.user_id:
+            raise AppError(status_code=403, detail="無權下載此廢止附件", error_code="DM_REVIEW_005")
+        if not review.obsolete_file_path:
+            raise _NOT_FOUND
+        safe_path = resolve_within_root(review.obsolete_file_path, not_found=_NOT_FOUND)
+        return ReviewFile(
+            path=safe_path,
+            mime=review.obsolete_file_mime or "application/octet-stream",
+            name=review.obsolete_file_name or "file",
+        )
+
     async def list_completed(
         self, db, *, op: OperatorInfo, page: int, limit: int, keyword: str = ""
     ) -> PaginatedResult[CompletedItem]:
@@ -201,8 +230,10 @@ class ReviewCenterService:
     # ── 核准並發布 ────────────────────────────────────
 
     async def approve(self, db, *, review_id: int, op: OperatorInfo) -> ApproveResult:
-        """核准並發布（NEW / NEW_VERSION）：原子完成版本切換 + 變更歷程 + 通知。"""
+        """核准（NEW / NEW_VERSION → 發布；OBSOLETE → 廢止）：原子完成狀態轉移 + 變更歷程 + 通知。"""
         review = await self._ensure_actionable(db, review_id, op)
+        if review.review_type == _OBSOLETE:
+            return await self._approve_obsolete(db, review, op=op)
         # 核准（PENDING→APPROVED；非 PENDING 由 ReviewService 擋 DM_REVIEW_003）
         await self._reviews.approve(db, review, approver=op.user_id)
 
@@ -246,6 +277,55 @@ class ReviewCenterService:
         notified = await self._notify_publish(db, doc=doc, new_ver=new_ver, author_id=review.created_user)
         return ApproveResult(published_version_id=new_ver.version_id, notified=notified)
 
+    async def _approve_obsolete(self, db, review, *, op: OperatorInfo) -> ApproveResult:
+        """核准廢止（US8）：文件轉 OBSOLETE（自文件庫下架）+ 寫 DM_CHANGE_LOG(OBSOLETE) + 通知撰寫者。
+
+        不動版本：保留 CURRENT_VERSION_ID、廢止前最後發布版維持 PUBLISHED（供 SRVDM001 回傳廢止旗標）。
+        廢止原因取自申請時填入之 review.reason（approve 不覆寫 reason），寫入變更歷程 NOTE 供稽核。
+        """
+        await self._reviews.approve(db, review, approver=op.user_id)
+        doc = await self._repo.get_document(db, review.doc_id)
+        if doc is None:
+            raise _NOT_FOUND
+        now = utcnow()
+        doc.status = _OBSOLETE
+        doc.updated_user, doc.updated_date = op.user_id, now
+        await db.flush()
+
+        await self._repo.write_change_log(
+            db,
+            doc_id=doc.doc_id,
+            version_id=doc.current_version_id,
+            operation=_OBSOLETE,
+            applicant=review.created_user,
+            approver=op.user_id,
+            note=review.reason,
+        )
+        await self._log(
+            db,
+            action_type="UPDATE",
+            operator_id=op.user_id,
+            target=doc.doc_id,
+            after={"review_id": review.review_id, "operation": _OBSOLETE},
+        )
+        notified = await self._notify_obsolete(
+            db, template_code="OBS_APPROVE", doc=doc, author_id=review.created_user, reason=review.reason or ""
+        )
+        return ApproveResult(published_version_id=doc.current_version_id, notified=notified)
+
+    async def _notify_obsolete(self, db, *, template_code: str, doc, author_id: str, reason: str) -> int:
+        """廢止核准 / 退回通知撰寫者（OBS_APPROVE / OBS_REJECT）；查無 Email 略過（回 0）。"""
+        author = await self._repo.get_user_name_email(db, author_id)
+        if author is None or not author.email:
+            return 0
+        result = await self._notifier.notify(
+            db,
+            template_code=template_code,
+            recipients=[author.email],
+            params={"author_name": author.user_name, "doc_name": doc.doc_name, "reason": reason},
+        )
+        return result.queued_count
+
     async def _notify_publish(self, db, *, doc, new_ver, author_id: str) -> int:
         """DOC_PUBLISH 通知撰寫者 + 可見對象相符閱覽者（發布當下快照）。"""
         recipients = await self._repo.recipient_emails(db, doc.doc_id, author_id)
@@ -276,6 +356,8 @@ class ReviewCenterService:
         if not reason:
             raise AppError(status_code=422, detail="請填寫退回原因", error_code="DM_REVIEW_004")
         review = await self._ensure_actionable(db, review_id, op)
+        if review.review_type == _OBSOLETE:
+            return await self._reject_obsolete(db, review, reason=reason, op=op)
         await self._reviews.reject(db, review, approver=op.user_id, reason=reason)
 
         now = utcnow()
@@ -320,20 +402,45 @@ class ReviewCenterService:
             params={"author_name": author.user_name, "doc_name": doc.doc_name, "reason": reason},
         )
 
+    async def _reject_obsolete(self, db, review, *, reason: str, op: OperatorInfo) -> RejectResult:
+        """退回廢止申請（US8）：文件由 PENDING_OBSOLETE 回 PUBLISHED；OBS_REJECT 通知撰寫者。
+
+        不動版本（廢止申請不含新版本，version 指向現行發布版、維持 PUBLISHED）。review.reason 以退回原因
+        記錄（與 NEW / NEW_VERSION 退回語意一致）；退回後文件恢復對外，撰寫者可於個人專區續處理（US9）。
+        """
+        await self._reviews.reject(db, review, approver=op.user_id, reason=reason)
+        doc = await self._repo.get_document(db, review.doc_id)
+        if doc is not None and doc.status == _PENDING_OBSOLETE:
+            doc.status = _PUBLISHED
+            doc.updated_user, doc.updated_date = op.user_id, utcnow()
+        await db.flush()
+
+        await self._log(
+            db,
+            action_type="UPDATE",
+            operator_id=op.user_id,
+            target=review.doc_id,
+            after={"review_id": review.review_id, "operation": "OBSOLETE_REJECT"},
+        )
+        if doc is not None:
+            await self._notify_obsolete(
+                db, template_code="OBS_REJECT", doc=doc, author_id=review.created_user, reason=reason
+            )
+        return RejectResult(review_id=review.review_id)
+
     # ── 共用檢核 ──────────────────────────────────────
 
     async def _ensure_actionable(self, db, review_id: int, op: OperatorInfo):
-        """取送審並確認可由本人處理：查無 404 / 非本人 403 / 廢止類本 issue 範圍外 409。
+        """取送審並確認可由本人處理：查無 404 / 非本人 403。
 
         以 FOR UPDATE 對 review 列上鎖（Sec M1）：序列化並發核准 / 退回，杜絕重複發布 / 通知 / 變更歷程。
+        US8 起支援 OBSOLETE（廢止類）之核准 / 退回，approve / reject 依 review_type 分流處理。
         """
         review = await self._repo.get_review(db, review_id, for_update=True)
         if review is None:
             raise _NOT_FOUND
         if review.assigned_reviewer != op.user_id:
             raise AppError(status_code=403, detail="非指定審核者，不可處理此送審", error_code="DM_REVIEW_005")
-        if review.review_type == _OBSOLETE:
-            raise AppError(status_code=409, detail="廢止類送審之簽核暫未支援（待 US8）", error_code="DM_REVIEW_006")
         return review
 
     # ── 催辦（FR-006）──────────────────────────────────

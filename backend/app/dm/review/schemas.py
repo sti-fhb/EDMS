@@ -35,7 +35,7 @@ class VersionMeta(BaseModel):
 
 
 class ReviewDetail(BaseModel):
-    """簽核明細：變更摘要 + 送審檔案（新版本另附目前發布版供比對）。"""
+    """簽核明細：變更摘要 + 送審檔案（新版本另附目前發布版供比對）；廢止類另附廢止原因 + 附件。"""
 
     review_id: int
     doc_id: str
@@ -46,8 +46,11 @@ class ReviewDetail(BaseModel):
     submit_date: datetime
     submitter_id: str
     submitter_name: str | None
-    new_version: VersionMeta | None  # 送審版本
+    new_version: VersionMeta | None  # 送審版本（廢止類＝廢止對象＝目前發布版）
     current_version: VersionMeta | None  # 目前發布版（NEW_VERSION 比對；NEW 無）
+    obsolete_reason: str | None = None  # 廢止原因（OBSOLETE；review.reason）
+    obsolete_file_name: str | None = None  # 廢止附件檔名（OBSOLETE；有則可下載）
+    obsolete_file_size: int | None = None  # 廢止附件大小（位元組）
 
 
 class RejectReq(BaseModel):
