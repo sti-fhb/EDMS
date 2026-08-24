@@ -72,8 +72,6 @@ async def test_resend_keeps_valid_admin_invite(db):
 
     # 撞 UNIQUE 後 session 需 rollback（production 由 get_db 負責）；已 commit 的邀請列應完好
     await db.rollback()
-    row = (
-        await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == _EMAIL))
-    ).scalar_one()
+    row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == _EMAIL))).scalar_one()
     assert row.kind == KIND_ADMIN_INVITE
     assert row.invite_id == "INV00000001"
