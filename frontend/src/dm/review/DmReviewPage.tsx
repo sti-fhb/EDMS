@@ -1,4 +1,3 @@
-import AttachFileIcon from "@mui/icons-material/AttachFile"
 import DownloadIcon from "@mui/icons-material/Download"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
@@ -113,8 +112,9 @@ function DetailPanel({
         </IconButton>
       </Box>
 
+      {/* 摘要（三類送審一致用「變更摘要」標題；廢止類內容為申請人填寫之廢止原因） */}
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
-        {isObsolete ? "廢止原因" : "變更摘要"}{" "}
+        變更摘要{" "}
         <Typography component="span" variant="caption" color="text.secondary">
           （{isObsolete ? "申請人填寫" : "撰寫者填寫"}）
         </Typography>
@@ -126,7 +126,7 @@ function DetailPanel({
       </Box>
 
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-        {isObsolete ? "廢止對象" : isNewVersion ? "版本對照" : "新增檔案"}
+        {isObsolete ? "廢止檔案" : isNewVersion ? "版本對照" : "新增檔案"}
       </Typography>
       <Table size="small" sx={{ mb: 1 }}>
         <TableHead>
@@ -149,9 +149,9 @@ function DetailPanel({
           {detail.new_version && (
             <VersionCompareRow
               meta={detail.new_version}
-              statusLabel={isObsolete ? "廢止對象（目前發布版）" : isNewVersion ? "待審新版" : "待審首版"}
-              statusColor={isObsolete ? "error" : "warning"}
-              highlight={!isObsolete}
+              statusLabel={isObsolete ? "廢止待簽核" : isNewVersion ? "待審新版" : "待審首版"}
+              statusColor="warning"
+              highlight
               onDownload={onDownload}
             />
           )}
@@ -160,8 +160,11 @@ function DetailPanel({
 
       {isObsolete && detail.obsolete_file_name && (
         <Box sx={{ mb: 2 }}>
-          <Button size="small" startIcon={<AttachFileIcon />} onClick={onDownloadObsoleteFile}>
-            廢止附件：{detail.obsolete_file_name}
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+            廢止附件
+          </Typography>
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={onDownloadObsoleteFile}>
+            下載廢止附件
           </Button>
         </Box>
       )}

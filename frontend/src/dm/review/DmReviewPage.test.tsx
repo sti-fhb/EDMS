@@ -114,9 +114,10 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     useObsoleteReview()
     renderWithProviders(<DmReviewPage />)
     await user.click(await screen.findByText("待廢止 SOP"))
-    expect(await screen.findByText("院內已停止實施此流程")).toBeInTheDocument() // 廢止原因
-    expect(screen.getByText("廢止對象（目前發布版）")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /停辦函文\.pdf/ })).toBeInTheDocument() // 附件下載
+    expect(await screen.findByText("院內已停止實施此流程")).toBeInTheDocument() // 廢止原因（變更摘要欄位）
+    expect(screen.getByText("廢止檔案")).toBeInTheDocument() // 檔案區標題（與新增/新版本一致命名）
+    expect(screen.getByText("廢止待簽核")).toBeInTheDocument() // 狀態 pill
+    expect(screen.getByRole("button", { name: "下載廢止附件" })).toBeInTheDocument() // 附件下載（不重複檔名）
     expect(screen.getByRole("button", { name: "核准並廢止" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "核准並發布" })).not.toBeInTheDocument()
   })

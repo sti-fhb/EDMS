@@ -1,5 +1,6 @@
 import AttachFileIcon from "@mui/icons-material/AttachFile"
 import Alert from "@mui/material/Alert"
+import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
@@ -113,9 +114,12 @@ export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: P
             helperText={errors.reason}
             fullWidth
           />
-          <div>
+          <Box sx={{ bgcolor: "action.hover", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+              廢止附件 <Typography component="span" variant="caption" color="text.secondary">（選填單檔）</Typography>
+            </Typography>
             <Button component="label" variant="outlined" size="small" startIcon={<AttachFileIcon />}>
-              廢止附件（選填單檔）
+              選擇檔案
               <input
                 type="file"
                 hidden
@@ -124,16 +128,16 @@ export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: P
               />
             </Button>
             {file && (
-              <Typography variant="body2" sx={{ mt: 0.5 }}>
+              <Typography variant="body2" sx={{ mt: 1 }}>
                 {file.name}
               </Typography>
             )}
             {errors.file && (
-              <Typography variant="caption" color="error" sx={{ display: "block", mt: 0.5 }}>
+              <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
                 {errors.file}
               </Typography>
             )}
-          </div>
+          </Box>
           <TextField
             select
             label="指定審核者"

@@ -144,7 +144,15 @@ async def test_initiate_transits_pending_obsolete_and_notifies(db):
     assert review.review_type == "OBSOLETE" and review.status == "PENDING"
     assert review.assigned_reviewer == "rev1" and review.reason == "流程已停辦"
     assert result.doc_status == "PENDING_OBSOLETE"
-    assert await _email_count(db, "OBS_SUBMIT", "rev1@e.com") == 1  # 通知指定審核者
+    assert result.notified == 1  # 成功排入（渲染成功；渲染失敗 queued_count 會是 0）
+    assert await _email_count(db, "OBS_SUBMIT", "rev1@e.com") == 1  # 通知指定審核者（STATUS=PENDING）
+    # 內容驗證：確認 params key 對齊範本佔位（渲染成功、非空信）——堵住「author_name vs applicant_name」類回歸
+    body = await db.scalar(
+        text(
+            'SELECT "BODY" FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'OBS_SUBMIT\' AND "RECIPIENT"=\'rev1@e.com\''
+        )
+    )
+    assert body and "流程已停辦" in body and "文件DM-SOP-000401" in body
 
 
 async def test_initiate_with_attachment_saves_obsolete_file(db):
@@ -334,6 +342,60 @@ async def test_http_initiate_forbidden_without_editor_role(db, client):
         data={"reason": "停辦", "reviewer_id": "rev1"},
     )
     assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_002"
+
+
+async def test_http_download_published_version_during_pending_obsolete(db, client):
+    """item 二：廢止待簽核期間，詳細頁仍可下載目前發布版（需實體檔存在）。"""
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _seed_user(db, "ed2", "編輯", email="ed2@e.com")
+    await _grant(db, "ed2", DM_EDITOR)
+    doc, v = await _published_doc(db, "DM-SOP-000441", author="ed2")
+    os.makedirs(os.path.dirname(v.file_path), exist_ok=True)  # 寫實體版本檔（下載端 is_file 檢查）
+    with open(v.file_path, "wb") as f:
+        f.write(b"%PDF-1.4 doc")
+    await _svc.initiate(
+        db, doc_id="DM-SOP-000441", reason="停辦", reviewer_id="rev1",
+        file_name=None, file_bytes=None, file_mime=None, op=_op("ed2"),
+    )
+    token = create_access_token(sub="ed2", ttl_minutes=15)
+    resp = await client.get(
+        f"/api/dm/documents/DM-SOP-000441/versions/{v.version_id}/file",
+        params={"disposition": "download"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200 and resp.content == b"%PDF-1.4 doc"
+
+
+async def test_http_upload_then_download_obsolete_attachment(db, client):
+    """item 六：完整前端路徑——編輯者以 multipart 上傳廢止附件 → 指定審核者於 DM04 下載（HTTP 全鏈路）。"""
+    await _seed_user(db, "ed3", "編輯", email="ed3@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "ed3", DM_EDITOR)
+    await _grant(db, "rev1", DM_REVIEWER)
+    await _published_doc(db, "DM-SOP-000442", author="ed3")
+    # 發起（multipart 含附件）——模擬 DmObsoleteDialog 送出
+    ed_token = create_access_token(sub="ed3", ttl_minutes=15)
+    post = await client.post(
+        "/api/dm/documents/DM-SOP-000442/obsolete",
+        headers={"Authorization": f"Bearer {ed_token}"},
+        data={"reason": "院內停辦", "reviewer_id": "rev1"},
+        files={"file": ("停辦函文.pdf", b"%PDF-1.4 letter", _PDF)},
+    )
+    assert post.status_code == 200
+    review_id = post.json()["review_id"]
+    # 指定審核者下載
+    rev_token = create_access_token(sub="rev1", ttl_minutes=15)
+    resp = await client.get(
+        f"/api/dm/reviews/{review_id}/obsolete-file",
+        headers={"Authorization": f"Bearer {rev_token}"},
+    )
+    assert resp.status_code == 200 and resp.content == b"%PDF-1.4 letter"
+    # 發起人本人不可下載（Q1=C）
+    forbidden = await client.get(
+        f"/api/dm/reviews/{review_id}/obsolete-file",
+        headers={"Authorization": f"Bearer {ed_token}"},
+    )
+    assert forbidden.status_code == 403
 
 
 async def test_http_initiate_multipart_success(db, client):
