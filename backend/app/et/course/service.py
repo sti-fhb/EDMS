@@ -137,7 +137,7 @@ class EtCourseService:
             },
             operator,
         )
-        ensure_version_matched(rowcount, entity="ET_COURSE")
+        ensure_version_matched(rowcount=rowcount, entity="ET_COURSE")
         await self._tags.apply(db, course_id, to_add=desired - current, to_remove=current - desired, operator=operator)
         await self._log(db, "UPDATE", operator.user_id, course_id, "編輯課程基本資料")
 
@@ -174,7 +174,7 @@ class EtCourseService:
             raise _CHAPTER_NOT_FOUND
         await self._require_owned(db, chapter.course_id, operator.user_id)
         rowcount = await self._chapters.rename(db, chapter_id, req.version, req.chapter_name, operator)
-        ensure_version_matched(rowcount, entity="ET_CHAPTER")
+        ensure_version_matched(rowcount=rowcount, entity="ET_CHAPTER")
         await self._log(db, "UPDATE", operator.user_id, chapter.course_id, "更名章節")
 
     async def reorder_chapters(
@@ -190,7 +190,7 @@ class EtCourseService:
         current = await self._chapters.list_by_course(db, course_id)
         ensure_reorder_complete(current_ids={c.chapter_id for c in current}, requested=req.chapter_ids)
         rowcount = await self._courses.bump_version(db, course_id, req.version, operator)
-        ensure_version_matched(rowcount, entity="ET_COURSE")
+        ensure_version_matched(rowcount=rowcount, entity="ET_COURSE")
         await self._chapters.apply_order(db, resequence(req.chapter_ids), operator)
         await self._log(db, "UPDATE", operator.user_id, course_id, "調整章節順序")
 

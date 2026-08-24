@@ -199,18 +199,36 @@ class EtChapterRepository:
         return result.rowcount
 
     async def apply_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
-        """依 `{chapter_id: sort_order}` 批次更新順序。
+        """依 `{chapter_id: sort_order}` 批次更新順序（**兩階段寫入**）。
 
         **不檢核章節層 `VERSION`**——重排以課程層版本保護（見 service）。章節自身的
         `VERSION` 亦不遞增：順序屬課程結構，遞增會讓正在改章節名的另一裝置無故衝突。
+
+        ## 為何要兩階段
+
+        `UX_ET_CHAPTER_COURSE_ORDER` 為 `(COURSE_ID, SORT_ORDER)` 唯一索引。交換相鄰
+        兩章（1↔2）時，若逐列直接寫入，第一列寫成 2 的瞬間會與尚未更新的第二列重複，
+        PostgreSQL 立即拋 `UniqueViolationError`——非 deferrable 之唯一索引是**逐列
+        即時檢核**，而部分索引（`WHERE DELETED = 0`）無法宣告 deferrable。
+
+        故先把所有涉及之列移到**負數暫存區**（以目標順序取負，因目標順序本身唯一，
+        負值亦唯一且不與任何正值業務資料衝突），再一次落定為正值。兩階段皆在同一
+        交易內，外部看不到中間狀態。
         """
+        if not order_map:
+            return
         now = utcnow()
-        for chapter_id, sort_order in order_map.items():
-            await db.execute(
-                update(EtChapter)
-                .where(EtChapter.chapter_id == chapter_id, EtChapter.deleted == 0)
-                .values(sort_order=sort_order, updated_user=operator.user_id, updated_date=now)
-            )
+        for phase_value in (lambda target: -target, lambda target: target):
+            for chapter_id, sort_order in order_map.items():
+                await db.execute(
+                    update(EtChapter)
+                    .where(EtChapter.chapter_id == chapter_id, EtChapter.deleted == 0)
+                    .values(
+                        sort_order=phase_value(sort_order),
+                        updated_user=operator.user_id,
+                        updated_date=now,
+                    )
+                )
         await db.flush()
 
     async def soft_delete_with_cascade(self, db: AsyncSession, chapter_ids: list[int], operator: OperatorInfo) -> None:
