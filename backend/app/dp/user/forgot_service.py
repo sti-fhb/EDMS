@@ -120,12 +120,15 @@ class ResetPasswordService:
         if await is_reused_async(new_password, recent):
             raise AppError(status_code=422, detail="不可與最近使用過之密碼相同", error_code="DP_PWD_003")
 
+        # 先算雜湊再進寫入段：雜湊為純 CPU、不依賴 DB 結果，放在 consume_reset_token 之後會讓
+        # 該 UPDATE 的交易多持有 ~185ms 的執行緒往返（#214 review 附帶發現）。
+        new_hash = await hash_password_async(new_password)
+
         # 原子消費 token（關閉「查→標用」TOCTOU；並發同 token 只有一個成功）→ 作為後續寫入的閘
         if await self._repo.consume_reset_token(db, token_hash=token_hash, token_type=_TOKEN_TYPE, now=now) is None:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
         # 更新（不改鎖定 / 停用）+ 追加歷程 + 稽核
-        new_hash = await hash_password_async(new_password)
         await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user.user_id, now=now)
         seq_no = await self._repo.next_pwd_seq_no(db, user.user_id)
         await self._repo.add_pwd_history(

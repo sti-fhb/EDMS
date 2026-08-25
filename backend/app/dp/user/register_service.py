@@ -99,7 +99,13 @@ class RegisterService:
         char_types = await self._params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES)
         validate_password_strength(password, min_length=min_len, required_char_types=char_types)
 
-        # 4. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256）
+        # 4. 先算雜湊再進寫入段：雜湊是純 CPU、不依賴任何 DB 結果，而下方的條件式刪除會取列鎖、
+        #    稽核寫入也會佔鎖。若把 ~185ms 的執行緒往返放在寫入交易之內，該交易與列鎖就白白多
+        #    持有那段時間（#214 review 附帶發現）。此處提前亦不改變任何早退行為——未逾期邀請
+        #    的守衛在 step 2-1、複雜度檢核在 step 3，皆已在此之前。
+        pwd_hash = await hash_password_async(password)
+
+        # 5. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256）
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
         # 條件式刪除：保留 TOCTOU 空窗內剛產生的有效邀請，讓其撞 UNIQUE 轉 409 而非被靜默覆蓋（#125）
@@ -130,7 +136,7 @@ class RegisterService:
                 token_hash=hash_token(plaintext),
                 email=email,
                 user_name=user_name,
-                pwd_hash=await hash_password_async(password),
+                pwd_hash=pwd_hash,
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
             )
