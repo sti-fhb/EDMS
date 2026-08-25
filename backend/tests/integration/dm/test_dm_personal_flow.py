@@ -262,6 +262,30 @@ async def test_activity_author_and_reviewer_views(db):
     assert any(a.doc_id == "DM-SOP-000531" for a in rev_act.reviewer) and rev_act.author == []
 
 
+async def test_reviewer_activity_marks_overdue(db):
+    # 審核者視角：停留逾催辦門檻（預設 7 天）之 PENDING → is_overdue=True（前端顯「催辦中」，AC5）
+    await _seed_user(db, "rev1", "審核")
+    await _doc(db, "DM-SOP-000533", status="PENDING_REVIEW")
+    v = await _version(db, "DM-SOP-000533", "1.0", status="PENDING_REVIEW")
+    old = utcnow() - timedelta(days=10)  # 逾 7 天門檻
+    r = await _review(
+        db, "DM-SOP-000533", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1", submit=old
+    )
+    act = await _svc.list_activity(db, user_id="rev1")
+    item = next(a for a in act.reviewer if a.review_id == r.review_id)
+    assert item.is_overdue is True and item.waiting_days >= 7
+
+
+async def test_reviewer_activity_recent_pending_not_overdue(db):
+    await _seed_user(db, "rev1", "審核")
+    await _doc(db, "DM-SOP-000534", status="PENDING_REVIEW")
+    v = await _version(db, "DM-SOP-000534", "1.0", status="PENDING_REVIEW")
+    r = await _review(db, "DM-SOP-000534", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1")
+    act = await _svc.list_activity(db, user_id="rev1")
+    item = next(a for a in act.reviewer if a.review_id == r.review_id)
+    assert item.is_overdue is False
+
+
 async def test_activity_excludes_older_than_30_days(db):
     await _seed_user(db, "ed", "撰寫")
     await _doc(db, "DM-SOP-000532", status="PUBLISHED")

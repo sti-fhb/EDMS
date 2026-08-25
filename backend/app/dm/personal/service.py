@@ -17,18 +17,21 @@ from app.dm.personal.repository import PersonalRepository
 from app.dm.personal.schemas import ActivityItem, ActivityResponse, DraftItem, WithdrawResult
 from app.dm.review.repository import ReviewCenterRepository
 from app.dm.review.service import ReviewService
-from app.services import AuditLogService
+from app.services import AuditLogService, ParamService
 
 _NEW = "NEW"
 _NEW_VERSION = "NEW_VERSION"
 _OBSOLETE = "OBSOLETE"
 _DRAFT = "DRAFT"
 _PUBLISHED = "PUBLISHED"
+_PENDING = "PENDING"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
 _REJECTED = "REJECTED"
 _WITHDRAWN = "WITHDRAWN"
 _ACTIVITY_DAYS = 30
-_NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
+_REMIND_THRESHOLD_DEFAULT = 7  # DM_REMIND_THRESHOLD 預設；逾此天數之 PENDING 於審核者視角顯「催辦中」
+_REVIEW_NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
+_DRAFT_NOT_FOUND = AppError(status_code=404, detail="查無此草稿版本或無權存取", error_code="DM_DOC_001")
 
 
 def _classify_draft(latest_review_status: str | None) -> str:
@@ -50,12 +53,14 @@ class PersonalService:
         reviews: ReviewService | None = None,
         notifier: DmNotifier | None = None,
         audit: AuditLogService | None = None,
+        params: ParamService | None = None,
     ) -> None:
         self._repo = repository or PersonalRepository()
         self._review_repo = review_repo or ReviewCenterRepository()
         self._reviews = reviews or ReviewService()
         self._notifier = notifier or DmNotifier()
         self._audit = audit or AuditLogService()
+        self._params = params or ParamService()
 
     # ── 草稿匣 ──────────────────────────────────────────
 
@@ -82,9 +87,9 @@ class PersonalService:
         Raises:
             AppError: 查無版本（404 DM_DOC_001）、非本人（403 DM_DRAFT_001）、非草稿版本（409 DM_DRAFT_002）。
         """
-        version = await self._repo.get_version(db, version_id)
+        version = await self._repo.get_version(db, version_id, for_update=True)  # 鎖列：狀態檢核與軟刪之間防 TOCTOU
         if version is None:
-            raise _NOT_FOUND
+            raise _DRAFT_NOT_FOUND
         if version.created_user != op.user_id:
             raise AppError(status_code=403, detail="僅能刪除本人之草稿", error_code="DM_DRAFT_001")
         if version.status != _DRAFT:
@@ -117,7 +122,7 @@ class PersonalService:
         """
         review = await self._review_repo.get_review(db, review_id, for_update=True)
         if review is None:
-            raise _NOT_FOUND
+            raise _REVIEW_NOT_FOUND
         if review.created_user != op.user_id:
             raise AppError(status_code=403, detail="僅送審撰寫者本人可撤回", error_code="DM_REVIEW_007")
         # 撤回（PENDING→WITHDRAWN；非 PENDING 由 ReviewService 擋 DM_REVIEW_003）
@@ -155,24 +160,26 @@ class PersonalService:
             target_id=review.doc_id,
             after_value={"review_id": review_id, "operation": "WITHDRAW", "review_type": review.review_type},
         )
-        notified = await self._notify_withdrawn(
+        await self._notify_withdrawn(
             db,
             reviewer_id=review.assigned_reviewer,
             author_id=review.created_user,
             doc_name=doc.doc_name if doc is not None else review.doc_id,
         )
-        return WithdrawResult(review_id=review_id, doc_status=doc_status, notified=notified)
+        return WithdrawResult(review_id=review_id, doc_status=doc_status)
 
-    async def _notify_withdrawn(self, db: AsyncSession, *, reviewer_id: str, author_id: str, doc_name: str) -> int:
-        """站內訊息通知原指派審核者（SUBMIT_WITHDRAWN、CHANNEL=MSG）；查無 Email 則略過（回 0）。
+    async def _notify_withdrawn(self, db: AsyncSession, *, reviewer_id: str, author_id: str, doc_name: str) -> None:
+        """觸發撤回通知事件（SUBMIT_WITHDRAWN，CHANNEL=MSG，對齊 AUTO_REMIND 之 MSG 事件慣例）。
 
-        params key 須對齊範本佔位（reviewer_name / author_name / doc_name）。
+        **實質站內訊息由原審核者之「我的文件動態」（審核者視角 WITHDRAWN）呈現**——平台 `send_email` 對
+        MSG 頻道回 `CHANNEL_NOT_EMAIL`、不寫 outbox（不寄 Email）。此呼叫為 forward-compat 事件觸發
+        （未來若平台實作站內訊息佇列即自動生效）；params key 對齊範本佔位（reviewer_name / author_name / doc_name）。
         """
         reviewer = await self._review_repo.get_user_name_email(db, reviewer_id)
         if reviewer is None or not reviewer.email:
-            return 0
+            return
         author = await self._review_repo.get_user_name_email(db, author_id)
-        result = await self._notifier.notify(
+        await self._notifier.notify(
             db,
             template_code="SUBMIT_WITHDRAWN",
             recipients=[reviewer.email],
@@ -182,22 +189,27 @@ class PersonalService:
                 "doc_name": doc_name,
             },
         )
-        return result.queued_count
 
     # ── 我的文件動態 ────────────────────────────────────
 
     async def list_activity(self, db: AsyncSession, *, user_id: str) -> ActivityResponse:
-        """近 30 天送審事件（撰寫者 / 審核者視角；兼具兩角色者兩清單皆有值）。"""
-        since = utcnow() - timedelta(days=_ACTIVITY_DAYS)
+        """近 30 天送審事件（撰寫者 / 審核者視角；兼具兩角色者兩清單皆有值）。
+
+        PENDING 項計算停留天數 + 是否逾催辦門檻（`DM_REMIND_THRESHOLD`）——審核者視角據此顯「催辦中」（AC5）。
+        """
+        now = utcnow()
+        since = now - timedelta(days=_ACTIVITY_DAYS)
+        threshold = await self._params.get_int_param(db, "DM_REMIND_THRESHOLD", "VALUE", _REMIND_THRESHOLD_DEFAULT)
         author_rows = await self._repo.list_author_activity(db, user_id, since)
         reviewer_rows = await self._repo.list_reviewer_activity(db, user_id, since)
         return ActivityResponse(
-            author=[self._to_activity(r) for r in author_rows],
-            reviewer=[self._to_activity(r) for r in reviewer_rows],
+            author=[self._to_activity(r, now=now, threshold=threshold) for r in author_rows],
+            reviewer=[self._to_activity(r, now=now, threshold=threshold) for r in reviewer_rows],
         )
 
     @staticmethod
-    def _to_activity(r) -> ActivityItem:
+    def _to_activity(r, *, now, threshold: int) -> ActivityItem:
+        waiting_days = max((now - r.submit_date).days, 0)
         return ActivityItem(
             review_id=r.review_id,
             doc_id=r.doc_id,
@@ -206,4 +218,6 @@ class PersonalService:
             status=r.status,
             submit_date=r.submit_date,
             complete_date=r.complete_date,
+            waiting_days=waiting_days,
+            is_overdue=r.status == _PENDING and waiting_days >= threshold,
         )

@@ -22,15 +22,18 @@ class DraftItem(BaseModel):
 
 
 class WithdrawResult(BaseModel):
-    """撤回送審結果。"""
+    """撤回送審結果。
+
+    無 `notified` 欄位：撤回之站內訊息（SUBMIT_WITHDRAWN、CHANNEL=MSG）不經 Email outbox，
+    由原審核者之「我的文件動態」（審核者視角 WITHDRAWN）呈現（平台 MSG 設計）。
+    """
 
     review_id: int
     doc_status: str  # 撤回後文件狀態（DRAFT / PUBLISHED）
-    notified: int  # 排入站內訊息之收件數（0=原審核者查無 / 範本停用）
 
 
 class ActivityItem(BaseModel):
-    """我的文件動態一筆（送審週期事件；前端依 review_type + status 映射顯示標籤）。"""
+    """我的文件動態一筆（送審週期事件；前端依 review_type + status + is_overdue 映射顯示標籤）。"""
 
     review_id: int
     doc_id: str
@@ -39,6 +42,8 @@ class ActivityItem(BaseModel):
     status: str  # PENDING / APPROVED / REJECTED / WITHDRAWN
     submit_date: datetime
     complete_date: datetime | None
+    waiting_days: int  # 送審至今停留天數（PENDING 用於催辦判定）
+    is_overdue: bool  # PENDING 且停留 ≥ 催辦門檻（審核者視角顯示「催辦中」，AC5）
 
 
 class ActivityResponse(BaseModel):

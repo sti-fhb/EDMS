@@ -87,7 +87,11 @@ function ActivityTab() {
           <Stack divider={<Divider />} spacing={1}>
             {data.reviewer.map((a) => (
               <Box key={a.review_id} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Chip size="small" label={reviewerEventLabel(a.status)} />
+                <Chip
+                  size="small"
+                  color={a.is_overdue ? "error" : "default"}
+                  label={reviewerEventLabel(a.status, a.is_overdue)}
+                />
                 <Typography variant="body2" sx={{ flex: 1 }}>
                   {a.doc_name}
                 </Typography>

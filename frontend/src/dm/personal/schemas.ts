@@ -27,6 +27,8 @@ export interface ActivityItem {
   status: string // PENDING / APPROVED / REJECTED / WITHDRAWN
   submit_date: string
   complete_date: string | null
+  waiting_days: number
+  is_overdue: boolean // PENDING 且逾催辦門檻（審核者視角顯「催辦中」）
 }
 
 export interface ActivityResponse {
@@ -57,9 +59,9 @@ export function authorEventLabel(review_type: string, status: string): string {
   return status
 }
 
-/** 審核者視角：待處理 / 已被撤回 / 已處理（核准 / 退回）。 */
-export function reviewerEventLabel(status: string): string {
-  if (status === "PENDING") return "待處理"
+/** 審核者視角：待處理 / 催辦中（逾門檻）/ 已被撤回 / 已處理（核准 / 退回）。 */
+export function reviewerEventLabel(status: string, isOverdue = false): string {
+  if (status === "PENDING") return isOverdue ? "催辦中" : "待處理"
   if (status === "WITHDRAWN") return "已被撰寫者撤回"
   if (status === "APPROVED") return "已核准"
   if (status === "REJECTED") return "已退回"

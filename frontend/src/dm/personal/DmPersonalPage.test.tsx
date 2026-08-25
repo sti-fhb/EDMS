@@ -6,14 +6,16 @@ import { DmPersonalPage } from "./DmPersonalPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
 describe("DmPersonalPage 個人專區（DM07）", () => {
-  it("我的文件動態：撰寫者 / 審核者視角事件；送審中可撤回", async () => {
+  it("我的文件動態：撰寫者 / 審核者視角事件；送審中可撤回；逾門檻顯催辦中（AC5）", async () => {
     renderWithProviders(<DmPersonalPage />)
     expect(await screen.findByText("待審文件 A")).toBeInTheDocument() // 撰寫者視角（送審中）
-    expect(screen.getByText("我要審的文件")).toBeInTheDocument() // 審核者視角（待處理）
+    expect(screen.getByText("我逾期要審的文件")).toBeInTheDocument() // 審核者視角
     expect(screen.getByText("撰寫者視角（近 30 天）")).toBeInTheDocument()
     expect(screen.getByText("審核者視角（近 30 天）")).toBeInTheDocument()
     // 送審中 → 有撤回送審鈕
     expect(screen.getByRole("button", { name: "撤回送審" })).toBeInTheDocument()
+    // 審核者視角逾催辦門檻 → 顯示「催辦中」（is_overdue=true）
+    expect(screen.getByText("催辦中")).toBeInTheDocument()
   })
 
   it("撤回送審 → 二次確認 → 成功 toast（DM-MSG-DM07-005）", async () => {
