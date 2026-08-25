@@ -19,21 +19,22 @@ export interface WithdrawResult {
   doc_status: string
 }
 
-export interface ActivityItem {
+/** 一筆狀態變動事件（一次送審週期展開為 送審 → 結果 多筆事件；時間新→舊）。 */
+export interface ActivityEvent {
   review_id: number
   doc_id: string
   doc_name: string
   review_type: string // NEW / NEW_VERSION / OBSOLETE
   status: string // PENDING / APPROVED / REJECTED / WITHDRAWN
-  submit_date: string
-  complete_date: string | null
-  waiting_days: number
-  is_overdue: boolean // PENDING 且逾催辦門檻（審核者視角顯「催辦中」）
+  event_kind: "submitted" | "resolved" // 送審(發起廢止) / 結果(核准 退回 撤回)
+  event_time: string
+  is_overdue: boolean // 僅 PENDING 之 submitted 事件；審核者視角逾門檻顯「催辦中」
+  party_name: string | null // 撰寫者視角＝指定審核者；審核者視角＝送審者
 }
 
 export interface ActivityResponse {
-  author: ActivityItem[]
-  reviewer: ActivityItem[]
+  author: ActivityEvent[]
+  reviewer: ActivityEvent[]
 }
 
 export interface PersonalAccess {
@@ -47,23 +48,65 @@ export const DRAFT_KIND_LABELS: Record<DraftKind, string> = {
   withdrawn: "已撤回",
 }
 
-/**
- * 送審事件顯示標籤：由 review_type + status 映射（撰寫者 / 審核者視角共用原始資料，標籤依視角）。
- * 撰寫者視角：送審中 / 核准發布 / 退回 / 廢止待簽核 / 已廢止 / 已撤回。
- */
-export function authorEventLabel(review_type: string, status: string): string {
-  if (status === "PENDING") return review_type === "OBSOLETE" ? "廢止待簽核" : "送審中"
-  if (status === "APPROVED") return review_type === "OBSOLETE" ? "已廢止" : "核准發布"
-  if (status === "REJECTED") return "退回"
-  if (status === "WITHDRAWN") return "已撤回"
-  return status
+/** 送審類型顯示名（動態「類型」欄）。 */
+export const REVIEW_TYPE_LABELS: Record<string, string> = {
+  NEW: "新增",
+  NEW_VERSION: "新版本",
+  OBSOLETE: "廢止",
 }
 
-/** 審核者視角：待處理 / 催辦中（逾門檻）/ 已被撤回 / 已處理（核准 / 退回）。 */
-export function reviewerEventLabel(status: string, isOverdue = false): string {
-  if (status === "PENDING") return isOverdue ? "催辦中" : "待處理"
-  if (status === "WITHDRAWN") return "已被撰寫者撤回"
-  if (status === "APPROVED") return "已核准"
-  if (status === "REJECTED") return "已退回"
-  return status
+type Tone = "warning" | "success" | "error" | "default"
+
+/** 事件標籤 + Chip 色調（一律中文；#8 詞彙統一，無英文 fallback）。 */
+export interface EventLabel {
+  text: string
+  tone: Tone
+}
+
+/**
+ * 撰寫者視角事件標籤：
+ * - 送審中（submitted 尚 PENDING）→ 廢止則「廢止待簽核」
+ * - 送審 / 發起廢止（submitted 且該週期已完成，作為歷程起點）
+ * - 核准發布 / 已廢止 / 已退回 / 已撤回（resolved）
+ */
+export function authorEventLabel(e: {
+  review_type: string
+  status: string
+  event_kind: string
+}): EventLabel {
+  const isObsolete = e.review_type === "OBSOLETE"
+  if (e.event_kind === "resolved") {
+    if (e.status === "APPROVED") return { text: isObsolete ? "已廢止" : "核准發布", tone: "success" }
+    if (e.status === "REJECTED") return { text: "已退回", tone: "error" }
+    return { text: "已撤回", tone: "default" } // WITHDRAWN
+  }
+  // submitted
+  if (e.status === "PENDING") return { text: isObsolete ? "廢止待簽核" : "送審中", tone: "warning" }
+  return { text: isObsolete ? "發起廢止" : "送審", tone: "default" } // 已完成週期之送審起點
+}
+
+/**
+ * 審核者視角事件標籤：
+ * - 待處理 / 催辦中（submitted 尚 PENDING，逾門檻催辦）
+ * - 收到送審 / 收到廢止申請（submitted 且該週期已完成，作為歷程起點）
+ * - 已核准 / 已核准廢止 / 已退回 / 已被撤回（resolved）
+ */
+export function reviewerEventLabel(e: {
+  review_type: string
+  status: string
+  event_kind: string
+  is_overdue: boolean
+}): EventLabel {
+  const isObsolete = e.review_type === "OBSOLETE"
+  if (e.event_kind === "resolved") {
+    if (e.status === "APPROVED") return { text: isObsolete ? "已核准廢止" : "已核准", tone: "success" }
+    if (e.status === "REJECTED") return { text: "已退回", tone: "error" }
+    return { text: "已被撤回", tone: "default" } // WITHDRAWN
+  }
+  // submitted
+  if (e.status === "PENDING") {
+    if (e.is_overdue) return { text: "催辦中", tone: "error" }
+    return { text: isObsolete ? "待處理（廢止）" : "待處理", tone: "warning" }
+  }
+  return { text: isObsolete ? "收到廢止申請" : "收到送審", tone: "default" }
 }

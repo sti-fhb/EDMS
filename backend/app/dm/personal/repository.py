@@ -1,13 +1,16 @@
 """個人專區（US9）資料存取：草稿匣（三類）+ 我的文件動態（衍生查詢，無新表）。"""
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute, aliased
 
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
+from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，同 dm/review、dm/detail）
 
 _DRAFT = "DRAFT"
 _OBSOLETE = "OBSOLETE"
@@ -64,8 +67,13 @@ class PersonalRepository:
             stmt = stmt.with_for_update()
         return await db.scalar(stmt)
 
-    async def _activity(self, db: AsyncSession, *, column, user_id: str, since: datetime) -> list[Row]:
-        stmt = (
+    def _activity_select(self, *, party_col: InstrumentedAttribute[str]) -> Select[Any]:
+        """組 activity 基礎查詢：送審週期各欄 + 對造人姓名（party_col 對應之 DP_USER.USER_NAME）。
+
+        最終呈現順序由 service 依展開後之事件時間重排（見 PersonalService._build_events），此處不加 order_by。
+        """
+        party_user = aliased(DpUser)
+        return (
             select(
                 DmReview.review_id,
                 DmReview.doc_id,
@@ -74,17 +82,40 @@ class PersonalRepository:
                 DmReview.submit_date,
                 DmReview.complete_date,
                 DmDocument.doc_name,
+                party_user.user_name.label("party_name"),
             )
             .join(DmDocument, (DmReview.doc_id == DmDocument.doc_id) & (DmDocument.deleted == 0))
-            .where(column == user_id, or_(DmReview.submit_date >= since, DmReview.complete_date >= since))
-            .order_by(DmReview.submit_date.desc())
+            .outerjoin(party_user, party_col == party_user.user_id)
+        )
+
+    async def list_author_activity(self, db: AsyncSession, user_id: str, since: datetime) -> list[Row]:
+        """撰寫者視角近 30 天狀態變動事件。
+
+        涵蓋：(1) 本人送出之送審（created_user＝我）；(2) 本人有版本之文件被「廢止」之送審——
+        即使廢止非本人發起，也讓我看到「該文件已廢止」（#4：已廢止孤兒草稿於草稿匣隱藏，動態補上該訊息）。
+        對造人 party_name＝指定審核者姓名。
+        """
+        my_docs = (
+            select(DmDocVersion.doc_id)
+            .where(DmDocVersion.created_user == user_id, DmDocVersion.deleted == 0)
+            .scalar_subquery()
+        )
+        stmt = (
+            self._activity_select(party_col=DmReview.assigned_reviewer)
+            .where(
+                or_(
+                    DmReview.created_user == user_id,
+                    and_(DmReview.review_type == _OBSOLETE, DmReview.doc_id.in_(my_docs)),
+                ),
+                or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
+            )
         )
         return list((await db.execute(stmt)).all())
 
-    async def list_author_activity(self, db: AsyncSession, user_id: str, since: datetime) -> list[Row]:
-        """撰寫者視角近 30 天送審事件（created_user＝我）。"""
-        return await self._activity(db, column=DmReview.created_user, user_id=user_id, since=since)
-
     async def list_reviewer_activity(self, db: AsyncSession, user_id: str, since: datetime) -> list[Row]:
-        """審核者視角近 30 天送審事件（assigned_reviewer＝我）。"""
-        return await self._activity(db, column=DmReview.assigned_reviewer, user_id=user_id, since=since)
+        """審核者視角近 30 天狀態變動事件（assigned_reviewer＝我）；對造人 party_name＝送審者姓名。"""
+        stmt = self._activity_select(party_col=DmReview.created_user).where(
+            DmReview.assigned_reviewer == user_id,
+            or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
+        )
+        return list((await db.execute(stmt)).all())

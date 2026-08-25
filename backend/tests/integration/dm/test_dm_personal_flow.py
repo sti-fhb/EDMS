@@ -315,8 +315,8 @@ async def test_reviewer_activity_marks_overdue(db):
         db, "DM-SOP-000533", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1", submit=old
     )
     act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
-    item = next(a for a in act.reviewer if a.review_id == r.review_id)
-    assert item.is_overdue is True and item.waiting_days >= 7
+    item = next(a for a in act.reviewer if a.review_id == r.review_id and a.event_kind == "submitted")
+    assert item.is_overdue is True
 
 
 async def test_reviewer_activity_recent_pending_not_overdue(db):
@@ -325,8 +325,42 @@ async def test_reviewer_activity_recent_pending_not_overdue(db):
     v = await _version(db, "DM-SOP-000534", "1.0", status="PENDING_REVIEW")
     r = await _review(db, "DM-SOP-000534", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1")
     act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
-    item = next(a for a in act.reviewer if a.review_id == r.review_id)
+    item = next(a for a in act.reviewer if a.review_id == r.review_id and a.event_kind == "submitted")
     assert item.is_overdue is False
+
+
+async def test_activity_terminal_expands_to_two_events_newest_first(db):
+    # #5：一次送審週期展開為 送審(submitted) → 結果(resolved) 兩事件，時間新→舊（結果在前）
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核")
+    await _doc(db, "DM-SOP-000541", status="DRAFT")
+    v = await _version(db, "DM-SOP-000541", "1.0", status="DRAFT")
+    submit = utcnow() - timedelta(days=3)
+    reject = utcnow() - timedelta(days=1)
+    await _review(
+        db, "DM-SOP-000541", v.version_id, review_type="NEW", status="REJECTED",
+        reviewer="rev1", author="ed", submit=submit, complete=reject,
+    )
+    act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    evs = [a for a in act.author if a.doc_id == "DM-SOP-000541"]
+    assert {e.event_kind for e in evs} == {"submitted", "resolved"}  # 兩事件
+    assert evs[0].event_kind == "resolved" and evs[1].event_kind == "submitted"  # 結果(較近)在前
+    assert evs[0].party_name == "審核"  # 撰寫者視角對造人＝指定審核者姓名
+
+
+async def test_activity_author_sees_obsolete_of_own_doc_by_other(db):
+    # #4：本人有版本之文件被他人發起廢止並核准 → 撰寫者視角仍見「已廢止(OBSOLETE/APPROVED)」事件
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "adm", "管理")
+    await _doc(db, "DM-SOP-000542", status="OBSOLETE", author="ed")
+    v = await _version(db, "DM-SOP-000542", "1.0", status="OBSOLETE", author="ed", published=utcnow())
+    # 廢止送審由他人(adm)發起並核准
+    await _review(
+        db, "DM-SOP-000542", v.version_id, review_type="OBSOLETE", status="APPROVED", reviewer="adm", author="adm"
+    )
+    act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    obs = [a for a in act.author if a.doc_id == "DM-SOP-000542" and a.review_type == "OBSOLETE"]
+    assert any(a.event_kind == "resolved" and a.status == "APPROVED" for a in obs)
 
 
 async def test_activity_excludes_older_than_30_days(db):

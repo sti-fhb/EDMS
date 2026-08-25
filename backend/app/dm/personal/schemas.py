@@ -32,25 +32,26 @@ class WithdrawResult(BaseModel):
     doc_status: str  # 撤回後文件狀態（DRAFT / PUBLISHED）
 
 
-class ActivityItem(BaseModel):
-    """我的文件動態一筆（送審週期事件；前端依 review_type + status + is_overdue 映射顯示標籤）。"""
+class ActivityEvent(BaseModel):
+    """我的文件動態一筆「狀態變動事件」（一次送審週期依其進度展開為 送審 → 核准/退回/撤回 多列事件，
+    各帶其發生時間；前端依 review_type + status + event_kind + 視角映射中文標籤，時間新→舊排序）。"""
 
     review_id: int
     doc_id: str
     doc_name: str
     review_type: str  # NEW / NEW_VERSION / OBSOLETE
-    status: str  # PENDING / APPROVED / REJECTED / WITHDRAWN
-    submit_date: datetime
-    complete_date: datetime | None
-    waiting_days: int  # 送審至今停留天數（PENDING 用於催辦判定）
-    is_overdue: bool  # PENDING 且停留 ≥ 催辦門檻（審核者視角顯示「催辦中」，AC5）
+    status: str  # 該送審週期終態 / 現態：PENDING / APPROVED / REJECTED / WITHDRAWN
+    event_kind: str  # "submitted"（送審 / 發起廢止）| "resolved"（核准 / 退回 / 撤回 之結果）
+    event_time: datetime  # 該事件發生時間（submitted＝送審時間、resolved＝完成時間）
+    is_overdue: bool  # 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻（審核者視角顯「催辦中」，AC5）
+    party_name: str | None  # 撰寫者視角＝指定審核者姓名；審核者視角＝送審者姓名
 
 
 class ActivityResponse(BaseModel):
-    """我的文件動態（角色視角）；兼具兩角色者兩清單皆有值。"""
+    """我的文件動態（依當下角色呈現視角）；兼具兩角色者兩清單皆有值。"""
 
-    author: list[ActivityItem]  # 撰寫者視角（created_user＝我）
-    reviewer: list[ActivityItem]  # 審核者視角（assigned_reviewer＝我）
+    author: list[ActivityEvent]  # 撰寫者視角（我送審之文件狀態變動）
+    reviewer: list[ActivityEvent]  # 審核者視角（指派給我之送審狀態變動）
 
 
 class PersonalAccess(BaseModel):

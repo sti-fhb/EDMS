@@ -24,7 +24,7 @@ import CloseIcon from "@mui/icons-material/Close"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_STATUS_LABELS, REVIEW_TYPE_LABELS } from "./schemas"
+import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
 import type { ReviewDetail, VersionMeta } from "./schemas"
 import { downloadObsoleteFile, downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
@@ -405,7 +405,7 @@ export function DmReviewPage() {
                         <Chip
                           size="small"
                           color={row.status === "APPROVED" ? "success" : "warning"}
-                          label={REVIEW_STATUS_LABELS[row.status] ?? row.status}
+                          label={reviewStatusLabel(row.status)}
                         />
                       </TableCell>
                       <TableCell>{row.complete_date?.slice(0, 10) ?? "—"}</TableCell>

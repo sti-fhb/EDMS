@@ -18,6 +18,12 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     expect(screen.getByText("催辦中")).toBeInTheDocument()
     // 待處理 / 催辦中 → 有「前往簽核中心」button
     expect(screen.getByRole("button", { name: "前往簽核中心" })).toBeInTheDocument()
+    // 狀態變動歷程：同一送審週期展開為 送審 + 退回 兩列（#5）
+    expect(screen.getAllByText("被退回文件 B")).toHaveLength(2)
+    expect(screen.getByText("已退回")).toBeInTheDocument() // resolved 事件
+    // 對造人欄（指定審核者 / 送審者）中文姓名
+    expect(screen.getByText("送審者")).toBeInTheDocument() // 審核者視角表頭
+    expect(screen.getByText("陳送審")).toBeInTheDocument()
   })
 
   it("撤回送審 → 二次確認 → 成功 toast（DM-MSG-DM07-005）", async () => {

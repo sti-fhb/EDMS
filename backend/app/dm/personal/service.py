@@ -17,7 +17,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.personal.repository import PersonalRepository
-from app.dm.personal.schemas import ActivityItem, ActivityResponse, DraftItem, WithdrawResult
+from app.dm.personal.schemas import ActivityEvent, ActivityResponse, DraftItem, WithdrawResult
 from app.dm.review.repository import ReviewCenterRepository
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, has_role
@@ -30,8 +30,10 @@ _DRAFT = "DRAFT"
 _PUBLISHED = "PUBLISHED"
 _PENDING = "PENDING"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
+_APPROVED = "APPROVED"
 _REJECTED = "REJECTED"
 _WITHDRAWN = "WITHDRAWN"
+_TERMINAL = (_APPROVED, _REJECTED, _WITHDRAWN)  # 送審週期終態（各對應一筆 resolved 事件）
 _ACTIVITY_DAYS = 30
 _REMIND_THRESHOLD_DEFAULT = 7  # DM_REMIND_THRESHOLD 預設；逾此天數之 PENDING 於審核者視角顯「催辦中」
 _REVIEW_NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
@@ -169,35 +171,60 @@ class PersonalService:
     # ── 我的文件動態 ────────────────────────────────────
 
     async def list_activity(self, db: AsyncSession, *, user_id: str, roles: list[str]) -> ActivityResponse:
-        """近 30 天送審事件——**依當下角色呈現視角**：具編輯者才回撰寫者視角、具審核者才回審核者視角
+        """近 30 天「狀態變動歷程」——**依當下角色呈現視角**：具編輯者才回撰寫者視角、具審核者才回審核者視角
         （曾具但當下已無該角色者不呈現對應視角）。
 
-        PENDING 項計算停留天數 + 是否逾催辦門檻（`DM_REMIND_THRESHOLD`）——審核者視角據此顯「催辦中」（AC5）。
+        每一次送審週期依進度展開為多筆事件：送審（submitted，@送審時間）→ 若已完成再加一筆結果
+        （resolved：核准 / 退回 / 撤回，@完成時間），時間新→舊排序，讓「送審 → 退回 / 發布」全程可見（#5）。
+        PENDING 之送審事件計是否逾催辦門檻（`DM_REMIND_THRESHOLD`）——審核者視角據此顯「催辦中」（AC5）。
         """
         now = utcnow()
         since = now - timedelta(days=_ACTIVITY_DAYS)
         threshold = await self._params.get_int_param(db, "DM_REMIND_THRESHOLD", "VALUE", _REMIND_THRESHOLD_DEFAULT)
-        author: list[ActivityItem] = []
-        reviewer: list[ActivityItem] = []
+        author: list[ActivityEvent] = []
+        reviewer: list[ActivityEvent] = []
         if has_role(roles, DM_EDITOR):
             rows = await self._repo.list_author_activity(db, user_id, since)
-            author = [self._to_activity(r, now=now, threshold=threshold) for r in rows]
+            author = self._build_events(rows, since=since, now=now, threshold=threshold)
         if has_role(roles, DM_REVIEWER):
             rows = await self._repo.list_reviewer_activity(db, user_id, since)
-            reviewer = [self._to_activity(r, now=now, threshold=threshold) for r in rows]
+            reviewer = self._build_events(rows, since=since, now=now, threshold=threshold)
         return ActivityResponse(author=author, reviewer=reviewer)
 
     @staticmethod
-    def _to_activity(r, *, now, threshold: int) -> ActivityItem:
-        waiting_days = max((now - r.submit_date).days, 0)
-        return ActivityItem(
-            review_id=r.review_id,
-            doc_id=r.doc_id,
-            doc_name=r.doc_name,
-            review_type=r.review_type,
-            status=r.status,
-            submit_date=r.submit_date,
-            complete_date=r.complete_date,
-            waiting_days=waiting_days,
-            is_overdue=r.status == _PENDING and waiting_days >= threshold,
-        )
+    def _build_events(rows, *, since, now, threshold: int) -> list[ActivityEvent]:
+        """把送審週期列展開為狀態變動事件，過濾近 30 天內，時間新→舊排序。"""
+        events: list[ActivityEvent] = []
+        for r in rows:
+            overdue = r.status == _PENDING and (now - r.submit_date).days >= threshold
+            if r.submit_date >= since:  # 送審 / 發起廢止事件
+                events.append(
+                    ActivityEvent(
+                        review_id=r.review_id,
+                        doc_id=r.doc_id,
+                        doc_name=r.doc_name,
+                        review_type=r.review_type,
+                        status=r.status,
+                        event_kind="submitted",
+                        event_time=r.submit_date,
+                        is_overdue=overdue,
+                        party_name=r.party_name,
+                    )
+                )
+            if r.status in _TERMINAL and r.complete_date is not None and r.complete_date >= since:
+                events.append(  # 核准 / 退回 / 撤回結果事件
+                    ActivityEvent(
+                        review_id=r.review_id,
+                        doc_id=r.doc_id,
+                        doc_name=r.doc_name,
+                        review_type=r.review_type,
+                        status=r.status,
+                        event_kind="resolved",
+                        event_time=r.complete_date,
+                        is_overdue=False,
+                        party_name=r.party_name,
+                    )
+                )
+        # 時間新→舊；同時點以 review_id 為次序穩定排序（repository 已不下 order_by，順序由此決定）
+        events.sort(key=lambda e: (e.event_time, e.review_id), reverse=True)
+        return events

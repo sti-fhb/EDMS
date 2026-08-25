@@ -3,18 +3,27 @@ import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
-import Divider from "@mui/material/Divider"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
+import Table from "@mui/material/Table"
+import TableBody from "@mui/material/TableBody"
+import TableCell from "@mui/material/TableCell"
+import TableHead from "@mui/material/TableHead"
+import TableRow from "@mui/material/TableRow"
 import Tabs from "@mui/material/Tabs"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-import type { ActivityItem, DraftItem } from "./schemas"
-import { DRAFT_KIND_LABELS, authorEventLabel, reviewerEventLabel } from "./schemas"
+import type { ActivityEvent, DraftItem } from "./schemas"
+import {
+  DRAFT_KIND_LABELS,
+  REVIEW_TYPE_LABELS,
+  authorEventLabel,
+  reviewerEventLabel,
+} from "./schemas"
 import { personalApi } from "./personalService"
 import { useActivity, useDrafts } from "./usePersonal"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -22,8 +31,8 @@ import { formatDateTime } from "../../utils/date"
 import { toApiError } from "../../services/http"
 
 /**
- * 個人專區（US9 / DM07）：我的文件動態 + 草稿匣（編輯者 / 審核者）。
- * 撤回送審（撰寫者對送審中項目）→ 狀態回復 + 站內訊息（呈現於原審核者之動態）；草稿續編進 US5、刪除須確認。
+ * 個人專區（US9 / DM07）：我的文件動態（狀態變動歷程）+ 草稿匣（編輯者 / 審核者）。
+ * 動態呈現每次送審週期的每個狀態轉換（送審 → 退回 / 核准發布 / 撤回 / 廢止），時間新→舊；撰寫者對送審中項目可撤回。
  * 個人資料維護（姓名 / Email / 密碼）為另一入口，由平台 DP 提供（右上使用者選單），不在此頁。
  */
 export function DmPersonalPage() {
@@ -42,7 +51,7 @@ export function DmPersonalPage() {
   )
 }
 
-// ── 我的文件動態 ──────────────────────────────────────
+// ── 我的文件動態（狀態變動歷程）──────────────────────────
 
 function ActivityTab() {
   const { message } = useNotification()
@@ -68,87 +77,125 @@ function ActivityTab() {
   return (
     <Stack spacing={2}>
       {hasAuthor && (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-            撰寫者視角（近 30 天）
-          </Typography>
-          <Stack divider={<Divider />} spacing={1}>
-            {data.author.map((a) => (
-              <AuthorRow key={a.review_id} item={a} onWithdraw={withdrawMut.mutate} busy={withdrawMut.isPending} />
-            ))}
-          </Stack>
-        </Paper>
+        <ActivitySection
+          title="撰寫者視角（近 30 天）"
+          partyHeader="指定審核者"
+          events={data.author}
+          perspective="author"
+          onWithdraw={withdrawMut.mutate}
+          busy={withdrawMut.isPending}
+        />
       )}
       {hasReviewer && (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-            審核者視角（近 30 天）
-          </Typography>
-          <Stack divider={<Divider />} spacing={1}>
-            {data.reviewer.map((a) => (
-              <ReviewerRow key={a.review_id} item={a} />
-            ))}
-          </Stack>
-        </Paper>
+        <ActivitySection
+          title="審核者視角（近 30 天）"
+          partyHeader="送審者"
+          events={data.reviewer}
+          perspective="reviewer"
+        />
       )}
     </Stack>
   )
 }
 
-function ReviewerRow({ item }: { item: ActivityItem }) {
-  const navigate = useNavigate()
-  const pending = item.status === "PENDING" // 待處理 / 催辦中 → 可前往簽核中心處理
-  return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-      <Chip size="small" color={item.is_overdue ? "error" : "default"} label={reviewerEventLabel(item.status, item.is_overdue)} />
-      <Typography variant="body2" sx={{ flex: 1 }}>
-        {item.doc_name}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
-        {formatDateTime(item.submit_date)}
-      </Typography>
-      {pending && (
-        <Button size="small" variant="outlined" onClick={() => navigate("/dm/review")}>
-          前往簽核中心
-        </Button>
-      )}
-    </Box>
-  )
-}
-
-function AuthorRow({
-  item,
+function ActivitySection({
+  title,
+  partyHeader,
+  events,
+  perspective,
   onWithdraw,
   busy,
 }: {
-  item: ActivityItem
-  onWithdraw: (reviewId: number) => void
-  busy: boolean
+  title: string
+  partyHeader: string
+  events: ActivityEvent[]
+  perspective: "author" | "reviewer"
+  onWithdraw?: (reviewId: number) => void
+  busy?: boolean
+}) {
+  return (
+    <Paper sx={{ p: 2 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+        {title}
+      </Typography>
+      <Box sx={{ overflowX: "auto" }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>文件名稱</TableCell>
+              <TableCell>類型</TableCell>
+              <TableCell>狀態</TableCell>
+              <TableCell>{partyHeader}</TableCell>
+              <TableCell>時間</TableCell>
+              <TableCell>操作</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {events.map((e) => (
+              <ActivityRow
+                key={`${e.review_id}-${e.event_kind}`}
+                event={e}
+                perspective={perspective}
+                onWithdraw={onWithdraw}
+                busy={busy}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </Box>
+    </Paper>
+  )
+}
+
+function ActivityRow({
+  event,
+  perspective,
+  onWithdraw,
+  busy,
+}: {
+  event: ActivityEvent
+  perspective: "author" | "reviewer"
+  onWithdraw?: (reviewId: number) => void
+  busy?: boolean
 }) {
   const { confirm } = useNotification()
-  const withdrawable = item.status === "PENDING" // 送審中 / 廢止待簽核可撤回
-  const onClick = () =>
+  const navigate = useNavigate()
+  const label =
+    perspective === "author" ? authorEventLabel(event) : reviewerEventLabel(event)
+  // 操作只掛在「當前送審中」事件（submitted 且 PENDING）
+  const actionable = event.event_kind === "submitted" && event.status === "PENDING"
+
+  const onWithdrawClick = () =>
     confirm({
       title: "確定撤回送審？",
       content: "撤回後送審項目將回到草稿 / 已發布狀態，並通知原指派審核者。",
       okText: "確認撤回",
-      onOk: () => onWithdraw(item.review_id),
+      onOk: () => onWithdraw?.(event.review_id),
     })
+
   return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-      <Chip size="small" color={withdrawable ? "warning" : "default"} label={authorEventLabel(item.review_type, item.status)} />
-      <Typography variant="body2" sx={{ flex: 1 }}>
-        {item.doc_name}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
-        {formatDateTime(item.submit_date)}
-      </Typography>
-      {withdrawable && (
-        <Button size="small" variant="outlined" color="error" onClick={onClick} disabled={busy}>
-          撤回送審
-        </Button>
-      )}
-    </Box>
+    <TableRow>
+      <TableCell>{event.doc_name}</TableCell>
+      <TableCell>{REVIEW_TYPE_LABELS[event.review_type] ?? event.review_type}</TableCell>
+      <TableCell>
+        <Chip size="small" color={label.tone} label={label.text} />
+      </TableCell>
+      <TableCell>{event.party_name ?? "—"}</TableCell>
+      <TableCell>{formatDateTime(event.event_time)}</TableCell>
+      <TableCell>
+        {actionable && perspective === "author" && (
+          <Button size="small" variant="outlined" color="error" onClick={onWithdrawClick} disabled={busy}>
+            撤回送審
+          </Button>
+        )}
+        {actionable && perspective === "reviewer" && (
+          <Button size="small" variant="outlined" onClick={() => navigate("/dm/review")}>
+            前往簽核中心
+          </Button>
+        )}
+        {!actionable && "—"}
+      </TableCell>
+    </TableRow>
   )
 }
 
@@ -183,25 +230,58 @@ function DraftsTab() {
 
   return (
     <Paper sx={{ p: 2 }}>
-      <Stack divider={<Divider />} spacing={1}>
-        {data.map((d) => (
-          <Box key={d.version_id} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Chip size="small" label={DRAFT_KIND_LABELS[d.kind]} />
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="body2">{d.doc_name}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {d.version_no ?? "（未填版號）"} ｜ {formatDateTime(d.updated_date)}
-              </Typography>
-            </Box>
-            <Button size="small" variant="outlined" onClick={() => navigate(`/dm/documents/${d.doc_id}/edit`)}>
-              繼續編輯
-            </Button>
-            <Button size="small" variant="outlined" color="error" onClick={() => onDelete(d)} disabled={deleteMut.isPending}>
-              刪除
-            </Button>
-          </Box>
-        ))}
-      </Stack>
+      <Box sx={{ overflowX: "auto" }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>文件名稱</TableCell>
+              <TableCell>分類</TableCell>
+              <TableCell>草稿類型</TableCell>
+              <TableCell>最後編輯</TableCell>
+              <TableCell>操作</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {data.map((d) => (
+              <TableRow key={d.version_id}>
+                <TableCell>
+                  {d.doc_name}
+                  {d.version_no && (
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                      {d.version_no}
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell>{d.category_code}</TableCell>
+                <TableCell>
+                  <Chip size="small" label={DRAFT_KIND_LABELS[d.kind]} />
+                </TableCell>
+                <TableCell>{formatDateTime(d.updated_date)}</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => navigate(`/dm/documents/${d.doc_id}/edit`)}
+                    >
+                      繼續編輯
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      onClick={() => onDelete(d)}
+                      disabled={deleteMut.isPending}
+                    >
+                      刪除
+                    </Button>
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Box>
     </Paper>
   )
 }
