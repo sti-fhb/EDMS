@@ -26,9 +26,9 @@
 | 3 | 文件詳細頁瀏覽 | US4 / UCDM04 | P1-核心 | T031 / T032 / T033 / T034 | #0；#4/#5（資料來源）| [#155](https://github.com/sti-fhb/EDMS/issues/155) | 🚀 已開立 [#155](https://github.com/sti-fhb/EDMS/issues/155) |
 | 4 | 文件新增與編輯 | US5 / UCDM06 | P1-核心 | T035 ~ T039（含 T035a）| #0；#3/#5（入口/去向）| [#169](https://github.com/sti-fhb/EDMS/issues/169) | ✅ 已交付（PR #172；spec 對齊 #175/#176）|
 | 5 | 簽核處理 | US6 / UCDM07 | P1-核心 | T040 ~ T044 | #4 | [#178](https://github.com/sti-fhb/EDMS/issues/178) | ✅ 已交付（PR #180；catalog 略）|
-| 6 | 系統儀表板（入口頁 DM 概況 widget，#89）| US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5；DP #89 | [#193](https://github.com/sti-fhb/EDMS/issues/193) | 🚀 已開立（開發中）|
-| 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5（本 issue 延伸 US6 核准 / 退回）| [#206](https://github.com/sti-fhb/EDMS/issues/206) | 🚀 已開立 [#206](https://github.com/sti-fhb/EDMS/issues/206) |
-| 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5 | — | 待補 |
+| 6 | 系統儀表板（入口頁 DM 概況 widget，#89）| US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5；DP #89 | [#193](https://github.com/sti-fhb/EDMS/issues/193) | ✅ 已交付（PR #195；#89 widget）|
+| 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5（本 issue 延伸 US6 核准 / 退回）| [#206](https://github.com/sti-fhb/EDMS/issues/206) | ✅ 已交付（PR #210；follow-up #211）|
+| 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5；#7（撤回廢止）| [#219](https://github.com/sti-fhb/EDMS/issues/219) | 🚀 已開立 [#219](https://github.com/sti-fhb/EDMS/issues/219) |
 | 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | — | 待補 |
 | 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | — | 待補 |
 | 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3-輔助 | T057 ~ T059 | #5；ET 引用端 | [#183](https://github.com/sti-fhb/EDMS/issues/183) | ✅ 已交付（PR #189；契約 #187；T059 廢止通知範圍外＝裁示 A + 待 US8）|
@@ -655,9 +655,72 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #8 ~ #10：待補（增量模式）
+## Issue #8：[P2-延伸] DM — 個人專區（US9 / UCDM09 / DM07）（GitHub [#219](https://github.com/sti-fhb/EDMS/issues/219)）
 
-US9 個人專區（#8）/ US10 已廢止文件查詢（#9）/ US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us9.md](spec_us9.md)（FR-001~004，UCDM09，訊息 DM-MSG-DM07-004/005）；[data-model.md](data-model.md)（`DM_DOC_VERSION` 草稿狀態、`DM_REVIEW`（PENDING→WITHDRAWN 撤回、REVIEW_TYPE 決定撤回回復狀態）、`DM_USER_ROLE` 角色判定）
+**對應畫面**：DM07 個人專區（左側 DM 功能列之個人工作區；示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-personal`：草稿匣 / 撤回送審 / 我的文件動態三塊）——**入口僅對具編輯者或審核者角色者顯示**
+**階段**：P2-延伸
+**涵蓋 Tasks**：T050（草稿匣）、T051（撤回送審）、T052（我的文件動態 + 個人專區入口可見性）。**T049（個人資料維護）已廢除**——姓名 / Email / 密碼變更由平台 DP 提供（UCDP004、右上使用者選單、共用 `DP_USER`），DM 不自建個資畫面。
+
+## 任務說明
+
+實作**編輯者 / 審核者之個人工作區**（DM 左側功能列），含三塊 DM 業務：
+- **草稿匣**（FR-001，編輯者）：列未送審 / 被退回待修改 / 已撤回三類草稿；「繼續編輯 / 修改」進 US5（DM03），「刪除」須確認（DM-MSG-DM07-004、不可復原、僅影響草稿不動已發布版本）。
+- **撤回送審**（FR-002，編輯者）：把卡住之送審撤回——新增 / 新版本 → 版本回草稿；廢止 → 文件回已發布；以**站內訊息**通知原指派審核者（不發 Email）；可重新編輯並改選新審核者再送；原送審週期之指定審核者紀錄保留不改寫。
+- **我的文件動態**（FR-003）：依角色 tab 呈現近 30 天事件（撰寫者視角：送審中 / 核准發布 / 退回 / 廢止待簽核 / 已廢止 / 已撤回；審核者視角：待處理 / 催辦中 / 已被撤回 / 已處理歷史）；兼具兩角色者兩 tab 皆顯示。
+- **入口可見性**（FR-004）：僅具**編輯者或審核者**角色者於左側見「個人專區」；純閱覽者 / 純管理者不顯示。
+
+> ℹ️ **收尾型全端 issue**：主要為組裝既有能力——`ReviewService.withdraw`（PENDING→WITHDRAWN，已存在）、US5 草稿續編 / 刪除、`DM_REVIEW` / `DM_DOC_VERSION` 查詢、依權限側欄（#89）。**個資維護不在本 US**（平台 DP UCDP004）。
+
+## 範圍
+
+**後端**（新 `app/dm/personal/` 或延伸 editor/review，router → service → repository）：
+- **T050 草稿匣**（FR-001）：`GET` 列該使用者之 DRAFT 版本，分三類——**未送審**（從未有送審紀錄之 DRAFT）/ **被退回**（最近一次 `DM_REVIEW` 為 REJECTED 後回 DRAFT）/ **已撤回**（最近一次 `DM_REVIEW` 為 WITHDRAWN 後回 DRAFT）；三類判定依 `DM_REVIEW` 歷史（非單看版本狀態，因三類版本皆 DRAFT）。刪除＝軟刪 `DELETED=1`（須確認、僅草稿版本、不影響已發布）。
+- **T051 撤回送審**（FR-002）：`POST /api/dm/reviews/{review_id}/withdraw`（限撰寫者本人）→ 重用 `ReviewService.withdraw`（PENDING→WITHDRAWN）；依 `review_type` 回復——NEW / NEW_VERSION → 版本回 DRAFT（首版文件亦回 DRAFT）、OBSOLETE → 文件回 PUBLISHED；**站內訊息**通知原指派審核者（範本 `SUBMIT_WITHDRAWN`、CHANNEL=MSG_ONLY、不發 Email；**本 issue 需新增此範本之 seed migration**）；原 `ASSIGNED_REVIEWER` 保留不改寫；撤回後可經 US5 改選新審核者再送。
+- **T052 我的文件動態**（FR-003）：`GET` 近 30 天事件，依角色（撰寫者 / 審核者）分視角回傳；資料來源 `DM_REVIEW` / `DM_CHANGE_LOG` / `DM_DOC_VERSION`。**入口可見性**（FR-004）：後端提供「具編輯者或審核者」判定（供 DP 依權限側欄 `has_any_role` 回呼 / 前端渲染）。
+- 存取：掛 `get_dm_context`；撤回 / 草稿刪除為寫入型（`get_operator` + 本人校驗 + 稽核）。
+
+**前端**（`frontend/src/dm/me` DM07 頁）：三區塊（草稿匣清單 + 續編/刪除、撤回送審動作、我的文件動態角色 tab）；掛左側功能列、**入口依「具編輯者或審核者」條件渲染**（對齊 #89 依權限側欄）；刪除確認（DM-MSG-DM07-004）、撤回成功 toast（DM-MSG-DM07-005）。`DmPersonalPage` 現為 stub、於本 issue 填實。
+
+**測試**：後端 int（草稿匣三類分類正確、刪除軟刪且不影響已發布、撤回各 review_type 狀態回復 + 站內訊息 + 保留原審核者、我的文件動態近 30 天 / 角色視角、入口可見性授權、HTTP 401/403）+ 前端（草稿匣三類渲染 / 續編導向 / 刪除確認、撤回 toast、動態 tab、無編輯/審核角色不顯示入口）。
+
+## 驗收條件
+
+- [ ] 個人專區入口僅對具編輯者或審核者角色者顯示；純閱覽 / 純管理不顯示（FR-004、AC1）
+- [ ] 草稿匣列未送審 / 被退回 / 已撤回三類（FR-001、AC2）
+- [ ] 草稿「繼續編輯」進 US5；「刪除」須確認、軟刪、不影響已發布版本（FR-001、AC3、DM-MSG-DM07-004）
+- [ ] 撤回送審：NEW / NEW_VERSION → 草稿、OBSOLETE → 已發布；站內訊息通知原審核者；原審核者紀錄保留；可改選新審核者再送（FR-002、AC4、DM-MSG-DM07-005）
+- [ ] 我的文件動態依角色 tab 呈現近 30 天事件；兼具兩角色者兩 tab 皆顯示（FR-003、AC5）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#4 US5（已交付）**：草稿續編 / 刪除、改選審核者再送之編輯流程
+- **#5 US6（已交付）**：撤回影響之送審項目；`ReviewService.withdraw`（PENDING→WITHDRAWN）
+- **#7 US8（已交付）**：撤回廢止申請（OBSOLETE → PUBLISHED）之對應狀態回復
+- **#127 Foundation（已交付）**：`DM_USER_ROLE` 角色判定、`DM_REVIEW` / `DM_DOC_VERSION` / `DM_CHANGE_LOG`、通知（站內訊息管道）
+- **DP #89 導覽重構（已落地）**：依權限側欄 + `has_any_role`——個人專區入口掛其上
+
+## 注意事項
+
+- ⚠️ **個資維護不在本 US**（T049 已廢除）：姓名 / Email / 密碼由平台 DP UCDP004（右上使用者選單、共用 `DP_USER`）提供，DM 不自建。
+- **撤回站內訊息管道（已定案，precheck 必補）**：新增通知範本 **`SUBMIT_WITHDRAWN`**（CHANNEL=MSG_ONLY、對象＝原指派審核者、不發 Email），已補列 `data-model` 通知事件表（10 項）；**本 issue 實作需新增對應 seed migration**（比照 #127 之 `dm_seed_templates_params_into_dp`）。
+- **撤回 vs 退回**：撤回為**撰寫者主動**（WITHDRAWN）、退回為**審核者**（REJECTED）——兩者皆使版本回 DRAFT，但 `DM_REVIEW` 終態不同；草稿匣三類分類即依此區分（被退回 vs 已撤回）。
+- **草稿三類分類依 `DM_REVIEW` 歷史（已定於 spec_us9 FR-001）**：未送審＝無對應送審紀錄；被退回＝最近一次送審 `REJECTED`；已撤回＝最近一次送審 `WITHDRAWN`（三類版本皆 DRAFT，不能單看版本狀態）。
+- 入口可見性由前端依「具編輯者或審核者」渲染；與 US7 widget（任一 DM 角色）之可見條件不同，勿混用。
+
+## 相關文件
+
+- [spec_us9.md](spec_us9.md)、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T050-T052）、[spec_us5.md](spec_us5.md)（草稿續編/刪除）、[spec_us6.md](spec_us6.md)（送審撤回）、[spec_us8.md](spec_us8.md)（撤回廢止）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-personal`）
+
+**Labels**：`P2-延伸`, `DM-文件管理`, `US9`
+
+---
+
+## Issue #9 ~ #10：待補（增量模式）
+
+US10 已廢止文件查詢（#9）/ US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
@@ -743,3 +806,7 @@ US13 閱讀統計與 KPI + 排程 SCHDM001（#12）/ 整合測試 + 安全 + 收
 | 2026-08-21 | **回填 issues.md 至現況**（自 2026-08-17 後未維護、body 停在 Issue #4）：**(1)** 總覽表狀態 / GitHub # 更正——US5(#4)→已交付 [#169]（PR #172；spec 對齊 #175/#176）、US6(#5)→已交付 [#178]（PR #180）、US12(#11)→已交付 [#183]（PR #189；契約 #187；T059 範圍外）、US7(#6)→「body 已撰寫（待開立）」。**(2)** 補撰三張完整 body：Issue #5（US6 簽核處理 / DM04，含交付後差異：催辦排程 `SCHDM001`→`SCHDM002`、退回被退版本 `REJECTED`→`DRAFT` + 新增 `DM_DOC_012`）、Issue #6（US7 系統儀表板 / DM00，含交付前自檢建議：badge 來源 `DM_REVIEW.REVIEW_TYPE`、統計計入 `PENDING_OBSOLETE`、`spec.md` 待辦彙總措辭待 SA 修）、Issue #11（US12 跨模組引用，含 in-process Service 介面、TRAINING 分類白名單、T059 裁示 A 範圍外）。**(3)** 其餘未開工者維持待補：#7 US8 / #8 US9 / #9 US10 / #10 US11 / #12 US13 / #13 收尾。補強 follow-up #160（storage-root 圍籬，非 US）不列入總覽。US7 GitHub issue 尚未開立（依指示先補 issues.md、暫不開 issue）|
 | 2026-08-24 | 撰寫 Issue #7（US8 文件廢止申請 / UCDM05 / DM02）完整 body：對應 spec_us8 FR-001~005 + 訊息 DM-MSG-DM02-011~015；涵蓋 T047（廢止申請對話框：必填原因 + 選填單檔附件 + 選審核者 → PENDING_OBSOLETE 並通知）/ T048（廢止待簽核行為：仍在架可下載、阻擋同時新版本送審、核准 / 退回）。**關鍵切分**：**本 issue 需延伸 US6（#178 已交付）**——US6 目前以 `DM_REVIEW_006`「待 US8」在 `center_service._ensure_actionable` 擋掉 OBSOLETE 核准 / 退回（review repository 亦排除 OBSOLETE），spec_us8 FR-005 雖寫「核准 / 退回交由 US6」實為 stub，故 US8 淨新增＝解除封鎖 + 實作核准（→OBSOLETE + 版本歷程廢止紀錄）/ 退回（→PUBLISHED）。**重用**：`ReviewService.submit(review_type=OBSOLETE)`、file_store 上傳驗證（`DM_FILE_001/002`）+ storage-root fence #160 存 `DM_REVIEW.OBSOLETE_FILE_*`（T010）、`DmNotifier`；FR-004 同時新版本送審由「一文件一 PENDING」唯一索引天然涵蓋（`DM_REVIEW_002` / DM-MSG-DM02-012）。**待 plan**：缺原因（DM-MSG-DM02-011）/ 缺審核者（DM-MSG-DM02-014）之後端 error_code；前端入口（DM02 現 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由）落地為 dialog（傾向、對齊 wireframe `openObsoleteModal`）或補 page 路由。Labels `P2-延伸` + `DM-文件管理` + `US8`。總覽表 Issue #7 狀態改「📝 body 已撰寫（待開立）」；placeholder 收斂為 #8~#10。body 經 `/sti-sa-precheck dm us8` 交付前自檢 ✅ 齊備、無擋交付必補（wireframe `obsoleteModal` 完整、`OBS_SUBMIT/APPROVE/REJECT` 範本已 seed），5 項建議補強留待 `/sti-plan`。issues.md body 落地 PR #205（已合併）|
 | 2026-08-24 | Issue #7（US8 文件廢止申請）開立為 GitHub [#206](https://github.com/sti-fhb/EDMS/issues/206)（labels `P2-延伸` + `DM-文件管理` + `US8`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #7 canonical 內容（連結轉 `../blob/main/` 形式、`OBS_*` 範本已 seed 補註、結尾 `Refs #178` 不自動關閉 US6）|
+| 2026-08-24 | US8（#206）交付並 close（PR #210 squash 合併 main `074298f`）：發起端點 `app/dm/obsolete/` + 延伸簽核中心 OBSOLETE 核准/退回（解除 `DM_REVIEW_006`）+ 廢止附件下載（授權 SA 裁示 **Q1=C**：僅 DM_ADMIN 或指定審核者、發起人不可）+ 前端 DM02 廢止 dialog / DM04 廢止明細；新增 error codes `DM_DOC_014/015/016`。Code review 抓到並修正 CRITICAL（`OBS_*` 通知 params key `author_name`→`applicant_name` + 補 `reason`，原致空信 FAILED）；SA 裁示 **Q2=A**（廢止 banner 承載紀錄、不插版本列）。security review 之 M1/M2/M3/L1（上傳/送審共用層加固）另開 follow-up **#211**。總覽 Issue #7 → ✅ 已交付。**順帶回填**：Issue #6（US7）狀態由「開發中」更正為 ✅ 已交付（PR #195，#193 已 close）|
+| 2026-08-24 | 撰寫 Issue #8（US9 個人專區 / UCDM09 / DM07）完整 body：對應 spec_us9 FR-001~004 + 訊息 DM-MSG-DM07-004/005；涵蓋 T050（草稿匣三類：未送審/被退回/已撤回）/ T051（撤回送審：NEW·NEW_VERSION→草稿、OBSOLETE→已發布、站內訊息通知原審核者、保留原審核者紀錄、改選再送）/ T052（我的文件動態角色 tab 近 30 天 + 個人專區入口可見性：僅編輯者或審核者）。**T049 個資維護已廢除**（平台 DP UCDP004，不自建）。**重用** `ReviewService.withdraw`（PENDING→WITHDRAWN，已存在）、US5 草稿續編/刪除、依權限側欄（#89）。**待 plan**：撤回站內訊息之通知範本/管道（data-model 通知事件表無「撤回」事件，採 MSG-only 既有或新增）、草稿三類分類依 `DM_REVIEW` 歷史之判定邏輯。Labels `P2-延伸` + `DM-文件管理` + `US9`。總覽 Issue #8 → 「📝 body 已撰寫（待開立）」；placeholder 收斂為 #9~#10 |
+| 2026-08-24 | US9 交付前自檢（`/sti-sa-precheck dm us9`）**1 必補**：FR-002 撤回要求「站內訊息通知原指派審核者」，但 data-model 通知事件表（9 項）**無撤回事件**、Foundation 亦未 seed → SD 無 template_code 可用。修正：新增 **`SUBMIT_WITHDRAWN`**（CHANNEL=MSG_ONLY、對象原指派審核者）至 data-model 通知事件表（→10 項）+ 集中化清單；spec_us9 FR-002 引用之、FR-001 補草稿三類判定規則（未送審=無 review / 被退回=最近 REJECTED / 已撤回=最近 WITHDRAWN）；issues.md #8 body 同步（T051 註明需 seed migration、注意事項兩項「待 plan」改為已定案）。實作時（T051）新增 `SUBMIT_WITHDRAWN` seed migration。修正折入 #218（issues.md body PR）同批 |
+| 2026-08-24 | Issue #8（US9 個人專區）開立為 GitHub [#219](https://github.com/sti-fhb/EDMS/issues/219)（labels `P2-延伸` + `DM-文件管理` + `US9`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #8 canonical 內容（連結轉 `../blob/main/`、驗收條件含 `SUBMIT_WITHDRAWN` seed migration） |

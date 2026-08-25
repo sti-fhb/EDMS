@@ -14,6 +14,11 @@ import { DmLibraryPage } from "./dm/library/DmLibraryPage"
 import { DmObsoletePage } from "./dm/obsolete/DmObsoletePage"
 import { DmPersonalPage } from "./dm/personal/DmPersonalPage"
 import { DmReviewPage } from "./dm/review/DmReviewPage"
+import { EtApprovalQueryPage } from "./et/approval/ApprovalQueryPage"
+import { EtCourseEditorPage } from "./et/courses/CourseEditorPage"
+import { EtCourseListPage } from "./et/courses/CourseListPage"
+import { EtMyCoursesPage } from "./et/my/MyCoursesPage"
+import { EtStudentsPage } from "./et/students/StudentsPage"
 import { AuditPage } from "./dp/audit/AuditPage"
 import { TemplatesPage } from "./dp/notify/TemplatesPage"
 import { ParamsPage } from "./dp/params/ParamsPage"
@@ -72,6 +77,21 @@ export const router = createBrowserRouter([
               { path: "obsolete", element: <DmObsoletePage /> },
               { path: "change-log", element: <DmChangeLogPage /> },
               { path: "kpi", element: <DmKpiPage /> },
+            ],
+          },
+          {
+            // 教育訓練模組殼（#202）：側欄 4 項對齊 wireframe ET 側欄；
+            // 課程列表以外目前為 StubPage，功能於對應 US issue 填實。
+            path: "et",
+            children: [
+              { index: true, element: <Navigate to="/et/courses" replace /> },
+              { path: "courses", element: <EtCourseListPage /> },
+              // ET02 為課程列表之子頁、非側欄項目；靜態 new 置於動態 :courseId 前避免被誤捕
+              { path: "courses/new", element: <EtCourseEditorPage /> },
+              { path: "courses/:courseId", element: <EtCourseEditorPage /> },
+              { path: "students", element: <EtStudentsPage /> },
+              { path: "approvals", element: <EtApprovalQueryPage /> },
+              { path: "my-courses", element: <EtMyCoursesPage /> },
             ],
           },
         ],

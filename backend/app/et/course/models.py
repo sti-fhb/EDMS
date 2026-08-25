@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -80,7 +81,16 @@ class EtChapter(BaseModel):
     __tablename__ = "ET_CHAPTER"
     __table_args__ = (
         PrimaryKeyConstraint("CHAPTER_ID", name="PK_ET_CHAPTER"),
-        UniqueConstraint("COURSE_ID", "SORT_ORDER", name="UQ_ET_CHAPTER_COURSE_ORDER"),
+        # 部分唯一索引（#202）：不變量是「**未刪除**之章節間順序不重複」。
+        # 原全表唯一約束會讓已軟刪除之列繼續佔住順序，使 data-model 明訂之
+        # 「後續章節順序自動遞補」無法實作。比照 DM 之 UX_* 部分索引前例。
+        Index(
+            "UX_ET_CHAPTER_COURSE_ORDER",
+            "COURSE_ID",
+            "SORT_ORDER",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
     )
 
     chapter_id: Mapped[int] = mapped_column("CHAPTER_ID", BigInteger, Identity(), nullable=False)
