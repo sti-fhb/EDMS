@@ -114,3 +114,18 @@ def test_is_reused():
     assert is_reused("OldPass1!", [h1, h2]) is True
     assert is_reused("BrandNew9!", [h1, h2]) is False
     assert is_reused("OldPass1!", []) is False
+
+
+def test_verify_password_rejects_oversized_plaintext_without_raising():
+    """超長明文一律回 False，不得讓 passlib 的 PasswordSizeError 冒出去（#214）。
+
+    passlib 對 > 4096 bytes 的明文會拋 PasswordSizeError。若讓它冒到端點，登入會回 500，
+    而且 `_fail()`（寫 LOGIN FAIL 稽核 + 遞增失敗次數）在密碼驗證**之後**——等於形成一個
+    不留痕跡、不觸發帳號鎖定的帳號存在性 oracle（Email 不存在 → 401 有稽核；存在 → 500 無稽核）。
+
+    回 False 而非拋 422：`hash_password` 已拒絕 > 72 bytes，不存在能與超長明文相符的既有
+    雜湊，故不改變任何正確性語意，且保留「密碼錯誤」路徑的稽核與鎖定。
+    """
+    hashed = hash_password("Abcd1234")
+    assert verify_password("A" * 73, hashed) is False
+    assert verify_password("A" * 5000, hashed) is False

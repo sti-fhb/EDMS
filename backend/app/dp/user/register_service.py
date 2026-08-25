@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.password_policy import hash_password, validate_password_strength
+from app.core.password_hashing import hash_password_async
+from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.kinds import KIND_ADMIN_INVITE
@@ -129,7 +130,7 @@ class RegisterService:
                 token_hash=hash_token(plaintext),
                 email=email,
                 user_name=user_name,
-                pwd_hash=hash_password(password),
+                pwd_hash=await hash_password_async(password),
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
             )
