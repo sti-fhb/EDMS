@@ -4,12 +4,19 @@ from pydantic import BaseModel, StringConstraints
 
 from app.core.schema_types import LoginEmailStr, NormalizedEmailStr
 
+# 密碼欄位共用型別（#214）：上限 4096 為縱深防禦——真正的政策上限是 bcrypt 的 72 bytes
+# （由 password_policy 的 validate_password_strength / hash_password / verify_password 把關，
+# 回 422 DP_PWD_004 或 False）。schema 層擋的是「超長 body 進到 service 才被擋」的資源浪費：
+# 不設上限時 100 MB 的 password 欄位會被 Pydantic 照收並佔記憶體。刻意不設 min_length：
+# 長度不足須由服務層回 DP_PWD_001（帶政策門檻），不是籠統的 422。
+_PasswordStr = Annotated[str, StringConstraints(max_length=4096)]
+
 
 class LoginRequest(BaseModel):
     """登入請求。email 正規化（#35）：strip + lower（不做格式驗證，格式錯→認證失敗）。"""
 
     email: LoginEmailStr
-    password: str
+    password: _PasswordStr
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -22,8 +29,8 @@ class ResetPasswordRequest(BaseModel):
     """密碼重設請求（US3）。token 為信中連結明文；新密碼複雜度 / 重複性由服務層權威檢核。"""
 
     token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
-    new_password: str
-    confirm_password: str
+    new_password: _PasswordStr
+    confirm_password: _PasswordStr
 
 
 class RegisterRequest(BaseModel):
@@ -38,8 +45,8 @@ class RegisterRequest(BaseModel):
 
     email: NormalizedEmailStr
     user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
-    password: str
-    confirm_password: str
+    password: _PasswordStr
+    confirm_password: _PasswordStr
 
 
 class VerifyEmailRequest(BaseModel):
@@ -55,8 +62,8 @@ class ActivateAccountRequest(BaseModel):
     """
 
     token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
-    new_password: str
-    confirm_password: str
+    new_password: _PasswordStr
+    confirm_password: _PasswordStr
 
 
 class ResendVerificationRequest(BaseModel):
@@ -115,9 +122,9 @@ class PasswordChange(BaseModel):
     僅於 schema 層擋空字串（min_length=1，讓明顯無效輸入更早以 422 攔下）；長度 / 複雜度門檻仍由 service 權威。
     """
 
-    old_password: Annotated[str, StringConstraints(min_length=1)]
-    new_password: Annotated[str, StringConstraints(min_length=1)]
-    confirm_password: Annotated[str, StringConstraints(min_length=1)]
+    old_password: _PasswordStr
+    new_password: _PasswordStr
+    confirm_password: _PasswordStr
 
 
 class EmailChangeRequest(BaseModel):

@@ -44,6 +44,11 @@
 | COMMON_422 | 422 | 請求格式驗證失敗 |
 | COMMON_429 | 429 | 操作過於頻繁，請稍後再試 |
 | COMMON_500 | 500 | Internal Server Error |
+| COMMON_503 | 503 | 系統忙碌中，請稍後再試 |
+
+> **`COMMON_503`**：密碼運算（bcrypt）之併發閘負載卸除（#214）。同時進行中的運算達門檻時
+> 立即拒絕，避免請求在等待期間持續佔用 DB 連線。屬**暫時性**錯誤，前端可提示稍後重試；
+> 勿用於一般系統錯誤（那是 `COMMON_500`）。
 
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
 

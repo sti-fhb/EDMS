@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, create_access_token
 from app.core.exceptions import AppError
-from app.core.password_policy import is_password_expired, verify_password
+from app.core.password_hashing import verify_password_async
+from app.core.password_policy import is_password_expired
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.repository import AuthRepository
@@ -71,7 +72,7 @@ class AuthService:
         if user.status != "ACTIVE":
             await self._fail(db, user.user_id, ip, "帳號已停用", 403, "帳號已停用，請洽管理者", "DP_AUTH_004")
 
-        if not verify_password(password, user.pwd_hash):
+        if not await verify_password_async(password, user.pwd_hash):
             fail_lock = await self._params.get_int_param(db, "LOGIN", "FAIL_LOCK_COUNT", _DEFAULT_FAIL_LOCK_COUNT)
             lock_min = await self._params.get_int_param(db, "LOGIN", "LOCK_MINUTES", _DEFAULT_LOCK_MINUTES)
             # 原子遞增：以 DB 端 count+1 判定並鎖定，消除 ORM 讀改寫的 lost update（並發同帳號錯密碼時

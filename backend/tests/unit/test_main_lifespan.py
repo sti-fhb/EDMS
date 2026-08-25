@@ -30,6 +30,15 @@ async def test_lifespan_starts_and_stops_worker(monkeypatch):
     monkeypatch.setattr("main.start_scheduler", _fake_start)
     monkeypatch.setattr("main.shutdown_scheduler", _fake_shutdown)
 
+    # 密碼運算執行緒池的暖機 / 關機也要隔離（#214）：真實 shutdown() 會**永久**關閉模組層級
+    # 單例，之後任何用到密碼雜湊的測試都會拋 RuntimeError: cannot schedule new futures
+    # after shutdown。本檔目前恰好是字母序最後一個測試檔而倖免，但那不是隔離設計。
+    async def _fake_warm_up() -> None:
+        return None
+
+    monkeypatch.setattr("main.warm_up_password_backend", _fake_warm_up)
+    monkeypatch.setattr("main.shutdown_password_executor", lambda: None)
+
     async with lifespan(app):
         await asyncio.wait_for(started.wait(), timeout=2)
         assert started.is_set()
