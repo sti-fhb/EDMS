@@ -36,6 +36,7 @@ from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
 from app.et.bootstrap import register_et_module
+from app.et.course.router import router as et_course_router
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ app.include_router(dm_detail_router)
 app.include_router(dm_editor_router)
 app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
+app.include_router(et_course_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()

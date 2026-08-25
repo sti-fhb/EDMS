@@ -189,7 +189,7 @@
 
 **業務規則**:
 - 同 COURSE_ID 下 SORT_ORDER 不重複（拖拉調整時 batch 更新）
-- 刪除章節時 DELETED=1（軟刪除）；該章節下之 ET_ITEM 連動 DELETED=1；學員於該章節之 ET_PROGRESS / ET_QUIZ_ATTEMPT_M 連帶 hard delete
+- 刪除章節時 DELETED=1（軟刪除）；該章節下之 ET_ITEM 連動 DELETED=1；學員於該章節之 ET_PROGRESS / ET_QUIZ_ATTEMPT_M **亦連帶軟刪除（DELETED=1）**（2026-08-24 變更，原為 hard delete，見 research.md §4）
 
 ---
 
@@ -249,7 +249,7 @@
 - 上傳時檢核格式（per `DP_PARAM.ET_VIDEO_ALLOWED_FORMATS`）與單檔大小（per `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`）
 - **DURATION_SEC 取得失敗（無法解析 metadata）時不得存檔**，並提示教師改用其他格式——否則該影片之覆蓋率無法計算、章節永遠無法解鎖
 - 影片儲存策略（本地檔案系統 vs. 物件儲存）由 plan 階段決定
-- 刪除影片時 DELETED=1（軟刪除）；學員於該影片之 ET_PROGRESS_VIDEO / ET_PROGRESS_INTERVAL 連帶 hard delete（比照章節 / 題目之軟刪除分流）
+- 刪除影片時 DELETED=1（軟刪除）；學員於該影片之 ET_PROGRESS_VIDEO / ET_PROGRESS_INTERVAL **亦連帶軟刪除（DELETED=1）**（比照章節 / 題目之軟刪除分流；2026-08-24 變更，原為 hard delete）
 
 ---
 
@@ -304,7 +304,7 @@
 **業務規則**:
 - 同 QUIZ_ID 下至少 1 題；同 QUESTION_ID 下選項至少 2 個、至多 6 個
 - 多選題建立時系統強制檢核「至少 1 個正確選項」
-- 刪除題目時 DELETED=1（軟刪除）；學員於該題之 ET_QUIZ_ATTEMPT_D 連帶 hard delete
+- 刪除題目時 DELETED=1（軟刪除）；學員於該題之 ET_QUIZ_ATTEMPT_D **亦連帶軟刪除（DELETED=1）**（2026-08-24 變更，原為 hard delete）
 
 ---
 
@@ -415,7 +415,7 @@
 - (USER_ID, VIDEO_ID) 邏輯唯一
 - COVERAGE_PCT 於學員離開頁面 normalize 後重算並寫回（快取值，供清單 / 統計快速讀取；權威來源仍為 ET_PROGRESS_INTERVAL）
 - 覆蓋率上限 100%（重複觀看不加成，區段聯集去重）
-- 影片軟刪除時本表連帶 hard delete（學員紀錄孤兒化無意義，per 軟刪除分流）
+- 影片軟刪除時本表**亦連帶軟刪除（DELETED=1）**（per 軟刪除分流；2026-08-24 變更，原為 hard delete）
 
 ---
 
@@ -853,7 +853,7 @@ erDiagram
 
 | 規則名 | 描述 |
 |--------|------|
-| 軟刪除分流 | 章節 / 題目 / **教材影片**本體軟刪除（DELETED=1）；學員紀錄與成績連同 hard delete |
+| 軟刪除分流 | 章節 / 題目 / **教材影片**本體軟刪除（DELETED=1）；學員紀錄與成績**亦連帶軟刪除**（2026-08-24 變更，原為 hard delete）|
 | 樂觀鎖 | ET_COURSE / ET_CHAPTER / ET_ITEM / ET_QUIZ / ET_QUESTION / ET_SURVEY* / ET_APPROVAL 每寫入時 VERSION + 1（通知範本之樂觀鎖由平台 `DP_NOTIFY_TEMPLATE` 提供）|
 | Attempt Snapshot | ET_QUIZ_ATTEMPT_M 與 _D 於 STARTED_AT 時凍結題目 + 選項 + 配分 + 順序 + PASS_SCORE + TIME_LIMIT |
 | 重考次數與重置 | attempt **永不刪除**（append-only、ATTEMPT_NO 標次序）；「重置重考次數」改以 ET_QUIZ_RETRY_RESET 記下當下 attempt 數為基準，已用重考次數 = max(0, COUNT(attempt) − MAX(基準) − 1)（2026-08-19 新增：原「歸 0」語意與歷次明細永久可回看互斥）|
