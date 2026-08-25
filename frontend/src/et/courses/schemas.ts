@@ -42,6 +42,11 @@ export interface CourseCreateResult {
   version: number
 }
 
+export interface Capabilities {
+  /** 具教師角色（SA 裁示 Q2）→ 顯示「新增課程」入口。 */
+  can_create_course: boolean
+}
+
 export interface CoursePayload {
   course_name: string
   description: string | null
@@ -49,6 +54,11 @@ export interface CoursePayload {
   open_end_at: string | null
   require_approval: boolean
   tag_ids: number[]
+}
+
+/** 建立課程可一併帶章節名稱——使新增流程不必「先存草稿才能加章節」（後端同一交易內建立）。 */
+export interface CourseCreatePayload extends CoursePayload {
+  chapters: string[]
 }
 
 /** 課程狀態（ET_COURSE_STATUS）。本 issue 僅寫入 DRAFT；發布屬 #204。 */
@@ -78,8 +88,6 @@ export const CourseFormSchema = z.object({
     .string()
     .trim()
     .max(DESCRIPTION_MAX_LEN, { message: `課程描述不可超過 ${DESCRIPTION_MAX_LEN} 字` }),
-  open_start_at: z.string(),
-  open_end_at: z.string(),
   require_approval: z.boolean(),
   tag_ids: z.array(z.number()),
 })

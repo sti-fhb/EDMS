@@ -1,8 +1,22 @@
 import { http } from "../../services/http"
-import type { ChapterItem, CourseCreateResult, CourseDetail, CoursePayload, TagOption } from "./schemas"
+import type {
+  Capabilities,
+  ChapterItem,
+  CourseCreatePayload,
+  CourseCreateResult,
+  CourseDetail,
+  CoursePayload,
+  TagOption,
+} from "./schemas"
 
 /** ET02 課程骨架與章節編排 API（US3 / #202）。 */
 export const coursesApi = {
+  /** 當前使用者之課程操作能力（回「能力」而非「角色」，比照 DM `Capabilities`）。 */
+  getCapabilities: async (): Promise<Capabilities> => {
+    const { data } = await http.get<Capabilities>("/et/courses/capabilities")
+    return data
+  },
+
   getDetail: async (courseId: number): Promise<CourseDetail> => {
     const { data } = await http.get<CourseDetail>(`/et/courses/${courseId}`)
     return data
@@ -16,7 +30,7 @@ export const coursesApi = {
     return data
   },
 
-  create: async (payload: CoursePayload): Promise<CourseCreateResult> => {
+  create: async (payload: CourseCreatePayload): Promise<CourseCreateResult> => {
     const { data } = await http.post<CourseCreateResult>("/et/courses", payload)
     return data
   },

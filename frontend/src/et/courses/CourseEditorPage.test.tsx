@@ -43,10 +43,42 @@ describe("ET02 課程編輯頁", () => {
     expect(screen.getByDisplayValue("第二章")).toBeInTheDocument()
   })
 
-  it("新增模式為空白表單，且章節區提示須先儲存草稿", async () => {
+  it("新增模式即可直接新增章節（暫存於畫面，儲存時一次建立）", async () => {
+    const user = userEvent.setup()
     renderNewEditor()
     expect(await screen.findByRole("heading", { name: "新增課程" })).toBeInTheDocument()
-    expect(screen.getByText("請先儲存草稿後再新增章節")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "新增章節" }))
+    await user.type(await screen.findByLabelText("章節名稱"), "第一章")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    // 尚未儲存課程，章節僅存在於畫面
+    expect(await screen.findByDisplayValue("第一章")).toBeInTheDocument()
+  })
+
+  it("新增模式儲存時一次送出課程與暫存章節，並導回列表", async () => {
+    const user = userEvent.setup()
+    let sent: { chapters?: string[]; open_start_at?: string | null; open_end_at?: string | null } | null = null
+    server.use(
+      http.post("/api/et/courses", async ({ request }) => {
+        sent = (await request.json()) as typeof sent
+        return HttpResponse.json({ course_id: 99, version: 0 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await user.type(await screen.findByRole("textbox", { name: "課程名稱" }), "新課程")
+    await user.click(screen.getByRole("button", { name: "新增章節" }))
+    await user.type(await screen.findByLabelText("章節名稱"), "第一章")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    // MUI Dialog 關閉有退場動畫，期間仍在 DOM 且對背景設 aria-hidden；
+    // 用 findBy* 等它真的消失，否則背景按鈕查不到（同步 getByRole 會失敗）。
+    await user.click(await screen.findByRole("button", { name: "儲存草稿" }))
+
+    await waitFor(() => expect(sent?.chapters).toEqual(["第一章"]))
+    // 起訖時間於草稿允許留空（FR-ET-US3-01）——未填即送 null，不送空字串
+    expect(sent?.open_start_at).toBeNull()
+    expect(sent?.open_end_at).toBeNull()
+    expect(navigateSpy).toHaveBeenCalledWith("/et/courses")
   })
 
   it("課程名稱留空時擋下送出並顯示錯誤", async () => {
@@ -59,7 +91,7 @@ describe("ET02 課程編輯頁", () => {
   it("課程描述超過 500 字時擋下送出", async () => {
     const user = userEvent.setup()
     renderEditor()
-    const description = await screen.findByLabelText(/課程描述/)
+    const description = await screen.findByRole("textbox", { name: "課程描述" })
     await user.clear(description)
     await user.paste("字".repeat(501))
     await user.click(screen.getByRole("button", { name: "儲存草稿" }))
@@ -154,10 +186,15 @@ describe("ET02 課程編輯頁", () => {
   it("新增模式顯示全部基本資料欄位且為空白 / 預設值", async () => {
     renderNewEditor()
     expect(await screen.findByRole("heading", { name: "新增課程" })).toBeInTheDocument()
-    expect(screen.getByLabelText(/課程名稱/)).toHaveValue("")
-    expect(screen.getByLabelText(/課程起始時間/)).toHaveValue("")
-    expect(screen.getByLabelText(/課程訖止時間/)).toHaveValue("")
-    expect(screen.getByLabelText(/課程描述/)).toHaveValue("")
+    expect(screen.getByRole("textbox", { name: "課程名稱" })).toHaveValue("")
+    // 起訖採 DateTimePicker（下拉式選擇器 + 確認 / 取消），非原生 datetime-local。
+    // MUI 的 label 會同時出現在 <label> 與 fieldset <legend>，故以 role + 精確名稱查。
+    // 起訖採 DateTimePicker（下拉式選擇器 + 確認 / 取消），非原生 datetime-local。
+    // 它渲染為多層帶 label 的容器（無 role、無 value），逐一斷言「存在且空白」意義不大；
+    // 「未填即送出 null」改由下方「一次送出」測試以行為驗證。
+    expect(screen.getAllByLabelText("課程起始時間").length).toBeGreaterThan(0)
+    expect(screen.getAllByLabelText("課程訖止時間").length).toBeGreaterThan(0)
+    expect(screen.getByRole("textbox", { name: "課程描述" })).toHaveValue("")
     expect(screen.getByLabelText("本課程需線下核可")).not.toBeChecked()
     expect(screen.getByLabelText("狀態")).toHaveValue("草稿")
   })

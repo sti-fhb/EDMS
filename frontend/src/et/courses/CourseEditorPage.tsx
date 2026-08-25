@@ -17,7 +17,12 @@ import Stack from "@mui/material/Stack"
 import Switch from "@mui/material/Switch"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs"
+import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import dayjs from "dayjs"
+import type { Dayjs } from "dayjs"
 import { useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
@@ -34,7 +39,6 @@ import {
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
-import { fromDateTimeLocalInput, toDateTimeLocalInput } from "../../utils/date"
 
 /** 樂觀鎖衝突之 error code——後端 `ensure_version_matched` 於版本不符時回此碼。 */
 const LOCK_CONFLICT = "ET_LOCK_001"
@@ -42,8 +46,6 @@ const LOCK_CONFLICT = "ET_LOCK_001"
 const EMPTY_FORM = {
   course_name: "",
   description: "",
-  open_start_at: "",
-  open_end_at: "",
   require_approval: false,
   tag_ids: [] as number[],
 }
@@ -65,6 +67,14 @@ export function EtCourseEditorPage() {
   const { message, confirm } = useNotification()
 
   const [form, setForm] = useState(EMPTY_FORM)
+  const [startAt, setStartAt] = useState<Dayjs | null>(null)
+  const [endAt, setEndAt] = useState<Dayjs | null>(null)
+  // 載入時的原值——「起始須 ≥ 當下」只對**使用者這次改動的值**成立（SA 裁示）。
+  // 已發布課程的起始必然落在過去，無條件檢核會讓它之後永遠存不了檔。
+  const [originalStart, setOriginalStart] = useState<string | null>(null)
+  // 新增模式之章節暫存：章節有 COURSE_ID 外鍵、課程不存在時掛不上去，
+  // 故先存在畫面上，儲存時連同課程一次送出（後端於同一交易內建立）。
+  const [stagedChapters, setStagedChapters] = useState<string[]>([])
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [conflictOpen, setConflictOpen] = useState(false)
   const [chapterDialogOpen, setChapterDialogOpen] = useState(false)
@@ -91,15 +101,25 @@ export function EtCourseEditorPage() {
     setForm({
       course_name: course.course_name,
       description: course.description ?? "",
-      open_start_at: toDateTimeLocalInput(course.open_start_at),
-      open_end_at: toDateTimeLocalInput(course.open_end_at),
       require_approval: course.require_approval,
       tag_ids: course.tag_ids,
     })
+    setStartAt(course.open_start_at ? dayjs(course.open_start_at) : null)
+    setEndAt(course.open_end_at ? dayjs(course.open_end_at) : null)
+    setOriginalStart(course.open_start_at)
   }
 
+  const isNew = courseId === undefined
   const readOnly = course !== undefined && !course.is_owner
-  const chapters: ChapterItem[] = course?.chapters ?? []
+  // 新增模式以負數 id 表示暫存章節（尚未寫入 DB）；index = -id - 1
+  const chapters: ChapterItem[] = isNew
+    ? stagedChapters.map((name, i) => ({
+        chapter_id: -(i + 1),
+        chapter_name: name,
+        sort_order: i + 1,
+        version: 0,
+      }))
+    : (course?.chapters ?? [])
   const status = course?.status ?? "DRAFT"
 
   /** 版本衝突以 Dialog 呈現而非 snackbar——使用者必須確實知道自己的編輯沒存進去。 */
@@ -118,28 +138,31 @@ export function EtCourseEditorPage() {
     }
   }
 
+  /** 起始時間是否被使用者改動——決定要不要套「不得早於當下」的下限。 */
+  const startChanged = (startAt?.toISOString() ?? null) !== originalStart
+
   const toPayload = (): CoursePayload => ({
     course_name: form.course_name.trim(),
     description: form.description.trim() || null,
-    open_start_at: fromDateTimeLocalInput(form.open_start_at),
-    open_end_at: fromDateTimeLocalInput(form.open_end_at),
+    // Dayjs → ISO 8601（含時區）；後端欄位為 TIMESTAMPTZ，送 naive 值會被以連線時區
+    // 解讀而靜默位移，使「起始時間前學員不可見」等時間判定算錯。
+    open_start_at: startAt?.toISOString() ?? null,
+    open_end_at: endAt?.toISOString() ?? null,
     require_approval: form.require_approval,
     tag_ids: form.tag_ids,
   })
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      if (courseId === undefined) return coursesApi.create(toPayload())
+      if (isNew) return coursesApi.create({ ...toPayload(), chapters: stagedChapters })
       await coursesApi.update(courseId, { ...toPayload(), version: course?.version ?? 0 })
       return undefined
     },
-    onSuccess: (created) => {
+    onSuccess: () => {
       message.success("草稿已儲存")
-      if (created) {
-        navigate(`/et/courses/${created.course_id}`, { replace: true })
-      } else {
-        invalidate()
-      }
+      // 對齊 wireframe「儲存後：回到課程列表卡片網格」；新增 / 編輯皆同。
+      // 章節是各自即時儲存的，不會因離開編輯頁而遺失。
+      navigate("/et/courses")
     },
     onError: handleError,
   })
@@ -161,6 +184,19 @@ export function EtCourseEditorPage() {
       setErrors(next)
       return
     }
+    // 時間規則（SA 裁示 2026-08-24）：起始須 ≥ 當下——但**只對改動過的值**成立；
+    // 迄止須晚於起始（後端亦強制，此處為即時回饋）。
+    const timeErrors: Record<string, string> = {}
+    if (startChanged && startAt && startAt.isBefore(dayjs())) {
+      timeErrors.open_start_at = "課程起始時間不可早於目前時間"
+    }
+    if (startAt && endAt && !endAt.isAfter(startAt)) {
+      timeErrors.open_end_at = "課程訖止時間須晚於起始時間"
+    }
+    if (Object.keys(timeErrors).length > 0) {
+      setErrors(timeErrors)
+      return
+    }
     setErrors({})
     saveMut.mutate()
   }
@@ -178,8 +214,14 @@ export function EtCourseEditorPage() {
       return
     }
     setChapterError("")
+    if (isNew) {
+      setStagedChapters((prev) => [...prev, parsed.data])
+      setChapterDraft("")
+      if (!keepOpen) setChapterDialogOpen(false)
+      return
+    }
     try {
-      await coursesApi.addChapter(courseId as number, parsed.data)
+      await coursesApi.addChapter(courseId, parsed.data)
       invalidate()
       setChapterDraft("")
       if (!keepOpen) setChapterDialogOpen(false)
@@ -188,7 +230,14 @@ export function EtCourseEditorPage() {
     }
   }
 
+  const stagedIndexOf = (chapter: ChapterItem) => -chapter.chapter_id - 1
+
   const handleDeleteChapter = (chapter: ChapterItem) => {
+    if (isNew) {
+      // 暫存章節尚未寫入 DB，也就沒有學員紀錄可連帶處理——直接移除，不必 confirm
+      setStagedChapters((prev) => prev.filter((_, i) => i !== stagedIndexOf(chapter)))
+      return
+    }
     confirm({
       title: "刪除章節",
       content: "確定刪除此章節？學員於本章節之學習與成績將一併移除，且不再計入完課率。",
@@ -210,6 +259,7 @@ export function EtCourseEditorPage() {
   const selectableTags = tagOptions.filter((t) => t.is_active)
 
   return (
+    <LocalizationProvider dateAdapter={AdapterDayjs}>
     <Box sx={{ p: 3 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
@@ -297,27 +347,31 @@ export function EtCourseEditorPage() {
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 4" } }}>
-            <TextField
+            <DateTimePicker
               label="課程起始時間"
-              type="datetime-local"
-              size="small"
-              fullWidth
-              value={form.open_start_at}
+              value={startAt}
               disabled={readOnly}
-              slotProps={{ inputLabel: { shrink: true } }}
-              onChange={(e) => setForm({ ...form, open_start_at: e.target.value })}
+              // 只在使用者「改動」時要求不得早於當下——沿用原值不設下限，
+              // 否則已開課課程（起始必然在過去）之後永遠存不了檔（AC 28 允許繼續編輯）。
+              minDateTime={startChanged ? dayjs() : undefined}
+              onChange={(v) => setStartAt(v)}
+              slotProps={{
+                textField: { size: "small", fullWidth: true, error: Boolean(errors.open_start_at), helperText: errors.open_start_at },
+                actionBar: { actions: ["cancel", "accept"] },
+              }}
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 4" } }}>
-            <TextField
+            <DateTimePicker
               label="課程訖止時間"
-              type="datetime-local"
-              size="small"
-              fullWidth
-              value={form.open_end_at}
+              value={endAt}
               disabled={readOnly}
-              slotProps={{ inputLabel: { shrink: true } }}
-              onChange={(e) => setForm({ ...form, open_end_at: e.target.value })}
+              minDateTime={startAt ?? undefined}
+              onChange={(v) => setEndAt(v)}
+              slotProps={{
+                textField: { size: "small", fullWidth: true, error: Boolean(errors.open_end_at), helperText: errors.open_end_at },
+                actionBar: { actions: ["cancel", "accept"] },
+              }}
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 4" } }}>
@@ -355,19 +409,27 @@ export function EtCourseEditorPage() {
       <ChapterSection
         chapters={chapters}
         readOnly={readOnly}
-        disabled={courseId === undefined}
+        disabled={false}
         onAdd={() => {
           setChapterDraft("")
           setChapterError("")
           setChapterDialogOpen(true)
         }}
-        onRename={(chapter, name) =>
+        onRename={(chapter, name) => {
+          if (isNew) {
+            setStagedChapters((prev) => prev.map((n, i) => (i === stagedIndexOf(chapter) ? name : n)))
+            return
+          }
           chapterMut.mutate(() => coursesApi.renameChapter(chapter.chapter_id, name, chapter.version))
-        }
+        }}
         onDelete={handleDeleteChapter}
-        onReorder={(ids) =>
-          chapterMut.mutate(() => coursesApi.reorderChapters(courseId as number, ids, course?.version ?? 0))
-        }
+        onReorder={(ids) => {
+          if (isNew) {
+            setStagedChapters((prev) => ids.map((id) => prev[-id - 1]))
+            return
+          }
+          chapterMut.mutate(() => coursesApi.reorderChapters(courseId, ids, course?.version ?? 0))
+        }}
       />
 
       {!readOnly && (
@@ -432,5 +494,6 @@ export function EtCourseEditorPage() {
         </DialogActions>
       </Dialog>
     </Box>
+    </LocalizationProvider>
   )
 }

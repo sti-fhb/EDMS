@@ -6,7 +6,7 @@
 
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # 課程描述長度上限（spec_us3 AC 1「至多 500 字」）。
 # data-model 之 `DESCRIPTION` 為 TEXT 無長度限制，故由應用層把關；前端另以 Zod 同步檢核。
@@ -32,8 +32,8 @@ def _strip_or_none(value: str | None) -> str | None:
     return stripped or None
 
 
-class CourseCreateReq(BaseModel):
-    """建立草稿課程。
+class _CourseFields(BaseModel):
+    """課程基本資料之共用欄位與驗證（建立 / 更新皆適用）。
 
     **僅課程名稱必填**——受訓單位標籤與起訖時間為「發布時」必填（FR-ET-US3-01），
     草稿階段允許留空，故此處皆為選填。`OWNER_ID` 取自 JWT，不由請求帶入。
@@ -83,12 +83,52 @@ class CourseCreateReq(BaseModel):
         """
         return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
 
+    @model_validator(mode="after")
+    def _end_after_start(self) -> "_CourseFields":
+        """課程訖止時間須晚於起始時間。
 
-class CourseUpdateReq(CourseCreateReq):
+        兩者皆填時才檢核——草稿允許留空（FR-ET-US3-01），發布必填之檢核屬 #204。
+
+        **「起始須 ≥ 當下」不在此檢核**：該規則只對「使用者這次改動的值」成立
+        （SA 裁示，2026-08-24）。已發布課程的起始時間必然落在過去，若後端無條件檢核，
+        教師之後編輯該課程（AC 28 允許）會因為沿用原值而永遠存不了檔。故該約束落在
+        前端輸入層（選擇器 `minDateTime` + 僅對已變更之值驗證）。
+        """
+        if self.open_start_at and self.open_end_at and self.open_end_at <= self.open_start_at:
+            raise ValueError("課程訖止時間須晚於起始時間")
+        return self
+
+
+class CourseCreateReq(_CourseFields):
+    """建立草稿課程，**可一併帶入章節名稱**。
+
+    章節有 `COURSE_ID` 外鍵，課程不存在時掛不上去——若要求使用者「先存草稿才能加章節」，
+    新增流程會出現一個沒有業務意義的斷點。改由前端於新增模式將章節暫存於畫面、
+    儲存時一次送出，後端在**同一交易內**建立課程與章節：不會出現「課程建好但章節
+    建到一半失敗」的殘局。
+
+    課程建立後，章節改由 `/courses/{id}/chapters` 等端點各自維護，故 `CourseUpdateReq`
+    **不含**本欄位。
+    """
+
+    chapters: list[str] = Field(default_factory=list, max_length=MAX_CHAPTER_IDS)
+
+    @field_validator("chapters")
+    @classmethod
+    def _valid_chapter_names(cls, v: list[str]) -> list[str]:
+        names = [name.strip() for name in v]
+        if any(not name for name in names):
+            raise ValueError("章節名稱不得為空白")
+        if any(len(name) > CHAPTER_NAME_MAX_LEN for name in names):
+            raise ValueError(f"章節名稱不可超過 {CHAPTER_NAME_MAX_LEN} 字元")
+        return names
+
+
+class CourseUpdateReq(_CourseFields):
     """更新課程基本資料；`version` 供樂觀鎖檢核。
 
-    繼承建立之欄位與驗證：本表單為全量覆寫（前端一次送出整張基本資料卡），
-    非 partial update，故不使用 `exclude_unset`。
+    本表單為全量覆寫（前端一次送出整張基本資料卡），非 partial update，
+    故不使用 `exclude_unset`。**不含 `chapters`**——課程存在後章節由專屬端點維護。
     """
 
     version: int = Field(ge=0)
@@ -166,6 +206,21 @@ class CourseCreateResult(BaseModel):
 
     course_id: int
     version: int
+
+
+class Capabilities(BaseModel):
+    """當前使用者於 ET 課程之操作能力（供前端決定入口顯示）。
+
+    **回「能力」而非「角色」**，比照 DM 之 `app/dm/library/schemas.Capabilities`：
+    若回角色清單，前端得自己再寫一次「有 TEACHER 就顯示」的判斷，那份邏輯會與後端
+    `require_et_roles(ET_TEACHER)` 各自演化、遲早不一致。回能力則只有一個判斷來源。
+
+    > 前端無從自行推導：JWT **刻意不含角色**（`sti-backend-modules`——角色即時查
+    > `ET_USER_ROLE`，使撤銷權限下一個請求即生效，不必等 token 過期），
+    > 而 `/dp/user/module-summary` 只回「有無任一 ET 角色」之布林（最小知悉）。
+    """
+
+    can_create_course: bool  # 具教師角色（SA 裁示 Q2）→ 顯示「新增課程」入口
 
 
 class TagOption(BaseModel):

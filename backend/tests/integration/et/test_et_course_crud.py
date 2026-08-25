@@ -141,6 +141,128 @@ class TestCreateDraft:
         assert r.json()["error_code"] == "ET_COURSE_004"
 
 
+class TestCreateWithChapters:
+    """建立課程時一併帶入章節——使新增流程不必「先存草稿才能加章節」。"""
+
+    async def test_一次建立課程與章節且順序依陣列(self, client, db) -> None:
+        uid = await _user(db, "ETC_H1")
+        r = await client.post(
+            _URL,
+            json={"course_name": "課程", "chapters": ["第一章", "第二章", "第三章"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 201
+        detail = await client.get(f"{_URL}/{r.json()['course_id']}", headers=_bearer(uid))
+        chapters = detail.json()["chapters"]
+        assert [c["chapter_name"] for c in chapters] == ["第一章", "第二章", "第三章"]
+        assert [c["sort_order"] for c in chapters] == [1, 2, 3]
+
+    async def test_空白章節名被擋且課程不會被建出來(self, client, db) -> None:
+        """同一交易內建立——章節驗證失敗時不應留下沒有章節的孤兒課程。"""
+        uid = await _user(db, "ETC_H2")
+        r = await client.post(
+            _URL, json={"course_name": "不該存在的課程", "chapters": ["正常", "  "]}, headers=_bearer(uid)
+        )
+        assert r.status_code == 422
+        orphan = await db.scalar(select(EtCourse).where(EtCourse.course_name == "不該存在的課程"))
+        assert orphan is None, "驗證失敗時不得留下課程"
+
+    async def test_更新端點不接受_chapters(self, client, db) -> None:
+        """課程建立後章節由專屬端點維護；更新請求帶 chapters 應被忽略而非誤建。"""
+        uid = await _user(db, "ETC_H3")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(uid))
+        cid = created.json()["course_id"]
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={"course_name": "課程", "version": 0, "chapters": ["偷渡章節"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204
+        detail = await client.get(f"{_URL}/{cid}", headers=_bearer(uid))
+        assert detail.json()["chapters"] == [], "更新端點不應建立章節"
+
+
+class TestCapabilities:
+    """操作能力（比照 DM `Capabilities`）——回「能力」而非「角色」，使授權判斷只有一個來源。"""
+
+    async def test_教師可建立課程(self, client, db) -> None:
+        uid = await _user(db, "ETC_P1")
+        r = await client.get(f"{_URL}/capabilities", headers=_bearer(uid))
+        assert r.status_code == 200
+        assert r.json()["can_create_course"] is True
+
+    async def test_僅學員者不可建立課程(self, client, db) -> None:
+        uid = await _user(db, "ETC_P2", roles=(ROLE_STUDENT,))
+        r = await client.get(f"{_URL}/capabilities", headers=_bearer(uid))
+        assert r.status_code == 200
+        assert r.json()["can_create_course"] is False, "學員不應看到「新增課程」入口"
+
+    async def test_capabilities_不被動態路由吃掉(self, client, db) -> None:
+        """`/courses/{course_id}` 之 course_id 為 int；路由順序錯誤時本路徑會回 422。"""
+        uid = await _user(db, "ETC_P3")
+        r = await client.get(f"{_URL}/capabilities", headers=_bearer(uid))
+        assert r.status_code == 200, "capabilities 須宣告於動態路由之前"
+
+
+class TestTimeWindow:
+    async def test_迄止早於起始被擋(self, client, db) -> None:
+        uid = await _user(db, "ETC_W1")
+        r = await client.post(
+            _URL,
+            json={
+                "course_name": "課程",
+                "open_start_at": "2026-07-31T17:00:00Z",
+                "open_end_at": "2026-04-15T09:00:00Z",
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 422
+
+    async def test_起訖相同被擋(self, client, db) -> None:
+        uid = await _user(db, "ETC_W2")
+        same = "2026-04-15T09:00:00Z"
+        r = await client.post(
+            _URL,
+            json={"course_name": "課程", "open_start_at": same, "open_end_at": same},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 422
+
+    async def test_已發布課程沿用過去之起始時間仍可儲存(self, client, db) -> None:
+        """SA 裁示：「起始 ≥ 當下」只對使用者**改動**的值成立。
+
+        若後端無條件檢核，已開課課程（起始必然在過去）之後就永遠存不了檔——
+        而 AC 28 明訂已發布課程可繼續編輯。
+        """
+        uid = await _user(db, "ETC_W3")
+        created = await client.post(
+            _URL,
+            json={
+                "course_name": "課程",
+                "open_start_at": "2020-01-01T00:00:00Z",
+                "open_end_at": "2030-01-01T00:00:00Z",
+            },
+            headers=_bearer(uid),
+        )
+        assert created.status_code == 201
+        cid = created.json()["course_id"]
+        course = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
+        course.status = COURSE_PUBLISHED
+        await db.flush()
+
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={
+                "course_name": "改名",
+                "open_start_at": "2020-01-01T00:00:00Z",
+                "open_end_at": "2030-01-01T00:00:00Z",
+                "version": course.version,
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204
+
+
 class TestInputBounds:
     """輸入界限（Security Review，#202）。
 

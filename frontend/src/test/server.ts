@@ -642,6 +642,7 @@ export const handlers = [
     HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
   ),
   // ET02 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
+  http.get("/api/et/courses/capabilities", () => HttpResponse.json({ can_create_course: true })),
   http.get("/api/et/tags", () =>
     HttpResponse.json([
       { tag_id: 1, tag_name: "全體", is_active: true },

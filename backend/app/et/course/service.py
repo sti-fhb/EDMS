@@ -28,6 +28,7 @@ from app.et.course.rules import (
     resequence,
 )
 from app.et.course.schemas import (
+    Capabilities,
     ChapterCreateReq,
     ChapterItem,
     ChapterRenameReq,
@@ -38,6 +39,7 @@ from app.et.course.schemas import (
     CourseUpdateReq,
     TagOption,
 )
+from app.et.roles.authz import ET_TEACHER
 from app.services import AuditLogService
 
 _MODULE = "ET"
@@ -87,6 +89,9 @@ class EtCourseService:
         )
         if req.tag_ids:
             await self._tags.apply(db, course.course_id, to_add=set(req.tag_ids), to_remove=set(), operator=operator)
+        # 章節於同一交易內一併建立——使新增流程不必「先存草稿才能加章節」
+        for name in req.chapters:
+            await self._chapters.append(db, course.course_id, name, operator)
         await self._log(db, "CREATE", operator.user_id, course.course_id, "建立課程草稿")
         return CourseCreateResult(course_id=course.course_id, version=course.version)
 
@@ -203,6 +208,15 @@ class EtCourseService:
         await self._chapters.soft_delete_with_cascade(db, [chapter_id], operator)
         await self._chapters.resequence_remaining(db, chapter.course_id, operator)
         await self._log(db, "DELETE", operator.user_id, chapter.course_id, "刪除章節")
+
+    # ── 能力 ────────────────────────────────────────────────────────────────
+
+    def capabilities(self, roles: frozenset[str]) -> Capabilities:
+        """依當前使用者之 ET 角色算出課程相關操作能力。
+
+        純函式（不需 DB）——角色已由 `get_et_context` 查妥並放入 `EtContext`。
+        """
+        return Capabilities(can_create_course=ET_TEACHER in roles)
 
     # ── 標籤下拉 ────────────────────────────────────────────────────────────
 

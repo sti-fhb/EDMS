@@ -23,6 +23,7 @@ from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.et.course.schemas import (
     MAX_BIGINT,
+    Capabilities,
     ChapterCreateReq,
     ChapterItem,
     ChapterRenameReq,
@@ -56,6 +57,17 @@ async def list_tag_options(
     可選清單但既有已掛者保留，前端需要那些資料才顯示得出已掛的 chip。
     """
     return await _service.list_tag_options(db, course_id=course_id)
+
+
+@router.get("/courses/capabilities", response_model=Capabilities)
+async def get_capabilities(ctx: EtContext = Depends(get_et_context)) -> Capabilities:
+    """當前使用者於課程之操作能力。
+
+    ⚠️ **本路由必須宣告在 `/courses/{course_id}` 之前**——後者的 `course_id` 為
+    `Annotated[int, Path(...)]`，若順序顛倒，`/courses/capabilities` 會先命中動態路由
+    並因「capabilities 不是整數」回 422。
+    """
+    return _service.capabilities(ctx.roles)
 
 
 @router.get(
