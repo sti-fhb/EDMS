@@ -219,4 +219,25 @@ describe("DmDetailPage 文件詳細頁", () => {
     // read-only：所有版本僅預覽、無下載鈕
     expect(screen.queryByRole("button", { name: "下載" })).not.toBeInTheDocument()
   })
+
+  it("編輯者發起廢止：填原因 + 選審核者 → 送出成功提示（US8）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmDetailPage />)
+    await user.click(await screen.findByRole("button", { name: "廢止此文件" }))
+    expect(await screen.findByText("申請廢止文件")).toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: /廢止原因/ }), "流程已停辦")
+    await user.click(screen.getByRole("combobox", { name: /指定審核者/ }))
+    await user.click(await screen.findByRole("option", { name: "王審核" }))
+    await user.click(screen.getByRole("button", { name: "送出廢止申請" }))
+    expect(await screen.findByText("已送出廢止申請，已通知指定審核者")).toBeInTheDocument()
+  })
+
+  it("廢止對話框：未填原因即送出 → 顯示必填錯誤（US8 / DM-MSG-DM02-011）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmDetailPage />)
+    await user.click(await screen.findByRole("button", { name: "廢止此文件" }))
+    await screen.findByText("申請廢止文件")
+    await user.click(screen.getByRole("button", { name: "送出廢止申請" }))
+    expect(await screen.findByText("請填寫廢止原因")).toBeInTheDocument()
+  })
 })

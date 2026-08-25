@@ -41,6 +41,9 @@ export interface ReviewDetail {
   submitter_name: string | null
   new_version: VersionMeta | null
   current_version: VersionMeta | null // 新版本申請附目前發布版供比對；首版為 null
+  obsolete_reason: string | null // 廢止原因（OBSOLETE）
+  obsolete_file_name: string | null // 廢止附件檔名（OBSOLETE；有則可下載）
+  obsolete_file_size: number | null // 廢止附件大小（位元組）
 }
 
 export interface CompletedItem {

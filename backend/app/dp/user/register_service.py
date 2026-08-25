@@ -19,6 +19,7 @@ from app.core.exceptions import AppError
 from app.core.password_policy import hash_password, validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
@@ -27,8 +28,6 @@ _EMAIL_TAKEN_MSG = "此 Email 已被註冊，請直接登入或使用忘記密�
 # 措辭刻意不提「管理者邀請」：本端點為公開匿名，不對外揭露組織脈絡（該句型亦常被釣魚信複用）。
 # 認證後的管理者端點（DP_USER_010）則可明說，此不對稱為刻意設計。
 _INVITE_PENDING_MSG = "此 Email 已有待完成的帳號啟用程序，請至信箱收取信件完成啟用"
-# 待啟用列來源；與 repository / activate_service / users.service 同值（各模組自持，未共用常數）
-_KIND_ADMIN_INVITE = "ADMIN_INVITE"
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _DEFAULT_MIN_LEN = 8
 _DEFAULT_CHAR_TYPES = 3
@@ -52,6 +51,18 @@ class RegisterService:
         self._notify = notify or NotifyService()
         self._audit = audit or AuditLogService()
 
+    async def assert_email_not_registered(self, db: AsyncSession, email: str) -> None:
+        """Email 已被「已驗證帳號」佔用 → 409 DP_USER_001；未佔用則靜默通過。
+
+        供 router 在「驗證信寄送冷卻」**之前**呼叫（#86）：「已是正式帳號」是終局狀態，
+        等冷卻倒數結束也不會改變，先擋掉可免使用者白等一輪才被告知「已被註冊」。
+        對已驗證帳號本來就直接 409、不會送信，冷卻在此無防狂發價值。
+
+        register() 內部亦呼叫本方法（單一 409 來源），故服務層獨立呼叫時語意不變。
+        """
+        if await self._repo.email_exists(db, email):
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
+
     async def register(
         self, db: AsyncSession, *, email: str, user_name: str, password: str, confirm_password: str
     ) -> None:
@@ -71,14 +82,13 @@ class RegisterService:
         if password != confirm_password:
             raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
         # 2. Email 未被「已驗證帳號」佔用（未驗證的 pending 列於 step 4 覆蓋，不擋）
-        if await self._repo.email_exists(db, email):
-            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
+        await self.assert_email_not_registered(db, email)
         # 2-1. 不得覆蓋管理者發出且仍有效的邀請（#125）。step 4 的覆蓋不分 kind，若不在此擋下，
         #      自助註冊會刪掉管理者的邀請列（該列從邀請清單消失、原邀請信連結失效），且管理者
         #      毫無感知。逾期的邀請則放行覆蓋——邀請既已失效，不應讓該 Email 被永久佔住。
         now = utcnow()
         pending = await self._repo.get_pending_by_email(db, email)
-        if pending is not None and pending.kind == _KIND_ADMIN_INVITE and pending.expires_date > now:
+        if pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > now:
             # ⚠️ 本分支在 bcrypt（step 4 的 hash_password，約 250ms）之前 return，回應時間顯著短於受理路徑。
             #    目前無害——status / error_code 本就是直球 oracle。但日後若為防列舉改成統一回 202，
             #    必須在此路徑補一次 dummy bcrypt，否則時間差會單獨把 oracle 重建起來。
@@ -93,7 +103,7 @@ class RegisterService:
         plaintext = generate_reset_token()
         # 條件式刪除：保留 TOCTOU 空窗內剛產生的有效邀請，讓其撞 UNIQUE 轉 409 而非被靜默覆蓋（#125）
         await self._repo.delete_pending_unless_active_invite(db, email, now)
-        if pending is not None and pending.kind == _KIND_ADMIN_INVITE:
+        if pending is not None and pending.kind == KIND_ADMIN_INVITE:
             # 走到這裡代表該邀請已逾期（未逾期者已於 step 2-1 擋下）。覆蓋是 #125 的預期行為
             # （不讓 Email 被永久佔住），但仍須留痕供管理者追查邀請為何消失。
             # operator 記 SYSTEM：行為人為匿名註冊者、無 user_id，且非管理者所為。

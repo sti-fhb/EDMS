@@ -3,12 +3,11 @@ from datetime import datetime
 from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dp.user.kinds import KIND_ADMIN_INVITE, KIND_SELF_REGISTER
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
 from app.dp.users.models import DpUser
 
 _SYSTEM_USER = "SYSTEM"
-_KIND_SELF_REGISTER = "SELF_REGISTER"
-_KIND_ADMIN_INVITE = "ADMIN_INVITE"
 _TOKEN_TYPE_EMAIL_CHANGE = "EMAIL_CHANGE"  # noqa: S105 — DP_PWD_RESET.TOKEN_TYPE 值，非密碼
 
 
@@ -223,7 +222,7 @@ class AuthRepository:
         await db.execute(
             delete(DpPendingRegistration).where(
                 DpPendingRegistration.email == email,
-                ~((DpPendingRegistration.kind == _KIND_ADMIN_INVITE) & (DpPendingRegistration.expires_date > now)),
+                ~((DpPendingRegistration.kind == KIND_ADMIN_INVITE) & (DpPendingRegistration.expires_date > now)),
             )
         )
 
@@ -241,7 +240,7 @@ class AuthRepository:
         pwd_hash: str | None,
         expires_date: datetime,
         now: datetime,
-        kind: str = _KIND_SELF_REGISTER,
+        kind: str = KIND_SELF_REGISTER,
         invite_id: str | None = None,
         operator_id: str = _SYSTEM_USER,
     ) -> None:
@@ -272,7 +271,7 @@ class AuthRepository:
 
         keyword：對姓名 / Email 不分大小寫模糊比對。依邀請寄出時間新到舊排序。
         """
-        conditions = [DpPendingRegistration.kind == _KIND_ADMIN_INVITE]
+        conditions = [DpPendingRegistration.kind == KIND_ADMIN_INVITE]
         if keyword:
             pattern = f"%{keyword}%"
             conditions.append(
@@ -289,7 +288,7 @@ class AuthRepository:
         """以 INVITE_ID 查邀請中列（僅 ADMIN_INVITE）；不存在回 None。"""
         stmt = select(DpPendingRegistration).where(
             DpPendingRegistration.invite_id == invite_id,
-            DpPendingRegistration.kind == _KIND_ADMIN_INVITE,
+            DpPendingRegistration.kind == KIND_ADMIN_INVITE,
         )
         return (await db.execute(stmt)).scalar_one_or_none()
 

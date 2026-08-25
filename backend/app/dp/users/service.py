@@ -22,6 +22,7 @@ from app.core.pagination import PaginatedResult, paginate
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.ids import generate_user_id
+from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.dp.users.repository import UsersRepository
@@ -33,7 +34,6 @@ logger = logging.getLogger(__name__)
 _FUNC_NAME = "DP-USERS"
 _INVITE_TEMPLATE = "ACCOUNT_INVITE"
 _PWD_EXPIRY_TEMPLATE = "PWD_EXPIRY_REMIND"  # noqa: S105 — 通知範本代碼，非密碼
-_KIND_ADMIN_INVITE = "ADMIN_INVITE"
 _SYSTEM_USER = "SYSTEM"
 _PENDING_INVITE_MSG = "此 Email 已有待啟用邀請，請改用重寄"
 _EMAIL_TAKEN_MSG = "此 Email 已被使用"
@@ -106,7 +106,7 @@ class UsersService:
 
         now = utcnow()
         existing = await self._auth_repo.get_pending_by_email(db, data.email)
-        if existing is not None and existing.kind != _KIND_ADMIN_INVITE:
+        if existing is not None and existing.kind != KIND_ADMIN_INVITE:
             # 自助註冊（SELF_REGISTER）處理中：該列不在邀請清單（build_invite_list_stmt 濾 kind）、
             # invite_id 為 NULL，管理者既無可重寄對象也不應覆蓋他人註冊列，故維持「Email 已被使用」
             # 而非回 DP_USER_010（會把管理者導向不存在的重寄動作）。
@@ -149,7 +149,7 @@ class UsersService:
                 pwd_hash=None,
                 expires_date=expires_date,
                 now=now,
-                kind=_KIND_ADMIN_INVITE,
+                kind=KIND_ADMIN_INVITE,
                 invite_id=invite_id,
                 operator_id=operator.user_id,
             )
@@ -171,7 +171,7 @@ class UsersService:
             after={
                 "email": data.email,
                 "user_name": data.user_name,
-                "kind": _KIND_ADMIN_INVITE,
+                "kind": KIND_ADMIN_INVITE,
                 "expires_date": _iso(expires_date),
             },
         )
@@ -205,7 +205,7 @@ class UsersService:
                 pwd_hash=None,
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
-                kind=_KIND_ADMIN_INVITE,
+                kind=KIND_ADMIN_INVITE,
                 invite_id=invite_id,
                 operator_id=operator.user_id,
             )

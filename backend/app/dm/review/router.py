@@ -81,6 +81,22 @@ async def download_review_file(
     )
 
 
+@router.get("/{review_id}/obsolete-file")
+async def download_obsolete_file(
+    review_id: int,
+    ctx: DmContext = Depends(get_dm_context),
+    op: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """廢止附件下載（US8）：僅 DM_ADMIN 或該送審之指定審核者（SA 裁示 Q1=C）。"""
+    served = await _service.prepare_obsolete_file(db, review_id=review_id, roles=ctx.roles, op=op)
+    if not Path(served.path).is_file():
+        raise AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
+    return FileResponse(
+        served.path, media_type=served.mime, filename=served.name, content_disposition_type="attachment"
+    )
+
+
 @router.post("/{review_id}/approve", response_model=ApproveResult)
 async def approve(
     review_id: int,

@@ -37,6 +37,24 @@ export const reviewApi = {
     })
     return data
   },
+
+  fetchObsoleteFileBlob: async (reviewId: number): Promise<Blob> => {
+    const { data } = await http.get<Blob>(`/dm/reviews/${reviewId}/obsolete-file`, { responseType: "blob" })
+    return data
+  },
+}
+
+/** 下載廢止附件（US8，授權 Q1=C：DM_ADMIN 或指定審核者）。 */
+export async function downloadObsoleteFile(reviewId: number, filename: string): Promise<void> {
+  const blob = await reviewApi.fetchObsoleteFileBlob(reviewId)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 /** 下載簽核明細之待審版 / 目前發布版檔案（走 US6 審核端點，可取未發布之待審版）。 */

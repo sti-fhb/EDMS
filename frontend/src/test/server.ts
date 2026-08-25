@@ -286,6 +286,13 @@ export const handlers = [
   http.get("/api/dm/reviews/:reviewId/versions/:versionId/file", () =>
     HttpResponse.arrayBuffer(new ArrayBuffer(8), { headers: { "Content-Type": "application/pdf" } }),
   ),
+  http.get("/api/dm/reviews/:reviewId/obsolete-file", () =>
+    HttpResponse.arrayBuffer(new ArrayBuffer(8), { headers: { "Content-Type": "application/pdf" } }),
+  ),
+  // US8 發起廢止（dm-obsolete）
+  http.post("/api/dm/documents/:docId/obsolete", () =>
+    HttpResponse.json({ review_id: 601, doc_status: "PENDING_OBSOLETE", notified: 1 }),
+  ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
     HttpResponse.json({
