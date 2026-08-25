@@ -56,12 +56,43 @@ describe("ET02 課程編輯頁", () => {
     expect(await screen.findByDisplayValue("第一章")).toBeInTheDocument()
   })
 
+  it("暫存章節的識別不隨位置改變——刪除第一章後剩下的仍顯示自己的名稱", async () => {
+    // 迴歸測試：暫存章節的 id 原本是 `-(index + 1)`，由位置推導。
+    // `ChapterRow` 以 chapter_id 當 React key 且內部以 state 保存名稱草稿，
+    // 位置一變 key 就對到別人，React 重用同一個元件實例、草稿不更新——
+    // 拖拉後畫面「看起來沒動」、刪除後剩下的會顯示被刪者的名稱。
+    const user = userEvent.setup()
+    renderNewEditor()
+    await screen.findByRole("heading", { name: "新增課程" })
+
+    for (const name of ["第一章", "第二章"]) {
+      await user.click(screen.getByRole("button", { name: "新增章節" }))
+      const input = await screen.findByLabelText("章節名稱")
+      await user.click(input)
+      await user.paste(name) // 貼上為單次事件，比逐字 type 快很多
+      await user.click(screen.getByRole("button", { name: "儲存" }))
+      await waitFor(() => expect(screen.queryByLabelText("章節名稱")).not.toBeInTheDocument())
+    }
+    expect(screen.getByDisplayValue("第一章")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("第二章")).toBeInTheDocument()
+
+    // 暫存章節無學員紀錄可連帶處理，故刪除不跳 confirm
+    await user.click(screen.getByRole("button", { name: "刪除章節 第一章" }))
+
+    await waitFor(() => expect(screen.queryByDisplayValue("第一章")).not.toBeInTheDocument())
+    expect(screen.getByDisplayValue("第二章")).toBeInTheDocument()
+    // 本條互動數明顯多於其他測試（兩輪對話框開關 + 刪除），全套件滿載時預設 5s 不夠；
+    // 拉長 timeout 而非削弱斷言——它驗的是拖拉 / 刪除失效的根因，不宜簡化。
+  }, 15000)
+
   it("新增模式儲存時一次送出課程與暫存章節，並導回列表", async () => {
     const user = userEvent.setup()
-    let sent: { chapters?: string[]; open_start_at?: string | null; open_end_at?: string | null } | null = null
+    // 用可變容器而非 `let`：`let` 只在 closure 內賦值時，TS 的控制流分析會把
+    // closure 外的讀取收斂成 `null`（屬性存取即報 never）。物件屬性不受此收斂影響。
+    const captured: { body?: { chapters: string[]; open_start_at: string | null; open_end_at: string | null } } = {}
     server.use(
       http.post("/api/et/courses", async ({ request }) => {
-        sent = (await request.json()) as typeof sent
+        captured.body = (await request.json()) as NonNullable<typeof captured.body>
         return HttpResponse.json({ course_id: 99, version: 0 }, { status: 201 })
       }),
     )
@@ -74,10 +105,10 @@ describe("ET02 課程編輯頁", () => {
     // 用 findBy* 等它真的消失，否則背景按鈕查不到（同步 getByRole 會失敗）。
     await user.click(await screen.findByRole("button", { name: "儲存草稿" }))
 
-    await waitFor(() => expect(sent?.chapters).toEqual(["第一章"]))
+    await waitFor(() => expect(captured.body?.chapters).toEqual(["第一章"]))
     // 起訖時間於草稿允許留空（FR-ET-US3-01）——未填即送 null，不送空字串
-    expect(sent?.open_start_at).toBeNull()
-    expect(sent?.open_end_at).toBeNull()
+    expect(captured.body?.open_start_at).toBeNull()
+    expect(captured.body?.open_end_at).toBeNull()
     expect(navigateSpy).toHaveBeenCalledWith("/et/courses")
   })
 
@@ -197,6 +228,15 @@ describe("ET02 課程編輯頁", () => {
     expect(screen.getByRole("textbox", { name: "課程描述" })).toHaveValue("")
     expect(screen.getByLabelText("本課程需線下核可")).not.toBeChecked()
     expect(screen.getByLabelText("狀態")).toHaveValue("草稿")
+  })
+
+  it("「儲存並發布」按鈕呈現但停用（發布屬 #204）", async () => {
+    renderNewEditor()
+    const publish = await screen.findByRole("button", { name: "儲存並發布" })
+    expect(publish).toBeDisabled()
+    // 不可先讓它能按：發布檢核之「≥ 1 教材」「配分 = 100」要到 #203 才驗得了，
+    // 而發布會觸發標籤自動邀請＋寄信，等於通知全體學員一門空課程。
+    expect(screen.getByRole("button", { name: "儲存草稿" })).toBeEnabled()
   })
 
   it("章節名稱留空時於對話框內顯示錯誤且不關閉", async () => {

@@ -15,6 +15,7 @@ import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Switch from "@mui/material/Switch"
+import Tooltip from "@mui/material/Tooltip"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs"
@@ -23,7 +24,7 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import dayjs from "dayjs"
 import type { Dayjs } from "dayjs"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
@@ -34,6 +35,7 @@ import {
   CourseFormSchema,
   DESCRIPTION_MAX_LEN,
   type ChapterItem,
+  type CourseDetail,
   type CoursePayload,
 } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -74,7 +76,12 @@ export function EtCourseEditorPage() {
   const [originalStart, setOriginalStart] = useState<string | null>(null)
   // 新增模式之章節暫存：章節有 COURSE_ID 外鍵、課程不存在時掛不上去，
   // 故先存在畫面上，儲存時連同課程一次送出（後端於同一交易內建立）。
-  const [stagedChapters, setStagedChapters] = useState<string[]>([])
+  //
+  // ⚠️ **id 必須穩定、不可由索引推導**：`ChapterRow` 以 `chapter_id` 當 React key 且
+  // 內部以 state 保存章節名草稿。若 id 為 `-(index + 1)`，拖拉後陣列順序變了但 key 仍
+  // 照位置排列，React 會重用同一批元件實例、其內部草稿不更新——畫面看起來「拖了沒動」。
+  const [stagedChapters, setStagedChapters] = useState<{ id: number; name: string }[]>([])
+  const nextStagedId = useRef(-1)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [conflictOpen, setConflictOpen] = useState(false)
   const [chapterDialogOpen, setChapterDialogOpen] = useState(false)
@@ -113,9 +120,9 @@ export function EtCourseEditorPage() {
   const readOnly = course !== undefined && !course.is_owner
   // 新增模式以負數 id 表示暫存章節（尚未寫入 DB）；index = -id - 1
   const chapters: ChapterItem[] = isNew
-    ? stagedChapters.map((name, i) => ({
-        chapter_id: -(i + 1),
-        chapter_name: name,
+    ? stagedChapters.map((c, i) => ({
+        chapter_id: c.id,
+        chapter_name: c.name,
         sort_order: i + 1,
         version: 0,
       }))
@@ -138,8 +145,18 @@ export function EtCourseEditorPage() {
     }
   }
 
-  /** 起始時間是否被使用者改動——決定要不要套「不得早於當下」的下限。 */
+  /** 起始時間是否被使用者改動——決定送出前要不要驗「不得早於當下」。 */
   const startChanged = (startAt?.toISOString() ?? null) !== originalStart
+
+  /**
+   * 起始時間可選範圍的下限——**一開始就套用**，過去的時間即為灰底不可選。
+   *
+   * 例外：課程已開課（原起始落在過去）時，下限放寬到**原值**而非當下。否則已開課課程
+   * 一進編輯頁，既有的起始時間就落在不可選範圍內，教師無從沿用（AC 28 允許已發布課程
+   * 繼續編輯）。放寬到原值仍擋住「把開課時間再往前挪」。
+   */
+  const startedInPast = originalStart !== null && dayjs(originalStart).isBefore(dayjs())
+  const startFloor = startedInPast ? dayjs(originalStart) : dayjs()
 
   const toPayload = (): CoursePayload => ({
     course_name: form.course_name.trim(),
@@ -154,7 +171,7 @@ export function EtCourseEditorPage() {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      if (isNew) return coursesApi.create({ ...toPayload(), chapters: stagedChapters })
+      if (isNew) return coursesApi.create({ ...toPayload(), chapters: stagedChapters.map((c) => c.name) })
       await coursesApi.update(courseId, { ...toPayload(), version: course?.version ?? 0 })
       return undefined
     },
@@ -170,7 +187,10 @@ export function EtCourseEditorPage() {
   const chapterMut = useMutation({
     mutationFn: async (action: () => Promise<unknown>) => action(),
     onSuccess: invalidate,
-    onError: handleError,
+    onError: (err) => {
+      handleError(err)
+      invalidate() // 還原樂觀更新（如重排失敗）
+    },
   })
 
   const handleSave = () => {
@@ -187,8 +207,10 @@ export function EtCourseEditorPage() {
     // 時間規則（SA 裁示 2026-08-24）：起始須 ≥ 當下——但**只對改動過的值**成立；
     // 迄止須晚於起始（後端亦強制，此處為即時回饋）。
     const timeErrors: Record<string, string> = {}
-    if (startChanged && startAt && startAt.isBefore(dayjs())) {
-      timeErrors.open_start_at = "課程起始時間不可早於目前時間"
+    if (startChanged && startAt && startAt.isBefore(startFloor)) {
+      timeErrors.open_start_at = startedInPast
+        ? "課程已開課，起始時間不可再往前調整"
+        : "課程起始時間不可早於目前時間"
     }
     if (startAt && endAt && !endAt.isAfter(startAt)) {
       timeErrors.open_end_at = "課程訖止時間須晚於起始時間"
@@ -215,7 +237,7 @@ export function EtCourseEditorPage() {
     }
     setChapterError("")
     if (isNew) {
-      setStagedChapters((prev) => [...prev, parsed.data])
+      setStagedChapters((prev) => [...prev, { id: nextStagedId.current--, name: parsed.data }])
       setChapterDraft("")
       if (!keepOpen) setChapterDialogOpen(false)
       return
@@ -230,12 +252,11 @@ export function EtCourseEditorPage() {
     }
   }
 
-  const stagedIndexOf = (chapter: ChapterItem) => -chapter.chapter_id - 1
 
   const handleDeleteChapter = (chapter: ChapterItem) => {
     if (isNew) {
       // 暫存章節尚未寫入 DB，也就沒有學員紀錄可連帶處理——直接移除，不必 confirm
-      setStagedChapters((prev) => prev.filter((_, i) => i !== stagedIndexOf(chapter)))
+      setStagedChapters((prev) => prev.filter((c) => c.id !== chapter.chapter_id))
       return
     }
     confirm({
@@ -351,9 +372,7 @@ export function EtCourseEditorPage() {
               label="課程起始時間"
               value={startAt}
               disabled={readOnly}
-              // 只在使用者「改動」時要求不得早於當下——沿用原值不設下限，
-              // 否則已開課課程（起始必然在過去）之後永遠存不了檔（AC 28 允許繼續編輯）。
-              minDateTime={startChanged ? dayjs() : undefined}
+              minDateTime={startFloor}
               onChange={(v) => setStartAt(v)}
               slotProps={{
                 textField: { size: "small", fullWidth: true, error: Boolean(errors.open_start_at), helperText: errors.open_start_at },
@@ -417,7 +436,7 @@ export function EtCourseEditorPage() {
         }}
         onRename={(chapter, name) => {
           if (isNew) {
-            setStagedChapters((prev) => prev.map((n, i) => (i === stagedIndexOf(chapter) ? name : n)))
+            setStagedChapters((prev) => prev.map((c) => (c.id === chapter.chapter_id ? { ...c, name } : c)))
             return
           }
           chapterMut.mutate(() => coursesApi.renameChapter(chapter.chapter_id, name, chapter.version))
@@ -425,9 +444,22 @@ export function EtCourseEditorPage() {
         onDelete={handleDeleteChapter}
         onReorder={(ids) => {
           if (isNew) {
-            setStagedChapters((prev) => ids.map((id) => prev[-id - 1]))
+            setStagedChapters((prev) => ids.map((id) => prev.find((c) => c.id === id)).filter((c) => c !== undefined))
             return
           }
+          // 樂觀更新：先把快取裡的章節順序換掉，拖放後立即定位。
+          // 少了這步，畫面要等 API + refetch 才變，中間會閃回舊順序、看起來像「拖了沒動」。
+          // 失敗時 onError 會 invalidate 還原（見 chapterMut）。
+          qc.setQueryData(QUERY_KEYS.etCourses.detail(courseId), (old?: CourseDetail) =>
+            old
+              ? {
+                  ...old,
+                  chapters: ids
+                    .map((id) => old.chapters.find((c) => c.chapter_id === id))
+                    .filter((c) => c !== undefined),
+                }
+              : old,
+          )
           chapterMut.mutate(() => coursesApi.reorderChapters(courseId, ids, course?.version ?? 0))
         }}
       />
@@ -439,15 +471,31 @@ export function EtCourseEditorPage() {
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Typography variant="caption" color="text.secondary">
-              儲存草稿可隨時繼續編輯；教材 / 測驗與發布於後續 issue 提供。
+              儲存草稿可隨時繼續編輯。發布須先有教材與測驗，待 #203 / #204 完成後開放。
             </Typography>
             <Stack direction="row" spacing={1}>
               <Button size="small" onClick={() => navigate("/et/courses")}>
                 取消
               </Button>
-              <Button size="small" variant="contained" disabled={saveMut.isPending} onClick={handleSave}>
+              <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
                 儲存草稿
               </Button>
+              {/*
+                發布屬 #204。此處先放停用的按鈕呈現完整版面——#204 接上時補 handler 即可，
+                按鈕本身不需重寫。
+
+                **不可先讓它能按**：發布檢核五項中「至少 1 教材」與「各測驗配分 = 100」
+                要到 #203 才驗得了。跳過那兩項會發布出一門沒有內容的課程，而發布會觸發
+                標籤自動邀請＋寄信給所有符合標籤的學員（FR-ET-US3-12）——等於對全體學員
+                寄信通知一門空課程。
+              */}
+              <Tooltip title="發布功能待教材 / 測驗完成後開放（ET Issue #203 / #204）">
+                <span>
+                  <Button size="small" variant="contained" disabled>
+                    儲存並發布
+                  </Button>
+                </span>
+              </Tooltip>
             </Stack>
           </Stack>
         </Paper>
