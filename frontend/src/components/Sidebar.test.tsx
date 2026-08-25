@@ -24,10 +24,19 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
     const dmGroup = NAV_GROUPS.find((g) => g.title === "文件管理")
     expect(dmGroup?.items).toHaveLength(6)
+    // 個人專區依 access 非同步閘（預設 can_access=true）→ 用 findBy 等其解析
     for (const item of dmGroup?.items ?? []) {
       expect(item.path.startsWith("/dm/")).toBe(true)
-      expect(screen.getByText(item.label)).toBeInTheDocument()
+      expect(await screen.findByText(item.label)).toBeInTheDocument()
     }
+  })
+
+  it("US9：具 DM 角色但非編輯 / 審核者（access can_access=false）時，隱藏「個人專區」單項（其餘 DM 項仍在）", async () => {
+    server.use(http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: false })))
+    renderWithProviders(<Sidebar />)
+    await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
+    expect(await screen.findByText("文件庫")).toBeInTheDocument() // 其餘 DM 項仍顯示
+    await waitFor(() => expect(screen.queryByText("個人專區")).not.toBeInTheDocument())
   })
 
   it("無 DM 權限（dm.has_role=false）時不顯示「文件管理」群組（DP 群組仍在）", async () => {
@@ -49,7 +58,7 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
     for (const group of NAV_GROUPS) {
       for (const item of group.items) {
-        expect(screen.getByRole("link", { name: item.label })).toHaveAttribute("href", item.path)
+        expect(await screen.findByRole("link", { name: item.label })).toHaveAttribute("href", item.path)
       }
     }
   })

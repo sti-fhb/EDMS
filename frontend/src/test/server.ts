@@ -293,6 +293,62 @@ export const handlers = [
   http.post("/api/dm/documents/:docId/obsolete", () =>
     HttpResponse.json({ review_id: 601, doc_status: "PENDING_OBSOLETE", notified: 1 }),
   ),
+  // US9 個人專區（dm-personal）
+  http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })),
+  http.get("/api/dm/personal/drafts", () =>
+    HttpResponse.json([
+      {
+        version_id: 701,
+        doc_id: "DM-SOP-000009",
+        doc_name: "領血 SOP 草稿",
+        version_no: "2.1",
+        change_summary: "修訂第 3 節",
+        category_code: "SOP",
+        kind: "rejected",
+        updated_date: "2026-08-20T09:00:00Z",
+      },
+      {
+        version_id: 702,
+        doc_id: "DM-SOP-000010",
+        doc_name: "新入庫作業",
+        version_no: "1.0",
+        change_summary: "首版草稿",
+        category_code: "SOP",
+        kind: "unsubmitted",
+        updated_date: "2026-08-22T09:00:00Z",
+      },
+    ]),
+  ),
+  http.delete("/api/dm/personal/drafts/:versionId", () => new HttpResponse(null, { status: 204 })),
+  http.get("/api/dm/personal/activity", () =>
+    HttpResponse.json({
+      author: [
+        {
+          review_id: 801,
+          doc_id: "DM-SOP-000011",
+          doc_name: "待審文件 A",
+          review_type: "NEW_VERSION",
+          status: "PENDING",
+          submit_date: "2026-08-23T09:00:00Z",
+          complete_date: null,
+        },
+      ],
+      reviewer: [
+        {
+          review_id: 802,
+          doc_id: "DM-SOP-000012",
+          doc_name: "我要審的文件",
+          review_type: "NEW",
+          status: "PENDING",
+          submit_date: "2026-08-23T10:00:00Z",
+          complete_date: null,
+        },
+      ],
+    }),
+  ),
+  http.post("/api/dm/reviews/:reviewId/withdraw", ({ params }) =>
+    HttpResponse.json({ review_id: Number(params.reviewId), doc_status: "PUBLISHED" }),
+  ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
     HttpResponse.json({
