@@ -86,12 +86,13 @@ class DmDocVersion(BaseModel):
         ),
         # 每人每文件一份草稿（US5）：同 (DOC_ID, CREATED_USER) 至多一筆 STATUS='DRAFT'——並發後盾
         # （應用層另給友善 DM_DOC_009）。不同撰寫者可各自開草稿、互不阻擋。
+        # 排除 DELETED=1（US9 草稿軟刪後釋出唯一槽，否則刪除後再開草稿誤報已有草稿；migration 8afb64daa14b）。
         Index(
             "UX_DM_DOC_VERSION_ONE_DRAFT",
             "DOC_ID",
             "CREATED_USER",
             unique=True,
-            postgresql_where=text("\"STATUS\" = 'DRAFT'"),
+            postgresql_where=text("\"STATUS\" = 'DRAFT' AND \"DELETED\" = 0"),
         ),
     )
 

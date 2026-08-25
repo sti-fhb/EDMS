@@ -10,6 +10,7 @@ from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
 
 _DRAFT = "DRAFT"
+_OBSOLETE = "OBSOLETE"
 
 
 class PersonalRepository:
@@ -46,6 +47,7 @@ class PersonalRepository:
                 DmDocVersion.created_user == user_id,
                 DmDocVersion.status == _DRAFT,
                 DmDocVersion.deleted == 0,
+                DmDocument.status != _OBSOLETE,  # 已廢止文件之孤兒草稿不顯示（#1；不主動刪，資料保留）
             )
             # 排序鍵以「最後異動」為準，未編輯過（updated_date NULL）之新草稿退回 created_date，避免排最後
             .order_by(

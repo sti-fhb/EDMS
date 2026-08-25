@@ -16,6 +16,8 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     expect(screen.getByRole("button", { name: "撤回送審" })).toBeInTheDocument()
     // 審核者視角逾催辦門檻 → 顯示「催辦中」（is_overdue=true）
     expect(screen.getByText("催辦中")).toBeInTheDocument()
+    // 待處理 / 催辦中 → 有「前往簽核中心」button
+    expect(screen.getByRole("button", { name: "前往簽核中心" })).toBeInTheDocument()
   })
 
   it("撤回送審 → 二次確認 → 成功 toast（DM-MSG-DM07-005）", async () => {

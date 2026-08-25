@@ -86,24 +86,33 @@ function ActivityTab() {
           </Typography>
           <Stack divider={<Divider />} spacing={1}>
             {data.reviewer.map((a) => (
-              <Box key={a.review_id} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Chip
-                  size="small"
-                  color={a.is_overdue ? "error" : "default"}
-                  label={reviewerEventLabel(a.status, a.is_overdue)}
-                />
-                <Typography variant="body2" sx={{ flex: 1 }}>
-                  {a.doc_name}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {formatDateTime(a.submit_date)}
-                </Typography>
-              </Box>
+              <ReviewerRow key={a.review_id} item={a} />
             ))}
           </Stack>
         </Paper>
       )}
     </Stack>
+  )
+}
+
+function ReviewerRow({ item }: { item: ActivityItem }) {
+  const navigate = useNavigate()
+  const pending = item.status === "PENDING" // 待處理 / 催辦中 → 可前往簽核中心處理
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+      <Chip size="small" color={item.is_overdue ? "error" : "default"} label={reviewerEventLabel(item.status, item.is_overdue)} />
+      <Typography variant="body2" sx={{ flex: 1 }}>
+        {item.doc_name}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        {formatDateTime(item.submit_date)}
+      </Typography>
+      {pending && (
+        <Button size="small" variant="outlined" onClick={() => navigate("/dm/review")}>
+          前往簽核中心
+        </Button>
+      )}
+    </Box>
   )
 }
 

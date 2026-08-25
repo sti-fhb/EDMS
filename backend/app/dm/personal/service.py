@@ -1,8 +1,12 @@
 """個人專區服務（US9 / UCDM09 / DM07）。
 
-三塊 DM 業務：草稿匣（三類 + 刪除）、撤回送審（狀態回復 + 站內訊息通知原審核者）、我的文件動態（近 30 天、
-角色視角）。撤回 orchestration 重用 `ReviewService.withdraw`（僅翻 DM_REVIEW 狀態）+ `ReviewCenterRepository`
-之版本 / 文件狀態回復（比照 US6 reject / US8 廢止退回）。個資維護不在本模組（平台 DP UCDP004）。
+三塊 DM 業務：草稿匣（三類 + 刪除）、撤回送審（狀態回復）、我的文件動態（近 30 天、角色視角）。撤回
+orchestration 重用 `ReviewService.withdraw`（僅翻 DM_REVIEW 狀態）+ `ReviewCenterRepository` 之版本 /
+文件狀態回復（比照 US6 reject / US8 廢止退回）。
+
+**撤回之「站內訊息通知原審核者」**：由原審核者之「我的文件動態」（審核者視角『已撤回』）呈現——平台 MSG 頻道
+不寄 Email、亦不寫 outbox（DmNotifier docstring）；故本服務不主動呼叫通知接線（避免撤回因通知範本問題而崩，
+且無實質遞送效果）。`SUBMIT_WITHDRAWN` 範本已 seed 供未來站內訊息佇列使用。個資維護不在本模組（平台 DP UCDP004）。
 """
 
 from datetime import timedelta
@@ -12,11 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.dm.notify.service import DmNotifier
 from app.dm.personal.repository import PersonalRepository
 from app.dm.personal.schemas import ActivityItem, ActivityResponse, DraftItem, WithdrawResult
 from app.dm.review.repository import ReviewCenterRepository
 from app.dm.review.service import ReviewService
+from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, has_role
 from app.services import AuditLogService, ParamService
 
 _NEW = "NEW"
@@ -51,14 +55,12 @@ class PersonalService:
         repository: PersonalRepository | None = None,
         review_repo: ReviewCenterRepository | None = None,
         reviews: ReviewService | None = None,
-        notifier: DmNotifier | None = None,
         audit: AuditLogService | None = None,
         params: ParamService | None = None,
     ) -> None:
         self._repo = repository or PersonalRepository()
         self._review_repo = review_repo or ReviewCenterRepository()
         self._reviews = reviews or ReviewService()
-        self._notifier = notifier or DmNotifier()
         self._audit = audit or AuditLogService()
         self._params = params or ParamService()
 
@@ -160,52 +162,30 @@ class PersonalService:
             target_id=review.doc_id,
             after_value={"review_id": review_id, "operation": "WITHDRAW", "review_type": review.review_type},
         )
-        await self._notify_withdrawn(
-            db,
-            reviewer_id=review.assigned_reviewer,
-            author_id=review.created_user,
-            doc_name=doc.doc_name if doc is not None else review.doc_id,
-        )
+        # 站內訊息通知原審核者：不主動呼叫通知接線——平台 MSG 頻道不寄 Email / 不寫 outbox，且若範本未 seed
+        # 會使 send_email raise（撤回不應因通知而崩）。通知以原審核者之「我的文件動態」（審核者視角『已撤回』）呈現。
         return WithdrawResult(review_id=review_id, doc_status=doc_status)
-
-    async def _notify_withdrawn(self, db: AsyncSession, *, reviewer_id: str, author_id: str, doc_name: str) -> None:
-        """觸發撤回通知事件（SUBMIT_WITHDRAWN，CHANNEL=MSG，對齊 AUTO_REMIND 之 MSG 事件慣例）。
-
-        **實質站內訊息由原審核者之「我的文件動態」（審核者視角 WITHDRAWN）呈現**——平台 `send_email` 對
-        MSG 頻道回 `CHANNEL_NOT_EMAIL`、不寫 outbox（不寄 Email）。此呼叫為 forward-compat 事件觸發
-        （未來若平台實作站內訊息佇列即自動生效）；params key 對齊範本佔位（reviewer_name / author_name / doc_name）。
-        """
-        reviewer = await self._review_repo.get_user_name_email(db, reviewer_id)
-        if reviewer is None or not reviewer.email:
-            return
-        author = await self._review_repo.get_user_name_email(db, author_id)
-        await self._notifier.notify(
-            db,
-            template_code="SUBMIT_WITHDRAWN",
-            recipients=[reviewer.email],
-            params={
-                "reviewer_name": reviewer.user_name,
-                "author_name": author.user_name if author else author_id,
-                "doc_name": doc_name,
-            },
-        )
 
     # ── 我的文件動態 ────────────────────────────────────
 
-    async def list_activity(self, db: AsyncSession, *, user_id: str) -> ActivityResponse:
-        """近 30 天送審事件（撰寫者 / 審核者視角；兼具兩角色者兩清單皆有值）。
+    async def list_activity(self, db: AsyncSession, *, user_id: str, roles: list[str]) -> ActivityResponse:
+        """近 30 天送審事件——**依當下角色呈現視角**：具編輯者才回撰寫者視角、具審核者才回審核者視角
+        （曾具但當下已無該角色者不呈現對應視角）。
 
         PENDING 項計算停留天數 + 是否逾催辦門檻（`DM_REMIND_THRESHOLD`）——審核者視角據此顯「催辦中」（AC5）。
         """
         now = utcnow()
         since = now - timedelta(days=_ACTIVITY_DAYS)
         threshold = await self._params.get_int_param(db, "DM_REMIND_THRESHOLD", "VALUE", _REMIND_THRESHOLD_DEFAULT)
-        author_rows = await self._repo.list_author_activity(db, user_id, since)
-        reviewer_rows = await self._repo.list_reviewer_activity(db, user_id, since)
-        return ActivityResponse(
-            author=[self._to_activity(r, now=now, threshold=threshold) for r in author_rows],
-            reviewer=[self._to_activity(r, now=now, threshold=threshold) for r in reviewer_rows],
-        )
+        author: list[ActivityItem] = []
+        reviewer: list[ActivityItem] = []
+        if has_role(roles, DM_EDITOR):
+            rows = await self._repo.list_author_activity(db, user_id, since)
+            author = [self._to_activity(r, now=now, threshold=threshold) for r in rows]
+        if has_role(roles, DM_REVIEWER):
+            rows = await self._repo.list_reviewer_activity(db, user_id, since)
+            reviewer = [self._to_activity(r, now=now, threshold=threshold) for r in rows]
+        return ActivityResponse(author=author, reviewer=reviewer)
 
     @staticmethod
     def _to_activity(r, *, now, threshold: int) -> ActivityItem:

@@ -49,8 +49,8 @@ async def list_activity(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ) -> ActivityResponse:
-    """我的文件動態（FR-003）：近 30 天事件，撰寫者 / 審核者視角。"""
-    return await _service.list_activity(db, user_id=ctx.user_id)
+    """我的文件動態（FR-003）：近 30 天事件，依當下角色呈現撰寫者 / 審核者視角。"""
+    return await _service.list_activity(db, user_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.post("/reviews/{review_id}/withdraw", response_model=WithdrawResult)

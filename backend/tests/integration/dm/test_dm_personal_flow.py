@@ -19,7 +19,7 @@ from app.core.utils import utcnow
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.personal.service import PersonalService
 from app.dm.review.models import DmReview
-from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, DM_VIEWER
+from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.users.models import DpUser
 
@@ -139,6 +139,27 @@ async def test_drafts_only_own_and_not_deleted(db):
     assert all(d.doc_id != "DM-SOP-000504" for d in drafts)
 
 
+async def test_drafts_exclude_obsolete_parent(db):
+    # #1：父文件已廢止(OBSOLETE)之孤兒草稿 → 草稿匣不顯示（不主動刪）
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, "DM-SOP-000505", status="OBSOLETE")
+    await _version(db, "DM-SOP-000505", "2.0", status="DRAFT")  # 廢止前編到一半的新版草稿
+    drafts = await _svc.list_drafts(db, user_id="ed")
+    assert all(d.doc_id != "DM-SOP-000505" for d in drafts)
+
+
+async def test_deleted_draft_releases_unique_slot(db):
+    # #6：軟刪草稿後，同文件同人可再開新草稿（唯一索引已排除 DELETED=1）
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, "DM-SOP-000506", status="DRAFT")
+    v = await _version(db, "DM-SOP-000506", "1.0", status="DRAFT")
+    await _svc.delete_draft(db, version_id=v.version_id, op=_op("ed"))
+    # 再開一份同文件同人之 DRAFT 版本 → 不應撞唯一索引（flush 不拋 IntegrityError）
+    await _version(db, "DM-SOP-000506", "1.1", status="DRAFT")
+    drafts = await _svc.list_drafts(db, user_id="ed")
+    assert len([d for d in drafts if d.doc_id == "DM-SOP-000506"]) == 1  # 只剩新的（軟刪的不列）
+
+
 # ── 刪除草稿 ────────────────────────────────────────
 
 
@@ -190,7 +211,7 @@ async def test_withdraw_new_restores_draft_and_notifies_via_activity(db):
     assert rev.status == "WITHDRAWN" and rev.assigned_reviewer == "rev1"  # 保留原審核者
     assert result.doc_status == "DRAFT"
     # 原審核者於個人專區「我的文件動態」（審核者視角）見此已撤回項目＝站內訊息之呈現
-    rev_act = await _svc.list_activity(db, user_id="rev1")
+    rev_act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
     assert any(a.review_id == r.review_id and a.status == "WITHDRAWN" for a in rev_act.reviewer)
 
 
@@ -256,10 +277,32 @@ async def test_activity_author_and_reviewer_views(db):
     v = await _version(db, "DM-SOP-000531", "1.0", status="PENDING_REVIEW")
     await _review(db, "DM-SOP-000531", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1", author="ed")
 
-    ed_act = await _svc.list_activity(db, user_id="ed")
-    rev_act = await _svc.list_activity(db, user_id="rev1")
+    ed_act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    rev_act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
     assert any(a.doc_id == "DM-SOP-000531" for a in ed_act.author) and ed_act.reviewer == []
     assert any(a.doc_id == "DM-SOP-000531" for a in rev_act.reviewer) and rev_act.author == []
+
+
+async def test_activity_gated_by_current_roles(db):
+    # #2：依當下角色呈現視角——曾當編輯者(有 author 資料)但當下只有審核者角色 → 不呈現撰寫者視角
+    await _seed_user(db, "u", "曾編輯今審核")
+    await _doc(db, "DM-SOP-000535", status="PENDING_REVIEW")
+    v = await _version(db, "DM-SOP-000535", "1.0", status="PENDING_REVIEW", author="u")
+    # u 既是該送審撰寫者、也是別人送審的指派審核者
+    await _review(db, "DM-SOP-000535", v.version_id, review_type="NEW", status="PENDING", reviewer="rev9", author="u")
+    await _doc(db, "DM-SOP-000536", status="PENDING_REVIEW")
+    v2 = await _version(db, "DM-SOP-000536", "1.0", status="PENDING_REVIEW", author="ed9")
+    await _review(db, "DM-SOP-000536", v2.version_id, review_type="NEW", status="PENDING", reviewer="u", author="ed9")
+
+    # 只有審核者角色 → 只回審核者視角（雖有 author 歷史資料）
+    only_reviewer = await _svc.list_activity(db, user_id="u", roles=[DM_REVIEWER])
+    assert only_reviewer.author == [] and len(only_reviewer.reviewer) >= 1
+    # 只有編輯者角色 → 只回撰寫者視角
+    only_editor = await _svc.list_activity(db, user_id="u", roles=[DM_EDITOR])
+    assert only_editor.reviewer == [] and len(only_editor.author) >= 1
+    # 兩角色皆有 → 兩視角皆呈現
+    both = await _svc.list_activity(db, user_id="u", roles=[DM_EDITOR, DM_REVIEWER])
+    assert len(both.author) >= 1 and len(both.reviewer) >= 1
 
 
 async def test_reviewer_activity_marks_overdue(db):
@@ -271,7 +314,7 @@ async def test_reviewer_activity_marks_overdue(db):
     r = await _review(
         db, "DM-SOP-000533", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1", submit=old
     )
-    act = await _svc.list_activity(db, user_id="rev1")
+    act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
     item = next(a for a in act.reviewer if a.review_id == r.review_id)
     assert item.is_overdue is True and item.waiting_days >= 7
 
@@ -281,7 +324,7 @@ async def test_reviewer_activity_recent_pending_not_overdue(db):
     await _doc(db, "DM-SOP-000534", status="PENDING_REVIEW")
     v = await _version(db, "DM-SOP-000534", "1.0", status="PENDING_REVIEW")
     r = await _review(db, "DM-SOP-000534", v.version_id, review_type="NEW", status="PENDING", reviewer="rev1")
-    act = await _svc.list_activity(db, user_id="rev1")
+    act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
     item = next(a for a in act.reviewer if a.review_id == r.review_id)
     assert item.is_overdue is False
 
@@ -295,7 +338,7 @@ async def test_activity_excludes_older_than_30_days(db):
     await _review(
         db, "DM-SOP-000532", v.version_id, review_type="NEW", status="APPROVED", author="ed", submit=old, complete=old
     )
-    act = await _svc.list_activity(db, user_id="ed")
+    act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
     assert all(a.doc_id != "DM-SOP-000532" for a in act.author)
 
 
