@@ -676,7 +676,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 **後端**（新 `app/dm/personal/` 或延伸 editor/review，router → service → repository）：
 - **T050 草稿匣**（FR-001）：`GET` 列該使用者之 DRAFT 版本，分三類——**未送審**（從未有送審紀錄之 DRAFT）/ **被退回**（最近一次 `DM_REVIEW` 為 REJECTED 後回 DRAFT）/ **已撤回**（最近一次 `DM_REVIEW` 為 WITHDRAWN 後回 DRAFT）；三類判定依 `DM_REVIEW` 歷史（非單看版本狀態，因三類版本皆 DRAFT）。刪除＝軟刪 `DELETED=1`（須確認、僅草稿版本、不影響已發布）。
-- **T051 撤回送審**（FR-002）：`POST /api/dm/reviews/{review_id}/withdraw`（限撰寫者本人）→ 重用 `ReviewService.withdraw`（PENDING→WITHDRAWN）；依 `review_type` 回復——NEW / NEW_VERSION → 版本回 DRAFT（首版文件亦回 DRAFT）、OBSOLETE → 文件回 PUBLISHED；**站內訊息**（MSG-only）通知原指派審核者；原 `ASSIGNED_REVIEWER` 保留不改寫；撤回後可經 US5 改選新審核者再送。
+- **T051 撤回送審**（FR-002）：`POST /api/dm/reviews/{review_id}/withdraw`（限撰寫者本人）→ 重用 `ReviewService.withdraw`（PENDING→WITHDRAWN）；依 `review_type` 回復——NEW / NEW_VERSION → 版本回 DRAFT（首版文件亦回 DRAFT）、OBSOLETE → 文件回 PUBLISHED；**站內訊息**通知原指派審核者（範本 `SUBMIT_WITHDRAWN`、CHANNEL=MSG_ONLY、不發 Email；**本 issue 需新增此範本之 seed migration**）；原 `ASSIGNED_REVIEWER` 保留不改寫；撤回後可經 US5 改選新審核者再送。
 - **T052 我的文件動態**（FR-003）：`GET` 近 30 天事件，依角色（撰寫者 / 審核者）分視角回傳；資料來源 `DM_REVIEW` / `DM_CHANGE_LOG` / `DM_DOC_VERSION`。**入口可見性**（FR-004）：後端提供「具編輯者或審核者」判定（供 DP 依權限側欄 `has_any_role` 回呼 / 前端渲染）。
 - 存取：掛 `get_dm_context`；撤回 / 草稿刪除為寫入型（`get_operator` + 本人校驗 + 稽核）。
 
@@ -704,9 +704,9 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ## 注意事項
 
 - ⚠️ **個資維護不在本 US**（T049 已廢除）：姓名 / Email / 密碼由平台 DP UCDP004（右上使用者選單、共用 `DP_USER`）提供，DM 不自建。
-- **撤回站內訊息管道**：spec 明示「系統內訊息、**不發 Email**」；對應通知範本 / 管道落點待 `/sti-plan` 確認（`data-model` 通知事件表目前無「撤回」事件，需確認採 MSG-only 既有範本或新增）。
+- **撤回站內訊息管道（已定案，precheck 必補）**：新增通知範本 **`SUBMIT_WITHDRAWN`**（CHANNEL=MSG_ONLY、對象＝原指派審核者、不發 Email），已補列 `data-model` 通知事件表（10 項）；**本 issue 實作需新增對應 seed migration**（比照 #127 之 `dm_seed_templates_params_into_dp`）。
 - **撤回 vs 退回**：撤回為**撰寫者主動**（WITHDRAWN）、退回為**審核者**（REJECTED）——兩者皆使版本回 DRAFT，但 `DM_REVIEW` 終態不同；草稿匣三類分類即依此區分（被退回 vs 已撤回）。
-- **草稿三類分類依 `DM_REVIEW` 歷史**（非單看版本狀態，三類版本皆 DRAFT）；判定邏輯待 `/sti-plan` 定。
+- **草稿三類分類依 `DM_REVIEW` 歷史（已定於 spec_us9 FR-001）**：未送審＝無對應送審紀錄；被退回＝最近一次送審 `REJECTED`；已撤回＝最近一次送審 `WITHDRAWN`（三類版本皆 DRAFT，不能單看版本狀態）。
 - 入口可見性由前端依「具編輯者或審核者」渲染；與 US7 widget（任一 DM 角色）之可見條件不同，勿混用。
 
 ## 相關文件
@@ -808,3 +808,4 @@ US13 閱讀統計與 KPI + 排程 SCHDM001（#12）/ 整合測試 + 安全 + 收
 | 2026-08-24 | Issue #7（US8 文件廢止申請）開立為 GitHub [#206](https://github.com/sti-fhb/EDMS/issues/206)（labels `P2-延伸` + `DM-文件管理` + `US8`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #7 canonical 內容（連結轉 `../blob/main/` 形式、`OBS_*` 範本已 seed 補註、結尾 `Refs #178` 不自動關閉 US6）|
 | 2026-08-24 | US8（#206）交付並 close（PR #210 squash 合併 main `074298f`）：發起端點 `app/dm/obsolete/` + 延伸簽核中心 OBSOLETE 核准/退回（解除 `DM_REVIEW_006`）+ 廢止附件下載（授權 SA 裁示 **Q1=C**：僅 DM_ADMIN 或指定審核者、發起人不可）+ 前端 DM02 廢止 dialog / DM04 廢止明細；新增 error codes `DM_DOC_014/015/016`。Code review 抓到並修正 CRITICAL（`OBS_*` 通知 params key `author_name`→`applicant_name` + 補 `reason`，原致空信 FAILED）；SA 裁示 **Q2=A**（廢止 banner 承載紀錄、不插版本列）。security review 之 M1/M2/M3/L1（上傳/送審共用層加固）另開 follow-up **#211**。總覽 Issue #7 → ✅ 已交付。**順帶回填**：Issue #6（US7）狀態由「開發中」更正為 ✅ 已交付（PR #195，#193 已 close）|
 | 2026-08-24 | 撰寫 Issue #8（US9 個人專區 / UCDM09 / DM07）完整 body：對應 spec_us9 FR-001~004 + 訊息 DM-MSG-DM07-004/005；涵蓋 T050（草稿匣三類：未送審/被退回/已撤回）/ T051（撤回送審：NEW·NEW_VERSION→草稿、OBSOLETE→已發布、站內訊息通知原審核者、保留原審核者紀錄、改選再送）/ T052（我的文件動態角色 tab 近 30 天 + 個人專區入口可見性：僅編輯者或審核者）。**T049 個資維護已廢除**（平台 DP UCDP004，不自建）。**重用** `ReviewService.withdraw`（PENDING→WITHDRAWN，已存在）、US5 草稿續編/刪除、依權限側欄（#89）。**待 plan**：撤回站內訊息之通知範本/管道（data-model 通知事件表無「撤回」事件，採 MSG-only 既有或新增）、草稿三類分類依 `DM_REVIEW` 歷史之判定邏輯。Labels `P2-延伸` + `DM-文件管理` + `US9`。總覽 Issue #8 → 「📝 body 已撰寫（待開立）」；placeholder 收斂為 #9~#10 |
+| 2026-08-24 | US9 交付前自檢（`/sti-sa-precheck dm us9`）**1 必補**：FR-002 撤回要求「站內訊息通知原指派審核者」，但 data-model 通知事件表（9 項）**無撤回事件**、Foundation 亦未 seed → SD 無 template_code 可用。修正：新增 **`SUBMIT_WITHDRAWN`**（CHANNEL=MSG_ONLY、對象原指派審核者）至 data-model 通知事件表（→10 項）+ 集中化清單；spec_us9 FR-002 引用之、FR-001 補草稿三類判定規則（未送審=無 review / 被退回=最近 REJECTED / 已撤回=最近 WITHDRAWN）；issues.md #8 body 同步（T051 註明需 seed migration、注意事項兩項「待 plan」改為已定案）。實作時（T051）新增 `SUBMIT_WITHDRAWN` seed migration。修正折入 #218（issues.md body PR）同批 |
