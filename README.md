@@ -181,7 +181,11 @@ pnpm dev
 
 ---
 
-## Docker 部署
+## Docker 部署（規劃中，尚未實作）
+
+> ⚠️ **EDMS 尚未建立 Dockerfile 與 compose 檔**，本章指令目前無法執行。
+> 內容自 TBMS 移植，保留作為日後建置容器映像檔時的規格依據；待實際落地後移除本標記即可。
+> **現行啟動方式見上方「啟動開發環境」。**
 
 ### 架構總覽
 
@@ -207,10 +211,10 @@ pnpm dev
 | `edms-backend` | python:3.12-slim + uv | FastAPI 後端 API |
 | `edms-db` | postgres:17 | PostgreSQL 資料庫（與 DM 共用 user table）|
 
-### 本機 Docker 開發
+### 本機 Docker 開發（預定流程）
 
 ```bash
-# 1. 複製環境變數
+# 1. 複製環境變數（.env.example 待建立）
 cp .env.example .env.local
 
 # 2. 編輯 .env.local，填入 POSTGRES_PASSWORD、JWT_SECRET_KEY、SMTP_*
@@ -226,7 +230,11 @@ docker compose exec edms-backend uv run alembic upgrade head
 - 後端 API：`http://localhost:8001`
 - PostgreSQL：`localhost:5441`（避免與 TBMS 5440、本機 5432 衝突）
 
-### 正式部署：client IP 與限流前提
+---
+
+## 正式部署：client IP 與限流前提
+
+> 本節**與 Docker 無關、現在即適用**：任何反向代理後方的部署都須依此設定。
 
 反向代理後方部署時，client IP 的可信度是**速率限制與稽核日誌的前提**：`X-Forwarded-For`
 可被用戶端偽造，偽造即可繞過 IP 維度限流（密碼噴灑）並污染稽核來源。應用預設完全忽略
