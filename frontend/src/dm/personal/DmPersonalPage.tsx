@@ -17,11 +17,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-import type { ActivityEvent, DraftItem } from "./schemas"
+import type { ActivityEvent, DraftItem, ObsoleteNotice } from "./schemas"
 import {
   DRAFT_KIND_LABELS,
   REVIEW_TYPE_LABELS,
   authorEventLabel,
+  obsoleteNoticeLabel,
   reviewerEventLabel,
 } from "./schemas"
 import { personalApi } from "./personalService"
@@ -72,7 +73,8 @@ function ActivityTab() {
 
   const hasAuthor = data.author.length > 0
   const hasReviewer = data.reviewer.length > 0
-  if (!hasAuthor && !hasReviewer) return <Alert severity="info">近 30 天無文件動態。</Alert>
+  const hasNotices = data.obsolete_notices.length > 0
+  if (!hasAuthor && !hasReviewer && !hasNotices) return <Alert severity="info">近 30 天無文件動態。</Alert>
 
   return (
     <Stack spacing={2}>
@@ -94,9 +96,13 @@ function ActivityTab() {
           perspective="reviewer"
         />
       )}
+      {hasNotices && <ObsoleteNoticesSection notices={data.obsolete_notices} />}
     </Stack>
   )
 }
+
+// 兩視角表格共用欄寬（fixed layout），確保撰寫者 / 審核者兩表欄位上下對齊
+const ACTIVITY_COLS = ["34%", "10%", "14%", "16%", "16%", "10%"]
 
 function ActivitySection({
   title,
@@ -119,7 +125,12 @@ function ActivitySection({
         {title}
       </Typography>
       <Box sx={{ overflowX: "auto" }}>
-        <Table size="small">
+        <Table size="small" sx={{ tableLayout: "fixed", minWidth: 720 }}>
+          <colgroup>
+            {ACTIVITY_COLS.map((w, i) => (
+              <col key={i} style={{ width: w }} />
+            ))}
+          </colgroup>
           <TableHead>
             <TableRow>
               <TableCell>文件名稱</TableCell>
@@ -196,6 +207,50 @@ function ActivityRow({
         {!actionable && "—"}
       </TableCell>
     </TableRow>
+  )
+}
+
+// ── 文件廢止通知（他人發起，與送審歷程分開）──────────────
+
+function ObsoleteNoticesSection({ notices }: { notices: ObsoleteNotice[] }) {
+  return (
+    <Paper sx={{ p: 2 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+        文件廢止通知（近 30 天）
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+        以下文件由他人發起廢止，您在該文件有版本 / 草稿。
+      </Typography>
+      <Box sx={{ overflowX: "auto" }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>文件名稱</TableCell>
+              <TableCell>狀態</TableCell>
+              <TableCell>廢止發起人</TableCell>
+              <TableCell>審核者</TableCell>
+              <TableCell>時間</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {notices.map((n) => {
+              const label = obsoleteNoticeLabel(n.status)
+              return (
+                <TableRow key={n.review_id}>
+                  <TableCell>{n.doc_name}</TableCell>
+                  <TableCell>
+                    <Chip size="small" color={label.tone} label={label.text} />
+                  </TableCell>
+                  <TableCell>{n.initiator_name ?? "—"}</TableCell>
+                  <TableCell>{n.reviewer_name ?? "—"}</TableCell>
+                  <TableCell>{formatDateTime(n.event_time)}</TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </Box>
+    </Paper>
   )
 }
 

@@ -371,6 +371,17 @@ export const handlers = [
           party_name: "陳送審",
         },
       ],
+      obsolete_notices: [
+        {
+          review_id: 901,
+          doc_id: "DM-SOP-000099",
+          doc_name: "他人廢止的文件 C",
+          status: "APPROVED",
+          initiator_name: "李發起",
+          reviewer_name: "王審核",
+          event_time: "2026-08-21T09:00:00Z",
+        },
+      ],
     }),
   ),
   http.post("/api/dm/reviews/:reviewId/withdraw", ({ params }) =>

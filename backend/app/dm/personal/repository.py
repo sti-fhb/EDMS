@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
@@ -14,6 +14,10 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，�
 
 _DRAFT = "DRAFT"
 _OBSOLETE = "OBSOLETE"
+_PENDING = "PENDING"
+_APPROVED = "APPROVED"
+_PENDING_OBSOLETE = "PENDING_OBSOLETE"
+_HIDDEN_PARENT_STATUSES = (_OBSOLETE, _PENDING_OBSOLETE)  # 廢止待簽核 / 已廢止之文件其孤兒草稿不列草稿匣
 
 
 class PersonalRepository:
@@ -50,7 +54,9 @@ class PersonalRepository:
                 DmDocVersion.created_user == user_id,
                 DmDocVersion.status == _DRAFT,
                 DmDocVersion.deleted == 0,
-                DmDocument.status != _OBSOLETE,  # 已廢止文件之孤兒草稿不顯示（#1；不主動刪，資料保留）
+                # 已廢止 / 廢止待簽核之文件其孤兒草稿不顯示（#1；不主動刪、資料保留；廢止若被退回、
+                # 文件回 PUBLISHED，草稿即重新出現）。廢止過程改於「文件廢止通知」呈現含發起人。
+                DmDocument.status.notin_(_HIDDEN_PARENT_STATUSES),
             )
             # 排序鍵以「最後異動」為準，未編輯過（updated_date NULL）之新草稿退回 created_date，避免排最後
             .order_by(
@@ -89,26 +95,14 @@ class PersonalRepository:
         )
 
     async def list_author_activity(self, db: AsyncSession, user_id: str, since: datetime) -> list[Row]:
-        """撰寫者視角近 30 天狀態變動事件。
+        """撰寫者視角近 30 天狀態變動事件——僅本人送出之送審（created_user＝我；含本人自行發起之廢止）。
 
-        涵蓋：(1) 本人送出之送審（created_user＝我）；(2) 本人有版本之文件被「廢止」之送審——
-        即使廢止非本人發起，也讓我看到「該文件已廢止」（#4：已廢止孤兒草稿於草稿匣隱藏，動態補上該訊息）。
-        對造人 party_name＝指定審核者姓名。
+        本人「未發起」但被他人廢止之文件不混入此處（避免看起來像自己發起廢止），改於獨立之
+        「文件廢止通知」呈現並標明發起人（見 list_obsolete_notices）。對造人 party_name＝指定審核者姓名。
         """
-        my_docs = (
-            select(DmDocVersion.doc_id)
-            .where(DmDocVersion.created_user == user_id, DmDocVersion.deleted == 0)
-            .scalar_subquery()
-        )
-        stmt = (
-            self._activity_select(party_col=DmReview.assigned_reviewer)
-            .where(
-                or_(
-                    DmReview.created_user == user_id,
-                    and_(DmReview.review_type == _OBSOLETE, DmReview.doc_id.in_(my_docs)),
-                ),
-                or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
-            )
+        stmt = self._activity_select(party_col=DmReview.assigned_reviewer).where(
+            DmReview.created_user == user_id,
+            or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
         )
         return list((await db.execute(stmt)).all())
 
@@ -117,5 +111,43 @@ class PersonalRepository:
         stmt = self._activity_select(party_col=DmReview.created_user).where(
             DmReview.assigned_reviewer == user_id,
             or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
+        )
+        return list((await db.execute(stmt)).all())
+
+    async def list_obsolete_notices(self, db: AsyncSession, user_id: str, since: datetime) -> list[Row]:
+        """他人對「本人有版本之文件」發起之廢止（近 30 天）——供「文件廢止通知」呈現，明示發起人。
+
+        排除本人自行發起之廢止（那屬撰寫者視角送審歷程）。回發起人 initiator_name（created_user）
+        與審核者 reviewer_name（assigned_reviewer）姓名。時間新→舊由 service 端統一處理。
+        """
+        my_docs = (
+            select(DmDocVersion.doc_id)
+            .where(DmDocVersion.created_user == user_id, DmDocVersion.deleted == 0)
+            .scalar_subquery()
+        )
+        initiator = aliased(DpUser)
+        reviewer = aliased(DpUser)
+        stmt = (
+            select(
+                DmReview.review_id,
+                DmReview.doc_id,
+                DmReview.status,
+                DmReview.submit_date,
+                DmReview.complete_date,
+                DmDocument.doc_name,
+                initiator.user_name.label("initiator_name"),
+                reviewer.user_name.label("reviewer_name"),
+            )
+            .join(DmDocument, (DmReview.doc_id == DmDocument.doc_id) & (DmDocument.deleted == 0))
+            .outerjoin(initiator, DmReview.created_user == initiator.user_id)
+            .outerjoin(reviewer, DmReview.assigned_reviewer == reviewer.user_id)
+            .where(
+                DmReview.review_type == _OBSOLETE,
+                DmReview.created_user != user_id,  # 本人發起者屬撰寫者視角，不重複
+                DmReview.doc_id.in_(my_docs),
+                # 僅廢止待簽核 / 已廢止才通知；退回 / 撤回代表文件回 PUBLISHED、草稿亦回草稿匣，無需通知
+                DmReview.status.in_((_PENDING, _APPROVED)),
+                or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
+            )
         )
         return list((await db.execute(stmt)).all())

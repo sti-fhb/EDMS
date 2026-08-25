@@ -17,7 +17,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.personal.repository import PersonalRepository
-from app.dm.personal.schemas import ActivityEvent, ActivityResponse, DraftItem, WithdrawResult
+from app.dm.personal.schemas import ActivityEvent, ActivityResponse, DraftItem, ObsoleteNotice, WithdrawResult
 from app.dm.review.repository import ReviewCenterRepository
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, has_role
@@ -174,30 +174,57 @@ class PersonalService:
         """近 30 天「狀態變動歷程」——**依當下角色呈現視角**：具編輯者才回撰寫者視角、具審核者才回審核者視角
         （曾具但當下已無該角色者不呈現對應視角）。
 
-        每一次送審週期依進度展開為多筆事件：送審（submitted，@送審時間）→ 若已完成再加一筆結果
-        （resolved：核准 / 退回 / 撤回，@完成時間），時間新→舊排序，讓「送審 → 退回 / 發布」全程可見（#5）。
+        撰寫者視角展開全程：送審（submitted，@送審時間）→ 若已完成再加結果（resolved：核准 / 退回 / 撤回，
+        @完成時間），讓「送審 → 退回 / 發布」全程可見（#5）。審核者視角則只呈現「當前待辦或最終結果」一列
+        （待處理 / 催辦中 / 已核准 / 已退回 / 已被撤回）——不另列已完成項之歷史「收到送審」，避免與結果重複造成困惑。
         PENDING 之送審事件計是否逾催辦門檻（`DM_REMIND_THRESHOLD`）——審核者視角據此顯「催辦中」（AC5）。
+        另回「文件廢止通知」：他人對本人有版本之文件發起之廢止，明示發起人、與送審歷程分開（見 list_obsolete_notices）。
         """
         now = utcnow()
         since = now - timedelta(days=_ACTIVITY_DAYS)
         threshold = await self._params.get_int_param(db, "DM_REMIND_THRESHOLD", "VALUE", _REMIND_THRESHOLD_DEFAULT)
         author: list[ActivityEvent] = []
         reviewer: list[ActivityEvent] = []
+        obsolete_notices: list[ObsoleteNotice] = []
         if has_role(roles, DM_EDITOR):
             rows = await self._repo.list_author_activity(db, user_id, since)
-            author = self._build_events(rows, since=since, now=now, threshold=threshold)
+            author = self._build_events(rows, since=since, now=now, threshold=threshold, keep_submitted_history=True)
+            notice_rows = await self._repo.list_obsolete_notices(db, user_id, since)
+            obsolete_notices = sorted(
+                (self._to_notice(r) for r in notice_rows), key=lambda n: n.event_time, reverse=True
+            )
         if has_role(roles, DM_REVIEWER):
             rows = await self._repo.list_reviewer_activity(db, user_id, since)
-            reviewer = self._build_events(rows, since=since, now=now, threshold=threshold)
-        return ActivityResponse(author=author, reviewer=reviewer)
+            # 審核者視角：不保留已完成項之歷史送審列（僅待辦 PENDING 顯「待處理 / 催辦中」，完成顯結果）
+            reviewer = self._build_events(rows, since=since, now=now, threshold=threshold, keep_submitted_history=False)
+        return ActivityResponse(author=author, reviewer=reviewer, obsolete_notices=obsolete_notices)
 
     @staticmethod
-    def _build_events(rows, *, since, now, threshold: int) -> list[ActivityEvent]:
-        """把送審週期列展開為狀態變動事件，過濾近 30 天內，時間新→舊排序。"""
+    def _to_notice(r) -> ObsoleteNotice:
+        """廢止通知列 → schema；PENDING 取送審時間、已完成取完成時間。"""
+        event_time = r.complete_date if (r.status in _TERMINAL and r.complete_date is not None) else r.submit_date
+        return ObsoleteNotice(
+            review_id=r.review_id,
+            doc_id=r.doc_id,
+            doc_name=r.doc_name,
+            status=r.status,
+            initiator_name=r.initiator_name,
+            reviewer_name=r.reviewer_name,
+            event_time=event_time,
+        )
+
+    @staticmethod
+    def _build_events(rows, *, since, now, threshold: int, keep_submitted_history: bool) -> list[ActivityEvent]:
+        """把送審週期列展開為狀態變動事件，過濾近 30 天內，時間新→舊排序。
+
+        keep_submitted_history=False（審核者視角）時，已完成項不產生歷史「送審」列——僅 PENDING 產生待辦列，
+        完成項只留結果列，一次送審在審核者視角至多一列。
+        """
         events: list[ActivityEvent] = []
         for r in rows:
             overdue = r.status == _PENDING and (now - r.submit_date).days >= threshold
-            if r.submit_date >= since:  # 送審 / 發起廢止事件
+            emit_submitted = r.submit_date >= since and (keep_submitted_history or r.status == _PENDING)
+            if emit_submitted:  # 送審 / 發起廢止事件
                 events.append(
                     ActivityEvent(
                         review_id=r.review_id,

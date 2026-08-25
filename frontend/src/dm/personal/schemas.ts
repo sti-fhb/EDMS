@@ -32,9 +32,21 @@ export interface ActivityEvent {
   party_name: string | null // 撰寫者視角＝指定審核者；審核者視角＝送審者
 }
 
+/** 文件廢止通知一筆（他人對本人有版本之文件發起廢止）。 */
+export interface ObsoleteNotice {
+  review_id: number
+  doc_id: string
+  doc_name: string
+  status: string // PENDING（廢止待簽核）/ APPROVED（已廢止）
+  initiator_name: string | null // 廢止發起人
+  reviewer_name: string | null // 廢止審核者
+  event_time: string
+}
+
 export interface ActivityResponse {
   author: ActivityEvent[]
   reviewer: ActivityEvent[]
+  obsolete_notices: ObsoleteNotice[]
 }
 
 export interface PersonalAccess {
@@ -86,10 +98,9 @@ export function authorEventLabel(e: {
 }
 
 /**
- * 審核者視角事件標籤：
- * - 待處理 / 催辦中（submitted 尚 PENDING，逾門檻催辦）
- * - 收到送審 / 收到廢止申請（submitted 且該週期已完成，作為歷程起點）
- * - 已核准 / 已核准廢止 / 已退回 / 已被撤回（resolved）
+ * 審核者視角事件標籤（後端已使審核者視角一次送審至多一列：待辦或最終結果，無歷史「收到送審」列）：
+ * - 待處理 / 待處理（廢止）/ 催辦中（PENDING 待辦）
+ * - 已核准 / 已核准廢止 / 已退回 / 已被撤回（resolved 結果）
  */
 export function reviewerEventLabel(e: {
   review_type: string
@@ -103,10 +114,13 @@ export function reviewerEventLabel(e: {
     if (e.status === "REJECTED") return { text: "已退回", tone: "error" }
     return { text: "已被撤回", tone: "default" } // WITHDRAWN
   }
-  // submitted
-  if (e.status === "PENDING") {
-    if (e.is_overdue) return { text: "催辦中", tone: "error" }
-    return { text: isObsolete ? "待處理（廢止）" : "待處理", tone: "warning" }
-  }
-  return { text: isObsolete ? "收到廢止申請" : "收到送審", tone: "default" }
+  // submitted（審核者視角只有 PENDING 待辦會到這）
+  if (e.is_overdue) return { text: "催辦中", tone: "error" }
+  return { text: isObsolete ? "待處理（廢止）" : "待處理", tone: "warning" }
+}
+
+/** 文件廢止通知狀態標籤（僅廢止待簽核 / 已廢止兩態）。 */
+export function obsoleteNoticeLabel(status: string): EventLabel {
+  if (status === "APPROVED") return { text: "已廢止", tone: "error" }
+  return { text: "廢止待簽核", tone: "warning" } // PENDING
 }

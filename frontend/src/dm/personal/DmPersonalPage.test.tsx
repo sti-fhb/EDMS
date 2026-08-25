@@ -24,6 +24,12 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     // 對造人欄（指定審核者 / 送審者）中文姓名
     expect(screen.getByText("送審者")).toBeInTheDocument() // 審核者視角表頭
     expect(screen.getByText("陳送審")).toBeInTheDocument()
+    // 文件廢止通知：他人發起之廢止獨立呈現，明示發起人（item 3 分開顯示）
+    expect(screen.getByText("文件廢止通知（近 30 天）")).toBeInTheDocument()
+    expect(screen.getByText("他人廢止的文件 C")).toBeInTheDocument()
+    expect(screen.getByText("李發起")).toBeInTheDocument() // 廢止發起人
+    // 審核者視角已完成項不再出現歷史「收到送審」（item 4）
+    expect(screen.queryByText("收到送審")).not.toBeInTheDocument()
   })
 
   it("撤回送審 → 二次確認 → 成功 toast（DM-MSG-DM07-005）", async () => {
