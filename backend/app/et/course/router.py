@@ -32,6 +32,9 @@ from app.et.course.schemas import (
     CourseCreateResult,
     CourseDetail,
     CourseUpdateReq,
+    ItemCreateReq,
+    ItemReorderReq,
+    ItemRow,
     TagOption,
 )
 from app.et.course.service import EtCourseService
@@ -116,7 +119,7 @@ async def delete_course(
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """刪除草稿課程；已發布 / 已關閉者以 `ET_COURSE_006` 擋下（改用 US11 關閉）。"""
+    """刪除草稿課程；已發布 / 已關閉者以 `ET_COURSE_005` 擋下（改用 US11 關閉）。"""
     await _service.delete_draft(db, course_id, operator=operator)
 
 
@@ -163,5 +166,41 @@ async def delete_chapter(
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """刪除章節：本體與其下項目軟刪、學員紀錄硬刪，剩餘章節順序遞補。"""
+    """刪除章節：本體、其下項目與教材 / 測驗內容、學員紀錄**皆軟刪**，剩餘章節順序遞補。"""
     await _service.delete_chapter(db, chapter_id, operator=operator)
+
+
+@router.post(
+    "/chapters/{chapter_id}/items",
+    response_model=ItemRow,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_item(
+    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: ItemCreateReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> ItemRow:
+    """新增章節項目（教材 / 測驗），追加至最末；同交易內建立對應之空殼內容。"""
+    return await _service.add_item(db, chapter_id, req, operator=operator)
+
+
+@router.put("/chapters/{chapter_id}/items/order", status_code=status.HTTP_204_NO_CONTENT)
+async def reorder_items(
+    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: ItemReorderReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """重排章節內項目順序（送完整順序陣列；帶**章節層** `version`）。"""
+    await _service.reorder_items(db, chapter_id, req, operator=operator)
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_item(
+    item_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """刪除章節項目：本體、其教材 / 測驗內容與學員紀錄皆軟刪，剩餘項目順序遞補。"""
+    await _service.delete_item(db, item_id, operator=operator)

@@ -123,6 +123,8 @@
 | ET_COURSE_005 | 422 | 僅草稿課程可刪除，已發布課程請改用關閉 |
 | ET_CHAPTER_001 | 404 | 查無此章節 |
 | ET_CHAPTER_002 | 422 | 重排清單與課程章節不一致 |
+| ET_ITEM_001 | 404 | 查無此章節項目 |
+| ET_ITEM_002 | 422 | 重排清單與章節項目不一致 |
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
 >
