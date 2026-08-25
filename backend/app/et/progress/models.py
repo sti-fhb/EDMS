@@ -97,7 +97,8 @@ class EtProgressVideo(BaseModel):
 
     `COVERAGE_PCT` 為**快取值**（供清單 / 統計快速讀取），權威來源仍為
     `ET_PROGRESS_INTERVAL`：學員離開頁面 normalize 後重算並寫回。上限 100%
-    （重複觀看不加成，區段聯集去重）。影片軟刪除時本表連帶 hard delete。
+    （重複觀看不加成，區段聯集去重）。影片軟刪除時本表**亦連帶軟刪除**
+    （`DELETED=1`；2026-08-24 #202 變更，原為 hard delete）。
     """
 
     __tablename__ = "ET_PROGRESS_VIDEO"

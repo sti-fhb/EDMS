@@ -74,8 +74,8 @@ class EtChapter(BaseModel):
     """章節（ET_CHAPTER）——課程下之順序容器，學員須依序解鎖。
 
     刪除採軟刪除（`DELETED=1`），其下 `ET_ITEM` 連動軟刪除；學員於該章節之
-    `ET_PROGRESS` / `ET_QUIZ_ATTEMPT_M` 則連帶 **hard delete**（軟刪除分流：
-    本體保留供稽核、學員紀錄孤兒化無意義）。
+    `ET_PROGRESS` / `ET_QUIZ_ATTEMPT_M` **亦連帶軟刪除**（`DELETED=1`；2026-08-24 #202 變更，原為 hard delete——刪除章節是編輯已發布課程的常規操作，而學員成績不可重建）。
+    統計時務必排除 `DELETED = 1`（分母以當前有效章節數計）。
     """
 
     __tablename__ = "ET_CHAPTER"
@@ -112,7 +112,15 @@ class EtItem(BaseModel):
     __tablename__ = "ET_ITEM"
     __table_args__ = (
         PrimaryKeyConstraint("ITEM_ID", name="PK_ET_ITEM"),
-        UniqueConstraint("CHAPTER_ID", "SORT_ORDER", name="UQ_ET_ITEM_CHAPTER_ORDER"),
+        # 部分唯一索引：不變量是「**未刪除**之項目間順序不重複」。全表唯一會讓
+        # 已軟刪除的列繼續佔住順序，使刪除後的遞補撞鍵（同 ET_CHAPTER，見 #202）。
+        Index(
+            "UX_ET_ITEM_CHAPTER_ORDER",
+            "CHAPTER_ID",
+            "SORT_ORDER",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
         CheckConstraint(
             '("ITEM_TYPE" = \'MATERIAL\' AND "MATERIAL_ID" IS NOT NULL AND "QUIZ_ID" IS NULL) '
             'OR ("ITEM_TYPE" = \'QUIZ\' AND "QUIZ_ID" IS NOT NULL AND "MATERIAL_ID" IS NULL)',
@@ -163,13 +171,19 @@ class EtMaterialVideo(BaseModel):
     否則該影片覆蓋率永遠算不出、章節永久無法解鎖。
 
     刪除採軟刪除；學員於該影片之 `ET_PROGRESS_VIDEO` / `ET_PROGRESS_INTERVAL`
-    連帶 hard delete。
+    **亦連帶軟刪除**（`DELETED=1`；2026-08-24 #202 變更，原為 hard delete——刪除章節是編輯已發布課程的常規操作，而學員成績不可重建）。
     """
 
     __tablename__ = "ET_MATERIAL_VIDEO"
     __table_args__ = (
         PrimaryKeyConstraint("VIDEO_ID", name="PK_ET_MATERIAL_VIDEO"),
-        UniqueConstraint("MATERIAL_ID", "SORT_ORDER", name="UQ_ET_MATERIAL_VIDEO_ORDER"),
+        Index(
+            "UX_ET_MATERIAL_VIDEO_ORDER",
+            "MATERIAL_ID",
+            "SORT_ORDER",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
     )
 
     video_id: Mapped[int] = mapped_column("VIDEO_ID", BigInteger, Identity(), nullable=False)
@@ -200,7 +214,15 @@ class EtMaterialDoc(BaseModel):
     __tablename__ = "ET_MATERIAL_DOC"
     __table_args__ = (
         PrimaryKeyConstraint("MAT_DOC_ID", name="PK_ET_MATERIAL_DOC"),
-        UniqueConstraint("MATERIAL_ID", "DOC_ID", name="UQ_ET_MATERIAL_DOC_MATERIAL_DOC"),
+        # 部分唯一索引：全表唯一會讓「引用某文件 → 刪除 → 想再引用同一份」永久失敗，
+        # 因已軟刪除的列仍佔住 (MATERIAL_ID, DOC_ID)。
+        Index(
+            "UX_ET_MATERIAL_DOC_MATERIAL_DOC",
+            "MATERIAL_ID",
+            "DOC_ID",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
     )
 
     mat_doc_id: Mapped[int] = mapped_column("MAT_DOC_ID", BigInteger, Identity(), nullable=False)
