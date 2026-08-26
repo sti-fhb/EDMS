@@ -179,5 +179,6 @@
 | DM_DOC_015 | 422 | 請選擇指定審核者（DM-MSG-DM02-014）|
 | DM_DOC_016 | 409 | 僅能對已發布文件發起廢止（US8）|
 | DM_DOC_017 | 404 | 查無可續編之草稿或無權存取（US5 續編 #222）|
+| DM_DOC_018 | 409 | 此文件已廢止，無法續編或送審，請刪除此草稿（US5 續編 #222）|
 
 > `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 spec_us7 FR-06）。

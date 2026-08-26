@@ -271,6 +271,35 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(screen.getByLabelText(/變更摘要/)).toHaveValue("新版草摘")
   })
 
+  it("續編已廢止孤兒草稿：顯示已廢止警示、鎖送簽/存草稿（#222 安全）", async () => {
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
+        HttpResponse.json({
+          doc_id: "DM-SOP-000052",
+          doc_name: "已廢止C",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          func_code: null,
+          func_name: null,
+          doc_status: "OBSOLETE",
+          name_editable: false,
+          draft_version_id: 557,
+          version_no: "2.0",
+          change_summary: "孤兒",
+          file_name: "c.pdf",
+          file_size: 100,
+          previewable: true,
+          assigned_reviewer: null,
+        }),
+      ),
+    )
+    paramsRef.current = { docId: "DM-SOP-000052" }
+    renderWithProviders(<DmEditorPage />)
+    expect(await screen.findByText(/此文件已廢止，無法續編或送審/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "送交簽核" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "儲存為草稿" })).toBeDisabled()
+  })
+
   it("取消且有未存變更 → 二次確認（DM-MSG-DM03-005）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)

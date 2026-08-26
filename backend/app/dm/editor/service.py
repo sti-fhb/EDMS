@@ -43,6 +43,7 @@ from app.services import AuditLogService
 
 _DRAFT = "DRAFT"
 _PENDING_REVIEW = "PENDING_REVIEW"
+_OBSOLETE = "OBSOLETE"
 _REJECTED = "REJECTED"
 _WITHDRAWN = "WITHDRAWN"
 _MANUAL = "MANUAL"
@@ -82,6 +83,18 @@ class EditorService:
         self._reviews = reviews or ReviewService()
         self._notifier = notifier or DmNotifier()
         self._audit = audit or AuditLogService()
+
+    @staticmethod
+    def _ensure_not_obsolete(doc) -> None:
+        """已廢止（OBSOLETE 終態）文件不得再加版 / 續編 / 送簽（孤兒草稿僅可刪除；spec_us9 FR-001）。
+
+        既有 has_pending_obsolete 僅擋「廢止待簽核（PENDING）」；廢止核准後文件轉 OBSOLETE，此處補擋終態，
+        杜絕孤兒草稿於前端灰化被繞過後仍能經 API 續編 / 送簽。
+        """
+        if doc.status == _OBSOLETE:
+            raise AppError(
+                status_code=409, detail="此文件已廢止，無法續編或送審，請刪除此草稿", error_code="DM_DOC_018"
+            )
 
     async def _log(self, db: AsyncSession, *, action_type: str, operator_id: str, target: str, after: dict) -> None:
         """寫入型操作於同交易寫 SRVDP003 稽核（MODULE=DM、FUNC=DM-EDITOR、res_id=DOC_ID）。"""
@@ -207,6 +220,7 @@ class EditorService:
         doc = await self._repo.get_document(db, doc_id)
         if doc is None:
             raise _NOT_FOUND
+        self._ensure_not_obsolete(doc)  # 已廢止文件不得再加版
         # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
@@ -332,6 +346,7 @@ class EditorService:
             raise AppError(status_code=403, detail="僅能續編本人之草稿", error_code="DM_DRAFT_003")
         if ver.status != _DRAFT:
             raise AppError(status_code=409, detail="僅草稿版本可續編", error_code="DM_DRAFT_004")
+        self._ensure_not_obsolete(doc)  # 已廢止文件之孤兒草稿不得續編（僅可刪除）
         # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
@@ -347,7 +362,9 @@ class EditorService:
             previewable = fmeta.previewable
         ver.version_no, ver.change_summary = version_no, change_summary
         ver.updated_user, ver.updated_date = op.user_id, now
-        if doc.status == _DRAFT and doc_name is not None:  # 首版草稿可改名（Q1=A）；已發布文件唯讀、忽略
+        # 首版草稿可改名（Q1=A）；已發布文件唯讀。改名另需**文件建立者本人**（改的是跨版本共享之
+        # DM_DOCUMENT.doc_name，僅版本擁有權不足——他人於同份 DRAFT 文件另開版本者不得改名），否則忽略。
+        if doc.status == _DRAFT and doc_name is not None and doc.created_user == op.user_id:
             doc.doc_name = doc_name.strip()
             doc.updated_user, doc.updated_date = op.user_id, now
         await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)
@@ -438,6 +455,7 @@ class EditorService:
     async def _ensure_submittable(self, db: AsyncSession, doc, ver) -> None:
         """送簽前完整檢核（存草稿階段皆放行、於此才要求）：版號 / 摘要 / 檔案 / MANUAL func /
         可見對象 ≥1 / 手冊唯一 / 廢止互斥。"""
+        self._ensure_not_obsolete(doc)  # 已廢止文件之孤兒草稿不得送簽（早於欄位檢核，優先回真因）
         if not (ver.version_no or "").strip():
             raise AppError(status_code=422, detail="請輸入版本號", error_code="DM_DOC_006")
         if await self._repo.version_no_taken(db, doc.doc_id, ver.version_no):

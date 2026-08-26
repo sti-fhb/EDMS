@@ -55,8 +55,10 @@ export function DmEditorPage() {
   // 無（後端 404 → null）→ 從 DM02 詳細載已發布文件 meta、走「加新版」（addVersion）。
   const { data: draftMeta, isPending: draftMetaPending } = useDraftMeta(docId ?? "", !isNew)
   const isContinueDraft = !isNew && !!draftMeta
-  const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!)
-  const { data: recentVersions } = useVersions(isNew ? "" : docId!, !isNew)
+  // 續編首版草稿（父文件 DRAFT）不打 DM02 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
+  const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
+  const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
+  const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
   const { data: docTags } = useDocTags(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
@@ -80,6 +82,8 @@ export function DmEditorPage() {
 
   // 續編模式名稱可編（首版草稿 Q1=A）；其餘編輯情境名稱唯讀。
   const nameEditable = isContinueDraft && !!draftMeta?.name_editable
+  // 已廢止文件之孤兒草稿：不可續編 / 送簽（後端亦擋 DM_DOC_018）；此處鎖動作、提示改用刪除。
+  const draftObsolete = isContinueDraft && draftMeta?.doc_status === "OBSOLETE"
   // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM02 詳細。
   const editName = isContinueDraft ? (draftMeta?.doc_name ?? "") : (detail?.doc_name ?? "")
   const editCategoryName = isContinueDraft ? (draftMeta?.category_name ?? "") : (detail?.category_name ?? "")
@@ -312,6 +316,12 @@ export function DmEditorPage() {
       <Typography variant="h5" gutterBottom>
         {isNew ? "新增文件" : `編輯文件 — ${editName}`}
       </Typography>
+
+      {draftObsolete && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          此文件已廢止，無法續編或送審。請至個人專區草稿匣刪除此草稿。
+        </Alert>
+      )}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr" }, gap: 2 }}>
         {/* 左：基本資料 + 版本 + 上傳 */}
@@ -575,10 +585,10 @@ export function DmEditorPage() {
             </TextField>
             <Divider sx={{ my: 2 }} />
             <Stack spacing={1}>
-              <Button variant="contained" onClick={handleSubmit} disabled={busy}>
+              <Button variant="contained" onClick={handleSubmit} disabled={busy || draftObsolete}>
                 送交簽核
               </Button>
-              <Button variant="outlined" onClick={handleSaveDraft} disabled={busy}>
+              <Button variant="outlined" onClick={handleSaveDraft} disabled={busy || draftObsolete}>
                 儲存為草稿
               </Button>
               <Button color="inherit" onClick={handleCancel} disabled={busy}>

@@ -8,6 +8,7 @@
 import pytest
 from sqlalchemy import func, select
 
+from app.core.auth import create_access_token
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
@@ -16,6 +17,8 @@ from app.dm.catalog.models import DmTag
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.editor.service import EditorService
 from app.dm.review.models import DmReview
+from app.dm.roles.authz import DM_VIEWER
+from app.dm.roles.models import DmUserRole
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
@@ -71,6 +74,42 @@ async def _first_version_draft(db, *, name="首版草稿文件", version_no="1.0
         file_mime=_PDF,
         op=_op(),
     )
+
+
+async def _grant(db, user_id, role):
+    db.add(DmUserRole(user_id=user_id, role_code=role, created_user="seed", created_date=utcnow()))
+    await db.flush()
+
+
+async def _obsolete_with_draft(db, doc_id, *, author="ed"):
+    """建一份已廢止(OBSOLETE)文件 + 作者之 DRAFT 孤兒版本。"""
+    now = utcnow()
+    doc = DmDocument(
+        doc_id=doc_id,
+        doc_name="已廢止文件",
+        category_code="SOP",
+        current_version_id=None,
+        status="OBSOLETE",
+        created_user=author,
+        created_date=now,
+    )
+    db.add(doc)
+    await db.flush()
+    ver = DmDocVersion(
+        doc_id=doc_id,
+        version_no="2.0",
+        change_summary="孤兒草稿",
+        file_name="o.pdf",
+        file_path="/x/o.pdf",
+        file_size=10,
+        file_mime=_PDF,
+        status="DRAFT",
+        created_user=author,
+        created_date=now,
+    )
+    db.add(ver)
+    await db.flush()
+    return doc, ver
 
 
 async def _published_with_draft_newversion(db, doc_id, *, author="ed"):
@@ -293,3 +332,107 @@ async def test_update_draft_version_non_owner_blocked(db):
             op=_op("other"),
         )
     assert e.value.status_code == 403
+
+
+async def test_update_draft_version_rename_requires_doc_owner(db):
+    # security MEDIUM：改名（改 DM_DOCUMENT.doc_name 跨版本共享欄）限文件建立者；
+    # 他人於同份 DRAFT 文件另開自己版本者，續編自己版本可、但不得改文件名稱（忽略、不生效）
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "other", "他人")
+    r = await _first_version_draft(db)  # 文件 + 首版皆 ed 建立
+    now = utcnow()
+    ov = DmDocVersion(
+        doc_id=r.doc_id,
+        version_no="1.0-b",
+        change_summary="b",
+        file_name="b.pdf",
+        file_path="/x/b.pdf",
+        file_size=10,
+        file_mime=_PDF,
+        status="DRAFT",
+        created_user="other",  # other 於 ed 的 DRAFT 文件另開自己的草稿版本
+        created_date=now,
+    )
+    db.add(ov)
+    await db.flush()
+    aud = await _audience_id(db)
+    await _svc.update_draft_version(
+        db,
+        doc_id=r.doc_id,
+        version_id=ov.version_id,
+        doc_name="他人想改名",
+        audience_ids=[aud],
+        retrieval_ids=[],
+        version_no="1.0-b",
+        change_summary="b",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op("other"),
+    )
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == r.doc_id))
+    assert doc.doc_name == "首版草稿文件"  # 非文件建立者改名不生效
+
+
+async def test_update_draft_version_blocked_when_doc_obsolete(db):
+    # HIGH(review)：父文件已廢止(OBSOLETE 終態)之孤兒草稿不得續編（僅可刪除）；後端擋 DM_DOC_018
+    await _seed_user(db, "ed", "撰寫")
+    _, ver = await _obsolete_with_draft(db, "DM-SOP-000910")
+    aud = await _audience_id(db)
+    with pytest.raises(AppError) as e:
+        await _svc.update_draft_version(
+            db,
+            doc_id="DM-SOP-000910",
+            version_id=ver.version_id,
+            doc_name=None,
+            audience_ids=[aud],
+            retrieval_ids=[],
+            version_no="2.1",
+            change_summary="想續編",
+            file_name=None,
+            file_bytes=None,
+            file_mime=None,
+            op=_op(),
+        )
+    assert e.value.error_code == "DM_DOC_018"
+
+
+async def test_submit_blocked_when_doc_obsolete(db):
+    # HIGH(review) 延伸：已廢止文件之孤兒草稿亦不得送簽（_ensure_submittable 擋 DM_DOC_018）
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, ver = await _obsolete_with_draft(db, "DM-SOP-000911")
+    with pytest.raises(AppError) as e:
+        await _svc.submit(db, doc_id="DM-SOP-000911", version_id=ver.version_id, assigned_reviewer="rev1", op=_op())
+    assert e.value.error_code == "DM_DOC_018"
+
+
+# ── HTTP 授權閘（新端點）───────────────────────────
+
+
+async def test_http_draft_meta_forbidden_without_editor(db, client):
+    # 新端點掛 _ensure_editor：具 DM 角色但非編輯者 → 403 DM_AUTH_002
+    await _seed_user(db, "v", "閱覽")
+    await _grant(db, "v", DM_VIEWER)
+    token = create_access_token(sub="v", ttl_minutes=15)
+    resp = await client.get(
+        "/api/dm/editor/documents/DM-SOP-000001/draft-meta", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_002"
+
+
+async def test_http_update_draft_forbidden_without_editor(db, client):
+    await _seed_user(db, "v", "閱覽")
+    await _grant(db, "v", DM_VIEWER)
+    token = create_access_token(sub="v", ttl_minutes=15)
+    resp = await client.put(
+        "/api/dm/documents/DM-SOP-000001/versions/1",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"version_no": "1.1", "change_summary": "x"},
+    )
+    assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_002"
+
+
+async def test_http_draft_meta_requires_auth(db, client):
+    resp = await client.get("/api/dm/editor/documents/DM-SOP-000001/draft-meta")
+    assert resp.status_code == 401
