@@ -64,8 +64,13 @@ class RegisterService:
         - `SELF_REGISTER`（#212）：他人仍有效的自助註冊申請。修法 B 之後這已不構成帳號接管
           （列裡沒有密碼），但對方會發現連結突然失效、客服需查得到原因
 
-        `operator_id` 一律記 SYSTEM：行為人是匿名註冊者、無 user_id，也非管理者所為。Email 依既有
-        慣例放 `before_value`（比照 `email_change_service`）而不放 `target_id`。
+        `operator_id` 一律記 SYSTEM：行為人是匿名註冊者、無 user_id，也非管理者所為。
+
+        `target_id` 兩種來源各給一個可查的識別碼：邀請給 `invite_id`，自助註冊列沒有識別碼故給
+        Email。刻意**不**沿用 `email_change_service`「email 只放 before_value」的慣例——那個慣例
+        成立是因為那裡的 target 本身是一個 user（有 USER_ID），而稽核查詢只能按 target_id 篩、
+        不支援 before_value 關鍵字搜尋，把 Email 留在 JSON 裡等於這列查不到（本 docstring 原本
+        寫的「客服需查得到原因」就做不到）。Email 仍一併留在 `before_value` 供比對。
 
         呼叫時機刻意在「建列成功之後」：稽核鏈以交易級 advisory lock 序列化（見
         `app/dp/audit/repository.py`），而本路徑匿名可觸發，晚一點取鎖即縮短全平台稽核寫入被
@@ -79,7 +84,7 @@ class RegisterService:
             action_type="DELETE",
             result="SUCCESS",
             operator_id=_SYSTEM_USER,
-            target_id=pending.invite_id if is_invite else None,
+            target_id=pending.invite_id if is_invite else pending.email,
             description="逾期管理者邀請被自助註冊覆蓋" if is_invite else "既有自助註冊申請被新的註冊申請覆蓋",
             before_value={
                 "kind": pending.kind,

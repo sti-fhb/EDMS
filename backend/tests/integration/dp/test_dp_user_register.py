@@ -232,8 +232,10 @@ async def test_self_register_overwrite_writes_audit(db, et_stub):
     """覆蓋既有自助註冊列 → 記一筆 DELETE 稽核（#212）。
 
     修法 B 之後覆蓋已不構成帳號接管（列裡沒有密碼），但它仍會作廢他人仍有效的驗證連結並
-    換掉姓名——使用者只會發現連結突然失效，客服需查得到原因。email 依既有慣例放
-    before_value（比照 email_change_service），不放 target_id。
+    換掉姓名——使用者只會發現連結突然失效，客服需查得到原因。
+
+    因此 target_id 記 Email：稽核查詢只能按 target_id 篩、不支援 before_value 關鍵字搜尋，
+    把 Email 只留在 JSON 裡等於這列實務上查不到。本斷言即釘住「這列查得到」。
     """
     email = "plain-overwrite@edms.local"
     await RegisterService().register(db, email=email, user_name="第一次")
@@ -247,3 +249,4 @@ async def test_self_register_overwrite_writes_audit(db, et_stub):
     assert log.action_type == "DELETE" and log.result == "SUCCESS"
     assert "既有自助註冊申請被新的註冊申請覆蓋" in log.description
     assert "第一次" in log.before_value and email in log.before_value
+    assert log.target_id == email  # 可經稽核查詢的 target 維度找到
