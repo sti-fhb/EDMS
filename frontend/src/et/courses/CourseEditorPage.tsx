@@ -28,7 +28,12 @@ import { useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
+import { MaterialDialog } from "./MaterialDialog"
+import { QuizDialog } from "./QuizDialog"
 import { coursesApi } from "./coursesService"
+import { ItemTitleSchema } from "./itemSchemas"
+import type { DocRow, ItemRow, ItemType, QuestionFormValues, QuestionRow, VideoRow } from "./itemSchemas"
+import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
 import {
   COURSE_STATUS_LABEL,
   ChapterNameSchema,
@@ -87,6 +92,10 @@ export function EtCourseEditorPage() {
   const [chapterDialogOpen, setChapterDialogOpen] = useState(false)
   const [chapterDraft, setChapterDraft] = useState("")
   const [chapterError, setChapterError] = useState("")
+  /** 目前開啟的項目視窗——`null` 表示未開啟。 */
+  const [openItem, setOpenItem] = useState<ItemRow | null>(null)
+  const [itemError, setItemError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   const { data: course } = useQuery({
     queryKey: QUERY_KEYS.etCourses.detail(courseId ?? 0),
@@ -125,6 +134,8 @@ export function EtCourseEditorPage() {
         chapter_name: c.name,
         sort_order: i + 1,
         version: 0,
+        // 暫存章節尚未寫入 DB，掛不了項目——ItemList 於新增模式停用
+        items: [],
       }))
     : (course?.chapters ?? [])
   const status = course?.status ?? "DRAFT"
@@ -271,6 +282,120 @@ export function EtCourseEditorPage() {
           handleError(err)
         }
       },
+    })
+  }
+
+  // ── 章節項目（教材 / 測驗，#203）────────────────────────────────────────
+
+  const openMaterialId = openItem?.item_type === "MATERIAL" ? openItem.material_id : null
+  const openQuizId = openItem?.item_type === "QUIZ" ? openItem.quiz_id : null
+
+  const { data: material, isFetching: materialLoading } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.material(openMaterialId ?? 0),
+    queryFn: () => materialsApi.getDetail(openMaterialId as number),
+    enabled: openMaterialId !== null,
+  })
+
+  const { data: quiz, isFetching: quizLoading } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.quiz(openQuizId ?? 0),
+    queryFn: () => quizzesApi.getDetail(openQuizId as number),
+    enabled: openQuizId !== null,
+  })
+
+  // DM 文件下拉只在教材視窗開著時才查——課程編輯頁本身不需要這份清單
+  const { data: dmOptions = [] } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.dmDocuments(),
+    queryFn: () => materialsApi.listDmDocuments(),
+    enabled: openMaterialId !== null,
+  })
+
+  const invalidateMaterial = () => {
+    if (openMaterialId !== null) {
+      void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.material(openMaterialId) })
+    }
+  }
+  const invalidateQuiz = () => {
+    if (openQuizId !== null) {
+      void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.quiz(openQuizId) })
+    }
+  }
+
+  /**
+   * 項目視窗內的操作統一經此執行。
+   *
+   * 錯誤呈現在**視窗內的 Alert** 而非 snackbar：使用者的注意力在視窗裡，
+   * 而「教材須至少提供⋯」這類訊息需要指出是哪一個教材出問題，飄一則 toast 說不清楚。
+   */
+  const runItemAction = async (action: () => Promise<unknown>, after?: () => void) => {
+    setItemError(null)
+    try {
+      await action()
+      after?.()
+    } catch (err) {
+      const { errorCode, errorMessage } = toApiError(err)
+      if (errorCode === LOCK_CONFLICT) {
+        setConflictOpen(true)
+        return
+      }
+      setItemError(errorMessage)
+    }
+  }
+
+  const closeItemDialog = () => {
+    setOpenItem(null)
+    setItemError(null)
+  }
+
+  const handleAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
+    const parsed = ItemTitleSchema.safeParse(itemType === "MATERIAL" ? "新教材" : "新測驗")
+    if (!parsed.success) return
+    try {
+      const created = await itemsApi.add(chapter.chapter_id, itemType, parsed.data)
+      invalidate()
+      // 建完直接開視窗——空殼本身沒有內容，不開等於要使用者再點一次
+      setOpenItem(created)
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  const handleDeleteItem = (item: ItemRow) => {
+    confirm({
+      title: `刪除${item.item_type === "MATERIAL" ? "教材" : "測驗"}`,
+      content:
+        "確定刪除此項目？其內容與學員於此項目之學習紀錄、成績將一併移除，且不再計入完課率。",
+      okText: "刪除",
+      onOk: async () => {
+        try {
+          await itemsApi.remove(item.item_id)
+          invalidate()
+          if (openItem?.item_id === item.item_id) closeItemDialog()
+        } catch (err) {
+          handleError(err)
+        }
+      },
+    })
+  }
+
+  const handleUploadVideo = async (file: File) => {
+    if (openMaterialId === null) return
+    setUploading(true)
+    await runItemAction(
+      () => materialsApi.uploadVideo(openMaterialId, file),
+      () => {
+        invalidateMaterial()
+        invalidate()
+      },
+    )
+    setUploading(false)
+  }
+
+  const handleDeleteQuestion = (question: QuestionRow) => {
+    confirm({
+      title: "刪除題目",
+      content: "確定刪除此題目？學員於此題之作答紀錄與得分將一併移除。",
+      okText: "刪除",
+      onOk: () => runItemAction(() => quizzesApi.removeQuestion(question.question_id), invalidateQuiz),
     })
   }
 
@@ -462,6 +587,94 @@ export function EtCourseEditorPage() {
           )
           chapterMut.mutate(() => coursesApi.reorderChapters(courseId, ids, course?.version ?? 0))
         }}
+        itemsDisabled={isNew}
+        onAddItem={handleAddItem}
+        onOpenItem={(item) => {
+          setItemError(null)
+          setOpenItem(item)
+        }}
+        onDeleteItem={handleDeleteItem}
+        onReorderItems={(chapter, ids) => {
+          // 樂觀更新：同章節重排之理由——少了這步會閃回舊順序、看起來像「拖了沒動」
+          qc.setQueryData(QUERY_KEYS.etCourses.detail(courseId as number), (old?: CourseDetail) =>
+            old
+              ? {
+                  ...old,
+                  chapters: old.chapters.map((c) =>
+                    c.chapter_id === chapter.chapter_id
+                      ? {
+                          ...c,
+                          items: ids.map((id) => c.items.find((i) => i.item_id === id)).filter((i) => i !== undefined),
+                        }
+                      : c,
+                  ),
+                }
+              : old,
+          )
+          chapterMut.mutate(() => itemsApi.reorder(chapter.chapter_id, ids, chapter.version))
+        }}
+      />
+
+      <MaterialDialog
+        open={openMaterialId !== null}
+        loading={materialLoading}
+        readOnly={readOnly}
+        material={material ?? null}
+        dmOptions={dmOptions}
+        error={itemError}
+        uploading={uploading}
+        onClose={closeItemDialog}
+        onSave={(values) =>
+          void runItemAction(
+            () =>
+              materialsApi.update(openMaterialId as number, {
+                ...values,
+                version: material?.version ?? 0,
+              }),
+            () => {
+              message.success("教材已儲存")
+              invalidateMaterial()
+              // 課程詳細也要刷——項目列顯示的名稱取自教材名稱
+              invalidate()
+              closeItemDialog()
+            },
+          )
+        }
+        onUploadVideo={(file) => void handleUploadVideo(file)}
+        onDeleteVideo={(video: VideoRow) =>
+          void runItemAction(() => materialsApi.removeVideo(video.video_id), invalidateMaterial)
+        }
+        onAddDoc={(docId) => void runItemAction(() => materialsApi.addDoc(openMaterialId as number, docId), invalidateMaterial)}
+        onDeleteDoc={(doc: DocRow) =>
+          void runItemAction(() => materialsApi.removeDoc(doc.mat_doc_id), invalidateMaterial)
+        }
+      />
+
+      <QuizDialog
+        open={openQuizId !== null}
+        loading={quizLoading}
+        readOnly={readOnly}
+        quiz={quiz ?? null}
+        error={itemError}
+        onClose={closeItemDialog}
+        onSaveSettings={(values) =>
+          void runItemAction(
+            () => quizzesApi.update(openQuizId as number, { ...values, version: quiz?.version ?? 0 }),
+            () => {
+              message.success("測驗設定已儲存")
+              invalidateQuiz()
+              invalidate()
+            },
+          )
+        }
+        onSaveQuestion={(questionId: number | null, values: QuestionFormValues) =>
+          void runItemAction(() => {
+            if (questionId === null) return quizzesApi.addQuestion(openQuizId as number, values)
+            const version = quiz?.questions.find((q) => q.question_id === questionId)?.version ?? 0
+            return quizzesApi.updateQuestion(questionId, { ...values, version })
+          }, invalidateQuiz)
+        }
+        onDeleteQuestion={handleDeleteQuestion}
       />
 
       {!readOnly && (

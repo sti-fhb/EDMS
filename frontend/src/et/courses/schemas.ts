@@ -1,5 +1,7 @@
 /** ET02 課程骨架與章節編排型別（對齊後端 app/et/course/schemas.py）。 */
 
+import type { ItemRow } from "./itemSchemas"
+
 /** 課程描述長度上限——與後端 `DESCRIPTION_MAX_LEN` 同步（spec_us3 AC 1「至多 500 字」）。 */
 export const DESCRIPTION_MAX_LEN = 500
 export const COURSE_NAME_MAX_LEN = 100
@@ -10,6 +12,8 @@ export interface ChapterItem {
   chapter_name: string
   sort_order: number
   version: number
+  /** 章節下之教材 / 測驗項目（#203）。新增模式之暫存章節恆為空陣列。 */
+  items: ItemRow[]
 }
 
 export interface CourseDetail {

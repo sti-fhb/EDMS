@@ -21,6 +21,9 @@ export const QUERY_KEYS = {
     capabilities: () => ["et", "courses", "capabilities"] as const,
     detail: (courseId: number) => ["et", "courses", courseId] as const,
     tags: (courseId?: number) => ["et", "tags", courseId ?? null] as const,
+    material: (materialId: number) => ["et", "materials", materialId] as const,
+    quiz: (quizId: number) => ["et", "quizzes", quizId] as const,
+    dmDocuments: () => ["et", "dm-documents"] as const,
   },
   moduleSummary: {
     get: () => ["module-summary"] as const,
