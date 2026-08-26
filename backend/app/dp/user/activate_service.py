@@ -14,8 +14,6 @@ from app.dp.user.repository import AuthRepository
 from app.services import AuditLogService, ParamService
 
 _FUNC_NAME = "DP-USERS"
-_DEFAULT_MIN_LEN = 8
-_DEFAULT_CHAR_TYPES = 3
 _TOKEN_INVALID_MSG = "邀請連結無效"  # noqa: S105 — 使用者訊息，非密碼
 _TOKEN_EXPIRED_MSG = "邀請連結已失效，請洽管理者重寄"  # noqa: S105 — 使用者訊息，非密碼
 

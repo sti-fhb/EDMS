@@ -13,6 +13,7 @@ from app.core.rate_limit import (
     LOGIN_RATE_MAX,
     RATE_WINDOW_SECONDS,
     REGISTER_RATE_MAX,
+    SET_PASSWORD_RATE_MAX,
     SlidingWindowRateLimiter,
     rate_limit_by_ip,
 )
@@ -54,10 +55,10 @@ _register_limiter = SlidingWindowRateLimiter(max_requests=REGISTER_RATE_MAX, win
 _forgot_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 _reset_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 註冊驗證端點限流器（IP 維度）；重寄另加帳號維度防濫發
-_verify_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_verify_limiter = SlidingWindowRateLimiter(max_requests=SET_PASSWORD_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 _resend_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 帳號啟用端點限流器（IP 維度；受邀者持 token 設密碼）
-_activate_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_activate_limiter = SlidingWindowRateLimiter(max_requests=SET_PASSWORD_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 # 密碼變更 / Email 變更申請限流器（IP + 帳號維度；US8 FR-07 防高頻嘗試）
 _pwd_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 _email_change_limiter = SlidingWindowRateLimiter(max_requests=LOGIN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
@@ -157,7 +158,7 @@ async def verify_email(
     await _verify_service.verify(
         db, token=data.token, new_password=data.new_password, confirm_password=data.confirm_password
     )
-    return {"message": "帳號已啟用，請以新帳號登入"}
+    return {"message": "帳號已啟用，請以新密碼登入"}
 
 
 @router.post("/resend-verification")

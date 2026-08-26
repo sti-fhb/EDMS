@@ -52,7 +52,8 @@ async def activate_pending_account(
 
     Args:
         pending: 待驗證 / 待邀請列
-        pwd_hash: 密碼雜湊（US2＝pending.pwd_hash；US4＝使用者當場設定並雜湊）
+        pwd_hash: 密碼雜湊。**US2 / US4 皆為使用者於本步當場設定並雜湊**——#212 之後
+            待驗證列不存密碼，`pending.pwd_hash` 恆為 None，該來源已不存在
         func_name: 稽核 func_name（US2「DP-REGISTER」/ US4「DP-USERS」）
         create_desc: 建帳號稽核描述
 

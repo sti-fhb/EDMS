@@ -1,12 +1,16 @@
 """註冊服務（US2 自助註冊，#56 方案 B：Email 驗證後啟用）。
 
-伺服器端檢核（兩次一致 / Email 未被已驗證帳號佔用 / 密碼複雜度）→ **不建 DP_USER**，
-改寫入待驗證表 `DP_PENDING_REGISTRATION`（Email / 姓名 / 密碼雜湊 + 一次性驗證 token）
-並經發信服務（US6）寄「註冊驗證信」。點驗證連結通過後才由 verify_service 建 DP_USER。
+伺服器端檢核（Email 未被已驗證帳號佔用）→ **不建 DP_USER**，改寫入待驗證表
+`DP_PENDING_REGISTRATION`（Email / 姓名 + 一次性驗證 token，**不含密碼**）並經發信服務（US6）
+寄「註冊驗證信」。點驗證連結後由 verify_service 收密碼、建 DP_USER。
+
+**本服務不收密碼、不做任何密碼運算**（#212）：註冊端點匿名、任何人可用他人 Email 送出，
+若密碼在此步收下並存入待驗證列，受害者點下驗證信後帳號即以送出者的密碼建立（pre-hijack）。
+密碼檢核與雜湊一律在驗證步（`activation.activate_with_new_password`）。
 
 一 Email 一筆待驗證：Email 已在 pending（未驗證）→ 覆蓋（刪舊列 + 新 token + 重寄）＝新註冊語意；
 Email 已在 DP_USER（已驗證）→ 409（引導登入 / 忘記密碼）。明文 token 僅入信中連結、DB 存 SHA-256。
-複雜度門檻讀平台級 DP_PARAM（一般使用者 MIN_LEN / CHAR_TYPES）；驗證 TTL 沿用既有 token 30 分。
+驗證 TTL 沿用既有 token 30 分。
 """
 
 from datetime import timedelta
@@ -19,6 +23,7 @@ from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.kinds import KIND_ADMIN_INVITE
+from app.dp.user.models import DpPendingRegistration
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
@@ -28,8 +33,6 @@ _EMAIL_TAKEN_MSG = "此 Email 已被註冊，請直接登入或使用忘記密�
 # 認證後的管理者端點（DP_USER_010）則可明說，此不對稱為刻意設計。
 _INVITE_PENDING_MSG = "此 Email 已有待完成的帳號啟用程序，請至信箱收取信件完成啟用"
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
-_DEFAULT_MIN_LEN = 8
-_DEFAULT_CHAR_TYPES = 3
 _DEFAULT_TTL_MIN = 30
 _FUNC_NAME = "DP-REGISTER"
 _SYSTEM_USER = "SYSTEM"
@@ -49,6 +52,43 @@ class RegisterService:
         self._params = params or ParamService()
         self._notify = notify or NotifyService()
         self._audit = audit or AuditLogService()
+
+    async def _log_pending_overwritten(self, db: AsyncSession, pending: DpPendingRegistration) -> None:
+        """覆蓋既有待驗證列時留痕（兩種來源共用一段）。
+
+        兩條路徑本質相同——「匿名者的新註冊申請刪掉了別人的列」，只是被刪的列來源不同：
+
+        - `ADMIN_INVITE`（#125）：已逾期的管理者邀請（未逾期者於 step 2-1 就擋下了）。覆蓋是
+          預期行為（不讓 Email 被永久佔住），但管理者需查得到邀請為何從清單消失，故 `target_id`
+          記 `invite_id`（該列有識別碼）
+        - `SELF_REGISTER`（#212）：他人仍有效的自助註冊申請。修法 B 之後這已不構成帳號接管
+          （列裡沒有密碼），但對方會發現連結突然失效、客服需查得到原因
+
+        `operator_id` 一律記 SYSTEM：行為人是匿名註冊者、無 user_id，也非管理者所為。Email 依既有
+        慣例放 `before_value`（比照 `email_change_service`）而不放 `target_id`。
+
+        呼叫時機刻意在「建列成功之後」：稽核鏈以交易級 advisory lock 序列化（見
+        `app/dp/audit/repository.py`），而本路徑匿名可觸發，晚一點取鎖即縮短全平台稽核寫入被
+        序列化的時間。⚠️ 因此本呼叫之後不得再加入慢 await（bcrypt / 外部呼叫 / 重試）。
+        """
+        is_invite = pending.kind == KIND_ADMIN_INVITE
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="DELETE",
+            result="SUCCESS",
+            operator_id=_SYSTEM_USER,
+            target_id=pending.invite_id if is_invite else None,
+            description="逾期管理者邀請被自助註冊覆蓋" if is_invite else "既有自助註冊申請被新的註冊申請覆蓋",
+            before_value={
+                "kind": pending.kind,
+                "email": pending.email,
+                "user_name": pending.user_name,
+                "expires_date": pending.expires_date.isoformat(),
+            },
+            source_ip=get_client_ip(),
+        )
 
     async def assert_email_not_registered(self, db: AsyncSession, email: str) -> None:
         """Email 已被「已驗證帳號」佔用 → 409 DP_USER_001；未佔用則靜默通過。
@@ -97,46 +137,6 @@ class RegisterService:
         plaintext = generate_reset_token()
         # 條件式刪除：保留 TOCTOU 空窗內剛產生的有效邀請，讓其撞 UNIQUE 轉 409 而非被靜默覆蓋（#125）
         await self._repo.delete_pending_unless_active_invite(db, email, now)
-        if pending is not None and pending.kind == KIND_ADMIN_INVITE:
-            # 走到這裡代表該邀請已逾期（未逾期者已於 step 2-1 擋下）。覆蓋是 #125 的預期行為
-            # （不讓 Email 被永久佔住），但仍須留痕供管理者追查邀請為何消失。
-            # operator 記 SYSTEM：行為人為匿名註冊者、無 user_id，且非管理者所為。
-            await self._audit.log_action(
-                db,
-                module="DP",
-                func_name=_FUNC_NAME,
-                action_type="DELETE",
-                result="SUCCESS",
-                operator_id=_SYSTEM_USER,
-                target_id=pending.invite_id,
-                description="逾期管理者邀請被自助註冊覆蓋",
-                before_value={
-                    "kind": pending.kind,
-                    "user_name": pending.user_name,
-                    "expires_date": pending.expires_date.isoformat(),
-                },
-                source_ip=get_client_ip(),
-            )
-        elif pending is not None:
-            # 覆蓋既有自助註冊列（#212）：作廢他人仍有效的驗證連結並換掉姓名。修法 B 之後這已
-            # 不構成帳號接管（列裡沒有密碼），但使用者會發現連結突然失效、客服需查得到原因。
-            # email 依既有慣例放 before_value（比照 email_change_service），不放 target_id。
-            await self._audit.log_action(
-                db,
-                module="DP",
-                func_name=_FUNC_NAME,
-                action_type="DELETE",
-                result="SUCCESS",
-                operator_id=_SYSTEM_USER,
-                description="既有自助註冊申請被新的註冊申請覆蓋",
-                before_value={
-                    "kind": pending.kind,
-                    "email": pending.email,
-                    "user_name": pending.user_name,
-                    "expires_date": pending.expires_date.isoformat(),
-                },
-                source_ip=get_client_ip(),
-            )
         try:
             await self._repo.create_pending_registration(
                 db,
@@ -153,6 +153,8 @@ class RegisterService:
             raise AppError(
                 status_code=409, detail="此 Email 註冊處理中，請稍後再試或直接登入", error_code="DP_USER_005"
             ) from exc
+        if pending is not None:
+            await self._log_pending_overwritten(db, pending)
         # 5. 寄驗證信（US6；範本 MODULE=DP ACCOUNT_VERIFY）；連結以設定檔組（防 Host 注入）
         verify_link = f"{settings.FRONTEND_BASE_URL}/verify-email?token={plaintext}"
         await self._notify.send_email(

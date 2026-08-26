@@ -246,7 +246,7 @@ class AuthRepository:
     ) -> None:
         """新增一筆待驗證 / 待啟用列（token 僅存 SHA-256）；呼叫方須先清同 Email 舊列。
 
-        kind＝SELF_REGISTER（US2 自助註冊，建立即帶 pwd_hash）或 ADMIN_INVITE（US4 邀請，
+        kind＝SELF_REGISTER（US2 自助註冊；#212 起 pwd_hash 恆為 None）或 ADMIN_INVITE（US4 邀請，
         pwd_hash 為 None、invite_id 作為對外識別碼、operator_id 為管理者）。
         """
         db.add(

@@ -101,7 +101,7 @@ export function VerifyEmailPage() {
             <Stack spacing={2}>
               {apiError !== null && <Alert severity="error">{apiError}</Alert>}
               <Typography variant="body2" color="text.secondary">
-                Email 已驗證，設定密碼即可啟用帳號並登入。
+                設定密碼即可啟用帳號並登入。連結若已失效，送出後會提示重新註冊。
               </Typography>
               <TextField
                 label="設定密碼"

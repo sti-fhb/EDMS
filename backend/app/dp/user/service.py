@@ -53,9 +53,15 @@ class AuthService:
         now = utcnow()
         user = await self._repo.get_by_email(db, email)
         if user is None:
-            # 方案 B：未驗證帳號不在 DP_USER，僅在待驗證表。若該 Email 有待驗證列 → 專屬提示（引導驗證 / 重寄），
-            # 而非誤導的「查無此帳號」（#56）。
-            if await self._repo.get_pending_by_email(db, email) is not None:
+            # 方案 B：未驗證帳號不在 DP_USER，僅在待驗證表。若該 Email 有**未逾期**的待驗證列 → 專屬提示
+            # （引導驗證 / 重寄），而非誤導的「查無此帳號」（#56）。
+            #
+            # 逾期列必須視為不存在（#212），與 resend 的定義一致。否則會構成死路：逾期列讓登入永久回
+            # DP_AUTH_010「請重新寄送」→ 前端據此渲染重寄鈕 → 重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章
+            # → 使用者每按一次就把自己的「重新註冊」路徑再鎖一個冷卻週期，而 UI 全程指向重寄。
+            # 回 DP_AUTH_007「請先註冊」才是此時唯一走得通的動作。
+            pending = await self._repo.get_pending_by_email(db, email)
+            if pending is not None and pending.expires_date > now:
                 await self._fail(
                     db,
                     _SYSTEM_USER,

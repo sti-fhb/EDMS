@@ -11,6 +11,7 @@ from app.core.module_provisioning import module_provisioning_gate
 from app.core.password_policy import hash_password, verify_password
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
+from app.dp.notify.models import DpEmailLog
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory
 from app.dp.user.service import AuthService
 from app.dp.user.token import generate_reset_token, hash_token
@@ -146,6 +147,44 @@ async def test_resend_unknown_email_noop(db):
     assert (
         await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == "nobody@edms.local"))
     ).scalar_one_or_none() is None
+
+
+async def test_resend_expired_pending_is_noop(db):
+    """重寄「已逾期」的待驗證列 → 視為不存在（#212）：不換發 token、不延長效期、不寄信。
+
+    這條守衛就是 `verify_service.resend` 裡多出來的 `expires_date <= now`。少了它，任何匿名者
+    每 30 分鐘打一次重寄就能讓同一筆註冊申請永遠不死，30 分鐘 TTL 形同無效——而該列在
+    #212 之前還帶著送出者的密碼，正是 pre-hijack 得以長期維持的管道。
+
+    斷言「token 未換」即等同「未寄信」：重寄的寄信動作在換發之後（見 test_resend_replaces_token），
+    這裡另以 outbox 列數直接確認。
+    """
+    email = "expiredresend@edms.local"
+    old_token = await _seed_pending(db, email=email, minutes=-1)
+
+    await ResendVerificationService().resend(db, email=email)
+
+    row = (
+        await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))
+    ).scalar_one()
+    assert row.token_hash == hash_token(old_token)  # 未換發新 token
+    assert row.expires_date < utcnow()  # 未延長效期
+    mails = (await db.execute(select(DpEmailLog).where(DpEmailLog.recipient == email))).scalars().all()
+    assert mails == []
+
+
+async def test_login_with_expired_pending_says_not_registered(db):
+    """逾期待驗證列 → 登入回 DP_AUTH_007「請先註冊」，而非 DP_AUTH_010「請重新寄送」（#212）。
+
+    登入與 resend 必須對「逾期」用同一個定義，否則構成死路：逾期列讓登入永久回 DP_AUTH_010
+    → 前端據此渲染重寄鈕 → 重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章 → 使用者每按一次就把
+    自己「重新註冊」的路徑再鎖一個冷卻週期，而 UI 全程指向重寄。此時唯一走得通的動作是重新註冊。
+    """
+    await _seed_pending(db, email="expiredlogin@edms.local", minutes=-1)
+
+    with pytest.raises(AppError) as exc:
+        await AuthService().login(db, email="expiredlogin@edms.local", password=_GOOD_PWD)
+    assert exc.value.status_code == 401 and exc.value.error_code == "DP_AUTH_007"
 
 
 async def test_verify_grant_failure_propagates(db):
