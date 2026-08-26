@@ -359,6 +359,34 @@ class EtItemRepository:
         await db.flush()
         return item
 
+    async def resolve_owner(
+        self, db: AsyncSession, *, material_id: int | None = None, quiz_id: int | None = None
+    ) -> tuple[int, str] | None:
+        """由教材 / 測驗反查其所屬課程，回 `(course_id, owner_id)`。
+
+        單次 join 而非「教材 → 項目 → 章節 → 課程」四段查詢：擁有權判定在每個教材 /
+        測驗端點都要做一次，四段查詢會讓每個請求多三個 round trip。
+
+        回 `None` 的情形：教材 / 測驗不存在，或存在但沒有任何未刪除的項目指向它
+        （孤兒）。呼叫端一律當成 404——孤兒教材在 UI 上無從到達，回 403 反而會洩漏
+        「這筆資料存在但你沒權限」。
+        """
+        if material_id is not None:
+            condition = EtItem.material_id == material_id
+        elif quiz_id is not None:
+            condition = EtItem.quiz_id == quiz_id
+        else:
+            return None
+        row = await db.execute(
+            select(EtCourse.course_id, EtCourse.owner_id)
+            .join(EtChapter, EtChapter.course_id == EtCourse.course_id)
+            .join(EtItem, EtItem.chapter_id == EtChapter.chapter_id)
+            .where(condition, EtItem.deleted == 0, EtChapter.deleted == 0, EtCourse.deleted == 0)
+            .limit(1)
+        )
+        found = row.first()
+        return (found[0], found[1]) if found else None
+
     async def apply_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
         """依 `{item_id: sort_order}` 批次更新順序（**兩階段寫入**）。
 

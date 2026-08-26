@@ -12,6 +12,7 @@ dependencies = [
     "bcrypt>=4.0.1,<5",
     "fastapi[standard]>=0.135.2",
     "greenlet>=3.0.0",
+    "nh3>=0.3.7",
     "passlib[bcrypt]>=1.7.4",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.13.0",

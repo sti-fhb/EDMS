@@ -71,6 +71,88 @@ class EtMaterialRepository:
         )
         return (max_order or 0) + 1
 
+    async def update_basic(
+        self,
+        db: AsyncSession,
+        material_id: int,
+        version: int,
+        *,
+        name: str,
+        description_html: str | None,
+        operator: OperatorInfo,
+    ) -> int:
+        """更新名稱與說明文字並遞增 `VERSION`；回傳受影響列數供樂觀鎖判定。
+
+        `description_html` 須為**已消毒**之內容——消毒在 service 層完成，Repository
+        不做內容轉換（否則「有沒有消毒」會散落在兩處，難以確認每條寫入路徑都經過）。
+        """
+        result = await db.execute(
+            update(EtMaterial)
+            .where(
+                EtMaterial.material_id == material_id,
+                EtMaterial.deleted == 0,
+                EtMaterial.version == version,
+            )
+            .values(
+                material_name=name,
+                description_html=description_html,
+                version=EtMaterial.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+        return result.rowcount
+
+    async def has_video(self, db: AsyncSession, material_id: int) -> bool:
+        return bool(
+            await db.scalar(
+                select(func.count())
+                .select_from(EtMaterialVideo)
+                .where(EtMaterialVideo.material_id == material_id, EtMaterialVideo.deleted == 0)
+            )
+        )
+
+    async def has_doc(self, db: AsyncSession, material_id: int) -> bool:
+        return bool(
+            await db.scalar(
+                select(func.count())
+                .select_from(EtMaterialDoc)
+                .where(EtMaterialDoc.material_id == material_id, EtMaterialDoc.deleted == 0)
+            )
+        )
+
+    async def add_doc(self, db: AsyncSession, material_id: int, doc_id: str, operator: OperatorInfo) -> EtMaterialDoc:
+        """新增一筆 DM 文件引用，追加至最末。"""
+        doc = EtMaterialDoc(
+            material_id=material_id,
+            doc_id=doc_id,
+            sort_order=await self.next_doc_order(db, material_id),
+            created_user=operator.user_id,
+            created_date=utcnow(),
+        )
+        db.add(doc)
+        await db.flush()
+        return doc
+
+    async def get_doc(self, db: AsyncSession, mat_doc_id: int) -> EtMaterialDoc | None:
+        return await db.scalar(
+            select(EtMaterialDoc).where(EtMaterialDoc.mat_doc_id == mat_doc_id, EtMaterialDoc.deleted == 0)
+        )
+
+    async def soft_delete_doc(self, db: AsyncSession, mat_doc_id: int, operator: OperatorInfo) -> None:
+        """軟刪除單筆文件引用（AC 4：廢止文件僅可逐筆刪除、不提供批次移除）。
+
+        刪除後**可再次引用同一份文件**——`UX_ET_MATERIAL_DOC_MATERIAL_DOC` 已改為部分
+        唯一索引，已刪除的列不再佔住 `(MATERIAL_ID, DOC_ID)`。
+        """
+        await db.execute(
+            update(EtMaterialDoc)
+            .where(EtMaterialDoc.mat_doc_id == mat_doc_id, EtMaterialDoc.deleted == 0)
+            .values(deleted=1, updated_user=operator.user_id, updated_date=utcnow())
+        )
+        await db.flush()
+
     async def soft_delete_cascade(self, db: AsyncSession, material_ids: list[int], operator: OperatorInfo) -> None:
         """軟刪除教材本體與其下影片、文件引用，及學員之觀看紀錄。
 
