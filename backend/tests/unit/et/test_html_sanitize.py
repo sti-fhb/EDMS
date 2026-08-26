@@ -82,19 +82,22 @@ class TestScriptRemoval:
 
 
 class TestLinks:
-    """連結是唯一放行屬性的標籤，須逐項限制。"""
+    """`<a>` 已於 2026-08-26 移出白名單——編輯器沒有產生連結的入口，白名單跟著收斂。
 
-    def test_https_連結保留(self) -> None:
-        got = sanitize_material_html('<a href="https://example.com">連結</a>')
-        assert 'href="https://example.com"' in got
-        assert "連結" in got
+    **剝標籤但保留文字**（nh3 的預設行為）：既有內容中的連結降級為純文字，
+    不會整段消失。
+    """
 
-    def test_http_連結保留(self) -> None:
-        assert 'href="http://example.com"' in sanitize_material_html('<a href="http://example.com">x</a>')
+    def test_連結降級為純文字(self) -> None:
+        got = sanitize_material_html('<p>看這裡 <a href="https://example.com">連結文字</a> 結束</p>')
+        assert "<a" not in got
+        assert "href" not in got
+        assert "連結文字" in got, "剝標籤不應把文字一起吃掉"
 
     @pytest.mark.parametrize(
         "href",
         [
+            "https://example.com",
             "javascript:alert(1)",
             "JaVaScRiPt:alert(1)",
             "data:text/html;base64,PHNjcmlwdD4=",
@@ -102,23 +105,27 @@ class TestLinks:
             "file:///etc/passwd",
         ],
     )
-    def test_危險_scheme_被擋(self, href: str) -> None:
-        """只放行 http(s)——`javascript:` 是最典型的繞過路徑，大小寫混寫亦須擋下。"""
+    def test_任何_scheme_之連結皆被剝除(self, href: str) -> None:
+        """連 https 也不例外——白名單裡沒有 `a`，就沒有例外可言。"""
         got = sanitize_material_html(f'<a href="{href}">點我</a>')
-        assert "javascript" not in got.lower()
-        assert "vbscript" not in got.lower()
-        assert "data:text/html" not in got.lower()
-        assert "file://" not in got.lower()
+        assert "<a" not in got
+        assert "href" not in got.lower()
+        assert "點我" in got
 
-    def test_外部連結加上_rel_noopener(self) -> None:
-        """新視窗開啟時，缺 `noopener` 會讓目標頁能以 `window.opener` 操控原分頁。"""
-        got = sanitize_material_html('<a href="https://example.com">x</a>')
-        assert "noopener" in got
-        assert "noreferrer" in got
+    def test_純文字網址原樣保留(self) -> None:
+        """教師要放連結就直接把 URL 打進說明文字——那是純文字，不受影響。"""
+        got = sanitize_material_html("<p>詳見 https://example.com/guide 一文</p>")
+        assert "https://example.com/guide" in got
 
-    def test_連結不得夾帶事件屬性(self) -> None:
-        got = sanitize_material_html('<a href="https://example.com" onclick="x()">x</a>')
-        assert "onclick" not in got.lower()
+    def test_scheme_限制常數仍在位(self) -> None:
+        """`a` 日後若被加回白名單，scheme 限制須已經就位。
+
+        少了它而重新放行 `a`，等於默默開一條 `javascript:` 的路——那種疏漏不會有人
+        察覺，故常數刻意保留而非一併刪除。
+        """
+        from app.et.common.html_sanitize import ALLOWED_URL_SCHEMES
+
+        assert ALLOWED_URL_SCHEMES == {"http", "https"}
 
 
 class TestEdgeCases:
