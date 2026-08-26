@@ -164,9 +164,7 @@ async def test_resend_expired_pending_is_noop(db):
 
     await ResendVerificationService().resend(db, email=email)
 
-    row = (
-        await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))
-    ).scalar_one()
+    row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()
     assert row.token_hash == hash_token(old_token)  # 未換發新 token
     assert row.expires_date < utcnow()  # 未延長效期
     mails = (await db.execute(select(DpEmailLog).where(DpEmailLog.recipient == email))).scalars().all()
