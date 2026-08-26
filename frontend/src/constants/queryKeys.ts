@@ -17,6 +17,11 @@ export const QUERY_KEYS = {
     list: () => ["schedule", "list"] as const,
     logs: (params: Record<string, unknown>) => ["schedule", "logs", params] as const,
   },
+  etCourses: {
+    capabilities: () => ["et", "courses", "capabilities"] as const,
+    detail: (courseId: number) => ["et", "courses", courseId] as const,
+    tags: (courseId?: number) => ["et", "tags", courseId ?? null] as const,
+  },
   moduleSummary: {
     get: () => ["module-summary"] as const,
   },

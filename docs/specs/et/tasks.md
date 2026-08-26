@@ -104,7 +104,7 @@
 - [ ] T054 [US3] 實作教材編輯視窗：三類媒材組合（影片上傳、DM 文件下拉 from **SRVDM002**、WYSIWYG 說明文字）；廢止文件警告顯示
 - [ ] T055 [US3] 實作測驗編輯視窗：測驗設定（及格分數 / 時間限制 / 重考次數）+ 題目編輯（單選 / 多選、題幹、選項、配分）+ 配分總和檢核
 - [ ] T056 [US3] 實作樂觀鎖衝突 UI：寫入失敗時跳出「內容已被其他裝置變更，請重新整理後再儲存」提示
-- [ ] T057 [US3] 實作章節 / 題目刪除 Service：軟刪除本體（DELETED=1）；學員 ET_PROGRESS / ET_QUIZ_ATTEMPT_D 連帶 hard delete
+- [ ] T057 [US3] 實作章節 / 題目刪除 Service：軟刪除本體（DELETED=1）；學員 ET_PROGRESS / ET_QUIZ_ATTEMPT_D **連帶軟刪除**（2026-08-24 變更，原為 hard delete）
 
 ---
 

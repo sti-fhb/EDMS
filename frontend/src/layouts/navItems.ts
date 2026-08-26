@@ -28,6 +28,21 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    // 教育訓練（#202）：對齊 wireframe ET 側欄 4 項；課程列表以外各頁目前為骨架佔位。
+    // requiresModule=ET：無任一 ET 角色者整個群組不顯示（module-summary 判定；
+    // 該端點之 ET 判定已於 #201 由寫死 true 改為實查 et_has_any_role）。
+    // ⚠️ ET02 課程建立 / 編輯**不是**側欄項目——它是課程列表的子頁
+    //（/et/courses/new、/et/courses/:courseId）。
+    title: "教育訓練",
+    requiresModule: "ET",
+    items: [
+      { label: "課程列表", path: "/et/courses" },
+      { label: "學員", path: "/et/students" },
+      { label: "核可查詢", path: "/et/approvals" },
+      { label: "我的課程", path: "/et/my-courses" },
+    ],
+  },
+  {
     // 文件管理（#127 Foundation）：對齊 wireframe DM 側欄 6 項；各頁目前為骨架佔位。
     // requiresModule=DM（US1）：無任一 DM 角色者，整個群組不顯示（module-summary 判定）。
     title: "文件管理",

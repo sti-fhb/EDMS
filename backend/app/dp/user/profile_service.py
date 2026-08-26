@@ -11,12 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
-from app.core.password_policy import (
-    hash_password,
-    is_reused,
-    validate_password_strength,
-    verify_password,
+from app.core.password_hashing import (
+    hash_password_async,
+    is_reused_async,
+    verify_password_async,
 )
+from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.repository import AuthRepository
@@ -96,7 +96,7 @@ class ProfileService:
 
         # 舊密碼錯用 422（非 401）：401 於前端 http interceptor 代表「session 失效 → 自動登出」，
         # 若舊密碼錯回 401 會被誤判為逾時而登出、吞掉「舊密碼不正確」訊息（US8 手測發現）。
-        if not verify_password(old_password, user.pwd_hash):
+        if not await verify_password_async(old_password, user.pwd_hash):
             raise AppError(status_code=422, detail="舊密碼不正確", error_code="DP_PWD_006")
         if new_password != confirm_password:
             raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
@@ -106,10 +106,10 @@ class ProfileService:
         validate_password_strength(new_password, min_length=min_len, required_char_types=char_types)
         history_count = await self._params.get_int_param(db, "PWD_POLICY", "HISTORY_COUNT", _DEFAULT_HISTORY_COUNT)
         recent = await self._repo.recent_pwd_hashes(db, user_id, history_count)
-        if is_reused(new_password, recent):
+        if await is_reused_async(new_password, recent):
             raise AppError(status_code=422, detail="不可與最近使用過之密碼相同", error_code="DP_PWD_003")
 
-        new_hash = hash_password(new_password)
+        new_hash = await hash_password_async(new_password)
         await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user_id, now=now)
         seq_no = await self._repo.next_pwd_seq_no(db, user_id)
         await self._repo.add_pwd_history(

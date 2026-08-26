@@ -9,7 +9,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.password_policy import hash_password, validate_password_strength
+from app.core.password_hashing import hash_password_async
+from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.activation import activate_pending_account
@@ -65,7 +66,7 @@ class ActivateAccountService:
         await activate_pending_account(
             db,
             pending=pending,
-            pwd_hash=hash_password(new_password),
+            pwd_hash=await hash_password_async(new_password),
             now=now,
             ip=ip,
             repo=self._repo,

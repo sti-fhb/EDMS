@@ -17,6 +17,8 @@ from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
 from app.core.log_redaction import format_exception_for_log
+from app.core.password_hashing import shutdown as shutdown_password_executor
+from app.core.password_hashing import warm_up as warm_up_password_backend
 from app.core.request_context import get_client_ip, set_client_ip
 from app.dm.bootstrap import register_dm_module
 from app.dm.dashboard.router import router as dm_dashboard_router
@@ -37,6 +39,7 @@ from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
 from app.et.bootstrap import register_et_module
+from app.et.course.router import router as et_course_router
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,9 @@ async def lifespan(app: "FastAPI"):
 
     兩者皆 lifespan 背景元件、互不依賴：worker 消 DP_EMAIL_LOG、scheduler 依 DP_SCHEDULE 觸發 job。
     """
+    # 密碼運算後端暖機（#214）：讓 passlib 的惰性初始化在單執行緒下完成，避免多 worker
+    # 首呼的競態，並把它已知的版本偵測 traceback 落在啟動階段而非第一個使用者登入時。
+    await warm_up_password_backend()
     stop_event = asyncio.Event()
     task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
     scheduler = await start_scheduler()
@@ -56,6 +62,7 @@ async def lifespan(app: "FastAPI"):
         # 先關排程引擎（等當前 job 跑完），再請 worker 優雅收斂（跑完當前 cycle 並 commit），
         # 逾時才強制取消——避免在「已透過 SMTP 寄出、尚未 commit」的空窗被 cancel 導致 rollback 後重送。
         await shutdown_scheduler(scheduler)
+        shutdown_password_executor()
         stop_event.set()
         try:
             await asyncio.wait_for(task, timeout=30)
@@ -118,6 +125,7 @@ app.include_router(dm_editor_router)
 app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
 app.include_router(dm_personal_router)
+app.include_router(et_course_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()
