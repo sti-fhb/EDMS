@@ -67,6 +67,172 @@ class EtQuizRepository:
         )
         return (max_order or 0) + 1
 
+    async def update_settings(
+        self,
+        db: AsyncSession,
+        quiz_id: int,
+        version: int,
+        *,
+        name: str,
+        description: str | None,
+        pass_score: int,
+        time_limit_min: int | None,
+        max_retry: int,
+        operator: OperatorInfo,
+    ) -> int:
+        """更新測驗設定並遞增 `VERSION`；回傳受影響列數供樂觀鎖判定。"""
+        result = await db.execute(
+            update(EtQuiz)
+            .where(EtQuiz.quiz_id == quiz_id, EtQuiz.deleted == 0, EtQuiz.version == version)
+            .values(
+                quiz_name=name,
+                description=description,
+                pass_score=pass_score,
+                time_limit_min=time_limit_min,
+                max_retry=max_retry,
+                version=EtQuiz.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+        return result.rowcount
+
+    async def bump_version(self, db: AsyncSession, quiz_id: int, version: int, operator: OperatorInfo) -> int:
+        """僅遞增測驗 `VERSION`（供題目重排之樂觀鎖）；回傳受影響列數。"""
+        result = await db.execute(
+            update(EtQuiz)
+            .where(EtQuiz.quiz_id == quiz_id, EtQuiz.deleted == 0, EtQuiz.version == version)
+            .values(version=EtQuiz.version + 1, updated_user=operator.user_id, updated_date=utcnow())
+        )
+        await db.flush()
+        return result.rowcount
+
+    async def get_question(self, db: AsyncSession, question_id: int) -> EtQuestion | None:
+        return await db.scalar(select(EtQuestion).where(EtQuestion.question_id == question_id, EtQuestion.deleted == 0))
+
+    async def add_question(
+        self,
+        db: AsyncSession,
+        quiz_id: int,
+        *,
+        question_type: str,
+        stem: str,
+        points: int,
+        options: list[tuple[str, bool]],
+        operator: OperatorInfo,
+    ) -> EtQuestion:
+        """新增題目與其全部選項，追加至測驗最末。
+
+        選項順序即傳入陣列的順序。這是**教師端**順序；學員作答時的選項順序由系統
+        洗牌並凍結於 attempt 快照（data-model §ET_OPTION：「學員端洗牌不依此」）。
+        """
+        now = utcnow()
+        question = EtQuestion(
+            quiz_id=quiz_id,
+            question_type=question_type,
+            stem=stem,
+            points=points,
+            sort_order=await self.next_question_order(db, quiz_id),
+            version=0,
+            created_user=operator.user_id,
+            created_date=now,
+        )
+        db.add(question)
+        await db.flush()
+        await self._insert_options(db, question.question_id, options, operator)
+        return question
+
+    async def replace_question(
+        self,
+        db: AsyncSession,
+        question_id: int,
+        version: int,
+        *,
+        question_type: str,
+        stem: str,
+        points: int,
+        options: list[tuple[str, bool]],
+        operator: OperatorInfo,
+    ) -> int:
+        """更新題目本體並**全量覆寫**其選項；回傳題目更新之受影響列數。
+
+        選項全量覆寫（舊的軟刪、新的插入）而非逐項 diff：選項無獨立識別需求——
+        作答紀錄以 snapshot 保存當時的選項內容，不以 `OPTION_ID` 外鍵關聯，
+        故換一批選項不會讓歷史作答失去意義。
+
+        **先更題目再換選項**：題目更新帶樂觀鎖，版本不符時 rowcount 為 0，此時不該
+        已經把選項換掉。呼叫端據 rowcount 判定並讓交易回滾。
+        """
+        result = await db.execute(
+            update(EtQuestion)
+            .where(
+                EtQuestion.question_id == question_id,
+                EtQuestion.deleted == 0,
+                EtQuestion.version == version,
+            )
+            .values(
+                question_type=question_type,
+                stem=stem,
+                points=points,
+                version=EtQuestion.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+        if result.rowcount:
+            await db.execute(
+                update(EtOption)
+                .where(EtOption.question_id == question_id, EtOption.deleted == 0)
+                .values(deleted=1, updated_user=operator.user_id, updated_date=utcnow())
+            )
+            await self._insert_options(db, question_id, options, operator)
+        return result.rowcount
+
+    async def apply_question_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
+        """依 `{question_id: sort_order}` 批次更新順序。
+
+        **不需兩階段寫入**——`ET_QUESTION` 之 `SORT_ORDER` 沒有唯一約束（僅一般索引
+        `IX_ET_QUESTION_QUIZ`），data-model 亦未要求其唯一，故中途出現重複值無妨。
+        章節 / 項目 / 影片才需要負數暫存區。
+
+        亦不遞增題目自身 `VERSION`：順序屬測驗結構，遞增會讓正在編輯該題的另一裝置
+        無故衝突。
+        """
+        if not order_map:
+            return
+        now = utcnow()
+        for question_id, sort_order in order_map.items():
+            await db.execute(
+                update(EtQuestion)
+                .where(EtQuestion.question_id == question_id, EtQuestion.deleted == 0)
+                .values(sort_order=sort_order, updated_user=operator.user_id, updated_date=now)
+            )
+        await db.flush()
+
+    async def resequence_questions(self, db: AsyncSession, quiz_id: int, operator: OperatorInfo) -> None:
+        """刪除後把剩餘題目之 `SORT_ORDER` 重編為 1..N。"""
+        remaining = await self.list_questions(db, quiz_id)
+        await self.apply_question_order(db, {q.question_id: i for i, q in enumerate(remaining, start=1)}, operator)
+
+    async def _insert_options(
+        self, db: AsyncSession, question_id: int, options: list[tuple[str, bool]], operator: OperatorInfo
+    ) -> None:
+        now = utcnow()
+        for index, (text, is_correct) in enumerate(options, start=1):
+            db.add(
+                EtOption(
+                    question_id=question_id,
+                    option_text=text,
+                    is_correct=is_correct,
+                    sort_order=index,
+                    created_user=operator.user_id,
+                    created_date=now,
+                )
+            )
+        await db.flush()
+
     async def soft_delete_questions(self, db: AsyncSession, question_ids: list[int], operator: OperatorInfo) -> None:
         """軟刪除題目、其選項，及學員於該題之作答明細。
 

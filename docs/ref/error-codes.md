@@ -130,6 +130,11 @@
 | ET_MATERIAL_003 | 422 | 影片格式或大小不符 |
 | ET_MATERIAL_004 | 422 | 無法解析影片長度，請改用其他格式 |
 | ET_MATERIAL_005 | 409 | 同一教材不可重複引用同一份文件 |
+| ET_QUIZ_001 | 404 | 查無此測驗 |
+| ET_QUESTION_001 | 404 | 查無此題目 |
+| ET_QUESTION_002 | 422 | 正確選項之設定不符題型規定 |
+| ET_QUESTION_003 | 422 | 每題選項數須介於 2 至 6 個 |
+| ET_QUESTION_004 | 422 | 重排清單與測驗題目不一致 |
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
 >
