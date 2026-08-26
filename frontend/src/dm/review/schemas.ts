@@ -75,8 +75,15 @@ export const REVIEW_TYPE_LABELS: Record<string, string> = {
 /** 停留天數標紅門檻（與後端 DM_REMIND_THRESHOLD 預設一致；逾此於清單標紅警示）。 */
 export const REMIND_THRESHOLD_DAYS = 7
 
-/** 已完成狀態顯示名。 */
+/** 送審狀態顯示名（一律中文；#8 詞彙統一）。 */
 export const REVIEW_STATUS_LABELS: Record<string, string> = {
+  PENDING: "待審核",
   APPROVED: "已核准",
   REJECTED: "已退回",
+  WITHDRAWN: "已撤回",
+}
+
+/** 送審狀態顯示名（無對應時回中文「未知狀態」，不外顯英文代碼）。 */
+export function reviewStatusLabel(status: string): string {
+  return REVIEW_STATUS_LABELS[status] ?? "未知狀態"
 }
