@@ -16,15 +16,39 @@
 
 ## 安全約束
 
-- `create_subprocess_exec` 不經 shell——`shell=True` 會讓檔名變成命令注入面
+- **不經 shell**（傳 list 而非字串）——`shell=True` 會讓檔名變成命令注入面
 - 傳入的路徑是**後端自建的暫存檔路徑**，不是使用者提供的字串
 - 設 timeout：畸形檔可能讓 ffprobe 久候不返
 - 限制讀取的輸出量：ffprobe 正常只吐一行數字，異常時不該讓它灌爆記憶體
+
+## 為何用執行緒 + 阻塞版 subprocess，而非 `asyncio.create_subprocess_exec`
+
+原本用 asyncio 版，在 `fastapi dev`（`--reload`）下必定拋 `NotImplementedError`。
+根因在 uvicorn 的迴圈選擇（`uvicorn/loops/asyncio.py`）：
+
+```python
+if sys.platform == "win32" and not use_subprocess:
+    return asyncio.ProactorEventLoop
+return asyncio.SelectorEventLoop          # use_subprocess=True 走這裡
+```
+
+而 `use_subprocess = reload or workers > 1`。也就是說——uvicorn **因為它自己要用
+子行程**（重載 / 多 worker）而選了一個**不支援子行程**的迴圈，我們的 ffprobe 就跟著
+陣亡。Windows 上 `SelectorEventLoop` 不實作 `_make_subprocess_transport`。
+
+更糟的是它的失敗形狀：單 worker 的正式環境用 Proactor、跑得好好的，只有開發模式
+壞掉——很容易被當成「我這台環境的問題」而放過。
+
+改用 `asyncio.to_thread` + 阻塞版 `subprocess.run` 後與迴圈實作無關，任何平台、
+任何 loop policy 都一致。代價是佔用一個執行緒池執行緒，但 ffprobe 只讀 metadata、
+毫秒等級就返回。
 """
 
 import asyncio
 import logging
 import math
+import subprocess
+import sys
 
 from app.core.exceptions import AppError
 
@@ -85,6 +109,27 @@ def parse_duration_output(text: str) -> int | None:
     return max(1, math.floor(seconds))
 
 
+def _run_ffprobe(path: str) -> subprocess.CompletedProcess[bytes]:
+    """同步執行 ffprobe（於工作執行緒中呼叫）。"""
+    return subprocess.run(  # noqa: S603 - 固定參數清單、不經 shell、路徑為後端自建
+        [
+            FFPROBE,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            path,
+        ],
+        capture_output=True,
+        timeout=PROBE_TIMEOUT_SEC,
+        check=False,
+        # Windows 上避免每次探測都閃一個主控台視窗
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+
+
 async def probe_duration_sec(path: str) -> int:
     """以 `ffprobe` 取影片長度（整數秒）。
 
@@ -101,37 +146,21 @@ async def probe_duration_sec(path: str) -> int:
             症狀會是「所有影片都傳不上去」，缺了這行 log 會被誤判為程式壞掉。
     """
     try:
-        process = await asyncio.create_subprocess_exec(
-            FFPROBE,
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        completed = await asyncio.to_thread(_run_ffprobe, path)
     except FileNotFoundError:
         logger.error(
             "找不到 ffprobe 執行檔，影片長度無法解析——這是**環境設定問題**，"
             "所有影片上傳都會失敗。請確認執行環境已安裝 ffmpeg（見 README 環境需求）。"
         )
         raise _UNPARSEABLE from None
-
-    try:
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=PROBE_TIMEOUT_SEC)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+    except subprocess.TimeoutExpired:
         logger.warning("ffprobe 解析影片長度逾時（不記檔案路徑）")
         raise _UNPARSEABLE from None
 
-    if process.returncode != 0:
+    if completed.returncode != 0:
         raise _UNPARSEABLE
 
-    duration = parse_duration_output(stdout[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace"))
+    duration = parse_duration_output(completed.stdout[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace"))
     if duration is None:
         raise _UNPARSEABLE
     return duration

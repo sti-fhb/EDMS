@@ -1,4 +1,5 @@
 import AddIcon from "@mui/icons-material/Add"
+import CloseIcon from "@mui/icons-material/Close"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined"
 import Alert from "@mui/material/Alert"
@@ -62,14 +63,15 @@ interface QuizDialogProps {
  * spec：題目順序由系統內建洗牌，教師不設定。故題庫頁沒有拖拉手把——
  * 後端雖有 `SORT_ORDER` 與重排端點（供日後需要時使用），UI 刻意不暴露。
  *
- * ## 關閉與儲存（2026-08-26 依實測回饋調整）
+ * ## 底部按鈕只在「測驗設定」分頁出現
  *
- * 兩顆按鈕在**兩個分頁都在**，行為一致：儲存＝存下設定並關閉、關閉＝放棄未存的
- * 變更並關閉。原本題庫分頁只有一顆「關閉」，使用者切過去再關掉時會不確定設定
- * 分頁改的東西到底存了沒。
+ * 設定分頁：關閉 + 儲存（儲存＝存下設定並關閉）。
+ * **題庫分頁沒有底部按鈕**——每一題自己就有「取消 / 儲存題目」，再放一組容易讓人
+ * 以為那顆「儲存」會存題目（它只存設定），而「關閉」也不會檢核展開中的題目。
+ * 關閉一律走標題列的 ✕，兩個分頁都在。
  *
- * 關閉前是否跳確認，由**有無未儲存變更**決定（`isDirty`）——沒改過還問一次是干擾。
- * 題目是逐題儲存的（各有自己的 `VERSION`），不列入 `isDirty`。
+ * 關閉前是否跳確認由 `isDirty` 決定——沒改過還問一次是干擾。**展開中的題目編輯器
+ * 也算 dirty**：那裡面的內容同樣會因為關閉而消失。
  */
 export function QuizDialog({
   open,
@@ -104,14 +106,20 @@ export function QuizDialog({
   }
   if (!open && loadedId !== null) setLoadedId(null)
 
-  /** 設定表單是否有未儲存的變更。題目不算——它們各自即時儲存。 */
+  /**
+   * 是否有未儲存的變更。
+   *
+   * 已存檔的題目不算（各自即時儲存），但**展開中的題目編輯器算**——關閉視窗會讓
+   * 那一題正在編輯的內容消失，使用者理應被提醒。
+   */
   const isDirty =
-    quiz !== null &&
+    editing !== null ||
+    (quiz !== null &&
     (name !== quiz.quiz_name ||
       description !== (quiz.description ?? "") ||
       passScore !== quiz.pass_score ||
       timeLimit !== (quiz.time_limit_min === null ? "" : String(quiz.time_limit_min)) ||
-      maxRetry !== quiz.max_retry)
+      maxRetry !== quiz.max_retry))
 
   const handleSaveSettings = () => {
     onSaveSettings({
@@ -141,7 +149,18 @@ export function QuizDialog({
 
   return (
     <Dialog open={open} onClose={() => onClose(isDirty)} maxWidth="md" fullWidth>
-      <DialogTitle>{readOnly ? "檢視測驗" : "編輯測驗"}</DialogTitle>
+      <DialogTitle sx={{ pr: 6 }}>
+        {readOnly ? "檢視測驗" : "編輯測驗"}
+        <IconButton
+          // 名稱與底部的「關閉」刻意不同——設定分頁兩者並存，同名會讓輔助技術
+          // 與測試都分不出是哪一顆
+          aria-label="關閉視窗"
+          onClick={() => onClose(isDirty)}
+          sx={{ position: "absolute", right: 8, top: 8 }}
+        >
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
       <DialogContent dividers>
         {loading ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
@@ -328,14 +347,17 @@ export function QuizDialog({
           </>
         )}
       </DialogContent>
-      <DialogActions>
-        <Button onClick={() => onClose(isDirty)}>關閉</Button>
-        {!readOnly && (
-          <Button variant="contained" disabled={loading} onClick={handleSaveSettings}>
-            儲存
-          </Button>
-        )}
-      </DialogActions>
+      {/* 只有設定分頁有底部按鈕——題庫分頁每題自帶「取消 / 儲存題目」，再放一組會混淆 */}
+      {tab === 0 && (
+        <DialogActions>
+          <Button onClick={() => onClose(isDirty)}>關閉</Button>
+          {!readOnly && (
+            <Button variant="contained" disabled={loading} onClick={handleSaveSettings}>
+              儲存
+            </Button>
+          )}
+        </DialogActions>
+      )}
     </Dialog>
   )
 }

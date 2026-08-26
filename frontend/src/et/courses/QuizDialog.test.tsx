@@ -161,27 +161,41 @@ describe("測驗編輯視窗", () => {
     const user = userEvent.setup()
     const { onClose } = renderDialog()
     // 沒改過 → 不必確認，直接關
-    await user.click(await screen.findByRole("button", { name: "關閉" }))
+    await user.click(await screen.findByRole("button", { name: "關閉視窗" }))
     expect(onClose).toHaveBeenLastCalledWith(false)
 
     await user.clear(screen.getByDisplayValue("基本概念測驗"))
-    await user.click(screen.getByRole("button", { name: "關閉" }))
+    await user.click(screen.getByRole("button", { name: "關閉視窗" }))
     expect(onClose).toHaveBeenLastCalledWith(true)
   })
 
-  it("題庫分頁同樣有關閉與儲存兩顆按鈕", async () => {
-    // 原本題庫分頁只有「關閉」，切過去再關掉時會不確定設定分頁改的東西存了沒
+  it("題庫分頁沒有底部按鈕——每題自帶取消 / 儲存題目", async () => {
+    // 再放一組容易讓人以為那顆「儲存」會存題目（它只存設定）
     const user = userEvent.setup()
     renderDialog()
     await user.click(await screen.findByRole("tab", { name: /題庫管理/ }))
-    expect(screen.getByRole("button", { name: "關閉" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "儲存" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "關閉" })).not.toBeInTheDocument()
+    // 關閉改由標題列的 ✕ 提供，兩個分頁都在
+    expect(screen.getByRole("button", { name: "關閉視窗" })).toBeInTheDocument()
+  })
+
+  it("展開中的題目編輯器算未儲存變更", async () => {
+    // 關閉視窗會讓那一題正在編輯的內容消失，使用者理應被提醒
+    const user = userEvent.setup()
+    const { onClose } = renderDialog()
+    await user.click(await screen.findByRole("tab", { name: /題庫管理/ }))
+    await user.click(await screen.findByRole("button", { name: "新增題目" }))
+    await user.click(screen.getByRole("button", { name: "關閉視窗" }))
+
+    expect(onClose).toHaveBeenLastCalledWith(true)
   })
 
   it("唯讀模式不顯示儲存與編輯入口", async () => {
     const user = userEvent.setup()
     renderDialog({ readOnly: true })
     expect(screen.queryByRole("button", { name: "儲存" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "關閉視窗" })).toBeInTheDocument()
 
     await user.click(await screen.findByRole("tab", { name: /題庫管理/ }))
     expect(screen.queryByRole("button", { name: "新增題目" })).not.toBeInTheDocument()

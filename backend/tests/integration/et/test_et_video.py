@@ -12,7 +12,9 @@
 > 環境缺件應該讓 CI 紅燈，而不是靜靜地跳過。
 """
 
+import asyncio
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,7 @@ from app.dp.users.models import DpUser
 from app.et.constants import ITEM_MATERIAL, ROLE_TEACHER
 from app.et.material import storage
 from app.et.material.models import EtMaterialVideo
+from app.et.material.video_probe import probe_duration_sec
 from app.et.progress.models import EtProgressInterval, EtProgressVideo
 from app.et.roles.models import EtUserRole
 
@@ -293,6 +296,34 @@ class TestDelete:
         await _upload(client, owner, mid, name="sample.mp4")
         d = await _put(client, other, mid, description_html="<p>x</p>", video_ids=[])
         assert d.status_code == 403
+
+
+class TestLoopIndependence:
+    """⚠️ 釘住 2026-08-26 的實測事故：影片上傳在 `fastapi dev` 下必定 500。
+
+    uvicorn 於 `--reload` 或多 worker 時（`use_subprocess=True`）選用
+    `SelectorEventLoop`，而 Windows 的 SelectorEventLoop **不實作**
+    `_make_subprocess_transport`——原本以 `asyncio.create_subprocess_exec` 呼叫
+    ffprobe 的實作因此拋 `NotImplementedError`，冒成未處理的 500。
+
+    整套測試當時全綠卻擋不下它：測試跑在預設（Proactor）迴圈上，而正式環境單 worker
+    也是 Proactor。**只有開發模式會壞**——最容易被當成「我這台環境的問題」的形狀。
+
+    現行實作以 `asyncio.to_thread` + 阻塞版 `subprocess.run`，與迴圈實作無關。
+    """
+
+    def test_於_selector_事件迴圈下仍可解析長度(self) -> None:
+        policy = asyncio.get_event_loop_policy()
+        try:
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            loop = asyncio.new_event_loop()
+            try:
+                assert loop.run_until_complete(probe_duration_sec(str(_FIXTURE))) == 3
+            finally:
+                loop.close()
+        finally:
+            asyncio.set_event_loop_policy(policy)
 
 
 class TestStorageFence:
