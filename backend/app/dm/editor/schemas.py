@@ -50,6 +50,30 @@ class EditorDocTags(BaseModel):
     retrieval_ids: list[str]
 
 
+class DraftMeta(BaseModel):
+    """續編草稿之編輯器 meta（author-scoped；供 DRAFT-status 文件亦可載，不經 DM02 詳細端點）。
+
+    父文件 DRAFT（首版草稿）→ `name_editable=True`（名稱可改，Q1=A）；父文件 PUBLISHED（新版本草稿）
+    → `name_editable=False`（名稱唯讀，比照 FR-003）。分類綁 DOC_ID 一律唯讀，不提供可編輯性旗標。
+    """
+
+    doc_id: str
+    doc_name: str
+    category_code: str
+    category_name: str
+    func_code: str | None
+    func_name: str | None
+    doc_status: str  # 父文件狀態（DRAFT / PUBLISHED）
+    name_editable: bool
+    draft_version_id: int  # 本人現有之 DRAFT 版本（續編對象）
+    version_no: str | None
+    change_summary: str | None
+    file_name: str | None
+    file_size: int | None
+    previewable: bool
+    assigned_reviewer: str | None  # 退回 / 撤回草稿之前次指定審核者（供預帶；未送審為 None）
+
+
 class OptionItem(BaseModel):
     """表單受控下拉項。"""
 

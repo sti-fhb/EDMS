@@ -27,6 +27,7 @@ from app.dm.document.file_store import is_previewable, validate_upload
 from app.dm.editor.repository import EditorRepository
 from app.dm.editor.schemas import (
     CreateResult,
+    DraftMeta,
     EditorDocTags,
     EditorOptions,
     OptionItem,
@@ -42,6 +43,8 @@ from app.services import AuditLogService
 
 _DRAFT = "DRAFT"
 _PENDING_REVIEW = "PENDING_REVIEW"
+_REJECTED = "REJECTED"
+_WITHDRAWN = "WITHDRAWN"
 _MANUAL = "MANUAL"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
@@ -251,6 +254,112 @@ class EditorService:
             after={"version_id": ver.version_id, "version_no": version_no},
         )
         return VersionResult(version_id=ver.version_id, previewable=fmeta.previewable)
+
+    # ── 續編草稿（#222）──────────────────────────────
+
+    async def get_draft_meta(self, db: AsyncSession, *, doc_id: str, user_id: str) -> DraftMeta:
+        """續編模式 author-scoped 之編輯器 meta（供 DRAFT-status 文件亦可載，不經 DM02 詳細端點）。
+
+        回文件名稱 / 分類 / func / 父文件狀態 + 本人現有 DRAFT 版本內容（版號 / 摘要 / 檔案）+
+        （退回 / 撤回草稿之）前次指定審核者。名稱可編輯性依父文件狀態（DRAFT 可改、PUBLISHED 唯讀，Q1=A）。
+
+        Raises:
+            AppError: 查無文件 / 查無本人可續編之 DRAFT 版本 / 無權（404 DM_DOC_017）。
+        """
+        doc = await self._repo.get_document(db, doc_id)
+        if doc is None:
+            raise AppError(status_code=404, detail="查無可續編之草稿或無權存取", error_code="DM_DOC_017")
+        ver = await self._repo.get_author_open_version(db, doc_id, user_id)
+        if ver is None or ver.status != _DRAFT:  # 僅本人之 DRAFT 版本可續編（PENDING_REVIEW / 無 → 無可續編草稿）
+            raise AppError(status_code=404, detail="查無可續編之草稿或無權存取", error_code="DM_DOC_017")
+        category_name = await self._repo.get_category_name(db, doc.category_code) or doc.category_code
+        func_name = await self._repo.get_func_name(db, doc.func_code) if doc.func_code else None
+        last = await self._repo.get_last_review(db, ver.version_id)
+        # 退回 / 撤回草稿預帶前次指定審核者供參考；從未送審 → None
+        prior_reviewer = last.assigned_reviewer if last is not None and last.status in (_REJECTED, _WITHDRAWN) else None
+        return DraftMeta(
+            doc_id=doc.doc_id,
+            doc_name=doc.doc_name,
+            category_code=doc.category_code,
+            category_name=category_name,
+            func_code=doc.func_code,
+            func_name=func_name,
+            doc_status=doc.status,
+            name_editable=doc.status == _DRAFT,  # 首版草稿名稱可改；已發布文件之新版草稿唯讀
+            draft_version_id=ver.version_id,
+            version_no=ver.version_no,
+            change_summary=ver.change_summary,
+            file_name=ver.file_name,
+            file_size=ver.file_size,
+            previewable=is_previewable(ver.file_mime or "") if ver.file_mime else False,
+            assigned_reviewer=prior_reviewer,
+        )
+
+    async def update_draft_version(
+        self,
+        db: AsyncSession,
+        *,
+        doc_id: str,
+        version_id: int,
+        doc_name: str | None,
+        audience_ids: Sequence[int],
+        retrieval_ids: Sequence[int],
+        version_no: str,
+        change_summary: str,
+        file_name: str | None,
+        file_bytes: bytes | None,
+        file_mime: str | None,
+        op: OperatorInfo,
+    ) -> VersionResult:
+        """續編：更新既有 DRAFT 版本（版號 / 摘要 / 檔案）+ 文件層標籤覆寫，不另開版本（不撞單一草稿唯一索引）。
+
+        父文件為 DRAFT（首版草稿）時一併更新文件名稱（Q1=A）；父文件已發布（新版本草稿）時名稱唯讀、忽略 doc_name。
+        檔案未附（file_bytes 空）則保留既有檔案。
+
+        Raises:
+            AppError: 查無文件 / 版本（404 DM_DOC_001）、非本人（403 DM_DRAFT_003）、非草稿版本（409 DM_DRAFT_004）、
+                廢止待簽核（409 DM_DOC_008）。
+        """
+        version_no = (version_no or "").strip()
+        change_summary = (change_summary or "").strip()
+        doc = await self._repo.get_document(db, doc_id)
+        if doc is None:
+            raise _NOT_FOUND
+        ver = await self._repo.get_version(db, doc_id, version_id)
+        if ver is None:
+            raise _NOT_FOUND
+        if ver.created_user != op.user_id:
+            raise AppError(status_code=403, detail="僅能續編本人之草稿", error_code="DM_DRAFT_003")
+        if ver.status != _DRAFT:
+            raise AppError(status_code=409, detail="僅草稿版本可續編", error_code="DM_DRAFT_004")
+        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
+        if await self._repo.has_pending_obsolete(db, doc_id):
+            raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
+        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
+
+        now = utcnow()
+        previewable = is_previewable(ver.file_mime or "") if ver.file_mime else False
+        if file_bytes:  # 有附新檔才落盤覆寫；否則保留既有檔案
+            fmeta = await self._store_file(
+                db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes, file_mime=file_mime
+            )
+            ver.file_name, ver.file_path, ver.file_size, ver.file_mime = fmeta.name, fmeta.path, fmeta.size, fmeta.mime
+            previewable = fmeta.previewable
+        ver.version_no, ver.change_summary = version_no, change_summary
+        ver.updated_user, ver.updated_date = op.user_id, now
+        if doc.status == _DRAFT and doc_name is not None:  # 首版草稿可改名（Q1=A）；已發布文件唯讀、忽略
+            doc.doc_name = doc_name.strip()
+            doc.updated_user, doc.updated_date = op.user_id, now
+        await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)
+        await db.flush()
+        await self._log(
+            db,
+            action_type="UPDATE",
+            operator_id=op.user_id,
+            target=doc_id,
+            after={"version_id": version_id, "version_no": version_no, "operation": "CONTINUE_DRAFT"},
+        )
+        return VersionResult(version_id=version_id, previewable=previewable)
 
     async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> EditorDocTags:
         """取文件現有標籤（可見對象 / 檢索之 TAG_ID），供編輯模式表單預帶。查無文件 → 404。"""

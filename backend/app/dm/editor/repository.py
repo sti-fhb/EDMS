@@ -135,6 +135,27 @@ class EditorRepository:
             )
         )
 
+    async def get_category_name(self, db: AsyncSession, category_code: str) -> str | None:
+        """取分類中文名（供 draft-meta 顯示）。"""
+        from app.dm.catalog.models import DmCategory
+
+        return await db.scalar(select(DmCategory.category_name).where(DmCategory.category_code == category_code))
+
+    async def get_func_name(self, db: AsyncSession, func_code: str) -> str | None:
+        """取關聯作業項目中文名（供 draft-meta 顯示）。"""
+        from app.dm.catalog.models import DmFunc
+
+        return await db.scalar(select(DmFunc.func_name).where(DmFunc.func_code == func_code))
+
+    async def get_last_review(self, db: AsyncSession, version_id: int) -> DmReview | None:
+        """取該版本最近一次送審（供退回 / 撤回草稿預帶前次指定審核者）；無則 None。"""
+        return await db.scalar(
+            select(DmReview)
+            .where(DmReview.version_id == version_id)
+            .order_by(DmReview.submit_date.desc(), DmReview.review_id.desc())
+            .limit(1)
+        )
+
     async def get_author_open_version(self, db: AsyncSession, doc_id: str, user_id: str) -> DmDocVersion | None:
         """取「該撰寫者」於此文件既有之進行中版本（草稿或審核中）；無則 None。
 

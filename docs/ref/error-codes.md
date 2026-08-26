@@ -155,6 +155,8 @@
 | DM_REVIEW_007 | 403 | 僅送審撰寫者本人可撤回（US9）|
 | DM_DRAFT_001 | 403 | 僅能刪除本人之草稿（US9）|
 | DM_DRAFT_002 | 409 | 僅草稿版本可刪除（US9）|
+| DM_DRAFT_003 | 403 | 僅能續編本人之草稿（US5 #222）|
+| DM_DRAFT_004 | 409 | 僅草稿版本可續編（US5 #222）|
 | DM_CATALOG_001 | 409 | 受控項目代碼已存在 |
 | DM_CATALOG_002 | 404 | 查無此受控項目 |
 | DM_CATALOG_003 | 422 | 代碼格式不合法，僅允許英文與數字 |
@@ -176,5 +178,6 @@
 | DM_DOC_014 | 422 | 請填寫廢止原因（DM-MSG-DM02-011）|
 | DM_DOC_015 | 422 | 請選擇指定審核者（DM-MSG-DM02-014）|
 | DM_DOC_016 | 409 | 僅能對已發布文件發起廢止（US8）|
+| DM_DOC_017 | 404 | 查無可續編之草稿或無權存取（US5 續編 #222）|
 
 > `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 spec_us7 FR-06）。
