@@ -23,7 +23,7 @@ from app.et.course.repository import EtItemRepository
 from app.et.course.rules import ensure_owner
 from app.et.material import storage
 from app.et.material.repository import EtMaterialRepository
-from app.et.material.rules import ensure_material_has_media
+from app.et.material.rules import ensure_material_has_media, ensure_video_name_unused
 from app.et.material.schemas import DmDocOption, DocRow, MaterialDetail, MaterialUpdateReq, VideoRow
 from app.et.material.video_probe import probe_duration_sec
 from app.services import AuditLogService, ParamService
@@ -161,9 +161,9 @@ class EtMaterialService:
 
         ## 步驟順序有意義
 
-        1. 擁有權 → 2. 讀參數 → 3. 檢副檔名 → 4. **串流寫暫存檔**（邊寫邊數大小）
-        → 5. **`ffprobe` 取長度**（取不到就刪暫存檔、拒收）→ 6. 搬到正式路徑
-        → 7. 寫 DB 紀錄
+        1. 擁有權 → 2. 讀參數 → 3. 檢副檔名 → 4. **擋同名影片**（落地前）
+        → 5. **串流寫暫存檔**（邊寫邊數大小）→ 6. **`ffprobe` 取長度**（取不到就刪
+        暫存檔、拒收）→ 7. 搬到正式路徑 → 8. 寫 DB 紀錄
 
         長度探測必須在檔案落地**之後**（ffprobe 要讀檔）、寫 DB **之前**
         （data-model：取不到不得存檔）。搬檔放在寫 DB 之前是刻意的——見
@@ -173,7 +173,12 @@ class EtMaterialService:
 
         formats_raw = await self._params.get_param_value(db, "ET_VIDEO_ALLOWED_FORMATS") or _DEFAULT_FORMATS
         max_size_mb = await self._params.get_int_param(db, "ET_VIDEO_MAX_SIZE_MB", "VALUE", _DEFAULT_MAX_SIZE_MB)
-        ext = storage.ensure_format_allowed(upload.filename or "", formats_raw.split(","))
+        file_name = upload.filename or ""
+        ext = storage.ensure_format_allowed(file_name, formats_raw.split(","))
+
+        # 在寫檔**之前**擋重複——等 500 MB 寫完才發現重複，I/O 與使用者的等待都白費
+        existing = await self._materials.list_videos(db, material_id)
+        ensure_video_name_unused(existing_names={v.file_name for v in existing}, file_name=file_name)
 
         tmp_path, size_bytes = await storage.save_video_stream(
             upload, ext=ext, max_size_bytes=max_size_mb * 1024 * 1024
@@ -190,7 +195,7 @@ class EtMaterialService:
                 db,
                 material_id,
                 file_path=final_path,
-                file_name=upload.filename or f"video.{ext}",
+                file_name=file_name or f"video.{ext}",
                 duration_sec=duration_sec,
                 file_size_bytes=size_bytes,
                 operator=operator,

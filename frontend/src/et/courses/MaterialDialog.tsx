@@ -132,6 +132,8 @@ export function MaterialDialog({
   const [loadedId, setLoadedId] = useState<number | null>(null)
   const [loadedVideos, setLoadedVideos] = useState("")
   const [dragOver, setDragOver] = useState(false)
+  /** 前端自行擋下的錯誤（如同名影片）。與 `error`（後端回的）共用同一個 Alert 位置。 */
+  const [localError, setLocalError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   /**
    * 尚未落地之引用的暫時 id（遞減計數器）。
@@ -194,7 +196,15 @@ export function MaterialDialog({
   }
 
   const pickFile = (file: File | undefined) => {
-    if (file) onUploadVideo(file)
+    if (!file) return
+    // 前端先擋一次同名影片——後端也會擋（`ET_MATERIAL_005`），但那要先把整支檔案
+    // 傳上去才知道。單檔上限 500 MB，沒必要為了一個一定會被拒的請求等那麼久。
+    if (keptVideos.some((v) => v.file_name === file.name)) {
+      setLocalError("此教材已有同名影片，請先移除原有影片或改用其他檔名")
+      return
+    }
+    setLocalError(null)
+    onUploadVideo(file)
   }
 
   return (
@@ -207,8 +217,8 @@ export function MaterialDialog({
           </Stack>
         ) : (
           <Stack spacing={2.5} sx={{ pt: 1 }}>
-            {error && <Alert severity="error">{error}</Alert>}
-            {!error && hasNoMedia && !readOnly && (
+            {(error ?? localError) && <Alert severity="error">{error ?? localError}</Alert>}
+            {!error && !localError && hasNoMedia && !readOnly && (
               <Alert severity="info">教材須至少提供影片、文件或說明文字其中一項才能儲存。</Alert>
             )}
 

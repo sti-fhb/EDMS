@@ -184,6 +184,26 @@ describe("教材編輯視窗", () => {
     expect(screen.getByRole("button", { name: "儲存" })).toBeDisabled()
   })
 
+  it("同名影片於前端先擋下，不送出上傳", async () => {
+    // 後端也擋（ET_MATERIAL_005），但那要先把整支檔案傳上去才知道——單檔上限 500 MB
+    const user = userEvent.setup()
+    const { onUploadVideo } = renderDialog()
+    const input = screen.getByLabelText("選擇影片檔")
+    await user.upload(input, new File(["x"], "demo.mp4", { type: "video/mp4" }))
+
+    expect(onUploadVideo).not.toHaveBeenCalled()
+    expect(await screen.findByRole("alert")).toHaveTextContent("此教材已有同名影片")
+  })
+
+  it("不同檔名照常上傳", async () => {
+    const user = userEvent.setup()
+    const { onUploadVideo } = renderDialog()
+    const input = screen.getByLabelText("選擇影片檔")
+    await user.upload(input, new File(["x"], "another.mp4", { type: "video/mp4" }))
+
+    expect(onUploadVideo).toHaveBeenCalled()
+  })
+
   it("提供拖拉上傳區", async () => {
     renderDialog()
     expect(await screen.findByRole("button", { name: "拖拉或點擊選擇影片檔" })).toBeInTheDocument()

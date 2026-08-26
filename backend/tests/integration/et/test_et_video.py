@@ -206,6 +206,44 @@ class TestUpload:
         rows = list(await db.scalars(select(EtMaterialVideo).where(EtMaterialVideo.material_id == mid)))
         assert rows == [], "長度取不到時不得存檔（覆蓋率分母缺失會使章節永久卡住）"
 
+    async def test_同名影片重複上傳被擋(self, client, db) -> None:
+        uid = await _user(db, "ETV_DUP")
+        mid = await _material(client, uid)
+        first = await _upload(client, uid, mid, name="sample.mp4")
+        assert first.status_code == 201, first.text
+
+        again = await _upload(client, uid, mid, name="sample.mp4")
+        assert again.status_code == 409
+        assert again.json()["error_code"] == "ET_MATERIAL_005"
+
+    async def test_重複上傳不留下半成品檔案(self, client, db) -> None:
+        """在寫檔之前就擋下——不該白做一次 500 MB 的 I/O。"""
+        uid = await _user(db, "ETV_DUP2")
+        mid = await _material(client, uid)
+        await _upload(client, uid, mid, name="sample.mp4")
+        before = _tmp_dir_entries()
+
+        await _upload(client, uid, mid, name="sample.mp4")
+        assert _tmp_dir_entries() == before, "被擋下的上傳不該產生暫存檔"
+
+    async def test_移除後可再次上傳同名影片(self, client, db) -> None:
+        """檢核只看未刪除的影片——誤刪後不該永久無法用回原本的檔名。"""
+        uid = await _user(db, "ETV_DUP3")
+        mid = await _material(client, uid)
+        first = await _upload(client, uid, mid, name="sample.mp4")
+        await _put(client, uid, mid, description_html="<p>說明</p>", video_ids=[])
+
+        again = await _upload(client, uid, mid, name="sample.mp4")
+        assert again.status_code == 201, f"移除後應可再次上傳同名影片：{again.text}"
+        assert again.json()["video_id"] != first.json()["video_id"]
+
+    async def test_不同檔名可上傳(self, client, db) -> None:
+        uid = await _user(db, "ETV_DUP4")
+        mid = await _material(client, uid)
+        await _upload(client, uid, mid, name="a.mp4")
+        r = await _upload(client, uid, mid, name="b.mp4")
+        assert r.status_code == 201, r.text
+
     async def test_非擁有者不可上傳(self, client, db) -> None:
         owner = await _user(db, "ETV_A1")
         other = await _user(db, "ETV_A2")
