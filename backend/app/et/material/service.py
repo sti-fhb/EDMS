@@ -21,6 +21,7 @@ from app.et.common.html_sanitize import sanitize_material_html
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.course.repository import EtItemRepository
 from app.et.course.rules import ensure_owner
+from app.et.material import storage
 from app.et.material.repository import EtMaterialRepository
 from app.et.material.rules import ensure_doc_not_duplicated, ensure_material_has_media
 from app.et.material.schemas import (
@@ -31,12 +32,18 @@ from app.et.material.schemas import (
     MaterialUpdateReq,
     VideoRow,
 )
-from app.services import AuditLogService
+from app.et.material.video_probe import probe_duration_sec
+from app.services import AuditLogService, ParamService
 
 _MODULE = "ET"
 _FUNC_NAME = "ET-COURSE"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此教材", error_code="ET_MATERIAL_001")
+
+#: 參數取不到時的保守預設值（與 `DP_PARAM` seed 一致）。參數被誤刪時寧可用預設值
+#: 繼續服務，也不要讓整個上傳功能掛掉。
+_DEFAULT_FORMATS = "mp4,webm"
+_DEFAULT_MAX_SIZE_MB = 500
 
 
 class EtMaterialService:
@@ -46,10 +53,12 @@ class EtMaterialService:
         self,
         materials: EtMaterialRepository | None = None,
         items: EtItemRepository | None = None,
+        params: ParamService | None = None,
         audit: AuditLogService | None = None,
     ) -> None:
         self._materials = materials or EtMaterialRepository()
         self._items = items or EtItemRepository()
+        self._params = params or ParamService()
         self._audit = audit or AuditLogService()
 
     async def get_detail(self, db: AsyncSession, material_id: int, *, actor_id: str) -> MaterialDetail:
@@ -92,6 +101,67 @@ class EtMaterialService:
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_MATERIAL")
         await self._log(db, "UPDATE", operator.user_id, course_id, "更新教材內容")
+
+    async def upload_video(self, db: AsyncSession, material_id: int, upload, *, operator: OperatorInfo) -> VideoRow:
+        """上傳一支教材影片。
+
+        ## 步驟順序有意義
+
+        1. 擁有權 → 2. 讀參數 → 3. 檢副檔名 → 4. **串流寫暫存檔**（邊寫邊數大小）
+        → 5. **`ffprobe` 取長度**（取不到就刪暫存檔、拒收）→ 6. 搬到正式路徑
+        → 7. 寫 DB 紀錄
+
+        長度探測必須在檔案落地**之後**（ffprobe 要讀檔）、寫 DB **之前**
+        （data-model：取不到不得存檔）。而搬檔放在寫 DB 之前是刻意的——
+        見 `storage.promote` 對兩種失敗後果不對稱性的說明。
+
+        寫 DB 失敗時刪掉正式檔：否則每次失敗的上傳都留一份 500 MB 的垃圾。
+        """
+        _, course_id = await self._require_owned(db, material_id, operator.user_id)
+
+        formats_raw = await self._params.get_param_value(db, "ET_VIDEO_ALLOWED_FORMATS") or _DEFAULT_FORMATS
+        max_size_mb = await self._params.get_int_param(db, "ET_VIDEO_MAX_SIZE_MB", "VALUE", _DEFAULT_MAX_SIZE_MB)
+        ext = storage.ensure_format_allowed(upload.filename or "", formats_raw.split(","))
+
+        tmp_path, size_bytes = await storage.save_video_stream(
+            upload, ext=ext, max_size_bytes=max_size_mb * 1024 * 1024
+        )
+        try:
+            duration_sec = await probe_duration_sec(tmp_path)
+        except BaseException:
+            storage.discard(tmp_path)
+            raise
+
+        final_path = storage.promote(tmp_path, video_id_hint=str(material_id), ext=ext)
+        try:
+            video = await self._materials.add_video(
+                db,
+                material_id,
+                file_path=final_path,
+                file_name=upload.filename or f"video.{ext}",
+                duration_sec=duration_sec,
+                file_size_bytes=size_bytes,
+                operator=operator,
+            )
+        except BaseException:
+            storage.discard(final_path)
+            raise
+
+        await self._log(db, "CREATE", operator.user_id, course_id, "上傳教材影片")
+        return VideoRow.model_validate(video)
+
+    async def delete_video(self, db: AsyncSession, video_id: int, *, operator: OperatorInfo) -> None:
+        """刪除單支影片：本體與學員觀看紀錄軟刪，剩餘影片順序遞補。
+
+        磁碟檔案**不刪**——軟刪除的語意是可回復（見 `repository.soft_delete_video`）。
+        """
+        video = await self._materials.get_video(db, video_id)
+        if video is None:
+            raise _NOT_FOUND
+        _, course_id = await self._require_owned(db, video.material_id, operator.user_id)
+        await self._materials.soft_delete_video(db, video_id, operator)
+        await self._materials.resequence_videos(db, video.material_id, operator)
+        await self._log(db, "DELETE", operator.user_id, course_id, "刪除教材影片")
 
     async def add_doc(
         self, db: AsyncSession, material_id: int, req: MaterialDocCreateReq, *, operator: OperatorInfo

@@ -11,7 +11,7 @@ router-level 掛 `get_et_context`（需任一 ET 角色），各端點另掛
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -25,6 +25,7 @@ from app.et.material.schemas import (
     MaterialDetail,
     MaterialDocCreateReq,
     MaterialUpdateReq,
+    VideoRow,
 )
 from app.et.material.service import EtMaterialService
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
@@ -69,6 +70,36 @@ async def update_material(
 ) -> None:
     """更新教材名稱與說明文字（說明文字經後端 allow-list 消毒；帶 `version`）。"""
     await _service.update(db, material_id, req, operator=operator)
+
+
+@router.post(
+    "/materials/{material_id}/videos",
+    response_model=VideoRow,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_material_video(
+    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    file: UploadFile = File(...),
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> VideoRow:
+    """上傳教材影片（multipart，**分塊串流寫檔**）。
+
+    單檔上限取自 `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`（預設 500 MB），格式取自
+    `ET_VIDEO_ALLOWED_FORMATS`。長度以 `ffprobe` 解析，**取不到不存檔**
+    （`ET_MATERIAL_004`）——覆蓋率的分母缺了它，章節永遠無法解鎖。
+    """
+    return await _service.upload_video(db, material_id, file, operator=operator)
+
+
+@router.delete("/videos/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_material_video(
+    video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """刪除單支影片（本體與學員觀看紀錄軟刪；磁碟檔案保留以維持可回復性）。"""
+    await _service.delete_video(db, video_id, operator=operator)
 
 
 @router.post(

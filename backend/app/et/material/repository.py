@@ -122,6 +122,83 @@ class EtMaterialRepository:
             )
         )
 
+    async def add_video(
+        self,
+        db: AsyncSession,
+        material_id: int,
+        *,
+        file_path: str,
+        file_name: str,
+        duration_sec: int,
+        file_size_bytes: int,
+        operator: OperatorInfo,
+    ) -> EtMaterialVideo:
+        """新增一支影片，追加至最末。
+
+        `duration_sec` 由 service 以 `ffprobe` 取得後傳入——**取不到就不會走到這裡**
+        （data-model：取得失敗不得存檔）。Repository 不自行探測：那會讓「有沒有驗過
+        長度」散在兩層，且 Repository 不該碰子行程。
+        """
+        video = EtMaterialVideo(
+            material_id=material_id,
+            file_path=file_path,
+            file_name=file_name,
+            duration_sec=duration_sec,
+            file_size_bytes=file_size_bytes,
+            sort_order=await self.next_video_order(db, material_id),
+            created_user=operator.user_id,
+            created_date=utcnow(),
+        )
+        db.add(video)
+        await db.flush()
+        return video
+
+    async def get_video(self, db: AsyncSession, video_id: int) -> EtMaterialVideo | None:
+        return await db.scalar(
+            select(EtMaterialVideo).where(EtMaterialVideo.video_id == video_id, EtMaterialVideo.deleted == 0)
+        )
+
+    async def soft_delete_video(self, db: AsyncSession, video_id: int, operator: OperatorInfo) -> None:
+        """軟刪除單支影片，並連帶軟刪學員於該影片之觀看紀錄。
+
+        **磁碟上的檔案不刪**：軟刪除的語意是「可回復」，把檔案砍掉就回復不了了。
+        代價是磁碟空間——需要真正回收時應由清理作業處理已軟刪超過保留期的檔案，
+        那是獨立的維運議題，不該混進使用者操作路徑。
+        """
+        audit = {"deleted": 1, "updated_user": operator.user_id, "updated_date": utcnow()}
+        for model in (EtProgressVideo, EtProgressInterval):
+            await db.execute(update(model).where(model.video_id == video_id, model.deleted == 0).values(**audit))
+        await db.execute(
+            update(EtMaterialVideo)
+            .where(EtMaterialVideo.video_id == video_id, EtMaterialVideo.deleted == 0)
+            .values(**audit)
+        )
+        await db.flush()
+
+    async def resequence_videos(self, db: AsyncSession, material_id: int, operator: OperatorInfo) -> None:
+        """刪除後把剩餘影片之 `SORT_ORDER` 重編為 1..N（**兩階段寫入**）。
+
+        兩階段的理由同章節 / 項目重排：`UX_ET_MATERIAL_VIDEO_ORDER` 為非 deferrable
+        之部分唯一索引，逐列即時檢核，直接遞補會在中途撞鍵。
+        """
+        remaining = await self.list_videos(db, material_id)
+        order_map = {v.video_id: i for i, v in enumerate(remaining, start=1)}
+        if not order_map:
+            return
+        now = utcnow()
+        for phase_value in (lambda target: -target, lambda target: target):
+            for video_id, sort_order in order_map.items():
+                await db.execute(
+                    update(EtMaterialVideo)
+                    .where(EtMaterialVideo.video_id == video_id, EtMaterialVideo.deleted == 0)
+                    .values(
+                        sort_order=phase_value(sort_order),
+                        updated_user=operator.user_id,
+                        updated_date=now,
+                    )
+                )
+        await db.flush()
+
     async def add_doc(self, db: AsyncSession, material_id: int, doc_id: str, operator: OperatorInfo) -> EtMaterialDoc:
         """新增一筆 DM 文件引用，追加至最末。"""
         doc = EtMaterialDoc(
