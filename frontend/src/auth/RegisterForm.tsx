@@ -7,22 +7,23 @@ import { useState } from "react"
 import type { FormEvent } from "react"
 
 import { authApi } from "./authService"
-import { makeRegisterRequestSchema } from "./schemas/registerSchema"
+import { registerRequestSchema } from "./schemas/registerSchema"
 import { useCooldown, formatCountdown } from "../hooks/useCooldown"
-import { usePasswordPolicy } from "../hooks/usePasswordPolicy"
 import { toApiError } from "../services/http"
 import { getFieldErrors } from "../utils/zodUtils"
 
 /**
- * 自助註冊表單（US2 #56，登入 overlay 的「註冊」分頁）。
- * 前端 Zod 驗證 → 後端伺服器端權威檢核。方案 B：送出成功後**不建帳號、不跳登入**，
- * 改顯示「驗證信已寄」狀態並提供重寄；使用者需點信中連結完成驗證後才能登入。
+ * 自助註冊表單（US2，登入 overlay 的「註冊」分頁）。
+ *
+ * **只收 Email 與姓名，不收密碼**（#212）：密碼於使用者點驗證連結後、在驗證頁當場設定。
+ * 原本在此收密碼並存入待驗證列，使任何人可用他人 Email 註冊並填自己的密碼，受害者點下
+ * 驗證信後帳號即以攻擊者的密碼建立（pre-hijack）。
+ *
+ * 送出成功後**不建帳號、不跳登入**，改顯示「驗證信已寄」狀態並提供重寄。
  */
 export function RegisterForm() {
   const [email, setEmail] = useState("")
   const [userName, setUserName] = useState("")
-  const [password, setPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [apiError, setApiError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -34,14 +35,11 @@ export function RegisterForm() {
   const cooldown = useCooldown()
   const submitCoolingDown = cooldown.active && cooldown.key === email
   const resendCoolingDown = cooldown.active && cooldown.key === sentEmail
-  // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）：管理者改參數後前端跟著變、非寫死
-  const { policy, hint } = usePasswordPolicy()
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setApiError(null)
-    const values = { email, user_name: userName, password, confirm_password: confirmPassword }
-    const parsed = makeRegisterRequestSchema(policy?.min_len, policy?.char_types).safeParse(values)
+    const parsed = registerRequestSchema.safeParse({ email, user_name: userName })
     setFieldErrors(getFieldErrors(parsed.success ? null : parsed.error))
     if (!parsed.success) return
 
@@ -78,7 +76,7 @@ export function RegisterForm() {
     return (
       <Stack spacing={2}>
         <Alert severity="success">
-          驗證信已寄至 <strong>{sentEmail}</strong>，請於 30 分鐘內點信中連結完成驗證後即可登入。
+          驗證信已寄至 <strong>{sentEmail}</strong>，請於 30 分鐘內點信中連結設定密碼以完成註冊。
         </Alert>
         {resendNote !== null && <Alert severity="info">{resendNote}</Alert>}
         <Typography variant="body2" color="text.secondary">
@@ -117,31 +115,11 @@ export function RegisterForm() {
           helperText={fieldErrors.user_name}
           fullWidth
         />
-        <TextField
-          label="密碼"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          error={"password" in fieldErrors}
-          helperText={fieldErrors.password ?? hint}
-          fullWidth
-          autoComplete="new-password"
-        />
-        <TextField
-          label="確認密碼"
-          type="password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          error={"confirm_password" in fieldErrors}
-          helperText={fieldErrors.confirm_password}
-          fullWidth
-          autoComplete="new-password"
-        />
         <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting || submitCoolingDown}>
           {submitCoolingDown ? `建立帳號（${formatCountdown(cooldown.remaining)} 後）` : "建立帳號"}
         </Button>
         <Typography variant="caption" color="text.secondary">
-          註冊後需完成 Email 驗證才能登入；驗證後自動取得 ET 學員預設角色，其他角色由管理者於權限管理開通。
+          註冊後需點信中連結設定密碼才能登入；完成後自動取得 ET 學員預設角色，其他角色由管理者於權限管理開通。
         </Typography>
       </Stack>
     </form>

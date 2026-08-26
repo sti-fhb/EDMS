@@ -17,7 +17,12 @@ export interface TokenResponse {
 export interface RegisterRequest {
   email: string
   user_name: string
-  password: string
+}
+
+/** 註冊驗證請求（US2）。使用者於驗證頁**當場設定密碼**（#212）；與 ActivateAccountRequest 同形狀。 */
+export interface VerifyEmailRequest {
+  token: string
+  new_password: string
   confirm_password: string
 }
 
@@ -41,8 +46,8 @@ export const authApi = {
     const { data } = await http.post<{ retry_after?: number }>("/register", payload)
     return data.retry_after
   },
-  async verifyEmail(token: string): Promise<void> {
-    await http.post("/verify-email", { token })
+  async verifyEmail(payload: VerifyEmailRequest): Promise<void> {
+    await http.post("/verify-email", payload)
   },
   async resendVerification(email: string): Promise<number | undefined> {
     const { data } = await http.post<{ retry_after?: number }>("/resend-verification", { email })
