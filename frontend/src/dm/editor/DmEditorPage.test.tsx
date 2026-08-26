@@ -201,6 +201,76 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(screen.getByText("目前發布版")).toBeInTheDocument()
   })
 
+  it("續編首版草稿：名稱可編輯、帶出既有版號/摘要/檔名、儲存走更新既有版本（#222）", async () => {
+    let putCalls = 0
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
+        HttpResponse.json({
+          doc_id: "DM-SOP-000050",
+          doc_name: "首版草稿A",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          func_code: null,
+          func_name: null,
+          doc_status: "DRAFT",
+          name_editable: true,
+          draft_version_id: 555,
+          version_no: "1.0",
+          change_summary: "首版摘要草",
+          file_name: "old.pdf",
+          file_size: 100,
+          previewable: true,
+          assigned_reviewer: null,
+        }),
+      ),
+      http.put("/api/dm/documents/:docId/versions/:versionId", ({ params }) => {
+        putCalls += 1
+        return HttpResponse.json({ version_id: Number(params.versionId), previewable: true })
+      }),
+    )
+    paramsRef.current = { docId: "DM-SOP-000050" }
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    expect(await screen.findByText("編輯文件 — 首版草稿A")).toBeInTheDocument()
+    expect(screen.getByLabelText(/文件名稱/)).toBeEnabled() // 首版草稿名稱可改（Q1=A）
+    expect(screen.getByLabelText(/新版本號/)).toHaveValue("1.0") // 帶出既有版號
+    expect(screen.getByLabelText(/變更摘要/)).toHaveValue("首版摘要草") // 帶出既有摘要
+    expect(screen.getByText(/目前檔案：old.pdf/)).toBeInTheDocument() // 既有檔案沿用提示
+    await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
+    expect(await screen.findByText("已儲存為草稿")).toBeInTheDocument()
+    expect(putCalls).toBe(1) // 續編走更新既有版本（PUT），非另開版本
+  }, 20000)
+
+  it("續編新版本草稿：名稱唯讀、帶出既有版號/摘要（#222）", async () => {
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
+        HttpResponse.json({
+          doc_id: "DM-SOP-000051",
+          doc_name: "已發布B",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          func_code: null,
+          func_name: null,
+          doc_status: "PUBLISHED",
+          name_editable: false,
+          draft_version_id: 556,
+          version_no: "2.0-draft",
+          change_summary: "新版草摘",
+          file_name: "v2.pdf",
+          file_size: 100,
+          previewable: true,
+          assigned_reviewer: null,
+        }),
+      ),
+    )
+    paramsRef.current = { docId: "DM-SOP-000051" }
+    renderWithProviders(<DmEditorPage />)
+    expect(await screen.findByText("編輯文件 — 已發布B")).toBeInTheDocument()
+    expect(screen.getByLabelText(/文件名稱/)).toBeDisabled() // 已發布文件之新版草稿名稱唯讀
+    expect(screen.getByLabelText(/新版本號/)).toHaveValue("2.0-draft")
+    expect(screen.getByLabelText(/變更摘要/)).toHaveValue("新版草摘")
+  })
+
   it("取消且有未存變更 → 二次確認（DM-MSG-DM03-005）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)

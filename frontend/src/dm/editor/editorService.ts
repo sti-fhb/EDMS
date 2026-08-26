@@ -1,5 +1,6 @@
 import type {
   CreateResult,
+  DraftMeta,
   EditorDocTags,
   EditorOptions,
   ReviewerItem,
@@ -27,6 +28,16 @@ export interface CreateDocPayload {
 
 /** 編輯模式加新版本之表單欄位（身份欄不送；標籤覆寫文件層；file 可為 null＝暫不附檔）。 */
 export interface AddVersionPayload {
+  version_no: string
+  change_summary: string
+  audience_ids: string[]
+  retrieval_ids: string[]
+  file: File | null
+}
+
+/** 續編既有 DRAFT 版本之表單欄位（doc_name 僅父文件 DRAFT 時傳；null＝不改名。file null＝沿用既有檔）。 */
+export interface UpdateDraftPayload {
+  doc_name: string | null
   version_no: string
   change_summary: string
   audience_ids: string[]
@@ -76,6 +87,33 @@ export const editorApi = {
 
   getDocTags: async (docId: string): Promise<EditorDocTags> => {
     const { data } = await http.get<EditorDocTags>(`/dm/editor/documents/${docId}/tags`)
+    return data
+  },
+
+  /** 續編模式 meta；無本人可續編之草稿（後端 404）回 null（＝改走「加新版」流程）。 */
+  getDraftMeta: async (docId: string): Promise<DraftMeta | null> => {
+    try {
+      const { data } = await http.get<DraftMeta>(`/dm/editor/documents/${docId}/draft-meta`)
+      return data
+    } catch (e) {
+      if ((e as { response?: { status?: number } })?.response?.status === 404) return null
+      throw e
+    }
+  },
+
+  updateDraftVersion: async (
+    docId: string,
+    versionId: number,
+    payload: UpdateDraftPayload,
+  ): Promise<VersionResult> => {
+    const fd = new FormData()
+    if (payload.doc_name !== null) fd.append("doc_name", payload.doc_name)
+    fd.append("version_no", payload.version_no)
+    fd.append("change_summary", payload.change_summary)
+    payload.audience_ids.forEach((id) => fd.append("audience_ids", id))
+    payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
+    if (payload.file) fd.append("file", payload.file)
+    const { data } = await http.put<VersionResult>(`/dm/documents/${docId}/versions/${versionId}`, fd)
     return data
   },
 

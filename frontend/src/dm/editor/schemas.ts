@@ -48,6 +48,28 @@ export interface SubmitResult {
   notified: number
 }
 
+/**
+ * 續編草稿之編輯器 meta（author-scoped；供 DRAFT-status 文件亦可載，對齊後端 DraftMeta）。
+ * `doc_status==="DRAFT"`（首版草稿）→ `name_editable=true`（名稱可改，Q1=A）；`PUBLISHED`（新版本草稿）→ 唯讀。
+ */
+export interface DraftMeta {
+  doc_id: string
+  doc_name: string
+  category_code: string
+  category_name: string
+  func_code: string | null
+  func_name: string | null
+  doc_status: string
+  name_editable: boolean
+  draft_version_id: number
+  version_no: string | null
+  change_summary: string | null
+  file_name: string | null
+  file_size: number | null
+  previewable: boolean
+  assigned_reviewer: string | null
+}
+
 /** 系統操作手冊分類代碼（選此分類才顯示 / 必填關聯作業項目 func）。 */
 export const MANUAL_CATEGORY = "MANUAL"
 
@@ -89,11 +111,17 @@ export const EMPTY_EDITOR_FORM: EditorForm = {
  *   分類必填——DOC_ID 配號用）；檔案於呼叫端另處理（草稿可不附）。
  * - **送簽（forSubmit=true）** 完整檢核：名稱（新增）/ 版號 / 摘要 / 可見對象 ≥1 / 審核者 /（MANUAL）func。
  */
-export function makeEditorSchema(opts: { isNew: boolean; isManual: boolean; forSubmit: boolean }) {
-  const { isNew, isManual, forSubmit } = opts
+export function makeEditorSchema(opts: {
+  isNew: boolean
+  isManual: boolean
+  forSubmit: boolean
+  requireName?: boolean // 續編首版草稿（名稱可改）送簽時亦要求名稱
+}) {
+  const { isNew, isManual, forSubmit, requireName = false } = opts
   return z
     .object({
-      doc_name: isNew && forSubmit ? z.string().trim().min(1, { message: "請輸入文件名稱" }) : z.string(),
+      doc_name:
+        (isNew || requireName) && forSubmit ? z.string().trim().min(1, { message: "請輸入文件名稱" }) : z.string(),
       // 分類為新增模式之結構必填（DOC_ID 配號用），草稿亦需
       category_code: isNew ? z.string().min(1, { message: "請選擇分類" }) : z.string(),
       func_code: z.string(),

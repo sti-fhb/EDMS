@@ -16,7 +16,7 @@ import { useBlocker, useNavigate, useParams } from "react-router-dom"
 import { EMPTY_EDITOR_FORM, isPreviewableMime, makeEditorSchema, MANUAL_CATEGORY } from "./schemas"
 import type { EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
-import { useDocTags, useEditorOptions, useReviewers } from "./useEditor"
+import { useDocTags, useDraftMeta, useEditorOptions, useReviewers } from "./useEditor"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
@@ -51,6 +51,10 @@ export function DmEditorPage() {
 
   const { data: options } = useEditorOptions()
   const { data: reviewers } = useReviewers()
+  // 續編模式 meta（草稿匣「繼續編輯」）：有本人草稿 → 續編（draftMeta + PUT 更新既有版本）；
+  // 無（後端 404 → null）→ 從 DM02 詳細載已發布文件 meta、走「加新版」（addVersion）。
+  const { data: draftMeta, isPending: draftMetaPending } = useDraftMeta(docId ?? "", !isNew)
+  const isContinueDraft = !isNew && !!draftMeta
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, !isNew)
   const { data: docTags } = useDocTags(isNew ? "" : docId!, !isNew)
@@ -68,9 +72,19 @@ export function DmEditorPage() {
   const bypassGuard = useRef(false)
   // 編輯模式標籤只預帶一次，之後尊重使用者編輯（避免 refetch 覆蓋）。
   const tagsPrefilled = useRef(false)
+  // 續編模式草稿內容（名稱 / 版號 / 摘要 / 審核者）只預帶一次。
+  const metaPrefilled = useRef(false)
 
   const isManual = isNew && form.category_code === MANUAL_CATEGORY
   const fileNotPreviewable = file !== null && !isPreviewableMime(file.type)
+
+  // 續編模式名稱可編（首版草稿 Q1=A）；其餘編輯情境名稱唯讀。
+  const nameEditable = isContinueDraft && !!draftMeta?.name_editable
+  // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM02 詳細。
+  const editName = isContinueDraft ? (draftMeta?.doc_name ?? "") : (detail?.doc_name ?? "")
+  const editCategoryName = isContinueDraft ? (draftMeta?.category_name ?? "") : (detail?.category_name ?? "")
+  const editFuncCode = isContinueDraft ? draftMeta?.func_code : detail?.func_code
+  const editFuncName = isContinueDraft ? draftMeta?.func_name : detail?.func_name
 
   const audienceOptions = options?.audiences ?? []
   const retrievalOptions = options?.retrieval_tags ?? []
@@ -153,6 +167,17 @@ export function DmEditorPage() {
         file,
       })
       ids = { doc_id: r.doc_id, version_id: r.version_id }
+    } else if (isContinueDraft) {
+      // 續編：更新既有 DRAFT 版本（in-place，不另開版本 → 不撞單一草稿唯一索引）
+      const r = await editorApi.updateDraftVersion(docId!, draftMeta!.draft_version_id, {
+        doc_name: nameEditable ? form.doc_name.trim() : null, // 首版草稿可改名（Q1=A）；已發布文件唯讀 → null
+        version_no: form.version_no.trim(),
+        change_summary: form.change_summary.trim(),
+        audience_ids: form.audience_ids,
+        retrieval_ids: form.retrieval_ids,
+        file,
+      })
+      ids = { doc_id: docId!, version_id: r.version_id }
     } else {
       const r = await editorApi.addVersion(docId!, {
         version_no: form.version_no.trim(),
@@ -178,7 +203,7 @@ export function DmEditorPage() {
   }
 
   function validate(forSubmit: boolean): boolean {
-    const schema = makeEditorSchema({ isNew, isManual, forSubmit })
+    const schema = makeEditorSchema({ isNew, isManual, forSubmit, requireName: nameEditable })
     const result = schema.safeParse(form)
     const fieldErrors = getFieldErrors(result.success ? null : result.error)
     // 檔案僅送簽時必填；存草稿可先不附檔（US5「存草稿不卡」）
@@ -260,7 +285,21 @@ export function DmEditorPage() {
     setForm((prev) => ({ ...prev, audience_ids: docTags.audience_ids, retrieval_ids: docTags.retrieval_ids }))
   }, [isNew, docTags])
 
-  if (!isNew && detailLoading) {
+  // 續編模式：一次性預帶既有草稿內容（名稱 / 版號 / 摘要 / 前次審核者），解決續編須重填之痛點（#222）。
+  useEffect(() => {
+    if (isNew || metaPrefilled.current || !draftMeta) return
+    metaPrefilled.current = true
+    setForm((prev) => ({
+      ...prev,
+      doc_name: draftMeta.doc_name,
+      version_no: draftMeta.version_no ?? "",
+      change_summary: draftMeta.change_summary ?? "",
+      reviewer_id: draftMeta.assigned_reviewer ?? "",
+    }))
+  }, [isNew, draftMeta])
+
+  // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM02 詳細載入。
+  if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
         <CircularProgress />
@@ -271,7 +310,7 @@ export function DmEditorPage() {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
-        {isNew ? "新增文件" : `編輯文件 — ${detail?.doc_name ?? ""}`}
+        {isNew ? "新增文件" : `編輯文件 — ${editName}`}
       </Typography>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr" }, gap: 2 }}>
@@ -334,15 +373,28 @@ export function DmEditorPage() {
                 </>
               ) : (
                 <>
-                  {/* 編輯模式：身份欄唯讀（名稱 / 分類 / func） */}
-                  <TextField label="文件名稱" fullWidth size="small" value={detail?.doc_name ?? ""} disabled />
-                  <TextField label="分類" fullWidth size="small" value={detail?.category_name ?? ""} disabled />
-                  {detail?.func_code && (
+                  {/* 編輯模式：分類 / func 唯讀；文件名稱於續編首版草稿（未發布）時可改（Q1=A），其餘唯讀 */}
+                  {nameEditable ? (
+                    <TextField
+                      label="文件名稱"
+                      required
+                      fullWidth
+                      size="small"
+                      value={form.doc_name}
+                      onChange={(e) => setField("doc_name", e.target.value)}
+                      error={!!errors.doc_name}
+                      helperText={errors.doc_name || "此文件尚未發布，續編期間可修改名稱"}
+                    />
+                  ) : (
+                    <TextField label="文件名稱" fullWidth size="small" value={editName} disabled />
+                  )}
+                  <TextField label="分類" fullWidth size="small" value={editCategoryName} disabled />
+                  {editFuncCode && (
                     <TextField
                       label="關聯作業項目"
                       fullWidth
                       size="small"
-                      value={`${detail.func_code} — ${detail.func_name ?? ""}`}
+                      value={`${editFuncCode} — ${editFuncName ?? ""}`}
                       disabled
                     />
                   )}
@@ -385,12 +437,12 @@ export function DmEditorPage() {
             <Typography variant="subtitle2" gutterBottom>
               版本資訊
             </Typography>
-            {!isNew && (
+            {!isNew && detail?.current_version_no && (
               <TextField
                 label="目前版本"
                 fullWidth
                 size="small"
-                value={detail?.current_version_no ?? "—"}
+                value={detail.current_version_no}
                 disabled
                 sx={{ mb: 2 }}
               />
@@ -425,6 +477,11 @@ export function DmEditorPage() {
             <Typography variant="subtitle2" gutterBottom>
               文件內容（上傳檔案）
             </Typography>
+            {isContinueDraft && draftMeta?.file_name && !file && (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                目前檔案：{draftMeta.file_name}（未重新上傳則沿用既有檔案）
+              </Alert>
+            )}
             <Stack spacing={1}>
               <Box
                 component="label"
