@@ -21,6 +21,9 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+# 驗證步由使用者當場設定的密碼（#212：pending 列不再存密碼）
+_VERIFY_PWD = "Verify1234"
+
 _GOOD_PWD = "Abcd1234"
 
 
@@ -113,7 +116,7 @@ async def test_verify_email_rejects_admin_invite_token(db, et_stub):
     # 不靠 DP_USER.PWD_HASH NOT NULL 約束兜底
     await _make_invite(db, token="inv-for-verify")
     with pytest.raises(AppError) as exc:
-        await VerifyService().verify(db, token="inv-for-verify")
+        await VerifyService().verify(db, token="inv-for-verify", new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     assert exc.value.status_code == 400
     assert exc.value.error_code == "DP_USER_003"
     # pending 未被消費（交易語意）

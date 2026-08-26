@@ -95,7 +95,7 @@ _DEFAULT_HISTORY_COUNT = 3
 _DEFAULT_EXPIRY_DAYS = 90
 
 _FORGOT_MESSAGE = "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"
-_REGISTER_MESSAGE = "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證"
+_REGISTER_MESSAGE = "驗證信已寄至您的信箱，請於 30 分鐘內點連結設定密碼以完成註冊"
 _RESEND_MESSAGE = "若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證"
 
 
@@ -142,8 +142,6 @@ async def register(
         db,
         email=data.email,
         user_name=data.user_name,
-        password=data.password,
-        confirm_password=data.confirm_password,
     )
     _verify_send_cooldown.record(key)
     return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
@@ -156,7 +154,9 @@ async def verify_email(
     _ip_limit: None = Depends(rate_limit_by_ip(_verify_limiter, "verify")),
 ) -> dict[str, str]:
     """驗證註冊 token（匿名，持信中連結 token）→ 建 DP_USER + 授 ET 學員 + 雙稽核 + 刪待驗證列。"""
-    await _verify_service.verify(db, token=data.token)
+    await _verify_service.verify(
+        db, token=data.token, new_password=data.new_password, confirm_password=data.confirm_password
+    )
     return {"message": "帳號已啟用，請以新帳號登入"}
 
 

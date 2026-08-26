@@ -15,9 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
-from app.dp.user.activation import activate_pending_account
+from app.dp.user.activation import activate_with_new_password
 from app.dp.user.kinds import KIND_SELF_REGISTER
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
@@ -37,39 +36,37 @@ class VerifyService:
         self,
         repository: AuthRepository | None = None,
         audit: AuditLogService | None = None,
+        params: ParamService | None = None,
     ) -> None:
         self._repo = repository or AuthRepository()
         self._audit = audit or AuditLogService()
+        self._params = params or ParamService()
 
-    async def verify(self, db: AsyncSession, *, token: str) -> None:
-        """驗證註冊 token → 啟用帳號（啟用副作用重用 `activate_pending_account`，#67）。
+    async def verify(self, db: AsyncSession, *, new_password: str, confirm_password: str, token: str) -> None:
+        """驗證註冊 token → **由本人當場設定密碼** → 啟用帳號（#212）。
 
-        密碼來源＝pending.pwd_hash（註冊時所填）。
+        密碼不再來自 pending 列（該列自 #212 起 PWD_HASH 為 NULL）。原本存「註冊當下填寫者的
+        密碼」使任何人可用他人 Email 註冊並填自己的密碼，受害者點下驗證信後帳號即以攻擊者的
+        密碼建立（pre-hijack）。改為與 US4 邀請啟用同一實作 `activate_with_new_password`。
 
         Raises:
-            AppError: token 無效（400 DP_USER_003）、逾時（400 DP_USER_004）、
+            AppError: token 無效（400 DP_USER_003）、逾時（400 DP_USER_004）、兩次不一致
+                （422 DP_USER_002）、密碼不符複雜度（422 DP_PWD_001/002/004）、
                 Email 已完成驗證 / 競態（409 DP_USER_001）。
         """
-        now = utcnow()
-        ip = get_client_ip()
-        pending = await self._repo.get_pending_by_token_hash(db, hash_token(token))
-        # 僅自助註冊 token 走本端點；管理者邀請（ADMIN_INVITE）token 一律視為無效（該走 /activate-account）。
-        # 明確檢查而非靠 DP_USER.PWD_HASH NOT NULL 兜底（pwd_hash 於邀請列為 NULL），語意清楚、不依賴 DB 約束。
-        if pending is None or pending.kind != KIND_SELF_REGISTER:
-            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_USER_003")
-        if pending.expires_date <= now:
-            raise AppError(status_code=400, detail=_TOKEN_EXPIRED_MSG, error_code="DP_USER_004")
-
-        await activate_pending_account(
+        await activate_with_new_password(
             db,
-            pending=pending,
-            pwd_hash=pending.pwd_hash,
-            now=now,
-            ip=ip,
+            token=token,
+            new_password=new_password,
+            confirm_password=confirm_password,
+            expected_kind=KIND_SELF_REGISTER,
             repo=self._repo,
             audit=self._audit,
+            params=self._params,
             func_name=_FUNC_NAME,
-            create_desc="使用者自助註冊（Email 驗證通過）",
+            create_desc="使用者自助註冊（Email 驗證通過並設定密碼）",
+            token_invalid_msg=_TOKEN_INVALID_MSG,
+            token_expired_msg=_TOKEN_EXPIRED_MSG,
         )
 
 
@@ -92,11 +89,16 @@ class ResendVerificationService:
         僅處理自助註冊（SELF_REGISTER）；管理者邀請（ADMIN_INVITE）之重寄走使用者管理頁（US4 #67），
         不經此匿名端點，故遇邀請列一律靜默（等同不存在，維持防列舉）。
         """
+        now = utcnow()
         pending = await self._repo.get_pending_by_email(db, email)
-        if pending is None or pending.kind != KIND_SELF_REGISTER:
+        # 逾期列視同不存在（#212）：原本不檢查 expires_date，導致任何匿名者每 30 分鐘打一次重寄
+        # 就能讓一筆註冊申請永遠不死——排程對逾期列的清理因此對被盯上的列失效，且該 Email 的
+        # UNIQUE 名額被永久佔住（管理者想邀請該人會撞 409「已被註冊」，訊息完全誤導）。
+        # 回應與「不存在」完全相同（同訊息、同狀態碼），故防列舉語意不變；連結逾期的正常使用者
+        # 重新註冊即可（#212 之後註冊只需 Email + 姓名，比重寄更簡單）。
+        if pending is None or pending.kind != KIND_SELF_REGISTER or pending.expires_date <= now:
             return
 
-        now = utcnow()
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
         # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原姓名 / 密碼雜湊寫新列。

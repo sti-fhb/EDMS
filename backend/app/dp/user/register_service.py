@@ -16,8 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.password_hashing import hash_password_async
-from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.kinds import KIND_ADMIN_INVITE
@@ -64,48 +62,37 @@ class RegisterService:
         if await self._repo.email_exists(db, email):
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
 
-    async def register(
-        self, db: AsyncSession, *, email: str, user_name: str, password: str, confirm_password: str
-    ) -> None:
-        """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色**（移至驗證步）。
+    async def register(self, db: AsyncSession, *, email: str, user_name: str) -> None:
+        """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色、不收密碼**。
 
-        稽核：註冊本身不記（帳號尚不存在，紀錄移至驗證步）。**唯一例外**是覆蓋掉一筆**已逾期的
-        管理者邀請**時記一筆 DELETE——該列由管理者建立、其建立與取消皆有稽核，若被匿名註冊
-        無痕抹除，管理者只會發現邀請消失卻查不到原因（#125）。
+        密碼於 Email 驗證通過後由本人當場設定（#212，比照 US4 邀請啟用）——原本在此收密碼並
+        存入 pending 列，使任何人可用他人 Email 註冊並填自己的密碼，受害者點下驗證信後帳號即
+        以攻擊者的密碼建立（pre-hijack）。本方法因此**完全不做 bcrypt**，順帶讓註冊端點不再是
+        密碼運算的放大器（#214）。
+
+        稽核：註冊本身不記（帳號尚不存在，紀錄移至驗證步）。**兩個例外**皆為「覆蓋既有 pending
+        列」時留痕：逾期的管理者邀請（#125——該列由管理者建立，若被匿名註冊無痕抹除，管理者只
+        會發現邀請消失卻查不到原因）、以及既有的自助註冊列（#212——覆蓋會作廢他人的驗證連結並
+        換掉姓名，客服需查得到）。
 
         提交由 get_db 於請求成功時負責；任一檢核失敗於寫入前拋 AppError，get_db rollback 無副作用。
 
         Raises:
-            AppError: 兩次不一致（422 DP_USER_002）、Email 已被已驗證帳號佔用（409 DP_USER_001）、
-                密碼不符複雜度（422 DP_PWD_001/002/004）。
+            AppError: Email 已被已驗證帳號佔用（409 DP_USER_001）、該 Email 有未逾期的管理者
+                邀請（409 DP_USER_011）、並發競態（409 DP_USER_005）。
         """
-        # 1. 兩次一致（FR-02 伺服器端權威檢核，前端 Zod 另擋一次）
-        if password != confirm_password:
-            raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
-        # 2. Email 未被「已驗證帳號」佔用（未驗證的 pending 列於 step 4 覆蓋，不擋）
+        # 1. Email 未被「已驗證帳號」佔用（未驗證的 pending 列於 step 3 覆蓋，不擋）
         await self.assert_email_not_registered(db, email)
-        # 2-1. 不得覆蓋管理者發出且仍有效的邀請（#125）。step 4 的覆蓋不分 kind，若不在此擋下，
+        # 1-1. 不得覆蓋管理者發出且仍有效的邀請（#125）。step 3 的覆蓋不分 kind，若不在此擋下，
         #      自助註冊會刪掉管理者的邀請列（該列從邀請清單消失、原邀請信連結失效），且管理者
         #      毫無感知。逾期的邀請則放行覆蓋——邀請既已失效，不應讓該 Email 被永久佔住。
         now = utcnow()
         pending = await self._repo.get_pending_by_email(db, email)
         if pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > now:
-            # ⚠️ 本分支在 bcrypt（step 4 的 hash_password，約 250ms）之前 return，回應時間顯著短於受理路徑。
-            #    目前無害——status / error_code 本就是直球 oracle。但日後若為防列舉改成統一回 202，
-            #    必須在此路徑補一次 dummy bcrypt，否則時間差會單獨把 oracle 重建起來。
             raise AppError(status_code=409, detail=_INVITE_PENDING_MSG, error_code="DP_USER_011")
-        # 3. 密碼複雜度（一般使用者；validate_password_strength 拋 DP_PWD_001/002/004）
-        min_len = await self._params.get_int_param(db, "PWD_POLICY", "MIN_LEN", _DEFAULT_MIN_LEN)
-        char_types = await self._params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES)
-        validate_password_strength(password, min_length=min_len, required_char_types=char_types)
 
-        # 4. 先算雜湊再進寫入段：雜湊是純 CPU、不依賴任何 DB 結果，而下方的條件式刪除會取列鎖、
-        #    稽核寫入也會佔鎖。若把 ~185ms 的執行緒往返放在寫入交易之內，該交易與列鎖就白白多
-        #    持有那段時間（#214 review 附帶發現）。此處提前亦不改變任何早退行為——未逾期邀請
-        #    的守衛在 step 2-1、複雜度檢核在 step 3，皆已在此之前。
-        pwd_hash = await hash_password_async(password)
-
-        # 5. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256）
+        # 2. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256、
+        #    PWD_HASH 留空，密碼於驗證步當場設定）
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
         # 條件式刪除：保留 TOCTOU 空窗內剛產生的有效邀請，讓其撞 UNIQUE 轉 409 而非被靜默覆蓋（#125）
@@ -130,13 +117,33 @@ class RegisterService:
                 },
                 source_ip=get_client_ip(),
             )
+        elif pending is not None:
+            # 覆蓋既有自助註冊列（#212）：作廢他人仍有效的驗證連結並換掉姓名。修法 B 之後這已
+            # 不構成帳號接管（列裡沒有密碼），但使用者會發現連結突然失效、客服需查得到原因。
+            # email 依既有慣例放 before_value（比照 email_change_service），不放 target_id。
+            await self._audit.log_action(
+                db,
+                module="DP",
+                func_name=_FUNC_NAME,
+                action_type="DELETE",
+                result="SUCCESS",
+                operator_id=_SYSTEM_USER,
+                description="既有自助註冊申請被新的註冊申請覆蓋",
+                before_value={
+                    "kind": pending.kind,
+                    "email": pending.email,
+                    "user_name": pending.user_name,
+                    "expires_date": pending.expires_date.isoformat(),
+                },
+                source_ip=get_client_ip(),
+            )
         try:
             await self._repo.create_pending_registration(
                 db,
                 token_hash=hash_token(plaintext),
                 email=email,
                 user_name=user_name,
-                pwd_hash=pwd_hash,
+                pwd_hash=None,
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
             )

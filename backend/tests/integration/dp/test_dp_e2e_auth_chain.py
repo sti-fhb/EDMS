@@ -69,13 +69,11 @@ async def test_self_service_auth_chain(db, et_gate):
     notify = _NotifyStub()
 
     # ① 自助註冊（US2）：寫待驗證列 + 寄驗證信（攔截取 token）
-    await RegisterService(notify=notify).register(
-        db, email=email, user_name="鏈測試", password=_PWD1, confirm_password=_PWD1
-    )
+    await RegisterService(notify=notify).register(db, email=email, user_name="鏈測試")
     verify_token = notify.last_token()
 
     # ② 驗證（US2）：建 DP_USER(ACTIVE) + 授 ET 學員
-    await VerifyService().verify(db, token=verify_token)
+    await VerifyService().verify(db, token=verify_token, new_password=_PWD1, confirm_password=_PWD1)
     user = (await db.execute(_by_email(email))).scalar_one()
     assert user.status == "ACTIVE"
     assert et_gate == [user.user_id]  # SC-001 單一登入前置：預設角色已授

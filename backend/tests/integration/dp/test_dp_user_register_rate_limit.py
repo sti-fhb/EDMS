@@ -29,7 +29,7 @@ def _reset_limits():
 
 
 def _payload(email: str):
-    return {"email": email, "user_name": "限流測試", "password": _GOOD_PWD, "confirm_password": _GOOD_PWD}
+    return {"email": email, "user_name": "限流測試"}
 
 
 def test_register_threshold_is_decoupled_from_login():

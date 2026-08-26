@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.exceptions import AppError
 from app.core.module_provisioning import module_provisioning_gate
-from app.core.password_policy import hash_password
+from app.core.password_policy import hash_password, verify_password
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory
@@ -18,6 +18,9 @@ from app.dp.user.verify_service import ResendVerificationService, VerifyService
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
+
+# 驗證步由使用者當場設定的密碼（#212：pending 列不再存密碼）
+_VERIFY_PWD = "Verify1234"
 
 _GOOD_PWD = "Abcd1234"
 
@@ -43,7 +46,7 @@ async def _seed_pending(db, *, email: str, minutes: int = 30, plaintext: str | N
             token_hash=hash_token(plaintext),
             email=email,
             user_name="待驗證",
-            pwd_hash=hash_password(_GOOD_PWD),
+            pwd_hash=None,  # #212：pending 列不存密碼
             kind="SELF_REGISTER",
             expires_date=now + timedelta(minutes=minutes),
             created_user="SYSTEM",
@@ -57,7 +60,7 @@ async def _seed_pending(db, *, email: str, minutes: int = 30, plaintext: str | N
 async def test_verify_activates_user(db, et_stub):
     """有效 token → 建 DP_USER(ACTIVE) + 授 ET 學員 + 雙稽核 + 首筆歷程 + 刪待驗證列。"""
     token = await _seed_pending(db, email="verify@edms.local")
-    await VerifyService().verify(db, token=token)
+    await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
 
     user = (await db.execute(select(DpUser).where(DpUser.email == "verify@edms.local"))).scalar_one()
     assert user.status == "ACTIVE" and user.created_user == user.user_id
@@ -79,7 +82,9 @@ async def test_verify_activates_user(db, et_stub):
 async def test_verify_invalid_token(db, et_stub):
     """token 不存在 → 400 DP_USER_003。"""
     with pytest.raises(AppError) as exc:
-        await VerifyService().verify(db, token="nonexistent-token")
+        await VerifyService().verify(
+            db, token="nonexistent-token", new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD
+        )
     assert exc.value.status_code == 400 and exc.value.error_code == "DP_USER_003"
 
 
@@ -87,7 +92,7 @@ async def test_verify_expired_token(db, et_stub):
     """token 逾時 → 400 DP_USER_004；不建 DP_USER。"""
     token = await _seed_pending(db, email="expired@edms.local", minutes=-1)
     with pytest.raises(AppError) as exc:
-        await VerifyService().verify(db, token=token)
+        await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     assert exc.value.status_code == 400 and exc.value.error_code == "DP_USER_004"
     assert (await db.execute(select(DpUser).where(DpUser.email == "expired@edms.local"))).scalar_one_or_none() is None
 
@@ -110,7 +115,7 @@ async def test_verify_idempotent_when_already_verified(db, et_stub):
     )
     token = await _seed_pending(db, email="already@edms.local")
     with pytest.raises(AppError) as exc:
-        await VerifyService().verify(db, token=token)
+        await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_001"
 
 
@@ -154,7 +159,7 @@ async def test_verify_grant_failure_propagates(db):
     try:
         token = await _seed_pending(db, email="grantboom@edms.local")
         with pytest.raises(RuntimeError):
-            await VerifyService().verify(db, token=token)
+            await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     finally:
         module_provisioning_gate.unregister("ET")
 
@@ -162,7 +167,7 @@ async def test_verify_grant_failure_propagates(db):
 async def test_verify_grant_noop_when_unregistered(db):
     """ET 未掛 granter（無 et_stub）→ grant_default_role no-op、不擋驗證；帳號仍建立成功。"""
     token = await _seed_pending(db, email="noet@edms.local")
-    await VerifyService().verify(db, token=token)
+    await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     user = (await db.execute(select(DpUser).where(DpUser.email == "noet@edms.local"))).scalar_one()
     assert user.status == "ACTIVE"
 
@@ -170,16 +175,18 @@ async def test_verify_grant_noop_when_unregistered(db):
 async def test_verify_consumed_token_reclick_rejected(db, et_stub):
     """成功消費後再點同一連結 → 400 DP_USER_003（待驗證列已刪、查無 token）。"""
     token = await _seed_pending(db, email="reclick@edms.local")
-    await VerifyService().verify(db, token=token)
+    await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     with pytest.raises(AppError) as exc:
-        await VerifyService().verify(db, token=token)
+        await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     assert exc.value.status_code == 400 and exc.value.error_code == "DP_USER_003"
 
 
 async def test_verify_email_endpoint(client, db, et_stub):
     """/api/verify-email 端點：有效 token → 200 + 建立 DP_USER。"""
     token = await _seed_pending(db, email="ep-verify@edms.local")
-    r = await client.post("/api/verify-email", json={"token": token})
+    r = await client.post(
+        "/api/verify-email", json={"token": token, "new_password": _VERIFY_PWD, "confirm_password": _VERIFY_PWD}
+    )
     assert r.status_code == 200
     assert (
         await db.execute(select(DpUser).where(DpUser.email == "ep-verify@edms.local"))
@@ -190,3 +197,38 @@ async def test_resend_endpoint_uniform_message(client):
     """/api/resend-verification 端點：無論 Email 是否有待驗證列，一律回相同訊息（防列舉）、200。"""
     r = await client.post("/api/resend-verification", json={"email": "whoever@edms.local"})
     assert r.status_code == 200 and "驗證信" in r.json()["message"]
+
+
+async def test_verify_rejects_password_mismatch(db):
+    """兩次密碼不一致 → 422 DP_USER_002（自 #212 起檢核落在驗證步，原本在註冊步）。"""
+    token = await _seed_pending(db, email="mm@edms.local")
+    with pytest.raises(AppError) as exc:
+        await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password="Zzzz9999")
+    assert exc.value.status_code == 422 and exc.value.error_code == "DP_USER_002"
+
+    # 檢核失敗不得建帳號、不得消費 pending 列（使用者可重試）
+    assert (
+        await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == "mm@edms.local"))
+    ).scalar_one() is not None
+
+
+async def test_verify_rejects_weak_password(db):
+    """密碼不符複雜度 → 422 DP_PWD_001/002（自 #212 起檢核落在驗證步）。"""
+    token = await _seed_pending(db, email="weak@edms.local")
+    with pytest.raises(AppError) as exc:
+        await VerifyService().verify(db, token=token, new_password="abc", confirm_password="abc")
+    assert exc.value.status_code == 422 and exc.value.error_code.startswith("DP_PWD_")
+
+
+async def test_verify_uses_password_set_at_this_step(db, et_stub):
+    """#212 的核心：帳號密碼＝**驗證步當場設定**者，與註冊申請無關。
+
+    修法 B 之前 pending 列存著「註冊當下填寫者」的密碼，任何人可用他人 Email 註冊並填自己的
+    密碼，受害者點驗證信後帳號就以攻擊者的密碼建立（pre-hijack）。
+    """
+    token = await _seed_pending(db, email="owner@edms.local")
+    await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
+
+    user = (await db.execute(select(DpUser).where(DpUser.email == "owner@edms.local"))).scalar_one()
+    assert verify_password(_VERIFY_PWD, user.pwd_hash), "帳號密碼應為驗證步所設"
+    assert not verify_password(_GOOD_PWD, user.pwd_hash), "不得沿用註冊階段的任何密碼"
