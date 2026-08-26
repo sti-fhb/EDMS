@@ -23,8 +23,9 @@ import Typography from "@mui/material/Typography"
 import CloseIcon from "@mui/icons-material/Close"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { useSearchParams } from "react-router-dom"
 
-import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_STATUS_LABELS, REVIEW_TYPE_LABELS } from "./schemas"
+import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
 import type { ReviewDetail, VersionMeta } from "./schemas"
 import { downloadObsoleteFile, downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
@@ -196,8 +197,14 @@ function DetailPanel({
 export function DmReviewPage() {
   const { message, confirm } = useNotification()
   const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<"pending" | "completed">("pending")
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  // 由個人專區「前往簽核中心」深連結（?reviewId=）帶入 → 掛載時預選該筆，於待簽核頁自動展開明細
+  const [selectedId, setSelectedId] = useState<number | null>(() => {
+    const rid = searchParams.get("reviewId")
+    const n = Number(rid)
+    return rid != null && !Number.isNaN(n) ? n : null
+  })
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectReason, setRejectReason] = useState("")
   const [rejectError, setRejectError] = useState("")
@@ -405,7 +412,7 @@ export function DmReviewPage() {
                         <Chip
                           size="small"
                           color={row.status === "APPROVED" ? "success" : "warning"}
-                          label={REVIEW_STATUS_LABELS[row.status] ?? row.status}
+                          label={reviewStatusLabel(row.status)}
                         />
                       </TableCell>
                       <TableCell>{row.complete_date?.slice(0, 10) ?? "—"}</TableCell>
