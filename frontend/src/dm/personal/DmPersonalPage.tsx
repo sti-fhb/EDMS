@@ -198,7 +198,11 @@ function ActivityRow({
           </Button>
         )}
         {actionable && perspective === "reviewer" && (
-          <Button size="small" variant="outlined" onClick={() => navigate("/dm/review")}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => navigate(`/dm/review?reviewId=${event.review_id}`)}
+          >
             前往簽核中心
           </Button>
         )}

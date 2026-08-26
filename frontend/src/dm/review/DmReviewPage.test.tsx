@@ -84,6 +84,13 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument()
   })
 
+  it("深連結 ?reviewId= 自動展開該筆簽核明細（個人專區前往簽核中心）", async () => {
+    renderWithProviders(<DmReviewPage />, undefined, ["/dm/review?reviewId=502"])
+    // 未點任何列，明細面板即自動展開
+    expect(await screen.findByText(/簽核明細 —/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "核准並發布" })).toBeInTheDocument()
+  })
+
   it("核准並發布 → 二次確認 → 成功 toast（DM-MSG-DM04-001）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmReviewPage />)
