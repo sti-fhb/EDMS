@@ -12,17 +12,17 @@ import TableCell from "@mui/material/TableCell"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import Tabs from "@mui/material/Tabs"
+import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-import type { ActivityEvent, DraftItem, ObsoleteNotice } from "./schemas"
+import type { ActivityEvent, DraftItem } from "./schemas"
 import {
   DRAFT_KIND_LABELS,
   REVIEW_TYPE_LABELS,
   authorEventLabel,
-  obsoleteNoticeLabel,
   reviewerEventLabel,
 } from "./schemas"
 import { personalApi } from "./personalService"
@@ -73,8 +73,7 @@ function ActivityTab() {
 
   const hasAuthor = data.author.length > 0
   const hasReviewer = data.reviewer.length > 0
-  const hasNotices = data.obsolete_notices.length > 0
-  if (!hasAuthor && !hasReviewer && !hasNotices) return <Alert severity="info">近 30 天無文件動態。</Alert>
+  if (!hasAuthor && !hasReviewer) return <Alert severity="info">近 30 天無文件動態。</Alert>
 
   return (
     <Stack spacing={2}>
@@ -96,7 +95,6 @@ function ActivityTab() {
           perspective="reviewer"
         />
       )}
-      {hasNotices && <ObsoleteNoticesSection notices={data.obsolete_notices} />}
     </Stack>
   )
 }
@@ -210,50 +208,6 @@ function ActivityRow({
   )
 }
 
-// ── 文件廢止通知（他人發起，與送審歷程分開）──────────────
-
-function ObsoleteNoticesSection({ notices }: { notices: ObsoleteNotice[] }) {
-  return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-        文件廢止通知（近 30 天）
-      </Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-        以下文件由他人發起廢止，您在該文件有版本 / 草稿。
-      </Typography>
-      <Box sx={{ overflowX: "auto" }}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>文件名稱</TableCell>
-              <TableCell>狀態</TableCell>
-              <TableCell>廢止發起人</TableCell>
-              <TableCell>審核者</TableCell>
-              <TableCell>時間</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {notices.map((n) => {
-              const label = obsoleteNoticeLabel(n.status)
-              return (
-                <TableRow key={n.review_id}>
-                  <TableCell>{n.doc_name}</TableCell>
-                  <TableCell>
-                    <Chip size="small" color={label.tone} label={label.text} />
-                  </TableCell>
-                  <TableCell>{n.initiator_name ?? "—"}</TableCell>
-                  <TableCell>{n.reviewer_name ?? "—"}</TableCell>
-                  <TableCell>{formatDateTime(n.event_time)}</TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </Box>
-    </Paper>
-  )
-}
-
 // ── 草稿匣 ────────────────────────────────────────────
 
 function DraftsTab() {
@@ -314,13 +268,7 @@ function DraftsTab() {
                 <TableCell>{formatDateTime(d.updated_date)}</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => navigate(`/dm/documents/${d.doc_id}/edit`)}
-                    >
-                      繼續編輯
-                    </Button>
+                    <ContinueEditButton draft={d} onNavigate={() => navigate(`/dm/documents/${d.doc_id}/edit`)} />
                     <Button
                       size="small"
                       variant="outlined"
@@ -338,6 +286,22 @@ function DraftsTab() {
         </Table>
       </Box>
     </Paper>
+  )
+}
+
+function ContinueEditButton({ draft, onNavigate }: { draft: DraftItem; onNavigate: () => void }) {
+  const obsolete = draft.doc_status === "OBSOLETE" // 已廢止 → 不可續編，僅可刪除
+  const button = (
+    <Button size="small" variant="outlined" onClick={onNavigate} disabled={obsolete}>
+      繼續編輯
+    </Button>
+  )
+  if (!obsolete) return button
+  // disabled Button 不觸發 hover 事件，需以 span 包裹讓 Tooltip 生效
+  return (
+    <Tooltip title="此文件已被廢止，無法繼續編輯，請刪除此草稿">
+      <span>{button}</span>
+    </Tooltip>
   )
 }
 

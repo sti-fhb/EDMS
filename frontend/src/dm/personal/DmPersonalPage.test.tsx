@@ -20,15 +20,13 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     expect(screen.getByRole("button", { name: "前往簽核中心" })).toBeInTheDocument()
     // 狀態變動歷程：同一送審週期展開為 送審 + 退回 兩列（#5）
     expect(screen.getAllByText("被退回文件 B")).toHaveLength(2)
-    expect(screen.getByText("已退回")).toBeInTheDocument() // resolved 事件
+    expect(screen.getAllByText("已退回").length).toBeGreaterThanOrEqual(1) // resolved 事件（撰寫者/審核者皆有）
     // 對造人欄（指定審核者 / 送審者）中文姓名
     expect(screen.getByText("送審者")).toBeInTheDocument() // 審核者視角表頭
-    expect(screen.getByText("陳送審")).toBeInTheDocument()
-    // 文件廢止通知：他人發起之廢止獨立呈現，明示發起人（item 3 分開顯示）
-    expect(screen.getByText("文件廢止通知（近 30 天）")).toBeInTheDocument()
-    expect(screen.getByText("他人廢止的文件 C")).toBeInTheDocument()
-    expect(screen.getByText("李發起")).toBeInTheDocument() // 廢止發起人
-    // 審核者視角已完成項不再出現歷史「收到送審」（item 4）
+    expect(screen.getAllByText("陳送審").length).toBeGreaterThanOrEqual(1)
+    // 審核者視角已完成項也展開為兩列（Round-4 item 2）：送審 + 已退回
+    expect(screen.getAllByText("我已退回的文件 D")).toHaveLength(2)
+    // 標籤一律中文、不再出現「收到送審」
     expect(screen.queryByText("收到送審")).not.toBeInTheDocument()
   })
 
@@ -41,14 +39,21 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     expect(await screen.findByText("已撤回送審，已通知原指派審核者")).toBeInTheDocument()
   })
 
-  it("草稿匣：三類標記 + 繼續編輯 / 刪除", async () => {
+  it("草稿匣：三類標記 + 繼續編輯 / 刪除；已廢止孤兒草稿仍顯示但續編灰化", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmPersonalPage />)
     await user.click(await screen.findByRole("tab", { name: "草稿匣" }))
     expect(await screen.findByText("領血 SOP 草稿")).toBeInTheDocument()
     expect(screen.getByText("被退回待修改")).toBeInTheDocument() // rejected 類
-    expect(screen.getByText("未送審")).toBeInTheDocument() // unsubmitted 類
-    expect(screen.getAllByRole("button", { name: "繼續編輯" }).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("未送審").length).toBeGreaterThanOrEqual(1) // unsubmitted 類
+    // 已廢止孤兒草稿仍留在草稿匣（不隱藏）
+    expect(screen.getByText("已廢止孤兒草稿")).toBeInTheDocument()
+    // 三筆皆有「繼續編輯」；已廢止那筆為 disabled、其餘可按
+    const editButtons = screen.getAllByRole("button", { name: "繼續編輯" })
+    expect(editButtons).toHaveLength(3)
+    expect(editButtons.filter((b) => (b as HTMLButtonElement).disabled)).toHaveLength(1)
+    // 已廢止列可刪除（讓使用者自行清掉）
+    expect(screen.getAllByRole("button", { name: "刪除" })).toHaveLength(3)
   })
 
   it("刪除草稿 → 確認（DM-MSG-DM07-004）→ 成功 toast", async () => {

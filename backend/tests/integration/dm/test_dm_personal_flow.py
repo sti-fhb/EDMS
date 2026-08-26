@@ -139,22 +139,24 @@ async def test_drafts_only_own_and_not_deleted(db):
     assert all(d.doc_id != "DM-SOP-000504" for d in drafts)
 
 
-async def test_drafts_exclude_obsolete_parent(db):
-    # #1：父文件已廢止(OBSOLETE)之孤兒草稿 → 草稿匣不顯示（不主動刪）
+async def test_drafts_include_obsolete_parent_with_doc_status(db):
+    # #1(Round-4)：父文件已廢止(OBSOLETE)之孤兒草稿「仍顯示」於草稿匣，帶 doc_status 供前端灰掉續編、允許刪除
     await _seed_user(db, "ed", "撰寫")
     await _doc(db, "DM-SOP-000505", status="OBSOLETE")
     await _version(db, "DM-SOP-000505", "2.0", status="DRAFT")  # 廢止前編到一半的新版草稿
     drafts = await _svc.list_drafts(db, user_id="ed")
-    assert all(d.doc_id != "DM-SOP-000505" for d in drafts)
+    d = next(x for x in drafts if x.doc_id == "DM-SOP-000505")
+    assert d.doc_status == "OBSOLETE"
 
 
-async def test_drafts_exclude_pending_obsolete_parent(db):
-    # #3(Round-3)：父文件廢止待簽核(PENDING_OBSOLETE)之孤兒草稿亦不顯示（廢止若被退回文件回 PUBLISHED，草稿再現）
+async def test_drafts_include_pending_obsolete_parent(db):
+    # #1(Round-4)：父文件廢止待簽核(PENDING_OBSOLETE)之孤兒草稿也不隱藏（與「他人送審中文件之草稿不隱藏」一致）
     await _seed_user(db, "ed", "撰寫")
     await _doc(db, "DM-SOP-000507", status="PENDING_OBSOLETE")
     await _version(db, "DM-SOP-000507", "2.0", status="DRAFT")
     drafts = await _svc.list_drafts(db, user_id="ed")
-    assert all(d.doc_id != "DM-SOP-000507" for d in drafts)
+    d = next(x for x in drafts if x.doc_id == "DM-SOP-000507")
+    assert d.doc_status == "PENDING_OBSOLETE"
 
 
 async def test_deleted_draft_releases_unique_slot(db):
@@ -357,28 +359,8 @@ async def test_activity_terminal_expands_to_two_events_newest_first(db):
     assert evs[0].party_name == "審核"  # 撰寫者視角對造人＝指定審核者姓名
 
 
-async def test_obsolete_by_other_shows_in_notices_not_author_progression(db):
-    # #4(Round-3)：本人有版本之文件被他人發起廢止 → 不混入撰寫者送審歷程（避免像自己發起），
-    # 改於「文件廢止通知」呈現並明示發起人
-    await _seed_user(db, "ed", "撰寫")
-    await _seed_user(db, "adm", "管理員", email="adm@e.com")
-    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
-    await _doc(db, "DM-SOP-000542", status="OBSOLETE", author="ed")
-    v = await _version(db, "DM-SOP-000542", "1.0", status="OBSOLETE", author="ed", published=utcnow())
-    # 廢止由他人(adm)發起、指派 rev1 審核並核准
-    await _review(
-        db, "DM-SOP-000542", v.version_id, review_type="OBSOLETE", status="APPROVED", reviewer="rev1", author="adm"
-    )
-    act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
-    # 不在撰寫者送審歷程
-    assert all(a.doc_id != "DM-SOP-000542" for a in act.author)
-    # 在文件廢止通知，明示發起人 adm、審核者 rev1
-    notice = next(n for n in act.obsolete_notices if n.doc_id == "DM-SOP-000542")
-    assert notice.status == "APPROVED" and notice.initiator_name == "管理員" and notice.reviewer_name == "審核"
-
-
-async def test_own_obsolete_stays_in_author_progression_not_notices(db):
-    # 本人自行發起之廢止仍屬撰寫者送審歷程、不重複列入廢止通知
+async def test_own_obsolete_shows_in_author_progression(db):
+    # 本人自行發起之廢止屬撰寫者送審歷程（此為唯一在動態呈現廢止之情形；他人發起之廢止不進動態）
     await _seed_user(db, "ed", "撰寫")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
     await _doc(db, "DM-SOP-000543", status="OBSOLETE", author="ed")
@@ -387,25 +369,39 @@ async def test_own_obsolete_stays_in_author_progression_not_notices(db):
         db, "DM-SOP-000543", v.version_id, review_type="OBSOLETE", status="APPROVED", reviewer="rev1", author="ed"
     )
     act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
-    assert any(a.doc_id == "DM-SOP-000543" for a in act.author)  # 在撰寫者歷程
-    assert all(n.doc_id != "DM-SOP-000543" for n in act.obsolete_notices)  # 不在廢止通知
+    assert any(a.doc_id == "DM-SOP-000543" for a in act.author)
 
 
-async def test_reviewer_view_completed_has_no_submitted_history(db):
-    # item 4：審核者視角已完成項不另列歷史「收到送審」，只留結果一列
+async def test_obsolete_by_other_not_in_activity(db):
+    # #1(Round-4)：他人對本人有版本之文件發起廢止 → 不進本人動態（動態只顯示自己送審的文件）
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "adm", "管理員", email="adm@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _doc(db, "DM-SOP-000542", status="OBSOLETE", author="ed")
+    v = await _version(db, "DM-SOP-000542", "1.0", status="OBSOLETE", author="ed", published=utcnow())
+    await _review(
+        db, "DM-SOP-000542", v.version_id, review_type="OBSOLETE", status="APPROVED", reviewer="rev1", author="adm"
+    )
+    act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    assert all(a.doc_id != "DM-SOP-000542" for a in act.author)
+
+
+async def test_reviewer_view_terminal_expands_to_two_events(db):
+    # #2(Round-4)：審核者視角與撰寫者一致——已完成送審展開為 送審 + 結果 兩列（不只改單列狀態）
     await _seed_user(db, "ed", "撰寫")
     await _seed_user(db, "rev1", "審核")
-    await _doc(db, "DM-SOP-000544", status="PUBLISHED")
-    v = await _version(db, "DM-SOP-000544", "1.0", status="PUBLISHED", published=utcnow())
+    await _doc(db, "DM-SOP-000544", status="DRAFT")
+    v = await _version(db, "DM-SOP-000544", "1.0", status="DRAFT")
     submit = utcnow() - timedelta(days=3)
-    approve = utcnow() - timedelta(days=1)
+    reject = utcnow() - timedelta(days=1)
     r = await _review(
-        db, "DM-SOP-000544", v.version_id, review_type="NEW", status="APPROVED",
-        reviewer="rev1", author="ed", submit=submit, complete=approve,
+        db, "DM-SOP-000544", v.version_id, review_type="NEW", status="REJECTED",
+        reviewer="rev1", author="ed", submit=submit, complete=reject,
     )
     act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
     evs = [a for a in act.reviewer if a.review_id == r.review_id]
-    assert len(evs) == 1 and evs[0].event_kind == "resolved" and evs[0].status == "APPROVED"
+    assert {e.event_kind for e in evs} == {"submitted", "resolved"}  # 兩列
+    assert evs[0].event_kind == "resolved" and evs[1].event_kind == "submitted"  # 結果較近在前
 
 
 async def test_activity_excludes_older_than_30_days(db):

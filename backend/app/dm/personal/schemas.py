@@ -19,6 +19,7 @@ class DraftItem(BaseModel):
     category_code: str
     kind: DraftKind
     updated_date: datetime | None
+    doc_status: str  # 父文件狀態（OBSOLETE 時前端灰掉「繼續編輯」、僅允許刪除）
 
 
 class WithdrawResult(BaseModel):
@@ -47,24 +48,11 @@ class ActivityEvent(BaseModel):
     party_name: str | None  # 撰寫者視角＝指定審核者姓名；審核者視角＝送審者姓名
 
 
-class ObsoleteNotice(BaseModel):
-    """文件廢止通知一筆：他人對「本人有版本之文件」發起之廢止（明示發起人，與送審歷程分開呈現）。"""
-
-    review_id: int
-    doc_id: str
-    doc_name: str
-    status: str  # PENDING（廢止待簽核）/ APPROVED（已廢止）/ REJECTED / WITHDRAWN
-    initiator_name: str | None  # 廢止發起人姓名
-    reviewer_name: str | None  # 廢止審核者姓名
-    event_time: datetime  # 完成則為完成時間、否則送審時間
-
-
 class ActivityResponse(BaseModel):
-    """我的文件動態（依當下角色呈現視角）；兼具兩角色者兩清單皆有值。"""
+    """我的文件動態（依當下角色呈現視角）；兼具兩角色者兩清單皆有值。只呈現與本人送審週期相關之事件。"""
 
     author: list[ActivityEvent]  # 撰寫者視角（我送審之文件狀態變動）
     reviewer: list[ActivityEvent]  # 審核者視角（指派給我之送審狀態變動）
-    obsolete_notices: list[ObsoleteNotice]  # 文件廢止通知（他人對我有版本之文件發起廢止）
 
 
 class PersonalAccess(BaseModel):

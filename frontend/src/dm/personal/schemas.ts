@@ -12,6 +12,7 @@ export interface DraftItem {
   category_code: string
   kind: DraftKind
   updated_date: string | null
+  doc_status: string // 父文件狀態；OBSOLETE 時「繼續編輯」灰掉、僅允許刪除
 }
 
 export interface WithdrawResult {
@@ -32,21 +33,9 @@ export interface ActivityEvent {
   party_name: string | null // 撰寫者視角＝指定審核者；審核者視角＝送審者
 }
 
-/** 文件廢止通知一筆（他人對本人有版本之文件發起廢止）。 */
-export interface ObsoleteNotice {
-  review_id: number
-  doc_id: string
-  doc_name: string
-  status: string // PENDING（廢止待簽核）/ APPROVED（已廢止）
-  initiator_name: string | null // 廢止發起人
-  reviewer_name: string | null // 廢止審核者
-  event_time: string
-}
-
 export interface ActivityResponse {
   author: ActivityEvent[]
   reviewer: ActivityEvent[]
-  obsolete_notices: ObsoleteNotice[]
 }
 
 export interface PersonalAccess {
@@ -98,9 +87,10 @@ export function authorEventLabel(e: {
 }
 
 /**
- * 審核者視角事件標籤（後端已使審核者視角一次送審至多一列：待辦或最終結果，無歷史「收到送審」列）：
- * - 待處理 / 待處理（廢止）/ 催辦中（PENDING 待辦）
- * - 已核准 / 已核准廢止 / 已退回 / 已被撤回（resolved 結果）
+ * 審核者視角事件標籤（與撰寫者一致展開全程）：
+ * - submitted 尚 PENDING → 待處理 / 待處理（廢止）/ 催辦中（逾門檻）
+ * - submitted 已完成 → 送審 / 發起廢止（歷程起點，搭配結果列）
+ * - resolved → 已核准 / 已核准廢止 / 已退回 / 已被撤回
  */
 export function reviewerEventLabel(e: {
   review_type: string
@@ -114,13 +104,10 @@ export function reviewerEventLabel(e: {
     if (e.status === "REJECTED") return { text: "已退回", tone: "error" }
     return { text: "已被撤回", tone: "default" } // WITHDRAWN
   }
-  // submitted（審核者視角只有 PENDING 待辦會到這）
-  if (e.is_overdue) return { text: "催辦中", tone: "error" }
-  return { text: isObsolete ? "待處理（廢止）" : "待處理", tone: "warning" }
-}
-
-/** 文件廢止通知狀態標籤（僅廢止待簽核 / 已廢止兩態）。 */
-export function obsoleteNoticeLabel(status: string): EventLabel {
-  if (status === "APPROVED") return { text: "已廢止", tone: "error" }
-  return { text: "廢止待簽核", tone: "warning" } // PENDING
+  // submitted
+  if (e.status === "PENDING") {
+    if (e.is_overdue) return { text: "催辦中", tone: "error" }
+    return { text: isObsolete ? "待處理（廢止）" : "待處理", tone: "warning" }
+  }
+  return { text: isObsolete ? "發起廢止" : "送審", tone: "default" } // 已完成週期之送審起點
 }
