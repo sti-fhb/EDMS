@@ -349,8 +349,15 @@ async def test_activity_terminal_expands_to_two_events_newest_first(db):
     submit = utcnow() - timedelta(days=3)
     reject = utcnow() - timedelta(days=1)
     await _review(
-        db, "DM-SOP-000541", v.version_id, review_type="NEW", status="REJECTED",
-        reviewer="rev1", author="ed", submit=submit, complete=reject,
+        db,
+        "DM-SOP-000541",
+        v.version_id,
+        review_type="NEW",
+        status="REJECTED",
+        reviewer="rev1",
+        author="ed",
+        submit=submit,
+        complete=reject,
     )
     act = await _svc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
     evs = [a for a in act.author if a.doc_id == "DM-SOP-000541"]
@@ -395,8 +402,15 @@ async def test_reviewer_view_terminal_expands_to_two_events(db):
     submit = utcnow() - timedelta(days=3)
     reject = utcnow() - timedelta(days=1)
     r = await _review(
-        db, "DM-SOP-000544", v.version_id, review_type="NEW", status="REJECTED",
-        reviewer="rev1", author="ed", submit=submit, complete=reject,
+        db,
+        "DM-SOP-000544",
+        v.version_id,
+        review_type="NEW",
+        status="REJECTED",
+        reviewer="rev1",
+        author="ed",
+        submit=submit,
+        complete=reject,
     )
     act = await _svc.list_activity(db, user_id="rev1", roles=[DM_REVIEWER])
     evs = [a for a in act.reviewer if a.review_id == r.review_id]

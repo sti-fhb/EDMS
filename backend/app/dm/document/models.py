@@ -92,7 +92,7 @@ class DmDocVersion(BaseModel):
             "DOC_ID",
             "CREATED_USER",
             unique=True,
-            postgresql_where=text("\"STATUS\" = 'DRAFT' AND \"DELETED\" = 0"),
+            postgresql_where=text('"STATUS" = \'DRAFT\' AND "DELETED" = 0'),
         ),
     )
 
