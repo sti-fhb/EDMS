@@ -5,6 +5,7 @@ import Autocomplete from "@mui/material/Autocomplete"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
+import CircularProgress from "@mui/material/CircularProgress"
 import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
@@ -31,8 +32,9 @@ import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
 import { QuizDialog } from "./QuizDialog"
 import { coursesApi } from "./coursesService"
+import type { MaterialSavePayload } from "./MaterialDialog"
 import { ItemTitleSchema } from "./itemSchemas"
-import type { DocRow, ItemRow, ItemType, QuestionFormValues, QuestionRow, VideoRow } from "./itemSchemas"
+import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
 import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
 import {
   COURSE_STATUS_LABEL,
@@ -97,10 +99,16 @@ export function EtCourseEditorPage() {
   const [itemError, setItemError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
-  const { data: course } = useQuery({
+  const {
+    data: course,
+    error: courseError,
+    isLoading: courseLoading,
+  } = useQuery({
     queryKey: QUERY_KEYS.etCourses.detail(courseId ?? 0),
     queryFn: () => coursesApi.getDetail(courseId as number),
     enabled: courseId !== undefined,
+    // 403 / 404 重試沒有意義，只會延後畫面上的錯誤呈現
+    retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
   const { data: tagOptions = [] } = useQuery({
     queryKey: QUERY_KEYS.etCourses.tags(courseId),
@@ -290,13 +298,15 @@ export function EtCourseEditorPage() {
   const openMaterialId = openItem?.item_type === "MATERIAL" ? openItem.material_id : null
   const openQuizId = openItem?.item_type === "QUIZ" ? openItem.quiz_id : null
 
-  const { data: material, isFetching: materialLoading } = useQuery({
+  // 用 `isLoading`（首次載入）而非 `isFetching`——後者在存檔後的 refetch 也會是 true，
+  // 視窗內容會被換成轉圈再換回來，看起來就是「儲存完視窗跳一下」。
+  const { data: material, isLoading: materialLoading } = useQuery({
     queryKey: QUERY_KEYS.etCourses.material(openMaterialId ?? 0),
     queryFn: () => materialsApi.getDetail(openMaterialId as number),
     enabled: openMaterialId !== null,
   })
 
-  const { data: quiz, isFetching: quizLoading } = useQuery({
+  const { data: quiz, isLoading: quizLoading } = useQuery({
     queryKey: QUERY_KEYS.etCourses.quiz(openQuizId ?? 0),
     queryFn: () => quizzesApi.getDetail(openQuizId as number),
     enabled: openQuizId !== null,
@@ -344,6 +354,20 @@ export function EtCourseEditorPage() {
   const closeItemDialog = () => {
     setOpenItem(null)
     setItemError(null)
+  }
+
+  /** 關閉項目視窗；有未儲存的變更時先確認——沒改過就直接關，多問一次是干擾。 */
+  const requestCloseItem = (dirty: boolean) => {
+    if (!dirty) {
+      closeItemDialog()
+      return
+    }
+    confirm({
+      title: "放棄變更",
+      content: "尚未儲存的變更將不會保留，確定關閉？",
+      okText: "關閉",
+      onOk: closeItemDialog,
+    })
   }
 
   const handleAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
@@ -403,6 +427,36 @@ export function EtCourseEditorPage() {
   // 已發布課程僅可新增標籤、不可移除（FR-ET-US3-02）；停用標籤不可再新掛（FR-ET-US3-03）
   const tagsLocked = status !== "DRAFT"
   const selectableTags = tagOptions.filter((t) => t.is_active)
+
+  // ⚠️ 查詢失敗時**必須早退**。原本忽略 error，403 之後 `course` 為 undefined，
+  // 而 `readOnly` 是由 `course` 推導的（undefined → false），結果學員直接看到一個
+  // 可編輯的課程編輯頁——雖然每個寫入都會被後端擋下，但畫面本身就不該出現。
+  if (courseLoading) {
+    // 載入中先顯示轉圈——否則會先閃出一張空表單，看起來像資料掉了
+    return (
+      <Stack alignItems="center" sx={{ py: 8 }}>
+        <CircularProgress />
+      </Stack>
+    )
+  }
+
+  if (courseError) {
+    const { status, errorMessage } = toApiError(courseError)
+    const forbidden = status === 403
+    return (
+      <Box sx={{ p: 3 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+          <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h5">課程編輯</Typography>
+        </Stack>
+        <Alert severity={forbidden ? "warning" : "error"}>
+          {forbidden ? "您沒有檢視此課程的權限。課程編輯僅開放教師與管理者。" : errorMessage}
+        </Alert>
+      </Box>
+    )
+  }
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -623,14 +677,10 @@ export function EtCourseEditorPage() {
         dmOptions={dmOptions}
         error={itemError}
         uploading={uploading}
-        onClose={closeItemDialog}
-        onSave={(values) =>
+        onClose={requestCloseItem}
+        onSave={(values: MaterialSavePayload) =>
           void runItemAction(
-            () =>
-              materialsApi.update(openMaterialId as number, {
-                ...values,
-                version: material?.version ?? 0,
-              }),
+            () => materialsApi.update(openMaterialId as number, { ...values, version: material?.version ?? 0 }),
             () => {
               message.success("教材已儲存")
               invalidateMaterial()
@@ -641,13 +691,6 @@ export function EtCourseEditorPage() {
           )
         }
         onUploadVideo={(file) => void handleUploadVideo(file)}
-        onDeleteVideo={(video: VideoRow) =>
-          void runItemAction(() => materialsApi.removeVideo(video.video_id), invalidateMaterial)
-        }
-        onAddDoc={(docId) => void runItemAction(() => materialsApi.addDoc(openMaterialId as number, docId), invalidateMaterial)}
-        onDeleteDoc={(doc: DocRow) =>
-          void runItemAction(() => materialsApi.removeDoc(doc.mat_doc_id), invalidateMaterial)
-        }
       />
 
       <QuizDialog
@@ -656,14 +699,16 @@ export function EtCourseEditorPage() {
         readOnly={readOnly}
         quiz={quiz ?? null}
         error={itemError}
-        onClose={closeItemDialog}
+        onClose={requestCloseItem}
         onSaveSettings={(values) =>
           void runItemAction(
             () => quizzesApi.update(openQuizId as number, { ...values, version: quiz?.version ?? 0 }),
             () => {
-              message.success("測驗設定已儲存")
+              message.success("測驗已儲存")
               invalidateQuiz()
+              // 課程詳細也要刷——項目列顯示的名稱取自測驗名稱
               invalidate()
+              closeItemDialog()
             },
           )
         }

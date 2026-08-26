@@ -1,7 +1,6 @@
 import { http } from "../../services/http"
 import type {
   DmDocOption,
-  DocRow,
   ItemRow,
   ItemType,
   MaterialDetail,
@@ -39,9 +38,21 @@ export const materialsApi = {
     return data
   },
 
+  /**
+   * 更新教材——送**最終狀態**（名稱、說明、文件集合、要保留的影片），全量覆寫。
+   *
+   * 文件引用原本是逐筆即時端點，2026-08-26 改為隨儲存一次套用：逐筆即時會讓
+   * 「取消」失去意義，也讓「至少擇一媒材」的檢核被繞過。
+   */
   update: async (
     materialId: number,
-    payload: { material_name: string; description_html: string | null; version: number },
+    payload: {
+      material_name: string
+      description_html: string | null
+      doc_ids: string[]
+      video_ids: number[]
+      version: number
+    },
   ): Promise<void> => {
     await http.put(`/et/materials/${materialId}`, payload)
   },
@@ -59,10 +70,6 @@ export const materialsApi = {
     return data
   },
 
-  removeVideo: async (videoId: number): Promise<void> => {
-    await http.delete(`/et/videos/${videoId}`)
-  },
-
   /** DM 訓練教材下拉（SRVDM002）——已排除廢止文件，但保留「廢止待簽核」者。 */
   listDmDocuments: async (keyword = ""): Promise<DmDocOption[]> => {
     const { data } = await http.get<DmDocOption[]>("/et/dm-documents", {
@@ -71,15 +78,6 @@ export const materialsApi = {
     return data
   },
 
-  addDoc: async (materialId: number, docId: string): Promise<DocRow> => {
-    const { data } = await http.post<DocRow>(`/et/materials/${materialId}/docs`, { doc_id: docId })
-    return data
-  },
-
-  /** 逐筆刪除引用——系統不提供批次移除（AC 4）。 */
-  removeDoc: async (matDocId: number): Promise<void> => {
-    await http.delete(`/et/material-docs/${matDocId}`)
-  },
 }
 
 interface QuestionPayload {

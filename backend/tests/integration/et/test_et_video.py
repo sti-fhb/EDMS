@@ -99,6 +99,19 @@ async def _set_max_size_mb(db, value: str) -> None:
     await db.flush()
 
 
+async def _put(client, uid: str, mid: int, **overrides):
+    """送**完整**教材狀態。`video_ids` 為**要保留的**影片，未列出者視為刪除。"""
+    payload = {
+        "material_name": "教材",
+        "description_html": None,
+        "doc_ids": [],
+        "video_ids": [],
+        "version": 0,
+        **overrides,
+    }
+    return await client.put(f"/api/et/materials/{mid}", json=payload, headers=_bearer(uid))
+
+
 def _tmp_dir_entries() -> set[str]:
     """暫存目錄現有檔名——用來驗證失敗路徑有清乾淨。"""
     tmp_dir = os.path.join(storage.storage_root(), storage.TMP_DIRNAME)
@@ -148,12 +161,8 @@ class TestUpload:
         """三類媒材擇一即可——這條把「影片算一類」釘住。"""
         uid = await _user(db, "ETV_U4")
         mid = await _material(client, uid)
-        await _upload(client, uid, mid, name="sample.mp4")
-        r = await client.put(
-            f"/api/et/materials/{mid}",
-            json={"material_name": "教材", "description_html": None, "version": 0},
-            headers=_bearer(uid),
-        )
+        up = await _upload(client, uid, mid, name="sample.mp4")
+        r = await _put(client, uid, mid, video_ids=[up.json()["video_id"]])
         assert r.status_code == 204, r.text
 
     @pytest.mark.parametrize("name", ["sample.avi", "sample.mov", "sample.mkv", "sample.txt", "sample", "sample."])
@@ -210,6 +219,12 @@ class TestUpload:
 
 
 class TestDelete:
+    """影片刪除走 `PUT /materials/{id}` 的 `video_ids`——未列出者視為刪除。
+
+    改成這樣是因為逐筆即時刪除會繞過「至少擇一媒材」的檢核，也讓「取消」失去意義
+    （2026-08-26 依實測回饋）。
+    """
+
     async def test_軟刪除影片並連帶學員觀看紀錄(self, client, db) -> None:
         uid = await _user(db, "ETV_D1")
         mid = await _material(client, uid)
@@ -221,7 +236,8 @@ class TestDelete:
         db.add(EtProgressInterval(user_id="STU01", video_id=vid, start_sec=0, end_sec=2, **audit))
         await db.flush()
 
-        d = await client.delete(f"/api/et/videos/{vid}", headers=_bearer(uid))
+        # 移除影片但補上說明文字，否則會變成空教材而被 ET_MATERIAL_002 擋下
+        d = await _put(client, uid, mid, description_html="<p>說明</p>", video_ids=[])
         assert d.status_code == 204, d.text
         video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == vid))
         assert video.deleted == 1
@@ -234,11 +250,10 @@ class TestDelete:
         uid = await _user(db, "ETV_D2")
         mid = await _material(client, uid)
         r = await _upload(client, uid, mid, name="sample.mp4")
-        vid = r.json()["video_id"]
-        video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == vid))
+        video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == r.json()["video_id"]))
         path = video.file_path
 
-        await client.delete(f"/api/et/videos/{vid}", headers=_bearer(uid))
+        await _put(client, uid, mid, description_html="<p>說明</p>", video_ids=[])
         assert os.path.isfile(path), "軟刪除不應刪磁碟檔案，否則無法回復"
 
     async def test_刪除後剩餘影片順序遞補(self, client, db) -> None:
@@ -247,7 +262,7 @@ class TestDelete:
         mid = await _material(client, uid)
         ids = [(await _upload(client, uid, mid, name=f"v{i}.mp4")).json()["video_id"] for i in range(3)]
 
-        d = await client.delete(f"/api/et/videos/{ids[0]}", headers=_bearer(uid))
+        d = await _put(client, uid, mid, video_ids=ids[1:])
         assert d.status_code == 204, d.text
         rows = await db.scalars(
             select(EtMaterialVideo)
@@ -258,18 +273,25 @@ class TestDelete:
         assert [v.video_id for v in remaining] == ids[1:]
         assert [v.sort_order for v in remaining] == [1, 2]
 
-    async def test_查無影片回_404(self, client, db) -> None:
+    async def test_移除最後一支影片而無其他媒材時被擋(self, client, db) -> None:
+        """檢核的是**存檔後的狀態**——逐筆即時刪除會繞過這一條。"""
         uid = await _user(db, "ETV_D4")
-        r = await client.delete("/api/et/videos/999999", headers=_bearer(uid))
-        assert r.status_code == 404
-        assert r.json()["error_code"] == "ET_MATERIAL_001"
+        mid = await _material(client, uid)
+        r = await _upload(client, uid, mid, name="sample.mp4")
+        vid = r.json()["video_id"]
+
+        d = await _put(client, uid, mid, video_ids=[])
+        assert d.status_code == 422
+        assert d.json()["error_code"] == "ET_MATERIAL_002"
+        video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == vid))
+        assert video.deleted == 0, "被擋下的請求須整批回滾"
 
     async def test_非擁有者不可刪除(self, client, db) -> None:
         owner = await _user(db, "ETV_D5")
         other = await _user(db, "ETV_D6")
         mid = await _material(client, owner)
-        r = await _upload(client, owner, mid, name="sample.mp4")
-        d = await client.delete(f"/api/et/videos/{r.json()['video_id']}", headers=_bearer(other))
+        await _upload(client, owner, mid, name="sample.mp4")
+        d = await _put(client, other, mid, description_html="<p>x</p>", video_ids=[])
         assert d.status_code == 403
 
 

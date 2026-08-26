@@ -31,24 +31,3 @@ def ensure_material_has_media(*, has_video: bool, has_doc: bool, has_description
             detail="教材須至少提供影片、文件或說明文字其中一項",
             error_code="ET_MATERIAL_002",
         )
-
-
-def ensure_doc_not_duplicated(*, existing_doc_ids: set[str], doc_id: str) -> None:
-    """同一教材不可重複引用同一份 DM 文件（`(MATERIAL_ID, DOC_ID)` 邏輯唯一）。
-
-    在應用層先擋而非只靠 DB 索引：資料庫的唯一違規會冒成 500，且訊息對使用者無意義。
-
-    > 註：DB 端之 `UX_ET_MATERIAL_DOC_MATERIAL_DOC` 已於本 issue 改為**部分**唯一索引
-    > （`WHERE DELETED = 0`）。原本的全表唯一約束會讓「引用 → 刪除 → 再引用同一份」
-    > 永久失敗，且錯誤指向一筆使用者看不見的已刪資料。此處的 `existing_doc_ids`
-    > 同樣只涵蓋未刪除者，兩邊語意一致。
-
-    Raises:
-        AppError: 409 `ET_MATERIAL_005`，該文件已被本教材引用。
-    """
-    if doc_id in existing_doc_ids:
-        raise AppError(
-            status_code=409,
-            detail="同一教材不可重複引用同一份文件",
-            error_code="ET_MATERIAL_005",
-        )

@@ -23,15 +23,8 @@ from app.et.course.repository import EtItemRepository
 from app.et.course.rules import ensure_owner
 from app.et.material import storage
 from app.et.material.repository import EtMaterialRepository
-from app.et.material.rules import ensure_doc_not_duplicated, ensure_material_has_media
-from app.et.material.schemas import (
-    DmDocOption,
-    DocRow,
-    MaterialDetail,
-    MaterialDocCreateReq,
-    MaterialUpdateReq,
-    VideoRow,
-)
+from app.et.material.rules import ensure_material_has_media
+from app.et.material.schemas import DmDocOption, DocRow, MaterialDetail, MaterialUpdateReq, VideoRow
 from app.et.material.video_probe import probe_duration_sec
 from app.services import AuditLogService, ParamService
 
@@ -78,19 +71,25 @@ class EtMaterialService:
     async def update(
         self, db: AsyncSession, material_id: int, req: MaterialUpdateReq, *, operator: OperatorInfo
     ) -> None:
-        """更新教材名稱與說明文字。
+        """更新教材：名稱、說明文字，與**完整的媒材集合**。
 
-        兩件事的順序有意義：**先消毒、再檢核「至少擇一媒材」**。若通篇說明文字都是
-        腳本，消毒後即為空——此時該教材若沒有影片也沒有文件，就是一個空教材，理應
-        被 `ET_MATERIAL_002` 擋下。順序顛倒的話會放行一個看似有說明、實則空白的教材。
+        ## 步驟順序有意義
+
+        1. 擁有權 → 2. 消毒說明文字 → 3. 樂觀鎖更新本體 → 4. 套用文件 / 影片差異
+        → 5. 對**最終狀態**檢核「至少擇一媒材」
+
+        **先消毒再檢核**：通篇皆為腳本的說明文字消毒後即為空，此時若無影片也無文件
+        就是空教材，理應被擋。順序顛倒會放行一個看似有說明、實則空白的教材。
+
+        **檢核放在套用差異之後**：要驗的是「存檔後的樣子」，不是「存檔前的樣子」。
+        放在前面的話，刪光所有文件的那次請求會以刪除前的狀態通過檢核。
+
+        全部在同一交易內——任一步失敗（版本不符、引用了不可引用的文件、最終為空教材）
+        整批回滾，使用者的畫面與 DB 不會分岔。
         """
-        material, course_id = await self._require_owned(db, material_id, operator.user_id)
+        _, course_id = await self._require_owned(db, material_id, operator.user_id)
         description = sanitize_material_html(req.description_html)
-        ensure_material_has_media(
-            has_video=await self._materials.has_video(db, material_id),
-            has_doc=await self._materials.has_doc(db, material_id),
-            has_description=description is not None,
-        )
+
         rowcount = await self._materials.update_basic(
             db,
             material_id,
@@ -100,10 +99,65 @@ class EtMaterialService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_MATERIAL")
+
+        await self._apply_docs(db, material_id, req.doc_ids, operator)
+        await self._apply_videos(db, material_id, req.video_ids, operator)
+
+        ensure_material_has_media(
+            has_video=await self._materials.has_video(db, material_id),
+            has_doc=await self._materials.has_doc(db, material_id),
+            has_description=description is not None,
+        )
         await self._log(db, "UPDATE", operator.user_id, course_id, "更新教材內容")
+
+    async def _apply_docs(self, db: AsyncSession, material_id: int, desired: list[str], operator: OperatorInfo) -> None:
+        """把文件引用調整成 `desired`（新增缺的、刪除多的）。
+
+        **只對新增的文件呼叫 SRVDM001**——既有引用不重驗：文件在 DM 端被廢止後仍是
+        合法引用（廢止前最後版學員仍可讀），重驗會讓「只是改個教材名稱」的存檔因為
+        某份舊文件被廢止而失敗。
+        """
+        existing = await self._materials.list_docs(db, material_id)
+        existing_ids = {d.doc_id for d in existing}
+        wanted = set(desired)
+
+        for doc in existing:
+            if doc.doc_id not in wanted:
+                await self._materials.soft_delete_doc(db, doc.mat_doc_id, operator)
+
+        client = get_dm_document_client()
+        for doc_id in desired:
+            if doc_id in existing_ids:
+                continue
+            await client.get_current_by_doc_id(db, doc_id)  # 不可引用 / 無發布版 → DM 端拋錯
+            await self._materials.add_doc(db, material_id, doc_id, operator)
+
+    async def _apply_videos(self, db: AsyncSession, material_id: int, keep: list[int], operator: OperatorInfo) -> None:
+        """刪除不在 `keep` 內的影片，並把剩餘影片順序遞補。
+
+        影片**只能刪不能加**——新增走上傳端點（檔案無法暫存在 JSON 請求裡）。故此處
+        不處理 `keep` 中不存在的 ID，那只會是前端送了一個已被別人刪掉的影片。
+        """
+        existing = await self._materials.list_videos(db, material_id)
+        kept = set(keep)
+        removed = [v.video_id for v in existing if v.video_id not in kept]
+        if not removed:
+            return
+        for video_id in removed:
+            await self._materials.soft_delete_video(db, video_id, operator)
+        await self._materials.resequence_videos(db, material_id, operator)
 
     async def upload_video(self, db: AsyncSession, material_id: int, upload, *, operator: OperatorInfo) -> VideoRow:
         """上傳一支教材影片。
+
+        ## 為何上傳是即時的、而其餘媒材是暫存的
+
+        檔案傳輸沒辦法「暫存在請求裡」——單檔上限 500 MB，留在瀏覽器記憶體等使用者
+        按儲存並不可行。故上傳一選檔就送出，而說明文字、文件引用、影片刪除都留到
+        按儲存時才隨 `PUT /materials/{id}` 一次套用。
+
+        代價是：上傳後按取消，影片仍在。這不會造成空教材（多一個媒材不會少），
+        使用者可再開啟教材把它刪掉。
 
         ## 步驟順序有意義
 
@@ -112,10 +166,8 @@ class EtMaterialService:
         → 7. 寫 DB 紀錄
 
         長度探測必須在檔案落地**之後**（ffprobe 要讀檔）、寫 DB **之前**
-        （data-model：取不到不得存檔）。而搬檔放在寫 DB 之前是刻意的——
-        見 `storage.promote` 對兩種失敗後果不對稱性的說明。
-
-        寫 DB 失敗時刪掉正式檔：否則每次失敗的上傳都留一份 500 MB 的垃圾。
+        （data-model：取不到不得存檔）。搬檔放在寫 DB 之前是刻意的——見
+        `storage.promote` 對兩種失敗後果不對稱性的說明。
         """
         _, course_id = await self._require_owned(db, material_id, operator.user_id)
 
@@ -149,50 +201,6 @@ class EtMaterialService:
 
         await self._log(db, "CREATE", operator.user_id, course_id, "上傳教材影片")
         return VideoRow.model_validate(video)
-
-    async def delete_video(self, db: AsyncSession, video_id: int, *, operator: OperatorInfo) -> None:
-        """刪除單支影片：本體與學員觀看紀錄軟刪，剩餘影片順序遞補。
-
-        磁碟檔案**不刪**——軟刪除的語意是可回復（見 `repository.soft_delete_video`）。
-        """
-        video = await self._materials.get_video(db, video_id)
-        if video is None:
-            raise _NOT_FOUND
-        _, course_id = await self._require_owned(db, video.material_id, operator.user_id)
-        await self._materials.soft_delete_video(db, video_id, operator)
-        await self._materials.resequence_videos(db, video.material_id, operator)
-        await self._log(db, "DELETE", operator.user_id, course_id, "刪除教材影片")
-
-    async def add_doc(
-        self, db: AsyncSession, material_id: int, req: MaterialDocCreateReq, *, operator: OperatorInfo
-    ) -> DocRow:
-        """新增一筆 DM 文件引用。
-
-        **先向 DM 確認該文件可引用**（SRVDM001）再落地：DM 端以 `AppError` 表達失敗
-        （404 查無 / 非可引用分類、409 尚無發布版），直接讓它冒上去即可——ET 自行判斷
-        會重複一次 DM 的分類白名單邏輯，兩邊遲早不一致。
-
-        已廢止之文件**不在此擋下**：AC 只要求下拉不出現廢止文件、既有引用顯示警告。
-        教師若手動帶入一個廢止文件的編號，仍會在課程發布檢核時被擋（屬 #204）。
-        """
-        _, course_id = await self._require_owned(db, material_id, operator.user_id)
-        client = get_dm_document_client()
-        await client.get_current_by_doc_id(db, req.doc_id)  # 不可引用 / 無發布版 → DM 端拋錯
-
-        existing = await self._materials.list_docs(db, material_id)
-        ensure_doc_not_duplicated(existing_doc_ids={d.doc_id for d in existing}, doc_id=req.doc_id)
-        doc = await self._materials.add_doc(db, material_id, req.doc_id, operator)
-        await self._log(db, "CREATE", operator.user_id, course_id, "新增教材文件引用")
-        return await self._doc_row(db, doc)
-
-    async def delete_doc(self, db: AsyncSession, mat_doc_id: int, *, operator: OperatorInfo) -> None:
-        """刪除單筆文件引用（逐筆，不提供批次移除——AC 4）。"""
-        doc = await self._materials.get_doc(db, mat_doc_id)
-        if doc is None:
-            raise _NOT_FOUND
-        _, course_id = await self._require_owned(db, doc.material_id, operator.user_id)
-        await self._materials.soft_delete_doc(db, mat_doc_id, operator)
-        await self._log(db, "DELETE", operator.user_id, course_id, "刪除教材文件引用")
 
     async def list_dm_documents(self, db: AsyncSession, *, keyword: str = "") -> list[DmDocOption]:
         """DM 訓練教材下拉（SRVDM002）。

@@ -2,15 +2,12 @@ import FormatBoldIcon from "@mui/icons-material/FormatBold"
 import FormatItalicIcon from "@mui/icons-material/FormatItalic"
 import FormatListBulletedIcon from "@mui/icons-material/FormatListBulleted"
 import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered"
-import LinkIcon from "@mui/icons-material/Link"
-import LinkOffIcon from "@mui/icons-material/LinkOff"
 import TitleIcon from "@mui/icons-material/Title"
 import Box from "@mui/material/Box"
 import Divider from "@mui/material/Divider"
 import Stack from "@mui/material/Stack"
 import ToggleButton from "@mui/material/ToggleButton"
 import Typography from "@mui/material/Typography"
-import Link from "@tiptap/extension-link"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import { useEffect } from "react"
@@ -22,10 +19,16 @@ import { useEffect } from "react"
  *
  * 後端 `app/et/common/html_sanitize.py` 以 allow-list 消毒，放行 `p/br/strong/em/u/
  * s/ul/ol/li/h3-h6/a/blockquote/code/pre`。這裡刻意**只提供其中一部分**（粗體、
- * 斜體、標題、列表、連結——對齊 wireframe 的工具列），因為編輯器產出的東西若不在
- * 後端白名單內，使用者會遇到「存檔後格式不見了」而不知道為什麼。
+ * 斜體、標題、列表），因為編輯器產出的東西若不在後端白名單內，使用者會遇到
+ * 「存檔後格式不見了」而不知道為什麼。
  *
  * 反過來則無妨：後端放行的比編輯器產得出的多，只是留了餘裕。
+ *
+ * ## 不提供「插入連結」工具（2026-08-26 依實測回饋移除）
+ *
+ * 原本有一顆連結按鈕，以 `window.prompt` 問網址。移除的理由是那個互動很笨拙，
+ * 而教師要放連結時直接把 URL 打進說明文字即可。後端白名單**仍保留 `a` 標籤**，
+ * 既有內容中的連結不會因此消失。
  *
  * ## 這不是安全邊界
  *
@@ -34,7 +37,7 @@ import { useEffect } from "react"
  */
 
 /** 編輯器可產出的標籤，須為後端白名單之子集。 */
-const ALLOWED_MARKS = ["bold", "italic", "heading", "bulletList", "orderedList", "link"] as const
+const ALLOWED_MARKS = ["bold", "italic", "heading", "bulletList", "orderedList"] as const
 
 interface RichTextEditorProps {
   value: string
@@ -53,12 +56,6 @@ export function RichTextEditor({ value, onChange, disabled = false, label = "說
         codeBlock: false,
         horizontalRule: false,
         blockquote: false,
-      }),
-      Link.configure({
-        openOnClick: false,
-        // 與後端 `ALLOWED_URL_SCHEMES` 一致——`javascript:` / `data:` 一律不放行
-        protocols: ["http", "https"],
-        HTMLAttributes: { rel: "noopener noreferrer" },
       }),
     ],
     content: value,
@@ -79,21 +76,6 @@ export function RichTextEditor({ value, onChange, disabled = false, label = "說
   }, [editor, disabled])
 
   if (!editor) return null
-
-  const toggleLink = () => {
-    if (editor.isActive("link")) {
-      editor.chain().focus().unsetLink().run()
-      return
-    }
-    const href = window.prompt("請輸入連結網址（http:// 或 https://）")
-    if (!href) return
-    // 前端先擋一次明顯不合法的 scheme——後端消毒才是真正的防線
-    if (!/^https?:\/\//i.test(href)) {
-      window.alert("僅支援 http:// 或 https:// 開頭的網址")
-      return
-    }
-    editor.chain().focus().extendMarkRange("link").setLink({ href }).run()
-  }
 
   const buttons = [
     { key: "bold", title: "粗體", icon: <FormatBoldIcon fontSize="small" />, run: () => editor.chain().focus().toggleBold().run() },
@@ -121,19 +103,6 @@ export function RichTextEditor({ value, onChange, disabled = false, label = "說
             {button.icon}
           </ToggleButton>
         ))}
-        <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-        <ToggleButton
-          value="link"
-          size="small"
-          disabled={disabled}
-          selected={editor.isActive("link")}
-          aria-label={editor.isActive("link") ? "移除連結" : "插入連結"}
-          title={editor.isActive("link") ? "移除連結" : "插入連結"}
-          onClick={toggleLink}
-          sx={{ border: 0, borderRadius: 1 }}
-        >
-          {editor.isActive("link") ? <LinkOffIcon fontSize="small" /> : <LinkIcon fontSize="small" />}
-        </ToggleButton>
       </Stack>
       <Divider />
       <Box
@@ -160,7 +129,7 @@ export function RichTextEditor({ value, onChange, disabled = false, label = "說
         <EditorContent editor={editor} aria-label={label} />
       </Box>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 1.5, pb: 1 }}>
-        支援粗體 / 斜體 / 標題 / 列表 / 連結；存檔時後端會依白名單消毒，其餘標記將被移除。
+        支援粗體 / 斜體 / 標題 / 列表；存檔時後端會依白名單消毒，其餘標記將被移除。
       </Typography>
     </Box>
   )

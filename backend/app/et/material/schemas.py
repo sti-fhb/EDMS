@@ -18,19 +18,48 @@ DOC_ID_MAX_LEN = 20
 DESCRIPTION_HTML_MAX_LEN = 50_000
 # DM 文件下拉之關鍵字長度上限（避免超長字串進到 LIKE 查詢）。
 KEYWORD_MAX_LEN = 100
+# 單一教材之引用文件 / 影片數上限——全量覆寫送完整陣列，無界限會成為放大面
+# （比照課程標籤之 `MAX_TAG_IDS`）。
+MAX_DOC_IDS = 100
+MAX_VIDEO_IDS = 100
 
 
 class MaterialUpdateReq(BaseModel):
-    """更新教材名稱與說明文字（帶教材自身之 `version` 檢核樂觀鎖）。
+    """更新教材：名稱、說明文字，與**完整的媒材集合**（帶 `version` 檢核樂觀鎖）。
 
-    **不含影片與文件引用**——那兩者各有自己的端點（上傳 / 逐筆增刪），不走全量覆寫：
-    影片是檔案上傳、文件引用需逐筆確認廢止狀態，硬塞進同一個 PUT 會讓「改個名稱」
-    也得把整包媒材重送一次。
+    ## 為何改成全量覆寫（2026-08-26 依實測回饋）
+
+    原本文件引用是逐筆即時生效的端點（加一筆就打一次 API）。實測發現兩個問題：
+
+    1. **「取消」不再是取消**——使用者刪掉一份文件、按取消，那次刪除早就送出去了
+    2. **「至少擇一媒材」被繞過**——刪到一份不剩時沒有任何檢核，教材直接變成空的，
+       而那正是 `ET_MATERIAL_002` 要防的狀態
+
+    改為送最終狀態後，兩者一併解決：檢核對象是**存檔後的樣子**，且未按儲存就什麼
+    都沒發生。比照課程標籤（`CourseUpdateReq.tag_ids`）之全量覆寫契約。
+
+    **影片上傳仍是獨立端點**——檔案傳輸無法「暫存」在請求裡（單檔上限 500 MB）。
+    此處的 `video_ids` 是**要保留的影片**，未列出者視為刪除。
     """
 
     material_name: str = Field(min_length=1, max_length=MATERIAL_NAME_MAX_LEN)
     description_html: str | None = Field(default=None, max_length=DESCRIPTION_HTML_MAX_LEN)
+    #: 本教材最終要引用的 DM 文件編號（依序）。未列出之既有引用將被軟刪除。
+    doc_ids: list[str] = Field(default_factory=list, max_length=MAX_DOC_IDS)
+    #: 本教材最終要保留的影片 ID。未列出之既有影片將被軟刪除。
+    video_ids: list[int] = Field(default_factory=list, max_length=MAX_VIDEO_IDS)
     version: int = Field(ge=0)
+
+    @field_validator("doc_ids")
+    @classmethod
+    def _docs_unique(cls, v: list[str]) -> list[str]:
+        """同一教材不可重複引用同一文件——在此先擋，避免送到 DB 才撞唯一索引（500）。"""
+        cleaned = [d.strip() for d in v]
+        if any(not d for d in cleaned):
+            raise ValueError("文件編號不得為空白")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("同一教材不可重複引用同一份文件")
+        return cleaned
 
     @field_validator("material_name")
     @classmethod

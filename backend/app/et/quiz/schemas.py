@@ -80,7 +80,9 @@ class QuestionCreateReq(BaseModel):
 
     question_type: Literal["SINGLE", "MULTIPLE"]
     stem: str = Field(min_length=1, max_length=STEM_MAX_LEN)
-    points: int = Field(ge=0, le=100)
+    #: 配分下限為 **1** 而非 0：0 分的題目答對答錯都不影響成績，等同不存在，
+    #: 卻仍佔著學員的作答時間。2026-08-26 依實測回饋收緊。
+    points: int = Field(ge=1, le=100)
     options: list[OptionInput] = Field(max_length=MAX_OPTIONS_PER_QUESTION)
 
     @field_validator("stem")

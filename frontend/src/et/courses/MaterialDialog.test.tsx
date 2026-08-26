@@ -32,9 +32,6 @@ function renderDialog(overrides: Partial<Parameters<typeof MaterialDialog>[0]> =
     onClose: vi.fn(),
     onSave: vi.fn(),
     onUploadVideo: vi.fn(),
-    onDeleteVideo: vi.fn(),
-    onAddDoc: vi.fn(),
-    onDeleteDoc: vi.fn(),
   }
   renderWithProviders(
     <MaterialDialog
@@ -86,14 +83,17 @@ describe("教材編輯視窗", () => {
     expect(screen.queryByText("此文件已廢止")).not.toBeInTheDocument()
   })
 
-  it("儲存時把名稱與說明文字交給呼叫端", async () => {
+  it("儲存時送出完整媒材狀態", async () => {
     const user = userEvent.setup()
     const { onSave } = renderDialog()
     await user.click(await screen.findByRole("button", { name: "儲存" }))
 
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ material_name: "採血示範", description_html: "<p>本教材重點</p>" }),
-    )
+    expect(onSave).toHaveBeenCalledWith({
+      material_name: "採血示範",
+      description_html: "<p>本教材重點</p>",
+      doc_ids: ["DM-TRAINING-000201"],
+      video_ids: [1],
+    })
   })
 
   it("說明文字為空殼標籤時送出 null", async () => {
@@ -119,31 +119,83 @@ describe("教材編輯視窗", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("教材須至少提供影片")
   })
 
-  it("刪除影片時通知呼叫端", async () => {
+  it("移除影片只改本地狀態，按儲存才送出", async () => {
+    // 逐筆即時刪除會讓「取消」失去意義，也繞過「至少擇一媒材」的檢核
     const user = userEvent.setup()
-    const { onDeleteVideo } = renderDialog()
-    await user.click(await screen.findByRole("button", { name: "刪除影片 demo.mp4" }))
-    expect(onDeleteVideo).toHaveBeenCalledWith(material.videos[0])
+    const { onSave } = renderDialog()
+    await user.click(await screen.findByRole("button", { name: "移除影片 demo.mp4" }))
+
+    expect(screen.queryByText("demo.mp4")).not.toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ video_ids: [] }))
   })
 
-  it("刪除文件引用時通知呼叫端", async () => {
+  it("移除文件引用只改本地狀態，按儲存才送出", async () => {
     const user = userEvent.setup()
-    const { onDeleteDoc } = renderDialog()
+    const { onSave } = renderDialog()
     await user.click(await screen.findByRole("button", { name: "移除文件引用 DM-TRAINING-000201" }))
-    expect(onDeleteDoc).toHaveBeenCalledWith(material.docs[0])
+
+    expect(screen.queryByText("採血流程訓練教材")).not.toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ doc_ids: [] }))
   })
 
-  it("上傳中停用儲存與選檔按鈕", async () => {
+  it("取消時回報有未儲存變更，交由呼叫端確認", async () => {
+    const user = userEvent.setup()
+    const { onClose, onSave } = renderDialog()
+    await user.click(await screen.findByRole("button", { name: "移除文件引用 DM-TRAINING-000201" }))
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    expect(onClose).toHaveBeenCalledWith(true)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("沒有改動時取消不回報 dirty——沒改過還問一次是干擾", async () => {
+    const user = userEvent.setup()
+    const { onClose } = renderDialog()
+    await user.click(await screen.findByRole("button", { name: "取消" }))
+    expect(onClose).toHaveBeenCalledWith(false)
+  })
+
+  it("加入 DM 文件只改本地狀態，按儲存才送出", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderDialog({
+      dmOptions: [
+        { doc_id: "DM-TRAINING-000999", doc_name: "新文件", version_no: "v1.0", published_date: null },
+      ],
+    })
+    await user.click(await screen.findByRole("combobox", { name: /從 DM/ }))
+    await user.click(await screen.findByRole("option", { name: /新文件/ }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ doc_ids: ["DM-TRAINING-000201", "DM-TRAINING-000999"] }),
+    )
+  })
+
+  it("上傳中停用儲存並於拖放區顯示進度", async () => {
     renderDialog({ uploading: true })
-    expect(await screen.findByRole("button", { name: /上傳中/ })).toBeDisabled()
+    expect(await screen.findByText("上傳中⋯")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "儲存" })).toBeDisabled()
+  })
+
+  it("提供拖拉上傳區", async () => {
+    renderDialog()
+    expect(await screen.findByRole("button", { name: "拖拉或點擊選擇影片檔" })).toBeInTheDocument()
+    expect(screen.getByText(/支援 mp4 \/ webm，單檔最大 500 MB/)).toBeInTheDocument()
   })
 
   it("唯讀模式不顯示儲存與刪除入口", async () => {
     renderDialog({ readOnly: true })
     expect(await screen.findByRole("button", { name: "關閉" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "儲存" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /刪除影片/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /移除影片/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /移除文件引用/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "拖拉或點擊選擇影片檔" })).not.toBeInTheDocument()
   })
 })

@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.exceptions import AppError
-from app.et.material.rules import ensure_doc_not_duplicated, ensure_material_has_media
+from app.et.material.rules import ensure_material_has_media
 
 pytestmark = pytest.mark.unit
 
@@ -37,24 +37,3 @@ class TestEnsureMaterialHasMedia:
         with pytest.raises(AppError) as exc:
             ensure_material_has_media(has_video=False, has_doc=False, has_description=False)
         assert "教材須至少提供影片、文件或說明文字其中一項" == exc.value.detail
-
-
-class TestEnsureDocNotDuplicated:
-    """同一教材不可重複引用同一份 DM 文件。"""
-
-    def test_新文件通過(self) -> None:
-        ensure_doc_not_duplicated(existing_doc_ids={"DM-TRAINING-000001"}, doc_id="DM-TRAINING-000002")
-
-    def test_空清單通過(self) -> None:
-        ensure_doc_not_duplicated(existing_doc_ids=set(), doc_id="DM-TRAINING-000001")
-
-    def test_重複引用被擋(self) -> None:
-        with pytest.raises(AppError) as exc:
-            ensure_doc_not_duplicated(existing_doc_ids={"DM-TRAINING-000001"}, doc_id="DM-TRAINING-000001")
-        assert exc.value.status_code == 409
-        assert exc.value.error_code == "ET_MATERIAL_005"
-
-    def test_錯誤訊息不含文件編號(self) -> None:
-        with pytest.raises(AppError) as exc:
-            ensure_doc_not_duplicated(existing_doc_ids={"DM-TRAINING-000007"}, doc_id="DM-TRAINING-000007")
-        assert "DM-TRAINING-000007" not in exc.value.detail

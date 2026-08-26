@@ -36,7 +36,8 @@ interface QuizDialogProps {
   readOnly: boolean
   quiz: QuizDetail | null
   error: string | null
-  onClose: () => void
+  /** `dirty` 為 true 表示設定表單有未儲存的變更，由呼叫端決定是否先確認。 */
+  onClose: (dirty: boolean) => void
   onSaveSettings: (values: {
     quiz_name: string
     description: string | null
@@ -60,6 +61,15 @@ interface QuizDialogProps {
  *
  * spec：題目順序由系統內建洗牌，教師不設定。故題庫頁沒有拖拉手把——
  * 後端雖有 `SORT_ORDER` 與重排端點（供日後需要時使用），UI 刻意不暴露。
+ *
+ * ## 關閉與儲存（2026-08-26 依實測回饋調整）
+ *
+ * 兩顆按鈕在**兩個分頁都在**，行為一致：儲存＝存下設定並關閉、關閉＝放棄未存的
+ * 變更並關閉。原本題庫分頁只有一顆「關閉」，使用者切過去再關掉時會不確定設定
+ * 分頁改的東西到底存了沒。
+ *
+ * 關閉前是否跳確認，由**有無未儲存變更**決定（`isDirty`）——沒改過還問一次是干擾。
+ * 題目是逐題儲存的（各有自己的 `VERSION`），不列入 `isDirty`。
  */
 export function QuizDialog({
   open,
@@ -94,6 +104,15 @@ export function QuizDialog({
   }
   if (!open && loadedId !== null) setLoadedId(null)
 
+  /** 設定表單是否有未儲存的變更。題目不算——它們各自即時儲存。 */
+  const isDirty =
+    quiz !== null &&
+    (name !== quiz.quiz_name ||
+      description !== (quiz.description ?? "") ||
+      passScore !== quiz.pass_score ||
+      timeLimit !== (quiz.time_limit_min === null ? "" : String(quiz.time_limit_min)) ||
+      maxRetry !== quiz.max_retry)
+
   const handleSaveSettings = () => {
     onSaveSettings({
       quiz_name: name,
@@ -121,7 +140,7 @@ export function QuizDialog({
   const pointsOk = pointsTotal === POINTS_TOTAL_TARGET
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={() => onClose(isDirty)} maxWidth="md" fullWidth>
       <DialogTitle>{readOnly ? "檢視測驗" : "編輯測驗"}</DialogTitle>
       <DialogContent dividers>
         {loading ? (
@@ -310,10 +329,10 @@ export function QuizDialog({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>{readOnly ? "關閉" : "關閉"}</Button>
-        {!readOnly && tab === 0 && (
+        <Button onClick={() => onClose(isDirty)}>關閉</Button>
+        {!readOnly && (
           <Button variant="contained" disabled={loading} onClick={handleSaveSettings}>
-            儲存設定
+            儲存
           </Button>
         )}
       </DialogActions>

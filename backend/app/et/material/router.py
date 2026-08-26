@@ -21,9 +21,7 @@ from app.et.deps import EtContext, get_et_context, require_et_roles
 from app.et.material.schemas import (
     KEYWORD_MAX_LEN,
     DmDocOption,
-    DocRow,
     MaterialDetail,
-    MaterialDocCreateReq,
     MaterialUpdateReq,
     VideoRow,
 )
@@ -68,7 +66,16 @@ async def update_material(
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """更新教材名稱與說明文字（說明文字經後端 allow-list 消毒；帶 `version`）。"""
+    """更新教材：名稱、說明文字，與**完整的媒材集合**（`doc_ids` / `video_ids`）。
+
+    ## 為何不是逐筆增刪端點（2026-08-26 依實測回饋改）
+
+    文件引用原本是「加一筆打一次 API」。那讓「取消」失去意義——刪除早就送出去了；
+    也讓「至少擇一媒材」被繞過——刪到一份不剩時沒有任何檢核，教材直接變空的。
+
+    改送最終狀態後，檢核對象是**存檔後的樣子**，且未按儲存就什麼都沒發生。
+    影片上傳仍是獨立端點（檔案無法暫存在 JSON 請求裡），`video_ids` 表示**要保留的**。
+    """
     await _service.update(db, material_id, req, operator=operator)
 
 
@@ -90,38 +97,3 @@ async def upload_material_video(
     （`ET_MATERIAL_004`）——覆蓋率的分母缺了它，章節永遠無法解鎖。
     """
     return await _service.upload_video(db, material_id, file, operator=operator)
-
-
-@router.delete("/videos/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_material_video(
-    video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """刪除單支影片（本體與學員觀看紀錄軟刪；磁碟檔案保留以維持可回復性）。"""
-    await _service.delete_video(db, video_id, operator=operator)
-
-
-@router.post(
-    "/materials/{material_id}/docs",
-    response_model=DocRow,
-    status_code=status.HTTP_201_CREATED,
-)
-async def add_material_doc(
-    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    req: MaterialDocCreateReq,
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> DocRow:
-    """新增一筆 DM 文件引用（僅存 `DOC_ID`，內容恆以 SRVDM001 取當前發布版）。"""
-    return await _service.add_doc(db, material_id, req, operator=operator)
-
-
-@router.delete("/material-docs/{mat_doc_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_material_doc(
-    mat_doc_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """刪除單筆文件引用——**逐筆**，系統不提供批次移除（AC 4）。"""
-    await _service.delete_doc(db, mat_doc_id, operator=operator)

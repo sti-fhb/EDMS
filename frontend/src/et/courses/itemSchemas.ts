@@ -178,11 +178,12 @@ export const QuestionFormSchema = z
       .trim()
       .min(1, { message: "請輸入題幹" })
       .max(STEM_MAX_LEN, { message: `題幹不可超過 ${STEM_MAX_LEN} 字` }),
+    // 下限 1：0 分的題目答對答錯都不影響成績，等同不存在卻仍佔作答時間
     points: z
       .number({ message: "請輸入配分" })
       .int({ message: "配分須為整數" })
-      .min(0, { message: "配分須介於 0 至 100" })
-      .max(100, { message: "配分須介於 0 至 100" }),
+      .min(1, { message: "配分須介於 1 至 100" })
+      .max(100, { message: "配分須介於 1 至 100" }),
     options: z
       .array(
         z.object({
@@ -227,7 +228,8 @@ export interface QuestionDraft {
 export const EMPTY_QUESTION: QuestionDraft = {
   question_type: "SINGLE",
   stem: "",
-  points: 0,
+  // 預設 1 而非 0——0 分不合法，讓使用者一開啟就踩到驗證錯誤沒有意義
+  points: 1,
   options: [
     { option_text: "", is_correct: true },
     { option_text: "", is_correct: false },

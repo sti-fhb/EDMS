@@ -132,9 +132,10 @@ export function QuestionEditor({ initial, saving = false, onSave, onCancel }: Qu
             label="配分"
             type="number"
             value={draft.points}
-            sx={{ width: 110 }}
+            // 140 而非 110：數字加上「分」的 endAdornment 在 110px 內會被截掉
+            sx={{ width: 140 }}
             slotProps={{
-              htmlInput: { min: 0, max: 100 },
+              htmlInput: { min: 1, max: 100 },
               input: { endAdornment: <InputAdornment position="end">分</InputAdornment> },
             }}
             onChange={(e) => patch({ points: Number(e.target.value) })}
