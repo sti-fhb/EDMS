@@ -26,8 +26,6 @@ def _payload(**over):
     base = {
         "email": "newbie@edms.local",
         "user_name": "新學員",
-        "password": _GOOD_PWD,
-        "confirm_password": _GOOD_PWD,
     }
     base.update(over)
     return base
@@ -86,43 +84,19 @@ async def test_register_duplicate_verified_email_409(db, et_stub):
     )
     await db.flush()
     with pytest.raises(AppError) as exc:
-        await RegisterService().register(
-            db, email="dup@edms.local", user_name="重複", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-        )
+        await RegisterService().register(db, email="dup@edms.local", user_name="重複")
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_001"
-
-
-async def test_register_password_mismatch(db):
-    """兩次密碼不一致 → 422 DP_USER_002（伺服器端）。"""
-    with pytest.raises(AppError) as exc:
-        await RegisterService().register(
-            db, email="mm@edms.local", user_name="不一致", password=_GOOD_PWD, confirm_password="Zzzz9999"
-        )
-    assert exc.value.status_code == 422 and exc.value.error_code == "DP_USER_002"
-
-
-async def test_register_weak_password(db):
-    """密碼不符複雜度 → 422（DP_PWD_001/002）。"""
-    with pytest.raises(AppError) as exc:
-        await RegisterService().register(
-            db, email="weak@edms.local", user_name="弱密碼", password="abc", confirm_password="abc"
-        )
-    assert exc.value.status_code == 422 and exc.value.error_code.startswith("DP_PWD_")
 
 
 async def test_reregister_pending_replaces_row(db):
     """同 Email 於未驗證期間再次註冊 → 覆蓋待驗證列（單一列、token 換新），非 409。"""
-    await RegisterService().register(
-        db, email="again@edms.local", user_name="第一次", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
+    await RegisterService().register(db, email="again@edms.local", user_name="第一次")
     first = (
         await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == "again@edms.local"))
     ).scalar_one()
     first_token = first.token_hash
 
-    await RegisterService().register(
-        db, email="again@edms.local", user_name="第二次", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
+    await RegisterService().register(db, email="again@edms.local", user_name="第二次")
     rows = (
         (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == "again@edms.local")))
         .scalars()
@@ -161,9 +135,7 @@ async def test_register_blocked_by_unexpired_admin_invite(db):
     original_token = await _make_admin_invite(db, email, minutes=30)
 
     with pytest.raises(AppError) as exc:
-        await RegisterService().register(
-            db, email=email, user_name="想自己註冊", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-        )
+        await RegisterService().register(db, email=email, user_name="想自己註冊")
     assert exc.value.status_code == 409
     assert exc.value.error_code == "DP_USER_011"
 
@@ -180,29 +152,13 @@ async def test_register_overwrites_expired_admin_invite(db, et_stub):
     email = "expired-invite@edms.local"
     original_token = await _make_admin_invite(db, email, minutes=-1)
 
-    await RegisterService().register(
-        db, email=email, user_name="自己註冊", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
+    await RegisterService().register(db, email=email, user_name="自己註冊")
 
     row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()
     assert row.token_hash != original_token  # 舊邀請 token 已作廢
     assert row.kind == "SELF_REGISTER"
     assert row.user_name == "自己註冊"
-    assert row.pwd_hash is not None  # 自助註冊建立即帶密碼雜湊
-
-
-async def test_register_invite_guard_precedes_password_check(db):
-    """#125：有有效邀請時，即使密碼不符複雜度也回 409 DP_USER_011（守衛置於密碼檢核之前）。
-
-    釘住檢核優先序：先擋「不該覆蓋邀請」，再談密碼。若日後有人把守衛移到 step 3 之後，
-    使用者會先看到 422 密碼錯誤、改好密碼才發現根本不能註冊，體驗更差。
-    """
-    email = "invited-weak@edms.local"
-    await _make_admin_invite(db, email, minutes=30)
-
-    with pytest.raises(AppError) as exc:
-        await RegisterService().register(db, email=email, user_name="X", password="abc", confirm_password="abc")
-    assert exc.value.error_code == "DP_USER_011"  # 非 DP_PWD_001/002/004
+    assert row.pwd_hash is None  # #212：pending 列不存密碼，密碼於驗證步當場設定
 
 
 async def test_delete_pending_unless_active_invite_keeps_valid_invite(db):
@@ -259,9 +215,7 @@ async def test_overwriting_expired_invite_writes_audit(db, et_stub):
     email = "audited-expired@edms.local"
     await _make_admin_invite(db, email, minutes=-1)
 
-    await RegisterService().register(
-        db, email=email, user_name="自己註冊", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
+    await RegisterService().register(db, email=email, user_name="自己註冊")
 
     log = (
         await db.execute(
@@ -274,16 +228,25 @@ async def test_overwriting_expired_invite_writes_audit(db, et_stub):
     assert "ADMIN_INVITE" in log.before_value  # 前值留下被覆蓋掉的邀請樣貌
 
 
-async def test_self_register_overwrite_writes_no_audit(db, et_stub):
-    """#125 反面：覆蓋的若是自助註冊列（非管理者邀請）→ 不記稽核，維持 US2 原設計。"""
-    email = "plain-overwrite@edms.local"
-    await RegisterService().register(
-        db, email=email, user_name="第一次", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
-    before = len(((await db.execute(select(DpAuditLog))).scalars().all()))
+async def test_self_register_overwrite_writes_audit(db, et_stub):
+    """覆蓋既有自助註冊列 → 記一筆 DELETE 稽核（#212）。
 
-    await RegisterService().register(
-        db, email=email, user_name="第二次", password=_GOOD_PWD, confirm_password=_GOOD_PWD
-    )
-    after = len(((await db.execute(select(DpAuditLog))).scalars().all()))
-    assert after == before  # 未新增任何稽核
+    修法 B 之後覆蓋已不構成帳號接管（列裡沒有密碼），但它仍會作廢他人仍有效的驗證連結並
+    換掉姓名——使用者只會發現連結突然失效，客服需查得到原因。
+
+    因此 target_id 記 Email：稽核查詢只能按 target_id 篩、不支援 before_value 關鍵字搜尋，
+    把 Email 只留在 JSON 裡等於這列實務上查不到。本斷言即釘住「這列查得到」。
+    """
+    email = "plain-overwrite@edms.local"
+    await RegisterService().register(db, email=email, user_name="第一次")
+    before = len((await db.execute(select(DpAuditLog))).scalars().all())
+
+    await RegisterService().register(db, email=email, user_name="第二次")
+    logs = (await db.execute(select(DpAuditLog))).scalars().all()
+    assert len(logs) == before + 1
+
+    log = logs[-1]
+    assert log.action_type == "DELETE" and log.result == "SUCCESS"
+    assert "既有自助註冊申請被新的註冊申請覆蓋" in log.description
+    assert "第一次" in log.before_value and email in log.before_value
+    assert log.target_id == email  # 可經稽核查詢的 target 維度找到
