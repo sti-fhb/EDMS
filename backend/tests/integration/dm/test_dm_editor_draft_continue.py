@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.dm.catalog.models import DmTag
+from app.dm.catalog.models import DmFunc, DmTag
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.editor.service import EditorService
 from app.dm.review.models import DmReview
@@ -372,6 +372,57 @@ async def test_update_draft_version_rename_requires_doc_owner(db):
     )
     doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == r.doc_id))
     assert doc.doc_name == "首版草稿文件"  # 非文件建立者改名不生效
+
+
+async def test_update_draft_version_updates_func_when_first_version_manual(db):
+    # Round-1：首版草稿續編開放全欄位——手冊類可改關聯作業項目 func（分類綁 DOC_ID 除外）
+    await _seed_user(db, "ed", "撰寫")
+    db.add(DmFunc(func_code="F1", func_name="功能一", created_user="seed", created_date=utcnow()))
+    now = utcnow()
+    doc = DmDocument(
+        doc_id="DM-MANUAL-000001",
+        doc_name="手冊草稿",
+        category_code="MANUAL",
+        func_code=None,
+        current_version_id=None,
+        status="DRAFT",
+        created_user="ed",
+        created_date=now,
+    )
+    db.add(doc)
+    await db.flush()
+    ver = DmDocVersion(
+        doc_id="DM-MANUAL-000001",
+        version_no="1.0",
+        change_summary="x",
+        file_name="a.pdf",
+        file_path="/x/a.pdf",
+        file_size=10,
+        file_mime=_PDF,
+        status="DRAFT",
+        created_user="ed",
+        created_date=now,
+    )
+    db.add(ver)
+    await db.flush()
+    aud = await _audience_id(db)
+    await _svc.update_draft_version(
+        db,
+        doc_id="DM-MANUAL-000001",
+        version_id=ver.version_id,
+        doc_name="手冊草稿",
+        func_code="F1",
+        audience_ids=[aud],
+        retrieval_ids=[],
+        version_no="1.0",
+        change_summary="x",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op(),
+    )
+    doc2 = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-MANUAL-000001"))
+    assert doc2.func_code == "F1"  # 首版手冊草稿續編可設 / 改 func
 
 
 async def test_update_draft_version_blocked_when_doc_obsolete(db):

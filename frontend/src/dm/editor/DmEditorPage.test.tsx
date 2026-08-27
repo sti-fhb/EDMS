@@ -239,9 +239,10 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
     expect(await screen.findByText("已儲存為草稿")).toBeInTheDocument()
     expect(putCalls).toBe(1) // 續編走更新既有版本（PUT），非另開版本
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/me?tab=drafts") // 導回草稿匣（Round-1）
   }, 20000)
 
-  it("續編新版本草稿：名稱唯讀、帶出既有版號/摘要（#222）", async () => {
+  it("續編新版本草稿：名稱唯讀、版號/摘要留白（Round-1：不帶舊值）", async () => {
     server.use(
       http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
         HttpResponse.json({
@@ -267,8 +268,8 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     renderWithProviders(<DmEditorPage />)
     expect(await screen.findByText("編輯文件 — 已發布B")).toBeInTheDocument()
     expect(screen.getByLabelText(/文件名稱/)).toBeDisabled() // 已發布文件之新版草稿名稱唯讀
-    expect(screen.getByLabelText(/新版本號/)).toHaveValue("2.0-draft")
-    expect(screen.getByLabelText(/變更摘要/)).toHaveValue("新版草摘")
+    expect(screen.getByLabelText(/新版本號/)).toHaveValue("") // 新版本不帶舊版號、留白（Round-1）
+    expect(screen.getByLabelText(/變更摘要/)).toHaveValue("") // 新版本不帶舊摘要、留白
   })
 
   it("續編已廢止孤兒草稿：顯示已廢止警示、鎖送簽/存草稿（#222 安全）", async () => {

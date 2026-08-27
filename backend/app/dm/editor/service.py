@@ -316,6 +316,7 @@ class EditorService:
         doc_id: str,
         version_id: int,
         doc_name: str | None,
+        func_code: str | None = None,
         audience_ids: Sequence[int],
         retrieval_ids: Sequence[int],
         version_no: str,
@@ -327,7 +328,8 @@ class EditorService:
     ) -> VersionResult:
         """續編：更新既有 DRAFT 版本（版號 / 摘要 / 檔案）+ 文件層標籤覆寫，不另開版本（不撞單一草稿唯一索引）。
 
-        父文件為 DRAFT（首版草稿）時一併更新文件名稱（Q1=A）；父文件已發布（新版本草稿）時名稱唯讀、忽略 doc_name。
+        父文件為 DRAFT（首版草稿）且為文件建立者時，一併更新文件名稱與關聯作業項目 func（Q1=A、所有欄位可編、
+        分類除外綁 DOC_ID）；父文件已發布（新版本草稿）時身份欄唯讀、忽略 doc_name / func_code。
         檔案未附（file_bytes 空）則保留既有檔案。
 
         Raises:
@@ -362,10 +364,13 @@ class EditorService:
             previewable = fmeta.previewable
         ver.version_no, ver.change_summary = version_no, change_summary
         ver.updated_user, ver.updated_date = op.user_id, now
-        # 首版草稿可改名（Q1=A）；已發布文件唯讀。改名另需**文件建立者本人**（改的是跨版本共享之
-        # DM_DOCUMENT.doc_name，僅版本擁有權不足——他人於同份 DRAFT 文件另開版本者不得改名），否則忽略。
-        if doc.status == _DRAFT and doc_name is not None and doc.created_user == op.user_id:
-            doc.doc_name = doc_name.strip()
+        # 首版草稿（父 DRAFT）之**文件建立者本人**可改文件層身份欄：名稱（Q1=A）+ 關聯作業項目 func
+        # （分類綁 DOC_ID、不可改）。改的是跨版本共享之 DM_DOCUMENT 欄位，僅版本擁有權不足——他人於同份
+        # DRAFT 文件另開版本者不得改；已發布文件（新版本草稿）身份欄唯讀，一律忽略。
+        if doc.status == _DRAFT and doc.created_user == op.user_id:
+            if doc_name is not None:
+                doc.doc_name = doc_name.strip()
+            doc.func_code = await self._resolve_func(db, doc.category_code, func_code)  # 非手冊類清為 None
             doc.updated_user, doc.updated_date = op.user_id, now
         await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)
         await db.flush()

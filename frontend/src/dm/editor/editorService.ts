@@ -35,9 +35,10 @@ export interface AddVersionPayload {
   file: File | null
 }
 
-/** 續編既有 DRAFT 版本之表單欄位（doc_name 僅父文件 DRAFT 時傳；null＝不改名。file null＝沿用既有檔）。 */
+/** 續編既有 DRAFT 版本之表單欄位（doc_name / func_code 僅父文件 DRAFT 時傳；null＝不改。file null＝沿用既有檔）。 */
 export interface UpdateDraftPayload {
   doc_name: string | null
+  func_code: string | null
   version_no: string
   change_summary: string
   audience_ids: string[]
@@ -108,6 +109,7 @@ export const editorApi = {
   ): Promise<VersionResult> => {
     const fd = new FormData()
     if (payload.doc_name !== null) fd.append("doc_name", payload.doc_name)
+    if (payload.func_code !== null) fd.append("func_code", payload.func_code)
     fd.append("version_no", payload.version_no)
     fd.append("change_summary", payload.change_summary)
     payload.audience_ids.forEach((id) => fd.append("audience_ids", id))

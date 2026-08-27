@@ -110,6 +110,7 @@ async def update_draft_version(
     doc_id: str,
     version_id: int,
     doc_name: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT（首版草稿）時生效
+    func_code: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT + 手冊類時生效
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
     audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
@@ -119,7 +120,7 @@ async def update_draft_version(
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
-    """續編：更新既有 DRAFT 版本（in-place，不另開版本）+ 文件層標籤覆寫；父文件 DRAFT 時可一併改名（#222）。"""
+    """續編：更新既有 DRAFT 版本（in-place，不另開版本）+ 文件層標籤覆寫；父文件 DRAFT 時可一併改名 / func（#222）。"""
     _ensure_editor(ctx)
     file_name, data, file_mime = await _read_upload(file)
     return await _service.update_draft_version(
@@ -127,6 +128,7 @@ async def update_draft_version(
         doc_id=doc_id,
         version_id=version_id,
         doc_name=doc_name,
+        func_code=func_code,
         audience_ids=audience_ids,
         retrieval_ids=retrieval_ids,
         version_no=version_no,

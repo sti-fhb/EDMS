@@ -16,7 +16,7 @@ import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 
 import type { ActivityEvent, DraftItem } from "./schemas"
 import {
@@ -37,7 +37,9 @@ import { toApiError } from "../../services/http"
  * 個人資料維護（姓名 / Email / 密碼）為另一入口，由平台 DP 提供（右上使用者選單），不在此頁。
  */
 export function DmPersonalPage() {
-  const [tab, setTab] = useState<"activity" | "drafts">("activity")
+  const [searchParams] = useSearchParams()
+  // 支援 ?tab=drafts 深連結（如編輯器續編後導回草稿匣）；預設「我的文件動態」。
+  const [tab, setTab] = useState<"activity" | "drafts">(searchParams.get("tab") === "drafts" ? "drafts" : "activity")
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
