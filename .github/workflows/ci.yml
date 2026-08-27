@@ -109,6 +109,20 @@ jobs:
       - name: 安裝 Python 依賴（含 dev 套件）
         run: uv sync --dev
 
+      # ET 教材影片以 ffprobe 解析長度（#203 / SA 裁示 Q2）——本專案唯一的系統層依賴。
+      # 寫成「有就跳過、沒有才裝」而非無條件 apt install：runner 映像檔是否預裝 ffmpeg
+      # 會隨版本變動，寫死任一邊都會在對方成立時錯（多花 10 秒，或整批影片測試紅燈）。
+      # 印出版本讓 log 直接回答「這個 runner 到底有沒有」。
+      - name: 確保 ffmpeg 可用（ET 影片時長解析）
+        run: |
+          if ! command -v ffprobe >/dev/null 2>&1; then
+            echo "runner 未預裝 ffmpeg，開始安裝"
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          else
+            echo "runner 已預裝 ffmpeg"
+          fi
+          ffprobe -version | head -1
+
       # ── Lint（不需 DB，最快，提前 fail-fast）──
       - name: 執行 ruff lint
         run: uv run ruff check .

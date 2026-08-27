@@ -5,6 +5,7 @@ import Autocomplete from "@mui/material/Autocomplete"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
+import CircularProgress from "@mui/material/CircularProgress"
 import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
@@ -28,7 +29,12 @@ import { useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
+import { MaterialDialog } from "./MaterialDialog"
+import { QuizDialog } from "./QuizDialog"
 import { coursesApi } from "./coursesService"
+import type { MaterialSavePayload } from "./MaterialDialog"
+import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
+import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
 import {
   COURSE_STATUS_LABEL,
   ChapterNameSchema,
@@ -87,11 +93,31 @@ export function EtCourseEditorPage() {
   const [chapterDialogOpen, setChapterDialogOpen] = useState(false)
   const [chapterDraft, setChapterDraft] = useState("")
   const [chapterError, setChapterError] = useState("")
+  /** 目前開啟的項目視窗——`null` 表示未開啟。 */
+  const [openItem, setOpenItem] = useState<ItemRow | null>(null)
+  const [itemError, setItemError] = useState<string | null>(null)
+  /** 上傳影片的錯誤與其他錯誤分開——它要顯示在上傳區旁邊，不是視窗頂端。 */
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  /**
+   * 剛建立、**尚未儲存過**的項目 ID。
+   *
+   * 新增項目會立刻於 DB 建立空殼（教材 / 測驗與 `ET_ITEM` 同交易），使用者若直接
+   * 取消，那個沒有名稱也沒有內容的空殼會留在章節裡。取消時把它刪掉，章節才不會
+   * 長出一排幽靈項目。儲存成功後清除此標記——之後的取消就只是「不存這次的修改」。
+   */
+  const [unsavedNewItemId, setUnsavedNewItemId] = useState<number | null>(null)
 
-  const { data: course } = useQuery({
+  const {
+    data: course,
+    error: courseError,
+    isLoading: courseLoading,
+  } = useQuery({
     queryKey: QUERY_KEYS.etCourses.detail(courseId ?? 0),
     queryFn: () => coursesApi.getDetail(courseId as number),
     enabled: courseId !== undefined,
+    // 403 / 404 重試沒有意義，只會延後畫面上的錯誤呈現
+    retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
   const { data: tagOptions = [] } = useQuery({
     queryKey: QUERY_KEYS.etCourses.tags(courseId),
@@ -125,6 +151,8 @@ export function EtCourseEditorPage() {
         chapter_name: c.name,
         sort_order: i + 1,
         version: 0,
+        // 暫存章節尚未寫入 DB，掛不了項目——ItemList 於新增模式停用
+        items: [],
       }))
     : (course?.chapters ?? [])
   const status = course?.status ?? "DRAFT"
@@ -274,10 +302,205 @@ export function EtCourseEditorPage() {
     })
   }
 
+  // ── 章節項目（教材 / 測驗，#203）────────────────────────────────────────
+
+  const openMaterialId = openItem?.item_type === "MATERIAL" ? openItem.material_id : null
+  const openQuizId = openItem?.item_type === "QUIZ" ? openItem.quiz_id : null
+
+  // 用 `isLoading`（首次載入）而非 `isFetching`——後者在存檔後的 refetch 也會是 true，
+  // 視窗內容會被換成轉圈再換回來，看起來就是「儲存完視窗跳一下」。
+  const { data: material, isLoading: materialLoading } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.material(openMaterialId ?? 0),
+    queryFn: () => materialsApi.getDetail(openMaterialId as number),
+    enabled: openMaterialId !== null,
+  })
+
+  const { data: quiz, isLoading: quizLoading } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.quiz(openQuizId ?? 0),
+    queryFn: () => quizzesApi.getDetail(openQuizId as number),
+    enabled: openQuizId !== null,
+  })
+
+  // DM 文件下拉只在教材視窗開著時才查——課程編輯頁本身不需要這份清單
+  const { data: dmOptions = [] } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.dmDocuments(),
+    queryFn: () => materialsApi.listDmDocuments(),
+    enabled: openMaterialId !== null,
+  })
+
+  const invalidateMaterial = () => {
+    if (openMaterialId !== null) {
+      void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.material(openMaterialId) })
+    }
+  }
+  const invalidateQuiz = () => {
+    if (openQuizId !== null) {
+      void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.quiz(openQuizId) })
+    }
+  }
+
+  /**
+   * 項目視窗內的操作統一經此執行。
+   *
+   * 錯誤呈現在**視窗內的 Alert** 而非 snackbar：使用者的注意力在視窗裡，
+   * 而「教材須至少提供⋯」這類訊息需要指出是哪一個教材出問題，飄一則 toast 說不清楚。
+   */
+  const runItemAction = async (
+    action: () => Promise<unknown>,
+    after?: () => void,
+    /** 錯誤的呈現位置——上傳相關的要落在上傳區旁，其餘落在視窗頂端。 */
+    setError: (message: string | null) => void = setItemError,
+  ) => {
+    setError(null)
+    try {
+      await action()
+      after?.()
+    } catch (err) {
+      const { errorCode, errorMessage } = toApiError(err)
+      if (errorCode === LOCK_CONFLICT) {
+        setConflictOpen(true)
+        return
+      }
+      setError(errorMessage)
+    }
+  }
+
+  const closeItemDialog = () => {
+    setOpenItem(null)
+    setItemError(null)
+    setUploadError(null)
+    setUnsavedNewItemId(null)
+  }
+
+  /** 丟棄尚未儲存過的新項目——連同其空殼教材 / 測驗一併刪除。 */
+  const discardUnsavedItem = async () => {
+    const itemId = unsavedNewItemId
+    closeItemDialog()
+    if (itemId === null) return
+    try {
+      await itemsApi.remove(itemId)
+      invalidate()
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  /**
+   * 關閉項目視窗。
+   *
+   * | 情境 | 行為 |
+   * |------|------|
+   * | 新項目、沒填任何東西 | **直接刪掉**，不問——他只是點開看看 |
+   * | 新項目、填了東西 | 確認後刪掉 |
+   * | 既有項目、沒改過 | 直接關 |
+   * | 既有項目、改過 | 確認後關（項目本身保留） |
+   */
+  const requestCloseItem = (dirty: boolean) => {
+    const isUnsavedNew = unsavedNewItemId !== null
+    if (!dirty) {
+      if (isUnsavedNew) void discardUnsavedItem()
+      else closeItemDialog()
+      return
+    }
+    confirm({
+      title: "放棄變更",
+      content: isUnsavedNew
+        ? "變更內容不會儲存，此項目也不會建立。確定取消？"
+        : "尚未儲存的變更將不會保留，確定關閉？",
+      okText: "確定",
+      onOk: isUnsavedNew ? discardUnsavedItem : closeItemDialog,
+    })
+  }
+
+  const handleAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
+    try {
+      // 不代填名稱——使用者開了視窗第一件事就是把預設值選起來刪掉。
+      // 空名稱只是「還沒填」的過渡狀態，儲存時後端仍必填。
+      const created = await itemsApi.add(chapter.chapter_id, itemType, "")
+      invalidate()
+      // 建完直接開視窗——空殼本身沒有內容，不開等於要使用者再點一次
+      setUnsavedNewItemId(created.item_id)
+      setOpenItem(created)
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  const handleDeleteItem = (item: ItemRow) => {
+    confirm({
+      title: `刪除${item.item_type === "MATERIAL" ? "教材" : "測驗"}`,
+      content:
+        "確定刪除此項目？其內容與學員於此項目之學習紀錄、成績將一併移除，且不再計入完課率。",
+      okText: "刪除",
+      onOk: async () => {
+        try {
+          await itemsApi.remove(item.item_id)
+          invalidate()
+          if (openItem?.item_id === item.item_id) closeItemDialog()
+        } catch (err) {
+          handleError(err)
+        }
+      },
+    })
+  }
+
+  const handleUploadVideo = async (file: File) => {
+    if (openMaterialId === null) return
+    setUploading(true)
+    await runItemAction(
+      () => materialsApi.uploadVideo(openMaterialId, file),
+      () => {
+        invalidateMaterial()
+        invalidate()
+      },
+      setUploadError,
+    )
+    setUploading(false)
+  }
+
+  const handleDeleteQuestion = (question: QuestionRow) => {
+    confirm({
+      title: "刪除題目",
+      content: "確定刪除此題目？學員於此題之作答紀錄與得分將一併移除。",
+      okText: "刪除",
+      onOk: () => runItemAction(() => quizzesApi.removeQuestion(question.question_id), invalidateQuiz),
+    })
+  }
+
   const selectedTags = tagOptions.filter((t) => form.tag_ids.includes(t.tag_id))
   // 已發布課程僅可新增標籤、不可移除（FR-ET-US3-02）；停用標籤不可再新掛（FR-ET-US3-03）
   const tagsLocked = status !== "DRAFT"
   const selectableTags = tagOptions.filter((t) => t.is_active)
+
+  // ⚠️ 查詢失敗時**必須早退**。原本忽略 error，403 之後 `course` 為 undefined，
+  // 而 `readOnly` 是由 `course` 推導的（undefined → false），結果學員直接看到一個
+  // 可編輯的課程編輯頁——雖然每個寫入都會被後端擋下，但畫面本身就不該出現。
+  if (courseLoading) {
+    // 載入中先顯示轉圈——否則會先閃出一張空表單，看起來像資料掉了
+    return (
+      <Stack alignItems="center" sx={{ py: 8 }}>
+        <CircularProgress />
+      </Stack>
+    )
+  }
+
+  if (courseError) {
+    const { status, errorMessage } = toApiError(courseError)
+    const forbidden = status === 403
+    return (
+      <Box sx={{ p: 3 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+          <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h5">課程編輯</Typography>
+        </Stack>
+        <Alert severity={forbidden ? "warning" : "error"}>
+          {forbidden ? "您沒有檢視此課程的權限。課程編輯僅開放教師與管理者。" : errorMessage}
+        </Alert>
+      </Box>
+    )
+  }
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -462,6 +685,92 @@ export function EtCourseEditorPage() {
           )
           chapterMut.mutate(() => coursesApi.reorderChapters(courseId, ids, course?.version ?? 0))
         }}
+        itemsDisabled={isNew}
+        onAddItem={handleAddItem}
+        onOpenItem={(item) => {
+          setItemError(null)
+          setUploadError(null)
+          // 由清單點開的是既有項目——取消時不該把它刪掉
+          setUnsavedNewItemId(null)
+          setOpenItem(item)
+        }}
+        onDeleteItem={handleDeleteItem}
+        onReorderItems={(chapter, ids) => {
+          // 樂觀更新：同章節重排之理由——少了這步會閃回舊順序、看起來像「拖了沒動」
+          qc.setQueryData(QUERY_KEYS.etCourses.detail(courseId as number), (old?: CourseDetail) =>
+            old
+              ? {
+                  ...old,
+                  chapters: old.chapters.map((c) =>
+                    c.chapter_id === chapter.chapter_id
+                      ? {
+                          ...c,
+                          items: ids.map((id) => c.items.find((i) => i.item_id === id)).filter((i) => i !== undefined),
+                        }
+                      : c,
+                  ),
+                }
+              : old,
+          )
+          chapterMut.mutate(() => itemsApi.reorder(chapter.chapter_id, ids, chapter.version))
+        }}
+      />
+
+      <MaterialDialog
+        open={openMaterialId !== null}
+        loading={materialLoading}
+        readOnly={readOnly}
+        material={material ?? null}
+        dmOptions={dmOptions}
+        error={itemError}
+        uploadError={uploadError}
+        uploading={uploading}
+        onClose={requestCloseItem}
+        onSave={(values: MaterialSavePayload) =>
+          void runItemAction(
+            () => materialsApi.update(openMaterialId as number, { ...values, version: material?.version ?? 0 }),
+            () => {
+              message.success("教材已儲存")
+              invalidateMaterial()
+              // 課程詳細也要刷——項目列顯示的名稱取自教材名稱
+              invalidate()
+              // 存過之後就不再是「未儲存的新項目」，關閉時不該被刪掉
+              setUnsavedNewItemId(null)
+              closeItemDialog()
+            },
+          )
+        }
+        onUploadVideo={(file) => void handleUploadVideo(file)}
+      />
+
+      <QuizDialog
+        open={openQuizId !== null}
+        loading={quizLoading}
+        readOnly={readOnly}
+        quiz={quiz ?? null}
+        error={itemError}
+        onClose={requestCloseItem}
+        onSaveSettings={(values) =>
+          void runItemAction(
+            () => quizzesApi.update(openQuizId as number, { ...values, version: quiz?.version ?? 0 }),
+            () => {
+              message.success("測驗已儲存")
+              invalidateQuiz()
+              // 課程詳細也要刷——項目列顯示的名稱取自測驗名稱
+              invalidate()
+              setUnsavedNewItemId(null)
+              closeItemDialog()
+            },
+          )
+        }
+        onSaveQuestion={(questionId: number | null, values: QuestionFormValues) =>
+          void runItemAction(() => {
+            if (questionId === null) return quizzesApi.addQuestion(openQuizId as number, values)
+            const version = quiz?.questions.find((q) => q.question_id === questionId)?.version ?? 0
+            return quizzesApi.updateQuestion(questionId, { ...values, version })
+          }, invalidateQuiz)
+        }
+        onDeleteQuestion={handleDeleteQuestion}
       />
 
       {!readOnly && (

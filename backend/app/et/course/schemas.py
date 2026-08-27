@@ -1,10 +1,13 @@
-"""ET02 課程骨架與章節編排（US3 / #202）schema。
+"""ET02 課程骨架、章節編排與章節項目（US3 / #202、#203）schema。
 
-本 issue 只涵蓋課程骨架與章節；教材 / 測驗屬 #203、問卷 / 發布屬 #204。
-`STATUS` 於本 issue 僅寫入 `DRAFT`——發布為 #204 之職責。
+課程骨架與章節屬 #202；章節項目（教材 / 測驗之掛載與排序）屬 #203。
+教材與測驗**內容**之 schema 另置於 `app/et/material/schemas.py` 與
+`app/et/quiz/schemas.py`——本檔只到「項目」這層容器。
+問卷 / 發布屬 #204；`STATUS` 目前僅寫入 `DRAFT`。
 """
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -20,6 +23,10 @@ CHAPTER_NAME_MAX_LEN = 100
 MAX_TAG_IDS = 100
 # 一門課程之章節數上限——重排送完整陣列，無界限同樣可被當成放大攻擊面。
 MAX_CHAPTER_IDS = 500
+# 一個章節之項目數上限（同上理由）。
+MAX_ITEM_IDS = 500
+# 教材 / 測驗名稱長度上限（data-model：`MATERIAL_NAME` / `QUIZ_NAME` 皆 VARCHAR(100)）。
+ITEM_TITLE_MAX_LEN = 100
 # BIGINT 上限：路徑參數與 ID 超出時，asyncpg 比對會溢位成 500 而非 404。
 MAX_BIGINT = 9_223_372_036_854_775_807
 
@@ -165,8 +172,60 @@ class ChapterReorderReq(BaseModel):
     version: int = Field(ge=0)
 
 
+class ItemCreateReq(BaseModel):
+    """新增章節項目（教材或測驗），追加至章節最末。
+
+    後端於**同一交易**內建立對應之 `ET_MATERIAL` / `ET_QUIZ` 空殼——前端不需先建
+    教材再建項目，避免中途失敗留下孤兒。
+
+    ## 名稱可留空（2026-08-27 依實測回饋）
+
+    原本前端會代填「新教材」/「新測驗」。那是替使用者做決定——他開了視窗第一件事
+    就是把那串字選起來刪掉。改為建立時可空、開啟視窗即為空白欄位讓他直接輸入。
+
+    **儲存時仍必填**（`MaterialUpdateReq` / `QuizUpdateReq` 之 `min_length=1`）——
+    空名稱只是「還沒填」的過渡狀態，不是可以存檔的樣子。
+    """
+
+    item_type: Literal["MATERIAL", "QUIZ"]
+    title: str = Field(default="", max_length=ITEM_TITLE_MAX_LEN)
+
+    @field_validator("title")
+    @classmethod
+    def _strip_title(cls, v: str) -> str:
+        return v.strip()
+
+
+class ItemReorderReq(BaseModel):
+    """項目重排：送**完整順序陣列**（同章節重排之契約）。
+
+    `version` 為**章節層**版本——項目順序是章節結構的一部分。不用項目自身版本：
+    重排一次動多列，且遞增各項目版本會讓正在編輯該教材內容的另一裝置無故衝突
+    （FR-ET-US3-15「不同實體並行編輯互不衝突」）。
+    """
+
+    item_ids: list[int] = Field(max_length=MAX_ITEM_IDS)
+    version: int = Field(ge=0)
+
+
+class ItemRow(BaseModel):
+    """章節項目列（回應）。
+
+    `title` 取自對應之 `MATERIAL_NAME` / `QUIZ_NAME`——項目本身不存名稱，避免
+    與教材 / 測驗改名後不同步。
+    """
+
+    item_id: int
+    item_type: str
+    title: str
+    sort_order: int
+    material_id: int | None
+    quiz_id: int | None
+    version: int
+
+
 class ChapterItem(BaseModel):
-    """章節列（回應）。"""
+    """章節列（回應），含其下項目。"""
 
     model_config = {"from_attributes": True}
 
@@ -174,6 +233,7 @@ class ChapterItem(BaseModel):
     chapter_name: str
     sort_order: int
     version: int
+    items: list[ItemRow] = Field(default_factory=list)
 
 
 class CourseDetail(BaseModel):

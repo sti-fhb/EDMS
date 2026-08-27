@@ -71,17 +71,45 @@ def resequence(ordered_ids: list[int]) -> dict[int, int]:
     return {chapter_id: index for index, chapter_id in enumerate(ordered_ids, start=1)}
 
 
-def ensure_reorder_complete(*, current_ids: set[int], requested: list[int]) -> None:
-    """重排請求須涵蓋且僅涵蓋該課程之現有章節。
+def _ensure_reorder_complete(*, current_ids: set[int], requested: list[int], detail: str, error_code: str) -> None:
+    """重排請求須涵蓋且僅涵蓋現有子項——章節與項目共用之核心判定。
 
     採「完整順序陣列」而非相對移動（上移 / 下移），避免並行編輯下的順序漂移：
     相對移動在兩人同時操作時會疊加出非預期結果，完整陣列則是最後寫入者的完整意圖。
 
     **長度與集合都要檢查**：`[1, 1, 2]` 之集合等同 `{1, 2}`，僅比對集合會漏掉重複；
-    集合比對則擋下缺漏與夾帶他人課程章節 ID 的越權嘗試。
+    集合比對則擋下缺漏與夾帶他人資料 ID 的越權嘗試。
+    """
+    if len(requested) != len(set(requested)) or set(requested) != current_ids:
+        raise AppError(status_code=422, detail=detail, error_code=error_code)
+
+
+def ensure_reorder_complete(*, current_ids: set[int], requested: list[int]) -> None:
+    """章節重排：清單須涵蓋且僅涵蓋該課程之現有章節。
 
     Raises:
         AppError: 422 `ET_CHAPTER_002`，清單有重複、缺漏或含非本課程之章節。
     """
-    if len(requested) != len(set(requested)) or set(requested) != current_ids:
-        raise AppError(status_code=422, detail="重排清單與課程章節不一致", error_code="ET_CHAPTER_002")
+    _ensure_reorder_complete(
+        current_ids=current_ids,
+        requested=requested,
+        detail="重排清單與課程章節不一致",
+        error_code="ET_CHAPTER_002",
+    )
+
+
+def ensure_item_reorder_complete(*, current_ids: set[int], requested: list[int]) -> None:
+    """項目重排：清單須涵蓋且僅涵蓋該**章節**之現有項目（#203）。
+
+    與章節重排同一判定、不同錯誤碼——前端需靠 `error_code` 分辨是哪一層的重排失敗，
+    共用單一代碼會使「章節重排壞了」與「項目重排壞了」在 UI 上無從區隔。
+
+    Raises:
+        AppError: 422 `ET_ITEM_002`，清單有重複、缺漏或含非本章節之項目。
+    """
+    _ensure_reorder_complete(
+        current_ids=current_ids,
+        requested=requested,
+        detail="重排清單與章節項目不一致",
+        error_code="ET_ITEM_002",
+    )

@@ -20,10 +20,21 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
+import { ItemList } from "./ItemList"
 import { moveId } from "./chapterOrder"
+import type { ItemRow, ItemType } from "./itemSchemas"
 import type { ChapterItem } from "./schemas"
 
-interface ChapterRowProps {
+interface ItemHandlers {
+  /** 新增模式（章節尚未寫入 DB）時停用項目操作——項目須掛在已存在的章節下。 */
+  itemsDisabled: boolean
+  onAddItem: (chapter: ChapterItem, itemType: ItemType) => void
+  onOpenItem: (item: ItemRow) => void
+  onDeleteItem: (item: ItemRow) => void
+  onReorderItems: (chapter: ChapterItem, orderedIds: number[]) => void
+}
+
+interface ChapterRowProps extends ItemHandlers {
   chapter: ChapterItem
   index: number
   readOnly: boolean
@@ -32,7 +43,18 @@ interface ChapterRowProps {
 }
 
 /** 單一章節列：拖拉手把 + 章節序 + inline 更名 + 刪除。 */
-function ChapterRow({ chapter, index, readOnly, onRename, onDelete }: ChapterRowProps) {
+function ChapterRow({
+  chapter,
+  index,
+  readOnly,
+  onRename,
+  onDelete,
+  itemsDisabled,
+  onAddItem,
+  onOpenItem,
+  onDeleteItem,
+  onReorderItems,
+}: ChapterRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: chapter.chapter_id,
     disabled: readOnly,
@@ -87,11 +109,20 @@ function ChapterRow({ chapter, index, readOnly, onRename, onDelete }: ChapterRow
           </IconButton>
         )}
       </Stack>
+      <ItemList
+        items={chapter.items}
+        readOnly={readOnly}
+        disabled={itemsDisabled}
+        onAdd={(itemType) => onAddItem(chapter, itemType)}
+        onOpen={onOpenItem}
+        onDelete={onDeleteItem}
+        onReorder={(ids) => onReorderItems(chapter, ids)}
+      />
     </Paper>
   )
 }
 
-interface ChapterSectionProps {
+interface ChapterSectionProps extends ItemHandlers {
   chapters: ChapterItem[]
   readOnly: boolean
   /** 新增模式（課程尚未建立）時停用整區——章節須掛在已存在的課程下。 */
@@ -116,6 +147,7 @@ export function ChapterSection({
   onRename,
   onDelete,
   onReorder,
+  ...itemHandlers
 }: ChapterSectionProps) {
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -181,6 +213,7 @@ export function ChapterSection({
                 readOnly={readOnly}
                 onRename={onRename}
                 onDelete={onDelete}
+                {...itemHandlers}
               />
             ))}
           </SortableContext>

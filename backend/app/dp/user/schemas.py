@@ -45,14 +45,18 @@ class RegisterRequest(BaseModel):
 
     email: NormalizedEmailStr
     user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
-    password: _PasswordStr
-    confirm_password: _PasswordStr
 
 
 class VerifyEmailRequest(BaseModel):
-    """註冊驗證請求（US2 #56）。token 為信中連結明文；效期 / 有效性由服務層權威檢核。"""
+    """註冊驗證請求（US2）。token 為信中連結明文；使用者於此步**當場設定密碼**（#212）。
+
+    與 `ActivateAccountRequest`（US4 邀請啟用）形狀一致——兩者只差 token 來源與接受的 KIND，
+    日後可評估合併為單一端點。密碼複雜度 / 兩次一致 / token 有效性由服務層權威檢核。
+    """
 
     token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    new_password: _PasswordStr
+    confirm_password: _PasswordStr
 
 
 class ActivateAccountRequest(BaseModel):

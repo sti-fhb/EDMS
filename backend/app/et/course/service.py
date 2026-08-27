@@ -19,9 +19,16 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
-from app.et.course.repository import EtChapterRepository, EtCourseRepository, EtCourseTagRepository
+from app.et.constants import ITEM_MATERIAL
+from app.et.course.repository import (
+    EtChapterRepository,
+    EtCourseRepository,
+    EtCourseTagRepository,
+    EtItemRepository,
+)
 from app.et.course.rules import (
     ensure_deletable,
+    ensure_item_reorder_complete,
     ensure_owner,
     ensure_reorder_complete,
     ensure_tag_change_allowed,
@@ -37,8 +44,13 @@ from app.et.course.schemas import (
     CourseCreateResult,
     CourseDetail,
     CourseUpdateReq,
+    ItemCreateReq,
+    ItemReorderReq,
+    ItemRow,
     TagOption,
 )
+from app.et.material.repository import EtMaterialRepository
+from app.et.quiz.repository import EtQuizRepository
 from app.et.roles.authz import ET_TEACHER
 from app.services import AuditLogService
 
@@ -47,6 +59,7 @@ _FUNC_NAME = "ET-COURSE"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程", error_code="ET_COURSE_001")
 _CHAPTER_NOT_FOUND = AppError(status_code=404, detail="查無此章節", error_code="ET_CHAPTER_001")
+_ITEM_NOT_FOUND = AppError(status_code=404, detail="查無此章節項目", error_code="ET_ITEM_001")
 
 
 class EtCourseService:
@@ -57,11 +70,17 @@ class EtCourseService:
         courses: EtCourseRepository | None = None,
         tags: EtCourseTagRepository | None = None,
         chapters: EtChapterRepository | None = None,
+        items: EtItemRepository | None = None,
+        materials: EtMaterialRepository | None = None,
+        quizzes: EtQuizRepository | None = None,
         audit: AuditLogService | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._tags = tags or EtCourseTagRepository()
         self._chapters = chapters or EtChapterRepository()
+        self._items = items or EtItemRepository()
+        self._materials = materials or EtMaterialRepository()
+        self._quizzes = quizzes or EtQuizRepository()
         self._audit = audit or AuditLogService()
 
     # ── 課程 ────────────────────────────────────────────────────────────────
@@ -103,6 +122,7 @@ class EtCourseService:
         owner_name = await db.scalar(select(DpUser.user_name).where(DpUser.user_id == course.owner_id))
         tag_ids = await self._tags.list_tag_ids(db, course_id)
         chapters = await self._chapters.list_by_course(db, course_id)
+        items_by_chapter = await self._items_by_chapter(db, [c.chapter_id for c in chapters])
         return CourseDetail(
             course_id=course.course_id,
             course_name=course.course_name,
@@ -116,7 +136,16 @@ class EtCourseService:
             owner_name=owner_name,
             is_owner=course.owner_id == actor_id,
             tag_ids=sorted(tag_ids),
-            chapters=[ChapterItem.model_validate(c) for c in chapters],
+            chapters=[
+                ChapterItem(
+                    chapter_id=c.chapter_id,
+                    chapter_name=c.chapter_name,
+                    sort_order=c.sort_order,
+                    version=c.version,
+                    items=items_by_chapter.get(c.chapter_id, []),
+                )
+                for c in chapters
+            ],
         )
 
     async def update_basic(
@@ -200,7 +229,7 @@ class EtCourseService:
         await self._log(db, "UPDATE", operator.user_id, course_id, "調整章節順序")
 
     async def delete_chapter(self, db: AsyncSession, chapter_id: int, *, operator: OperatorInfo) -> None:
-        """刪除章節：本體與其下項目軟刪、學員紀錄硬刪，剩餘章節順序遞補。"""
+        """刪除章節：本體、其下項目與教材 / 測驗內容、學員紀錄**皆軟刪**，剩餘章節順序遞補。"""
         chapter = await self._chapters.get(db, chapter_id)
         if chapter is None:
             raise _CHAPTER_NOT_FOUND
@@ -208,6 +237,69 @@ class EtCourseService:
         await self._chapters.soft_delete_with_cascade(db, [chapter_id], operator)
         await self._chapters.resequence_remaining(db, chapter.course_id, operator)
         await self._log(db, "DELETE", operator.user_id, chapter.course_id, "刪除章節")
+
+    # ── 章節項目（#203）──────────────────────────────────────────────────────
+
+    async def add_item(
+        self, db: AsyncSession, chapter_id: int, req: ItemCreateReq, *, operator: OperatorInfo
+    ) -> ItemRow:
+        """新增章節項目（教材 / 測驗），追加至最末。
+
+        **同一交易內**一併建立對應之空殼 `ET_MATERIAL` / `ET_QUIZ`：使用者於 UI 是
+        「新增項目 → 教材」一個動作，若拆成兩次請求，中途失敗會留下指不到任何內容的
+        項目（而 `CK_ET_ITEM_TYPE_TARGET` 根本不允許該狀態）。
+
+        空殼當下三類媒材皆空，這**不違反**「教材至少擇一媒材」——該檢核在儲存教材
+        內容時才套用（`ET_MATERIAL_002`），不在建立時。
+        """
+        chapter = await self._require_owned_chapter(db, chapter_id, operator.user_id)
+        # 名稱可留空——使用者於視窗內填寫，儲存時才必填（見 `ItemCreateReq`）
+        if req.item_type == ITEM_MATERIAL:
+            material = await self._materials.create_shell(db, req.title, operator)
+            item = await self._items.append(
+                db, chapter_id, item_type=req.item_type, material_id=material.material_id, operator=operator
+            )
+        else:
+            quiz = await self._quizzes.create_shell(db, req.title, operator)
+            item = await self._items.append(
+                db, chapter_id, item_type=req.item_type, quiz_id=quiz.quiz_id, operator=operator
+            )
+        await self._log(db, "CREATE", operator.user_id, chapter.course_id, f"新增章節項目（{req.item_type}）")
+        return ItemRow(
+            item_id=item.item_id,
+            item_type=item.item_type,
+            title=req.title,
+            sort_order=item.sort_order,
+            material_id=item.material_id,
+            quiz_id=item.quiz_id,
+            version=item.version,
+        )
+
+    async def reorder_items(
+        self, db: AsyncSession, chapter_id: int, req: ItemReorderReq, *, operator: OperatorInfo
+    ) -> None:
+        """重排章節內項目順序（送完整陣列；帶**章節層** `version`）。
+
+        以章節版本保護而非項目版本——理由同章節重排以課程版本保護：順序是上一層的
+        結構，且遞增各項目版本會讓正在編輯該教材的另一裝置無故衝突。
+        """
+        chapter = await self._require_owned_chapter(db, chapter_id, operator.user_id)
+        current = await self._items.list_by_chapter(db, chapter_id)
+        ensure_item_reorder_complete(current_ids={i.item_id for i in current}, requested=req.item_ids)
+        rowcount = await self._chapters.bump_version(db, chapter_id, req.version, operator)
+        ensure_version_matched(rowcount=rowcount, entity="ET_CHAPTER")
+        await self._items.apply_order(db, resequence(req.item_ids), operator)
+        await self._log(db, "UPDATE", operator.user_id, chapter.course_id, "調整章節項目順序")
+
+    async def delete_item(self, db: AsyncSession, item_id: int, *, operator: OperatorInfo) -> None:
+        """刪除章節項目：本體、其教材 / 測驗內容與學員紀錄皆軟刪，剩餘項目順序遞補。"""
+        item = await self._items.get(db, item_id)
+        if item is None:
+            raise _ITEM_NOT_FOUND
+        chapter = await self._require_owned_chapter(db, item.chapter_id, operator.user_id)
+        await self._items.soft_delete_with_cascade(db, [item_id], operator)
+        await self._items.resequence_remaining(db, item.chapter_id, operator)
+        await self._log(db, "DELETE", operator.user_id, chapter.course_id, f"刪除章節項目（{item.item_type}）")
 
     # ── 能力 ────────────────────────────────────────────────────────────────
 
@@ -233,6 +325,31 @@ class EtCourseService:
             raise _NOT_FOUND
         ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
         return course
+
+    async def _require_owned_chapter(self, db: AsyncSession, chapter_id: int, actor_id: str):
+        """取章節並確認其所屬課程之擁有者為操作者；查無章節 → 404、非擁有者 → 403。"""
+        chapter = await self._chapters.get(db, chapter_id)
+        if chapter is None:
+            raise _CHAPTER_NOT_FOUND
+        await self._require_owned(db, chapter.course_id, actor_id)
+        return chapter
+
+    async def _items_by_chapter(self, db: AsyncSession, chapter_ids: list[int]) -> dict[int, list[ItemRow]]:
+        """批次取項目並依章節分組（課程詳細頁一次列出所有章節，逐章查會是 N+1）。"""
+        grouped: dict[int, list[ItemRow]] = {}
+        for item, title in await self._items.list_rows_by_chapters(db, chapter_ids):
+            grouped.setdefault(item.chapter_id, []).append(
+                ItemRow(
+                    item_id=item.item_id,
+                    item_type=item.item_type,
+                    title=title,
+                    sort_order=item.sort_order,
+                    material_id=item.material_id,
+                    quiz_id=item.quiz_id,
+                    version=item.version,
+                )
+            )
+        return grouped
 
     async def _ensure_tags_selectable(self, db: AsyncSession, tag_ids: set[int]) -> None:
         """新掛之標籤須存在且啟用中（FR-ET-US3-03）。

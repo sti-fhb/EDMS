@@ -23,8 +23,9 @@ from app.et.constants import (
     QUESTION_SINGLE,
     SOURCE_TAG_DEFAULT,
 )
-from app.et.course.models import EtChapter, EtCourse, EtItem, EtMaterial, EtMaterialDoc, EtMaterialVideo
+from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.invitation.models import EtInvitation, EtOwnerTransfer
+from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtEnrollment, EtProgress, EtProgressInterval, EtProgressVideo
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
 from app.et.stats.models import EtWeeklyStat

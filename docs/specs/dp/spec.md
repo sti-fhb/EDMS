@@ -405,4 +405,5 @@
 | 2026-07-09 | 跨文件一致性檢查修正：Key Entities `DP_PWD_RESET` 補 `EMAIL_CHANGE` 類型（對齊 research §5）、`DP_EMAIL_LOG` 改「新增 + 狀態更新」（原誤標 append-only）、plan.md 文件樹過期註記、tasks T035 補 FR-07 稽核歸屬 |
 | 2026-07-21 | #56：自助註冊改「Email 驗證後啟用」（**推翻**「註冊即用 / 不寄開通確認信」）；新增待驗證表 `DP_PENDING_REGISTRATION`（方案 B，驗證前不寫 `DP_USER`）、DP 系統信範本 `ACCOUNT_VERIFY`；新增 `DP_AUTH_010`（未驗證登入）、`DP_USER_003/004`（驗證連結無效 / 逾時）；詳見 [spec_us2](spec_us2.md) |
 | 2026-07-09 | 釐清第 4 輪（首次註冊引導）：入口頁 DM 卡改「未開通鎖定卡」（取代第 3 輪隱藏式）、首次登入歡迎橫幅、模組側欄可見性規則（DM 組未開通隱藏）、redirect 語意精確化（逾時重登 / 通知連結返回原頁面）；開通申請流程列為未來擴充 backlog |
+| 2026-08-26 | #212：自助註冊改為**密碼於 Email 驗證步設定**（註冊只收 Email / 姓名，待驗證列不存密碼），消除帳號預先劫持——原設計讓匿名者能為他人 Email 預先指定密碼；`/verify-email` 改收 `token + 新密碼 + 確認密碼`，與 US4 `/activate-account` 同形狀。併同修正「逾期待驗證列可被重寄復活」（TTL 形同無效）；詳見 [spec_us2](spec_us2.md) Clarifications 2026-08-26 |
 | 2026-08-13 | #156：訊息代碼由語意碼改為**畫面碼**（`DP-MSG-LOGIN-001` → `DP-MSG-DP01-001`，流水號與訊息內容不變，158 處）；新增〈畫面代號對照表〉（`DP00`–`DP10`，依操作動線編號、不對齊主系統 TBMS）；US 索引補畫面碼；US6 發信服務無畫面、沿用語意碼 `MAIL`。`RES_ID` 不在本次範圍（見 #158）|

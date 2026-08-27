@@ -2,101 +2,132 @@ import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Card from "@mui/material/Card"
-import CircularProgress from "@mui/material/CircularProgress"
+import Link from "@mui/material/Link"
 import Stack from "@mui/material/Stack"
+import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
-import { useEffect, useRef, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useEffect, useState } from "react"
+import type { FormEvent } from "react"
+import { useSearchParams } from "react-router-dom"
 
 import { AUTH_BG_GRADIENT } from "./authBackground"
 import { authApi } from "./authService"
+import { makeResetPasswordSchema } from "./schemas/resetPasswordSchema"
+import { usePasswordPolicy } from "../hooks/usePasswordPolicy"
 import { toApiError } from "../services/http"
-
-type Status = "verifying" | "success" | "error"
+import { getFieldErrors } from "../utils/zodUtils"
 
 /**
- * 註冊驗證落點頁（US2 #56）。獨立公開頁（不套登入 overlay）：讀網址 token → 呼叫 /verify-email，
- * 成功導登入；連結無效 / 逾時顯示錯誤並引導回登入頁重新註冊 / 重寄。
+ * 註冊驗證落點頁（US2，驗證信連結落點 /verify-email?token=xxx）。
+ *
+ * **自 #212 起本頁改為「設定密碼」表單**，不再是「進來就自動驗證」的結果頁：註冊時不收密碼，
+ * 密碼由點連結的本人在此當場設定。原設計把密碼存在待驗證列，使任何人可用他人 Email 註冊並
+ * 填自己的密碼，受害者點下（來自組織網域、格式正確的）驗證信後，帳號就以攻擊者的密碼建立。
+ *
+ * 與 US4 的 ActivateAccountPage 為孿生頁——同一個殼與同一套密碼驗證，只差文案與呼叫的 API
+ * （後端 /verify-email 與 /activate-account 亦只差接受的 KIND）。
  */
 export function VerifyEmailPage() {
-  const [params] = useSearchParams()
-  const navigate = useNavigate()
-  const token = params.get("token")
-  // 缺 token 者初始即為錯誤（不在 effect 內同步 setState，避免 react-hooks/set-state-in-effect）
-  const hasToken = token !== null && token !== ""
-  const [status, setStatus] = useState<Status>(hasToken ? "verifying" : "error")
-  const [errorMessage, setErrorMessage] = useState<string | null>(hasToken ? null : "驗證連結無效")
-  // 已對哪個 token 送過驗證請求；ref 在同一元件實例間保留，用於去重
-  const requestedTokenRef = useRef<string | null>(null)
-  // 當前是否仍掛載中（取代舊的 closure cancelled，才能讓「去重後只剩的那個請求」由最後一次掛載收斂 state）
-  const activeRef = useRef(true)
-
+  const [searchParams] = useSearchParams()
+  // 只在首次 render 擷取 token，隨即從網址移除，避免殘留於瀏覽器歷史 / Referer
+  const [token] = useState(() => searchParams.get("token") ?? "")
   useEffect(() => {
-    activeRef.current = true
-    if (!hasToken) return // 無 token：初始 state 已為 error，不呼叫 API
-    // StrictMode（dev）會讓掛載期 effect 跑兩次；同一 token 已送過就不再重打，
-    // 避免兩個 /verify-email 並發互撞、輸的那個回 409 誤報「已被註冊」
-    if (requestedTokenRef.current !== token) {
-      requestedTokenRef.current = token
-      authApi
-        .verifyEmail(token)
-        .then(() => {
-          if (activeRef.current) setStatus("success")
-        })
-        .catch((err) => {
-          if (activeRef.current) {
-            setStatus("error")
-            setErrorMessage(toApiError(err).errorMessage)
-          }
-        })
+    if (token) window.history.replaceState(null, "", window.location.pathname)
+  }, [token])
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [apiError, setApiError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）
+  const { policy, hint } = usePasswordPolicy()
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setApiError(null)
+    const parsed = makeResetPasswordSchema(policy?.min_len, policy?.char_types).safeParse({
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    })
+    setFieldErrors(getFieldErrors(parsed.success ? null : parsed.error))
+    if (!parsed.success) return
+
+    setSubmitting(true)
+    try {
+      await authApi.verifyEmail({ token, ...parsed.data })
+      setDone(true)
+    } catch (err) {
+      setApiError(toApiError(err).errorMessage)
+    } finally {
+      setSubmitting(false)
     }
-    return () => {
-      activeRef.current = false
-    }
-  }, [token, hasToken])
+  }
 
   return (
     <Box
       sx={{
-        position: "fixed",
-        inset: 0,
-        background: AUTH_BG_GRADIENT,
+        minHeight: "100vh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         p: 2,
+        background: AUTH_BG_GRADIENT,
       }}
     >
-      <Card sx={{ width: 400, maxWidth: "100%", p: 4, textAlign: "center" }}>
+      <Card sx={{ width: 440, maxWidth: "100%", p: 4 }}>
         <Typography variant="h6" gutterBottom>
-          EDMS 帳號驗證
+          設定密碼以完成註冊
         </Typography>
-        {status === "verifying" && (
-          <Stack spacing={2} alignItems="center" sx={{ py: 2 }}>
-            <CircularProgress aria-label="驗證中" />
-            <Typography variant="body2" color="text.secondary">
-              驗證中，請稍候…
-            </Typography>
-          </Stack>
-        )}
-        {status === "success" && (
+        {done ? (
           <Stack spacing={2}>
-            <Alert severity="success">帳號已啟用，請以新帳號登入。</Alert>
-            <Button variant="contained" onClick={() => navigate("/")}>
+            <Alert severity="success">帳號已啟用，請以新密碼登入</Alert>
+            <Link href="/" underline="hover">
               前往登入
-            </Button>
+            </Link>
           </Stack>
-        )}
-        {status === "error" && (
+        ) : token === "" ? (
           <Stack spacing={2}>
-            <Alert severity="error">{errorMessage ?? "驗證連結無效"}</Alert>
+            <Alert severity="error">驗證連結無效</Alert>
             <Typography variant="body2" color="text.secondary">
               連結可能已失效或逾時，請回登入頁重新註冊或重寄驗證信。
             </Typography>
-            <Button variant="outlined" onClick={() => navigate("/")}>
+            <Link href="/" underline="hover">
               回登入頁
-            </Button>
+            </Link>
           </Stack>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <Stack spacing={2}>
+              {apiError !== null && <Alert severity="error">{apiError}</Alert>}
+              <Typography variant="body2" color="text.secondary">
+                設定密碼即可啟用帳號並登入。連結若已失效，送出後會提示重新註冊。
+              </Typography>
+              <TextField
+                label="設定密碼"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                error={"new_password" in fieldErrors}
+                helperText={fieldErrors.new_password ?? hint}
+                fullWidth
+                autoComplete="new-password"
+              />
+              <TextField
+                label="確認密碼"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                error={"confirm_password" in fieldErrors}
+                helperText={fieldErrors.confirm_password}
+                fullWidth
+                autoComplete="new-password"
+              />
+              <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
+                設定密碼並啟用
+              </Button>
+            </Stack>
+          </form>
         )}
       </Card>
     </Box>

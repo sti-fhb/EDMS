@@ -38,6 +38,7 @@ class EtQuiz(BaseModel):
     `TIME_LIMIT_MIN`：**NULL = 不限時**、`>= 1` = 限時 N 分鐘（倒數歸零自動提交）。
     `MAX_RETRY`：**0 = 不允許重考**（僅可作答 1 次）；故總可作答次數 = `MAX_RETRY + 1`。
     該測驗下各題配分總和須 = 100（發布前由應用層檢核）。
+    `DESCRIPTION` 為純文字說明，顯示於學員作答開始前。
     """
 
     __tablename__ = "ET_QUIZ"
@@ -45,6 +46,9 @@ class EtQuiz(BaseModel):
 
     quiz_id: Mapped[int] = mapped_column("QUIZ_ID", BigInteger, Identity(), nullable=False)
     quiz_name: Mapped[str] = mapped_column("QUIZ_NAME", String(100), nullable=False)
+    #: 測驗說明（顯示於學員作答開始前）。**純文字**——與 `ET_MATERIAL.DESCRIPTION_HTML`
+    #: 不同，不經 WYSIWYG、不走 HTML 消毒，前端須以純文字渲染（SA 裁示 #203 Q1）。
+    description: Mapped[Optional[str]] = mapped_column("DESCRIPTION", Text, nullable=True)
     pass_score: Mapped[int] = mapped_column("PASS_SCORE", Integer, nullable=False, default=80)
     time_limit_min: Mapped[Optional[int]] = mapped_column("TIME_LIMIT_MIN", Integer, nullable=True)
     max_retry: Mapped[int] = mapped_column("MAX_RETRY", Integer, nullable=False, default=3)
@@ -56,7 +60,8 @@ class EtQuestion(BaseModel):
 
     多選題建立時強制至少 1 個正確選項（避免部分計分公式分母為 0）。
     `SORT_ORDER` 供教師拖拉調整；**學員端洗牌不依此**（順序存於 attempt 快照）。
-    刪除採軟刪除；學員於該題之 `ET_QUIZ_ATTEMPT_D` 連帶 hard delete。
+    刪除採軟刪除；學員於該題之 `ET_QUIZ_ATTEMPT_D` **亦連帶軟刪除**（`DELETED=1`；
+    2026-08-24 #202 變更，原為 hard delete）。成績查詢務必排除 `DELETED = 1`。
     """
 
     __tablename__ = "ET_QUESTION"

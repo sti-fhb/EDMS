@@ -145,7 +145,7 @@ describe("ET02 課程編輯頁", () => {
           owner_name: "林助教",
           is_owner: false,
           tag_ids: [],
-          chapters: [{ chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0 }],
+          chapters: [{ chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] }],
         }),
       ),
     )

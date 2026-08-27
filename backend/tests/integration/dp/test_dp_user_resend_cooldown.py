@@ -5,11 +5,15 @@
 冷卻邏輯本身的邊界（剩餘秒計算、視窗刷新等）已由 tests/unit/test_core_cooldown.py 覆蓋。
 """
 
+from datetime import timedelta
+
 import pytest
 
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.user import router as auth_router
+from app.dp.user.models import DpPendingRegistration
+from app.dp.user.token import hash_token
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
@@ -27,7 +31,7 @@ def _reset_limits():
 
 
 def _reg_payload(email: str, **over):
-    base = {"email": email, "user_name": "冷卻測試", "password": _GOOD_PWD, "confirm_password": _GOOD_PWD}
+    base = {"email": email, "user_name": "冷卻測試"}
     base.update(over)
     return base
 
@@ -66,15 +70,36 @@ async def test_register_and_resend_share_cooldown_budget(client):
     assert resend.json()["error_code"] == "COMMON_429"
 
 
-async def test_register_validation_failure_does_not_start_cooldown(client):
-    """註冊檢核失敗（密碼太弱 422）→ 未送信、不 record 冷卻；隨後對同 Email 仍可正常寄送。"""
-    weak = await client.post(
-        "/api/register", json=_reg_payload("cool-d@edms.local", password="abc", confirm_password="abc")
+async def test_register_check_failure_does_not_start_cooldown(client, db):
+    """註冊在 service 層被擋（409）→ 未送信、不 record 冷卻；隨後對同 Email 仍可正常寄送。
+
+    原本以「弱密碼 422」觸發，但 #212 之後註冊不收密碼、無密碼檢核。改用「該 Email 有未逾期
+    的管理者邀請」（409 DP_USER_011）——它同樣位於冷卻 check 之後、record 之前，能驗到
+    「檢核失敗不誤觸冷卻」這個性質。
+    """
+    email = "cool-invite@edms.local"
+    now = utcnow()
+    db.add(
+        DpPendingRegistration(
+            token_hash=hash_token("invite-cool"),
+            email=email,
+            user_name="被邀請者",
+            pwd_hash=None,
+            kind="ADMIN_INVITE",
+            invite_id="INVCOOL0001",
+            expires_date=now + timedelta(hours=24),
+            created_user="admin01",
+            created_date=now,
+        )
     )
-    assert weak.status_code == 422
+    await db.commit()
+
+    blocked = await client.post("/api/register", json=_reg_payload(email))
+    assert blocked.status_code == 409
+    assert blocked.json()["error_code"] == "DP_USER_011"
 
     # 因上一步未 record，冷卻未啟動 → resend 應放行（非 429）
-    resend = await client.post("/api/resend-verification", json={"email": "cool-d@edms.local"})
+    resend = await client.post("/api/resend-verification", json={"email": email})
     assert resend.status_code == 200
 
 

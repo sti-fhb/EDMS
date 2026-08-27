@@ -14,10 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import COURSE_DRAFT
+from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL, ITEM_QUIZ
 from app.et.course.models import EtChapter, EtCourse, EtItem
+from app.et.material.models import EtMaterial
+from app.et.material.repository import EtMaterialRepository
 from app.et.progress.models import EtProgress
-from app.et.quiz.models import EtQuizAttemptM
+from app.et.quiz.models import EtQuiz
+from app.et.quiz.repository import EtQuizRepository
 
 
 class EtCourseRepository:
@@ -206,6 +209,20 @@ class EtChapterRepository:
         await db.flush()
         return result.rowcount
 
+    async def bump_version(self, db: AsyncSession, chapter_id: int, version: int, operator: OperatorInfo) -> int:
+        """僅遞增章節 `VERSION`（供項目重排之樂觀鎖）；回傳受影響列數。"""
+        result = await db.execute(
+            update(EtChapter)
+            .where(EtChapter.chapter_id == chapter_id, EtChapter.deleted == 0, EtChapter.version == version)
+            .values(
+                version=EtChapter.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+        return result.rowcount
+
     async def apply_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
         """依 `{chapter_id: sort_order}` 批次更新順序（**兩階段寫入**）。
 
@@ -240,55 +257,26 @@ class EtChapterRepository:
         await db.flush()
 
     async def soft_delete_with_cascade(self, db: AsyncSession, chapter_ids: list[int], operator: OperatorInfo) -> None:
-        """軟刪除章節，並連動其下項目與學員紀錄——**四者皆軟刪除**。
+        """軟刪除章節，並連動其下**所有項目**（教材 / 測驗）與學員紀錄。
 
-        1. `ET_ITEM` → `DELETED = 1`
-        2. 學員 `ET_PROGRESS` → `DELETED = 1`
-        3. 學員 `ET_QUIZ_ATTEMPT_M` → `DELETED = 1`
+        項目層的連帶處理已於 #203 抽至 `EtItemRepository.soft_delete_with_cascade`——
+        #202 建立本方法時尚無項目端點，連帶範圍只到 `ET_PROGRESS` /
+        `ET_QUIZ_ATTEMPT_M`；教材本體、影片、文件引用、題目、選項會被留成孤兒
+        （章節刪了但教材列還在，無從到達亦不會被清）。
 
-        > **2026-08-24 變更（#202）**：原 spec 規定學員紀錄為 **hard delete**
-        > （見 research.md §4 之原決策）。改為軟刪除的理由：誤刪章節是可能發生的操作，
-        > 而學員成績不可重建——硬刪除把一個可回復的操作變成不可回復。原決策反對軟刪除的
-        > 理由是「孤兒化、無法顯示」，但軟刪除的紀錄本就不該顯示，加 `WHERE DELETED = 0`
-        > 是專案對所有表的預設作法。
-        >
-        > ⚠️ **代價是紀律**：完課率 / 進度統計 / 成績查詢**務必排除已軟刪除之紀錄**
-        > （分母以當前有效章節數計），否則會把已刪章節的進度算進去。此約束落在
-        > #5（章節學習）、#9（學習狀況追蹤）、#14（週報統計）。
-
-        本 issue（#202）尚無建立項目之端點（屬 #203），故實務上 `item_ids` 目前恆為空；
-        邏輯仍寫在此處——刪除是本 issue 交付的路徑，#203 接上項目後即自動生效。
+        改為委派後，「刪章節」與「逐一刪項目」的結果一致——否則兩條路徑會產生不同的
+        殘留資料。
         """
         if not chapter_ids:
             return
-        now = utcnow()
-        audit = {"updated_user": operator.user_id, "updated_date": now}
-
-        item_rows = await db.execute(
-            select(EtItem.item_id, EtItem.quiz_id).where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
+        item_ids = list(
+            await db.scalars(select(EtItem.item_id).where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0))
         )
-        items = item_rows.all()
-        item_ids = [row.item_id for row in items]
-        quiz_ids = [row.quiz_id for row in items if row.quiz_id is not None]
-
-        if item_ids:
-            await db.execute(update(EtItem).where(EtItem.item_id.in_(item_ids)).values(deleted=1, **audit))
-            await db.execute(
-                update(EtProgress)
-                .where(EtProgress.item_id.in_(item_ids), EtProgress.deleted == 0)
-                .values(deleted=1, **audit)
-            )
-        if quiz_ids:
-            await db.execute(
-                update(EtQuizAttemptM)
-                .where(EtQuizAttemptM.quiz_id.in_(quiz_ids), EtQuizAttemptM.deleted == 0)
-                .values(deleted=1, **audit)
-            )
-
+        await EtItemRepository().soft_delete_with_cascade(db, item_ids, operator)
         await db.execute(
             update(EtChapter)
             .where(EtChapter.chapter_id.in_(chapter_ids), EtChapter.deleted == 0)
-            .values(deleted=1, updated_user=operator.user_id, updated_date=now)
+            .values(deleted=1, updated_user=operator.user_id, updated_date=utcnow())
         )
         await db.flush()
 
@@ -296,3 +284,176 @@ class EtChapterRepository:
         """刪除後把剩餘章節之 `SORT_ORDER` 重編為 1..N（AC「後續章節順序自動遞補」）。"""
         remaining = await self.list_by_course(db, course_id)
         await self.apply_order(db, {c.chapter_id: i for i, c in enumerate(remaining, start=1)}, operator)
+
+
+class EtItemRepository:
+    """`ET_ITEM` 存取——章節下之教材 / 測驗項目，含刪除時之連動處理。"""
+
+    def __init__(
+        self,
+        materials: EtMaterialRepository | None = None,
+        quizzes: EtQuizRepository | None = None,
+    ) -> None:
+        self._materials = materials or EtMaterialRepository()
+        self._quizzes = quizzes or EtQuizRepository()
+
+    async def list_by_chapter(self, db: AsyncSession, chapter_id: int) -> list[EtItem]:
+        """依 `SORT_ORDER` 列出章節之項目。"""
+        rows = await db.scalars(
+            select(EtItem)
+            .where(EtItem.chapter_id == chapter_id, EtItem.deleted == 0)
+            .order_by(EtItem.sort_order, EtItem.item_id)
+        )
+        return list(rows)
+
+    async def get(self, db: AsyncSession, item_id: int) -> EtItem | None:
+        return await db.scalar(select(EtItem).where(EtItem.item_id == item_id, EtItem.deleted == 0))
+
+    async def list_rows_by_chapters(self, db: AsyncSession, chapter_ids: list[int]) -> list[tuple[EtItem, str]]:
+        """一次取多個章節之項目與顯示名稱，回 `(item, title)`。
+
+        以 outer join 取 `MATERIAL_NAME` / `QUIZ_NAME`——項目本身不存名稱（避免教材
+        改名後不同步）。**批次查詢**：課程詳細頁一次要列出所有章節的項目，逐章節查
+        會是 N+1。
+        """
+        if not chapter_ids:
+            return []
+        rows = await db.execute(
+            select(EtItem, func.coalesce(EtMaterial.material_name, EtQuiz.quiz_name, ""))
+            .outerjoin(EtMaterial, (EtItem.material_id == EtMaterial.material_id) & (EtMaterial.deleted == 0))
+            .outerjoin(EtQuiz, (EtItem.quiz_id == EtQuiz.quiz_id) & (EtQuiz.deleted == 0))
+            .where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
+            .order_by(EtItem.chapter_id, EtItem.sort_order, EtItem.item_id)
+        )
+        return [(row[0], row[1]) for row in rows.all()]
+
+    async def append(
+        self,
+        db: AsyncSession,
+        chapter_id: int,
+        *,
+        item_type: str,
+        material_id: int | None = None,
+        quiz_id: int | None = None,
+        operator: OperatorInfo,
+    ) -> EtItem:
+        """新增項目並追加至章節最末（`SORT_ORDER` = 現有最大值 + 1，自 1 起）。
+
+        `MATERIAL_ID` / `QUIZ_ID` 之互斥由 DB 之 `CK_ET_ITEM_TYPE_TARGET` 保證
+        （#185 建立），此處僅負責填值。
+        """
+        max_order = await db.scalar(
+            select(func.max(EtItem.sort_order)).where(EtItem.chapter_id == chapter_id, EtItem.deleted == 0)
+        )
+        item = EtItem(
+            chapter_id=chapter_id,
+            item_type=item_type,
+            sort_order=(max_order or 0) + 1,
+            material_id=material_id,
+            quiz_id=quiz_id,
+            version=0,
+            created_user=operator.user_id,
+            created_date=utcnow(),
+        )
+        db.add(item)
+        await db.flush()
+        return item
+
+    async def resolve_owner(
+        self, db: AsyncSession, *, material_id: int | None = None, quiz_id: int | None = None
+    ) -> tuple[int, str] | None:
+        """由教材 / 測驗反查其所屬課程，回 `(course_id, owner_id)`。
+
+        單次 join 而非「教材 → 項目 → 章節 → 課程」四段查詢：擁有權判定在每個教材 /
+        測驗端點都要做一次，四段查詢會讓每個請求多三個 round trip。
+
+        回 `None` 的情形：教材 / 測驗不存在，或存在但沒有任何未刪除的項目指向它
+        （孤兒）。呼叫端一律當成 404——孤兒教材在 UI 上無從到達，回 403 反而會洩漏
+        「這筆資料存在但你沒權限」。
+        """
+        if material_id is not None:
+            condition = EtItem.material_id == material_id
+        elif quiz_id is not None:
+            condition = EtItem.quiz_id == quiz_id
+        else:
+            return None
+        row = await db.execute(
+            select(EtCourse.course_id, EtCourse.owner_id)
+            .join(EtChapter, EtChapter.course_id == EtCourse.course_id)
+            .join(EtItem, EtItem.chapter_id == EtChapter.chapter_id)
+            .where(condition, EtItem.deleted == 0, EtChapter.deleted == 0, EtCourse.deleted == 0)
+            .limit(1)
+        )
+        found = row.first()
+        return (found[0], found[1]) if found else None
+
+    async def apply_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
+        """依 `{item_id: sort_order}` 批次更新順序（**兩階段寫入**）。
+
+        兩階段的理由同章節（見 `EtChapterRepository.apply_order`）：
+        `UX_ET_ITEM_CHAPTER_ORDER` 為非 deferrable 之部分唯一索引，逐列即時檢核，
+        直接交換相鄰兩項會在中途撞鍵。先移至負數暫存區再落定。
+
+        **不檢核項目層 `VERSION`、亦不遞增**——順序屬章節結構，遞增會讓正在編輯該教材
+        內容的另一裝置無故衝突（FR-ET-US3-15「不同實體並行編輯互不衝突」）。
+        """
+        if not order_map:
+            return
+        now = utcnow()
+        for phase_value in (lambda target: -target, lambda target: target):
+            for item_id, sort_order in order_map.items():
+                await db.execute(
+                    update(EtItem)
+                    .where(EtItem.item_id == item_id, EtItem.deleted == 0)
+                    .values(
+                        sort_order=phase_value(sort_order),
+                        updated_user=operator.user_id,
+                        updated_date=now,
+                    )
+                )
+        await db.flush()
+
+    async def soft_delete_with_cascade(self, db: AsyncSession, item_ids: list[int], operator: OperatorInfo) -> None:
+        """軟刪除項目，並連動其教材 / 測驗本體與學員紀錄——**全部軟刪除**。
+
+        1. `ET_PROGRESS`（學員於該項目之完成進度）
+        2. 教材項目 → 委派 `EtMaterialRepository.soft_delete_cascade`
+           （教材本體、影片、文件引用、學員觀看紀錄）
+        3. 測驗項目 → 委派 `EtQuizRepository.soft_delete_cascade`
+           （測驗本體、題目、選項、學員作答主檔與明細）
+
+        **為何連教材 / 測驗本體一起刪**：`ET_ITEM.MATERIAL_ID` 雖無 UNIQUE、DB 層允許
+        多個項目共用同一教材，但 UI 無「重用既有教材」入口，實務上恆為一項目一教材。
+        不一起刪會留下無從到達的孤兒教材，且日後若真要支援重用，屆時本判斷需改為
+        「僅在無其他項目引用時才刪」——那是加條件，不是推翻設計。
+        """
+        if not item_ids:
+            return
+        now = utcnow()
+        audit = {"deleted": 1, "updated_user": operator.user_id, "updated_date": now}
+
+        rows = await db.execute(
+            select(EtItem.item_id, EtItem.item_type, EtItem.material_id, EtItem.quiz_id).where(
+                EtItem.item_id.in_(item_ids), EtItem.deleted == 0
+            )
+        )
+        items = rows.all()
+        if not items:
+            return
+
+        live_ids = [row.item_id for row in items]
+        material_ids = [row.material_id for row in items if row.item_type == ITEM_MATERIAL and row.material_id]
+        quiz_ids = [row.quiz_id for row in items if row.item_type == ITEM_QUIZ and row.quiz_id]
+
+        await db.execute(
+            update(EtProgress).where(EtProgress.item_id.in_(live_ids), EtProgress.deleted == 0).values(**audit)
+        )
+        await self._materials.soft_delete_cascade(db, material_ids, operator)
+        await self._quizzes.soft_delete_cascade(db, quiz_ids, operator)
+        await db.execute(update(EtItem).where(EtItem.item_id.in_(live_ids)).values(**audit))
+        await db.flush()
+
+    async def resequence_remaining(self, db: AsyncSession, chapter_id: int, operator: OperatorInfo) -> None:
+        """刪除後把剩餘項目之 `SORT_ORDER` 重編為 1..N。"""
+        remaining = await self.list_by_chapter(db, chapter_id)
+        await self.apply_order(db, {item.item_id: i for i, item in enumerate(remaining, start=1)}, operator)

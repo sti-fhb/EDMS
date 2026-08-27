@@ -1,5 +1,7 @@
 import { ThemeProvider } from "@mui/material/styles"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { StrictMode } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
@@ -9,30 +11,68 @@ import { VerifyEmailPage } from "./VerifyEmailPage"
 import { server } from "../test/server"
 import { muiTheme } from "../styles/muiTheme"
 
-// 以 StrictMode 包裝，對齊正式環境（main.tsx），並讓「掛載期 effect 跑兩次」的行為在測試中重現
+// 以 StrictMode 包裝，對齊正式環境（main.tsx）
 function renderVerify(initialUrl: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <StrictMode>
-      <ThemeProvider theme={muiTheme}>
-        <MemoryRouter initialEntries={[initialUrl]}>
-          <Routes>
-            <Route path="/verify-email" element={<VerifyEmailPage />} />
-            <Route path="/" element={<div>登入頁</div>} />
-          </Routes>
-        </MemoryRouter>
-      </ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider theme={muiTheme}>
+          <MemoryRouter initialEntries={[initialUrl]}>
+            <Routes>
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/" element={<div>登入頁</div>} />
+            </Routes>
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>
     </StrictMode>,
   )
 }
 
-describe("VerifyEmailPage", () => {
-  it("有效 token → 驗證成功、顯示前往登入", async () => {
+async function setPassword(user: ReturnType<typeof userEvent.setup>, pwd = "Abcd1234", confirm?: string) {
+  await user.type(screen.getByLabelText("設定密碼"), pwd)
+  await user.type(screen.getByLabelText("確認密碼"), confirm ?? pwd)
+  await user.click(screen.getByRole("button", { name: "設定密碼並啟用" }))
+}
+
+describe("VerifyEmailPage（設定密碼以完成註冊，#212）", () => {
+  it("有效 token + 合規密碼 → 送出後顯示啟用成功", async () => {
     renderVerify("/verify-email?token=good-token")
-    expect(await screen.findByText("帳號已啟用，請以新帳號登入。")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "前往登入" })).toBeInTheDocument()
+    const user = userEvent.setup()
+    await setPassword(user)
+    expect(await screen.findByText("帳號已啟用，請以新密碼登入")).toBeInTheDocument()
   })
 
-  it("連結逾時（DP_USER_004）→ 顯示錯誤訊息", async () => {
+  it("密碼隨請求一起送出（後端據此建立帳號，非沿用註冊階段的密碼）", async () => {
+    let received: Record<string, unknown> | null = null
+    server.use(
+      http.post("/api/verify-email", async ({ request }) => {
+        received = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ message: "帳號已啟用" })
+      }),
+    )
+    renderVerify("/verify-email?token=good-token")
+    const user = userEvent.setup()
+    await setPassword(user, "Str0ng!Pass")
+
+    expect(await screen.findByText("帳號已啟用，請以新密碼登入")).toBeInTheDocument()
+    expect(received).toEqual({
+      token: "good-token",
+      new_password: "Str0ng!Pass",
+      confirm_password: "Str0ng!Pass",
+    })
+  })
+
+  it("兩次不一致 → 前端 Zod 擋下（不送出、留在表單）", async () => {
+    renderVerify("/verify-email?token=good-token")
+    const user = userEvent.setup()
+    await setPassword(user, "Abcd1234", "Zzzz9999")
+    expect(await screen.findByText("兩次輸入之密碼不一致")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "設定密碼並啟用" })).toBeInTheDocument()
+  })
+
+  it("連結逾時（DP_USER_004）→ 顯示後端錯誤訊息", async () => {
     server.use(
       http.post("/api/verify-email", () =>
         HttpResponse.json(
@@ -42,27 +82,14 @@ describe("VerifyEmailPage", () => {
       ),
     )
     renderVerify("/verify-email?token=expired-token")
+    const user = userEvent.setup()
+    await setPassword(user)
     expect(await screen.findByText("驗證連結已失效，請重新申請")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "回登入頁" })).toBeInTheDocument()
   })
 
-  it("缺 token → 顯示錯誤、不呼叫 API", async () => {
+  it("缺 token → 顯示錯誤、不呈現表單", async () => {
     renderVerify("/verify-email")
     expect(await screen.findByText("驗證連結無效")).toBeInTheDocument()
-  })
-
-  it("StrictMode 重複掛載時，同一 token 只送出一次驗證請求", async () => {
-    // 回歸測試：修正前 effect 會在 StrictMode 下對同一 token 送出兩個 /verify-email，
-    // 兩個請求在後端互撞，輸的那個回 409「已被註冊」誤導使用者
-    let requestCount = 0
-    server.use(
-      http.post("/api/verify-email", () => {
-        requestCount += 1
-        return HttpResponse.json({ message: "帳號已啟用，請以新帳號登入" })
-      }),
-    )
-    renderVerify("/verify-email?token=good-token")
-    expect(await screen.findByText("帳號已啟用，請以新帳號登入。")).toBeInTheDocument()
-    expect(requestCount).toBe(1)
+    expect(screen.queryByLabelText("設定密碼")).not.toBeInTheDocument()
   })
 })

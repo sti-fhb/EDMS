@@ -12,7 +12,8 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.constants import ITEM_MATERIAL, ROLE_TEACHER
-from app.et.course.models import EtChapter, EtItem, EtMaterial
+from app.et.course.models import EtChapter, EtItem
+from app.et.material.models import EtMaterial
 from app.et.progress.models import EtProgress
 from app.et.roles.models import EtUserRole
 

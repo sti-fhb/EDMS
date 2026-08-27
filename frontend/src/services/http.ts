@@ -47,14 +47,43 @@ export interface ApiError {
   retryAfter?: number
 }
 
-/** 把 axios 例外正規化為 { status, errorCode, errorMessage, retryAfter }，供頁面顯示（對齊後端錯誤格式）。 */
+/**
+ * 把 axios 例外正規化為 `{ status, errorCode, errorMessage, retryAfter }`，供頁面顯示。
+ *
+ * ## 三種情形要分開，不能都說「連線異常」
+ *
+ * | 情形 | 判準 | 訊息 |
+ * |------|------|------|
+ * | 真的連不上 | **完全沒有 response**（斷網、後端沒起來、CORS 被擋）| 系統連線異常 |
+ * | 後端正常回報的業務錯誤 | body 有 `error_message` | 原樣顯示 |
+ * | 伺服器端出錯 | 有 response 但 body 無 `error_message`（未處理例外之 5xx、反向代理錯誤頁）| 伺服器處理失敗（HTTP xxx）|
+ *
+ * 原本第三種也顯示「系統連線異常」，會把人帶去查網路——2026-08-26 於 #203 實測時
+ * 就發生過：開發庫少套一支 migration 造成 500，畫面只說連線異常，實際上網路好得很。
+ * 訊息帶上 HTTP 狀態碼，回報問題時才有東西可講。
+ *
+ * FastAPI 的未處理例外回的是 `{"detail": "Internal Server Error"}`——沒有
+ * `error_message`，正好落在第三種。
+ */
 export function toApiError(err: unknown): ApiError {
   const axiosErr = err as AxiosError<{ error_code?: string; error_message?: string; retry_after?: number }>
+  const response = axiosErr.response
+  if (!response) {
+    return { status: 0, errorCode: "NETWORK_ERROR", errorMessage: "系統連線異常，請稍後再試" }
+  }
+  const data = response.data
+  if (data?.error_message) {
+    return {
+      status: response.status,
+      errorCode: data.error_code ?? "UNKNOWN_ERROR",
+      errorMessage: data.error_message,
+      retryAfter: data.retry_after,
+    }
+  }
   return {
-    status: axiosErr.response?.status ?? 0,
-    errorCode: axiosErr.response?.data?.error_code ?? "NETWORK_ERROR",
-    errorMessage: axiosErr.response?.data?.error_message ?? "系統連線異常，請稍後再試",
-    retryAfter: axiosErr.response?.data?.retry_after,
+    status: response.status,
+    errorCode: "SERVER_ERROR",
+    errorMessage: `伺服器處理失敗（HTTP ${response.status}），請稍後再試或聯絡系統管理員`,
   }
 }
 
@@ -69,12 +98,15 @@ export async function toBlobApiError(err: unknown): Promise<ApiError> {
   if (data instanceof Blob) {
     try {
       const parsed = JSON.parse(await data.text()) as { error_code?: string; error_message?: string; retry_after?: number }
-      return {
-        status: axiosErr.response?.status ?? 0,
-        errorCode: parsed.error_code ?? "NETWORK_ERROR",
-        errorMessage: parsed.error_message ?? "系統連線異常，請稍後再試",
-        retryAfter: parsed.retry_after,
+      if (parsed.error_message) {
+        return {
+          status: axiosErr.response?.status ?? 0,
+          errorCode: parsed.error_code ?? "UNKNOWN_ERROR",
+          errorMessage: parsed.error_message,
+          retryAfter: parsed.retry_after,
+        }
       }
+      // 是 JSON 但沒有結構化錯誤 → 與一般路徑同樣視為伺服器端出錯
     } catch {
       // 非 JSON（如 HTML 錯誤頁）→ 落回一般處理
     }

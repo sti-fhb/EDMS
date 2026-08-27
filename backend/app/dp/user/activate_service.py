@@ -8,20 +8,12 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
-from app.core.password_hashing import hash_password_async
-from app.core.password_policy import validate_password_strength
-from app.core.request_context import get_client_ip
-from app.core.utils import utcnow
-from app.dp.user.activation import activate_pending_account
+from app.dp.user.activation import activate_with_new_password
 from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.repository import AuthRepository
-from app.dp.user.token import hash_token
 from app.services import AuditLogService, ParamService
 
 _FUNC_NAME = "DP-USERS"
-_DEFAULT_MIN_LEN = 8
-_DEFAULT_CHAR_TYPES = 3
 _TOKEN_INVALID_MSG = "邀請連結無效"  # noqa: S105 — 使用者訊息，非密碼
 _TOKEN_EXPIRED_MSG = "邀請連結已失效，請洽管理者重寄"  # noqa: S105 — 使用者訊息，非密碼
 
@@ -47,30 +39,17 @@ class ActivateAccountService:
                 兩次不一致（422 DP_USER_002）、密碼不符複雜度（422 DP_PWD_001/002/004）、
                 Email 已啟用 / 競態（409 DP_USER_001）。
         """
-        now = utcnow()
-        ip = get_client_ip()
-        pending = await self._repo.get_pending_by_token_hash(db, hash_token(token))
-        # 僅 ADMIN_INVITE 走本端點；自助註冊 token 一律視為無效（該走 /verify-email）
-        if pending is None or pending.kind != KIND_ADMIN_INVITE:
-            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_USER_003")
-        if pending.expires_date <= now:
-            raise AppError(status_code=400, detail=_TOKEN_EXPIRED_MSG, error_code="DP_USER_004")
-
-        # 密碼檢核：兩次一致（前端 Zod 另擋）+ 複雜度（一般使用者門檻，讀平台參數）
-        if new_password != confirm_password:
-            raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
-        min_len = await self._params.get_int_param(db, "PWD_POLICY", "MIN_LEN", _DEFAULT_MIN_LEN)
-        char_types = await self._params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES)
-        validate_password_strength(new_password, min_length=min_len, required_char_types=char_types)
-
-        await activate_pending_account(
+        await activate_with_new_password(
             db,
-            pending=pending,
-            pwd_hash=await hash_password_async(new_password),
-            now=now,
-            ip=ip,
+            token=token,
+            new_password=new_password,
+            confirm_password=confirm_password,
+            expected_kind=KIND_ADMIN_INVITE,
             repo=self._repo,
             audit=self._audit,
+            params=self._params,
             func_name=_FUNC_NAME,
             create_desc="受邀者設定密碼啟用帳號",
+            token_invalid_msg=_TOKEN_INVALID_MSG,
+            token_expired_msg=_TOKEN_EXPIRED_MSG,
         )
