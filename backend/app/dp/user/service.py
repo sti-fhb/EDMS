@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, create_access_token
 from app.core.exceptions import AppError
-from app.core.password_policy import is_password_expired, verify_password
+from app.core.password_hashing import verify_password_async
+from app.core.password_policy import is_password_expired
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.repository import AuthRepository
@@ -52,9 +53,15 @@ class AuthService:
         now = utcnow()
         user = await self._repo.get_by_email(db, email)
         if user is None:
-            # 方案 B：未驗證帳號不在 DP_USER，僅在待驗證表。若該 Email 有待驗證列 → 專屬提示（引導驗證 / 重寄），
-            # 而非誤導的「查無此帳號」（#56）。
-            if await self._repo.get_pending_by_email(db, email) is not None:
+            # 方案 B：未驗證帳號不在 DP_USER，僅在待驗證表。若該 Email 有**未逾期**的待驗證列 → 專屬提示
+            # （引導驗證 / 重寄），而非誤導的「查無此帳號」（#56）。
+            #
+            # 逾期列必須視為不存在（#212），與 resend 的定義一致。否則會構成死路：逾期列讓登入永久回
+            # DP_AUTH_010「請重新寄送」→ 前端據此渲染重寄鈕 → 重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章
+            # → 使用者每按一次就把自己的「重新註冊」路徑再鎖一個冷卻週期，而 UI 全程指向重寄。
+            # 回 DP_AUTH_007「請先註冊」才是此時唯一走得通的動作。
+            pending = await self._repo.get_pending_by_email(db, email)
+            if pending is not None and pending.expires_date > now:
                 await self._fail(
                     db,
                     _SYSTEM_USER,
@@ -71,7 +78,7 @@ class AuthService:
         if user.status != "ACTIVE":
             await self._fail(db, user.user_id, ip, "帳號已停用", 403, "帳號已停用，請洽管理者", "DP_AUTH_004")
 
-        if not verify_password(password, user.pwd_hash):
+        if not await verify_password_async(password, user.pwd_hash):
             fail_lock = await self._params.get_int_param(db, "LOGIN", "FAIL_LOCK_COUNT", _DEFAULT_FAIL_LOCK_COUNT)
             lock_min = await self._params.get_int_param(db, "LOGIN", "LOCK_MINUTES", _DEFAULT_LOCK_MINUTES)
             # 原子遞增：以 DB 端 count+1 判定並鎖定，消除 ORM 讀改寫的 lost update（並發同帳號錯密碼時

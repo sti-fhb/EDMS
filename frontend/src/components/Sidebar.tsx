@@ -11,6 +11,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 
+import { usePersonalAccess } from "../dm/personal/usePersonal"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
 import type { ModuleSummary } from "../layouts/useModuleSummary"
@@ -110,7 +111,13 @@ function isGroupVisible(requires: ModuleKey | undefined, summary: ModuleSummary 
  */
 export function Sidebar() {
   const { data: summary } = useModuleSummary()
-  const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary))
+  // 個人專區入口可見性（US9 FR-004）：具編輯者或審核者才顯示；僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
+  const { data: access } = usePersonalAccess(summary?.dm.has_role ?? false)
+  const canPersonal = access?.can_access ?? false
+  const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary)).map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.requiresDmPersonalAccess || canPersonal),
+  }))
   return (
     <Box component="nav" aria-label="主導覽" sx={{ py: 0.5 }}>
       {visibleGroups.map((group) => (

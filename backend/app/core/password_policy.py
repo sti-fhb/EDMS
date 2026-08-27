@@ -47,8 +47,17 @@ def verify_password(plain: str, hashed: str) -> bool:
         hashed: 既有的 bcrypt 雜湊。
 
     Returns:
-        相符回 True。
+        相符回 True。超過 bcrypt 上限（72 bytes）一律回 False——`hash_password` 已拒絕
+        產生此類雜湊，故不存在能相符的既有雜湊。
+
+    Note:
+        此守衛不可省略：passlib 對超過 4096 bytes 的明文會拋 `PasswordSizeError`，
+        若讓它冒出去，登入端點會回 500 且**不寫 LOGIN FAIL 稽核、不增失敗計數、
+        不觸發帳號鎖定**（`_fail()` 在密碼驗證之後），形成不留痕跡的帳號列舉 oracle。
+        回 False 則走既有的「密碼錯誤」路徑，稽核與鎖定語意完整保留。
     """
+    if len(plain.encode("utf-8")) > _MAX_PASSWORD_BYTES:
+        return False
     return _pwd_context.verify(plain, hashed)
 
 

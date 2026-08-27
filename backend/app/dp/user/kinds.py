@@ -20,7 +20,7 @@
 不是「只有這兩個值進得了 DB」。
 """
 
-# US2 自助註冊：建立即帶 PWD_HASH，驗證通過後搬入 DP_USER
+# US2 自助註冊：**不帶 PWD_HASH**（#212），密碼由本人於驗證步當場設定
 KIND_SELF_REGISTER = "SELF_REGISTER"
 
 # US4 管理者邀請：建立時 PWD_HASH 為 NULL，受邀者於啟用連結自設密碼才回填

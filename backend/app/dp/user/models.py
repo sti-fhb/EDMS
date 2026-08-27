@@ -38,16 +38,19 @@ class DpPendingRegistration(BaseModelHardDelete):
     """待驗證的自助註冊（DP_PENDING_REGISTRATION）。
 
     US2 改為「Email 驗證後啟用」（#56，方案 B）：註冊當下**不寫 DP_USER**，先把註冊申請
-    （Email / 姓名 / 密碼雜湊 + 一次性驗證 token）暫存於本表；點驗證連結通過才 INSERT DP_USER。
+    （Email / 姓名 + 一次性驗證 token，**不含密碼**）暫存於本表；點驗證連結通過才 INSERT DP_USER。
     如此 DP_USER 只存已驗證帳號，登入 / 忘記密碼 / 使用者管理等不必處理未驗證半成品。
 
     一 Email 一筆待驗證（EMAIL UNIQUE）：重新註冊 / 重寄時以 Email 覆蓋（刪舊列 + 插新）。
     明文 token 僅入信中連結，本表只存其 SHA-256（同 DP_PWD_RESET）。consume / 逾時後硬刪除
     （BaseModelHardDelete，無 DELETED），逾期未驗證列由排程清理。
 
-    兩種來源以 KIND 區分（US4 #67）：
-    - SELF_REGISTER（US2 自助註冊）：建立即帶 PWD_HASH，啟用時搬入 DP_USER。
-    - ADMIN_INVITE（US4 管理者邀請）：建立時 PWD_HASH 為 NULL，使用者於啟用連結自設密碼才回填。
+    兩種來源以 KIND 區分（US4 #67），#212 之後**兩者形狀一致**：
+    - SELF_REGISTER（US2 自助註冊）：PWD_HASH 恆為 NULL，使用者於驗證連結自設密碼。
+    - ADMIN_INVITE（US4 管理者邀請）：PWD_HASH 恆為 NULL，使用者於啟用連結自設密碼。
+
+    ⚠️ `PWD_HASH` 因此已無任何寫入非 NULL 的路徑（欄位保留待另案評估移除）。本表匿名可寫，
+    密碼素材不得存於此——這正是 #212 修掉的 pre-hijack 破口，勿把密碼加回本表。
     """
 
     __tablename__ = "DP_PENDING_REGISTRATION"
@@ -59,7 +62,7 @@ class DpPendingRegistration(BaseModelHardDelete):
     token_hash: Mapped[str] = mapped_column("TOKEN_HASH", String(64), nullable=False)
     email: Mapped[str] = mapped_column("EMAIL", String(255), nullable=False)
     user_name: Mapped[str] = mapped_column("USER_NAME", String(50), nullable=False)
-    # ADMIN_INVITE 建立時為 NULL（使用者啟用時自設密碼回填）；SELF_REGISTER 建立即有值
+    # 兩種 KIND 皆恆為 NULL（#212）：密碼一律由使用者於落點頁當場設定，不經本表
     pwd_hash: Mapped[Optional[str]] = mapped_column("PWD_HASH", String(100), nullable=True)
     kind: Mapped[str] = mapped_column("KIND", String(20), nullable=False)
     expires_date: Mapped[datetime] = mapped_column("EXPIRES_DATE", DateTime(timezone=True), nullable=False)

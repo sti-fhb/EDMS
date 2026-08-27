@@ -119,8 +119,6 @@ describe("LoginOverlay", () => {
     await user.click(screen.getByRole("tab", { name: "註冊" }))
     await user.type(screen.getByLabelText("帳號（Email）"), over.email ?? "new@edms.local")
     await user.type(screen.getByLabelText("姓名"), over.user_name ?? "新學員")
-    await user.type(screen.getByLabelText("密碼"), over.password ?? "Abcd1234")
-    await user.type(screen.getByLabelText("確認密碼"), over.confirm ?? "Abcd1234")
     await user.click(screen.getByRole("button", { name: "建立帳號" }))
   }
 
@@ -148,11 +146,21 @@ describe("LoginOverlay", () => {
     expect(await screen.findByText("此 Email 已被註冊，請直接登入或使用忘記密碼")).toBeInTheDocument()
   })
 
-  it("兩次密碼不一致 → 前端 Zod 擋下（不送出、留在註冊分頁）", async () => {
+  it("註冊表單不含密碼欄位（密碼於驗證頁設定，#212）", async () => {
     renderLogin()
     const user = userEvent.setup()
-    await fillRegister(user, { confirm: "Zzzz9999" })
-    expect(await screen.findByText("兩次輸入之密碼不一致")).toBeInTheDocument()
+    await user.click(screen.getByRole("tab", { name: "註冊" }))
+    expect(screen.queryByLabelText("密碼")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("確認密碼")).not.toBeInTheDocument()
+  })
+
+  it("姓名未填 → 前端 Zod 擋下（不送出、留在註冊分頁）", async () => {
+    renderLogin()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("tab", { name: "註冊" }))
+    await user.type(screen.getByLabelText("帳號（Email）"), "noname@edms.local")
+    await user.click(screen.getByRole("button", { name: "建立帳號" }))
+    expect(await screen.findByText("請輸入姓名")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "建立帳號" })).toBeInTheDocument()
   })
 

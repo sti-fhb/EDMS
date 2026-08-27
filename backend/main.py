@@ -17,6 +17,8 @@ from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
 from app.core.log_redaction import format_exception_for_log
+from app.core.password_hashing import shutdown as shutdown_password_executor
+from app.core.password_hashing import warm_up as warm_up_password_backend
 from app.core.request_context import get_client_ip, set_client_ip
 from app.dm.bootstrap import register_dm_module
 from app.dm.dashboard.router import router as dm_dashboard_router
@@ -24,6 +26,7 @@ from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
 from app.dm.library.router import router as dm_library_router
 from app.dm.obsolete.router import router as dm_obsolete_router
+from app.dm.personal.router import router as dm_personal_router
 from app.dm.review.router import router as dm_review_router
 from app.dp.audit.router import router as dp_audit_router
 from app.dp.notify.mailer import SmtpMailer
@@ -49,6 +52,9 @@ async def lifespan(app: "FastAPI"):
 
     兩者皆 lifespan 背景元件、互不依賴：worker 消 DP_EMAIL_LOG、scheduler 依 DP_SCHEDULE 觸發 job。
     """
+    # 密碼運算後端暖機（#214）：讓 passlib 的惰性初始化在單執行緒下完成，避免多 worker
+    # 首呼的競態，並把它已知的版本偵測 traceback 落在啟動階段而非第一個使用者登入時。
+    await warm_up_password_backend()
     stop_event = asyncio.Event()
     task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
     scheduler = await start_scheduler()
@@ -58,6 +64,7 @@ async def lifespan(app: "FastAPI"):
         # 先關排程引擎（等當前 job 跑完），再請 worker 優雅收斂（跑完當前 cycle 並 commit），
         # 逾時才強制取消——避免在「已透過 SMTP 寄出、尚未 commit」的空窗被 cancel 導致 rollback 後重送。
         await shutdown_scheduler(scheduler)
+        shutdown_password_executor()
         stop_event.set()
         try:
             await asyncio.wait_for(task, timeout=30)
@@ -119,6 +126,7 @@ app.include_router(dm_detail_router)
 app.include_router(dm_editor_router)
 app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
+app.include_router(dm_personal_router)
 app.include_router(et_course_router)
 app.include_router(et_material_router)
 app.include_router(et_quiz_router)

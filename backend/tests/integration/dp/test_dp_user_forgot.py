@@ -212,3 +212,29 @@ async def test_reset_keeps_locked_and_status(db):
     user = (await db.execute(select(DpUser).where(DpUser.user_id == "lk"))).scalar_one()
     assert verify_password(_NEW_PWD, user.pwd_hash)  # 密碼已更新
     assert user.status == "DISABLED" and user.locked_until == locked_until  # 狀態不變
+
+
+async def test_shed_503_does_not_consume_reset_token(db, monkeypatch):
+    """併發閘卸除（503）不得燒掉使用者的一次性重設連結（#214）。
+
+    `consume_reset_token` 與 `hash_password_async` 之間沒有 commit，故 503 觸發的 rollback
+    會一併回復 token。若哪天有人把 consume 提前 commit，這條會紅——那正是要防的回歸：
+    使用者收到「系統忙碌中」之後，連結還必須能再用一次。
+    """
+    from app.core import password_hashing
+
+    await _make_user(db, user_id="shed", email="shed@edms.local")
+    plaintext = await _make_token(db, user_id="shed")
+    await db.commit()
+
+    monkeypatch.setattr(password_hashing, "_HASH_MAX_INFLIGHT", 0)  # 閘位全滿 → 必定卸除
+    with pytest.raises(AppError) as err:
+        await ResetPasswordService().reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+    assert err.value.status_code == 503
+    assert err.value.error_code == "COMMON_503"
+
+    await db.rollback()  # production 由 get_db 負責
+    token = (await db.execute(select(DpPwdReset).where(DpPwdReset.user_id == "shed"))).scalar_one()
+    assert token.used_date is None, "503 之後 token 仍須可用"
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "shed"))).scalar_one()
+    assert verify_password(_GOOD_PWD, user.pwd_hash), "503 之後密碼不得被改動"

@@ -50,8 +50,6 @@ async def test_register_stores_email_lowercased(client, db):
         json={
             "email": "Mixed.Case@Example.COM",
             "user_name": "王小明",
-            "password": _PWD,
-            "confirm_password": _PWD,
         },
     )
     assert resp.status_code == 202
@@ -65,7 +63,7 @@ async def test_register_then_duplicate_mixed_case_rejected(client, db):
     await _make_user(db, email="dup@edms.local")
     resp = await client.post(
         "/api/register",
-        json={"email": "DUP@edms.local", "user_name": "重複", "password": _PWD, "confirm_password": _PWD},
+        json={"email": "DUP@edms.local", "user_name": "重複"},
     )
     assert resp.status_code == 409
     assert resp.json()["error_code"] == "DP_USER_001"
