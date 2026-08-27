@@ -10,6 +10,7 @@ from app.core.exceptions import AppError
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.rules import (
     ensure_deletable,
+    ensure_item_reorder_complete,
     ensure_owner,
     ensure_reorder_complete,
     ensure_tag_change_allowed,
@@ -115,3 +116,41 @@ class TestEnsureReorderComplete:
         with pytest.raises(AppError) as exc:
             ensure_reorder_complete(current_ids={1, 2}, requested=[1, 1, 2])
         assert exc.value.error_code == "ET_CHAPTER_002"
+
+
+class TestEnsureItemReorderComplete:
+    """項目重排判定（#203）：與章節同一邏輯、不同錯誤碼。"""
+
+    def test_集合一致時通過(self) -> None:
+        ensure_item_reorder_complete(current_ids={10, 11, 12}, requested=[12, 10, 11])
+
+    def test_缺漏項目被擋(self) -> None:
+        with pytest.raises(AppError) as exc:
+            ensure_item_reorder_complete(current_ids={10, 11, 12}, requested=[10, 11])
+        assert exc.value.status_code == 422
+        assert exc.value.error_code == "ET_ITEM_002"
+
+    def test_多出不屬本章節之項目被擋(self) -> None:
+        """防越權：把別的章節（甚至別人課程）的項目 id 塞進來重排。"""
+        with pytest.raises(AppError) as exc:
+            ensure_item_reorder_complete(current_ids={10, 11}, requested=[10, 11, 99])
+        assert exc.value.error_code == "ET_ITEM_002"
+
+    def test_重複_id_被擋(self) -> None:
+        """[10,10,11] 之集合與 {10,11} 相同，僅比對集合會漏掉；須另檢長度。"""
+        with pytest.raises(AppError) as exc:
+            ensure_item_reorder_complete(current_ids={10, 11}, requested=[10, 10, 11])
+        assert exc.value.error_code == "ET_ITEM_002"
+
+    def test_空章節送空陣列通過(self) -> None:
+        ensure_item_reorder_complete(current_ids=set(), requested=[])
+
+    def test_錯誤碼與章節重排不同(self) -> None:
+        """兩層重排須以 error_code 區辨——共用單一代碼會使前端無從分辨是哪一層失敗。"""
+        from app.et.course.rules import ensure_reorder_complete as chapter_rule
+
+        with pytest.raises(AppError) as item_exc:
+            ensure_item_reorder_complete(current_ids={1}, requested=[])
+        with pytest.raises(AppError) as chapter_exc:
+            chapter_rule(current_ids={1}, requested=[])
+        assert item_exc.value.error_code != chapter_exc.value.error_code

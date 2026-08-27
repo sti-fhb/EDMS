@@ -86,15 +86,36 @@ class TestBoundary:
         assert TRAINING_CATEGORY == "TRAINING"
 
     def test_et_模組未直接_import_dm_內部(self) -> None:
-        """架構護欄：ET 全模組不得 `from app.dm...`（僅可經 app.services）。"""
+        """架構護欄：ET 全模組不得 `from app.dm...`（僅可經 app.services）。
+
+        以 **AST 解析真正的 import 語句**，而非字串比對整份檔案內容。原本的
+        substring 版有兩個問題（2026-08-26 #203 改）：
+
+        1. **誤報**——在 docstring 或註解裡寫下「不得 `from app.dm`」這條規則本身就會
+           觸發。護欄若懲罰把規則寫進註解的人，就會讓人不敢寫註解。
+        2. **漏報**——`import app.dm.document.models as m` 這種寫法不含 `from app.dm`
+           字樣，舊版抓不到；被註解掉的 import 反而會誤判為違規。
+
+        回報**模組相對路徑**而非僅檔名：ET 底下有多個子模組都可能有 `service.py`，
+        只給檔名會讓人不知道要去哪裡找。
+        """
+        import ast
         from pathlib import Path
 
         et_root = Path(__file__).resolve().parents[3] / "app" / "et"
-        offenders = [
-            f"{py.name}"
-            for py in et_root.rglob("*.py")
-            if "from app.dm" in py.read_text(encoding="utf-8") or "import app.dm" in py.read_text(encoding="utf-8")
-        ]
+        offenders: list[str] = []
+        for py in sorted(et_root.rglob("*.py")):
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    hit = (node.module or "").startswith("app.dm")
+                elif isinstance(node, ast.Import):
+                    hit = any(alias.name.startswith("app.dm") for alias in node.names)
+                else:
+                    continue
+                if hit:
+                    offenders.append(str(py.relative_to(et_root)))
+                    break
         assert offenders == [], f"ET 不得直接 import DM 內部：{offenders}"
 
 

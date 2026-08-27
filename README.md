@@ -77,6 +77,7 @@ EDMS/
 | pnpm | 最新版 | Node 套件管理 |
 | PostgreSQL | 17 | 資料庫（與 DM 模組共用 user table，可同庫不同 schema 或獨立 DB）|
 | SMTP Server | — | 寄送邀請信 / 密碼重設信 / Email 變更驗證信 |
+| ffmpeg | 最新版 | ET 教材影片上傳時以 `ffprobe` 解析影片長度。**未安裝則所有影片皆無法上傳**（`DURATION_SEC` 為必填且取不到不得存檔）。Windows：`winget install --id Gyan.FFmpeg`；安裝後需重開終端機 |
 
 ### 安裝環境工具
 
@@ -208,7 +209,7 @@ pnpm dev
 | 容器 | 映像檔 | 說明 |
 |------|--------|------|
 | `edms-nginx` | nginx:alpine（multi-stage build） | 前端靜態檔案 + 反向代理 |
-| `edms-backend` | python:3.12-slim + uv | FastAPI 後端 API |
+| `edms-backend` | python:3.12-slim + uv | FastAPI 後端 API；**映像檔須加裝 ffmpeg**（ET 教材影片以 `ffprobe` 解析長度）|
 | `edms-db` | postgres:17 | PostgreSQL 資料庫（與 DM 共用 user table）|
 
 ### 本機 Docker 開發（預定流程）

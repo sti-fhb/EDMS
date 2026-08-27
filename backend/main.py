@@ -40,6 +40,8 @@ from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
 from app.et.bootstrap import register_et_module
 from app.et.course.router import router as et_course_router
+from app.et.material.router import router as et_material_router
+from app.et.quiz.router import router as et_quiz_router
 
 logger = logging.getLogger(__name__)
 
@@ -126,13 +128,16 @@ app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
 app.include_router(dm_personal_router)
 app.include_router(et_course_router)
+app.include_router(et_material_router)
+app.include_router(et_quiz_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()
 
 # ET 模組啟動接線（#185）：註冊四個聚合閘 checker / provider（§1~§4）。
 # ⚠️ 本呼叫是 DP #113（真授權閘掛 router）之解鎖條件——閘為 fail-closed，
-# 無模組註冊時會使整個 DP 後台 403。ET 尚無業務 router，故此處僅接線、不 include_router。
+# 無模組註冊時會使整個 DP 後台 403。與業務 router 之 include 相互獨立：
+# 閘註冊是「ET 這個模組存在」的宣告，router 則是各功能的端點掛載。
 register_et_module()
 
 
@@ -192,13 +197,29 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """將 Pydantic 請求格式驗證失敗轉換為標準錯誤回應格式。
+    """將 Pydantic 請求格式驗證失敗轉換為標準錯誤回應格式，並**指出是哪些欄位**。
 
-    不洩漏 Pydantic 內部的欄位驗證細節。
+    ## 為何改為回傳欄位名（2026-08-27）
+
+    原本一律回「請求格式驗證失敗」，理由是「不洩漏 Pydantic 內部的欄位驗證細節」。
+    但那讓所有驗證失敗長得一模一樣——使用者（與排查的人）無從知道這次錯在哪。
+
+    真正不該外洩的是 **`input`（使用者送出的值）**：驗證失敗的欄位可能正是密碼、
+    Email 等敏感內容，回傳等於把它寫進前端畫面與瀏覽器 log。**欄位名稱則不然**
+    ——它本來就印在 OpenAPI 文件上，是公開的 API 契約。
+
+    故此處只取 `loc` 的最後一段（欄位名），**不取 `input`、不取 pydantic 的原始
+    `msg`**（後者是英文且可能帶出正則式等實作細節）。
+
+    `fields` 為附加欄位，既有前端忽略它不會壞；需要逐欄標記的畫面才取用。
+
+    > 前端仍應在送出前自行驗證——這裡是最後一道網，不是主要的使用者回饋管道。
     """
+    fields = sorted({str(err["loc"][-1]) for err in exc.errors() if err.get("loc")})
+    detail = f"以下欄位不符規定：{'、'.join(fields)}" if fields else "請求格式不符規定"
     return JSONResponse(
         status_code=422,
-        content={"error_code": "COMMON_422", "error_message": "請求格式驗證失敗"},
+        content={"error_code": "COMMON_422", "error_message": detail, "fields": fields},
     )
 
 
