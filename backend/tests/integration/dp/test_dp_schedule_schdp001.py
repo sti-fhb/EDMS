@@ -11,9 +11,9 @@ from sqlalchemy import select
 
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
+from app.dp.notify.models import DpEmailLog
 from app.dp.user.models import DpPendingRegistration
 from app.dp.user.repository import AuthRepository
-from app.dp.notify.models import DpEmailLog
 from app.dp.users.models import DpUser
 from app.dp.users.repository import UsersRepository
 from app.dp.users.service import UsersService

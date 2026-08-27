@@ -83,11 +83,17 @@ class ResendVerificationService:
         self._params = params or ParamService()
         self._notify = notify or NotifyService()
 
-    async def resend(self, db: AsyncSession, *, email: str) -> None:
-        """重寄：pending 存在才作廢舊 token、產新並重寄；不存在則靜默（防列舉）。
+    async def resend(self, db: AsyncSession, *, email: str) -> bool:
+        """重寄：pending 存在且有效才作廢舊 token、產新並重寄；否則靜默（防列舉）。
 
         僅處理自助註冊（SELF_REGISTER）；管理者邀請（ADMIN_INVITE）之重寄走使用者管理頁（US4 #67），
         不經此匿名端點，故遇邀請列一律靜默（等同不存在，維持防列舉）。
+
+        Returns:
+            bool: **是否真的寄出信**。呼叫端據此決定蓋哪一個冷卻章（#213）——沒寄信卻蓋 Email 章
+                會讓任何匿名者無限期封鎖任意 Email 的自助註冊，見 `router._verify_send_probe_key`。
+                回傳值刻意**不**影響對外回應（訊息 / 狀態碼 / retry_after 三條路徑皆相同），
+                否則會變成 pending 存在性 oracle。
         """
         now = utcnow()
         pending = await self._repo.get_pending_by_email(db, email)
@@ -97,7 +103,7 @@ class ResendVerificationService:
         # 回應與「不存在」完全相同（同訊息、同狀態碼），故防列舉語意不變；連結逾期的正常使用者
         # 重新註冊即可（#212 之後註冊只需 Email + 姓名，比重寄更簡單）。
         if pending is None or pending.kind != KIND_SELF_REGISTER or pending.expires_date <= now:
-            return
+            return False
 
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
@@ -136,3 +142,4 @@ class ResendVerificationService:
             params={"user_name": pending.user_name, "verify_link": verify_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
         )
+        return True
