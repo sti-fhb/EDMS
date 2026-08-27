@@ -115,10 +115,25 @@ async def _put(client, uid: str, mid: int, **overrides):
     return await client.put(f"/api/et/materials/{mid}", json=payload, headers=_bearer(uid))
 
 
-def _tmp_dir_entries() -> set[str]:
-    """暫存目錄現有檔名——用來驗證失敗路徑有清乾淨。"""
-    tmp_dir = os.path.join(storage.storage_root(), storage.TMP_DIRNAME)
-    return set(os.listdir(tmp_dir)) if os.path.isdir(tmp_dir) else set()
+@pytest.fixture
+def discard_spy(monkeypatch):
+    """記錄 `storage.discard` 的呼叫（仍實際刪檔），用來驗證失敗路徑有清乾淨。
+
+    ⚠️ **不可改用「比對暫存目錄前後檔案清單」**——那個目錄是全域共用的，而 CI 以
+    pytest-xdist 12 個 worker 並行，其他 worker 的上傳會同時在裡面增刪檔案，
+    斷言必然飄。2026-08-27 的 CI 就是這樣紅的（單獨跑過、並行跑掛）。
+
+    觀測「清理有沒有被呼叫」則只碰本次請求的狀態，與並行無關。
+    """
+    calls: list[str] = []
+    original = storage.discard
+
+    def spy(path: str) -> None:
+        calls.append(path)
+        original(path)
+
+    monkeypatch.setattr(storage, "discard", spy)
+    return calls
 
 
 class TestUpload:
@@ -176,33 +191,33 @@ class TestUpload:
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_MATERIAL_003"
 
-    async def test_超過大小上限被擋且不留半成品(self, client, db) -> None:
+    async def test_超過大小上限被擋且不留半成品(self, client, db, discard_spy) -> None:
         """上限以**實際寫入位元組數**判定，不信 `Content-Length`。"""
         uid = await _user(db, "ETV_S1")
         mid = await _material(client, uid)
         await _set_max_size_mb(db, "0")
-        before = _tmp_dir_entries()
 
         r = await _upload(client, uid, mid, name="sample.mp4")
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_MATERIAL_003"
-        assert _tmp_dir_entries() == before, "超標中止後暫存檔應被刪除"
+        assert discard_spy, "超標中止後應刪除半成品暫存檔"
+        assert not any(os.path.exists(p) for p in discard_spy)
         rows = list(await db.scalars(select(EtMaterialVideo).where(EtMaterialVideo.material_id == mid)))
         assert rows == [], "被擋下的上傳不應留下 DB 紀錄"
 
-    async def test_非影片內容無法解析長度而拒收(self, client, db) -> None:
+    async def test_非影片內容無法解析長度而拒收(self, client, db, discard_spy) -> None:
         """副檔名對但內容不是影片——ffprobe 讀不出長度，依 data-model 不得存檔。
 
         這也是「副檔名檢核不足以判定是影片」的補強：真正的內容驗證由 ffprobe 承擔。
         """
         uid = await _user(db, "ETV_P1")
         mid = await _material(client, uid)
-        before = _tmp_dir_entries()
 
         r = await _upload(client, uid, mid, name="fake.mp4", content=b"this is definitely not a video" * 100)
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_MATERIAL_004"
-        assert _tmp_dir_entries() == before, "解析失敗後暫存檔應被刪除"
+        assert discard_spy, "解析失敗後應刪除暫存檔"
+        assert not any(os.path.exists(p) for p in discard_spy)
         rows = list(await db.scalars(select(EtMaterialVideo).where(EtMaterialVideo.material_id == mid)))
         assert rows == [], "長度取不到時不得存檔（覆蓋率分母缺失會使章節永久卡住）"
 
@@ -235,15 +250,13 @@ class TestUpload:
         assert again.status_code == 409
         assert again.json()["error_code"] == "ET_MATERIAL_005"
 
-    async def test_重複上傳不留下半成品檔案(self, client, db) -> None:
+    async def test_重複上傳不留下半成品檔案(self, client, db, discard_spy) -> None:
         """在寫檔之前就擋下——不該白做一次 500 MB 的 I/O。"""
         uid = await _user(db, "ETV_DUP2")
         mid = await _material(client, uid)
         await _upload(client, uid, mid, name="sample.mp4")
-        before = _tmp_dir_entries()
-
         await _upload(client, uid, mid, name="sample.mp4")
-        assert _tmp_dir_entries() == before, "被擋下的上傳不該產生暫存檔"
+        assert discard_spy == [], "在寫檔之前就擋下——不該產生任何暫存檔可清"
 
     async def test_移除後可再次上傳同名影片(self, client, db) -> None:
         """檢核只看未刪除的影片——誤刪後不該永久無法用回原本的檔名。"""
