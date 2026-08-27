@@ -10,13 +10,14 @@ import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
+import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
 import { EMPTY_EDITOR_FORM, isPreviewableMime, makeEditorSchema, MANUAL_CATEGORY } from "./schemas"
 import type { EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
-import { useDocTags, useEditorOptions, useReviewers } from "./useEditor"
+import { useDocTags, useDraftMeta, useEditorOptions, useReviewers } from "./useEditor"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
@@ -47,12 +48,19 @@ export function DmEditorPage() {
   const { docId } = useParams<{ docId?: string }>()
   const isNew = !docId
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const { message, confirm } = useNotification()
 
   const { data: options } = useEditorOptions()
   const { data: reviewers } = useReviewers()
-  const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!)
-  const { data: recentVersions } = useVersions(isNew ? "" : docId!, !isNew)
+  // 續編模式 meta（草稿匣「繼續編輯」）：有本人草稿 → 續編（draftMeta + PUT 更新既有版本）；
+  // 無（後端 404 → null）→ 從 DM02 詳細載已發布文件 meta、走「加新版」（addVersion）。
+  const { data: draftMeta, isPending: draftMetaPending } = useDraftMeta(docId ?? "", !isNew)
+  const isContinueDraft = !isNew && !!draftMeta
+  // 續編首版草稿（父文件 DRAFT）不打 DM02 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
+  const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
+  const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
+  const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
   const { data: docTags } = useDocTags(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
@@ -68,9 +76,24 @@ export function DmEditorPage() {
   const bypassGuard = useRef(false)
   // 編輯模式標籤只預帶一次，之後尊重使用者編輯（避免 refetch 覆蓋）。
   const tagsPrefilled = useRef(false)
+  // 續編模式草稿內容（名稱 / 版號 / 摘要 / 審核者）只預帶一次。
+  const metaPrefilled = useRef(false)
 
-  const isManual = isNew && form.category_code === MANUAL_CATEGORY
+  // 續編首版草稿（父 DRAFT）視同新增般開放全欄位編輯（分類除外，綁 DOC_ID）；加新版沿用唯讀身份欄。
+  const editCategoryCode = isContinueDraft ? draftMeta?.category_code : detail?.category_code
+  // isManual：新增模式看 form；續編首版看該文件分類（供 func 欄可編）。
+  const isManual = isNew ? form.category_code === MANUAL_CATEGORY : editCategoryCode === MANUAL_CATEGORY
   const fileNotPreviewable = file !== null && !isPreviewableMime(file.type)
+
+  // 續編模式名稱可編（首版草稿 Q1=A）；其餘編輯情境名稱唯讀。
+  const nameEditable = isContinueDraft && !!draftMeta?.name_editable
+  // 已廢止文件之孤兒草稿：不可續編 / 送簽（後端亦擋 DM_DOC_018）；此處鎖動作、提示改用刪除。
+  const draftObsolete = isContinueDraft && draftMeta?.doc_status === "OBSOLETE"
+  // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM02 詳細。
+  const editName = isContinueDraft ? (draftMeta?.doc_name ?? "") : (detail?.doc_name ?? "")
+  const editCategoryName = isContinueDraft ? (draftMeta?.category_name ?? "") : (detail?.category_name ?? "")
+  const editFuncCode = isContinueDraft ? draftMeta?.func_code : detail?.func_code
+  const editFuncName = isContinueDraft ? draftMeta?.func_name : detail?.func_name
 
   const audienceOptions = options?.audiences ?? []
   const retrievalOptions = options?.retrieval_tags ?? []
@@ -150,13 +173,28 @@ export function DmEditorPage() {
         retrieval_ids: form.retrieval_ids,
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
+        assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         file,
       })
       ids = { doc_id: r.doc_id, version_id: r.version_id }
+    } else if (isContinueDraft) {
+      // 續編：更新既有 DRAFT 版本（in-place，不另開版本 → 不撞單一草稿唯一索引）
+      const r = await editorApi.updateDraftVersion(docId!, draftMeta!.draft_version_id, {
+        doc_name: nameEditable ? form.doc_name.trim() : null, // 首版草稿可改名（Q1=A）；已發布文件唯讀 → null
+        func_code: nameEditable && isManual ? form.func_code : null, // 首版手冊類可改 func；其餘 null
+        assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
+        version_no: form.version_no.trim(),
+        change_summary: form.change_summary.trim(),
+        audience_ids: form.audience_ids,
+        retrieval_ids: form.retrieval_ids,
+        file,
+      })
+      ids = { doc_id: docId!, version_id: r.version_id }
     } else {
       const r = await editorApi.addVersion(docId!, {
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
+        assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         audience_ids: form.audience_ids,
         retrieval_ids: form.retrieval_ids,
         file,
@@ -167,9 +205,9 @@ export function DmEditorPage() {
     return ids
   }
 
-  // 成功後導向：新增模式回文件庫（草稿 / 送審中不在詳細頁呈現，US4 對未發布一律 404）；
-  // 編輯模式回原文件詳細頁（文件仍為已發布，可見送審中鎖定狀態）。
-  const destAfter = () => (isNew ? "/dm/library" : `/dm/documents/${docId}`)
+  // 成功 / 取消後導向：新增 → 文件庫；續編草稿 → 個人專區草稿匣（首版草稿之父文件為 DRAFT、詳細頁會 404，
+  // 且續編入口本就來自草稿匣，故回草稿匣，Round-1 回饋）；加新版 → 原文件詳細頁（文件已發布可正常瀏覽）。
+  const destAfter = () => (isNew ? "/dm/library" : isContinueDraft ? "/dm/me?tab=drafts" : `/dm/documents/${docId}`)
 
   // 我方主動導向：先舉旗略過離開攔截再 navigate。
   const go = (path: string) => {
@@ -178,13 +216,23 @@ export function DmEditorPage() {
   }
 
   function validate(forSubmit: boolean): boolean {
-    const schema = makeEditorSchema({ isNew, isManual, forSubmit })
+    const schema = makeEditorSchema({ isNew, isManual, forSubmit, requireName: nameEditable })
     const result = schema.safeParse(form)
     const fieldErrors = getFieldErrors(result.success ? null : result.error)
-    // 檔案僅送簽時必填；存草稿可先不附檔（US5「存草稿不卡」）
-    if (forSubmit && !file && !persisted.current) fieldErrors.file = "請選擇要上傳的檔案"
+    // 檔案僅送簽時必填；存草稿可先不附檔（US5「存草稿不卡」）。續編既有草稿若已有檔案（draftMeta.file_name），
+    // 未重新上傳亦視為已附檔（沿用既有檔）→ 不誤要求上傳（Round-1 回饋）。
+    const hasExistingFile = isContinueDraft && !!draftMeta?.file_name
+    if (forSubmit && !file && !persisted.current && !hasExistingFile) fieldErrors.file = "請選擇要上傳的檔案"
     setErrors(fieldErrors)
     return Object.keys(fieldErrors).length === 0
+  }
+
+  // 續編寫入後失效相關查詢，避免下次再進編輯讀到舊快取（誤以為沒存到，Round-1 回饋）。
+  const invalidateAfterWrite = () => {
+    if (isNew || !docId) return
+    qc.invalidateQueries({ queryKey: ["dm-editor", "draft-meta", docId] })
+    qc.invalidateQueries({ queryKey: ["dm-detail", docId] })
+    qc.invalidateQueries({ queryKey: ["dm-personal", "drafts"] })
   }
 
   async function handleSaveDraft() {
@@ -192,6 +240,7 @@ export function DmEditorPage() {
     setBusy(true)
     try {
       await persistDraft()
+      invalidateAfterWrite()
       message.success("已儲存為草稿") // DM-MSG-DM03-007
       setDirty(false)
       go(destAfter())
@@ -208,6 +257,7 @@ export function DmEditorPage() {
     try {
       const ids = await persistDraft()
       await editorApi.submit(ids.doc_id, { version_id: ids.version_id, assigned_reviewer: form.reviewer_id })
+      invalidateAfterWrite()
       message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM03-006
       setDirty(false)
       go(destAfter())
@@ -219,9 +269,9 @@ export function DmEditorPage() {
   }
 
   function handleCancel() {
-    // 取消鈕：回來源頁（新增→文件庫、編輯→原詳細頁）。有未存變更先二次確認（DM-MSG-DM03-005），
-    // 確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
-    const leave = () => go(isNew ? "/dm/library" : `/dm/documents/${docId}`)
+    // 取消鈕：回來源頁（新增→文件庫、續編草稿→草稿匣、加新版→原詳細頁）。有未存變更先二次確認
+    //（DM-MSG-DM03-005），確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
+    const leave = () => go(destAfter())
     if (!dirty) {
       leave()
       return
@@ -260,7 +310,24 @@ export function DmEditorPage() {
     setForm((prev) => ({ ...prev, audience_ids: docTags.audience_ids, retrieval_ids: docTags.retrieval_ids }))
   }, [isNew, docTags])
 
-  if (!isNew && detailLoading) {
+  // 續編模式：一次性預帶既有草稿內容。首版草稿帶回名稱 / func / 版號 / 摘要 / 前次審核者；
+  // 新版本草稿（父已發布）之版號 / 摘要**不預帶、留白**（每次續編填全新版號與本次變更摘要，回饋 Round-1）。
+  useEffect(() => {
+    if (isNew || metaPrefilled.current || !draftMeta) return
+    metaPrefilled.current = true
+    const firstVersion = draftMeta.doc_status === "DRAFT"
+    setForm((prev) => ({
+      ...prev,
+      doc_name: draftMeta.doc_name,
+      func_code: draftMeta.func_code ?? "",
+      version_no: firstVersion ? (draftMeta.version_no ?? "") : "",
+      change_summary: firstVersion ? (draftMeta.change_summary ?? "") : "",
+      reviewer_id: draftMeta.assigned_reviewer ?? "",
+    }))
+  }, [isNew, draftMeta])
+
+  // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM02 詳細載入。
+  if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
         <CircularProgress />
@@ -271,8 +338,14 @@ export function DmEditorPage() {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
-        {isNew ? "新增文件" : `編輯文件 — ${detail?.doc_name ?? ""}`}
+        {isNew ? "新增文件" : `編輯文件 — ${editName}`}
       </Typography>
+
+      {draftObsolete && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          此文件已廢止，無法續編或送審。請至個人專區草稿匣刪除此草稿。
+        </Alert>
+      )}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr" }, gap: 2 }}>
         {/* 左：基本資料 + 版本 + 上傳 */}
@@ -334,17 +407,51 @@ export function DmEditorPage() {
                 </>
               ) : (
                 <>
-                  {/* 編輯模式：身份欄唯讀（名稱 / 分類 / func） */}
-                  <TextField label="文件名稱" fullWidth size="small" value={detail?.doc_name ?? ""} disabled />
-                  <TextField label="分類" fullWidth size="small" value={detail?.category_name ?? ""} disabled />
-                  {detail?.func_code && (
+                  {/* 編輯模式：分類 / func 唯讀；文件名稱於續編首版草稿（未發布）時可改（Q1=A），其餘唯讀 */}
+                  {nameEditable ? (
                     <TextField
-                      label="關聯作業項目"
+                      label="文件名稱"
+                      required
                       fullWidth
                       size="small"
-                      value={`${detail.func_code} — ${detail.func_name ?? ""}`}
-                      disabled
+                      value={form.doc_name}
+                      onChange={(e) => setField("doc_name", e.target.value)}
+                      error={!!errors.doc_name}
+                      helperText={errors.doc_name || "此文件尚未發布，續編期間可修改名稱"}
                     />
+                  ) : (
+                    <TextField label="文件名稱" fullWidth size="small" value={editName} disabled />
+                  )}
+                  <TextField label="分類" fullWidth size="small" value={editCategoryName} disabled />
+                  {/* 首版草稿續編開放全欄位編輯：手冊類 func 可改（下拉）；其餘情境唯讀顯示 */}
+                  {nameEditable && isManual ? (
+                    <TextField
+                      select
+                      label="關聯作業項目"
+                      required
+                      fullWidth
+                      size="small"
+                      value={form.func_code}
+                      onChange={(e) => setField("func_code", e.target.value)}
+                      error={!!errors.func_code}
+                      helperText={errors.func_code}
+                    >
+                      {(options?.funcs ?? []).map((f) => (
+                        <MenuItem key={f.code} value={f.code}>
+                          {f.code} — {f.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  ) : (
+                    editFuncCode && (
+                      <TextField
+                        label="關聯作業項目"
+                        fullWidth
+                        size="small"
+                        value={`${editFuncCode} — ${editFuncName ?? ""}`}
+                        disabled
+                      />
+                    )
                   )}
                 </>
               )}
@@ -385,12 +492,12 @@ export function DmEditorPage() {
             <Typography variant="subtitle2" gutterBottom>
               版本資訊
             </Typography>
-            {!isNew && (
+            {!isNew && detail?.current_version_no && (
               <TextField
                 label="目前版本"
                 fullWidth
                 size="small"
-                value={detail?.current_version_no ?? "—"}
+                value={detail.current_version_no}
                 disabled
                 sx={{ mb: 2 }}
               />
@@ -471,6 +578,16 @@ export function DmEditorPage() {
                       點擊或拖拉可重新選擇
                     </Typography>
                   </>
+                ) : isContinueDraft && draftMeta?.file_name ? (
+                  // 續編既有草稿之已存檔案：比照新增之「已選擇」樣式（未重新上傳則沿用）
+                  <>
+                    <Typography variant="body2" color="text.primary">
+                      已選擇：{draftMeta.file_name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      點擊或拖拉可重新選擇
+                    </Typography>
+                  </>
                 ) : (
                   <>
                     <Typography variant="body2" color="text.secondary">
@@ -518,10 +635,10 @@ export function DmEditorPage() {
             </TextField>
             <Divider sx={{ my: 2 }} />
             <Stack spacing={1}>
-              <Button variant="contained" onClick={handleSubmit} disabled={busy}>
+              <Button variant="contained" onClick={handleSubmit} disabled={busy || draftObsolete}>
                 送交簽核
               </Button>
-              <Button variant="outlined" onClick={handleSaveDraft} disabled={busy}>
+              <Button variant="outlined" onClick={handleSaveDraft} disabled={busy || draftObsolete}>
                 儲存為草稿
               </Button>
               <Button color="inherit" onClick={handleCancel} disabled={busy}>

@@ -15,6 +15,7 @@ from app.core.operator import OperatorInfo, get_operator
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.editor.schemas import (
     CreateResult,
+    DraftMeta,
     EditorDocTags,
     EditorOptions,
     ReviewerItem,
@@ -49,6 +50,7 @@ async def create_document(
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
     func_code: Annotated[str | None, Form()] = None,
+    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
     audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
@@ -72,6 +74,7 @@ async def create_document(
         file_bytes=data,
         file_mime=file_mime,
         op=op,
+        assigned_reviewer=assigned_reviewer,
     )
 
 
@@ -80,6 +83,7 @@ async def add_version(
     doc_id: str,
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
+    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
     audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
@@ -93,6 +97,44 @@ async def add_version(
     return await _service.add_version(
         db,
         doc_id=doc_id,
+        audience_ids=audience_ids,
+        retrieval_ids=retrieval_ids,
+        version_no=version_no,
+        change_summary=change_summary,
+        file_name=file_name,
+        file_bytes=data,
+        file_mime=file_mime,
+        op=op,
+        assigned_reviewer=assigned_reviewer,
+    )
+
+
+@router.put("/documents/{doc_id}/versions/{version_id}", response_model=VersionResult)
+async def update_draft_version(
+    doc_id: str,
+    version_id: int,
+    doc_name: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT（首版草稿）時生效
+    func_code: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT + 手冊類時生效
+    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
+    version_no: Annotated[str, Form()] = "",
+    change_summary: Annotated[str, Form()] = "",
+    audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    file: Annotated[UploadFile | None, File()] = None,  # 未附檔則保留既有檔案
+    ctx: DmContext = Depends(get_dm_context),
+    op: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    """續編：更新既有 DRAFT 版本（in-place，不另開版本）+ 文件層標籤覆寫；父文件 DRAFT 時可一併改名 / func（#222）。"""
+    _ensure_editor(ctx)
+    file_name, data, file_mime = await _read_upload(file)
+    return await _service.update_draft_version(
+        db,
+        doc_id=doc_id,
+        version_id=version_id,
+        doc_name=doc_name,
+        func_code=func_code,
+        assigned_reviewer=assigned_reviewer,
         audience_ids=audience_ids,
         retrieval_ids=retrieval_ids,
         version_no=version_no,
@@ -117,6 +159,17 @@ async def submit_document(
     return await _service.submit(
         db, doc_id=doc_id, version_id=body.version_id, assigned_reviewer=body.assigned_reviewer, op=op
     )
+
+
+@router.get("/editor/documents/{doc_id}/draft-meta", response_model=DraftMeta)
+async def get_draft_meta(
+    doc_id: str,
+    ctx: DmContext = Depends(get_dm_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """續編模式 author-scoped meta（供 DRAFT-status 文件亦可載，取代編輯模式對 DM02 詳細端點之依賴，#222）。"""
+    _ensure_editor(ctx)
+    return await _service.get_draft_meta(db, doc_id=doc_id, user_id=ctx.user_id)
 
 
 @router.get("/editor/documents/{doc_id}/tags", response_model=EditorDocTags)

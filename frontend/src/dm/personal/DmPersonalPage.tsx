@@ -16,7 +16,7 @@ import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 
 import type { ActivityEvent, DraftItem } from "./schemas"
 import {
@@ -37,7 +37,9 @@ import { toApiError } from "../../services/http"
  * 個人資料維護（姓名 / Email / 密碼）為另一入口，由平台 DP 提供（右上使用者選單），不在此頁。
  */
 export function DmPersonalPage() {
-  const [tab, setTab] = useState<"activity" | "drafts">("activity")
+  const [searchParams] = useSearchParams()
+  // 支援 ?tab=drafts 深連結（如編輯器續編後導回草稿匣）；預設「我的文件動態」。
+  const [tab, setTab] = useState<"activity" | "drafts">(searchParams.get("tab") === "drafts" ? "drafts" : "activity")
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
@@ -221,10 +223,13 @@ function DraftsTab() {
   const { data, isPending, isError } = useDrafts()
 
   const deleteMut = useMutation({
-    mutationFn: (versionId: number) => personalApi.deleteDraft(versionId),
-    onSuccess: () => {
+    mutationFn: (d: DraftItem) => personalApi.deleteDraft(d.version_id),
+    onSuccess: (_res, d) => {
       message.success("草稿已刪除")
       qc.invalidateQueries({ queryKey: ["dm-personal", "drafts"] })
+      // 失效該文件之續編 meta 與詳細快取，確保刪除後可立即再進編輯、不誤報「已有草稿」（#222）
+      qc.invalidateQueries({ queryKey: ["dm-editor", "draft-meta", d.doc_id] })
+      qc.invalidateQueries({ queryKey: ["dm-detail", d.doc_id] })
     },
     onError: (e) => message.error(toApiError(e).errorMessage),
   })
@@ -238,7 +243,7 @@ function DraftsTab() {
       title: "確定刪除此草稿？刪除後不可復原", // DM-MSG-DM07-004
       content: "僅刪除此草稿版本，不影響已發布版本。",
       okText: "確認刪除",
-      onOk: () => deleteMut.mutate(d.version_id),
+      onOk: () => deleteMut.mutate(d),
     })
 
   return (
