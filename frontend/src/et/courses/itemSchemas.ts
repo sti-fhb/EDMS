@@ -21,6 +21,9 @@ export const POINTS_TOTAL_TARGET = 100
 export type ItemType = "MATERIAL" | "QUIZ"
 export type QuestionType = "SINGLE" | "MULTIPLE"
 
+/** 名稱尚未填寫之項目於清單上的顯示文字（剛建立、使用者還沒命名）。 */
+export const UNNAMED_ITEM_LABEL = "（未命名）"
+
 export const ITEM_TYPE_LABEL: Record<ItemType, string> = {
   MATERIAL: "教材",
   QUIZ: "測驗",

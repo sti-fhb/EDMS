@@ -177,18 +177,23 @@ class ItemCreateReq(BaseModel):
 
     後端於**同一交易**內建立對應之 `ET_MATERIAL` / `ET_QUIZ` 空殼——前端不需先建
     教材再建項目，避免中途失敗留下孤兒。
+
+    ## 名稱可留空（2026-08-27 依實測回饋）
+
+    原本前端會代填「新教材」/「新測驗」。那是替使用者做決定——他開了視窗第一件事
+    就是把那串字選起來刪掉。改為建立時可空、開啟視窗即為空白欄位讓他直接輸入。
+
+    **儲存時仍必填**（`MaterialUpdateReq` / `QuizUpdateReq` 之 `min_length=1`）——
+    空名稱只是「還沒填」的過渡狀態，不是可以存檔的樣子。
     """
 
     item_type: Literal["MATERIAL", "QUIZ"]
-    title: str = Field(min_length=1, max_length=ITEM_TITLE_MAX_LEN)
+    title: str = Field(default="", max_length=ITEM_TITLE_MAX_LEN)
 
     @field_validator("title")
     @classmethod
-    def _title_not_blank(cls, v: str) -> str:
-        stripped = v.strip()
-        if not stripped:
-            raise ValueError("名稱不得為空白")
-        return stripped
+    def _strip_title(cls, v: str) -> str:
+        return v.strip()
 
 
 class ItemReorderReq(BaseModel):

@@ -39,7 +39,15 @@ interface MaterialDialogProps {
   readOnly: boolean
   material: MaterialDetail | null
   dmOptions: DmDocOption[]
+  /** 儲存相關的錯誤（顯示於視窗頂端）。 */
   error: string | null
+  /**
+   * 上傳影片的錯誤（顯示於**上傳區上方**）。
+   *
+   * 與 `error` 分開是刻意的：使用者按下上傳時視線在上傳區，訊息飄到視窗最上面
+   * 等於沒說——他只會覺得「怎麼傳不上去」。2026-08-27 依實測回饋拆開。
+   */
+  uploadError: string | null
   uploading: boolean
   /** `dirty` 為 true 表示有未儲存的變更，由呼叫端決定是否先確認。 */
   onClose: (dirty: boolean) => void
@@ -120,6 +128,7 @@ export function MaterialDialog({
   material,
   dmOptions,
   error,
+  uploadError,
   uploading,
   onClose,
   onSave,
@@ -132,8 +141,8 @@ export function MaterialDialog({
   const [loadedId, setLoadedId] = useState<number | null>(null)
   const [loadedVideos, setLoadedVideos] = useState("")
   const [dragOver, setDragOver] = useState(false)
-  /** 前端自行擋下的錯誤（如同名影片）。與 `error`（後端回的）共用同一個 Alert 位置。 */
-  const [localError, setLocalError] = useState<string | null>(null)
+  /** 前端自行擋下的上傳錯誤（如同名影片）。與後端回的 `uploadError` 共用同一個位置。 */
+  const [localUploadError, setLocalUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   /**
    * 尚未落地之引用的暫時 id（遞減計數器）。
@@ -200,10 +209,10 @@ export function MaterialDialog({
     // 前端先擋一次同名影片——後端也會擋（`ET_MATERIAL_005`），但那要先把整支檔案
     // 傳上去才知道。單檔上限 500 MB，沒必要為了一個一定會被拒的請求等那麼久。
     if (keptVideos.some((v) => v.file_name === file.name)) {
-      setLocalError("此教材已有同名影片，請先移除原有影片或改用其他檔名")
+      setLocalUploadError("此教材已有同名影片，請先移除原有影片或改用其他檔名")
       return
     }
-    setLocalError(null)
+    setLocalUploadError(null)
     onUploadVideo(file)
   }
 
@@ -217,8 +226,8 @@ export function MaterialDialog({
           </Stack>
         ) : (
           <Stack spacing={2.5} sx={{ pt: 1 }}>
-            {(error ?? localError) && <Alert severity="error">{error ?? localError}</Alert>}
-            {!error && !localError && hasNoMedia && !readOnly && (
+            {error && <Alert severity="error">{error}</Alert>}
+            {!error && hasNoMedia && !readOnly && (
               <Alert severity="info">教材須至少提供影片、文件或說明文字其中一項才能儲存。</Alert>
             )}
 
@@ -244,6 +253,12 @@ export function MaterialDialog({
               <Typography variant="subtitle2" gutterBottom>
                 影片檔
               </Typography>
+              {/* 緊貼上傳區——使用者按下上傳時視線在這裡，訊息飄到視窗頂端等於沒說 */}
+              {(uploadError ?? localUploadError) && (
+                <Alert severity="error" sx={{ mb: 1 }}>
+                  {uploadError ?? localUploadError}
+                </Alert>
+              )}
               {!readOnly && (
                 <Box
                   role="button"

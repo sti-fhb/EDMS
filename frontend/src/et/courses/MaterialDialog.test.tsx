@@ -41,6 +41,7 @@ function renderDialog(overrides: Partial<Parameters<typeof MaterialDialog>[0]> =
       material={material}
       dmOptions={[]}
       error={null}
+      uploadError={null}
       uploading={false}
       {...handlers}
       {...overrides}
@@ -193,6 +194,17 @@ describe("教材編輯視窗", () => {
 
     expect(onUploadVideo).not.toHaveBeenCalled()
     expect(await screen.findByRole("alert")).toHaveTextContent("此教材已有同名影片")
+  })
+
+  it("上傳錯誤顯示於上傳區旁，不在視窗頂端", async () => {
+    // 使用者按下上傳時視線在上傳區，訊息飄到最上面等於沒說——他只會覺得傳不上去
+    renderDialog({ uploadError: "無法解析影片長度，請改用其他格式" })
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("無法解析影片長度")
+
+    // 與上傳區同一區塊：兩者共同的祖先不應是整個對話框內容
+    const dropzone = screen.getByRole("button", { name: "拖拉或點擊選擇影片檔" })
+    expect(alert.parentElement).toBe(dropzone.parentElement)
   })
 
   it("不同檔名照常上傳", async () => {

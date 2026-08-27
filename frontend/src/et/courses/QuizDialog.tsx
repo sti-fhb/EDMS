@@ -161,7 +161,8 @@ export function QuizDialog({
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers>
+      {/* 固定最小高度——兩個分頁內容量差很多，不固定的話切分頁時整個視窗會縮放跳動 */}
+      <DialogContent dividers sx={{ minHeight: 420 }}>
         {loading ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress />
@@ -240,13 +241,9 @@ export function QuizDialog({
                   minRows={3}
                   value={description}
                   disabled={readOnly}
-                  helperText="純文字，不支援格式化"
                   slotProps={{ htmlInput: { maxLength: QUIZ_DESCRIPTION_MAX_LEN } }}
                   onChange={(e) => setDescription(e.target.value)}
                 />
-                <Alert severity="info" variant="outlined">
-                  題目順序由系統內建洗牌——學員每次作答時自動隨機排序，無需教師設定。
-                </Alert>
               </Stack>
             )}
 

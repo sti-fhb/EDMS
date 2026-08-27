@@ -253,6 +253,7 @@ class EtCourseService:
         內容時才套用（`ET_MATERIAL_002`），不在建立時。
         """
         chapter = await self._require_owned_chapter(db, chapter_id, operator.user_id)
+        # 名稱可留空——使用者於視窗內填寫，儲存時才必填（見 `ItemCreateReq`）
         if req.item_type == ITEM_MATERIAL:
             material = await self._materials.create_shell(db, req.title, operator)
             item = await self._items.append(

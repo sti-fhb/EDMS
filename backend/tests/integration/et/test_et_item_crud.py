@@ -108,12 +108,46 @@ class TestAddItem:
         rows = await db.scalars(select(EtItem).where(EtItem.chapter_id == chapter_id).order_by(EtItem.sort_order))
         assert [i.sort_order for i in rows] == [1, 2, 3]
 
-    async def test_名稱全空白被擋(self, client, db) -> None:
+    async def test_名稱可留空由使用者於視窗內填寫(self, client, db) -> None:
+        """不代填「新教材」——使用者開了視窗第一件事就是把預設值選起來刪掉。
+
+        空名稱只是「還沒填」的過渡狀態；**儲存時仍必填**（見
+        `test_名稱全空白時無法儲存`）。
+        """
         uid = await _user(db, "ETI_A4")
         _, chapter_id = await _chapter(client, uid)
         r = await client.post(
             f"/api/et/chapters/{chapter_id}/items",
             json={"item_type": ITEM_MATERIAL, "title": "   "},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["title"] == ""
+
+    async def test_未帶名稱亦可建立(self, client, db) -> None:
+        uid = await _user(db, "ETI_A4B")
+        _, chapter_id = await _chapter(client, uid)
+        r = await client.post(
+            f"/api/et/chapters/{chapter_id}/items",
+            json={"item_type": ITEM_MATERIAL},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 201, r.text
+
+    async def test_名稱全空白時無法儲存(self, client, db) -> None:
+        """建立可空、儲存必填——空名稱不是可以存檔的樣子。"""
+        uid = await _user(db, "ETI_A4C")
+        _, chapter_id = await _chapter(client, uid)
+        item = await _add_item(client, uid, chapter_id, ITEM_MATERIAL, "")
+        r = await client.put(
+            f"/api/et/materials/{item['material_id']}",
+            json={
+                "material_name": "  ",
+                "description_html": "<p>說明</p>",
+                "doc_ids": [],
+                "video_ids": [],
+                "version": 0,
+            },
             headers=_bearer(uid),
         )
         assert r.status_code == 422

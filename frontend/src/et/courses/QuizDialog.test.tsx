@@ -71,11 +71,6 @@ describe("測驗編輯視窗", () => {
     expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ description: null }))
   })
 
-  it("提示題目順序由系統洗牌、教師不設定", async () => {
-    renderDialog()
-    expect(await screen.findByText(/題目順序由系統內建洗牌/)).toBeInTheDocument()
-  })
-
   it("題庫分頁顯示配分總和且未達 100 時不阻擋", async () => {
     const user = userEvent.setup()
     renderDialog()

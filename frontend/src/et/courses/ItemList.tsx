@@ -26,7 +26,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
 import { moveId } from "./chapterOrder"
-import { ITEM_TYPE_LABEL } from "./itemSchemas"
+import { ITEM_TYPE_LABEL, UNNAMED_ITEM_LABEL } from "./itemSchemas"
 import type { ItemRow, ItemType } from "./itemSchemas"
 
 interface ItemRowViewProps {
@@ -63,7 +63,7 @@ function ItemRowView({ item, readOnly, onOpen, onDelete }: ItemRowViewProps) {
             {...attributes}
             {...listeners}
             sx={{ display: "flex", cursor: "grab", color: "text.disabled" }}
-            aria-label={`拖曳調整「${item.title}」順序`}
+            aria-label={`拖曳調整「${item.title || UNNAMED_ITEM_LABEL}」順序`}
           >
             <DragIndicatorIcon fontSize="small" />
           </Box>
@@ -81,15 +81,22 @@ function ItemRowView({ item, readOnly, onOpen, onDelete }: ItemRowViewProps) {
           sx={{ flexGrow: 1, justifyContent: "flex-start", textAlign: "left", minWidth: 0 }}
           onClick={() => onOpen(item)}
         >
-          <Typography variant="body2" noWrap>
-            {item.title}
+          {/* 名稱可為空（剛建立、還沒填）——顯示佔位文字而非留一片空白，
+              否則那一列看起來像壞掉的資料 */}
+          <Typography
+            variant="body2"
+            noWrap
+            color={item.title ? "inherit" : "text.disabled"}
+            fontStyle={item.title ? undefined : "italic"}
+          >
+            {item.title || UNNAMED_ITEM_LABEL}
           </Typography>
         </Button>
         {!readOnly && (
           <IconButton
             size="small"
             color="error"
-            aria-label={`刪除項目 ${item.title}`}
+            aria-label={`刪除項目 ${item.title || UNNAMED_ITEM_LABEL}`}
             onClick={() => onDelete(item)}
           >
             <DeleteOutlineIcon fontSize="small" />

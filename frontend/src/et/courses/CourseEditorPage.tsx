@@ -33,7 +33,6 @@ import { MaterialDialog } from "./MaterialDialog"
 import { QuizDialog } from "./QuizDialog"
 import { coursesApi } from "./coursesService"
 import type { MaterialSavePayload } from "./MaterialDialog"
-import { ItemTitleSchema } from "./itemSchemas"
 import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
 import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
 import {
@@ -97,6 +96,8 @@ export function EtCourseEditorPage() {
   /** 目前開啟的項目視窗——`null` 表示未開啟。 */
   const [openItem, setOpenItem] = useState<ItemRow | null>(null)
   const [itemError, setItemError] = useState<string | null>(null)
+  /** 上傳影片的錯誤與其他錯誤分開——它要顯示在上傳區旁邊，不是視窗頂端。 */
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
   const {
@@ -336,8 +337,13 @@ export function EtCourseEditorPage() {
    * 錯誤呈現在**視窗內的 Alert** 而非 snackbar：使用者的注意力在視窗裡，
    * 而「教材須至少提供⋯」這類訊息需要指出是哪一個教材出問題，飄一則 toast 說不清楚。
    */
-  const runItemAction = async (action: () => Promise<unknown>, after?: () => void) => {
-    setItemError(null)
+  const runItemAction = async (
+    action: () => Promise<unknown>,
+    after?: () => void,
+    /** 錯誤的呈現位置——上傳相關的要落在上傳區旁，其餘落在視窗頂端。 */
+    setError: (message: string | null) => void = setItemError,
+  ) => {
+    setError(null)
     try {
       await action()
       after?.()
@@ -347,13 +353,14 @@ export function EtCourseEditorPage() {
         setConflictOpen(true)
         return
       }
-      setItemError(errorMessage)
+      setError(errorMessage)
     }
   }
 
   const closeItemDialog = () => {
     setOpenItem(null)
     setItemError(null)
+    setUploadError(null)
   }
 
   /** 關閉項目視窗；有未儲存的變更時先確認——沒改過就直接關，多問一次是干擾。 */
@@ -371,10 +378,10 @@ export function EtCourseEditorPage() {
   }
 
   const handleAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
-    const parsed = ItemTitleSchema.safeParse(itemType === "MATERIAL" ? "新教材" : "新測驗")
-    if (!parsed.success) return
     try {
-      const created = await itemsApi.add(chapter.chapter_id, itemType, parsed.data)
+      // 不代填名稱——使用者開了視窗第一件事就是把預設值選起來刪掉。
+      // 空名稱只是「還沒填」的過渡狀態，儲存時後端仍必填。
+      const created = await itemsApi.add(chapter.chapter_id, itemType, "")
       invalidate()
       // 建完直接開視窗——空殼本身沒有內容，不開等於要使用者再點一次
       setOpenItem(created)
@@ -410,6 +417,7 @@ export function EtCourseEditorPage() {
         invalidateMaterial()
         invalidate()
       },
+      setUploadError,
     )
     setUploading(false)
   }
@@ -645,6 +653,7 @@ export function EtCourseEditorPage() {
         onAddItem={handleAddItem}
         onOpenItem={(item) => {
           setItemError(null)
+          setUploadError(null)
           setOpenItem(item)
         }}
         onDeleteItem={handleDeleteItem}
@@ -676,6 +685,7 @@ export function EtCourseEditorPage() {
         material={material ?? null}
         dmOptions={dmOptions}
         error={itemError}
+        uploadError={uploadError}
         uploading={uploading}
         onClose={requestCloseItem}
         onSave={(values: MaterialSavePayload) =>
