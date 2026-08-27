@@ -155,33 +155,71 @@ async def test_create_invite_on_expired_pending_reinvites(db):
     assert after["expires_date"] > before["expires_date"]  # ISO 字串可直接比大小
 
 
-@pytest.mark.parametrize("expired", [False, True], ids=["active", "expired"])
-async def test_create_invite_on_self_register_pending_rejected(db, expired):
-    """Email 正被**自助註冊**（SELF_REGISTER）佔用 → 409 DP_USER_007（#111）。
-
-    不可回 DP_USER_010：該列不在邀請清單、invite_id 為 NULL，管理者根本無可重寄對象；
-    逾期亦不得走「重新邀請」覆蓋他人的自助註冊列（含其 pwd_hash）。
-    """
-    offset = -timedelta(minutes=1) if expired else timedelta(minutes=30)
+async def _seed_self_register(db, *, email, offset_min):
+    """塞一筆 SELF_REGISTER 待驗證列（#212 起 pwd_hash 恆為 None）。"""
     await AuthRepository().create_pending_registration(
         db,
-        token_hash="selfhash",
-        email="selfreg@edms.local",
+        token_hash=f"selfhash-{email}",
+        email=email,
         user_name="自助",
-        pwd_hash="x",
-        expires_date=utcnow() + offset,
+        pwd_hash=None,
+        expires_date=utcnow() + timedelta(minutes=offset_min),
         now=utcnow(),
     )
+
+
+async def test_create_invite_on_active_self_register_pending_rejected(db):
+    """Email 正被**未逾期**的自助註冊（SELF_REGISTER）佔用 → 409 DP_USER_007（#111）。
+
+    不可回 DP_USER_010：該列不在邀請清單、invite_id 為 NULL，管理者根本無可重寄對象。
+    此時確實有人在進行中（30 分鐘內點連結就能拿到帳號），不應被管理者的邀請蓋掉。
+    """
+    await _seed_self_register(db, email="selfreg@edms.local", offset_min=30)
 
     with pytest.raises(AppError) as exc:
         await _svc().create_user(db, data=UserCreate(email="selfreg@edms.local", user_name="管建"), operator=_OP)
 
     assert exc.value.status_code == 409
     assert exc.value.error_code == "DP_USER_007"
-    # 他人的自助註冊列未被覆蓋
+    # 他人進行中的自助註冊列未被覆蓋
     pending = await AuthRepository().get_pending_by_email(db, "selfreg@edms.local")
     assert pending.kind == "SELF_REGISTER"
-    assert pending.token_hash == "selfhash"
+    assert pending.token_hash == "selfhash-selfreg@edms.local"
+
+
+async def test_create_invite_on_expired_self_register_pending_succeeds(db):
+    """Email 被**已逾期**的自助註冊列佔用 → 邀請**成功**（#226），並留一筆 DELETE 稽核。
+
+    ⚠️ 本條**反轉**了先前刻意測過的行為（原 `..._rejected` 的 `expired=True` 分支）。原理由是
+    「逾期亦不得覆蓋他人的自助註冊列（**含其 pwd_hash**）」——而該前提已被 #212 消滅：pending 列
+    不再存密碼，覆蓋一張逾期的列不會拿走任何人的憑證。
+
+    保持 409 的實際後果是：新人自己開始註冊、沒收到信就放棄 → 30 分鐘後列逾期但永遠不會消失
+    → HR 改用管理者邀請 → 恆回「此 Email 已被使用」，而該列**不出現在「待啟用邀請」頁籤**
+    （只撈 ADMIN_INVITE）、`DP_USER` 裡也查不到 → 管理者無從排解。
+
+    這也讓「逾期＝視為不存在」在三個讀取點（登入 / 重寄 / 管理者代建）語意一致（#212 修了前兩個）。
+    """
+    email = "expired-selfreg@edms.local"
+    await _seed_self_register(db, email=email, offset_min=-1)
+
+    await _svc().create_user(db, data=UserCreate(email=email, user_name="管建"), operator=_OP)
+
+    # 列已換成管理者邀請
+    pending = await AuthRepository().get_pending_by_email(db, email)
+    assert pending.kind == "ADMIN_INVITE"
+    assert pending.invite_id is not None
+    assert pending.token_hash != f"selfhash-{email}"
+
+    # 被刪掉的自助註冊列留一筆 DELETE 稽核，且 target_id 記 Email（稽核查詢只能按 target 篩）
+    logs = (
+        (await db.execute(select(DpAuditLog).where(DpAuditLog.action_type == "DELETE", DpAuditLog.target_id == email)))
+        .scalars()
+        .all()
+    )
+    assert len(logs) == 1
+    assert logs[0].created_user == "admin01"  # 管理者本人，非 SYSTEM（operator 存標準欄位 CREATED_USER）
+    assert "SELF_REGISTER" in logs[0].before_value
 
 
 async def test_reinvite_invalidates_old_invite_token(db):

@@ -226,6 +226,16 @@ class AuthRepository:
             )
         )
 
+    async def delete_pending_expired_before(self, db: AsyncSession, cutoff: datetime) -> int:
+        """刪除 EXPIRES_DATE 早於 cutoff 的待驗證列，回傳刪除筆數（供每日清理排程，#226）。
+
+        兩種 KIND 一視同仁：逾期的管理者邀請同樣已無用（重寄會產新 token、不依賴舊列）。
+        單一 DELETE 語句而非逐筆：這些列已無業務意義、不需逐筆稽核（理由見 UsersService
+        之 purge_expired_pending），且量可能不小。
+        """
+        result = await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.expires_date < cutoff))
+        return result.rowcount or 0
+
     async def delete_pending_by_token_hash(self, db: AsyncSession, token_hash: str) -> None:
         """驗證通過後刪除該待驗證註冊列（已消費）。"""
         await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.token_hash == token_hash))

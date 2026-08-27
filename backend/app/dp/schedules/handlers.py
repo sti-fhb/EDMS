@@ -1,7 +1,7 @@
 """平台自身排程 handler（US11 FR-05）。
 
 `SCHDP001`（每日）＝ `daily_platform_job`（`DP_SCHEDULE.HANDLER_REF` 指向本 callable）：
-① 閒置帳號禁用 ② 密碼到期提醒。兩批次各自交易 / 逐筆容錯（見 UsersService）；帳號生命週期
+① 閒置帳號禁用 ② 密碼到期提醒 ③ 清理逾期待驗證列（#226）。兩批次各自交易 / 逐筆容錯（見 UsersService）；帳號生命週期
 邏輯歸使用者域（`UsersService`），本 handler 僅編排。handler 為 async 無參，自管 session。
 """
 
@@ -23,4 +23,12 @@ async def daily_platform_job() -> None:
     async with AsyncSessionLocal() as db:
         reminded = await service.send_pwd_expiry_reminders(db)
 
-    logger.info("SCHDP001 完成：閒置禁用 %d 筆、密碼到期提醒 %d 筆", disabled, reminded)
+    async with AsyncSessionLocal() as db:
+        purged = await service.purge_expired_pending(db)
+
+    logger.info(
+        "SCHDP001 完成：閒置禁用 %d 筆、密碼到期提醒 %d 筆、清理逾期待驗證列 %d 筆",
+        disabled,
+        reminded,
+        purged,
+    )
