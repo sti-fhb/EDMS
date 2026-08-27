@@ -52,6 +52,35 @@ def test_render_coerces_non_str_value():
     assert _render("n={n}", {"n": 123}) == "n=123"
 
 
+def test_render_strips_cr_and_c0_from_param_values():
+    """參數值中的 CR 與 C0 控制字元於代入時剝除（縱深防禦，#225）。
+
+    主旨（SUBJECT）是 US9 後台**可編輯**的。目前 seed 的主旨無 {user_name} 佔位、所以沒有
+    header injection 路徑；但一旦有人在主旨加入佔位，CR/LF 會讓 stdlib 設定 header 時拋錯、
+    整批信變 FAILED。在唯一的代入收斂點處理，不必依賴每個呼叫端都記得驗輸入。
+    """
+    assert _render("n={n}", {"n": "王\r小明"}) == "n=王小明"
+    assert _render("n={n}", {"n": "王\x00小明"}) == "n=王小明"
+    assert _render("n={n}", {"n": "王\x1b[31m小明"}) == "n=王[31m小明"
+    assert _render("n={n}", {"n": "王\x7f小明"}) == "n=王小明"
+
+
+def test_render_preserves_newline_and_tab_in_param_values():
+    """**不得**剝除 LF / TAB——DM 的退回 / 廢止理由是真的多行使用者輸入。
+
+    `dm/review/center_service.py` 與 `dm/obsolete/service.py` 把理由當範本參數傳入，而前端
+    `DmReviewPage` / `DmObsoleteDialog` 的輸入框是 multiline。若在此處全域剝換行，DM 通知信
+    裡的理由會被壓平——那是弄壞別的模組的功能。
+
+    「內文被插入假訊息」那條由輸入端的姓名型別擋（見 test_dp_schema_safe_name.py），因為姓名
+    本質單行、理由本質多行，只有輸入端分得清這個差別。
+    """
+    assert _render("r={r}", {"r": "第一行\n第二行"}) == "r=第一行\n第二行"
+    assert _render("r={r}", {"r": "欄一\t欄二"}) == "r=欄一\t欄二"
+    # CRLF 正規化為 LF（丟 CR、留 LF），多行結構保留
+    assert _render("r={r}", {"r": "第一行\r\n第二行"}) == "r=第一行\n第二行"
+
+
 @pytest.mark.parametrize(
     ("channel", "expected"),
     [("EMAIL", True), ("BOTH", True), ("MSG", False)],

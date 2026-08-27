@@ -21,6 +21,21 @@ _SYSTEM_USER = "SYSTEM"
 _MAX_RECIPIENTS = 50
 
 
+# 代入值中須剝除的控制字元（#225）：C0 全體與 DEL，但**保留 TAB（U+0009）與 LF（U+000A）**。
+#
+# 剝 CR（U+000D）與其餘 C0 的理由：主旨（SUBJECT）是 US9 後台**可編輯**的，目前 seed 的主旨無
+# 佔位、故沒有 header injection 路徑；但一旦有人在主旨加入 `{user_name}` 之類的佔位，CR / LF 會
+# 讓 stdlib 設定 header 時拋錯、整批信變 FAILED。在唯一的代入收斂點處理，不必依賴每個呼叫端。
+#
+# **不剝 LF / TAB 的理由**：DM 的退回 / 廢止理由是真的多行使用者輸入（`dm/review/center_service.py`
+# 與 `dm/obsolete/service.py` 把它當範本參數傳入，前端輸入框為 multiline）。在此全域剝換行會把
+# 理由壓平——那是弄壞別的模組的功能。CRLF 因此被正規化為 LF：丟 CR、留 LF，多行結構保留。
+#
+# 「內文被插入假訊息」那條由**輸入端**的 `SafeNameStr` 擋（見 `core/schema_types.py`）：姓名本質
+# 單行、理由本質多行，只有輸入端分得清這個差別；本層只做與信件結構有關的防護。
+_CONTROL_CHARS_TO_STRIP = str.maketrans({c: None for c in [*range(0x00, 0x09), *range(0x0B, 0x20), 0x7F]})
+
+
 class _SafeFormatter(string.Formatter):
     """安全範本格式器：僅允許具名佔位 `{var}`，封鎖範本注入攻擊面。
 
@@ -30,6 +45,7 @@ class _SafeFormatter(string.Formatter):
     - 佔位僅接受合法識別字（拒 `{0}` / `{}` / `{a.b}` / `{a[0]}`）
     - 禁格式規格（拒 `{v:...}`）
     - 值一律 str() 後代入（即便呼叫方誤傳非 str 物件，亦無屬性存取路徑）
+    - 值中的控制字元剝除（保留 TAB / LF），見 `_CONTROL_CHARS_TO_STRIP`（#225）
     """
 
     def get_field(self, field_name: str, args, kwargs):
@@ -40,7 +56,7 @@ class _SafeFormatter(string.Formatter):
     def format_field(self, value, format_spec: str) -> str:
         if format_spec:
             raise ValueError("範本佔位不得含格式規格")
-        return str(value)
+        return str(value).translate(_CONTROL_CHARS_TO_STRIP)
 
 
 _formatter = _SafeFormatter()

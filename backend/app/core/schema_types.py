@@ -26,3 +26,28 @@ LoginEmailStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, to_lower=True, max_length=255),
 ]
+
+# 姓名欄位不得含控制字元（#225）：拒 C0（U+0000–U+001F，含 CR / LF / TAB）與 DEL（U+007F）。
+#
+# 為何要擋：`user_name` 會直接進通知信**內文**（`ACCOUNT_VERIFY` / `ACCOUNT_INVITE` 範本的
+# `{user_name}`），而自助註冊端點是**匿名**的——任何人可用他人 Email 送出並自填姓名。姓名若可含
+# 換行，攻擊者就能在一封 SPF/DKIM 全正常、來自本組織網域的信裡插入自選文字（例如
+# 「【重要】帳號異常，請至 http://evil.tw 處理」），而受害者不需做任何事就會收到。
+#
+# 為何擋在輸入端而非發信層：姓名**本質單行**，發信層分不出「這個參數該不該有換行」——DM 的退回 /
+# 廢止理由就是真的多行使用者輸入（前端為 multiline），在發信層全域剝換行會把它壓平。發信層只做
+# 結構性防護（剝 CR 與其餘 C0、保留 LF / TAB，見 `dp/notify/service.py` 的 `_SafeFormatter`）。
+#
+# 刻意不擋的範圍：Unicode 格式字元（如 ZWJ、雙向覆寫 U+202E）不在此列——那屬顯示欺騙（同形字）
+# 的議題、與信件結構無關，且部分書寫系統的正常姓名會用到格式字元，一併擋會誤傷真人姓名。
+#
+# 順序：pydantic 先 strip 再驗 pattern，故前後空白（含換行）維持既有的 strip 行為，只有**內部**
+# 的控制字元會被拒。
+_SAFE_NAME_PATTERN = r"^[^\x00-\x1f\x7f]+$"
+
+# 姓名進入點（自助註冊 / 本人改姓名 / 管理者代建與維護）：strip + 長度 + 拒控制字元。
+# 長度 50 對齊 `DP_USER.USER_NAME`。管理者輸入的姓名同樣會進邀請信內文，故不因「已認證」而放寬。
+SafeNameStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=_SAFE_NAME_PATTERN),
+]
