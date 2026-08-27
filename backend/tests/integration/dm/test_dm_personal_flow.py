@@ -130,6 +130,16 @@ async def test_drafts_classified_three_kinds(db):
     assert kinds["DM-SOP-000503"] == "withdrawn"
 
 
+async def test_drafts_last_edited_falls_back_to_created(db):
+    # #222 Round-2：首次存草稿（未編輯過、updated_date NULL）→ 最後編輯回退 created_date（存草稿時間），不空白
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, "DM-SOP-000560", status="DRAFT")
+    await _version(db, "DM-SOP-000560", "1.0", status="DRAFT")  # 無 updated_date
+    drafts = await _svc.list_drafts(db, user_id="ed")
+    d = next(x for x in drafts if x.doc_id == "DM-SOP-000560")
+    assert d.updated_date is not None  # coalesce 退回 created_date
+
+
 async def test_drafts_only_own_and_not_deleted(db):
     await _seed_user(db, "ed", "撰寫")
     await _seed_user(db, "ed2", "他人")

@@ -199,9 +199,17 @@ export const handlers = [
   http.post("/api/dm/documents/:docId/versions", () =>
     HttpResponse.json({ version_id: 901, previewable: true }, { status: 201 }),
   ),
+  // 續編更新既有草稿版本（#222）
+  http.put("/api/dm/documents/:docId/versions/:versionId", ({ params }) =>
+    HttpResponse.json({ version_id: Number(params.versionId), previewable: true }),
+  ),
   http.post("/api/dm/documents/:docId/submit", () => HttpResponse.json({ review_id: 500, notified: 1 })),
   http.get("/api/dm/editor/documents/:docId/tags", () =>
     HttpResponse.json({ audience_ids: ["1"], retrieval_ids: ["20"] }),
+  ),
+  // 續編 meta（#222）：預設回 404＝無本人草稿（→ 走「加新版」）；續編測試以 server.use 覆寫回 200
+  http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
+    HttpResponse.json({ error_code: "DM_DOC_017", error_message: "查無可續編之草稿或無權存取" }, { status: 404 }),
   ),
   // US6 簽核中心（dm-review）
   http.get("/api/dm/reviews/pending", () =>

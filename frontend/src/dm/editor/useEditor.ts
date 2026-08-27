@@ -20,3 +20,12 @@ export function useDocTags(docId: string, enabled: boolean) {
     enabled: enabled && !!docId,
   })
 }
+
+/** 續編模式 meta（author-scoped）：有本人草稿回 DraftMeta、無則 null（改走加新版）；僅編輯模式啟用。 */
+export function useDraftMeta(docId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["dm-editor", "draft-meta", docId],
+    queryFn: () => editorApi.getDraftMeta(docId),
+    enabled: enabled && !!docId,
+  })
+}

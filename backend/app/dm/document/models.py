@@ -109,6 +109,8 @@ class DmDocVersion(BaseModel):
     file_mime: Mapped[Optional[str]] = mapped_column("FILE_MIME", String(100), nullable=True)
     status: Mapped[str] = mapped_column("STATUS", String(20), nullable=False, default="DRAFT")
     approver_user_id: Mapped[Optional[str]] = mapped_column("APPROVER_USER_ID", String(20), nullable=True)
+    # 草稿階段記住的「指定審核者」（存草稿時暫存，續編時預帶；送簽時以表單值建 DM_REVIEW，此欄僅便利記憶）
+    assigned_reviewer: Mapped[Optional[str]] = mapped_column("ASSIGNED_REVIEWER", String(20), nullable=True)
     published_date: Mapped[Optional[datetime]] = mapped_column("PUBLISHED_DATE", DateTime(timezone=True), nullable=True)
 
 
