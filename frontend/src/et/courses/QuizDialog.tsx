@@ -93,6 +93,8 @@ export function QuizDialog({
   const [loadedId, setLoadedId] = useState<number | null>(null)
   /** 目前展開編輯的題目 id；`"new"` 表示新增中；`null` 表示沒有展開任何題目。 */
   const [editing, setEditing] = useState<number | "new" | null>(null)
+  /** 送出前的驗證結果——逐欄標記，讓使用者知道要補哪一格而非「有東西不對」。 */
+  const [nameError, setNameError] = useState<string | null>(null)
 
   // render 期間衍生 state——載入新測驗時把表單重設為它的值（不放 useEffect）
   if (quiz && loadedId !== quiz.quiz_id) {
@@ -122,6 +124,12 @@ export function QuizDialog({
       maxRetry !== quiz.max_retry))
 
   const handleSaveSettings = () => {
+    if (!name.trim()) {
+      setNameError("請輸入測驗名稱")
+      setTab(0) // 從題庫分頁按儲存時，把使用者帶回出問題的那一格
+      return
+    }
+    setNameError(null)
     onSaveSettings({
       quiz_name: name,
       description: description.trim() || null,
@@ -148,7 +156,15 @@ export function QuizDialog({
   const pointsOk = pointsTotal === POINTS_TOTAL_TARGET
 
   return (
-    <Dialog open={open} onClose={() => onClose(isDirty)} maxWidth="md" fullWidth>
+    // 固定**整個對話框**的高度，而非只固定內容高度——底部按鈕只在設定分頁出現，
+    // 光固定 DialogContent 仍會差一個 footer 的高度。內容超出時由 DialogContent 自行捲動。
+    <Dialog
+      open={open}
+      onClose={() => onClose(isDirty)}
+      maxWidth="md"
+      fullWidth
+      slotProps={{ paper: { sx: { height: "min(680px, 90vh)" } } }}
+    >
       <DialogTitle sx={{ pr: 6 }}>
         {readOnly ? "檢視測驗" : "編輯測驗"}
         <IconButton
@@ -161,8 +177,7 @@ export function QuizDialog({
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      {/* 固定最小高度——兩個分頁內容量差很多，不固定的話切分頁時整個視窗會縮放跳動 */}
-      <DialogContent dividers sx={{ minHeight: 420 }}>
+      <DialogContent dividers>
         {loading ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress />
@@ -188,8 +203,14 @@ export function QuizDialog({
                   fullWidth
                   value={name}
                   disabled={readOnly}
+                  error={Boolean(nameError)}
+                  helperText={nameError}
                   slotProps={{ htmlInput: { maxLength: QUIZ_NAME_MAX_LEN } }}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    // 邊打邊清掉錯誤——訊息留著不動會讓人以為改了還是不對
+                    if (nameError) setNameError(null)
+                  }}
                 />
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <TextField

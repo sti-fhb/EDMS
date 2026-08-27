@@ -143,6 +143,13 @@ export function MaterialDialog({
   const [dragOver, setDragOver] = useState(false)
   /** 前端自行擋下的上傳錯誤（如同名影片）。與後端回的 `uploadError` 共用同一個位置。 */
   const [localUploadError, setLocalUploadError] = useState<string | null>(null)
+  /**
+   * 送出前的驗證結果——**逐欄**，不是一句籠統的訊息。
+   *
+   * 使用者按下儲存時需要知道「要補哪一格」，而不是「有東西不對」。空值時把欄位
+   * 框起來並在欄位下方說明，比在頂端飄一句話有用得多。
+   */
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; media?: string }>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   /**
    * 尚未落地之引用的暫時 id（遞減計數器）。
@@ -188,6 +195,21 @@ export function MaterialDialog({
 
   const hasNoMedia = keptVideos.length === 0 && docs.length === 0 && cleanedHtml === null
 
+  const handleSave = () => {
+    const errors: { name?: string; media?: string } = {}
+    if (!name.trim()) errors.name = "請輸入項目標題"
+    if (hasNoMedia) errors.media = "教材須至少提供影片、文件或說明文字其中一項"
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) return
+
+    onSave({
+      material_name: name,
+      description_html: cleanedHtml,
+      doc_ids: docs.map((d) => d.doc_id),
+      video_ids: videoIds,
+    })
+  }
+
   const addDoc = (option: DmDocOption) => {
     if (docs.some((d) => d.doc_id === option.doc_id)) return
     setDocs((prev) => [
@@ -217,7 +239,13 @@ export function MaterialDialog({
   }
 
   return (
-    <Dialog open={open} onClose={() => onClose(isDirty)} maxWidth="md" fullWidth>
+    <Dialog
+      open={open}
+      onClose={() => onClose(isDirty)}
+      maxWidth="md"
+      fullWidth
+      slotProps={{ paper: { sx: { height: "min(680px, 90vh)" } } }}
+    >
       <DialogTitle>{readOnly ? "檢視教材" : "編輯教材"}</DialogTitle>
       <DialogContent dividers>
         {loading ? (
@@ -227,8 +255,11 @@ export function MaterialDialog({
         ) : (
           <Stack spacing={2.5} sx={{ pt: 1 }}>
             {error && <Alert severity="error">{error}</Alert>}
+            {/* 已按過儲存才用錯誤色——一開視窗就滿江紅會讓人以為自己做錯了什麼 */}
             {!error && hasNoMedia && !readOnly && (
-              <Alert severity="info">教材須至少提供影片、文件或說明文字其中一項才能儲存。</Alert>
+              <Alert severity={fieldErrors.media ? "error" : "info"}>
+                教材須至少提供影片、文件或說明文字其中一項才能儲存。
+              </Alert>
             )}
 
             <TextField
@@ -238,8 +269,14 @@ export function MaterialDialog({
               fullWidth
               value={name}
               disabled={readOnly}
+              error={Boolean(fieldErrors.name)}
+              helperText={fieldErrors.name}
               slotProps={{ htmlInput: { maxLength: MATERIAL_NAME_MAX_LEN } }}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value)
+                // 邊打邊清掉錯誤——訊息留著不動會讓人以為改了還是不對
+                if (fieldErrors.name) setFieldErrors((prev) => ({ ...prev, name: undefined }))
+              }}
             />
 
             <Box>
@@ -392,14 +429,7 @@ export function MaterialDialog({
           <Button
             variant="contained"
             disabled={loading || uploading}
-            onClick={() =>
-              onSave({
-                material_name: name,
-                description_html: cleanedHtml,
-                doc_ids: docs.map((d) => d.doc_id),
-                video_ids: videoIds,
-              })
-            }
+            onClick={handleSave}
           >
             儲存
           </Button>

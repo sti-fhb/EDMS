@@ -99,6 +99,14 @@ export function EtCourseEditorPage() {
   /** 上傳影片的錯誤與其他錯誤分開——它要顯示在上傳區旁邊，不是視窗頂端。 */
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  /**
+   * 剛建立、**尚未儲存過**的項目 ID。
+   *
+   * 新增項目會立刻於 DB 建立空殼（教材 / 測驗與 `ET_ITEM` 同交易），使用者若直接
+   * 取消，那個沒有名稱也沒有內容的空殼會留在章節裡。取消時把它刪掉，章節才不會
+   * 長出一排幽靈項目。儲存成功後清除此標記——之後的取消就只是「不存這次的修改」。
+   */
+  const [unsavedNewItemId, setUnsavedNewItemId] = useState<number | null>(null)
 
   const {
     data: course,
@@ -361,19 +369,46 @@ export function EtCourseEditorPage() {
     setOpenItem(null)
     setItemError(null)
     setUploadError(null)
+    setUnsavedNewItemId(null)
   }
 
-  /** 關閉項目視窗；有未儲存的變更時先確認——沒改過就直接關，多問一次是干擾。 */
+  /** 丟棄尚未儲存過的新項目——連同其空殼教材 / 測驗一併刪除。 */
+  const discardUnsavedItem = async () => {
+    const itemId = unsavedNewItemId
+    closeItemDialog()
+    if (itemId === null) return
+    try {
+      await itemsApi.remove(itemId)
+      invalidate()
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  /**
+   * 關閉項目視窗。
+   *
+   * | 情境 | 行為 |
+   * |------|------|
+   * | 新項目、沒填任何東西 | **直接刪掉**，不問——他只是點開看看 |
+   * | 新項目、填了東西 | 確認後刪掉 |
+   * | 既有項目、沒改過 | 直接關 |
+   * | 既有項目、改過 | 確認後關（項目本身保留） |
+   */
   const requestCloseItem = (dirty: boolean) => {
+    const isUnsavedNew = unsavedNewItemId !== null
     if (!dirty) {
-      closeItemDialog()
+      if (isUnsavedNew) void discardUnsavedItem()
+      else closeItemDialog()
       return
     }
     confirm({
       title: "放棄變更",
-      content: "尚未儲存的變更將不會保留，確定關閉？",
-      okText: "關閉",
-      onOk: closeItemDialog,
+      content: isUnsavedNew
+        ? "變更內容不會儲存，此項目也不會建立。確定取消？"
+        : "尚未儲存的變更將不會保留，確定關閉？",
+      okText: "確定",
+      onOk: isUnsavedNew ? discardUnsavedItem : closeItemDialog,
     })
   }
 
@@ -384,6 +419,7 @@ export function EtCourseEditorPage() {
       const created = await itemsApi.add(chapter.chapter_id, itemType, "")
       invalidate()
       // 建完直接開視窗——空殼本身沒有內容，不開等於要使用者再點一次
+      setUnsavedNewItemId(created.item_id)
       setOpenItem(created)
     } catch (err) {
       handleError(err)
@@ -654,6 +690,8 @@ export function EtCourseEditorPage() {
         onOpenItem={(item) => {
           setItemError(null)
           setUploadError(null)
+          // 由清單點開的是既有項目——取消時不該把它刪掉
+          setUnsavedNewItemId(null)
           setOpenItem(item)
         }}
         onDeleteItem={handleDeleteItem}
@@ -696,6 +734,8 @@ export function EtCourseEditorPage() {
               invalidateMaterial()
               // 課程詳細也要刷——項目列顯示的名稱取自教材名稱
               invalidate()
+              // 存過之後就不再是「未儲存的新項目」，關閉時不該被刪掉
+              setUnsavedNewItemId(null)
               closeItemDialog()
             },
           )
@@ -718,6 +758,7 @@ export function EtCourseEditorPage() {
               invalidateQuiz()
               // 課程詳細也要刷——項目列顯示的名稱取自測驗名稱
               invalidate()
+              setUnsavedNewItemId(null)
               closeItemDialog()
             },
           )

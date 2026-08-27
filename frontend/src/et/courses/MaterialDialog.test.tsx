@@ -107,6 +107,40 @@ describe("教材編輯視窗", () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ description_html: null }))
   })
 
+  it("名稱留空按儲存時標記欄位而非籠統報錯", async () => {
+    // 使用者要知道「要補哪一格」，不是「有東西不對」
+    const user = userEvent.setup()
+    const { onSave } = renderDialog({ material: { ...material, material_name: "" } })
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText("請輸入項目標題")).toBeInTheDocument()
+    expect(screen.getByLabelText(/項目標題/)).toBeInvalid()
+  })
+
+  it("開始輸入後清掉欄位錯誤", async () => {
+    // 訊息留著不動會讓人以為改了還是不對
+    const user = userEvent.setup()
+    renderDialog({ material: { ...material, material_name: "" } })
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+    expect(await screen.findByText("請輸入項目標題")).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText(/項目標題/), "教材")
+    expect(screen.queryByText("請輸入項目標題")).not.toBeInTheDocument()
+  })
+
+  it("三類媒材皆空按儲存時不送出並轉為錯誤色", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderDialog({
+      material: { ...material, description_html: null, videos: [], docs: [] },
+    })
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    const alerts = screen.getAllByRole("alert")
+    expect(alerts.some((a) => a.className.includes("colorError"))).toBe(true)
+  })
+
   it("三類媒材皆空時顯示提示", async () => {
     renderDialog({
       material: { ...material, description_html: null, videos: [], docs: [] },

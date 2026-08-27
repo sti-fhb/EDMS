@@ -152,6 +152,29 @@ describe("測驗編輯視窗", () => {
     expect(await screen.findByText(/尚無題目/)).toBeInTheDocument()
   })
 
+  it("名稱留空按儲存時標記欄位而非籠統報錯", async () => {
+    const user = userEvent.setup()
+    const { onSaveSettings } = renderDialog()
+    await user.clear(await screen.findByDisplayValue("基本概念測驗"))
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(onSaveSettings).not.toHaveBeenCalled()
+    expect(await screen.findByText("請輸入測驗名稱")).toBeInTheDocument()
+  })
+
+  it("從題庫分頁按儲存而名稱有誤時，帶回出問題的分頁", async () => {
+    // 停在題庫分頁只顯示一句錯誤，使用者看不到是哪一格
+    const user = userEvent.setup()
+    renderDialog()
+    await user.clear(await screen.findByDisplayValue("基本概念測驗"))
+    await user.click(screen.getByRole("tab", { name: /題庫管理/ }))
+    // 題庫分頁沒有儲存鍵——切回設定分頁按儲存即可驗證錯誤標記
+    await user.click(screen.getByRole("tab", { name: "測驗設定" }))
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(await screen.findByText("請輸入測驗名稱")).toBeInTheDocument()
+  })
+
   it("關閉時回報是否有未儲存變更", async () => {
     const user = userEvent.setup()
     const { onClose } = renderDialog()
