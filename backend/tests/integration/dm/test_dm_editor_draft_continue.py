@@ -374,6 +374,53 @@ async def test_update_draft_version_rename_requires_doc_owner(db):
     assert doc.doc_name == "首版草稿文件"  # 非文件建立者改名不生效
 
 
+async def test_create_persists_assigned_reviewer_for_draft_prefill(db):
+    # Round-2：新增存草稿記住指定審核者 → 續編時由 draft-meta 回帶
+    await _seed_user(db, "ed", "撰寫")
+    aud = await _audience_id(db)
+    r = await _svc.create_document(
+        db,
+        doc_name="x",
+        category_code="SOP",
+        func_code=None,
+        audience_ids=[aud],
+        retrieval_ids=[],
+        version_no="1.0",
+        change_summary="s",
+        file_name="a.pdf",
+        file_bytes=b"%PDF-1.4 x",
+        file_mime=_PDF,
+        op=_op(),
+        assigned_reviewer="rev1",
+    )
+    meta = await _svc.get_draft_meta(db, doc_id=r.doc_id, user_id="ed")
+    assert meta.assigned_reviewer == "rev1"
+
+
+async def test_update_draft_version_persists_assigned_reviewer(db):
+    # Round-2：續編存草稿更新指定審核者 → draft-meta 回帶（存草稿記住，非只在送簽用）
+    await _seed_user(db, "ed", "撰寫")
+    r = await _first_version_draft(db)
+    aud = await _audience_id(db)
+    await _svc.update_draft_version(
+        db,
+        doc_id=r.doc_id,
+        version_id=r.version_id,
+        doc_name=None,
+        assigned_reviewer="rev1",
+        audience_ids=[aud],
+        retrieval_ids=[],
+        version_no="1.0",
+        change_summary="首版摘要",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op(),
+    )
+    meta = await _svc.get_draft_meta(db, doc_id=r.doc_id, user_id="ed")
+    assert meta.assigned_reviewer == "rev1"
+
+
 async def test_update_draft_version_updates_func_when_first_version_manual(db):
     # Round-1：首版草稿續編開放全欄位——手冊類可改關聯作業項目 func（分類綁 DOC_ID 除外）
     await _seed_user(db, "ed", "撰寫")

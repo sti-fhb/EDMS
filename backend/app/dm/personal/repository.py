@@ -41,7 +41,8 @@ class PersonalRepository:
                 DmDocVersion.doc_id,
                 DmDocVersion.version_no,
                 DmDocVersion.change_summary,
-                DmDocVersion.updated_date,
+                # 最後編輯時間：未編輯過（updated_date NULL）之首存草稿退回 created_date（存草稿時間），避免顯示空白
+                func.coalesce(DmDocVersion.updated_date, DmDocVersion.created_date).label("updated_date"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
                 DmDocument.status.label("doc_status"),

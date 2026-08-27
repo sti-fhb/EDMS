@@ -126,10 +126,12 @@ class EditorService:
         file_bytes: bytes | None,
         file_mime: str | None,
         op: OperatorInfo,
+        assigned_reviewer: str | None = None,
     ) -> CreateResult:
         """新增草稿文件（配 DOC_ID + DRAFT 首版 + 標籤）。
 
         存草稿不卡必填（US5）：名稱 / 版號 / 摘要 / 檔案皆可空，送簽時才完整檢核。分類必填（DOC_ID 配號用）。
+        assigned_reviewer：存草稿時記住之指定審核者（可空，供續編預帶；#222）。
         """
         doc_name = (doc_name or "").strip()
         version_no = (version_no or "").strip()
@@ -154,6 +156,7 @@ class EditorService:
             file_size=fmeta.size,
             file_mime=fmeta.mime,
             op=op,
+            assigned_reviewer=(assigned_reviewer or "").strip() or None,
         )
         await self._repo.set_tags(db, doc_id=doc.doc_id, tag_ids=tag_ids, op=op)
         await self._log(
@@ -209,6 +212,7 @@ class EditorService:
         file_bytes: bytes | None,
         file_mime: str | None,
         op: OperatorInfo,
+        assigned_reviewer: str | None = None,
     ) -> VersionResult:
         """既有文件新增 DRAFT 版本（身份欄不吃）+ 覆寫文件層標籤（可見對象 / 檢索）。
 
@@ -253,6 +257,7 @@ class EditorService:
                     file_size=fmeta.size,
                     file_mime=fmeta.mime,
                     op=op,
+                    assigned_reviewer=(assigned_reviewer or "").strip() or None,
                 )
         except IntegrityError as exc:
             # 並發後盾（每人每文件一份草稿之部分唯一索引）：回退後給友善錯誤。
@@ -288,9 +293,12 @@ class EditorService:
             raise AppError(status_code=404, detail="查無可續編之草稿或無權存取", error_code="DM_DOC_017")
         category_name = await self._repo.get_category_name(db, doc.category_code) or doc.category_code
         func_name = await self._repo.get_func_name(db, doc.func_code) if doc.func_code else None
-        last = await self._repo.get_last_review(db, ver.version_id)
-        # 退回 / 撤回草稿預帶前次指定審核者供參考；從未送審 → None
-        prior_reviewer = last.assigned_reviewer if last is not None and last.status in (_REJECTED, _WITHDRAWN) else None
+        # 指定審核者預帶：優先用草稿階段記住之值（ver.assigned_reviewer）；否則退回 / 撤回草稿取前次送審之審核者
+        prior_reviewer = ver.assigned_reviewer
+        if prior_reviewer is None:
+            last = await self._repo.get_last_review(db, ver.version_id)
+            if last is not None and last.status in (_REJECTED, _WITHDRAWN):
+                prior_reviewer = last.assigned_reviewer
         return DraftMeta(
             doc_id=doc.doc_id,
             doc_name=doc.doc_name,
@@ -317,6 +325,7 @@ class EditorService:
         version_id: int,
         doc_name: str | None,
         func_code: str | None = None,
+        assigned_reviewer: str | None = None,
         audience_ids: Sequence[int],
         retrieval_ids: Sequence[int],
         version_no: str,
@@ -363,6 +372,7 @@ class EditorService:
             ver.file_name, ver.file_path, ver.file_size, ver.file_mime = fmeta.name, fmeta.path, fmeta.size, fmeta.mime
             previewable = fmeta.previewable
         ver.version_no, ver.change_summary = version_no, change_summary
+        ver.assigned_reviewer = (assigned_reviewer or "").strip() or None  # 存草稿記住指定審核者（供續編預帶）
         ver.updated_user, ver.updated_date = op.user_id, now
         # 首版草稿（父 DRAFT）之**文件建立者本人**可改文件層身份欄：名稱（Q1=A）+ 關聯作業項目 func
         # （分類綁 DOC_ID、不可改）。改的是跨版本共享之 DM_DOCUMENT 欄位，僅版本擁有權不足——他人於同份

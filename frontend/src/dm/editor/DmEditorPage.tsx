@@ -173,6 +173,7 @@ export function DmEditorPage() {
         retrieval_ids: form.retrieval_ids,
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
+        assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         file,
       })
       ids = { doc_id: r.doc_id, version_id: r.version_id }
@@ -181,6 +182,7 @@ export function DmEditorPage() {
       const r = await editorApi.updateDraftVersion(docId!, draftMeta!.draft_version_id, {
         doc_name: nameEditable ? form.doc_name.trim() : null, // 首版草稿可改名（Q1=A）；已發布文件唯讀 → null
         func_code: nameEditable && isManual ? form.func_code : null, // 首版手冊類可改 func；其餘 null
+        assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
         audience_ids: form.audience_ids,
@@ -192,6 +194,7 @@ export function DmEditorPage() {
       const r = await editorApi.addVersion(docId!, {
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
+        assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         audience_ids: form.audience_ids,
         retrieval_ids: form.retrieval_ids,
         file,
@@ -529,11 +532,6 @@ export function DmEditorPage() {
             <Typography variant="subtitle2" gutterBottom>
               文件內容（上傳檔案）
             </Typography>
-            {isContinueDraft && draftMeta?.file_name && !file && (
-              <Alert severity="info" sx={{ mb: 1 }}>
-                目前檔案：{draftMeta.file_name}（未重新上傳則沿用既有檔案）
-              </Alert>
-            )}
             <Stack spacing={1}>
               <Box
                 component="label"
@@ -575,6 +573,16 @@ export function DmEditorPage() {
                   <>
                     <Typography variant="body2" color="text.primary">
                       已選擇：{file.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      點擊或拖拉可重新選擇
+                    </Typography>
+                  </>
+                ) : isContinueDraft && draftMeta?.file_name ? (
+                  // 續編既有草稿之已存檔案：比照新增之「已選擇」樣式（未重新上傳則沿用）
+                  <>
+                    <Typography variant="body2" color="text.primary">
+                      已選擇：{draftMeta.file_name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       點擊或拖拉可重新選擇

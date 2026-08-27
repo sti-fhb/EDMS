@@ -50,6 +50,7 @@ async def create_document(
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
     func_code: Annotated[str | None, Form()] = None,
+    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
     audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
@@ -73,6 +74,7 @@ async def create_document(
         file_bytes=data,
         file_mime=file_mime,
         op=op,
+        assigned_reviewer=assigned_reviewer,
     )
 
 
@@ -81,6 +83,7 @@ async def add_version(
     doc_id: str,
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
+    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
     audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
@@ -102,6 +105,7 @@ async def add_version(
         file_bytes=data,
         file_mime=file_mime,
         op=op,
+        assigned_reviewer=assigned_reviewer,
     )
 
 
@@ -111,6 +115,7 @@ async def update_draft_version(
     version_id: int,
     doc_name: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT（首版草稿）時生效
     func_code: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT + 手冊類時生效
+    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
     audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
@@ -129,6 +134,7 @@ async def update_draft_version(
         version_id=version_id,
         doc_name=doc_name,
         func_code=func_code,
+        assigned_reviewer=assigned_reviewer,
         audience_ids=audience_ids,
         retrieval_ids=retrieval_ids,
         version_no=version_no,

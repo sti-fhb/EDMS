@@ -68,8 +68,12 @@ class EditorRepository:
         file_size: int | None,
         file_mime: str | None,
         op: OperatorInfo,
+        assigned_reviewer: str | None = None,
     ) -> DmDocVersion:
-        """新增一筆草稿版本（STATUS=DRAFT）；檔案可暫無（存草稿不卡，送簽時才必備）。"""
+        """新增一筆草稿版本（STATUS=DRAFT）；檔案可暫無（存草稿不卡，送簽時才必備）。
+
+        assigned_reviewer：存草稿時記住之指定審核者（可空，供續編預帶）。
+        """
         now = utcnow()
         ver = DmDocVersion(
             doc_id=doc_id,
@@ -80,6 +84,7 @@ class EditorRepository:
             file_size=file_size,
             file_mime=file_mime,
             status=_DRAFT,
+            assigned_reviewer=assigned_reviewer,
             created_user=op.user_id,
             created_date=now,
         )

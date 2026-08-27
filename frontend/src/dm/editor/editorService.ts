@@ -23,6 +23,7 @@ export interface CreateDocPayload {
   retrieval_ids: string[]
   version_no: string
   change_summary: string
+  assigned_reviewer: string // 空字串＝未指定；存草稿記住供續編預帶
   file: File | null
 }
 
@@ -30,6 +31,7 @@ export interface CreateDocPayload {
 export interface AddVersionPayload {
   version_no: string
   change_summary: string
+  assigned_reviewer: string
   audience_ids: string[]
   retrieval_ids: string[]
   file: File | null
@@ -39,6 +41,7 @@ export interface AddVersionPayload {
 export interface UpdateDraftPayload {
   doc_name: string | null
   func_code: string | null
+  assigned_reviewer: string
   version_no: string
   change_summary: string
   audience_ids: string[]
@@ -55,6 +58,7 @@ function buildCreateForm(p: CreateDocPayload): FormData {
   p.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
   fd.append("version_no", p.version_no)
   fd.append("change_summary", p.change_summary)
+  if (p.assigned_reviewer) fd.append("assigned_reviewer", p.assigned_reviewer)
   if (p.file) fd.append("file", p.file)
   return fd
 }
@@ -79,6 +83,7 @@ export const editorApi = {
     const fd = new FormData()
     fd.append("version_no", payload.version_no)
     fd.append("change_summary", payload.change_summary)
+    if (payload.assigned_reviewer) fd.append("assigned_reviewer", payload.assigned_reviewer)
     payload.audience_ids.forEach((id) => fd.append("audience_ids", id))
     payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
     if (payload.file) fd.append("file", payload.file)
@@ -110,6 +115,7 @@ export const editorApi = {
     const fd = new FormData()
     if (payload.doc_name !== null) fd.append("doc_name", payload.doc_name)
     if (payload.func_code !== null) fd.append("func_code", payload.func_code)
+    fd.append("assigned_reviewer", payload.assigned_reviewer)
     fd.append("version_no", payload.version_no)
     fd.append("change_summary", payload.change_summary)
     payload.audience_ids.forEach((id) => fd.append("audience_ids", id))

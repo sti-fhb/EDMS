@@ -220,7 +220,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
           file_name: "old.pdf",
           file_size: 100,
           previewable: true,
-          assigned_reviewer: null,
+          assigned_reviewer: "rev1",
         }),
       ),
       http.put("/api/dm/documents/:docId/versions/:versionId", ({ params }) => {
@@ -235,7 +235,8 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(screen.getByLabelText(/文件名稱/)).toBeEnabled() // 首版草稿名稱可改（Q1=A）
     expect(screen.getByLabelText(/新版本號/)).toHaveValue("1.0") // 帶出既有版號
     expect(screen.getByLabelText(/變更摘要/)).toHaveValue("首版摘要草") // 帶出既有摘要
-    expect(screen.getByText(/目前檔案：old.pdf/)).toBeInTheDocument() // 既有檔案沿用提示
+    expect(await screen.findByText("王審核")).toBeInTheDocument() // 指定審核者預帶（Round-2）
+    expect(screen.getByText(/已選擇：old.pdf/)).toBeInTheDocument() // 既有檔案以「已選擇」樣式呈現（Round-2 item3）
     await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
     expect(await screen.findByText("已儲存為草稿")).toBeInTheDocument()
     expect(putCalls).toBe(1) // 續編走更新既有版本（PUT），非另開版本
