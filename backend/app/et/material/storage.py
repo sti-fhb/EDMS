@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 #: 串流讀寫之分塊大小（1 MB）。太小會增加 syscall 次數，太大則失去串流的意義。
 CHUNK_SIZE = 1024 * 1024
 
+#: 原始檔名之長度上限，對齊 `ET_MATERIAL_VIDEO.FILE_NAME` 的 `VARCHAR(200)`。
+#: 不設限時超長檔名會在 INSERT 時撞 asyncpg 的 StringDataRightTruncation，
+#: 冒成未處理的 500——與 #202 修過的三個「越界回 500」屬同一類。
+MAX_FILE_NAME_LEN = 200
+
 #: 暫存子目錄。放在 storage root **之內**——跨檔案系統的 rename 不是原子操作，
 #: 放在系統暫存區再搬進來會退化成複製，500 MB 的檔案等於多讀寫一次。
 TMP_DIRNAME = ".tmp"
@@ -43,6 +48,33 @@ _TOO_LARGE_OR_BAD_FORMAT = AppError(
     detail="影片格式或大小不符",
     error_code="ET_MATERIAL_003",
 )
+
+_NAME_TOO_LONG = AppError(
+    status_code=422,
+    detail=f"影片檔名過長（上限 {MAX_FILE_NAME_LEN} 字元），請縮短檔名後再上傳",
+    error_code="ET_MATERIAL_006",
+)
+
+
+def ensure_file_name_acceptable(file_name: str) -> None:
+    """檔名長度須在 `ET_MATERIAL_VIDEO.FILE_NAME` 容得下的範圍內。
+
+    ## 為何是拒絕而非截斷
+
+    截斷會**默默改掉使用者的檔案名稱**，而該名稱正是「同名影片」判定的依據——
+    兩支不同的長檔名截斷後可能撞在一起，變成一個使用者無法理解的「重複」錯誤。
+    明講「檔名過長，請縮短」則是他當下就能處理的事。
+
+    ## 為何不靠 DB 的長度限制擋
+
+    靠 DB 擋的結果是 `StringDataRightTruncation` 冒成 500——使用者只會看到「伺服器
+    處理失敗」。這與 #202 修過的三個「越界回 500 而非 4xx」是同一類問題。
+
+    Raises:
+        AppError: 422 `ET_MATERIAL_006`。
+    """
+    if len(file_name) > MAX_FILE_NAME_LEN:
+        raise _NAME_TOO_LONG
 
 
 def storage_root() -> str:

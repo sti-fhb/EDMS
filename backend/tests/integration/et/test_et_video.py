@@ -206,6 +206,25 @@ class TestUpload:
         rows = list(await db.scalars(select(EtMaterialVideo).where(EtMaterialVideo.material_id == mid)))
         assert rows == [], "長度取不到時不得存檔（覆蓋率分母缺失會使章節永久卡住）"
 
+    async def test_超長檔名回_422_而非_500(self, client, db) -> None:
+        """`FILE_NAME` 為 VARCHAR(200)。不設限時超長檔名會在 INSERT 撞
+        StringDataRightTruncation，冒成未處理的 500——使用者只看得到「伺服器處理
+        失敗」。與 #202 修過的三個「越界回 500」屬同一類。"""
+        uid = await _user(db, "ETV_LONG")
+        mid = await _material(client, uid)
+        r = await _upload(client, uid, mid, name="a" * 250 + ".mp4")
+        assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_MATERIAL_006"
+
+    async def test_剛好等於上限之檔名可上傳(self, client, db) -> None:
+        """邊界值——200 字元應通過，201 才擋。"""
+        uid = await _user(db, "ETV_LONG2")
+        mid = await _material(client, uid)
+        name = "a" * (200 - len(".mp4")) + ".mp4"
+        assert len(name) == 200
+        r = await _upload(client, uid, mid, name=name)
+        assert r.status_code == 201, r.text
+
     async def test_同名影片重複上傳被擋(self, client, db) -> None:
         uid = await _user(db, "ETV_DUP")
         mid = await _material(client, uid)

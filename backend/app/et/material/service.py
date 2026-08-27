@@ -161,7 +161,7 @@ class EtMaterialService:
 
         ## 步驟順序有意義
 
-        1. 擁有權 → 2. 讀參數 → 3. 檢副檔名 → 4. **擋同名影片**（落地前）
+        1. 擁有權 → 2. 讀參數 → 3. 檢檔名長度與副檔名 → 4. **擋同名影片**（落地前）
         → 5. **串流寫暫存檔**（邊寫邊數大小）→ 6. **`ffprobe` 取長度**（取不到就刪
         暫存檔、拒收）→ 7. 搬到正式路徑 → 8. 寫 DB 紀錄
 
@@ -174,6 +174,7 @@ class EtMaterialService:
         formats_raw = await self._params.get_param_value(db, "ET_VIDEO_ALLOWED_FORMATS") or _DEFAULT_FORMATS
         max_size_mb = await self._params.get_int_param(db, "ET_VIDEO_MAX_SIZE_MB", "VALUE", _DEFAULT_MAX_SIZE_MB)
         file_name = upload.filename or ""
+        storage.ensure_file_name_acceptable(file_name)
         ext = storage.ensure_format_allowed(file_name, formats_raw.split(","))
 
         # 在寫檔**之前**擋重複——等 500 MB 寫完才發現重複，I/O 與使用者的等待都白費

@@ -23,8 +23,9 @@ class EtQuizRepository:
     async def create_shell(self, db: AsyncSession, name: str, operator: OperatorInfo) -> EtQuiz:
         """建立空殼測驗（無題目、採預設設定值）。
 
-        與 `ET_ITEM` 於同一交易建立。「每測驗至少 1 題」之檢核在**儲存測驗**時才套用，
-        不在建立時。
+        與 `ET_ITEM` 於同一交易建立。「每測驗至少 1 題」**不在此檢核，也不在儲存時
+        檢核**——教師是逐題新增的，空殼與第一題存檔之間必然存在 0 題的狀態。該條
+        屬**發布時**檢核（FR-ET-US3-11，#204），見 `rules.py` 模組 docstring。
         """
         quiz = EtQuiz(
             quiz_name=name,
