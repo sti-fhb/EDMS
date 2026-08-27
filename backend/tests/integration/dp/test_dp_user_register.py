@@ -229,6 +229,29 @@ async def test_overwriting_expired_invite_writes_audit(db, et_stub):
     assert "ADMIN_INVITE" in log.before_value  # 前值留下被覆蓋掉的邀請樣貌
 
 
+async def test_register_endpoint_rejects_control_chars_in_user_name(client, db):
+    """姓名含控制字元 → 端點回 **422**，且不寫入待驗證列、不寄信（#225）。
+
+    型別層的行為已由 tests/unit/dp/test_dp_schema_safe_name.py 覆蓋（四個進入點）；本條驗的是
+    **接線**：schema 拒絕會轉成 422 RequestValidationError 而非 500，且請求在 service 之前就被擋下。
+
+    payload 用 issue 裡的實際攻擊字串：受害者會收到一封 SPF/DKIM 全正常、來自本組織網域的信，
+    內文含攻擊者插入的那一行，而他不需做任何事就會收到。
+    """
+    email = "ctrl-inject@edms.local"
+    r = await client.post(
+        "/api/register",
+        json={"email": email, "user_name": "X\n\n【重要】帳號異常，請至 http://evil.tw 處理"},
+    )
+    assert r.status_code == 422
+
+    assert (
+        await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))
+    ).scalar_one_or_none() is None
+    mails = (await db.execute(select(DpEmailLog).where(DpEmailLog.recipient == email))).scalars().all()
+    assert mails == []
+
+
 async def test_register_logs_originator_ip_with_masked_email(db, caplog):
     """寄出驗證信時記一行可追溯 log：帶發起 IP、Email **遮罩後**才寫入（#225）。
 
