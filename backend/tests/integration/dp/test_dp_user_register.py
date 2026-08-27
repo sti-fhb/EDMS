@@ -1,5 +1,6 @@
 """US2 自助註冊（#56 方案 B）整合測試：檢核分流 / 寫待驗證表 + 寄驗證信（**不建 DP_USER**）。"""
 
+import logging
 from datetime import timedelta
 
 import pytest
@@ -226,6 +227,28 @@ async def test_overwriting_expired_invite_writes_audit(db, et_stub):
     assert log.created_user == "SYSTEM"  # 匿名註冊者無 user_id，非管理者所為
     assert "逾期管理者邀請被自助註冊覆蓋" in log.description
     assert "ADMIN_INVITE" in log.before_value  # 前值留下被覆蓋掉的邀請樣貌
+
+
+async def test_register_logs_originator_ip_with_masked_email(db, caplog):
+    """寄出驗證信時記一行可追溯 log：帶發起 IP、Email **遮罩後**才寫入（#225）。
+
+    本端點匿名，任何人可用他人 Email 送出，受害者會收到一封來自本組織網域、格式正確的驗證信。
+    若不留紀錄，回報者問「誰送的」時查不出來。刻意不寫 DP_AUDIT_LOG——那是 append-only 且鏈式
+    雜湊，匿名可灌列（見 #225 決策留言）。
+
+    最重要的斷言是**完整 Email 不得出現在 log**：規範禁記個資完整值
+    （`.claude/rules/sti-backend-logging.md`）。遮罩不影響用途，回報者本來就知道自己的 Email。
+    """
+    email = "trace-me@edms.local"
+    with caplog.at_level(logging.INFO, logger="app.dp.user.register_service"):
+        await RegisterService().register(db, email=email, user_name="被冒用的人")
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("自助註冊已寄出驗證信" in m for m in messages)
+    assert any("t***@edms.local" in m for m in messages)
+    assert all(email not in m for m in messages)  # 完整 Email 不得落地
+    # 不記 user_name：對正常使用者是個資，追查寄件來源也用不到
+    assert all("被冒用的人" not in m for m in messages)
 
 
 async def test_self_register_overwrite_writes_audit(db, et_stub):

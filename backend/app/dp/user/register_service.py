@@ -13,6 +13,7 @@ Email 已在 DP_USER（已驗證）→ 409（引導登入 / 忘記密碼）。�
 驗證 TTL 沿用既有 token 30 分。
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.log_redaction import mask_email
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.kinds import KIND_ADMIN_INVITE
@@ -36,6 +38,8 @@ _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _DEFAULT_TTL_MIN = 30
 _FUNC_NAME = "DP-REGISTER"
 _SYSTEM_USER = "SYSTEM"
+
+logger = logging.getLogger(__name__)
 
 
 class RegisterService:
@@ -170,3 +174,17 @@ class RegisterService:
             params={"user_name": user_name, "verify_link": verify_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
         )
+        # 發起者可追溯性（#225）：本端點匿名，任何人可用他人 Email 送出並自填姓名，受害者會收到一封
+        # 來自本組織網域、格式完全正確的驗證信。若不留紀錄，使用者回報「我收到一封奇怪的註冊信」時
+        # 無法回答「誰、從哪個 IP 送的」。
+        #
+        # 刻意只記 log、不寫 DP_AUDIT_LOG：稽核表 append-only 且鏈式雜湊，讓匿名者以 30 次/分/IP
+        # 往裡面灌列會把有意義的紀錄淹掉（見 #225 的決策留言）。
+        #
+        # Email 遮罩後才寫入：規範禁記個資完整值（sti-backend-logging.md）。遮罩不影響用途——回報者
+        # 已經知道自己的 Email，需要的是 IP。**不記 user_name**：對正常使用者是個資，而追查寄件來源
+        # 也用不到（受害者手上就有那封信的內文）。
+        #
+        # 已接受的限制：log 無保留政策保證、不可長期查詢，這不等於稽核級追溯。若日後需要持久證據，
+        # 須為 pending 列加「發起 IP」欄位（併入 #215 的 migration），並把 #226 的清理保留期當證據窗口。
+        logger.info("自助註冊已寄出驗證信 ip=%s email=%s", get_client_ip(), mask_email(email))
