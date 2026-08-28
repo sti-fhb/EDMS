@@ -4,10 +4,12 @@
 
 ## 與測驗題目 schema 的差異
 
-- **無 `question_type`**：問卷題型一律單選，`data-model` 明訂「不設題型欄位」
+- **`question_type` 值域不同**：問卷為 `SINGLE` / `TEXT`，測驗為 `SINGLE` / `MULTIPLE`
 - **無 `is_correct`**：問卷收集意見，沒有對錯
 - **無 `points`**：問卷不計分、不計入學習進度
 """
+
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -73,12 +75,17 @@ class SurveyOptionInput(BaseModel):
 class SurveyQuestionCreateReq(BaseModel):
     """新增問卷題目（含其全部選項），追加至最末。
 
-    選項與題目**同一個請求**：沒有選項的題目不是有效題目，拆成兩次請求會讓中途失敗
+    選項與題目**同一個請求**：沒有選項的單選題不是有效題目，拆成兩次請求會讓中途失敗
     留下無選項的題目，而那正是 `ET_SURVEY_004` 要擋的狀態。
+
+    **問答題（`TEXT`）之 `options` 須為空陣列**——帶了就 422 `ET_SURVEY_008`。
+    這裡刻意不在 schema 層擋（`Literal` 管不到跨欄位條件），交給
+    `rules.ensure_options_match_type`，讓兩種違規有各自的錯誤碼與訊息。
     """
 
+    question_type: Literal["SINGLE", "TEXT"]
     stem: str = Field(min_length=1, max_length=STEM_MAX_LEN)
-    options: list[SurveyOptionInput] = Field(max_length=MAX_OPTIONS_PER_QUESTION)
+    options: list[SurveyOptionInput] = Field(default_factory=list, max_length=MAX_OPTIONS_PER_QUESTION)
 
     @field_validator("stem")
     @classmethod
@@ -113,9 +120,10 @@ class SurveyOptionRow(BaseModel):
 
 
 class SurveyQuestionRow(BaseModel):
-    """題目列（回應，含選項）。"""
+    """題目列（回應，含選項）。問答題之 `options` 恆為空陣列。"""
 
     sq_id: int
+    question_type: str
     stem: str
     sort_order: int
     version: int
@@ -141,3 +149,29 @@ class SurveyDetail(BaseModel):
     #: 未填人數（= 該課程已加入學員數 − 已填人數，下限 0）。
     pending_count: int
     questions: list[SurveyQuestionRow]
+
+
+class SurveyTemplateRow(BaseModel):
+    """模板清單列（回應）——**不含題目內容**。
+
+    教師選模板時看的是名稱與題數；把整包題目塞進清單會讓回應隨模板數量膨脹，
+    而那些內容在他選定之前都用不到。
+    """
+
+    model_config = {"from_attributes": True}
+
+    code: str
+    name: str
+    description: str
+    question_count: int
+
+
+class ApplyTemplateReq(BaseModel):
+    """套用模板（帶問卷層 `version`）。
+
+    僅於問卷 **0 題**時可套用（否則 409 `ET_SURVEY_010`）——避免模板題目與教師已建的
+    題目混在一起、順序難以預期。
+    """
+
+    template_code: str = Field(min_length=1, max_length=50)
+    version: int = Field(ge=0)

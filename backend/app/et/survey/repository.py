@@ -4,7 +4,8 @@
 `DELETED = 0`；時間一律 `utcnow()`。更新型方法回傳受影響列數供 service 交給
 `ensure_version_matched()` 判定樂觀鎖。
 
-**沒有刪除問卷的方法**——SA 裁示（#204 Q1 → B）問卷只能停用。
+**問卷刪除**（`soft_delete_survey`）為 #238 新增——#204 當時裁示「只能停用」，
+本 issue 依實測回饋改為「未發布課程可刪」。條件判定在 service（需課程狀態）。
 """
 
 from sqlalchemy import func, select, update
@@ -143,11 +144,19 @@ class EtSurveyRepository:
         return (max_order or 0) + 1
 
     async def add_question(
-        self, db: AsyncSession, survey_id: int, *, stem: str, options: list[str], operator: OperatorInfo
+        self,
+        db: AsyncSession,
+        survey_id: int,
+        *,
+        question_type: str,
+        stem: str,
+        options: list[str],
+        operator: OperatorInfo,
     ) -> EtSurveyQuestion:
-        """新增題目與其全部選項，追加至問卷最末。"""
+        """新增題目與其全部選項（問答題傳空 list），追加至問卷最末。"""
         question = EtSurveyQuestion(
             survey_id=survey_id,
+            question_type=question_type,
             stem=stem,
             sort_order=await self.next_question_order(db, survey_id),
             version=0,
@@ -160,7 +169,15 @@ class EtSurveyRepository:
         return question
 
     async def replace_question(
-        self, db: AsyncSession, sq_id: int, version: int, *, stem: str, options: list[str], operator: OperatorInfo
+        self,
+        db: AsyncSession,
+        sq_id: int,
+        version: int,
+        *,
+        question_type: str,
+        stem: str,
+        options: list[str],
+        operator: OperatorInfo,
     ) -> int:
         """更新題目本體並**全量覆寫**其選項；回傳題目更新之受影響列數。
 
@@ -179,6 +196,7 @@ class EtSurveyRepository:
                 EtSurveyQuestion.version == version,
             )
             .values(
+                question_type=question_type,
                 stem=stem,
                 version=EtSurveyQuestion.version + 1,
                 updated_user=operator.user_id,
@@ -211,6 +229,63 @@ class EtSurveyRepository:
             .where(EtSurveyQuestion.sq_id == sq_id, EtSurveyQuestion.deleted == 0)
             .values(**audit)
         )
+        await db.flush()
+
+    async def add_questions_bulk(
+        self,
+        db: AsyncSession,
+        survey_id: int,
+        questions: list[tuple[str, str, list[str]]],
+        operator: OperatorInfo,
+    ) -> None:
+        """一次建立多題（模板套用用；`questions` 為 `(題型, 題幹, 選項)` 之序列）。
+
+        順序即傳入序列的順序，自 1 起。呼叫端已確認問卷為 0 題（`ET_SURVEY_010`），
+        故不需查詢當前最大順序。
+
+        **與逐題呼叫 `add_question` 的差別在交易邊界**：這裡全部在同一個 flush 週期內，
+        中途失敗整批不落地；逐題呼叫則會留下半套用的問卷。
+        """
+        now = utcnow()
+        for index, (question_type, stem, options) in enumerate(questions, start=1):
+            question = EtSurveyQuestion(
+                survey_id=survey_id,
+                question_type=question_type,
+                stem=stem,
+                sort_order=index,
+                version=0,
+                created_user=operator.user_id,
+                created_date=now,
+            )
+            db.add(question)
+            await db.flush()
+            await self._insert_options(db, question.sq_id, options, operator)
+
+    async def soft_delete_survey(self, db: AsyncSession, survey_id: int, operator: OperatorInfo) -> None:
+        """軟刪除問卷本體與其全部題目、選項（#238）。
+
+        **填答（`_RESPONSE_M` / `_RESPONSE_D`）不處理**——刪除僅限草稿課程，而草稿課程
+        學員看不到、不可能有填答。與 `soft_delete_question` 同一判斷。
+
+        > 刪除後該課程可再建新問卷，靠的是 `UX_ET_SURVEY_COURSE` 為**部分**唯一索引
+        > （migration `8713c6177f6f`）。若仍為全表唯一，這裡軟刪的那筆會永久佔住該課程。
+        """
+        audit = {"deleted": 1, "updated_user": operator.user_id, "updated_date": utcnow()}
+        sq_ids = list(
+            await db.scalars(
+                select(EtSurveyQuestion.sq_id).where(
+                    EtSurveyQuestion.survey_id == survey_id, EtSurveyQuestion.deleted == 0
+                )
+            )
+        )
+        if sq_ids:
+            await db.execute(
+                update(EtSurveyOption)
+                .where(EtSurveyOption.sq_id.in_(sq_ids), EtSurveyOption.deleted == 0)
+                .values(**audit)
+            )
+            await db.execute(update(EtSurveyQuestion).where(EtSurveyQuestion.sq_id.in_(sq_ids)).values(**audit))
+        await db.execute(update(EtSurvey).where(EtSurvey.survey_id == survey_id, EtSurvey.deleted == 0).values(**audit))
         await db.flush()
 
     async def apply_question_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
