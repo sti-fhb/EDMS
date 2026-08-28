@@ -387,8 +387,8 @@ async def test_obsolete_info_banner(db):
     assert d.obsolete_info.review_id is not None and d.obsolete_info.attachment_name == "函文.pdf"
 
 
-async def test_obsolete_office_old_version_download_allowed_for_audit(db):
-    """已廢止文件之無法預覽（Office）版本開放下載供稽核（US10 SA 裁示）；可預覽舊版仍僅預覽、不可下載。"""
+async def test_obsolete_office_old_version_download_admin_only_for_audit(db):
+    """已廢止之無法預覽（Office）版本僅管理者可下載供稽核（US10 SA 裁示：限管理者）；可預覽舊版仍僅預覽。"""
     doc = DmDocument(
         doc_id="DM-SOP-000060",
         doc_name="d",
@@ -407,10 +407,16 @@ async def test_obsolete_office_old_version_download_allowed_for_audit(db):
     doc.current_version_id = cur
     await db.flush()
 
-    # 已廢止 + 無法預覽（Office）舊版 → 開放下載（稽核）
+    # 已廢止 + 無法預覽（Office）舊版 + 管理者 → 開放下載（稽核）
     f = await _svc.prepare_file(db, doc_id="DM-SOP-000060", version_id=old_office, disposition="download", ctx=_admin())
     assert f.inline is False
-    # 已廢止 + 可預覽（PDF）舊版 → 仍不可下載（僅預覽）
+    # 已廢止 + Office 舊版，但非管理者（編輯者）→ 仍不可下載（限管理者）
+    with pytest.raises(AppError) as e_ed:
+        await _svc.prepare_file(
+            db, doc_id="DM-SOP-000060", version_id=old_office, disposition="download", ctx=_editor()
+        )
+    assert e_ed.value.status_code == 403 and e_ed.value.error_code == "DM_DOC_002"
+    # 已廢止 + 可預覽（PDF）舊版 → 管理者也不可下載（僅預覽）
     with pytest.raises(AppError) as e:
         await _svc.prepare_file(db, doc_id="DM-SOP-000060", version_id=old_pdf, disposition="download", ctx=_admin())
     assert e.value.status_code == 403 and e.value.error_code == "DM_DOC_002"

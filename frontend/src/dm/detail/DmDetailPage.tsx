@@ -215,7 +215,14 @@ export function DmDetailPage() {
           </Typography>
           <Stack divider={<Divider />} spacing={1.5}>
             {(versions ?? []).map((v) => (
-              <VersionRow key={v.version_id} v={v} readOnly={readOnly} onDownload={onDownload} onPreview={onPreview} />
+              <VersionRow
+                key={v.version_id}
+                v={v}
+                readOnly={readOnly}
+                isAdmin={detail.is_admin}
+                onDownload={onDownload}
+                onPreview={onPreview}
+              />
             ))}
           </Stack>
         </Paper>
@@ -348,16 +355,18 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 function VersionRow({
   v,
   readOnly,
+  isAdmin,
   onDownload,
   onPreview,
 }: {
   v: VersionItem
   readOnly: boolean
+  isAdmin: boolean
   onDownload: (versionId: number, filename: string) => void
   onPreview: (versionId: number) => void
 }) {
-  // 目前版且非廢止 → 可下載；已廢止之無法預覽（Office）版本亦開放下載供稽核（SA 裁示）
-  const canDownload = (v.is_current && !readOnly) || (readOnly && !v.previewable)
+  // 目前版且非廢止 → 可下載；已廢止之無法預覽（Office）版本僅「管理者」可下載供稽核（SA 裁示：限管理者）
+  const canDownload = (v.is_current && !readOnly) || (readOnly && !v.previewable && isAdmin)
   return (
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start">

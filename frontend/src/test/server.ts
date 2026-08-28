@@ -132,6 +132,7 @@ export const handlers = [
         previewable: true,
       },
       is_editor: true,
+      is_admin: false,
       can_edit: true,
       edit_lock_reason: null,
       is_obsolete: false,

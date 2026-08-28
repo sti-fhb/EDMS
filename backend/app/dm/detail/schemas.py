@@ -56,6 +56,7 @@ class DetailResponse(BaseModel):
     # 目前版檔案 + 操作能力
     file: FileMeta | None
     is_editor: bool  # 具 DM_EDITOR → 呈現編輯/廢止入口（送審中時灰階、非隱藏）
+    is_admin: bool  # 具 DM_ADMIN → 已廢止 read-only 下可下載無法預覽（Office）版本（US10 稽核）
     can_edit: bool  # DM_EDITOR 且無進行中 PENDING 送審週期 → 入口可點
     edit_lock_reason: str | None  # 入口失效原因（送審中 / 廢止待簽核）；可點時為 None
     is_obsolete: bool  # STATUS=OBSOLETE → read-only 模式

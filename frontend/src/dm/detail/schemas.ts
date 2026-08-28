@@ -38,6 +38,7 @@ export interface DetailResponse {
   func_name: string | null
   file: FileMeta | null
   is_editor: boolean
+  is_admin: boolean
   can_edit: boolean
   edit_lock_reason: string | null
   is_obsolete: boolean
