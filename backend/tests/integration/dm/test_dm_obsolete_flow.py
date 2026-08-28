@@ -176,7 +176,9 @@ async def test_initiate_with_attachment_saves_obsolete_file(db):
 
     review = await db.scalar(select(DmReview).where(DmReview.review_id == result.review_id))
     assert review.obsolete_file_name == "停辦函文.pdf" and review.obsolete_file_size == len(b"%PDF-1.4 letter")
-    assert review.obsolete_file_path and os.path.isfile(review.obsolete_file_path)  # 實體落地於 storage root
+    # OBSOLETE_FILE_PATH 存的是相對於 storage root 之片段（#233），須經 root 解析才是檔案系統路徑
+    assert review.obsolete_file_path and not os.path.isabs(review.obsolete_file_path)
+    assert os.path.isfile(os.path.join(storage_root(), review.obsolete_file_path))  # 實體落地於 storage root
 
 
 async def test_initiate_missing_reason_blocked(db):

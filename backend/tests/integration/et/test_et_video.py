@@ -153,14 +153,22 @@ class TestUpload:
         assert body["sort_order"] == 1
 
     async def test_落地路徑在_storage_root_內(self, client, db) -> None:
-        """#188 B2：即使 DB 中的路徑有瑕疵，讀取端圍籬也擋得住；寫入端本就不該逃逸。"""
+        """#188 B2：即使 DB 中的路徑有瑕疵，讀取端圍籬也擋得住；寫入端本就不該逃逸。
+
+        #233 起 `FILE_PATH` 存的是相對於 root 之片段，故以圍籬解析後再驗——這同時也驗到
+        「寫入端產出的值，讀取端接得起來」這條契約。
+        """
         uid = await _user(db, "ETV_U2")
         mid = await _material(client, uid)
         r = await _upload(client, uid, mid, name="sample.mp4")
         video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == r.json()["video_id"]))
+        assert not os.path.isabs(video.file_path), "DB 應存相對片段（#233），存絕對路徑換 root 即失聯"
+        resolved = storage.resolve_within_root(
+            video.file_path, not_found=AssertionError("寫入端產出的路徑不應被讀取端圍籬擋下")
+        )
         root = storage.storage_root()
-        assert os.path.commonpath([root, os.path.realpath(video.file_path)]) == root
-        assert os.path.isfile(video.file_path), "DB 有紀錄但檔案不存在＝學員會拿到 404"
+        assert os.path.commonpath([root, resolved]) == root
+        assert os.path.isfile(resolved), "DB 有紀錄但檔案不存在＝學員會拿到 404"
 
     async def test_多支影片順序自_1_遞增(self, client, db) -> None:
         uid = await _user(db, "ETV_U3")
@@ -324,7 +332,8 @@ class TestDelete:
         mid = await _material(client, uid)
         r = await _upload(client, uid, mid, name="sample.mp4")
         video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == r.json()["video_id"]))
-        path = video.file_path
+        # FILE_PATH 為相對片段（#233），須併上 root 才是檔案系統路徑
+        path = os.path.join(storage.storage_root(), video.file_path)
 
         await _put(client, uid, mid, description_html="<p>說明</p>", video_ids=[])
         assert os.path.isfile(path), "軟刪除不應刪磁碟檔案，否則無法回復"
