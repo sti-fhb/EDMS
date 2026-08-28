@@ -72,6 +72,20 @@ def test_downgrade_is_intentional_noop():
             "DM-MANUAL-900010/7793.pdf",
             id="已是相對路徑-冪等",
         ),
+        pytest.param(
+            r"DM-MANUAL-900010\7793.pdf",
+            "DM-MANUAL-900010",
+            "DM-MANUAL-900010/7793.pdf",
+            id="已是相對路徑但反斜線-須正規化",
+        ),
+        pytest.param(
+            # Code Review 抓到的缺陷：識別碼在路徑中出現兩次時，
+            # 以「首次出現處」為切點會切成 DM-X/DM-X/f.pdf
+            "/srv/DM-X/DM-X/f.pdf",
+            "DM-X",
+            "DM-X/f.pdf",
+            id="識別碼出現兩次-不得從首次出現處切",
+        ),
     ],
 )
 async def test_dm_version_path_converted(db, stored, doc_id, expected):
@@ -115,19 +129,66 @@ async def test_null_path_left_null(db):
     assert got is None
 
 
-async def test_et_video_path_converted_by_material_id(db):
-    """ET 影片以 MATERIAL_ID（整數，需 ::text）為切點。"""
+@pytest.mark.parametrize(
+    ("material_id", "stored", "expected"),
+    [
+        pytest.param(
+            11,
+            r"C:\Users\dev\TBMS_git\worktrees\feature-et\backend\var\et_videos\11\29ef.mp4",
+            "11/29ef.mp4",
+            id="一般情形",
+        ),
+        pytest.param(
+            # Code Review 實測抓到的缺陷：路徑含 srv2，以「首次出現處」為切點會
+            # 命中 srv2 的 2，切出 2/et_videos/2/29ef.mp4——錯誤但 position()>0 成立，
+            # 「切不出來」的盤點條件抓不到，會被靜默寫入錯誤值。
+            2,
+            r"\data\srv2\et_videos\2\29ef.mp4",
+            "2/29ef.mp4",
+            id="短識別碼-前綴目錄含同數字",
+        ),
+        pytest.param(
+            1,
+            r"\srv1\v1\et_videos\1\abc.mp4",
+            "1/abc.mp4",
+            id="短識別碼-多處碰撞",
+        ),
+    ],
+)
+async def test_et_video_path_converted_by_material_id(db, material_id, stored, expected):
+    """ET 影片以最後兩段取相對片段——短數字 MATERIAL_ID 特別容易被前綴目錄誤命中。"""
     mod = _load_migration()
     await db.execute(
         text('CREATE TEMP TABLE "ET_MATERIAL_VIDEO" ("MATERIAL_ID" bigint, "FILE_PATH" varchar(500)) ON COMMIT DROP')
     )
     await db.execute(
-        text('INSERT INTO "ET_MATERIAL_VIDEO" VALUES (:m, :p)'),
-        {"m": 11, "p": r"C:\Users\dev\TBMS_git\worktrees\feature-et\backend\var\et_videos\11\29ef.mp4"},
+        text('INSERT INTO "ET_MATERIAL_VIDEO" VALUES (:m, :p)'), {"m": material_id, "p": stored}
     )
     await db.execute(text(dict(mod.TARGETS)["ET_MATERIAL_VIDEO.FILE_PATH"]))
     got = (await db.execute(text('SELECT "FILE_PATH" FROM "ET_MATERIAL_VIDEO"'))).scalar_one()
-    assert got == "11/29ef.mp4"
+    assert got == expected
+
+
+async def test_leftover_query_flags_rows_that_failed_the_guard(db):
+    """未通過守門的列須被盤點查詢抓到——「切出來但切錯」也算，不只「完全切不出來」。"""
+    mod = _load_migration()
+    await db.execute(
+        text('CREATE TEMP TABLE "DM_DOC_VERSION" ("DOC_ID" varchar(20), "FILE_PATH" varchar(500)) ON COMMIT DROP')
+    )
+    await db.execute(
+        text('CREATE TEMP TABLE "DM_REVIEW" ("DOC_ID" varchar(20), "OBSOLETE_FILE_PATH" varchar(500)) ON COMMIT DROP')
+    )
+    await db.execute(
+        text('CREATE TEMP TABLE "ET_MATERIAL_VIDEO" ("MATERIAL_ID" bigint, "FILE_PATH" varchar(500)) ON COMMIT DROP')
+    )
+    await db.execute(
+        text('INSERT INTO "DM_DOC_VERSION" VALUES (:d, :p)'),
+        {"d": "DM-MANUAL-900010", "p": "/nonexistent/test.pdf"},  # 最後兩段是 nonexistent/test.pdf → 對不上
+    )
+    counts = {row.col: row.n for row in (await db.execute(text(mod.LEFTOVER_SQL))).all()}
+    assert counts["DM_DOC_VERSION.FILE_PATH"] == 1
+    assert counts["DM_REVIEW.OBSOLETE_FILE_PATH"] == 0
+    assert counts["ET_MATERIAL_VIDEO.FILE_PATH"] == 0
 
 
 async def test_obsolete_attachment_path_converted(db):
