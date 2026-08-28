@@ -93,6 +93,8 @@ def test_mail_plaintext_allowed_when_suppress_send() -> None:
         DEBUG=False,
         FRONTEND_BASE_URL="https://edms.example.com",  # DEBUG=false 下需正式網域，避開 prod frontend 護欄
         TRUSTED_PROXY_COUNT=0,  # DEBUG=false 下需明示（見 _validate_trusted_proxy_count_explicit）
+        DM_FILE_STORAGE_ROOT="/srv/edms/dm_files",  # DEBUG=false 下須絕對路徑（見 _validate_storage_roots_absolute）
+        ET_VIDEO_STORAGE_ROOT="/srv/edms/et_videos",
         MAIL_SERVER="smtp.example.com",
         MAIL_STARTTLS=False,
         MAIL_SSL_TLS=False,
@@ -109,6 +111,8 @@ def _settings_with_frontend(url: str, *, debug: bool) -> Settings:
         DEBUG=debug,
         FRONTEND_BASE_URL=url,
         TRUSTED_PROXY_COUNT=0,  # 聚焦 FRONTEND_BASE_URL 驗證，避開 production 明示設定護欄
+        DM_FILE_STORAGE_ROOT="/srv/edms/dm_files",  # 同上，避開 storage root 絕對路徑護欄
+        ET_VIDEO_STORAGE_ROOT="/srv/edms/et_videos",
     )
 
 
@@ -198,6 +202,9 @@ def _settings_for_proxy_count(**overrides: object) -> Settings:
         "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
         "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
         "FRONTEND_BASE_URL": "https://edms.example.com",
+        # 聚焦 TRUSTED_PROXY_COUNT 驗證，避開 storage root 絕對路徑護欄（#233）
+        "DM_FILE_STORAGE_ROOT": "/srv/edms/dm_files",
+        "ET_VIDEO_STORAGE_ROOT": "/srv/edms/et_videos",
     }
     kwargs.update(overrides)
     return Settings(**kwargs)  # type: ignore[arg-type]
@@ -229,3 +236,66 @@ def test_trusted_proxy_count_upper_bound() -> None:
     """上限 8：明顯誤設（如把毫秒數填進來）於啟動即擋。"""
     with pytest.raises(ValueError):
         _settings_for_proxy_count(DEBUG=True, TRUSTED_PROXY_COUNT=99)
+
+
+# ── storage root production 護欄（#233 AC8）──────────────────────
+# 兩個落盤根的預設值是相對路徑（./var/dm_files、./var/et_videos），storage_root() 以
+# os.path.realpath 解析 → 結果依 process 的工作目錄而定。同一份設定從不同目錄啟動會
+# 得到不同的 root。#160 close 留言已記為 Security LOW-4（當時只留建議、未加護欄）；
+# FILE_PATH 改存相對路徑後，root 設錯的後果更集中（所有檔案一起讀不到），故補上護欄。
+
+
+def _prod_settings(**overrides) -> Settings:
+    """建構一份通過其他 prod 護欄的 Settings，好讓測試聚焦在 storage root。"""
+    base = dict(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",
+        TRUSTED_PROXY_COUNT=0,
+        DM_FILE_STORAGE_ROOT="/srv/edms/dm_files",
+        ET_VIDEO_STORAGE_ROOT="/srv/edms/et_videos",
+    )
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_prod_absolute_storage_roots_accepted() -> None:
+    """兩個 root 皆為絕對路徑時 production 正常啟動。"""
+    s = _prod_settings()
+    assert s.DM_FILE_STORAGE_ROOT == "/srv/edms/dm_files"
+
+
+@pytest.mark.parametrize("field", ["DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT"])
+def test_prod_relative_storage_root_rejected(field: str) -> None:
+    """production 下相對 root 一律擋，且錯誤訊息指名是哪一個變數。"""
+    with pytest.raises(ValueError) as e:
+        _prod_settings(**{field: "./var/whatever"})
+    assert field in str(e.value)
+
+
+def test_prod_default_storage_root_rejected() -> None:
+    """預設值本身就是相對路徑，未明示設定即應擋下（防「忘了設」靜默塌縮）。"""
+    base = dict(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",
+        TRUSTED_PROXY_COUNT=0,
+    )
+    with pytest.raises(ValueError):
+        Settings(**base)
+
+
+def test_dev_relative_storage_root_allowed() -> None:
+    """DEBUG=true 之本機開發不受影響——相對 root 是 dev 的便利預設。"""
+    s = Settings(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=True,
+    )
+    assert s.DM_FILE_STORAGE_ROOT == "./var/dm_files"
+    assert s.ET_VIDEO_STORAGE_ROOT == "./var/et_videos"

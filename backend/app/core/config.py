@@ -1,4 +1,5 @@
 import ipaddress
+import os
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -72,11 +73,15 @@ class Settings(BaseSettings):
     INVITE_RESEND_COOLDOWN_SEC: int = Field(default=600, ge=0)
 
     # DM 文件上傳落盤根目錄（US5）——上傳之檔案位元組寫入此根下、以系統產生之 FILE_ID 命名，
-    # DB 存絕對 FILE_PATH（os.path.abspath，見 dm/editor/storage.py）。讀寫端皆經 dm/document/file_paths
-    # 之 storage-root 圍籬（#160）。走 config（依部署環境定；正式建議設絕對路徑、可換物件儲存）。
+    # DB 存**相對於本根目錄**之 FILE_PATH（`{doc_id}/{file_id}.{ext}`，見 dm/editor/storage.py）。
+    # 讀寫端皆經 dm/document/file_paths 之 storage-root 圍籬（#160）。
+    # ⚠️ 存相對路徑是 #233 的修正：舊版存絕對路徑，換 worktree / 換機器 / 換部署目錄即全數失聯，
+    # 且無法以複製檔案救回（圍籬擋在檔案存在性檢查之前）。改動後只需搬目錄 + 改本設定，DB 不必動。
+    # production 下必須為絕對路徑（見 _validate_storage_roots_absolute）；相對值依 process 工作目錄解析。
     DM_FILE_STORAGE_ROOT: str = "./var/dm_files"
 
-    # ET 教材影片落盤根目錄（#185）——比照 DM_FILE_STORAGE_ROOT，DB 僅存相對路徑。
+    # ET 教材影片落盤根目錄（#185）——比照 DM_FILE_STORAGE_ROOT，DB 亦存相對路徑（#233 起實際成立；
+    # 在此之前本註解與實作不符，實際存的是絕對路徑）。
     # ⚠️ 影片單檔上限 500MB（DP_PARAM.ET_VIDEO_MAX_SIZE_MB），寫檔須**串流分塊**，
     # 不可比照 dm/editor/storage.py 之 save_upload(data: bytes) 一次讀進記憶體。
     ET_VIDEO_STORAGE_ROOT: str = "./var/et_videos"
@@ -168,6 +173,31 @@ class Settings(BaseSettings):
                 "TRUSTED_PROXY_COUNT 在 production（DEBUG=false）必須明示設定："
                 "應用直接對外設 0，反向代理後方設實際追加段數（見 docs/ref/deployment-client-ip.md）"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_storage_roots_absolute(self) -> "Settings":
+        """production 護欄：兩個落盤根必須是絕對路徑（#233）。
+
+        `DM_FILE_STORAGE_ROOT` / `ET_VIDEO_STORAGE_ROOT` 的預設值是相對路徑，而
+        `storage_root()` 以 `os.path.realpath` 解析——結果依 **process 的工作目錄**而定。
+        同一份設定從不同目錄啟動即得到不同的 root，且不會有任何錯誤訊息。
+
+        後果在 `FILE_PATH` 改存相對路徑後更集中：root 一錯，**全部檔案一起讀不到**
+        （圍籬擋在檔案存在性檢查之前，回 404 而非 500，只留一行 warning）。此即 #160
+        close 留言記錄之 Security LOW-4，當時只留建議未加護欄，於此補上。
+
+        比照 `_validate_frontend_base_url` / `_validate_trusted_proxy_count_explicit`
+        的既有作法於啟動即擋；dev（DEBUG=true）維持相對路徑的便利預設。
+        """
+        if not self.DEBUG:
+            for field in ("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT"):
+                value = getattr(self, field).strip()
+                if not value or not os.path.isabs(value):
+                    raise ValueError(
+                        f"{field} 在 production（DEBUG=false）必須為絕對路徑（目前為 {value!r}）："
+                        "相對路徑依 process 工作目錄解析，換啟動位置即讀不到既有檔案"
+                    )
         return self
 
     @property
