@@ -301,11 +301,30 @@ export function EtCourseEditorPage() {
     },
   })
 
+  /**
+   * 「儲存並發布」的第一步——**先把當前編輯存檔**，成功後才開視窗跑檢核。
+   *
+   * 少了這步，教師剛在畫面上填好起訖時間、還沒存就按發布，檢核讀到的是資料庫裡
+   * **尚未更新**的舊值，會回報「課程起訖時間須填寫完整」——而欄位裡明明填著。
+   * 按鈕寫的是「儲存並發布」，行為也該如此。
+   *
+   * 與 `saveMut` 分開是因為那條成功後會導回課程列表（對齊 wireframe「儲存後回到
+   * 卡片網格」），發布流程要留在原頁把結果視窗開起來。
+   */
+  const saveThenCheckMut = useMutation({
+    mutationFn: () => coursesApi.update(courseId as number, { ...toPayload(), version: course?.version ?? 0 }),
+    onSuccess: () => {
+      invalidate()
+      setBlockers([])
+      setPublishResult(null)
+      setPublishOpen(true)
+      checkMut.mutate()
+    },
+    onError: handleError,
+  })
+
   const openPublish = () => {
-    setBlockers([])
-    setPublishResult(null)
-    setPublishOpen(true)
-    checkMut.mutate()
+    if (validateForm()) saveThenCheckMut.mutate()
   }
 
   /**
@@ -321,7 +340,12 @@ export function EtCourseEditorPage() {
     }
   }
 
-  const handleSave = () => {
+  /**
+   * 基本資料驗證——「儲存草稿」與「儲存並發布」共用。
+   *
+   * 有錯時把訊息寫進 `errors`（逐欄標示）並回 `false`；通過則清空並回 `true`。
+   */
+  const validateForm = (): boolean => {
     const parsed = CourseFormSchema.safeParse(form)
     if (!parsed.success) {
       const next: Record<string, string> = {}
@@ -330,7 +354,7 @@ export function EtCourseEditorPage() {
         if (!next[key]) next[key] = issue.message
       }
       setErrors(next)
-      return
+      return false
     }
     // 時間規則（SA 裁示 2026-08-24）：起始須 ≥ 當下——但**只對改動過的值**成立；
     // 迄止須晚於起始（後端亦強制，此處為即時回饋）。
@@ -345,10 +369,14 @@ export function EtCourseEditorPage() {
     }
     if (Object.keys(timeErrors).length > 0) {
       setErrors(timeErrors)
-      return
+      return false
     }
     setErrors({})
-    saveMut.mutate()
+    return true
+  }
+
+  const handleSave = () => {
+    if (validateForm()) saveMut.mutate()
   }
 
   /**
@@ -960,7 +988,12 @@ export function EtCourseEditorPage() {
               {status === "DRAFT" && (
                 <Tooltip title={isNew ? "請先儲存草稿後再發布" : ""}>
                   <span>
-                    <Button size="small" variant="contained" disabled={isNew} onClick={openPublish}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={isNew || saveThenCheckMut.isPending}
+                      onClick={openPublish}
+                    >
                       儲存並發布
                     </Button>
                   </span>

@@ -134,13 +134,12 @@ class EtSurveyService:
         question = await self._surveys.get_question(db, sq_id)
         if question is None:
             raise _QUESTION_NOT_FOUND
-        await self._require_editable(db, question.survey_id, operator.user_id)
+        survey = await self._require_editable(db, question.survey_id, operator.user_id)
         ensure_option_count_valid(len(req.options))
         rowcount = await self._surveys.replace_question(
             db, sq_id, req.version, stem=req.stem, options=[o.option_text for o in req.options], operator=operator
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_SURVEY_QUESTION")
-        survey = await self._surveys.get(db, question.survey_id)
         await self._log(db, "UPDATE", operator.user_id, survey.course_id, "更新問卷題目")
 
     async def delete_question(self, db: AsyncSession, sq_id: int, *, operator: OperatorInfo) -> None:
