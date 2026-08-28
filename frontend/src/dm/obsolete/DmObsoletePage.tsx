@@ -18,10 +18,9 @@ import { useNavigate } from "react-router-dom"
 import { downloadObsoleteCsv } from "./obsoleteService"
 import { EMPTY_OBSOLETE_FILTERS } from "./schemas"
 import type { ObsoleteFilters } from "./schemas"
-import { useObsoleteSearch } from "./useObsolete"
+import { useObsoleteAccess, useObsoleteSearch } from "./useObsolete"
 import { Pagination } from "../../components/Pagination"
 import { useNotification } from "../../contexts/NotificationContext"
-import { toApiError } from "../../services/http"
 import { formatDateTime } from "../../utils/date"
 import { DM_CATEGORIES } from "../library/schemas"
 
@@ -45,9 +44,14 @@ export function DmObsoletePage() {
   const [page, setPage] = useState(1)
   const [exporting, setExporting] = useState(false)
 
-  const { data, isPending, isError, error } = useObsoleteSearch({ ...applied, page, limit: PAGE_SIZE })
-  // 非管理者直連本頁：後端清單 API 回 403（FR-001 擋直連）→ 顯示無權限、不渲染查詢 UI（DM-MSG-DM06-002）
-  const forbidden = isError && toApiError(error).status === 403
+  // 先以 access 端點判權限：非管理者不渲染搜尋 UI、清單查詢僅在具管理者權限時才發（避免先閃搜尋列再跳無權限）。
+  const { data: access, isPending: accessPending, isError: accessError } = useObsoleteAccess()
+  const canAccess = access?.can_access ?? false
+  const denied = accessError || access?.can_access === false
+  const { data, isPending, isError } = useObsoleteSearch(
+    { ...applied, page, limit: PAGE_SIZE },
+    { enabled: canAccess },
+  )
 
   // 即時篩選：任一條件異動即防抖套用查詢並回第一頁，無「搜尋」按鈕
   useEffect(() => {
@@ -73,14 +77,28 @@ export function DmObsoletePage() {
 
   const rows = data?.data ?? []
 
-  // 無權限（非管理者）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（後端亦已擋，前端呼應）
-  if (forbidden) {
+  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM06-002）
+  if (denied) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography variant="h5" gutterBottom>
           已廢止文件查詢
         </Typography>
         <Alert severity="error">您無權限存取此頁面</Alert>
+      </Box>
+    )
+  }
+
+  // 權限確認中：僅顯示標題 + spinner，不先閃搜尋列（避免非管理者看到搜尋 UI 後才跳無權限）
+  if (accessPending) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography variant="h5" gutterBottom>
+          已廢止文件查詢
+        </Typography>
+        <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+          <CircularProgress size={28} />
+        </Box>
       </Box>
     )
   }
