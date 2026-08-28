@@ -29,7 +29,7 @@
 | 6 | 系統儀表板（入口頁 DM 概況 widget，#89）| US7 / UCDM02 | P2-延伸 | T045 ~ T046 | #4, #5；DP #89 | [#193](https://github.com/sti-fhb/EDMS/issues/193) | ✅ 已交付（PR #195；#89 widget）|
 | 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5（本 issue 延伸 US6 核准 / 退回）| [#206](https://github.com/sti-fhb/EDMS/issues/206) | ✅ 已交付（PR #210；follow-up #211）|
 | 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5；#7（撤回廢止）| [#219](https://github.com/sti-fhb/EDMS/issues/219) | 🚀 已開立 [#219](https://github.com/sti-fhb/EDMS/issues/219) |
-| 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | — | 待補 |
+| 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | [#230](https://github.com/sti-fhb/EDMS/issues/230) | 🚀 已開立 [#230](https://github.com/sti-fhb/EDMS/issues/230) |
 | 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | — | 待補 |
 | 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3-輔助 | T057 ~ T059 | #5；ET 引用端 | [#183](https://github.com/sti-fhb/EDMS/issues/183) | ✅ 已交付（PR #189；契約 #187；T059 廢止通知範圍外＝裁示 A + 待 US8）|
 | 12 | 閱讀統計與 KPI + 排程 SCHDM001 | US13 / UCDM13 | P2-延伸 | T059a ~ T059c | #3；DP 排程引擎 | — | 待補 |
@@ -718,9 +718,69 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #9 ~ #10：待補（增量模式）
+## Issue #9：[P2-延伸] DM — 已廢止文件查詢（US10 / UCDM08 / DM06）（GitHub [#230](https://github.com/sti-fhb/EDMS/issues/230)，🚀 已開立）
 
-US10 已廢止文件查詢（#9）/ US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us10.md](spec_us10.md)（FR-001~005，UCDM08，訊息 DM-MSG-DM06-001/002）；[data-model.md](data-model.md)（`DM_DOCUMENT`（STATUS=OBSOLETE）、`DM_DOC_VERSION`（末版版號）、`DM_REVIEW`（OBSOLETE 已核准週期：申請人 / 核准者 / 廢止時間 / 廢止原因 / 廢止附件）、`DM_USER_ROLE`（DM_ADMIN 判定））
+**對應畫面**：DM06 已廢止文件查詢（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-obsolete`）——**入口與後端皆僅 DM_ADMIN 可存取**
+**階段**：P2-延伸
+**涵蓋 Tasks**：T053（已廢止查詢清單 + 搜尋）、T054（CSV 匯出 + read-only 詳細頁導向 + 入口 / 存取閘）
+
+## 任務說明
+
+實作 **DM06 已廢止文件查詢**（管理者，供稽核 / 醫療糾紛追溯 / 法規查核）：DM_ADMIN 以關鍵字（文件名 / 廢止原因）、分類、廢止日期區間搜尋**已廢止（STATUS=OBSOLETE）**文件，清單呈現廢止脈絡欄位，點列進入 **US4 read-only 詳細頁**檢視歷史版本，並可**匯出 CSV** 供封存。已廢止文件不出現於文件庫主清單（US3 已排除），一般使用者無法存取。
+
+> ℹ️ **讀取型全端 issue**：後端為唯讀查詢 + CSV 匯出；**read-only 詳細頁（US4 FR-006：隱藏檔案+文件資訊、版本歷程自動展開、僅預覽、廢止 banner + 廢止附件下載）已於 #3 交付、本 issue 直接重用**，不改動 DM02 瀏覽語意。本 issue 不產生廢止（廢止申請 / 核准屬 US8 / US6）。
+
+## 範圍
+
+**後端**（新模組 `app/dm/obsolete_archive/`〔暫名，開工時定〕，router → service → repository；與 US8 廢止申請之 `app/dm/obsolete/` 分離——一為查詢、一為寫入）：
+- **T053 查詢清單**（FR-002/003）：`GET /api/dm/obsolete-archive/documents`——列 STATUS=OBSOLETE 文件，搜尋條件：關鍵字（`DM_DOCUMENT.DOC_NAME` / 廢止原因 `DM_REVIEW.OBSOLETE_REASON`）、分類、廢止日期區間（廢止核准完成時間 `DM_REVIEW.COMPLETE_DATE`）。回欄位（FR-003）：文件名稱（含末版版號）/ 分類 / 原撰寫者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因。資料來源＝`DM_DOCUMENT` join `DM_DOC_VERSION`（末版）join `DM_REVIEW`（該文件 OBSOLETE 且 APPROVED 之週期）。後端分頁 `paginate()`（依廢止時間新→舊）。
+- **T054 CSV 匯出**（FR-005）：`GET /api/dm/obsolete-archive/documents/export`——依相同查詢條件回 CSV（欄位同清單），供稽核封存。
+- **存取閘**（FR-001）：兩端點皆掛 `get_dm_context` + **細粒度 `DM_ADMIN` 檢核**（非管理者 → 403，對應 DM-MSG-DM06-002）；**後端 MUST 擋直接 URL 存取**、非僅前端隱藏。查無結果回空清單（前端呈現 DM-MSG-DM06-001）。
+- **入口可見性判定**：提供 DM_ADMIN 判定供前端側欄 per-item 閘（資料來源待 SA 定案，見注意事項）。
+
+**前端**（`frontend/src/dm/obsolete/DmObsoletePage.tsx` 現為 stub、於本 issue 填實）：DM06 查詢頁——搜尋列（關鍵字 / 分類 / 廢止日期區間）+ 結果清單（FR-003 欄位）+「匯出 CSV」鈕；點列導向 `/dm/documents/{docId}`（US4 read-only 詳細頁，已支援 OBSOLETE）；空結果提示 DM-MSG-DM06-001。側欄「已廢止文件查詢」項**僅 DM_ADMIN 顯示**（per-item 角色閘，比照 US9 個人專區入口機制）。
+
+**測試**：後端 int（DM_ADMIN 查得已廢止清單、關鍵字 / 分類 / 廢止日期區間過濾、欄位正確含末版版號與廢止脈絡、CSV 匯出內容、非 DM_ADMIN 403〔清單 + 匯出 + 直連〕、未登入 401、查無回空）+ 前端（查詢渲染 / 空結果提示 / 匯出鈕 / 點列導向 read-only 詳細、非管理者不顯示入口）。
+
+## 驗收條件
+
+- [ ] DM06 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直接 URL 存取**（FR-001、AC1/AC6、DM-MSG-DM06-002）
+- [ ] 可依關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間查詢已廢止文件（FR-002、AC2）
+- [ ] 清單欄位含文件名稱（含末版版號）/ 分類 / 原撰寫者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因（FR-003、AC3）
+- [ ] 點任一筆進入 US4 read-only 詳細頁（隱藏檔案+文件資訊、版本歷程自動展開、僅預覽、廢止 banner + 廢止附件下載）（FR-004、AC4；重用 #3）
+- [ ] 支援 CSV 匯出當前查詢結果（FR-005、AC5）
+- [ ] 查無結果顯示 DM-MSG-DM06-001（FR-002）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#3 US4（已交付）**：read-only 詳細頁模式（FR-006：OBSOLETE read-only + 廢止 banner + 廢止附件下載）——本 issue 之點列去向直接重用，不重建
+- **#5 US6（已交付）/ #7 US8（已交付）**：已廢止文件之來源（廢止申請 → 核准）；`DM_REVIEW` OBSOLETE 已核准週期之申請人 / 核准者 / 時間 / 原因 / 附件
+- **#2 US3（已交付）**：文件庫已排除 OBSOLETE、確保已廢止文件僅由 DM06 查閱
+- **#127 Foundation（已交付）**：`DM_USER_ROLE`（DM_ADMIN 判定）、`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_REVIEW`
+- **DP #89 導覽重構（已落地）**：依權限側欄——DM06 入口掛其上（per-item DM_ADMIN 閘）
+
+## 注意事項
+
+- **入口 / 存取閘為 DM_ADMIN**（與 US9 個人專區「編輯者或審核者」不同閘）：FR-001 要求**後端擋直連**，非僅前端隱藏；細粒度授權以 `has_role(ctx.roles, DM_ADMIN)` 判定。
+- **per-item 側欄角色閘資料來源**（待 SA 定案，同 US9 SA Q1 脈絡）：DM-local 判定端點（如 `GET /api/dm/obsolete-archive/access` → `{ can_access }`，不動 DP module-summary）vs 擴充 DP `module-summary` 帶 DM 角色細節（`is_admin` 等）——US9 採前者（A 過渡），本 issue 沿用或收斂由 `/sti-plan` 提請 SA。
+- **模組分離**：US8 廢止**申請**（寫入）已在 `app/dm/obsolete/`；本 issue 為廢止**查詢**（唯讀），另立模組避免讀寫混雜、命名勿衝突。
+- **read-only 詳細頁不重建**：US4 FR-006 已實作（`dm/detail` 之 `is_obsolete` / `obsolete_info` + 版本歷程自動展開 + 廢止附件下載授權含 DM_ADMIN）；本 issue 僅導向、不改 DM02。
+- **CSV 匯出**：欄位對齊清單；注意廢止原因等文字之 CSV 跳脫（逗號 / 換行 / 引號），避免格式破損。
+
+## 相關文件
+
+- [spec_us10.md](spec_us10.md)、[spec_us4.md](spec_us4.md)（FR-006 read-only）、[spec_us8.md](spec_us8.md)（廢止申請）、[spec_us6.md](spec_us6.md)（核准廢止）、[data-model.md](data-model.md)、[tasks.md](tasks.md)（T053-T054）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-obsolete`）
+
+**Labels**：`P2-延伸`, `DM-文件管理`, `US10`
+
+---
+
+## Issue #10：待補（增量模式）
+
+US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
 
 ---
 
