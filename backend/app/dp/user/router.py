@@ -17,6 +17,7 @@ from app.core.rate_limit import (
     SlidingWindowRateLimiter,
     rate_limit_by_ip,
 )
+from app.core.request_context import get_client_ip
 from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.email_change_service import EmailChangeService
 from app.dp.user.forgot_service import ForgotPasswordService, ResetPasswordService
@@ -74,8 +75,37 @@ _VERIFY_SEND_COOLDOWN_DEFAULT = 600
 
 
 def _verify_send_key(email: str) -> str:
-    """驗證信寄送冷卻分桶鍵（register / resend 共用同一 Email 額度）。"""
+    """驗證信寄送冷卻分桶鍵（register / resend 共用同一 Email 額度）。**只在真的寄出信時蓋章。**"""
     return f"verify-send:acct:{email}"
+
+
+def _verify_send_probe_key(email: str) -> str:
+    """「未寄出」時改蓋的分桶鍵：只對發起者自己生效（#213 候選 2）。
+
+    原本 resend 是**無條件**蓋 Email 章（為防列舉：讓 429 的有無不因該 Email 是否有待驗證列而異）。
+    但 resend 對「Email 不存在 / 是 ADMIN_INVITE / 已逾期」是靜默不寄，於是任何匿名者打一次
+    resend 就能替任意 Email 蓋 600 秒章，而該 key 與 register 共用 → 受害者註冊得到 429，
+    每 10 分鐘重打一次即可**無限期封鎖**，且無稽核、無寄信紀錄、狀態只在行程記憶體
+    （「重啟服務好一下、幾分鐘又壞」會把排查方向整個帶錯）。
+
+    改為「冷卻由**信**來武裝」：真的寄出才蓋 Email 章（防狂發語意不變），沒寄信只蓋本 key，
+    使發起者自己重打仍得到形狀完全相同的 429、但不波及他人。
+
+    key 必須帶 email 而非只帶 IP：辦公室 / 教室 NAT 下，一個人探測會擋掉同事對**自己** Email
+    的重寄。IP 缺失（無法解析 client）時退 "unknown" 分桶——該情境下所有請求共用一桶，
+    退化為與改動前相近的行為，不會比原本更寬鬆。
+
+    已知取捨（記於 #213 決策留言）：key 基數由 |email| 變為 |email| + |ip×email|。攻擊者付的成本
+    其實**沒有變**——改動前每次 resend 也蓋一個 acct key，同 IP 對同 email 重打第二次起就 429、
+    不再產生新 key，所以要灌 key 一樣得換 email、每請求 1 個 key。基數膨脹只發生在正常的 NAT
+    多人使用上，那是有界的。
+
+    `VerifySendCooldown` 達 `_max_keys` 上限時為 **fail-open**（不擋，交 IP 限流兜底）；穩態 key 數
+    約為「到達率 × `_MAX_RETENTION_SEC`」，故單一 IP **永遠到不了**上限（10 次/分 × 1 小時保留
+    ≈ 600 個 key）。實際門檻與後果見 `core/cooldown.py` 之 `_MAX_RETENTION_SEC` 註解（該處已依
+    review 由 1 天下調為 1 小時）。
+    """
+    return f"verify-send:probe:{get_client_ip() or 'unknown'}:{email}"
 
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -139,12 +169,17 @@ async def register(
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
     key = _verify_send_key(data.email)
     _verify_send_cooldown.check(key, cooldown_sec)
-    await _register_service.register(
+    sent = await _register_service.register(
         db,
         email=data.email,
         user_name=data.user_name,
     )
-    _verify_send_cooldown.record(key)
+    # 只在真的排入 outbox 才蓋章（冷卻由「信」武裝，同 resend 的處理）：send_email 對範本停用 /
+    # channel 非 EMAIL / 渲染失敗是正常回傳 0、不拋例外，那些情況下蓋章會把使用者鎖 600 秒卻連
+    # 一封信都沒收到。register 不需要 probe 章——它沒有「靜默不寄」的防列舉需求（已驗證帳號直接
+    # 回 409），且此路徑必然已寫入待驗證列，本身就受帳號維度限流約束。
+    if sent:
+        _verify_send_cooldown.record(key)
     return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
 
@@ -171,16 +206,25 @@ async def resend_verification(
 
     帳號維度**先 hit 限流、後查存在性**（同 forgot，防以 429 反推）。
 
-    驗證信寄送冷卻（#74）：check 於查存在性前、record 於服務返回後——對存在 / 不存在的
-    Email 皆 record，故 429 不因帳號是否存在而異（防列舉）；與 register 共用同一 Email 額度。
-    成功回應帶 retry_after（＝完整冷卻秒數）供前端起算倒數。
+    驗證信寄送冷卻（#74 + #213）：**兩個維度都 check**（皆於查存在性前，故 429 的有無不因該
+    Email 是否有待驗證列而異——防列舉），但**只有真的寄出信才蓋 Email 章**：
+
+    - 有寄出 → 蓋 `_verify_send_key`（Email 維度，與 register 共用額度、防對同一信箱狂發）
+    - 沒寄出 → 只蓋 `_verify_send_probe_key`（IP×Email 維度，只影響發起者自己）
+
+    改動理由見 `_verify_send_probe_key` 的 docstring（#213）：原本無條件蓋 Email 章，使任何匿名者
+    打一次 resend 就能無限期封鎖任意 Email 的自助註冊。
+
+    成功回應帶 retry_after（＝完整冷卻秒數）供前端起算倒數；兩條路徑的回應完全相同。
     """
     _resend_limiter.hit(f"resend:acct:{data.email}")
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
-    key = _verify_send_key(data.email)
-    _verify_send_cooldown.check(key, cooldown_sec)
-    await _resend_service.resend(db, email=data.email)
-    _verify_send_cooldown.record(key)
+    sent_key = _verify_send_key(data.email)
+    probe_key = _verify_send_probe_key(data.email)
+    _verify_send_cooldown.check(sent_key, cooldown_sec)
+    _verify_send_cooldown.check(probe_key, cooldown_sec)
+    sent = await _resend_service.resend(db, email=data.email)
+    _verify_send_cooldown.record(sent_key if sent else probe_key)
     return {"message": _RESEND_MESSAGE, "retry_after": cooldown_sec}
 
 

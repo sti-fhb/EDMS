@@ -227,6 +227,27 @@ describe("LoginOverlay", () => {
     expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled()
   })
 
+  it("註冊遇 429 → 訊息補「若您並未進行任何操作」的指引（#213）", async () => {
+    // 429 對「第一次註冊就被擋」的人完全無指引：他沒操作過任何東西，看不出這是別人觸發的冷卻。
+    // #213 已讓「沒寄出信的探測」不再波及他人，但本人在另一裝置註冊過、或有人真的觸發過一次
+    // 寄信，都還是會走到這裡。
+    server.use(
+      http.post("/api/register", () =>
+        HttpResponse.json(
+          { error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試", retry_after: 600 },
+          { status: 429 },
+        ),
+      ),
+    )
+    renderLogin()
+    const user = userEvent.setup()
+    await fillRegister(user, { email: "noidea@edms.local" })
+
+    expect(
+      await screen.findByText(/操作過於頻繁，請稍後再試（若您並未進行任何操作，請稍候再試或聯繫系統管理者）/),
+    ).toBeInTheDocument()
+  })
+
   it("冷卻綁定 Email：換一個 Email 後「建立帳號」不被前一個 Email 的冷卻誤擋", async () => {
     // 對 aaa 觸發 429 冷卻；換成從未觸發冷卻的 bbb 時，送出鈕應恢復可用（回歸：冷卻須綁定 Email）
     server.use(

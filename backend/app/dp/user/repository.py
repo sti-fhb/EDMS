@@ -226,6 +226,47 @@ class AuthRepository:
             )
         )
 
+    async def delete_pending_expired_before(self, db: AsyncSession, cutoff: datetime) -> int:
+        """刪除 EXPIRES_DATE 早於 cutoff 的**自助註冊**列，回傳刪除筆數（供每日清理排程，#226）。
+
+        **只清 `SELF_REGISTER`，不碰 `ADMIN_INVITE`**（review 修正）：逾期的管理者邀請**仍是 UI 物件**
+        ——`build_invite_list_stmt` 沒有效期條件，逾期邀請會列在「待啟用邀請」頁籤並顯示「已逾期」，
+        管理者可直接按「重寄邀請」，那正是 `spec_us4.md` AC10 所定義的情境。清掉它們會讓邀請從清單
+        靜默消失（週五寄的邀請，管理者週一就找不到）、`resend_invite` / `cancel_invite` 對舊 invite_id
+        回 404，且邀請的稽核鏈以無終結事件收尾。邀請由管理者以「取消邀請」主動收掉，本來就有 UI
+        與稽核；自助註冊列則在任何 UI 上都看不見，那才是需要排程清的一類。
+
+        單一 DELETE 語句而非逐筆：這些列已無業務意義、不需逐筆稽核（理由見 UsersService
+        之 purge_expired_pending），且量可能不小。
+        """
+        result = await db.execute(
+            delete(DpPendingRegistration).where(
+                DpPendingRegistration.kind == KIND_SELF_REGISTER,
+                DpPendingRegistration.expires_date < cutoff,
+            )
+        )
+        return result.rowcount or 0
+
+    async def delete_pending_expired_unless_invite(self, db: AsyncSession, email: str, now: datetime) -> int:
+        """條件式刪除：只在該 Email 的待驗證列**非管理者邀請且已逾期**時刪，回傳刪除筆數（#226）。
+
+        供管理者代建接手一筆逾期的自助註冊列使用。**不可用無條件版**：SELECT 讀到「逾期」到此處
+        DELETE 之間有 await 邊界，若該空窗內本人重新註冊或重寄（兩者都會產出一張**有效**的新列），
+        無條件刪除會把那張新列吃掉、後續 INSERT 也不會撞 UNIQUE（已刪空）→ 受害者剛收到的驗證連結
+        靜默失效，而稽核的 before_value 記的是舊列快照、與實際被刪的列不符。
+
+        與 `delete_pending_unless_active_invite`（#125，自助註冊覆蓋舊列用）是同一個 TOCTOU 形狀的
+        對稱處理：條件不成立時刪 0 筆，交由呼叫端轉乾淨的 409。
+        """
+        result = await db.execute(
+            delete(DpPendingRegistration).where(
+                DpPendingRegistration.email == email,
+                DpPendingRegistration.kind != KIND_ADMIN_INVITE,
+                DpPendingRegistration.expires_date <= now,
+            )
+        )
+        return result.rowcount or 0
+
     async def delete_pending_by_token_hash(self, db: AsyncSession, token_hash: str) -> None:
         """驗證通過後刪除該待驗證註冊列（已消費）。"""
         await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.token_hash == token_hash))

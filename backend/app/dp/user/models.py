@@ -43,7 +43,9 @@ class DpPendingRegistration(BaseModelHardDelete):
 
     一 Email 一筆待驗證（EMAIL UNIQUE）：重新註冊 / 重寄時以 Email 覆蓋（刪舊列 + 插新）。
     明文 token 僅入信中連結，本表只存其 SHA-256（同 DP_PWD_RESET）。consume / 逾時後硬刪除
-    （BaseModelHardDelete，無 DELETED），逾期未驗證列由排程清理。
+    （BaseModelHardDelete，無 DELETED）。逾期列由每日排程 SCHDP001 清理——**逾期滿
+    `_PENDING_RETENTION_DAYS` 天才刪**（見 `dp/users/service.py` 的 `purge_expired_pending`，#226）；
+    在此之前這句話是空話，SCHDP001 並未清這張表，逾期列會永久累積（而本表匿名可寫）。
 
     兩種來源以 KIND 區分（US4 #67），#212 之後**兩者形狀一致**：
     - SELF_REGISTER（US2 自助註冊）：PWD_HASH 恆為 NULL，使用者於驗證連結自設密碼。

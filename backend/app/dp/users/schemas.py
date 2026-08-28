@@ -1,11 +1,12 @@
 from datetime import datetime
-from typing import Annotated, Literal, Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel
 
-from app.core.schema_types import NormalizedEmailStr
+from app.core.schema_types import NormalizedEmailStr, SafeNameStr
 
-_NameStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+# 姓名一律走共用型別（strip + 長度 + 拒控制字元，理由見 core/schema_types.py，#225）
+_NameStr = SafeNameStr
 
 
 class UserResponse(BaseModel):
