@@ -122,7 +122,12 @@ export function DmObsoletePage() {
       <Paper sx={{ p: 2 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
           <Typography variant="subtitle2">已廢止文件{data ? `（共 ${data.meta.total} 筆）` : ""}</Typography>
-          <Button size="small" variant="outlined" disabled={exporting || rows.length === 0} onClick={onExport}>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={exporting || (data?.meta.total ?? 0) === 0}
+            onClick={onExport}
+          >
             匯出 CSV
           </Button>
         </Box>

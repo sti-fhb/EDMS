@@ -32,7 +32,14 @@ class ObsoleteArchiveRepository:
         date_from: date | None,
         date_to: date | None,
     ) -> list[ColumnElement[bool]]:
-        """組搜尋條件：已廢止文件 × 其核准廢止週期；關鍵字比對文件名 / 廢止原因，日期比對核准完成時間。"""
+        """組搜尋條件：已廢止文件 × 其核准廢止週期；關鍵字比對文件名 / 廢止原因，日期比對核准完成時間。
+
+        **不變量（doc_id join 不會重複列的依據）**：一份文件至多一筆 STATUS=APPROVED 的 OBSOLETE
+        review——OBSOLETE 為文件終態（editor `_ensure_not_obsolete` 擋已廢止文件再送審；廢止核准後
+        不再開新週期），故 `REVIEW_TYPE=OBSOLETE AND STATUS=APPROVED` 對每份 OBSOLETE 文件恰一筆
+        （被退回 / 撤回之 OBSOLETE 週期為 REJECTED/WITHDRAWN，不入此條件）。此不變量由 review 狀態機
+        維持；若未來新增「還原已廢止文件」等鬆動終態之功能，需同步在此加 DISTINCT / 每文件取一筆防護。
+        """
         conds: list[ColumnElement[bool]] = [
             DmDocument.deleted == 0,
             DmDocument.status == _OBSOLETE,

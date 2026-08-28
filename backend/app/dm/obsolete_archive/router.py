@@ -29,7 +29,7 @@ async def obsolete_access(ctx: DmContext = Depends(get_dm_context)) -> ObsoleteA
 async def list_obsolete(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
-    keyword: str | None = Query(None),
+    keyword: str | None = Query(None, max_length=200),  # 上限防過長 ILIKE（對齊 library/review，Security LOW）
     category: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -45,7 +45,7 @@ async def list_obsolete(
 async def export_obsolete(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
-    keyword: str | None = Query(None),
+    keyword: str | None = Query(None, max_length=200),  # 上限防過長 ILIKE（對齊 library/review，Security LOW）
     category: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),

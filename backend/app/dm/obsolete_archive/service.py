@@ -11,6 +11,7 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResult
 from app.dm.obsolete_archive.repository import ObsoleteArchiveRepository
@@ -88,14 +89,15 @@ class ObsoleteArchiveService:
     @staticmethod
     def _to_csv_row(r: Row) -> Sequence[str]:
         obsolete_at = r.obsolete_date.strftime("%Y-%m-%d %H:%M") if r.obsolete_date else ""
+        # 含使用者自由輸入欄位（文件名 / 版號 / 廢止原因 / 姓名）→ 一律過公式注入防護（CWE-1236）
         return [
-            r.doc_id,
-            r.doc_name,
-            r.latest_version_no or "",
-            r.category_name,
-            r.author_name or r.author_id or "",
+            sanitize_csv_cell(r.doc_id),
+            sanitize_csv_cell(r.doc_name),
+            sanitize_csv_cell(r.latest_version_no or ""),
+            sanitize_csv_cell(r.category_name),
+            sanitize_csv_cell(r.author_name or r.author_id or ""),
             obsolete_at,
-            r.applicant_name or r.applicant_id or "",
-            r.approver_name or r.approver_id or "",
-            r.obsolete_reason or "",
+            sanitize_csv_cell(r.applicant_name or r.applicant_id or ""),
+            sanitize_csv_cell(r.approver_name or r.approver_id or ""),
+            sanitize_csv_cell(r.obsolete_reason or ""),
         ]

@@ -152,6 +152,36 @@ async def test_only_approved_obsolete_included(db, client):
     assert "DM-SOP-000902" in ids and "DM-SOP-000903" not in ids
 
 
+async def test_no_duplicate_when_prior_rejected_obsolete_cycle(db, client):
+    """同文件曾有被退回之廢止週期（REJECTED）、之後才核准（APPROVED）→ 清單仍恰一列、total=1。"""
+    await _seed_user(db, "adm", "管理員")
+    await _grant(db, "adm", DM_ADMIN)
+    for uid in ("author1", "applicant1", "approver1"):
+        await _seed_user(db, uid, uid)
+    _, v = await _obsolete_doc(db, "DM-SOP-000909")
+    # 早於核准前的一筆被退回廢止週期（同文件、OBSOLETE、REJECTED）
+    db.add(
+        DmReview(
+            doc_id="DM-SOP-000909",
+            version_id=v.version_id,
+            review_type="OBSOLETE",
+            assigned_reviewer="approver1",
+            approver_user_id="approver1",
+            status="REJECTED",
+            submit_date=utcnow(),
+            complete_date=utcnow(),
+            reason="首次退回",
+            created_user="applicant1",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+
+    resp = await client.get("/api/dm/obsolete-archive/documents", headers=_headers("adm"))
+    ids = [r["doc_id"] for r in resp.json()["data"]]
+    assert ids.count("DM-SOP-000909") == 1 and resp.json()["meta"]["total"] == 1
+
+
 async def test_filter_by_keyword_name_or_reason(db, client):
     await _seed_user(db, "adm", "管理員")
     await _grant(db, "adm", DM_ADMIN)
@@ -260,3 +290,16 @@ async def test_export_csv_content(db, client):
     text = resp.content.decode("utf-8-sig")  # 去 BOM
     assert "DM-SOP-000908" in text and "停辦SOP" in text and "原作者A" in text
     assert '"裁撤,合併"' in text  # 含逗號欄位被雙引號包覆（csv 標準跳脫）
+
+
+async def test_export_csv_neutralizes_formula_injection(db, client):
+    """公式注入防護（CWE-1236）：以 = / @ 開頭之使用者輸入欄位匯出時前置單引號。"""
+    await _seed_user(db, "adm", "管理員")
+    await _grant(db, "adm", DM_ADMIN)
+    for uid in ("author1", "applicant1", "approver1"):
+        await _seed_user(db, uid, uid)
+    await _obsolete_doc(db, "DM-SOP-000912", doc_name="=SUM(A1:A9)", reason="@cmd")
+
+    resp = await client.get("/api/dm/obsolete-archive/documents/export", headers=_headers("adm"))
+    text = resp.content.decode("utf-8-sig")
+    assert "'=SUM(A1:A9)" in text and "'@cmd" in text  # 危險前導字元被中和
