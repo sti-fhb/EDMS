@@ -141,10 +141,24 @@
 | ET_QUESTION_002 | 422 | 正確選項之設定不符題型規定 |
 | ET_QUESTION_003 | 422 | 每題選項數須介於 2 至 6 個 |
 | ET_QUESTION_004 | 422 | 重排清單與測驗題目不一致 |
+| ET_SURVEY_001 | 404 | 查無此問卷 |
+| ET_SURVEY_002 | 409 | 一門課程僅可建立 1 份課後問卷 |
+| ET_SURVEY_003 | 422 | 已有學員填答，題目與選項不可修改 |
+| ET_SURVEY_004 | 422 | 每題至少需 2 個選項 |
+| ET_SURVEY_005 | 404 | 查無此問卷題目 |
+| ET_SURVEY_006 | 422 | 重排清單與問卷題目不一致 |
+| ET_PUBLISH_001 | 422 | 發布條件未滿足 |
+| ET_PUBLISH_002 | 409 | 課程狀態不允許發布 |
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
 >
 > `ET_TAG_001` / `002` / `003`（SRVET004 受控主檔轉接層）：比照 DM 之 `DM_CATALOG_001~003`，依 HTTP 狀態碼拆為三支——`001` 業務保護（422，「全體」等內建標籤不可停用 / 改名，伺服器端拒絕；DP 後台之前端隱藏僅為 UX）、`002` 名稱重複（409）、`003` 查無（404）。**不得共用單一代碼**，否則 DP 端 UI 無法單靠 error_code 分辨情境、只能解析訊息文字。
+
+> `ET_SURVEY_003`（題目凍結，#204）：`ET_SURVEY_RESPONSE_M` 存在任何未刪除紀錄即凍結，為**應用層**檢核而非 DB constraint。凍結僅涵蓋題目與選項之增改刪與重排；問卷名稱與 `IS_ACTIVE` **不受限**——AC 21 明訂此時教師僅可停用問卷，連停用都擋掉會使凍結後無路可走。
+>
+> `ET_SURVEY_004` 與 `ET_QUESTION_003` 看似同類但**規則不同**：問卷選項為「至少 2、**無上限**」（`data-model` §ET_SURVEY_OPTION 未訂上限），測驗選項為「2–6」。共用單一代碼會讓兩者的界限在維護時互相污染。
+>
+> `ET_PUBLISH_001`（#204）：回應除 `error_code` / `error_message` 外另帶 `blockers` 陣列（`code` / `message` / `target_id`），對應 ET-MSG-ET02-011 之「{缺漏項目}」。`message` 一律為靜態文案、**不內插測驗名稱等使用者輸入**，出問題的對象以 `target_id` 表達。
 
 ---
 

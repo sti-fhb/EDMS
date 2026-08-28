@@ -8,13 +8,15 @@
 使「版本不符」與「查無資料」的區辨留在 service。
 """
 
+from datetime import datetime
+
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL, ITEM_QUIZ
+from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ITEM_QUIZ
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.material.repository import EtMaterialRepository
@@ -69,6 +71,56 @@ class EtCourseRepository:
         )
         await db.flush()
         return result.rowcount
+
+    async def mark_published(
+        self,
+        db: AsyncSession,
+        course_id: int,
+        version: int,
+        *,
+        invitation_code: str,
+        published_at: datetime,
+        operator: OperatorInfo,
+    ) -> int:
+        """發布課程：狀態轉 `PUBLISHED`、寫入邀請碼與首次發布時間（#204）。
+
+        `FIRST_PUBLISHED_AT` 以 `COALESCE` 保留既有值——歷經再開課（`ET-11`）不變
+        （data-model §ET_COURSE）。本 issue 只由草稿發布一次，但寫法先對，避免
+        `ET-11` 接手時把首次發布時間覆寫成再開課時間。
+
+        帶樂觀鎖：檢核與寫入之間若有人改動課程，rowcount 為 0，呼叫端據此讓教師
+        重新載入——而不是拿一份過時的檢核結果硬寫。
+
+        Returns:
+            受影響列數。
+        """
+        result = await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == course_id, EtCourse.deleted == 0, EtCourse.version == version)
+            .values(
+                status=COURSE_PUBLISHED,
+                invitation_code=invitation_code,
+                first_published_at=func.coalesce(EtCourse.first_published_at, published_at),
+                version=EtCourse.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+        return result.rowcount
+
+    async def list_invitation_codes(self, db: AsyncSession) -> set[str]:
+        """所有已使用之邀請碼（供產碼時判重）。
+
+        **不濾 `DELETED = 0`**：邀請碼於 `ET_COURSE` 上是全域唯一約束
+        （`UQ_ET_COURSE_INVITATION_CODE`，全表），軟刪除的課程仍佔著它的碼。只查未
+        刪除的會讓產碼器以為某個碼可用，插入時才被約束擋下。
+
+        > 一次撈成集合是 `generate_invitation_code` 的要求——它的 `exists` 為**同步**
+        > callable，不能在裡面等待非同步查詢。
+        """
+        rows = await db.scalars(select(EtCourse.invitation_code).where(EtCourse.invitation_code.is_not(None)))
+        return set(rows)
 
     async def soft_delete(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
         """軟刪除課程本體。其下章節與項目由 service 呼叫章節 repository 連動處理。"""

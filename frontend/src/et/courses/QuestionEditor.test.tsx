@@ -138,14 +138,22 @@ describe("題目編輯器", () => {
     expect(values.options[0].is_correct).toBe(true)
   })
 
-  it("選項刪到剩 1 個時儲存被擋", async () => {
-    const user = userEvent.setup()
-    const { onSave } = renderEditor()
-    await user.click(screen.getByRole("button", { name: "刪除選項 2" }))
-    await user.click(screen.getByRole("button", { name: "儲存題目" }))
+  it("選項達下限 2 個時刪除鈕停用", async () => {
+    // 讓使用者刪光再被儲存擋下，等於白做一次——比照問卷之 SurveyQuestionEditor
+    // （#204 實測回饋）。schema 層的「少於 2 個被擋」仍留著，守的是繞過 UI 的請求，
+    // 測試在 itemSchemas.test.ts。
+    renderEditor()
+    expect(screen.getAllByRole("textbox", { name: /選項 \d 文字/ })).toHaveLength(2)
+    expect(screen.getByRole("button", { name: "刪除選項 1" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "刪除選項 2" })).toBeDisabled()
+  })
 
-    expect(await screen.findByText(/每題選項數須介於 2 至 6 個/)).toBeInTheDocument()
-    expect(onSave).not.toHaveBeenCalled()
+  it("超過下限時刪除鈕可用", async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await user.click(screen.getByRole("button", { name: "新增選項" }))
+
+    expect(screen.getByRole("button", { name: "刪除選項 1" })).toBeEnabled()
   })
 
   it("新增題目之初始值為單選、兩個空選項", () => {

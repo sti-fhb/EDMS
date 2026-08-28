@@ -798,8 +798,10 @@ export const handlers = [
       is_owner: true,
       tag_ids: [2],
       chapters: [
-        { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0 },
-        { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0 },
+        // `items` 為後端恆回之欄位（#203）——fixture 少了它，任何走訪項目的程式碼
+        // 都會在測試裡炸掉，而正式環境不會，屬最難察覺的一種假象。
+        { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] },
+        { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0, items: [] },
       ],
     }),
   ),
@@ -811,6 +813,46 @@ export const handlers = [
   http.put("/api/et/courses/:courseId/chapters/order", () => new HttpResponse(null, { status: 204 })),
   http.put("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
   http.delete("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
+  // ET02 課後問卷與發布（#204）：預設「尚未建立問卷」——**回 null 而非 404**，
+  // 問卷為選配（AC 23），「沒有」是正常狀態。個別測試以 server.use 覆蓋。
+  http.get("/api/et/courses/:courseId/survey", () => HttpResponse.json(null)),
+  http.post("/api/et/courses/:courseId/survey", ({ params }) =>
+    HttpResponse.json(
+      {
+        survey_id: 500,
+        course_id: Number(params.courseId),
+        survey_name: "課後滿意度問卷",
+        is_active: true,
+        version: 0,
+        frozen: false,
+        responded_count: 0,
+        pending_count: 0,
+        questions: [],
+      },
+      { status: 201 },
+    ),
+  ),
+  http.put("/api/et/surveys/:surveyId", () => new HttpResponse(null, { status: 204 })),
+  http.post("/api/et/surveys/:surveyId/questions", () =>
+    HttpResponse.json(
+      { sq_id: 600, stem: "題幹", sort_order: 1, version: 0, options: [] },
+      { status: 201 },
+    ),
+  ),
+  http.put("/api/et/surveys/:surveyId/questions/order", () => new HttpResponse(null, { status: 204 })),
+  http.put("/api/et/survey-questions/:sqId", () => new HttpResponse(null, { status: 204 })),
+  http.delete("/api/et/survey-questions/:sqId", () => new HttpResponse(null, { status: 204 })),
+  http.get("/api/et/courses/:courseId/publish-check", () =>
+    HttpResponse.json({ can_publish: true, blockers: [] }),
+  ),
+  http.post("/api/et/courses/:courseId/publish", ({ params }) =>
+    HttpResponse.json({
+      course_id: Number(params.courseId),
+      status: "PUBLISHED",
+      invitation_code: "01234567",
+      version: 1,
+    }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

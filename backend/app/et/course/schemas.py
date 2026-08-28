@@ -295,3 +295,39 @@ class TagOption(BaseModel):
     tag_id: int
     tag_name: str
     is_active: bool
+
+
+class PublishBlockerRow(BaseModel):
+    """一條發布缺漏（回應）。
+
+    `message` 為**靜態**文案、不內插使用者輸入；出問題的對象以 `target_id` 表達，
+    前端自行從已載入的課程詳細對照出名稱（見 `publish_rules` 模組 docstring）。
+    """
+
+    code: str
+    message: str
+    target_id: int | None = None
+
+
+class PublishCheckResult(BaseModel):
+    """發布預檢結果（回應）。
+
+    預檢是**體驗**、不是把關——讓教師在按下發布**之前**就看到缺漏。發布端點自身
+    會重跑同一套檢核，繞過預檢直接打 POST 一樣擋得下來。
+    """
+
+    can_publish: bool
+    blockers: list[PublishBlockerRow]
+
+
+class PublishResult(BaseModel):
+    """發布成功之結果（回應）。
+
+    `invitation_code` 於發布時產生、**發布後永久不可變更**（data-model §ET_COURSE）。
+    `first_published_at` 僅供稽核、不顯示於 UI，故**不在此回傳**。
+    """
+
+    course_id: int
+    status: str
+    invitation_code: str
+    version: int
