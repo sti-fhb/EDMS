@@ -5,6 +5,7 @@ import type {
   SurveyDetail,
   SurveyQuestionFormValues,
   SurveyQuestionRow,
+  SurveyTemplateRow,
 } from "./surveySchemas"
 
 /** ET02 課後問卷 API（US3 / #204）。 */
@@ -31,6 +32,31 @@ export const surveyApi = {
     payload: { survey_name: string; is_active: boolean; version: number },
   ): Promise<void> => {
     await http.put(`/et/surveys/${surveyId}`, payload)
+  },
+
+  /** 刪除問卷（**僅草稿課程**）；已發布課程後端回 422 `ET_SURVEY_007`。 */
+  remove: async (surveyId: number): Promise<void> => {
+    await http.delete(`/et/surveys/${surveyId}`)
+  },
+
+  /** 內建模板清單（不含題目內容）。 */
+  listTemplates: async (): Promise<SurveyTemplateRow[]> => {
+    const { data } = await http.get<SurveyTemplateRow[]>("/et/survey-templates")
+    return data
+  },
+
+  /**
+   * 套用模板——一次建立整組題目與選項，回傳套用後的問卷詳細。
+   *
+   * 走**單一端點**而非前端逐題呼叫：逐題呼叫時中途失敗會留下半套用的問卷，
+   * 教師得自己收拾而且不知道發生什麼事。
+   */
+  applyTemplate: async (surveyId: number, templateCode: string, version: number): Promise<SurveyDetail> => {
+    const { data } = await http.post<SurveyDetail>(`/et/surveys/${surveyId}/apply-template`, {
+      template_code: templateCode,
+      version,
+    })
+    return data
   },
 
   addQuestion: async (surveyId: number, values: SurveyQuestionFormValues): Promise<SurveyQuestionRow> => {
