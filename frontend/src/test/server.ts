@@ -301,6 +301,35 @@ export const handlers = [
   http.post("/api/dm/documents/:docId/obsolete", () =>
     HttpResponse.json({ review_id: 601, doc_status: "PENDING_OBSOLETE", notified: 1 }),
   ),
+  // US10 已廢止文件查詢（dm-obsolete-archive）
+  http.get("/api/dm/obsolete-archive/access", () => HttpResponse.json({ can_access: true })),
+  http.get("/api/dm/obsolete-archive/documents", () =>
+    HttpResponse.json({
+      data: [
+        {
+          doc_id: "DM-SOP-000901",
+          doc_name: "停辦作業SOP",
+          latest_version_no: "3.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "原作者A",
+          obsolete_date: "2026-06-20T08:30:00Z",
+          applicant_id: "u2",
+          applicant_name: "申請人B",
+          approver_id: "u3",
+          approver_name: "核准者C",
+          obsolete_reason: "部門裁撤",
+        },
+      ],
+      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dm/obsolete-archive/documents/export", () =>
+    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿文件編號,文件名稱\nDM-SOP-000901,停辦作業SOP\n").buffer, {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
   // US9 個人專區（dm-personal）
   http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })),
   http.get("/api/dm/personal/drafts", () =>

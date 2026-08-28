@@ -39,6 +39,14 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.queryByText("個人專區")).not.toBeInTheDocument())
   })
 
+  it("US10：具 DM 角色但非管理者（obsolete access can_access=false）時，隱藏「已廢止文件查詢」單項（其餘 DM 項仍在）", async () => {
+    server.use(http.get("/api/dm/obsolete-archive/access", () => HttpResponse.json({ can_access: false })))
+    renderWithProviders(<Sidebar />)
+    await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
+    expect(await screen.findByText("文件庫")).toBeInTheDocument() // 其餘 DM 項仍顯示
+    await waitFor(() => expect(screen.queryByText("已廢止文件查詢")).not.toBeInTheDocument())
+  })
+
   it("具 ET 權限時顯示「教育訓練」群組與其四個 /et 項目", async () => {
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("教育訓練")).toBeInTheDocument())

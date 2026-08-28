@@ -11,6 +11,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 
+import { useObsoleteAccess } from "../dm/obsolete/useObsolete"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
@@ -114,9 +115,14 @@ export function Sidebar() {
   // 個人專區入口可見性（US9 FR-004）：具編輯者或審核者才顯示；僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
   const { data: access } = usePersonalAccess(summary?.dm.has_role ?? false)
   const canPersonal = access?.can_access ?? false
+  // 已廢止文件查詢入口可見性（US10 FR-001）：具管理者才顯示；同上僅在具任一 DM 角色時查詢。
+  const { data: obsoleteAccess } = useObsoleteAccess(summary?.dm.has_role ?? false)
+  const canObsolete = obsoleteAccess?.can_access ?? false
   const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary)).map((group) => ({
     ...group,
-    items: group.items.filter((item) => !item.requiresDmPersonalAccess || canPersonal),
+    items: group.items.filter(
+      (item) => (!item.requiresDmPersonalAccess || canPersonal) && (!item.requiresDmAdminAccess || canObsolete),
+    ),
   }))
   return (
     <Box component="nav" aria-label="主導覽" sx={{ py: 0.5 }}>
