@@ -8,6 +8,7 @@
 """
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -36,15 +37,18 @@ class EtSurvey(BaseModel):
     __tablename__ = "ET_SURVEY"
     __table_args__ = (
         PrimaryKeyConstraint("SURVEY_ID", name="PK_ET_SURVEY"),
-        # ⚠️ 全表唯一（**未**排除軟刪除列），成立的前提是「問卷不可刪除」——
-        # SA 裁示 #204 Q1 → B：問卷只能停用（`IS_ACTIVE=false`），不提供刪除端點。
-        # 沒有刪除就不會產生軟刪列，此約束因而不會壞。
+        # 部分唯一索引（#238）：不變量是「**未刪除**之問卷間，一門課程至多 1 份」。
         #
-        # 這是「用不到所以沒壞」，不是「修好了」。日後若開放問卷刪除，**必須同步**
-        # 改為部分唯一索引（`postgresql_where=text('"DELETED" = 0')`，比照下方
-        # 題目 / 選項）；否則軟刪的那筆會永久佔住該課程，而錯誤訊息會是
-        # 「一門課程僅可建立 1 份課後問卷」，指向一筆使用者看不見的資料。
-        UniqueConstraint("COURSE_ID", name="UQ_ET_SURVEY_COURSE"),
+        # #204 當時裁示「問卷不可刪除」，此處曾是全表唯一約束並留註解記明「日後若
+        # 開放刪除必須同步改」——#238 開放了「未發布課程可刪除問卷」，那個日後就是
+        # 現在。若仍為全表唯一，軟刪的那筆會永久佔住該課程，教師刪掉後再也建不了，
+        # 而錯誤訊息會是「一門課程僅可建立 1 份課後問卷」，指向一筆他看不見的資料。
+        Index(
+            "UX_ET_SURVEY_COURSE",
+            "COURSE_ID",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
     )
 
     survey_id: Mapped[int] = mapped_column("SURVEY_ID", BigInteger, Identity(), nullable=False)
@@ -57,7 +61,15 @@ class EtSurvey(BaseModel):
 
 
 class EtSurveyQuestion(BaseModel):
-    """問卷題目（ET_SURVEY_QUESTION）——題型一律**單選**（不設題型欄位）。
+    """問卷題目（ET_SURVEY_QUESTION）——單選或問答（`QUESTION_TYPE`）。
+
+    2026-08-28（#238）新增問答題型。原 data-model 明訂「題型一律單選（不設題型欄位）」，
+    該條已隨本次變更推翻。
+
+    | 題型 | 選項 | 學員作答 |
+    |------|------|---------|
+    | `SINGLE` | 至少 2 個 | 選一個選項（`ET_SURVEY_RESPONSE_D.SO_ID`）|
+    | `TEXT` | **必須 0 個** | 文字，≤ 150 字（`ET_SURVEY_RESPONSE_D.ANSWER_TEXT`）|
 
     同問卷下至少 1 題方可對學員開放。
     """
@@ -84,6 +96,11 @@ class EtSurveyQuestion(BaseModel):
         ForeignKey("ET_SURVEY.SURVEY_ID", name="FK_ET_SURVEY_QUESTION_SURVEY"),
         nullable=False,
     )
+    #: 參見 Lookup `ET_SURVEY_QUESTION_TYPE`（`app/et/constants.py`）。
+    #:
+    #: **刻意不給 model 層 default**——與 migration 移除 `server_default` 同一理由：
+    #: 讓「忘了指定題型」在建立時就爆出來，而不是靜默變成單選。
+    question_type: Mapped[str] = mapped_column("QUESTION_TYPE", String(20), nullable=False)
     stem: Mapped[str] = mapped_column("STEM", String(500), nullable=False)
     sort_order: Mapped[int] = mapped_column("SORT_ORDER", Integer, nullable=False)
     version: Mapped[int] = mapped_column("VERSION", Integer, nullable=False, default=0)
@@ -142,9 +159,20 @@ class EtSurveyResponseM(BaseModel):
 
 
 class EtSurveyResponseD(BaseModel):
-    """問卷填答明細（ET_SURVEY_RESPONSE_D）——每題一個選擇（單選）。
+    """問卷填答明細（ET_SURVEY_RESPONSE_D）——每題一筆作答。
 
-    統計檢視以 `SQ_ID × SO_ID` 聚合（各選項人數與百分比）。
+    `SO_ID` 與 `ANSWER_TEXT` **互斥**（#238）：
+
+    | 題型 | `SO_ID` | `ANSWER_TEXT` |
+    |------|---------|---------------|
+    | `SINGLE` | 選中的選項 | NULL |
+    | `TEXT` | NULL | 學員輸入之文字（≤ 150 字）|
+
+    兩者之互斥由**應用層**把關、不設 CHECK constraint——比照本專案 DM / DP 之做法，
+    值域一律由應用層負責。
+
+    統計檢視：單選題以 `SQ_ID × SO_ID` 聚合（各選項人數與百分比）；**問答題僅計已答
+    人數，文字答案歸明細檢視**（SA 裁示 #238 Q1 → A）。
     """
 
     __tablename__ = "ET_SURVEY_RESPONSE_D"
@@ -166,9 +194,12 @@ class EtSurveyResponseD(BaseModel):
         ForeignKey("ET_SURVEY_QUESTION.SQ_ID", name="FK_ET_SURVEY_RESPONSE_D_QUESTION"),
         nullable=False,
     )
-    so_id: Mapped[int] = mapped_column(
+    #: 單選題之選中選項；**問答題為 NULL**（#238）。
+    so_id: Mapped[Optional[int]] = mapped_column(
         "SO_ID",
         BigInteger,
         ForeignKey("ET_SURVEY_OPTION.SO_ID", name="FK_ET_SURVEY_RESPONSE_D_OPTION"),
-        nullable=False,
+        nullable=True,
     )
+    #: 問答題之文字答案（≤ 150 字）；**單選題為 NULL**（#238）。
+    answer_text: Mapped[Optional[str]] = mapped_column("ANSWER_TEXT", String(150), nullable=True)
