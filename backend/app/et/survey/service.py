@@ -165,8 +165,11 @@ class EtSurveyService:
             operator,
         )
         await self._log(db, "CREATE", operator.user_id, survey.course_id, f"套用問卷模板（{template.code}）")
-        refreshed = await self._surveys.get(db, survey_id)
-        return await self._detail(db, refreshed)
+        # `bump_version` 走的是 Core update，session 裡的 `survey` 還握著舊版號。
+        # 用 refresh 而非重新 `get()`——後者回 `EtSurvey | None`，會多一個永遠不會
+        # 成立卻得處理的分支（#204 的 `update_question` 就踩過同型）。
+        await db.refresh(survey)
+        return await self._detail(db, survey)
 
     # ── 題目與選項 ──────────────────────────────────────────────────────────
 

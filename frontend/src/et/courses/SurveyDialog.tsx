@@ -132,7 +132,8 @@ interface SurveyDialogProps {
   templates: SurveyTemplateRow[]
   saving?: boolean
   error?: string | null
-  onClose: () => void
+  /** `dirty` 為 true 表示有題目正在編輯、內容尚未儲存，由呼叫端決定是否先確認。 */
+  onClose: (dirty: boolean) => void
   onRename: (surveyName: string) => void
   onApplyTemplate: (templateCode: string) => void
   onSaveQuestion: (sqId: number | null, values: SurveyQuestionFormValues) => void
@@ -155,6 +156,12 @@ interface SurveyDialogProps {
  *
  * 有學員填答後題目與選項凍結，編輯入口全部收起。**問卷名稱不受此限**——
  * 名稱不影響已填答資料的意義。停用問卷的入口在卡片上（`SurveySection`），不在此視窗。
+ *
+ * ## 關閉時的未存草稿
+ *
+ * 題目編輯器展開中（新增或編輯）代表有還沒存的內容，關閉視窗會讓它消失。此時以
+ * `onClose(true)` 告知呼叫端，由頁面跳確認——比照 `QuizDialog` 的 dirty 契約與 #203
+ * 實測回饋（「有填入值按取消跳出提示」）。問卷名稱不計入：它是失焦即存的。
  */
 export function SurveyDialog({
   open,
@@ -196,6 +203,11 @@ export function SurveyDialog({
     if (next) onReorder(next)
   }
 
+  /** 題目編輯器展開中 = 有未儲存的內容。問卷名稱失焦即存，不計入。 */
+  const isDirty = editing !== undefined
+
+  const handleClose = () => onClose(isDirty)
+
   const commitName = () => {
     if (nameDraft === null || !survey || nameDraft === survey.survey_name) {
       setNameDraft(null)
@@ -211,7 +223,7 @@ export function SurveyDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       maxWidth="md"
       fullWidth
       // 固定整個對話框高度，比照 `QuizDialog`——內容多寡不同時視窗不會忽大忽小
@@ -222,7 +234,7 @@ export function SurveyDialog({
         <IconButton
           // 名稱與底部的「關閉」刻意不同——同名會讓輔助技術與測試都分不出是哪一顆
           aria-label="關閉視窗"
-          onClick={onClose}
+          onClick={handleClose}
           sx={{ position: "absolute", right: 8, top: 8 }}
         >
           <CloseIcon />
@@ -342,7 +354,7 @@ export function SurveyDialog({
         <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", pl: 1 }}>
           {survey ? `填答狀況：已填 ${survey.responded_count} / 未填 ${survey.pending_count}` : ""}
         </Typography>
-        <Button onClick={onClose}>關閉</Button>
+        <Button onClick={handleClose}>關閉</Button>
       </DialogActions>
     </Dialog>
   )

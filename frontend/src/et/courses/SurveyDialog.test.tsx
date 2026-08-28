@@ -100,6 +100,41 @@ describe("SurveyDialog：題目清單", () => {
   })
 })
 
+describe("SurveyDialog：關閉時的未存草稿", () => {
+  it("沒有展開編輯器時關閉不算 dirty", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
+    await userEvent.click(screen.getByRole("button", { name: "關閉" }))
+    expect(onClose).toHaveBeenCalledWith(false)
+  })
+
+  it("題目編輯器展開中關閉會回報 dirty", async () => {
+    // 展開中代表有還沒存的內容，直接關掉會讓它無聲消失
+    // （#203 實測回饋：「有填入值按取消跳出提示」）
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
+    await userEvent.click(screen.getByRole("button", { name: "新增題目" }))
+    await userEvent.click(screen.getByRole("button", { name: "關閉" }))
+    expect(onClose).toHaveBeenCalledWith(true)
+  })
+
+  it("編輯既有題目時關閉也算 dirty", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
+    await userEvent.click(screen.getByRole("button", { name: "編輯第 1 題" }))
+    await userEvent.click(screen.getByRole("button", { name: "關閉" }))
+    expect(onClose).toHaveBeenCalledWith(true)
+  })
+
+  it("標題列的關閉視窗鈕走同一條路", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
+    await userEvent.click(screen.getByRole("button", { name: "新增題目" }))
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
+    expect(onClose).toHaveBeenCalledWith(true)
+  })
+})
+
 describe("SurveyDialog：模板（#238）", () => {
   it("空問卷時顯示模板選項", () => {
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey({ questions: [] })} />)

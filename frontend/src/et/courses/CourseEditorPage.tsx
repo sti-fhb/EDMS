@@ -964,7 +964,20 @@ export function EtCourseEditorPage() {
         templates={surveyTemplates}
         saving={surveyMut.isPending}
         error={surveyError}
-        onClose={() => setSurveyOpen(false)}
+        onClose={(dirty) => {
+          // 題目編輯器展開中代表有還沒存的內容，直接關掉會讓它無聲消失
+          // （#203 實測回饋：「有填入值按取消跳出提示」）
+          if (!dirty) {
+            setSurveyOpen(false)
+            return
+          }
+          confirm({
+            title: "放棄變更",
+            content: "尚未儲存的題目內容將不會保留，確定關閉？",
+            okText: "確定",
+            onOk: () => setSurveyOpen(false),
+          })
+        }}
         onRename={(name) =>
           surveyMut.mutate(() =>
             surveyApi.update(survey!.survey_id, {
