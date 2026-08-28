@@ -42,6 +42,7 @@ from app.et.bootstrap import register_et_module
 from app.et.course.router import router as et_course_router
 from app.et.material.router import router as et_material_router
 from app.et.quiz.router import router as et_quiz_router
+from app.et.survey.router import router as et_survey_router
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,7 @@ app.include_router(dm_personal_router)
 app.include_router(et_course_router)
 app.include_router(et_material_router)
 app.include_router(et_quiz_router)
+app.include_router(et_survey_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()
