@@ -8,7 +8,6 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
 
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
@@ -141,8 +140,12 @@ async def test_only_approved_obsolete_included(db, client):
     await _obsolete_doc(db, "DM-SOP-000902")
     # 一份仍在架（PUBLISHED）文件，不應出現
     pub = DmDocument(
-        doc_id="DM-SOP-000903", doc_name="在架", category_code="SOP", status="PUBLISHED",
-        created_user="x", created_date=utcnow(),
+        doc_id="DM-SOP-000903",
+        doc_name="在架",
+        category_code="SOP",
+        status="PUBLISHED",
+        created_user="x",
+        created_date=utcnow(),
     )
     db.add(pub)
     await db.flush()
