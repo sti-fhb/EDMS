@@ -83,7 +83,14 @@ def storage_root() -> str:
 
 
 def _resolved_within_root(path: str) -> str | None:
-    """path 正規化（解析 `..` / symlink）後若落在 root 內回其絕對路徑，否則 `None`。
+    """path 以 root 為基準正規化（解析 `..` / symlink）後若落在 root 內回其絕對路徑，否則 `None`。
+
+    `path` 為**相對於 `ET_VIDEO_STORAGE_ROOT` 的片段**（`ET_MATERIAL_VIDEO.FILE_PATH` 之
+    儲存格式，#233）；傳入絕對路徑亦受支援——`os.path.join` 遇絕對第二引數會丟棄 root 直接
+    回該路徑，故既有絕對路徑資料只要仍落在當前 root 內即照常解析（免 big-bang 轉換）。
+
+    ⚠️ 上述 join 行為使絕對路徑得以繞過 root 前綴，**其後的 commonpath 檢查是唯一防線**——
+    移除它等同解除圍籬。讀取者可能是無任何 DM / 管理權限的學員，重構時不得省略。
 
     fail-closed：`None` / 空字串 / 非字串、跨磁碟（Windows 上 `commonpath` 會拋
     `ValueError`）、逃出根目錄一律回 `None`。
@@ -95,7 +102,7 @@ def _resolved_within_root(path: str) -> str | None:
         return None
     root = storage_root()
     try:
-        resolved = os.path.realpath(path)
+        resolved = os.path.realpath(os.path.join(root, path))
         return resolved if os.path.commonpath([root, resolved]) == root else None
     except (ValueError, TypeError):
         return None

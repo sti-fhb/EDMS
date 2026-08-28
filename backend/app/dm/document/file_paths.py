@@ -20,7 +20,14 @@ def storage_root() -> str:
 
 
 def _resolved_within_root(path: str) -> str | None:
-    """path 正規化（解析 `..` / symlink）後若落在 storage root 內回其 canonical 絕對路徑，否則 None。
+    """path 以 storage root 為基準正規化（解析 `..` / symlink）後若落在 root 內回其 canonical 絕對路徑，否則 None。
+
+    `path` 為**相對於 storage root 的片段**（`DM_DOC_VERSION.FILE_PATH` 之儲存格式，#233）；
+    傳入絕對路徑亦受支援——`os.path.join` 遇絕對第二引數會丟棄 root 直接回該路徑，故既有
+    絕對路徑資料只要仍落在當前 root 內即照常解析（免 big-bang 轉換）。
+
+    ⚠️ 上述 join 行為使絕對路徑得以繞過 root 前綴，**其後的 commonpath 檢查是唯一防線**——
+    移除它等同解除圍籬（root 外之絕對路徑注入將直接放行）。重構時不得省略。
 
     fail-closed：None / 空字串 / 非字串、跨磁碟（Windows commonpath ValueError）、逃出根目錄一律回 None。
     單次 realpath——回傳值即「被驗證且將被串流」的同一路徑（避免 validate 與 serve 取不同解析）。
@@ -29,7 +36,7 @@ def _resolved_within_root(path: str) -> str | None:
         return None
     root = storage_root()
     try:
-        resolved = os.path.realpath(path)
+        resolved = os.path.realpath(os.path.join(root, path))
         return resolved if os.path.commonpath([root, resolved]) == root else None
     except (ValueError, TypeError):
         return None
