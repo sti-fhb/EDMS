@@ -95,9 +95,15 @@ def _verify_send_probe_key(email: str) -> str:
     的重寄。IP 缺失（無法解析 client）時退 "unknown" 分桶——該情境下所有請求共用一桶，
     退化為與改動前相近的行為，不會比原本更寬鬆。
 
-    已知取捨（記於 #213 決策留言）：key 基數由 |email| 變為 |email| + |ip×email|，而
-    `VerifySendCooldown` 有 `_max_keys` 上限且達上限時 **fail-open**（不擋，交 IP 限流兜底）。
-    單一 IP 以 resend 的 10 次/分要灌滿十萬個 key 約需 7 天，屆時退化為 IP 限流兜底。
+    已知取捨（記於 #213 決策留言）：key 基數由 |email| 變為 |email| + |ip×email|。攻擊者付的成本
+    其實**沒有變**——改動前每次 resend 也蓋一個 acct key，同 IP 對同 email 重打第二次起就 429、
+    不再產生新 key，所以要灌 key 一樣得換 email、每請求 1 個 key。基數膨脹只發生在正常的 NAT
+    多人使用上，那是有界的。
+
+    `VerifySendCooldown` 達 `_max_keys` 上限時為 **fail-open**（不擋，交 IP 限流兜底）；穩態 key 數
+    約為「到達率 × `_MAX_RETENTION_SEC`」，故單一 IP **永遠到不了**上限（10 次/分 × 1 小時保留
+    ≈ 600 個 key）。實際門檻與後果見 `core/cooldown.py` 之 `_MAX_RETENTION_SEC` 註解（該處已依
+    review 由 1 天下調為 1 小時）。
     """
     return f"verify-send:probe:{get_client_ip() or 'unknown'}:{email}"
 
@@ -163,12 +169,17 @@ async def register(
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
     key = _verify_send_key(data.email)
     _verify_send_cooldown.check(key, cooldown_sec)
-    await _register_service.register(
+    sent = await _register_service.register(
         db,
         email=data.email,
         user_name=data.user_name,
     )
-    _verify_send_cooldown.record(key)
+    # 只在真的排入 outbox 才蓋章（冷卻由「信」武裝，同 resend 的處理）：send_email 對範本停用 /
+    # channel 非 EMAIL / 渲染失敗是正常回傳 0、不拋例外，那些情況下蓋章會把使用者鎖 600 秒卻連
+    # 一封信都沒收到。register 不需要 probe 章——它沒有「靜默不寄」的防列舉需求（已驗證帳號直接
+    # 回 409），且此路徑必然已寫入待驗證列，本身就受帳號維度限流約束。
+    if sent:
+        _verify_send_cooldown.record(key)
     return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
 

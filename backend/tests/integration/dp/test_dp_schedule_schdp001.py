@@ -202,9 +202,13 @@ async def test_purge_expired_pending_deletes_only_rows_expired_over_retention(db
     assert "old-expired@edms.local" not in remaining
     assert "just-expired@edms.local" in remaining  # 逾期未滿保留期
     assert "still-valid@edms.local" in remaining  # 未逾期
-    # 兩種 KIND 一視同仁：逾期的管理者邀請同樣已無用（重寄會產新 token，不依賴舊列）
-    assert "old-invite@edms.local" not in remaining
-    assert purged == 2
+    # **只清 SELF_REGISTER**：逾期的管理者邀請仍是 UI 物件——build_invite_list_stmt 沒有效期條件，
+    # 逾期邀請會列在「待啟用邀請」頁籤並顯示「已逾期」，管理者可直接按「重寄邀請」，那正是
+    # spec_us4.md AC10 定義的情境。清掉會讓邀請靜默消失（週五寄的，管理者週一就找不到）、
+    # resend_invite / cancel_invite 對舊 invite_id 回 404，且邀請的稽核鏈以無終結事件收尾。
+    # 自助註冊列則在任何 UI 上都看不見，那才是需要排程清的一類。
+    assert "old-invite@edms.local" in remaining
+    assert purged == 1
 
 
 async def test_purge_expired_pending_writes_no_per_row_audit(db):

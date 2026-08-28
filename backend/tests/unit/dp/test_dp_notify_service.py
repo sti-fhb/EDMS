@@ -63,6 +63,11 @@ def test_render_strips_cr_and_c0_from_param_values():
     assert _render("n={n}", {"n": "王\x00小明"}) == "n=王小明"
     assert _render("n={n}", {"n": "王\x1b[31m小明"}) == "n=王[31m小明"
     assert _render("n={n}", {"n": "王\x7f小明"}) == "n=王小明"
+    # review 抓到的缺口：C1 全段與 U+2028 / U+2029 也是斷行邊界（UAX #14 class BK）
+    assert _render("n={n}", {"n": "王\x85小明"}) == "n=王小明"
+    assert _render("n={n}", {"n": "王\x9b小明"}) == "n=王小明"
+    assert _render("n={n}", {"n": "王\u2028小明"}) == "n=王小明"
+    assert _render("n={n}", {"n": "王\u2029小明"}) == "n=王小明"
 
 
 def test_render_preserves_newline_and_tab_in_param_values():
@@ -88,3 +93,24 @@ def test_render_preserves_newline_and_tab_in_param_values():
 def test_channel_allows_email(channel, expected):
     """僅 EMAIL / BOTH 寄 Email；MSG（純站內）不寄。"""
     assert _channel_allows_email(channel) is expected
+
+
+def test_render_subject_mode_strips_newline_too():
+    """主旨模式（single_line=True）**連 LF 一併剝**——主旨本質單行，保留會壞事。
+
+    stdlib 的 `EmailMessage.__setitem__` 對含斷行的 header 直接拋 ValueError，該例外被 worker 吞掉、
+    retry 到上限後標 FAILED → **該批通知信永久寄不出去**，錯誤只留在 DP_EMAIL_LOG.ERROR_MSG。
+
+    這條路徑現在就可觸發：DM 的 9 支內建範本主旨含 `{doc_name}` 佔位，而 doc_name 只做 strip、
+    無 pattern，任何已認證的 DM 編輯者把文件命名為含換行即可讓該文件所有通知信永久失敗。
+    """
+    assert _render("【簽核】{doc_name} 待審", {"doc_name": "月報\n測試"}, single_line=True) == "【簽核】月報測試 待審"
+    assert _render("s={v}", {"v": "a\u2028b"}, single_line=True) == "s=ab"
+    assert _render("s={v}", {"v": "a\x85b"}, single_line=True) == "s=ab"
+    # TAB 是合法的 header 摺行空白，維持保留
+    assert _render("s={v}", {"v": "a\tb"}, single_line=True) == "s=a\tb"
+
+
+def test_render_body_mode_is_the_default():
+    """內文模式為預設（不必傳參數），且維持保留 LF——DM 的多行理由不得被壓平。"""
+    assert _render("r={r}", {"r": "第一行\n第二行"}) == "r=第一行\n第二行"

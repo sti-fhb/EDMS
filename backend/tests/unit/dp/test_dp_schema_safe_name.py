@@ -43,6 +43,12 @@ _BUILDERS = [
         pytest.param("王\x00小明", id="NUL"),
         pytest.param("王\x1b[31m小明", id="ANSI-escape"),
         pytest.param("王\x7f小明", id="DEL"),
+        # 以下四個是 review 抓到的缺口：只擋 C0 + DEL 會讓它們過關，而 str.splitlines() 與
+        # Python 的 email 模組都把 U+0085 / U+2028 / U+2029 當斷行邊界（UAX #14 class BK）
+        pytest.param("王\x85小明", id="NEL-U+0085"),
+        pytest.param("王\u2028小明", id="LINE-SEPARATOR-U+2028"),
+        pytest.param("王\u2029小明", id="PARAGRAPH-SEPARATOR-U+2029"),
+        pytest.param("王\x9b小明", id="C1-CSI"),
     ],
 )
 def test_control_chars_rejected(build, bad):
@@ -81,3 +87,29 @@ def test_empty_after_strip_rejected(build):
     """全為空白 → strip 後為空 → 仍受 min_length=1 約束（既有行為不變）。"""
     with pytest.raises(ValidationError):
         build("   ")
+
+
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_bidi_override_deliberately_allowed(build):
+    """雙向覆寫（U+202E）**刻意放行**：那屬顯示欺騙（同形字）議題、與信件結構無關，
+    且部分書寫系統的正常姓名會用到格式字元，一併擋會誤傷真人姓名。
+
+    本條存在的目的是把「刻意」寫成可執行的紀錄——否則日後有人看到它能通過，會誤判為漏洞而收緊，
+    連帶擋掉合法姓名。
+    """
+    assert build("王\u202e小明").user_name == "王\u202e小明"
+
+
+@pytest.mark.parametrize("build", _BUILDERS)
+def test_same_line_injection_still_possible_by_design(build):
+    """⚠️ 本型別**不**消除信件內文注入，只降低保真度——這條測試把該限制釘成紀錄。
+
+    姓名上限 50 字元，攻擊者仍可放入同一行的完整句子；範本內文首行為 `{user_name} 您好：`，
+    故下面這個 payload 會渲染成一句看似系統訊息的文字。要真正消除須改範本設計或不回顯使用者
+    自填姓名（產品決策），不是輸入驗證能解的。
+
+    #225 的收尾摘要因此應寫「降低可信度」而非「關閉內文注入」。
+    """
+    payload = "帳號異常請立即至 http://evil.tw 重設密碼"
+    assert len(payload) <= 50
+    assert build(payload).user_name == payload

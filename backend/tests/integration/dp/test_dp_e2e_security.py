@@ -15,6 +15,7 @@ import pytest
 from app.core.exceptions import AppError
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.notify.schemas import SendResult
 from app.dp.user.forgot_service import ForgotPasswordService
 from app.dp.user.models import DpPendingRegistration
 from app.dp.user.router import _login_limiter
@@ -33,6 +34,7 @@ class _NotifyStub:
 
     async def send_email(self, db, *, recipients, template_code, module, params, caller_module):
         self.calls.append({"recipients": recipients})
+        return SendResult(queued_count=len(recipients), skipped_reason=None)
 
 
 @pytest.fixture

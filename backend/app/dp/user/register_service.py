@@ -111,7 +111,7 @@ class RegisterService:
         if await self._repo.email_exists(db, email):
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
 
-    async def register(self, db: AsyncSession, *, email: str, user_name: str) -> None:
+    async def register(self, db: AsyncSession, *, email: str, user_name: str) -> bool:
         """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色、不收密碼**。
 
         密碼於 Email 驗證通過後由本人當場設定（#212，比照 US4 邀請啟用）——原本在此收密碼並
@@ -166,7 +166,7 @@ class RegisterService:
             await self._log_pending_overwritten(db, pending)
         # 5. 寄驗證信（US6；範本 MODULE=DP ACCOUNT_VERIFY）；連結以設定檔組（防 Host 注入）
         verify_link = f"{settings.FRONTEND_BASE_URL}/verify-email?token={plaintext}"
-        await self._notify.send_email(
+        result = await self._notify.send_email(
             db,
             recipients=[email],
             template_code=_TEMPLATE_CODE,
@@ -187,4 +187,10 @@ class RegisterService:
         #
         # 已接受的限制：log 無保留政策保證、不可長期查詢，這不等於稽核級追溯。若日後需要持久證據，
         # 須為 pending 列加「發起 IP」欄位（併入 #215 的 migration），並把 #226 的清理保留期當證據窗口。
+        if result.queued_count == 0:
+            # 範本停用 / channel 非 EMAIL / 渲染失敗三種情況下 send_email 是**正常回傳 0**、不拋例外。
+            # 沒寄出就不該蓋 Email 冷卻章（冷卻由「信」武裝，同 #213 對 resend 的處理），否則使用者
+            # 會被鎖 600 秒卻連一封信都沒收到——而這條在範本被管理者誤設定時就會發生。
+            return False
         logger.info("自助註冊已寄出驗證信 ip=%s email=%s", get_client_ip(), mask_email(email))
+        return True

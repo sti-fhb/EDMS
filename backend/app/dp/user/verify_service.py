@@ -8,6 +8,7 @@ ResendVerificationService：重寄驗證信（僅對 pending 帳號）；作廢�
 防列舉——無論該 Email 是否有待驗證列，端點一律回相同訊息。
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -15,12 +16,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.log_redaction import mask_email
+from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.activation import activate_with_new_password
 from app.dp.user.kinds import KIND_SELF_REGISTER
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
+
+logger = logging.getLogger(__name__)
 
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _FUNC_NAME = "DP-REGISTER"
@@ -90,10 +95,15 @@ class ResendVerificationService:
         不經此匿名端點，故遇邀請列一律靜默（等同不存在，維持防列舉）。
 
         Returns:
-            bool: **是否真的寄出信**。呼叫端據此決定蓋哪一個冷卻章（#213）——沒寄信卻蓋 Email 章
+            bool: **是否真的排入 outbox**。呼叫端據此決定蓋哪一個冷卻章（#213）——沒寄信卻蓋 Email 章
                 會讓任何匿名者無限期封鎖任意 Email 的自助註冊，見 `router._verify_send_probe_key`。
                 回傳值刻意**不**影響對外回應（訊息 / 狀態碼 / retry_after 三條路徑皆相同），
                 否則會變成 pending 存在性 oracle。
+
+                以 `SendResult.queued_count` 為準，不是「呼叫過 send_email 就算寄了」：`send_email`
+                對範本停用（TEMPLATE_DISABLED）、channel 非 EMAIL（CHANNEL_NOT_EMAIL）、渲染失敗
+                三種情況都是**正常回傳 queued_count=0**、不拋例外。若只憑「有呼叫」就回 True，
+                #213 的洞會在「範本被誤設定」這個條件下重現（review 抓到）。
         """
         now = utcnow()
         pending = await self._repo.get_pending_by_email(db, email)
@@ -134,7 +144,7 @@ class ResendVerificationService:
                 status_code=409, detail="此 Email 註冊處理中，請稍後再試或直接登入", error_code="DP_USER_005"
             ) from exc
         verify_link = f"{settings.FRONTEND_BASE_URL}/verify-email?token={plaintext}"
-        await self._notify.send_email(
+        result = await self._notify.send_email(
             db,
             recipients=[email],
             template_code=_TEMPLATE_CODE,
@@ -142,4 +152,9 @@ class ResendVerificationService:
             params={"user_name": pending.user_name, "verify_link": verify_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
         )
+        if result.queued_count == 0:
+            return False
+        # 發起者可追溯性（#225）：本端點與 register 同為匿名寄信原語，回報「我收到一封奇怪的驗證信」
+        # 時同樣需要查得到來源。Email 遮罩後才寫入（規範禁記個資完整值）、不記 user_name。
+        logger.info("重寄驗證信已排入 outbox ip=%s email=%s", get_client_ip(), mask_email(email))
         return True

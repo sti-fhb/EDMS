@@ -15,6 +15,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
+from app.dp.notify.schemas import SendResult
 from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import hash_token
@@ -35,6 +36,7 @@ class _FakeNotify:
 
     async def send_email(self, _db, *, recipients, template_code, module, params, caller_module):
         self.calls.append({"recipients": recipients, "template_code": template_code, "params": params})
+        return SendResult(queued_count=len(recipients), skipped_reason=None)
 
 
 def _svc(notify=None) -> UsersService:
@@ -185,6 +187,42 @@ async def test_create_invite_on_active_self_register_pending_rejected(db):
     pending = await AuthRepository().get_pending_by_email(db, "selfreg@edms.local")
     assert pending.kind == "SELF_REGISTER"
     assert pending.token_hash == "selfhash-selfreg@edms.local"
+
+
+async def test_create_invite_aborts_if_self_register_row_renewed_mid_flight(db):
+    """TOCTOU：讀到「逾期」之後、實際 DELETE 之前若該列被 renew 成有效 → 回 409、**不刪那張新列**。
+
+    這條釘住的是條件式刪除（`delete_pending_expired_unless_invite`）。用無條件版會出兩個問題：
+    受害者剛重新註冊拿到的有效驗證連結被靜默作廢（後續 INSERT 也不會撞 UNIQUE，因為已刪空），
+    而 DELETE 稽核的 before_value 記的是**舊列快照**、與實際被刪的列不符——事後查會被誤導。
+
+    以 monkeypatch 模擬空窗：讓服務讀到逾期列，但實際 DELETE 前該列已被換成未逾期的新列。
+    """
+    email = "renewed-midflight@edms.local"
+    await _seed_self_register(db, email=email, offset_min=-1)
+    stale = await AuthRepository().get_pending_by_email(db, email)
+
+    # 模擬空窗內本人重新註冊：刪舊列、插一張**有效**的新列
+    await AuthRepository().delete_pending_by_email(db, email)
+    await AuthRepository().create_pending_registration(
+        db,
+        token_hash="renewed-token",
+        email=email,
+        user_name="本人重新註冊",
+        pwd_hash=None,
+        expires_date=utcnow() + timedelta(minutes=30),
+        now=utcnow(),
+    )
+
+    svc = _svc()
+    # 服務拿到的是「空窗前」讀到的逾期快照（stale），但 DB 現況已是有效列
+    with pytest.raises(AppError) as exc:
+        await svc._take_over_expired_self_register(db, stale, utcnow())
+    assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_007"
+
+    # 新列存活、token 未被吃掉
+    survived = await AuthRepository().get_pending_by_email(db, email)
+    assert survived is not None and survived.token_hash == "renewed-token"
 
 
 async def test_create_invite_on_expired_self_register_pending_succeeds(db):
