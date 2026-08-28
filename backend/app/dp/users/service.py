@@ -41,6 +41,8 @@ _NOT_FOUND_MSG = "查無此帳號"
 _INVITE_NOT_FOUND_MSG = "查無此邀請"
 _SELF_PROTECT_MSG = "無法停用或鎖定自己的帳號"
 _DEFAULT_TTL_MIN = 30
+# 逾期待驗證列的保留天數（#226）：逾期滿此天數才清，留一天供當天的客服追查
+_PENDING_RETENTION_DAYS = 1
 
 
 def _iso(value: object) -> object:
@@ -91,9 +93,10 @@ class UsersService:
         """管理者建立帳號＝寄邀請信（#67）：檢 Email 未被佔用 → 寫 pending（ADMIN_INVITE、pwd_hash=NULL）
         + 寄 ACCOUNT_INVITE 邀請信 + 稽核。**不建 DP_USER、不授角色**（啟用時才落地）。
 
-        重複 Email 分四種情況（#111）：
+        重複 Email 分五種情況（#111 / #226）：
         - 已啟用（DP_USER 存在）→ 409 DP_USER_007（真重複）。
-        - 待啟用列存在但**非 ADMIN_INVITE**（使用者自助註冊中）→ 409 DP_USER_007（維持既有語意）。
+        - 自助註冊中（非 ADMIN_INVITE）且**未逾期** → 409 DP_USER_007（不覆蓋他人進行中的註冊）。
+        - 自助註冊中且**已逾期** → 視為不存在（#226）：清掉死列、走**首次邀請**並記一筆 DELETE 稽核。
         - 待啟用邀請**未逾期** → 409 DP_USER_010（引導改用重寄）。
         - 待啟用邀請**已逾期** → 視為**重新邀請**：沿用原 invite_id、作廢舊列、換新 token/效期並重寄。
 
@@ -106,11 +109,11 @@ class UsersService:
 
         now = utcnow()
         existing = await self._auth_repo.get_pending_by_email(db, data.email)
+        # 不加型別註記：本檔刻意不 import dp/user 的 Model（型別由 get_pending_by_email 回傳推導）
+        overwritten_self_register = None
         if existing is not None and existing.kind != KIND_ADMIN_INVITE:
-            # 自助註冊（SELF_REGISTER）處理中：該列不在邀請清單（build_invite_list_stmt 濾 kind）、
-            # invite_id 為 NULL，管理者既無可重寄對象也不應覆蓋他人註冊列，故維持「Email 已被使用」
-            # 而非回 DP_USER_010（會把管理者導向不存在的重寄動作）。
-            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007")
+            overwritten_self_register = await self._take_over_expired_self_register(db, existing, now)
+            existing = None
 
         reinvite = existing is not None
         before: dict | None = None
@@ -159,6 +162,8 @@ class UsersService:
         await self._send_invite(db, email=data.email, user_name=data.user_name, token=plaintext, ttl_min=ttl_min)
         # 每次成功寄出都蓋章（含首次邀請）：冷卻起點才能涵蓋「首寄 → 逾期後重新邀請」的間隔
         self._invite_cooldown.record(_send_cooldown_key(data.email))
+        if overwritten_self_register is not None:
+            await self._log_self_register_overwritten(db, overwritten_self_register, operator.user_id, ip)
         await self._log(
             db,
             operator.user_id,
@@ -174,6 +179,68 @@ class UsersService:
                 "kind": KIND_ADMIN_INVITE,
                 "expires_date": _iso(expires_date),
             },
+        )
+
+    async def _take_over_expired_self_register(self, db: AsyncSession, pending, now):
+        """管理者代建遇到「自助註冊中」的待驗證列：**逾期**才接手（刪掉死列），否則 409（#226）。
+
+        回傳被刪掉的那一列（供稽核記 before），呼叫端據此決定是否寫 DELETE 稽核。
+
+        **未逾期 → 409 `DP_USER_007`**：該列不在邀請清單（`build_invite_list_stmt` 濾 kind）、
+        `invite_id` 為 NULL，管理者既無可重寄對象也不應覆蓋他人正在進行的註冊；回 007 而非 010
+        是因為 010 會把管理者導向一個不存在的「重寄」動作。
+
+        **已逾期 → 視為不存在**。原本連逾期也擋，理由是「不得覆蓋他人的自助註冊列（含其 pwd_hash）」
+        ——該前提已被 #212 消滅：pending 列不再存密碼，覆蓋一張逾期的列不會拿走任何人的憑證。而
+        保持 409 的實際後果是：新人自己開始註冊、沒收到信就放棄 → 列逾期卻永遠不會消失 → 管理者
+        改用邀請恆回「此 Email 已被使用」，且該列不出現在「待啟用邀請」頁籤、`DP_USER` 裡也查不到
+        → 管理者無從排解。這也讓「逾期＝視為不存在」在三個讀取點語意一致：登入、重寄（皆 #212）、本處。
+
+        接手後呼叫端走**首次邀請**分支（非 reinvite）：本次是這個 Email 的第一封邀請信，不該套
+        「重新邀請」的冷卻，也不該沿用 invite_id（逾期的自助註冊列本來就沒有）。
+
+        ⚠️ 刪除用**條件式**版本（`delete_pending_expired_unless_invite`）：本方法讀到「逾期」到實際
+        DELETE 之間有 await 邊界，若該空窗內本人重新註冊或重寄（都會產出一張**有效**的新列），無條件
+        刪除會吃掉那張新列且後續 INSERT 不撞 UNIQUE → 連結靜默失效、稽核 before 還記到錯的列。刪 0 筆
+        即代表狀態已變，保守回 409（該 Email 此刻確實「已被使用」）。與 #125 是同一 TOCTOU 形狀。
+        """
+        if pending.expires_date > now:
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007")
+        deleted = await self._auth_repo.delete_pending_expired_unless_invite(db, pending.email, now)
+        if deleted == 0:
+            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_007")
+        return pending
+
+    async def _log_self_register_overwritten(self, db, pending, operator_id: str, ip: str | None) -> None:
+        """管理者邀請覆蓋掉一筆**逾期的自助註冊列**時留痕（#226）。
+
+        與 #125 的反方向（匿名註冊覆蓋逾期的管理者邀請，見 `register_service`）成對，形狀刻意一致：
+        獨立一筆 `DELETE`，`target_id` 記 **Email**。
+
+        為何另記一筆而不把 before 掛在邀請那筆稽核上：邀請那筆的 `target_id` 是 `invite_id`，
+        **用 Email 查不到**。而會來查的人手上有的正是 Email（自助註冊者回報「我的驗證連結失效了」）
+        ——這是 #212 review 的教訓：稽核查詢只能按 target_id 篩、不支援 before_value 關鍵字搜尋，
+        把 Email 只留在 JSON 裡等於這列實務上查不到。
+
+        `operator_id` 記**管理者本人**（非 SYSTEM）：這是他的動作，且比 #125 那筆（行為人為匿名
+        註冊者、只能記 SYSTEM）更有追溯價值。
+        """
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="DELETE",
+            result="SUCCESS",
+            operator_id=operator_id,
+            target_id=pending.email,
+            description="逾期自助註冊申請被管理者邀請覆蓋",
+            before_value={
+                "kind": pending.kind,
+                "email": pending.email,
+                "user_name": pending.user_name,
+                "expires_date": _iso(pending.expires_date),
+            },
+            source_ip=ip,
         )
 
     async def list_invites(
@@ -351,6 +418,39 @@ class UsersService:
                 await db.rollback()
                 logger.exception("SCHDP001 閒置禁用失敗 user_id=%s", user.user_id)
         return disabled
+
+    async def purge_expired_pending(self, db: AsyncSession) -> int:
+        """清理**逾期滿保留期**的待驗證 / 待啟用列，回傳刪除筆數（#226）。
+
+        在此之前 `DpPendingRegistration` 的 docstring 與 `data-model.md` 都寫著「逾期未驗證列由排程
+        清理」，但 SCHDP001 只做閒置禁用與密碼到期提醒——那句話是空話。逾期列因此永久累積，而這張表
+        **匿名可寫**（`REGISTER_RATE_MAX` 30 次/分/IP）；殘留的逾期列還會讓管理者邀請該 Email 恆回
+        誤導的 409（#226 的另一半，已於 `create_user` 修正）。
+
+        保留期不設為 0 的理由：逾期的列本身已無用（token 不可用、#212 之後也不含密碼），但留一天讓
+        **當天**的客服問題還查得到「這個 Email 前一天有人送過註冊」。以常數而非 DP_PARAM 實作——目前
+        沒有證據有人需要調整它，加參數只是多一個沒人維護的旋鈕。
+
+        ⚠️ 這**不是**證據保留期：發起者追溯目前只記應用層 log（#225 決策）。若日後改為在 pending 列
+        存發起 IP，這個保留期就會變成證據窗口，屆時需重新評估天數。
+
+        **不逐列寫稽核**：這張表匿名可寫，逐列寫稽核等於讓任何人往 append-only、鏈式雜湊的
+        `DP_AUDIT_LOG` 灌列，把有意義的紀錄淹掉（同 #225 的判斷）。被清的列早已逾期、無業務意義；
+        真正需要留痕的是「有人覆蓋了**別人**的列」，那由 `register_service` 與 `create_user` 各自記
+        一筆 DELETE 稽核。呼叫端（handler）會把筆數記入 log。
+        """
+        cutoff = utcnow() - timedelta(days=_PENDING_RETENTION_DAYS)
+        try:
+            purged = await self._auth_repo.delete_pending_expired_before(db, cutoff)
+            await db.commit()
+        except Exception:
+            # 與另兩批次同一容錯姿態：本批失敗不得往外拋。否則 daily_platform_job 的彙總 log
+            # 整條不寫（前兩批已成功 commit 的筆數一起丟失），且 scheduler 的 job 級 catch-all
+            # 會把「兩批成功、一批失敗」記成整個 SCHDP001 失敗，掩蓋已完成的部分。
+            await db.rollback()
+            logger.exception("清理逾期待驗證列失敗")
+            return 0
+        return purged
 
     async def send_pwd_expiry_reminders(self, db: AsyncSession) -> int:
         """密碼將於 `EXPIRY_REMIND_DAYS`（預設 7）天內到期之啟用帳號經 SRVDP002 寄 `PWD_EXPIRY_REMIND`。

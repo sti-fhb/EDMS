@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
-from app.core.schema_types import LoginEmailStr, NormalizedEmailStr
+from app.core.schema_types import LoginEmailStr, NormalizedEmailStr, SafeNameStr
 
 # 密碼欄位共用型別（#214）：上限 4096 為縱深防禦——真正的政策上限是 bcrypt 的 72 bytes
 # （由 password_policy 的 validate_password_strength / hash_password / verify_password 把關，
@@ -44,7 +44,7 @@ class RegisterRequest(BaseModel):
     """
 
     email: NormalizedEmailStr
-    user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+    user_name: SafeNameStr
 
 
 class VerifyEmailRequest(BaseModel):
@@ -117,7 +117,7 @@ class MeResponse(BaseModel):
 class NameUpdate(BaseModel):
     """姓名變更請求（US8）。長度對齊 DP_USER.USER_NAME（50）。"""
 
-    user_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+    user_name: SafeNameStr
 
 
 class PasswordChange(BaseModel):

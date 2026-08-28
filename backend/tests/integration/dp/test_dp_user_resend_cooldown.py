@@ -147,3 +147,126 @@ async def test_new_email_still_blocked_by_cooldown(client):
     body = second.json()
     assert body["error_code"] == "COMMON_429"
     assert 1 <= body["retry_after"] <= 600
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #213：只在真的寄出信時蓋 Email 章；沒寄信只蓋「發起者自己」的章
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def as_ip(monkeypatch):
+    """切換 router 眼中的 client IP（`_verify_send_probe_key` 用它分桶）。
+
+    ASGI 測試傳輸沒有真實 peer 位址，且 XFF 預設不受信（TRUSTED_PROXY_COUNT=0，#23），
+    故直接替換 router 模組內的 `get_client_ip` 名稱——只影響本 key 函式，不動限流器自己的取值。
+    """
+
+    def _set(ip: str) -> None:
+        monkeypatch.setattr(auth_router, "get_client_ip", lambda: ip)
+
+    return _set
+
+
+async def test_probe_by_attacker_does_not_block_victim_registration(client, as_ip):
+    """**本 issue 的核心**：匿名者對他人 Email 打 resend 後，該他人仍可正常完成自助註冊（#213）。
+
+    改動前 resend 是無條件蓋 Email 章，而它對「查無待驗證列」是靜默不寄 → 攻擊者打一次就替任意
+    Email 蓋 600 秒章，且該 key 與 register 共用 → 受害者註冊得到 429「操作過於頻繁」，每 10 分鐘
+    重打一次即可無限期封鎖。無稽核、無寄信紀錄、狀態只在行程記憶體。
+    """
+    email = "victim@edms.local"
+
+    as_ip("203.0.113.9")  # 攻擊者
+    probe = await client.post("/api/resend-verification", json={"email": email})
+    assert probe.status_code == 200  # 回應與「有寄出」完全相同（防列舉）
+
+    as_ip("198.51.100.7")  # 受害者，不同 IP
+    reg = await client.post("/api/register", json=_reg_payload(email))
+    assert reg.status_code == 202  # 未被攻擊者的探測波及
+
+
+async def test_probe_still_blocks_the_prober_itself(client, as_ip):
+    """同一發起者重打 → 仍 429（形狀與有寄出時相同），故單一 IP 下問不出存在性。"""
+    email = "prober@edms.local"
+    as_ip("203.0.113.9")
+
+    first = await client.post("/api/resend-verification", json={"email": email})
+    assert first.status_code == 200
+
+    second = await client.post("/api/resend-verification", json={"email": email})
+    assert second.status_code == 429
+    assert second.json()["error_code"] == "COMMON_429"
+
+
+@pytest.mark.parametrize(
+    "seed",
+    [
+        pytest.param(None, id="無待驗證列"),
+        pytest.param("SELF_REGISTER", id="有自助註冊列"),
+        pytest.param("ADMIN_INVITE", id="有管理者邀請列"),
+    ],
+)
+async def test_same_ip_429_identical_regardless_of_pending_state(client, db, as_ip, seed):
+    """同一 IP 下，429 的有無與內容**不因該 Email 的待驗證狀態而異**（防列舉語意不退化）。
+
+    三種狀態中只有 SELF_REGISTER 會真的寄信（走 Email 章），另兩種靜默不寄（走 probe 章），
+    但發起者看到的第二次回應完全相同。
+    """
+    email = f"enum-{seed}@edms.local"
+    if seed is not None:
+        now = utcnow()
+        db.add(
+            DpPendingRegistration(
+                token_hash=hash_token(f"enum-{seed}"),
+                email=email,
+                user_name="待驗證",
+                pwd_hash=None,
+                kind=seed,
+                invite_id="INVENUM0001" if seed == "ADMIN_INVITE" else None,
+                expires_date=now + timedelta(minutes=30),
+                created_user="seed",
+                created_date=now,
+            )
+        )
+        await db.commit()
+
+    as_ip("203.0.113.50")
+    first = await client.post("/api/resend-verification", json={"email": email})
+    second = await client.post("/api/resend-verification", json={"email": email})
+
+    assert first.status_code == 200
+    assert first.json()["retry_after"] == 600
+    assert second.status_code == 429
+    assert second.json()["error_code"] == "COMMON_429"
+
+
+async def test_real_resend_still_cooled_across_ips(client, db, as_ip):
+    """對同一 Email 的**真實**重寄仍受 Email 維度冷卻約束（防狂發不變，且跨 IP 有效）。
+
+    這條是候選 1（key 加 IP 維度）被否決的原因：那個做法會讓換 IP 就能對同一信箱無限發信，
+    而 register 是匿名端點——把「封鎖某人註冊」換成「用組織自己的網域對某人信箱轟炸」。
+    """
+    email = "realresend@edms.local"
+    now = utcnow()
+    db.add(
+        DpPendingRegistration(
+            token_hash=hash_token("realresend"),
+            email=email,
+            user_name="待驗證",
+            pwd_hash=None,
+            kind="SELF_REGISTER",
+            expires_date=now + timedelta(minutes=30),
+            created_user="seed",
+            created_date=now,
+        )
+    )
+    await db.commit()
+
+    as_ip("203.0.113.1")
+    first = await client.post("/api/resend-verification", json={"email": email})
+    assert first.status_code == 200  # 真的寄出 → 蓋 Email 章
+
+    as_ip("203.0.113.2")  # 換 IP 也擋得住
+    second = await client.post("/api/resend-verification", json={"email": email})
+    assert second.status_code == 429

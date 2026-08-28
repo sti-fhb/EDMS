@@ -19,6 +19,7 @@ from app.core.exceptions import AppError
 from app.core.module_provisioning import module_provisioning_gate
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.notify.schemas import SendResult
 from app.dp.user.forgot_service import ForgotPasswordService, ResetPasswordService
 from app.dp.user.profile_service import ProfileService
 from app.dp.user.register_service import RegisterService
@@ -40,6 +41,9 @@ class _NotifyStub:
 
     async def send_email(self, db, *, recipients, template_code, module, params, caller_module):
         self.calls.append({"template_code": template_code, "params": params})
+        # 回傳與真實 send_email 同形狀的 SendResult：呼叫端（register / resend）以 queued_count
+        # 判斷「是否真的排入 outbox」來決定蓋哪個冷卻章（#213 review），回 None 會讓 fake 說謊。
+        return SendResult(queued_count=len(recipients), skipped_reason=None)
 
     def last_token(self) -> str:
         """從最後一次 send_email 的任一 *_link 參數解析 token query。"""

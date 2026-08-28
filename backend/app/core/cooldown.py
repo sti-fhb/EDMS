@@ -25,8 +25,19 @@ _COOLDOWN_MSG = "操作過於頻繁，請稍後再試"
 _SWEEP_EVERY = 1000
 # outer dict 硬上限：達上限先 sweep，仍滿則不再記錄（fail-open：不擋，交由 IP 限流兜底），界定記憶體上界
 _DEFAULT_MAX_KEYS = 100_000
-# 掃描回收保留上限：遠大於實務冷卻（分鐘級），僅用於記憶體回收，不影響正常冷卻判定
-_MAX_RETENTION_SEC = 86_400.0
+# 掃描回收保留上限：僅用於記憶體回收，不影響正常冷卻判定（實務冷卻 600 秒，1 小時已有 6 倍餘裕）。
+#
+# 由 86,400（1 天）下調至 3,600（#213 review）：`_MAX_KEYS` 達上限時本類是 **fail-open**（不擋，
+# 交 IP 限流兜底），而穩態 key 數約等於「到達率 × 本保留期」。保留 1 天時只需約 1.16 key/秒
+# （≈7 個來源 IP 各以 resend 的 10 次/分持續一天）即可把表推到十萬上限；保留 1 小時則需約
+# 27.8 key/秒（≈167 個 IP），實質不可達。
+#
+# 為何值得在意：fail-open 之後，任何尚未進表的 Email 其 `verify-send:acct:{email}` 永遠蓋不上章
+# → `/register` 對同一 Email 的 600 秒防狂發完全消失（只剩 30 次/分的帳號維度限流）→ 可對指定
+# 信箱灌 30 封驗證信/分鐘，且每次覆蓋都寫一筆稽核（append-only、鏈式雜湊、以交易級 advisory
+# lock 序列化）。`core/rate_limit.py` 的 REGISTER_RATE_MAX 推導明文倚賴「同一 Email 由 600 秒
+# 冷卻鎖住」，冷卻一 fail-open 該推導即失效。
+_MAX_RETENTION_SEC = 3_600.0
 
 
 class VerifySendCooldown:

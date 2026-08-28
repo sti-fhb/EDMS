@@ -23,6 +23,14 @@
 |-------|------|------|
 | `DP_PENDING_REGISTRATION` | DP | 待驗證的自助註冊（US2 #56，方案 B）。屬**暫存性**資料：驗證通過即消費（搬入 `DP_USER` 後刪列）、逾期未驗證由排程清理；一 Email 一筆（`UNIQUE(EMAIL)`），重新註冊 / 重寄以硬刪 + 重建覆蓋。若改軟刪除，`UNIQUE(EMAIL)` 需改為部分索引（`WHERE DELETED = 0`）徒增複雜度，且已消費 / 逾期的待驗證列無保留價值，故採硬刪除。 |
 
+**批次硬刪除（#226）**：本表是專案第一支**排程級批次硬刪除**——`UsersService.purge_expired_pending`（SCHDP001 第三批次）以單一 `DELETE` 清掉**逾期滿 1 天**的列。三項須併記的決定：
+
+| 決定 | 理由 |
+|------|------|
+| 只清 `KIND=SELF_REGISTER`，**不碰 `ADMIN_INVITE`** | 逾期邀請仍是 UI 物件：「待啟用邀請」頁籤沒有效期條件，逾期者會顯示「已逾期」並可按「重寄邀請」（`spec_us4.md` AC10）。清掉會讓邀請靜默消失、`resend_invite` / `cancel_invite` 回 404、邀請的稽核鏈以無終結事件收尾。邀請由管理者以「取消邀請」主動收掉。 |
+| 保留 1 天而非立即刪 | 逾期列本身已無用（token 不可用、#212 後也不含密碼），留一天讓**當天**的客服問題還查得到「這個 Email 前一天有人送過註冊」。以常數而非 `DP_PARAM`——無證據需要調整。**這不是證據保留期**（發起者追溯只記應用層 log，見 #225）。 |
+| **不逐列寫稽核** | 本表**匿名可寫**（自助註冊為公開端點、30 次/分/IP），逐列寫稽核等於讓任何人往 append-only、鏈式雜湊的 `DP_AUDIT_LOG` 灌列。被清的列早已逾期、無業務意義；需要留痕的是「有人覆蓋了**別人**的列」，那由 `register_service` 與 `UsersService.create_user` 各自記一筆 `DELETE` 稽核。刪除筆數由 handler 記入 log。 |
+
 ### 無 `DELETED` 但非硬刪除（`BaseModelNoDelete` / `AuditLogBaseModel`）
 
 | Table | 基底 | 說明 |
