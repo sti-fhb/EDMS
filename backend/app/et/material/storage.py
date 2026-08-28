@@ -177,10 +177,26 @@ async def save_video_stream(upload, *, ext: str, max_size_bytes: int) -> tuple[s
     return tmp_path, written
 
 
-def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> str:
-    """把暫存檔搬到正式路徑，回正式路徑。
+def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
+    r"""把暫存檔搬到正式路徑，回 `(絕對路徑, 相對於 root 之片段)`。
 
     同一檔案系統內的 `os.replace` 是原子操作——不會出現「搬一半」的檔案。
+
+    ## 為何回兩個值（#233）
+
+    兩者用途不同且**不可互換**：
+
+    | 用途 | 要哪一個 | 拿錯的後果 |
+    |------|---------|-----------|
+    | 寫入 `ET_MATERIAL_VIDEO.FILE_PATH` | 相對片段 | 存絕對路徑 → 換 root / 清 worktree 即永久失聯 |
+    | 失敗時 `discard()` 回滾刪檔 | 絕對路徑 | 傳相對片段 → `os.remove` 依 CWD 解析而找不到，`discard`
+    | | | 吞掉 `OSError` 只留 warning，**靜默留下孤兒檔** |
+
+    不讓 `discard` 自行 join root 的理由：它同時被 `save_video_stream` 以 `.tmp/` 下的
+    **暫存絕對路徑**呼叫，改成吃相對片段會讓它變成「有時絕對、有時相對」的雙語意函式。
+
+    相對片段之分隔符固定 `/`（不用 `os.path.join`：Windows 會產出 `\`，該值搬到 POSIX
+    即讀不到，因為 `\` 在 POSIX 是合法檔名字元而非分隔符）。
 
     ## 為何在寫 DB 之前搬
 
@@ -197,9 +213,10 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> str:
     """
     final_dir = os.path.join(storage_root(), video_id_hint)
     os.makedirs(final_dir, exist_ok=True)
-    final_path = os.path.join(final_dir, f"{uuid.uuid4().hex}.{ext}")
+    name = f"{uuid.uuid4().hex}.{ext}"
+    final_path = os.path.join(final_dir, name)
     os.replace(tmp_path, final_path)
-    return final_path
+    return final_path, f"{video_id_hint}/{name}"
 
 
 def discard(path: str) -> None:

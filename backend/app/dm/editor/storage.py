@@ -2,8 +2,9 @@
 
 #127 `file_store` 只做上傳「檢核」（大小 / 副檔名）與預覽判定，實際 byte 落盤留待此層。
 本層將上傳位元組寫入設定的儲存根目錄（`settings.DM_FILE_STORAGE_ROOT`），以**系統產生之
-`FILE_ID`** 命名（不用原始檔名組路徑，防 `../` 路徑穿越），回傳寫入之絕對 `FILE_PATH`
-供 `DM_DOC_VERSION.FILE_PATH` 記錄、US4 檔案端點串流。
+`FILE_ID`** 命名（不用原始檔名組路徑，防 `../` 路徑穿越），回傳**相對於該根目錄**之
+`FILE_PATH` 供 `DM_DOC_VERSION.FILE_PATH` 記錄、US4 檔案端點串流（#233：改存相對路徑，
+使資料可隨 root 搬移；存絕對路徑會在換 worktree / 換機器時全數失聯）。
 
 ⚠️ 讀取端 storage-root 圍籬（解析後路徑須落在根內）為 #160 follow-up；本層先確保**寫入**
 一律落在根下、檔名不含使用者輸入。
@@ -34,7 +35,7 @@ def _safe_ext(filename: str) -> str:
 
 
 def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str:
-    """將上傳位元組寫入 `{root}/{doc_id}/{file_id}.{ext}`，回傳絕對 `FILE_PATH`。
+    """將上傳位元組寫入 `{root}/{doc_id}/{file_id}.{ext}`，回傳**相對於 root** 的 `FILE_PATH`。
 
     Args:
         doc_id: 所屬文件（作為子目錄，便於管理與日後清理）。
@@ -43,7 +44,14 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
         data: 檔案位元組。
 
     Returns:
-        寫入檔案之絕對路徑（供 DB FILE_PATH 記錄）。
+        `{doc_id}/{file_id}.{ext}`——相對於 storage root 之片段，供 DB `FILE_PATH` 記錄。
+        分隔符固定 `/`（不用 `os.path.join` 組回傳值：Windows 會產出 `\\`，該值搬到 POSIX
+        即讀不到，因為 `\\` 在 POSIX 是合法檔名字元而非分隔符）。
+
+    Note:
+        落盤仍以絕對路徑進行（`makedirs` / `open` 需要），改的只是**寫進 DB 的值**——
+        存絕對路徑會把 `FILE_PATH` 綁死在當下的機器與工作目錄，worktree 一被 `/sti-cleanup`
+        清掉即永久失聯，且無法以複製檔案救回（讀取端圍籬會擋在檔案存在性檢查之前）。見 #233。
     """
     root = storage_root()  # 與讀取端圍籬共用同一根目錄常數（file_store，避免 drift，#160）
     ext = _safe_ext(filename)
@@ -57,4 +65,4 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
     os.makedirs(doc_dir, exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
-    return path
+    return f"{doc_id}/{name}"
