@@ -4,6 +4,8 @@
 **規格**: [spec.md](spec.md)
 **模組代碼**: ET（教育訓練文件管理）
 
+> **2026-08-28 變更摘要**（#238）：ET_SURVEY_QUESTION 新增 QUESTION_TYPE（單選 / 問答，推翻原「不設題型欄位」）；ET_SURVEY_RESPONSE_D 之 SO_ID 改選填並新增 ANSWER_TEXT(150)；UQ_ET_SURVEY_COURSE 改為部分唯一索引（開放未發布課程刪除問卷）；Lookup 增第 10 類 ET_SURVEY_QUESTION_TYPE。
+>
 > **2026-07-02 變更摘要**：移除 ET_MODULE / ET_USER_MODULE 與 ET_COURSE.MODULE_CODE，新增 ET_TAG / ET_USER_TAG / ET_COURSE_TAG（受訓單位標籤）；ET_COURSE 新增起訖時間、狀態機改可逆（移除 PENDING_CLOSE）；新增課後問卷五表（ET_SURVEY*）、週統計快照（ET_WEEKLY_STAT）。
 
 > **2026-07-17 變更摘要（線下核可）**：ET_COURSE 新增 `REQUIRE_APPROVAL`（是否需線下核可）；新增 `ET_APPROVAL`（線下核可紀錄，學員×課程 0～1 筆，通過 / 不通過二態、可撤銷需填原因）；新增 Lookup `ET_APPROVAL_RESULT`；通知範本 `MODULE=ET` 由 6 類增為 **7 類**（新增 `APPROVAL_PASSED` 核可通過通知）。核可為獨立維度，不影響完課率 / 問卷 / 週報。
@@ -586,14 +588,18 @@
 |---|---------|---------|---------|------|------|
 | 1 | 題目 ID | SQ_ID | BIGINT | PK | 主鍵 |
 | 2 | 問卷 ID | SURVEY_ID | BIGINT | Y | FK → ET_SURVEY.SURVEY_ID |
-| 3 | 題幹 | STEM | VARCHAR(500) | Y | 題目敘述（至多 500 字）|
-| 4 | 題目順序 | SORT_ORDER | INT | Y | 同問卷下之順序，從 1 起 |
-| 5 | 版本號 | VERSION | INT | Y | 樂觀鎖 |
+| 3 | 題型 | QUESTION_TYPE | VARCHAR(20) | Y | 參見 Lookup `ET_SURVEY_QUESTION_TYPE`（SINGLE / TEXT）；**無 DB 預設值**（2026-08-28 新增）|
+| 4 | 題幹 | STEM | VARCHAR(500) | Y | 題目敘述（至多 500 字）|
+| 5 | 題目順序 | SORT_ORDER | INT | Y | 同問卷下之順序，從 1 起 |
+| 6 | 版本號 | VERSION | INT | Y | 樂觀鎖 |
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- 題型一律**單選**（不設題型欄位）
-- 同 SURVEY_ID 下至少 1 題方可對學員開放
+- 題型為**單選（SINGLE）或問答（TEXT）**（2026-08-28 變更；原為「一律單選、不設題型欄位」）
+- 單選題：同 SQ_ID 下至少 2 個選項；**問答題：不得有選項**（應用層檢核）
+- `QUESTION_TYPE` **刻意不設 DB 預設值**——留著預設會讓「漏傳題型」靜默變成單選，
+  而該錯誤只會在教師發現題目型態不對時才浮現
+- 同 SURVEY_ID 下至少 1 題方可對學員開放；課程發布時亦檢核（見 spec_us3 發布檢核）
 
 ---
 
@@ -608,7 +614,8 @@
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- 同 SQ_ID 下至少 2 個選項
+- **僅單選題（`QUESTION_TYPE = SINGLE`）有選項**；問答題不得有選項（2026-08-28 變更）
+- 單選題同 SQ_ID 下至少 2 個選項（**無上限**——與測驗選項之 2–6 不同）
 - 教師可自行新增 / 編輯 / 刪除（受 ET_SURVEY 題目凍結規則限制）
 
 ---
@@ -636,12 +643,16 @@
 | 1 | 明細 ID | RD_ID | BIGINT | PK | 主鍵 |
 | 2 | 填答 ID | RESPONSE_ID | BIGINT | Y | FK → ET_SURVEY_RESPONSE_M.RESPONSE_ID |
 | 3 | 題目 ID | SQ_ID | BIGINT | Y | FK → ET_SURVEY_QUESTION.SQ_ID |
-| 4 | 選擇選項 ID | SO_ID | BIGINT | Y | FK → ET_SURVEY_OPTION.SO_ID |
+| 4 | 選擇選項 ID | SO_ID | BIGINT | N | FK → ET_SURVEY_OPTION.SO_ID；**單選題必填、問答題為 NULL**（2026-08-28 改為選填）|
+| 5 | 文字答案 | ANSWER_TEXT | VARCHAR(150) | N | **問答題必填、單選題為 NULL**；至多 150 字（2026-08-28 新增）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- (RESPONSE_ID, SQ_ID) 唯一：每題一個選擇（單選）
-- 統計檢視以 SQ_ID × SO_ID 聚合（各選項人數與百分比）
+- (RESPONSE_ID, SQ_ID) 唯一：每題一筆作答
+- `SO_ID` 與 `ANSWER_TEXT` **互斥**，依題型擇一填寫；互斥由**應用層**把關、不設 CHECK
+  constraint（比照 DM / DP：值域一律由應用層負責）
+- 統計檢視：**單選題**以 SQ_ID × SO_ID 聚合（各選項人數與百分比）；
+  **問答題僅計已答人數**，文字答案於明細檢視與 CSV 呈現（見 spec_us9）
 
 ---
 
