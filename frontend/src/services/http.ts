@@ -45,6 +45,17 @@ export interface ApiError {
   errorMessage: string
   /** 限流 / 冷卻類 429 的可重試剩餘秒數（後端 body 帶回），供前端倒數；無則 undefined。 */
   retryAfter?: number
+  /**
+   * 錯誤回應的原始 body，供帶結構化細節的錯誤取用。
+   *
+   * 對應後端 `AppError.extra`（`app/core/exceptions.py`）——例如 ET 發布檢核未通過時
+   * 的 `blockers` 清單（`ET_PUBLISH_001`）。取用前**務必先確認 `errorCode`**，不同
+   * 錯誤碼的 body 形狀不同，直接讀欄位會在別的錯誤路徑上拿到 undefined。
+   *
+   * 只有 body 為物件時才有值（非 JSON 的錯誤頁為 undefined）。`retryAfter` 早於本
+   * 欄位存在且已有多處呼叫端，維持獨立欄位不併入。
+   */
+  payload?: Record<string, unknown>
 }
 
 /**
@@ -78,6 +89,7 @@ export function toApiError(err: unknown): ApiError {
       errorCode: data.error_code ?? "UNKNOWN_ERROR",
       errorMessage: data.error_message,
       retryAfter: data.retry_after,
+      payload: typeof data === "object" ? (data as Record<string, unknown>) : undefined,
     }
   }
   return {

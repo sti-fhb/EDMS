@@ -57,4 +57,38 @@ describe("toApiError", () => {
     expect(got.errorCode).toBe("UNKNOWN_ERROR")
     expect(got.errorMessage).toBe("參數有誤")
   })
+
+  // ── payload：帶結構化細節的錯誤（對應後端 AppError.extra，#204）────────────
+
+  it("業務錯誤帶回原始 body 供取用結構化細節", () => {
+    // ET 發布檢核未通過（ET_PUBLISH_001）會在 body 帶 blockers 清單——
+    // 沒有這個欄位，前端只能顯示「發布條件未滿足」，教師得自己猜哪裡不合格。
+    const blockers = [{ code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null }]
+    const got = toApiError(
+      withResponse(422, { error_code: "ET_PUBLISH_001", error_message: "發布條件未滿足", blockers }),
+    )
+    expect(got.errorCode).toBe("ET_PUBLISH_001")
+    expect(got.payload?.blockers).toEqual(blockers)
+  })
+
+  it("沒有額外欄位時 payload 仍是那個 body、不是 undefined", () => {
+    const got = toApiError(withResponse(404, { error_code: "ET_COURSE_001", error_message: "查無此課程" }))
+    expect(got.payload).toEqual({ error_code: "ET_COURSE_001", error_message: "查無此課程" })
+  })
+
+  it("完全沒有 response 時無 payload", () => {
+    expect(toApiError(new Error("boom")).payload).toBeUndefined()
+  })
+
+  it("伺服器端錯誤（無 error_message）不帶 payload", () => {
+    // 那條路徑的 body 是 FastAPI 預設或反向代理錯誤頁，沒有結構化細節可取
+    expect(toApiError(withResponse(500, { detail: "Internal Server Error" })).payload).toBeUndefined()
+  })
+
+  it("retryAfter 仍獨立回傳、不必從 payload 取", () => {
+    // retryAfter 早於 payload 存在且已有多處呼叫端，維持獨立欄位（與後端對稱）
+    const got = toApiError(withResponse(429, { error_code: "X", error_message: "太頻繁", retry_after: 30 }))
+    expect(got.retryAfter).toBe(30)
+    expect(got.payload?.retry_after).toBe(30)
+  })
 })
