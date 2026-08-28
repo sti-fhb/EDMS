@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.et.course.publish_service import EtPublishService
 from app.et.course.schemas import (
     MAX_BIGINT,
     Capabilities,
@@ -35,6 +36,8 @@ from app.et.course.schemas import (
     ItemCreateReq,
     ItemReorderReq,
     ItemRow,
+    PublishCheckResult,
+    PublishResult,
     TagOption,
 )
 from app.et.course.service import EtCourseService
@@ -43,6 +46,7 @@ from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
+_publish_service = EtPublishService()
 
 
 @router.get(
@@ -204,3 +208,42 @@ async def delete_item(
 ) -> None:
     """刪除章節項目：本體、其教材 / 測驗內容與學員紀錄皆軟刪，剩餘項目順序遞補。"""
     await _service.delete_item(db, item_id, operator=operator)
+
+
+@router.get(
+    "/courses/{course_id}/publish-check",
+    response_model=PublishCheckResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def check_publish(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> PublishCheckResult:
+    """發布**預檢**：回傳缺漏項目清單，不改變任何狀態。
+
+    讓前端能在按下發布之前就把缺漏標示出來。這是**體驗、不是把關**——發布端點
+    自身會重跑同一套檢核，繞過預檢直接打 POST 一樣擋得下來。
+    """
+    return await _publish_service.check(db, course_id, actor_id=ctx.user_id)
+
+
+@router.post(
+    "/courses/{course_id}/publish",
+    response_model=PublishResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def publish_course(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> PublishResult:
+    """發布課程：六項檢核 → 狀態轉「已發布」→ 寫入首次發布時間 → 產生 8 碼邀請碼。
+
+    檢核未通過回 422 `ET_PUBLISH_001`，body 另帶 `blockers` 清單（AC 26 要求提示
+    具體缺漏項目）。
+
+    > 標籤自動邀請與寄通知信屬 `ET-8`（FR-ET-US3-12 後半），本端點只到狀態變更
+    > 與邀請碼產生。
+    """
+    return await _publish_service.publish(db, course_id, operator=operator)

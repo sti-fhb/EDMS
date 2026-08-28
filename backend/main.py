@@ -174,13 +174,17 @@ async def client_ip_middleware(request: Request, call_next):
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """將 AppError 統一轉換為標準錯誤回應格式。
 
-    回傳格式：{"error_code": "...", "error_message": "..."}；限流 / 冷卻類 429 另帶 retry_after。
+    回傳格式：{"error_code": "...", "error_message": "..."}；限流 / 冷卻類 429 另帶
+    retry_after；帶 `extra` 者（如 ET 發布檢核之 blockers 清單）併入同一層。
     debug log 保留完整錯誤細節供後端排查，不對外暴露。
     """
     logger.debug("AppError %s %s: [%s] %s", request.method, request.url.path, exc.error_code, exc.detail)
     content: dict[str, object] = {"error_code": exc.error_code, "error_message": exc.detail}
     if exc.retry_after is not None:
         content["retry_after"] = exc.retry_after
+    if exc.extra:
+        # 標準欄位不會被蓋掉——AppError 建構時已擋下相撞的 key。
+        content.update(exc.extra)
     return JSONResponse(status_code=exc.status_code, content=content)
 
 
