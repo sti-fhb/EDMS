@@ -25,7 +25,7 @@ import type { ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { DmObsoleteDialog } from "./DmObsoleteDialog"
-import { downloadVersionFile, previewVersionFile } from "./detailService"
+import { downloadObsoleteAttachment, downloadVersionFile, previewVersionFile } from "./detailService"
 import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -69,6 +69,13 @@ export function DmDetailPage() {
       message.error(fileErrorMessage(err, "預覽"))
     }
   }
+  const onDownloadAttachment = async (reviewId: number, name: string | null) => {
+    try {
+      await downloadObsoleteAttachment(reviewId, name ?? "廢止附件")
+    } catch (err) {
+      message.error(fileErrorMessage(err, "下載"))
+    }
+  }
 
   if (isPending) {
     return (
@@ -105,12 +112,27 @@ export function DmDetailPage() {
         <Alert severity="error" icon={<ArchiveIcon />} sx={{ mb: 2 }}>
           本文件已<strong>廢止</strong>，僅供稽核查閱；所有版本僅可預覽、不開放下載。
           {detail.obsolete_info && (
-            <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
-              廢止時間：{detail.obsolete_info.obsolete_time?.slice(0, 10) ?? "—"} ｜ 申請人：
-              {detail.obsolete_info.applicant_name ?? detail.obsolete_info.applicant_id} ｜ 核准者：
-              {detail.obsolete_info.approver_name ?? "—"} ｜ 廢止原因：{detail.obsolete_info.reason ?? "—"}
-              {detail.obsolete_info.has_attachment && "　｜ 廢止附件（如需請聯絡管理者）"}
-            </Typography>
+            <>
+              <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
+                廢止時間：{detail.obsolete_info.obsolete_time?.slice(0, 10) ?? "—"} ｜ 申請人：
+                {detail.obsolete_info.applicant_name ?? detail.obsolete_info.applicant_id} ｜ 核准者：
+                {detail.obsolete_info.approver_name ?? "—"} ｜ 廢止原因：{detail.obsolete_info.reason ?? "—"}
+              </Typography>
+              {detail.obsolete_info.has_attachment && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DownloadIcon />}
+                  sx={{ mt: 1 }}
+                  onClick={() =>
+                    onDownloadAttachment(detail.obsolete_info!.review_id, detail.obsolete_info!.attachment_name)
+                  }
+                >
+                  下載廢止附件
+                </Button>
+              )}
+            </>
           )}
         </Alert>
       )}
@@ -118,22 +140,36 @@ export function DmDetailPage() {
       {/* 操作列 */}
       <Paper sx={{ p: 1.5, mb: 2 }}>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate("/dm/library")}
-          >
-            返回文件庫
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<HistoryIcon />}
-            onClick={() => setHistoryOpen((v) => !v)}
-          >
-            版本歷程
-          </Button>
+          {readOnly ? (
+            // 已廢止（自 US10 DM06 進入）：返回已廢止文件查詢；版本歷程本就自動展開、不再提供 toggle
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ArrowBackIcon />}
+              onClick={() => navigate("/dm/obsolete")}
+            >
+              返回已廢止文件查詢
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ArrowBackIcon />}
+                onClick={() => navigate("/dm/library")}
+              >
+                返回文件庫
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<HistoryIcon />}
+                onClick={() => setHistoryOpen((v) => !v)}
+              >
+                版本歷程
+              </Button>
+            </>
+          )}
           {/* 編輯者入口：送審中 / 廢止待簽核時灰階 + 提示原因（非隱藏，FR-005）；已廢止則整段不顯示 */}
           {detail.is_editor && !readOnly && (
             <>
@@ -320,8 +356,8 @@ function VersionRow({
   onDownload: (versionId: number, filename: string) => void
   onPreview: (versionId: number) => void
 }) {
-  // 目前版且非廢止 → 可下載；否則僅預覽
-  const canDownload = v.is_current && !readOnly
+  // 目前版且非廢止 → 可下載；已廢止之無法預覽（Office）版本亦開放下載供稽核（SA 裁示）
+  const canDownload = (v.is_current && !readOnly) || (readOnly && !v.previewable)
   return (
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start">

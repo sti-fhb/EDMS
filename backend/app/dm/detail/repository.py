@@ -151,6 +151,7 @@ class DetailRepository:
         approver = aliased(DpUser)
         stmt = (
             select(
+                DmReview.review_id,  # 供 US10 read-only banner 下載廢止附件（/dm/reviews/{id}/obsolete-file）
                 DmReview.created_user.label("applicant_id"),
                 DmReview.complete_date,
                 DmReview.reason,

@@ -10,12 +10,14 @@ export interface FileMeta {
 }
 
 export interface ObsoleteInfo {
+  review_id: number
   obsolete_time: string | null
   applicant_id: string
   applicant_name: string | null
   approver_name: string | null
   reason: string | null
   has_attachment: boolean
+  attachment_name: string | null
 }
 
 export interface DetailResponse {

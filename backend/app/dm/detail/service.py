@@ -64,12 +64,14 @@ class DetailService:
             orv = await self._repo.get_obsolete_review(db, doc_id)
             if orv is not None:
                 obsolete_info = ObsoleteInfo(
+                    review_id=orv.review_id,
                     obsolete_time=orv.complete_date,
                     applicant_id=orv.applicant_id,
                     applicant_name=orv.applicant_name,
                     approver_name=orv.approver_name,
                     reason=orv.reason,
                     has_attachment=orv.obsolete_file_name is not None,
+                    attachment_name=orv.obsolete_file_name,
                 )
 
         file_meta = None
@@ -144,9 +146,13 @@ class DetailService:
         is_current = version_id == meta.current_version_id
 
         if disposition == "download":
-            if not is_current:  # 舊版僅預覽、不開放下載（FR-004）
+            # 舊版一般不可下載（FR-004）；例外：已廢止文件之「無法線上預覽」（Office 等）版本開放下載供稽核
+            # （US10 SA 裁示——無法預覽者才開放；PDF / 圖片於已廢止仍僅預覽，由前端把關）。
+            obsolete_audit = meta.status == _OBSOLETE and not is_previewable(vfile.file_mime)
+            if not is_current and not obsolete_audit:
                 raise AppError(status_code=403, detail="舊版本不可下載，請聯絡管理者", error_code="DM_DOC_002")
-            await self._repo.write_read(db, doc_id=doc_id, version_id=version_id, user_id=ctx.user_id)  # 已看
+            if is_current:
+                await self._repo.write_read(db, doc_id=doc_id, version_id=version_id, user_id=ctx.user_id)  # 已看
             return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=False)
 
         # disposition == "preview"

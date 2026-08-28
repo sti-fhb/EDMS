@@ -61,4 +61,15 @@ describe("DmObsoletePage 已廢止文件查詢", () => {
     await user.click(screen.getByRole("button", { name: "匯出 CSV" }))
     expect(downloadObsoleteCsv).toHaveBeenCalled()
   })
+
+  it("非管理者直連（清單 API 403）→ 顯示無權限、不渲染查詢 UI（DM-MSG-DM06-002）", async () => {
+    server.use(
+      http.get("/api/dm/obsolete-archive/documents", () =>
+        HttpResponse.json({ error_code: "DM_AUTH_003", error_message: "需要文件管理者權限" }, { status: 403 }),
+      ),
+    )
+    renderWithProviders(<DmObsoletePage />)
+    expect(await screen.findByText("您無權限存取此頁面")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "匯出 CSV" })).not.toBeInTheDocument() // 查詢 UI 不渲染
+  })
 })

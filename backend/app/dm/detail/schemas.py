@@ -23,12 +23,14 @@ class FileMeta(BaseModel):
 class ObsoleteInfo(BaseModel):
     """已廢止文件之廢止資訊（read-only banner 用；取自 DM_REVIEW 廢止類已核准週期）。"""
 
+    review_id: int  # 廢止送審週期 ID（供下載廢止附件 /dm/reviews/{id}/obsolete-file）
     obsolete_time: datetime | None  # 核准廢止時間（COMPLETE_DATE）
     applicant_id: str  # 申請人 USER_ID（DM_REVIEW.CREATED_USER）
     applicant_name: str | None
     approver_name: str | None
     reason: str | None
     has_attachment: bool  # 廢止附件（OBSOLETE_FILE_*）是否存在
+    attachment_name: str | None  # 廢止附件原始檔名（下載時之檔名；無附件為 None）
 
 
 class DetailResponse(BaseModel):
