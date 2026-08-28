@@ -94,9 +94,7 @@ async def test_dm_version_path_converted(db, stored, doc_id, expected):
     await db.execute(
         text('CREATE TEMP TABLE "DM_DOC_VERSION" ("DOC_ID" varchar(20), "FILE_PATH" varchar(500)) ON COMMIT DROP')
     )
-    await db.execute(
-        text('INSERT INTO "DM_DOC_VERSION" VALUES (:d, :p)'), {"d": doc_id, "p": stored}
-    )
+    await db.execute(text('INSERT INTO "DM_DOC_VERSION" VALUES (:d, :p)'), {"d": doc_id, "p": stored})
     await db.execute(text(dict(mod.TARGETS)["DM_DOC_VERSION.FILE_PATH"]))
     got = (await db.execute(text('SELECT "FILE_PATH" FROM "DM_DOC_VERSION"'))).scalar_one()
     assert got == expected
@@ -123,7 +121,7 @@ async def test_null_path_left_null(db):
     await db.execute(
         text('CREATE TEMP TABLE "DM_DOC_VERSION" ("DOC_ID" varchar(20), "FILE_PATH" varchar(500)) ON COMMIT DROP')
     )
-    await db.execute(text('INSERT INTO "DM_DOC_VERSION" VALUES (\'DM-OTHER-000009\', NULL)'))
+    await db.execute(text("INSERT INTO \"DM_DOC_VERSION\" VALUES ('DM-OTHER-000009', NULL)"))
     await db.execute(text(dict(mod.TARGETS)["DM_DOC_VERSION.FILE_PATH"]))
     got = (await db.execute(text('SELECT "FILE_PATH" FROM "DM_DOC_VERSION"'))).scalar_one()
     assert got is None
@@ -161,9 +159,7 @@ async def test_et_video_path_converted_by_material_id(db, material_id, stored, e
     await db.execute(
         text('CREATE TEMP TABLE "ET_MATERIAL_VIDEO" ("MATERIAL_ID" bigint, "FILE_PATH" varchar(500)) ON COMMIT DROP')
     )
-    await db.execute(
-        text('INSERT INTO "ET_MATERIAL_VIDEO" VALUES (:m, :p)'), {"m": material_id, "p": stored}
-    )
+    await db.execute(text('INSERT INTO "ET_MATERIAL_VIDEO" VALUES (:m, :p)'), {"m": material_id, "p": stored})
     await db.execute(text(dict(mod.TARGETS)["ET_MATERIAL_VIDEO.FILE_PATH"]))
     got = (await db.execute(text('SELECT "FILE_PATH" FROM "ET_MATERIAL_VIDEO"'))).scalar_one()
     assert got == expected
@@ -195,9 +191,7 @@ async def test_obsolete_attachment_path_converted(db):
     """廢止附件沿用 save_upload 之 {doc_id}/ 佈局，切點同為 DOC_ID。"""
     mod = _load_migration()
     await db.execute(
-        text(
-            'CREATE TEMP TABLE "DM_REVIEW" ("DOC_ID" varchar(20), "OBSOLETE_FILE_PATH" varchar(500)) ON COMMIT DROP'
-        )
+        text('CREATE TEMP TABLE "DM_REVIEW" ("DOC_ID" varchar(20), "OBSOLETE_FILE_PATH" varchar(500)) ON COMMIT DROP')
     )
     await db.execute(
         text('INSERT INTO "DM_REVIEW" VALUES (:d, :p)'),
