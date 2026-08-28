@@ -66,3 +66,16 @@ export async function previewVersionFile(docId: string, versionId: number): Prom
   // 延遲回收 blob URL：確保新分頁已載入後才釋放，避免記憶體洩漏（多次預覽累積）。
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
+
+/** 下載廢止附件（US10 read-only banner）：打 US8 既有端點（DM_ADMIN 可下載）→ 觸發瀏覽器下載。 */
+export async function downloadObsoleteAttachment(reviewId: number, filename: string): Promise<void> {
+  const { data } = await http.get<Blob>(`/dm/reviews/${reviewId}/obsolete-file`, { responseType: "blob" })
+  const url = URL.createObjectURL(data)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

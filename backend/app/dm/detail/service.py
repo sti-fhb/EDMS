@@ -12,7 +12,7 @@ from app.dm.detail.repository import DetailRepository
 from app.dm.detail.schemas import DetailResponse, FileMeta, ObsoleteInfo, VersionItem
 from app.dm.document.file_paths import resolve_within_root
 from app.dm.document.file_store import is_previewable
-from app.dm.roles.authz import DM_EDITOR
+from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, has_role
 
 _OBSOLETE = "OBSOLETE"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
@@ -44,6 +44,7 @@ class DetailService:
             raise _NOT_FOUND  # 查無或無權（存取控制）
         tags = await self._repo.get_retrieval_tags(db, doc_id)
         is_editor = DM_EDITOR in ctx.roles
+        is_admin = DM_ADMIN in ctx.roles  # 供前端判斷是否顯示「已廢止 Office 版本下載」（US10 限管理者）
         has_pending = await self._repo.has_pending_review(db, doc_id)
         # 本人已有未送簽草稿：編輯入口＝新開版本（addVersion），會被 DM_DOC_009 擋 → 提前灰階請續編既有草稿。
         # 送審中（不分申請人）優先於本人草稿：文件層送審鎖對所有編輯者一致失效。
@@ -64,12 +65,14 @@ class DetailService:
             orv = await self._repo.get_obsolete_review(db, doc_id)
             if orv is not None:
                 obsolete_info = ObsoleteInfo(
+                    review_id=orv.review_id,
                     obsolete_time=orv.complete_date,
                     applicant_id=orv.applicant_id,
                     applicant_name=orv.applicant_name,
                     approver_name=orv.approver_name,
                     reason=orv.reason,
                     has_attachment=orv.obsolete_file_name is not None,
+                    attachment_name=orv.obsolete_file_name,
                 )
 
         file_meta = None
@@ -101,6 +104,7 @@ class DetailService:
             func_name=row.func_name,
             file=file_meta,
             is_editor=is_editor,
+            is_admin=is_admin,
             can_edit=can_edit,
             edit_lock_reason=edit_lock_reason,
             is_obsolete=is_obsolete,
@@ -144,7 +148,16 @@ class DetailService:
         is_current = version_id == meta.current_version_id
 
         if disposition == "download":
-            if not is_current:  # 舊版僅預覽、不開放下載（FR-004）
+            if meta.status == _OBSOLETE:
+                # 已廢止：所有版本一律僅預覽、不下載；唯管理者可下載「無法線上預覽」（Office 等）版本供稽核
+                # （US10 SA 裁示：限管理者）。稽核下載不寫 DM_DOC_READ。
+                if not (has_role(ctx.roles, DM_ADMIN) and not is_previewable(vfile.file_mime)):
+                    raise AppError(
+                        status_code=403, detail="已廢止文件僅供預覽，如需下載請洽管理者", error_code="DM_DOC_002"
+                    )
+                return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=False)
+            # 非廢止：舊版僅預覽、不開放下載（FR-004）；目前版可下載並寫閱讀紀錄。
+            if not is_current:
                 raise AppError(status_code=403, detail="舊版本不可下載，請聯絡管理者", error_code="DM_DOC_002")
             await self._repo.write_read(db, doc_id=doc_id, version_id=version_id, user_id=ctx.user_id)  # 已看
             return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=False)
