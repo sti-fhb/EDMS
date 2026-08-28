@@ -113,6 +113,13 @@ def resolve_within_root(file_path: str, *, not_found: AppError) -> str:
 
     錯誤文案由呼叫端自帶，避免與該端點其他 404 措辭不一致。逃逸時記安全事件但
     **不記落盤路徑**（遵 `sti-backend-logging`）。
+
+    ⚠️ **播放端點落地時必須比照 DM，先做 `Path(resolved).is_file()` 再開檔**（見
+    `app/dm/detail/router.py`）。Windows 的 `os.path.realpath` 不拒絕內嵌 NUL 字元
+    （CPython gh-106242），帶 NUL 的路徑會通過本圍籬；`pathlib` 的 `is_file()` 內部
+    `except ValueError: return False`，能把它收斂成統一 404，但若直接 `open(resolved)`
+    則會拋 `ValueError` 冒成 500。POSIX 端 `realpath` 本身就會拋、由此處 fail-closed
+    接住，兩平台行為因而一致。此為 #233 security review INFO-6。
     """
     resolved = _resolved_within_root(file_path)
     if resolved is None:
@@ -211,12 +218,14 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
     rollback（`get_db` 於此時 commit），結果就是一個孤兒檔案——不阻塞任何人，
     亦可日後以清理作業回收。
     """
-    final_dir = os.path.join(storage_root(), video_id_hint)
+    root = storage_root()
+    final_dir = os.path.join(root, video_id_hint)
     os.makedirs(final_dir, exist_ok=True)
-    name = f"{uuid.uuid4().hex}.{ext}"
-    final_path = os.path.join(final_dir, name)
+    final_path = os.path.join(final_dir, f"{uuid.uuid4().hex}.{ext}")
     os.replace(tmp_path, final_path)
-    return final_path, f"{video_id_hint}/{name}"
+    # 相對片段由實際落地的絕對路徑反推，而非另行組字串——避免「落地的」與「入 DB 的」
+    # 是兩個各自組出來的東西，日後任一端重構即可能靜默產生落差
+    return final_path, os.path.relpath(final_path, root).replace(os.sep, "/")
 
 
 def discard(path: str) -> None:

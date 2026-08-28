@@ -3,7 +3,7 @@ import os
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # HMAC 密鑰最小長度（bytes）對齊 RFC 7518 §3.2 各演算法輸出長度，防過短/未替換密鑰。
@@ -175,6 +175,19 @@ class Settings(BaseSettings):
             )
         return self
 
+    @field_validator("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT", mode="before")
+    @classmethod
+    def _strip_storage_root(cls, v: Any) -> Any:
+        """落盤根去除前後空白，讓「被檢查的值」與「被使用的值」是同一個。
+
+        ⚠️ 不可只在檢查時 `.strip()` 而不寫回：`os.path.isabs("  /srv/dm  ")` 為 False、
+        strip 後為 True，於是護欄看的是乾淨值、`storage_root()` 用的卻是帶空白的原值，
+        `realpath` 會把它當相對路徑接到 CWD 底下——護欄放行了它本來要擋的那個失敗模式，
+        而且完全無聲。python-dotenv 對引號內的空白是原樣保留的（`ROOT="  /srv/dm  "`），
+        docker-compose / k8s ConfigMap 的 YAML 值亦然，此非理論情境。
+        """
+        return v.strip() if isinstance(v, str) else v
+
     @model_validator(mode="after")
     def _validate_storage_roots_absolute(self) -> "Settings":
         """production 護欄：兩個落盤根必須是絕對路徑（#233）。
@@ -189,15 +202,25 @@ class Settings(BaseSettings):
 
         比照 `_validate_frontend_base_url` / `_validate_trusted_proxy_count_explicit`
         的既有作法於啟動即擋；dev（DEBUG=true）維持相對路徑的便利預設。
+
+        Windows 另需磁碟機：`os.path.isabs("/srv/dm")` 在 nt 為 True，但 `realpath`
+        會依**當前磁碟機**解析成 `C:\\srv\\dm`——從 D: 啟動即得到不同的 root，仍是本護欄
+        要擋的那種靜默飄移。`splitdrive` 對 UNC（`\\\\server\\share`）回非空，不會誤擋。
         """
-        if not self.DEBUG:
-            for field in ("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT"):
-                value = getattr(self, field).strip()
-                if not value or not os.path.isabs(value):
-                    raise ValueError(
-                        f"{field} 在 production（DEBUG=false）必須為絕對路徑（目前為 {value!r}）："
-                        "相對路徑依 process 工作目錄解析，換啟動位置即讀不到既有檔案"
-                    )
+        if self.DEBUG:
+            return self
+        for field in ("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT"):
+            value = getattr(self, field)  # 已由 _strip_storage_root 正規化
+            if not value or not os.path.isabs(value):
+                raise ValueError(
+                    f"{field} 在 production（DEBUG=false）必須為絕對路徑（目前為 {value!r}）："
+                    "相對路徑依 process 工作目錄解析，換啟動位置即讀不到既有檔案"
+                )
+            if os.name == "nt" and not os.path.splitdrive(value)[0]:
+                raise ValueError(
+                    f"{field} 在 Windows production 需含磁碟機或 UNC 主機（目前為 {value!r}）："
+                    "無磁碟機之絕對路徑依當前磁碟機解析，換啟動磁碟機即讀不到既有檔案"
+                )
         return self
 
     @property

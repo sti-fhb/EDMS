@@ -45,8 +45,12 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
 
     Returns:
         `{doc_id}/{file_id}.{ext}`——相對於 storage root 之片段，供 DB `FILE_PATH` 記錄。
-        分隔符固定 `/`（不用 `os.path.join` 組回傳值：Windows 會產出 `\\`，該值搬到 POSIX
-        即讀不到，因為 `\\` 在 POSIX 是合法檔名字元而非分隔符）。
+        分隔符固定 `/`（`os.sep` 在 Windows 為 `\\`，該值搬到 POSIX 即讀不到，因為 `\\`
+        在 POSIX 是合法檔名字元而非分隔符）。
+
+        回傳值由**已通過圍籬檢查的絕對路徑**經 `relpath` 反推，而非另行以原始 `doc_id`
+        組字串——後者會讓「被驗證的物件」與「落 DB 的物件」是兩個不同的東西，日後任一端
+        重構就可能靜默產生落差。
 
     Note:
         落盤仍以絕對路徑進行（`makedirs` / `open` 需要），改的只是**寫進 DB 的值**——
@@ -65,4 +69,4 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
     os.makedirs(doc_dir, exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
-    return f"{doc_id}/{name}"
+    return os.path.relpath(path, root).replace(os.sep, "/")
