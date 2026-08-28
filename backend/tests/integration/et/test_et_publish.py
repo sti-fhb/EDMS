@@ -203,6 +203,34 @@ class TestPublishCheck:
         body = await _check(client, uid, cid)
         assert {b["code"] for b in body["blockers"]} == {"NO_CHAPTER", "NO_MATERIAL"}
 
+    async def test_有問卷但零題被擋(self, client, db) -> None:
+        """第七項檢核（2026-08-28 實測回饋）。走真實路徑：建問卷但不加題目。
+
+        `_survey_question_count` 對「沒有問卷」回 None、「有問卷 0 題」回 0——
+        這條驗的是後者確實被擋，`test_未建立問卷不阻擋` 驗前者不被擋。
+        """
+        uid = await _user(db, "t_pc10")
+        cid = await _publishable_course(client, db, uid)
+        created = await client.post(
+            f"{_COURSES}/{cid}/survey", json={"survey_name": "space survey"}, headers=_bearer(uid)
+        )
+        assert created.status_code == 201, created.text
+
+        body = await _check(client, uid, cid)
+        assert body["can_publish"] is False
+        assert [(b["code"], b["target_id"]) for b in body["blockers"]] == [("SURVEY_NO_QUESTION", None)]
+
+    async def test_有問卷且有題目可發布(self, client, db) -> None:
+        uid = await _user(db, "t_pc11")
+        cid = await _publishable_course(client, db, uid)
+        created = await client.post(f"{_COURSES}/{cid}/survey", json={"survey_name": "ok survey"}, headers=_bearer(uid))
+        await client.post(
+            f"/api/et/surveys/{created.json()['survey_id']}/questions",
+            json={"stem": "stem", "options": [{"option_text": "A"}, {"option_text": "B"}]},
+            headers=_bearer(uid),
+        )
+        assert (await _check(client, uid, cid))["can_publish"] is True
+
     async def test_非擁有者不可預檢(self, client, db) -> None:
         owner = await _user(db, "t_pc08")
         other = await _user(db, "t_pc09")

@@ -15,7 +15,14 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
-import { MAX_OPTIONS, OPTION_TEXT_MAX_LEN, QUESTION_TYPE_LABEL, QuestionFormSchema, STEM_MAX_LEN } from "./itemSchemas"
+import {
+  MAX_OPTIONS,
+  MIN_OPTIONS,
+  OPTION_TEXT_MAX_LEN,
+  QUESTION_TYPE_LABEL,
+  QuestionFormSchema,
+  STEM_MAX_LEN,
+} from "./itemSchemas"
 import type { QuestionDraft, QuestionFormValues, QuestionType } from "./itemSchemas"
 
 interface QuestionEditorProps {
@@ -196,6 +203,9 @@ export function QuestionEditor({ initial, saving = false, onSave, onCancel }: Qu
                   size="small"
                   color="error"
                   aria-label={`刪除選項 ${index + 1}`}
+                  // 刪到剩下限就停用——讓使用者刪光再被 `ET_QUESTION_003` 擋下，
+                  // 等於白做一次。比照問卷之 `SurveyQuestionEditor`（#204 實測回饋）。
+                  disabled={draft.options.length <= MIN_OPTIONS}
                   onClick={() => removeOption(index)}
                 >
                   <DeleteOutlineIcon fontSize="small" />

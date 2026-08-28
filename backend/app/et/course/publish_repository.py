@@ -24,6 +24,7 @@ from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.publish_rules import CourseSnapshot, QuizSummary
 from app.et.material.models import EtMaterialDoc
 from app.et.quiz.models import EtQuestion
+from app.et.survey.models import EtSurvey, EtSurveyQuestion
 
 
 class EtPublishRepository:
@@ -48,6 +49,27 @@ class EtPublishRepository:
             material_count=await self._item_count(db, chapter_ids, ITEM_MATERIAL),
             quizzes=await self._quiz_summaries(db, chapter_ids),
             doc_ids=await self._doc_ids(db, chapter_ids),
+            survey_question_count=await self._survey_question_count(db, course.course_id),
+        )
+
+    async def _survey_question_count(self, db: AsyncSession, course_id: int) -> int | None:
+        """問卷題數；**沒有問卷時回 `None` 而非 0**。
+
+        0 是「有問卷但一題都沒有」（要擋發布），`None` 是「沒有問卷」（選配，不擋）。
+        兩者共用同一個值會讓 AC 23 失效——每一門沒建問卷的課程都會被擋住發布。
+        """
+        survey_id = await db.scalar(
+            select(EtSurvey.survey_id).where(EtSurvey.course_id == course_id, EtSurvey.deleted == 0)
+        )
+        if survey_id is None:
+            return None
+        return (
+            await db.scalar(
+                select(func.count())
+                .select_from(EtSurveyQuestion)
+                .where(EtSurveyQuestion.survey_id == survey_id, EtSurveyQuestion.deleted == 0)
+            )
+            or 0
         )
 
     async def _chapter_ids(self, db: AsyncSession, course_id: int) -> list[int]:

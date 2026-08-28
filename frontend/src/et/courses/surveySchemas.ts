@@ -135,5 +135,6 @@ export const BLOCKER_HINT: Record<string, string> = {
   NO_SCHEDULE: "請於「基本資料」填寫課程起訖時間",
   QUIZ_POINTS: "請調整該測驗各題配分，使總和為 100",
   QUIZ_NO_QUESTION: "請為該測驗新增至少 1 題",
+  SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或停用該問卷",
   OBSOLETE_DOC: "請於教材中移除已廢止文件之引用",
 }

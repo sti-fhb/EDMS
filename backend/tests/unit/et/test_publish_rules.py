@@ -18,6 +18,7 @@ from app.et.course.publish_rules import (
     BLOCK_OBSOLETE_DOC,
     BLOCK_QUIZ_NO_QUESTION,
     BLOCK_QUIZ_POINTS,
+    BLOCK_SURVEY_NO_QUESTION,
     CourseSnapshot,
     QuizSummary,
     evaluate_publish,
@@ -46,6 +47,8 @@ def _snapshot(**overrides) -> CourseSnapshot:
         "material_count": 1,
         "quizzes": (),
         "doc_ids": frozenset(),
+        # None = 沒有問卷（選配，AC 23）；整數 = 有問卷且其題數
+        "survey_question_count": None,
     }
     return CourseSnapshot(**{**base, **overrides})
 
@@ -57,10 +60,11 @@ class TestEvaluatePublishHappyPath:
     def test_未建立問卷不列入缺漏(self) -> None:
         """AC 23：問卷為選配，未建立**不得**因此阻擋發布。
 
-        `CourseSnapshot` 刻意不含問卷欄位——沒有欄位就不可能有人不小心加上這條檢核。
-        本測試釘住這個設計，兼作 AC 23 的驗證。
+        以 `survey_question_count is None` 表達「沒有問卷」，而不是用 0——
+        0 是「有問卷但一題都沒有」，那要擋（見 `TestSurveyCheck`）。兩者若共用同一個
+        值，這兩條規則就沒辦法並存。
         """
-        assert not hasattr(_snapshot(), "survey_count")
+        assert _snapshot().survey_question_count is None
         assert evaluate_publish(_snapshot(), obsolete_doc_ids=frozenset()) == ()
 
     def test_測驗配分剛好一百且有題目時通過(self) -> None:
@@ -130,6 +134,36 @@ class TestEvaluatePublishEachCheck:
     def test_引用未廢止文件通過(self) -> None:
         snapshot = _snapshot(doc_ids=frozenset({"DOC-A"}))
         assert evaluate_publish(snapshot, obsolete_doc_ids=frozenset()) == ()
+
+
+class TestSurveyCheck:
+    """有問卷則至少 1 題（2026-08-28 實測回饋新增，為**第七項**檢核）。
+
+    與 AC 23「未建立問卷不阻擋發布」並不衝突——這條是「**有**才檢查」。一份 0 題的
+    問卷對學員而言是個打不開的空殼，與 0 題測驗同型（第六項檢核）。
+    """
+
+    def test_有問卷且有題目通過(self) -> None:
+        assert evaluate_publish(_snapshot(survey_question_count=3), obsolete_doc_ids=frozenset()) == ()
+
+    def test_有問卷但零題被擋(self) -> None:
+        blockers = evaluate_publish(_snapshot(survey_question_count=0), obsolete_doc_ids=frozenset())
+        assert [b.code for b in blockers] == [BLOCK_SURVEY_NO_QUESTION]
+
+    def test_沒有問卷不被擋(self) -> None:
+        assert evaluate_publish(_snapshot(survey_question_count=None), obsolete_doc_ids=frozenset()) == ()
+
+    def test_零題與沒有問卷是不同狀態(self) -> None:
+        """釘住 `None` vs `0` 的區別——把「沒有問卷」寫成 0 會讓 AC 23 失效
+        （每一門沒建問卷的課程都會被擋住發布）。
+        """
+        assert evaluate_publish(_snapshot(survey_question_count=None), obsolete_doc_ids=frozenset()) == ()
+        assert evaluate_publish(_snapshot(survey_question_count=0), obsolete_doc_ids=frozenset()) != ()
+
+    def test_問卷缺漏無_target_id(self) -> None:
+        """一門課程至多 1 份問卷，不需要 `target_id` 指出是哪一份。"""
+        blockers = evaluate_publish(_snapshot(survey_question_count=0), obsolete_doc_ids=frozenset())
+        assert blockers[0].target_id is None
 
 
 class TestEvaluatePublishCombined:

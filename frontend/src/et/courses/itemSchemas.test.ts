@@ -96,6 +96,26 @@ describe("QuestionFormSchema", () => {
     expect(QuestionFormSchema.safeParse(base).success).toBe(true)
   })
 
+  it.each([0, 1])("選項只有 %i 個被擋", (count) => {
+    // UI 已於達下限時停用刪除鈕（見 QuestionEditor），所以正常操作到不了這裡——
+    // 這條守的是**繞過 UI 直接送出**的請求，故必須在 schema 層留著測試。
+    const result = QuestionFormSchema.safeParse({
+      ...base,
+      options: Array.from({ length: count }, (_, i) => option(`X${i}`, i === 0)),
+    })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]?.message).toContain("每題選項數須介於 2 至 6 個")
+  })
+
+  it("選項超過 6 個被擋", () => {
+    const result = QuestionFormSchema.safeParse({
+      ...base,
+      options: Array.from({ length: 7 }, (_, i) => option(`X${i}`, i === 0)),
+    })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]?.message).toContain("每題選項數須介於 2 至 6 個")
+  })
+
   it("單選題兩個正確選項被擋", () => {
     const result = QuestionFormSchema.safeParse({ ...base, options: [option("A", true), option("B", true)] })
     expect(result.success).toBe(false)

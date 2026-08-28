@@ -9,13 +9,17 @@ test 涵蓋，不必為每種缺漏情境建一份真資料。
 AC 26 要求「提示**具體缺漏項目**」。回布林就只能說「發布失敗」，教師得自己猜是哪裡
 不合格；回單一原因則會讓他修一次、再被擋一次。故一次回**全部**缺漏。
 
-## 六項檢核——其中一項不在 spec AC 24 內
+## 七項檢核——其中兩項不在 spec AC 24 內
 
 AC 24 明列五項：至少 1 章節 + 1 教材、至少 1 個受訓單位標籤、起訖時間已填、
 各測驗配分總和 = 100、無引用之廢止 DM 文件。
 
 第六項「**每個測驗至少 1 題**」來自 `data-model.md` §ET_QUESTION 之業務規則
 （「同 QUIZ_ID 下至少 1 題」），經 **SA 裁示（#204 Q3 → A）** 加入。
+
+第七項「**有問卷則至少 1 題**」為 2026-08-28 實機測試回饋新增。它與 AC 23
+「未建立問卷不阻擋發布」**不衝突**——是「有才檢查」。一份 0 題的問卷對學員而言是個
+打不開的空殼，與 0 題測驗同型。
 
 ⚠️ **不要因為對照 AC 24 找不到就把它刪掉**。它的來源是 #203 的延後決策：教師是逐題
 新增的，空殼測驗與第一題存檔之間必然存在 0 題的狀態，擋在儲存時等於無法建題，因此
@@ -42,6 +46,7 @@ BLOCK_NO_TAG: Final = "NO_TAG"
 BLOCK_NO_SCHEDULE: Final = "NO_SCHEDULE"
 BLOCK_QUIZ_POINTS: Final = "QUIZ_POINTS"
 BLOCK_QUIZ_NO_QUESTION: Final = "QUIZ_NO_QUESTION"
+BLOCK_SURVEY_NO_QUESTION: Final = "SURVEY_NO_QUESTION"
 BLOCK_OBSOLETE_DOC: Final = "OBSOLETE_DOC"
 
 #: 各測驗配分總和之目標值（`data-model.md` §ET_QUIZ）。
@@ -59,11 +64,7 @@ class QuizSummary:
 
 @dataclass(frozen=True)
 class CourseSnapshot:
-    """發布檢核所需之課程結構快照。
-
-    **刻意不含問卷欄位**——AC 23 明訂問卷為選配、未建立不得阻擋發布。沒有欄位就不會
-    有人不小心把它加進檢核。
-    """
+    """發布檢核所需之課程結構快照。"""
 
     status: str
     open_start_at: datetime | None
@@ -73,6 +74,11 @@ class CourseSnapshot:
     material_count: int
     quizzes: tuple[QuizSummary, ...]
     doc_ids: frozenset[str]
+    #: 問卷題數。**`None` = 沒有問卷**（選配，AC 23）；整數 = 有問卷且其題數。
+    #:
+    #: ⚠️ 「沒有問卷」不可寫成 `0`——0 是「有問卷但一題都沒有」，那要擋。兩者共用
+    #: 同一個值會讓 AC 23 失效：每一門沒建問卷的課程都會被擋住發布。
+    survey_question_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +129,11 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
             blockers.append(
                 PublishBlocker(BLOCK_QUIZ_POINTS, f"測驗各題配分總和須等於 {REQUIRED_POINTS_TOTAL}", quiz.quiz_id)
             )
+
+    # 有問卷才檢查——與 AC 23「未建立問卷不阻擋發布」不衝突。一份 0 題的問卷對學員
+    # 而言是個打不開的空殼，與 0 題測驗同型。不需要 `target_id`：一門課程至多 1 份問卷。
+    if snapshot.survey_question_count is not None and snapshot.survey_question_count < 1:
+        blockers.append(PublishBlocker(BLOCK_SURVEY_NO_QUESTION, "課後問卷至少須有 1 題，或請停用該問卷"))
 
     if snapshot.doc_ids & obsolete_doc_ids:
         blockers.append(PublishBlocker(BLOCK_OBSOLETE_DOC, "請先移除已廢止文件之引用"))
