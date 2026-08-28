@@ -50,7 +50,15 @@ export function RegisterForm() {
       if (retryAfter) cooldown.start(retryAfter, email)
     } catch (err) {
       const apiError = toApiError(err)
-      setApiError(apiError.errorMessage)
+      // 429 在「非本人操作」時完全無指引（#213）：使用者第一次註冊就被擋，訊息只說「操作過於頻繁」
+      // ——他沒操作過任何東西，看不出這是別人（或另一台裝置 / 同一辦公室的同事）觸發的冷卻。
+      // #213 已讓「沒寄出信的探測」不再波及他人，但仍有兩種正常情況會走到這裡：本人在另一裝置剛
+      // 註冊過、或有人真的觸發過一次寄信。故補一句指引，讓使用者知道這不是他做錯了什麼。
+      setApiError(
+        apiError.retryAfter
+          ? `${apiError.errorMessage}（若您並未進行任何操作，請稍候再試或聯繫系統管理者）`
+          : apiError.errorMessage,
+      )
       // 冷卻中重複註冊（429）→ 起算倒數（綁定此 Email）並暫時 disable 送出
       if (apiError.retryAfter) cooldown.start(apiError.retryAfter, email)
     } finally {

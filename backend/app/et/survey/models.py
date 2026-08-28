@@ -20,6 +20,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +36,14 @@ class EtSurvey(BaseModel):
     __tablename__ = "ET_SURVEY"
     __table_args__ = (
         PrimaryKeyConstraint("SURVEY_ID", name="PK_ET_SURVEY"),
+        # ⚠️ 全表唯一（**未**排除軟刪除列），成立的前提是「問卷不可刪除」——
+        # SA 裁示 #204 Q1 → B：問卷只能停用（`IS_ACTIVE=false`），不提供刪除端點。
+        # 沒有刪除就不會產生軟刪列，此約束因而不會壞。
+        #
+        # 這是「用不到所以沒壞」，不是「修好了」。日後若開放問卷刪除，**必須同步**
+        # 改為部分唯一索引（`postgresql_where=text('"DELETED" = 0')`，比照下方
+        # 題目 / 選項）；否則軟刪的那筆會永久佔住該課程，而錯誤訊息會是
+        # 「一門課程僅可建立 1 份課後問卷」，指向一筆使用者看不見的資料。
         UniqueConstraint("COURSE_ID", name="UQ_ET_SURVEY_COURSE"),
     )
 
@@ -56,7 +65,16 @@ class EtSurveyQuestion(BaseModel):
     __tablename__ = "ET_SURVEY_QUESTION"
     __table_args__ = (
         PrimaryKeyConstraint("SQ_ID", name="PK_ET_SURVEY_QUESTION"),
-        UniqueConstraint("SURVEY_ID", "SORT_ORDER", name="UQ_ET_SURVEY_QUESTION_ORDER"),
+        # 部分唯一索引（#204）：不變量是「**未刪除**之題目間順序不重複」。
+        # 全表唯一會讓已軟刪除的列繼續佔住順序，使刪題後的順序遞補撞鍵
+        # （同 ET_CHAPTER / ET_ITEM，見 #202 / #203）。
+        Index(
+            "UX_ET_SURVEY_QUESTION_ORDER",
+            "SURVEY_ID",
+            "SORT_ORDER",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
     )
 
     sq_id: Mapped[int] = mapped_column("SQ_ID", BigInteger, Identity(), nullable=False)
@@ -77,7 +95,15 @@ class EtSurveyOption(BaseModel):
     __tablename__ = "ET_SURVEY_OPTION"
     __table_args__ = (
         PrimaryKeyConstraint("SO_ID", name="PK_ET_SURVEY_OPTION"),
-        UniqueConstraint("SQ_ID", "SORT_ORDER", name="UQ_ET_SURVEY_OPTION_ORDER"),
+        # 部分唯一索引（#204）：更新題目採「舊選項軟刪 + 新選項自 1 起插入」，
+        # 全表唯一會讓舊列繼續佔著 SORT_ORDER=1，第一個新選項就插不進去。
+        Index(
+            "UX_ET_SURVEY_OPTION_ORDER",
+            "SQ_ID",
+            "SORT_ORDER",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0'),
+        ),
     )
 
     so_id: Mapped[int] = mapped_column("SO_ID", BigInteger, Identity(), nullable=False)

@@ -12,6 +12,8 @@ from sqlalchemy import select
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.notify.models import DpEmailLog
+from app.dp.user.models import DpPendingRegistration
+from app.dp.user.repository import AuthRepository
 from app.dp.users.models import DpUser
 from app.dp.users.repository import UsersRepository
 from app.dp.users.service import UsersService
@@ -162,3 +164,65 @@ async def test_reminder_just_outside_window(db):
     await _seed_user(db, user_id="edge82", email="edge82@x.com", pwd_changed=now - timedelta(days=82))
 
     assert await _service.send_pwd_expiry_reminders(db) == 0
+
+
+async def _seed_pending(db, *, email, expires_offset_hours, kind="SELF_REGISTER"):
+    """塞一筆待驗證列，效期以「距現在幾小時」表示（負數＝已逾期）。"""
+    now = utcnow()
+    await AuthRepository().create_pending_registration(
+        db,
+        token_hash=f"h-{email}",
+        email=email,
+        user_name="待驗證",
+        pwd_hash=None,
+        expires_date=now + timedelta(hours=expires_offset_hours),
+        now=now,
+        kind=kind,
+        invite_id="inv-1" if kind == "ADMIN_INVITE" else None,
+    )
+
+
+async def test_purge_expired_pending_deletes_only_rows_expired_over_retention(db):
+    """清理逾期待驗證列（#226）：**逾期滿 1 天**才刪；未滿 1 天與未逾期的都留。
+
+    保留一天的理由：逾期的列本身已無用（token 不可用、#212 之後也不含密碼），但留一天讓當天的
+    客服問題還查得到「這個 Email 前一天有人送過註冊」。
+
+    在此之前 `models.py` 與 `data-model.md` 都寫著「逾期未驗證列由排程清理」，但 SCHDP001 只做
+    閒置禁用與密碼到期提醒、不清這張表——那句話是空話，列會永久累積（而這張表匿名可寫）。
+    """
+    await _seed_pending(db, email="old-expired@edms.local", expires_offset_hours=-25)
+    await _seed_pending(db, email="just-expired@edms.local", expires_offset_hours=-2)
+    await _seed_pending(db, email="still-valid@edms.local", expires_offset_hours=1)
+    await _seed_pending(db, email="old-invite@edms.local", expires_offset_hours=-25, kind="ADMIN_INVITE")
+
+    purged = await _service.purge_expired_pending(db)
+
+    remaining = {row.email for row in (await db.execute(select(DpPendingRegistration))).scalars().all()}
+    assert "old-expired@edms.local" not in remaining
+    assert "just-expired@edms.local" in remaining  # 逾期未滿保留期
+    assert "still-valid@edms.local" in remaining  # 未逾期
+    # **只清 SELF_REGISTER**：逾期的管理者邀請仍是 UI 物件——build_invite_list_stmt 沒有效期條件，
+    # 逾期邀請會列在「待啟用邀請」頁籤並顯示「已逾期」，管理者可直接按「重寄邀請」，那正是
+    # spec_us4.md AC10 定義的情境。清掉會讓邀請靜默消失（週五寄的，管理者週一就找不到）、
+    # resend_invite / cancel_invite 對舊 invite_id 回 404，且邀請的稽核鏈以無終結事件收尾。
+    # 自助註冊列則在任何 UI 上都看不見，那才是需要排程清的一類。
+    assert "old-invite@edms.local" in remaining
+    assert purged == 1
+
+
+async def test_purge_expired_pending_writes_no_per_row_audit(db):
+    """清理**不**逐列寫稽核，只回傳筆數供 handler 記 log（#226）。
+
+    理由與 #225 的追溯決策一致：這張表**匿名可寫**（30 次/分/IP），逐列寫稽核等於讓任何人能往
+    append-only、鏈式雜湊的 DP_AUDIT_LOG 灌列，把有意義的紀錄淹掉。而被清的列早已逾期、無業務
+    意義——真正需要留痕的是「有人覆蓋了別人的列」（那條由 register_service / users.service 各自
+    記 DELETE 稽核）。
+    """
+    before = len((await db.execute(select(DpAuditLog))).scalars().all())
+    await _seed_pending(db, email="silent-purge@edms.local", expires_offset_hours=-48)
+
+    assert await _service.purge_expired_pending(db) == 1
+
+    after = len((await db.execute(select(DpAuditLog))).scalars().all())
+    assert after == before

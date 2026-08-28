@@ -49,10 +49,20 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _MAX_CHAIN = 4
 
 
-def _mask_email(match: "re.Match[str]") -> str:
-    """遮罩 Email 本地端，保留網域供排查（如 wang@example.com → w***@example.com）。"""
-    local, _, domain = match.group(0).partition("@")
+def mask_email(email: str) -> str:
+    """遮罩 Email 本地端，保留網域供排查（如 wang@example.com → w***@example.com）。
+
+    供**刻意**要把 Email 寫進 log 的呼叫端使用（規範禁記個資完整值，見
+    `.claude/rules/sti-backend-logging.md`）。與 `redact_sensitive` 的自動遮罩共用同一規則，
+    使「事後掃 log 文字」與「事前遮罩後才寫入」兩條路徑的輸出格式一致、可互相比對。
+    """
+    local, _, domain = email.partition("@")
     return f"{local[:1]}***@{domain}"
+
+
+def _mask_email(match: "re.Match[str]") -> str:
+    """`_EMAIL_RE.sub` 用的轉接（規則單一來源見 `mask_email`）。"""
+    return mask_email(match.group(0))
 
 
 def _mask_jwt(match: "re.Match[str]") -> str:

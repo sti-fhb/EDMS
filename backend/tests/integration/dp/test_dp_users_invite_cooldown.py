@@ -15,6 +15,7 @@ import pytest
 
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
+from app.dp.notify.schemas import SendResult
 from app.dp.user.repository import AuthRepository
 from app.dp.users import router as users_router
 from app.dp.users.models import DpUser
@@ -49,6 +50,7 @@ class _FakeNotify:
 
     async def send_email(self, _db, *, recipients, template_code, module, params, caller_module):
         self.calls.append({"recipients": recipients, "template_code": template_code})
+        return SendResult(queued_count=len(recipients), skipped_reason=None)
 
 
 @pytest.fixture(autouse=True)

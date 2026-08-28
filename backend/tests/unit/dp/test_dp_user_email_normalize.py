@@ -31,7 +31,7 @@ def test_login_email_normalized_and_no_format_check():
 @pytest.mark.parametrize(
     "model_kwargs",
     [
-        lambda e: RegisterRequest(email=e, user_name="王小明", password="Abcd1234", confirm_password="Abcd1234"),
+        lambda e: RegisterRequest(email=e, user_name="王小明"),
         lambda e: ForgotPasswordRequest(email=e),
         lambda e: ResendVerificationRequest(email=e),
         lambda e: UserCreate(email=e, user_name="王小明"),
@@ -44,7 +44,7 @@ def test_email_bearing_schemas_normalize(model_kwargs):
 @pytest.mark.parametrize(
     "builder",
     [
-        lambda e: RegisterRequest(email=e, user_name="王小明", password="Abcd1234", confirm_password="Abcd1234"),
+        lambda e: RegisterRequest(email=e, user_name="王小明"),
         lambda e: ForgotPasswordRequest(email=e),
         lambda e: ResendVerificationRequest(email=e),
         lambda e: UserCreate(email=e, user_name="王小明"),

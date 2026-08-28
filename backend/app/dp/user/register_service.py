@@ -13,6 +13,7 @@ Email 已在 DP_USER（已驗證）→ 409（引導登入 / 忘記密碼）。�
 驗證 TTL 沿用既有 token 30 分。
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.log_redaction import mask_email
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.kinds import KIND_ADMIN_INVITE
@@ -36,6 +38,8 @@ _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _DEFAULT_TTL_MIN = 30
 _FUNC_NAME = "DP-REGISTER"
 _SYSTEM_USER = "SYSTEM"
+
+logger = logging.getLogger(__name__)
 
 
 class RegisterService:
@@ -107,7 +111,7 @@ class RegisterService:
         if await self._repo.email_exists(db, email):
             raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
 
-    async def register(self, db: AsyncSession, *, email: str, user_name: str) -> None:
+    async def register(self, db: AsyncSession, *, email: str, user_name: str) -> bool:
         """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色、不收密碼**。
 
         密碼於 Email 驗證通過後由本人當場設定（#212，比照 US4 邀請啟用）——原本在此收密碼並
@@ -162,7 +166,7 @@ class RegisterService:
             await self._log_pending_overwritten(db, pending)
         # 5. 寄驗證信（US6；範本 MODULE=DP ACCOUNT_VERIFY）；連結以設定檔組（防 Host 注入）
         verify_link = f"{settings.FRONTEND_BASE_URL}/verify-email?token={plaintext}"
-        await self._notify.send_email(
+        result = await self._notify.send_email(
             db,
             recipients=[email],
             template_code=_TEMPLATE_CODE,
@@ -170,3 +174,23 @@ class RegisterService:
             params={"user_name": user_name, "verify_link": verify_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
         )
+        # 發起者可追溯性（#225）：本端點匿名，任何人可用他人 Email 送出並自填姓名，受害者會收到一封
+        # 來自本組織網域、格式完全正確的驗證信。若不留紀錄，使用者回報「我收到一封奇怪的註冊信」時
+        # 無法回答「誰、從哪個 IP 送的」。
+        #
+        # 刻意只記 log、不寫 DP_AUDIT_LOG：稽核表 append-only 且鏈式雜湊，讓匿名者以 30 次/分/IP
+        # 往裡面灌列會把有意義的紀錄淹掉（見 #225 的決策留言）。
+        #
+        # Email 遮罩後才寫入：規範禁記個資完整值（sti-backend-logging.md）。遮罩不影響用途——回報者
+        # 已經知道自己的 Email，需要的是 IP。**不記 user_name**：對正常使用者是個資，而追查寄件來源
+        # 也用不到（受害者手上就有那封信的內文）。
+        #
+        # 已接受的限制：log 無保留政策保證、不可長期查詢，這不等於稽核級追溯。若日後需要持久證據，
+        # 須為 pending 列加「發起 IP」欄位（併入 #215 的 migration），並把 #226 的清理保留期當證據窗口。
+        if result.queued_count == 0:
+            # 範本停用 / channel 非 EMAIL / 渲染失敗三種情況下 send_email 是**正常回傳 0**、不拋例外。
+            # 沒寄出就不該蓋 Email 冷卻章（冷卻由「信」武裝，同 #213 對 resend 的處理），否則使用者
+            # 會被鎖 600 秒卻連一封信都沒收到——而這條在範本被管理者誤設定時就會發生。
+            return False
+        logger.info("自助註冊已寄出驗證信 ip=%s email=%s", get_client_ip(), mask_email(email))
+        return True

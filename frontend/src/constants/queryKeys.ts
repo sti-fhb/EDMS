@@ -23,6 +23,7 @@ export const QUERY_KEYS = {
     tags: (courseId?: number) => ["et", "tags", courseId ?? null] as const,
     material: (materialId: number) => ["et", "materials", materialId] as const,
     quiz: (quizId: number) => ["et", "quizzes", quizId] as const,
+    survey: (courseId: number) => ["et", "courses", courseId, "survey"] as const,
     dmDocuments: () => ["et", "dm-documents"] as const,
   },
   moduleSummary: {

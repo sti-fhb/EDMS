@@ -30,11 +30,15 @@ import { useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
+import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
+import { SurveySection } from "./SurveySection"
 import { coursesApi } from "./coursesService"
 import type { MaterialSavePayload } from "./MaterialDialog"
 import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
 import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
+import { publishApi, surveyApi } from "./surveyService"
+import type { PublishBlocker, PublishResult, SurveyQuestionFormValues, SurveyQuestionRow } from "./surveySchemas"
 import {
   COURSE_STATUS_LABEL,
   ChapterNameSchema,
@@ -59,10 +63,10 @@ const EMPTY_FORM = {
 }
 
 /**
- * ET02 課程建立與編輯——**課程骨架與章節編排**（US3 / #202）。
+ * ET02 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
  *
- * 教材 / 測驗屬 #203、課後問卷與發布屬 #204，故本頁動作列只有「取消 / 儲存草稿」，
- * 尚無「儲存並發布」。
+ * 動作列：取消 / 儲存草稿 / **儲存並發布**（僅草稿狀態顯示——已發布課程的編輯即時
+ * 生效、不需重新發布，見 AC 28）。
  *
  * **非擁有者為唯讀**（`spec.md` §擁有權判定）：顯示檢視模式提示，所有輸入停用、
  * 操作按鈕不顯示。後端另以 `ET_COURSE_002` 把關，前端隱藏僅為 UX。
@@ -107,6 +111,11 @@ export function EtCourseEditorPage() {
    * 長出一排幽靈項目。儲存成功後清除此標記——之後的取消就只是「不存這次的修改」。
    */
   const [unsavedNewItemId, setUnsavedNewItemId] = useState<number | null>(null)
+  /** 問卷區塊的錯誤（凍結、選項不足等）——與項目視窗的錯誤分開顯示於問卷卡片內。 */
+  const [surveyError, setSurveyError] = useState<string | null>(null)
+  const [publishOpen, setPublishOpen] = useState(false)
+  const [blockers, setBlockers] = useState<PublishBlocker[]>([])
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
 
   const {
     data: course,
@@ -122,6 +131,18 @@ export function EtCourseEditorPage() {
   const { data: tagOptions = [] } = useQuery({
     queryKey: QUERY_KEYS.etCourses.tags(courseId),
     queryFn: () => coursesApi.listTags(courseId),
+  })
+  /**
+   * 課程之課後問卷。**尚未建立時後端回 `null`（200）**，不是錯誤。
+   *
+   * `data` 為 `undefined` 代表尚在載入，`null` 代表確定沒有問卷——`SurveySection`
+   * 靠這個區別決定要不要讓「新增問卷」可按。
+   */
+  const { data: survey } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.survey(courseId ?? 0),
+    queryFn: () => surveyApi.get(courseId as number),
+    enabled: courseId !== undefined,
+    retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
   // 由查詢結果衍生表單初值——**於 render 期間同步，不放 useEffect**。
@@ -221,7 +242,110 @@ export function EtCourseEditorPage() {
     },
   })
 
-  const handleSave = () => {
+  const invalidateSurvey = () => {
+    if (courseId !== undefined) {
+      void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.survey(courseId) })
+    }
+  }
+
+  /**
+   * 問卷相關操作統一經此執行。
+   *
+   * 錯誤顯示在**問卷卡片內**而非 snackbar：凍結（`ET_SURVEY_003`）與選項不足
+   * （`ET_SURVEY_004`）都是「這一區塊的狀態不允許」，訊息貼著出問題的地方才看得懂。
+   * 版本衝突仍走 `handleError` 的 Dialog——那要使用者確實知道編輯沒存進去。
+   */
+  const surveyMut = useMutation({
+    mutationFn: async (action: () => Promise<unknown>) => action(),
+    onSuccess: () => {
+      setSurveyError(null)
+      invalidateSurvey()
+    },
+    onError: (err) => {
+      const { errorCode, errorMessage } = toApiError(err)
+      if (errorCode === LOCK_CONFLICT) {
+        handleError(err)
+      } else {
+        setSurveyError(errorMessage)
+      }
+      invalidateSurvey() // 還原樂觀更新（如重排失敗）
+    },
+  })
+
+  const checkMut = useMutation({
+    mutationFn: () => publishApi.check(courseId as number),
+    onSuccess: (result) => setBlockers(result.blockers),
+    onError: (err) => {
+      handleError(err)
+      setPublishOpen(false)
+    },
+  })
+
+  const publishMut = useMutation({
+    mutationFn: () => publishApi.publish(courseId as number),
+    onSuccess: (result) => {
+      setPublishResult(result)
+      invalidate()
+    },
+    onError: (err) => {
+      // 發布端點會重跑檢核——若在預檢之後條件變了，這裡會拿到帶 blockers 的 422。
+      // 直接把它顯示出來，使用者不必再按一次才知道哪裡不對。
+      const { errorCode, payload } = toApiError(err)
+      const returned = (payload as { blockers?: PublishBlocker[] } | undefined)?.blockers
+      if (errorCode === "ET_PUBLISH_001" && returned) {
+        setBlockers(returned)
+        return
+      }
+      handleError(err)
+      setPublishOpen(false)
+    },
+  })
+
+  /**
+   * 「儲存並發布」的第一步——**先把當前編輯存檔**，成功後才開視窗跑檢核。
+   *
+   * 少了這步，教師剛在畫面上填好起訖時間、還沒存就按發布，檢核讀到的是資料庫裡
+   * **尚未更新**的舊值，會回報「課程起訖時間須填寫完整」——而欄位裡明明填著。
+   * 按鈕寫的是「儲存並發布」，行為也該如此。
+   *
+   * 與 `saveMut` 分開是因為那條成功後會導回課程列表（對齊 wireframe「儲存後回到
+   * 卡片網格」），發布流程要留在原頁把結果視窗開起來。
+   */
+  const saveThenCheckMut = useMutation({
+    mutationFn: () => coursesApi.update(courseId as number, { ...toPayload(), version: course?.version ?? 0 }),
+    onSuccess: () => {
+      invalidate()
+      setBlockers([])
+      setPublishResult(null)
+      setPublishOpen(true)
+      checkMut.mutate()
+    },
+    onError: handleError,
+  })
+
+  const openPublish = () => {
+    if (validateForm()) saveThenCheckMut.mutate()
+  }
+
+  /**
+   * 缺漏項目所指的測驗名稱——後端只回 `target_id`，名稱由前端自課程詳細對照。
+   *
+   * `items` 以 `?? []` 兜底：後端恆回此欄位，但少一個欄位不該讓整個編輯頁白畫面
+   * （比照 `ItemList` 的同名預設值，#203 已踩過一次）。
+   */
+  const quizNames: Record<number, string> = {}
+  for (const chapter of chapters) {
+    for (const item of chapter.items ?? []) {
+      if (item.quiz_id !== null && item.quiz_id !== undefined) quizNames[item.quiz_id] = item.title
+    }
+  }
+
+  /**
+   * 基本資料驗證——「儲存草稿」與「儲存並發布」共用。
+   *
+   * 有錯時把訊息寫進 `errors`（逐欄標示）並回 `false`；通過則清空並回 `true`。
+   */
+  const validateForm = (): boolean => {
     const parsed = CourseFormSchema.safeParse(form)
     if (!parsed.success) {
       const next: Record<string, string> = {}
@@ -230,7 +354,7 @@ export function EtCourseEditorPage() {
         if (!next[key]) next[key] = issue.message
       }
       setErrors(next)
-      return
+      return false
     }
     // 時間規則（SA 裁示 2026-08-24）：起始須 ≥ 當下——但**只對改動過的值**成立；
     // 迄止須晚於起始（後端亦強制，此處為即時回饋）。
@@ -245,10 +369,14 @@ export function EtCourseEditorPage() {
     }
     if (Object.keys(timeErrors).length > 0) {
       setErrors(timeErrors)
-      return
+      return false
     }
     setErrors({})
-    saveMut.mutate()
+    return true
+  }
+
+  const handleSave = () => {
+    if (validateForm()) saveMut.mutate()
   }
 
   /**
@@ -773,6 +901,67 @@ export function EtCourseEditorPage() {
         onDeleteQuestion={handleDeleteQuestion}
       />
 
+      <SurveySection
+        survey={isNew ? null : survey}
+        readOnly={readOnly}
+        disabled={isNew}
+        saving={surveyMut.isPending}
+        error={surveyError}
+        onCreate={(name) => surveyMut.mutate(() => surveyApi.create(courseId as number, name))}
+        onRename={(name) =>
+          surveyMut.mutate(() =>
+            surveyApi.update(survey!.survey_id, {
+              survey_name: name,
+              is_active: survey!.is_active,
+              version: survey!.version,
+            }),
+          )
+        }
+        onDeactivate={() =>
+          confirm({
+            title: "停用課後問卷",
+            content: "停用後學員端不再顯示填寫入口，已填寫的內容仍保留。確定停用？",
+            okText: "停用",
+            onOk: () =>
+              surveyMut.mutate(() =>
+                surveyApi.update(survey!.survey_id, {
+                  survey_name: survey!.survey_name,
+                  is_active: false,
+                  version: survey!.version,
+                }),
+              ),
+          })
+        }
+        onSaveQuestion={(sqId: number | null, values: SurveyQuestionFormValues) =>
+          surveyMut.mutate(() => {
+            if (sqId === null) return surveyApi.addQuestion(survey!.survey_id, values)
+            const version = survey!.questions.find((q) => q.sq_id === sqId)?.version ?? 0
+            return surveyApi.updateQuestion(sqId, { ...values, version })
+          })
+        }
+        onDeleteQuestion={(question: SurveyQuestionRow) =>
+          confirm({
+            title: "刪除問卷題目",
+            content: "確定刪除此題目？此題與其選項將一併移除。",
+            okText: "刪除",
+            onOk: () => surveyMut.mutate(() => surveyApi.deleteQuestion(question.sq_id)),
+          })
+        }
+        onReorder={(ids) => {
+          // 樂觀更新：少了這步畫面要等 API + refetch 才變，中間會閃回舊順序、
+          // 看起來像「拖了沒動」（比照章節 / 項目重排）。失敗時 onError 會 invalidate 還原。
+          qc.setQueryData(QUERY_KEYS.etCourses.survey(courseId as number), (old?: typeof survey) =>
+            old
+              ? {
+                  ...old,
+                  questions: ids.map((id) => old.questions.find((q) => q.sq_id === id)).filter((q) => q !== undefined),
+                }
+              : old,
+          )
+          surveyMut.mutate(() => surveyApi.reorderQuestions(survey!.survey_id, ids, survey!.version))
+        }}
+      />
+
       {!readOnly && (
         <Paper
           variant="outlined"
@@ -780,35 +969,54 @@ export function EtCourseEditorPage() {
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Typography variant="caption" color="text.secondary">
-              儲存草稿可隨時繼續編輯。發布須先有教材與測驗，待 #203 / #204 完成後開放。
+              {status === "DRAFT"
+                ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 個受訓單位標籤、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
+                : "已發布課程的編輯即時生效，不需重新發布。"}
             </Typography>
             <Stack direction="row" spacing={1}>
               <Button size="small" onClick={() => navigate("/et/courses")}>
                 取消
               </Button>
               <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
-                儲存草稿
+                {status === "DRAFT" ? "儲存草稿" : "儲存"}
               </Button>
               {/*
-                發布屬 #204。此處先放停用的按鈕呈現完整版面——#204 接上時補 handler 即可，
-                按鈕本身不需重寫。
-
-                **不可先讓它能按**：發布檢核五項中「至少 1 教材」與「各測驗配分 = 100」
-                要到 #203 才驗得了。跳過那兩項會發布出一門沒有內容的課程，而發布會觸發
-                標籤自動邀請＋寄信給所有符合標籤的學員（FR-ET-US3-12）——等於對全體學員
-                寄信通知一門空課程。
+                僅草稿可發布。已發布課程的後續編輯**即時生效、不需重新發布**（AC 28），
+                故發布不是常駐動作——已發布時直接不顯示，而非顯示一顆按了會回
+                `ET_PUBLISH_002` 的按鈕。
               */}
-              <Tooltip title="發布功能待教材 / 測驗完成後開放（ET Issue #203 / #204）">
-                <span>
-                  <Button size="small" variant="contained" disabled>
-                    儲存並發布
-                  </Button>
-                </span>
-              </Tooltip>
+              {status === "DRAFT" && (
+                <Tooltip title={isNew ? "請先儲存草稿後再發布" : ""}>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={isNew || saveThenCheckMut.isPending}
+                      onClick={openPublish}
+                    >
+                      儲存並發布
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
             </Stack>
           </Stack>
         </Paper>
       )}
+
+      <PublishDialog
+        open={publishOpen}
+        checking={checkMut.isPending}
+        publishing={publishMut.isPending}
+        blockers={blockers}
+        result={publishResult}
+        quizNames={quizNames}
+        onPublish={() => publishMut.mutate()}
+        onClose={() => {
+          setPublishOpen(false)
+          setPublishResult(null)
+        }}
+      />
 
       <Dialog open={chapterDialogOpen} onClose={() => setChapterDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>新增章節</DialogTitle>
