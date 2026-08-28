@@ -26,6 +26,7 @@ from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
 from app.dm.library.router import router as dm_library_router
 from app.dm.obsolete.router import router as dm_obsolete_router
+from app.dm.obsolete_archive.router import router as dm_obsolete_archive_router
 from app.dm.personal.router import router as dm_personal_router
 from app.dm.review.router import router as dm_review_router
 from app.dp.audit.router import router as dp_audit_router
@@ -126,6 +127,7 @@ app.include_router(dm_detail_router)
 app.include_router(dm_editor_router)
 app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
+app.include_router(dm_obsolete_archive_router)
 app.include_router(dm_personal_router)
 app.include_router(et_course_router)
 app.include_router(et_material_router)
