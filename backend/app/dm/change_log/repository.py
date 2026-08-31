@@ -10,7 +10,7 @@ keyword 需比對 `DP_USER.USER_NAME`（申請人 / 核准人姓名）故 join �
 
 from datetime import date
 
-from sqlalchemy import Row, Select, func, or_, select
+from sqlalchemy import Row, Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -44,12 +44,14 @@ class ChangeLogRepository:
         if date_to:
             conds.append(func.date(DmChangeLog.operation_time) <= date_to)
         if keyword:
+            # 「帳號或姓名」（FR-002）：EDMS 登入以 email 為帳號、USER_ID 為內部 GUID（使用者不可見），
+            # 故比對申請人 / 核准人之 DP_USER.email（帳號）與 user_name（姓名），不比對 GUID USER_ID。
             pattern = f"%{keyword}%"
             conds.append(
                 or_(
-                    DmChangeLog.applicant_user_id.ilike(pattern),
+                    applicant.email.ilike(pattern),
                     applicant.user_name.ilike(pattern),
-                    DmChangeLog.approver_user_id.ilike(pattern),
+                    approver.email.ilike(pattern),
                     approver.user_name.ilike(pattern),
                 )
             )
@@ -65,7 +67,13 @@ class ChangeLogRepository:
                 DmChangeLog.doc_id,
                 DmDocument.doc_name,
                 DmDocVersion.version_no,
-                DmChangeLog.note,
+                # 備註（FR-003）：發布＝該版本變更摘要、廢止＝廢止原因（NOTE）。發布事件之 NOTE 未由寫入端
+                # 填入（見 review/center_service PUBLISH 分支），故發布列改由 DM_DOC_VERSION.change_summary
+                # 取，涵蓋既有已寫入列；廢止列仍取 NOTE（廢止原因，US8 必填）。
+                case(
+                    (DmChangeLog.operation == "PUBLISH", DmDocVersion.change_summary),
+                    else_=DmChangeLog.note,
+                ).label("note"),
             )
             .select_from(DmChangeLog)
             .join(DmDocument, DmChangeLog.doc_id == DmDocument.doc_id)

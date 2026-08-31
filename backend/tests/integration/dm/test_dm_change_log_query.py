@@ -48,7 +48,7 @@ async def _grant(db, user_id, role):
     await db.flush()
 
 
-async def _doc_with_version(db, doc_id, *, doc_name, version_no, author="author1"):
+async def _doc_with_version(db, doc_id, *, doc_name, version_no, change_summary="摘要", author="author1"):
     doc = DmDocument(
         doc_id=doc_id,
         doc_name=doc_name,
@@ -62,7 +62,7 @@ async def _doc_with_version(db, doc_id, *, doc_name, version_no, author="author1
     v = DmDocVersion(
         doc_id=doc_id,
         version_no=version_no,
-        change_summary="摘要",
+        change_summary=change_summary,
         file_name="f.pdf",
         file_path="/x/f.pdf",
         file_size=100,
@@ -97,12 +97,13 @@ async def _change_log(db, doc_id, *, operation, version_id, applicant, approver,
 
 
 async def _seed_publish(
-    db, doc_id="DM-SOP-001101", *, doc_name="發布文件", version_no="1.0", note="首版發布", when=None
+    db, doc_id="DM-SOP-001101", *, doc_name="發布文件", version_no="1.0", summary="首版發布", when=None
 ):
     for uid, name in (("author1", "作者甲"), ("applicant1", "申請乙"), ("approver1", "核准丙")):
         if not await db.scalar(select(DpUser.user_id).where(DpUser.user_id == uid)):
             await _seed_user(db, uid, name)
-    vid = await _doc_with_version(db, doc_id, doc_name=doc_name, version_no=version_no)
+    vid = await _doc_with_version(db, doc_id, doc_name=doc_name, version_no=version_no, change_summary=summary)
+    # 發布事件 NOTE 為空（真實情境：US6 未填），備註（變更摘要）由版本 change_summary 取（AC3）
     await _change_log(
         db,
         doc_id,
@@ -110,7 +111,7 @@ async def _seed_publish(
         version_id=vid,
         applicant="applicant1",
         approver="approver1",
-        note=note,
+        note=None,
         when=when,
     )
 
@@ -121,7 +122,7 @@ async def _seed_publish(
 async def test_admin_lists_change_log_with_fields(db, client):
     await _seed_user(db, "adm", "管理員")
     await _grant(db, "adm", DM_ADMIN)
-    await _seed_publish(db, "DM-SOP-001101", doc_name="領血SOP", version_no="2.0", note="補充異常通報")
+    await _seed_publish(db, "DM-SOP-001101", doc_name="領血SOP", version_no="2.0", summary="補充異常通報")
 
     resp = await client.get("/api/dm/change-log/entries", headers=_headers("adm"))
     assert resp.status_code == 200
@@ -141,7 +142,7 @@ async def test_admin_lists_change_log_with_fields(db, client):
 async def test_filter_by_operation(db, client):
     await _seed_user(db, "adm", "管理員")
     await _grant(db, "adm", DM_ADMIN)
-    await _seed_publish(db, "DM-SOP-001102", note="發布")
+    await _seed_publish(db, "DM-SOP-001102", summary="發布")
     # 一筆廢止事件（重用同文件之版本）
     vid = await db.scalar(select(DmDocVersion.version_id).where(DmDocVersion.doc_id == "DM-SOP-001102"))
     await _change_log(
@@ -169,7 +170,7 @@ async def test_filter_by_party_keyword_applicant_or_approver(db, client):
     await _grant(db, "adm", DM_ADMIN)
     await _seed_user(db, "zhang", "張三")
     await _seed_user(db, "li", "李四")
-    await _seed_publish(db, "DM-SOP-001103", note="a")
+    await _seed_publish(db, "DM-SOP-001103", summary="a")
     # 申請人 = 張三 之事件
     vid = await db.scalar(select(DmDocVersion.version_id).where(DmDocVersion.doc_id == "DM-SOP-001103"))
     await _change_log(
@@ -183,6 +184,9 @@ async def test_filter_by_party_keyword_applicant_or_approver(db, client):
     # 關鍵字比對核准人姓名（「李四」不與其他 seed 帳號/姓名撞字）
     r2 = await client.get("/api/dm/change-log/entries", headers=_headers("adm"), params={"keyword": "李四"})
     assert len(r2.json()["data"]) == 1 and r2.json()["data"][0]["approver_name"] == "李四"
+    # 關鍵字比對申請人**帳號（email）**（AC2：EDMS 帳號＝email，非僅姓名、非 GUID USER_ID）
+    r3 = await client.get("/api/dm/change-log/entries", headers=_headers("adm"), params={"keyword": "zhang@e.com"})
+    assert len(r3.json()["data"]) == 1 and r3.json()["data"][0]["applicant_id"] == "zhang"
 
 
 async def test_filter_by_date_range(db, client):
@@ -190,8 +194,8 @@ async def test_filter_by_date_range(db, client):
     await _grant(db, "adm", DM_ADMIN)
     old = datetime(2026, 1, 10, tzinfo=timezone.utc)
     new = datetime(2026, 6, 20, tzinfo=timezone.utc)
-    await _seed_publish(db, "DM-SOP-001104", note="old", when=old)
-    await _seed_publish(db, "DM-SOP-001105", note="new", when=new)
+    await _seed_publish(db, "DM-SOP-001104", summary="old", when=old)
+    await _seed_publish(db, "DM-SOP-001105", summary="new", when=new)
 
     resp = await client.get(
         "/api/dm/change-log/entries",
@@ -252,7 +256,7 @@ async def test_export_csv_content(db, client):
     await _seed_user(db, "adm", "管理員")
     await _grant(db, "adm", DM_ADMIN)
     # 備註含逗號 → 驗 CSV 跳脫不破欄
-    await _seed_publish(db, "DM-SOP-001106", doc_name="停辦SOP", version_no="1.0", note="改版,重寫")
+    await _seed_publish(db, "DM-SOP-001106", doc_name="停辦SOP", version_no="1.0", summary="改版,重寫")
 
     resp = await client.get("/api/dm/change-log/entries/export", headers=_headers("adm"))
     assert resp.status_code == 200
@@ -266,7 +270,7 @@ async def test_export_csv_neutralizes_formula_injection(db, client):
     """CSV 公式注入防護（CWE-1236）：以 = / @ 開頭之自由輸入欄位匯出時前置單引號中和（比照 US10）。"""
     await _seed_user(db, "adm", "管理員")
     await _grant(db, "adm", DM_ADMIN)
-    await _seed_publish(db, "DM-SOP-001107", doc_name="@cmd", note="=SUM(A1:A9)")
+    await _seed_publish(db, "DM-SOP-001107", doc_name="@cmd", summary="=SUM(A1:A9)")
 
     resp = await client.get("/api/dm/change-log/entries/export", headers=_headers("adm"))
     text = resp.content.decode("utf-8-sig")
