@@ -153,14 +153,22 @@ class TestUpload:
         assert body["sort_order"] == 1
 
     async def test_落地路徑在_storage_root_內(self, client, db) -> None:
-        """#188 B2：即使 DB 中的路徑有瑕疵，讀取端圍籬也擋得住；寫入端本就不該逃逸。"""
+        """#188 B2：即使 DB 中的路徑有瑕疵，讀取端圍籬也擋得住；寫入端本就不該逃逸。
+
+        #233 起 `FILE_PATH` 存的是相對於 root 之片段，故以圍籬解析後再驗——這同時也驗到
+        「寫入端產出的值，讀取端接得起來」這條契約。
+        """
         uid = await _user(db, "ETV_U2")
         mid = await _material(client, uid)
         r = await _upload(client, uid, mid, name="sample.mp4")
         video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == r.json()["video_id"]))
+        assert not os.path.isabs(video.file_path), "DB 應存相對片段（#233），存絕對路徑換 root 即失聯"
+        resolved = storage.resolve_within_root(
+            video.file_path, not_found=AssertionError("寫入端產出的路徑不應被讀取端圍籬擋下")
+        )
         root = storage.storage_root()
-        assert os.path.commonpath([root, os.path.realpath(video.file_path)]) == root
-        assert os.path.isfile(video.file_path), "DB 有紀錄但檔案不存在＝學員會拿到 404"
+        assert os.path.commonpath([root, resolved]) == root
+        assert os.path.isfile(resolved), "DB 有紀錄但檔案不存在＝學員會拿到 404"
 
     async def test_多支影片順序自_1_遞增(self, client, db) -> None:
         uid = await _user(db, "ETV_U3")
@@ -324,7 +332,8 @@ class TestDelete:
         mid = await _material(client, uid)
         r = await _upload(client, uid, mid, name="sample.mp4")
         video = await db.scalar(select(EtMaterialVideo).where(EtMaterialVideo.video_id == r.json()["video_id"]))
-        path = video.file_path
+        # FILE_PATH 為相對片段（#233），須併上 root 才是檔案系統路徑
+        path = os.path.join(storage.storage_root(), video.file_path)
 
         await _put(client, uid, mid, description_html="<p>說明</p>", video_ids=[])
         assert os.path.isfile(path), "軟刪除不應刪磁碟檔案，否則無法回復"
@@ -405,7 +414,13 @@ class TestStorageFence:
             "",
             "../../../etc/passwd",
             "/etc/passwd",
-            "C:\\Windows\\win.ini",
+            pytest.param(
+                "C:\\Windows\\win.ini",
+                marks=pytest.mark.skipif(
+                    os.name != "nt",
+                    reason="POSIX 上此字串非絕對路徑，不構成逃逸——見 test_windows_絕對路徑於_posix_仍侷限於_root",
+                ),
+            ),
         ],
     )
     def test_逃逸路徑被擋(self, path: str) -> None:
@@ -415,6 +430,30 @@ class TestStorageFence:
         with pytest.raises(AppError) as exc:
             storage.resolve_within_root(path, not_found=sentinel)
         assert exc.value.error_code == "ET_MATERIAL_001"
+
+    @pytest.mark.skipif(os.name == "nt", reason="Windows 上此字串是絕對路徑，由上一條測試涵蓋")
+    def test_windows_絕對路徑於_posix_仍侷限於_root(self) -> None:
+        r"""POSIX 上 `C:\Windows\win.ini` 不是絕對路徑，但仍不得逃出 root。
+
+        反斜線在 POSIX 是合法檔名字元、不作分隔符，故整串是**單一檔名**——定址不到 root 外
+        任何東西。圍籬回 `{root}/C:\Windows\win.ini`（該檔不存在，呼叫端 `is_file()` → 404）。
+
+        ## 為何改寫這條（#233）
+
+        原本此字串列在 `test_逃逸路徑被擋` 的 parametrize 中，POSIX 上也會被擋——但**是碰巧**：
+        當時圍籬對相對路徑依 **process CWD** 解析，而 CWD 恰好在 root 外。若有人把後端 CWD
+        設成 storage root，舊程式碼同樣會放行。那條斷言驗到的是 CWD 的位置，不是安全性質。
+
+        #233 改為以 root 為基準解析後，此字串成為「root 內的怪檔名」。安全性質
+        （**讀不到 root 外的檔案**）不變，故改為直接斷言該性質。
+        """
+        from app.core.exceptions import AppError
+
+        sentinel = AppError(status_code=404, detail="查無此影片", error_code="ET_MATERIAL_001")
+        resolved = storage.resolve_within_root("C:\\Windows\\win.ini", not_found=sentinel)
+        root = storage.storage_root()
+        assert os.path.commonpath([root, resolved]) == root, "不得逃出 storage root"
+        assert not os.path.exists(resolved), "此路徑不應對應到任何實體檔案"
 
     def test_root_內路徑通過並回正規化結果(self) -> None:
         inside = os.path.join(storage.storage_root(), "1", "abc.mp4")

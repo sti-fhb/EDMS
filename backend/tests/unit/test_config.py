@@ -1,10 +1,17 @@
 """core.config 設定測試——涵蓋 #16 T001 新增之 JWT / SMTP 設定。"""
 
+import os
+
 import pytest
 
 from app.core.config import Settings, _build_settings
 
 pytestmark = pytest.mark.unit
+
+# production 護欄要求絕對路徑，且 Windows 另需磁碟機（見 _validate_storage_roots_absolute）。
+# 測試值依平台給，否則同一份測試在 Windows / Linux 其中一邊必然失敗。
+_ABS_DM_ROOT = r"C:\srv\edms\dm_files" if os.name == "nt" else "/srv/edms/dm_files"
+_ABS_ET_ROOT = r"C:\srv\edms\et_videos" if os.name == "nt" else "/srv/edms/et_videos"
 
 
 def test_new_settings_defaults() -> None:
@@ -93,6 +100,8 @@ def test_mail_plaintext_allowed_when_suppress_send() -> None:
         DEBUG=False,
         FRONTEND_BASE_URL="https://edms.example.com",  # DEBUG=false 下需正式網域，避開 prod frontend 護欄
         TRUSTED_PROXY_COUNT=0,  # DEBUG=false 下需明示（見 _validate_trusted_proxy_count_explicit）
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,  # DEBUG=false 下須絕對路徑（見 _validate_storage_roots_absolute）
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
         MAIL_SERVER="smtp.example.com",
         MAIL_STARTTLS=False,
         MAIL_SSL_TLS=False,
@@ -109,6 +118,8 @@ def _settings_with_frontend(url: str, *, debug: bool) -> Settings:
         DEBUG=debug,
         FRONTEND_BASE_URL=url,
         TRUSTED_PROXY_COUNT=0,  # 聚焦 FRONTEND_BASE_URL 驗證，避開 production 明示設定護欄
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,  # 同上，避開 storage root 絕對路徑護欄
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
     )
 
 
@@ -198,6 +209,9 @@ def _settings_for_proxy_count(**overrides: object) -> Settings:
         "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
         "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
         "FRONTEND_BASE_URL": "https://edms.example.com",
+        # 聚焦 TRUSTED_PROXY_COUNT 驗證，避開 storage root 絕對路徑護欄（#233）
+        "DM_FILE_STORAGE_ROOT": _ABS_DM_ROOT,
+        "ET_VIDEO_STORAGE_ROOT": _ABS_ET_ROOT,
     }
     kwargs.update(overrides)
     return Settings(**kwargs)  # type: ignore[arg-type]
@@ -229,3 +243,107 @@ def test_trusted_proxy_count_upper_bound() -> None:
     """上限 8：明顯誤設（如把毫秒數填進來）於啟動即擋。"""
     with pytest.raises(ValueError):
         _settings_for_proxy_count(DEBUG=True, TRUSTED_PROXY_COUNT=99)
+
+
+# ── storage root production 護欄（#233 AC8）──────────────────────
+# 兩個落盤根的預設值是相對路徑（./var/dm_files、./var/et_videos），storage_root() 以
+# os.path.realpath 解析 → 結果依 process 的工作目錄而定。同一份設定從不同目錄啟動會
+# 得到不同的 root。#160 close 留言已記為 Security LOW-4（當時只留建議、未加護欄）；
+# FILE_PATH 改存相對路徑後，root 設錯的後果更集中（所有檔案一起讀不到），故補上護欄。
+
+
+def _prod_settings(**overrides) -> Settings:
+    """建構一份通過其他 prod 護欄的 Settings，好讓測試聚焦在 storage root。"""
+    base = dict(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",
+        TRUSTED_PROXY_COUNT=0,
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+    )
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_prod_absolute_storage_roots_accepted() -> None:
+    """兩個 root 皆為絕對路徑時 production 正常啟動。"""
+    s = _prod_settings()
+    assert s.DM_FILE_STORAGE_ROOT == _ABS_DM_ROOT
+
+
+@pytest.mark.parametrize("field", ["DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT"])
+def test_prod_relative_storage_root_rejected(field: str) -> None:
+    """production 下相對 root 一律擋，且錯誤訊息指名是哪一個變數。"""
+    with pytest.raises(ValueError) as e:
+        _prod_settings(**{field: "./var/whatever"})
+    assert field in str(e.value)
+
+
+def test_prod_default_storage_root_rejected() -> None:
+    """預設值本身就是相對路徑，未明示設定即應擋下（防「忘了設」靜默塌縮）。"""
+    base = dict(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",
+        TRUSTED_PROXY_COUNT=0,
+    )
+    with pytest.raises(ValueError):
+        Settings(**base)
+
+
+def test_dev_relative_storage_root_allowed() -> None:
+    """DEBUG=true 之本機開發不受影響——相對 root 是 dev 的便利預設。"""
+    s = Settings(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=True,
+    )
+    assert s.DM_FILE_STORAGE_ROOT == "./var/dm_files"
+    assert s.ET_VIDEO_STORAGE_ROOT == "./var/et_videos"
+
+
+def test_prod_storage_root_with_surrounding_whitespace_rejected() -> None:
+    """帶前後空白之相對路徑不得被放行（#233 security review MEDIUM-1）。
+
+    原缺陷：檢查時 `.strip()` 但沒寫回欄位，於是護欄看乾淨值、storage_root() 用原值，
+    `realpath("  ./var  ")` 接到 CWD 底下——護欄放行了它本來要擋的失敗模式且完全無聲。
+    python-dotenv 對引號內空白原樣保留（`ROOT="  x  "`），非理論情境。
+    """
+    with pytest.raises(ValueError) as e:
+        _prod_settings(DM_FILE_STORAGE_ROOT="  ./var/dm_files  ")
+    assert "DM_FILE_STORAGE_ROOT" in str(e.value)
+
+
+def test_storage_root_whitespace_is_stripped_into_the_stored_value() -> None:
+    """空白須在賦值前正規化——「被檢查的值」與「被使用的值」必須是同一個。"""
+    s = _prod_settings(DM_FILE_STORAGE_ROOT=f"  {_ABS_DM_ROOT}  ")
+    assert s.DM_FILE_STORAGE_ROOT == _ABS_DM_ROOT
+
+
+@pytest.mark.skipif(os.name != "nt", reason="磁碟機語意僅 Windows 適用")
+def test_prod_driveless_absolute_root_rejected_on_windows() -> None:
+    """Windows：無磁碟機之絕對路徑依當前磁碟機解析，仍屬靜默飄移（LOW-2）。
+
+    `os.path.isabs("/srv/dm")` 在 nt 為 True，但 `realpath` 會解析成 `C:\\srv\\dm`——
+    從 D: 啟動即得到不同 root，正是本護欄要擋的那種飄移。故此處刻意不用 `_ABS_DM_ROOT`。
+    """
+    with pytest.raises(ValueError) as e:
+        _prod_settings(DM_FILE_STORAGE_ROOT="/srv/edms/dm_files")
+    assert "磁碟機" in str(e.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="UNC 語意僅 Windows 適用")
+def test_prod_unc_root_accepted_on_windows() -> None:
+    """UNC 路徑有明確主機 / 共享，不受當前磁碟機影響，不應被磁碟機檢查誤擋。"""
+    unc_dm = "\\\\fileserver\\edms\\dm_files"
+    s = _prod_settings(
+        DM_FILE_STORAGE_ROOT=unc_dm,
+        ET_VIDEO_STORAGE_ROOT="\\\\fileserver\\edms\\et_videos",
+    )
+    assert s.DM_FILE_STORAGE_ROOT == unc_dm

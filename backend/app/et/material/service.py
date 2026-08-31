@@ -190,19 +190,20 @@ class EtMaterialService:
             storage.discard(tmp_path)
             raise
 
-        final_path = storage.promote(tmp_path, video_id_hint=str(material_id), ext=ext)
+        # DB 記相對片段（可隨 root 搬移，#233）；回滾刪檔須用絕對路徑，兩者不可互換
+        final_abs, final_rel = storage.promote(tmp_path, video_id_hint=str(material_id), ext=ext)
         try:
             video = await self._materials.add_video(
                 db,
                 material_id,
-                file_path=final_path,
+                file_path=final_rel,
                 file_name=file_name or f"video.{ext}",
                 duration_sec=duration_sec,
                 file_size_bytes=size_bytes,
                 operator=operator,
             )
         except BaseException:
-            storage.discard(final_path)
+            storage.discard(final_abs)
             raise
 
         await self._log(db, "CREATE", operator.user_id, course_id, "上傳教材影片")

@@ -8,8 +8,9 @@ router-level 掛 `get_et_context` + `require_et_roles(ET_TEACHER, ET_ADMIN)`—�
 
 擁有權判定在 service（回溯至所屬課程），無法以 dependency 表達。
 
-**沒有 `DELETE /surveys/{id}`**——SA 裁示（#204 Q1 → B）問卷只能停用，停用走
-`PUT /surveys/{id}` 改 `is_active`。
+**`DELETE /surveys/{id}` 僅適用草稿課程**（#238）——已發布 / 已關閉課程改用停用
+（`PUT /surveys/{id}` 改 `is_active`），由 service 之 `ensure_survey_deletable` 以
+`ET_SURVEY_007` 把關。
 """
 
 from typing import Annotated
@@ -23,12 +24,14 @@ from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 from app.et.survey.schemas import (
+    ApplyTemplateReq,
     SurveyCreateReq,
     SurveyDetail,
     SurveyQuestionCreateReq,
     SurveyQuestionReorderReq,
     SurveyQuestionRow,
     SurveyQuestionUpdateReq,
+    SurveyTemplateRow,
     SurveyUpdateReq,
 )
 from app.et.survey.service import EtSurveyService
@@ -82,6 +85,43 @@ async def update_survey(
     **凍結後仍可呼叫**——AC 21 明訂已有填答時教師僅可停用問卷，停用走的正是這條。
     """
     await _service.update_basic(db, survey_id, req, operator=operator)
+
+
+@router.get("/survey-templates", response_model=list[SurveyTemplateRow])
+async def list_survey_templates() -> list[SurveyTemplateRow]:
+    """內建問卷模板清單（**不含題目內容**）。
+
+    純資料、不需 DB，也不需課程上下文——任何具教師 / 管理者角色者皆可取得。
+    """
+    return _service.list_templates()
+
+
+@router.delete("/surveys/{survey_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_survey(
+    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """刪除問卷（**僅草稿課程**）：本體與其題目、選項一併軟刪。
+
+    已發布 / 已關閉課程改用停用——回 422 `ET_SURVEY_007`。
+    """
+    await _service.delete(db, survey_id, operator=operator)
+
+
+@router.post("/surveys/{survey_id}/apply-template", response_model=SurveyDetail)
+async def apply_survey_template(
+    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: ApplyTemplateReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> SurveyDetail:
+    """套用模板：一次建立整組題目與選項，回傳套用後的問卷詳細。
+
+    **僅於問卷 0 題時可套用**（否則 409 `ET_SURVEY_010`）。套用後題目即為一般題目，
+    可自由編修，不與模板保持關聯。
+    """
+    return await _service.apply_template(db, survey_id, req, operator=operator)
 
 
 @router.post(

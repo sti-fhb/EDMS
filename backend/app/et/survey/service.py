@@ -15,10 +15,13 @@
 **不套用於** `update_basic`（問卷名稱與 `IS_ACTIVE`）——AC 21 明訂此時教師「僅可
 停用問卷」，把停用也擋掉等於凍結後整張卡片變成死的。
 
-## 沒有刪除問卷的方法
+## 刪除問卷（#238 推翻 #204 之裁示 Q1）
 
-SA 裁示（#204 Q1 → B）：問卷只能停用。此前提同時是 `UQ_ET_SURVEY_COURSE` 維持
-全表唯一的理由，見 `models.py` 該約束上方註解。
+**僅草稿課程可刪**（`ensure_survey_deletable`），已發布 / 已關閉僅可停用。
+連帶軟刪其題目與選項；填答不處理——草稿課程不可能有填答。
+
+該變更連帶要求 `UQ_ET_SURVEY_COURSE` 改為部分唯一索引（migration `8713c6177f6f`），
+否則軟刪的問卷會永久佔住該課程。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,12 +34,14 @@ from app.et.course.rules import ensure_owner
 from app.et.survey.repository import EtSurveyRepository
 from app.et.survey.rules import (
     ensure_editable,
-    ensure_option_count_valid,
+    ensure_options_match_type,
     ensure_question_reorder_complete,
     ensure_survey_absent,
+    ensure_survey_deletable,
     resequence_questions,
 )
 from app.et.survey.schemas import (
+    ApplyTemplateReq,
     SurveyCreateReq,
     SurveyDetail,
     SurveyOptionRow,
@@ -44,8 +49,10 @@ from app.et.survey.schemas import (
     SurveyQuestionReorderReq,
     SurveyQuestionRow,
     SurveyQuestionUpdateReq,
+    SurveyTemplateRow,
     SurveyUpdateReq,
 )
+from app.et.survey.templates import get_template, list_templates
 from app.services import AuditLogService
 
 _MODULE = "ET"
@@ -113,6 +120,57 @@ class EtSurveyService:
         action = "停用課後問卷" if not req.is_active else "更新課後問卷"
         await self._log(db, "UPDATE", operator.user_id, survey.course_id, action)
 
+    async def delete(self, db: AsyncSession, survey_id: int, *, operator: OperatorInfo) -> None:
+        """刪除問卷（**僅草稿課程**，#238）：本體與其題目、選項一併軟刪。
+
+        已發布 / 已關閉課程改用停用——`ensure_survey_deletable` 以 `ET_SURVEY_007` 擋下。
+        """
+        survey = await self._surveys.get(db, survey_id)
+        if survey is None:
+            raise _NOT_FOUND
+        course = await self._require_owned_course(db, survey.course_id, operator.user_id)
+        ensure_survey_deletable(course.status)
+        await self._surveys.soft_delete_survey(db, survey_id, operator)
+        await self._log(db, "DELETE", operator.user_id, survey.course_id, "刪除課後問卷")
+
+    # ── 模板 ────────────────────────────────────────────────────────────────
+
+    def list_templates(self) -> list[SurveyTemplateRow]:
+        """內建模板清單（純資料，不需 DB）。"""
+        return [SurveyTemplateRow.model_validate(t) for t in list_templates()]
+
+    async def apply_template(
+        self, db: AsyncSession, survey_id: int, req: ApplyTemplateReq, *, operator: OperatorInfo
+    ) -> SurveyDetail:
+        """套用模板：一次建立整組題目與選項。
+
+        **僅於問卷 0 題時可套用**（否則 409 `ET_SURVEY_010`）——避免模板題目與教師已建
+        的題目混在一起、順序難以預期。前端亦僅於空問卷時顯示模板區，此處為繞過 UI 的
+        把關。
+
+        套用後題目即為該問卷的一般題目，**不與模板保持任何關聯**：之後改模板不影響
+        已建立的問卷，改問卷也不回寫模板。
+        """
+        survey = await self._require_editable(db, survey_id, operator.user_id)
+        existing = await self._surveys.list_questions(db, survey_id)
+        if existing:
+            raise AppError(status_code=409, detail="問卷已有題目，無法套用模板", error_code="ET_SURVEY_010")
+        template = get_template(req.template_code)
+        rowcount = await self._surveys.bump_version(db, survey_id, req.version, operator)
+        ensure_version_matched(rowcount=rowcount, entity="ET_SURVEY")
+        await self._surveys.add_questions_bulk(
+            db,
+            survey_id,
+            [(q.question_type, q.stem, list(q.options)) for q in template.questions],
+            operator,
+        )
+        await self._log(db, "CREATE", operator.user_id, survey.course_id, f"套用問卷模板（{template.code}）")
+        # `bump_version` 走的是 Core update，session 裡的 `survey` 還握著舊版號。
+        # 用 refresh 而非重新 `get()`——後者回 `EtSurvey | None`，會多一個永遠不會
+        # 成立卻得處理的分支（#204 的 `update_question` 就踩過同型）。
+        await db.refresh(survey)
+        return await self._detail(db, survey)
+
     # ── 題目與選項 ──────────────────────────────────────────────────────────
 
     async def add_question(
@@ -120,9 +178,14 @@ class EtSurveyService:
     ) -> SurveyQuestionRow:
         """新增題目（含其全部選項），追加至最末。"""
         survey = await self._require_editable(db, survey_id, operator.user_id)
-        ensure_option_count_valid(len(req.options))
+        ensure_options_match_type(req.question_type, option_count=len(req.options))
         question = await self._surveys.add_question(
-            db, survey_id, stem=req.stem, options=[o.option_text for o in req.options], operator=operator
+            db,
+            survey_id,
+            question_type=req.question_type,
+            stem=req.stem,
+            options=[o.option_text for o in req.options],
+            operator=operator,
         )
         await self._log(db, "CREATE", operator.user_id, survey.course_id, "新增問卷題目")
         return await self._question_row(db, question)
@@ -135,9 +198,15 @@ class EtSurveyService:
         if question is None:
             raise _QUESTION_NOT_FOUND
         survey = await self._require_editable(db, question.survey_id, operator.user_id)
-        ensure_option_count_valid(len(req.options))
+        ensure_options_match_type(req.question_type, option_count=len(req.options))
         rowcount = await self._surveys.replace_question(
-            db, sq_id, req.version, stem=req.stem, options=[o.option_text for o in req.options], operator=operator
+            db,
+            sq_id,
+            req.version,
+            question_type=req.question_type,
+            stem=req.stem,
+            options=[o.option_text for o in req.options],
+            operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_SURVEY_QUESTION")
         await self._log(db, "UPDATE", operator.user_id, survey.course_id, "更新問卷題目")
@@ -217,6 +286,7 @@ class EtSurveyService:
             questions=[
                 SurveyQuestionRow(
                     sq_id=q.sq_id,
+                    question_type=q.question_type,
                     stem=q.stem,
                     sort_order=q.sort_order,
                     version=q.version,
@@ -230,6 +300,7 @@ class EtSurveyService:
         options = await self._surveys.list_options(db, [question.sq_id])
         return SurveyQuestionRow(
             sq_id=question.sq_id,
+            question_type=question.question_type,
             stem=question.stem,
             sort_order=question.sort_order,
             version=question.version,

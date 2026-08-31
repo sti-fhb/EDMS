@@ -22,6 +22,7 @@ from app.et.constants import (
     ITEM_MATERIAL,
     QUESTION_SINGLE,
     SOURCE_TAG_DEFAULT,
+    SURVEY_QUESTION_SINGLE,
 )
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.invitation.models import EtInvitation, EtOwnerTransfer
@@ -280,7 +281,16 @@ class TestSurveyChain:
         sv = EtSurvey(**_audit(course_id=course.course_id, survey_name="問卷", is_active=True, version=0))
         db.add(sv)
         await db.flush()
-        sq = EtSurveyQuestion(**_audit(survey_id=sv.survey_id, stem="滿意度？", sort_order=1, version=0))
+        sq = EtSurveyQuestion(
+            **_audit(
+                survey_id=sv.survey_id,
+                # QUESTION_TYPE 於 #238 新增且**無 default**——漏傳會直接撞 NOT NULL
+                question_type=SURVEY_QUESTION_SINGLE,
+                stem="滿意度？",
+                sort_order=1,
+                version=0,
+            )
+        )
         db.add(sq)
         await db.flush()
         so = EtSurveyOption(**_audit(sq_id=sq.sq_id, option_text="滿意", sort_order=1))

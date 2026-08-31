@@ -12,7 +12,11 @@ import {
 import type { SurveyQuestionRow } from "./surveySchemas"
 
 describe("SurveyQuestionFormSchema", () => {
-  const valid = { stem: "您對本課程是否滿意？", options: [{ option_text: "滿意" }, { option_text: "不滿意" }] }
+  const valid = {
+    question_type: "SINGLE" as const,
+    stem: "您對本課程是否滿意？",
+    options: [{ option_text: "滿意" }, { option_text: "不滿意" }],
+  }
 
   it("兩個選項通過", () => {
     expect(SurveyQuestionFormSchema.safeParse(valid).success).toBe(true)
@@ -62,15 +66,50 @@ describe("SurveyQuestionFormSchema", () => {
 
   it("題幹與選項前後空白被去除", () => {
     const result = SurveyQuestionFormSchema.safeParse({
+      question_type: "SINGLE",
       stem: "  題幹  ",
       options: [{ option_text: " A " }, { option_text: " B " }],
     })
     expect(result.success).toBe(true)
-    expect(result.data).toEqual({ stem: "題幹", options: [{ option_text: "A" }, { option_text: "B" }] })
+    expect(result.data).toEqual({
+      question_type: "SINGLE",
+      stem: "題幹",
+      options: [{ option_text: "A" }, { option_text: "B" }],
+    })
+  })
+
+  // ── 問答題（#238）────────────────────────────────────────────────────────
+
+  it("問答題零選項通過", () => {
+    expect(
+      SurveyQuestionFormSchema.safeParse({ question_type: "TEXT", stem: "有什麼建議？", options: [] }).success,
+    ).toBe(true)
+  })
+
+  it("問答題帶選項被擋", () => {
+    // 對齊後端 `ensure_options_match_type`——靜默忽略會讓教師以為選項還在
+    const result = SurveyQuestionFormSchema.safeParse({
+      question_type: "TEXT",
+      stem: "有什麼建議？",
+      options: [{ option_text: "不該有" }],
+    })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]?.message).toBe("問答題不可設定選項")
+  })
+
+  it("選項數要求隨題型而異，不是無條件的", () => {
+    // 同樣是 0 個選項：問答題通過、單選題被擋
+    const base = { stem: "題幹", options: [] }
+    expect(SurveyQuestionFormSchema.safeParse({ ...base, question_type: "TEXT" }).success).toBe(true)
+    expect(SurveyQuestionFormSchema.safeParse({ ...base, question_type: "SINGLE" }).success).toBe(false)
   })
 })
 
 describe("EMPTY_SURVEY_QUESTION", () => {
+  it("預設為單選題", () => {
+    expect(EMPTY_SURVEY_QUESTION.question_type).toBe("SINGLE")
+  })
+
   it("預設兩個空選項、不預填範例文字", () => {
     // #203 實測回饋明確要求「不要幫使用者填預設值，空白就好」。
     // 給兩格是因為下限就是 2，少於此存不了檔。
@@ -88,6 +127,7 @@ describe("toSurveyDraft", () => {
   it("只保留可編輯欄位", () => {
     const question: SurveyQuestionRow = {
       sq_id: 7,
+      question_type: "SINGLE",
       stem: "題幹",
       sort_order: 2,
       version: 3,
@@ -97,6 +137,7 @@ describe("toSurveyDraft", () => {
       ],
     }
     expect(toSurveyDraft(question)).toEqual({
+      question_type: "SINGLE",
       stem: "題幹",
       options: [{ option_text: "A" }, { option_text: "B" }],
     })

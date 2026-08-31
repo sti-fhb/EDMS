@@ -5,7 +5,7 @@
 `app/dm/detail/repository.py` 之 `_OBSOLETE` / `_BROWSABLE_STATUSES`）。ET 若為 9 類代碼
 各建一張表，將與 DM / DP 做法分歧並平白多出 9 張表與其維護成本。
 
-因此 9 類代碼一律以本模組之常數表達；DB 欄位維持 `VARCHAR`，**值域由應用層把關**
+因此各類代碼一律以本模組之常數表達；DB 欄位維持 `VARCHAR`，**值域由應用層把關**
 （不加 CHECK constraint，比照 DM）。權威定義見 `docs/specs/et/data-model.md`
 §Lookup 代碼定義；改動常數時必須同步該文件。
 
@@ -70,6 +70,16 @@ QUESTION_MULTIPLE: Final = "MULTIPLE"
 
 ALL_QUESTION_TYPES: Final = frozenset({QUESTION_SINGLE, QUESTION_MULTIPLE})
 
+# ── ET_SURVEY_QUESTION_TYPE：問卷題型（2026-08-28 #238 新增）──────────────────
+# 與測驗的 ET_QUESTION_TYPE **刻意不共用**：問卷沒有多選、測驗沒有問答，值域不同。
+# 共用會讓任一邊擴充時污染另一邊。
+SurveyQuestionType = Literal["SINGLE", "TEXT"]
+
+SURVEY_QUESTION_SINGLE: Final = "SINGLE"
+SURVEY_QUESTION_TEXT: Final = "TEXT"
+
+ALL_SURVEY_QUESTION_TYPES: Final = frozenset({SURVEY_QUESTION_SINGLE, SURVEY_QUESTION_TEXT})
+
 # ── ET_ITEM_TYPE：章節項目類型（MATERIAL_ID / QUIZ_ID 互斥）────────────────────
 ItemType = Literal["MATERIAL", "QUIZ"]
 
@@ -98,7 +108,7 @@ APPROVAL_FAIL: Final = "FAIL"
 
 ALL_APPROVAL_RESULTS: Final = frozenset({APPROVAL_PASS, APPROVAL_FAIL})
 
-# ── 全部 9 類之對照（供測試與文件比對；非執行期邏輯使用）──────────────────────
+# ── 全部 10 類之對照（供測試與文件比對；非執行期邏輯使用）─────────────────────
 LOOKUP_SETS: Final[dict[str, frozenset[str]]] = {
     "ET_USER_ROLE_TYPE": ALL_ROLES,
     "ET_COURSE_STATUS": ALL_COURSE_STATUSES,
@@ -106,6 +116,7 @@ LOOKUP_SETS: Final[dict[str, frozenset[str]]] = {
     "ET_INVITATION_STATUS": ALL_INVITATION_STATUSES,
     "ET_ATTEMPT_STATUS": ALL_ATTEMPT_STATUSES,
     "ET_QUESTION_TYPE": ALL_QUESTION_TYPES,
+    "ET_SURVEY_QUESTION_TYPE": ALL_SURVEY_QUESTION_TYPES,
     "ET_ITEM_TYPE": ALL_ITEM_TYPES,
     "ET_COMPLETION_STATUS": ALL_COMPLETION_STATUSES,
     "ET_APPROVAL_RESULT": ALL_APPROVAL_RESULTS,

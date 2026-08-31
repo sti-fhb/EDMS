@@ -3,12 +3,15 @@
 import pytest
 
 from app.core.exceptions import AppError
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, SURVEY_QUESTION_SINGLE, SURVEY_QUESTION_TEXT
 from app.et.survey.rules import (
     MIN_OPTIONS,
     ensure_editable,
     ensure_option_count_valid,
+    ensure_options_match_type,
     ensure_question_reorder_complete,
     ensure_survey_absent,
+    ensure_survey_deletable,
     resequence_questions,
 )
 
@@ -50,6 +53,75 @@ class TestEnsureOptionCountValid:
         """
         assert MIN_OPTIONS == 2
         ensure_option_count_valid(50)
+
+
+class TestEnsureOptionsMatchType:
+    """題型與選項數之搭配（#238）。
+
+    取代了原本無條件套用的 `ensure_option_count_valid`——問答題沒有選項可言。
+    """
+
+    @pytest.mark.parametrize("count", [2, 3, 10])
+    def test_單選題達下限通過(self, count: int) -> None:
+        ensure_options_match_type(SURVEY_QUESTION_SINGLE, option_count=count)
+
+    @pytest.mark.parametrize("count", [0, 1])
+    def test_單選題不足兩個被擋(self, count: int) -> None:
+        with pytest.raises(AppError) as exc:
+            ensure_options_match_type(SURVEY_QUESTION_SINGLE, option_count=count)
+        assert exc.value.error_code == "ET_SURVEY_004"
+
+    def test_問答題零個選項通過(self) -> None:
+        ensure_options_match_type(SURVEY_QUESTION_TEXT, option_count=0)
+
+    @pytest.mark.parametrize("count", [1, 2, 5])
+    def test_問答題帶選項被擋(self, count: int) -> None:
+        """**明確擋下而非靜默忽略**。
+
+        教師把單選題改成問答題時，原本填的選項若被無聲丟棄，他會以為還在。
+        擋下來並提示，前端才有機會告訴他「切換題型會清空選項」。
+        """
+        with pytest.raises(AppError) as exc:
+            ensure_options_match_type(SURVEY_QUESTION_TEXT, option_count=count)
+        assert exc.value.status_code == 422
+        assert exc.value.error_code == "ET_SURVEY_008"
+
+    def test_兩種題型的錯誤碼不同(self) -> None:
+        """單選題選項不足是 `ET_SURVEY_004`、問答題誤帶選項是 `ET_SURVEY_008`——
+        前端要靠 error_code 分辨該提示「請再加一個選項」還是「問答題不能有選項」。
+        """
+        with pytest.raises(AppError) as single_exc:
+            ensure_options_match_type(SURVEY_QUESTION_SINGLE, option_count=1)
+        with pytest.raises(AppError) as text_exc:
+            ensure_options_match_type(SURVEY_QUESTION_TEXT, option_count=1)
+        assert single_exc.value.error_code != text_exc.value.error_code
+
+
+class TestEnsureSurveyDeletable:
+    """僅草稿課程之問卷可刪除（#238）。"""
+
+    def test_草稿課程可刪(self) -> None:
+        ensure_survey_deletable(COURSE_DRAFT)
+
+    @pytest.mark.parametrize("status", [COURSE_PUBLISHED, COURSE_CLOSED])
+    def test_非草稿被擋(self, status: str) -> None:
+        """已發布 / 已關閉一律只能停用。
+
+        「已關閉」也擋是因為關閉可逆（再開課後學員又看得到），若允許在關閉期間刪問卷，
+        再開課後學員的填答入口就無故消失了。
+        """
+        with pytest.raises(AppError) as exc:
+            ensure_survey_deletable(status)
+        assert exc.value.status_code == 422
+        assert exc.value.error_code == "ET_SURVEY_007"
+
+    def test_訊息指向替代動作(self) -> None:
+        """比照 `ET_COURSE_005`（「僅草稿課程可刪除，已發布課程請改用關閉」）——
+        只說不能刪、不說能做什麼，教師會卡住。
+        """
+        with pytest.raises(AppError) as exc:
+            ensure_survey_deletable(COURSE_PUBLISHED)
+        assert "停用" in exc.value.detail
 
 
 class TestEnsureEditable:

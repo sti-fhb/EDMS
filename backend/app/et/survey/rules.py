@@ -7,15 +7,18 @@ Service 負責取資料與寫入，判斷交給本模組。
 
 | 項目 | 測驗題目 | 問卷題目 |
 |------|---------|---------|
-| 選項數 | 2–6（`ET_QUESTION_003`）| **至少 2、無上限**（`data-model` §ET_SURVEY_OPTION 未訂上限）|
+| 題型 | `SINGLE` / `MULTIPLE` | `SINGLE` / `TEXT`（**不共用值域**，見 `constants.py`）|
+| 選項數 | 2–6（`ET_QUESTION_003`）| 單選至少 2、**無上限**；問答**必須 0 個** |
 | 正確選項 | 有（依題型判定）| **無此概念**——問卷是收集意見，沒有對錯 |
 | 凍結 | 無 | **有填答即凍結**（`ET_SURVEY_003`）|
 
-## 問卷不可刪除
+## 問卷可刪除（#238 推翻 #204 之裁示 Q1）
 
-SA 裁示（#204 Q1 → B）：問卷只能停用（`IS_ACTIVE=false`），故本模組**沒有**
-`ensure_deletable`，router 亦無 `DELETE /surveys/{id}`。此前提同時是
-`UQ_ET_SURVEY_COURSE` 維持全表唯一的理由，見 `models.py` 該約束上方註解。
+#204 當時裁示「問卷只能停用」，本模組因而沒有刪除規則。#238 依實測回饋改為
+**未發布（`DRAFT`）課程可刪除、已發布僅可停用**，故新增 `ensure_survey_deletable`。
+
+⚠️ 該變更連帶要求 `UQ_ET_SURVEY_COURSE` 改為部分唯一索引（migration `8713c6177f6f`）
+——否則軟刪的問卷會永久佔住該課程。
 
 錯誤訊息一律不嵌入動態值（問卷名稱、題幹等），對齊 `sti-error-codes`。
 """
@@ -23,6 +26,7 @@ SA 裁示（#204 Q1 → B）：問卷只能停用（`IS_ACTIVE=false`），故�
 from typing import Final
 
 from app.core.exceptions import AppError
+from app.et.constants import COURSE_DRAFT, SURVEY_QUESTION_TEXT
 
 #: 每題選項數下限（`data-model.md` §ET_SURVEY_OPTION：「同 SQ_ID 下至少 2 個選項」）。
 #:
@@ -102,3 +106,60 @@ def resequence_questions(ordered_ids: list[int]) -> dict[int, int]:
     > 為了防作弊，問卷則是教師刻意安排的敘事順序（例如由總體滿意度問到細項）。
     """
     return {sq_id: index for index, sq_id in enumerate(ordered_ids, start=1)}
+
+
+def ensure_options_match_type(question_type: str, *, option_count: int) -> None:
+    """選項數須符合題型（#238）。
+
+    | 題型 | 要求 | 錯誤碼 |
+    |------|------|--------|
+    | `SINGLE` | 至少 2 個（無上限）| `ET_SURVEY_004` |
+    | `TEXT` | **必須 0 個** | `ET_SURVEY_008` |
+
+    ## 問答題為何是「必須 0 個」而不是「忽略選項」
+
+    教師把單選題改成問答題時，原本填的選項若被靜默丟棄，他會以為那些選項還在——
+    直到學員端呈現時才發現不對。明確擋下並提示，前端才有立場告訴他「切換題型會清空
+    選項」。
+
+    ## 兩種違規為何用不同錯誤碼
+
+    前端要據此決定提示什麼：`ET_SURVEY_004` 是「請再加一個選項」、`ET_SURVEY_008` 是
+    「問答題不能有選項」。共用一個代碼會讓兩種相反的修正方向擠在同一句訊息裡。
+
+    Raises:
+        AppError: 422 `ET_SURVEY_004`（單選題選項不足）或 `ET_SURVEY_008`（問答題帶選項）。
+    """
+    if question_type == SURVEY_QUESTION_TEXT:
+        if option_count:
+            raise AppError(status_code=422, detail="問答題不可設定選項", error_code="ET_SURVEY_008")
+        return
+    # `SINGLE`——schema 之 Literal 已擋下未知題型，走到這裡必為單選
+    ensure_option_count_valid(option_count)
+
+
+def ensure_survey_deletable(course_status: str) -> None:
+    """僅**草稿**課程之問卷可刪除（#238）。
+
+    已發布 / 已關閉一律只能停用（`IS_ACTIVE=false`）。
+
+    ## 為何以課程狀態判定，而非「有無填答」
+
+    未發布課程學員看不到，不可能有填答，兩者實務上等價。選課程狀態是因為它與
+    「已發布僅可停用」對稱，教師的心智模型單純——**發布前隨便改，發布後只能停用**
+    ——不必去想「有沒有人填過」。
+
+    ## 「已關閉」為何也擋
+
+    關閉可逆（`ET-11` 再開課）。若允許在關閉期間刪問卷，再開課後學員的填答入口就
+    無故消失了。
+
+    Raises:
+        AppError: 422 `ET_SURVEY_007`。
+    """
+    if course_status != COURSE_DRAFT:
+        raise AppError(
+            status_code=422,
+            detail="僅草稿課程之問卷可刪除，已發布課程請改用停用",
+            error_code="ET_SURVEY_007",
+        )

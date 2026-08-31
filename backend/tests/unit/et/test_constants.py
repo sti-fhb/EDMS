@@ -60,9 +60,16 @@ class TestApprovalResult:
 
 
 class TestLookupCoverage:
-    def test_共九類代碼集合(self) -> None:
-        """data-model §Lookup 代碼定義列 9 類，全部須有對應常數集合。"""
-        assert len(c.LOOKUP_SETS) == 9
+    def test_共十類代碼集合(self) -> None:
+        """data-model §Lookup 代碼定義列 10 類，全部須有對應常數集合。
+
+        第 10 類 `ET_SURVEY_QUESTION_TYPE` 於 2026-08-28（#238）新增——問卷加入問答
+        題型，推翻了原本「題型一律單選（不設題型欄位）」的規定。
+
+        本條寫死類別數是刻意的：它是 `constants.py` 與 data-model §Lookup 之間唯一的
+        守門。加了常數卻沒更新文件（或反之）時，這裡會先失敗。
+        """
+        assert len(c.LOOKUP_SETS) == 10
         # 每一類都非空，且成員皆為大寫英數底線（DB 欄位為 VARCHAR，值域由應用層把關）
         for name, values in c.LOOKUP_SETS.items():
             assert values, f"{name} 不得為空"
