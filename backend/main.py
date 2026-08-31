@@ -20,7 +20,9 @@ from app.core.log_redaction import format_exception_for_log
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
 from app.core.request_context import get_client_ip, set_client_ip
+from app.dm.access.router import router as dm_access_router
 from app.dm.bootstrap import register_dm_module
+from app.dm.change_log.router import router as dm_change_log_router
 from app.dm.dashboard.router import router as dm_dashboard_router
 from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
@@ -129,6 +131,8 @@ app.include_router(dm_editor_router)
 app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
 app.include_router(dm_obsolete_archive_router)
+app.include_router(dm_change_log_router)
+app.include_router(dm_access_router)
 app.include_router(dm_personal_router)
 app.include_router(et_course_router)
 app.include_router(et_material_router)

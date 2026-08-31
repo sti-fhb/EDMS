@@ -12,17 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.pagination import PagedResponse
 from app.dm.deps import DmContext, get_dm_context
-from app.dm.obsolete_archive.schemas import ObsoleteAccess, ObsoleteDocItem, ObsoleteQuery
+from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
 from app.dm.obsolete_archive.service import ObsoleteArchiveService
 
 router = APIRouter(prefix="/api/dm", tags=["dm-obsolete-archive"])
 _service = ObsoleteArchiveService()
 
-
-@router.get("/obsolete-archive/access", response_model=ObsoleteAccess)
-async def obsolete_access(ctx: DmContext = Depends(get_dm_context)) -> ObsoleteAccess:
-    """DM06 入口可見性（FR-001）：具 DM_ADMIN 才顯示側欄項；供前端逐項閘（非 403）。"""
-    return _service.get_access(ctx.roles)
+# 入口可見性改用共用 GET /api/dm/admin-access（US11 A' 收斂）；本模組不再提供 /obsolete-archive/access。
 
 
 @router.get("/obsolete-archive/documents", response_model=PagedResponse[ObsoleteDocItem])

@@ -2,7 +2,8 @@
 
 涵蓋：DM_ADMIN 查詢已廢止清單（末版版號 + 廢止脈絡欄位：原作者〔末版作者〕/ 申請人 / 核准者 / 廢止時間 / 原因）、
 關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間過濾、CSV 匯出（含 BOM + 跳脫）、
-存取閘（非 DM_ADMIN 清單 + 匯出 403 DM_AUTH_003、access 回 false、未登入 401）、查無回空。
+存取閘（非 DM_ADMIN 清單 + 匯出 403 DM_AUTH_003、未登入 401）、查無回空。
+（入口可見性 access 已收斂至共用 GET /api/dm/admin-access，見 test_dm_change_log_query.py。）
 """
 
 from datetime import datetime, timezone
@@ -263,16 +264,7 @@ async def test_export_forbidden_for_non_admin(db, client):
     assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_003"
 
 
-async def test_access_flag_admin_vs_non_admin(db, client):
-    await _seed_user(db, "adm", "管理員")
-    await _grant(db, "adm", DM_ADMIN)
-    await _seed_user(db, "ed", "編輯")
-    await _grant(db, "ed", DM_EDITOR)
-
-    r_adm = await client.get("/api/dm/obsolete-archive/access", headers=_headers("adm"))
-    assert r_adm.status_code == 200 and r_adm.json()["can_access"] is True
-    r_ed = await client.get("/api/dm/obsolete-archive/access", headers=_headers("ed"))
-    assert r_ed.status_code == 200 and r_ed.json()["can_access"] is False
+# 入口可見性測試移至共用 GET /api/dm/admin-access（US11 A' 收斂，見 test_dm_change_log_query.py）。
 
 
 # ── CSV 匯出 ──────────────────────────────────────────

@@ -302,8 +302,9 @@ export const handlers = [
   http.post("/api/dm/documents/:docId/obsolete", () =>
     HttpResponse.json({ review_id: 601, doc_status: "PENDING_OBSOLETE", notified: 1 }),
   ),
+  // 共用 DM 管理者入口可見性（US11 A' 收斂；US10/11/13 admin 側欄項共用）
+  http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: true })),
   // US10 已廢止文件查詢（dm-obsolete-archive）
-  http.get("/api/dm/obsolete-archive/access", () => HttpResponse.json({ can_access: true })),
   http.get("/api/dm/obsolete-archive/documents", () =>
     HttpResponse.json({
       data: [
@@ -328,6 +329,45 @@ export const handlers = [
   ),
   http.get("/api/dm/obsolete-archive/documents/export", () =>
     HttpResponse.arrayBuffer(new TextEncoder().encode("﻿文件編號,文件名稱\nDM-SOP-000901,停辦作業SOP\n").buffer, {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
+  // US11 文件變更歷程查詢（dm-change-log）
+  http.get("/api/dm/change-log/entries", () =>
+    HttpResponse.json({
+      data: [
+        {
+          change_log_id: 1,
+          operation_time: "2026-05-15T06:30:00Z",
+          operation: "PUBLISH",
+          applicant_id: "u1",
+          applicant_name: "陳大華",
+          approver_id: "u2",
+          approver_name: "李主任",
+          doc_id: "DM-SOP-000001",
+          doc_name: "領血確認標準作業程序",
+          version_no: "2.1",
+          note: "補充異常通報流程",
+        },
+        {
+          change_log_id: 2,
+          operation_time: "2026-05-14T02:10:00Z",
+          operation: "OBSOLETE",
+          applicant_id: "u3",
+          applicant_name: "王曉明",
+          approver_id: "u2",
+          approver_name: "李主任",
+          doc_id: "DM-SOP-000009",
+          doc_name: "舊版急救血品SOP",
+          version_no: "1.5",
+          note: "院內急救業務調整，本流程不再執行",
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/dm/change-log/entries/export", () =>
+    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿時間,申請人\n2026-05-15 14:30,陳大華\n").buffer, {
       headers: { "Content-Type": "text/csv; charset=utf-8" },
     }),
   ),
