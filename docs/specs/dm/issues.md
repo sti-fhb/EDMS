@@ -30,7 +30,7 @@
 | 7 | 文件廢止申請 | US8 / UCDM05 | P2-延伸 | T047 ~ T048 | #3, #5（本 issue 延伸 US6 核准 / 退回）| [#206](https://github.com/sti-fhb/EDMS/issues/206) | ✅ 已交付（PR #210；follow-up #211）|
 | 8 | 個人專區（草稿匣 / 我的文件動態 / 撤回送審）| US9 / UCDM09 | P2-延伸 | T050 ~ T052 | #4, #5；#7（撤回廢止）| [#219](https://github.com/sti-fhb/EDMS/issues/219) | 🚀 已開立 [#219](https://github.com/sti-fhb/EDMS/issues/219) |
 | 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | [#230](https://github.com/sti-fhb/EDMS/issues/230) | 🚀 已開立 [#230](https://github.com/sti-fhb/EDMS/issues/230) |
-| 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | — | 待補 |
+| 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | [#243](https://github.com/sti-fhb/EDMS/issues/243) | 🚀 已開立 [#243](https://github.com/sti-fhb/EDMS/issues/243) |
 | 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3-輔助 | T057 ~ T059 | #5；ET 引用端 | [#183](https://github.com/sti-fhb/EDMS/issues/183) | ✅ 已交付（PR #189；契約 #187；T059 廢止通知範圍外＝裁示 A + 待 US8）|
 | 12 | 閱讀統計與 KPI + 排程 SCHDM001 | US13 / UCDM13 | P2-延伸 | T059a ~ T059c | #3；DP 排程引擎 | — | 待補 |
 | 13 | 整合測試 + 安全 + 收尾 | — | 收尾 | T060 ~ T067 | 全部 | — | 待補 |
@@ -778,9 +778,64 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #10：待補（增量模式）
+## Issue #10：[P3-輔助] DM — 文件變更歷程查詢（US11 / UCDM10 / DM08）（GitHub [#243](https://github.com/sti-fhb/EDMS/issues/243)，🚀 已開立）
 
-US11 文件變更歷程查詢（#10）——尚未開工，於前一張實作驗證 OK 後補入完整 body（格式同上，對齊 `sti-issue-create` canonical 模板）。
+**對應規格**：[spec_us11.md](spec_us11.md)（FR-001~006，UCDM10，訊息 DM-MSG-DM08-001/002）；[data-model.md](data-model.md)（`DM_CHANGE_LOG`（append-only，`OPERATION`=PUBLISH/OBSOLETE、`APPLICANT_USER_ID` / `APPROVER_USER_ID` / `OPERATION_TIME` / `VERSION_ID` / `NOTE`）、`DM_DOCUMENT`（文件名）、`DM_DOC_VERSION`（版本號）、`DP_USER`（申請人 / 核准人姓名）、`DM_USER_ROLE`（DM_ADMIN 判定））
+**對應畫面**：DM08 文件變更歷程查詢（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-audit`）——**入口與後端皆僅 DM_ADMIN 可存取**
+**階段**：P3-輔助
+**涵蓋 Tasks**：T055（變更歷程查詢清單 + 搜尋）、T056（CSV 匯出 + 入口 / 存取閘）
+
+## 任務說明
+
+實作 **DM08 文件變更歷程查詢**（管理者，供資安稽核 / 合規追溯）：DM_ADMIN 跨文件查詢**公開變更歷程**（`DM_CHANGE_LOG` 之**發布 / 廢止**兩類事件），依日期區間、申請人 / 核准人（帳號或姓名）、操作類型篩選，清單呈現稽核欄位，並**匯出 CSV**。撰寫過程動作（上傳 / 編輯 / 送審 / 退回 / 撤回）與閱讀動作（下載 / 預覽）不入此公開歷程；系統設定變更亦不於本頁顯示。變更歷程**永久保留、不可竄改**。
+
+> ℹ️ **讀取型全端 issue**：後端為唯讀查詢 + CSV 匯出；資料來源 `DM_CHANGE_LOG` 之發布 / 廢止事件已由 **US6 核准發布 / US8→US6 核准廢止**（`app/dm/review/center_service`）寫入，**本 issue 不產生變更事件**。與 US10 已廢止查詢同屬「唯讀跨文件稽核查詢」，可大量鏡像其 `obsolete_archive` 範式（DM_ADMIN 硬閘 + `core/csv_export` + access 端點 + 前端逐項側欄閘）。
+
+## 範圍
+
+**後端**（新模組 `app/dm/change_log/`〔暫名，開工時定〕，router → service → repository；與 US6/US8 之**寫入**端 `app/dm/review/` 分離——本 issue 純唯讀查詢）：
+- **T055 查詢清單**（FR-002/003）：`GET /api/dm/change-log/entries`〔端點命名開工定〕——列 `DM_CHANGE_LOG` 事件，搜尋條件：日期區間（`OPERATION_TIME`）、申請人 / 核准人（`APPLICANT_USER_ID` / `APPROVER_USER_ID` 之帳號或 `DP_USER.USER_NAME` ILIKE，單一輸入比對兩者）、操作類型（全部 / PUBLISH / OBSOLETE）。回欄位（FR-003）：時間 / 申請人 / 核准人 / 操作 / 文件名稱 / 版本號 / 備註（`NOTE`：發布＝變更摘要、廢止＝廢止原因）。資料來源＝`DM_CHANGE_LOG` join `DM_DOCUMENT`（文件名）join `DM_DOC_VERSION`（版本號）join `DP_USER`（姓名，唯讀報表例外）。後端分頁 `paginate()`（依 `OPERATION_TIME` 新→舊）。
+- **T056 CSV 匯出**（FR-004）：`GET /api/dm/change-log/entries/export`——依相同查詢條件回 CSV（欄位同清單），供資安稽核封存。**重用 `app/core/csv_export.py`**（US10 建立，含公式注入防護 + UTF-8 BOM）。
+- **存取閘**（FR-001）：兩端點皆掛 `get_dm_context` + 細粒度 `DM_ADMIN` 檢核（非管理者 → 403 `DM_AUTH_003`，對應 DM-MSG-DM08-002）；**後端 MUST 擋直接 URL 存取**。查無結果回空清單（前端呈現 DM-MSG-DM08-001）。
+- **入口可見性判定**：提供 DM_ADMIN 判定供前端側欄 per-item 閘（資料來源待 SA 定案，見注意事項）。
+
+**前端**（`frontend/src/dm/changelog/DmChangeLogPage.tsx` 現為 stub、於本 issue 填實）：DM08 查詢頁——搜尋列（日期起訖 / 申請人或核准人 / 操作類型）+ 結果清單（FR-003 七欄，操作以 badge 呈現發布 / 廢止）+「匯出 CSV」鈕；空結果提示 DM-MSG-DM08-001。側欄「文件變更歷程查詢」項**僅 DM_ADMIN 顯示**（per-item 角色閘，比照 US10）。
+
+**測試**：後端 int（DM_ADMIN 查得清單、日期 / 申請人或核准人 / 操作類型過濾、欄位正確含版本號與備註、**僅 PUBLISH/OBSOLETE 事件**〔驗撰寫過程 / 閱讀動作不入歷程〕、CSV 匯出內容、非 DM_ADMIN 403〔清單 + 匯出 + 直連〕、未登入 401、查無回空）+ 前端（查詢渲染 / 空結果提示 / 匯出鈕 / 操作 badge、非管理者不顯示入口）。
+
+## 驗收條件
+
+- [ ] DM08 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直接 URL 存取**（FR-001、AC1、DM-MSG-DM08-002）
+- [ ] 可依日期區間 / 申請人或核准人（帳號或姓名）/ 操作類型（全部 / 發布 / 廢止）查詢（FR-002、AC2）
+- [ ] 清單欄位含時間 / 申請人 / 核准人 / 操作 / 文件名稱 / 版本號 / 備註（發布＝變更摘要、廢止＝廢止原因），依時間 DESC（FR-003、AC3）
+- [ ] 僅含發布 / 廢止兩類；撰寫過程動作（上傳 / 編輯 / 送審 / 退回 / 撤回）與閱讀動作（下載 / 預覽）不出現、系統設定變更不顯示（FR-001/FR-005、AC5/AC6）
+- [ ] 支援 CSV 匯出當前查詢結果（FR-004、AC4）
+- [ ] 查無結果顯示 DM-MSG-DM08-001（FR-002）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#5 US6（已交付）**：核准發布 / 核准廢止寫 `DM_CHANGE_LOG`（PUBLISH / OBSOLETE 事件）——本 issue 之資料來源，程式在 `app/dm/review/center_service`
+- **#7 US8（已交付）**：廢止核准之 OBSOLETE 事件來源
+- **#9 US10（已交付）**：鏡像其 `obsolete_archive` 唯讀查詢範式（手動 count+分頁 enriched 列）+ `app/core/csv_export`（公式注入防護）+ DM_ADMIN 硬閘（`DM_AUTH_003`）+ access 端點 + 前端側欄逐項閘
+- **#127 Foundation（已交付）**：`DM_CHANGE_LOG` / `DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_USER_ROLE`
+- **DP #89 導覽重構（已落地）**：依權限側欄——DM08 入口掛其上（per-item DM_ADMIN 閘）
+
+## 注意事項
+
+- **入口 / 存取閘為 DM_ADMIN**（同 US10）：FR-001 要求**後端擋直連**，非僅前端隱藏；細粒度授權以 `has_role(ctx.roles, DM_ADMIN)` 判定。
+- **per-item 側欄角色閘資料來源**（待 SA 定案，同 US9/US10 SA Q 脈絡）：US10 採 A（DM-local `obsolete-archive/access`）。US11 可（a）鏡像新增 `change-log/access`、（b）**收斂為共用** `GET /api/dm/admin-access`（一次供 US10/11/13）、或（c）待 DP 擴 `module-summary` 帶 `is_admin`（US9 前瞻方向 B）——由 `/sti-plan` 提請 SA；未定前沿用 US10 模式。
+- **模組分離**：`DM_CHANGE_LOG` 寫入屬 US6/US8（`app/dm/review/`）；本 issue 為唯讀**查詢**，另立模組、不改寫入端。
+- **僅 PUBLISH / OBSOLETE 由資料來源保證**：`DM_CHANGE_LOG` 依設計只寫這兩類事件（撰寫過程 / 閱讀 / 設定變更本就不寫入本表，FR-005 由來源保證）；查詢無需額外排除，但**測試應驗證**表內僅此兩類（防未來誤寫回歸）。
+- **版本號欄**：PUBLISH 事件 `VERSION_ID` 指向該發布版 → 取 `version_no`；OBSOLETE 事件 `VERSION_ID` 可能為 null（廢止屬文件層）→ 版本號欄對廢止列可留空或顯示廢止時發布版，開工時依 `DM_CHANGE_LOG` 實際寫入值決定（SD 自決 / 必要時 SA Q）。
+- **CSV 匯出**：重用 `core/csv_export`；備註（變更摘要 / 廢止原因）為自由文字，跳脫由共用模組處理。
+
+## 相關文件
+
+- [spec_us11.md](spec_us11.md)、[spec_us6.md](spec_us6.md)（核准發布 / 廢止寫歷程）、[spec_us8.md](spec_us8.md)（廢止）、[spec_us9.md](spec_us9.md)（撰寫過程動作個人視角）、[spec_us1.md](spec_us1.md)（系統設定異動紀錄）、[data-model.md](data-model.md)（`DM_CHANGE_LOG`）、[tasks.md](tasks.md)（T055-T056）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-audit`）
+
+**Labels**：`P3-輔助`, `DM-文件管理`, `US11`
 
 ---
 

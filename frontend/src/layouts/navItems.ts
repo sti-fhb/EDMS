@@ -4,6 +4,8 @@ export interface NavItem {
   path: string
   /** 個人專區入口可見性（US9 FR-004）：需具編輯者或審核者角色（DM-local access 判定，SA 裁示 Q1=C）。 */
   requiresDmPersonalAccess?: boolean
+  /** 已廢止文件查詢入口可見性（US10 FR-001）：需具管理者角色（DM-local access 判定，SA 裁示 Q1=A 鏡像 US9）。 */
+  requiresDmAdminAccess?: boolean
 }
 
 /** 模組門檻：需具該模組任一角色才顯示此群組（經 module-summary 判定）。未設＝恆顯示。 */
@@ -51,7 +53,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "文件庫", path: "/dm/library" },
       { label: "簽核中心", path: "/dm/review" },
       { label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
-      { label: "已廢止文件查詢", path: "/dm/obsolete" },
+      { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
       { label: "文件變更歷程查詢", path: "/dm/change-log" },
       { label: "閱讀統計 KPI", path: "/dm/kpi" },
     ],

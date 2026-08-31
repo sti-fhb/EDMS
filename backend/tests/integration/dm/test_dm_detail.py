@@ -383,6 +383,43 @@ async def test_obsolete_info_banner(db):
     assert d.is_obsolete is True and d.obsolete_info is not None
     assert d.obsolete_info.applicant_name == "王曉明" and d.obsolete_info.approver_name == "李主任"
     assert d.obsolete_info.reason == "院內停用" and d.obsolete_info.has_attachment is True
+    # US10：banner 提供廢止附件下載所需之 review_id + 檔名
+    assert d.obsolete_info.review_id is not None and d.obsolete_info.attachment_name == "函文.pdf"
+
+
+async def test_obsolete_office_old_version_download_admin_only_for_audit(db):
+    """已廢止之無法預覽（Office）版本僅管理者可下載供稽核（US10 SA 裁示：限管理者）；可預覽舊版仍僅預覽。"""
+    doc = DmDocument(
+        doc_id="DM-SOP-000060",
+        doc_name="d",
+        category_code="SOP",
+        current_version_id=None,
+        status="OBSOLETE",
+        created_user="u_author",
+        created_date=utcnow(),
+    )
+    db.add(doc)
+    await db.flush()
+    office = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    old_office = await _add_version(db, "DM-SOP-000060", "0.9", mime=office, status="SUPERSEDED")
+    old_pdf = await _add_version(db, "DM-SOP-000060", "0.8", mime="application/pdf", status="SUPERSEDED")
+    cur = await _add_version(db, "DM-SOP-000060", "1.0", mime="application/pdf")
+    doc.current_version_id = cur
+    await db.flush()
+
+    # 已廢止 + 無法預覽（Office）舊版 + 管理者 → 開放下載（稽核）
+    f = await _svc.prepare_file(db, doc_id="DM-SOP-000060", version_id=old_office, disposition="download", ctx=_admin())
+    assert f.inline is False
+    # 已廢止 + Office 舊版，但非管理者（編輯者）→ 仍不可下載（限管理者）
+    with pytest.raises(AppError) as e_ed:
+        await _svc.prepare_file(
+            db, doc_id="DM-SOP-000060", version_id=old_office, disposition="download", ctx=_editor()
+        )
+    assert e_ed.value.status_code == 403 and e_ed.value.error_code == "DM_DOC_002"
+    # 已廢止 + 可預覽（PDF）舊版 → 管理者也不可下載（僅預覽）
+    with pytest.raises(AppError) as e:
+        await _svc.prepare_file(db, doc_id="DM-SOP-000060", version_id=old_pdf, disposition="download", ctx=_admin())
+    assert e.value.status_code == 403 and e.value.error_code == "DM_DOC_002"
 
 
 # ── HTTP 存取閘 + FileResponse ─────────────────────
@@ -459,3 +496,55 @@ async def test_http_missing_physical_file_returns_404_not_500(db, client):
     assert resp.status_code == 404
     assert resp.json()["error_code"] == "DM_DOC_001"
     assert "secret" not in resp.text  # 落盤路徑不外洩
+
+
+async def test_http_file_download_survives_storage_root_move(db, client, tmp_path, monkeypatch):
+    """可攜性端到端（#233 AC7）：搬走整個 storage root、改設定指過去，下載仍成功。
+
+    這是本 issue 的核心價值驗證，也是最嚴格的形式——只要 `FILE_PATH` 還藏著任何絕對路徑
+    成分，第二次下載就會 404。相較之下「斷言字串不含反斜線」只驗得到格式，驗不到可攜。
+
+    改動前此案必然失敗：舊版把絕對路徑寫進 DB，root 一搬即指向不存在的舊位置。
+    """
+    doc_id = "DM-SOP-000062"
+    rel = f"{doc_id}/portable.pdf"
+    payload = b"%PDF-1.4 portable"
+
+    old_root = tmp_path / "root_a"
+    (old_root / doc_id).mkdir(parents=True)
+    (old_root / rel).write_bytes(payload)
+    monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", str(old_root))
+
+    doc = DmDocument(
+        doc_id=doc_id,
+        doc_name="可攜性測試",
+        category_code="SOP",
+        current_version_id=None,
+        status="PUBLISHED",
+        created_user="u_author",
+        created_date=utcnow(),
+    )
+    db.add(doc)
+    await db.flush()
+    vid = await _add_version(db, doc_id, "1.0", path=rel)  # DB 只存相對片段
+    doc.current_version_id = vid
+    await db.flush()
+    await _seed_user(db, "portable_user", "可攜使用者")
+    db.add(DmUserRole(user_id="portable_user", role_code=DM_EDITOR, created_user="a", created_date=utcnow()))
+    await db.flush()
+
+    token = create_access_token(sub="portable_user", ttl_minutes=15)
+    url = f"/api/dm/documents/{doc_id}/versions/{vid}/file?disposition=download"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    first = await client.get(url, headers=headers)
+    assert first.status_code == 200 and first.content == payload
+
+    # 換機器 / 換部署目錄的等價操作：整個 root 搬走 + 改設定，DB 一列都不動
+    new_root = tmp_path / "root_b"
+    old_root.rename(new_root)
+    monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", str(new_root))
+
+    second = await client.get(url, headers=headers)
+    assert second.status_code == 200, "搬 root 後仍須讀得到——FILE_PATH 可能殘留絕對路徑成分"
+    assert second.content == payload
