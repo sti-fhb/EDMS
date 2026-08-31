@@ -194,15 +194,18 @@ describe("DmDetailPage 文件詳細頁", () => {
             uploaded_at: null,
             previewable: true,
           },
+          is_admin: true,
           can_edit: false,
           is_obsolete: true,
           obsolete_info: {
+            review_id: 77,
             obsolete_time: "2026-04-10T11:15:00Z",
             applicant_id: "u1",
             applicant_name: "王曉明",
             approver_name: "李主任",
             reason: "院內停用",
             has_attachment: true,
+            attachment_name: "函文.pdf",
           },
         }),
       ),
@@ -216,7 +219,146 @@ describe("DmDetailPage 文件詳細頁", () => {
     // 版本歷程自動展開（read-only 提示）
     expect(await screen.findByText(/已廢止：所有版本僅供預覽/)).toBeInTheDocument()
     await screen.findByText("2.1") // 版本載入
-    // read-only：所有版本僅預覽、無下載鈕
+    // read-only：可預覽版本僅預覽、無版本檔下載鈕
+    expect(screen.queryByRole("button", { name: "下載" })).not.toBeInTheDocument()
+    // US10：返回鈕改為「返回已廢止文件查詢」、隱藏「版本歷程」toggle、提供廢止附件下載
+    expect(screen.getByRole("button", { name: "返回已廢止文件查詢" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "返回文件庫" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "版本歷程" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "下載廢止附件" })).toBeInTheDocument()
+  })
+
+  it("已廢止 read-only：管理者可下載無法預覽（Office）版本（SA 裁示：限管理者）", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "廢止Word文件",
+          status: "OBSOLETE",
+          current_version_no: "1.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: null,
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 9,
+            file_name: "a.docx",
+            file_mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_size: 1000,
+            uploaded_at: null,
+            previewable: false,
+          },
+          is_admin: true,
+          can_edit: false,
+          is_obsolete: true,
+          obsolete_info: {
+            review_id: 78,
+            obsolete_time: "2026-04-10T11:15:00Z",
+            applicant_id: "u1",
+            applicant_name: "王曉明",
+            approver_name: "李主任",
+            reason: "停用",
+            has_attachment: false,
+            attachment_name: null,
+          },
+        }),
+      ),
+      http.get("/api/dm/documents/:docId/versions", () =>
+        HttpResponse.json([
+          {
+            version_id: 9,
+            version_no: "1.0",
+            change_summary: "首版",
+            file_name: "a.docx",
+            author_id: "u1",
+            author_name: "陳大華",
+            approver_name: "李主任",
+            published_date: "2026-02-10T14:20:00Z",
+            is_current: true,
+            previewable: false,
+          },
+        ]),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("廢止Word文件")
+    await screen.findByText("1.0") // 版本載入
+    // Office（無法預覽）→ 無預覽鈕、有下載鈕
+    expect(screen.queryByRole("button", { name: "預覽" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "下載" })).toBeInTheDocument()
+  })
+
+  it("已廢止 read-only：非管理者（is_admin=false）→ 無法預覽版本不顯示下載鈕（限管理者）", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "廢止Word文件",
+          status: "OBSOLETE",
+          current_version_no: "1.0",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: null,
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 9,
+            file_name: "a.docx",
+            file_mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_size: 1000,
+            uploaded_at: null,
+            previewable: false,
+          },
+          is_admin: false,
+          can_edit: false,
+          is_obsolete: true,
+          obsolete_info: {
+            review_id: 78,
+            obsolete_time: "2026-04-10T11:15:00Z",
+            applicant_id: "u1",
+            applicant_name: "王曉明",
+            approver_name: "李主任",
+            reason: "停用",
+            has_attachment: false,
+            attachment_name: null,
+          },
+        }),
+      ),
+      http.get("/api/dm/documents/:docId/versions", () =>
+        HttpResponse.json([
+          {
+            version_id: 9,
+            version_no: "1.0",
+            change_summary: "首版",
+            file_name: "a.docx",
+            author_id: "u1",
+            author_name: "陳大華",
+            approver_name: "李主任",
+            published_date: "2026-02-10T14:20:00Z",
+            is_current: true,
+            previewable: false,
+          },
+        ]),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("廢止Word文件")
+    await screen.findByText("1.0")
+    // 非管理者：Office 版本無預覽（不可）、也無下載鈕（限管理者）
+    expect(screen.queryByRole("button", { name: "預覽" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "下載" })).not.toBeInTheDocument()
   })
 

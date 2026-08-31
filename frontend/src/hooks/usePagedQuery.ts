@@ -31,5 +31,5 @@ export function usePagedQuery<T>(
   const invalidate = () => queryClient.invalidateQueries({ queryKey })
 
   // enabled=false 時 useQuery 仍為 pending；以 enabled 收斂 loading，避免未啟用頁籤顯示載入中
-  return { data: query.data, isPending: enabled && query.isPending, isError: query.isError, invalidate }
+  return { data: query.data, isPending: enabled && query.isPending, isError: query.isError, error: query.error, invalidate }
 }

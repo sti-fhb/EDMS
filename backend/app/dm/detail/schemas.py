@@ -23,12 +23,14 @@ class FileMeta(BaseModel):
 class ObsoleteInfo(BaseModel):
     """已廢止文件之廢止資訊（read-only banner 用；取自 DM_REVIEW 廢止類已核准週期）。"""
 
+    review_id: int  # 廢止送審週期 ID（供下載廢止附件 /dm/reviews/{id}/obsolete-file）
     obsolete_time: datetime | None  # 核准廢止時間（COMPLETE_DATE）
     applicant_id: str  # 申請人 USER_ID（DM_REVIEW.CREATED_USER）
     applicant_name: str | None
     approver_name: str | None
     reason: str | None
     has_attachment: bool  # 廢止附件（OBSOLETE_FILE_*）是否存在
+    attachment_name: str | None  # 廢止附件原始檔名（下載時之檔名；無附件為 None）
 
 
 class DetailResponse(BaseModel):
@@ -54,6 +56,7 @@ class DetailResponse(BaseModel):
     # 目前版檔案 + 操作能力
     file: FileMeta | None
     is_editor: bool  # 具 DM_EDITOR → 呈現編輯/廢止入口（送審中時灰階、非隱藏）
+    is_admin: bool  # 具 DM_ADMIN → 已廢止 read-only 下可下載無法預覽（Office）版本（US10 稽核）
     can_edit: bool  # DM_EDITOR 且無進行中 PENDING 送審週期 → 入口可點
     edit_lock_reason: str | None  # 入口失效原因（送審中 / 廢止待簽核）；可點時為 None
     is_obsolete: bool  # STATUS=OBSOLETE → read-only 模式
