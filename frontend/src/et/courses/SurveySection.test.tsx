@@ -90,11 +90,17 @@ describe("SurveySection：尚未建立", () => {
 })
 
 describe("SurveySection：摘要卡（#238 題目管理已移入 Dialog）", () => {
-  it("顯示名稱、題數與填答狀況", () => {
-    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ responded_count: 18, pending_count: 10 })} />)
+  it("顯示問卷標籤、名稱與題數", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} />)
+    expect(screen.getByText("問卷")).toBeInTheDocument()
     expect(screen.getByText("課後滿意度問卷")).toBeInTheDocument()
-    expect(screen.getByText("1 題")).toBeInTheDocument()
-    expect(screen.getByText("填答狀況：已填 18 / 未填 10")).toBeInTheDocument()
+    expect(screen.getByText(/1 題/)).toBeInTheDocument()
+  })
+
+  it("不顯示填答狀況——那屬 ET-9 的問卷結果區塊", () => {
+    // 且在 ET-4 / ET-8 交付前恆為 0，顯示了也只是佔位（2026-08-31 實測回饋）
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ responded_count: 18, pending_count: 10 })} />)
+    expect(screen.queryByText(/填答狀況/)).not.toBeInTheDocument()
   })
 
   it("不再直接列出題目內容——那是 Dialog 的事", () => {
@@ -113,11 +119,11 @@ describe("SurveySection：摘要卡（#238 題目管理已移入 Dialog）", () 
   it("零題時提醒會擋住發布", () => {
     // #204 之第七項發布檢核；在這裡先講比讓教師按了發布才發現好
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ questions: [] })} />)
-    expect(screen.getByText(/問卷至少須有 1 題才能發布課程/)).toBeInTheDocument()
+    expect(screen.getByText(/至少須有 1 題才能發布課程/)).toBeInTheDocument()
   })
 
-  it("停用中的問卷顯示標記且不再有停用鈕", () => {
-    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false })} />)
+  it("停用中的問卷顯示標記", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false })} isDraftCourse={false} />)
     expect(screen.getByText("已停用")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
   })
@@ -128,21 +134,20 @@ describe("SurveySection：摘要卡（#238 題目管理已移入 Dialog）", () 
   })
 })
 
-describe("SurveySection：刪除（#238）", () => {
-  it("草稿課程顯示垃圾桶", () => {
+describe("SurveySection：刪除與停用互補（#238）", () => {
+  it("草稿課程：有垃圾桶、**沒有**停用鈕", () => {
+    // 停用的作用是讓學員端不再顯示填寫入口，而草稿課程學員本來就看不到——
+    // 那裡放停用只是一顆沒有效果的按鈕（2026-08-31 實測回饋）
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse />)
     expect(screen.getByRole("button", { name: "刪除問卷" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
   })
 
-  it("已發布課程不顯示垃圾桶", () => {
+  it("已發布課程：有停用鈕、**沒有**垃圾桶", () => {
     // 後端另以 ET_SURVEY_007 把關，前端隱藏僅為 UX——不該讓教師按了才知道不行
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse={false} />)
-    expect(screen.queryByRole("button", { name: "刪除問卷" })).not.toBeInTheDocument()
-  })
-
-  it("已發布課程仍可停用", () => {
-    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse={false} />)
     expect(screen.getByRole("button", { name: "停用問卷" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "刪除問卷" })).not.toBeInTheDocument()
   })
 
   it("點垃圾桶通知呼叫端", async () => {
@@ -167,8 +172,9 @@ describe("SurveySection：凍結", () => {
   })
 
   it("停用問卷仍可按——AC 21 明訂凍結後教師僅可停用", () => {
-    // 把停用也鎖掉，凍結後整張卡片就變成死的，教師無路可走
-    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
+    // 把停用也鎖掉，凍結後整張卡片就變成死的，教師無路可走。
+    // 能凍結代表已有填答，也就必然是已發布課程，故以 isDraftCourse={false} 呈現。
+    render(<SurveySection {...BASE_PROPS} survey={frozen} isDraftCourse={false} />)
     expect(screen.getByRole("button", { name: "停用問卷" })).toBeEnabled()
   })
 

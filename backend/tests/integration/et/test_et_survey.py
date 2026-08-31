@@ -484,7 +484,7 @@ class TestSurveyTemplates:
         r = await client.get("/api/et/survey-templates", headers=_bearer(uid))
         assert r.status_code == 200, r.text
         rows = r.json()
-        assert len(rows) >= 2
+        assert len(rows) >= 1
         assert all("question_count" in row and "questions" not in row for row in rows)
 
     async def test_套用模板建立整組題目(self, client, db) -> None:
@@ -512,7 +512,7 @@ class TestSurveyTemplates:
         applied = (
             await client.post(
                 f"/api/et/surveys/{survey['survey_id']}/apply-template",
-                json={"template_code": "SATISFACTION", "version": survey["version"]},
+                json={"template_code": "DEFAULT", "version": survey["version"]},
                 headers=_bearer(uid),
             )
         ).json()
@@ -539,7 +539,7 @@ class TestSurveyTemplates:
         detail = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
         r = await client.post(
             f"/api/et/surveys/{survey['survey_id']}/apply-template",
-            json={"template_code": "SATISFACTION", "version": detail["version"]},
+            json={"template_code": "DEFAULT", "version": detail["version"]},
             headers=_bearer(uid),
         )
         assert r.status_code == 409
@@ -559,7 +559,7 @@ class TestSurveyTemplates:
 
     async def test_含問答題的模板可套用(self, client, db) -> None:
         """模板內容若違反自己的題型規則，套用時會被檢核擋下——這條走真實路徑確認
-        `EFFECTIVENESS` 那組（含一題問答）確實建得起來。
+        預設模板（6 題，末題為問答）確實建得起來。
         """
         uid = await _user(db, "t_tm06")
         cid = await _course(client, uid)
@@ -567,7 +567,7 @@ class TestSurveyTemplates:
         body = (
             await client.post(
                 f"/api/et/surveys/{survey['survey_id']}/apply-template",
-                json={"template_code": "EFFECTIVENESS", "version": survey["version"]},
+                json={"template_code": "DEFAULT", "version": survey["version"]},
                 headers=_bearer(uid),
             )
         ).json()

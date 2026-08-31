@@ -4,6 +4,13 @@
 一般題目，**不與模板保持任何關聯**——之後改模板不會影響已建立的問卷，改問卷也不會
 回寫模板。
 
+## 目前只有一組模板
+
+2026-08-31 實測回饋：原本分「課程滿意度」「學習成效回饋」兩組，教師還要先決定用哪組；
+合併為單一組 6 題，UI 上就只是一顆「套用模板」。**結構仍保留 tuple 與 `code`**——不是
+為了預留擴充，而是 `list_templates` / `get_template` / `apply-template` 的既有契約與測試
+都建立在「依代碼取一組」之上，為了少一個模板去拆掉它並不會讓程式更簡單。
+
 ## 為何放後端而非前端常數
 
 套用一個模板 = 建立 N 題 × M 選項。若由前端逐題呼叫 API，中途失敗會留下**半套用**的
@@ -69,9 +76,9 @@ class TemplateSummary:
 
 SURVEY_TEMPLATES: Final[tuple[SurveyTemplate, ...]] = (
     SurveyTemplate(
-        code="SATISFACTION",
-        name="課程滿意度",
-        description="整體內容、教材難易度與時間安排之滿意度回饋",
+        code="DEFAULT",
+        name="課程回饋問卷",
+        description="滿意度、教材難易度、時間安排、實用性、推薦意願與開放式建議",
         questions=(
             TemplateQuestion(
                 question_type=SURVEY_QUESTION_SINGLE,
@@ -88,13 +95,6 @@ SURVEY_TEMPLATES: Final[tuple[SurveyTemplate, ...]] = (
                 stem="課程時間安排是否恰當？",
                 options=("恰當", "太長", "太短"),
             ),
-        ),
-    ),
-    SurveyTemplate(
-        code="EFFECTIVENESS",
-        name="學習成效回饋",
-        description="課程對實際工作之幫助與推薦意願，含一題開放式建議",
-        questions=(
             TemplateQuestion(
                 question_type=SURVEY_QUESTION_SINGLE,
                 stem="本課程對您的實際工作是否有幫助？",

@@ -8,8 +8,7 @@ import type { SurveyDetail, SurveyTemplateRow } from "./surveySchemas"
 const noop = () => {}
 
 const TEMPLATES: SurveyTemplateRow[] = [
-  { code: "SATISFACTION", name: "課程滿意度", description: "整體滿意度回饋", question_count: 3 },
-  { code: "EFFECTIVENESS", name: "學習成效回饋", description: "含一題開放式建議", question_count: 3 },
+  { code: "DEFAULT", name: "課程回饋問卷", description: "滿意度與開放式建議", question_count: 6 },
 ]
 
 const BASE_PROPS = {
@@ -87,16 +86,17 @@ describe("SurveyDialog：題目清單", () => {
     expect(screen.getByRole("button", { name: "儲存題目" })).toBeInTheDocument()
   })
 
-  it("顯示填答狀況於底部", () => {
+  it("不顯示填答狀況——那屬 ET-9 的問卷結果區塊", () => {
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey({ responded_count: 18, pending_count: 10 })} />)
-    expect(screen.getByText("填答狀況：已填 18 / 未填 10")).toBeInTheDocument()
+    expect(screen.queryByText(/填答狀況/)).not.toBeInTheDocument()
   })
 
-  it("關閉鈕與標題列的關閉不同名", () => {
-    // 同名會讓輔助技術與測試都分不出是哪一顆（#203 實測回饋）
+  it("關閉入口只有標題列的 ✕", () => {
+    // 每項編輯都即時生效（名稱失焦即存、題目各有儲存鈕），底部再放「關閉」
+    // 會讓人以為那是「儲存並關閉」（2026-08-31 實測回饋移除）
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} />)
     expect(screen.getByRole("button", { name: "關閉視窗" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "關閉" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "關閉" })).not.toBeInTheDocument()
   })
 })
 
@@ -104,7 +104,7 @@ describe("SurveyDialog：關閉時的未存草稿", () => {
   it("沒有展開編輯器時關閉不算 dirty", async () => {
     const onClose = vi.fn()
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
-    await userEvent.click(screen.getByRole("button", { name: "關閉" }))
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
     expect(onClose).toHaveBeenCalledWith(false)
   })
 
@@ -114,7 +114,7 @@ describe("SurveyDialog：關閉時的未存草稿", () => {
     const onClose = vi.fn()
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
     await userEvent.click(screen.getByRole("button", { name: "新增題目" }))
-    await userEvent.click(screen.getByRole("button", { name: "關閉" }))
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
     expect(onClose).toHaveBeenCalledWith(true)
   })
 
@@ -122,49 +122,43 @@ describe("SurveyDialog：關閉時的未存草稿", () => {
     const onClose = vi.fn()
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
     await userEvent.click(screen.getByRole("button", { name: "編輯第 1 題" }))
-    await userEvent.click(screen.getByRole("button", { name: "關閉" }))
-    expect(onClose).toHaveBeenCalledWith(true)
-  })
-
-  it("標題列的關閉視窗鈕走同一條路", async () => {
-    const onClose = vi.fn()
-    render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} onClose={onClose} />)
-    await userEvent.click(screen.getByRole("button", { name: "新增題目" }))
     await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
     expect(onClose).toHaveBeenCalledWith(true)
   })
 })
 
 describe("SurveyDialog：模板（#238）", () => {
-  it("空問卷時顯示模板選項", () => {
+  it("空問卷時顯示單一「套用模板」鈕與題數說明", () => {
+    // 2026-08-31 實測回饋：由兩組改為一組，教師不必先決定用哪組
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey({ questions: [] })} />)
-    expect(screen.getByText("從模板開始（套用後可自由編修）")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "課程滿意度（3 題）" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "套用模板" })).toBeInTheDocument()
+    expect(screen.getByText(/帶入 6 題常用題目/)).toBeInTheDocument()
   })
 
   it("已有題目時不顯示模板——後端亦以 ET_SURVEY_010 擋下", () => {
     // 不顯示入口是為了讓教師不必先試一次才知道不行
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey()} />)
-    expect(screen.queryByText("從模板開始（套用後可自由編修）")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "套用模板" })).not.toBeInTheDocument()
   })
 
-  it("點模板帶出代碼", async () => {
+  it("點套用帶出代碼", async () => {
     const onApplyTemplate = vi.fn()
     render(
       <SurveyDialog {...BASE_PROPS} survey={makeSurvey({ questions: [] })} onApplyTemplate={onApplyTemplate} />,
     )
-    await userEvent.click(screen.getByRole("button", { name: "學習成效回饋（3 題）" }))
-    expect(onApplyTemplate).toHaveBeenCalledWith("EFFECTIVENESS")
+    await userEvent.click(screen.getByRole("button", { name: "套用模板" }))
+    expect(onApplyTemplate).toHaveBeenCalledWith("DEFAULT")
   })
 
   it("模板清單為空時不顯示區塊", () => {
+    // templates[0] 會是 undefined——不擋的話整個視窗會炸
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey({ questions: [] })} templates={[]} />)
-    expect(screen.queryByText("從模板開始（套用後可自由編修）")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "套用模板" })).not.toBeInTheDocument()
   })
 
   it("唯讀時不顯示模板", () => {
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey({ questions: [] })} readOnly />)
-    expect(screen.queryByText("從模板開始（套用後可自由編修）")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "套用模板" })).not.toBeInTheDocument()
   })
 })
 

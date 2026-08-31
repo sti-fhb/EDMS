@@ -15,9 +15,16 @@ pytestmark = pytest.mark.unit
 
 
 class TestTemplateCatalog:
-    def test_至少兩組模板(self) -> None:
-        """AC 8 明訂「至少 2 組」。"""
-        assert len(SURVEY_TEMPLATES) >= 2
+    def test_至少一組模板(self) -> None:
+        """2026-08-31 實測回饋：由兩組合併為單一組 6 題。
+
+        原 AC 8 寫「至少 2 組」，回饋後改為一顆「套用模板」——教師不必先決定用哪組。
+        """
+        assert len(SURVEY_TEMPLATES) >= 1
+
+    def test_預設模板為六題(self) -> None:
+        """六題涵蓋滿意度 / 難易度 / 時間 / 實用性 / 推薦意願 / 開放式建議。"""
+        assert len(get_template("DEFAULT").questions) == 6
 
     def test_模板代碼唯一(self) -> None:
         codes = [t.code for t in SURVEY_TEMPLATES]

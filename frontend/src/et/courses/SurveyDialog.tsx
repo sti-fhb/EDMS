@@ -19,7 +19,6 @@ import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
 import Dialog from "@mui/material/Dialog"
-import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
 import IconButton from "@mui/material/IconButton"
@@ -147,10 +146,14 @@ interface SurveyDialogProps {
  * 由 #204 的 inline 展開改為 Dialog，與教材 / 測驗的操作形狀一致（2026-08-28 實測回饋）。
  * ⚠️ 這**刻意偏離 wireframe**——wireframe 的問卷區塊是 inline `wf-card`。
  *
- * ## 模板只在空問卷時出現
+ * ## 模板只在空問卷時出現，且只有一顆按鈕
  *
  * 已有題目時套用模板會讓兩批題目混在一起、順序難以預期，後端亦以 `ET_SURVEY_010`
  * 擋下。此處不顯示入口是為了讓教師不必先試一次才知道不行。
+ *
+ * 2026-08-31 實測回饋：原本列出兩組模板讓教師挑，改為單一組 6 題、UI 只是一顆
+ * 「套用模板」——教師不必先決定用哪組。`templates` 仍是陣列（後端契約如此），
+ * 這裡取第一組。
  *
  * ## 凍結（沿用 #204）
  *
@@ -162,6 +165,10 @@ interface SurveyDialogProps {
  * 題目編輯器展開中（新增或編輯）代表有還沒存的內容，關閉視窗會讓它消失。此時以
  * `onClose(true)` 告知呼叫端，由頁面跳確認——比照 `QuizDialog` 的 dirty 契約與 #203
  * 實測回饋（「有填入值按取消跳出提示」）。問卷名稱不計入：它是失焦即存的。
+ *
+ * 關閉入口**只有標題列的 ✕**（2026-08-31 實測回饋移除底部的「關閉」）——問卷的每項
+ * 編輯都是即時生效的（名稱失焦即存、題目各自有儲存鈕），底部再放一顆「關閉」會讓人
+ * 以為那是「儲存並關閉」。
  */
 export function SurveyDialog({
   open,
@@ -273,21 +280,18 @@ export function SurveyDialog({
 
             {showTemplates && (
               <Paper variant="outlined" sx={{ p: 1.5, mb: 2, bgcolor: "background.default" }}>
-                <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ display: "block", mb: 1 }}>
-                  從模板開始（套用後可自由編修）
-                </Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {templates.map((template) => (
-                    <Button
-                      key={template.code}
-                      size="small"
-                      variant="outlined"
-                      disabled={saving}
-                      onClick={() => onApplyTemplate(template.code)}
-                    >
-                      {template.name}（{template.question_count} 題）
-                    </Button>
-                  ))}
+                <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap" useFlexGap>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={saving}
+                    onClick={() => onApplyTemplate(templates[0].code)}
+                  >
+                    套用模板
+                  </Button>
+                  <Typography variant="caption" color="text.secondary">
+                    帶入 {templates[0].question_count} 題常用題目，套用後可自由編修
+                  </Typography>
                 </Stack>
               </Paper>
             )}
@@ -350,12 +354,6 @@ export function SurveyDialog({
         )}
       </DialogContent>
 
-      <DialogActions>
-        <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", pl: 1 }}>
-          {survey ? `填答狀況：已填 ${survey.responded_count} / 未填 ${survey.pending_count}` : ""}
-        </Typography>
-        <Button onClick={handleClose}>關閉</Button>
-      </DialogActions>
     </Dialog>
   )
 }

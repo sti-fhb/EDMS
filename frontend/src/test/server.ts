@@ -872,8 +872,7 @@ export const handlers = [
   http.delete("/api/et/surveys/:surveyId", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/et/survey-templates", () =>
     HttpResponse.json([
-      { code: "SATISFACTION", name: "課程滿意度", description: "整體滿意度回饋", question_count: 3 },
-      { code: "EFFECTIVENESS", name: "學習成效回饋", description: "含一題開放式建議", question_count: 3 },
+      { code: "DEFAULT", name: "課程回饋問卷", description: "滿意度與開放式建議", question_count: 6 },
     ]),
   ),
   http.post("/api/et/surveys/:surveyId/apply-template", ({ params }) =>
