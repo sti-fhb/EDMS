@@ -18,7 +18,14 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEACHER
+from app.et.constants import (
+    COURSE_PUBLISHED,
+    ITEM_MATERIAL,
+    ITEM_QUIZ,
+    QUESTION_SINGLE,
+    ROLE_TEACHER,
+    SURVEY_QUESTION_SINGLE,
+)
 from app.et.course.models import EtCourse
 from app.et.roles.models import EtUserRole
 
@@ -226,7 +233,11 @@ class TestPublishCheck:
         created = await client.post(f"{_COURSES}/{cid}/survey", json={"survey_name": "ok survey"}, headers=_bearer(uid))
         await client.post(
             f"/api/et/surveys/{created.json()['survey_id']}/questions",
-            json={"stem": "stem", "options": [{"option_text": "A"}, {"option_text": "B"}]},
+            json={
+                "question_type": SURVEY_QUESTION_SINGLE,
+                "stem": "stem",
+                "options": [{"option_text": "A"}, {"option_text": "B"}],
+            },
             headers=_bearer(uid),
         )
         assert (await _check(client, uid, cid))["can_publish"] is True

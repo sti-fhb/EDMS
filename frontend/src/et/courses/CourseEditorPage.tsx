@@ -32,13 +32,19 @@ import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
 import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
+import { SurveyDialog } from "./SurveyDialog"
 import { SurveySection } from "./SurveySection"
 import { coursesApi } from "./coursesService"
 import type { MaterialSavePayload } from "./MaterialDialog"
 import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
 import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
 import { publishApi, surveyApi } from "./surveyService"
-import type { PublishBlocker, PublishResult, SurveyQuestionFormValues, SurveyQuestionRow } from "./surveySchemas"
+import type {
+  PublishBlocker,
+  PublishResult,
+  SurveyQuestionFormValues,
+  SurveyQuestionRow,
+} from "./surveySchemas"
 import {
   COURSE_STATUS_LABEL,
   ChapterNameSchema,
@@ -113,6 +119,7 @@ export function EtCourseEditorPage() {
   const [unsavedNewItemId, setUnsavedNewItemId] = useState<number | null>(null)
   /** 問卷區塊的錯誤（凍結、選項不足等）——與項目視窗的錯誤分開顯示於問卷卡片內。 */
   const [surveyError, setSurveyError] = useState<string | null>(null)
+  const [surveyOpen, setSurveyOpen] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
   const [blockers, setBlockers] = useState<PublishBlocker[]>([])
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
@@ -143,6 +150,18 @@ export function EtCourseEditorPage() {
     queryFn: () => surveyApi.get(courseId as number),
     enabled: courseId !== undefined,
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
+  })
+  /**
+   * 內建問卷模板清單（#238）。
+   *
+   * 只在問卷視窗開著時才抓——模板是純靜態資料，但沒必要在每次進課程編輯頁時
+   * 都多送一個請求；教師多數時候根本不會開問卷視窗。
+   */
+  const { data: surveyTemplates = [] } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.surveyTemplates(),
+    queryFn: surveyApi.listTemplates,
+    enabled: surveyOpen,
+    staleTime: Infinity,
   })
 
   // 由查詢結果衍生表單初值——**於 render 期間同步，不放 useEffect**。
@@ -905,18 +924,14 @@ export function EtCourseEditorPage() {
         survey={isNew ? null : survey}
         readOnly={readOnly}
         disabled={isNew}
+        isDraftCourse={status === "DRAFT"}
         saving={surveyMut.isPending}
         error={surveyError}
         onCreate={(name) => surveyMut.mutate(() => surveyApi.create(courseId as number, name))}
-        onRename={(name) =>
-          surveyMut.mutate(() =>
-            surveyApi.update(survey!.survey_id, {
-              survey_name: name,
-              is_active: survey!.is_active,
-              version: survey!.version,
-            }),
-          )
-        }
+        onOpen={() => {
+          setSurveyError(null)
+          setSurveyOpen(true)
+        }}
         onDeactivate={() =>
           confirm({
             title: "停用課後問卷",
@@ -931,6 +946,49 @@ export function EtCourseEditorPage() {
                 }),
               ),
           })
+        }
+        onDelete={() =>
+          confirm({
+            title: "刪除課後問卷",
+            content: "確定刪除此問卷？其題目與選項將一併移除。刪除後可重新建立。",
+            okText: "刪除",
+            onOk: () => surveyMut.mutate(() => surveyApi.remove(survey!.survey_id)),
+          })
+        }
+      />
+
+      <SurveyDialog
+        open={surveyOpen}
+        readOnly={readOnly}
+        survey={survey ?? null}
+        templates={surveyTemplates}
+        saving={surveyMut.isPending}
+        error={surveyError}
+        onClose={(dirty) => {
+          // 題目編輯器展開中代表有還沒存的內容，直接關掉會讓它無聲消失
+          // （#203 實測回饋：「有填入值按取消跳出提示」）
+          if (!dirty) {
+            setSurveyOpen(false)
+            return
+          }
+          confirm({
+            title: "放棄變更",
+            content: "尚未儲存的題目內容將不會保留，確定關閉？",
+            okText: "確定",
+            onOk: () => setSurveyOpen(false),
+          })
+        }}
+        onRename={(name) =>
+          surveyMut.mutate(() =>
+            surveyApi.update(survey!.survey_id, {
+              survey_name: name,
+              is_active: survey!.is_active,
+              version: survey!.version,
+            }),
+          )
+        }
+        onApplyTemplate={(code) =>
+          surveyMut.mutate(() => surveyApi.applyTemplate(survey!.survey_id, code, survey!.version))
         }
         onSaveQuestion={(sqId: number | null, values: SurveyQuestionFormValues) =>
           surveyMut.mutate(() => {

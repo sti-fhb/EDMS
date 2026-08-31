@@ -9,12 +9,11 @@ const noop = () => {}
 
 const BASE_PROPS = {
   readOnly: false,
+  isDraftCourse: true,
   onCreate: noop,
-  onRename: noop,
+  onOpen: noop,
   onDeactivate: noop,
-  onSaveQuestion: noop,
-  onDeleteQuestion: noop,
-  onReorder: noop,
+  onDelete: noop,
 }
 
 function makeSurvey(overrides: Partial<SurveyDetail> = {}): SurveyDetail {
@@ -30,6 +29,7 @@ function makeSurvey(overrides: Partial<SurveyDetail> = {}): SurveyDetail {
     questions: [
       {
         sq_id: 100,
+        question_type: "SINGLE",
         stem: "您對本課程是否滿意？",
         sort_order: 1,
         version: 0,
@@ -89,27 +89,41 @@ describe("SurveySection：尚未建立", () => {
   })
 })
 
-describe("SurveySection：已建立", () => {
-  it("列出題目與選項摘要", () => {
+describe("SurveySection：摘要卡（#238 題目管理已移入 Dialog）", () => {
+  it("顯示問卷標籤、名稱與題數", () => {
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} />)
-    expect(screen.getByText("您對本課程是否滿意？")).toBeInTheDocument()
-    expect(screen.getByText("滿意 / 不滿意")).toBeInTheDocument()
-    expect(screen.getByText("Q1")).toBeInTheDocument()
+    expect(screen.getByText("問卷")).toBeInTheDocument()
+    expect(screen.getByText("課後滿意度問卷")).toBeInTheDocument()
+    expect(screen.getByText(/1 題/)).toBeInTheDocument()
   })
 
-  it("顯示填答統計", () => {
+  it("不顯示填答狀況——那屬 ET-9 的問卷結果區塊", () => {
+    // 且在 ET-4 / ET-8 交付前恆為 0，顯示了也只是佔位（2026-08-31 實測回饋）
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ responded_count: 18, pending_count: 10 })} />)
-    expect(screen.getByText("填答狀況：已填 18 / 未填 10")).toBeInTheDocument()
+    expect(screen.queryByText(/填答狀況/)).not.toBeInTheDocument()
   })
 
-  it("點新增題目展開編輯器", async () => {
+  it("不再直接列出題目內容——那是 Dialog 的事", () => {
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} />)
-    await userEvent.click(screen.getByRole("button", { name: "新增題目" }))
-    expect(screen.getByRole("button", { name: "儲存題目" })).toBeInTheDocument()
+    expect(screen.queryByText("您對本課程是否滿意？")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "新增題目" })).not.toBeInTheDocument()
   })
 
-  it("停用中的問卷顯示標記且不再有停用鈕", () => {
-    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false })} />)
+  it("點編輯開啟視窗", async () => {
+    const onOpen = vi.fn()
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} onOpen={onOpen} />)
+    await userEvent.click(screen.getByRole("button", { name: "編輯" }))
+    expect(onOpen).toHaveBeenCalledOnce()
+  })
+
+  it("零題時提醒會擋住發布", () => {
+    // #204 之第七項發布檢核；在這裡先講比讓教師按了發布才發現好
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ questions: [] })} />)
+    expect(screen.getByText(/至少須有 1 題才能發布課程/)).toBeInTheDocument()
+  })
+
+  it("停用中的問卷顯示標記", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false })} isDraftCourse={false} />)
     expect(screen.getByText("已停用")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
   })
@@ -120,43 +134,61 @@ describe("SurveySection：已建立", () => {
   })
 })
 
-describe("SurveySection：凍結（AC 21）", () => {
-  const frozen = makeSurvey({ frozen: true, responded_count: 3 })
-
-  it("顯示凍結提示", () => {
-    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByText(/題目與選項已凍結/)).toBeInTheDocument()
+describe("SurveySection：刪除與停用互補（#238）", () => {
+  it("草稿課程：有垃圾桶、**沒有**停用鈕", () => {
+    // 停用的作用是讓學員端不再顯示填寫入口，而草稿課程學員本來就看不到——
+    // 那裡放停用只是一顆沒有效果的按鈕（2026-08-31 實測回饋）
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse />)
+    expect(screen.getByRole("button", { name: "刪除問卷" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
   })
 
-  it("隱藏新增題目與編輯 / 刪除鈕", () => {
+  it("已發布課程：有停用鈕、**沒有**垃圾桶", () => {
+    // 後端另以 ET_SURVEY_007 把關，前端隱藏僅為 UX——不該讓教師按了才知道不行
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse={false} />)
+    expect(screen.getByRole("button", { name: "停用問卷" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "刪除問卷" })).not.toBeInTheDocument()
+  })
+
+  it("點垃圾桶通知呼叫端", async () => {
+    const onDelete = vi.fn()
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} onDelete={onDelete} />)
+    await userEvent.click(screen.getByRole("button", { name: "刪除問卷" }))
+    expect(onDelete).toHaveBeenCalledOnce()
+  })
+
+  it("唯讀時不顯示垃圾桶", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} readOnly />)
+    expect(screen.queryByRole("button", { name: "刪除問卷" })).not.toBeInTheDocument()
+  })
+})
+
+describe("SurveySection：凍結", () => {
+  const frozen = makeSurvey({ frozen: true, responded_count: 3 })
+
+  it("顯示凍結標記", () => {
     render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.queryByRole("button", { name: "新增題目" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "編輯第 1 題" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "刪除第 1 題" })).not.toBeInTheDocument()
+    expect(screen.getByText("已凍結")).toBeInTheDocument()
   })
 
   it("停用問卷仍可按——AC 21 明訂凍結後教師僅可停用", () => {
     // 把停用也鎖掉，凍結後整張卡片就變成死的，教師無路可走。
-    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
+    // 能凍結代表已有填答，也就必然是已發布課程，故以 isDraftCourse={false} 呈現。
+    render(<SurveySection {...BASE_PROPS} survey={frozen} isDraftCourse={false} />)
     expect(screen.getByRole("button", { name: "停用問卷" })).toBeEnabled()
   })
 
-  it("拖拉手把收起", () => {
+  it("仍可開啟視窗檢視", () => {
     render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.queryByLabelText("拖曳調整第 1 題順序")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "編輯" })).toBeEnabled()
   })
 })
 
 describe("SurveySection：唯讀（非擁有者）", () => {
-  it("所有操作入口皆不顯示", () => {
+  it("僅保留檢視入口", () => {
     render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} readOnly />)
-    expect(screen.queryByRole("button", { name: "新增題目" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "檢視" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText("拖曳調整第 1 題順序")).not.toBeInTheDocument()
-  })
-
-  it("問卷名稱欄位停用", () => {
-    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} readOnly />)
-    expect(screen.getByLabelText(/問卷名稱/)).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "刪除問卷" })).not.toBeInTheDocument()
   })
 })

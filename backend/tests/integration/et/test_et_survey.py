@@ -17,7 +17,14 @@ from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
-from app.et.constants import ROLE_TEACHER
+from app.et.constants import (
+    COURSE_CLOSED,
+    COURSE_PUBLISHED,
+    ROLE_TEACHER,
+    SURVEY_QUESTION_SINGLE,
+    SURVEY_QUESTION_TEXT,
+)
+from app.et.course.models import EtCourse
 from app.et.roles.models import EtUserRole
 from app.et.survey.models import EtSurveyOption, EtSurveyQuestion, EtSurveyResponseM
 
@@ -70,14 +77,18 @@ async def _survey(client, uid: str, course_id: int, name: str = "課後滿意度
 _DEFAULT_OPTIONS = [{"option_text": "滿意"}, {"option_text": "普通"}, {"option_text": "不滿意"}]
 
 
-def _question_body(*, stem="您對本課程是否滿意？", options=None) -> dict:
+def _question_body(*, qtype=SURVEY_QUESTION_SINGLE, stem="您對本課程是否滿意？", options=None) -> dict:
     """組題目請求。
 
     ⚠️ 以 `is None` 判斷而非 `options or 預設`——**空陣列是 falsy**，用 `or` 會讓
     「明確傳入 0 個選項」被預設值吃掉，那條測試就變成假綠（測到的是 3 個選項）。
     比照 `test_et_quiz.py` 之同型修正。
     """
-    return {"stem": stem, "options": _DEFAULT_OPTIONS if options is None else options}
+    return {
+        "question_type": qtype,
+        "stem": stem,
+        "options": _DEFAULT_OPTIONS if options is None else options,
+    }
 
 
 async def _add_question(client, uid: str, survey_id: int, **kwargs) -> dict:
@@ -153,18 +164,14 @@ class TestSurveyLifecycle:
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_COURSE_002"
 
-    async def test_沒有刪除問卷的端點(self, client, db) -> None:
-        """SA 裁示 #204 Q1 → B：問卷只能停用、不可刪除。
-
-        這條同時是 `UQ_ET_SURVEY_COURSE` 維持全表唯一（未排除軟刪除列）的前提——
-        若日後有人加上刪除端點而忘了改索引，本測試會先失敗，提醒去看
-        `models.py` 該約束上方的註解。
-        """
+    async def test_草稿課程可刪除問卷(self, client, db) -> None:
+        """#238 推翻 #204 之裁示 Q1：未發布課程可刪除問卷。"""
         uid = await _user(db, "t_srv07")
         cid = await _course(client, uid)
         survey = await _survey(client, uid, cid)
         r = await client.delete(f"/api/et/surveys/{survey['survey_id']}", headers=_bearer(uid))
-        assert r.status_code == 405
+        assert r.status_code == 204, r.text
+        assert (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json() is None
 
 
 class TestSurveyQuestions:
@@ -218,6 +225,7 @@ class TestSurveyQuestions:
         r = await client.put(
             f"/api/et/survey-questions/{row['sq_id']}",
             json={
+                "question_type": SURVEY_QUESTION_SINGLE,
                 "stem": "改過的題幹",
                 "options": [{"option_text": "很好"}, {"option_text": "普通"}],
                 "version": row["version"],
@@ -276,6 +284,297 @@ class TestSurveyQuestions:
         r = await client.delete("/api/et/survey-questions/999999", headers=_bearer(uid))
         assert r.status_code == 404
         assert r.json()["error_code"] == "ET_SURVEY_005"
+
+
+class TestSurveyQuestionTypes:
+    """問答題型（#238）——推翻 data-model 原本的「題型一律單選（不設題型欄位）」。"""
+
+    async def test_建立問答題(self, client, db) -> None:
+        uid = await _user(db, "t_tp01")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        row = await _add_question(client, uid, survey["survey_id"], qtype=SURVEY_QUESTION_TEXT, options=[])
+        assert row["question_type"] == SURVEY_QUESTION_TEXT
+        assert row["options"] == []
+
+    async def test_問答題帶選項被擋(self, client, db) -> None:
+        """**明確擋下而非靜默忽略**——教師把單選改成問答時，選項若被無聲丟棄，
+        他會以為還在。
+        """
+        uid = await _user(db, "t_tp02")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        r = await client.post(
+            f"/api/et/surveys/{survey['survey_id']}/questions",
+            json=_question_body(qtype=SURVEY_QUESTION_TEXT),
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_SURVEY_008"
+
+    async def test_單選題零選項仍被擋且錯誤碼不同(self, client, db) -> None:
+        """`ET_SURVEY_004`（選項不足）與 `ET_SURVEY_008`（問答題帶選項）的修正方向
+        相反，前端要靠 error_code 分辨。
+        """
+        uid = await _user(db, "t_tp03")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        r = await client.post(
+            f"/api/et/surveys/{survey['survey_id']}/questions",
+            json=_question_body(qtype=SURVEY_QUESTION_SINGLE, options=[]),
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_SURVEY_004"
+
+    async def test_未帶題型被擋(self, client, db) -> None:
+        """`QUESTION_TYPE` 於 DB 與 model 皆無 default——漏傳要當場爆出來，
+        不能靜默變成單選。
+        """
+        uid = await _user(db, "t_tp04")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        r = await client.post(
+            f"/api/et/surveys/{survey['survey_id']}/questions",
+            json={"stem": "no type", "options": _DEFAULT_OPTIONS},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 422
+
+    async def test_單選改問答須一併清空選項(self, client, db) -> None:
+        uid = await _user(db, "t_tp05")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        row = await _add_question(client, uid, survey["survey_id"])
+
+        bad = await client.put(
+            f"/api/et/survey-questions/{row['sq_id']}",
+            json={
+                "question_type": SURVEY_QUESTION_TEXT,
+                "stem": row["stem"],
+                "options": _DEFAULT_OPTIONS,
+                "version": row["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert bad.status_code == 422
+        assert bad.json()["error_code"] == "ET_SURVEY_008"
+
+        ok = await client.put(
+            f"/api/et/survey-questions/{row['sq_id']}",
+            json={
+                "question_type": SURVEY_QUESTION_TEXT,
+                "stem": row["stem"],
+                "options": [],
+                "version": row["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert ok.status_code == 204, ok.text
+        detail = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
+        assert detail["questions"][0]["question_type"] == SURVEY_QUESTION_TEXT
+        assert detail["questions"][0]["options"] == []
+
+    async def test_兩種題型可混用(self, client, db) -> None:
+        uid = await _user(db, "t_tp06")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        await _add_question(client, uid, survey["survey_id"], stem="single q")
+        await _add_question(client, uid, survey["survey_id"], qtype=SURVEY_QUESTION_TEXT, stem="text q", options=[])
+
+        detail = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
+        assert [q["question_type"] for q in detail["questions"]] == [
+            SURVEY_QUESTION_SINGLE,
+            SURVEY_QUESTION_TEXT,
+        ]
+
+
+async def _set_course_status(db, course_id: int, status: str) -> None:
+    """直接改課程狀態。
+
+    受測的規則是 `ensure_survey_deletable(course.status)`——**重要的是狀態本身，
+    不是怎麼變成那個狀態的**。走完整發布流程要複製 `test_et_publish.py` 的整套
+    fixture（章節 + 教材 + 標籤 + 起訖時間 + 配分），那些跟本測試想驗的事無關，
+    反而讓失敗時難以判斷是哪一環壞掉。
+    """
+    await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(status=status))
+    await db.flush()
+
+
+class TestSurveyDelete:
+    """問卷刪除（#238 推翻 #204 之裁示 Q1）。"""
+
+    async def test_刪除連帶軟刪題目與選項(self, client, db) -> None:
+        uid = await _user(db, "t_dl01")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        row = await _add_question(client, uid, survey["survey_id"])
+
+        r = await client.delete(f"/api/et/surveys/{survey['survey_id']}", headers=_bearer(uid))
+        assert r.status_code == 204, r.text
+
+        alive_q = await db.scalars(
+            select(EtSurveyQuestion).where(
+                EtSurveyQuestion.survey_id == survey["survey_id"], EtSurveyQuestion.deleted == 0
+            )
+        )
+        alive_o = await db.scalars(
+            select(EtSurveyOption).where(EtSurveyOption.sq_id == row["sq_id"], EtSurveyOption.deleted == 0)
+        )
+        assert list(alive_q) == []
+        assert list(alive_o) == []
+
+    async def test_刪除後可再次建立(self, client, db) -> None:
+        """**釘住 `UX_ET_SURVEY_COURSE` 為部分唯一索引**（migration `8713c6177f6f`）。
+
+        若仍是全表唯一約束，軟刪的那筆會永久佔住該課程——教師刪掉問卷後再也建不了，
+        而錯誤訊息會是「一門課程僅可建立 1 份課後問卷」，指向一筆他看不見的資料。
+        這正是 #204 在 `models.py` 註解裡預告的那個缺陷。
+        """
+        uid = await _user(db, "t_dl02")
+        cid = await _course(client, uid)
+        first = await _survey(client, uid, cid, "first")
+        await client.delete(f"/api/et/surveys/{first['survey_id']}", headers=_bearer(uid))
+
+        second = await _survey(client, uid, cid, "second")
+        assert second["survey_id"] != first["survey_id"]
+        assert second["survey_name"] == "second"
+
+    @pytest.mark.parametrize("status", [COURSE_PUBLISHED, COURSE_CLOSED])
+    async def test_非草稿課程不可刪除(self, client, db, status: str) -> None:
+        """已關閉也擋：關閉可逆，再開課後學員的填答入口不該無故消失。"""
+        uid = await _user(db, f"t_dl03{status[:3].lower()}")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        await _set_course_status(db, cid, status)
+
+        r = await client.delete(f"/api/et/surveys/{survey['survey_id']}", headers=_bearer(uid))
+        assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_SURVEY_007"
+
+    async def test_已發布課程仍可停用(self, client, db) -> None:
+        """擋掉刪除但保留停用——否則已發布課程的問卷就完全動不了。"""
+        uid = await _user(db, "t_dl04")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        await _set_course_status(db, cid, COURSE_PUBLISHED)
+
+        r = await client.put(
+            f"/api/et/surveys/{survey['survey_id']}",
+            json={"survey_name": survey["survey_name"], "is_active": False, "version": survey["version"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text
+
+    async def test_非擁有者不可刪除(self, client, db) -> None:
+        owner = await _user(db, "t_dl05")
+        other = await _user(db, "t_dl06")
+        cid = await _course(client, owner)
+        survey = await _survey(client, owner, cid)
+        r = await client.delete(f"/api/et/surveys/{survey['survey_id']}", headers=_bearer(other))
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+class TestSurveyTemplates:
+    """模板套用（#238）。"""
+
+    async def test_列出模板(self, client, db) -> None:
+        uid = await _user(db, "t_tm01")
+        r = await client.get("/api/et/survey-templates", headers=_bearer(uid))
+        assert r.status_code == 200, r.text
+        rows = r.json()
+        assert len(rows) >= 1
+        assert all("question_count" in row and "questions" not in row for row in rows)
+
+    async def test_套用模板建立整組題目(self, client, db) -> None:
+        uid = await _user(db, "t_tm02")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        templates = (await client.get("/api/et/survey-templates", headers=_bearer(uid))).json()
+        target = templates[0]
+
+        r = await client.post(
+            f"/api/et/surveys/{survey['survey_id']}/apply-template",
+            json={"template_code": target["code"], "version": survey["version"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert len(body["questions"]) == target["question_count"]
+        assert [q["sort_order"] for q in body["questions"]] == list(range(1, target["question_count"] + 1))
+
+    async def test_套用後題目可自由編修(self, client, db) -> None:
+        """AC 8：套用後即為一般題目，與模板無關聯。"""
+        uid = await _user(db, "t_tm03")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        applied = (
+            await client.post(
+                f"/api/et/surveys/{survey['survey_id']}/apply-template",
+                json={"template_code": "DEFAULT", "version": survey["version"]},
+                headers=_bearer(uid),
+            )
+        ).json()
+        first = applied["questions"][0]
+
+        r = await client.put(
+            f"/api/et/survey-questions/{first['sq_id']}",
+            json={
+                "question_type": first["question_type"],
+                "stem": "my own question",
+                "options": _DEFAULT_OPTIONS,
+                "version": first["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text
+
+    async def test_已有題目時不可套用(self, client, db) -> None:
+        uid = await _user(db, "t_tm04")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        await _add_question(client, uid, survey["survey_id"])
+
+        detail = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
+        r = await client.post(
+            f"/api/et/surveys/{survey['survey_id']}/apply-template",
+            json={"template_code": "DEFAULT", "version": detail["version"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_SURVEY_010"
+
+    async def test_查無模板回_404(self, client, db) -> None:
+        uid = await _user(db, "t_tm05")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        r = await client.post(
+            f"/api/et/surveys/{survey['survey_id']}/apply-template",
+            json={"template_code": "NO_SUCH", "version": survey["version"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 404
+        assert r.json()["error_code"] == "ET_SURVEY_009"
+
+    async def test_含問答題的模板可套用(self, client, db) -> None:
+        """模板內容若違反自己的題型規則，套用時會被檢核擋下——這條走真實路徑確認
+        預設模板（6 題，末題為問答）確實建得起來。
+        """
+        uid = await _user(db, "t_tm06")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        body = (
+            await client.post(
+                f"/api/et/surveys/{survey['survey_id']}/apply-template",
+                json={"template_code": "DEFAULT", "version": survey["version"]},
+                headers=_bearer(uid),
+            )
+        ).json()
+        types = [q["question_type"] for q in body["questions"]]
+        assert SURVEY_QUESTION_TEXT in types
+        text_q = next(q for q in body["questions"] if q["question_type"] == SURVEY_QUESTION_TEXT)
+        assert text_q["options"] == []
 
 
 class TestSurveyQuestionReorder:
@@ -362,7 +661,12 @@ class TestSurveyFreeze:
         row = await _add_question(client, uid, survey["survey_id"])
         r = await client.put(
             f"/api/et/survey-questions/{row['sq_id']}",
-            json={"stem": "改過", "options": _DEFAULT_OPTIONS, "version": row["version"]},
+            json={
+                "question_type": SURVEY_QUESTION_SINGLE,
+                "stem": "改過",
+                "options": _DEFAULT_OPTIONS,
+                "version": row["version"],
+            },
             headers=_bearer(uid),
         )
         assert r.status_code == 204, r.text
@@ -390,7 +694,12 @@ class TestSurveyFreeze:
 
         r = await client.put(
             f"/api/et/survey-questions/{row['sq_id']}",
-            json={"stem": "偷改", "options": _DEFAULT_OPTIONS, "version": row["version"]},
+            json={
+                "question_type": SURVEY_QUESTION_SINGLE,
+                "stem": "偷改",
+                "options": _DEFAULT_OPTIONS,
+                "version": row["version"],
+            },
             headers=_bearer(uid),
         )
         assert r.status_code == 422
@@ -498,7 +807,12 @@ class TestSurveyOptimisticLock:
         row = await _add_question(client, uid, survey["survey_id"])
         r = await client.put(
             f"/api/et/survey-questions/{row['sq_id']}",
-            json={"stem": "改", "options": _DEFAULT_OPTIONS, "version": row["version"] + 5},
+            json={
+                "question_type": SURVEY_QUESTION_SINGLE,
+                "stem": "改",
+                "options": _DEFAULT_OPTIONS,
+                "version": row["version"] + 5,
+            },
             headers=_bearer(uid),
         )
         assert r.status_code == 409
@@ -515,7 +829,12 @@ class TestSurveyOptimisticLock:
 
         await client.put(
             f"/api/et/survey-questions/{row['sq_id']}",
-            json={"stem": "改", "options": [{"option_text": "X"}, {"option_text": "Y"}], "version": 99},
+            json={
+                "question_type": SURVEY_QUESTION_SINGLE,
+                "stem": "改",
+                "options": [{"option_text": "X"}, {"option_text": "Y"}],
+                "version": 99,
+            },
             headers=_bearer(uid),
         )
         alive = await db.scalars(

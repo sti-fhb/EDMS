@@ -865,9 +865,28 @@ export const handlers = [
   http.put("/api/et/surveys/:surveyId", () => new HttpResponse(null, { status: 204 })),
   http.post("/api/et/surveys/:surveyId/questions", () =>
     HttpResponse.json(
-      { sq_id: 600, stem: "題幹", sort_order: 1, version: 0, options: [] },
+      { sq_id: 600, question_type: "SINGLE", stem: "題幹", sort_order: 1, version: 0, options: [] },
       { status: 201 },
     ),
+  ),
+  http.delete("/api/et/surveys/:surveyId", () => new HttpResponse(null, { status: 204 })),
+  http.get("/api/et/survey-templates", () =>
+    HttpResponse.json([
+      { code: "DEFAULT", name: "課程回饋問卷", description: "滿意度與開放式建議", question_count: 6 },
+    ]),
+  ),
+  http.post("/api/et/surveys/:surveyId/apply-template", ({ params }) =>
+    HttpResponse.json({
+      survey_id: Number(params.surveyId),
+      course_id: 1,
+      survey_name: "課後滿意度問卷",
+      is_active: true,
+      version: 1,
+      frozen: false,
+      responded_count: 0,
+      pending_count: 0,
+      questions: [],
+    }),
   ),
   http.put("/api/et/surveys/:surveyId/questions/order", () => new HttpResponse(null, { status: 204 })),
   http.put("/api/et/survey-questions/:sqId", () => new HttpResponse(null, { status: 204 })),
