@@ -15,7 +15,7 @@ from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResult
 from app.dm.obsolete_archive.repository import ObsoleteArchiveRepository
-from app.dm.obsolete_archive.schemas import ObsoleteAccess, ObsoleteDocItem, ObsoleteQuery
+from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
 from app.dm.roles.authz import DM_ADMIN, has_role
 
 # CSV 表頭（欄位對齊清單 FR-003）；廢止時間以 UTC 呈現供稽核封存。
@@ -23,7 +23,7 @@ _CSV_HEADERS = ["文件編號", "文件名稱", "末版版號", "分類", "原�
 
 
 class ObsoleteArchiveService:
-    """已廢止文件查詢（清單 / CSV 匯出 / 入口可見性判定）。"""
+    """已廢止文件查詢（清單 / CSV 匯出）；入口可見性改用共用 GET /api/dm/admin-access（US11 A' 收斂）。"""
 
     def __init__(self, repository: ObsoleteArchiveRepository | None = None) -> None:
         self._repo = repository or ObsoleteArchiveRepository()
@@ -33,10 +33,6 @@ class ObsoleteArchiveService:
         """FR-001 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM06-002）。"""
         if not has_role(roles, DM_ADMIN):
             raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
-
-    def get_access(self, roles: Iterable[str]) -> ObsoleteAccess:
-        """入口可見性（供前端側欄逐項閘；鏡像 US9 個人專區 access）。"""
-        return ObsoleteAccess(can_access=has_role(roles, DM_ADMIN))
 
     async def search(
         self, db: AsyncSession, *, query: ObsoleteQuery, roles: Iterable[str], page: int, limit: int

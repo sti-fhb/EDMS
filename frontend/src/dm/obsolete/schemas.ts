@@ -17,11 +17,6 @@ export interface ObsoleteDocItem {
   obsolete_reason: string | null
 }
 
-/** DM06 入口可見性（供側欄逐項閘）。 */
-export interface ObsoleteAccess {
-  can_access: boolean
-}
-
 /** 查詢條件（關鍵字＝文件名 / 廢止原因；分類；廢止日期區間）。 */
 export interface ObsoleteFilters {
   keyword: string

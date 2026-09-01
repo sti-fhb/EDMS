@@ -30,9 +30,3 @@ class ObsoleteDocItem(BaseModel):
     approver_id: str | None  # 核准者
     approver_name: str | None
     obsolete_reason: str | None
-
-
-class ObsoleteAccess(BaseModel):
-    """DM06 入口可見性（FR-001，供前端側欄逐項閘；後端另有硬閘擋直連）。"""
-
-    can_access: bool

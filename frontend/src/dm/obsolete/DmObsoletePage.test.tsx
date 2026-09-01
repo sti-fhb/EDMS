@@ -63,7 +63,7 @@ describe("DmObsoletePage 已廢止文件查詢", () => {
   })
 
   it("非管理者（access can_access=false）→ 直接顯示無權限、不渲染搜尋 UI（DM-MSG-DM06-002）", async () => {
-    server.use(http.get("/api/dm/obsolete-archive/access", () => HttpResponse.json({ can_access: false })))
+    server.use(http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<DmObsoletePage />)
     expect(await screen.findByText("您無權限存取此頁面")).toBeInTheDocument()
     // 搜尋列 / 匯出鈕皆不渲染（不先閃搜尋 UI）

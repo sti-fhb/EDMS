@@ -18,7 +18,8 @@ import { useNavigate } from "react-router-dom"
 import { downloadObsoleteCsv } from "./obsoleteService"
 import { EMPTY_OBSOLETE_FILTERS } from "./schemas"
 import type { ObsoleteFilters } from "./schemas"
-import { useObsoleteAccess, useObsoleteSearch } from "./useObsolete"
+import { useObsoleteSearch } from "./useObsolete"
+import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { Pagination } from "../../components/Pagination"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
@@ -45,7 +46,7 @@ export function DmObsoletePage() {
   const [exporting, setExporting] = useState(false)
 
   // 先以 access 端點判權限：非管理者不渲染搜尋 UI、清單查詢僅在具管理者權限時才發（避免先閃搜尋列再跳無權限）。
-  const { data: access, isPending: accessPending, isError: accessError } = useObsoleteAccess()
+  const { data: access, isPending: accessPending, isError: accessError } = useDmAdminAccess()
   const canAccess = access?.can_access ?? false
   const denied = accessError || access?.can_access === false
   const { data, isPending, isError } = useObsoleteSearch(

@@ -11,7 +11,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 
-import { useObsoleteAccess } from "../dm/obsolete/useObsolete"
+import { useDmAdminAccess } from "../dm/access/useDmAdminAccess"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
@@ -115,13 +115,14 @@ export function Sidebar() {
   // 個人專區入口可見性（US9 FR-004）：具編輯者或審核者才顯示；僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
   const { data: access } = usePersonalAccess(summary?.dm.has_role ?? false)
   const canPersonal = access?.can_access ?? false
-  // 已廢止文件查詢入口可見性（US10 FR-001）：具管理者才顯示；同上僅在具任一 DM 角色時查詢。
-  const { data: obsoleteAccess } = useObsoleteAccess(summary?.dm.has_role ?? false)
-  const canObsolete = obsoleteAccess?.can_access ?? false
+  // admin-only 項入口可見性（US10 已廢止 / US11 變更歷程 / US13 KPI）：具 DM_ADMIN 才顯示；
+  // 共用 GET /dm/admin-access（US11 A' 收斂）；同上僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
+  const { data: adminAccess } = useDmAdminAccess(summary?.dm.has_role ?? false)
+  const canAdmin = adminAccess?.can_access ?? false
   const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary)).map((group) => ({
     ...group,
     items: group.items.filter(
-      (item) => (!item.requiresDmPersonalAccess || canPersonal) && (!item.requiresDmAdminAccess || canObsolete),
+      (item) => (!item.requiresDmPersonalAccess || canPersonal) && (!item.requiresDmAdminAccess || canAdmin),
     ),
   }))
   return (

@@ -1,4 +1,4 @@
-import type { ObsoleteAccess, ObsoleteDocItem, ObsoleteFilters } from "./schemas"
+import type { ObsoleteDocItem, ObsoleteFilters } from "./schemas"
 import type { PagedResult } from "../../hooks/usePagedQuery"
 import { http } from "../../services/http"
 
@@ -24,12 +24,6 @@ export const obsoleteApi = {
     const { data } = await http.get<PagedResult<ObsoleteDocItem>>("/dm/obsolete-archive/documents", {
       params: { ...filterParams(p), page: p.page, limit: p.limit },
     })
-    return data
-  },
-
-  /** 入口可見性（供側欄逐項閘；具 DM_ADMIN 才顯示）。 */
-  getAccess: async (): Promise<ObsoleteAccess> => {
-    const { data } = await http.get<ObsoleteAccess>("/dm/obsolete-archive/access")
     return data
   },
 
