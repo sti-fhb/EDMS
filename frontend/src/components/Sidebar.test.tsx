@@ -69,11 +69,13 @@ describe("Sidebar", () => {
     renderWithProviders(<Sidebar />)
 
     expect(await screen.findByText("我的課程")).toBeInTheDocument()
-    // 群組門檻只判「有無任一 ET 角色」——不夠。純學員看到「學員 / 核可查詢」等於
-    // 看到一堆點進去只會 403 的項目。
+    // 核可查詢**兩種角色都看得到**，只是內容不同（`ApprovalQueryPage` 之說明：
+    // 教師查全部學員、學員查自己已通過的課程）。
+    expect(screen.getByText("核可查詢")).toBeInTheDocument()
+    // 群組門檻只判「有無任一 ET 角色」——不夠。純學員看到「課程列表 / 學員」等於
+    // 看到點進去只會 403 的項目。
     await waitFor(() => expect(screen.queryByText("課程列表")).not.toBeInTheDocument())
     expect(screen.queryByText("學員")).not.toBeInTheDocument()
-    expect(screen.queryByText("核可查詢")).not.toBeInTheDocument()
   })
 
   it("學員角色被停用者看不到「我的課程」（#247）", async () => {

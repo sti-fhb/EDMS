@@ -150,7 +150,7 @@ describe("ET04 加入新課程視窗", () => {
     await user.type(codeInput(), "12345678")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    await waitFor(() => expect(onAlreadyJoined).toHaveBeenCalledWith(7, false))
+    await waitFor(() => expect(onAlreadyJoined).toHaveBeenCalledWith(7, false, "已加入的課"))
     // 不該停在預覽畫面等使用者再按一次「確認加入」——他已經在這門課了。
     expect(screen.queryByRole("button", { name: "確認加入" })).not.toBeInTheDocument()
   })

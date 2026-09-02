@@ -42,12 +42,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "教育訓練",
     requiresModule: "ET",
     items: [
-      // 群組門檻（requiresModule）只判「有無任一 ET 角色」；群組內再依角色分兩類
-      // （#247）——ET 三種角色可任意組合，純學員看到「學員 / 核可查詢」等於看到一堆
+      // 群組門檻（requiresModule）只判「有無任一 ET 角色」；群組內再依角色分流
+      // （#247）——ET 三種角色可任意組合，純學員看到「課程列表 / 學員」等於看到
       // 點進去只會 403 的項目，純教師看到「我的課程」則是一個空清單。
       { label: "課程列表", path: "/et/courses", requiresEtManage: true },
       { label: "學員", path: "/et/students", requiresEtManage: true },
-      { label: "核可查詢", path: "/et/approvals", requiresEtManage: true },
+      // 核可查詢**兩種角色都要**，但看到的內容不同：教師查所轄課程之核可紀錄，
+      // 學員查自己已通過核可的課程。不掛任何角色旗標＝具任一 ET 角色即顯示。
+      { label: "核可查詢", path: "/et/approvals" },
       { label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
     ],
   },

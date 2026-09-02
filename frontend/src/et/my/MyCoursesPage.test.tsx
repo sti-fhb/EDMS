@@ -87,7 +87,7 @@ describe("ET04 我的課程", () => {
 
     // 實測回報：原本這裡送完「您已加入此課程」又立刻送「章節學習頁尚未開放」，
     // 後者把前者蓋掉，使用者只看得到後面那句。
-    expect(await screen.findByText("您已加入此課程")).toBeInTheDocument()
+    expect(await screen.findByText(/您已加入「採血作業新進人員訓練」/)).toBeInTheDocument()
     expect(screen.queryByText("章節學習頁尚未開放")).not.toBeInTheDocument()
   })
 

@@ -136,12 +136,19 @@ export function EtMyCoursesPage() {
         open={joinOpen}
         onClose={() => setJoinOpen(false)}
         onJoined={handleJoined}
-        onAlreadyJoined={(_courseId, pendingOpen) => {
+        onAlreadyJoined={(_courseId, pendingOpen, courseName) => {
           // 只送一則。`ET-5` 交付後這裡改成導向該課程（AC 10）。
           //
-          // 未開放時**必須說明白**：光說「您已加入此課程」而清單是空的（AC 4），
-          // 學員會以為系統壞了——實測就是這樣回報的。
-          message.info(pendingOpen ? "您已加入此課程，將於課程開放後出現於清單" : "您已加入此課程")
+          // 帶課程名稱：學員可能是被標籤自動邀請帶進去的、從未輸入過邀請碼，
+          // 只說「您已加入此課程」會讓人以為是剛才那次查詢把他加進去的。
+          //
+          // 未開放時**必須說明白**：光說「已加入」而清單是空的（AC 4），學員會以為
+          // 系統壞了——實測就是這樣回報的。
+          message.info(
+            pendingOpen
+              ? `您已加入「${courseName}」，將於課程開放後出現於清單`
+              : `您已加入「${courseName}」`,
+          )
         }}
       />
     </Box>

@@ -27,8 +27,12 @@ interface Props {
    * **這兩個旗標必須成對存在**——只在「新加入」那條路徑提示、「已加入」不提示的話，
    * 已加入未開放課程的學員會看到「您已加入此課程」然後回到一個空清單，比完全不提示
    * 更難理解（實測回報）。
+   *
+   * `courseName` 一併回傳：學員可能是被**標籤自動邀請**帶進課程的（發布時依受訓單位
+   * 標籤批次加入），他自己從未輸入過邀請碼。此時只說「您已加入此課程」會讓人以為
+   * 剛才那次查詢把他加了進去——講出課程名稱才看得出那是既有的成員資格。
    */
-  onAlreadyJoined: (courseId: number, pendingOpen: boolean) => void
+  onAlreadyJoined: (courseId: number, pendingOpen: boolean, courseName: string) => void
 }
 
 /** 課程是否尚未開放學習（`open_start_at` 未到）。 */
@@ -84,7 +88,7 @@ export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined }: P
       if (result.already_joined) {
         // 不進預覽——AC 10 要的是直接導向該課程。
         handleClose()
-        onAlreadyJoined(result.course_id, isPendingOpen(result.open_start_at))
+        onAlreadyJoined(result.course_id, isPendingOpen(result.open_start_at), result.course_name)
         return
       }
       setPreview(result)
