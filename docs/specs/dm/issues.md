@@ -32,7 +32,7 @@
 | 9 | 已廢止文件查詢 | US10 / UCDM08 | P2-延伸 | T053 ~ T054 | #3, #5 | [#230](https://github.com/sti-fhb/EDMS/issues/230) | 🚀 已開立 [#230](https://github.com/sti-fhb/EDMS/issues/230) |
 | 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | [#243](https://github.com/sti-fhb/EDMS/issues/243) | 🚀 已開立 [#243](https://github.com/sti-fhb/EDMS/issues/243) |
 | 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3-輔助 | T057 ~ T059 | #5；ET 引用端 | [#183](https://github.com/sti-fhb/EDMS/issues/183) | ✅ 已交付（PR #189；契約 #187；T059 廢止通知範圍外＝裁示 A + 待 US8）|
-| 12 | 閱讀統計與 KPI + 排程 SCHDM001 | US13 / UCDM13 | P2-延伸 | T059a ~ T059c | #3；DP 排程引擎 | — | 待補 |
+| 12 | 閱讀統計與 KPI + 排程 SCHDM001 | US13 / UCDM13 | P2-延伸 | T059a ~ T059c | #3；DP 排程引擎 | [#248](https://github.com/sti-fhb/EDMS/issues/248) | 🚀 已開立 [#248](https://github.com/sti-fhb/EDMS/issues/248) |
 | 13 | 整合測試 + 安全 + 收尾 | — | 收尾 | T060 ~ T067 | 全部 | — | 待補 |
 | — | ~~登入 / 註冊 / 忘記密碼~~ | US2 / UCDM01 | — | —（T014）| — | — | **不開獨立 issue**：登入 / 註冊 / 忘記密碼由平台 DP 提供（UCDP001–003）；DM 端僅存取閘（無 DM 角色者拒絕進入），併入 #0（T014）|
 
@@ -895,9 +895,77 @@ DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `ap
 
 ---
 
-## Issue #12 ~ #13：待補（增量模式）
+## Issue #12：[P2-延伸] DM — 閱讀統計與 KPI + 排程 SCHDM001（US13 / UCDM13 / DM10）（GitHub [#248](https://github.com/sti-fhb/EDMS/issues/248)，🚀 已開立）
 
-US13 閱讀統計與 KPI + 排程 SCHDM001（#12）/ 整合測試 + 安全 + 收尾（#13）——尚未開工，於前置就緒後補入完整 body。
+**對應規格**：[spec_us13.md](spec_us13.md)（FR-001~007，UCDM13，訊息 DM-MSG-DM10-001/002）；[data-model.md](data-model.md)（`DM_DOC_READ`（下載目前發布版之閱讀事件，唯一 (DOC_ID, VERSION_ID, CREATED_USER)）、`DM_DOCUMENT`/`DM_DOC_VERSION`（目前發布版）、`DM_DOC_TAG`/`DM_USER_TAG`/`DM_TAG`（可見對象→應看名單）、`DM_USER_ROLE`（DM_ADMIN 判定）、平台 `DP_SCHEDULE`/`DP_SCHEDULE_LOG`（SCHDM001）、`DP_NOTIFY_TEMPLATE`（MODULE=DM，KPI_WEEKLY/UNREAD_REMIND）、`DP_EMAIL_LOG`（outbox）、`DP_PARAM`（`DM_WEEKLY_SCHED_DAY_TIME`））
+**對應畫面**：DM10 閱讀統計 KPI（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-kpi`）——**入口與後端皆僅 DM_ADMIN 可存取**
+**階段**：P2-延伸
+**涵蓋 Tasks**：T059a（KPI 儀表板查詢 + CSV）、T059b（SCHDM001 排程 job handler：KPI 週報 + 未讀提醒）、T059c（KPI_WEEKLY / UNREAD_REMIND 範本 + 參數種子）
+
+## 任務說明
+
+實作 **DM10 閱讀統計 KPI**（管理者，落實度追蹤）與**每週排程 SCHDM001**：DM_ADMIN 於儀表板逐文件即時查看**應看 / 已看 / 未看 / 閱讀率**（範圍全部已發布文件），可依關鍵字（文件名）/ 分類查詢、匯出 CSV；並由每週排程寄 **KPI 週報**予管理者、**未讀提醒**予未看之閱覽者。
+
+> ℹ️ **FR-001（下載寫 `DM_DOC_READ`）已於 US4（#3）交付**（`detail/prepare_file` 下載目前發布版寫入、唯一約束去重、預覽不寫）——本 issue **不重做**，僅消費該資料算 KPI。本 issue＝「KPI 查詢/儀表板」（唯讀）+「SCHDM001 排程 job」（跨模組）。KPI 查詢部分可鏡像 US10/US11 唯讀查詢範式 + 共用 `core/csv_export`；DM_ADMIN 側欄逐項閘沿用 **US11 A' 共用 `admin-access`**。
+
+## 範圍
+
+**後端**（新模組 `app/dm/kpi/`〔暫名，開工時定〕）
+- **T059a 儀表板查詢**（FR-002/003）：`GET /api/dm/kpi/documents`——列全部已發布文件（含 PENDING_OBSOLETE？見注意事項），逐文件算：**應看**＝可見對象相符之閱覽者數（掛「全體」→ 全部閱覽者；否則文件 `DM_DOC_TAG`(AUDIENCE) ∩ 使用者 `DM_USER_TAG` ≠ ∅；OR 比對，重用 `dm/document/visibility` 之可見性語意反算，**不排除**兼具其他角色者）；**已看**＝該文件**目前發布版** `DM_DOC_READ` 之 distinct `CREATED_USER` ∩ 應看名單；**未看**＝應看−已看；**閱讀率**＝已看/應看（應看=0 → 回特殊值供前端顯示「—（無對應閱覽者）」且**不計入整體平均**）。搜尋：關鍵字（文件名）、分類。後端分頁 `paginate()`。另回**整體平均閱讀率**（排除應看=0 者）+「閱讀率<50% 文件數」供頂部統計卡。
+- **T059a CSV 匯出**（FR-002）：`GET /api/dm/kpi/documents/export`——同條件全量、欄位同清單（重用 `core/csv_export`）。
+- **存取閘**（FR-002）：`get_dm_context` + DM_ADMIN 硬閘（非管理者 403 `DM_AUTH_003`，對應 DM-MSG-DM10-002；後端擋直連）。查無回空（DM-MSG-DM10-001）。
+- **T059b SCHDM001 排程 job handler**（FR-004~007）：於 `app/dm/kpi/scheduler.py`〔暫名〕提供 async `run()`（**鏡像 `app/dm/review/reminder.py`（SCHDM002）**：無參、自管 session）；於平台 `DP_SCHEDULE` 註冊一列（`HANDLER_REF` 指向本 `run`、CRON 由 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`〔`星期,HH:MM`，預設 `週一,10:00`〕推導、平台引擎執行、`DP_SCHEDULE_LOG` 記錄）。`run` 內容：計算全部已發布文件 KPI → **執行當下逐位收件人算好內容**（SA 裁示：平台不做寄送時組信）→ ①寄 **KPI 週報**予所有 DM_ADMIN（內文摘要：總文件數 / 整體平均閱讀率 / 閱讀率最低前 5 份 / **儀表板連結**；逐文件明細 CSV 由 DM10 匯出、**不走附件**）②寄 **未讀提醒**予未看閱覽者（**逐人**算未看清單、一人一信彙整；無未看者不寄；範本停用則整批不寄）。逐一以固定 `params` 呼叫 `DmNotifier` → 平台發信服務 + outbox `DP_EMAIL_LOG` 非同步（沿用 US6 FR-008 機制）。
+- **T059c 種子**：`DP_NOTIFY_TEMPLATE`（MODULE=DM，`KPI_WEEKLY` / `UNREAD_REMIND`，CHANNEL=EMAIL_ONLY，可停用）+ `DP_PARAM` `DM_WEEKLY_SCHED_DAY_TIME`（預設 `週一,10:00`）種子（落點：平台 DP 表，比照既有 DM 範本/參數種子）。
+
+**前端**（`frontend/src/dm/kpi/DmKpiPage.tsx` 現為 stub、於本 issue 填實）：DM10 儀表板——頂部統計卡（整體平均閱讀率 / 閱讀率<50% 文件數）+ 搜尋列（關鍵字 / 分類）+ 清單（文件名稱 / 分類 / 目前版本 / 應看 / 已看 / 未看 / 閱讀率〔進度條或百分比，應看=0 顯示「—（無對應閱覽者）」〕）+「匯出 CSV」；空結果 DM-MSG-DM10-001。側欄「閱讀統計 KPI」項**僅 DM_ADMIN 顯示**（加 `requiresDmAdminAccess: true`，沿用 US11 A' 共用 `admin-access` + `useDmAdminAccess`）；access 先判（不先閃搜尋 UI）。
+
+**測試**：後端 int（DM_ADMIN 查得逐文件 KPI 值〔應看/已看/未看/率正確，含「全體」與交集比對、應看=0 特殊值、發新版後已看重置〕、整體平均排除應看=0、關鍵字/分類過濾、CSV、非 DM_ADMIN 403、未登入 401、查無回空；SCHDM001 `run` handler：計算 + 產生 KPI 週報收件 = 全 DM_ADMIN、未讀提醒收件 = 未看閱覽者一人一信、範本停用不寄——經 `DP_EMAIL_LOG` STATUS='PENDING' 驗、篩範本 code 防假陽性）+ 前端（儀表板渲染 / 統計卡 / 空結果 / 匯出 / 非管理者不顯示入口）。
+
+## 驗收條件
+
+- [ ] DM10 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直連**（FR-002、AC2、DM-MSG-DM10-002）
+- [ ] 逐文件呈現 文件 / 分類 / 目前版本 / 應看 / 已看 / 未看 / 閱讀率，可依關鍵字（文件名）/ 分類查詢（FR-002、AC2）
+- [ ] 應看＝可見對象相符之閱覽者（「全體」→ 全部；OR 比對；不排除兼具其他角色者）；已看＝目前發布版 distinct 下載者 ∩ 應看；發新版後以新版重算（FR-003、AC3/AC4）
+- [ ] 應看=0 顯示「—（無對應閱覽者）」且不計入整體平均閱讀率（FR-003、AC3a）
+- [ ] 支援 CSV 匯出當前查詢結果（FR-002）
+- [ ] SCHDM001 每週執行（時間由 `DM_WEEKLY_SCHED_DAY_TIME` 設定、預設週一 10:00）：寄 KPI 週報予全 DM_ADMIN（摘要 + 儀表板連結、CSV 由 DM10 匯出不走附件）、未讀提醒予未看閱覽者（排程當下逐人算、一人一信彙整、涵蓋全部已發布文件）（FR-004/004a/005、AC5/AC6）
+- [ ] 排程寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步；範本（KPI 週報 / 未讀提醒）停用則對應信不寄、KPI 儀表板不受影響（FR-006、AC7/AC8）
+- [ ] 查無顯示 DM-MSG-DM10-001（FR-002）
+- [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
+
+## 依賴
+
+- **#3 US4（已交付）**：下載目前發布版寫 `DM_DOC_READ`（KPI「已看」資料來源）——本 issue 僅消費、不重做
+- **#2 US3 / #1 US1（已交付）**：標籤式可見性（`DM_DOC_TAG` AUDIENCE × `DM_USER_TAG`）決定「應看」名單（重用 `dm/document/visibility`）
+- **#5 US6（已交付）**：集中 outbox 發信機制（`DmNotifier` → 平台發信服務 + `DP_EMAIL_LOG`）——KPI 週報 / 未讀提醒沿用
+- **#10 US11（已交付）**：共用 `GET /api/dm/admin-access` + 前端 `useDmAdminAccess` + `requiresDmAdminAccess`（A' 收斂）——側欄逐項閘直接沿用；`core/csv_export`（公式注入防護）重用
+- **DM 既有排程前例**：`app/dm/review/reminder.py`（SCHDM002 催辦，每日）——SCHDM001 之 job handler 鏡像此模式
+- **平台 DP（跨模組）**：`DP_SCHEDULE` 排程引擎（註冊 + 執行 + `DP_SCHEDULE_LOG`）、`DP_NOTIFY_TEMPLATE`（MODULE=DM 範本）、`DP_PARAM`（`DM_WEEKLY_SCHED_DAY_TIME`）、發信服務——皆平台既有，本 issue 掛載使用
+- **#127 Foundation（已交付）**：`DM_DOC_READ` / `DM_DOC_TAG` / `DM_USER_TAG` / `DM_TAG` / `DM_USER_ROLE`
+
+## 注意事項
+
+- **入口 / 存取閘為 DM_ADMIN**：後端擋直連（`has_role(ctx.roles, DM_ADMIN)`），前端沿用 US11 A' 共用閘、不另建端點。
+- **「應看」母體（SA 裁示 2026-09-02，已定）**：母體＝**具 `DM_VIEWER` 角色之使用者**且可見對象相符（全體→全部 DM_VIEWER；否則 AUDIENCE ∩ 使用者可見對象授權 ≠ ∅）；兼具 EDITOR/ADMIN 之 VIEWER 仍算，**純 EDITOR/ADMIN 無 VIEWER 者不計入應看**。見 spec_us13 FR-003。
+- **KPI 週報不走 Email 附件（SA 裁示 2026-09-02，已定）**：平台發信服務不支援附件（`DmNotifier.notify` 僅 `recipients` + `params: dict[str,str]`）→ 週報改「**內文摘要 + 儀表板連結**」，逐文件明細 CSV 由 DM10 儀表板匯出。見 spec_us13 FR-004。
+- **逐人內容於排程當下算（SA 裁示 2026-09-02，已定）**：平台發信為「呼叫方備妥 params → outbox 非同步寄送」、不做寄送時動態組信 → `SCHDM001` 之 `run` 於執行當下**逐位收件人算好內容**（未讀提醒逐人算未看清單、週報算統計）後**逐一以固定 `params` enqueue**（不需平台新增即時組信能力）。見 spec_us13 FR-006。
+- **SCHDM001 註冊與 CRON**：`DM_WEEKLY_SCHED_DAY_TIME`（`星期,HH:MM`）→ 平台 `DP_SCHEDULE` CRON 之推導 / 更新（管理者於 DP 後台改時間時如何反映到排程）——`/sti-plan` 對齊平台排程註冊機制（比照 SCHDM002）。
+- **範圍：整體平均閱讀率**排除應看=0 文件（AC3a）；「閱讀率<50%」統計卡門檻為顯示用（非參數）。
+- **模組分離**：`DM_DOC_READ` 寫入屬 US4（`detail`）；本 issue 為唯讀 KPI 查詢 + 排程，另立模組、不改寫入端。
+- **CSV**：重用 `core/csv_export`（公式注入防護）；文件名等自由輸入欄位需跳脫。
+
+## 相關文件
+
+- [spec_us13.md](spec_us13.md)、[spec_us4.md](spec_us4.md)（DM_DOC_READ 寫入）、[spec_us3.md](spec_us3.md) / [spec_us1.md](spec_us1.md)（可見性→應看）、[spec_us6.md](spec_us6.md)（outbox 發信）、[data-model.md](data-model.md)（`DM_DOC_READ`、`SCHDM001`）、[tasks.md](tasks.md)（T059a-c）
+- [wireframes/dm/index.html](../../wireframes/dm/index.html)（`dm-kpi`）
+
+**Labels**：`P2-延伸`, `DM-文件管理`, `US13`
+
+---
+
+## Issue #13：待補（增量模式）
+
+整合測試 + 安全 + 收尾（#13，T060~T067）——於各 US 交付後補入完整 body。
 
 ---
 
