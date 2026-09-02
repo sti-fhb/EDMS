@@ -6,6 +6,8 @@ export interface NavItem {
   requiresDmPersonalAccess?: boolean
   /** admin-only 項入口可見性（US10 已廢止 / US11 變更歷程 / US13 KPI）：需具 DM_ADMIN；共用 GET /dm/admin-access（US11 A' 收斂）。 */
   requiresDmAdminAccess?: boolean
+  /** 簽核中心入口可見性（#250）：需具 DM_REVIEWER（僅具 DM_ADMIN 者亦不顯示）；GET /dm/reviewer-access。 */
+  requiresDmReviewerAccess?: boolean
 }
 
 /** 模組門檻：需具該模組任一角色才顯示此群組（經 module-summary 判定）。未設＝恆顯示。 */
@@ -15,11 +17,21 @@ export interface NavGroup {
   title: string
   items: readonly NavItem[]
   requiresModule?: ModuleKey
+  /**
+   * 群組門檻（#250）：需具 **ET 或 DM 任一模組管理者**角色才顯示。
+   * 對齊 spec——DP 後台六項功能（spec_us4 / us5 / us7 / us9 / us10 / us11）之操作者
+   * 皆定義為「ET 或 DM 管理者」；後端對應閘為 `require_any_module_admin`。
+   */
+  requiresAnyModuleAdmin?: boolean
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
   {
+    // requiresAnyModuleAdmin（#250）：原為「過渡期對所有登入者顯示」，收斂為模組管理者專用。
+    // 側欄與後端閘同源（module-summary 的 is_admin ↔ require_any_module_admin），
+    // 避免側欄承諾閘不給的東西。
     title: "系統管理者後台",
+    requiresAnyModuleAdmin: true,
     items: [
       { label: "使用者管理", path: "/dp/users" },
       { label: "系統參數", path: "/dp/params" },
@@ -51,7 +63,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     requiresModule: "DM",
     items: [
       { label: "文件庫", path: "/dm/library" },
-      { label: "簽核中心", path: "/dm/review" },
+      // 簽核中心（#250）：限 DM_REVIEWER——原本管理者 / 編輯者也看得到，但清單依
+      // assigned_reviewer=登入者 過濾，點進去永遠空白（SA Q3=A 裁示嚴格只認審核者）
+      { label: "簽核中心", path: "/dm/review", requiresDmReviewerAccess: true },
       { label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
       { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
       { label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },

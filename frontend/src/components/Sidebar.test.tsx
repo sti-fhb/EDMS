@@ -8,15 +8,53 @@ import { server } from "../test/server"
 import { Sidebar } from "./Sidebar"
 
 describe("Sidebar", () => {
-  it("渲染「系統管理者後台」群組標題與其六個導覽項目（無模組門檻、恆顯示）", () => {
+  it("具模組管理者身分時渲染「系統管理者後台」群組與其六個導覽項目", async () => {
     renderWithProviders(<Sidebar />)
     const adminGroup = NAV_GROUPS.find((g) => g.title === "系統管理者後台")
     expect(adminGroup).toBeDefined()
-    expect(screen.getByText("系統管理者後台")).toBeInTheDocument()
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
     expect(adminGroup?.items).toHaveLength(6)
     for (const item of adminGroup?.items ?? []) {
       expect(screen.getByText(item.label)).toBeInTheDocument()
     }
+  })
+
+  it("#250：非 ET 且非 DM 管理者時，隱藏「系統管理者後台」整個群組（模組群組仍在）", async () => {
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({
+          et: { has_role: true, is_admin: false },
+          dm: { has_role: true, is_admin: false },
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+    // 以模組群組確認已渲染完成（後台群組不該出現，不能用它當標記）
+    expect(await screen.findByText("文件管理")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("系統管理者後台")).not.toBeInTheDocument())
+    expect(screen.queryByText("使用者管理")).not.toBeInTheDocument()
+    expect(screen.queryByText("角色 / 權限")).not.toBeInTheDocument()
+  })
+
+  it("#250：僅具 ET 管理者（DM 非管理者）時仍顯示「系統管理者後台」（門檻為任一模組）", async () => {
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({
+          et: { has_role: true, is_admin: true },
+          dm: { has_role: true, is_admin: false },
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
+  })
+
+  it("#250：非審核者（reviewer-access can_access=false）時隱藏「簽核中心」單項（其餘 DM 項仍在）", async () => {
+    server.use(http.get("/api/dm/reviewer-access", () => HttpResponse.json({ can_access: false })))
+    renderWithProviders(<Sidebar />)
+    await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
+    expect(await screen.findByText("文件庫")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("簽核中心")).not.toBeInTheDocument())
   })
 
   it("具 DM 權限（module-summary dm.has_role=true）時顯示「文件管理」群組與其六個 /dm 項目", async () => {
@@ -62,7 +100,11 @@ describe("Sidebar", () => {
   it("無 ET 權限（et.has_role=false）時不顯示「教育訓練」群組（最小知悉）", async () => {
     server.use(
       http.get("/api/dp/user/module-summary", () =>
-        HttpResponse.json({ et: { has_role: false }, dm: { has_role: true } }),
+        // is_admin 保持 true：本案驗的是 ET 群組門檻，後台群組須維持顯示以當渲染完成標記
+        HttpResponse.json({
+          et: { has_role: false, is_admin: false },
+          dm: { has_role: true, is_admin: true },
+        }),
       ),
     )
     renderWithProviders(<Sidebar />)
@@ -74,7 +116,11 @@ describe("Sidebar", () => {
   it("無 DM 權限（dm.has_role=false）時不顯示「文件管理」群組（DP 群組仍在）", async () => {
     server.use(
       http.get("/api/dp/user/module-summary", () =>
-        HttpResponse.json({ et: { has_role: true }, dm: { has_role: false } }),
+        // 同上：驗 DM 群組門檻，後台群組維持顯示
+        HttpResponse.json({
+          et: { has_role: true, is_admin: true },
+          dm: { has_role: false, is_admin: false },
+        }),
       ),
     )
     renderWithProviders(<Sidebar />)

@@ -24,8 +24,12 @@ export const handlers = [
   http.post("/api/dp/user/logout", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/version", () => HttpResponse.json({ version: "1.0.0-test" })),
   // 入口頁 / 側欄模組摘要（預設具 DM 權限；個別測試以 server.use 覆蓋）
+  // 預設情境＝兼具兩模組角色與管理者身分（#250 起 is_admin 決定「系統管理者後台」群組可見性）
   http.get("/api/dp/user/module-summary", () =>
-    HttpResponse.json({ et: { has_role: true }, dm: { has_role: true } }),
+    HttpResponse.json({
+      et: { has_role: true, is_admin: true },
+      dm: { has_role: true, is_admin: true },
+    }),
   ),
   // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
   http.get("/api/dm/dashboard/stats", () =>
@@ -304,6 +308,8 @@ export const handlers = [
   ),
   // 共用 DM 管理者入口可見性（US11 A' 收斂；US10/11/13 admin 側欄項共用）
   http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: true })),
+  // #250 簽核中心入口可見性（具 DM_REVIEWER）
+  http.get("/api/dm/reviewer-access", () => HttpResponse.json({ can_access: true })),
   // US10 已廢止文件查詢（dm-obsolete-archive）
   http.get("/api/dm/obsolete-archive/documents", () =>
     HttpResponse.json({
