@@ -5,6 +5,7 @@ DP 為轉接層、不自持角色/指派資料；本檔僅定義 DP 端點之請
 """
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -15,6 +16,11 @@ class AssignmentItem(BaseModel):
     user_id: str
     user_name: str
     email: str
+    # 帳號狀態（#250）：畫面據此灰化不可指派的列。`status` 為原始 DP_USER.STATUS
+    # （ACTIVE / DISABLED）；`locked_until` 原樣輸出，「鎖定中」由前端以 `locked_until > now`
+    # 衍生——與 dp-users 列表同慣例（見 dp/users/schemas.py UserResponse），避免序列化時取系統時間。
+    status: str
+    locked_until: Optional[datetime] = None
     roles: list[str]
     groups: list[str]  # DM＝可見對象 TAG_ID；ET＝受訓單位標籤代碼
     last_modified_by: str | None = None  # 最後異動者 USER_ID（原始碼）

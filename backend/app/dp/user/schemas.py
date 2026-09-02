@@ -90,9 +90,15 @@ class TokenResponse(BaseModel):
 
 
 class ModuleRoleStatus(BaseModel):
-    """單一模組於入口頁的可進入狀態。"""
+    """單一模組於入口頁的可進入狀態。
+
+    `has_role`＝具任一該模組角色（決定模組群組是否顯示）；`is_admin`＝為該模組管理者
+    （#250：決定側欄「系統管理者後台」群組是否顯示——DP 後台各功能之操作者依 spec_us4 /
+    us5 / us7 / us9 / us10 / us11 皆為「ET 或 DM 管理者」）。兩者皆經判定閘 fail-closed。
+    """
 
     has_role: bool
+    is_admin: bool = False
 
 
 class ModuleSummary(BaseModel):

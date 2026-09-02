@@ -5,9 +5,11 @@ from datetime import timedelta
 import pytest
 
 from app.core.auth import create_access_token
+from app.core.module_admin import module_admin_gate
 from app.core.module_roles import module_role_gate
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dm.roles.gate import dm_is_module_admin
 from app.dp.users.models import DpUser
 
 # teardown 還原用：ET 已於 main.py 註冊真實 checker，測試替換後須放回原樣（測試專用引用）
@@ -90,6 +92,38 @@ async def test_module_summary_et_has_role(client, db):
     finally:
         module_role_gate.register("ET", et_has_any_role)
     assert r.status_code == 200 and r.json()["et"]["has_role"] is True
+
+
+async def test_module_summary_is_admin_預設為否(client, db):
+    """無任一模組管理者角色者 `is_admin` 皆 False（側欄「系統管理者後台」群組據此隱藏，#250）。"""
+    await _make_user(db, user_id="na1")
+    r = await client.get(_URL, headers=_bearer("na1"))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["et"]["is_admin"] is False
+    assert body["dm"]["is_admin"] is False
+
+
+async def test_module_summary_is_admin_經管理者判定閘(client, db):
+    """`is_admin` 經 `module_admin_gate` 判定；DM 管理者 → dm.is_admin=True、et 仍 False。
+
+    teardown 還原 `main.py` 註冊之真實 checker（非 unregister——DM / ET 皆已接線，
+    移除會讓後續測試看到未接線狀態，比照本檔 has_role 案例）。
+    """
+    await _make_user(db, user_id="dma")
+
+    async def _dm_admin_stub(_db, _user_id):
+        return True
+
+    module_admin_gate.register("DM", _dm_admin_stub)
+    try:
+        r = await client.get(_URL, headers=_bearer("dma"))
+    finally:
+        module_admin_gate.register("DM", dm_is_module_admin)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dm"]["is_admin"] is True, "DM 管理者應可見系統管理者後台"
+    assert body["et"]["is_admin"] is False, "非 ET 管理者不應被誤判"
 
 
 async def test_module_summary_requires_token(client):
