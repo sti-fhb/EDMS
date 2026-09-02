@@ -26,6 +26,7 @@ from app.dm.change_log.router import router as dm_change_log_router
 from app.dm.dashboard.router import router as dm_dashboard_router
 from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
+from app.dm.kpi.router import router as dm_kpi_router
 from app.dm.library.router import router as dm_library_router
 from app.dm.obsolete.router import router as dm_obsolete_router
 from app.dm.obsolete_archive.router import router as dm_obsolete_archive_router
@@ -133,6 +134,7 @@ app.include_router(dm_review_router)
 app.include_router(dm_obsolete_router)
 app.include_router(dm_obsolete_archive_router)
 app.include_router(dm_change_log_router)
+app.include_router(dm_kpi_router)
 app.include_router(dm_access_router)
 app.include_router(dm_personal_router)
 app.include_router(et_course_router)

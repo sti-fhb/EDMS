@@ -39,13 +39,14 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.queryByText("個人專區")).not.toBeInTheDocument())
   })
 
-  it("US10/US11：具 DM 角色但非管理者（admin-access can_access=false）時，隱藏所有 admin-only 項（已廢止 / 變更歷程），其餘 DM 項仍在", async () => {
+  it("US10/US11/US13：具 DM 角色但非管理者（admin-access can_access=false）時，隱藏所有 admin-only 項（已廢止 / 變更歷程 / 閱讀統計 KPI），其餘 DM 項仍在", async () => {
     server.use(http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
     expect(await screen.findByText("文件庫")).toBeInTheDocument() // 其餘 DM 項仍顯示
     await waitFor(() => expect(screen.queryByText("已廢止文件查詢")).not.toBeInTheDocument())
     expect(screen.queryByText("文件變更歷程查詢")).not.toBeInTheDocument()
+    expect(screen.queryByText("閱讀統計 KPI")).not.toBeInTheDocument()
   })
 
   it("兼具教師與學員角色時顯示「教育訓練」群組與其四個 /et 項目", async () => {
