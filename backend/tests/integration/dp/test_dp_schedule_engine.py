@@ -101,12 +101,13 @@ async def test_write_skipped_log(db):
 
 
 async def test_list_enabled_excludes_disabled(db):
-    """AC5：引擎僅載入 IS_ENABLED=true（種子 SCHDP001 啟用；SCHET/SCHDM 預留停用不載入）。"""
+    """AC5：引擎僅載入 IS_ENABLED=true（種子 SCHDP001 啟用、SCHDM001 由 US13 接線啟用；SCHET 預留停用不載入）。"""
     enabled = await ScheduleRepository().list_enabled(db)
     ids = {j.job_id for j in enabled}
 
     assert "SCHDP001" in ids
-    assert "SCHET001" not in ids and "SCHDM001" not in ids
+    assert "SCHDM001" in ids  # US13 接上 KPI 週報 handler 並啟用
+    assert "SCHET001" not in ids and "SCHET002" not in ids  # ET 排程仍為預留停用
 
 
 async def test_list_all_includes_disabled(db):
