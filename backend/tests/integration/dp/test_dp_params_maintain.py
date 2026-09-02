@@ -327,7 +327,7 @@ async def test_create_on_missing_param_404(db, admin_gate):
 
 async def test_list_params_http(db, client, admin_gate):
     # #250：後台 router 掛 require_any_module_admin，須明確授予管理者身分才進得來
-    #（原為空設定 admin_gate()——當時 router 只驗認證）。斷言仍聚焦「平台級參數可見」。
+    # （原為空設定 admin_gate()——當時 router 只驗認證）。斷言仍聚焦「平台級參數可見」。
     admin_gate(et_admins=("admin01",))
     now = utcnow()
     db.add(

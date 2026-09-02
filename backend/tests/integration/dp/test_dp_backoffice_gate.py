@@ -78,12 +78,16 @@ async def test_non_admin_forbidden(db, client, restore_gates, url):
 
 @pytest.mark.parametrize("url", _BACKOFFICE_ENDPOINTS)
 async def test_dm_admin_allowed(db, client, restore_gates, url):
-    """DM 管理者 → 放行（非 403；AC6）。"""
+    """DM 管理者 → 放行並正常回應（AC6）。
+
+    斷言 200 而非「非 403」：後者會讓 500（授權以外的錯誤）被誤判為通過。
+    六個端點皆為無參數 GET，正常情況應可回 200。
+    """
     await _seed_user(db, "bo_dm")
     module_admin_gate.register("ET", _never)
     module_admin_gate.register("DM", _always)
     r = await client.get(url, headers=_headers("bo_dm"))
-    assert r.status_code != 403, f"{url} 不應擋下 DM 管理者（回 {r.status_code}）"
+    assert r.status_code == 200, f"{url} 應放行 DM 管理者（回 {r.status_code}）"
 
 
 async def test_et_admin_only_still_allowed(db, client, restore_gates):

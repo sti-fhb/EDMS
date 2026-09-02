@@ -130,6 +130,7 @@ async def _email_count(db, template_code, recipient):
 async def test_initiate_transits_pending_obsolete_and_notifies(db):
     await _seed_user(db, "ed", "撰寫", email="ed@e.com")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     doc, _ = await _published_doc(db, "DM-SOP-000401")
 
     result = await _svc.initiate(
@@ -161,6 +162,7 @@ async def test_initiate_transits_pending_obsolete_and_notifies(db):
 async def test_initiate_with_attachment_saves_obsolete_file(db):
     await _seed_user(db, "ed", "撰寫")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     await _published_doc(db, "DM-SOP-000402")
 
     result = await _svc.initiate(
@@ -319,6 +321,7 @@ async def _pending_obsolete(db, doc_id, *, reason="停辦", reviewer="rev1"):
 async def test_approve_obsolete_transits_document_obsolete(db):
     await _seed_user(db, "ed", "撰寫", email="ed@e.com")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     review_id = await _pending_obsolete(db, "DM-SOP-000411")
 
     await _rsvc.approve(db, review_id=review_id, op=_op("rev1"))
@@ -339,6 +342,7 @@ async def test_approve_obsolete_transits_document_obsolete(db):
 async def test_reject_obsolete_restores_published(db):
     await _seed_user(db, "ed", "撰寫", email="ed@e.com")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     review_id = await _pending_obsolete(db, "DM-SOP-000412")
 
     await _rsvc.reject(db, review_id=review_id, reason="仍需沿用", op=_op("rev1"))
@@ -369,6 +373,7 @@ async def _obsolete_with_file(db, doc_id):
 
 async def test_obsolete_file_download_authz(db):
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     await _published_doc(db, "DM-SOP-000421")
     review_id = await _obsolete_with_file(db, "DM-SOP-000421")
 
@@ -411,6 +416,7 @@ async def test_http_initiate_forbidden_without_editor_role(db, client):
 async def test_http_download_published_version_during_pending_obsolete(db, client):
     """item 二：廢止待簽核期間，詳細頁仍可下載目前發布版（需實體檔存在）。"""
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     await _seed_user(db, "ed2", "編輯", email="ed2@e.com")
     await _grant(db, "ed2", DM_EDITOR)
     doc, v = await _published_doc(db, "DM-SOP-000441", author="ed2")
@@ -471,6 +477,7 @@ async def test_http_upload_then_download_obsolete_attachment(db, client):
 async def test_http_initiate_multipart_success(db, client):
     await _seed_user(db, "editor1", "編輯者")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
     await _grant(db, "editor1", DM_EDITOR)
     await _published_doc(db, "DM-SOP-000433", author="editor1")
     token = create_access_token(sub="editor1", ttl_minutes=15)

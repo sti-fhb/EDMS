@@ -220,8 +220,27 @@ async def test_assign_allows_account_with_expired_lock(db, dm_registered):
     roles = {
         r
         for r in (
+            await db.execute(select(DmUserRole.role_code).where(DmUserRole.user_id == "u_exp", DmUserRole.deleted == 0))
+        ).scalars()
+    }
+    assert roles == {DM_EDITOR}
+
+
+async def test_assign_allows_unknown_user_id(db, dm_registered):
+    """對「DP_USER 查無」之 USER_ID 指派仍成功——既有允許行為，狀態檢核不得誤擋。
+
+    `_require_usable_target` 對查無帳號者刻意放行（模組角色表無 FK 至 DP_USER）；
+    此案例把該文件化的分支釘住，避免日後有人誤把 None 當成阻擋條件。
+    """
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _svc.assign(
+        db, module="DM", user_id="ghost_user", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+    )
+    roles = {
+        r
+        for r in (
             await db.execute(
-                select(DmUserRole.role_code).where(DmUserRole.user_id == "u_exp", DmUserRole.deleted == 0)
+                select(DmUserRole.role_code).where(DmUserRole.user_id == "ghost_user", DmUserRole.deleted == 0)
             )
         ).scalars()
     }

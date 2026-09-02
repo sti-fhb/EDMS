@@ -106,7 +106,9 @@ class RolesService:
         已登不進系統的帳號卻持有可操作的權限，語意矛盾；畫面已灰化該列，本檢核擋前端繞過。
 
         **查無 DP_USER 者不擋**：對尚未建帳號的 USER_ID 指派為既有允許行為
-        （模組角色表無 FK 至 `DP_USER`），本 issue 不改變該行為。
+        （模組角色表無 FK 至 `DP_USER`），本 issue 不改變該行為。軟刪除之帳號同樣回 None
+        （`get_by_id` 濾 `DELETED=0`）故一併放行——目前 DP 無「刪除既有帳號」入口
+        （離職走 DISABLED），若日後新增則需重新檢視此分支語意。
 
         Raises:
             AppError: 帳號已停用或鎖定中（403 DP_ROLE_004）。

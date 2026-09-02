@@ -15,8 +15,7 @@ from app.core.utils import utcnow
 from app.dm.catalog.models import DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
-from app.dm.roles.authz import DM_REVIEWER
-from app.dp.users.account_status import account_usable_clause
+from app.dm.roles.reviewer_query import assignable_reviewers_stmt
 from app.dp.users.models import DpUser
 
 _DRAFT = "DRAFT"
@@ -266,11 +265,10 @@ class EditorRepository:
         return got is not None
 
     async def list_reviewers(self, db: AsyncSession, *, exclude_user_id: str, now: datetime) -> list[Row]:
-        """列可被指定為審核者之使用者（join DP_USER 取姓名、排除自己、依姓名排序）。
+        """列可被指定為審核者之使用者（排除自己、依姓名排序）。
 
-        排除停用 / 鎖定中的帳號（#250）：該帳號登不進系統，被指定後該送審將無人可審、
-        只能靠撰寫者撤回。條件取自 DP 之 `account_usable_clause`——`DP_USER.STATUS` 值域
-        屬 DP 語意，DM 不自行解讀（唯讀 JOIN 屬 sti-backend-boundaries §報表/查詢類例外）。
+        可指定性條件（具 DM_REVIEWER + 帳號可用）由 `assignable_reviewers_stmt` 單一定義，
+        與送簽時的伺服器端檢核共用——下拉給什麼、送簽就只接受什麼（#250）。
 
         Args:
             db: DB session。
@@ -280,20 +278,7 @@ class EditorRepository:
         Returns:
             (USER_ID, USER_NAME) 列，依姓名排序。
         """
-        from app.dm.roles.models import DmUserRole
-
-        stmt = (
-            select(DpUser.user_id, DpUser.user_name)
-            .join(DmUserRole, DmUserRole.user_id == DpUser.user_id)
-            .where(
-                DmUserRole.role_code == DM_REVIEWER,
-                DmUserRole.deleted == 0,
-                DpUser.user_id != exclude_user_id,
-                DpUser.deleted == 0,
-                account_usable_clause(now),
-            )
-            .order_by(DpUser.user_name)
-        )
+        stmt = assignable_reviewers_stmt(now).where(DpUser.user_id != exclude_user_id).order_by(DpUser.user_name)
         return list((await db.execute(stmt)).all())
 
     async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
