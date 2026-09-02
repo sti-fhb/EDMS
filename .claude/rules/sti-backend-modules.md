@@ -182,31 +182,53 @@ async def update(self, db, site_id: str, data: dict, operator: OperatorInfo) -> 
 
 GET endpoint 不需注入 `operator`（router-level `get_jwt_payload` 認證即可）。
 
-#### 暫行授權規則（全域權限機制實作前）
+#### 授權規則
 
-目前 JWT 不含 `res_ids`，全域 res_id 授權機制尚未實作。在此之前：
+EDMS 無全域 RBAC、JWT 不含角色（research §4）。授權一律**經判定閘委派模組**，
+分兩類處理：
 
-- **GET**：router-level `dependencies=[Depends(get_jwt_payload)]` 做 JWT 驗證即可
-- **POST / PUT / DELETE**：只需注入 `get_operator`（內部已呼叫 `get_jwt_payload`），**不加 `require_admin`**
-- 禁止以 `require_admin` 作為臨時替代方案（role 名稱判斷與 res_id 設計脫鉤）
+**（一）DP 後台端點：掛 `require_any_module_admin()`**
 
-各 Router 宣告方式：
+DP 後台六項功能之操作者於 spec 皆定義為「ET 或 DM 管理者」——使用者管理（spec_us4）/
+系統參數（us5）/ 權限管理（us7）/ 通知範本（us9）/ 操作記錄（us10）/ 排程總覽（us11）。
+於 #250 落地：
 
 ```python
-# 目前（JWT 驗證）
-router = APIRouter(
-    prefix="/dp/sites",
-    dependencies=[Depends(get_jwt_payload)],
-)
+from app.core.module_admin import require_any_module_admin
 
-# 將來（全域授權機制就緒後，只改這一行）
 router = APIRouter(
-    prefix="/dp/sites",
-    dependencies=[require_permission("site")],  # factory 產生的 Dependency
+    prefix="/api/dp/params",
+    dependencies=[Depends(require_any_module_admin())],  # 預設門檻 ET + DM
 )
 ```
 
-遷移時只需改 router 宣告，不需逐 endpoint 修改。
+- 非管理者 → 403 `DP_AUTH_006`；未帶 token 仍先 401（認證早於授權）
+- 單一模組門檻用 `require_module_admin("DM")`
+- **不含**個人資料維護（`/api/dp/user/me`）——spec_us8 之操作者為「已登入的使用者」
+
+**（二）業務模組（ET / DM）端點：掛模組自己的存取閘**
+
+如 DM 的 `get_dm_context`（需任一 DM 角色，403 `DM_AUTH_001`）、細粒度再以
+`get_dm_reviewer_context`（403 `DM_AUTH_004`）或 service 層 `has_role` 把關。
+
+**共同禁則**
+
+- ❌ 禁止在 DP 層以角色名稱字串判斷（如 `"DM_ADMIN" in roles`）——DP 不得認識模組角色碼，
+  一律經 `module_admin_gate` 委派模組 checker（見 `sti-backend-boundaries.md`）
+- ❌ 禁止只在個別 method 注入授權閘：一律掛 router-level，否則新增 endpoint 易遺漏
+- 寫入型端點（POST / PUT / PATCH / DELETE）除授權閘外仍須注入 `get_operator` 填稽核欄位
+
+> **歷史**：#250 之前為「暫行授權規則」——GET 只做 JWT 驗證、寫入只注入 `get_operator`、
+> 明文禁止加 admin 閘（理由是當時 `is_module_admin` 未就緒，role 名稱判斷與原 res_id 設計脫鉤）。
+> 各 router docstring 當時註記「待 T049 回歸」，#250 即該次回歸：改以模組判定閘實作，
+> 不走角色名稱判斷，故與原禁則的精神一致。
+
+**測試影響**：驗後台功能業務邏輯（非授權）的 integration test 需讓操作者通過閘，
+用 `tests/integration/conftest.py` 的 `backoffice_admin` fixture：
+
+```python
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("backoffice_admin")]
+```
 
 ---
 
