@@ -24,6 +24,11 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外）
 _AUDIENCE_GROUP = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
 _PUBLISHED = "PUBLISHED"
+_PENDING_OBSOLETE = "PENDING_OBSOLETE"
+# 在架（對外有效、閱覽者仍在下載）＝已發布 + 廢止待簽核（對齊 dashboard `_LIVE_STATUSES`）；
+# PENDING_OBSOLETE 文件仍可被下載並寫入 DM_DOC_READ（見 detail.write_read），故其閱讀落實度應納入 KPI。
+# OBSOLETE（已下架）/ 送審 / 草稿 / SUPERSEDED（舊版）不計。
+_LIVE_STATUSES = (_PUBLISHED, _PENDING_OBSOLETE)
 
 
 class KpiRepository:
@@ -34,7 +39,7 @@ class KpiRepository:
 
         依文件名排序（穩定、可預期）；keyword 比對文件名、category 比對分類碼。
         """
-        conds = [DmDocument.status == _PUBLISHED, DmDocument.current_version_id.isnot(None)]
+        conds = [DmDocument.status.in_(_LIVE_STATUSES), DmDocument.current_version_id.isnot(None)]
         if keyword:
             conds.append(DmDocument.doc_name.ilike(f"%{keyword}%"))
         if category:
@@ -59,9 +64,16 @@ class KpiRepository:
         return list((await db.execute(self.published_docs_select(keyword=keyword, category=category))).all())
 
     async def viewer_ids(self, db: AsyncSession) -> set[str]:
-        """具 DM_VIEWER 角色之使用者集（應看母體；SA 裁示：純 EDITOR/ADMIN 無 VIEWER 不計）。"""
+        """具 DM_VIEWER 角色且帳號有效之使用者集（應看母體；SA 裁示：純 EDITOR/ADMIN 無 VIEWER 不計）。
+
+        join DP_USER 並過濾 DELETED=0：停用 / 刪除之帳號不列入應看分母（與 admin_emails / viewer_profiles 一致，
+        避免帳號停用但角色列未同步移除時永久拉低閱讀率）。
+        """
         rows = await db.scalars(
-            select(DmUserRole.user_id).where(DmUserRole.role_code == DM_VIEWER, DmUserRole.deleted == 0).distinct()
+            select(DmUserRole.user_id)
+            .join(DpUser, DmUserRole.user_id == DpUser.user_id)
+            .where(DmUserRole.role_code == DM_VIEWER, DmUserRole.deleted == 0, DpUser.deleted == 0)
+            .distinct()
         )
         return set(rows.all())
 

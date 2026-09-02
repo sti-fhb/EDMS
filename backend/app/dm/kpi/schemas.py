@@ -5,13 +5,6 @@ from pydantic import BaseModel
 from app.core.pagination import PageMetaResponse
 
 
-class KpiQuery(BaseModel):
-    """查詢條件：關鍵字（文件名）、分類。"""
-
-    keyword: str | None = None
-    category: str | None = None  # CATEGORY_CODE
-
-
 class KpiDocItem(BaseModel):
     """逐文件閱讀 KPI 列（FR-002/003）。
 

@@ -222,6 +222,28 @@ async def test_new_version_resets_seen(db, client):
     assert item["seen"] == 0 and item["unseen"] == 1 and item["rate"] == 0.0
 
 
+async def test_pending_obsolete_doc_included(db, client):
+    """在架母體含 PENDING_OBSOLETE（廢止待簽核仍可下載、累積已看）；OBSOLETE / 送審不計。"""
+    await _seed_admin(db)
+    await _seed_user(db, "v1", "閱覽")
+    await _grant(db, "v1", DM_VIEWER)
+    await _grant_audience(db, "v1", "護理師")
+    # 廢止待簽核文件（仍在架）
+    vid = await _doc(db, "DM-SOP-000120", status="PENDING_OBSOLETE")
+    await _tag_doc(db, "DM-SOP-000120", "護理師")
+    await _read(db, "DM-SOP-000120", vid, "v1")
+    # 已下架 / 送審中文件不列入
+    await _doc(db, "DM-SOP-000121", status="OBSOLETE")
+    await _doc(db, "DM-SOP-000122", status="PENDING_REVIEW")
+
+    body = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()
+    ids = {d["doc_id"] for d in body["data"]}
+    assert "DM-SOP-000120" in ids  # PENDING_OBSOLETE 納入
+    assert "DM-SOP-000121" not in ids and "DM-SOP-000122" not in ids
+    item = next(d for d in body["data"] if d["doc_id"] == "DM-SOP-000120")
+    assert item["should_see"] == 1 and item["seen"] == 1 and item["rate"] == 1.0
+
+
 async def test_zero_audience_rate_none_and_excluded_from_overall(db, client):
     """應看=0 → rate None（顯示「—」），且不列入整體平均。"""
     await _seed_admin(db)
