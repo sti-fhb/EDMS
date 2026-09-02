@@ -942,6 +942,50 @@ export const handlers = [
       version: 1,
     }),
   ),
+
+  // ── ET04 我的課程與加入新課程（US4 / #247）────────────────────────────────
+  http.get("/api/et/my-courses", () =>
+    HttpResponse.json({
+      summary: { joined: 2, in_progress: 1, not_started: 1, completed: 0 },
+      courses: [
+        {
+          course_id: 1,
+          course_name: "採血作業新進人員訓練",
+          status: "PUBLISHED",
+          completion_status: "IN_PROGRESS",
+          tags: ["護理師", "軍人"],
+          chapter_count: 5,
+          open_start_at: "2026-04-15T09:00:00Z",
+          open_end_at: "2026-07-31T17:00:00Z",
+          progress_pct: 0,
+        },
+        {
+          course_id: 2,
+          course_name: "血品安全與品保概論",
+          status: "CLOSED",
+          completion_status: "NOT_STARTED",
+          tags: ["全體"],
+          chapter_count: 4,
+          open_start_at: "2026-05-01T08:00:00Z",
+          open_end_at: "2026-10-31T17:00:00Z",
+          progress_pct: 0,
+        },
+      ],
+    }),
+  ),
+  http.post("/api/et/enrollments/preview", () =>
+    HttpResponse.json({
+      course_id: 1,
+      course_name: "採血作業新進人員訓練",
+      owner_name: "王教師",
+      chapter_count: 5,
+      already_joined: false,
+      open_start_at: "2026-04-15T09:00:00Z",
+    }),
+  ),
+  http.post("/api/et/enrollments", () =>
+    HttpResponse.json({ course_id: 1, completion_status: "NOT_STARTED", pending_open: false }, { status: 201 }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

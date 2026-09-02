@@ -27,6 +27,9 @@ export const QUERY_KEYS = {
     surveyTemplates: () => ["et", "survey-templates"] as const,
     dmDocuments: () => ["et", "dm-documents"] as const,
   },
+  etMyCourses: {
+    list: () => ["et", "my-courses"] as const,
+  },
   moduleSummary: {
     get: () => ["module-summary"] as const,
   },
