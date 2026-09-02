@@ -153,7 +153,9 @@ class KpiService:
             summary=summary,
         )
 
-    async def export_csv(self, db: AsyncSession, *, roles: Iterable[str], keyword: str | None, category: str | None) -> bytes:
+    async def export_csv(
+        self, db: AsyncSession, *, roles: Iterable[str], keyword: str | None, category: str | None
+    ) -> bytes:
         """匯出當前查詢結果為 CSV（FR-002，全量、無分頁）。含 UTF-8 BOM 供 Excel 辨識中文。"""
         self._ensure_admin(roles)
         stats = await self._compute(db, keyword=keyword, category=category)
@@ -224,9 +226,7 @@ class KpiService:
                 "unread_count": str(len(doc_names)),
                 "unread_list": "\n".join(f"- {n}" for n in doc_names),
             }
-            result = await self._notifier.notify(
-                db, template_code=_TPL_UNREAD, recipients=[prof.email], params=params
-            )
+            result = await self._notifier.notify(db, template_code=_TPL_UNREAD, recipients=[prof.email], params=params)
             if result.queued_count:
                 notified += 1
         return notified

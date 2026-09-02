@@ -35,7 +35,7 @@ class KpiRepository:
     """KPI 計算所需之集合式唯讀查詢。"""
 
     def published_docs_select(self, *, keyword: str | None, category: str | None) -> Select:
-        """全部已發布文件（母體：STATUS='PUBLISHED' 且有目前發布版）+ 分類名 / 版本號。
+        """在架文件（母體：STATUS ∈ PUBLISHED / PENDING_OBSOLETE 且有目前發布版）+ 分類名 / 版本號。
 
         依文件名排序（穩定、可預期）；keyword 比對文件名、category 比對分類碼。
         """
@@ -102,9 +102,7 @@ class KpiRepository:
         if not ids:
             return {}
         rows = await db.execute(
-            select(DpUser.user_id, DpUser.email, DpUser.user_name).where(
-                DpUser.user_id.in_(ids), DpUser.deleted == 0
-            )
+            select(DpUser.user_id, DpUser.email, DpUser.user_name).where(DpUser.user_id.in_(ids), DpUser.deleted == 0)
         )
         return {r.user_id: r for r in rows.all()}
 

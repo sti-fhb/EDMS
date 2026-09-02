@@ -92,8 +92,7 @@ async def _read(db, doc_id, version_id, user_id):
 async def _pending_recipients(db, template_code) -> set[str]:
     rows = await db.execute(
         text(
-            'SELECT "RECIPIENT", "STATUS" FROM "DP_EMAIL_LOG" '
-            'WHERE "TEMPLATE_CODE" = :tc AND "MODULE" = \'DM\''
+            'SELECT "RECIPIENT", "STATUS" FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE" = :tc AND "MODULE" = \'DM\''
         ).bindparams(tc=template_code)
     )
     result = set()
@@ -136,7 +135,10 @@ async def test_unread_reminder_only_to_unseen_viewers(db):
 async def test_unread_reminder_disabled_template_not_sent(db):
     await _scenario(db)
     await db.execute(
-        text('UPDATE "DP_NOTIFY_TEMPLATE" SET "IS_ENABLED" = false WHERE "MODULE" = \'DM\' AND "TEMPLATE_CODE" = \'UNREAD_REMIND\'')
+        text(
+            'UPDATE "DP_NOTIFY_TEMPLATE" SET "IS_ENABLED" = false '
+            "WHERE \"MODULE\" = 'DM' AND \"TEMPLATE_CODE\" = 'UNREAD_REMIND'"
+        )
     )
     await db.flush()
     result = await KpiService().run_weekly(db)
