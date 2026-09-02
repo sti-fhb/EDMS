@@ -25,9 +25,10 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     expect(await screen.findByText("領血確認標準作業程序")).toBeInTheDocument()
     // 閱讀率（統計卡 overall 與該列 rate 同為 40.0%，故至少 1 處）
     expect(screen.getAllByText("40.0%").length).toBeGreaterThanOrEqual(1)
-    // 統計卡：整體平均閱讀率 + 低於 50% 文件數
+    // 統計卡：整體平均閱讀率 + 低於 50% 文件數（旁附總文件數）
     expect(screen.getByText("整體平均閱讀率")).toBeInTheDocument()
     expect(screen.getByText("閱讀率低於 50% 之文件數")).toBeInTheDocument()
+    expect(screen.getByText("／ 共 2 份文件")).toBeInTheDocument()
     // 應看=0 文件 → 顯示「—（無對應閱覽者）」
     expect(screen.getByText("—（無對應閱覽者）")).toBeInTheDocument()
   })

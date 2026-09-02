@@ -23,6 +23,7 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外）
 
 _AUDIENCE_GROUP = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
+_ACTIVE = "ACTIVE"  # DP_USER.STATUS：ACTIVE / DISABLED（停用）；停用者無法登入閱讀（auth 擋），不列入 KPI
 _PUBLISHED = "PUBLISHED"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
 # 在架（對外有效、閱覽者仍在下載）＝已發布 + 廢止待簽核（對齊 dashboard `_LIVE_STATUSES`）；
@@ -64,15 +65,21 @@ class KpiRepository:
         return list((await db.execute(self.published_docs_select(keyword=keyword, category=category))).all())
 
     async def viewer_ids(self, db: AsyncSession) -> set[str]:
-        """具 DM_VIEWER 角色且帳號有效之使用者集（應看母體；SA 裁示：純 EDITOR/ADMIN 無 VIEWER 不計）。
+        """具 DM_VIEWER 角色且帳號有效（未刪除、未停用）之使用者集（應看母體）。
 
-        join DP_USER 並過濾 DELETED=0：停用 / 刪除之帳號不列入應看分母（與 admin_emails / viewer_profiles 一致，
-        避免帳號停用但角色列未同步移除時永久拉低閱讀率）。
+        join DP_USER 並過濾 DELETED=0 且 STATUS='ACTIVE'：已刪除 / 已停用之帳號無法登入閱讀，不列入應看
+        分母（與 admin_emails / viewer_profiles 一致，避免停用帳號永久拉低閱讀率）。SA 裁示：純 EDITOR/ADMIN
+        無 VIEWER 不計。
         """
         rows = await db.scalars(
             select(DmUserRole.user_id)
             .join(DpUser, DmUserRole.user_id == DpUser.user_id)
-            .where(DmUserRole.role_code == DM_VIEWER, DmUserRole.deleted == 0, DpUser.deleted == 0)
+            .where(
+                DmUserRole.role_code == DM_VIEWER,
+                DmUserRole.deleted == 0,
+                DpUser.deleted == 0,
+                DpUser.status == _ACTIVE,
+            )
             .distinct()
         )
         return set(rows.all())
@@ -102,7 +109,9 @@ class KpiRepository:
         if not ids:
             return {}
         rows = await db.execute(
-            select(DpUser.user_id, DpUser.email, DpUser.user_name).where(DpUser.user_id.in_(ids), DpUser.deleted == 0)
+            select(DpUser.user_id, DpUser.email, DpUser.user_name).where(
+                DpUser.user_id.in_(ids), DpUser.deleted == 0, DpUser.status == _ACTIVE
+            )
         )
         return {r.user_id: r for r in rows.all()}
 
@@ -151,7 +160,12 @@ class KpiRepository:
         rows = await db.scalars(
             select(DpUser.email)
             .join(DmUserRole, (DmUserRole.user_id == DpUser.user_id) & (DmUserRole.role_code == DM_ADMIN))
-            .where(DmUserRole.deleted == 0, DpUser.deleted == 0, DpUser.email.isnot(None))
+            .where(
+                DmUserRole.deleted == 0,
+                DpUser.deleted == 0,
+                DpUser.status == _ACTIVE,
+                DpUser.email.isnot(None),
+            )
             .distinct()
         )
         return sorted({e for e in rows.all() if e})

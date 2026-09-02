@@ -117,7 +117,12 @@ export function DmKpiPage() {
           <Typography variant="caption" color="text.secondary">
             閱讀率低於 50% 之文件數
           </Typography>
-          <Typography variant="h4">{summary?.below_50_count ?? 0}</Typography>
+          <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
+            <Typography variant="h4">{summary?.below_50_count ?? 0}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              ／ 共 {summary?.total_docs ?? 0} 份文件
+            </Typography>
+          </Box>
         </Paper>
       </Box>
 

@@ -28,7 +28,7 @@ async def _tag_id(db, tag_name: str) -> int:
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == tag_name))
 
 
-async def _seed_user(db, user_id, name):
+async def _seed_user(db, user_id, name, status="ACTIVE"):
     if await db.scalar(select(DpUser.user_id).where(DpUser.user_id == user_id)):
         return
     db.add(
@@ -37,6 +37,7 @@ async def _seed_user(db, user_id, name):
             email=f"{user_id}@e.com",
             pwd_hash="x",
             user_name=name,
+            status=status,
             pwd_changed_date=utcnow(),
             created_user="seed",
             created_date=utcnow(),
@@ -220,6 +221,23 @@ async def test_new_version_resets_seen(db, client):
     resp = await client.get("/api/dm/kpi/documents", headers=_headers("adm"))
     item = next(d for d in resp.json()["data"] if d["doc_id"] == "DM-SOP-000106")
     assert item["seen"] == 0 and item["unseen"] == 1 and item["rate"] == 0.0
+
+
+async def test_disabled_viewer_excluded_from_should_see(db, client):
+    """停用（STATUS=DISABLED）之閱覽者無法登入閱讀，不列入應看分母（不永久拉低閱讀率）。"""
+    await _seed_admin(db)
+    await _seed_user(db, "v_active", "有效")
+    await _grant(db, "v_active", DM_VIEWER)
+    await _grant_audience(db, "v_active", "護理師")
+    await _seed_user(db, "v_disabled", "停用", status="DISABLED")
+    await _grant(db, "v_disabled", DM_VIEWER)
+    await _grant_audience(db, "v_disabled", "護理師")
+    await _doc(db, "DM-SOP-000130")
+    await _tag_doc(db, "DM-SOP-000130", "護理師")
+
+    body = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()
+    item = next(d for d in body["data"] if d["doc_id"] == "DM-SOP-000130")
+    assert item["should_see"] == 1  # 僅 v_active；停用之 v_disabled 不計
 
 
 async def test_pending_obsolete_doc_included(db, client):
