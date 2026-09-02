@@ -371,6 +371,42 @@ export const handlers = [
       headers: { "Content-Type": "text/csv; charset=utf-8" },
     }),
   ),
+  // US13 閱讀統計 KPI（dm-kpi）
+  http.get("/api/dm/kpi/documents", () =>
+    HttpResponse.json({
+      data: [
+        {
+          doc_id: "DM-SOP-000001",
+          doc_name: "領血確認標準作業程序",
+          category_code: "SOP",
+          category_name: "SOP（標準作業程序）",
+          current_version_no: "2.1",
+          should_see: 10,
+          seen: 4,
+          unseen: 6,
+          rate: 0.4,
+        },
+        {
+          doc_id: "DM-OTHER-000009",
+          doc_name: "無對應閱覽者文件",
+          category_code: "OTHER",
+          category_name: "其他",
+          current_version_no: "1.0",
+          should_see: 0,
+          seen: 0,
+          unseen: 0,
+          rate: null,
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+      summary: { total_docs: 2, overall_rate: 0.4, below_50_count: 1 },
+    }),
+  ),
+  http.get("/api/dm/kpi/documents/export", () =>
+    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿文件編號,文件名稱\nDM-SOP-000001,領血確認標準作業程序\n").buffer, {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
   // US9 個人專區（dm-personal）
   http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })),
   http.get("/api/dm/personal/drafts", () =>

@@ -55,7 +55,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
       { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
       { label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
-      { label: "閱讀統計 KPI", path: "/dm/kpi" },
+      { label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
     ],
   },
 ]
