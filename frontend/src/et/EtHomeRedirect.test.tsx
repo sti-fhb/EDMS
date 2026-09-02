@@ -9,7 +9,7 @@ import { EtHomeRedirect } from "./EtHomeRedirect"
 import { server } from "../test/server"
 
 /** 需要真的看見「轉址到哪裡」，故不能用 renderWithProviders（它固定 MemoryRouter 無子路由）。 */
-function renderAt(capabilities?: { can_create_course: boolean }) {
+function renderAt(capabilities?: { can_create_course: boolean; can_manage_courses: boolean; can_learn: boolean }) {
   if (capabilities) {
     server.use(http.get("/api/et/courses/capabilities", () => HttpResponse.json(capabilities)))
   }
@@ -33,13 +33,13 @@ function renderAt(capabilities?: { can_create_course: boolean }) {
 
 describe("ET 首頁角色導向（AC 1）", () => {
   it("純學員導向 ET04 我的課程", async () => {
-    renderAt({ can_create_course: false })
+    renderAt({ can_create_course: false, can_manage_courses: false, can_learn: true })
 
     expect(await screen.findByText("我的課程")).toBeInTheDocument()
   })
 
   it("具建課能力者導向課程列表", async () => {
-    renderAt({ can_create_course: true })
+    renderAt({ can_create_course: true, can_manage_courses: true, can_learn: true })
 
     // 教師同時也是學員（學員角色人人有）；一律送到 ET04 會讓他每次進 ET 都要多點一次。
     expect(await screen.findByText("課程列表")).toBeInTheDocument()

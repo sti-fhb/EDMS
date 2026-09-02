@@ -6,6 +6,10 @@ export interface NavItem {
   requiresDmPersonalAccess?: boolean
   /** admin-only 項入口可見性（US10 已廢止 / US11 變更歷程 / US13 KPI）：需具 DM_ADMIN；共用 GET /dm/admin-access（US11 A' 收斂）。 */
   requiresDmAdminAccess?: boolean
+  /** ET 教學管理項：需具教師或管理者角色（`Capabilities.can_manage_courses`）。 */
+  requiresEtManage?: boolean
+  /** ET 學習項（我的課程）：需具學員角色（`Capabilities.can_learn`）。 */
+  requiresEtLearn?: boolean
 }
 
 /** 模組門檻：需具該模組任一角色才顯示此群組（經 module-summary 判定）。未設＝恆顯示。 */
@@ -38,10 +42,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "教育訓練",
     requiresModule: "ET",
     items: [
-      { label: "課程列表", path: "/et/courses" },
-      { label: "學員", path: "/et/students" },
-      { label: "核可查詢", path: "/et/approvals" },
-      { label: "我的課程", path: "/et/my-courses" },
+      // 群組門檻（requiresModule）只判「有無任一 ET 角色」；群組內再依角色分兩類
+      // （#247）——ET 三種角色可任意組合，純學員看到「學員 / 核可查詢」等於看到一堆
+      // 點進去只會 403 的項目，純教師看到「我的課程」則是一個空清單。
+      { label: "課程列表", path: "/et/courses", requiresEtManage: true },
+      { label: "學員", path: "/et/students", requiresEtManage: true },
+      { label: "核可查詢", path: "/et/approvals", requiresEtManage: true },
+      { label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
     ],
   },
   {

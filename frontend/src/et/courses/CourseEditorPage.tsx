@@ -1,4 +1,5 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
+import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import VisibilityIcon from "@mui/icons-material/Visibility"
 import Alert from "@mui/material/Alert"
 import Autocomplete from "@mui/material/Autocomplete"
@@ -663,6 +664,29 @@ export function EtCourseEditorPage() {
       {readOnly && (
         <Alert severity="warning" icon={<VisibilityIcon />} sx={{ mb: 2 }}>
           <strong>檢視模式</strong> — 此課程由 <strong>{course?.owner_name ?? "他人"}</strong> 建立，您僅可閱覽，無法編輯。
+        </Alert>
+      )}
+
+      {/*
+        邀請碼（#247 補 #204 之缺口）。在此之前它只在發布當下的 `PublishDialog` 出現
+        一次，而發布後**不提供重新產生**——教師關掉視窗就永久拿不回來，那門課再也發不
+        出邀請碼。後端只對 owner 回傳本欄位（非擁有者恆為 null），故此處不必再判 readOnly。
+      */}
+      {course?.invitation_code && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+            <span>課程邀請碼（發布後永久不可變更）：</span>
+            <Typography component="span" fontFamily="monospace" fontWeight={700} letterSpacing={3}>
+              {course.invitation_code}
+            </Typography>
+            <IconButton
+              size="small"
+              aria-label="複製邀請碼"
+              onClick={() => void navigator.clipboard?.writeText(course.invitation_code ?? "")}
+            >
+              <ContentCopyIcon fontSize="small" />
+            </IconButton>
+          </Stack>
         </Alert>
       )}
 

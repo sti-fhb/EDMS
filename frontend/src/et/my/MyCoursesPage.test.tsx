@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { describe, expect, it } from "vitest"
 
@@ -62,5 +63,57 @@ describe("ET04 我的課程", () => {
     renderWithProviders(<EtMyCoursesPage />)
 
     expect(await screen.findByRole("button", { name: "加入新課程" })).toBeInTheDocument()
+  })
+
+  it("已加入之課程只顯示一則提示，不被後續訊息蓋掉（AC 10）", async () => {
+    server.use(
+      http.post("/api/et/enrollments/preview", () =>
+        HttpResponse.json({
+          course_id: 1,
+          course_name: "採血作業新進人員訓練",
+          owner_name: "王教師",
+          chapter_count: 5,
+          already_joined: true,
+          open_start_at: null,
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtMyCoursesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "加入新課程" }))
+    await user.type(screen.getByLabelText(/邀請碼/), "12345678")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    // 實測回報：原本這裡送完「您已加入此課程」又立刻送「章節學習頁尚未開放」，
+    // 後者把前者蓋掉，使用者只看得到後面那句。
+    expect(await screen.findByText("您已加入此課程")).toBeInTheDocument()
+    expect(screen.queryByText("章節學習頁尚未開放")).not.toBeInTheDocument()
+  })
+
+  it("已加入但課程尚未開放時，提示要說明清單為何是空的", async () => {
+    server.use(
+      http.post("/api/et/enrollments/preview", () =>
+        HttpResponse.json({
+          course_id: 9,
+          course_name: "尚未開放的課",
+          owner_name: "王教師",
+          chapter_count: 2,
+          already_joined: true,
+          open_start_at: "2099-01-01T09:00:00Z",
+        }),
+      ),
+    )
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    const user = userEvent.setup()
+    renderWithProviders(<EtMyCoursesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "加入新課程" }))
+    await user.type(screen.getByLabelText(/邀請碼/), "12345678")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    // 實測回報：只說「您已加入此課程」而清單是空的（AC 4），學員會以為系統壞了。
+    // 裁示 A 的提示原本只做在「新加入」那條路徑，漏了「已加入 + 未開放」這個組合。
+    expect(await screen.findByText(/將於課程開放後出現於清單/)).toBeInTheDocument()
   })
 })

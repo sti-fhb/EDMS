@@ -153,6 +153,8 @@ export interface PublishResult {
   status: string
   invitation_code: string
   version: number
+  /** 依受訓單位標籤自動帶入之學員數（#247）。0 通常代表標籤沒掛到任何人。 */
+  invited_count: number
 }
 
 /**

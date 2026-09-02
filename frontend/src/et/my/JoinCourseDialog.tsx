@@ -20,8 +20,20 @@ interface Props {
   onClose: () => void
   /** 加入成功。`pendingOpen` 為 true 時課程尚未開放，清單不會出現該課程（AC 4）。 */
   onJoined: (courseId: number, pendingOpen: boolean) => void
-  /** 已加入之課程——直接導向，不重複加入（AC 10）。 */
-  onAlreadyJoined: (courseId: number) => void
+  /**
+   * 已加入之課程——直接導向，不重複加入（AC 10）。
+   *
+   * `pendingOpen` 與 `onJoined` 同義：課程尚未開放，清單不會出現它（AC 4）。
+   * **這兩個旗標必須成對存在**——只在「新加入」那條路徑提示、「已加入」不提示的話，
+   * 已加入未開放課程的學員會看到「您已加入此課程」然後回到一個空清單，比完全不提示
+   * 更難理解（實測回報）。
+   */
+  onAlreadyJoined: (courseId: number, pendingOpen: boolean) => void
+}
+
+/** 課程是否尚未開放學習（`open_start_at` 未到）。 */
+function isPendingOpen(openStartAt: string | null): boolean {
+  return openStartAt !== null && new Date(openStartAt) > new Date()
 }
 
 /**
@@ -72,7 +84,7 @@ export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined }: P
       if (result.already_joined) {
         // 不進預覽——AC 10 要的是直接導向該課程。
         handleClose()
-        onAlreadyJoined(result.course_id)
+        onAlreadyJoined(result.course_id, isPendingOpen(result.open_start_at))
         return
       }
       setPreview(result)
@@ -115,7 +127,10 @@ export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined }: P
               value={code}
               onChange={(e) => handleChange(e.target.value)}
               helperText={`請輸入教師提供的 ${INVITATION_CODE_LENGTH} 碼數字邀請碼`}
-              slotProps={{ htmlInput: { inputMode: "numeric", maxLength: INVITATION_CODE_LENGTH } }}
+              // ⚠️ **不要加 `maxLength`**：它在 HTML 層先截斷，早於 `handleChange` 的
+              // 濾非數字。貼上「12ab34cd5678999」時會先被截成「12ab34cd」，濾完只剩
+              // 「1234」——使用者以為貼壞了。長度由 `handleChange` 濾完再 slice。
+              slotProps={{ htmlInput: { inputMode: "numeric" } }}
               fullWidth
             />
           )}
@@ -147,7 +162,7 @@ export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined }: P
 }
 
 function PreviewBody({ preview }: { preview: JoinPreview }) {
-  const pendingOpen = preview.open_start_at !== null && new Date(preview.open_start_at) > new Date()
+  const pendingOpen = isPendingOpen(preview.open_start_at)
 
   return (
     <Stack spacing={1}>

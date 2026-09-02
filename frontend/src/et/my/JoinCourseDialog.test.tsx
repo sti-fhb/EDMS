@@ -43,6 +43,19 @@ describe("ET04 加入新課程視窗", () => {
     expect(codeInput()).toHaveValue("12345678")
   })
 
+  it("整串貼上時濾非數字的結果與逐字輸入一致", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(codeInput())
+    await user.paste("12ab34cd5678999")
+
+    // ⚠️ 這條與上一條**不是重複的**：逐字輸入時受控值永遠不超過 8，碰不到
+    // `maxLength`；整串貼上會先被 HTML 層截成 8 個「字元」（"12ab34cd"），濾完只剩
+    // "1234"。實測回報的正是這個——上一條測試看不出來。
+    expect(codeInput()).toHaveValue("12345678")
+  })
+
   it("查詢通過後顯示課程資訊供確認（AC 6）", async () => {
     const user = userEvent.setup()
     renderDialog()
@@ -137,7 +150,7 @@ describe("ET04 加入新課程視窗", () => {
     await user.type(codeInput(), "12345678")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    await waitFor(() => expect(onAlreadyJoined).toHaveBeenCalledWith(7))
+    await waitFor(() => expect(onAlreadyJoined).toHaveBeenCalledWith(7, false))
     // 不該停在預覽畫面等使用者再按一次「確認加入」——他已經在這門課了。
     expect(screen.queryByRole("button", { name: "確認加入" })).not.toBeInTheDocument()
   })

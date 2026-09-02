@@ -63,20 +63,21 @@ export function EtMyCoursesPage() {
    * `ET-5` 章節學習頁未實作——**先提示而非 `navigate` 到不存在的路由**，後者會給
    * 學員一個白畫面，看起來像壞掉而不像還沒做。
    *
-   * 🔴 **`ET-5` 交付時**：把本函式改成收 `courseId` 並
-   * `navigate(\`/et/courses/${courseId}/learn\`)`，同時把三個呼叫端的 id 傳回來
-   * （它們都拿得到）。目前不收參數純粹是因為用不到——留一個未使用的參數過不了
-   * ESLint，而加 `_` 前綴在本專案的設定下也不豁免。
+   * ⚠️ **只在點卡片時呼叫**。加入成功 / 已加入的路徑上**不要**再呼叫它：那些路徑
+   * 自己已經有一則訊息，接著再送一則會把前一則蓋掉——實測時「您已加入此課程」就是
+   * 這樣變成「章節學習頁尚未開放」的。
+   *
+   * 🔴 **`ET-5` 交付時**：改成收 `courseId` 並 `navigate(\`/et/courses/${id}/learn\`)`，
+   * 並讓加入成功 / 已加入兩條路徑改為導向（那時導向取代訊息，不會再互相覆蓋）。
    */
   function openCourse() {
     message.info("章節學習頁尚未開放")
   }
 
-  function handleJoined(courseId: number, pendingOpen: boolean) {
-    void courseId // `ET-5` 交付後傳給 openCourse
+  function handleJoined(_courseId: number, pendingOpen: boolean) {
     void refetch()
+    // `ET-5` 交付前只給一則訊息、不導向——學員留在清單上就看得到剛加入的課程。
     message.success(pendingOpen ? "已加入，課程開放後將出現於清單" : "已加入課程")
-    if (!pendingOpen) openCourse()
   }
 
   return (
@@ -135,9 +136,12 @@ export function EtMyCoursesPage() {
         open={joinOpen}
         onClose={() => setJoinOpen(false)}
         onJoined={handleJoined}
-        onAlreadyJoined={() => {
-          message.info("您已加入此課程")
-          openCourse()
+        onAlreadyJoined={(_courseId, pendingOpen) => {
+          // 只送一則。`ET-5` 交付後這裡改成導向該課程（AC 10）。
+          //
+          // 未開放時**必須說明白**：光說「您已加入此課程」而清單是空的（AC 4），
+          // 學員會以為系統壞了——實測就是這樣回報的。
+          message.info(pendingOpen ? "您已加入此課程，將於課程開放後出現於清單" : "您已加入此課程")
         }}
       />
     </Box>

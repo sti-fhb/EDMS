@@ -66,7 +66,15 @@ export function PublishDialog({
       <DialogContent dividers>
         {result ? (
           <Stack spacing={2}>
-            <Alert severity="success">課程已發布，系統將依標籤自動邀請對應學員。</Alert>
+            {/* 帶入人數要據實顯示（#247）：0 通常代表課程掛的標籤沒有任何人掛上，
+                那是設定問題——等學員反映「看不到課」才發現就太晚了。 */}
+            {result.invited_count > 0 ? (
+              <Alert severity="success">課程已發布，已依受訓單位標籤帶入 {result.invited_count} 位學員。</Alert>
+            ) : (
+              <Alert severity="warning">
+                課程已發布，但沒有任何學員符合本課程的受訓單位標籤。請確認標籤設定，或將下方邀請碼提供給學員。
+              </Alert>
+            )}
             <Box>
               <Typography variant="caption" color="text.secondary">
                 課程邀請碼（發布後永久不可變更）

@@ -16,8 +16,11 @@ import { QUERY_KEYS } from "../constants/queryKeys"
  * #202 已建立的作法：後端回**能力**（`can_create_course`），前端據此分流。這樣授權
  * 判斷只有一個來源。
  *
- * 具教師 / 管理者能力者仍導向課程列表——他們同時也是學員（學員角色人人有），
+ * 具教師 / 管理者能力者仍導向課程列表——他們同時也是學員（學員角色預設人人有），
  * 若一律送到 ET04，教師每次進 ET 都要多點一次才能到自己的課程。
+ *
+ * 以 `can_manage_courses` 而非 `can_create_course` 判斷：**管理者不建課程但要能
+ * 管理**，用後者會把管理者送到「我的課程」。
  *
  * 查詢未完成前 `render` 為 `null`：這是一個轉址節點，閃一下 spinner 再跳走比留白
  * 更晃眼。查詢失敗（能力取不到）時保守導向 ET04——那是每個 ET 使用者都進得去的
@@ -30,5 +33,5 @@ export function EtHomeRedirect() {
   })
 
   if (isPending) return null
-  return <Navigate to={data?.can_create_course ? "/et/courses" : "/et/my-courses"} replace />
+  return <Navigate to={data?.can_manage_courses ? "/et/courses" : "/et/my-courses"} replace />
 }

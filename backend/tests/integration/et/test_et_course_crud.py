@@ -5,14 +5,14 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtTag
-from app.et.constants import COURSE_PUBLISHED, ROLE_STUDENT, ROLE_TEACHER
+from app.et.constants import COURSE_PUBLISHED, ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER
 from app.et.course.models import EtCourse
 from app.et.roles.models import EtUserRole
 
@@ -202,6 +202,57 @@ class TestCapabilities:
         uid = await _user(db, "ETC_P3")
         r = await client.get(f"{_URL}/capabilities", headers=_bearer(uid))
         assert r.status_code == 200, "capabilities 須宣告於動態路由之前"
+
+    async def test_側欄分流之三項能力(self, client, db) -> None:
+        """側欄 ET 群組內依角色分兩類（#247）：教學管理項 vs 我的課程。
+
+        群組門檻只判「有無任一 ET 角色」，不夠——ET 三種角色可任意組合，純學員看到
+        「學員 / 核可查詢」等於看到一堆點進去只會 403 的項目。
+        """
+        teacher = await _user(db, "ETC_P4")
+        student = await _user(db, "ETC_P5", roles=(ROLE_STUDENT,))
+        admin = await _user(db, "ETC_P6", roles=(ROLE_ADMIN,))
+
+        t = (await client.get(f"{_URL}/capabilities", headers=_bearer(teacher))).json()
+        s = (await client.get(f"{_URL}/capabilities", headers=_bearer(student))).json()
+        a = (await client.get(f"{_URL}/capabilities", headers=_bearer(admin))).json()
+
+        assert (t["can_manage_courses"], t["can_learn"]) == (True, False)
+        assert (s["can_manage_courses"], s["can_learn"]) == (False, True)
+        # 管理者不建課程但要能管理——用 `can_create_course` 判斷側欄會把他擋在外面。
+        assert (a["can_create_course"], a["can_manage_courses"]) == (False, True)
+
+
+class TestInvitationCodeVisibility:
+    """邀請碼於課程詳細僅 owner 可見（#247 補 #204 之缺口）。"""
+
+    async def test_擁有者看得到邀請碼(self, client, db) -> None:
+        """#204 只在發布當下顯示一次，且發布後不提供重新產生——教師關掉視窗就永久
+        拿不回來，那門課再也發不出邀請碼。"""
+        uid = await _user(db, "ETC_IC1")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(uid))
+        cid = created.json()["course_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == cid).values(invitation_code="24681357"))
+        await db.flush()
+
+        r = await client.get(f"{_URL}/{cid}", headers=_bearer(uid))
+
+        assert r.json()["invitation_code"] == "24681357"
+
+    async def test_非擁有者看不到邀請碼(self, client, db) -> None:
+        """學員角色人人都有，對所有人回傳等於讓任何登入者收集全站邀請碼、自行加入
+        任意課程——繞過 ET-4 的邀請門檻與其限流。"""
+        owner = await _user(db, "ETC_IC2")
+        other = await _user(db, "ETC_IC3")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(owner))
+        cid = created.json()["course_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == cid).values(invitation_code="13572468"))
+        await db.flush()
+
+        r = await client.get(f"{_URL}/{cid}", headers=_bearer(other))
+
+        assert r.status_code == 200, "他人課程仍可閱覽（spec.md §擁有權判定）"
+        assert r.json()["invitation_code"] is None
 
 
 class TestTimeWindow:
