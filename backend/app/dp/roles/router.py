@@ -2,9 +2,10 @@
 
 DP 後台 ET / DM 共用之角色 / 群組指派入口。DP 為轉接層，經 `RolesService` 呼叫模組 provider。
 
-授權（SA Q1=A，授權頁特例）：router-level 掛 `get_jwt_payload` 認證；**每模組操作再 enforce
-`is_module_admin`**（於 service `_require_manageable`），越權 403（不沿用 #5/#6 暫行只認證，因本頁
-為提權入口且 is_module_admin 已就緒）。寫入注入 `get_operator`。
+授權：router-level 掛 `require_any_module_admin()`（#250——需 ET 或 DM 任一模組管理者，
+落地 spec_us7「作為 ET 或 DM 管理者」）；**每模組操作再 enforce `is_module_admin`**
+（於 service `_require_manageable`），越權 403。兩層並存且職責不同：router 閘管「能否進本頁」，
+service 閘管「能否維護該模組」——兼具兩身分者才看得到兩個頁籤。寫入注入 `get_operator`。
 """
 
 from fastapi import APIRouter, Depends, Query, status
@@ -12,12 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
+from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.dp.roles.schemas import AssignmentItem, AssignPayload, GroupOption
 from app.dp.roles.service import RolesService
 
-router = APIRouter(prefix="/api/dp/roles", tags=["dp-roles"], dependencies=[Depends(get_jwt_payload)])
+router = APIRouter(prefix="/api/dp/roles", tags=["dp-roles"], dependencies=[Depends(require_any_module_admin())])
 
 _service = RolesService()
 

@@ -20,6 +20,8 @@ from app.dp.params.schemas import ParamDetailCreate, ParamDetailUpdate
 from app.dp.params.service import ParamAdminService, ParamService
 from app.dp.users.models import DpUser
 
+# 本檔不套 conftest 的 backoffice_admin：已有專用的 `admin_gate` stub（可指定誰是 ET/DM 管理者），
+# 且測試會以它覆蓋全域 checker——兩者並用會互相蓋掉。HTTP 測試改以 admin_gate 明確授予（#250）。
 pytestmark = pytest.mark.integration
 
 _OP = OperatorInfo(user_id="admin01")
@@ -324,7 +326,9 @@ async def test_create_on_missing_param_404(db, admin_gate):
 
 
 async def test_list_params_http(db, client, admin_gate):
-    admin_gate()
+    # #250：後台 router 掛 require_any_module_admin，須明確授予管理者身分才進得來
+    #（原為空設定 admin_gate()——當時 router 只驗認證）。斷言仍聚焦「平台級參數可見」。
+    admin_gate(et_admins=("admin01",))
     now = utcnow()
     db.add(
         DpUser(

@@ -23,7 +23,9 @@ from app.dp.users.models import DpUser
 from app.dp.users.schemas import UserCreate, UserUpdate
 from app.dp.users.service import UsersService
 
-pytestmark = pytest.mark.integration
+# usefixtures(backoffice_admin)：本檔驗後台功能之業務邏輯，非授權；#250 起後台 router
+# 掛 require_any_module_admin，故統一讓操作者通過該閘（授權行為見 test_dp_backoffice_gate.py）
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("backoffice_admin")]
 
 _OP = OperatorInfo(user_id="admin01")
 

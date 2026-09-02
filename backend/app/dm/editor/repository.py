@@ -5,6 +5,7 @@
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import Row, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from app.dm.catalog.models import DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
 from app.dm.roles.authz import DM_REVIEWER
+from app.dp.users.account_status import account_usable_clause
 from app.dp.users.models import DpUser
 
 _DRAFT = "DRAFT"
@@ -263,8 +265,21 @@ class EditorRepository:
         )
         return got is not None
 
-    async def list_reviewers(self, db: AsyncSession, *, exclude_user_id: str) -> list[Row]:
-        """列具 DM_REVIEWER 角色之使用者（join DP_USER 取姓名、排除自己、依姓名排序）。"""
+    async def list_reviewers(self, db: AsyncSession, *, exclude_user_id: str, now: datetime) -> list[Row]:
+        """列可被指定為審核者之使用者（join DP_USER 取姓名、排除自己、依姓名排序）。
+
+        排除停用 / 鎖定中的帳號（#250）：該帳號登不進系統，被指定後該送審將無人可審、
+        只能靠撰寫者撤回。條件取自 DP 之 `account_usable_clause`——`DP_USER.STATUS` 值域
+        屬 DP 語意，DM 不自行解讀（唯讀 JOIN 屬 sti-backend-boundaries §報表/查詢類例外）。
+
+        Args:
+            db: DB session。
+            exclude_user_id: 排除的 USER_ID（撰寫者本人，US5 指定審核者不得為自己）。
+            now: 鎖定逾時判定基準（aware）。
+
+        Returns:
+            (USER_ID, USER_NAME) 列，依姓名排序。
+        """
         from app.dm.roles.models import DmUserRole
 
         stmt = (
@@ -275,6 +290,7 @@ class EditorRepository:
                 DmUserRole.deleted == 0,
                 DpUser.user_id != exclude_user_id,
                 DpUser.deleted == 0,
+                account_usable_clause(now),
             )
             .order_by(DpUser.user_name)
         )

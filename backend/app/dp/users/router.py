@@ -1,7 +1,9 @@
 """使用者管理端點（US4 / dp-users）。
 
-授權：依 [sti-backend-modules 暫行授權規則] 僅掛 router-level get_jwt_payload 認證，
-寫入型端點注入 get_operator；**不掛 admin 閘**（SA 裁示 Q1=A，待 ET/DM service 就緒於 T049 回歸）。
+授權：router-level 掛 `require_any_module_admin()`——需 ET 或 DM 任一模組管理者，
+落地 spec_us4「作為 ET 或 DM 管理者」（#250；此前依暫行授權規則僅掛 get_jwt_payload 認證，
+授權未落地，任何登入者皆可讀寫後台——即當時註記「待 T049 回歸」之 admin 閘）。
+寫入型端點注入 get_operator。
 """
 
 from typing import Literal, Optional
@@ -9,16 +11,16 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_jwt_payload
 from app.core.config import settings
 from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
+from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse
 from app.dp.users.schemas import InviteResponse, UserCreate, UserResponse, UserStatusUpdate, UserUpdate
 from app.dp.users.service import UsersService
 
-router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depends(get_jwt_payload)])
+router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depends(require_any_module_admin())])
 
 # 邀請端點加固（#72）：對「單筆邀請（invite_id）」重寄設冷卻，防對同一受邀信箱短時間反覆轟炸。
 # 刻意**不設操作者總量限流**（PO 決策）：管理者一次為多位不同使用者建帳號屬正常作業，

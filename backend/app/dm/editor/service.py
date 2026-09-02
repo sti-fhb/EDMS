@@ -516,8 +516,8 @@ class EditorService:
     # ── 受控下拉 ──────────────────────────────────────
 
     async def list_reviewers(self, db: AsyncSession, *, op: OperatorInfo) -> list[ReviewerItem]:
-        """列具 DM_REVIEWER 角色之使用者（排除自己）。"""
-        rows = await self._repo.list_reviewers(db, exclude_user_id=op.user_id)
+        """列具 DM_REVIEWER 角色且帳號可用之使用者（排除自己、排除停用 / 鎖定中，#250）。"""
+        rows = await self._repo.list_reviewers(db, exclude_user_id=op.user_id, now=utcnow())
         return [ReviewerItem(user_id=r.user_id, user_name=r.user_name) for r in rows]
 
     async def get_options(self, db: AsyncSession) -> EditorOptions:

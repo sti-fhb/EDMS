@@ -8,7 +8,7 @@ ET / DM 尚未實作，未註冊模組一律 fail-closed（回 False）；測試
 """
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +59,26 @@ class ModuleAdminGate:
         # 嚴格布林收斂：只在明確 True 放行；truthy 非 bool（如角色清單 / int）一律 fail-closed
         return result is True
 
+    async def is_any_module_admin(self, modules: Iterable[str], user_id: str, db: AsyncSession) -> bool:
+        """user_id 是否為 modules 中**任一**模組的管理者（#250）。
+
+        DP 後台六項功能之操作者依 spec（us4 / us5 / us7 / us9 / us10 / us11）皆為
+        「ET 或 DM 管理者」，故以 or 聚合。逐一委派 `is_module_admin`，因此未註冊模組與
+        checker 例外同樣 fail-closed，且單一模組失敗不影響其他模組的判定。
+
+        Args:
+            modules: 模組代碼集合（如 ("ET", "DM")）；空集合一律回 False。
+            user_id: 操作者 USER_ID。
+            db: DB session（傳給各模組 checker）。
+
+        Returns:
+            任一模組為管理者回 True；全否 / 空集合回 False。
+        """
+        for module in modules:
+            if await self.is_module_admin(module, user_id, db):
+                return True
+        return False
+
 
 # 全域單例：各模組啟動時 register 自己的 checker，DP 端點經此判定。
 module_admin_gate = ModuleAdminGate()
@@ -85,6 +105,41 @@ def require_module_admin(module: str) -> Callable[..., Awaitable[JwtPayload]]:
         db: AsyncSession = Depends(get_db),
     ) -> JwtPayload:
         if not await module_admin_gate.is_module_admin(module, payload.sub, db):
+            raise AppError(status_code=403, detail="需要模組管理者權限", error_code="DP_AUTH_006")
+        return payload
+
+    return _dependency
+
+
+# DP 後台之預設門檻模組：spec_us4 / us5 / us7 / us9 / us10 / us11 皆定義操作者為「ET 或 DM 管理者」
+_BACKOFFICE_MODULES: tuple[str, ...] = ("ET", "DM")
+
+
+def require_any_module_admin(modules: Iterable[str] = _BACKOFFICE_MODULES) -> Callable[..., Awaitable[JwtPayload]]:
+    """產生「要求為任一指定模組管理者」的 FastAPI dependency（#250）。
+
+    供 DP 後台各 router 掛於 router-level，取代原先僅認證的 `get_jwt_payload`——
+    DP 後台六項功能（使用者管理 / 系統參數 / 通知範本 / 權限管理 / 操作記錄 / 排程總覽）
+    之操作者於 spec 皆為「ET 或 DM 管理者」，此前實作只驗認證、授權未落地。
+
+    **不以角色名稱字串判斷**：一律經 `module_admin_gate` 委派各模組 checker
+    （`.claude/rules/sti-backend-boundaries.md`——DP 不得認識模組角色碼）。
+
+    Args:
+        modules: 門檻模組集合，預設 ET + DM。
+
+    Returns:
+        回傳 JwtPayload 的 async dependency。
+
+    Raises:
+        AppError: 非任一模組之管理者（403 DP_AUTH_006）；認證失敗由 get_jwt_payload 拋（401）。
+    """
+
+    async def _dependency(
+        payload: JwtPayload = Depends(get_jwt_payload),
+        db: AsyncSession = Depends(get_db),
+    ) -> JwtPayload:
+        if not await module_admin_gate.is_any_module_admin(modules, payload.sub, db):
             raise AppError(status_code=403, detail="需要模組管理者權限", error_code="DP_AUTH_006")
         return payload
 

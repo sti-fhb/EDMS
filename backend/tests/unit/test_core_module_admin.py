@@ -60,6 +60,49 @@ async def test_truthy_non_bool_fails_closed():
     assert await gate.is_module_admin("ET", "u1", db=None) is False
 
 
+async def test_any_module_admin_true_when_only_one_matches():
+    """任一模組為管理者即 True（#250：DP 後台門檻為「ET 或 DM 任一管理者」）。"""
+    gate = ModuleAdminGate()
+    gate.register("ET", _never)
+    gate.register("DM", _always)
+    assert await gate.is_any_module_admin(("ET", "DM"), "u1", db=None) is True
+    # 順序無關：先命中者提前回傳，兩種排列結果相同
+    assert await gate.is_any_module_admin(("DM", "ET"), "u1", db=None) is True
+
+
+async def test_any_module_admin_false_when_none_matches():
+    """全部模組皆非管理者 → False（該使用者看不到 / 進不了 DP 後台）。"""
+    gate = ModuleAdminGate()
+    gate.register("ET", _never)
+    gate.register("DM", _never)
+    assert await gate.is_any_module_admin(("ET", "DM"), "u1", db=None) is False
+
+
+async def test_any_module_admin_unregistered_fails_closed():
+    """模組皆未註冊 → False（fail-closed，未接線＝非管理者）。"""
+    gate = ModuleAdminGate()
+    assert await gate.is_any_module_admin(("ET", "DM"), "u1", db=None) is False
+
+
+async def test_any_module_admin_empty_modules_is_false():
+    """未指定任何模組 → False（不得因空集合而放行）。"""
+    gate = ModuleAdminGate()
+    gate.register("ET", _always)
+    assert await gate.is_any_module_admin((), "u1", db=None) is False
+
+
+async def test_any_module_admin_survives_checker_exception():
+    """某模組 checker 炸掉不影響其他模組判定（該模組視為 False，不整體 500）。"""
+
+    async def _boom(_db, _user_id):
+        raise RuntimeError("boom")
+
+    gate = ModuleAdminGate()
+    gate.register("ET", _boom)
+    gate.register("DM", _always)
+    assert await gate.is_any_module_admin(("ET", "DM"), "u1", db=None) is True
+
+
 async def test_checker_exception_fails_closed():
     """checker 執行期拋例外 → fail-closed 回 False，不向上傳播。"""
 
