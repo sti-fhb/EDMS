@@ -14,10 +14,12 @@
 以為它只是暫時關著。
 """
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.et.constants import (
     COMPLETION_COMPLETED,
@@ -107,7 +109,7 @@ class EtEnrollmentService:
             # 順序要緊：先擋「已被移除」（裁示 C），再讓「已加入」走正常導航。
             # 反過來的話被移除者會拿到 already_joined=true，前端把他導向一門他已無
             # 成員資格的課程。
-            ensure_not_removed(is_removed=enrollment.is_removed)
+            await self._guard_not_removed(db, enrollment.is_removed, user_id=user_id, course_id=course.course_id)
 
         return JoinPreview(
             course_id=course.course_id,
@@ -131,19 +133,35 @@ class EtEnrollmentService:
         course = await self._require_course(db, code)
         existing = await self._enrollments.get_enrollment(db, user_id=operator.user_id, course_id=course.course_id)
         if existing is not None:
-            ensure_not_removed(is_removed=existing.is_removed)
+            await self._guard_not_removed(db, existing.is_removed, user_id=operator.user_id, course_id=course.course_id)
             # 重複加入不重複寫入、也不報錯——AC 10 要的是「導向該課程」。
             return _to_result(course, existing.completion_status)
 
-        await self._enrollments.create(
-            db,
-            user_id=operator.user_id,
-            course_id=course.course_id,
-            join_source=SOURCE_INVITATION_CODE,
-            completion_status=COMPLETION_NOT_STARTED,
-            joined_at=utcnow(),
-            operator=operator,
-        )
+        try:
+            # SAVEPOINT：「查無既有列」與 INSERT 之間有空隙，雙擊「確認加入」或前端
+            # 重試會讓兩個請求都通過上面的判斷，第二個撞
+            # `UQ_ET_ENROLLMENT_USER_COURSE`（全表唯一，刻意保留——見
+            # `progress/models.py`）。不接的話那是一個未處理例外 → 500，而使用者只是
+            # 手快點了兩下。包 SAVEPOINT 讓衝突只回退這次 INSERT，不毀整個請求交易。
+            async with db.begin_nested():
+                await self._enrollments.create(
+                    db,
+                    user_id=operator.user_id,
+                    course_id=course.course_id,
+                    join_source=SOURCE_INVITATION_CODE,
+                    completion_status=COMPLETION_NOT_STARTED,
+                    joined_at=utcnow(),
+                    operator=operator,
+                )
+        except IntegrityError:
+            # 併發的另一個請求先寫成功了——結果與「已加入」完全相同，回既有列即可。
+            # 重查而非直接回預設值：另一端有可能寫的是別的 `COMPLETION_STATUS`。
+            winner = await self._enrollments.get_enrollment(db, user_id=operator.user_id, course_id=course.course_id)
+            if winner is None:
+                raise
+            await self._guard_not_removed(db, winner.is_removed, user_id=operator.user_id, course_id=course.course_id)
+            return _to_result(course, winner.completion_status)
+
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -153,10 +171,43 @@ class EtEnrollmentService:
             operator_id=operator.user_id,
             target_id=str(course.course_id),
             description="以邀請碼加入課程",
+            source_ip=get_client_ip(),
         )
         return _to_result(course, COMPLETION_NOT_STARTED)
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _guard_not_removed(self, db: AsyncSession, is_removed: bool, *, user_id: str, course_id: int) -> None:
+        """擋下被移除者的重新加入，並**留下稽核紀錄**。
+
+        「被移除的學員嘗試回到課程」是教師與稽核該看得見的保安事件——規則有沒有真的
+        發揮作用，不能只靠沒有人來抱怨。
+
+        稽核必須在拋 `AppError` **之前寫入並顯式 commit**：`get_db` 對 `AppError`
+        會 rollback，否則這筆紀錄會跟著被抹掉（同 `dp/user/service.py` 之
+        `_fail_login`）。`course_id` 為已知值，可完整記錄。
+
+        > 相對地，`ET_ENROLL_001`（邀請碼查無）**刻意不逐次寫稽核**：那是枚舉攻擊
+        > 的主要路徑，逐次寫入會在被攻擊時把稽核表灌爆，而 `log_action` 取
+        > `pg_advisory_xact_lock`，等於把攻擊放大成鎖競爭。且被嘗試的碼**不可寫進
+        > 稽核**——那會讓其他課程的有效邀請碼以明文累積在稽核表裡。枚舉的偵測面
+        > 目前靠限流門檻，尚無記錄；已於 close 摘要列為 follow-up。
+        """
+        if not is_removed:
+            return
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_NAME,
+            action_type="CREATE",
+            result="FAIL",
+            operator_id=user_id,
+            target_id=str(course_id),
+            description="已被移除之學員嘗試以邀請碼重新加入課程",
+            source_ip=get_client_ip(),
+        )
+        await db.commit()
+        ensure_not_removed(is_removed=True)
 
     async def _require_course(self, db: AsyncSession, code: str):
         """邀請碼 → 課程，含格式與狀態檢核。

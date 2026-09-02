@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import (
@@ -227,14 +228,51 @@ class TestJoin:
         assert again.status_code == 201, again.text
         assert again.json()["course_id"] == cid
         rows = (
-            await db.scalars(
-                select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid)
-            )
+            await db.scalars(select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid))
         ).all()
         assert len(rows) == 1
 
         preview = await _preview(client, student, "10000007")
         assert preview.json()["already_joined"] is True
+
+
+class TestConcurrentJoin:
+    async def test_併發加入不炸成500而是回既有列(self, client, db) -> None:
+        """雙擊「確認加入」/ 前端重試——兩個請求都會通過「查無既有列」判斷。
+
+        少了 SAVEPOINT + `IntegrityError` 攔截，第二個請求會撞
+        `UQ_ET_ENROLLMENT_USER_COURSE` 變成未處理例外 → 500，而使用者只是手快點了
+        兩下。此處以「先插一列再打 API」模擬那個空隙——service 在 `get_enrollment`
+        查完之後、`create` 之前，資料庫已多出一列，正是併發的效果。
+        """
+        teacher = await _user(db, "t_enr18", ROLE_TEACHER)
+        student = await _user(db, "s_enr18")
+        cid = await _course(client, db, teacher, code="10000018")
+
+        # 模擬另一個併發請求已搶先寫入
+        db.add(
+            EtEnrollment(
+                user_id=student,
+                course_id=cid,
+                join_source=SOURCE_INVITATION_CODE,
+                joined_at=utcnow(),
+                completion_status=COMPLETION_NOT_STARTED,
+                is_removed=False,
+                created_user=student,
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+
+        r = await _join(client, student, "10000018")
+
+        assert r.status_code == 201, r.text
+        assert r.json()["course_id"] == cid
+        rows = (
+            await db.scalars(select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid))
+        ).all()
+        assert len(rows) == 1
 
 
 class TestRemovedStudentCannotRejoin:
@@ -271,6 +309,36 @@ class TestRemovedStudentCannotRejoin:
         assert r.status_code == 409
         assert r.json()["error_code"] == "ET_ENROLL_003"
 
+    async def test_被移除者的嘗試會留下稽核紀錄(self, client, db) -> None:
+        """「被移除的學員想回到課程」是教師與稽核該看得見的保安事件。
+
+        ⚠️ 這條測試的重點是**紀錄在請求以 409 失敗後仍然存在**：`get_db` 對
+        `AppError` 會 rollback，稽核若不顯式 commit 就會一起被抹掉（同
+        `dp/user/service.py` 之 `_fail_login`）。少了這個斷言，把 commit 拿掉也不會
+        有任何測試變紅。
+        """
+        teacher = await _user(db, "t_enr20", ROLE_TEACHER)
+        student = await _user(db, "s_enr20")
+        cid = await _course(client, db, teacher, code="10000020")
+        assert (await _join(client, student, "10000020")).status_code == 201
+        await _remove_student(db, student, cid)
+
+        assert (await _join(client, student, "10000020")).status_code == 409
+
+        logs = (
+            await db.scalars(
+                select(DpAuditLog).where(
+                    DpAuditLog.module == "ET",
+                    DpAuditLog.result == "FAIL",
+                    DpAuditLog.target_id == str(cid),
+                )
+            )
+        ).all()
+        assert len(logs) == 1
+        assert "重新加入" in (logs[0].description or "")
+        # 被嘗試的邀請碼不可寫進稽核——那會讓其他課程的有效碼以明文累積在稽核表裡。
+        assert "10000020" not in (logs[0].description or "")
+
     async def test_被移除之課程不再出現於清單(self, client, db) -> None:
         """FR-ET-US4-06：前台不再顯示，但學習歷史保留於 DB。"""
         teacher = await _user(db, "t_enr10", ROLE_TEACHER)
@@ -282,9 +350,10 @@ class TestRemovedStudentCannotRejoin:
         r = await client.get(_MY_COURSES, headers=_bearer(student))
 
         assert [c["course_id"] for c in r.json()["courses"]] == []
-        assert await db.scalar(
-            select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid)
-        ) is not None, "學習歷史必須保留"
+        assert (
+            await db.scalar(select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid))
+            is not None
+        ), "學習歷史必須保留"
 
 
 class TestPendingOpenCourse:

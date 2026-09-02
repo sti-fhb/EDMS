@@ -98,13 +98,15 @@ class EtEnrollmentRepository:
         **不在此判斷課程狀態**——「關閉中」與「查無此碼」是兩種不同的回應
         （AC 8 / AC 9），判定屬 `rules.ensure_course_joinable`。
         """
-        return await db.scalar(
-            select(EtCourse).where(EtCourse.invitation_code == code, EtCourse.deleted == 0)
-        )
+        return await db.scalar(select(EtCourse).where(EtCourse.invitation_code == code, EtCourse.deleted == 0))
 
     async def owner_name(self, db: AsyncSession, owner_id: str) -> str | None:
-        """課程教師姓名（AC 6）。"""
-        return await db.scalar(select(DpUser.user_name).where(DpUser.user_id == owner_id))
+        """課程教師姓名（AC 6）。查無回 `None`（比照 DM 之 `author_name`）。
+
+        濾 `DELETED`——本檔其餘查詢皆濾，這裡漏掉會讓已刪除教師的姓名繼續出現在
+        預覽畫面。
+        """
+        return await db.scalar(select(DpUser.user_name).where(DpUser.user_id == owner_id, DpUser.deleted == 0))
 
     async def get_enrollment(self, db: AsyncSession, *, user_id: str, course_id: int) -> EtEnrollment | None:
         """取該學員於該課程之選課列——**含已被移除者**。

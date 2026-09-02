@@ -25,7 +25,10 @@ INVITATION_CODE_LENGTH: Final = 8
 
 #: 邀請碼樣式：**ASCII** 數字。不可用 `str.isdigit()`——它對全形數字回 `True`
 #: （`int("１")` 也吃），會讓全形碼一路查到 DB 才查無。
-_CODE_PATTERN: Final = re.compile(rf"[0-9]{{{INVITATION_CODE_LENGTH}}}")
+#:
+#: 明確帶 `\A` / `\Z` 錨點，正確性就不依賴呼叫端記得用 `fullmatch`——若有人改成
+#: `.match()`，沒有錨點的話 `"12345678abc"` 會通過，前 8 碼流進 DB 查詢。
+_CODE_PATTERN: Final = re.compile(rf"\A[0-9]{{{INVITATION_CODE_LENGTH}}}\Z")
 
 _CODE_INVALID = AppError(status_code=404, detail="邀請碼無效，請確認後重試", error_code="ET_ENROLL_001")
 
@@ -45,6 +48,12 @@ def ensure_course_joinable(*, course_status: str) -> None:
 
     判定依據是**課程當前狀態**而非碼是否存在——邀請碼於課程關閉期間失效、
     再開課後恢復有效（`spec_us4` Clarifications），碼本身自始至終不變。
+
+    ⚠️ **本函式不看 `OPEN_END_AT`，全後端目前也沒有任何地方看它**（它只用於顯示與
+    發布檢核）。閱課期間結束後若 `STATUS` 仍是 `PUBLISHED`，課程依然可加入、也依然
+    留在我的課程清單。spec 說「到期自動關閉」，但自動關閉屬 `ET-11`（未實作）——
+    到期的執行點目前不存在，不是散落在別處。`ET-11` 設計時須決定「期間結束 = 不可
+    加入」要落在這裡還是靠自動 `CLOSED`，別因為這裡查不到就假設有人已經做了。
 
     Raises:
         AppError: 409 `ET_ENROLL_002` 課程關閉中；404 `ET_ENROLL_001` 非已發布課程。

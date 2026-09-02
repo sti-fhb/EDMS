@@ -61,17 +61,22 @@ export function EtMyCoursesPage() {
    * 點擊課程卡片（AC 6）。
    *
    * `ET-5` 章節學習頁未實作——**先提示而非 `navigate` 到不存在的路由**，後者會給
-   * 學員一個白畫面，看起來像壞掉而不像還沒做。`ET-5` 交付時把這裡換成
-   * `navigate(\`/et/courses/${courseId}/learn\`)` 即可，卡片與路由都已接好。
+   * 學員一個白畫面，看起來像壞掉而不像還沒做。
+   *
+   * 🔴 **`ET-5` 交付時**：把本函式改成收 `courseId` 並
+   * `navigate(\`/et/courses/${courseId}/learn\`)`，同時把三個呼叫端的 id 傳回來
+   * （它們都拿得到）。目前不收參數純粹是因為用不到——留一個未使用的參數過不了
+   * ESLint，而加 `_` 前綴在本專案的設定下也不豁免。
    */
-  function openCourse(_courseId: number) {
+  function openCourse() {
     message.info("章節學習頁尚未開放")
   }
 
   function handleJoined(courseId: number, pendingOpen: boolean) {
+    void courseId // `ET-5` 交付後傳給 openCourse
     void refetch()
     message.success(pendingOpen ? "已加入，課程開放後將出現於清單" : "已加入課程")
-    if (!pendingOpen) openCourse(courseId)
+    if (!pendingOpen) openCourse()
   }
 
   return (
@@ -121,7 +126,7 @@ export function EtMyCoursesPage() {
       <Grid container spacing={2}>
         {courses.map((course) => (
           <Grid key={course.course_id} size={{ xs: 12, md: 4 }}>
-            <CourseCard course={course} onOpen={() => openCourse(course.course_id)} />
+            <CourseCard course={course} onOpen={openCourse} />
           </Grid>
         ))}
       </Grid>
@@ -130,9 +135,9 @@ export function EtMyCoursesPage() {
         open={joinOpen}
         onClose={() => setJoinOpen(false)}
         onJoined={handleJoined}
-        onAlreadyJoined={(courseId) => {
+        onAlreadyJoined={() => {
           message.info("您已加入此課程")
-          openCourse(courseId)
+          openCourse()
         }}
       />
     </Box>
