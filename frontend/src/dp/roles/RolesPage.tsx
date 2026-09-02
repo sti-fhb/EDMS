@@ -26,7 +26,9 @@ import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
+import { isAccountUsable, isDisabled, isLocked } from "../users/accountStatus"
 import { toApiError } from "../../services/http"
+import { formatDateTime } from "../../utils/date"
 
 /**
  * 權限管理（dp-roles，US7）：ET / DM 共用之角色 / 群組指派入口。
@@ -160,52 +162,73 @@ function AssignmentsTab({ module }: { module: string }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.user_id}>
-              <TableCell>{row.email}</TableCell>
-              <TableCell>{row.user_name}</TableCell>
-              {roleDefs.map((r) => (
-                <TableCell key={r.code} align="center">
-                  <Checkbox
-                    size="small"
-                    checked={row.roles.includes(r.code)}
-                    // 只在「正對本列做角色操作」時 disable；存可見對象（source==="group"）不影響角色 checkbox（不閃）
-                    disabled={
-                      assignMut.isPending &&
-                      assignMut.variables?.userId === row.user_id &&
-                      assignMut.variables?.source === "role"
-                    }
-                    onChange={() => toggleRole(row, r.code)}
-                    slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
-                  />
+          {rows.map((row) => {
+            // 停用 / 鎖定中的帳號登不進系統，不應被指派權限（#250）：整列灰化、兩維度皆不可操作。
+            // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
+            const usable = isAccountUsable(row)
+            return (
+              <TableRow key={row.user_id} sx={usable ? undefined : { opacity: 0.5 }}>
+                <TableCell>{row.email}</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>{row.user_name}</span>
+                    {isDisabled(row) && <Chip size="small" label="已停用" />}
+                    {isLocked(row) && (
+                      <Chip
+                        size="small"
+                        color="warning"
+                        label="已鎖定"
+                        title={`鎖定至 ${formatDateTime(row.locked_until)}`}
+                      />
+                    )}
+                  </Stack>
                 </TableCell>
-              ))}
-              <TableCell sx={{ verticalAlign: "top" }}>
-                {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
-                <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
-                  {row.groups.length === 0 ? (
-                    <Typography variant="caption" color="text.secondary">
-                      未指派
-                    </Typography>
-                  ) : (
-                    row.groups.map((g) => (
-                      <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
-                    ))
-                  )}
-                  <Button size="small" onClick={() => setEditing(row)}>
-                    編輯
-                  </Button>
-                </Box>
-              </TableCell>
-              <TableCell>
-                <Typography variant="caption" color="text.secondary">
-                  {row.last_modified_by
-                    ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
-                    : "—"}
-                </Typography>
-              </TableCell>
-            </TableRow>
-          ))}
+                {roleDefs.map((r) => (
+                  <TableCell key={r.code} align="center">
+                    <Checkbox
+                      size="small"
+                      checked={row.roles.includes(r.code)}
+                      // 帳號不可用 → 一律 disable；否則只在「正對本列做角色操作」時 disable
+                      //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
+                      disabled={
+                        !usable ||
+                        (assignMut.isPending &&
+                          assignMut.variables?.userId === row.user_id &&
+                          assignMut.variables?.source === "role")
+                      }
+                      onChange={() => toggleRole(row, r.code)}
+                      slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
+                    />
+                  </TableCell>
+                ))}
+                <TableCell sx={{ verticalAlign: "top" }}>
+                  {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
+                  <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
+                    {row.groups.length === 0 ? (
+                      <Typography variant="caption" color="text.secondary">
+                        未指派
+                      </Typography>
+                    ) : (
+                      row.groups.map((g) => (
+                        <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
+                      ))
+                    )}
+                    {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
+                    <Button size="small" disabled={!usable} onClick={() => setEditing(row)}>
+                      編輯
+                    </Button>
+                  </Box>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="caption" color="text.secondary">
+                    {row.last_modified_by
+                      ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
+                      : "—"}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
 

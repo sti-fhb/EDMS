@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -51,6 +51,60 @@ describe("RolesPage 權限管理", () => {
     expect(screen.getByText("ming@example.com")).toBeInTheDocument() // 帳號欄＝email
     expect(screen.getByText(/系統管理員/)).toBeInTheDocument() // 最後異動＝姓名（非 "admin"）
     expect(screen.queryByText(/^admin｜/)).not.toBeInTheDocument()
+  })
+
+  it("停用帳號：列標示「已停用」、角色核取與編輯鈕不可操作（#250 AC1）", async () => {
+    renderWithProviders(<RolesPage />)
+    const row = (await screen.findByText("林離職")).closest("tr")!
+    expect(within(row).getByText("已停用")).toBeInTheDocument()
+    expect(within(row).getByRole("checkbox", { name: "林離職 編輯者" })).toBeDisabled()
+    expect(within(row).getByRole("checkbox", { name: "林離職 管理者" })).toBeDisabled()
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeDisabled()
+  })
+
+  it("鎖定中帳號：列標示「已鎖定」、角色核取與編輯鈕不可操作（#250 AC2）", async () => {
+    renderWithProviders(<RolesPage />)
+    const row = (await screen.findByText("陳鎖定")).closest("tr")!
+    expect(within(row).getByText("已鎖定")).toBeInTheDocument()
+    expect(within(row).getByRole("checkbox", { name: "陳鎖定 閱覽者" })).toBeDisabled()
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeDisabled()
+  })
+
+  it("正常帳號不受影響：無狀態標籤、可操作（#250 迴歸）", async () => {
+    renderWithProviders(<RolesPage />)
+    const row = (await screen.findByText("王曉明")).closest("tr")!
+    expect(within(row).queryByText("已停用")).not.toBeInTheDocument()
+    expect(within(row).queryByText("已鎖定")).not.toBeInTheDocument()
+    expect(within(row).getByRole("checkbox", { name: "王曉明 編輯者" })).toBeEnabled()
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeEnabled()
+  })
+
+  it("鎖定已逾時的帳號視為正常（不可誤以 locked_until 非空判定）", async () => {
+    server.use(
+      http.get("/api/dp/roles/:module/assignments", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "u9",
+              user_name: "已解鎖",
+              email: "unlocked@example.com",
+              status: "ACTIVE",
+              locked_until: "2020-01-01T00:00:00Z", // 早已逾時 → 自動解鎖
+              roles: [],
+              groups: [],
+              last_modified_by: null,
+              last_modified_by_name: null,
+              last_modified_date: null,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<RolesPage />)
+    const row = (await screen.findByText("已解鎖")).closest("tr")!
+    expect(within(row).queryByText("已鎖定")).not.toBeInTheDocument()
+    expect(within(row).getByRole("checkbox", { name: "已解鎖 編輯者" })).toBeEnabled()
   })
 
   it("無新增角色入口（角色為固定 enum）", async () => {

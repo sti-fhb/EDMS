@@ -6,6 +6,10 @@ export interface AssignmentRow {
   user_id: string
   user_name: string
   email: string
+  /** 帳號狀態（#250）：ACTIVE / DISABLED；停用或鎖定中之列不可指派。 */
+  status: string
+  /** 鎖定截止時間；null=未鎖定。「鎖定中」由前端衍生（見 dp/users/accountStatus.ts）。 */
+  locked_until: string | null
   roles: string[]
   groups: string[]
   last_modified_by: string | null
