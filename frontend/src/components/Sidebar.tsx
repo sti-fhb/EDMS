@@ -11,8 +11,12 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 
+import { useQuery } from "@tanstack/react-query"
+
+import { QUERY_KEYS } from "../constants/queryKeys"
 import { useDmAdminAccess } from "../dm/access/useDmAdminAccess"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
+import { coursesApi } from "../et/courses/coursesService"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
 import type { ModuleSummary } from "../layouts/useModuleSummary"
@@ -119,10 +123,23 @@ export function Sidebar() {
   // 共用 GET /dm/admin-access（US11 A' 收斂）；同上僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
   const { data: adminAccess } = useDmAdminAccess(summary?.dm.has_role ?? false)
   const canAdmin = adminAccess?.can_access ?? false
+  // ET 群組內之角色分流（#247）：教學管理項需教師 / 管理者，「我的課程」需學員。
+  // 同上僅在具任一 ET 角色時查詢（避免非 ET 者 403）。
+  const { data: etCaps } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.capabilities(),
+    queryFn: coursesApi.getCapabilities,
+    enabled: summary?.et.has_role ?? false,
+  })
+  const canEtManage = etCaps?.can_manage_courses ?? false
+  const canEtLearn = etCaps?.can_learn ?? false
   const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary)).map((group) => ({
     ...group,
     items: group.items.filter(
-      (item) => (!item.requiresDmPersonalAccess || canPersonal) && (!item.requiresDmAdminAccess || canAdmin),
+      (item) =>
+        (!item.requiresDmPersonalAccess || canPersonal) &&
+        (!item.requiresDmAdminAccess || canAdmin) &&
+        (!item.requiresEtManage || canEtManage) &&
+        (!item.requiresEtLearn || canEtLearn),
     ),
   }))
   return (

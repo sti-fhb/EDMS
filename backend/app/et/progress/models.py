@@ -39,9 +39,39 @@ class EtEnrollment(BaseModel):
 
     標籤自動邀請（2026-07-02）：課程發布時依 `ET_COURSE_TAG × ET_USER_TAG` 取聯集去重
     （限具學員角色者；「全體」展開為全部學員角色者）批次 INSERT，`JOIN_SOURCE=TAG_DEFAULT`。
+
+    ## 本表是純粹的「成員名牌」，不存任何學習資料
+
+    `ENROLLMENT_ID` 於整份 `data-model.md` **不被任何表引用**；所有學習紀錄都掛在
+    `USER_ID` + 學習標的上（`ET_PROGRESS` 為 `(USER_ID, ITEM_ID)`、`ET_PROGRESS_VIDEO`
+    為 `(USER_ID, VIDEO_ID)`、`ET_QUIZ_ATTEMPT_M` 為 `(USER_ID, QUIZ_ID, ATTEMPT_NO)`）。
+
+    推論：學員被移除後若再度成為成員，**進度與成績必然完整接續**，不因本表如何處理
+    而改變。`ATTEMPT_NO` 亦接續——要讓重考次數歸零請走 US9 的「重置重考次數」
+    （`ET_QUIZ_RETRY_RESET`），那是教師手動且有稽核的機制。
+
+    ## `DELETED` 與 `IS_REMOVED` 是兩件事
+
+    `DELETED`（`BaseModel` 提供）＝資料作廢；`IS_REMOVED`＝成員資格終止。本表的移除
+    學員一律走 `IS_REMOVED`，`DELETED` 未被使用。兩者都要在查詢時濾掉。
     """
 
     __tablename__ = "ET_ENROLLMENT"
+    # ⚠️ `UQ_ET_ENROLLMENT_USER_COURSE` 為**全表**唯一，這是刻意的，不是 #185 的建表缺陷。
+    #
+    # 它的形狀與 #202 `ET_CHAPTER` / #203 `ET_ITEM` / #204 `ET_SURVEY_QUESTION` /
+    # #238 `ET_SURVEY_COURSE` 那四次「軟刪除列佔住唯一鍵」一模一樣，但那四次的欄位是
+    # `DELETED`（這筆資料不存在了），改成部分唯一索引純屬修正；本表是 `IS_REMOVED`
+    # （這個人曾經在這門課），而 **#247 SA Q1 裁示 C：被移除的學員不可自行重新加入**。
+    # 全表唯一正是執行該規則的機制——一人一課恆為一列，`IS_REMOVED` 是唯一的成員開關。
+    #
+    # 🚨 不要改成 `postgresql_where=text('"IS_REMOVED" = false')`。改了會讓同一人同一課
+    # 出現多列，靜默打開那條被明確否決的路，並讓 US9 完課率分母（AC 22「分母不含已移除
+    # 學員」）與已加入清單去重出錯。
+    #
+    # 🔴 給 `ET-8`（標籤 / Email 邀請）：**重新邀請必須是 upsert，不能 INSERT**。被移除者
+    # 那一列還在，`INSERT` 會撞本約束並讓教師看到一個指向他看不見之列的資料庫錯誤。
+    # 正確作法：查得到既有列就把 `IS_REMOVED` 翻回 false、清空 `REMOVED_AT`，查不到才 INSERT。
     __table_args__ = (
         PrimaryKeyConstraint("ENROLLMENT_ID", name="PK_ET_ENROLLMENT"),
         UniqueConstraint("USER_ID", "COURSE_ID", name="UQ_ET_ENROLLMENT_USER_COURSE"),

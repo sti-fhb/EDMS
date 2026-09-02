@@ -882,7 +882,9 @@ export const handlers = [
     HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
   ),
   // ET02 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
-  http.get("/api/et/courses/capabilities", () => HttpResponse.json({ can_create_course: true })),
+  http.get("/api/et/courses/capabilities", () =>
+    HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
+  ),
   http.get("/api/et/tags", () =>
     HttpResponse.json([
       { tag_id: 1, tag_name: "全體", is_active: true },
@@ -977,6 +979,50 @@ export const handlers = [
       invitation_code: "01234567",
       version: 1,
     }),
+  ),
+
+  // ── ET04 我的課程與加入新課程（US4 / #247）────────────────────────────────
+  http.get("/api/et/my-courses", () =>
+    HttpResponse.json({
+      summary: { joined: 2, in_progress: 1, not_started: 1, completed: 0 },
+      courses: [
+        {
+          course_id: 1,
+          course_name: "採血作業新進人員訓練",
+          status: "PUBLISHED",
+          completion_status: "IN_PROGRESS",
+          tags: ["護理師", "軍人"],
+          chapter_count: 5,
+          open_start_at: "2026-04-15T09:00:00Z",
+          open_end_at: "2026-07-31T17:00:00Z",
+          progress_pct: 0,
+        },
+        {
+          course_id: 2,
+          course_name: "血品安全與品保概論",
+          status: "CLOSED",
+          completion_status: "NOT_STARTED",
+          tags: ["全體"],
+          chapter_count: 4,
+          open_start_at: "2026-05-01T08:00:00Z",
+          open_end_at: "2026-10-31T17:00:00Z",
+          progress_pct: 0,
+        },
+      ],
+    }),
+  ),
+  http.post("/api/et/enrollments/preview", () =>
+    HttpResponse.json({
+      course_id: 1,
+      course_name: "採血作業新進人員訓練",
+      owner_name: "王教師",
+      chapter_count: 5,
+      already_joined: false,
+      open_start_at: "2026-04-15T09:00:00Z",
+    }),
+  ),
+  http.post("/api/et/enrollments", () =>
+    HttpResponse.json({ course_id: 1, completion_status: "NOT_STARTED", pending_open: false }, { status: 201 }),
   ),
 ]
 

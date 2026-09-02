@@ -51,7 +51,7 @@ from app.et.course.schemas import (
 )
 from app.et.material.repository import EtMaterialRepository
 from app.et.quiz.repository import EtQuizRepository
-from app.et.roles.authz import ET_TEACHER
+from app.et.roles.authz import ET_ADMIN, ET_STUDENT, ET_TEACHER
 from app.services import AuditLogService
 
 _MODULE = "ET"
@@ -123,6 +123,7 @@ class EtCourseService:
         tag_ids = await self._tags.list_tag_ids(db, course_id)
         chapters = await self._chapters.list_by_course(db, course_id)
         items_by_chapter = await self._items_by_chapter(db, [c.chapter_id for c in chapters])
+        is_owner = course.owner_id == actor_id
         return CourseDetail(
             course_id=course.course_id,
             course_name=course.course_name,
@@ -134,8 +135,11 @@ class EtCourseService:
             version=course.version,
             owner_id=course.owner_id,
             owner_name=owner_name,
-            is_owner=course.owner_id == actor_id,
+            is_owner=is_owner,
             tag_ids=sorted(tag_ids),
+            # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者
+            # 收集全站邀請碼、自行加入任意課程，繞過 ET-4 的邀請門檻與限流。
+            invitation_code=course.invitation_code if is_owner else None,
             chapters=[
                 ChapterItem(
                     chapter_id=c.chapter_id,
@@ -308,7 +312,11 @@ class EtCourseService:
 
         純函式（不需 DB）——角色已由 `get_et_context` 查妥並放入 `EtContext`。
         """
-        return Capabilities(can_create_course=ET_TEACHER in roles)
+        return Capabilities(
+            can_create_course=ET_TEACHER in roles,
+            can_manage_courses=bool(roles & {ET_TEACHER, ET_ADMIN}),
+            can_learn=ET_STUDENT in roles,
+        )
 
     # ── 標籤下拉 ────────────────────────────────────────────────────────────
 

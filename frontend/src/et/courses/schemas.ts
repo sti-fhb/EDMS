@@ -32,6 +32,8 @@ export interface CourseDetail {
   is_owner: boolean
   tag_ids: number[]
   chapters: ChapterItem[]
+  /** 課程邀請碼；**僅 owner 可見**，非擁有者後端回 null（#247）。 */
+  invitation_code: string | null
 }
 
 export interface TagOption {
@@ -49,6 +51,10 @@ export interface CourseCreateResult {
 export interface Capabilities {
   /** 具教師角色（SA 裁示 Q2）→ 顯示「新增課程」入口。 */
   can_create_course: boolean
+  /** 具教師或管理者角色 → 顯示側欄教學管理項（課程列表 / 學員 / 核可查詢）。 */
+  can_manage_courses: boolean
+  /** 具學員角色 → 顯示側欄「我的課程」。 */
+  can_learn: boolean
 }
 
 export interface CoursePayload {
