@@ -5,6 +5,7 @@ import { ResetPasswordPage } from "./auth/ResetPasswordPage"
 import { VerifyEmailChangePage } from "./auth/VerifyEmailChangePage"
 import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { AppShell } from "./layouts/AppShell"
+import { RequireDmReviewer, RequireModuleAdmin } from "./layouts/RequireAccess"
 import { RootLayout } from "./layouts/RootLayout"
 import { DmChangeLogPage } from "./dm/changelog/DmChangeLogPage"
 import { DmDetailPage } from "./dm/detail/DmDetailPage"
@@ -49,7 +50,10 @@ export const router = createBrowserRouter([
           // 個人資料維護（US8）：所有登入者可用，改入統一 shell（側欄常駐）
           { path: "profile", element: <ProfilePage /> },
           {
+            // #250：整段 /dp 掛模組管理者守衛——直接輸入網址者顯示無權限畫面，
+            // 而非停在載入中（後端已回 403，但各頁無錯誤畫面）
             path: "dp",
+            element: <RequireModuleAdmin />,
             children: [
               { index: true, element: <Navigate to="/dp/users" replace /> },
               { path: "users", element: <UsersPage /> },
@@ -72,7 +76,15 @@ export const router = createBrowserRouter([
               { path: "documents/new", element: <DmEditorPage /> },
               { path: "documents/:docId/edit", element: <DmEditorPage /> },
               { path: "documents/:docId", element: <DmDetailPage /> },
-              { path: "review", element: <DmReviewPage /> },
+              // #250：限 DM_REVIEWER——原本直接輸入網址會渲染出簽核畫面空殼
+              {
+                path: "review",
+                element: (
+                  <RequireDmReviewer>
+                    <DmReviewPage />
+                  </RequireDmReviewer>
+                ),
+              },
               { path: "me", element: <DmPersonalPage /> },
               { path: "obsolete", element: <DmObsoletePage /> },
               { path: "change-log", element: <DmChangeLogPage /> },

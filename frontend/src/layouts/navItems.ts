@@ -27,21 +27,6 @@ export interface NavGroup {
 
 export const NAV_GROUPS: readonly NavGroup[] = [
   {
-    // requiresAnyModuleAdmin（#250）：原為「過渡期對所有登入者顯示」，收斂為模組管理者專用。
-    // 側欄與後端閘同源（module-summary 的 is_admin ↔ require_any_module_admin），
-    // 避免側欄承諾閘不給的東西。
-    title: "系統管理者後台",
-    requiresAnyModuleAdmin: true,
-    items: [
-      { label: "使用者管理", path: "/dp/users" },
-      { label: "系統參數", path: "/dp/params" },
-      { label: "通知範本", path: "/dp/templates" },
-      { label: "角色 / 權限", path: "/dp/roles" },
-      { label: "稽核日誌", path: "/dp/audit" },
-      { label: "排程總覽", path: "/dp/schedule" },
-    ],
-  },
-  {
     // 教育訓練（#202）：對齊 wireframe ET 側欄 4 項；課程列表以外各頁目前為骨架佔位。
     // requiresModule=ET：無任一 ET 角色者整個群組不顯示（module-summary 判定；
     // 該端點之 ET 判定已於 #201 由寫死 true 改為實查 et_has_any_role）。
@@ -70,6 +55,21 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
       { label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
       { label: "閱讀統計 KPI", path: "/dm/kpi" },
+    ],
+  },
+  {
+    // requiresAnyModuleAdmin（#250）：原為「過渡期對所有登入者顯示」，收斂為模組管理者專用。
+    // 側欄與後端閘同源（module-summary 的 is_admin ↔ require_any_module_admin），
+    // 避免側欄承諾閘不給的東西。
+    title: "系統管理者後台",
+    requiresAnyModuleAdmin: true,
+    items: [
+      { label: "使用者管理", path: "/dp/users" },
+      { label: "系統參數", path: "/dp/params" },
+      { label: "通知範本", path: "/dp/templates" },
+      { label: "角色 / 權限", path: "/dp/roles" },
+      { label: "稽核日誌", path: "/dp/audit" },
+      { label: "排程總覽", path: "/dp/schedule" },
     ],
   },
 ]

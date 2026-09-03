@@ -165,6 +165,15 @@ describe("Sidebar", () => {
     expect(screen.queryByText("使用者管理")).not.toBeInTheDocument()
   })
 
+  it("群組由上而下的順序為：教育訓練 → 文件管理 → 系統管理者後台", async () => {
+    renderWithProviders(<Sidebar />)
+    await screen.findByText("系統管理者後台")
+    const nav = screen.getByRole("navigation", { name: "主導覽" })
+    const titles = Array.from(nav.querySelectorAll("span")).map((el) => el.textContent)
+    const groupTitles = titles.filter((t) => t && ["教育訓練", "文件管理", "系統管理者後台"].includes(t))
+    expect(groupTitles).toEqual(["教育訓練", "文件管理", "系統管理者後台"])
+  })
+
   it("每個顯示中的導覽項目連到對應路由", async () => {
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())

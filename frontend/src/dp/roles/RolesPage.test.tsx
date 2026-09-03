@@ -53,39 +53,29 @@ describe("RolesPage 權限管理", () => {
     expect(screen.queryByText(/^admin｜/)).not.toBeInTheDocument()
   })
 
-  it("停用帳號：列標示「已停用」、未持有的角色不可勾選（#250 AC1）", async () => {
+  it("停用帳號：列標示「已停用」、整列不可操作（#250 AC1）", async () => {
     renderWithProviders(<RolesPage />)
     const row = (await screen.findByText("林離職")).closest("tr")!
     expect(within(row).getByText("已停用")).toBeInTheDocument()
-    // u2 未持有任何角色 → 四個核取皆為「新增」方向，一律禁用
     expect(within(row).getByRole("checkbox", { name: "林離職 編輯者" })).toBeDisabled()
     expect(within(row).getByRole("checkbox", { name: "林離職 管理者" })).toBeDisabled()
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeDisabled()
   })
 
-  it("鎖定中帳號：列標示「已鎖定」、未持有的角色不可勾選（#250 AC2）", async () => {
+  it("鎖定中帳號：列標示「已鎖定」、整列不可操作（#250 AC2）", async () => {
     renderWithProviders(<RolesPage />)
     const row = (await screen.findByText("陳鎖定")).closest("tr")!
     expect(within(row).getByText("已鎖定")).toBeInTheDocument()
-    expect(within(row).getByRole("checkbox", { name: "陳鎖定 編輯者" })).toBeDisabled()
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeDisabled()
   })
 
-  it("停用 / 鎖定帳號仍可撤除既有權限（Security Review MEDIUM-3：保留離職降權路徑）", async () => {
+  it("停用 / 鎖定帳號連「已持有」的角色也不可撤除（整列唯讀，SA 裁示）", async () => {
     renderWithProviders(<RolesPage />)
-    // u3 陳鎖定持有閱覽者 → 該核取為「撤除」方向，須可操作
+    // u3 陳鎖定持有閱覽者——即使是撤除方向也不可操作，降權須先啟用帳號
     const row = (await screen.findByText("陳鎖定")).closest("tr")!
     const held = within(row).getByRole("checkbox", { name: "陳鎖定 閱覽者" })
     expect(held).toBeChecked()
-    expect(held).toBeEnabled()
-    // 可見對象編輯鈕保持可用（dialog 內只允許取消已選項）
-    expect(within(row).getByRole("button", { name: "編輯" })).toBeEnabled()
-  })
-
-  it("撤除停用帳號之角色 → 送出並顯示成功（不被前端擋下）", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<RolesPage />)
-    const row = (await screen.findByText("陳鎖定")).closest("tr")!
-    await user.click(within(row).getByRole("checkbox", { name: "陳鎖定 閱覽者" }))
-    expect(await screen.findByText("角色 / 標籤已更新並即時生效")).toBeInTheDocument()
+    expect(held).toBeDisabled()
   })
 
   it("正常帳號不受影響：無狀態標籤、可操作（#250 迴歸）", async () => {

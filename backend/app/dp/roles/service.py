@@ -78,11 +78,11 @@ class RolesService:
         """指派角色 / 群組（委派模組 provider）；自我保護（模組 403）統一映射為 DP_ROLE_002。
 
         Raises:
-            AppError: 對停用 / 鎖定中帳號**新增**權限（403 DP_ROLE_004，純撤權不擋）；
-                非本模組管理者（403 DP_ROLE_001）；模組自我保護（403 DP_ROLE_002）。
+            AppError: 目標帳號已停用 / 鎖定中（403 DP_ROLE_004）；非本模組管理者
+                （403 DP_ROLE_001）；模組自我保護（403 DP_ROLE_002）。
         """
         provider = await self._require_manageable(db, module, operator.user_id)
-        await self._require_grantable_target(db, provider, user_id, roles=roles, groups=groups)
+        await self._require_usable_target(db, user_id)
         try:
             await provider.assign(
                 db, user_id=user_id, roles=set(roles), groups=set(groups), operator_id=operator.user_id
@@ -100,21 +100,15 @@ class RolesService:
         audiences = await provider.list_audiences(db)
         return [GroupOption(code=a.code, name=a.name) for a in audiences]
 
-    async def _require_grantable_target(
-        self,
-        db: AsyncSession,
-        provider: ModuleAssignProvider,
-        user_id: str,
-        *,
-        roles: list[str],
-        groups: list[str],
-    ) -> None:
-        """停用 / 鎖定中的帳號只可**撤權**、不可新增權限（#250）。
+    async def _require_usable_target(self, db: AsyncSession, user_id: str) -> None:
+        """停用 / 鎖定中的帳號不可指派權限——加權與降權皆擋（#250，SA 裁示）。
 
-        已登不進系統的帳號不該取得新權限；但 `assign` 為**整組目標集覆寫**，若一律擋下，
-        離職 / 疑遭盜用的帳號就再也無法降權——權限凍結在原狀，日後重新啟用時原封不動復活、
-        不經重新核可，牴觸最小權限原則（Security Review MEDIUM-3）。故只擋提權：
-        目標集為現況之子集（純撤除）一律放行，超出現況才視為新增而拒絕。
+        已登不進系統的帳號卻持有可操作的權限，語意矛盾；畫面已將該列整列唯讀，本檢核擋前端繞過。
+
+        **為何連撤權也擋**：`assign` 為整組目標集覆寫，區分「提權 / 降權」需比對現況，
+        規則變複雜且畫面得在同一列混合可點與不可點的核取方塊。SA 裁示採「整列唯讀」，
+        需要降權時走既有路徑：**先於使用者管理頁啟用帳號 → 撤權 → 再停用**。
+        （Security Review MEDIUM-3 曾建議只擋提權，經 SA 評估後不採，理由如上。）
 
         **查無 DP_USER 者不擋**：對尚未建帳號的 USER_ID 指派為既有允許行為
         （模組角色表無 FK 至 `DP_USER`），本 issue 不改變該行為。軟刪除之帳號同樣回 None
@@ -122,19 +116,13 @@ class RolesService:
         （離職走 DISABLED），若日後新增則需重新檢視此分支語意。
 
         Raises:
-            AppError: 對停用 / 鎖定中帳號新增角色或群組（403 DP_ROLE_004）。
+            AppError: 帳號已停用或鎖定中（403 DP_ROLE_004）。
         """
         account = await self._users.get_account_status(db, user_id)
         if account is None:
             return
-        if is_account_usable(status=account.status, locked_until=account.locked_until, now=utcnow()):
-            return
-        current = (await provider.get_users_assignments(db, [user_id])).get(user_id)
-        current_roles = set(current.roles) if current else set()
-        current_groups = set(current.groups) if current else set()
-        if set(roles) <= current_roles and set(groups) <= current_groups:
-            return  # 純撤權（目標集未超出現況）
-        raise AppError(status_code=403, detail="此帳號已停用或鎖定，無法新增權限", error_code="DP_ROLE_004")
+        if not is_account_usable(status=account.status, locked_until=account.locked_until, now=utcnow()):
+            raise AppError(status_code=403, detail="此帳號已停用或鎖定，無法指派權限", error_code="DP_ROLE_004")
 
     async def _require_manageable(self, db: AsyncSession, module: str, user_id: str) -> ModuleAssignProvider:
         """模組過濾閘：未註冊 provider → 404 DP_ROLE_003；非該模組管理者 → 403 DP_ROLE_001（越權，ROLES-003 呈現）。"""
