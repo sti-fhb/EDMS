@@ -76,6 +76,18 @@ def resolve_upload_mime(file_bytes: bytes, filename: str, declared_mime: str | N
     return declared_mime if declared and not is_previewable(declared) else "application/octet-stream"
 
 
+async def enforce_size_limit(db: AsyncSession, *, size_bytes: int, params: ParamService | None = None) -> None:
+    """僅檢核大小不逾 `DM_FILE_MAX_MB`（供 router 於 `read()` 前以 `UploadFile.size` 先擋，避免整包載入記憶體）。
+
+    Raises:
+        AppError: 超過大小上限（422 DM_FILE_001）。
+    """
+    svc = params or ParamService()
+    max_mb = await svc.get_int_param(db, "DM_FILE_MAX_MB", "VALUE", _DEFAULT_MAX_MB)
+    if size_bytes > max_mb * _MB:
+        raise AppError(status_code=422, detail="檔案大小超過上限", error_code="DM_FILE_001")
+
+
 async def validate_upload(
     db: AsyncSession, *, size_bytes: int, filename: str, params: ParamService | None = None
 ) -> None:
@@ -85,9 +97,7 @@ async def validate_upload(
         AppError: 超過大小上限（422 DM_FILE_001）、不支援格式（422 DM_FILE_002）。
     """
     svc = params or ParamService()
-    max_mb = await svc.get_int_param(db, "DM_FILE_MAX_MB", "VALUE", _DEFAULT_MAX_MB)
-    if size_bytes > max_mb * _MB:
-        raise AppError(status_code=422, detail="檔案大小超過上限", error_code="DM_FILE_001")
+    await enforce_size_limit(db, size_bytes=size_bytes, params=svc)
 
     # fail-closed：DM_FILE_TYPES 缺值 / 清空 → 退回安全預設白名單，格式檢核恆執行（T066 L2）
     allowed = await svc.get_param_value(db, "DM_FILE_TYPES", "VALUE")

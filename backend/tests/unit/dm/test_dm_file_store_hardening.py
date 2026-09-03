@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.exceptions import AppError
-from app.dm.document.file_store import is_previewable, resolve_upload_mime, validate_upload
+from app.dm.document.file_store import enforce_size_limit, is_previewable, resolve_upload_mime, validate_upload
 
 pytestmark = pytest.mark.unit
 
@@ -52,6 +52,19 @@ async def test_oversize_still_blocked():
     with pytest.raises(AppError) as ei:
         await validate_upload(None, size_bytes=999 * 1024 * 1024, filename="ok.pdf", params=_StubParam(max_mb=50))
     assert ei.value.error_code == "DM_FILE_001"
+
+
+# ── M1：read() 前之大小預檢（enforce_size_limit）──
+
+
+async def test_enforce_size_limit_over_raises():
+    with pytest.raises(AppError) as ei:
+        await enforce_size_limit(None, size_bytes=2 * 1024 * 1024, params=_StubParam(max_mb=1))
+    assert ei.value.error_code == "DM_FILE_001"
+
+
+async def test_enforce_size_limit_within_ok():
+    await enforce_size_limit(None, size_bytes=100, params=_StubParam(max_mb=1))
 
 
 # ── M2：magic-byte 判定權威 MIME（可預覽 ⟺ 已驗證）──
