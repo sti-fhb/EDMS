@@ -67,37 +67,40 @@ async def test_enforce_size_limit_within_ok():
     await enforce_size_limit(None, size_bytes=100, params=_StubParam(max_mb=1))
 
 
-# ── M2：magic-byte 判定權威 MIME（可預覽 ⟺ 已驗證）──
+# ── M2：伺服端由副檔名 + magic 判定權威 MIME（可預覽 ⟺ 已驗證；完全不採用戶端 content_type）──
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def test_previewable_ext_matching_magic_returns_authoritative_mime():
-    assert resolve_upload_mime(_PDF_MAGIC, "a.pdf", "application/pdf") == "application/pdf"
-    assert resolve_upload_mime(_PNG_MAGIC, "b.png", "image/png") == "image/png"
+    assert resolve_upload_mime(_PDF_MAGIC, "a.pdf") == "application/pdf"
+    assert resolve_upload_mime(_PNG_MAGIC, "b.png") == "image/png"
     # jpg / jpeg 皆歸 image/jpeg
-    assert resolve_upload_mime(b"\xff\xd8\xff\xe0xxxx", "c.jpg", "image/jpeg") == "image/jpeg"
+    assert resolve_upload_mime(b"\xff\xd8\xff\xe0xxxx", "c.jpg") == "image/jpeg"
 
 
 def test_previewable_ext_wrong_magic_rejected():
     """.pdf 副檔名但檔頭非 PDF（evil.exe 改名 evil.pdf）→ DM_FILE_002。"""
     with pytest.raises(AppError) as ei:
-        resolve_upload_mime(b"MZ\x90\x00 not a pdf", "evil.pdf", "application/pdf")
+        resolve_upload_mime(b"MZ\x90\x00 not a pdf", "evil.pdf")
     assert ei.value.error_code == "DM_FILE_002"
 
 
-def test_previewable_ext_ignores_client_mime_uses_server():
-    """.png 內容實為 PDF → 以副檔名 png 之期望比對（magic 非 PNG）→ 擋（不信用戶端 content_type）。"""
+def test_png_ext_with_pdf_content_rejected():
+    """.png 副檔名但內容實為 PDF → magic 與副檔名不符 → 擋（伺服端判定，非信用戶端）。"""
     with pytest.raises(AppError):
-        resolve_upload_mime(_PDF_MAGIC, "x.png", "image/png")
+        resolve_upload_mime(_PDF_MAGIC, "x.png")
 
 
-def test_non_previewable_ext_keeps_office_mime():
-    office = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    assert resolve_upload_mime(b"PK\x03\x04....", "d.docx", office) == office
-    assert is_previewable(resolve_upload_mime(b"PK\x03\x04....", "d.docx", office)) is False
+def test_office_ext_derives_server_mime_not_previewable():
+    """Office 副檔名 → 落地 MIME 由伺服端映射（權威）、非可預覽（僅下載）。"""
+    resolved = resolve_upload_mime(b"PK\x03\x04....", "d.docx")
+    assert resolved == _DOCX_MIME
+    assert is_previewable(resolved) is False
 
 
-def test_non_previewable_ext_strips_lied_previewable_mime():
-    """非可預覽副檔名但用戶端謊報可預覽 MIME → 剝除為 octet-stream（不會被當可預覽內嵌）。"""
-    resolved = resolve_upload_mime(b"MZ\x90\x00 exe", "sneaky.docx", "image/png")
+def test_unknown_ext_falls_back_to_octet_stream():
+    """未知/未映射副檔名 → application/octet-stream（非可預覽），完全不受用戶端宣稱影響。"""
+    resolved = resolve_upload_mime(b"<html>evil</html>", "sneaky.bin")
     assert resolved == "application/octet-stream"
     assert is_previewable(resolved) is False

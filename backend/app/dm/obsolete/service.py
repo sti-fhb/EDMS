@@ -86,8 +86,8 @@ class ObsoleteService:
         resolved_mime: str | None = None
         if file_bytes:
             await validate_upload(db, size_bytes=len(file_bytes), filename=file_name or "")
-            # M2：伺服端 magic-byte 判定權威 MIME（可預覽類須與副檔名相符，否則 DM_FILE_002）
-            resolved_mime = resolve_upload_mime(file_bytes, file_name or "", file_mime)
+            # M2：伺服端由副檔名 + magic 判定權威 MIME（可預覽類須相符，否則 DM_FILE_002）；不採用戶端 content_type
+            resolved_mime = resolve_upload_mime(file_bytes, file_name or "")
         # 建送審週期（OBSOLETE、指向當前發布版）：審核者=本人 → DM_REVIEW_001；
         # 已有進行中送審（含新版本）→ DM_REVIEW_002（一文件一 PENDING，FR-004）
         review = await self._reviews.submit(

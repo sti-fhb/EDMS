@@ -34,14 +34,22 @@ def is_previewable(mime: str) -> bool:
     return mime.lower() in _PREVIEWABLE_MIMES
 
 
-# 可內嵌預覽副檔名 → 其權威 MIME（magic-byte 驗證用）。Office / 壓縮類簽章弱且非可預覽，不列入。
-_EXT_TO_PREVIEWABLE_MIME = {
+# 副檔名 → 權威 MIME（**伺服端判定、完全不採用戶端 content_type**）。可預覽類（前 5 項）另需 magic 驗證。
+_EXT_TO_MIME = {
     "pdf": "application/pdf",
     "png": "image/png",
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
     "gif": "image/gif",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xls": "application/vnd.ms-excel",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "ppt": "application/vnd.ms-powerpoint",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
+# 可內嵌預覽副檔名（須 magic 驗證真實型別）；其權威 MIME 見 _EXT_TO_MIME。
+_PREVIEWABLE_EXTS = frozenset({"pdf", "png", "jpg", "jpeg", "gif"})
 
 
 def sniff_previewable_mime(head: bytes) -> str | None:
@@ -57,23 +65,20 @@ def sniff_previewable_mime(head: bytes) -> str | None:
     return None
 
 
-def resolve_upload_mime(file_bytes: bytes, filename: str, declared_mime: str | None) -> str:
-    """伺服端判定落地 MIME，杜絕「可預覽 MIME 未經 magic 驗證即內嵌」之 XSS/MIME sniffing 面（T066 M2）。
+def resolve_upload_mime(file_bytes: bytes, filename: str) -> str:
+    """**伺服端**由副檔名 + magic bytes 判定落地 MIME，**完全不採用戶端 content_type**（T066 M2）。
 
     不變量：**回傳之 MIME 為可預覽 ⟺ 已 magic-byte 驗證**。
-    - 副檔名屬可預覽類（pdf/png/jpg/jpeg/gif）：檔頭 magic 必須為對應型別，否則 `DM_FILE_002`（真實型別
-      與副檔名不符，防 evil.exe 改名 evil.pdf）；回**伺服端判定之權威 MIME**（不採用戶端 content_type）。
-    - 其餘（Office 等非可預覽）：不強制 magic（其簽章弱、且一律僅下載不內嵌）；但**剝除**用戶端謊報的
-      可預覽 MIME（改回 `application/octet-stream`），確保非驗證檔不會被當可預覽內嵌。
+    - 落地 MIME 一律取 `_EXT_TO_MIME[ext]`（白名單映射；未知副檔名 → `application/octet-stream`）——杜絕
+      用戶端謊報 MIME（含謊報 `text/html` / `image/svg+xml` 等非可預覽但可渲染型別）寫入 DB。
+    - 可預覽類副檔名（pdf/png/jpg/jpeg/gif）另要求檔頭 magic 為對應型別，否則 `DM_FILE_002`（真實型別
+      與副檔名不符，防 evil.exe 改名 evil.pdf 之內嵌 XSS）。
     """
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    expected = _EXT_TO_PREVIEWABLE_MIME.get(ext)
-    if expected is not None:
-        if sniff_previewable_mime(file_bytes[:16]) != expected:
-            raise AppError(status_code=422, detail="檔案內容與副檔名不符", error_code="DM_FILE_002")
-        return expected
-    declared = (declared_mime or "").lower()
-    return declared_mime if declared and not is_previewable(declared) else "application/octet-stream"
+    mime = _EXT_TO_MIME.get(ext, "application/octet-stream")
+    if ext in _PREVIEWABLE_EXTS and sniff_previewable_mime(file_bytes[:16]) != mime:
+        raise AppError(status_code=422, detail="檔案內容與副檔名不符", error_code="DM_FILE_002")
+    return mime
 
 
 async def enforce_size_limit(db: AsyncSession, *, size_bytes: int, params: ParamService | None = None) -> None:
