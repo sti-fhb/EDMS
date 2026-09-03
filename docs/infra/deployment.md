@@ -76,7 +76,7 @@ flowchart TD
 | §2.1～§2.3（GCP 設定） | **開發者自己的電腦或 Cloud Shell**——見 [edms-gcp-setup.md](edms-gcp-setup.md)，該檔有完整指令 | 不用 |
 | §2.4（VM 前置） | **bms-prod-02** | 要 |
 | §2.5 的「本機開發起手」 | **開發者自己的電腦** | 不用 |
-| §3（觀察與排查） | **bms-prod-02** | 唯讀不用，操作容器要 |
+| §3（觀察與排查） | **bms-prod-02** | **docker 一律要**；systemctl／journalctl 不用 |
 | §4.1（client IP 驗收） | **bms-prod-02** | 要 |
 | §5 的 psql 維護 | **bms-prod-02** | 要 |
 
@@ -210,16 +210,20 @@ docker compose up -d           # 自動套用 docker-compose.override.yml
 
 ## 3. 觀察與排查
 
-以下指令**在 bms-prod-02 上執行**。唯讀查詢不需 `sudo`（該機帳號在 `adm` 群組，讀得到 journal）；操作容器與觸發部署則需要。
+以下指令**在 bms-prod-02 上執行**。
+
+⚠️ **所有 `docker` 指令都要 `sudo`**，包含 `logs`、`ps`、`inspect` 這類唯讀操作——維運帳號不在 `docker` 群組，直接執行會得到 `permission denied while trying to connect to the docker API`。
+
+不需 `sudo` 的只有 `systemctl status` / `list-timers` 與 `journalctl`（該機帳號在 `adm` 群組，讀得到 journal）。
 
 ```bash
-systemctl status edms-deploy.timer          # 排程是否啟用
+systemctl status edms-deploy.timer          # 排程是否啟用（不需 sudo）
 systemctl list-timers edms-deploy.timer     # 下次觸發時間
 tail -50 /opt/edms/deploy.log               # 部署紀錄（無變動時不寫）
 cat /opt/edms/deployed.sha                  # 目前部署的 commit
 journalctl -u edms-deploy.service -n 50     # 執行失敗的細節
 
-sudo docker compose -f /opt/edms/repo/docker-compose.yml \
+sudo docker compose -p edms -f /opt/edms/repo/docker-compose.yml \
      -f /opt/edms/repo/docker-compose.prod.yml ps
 ```
 
