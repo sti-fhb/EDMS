@@ -13,6 +13,7 @@ from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
 from app.dm.deps import DmContext, get_dm_context
+from app.dm.document.file_store import enforce_size_limit
 from app.dm.editor.schemas import (
     CreateResult,
     DraftMeta,
@@ -36,10 +37,16 @@ def _ensure_editor(ctx: DmContext) -> None:
         raise AppError(status_code=403, detail="需要文件編輯者權限", error_code="DM_AUTH_002")
 
 
-async def _read_upload(file: UploadFile | None) -> tuple[str | None, bytes | None, str | None]:
-    """讀取選填上傳檔 → (檔名, bytes, mime)；未附檔（存草稿允許）回 (None, None, None)。"""
+async def _read_upload(db: AsyncSession, file: UploadFile | None) -> tuple[str | None, bytes | None, str | None]:
+    """讀取選填上傳檔 → (檔名, bytes, mime)；未附檔（存草稿允許）回 (None, None, None)。
+
+    M1：`read()` 前先以 `UploadFile.size`（Starlette 由 Content-Length / spool 提供）對照大小上限先擋，
+    避免過大 body 整包載入記憶體造成認證後 DoS；讀入後仍由 service 之 `validate_upload` 精確複檢。
+    """
     if file is None:
         return None, None, None
+    if file.size is not None:
+        await enforce_size_limit(db, size_bytes=file.size)
     return file.filename or "", await file.read(), file.content_type or "application/octet-stream"
 
 
@@ -60,7 +67,7 @@ async def create_document(
 ):
     """新增模式：建 DRAFT 文件（配 DOC_ID）+ DRAFT 首版 + 標籤。存草稿不卡必填（僅分類必填）。"""
     _ensure_editor(ctx)
-    file_name, data, file_mime = await _read_upload(file)
+    file_name, data, file_mime = await _read_upload(db, file)
     return await _service.create_document(
         db,
         doc_name=doc_name,
@@ -93,7 +100,7 @@ async def add_version(
 ):
     """編輯模式：既有文件加 DRAFT 版本（身份欄不吃）+ 覆寫文件層標籤。存草稿不卡必填。"""
     _ensure_editor(ctx)
-    file_name, data, file_mime = await _read_upload(file)
+    file_name, data, file_mime = await _read_upload(db, file)
     return await _service.add_version(
         db,
         doc_id=doc_id,
@@ -127,7 +134,7 @@ async def update_draft_version(
 ):
     """續編：更新既有 DRAFT 版本（in-place，不另開版本）+ 文件層標籤覆寫；父文件 DRAFT 時可一併改名 / func（#222）。"""
     _ensure_editor(ctx)
-    file_name, data, file_mime = await _read_upload(file)
+    file_name, data, file_mime = await _read_upload(db, file)
     return await _service.update_draft_version(
         db,
         doc_id=doc_id,

@@ -12,6 +12,7 @@ from sqlalchemy import ColumnElement, Row, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.document.visibility import visible_docs_condition
@@ -45,12 +46,17 @@ class LibraryRepository:
             DmDocument.status.in_(_LIBRARY_STATUSES),
         ]
         if keyword:
-            pattern = f"%{keyword}%"
-            conds.append(or_(DmDocument.doc_name.ilike(pattern), DmDocVersion.change_summary.ilike(pattern)))
+            pattern = contains(keyword)
+            conds.append(
+                or_(
+                    DmDocument.doc_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                    DmDocVersion.change_summary.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                )
+            )
         if category:
             conds.append(DmDocument.category_code == category)
         if author:
-            conds.append(DpUser.user_name.ilike(f"%{author}%"))
+            conds.append(DpUser.user_name.ilike(contains(author), escape=LIKE_ESCAPE_CHAR))
         if func_code:
             conds.append(DmDocument.func_code == func_code)
         if date_from:

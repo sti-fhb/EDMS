@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from sqlalchemy import Row, Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmCategory, DmTag
 from app.dm.document.models import DmDocRead, DmDocTag, DmDocument, DmDocVersion
@@ -42,7 +43,7 @@ class KpiRepository:
         """
         conds = [DmDocument.status.in_(_LIVE_STATUSES), DmDocument.current_version_id.isnot(None)]
         if keyword:
-            conds.append(DmDocument.doc_name.ilike(f"%{keyword}%"))
+            conds.append(DmDocument.doc_name.ilike(contains(keyword), escape=LIKE_ESCAPE_CHAR))
         if category:
             conds.append(DmDocument.category_code == category)
         return (

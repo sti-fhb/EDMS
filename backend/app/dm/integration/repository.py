@@ -6,14 +6,13 @@
 from sqlalchemy import Row, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dm.document.models import DmDocument, DmDocVersion
 
 _PUBLISHED = "PUBLISHED"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
 # 對外有效（可供 ET 引用清單）之文件狀態：在架（含廢止待簽核，仍對外有效）；OBSOLETE 不列。
 _LIST_STATUSES = (_PUBLISHED, _PENDING_OBSOLETE)
-# LIKE 萬用字元轉義（keyword 防「% 命中全部」；值仍走參數化綁定）
-_LIKE_ESCAPE = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_"})
 
 
 class IntegrationRepository:
@@ -45,8 +44,7 @@ class IntegrationRepository:
             .order_by(DmDocVersion.published_date.desc(), DmDocument.doc_id)
         )
         if keyword:
-            esc = keyword.translate(_LIKE_ESCAPE)
-            stmt = stmt.where(DmDocument.doc_name.ilike(f"%{esc}%", escape="\\"))
+            stmt = stmt.where(DmDocument.doc_name.ilike(contains(keyword), escape=LIKE_ESCAPE_CHAR))
         if func_code:
             stmt = stmt.where(DmDocument.func_code == func_code)
         return list((await db.execute(stmt)).all())
