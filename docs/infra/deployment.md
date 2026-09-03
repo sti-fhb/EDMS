@@ -76,7 +76,8 @@ flowchart TD
 | §2.1～§2.3（GCP 設定） | **開發者自己的電腦或 Cloud Shell**——見 [edms-gcp-setup.md](edms-gcp-setup.md)，該檔有完整指令 | 不用 |
 | §2.4（VM 前置） | **bms-prod-02** | 要 |
 | §2.5 的「本機開發起手」 | **開發者自己的電腦** | 不用 |
-| §3（觀察與排查） | **bms-prod-02** | 唯讀不用，操作容器要 |
+| §2.6（寄信設定） | **bms-prod-02** | 要 |
+| §3（觀察與排查） | **bms-prod-02** | **docker 一律要**；systemctl／journalctl 不用 |
 | §4.1（client IP 驗收） | **bms-prod-02** | 要 |
 | §5 的 psql 維護 | **bms-prod-02** | 要 |
 
@@ -123,7 +124,14 @@ flowchart TD
 在 bms-prod-02 上執行，**需要 `sudo`**（`/opt` 寫入與 docker 操作皆然；一般帳號未在 `docker` 群組內）。與 §2.1～§2.3 的 GCP 設定互相獨立，兩邊可平行進行。
 
 ```bash
+# DB 資料
 sudo mkdir -p /opt/edms/data/postgres
+
+# DM 受控文件與 ET 影音教材的存放目錄。
+# owner 必須是 10001（映像內 app 使用者的 uid，見 backend/Dockerfile）——
+# 否則容器啟動成功、上傳卻靜默失敗。
+sudo mkdir -p /opt/edms/data/dm_files /opt/edms/data/et_videos
+sudo chown -R 10001:10001 /opt/edms/data/dm_files /opt/edms/data/et_videos
 sudo git clone https://github.com/sti-fhb/EDMS.git /opt/edms/repo   # public，免認證
 
 # 機密設定，不進 git
@@ -144,10 +152,15 @@ sudo systemctl enable --now edms-deploy.timer
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
 DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
+TRUSTED_PROXY_COUNT=3
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
+DM_FILE_STORAGE_ROOT=/app/var/dm_files
+ET_VIDEO_STORAGE_ROOT=/app/var/et_videos
 EDMS_BACKUP_BUCKET=gs://...
 ```
+
+完整欄位以 [`.env.example`](../../.env.example) 為準。production（`DEBUG=false`）另有數項會在啟動時擋下的護欄：`FRONTEND_BASE_URL` 不得指向 localhost、`TRUSTED_PROXY_COUNT` 必須明示、兩個儲存根目錄必須為絕對路徑。
 
 ⚠️ 兩點容易出錯：
 
@@ -181,6 +194,8 @@ journalctl -u edms-deploy.service -n 30
 | `/opt/edms/.env.prod` | **正式環境**，放在 VM 上。`vm-deploy.sh` 部署時複製進 `/opt/edms/repo/.env.prod` | ❌ |
 | `backend/.env.example`、`frontend/.env.example` | 供「不透過 docker」直接跑起服務時使用 | ✅ |
 
+`MAIL_*` 一組設定於 `/opt/edms/.env.prod`，見 §2.6。
+
 本機開發起手（在**開發者自己的電腦**上，不是 bms-prod-02）：
 
 ```bash
@@ -190,7 +205,49 @@ docker compose up -d           # 自動套用 docker-compose.override.yml
 
 > ⚠️ 本 repo 為 **public**。`.gitignore` 已擋住 `.env` 與 `.env.*`（範本除外），但**填了實際值的檔案一律不得進版控**——一旦被追蹤即等同公開。
 
-### 2.6 Cloudflare
+### 2.6 寄信（SMTP）
+
+註冊、帳號啟用、忘記密碼、到期通知都要寄信。未設定時這些流程會失敗——**沒有 SMTP 就沒有人能自行註冊或重設密碼**。
+
+沿用 TBMS 的做法：**Gmail SMTP、埠 465、implicit TLS**，且**共用 TBMS 的寄件帳號**（2026-09-03 決定）。憑證直接從 `/opt/tbms/.env.prod` 複製，不經過任何人的畫面：
+
+```bash
+sudo bash -c '
+  {
+    echo "MAIL_SERVER=smtp.gmail.com"
+    echo "MAIL_PORT=465"
+    echo "MAIL_STARTTLS=false"
+    echo "MAIL_SSL_TLS=true"
+    grep -E "^MAIL_USERNAME=" /opt/tbms/.env.prod
+    grep -E "^MAIL_PASSWORD=" /opt/tbms/.env.prod
+    grep -E "^MAIL_FROM=" /opt/tbms/.env.prod | head -1
+  } >> /opt/edms/.env.prod
+'
+sudo chmod 600 /opt/edms/.env.prod
+```
+
+> `MAIL_FROM` 加 `head -1`：`/opt/tbms/.env.prod` 有重複行。
+
+改完**必須重建容器**——`env_file` 是容器啟動時讀取的：
+
+```bash
+cd /opt/edms/repo
+sudo docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate edms-backend
+```
+
+#### 共用帳號的三個已知代價
+
+1. **寄件人顯示為 TBMS 的信箱**（`tbsfnoreply@gmail.com`）——收信者看到的是血庫系統的信箱寄來教育訓練通知。若日後要給院方或 SA 使用，這個混淆值得另外處理
+2. **共用 Gmail 每日約 500 封的額度**——平常用量遠低於此，但 ET 若加入批次通知功能要留意
+3. **安全邊界**——該組 App Password 存在 `/opt/edms/.env.prod`。EDMS 為 public repo、次級系統，一旦遭入侵，攻擊者能以血庫系統的官方寄件人身分發信。**改用 EDMS 專屬帳號可消除此項**，屆時只需換 `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM` 三行並重建容器
+
+> Gmail SMTP **不接受一般登入密碼**，一律要用 App Password（16 碼，帳號須先開啟兩階段驗證）。日後若要另開帳號，這是第一步。
+
+#### 驗證
+
+在 `https://edms.tbsf.tw/` 走一次「忘記密碼」，確認信箱收到。失敗時看 `sudo docker logs edms-backend --tail 30`。
+
+### 2.7 Cloudflare
 
 `edms.tbsf.tw` 的 public hostname 指向 `http://10.140.0.3:80`（與 TBMS 同一目的地，由 front-proxy 依 Host 分流）。此項已完成。
 
@@ -198,16 +255,20 @@ docker compose up -d           # 自動套用 docker-compose.override.yml
 
 ## 3. 觀察與排查
 
-以下指令**在 bms-prod-02 上執行**。唯讀查詢不需 `sudo`（該機帳號在 `adm` 群組，讀得到 journal）；操作容器與觸發部署則需要。
+以下指令**在 bms-prod-02 上執行**。
+
+⚠️ **所有 `docker` 指令都要 `sudo`**，包含 `logs`、`ps`、`inspect` 這類唯讀操作——維運帳號不在 `docker` 群組，直接執行會得到 `permission denied while trying to connect to the docker API`。
+
+不需 `sudo` 的只有 `systemctl status` / `list-timers` 與 `journalctl`（該機帳號在 `adm` 群組，讀得到 journal）。
 
 ```bash
-systemctl status edms-deploy.timer          # 排程是否啟用
+systemctl status edms-deploy.timer          # 排程是否啟用（不需 sudo）
 systemctl list-timers edms-deploy.timer     # 下次觸發時間
 tail -50 /opt/edms/deploy.log               # 部署紀錄（無變動時不寫）
 cat /opt/edms/deployed.sha                  # 目前部署的 commit
 journalctl -u edms-deploy.service -n 50     # 執行失敗的細節
 
-sudo docker compose -f /opt/edms/repo/docker-compose.yml \
+sudo docker compose -p edms -f /opt/edms/repo/docker-compose.yml \
      -f /opt/edms/repo/docker-compose.prod.yml ps
 ```
 
@@ -253,6 +314,49 @@ TBMS 曾因此誤報部署失敗（服務其實正常），詳見其 `docs/infra
 正式環境 EDMS 的 DB 無外部通道，維護須**登入 bms-prod-02** 後用 `sudo docker exec -it edms-db psql -U edms edms`。日後若需外部連線須用 **5433**（5432 已被 `tbms-db` 佔）。
 
 ⚠️ 兩套系統沿用同一組 `DP_` 表名（`DP_USER`、`DP_SESSION`、`DP_AUDIT_LOG`），**連錯資料庫不會報錯**——表存在、欄位對得上、查得出資料，只是查到另一套系統的。動 `UPDATE` / `DELETE` 前先 `SELECT current_database();`。
+
+---
+
+## 5.1 備份
+
+兩個排程，都在 bms-prod-02 上以 systemd timer 執行：
+
+| 時機 | 內容 | 觸發者 |
+|------|------|--------|
+| 每次部署前 | 資料庫 `pg_dump` → GCS `pre-migrate/` | `vm-deploy.sh` |
+| 每日 04:30（台灣） | 資料庫 → `daily/`（每月 1 日另存 `monthly/`）＋ **檔案 rsync → `files/`** | `edms-backup.timer` |
+
+**為何需要獨立的每日排程**：部署前備份只在有部署時才跑，一週沒部署就一週沒有備份。TBMS 的每日備份跑在 GitHub Actions 的 self-hosted runner 上，EDMS 為 public repo 不使用 self-hosted runner，故改以 systemd timer 在本機執行。
+
+**時間刻意與 TBMS 的 03:30 錯開**——兩份 `pg_dump` 併行會同時吃滿 CPU 與磁碟 IO，而 TBMS 是主系統。
+
+### 檔案備份的兩個取捨
+
+`scripts/files-backup.sh` 用 `gcloud storage rsync` 而非每日全量複製，只上傳有變動的物件——ET 影音類大檔不會重複傳。
+
+⚠️ **刻意不加 `--delete-unmatched-destination-objects`**：來源端誤刪時備份端仍留有副本可救。代價是 GCS 用量只增不減，需定期人工檢視。若日後改為鏡像語意，要同時想清楚誤刪的救援路徑。
+
+⚠️ `files/` 前綴**不在 §2.3 的 lifecycle 刪除規則內**（那些只涵蓋 `daily/`、`pre-migrate/`、`monthly/`），故檔案備份會長期保留。這是刻意的——文件不像每日 dump 有新版可取代。
+
+### 安裝
+
+```bash
+sudo cp /opt/edms/repo/deploy/edms-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now edms-backup.timer
+
+# 驗證
+systemctl list-timers edms-backup.timer      # 應列出下次觸發時間
+sudo systemctl start edms-backup.service     # 立即跑一次
+sudo tail -20 /opt/backup/edms-db/backup.log
+sudo tail -20 /opt/backup/edms-db/files-backup.log
+```
+
+### 還原
+
+資料庫還原 SOP 比照 TBMS 的 `docs/infra/db-backup-restore.md`（同樣是 `pg_restore` 到容器內）。**檔案還原**為 `gcloud storage rsync -r "${BUCKET}/files/dm_files" /opt/edms/data/dm_files`，還原後須確認 owner 仍為 `10001:10001`。
+
+⚠️ 磁碟水位：ET 影音教材單檔可能很大，而 bms-prod-02 只有 100 GB 且與 TBMS 共用。上線後要納入監看。
 
 ---
 
