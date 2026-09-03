@@ -272,22 +272,46 @@ TBMS 曾因此誤報部署失敗（服務其實正常），詳見其 `docs/infra
 
 ---
 
-## 5.1 ⚠️ 檔案本體目前沒有備份
+## 5.1 備份
 
-`scripts/db-backup.sh` 只 dump **資料庫**。DM 的受控文件與 ET 的影音教材存在
-`/opt/edms/data/{dm_files,et_videos}`，**不在任何備份範圍內**。
+兩個排程，都在 bms-prod-02 上以 systemd timer 執行：
 
-後果：VM 或磁碟損毀時，資料庫可從 GCS 還原，但檔案本體會全部遺失——還原後
-資料庫裡留著文件紀錄、實際檔案卻不存在。
+| 時機 | 內容 | 觸發者 |
+|------|------|--------|
+| 每次部署前 | 資料庫 `pg_dump` → GCS `pre-migrate/` | `vm-deploy.sh` |
+| 每日 04:30（台灣） | 資料庫 → `daily/`（每月 1 日另存 `monthly/`）＋ **檔案 rsync → `files/`** | `edms-backup.timer` |
 
-此缺口尚未處理，可能的方向（擇一，未定案）：
+**為何需要獨立的每日排程**：部署前備份只在有部署時才跑，一週沒部署就一週沒有備份。TBMS 的每日備份跑在 GitHub Actions 的 self-hosted runner 上，EDMS 為 public repo 不使用 self-hosted runner，故改以 systemd timer 在本機執行。
 
-- 以 `gcloud storage rsync` 定期同步到 GCS（最貼近現行備份機制）
-- 改用 GCS 作為儲存後端，檔案不落在 VM 磁碟
-- 若院內封閉網路無法用物件儲存，則需另訂異機備份方式
+**時間刻意與 TBMS 的 03:30 錯開**——兩份 `pg_dump` 併行會同時吃滿 CPU 與磁碟 IO，而 TBMS 是主系統。
 
-⚠️ 這也牽動磁碟水位：ET 影音教材單檔可能很大，而 bms-prod-02 只有 100 GB
-且與 TBMS 共用。上線後要納入監看。
+### 檔案備份的兩個取捨
+
+`scripts/files-backup.sh` 用 `gcloud storage rsync` 而非每日全量複製，只上傳有變動的物件——ET 影音類大檔不會重複傳。
+
+⚠️ **刻意不加 `--delete-unmatched-destination-objects`**：來源端誤刪時備份端仍留有副本可救。代價是 GCS 用量只增不減，需定期人工檢視。若日後改為鏡像語意，要同時想清楚誤刪的救援路徑。
+
+⚠️ `files/` 前綴**不在 §2.3 的 lifecycle 刪除規則內**（那些只涵蓋 `daily/`、`pre-migrate/`、`monthly/`），故檔案備份會長期保留。這是刻意的——文件不像每日 dump 有新版可取代。
+
+### 安裝
+
+```bash
+sudo cp /opt/edms/repo/deploy/edms-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now edms-backup.timer
+
+# 驗證
+systemctl list-timers edms-backup.timer      # 應列出下次觸發時間
+sudo systemctl start edms-backup.service     # 立即跑一次
+sudo tail -20 /opt/backup/edms-db/backup.log
+sudo tail -20 /opt/backup/edms-db/files-backup.log
+```
+
+### 還原
+
+資料庫還原 SOP 比照 TBMS 的 `docs/infra/db-backup-restore.md`（同樣是 `pg_restore` 到容器內）。**檔案還原**為 `gcloud storage rsync -r "${BUCKET}/files/dm_files" /opt/edms/data/dm_files`，還原後須確認 owner 仍為 `10001:10001`。
+
+⚠️ 磁碟水位：ET 影音教材單檔可能很大，而 bms-prod-02 只有 100 GB 且與 TBMS 共用。上線後要納入監看。
 
 ---
 
