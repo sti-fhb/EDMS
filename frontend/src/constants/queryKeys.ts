@@ -30,6 +30,10 @@ export const QUERY_KEYS = {
   etMyCourses: {
     list: () => ["et", "my-courses"] as const,
   },
+  etLearn: {
+    structure: (courseId: number) => ["et", "learn", courseId] as const,
+    material: (materialId: number) => ["et", "learn", "materials", materialId] as const,
+  },
   moduleSummary: {
     get: () => ["module-summary"] as const,
   },

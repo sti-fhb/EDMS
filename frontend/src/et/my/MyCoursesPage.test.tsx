@@ -1,7 +1,13 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+const { navigateSpy } = vi.hoisted(() => ({ navigateSpy: vi.fn() }))
+vi.mock("react-router-dom", async (orig) => {
+  const actual = await orig<typeof import("react-router-dom")>()
+  return { ...actual, useNavigate: () => navigateSpy }
+})
 
 import { EtMyCoursesPage } from "./MyCoursesPage"
 import type { MyCoursesResult } from "./myCoursesSchemas"
@@ -85,9 +91,9 @@ describe("ET04 我的課程", () => {
     await user.type(screen.getByLabelText(/邀請碼/), "12345678")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    // 實測回報：原本這裡送完「您已加入此課程」又立刻送「章節學習頁尚未開放」，
-    // 後者把前者蓋掉，使用者只看得到後面那句。
-    expect(await screen.findByText(/您已加入「採血作業新進人員訓練」/)).toBeInTheDocument()
+    // AC 10：#255 起 ET05 已存在，「已加入」改為**直接導向該課程**而非給訊息。
+    // （在此之前是兩則 message.info 互相覆蓋，實測時顯示成「章節學習頁尚未開放」。）
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses/1/learn"))
     expect(screen.queryByText("章節學習頁尚未開放")).not.toBeInTheDocument()
   })
 
