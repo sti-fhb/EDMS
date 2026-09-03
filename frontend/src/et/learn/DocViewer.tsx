@@ -32,18 +32,18 @@ interface Props {
  * blob 要整支下載完才能播且失去 Range），見 `VideoPlayer`。
  */
 export function DocViewer({ materialId, doc }: Props) {
+  const canPreview = doc.available && doc.previewable
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const canPreview = doc.available && doc.previewable
+  // 初值即為「要預覽就是載入中」——**不在 effect 裡同步 setState**（會觸發串聯 render，
+  // 且 ESLint 擋）。切換文件時 `ContentPane` 以 `key={doc.doc_id}` 重新掛載本元件，
+  // 狀態自然歸零，不需要手動 reset。
+  const [loading, setLoading] = useState(canPreview)
 
   useEffect(() => {
     if (!canPreview) return
     let revoked = false
     let url: string | null = null
-    setLoading(true)
-    setError(null)
     fetchDocBlob(materialId, doc.doc_id)
       .then((blob) => {
         if (revoked) return

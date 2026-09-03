@@ -25,8 +25,8 @@ from app.et.constants import (
     ROLE_TEACHER,
     SOURCE_INVITATION_CODE,
 )
-from app.et.course.models import EtChapter, EtCourse, EtItem
-from app.et.material.models import EtMaterial, EtMaterialVideo
+from app.et.course.models import EtCourse, EtItem
+from app.et.material.models import EtMaterialVideo
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
 

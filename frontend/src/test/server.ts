@@ -1024,6 +1024,32 @@ export const handlers = [
   http.post("/api/et/enrollments", () =>
     HttpResponse.json({ course_id: 1, completion_status: "NOT_STARTED", pending_open: false }, { status: 201 }),
   ),
+
+  // ── ET05 章節學習（US5 / #255）──────────────────────────────────────────
+  http.get("/api/et/materials/:materialId/content", ({ params }) =>
+    HttpResponse.json({
+      material_id: Number(params.materialId),
+      material_name: "採血流程概論教材",
+      description_html: "<p>本教材說明採血的基本流程。</p>",
+      videos: [{ video_id: 500, file_name: "採血示範.mp4", duration_sec: 615, sort_order: 1 }],
+      docs: [
+        {
+          doc_id: "DM-SOP-000001",
+          doc_name: "採血標準作業程序",
+          file_name: "SOP-v2.1.pdf",
+          file_mime: "application/pdf",
+          version_id: 21,
+          obsolete: false,
+          previewable: true,
+          available: true,
+          sort_order: 1,
+        },
+      ],
+    }),
+  ),
+  http.post("/api/et/videos/:videoId/ticket", () =>
+    HttpResponse.json({ ticket: "test-ticket", expires_in: 60 }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

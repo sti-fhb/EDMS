@@ -75,3 +75,9 @@ export function itemDisplayState(item: ItemNode, activeItemId: number | null): I
   if (item.locked) return "locked"
   return "available"
 }
+
+/** 短效播放票（對齊後端 `VideoTicket`）。 */
+export interface VideoTicket {
+  ticket: string
+  expires_in: number
+}
