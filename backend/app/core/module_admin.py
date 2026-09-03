@@ -135,11 +135,15 @@ def require_any_module_admin(modules: Iterable[str] = _BACKOFFICE_MODULES) -> Ca
         AppError: 非任一模組之管理者（403 DP_AUTH_006）；認證失敗由 get_jwt_payload 拋（401）。
     """
 
+    # 固化成 tuple：`modules` 若為一次性 iterator（generator / iter(...)），closure 會在第一個
+    # 請求耗盡它，之後每個請求都看到空集合 → 整個 router 恆 403。方向雖 fail-closed，但無訊號、難排查。
+    gate_modules = tuple(modules)
+
     async def _dependency(
         payload: JwtPayload = Depends(get_jwt_payload),
         db: AsyncSession = Depends(get_db),
     ) -> JwtPayload:
-        if not await module_admin_gate.is_any_module_admin(modules, payload.sub, db):
+        if not await module_admin_gate.is_any_module_admin(gate_modules, payload.sub, db):
             raise AppError(status_code=403, detail="需要模組管理者權限", error_code="DP_AUTH_006")
         return payload
 

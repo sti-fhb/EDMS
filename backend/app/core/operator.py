@@ -4,8 +4,10 @@
 禁止直接讀 `payload.sub` 填欄位（見 sti-backend-modules）。EDMS 為單一組織、
 無站點維度，故 OperatorInfo 僅含 user_id。
 
-暫行授權規則（全域授權機制實作前）：寫入型端點只注入本 Dependency（內部已經
-get_jwt_payload 完成認證），不加 require_admin / require_module_admin。
+**本 Dependency 只負責「取操作者」，不是授權閘**（內部僅經 `get_jwt_payload` 完成認證）。
+授權另掛：DP 後台端點於 router-level 掛 `require_any_module_admin()`、業務模組端點掛各自
+的存取閘（如 DM 的 `get_dm_context`）。#250 之前的「暫行授權規則」（寫入型只注入本
+Dependency、不加 admin 閘）已廢止，詳見 `.claude/rules/sti-backend-modules.md` §授權規則。
 """
 
 from dataclasses import dataclass

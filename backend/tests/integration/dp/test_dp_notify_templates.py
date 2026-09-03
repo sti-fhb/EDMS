@@ -13,11 +13,13 @@ from app.core.module_admin import module_admin_gate
 from app.core.operator import OperatorInfo
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dm.roles.gate import dm_is_module_admin
 from app.dp.audit.models import DpAuditLog
 from app.dp.notify.admin_service import TemplateAdminService
 from app.dp.notify.models import DpNotifyTemplate
 from app.dp.notify.schemas import TemplateUpdate
 from app.dp.users.models import DpUser
+from app.et.roles.gate import et_is_module_admin
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +41,10 @@ def admin_gate():
         module_admin_gate.register("DM", dm_checker)
 
     yield configure
-    module_admin_gate.unregister("ET")
-    module_admin_gate.unregister("DM")
+    # 還原 main.py 註冊之真實 checker（非 unregister——ET / DM 皆已接線，移除會讓
+    # 後續測試看到「未接線」而全數 fail-closed 403，使閘的狀態變成 test-order 相依）
+    module_admin_gate.register("ET", et_is_module_admin)
+    module_admin_gate.register("DM", dm_is_module_admin)
 
 
 async def _make_template(

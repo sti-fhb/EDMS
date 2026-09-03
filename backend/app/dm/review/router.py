@@ -1,9 +1,15 @@
 """簽核中心 API（US6 / DM04）。
 
-掛簽核入口閘 `get_dm_reviewer_context`（需 `DM_REVIEWER`，非審核者 403 `DM_AUTH_004`；
-#250 起——原為 `get_dm_context` 僅需任一 DM 角色，管理者 / 編輯者進得來但清單永遠空白）
-+ 寫入注入 `get_operator`；核准 / 退回 / 明細另僅指定審核者本人可操作（service 層以
-`DM_REVIEW_005` 逐筆把關，與入口閘並存）。清單依 `assigned_reviewer=登入者` 過濾。
+本檔含兩個 router，授權模型不同：
+
+- `router`（簽核中心本體）：router-level 掛 `get_dm_reviewer_context`——需 `DM_REVIEWER`，
+  非審核者 403 `DM_AUTH_004`（#250 起；原為 `get_dm_context` 僅需任一 DM 角色，管理者 /
+  編輯者進得來但清單永遠空白）。核准 / 退回 / 明細另僅指定審核者本人可操作（service 層以
+  `DM_REVIEW_005` 逐筆把關，與入口閘並存）。清單依 `assigned_reviewer=登入者` 過濾。
+- `shared_router`（廢止附件下載）：僅掛 `get_dm_context`，授權交由 service 判定
+  「DM_ADMIN 或指定審核者」（US8 SA 裁示 Q1=C）——見該 router 上方註解。
+
+寫入端點另注入 `get_operator`。
 """
 
 from pathlib import Path
@@ -16,7 +22,7 @@ from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
-from app.dm.deps import DmContext, get_dm_reviewer_context
+from app.dm.deps import DmContext, get_dm_context, get_dm_reviewer_context
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.schemas import (
     ApproveResult,
@@ -27,13 +33,23 @@ from app.dm.review.schemas import (
     ReviewDetail,
 )
 
-router = APIRouter(prefix="/api/dm/reviews", tags=["dm-review"])
+router = APIRouter(
+    prefix="/api/dm/reviews",
+    tags=["dm-review"],
+    # router-level（#250）：新增端點自動受閘，且不必在每個 handler 掛未被使用的 ctx 參數
+    # （那種寫法一旦被「清理未使用參數」重構刪掉，就是靜默的授權移除）
+    dependencies=[Depends(get_dm_reviewer_context)],
+)
+
+# 廢止附件下載之授權為「DM_ADMIN 或該送審之指定審核者」（US8 SA 裁示 Q1=C），且供 US10 已廢止
+# 文件查詢的稽核動線共用——純 DM_ADMIN 不具審核者角色，故**不可**掛簽核入口閘，否則管理者
+# 會被 DM_AUTH_004 擋在門外、service 內的 DM_ADMIN 分支成為死碼。授權完全交由 service 判定。
+shared_router = APIRouter(prefix="/api/dm/reviews", tags=["dm-review"], dependencies=[Depends(get_dm_context)])
 _service = ReviewCenterService()
 
 
 @router.get("/pending", response_model=list[PendingItem])
 async def list_pending(
-    ctx: DmContext = Depends(get_dm_reviewer_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
@@ -46,7 +62,6 @@ async def list_completed(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     keyword: str = Query(default="", max_length=200),
-    ctx: DmContext = Depends(get_dm_reviewer_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
@@ -57,7 +72,6 @@ async def list_completed(
 @router.get("/{review_id}", response_model=ReviewDetail)
 async def get_detail(
     review_id: int,
-    ctx: DmContext = Depends(get_dm_reviewer_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
@@ -69,7 +83,6 @@ async def get_detail(
 async def download_review_file(
     review_id: int,
     version_id: int,
-    ctx: DmContext = Depends(get_dm_reviewer_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
@@ -83,10 +96,10 @@ async def download_review_file(
     )
 
 
-@router.get("/{review_id}/obsolete-file")
+@shared_router.get("/{review_id}/obsolete-file")
 async def download_obsolete_file(
     review_id: int,
-    ctx: DmContext = Depends(get_dm_reviewer_context),
+    ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
@@ -102,7 +115,6 @@ async def download_obsolete_file(
 @router.post("/{review_id}/approve", response_model=ApproveResult)
 async def approve(
     review_id: int,
-    ctx: DmContext = Depends(get_dm_reviewer_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
@@ -114,7 +126,6 @@ async def approve(
 async def reject(
     review_id: int,
     body: RejectReq,
-    ctx: DmContext = Depends(get_dm_reviewer_context),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):

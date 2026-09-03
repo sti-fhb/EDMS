@@ -100,6 +100,23 @@ async def test_pending_requires_auth(client):
     assert r.status_code == 401
 
 
+async def test_obsolete_file_endpoint_not_behind_reviewer_gate(db, client):
+    """廢止附件下載**不**掛簽核入口閘：純 DM_ADMIN 須進得了 handler（Security Review 迴歸）。
+
+    該端點授權為「DM_ADMIN 或該送審之指定審核者」（US8 SA 裁示 Q1=C），且供 US10 已廢止
+    文件查詢的稽核動線共用。若誤掛 reviewer 閘，管理者會被 DM_AUTH_004 擋在門外、
+    service 內的 DM_ADMIN 分支成死碼。
+
+    此處以「不是 DM_AUTH_004」斷言閘的行為——review_id 不存在故預期 404，
+    關鍵在於錯誤不能是入口閘的 403。
+    """
+    await _seed_user(db, "obs_adm")
+    await _grant(db, "obs_adm", DM_ADMIN)
+    r = await client.get("/api/dm/reviews/999999/obsolete-file", headers=_headers("obs_adm"))
+    assert r.status_code != 403, "純 DM_ADMIN 不應被簽核入口閘擋下"
+    assert r.json().get("error_code") != "DM_AUTH_004"
+
+
 async def test_reviewer_access_returns_boolean(db, client):
     """`reviewer-access` 回布林而非 403（比照 admin-access 之語意中性設計）：
 
