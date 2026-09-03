@@ -23,7 +23,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.document.docid import next_doc_id
-from app.dm.document.file_store import is_previewable, validate_upload
+from app.dm.document.file_store import is_previewable, resolve_upload_mime, validate_upload
 from app.dm.editor.repository import EditorRepository
 from app.dm.editor.schemas import (
     CreateResult,
@@ -175,11 +175,17 @@ class EditorService:
         if not file_bytes:
             return _FileMeta(path=None, name=None, size=None, mime=None, previewable=False)
         await validate_upload(db, size_bytes=len(file_bytes), filename=file_name or "")
+        # M2：伺服端 magic-byte 判定權威 MIME（可預覽類須與副檔名相符，否則 DM_FILE_002）；不採用戶端 content_type
+        resolved_mime = resolve_upload_mime(file_bytes, file_name or "", file_mime)
         path = await asyncio.to_thread(
             save_upload, doc_id=doc_id, file_id=generate_file_id(), filename=file_name or "", data=file_bytes
         )
         return _FileMeta(
-            path=path, name=file_name, size=len(file_bytes), mime=file_mime, previewable=is_previewable(file_mime or "")
+            path=path,
+            name=file_name,
+            size=len(file_bytes),
+            mime=resolved_mime,
+            previewable=is_previewable(resolved_mime),
         )
 
     async def _create_doc_with_retry(
