@@ -16,6 +16,9 @@ EDMS 是 **public repository**，因此 CI/CD 全在 GitHub-hosted runner 執行
 
 所以需要三樣東西：**放映像的地方**、**GitHub 推映像用的身分**、**放備份的地方**。
 
+> ✅ **本文件的操作全部是「新建資源」，不會動到 TBMS 或任何現有服務，不需要停機窗口。**
+> 唯二觸及既有事物的是 §1.2 與 §3.1——替 bms-prod-02 既有的 Service Account 新增兩項讀寫權限（只增不減）。
+
 ---
 
 ## 0.1 執行環境與權限
@@ -49,6 +52,11 @@ export PROJECT_ID=blood-system-dev
 export PROJECT_NUM=398001699233
 export REGION=asia-east1
 export VM_SA=398001699233-compute@developer.gserviceaccount.com   # bms-prod-02 的 Service Account
+
+# ⚠️ GCS bucket 名稱是**全球唯一**的，可能已被其他組織註冊。
+#    若 §3 建立時回報 409／already exists，改用帶專案前綴的名稱再重跑一次，
+#    並記得把最終名稱回報給開發者（見 §2.4）。
+export BUCKET=gs://edms-db-backup
 ```
 
 ⚠️ **換分頁、重開終端機、或 Cloud Shell 閒置斷線後，這些變數就沒了。** 屆時後續指令會帶著空值執行，錯誤訊息不會直說「變數沒設」（例如 `--member="serviceAccount:"` 只會回一個看不出原因的格式錯誤）。**每次重新開始前先回來重跑這一段。**
@@ -56,7 +64,7 @@ export VM_SA=398001699233-compute@developer.gserviceaccount.com   # bms-prod-02 
 每個章節開跑前先驗一次，缺任何一個就會直接停下：
 
 ```bash
-: "${PROJECT_ID:?未設定}" "${PROJECT_NUM:?未設定}" "${REGION:?未設定}" "${VM_SA:?未設定}"   && echo "✅ 變數齊備：${PROJECT_ID} / ${REGION}"
+: "${PROJECT_ID:?未設定}" "${PROJECT_NUM:?未設定}" "${REGION:?未設定}" "${VM_SA:?未設定}" "${BUCKET:?未設定}" && echo "✅ 變數齊備：${PROJECT_ID} / ${REGION} / ${BUCKET}"
 ```
 
 若要分多次執行，可存成檔案再 `source`（這四個值都不是機密，但**請放在 repo 之外**）：
@@ -67,10 +75,23 @@ export PROJECT_ID=blood-system-dev
 export PROJECT_NUM=398001699233
 export REGION=asia-east1
 export VM_SA=398001699233-compute@developer.gserviceaccount.com
+export BUCKET=gs://edms-db-backup
 EOF
 
 source ~/edms-setup.env    # 每個新 session 執行一次
 ```
+
+---
+
+## 0.3 啟用所需 API
+
+專案已在用 Artifact Registry（TBMS），但 WIF 相關 API 未必啟用過。先跑一次，已啟用者不會有副作用：
+
+```bash
+gcloud services enable artifactregistry.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project="${PROJECT_ID}"
+```
+
+> **資源已存在時的處理**：本文件的 `create` 指令若回報 `ALREADY_EXISTS`，代表該資源已在（例如專案內已有給其他 repo 用的 `github-pool`）。**這不是錯誤**——跳過該步、沿用既有資源即可，但要記得後續指令與 §2.4 的回報值要改用實際名稱。
 
 ---
 
@@ -178,24 +199,38 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 ref 的限制已由 §2.2 的 attribute condition 把關，故此處以 repository 為範圍即可。
 
-### 2.4 回報這兩個值
+### 2.4 回報這三個值
 
+**全部做完後**（含 §3 的 bucket）執行以下指令，把輸出整段回報給 EDMS 開發者。用指令產生而非照抄，可避免沿用既有 pool／改用替代 bucket 名稱時抄錯：
+
+```bash
+echo "GCP_WORKLOAD_IDENTITY_PROVIDER = $(gcloud iam workload-identity-pools providers describe github-edms --project="${PROJECT_ID}" --location=global --workload-identity-pool=github-pool --format='value(name)')"
+echo "GCP_BUILD_SERVICE_ACCOUNT      = edms-build@${PROJECT_ID}.iam.gserviceaccount.com"
+echo "EDMS_BACKUP_BUCKET             = ${BUCKET}"
 ```
-GCP_WORKLOAD_IDENTITY_PROVIDER =
-  projects/398001699233/locations/global/workloadIdentityPools/github-pool/providers/github-edms
 
-GCP_BUILD_SERVICE_ACCOUNT =
-  edms-build@blood-system-dev.iam.gserviceaccount.com
-```
+| 值 | 去向 |
+|---|---|
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | GitHub repo variables |
+| `GCP_BUILD_SERVICE_ACCOUNT` | GitHub repo variables |
+| `EDMS_BACKUP_BUCKET` | bms-prod-02 的 `/opt/edms/.env.prod` |
 
-由 EDMS 開發者填入 **GitHub repo variables**（Settings → Secrets and variables → Actions → Variables）。這兩個值不是機密，用 variables 而非 secrets 即可。
+前兩者填入 **GitHub repo variables**（Settings → Secrets and variables → Actions → **Variables**，不是 Secrets）——它們不是機密。
 
 ---
 
 ## 3. GCS 備份 bucket
 
+> ⚠️ **bucket 名稱是全球唯一的**，`edms-db-backup` 可能已被其他組織註冊。建立失敗（409 / already exists 且不屬於本專案）時，改用帶專案前綴的名稱：
+>
+> ```bash
+> export BUCKET=gs://blood-system-dev-edms-db-backup
+> ```
+>
+> **最終採用的名稱務必回報給開發者**（見 §2.4）——它要填進 VM 的 `/opt/edms/.env.prod` 的 `EDMS_BACKUP_BUCKET`，填錯部署會直接失敗。
+
 ```bash
-gcloud storage buckets create gs://edms-db-backup \
+gcloud storage buckets create "${BUCKET}" \
   --project="${PROJECT_ID}" \
   --location="${REGION}" \
   --uniform-bucket-level-access
@@ -206,7 +241,7 @@ gcloud storage buckets create gs://edms-db-backup \
 備份由 bms-prod-02 上的腳本執行（migration 前備份、每日備份）：
 
 ```bash
-gcloud storage buckets add-iam-policy-binding gs://edms-db-backup \
+gcloud storage buckets add-iam-policy-binding "${BUCKET}" \
   --member="serviceAccount:${VM_SA}" \
   --role=roles/storage.objectAdmin
 ```
@@ -229,19 +264,19 @@ cat > /tmp/edms-bucket-lifecycle.json << 'EOF'
 }
 EOF
 
-gcloud storage buckets update gs://edms-db-backup \
-  --lifecycle-file=/tmp/edms-bucket-lifecycle.json
+gcloud storage buckets update "${BUCKET}" --lifecycle-file=/tmp/edms-bucket-lifecycle.json
 ```
 
-### 3.3 Retention 鎖（建議）
+### 3.3 Retention（選用）
 
-30 天內任何權限都無法刪除或覆寫物件，防止 VM 遭入侵時備份被一併銷毀：
+設定保留期後，期限內任何權限都無法刪除或覆寫物件，可防止 VM 遭入侵時備份被一併銷毀：
 
 ```bash
-gcloud storage buckets update gs://edms-db-backup --retention-period=30d
+gcloud storage buckets update "${BUCKET}" --retention-period=30d
 ```
 
-> ⚠️ `--lock-retention-period` 會讓保留期**永久無法縮短或移除**，屬不可逆操作。TBMS 的 bucket 已採此設定；EDMS 是否比照請自行判斷，未鎖定時保留期仍然生效，只是日後可調整。
+> ⚠️ 另有 `--lock-retention-period`，會讓保留期**永久無法縮短或移除**，屬**不可逆**操作。
+> TBMS 的備份 bucket 依其 `scripts/db-backup.sh` 註解記載為「已設 30 天 retention 鎖」，但本文件未實地查證其為 `retention-period` 或已 `lock`。**EDMS 是否比照、是否鎖定，請依貴方政策自行判斷**——未鎖定時保留期一樣生效，只是日後可調整。
 
 保留期 30 天與 §3.2 的 31 天刪除規則相容——物件滿 31 天才被 lifecycle 刪除，此時保留期已過。
 
@@ -262,7 +297,7 @@ gcloud iam workload-identity-pools providers describe github-edms \
 # 預期輸出：assertion.repository=='sti-fhb/EDMS' && assertion.ref=='refs/heads/main'
 
 # bucket 的 lifecycle
-gcloud storage buckets describe gs://edms-db-backup --format="yaml(lifecycle)"
+gcloud storage buckets describe "${BUCKET}" --format="yaml(lifecycle)"
 ```
 
 第二項務必實際確認——條件寫錯不會有任何錯誤訊息，但會讓任何分支都能取得推送映像的權限。

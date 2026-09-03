@@ -114,7 +114,7 @@ flowchart TD
 
 `scripts/db-backup.sh` 需要 `EDMS_BACKUP_BUCKET`（於 `/opt/edms/.env.prod` 設定），VM Service Account 需具寫入權限。
 
-建議 lifecycle：`daily/` 31 天、`pre-migrate/` 31 天、`monthly/` 365 天，並設 30 天 retention 鎖。
+建議 lifecycle：`daily/` 31 天、`pre-migrate/` 31 天、`monthly/` 365 天。retention（防備份被刪）為選用，是否鎖定依貴方政策——詳見 [edms-gcp-setup.md](edms-gcp-setup.md) §3.3。
 
 > **未設定時部署會直接失敗，這是刻意的**——備份是執行 migration 的前提。
 
@@ -147,6 +147,29 @@ DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
 EDMS_BACKUP_BUCKET=gs://...
+```
+
+⚠️ 兩點容易出錯：
+
+- **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` 必須與 `DATABASE_URL` 內的值一致。** 不一致時 DB 容器會正常啟動、health check 卻過不了，症狀看起來像後端有問題
+- **`EDMS_BACKUP_BUCKET` 用維運人員實際建立的 bucket 名稱**（GCS 名稱全球唯一，可能不是預設的 `gs://edms-db-backup`）。填錯的話部署會停在備份那步——這是刻意的，沒有快照就不動 schema
+
+#### 安裝後驗收
+
+```bash
+systemctl list-timers edms-deploy.timer          # 應列出下次觸發時間
+test -x /opt/edms/repo/scripts/vm-deploy.sh && echo "✅ 部署腳本可執行"
+docker network inspect edms-proxy-net --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'   # 應為 172.28.241.0/24
+sudo test -s /opt/edms/.env.prod && echo "✅ .env.prod 非空"
+```
+
+第二項若失敗，systemd 會以 `status=203/EXEC` 失敗且服務永遠不會部署——補 `sudo chmod +x /opt/edms/repo/scripts/vm-deploy.sh` 即可。
+
+首次安裝完可手動觸發一次，不必等排程：
+
+```bash
+sudo systemctl start edms-deploy.service
+journalctl -u edms-deploy.service -n 30
 ```
 
 ### 2.5 環境變數檔一覽
