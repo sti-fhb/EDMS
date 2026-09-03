@@ -6,9 +6,9 @@
 
 實際落盤 I/O（寫檔案系統 / 物件儲存）屬部署層，Foundation 提供可測核心：預覽判定 + 上傳檢核。
 
-⚠️ 安全契約（落盤層須遵守，見 sti-backend-ref 待補）：
-- 副檔名白名單檢核**非充分條件**——落盤前應另以 content-type / magic bytes 驗證真實型別
-  （防 evil.exe 改名 evil.pdf）。
+⚠️ 安全契約：
+- 副檔名白名單檢核**非充分條件**——故 `resolve_upload_mime` 另以 magic bytes 驗證可預覽類之真實型別、
+  並以伺服端判定之權威 MIME 落地（防 evil.exe 改名 evil.pdf 之內嵌 XSS，T066 M2）。
 - 檔名不得用於組路徑：一律以系統產生之 FILE_ID 命名，避免 `../` 路徑穿越。
 - `DM_FILE_TYPES` 參數若被清空 / 停用，本函式**改用安全預設白名單 fail-closed**（不再跳過格式檢核），
   避免管理者誤清參數即開放任意副檔名（T066 L2）。
