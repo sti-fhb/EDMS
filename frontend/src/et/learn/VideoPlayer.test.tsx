@@ -81,6 +81,30 @@ describe("ET05 影片播放器", () => {
     expect(requestVideoTicket).toHaveBeenCalledTimes(2)
   })
 
+  it("重取成功後可再次自動救援（旗標會解除）", async () => {
+    // `TICKET_TTL_SECONDS = 300` 的正當性建立在「有自動重取兜底」之上——若一個掛載
+    // 週期只能救一次，學員在同一支長影片上第二次撞到過期就得重新整理。
+    requestVideoTicket
+      .mockResolvedValueOnce("ticket-1")
+      .mockResolvedValueOnce("ticket-2")
+      .mockResolvedValueOnce("ticket-3")
+    const { container } = renderPlayer()
+    const video = await waitFor(() => {
+      const el = container.querySelector("video")
+      expect(el).toBeInTheDocument()
+      return el as HTMLVideoElement
+    })
+
+    fireEvent.error(video)
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toContain("t=ticket-2"))
+    // 換 src 後瀏覽器會發 loadeddata——旗標於此解除
+    fireEvent.loadedData(container.querySelector("video") as HTMLVideoElement)
+    fireEvent.error(container.querySelector("video") as HTMLVideoElement)
+
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toContain("t=ticket-3"))
+    expect(requestVideoTicket).toHaveBeenCalledTimes(3)
+  })
+
   it("取票失敗顯示錯誤而非空白播放器", async () => {
     requestVideoTicket.mockRejectedValue(new Error("403"))
     renderPlayer()

@@ -26,9 +26,9 @@ from app.et.constants import (
     SOURCE_INVITATION_CODE,
 )
 from app.et.course.models import EtCourse, EtItem
+from app.et.learning.video_ticket import TICKET_TTL_SECONDS
 from app.et.material.models import EtMaterialVideo
 from app.et.progress.models import EtEnrollment
-from app.et.learning.video_ticket import TICKET_TTL_SECONDS
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration

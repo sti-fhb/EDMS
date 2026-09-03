@@ -147,4 +147,15 @@ async def video_file(
     # `inline`：本端點的用途是**串流播放**。Starlette 預設 `attachment`，把這個 URL
     # 貼到網址列會被強制下載而非播放——語意不符，且對「複製連結確認影片能不能開」
     # 這種日常操作很不直覺。
-    return FileResponse(path, filename=file_name, content_disposition_type="inline")
+    #
+    # 兩個 header 是 `inline` 帶來的配套：
+    # - `nosniff`：回的是**使用者上傳的位元組**且以 inline 呈現，關掉 MIME 嗅探。
+    #   （副檔名於上傳時已由 `ensure_format_allowed` 限制在影片格式內，此為縱深防禦）
+    # - `no-store`：本端點是全站唯一**自帶憑證、不帶 cookie** 的 URL，中介 proxy
+    #   會認為它可快取——那等於把授權過的內容留在共用快取裡。
+    return FileResponse(
+        path,
+        filename=file_name,
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )

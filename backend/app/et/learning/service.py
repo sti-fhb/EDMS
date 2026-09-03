@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.et.common.dm_client import get_dm_document_client
-from app.et.constants import COURSE_CLOSED, ITEM_MATERIAL
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access, playback_rates
 from app.et.learning.schemas import (
@@ -71,6 +71,14 @@ class EtLearningService:
         """
         course = await self._repo.get_course(db, course_id)
         if course is None:
+            raise _NOT_FOUND
+        if course.status == COURSE_DRAFT and course.owner_id != user_id:
+            # 未發布課程的**存在**對學員是秘密。若照一般流程回 403「您尚未加入此課程」，
+            # 任一登入者（ET 學員角色人人有）即可用它二分掃描出全站有效 course_id，
+            # 包含教師還沒發布的草稿。回 404 與「查無此課程」無法區分。
+            #
+            # 擁有者不受此限——教師需要在發布**之前**確認學員視角（#255 裁示 Q1 的
+            # 同一個理由；草稿階段正是最需要預覽的時候）。
             raise _NOT_FOUND
         is_owner = await self._require_access(db, course_id=course_id, user_id=user_id, course_owner=course.owner_id)
 
@@ -128,6 +136,13 @@ class EtLearningService:
         if material is None or course_id is None:
             # 有權者才看得到這個區別：教材本身或其所屬項目 / 章節任一被軟刪除（AC 22）。
             raise _DELETED
+        if course_id != owning_course:
+            # 授權是拿 `course_id_of_material_any`（不濾軟刪除、`limit(1)`）算的，而
+            # 這裡是「活著的」那條。**同一份教材若被兩門課程引用**（今日不會發生——
+            # 建項目一律產生新教材——但 `course/repository.py` 已預告日後可能支援重用），
+            # 兩者就可能不同課程，於是「用 A 課的資格看 B 課的教材」。
+            # 不一致即拒，不去猜哪一個才對。
+            raise _FILE_NOT_FOUND
 
         videos = [
             MaterialVideoRow(

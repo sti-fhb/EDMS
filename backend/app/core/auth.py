@@ -76,6 +76,15 @@ def decode_access_token(token: str) -> JwtPayload:
     """
     try:
         raw = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        if raw.get("typ") is not None:
+            # 拒絕任何帶 `typ` 的專用票券（目前為 ET 影片播放票，`et/learning/video_ticket`）。
+            #
+            # 那些票會出現在 URL 與 access log；若能當一般 access token 用，從 log 撈到
+            # 一張就等於一組帳號憑證。在此明確擋下，讓「票 ↔ token 不可互換」有**單一
+            # 守門人**——先前實際擋住它的是下方 `raw["auth_time"]` 的 KeyError，那是個
+            # 間接性質：有人把 auth_time 改成選填（看起來是無害的向後相容改動）就會
+            # 靜默打開這條路。
+            raise KeyError("typ")
         return JwtPayload(
             sub=raw["sub"],
             auth_time=_epoch_to_dt(raw["auth_time"]),

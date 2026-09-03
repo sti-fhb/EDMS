@@ -96,6 +96,11 @@ export function VideoPlayer({ video, playbackRates }: Props) {
       if (el) {
         const restore = () => {
           el.currentTime = resumeAt
+          // **重取成功即解除「已重試」旗標**。不解除的話一個掛載週期只能救一次——
+          // 學員在同一支長影片上第二次撞到過期就會看到錯誤訊息，而 300 秒 TTL 的
+          // 正當性正是建立在「有自動重取兜底」之上。旗標的用途是擋住「換了新票仍
+          // 立刻失敗」的無窮迴圈，而那種情況走不到這裡（`loadeddata` 不會觸發）。
+          retriedRef.current = false
           el.removeEventListener("loadeddata", restore)
         }
         el.addEventListener("loadeddata", restore)

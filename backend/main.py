@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.access_log_redaction import install_access_log_redaction
 from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
@@ -52,6 +53,10 @@ from app.et.quiz.router import router as et_quiz_router
 from app.et.survey.router import router as et_survey_router
 
 logger = logging.getLogger(__name__)
+
+# 遮罩 access log 中的憑證型 query 參數（#255：ET 影片播放票只能放 query string）。
+# 於 module-level 執行，確保在第一個請求進來之前就掛上。
+install_access_log_redaction()
 
 
 @asynccontextmanager
