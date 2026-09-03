@@ -9,10 +9,18 @@ import { useEffect, useState } from "react"
 
 import type { MaterialDocRow } from "./learnSchemas"
 import { fetchDocBlob } from "./learnService"
+import { toApiError } from "../../services/http"
 
 interface Props {
   materialId: number
   doc: MaterialDocRow
+}
+
+/** 取檔失敗之訊息。404 代表實體檔已不存在（非暫時性），要講出來才有辦法處理。 */
+function docErrorMessage(err: unknown): string {
+  return toApiError(err).status === 404
+    ? "此文件的檔案已不存在，請聯繫課程教師重新上傳"
+    : "文件載入失敗，請稍後再試"
 }
 
 /**
@@ -50,8 +58,10 @@ export function DocViewer({ materialId, doc }: Props) {
         url = URL.createObjectURL(blob)
         setBlobUrl(url)
       })
-      .catch(() => {
-        if (!revoked) setError("文件載入失敗")
+      .catch((err) => {
+        // 區分「檔案不在」與其他失敗：DB 有 metadata 但實體檔缺失（DB↔磁碟不一致）
+        // 會回 404，那是最常見的情形，而「文件載入失敗」四個字讓人無從下手。
+        if (!revoked) setError(docErrorMessage(err))
       })
       .finally(() => {
         if (!revoked) setLoading(false)
@@ -74,8 +84,8 @@ export function DocViewer({ materialId, doc }: Props) {
       a.download = doc.file_name ?? doc.doc_id
       a.click()
       URL.revokeObjectURL(url)
-    } catch {
-      setError("文件下載失敗")
+    } catch (err) {
+      setError(docErrorMessage(err))
     }
   }
 

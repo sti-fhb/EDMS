@@ -128,7 +128,16 @@ export function VideoPlayer({ video, playbackRates }: Props) {
         />
       )}
 
-      <Stack direction="row" spacing={2} alignItems="center">
+      {/*
+        與影片下緣拉開距離——否則這排會和播放器自己的控制列（暫停 / 全螢幕）擠在一起，
+        視覺上分不出哪些是播放器的、哪些是頁面的。
+
+        ⚠️ **用 `pt` 不能用 `mt`**：父層 `<Stack spacing>` 以
+        `& > :not(style) ~ :not(style) { margin-top }` 對子元素設定間距，其特異性
+        （0,1,2）高過子元素自己 `sx` 產生的類別（0,1,0）——寫 `mt` 會被靜默蓋掉，
+        畫面完全沒有變化。padding 不在它的覆寫範圍內。
+      */}
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ pt: 1.5 }}>
         <TextField
           select
           size="small"

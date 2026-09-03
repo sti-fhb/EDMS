@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { DocViewer } from "./DocViewer"
+import { fetchDocBlob } from "./learnService"
 import type { MaterialDocRow } from "./learnSchemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
@@ -54,6 +55,16 @@ describe("ET05 DM 文件呈現", () => {
     expect(screen.getByText("此文件已廢止")).toBeInTheDocument()
     // 標籤是提醒、不是阻擋——廢止前最後版本仍要看得到
     await waitFor(() => expect(screen.getByTitle("採血標準作業程序")).toBeInTheDocument())
+  })
+
+  it("實體檔不存在時訊息要指向原因", async () => {
+    // 「文件載入失敗」四個字讓人無從下手——實測時就是被它卡住的。
+    // DB 有 metadata 但檔案不在（DB↔磁碟不一致）會回 404，那是最常見的情形。
+    const axiosLike = { response: { status: 404, data: new Blob() } }
+    vi.mocked(fetchDocBlob).mockRejectedValueOnce(axiosLike)
+    renderWithProviders(<DocViewer materialId={1} doc={makeDoc()} />)
+
+    expect(await screen.findByText(/檔案已不存在/)).toBeInTheDocument()
   })
 
   it("DM 端取不到時顯示說明而非壞掉的連結", async () => {
