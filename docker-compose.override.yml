@@ -1,0 +1,31 @@
+# 本機開發專用 override（docker compose 預設會自動套用本檔）。
+# 正式環境不會吃到這份——CD 明確指定 docker-compose.yml + docker-compose.prod.yml。
+
+services:
+  edms-nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    image: edms-nginx:local
+    # 本機沒有 front-proxy，直接映射 port 供瀏覽器連入。
+    # 用 8090 而非 80，避免與同機的 TBMS 本機環境搶 port。
+    ports:
+      - "8090:80"
+
+  edms-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: edms-backend:local
+    env_file: .env.local
+
+  edms-db:
+    # 用 5441 而非 5432，避免與本機既有的 PostgreSQL 及 TBMS 本機環境（5440）衝突
+    ports:
+      - "5441:5432"
+    volumes:
+      - edms-db-data:/var/lib/postgresql/data
+    env_file: .env.local
+
+volumes:
+  edms-db-data:

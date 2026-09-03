@@ -1,0 +1,28 @@
+# ============================================================
+# EDMS 正式環境專屬 override
+#
+# 僅由 CD 套用：docker compose -f docker-compose.yml -f docker-compose.prod.yml ...
+# 本機開發不會吃到這份（本機只吃 docker-compose.yml + docker-compose.override.yml）。
+#
+# 用途：把 edms-nginx 接上 front-proxy 的網路。
+#   - front-proxy 本身由 **TBMS repo** 管理（其 docker-compose.prod.yml 與 edge/），
+#     不在此定義；本檔只負責讓 edms-nginx 可被 proxy 抵達
+#   - edms-nginx 仍不映射任何 host port，對外只有 proxy 的 80
+#
+# 依賴主機前置（不進 git、CD 不會自動建立）：
+#   docker network create --driver bridge --subnet 172.28.241.0/24 edms-proxy-net
+#   /opt/edms/.env.prod
+#   /opt/edms/data/postgres
+# 網路為 external 的理由：任一套系統的部署都不該因對方未部署而失敗。
+# 詳見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §1.4 與 edge/README.md §1。
+# ============================================================
+
+services:
+  edms-nginx:
+    networks:
+      - edms-net
+      - edms-proxy-net
+
+networks:
+  edms-proxy-net:
+    external: true

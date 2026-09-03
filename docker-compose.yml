@@ -1,0 +1,39 @@
+services:
+  edms-nginx:
+    image: asia-east1-docker.pkg.dev/blood-system-dev/edms-image/edms-nginx:latest
+    container_name: edms-nginx
+    # ⚠️ 刻意不映射 ports：正式環境由 TBMS repo 管理的 front-proxy 佔 80 並依 Host
+    #    分流（見 TBMS 的 edge/README.md）。本機開發所需的 port 定義在
+    #    docker-compose.override.yml——compose 的 ports 是**合併**不是覆寫，
+    #    留在這裡就沒辦法在 prod 那側移除。
+    depends_on:
+      - edms-backend
+    networks:
+      - edms-net
+    restart: unless-stopped
+
+  edms-backend:
+    image: asia-east1-docker.pkg.dev/blood-system-dev/edms-image/edms-backend:latest
+    container_name: edms-backend
+    # ⚠️ 禁止對外映射 ports：後端僅可經 nginx 抵達，否則會繞過 real_ip 而讓
+    #    client IP 可被偽造（限流與稽核都依賴它）
+    env_file: .env.prod
+    depends_on:
+      - edms-db
+    networks:
+      - edms-net
+    restart: unless-stopped
+
+  edms-db:
+    image: postgres:17
+    container_name: edms-db
+    env_file: .env.prod
+    volumes:
+      - /opt/edms/data/postgres:/var/lib/postgresql/data
+    networks:
+      - edms-net
+    restart: unless-stopped
+
+networks:
+  edms-net:
+    driver: bridge
