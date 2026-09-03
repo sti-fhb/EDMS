@@ -18,6 +18,10 @@ services:
       dockerfile: Dockerfile
     image: edms-backend:local
     env_file: .env.local
+    # 本機用 named volume，避免每次 up 都清空上傳的測試檔
+    volumes:
+      - edms-dm-files:/app/var/dm_files
+      - edms-et-videos:/app/var/et_videos
 
   edms-db:
     # 用 5441 而非 5432，避免與本機既有的 PostgreSQL 及 TBMS 本機環境（5440）衝突
@@ -29,3 +33,5 @@ services:
 
 volumes:
   edms-db-data:
+  edms-dm-files:
+  edms-et-videos:
