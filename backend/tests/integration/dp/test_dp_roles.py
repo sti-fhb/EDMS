@@ -188,8 +188,8 @@ async def test_list_assignments_exposes_account_status(db, dm_registered):
     assert by_id["u_lock"].status == "ACTIVE" and by_id["u_lock"].locked_until is not None
 
 
-async def test_assign_rejects_disabled_account(db, dm_registered):
-    """對已停用帳號指派角色 → 403 DP_ROLE_004（#250 AC3，擋前端繞過）。"""
+async def test_assign_rejects_granting_to_disabled_account(db, dm_registered):
+    """對已停用帳號**新增**角色 → 403 DP_ROLE_004（#250 AC3，擋前端繞過）。"""
     await _grant_dm(db, "adm", DM_ADMIN)
     await _seed_user(db, "u_off", status="DISABLED")
     with pytest.raises(AppError) as e:
@@ -199,8 +199,63 @@ async def test_assign_rejects_disabled_account(db, dm_registered):
     assert e.value.status_code == 403 and e.value.error_code == "DP_ROLE_004"
 
 
-async def test_assign_rejects_locked_account(db, dm_registered):
-    """對鎖定中帳號指派角色 → 403 DP_ROLE_004（#250 AC3）。"""
+async def test_assign_allows_revoking_from_disabled_account(db, dm_registered):
+    """對已停用帳號**撤除**角色 → 放行（Security Review MEDIUM-3）。
+
+    `assign` 為整組目標集覆寫，若一律擋下，離職 / 疑遭盜用帳號將無法降權——
+    權限凍結在原狀，日後重新啟用時原封不動復活、不經重新核可，牴觸最小權限原則。
+    故只擋「提權」（目標集超出現況），純撤權放行。
+    """
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_leaver")
+    # 先於帳號正常時授予兩個角色，再停用該帳號（模擬離職流程：先停用、後清權限）
+    await _svc.assign(
+        db,
+        module="DM",
+        user_id="u_leaver",
+        roles=[DM_EDITOR, DM_ADMIN],
+        groups=[],
+        operator=OperatorInfo(user_id="adm"),
+    )
+    user = await db.scalar(select(DpUser).where(DpUser.user_id == "u_leaver"))
+    user.status = "DISABLED"
+    await db.flush()
+
+    # 全部撤除（目標集為空）→ 應放行
+    await _svc.assign(
+        db, module="DM", user_id="u_leaver", roles=[], groups=[], operator=OperatorInfo(user_id="adm")
+    )
+    roles = {
+        r
+        for r in (
+            await db.execute(
+                select(DmUserRole.role_code).where(DmUserRole.user_id == "u_leaver", DmUserRole.deleted == 0)
+            )
+        ).scalars()
+    }
+    assert roles == set(), "停用帳號應可被完全撤權"
+
+
+async def test_assign_rejects_partial_revoke_with_new_grant(db, dm_registered):
+    """撤一個、加一個（目標集非現況子集）→ 仍視為提權，擋下。"""
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_mix")
+    await _svc.assign(
+        db, module="DM", user_id="u_mix", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+    )
+    user = await db.scalar(select(DpUser).where(DpUser.user_id == "u_mix"))
+    user.status = "DISABLED"
+    await db.flush()
+
+    with pytest.raises(AppError) as e:
+        await _svc.assign(
+            db, module="DM", user_id="u_mix", roles=[DM_ADMIN], groups=[], operator=OperatorInfo(user_id="adm")
+        )
+    assert e.value.status_code == 403 and e.value.error_code == "DP_ROLE_004"
+
+
+async def test_assign_rejects_granting_to_locked_account(db, dm_registered):
+    """對鎖定中帳號**新增**角色 → 403 DP_ROLE_004（#250 AC3）。"""
     await _grant_dm(db, "adm", DM_ADMIN)
     await _seed_user(db, "u_lock", locked_until=utcnow() + timedelta(hours=1))
     with pytest.raises(AppError) as e:

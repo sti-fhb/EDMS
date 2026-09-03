@@ -163,11 +163,13 @@ function AssignmentsTab({ module }: { module: string }) {
         </TableHead>
         <TableBody>
           {rows.map((row) => {
-            // 停用 / 鎖定中的帳號登不進系統，不應被指派權限（#250）：整列灰化、兩維度皆不可操作。
-            // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
-            const usable = isAccountUsable(row)
+            // 停用 / 鎖定中的帳號登不進系統，不應取得新權限（#250）：整列灰化、且只擋「新增」方向。
+            // **撤除既有權限仍可操作**——否則離職 / 疑遭盜用帳號無法降權，權限會凍結原狀並在日後
+            // 重新啟用時原封不動復活（Security Review MEDIUM-3）。後端 DP_ROLE_004 為同一語意。
+            // 本判定只是體驗，非權限邊界。
+            const canGrant = isAccountUsable(row)
             return (
-              <TableRow key={row.user_id} sx={usable ? undefined : { opacity: 0.5 }}>
+              <TableRow key={row.user_id} sx={canGrant ? undefined : { opacity: 0.5 }}>
                 <TableCell>{row.email}</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={0.5} alignItems="center">
@@ -183,24 +185,27 @@ function AssignmentsTab({ module }: { module: string }) {
                     )}
                   </Stack>
                 </TableCell>
-                {roleDefs.map((r) => (
-                  <TableCell key={r.code} align="center">
-                    <Checkbox
-                      size="small"
-                      checked={row.roles.includes(r.code)}
-                      // 帳號不可用 → 一律 disable；否則只在「正對本列做角色操作」時 disable
-                      //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
-                      disabled={
-                        !usable ||
-                        (assignMut.isPending &&
-                          assignMut.variables?.userId === row.user_id &&
-                          assignMut.variables?.source === "role")
-                      }
-                      onChange={() => toggleRole(row, r.code)}
-                      slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
-                    />
-                  </TableCell>
-                ))}
+                {roleDefs.map((r) => {
+                  const held = row.roles.includes(r.code)
+                  return (
+                    <TableCell key={r.code} align="center">
+                      <Checkbox
+                        size="small"
+                        checked={held}
+                        // 不可用帳號只擋「新增」（未持有者不可勾）；已持有者可取消＝撤權，須保持可操作。
+                        // 另在「正對本列做角色操作」時 disable（存可見對象 source==="group" 不影響角色 checkbox，不閃）
+                        disabled={
+                          (!canGrant && !held) ||
+                          (assignMut.isPending &&
+                            assignMut.variables?.userId === row.user_id &&
+                            assignMut.variables?.source === "role")
+                        }
+                        onChange={() => toggleRole(row, r.code)}
+                        slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
+                      />
+                    </TableCell>
+                  )
+                })}
                 <TableCell sx={{ verticalAlign: "top" }}>
                   {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
                   <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
@@ -213,8 +218,8 @@ function AssignmentsTab({ module }: { module: string }) {
                         <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
                       ))
                     )}
-                    {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
-                    <Button size="small" disabled={!usable} onClick={() => setEditing(row)}>
+                    {/* 不可用帳號仍可開啟：dialog 內只允許取消已選項（撤權），不可新增 */}
+                    <Button size="small" onClick={() => setEditing(row)}>
                       編輯
                     </Button>
                   </Box>
@@ -240,6 +245,7 @@ function AssignmentsTab({ module }: { module: string }) {
         <GroupEditDialog
           row={editing}
           options={groupOptions ?? []}
+          canGrant={isAccountUsable(editing)}
           onClose={() => setEditing(null)}
           onSave={(groups) => {
             assignMut.mutate({ userId: editing.user_id, roles: editing.roles, groups, source: "group" })
@@ -251,15 +257,22 @@ function AssignmentsTab({ module }: { module: string }) {
   )
 }
 
-/** 群組多選 dialog（可見對象 / 標籤指派）。 */
+/**
+ * 群組多選 dialog（可見對象 / 標籤指派）。
+ *
+ * `canGrant=false`（帳號停用 / 鎖定中）時只允許**取消**已選項——未選者禁用，
+ * 保留離職降權路徑（#250 Security Review MEDIUM-3）。
+ */
 function GroupEditDialog({
   row,
   options,
+  canGrant,
   onClose,
   onSave,
 }: {
   row: AssignmentRow
   options: GroupOption[]
+  canGrant: boolean
   onClose: () => void
   onSave: (groups: string[]) => void
 }) {
@@ -271,19 +284,29 @@ function GroupEditDialog({
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>編輯可見對象</DialogTitle>
       <DialogContent>
+        {!canGrant && (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            此帳號已停用或鎖定，僅能撤除既有可見對象、不可新增。
+          </Alert>
+        )}
         {options.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             尚無可選群組。
           </Typography>
         ) : (
           <Stack>
-            {options.map((o) => (
-              <FormControlLabel
-                key={o.code}
-                control={<Checkbox checked={selected.includes(o.code)} onChange={() => toggle(o.code)} />}
-                label={o.name}
-              />
-            ))}
+            {options.map((o) => {
+              const held = selected.includes(o.code)
+              return (
+                <FormControlLabel
+                  key={o.code}
+                  control={
+                    <Checkbox checked={held} disabled={!canGrant && !held} onChange={() => toggle(o.code)} />
+                  }
+                  label={o.name}
+                />
+              )
+            })}
           </Stack>
         )}
       </DialogContent>
