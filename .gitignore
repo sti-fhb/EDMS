@@ -8,3 +8,13 @@ ehthumbs.db
 
 # Wireframe 暫存工作目錄（截圖產生用，非版控內容）
 docs/wireframes/**/temp/
+
+# 環境變數：**絕不進 git**
+#
+# 本 repo 為 public——.env.local（本機）與 .env.prod（由 vm-deploy.sh 從
+# /opt/edms/.env.prod 複製進部署用 clone）都含機密，一旦被追蹤即等同公開。
+# 範本檔（*.env.example / .env.example）刻意保留在版控內。
+.env
+.env.*
+!.env.example
+!*.env.example

@@ -132,7 +132,25 @@ ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
 EDMS_BACKUP_BUCKET=gs://...
 ```
 
-### 2.5 Cloudflare
+### 2.5 環境變數檔一覽
+
+| 檔案 | 用途 | 進 git？ |
+|------|------|---------|
+| `.env.example` | 範本，列出 docker compose 需要的所有變數 | ✅ |
+| `.env.local` | **本機開發**用，由 `docker-compose.override.yml` 引用。從 `.env.example` 複製後填值 | ❌ |
+| `/opt/edms/.env.prod` | **正式環境**，放在 VM 上。`vm-deploy.sh` 部署時複製進 `/opt/edms/repo/.env.prod` | ❌ |
+| `backend/.env.example`、`frontend/.env.example` | 供「不透過 docker」直接跑起服務時使用 | ✅ |
+
+本機開發起手：
+
+```bash
+cp .env.example .env.local     # 填入本機用的值
+docker compose up -d           # 自動套用 docker-compose.override.yml
+```
+
+> ⚠️ 本 repo 為 **public**。`.gitignore` 已擋住 `.env` 與 `.env.*`（範本除外），但**填了實際值的檔案一律不得進版控**——一旦被追蹤即等同公開。
+
+### 2.6 Cloudflare
 
 `edms.tbsf.tw` 的 public hostname 指向 `http://10.140.0.3:80`（與 TBMS 同一目的地，由 front-proxy 依 Host 分流）。此項已完成。
 
