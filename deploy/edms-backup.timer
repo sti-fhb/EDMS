@@ -1,0 +1,18 @@
+# 每日台灣時間 04:30 備份。
+#
+# 刻意與 TBMS 的每日備份（03:30）錯開：兩份 pg_dump 併行會同時吃滿
+# bms-prod-02 的 CPU 與磁碟 IO，而 TBMS 是主系統、優先權較高。
+
+[Unit]
+Description=Run EDMS backup daily at 04:30 Taipei time
+Documentation=https://github.com/sti-fhb/EDMS/blob/main/docs/infra/deployment.md
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Taipei
+# 開機時若已錯過當日排程則補跑一次
+Persistent=true
+RandomizedDelaySec=300
+Unit=edms-backup.service
+
+[Install]
+WantedBy=timers.target
