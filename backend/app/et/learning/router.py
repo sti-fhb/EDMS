@@ -20,6 +20,7 @@ Starlette 之 `FileResponse` **原生支援 Range 請求**（`_parse_range_heade
 這種不易歸因的症狀。
 """
 
+from pathlib import Path as FsPath
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
@@ -27,6 +28,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.exceptions import AppError
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context
 from app.et.learning.schemas import LearnStructure, MaterialContent
@@ -76,6 +78,7 @@ async def video_file(
 ) -> FileResponse:
     """影片實體檔。Range 由 `FileResponse` 處理，播放器可正常拖動進度條。"""
     path, file_name = await _service.video_file_path(db, video_id, user_id=ctx.user_id)
+    _ensure_file_present(path)
     return FileResponse(path, filename=file_name)
 
 
@@ -92,4 +95,22 @@ async def material_doc_file(
     任一課程者即可用自己有權的 `material_id` 搭配任意 `doc_id` 取走全站被引用的文件。
     """
     content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id)
+    _ensure_file_present(content.path)
     return FileResponse(content.path, media_type=content.mime, filename=content.name)
+
+
+def _ensure_file_present(path: str) -> None:
+    """實體檔缺失（DB↔磁碟不一致）時回統一 404。
+
+    `resolve_within_root` 只做 storage-root 圍籬、**不檢查存在性**；少了本檢查，
+    `FileResponse` 會拋 `RuntimeError: File at path ... does not exist` 而成為 500，
+    **且 traceback 含落盤絕對路徑**。
+
+    這個情境不是理論：`ET_VIDEO_STORAGE_ROOT` 預設為相對路徑（`./var/et_videos`），
+    從不同工作目錄啟動後端就會指向不同的 root，DB 裡的所有 `FILE_PATH` 一起對不到
+    ——2026-09-03 DM 那側正是這樣掉了 9 筆檔案實體。
+
+    比照 `dm/detail/router.get_version_file` 之既有作法。
+    """
+    if not FsPath(path).is_file():
+        raise AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
