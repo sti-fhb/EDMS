@@ -130,25 +130,32 @@ jobs:
       # `uv run` 預設會先把環境同步到與 uv.lock 一致，而映像刻意以 --no-dev 建置，
       # uv 便判定 dev 依賴缺漏而連 PyPI 下載——院內無網路即容器起不來。
       # 根因由 backend/Dockerfile 的 ENV UV_NO_SYNC=1 收斂；此處每次都實測一次。
+      #
+      # ⚠️ 探針刻意用最小的 `uv run python`，**不要用 alembic heads**：
+      # 本專案有 migration 在 module 層 `from app.core.config import settings`，
+      # 使 alembic 相關指令需要一整組通過驗證的 production 設定，探針會隨設定
+      # 規則增修而失效（2026-09-03 首次 CD 即因此誤判為「封閉網路不可執行」）。
+      # 本步驟要驗的只是「uv run 不會嘗試對外同步」，與 app 設定無關。
       - name: 驗證映像可於封閉網路執行
         run: |
-          if ! docker run --rm --network none \
-            "${AR_BASE}/edms-backend:${SHORT_SHA}" \
-            uv run alembic heads > /dev/null 2>&1; then
+          if ! OUT=$(docker run --rm --network none "${AR_BASE}/edms-backend:${SHORT_SHA}" uv run python -c "print('offline-ok')" 2>&1); then
             echo "::error::映像在無對外網路的環境下無法執行。"
             echo "::error::請確認 backend/Dockerfile 的 ENV UV_NO_SYNC=1 未被移除。"
-            echo "::error::重現方式：docker run --rm --network none <image> uv run alembic heads"
+            echo "::error::實際輸出：${OUT}"
             exit 1
           fi
-          echo "映像可於封閉網路執行（--network none 驗證通過）"
+          echo "映像可於封閉網路執行（--network none 驗證通過）：${OUT}"
 
       # 雙 head 提前 fail-fast：在 image 還沒 push 前先擋下。
       # alembic heads 為離線指令（只讀 migration 版本檔、不連 DB）。
       - name: 檢查 Alembic heads（雙 head 提前 fail-fast）
         if: steps.mig.outputs.changed == 'true'
         run: |
-          if ! HEADS=$(docker run --rm "${AR_BASE}/edms-backend:${SHORT_SHA}" uv run alembic heads); then
-            echo "::error::alembic heads 執行失敗（非 head 數問題），中止。"
+          # alembic 會載入所有 migration 檔，而其中有一支在 module 層 import settings，
+          # 故需提供可通過驗證的最小設定。DEBUG=true 放寬 production 專屬檢核；
+          # 這些值僅供離線讀取 migration 版本檔使用，不連任何資料庫。
+          if ! HEADS=$(docker run --rm -e DEBUG=true -e DATABASE_URL="postgresql+asyncpg://probe:probe@localhost:5432/probe" -e JWT_SECRET_KEY="ci-probe-only-not-a-real-secret-0123456789" "${AR_BASE}/edms-backend:${SHORT_SHA}" uv run alembic heads 2>&1); then
+            echo "::error::alembic heads 執行失敗（非 head 數問題），中止。實際輸出：${HEADS}"
             exit 1
           fi
           COUNT=$(echo "$HEADS" | grep -c . || true)
