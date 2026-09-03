@@ -45,13 +45,27 @@ export function EtLearnPage() {
   const navigate = useNavigate()
   const [activeItemId, setActiveItemId] = useState<number | null>(null)
 
+  // 路由參數非數字（網址被手改）時 query 之 `enabled` 為 false，`isPending` 會恆為
+  // true——使用者只會看到一個永遠轉不完的圈。提前給明確訊息。
+  const courseIdValid = Number.isFinite(courseId) && courseId > 0
+
   const { data, isPending, error } = useQuery({
     queryKey: QUERY_KEYS.etLearn.structure(courseId),
     queryFn: () => learnApi.structure(courseId),
-    enabled: Number.isFinite(courseId) && courseId > 0,
+    enabled: courseIdValid,
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
+  if (!courseIdValid) {
+    return (
+      <Box>
+        <BackButton onBack={() => navigate("/et/my-courses")} />
+        <Alert severity="error" sx={{ mt: 2 }}>
+          課程代碼無效
+        </Alert>
+      </Box>
+    )
+  }
   if (isPending) {
     return (
       <Stack alignItems="center" sx={{ py: 6 }}>

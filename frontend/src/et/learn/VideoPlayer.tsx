@@ -22,11 +22,13 @@ interface Props {
  *
  * JWT 是 memory-only，`<video src>` **送不出 Authorization header**。而影片單檔上限
  * 500MB，不能像 DM 文件那樣用 blob（整支下載完才能播、失去 Range、記憶體吃滿）。
- * 故先向 `POST /videos/{id}/ticket` 取一張 60 秒、綁單一影片的票，放進 query string
+ * 故先向 `POST /videos/{id}/ticket` 取一張 5 分鐘、綁單一影片的票，放進 query string
  * ——形同 S3 presigned URL。
  *
- * 票只用於**發起**連線；之後拖動進度條產生的 Range 請求沿用同一個 URL，串流不會因
- * 票過期而中斷（連線已建立）。
+ * ⚠️ **票不是「只用於發起連線」**（初版這樣假設，是錯的）。`<video>` 對同一個 URL 會
+ * 反覆發出新請求：`preload="metadata"` 只預抓 metadata，內容要等按下播放才抓；久停後
+ * 續播、拖到未緩衝區段亦然。它們都帶著同一張票，過期就會失敗。故除了拉長 TTL，
+ * 另以 `onError` 自動重取票並復位進度（見 `handleVideoError`）。
  *
  * ## 倍速選項由後端給
  *
@@ -43,6 +45,8 @@ export function VideoPlayer({ video, playbackRates }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [rate, setRate] = useState(1)
   const videoRef = useRef<HTMLVideoElement>(null)
+  /** 票過期只重試一次——換了新票仍失敗表示不是過期問題，再重試會變無窮迴圈。 */
+  const retriedRef = useRef(false)
 
   useEffect(() => {
     // **不在 effect 內同步 setState**（串聯 render，且 ESLint 擋）。切換教材時
@@ -64,6 +68,43 @@ export function VideoPlayer({ video, playbackRates }: Props) {
     if (videoRef.current) videoRef.current.playbackRate = rate
   }, [rate, src])
 
+  /**
+   * 票過期後的自動復原。
+   *
+   * `<video>` 會對同一個 URL **反覆**發出請求（按下播放才抓內容、久停後續播、拖到
+   * 未緩衝區段），而它們都帶著同一張票。只靠拉長 TTL 只是把撞到的機率降低，不是修好
+   * ——學員把頁面開著吃完午餐回來按播放，一樣會失敗。
+   *
+   * 故播放失敗時重新取票並換上新 URL，**並復位播放進度**（換 `src` 會讓
+   * `currentTime` 歸零，不復位就等於每次過期都被丟回片頭）。
+   *
+   * 只重試一次：若換了新票仍失敗，那不是過期問題（檔案不見、被移除權限），再重試
+   * 只會變成無窮迴圈。
+   */
+  async function handleVideoError() {
+    if (retriedRef.current) {
+      setError("影片播放失敗，請重新整理頁面")
+      return
+    }
+    retriedRef.current = true
+    const resumeAt = videoRef.current?.currentTime ?? 0
+    try {
+      const ticket = await requestVideoTicket(video.video_id)
+      setSrc(videoFileUrl(video.video_id, ticket))
+      // `loadeddata` 之後才能設 currentTime——換 src 會重新載入
+      const el = videoRef.current
+      if (el) {
+        const restore = () => {
+          el.currentTime = resumeAt
+          el.removeEventListener("loadeddata", restore)
+        }
+        el.addEventListener("loadeddata", restore)
+      }
+    } catch {
+      setError("影片播放失敗，請重新整理頁面")
+    }
+  }
+
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2">{video.file_name}</Typography>
@@ -77,6 +118,7 @@ export function VideoPlayer({ video, playbackRates }: Props) {
           src={src}
           controls
           preload="metadata"
+          onError={() => void handleVideoError()}
           sx={{ width: "100%", maxHeight: 480, bgcolor: "common.black", borderRadius: 1 }}
         />
       )}

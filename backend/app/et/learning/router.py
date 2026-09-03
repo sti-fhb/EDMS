@@ -144,4 +144,7 @@ async def video_file(
     verify_video_ticket(t, video_id=video_id)
     path, file_name = await _service.video_file_by_ticket(db, video_id)
     _ensure_file_present(path)
-    return FileResponse(path, filename=file_name)
+    # `inline`：本端點的用途是**串流播放**。Starlette 預設 `attachment`，把這個 URL
+    # 貼到網址列會被強制下載而非播放——語意不符，且對「複製連結確認影片能不能開」
+    # 這種日常操作很不直覺。
+    return FileResponse(path, filename=file_name, content_disposition_type="inline")

@@ -1,8 +1,8 @@
 """影片播放票（US5 / #255）。
 
-票會進 URL 與 access log，故三道限制各自要有測試釘住：60 秒有效、綁單一影片、
-與 access token 嚴格區隔。**第三道最關鍵**——若票能當一般 token 用，一個從 log 撈到
-的票就等於一組帳號憑證。
+票會進 URL 與 access log，故三道限制各自要有測試釘住：有效期、綁單一影片、與 access
+token 嚴格區隔。**第三道最關鍵**——若票能當一般 token 用，一個從 log 撈到的票就等於
+一組帳號憑證。
 """
 
 from datetime import timedelta
@@ -25,14 +25,19 @@ class TestIssueAndVerify:
         token = issue_video_ticket(user_id="stu001", video_id=42)
         assert verify_video_ticket(token, video_id=42) == "stu001"
 
-    def test_有效期為六十秒(self) -> None:
-        assert TICKET_TTL_SECONDS == 60
+    def test_有效期與常數一致且足夠涵蓋開啟到播放(self) -> None:
+        """TTL 須涵蓋「開啟頁面 → 實際按下播放」的停留。
+
+        初版設 60 秒是錯的：`preload="metadata"` 只預抓 metadata，內容請求要等按下
+        播放才發出——學員先看完教材說明再點播放就會撞到過期票。
+        """
+        assert TICKET_TTL_SECONDS >= 300, "太短會讓正常操作撞到過期"
         raw = jwt.decode(
             issue_video_ticket(user_id="stu001", video_id=42),
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
         )
-        assert raw["exp"] - raw["iat"] == 60
+        assert raw["exp"] - raw["iat"] == TICKET_TTL_SECONDS
 
 
 class TestScopedToOneVideo:
@@ -47,7 +52,10 @@ class TestScopedToOneVideo:
 
 class TestExpiry:
     def test_過期之票不通過(self) -> None:
-        with patch("app.et.learning.video_ticket.utcnow", return_value=utcnow() - timedelta(seconds=120)):
+        with patch(
+            "app.et.learning.video_ticket.utcnow",
+            return_value=utcnow() - timedelta(seconds=TICKET_TTL_SECONDS + 60),
+        ):
             stale = issue_video_ticket(user_id="stu001", video_id=42)
         with pytest.raises(AppError) as exc:
             verify_video_ticket(stale, video_id=42)

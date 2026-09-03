@@ -28,6 +28,7 @@ from app.et.constants import (
 from app.et.course.models import EtCourse, EtItem
 from app.et.material.models import EtMaterialVideo
 from app.et.progress.models import EtEnrollment
+from app.et.learning.video_ticket import TICKET_TTL_SECONDS
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
@@ -373,5 +374,5 @@ class TestVideoTicketFlow:
         r = await client.post(f"/api/et/videos/{ids['video_id']}/ticket", headers=_bearer(student))
 
         assert r.status_code == 200, r.text
-        assert r.json()["expires_in"] == 60
+        assert r.json()["expires_in"] == TICKET_TTL_SECONDS
         assert r.json()["ticket"]

@@ -135,6 +135,13 @@ class EtLearningService:
             )
             for v in await self._repo.videos(db, material_id)
         ]
+        # ⚠️ 逐份序列呼叫 DM（N+1）。**刻意不用 `asyncio.gather` 平行化**：
+        # `AsyncSession` 不可跨協程並行共用，而 `get_current_by_doc_id` 是拿同一個
+        # session 去查——平行化會踩到 SQLAlchemy 的並行使用錯誤，或更糟地靜默回錯資料。
+        #
+        # 實務上單一教材引用的 DM 文件是個位數（教師逐份挑選），故先接受。若日後成為
+        # 瓶頸，正解是請 DM 開一支批次介面（`get_current_by_doc_ids`），而不是在這裡
+        # 玩並行。
         docs = [await self._doc_row(db, d.doc_id, d.sort_order) for d in await self._repo.docs(db, material_id)]
         return MaterialContent(
             material_id=material.material_id,

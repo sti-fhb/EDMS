@@ -30,9 +30,14 @@ export async function requestVideoTicket(videoId: number): Promise<string> {
  *
  * 直接放進 `<video src>`，拖動進度條所需的 Range 請求由瀏覽器自行發出、後端以
  * `FileResponse` 支援。**不經 axios**——那會變成 blob，失去串流與 Range。
+ *
+ * base URL 取自 `http` client 而非硬寫 `/api`：`VITE_API_BASE_URL` 是可設定的
+ * （見 `.env.example`），硬寫會讓「全站唯一一條不經 axios 的路徑」在後端換位址時
+ * 與其餘 API 不一致而失效。
  */
 export function videoFileUrl(videoId: number, ticket: string): string {
-  return `/api/et/videos/${videoId}/file?t=${encodeURIComponent(ticket)}`
+  const base = (http.defaults.baseURL ?? "").replace(/\/$/, "")
+  return `${base}/et/videos/${videoId}/file?t=${encodeURIComponent(ticket)}`
 }
 
 /**
