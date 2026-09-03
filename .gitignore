@@ -18,3 +18,6 @@ docs/wireframes/**/temp/
 .env.*
 !.env.example
 !*.env.example
+
+# IDE 個人設定（JetBrains）：屬開發者本機偏好，不進版控
+.idea/
