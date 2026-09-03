@@ -18,6 +18,29 @@
 # ============================================================
 
 services:
+  edms-backend:
+    # DM 受控文件與 ET 影音教材存在**檔案系統**上（DM_FILE_STORAGE_ROOT /
+    # ET_VIDEO_STORAGE_ROOT）。不掛出來的話會寫進容器可寫層，每次部署重建容器
+    # 即全部消失——資料庫裡留著紀錄、檔案卻不見了。
+    #
+    # 掛載點放在 prod override 而非 base：compose 的 volumes 是**合併**不是覆寫，
+    # 留在 base 會讓本機開發也被迫要有 /opt/edms 這些路徑。
+    #
+    # create_host_path: false —— 目錄未備妥時直接啟動失敗，而非讓 Docker 以 root
+    # 自動建出容器內 app 使用者（uid 10001）寫不進去的目錄；後者會「啟動成功、
+    # 上傳卻靜默失敗」，比啟動失敗難查得多。
+    volumes:
+      - type: bind
+        source: /opt/edms/data/dm_files
+        target: /app/var/dm_files
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/edms/data/et_videos
+        target: /app/var/et_videos
+        bind:
+          create_host_path: false
+
   edms-nginx:
     networks:
       - edms-net

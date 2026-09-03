@@ -123,7 +123,14 @@ flowchart TD
 在 bms-prod-02 上執行，**需要 `sudo`**（`/opt` 寫入與 docker 操作皆然；一般帳號未在 `docker` 群組內）。與 §2.1～§2.3 的 GCP 設定互相獨立，兩邊可平行進行。
 
 ```bash
+# DB 資料
 sudo mkdir -p /opt/edms/data/postgres
+
+# DM 受控文件與 ET 影音教材的存放目錄。
+# owner 必須是 10001（映像內 app 使用者的 uid，見 backend/Dockerfile）——
+# 否則容器啟動成功、上傳卻靜默失敗。
+sudo mkdir -p /opt/edms/data/dm_files /opt/edms/data/et_videos
+sudo chown -R 10001:10001 /opt/edms/data/dm_files /opt/edms/data/et_videos
 sudo git clone https://github.com/sti-fhb/EDMS.git /opt/edms/repo   # public，免認證
 
 # 機密設定，不進 git
@@ -144,10 +151,15 @@ sudo systemctl enable --now edms-deploy.timer
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
 DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
+TRUSTED_PROXY_COUNT=3
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
+DM_FILE_STORAGE_ROOT=/app/var/dm_files
+ET_VIDEO_STORAGE_ROOT=/app/var/et_videos
 EDMS_BACKUP_BUCKET=gs://...
 ```
+
+完整欄位以 [`.env.example`](../../.env.example) 為準。production（`DEBUG=false`）另有數項會在啟動時擋下的護欄：`FRONTEND_BASE_URL` 不得指向 localhost、`TRUSTED_PROXY_COUNT` 必須明示、兩個儲存根目錄必須為絕對路徑。
 
 ⚠️ 兩點容易出錯：
 
@@ -253,6 +265,25 @@ TBMS 曾因此誤報部署失敗（服務其實正常），詳見其 `docs/infra
 正式環境 EDMS 的 DB 無外部通道，維護須**登入 bms-prod-02** 後用 `sudo docker exec -it edms-db psql -U edms edms`。日後若需外部連線須用 **5433**（5432 已被 `tbms-db` 佔）。
 
 ⚠️ 兩套系統沿用同一組 `DP_` 表名（`DP_USER`、`DP_SESSION`、`DP_AUDIT_LOG`），**連錯資料庫不會報錯**——表存在、欄位對得上、查得出資料，只是查到另一套系統的。動 `UPDATE` / `DELETE` 前先 `SELECT current_database();`。
+
+---
+
+## 5.1 ⚠️ 檔案本體目前沒有備份
+
+`scripts/db-backup.sh` 只 dump **資料庫**。DM 的受控文件與 ET 的影音教材存在
+`/opt/edms/data/{dm_files,et_videos}`，**不在任何備份範圍內**。
+
+後果：VM 或磁碟損毀時，資料庫可從 GCS 還原，但檔案本體會全部遺失——還原後
+資料庫裡留著文件紀錄、實際檔案卻不存在。
+
+此缺口尚未處理，可能的方向（擇一，未定案）：
+
+- 以 `gcloud storage rsync` 定期同步到 GCS（最貼近現行備份機制）
+- 改用 GCS 作為儲存後端，檔案不落在 VM 磁碟
+- 若院內封閉網路無法用物件儲存，則需另訂異機備份方式
+
+⚠️ 這也牽動磁碟水位：ET 影音教材單檔可能很大，而 bms-prod-02 只有 100 GB
+且與 TBMS 共用。上線後要納入監看。
 
 ---
 
