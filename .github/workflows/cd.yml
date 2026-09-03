@@ -1,40 +1,34 @@
 # ============================================================
-# EDMS CD Pipeline
+# EDMS CD Pipeline —— **只負責 build 與 push，不部署**
 #
-# 觸發時機：push 到 main（排除純文件與純 CI/workflow 變更，見 paths-ignore）
+# 觸發時機：push 到 main（排除純文件與純 CI/workflow 變更）
 #
-# 流程（self-hosted runner [cd] on bms-prod-02）：
+# 流程（GitHub-hosted runner）：
+#   ├── WIF 認證 GCP（不使用 SA 金鑰）
 #   ├── docker build edms-backend
-#   ├── 封閉網路可執行性驗證（docker run --network none；EDMS 同樣交付院內
-#   │     封閉網路，映像不得於執行期依賴對外連線）
-#   ├── alembic heads 檢查（僅本次 push 有動 migration 檔時；多 head 即 fail-fast）
+#   ├── 封閉網路可執行性驗證（docker run --network none）
+#   ├── alembic heads 檢查（僅本次 push 有動 migration 檔時）
 #   ├── docker build edms-nginx（含 frontend build）
-#   ├── docker push（:latest + :<short-sha> 雙 tag，SHA tag 供追溯與回滾）
-#   ├── compose pull
-#   ├── pg_dump 備份（migration 前快照 → GCS，出錯可還原）
-#   ├── alembic upgrade head
-#   ├── compose up -d
-#   └── 內部 health check
+#   └── docker push（:latest + :<short-sha> 雙 tag）
 #
-# ⚠️ 前置條件（未滿足則本 workflow 無法運作）：
-#   1. **runs-on 的 self-hosted runner**：CD 必須在 bms-prod-02 本機執行
-#      （直接操作該機的 docker）。若 `cd` runner 為 repo-level 綁在 TBMS repo，
-#      本 repo 用不到，需改註冊為 org-level 或在同機為本 repo 另註冊一個。
-#      → 待確認事項，見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §8
-#   2. **Artifact Registry 需新開 `edms-image` repo**，並於建立當天設定
-#      cleanup policy（TBMS 曾因未設而累積 1,456 個無 tag 映像、8.8 GB）
-#   3. **GCS 備份 bucket** 與 VM Service Account 的寫入權限，
-#      並於 /opt/edms/.env.prod 設定 EDMS_BACKUP_BUCKET
-#   4. **主機前置**：/opt/edms/.env.prod、/opt/edms/data/postgres、
-#      external network edms-proxy-net（172.28.241.0/24）
+# ⚠️ **本 workflow 刻意不含任何部署步驟。**
 #
-# 注意：
-#   - 本 workflow 與 TBMS 的 CD 共用同一個 `cd` runner，會**序列化排隊**。
-#     TBMS 為主系統，其緊急修復優先——必要時手動取消本 workflow 的 job。
-#   - front-proxy 由 TBMS repo 管理，本 repo 不得定義或重啟它。
+# 本 repo 為 **public**，故：
+#   1. 不使用 self-hosted runner —— fork PR 會在 runner 上執行任意程式碼，
+#      而該 runner 所在的 bms-prod-02 同時跑著 TBMS（血庫，主系統）
+#   2. **不授予本 workflow 任何 bms-prod-02 的存取權** —— 部署必然需要 docker
+#      權限，而 docker group 等同 root，可讀取 /opt/tbms/.env.prod、連上 tbms-db。
+#      讓 public repo 的 workflow 取得主系統正式機的 root 等級存取，違反
+#      「不讓次級系統拉低主系統可用性／安全性」的原則
+#
+# 部署改由 **VM 側主動拉取**：bms-prod-02 上的 systemd timer 執行
+# scripts/vm-deploy.sh，偵測到新的 image tag 才進行部署。本 workflow 的最大
+# 爆炸半徑因此收斂為「能推一個映像到 edms-image」。
+#
+# 安裝與設定見 docs/infra/deployment.md。
 # ============================================================
 
-name: CD
+name: CD (build & push)
 
 on:
   push:
@@ -43,36 +37,45 @@ on:
       - 'docs/**'
       - '**/*.md'
       - '.claude/**'
-      # CI / workflow 設定不進映像，改動它們不會改變線上行為。
-      # 含本檔自身：cd.yml 的變更於下一次真實部署時生效。
       # 注意 paths-ignore 的語意是「本次 push 的**所有**變更檔都符合才跳過」，
-      # 故「同時改 .github/ 與 backend/」仍會正常觸發部署。
+      # 故「同時改 .github/ 與 backend/」仍會正常觸發。
       - '.github/**'
   workflow_dispatch:
 
-# 同一時間只允許一個 EDMS 部署；與 TBMS 的 cd-deploy 分開命名，避免互鎖
 concurrency:
-  group: edms-deploy
+  group: edms-build
   cancel-in-progress: false
 
 env:
+  AR_HOST: asia-east1-docker.pkg.dev
   AR_BASE: asia-east1-docker.pkg.dev/blood-system-dev/edms-image
 
 jobs:
-  deploy:
-    name: Build, Push & Deploy
-    runs-on: [self-hosted, cd]
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # WIF 取得 OIDC token 所需
 
     steps:
       - name: Checkout 原始碼
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: 設定 Artifact Registry 認證
-        run: |
-          docker logout asia-east1-docker.pkg.dev || true
-          gcloud auth print-access-token | \
-          docker login -u oauth2accesstoken --password-stdin \
-          asia-east1-docker.pkg.dev
+      # 以 Workload Identity Federation 認證，**不使用 service account 金鑰**。
+      # public repo 內不得存放任何長期憑證；WIF 的 attribute condition 必須綁到
+      # repo + ref（refs/heads/main），只綁 repo 會讓任何分支的 workflow 都能取得身分。
+      - name: 認證 GCP（Workload Identity Federation）
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
+
+      - name: 設定 gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Artifact Registry 認證
+        run: gcloud auth configure-docker "${AR_HOST}" --quiet
 
       - name: 取得 commit short SHA
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
@@ -109,18 +112,24 @@ jobs:
             echo "本次 push 未異動 migration，略過 heads 檢查"
           fi
 
+      # GitHub-hosted runner 每次都是全新環境，沒有本地 layer cache，
+      # 故改用 GitHub Actions cache（type=gha）補回來，否則每次都是冷 build。
+      - name: 設定 Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build edms-backend image
-        run: |
-          docker build \
-            -t "${AR_BASE}/edms-backend:latest" \
-            -t "${AR_BASE}/edms-backend:${SHORT_SHA}" \
-            ./backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          load: true          # 載入本地 daemon，供下方兩個驗證步驟使用
+          tags: ${{ env.AR_BASE }}/edms-backend:${{ env.SHORT_SHA }}
+          cache-from: type=gha,scope=edms-backend
+          cache-to: type=gha,scope=edms-backend,mode=max
 
       # 交付標的為院內封閉網路，映像不得在執行期依賴對外連線。
       # `uv run` 預設會先把環境同步到與 uv.lock 一致，而映像刻意以 --no-dev 建置，
       # uv 便判定 dev 依賴缺漏而連 PyPI 下載——院內無網路即容器起不來。
-      # 根因由 backend/Dockerfile 的 ENV UV_NO_SYNC=1 收斂；此處每次部署實測一次，
-      # 避免該設定日後被移除而無人察覺（雲端有網路，不會自己爆）。
+      # 根因由 backend/Dockerfile 的 ENV UV_NO_SYNC=1 收斂；此處每次都實測一次。
       - name: 驗證映像可於封閉網路執行
         run: |
           if ! docker run --rm --network none \
@@ -133,114 +142,43 @@ jobs:
           fi
           echo "映像可於封閉網路執行（--network none 驗證通過）"
 
-      # 雙 head 提前 fail-fast：在 image 還沒 push、DB 還沒備份前先擋下。
+      # 雙 head 提前 fail-fast：在 image 還沒 push 前先擋下。
       # alembic heads 為離線指令（只讀 migration 版本檔、不連 DB）。
       - name: 檢查 Alembic heads（雙 head 提前 fail-fast）
         if: steps.mig.outputs.changed == 'true'
         run: |
           if ! HEADS=$(docker run --rm "${AR_BASE}/edms-backend:${SHORT_SHA}" uv run alembic heads); then
-            echo "::error::alembic heads 執行失敗（非 head 數問題），中止部署。"
+            echo "::error::alembic heads 執行失敗（非 head 數問題），中止。"
             exit 1
           fi
           COUNT=$(echo "$HEADS" | grep -c . || true)
           if [ "$COUNT" -ne 1 ]; then
-            echo "::error::main 上偵測到 ${COUNT} 個 Alembic head，中止部署。請先 alembic merge heads。"
+            echo "::error::main 上偵測到 ${COUNT} 個 Alembic head。請先 alembic merge heads。"
             echo "$HEADS"
             exit 1
           fi
           echo "✅ Alembic head 正常（單一 head）"
 
-      - name: Build edms-nginx image（含前端建置）
+      - name: Push edms-backend（雙 tag）
         run: |
-          docker build \
-            -t "${AR_BASE}/edms-nginx:latest" \
-            -t "${AR_BASE}/edms-nginx:${SHORT_SHA}" \
-            -f nginx/Dockerfile \
-            .
-
-      - name: Push images 到 Artifact Registry
-        run: |
-          docker push "${AR_BASE}/edms-backend:latest"
+          docker tag "${AR_BASE}/edms-backend:${SHORT_SHA}" "${AR_BASE}/edms-backend:latest"
           docker push "${AR_BASE}/edms-backend:${SHORT_SHA}"
-          docker push "${AR_BASE}/edms-nginx:latest"
-          docker push "${AR_BASE}/edms-nginx:${SHORT_SHA}"
+          docker push "${AR_BASE}/edms-backend:latest"
 
-      - name: 準備 .env.prod
-        run: cp /opt/edms/.env.prod .env.prod
+      - name: Build & Push edms-nginx（含前端建置）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: nginx/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}
+            ${{ env.AR_BASE }}/edms-nginx:latest
+          cache-from: type=gha,scope=edms-nginx
+          cache-to: type=gha,scope=edms-nginx,mode=max
 
-      - name: Pull 最新 images
-        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-
-      - name: 啟動 DB
-        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d edms-db
-
-      - name: 等待 DB 就緒
+      # SHA tag 是 VM 側部署腳本的觸發依據：它比對 main 的最新 commit 是否
+      # 已有對應的映像 tag，有才部署——確保程式碼與映像一致，不會拉到半成品。
+      - name: 部署提示
         run: |
-          for i in $(seq 1 30); do
-            if docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T edms-db pg_isready -U edms; then
-              echo "✅ DB ready"
-              exit 0
-            fi
-            echo "Waiting for DB... ($i/30)"
-            sleep 2
-          done
-          echo "❌ DB 未在 60 秒內就緒"
-          exit 1
-
-      # Migration 前先備份。備份失敗即中止部署——沒有可還原的快照就不動 schema。
-      - name: Migration 前備份 DB
-        run: bash scripts/db-backup.sh pre-migrate
-
-      - name: 執行 DB Migration
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm \
-            edms-backend uv run alembic upgrade head
-
-      - name: 啟動所有服務
-        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
-
-      # 打容器內部的 /health（經 nginx 代理到 backend，含 DB 探活）而非首頁：
-      # 首頁是 nginx 靜態檔，backend 掛掉也會回 200，驗不到後端與 DB。
-      #
-      # ⚠️ 必須用 127.0.0.1，**不可用 localhost**。edms-nginx 以非 root 的 USER nginx
-      # 執行，entrypoint 的 10-listen-on-ipv6-by-default.sh 改不動 root 擁有的
-      # default.conf，因此容器內只監聽 IPv4；BusyBox wget 解析 localhost 會先試 ::1
-      # 而得到 Connection refused。TBMS 曾因此誤報部署失敗，詳見其
-      # docs/infra/vm-ops-pitfalls.md §6。
-      #
-      # 放行門檻打內部而非對外網址：對外路徑經 front-proxy（由 TBMS repo 管理），
-      # 其狀態不該卡住本系統的部署放行。
-      - name: Health Check（內部，放行門檻）
-        id: healthcheck
-        run: |
-          echo "等待服務啟動..."
-          for i in $(seq 1 6); do
-            sleep 10
-            if OUT=$(docker exec edms-nginx wget -q -O /dev/null http://127.0.0.1/health 2>&1); then
-              echo "✅ EDMS 內部健康檢查通過（嘗試 $i/6）"
-              echo "status=200" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "嘗試 $i/6 未通過 — ${OUT:-（無輸出）}"
-          done
-          echo "status=000" >> "$GITHUB_OUTPUT"
-          echo "❌ 部署異常，連續 6 次內部檢查均失敗"
-          exit 1
-
-      # 對外路徑檢查：涵蓋 cloudflared → front-proxy → edms-nginx 整條鏈。
-      # 失敗不阻擋部署——此時 EDMS 本身已驗證正常，問題在 proxy 或 tunnel。
-      - name: Health Check（對外，僅警告）
-        continue-on-error: true
-        run: |
-          for i in $(seq 1 3); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://edms.tbsf.tw/health || echo "000")
-            echo "對外嘗試 $i/3 — HTTP Status: $STATUS"
-            [ "$STATUS" = "200" ] && { echo "✅ 對外路徑正常"; exit 0; }
-            sleep 10
-          done
-          echo "::warning::對外路徑檢查未通過（最後 HTTP: $STATUS）。EDMS 內部已正常，請檢查 front-proxy 與 Cloudflare Tunnel。"
-          exit 1
-
-      - name: 清理舊 images
-        if: always()
-        run: docker image prune -f
+          echo "::notice::映像已推送（${SHORT_SHA}）。部署由 bms-prod-02 的 edms-deploy.timer 自動拉取，非本 workflow 執行。"
