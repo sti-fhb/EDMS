@@ -1,14 +1,16 @@
-"""「可被指定為審核者」之單一查詢定義（#250）。
+"""「可被指定為審核者」之清單查詢（#250）。
 
 條件：具 `DM_REVIEWER` 角色（DM 自持）**且** `DP_USER` 帳號可用（未停用、未鎖定中）。
+唯一使用者為 `dm/editor/repository.list_reviewers`——送簽表單的審核者下拉。
 
-兩處共用同一定義，避免判準漂移——**下拉給什麼，送簽就只接受什麼**：
-- `dm/editor/repository.list_reviewers`：送簽表單的審核者下拉清單
-- `dm/review/service.submit`：送簽時的伺服器端檢核（擋直接打 API 繞過下拉）
+**僅供顯示用途**：JOIN `DP_USER` 屬 `sti-backend-boundaries.md` §報表/查詢類唯讀例外，
+且帳號可用性條件取自 DP 的 `account_usable_clause`（不在此重新實作 DP 的業務規則）。
 
-帳號可用性條件取自 DP 的 `account_usable_clause`（`DP_USER.STATUS` 值域屬 DP 語意，
-DM 不自行解讀）。JOIN `DP_USER` 為唯讀查詢，屬 `sti-backend-boundaries.md`
-§報表/查詢類唯讀例外；不在此重新實作 DP 的業務規則。
+⚠️ 送簽時的伺服器端檢核**不走這裡**：該處查詢結果會成為寫入的判斷依據，依邊界規則
+不適用唯讀例外，改由 `dm/review/service._ensure_assignable_reviewer` 以
+`services.AccountQueryService`（DP 出口）判定帳號、自查 `DM_USER_ROLE` 判定角色。
+兩邊判準必須一致（下拉給什麼、送簽就只接受什麼），由 `test_dm_editor_reviewers.py`
+的下拉排除案例與送簽拒絕案例共同把關——改動任一側時請同步檢視另一側。
 """
 
 from datetime import datetime

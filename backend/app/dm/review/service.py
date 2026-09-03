@@ -7,22 +7,26 @@ DM_REVIEW 建立 / 核准 / 退回 / 撤回；核心約束「**同一文件不�
 狀態機：PENDING → APPROVED / REJECTED / WITHDRAWN（皆為終態；撤回 / 退回後文件回草稿或已發布由呼叫端處理）。
 """
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dm.review.models import DmReview
-from app.dm.roles.authz import ensure_reviewer_not_author
-from app.dm.roles.reviewer_query import assignable_reviewers_stmt
-from app.dp.users.models import DpUser
+from app.dm.roles.authz import DM_REVIEWER, ensure_reviewer_not_author
+from app.dm.roles.models import DmUserRole
+from app.services import AccountQueryService
 
 _PENDING = "PENDING"
 
 
 class ReviewService:
     """送審週期建立與狀態轉移。"""
+
+    def __init__(self, accounts: AccountQueryService | None = None) -> None:
+        # 帳號可用性走 DP 出口（可注入 stub 供測試），不直接碰 DP_USER
+        self._accounts = accounts or AccountQueryService()
 
     async def submit(
         self,
@@ -84,14 +88,31 @@ class ReviewService:
         """指定審核者須可被指定：具 `DM_REVIEWER` 且帳號未停用 / 未鎖定中（#250）。
 
         送簽表單的下拉已濾掉不可指定者，但那只是 UI 便利——不擋在伺服器端，直接打 API
-        仍可把文件掛在一個永遠登不進系統的人身上（該送審無人可審，只能靠撰寫者撤回）。
-        條件與下拉共用 `assignable_reviewers_stmt`，確保「下拉給什麼、送簽就只接受什麼」。
+        仍可把文件掛在一個永遠登不進系統的人身上（該送審無人可審，只能靠撰寫者撤回）；
+        亦可指派給根本沒有審核者角色的人，而該人憑「自己是指定審核者」即通過
+        `DM_REVIEW_005` 執行核准發布。
+
+        兩個條件分屬不同模組、各走各的路徑（`sti-backend-boundaries`）：
+
+        - **角色**：`DM_USER_ROLE` 為 DM 自持，直接查。
+        - **帳號可用性**：`DP_USER.STATUS` 值域屬 DP 語意，且此處為**寫入前的判斷依據**，
+          依邊界規則不適用「查詢類唯讀 JOIN」例外，故走 `services/__init__.py` 出口之
+          `AccountQueryService`（唯讀布林）。純顯示用的下拉另以 JOIN 實作
+          （`dm/roles/reviewer_query.py`），兩者判準一致由整合測試把關。
 
         Raises:
             AppError: 指定審核者無 DM_REVIEWER 角色或帳號不可用（422 DM_REVIEW_008）。
         """
-        stmt = assignable_reviewers_stmt(utcnow()).where(DpUser.user_id == user_id)
-        if (await db.execute(select(exists(stmt.subquery())))).scalar() is not True:
+        has_reviewer_role = await db.scalar(
+            select(func.count())
+            .select_from(DmUserRole)
+            .where(
+                DmUserRole.user_id == user_id,
+                DmUserRole.role_code == DM_REVIEWER,
+                DmUserRole.deleted == 0,
+            )
+        )
+        if not has_reviewer_role or not await self._accounts.is_usable(db, user_id):
             raise AppError(
                 status_code=422,
                 detail="指定審核者無效或帳號已停用 / 鎖定，請重新選擇",
