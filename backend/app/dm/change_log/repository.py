@@ -14,6 +14,7 @@ from sqlalchemy import Row, Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.review.models import DmChangeLog
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外）
@@ -46,13 +47,13 @@ class ChangeLogRepository:
         if keyword:
             # 「帳號或姓名」（FR-002）：EDMS 登入以 email 為帳號、USER_ID 為內部 GUID（使用者不可見），
             # 故比對申請人 / 核准人之 DP_USER.email（帳號）與 user_name（姓名），不比對 GUID USER_ID。
-            pattern = f"%{keyword}%"
+            pattern = contains(keyword)
             conds.append(
                 or_(
-                    applicant.email.ilike(pattern),
-                    applicant.user_name.ilike(pattern),
-                    approver.email.ilike(pattern),
-                    approver.user_name.ilike(pattern),
+                    applicant.email.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                    applicant.user_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                    approver.email.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                    approver.user_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
                 )
             )
         return (
