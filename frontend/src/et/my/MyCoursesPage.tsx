@@ -17,6 +17,7 @@ import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import type { ReactNode } from "react"
+import { useNavigate } from "react-router-dom"
 
 import { JoinCourseDialog } from "./JoinCourseDialog"
 import { COMPLETION_STATUS_LABEL } from "./myCoursesSchemas"
@@ -46,6 +47,7 @@ import { formatDateTime } from "../../utils/date"
  * 後端連端點都沒有——少寫一個端點就是這條規則的執行方式。
  */
 export function EtMyCoursesPage() {
+  const navigate = useNavigate()
   const { message } = useNotification()
   const [joinOpen, setJoinOpen] = useState(false)
 
@@ -57,27 +59,20 @@ export function EtMyCoursesPage() {
   const summary = data?.summary
   const courses = data?.courses ?? []
 
-  /**
-   * 點擊課程卡片（AC 6）。
-   *
-   * `ET-5` 章節學習頁未實作——**先提示而非 `navigate` 到不存在的路由**，後者會給
-   * 學員一個白畫面，看起來像壞掉而不像還沒做。
-   *
-   * ⚠️ **只在點卡片時呼叫**。加入成功 / 已加入的路徑上**不要**再呼叫它：那些路徑
-   * 自己已經有一則訊息，接著再送一則會把前一則蓋掉——實測時「您已加入此課程」就是
-   * 這樣變成「章節學習頁尚未開放」的。
-   *
-   * 🔴 **`ET-5` 交付時**：改成收 `courseId` 並 `navigate(\`/et/courses/${id}/learn\`)`，
-   * 並讓加入成功 / 已加入兩條路徑改為導向（那時導向取代訊息，不會再互相覆蓋）。
-   */
-  function openCourse() {
-    message.info("章節學習頁尚未開放")
+  /** 點擊課程卡片 → ET05 章節學習（AC 6；#255 接上，在此之前只給提示）。 */
+  function openCourse(courseId: number) {
+    navigate(`/et/courses/${courseId}/learn`)
   }
 
-  function handleJoined(_courseId: number, pendingOpen: boolean) {
+  function handleJoined(courseId: number, pendingOpen: boolean) {
     void refetch()
-    // `ET-5` 交付前只給一則訊息、不導向——學員留在清單上就看得到剛加入的課程。
-    message.success(pendingOpen ? "已加入，課程開放後將出現於清單" : "已加入課程")
+    if (pendingOpen) {
+      // 課程尚未開放——導過去只會看到一個進不了的頁面，留在清單並說明原因（AC 4）。
+      message.success("已加入，課程開放後將出現於清單")
+      return
+    }
+    message.success("已加入課程")
+    openCourse(courseId)
   }
 
   return (
@@ -127,7 +122,7 @@ export function EtMyCoursesPage() {
       <Grid container spacing={2}>
         {courses.map((course) => (
           <Grid key={course.course_id} size={{ xs: 12, md: 4 }}>
-            <CourseCard course={course} onOpen={openCourse} />
+            <CourseCard course={course} onOpen={() => openCourse(course.course_id)} />
           </Grid>
         ))}
       </Grid>
@@ -136,7 +131,7 @@ export function EtMyCoursesPage() {
         open={joinOpen}
         onClose={() => setJoinOpen(false)}
         onJoined={handleJoined}
-        onAlreadyJoined={(_courseId, pendingOpen, courseName) => {
+        onAlreadyJoined={(courseId, pendingOpen, courseName) => {
           // 只送一則。`ET-5` 交付後這裡改成導向該課程（AC 10）。
           //
           // 帶課程名稱：學員可能是被標籤自動邀請帶進去的、從未輸入過邀請碼，
@@ -144,11 +139,12 @@ export function EtMyCoursesPage() {
           //
           // 未開放時**必須說明白**：光說「已加入」而清單是空的（AC 4），學員會以為
           // 系統壞了——實測就是這樣回報的。
-          message.info(
-            pendingOpen
-              ? `您已加入「${courseName}」，將於課程開放後出現於清單`
-              : `您已加入「${courseName}」`,
-          )
+          if (pendingOpen) {
+            message.info(`您已加入「${courseName}」，將於課程開放後出現於清單`)
+            return
+          }
+          // AC 10：不重複加入，**直接導向該課程**（#255 起目的地已存在）。
+          openCourse(courseId)
         }}
       />
     </Box>

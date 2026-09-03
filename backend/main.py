@@ -45,6 +45,7 @@ from app.dp.users.router import router as dp_users_router
 from app.et.bootstrap import register_et_module
 from app.et.course.router import router as et_course_router
 from app.et.enrollment.router import router as et_enrollment_router
+from app.et.learning.router import media_router as et_learning_media_router
 from app.et.learning.router import router as et_learning_router
 from app.et.material.router import router as et_material_router
 from app.et.quiz.router import router as et_quiz_router
@@ -144,6 +145,7 @@ app.include_router(et_quiz_router)
 app.include_router(et_survey_router)
 app.include_router(et_enrollment_router)
 app.include_router(et_learning_router)
+app.include_router(et_learning_media_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()

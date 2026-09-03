@@ -101,3 +101,15 @@ class MaterialContent(BaseModel):
     description_html: str | None
     videos: list[MaterialVideoRow]
     docs: list[MaterialDocRow]
+
+
+class VideoTicket(BaseModel):
+    """短效播放票（#255）。
+
+    `<video src>` 送不出 Authorization header，故以票放進 query string 取檔——形同
+    S3 presigned URL。見 `video_ticket` 模組之三道限制（60 秒、綁單一影片、`typ` 與
+    access token 嚴格區隔）。
+    """
+
+    ticket: str
+    expires_in: int

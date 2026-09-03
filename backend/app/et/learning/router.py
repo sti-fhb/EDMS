@@ -23,7 +23,7 @@ Starlette 之 `FileResponse` **原生支援 Range 請求**（`_parse_range_heade
 from pathlib import Path as FsPath
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,8 +31,9 @@ from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context
-from app.et.learning.schemas import LearnStructure, MaterialContent
+from app.et.learning.schemas import LearnStructure, MaterialContent, VideoTicket
 from app.et.learning.service import EtLearningService
+from app.et.learning.video_ticket import TICKET_TTL_SECONDS, issue_video_ticket, verify_video_ticket
 
 router = APIRouter(
     prefix="/api/et",
@@ -70,16 +71,18 @@ async def material_content(
     return await _service.material_content(db, material_id, user_id=ctx.user_id)
 
 
-@router.get("/videos/{video_id}/file")
-async def video_file(
+@router.post("/videos/{video_id}/ticket", response_model=VideoTicket)
+async def video_ticket(
     video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
-) -> FileResponse:
-    """影片實體檔。Range 由 `FileResponse` 處理，播放器可正常拖動進度條。"""
-    path, file_name = await _service.video_file_path(db, video_id, user_id=ctx.user_id)
-    _ensure_file_present(path)
-    return FileResponse(path, filename=file_name)
+) -> VideoTicket:
+    """簽發短效播放票，供 `<video src>` 取檔（見 `video_ticket` 模組）。
+
+    **授權在此完成**：走與其他端點相同的「在籍 OR 擁有者」判定；取檔端點只驗票。
+    """
+    await _service.ensure_video_accessible(db, video_id, user_id=ctx.user_id)
+    return VideoTicket(ticket=issue_video_ticket(user_id=ctx.user_id, video_id=video_id), expires_in=TICKET_TTL_SECONDS)
 
 
 @router.get("/materials/{material_id}/docs/{doc_id}/file")
@@ -114,3 +117,31 @@ def _ensure_file_present(path: str) -> None:
     """
     if not FsPath(path).is_file():
         raise AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
+
+
+# ── 媒體 router：**不掛 router-level 認證** ──────────────────────────────────
+#
+# `<video src>` 送不出 `Authorization` header，故本 router 的唯一端點以**播放票**
+# 認證（`video_ticket` 模組）。它必須與上面的 `router` 分開——後者的 router-level
+# `get_et_context` 會強制 Bearer，掛在同一個 router 上就永遠拿不到票的路徑。
+#
+# ⚠️ **不要往這個 router 加其他端點**。它是唯一一處沒有 router-level 認證的地方，
+# 新端點掛進來等於預設無認證，而那種遺漏在測試裡看不出來（測試會帶票）。
+media_router = APIRouter(prefix="/api/et", tags=["et-learning-media"])
+
+
+@media_router.get("/videos/{video_id}/file")
+async def video_file(
+    video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    t: Annotated[str, Query(min_length=1, max_length=2048)],
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """影片實體檔（**憑票取用**）。
+
+    Range 由 `FileResponse` 處理，播放器可正常拖動進度條。票的驗證不查 DB——見
+    `video_ticket` 模組「取檔時不重跑授權」一節之取捨說明。
+    """
+    verify_video_ticket(t, video_id=video_id)
+    path, file_name = await _service.video_file_by_ticket(db, video_id)
+    _ensure_file_present(path)
+    return FileResponse(path, filename=file_name)

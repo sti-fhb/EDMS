@@ -144,21 +144,32 @@ class EtLearningService:
             docs=docs,
         )
 
-    async def video_file_path(self, db: AsyncSession, video_id: int, *, user_id: str) -> tuple[str, str]:
-        """影片實體檔之絕對路徑與檔名（供 router 出 `FileResponse`）。
+    async def ensure_video_accessible(self, db: AsyncSession, video_id: int, *, user_id: str) -> None:
+        """發票前之授權：影片存在且該使用者有權（在籍 OR 擁有者）。
 
-        路徑一律經 `storage.resolve_within_root` 解析——`FILE_PATH` 存的是相對於
-        `ET_VIDEO_STORAGE_ROOT` 的片段（#241），自行 `os.path.join` 等於開一個路徑
-        穿越面。
+        **授權只在這裡做一次**——取檔端點憑票放行、不重跑（見 `video_ticket` 模組之
+        取捨說明）。
 
         Raises:
-            AppError: 404 `ET_LEARN_001`——**不存在與無權共用同一回應**（見 `_FILE_NOT_FOUND`）。
+            AppError: 404 `ET_LEARN_001`——不存在與無權共用同一回應。
         """
         video = await self._repo.get_video(db, video_id)
         course_id = await self._repo.course_id_of_video(db, video_id)
         if video is None or course_id is None:
             raise _FILE_NOT_FOUND
         await self._require_access_by_course(db, course_id=course_id, user_id=user_id)
+
+    async def video_file_by_ticket(self, db: AsyncSession, video_id: int) -> tuple[str, str]:
+        """憑票取檔：解析實體路徑與檔名（供 router 出 `FileResponse`）。
+
+        **本方法不做授權**——呼叫端已驗票，而票的簽發經過 `ensure_video_accessible`。
+        路徑一律經 `storage.resolve_within_root` 解析：`FILE_PATH` 存的是相對於
+        `ET_VIDEO_STORAGE_ROOT` 的片段（#241），自行 `os.path.join` 等於開一個路徑
+        穿越面。
+        """
+        video = await self._repo.get_video(db, video_id)
+        if video is None:
+            raise _FILE_NOT_FOUND
         return resolve_within_root(video.file_path, not_found=_FILE_NOT_FOUND), video.file_name
 
     async def doc_file(self, db: AsyncSession, material_id: int, doc_id: str, *, user_id: str):

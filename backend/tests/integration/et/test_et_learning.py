@@ -70,7 +70,9 @@ async def _course_with_material(client, db, teacher: str, *, name: str = "採血
     assert created.status_code == 201, created.text
     course_id = created.json()["course_id"]
 
-    ch = await client.post(f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(teacher))
+    ch = await client.post(
+        f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(teacher)
+    )
     assert ch.status_code == 201, ch.text
     chapter_id = ch.json()["chapter_id"]
 
@@ -99,7 +101,9 @@ async def _course_with_material(client, db, teacher: str, *, name: str = "採血
     await db.flush()
 
     await db.execute(
-        update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_PUBLISHED, invitation_code="30000001")
+        update(EtCourse)
+        .where(EtCourse.course_id == course_id)
+        .values(status=COURSE_PUBLISHED, invitation_code="30000001")
     )
     await db.flush()
     return {
@@ -144,14 +148,15 @@ class TestAuthorization:
 
         r_struct = await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=h)
         r_content = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=h)
-        r_video = await client.get(f"/api/et/videos/{ids['video_id']}/file", headers=h)
+        r_video = await client.post(f"/api/et/videos/{ids['video_id']}/ticket", headers=h)
         r_doc = await client.get(f"/api/et/materials/{ids['material_id']}/docs/DM-SOP-000001/file", headers=h)
 
         # 課程層：403 + 可行動的訊息（他可能正要加入）
         assert r_struct.status_code == 403
         assert r_struct.json()["error_code"] == "ET_LEARN_002"
         # 以 id 定址的資源：一律 404，不可分辨「不存在」與「無權」
-        for label, r in [("content", r_content), ("video", r_video), ("doc", r_doc)]:
+        # 影片以「發票端點」代表——取檔端點本身憑票放行，授權在發票時完成
+        for label, r in [("content", r_content), ("video-ticket", r_video), ("doc", r_doc)]:
             assert r.status_code == 404, f"{label}: {r.status_code} {r.text}"
             assert r.json()["error_code"] == "ET_LEARN_001", label
 
@@ -319,7 +324,10 @@ class TestVideoFile:
         teacher = await _user(db, "t_learn12", ROLE_TEACHER)
         ids = await _course_with_material(client, db, teacher)
 
-        r = await client.get(f"/api/et/videos/{ids['video_id']}/file", headers=_bearer(teacher))
+        ticket = await client.post(f"/api/et/videos/{ids['video_id']}/ticket", headers=_bearer(teacher))
+        assert ticket.status_code == 200, ticket.text
+
+        r = await client.get(f"/api/et/videos/{ids['video_id']}/file", params={"t": ticket.json()["ticket"]})
 
         assert r.status_code == 404, r.text
         assert r.json()["error_code"] == "ET_LEARN_001"
@@ -328,7 +336,42 @@ class TestVideoFile:
         teacher = await _user(db, "t_learn13", ROLE_TEACHER)
         await _course_with_material(client, db, teacher)
 
-        r = await client.get("/api/et/videos/99999999/file", headers=_bearer(teacher))
+        r = await client.post("/api/et/videos/99999999/ticket", headers=_bearer(teacher))
 
         assert r.status_code == 404
         assert r.json()["error_code"] == "ET_LEARN_001"
+
+
+class TestVideoTicketFlow:
+    """播放票流程（#255）——`<video src>` 送不出 Authorization header 的解法。"""
+
+    async def test_無票不可取檔(self, client, db) -> None:
+        """取檔端點掛在**沒有 router-level 認證**的 media_router 上，故這條特別重要：
+        票是它唯一的門。"""
+        teacher = await _user(db, "t_learn14", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, teacher)
+
+        r = await client.get(f"/api/et/videos/{ids['video_id']}/file")
+
+        assert r.status_code == 422, "缺少必填的 t 參數"
+
+    async def test_偽造之票不可取檔(self, client, db) -> None:
+        teacher = await _user(db, "t_learn15", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, teacher)
+
+        r = await client.get(f"/api/et/videos/{ids['video_id']}/file", params={"t": "not-a-real-ticket"})
+
+        assert r.status_code == 404
+        assert r.json()["error_code"] == "ET_LEARN_001"
+
+    async def test_在籍學員可取票(self, client, db) -> None:
+        teacher = await _user(db, "t_learn16", ROLE_TEACHER)
+        student = await _user(db, "s_learn16")
+        ids = await _course_with_material(client, db, teacher)
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.post(f"/api/et/videos/{ids['video_id']}/ticket", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["expires_in"] == 60
+        assert r.json()["ticket"]
