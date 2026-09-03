@@ -1,0 +1,28 @@
+# EDMS pull-based 部署（由 edms-deploy.timer 觸發，非常駐）
+#
+# 安裝：
+#   sudo cp deploy/edms-deploy.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now edms-deploy.timer
+#
+# 說明見 docs/infra/deployment.md。
+
+[Unit]
+Description=EDMS pull-based deploy (checks Artifact Registry for new image)
+Documentation=https://github.com/sti-fhb/EDMS/blob/main/docs/infra/deployment.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# 需要 docker 與 gcloud；以 root 執行（docker group 等同 root，不另建低權帳號
+# 反而少一層混淆）。腳本本身只操作 /opt/edms 與 edms-* 容器。
+User=root
+WorkingDirectory=/opt/edms/repo
+ExecStart=/opt/edms/repo/scripts/vm-deploy.sh
+
+# 單次執行上限：build 不在此進行，僅 pull + migration + 重啟，20 分鐘足夠
+TimeoutStartSec=1200
+
+[Install]
+WantedBy=multi-user.target

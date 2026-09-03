@@ -1,0 +1,20 @@
+# 此檔案用於 nginx Dockerfile（build context = repo root）
+
+# Git
+.git
+.gitignore
+
+# 只需要 frontend/ 和 nginx/，排除其他目錄
+backend/
+docs/
+.claude/
+.github/
+scripts/
+
+# Node
+node_modules
+frontend/node_modules
+
+# 環境變數
+.env*
+*.md
