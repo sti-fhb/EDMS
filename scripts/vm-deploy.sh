@@ -35,7 +35,9 @@ STATE_FILE="/opt/edms/deployed.sha"
 LOG_FILE="/opt/edms/deploy.log"
 AR_HOST="asia-east1-docker.pkg.dev"
 AR_BASE="${AR_HOST}/blood-system-dev/edms-image"
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
+# -p edms：專案名稱預設取自目錄名（/opt/edms/repo → "repo"），會產出 repo_edms-net
+# 之類的名稱，與文件不一致且難辨識。明示固定。
+COMPOSE=(docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml)
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
@@ -109,6 +111,16 @@ if [ "${DB_READY}" -ne 1 ]; then
 fi
 
 # 備份失敗即中止——沒有可還原的快照就不動 schema
+# db-backup.sh 在**主機上**執行，而 .env.prod 是給 docker compose 的 env_file 用的
+# ——那只注入容器內，主機的 shell 拿不到。故此處單獨取出 bucket 一項帶進環境；
+# 刻意不整份 source，避免把 DB 密碼與金鑰灌進本行程及其所有子行程的環境。
+EDMS_BACKUP_BUCKET=$(sed -n 's/^EDMS_BACKUP_BUCKET=//p' /opt/edms/.env.prod | tr -d '"'"'"'"' | head -1)
+export EDMS_BACKUP_BUCKET
+if [ -z "${EDMS_BACKUP_BUCKET}" ]; then
+  log "❌ /opt/edms/.env.prod 未設定 EDMS_BACKUP_BUCKET，中止"
+  exit 1
+fi
+
 log "migration 前備份..."
 bash scripts/db-backup.sh pre-migrate
 
