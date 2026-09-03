@@ -1,0 +1,19 @@
+# 每 5 分鐘檢查一次是否有新版本可部署。
+#
+# 為何是 5 分鐘：EDMS 為次級系統，部署延遲數分鐘可接受；間隔太短會讓
+# gcloud 查詢與 git fetch 的雜訊變多，太長則失去 CD 的意義。
+# 無新版本時腳本立即結束且不寫 log，成本極低。
+
+[Unit]
+Description=Run EDMS deploy check every 5 minutes
+Documentation=https://github.com/sti-fhb/EDMS/blob/main/docs/infra/deployment.md
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+# 避開整分同時觸發，減少與 TBMS 的 CD／備份排程在同一秒搶資源的機會
+RandomizedDelaySec=30
+Unit=edms-deploy.service
+
+[Install]
+WantedBy=timers.target

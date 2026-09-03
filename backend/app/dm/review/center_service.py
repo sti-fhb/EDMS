@@ -17,6 +17,8 @@
 
 from dataclasses import dataclass
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult
@@ -259,7 +261,20 @@ class ReviewCenterService:
         if doc.status != _PUBLISHED:  # 首版：文件轉已發布（已發布文件之新版維持 PUBLISHED）
             doc.status = _PUBLISHED
             doc.updated_user, doc.updated_date = op.user_id, now
-        await db.flush()
+        try:
+            async with (
+                db.begin_nested()
+            ):  # SAVEPOINT：撞唯一索引時只回退本次發布，不毀呼叫方交易（對齊 ReviewService.submit）
+                await db.flush()
+        except IntegrityError as exc:
+            # 手冊 func_name 唯一之並發 backstop（T065）：兩份同 func 手冊皆送審中、依序核准時，
+            # 送簽檢核（DM_DOC_007）皆放行，第二份核准撞部分唯一索引 UX_DM_DOCUMENT_MANUAL_FUNC。
+            # 部分唯一索引為資料層最後防線，於此映射為友善 DM_DOC_007（不外露 500）。
+            if "UX_DM_DOCUMENT_MANUAL_FUNC" in str(exc.orig):
+                raise AppError(
+                    status_code=409, detail="此關聯作業項目已有對應之已發布手冊", error_code="DM_DOC_007"
+                ) from exc
+            raise
 
         await self._repo.write_change_log(
             db,
