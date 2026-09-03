@@ -33,7 +33,7 @@
 | 10 | 文件變更歷程查詢 | US11 / UCDM10 | P3 | T055 ~ T056 | #5 | [#243](https://github.com/sti-fhb/EDMS/issues/243) | 🚀 已開立 [#243](https://github.com/sti-fhb/EDMS/issues/243) |
 | 11 | 跨模組教材引用（DM ↔ ET）| US12 / UCDM12 | P3-輔助 | T057 ~ T059 | #5；ET 引用端 | [#183](https://github.com/sti-fhb/EDMS/issues/183) | ✅ 已交付（PR #189；契約 #187；T059 廢止通知範圍外＝裁示 A + 待 US8）|
 | 12 | 閱讀統計與 KPI + 排程 SCHDM001 | US13 / UCDM13 | P2-延伸 | T059a ~ T059c | #3；DP 排程引擎 | [#248](https://github.com/sti-fhb/EDMS/issues/248) | 🚀 已開立 [#248](https://github.com/sti-fhb/EDMS/issues/248) |
-| 13 | 整合測試 + 安全 + 效能收尾 | — | 收尾 | T060 ~ T067（含 T063a/b）| 全部 US（已交付）| — | body 已撰寫（待開立）|
+| 13 | 整合測試 + 安全 + 效能收尾 | — | 收尾 | T060 ~ T067（含 T063a/b）| 全部 US（已交付）| [#257](https://github.com/sti-fhb/EDMS/issues/257) | 🚀 已開立 [#257](https://github.com/sti-fhb/EDMS/issues/257) |
 | — | ~~登入 / 註冊 / 忘記密碼~~ | US2 / UCDM01 | — | —（T014）| — | — | **不開獨立 issue**：登入 / 註冊 / 忘記密碼由平台 DP 提供（UCDP001–003）；DM 端僅存取閘（無 DM 角色者拒絕進入），併入 #0（T014）|
 
 > **US2 說明**：DM 完全不實作登入 / 註冊 / 忘記密碼（由平台 DP 提供、單一登入共用 `DP_USER`）。DM 端唯一之認證相關工作為**存取閘**（經 DP 登入後、無任何 DM 角色者拒絕進入 DM，含直呼 API），屬基礎建設、併入 Issue #0（T014）。故 US2 不開獨立功能 issue。
@@ -963,7 +963,7 @@ DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `ap
 
 ---
 
-## Issue #13：[收尾] DM — 整合測試 + 安全 + 效能收尾（T060~T067）
+## Issue #13：[收尾] DM — 整合測試 + 安全 + 效能收尾（T060~T067）（GitHub [#257](https://github.com/sti-fhb/EDMS/issues/257)，🚀 已開立）
 
 **對應規格**：[spec.md](spec.md)（Success Criteria：SC-001 檢索 P95 ≤ 2s、SC-010 標籤式可見性、SC-011 閱讀 KPI/排程）；[tasks.md](tasks.md)（T060~T067，含 T063a 可見性 / T063b KPI）；[data-model.md](data-model.md)（append-only 表 `DM_CHANGE_LOG` / `DM_USER_ROLE_LOG`、部分唯一索引 func_name）
 **對應畫面**：無（收尾型，跨 US 端到端測試 + 安全 / 效能驗證，不新增功能）
@@ -1056,4 +1056,5 @@ DM 全 US（US1/US3~US13）已交付，本 issue 為**收尾**：補齊**跨 US 
 | 2026-08-24 | 撰寫 Issue #8（US9 個人專區 / UCDM09 / DM07）完整 body：對應 spec_us9 FR-001~004 + 訊息 DM-MSG-DM07-004/005；涵蓋 T050（草稿匣三類：未送審/被退回/已撤回）/ T051（撤回送審：NEW·NEW_VERSION→草稿、OBSOLETE→已發布、站內訊息通知原審核者、保留原審核者紀錄、改選再送）/ T052（我的文件動態角色 tab 近 30 天 + 個人專區入口可見性：僅編輯者或審核者）。**T049 個資維護已廢除**（平台 DP UCDP004，不自建）。**重用** `ReviewService.withdraw`（PENDING→WITHDRAWN，已存在）、US5 草稿續編/刪除、依權限側欄（#89）。**待 plan**：撤回站內訊息之通知範本/管道（data-model 通知事件表無「撤回」事件，採 MSG-only 既有或新增）、草稿三類分類依 `DM_REVIEW` 歷史之判定邏輯。Labels `P2-延伸` + `DM-文件管理` + `US9`。總覽 Issue #8 → 「📝 body 已撰寫（待開立）」；placeholder 收斂為 #9~#10 |
 | 2026-08-24 | US9 交付前自檢（`/sti-sa-precheck dm us9`）**1 必補**：FR-002 撤回要求「站內訊息通知原指派審核者」，但 data-model 通知事件表（9 項）**無撤回事件**、Foundation 亦未 seed → SD 無 template_code 可用。修正：新增 **`SUBMIT_WITHDRAWN`**（CHANNEL=MSG_ONLY、對象原指派審核者）至 data-model 通知事件表（→10 項）+ 集中化清單；spec_us9 FR-002 引用之、FR-001 補草稿三類判定規則（未送審=無 review / 被退回=最近 REJECTED / 已撤回=最近 WITHDRAWN）；issues.md #8 body 同步（T051 註明需 seed migration、注意事項兩項「待 plan」改為已定案）。實作時（T051）新增 `SUBMIT_WITHDRAWN` seed migration。修正折入 #218（issues.md body PR）同批 |
 | 2026-08-24 | Issue #8（US9 個人專區）開立為 GitHub [#219](https://github.com/sti-fhb/EDMS/issues/219)（labels `P2-延伸` + `DM-文件管理` + `US9`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #8 canonical 內容（連結轉 `../blob/main/`、驗收條件含 `SUBMIT_WITHDRAWN` seed migration） |
+| 2026-09-03 | Issue #13（收尾）開立為 GitHub [#257](https://github.com/sti-fhb/EDMS/issues/257)（labels `收尾` + `DM-文件管理`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #13 canonical（連結轉 `../blob/main/`）。經 `/sti-sa-precheck` 交付前自檢 ✅ 齊備、無擋交付必補（SC-001/010/011 於 spec.md 明確、append-only/func_name 索引於 data-model 齊、SRVDM001/002 契約含無快取延遲），2 項 ⚠ 建議（效能量測基準、安全驗收判定）屬 SD 自決、已於 body 注意事項標註 |
 | 2026-09-03 | 撰寫 Issue #13（收尾 — 整合測試 + 安全 + 效能）完整 body：涵蓋 T060~T067（含 T063a 可見性 SC-010 / T063b KPI SC-011）。**收尾型定位**：全 DM US 已交付，本 issue 補**跨 US 端到端整合測試**（T060 P1 生命週期 e2e / T061 簽核分支 + 單一送審週期 / T062 跨模組 SRVDM001-002 + ET 取最新版）+ 彙整驗證清單（T063 職責分離 / T063a 可見性〔**維持現行「編輯·審核·管理見全部」，#253 已決議不收斂**〕/ T063b KPI〔US13 #248 已覆蓋、引用確認〕/ T064 append-only 永久保留 / T065 func_name 並發唯一）+ 專項 T066 安全（security-reviewer）+ T067 效能（檢索 P95 ≤ 2s，SC-001）。注意不重造既有各 US 測試、僅補跨 US 缺口。Labels `收尾` + `DM-文件管理`。總覽表 Issue #13 狀態 待補 → 「body 已撰寫（待開立）」。另記既有 follow-up（非阻塞）：US6 補 `DM_CHANGE_LOG.NOTE`、dp/audit CSV sanitizer 收斂至 `core/csv_export` |
