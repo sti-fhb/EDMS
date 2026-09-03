@@ -33,12 +33,19 @@ set -euo pipefail
 REPO_DIR="/opt/edms/repo"
 STATE_FILE="/opt/edms/deployed.sha"
 LOG_FILE="/opt/edms/deploy.log"
-AR_BASE="asia-east1-docker.pkg.dev/blood-system-dev/edms-image"
+AR_HOST="asia-east1-docker.pkg.dev"
+AR_BASE="${AR_HOST}/blood-system-dev/edms-image"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
 }
+
+# ⚠️ 整段包成函式再呼叫：bash 是**逐段讀取**腳本檔的，而本腳本執行中會
+# `git checkout` 自己所在的 repo——若該 commit 改到本檔，bash 接下來會從
+# 變動後的檔案讀取剩餘位元組，執行到錯亂的內容。包成函式可讓 bash 在呼叫前
+# 就完整解析整個函式主體，把風險窗口收斂到最後一行。
+main() {
 
 cd "${REPO_DIR}"
 
@@ -77,6 +84,12 @@ export EDMS_IMAGE_TAG="${TARGET_SHA}"
 cp /opt/edms/.env.prod .env.prod
 
 # ---------- 4. 部署 ----------
+# Artifact Registry 認證：IAM 授權（VM SA 的 artifactregistry.reader）只是 GCP 層的
+# 許可，docker daemon 本身仍需持 token 才能 pull。token 有時效，故每次部署重取，
+# 不依賴先前殘留的登入狀態。
+log "登入 Artifact Registry..."
+gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin "$AR_HOST" >/dev/null
+
 log "pull 映像..."
 "${COMPOSE[@]}" pull --quiet
 
@@ -134,3 +147,7 @@ docker image prune -f >/dev/null 2>&1 || true
 if [ -f "${LOG_FILE}" ] && [ "$(wc -l < "${LOG_FILE}")" -gt 1000 ]; then
   tail -n 1000 "${LOG_FILE}" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "${LOG_FILE}"
 fi
+
+}
+
+main "$@"
