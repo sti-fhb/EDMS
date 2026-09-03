@@ -69,6 +69,9 @@ flowchart TD
 
 ## 2. 前置條件
 
+> §2.1～§2.3 需要 `blood-system-dev` 的專案管理權限，EDMS 開發者沒有。
+> **完整可執行指令另見 [edms-gcp-setup.md](edms-gcp-setup.md)**，可直接交給維運人員代為執行。
+
 ### 2.1 GitHub 側：Workload Identity Federation
 
 **不得使用 service account 金鑰**——public repo 內不能有任何長期憑證。
