@@ -41,12 +41,35 @@ gcloud config get-value project       # 應為 blood-system-dev；不是的話�
 
 ## 0.2 共用變數
 
+**這是 shell 變數，只在「同一個終端機 session」內有效，不需要也不會存成檔案。**
+
 ```bash
 # 以下所有指令共用的變數
 export PROJECT_ID=blood-system-dev
 export PROJECT_NUM=398001699233
 export REGION=asia-east1
 export VM_SA=398001699233-compute@developer.gserviceaccount.com   # bms-prod-02 的 Service Account
+```
+
+⚠️ **換分頁、重開終端機、或 Cloud Shell 閒置斷線後，這些變數就沒了。** 屆時後續指令會帶著空值執行，錯誤訊息不會直說「變數沒設」（例如 `--member="serviceAccount:"` 只會回一個看不出原因的格式錯誤）。**每次重新開始前先回來重跑這一段。**
+
+每個章節開跑前先驗一次，缺任何一個就會直接停下：
+
+```bash
+: "${PROJECT_ID:?未設定}" "${PROJECT_NUM:?未設定}" "${REGION:?未設定}" "${VM_SA:?未設定}"   && echo "✅ 變數齊備：${PROJECT_ID} / ${REGION}"
+```
+
+若要分多次執行，可存成檔案再 `source`（這四個值都不是機密，但**請放在 repo 之外**）：
+
+```bash
+cat > ~/edms-setup.env << 'EOF'
+export PROJECT_ID=blood-system-dev
+export PROJECT_NUM=398001699233
+export REGION=asia-east1
+export VM_SA=398001699233-compute@developer.gserviceaccount.com
+EOF
+
+source ~/edms-setup.env    # 每個新 session 執行一次
 ```
 
 ---
