@@ -103,6 +103,8 @@ flowchart TD
 
 ### 2.4 VM 前置（bms-prod-02）
 
+在 bms-prod-02 上執行，**需要 `sudo`**（`/opt` 寫入與 docker 操作皆然；一般帳號未在 `docker` 群組內）。與 §2.1～§2.3 的 GCP 設定互相獨立，兩邊可平行進行。
+
 ```bash
 sudo mkdir -p /opt/edms/data/postgres
 sudo git clone https://github.com/sti-fhb/EDMS.git /opt/edms/repo   # public，免認證
@@ -137,6 +139,8 @@ EDMS_BACKUP_BUCKET=gs://...
 ---
 
 ## 3. 觀察與排查
+
+唯讀查詢不需 `sudo`（本機帳號在 `adm` 群組，讀得到 journal）；操作容器與觸發部署則需要。
 
 ```bash
 systemctl status edms-deploy.timer          # 排程是否啟用

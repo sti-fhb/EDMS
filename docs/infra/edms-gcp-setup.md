@@ -16,7 +16,30 @@ EDMS 是 **public repository**，因此 CI/CD 全在 GitHub-hosted runner 執行
 
 所以需要三樣東西：**放映像的地方**、**GitHub 推映像用的身分**、**放備份的地方**。
 
-執行者所需權限：Artifact Registry Admin、IAM Workload Identity Pool Admin、Service Account Admin、Storage Admin。
+---
+
+## 0.1 執行環境與權限
+
+| 項目 | 說明 |
+|------|------|
+| **在哪執行** | 你自己的機器，或 GCP Cloud Shell。**不是** bms-prod-02 |
+| **要不要 `sudo`** | **不用**。本文件所有指令都是 `gcloud`／`cat`，用的是 GCP 身分而非 Linux 權限 |
+| **需要的權限** | GCP IAM 角色：Artifact Registry Admin、IAM Workload Identity Pool Admin、Service Account Admin、Storage Admin |
+
+> ⚠️ **不要 SSH 進 bms-prod-02 執行這些指令。** 那台機器上的 gcloud 是以 VM 的 Service Account 認證，該帳號**沒有**上述 admin 角色——指令會失敗，而錯誤訊息容易被誤讀成「權限給得不夠」而去替 VM 多開權限。VM 只需要 §1.2 與 §3.1 授予它的兩項讀寫權，不需要任何 admin 角色。
+>
+> bms-prod-02 上要做的事是另一份文件的 §2.4（clone repo、`.env.prod`、systemd units），**那些才需要 `sudo`**。
+
+執行前先確認身分與專案：
+
+```bash
+gcloud auth list                      # 應為具上述角色的個人帳號，非 compute service account
+gcloud config get-value project       # 應為 blood-system-dev；不是的話用下方 --project 覆寫即可
+```
+
+---
+
+## 0.2 共用變數
 
 ```bash
 # 以下所有指令共用的變數
