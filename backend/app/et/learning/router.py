@@ -1,0 +1,95 @@
+"""ET05 章節學習 API（US5 / #255）——學員端內容取用。
+
+router-level 只掛 `get_et_context`（任一 ET 角色）。真正的授權在**每個端點各自**的
+「在籍 OR 擁有者」判定——見 `rules.ensure_can_access`。
+
+## 四個端點各自判定，不共用一次查詢結果
+
+理由不是效能，是**遺漏的形狀**：共用一次前置查詢時，新增第五個端點的人很容易忘記
+掛上，而那個遺漏在測試裡看不出來（他的測試會用有權限的帳號）。故四個端點各自呼叫
+service 的授權路徑，且**各有一條「無權」的 integration 測試**。
+
+影片與 DM 文件是**實體檔案**——少一道判定，任何登入者（ET 學員角色人人都有）知道
+`video_id` 就能抓走全站教材。
+
+## 取檔一律 `FileResponse`
+
+Starlette 之 `FileResponse` **原生支援 Range 請求**（`_parse_range_header`），HTML5
+播放器拖動進度條所需的 206 由框架處理。**不要自行實作**——Range 的邊界語意、
+`Content-Range` 格式、multipart ranges 都容易寫壞，而寫壞的表現是「影片只能從頭播」
+這種不易歸因的症狀。
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path
+from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+from app.et.course.schemas import MAX_BIGINT
+from app.et.deps import EtContext, get_et_context
+from app.et.learning.schemas import LearnStructure, MaterialContent
+from app.et.learning.service import EtLearningService
+
+router = APIRouter(
+    prefix="/api/et",
+    tags=["et-learning"],
+    dependencies=[Depends(get_et_context)],
+)
+_service = EtLearningService()
+
+#: `ET_MATERIAL_DOC.DOC_ID` 為 `VARCHAR(20)`。
+_DOC_ID_MAX_LEN = 20
+
+
+@router.get("/courses/{course_id}/learn", response_model=LearnStructure)
+async def learn_structure(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> LearnStructure:
+    """ET05 左側導覽結構（章節 → 項目）+ 課程狀態 + 可選倍速。
+
+    非在籍且非擁有者回 **403 `ET_LEARN_002`**——課程的存在對學員不是秘密（他可能正要
+    加入），而「你尚未加入此課程」是可行動的訊息。**以 id 定址的資源端點則一律 404**
+    （見 service 之 `_FILE_NOT_FOUND`）。
+    """
+    return await _service.structure(db, course_id, user_id=ctx.user_id)
+
+
+@router.get("/materials/{material_id}/content", response_model=MaterialContent)
+async def material_content(
+    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> MaterialContent:
+    """教材內容：說明文字 + 影片清單 + DM 文件清單（含廢止旗標與可否內嵌預覽）。"""
+    return await _service.material_content(db, material_id, user_id=ctx.user_id)
+
+
+@router.get("/videos/{video_id}/file")
+async def video_file(
+    video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """影片實體檔。Range 由 `FileResponse` 處理，播放器可正常拖動進度條。"""
+    path, file_name = await _service.video_file_path(db, video_id, user_id=ctx.user_id)
+    return FileResponse(path, filename=file_name)
+
+
+@router.get("/materials/{material_id}/docs/{doc_id}/file")
+async def material_doc_file(
+    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    doc_id: Annotated[str, Path(min_length=1, max_length=_DOC_ID_MAX_LEN)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """教材引用之 DM 文件實體檔（PDF 供頁內預覽、其餘供下載）。
+
+    授權由 `material_id` 那側判定，另驗證 `doc_id` **確實被此教材引用**——否則在籍
+    任一課程者即可用自己有權的 `material_id` 搭配任意 `doc_id` 取走全站被引用的文件。
+    """
+    content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id)
+    return FileResponse(content.path, media_type=content.mime, filename=content.name)
