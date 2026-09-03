@@ -76,6 +76,7 @@ flowchart TD
 | §2.1～§2.3（GCP 設定） | **開發者自己的電腦或 Cloud Shell**——見 [edms-gcp-setup.md](edms-gcp-setup.md)，該檔有完整指令 | 不用 |
 | §2.4（VM 前置） | **bms-prod-02** | 要 |
 | §2.5 的「本機開發起手」 | **開發者自己的電腦** | 不用 |
+| §2.6（寄信設定） | **bms-prod-02** | 要 |
 | §3（觀察與排查） | **bms-prod-02** | **docker 一律要**；systemctl／journalctl 不用 |
 | §4.1（client IP 驗收） | **bms-prod-02** | 要 |
 | §5 的 psql 維護 | **bms-prod-02** | 要 |
@@ -193,6 +194,8 @@ journalctl -u edms-deploy.service -n 30
 | `/opt/edms/.env.prod` | **正式環境**，放在 VM 上。`vm-deploy.sh` 部署時複製進 `/opt/edms/repo/.env.prod` | ❌ |
 | `backend/.env.example`、`frontend/.env.example` | 供「不透過 docker」直接跑起服務時使用 | ✅ |
 
+`MAIL_*` 一組設定於 `/opt/edms/.env.prod`，見 §2.6。
+
 本機開發起手（在**開發者自己的電腦**上，不是 bms-prod-02）：
 
 ```bash
@@ -202,7 +205,49 @@ docker compose up -d           # 自動套用 docker-compose.override.yml
 
 > ⚠️ 本 repo 為 **public**。`.gitignore` 已擋住 `.env` 與 `.env.*`（範本除外），但**填了實際值的檔案一律不得進版控**——一旦被追蹤即等同公開。
 
-### 2.6 Cloudflare
+### 2.6 寄信（SMTP）
+
+註冊、帳號啟用、忘記密碼、到期通知都要寄信。未設定時這些流程會失敗——**沒有 SMTP 就沒有人能自行註冊或重設密碼**。
+
+沿用 TBMS 的做法：**Gmail SMTP、埠 465、implicit TLS**，且**共用 TBMS 的寄件帳號**（2026-09-03 決定）。憑證直接從 `/opt/tbms/.env.prod` 複製，不經過任何人的畫面：
+
+```bash
+sudo bash -c '
+  {
+    echo "MAIL_SERVER=smtp.gmail.com"
+    echo "MAIL_PORT=465"
+    echo "MAIL_STARTTLS=false"
+    echo "MAIL_SSL_TLS=true"
+    grep -E "^MAIL_USERNAME=" /opt/tbms/.env.prod
+    grep -E "^MAIL_PASSWORD=" /opt/tbms/.env.prod
+    grep -E "^MAIL_FROM=" /opt/tbms/.env.prod | head -1
+  } >> /opt/edms/.env.prod
+'
+sudo chmod 600 /opt/edms/.env.prod
+```
+
+> `MAIL_FROM` 加 `head -1`：`/opt/tbms/.env.prod` 有重複行。
+
+改完**必須重建容器**——`env_file` 是容器啟動時讀取的：
+
+```bash
+cd /opt/edms/repo
+sudo docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate edms-backend
+```
+
+#### 共用帳號的三個已知代價
+
+1. **寄件人顯示為 TBMS 的信箱**（`tbsfnoreply@gmail.com`）——收信者看到的是血庫系統的信箱寄來教育訓練通知。若日後要給院方或 SA 使用，這個混淆值得另外處理
+2. **共用 Gmail 每日約 500 封的額度**——平常用量遠低於此，但 ET 若加入批次通知功能要留意
+3. **安全邊界**——該組 App Password 存在 `/opt/edms/.env.prod`。EDMS 為 public repo、次級系統，一旦遭入侵，攻擊者能以血庫系統的官方寄件人身分發信。**改用 EDMS 專屬帳號可消除此項**，屆時只需換 `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM` 三行並重建容器
+
+> Gmail SMTP **不接受一般登入密碼**，一律要用 App Password（16 碼，帳號須先開啟兩階段驗證）。日後若要另開帳號，這是第一步。
+
+#### 驗證
+
+在 `https://edms.tbsf.tw/` 走一次「忘記密碼」，確認信箱收到。失敗時看 `sudo docker logs edms-backend --tail 30`。
+
+### 2.7 Cloudflare
 
 `edms.tbsf.tw` 的 public hostname 指向 `http://10.140.0.3:80`（與 TBMS 同一目的地，由 front-proxy 依 Host 分流）。此項已完成。
 
