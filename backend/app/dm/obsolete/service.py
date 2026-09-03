@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.dm.document.file_store import validate_upload
+from app.dm.document.file_store import resolve_upload_mime, validate_upload
 from app.dm.editor.storage import generate_file_id, save_upload
 from app.dm.notify.service import DmNotifier
 from app.dm.obsolete.repository import ObsoleteRepository
@@ -83,8 +83,11 @@ class ObsoleteService:
         if doc.status != _PUBLISHED:
             raise AppError(status_code=409, detail="僅能對已發布文件發起廢止", error_code="DM_DOC_016")
         # 附件先檢核（大小 / 格式）——通過後才建 review、才落盤，避免違規附件產生孤兒檔 / review
+        resolved_mime: str | None = None
         if file_bytes:
             await validate_upload(db, size_bytes=len(file_bytes), filename=file_name or "")
+            # M2：伺服端由副檔名 + magic 判定權威 MIME（可預覽類須相符，否則 DM_FILE_002）；不採用戶端 content_type
+            resolved_mime = resolve_upload_mime(file_bytes, file_name or "")
         # 建送審週期（OBSOLETE、指向當前發布版）：審核者=本人 → DM_REVIEW_001；
         # 已有進行中送審（含新版本）→ DM_REVIEW_002（一文件一 PENDING，FR-004）
         review = await self._reviews.submit(
@@ -104,7 +107,7 @@ class ObsoleteService:
             review.obsolete_file_name = file_name
             review.obsolete_file_path = path
             review.obsolete_file_size = len(file_bytes)
-            review.obsolete_file_mime = file_mime
+            review.obsolete_file_mime = resolved_mime
         # 文件轉廢止待簽核（仍在架、仍對外，FR-003）
         now = utcnow()
         doc.status = _PENDING_OBSOLETE

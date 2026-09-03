@@ -12,6 +12,7 @@ from sqlalchemy import ColumnElement, Row, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dm.catalog.models import DmCategory
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
@@ -48,8 +49,13 @@ class ObsoleteArchiveRepository:
             DmReview.deleted == 0,
         ]
         if keyword:
-            pattern = f"%{keyword}%"
-            conds.append(or_(DmDocument.doc_name.ilike(pattern), DmReview.reason.ilike(pattern)))
+            pattern = contains(keyword)
+            conds.append(
+                or_(
+                    DmDocument.doc_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                    DmReview.reason.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                )
+            )
         if category:
             conds.append(DmDocument.category_code == category)
         if date_from:

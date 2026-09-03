@@ -1,0 +1,30 @@
+# EDMS 每日備份（資料庫 + 檔案），由 edms-backup.timer 觸發。
+#
+# 為何需要獨立排程：vm-deploy.sh 只在**部署時**做 pre-migrate 備份。
+# 沒有本排程的話，一週沒部署就一週沒有備份。
+#
+# TBMS 的每日備份跑在 GitHub Actions 的 self-hosted runner 上；EDMS 為
+# public repo 不使用 self-hosted runner，故改以 systemd timer 在本機執行。
+#
+# 安裝：
+#   sudo cp deploy/edms-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now edms-backup.timer
+
+[Unit]
+Description=EDMS daily backup (database + files) to GCS
+Documentation=https://github.com/sti-fhb/EDMS/blob/main/docs/infra/deployment.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/edms/repo
+# EDMS_BACKUP_BUCKET 等設定放在 .env.prod；此處只取備份需要的那一項，
+# 不整份載入，避免把 DB 密碼與金鑰帶進本服務的環境。
+ExecStart=/bin/bash -c 'set -a; EDMS_BACKUP_BUCKET=$(sed -n "s/^EDMS_BACKUP_BUCKET=//p" /opt/edms/.env.prod | tr -d "\\"" | head -1); set +a; export EDMS_BACKUP_BUCKET; /opt/edms/repo/scripts/db-backup.sh daily && /opt/edms/repo/scripts/files-backup.sh'
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

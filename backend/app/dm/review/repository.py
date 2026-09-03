@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import Row, and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag, DmTagGroup
@@ -24,8 +25,6 @@ _SUPERSEDED = "SUPERSEDED"
 _AUDIENCE = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
-# LIKE 萬用字元轉義（keyword 搜尋防「% 命中全部」；值仍走參數化綁定）
-_LIKE_ESCAPE = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_"})
 
 
 class ReviewCenterRepository:
@@ -122,8 +121,7 @@ class ReviewCenterRepository:
         """
         conds = [DmReview.approver_user_id == reviewer_id, DmReview.status.in_(_COMPLETED_STATUSES)]
         if keyword:
-            esc = keyword.translate(_LIKE_ESCAPE)
-            conds.append(DmDocument.doc_name.ilike(f"%{esc}%", escape="\\"))
+            conds.append(DmDocument.doc_name.ilike(contains(keyword), escape=LIKE_ESCAPE_CHAR))
         return conds
 
     async def count_completed(self, db: AsyncSession, reviewer_id: str, *, keyword: str = "") -> int:
