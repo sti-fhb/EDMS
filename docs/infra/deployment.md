@@ -67,6 +67,23 @@ flowchart TD
 
 ---
 
+## 1.1 執行位置速查
+
+本檔的指令散落在三種主機上，執行前先確認自己在哪一台：
+
+| 章節 | 在哪執行 | sudo |
+|------|---------|------|
+| §2.1～§2.3（GCP 設定） | **開發者自己的電腦或 Cloud Shell**——見 [edms-gcp-setup.md](edms-gcp-setup.md)，該檔有完整指令 | 不用 |
+| §2.4（VM 前置） | **bms-prod-02** | 要 |
+| §2.5 的「本機開發起手」 | **開發者自己的電腦** | 不用 |
+| §3（觀察與排查） | **bms-prod-02** | 唯讀不用，操作容器要 |
+| §4.1（client IP 驗收） | **bms-prod-02** | 要 |
+| §5 的 psql 維護 | **bms-prod-02** | 要 |
+
+> 本檔所稱「本機」一律指**開發者自己的電腦**，不是 bms-prod-02。
+
+---
+
 ## 2. 前置條件
 
 > §2.1～§2.3 需要 `blood-system-dev` 的專案管理權限，EDMS 開發者沒有。
@@ -141,7 +158,7 @@ EDMS_BACKUP_BUCKET=gs://...
 | `/opt/edms/.env.prod` | **正式環境**，放在 VM 上。`vm-deploy.sh` 部署時複製進 `/opt/edms/repo/.env.prod` | ❌ |
 | `backend/.env.example`、`frontend/.env.example` | 供「不透過 docker」直接跑起服務時使用 | ✅ |
 
-本機開發起手：
+本機開發起手（在**開發者自己的電腦**上，不是 bms-prod-02）：
 
 ```bash
 cp .env.example .env.local     # 填入本機用的值
@@ -158,7 +175,7 @@ docker compose up -d           # 自動套用 docker-compose.override.yml
 
 ## 3. 觀察與排查
 
-唯讀查詢不需 `sudo`（本機帳號在 `adm` 群組，讀得到 journal）；操作容器與觸發部署則需要。
+以下指令**在 bms-prod-02 上執行**。唯讀查詢不需 `sudo`（該機帳號在 `adm` 群組，讀得到 journal）；操作容器與觸發部署則需要。
 
 ```bash
 systemctl status edms-deploy.timer          # 排程是否啟用
@@ -187,7 +204,7 @@ sudo systemctl start edms-deploy.service
 
 **不一致時不會有任何錯誤訊息**：服務照跑、網站照開，但 access log 的 client IP 會變成 proxy 的容器位址（稽核追不到人），且 `rate-limit.conf` 的 `limit_req_zone $binary_remote_addr` 會把全站算成同一個來源、共用整個額度。
 
-**上線後必須實地確認**：
+**上線後必須實地確認**（在 **bms-prod-02** 上執行）：
 
 ```bash
 sudo docker logs edms-nginx --tail 20
@@ -210,7 +227,7 @@ TBMS 曾因此誤報部署失敗（服務其實正常），詳見其 `docs/infra
 | 正式 | 三容器**皆不映射** | proxy `80`、`tbms-db` `5432` |
 | 本機 | nginx `8090`、db `5441` | nginx `80`、db `5440` |
 
-正式環境 EDMS 的 DB 無外部通道，維護用 `sudo docker exec -it edms-db psql -U edms edms`。日後若需外部連線須用 **5433**（5432 已被 `tbms-db` 佔）。
+正式環境 EDMS 的 DB 無外部通道，維護須**登入 bms-prod-02** 後用 `sudo docker exec -it edms-db psql -U edms edms`。日後若需外部連線須用 **5433**（5432 已被 `tbms-db` 佔）。
 
 ⚠️ 兩套系統沿用同一組 `DP_` 表名（`DP_USER`、`DP_SESSION`、`DP_AUDIT_LOG`），**連錯資料庫不會報錯**——表存在、欄位對得上、查得出資料，只是查到另一套系統的。動 `UPDATE` / `DELETE` 前先 `SELECT current_database();`。
 
