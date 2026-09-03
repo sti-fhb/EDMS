@@ -33,12 +33,21 @@ set -euo pipefail
 REPO_DIR="/opt/edms/repo"
 STATE_FILE="/opt/edms/deployed.sha"
 LOG_FILE="/opt/edms/deploy.log"
-AR_BASE="asia-east1-docker.pkg.dev/blood-system-dev/edms-image"
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
+AR_HOST="asia-east1-docker.pkg.dev"
+AR_BASE="${AR_HOST}/blood-system-dev/edms-image"
+# -p edms：專案名稱預設取自目錄名（/opt/edms/repo → "repo"），會產出 repo_edms-net
+# 之類的名稱，與文件不一致且難辨識。明示固定。
+COMPOSE=(docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml)
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
 }
+
+# ⚠️ 整段包成函式再呼叫：bash 是**逐段讀取**腳本檔的，而本腳本執行中會
+# `git checkout` 自己所在的 repo——若該 commit 改到本檔，bash 接下來會從
+# 變動後的檔案讀取剩餘位元組，執行到錯亂的內容。包成函式可讓 bash 在呼叫前
+# 就完整解析整個函式主體，把風險窗口收斂到最後一行。
+main() {
 
 cd "${REPO_DIR}"
 
@@ -77,6 +86,12 @@ export EDMS_IMAGE_TAG="${TARGET_SHA}"
 cp /opt/edms/.env.prod .env.prod
 
 # ---------- 4. 部署 ----------
+# Artifact Registry 認證：IAM 授權（VM SA 的 artifactregistry.reader）只是 GCP 層的
+# 許可，docker daemon 本身仍需持 token 才能 pull。token 有時效，故每次部署重取，
+# 不依賴先前殘留的登入狀態。
+log "登入 Artifact Registry..."
+gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin "$AR_HOST" >/dev/null
+
 log "pull 映像..."
 "${COMPOSE[@]}" pull --quiet
 
@@ -96,6 +111,16 @@ if [ "${DB_READY}" -ne 1 ]; then
 fi
 
 # 備份失敗即中止——沒有可還原的快照就不動 schema
+# db-backup.sh 在**主機上**執行，而 .env.prod 是給 docker compose 的 env_file 用的
+# ——那只注入容器內，主機的 shell 拿不到。故此處單獨取出 bucket 一項帶進環境；
+# 刻意不整份 source，避免把 DB 密碼與金鑰灌進本行程及其所有子行程的環境。
+EDMS_BACKUP_BUCKET=$(sed -n 's/^EDMS_BACKUP_BUCKET=//p' /opt/edms/.env.prod | tr -d '"'"'"'"' | head -1)
+export EDMS_BACKUP_BUCKET
+if [ -z "${EDMS_BACKUP_BUCKET}" ]; then
+  log "❌ /opt/edms/.env.prod 未設定 EDMS_BACKUP_BUCKET，中止"
+  exit 1
+fi
+
 log "migration 前備份..."
 bash scripts/db-backup.sh pre-migrate
 
@@ -134,3 +159,7 @@ docker image prune -f >/dev/null 2>&1 || true
 if [ -f "${LOG_FILE}" ] && [ "$(wc -l < "${LOG_FILE}")" -gt 1000 ]; then
   tail -n 1000 "${LOG_FILE}" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "${LOG_FILE}"
 fi
+
+}
+
+main "$@"
