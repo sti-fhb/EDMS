@@ -1,7 +1,9 @@
 import { screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 
+import { RolesPage } from "../dp/roles/RolesPage"
 import { NAV_GROUPS } from "../layouts/navItems"
 import { renderWithProviders } from "../test/renderWithProviders"
 import { server } from "../test/server"
@@ -129,6 +131,38 @@ describe("Sidebar", () => {
     // 等 module-summary 解析後，DM 群組與其項目皆不應出現
     await waitFor(() => expect(screen.queryByText("文件管理")).not.toBeInTheDocument())
     expect(screen.queryByText("文件庫")).not.toBeInTheDocument()
+  })
+
+  it("#250 AC11：角色異動後側欄即時更新，不需重登", async () => {
+    // 模擬「管理者把自己的 DM 管理者角色移除」：assign 成功後 module-summary 改回非管理者
+    let dmIsAdmin = true
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({
+          et: { has_role: true, is_admin: false },
+          dm: { has_role: true, is_admin: dmIsAdmin },
+        }),
+      ),
+      http.put("/api/dp/roles/:module/assignments/:userId", () => {
+        dmIsAdmin = false
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const user = userEvent.setup()
+    // 兩個元件共用同一個 QueryClient，才驗得到 RolesPage 的 invalidate 傳導到 Sidebar
+    renderWithProviders(
+      <>
+        <Sidebar />
+        <RolesPage />
+      </>,
+    )
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
+
+    await user.click(await screen.findByRole("checkbox", { name: "王曉明 管理者" }))
+
+    // 不重整、不重登，側欄自行收起後台群組（RolesPage 於 onSuccess invalidate moduleSummary）
+    await waitFor(() => expect(screen.queryByText("系統管理者後台")).not.toBeInTheDocument())
+    expect(screen.queryByText("使用者管理")).not.toBeInTheDocument()
   })
 
   it("每個顯示中的導覽項目連到對應路由", async () => {

@@ -222,9 +222,7 @@ async def test_assign_allows_revoking_from_disabled_account(db, dm_registered):
     await db.flush()
 
     # 全部撤除（目標集為空）→ 應放行
-    await _svc.assign(
-        db, module="DM", user_id="u_leaver", roles=[], groups=[], operator=OperatorInfo(user_id="adm")
-    )
+    await _svc.assign(db, module="DM", user_id="u_leaver", roles=[], groups=[], operator=OperatorInfo(user_id="adm"))
     roles = {
         r
         for r in (
