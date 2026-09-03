@@ -1,6 +1,8 @@
 # EDMS 部署說明
 
-> **狀態：設定已備妥，尚未實際部署。** 上線前須完成 §2 的前置條件。
+> **狀態：已於 2026-09-03 上線**，`https://edms.tbsf.tw` 服務中。§2 的前置條件皆已完成（GCP 資源、WIF、VM 安裝、SMTP）。
+>
+> 本檔同時是**重建環境的依據**——若日後要在新機器上重來一次，§2 就是完整的步驟。
 >
 > EDMS 與 TBMS **共用 bms-prod-02 這台 VM**。整體共存架構（分流方式、資源配額、隔離原則）由 TBMS repo 的 `docs/infra/edms-coexistence-plan.md` 定義，本檔只描述 EDMS 這一側該怎麼做。兩者衝突時**以該檔為準**。
 
@@ -86,6 +88,17 @@ flowchart TD
 ---
 
 ## 2. 前置條件
+
+> 以下皆已於 2026-09-03 完成。保留完整步驟供重建環境或除錯時對照。
+>
+> | 項目 | 完成 |
+> |------|------|
+> | Artifact Registry `edms-image` + cleanup policy | ✅ |
+> | WIF pool `github-pool` / provider `github-edms` + SA `edms-build` | ✅ |
+> | GCS `gs://edms-db-backup` + lifecycle | ✅ |
+> | VM 目錄、`.env.prod`、external network、systemd timers | ✅ |
+> | SMTP（沿用 TBMS 的 Gmail 帳號） | ✅ 已設定，**尚未實測寄信** |
+
 
 > §2.1～§2.3 需要 `blood-system-dev` 的專案管理權限，EDMS 開發者沒有。
 > **完整可執行指令另見 [edms-gcp-setup.md](edms-gcp-setup.md)**，可直接交給維運人員代為執行。
@@ -357,6 +370,18 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 資料庫還原 SOP 比照 TBMS 的 `docs/infra/db-backup-restore.md`（同樣是 `pg_restore` 到容器內）。**檔案還原**為 `gcloud storage rsync -r "${BUCKET}/files/dm_files" /opt/edms/data/dm_files`，還原後須確認 owner 仍為 `10001:10001`。
 
 ⚠️ 磁碟水位：ET 影音教材單檔可能很大，而 bms-prod-02 只有 100 GB 且與 TBMS 共用。上線後要納入監看。
+
+---
+
+## 5.2 已知未完成事項
+
+| 項目 | 影響 |
+|------|------|
+| **寄信未實測** | SMTP 已設定但沒實際送過信。註冊／忘記密碼流程能否運作未經驗證 |
+| **備份還原未演練** | §5.1 寫了還原步驟但沒跑過。「備份沒演練過等於沒有」 |
+| **檔案 rsync 未在有實際檔案時驗過** | 首次執行時兩個目錄都是空的。上傳第一份文件後應手動跑一次 `sudo systemctl start edms-backup.service` 確認 |
+| **未納入監控** | 容器掛掉不會有人知道。TBMS 有 `monitoring.md` 定義的 VM 層告警，EDMS 尚未納入 |
+| **第一個帳號為手動 bootstrap** | 因當時無 SMTP，帳號與 ET／DM 角色是直接以 app 的 ORM 寫入的，未走正規註冊流程 |
 
 ---
 
