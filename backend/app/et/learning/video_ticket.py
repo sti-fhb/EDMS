@@ -16,8 +16,27 @@ blob 要整支下載完才能播、失去 Range（拖不動進度條）、整支
 3. **`typ` 嚴格區隔**——票**不可**當一般 access token 用，access token 也**不可**當票用
 
 第 3 點是關鍵。若共用 claim 集，一個從 access log 撈到的票就等於一組帳號憑證；反過來
-若接受一般 token 當票，等於把長效憑證引進 URL。兩個方向都要擋，故簽發與驗證各自檢查
-`typ`。
+若接受一般 token 當票，等於把長效憑證引進 URL。兩個方向都要擋——`issue_video_ticket`
+簽入 `typ`、`verify_video_ticket` 檢查它，而 `core/auth.decode_access_token` 反向拒絕
+任何帶 `typ` 的票。
+
+## 票確實會進某些日誌——這是已知且已接受的
+
+三層各自的狀態：
+
+| 層 | 狀態 |
+|---|---|
+| nginx access log | ✅ 已去除 query string（`nginx/log-format.conf` 之 `edms_no_query`）|
+| uvicorn access log | ✅ 已遮罩（`core/access_log_redaction`，#255）|
+| **nginx error_log** | ⚠️ 記完整 request，格式不可自訂 |
+| **Cloudflare Tunnel 請求日誌** | ⚠️ **記含 query string 的完整 URI，不受我方管轄** |
+| 瀏覽器歷史 / Referer | ⚠️ 同上 |
+
+故**不可宣稱「票不會進 log」**。可接受的理由是票本身的三道限制（5 分鐘、綁單一影片、
+與 access token 不可互換），而不是遮罩做得多完整。若日後要根治，方向是讓憑證不進
+query string——但 `<video src>` 送不出 header 這個限制不會改變，實務上得換成
+媒體專用 cookie（`HttpOnly` + `SameSite=Strict` + 路徑限定），代價是把 cookie 引進
+一個刻意沒有 cookie 的認證模型。
 
 ## 取檔時不重跑授權——這是刻意的
 
