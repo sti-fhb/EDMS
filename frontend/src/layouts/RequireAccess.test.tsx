@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 
-import { RequireDmReviewer, RequireModuleAdmin } from "./RequireAccess"
+import { RequireDmAdmin, RequireDmPersonal, RequireDmReviewer, RequireModule, RequireModuleAdmin } from "./RequireAccess"
 import { renderWithProviders } from "../test/renderWithProviders"
 import { server } from "../test/server"
 
@@ -28,7 +28,9 @@ describe("RequireModuleAdmin", () => {
   it("非 ET 且非 DM 管理者 → 顯示 403 無權限畫面，不渲染子頁", async () => {
     server.use(summaryHandler(false, false))
     renderWithProviders(<RequireModuleAdmin>{CHILD}</RequireModuleAdmin>)
-    expect(await screen.findByText("無存取權限（HTTP 403）")).toBeInTheDocument()
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+    // 所有守衛共用同一元件、同一段文字（各 describe 皆斷言此字串，即為一致性保證）
+    expect(screen.getByText("如需使用此功能，請洽模組管理者為您指派對應角色。")).toBeInTheDocument()
     expect(screen.queryByText("受保護內容")).not.toBeInTheDocument()
   })
 
@@ -36,7 +38,7 @@ describe("RequireModuleAdmin", () => {
     server.use(summaryHandler(false, true))
     renderWithProviders(<RequireModuleAdmin>{CHILD}</RequireModuleAdmin>)
     expect(await screen.findByText("受保護內容")).toBeInTheDocument()
-    expect(screen.queryByText("無存取權限（HTTP 403）")).not.toBeInTheDocument()
+    expect(screen.queryByText("無權限存取此功能")).not.toBeInTheDocument()
   })
 
   it("summary 未載入前不渲染子頁（fail-closed，避免先閃內容再收回）", () => {
@@ -50,7 +52,7 @@ describe("RequireDmReviewer", () => {
   it("具 DM 角色但非審核者 → 403 畫面（僅 DM_ADMIN 者亦然）", async () => {
     server.use(summaryHandler(false, true), http.get("/api/dm/reviewer-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<RequireDmReviewer>{CHILD}</RequireDmReviewer>)
-    expect(await screen.findByText("無存取權限（HTTP 403）")).toBeInTheDocument()
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
     expect(screen.queryByText("受保護內容")).not.toBeInTheDocument()
   })
 
@@ -70,7 +72,49 @@ describe("RequireDmReviewer", () => {
       }),
     )
     renderWithProviders(<RequireDmReviewer>{CHILD}</RequireDmReviewer>)
-    expect(await screen.findByText("無存取權限（HTTP 403）")).toBeInTheDocument()
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
     await waitFor(() => expect(called).toBe(0))
+  })
+})
+
+describe("RequireModule（模組群組門檻）", () => {
+  it("無該模組任一角色 → 無權限畫面", async () => {
+    server.use(summaryHandler(false, false, false))
+    renderWithProviders(<RequireModule module="DM">{CHILD}</RequireModule>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+  })
+
+  it("具該模組角色 → 渲染子頁", async () => {
+    server.use(summaryHandler(false, false, true))
+    renderWithProviders(<RequireModule module="DM">{CHILD}</RequireModule>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+})
+
+describe("RequireDmAdmin（已廢止 / 變更歷程 / KPI）", () => {
+  it("非 DM 管理者 → 無權限畫面", async () => {
+    server.use(summaryHandler(false, false), http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
+    renderWithProviders(<RequireDmAdmin>{CHILD}</RequireDmAdmin>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+  })
+
+  it("DM 管理者 → 渲染子頁", async () => {
+    server.use(summaryHandler(false, true), http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: true })))
+    renderWithProviders(<RequireDmAdmin>{CHILD}</RequireDmAdmin>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+})
+
+describe("RequireDmPersonal（個人專區）", () => {
+  it("非編輯者 / 審核者 → 無權限畫面", async () => {
+    server.use(summaryHandler(false, false), http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: false })))
+    renderWithProviders(<RequireDmPersonal>{CHILD}</RequireDmPersonal>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+  })
+
+  it("具編輯者或審核者 → 渲染子頁", async () => {
+    server.use(summaryHandler(false, false), http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })))
+    renderWithProviders(<RequireDmPersonal>{CHILD}</RequireDmPersonal>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
   })
 })

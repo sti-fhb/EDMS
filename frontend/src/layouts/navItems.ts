@@ -54,7 +54,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
       { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
       { label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
-      { label: "閱讀統計 KPI", path: "/dm/kpi" },
+      // #250：補上漏設的 admin 門檻——US13 KPI 為管理者功能（見上方 requiresDmAdminAccess 註解
+      // 已列 US13，但此項當初未設 flag），與路由守衛 RequireDmAdmin 一致
+      { label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
     ],
   },
   {

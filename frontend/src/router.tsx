@@ -5,7 +5,13 @@ import { ResetPasswordPage } from "./auth/ResetPasswordPage"
 import { VerifyEmailChangePage } from "./auth/VerifyEmailChangePage"
 import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { AppShell } from "./layouts/AppShell"
-import { RequireDmReviewer, RequireModuleAdmin } from "./layouts/RequireAccess"
+import {
+  RequireDmAdmin,
+  RequireDmPersonal,
+  RequireDmReviewer,
+  RequireModule,
+  RequireModuleAdmin,
+} from "./layouts/RequireAccess"
 import { RootLayout } from "./layouts/RootLayout"
 import { DmChangeLogPage } from "./dm/changelog/DmChangeLogPage"
 import { DmDetailPage } from "./dm/detail/DmDetailPage"
@@ -66,7 +72,10 @@ export const router = createBrowserRouter([
           },
           {
             // 文件管理模組殼（#127 Foundation）：路由骨架，各頁為 StubPage，功能於對應 US issue 填實
+            // #250：整段 /dm 需任一 DM 角色；細項再各自掛閘（下方）。
+            // 直接輸入網址而無權限者一律顯示「無權限存取此功能」，不再各頁自行處理 403。
             path: "dm",
+            element: <RequireModule module="DM" />,
             children: [
               // DM 儀表板（US7 / DM00）改為中性歡迎頁之依權限 widget（#89），不設獨立 /dm 落地頁；
               // 裸 /dm 導向文件庫（既有行為）
@@ -85,16 +94,52 @@ export const router = createBrowserRouter([
                   </RequireDmReviewer>
                 ),
               },
-              { path: "me", element: <DmPersonalPage /> },
-              { path: "obsolete", element: <DmObsoletePage /> },
-              { path: "change-log", element: <DmChangeLogPage /> },
-              { path: "kpi", element: <DmKpiPage /> },
+              // 個人專區：需編輯者或審核者（US9 FR-004）
+              {
+                path: "me",
+                element: (
+                  <RequireDmPersonal>
+                    <DmPersonalPage />
+                  </RequireDmPersonal>
+                ),
+              },
+              // 需 DM_ADMIN（service 層 DM_AUTH_003）
+              {
+                path: "obsolete",
+                element: (
+                  <RequireDmAdmin>
+                    <DmObsoletePage />
+                  </RequireDmAdmin>
+                ),
+              },
+              // 需 DM_ADMIN（service 層 DM_AUTH_003）
+              {
+                path: "change-log",
+                element: (
+                  <RequireDmAdmin>
+                    <DmChangeLogPage />
+                  </RequireDmAdmin>
+                ),
+              },
+              // 需 DM_ADMIN（service 層 DM_AUTH_003）
+              {
+                path: "kpi",
+                element: (
+                  <RequireDmAdmin>
+                    <DmKpiPage />
+                  </RequireDmAdmin>
+                ),
+              },
             ],
           },
           {
             // 教育訓練模組殼（#202）：側欄 4 項對齊 wireframe ET 側欄；
             // 課程列表以外目前為 StubPage，功能於對應 US issue 填實。
+            // #250：整段 /et 需任一 ET 角色（對齊側欄 requiresModule=ET）。
+            // 課程編輯等頁另需 TEACHER / ADMIN，但目前無對應的 access 端點可供前端判定，
+            // 故僅做群組層守衛，細粒度仍由後端 require_et_roles 把關（見 PR 說明之後續項）。
             path: "et",
+            element: <RequireModule module="ET" />,
             children: [
               { index: true, element: <Navigate to="/et/courses" replace /> },
               { path: "courses", element: <EtCourseListPage /> },
