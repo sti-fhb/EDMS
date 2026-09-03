@@ -127,13 +127,21 @@ async def test_p1_full_lifecycle(db):
 
     # 4) 文件庫檢索見文件（以編輯者身分，不受可見性限制）
     res = await _library.search(
-        db, query=DocumentQuery(keyword="領血"), ctx=DmContext(user_id="ed", roles=frozenset({DM_EDITOR})), page=1, limit=20
+        db,
+        query=DocumentQuery(keyword="領血"),
+        ctx=DmContext(user_id="ed", roles=frozenset({DM_EDITOR})),
+        page=1,
+        limit=20,
     )
     assert doc_id in [d.doc_id for d in res["data"]]
 
     # 5) 詳細頁下載 → 寫入 DM_DOC_READ（閱覽者、目前發布版）
     await _detail.prepare_file(
-        db, doc_id=doc_id, version_id=v1_id, disposition="download", ctx=DmContext(user_id="viewer1", roles=frozenset({DM_VIEWER}))
+        db,
+        doc_id=doc_id,
+        version_id=v1_id,
+        disposition="download",
+        ctx=DmContext(user_id="viewer1", roles=frozenset({DM_VIEWER})),
     )
     read_cnt = await db.scalar(
         select(func.count())
@@ -170,7 +178,14 @@ async def test_p1_full_lifecycle(db):
 
     # 9) 廢止申請
     init = await _obsolete.initiate(
-        db, doc_id=doc_id, reason="業務調整不再使用", reviewer_id="rev1", file_name=None, file_bytes=None, file_mime=None, op=_op("ed")
+        db,
+        doc_id=doc_id,
+        reason="業務調整不再使用",
+        reviewer_id="rev1",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op("ed"),
     )
     assert (await _doc(db, doc_id)).status == "PENDING_OBSOLETE"
 

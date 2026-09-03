@@ -262,7 +262,10 @@ class ReviewCenterService:
             doc.status = _PUBLISHED
             doc.updated_user, doc.updated_date = op.user_id, now
         try:
-            await db.flush()
+            async with (
+                db.begin_nested()
+            ):  # SAVEPOINT：撞唯一索引時只回退本次發布，不毀呼叫方交易（對齊 ReviewService.submit）
+                await db.flush()
         except IntegrityError as exc:
             # 手冊 func_name 唯一之並發 backstop（T065）：兩份同 func 手冊皆送審中、依序核准時，
             # 送簽檢核（DM_DOC_007）皆放行，第二份核准撞部分唯一索引 UX_DM_DOCUMENT_MANUAL_FUNC。

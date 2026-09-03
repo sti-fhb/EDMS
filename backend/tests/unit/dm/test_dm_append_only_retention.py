@@ -6,9 +6,13 @@
 - 版本表（DM_DOC_VERSION）採**軟刪除**：具 DELETED 欄（永久保留、以 DELETED=1 標記，不實體刪）。
 """
 
+import pytest
+
 from app.dm.document.models import DmDocVersion
 from app.dm.review.models import DmChangeLog
 from app.dm.roles.models import DmUserRoleLog
+
+pytestmark = pytest.mark.unit
 
 _MUTABLE_COLS = {"UPDATED_USER", "UPDATED_DATE", "DELETED"}
 

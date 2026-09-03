@@ -105,7 +105,11 @@ async def test_manual_func_uniqueness_blocked_at_submit(db):
 
 
 async def test_concurrent_manual_publish_backstopped(db):
-    """兩份手冊皆送審中（皆未發布）→ 依序核准：第一份發布，第二份核准撞索引 → 友善 DM_DOC_007。"""
+    """兩份手冊皆送審中（皆未發布）→ 依序核准：第一份發布，第二份核准撞索引 → 友善 DM_DOC_007。
+
+    註：以「同交易依序核准」模擬並發之**最終態**（PostgreSQL 對同交易內已 flush 未 commit 之列亦做唯一性
+    檢查，故能觸發 backstop）；非真正多連線競爭，但足以驗證部分唯一索引之資料層防線與友善映射。
+    """
     await _setup_roles(db)
     await _make_func(db, "OPF02", "作業項目二")
     a = await _create_manual(db, name="手冊甲", func_code="OPF02")
