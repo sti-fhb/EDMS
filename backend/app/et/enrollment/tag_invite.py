@@ -83,20 +83,41 @@ class EtTagInviteRepository:
     async def bulk_enroll(
         self, db: AsyncSession, course_id: int, user_ids: list[str], *, operator: OperatorInfo
     ) -> int:
-        """批次建立選課列，**已存在者略過**。
+        """批次建立選課列，**已存在者略過**；回傳實際新增的列數。
+
+        Returns:
+            實際新增的列數（已存在者不計）。
+        """
+        return len(await self.bulk_enroll_returning(db, course_id, user_ids, operator=operator))
+
+    async def bulk_enroll_returning(
+        self, db: AsyncSession, course_id: int, user_ids: list[str], *, operator: OperatorInfo
+    ) -> list[str]:
+        """同 `bulk_enroll`，但回傳**實際新增者的 `USER_ID`**。
+
+        `ET-8`（#273）要對「這次真的被加進來的人」逐人寄一封通知信，而列數回答不了
+        「是誰」。以 `RETURNING` 取得——`ON CONFLICT DO NOTHING` 之下它只會吐出真正
+        插入的列，與 `rowcount` 同義但多帶了身分。
 
         以 `ON CONFLICT DO NOTHING` 而非「先查後插」：後者在兩位教師同時發布 /
         重新發布時仍會撞 `UQ_ET_ENROLLMENT_USER_COURSE`。衝突目標明寫欄位組而非約束
         名稱，避免與該約束的名稱耦合。
 
-        **不碰既有列**（`DO NOTHING` 而非 `DO UPDATE`）——這正是「被移除的學員不會被
-        標籤帶回來」的實作方式：他那一列還在，衝突後原樣保留 `IS_REMOVED=true`。
+        🔴 **不碰既有列**（`DO NOTHING` 而非 `DO UPDATE`）——這正是「被移除的學員不會被
+        標籤帶回來」的實作方式：他那一列還在，衝突後原樣保留 `IS_REMOVED=true`
+        （#247 SA Q1 裁示 C）。
+
+        ⚠️ **本方法與 `app/et/invitation/repository.py` 的 `upsert_enrollment`
+        （`DO UPDATE`，讓被移除者回到課程）刻意不共用實作**。兩者看起來只差一個
+        `on_conflict_*` 參數，實際上是同一條裁示的兩側：標籤帶入不得把人帶回來、
+        教師明確重新邀請可以。抽成共用 helper 之後，任何人把預設值一改就會靜默打開
+        那條被否決的路徑，而兩邊各自的測試都還會過。
 
         Returns:
-            實際新增的列數（已存在者不計）。
+            實際新增之 `USER_ID` 清單（已存在者不在其中）；`user_ids` 為空時回空清單。
         """
         if not user_ids:
-            return 0
+            return []
         now = utcnow()
         stmt = (
             pg_insert(EtEnrollment)
@@ -117,7 +138,9 @@ class EtTagInviteRepository:
                 ]
             )
             .on_conflict_do_nothing(index_elements=["USER_ID", "COURSE_ID"])
+            .returning(EtEnrollment.user_id)
         )
         result = await db.execute(stmt)
+        inserted = list(result.scalars().all())
         await db.flush()
-        return result.rowcount or 0
+        return inserted
