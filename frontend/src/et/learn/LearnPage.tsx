@@ -167,6 +167,7 @@ export function EtLearnPage() {
             chapters={data.chapters}
             activeItemId={active?.item_id ?? null}
             onSelect={handleSelect}
+            showProgress={!data.is_owner}
           />
         </Grid>
         <Grid size={{ xs: 12, md: 9 }}>

@@ -4,6 +4,8 @@ import DescriptionIcon from "@mui/icons-material/Description"
 import LockIcon from "@mui/icons-material/Lock"
 import QuizIcon from "@mui/icons-material/Quiz"
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked"
+import Box from "@mui/material/Box"
+import LinearProgress from "@mui/material/LinearProgress"
 import List from "@mui/material/List"
 import ListItemButton from "@mui/material/ListItemButton"
 import ListItemIcon from "@mui/material/ListItemIcon"
@@ -19,6 +21,14 @@ interface Props {
   chapters: ChapterNode[]
   activeItemId: number | null
   onSelect: (item: ItemNode) => void
+  /**
+   * 是否顯示課程進度條。擁有者不顯示——預覽不累積進度，一條恆為 0% 的進度條只會讓
+   * 教師以為自己「什麼都沒完成」。
+   *
+   * ⚠️ 教師若真的用邀請碼加入自己的課，他是學員、進度照常累積，但這裡仍會少一條進度條
+   * （前端拿到的 `is_owner` 分不出這兩種情形）。純屬顯示上的缺漏，完成 / 解鎖判定不受影響。
+   */
+  showProgress: boolean
 }
 
 /**
@@ -39,7 +49,7 @@ interface Props {
  * ⚠️ wireframe 的側欄底部另有「填寫課後問卷」入口——**本 issue 不做**（`ET-15` 未實作，
  * 且顯示條件需完課判定）。照抄會做出一顆永遠不會動作的按鈕。
  */
-export function ChapterNav({ chapters, activeItemId, onSelect }: Props) {
+export function ChapterNav({ chapters, activeItemId, onSelect, showProgress }: Props) {
   if (chapters.length === 0) {
     return (
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -50,8 +60,21 @@ export function ChapterNav({ chapters, activeItemId, onSelect }: Props) {
     )
   }
 
+  // wireframe 之 `course-progress-bar`：完成項目數 ÷ 總項目數
+  const items = chapters.flatMap((c) => c.items)
+  const completedCount = items.filter((i) => i.completed).length
+  const percent = items.length === 0 ? 0 : Math.round((completedCount * 100) / items.length)
+
   return (
     <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      {showProgress && (
+        <Box sx={{ px: 2, py: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">
+            課程進度 {completedCount} / {items.length}（{percent}%）
+          </Typography>
+          <LinearProgress variant="determinate" value={percent} aria-label="課程進度" sx={{ mt: 0.5 }} />
+        </Box>
+      )}
       <List dense disablePadding>
         {chapters.map((chapter) => (
           <li key={chapter.chapter_id}>

@@ -151,6 +151,23 @@ describe("ET05 章節學習頁", () => {
       expect(screen.queryByRole("button", { name: "開始測驗" })).not.toBeInTheDocument()
     })
 
+    it("側欄顯示課程進度（完成項目數 ÷ 總項目數）", async () => {
+      mockStructure({ chapters: threeStateChapters(), last_item_id: 102 })
+      renderWithProviders(<EtLearnPage />)
+
+      // 3 項中 1 項完成
+      expect(await screen.findByText(/課程進度 1 \/ 3（33%）/)).toBeInTheDocument()
+    })
+
+    it("教師預覽不顯示課程進度條", async () => {
+      // 恆為 0% 的進度條只會讓教師以為自己「什麼都沒完成」
+      mockStructure({ is_owner: true })
+      renderWithProviders(<EtLearnPage />)
+      await screen.findByText("第一章 採血基本流程")
+
+      expect(screen.queryByText(/課程進度/)).not.toBeInTheDocument()
+    })
+
     it("側欄三態顯示真實狀態（AC 14）", async () => {
       // `last_item_id` 指向第 2 章，故第 1 章那兩項不是「進行中」——`itemDisplayState`
       // 讓 active 蓋過 completed，兩者放在同一項上就驗不到完成標記。
