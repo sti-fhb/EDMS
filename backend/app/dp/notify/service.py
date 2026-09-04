@@ -5,6 +5,7 @@
 實際寄送由常駐 worker（見 worker.py）非同步執行。模組不自持範本、不自建佇列、不直連 SMTP。
 """
 
+import logging
 import string
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dp.notify.repository import NotifyRepository
-from app.dp.notify.schemas import SendResult
+from app.dp.notify.schemas import RenderedMail, SendResult
+
+logger = logging.getLogger(__name__)
 
 # 系統作業建立者（DP_EMAIL_LOG 標準欄位 CREATED_USER）；實際觸發模組記於 CALLER_MODULE。
 _SYSTEM_USER = "SYSTEM"
@@ -105,6 +108,56 @@ class NotifyService:
 
     def __init__(self, repository: NotifyRepository | None = None) -> None:
         self._repo = repository or NotifyRepository()
+
+    async def render_preview(
+        self,
+        db: AsyncSession,
+        *,
+        template_code: str,
+        module: str,
+        params: dict[str, str],
+    ) -> RenderedMail:
+        """渲染範本並回傳主旨 / 內文，**不寫入 outbox、不寄送**（#273）。
+
+        給「寄出前先讓使用者看一眼」的情境用。ET 之 Email 邀請要求於下一步顯示依統一
+        範本渲染之預覽（FR-ET-US8-07），而範本與 `_SafeFormatter` 皆為本模組內部——
+        呼叫方自行讀 `DP_NOTIFY_TEMPLATE` 會違反 `sti-backend-boundaries`，故由此提供。
+
+        與 `send_email` 的差異只有「不落 outbox」；渲染規則（主旨剝換行、內文保留 LF、
+        佔位僅允許具名變數）完全共用，故預覽所見即寄出所得。
+
+        **渲染失敗於此拋錯而非靜默記 FAILED**：`send_email` 吞掉渲染錯誤是為了不阻斷
+        呼叫方的業務交易（信寄不出去不該讓文件送審失敗）；預覽沒有業務交易可保護，
+        它的**唯一產出**就是那段文字，靜默回空字串只會讓使用者看到一封空白的信卻以為
+        正常。
+
+        Args:
+            template_code: DP_NOTIFY_TEMPLATE.TEMPLATE_CODE。
+            module: 範本歸屬 MODULE（DP / ET / DM）。
+            params: 範本變數；key 須逐字對齊範本佔位。
+
+        Returns:
+            RenderedMail：渲染後之 subject / body。
+
+        Raises:
+            AppError: 範本不存在（404 / DP_MAIL_001）、已停用（409 / DP_MAIL_006）、
+                渲染失敗（422 / DP_MAIL_007，多為 params 缺 key）。
+        """
+        template = await self._repo.get_template(db, module, template_code)
+        if template is None:
+            raise AppError(status_code=404, detail="通知範本不存在", error_code="DP_MAIL_001")
+        if not template.is_enabled:
+            # 停用的範本寄不出去，預覽卻給出內容會讓使用者按下寄出後一無所獲。
+            raise AppError(status_code=409, detail="通知範本已停用", error_code="DP_MAIL_006")
+        try:
+            subject = _render(template.subject, params, single_line=True)
+            body = _render(template.body, params)
+        except (KeyError, ValueError, IndexError) as exc:
+            # 例外訊息**不外流**：它含範本內部的佔位名稱，屬 schema 細節（sti-error-codes
+            # 明定 error_message 不得嵌入動態值）。詳情留在伺服器日誌。
+            logger.warning("通知範本預覽渲染失敗 module=%s template_code=%s: %s", module, template_code, exc)
+            raise AppError(status_code=422, detail="通知範本內容無法產生預覽", error_code="DP_MAIL_007") from exc
+        return RenderedMail(subject=subject, body=body)
 
     async def send_email(
         self,

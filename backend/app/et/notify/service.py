@@ -28,8 +28,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.dp.notify.schemas import SendResult
-from app.services import NotifyService
+from app.services import NotifyService, SendResult
 
 logger = logging.getLogger(__name__)
 
