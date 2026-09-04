@@ -23,7 +23,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.document.docid import next_doc_id
-from app.dm.document.file_store import is_previewable, validate_upload
+from app.dm.document.file_store import is_previewable, resolve_upload_mime, validate_upload
 from app.dm.editor.repository import EditorRepository
 from app.dm.editor.schemas import (
     CreateResult,
@@ -143,9 +143,7 @@ class EditorService:
         doc = await self._create_doc_with_retry(
             db, category_code=category_code, doc_name=doc_name, func_code=func_code, op=op
         )
-        fmeta = await self._store_file(
-            db, doc_id=doc.doc_id, file_name=file_name, file_bytes=file_bytes, file_mime=file_mime
-        )
+        fmeta = await self._store_file(db, doc_id=doc.doc_id, file_name=file_name, file_bytes=file_bytes)
         ver = await self._repo.add_version(
             db,
             doc_id=doc.doc_id,
@@ -169,17 +167,25 @@ class EditorService:
         return CreateResult(doc_id=doc.doc_id, version_id=ver.version_id, previewable=fmeta.previewable)
 
     async def _store_file(
-        self, db: AsyncSession, *, doc_id: str, file_name: str | None, file_bytes: bytes | None, file_mime: str | None
+        self, db: AsyncSession, *, doc_id: str, file_name: str | None, file_bytes: bytes | None
     ) -> _FileMeta:
-        """有檔案 → 檢核（大小 / 副檔名）+ 落盤（卸載至 thread）並回 metadata；無檔案 → 全 None（草稿允許）。"""
+        """有檔案 → 檢核（大小 / 副檔名）+ 落盤（卸載至 thread）並回 metadata；無檔案 → 全 None（草稿允許）。
+
+        MIME 由 `resolve_upload_mime` 依副檔名 + magic 伺服端判定，**不採用戶端 content_type**（T066 M2）。
+        """
         if not file_bytes:
             return _FileMeta(path=None, name=None, size=None, mime=None, previewable=False)
         await validate_upload(db, size_bytes=len(file_bytes), filename=file_name or "")
+        resolved_mime = resolve_upload_mime(file_bytes, file_name or "")
         path = await asyncio.to_thread(
             save_upload, doc_id=doc_id, file_id=generate_file_id(), filename=file_name or "", data=file_bytes
         )
         return _FileMeta(
-            path=path, name=file_name, size=len(file_bytes), mime=file_mime, previewable=is_previewable(file_mime or "")
+            path=path,
+            name=file_name,
+            size=len(file_bytes),
+            mime=resolved_mime,
+            previewable=is_previewable(resolved_mime),
         )
 
     async def _create_doc_with_retry(
@@ -242,9 +248,7 @@ class EditorService:
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             )
         tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
-        fmeta = await self._store_file(
-            db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes, file_mime=file_mime
-        )
+        fmeta = await self._store_file(db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes)
         try:
             async with db.begin_nested():  # SAVEPOINT：並發撞單一草稿（同人）只回退本次 INSERT
                 ver = await self._repo.add_version(
@@ -366,9 +370,7 @@ class EditorService:
         now = utcnow()
         previewable = is_previewable(ver.file_mime or "") if ver.file_mime else False
         if file_bytes:  # 有附新檔才落盤覆寫；否則保留既有檔案
-            fmeta = await self._store_file(
-                db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes, file_mime=file_mime
-            )
+            fmeta = await self._store_file(db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes)
             ver.file_name, ver.file_path, ver.file_size, ver.file_mime = fmeta.name, fmeta.path, fmeta.size, fmeta.mime
             previewable = fmeta.previewable
         ver.version_no, ver.change_summary = version_no, change_summary

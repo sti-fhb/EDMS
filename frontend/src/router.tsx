@@ -24,6 +24,8 @@ import { DmReviewPage } from "./dm/review/DmReviewPage"
 import { EtApprovalQueryPage } from "./et/approval/ApprovalQueryPage"
 import { EtCourseEditorPage } from "./et/courses/CourseEditorPage"
 import { EtCourseListPage } from "./et/courses/CourseListPage"
+import { EtHomeRedirect } from "./et/EtHomeRedirect"
+import { EtLearnPage } from "./et/learn/LearnPage"
 import { EtMyCoursesPage } from "./et/my/MyCoursesPage"
 import { EtStudentsPage } from "./et/students/StudentsPage"
 import { AuditPage } from "./dp/audit/AuditPage"
@@ -141,7 +143,8 @@ export const router = createBrowserRouter([
             path: "et",
             element: <RequireModule module="ET" />,
             children: [
-              { index: true, element: <Navigate to="/et/courses" replace /> },
+              // 依能力分流（#247 AC 1）：純學員 → ET04 我的課程；具建課能力者 → 課程列表
+              { index: true, element: <EtHomeRedirect /> },
               { path: "courses", element: <EtCourseListPage /> },
               // ET02 為課程列表之子頁、非側欄項目；靜態 new 置於動態 :courseId 前避免被誤捕
               { path: "courses/new", element: <EtCourseEditorPage /> },
@@ -149,6 +152,8 @@ export const router = createBrowserRouter([
               { path: "students", element: <EtStudentsPage /> },
               { path: "approvals", element: <EtApprovalQueryPage /> },
               { path: "my-courses", element: <EtMyCoursesPage /> },
+              // ET05 章節學習（#255）：學員自我的課程卡片進入，非側欄項目
+              { path: "courses/:courseId/learn", element: <EtLearnPage /> },
             ],
           },
         ],

@@ -377,6 +377,42 @@ export const handlers = [
       headers: { "Content-Type": "text/csv; charset=utf-8" },
     }),
   ),
+  // US13 閱讀統計 KPI（dm-kpi）
+  http.get("/api/dm/kpi/documents", () =>
+    HttpResponse.json({
+      data: [
+        {
+          doc_id: "DM-SOP-000001",
+          doc_name: "領血確認標準作業程序",
+          category_code: "SOP",
+          category_name: "SOP（標準作業程序）",
+          current_version_no: "2.1",
+          should_see: 10,
+          seen: 4,
+          unseen: 6,
+          rate: 0.4,
+        },
+        {
+          doc_id: "DM-OTHER-000009",
+          doc_name: "無對應閱覽者文件",
+          category_code: "OTHER",
+          category_name: "其他",
+          current_version_no: "1.0",
+          should_see: 0,
+          seen: 0,
+          unseen: 0,
+          rate: null,
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+      summary: { total_docs: 2, overall_rate: 0.4, below_50_count: 1 },
+    }),
+  ),
+  http.get("/api/dm/kpi/documents/export", () =>
+    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿文件編號,文件名稱\nDM-SOP-000001,領血確認標準作業程序\n").buffer, {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
   // US9 個人專區（dm-personal）
   http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })),
   http.get("/api/dm/personal/drafts", () =>
@@ -879,7 +915,9 @@ export const handlers = [
     HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
   ),
   // ET02 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
-  http.get("/api/et/courses/capabilities", () => HttpResponse.json({ can_create_course: true })),
+  http.get("/api/et/courses/capabilities", () =>
+    HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
+  ),
   http.get("/api/et/tags", () =>
     HttpResponse.json([
       { tag_id: 1, tag_name: "全體", is_active: true },
@@ -974,6 +1012,76 @@ export const handlers = [
       invitation_code: "01234567",
       version: 1,
     }),
+  ),
+
+  // ── ET04 我的課程與加入新課程（US4 / #247）────────────────────────────────
+  http.get("/api/et/my-courses", () =>
+    HttpResponse.json({
+      summary: { joined: 2, in_progress: 1, not_started: 1, completed: 0 },
+      courses: [
+        {
+          course_id: 1,
+          course_name: "採血作業新進人員訓練",
+          status: "PUBLISHED",
+          completion_status: "IN_PROGRESS",
+          tags: ["護理師", "軍人"],
+          chapter_count: 5,
+          open_start_at: "2026-04-15T09:00:00Z",
+          open_end_at: "2026-07-31T17:00:00Z",
+          progress_pct: 0,
+        },
+        {
+          course_id: 2,
+          course_name: "血品安全與品保概論",
+          status: "CLOSED",
+          completion_status: "NOT_STARTED",
+          tags: ["全體"],
+          chapter_count: 4,
+          open_start_at: "2026-05-01T08:00:00Z",
+          open_end_at: "2026-10-31T17:00:00Z",
+          progress_pct: 0,
+        },
+      ],
+    }),
+  ),
+  http.post("/api/et/enrollments/preview", () =>
+    HttpResponse.json({
+      course_id: 1,
+      course_name: "採血作業新進人員訓練",
+      owner_name: "王教師",
+      chapter_count: 5,
+      already_joined: false,
+      open_start_at: "2026-04-15T09:00:00Z",
+    }),
+  ),
+  http.post("/api/et/enrollments", () =>
+    HttpResponse.json({ course_id: 1, completion_status: "NOT_STARTED", pending_open: false }, { status: 201 }),
+  ),
+
+  // ── ET05 章節學習（US5 / #255）──────────────────────────────────────────
+  http.get("/api/et/materials/:materialId/content", ({ params }) =>
+    HttpResponse.json({
+      material_id: Number(params.materialId),
+      material_name: "採血流程概論教材",
+      description_html: "<p>本教材說明採血的基本流程。</p>",
+      videos: [{ video_id: 500, file_name: "採血示範.mp4", duration_sec: 615, sort_order: 1 }],
+      docs: [
+        {
+          doc_id: "DM-SOP-000001",
+          doc_name: "採血標準作業程序",
+          file_name: "SOP-v2.1.pdf",
+          file_mime: "application/pdf",
+          version_id: 21,
+          obsolete: false,
+          previewable: true,
+          available: true,
+          sort_order: 1,
+        },
+      ],
+    }),
+  ),
+  http.post("/api/et/videos/:videoId/ticket", () =>
+    HttpResponse.json({ ticket: "test-ticket", expires_in: 60 }),
   ),
 ]
 

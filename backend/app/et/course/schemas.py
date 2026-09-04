@@ -259,6 +259,15 @@ class CourseDetail(BaseModel):
     is_owner: bool
     tag_ids: list[int]
     chapters: list[ChapterItem]
+    #: 課程邀請碼（8 碼純數字）。**僅 owner 可見**——非擁有者一律為 `None`。
+    #:
+    #: #204 只在發布端點的回應帶回這個值，於 `PublishDialog` 顯示一次；而發布後
+    #: **不提供重新產生**（`spec_us4` Clarifications）。兩者相加的結果是：教師當下
+    #: 沒複製就永久拿不回來，那門課再也發不出邀請碼。#247 補上本欄位讓它之後仍看得到。
+    #:
+    #: ⚠️ 不可對所有人回傳——學員角色人人都有，任何登入者打這支 API 就能收集全站
+    #: 邀請碼並自行加入任意課程，等同繞過 `ET-4` 的邀請門檻與其限流。
+    invitation_code: str | None
 
 
 class CourseCreateResult(BaseModel):
@@ -281,6 +290,15 @@ class Capabilities(BaseModel):
     """
 
     can_create_course: bool  # 具教師角色（SA 裁示 Q2）→ 顯示「新增課程」入口
+    #: 具教師或管理者角色 → 顯示側欄之教學管理項（課程列表 / 學員 / 核可查詢）。
+    #:
+    #: 與 `can_create_course` **分開**：管理者不建課程但要能管理，兩者的角色集不同。
+    can_manage_courses: bool
+    #: 具學員角色 → 顯示側欄之「我的課程」。
+    #:
+    #: 學員角色於帳號建立時自動授予，故多數人為 true；但管理者可停用個別指派
+    #: （`load_et_roles` 只取 `IS_ACTIVE=true`），被停用者不該再看到學員入口。
+    can_learn: bool
 
 
 class TagOption(BaseModel):
@@ -331,3 +349,8 @@ class PublishResult(BaseModel):
     status: str
     invitation_code: str
     version: int
+    #: 依受訓單位標籤自動帶入之學員數（#247）。
+    #:
+    #: 回這個數字是為了讓教師在發布當下就知道「標籤有沒有生效」——0 通常代表課程掛
+    #: 的標籤沒有任何人掛，那是設定問題，等學員反映「看不到課」才發現就太晚了。
+    invited_count: int = 0

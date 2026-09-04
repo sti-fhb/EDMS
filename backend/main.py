@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.access_log_redaction import install_access_log_redaction
 from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
@@ -26,6 +27,7 @@ from app.dm.change_log.router import router as dm_change_log_router
 from app.dm.dashboard.router import router as dm_dashboard_router
 from app.dm.detail.router import router as dm_detail_router
 from app.dm.editor.router import router as dm_editor_router
+from app.dm.kpi.router import router as dm_kpi_router
 from app.dm.library.router import router as dm_library_router
 from app.dm.obsolete.router import router as dm_obsolete_router
 from app.dm.obsolete_archive.router import router as dm_obsolete_archive_router
@@ -44,11 +46,18 @@ from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
 from app.et.bootstrap import register_et_module
 from app.et.course.router import router as et_course_router
+from app.et.enrollment.router import router as et_enrollment_router
+from app.et.learning.router import media_router as et_learning_media_router
+from app.et.learning.router import router as et_learning_router
 from app.et.material.router import router as et_material_router
 from app.et.quiz.router import router as et_quiz_router
 from app.et.survey.router import router as et_survey_router
 
 logger = logging.getLogger(__name__)
+
+# 遮罩 access log 中的憑證型 query 參數（#255：ET 影片播放票只能放 query string）。
+# 於 module-level 執行，確保在第一個請求進來之前就掛上。
+install_access_log_redaction()
 
 
 @asynccontextmanager
@@ -135,12 +144,16 @@ app.include_router(dm_review_shared_router)
 app.include_router(dm_obsolete_router)
 app.include_router(dm_obsolete_archive_router)
 app.include_router(dm_change_log_router)
+app.include_router(dm_kpi_router)
 app.include_router(dm_access_router)
 app.include_router(dm_personal_router)
 app.include_router(et_course_router)
 app.include_router(et_material_router)
 app.include_router(et_quiz_router)
 app.include_router(et_survey_router)
+app.include_router(et_enrollment_router)
+app.include_router(et_learning_router)
+app.include_router(et_learning_media_router)
 
 # DM 模組啟動接線：註冊 DM 判定閘 checker（§1 / §4），供 DP 入口頁 / 後台呼叫
 register_dm_module()

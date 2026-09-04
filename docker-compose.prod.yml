@@ -1,0 +1,51 @@
+# ============================================================
+# EDMS 正式環境專屬 override
+#
+# 僅由 CD 套用：docker compose -f docker-compose.yml -f docker-compose.prod.yml ...
+# 本機開發不會吃到這份（本機只吃 docker-compose.yml + docker-compose.override.yml）。
+#
+# 用途：把 edms-nginx 接上 front-proxy 的網路。
+#   - front-proxy 本身由 **TBMS repo** 管理（其 docker-compose.prod.yml 與 edge/），
+#     不在此定義；本檔只負責讓 edms-nginx 可被 proxy 抵達
+#   - edms-nginx 仍不映射任何 host port，對外只有 proxy 的 80
+#
+# 依賴主機前置（不進 git、CD 不會自動建立）：
+#   docker network create --driver bridge --subnet 172.28.241.0/24 edms-proxy-net
+#   /opt/edms/.env.prod
+#   /opt/edms/data/postgres
+# 網路為 external 的理由：任一套系統的部署都不該因對方未部署而失敗。
+# 詳見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §1.4 與 edge/README.md §1。
+# ============================================================
+
+services:
+  edms-backend:
+    # DM 受控文件與 ET 影音教材存在**檔案系統**上（DM_FILE_STORAGE_ROOT /
+    # ET_VIDEO_STORAGE_ROOT）。不掛出來的話會寫進容器可寫層，每次部署重建容器
+    # 即全部消失——資料庫裡留著紀錄、檔案卻不見了。
+    #
+    # 掛載點放在 prod override 而非 base：compose 的 volumes 是**合併**不是覆寫，
+    # 留在 base 會讓本機開發也被迫要有 /opt/edms 這些路徑。
+    #
+    # create_host_path: false —— 目錄未備妥時直接啟動失敗，而非讓 Docker 以 root
+    # 自動建出容器內 app 使用者（uid 10001）寫不進去的目錄；後者會「啟動成功、
+    # 上傳卻靜默失敗」，比啟動失敗難查得多。
+    volumes:
+      - type: bind
+        source: /opt/edms/data/dm_files
+        target: /app/var/dm_files
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/edms/data/et_videos
+        target: /app/var/et_videos
+        bind:
+          create_host_path: false
+
+  edms-nginx:
+    networks:
+      - edms-net
+      - edms-proxy-net
+
+networks:
+  edms-proxy-net:
+    external: true

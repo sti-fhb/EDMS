@@ -11,9 +11,13 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 import { NavLink } from "react-router-dom"
 
+import { useQuery } from "@tanstack/react-query"
+
+import { QUERY_KEYS } from "../constants/queryKeys"
 import { useDmAdminAccess } from "../dm/access/useDmAdminAccess"
 import { useDmReviewerAccess } from "../dm/access/useDmReviewerAccess"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
+import { coursesApi } from "../et/courses/coursesService"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
 import type { ModuleSummary } from "../layouts/useModuleSummary"
@@ -134,13 +138,25 @@ export function Sidebar() {
   // 簽核中心入口可見性（#250）：具 DM_REVIEWER 才顯示（僅 DM_ADMIN 亦不顯示）；同上僅在具 DM 角色時查詢。
   const { data: reviewerAccess } = useDmReviewerAccess(summary?.dm.has_role ?? false)
   const canReview = reviewerAccess?.can_access ?? false
+  // ET 群組內之角色分流（#247）：教學管理項需教師 / 管理者，「我的課程」需學員。
+  // 同上僅在具任一 ET 角色時查詢（避免非 ET 者 403）。
+  const { data: etCaps } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.capabilities(),
+    queryFn: coursesApi.getCapabilities,
+    enabled: summary?.et.has_role ?? false,
+  })
+  const canEtManage = etCaps?.can_manage_courses ?? false
+  const canEtLearn = etCaps?.can_learn ?? false
+  // isGroupVisible 傳整個 group（#250 起）：群組門檻除 requiresModule 外，另有 requiresAnyModuleAdmin
   const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group, summary)).map((group) => ({
     ...group,
     items: group.items.filter(
       (item) =>
         (!item.requiresDmPersonalAccess || canPersonal) &&
         (!item.requiresDmAdminAccess || canAdmin) &&
-        (!item.requiresDmReviewerAccess || canReview),
+        (!item.requiresDmReviewerAccess || canReview) &&
+        (!item.requiresEtManage || canEtManage) &&
+        (!item.requiresEtLearn || canEtLearn),
     ),
   }))
   return (

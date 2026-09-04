@@ -79,24 +79,57 @@ describe("Sidebar", () => {
     await waitFor(() => expect(screen.queryByText("個人專區")).not.toBeInTheDocument())
   })
 
-  it("US10/US11：具 DM 角色但非管理者（admin-access can_access=false）時，隱藏所有 admin-only 項（已廢止 / 變更歷程），其餘 DM 項仍在", async () => {
+  it("US10/US11/US13：具 DM 角色但非管理者（admin-access can_access=false）時，隱藏所有 admin-only 項（已廢止 / 變更歷程 / 閱讀統計 KPI），其餘 DM 項仍在", async () => {
     server.use(http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
     expect(await screen.findByText("文件庫")).toBeInTheDocument() // 其餘 DM 項仍顯示
     await waitFor(() => expect(screen.queryByText("已廢止文件查詢")).not.toBeInTheDocument())
     expect(screen.queryByText("文件變更歷程查詢")).not.toBeInTheDocument()
+    expect(screen.queryByText("閱讀統計 KPI")).not.toBeInTheDocument()
   })
 
-  it("具 ET 權限時顯示「教育訓練」群組與其四個 /et 項目", async () => {
+  it("兼具教師與學員角色時顯示「教育訓練」群組與其四個 /et 項目", async () => {
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("教育訓練")).toBeInTheDocument())
     const etGroup = NAV_GROUPS.find((g) => g.title === "教育訓練")
     expect(etGroup?.items).toHaveLength(4)
     for (const item of etGroup?.items ?? []) {
       expect(item.path.startsWith("/et/")).toBe(true)
-      expect(screen.getByText(item.label)).toBeInTheDocument()
+      // `findBy`：項目要等能力查詢回來才出現（#247 起依角色分流，不再同步渲染）
+      expect(await screen.findByText(item.label)).toBeInTheDocument()
     }
+  })
+
+  it("純學員只看到「我的課程」，看不到教學管理項（#247）", async () => {
+    server.use(
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({ can_create_course: false, can_manage_courses: false, can_learn: true }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+
+    expect(await screen.findByText("我的課程")).toBeInTheDocument()
+    // 核可查詢**兩種角色都看得到**，只是內容不同（`ApprovalQueryPage` 之說明：
+    // 教師查全部學員、學員查自己已通過的課程）。
+    expect(screen.getByText("核可查詢")).toBeInTheDocument()
+    // 群組門檻只判「有無任一 ET 角色」——不夠。純學員看到「課程列表 / 學員」等於
+    // 看到點進去只會 403 的項目。
+    await waitFor(() => expect(screen.queryByText("課程列表")).not.toBeInTheDocument())
+    expect(screen.queryByText("學員")).not.toBeInTheDocument()
+  })
+
+  it("學員角色被停用者看不到「我的課程」（#247）", async () => {
+    server.use(
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: false }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+
+    // 學員角色雖於建立帳號時自動授予，但管理者可停用個別指派。
+    expect(await screen.findByText("課程列表")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("我的課程")).not.toBeInTheDocument())
   })
 
   it("無 ET 權限（et.has_role=false）時不顯示「教育訓練」群組（最小知悉）", async () => {

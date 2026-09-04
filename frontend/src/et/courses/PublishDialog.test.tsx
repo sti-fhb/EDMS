@@ -108,7 +108,7 @@ describe("PublishDialog：有缺漏", () => {
 })
 
 describe("PublishDialog：發布成功", () => {
-  const result = { course_id: 1, status: "PUBLISHED", invitation_code: "01234567", version: 1 }
+  const result = { course_id: 1, status: "PUBLISHED", invitation_code: "01234567", version: 1, invited_count: 0 }
 
   it("顯示邀請碼與不可變更的說明", () => {
     render(<PublishDialog {...BASE_PROPS} result={result} />)

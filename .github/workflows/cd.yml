@@ -1,0 +1,191 @@
+# ============================================================
+# EDMS CD Pipeline —— **只負責 build 與 push，不部署**
+#
+# 觸發時機：push 到 main（排除純文件與純 CI/workflow 變更）
+#
+# 流程（GitHub-hosted runner）：
+#   ├── WIF 認證 GCP（不使用 SA 金鑰）
+#   ├── docker build edms-backend
+#   ├── 封閉網路可執行性驗證（docker run --network none）
+#   ├── alembic heads 檢查（僅本次 push 有動 migration 檔時）
+#   ├── docker build edms-nginx（含 frontend build）
+#   └── docker push（:latest + :<short-sha> 雙 tag）
+#
+# ⚠️ **本 workflow 刻意不含任何部署步驟。**
+#
+# 本 repo 為 **public**，故：
+#   1. 不使用 self-hosted runner —— fork PR 會在 runner 上執行任意程式碼，
+#      而該 runner 所在的 bms-prod-02 同時跑著 TBMS（血庫，主系統）
+#   2. **不授予本 workflow 任何 bms-prod-02 的存取權** —— 部署必然需要 docker
+#      權限，而 docker group 等同 root，可讀取 /opt/tbms/.env.prod、連上 tbms-db。
+#      讓 public repo 的 workflow 取得主系統正式機的 root 等級存取，違反
+#      「不讓次級系統拉低主系統可用性／安全性」的原則
+#
+# 部署改由 **VM 側主動拉取**：bms-prod-02 上的 systemd timer 執行
+# scripts/vm-deploy.sh，偵測到新的 image tag 才進行部署。本 workflow 的最大
+# 爆炸半徑因此收斂為「能推一個映像到 edms-image」。
+#
+# 安裝與設定見 docs/infra/deployment.md。
+# ============================================================
+
+name: CD (build & push)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
+      # 注意 paths-ignore 的語意是「本次 push 的**所有**變更檔都符合才跳過」，
+      # 故「同時改 .github/ 與 backend/」仍會正常觸發。
+      - '.github/**'
+  workflow_dispatch:
+
+concurrency:
+  group: edms-build
+  cancel-in-progress: false
+
+env:
+  AR_HOST: asia-east1-docker.pkg.dev
+  AR_BASE: asia-east1-docker.pkg.dev/blood-system-dev/edms-image
+
+jobs:
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # WIF 取得 OIDC token 所需
+
+    steps:
+      - name: Checkout 原始碼
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # 以 Workload Identity Federation 認證，**不使用 service account 金鑰**。
+      # public repo 內不得存放任何長期憑證；WIF 的 attribute condition 必須綁到
+      # repo + ref（refs/heads/main），只綁 repo 會讓任何分支的 workflow 都能取得身分。
+      - name: 認證 GCP（Workload Identity Federation）
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
+
+      - name: 設定 gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Artifact Registry 認證
+        run: gcloud auth configure-docker "${AR_HOST}" --quiet
+
+      - name: 取得 commit short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      # 偵測本次 push 是否異動 migration 檔，供「檢查 Alembic heads」決定跑不跑。
+      # fail-safe：diff base 取不到（首次 push / force-push / 手動觸發）一律視為
+      # 有異動——寧可多查不可漏查。
+      - name: 偵測 migration 是否異動
+        id: mig
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "取不到 diff base，fail-safe 視為有異動"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --quiet --depth=1 origin "$BEFORE" || {
+              echo "無法取得 base commit ${BEFORE}，fail-safe 視為有異動"
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            }
+          fi
+          if ! FILES=$(git diff --name-only "$BEFORE" "$GITHUB_SHA"); then
+            echo "git diff 失敗，fail-safe 視為有異動"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "$FILES" | grep -q '^backend/alembic/versions/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "本次 push 未異動 migration，略過 heads 檢查"
+          fi
+
+      # GitHub-hosted runner 每次都是全新環境，沒有本地 layer cache，
+      # 故改用 GitHub Actions cache（type=gha）補回來，否則每次都是冷 build。
+      - name: 設定 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build edms-backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          load: true          # 載入本地 daemon，供下方兩個驗證步驟使用
+          tags: ${{ env.AR_BASE }}/edms-backend:${{ env.SHORT_SHA }}
+          cache-from: type=gha,scope=edms-backend
+          cache-to: type=gha,scope=edms-backend,mode=max
+
+      # 交付標的為院內封閉網路，映像不得在執行期依賴對外連線。
+      # `uv run` 預設會先把環境同步到與 uv.lock 一致，而映像刻意以 --no-dev 建置，
+      # uv 便判定 dev 依賴缺漏而連 PyPI 下載——院內無網路即容器起不來。
+      # 根因由 backend/Dockerfile 的 ENV UV_NO_SYNC=1 收斂；此處每次都實測一次。
+      #
+      # ⚠️ 探針刻意用最小的 `uv run python`，**不要用 alembic heads**：
+      # 本專案有 migration 在 module 層 `from app.core.config import settings`，
+      # 使 alembic 相關指令需要一整組通過驗證的 production 設定，探針會隨設定
+      # 規則增修而失效（2026-09-03 首次 CD 即因此誤判為「封閉網路不可執行」）。
+      # 本步驟要驗的只是「uv run 不會嘗試對外同步」，與 app 設定無關。
+      - name: 驗證映像可於封閉網路執行
+        run: |
+          if ! OUT=$(docker run --rm --network none "${AR_BASE}/edms-backend:${SHORT_SHA}" uv run python -c "print('offline-ok')" 2>&1); then
+            echo "::error::映像在無對外網路的環境下無法執行。"
+            echo "::error::請確認 backend/Dockerfile 的 ENV UV_NO_SYNC=1 未被移除。"
+            echo "::error::實際輸出：${OUT}"
+            exit 1
+          fi
+          echo "映像可於封閉網路執行（--network none 驗證通過）：${OUT}"
+
+      # 雙 head 提前 fail-fast：在 image 還沒 push 前先擋下。
+      # alembic heads 為離線指令（只讀 migration 版本檔、不連 DB）。
+      - name: 檢查 Alembic heads（雙 head 提前 fail-fast）
+        if: steps.mig.outputs.changed == 'true'
+        run: |
+          # alembic 會載入所有 migration 檔，而其中有一支在 module 層 import settings，
+          # 故需提供可通過驗證的最小設定。DEBUG=true 放寬 production 專屬檢核；
+          # 這些值僅供離線讀取 migration 版本檔使用，不連任何資料庫。
+          if ! HEADS=$(docker run --rm -e DEBUG=true -e DATABASE_URL="postgresql+asyncpg://probe:probe@localhost:5432/probe" -e JWT_SECRET_KEY="ci-probe-only-not-a-real-secret-0123456789" "${AR_BASE}/edms-backend:${SHORT_SHA}" uv run alembic heads 2>&1); then
+            echo "::error::alembic heads 執行失敗（非 head 數問題），中止。實際輸出：${HEADS}"
+            exit 1
+          fi
+          COUNT=$(echo "$HEADS" | grep -c . || true)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::main 上偵測到 ${COUNT} 個 Alembic head。請先 alembic merge heads。"
+            echo "$HEADS"
+            exit 1
+          fi
+          echo "✅ Alembic head 正常（單一 head）"
+
+      - name: Push edms-backend（雙 tag）
+        run: |
+          docker tag "${AR_BASE}/edms-backend:${SHORT_SHA}" "${AR_BASE}/edms-backend:latest"
+          docker push "${AR_BASE}/edms-backend:${SHORT_SHA}"
+          docker push "${AR_BASE}/edms-backend:latest"
+
+      - name: Build & Push edms-nginx（含前端建置）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: nginx/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}
+            ${{ env.AR_BASE }}/edms-nginx:latest
+          cache-from: type=gha,scope=edms-nginx
+          cache-to: type=gha,scope=edms-nginx,mode=max
+
+      # SHA tag 是 VM 側部署腳本的觸發依據：它比對 main 的最新 commit 是否
+      # 已有對應的映像 tag，有才部署——確保程式碼與映像一致，不會拉到半成品。
+      - name: 部署提示
+        run: |
+          echo "::notice::映像已推送（${SHORT_SHA}）。部署由 bms-prod-02 的 edms-deploy.timer 自動拉取，非本 workflow 執行。"
