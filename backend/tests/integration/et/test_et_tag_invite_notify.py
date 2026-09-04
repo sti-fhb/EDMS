@@ -236,6 +236,139 @@ class TestPublishSendsInvites:
         assert row.is_removed is True, "標籤帶入不得把被移除者翻回成員"
 
 
+class TestAddTagToPublishedCourse:
+    """AC 5：已發布課程新增標籤 → 對該標籤人員補加入 + 寄信；**既有學員不重複加入**。"""
+
+    async def _published_course_with_tag(self, client, db, teacher: str, tag_id: int) -> int:
+        """發布一門掛著 `tag_id` 的課程。"""
+        cid = await _publishable_course(client, db, teacher)
+        await _attach_tag(db, cid, tag_id)
+        r = await client.post(f"{_COURSES}/{cid}/publish", headers=_bearer(teacher))
+        assert r.status_code == 200, r.text
+        return cid
+
+    async def _detail(self, client, teacher: str, course_id: int) -> dict:
+        """讀課程詳細取當下 `tag_ids` 與 `version`。
+
+        `version` 一律現讀而非沿用發布回應——前端也是這樣（存檔前重新載入表單），
+        且發布之外的路徑（如日後的關閉 / 再開課）同樣會推進版本。
+        """
+        detail = await client.get(f"{_COURSES}/{course_id}", headers=_bearer(teacher))
+        assert detail.status_code == 200, detail.text
+        return detail.json()
+
+    async def test_新增標籤後該標籤人員被補加入並收到信(self, client, db) -> None:
+        teacher = await _user(db, "ta_t01", ROLE_TEACHER)
+        first_tag = await _new_tag(db, "護理師_ta01")
+        cid = await self._published_course_with_tag(client, db, teacher, first_tag)
+
+        # 課程發布後，管理者才建了「行政人員」標籤並貼上兩位學員
+        second_tag = await _new_tag(db, "行政人員_ta01")
+        newcomers = [await _user(db, f"ta_s0{i}") for i in (1, 2)]
+        for s in newcomers:
+            await _tag_user(db, s, second_tag)
+
+        detail = await self._detail(client, teacher, cid)
+        r = await client.put(
+            f"{_COURSES}/{cid}",
+            json={
+                "course_name": "採血作業新進人員訓練",
+                "tag_ids": [*detail["tag_ids"], second_tag],
+                "version": detail["version"],
+            },
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
+
+        enrolled = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
+        assert set(enrolled) == set(newcomers)
+
+        logs = await _pending_invites(db)
+        assert {log.recipient for log in logs} == {f"{s}@edms.local" for s in newcomers}
+
+    async def test_既有學員不重複加入也不重複收信(self, client, db) -> None:
+        """新標籤的人裡有一位已在課程中——他不該再被加一次、也不該再收到一封信。"""
+        teacher = await _user(db, "ta_t02", ROLE_TEACHER)
+        first_tag = await _new_tag(db, "護理師_ta02")
+        existing = await _user(db, "ta_s03")
+        await _tag_user(db, existing, first_tag)
+        cid = await self._published_course_with_tag(client, db, teacher, first_tag)
+
+        # 發布時 existing 已被帶入並收過一封；把那封清掉，只看新增標籤這次寄了什麼
+        for log in await _pending_invites(db):
+            await db.delete(log)
+        await db.flush()
+
+        second_tag = await _new_tag(db, "行政人員_ta02")
+        await _tag_user(db, existing, second_tag)  # 同一人同時具兩個標籤
+        newcomer = await _user(db, "ta_s04")
+        await _tag_user(db, newcomer, second_tag)
+
+        detail = await self._detail(client, teacher, cid)
+        r = await client.put(
+            f"{_COURSES}/{cid}",
+            json={
+                "course_name": "採血作業新進人員訓練",
+                "tag_ids": [*detail["tag_ids"], second_tag],
+                "version": detail["version"],
+            },
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
+
+        rows = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
+        assert sorted(rows) == sorted([existing, newcomer])
+        assert len(rows) == len(set(rows)), "同一人不得出現兩列"
+
+        logs = await _pending_invites(db)
+        assert {log.recipient for log in logs} == {f"{newcomer}@edms.local"}
+
+    async def test_草稿課程改標籤不寄信(self, client, db) -> None:
+        """草稿的標籤可自由增刪，帶入與寄信一律等到發布當下（FR-ET-US3-12）。"""
+        teacher = await _user(db, "ta_t03", ROLE_TEACHER)
+        tag_id = await _new_tag(db, "護理師_ta03")
+        student = await _user(db, "ta_s05")
+        await _tag_user(db, student, tag_id)
+
+        created = await client.post(_COURSES, json={"course_name": "草稿課程"}, headers=_bearer(teacher))
+        cid = created.json()["course_id"]
+        r = await client.put(
+            f"{_COURSES}/{cid}",
+            json={"course_name": "草稿課程", "tag_ids": [tag_id], "version": 0},
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
+
+        assert await _pending_invites(db) == []
+        rows = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
+        assert rows == []
+
+    async def test_只改課程名稱不觸發任何邀請(self, client, db) -> None:
+        """標籤沒有異動時不該重跑帶入——否則每次存檔都在對同一批人重算。"""
+        teacher = await _user(db, "ta_t04", ROLE_TEACHER)
+        tag_id = await _new_tag(db, "護理師_ta04")
+        cid = await self._published_course_with_tag(client, db, teacher, tag_id)
+        # 發布後才貼標的人：若「只改名稱」也重跑帶入，他會被意外加入
+        latecomer = await _user(db, "ta_s06")
+        await _tag_user(db, latecomer, tag_id)
+
+        detail = await self._detail(client, teacher, cid)
+        r = await client.put(
+            f"{_COURSES}/{cid}",
+            json={
+                "course_name": "改過的課程名稱",
+                "tag_ids": detail["tag_ids"],
+                "version": detail["version"],
+            },
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
+
+        rows = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
+        assert rows == []
+        assert await _pending_invites(db) == []
+
+
 class TestNotifyFailureDoesNotBreakPublish:
     """AC 3：寄送失敗 MUST NOT 影響已加入狀態。"""
 

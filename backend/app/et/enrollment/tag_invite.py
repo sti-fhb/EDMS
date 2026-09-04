@@ -26,6 +26,8 @@
 （`ET-8`），那是一個有意識的動作。
 """
 
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,10 +44,9 @@ class EtTagInviteRepository:
     """依課程標籤解析出應帶入的學員，並批次建立選課列。"""
 
     async def target_user_ids(self, db: AsyncSession, course_id: int) -> list[str]:
-        """課程標籤對應之學員 `USER_ID`（去重、已排除非學員）。
+        """課程**全部**標籤對應之學員 `USER_ID`（去重、已排除非學員）。
 
-        `IS_ALL` 標籤（「全體」）展開為**全部具學員角色者**，不需該使用者實際掛上
-        那個標籤——否則「全體」就只是一個名字叫全體的普通標籤。
+        用於發布當下——那時整門課的標籤一次生效。
         """
         tag_rows = await db.execute(
             select(EtTag.tag_id, EtTag.is_all)
@@ -56,7 +57,29 @@ class EtTagInviteRepository:
                 EtTag.deleted == 0,
             )
         )
-        tags = tag_rows.all()
+        return await self._resolve_students(db, tag_rows.all())
+
+    async def target_user_ids_for_tags(self, db: AsyncSession, tag_ids: Sequence[int]) -> list[str]:
+        """**指定標籤**對應之學員 `USER_ID`（去重、已排除非學員）。
+
+        已發布課程新增標籤時用（FR-ET-US8-04）：spec 要求對「**該標籤**對應人員」補邀請。
+        若改用 `target_user_ids`（全部課程標籤），那些在課程發布**之後**才被貼上舊標籤
+        的人也會被一併帶入——那是另一條規則（貼標追溯，由 `EtAssignService` 於貼標當下
+        觸發），在這裡順手做會讓同一個人被兩條路徑各邀請一次、且時機難以解釋。
+        """
+        if not tag_ids:
+            return []
+        rows = await db.execute(
+            select(EtTag.tag_id, EtTag.is_all).where(EtTag.tag_id.in_(list(tag_ids)), EtTag.deleted == 0)
+        )
+        return await self._resolve_students(db, rows.all())
+
+    async def _resolve_students(self, db: AsyncSession, tags: Sequence[tuple[int, bool]]) -> list[str]:
+        """(TAG_ID, IS_ALL) 清單 → 具學員角色之 `USER_ID`（去重、排序）。
+
+        `IS_ALL` 標籤（「全體」）展開為**全部具學員角色者**，不需該使用者實際掛上
+        那個標籤——否則「全體」就只是一個名字叫全體的普通標籤。
+        """
         if not tags:
             return []
 
