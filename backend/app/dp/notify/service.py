@@ -124,7 +124,12 @@ class NotifyService:
         呼叫方自行讀 `DP_NOTIFY_TEMPLATE` 會違反 `sti-backend-boundaries`，故由此提供。
 
         與 `send_email` 的差異只有「不落 outbox」；渲染規則（主旨剝換行、內文保留 LF、
-        佔位僅允許具名變數）完全共用，故預覽所見即寄出所得。
+        佔位僅允許具名變數）與**可否寄出之前置條件**（範本存在、已啟用、CHANNEL 允許
+        Email）完全共用，故預覽所見即寄出所得。
+
+        `CHANNEL` 這道檢查不可省：非系統範本之 `CHANNEL` 可由管理者於後台改為 `MSG`，
+        此時 `send_email` 會回 `skipped_reason='CHANNEL_NOT_EMAIL'`、`queued_count=0`。
+        若預覽不檢查，使用者會看到一封完整的信、按下寄出後卻全部落入失敗清單。
 
         **渲染失敗於此拋錯而非靜默記 FAILED**：`send_email` 吞掉渲染錯誤是為了不阻斷
         呼叫方的業務交易（信寄不出去不該讓文件送審失敗）；預覽沒有業務交易可保護，
@@ -141,7 +146,8 @@ class NotifyService:
 
         Raises:
             AppError: 範本不存在（404 / DP_MAIL_001）、已停用（409 / DP_MAIL_006）、
-                渲染失敗（422 / DP_MAIL_007，多為 params 缺 key）。
+                渲染失敗（422 / DP_MAIL_007，多為 params 缺 key）、
+                CHANNEL 非 Email（409 / DP_MAIL_008）。
         """
         template = await self._repo.get_template(db, module, template_code)
         if template is None:
@@ -149,6 +155,8 @@ class NotifyService:
         if not template.is_enabled:
             # 停用的範本寄不出去，預覽卻給出內容會讓使用者按下寄出後一無所獲。
             raise AppError(status_code=409, detail="通知範本已停用", error_code="DP_MAIL_006")
+        if not _channel_allows_email(template.channel):
+            raise AppError(status_code=409, detail="通知範本未設定為 Email 發送", error_code="DP_MAIL_008")
         try:
             subject = _render(template.subject, params, single_line=True)
             body = _render(template.body, params)

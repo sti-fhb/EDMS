@@ -332,6 +332,28 @@ class TestAcceptInvitation:
         assert rows[0].join_source == SOURCE_EMAIL_INVITE
         assert rows[0].completion_status == "IN_PROGRESS", "回鍋不得重置學習狀態"
 
+    async def test_邀請只能被消耗一次(self, client, db) -> None:
+        """一次性由 DB 的條件式 UPDATE 保證，不是由「先查後改」的讀寫間隙保證。
+
+        直接打 repository：兩個併發請求最終都會走到 `consume_pending`，第二次必須回
+        False（否則兩人都會被加入，見該方法之說明）。以循序兩次呼叫釘住那個條件——
+        若有人把 `WHERE STATUS='PENDING'` 拿掉，本測試會紅。
+        """
+        from app.core.operator import OperatorInfo
+        from app.et.invitation.repository import EtInvitationRepository
+
+        teacher = await _user(db, "cs_t01", ROLE_TEACHER)
+        cid = await _published_course(client, db, teacher)
+        await _invite(client, teacher, cid, "a@x.gov.tw")
+        row = await db.scalar(select(EtInvitation).where(EtInvitation.email == "a@x.gov.tw"))
+
+        repo = EtInvitationRepository()
+        first = await repo.consume_pending(db, invitation_id=row.invitation_id, operator=OperatorInfo(user_id="u1"))
+        second = await repo.consume_pending(db, invitation_id=row.invitation_id, operator=OperatorInfo(user_id="u2"))
+
+        assert first is True
+        assert second is False, "第二次消耗必須失敗，否則一次性可被併發繞過"
+
     async def test_無效_token_回連結無效(self, client, db) -> None:
         user = await _user(db, "ac_s07")
         r = await client.post(_ACCEPT, json={"token": "does-not-exist"}, headers=_bearer(user))

@@ -323,6 +323,36 @@ class TestAddTagToPublishedCourse:
         logs = await _pending_invites(db)
         assert {log.recipient for log in logs} == {f"{newcomer}@edms.local"}
 
+    async def test_同一次請求改名並加標籤時信件帶新名稱(self, client, db) -> None:
+        """釘住 `_backfill_new_tag_members` 裡的 `db.refresh(course)`。
+
+        更新走 Core UPDATE，手上的 ORM 物件仍是舊快照；少了 refresh 就會寄出**改名前**
+        的課程名稱。其他測試全程不改名，抓不到這條回歸。
+        """
+        teacher = await _user(db, "ta_t05", ROLE_TEACHER)
+        first_tag = await _new_tag(db, "護理師_ta05")
+        cid = await self._published_course_with_tag(client, db, teacher, first_tag)
+
+        second_tag = await _new_tag(db, "行政人員_ta05")
+        newcomer = await _user(db, "ta_s07")
+        await _tag_user(db, newcomer, second_tag)
+
+        detail = await self._detail(client, teacher, cid)
+        r = await client.put(
+            f"{_COURSES}/{cid}",
+            json={
+                "course_name": "改名後的課程名稱",
+                "tag_ids": [*detail["tag_ids"], second_tag],
+                "version": detail["version"],
+            },
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
+
+        (log,) = await _pending_invites(db)
+        assert "改名後的課程名稱" in log.body
+        assert "採血作業新進人員訓練" not in log.body, "寄出了改名前的快照"
+
     async def test_草稿課程改標籤不寄信(self, client, db) -> None:
         """草稿的標籤可自由增刪，帶入與寄信一律等到發布當下（FR-ET-US3-12）。"""
         teacher = await _user(db, "ta_t03", ROLE_TEACHER)

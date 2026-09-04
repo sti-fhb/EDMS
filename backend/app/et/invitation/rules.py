@@ -27,7 +27,11 @@ _SEPARATORS: Final = re.compile(r"[\s,;，、；]+")
 
 #: Email 格式。刻意保守（不追求 RFC 5322 全集）：這是「教師手貼的清單」，寬鬆比對只會
 #: 讓錯字變成一封永遠寄不到的信，而使用者要到 US12 待加入清單才會發現。
-_EMAIL_PATTERN: Final = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+#: 結尾用 `\Z` 而非 `$`：Python 的 `$` 也匹配「字串結尾前的單一換行」，故結尾帶 LF 的字串
+#: 會通過 `$` 版本。目前不可利用（`_SEPARATORS` 的 `\s` 已把換行當分隔符切掉），但那意味著
+#: header injection 的唯一防線是「分隔符恰好包含 `\s`」——若日後為了支援 `"名字 <a@b.co>"`
+#: 之類格式改動切分規則，防線就沒了。`\Z` 是零成本的縱深防禦。
+_EMAIL_PATTERN: Final = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\Z")
 
 _INVALID = AppError(status_code=422, detail="Email 格式不正確或數量超過上限", error_code="ET_INVITE_003")
 

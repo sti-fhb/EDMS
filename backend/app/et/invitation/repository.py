@@ -3,7 +3,7 @@
 `ET_INVITATION` 與 `ET_ENROLLMENT` 之寫入都在此。
 """
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,18 +92,45 @@ class EtInvitationRepository:
             select(EtInvitation).where(EtInvitation.token_hash == token_hash, EtInvitation.deleted == 0)
         )
 
-    async def mark_joined(self, db: AsyncSession, invitation: EtInvitation, *, operator: OperatorInfo) -> None:
-        """消耗邀請：`PENDING → JOINED`（終態）。
+    async def consume_pending(self, db: AsyncSession, *, invitation_id: int, operator: OperatorInfo) -> bool:
+        """原子消耗邀請：**只有仍為 `PENDING` 才成功**（`PENDING → JOINED`，終態）。
 
-        這就是「一次性」的實作——`STATUS` 轉為終態後，同一條連結再被別人點到時
-        `service.accept` 會依「呼叫者是否已在課程名單內」判定，不在名單內即回無效。
+        🔴 **條件必須寫在 `WHERE` 裡，不可先查後改**。前一版是「`select` 讀出 → 比對
+        `status` → ORM 屬性賦值」，那是 TOCTOU：兩個請求（各自獨立的 session，`get_db`
+        要到 request 結束才 commit）都會在對方 commit 前讀到 `PENDING`，各自
+        `upsert_enrollment`（不同 `USER_ID` → 不同列、互不阻擋），最後兩筆不帶條件的
+        `UPDATE ... WHERE INVITATION_ID=:id` 依序把同一列改成 `JOINED`——**兩個人都加入
+        成功**。
+
+        那正是一次性要擋的「連結被轉發」情境，只是用並發而非循序達成。而一次性是
+        #273 Q1 裁示用來取代「登入帳號 Email 比對」的**唯一**控制，被繞過就沒有第二道。
+        轉發到群組聊天室、多人同時點，是最自然的觸發情境，不需要刻意攻擊。
+
+        `READ COMMITTED` 下，後到的 `UPDATE` 會等前一筆的 row lock 釋放後**重新評估
+        `WHERE`**（EvalPlanQual），此時 `STATUS` 已是 `JOINED` → 命中 0 列 → 回 False。
+        故「恰好一人成功」由資料庫保證，而非由應用層的讀寫間隙保證。
+
+        Returns:
+            True 表示本次呼叫消耗成功；False 表示已被其他請求消耗（呼叫端應改走
+            「已消耗」分支）。
         """
         now = utcnow()
-        invitation.status = INVITATION_JOINED
-        invitation.joined_at = now
-        invitation.updated_user = operator.user_id
-        invitation.updated_date = now
+        result = await db.execute(
+            update(EtInvitation)
+            .where(
+                EtInvitation.invitation_id == invitation_id,
+                EtInvitation.status == INVITATION_PENDING,
+                EtInvitation.deleted == 0,
+            )
+            .values(
+                status=INVITATION_JOINED,
+                joined_at=now,
+                updated_user=operator.user_id,
+                updated_date=now,
+            )
+        )
         await db.flush()
+        return (result.rowcount or 0) > 0
 
     async def get_enrollment(self, db: AsyncSession, *, user_id: str, course_id: int) -> EtEnrollment | None:
         return await db.scalar(
