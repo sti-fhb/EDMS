@@ -233,6 +233,55 @@ class EtProgressRepository:
         )
         return set(rows)
 
+    async def completion_pct_by_course(
+        self, db: AsyncSession, *, user_id: str, course_ids: list[int]
+    ) -> dict[int, int]:
+        """各課程之學習進度百分比＝**完成項目數 ÷ 總項目數**（與側欄進度條同一定義）。
+
+        以兩支 `GROUP BY` 聚合查詢取得，**不逐課程查**——「我的課程」一次可能列出數十
+        門課，N+1 會讓那一頁隨選課數線性變慢。
+
+        ⚠️ **完成數必須 JOIN 回 `ET_ITEM` / `ET_CHAPTER` 過濾軟刪除**。`ET_PROGRESS` 的
+        列在項目被刪除後仍然留著（那是學習歷史，刻意不連帶刪），若直接 `count(*)` 會拿
+        分母已縮小、分子沒縮小的兩個數字相除——教師刪掉一章就會讓學員看到 150%。
+
+        課程層以 `ET_CHAPTER.COURSE_ID` 推導而非 `ET_PROGRESS.COURSE_ID`：後者是寫入當下
+        存下的冗餘欄位，前者才是當前的結構事實。
+        """
+        if not course_ids:
+            return {}
+        totals = await db.execute(
+            select(EtChapter.course_id, func.count(EtItem.item_id))
+            .select_from(EtItem)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(EtChapter.course_id.in_(course_ids), EtItem.deleted == 0, EtChapter.deleted == 0)
+            .group_by(EtChapter.course_id)
+        )
+        total_by_course = dict(totals.all())
+        done = await db.execute(
+            select(EtChapter.course_id, func.count(EtProgress.progress_id))
+            .select_from(EtProgress)
+            .join(EtItem, EtItem.item_id == EtProgress.item_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtProgress.user_id == user_id,
+                EtChapter.course_id.in_(course_ids),
+                EtProgress.is_completed.is_(True),
+                EtProgress.deleted == 0,
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+            )
+            .group_by(EtChapter.course_id)
+        )
+        done_by_course = dict(done.all())
+
+        result: dict[int, int] = {}
+        for course_id in course_ids:
+            total = total_by_course.get(course_id, 0)
+            # 沒有任何項目的課程回 0 而非除零——教師剛建好還沒放內容時很常見
+            result[course_id] = 0 if total == 0 else min(100, round(done_by_course.get(course_id, 0) * 100 / total))
+        return result
+
     # ── 上次檢視項目（#274 SA Q1 裁示 B）────────────────────────────────────
 
     async def set_last_item(

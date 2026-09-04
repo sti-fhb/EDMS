@@ -17,6 +17,8 @@
 （見 `tests/integration/conftest.py` 之 `db` fixture）。
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import func, select, update
 
@@ -32,7 +34,7 @@ from app.et.constants import (
     ROLE_TEACHER,
     SOURCE_INVITATION_CODE,
 )
-from app.et.course.models import EtCourse
+from app.et.course.models import EtCourse, EtItem
 from app.et.material.models import EtMaterialVideo
 from app.et.progress.models import EtEnrollment, EtProgressInterval
 from app.et.roles.models import EtUserRole
@@ -118,7 +120,16 @@ async def _published_course(client, db, teacher: str, *, chapters: list[bool], c
         for i, with_video in enumerate(chapters)
     ]
     await db.execute(
-        update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_PUBLISHED, invitation_code=code)
+        update(EtCourse)
+        .where(EtCourse.course_id == course_id)
+        .values(
+            status=COURSE_PUBLISHED,
+            invitation_code=code,
+            # `open_start_at` 為 NULL 的已發布課程對學員**完全不可見**
+            # （`publish_rules.is_visible_to_student` 對空值取較安全的那一側），
+            # 於是「我的課程」會是空清單。設一個已到的起始時間。
+            open_start_at=utcnow() - timedelta(hours=1),
+        )
     )
     await db.flush()
     return {"course_id": course_id, "chapters": built}
@@ -345,6 +356,55 @@ class TestItemViewed:
         r = await client.get(f"/api/et/materials/{chapter['material_id']}/content", headers=h)
 
         assert r.json()["videos"][0]["last_position_sec"] == 118
+
+
+class TestMyCoursesProgress:
+    """「我的課程」卡片的 `progress_pct`（#274 填實 #247 留下的接點）。"""
+
+    async def test_完成一半項目時卡片顯示五十(self, client, db) -> None:
+        """完成項目數 ÷ 總項目數，與 ET05 側欄的課程進度條同一定義。"""
+        teacher = await _user(db, "t_prog20", ROLE_TEACHER)
+        student = await _user(db, "s_prog20")
+        course = await _published_course(client, db, teacher, chapters=[False, False], code="31000020")
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+
+        before = await client.get("/api/et/my-courses", headers=h)
+        assert before.json()["courses"][0]["progress_pct"] == 0
+
+        # 兩個純文件項目完成其一
+        await client.post(f"/api/et/items/{course['chapters'][0]['item_id']}/viewed", headers=h)
+        after = await client.get("/api/et/my-courses", headers=h)
+
+        assert after.json()["courses"][0]["progress_pct"] == 50
+
+    async def test_已完成項目被刪除後不計入分子(self, client, db) -> None:
+        """**分子必須一起濾掉軟刪除的項目**。
+
+        `ET_PROGRESS` 的列在項目被刪除後仍然留著（那是學習歷史，刻意不連帶刪）。分母
+        縮小、分子沒縮小的話，教師刪掉一章就會讓學員的進度虛高。
+
+        ⚠️ 這裡刻意用「3 項完成 2 項，再刪掉其中一個**已完成**的」而不是「刪到超過
+        100%」——後者會被 `min(100, ...)` 的上限吸收掉，測試照樣綠，什麼都沒驗到。
+        本組合下有濾是 50%、沒濾是 100%，兩者分得開。
+        """
+        teacher = await _user(db, "t_prog21", ROLE_TEACHER)
+        student = await _user(db, "s_prog21")
+        course = await _published_course(client, db, teacher, chapters=[False, False, False], code="31000021")
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+
+        # 依序完成前兩項（純文件，開啟即完成）
+        for chapter in course["chapters"][:2]:
+            await client.post(f"/api/et/items/{chapter['item_id']}/viewed", headers=h)
+        # 教師刪掉第 1 章的項目——學員對它的完成紀錄仍在
+        await db.execute(update(EtItem).where(EtItem.item_id == course["chapters"][0]["item_id"]).values(deleted=1))
+        await db.flush()
+
+        r = await client.get("/api/et/my-courses", headers=h)
+
+        # 剩 2 項、其中 1 項已完成 → 50%（沒濾掉已刪除的分子會變成 100%）
+        assert r.json()["courses"][0]["progress_pct"] == 50
 
 
 class TestWriteGuards:

@@ -58,9 +58,9 @@ class MyCourseRow(BaseModel):
     """我的課程卡片（AC 3）。
 
     Attributes:
-        progress_pct: 當前學習進度百分比。**本 issue 恆為 0**——進度累積依賴
-            `ET_PROGRESS`，屬 `ET-5` 的領域。欄位與查詢先備妥，`ET-5` 交付時只需
-            換掉取值來源，不必回頭改前端與 schema。
+        progress_pct: 當前學習進度百分比＝**完成項目數 ÷ 總項目數**（#274 填實，
+            原為恆 0 的接點）。與 ET05 側欄的課程進度條同一定義——同一門課在兩個
+            畫面顯示不同的數字，使用者只會當成其中一個壞了。
     """
 
     course_id: int
