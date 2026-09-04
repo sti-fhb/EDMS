@@ -26,7 +26,9 @@ import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
+import { isAccountUsable, isDisabled, isLocked } from "../users/accountStatus"
 import { toApiError } from "../../services/http"
+import { formatDateTime } from "../../utils/date"
 
 /**
  * 權限管理（dp-roles，US7）：ET / DM 共用之角色 / 群組指派入口。
@@ -99,9 +101,17 @@ function AssignmentsTab({ module }: { module: string }) {
     onSuccess: () => {
       message.success("角色 / 標籤已更新並即時生效")
       qc.invalidateQueries({ queryKey: ["roles", module, "assignments"] })
-      // 角色異動可能改變「當前使用者自己」的模組權限（如把自己加/移 DM 角色）→ 讓側欄 module-summary
-      // 重抓，側欄 DM 功能群組即時顯示/隱藏，不必重登或硬重整（module-summary 由側欄常駐觀察）。
+      // 角色異動可能改變「當前使用者自己」的模組權限（如把自己加/移 DM 角色）→ 讓側欄重抓，
+      // 功能群組與逐項閘即時顯示/隱藏，不必重登或硬重整（皆由側欄常駐觀察）。
+      // ⚠️ 側欄的可見性來自**四個獨立 query**，少 invalidate 任一個，該項就要等切頁才更新：
+      //   module-summary → 模組群組 + 系統管理者後台群組（is_admin）
+      //   dm/admin-access → 已廢止 / 變更歷程 / KPI
+      //   dm/reviewer-access → 簽核中心
+      //   dm-personal/access → 個人專區
       qc.invalidateQueries({ queryKey: QUERY_KEYS.moduleSummary.get() })
+      qc.invalidateQueries({ queryKey: ["dm", "admin-access"] })
+      qc.invalidateQueries({ queryKey: ["dm", "reviewer-access"] })
+      qc.invalidateQueries({ queryKey: ["dm-personal", "access"] })
     },
     onError: (err) => {
       message.error(toApiError(err).errorMessage)
@@ -160,52 +170,70 @@ function AssignmentsTab({ module }: { module: string }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.user_id}>
-              <TableCell>{row.email}</TableCell>
-              <TableCell>{row.user_name}</TableCell>
-              {roleDefs.map((r) => (
-                <TableCell key={r.code} align="center">
-                  <Checkbox
-                    size="small"
-                    checked={row.roles.includes(r.code)}
-                    // 只在「正對本列做角色操作」時 disable；存可見對象（source==="group"）不影響角色 checkbox（不閃）
-                    disabled={
-                      assignMut.isPending &&
-                      assignMut.variables?.userId === row.user_id &&
-                      assignMut.variables?.source === "role"
-                    }
-                    onChange={() => toggleRole(row, r.code)}
-                    slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
-                  />
+          {rows.map((row) => {
+            // 停用 / 鎖定中的帳號登不進系統 → 整列唯讀，兩維度皆不可操作（加權與降權都不行，SA 裁示）。
+            // 需要降權時的路徑是：先於使用者管理頁啟用帳號 → 撤權 → 再停用。
+            // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
+            const editable = isAccountUsable(row)
+            return (
+              <TableRow key={row.user_id} sx={editable ? undefined : { opacity: 0.5 }}>
+                <TableCell>{row.email}</TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <span>{row.user_name}</span>
+                    {/* 兩種狀態都用預設灰：本頁的語意是「此列不可操作」，非警示 */}
+                    {isDisabled(row) && <Chip size="small" label="已停用" />}
+                    {isLocked(row) && (
+                      <Chip size="small" label="已鎖定" title={`鎖定至 ${formatDateTime(row.locked_until)}`} />
+                    )}
+                  </Stack>
                 </TableCell>
-              ))}
-              <TableCell sx={{ verticalAlign: "top" }}>
-                {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
-                <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
-                  {row.groups.length === 0 ? (
-                    <Typography variant="caption" color="text.secondary">
-                      未指派
-                    </Typography>
-                  ) : (
-                    row.groups.map((g) => (
-                      <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
-                    ))
-                  )}
-                  <Button size="small" onClick={() => setEditing(row)}>
-                    編輯
-                  </Button>
-                </Box>
-              </TableCell>
-              <TableCell>
-                <Typography variant="caption" color="text.secondary">
-                  {row.last_modified_by
-                    ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
-                    : "—"}
-                </Typography>
-              </TableCell>
-            </TableRow>
-          ))}
+                {roleDefs.map((r) => (
+                  <TableCell key={r.code} align="center">
+                    <Checkbox
+                      size="small"
+                      checked={row.roles.includes(r.code)}
+                      // 帳號不可用 → 整列唯讀；否則只在「正對本列做角色操作」時 disable
+                      //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
+                      disabled={
+                        !editable ||
+                        (assignMut.isPending &&
+                          assignMut.variables?.userId === row.user_id &&
+                          assignMut.variables?.source === "role")
+                      }
+                      onChange={() => toggleRole(row, r.code)}
+                      slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
+                    />
+                  </TableCell>
+                ))}
+                <TableCell sx={{ verticalAlign: "top" }}>
+                  {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
+                  <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
+                    {row.groups.length === 0 ? (
+                      <Typography variant="caption" color="text.secondary">
+                        未指派
+                      </Typography>
+                    ) : (
+                      row.groups.map((g) => (
+                        <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
+                      ))
+                    )}
+                    {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
+                    <Button size="small" disabled={!editable} onClick={() => setEditing(row)}>
+                      編輯
+                    </Button>
+                  </Box>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="caption" color="text.secondary">
+                    {row.last_modified_by
+                      ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
+                      : "—"}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
 
@@ -228,7 +256,7 @@ function AssignmentsTab({ module }: { module: string }) {
   )
 }
 
-/** 群組多選 dialog（可見對象 / 標籤指派）。 */
+/** 群組多選 dialog（可見對象 / 標籤指派）。停用 / 鎖定帳號之編輯鈕為 disabled，不會開到本 dialog。 */
 function GroupEditDialog({
   row,
   options,

@@ -196,3 +196,27 @@ async def client(db):
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         yield c
     main.app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def backoffice_admin():
+    """讓本測試的操作者通過 DP 後台授權閘（#250）。
+
+    DP 後台六個 router 自 #250 起掛 `require_any_module_admin()`（需 ET 或 DM 任一模組
+    管理者）。驗「後台功能本身的業務邏輯」而非授權的測試，以本 fixture 註冊 always-true
+    的 ET 管理者 checker 即可，不必逐測試建 `ET_USER_ROLE` / `DM_USER_ROLE` 列。
+
+    teardown 還原 `main.py` 註冊之真實 checker——ET 已接線，unregister 會讓後續測試
+    看到「未接線」狀態（fail-closed 全 403），比照 test_dp_module_summary.py 之慣例。
+
+    授權行為本身由 `tests/integration/dp/test_dp_backoffice_gate.py` 覆蓋。
+    """
+    from app.core.module_admin import module_admin_gate
+    from app.et.roles.gate import et_is_module_admin
+
+    async def _always_admin(_db, _user_id):
+        return True
+
+    module_admin_gate.register("ET", _always_admin)
+    yield
+    module_admin_gate.register("ET", et_is_module_admin)

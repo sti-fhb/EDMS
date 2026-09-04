@@ -1,22 +1,62 @@
 import { screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 
+import { RolesPage } from "../dp/roles/RolesPage"
 import { NAV_GROUPS } from "../layouts/navItems"
 import { renderWithProviders } from "../test/renderWithProviders"
 import { server } from "../test/server"
 import { Sidebar } from "./Sidebar"
 
 describe("Sidebar", () => {
-  it("渲染「系統管理者後台」群組標題與其六個導覽項目（無模組門檻、恆顯示）", () => {
+  it("具模組管理者身分時渲染「系統管理者後台」群組與其六個導覽項目", async () => {
     renderWithProviders(<Sidebar />)
     const adminGroup = NAV_GROUPS.find((g) => g.title === "系統管理者後台")
     expect(adminGroup).toBeDefined()
-    expect(screen.getByText("系統管理者後台")).toBeInTheDocument()
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
     expect(adminGroup?.items).toHaveLength(6)
     for (const item of adminGroup?.items ?? []) {
       expect(screen.getByText(item.label)).toBeInTheDocument()
     }
+  })
+
+  it("#250：非 ET 且非 DM 管理者時，隱藏「系統管理者後台」整個群組（模組群組仍在）", async () => {
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({
+          et: { has_role: true, is_admin: false },
+          dm: { has_role: true, is_admin: false },
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+    // 以模組群組確認已渲染完成（後台群組不該出現，不能用它當標記）
+    expect(await screen.findByText("文件管理")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("系統管理者後台")).not.toBeInTheDocument())
+    expect(screen.queryByText("使用者管理")).not.toBeInTheDocument()
+    expect(screen.queryByText("角色 / 權限")).not.toBeInTheDocument()
+  })
+
+  it("#250：僅具 ET 管理者（DM 非管理者）時仍顯示「系統管理者後台」（門檻為任一模組）", async () => {
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({
+          et: { has_role: true, is_admin: true },
+          dm: { has_role: true, is_admin: false },
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
+  })
+
+  it("#250：非審核者（reviewer-access can_access=false）時隱藏「簽核中心」單項（其餘 DM 項仍在）", async () => {
+    server.use(http.get("/api/dm/reviewer-access", () => HttpResponse.json({ can_access: false })))
+    renderWithProviders(<Sidebar />)
+    await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
+    expect(await screen.findByText("文件庫")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("簽核中心")).not.toBeInTheDocument())
   })
 
   it("具 DM 權限（module-summary dm.has_role=true）時顯示「文件管理」群組與其六個 /dm 項目", async () => {
@@ -95,7 +135,11 @@ describe("Sidebar", () => {
   it("無 ET 權限（et.has_role=false）時不顯示「教育訓練」群組（最小知悉）", async () => {
     server.use(
       http.get("/api/dp/user/module-summary", () =>
-        HttpResponse.json({ et: { has_role: false }, dm: { has_role: true } }),
+        // is_admin 保持 true：本案驗的是 ET 群組門檻，後台群組須維持顯示以當渲染完成標記
+        HttpResponse.json({
+          et: { has_role: false, is_admin: false },
+          dm: { has_role: true, is_admin: true },
+        }),
       ),
     )
     renderWithProviders(<Sidebar />)
@@ -107,7 +151,11 @@ describe("Sidebar", () => {
   it("無 DM 權限（dm.has_role=false）時不顯示「文件管理」群組（DP 群組仍在）", async () => {
     server.use(
       http.get("/api/dp/user/module-summary", () =>
-        HttpResponse.json({ et: { has_role: true }, dm: { has_role: false } }),
+        // 同上：驗 DM 群組門檻，後台群組維持顯示
+        HttpResponse.json({
+          et: { has_role: true, is_admin: true },
+          dm: { has_role: false, is_admin: false },
+        }),
       ),
     )
     renderWithProviders(<Sidebar />)
@@ -116,6 +164,47 @@ describe("Sidebar", () => {
     // 等 module-summary 解析後，DM 群組與其項目皆不應出現
     await waitFor(() => expect(screen.queryByText("文件管理")).not.toBeInTheDocument())
     expect(screen.queryByText("文件庫")).not.toBeInTheDocument()
+  })
+
+  it("#250 AC11：角色異動後側欄即時更新，不需重登", async () => {
+    // 模擬「管理者把自己的 DM 管理者角色移除」：assign 成功後 module-summary 改回非管理者
+    let dmIsAdmin = true
+    server.use(
+      http.get("/api/dp/user/module-summary", () =>
+        HttpResponse.json({
+          et: { has_role: true, is_admin: false },
+          dm: { has_role: true, is_admin: dmIsAdmin },
+        }),
+      ),
+      http.put("/api/dp/roles/:module/assignments/:userId", () => {
+        dmIsAdmin = false
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const user = userEvent.setup()
+    // 兩個元件共用同一個 QueryClient，才驗得到 RolesPage 的 invalidate 傳導到 Sidebar
+    renderWithProviders(
+      <>
+        <Sidebar />
+        <RolesPage />
+      </>,
+    )
+    expect(await screen.findByText("系統管理者後台")).toBeInTheDocument()
+
+    await user.click(await screen.findByRole("checkbox", { name: "王曉明 管理者" }))
+
+    // 不重整、不重登，側欄自行收起後台群組（RolesPage 於 onSuccess invalidate moduleSummary）
+    await waitFor(() => expect(screen.queryByText("系統管理者後台")).not.toBeInTheDocument())
+    expect(screen.queryByText("使用者管理")).not.toBeInTheDocument()
+  })
+
+  it("群組由上而下的順序為：教育訓練 → 文件管理 → 系統管理者後台", async () => {
+    renderWithProviders(<Sidebar />)
+    await screen.findByText("系統管理者後台")
+    const nav = screen.getByRole("navigation", { name: "主導覽" })
+    const titles = Array.from(nav.querySelectorAll("span")).map((el) => el.textContent)
+    const groupTitles = titles.filter((t) => t && ["教育訓練", "文件管理", "系統管理者後台"].includes(t))
+    expect(groupTitles).toEqual(["教育訓練", "文件管理", "系統管理者後台"])
   })
 
   it("每個顯示中的導覽項目連到對應路由", async () => {

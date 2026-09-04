@@ -4,6 +4,8 @@
 自我保護映射 DP_ROLE_002、群組選項、列現況；另一條 HTTP 驗 router 認證接線。
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import func, select
 
@@ -42,7 +44,8 @@ async def _grant_dm(db, user_id: str, role: str) -> None:
     await db.flush()
 
 
-async def _seed_user(db, user_id: str) -> None:
+async def _seed_user(db, user_id: str, *, status: str = "ACTIVE", locked_until=None) -> None:
+    """建 DP_USER；`status` / `locked_until` 供 #250 停用 / 鎖定情境使用（預設為正常帳號）。"""
     now = utcnow()
     db.add(
         DpUser(
@@ -50,6 +53,8 @@ async def _seed_user(db, user_id: str) -> None:
             email=f"{user_id}@example.com",
             pwd_hash="x",
             user_name=f"用戶{user_id}",
+            status=status,
+            locked_until=locked_until,
             pwd_changed_date=now,
             created_user="seed",
             created_date=now,
@@ -160,6 +165,136 @@ async def test_list_assignments_resolves_modifier_name(db, dm_registered):
     assert row is not None
     assert row.last_modified_by == "op_adm"  # 原始 USER_ID 仍保留
     assert row.last_modified_by_name == "用戶op_adm"  # 解析姓名（_seed_user 設 user_name=用戶{id}）
+
+
+async def test_list_assignments_exposes_account_status(db, dm_registered):
+    """列表帶出帳號狀態（#250 AC1/AC2 資料基礎）：畫面據此灰化停用 / 鎖定列。
+
+    `locked_until` 原樣輸出、不由後端算「是否鎖定中」——與 dp-users 列表同慣例
+    （`UserResponse` docstring：已鎖定由前端以 `locked_until > now` 衍生，避免序列化取系統時間）。
+    """
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_ok")
+    await _seed_user(db, "u_off", status="DISABLED")
+    lock_until = utcnow() + timedelta(hours=1)
+    await _seed_user(db, "u_lock", locked_until=lock_until)
+
+    result = await _svc.list_assignments(
+        db, module="DM", keyword=None, page=1, limit=100, operator=OperatorInfo(user_id="adm")
+    )
+    by_id = {i.user_id: i for i in result["data"]}
+    assert by_id["u_ok"].status == "ACTIVE" and by_id["u_ok"].locked_until is None
+    assert by_id["u_off"].status == "DISABLED"
+    assert by_id["u_lock"].status == "ACTIVE" and by_id["u_lock"].locked_until is not None
+
+
+async def test_assign_rejects_granting_to_disabled_account(db, dm_registered):
+    """對已停用帳號**新增**角色 → 403 DP_ROLE_004（#250 AC3，擋前端繞過）。"""
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_off", status="DISABLED")
+    with pytest.raises(AppError) as e:
+        await _svc.assign(
+            db, module="DM", user_id="u_off", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+        )
+    assert e.value.status_code == 403 and e.value.error_code == "DP_ROLE_004"
+
+
+async def test_assign_rejects_revoking_from_disabled_account(db, dm_registered):
+    """對已停用帳號**撤除**角色同樣 403（整列唯讀，SA 裁示；非 Security Review 建議的只擋提權）。
+
+    需要降權時的路徑是：先於使用者管理頁啟用帳號 → 撤權 → 再停用。
+    """
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_leaver")
+    await _svc.assign(
+        db, module="DM", user_id="u_leaver", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+    )
+    user = await db.scalar(select(DpUser).where(DpUser.user_id == "u_leaver"))
+    user.status = "DISABLED"
+    await db.flush()
+
+    with pytest.raises(AppError) as e:
+        await _svc.assign(
+            db, module="DM", user_id="u_leaver", roles=[], groups=[], operator=OperatorInfo(user_id="adm")
+        )
+    assert e.value.status_code == 403 and e.value.error_code == "DP_ROLE_004"
+    # 角色維持原狀（撤權未生效）
+    roles = {
+        r
+        for r in (
+            await db.execute(
+                select(DmUserRole.role_code).where(DmUserRole.user_id == "u_leaver", DmUserRole.deleted == 0)
+            )
+        ).scalars()
+    }
+    assert roles == {DM_EDITOR}
+
+
+async def test_assign_allows_revoking_after_reactivation(db, dm_registered):
+    """啟用帳號後即可撤權——確認「先啟用 → 撤權 → 再停用」這條降權路徑通得過。"""
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_back", status="DISABLED")
+    user = await db.scalar(select(DpUser).where(DpUser.user_id == "u_back"))
+    user.status = "ACTIVE"  # 使用者管理頁「啟用」
+    await db.flush()
+    await _svc.assign(db, module="DM", user_id="u_back", roles=[], groups=[], operator=OperatorInfo(user_id="adm"))
+    roles = {
+        r
+        for r in (
+            await db.execute(
+                select(DmUserRole.role_code).where(DmUserRole.user_id == "u_back", DmUserRole.deleted == 0)
+            )
+        ).scalars()
+    }
+    assert roles == set()
+
+
+async def test_assign_rejects_granting_to_locked_account(db, dm_registered):
+    """對鎖定中帳號**新增**角色 → 403 DP_ROLE_004（#250 AC3）。"""
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_lock", locked_until=utcnow() + timedelta(hours=1))
+    with pytest.raises(AppError) as e:
+        await _svc.assign(
+            db, module="DM", user_id="u_lock", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+        )
+    assert e.value.status_code == 403 and e.value.error_code == "DP_ROLE_004"
+
+
+async def test_assign_allows_account_with_expired_lock(db, dm_registered):
+    """鎖定已逾時（自動解鎖）之帳號可正常指派——不可誤以 `LOCKED_UNTIL IS NOT NULL` 判定。"""
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _seed_user(db, "u_exp", locked_until=utcnow() - timedelta(minutes=1))
+    await _svc.assign(
+        db, module="DM", user_id="u_exp", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+    )
+    roles = {
+        r
+        for r in (
+            await db.execute(select(DmUserRole.role_code).where(DmUserRole.user_id == "u_exp", DmUserRole.deleted == 0))
+        ).scalars()
+    }
+    assert roles == {DM_EDITOR}
+
+
+async def test_assign_allows_unknown_user_id(db, dm_registered):
+    """對「DP_USER 查無」之 USER_ID 指派仍成功——既有允許行為，狀態檢核不得誤擋。
+
+    `_require_usable_target` 對查無帳號者刻意放行（模組角色表無 FK 至 DP_USER）；
+    此案例把該文件化的分支釘住，避免日後有人誤把 None 當成阻擋條件。
+    """
+    await _grant_dm(db, "adm", DM_ADMIN)
+    await _svc.assign(
+        db, module="DM", user_id="ghost_user", roles=[DM_EDITOR], groups=[], operator=OperatorInfo(user_id="adm")
+    )
+    roles = {
+        r
+        for r in (
+            await db.execute(
+                select(DmUserRole.role_code).where(DmUserRole.user_id == "ghost_user", DmUserRole.deleted == 0)
+            )
+        ).scalars()
+    }
+    assert roles == {DM_EDITOR}
 
 
 async def test_http_requires_auth(db, dm_registered, client):

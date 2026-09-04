@@ -6,6 +6,8 @@ export interface NavItem {
   requiresDmPersonalAccess?: boolean
   /** admin-only 項入口可見性（US10 已廢止 / US11 變更歷程 / US13 KPI）：需具 DM_ADMIN；共用 GET /dm/admin-access（US11 A' 收斂）。 */
   requiresDmAdminAccess?: boolean
+  /** 簽核中心入口可見性（#250）：需具 DM_REVIEWER（僅具 DM_ADMIN 者亦不顯示）；GET /dm/reviewer-access。 */
+  requiresDmReviewerAccess?: boolean
   /** ET 教學管理項：需具教師或管理者角色（`Capabilities.can_manage_courses`）。 */
   requiresEtManage?: boolean
   /** ET 學習項（我的課程）：需具學員角色（`Capabilities.can_learn`）。 */
@@ -19,20 +21,15 @@ export interface NavGroup {
   title: string
   items: readonly NavItem[]
   requiresModule?: ModuleKey
+  /**
+   * 群組門檻（#250）：需具 **ET 或 DM 任一模組管理者**角色才顯示。
+   * 對齊 spec——DP 後台六項功能（spec_us4 / us5 / us7 / us9 / us10 / us11）之操作者
+   * 皆定義為「ET 或 DM 管理者」；後端對應閘為 `require_any_module_admin`。
+   */
+  requiresAnyModuleAdmin?: boolean
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
-  {
-    title: "系統管理者後台",
-    items: [
-      { label: "使用者管理", path: "/dp/users" },
-      { label: "系統參數", path: "/dp/params" },
-      { label: "通知範本", path: "/dp/templates" },
-      { label: "角色 / 權限", path: "/dp/roles" },
-      { label: "稽核日誌", path: "/dp/audit" },
-      { label: "排程總覽", path: "/dp/schedule" },
-    ],
-  },
   {
     // 教育訓練（#202）：對齊 wireframe ET 側欄 4 項；課程列表以外各頁目前為骨架佔位。
     // requiresModule=ET：無任一 ET 角色者整個群組不顯示（module-summary 判定；
@@ -60,11 +57,29 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     requiresModule: "DM",
     items: [
       { label: "文件庫", path: "/dm/library" },
-      { label: "簽核中心", path: "/dm/review" },
+      // 簽核中心（#250）：限 DM_REVIEWER——原本管理者 / 編輯者也看得到，但清單依
+      // assigned_reviewer=登入者 過濾，點進去永遠空白（SA Q3=A 裁示嚴格只認審核者）
+      { label: "簽核中心", path: "/dm/review", requiresDmReviewerAccess: true },
       { label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
       { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
       { label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
+      // US13 KPI 為管理者功能，與路由守衛 RequireDmAdmin 一致（#250 / main 同時補上此 flag）
       { label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
+    ],
+  },
+  {
+    // requiresAnyModuleAdmin（#250）：原為「過渡期對所有登入者顯示」，收斂為模組管理者專用。
+    // 側欄與後端閘同源（module-summary 的 is_admin ↔ require_any_module_admin），
+    // 避免側欄承諾閘不給的東西。
+    title: "系統管理者後台",
+    requiresAnyModuleAdmin: true,
+    items: [
+      { label: "使用者管理", path: "/dp/users" },
+      { label: "系統參數", path: "/dp/params" },
+      { label: "通知範本", path: "/dp/templates" },
+      { label: "角色 / 權限", path: "/dp/roles" },
+      { label: "稽核日誌", path: "/dp/audit" },
+      { label: "排程總覽", path: "/dp/schedule" },
     ],
   },
 ]

@@ -1,8 +1,9 @@
 """操作記錄查詢端點（US10 / dp-audit，唯讀）。
 
-授權：依 [sti-backend-modules 暫行授權規則] 僅掛 router-level get_jwt_payload 認證
-（SA 裁示 Q1=A）。稽核「僅管理者」（AUDIT-002）之真 admin 閘待 T049 隨 is_module_admin 回歸；
-interim 對登入者開放、以「未登入 401」先行。**不提供任何刪改端點**（append-only）。
+授權：router-level 掛 `require_any_module_admin()`——需 ET 或 DM 任一模組管理者，
+落地 spec_us10「作為 ET 或 DM 管理者」與稽核「僅管理者」（AUDIT-002）。#250 起生效：
+此前為 interim「對所有登入者開放、以未登入 401 先行」，即當時註記「待 T049 隨
+is_module_admin 回歸」之真 admin 閘。**不提供任何刪改端點**（append-only）。
 """
 
 from datetime import date, datetime, timezone
@@ -12,13 +13,13 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_jwt_payload
 from app.core.db import get_db
+from app.core.module_admin import require_any_module_admin
 from app.core.pagination import MAX_LIMIT, PagedResponse
 from app.dp.audit.query_service import AuditQueryService
 from app.dp.audit.schemas import AuditLogResponse
 
-router = APIRouter(prefix="/api/dp/audit", tags=["dp-audit"], dependencies=[Depends(get_jwt_payload)])
+router = APIRouter(prefix="/api/dp/audit", tags=["dp-audit"], dependencies=[Depends(require_any_module_admin())])
 
 _service = AuditQueryService()
 

@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { QUERY_KEYS } from "../constants/queryKeys"
 import { useDmAdminAccess } from "../dm/access/useDmAdminAccess"
+import { useDmReviewerAccess } from "../dm/access/useDmReviewerAccess"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
 import { coursesApi } from "../et/courses/coursesService"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
@@ -102,8 +103,18 @@ function NavGroupSection({ group }: { group: NavGroup }) {
   )
 }
 
-/** 群組是否顯示：無模組門檻恆顯示；有門檻則需 module-summary 回該模組具權限（未載入前先不顯示，避免閃現）。 */
-function isGroupVisible(requires: ModuleKey | undefined, summary: ModuleSummary | undefined): boolean {
+/**
+ * 群組是否顯示（summary 未載入前一律不顯示，fail-closed 避免閃現後消失）：
+ * - `requiresAnyModuleAdmin`（#250）：需 ET 或 DM 任一模組管理者
+ * - `requiresModule`：需具該模組任一角色
+ * - 兩者皆未設 → 恆顯示
+ */
+function isGroupVisible(group: NavGroup, summary: ModuleSummary | undefined): boolean {
+  if (group.requiresAnyModuleAdmin) {
+    if (!summary) return false
+    if (!summary.et.is_admin && !summary.dm.is_admin) return false
+  }
+  const requires: ModuleKey | undefined = group.requiresModule
   if (!requires) return true
   if (!summary) return false
   return requires === "DM" ? summary.dm.has_role : summary.et.has_role
@@ -111,8 +122,9 @@ function isGroupVisible(requires: ModuleKey | undefined, summary: ModuleSummary 
 
 /**
  * 統一 shell 左側導覽（#89）：模組群組可收合下拉、功能項縮排，對齊 TBMS 母專案側欄。
- * 「系統管理者後台」過渡期對所有登入者顯示；「文件管理」（DM）依 module-summary 之 has_role 決定顯示
- * （US1，§4）——無任一 DM 角色者完全看不到 DM 功能列（最小知悉）。
+ * 「系統管理者後台」需 ET 或 DM 任一模組管理者（#250，對齊 spec_us4/5/7/9/10/11 之操作者定義）；
+ * 「文件管理」（DM）依 module-summary 之 has_role 決定顯示（US1，§4）——無任一 DM 角色者
+ * 完全看不到 DM 功能列（最小知悉）。
  */
 export function Sidebar() {
   const { data: summary } = useModuleSummary()
@@ -123,6 +135,9 @@ export function Sidebar() {
   // 共用 GET /dm/admin-access（US11 A' 收斂）；同上僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
   const { data: adminAccess } = useDmAdminAccess(summary?.dm.has_role ?? false)
   const canAdmin = adminAccess?.can_access ?? false
+  // 簽核中心入口可見性（#250）：具 DM_REVIEWER 才顯示（僅 DM_ADMIN 亦不顯示）；同上僅在具 DM 角色時查詢。
+  const { data: reviewerAccess } = useDmReviewerAccess(summary?.dm.has_role ?? false)
+  const canReview = reviewerAccess?.can_access ?? false
   // ET 群組內之角色分流（#247）：教學管理項需教師 / 管理者，「我的課程」需學員。
   // 同上僅在具任一 ET 角色時查詢（避免非 ET 者 403）。
   const { data: etCaps } = useQuery({
@@ -132,12 +147,14 @@ export function Sidebar() {
   })
   const canEtManage = etCaps?.can_manage_courses ?? false
   const canEtLearn = etCaps?.can_learn ?? false
-  const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group.requiresModule, summary)).map((group) => ({
+  // isGroupVisible 傳整個 group（#250 起）：群組門檻除 requiresModule 外，另有 requiresAnyModuleAdmin
+  const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group, summary)).map((group) => ({
     ...group,
     items: group.items.filter(
       (item) =>
         (!item.requiresDmPersonalAccess || canPersonal) &&
         (!item.requiresDmAdminAccess || canAdmin) &&
+        (!item.requiresDmReviewerAccess || canReview) &&
         (!item.requiresEtManage || canEtManage) &&
         (!item.requiresEtLearn || canEtLearn),
     ),

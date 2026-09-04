@@ -17,6 +17,7 @@ import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { formatDateTime } from "../../utils/date"
+import { isDisabled, isLocked } from "./accountStatus"
 import { UsersForm } from "./UsersForm"
 import { useInvites } from "./useInvites"
 import { useUsers } from "./useUsers"
@@ -29,13 +30,8 @@ const STATUS_OPTIONS = [
   { value: "locked", label: "已鎖定" },
 ]
 
-/** 帳號是否鎖定中（ACTIVE 且 locked_until 尚未逾時）。 */
-function isLocked(row: UserRow): boolean {
-  return row.status === "ACTIVE" && row.locked_until !== null && new Date(row.locked_until) > new Date()
-}
-
 function StatusChip({ row }: { row: UserRow }) {
-  if (row.status === "DISABLED") return <Chip size="small" label="已停用" />
+  if (isDisabled(row)) return <Chip size="small" label="已停用" />
   if (isLocked(row)) return <Chip size="small" color="warning" label="已鎖定" />
   return <Chip size="small" color="success" label="啟用中" />
 }

@@ -1,7 +1,8 @@
 """排程總覽 / 編輯端點（US11 / dp-schedule）。
 
-授權：依 [sti-backend-modules 暫行授權規則] 僅掛 router-level get_jwt_payload 認證（暫行案 A、同
-dp-audit）；真 admin 閘待 T049 回歸重用 DP_AUTH_006。共用項（不分模組）。
+授權：router-level 掛 `require_any_module_admin()`——需 ET 或 DM 任一模組管理者，
+落地 spec_us11「ET / DM 管理者於 DP 後台唯讀檢視排程總覽」（#250，即暫行案 A 註記
+「待 T049 回歸重用 DP_AUTH_006」之真 admin 閘）。共用項（不分模組）。
 編輯僅開放 JOB_NAME / CRON_EXPR / IS_ENABLED；**不提供手動補跑端點**（補跑各模組自理，FR-03）、
 **HANDLER_REF / MODULE 不可改**（RCE 防護）。
 """
@@ -9,15 +10,15 @@ dp-audit）；真 admin 閘待 T049 回歸重用 DP_AUTH_006。共用項（不�
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_jwt_payload
 from app.core.db import get_db
+from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse, paginate
 from app.dp.schedules.repository import ScheduleRepository
 from app.dp.schedules.schemas import ScheduleLogResponse, ScheduleResponse, ScheduleUpdate
 from app.dp.schedules.service import ScheduleService
 
-router = APIRouter(prefix="/api/dp/schedules", tags=["dp-schedule"], dependencies=[Depends(get_jwt_payload)])
+router = APIRouter(prefix="/api/dp/schedules", tags=["dp-schedule"], dependencies=[Depends(require_any_module_admin())])
 
 _repo = ScheduleRepository()
 _service = ScheduleService()

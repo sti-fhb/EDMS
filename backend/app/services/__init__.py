@@ -8,5 +8,6 @@ from app.dm.integration.service import DmDocumentService
 from app.dp.audit.service import AuditLogService
 from app.dp.notify.service import NotifyService
 from app.dp.params.service import ParamService
+from app.dp.users.account_service import AccountQueryService
 
-__all__ = ["AuditLogService", "DmDocumentService", "NotifyService", "ParamService"]
+__all__ = ["AccountQueryService", "AuditLogService", "DmDocumentService", "NotifyService", "ParamService"]

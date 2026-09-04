@@ -14,12 +14,16 @@ from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.dm.roles.gate import dm_is_module_admin
 from app.dp.audit.models import DpAuditLog
 from app.dp.params.models import DpParamDetail, DpParamMaster
 from app.dp.params.schemas import ParamDetailCreate, ParamDetailUpdate
 from app.dp.params.service import ParamAdminService, ParamService
 from app.dp.users.models import DpUser
+from app.et.roles.gate import et_is_module_admin
 
+# 本檔不套 conftest 的 backoffice_admin：已有專用的 `admin_gate` stub（可指定誰是 ET/DM 管理者），
+# 且測試會以它覆蓋全域 checker——兩者並用會互相蓋掉。HTTP 測試改以 admin_gate 明確授予（#250）。
 pytestmark = pytest.mark.integration
 
 _OP = OperatorInfo(user_id="admin01")
@@ -40,8 +44,10 @@ def admin_gate():
         module_admin_gate.register("DM", dm_checker)
 
     yield configure
-    module_admin_gate.unregister("ET")
-    module_admin_gate.unregister("DM")
+    # 還原 main.py 註冊之真實 checker（非 unregister——ET / DM 皆已接線，移除會讓
+    # 後續測試看到「未接線」而全數 fail-closed 403，使閘的狀態變成 test-order 相依）
+    module_admin_gate.register("ET", et_is_module_admin)
+    module_admin_gate.register("DM", dm_is_module_admin)
 
 
 async def _make_master(db, param_id, *, param_type="VALUE", detail_lock=False, name="測試參數", details=()):
@@ -324,7 +330,9 @@ async def test_create_on_missing_param_404(db, admin_gate):
 
 
 async def test_list_params_http(db, client, admin_gate):
-    admin_gate()
+    # #250：後台 router 掛 require_any_module_admin，須明確授予管理者身分才進得來
+    # （原為空設定 admin_gate()——當時 router 只驗認證）。斷言仍聚焦「平台級參數可見」。
+    admin_gate(et_admins=("admin01",))
     now = utcnow()
     db.add(
         DpUser(

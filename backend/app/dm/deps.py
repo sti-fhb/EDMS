@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.dm.roles.authz import DM_REVIEWER, has_role
 from app.dm.roles.models import DmUserRole
 
 
@@ -50,3 +51,21 @@ async def get_dm_context(
     if not roles:
         raise AppError(status_code=403, detail="需要文件管理模組權限", error_code="DM_AUTH_001")
     return DmContext(user_id=payload.sub, roles=roles)
+
+
+async def get_dm_reviewer_context(ctx: DmContext = Depends(get_dm_context)) -> DmContext:
+    """簽核中心入口閘（#250）：於模組存取閘之上再要求 `DM_REVIEWER`。
+
+    嚴格只認審核者——**僅具 `DM_ADMIN` 者亦不放行**（SA #250 Q3=A：管理者管設定、
+    審核者管簽核；管理者需代審時自行加勾審核者角色）。原本非審核者可進入並取得空清單
+    （清單依 `assigned_reviewer=登入者` 過濾），入口看得到卻永遠空白，語意不一致。
+
+    本閘為**粗粒度入口**判定；「是否為該筆送審的指定審核者」仍由 `center_service` 以
+    `DM_REVIEW_005` 逐筆把關，兩層並存、職責不同。
+
+    Raises:
+        AppError: 具 DM 角色但無 DM_REVIEWER（403 DM_AUTH_004）。
+    """
+    if not has_role(ctx.roles, DM_REVIEWER):
+        raise AppError(status_code=403, detail="需要文件審核者權限", error_code="DM_AUTH_004")
+    return ctx

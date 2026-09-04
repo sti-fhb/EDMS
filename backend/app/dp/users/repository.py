@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dp.users.account_status import account_usable_clause
 from app.dp.users.models import DpUser
 
 
@@ -26,8 +27,8 @@ class UsersRepository:
             conditions.append(or_(DpUser.user_name.ilike(pattern), DpUser.email.ilike(pattern)))
 
         if status == "active":
-            conditions.append(DpUser.status == "ACTIVE")
-            conditions.append(or_(DpUser.locked_until.is_(None), DpUser.locked_until <= now))
+            # 與 #250 之 is_account_usable / DM 指定審核者下拉共用同一條件，避免多份判定漂移
+            conditions.append(account_usable_clause(now))
         elif status == "disabled":
             conditions.append(DpUser.status == "DISABLED")
         elif status == "locked":

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
+from app.core.module_admin import module_admin_gate
 from app.core.module_roles import module_role_gate
 from app.core.operator import OperatorInfo, get_operator
 from app.core.password_gate import require_password_current
@@ -309,9 +310,13 @@ async def module_summary(
     """
     et_has_role = await module_role_gate.has_any_role("ET", payload.sub, db)
     dm_has_role = await module_role_gate.has_any_role("DM", payload.sub, db)
+    # is_admin（#250）：供側欄決定「系統管理者後台」群組可見性，與 DP 後台端點之
+    # require_any_module_admin 同源（module_admin_gate），避免側欄承諾閘不給的東西
+    et_is_admin = await module_admin_gate.is_module_admin("ET", payload.sub, db)
+    dm_is_admin = await module_admin_gate.is_module_admin("DM", payload.sub, db)
     return ModuleSummary(
-        et=ModuleRoleStatus(has_role=et_has_role),
-        dm=ModuleRoleStatus(has_role=dm_has_role),
+        et=ModuleRoleStatus(has_role=et_has_role, is_admin=et_is_admin),
+        dm=ModuleRoleStatus(has_role=dm_has_role, is_admin=dm_is_admin),
     )
 
 

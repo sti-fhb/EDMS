@@ -12,10 +12,37 @@ from app.dm.catalog.models import DmCategory, DmFunc  # noqa: F401  # 註冊 FK 
 from app.dm.document.models import DmDocument
 from app.dm.review.models import DmReview
 from app.dm.review.service import ReviewService
+from app.dm.roles.authz import DM_REVIEWER
+from app.dm.roles.models import DmUserRole
+from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
 _svc = ReviewService()
+
+
+@pytest.fixture(autouse=True)
+async def seed_reviewers(db):
+    """建 rev1 / rev2 為「可被指定」之審核者（具 DM_REVIEWER 且帳號可用）。
+
+    #250 起 `submit` 檢核審核者可指定性，本檔原以裸字串當審核者、未建對應帳號與角色。
+    autouse：本檔每條測試皆送簽，統一備妥比逐條插入清楚。
+    """
+    now = utcnow()
+    for uid in ("rev1", "rev2"):
+        db.add(
+            DpUser(
+                user_id=uid,
+                email=f"{uid}@e.com",
+                pwd_hash="x",
+                user_name=f"審核者{uid}",
+                pwd_changed_date=now,
+                created_user="seed",
+                created_date=now,
+            )
+        )
+        db.add(DmUserRole(user_id=uid, role_code=DM_REVIEWER, created_user="seed", created_date=now))
+    await db.flush()
 
 
 async def _doc(db, doc_id="DM-SOP-000001"):

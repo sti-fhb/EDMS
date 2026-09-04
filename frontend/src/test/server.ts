@@ -24,8 +24,12 @@ export const handlers = [
   http.post("/api/dp/user/logout", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/version", () => HttpResponse.json({ version: "1.0.0-test" })),
   // 入口頁 / 側欄模組摘要（預設具 DM 權限；個別測試以 server.use 覆蓋）
+  // 預設情境＝兼具兩模組角色與管理者身分（#250 起 is_admin 決定「系統管理者後台」群組可見性）
   http.get("/api/dp/user/module-summary", () =>
-    HttpResponse.json({ et: { has_role: true }, dm: { has_role: true } }),
+    HttpResponse.json({
+      et: { has_role: true, is_admin: true },
+      dm: { has_role: true, is_admin: true },
+    }),
   ),
   // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
   http.get("/api/dm/dashboard/stats", () =>
@@ -304,6 +308,8 @@ export const handlers = [
   ),
   // 共用 DM 管理者入口可見性（US11 A' 收斂；US10/11/13 admin 側欄項共用）
   http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: true })),
+  // #250 簽核中心入口可見性（具 DM_REVIEWER）
+  http.get("/api/dm/reviewer-access", () => HttpResponse.json({ can_access: true })),
   // US10 已廢止文件查詢（dm-obsolete-archive）
   http.get("/api/dm/obsolete-archive/documents", () =>
     HttpResponse.json({
@@ -534,14 +540,41 @@ export const handlers = [
           user_id: "u1",
           user_name: "王曉明",
           email: "ming@example.com",
+          status: "ACTIVE",
+          locked_until: null,
           roles: ["DM_EDITOR"],
           groups: [],
           last_modified_by: "admin",
           last_modified_by_name: "系統管理員",
           last_modified_date: "2026-06-30T00:00:00Z",
         },
+        // #250 停用 / 鎖定列：權限管理頁應灰化且不可指派
+        {
+          user_id: "u2",
+          user_name: "林離職",
+          email: "off@example.com",
+          status: "DISABLED",
+          locked_until: null,
+          roles: [],
+          groups: [],
+          last_modified_by: null,
+          last_modified_by_name: null,
+          last_modified_date: null,
+        },
+        {
+          user_id: "u3",
+          user_name: "陳鎖定",
+          email: "lock@example.com",
+          status: "ACTIVE",
+          locked_until: "2099-12-31T00:00:00Z",
+          roles: ["DM_VIEWER"],
+          groups: [],
+          last_modified_by: null,
+          last_modified_by_name: null,
+          last_modified_date: null,
+        },
       ],
-      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+      meta: { total: 3, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
   http.get("/api/dp/roles/:module/group-options", () =>

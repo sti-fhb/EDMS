@@ -33,6 +33,7 @@ from app.dm.obsolete.router import router as dm_obsolete_router
 from app.dm.obsolete_archive.router import router as dm_obsolete_archive_router
 from app.dm.personal.router import router as dm_personal_router
 from app.dm.review.router import router as dm_review_router
+from app.dm.review.router import shared_router as dm_review_shared_router
 from app.dp.audit.router import router as dp_audit_router
 from app.dp.notify.mailer import SmtpMailer
 from app.dp.notify.router import router as dp_templates_router
@@ -138,6 +139,8 @@ app.include_router(dm_library_router)
 app.include_router(dm_detail_router)
 app.include_router(dm_editor_router)
 app.include_router(dm_review_router)
+# 廢止附件下載：授權為「DM_ADMIN 或指定審核者」，不掛簽核入口閘（見 review/router.py 註解）
+app.include_router(dm_review_shared_router)
 app.include_router(dm_obsolete_router)
 app.include_router(dm_obsolete_archive_router)
 app.include_router(dm_change_log_router)

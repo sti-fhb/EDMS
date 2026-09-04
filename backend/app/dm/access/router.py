@@ -7,9 +7,9 @@ US13 KPI 等 admin-only 項共用；語意中性、不綁特定功能）。回�
 
 from fastapi import APIRouter, Depends
 
-from app.dm.access.schemas import AdminAccess
+from app.dm.access.schemas import AdminAccess, ReviewerAccess
 from app.dm.deps import DmContext, get_dm_context
-from app.dm.roles.authz import DM_ADMIN, has_role
+from app.dm.roles.authz import DM_ADMIN, DM_REVIEWER, has_role
 
 router = APIRouter(prefix="/api/dm", tags=["dm-access"])
 
@@ -18,3 +18,13 @@ router = APIRouter(prefix="/api/dm", tags=["dm-access"])
 async def admin_access(ctx: DmContext = Depends(get_dm_context)) -> AdminAccess:
     """DM 管理者入口可見性（共用逐項閘）：具 DM_ADMIN → can_access=true。"""
     return AdminAccess(can_access=has_role(ctx.roles, DM_ADMIN))
+
+
+@router.get("/reviewer-access", response_model=ReviewerAccess)
+async def reviewer_access(ctx: DmContext = Depends(get_dm_context)) -> ReviewerAccess:
+    """DM 審核者入口可見性（#250）：具 DM_REVIEWER → can_access=true。
+
+    供側欄決定「簽核中心」是否顯示。同 `admin-access` 回布林、非 403——非審核者取得
+    false 而不是錯誤；擋直連的硬閘為 `/api/dm/reviews/*` 上的 `get_dm_reviewer_context`。
+    """
+    return ReviewerAccess(can_access=has_role(ctx.roles, DM_REVIEWER))

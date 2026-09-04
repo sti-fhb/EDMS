@@ -25,6 +25,7 @@ from app.dp.user.ids import generate_user_id
 from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
+from app.dp.users.account_status import AccountStatus
 from app.dp.users.repository import UsersRepository
 from app.dp.users.schemas import InviteResponse, UserCreate, UserResponse, UserUpdate
 from app.services import AuditLogService, NotifyService, ParamService
@@ -81,6 +82,23 @@ class UsersService:
         """查詢正式帳號清單（DP_USER；姓名 / Email 關鍵字 + 狀態篩選，後端分頁）。"""
         stmt = self._repo.build_list_stmt(keyword=keyword, status=status, now=utcnow())
         return await paginate(db, stmt, page=page, limit=limit, schema=UserResponse)
+
+    async def get_account_status(self, db: AsyncSession, user_id: str) -> AccountStatus | None:
+        """取帳號狀態兩維度（STATUS / LOCKED_UNTIL）；查無（含軟刪）回 None。
+
+        供其他 DP 子模組判定「帳號是否可用」而不需碰 ORM model（#250 權限指派檢核）。
+
+        Args:
+            db: DB session。
+            user_id: 目標帳號 USER_ID。
+
+        Returns:
+            `AccountStatus`；帳號不存在回 None。
+        """
+        user = await self._repo.get_by_id(db, user_id)
+        if user is None:
+            return None
+        return AccountStatus(status=user.status, locked_until=user.locked_until)
 
     async def resolve_display_names(self, db: AsyncSession, user_ids: Collection[str]) -> dict[str, str]:
         """批次解析 USER_ID → 顯示名（姓名，無姓名時退 email）；查無者不放入。

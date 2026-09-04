@@ -1,8 +1,9 @@
 """系統參數與清單維護端點（US5 / dp-params）。
 
-授權：router-level get_jwt_payload 認證；寫入型注入 get_operator。模組前綴過濾於
-service 依 module_admin_gate.is_module_admin enforce（A-strict，SA Q1 定案）——
-存取閘沿用 #61 裁示 A：不掛 require_module_admin，待 T049 回歸。
+授權：router-level 掛 `require_any_module_admin()`——需 ET 或 DM 任一模組管理者，
+落地 spec_us5「作為 ET 或 DM 管理者」（#250，即 #61 裁示 A 註記「待 T049 回歸」之存取閘）。
+寫入型注入 get_operator。**模組前綴過濾**仍於 service 依 `is_module_admin` 逐模組
+enforce（A-strict，SA Q1 定案）——本閘只管「能否進後台」，不取代該模組級過濾。
 """
 
 from fastapi import APIRouter, Depends
@@ -10,11 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
+from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
 from app.dp.params.schemas import ParamDetailCreate, ParamDetailResponse, ParamDetailUpdate, ParamMasterResponse
 from app.dp.params.service import ParamAdminService
 
-router = APIRouter(prefix="/api/dp/params", tags=["dp-params"], dependencies=[Depends(get_jwt_payload)])
+router = APIRouter(prefix="/api/dp/params", tags=["dp-params"], dependencies=[Depends(require_any_module_admin())])
 
 _service = ParamAdminService()
 
