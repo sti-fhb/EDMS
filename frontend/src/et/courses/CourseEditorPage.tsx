@@ -1,5 +1,6 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
 import ContentCopyIcon from "@mui/icons-material/ContentCopy"
+import PersonAddIcon from "@mui/icons-material/PersonAdd"
 import VisibilityIcon from "@mui/icons-material/Visibility"
 import Alert from "@mui/material/Alert"
 import Autocomplete from "@mui/material/Autocomplete"
@@ -31,6 +32,7 @@ import { useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
+import { InviteStudentsDialog } from "./InviteStudentsDialog"
 import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
 import { SurveyDialog } from "./SurveyDialog"
@@ -185,6 +187,7 @@ export function EtCourseEditorPage() {
 
   const isNew = courseId === undefined
   const readOnly = course !== undefined && !course.is_owner
+  const [inviteOpen, setInviteOpen] = useState(false)
   // 新增模式以負數 id 表示暫存章節（尚未寫入 DB）；index = -id - 1
   const chapters: ChapterItem[] = isNew
     ? stagedChapters.map((c, i) => ({
@@ -659,7 +662,34 @@ export function EtCourseEditorPage() {
         </IconButton>
         <Typography variant="h5">{courseId === undefined ? "新增課程" : "課程編輯"}</Typography>
         <Chip size="small" label={COURSE_STATUS_LABEL[status] ?? status} />
+        {/*
+          「邀請學員」僅**已發布**課程顯示（AC 1）——草稿尚無邀請碼、學員端也看不到課程；
+          已關閉課程的學習頁為唯讀，把人邀請進去只會讓他點開後什麼都不能做。再開課後
+          `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。
+          非擁有者（檢視模式）一律不顯示。
+        */}
+        {status === "PUBLISHED" && !readOnly && course !== undefined && (
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<PersonAddIcon />}
+            sx={{ ml: "auto" }}
+            onClick={() => setInviteOpen(true)}
+          >
+            邀請學員
+          </Button>
+        )}
       </Stack>
+
+      {course !== undefined && (
+        <InviteStudentsDialog
+          open={inviteOpen}
+          courseId={course.course_id}
+          courseName={course.course_name}
+          invitationCode={course.invitation_code}
+          onClose={() => setInviteOpen(false)}
+        />
+      )}
 
       {readOnly && (
         <Alert severity="warning" icon={<VisibilityIcon />} sx={{ mb: 2 }}>

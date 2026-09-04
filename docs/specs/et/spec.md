@@ -190,7 +190,7 @@ ET 畫面碼原僅散見於上表與各 spec 敘述、無集中定義，交付�
 
 | 外模組 table | 引用欄位 | 用於 | 對應 US |
 |-------------|---------|------|---------|
-| `DP_USER` | `USER_ID` / `NAME` / `EMAIL` | 學員與教師姓名顯示、依姓名模糊查詢、寄信收件者 Email、CSV 匯出之姓名 / Email 欄 | US1、**US4**、US7、US9、US12、US14、US16、US17 |
+| `DP_USER` | `USER_ID` / `NAME` / `EMAIL` | 學員與教師姓名顯示、依姓名模糊查詢、寄信收件者 Email、CSV 匯出之姓名 / Email 欄 | US1、**US4**、US7、**US8**、US9、US12、US14、US16、US17 |
 
 > 比照 DM 既有做法（DM 文件庫清單以 `author_name` 唯讀 join `DP_USER`、查無回 `None`）。ET 不得於 SQL 內重新實作 DP 之帳號狀態判斷（停用 / 鎖定 / 待驗證一律以 DP 定義為準）；**任何寫入 `DP_USER` 之需求一律走 DP Service**。
 

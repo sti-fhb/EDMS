@@ -7,6 +7,13 @@ _BodyStr = Annotated[str, StringConstraints(min_length=1, max_length=10000)]
 Channel = Literal["EMAIL", "MSG", "BOTH"]
 
 
+class RenderedMail(BaseModel):
+    """渲染後之信件內容（`render_preview` 回傳；不落 outbox）。"""
+
+    subject: str
+    body: str
+
+
 class SendResult(BaseModel):
     """SRVDP002 send_email 回傳：排入 outbox 的收件人數與略過原因。"""
 

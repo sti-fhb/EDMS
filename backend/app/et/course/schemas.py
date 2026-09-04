@@ -7,9 +7,11 @@
 """
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+
+from app.core.schema_types import SAFE_SINGLE_LINE_PATTERN
 
 # 課程描述長度上限（spec_us3 AC 1「至多 500 字」）。
 # data-model 之 `DESCRIPTION` 為 TEXT 無長度限制，故由應用層把關；前端另以 Zod 同步檢核。
@@ -46,7 +48,15 @@ class _CourseFields(BaseModel):
     草稿階段允許留空，故此處皆為選填。`OWNER_ID` 取自 JWT，不由請求帶入。
     """
 
-    course_name: str = Field(min_length=1, max_length=COURSE_NAME_MAX_LEN)
+    #: 拒內部控制 / 斷行字元——**課程名稱會進入邀請信內文**（範本 `COURSE_INVITE` 之
+    #: `{COURSE_NAME}`）。平台發信層對主旨剝換行、但對**內文刻意保留 LF**（DM 的退回理由
+    #: 是真的多行輸入），故多行名稱會原樣渲染成信件內容，讓一封 SPF/DKIM 全部合法的組織
+    #: 信件夾帶自選文字。比照 `SafeNameStr` 的判斷：那份註解明載「管理者輸入的姓名同樣會進
+    #: 邀請信內文，故不因已認證而放寬」——擋在輸入端是唯一分得清「該不該有換行」的地方。
+    course_name: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=COURSE_NAME_MAX_LEN, pattern=SAFE_SINGLE_LINE_PATTERN),
+    ]
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LEN)
     open_start_at: datetime | None = None
     open_end_at: datetime | None = None

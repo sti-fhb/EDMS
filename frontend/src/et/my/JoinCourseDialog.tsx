@@ -18,6 +18,14 @@ import { formatDateTime } from "../../utils/date"
 interface Props {
   open: boolean
   onClose: () => void
+  /**
+   * 開啟時預填的邀請碼（#273）——教師以「複製邀請連結」或 QR Code 傳出的網址帶
+   * `?code=`，學員落地後不該還要自己把 8 碼重打一次。
+   *
+   * 只預填、**不自動送出**：AC 8 的預覽是明訂的一步（學員拿到的是一串數字，加入前
+   * 沒有任何線索知道那是哪門課），自動加入會把那一步跳掉。
+   */
+  initialCode?: string
   /** 加入成功。`pendingOpen` 為 true 時課程尚未開放，清單不會出現該課程（AC 4）。 */
   onJoined: (courseId: number, pendingOpen: boolean) => void
   /**
@@ -50,8 +58,8 @@ function isPendingOpen(openStartAt: string | null): boolean {
  * 錯誤以 **inline `Alert`** 呈現而非 Snackbar：使用者的注意力在這個視窗裡，而且
  * 「邀請碼無效」要與輸入框並存才看得出是哪一次輸入錯了。
  */
-export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined }: Props) {
-  const [code, setCode] = useState("")
+export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined, initialCode = "" }: Props) {
+  const [code, setCode] = useState(initialCode)
   const [preview, setPreview] = useState<JoinPreview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -59,7 +67,7 @@ export function JoinCourseDialog({ open, onClose, onJoined, onAlreadyJoined }: P
   const codeValid = invitationCodeSchema.safeParse(code).success
 
   function reset() {
-    setCode("")
+    setCode(initialCode)
     setPreview(null)
     setError(null)
     setBusy(false)
