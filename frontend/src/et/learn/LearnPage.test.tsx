@@ -23,6 +23,7 @@ function mockStructure(overrides: Partial<LearnStructure>) {
         is_owner: false,
         is_closed: false,
         playback_rates: [0.75, 1.0, 1.25, 1.5, 2.0],
+        last_item_id: null,
         chapters: [
           {
             chapter_id: 10,
@@ -127,4 +128,114 @@ describe("ET05 章節學習頁", () => {
     // wireframe 側欄底部有這顆按鈕，但本 issue 不做——照抄會做出永遠不動作的元件
     expect(screen.queryByRole("button", { name: /問卷/ })).not.toBeInTheDocument()
   })
+
+  describe("進度與解鎖（#274）", () => {
+    it("重新進入定位至上次檢視之項目（AC 11）", async () => {
+      // 第 1 章第 1 項是教材、第 2 項是測驗；`last_item_id` 指向測驗 → 應直接開在測驗
+      mockStructure({ last_item_id: 101 })
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByRole("button", { name: "開始測驗" })).toBeInTheDocument()
+    })
+
+    it("鎖定項目點擊時擋下並提示（AC 6 / ET-MSG-ET05-001）", async () => {
+      mockStructure({ chapters: lockedChapters() })
+      const user = userEvent.setup()
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByText("基本概念測驗"))
+
+      // **提示而非靜默無反應**——學員需要知道為什麼點不動
+      expect(await screen.findByText("請先完成本章節之影片學習")).toBeInTheDocument()
+      // 內容區沒有切過去（測驗入口不該出現）
+      expect(screen.queryByRole("button", { name: "開始測驗" })).not.toBeInTheDocument()
+    })
+
+    it("側欄顯示課程進度（完成項目數 ÷ 總項目數）", async () => {
+      mockStructure({ chapters: threeStateChapters(), last_item_id: 102 })
+      renderWithProviders(<EtLearnPage />)
+
+      // 3 項中 1 項完成
+      expect(await screen.findByText(/課程進度 1 \/ 3（33%）/)).toBeInTheDocument()
+    })
+
+    it("教師預覽不顯示課程進度條", async () => {
+      // 恆為 0% 的進度條只會讓教師以為自己「什麼都沒完成」
+      mockStructure({ is_owner: true })
+      renderWithProviders(<EtLearnPage />)
+      await screen.findByText("第一章 採血基本流程")
+
+      expect(screen.queryByText(/課程進度/)).not.toBeInTheDocument()
+    })
+
+    it("側欄三態顯示真實狀態（AC 14）", async () => {
+      // `last_item_id` 指向第 2 章，故第 1 章那兩項不是「進行中」——`itemDisplayState`
+      // 讓 active 蓋過 completed，兩者放在同一項上就驗不到完成標記。
+      mockStructure({ chapters: threeStateChapters(), last_item_id: 102 })
+      renderWithProviders(<EtLearnPage />)
+      await screen.findByText("採血流程概論")
+
+      expect(screen.getAllByTestId("CheckCircleIcon")).toHaveLength(1) // 已完成 ✓
+      expect(screen.getByTestId("ArrowCircleRightIcon")).toBeInTheDocument() // 進行中 →
+      expect(screen.getByTestId("LockIcon")).toBeInTheDocument() // 鎖定 🔒
+    })
+  })
 })
+
+/** 已完成 ✓ / 進行中 → / 鎖定 🔒 三態同時出現的側欄形狀。 */
+function threeStateChapters() {
+  const [first] = lockedChapters()
+  return [
+    first,
+    {
+      chapter_id: 11,
+      chapter_name: "第二章 進階操作",
+      sort_order: 2,
+      items: [
+        {
+          item_id: 102,
+          item_type: "MATERIAL" as const,
+          sort_order: 1,
+          title: "進階操作示範",
+          material_id: 1002,
+          quiz_id: null,
+          locked: false,
+          completed: false,
+        },
+      ],
+    },
+  ]
+}
+
+/** 第 1 項已完成、第 2 項（測驗）鎖定——章節內依序解鎖（裁示 Q2=A）的側欄形狀。 */
+function lockedChapters() {
+  return [
+    {
+      chapter_id: 10,
+      chapter_name: "第一章 採血基本流程",
+      sort_order: 1,
+      items: [
+        {
+          item_id: 100,
+          item_type: "MATERIAL" as const,
+          sort_order: 1,
+          title: "採血流程概論",
+          material_id: 1000,
+          quiz_id: null,
+          locked: false,
+          completed: true,
+        },
+        {
+          item_id: 101,
+          item_type: "QUIZ" as const,
+          sort_order: 2,
+          title: "基本概念測驗",
+          material_id: null,
+          quiz_id: 2000,
+          locked: true,
+          completed: false,
+        },
+      ],
+    },
+  ]
+}

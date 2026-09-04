@@ -18,9 +18,11 @@ class ItemNode(BaseModel):
 
     Attributes:
         title: 側欄顯示名稱——教材取 `MATERIAL_NAME`、測驗取 `QUIZ_NAME`。
-        locked: 是否鎖定。**本 issue 恆為 `False`**——解鎖判定依賴 `ET_PROGRESS`
-            （`ET-5b`）。欄位先備妥，`ET-5b` 交付時只需換掉取值來源，前端不必再改。
-        completed: 是否已完成。**本 issue 恆為 `False`**，同上。
+        locked: 是否鎖定（#274）。章節依序 + 章節內依序，見
+            `progress.rules.locked_item_ids`。**教師預覽恆為 `False`**——他沒有進度可
+            累積（#255 裁示 Q1），照學員規則算會把他鎖在第 1 項，預覽就失去意義。
+        completed: 是否已完成（#274）。測驗項目在 `ET-6` 交付前恆為 `False`——它不打勾，
+            但也不擋住後續（見 `ItemState.treat_as_done`）。
     """
 
     item_id: int
@@ -49,6 +51,9 @@ class LearnStructure(BaseModel):
         is_closed: 課程已關閉 → 前端顯示唯讀提示（ET-MSG-ET05-005）。
             **不過濾任何內容**（#255 裁示 Q2=A）——關閉限制的是寫入，不是讀取。
         playback_rates: 可選倍速，已依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮。
+        last_item_id: 上次檢視之項目（#274 SA Q1 裁示 B）。`None` = 還沒看過任何項目
+            → 前端定位第 1 章第 1 項。影片內的秒數是另一半，在
+            `MaterialVideoRow.last_position_sec`。
     """
 
     course_id: int
@@ -57,16 +62,25 @@ class LearnStructure(BaseModel):
     is_owner: bool
     is_closed: bool
     playback_rates: list[float]
+    last_item_id: int | None
     chapters: list[ChapterNode]
 
 
 class MaterialVideoRow(BaseModel):
-    """教材下的一支影片。**不含 `FILE_PATH`**——落盤路徑不對學員端外洩。"""
+    """教材下的一支影片。**不含 `FILE_PATH`**——落盤路徑不對學員端外洩。
+
+    Attributes:
+        coverage_pct: 該學員對這支影片的累計覆蓋率（#274）。播放器下方顯示「完成 65%」，
+            達 80% 即解鎖。**教師預覽恆為 0**——他不累積進度。
+        last_position_sec: 上次播放到第幾秒，供續看（AC 11 的另一半）。`None` = 從頭播。
+    """
 
     video_id: int
     file_name: str
     duration_sec: int
     sort_order: int
+    coverage_pct: int
+    last_position_sec: int | None
 
 
 class MaterialDocRow(BaseModel):

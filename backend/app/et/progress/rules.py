@@ -1,0 +1,207 @@
+"""ET05 學習進度之純業務規則（US5 / #274）。
+
+**完全不碰 DB**：覆蓋率、區段聯集、完成判定、解鎖判定都能以純函式表達，故全部以
+unit test 涵蓋；integration 只驗接線與寫入。
+
+## 三條覆蓋率規則其實是同一個決定
+
+| 規則 | spec |
+|---|---|
+| 倍速照算（2 倍速看完全片 = 100%）| FR-ET-US5-07 |
+| 直接拉到結尾不算看過 | FR-ET-US5-06 |
+| 重複觀看不加成 | FR-ET-US5-06 |
+
+合起來就是：**只計算「播放頭實際走過的影片時間軸範圍」的聯集**。
+
+- **倍速**由前端上報 `currentTime`（影片時間軸）自然滿足——後端不需要知道倍速是多少
+- **跳躍**由前端「`seeked` 時先送出跳之前那段、再從新位置重記起點」滿足
+- **重複**由本模組的 `merge_segments` 滿足
+
+## ⚠️ 覆蓋率一律先聯集再加總
+
+`data-model` §ET_PROGRESS_INTERVAL 原寫「覆蓋率 = `SUM(END_SEC − START_SEC)`」，
+**照字面實作是錯的**：`[0,50]` 看兩次會得到 100%，而學員從未看過後半段。
+同一份文件的 §ET_PROGRESS_VIDEO 寫的是「區段**聯集去重後**聚合」——後者才對，
+本 issue 一併修正前者的措辭。
+
+推論：`normalize` 只是**儲存壓縮**（減少列數），不是正確性的前提。異常離開沒跑
+normalize 時覆蓋率仍然正確（AC 7 因此自然成立）。
+"""
+
+from collections.abc import Container, Sequence
+from typing import Final, NamedTuple
+
+from app.et.constants import ITEM_QUIZ
+
+#: 解鎖門檻（FR-ET-US5-05）。
+COVERAGE_THRESHOLD_PCT: Final = 80
+
+
+class Segment(NamedTuple):
+    """一段實際播放過的影片時間軸範圍（秒）。
+
+    `ET_PROGRESS_INTERVAL.START_SEC` / `END_SEC` 為 `INT`，故一律以整數表示；
+    浮點的 `currentTime` 於進入本模組前已 `floor`。
+    """
+
+    start: int
+    end: int
+
+
+def clamp_segment(segment: Segment, *, duration_sec: int) -> Segment | None:
+    """把區段裁切進 `[0, duration_sec]`；完全落在範圍外或長度為零者回 `None`。
+
+    `data-model` 明訂「`END_SEC` 不得超過該影片之 `DURATION_SEC`（應用層裁切，避免
+    覆蓋率 > 100%）」。不裁切的話 `COVERAGE_PCT`（`DECIMAL(5,2)`）可能寫入失敗。
+
+    長度為零者不寫入——`END_SEC > START_SEC` 是 `data-model` 的業務規則，且零長度
+    區段對覆蓋率沒有貢獻，留著只是雜訊。
+    """
+    start = max(0, segment.start)
+    end = min(duration_sec, segment.end)
+    if end <= start:
+        return None
+    return Segment(start, end)
+
+
+def merge_segments(segments: list[Segment]) -> tuple[Segment, ...]:
+    """區段聯集去重：排序 → 合併重疊與相接。
+
+    **只合併重疊與相接（gap = 0）**。任何正數的「鄰近」門檻都會把未觀看的秒數算進
+    覆蓋率——`[0,30]` 與 `[31,60]` 中間那一秒他沒看過，合併就等於送他一秒。
+    `data-model` 用「重疊 / 鄰近」的字眼，此處取無損的讀法。
+    """
+    if not segments:
+        return ()
+    ordered = sorted(segments)
+    merged: list[Segment] = [ordered[0]]
+    for current in ordered[1:]:
+        last = merged[-1]
+        if current.start <= last.end:  # 重疊或相接
+            if current.end > last.end:
+                merged[-1] = Segment(last.start, current.end)
+        else:
+            merged.append(current)
+    return tuple(merged)
+
+
+def coverage_pct(segments: list[Segment], *, duration_sec: int) -> int:
+    """累計覆蓋率（%，四捨五入至整數）。
+
+    **先聯集再加總**——見模組 docstring。`duration_sec` 非正數時回 0 而非除零：
+    理論上影片必有長度（上傳時由 ffprobe 取得），但資料異常不該讓學員的頁面 500。
+
+    上限 100：聯集去重後理論上不可能超過，但區段若未經 `clamp_segment` 就進來
+    （例如日後有人繞過），這裡是最後一道。
+    """
+    if duration_sec <= 0:
+        return 0
+    watched = sum(seg.end - seg.start for seg in merge_segments(segments))
+    return min(100, round(watched * 100 / duration_sec))
+
+
+def is_video_completed(coverage: int) -> bool:
+    """單支影片是否達標（FR-ET-US5-05）。"""
+    return coverage >= COVERAGE_THRESHOLD_PCT
+
+
+def is_material_completed(video_coverages: list[int]) -> bool:
+    """含影片之教材是否完成。
+
+    `data-model` §ET_PROGRESS：「該教材**所有未刪除影片**之 `COVERAGE_PCT` 皆 ≥ 80%
+    （**缺任一支影片之進度紀錄視為 0%**）」——故呼叫端須為每支影片都給一個值，
+    沒有進度紀錄的那支要傳 0，不能只傳有紀錄的那些。
+
+    **沒有影片的教材**（純文件 / 說明文字）不走本函式——那類是「開啟即完成」。
+    """
+    return all(is_video_completed(c) for c in video_coverages)
+
+
+def is_item_unlocked(*, previous_completed: bool | None, self_completed: bool) -> bool:
+    """章節內的項目是否已解鎖（#274 SA Q2 裁示 A：依序解鎖）。
+
+    Args:
+        previous_completed: 同章節內前一項是否完成；`None` 表示本項為該章第一項。
+        self_completed: 本項自身是否已完成。
+
+    **已完成者不再上鎖**——依序解鎖擋的只有「還沒學過的」。少了這條，學員完成第 3 項
+    之後想回頭複習第 1 項會被自己的進度擋住。
+
+    裁示 A 真正要擋的是「還沒看教材就先點測驗」：`ET_QUIZ.MAX_RETRY` 有重考次數上限，
+    讓學員能先點進測驗，會把那個限制變成陷阱。
+    """
+    if self_completed or previous_completed is None:
+        return True
+    return previous_completed
+
+
+class ItemState(NamedTuple):
+    """解鎖判定所需的單一項目狀態。
+
+    Attributes:
+        completed: 側欄顯示用的「已完成」。
+        treat_as_done: 供**解鎖判定**使用的「視為完成」。多數情況等同 `completed`，
+            但**測驗項目在 `ET-6` 交付前恆為 `True`**——沒有測驗結果可查，若照
+            `completed=False` 判定，測驗之後的所有項目與章節會永久鎖死，學員的課程
+            就此停在那裡。判斷點留在此欄位，`ET-6` 只需改餵值來源。
+    """
+
+    item_id: int
+    completed: bool
+    treat_as_done: bool
+
+
+def build_item_state(item_id: int, item_type: str, *, completed_ids: Container[int]) -> ItemState:
+    """由項目型別與完成集合組出 `ItemState`。
+
+    ⚠️ **讀取路徑（側欄旗標）與寫入路徑（擋下鎖定項目）必須共用本函式**。兩邊各自
+    組一份的話，`treat_as_done` 這條「測驗恆視為通過」的規則就有兩個版本——而它們
+    分岔的表現是「側欄顯示解鎖但後端擋下」，一個學員完全無法理解、也不會有測試自然
+    抓到的狀態。
+    """
+    completed = item_id in completed_ids
+    return ItemState(
+        item_id=item_id,
+        completed=completed,
+        # 測驗於 `ET-6` 交付前恆視為通過——否則它後面的一切永久鎖死
+        treat_as_done=completed or item_type == ITEM_QUIZ,
+    )
+
+
+def locked_item_ids(chapters: Sequence[Sequence[ItemState]]) -> frozenset[int]:
+    """依「章節依序 + 章節內依序」算出所有**鎖定**的項目（AC 5 / AC 6 + 裁示 Q2=A）。
+
+    兩層規則：
+
+    | 層 | 規則 | 來源 |
+    |---|---|---|
+    | 章節 | 前一章**所有**項目完成才解鎖下一章 | `spec_us5` AC 9 |
+    | 章節內 | 前一項完成才解鎖下一項（依 `SORT_ORDER`）| #274 SA Q2 裁示 A |
+
+    **已完成的項目永不鎖定**——回頭複習照常，依序解鎖擋的只有「還沒學過的」。這條
+    優先於章節層：教師事後調整章節順序時，學員已學過的東西不該突然被鎖回去。
+
+    ⚠️ **空章節不擋路**：沒有項目的章節視為已完成（`all([])` 為 `True`）。反過來會讓
+    教師建了空章節之後，整門課程的後半段永久鎖死，而畫面上完全看不出原因。
+
+    Args:
+        chapters: 已依 `SORT_ORDER` 排序的章節，每章為已排序的項目。**順序即規則**，
+            未排序的輸入會算出錯誤結果。
+
+    Returns:
+        鎖定項目的 `ITEM_ID` 集合；其餘皆解鎖。
+    """
+    locked: set[int] = set()
+    previous_chapter_done = True
+    for items in chapters:
+        chapter_unlocked = previous_chapter_done
+        previous_done: bool | None = None
+        for state in items:
+            unlocked = state.completed or (
+                chapter_unlocked and is_item_unlocked(previous_completed=previous_done, self_completed=False)
+            )
+            if not unlocked:
+                locked.add(state.item_id)
+            previous_done = state.treat_as_done
+        previous_chapter_done = all(s.treat_as_done for s in items)
+    return frozenset(locked)

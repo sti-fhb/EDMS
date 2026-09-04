@@ -31,6 +31,12 @@
 | 保留 1 天而非立即刪 | 逾期列本身已無用（token 不可用、#212 後也不含密碼），留一天讓**當天**的客服問題還查得到「這個 Email 前一天有人送過註冊」。以常數而非 `DP_PARAM`——無證據需要調整。**這不是證據保留期**（發起者追溯只記應用層 log，見 #225）。 |
 | **不逐列寫稽核** | 本表**匿名可寫**（自助註冊為公開端點、30 次/分/IP），逐列寫稽核等於讓任何人往 append-only、鏈式雜湊的 `DP_AUDIT_LOG` 灌列。被清的列早已逾期、無業務意義；需要留痕的是「有人覆蓋了**別人**的列」，那由 `register_service` 與 `UsersService.create_user` 各自記一筆 `DELETE` 稽核。刪除筆數由 handler 記入 log。 |
 
+### 保留 `DELETED` 但特定路徑硬刪除
+
+| Table | 模組 | 硬刪除路徑 | 理由 |
+|-------|------|-----------|------|
+| `ET_PROGRESS_INTERVAL` | ET | `progress/repository.replace_intervals`（normalize 與累計列數超限時的就地壓縮）| 本表以「每段播放一列」記錄影片觀看區段，覆蓋率一律取**區段聯集**後計算。壓縮所刪除的是「**同一批資料的未壓縮表述**」——`[0,60]` 與 `[30,90]` 換成 `[0,90]`，資訊完全等價，不是使用者資料的作廢。留著軟刪除列會讓每次覆蓋率計算都要過濾一堆歷史雜訊（該路徑在每次暫停 / 跳轉都會執行），而那些列不帶任何 `DELETED=1` 才有的資訊。<br>本表其餘查詢仍照常過濾 `DELETED = 0`，故保留 `BaseModel` 而非改用 `BaseModelHardDelete`。<br>⚠️ **刪除範圍限定在 SELECT 快照讀到的 `INTERVAL_ID`**，不可用 `(USER_ID, VIDEO_ID)` 全量刪——後者會讓併發寫入的區段被掃掉而永久遺失（表現為學員的覆蓋率倒退、已完成的項目變回未完成）。 |
+
 ### 無 `DELETED` 但非硬刪除（`BaseModelNoDelete` / `AuditLogBaseModel`）
 
 | Table | 基底 | 說明 |
@@ -39,6 +45,15 @@
 | `DP_AUDIT_LOG` / `DP_PWD_HIST` / `DP_SCHEDULE_LOG` | `AuditLogBaseModel` | append-only 記錄表。 |
 
 ## AuditLogService 用法
+
+### 明示不寫稽核的例外
+
+| 位置 | 略過的範圍 | 理由 |
+|------|-----------|------|
+| `et/enrollment/service.py` | `ET_ENROLL_001`（邀請碼查無）**失敗路徑** | 該路徑是枚舉攻擊的主要面，逐次寫入會在被攻擊時灌爆稽核表。加入課程**成功**時仍照常寫稽核。 |
+| `et/progress/router.py` 三個端點 | **成功寫入路徑本身** | `log_action` 以**單一固定 key** 的 `pg_advisory_xact_lock` 序列化稽核鏈，且持有至整個外層交易結束。掛在全站頻率最高的端點（每次暫停 / 跳轉 / 切換項目各一次）上，會讓**所有模組**的稽核寫入排隊等同一把鎖。學習軌跡完整保存在三張進度表與 `ET_ENROLLMENT.LAST_ACTIVITY_AT`，追溯需求由那些表滿足。 |
+
+> 上表兩筆**性質不同、不可互相援引**：前者是防枚舉（只略過失敗路徑），後者是高頻遙測（略過成功路徑）。
 
 跨模組經 `app.services.AuditLogService` 呼叫；`log_action(db, module, func_name, action_type, result, operator_id, target_id=, description=, source_ip=)`。`action_type` 用 `DP_PARAM.ACTION_TYPE` 代碼（LOGIN/LOGOUT/CREATE/UPDATE/DELETE）；停用啟用、鎖定解鎖、密碼重置等以 `func_name` + `description` 細分。自助註冊 / 驗證等無登入操作者之情境，`operator_id` 填該帳號本人 USER_ID（見 spec_us2 Clarifications）。
 

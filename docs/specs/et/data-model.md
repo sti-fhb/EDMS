@@ -437,7 +437,9 @@
 **業務規則**:
 - 每段播放（暫停 / 結束 / 跳轉）INSERT 一筆；索引 (USER_ID, VIDEO_ID)
 - 學員離開頁面時系統執行 normalize：SELECT (USER_ID, VIDEO_ID) → 排序 → 合併重疊 / 鄰近區段 → DELETE → INSERT 合併後結果，並回寫 `ET_PROGRESS_VIDEO.COVERAGE_PCT`
-- 覆蓋率 = SUM(END_SEC − START_SEC) ÷ **`ET_MATERIAL_VIDEO.DURATION_SEC`**（normalize 前後皆可正確計算）
+- 覆蓋率 = **區段聯集去重後**之總秒數 ÷ **`ET_MATERIAL_VIDEO.DURATION_SEC`**（normalize 前後皆可正確計算，因計算本身就先聯集）
+  - ⚠️ **不可寫成 `SUM(END_SEC − START_SEC)`**（2026-09-04 / #274 修正措辭）：normalize 之前區段可能重疊，`[0,60]` 與 `[30,90]` 的 SUM 為 120、聯集為 90。照 SUM 實作會讓「重複觀看不加成」（FR-ET-US5-06）失效——學員把同一段看兩次就能刷到 80%。本行原措辭與 §ET_PROGRESS_VIDEO 的「區段聯集去重後聚合」自相矛盾，以後者為準。
+  - 推論：normalize 只是**儲存壓縮**（減少列數），不是正確性的前提。異常離開沒跑 normalize 時覆蓋率仍然正確。
 - END_SEC 不得超過該影片之 DURATION_SEC（應用層裁切，避免覆蓋率 > 100%）
 - 不限區段筆數（不裁切）
 

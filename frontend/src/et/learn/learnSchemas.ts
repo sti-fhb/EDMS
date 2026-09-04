@@ -10,9 +10,13 @@ export interface ItemNode {
   title: string
   material_id: number | null
   quiz_id: number | null
-  /** **本 issue 恆為 false**——解鎖判定依賴 `ET_PROGRESS`（`ET-5b`）。 */
+  /**
+   * 是否鎖定（#274）。章節依序 + 章節內依序（SA Q2 裁示 A）。
+   *
+   * **教師預覽恆為 false**——他沒有進度可累積，照學員規則算會被鎖在第 1 項。
+   */
   locked: boolean
-  /** **本 issue 恆為 false**，同上。 */
+  /** 是否已完成（#274）。測驗項目於 `ET-6` 交付前恆為 false，但它不擋住後續。 */
   completed: boolean
 }
 
@@ -33,6 +37,12 @@ export interface LearnStructure {
   is_closed: boolean
   /** 已依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮之可選倍速。 */
   playback_rates: number[]
+  /**
+   * 上次檢視之項目（#274 SA Q1 裁示 B）。`null` = 還沒看過任何項目 → 定位第 1 章第 1 項。
+   *
+   * 影片內的秒數是另一半，在 `MaterialVideoRow.last_position_sec`。
+   */
+  last_item_id: number | null
   chapters: ChapterNode[]
 }
 
@@ -41,6 +51,10 @@ export interface MaterialVideoRow {
   file_name: string
   duration_sec: number
   sort_order: number
+  /** 該學員對這支影片的累計覆蓋率（#274）。達 80% 解鎖；**教師預覽恆為 0**。 */
+  coverage_pct: number
+  /** 上次播放到第幾秒，供續看（AC 11 的另一半）。`null` = 從頭播。 */
+  last_position_sec: number | null
 }
 
 export interface MaterialDocRow {
@@ -66,7 +80,7 @@ export interface MaterialContent {
   docs: MaterialDocRow[]
 }
 
-/** 側欄項目的呈現狀態。`ET-5b` 交付後 `locked` / `completed` 才會有真值。 */
+/** 側欄項目的呈現狀態（#274 起為真值）。 */
 export type ItemDisplayState = "completed" | "active" | "locked" | "available"
 
 export function itemDisplayState(item: ItemNode, activeItemId: number | null): ItemDisplayState {
