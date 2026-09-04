@@ -12,17 +12,24 @@
 `spec_us5` 原文寫「可重看**已學過的**教材」，本 issue 一併將措辭改為「課程教材」，
 避免下一位實作者照字面做出過濾。
 
-## 本 issue 不碰任何進度表
+## 進度接點於 #274 填實
 
-`locked` / `completed` 恆為 `False`——解鎖判定屬 `ET-5b`。欄位先備妥，`ET-5b` 交付時
-只需換取值來源，前端不必再改一次。
+`locked` / `completed` 原為恆 `False`（#255 沒有任何進度表讀寫）。#274 起改由
+`progress` 子模組供值——見 `_item_nodes`。
+
+## 教師預覽不套用解鎖規則
+
+擁有者不累積進度（#255 裁示 Q1），照學員規則算會把他鎖在第 1 章第 1 項——而預覽的
+用途正是「確認每一段內容在學員視角長什麼樣」。故 `is_owner and not enrolled` 時
+一律不鎖。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.et.common.dm_client import get_dm_document_client
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL, ITEM_QUIZ
+from app.et.course.models import EtItem
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access, playback_rates
 from app.et.learning.schemas import (
@@ -35,6 +42,8 @@ from app.et.learning.schemas import (
     MaterialVideoRow,
 )
 from app.et.material.storage import resolve_within_root
+from app.et.progress.repository import EtProgressRepository
+from app.et.progress.rules import ItemState, locked_item_ids
 from app.services import ParamService
 
 #: 倍速上限之參數代碼。單值參數，明細碼固定 `VALUE`（比照 #204 的邀請碼長度）。
@@ -59,9 +68,11 @@ class EtLearningService:
         self,
         repository: EtLearningRepository | None = None,
         params: ParamService | None = None,
+        progress: EtProgressRepository | None = None,
     ) -> None:
         self._repo = repository or EtLearningRepository()
         self._params = params or ParamService()
+        self._progress = progress or EtProgressRepository()
 
     async def structure(self, db: AsyncSession, course_id: int, *, user_id: str) -> LearnStructure:
         """ET05 左側導覽之完整結構（AC 1 / AC 2）。
@@ -80,25 +91,21 @@ class EtLearningService:
             # 擁有者不受此限——教師需要在發布**之前**確認學員視角（#255 裁示 Q1 的
             # 同一個理由；草稿階段正是最需要預覽的時候）。
             raise _NOT_FOUND
-        is_owner = await self._require_access(db, course_id=course_id, user_id=user_id, course_owner=course.owner_id)
+        enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
+        is_owner = course.owner_id == user_id
+        ensure_can_access(enrolled=enrolled, is_owner=is_owner)
 
         chapters = await self._repo.chapters(db, course_id)
         rows = await self._repo.items_with_titles(db, [c.chapter_id for c in chapters])
-        by_chapter: dict[int, list[ItemNode]] = {}
-        for item, material_name, quiz_name in rows:
-            by_chapter.setdefault(item.chapter_id, []).append(
-                ItemNode(
-                    item_id=item.item_id,
-                    item_type=item.item_type,
-                    sort_order=item.sort_order,
-                    # 名稱取自對應子表；兩者皆無（資料異常）時給一個不會讓側欄出現空白列的預設。
-                    title=(material_name if item.item_type == ITEM_MATERIAL else quiz_name) or "（未命名）",
-                    material_id=item.material_id,
-                    quiz_id=item.quiz_id,
-                    locked=False,  # `ET-5b`
-                    completed=False,  # `ET-5b`
-                )
-            )
+        # 擁有者預覽（是擁有者且**不在籍**）不累積進度，故完成集合為空、也不套用鎖定。
+        # 教師若真的用邀請碼加入自己的課，他就是學員，一切照學員規則走。
+        is_preview = is_owner and not enrolled
+        completed_ids: set[int] = (
+            set() if is_preview else await self._progress.completed_item_ids(db, user_id=user_id, course_id=course_id)
+        )
+        by_chapter = self._item_nodes(
+            chapters=[c.chapter_id for c in chapters], rows=rows, completed_ids=completed_ids, is_preview=is_preview
+        )
 
         max_rate = await self._params.get_int_param(db, _MAX_RATE_PARAM, "VALUE", _DEFAULT_MAX_RATE)
         return LearnStructure(
@@ -108,6 +115,9 @@ class EtLearningService:
             is_owner=is_owner,
             is_closed=course.status == COURSE_CLOSED,
             playback_rates=list(playback_rates(max_rate=max_rate)),
+            last_item_id=(
+                None if is_preview else await self._progress.get_last_item_id(db, user_id=user_id, course_id=course_id)
+            ),
             chapters=[
                 ChapterNode(
                     chapter_id=c.chapter_id,
@@ -118,6 +128,61 @@ class EtLearningService:
                 for c in chapters
             ],
         )
+
+    @staticmethod
+    def _item_nodes(
+        *,
+        chapters: list[int],
+        rows: list[tuple[EtItem, str | None, str | None]],
+        completed_ids: set[int],
+        is_preview: bool,
+    ) -> dict[int, list[ItemNode]]:
+        """組側欄項目並套用解鎖判定（#274）。
+
+        `rows` 已由 repository 依 `(CHAPTER_ID, SORT_ORDER, ITEM_ID)` 排序，
+        `chapters` 依 `SORT_ORDER`——**順序即解鎖規則**，故此處按 `chapters` 的順序
+        取值餵給 `locked_item_ids`，不可改用 `dict` 的插入序（沒有項目的章節不會出現
+        在 `by_chapter` 裡，會讓章節序列少一節）。
+        """
+        by_chapter: dict[int, list[tuple[EtItem, str | None, str | None]]] = {}
+        for item, material_name, quiz_name in rows:
+            by_chapter.setdefault(item.chapter_id, []).append((item, material_name, quiz_name))
+
+        locked = (
+            frozenset()
+            if is_preview
+            else locked_item_ids(
+                [
+                    [
+                        ItemState(
+                            item_id=item.item_id,
+                            completed=item.item_id in completed_ids,
+                            # 測驗於 `ET-6` 交付前恆視為通過——否則它後面的一切永久鎖死。
+                            treat_as_done=item.item_id in completed_ids or item.item_type == ITEM_QUIZ,
+                        )
+                        for item, _, _ in by_chapter.get(chapter_id, [])
+                    ]
+                    for chapter_id in chapters
+                ]
+            )
+        )
+        return {
+            chapter_id: [
+                ItemNode(
+                    item_id=item.item_id,
+                    item_type=item.item_type,
+                    sort_order=item.sort_order,
+                    # 名稱取自對應子表；兩者皆無（資料異常）時給一個不會讓側欄出現空白列的預設。
+                    title=(material_name if item.item_type == ITEM_MATERIAL else quiz_name) or "（未命名）",
+                    material_id=item.material_id,
+                    quiz_id=item.quiz_id,
+                    locked=item.item_id in locked,
+                    completed=item.item_id in completed_ids,
+                )
+                for item, material_name, quiz_name in items
+            ]
+            for chapter_id, items in by_chapter.items()
+        }
 
     async def material_content(self, db: AsyncSession, material_id: int, *, user_id: str) -> MaterialContent:
         """教材內容：說明文字 + 影片清單 + DM 文件清單（含廢止旗標）。"""
@@ -144,9 +209,23 @@ class EtLearningService:
             # 不一致即拒，不去猜哪一個才對。
             raise _FILE_NOT_FOUND
 
+        # 授權已於上方通過（在籍 OR 擁有者），故「不在籍」在這裡等同「擁有者預覽」。
+        # 預覽不累積進度（#255 裁示 Q1）——不查也不回，查了只會拿到一片 0，而那個 0 會
+        # 被前端當成「看了 0%」而非「不適用」。
+        enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
+        video_progress = (
+            await self._progress.video_progress_of_material(db, user_id=user_id, material_id=material_id)
+            if enrolled
+            else {}
+        )
         videos = [
             MaterialVideoRow(
-                video_id=v.video_id, file_name=v.file_name, duration_sec=v.duration_sec, sort_order=v.sort_order
+                video_id=v.video_id,
+                file_name=v.file_name,
+                duration_sec=v.duration_sec,
+                sort_order=v.sort_order,
+                coverage_pct=video_progress.get(v.video_id, (0, None))[0],
+                last_position_sec=video_progress.get(v.video_id, (0, None))[1],
             )
             for v in await self._repo.videos(db, material_id)
         ]

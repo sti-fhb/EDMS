@@ -18,10 +18,12 @@ import pytest
 
 from app.et.progress.rules import (
     COVERAGE_THRESHOLD_PCT,
+    ItemState,
     Segment,
     clamp_segment,
     coverage_pct,
     is_item_unlocked,
+    locked_item_ids,
     merge_segments,
 )
 
@@ -155,6 +157,74 @@ class TestIsItemUnlocked:
         少了這條，學員完成第 3 項後想回看第 1 項會被自己的進度擋住，那顯然不對。
         """
         assert is_item_unlocked(previous_completed=False, self_completed=True)
+
+
+def _item(item_id: int, *, completed: bool = False, treat_as_done: bool | None = None) -> ItemState:
+    """測試用項目。`treat_as_done` 未指定時等同 `completed`（一般教材項目的情形）。"""
+    return ItemState(
+        item_id=item_id,
+        completed=completed,
+        treat_as_done=completed if treat_as_done is None else treat_as_done,
+    )
+
+
+class TestLockedItemIds:
+    """章節依序 + 章節內依序的整體解鎖判定（AC 5 / AC 6 + 裁示 Q2=A）。"""
+
+    def test_全新學員只解鎖第一章第一項(self) -> None:
+        chapters = [[_item(1), _item(2)], [_item(3), _item(4)]]
+        assert locked_item_ids(chapters) == frozenset({2, 3, 4})
+
+    def test_章節內依序解鎖(self) -> None:
+        chapters = [[_item(1, completed=True), _item(2), _item(3)]]
+        assert locked_item_ids(chapters) == frozenset({3})
+
+    def test_前一章未全部完成則下一章全鎖(self) -> None:
+        """AC 6：覆蓋率未達時阻擋切換至下一章節。"""
+        chapters = [[_item(1, completed=True), _item(2)], [_item(3), _item(4)]]
+        assert locked_item_ids(chapters) == frozenset({3, 4})
+
+    def test_前一章全部完成則下一章第一項解鎖(self) -> None:
+        chapters = [[_item(1, completed=True), _item(2, completed=True)], [_item(3), _item(4)]]
+        assert locked_item_ids(chapters) == frozenset({4})
+
+    def test_已完成項目永不鎖定(self) -> None:
+        """教師事後調整章節順序時，學員已學過的東西不該突然被鎖回去。
+
+        這裡第 2 章的項目 4 已完成，但第 1 章尚未全部完成——章節層說該鎖，
+        「已完成永不鎖」優先。
+        """
+        chapters = [[_item(1), _item(2)], [_item(3), _item(4, completed=True)]]
+        assert 4 not in locked_item_ids(chapters)
+
+    def test_空章節不擋路(self) -> None:
+        """**沒有項目的章節視為已完成**。
+
+        反過來會讓教師建了空章節之後，整門課程的後半段永久鎖死，而畫面上完全看不出
+        原因——側欄只會顯示一整排 🔒，沒有任何可操作的下一步。
+        """
+        chapters: list[list[ItemState]] = [[], [_item(1), _item(2)]]
+        assert locked_item_ids(chapters) == frozenset({2})
+
+    def test_測驗項目不擋住後續(self) -> None:
+        """**`ET-6` 未交付前，測驗恆視為通過**（規劃留言之範圍邊界）。
+
+        沒有測驗結果可查；若照 `completed=False` 判定，測驗之後的所有項目與章節會
+        永久鎖死，學員的課程就此停在那裡。判斷點留在 `treat_as_done`。
+        """
+        quiz = _item(2, completed=False, treat_as_done=True)
+        chapters = [[_item(1, completed=True), quiz, _item(3)], [_item(4)]]
+        # 測驗本身未完成（側欄不打勾）但**不擋住**其後的項目 3
+        assert locked_item_ids(chapters) == frozenset({4})
+
+    def test_章節末尾之測驗不擋住下一章(self) -> None:
+        """接上：測驗在章末時，它也不能擋住整個下一章。"""
+        quiz = _item(2, completed=False, treat_as_done=True)
+        chapters = [[_item(1, completed=True), quiz], [_item(3), _item(4)]]
+        assert locked_item_ids(chapters) == frozenset({4})
+
+    def test_無章節回空集合(self) -> None:
+        assert locked_item_ids([]) == frozenset()
 
 
 class TestThreshold:

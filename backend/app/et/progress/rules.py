@@ -28,6 +28,7 @@ unit test 涵蓋；integration 只驗接線與寫入。
 normalize 時覆蓋率仍然正確（AC 7 因此自然成立）。
 """
 
+from collections.abc import Sequence
 from typing import Final, NamedTuple
 
 #: 解鎖門檻（FR-ET-US5-05）。
@@ -130,3 +131,58 @@ def is_item_unlocked(*, previous_completed: bool | None, self_completed: bool) -
     if self_completed or previous_completed is None:
         return True
     return previous_completed
+
+
+class ItemState(NamedTuple):
+    """解鎖判定所需的單一項目狀態。
+
+    Attributes:
+        completed: 側欄顯示用的「已完成」。
+        treat_as_done: 供**解鎖判定**使用的「視為完成」。多數情況等同 `completed`，
+            但**測驗項目在 `ET-6` 交付前恆為 `True`**——沒有測驗結果可查，若照
+            `completed=False` 判定，測驗之後的所有項目與章節會永久鎖死，學員的課程
+            就此停在那裡。判斷點留在此欄位，`ET-6` 只需改餵值來源。
+    """
+
+    item_id: int
+    completed: bool
+    treat_as_done: bool
+
+
+def locked_item_ids(chapters: Sequence[Sequence[ItemState]]) -> frozenset[int]:
+    """依「章節依序 + 章節內依序」算出所有**鎖定**的項目（AC 5 / AC 6 + 裁示 Q2=A）。
+
+    兩層規則：
+
+    | 層 | 規則 | 來源 |
+    |---|---|---|
+    | 章節 | 前一章**所有**項目完成才解鎖下一章 | `spec_us5` AC 9 |
+    | 章節內 | 前一項完成才解鎖下一項（依 `SORT_ORDER`）| #274 SA Q2 裁示 A |
+
+    **已完成的項目永不鎖定**——回頭複習照常，依序解鎖擋的只有「還沒學過的」。這條
+    優先於章節層：教師事後調整章節順序時，學員已學過的東西不該突然被鎖回去。
+
+    ⚠️ **空章節不擋路**：沒有項目的章節視為已完成（`all([])` 為 `True`）。反過來會讓
+    教師建了空章節之後，整門課程的後半段永久鎖死，而畫面上完全看不出原因。
+
+    Args:
+        chapters: 已依 `SORT_ORDER` 排序的章節，每章為已排序的項目。**順序即規則**，
+            未排序的輸入會算出錯誤結果。
+
+    Returns:
+        鎖定項目的 `ITEM_ID` 集合；其餘皆解鎖。
+    """
+    locked: set[int] = set()
+    previous_chapter_done = True
+    for items in chapters:
+        chapter_unlocked = previous_chapter_done
+        previous_done: bool | None = None
+        for state in items:
+            unlocked = state.completed or (
+                chapter_unlocked and is_item_unlocked(previous_completed=previous_done, self_completed=False)
+            )
+            if not unlocked:
+                locked.add(state.item_id)
+            previous_done = state.treat_as_done
+        previous_chapter_done = all(s.treat_as_done for s in items)
+    return frozenset(locked)
