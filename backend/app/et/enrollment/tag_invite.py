@@ -35,7 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag
-from app.et.constants import COMPLETION_NOT_STARTED, ROLE_STUDENT, SOURCE_TAG_DEFAULT
+from app.et.constants import COMPLETION_NOT_STARTED, COURSE_PUBLISHED, ROLE_STUDENT, SOURCE_TAG_DEFAULT
+from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
 
@@ -73,6 +74,32 @@ class EtTagInviteRepository:
             select(EtTag.tag_id, EtTag.is_all).where(EtTag.tag_id.in_(list(tag_ids)), EtTag.deleted == 0)
         )
         return await self._resolve_students(db, rows.all())
+
+    async def courses_for_tags(self, db: AsyncSession, tag_ids: Sequence[int]) -> list[EtCourse]:
+        """掛有指定標籤之**已發布且未關閉**課程（貼標追溯用，FR-ET-US8-05）。
+
+        `STATUS='PUBLISHED'` 一項即涵蓋「已發布且未關閉」——`CLOSED` 是獨立狀態
+        （`DRAFT → PUBLISHED ⇄ CLOSED`），關閉的課程不該把新貼標的人拉進去，
+        他進去也不能累積進度。再開課後該人不會被補上，那是 `ET-11` 的範圍。
+
+        Returns:
+            依 `COURSE_ID` 排序、去重之課程列（排序使彙整信的課程順序可預期）。
+        """
+        if not tag_ids:
+            return []
+        rows = await db.scalars(
+            select(EtCourse)
+            .join(EtCourseTag, EtCourseTag.course_id == EtCourse.course_id)
+            .where(
+                EtCourseTag.tag_id.in_(list(tag_ids)),
+                EtCourseTag.deleted == 0,
+                EtCourse.status == COURSE_PUBLISHED,
+                EtCourse.deleted == 0,
+            )
+            .order_by(EtCourse.course_id)
+            .distinct()
+        )
+        return list(rows.all())
 
     async def _resolve_students(self, db: AsyncSession, tags: Sequence[tuple[int, bool]]) -> list[str]:
         """(TAG_ID, IS_ALL) 清單 → 具學員角色之 `USER_ID`（去重、排序）。
