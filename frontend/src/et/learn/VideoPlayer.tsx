@@ -1,22 +1,47 @@
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
+import Chip from "@mui/material/Chip"
+import LinearProgress from "@mui/material/LinearProgress"
 import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { MaterialVideoRow } from "./learnSchemas"
 import { requestVideoTicket, videoFileUrl } from "./learnService"
+import type { Segment, TrackerState } from "./playbackTracker"
+import { IDLE_TRACKER, beginSegment, endSegment, observeTime, seekTo } from "./playbackTracker"
+import { progressApi } from "./progressService"
+
+/** 覆蓋率達此值即解鎖下一項（FR-ET-US5-05，與後端 `COVERAGE_THRESHOLD_PCT` 一致）。 */
+const COVERAGE_THRESHOLD_PCT = 80
+
+/**
+ * `seeked` 的緩衝時間（毫秒）。
+ *
+ * 拖動進度條時 `seeked` 會連續觸發數十次；逐次送出等於一次拖動打數十個請求。緩衝後
+ * 一次送一批（後端單次上限 200 段，遠高於任何正常操作）。
+ *
+ * **只有 `seeked` 需要緩衝**——`pause` / `ended` 是刻意且低頻的動作，延後兩秒送只是
+ * 讓覆蓋率慢兩秒才更新，沒有換到任何東西。
+ *
+ * ⚠️ 這是**節流，不是可靠性機制**——離開頁面時一律強制 flush（見 `flushNow`）。
+ */
+const SEEK_FLUSH_DELAY_MS = 2000
 
 interface Props {
   video: MaterialVideoRow
   /** 已由後端依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮之可選倍速。 */
   playbackRates: number[]
+  /** 課程已關閉 → 不上報（#255 裁示 Q2：讀照舊、寫全停）。 */
+  readOnly: boolean
+  /** 覆蓋率變動時通知上層重抓側欄（解鎖狀態可能改變）。 */
+  onProgress?: (coverage: number) => void
 }
 
 /**
- * HTML5 影片播放器（AC 3 / AC 4）。
+ * HTML5 影片播放器（AC 3 / AC 4 / #274 進度上報）。
  *
  * ## 為何要先取票再播
  *
@@ -36,17 +61,80 @@ interface Props {
  * **只能往下限縮**（FR-ET-US5-03）。後端已算好可選清單，前端照列即可；自行產生會讓
  * 參數調高時冒出播放器不該有的倍速。
  *
- * ⚠️ **本 issue 不上報觀看區段**——`ET_PROGRESS_INTERVAL` 的寫入、覆蓋率、解鎖判定
- * 全屬 `ET-5b`。此處刻意不掛 `onPause` / `onSeeked` 等事件監聽：先鋪一半的上報會讓
- * `ET-5b` 得先拆掉它。
+ * ## 進度上報（#274）
+ *
+ * `play` 記起點、`pause` / `seeked` / `ended` 送出一段——邏輯全在
+ * [`playbackTracker`](./playbackTracker.ts)，本元件只負責接線與送出。
+ *
+ * ⚠️ **不用 `timeupdate` 累加**：它每秒觸發約 4 次，用它累加等於在前端做聯集，而前端
+ * 沒有既有區段可比對。這裡只用它記下「最後觀察到的位置」，供 `seeked` 取跳躍前的終點。
+ *
+ * **教師預覽照常上報**：後端對擁有者預覽是靜默忽略（回 200 不寫入）。前端不自行判斷
+ * `is_owner` 就跳過——教師若真的用邀請碼加入自己的課，他就是學員，進度該照常累積，
+ * 而前端分不出這兩種情況。
  */
-export function VideoPlayer({ video, playbackRates }: Props) {
+export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Props) {
   const [src, setSrc] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [rate, setRate] = useState(1)
+  const [coverage, setCoverage] = useState(video.coverage_pct)
   const videoRef = useRef<HTMLVideoElement>(null)
   /** 票過期只重試一次——換了新票仍失敗表示不是過期問題，再重試會變無窮迴圈。 */
   const retriedRef = useRef(false)
+  const trackerRef = useRef<TrackerState>(IDLE_TRACKER)
+  const bufferRef = useRef<Segment[]>([])
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 只在首次載入復位；換票重載走 `handleVideoError` 自己的復位。 */
+  const resumedRef = useRef(false)
+
+  /**
+   * 送出緩衝中的區段。
+   *
+   * **失敗靜默**——這條路徑常在「離開頁面」時執行，跳錯誤訊息學員也處理不了；而後端
+   * 的覆蓋率一律先聯集再算，下次補送同一段不會灌水。
+   */
+  const flushNow = useCallback(async () => {
+    if (flushTimerRef.current !== null) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    const pending = bufferRef.current
+    if (readOnly || pending.length === 0) return
+    bufferRef.current = []
+    try {
+      const result = await progressApi.reportIntervals(
+        video.video_id,
+        pending,
+        Math.floor(videoRef.current?.currentTime ?? 0),
+      )
+      setCoverage(result.coverage_pct)
+      onProgress?.(result.coverage_pct)
+    } catch {
+      // 靜默：下次離開時後端仍能由既有區段算出正確覆蓋率
+    }
+  }, [onProgress, readOnly, video.video_id])
+
+  /**
+   * 收下一段並決定何時送出。
+   *
+   * ⚠️ **`segment` 為 `null` 時仍要 flush**（非 debounce 路徑）：學員拖動進度條後直接
+   * 暫停，那次 `pause` 產生不了新區段，但緩衝裡還躺著剛才 `seeked` 的那幾段。若因為
+   * 「沒有新東西」就提早返回，它們得等 2 秒的計時器——而學員可能在那之前就切走了。
+   */
+  const enqueue = useCallback(
+    (segment: Segment | null, { debounce = false }: { debounce?: boolean } = {}) => {
+      if (readOnly) return
+      if (segment !== null) bufferRef.current = [...bufferRef.current, segment]
+      if (!debounce) {
+        void flushNow()
+        return
+      }
+      if (segment === null) return
+      if (flushTimerRef.current !== null) clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = setTimeout(() => void flushNow(), SEEK_FLUSH_DELAY_MS)
+    },
+    [flushNow, readOnly],
+  )
 
   useEffect(() => {
     // **不在 effect 內同步 setState**（串聯 render，且 ESLint 擋）。切換教材時
@@ -67,6 +155,37 @@ export function VideoPlayer({ video, playbackRates }: Props) {
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = rate
   }, [rate, src])
+
+  /**
+   * 離開時收尾：送出殘留區段 + normalize（AC 2）。
+   *
+   * `visibilitychange`（hidden）而非 `beforeunload`——後者在行動裝置與分頁切換時常常
+   * 不觸發，而「切到別的分頁去做別的事」正是最常見的離開方式。`pagehide` 補上真正
+   * 關閉分頁的情形。
+   *
+   * ⚠️ 這兩個時機都**不保證請求送得出去**。可以接受，因為 normalize 只是儲存壓縮：
+   * 沒跑成功只是後端的列數變多，覆蓋率照樣正確（AC 3）。
+   */
+  useEffect(() => {
+    if (readOnly) return
+    const finish = () => {
+      const { segment } = endSegment(trackerRef.current, videoRef.current?.currentTime ?? 0)
+      trackerRef.current = IDLE_TRACKER
+      if (segment !== null) bufferRef.current = [...bufferRef.current, segment]
+      void flushNow().then(() => progressApi.normalize(video.video_id).catch(() => undefined))
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") finish()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("pagehide", finish)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("pagehide", finish)
+      // 切換教材 / 離開頁面：同樣要收尾，否則最後一段永遠不會被送出
+      finish()
+    }
+  }, [flushNow, readOnly, video.video_id])
 
   /**
    * 票過期後的自動復原。
@@ -110,9 +229,28 @@ export function VideoPlayer({ video, playbackRates }: Props) {
     }
   }
 
+  /**
+   * 續看定位（AC 11 的後半）。
+   *
+   * 只做一次——`handleVideoError` 換票重載時有自己的復位點（復到當下位置，不是上次
+   * 的位置），兩者搶著設 `currentTime` 會把學員丟回更早的地方。
+   *
+   * 已看到最後一秒者不復位：那等於一按播放就立刻結束，看起來像壞掉。
+   */
+  function handleLoadedMetadata() {
+    const el = videoRef.current
+    const resumeAt = video.last_position_sec
+    if (el === null || resumedRef.current || resumeAt === null || resumeAt <= 0) return
+    resumedRef.current = true
+    if (resumeAt < video.duration_sec - 1) el.currentTime = resumeAt
+  }
+
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">{video.file_name}</Typography>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Typography variant="subtitle2">{video.file_name}</Typography>
+        {coverage >= COVERAGE_THRESHOLD_PCT && <Chip size="small" color="success" label="已完成" />}
+      </Stack>
 
       {error && <Alert severity="error">{error}</Alert>}
 
@@ -124,6 +262,31 @@ export function VideoPlayer({ video, playbackRates }: Props) {
           controls
           preload="metadata"
           onError={() => void handleVideoError()}
+          onLoadedMetadata={handleLoadedMetadata}
+          onPlay={(e) => {
+            trackerRef.current = beginSegment(e.currentTarget.currentTime)
+          }}
+          onTimeUpdate={(e) => {
+            trackerRef.current = observeTime(trackerRef.current, e.currentTarget.currentTime)
+          }}
+          onPause={(e) => {
+            const result = endSegment(trackerRef.current, e.currentTarget.currentTime)
+            trackerRef.current = result.state
+            enqueue(result.segment)
+          }}
+          onSeeked={(e) => {
+            const result = seekTo(trackerRef.current, e.currentTarget.currentTime, {
+              paused: e.currentTarget.paused,
+            })
+            trackerRef.current = result.state
+            // 拖動進度條會連續觸發——這是唯一需要緩衝的事件
+            enqueue(result.segment, { debounce: true })
+          }}
+          onEnded={(e) => {
+            const result = endSegment(trackerRef.current, e.currentTarget.currentTime)
+            trackerRef.current = result.state
+            enqueue(result.segment)
+          }}
           sx={{ width: "100%", maxHeight: 480, bgcolor: "common.black", borderRadius: 1 }}
         />
       )}
@@ -156,6 +319,22 @@ export function VideoPlayer({ video, playbackRates }: Props) {
           長度 {formatDuration(video.duration_sec)}
         </Typography>
       </Stack>
+
+      {!readOnly && (
+        <Box sx={{ pt: 0.5 }}>
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(100, coverage)}
+            color={coverage >= COVERAGE_THRESHOLD_PCT ? "success" : "primary"}
+            aria-label="影片觀看進度"
+          />
+          <Typography variant="caption" color="text.secondary">
+            {coverage >= COVERAGE_THRESHOLD_PCT
+              ? `完成 ${coverage}%`
+              : `完成 ${coverage}%（達 ${COVERAGE_THRESHOLD_PCT}% 後解鎖下一項）`}
+          </Typography>
+        </Box>
+      )}
     </Stack>
   )
 }

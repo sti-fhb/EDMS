@@ -1064,7 +1064,16 @@ export const handlers = [
       material_id: Number(params.materialId),
       material_name: "採血流程概論教材",
       description_html: "<p>本教材說明採血的基本流程。</p>",
-      videos: [{ video_id: 500, file_name: "採血示範.mp4", duration_sec: 615, sort_order: 1 }],
+      videos: [
+        {
+          video_id: 500,
+          file_name: "採血示範.mp4",
+          duration_sec: 615,
+          sort_order: 1,
+          coverage_pct: 0,
+          last_position_sec: null,
+        },
+      ],
       docs: [
         {
           doc_id: "DM-SOP-000001",
@@ -1080,8 +1089,27 @@ export const handlers = [
       ],
     }),
   ),
-  http.post("/api/et/videos/:videoId/ticket", () =>
-    HttpResponse.json({ ticket: "test-ticket", expires_in: 60 }),
+  http.post("/api/et/videos/:videoId/ticket", () => HttpResponse.json({ ticket: "test-ticket", expires_in: 60 })),
+
+  // ── ET05 學習進度（US5 / #274）──────────────────────────────────────────
+  http.post("/api/et/videos/:videoId/intervals", ({ params }) =>
+    HttpResponse.json({
+      video_id: Number(params.videoId),
+      coverage_pct: 0,
+      last_position_sec: null,
+      completed: false,
+    }),
+  ),
+  http.post("/api/et/videos/:videoId/normalize", ({ params }) =>
+    HttpResponse.json({
+      video_id: Number(params.videoId),
+      coverage_pct: 0,
+      last_position_sec: null,
+      completed: false,
+    }),
+  ),
+  http.post("/api/et/items/:itemId/viewed", ({ params }) =>
+    HttpResponse.json({ item_id: Number(params.itemId), completed: false }),
   ),
 ]
 

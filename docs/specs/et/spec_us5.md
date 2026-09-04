@@ -16,7 +16,7 @@
 
 1. **Given** 學員於 ET04 點擊課程卡片，**When** 系統載入 ET05，**Then** 左側顯示章節導覽列（含章節 / 教材 / 測驗清單，標示已完成 / 進行中 / 未解鎖狀態）；中間為內容區
 2. **Given** 學員首次進入該課程，**When** 系統載入，**Then** 自動定位至第 1 章節之第 1 項目
-3. **Given** 學員已學習過該課程，**When** 系統載入，**Then** 自動定位至上次觀看位置（依 ET_PROGRESS 之 LAST_POSITION）
+3. **Given** 學員已學習過該課程，**When** 系統載入，**Then** 自動定位至上次觀看位置（項目依 ET_ENROLLMENT 之 LAST_ITEM_ID、影片內秒數依 ET_PROGRESS_VIDEO 之 LAST_POSITION_SEC）
 
 ### 影片播放
 
@@ -59,7 +59,8 @@
 ## Functional Requirements
 
 - **FR-ET-US5-01**: 系統 MUST 於載入 ET05 時呈現左側章節導覽列（含章節 / 教材 / 測驗清單，並標示已完成 / 進行中 / 未解鎖狀態）與中間內容區。
-- **FR-ET-US5-02**: 系統 MUST 於學員首次進入時定位至第 1 章節之第 1 項目，已學習過者定位至上次觀看位置（依 ET_PROGRESS 之 LAST_POSITION）；觀看位置 MUST 跨 session 保留、返回時自動恢復。
+- **FR-ET-US5-02**: 系統 MUST 於學員首次進入時定位至第 1 章節之第 1 項目，已學習過者定位至上次觀看位置（項目依 ET_ENROLLMENT 之 LAST_ITEM_ID、影片內秒數依 ET_PROGRESS_VIDEO 之 LAST_POSITION_SEC）；觀看位置 MUST 跨 session 保留、返回時自動恢復。
+  - > 2026-09-04 / #274 修正欄位引用：原寫「依 ET_PROGRESS 之 LAST_POSITION」，但該欄位已於 2026-08-19 隨「影片進度逐支拆表」移至 ET_PROGRESS_VIDEO.LAST_POSITION_SEC，且它記的是**單支影片內的秒數**——「上次看到哪一個**項目**」在當時的資料模型裡無處可存。#274 SA Q1 裁示 B 於 ET_ENROLLMENT 增設 LAST_ITEM_ID 補上該段資訊（與既有的 LAST_ACTIVITY_AT 成對）。
 - **FR-ET-US5-03**: 系統 MUST 以 HTML5 video player 呈現影片教材（含播放 / 暫停 / 調速 / 音量 / 全螢幕控制），倍速選項為 0.75 / 1 / 1.25 / 1.5 / 2，上限 2 倍由 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE` 控制；**此參數只能往下限縮可選倍速、不能往上新增選項**（播放器之選項清單為前端寫死，調為 3 不會多出 3x；2026-08-19 #181 明文化，對應 DP #171 將本參數判為 `READONLY` 之理由）。
 - **FR-ET-US5-04**: 系統 MUST 於學員暫停 / 跳轉 / 結束播放時將對應播放區段以 INSERT 寫入 ET_PROGRESS_INTERVAL；並於學員離開頁面時對該影片執行 normalize（SELECT 全部 → 排序 → 合併重疊 / 鄰近區段 → DELETE 全部 → INSERT 合併後結果），異常離開（強制關閉 / 斷網）者 MUST 於下次離開該影片時補做 normalize，確保覆蓋率計算正確。
 - **FR-ET-US5-05**: 系統 MUST 以累計覆蓋率（實際播放區段聯集 ÷ 影片總長）判定含影片章節之解鎖，達 80% 方解鎖下一章節，未達時 MUST 阻擋切換至下一章節。

@@ -11,20 +11,29 @@ vi.mock("./learnService", async (orig) => {
   return { ...actual, requestVideoTicket }
 })
 
+const { reportIntervals, normalize } = vi.hoisted(() => ({ reportIntervals: vi.fn(), normalize: vi.fn() }))
+vi.mock("./progressService", () => ({ progressApi: { reportIntervals, normalize, markViewed: vi.fn() } }))
+
 const VIDEO: MaterialVideoRow = {
   video_id: 500,
   file_name: "採血示範.mp4",
   duration_sec: 615,
   sort_order: 1,
+  coverage_pct: 0,
+  last_position_sec: null,
 }
 
 beforeEach(() => {
   requestVideoTicket.mockReset()
   requestVideoTicket.mockResolvedValue("ticket-1")
+  reportIntervals.mockReset()
+  reportIntervals.mockResolvedValue({ video_id: 500, coverage_pct: 20, last_position_sec: 120, completed: false })
+  normalize.mockReset()
+  normalize.mockResolvedValue({ video_id: 500, coverage_pct: 20, last_position_sec: 120, completed: false })
 })
 
-function renderPlayer(rates = [0.75, 1, 1.25, 1.5, 2]) {
-  return renderWithProviders(<VideoPlayer video={VIDEO} playbackRates={rates} />)
+function renderPlayer(rates = [0.75, 1, 1.25, 1.5, 2], video: MaterialVideoRow = VIDEO, readOnly = false) {
+  return renderWithProviders(<VideoPlayer video={video} playbackRates={rates} readOnly={readOnly} />)
 }
 
 describe("ET05 影片播放器", () => {
@@ -111,4 +120,100 @@ describe("ET05 影片播放器", () => {
 
     expect(await screen.findByText(/影片載入失敗/)).toBeInTheDocument()
   })
+
+  describe("進度上報（#274）", () => {
+    async function mountedVideo(readOnly = false, video: MaterialVideoRow = VIDEO) {
+      const rendered = renderPlayer([1, 2], video, readOnly)
+      const el = await waitFor(() => {
+        const found = rendered.container.querySelector("video")
+        expect(found).toBeInTheDocument()
+        return found as HTMLVideoElement
+      })
+      return { ...rendered, video: el }
+    }
+
+    it("播放後暫停會上報該區段（AC 1）", async () => {
+      const { video } = await mountedVideo()
+
+      setCurrentTime(video, 0)
+      fireEvent.play(video)
+      setCurrentTime(video, 120)
+      fireEvent.timeUpdate(video)
+      fireEvent.pause(video)
+
+      await waitFor(() => expect(reportIntervals).toHaveBeenCalledTimes(1))
+      expect(reportIntervals).toHaveBeenCalledWith(500, [{ start_sec: 0, end_sec: 120 }], 120)
+    })
+
+    it("課程已關閉時完全不上報（AC 12）", async () => {
+      // #255 裁示 Q2：讀照舊、寫全停。後端也會擋（409），但每次暫停都打一個註定失敗的
+      // 請求是白費的——而且學員會在 devtools 看到一排紅色。
+      const { video } = await mountedVideo(true)
+
+      setCurrentTime(video, 0)
+      fireEvent.play(video)
+      setCurrentTime(video, 120)
+      fireEvent.timeUpdate(video)
+      fireEvent.pause(video)
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(reportIntervals).not.toHaveBeenCalled()
+    })
+
+    it("拉進度條到結尾不會把跳過的範圍算成看過（AC 7）", async () => {
+      const { video } = await mountedVideo()
+
+      setCurrentTime(video, 0)
+      setPaused(video, false) // jsdom 不實作播放，`paused` 需自行設定
+      fireEvent.play(video)
+      setCurrentTime(video, 10)
+      fireEvent.timeUpdate(video)
+      setCurrentTime(video, 600) // 拖到接近結尾
+      fireEvent.seeked(video)
+      setPaused(video, true)
+      fireEvent.pause(video)
+
+      await waitFor(() => expect(reportIntervals).toHaveBeenCalled())
+      const segments = reportIntervals.mock.calls[0][1]
+      expect(segments).toEqual([{ start_sec: 0, end_sec: 10 }])
+    })
+
+    it("上報後顯示覆蓋率", async () => {
+      const { video } = await mountedVideo()
+
+      setCurrentTime(video, 0)
+      fireEvent.play(video)
+      setCurrentTime(video, 120)
+      fireEvent.timeUpdate(video)
+      fireEvent.pause(video)
+
+      expect(await screen.findByText(/完成 20%/)).toBeInTheDocument()
+    })
+
+    it("有上次位置時載入後定位過去（AC 11）", async () => {
+      const { video } = await mountedVideo(false, { ...VIDEO, last_position_sec: 300 })
+
+      fireEvent.loadedMetadata(video)
+
+      expect(video.currentTime).toBe(300)
+    })
+
+    it("上次看到最後一秒者不定位，否則一按播放就結束", async () => {
+      const { video } = await mountedVideo(false, { ...VIDEO, last_position_sec: 615 })
+
+      fireEvent.loadedMetadata(video)
+
+      expect(video.currentTime).toBe(0)
+    })
+  })
 })
+
+/** jsdom 不實作播放，`currentTime` 需自行設定才會被事件處理器讀到。 */
+function setCurrentTime(video: HTMLVideoElement, seconds: number) {
+  Object.defineProperty(video, "currentTime", { value: seconds, configurable: true, writable: true })
+}
+
+/** 同上：jsdom 的 `paused` 恆為 true，而 `seeked` 需要它分辨「播放中拖動」與「暫停中拖動」。 */
+function setPaused(video: HTMLVideoElement, paused: boolean) {
+  Object.defineProperty(video, "paused", { value: paused, configurable: true, writable: true })
+}

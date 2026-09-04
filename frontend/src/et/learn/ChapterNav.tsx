@@ -22,11 +22,19 @@ interface Props {
 }
 
 /**
- * ET05 左側章節導覽（AC 1）。
+ * ET05 左側章節導覽（AC 1 / AC 6）。
  *
- * 狀態 icon 三態（已完成 ✓ / 進行中 → / 鎖定 🔒）**UI 已備妥，但本 issue 的資料恆為
- * 「可學習」**——`locked` / `completed` 依賴 `ET_PROGRESS`（`ET-5b`）。`ET-5b` 交付時
- * 只需讓後端填真值，本元件不必再改。
+ * 狀態 icon 三態（已完成 ✓ / 進行中 → / 鎖定 🔒）；`locked` / `completed` 自 #274 起
+ * 為真值。
+ *
+ * ## 鎖定項目**可點但不放行**，不是 `disabled`
+ *
+ * `disabled` 的 `ListItemButton` 不會觸發 `onClick`，於是點下去毫無反應——而 AC 6 要的
+ * 是「阻擋**並提示**」（ET-MSG-ET05-001「請先完成本章節之影片學習」）。學員需要知道
+ * 為什麼點不動，否則只會以為系統壞了。
+ *
+ * 故一律可點、由 `onSelect` 那端判斷 `locked` 決定提示或切換；視覺上仍以 `aria-disabled`
+ * 與淡化表達不可用。
  *
  * ⚠️ wireframe 的側欄底部另有「填寫課後問卷」入口——**本 issue 不做**（`ET-15` 未實作，
  * 且顯示條件需完課判定）。照抄會做出一顆永遠不會動作的按鈕。
@@ -57,8 +65,9 @@ export function ChapterNav({ chapters, activeItemId, onSelect }: Props) {
                   <ListItemButton
                     key={item.item_id}
                     selected={state === "active"}
-                    disabled={state === "locked"}
+                    aria-disabled={state === "locked"}
                     onClick={() => onSelect(item)}
+                    sx={state === "locked" ? { color: "text.disabled" } : undefined}
                   >
                     <ListItemIcon sx={{ minWidth: 32 }}>{stateIcon(state)}</ListItemIcon>
                     <ListItemIcon sx={{ minWidth: 28 }}>
