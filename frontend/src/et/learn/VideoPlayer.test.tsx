@@ -190,6 +190,27 @@ describe("ET05 影片播放器", () => {
       expect(await screen.findByText(/完成 20%/)).toBeInTheDocument()
     })
 
+    it("連續播放不暫停時也會持續上報（實測回報：完成度一路卡住）", async () => {
+      // `pause` / `seeked` / `ended` 都是「停下來」才觸發。少了播放中的定期打點，學員
+      // 從頭播到尾都不暫停時整段觀看在結束前一次都不會上報——畫面上的覆蓋率會停在
+      // 進頁時的舊值，而瀏覽器若在播放中被關掉，那整段就永久遺失。
+      const { video } = await mountedVideo()
+
+      setCurrentTime(video, 0)
+      setPaused(video, false)
+      fireEvent.play(video)
+      // 全程只有 timeupdate，沒有任何 pause / seeked / ended
+      for (const t of [5, 10, 16, 20, 32]) {
+        setCurrentTime(video, t)
+        fireEvent.timeUpdate(video)
+      }
+
+      await waitFor(() => expect(reportIntervals).toHaveBeenCalledTimes(2))
+      // 相接而不重疊——後端聯集回 [0,32]，與「播完才送一次」等價
+      expect(reportIntervals.mock.calls[0][1]).toEqual([{ start_sec: 0, end_sec: 16 }])
+      expect(reportIntervals.mock.calls[1][1]).toEqual([{ start_sec: 16, end_sec: 32 }])
+    })
+
     it("切換項目（unmount）時仍送出最後一段與正確的續看位置", async () => {
       // **React 在跑 useEffect cleanup 之前就把 DOM ref 設成 null**（passive effect 的
       // 執行順序）。若收尾時讀 `videoRef.current?.currentTime`，會拿到 0：

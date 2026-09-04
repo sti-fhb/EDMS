@@ -84,6 +84,37 @@ export function endSegment(state: TrackerState, endAt: number): { state: Tracker
 }
 
 /**
+ * 播放中的定期打點：把「起點 → 現在」切出來送，並**從同一點繼續記**。
+ *
+ * ## 為什麼需要它
+ *
+ * `pause` / `seeked` / `ended` 都是「停下來」才觸發的事件。學員從頭播到尾都不暫停時，
+ * 整段觀看在結束前**一次都不會上報**——畫面上的覆蓋率會一路停在進頁時的舊值（看起來
+ * 像壞掉），而瀏覽器若在播放中被關掉，那整段就永久遺失。
+ *
+ * ## 這不是「用 `timeupdate` 累加」
+ *
+ * 模組 docstring 警告的是「在前端把秒數加總當成覆蓋率」——前端沒有既有區段可比對，
+ * 做不出聯集。這裡送的仍是**播放頭實際走過的精確範圍**，只是切成好幾段：
+ * `[0,15]`、`[15,30]`、`[30,45]`⋯ 相接（gap = 0），後端聯集回 `[0,45]`，
+ * 結果與一次送完全相同。
+ *
+ * @param minSeconds 距離目前起點至少要走過幾秒才切一段；未達則原樣返回。
+ */
+export function checkpoint(
+  state: TrackerState,
+  currentTime: number,
+  { minSeconds }: { minSeconds: number },
+): { state: TrackerState; segment: Segment | null } {
+  if (state.anchor === null || floorSec(currentTime) - state.anchor < minSeconds) {
+    return { state: observeTime(state, currentTime), segment: null }
+  }
+  const { segment } = endSegment(state, currentTime)
+  // 從同一點重新起算——相接而不重疊，故聯集不變、也不會有沒看過的秒數被算進去
+  return { state: beginSegment(currentTime), segment }
+}
+
+/**
  * `seeked`：先結束「跳之前那一段」，再視情況從新位置重記起點。
  *
  * **這是「直接拉到結尾不算看過」的落實點**（FR-06）：跳過的範圍夾在舊段的終點與新段的

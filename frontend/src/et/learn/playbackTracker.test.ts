@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { IDLE_TRACKER, beginSegment, endSegment, observeTime, seekTo } from "./playbackTracker"
+import { IDLE_TRACKER, beginSegment, checkpoint, endSegment, observeTime, seekTo } from "./playbackTracker"
 
 /**
  * 播放區段追蹤（US5 / #274）。
@@ -80,6 +80,54 @@ describe("playbackTracker", () => {
         { start_sec: 0, end_sec: 20 },
         { start_sec: 100, end_sec: 130 },
       ])
+    })
+  })
+
+  describe("播放中定期打點", () => {
+    it("未達門檻不切段，只更新最後觀察位置", () => {
+      const { segment, state } = checkpoint(beginSegment(0), 10, { minSeconds: 15 })
+
+      expect(segment).toBeNull()
+      expect(state.anchor).toBe(0)
+      expect(state.last).toBe(10)
+    })
+
+    it("達門檻切出一段並從同一點續記", () => {
+      const { segment, state } = checkpoint(beginSegment(0), 15.8, { minSeconds: 15 })
+
+      expect(segment).toEqual({ start_sec: 0, end_sec: 15 })
+      expect(state.anchor).toBe(15)
+    })
+
+    it("連續打點的聯集與一次送完全相同", () => {
+      // 這是打點正確性的核心：切出來的段**相接**（gap = 0），後端聯集回同一個範圍。
+      // 若切點之間有空隙，學員實際看過的秒數會被吃掉。
+      const collected: { start_sec: number; end_sec: number }[] = []
+      let state = beginSegment(0)
+      for (const t of [15, 30, 45, 60]) {
+        const step = checkpoint(state, t, { minSeconds: 15 })
+        state = step.state
+        if (step.segment) collected.push(step.segment)
+      }
+
+      expect(collected).toEqual([
+        { start_sec: 0, end_sec: 15 },
+        { start_sec: 15, end_sec: 30 },
+        { start_sec: 30, end_sec: 45 },
+        { start_sec: 45, end_sec: 60 },
+      ])
+      // 相接 → 聯集為 [0,60]，與「一路播完才送一次」等價
+      expect(collected[0].start_sec).toBe(0)
+      expect(collected.at(-1)?.end_sec).toBe(60)
+      collected.forEach((seg, i) => {
+        if (i > 0) expect(seg.start_sec).toBe(collected[i - 1].end_sec)
+      })
+    })
+
+    it("沒有在播放時不打點", () => {
+      const { segment } = checkpoint(IDLE_TRACKER, 999, { minSeconds: 15 })
+
+      expect(segment).toBeNull()
     })
   })
 

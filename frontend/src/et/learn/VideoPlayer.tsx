@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { MaterialVideoRow } from "./learnSchemas"
 import { requestVideoTicket, videoFileUrl } from "./learnService"
 import type { Segment, TrackerState } from "./playbackTracker"
-import { IDLE_TRACKER, beginSegment, endSegment, observeTime, seekTo } from "./playbackTracker"
+import { IDLE_TRACKER, beginSegment, checkpoint, endSegment, seekTo } from "./playbackTracker"
 import { progressApi } from "./progressService"
 
 /** 覆蓋率達此值即解鎖下一項（FR-ET-US5-05，與後端 `COVERAGE_THRESHOLD_PCT` 一致）。 */
@@ -29,6 +29,19 @@ const COVERAGE_THRESHOLD_PCT = 80
  * ⚠️ 這是**節流，不是可靠性機制**——離開頁面時一律強制 flush（見 `flushNow`）。
  */
 const SEEK_FLUSH_DELAY_MS = 2000
+
+/**
+ * 播放中的定期打點間隔（**影片時間軸**秒數，非牆鐘時間）。
+ *
+ * ⚠️ 少了這個，連續播放到結束前**一次都不會上報**——`pause` / `seeked` / `ended` 都是
+ * 「停下來」才觸發的。實測症狀是「從頭播到尾都不暫停，完成度一路卡在進頁時的舊值」，
+ * 而瀏覽器若在播放中被關掉，那整段觀看會永久遺失。
+ *
+ * 取影片時間軸而非牆鐘：2 倍速時每 15 秒影片時間仍只送一次，與正常速度的請求數相同。
+ * 15 秒讓一支 2 分鐘的影片有 8 次更新（畫面看得出在動），而一小時的影片一分鐘也只送
+ * 4 次，遠低於 120 次/分的限流。
+ */
+const CHECKPOINT_SECONDS = 15
 
 interface Props {
   video: MaterialVideoRow
@@ -226,6 +239,11 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
     }
     retriedRef.current = true
     const resumeAt = videoRef.current?.currentTime ?? 0
+    // 換 `src` 會讓 `currentTime` 歸零並重新載入——先把目前這段結掉送出，否則從上次打點
+    // 到現在的觀看會夾在「舊 src 已失效、新 src 尚未載入」之間而消失。
+    const pending = endSegment(trackerRef.current, resumeAt)
+    trackerRef.current = IDLE_TRACKER
+    enqueue(pending.segment)
     try {
       const ticket = await requestVideoTicket(video.video_id)
       setSrc(videoFileUrl(video.video_id, ticket))
@@ -290,7 +308,16 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
           }}
           onTimeUpdate={(e) => {
             lastTimeRef.current = e.currentTarget.currentTime
-            trackerRef.current = observeTime(trackerRef.current, e.currentTarget.currentTime)
+            // 每 `CHECKPOINT_SECONDS` 影片秒切一段送出，播放中也能持續累積（見常數說明）。
+            // 未達門檻時 `checkpoint` 只更新「最後觀察位置」，行為與原本的 `observeTime` 相同。
+            const result = checkpoint(trackerRef.current, e.currentTarget.currentTime, {
+              minSeconds: CHECKPOINT_SECONDS,
+            })
+            trackerRef.current = result.state
+            // ⚠️ 只在真的切出一段時才呼叫 `enqueue`——`timeupdate` 每秒觸發約 4 次，
+            // 無條件呼叫會讓非 debounce 路徑每秒清掉 4 次 `seeked` 的緩衝計時器，
+            // 等於讓拖動進度條的節流失效。
+            if (result.segment !== null) enqueue(result.segment)
           }}
           onPause={(e) => {
             lastTimeRef.current = e.currentTarget.currentTime
