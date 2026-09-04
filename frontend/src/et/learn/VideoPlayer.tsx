@@ -86,6 +86,21 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 只在首次載入復位；換票重載走 `handleVideoError` 自己的復位。 */
   const resumedRef = useRef(false)
+  /** 收尾只跑一次——`visibilitychange`(hidden) 與 `pagehide` 在關閉分頁時**都會**觸發。 */
+  const finishedRef = useRef(false)
+  /**
+   * 最後已知的播放位置。
+   *
+   * ⚠️ **收尾時不可讀 `videoRef.current?.currentTime`**：`useEffect` 的 cleanup 是
+   * passive effect，React 在跑它**之前**就已經把 DOM ref 設成 `null`。於是切換項目
+   * （最常見的離開方式）時 `currentTime` 會讀成 `0`——
+   *
+   * - `endSegment(tracker, 0)`：`0 > anchor` 恆為假 → **最後那一段被整個丟掉**
+   * - `last_position_sec: 0`：後端對非 `null` 值一律覆寫 → **把續看位置重置為 0**（AC 11 壞掉）
+   *
+   * 故一律以本 ref 為位置來源，由各事件處理器同步更新。
+   */
+  const lastTimeRef = useRef(0)
 
   /**
    * 送出緩衝中的區段。
@@ -102,11 +117,7 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
     if (readOnly || pending.length === 0) return
     bufferRef.current = []
     try {
-      const result = await progressApi.reportIntervals(
-        video.video_id,
-        pending,
-        Math.floor(videoRef.current?.currentTime ?? 0),
-      )
+      const result = await progressApi.reportIntervals(video.video_id, pending, Math.floor(lastTimeRef.current))
       setCoverage(result.coverage_pct)
       onProgress?.(result.coverage_pct)
     } catch {
@@ -169,13 +180,21 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
   useEffect(() => {
     if (readOnly) return
     const finish = () => {
-      const { segment } = endSegment(trackerRef.current, videoRef.current?.currentTime ?? 0)
+      // 關閉分頁時 `visibilitychange`(hidden) 與 `pagehide` 會接連觸發。不去重的話會對
+      // 同一支影片送出兩組並行的「上報 + normalize」——首次觀看該影片時兩個請求會同時
+      // 嘗試建立 `ET_PROGRESS_VIDEO` 那一列。後端已改用 `ON CONFLICT` 擋住競態，此處
+      // 去重則是連多餘的請求都不要送。
+      if (finishedRef.current) return
+      finishedRef.current = true
+      const { segment } = endSegment(trackerRef.current, lastTimeRef.current)
       trackerRef.current = IDLE_TRACKER
       if (segment !== null) bufferRef.current = [...bufferRef.current, segment]
       void flushNow().then(() => progressApi.normalize(video.video_id).catch(() => undefined))
     }
     const onVisibility = () => {
       if (document.visibilityState === "hidden") finish()
+      // 切回分頁 → 學員還要繼續看，解除旗標讓下次離開能再收尾一次
+      if (document.visibilityState === "visible") finishedRef.current = false
     }
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pagehide", finish)
@@ -242,7 +261,9 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
     const resumeAt = video.last_position_sec
     if (el === null || resumedRef.current || resumeAt === null || resumeAt <= 0) return
     resumedRef.current = true
-    if (resumeAt < video.duration_sec - 1) el.currentTime = resumeAt
+    // 已看到最後一秒者不復位——那等於一按播放就立刻結束，看起來像壞掉。
+    // `Math.max(0, ...)` 讓 1 秒以內的極短影片不會因為門檻變成負數而永遠不復位。
+    if (resumeAt < Math.max(0, video.duration_sec - 1)) el.currentTime = resumeAt
   }
 
   return (
@@ -264,12 +285,15 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
           onError={() => void handleVideoError()}
           onLoadedMetadata={handleLoadedMetadata}
           onPlay={(e) => {
+            lastTimeRef.current = e.currentTarget.currentTime
             trackerRef.current = beginSegment(e.currentTarget.currentTime)
           }}
           onTimeUpdate={(e) => {
+            lastTimeRef.current = e.currentTarget.currentTime
             trackerRef.current = observeTime(trackerRef.current, e.currentTarget.currentTime)
           }}
           onPause={(e) => {
+            lastTimeRef.current = e.currentTarget.currentTime
             const result = endSegment(trackerRef.current, e.currentTarget.currentTime)
             trackerRef.current = result.state
             enqueue(result.segment)
@@ -278,11 +302,13 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
             const result = seekTo(trackerRef.current, e.currentTarget.currentTime, {
               paused: e.currentTarget.paused,
             })
+            lastTimeRef.current = e.currentTarget.currentTime
             trackerRef.current = result.state
             // 拖動進度條會連續觸發——這是唯一需要緩衝的事件
             enqueue(result.segment, { debounce: true })
           }}
           onEnded={(e) => {
+            lastTimeRef.current = e.currentTarget.currentTime
             const result = endSegment(trackerRef.current, e.currentTarget.currentTime)
             trackerRef.current = result.state
             enqueue(result.segment)

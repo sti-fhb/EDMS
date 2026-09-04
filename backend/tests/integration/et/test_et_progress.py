@@ -318,7 +318,10 @@ class TestItemViewed:
         fresh = await client.get(f"{_COURSES}/{course['course_id']}/learn", headers=h)
         assert fresh.json()["last_item_id"] is None, "還沒看過任何項目 → 前端定位第 1 章第 1 項"
 
-        await client.post(f"/api/et/items/{course['chapters'][1]['item_id']}/viewed", headers=h)
+        # 依序：先完成第 1 章（純文件、開啟即完成），第 2 章才解鎖
+        await client.post(f"/api/et/items/{course['chapters'][0]['item_id']}/viewed", headers=h)
+        second = await client.post(f"/api/et/items/{course['chapters'][1]['item_id']}/viewed", headers=h)
+        assert second.status_code == 200, second.text
         again = await client.get(f"{_COURSES}/{course['course_id']}/learn", headers=h)
 
         assert again.json()["last_item_id"] == course["chapters"][1]["item_id"]
@@ -399,6 +402,27 @@ class TestWriteGuards:
         assert r.json()["coverage_pct"] == 0
         assert await _interval_count(db, teacher, video_id) == 0
 
+    async def test_擁有者預覽已關閉的課程仍是靜默而非四零九(self, client, db) -> None:
+        """**守門 2 必須排在守門 3 之前**——這條釘住那個順序。
+
+        教師預覽一門已關閉的課程時，該給他「什麼都沒發生」而不是「此課程已關閉」：
+        後者暗示他做錯了什麼，但他只是在看自己的課。順序若被調換，其餘測試都不會發現
+        （`test_關閉課程上報被拒` 用的是學員、`test_擁有者預覽不累積進度` 用的是未關閉課程）。
+        """
+        teacher = await _user(db, "t_prog19", ROLE_TEACHER)
+        course = await _published_course(client, db, teacher, chapters=[True], code="31000019")
+        video_id = course["chapters"][0]["video_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
+        await db.flush()
+
+        r = await client.post(
+            _report(video_id), json={"segments": [{"start_sec": 0, "end_sec": 600}]}, headers=_bearer(teacher)
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["coverage_pct"] == 0
+        assert await _interval_count(db, teacher, video_id) == 0
+
     async def test_擁有者預覽不套用鎖定(self, client, db) -> None:
         """預覽的用途是「確認每一段內容在學員視角長什麼樣」。
 
@@ -412,6 +436,64 @@ class TestWriteGuards:
 
         assert r.json()["is_owner"] is True
         assert all(not item["locked"] for item in _items_by_id(r.json()).values())
+
+    async def test_未解鎖項目之_viewed_被擋(self, client, db) -> None:
+        """**H1 迴歸**：解鎖判定必須在後端執行，不能只靠前端不給點。
+
+        `spec_us5` AC 9 寫的是「系統阻擋」。只靠前端判 `locked`，任何人都能直接
+        `POST /items/{第 2 章的文件項目}/viewed` 拿到 `completed=true`——而
+        `locked_item_ids` 的「已完成永不鎖定」會讓那一項自我解鎖、第 3 章跟著開，
+        第 1 章一項都不必碰。對教育訓練系統而言那等於可以偽造依序完訓的紀錄。
+        """
+        teacher = await _user(db, "t_prog16", ROLE_TEACHER)
+        student = await _user(db, "s_prog16")
+        course = await _published_course(client, db, teacher, chapters=[True, False], code="31000016")
+        await _enroll(db, student, course["course_id"])
+        await db.commit()
+
+        # 第 1 章的影片一秒都沒看 → 第 2 章鎖定
+        r = await client.post(f"/api/et/items/{course['chapters'][1]['item_id']}/viewed", headers=_bearer(student))
+
+        # **404 而非 403**：與其餘以 id 定址的端點一致，不讓回應差異變成存在性 oracle
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_LEARN_001"
+
+    async def test_未解鎖影片之區段上報被擋(self, client, db) -> None:
+        """同上，另一條能產生進度的路徑——擋了 `viewed` 卻放行 `intervals` 等於沒擋。"""
+        teacher = await _user(db, "t_prog17", ROLE_TEACHER)
+        student = await _user(db, "s_prog17")
+        course = await _published_course(client, db, teacher, chapters=[True, True], code="31000017")
+        await _enroll(db, student, course["course_id"])
+        locked_video = course["chapters"][1]["video_id"]
+        await db.commit()
+
+        r = await client.post(
+            _report(locked_video), json={"segments": [{"start_sec": 0, "end_sec": 600}]}, headers=_bearer(student)
+        )
+
+        assert r.status_code == 404, r.text
+        assert await _interval_count(db, student, locked_video) == 0
+
+    async def test_上次播放秒數超過影片長度時被裁切(self, client, db) -> None:
+        """`LAST_POSITION_SEC` 是 INT4 且**不經 `clamp_segment`**。
+
+        不裁切的話上報一個 999 億會讓 asyncpg 在寫入時炸成 500，連同該次的區段一起回滾
+        ——任何在籍學員都能重複觸發的可用性擾動。
+        """
+        teacher = await _user(db, "t_prog18", ROLE_TEACHER)
+        student = await _user(db, "s_prog18")
+        course = await _published_course(client, db, teacher, chapters=[True], code="31000018")
+        await _enroll(db, student, course["course_id"])
+        chapter = course["chapters"][0]
+
+        r = await client.post(
+            _report(chapter["video_id"]),
+            json={"segments": [{"start_sec": 0, "end_sec": 120}], "last_position_sec": 99_999_999},
+            headers=_bearer(student),
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["last_position_sec"] == _DURATION
 
     async def test_非在籍者上報回四零四(self, client, db) -> None:
         """以 id 定址的資源一律 404——回 403 等於確認「這個 video_id 存在」。"""

@@ -190,6 +190,24 @@ describe("ET05 影片播放器", () => {
       expect(await screen.findByText(/完成 20%/)).toBeInTheDocument()
     })
 
+    it("切換項目（unmount）時仍送出最後一段與正確的續看位置", async () => {
+      // **React 在跑 useEffect cleanup 之前就把 DOM ref 設成 null**（passive effect 的
+      // 執行順序）。若收尾時讀 `videoRef.current?.currentTime`，會拿到 0：
+      //   - `endSegment(tracker, 0)` → 最後那一段被整個丟掉
+      //   - `last_position_sec: 0` → 後端覆寫，續看位置被重置（AC 11 壞掉）
+      // 而「切換到下一個項目」正是最常見的離開方式。
+      const { video, unmount } = await mountedVideo()
+
+      setCurrentTime(video, 100)
+      fireEvent.play(video)
+      setCurrentTime(video, 250)
+      fireEvent.timeUpdate(video)
+      unmount()
+
+      await waitFor(() => expect(reportIntervals).toHaveBeenCalled())
+      expect(reportIntervals).toHaveBeenCalledWith(500, [{ start_sec: 100, end_sec: 250 }], 250)
+    })
+
     it("有上次位置時載入後定位過去（AC 11）", async () => {
       const { video } = await mountedVideo(false, { ...VIDEO, last_position_sec: 300 })
 

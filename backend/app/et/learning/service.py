@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.et.common.dm_client import get_dm_document_client
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL, ITEM_QUIZ
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL
 from app.et.course.models import EtItem
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access, playback_rates
@@ -43,7 +43,7 @@ from app.et.learning.schemas import (
 )
 from app.et.material.storage import resolve_within_root
 from app.et.progress.repository import EtProgressRepository
-from app.et.progress.rules import ItemState, locked_item_ids
+from app.et.progress.rules import build_item_state, locked_item_ids
 from app.services import ParamService
 
 #: 倍速上限之參數代碼。單值參數，明細碼固定 `VALUE`（比照 #204 的邀請碼長度）。
@@ -154,12 +154,9 @@ class EtLearningService:
             else locked_item_ids(
                 [
                     [
-                        ItemState(
-                            item_id=item.item_id,
-                            completed=item.item_id in completed_ids,
-                            # 測驗於 `ET-6` 交付前恆視為通過——否則它後面的一切永久鎖死。
-                            treat_as_done=item.item_id in completed_ids or item.item_type == ITEM_QUIZ,
-                        )
+                        # 與寫入路徑的擋鎖判定（`progress/service._locked_ids`）共用同一支
+                        # ——兩邊各組一份的話，分岔的表現是「側欄顯示解鎖但後端擋下」。
+                        build_item_state(item.item_id, item.item_type, completed_ids=completed_ids)
                         for item, _, _ in by_chapter.get(chapter_id, [])
                     ]
                     for chapter_id in chapters

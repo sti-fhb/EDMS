@@ -13,7 +13,8 @@
 
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import Integer, delete, func, literal, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
@@ -57,30 +58,50 @@ class EtProgressRepository:
         return len(segments)
 
     async def list_intervals(self, db: AsyncSession, *, user_id: str, video_id: int) -> list[Segment]:
+        return [seg for _, seg in await self.list_intervals_with_ids(db, user_id=user_id, video_id=video_id)]
+
+    async def list_intervals_with_ids(
+        self, db: AsyncSession, *, user_id: str, video_id: int
+    ) -> list[tuple[int, Segment]]:
+        """區段連同 `INTERVAL_ID`——`replace_intervals` 需要它來限定刪除範圍。"""
         rows = await db.execute(
-            select(EtProgressInterval.start_sec, EtProgressInterval.end_sec).where(
+            select(EtProgressInterval.interval_id, EtProgressInterval.start_sec, EtProgressInterval.end_sec).where(
                 EtProgressInterval.user_id == user_id,
                 EtProgressInterval.video_id == video_id,
                 EtProgressInterval.deleted == 0,
             )
         )
-        return [Segment(start, end) for start, end in rows.all()]
+        return [(interval_id, Segment(start, end)) for interval_id, start, end in rows.all()]
 
     async def replace_intervals(
-        self, db: AsyncSession, *, user_id: str, video_id: int, segments: list[Segment], operator: OperatorInfo
+        self,
+        db: AsyncSession,
+        *,
+        user_id: str,
+        video_id: int,
+        replaced_ids: list[int],
+        segments: list[Segment],
+        operator: OperatorInfo,
     ) -> None:
-        """normalize 的寫入端：DELETE 全部 → INSERT 合併後結果。
+        """壓縮的寫入端：刪掉**快照中讀到的那些列**，換成合併後的結果。
 
-        **硬刪除而非軟刪除**——這裡刪掉的是「同一批資料的未壓縮表述」，不是使用者
-        資料的作廢。留著軟刪除列會讓 `list_intervals` 每次都要過濾一堆歷史雜訊，
-        而它們不帶任何 `DELETED=1` 才有的資訊（`sti-backend-modules` 之刪除策略例外）。
+        ## ⚠️ 只刪 `replaced_ids`，不可用 `(USER_ID, VIDEO_ID)` 全量刪
+
+        「SELECT → 記憶體合併 → 覆寫」之間沒有鎖，而同一支影片可能同時有另一個請求
+        在寫入（`pause` 觸發的上報還在飛，`pagehide` 的 normalize 已經進來；或學員開了
+        兩個分頁）。全量刪除會讓 A 的 DELETE 掃掉 B 剛寫入、A 卻沒讀到的區段，A 再把
+        舊快照寫回去——**該段觀看紀錄永久遺失**。
+
+        表現會是「覆蓋率倒退」，甚至讓已判定完成的項目變回未完成、後續章節重新上鎖，
+        而學員什麼都沒做錯。限定在快照 id 內刪除即可讓併發寫入自然共存：沒被讀到的列
+        原地保留，下次計算時一併聯集。
+
+        **硬刪除而非軟刪除**——這裡刪掉的是「同一批資料的未壓縮表述」，不是使用者資料
+        的作廢。留著軟刪除列會讓每次讀取都要過濾一堆歷史雜訊，而它們不帶任何
+        `DELETED=1` 才有的資訊（已登記於 `docs/ref/sti-backend-ref.md` 刪除策略例外表）。
         """
-        await db.execute(
-            delete(EtProgressInterval).where(
-                EtProgressInterval.user_id == user_id,
-                EtProgressInterval.video_id == video_id,
-            )
-        )
+        if replaced_ids:
+            await db.execute(delete(EtProgressInterval).where(EtProgressInterval.interval_id.in_(replaced_ids)))
         await self.add_intervals(db, user_id=user_id, video_id=video_id, segments=segments, operator=operator)
 
     # ── 影片進度 ────────────────────────────────────────────────────────────
@@ -106,27 +127,43 @@ class EtProgressRepository:
     ) -> EtProgressVideo:
         """寫入覆蓋率快取與上次播放位置。
 
-        `last_position_sec` 為 `None` 時**保留原值**——normalize 不帶位置，不該把
-        學員的續看點清掉。
+        ## 為何是 `ON CONFLICT` 而不是「查了再決定 INSERT / UPDATE」
+
+        **關閉分頁會同時觸發兩次收尾**：前端對 `visibilitychange`(hidden) 與 `pagehide`
+        各註冊一次，兩者都會送出上報。首次觀看某支影片時（本表尚無該列）兩個請求會
+        同時走到這裡，read-then-write 之間沒有鎖，第二個 INSERT 會撞
+        `UQ_ET_PROGRESS_VIDEO_USER_VIDEO` 變成未處理例外 500，並讓該次的區段一起回滾。
+        這不是理論競態，是關分頁的預設路徑。
+
+        `last_position_sec` 為 `None` 時**保留原值**——normalize 不帶位置，不該把學員的
+        續看點清掉。故 `set_` 用 `COALESCE(EXCLUDED, 既有值)` 表達，而非無條件覆寫。
         """
         now = utcnow()
-        row = await self.get_video_progress(db, user_id=user_id, video_id=video_id)
-        if row is None:
-            row = EtProgressVideo(
-                user_id=user_id,
-                video_id=video_id,
-                coverage_pct=Decimal(coverage),
-                last_position_sec=last_position_sec,
-                created_user=operator.user_id,
-                created_date=now,
+        stmt = (
+            pg_insert(EtProgressVideo)
+            .values(
+                USER_ID=user_id,
+                VIDEO_ID=video_id,
+                COVERAGE_PCT=Decimal(coverage),
+                LAST_POSITION_SEC=last_position_sec,
+                CREATED_USER=operator.user_id,
+                CREATED_DATE=now,
+                DELETED=0,
             )
-            db.add(row)
-        else:
-            row.coverage_pct = Decimal(coverage)
-            if last_position_sec is not None:
-                row.last_position_sec = last_position_sec
-            row.updated_user = operator.user_id
-            row.updated_date = now
+            .on_conflict_do_update(
+                constraint="UQ_ET_PROGRESS_VIDEO_USER_VIDEO",
+                set_={
+                    "COVERAGE_PCT": Decimal(coverage),
+                    "LAST_POSITION_SEC": func.coalesce(
+                        literal(last_position_sec, Integer), EtProgressVideo.__table__.c.LAST_POSITION_SEC
+                    ),
+                    "UPDATED_USER": operator.user_id,
+                    "UPDATED_DATE": now,
+                },
+            )
+            .returning(EtProgressVideo)
+        )
+        row = (await db.execute(stmt)).scalar_one()
         await db.flush()
         return row
 
@@ -165,27 +202,24 @@ class EtProgressRepository:
     async def set_item_completed(
         self, db: AsyncSession, *, user_id: str, course_id: int, item_id: int, completed: bool, operator: OperatorInfo
     ) -> None:
+        """項目層完成旗標。`ON CONFLICT` 的理由同 `upsert_video_progress`。"""
         now = utcnow()
-        row = await db.scalar(
-            select(EtProgress).where(
-                EtProgress.user_id == user_id, EtProgress.item_id == item_id, EtProgress.deleted == 0
+        await db.execute(
+            pg_insert(EtProgress)
+            .values(
+                USER_ID=user_id,
+                COURSE_ID=course_id,
+                ITEM_ID=item_id,
+                IS_COMPLETED=completed,
+                CREATED_USER=operator.user_id,
+                CREATED_DATE=now,
+                DELETED=0,
+            )
+            .on_conflict_do_update(
+                constraint="UQ_ET_PROGRESS_USER_ITEM",
+                set_={"IS_COMPLETED": completed, "UPDATED_USER": operator.user_id, "UPDATED_DATE": now},
             )
         )
-        if row is None:
-            db.add(
-                EtProgress(
-                    user_id=user_id,
-                    course_id=course_id,
-                    item_id=item_id,
-                    is_completed=completed,
-                    created_user=operator.user_id,
-                    created_date=now,
-                )
-            )
-        else:
-            row.is_completed = completed
-            row.updated_user = operator.user_id
-            row.updated_date = now
         await db.flush()
 
     async def completed_item_ids(self, db: AsyncSession, *, user_id: str, course_id: int) -> set[int]:
@@ -236,11 +270,20 @@ class EtProgressRepository:
             )
         )
 
-    # ── 授權反查（比照 learning 之鏈）────────────────────────────────────────
+    # ── 授權反查：**一條鏈推導，不拼裝** ─────────────────────────────────────
+    #
+    # ⚠️ 影片與項目的所屬課程一律由**同一次查詢**得出。分兩支查（video → course、
+    # material → item）再把結果湊起來，在「同一份教材被兩門課程引用」時會湊出
+    # 「A 課的課程 + B 課的項目」——於是以 A 課的在籍資格，寫出掛在 B 課項目上的進度。
+    #
+    # 今日建項目一律產生新教材，故不可達；但 `course/repository.py` 已預告日後可能支援
+    # 教材重用，屆時拼裝式的反查會直接變成跨課程寫入。比照 `learning/service`
+    # `material_content` 的同一個判斷：**不一致即拒，不去猜哪一個才對**。
 
-    async def course_id_of_video(self, db: AsyncSession, video_id: int) -> int | None:
-        return await db.scalar(
-            select(EtChapter.course_id)
+    async def video_context(self, db: AsyncSession, video_id: int) -> tuple[EtMaterialVideo, int, int] | None:
+        """影片 → `(影片列, 所屬項目, 所屬課程)`；任一跳被軟刪除或**引用不唯一**時回 `None`。"""
+        rows = await db.execute(
+            select(EtMaterialVideo, EtItem.item_id, EtChapter.course_id)
             .select_from(EtMaterialVideo)
             .join(EtItem, EtItem.material_id == EtMaterialVideo.material_id)
             .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
@@ -251,27 +294,32 @@ class EtProgressRepository:
                 EtChapter.deleted == 0,
             )
         )
+        found = rows.all()
+        if len(found) != 1:
+            return None
+        video, item_id, course_id = found[0]
+        return video, item_id, course_id
 
-    async def get_video(self, db: AsyncSession, video_id: int) -> EtMaterialVideo | None:
-        return await db.scalar(
-            select(EtMaterialVideo).where(EtMaterialVideo.video_id == video_id, EtMaterialVideo.deleted == 0)
-        )
-
-    async def get_item(self, db: AsyncSession, item_id: int) -> EtItem | None:
-        return await db.scalar(select(EtItem).where(EtItem.item_id == item_id, EtItem.deleted == 0))
-
-    async def item_id_of_material(self, db: AsyncSession, material_id: int) -> int | None:
-        """教材 → 引用它的項目。影片的覆蓋率要回寫到**項目層**的 `IS_COMPLETED`。
-
-        今日一份教材只會被一個項目引用（建項目一律產生新教材），故取一筆即可；
-        `course/repository.py` 已預告日後可能支援重用，屆時本函式要一併調整。
-        """
-        return await db.scalar(select(EtItem.item_id).where(EtItem.material_id == material_id, EtItem.deleted == 0))
-
-    async def course_id_of_item(self, db: AsyncSession, item_id: int) -> int | None:
-        return await db.scalar(
-            select(EtChapter.course_id)
+    async def item_context(self, db: AsyncSession, item_id: int) -> tuple[EtItem, int] | None:
+        """項目 → `(項目列, 所屬課程)`；任一跳被軟刪除時回 `None`。"""
+        rows = await db.execute(
+            select(EtItem, EtChapter.course_id)
             .select_from(EtItem)
             .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
             .where(EtItem.item_id == item_id, EtItem.deleted == 0, EtChapter.deleted == 0)
+        )
+        found = rows.first()
+        if found is None:
+            return None
+        item, course_id = found
+        return item, course_id
+
+    async def interval_row_count(self, db: AsyncSession, *, user_id: str, video_id: int) -> int:
+        return (
+            await db.scalar(
+                select(func.count())
+                .select_from(EtProgressInterval)
+                .where(EtProgressInterval.user_id == user_id, EtProgressInterval.video_id == video_id)
+            )
+            or 0
         )

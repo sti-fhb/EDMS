@@ -65,18 +65,23 @@ export function EtLearnPage() {
   //
   // 以 `data` 推導而非存進 state：`last_item_id` 是伺服器狀態，複製一份到 state 只會多
   // 一個要同步的來源，而 query 重抓時那份會過期。
+  //
+  // ⚠️ **退回的候選都要濾掉鎖定項目**：教師事後調整章節順序後，`last_item_id` 可能指向
+  // 一個現在已鎖定的項目。不濾的話頁面會自動開啟它，並對它送出 `markViewed`——後端會
+  // 回 404（守門 4），但那是一個學員沒做錯任何事卻失敗的請求。
   const allItems = data?.chapters.flatMap((c) => c.items) ?? []
+  const openable = allItems.filter((i) => !i.locked)
   const active =
     allItems.find((i) => i.item_id === activeItemId) ??
-    allItems.find((i) => i.item_id === data?.last_item_id) ??
-    allItems[0] ??
+    openable.find((i) => i.item_id === data?.last_item_id) ??
+    openable[0] ??
     null
 
   // 切換項目時記錄「正在看這一項」；純文件 / 說明文字項目一併標記完成（AC 10）。
   //
   // ⚠️ 依賴只放 `item_id`——放整個 `active` 物件會在每次 query 重抓時觸發（物件identity
   // 變了），而本 effect 自己就會 invalidate 那個 query，於是變成無窮迴圈。
-  const activeItemIdForEffect = active?.item_id ?? null
+  const activeItemIdForEffect = active !== null && !active.locked ? active.item_id : null
   useEffect(() => {
     if (activeItemIdForEffect === null) return
     let cancelled = false
