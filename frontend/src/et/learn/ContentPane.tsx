@@ -19,10 +19,14 @@ import { toApiError } from "../../services/http"
 interface Props {
   item: ItemNode | null
   playbackRates: number[]
+  /** 課程已關閉 → 播放器不上報進度（#255 裁示 Q2：讀照舊、寫全停）。 */
+  readOnly: boolean
+  /** 影片覆蓋率變動 → 通知上層重抓側欄（解鎖狀態可能改變）。 */
+  onProgress: () => void
 }
 
 /** ET05 中間內容區——依項目型別切換（AC 1 / 3 / 9 / 10 / 15–17）。 */
-export function ContentPane({ item, playbackRates }: Props) {
+export function ContentPane({ item, playbackRates, readOnly, onProgress }: Props) {
   if (item === null) {
     return (
       <Paper variant="outlined" sx={{ p: 3 }}>
@@ -40,7 +44,14 @@ export function ContentPane({ item, playbackRates }: Props) {
       </Paper>
     )
   }
-  return <MaterialPane materialId={item.material_id} playbackRates={playbackRates} />
+  return (
+    <MaterialPane
+      materialId={item.material_id}
+      playbackRates={playbackRates}
+      readOnly={readOnly}
+      onProgress={onProgress}
+    />
+  )
 }
 
 /**
@@ -63,7 +74,17 @@ function QuizEntry({ item }: { item: ItemNode }) {
   )
 }
 
-function MaterialPane({ materialId, playbackRates }: { materialId: number; playbackRates: number[] }) {
+function MaterialPane({
+  materialId,
+  playbackRates,
+  readOnly,
+  onProgress,
+}: {
+  materialId: number
+  playbackRates: number[]
+  readOnly: boolean
+  onProgress: () => void
+}) {
   const { data, isPending, error } = useQuery({
     queryKey: QUERY_KEYS.etLearn.material(materialId),
     queryFn: () => learnApi.materialContent(materialId),
@@ -110,7 +131,13 @@ function MaterialPane({ materialId, playbackRates }: { materialId: number; playb
         )}
 
         {data.videos.map((video) => (
-          <VideoPlayer key={video.video_id} video={video} playbackRates={playbackRates} />
+          <VideoPlayer
+            key={video.video_id}
+            video={video}
+            playbackRates={playbackRates}
+            readOnly={readOnly}
+            onProgress={onProgress}
+          />
         ))}
 
         {data.docs.length > 0 && data.videos.length > 0 && <Divider />}

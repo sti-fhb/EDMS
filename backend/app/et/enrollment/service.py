@@ -41,15 +41,13 @@ from app.et.enrollment.schemas import (
     MyCoursesResult,
     MyCoursesSummary,
 )
+from app.et.progress.repository import EtProgressRepository
 from app.services import AuditLogService
 
 _MODULE = "ET"
 _FUNC_NAME = "ET-ENROLLMENT"
 
 _CODE_INVALID = AppError(status_code=404, detail="邀請碼無效，請確認後重試", error_code="ET_ENROLL_001")
-
-#: 卡片進度百分比。**本 issue 恆為 0**——進度累積依賴 `ET_PROGRESS`（`ET-5`）。
-_PROGRESS_NOT_IMPLEMENTED = 0
 
 
 class EtEnrollmentService:
@@ -59,9 +57,11 @@ class EtEnrollmentService:
         self,
         enrollments: EtEnrollmentRepository | None = None,
         audit: AuditLogService | None = None,
+        progress: EtProgressRepository | None = None,
     ) -> None:
         self._enrollments = enrollments or EtEnrollmentRepository()
         self._audit = audit or AuditLogService()
+        self._progress = progress or EtProgressRepository()
 
     async def my_courses(self, db: AsyncSession, *, user_id: str) -> MyCoursesResult:
         """我的課程清單與統計（AC 2 / AC 3 / AC 4 / AC 5）。
@@ -79,6 +79,9 @@ class EtEnrollmentService:
         course_ids = [course.course_id for _, course in visible]
         tags = await self._enrollments.tags_by_course(db, course_ids)
         chapters = await self._enrollments.chapter_counts(db, course_ids)
+        # #274 起為真值（原為恆 0 的接點）——完成項目數 ÷ 總項目數，與 ET05 側欄的
+        # 課程進度條同一定義，兩處顯示的數字必須一致。
+        progress = await self._progress.completion_pct_by_course(db, user_id=user_id, course_ids=course_ids)
 
         courses = [
             MyCourseRow(
@@ -90,7 +93,7 @@ class EtEnrollmentService:
                 chapter_count=chapters.get(course.course_id, 0),
                 open_start_at=course.open_start_at,
                 open_end_at=course.open_end_at,
-                progress_pct=_PROGRESS_NOT_IMPLEMENTED,
+                progress_pct=progress.get(course.course_id, 0),
             )
             for enrollment, course in visible
         ]

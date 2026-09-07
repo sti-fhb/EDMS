@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.rate_limit import SlidingWindowRateLimiter
 from app.et.roles.models import EtUserRole
 
 
@@ -91,3 +92,24 @@ def require_et_roles(*required: str) -> Callable[..., Awaitable[EtContext]]:
         return ctx
 
     return _dep
+
+
+def rate_limit_by_et_user(limiter: SlidingWindowRateLimiter, scope: str) -> Callable[..., Awaitable[None]]:
+    """依 `USER_ID` 限流之 dependency（`core.rate_limit` 只提供 IP 維度）。
+
+    **使用者維度為主、IP 維度為輔**：ET 的寫入端點都要求已登入，攻擊者是一個帳號而非
+    一個位址；但使用者維度可用「多開帳號」線性擴張（自助註冊是開的），故通常兩個維度
+    同時掛，IP 那側放寬到不會誤傷同一 NAT 出口的同事。
+
+    ⚠️ `enrollment/router.py` 另有一份同名的區域實作（早於本函式，且把 limiter 寫死在
+    閉包裡）。**新端點請一律用本函式**；`enrollment` 那份待 #273（另一個 session 正在
+    動該目錄）合併後再收斂，避免現在製造無謂的衝突。
+
+    Raises:
+        AppError: 視窗內超過門檻（429 / `COMMON_429`）。
+    """
+
+    async def _dependency(ctx: EtContext = Depends(get_et_context)) -> None:
+        limiter.hit(f"{scope}:user:{ctx.user_id}")
+
+    return _dependency

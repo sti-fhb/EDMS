@@ -92,6 +92,16 @@ class EtEnrollment(BaseModel):
     last_activity_at: Mapped[Optional[datetime]] = mapped_column(
         "LAST_ACTIVITY_AT", DateTime(timezone=True), nullable=True
     )
+    #: 上次檢視之章節項目（#274 SA Q1 裁示 B）。
+    #:
+    #: 與 `LAST_ACTIVITY_AT` 成對——該欄原本只記「最後活動**時間**」，沒有「最後活動
+    #: 在**哪**」。`spec_us5` AC 3 的「定位至上次觀看位置」需要兩段資訊，另一段
+    #: （影片內第幾秒）在 `ET_PROGRESS_VIDEO.LAST_POSITION_SEC`。
+    #:
+    #: `None` = 還沒看過任何項目 → 定位第 1 章第 1 項。
+    last_item_id: Mapped[Optional[int]] = mapped_column(
+        "LAST_ITEM_ID", BigInteger, ForeignKey("ET_ITEM.ITEM_ID", name="FK_ET_ENROLLMENT_LAST_ITEM"), nullable=True
+    )
 
 
 class EtProgress(BaseModel):
