@@ -1,17 +1,20 @@
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtLearnPage } from "./LearnPage"
 import type { LearnStructure } from "./learnSchemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
+const navigate = vi.fn()
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => vi.fn(), useParams: () => ({ courseId: "1" }) }
+  return { ...actual, useNavigate: () => navigate, useParams: () => ({ courseId: "1" }) }
 })
+
+beforeEach(() => navigate.mockReset())
 
 function mockStructure(overrides: Partial<LearnStructure>) {
   server.use(
@@ -78,17 +81,17 @@ describe("ET05 章節學習頁", () => {
     expect(await screen.findByText("採血流程概論教材")).toBeInTheDocument()
   })
 
-  it("測驗項目顯示開始測驗入口，點擊提示尚未開放（AC 10）", async () => {
+  it("測驗項目點「開始測驗」導向引導頁（AC 10）", async () => {
+    // `ET-6a`（#279）交付前這裡是「顯示入口但只給提示」——因為導到不存在的路由會給
+    // 學員白畫面，看起來像壞掉而不像還沒做。現在路由存在了，改為真的導過去。
     mockStructure({})
     const user = userEvent.setup()
     renderWithProviders(<EtLearnPage />)
 
     await user.click(await screen.findByText("基本概念測驗"))
+    await user.click(await screen.findByRole("button", { name: "開始測驗" }))
 
-    const start = await screen.findByRole("button", { name: "開始測驗" })
-    await user.click(start)
-    // `ET-6` 未實作——提示而非 navigate 到不存在的路由（那會是白畫面）
-    expect(await screen.findByText("線上測驗尚未開放")).toBeInTheDocument()
+    expect(navigate).toHaveBeenCalledWith("/et/quizzes/2000")
   })
 
   it("課程已關閉時顯示唯讀提示，且內容照常呈現（AC 23 / 裁示 Q2=A）", async () => {

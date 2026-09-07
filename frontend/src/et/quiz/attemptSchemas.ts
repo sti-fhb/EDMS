@@ -1,0 +1,111 @@
+/** ET06 測驗作答型別（對齊後端 `app/et/attempt/schemas.py`）。 */
+
+/**
+ * 作答中的選項——**沒有 `is_correct`**。
+ *
+ * 正確答案只在提交後的 `OptionResult` 才會出現。兩個型別刻意分開而非共用基底：
+ * 共用之後只要有人為了少寫幾行把 `is_correct` 提到共同欄位，作答中就會跟著漏出去，
+ * 而畫面上完全看不出來。
+ */
+export interface OptionForAnswering {
+  option_id: number
+  text: string
+}
+
+export interface QuestionForAnswering {
+  question_id: number
+  question_type: "SINGLE" | "MULTIPLE"
+  stem: string
+  points: number
+  options: OptionForAnswering[]
+  /** 已暫存的作答；空陣列 = 未作答（供導覽列的「已答 / 未答」三態）。 */
+  selected_options: number[]
+}
+
+export interface AttemptState {
+  attempt_id: number
+  quiz_id: number
+  quiz_name: string
+  attempt_no: number
+  pass_score: number
+  time_limit_min: number | null
+  /**
+   * 剩餘秒數，由後端自 `STARTED_AT` 推導。**`null` = 不限時**——不可當成 0
+   *（那會渲染成「時間到」並立刻自動提交）。
+   */
+  remaining_sec: number | null
+  /** 回傳的是既有的進行中作答而非新建（SA 裁示 Q1 = A）。 */
+  resumed: boolean
+  questions: QuestionForAnswering[]
+}
+
+/** 明細中的選項：**此時才帶正確答案**（AC 11 強制顯示）。 */
+export interface OptionResult {
+  option_id: number
+  text: string
+  is_correct: boolean
+  selected: boolean
+}
+
+export interface QuestionResult {
+  question_id: number
+  question_type: "SINGLE" | "MULTIPLE"
+  stem: string
+  points: number
+  score: string
+  /** `CORRECT` / `PARTIAL` / `WRONG`——由後端判定，前端不自行由得分推導。 */
+  outcome: "CORRECT" | "PARTIAL" | "WRONG"
+  options: OptionResult[]
+}
+
+export interface AttemptResult {
+  attempt_id: number
+  /** 供「重新作答」導回引導頁——`attempt_id` 與 `quiz_id` 是兩個獨立的序列，不可互推。 */
+  quiz_id: number
+  attempt_no: number
+  status: "SUBMITTED" | "TIMEOUT"
+  score: string
+  pass_score: number
+  is_pass: boolean
+  submitted_at: string
+  remaining_attempts: number
+  questions: QuestionResult[]
+}
+
+export interface QuizIntro {
+  quiz_id: number
+  quiz_name: string
+  description: string | null
+  question_count: number
+  pass_score: number
+  /** `null` = 不限時。前端須顯示「不限時」而**不是「0 分」**。 */
+  time_limit_min: number | null
+  max_retry: number
+  remaining_attempts: number
+  can_start: boolean
+  /** 最近一次成績。與 `best_score` 並列——結業成績取最高分，只顯示其一都會誤導。 */
+  last_score: string | null
+  best_score: string | null
+  is_passed: boolean
+  /** 有未完成的作答時帶其 id，按鈕改為「繼續作答」。 */
+  in_progress_attempt_id: number | null
+}
+
+/** 導覽列的題目狀態。 */
+export type QuestionNavState = "answered" | "current" | "unanswered"
+
+export function questionNavState(
+  question: QuestionForAnswering,
+  currentQuestionId: number | null,
+): QuestionNavState {
+  if (question.question_id === currentQuestionId) return "current"
+  return question.selected_options.length > 0 ? "answered" : "unanswered"
+}
+
+/** 倒數顯示格式 `MM:SS`；小時以上仍以分鐘累計（`90:00` 而非 `1:30:00`）。 */
+export function formatCountdown(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds))
+  const minutes = Math.floor(safe / 60)
+  const seconds = safe % 60
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+}

@@ -5,6 +5,42 @@ import { setupServer } from "msw/node"
  * MSW mock server：於網路層攔截 API（axios 真實發出 request）。
  * 各測試可用 server.use(...) 覆寫單一情境（如錯誤 / must_change）；預設為 happy path。
  */
+/** ET06 作答中狀態——**選項刻意不含 `is_correct`**，與後端 schema 一致。 */
+const ATTEMPT_STATE = {
+  attempt_id: 800,
+  quiz_id: 700,
+  quiz_name: "基本概念測驗",
+  attempt_no: 1,
+  pass_score: 80,
+  time_limit_min: 10,
+  remaining_sec: 600,
+  resumed: false,
+  questions: [
+    {
+      question_id: 901,
+      question_type: "SINGLE",
+      stem: "採血前應先確認什麼？",
+      points: 50,
+      options: [
+        { option_id: 9011, text: "捐血人身分" },
+        { option_id: 9012, text: "天氣" },
+      ],
+      selected_options: [],
+    },
+    {
+      question_id: 902,
+      question_type: "MULTIPLE",
+      stem: "以下哪些必須檢查？",
+      points: 50,
+      options: [
+        { option_id: 9021, text: "體溫" },
+        { option_id: 9022, text: "視力" },
+      ],
+      selected_options: [],
+    },
+  ],
+}
+
 export const handlers = [
   http.post("/api/login", () =>
     HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false }),
@@ -1132,6 +1168,70 @@ export const handlers = [
   }),
   http.post("/api/et/invitations/accept", () =>
     HttpResponse.json({ course_id: 7, course_name: "採血作業新進人員訓練", already_joined: false }),
+
+  // ── ET06 測驗作答（US6 / #279）──────────────────────────────────────────
+  http.get("/api/et/quizzes/:quizId/intro", ({ params }) =>
+    HttpResponse.json({
+      quiz_id: Number(params.quizId),
+      quiz_name: "基本概念測驗",
+      description: "本測驗為第 1 章內容之自我檢核。",
+      question_count: 2,
+      pass_score: 80,
+      time_limit_min: 10,
+      max_retry: 3,
+      remaining_attempts: 4,
+      can_start: true,
+      last_score: null,
+      best_score: null,
+      is_passed: false,
+      in_progress_attempt_id: null,
+    }),
+  ),
+  http.post("/api/et/quizzes/:quizId/attempts", ({ params }) =>
+    HttpResponse.json({ ...ATTEMPT_STATE, quiz_id: Number(params.quizId) }, { status: 201 }),
+  ),
+  http.get("/api/et/attempts/:attemptId", ({ params }) =>
+    HttpResponse.json({ ...ATTEMPT_STATE, attempt_id: Number(params.attemptId) }),
+  ),
+  http.put("/api/et/attempts/:attemptId/answers/:questionId", () => new HttpResponse(null, { status: 204 })),
+  http.post("/api/et/attempts/:attemptId/submit", ({ params }) =>
+    HttpResponse.json({
+      attempt_id: Number(params.attemptId),
+      quiz_id: 700,
+      attempt_no: 1,
+      status: "SUBMITTED",
+      score: "50.00",
+      pass_score: 80,
+      is_pass: false,
+      submitted_at: "2026-09-04T10:00:00Z",
+      remaining_attempts: 3,
+      questions: [
+        {
+          question_id: 901,
+          question_type: "SINGLE",
+          stem: "採血前應先確認什麼？",
+          points: 50,
+          score: "50.00",
+          outcome: "CORRECT",
+          options: [
+            { option_id: 9011, text: "捐血人身分", is_correct: true, selected: true },
+            { option_id: 9012, text: "天氣", is_correct: false, selected: false },
+          ],
+        },
+        {
+          question_id: 902,
+          question_type: "MULTIPLE",
+          stem: "以下哪些必須檢查？",
+          points: 50,
+          score: "0.00",
+          outcome: "WRONG",
+          options: [
+            { option_id: 9021, text: "體溫", is_correct: true, selected: false },
+            { option_id: 9022, text: "視力", is_correct: false, selected: true },
+          ],
+        },
+      ],
+    }),
   ),
 ]
 

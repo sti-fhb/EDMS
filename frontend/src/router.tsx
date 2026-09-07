@@ -27,6 +27,9 @@ import { EtCourseListPage } from "./et/courses/CourseListPage"
 import { EtHomeRedirect } from "./et/EtHomeRedirect"
 import { EtInviteLandingPage } from "./et/invite/InviteLandingPage"
 import { EtLearnPage } from "./et/learn/LearnPage"
+import { EtQuizAnswerPage } from "./et/quiz/QuizAnswerPage"
+import { EtQuizIntroPage } from "./et/quiz/QuizIntroPage"
+import { EtQuizResultPage } from "./et/quiz/QuizResultPage"
 import { EtMyCoursesPage } from "./et/my/MyCoursesPage"
 import { EtStudentsPage } from "./et/students/StudentsPage"
 import { AuditPage } from "./dp/audit/AuditPage"
@@ -158,6 +161,9 @@ export const router = createBrowserRouter([
               // Email 邀請連結落點（#273）：置於登入殼**之內**——加入課程需要登入者身分，
               // 未登入時由 LoginOverlay 擋在前面，登入後 token 仍在網址上、流程自然接續。
               { path: "invite", element: <EtInviteLandingPage /> },
+              { path: "quizzes/:quizId", element: <EtQuizIntroPage /> },
+              { path: "attempts/:attemptId", element: <EtQuizAnswerPage /> },
+              { path: "attempts/:attemptId/result", element: <EtQuizResultPage /> },
             ],
           },
         ],

@@ -234,6 +234,7 @@ class EtAttemptService:
         base = await self._repo.reset_base(db, user_id=operator.user_id, quiz_id=attempt.quiz_id)
         return AttemptResult(
             attempt_id=attempt.attempt_id,
+            quiz_id=attempt.quiz_id,
             attempt_no=attempt.attempt_no,
             status=attempt.status,
             score=total,

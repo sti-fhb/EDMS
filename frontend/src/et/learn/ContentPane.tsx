@@ -7,6 +7,7 @@ import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
 
 import { DocViewer } from "./DocViewer"
 import { VideoPlayer } from "./VideoPlayer"
@@ -55,18 +56,28 @@ export function ContentPane({ item, playbackRates, readOnly, onProgress }: Props
 }
 
 /**
- * 測驗項目（AC 10）。
+ * 測驗項目入口（AC 10）。
  *
- * `ET-6` 未實作——**顯示入口但點擊只給提示**，不 `navigate` 到不存在的路由（那會給
- * 學員一個白畫面，看起來像壞掉而不像還沒做）。比照 #247 對 `ET-5` 的處理。
+ * `ET-6a`（#279）交付後改為導向引導頁——在此之前是「顯示入口但點擊只給提示」，
+ * 因為導到不存在的路由會給學員一個白畫面，看起來像壞掉而不像還沒做。
+ *
+ * `quiz_id` 為 `null` 屬資料異常（項目型別是測驗卻沒有測驗），此時仍給提示而非導頁。
  */
 function QuizEntry({ item }: { item: ItemNode }) {
   const { message } = useNotification()
+  const navigate = useNavigate()
   return (
     <Paper variant="outlined" sx={{ p: 3 }}>
       <Stack spacing={2} alignItems="flex-start">
         <Typography variant="h6">{item.title}</Typography>
-        <Button variant="contained" onClick={() => message.info("線上測驗尚未開放")}>
+        <Button
+          variant="contained"
+          onClick={() =>
+            item.quiz_id === null
+              ? message.warning("此測驗內容不完整，請聯繫課程教師")
+              : navigate(`/et/quizzes/${item.quiz_id}`)
+          }
+        >
           開始測驗
         </Button>
       </Stack>

@@ -34,6 +34,10 @@ export const QUERY_KEYS = {
     structure: (courseId: number) => ["et", "learn", courseId] as const,
     material: (materialId: number) => ["et", "learn", "materials", materialId] as const,
   },
+  etQuiz: {
+    intro: (quizId: number) => ["et", "quizzes", quizId, "intro"] as const,
+    attempt: (attemptId: number) => ["et", "attempts", attemptId] as const,
+  },
   moduleSummary: {
     get: () => ["module-summary"] as const,
   },
