@@ -2573,25 +2573,24 @@ zhangsm@military.gov.tw</textarea>
             <div class="bg-light border rounded p-3 mb-2" style="font-size:0.85rem;">
               <div class="border-bottom pb-2 mb-2 small">
                 <div class="mb-1"><span class="text-muted">寄件人：</span>教育訓練系統 &lt;noreply@et.tsbms.local&gt;</div>
-                <div class="mb-1"><span class="text-muted">收件人：</span>linst@military.gov.tw <small class="text-muted">（以第 1 筆收件人為預覽範例）</small></div>
+                <div class="mb-1"><span class="text-muted">收件人：</span><small class="text-muted">每位收件人皆收到相同內容；稱謂與邀請連結於寄出時各自帶入</small></div>
                 <div class="d-flex align-items-center">
                   <span class="text-muted me-2" style="white-space:nowrap;">主旨：</span>
                   <input type="text" id="invite-subject-edit" class="form-control form-control-sm border-0 bg-transparent fw-bold p-0 text-muted" value="【ET】您已被加入課程「採血作業新進人員訓練 v2.0」" style="font-size:0.85rem;" readonly>
                 </div>
               </div>
-              <textarea id="invite-body-edit" class="form-control border-0 bg-transparent p-0 text-muted" rows="10" style="font-size:0.85rem; font-family:inherit; resize:vertical;" readonly>您好，
+              <textarea id="invite-body-edit" class="form-control border-0 bg-transparent p-0 text-muted" rows="10" style="font-size:0.85rem; font-family:inherit; resize:vertical;" readonly>〔收件人姓名〕 您好：
 
-您已被加入以下課程：
+您已被加入由 王大明 開設之課程「採血作業新進人員訓練 v2.0」。
+閱課期間：2026/04/15 09:00 ～ 2026/07/31 17:00
+學習連結：https://et.tsbms.local/et/invite?token=…
+（如以邀請碼加入，代碼為 83052617）
 
-  課程：採血作業新進人員訓練 v2.0
-  閱課期間：2026-04-15 09:00 ～ 2026-07-31 17:00
-
-點此進入學習：https://et.tsbms.local/join?token=abc123xyz
-或於系統內輸入邀請碼：83052617
-
-教育訓練系統 ET</textarea>
+— EDMS 教育訓練文件管理系統（本信件由系統自動發送，請勿直接回覆）</textarea>
             </div>
-            <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>實際寄出時，系統會為每位收件人產生獨立邀請連結與專屬 token；寄送失敗保留「待加入」狀態，可於 ET03「待加入」tab 再次寄送。</div>
+            <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>實際寄出時，系統會為每位收件人產生獨立邀請連結；該連結為<strong>一次性</strong>，被使用後即失效，請勿轉寄。寄送失敗保留「待加入」狀態，可於 ET03「待加入」tab 再次寄送。<br><i class="bi bi-info-circle"></i>收件對象<strong>限既有 EDMS 使用者</strong>；清單中有查無帳號者將整批擋下並列出是哪幾筆（ET-MSG-ET02-106）。
+              <div class="internal-note">💡 一次性語意為「先到先得」：受邀者若於點擊前轉寄，先點者會加入成功、原受邀者取得失效連結（US8 場景 13～15；2026-09-07 裁示已接受此殘留風險）。</div>
+            </div>
 
             <div class="d-flex justify-content-between align-items-center pt-2" style="border-top:1px solid #e0e0e0;">
               <small class="text-muted">將寄出 <strong>3</strong> 封邀請信</small>
@@ -2604,12 +2603,27 @@ zhangsm@military.gov.tw</textarea>
           <!-- Tab 2: 邀請碼（8 碼數字，系統產生） -->
           <div class="tab-pane fade" id="invite-tab-code">
             <label class="form-label small fw-bold">本課程邀請碼 <small class="text-muted fw-normal">（8 碼數字；課程發布時系統自動產生）</small></label>
-            <div class="invite-code-box mb-2">83052617</div>
-            <div class="d-flex gap-2 mb-2">
-              <button class="btn btn-sm btn-outline-primary flex-grow-1" onclick="showToast('已複製邀請連結')">
-                <i class="bi bi-clipboard me-1"></i>複製邀請連結
-              </button>
+            <div class="d-flex flex-wrap align-items-center gap-4 mb-2">
+              <div class="flex-grow-1">
+                <div class="invite-code-box mb-2">83052617</div>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-sm btn-outline-primary flex-grow-1" onclick="showToast('已複製邀請連結')">
+                    <i class="bi bi-clipboard me-1"></i>複製邀請連結
+                  </button>
+                  <button class="btn btn-sm btn-outline-primary" onclick="showToast('已複製邀請碼')">
+                    <i class="bi bi-clipboard me-1"></i>複製邀請碼
+                  </button>
+                </div>
+              </div>
+              <!-- QR Code（US8 場景 17）：內容為帶邀請碼之加入連結，掃描後落到 ET04 加入流程 -->
+              <div class="text-center">
+                <div class="border rounded d-flex align-items-center justify-content-center" style="width:160px; height:160px; background:#fff;">
+                  <i class="bi bi-qr-code" style="font-size:6rem; color:#212529;"></i>
+                </div>
+                <div class="text-muted mt-1" style="font-size:0.75rem;">掃描加入課程</div>
+              </div>
             </div>
+            <div class="internal-note mb-2">💡 QR Code 與「複製邀請連結」指向同一網址（帶邀請碼之 ET04 加入頁），故<strong>可多人重複掃描</strong>——與 Email 邀請之一次性 token 是兩種不同機制。邀請碼流出即等同任何人可加入，且不提供重新產生。</div>
             <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>每門課程的邀請碼皆不同；學員可至「我的課程 → 加入新課程」輸入此邀請碼自行加入課程。邀請碼於課程<strong>關閉期間失效、再開課後恢復</strong>；不可手動指定、<strong>不提供重新產生</strong>。</div>
           </div>
 
@@ -3062,7 +3076,7 @@ function saveChapter(action) {
   }
 }
 
-/* 邀請學員 modal — ET02 觸發；Email 預覽主旨/內文可直接編輯 */
+/* 邀請學員 modal — ET02 觸發；Email 預覽為唯讀（FR-ET-US8-07：範本由管理者統一維護，教師不可編輯） */
 function openInviteModal() {
   new bootstrap.Modal(document.getElementById('inviteModal')).show();
 }
