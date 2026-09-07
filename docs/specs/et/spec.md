@@ -216,10 +216,12 @@ ET 之資安稽核統一寫入平台 `DP_AUDIT_LOG`（經 `AuditLogService`）�
 | `ET-CATALOG` | 受訓單位標籤庫**定義**維護（新增 / 改名 / 停用啟用）——經受控主檔轉接層由 DP 後台「系統參數與清單」呼叫 | US1 |
 | `ET-COURSE` | 課程建立 / 編輯 / 發布 / 關閉 / 再開課，及其下章節、教材、測驗、問卷之編修與刪除 | US3、US11 |
 | `ET-OWNER` | 管理者代為轉讓課程擁有者（破例變更；另存 `ET_OWNER_TRANSFER` 業務紀錄）| 跨 US 補強 |
-| `ET-ENROLL` | 學員邀請寄送 / 撤回 / 加入 / 移除 | US8、US12、US9 |
+| `ET-ENROLLMENT` | 學員邀請寄送 / 撤回 / 加入 / 移除 | US8、US12、US9 |
 | `ET-QUIZ-RESET` | 重置學員重考次數（教師破例動作；另存 `ET_QUIZ_RETRY_RESET` 業務紀錄）| US9 |
 | `ET-APPROVAL` | 線下核可通過 / 不通過 / 撤銷 | US16 |
 
+> **`ET-ENROLLMENT` 之命名**（2026-09-07 對齊）：原定 `ET-ENROLL`，但自 US4 交付起程式實際寫入的即為 `ET-ENROLLMENT`。改以實作值為準——同一語意類別若在 `DP_AUDIT_LOG` 內分裂成兩個碼，查詢須同時涵蓋兩者，比對不上文件更難追查。
+>
 > **語意碼 vs. 業務紀錄表**：`ET_OWNER_TRANSFER` / `ET_QUIZ_RETRY_RESET` / `ET_APPROVAL` 為**業務用**紀錄（供 UI 查詢與業務判定），`DP_AUDIT_LOG` 為**資安用**稽核（統一保存、不可竄改）；兩者並存，不互相取代。
 >
 > 一般資料異動之建立者 / 異動者與時間由各表標準稽核欄位承載（見 [data-model.md](data-model.md)），不逐筆寫 `DP_AUDIT_LOG`；僅上表所列之權限、破例與關鍵狀態變更寫入。
