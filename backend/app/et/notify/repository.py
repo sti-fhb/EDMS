@@ -49,22 +49,24 @@ class EtNotifyRepository:
             key=lambda r: r.user_id,
         )
 
-    async def recipient_by_email(self, db: AsyncSession, email: str) -> Recipient | None:
-        """依 Email 找帳號——Email 邀請的對象**可能尚無帳號**，故回 None 為正常情形。
+    async def recipients_by_emails(self, db: AsyncSession, emails: Sequence[str]) -> list[Recipient]:
+        """依 Email 批次找帳號；**查無者不出現在結果中**（由呼叫端比對出缺哪幾筆）。
 
-        `DP_USER.EMAIL` 以小寫儲存（見 `dp/user` 之註冊流程），呼叫端須先正規化。
+        一次查完而非逐筆查：Email 邀請單次最多 50 筆，逐筆查是 50 趟往返，而呼叫端
+        本來就要「先驗證全部、再決定寄不寄」，逐筆查也拿不到提早結束的好處。
+
+        `DP_USER.EMAIL` 以小寫儲存（見 `dp/user` 之註冊流程），呼叫端須先正規化
+        （`invitation/rules.parse_emails` 已做）。
         """
-        row = (
-            await db.execute(
-                select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
-                    DpUser.email == email,
-                    DpUser.deleted == 0,
-                )
+        if not emails:
+            return []
+        rows = await db.execute(
+            select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
+                DpUser.email.in_(list(emails)),
+                DpUser.deleted == 0,
             )
-        ).first()
-        if row is None:
-            return None
-        return Recipient(user_id=row[0], user_name=row[1], email=row[2])
+        )
+        return [Recipient(user_id=uid, user_name=name, email=email) for uid, name, email in rows]
 
     async def user_name(self, db: AsyncSession, user_id: str) -> str | None:
         """使用者顯示姓名（課程擁有者用於 `{TEACHER_NAME}`）。"""

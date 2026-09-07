@@ -65,12 +65,16 @@ export const InviteEmailsSchema = z
 
 export type InviteEmailsValues = z.infer<typeof InviteEmailsSchema>
 
-/** 邀請信預覽（唯讀）。 */
+/**
+ * 邀請信預覽（唯讀）。
+ *
+ * **內容與收件人無關**：後端以佔位字樣取代收件人姓名與邀請連結（兩者逐收件人不同），
+ * 其餘（課程名稱、閱課期間、邀請碼）人人相同。因此改動 Email 清單**不需要**重新預覽，
+ * 也不回傳收件人範例或筆數（筆數前端自己用 `parseEmails` 算）。
+ */
 export interface InvitePreview {
   subject: string
   body: string
-  recipient_sample: string
-  recipient_count: number
 }
 
 /** 寄出結果；`failed` 為排入寄送佇列失敗者。 */

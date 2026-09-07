@@ -34,7 +34,10 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     // FR-ET-US8-07：教師不可編輯主旨與內文
     expect(screen.getByLabelText("主旨")).toHaveAttribute("readonly")
     expect(screen.getByLabelText("內文")).toHaveAttribute("readonly")
-    expect(screen.getByText(/以第 1 筆收件人為預覽範例/)).toBeInTheDocument()
+    // 預覽只有一份、每封信代入各自的稱謂，故不呈現任何一位收件人的資料
+    expect(screen.getByText(/每位收件人皆收到相同內容/)).toBeInTheDocument()
+    // `toHaveValue` 不接受 `expect.stringContaining`（非對稱 matcher）；`toHaveDisplayValue` 吃 regex
+    expect(screen.getByLabelText("內文")).toHaveDisplayValue(/〔收件人姓名〕/)
   })
 
   it("預覽出現後才有確認寄出，寄出成功關閉視窗", async () => {
@@ -52,7 +55,7 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
-  it("修改 Email 清單後預覽消失，避免寄出與畫面不符的內容", async () => {
+  it("修改 Email 清單後預覽**保留**——內容與收件人無關，不必重新預覽", async () => {
     const user = userEvent.setup()
     renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
 
@@ -62,8 +65,58 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
 
     await user.type(screen.getByLabelText("學員 Email"), ",c@x.gov.tw")
 
+    // 加減 Email 不會改變那封信長什麼樣子，清掉只會逼教師多按一次「下一步」
+    expect(screen.getByLabelText("主旨")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "確認寄出" })).toBeInTheDocument()
+    expect(screen.getByText("將寄出 2 封邀請信")).toBeInTheDocument()
+  })
+
+  it("預覽後把清單改成不合法內容，直接按寄出仍會被本地驗證擋下", async () => {
+    const user = userEvent.setup()
+    let sendCalled = false
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations", () => {
+        sendCalled = true
+        return HttpResponse.json({ sent: 1, failed: [] })
+      }),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+
+    await user.type(screen.getByLabelText("學員 Email"), "a@x.gov.tw")
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "確認寄出" })).toBeInTheDocument())
+
+    // 預覽不再隨清單清除，所以「寄出」這一步必須自己重驗
+    await user.type(screen.getByLabelText("學員 Email"), ",broken")
+    await user.click(screen.getByRole("button", { name: "確認寄出" }))
+
+    expect(await screen.findByText("以下 Email 格式不正確：broken")).toBeInTheDocument()
+    expect(sendCalled).toBe(false)
+  })
+
+  it("後端回 ET_INVITE_005 時列出尚未建立帳號的 Email", async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations/preview", () =>
+        HttpResponse.json(
+          {
+            error_code: "ET_INVITE_005",
+            error_message: "以下 Email 尚未建立 EDMS 帳號，請確認拼寫或請管理者先建立帳號",
+            unknown_emails: ["typo@x.gov.tw"],
+          },
+          { status: 422 },
+        ),
+      ),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+
+    await user.type(screen.getByLabelText("學員 Email"), "typo@x.gov.tw")
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+
+    // error_message 依規範不得嵌入動態值，是哪幾筆由 unknown_emails 帶出
+    const alert = (await screen.findByText(/尚未建立 EDMS 帳號，無法寄送邀請/)).closest('[role="alert"]')
+    expect(alert).toHaveTextContent("typo@x.gov.tw")
     expect(screen.queryByLabelText("主旨")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "下一步" })).toBeInTheDocument()
   })
 
   it("格式錯誤時不打 API，直接在欄位下方指出是哪幾筆", async () => {

@@ -69,12 +69,14 @@ export function InviteStudentsDialog({
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
   const [partialFailures, setPartialFailures] = useState<string[]>([])
+  const [unknownEmails, setUnknownEmails] = useState<string[]>([])
 
   const resetAll = useCallback(() => {
     setEmails("")
     setEmailsError(null)
     setPreview(null)
     setPartialFailures([])
+    setUnknownEmails([])
   }, [])
 
   const handleClose = useCallback(() => {
@@ -82,24 +84,53 @@ export function InviteStudentsDialog({
     onClose()
   }, [onClose, resetAll])
 
-  const handleNext = useCallback(async () => {
+  /** 本地格式驗證；不通過就把訊息放到欄位下方並回 false（不打 API）。 */
+  const validateLocally = useCallback((): boolean => {
     const parsed = InviteEmailsSchema.safeParse({ emails })
     if (!parsed.success) {
       setEmailsError(parsed.error.issues[0]?.message ?? "請確認 Email 清單")
-      return
+      return false
     }
     setEmailsError(null)
+    return true
+  }, [emails])
+
+  /**
+   * 後端錯誤呈現。`ET_INVITE_005`（有 Email 尚無 EDMS 帳號）另外把清單攤開——
+   * `error_message` 依規範不得嵌入動態值，是哪幾筆放在 `unknown_emails`。
+   */
+  const showApiError = useCallback(
+    (err: unknown) => {
+      const apiError = toApiError(err)
+      if (apiError.errorCode === "ET_INVITE_005") {
+        const list = apiError.payload?.unknown_emails
+        setUnknownEmails(Array.isArray(list) ? (list as string[]) : [])
+        setEmailsError(apiError.errorMessage)
+        return
+      }
+      message.error(apiError.errorMessage)
+    },
+    [message],
+  )
+
+  const handleNext = useCallback(async () => {
+    if (!validateLocally()) return
+    setUnknownEmails([])
     setLoadingPreview(true)
     try {
       setPreview(await invitationsApi.preview(courseId, emails))
     } catch (err) {
-      message.error(toApiError(err).errorMessage)
+      showApiError(err)
     } finally {
       setLoadingPreview(false)
     }
-  }, [courseId, emails, message])
+  }, [courseId, emails, showApiError, validateLocally])
 
   const handleSend = useCallback(async () => {
+    // 預覽不再因改動清單而消失（內容與收件人無關），所以「送出」這一步必須自己重驗——
+    // 否則教師可以在看過預覽後把清單改成不合法的內容再直接送出。
+    if (!validateLocally()) return
+    setUnknownEmails([])
     setSending(true)
     try {
       const result = await invitationsApi.send(courseId, emails)
@@ -111,11 +142,11 @@ export function InviteStudentsDialog({
       message.success("邀請信已寄出")
       handleClose()
     } catch (err) {
-      message.error(toApiError(err).errorMessage)
+      showApiError(err)
     } finally {
       setSending(false)
     }
-  }, [courseId, emails, handleClose, message])
+  }, [courseId, emails, handleClose, message, showApiError, validateLocally])
 
   const copy = useCallback(
     (text: string, label: string) => {
@@ -162,9 +193,10 @@ export function InviteStudentsDialog({
                 onChange={(e) => {
                   setEmails(e.target.value)
                   setEmailsError(null)
-                  // 清單改了，先前的預覽就不再對應——留著會讓教師以為寄的是他剛改完的版本。
-                  setPreview(null)
+                  setUnknownEmails([])
                   setPartialFailures([])
+                  // **不清掉預覽**：預覽內容與收件人無關（姓名與連結都是佔位字樣），
+                  // 加減 Email 不會改變那封信長什麼樣子。清掉只會逼教師多按一次「下一步」。
                 }}
                 multiline
                 minRows={3}
@@ -179,7 +211,7 @@ export function InviteStudentsDialog({
                     信件內容由管理者統一維護，僅可預覽、不可編輯
                   </Alert>
                   <Typography variant="caption" color="text.secondary">
-                    收件人：{preview.recipient_sample}（以第 1 筆收件人為預覽範例）
+                    每位收件人皆收到相同內容；稱謂與邀請連結於寄出時各自帶入。
                   </Typography>
                   <TextField
                     label="主旨"
@@ -202,6 +234,12 @@ export function InviteStudentsDialog({
                     實際寄出時，系統會為每位收件人產生獨立的一次性邀請連結；連結被使用後即失效，請勿轉寄。
                   </Typography>
                 </Stack>
+              )}
+
+              {unknownEmails.length > 0 && (
+                <Alert severity="warning">
+                  以下 Email 尚未建立 EDMS 帳號，無法寄送邀請：{unknownEmails.join("、")}
+                </Alert>
               )}
 
               {partialFailures.length > 0 && (

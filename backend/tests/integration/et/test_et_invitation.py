@@ -93,6 +93,15 @@ async def _published_course(client, db, teacher: str, *, name: str = "採血作�
     return cid
 
 
+async def _account(db, email: str, *, user_id: str | None = None) -> str:
+    """建立一個持有指定 Email 的學員帳號。
+
+    SA 裁示後 Email 邀請**只收既有 EDMS 使用者**，故本檔的收件人一律要先有帳號；
+    沒有帳號的 Email 用來驗 `ET_INVITE_005`。`user_id` 上限 20 字元，故由呼叫端指定。
+    """
+    return await _user(db, user_id or email.split("@")[0][:20], email=email)
+
+
 async def _invite(client, teacher: str, course_id: int, emails: str):
     return await client.post(f"{_COURSES}/{course_id}/invitations", json={"emails": emails}, headers=_bearer(teacher))
 
@@ -118,37 +127,75 @@ async def _token_for(db, email: str) -> str:
 class TestPreview:
     """AC 6：多筆 Email → **唯讀預覽**。"""
 
-    async def test_預覽以統一範本渲染且帶第一筆收件人(self, client, db) -> None:
+    async def test_預覽以統一範本渲染且帶入課程資訊(self, client, db) -> None:
         teacher = await _user(db, "iv_t01", ROLE_TEACHER)
+        await _account(db, "iva@x.gov.tw", user_id="iv_a01")
+        await _account(db, "ivb@x.gov.tw", user_id="iv_b01")
         cid = await _published_course(client, db, teacher, name="感染管制年度訓練")
 
         r = await client.post(
             f"{_COURSES}/{cid}/invitations/preview",
-            json={"emails": "a@x.gov.tw\nb@x.gov.tw"},
+            json={"emails": "iva@x.gov.tw\nivb@x.gov.tw"},
             headers=_bearer(teacher),
         )
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["recipient_sample"] == "a@x.gov.tw"
-        assert body["recipient_count"] == 2
         assert "感染管制年度訓練" in body["subject"]
         assert "姓名iv_t01" in body["body"], "應帶入課程擁有者姓名"
         assert "{" not in body["body"], "殘留未代入的佔位符代表 params key 對不上"
 
+    async def test_預覽不呈現任何一位收件人的資料(self, client, db) -> None:
+        """預覽只有一份，而每封信代入各自的姓名。
+
+        填第 1 筆會讓教師以為每封信都長那樣；填 Email 更糟——實際寄出用的是帳號姓名，
+        預覽與收到的信對不起來（使用者實測回報）。
+        """
+        teacher = await _user(db, "iv_t11", ROLE_TEACHER)
+        await _account(db, "ivc@x.gov.tw", user_id="iv_c01")
+        await _account(db, "ivd@x.gov.tw", user_id="iv_d01")
+        cid = await _published_course(client, db, teacher)
+
+        r = await client.post(
+            f"{_COURSES}/{cid}/invitations/preview",
+            json={"emails": "ivc@x.gov.tw,ivd@x.gov.tw"},
+            headers=_bearer(teacher),
+        )
+        body = r.json()
+        assert "〔收件人姓名〕" in body["body"], "應以佔位字樣取代稱謂"
+        assert "ivc@x.gov.tw" not in body["body"]
+        assert "ivd@x.gov.tw" not in body["body"]
+        assert "姓名iv_c01" not in body["body"], "不得洩漏收件人的真實姓名"
+        assert "recipient_sample" not in body
+        assert "recipient_count" not in body
+
+    async def test_預覽內容不隨收件人清單變動(self, client, db) -> None:
+        """這是「改動清單不需重新預覽」的依據（使用者回饋 3）。"""
+        teacher = await _user(db, "iv_t12", ROLE_TEACHER)
+        await _account(db, "ive@x.gov.tw", user_id="iv_e01")
+        await _account(db, "ivf@x.gov.tw", user_id="iv_f01")
+        cid = await _published_course(client, db, teacher)
+        url = f"{_COURSES}/{cid}/invitations/preview"
+
+        one = await client.post(url, json={"emails": "ive@x.gov.tw"}, headers=_bearer(teacher))
+        two = await client.post(url, json={"emails": "ive@x.gov.tw,ivf@x.gov.tw"}, headers=_bearer(teacher))
+        assert one.json() == two.json()
+
     async def test_預覽不含可用的_token(self, client, db) -> None:
         """每位收件人的 token 於寄出當下才產生；預覽給出真的連結才是問題。"""
         teacher = await _user(db, "iv_t02", ROLE_TEACHER)
+        await _account(db, "ivg@x.gov.tw", user_id="iv_g01")
         cid = await _published_course(client, db, teacher)
         r = await client.post(
-            f"{_COURSES}/{cid}/invitations/preview", json={"emails": "a@x.gov.tw"}, headers=_bearer(teacher)
+            f"{_COURSES}/{cid}/invitations/preview", json={"emails": "ivg@x.gov.tw"}, headers=_bearer(teacher)
         )
         assert "/et/invite?token=…" in r.json()["body"]
 
     async def test_預覽不寫入任何邀請列也不寄信(self, client, db) -> None:
         teacher = await _user(db, "iv_t03", ROLE_TEACHER)
+        await _account(db, "ivh@x.gov.tw", user_id="iv_h01")
         cid = await _published_course(client, db, teacher)
         await client.post(
-            f"{_COURSES}/{cid}/invitations/preview", json={"emails": "a@x.gov.tw"}, headers=_bearer(teacher)
+            f"{_COURSES}/{cid}/invitations/preview", json={"emails": "ivh@x.gov.tw"}, headers=_bearer(teacher)
         )
         assert (await db.execute(select(EtInvitation))).scalars().all() == []
         logs = (await db.execute(select(DpEmailLog).where(DpEmailLog.template_code == "COURSE_INVITE"))).scalars().all()
@@ -160,14 +207,16 @@ class TestSendInvitations:
 
     async def test_每筆_email_建立待加入邀請並寄信(self, client, db) -> None:
         teacher = await _user(db, "iv_t04", ROLE_TEACHER)
+        await _account(db, "ivi@x.gov.tw", user_id="iv_i01")
+        await _account(db, "ivj@x.gov.tw", user_id="iv_j01")
         cid = await _published_course(client, db, teacher)
 
-        r = await _invite(client, teacher, cid, "a@x.gov.tw, b@x.gov.tw")
+        r = await _invite(client, teacher, cid, "ivi@x.gov.tw, ivj@x.gov.tw")
         assert r.status_code == 200, r.text
         assert r.json() == {"sent": 2, "failed": []}
 
         rows = (await db.execute(select(EtInvitation).order_by(EtInvitation.email))).scalars().all()
-        assert [row.email for row in rows] == ["a@x.gov.tw", "b@x.gov.tw"]
+        assert [row.email for row in rows] == ["ivi@x.gov.tw", "ivj@x.gov.tw"]
         assert all(row.status == INVITATION_PENDING for row in rows)
         assert all(row.send_status_code == "QUEUED" for row in rows)
         assert all(row.token_hash for row in rows)
@@ -175,11 +224,12 @@ class TestSendInvitations:
     async def test_明文_token_不落庫(self, client, db) -> None:
         """DB 只存 SHA-256；該表外洩不得反推出可用的連結。"""
         teacher = await _user(db, "iv_t05", ROLE_TEACHER)
+        await _account(db, "ivk@x.gov.tw", user_id="iv_k01")
         cid = await _published_course(client, db, teacher)
-        await _invite(client, teacher, cid, "a@x.gov.tw")
+        await _invite(client, teacher, cid, "ivk@x.gov.tw")
 
-        token = await _token_for(db, "a@x.gov.tw")
-        row = await db.scalar(select(EtInvitation).where(EtInvitation.email == "a@x.gov.tw"))
+        token = await _token_for(db, "ivk@x.gov.tw")
+        row = await db.scalar(select(EtInvitation).where(EtInvitation.email == "ivk@x.gov.tw"))
         assert row.token_hash != token
         assert row.token_hash == hash_token(token)
 
@@ -189,29 +239,32 @@ class TestSendInvitations:
         換新 token 是一次性的前提——舊 token 已隨信件流出，沿用等於留一條舊路。
         """
         teacher = await _user(db, "iv_t06", ROLE_TEACHER)
+        await _account(db, "ivl@x.gov.tw", user_id="iv_l01")
         cid = await _published_course(client, db, teacher)
-        await _invite(client, teacher, cid, "a@x.gov.tw")
-        first = await db.scalar(select(EtInvitation).where(EtInvitation.email == "a@x.gov.tw"))
+        await _invite(client, teacher, cid, "ivl@x.gov.tw")
+        first = await db.scalar(select(EtInvitation).where(EtInvitation.email == "ivl@x.gov.tw"))
         first_hash, first_id = first.token_hash, first.invitation_id
 
-        await _invite(client, teacher, cid, "a@x.gov.tw")
+        await _invite(client, teacher, cid, "ivl@x.gov.tw")
 
-        rows = (await db.execute(select(EtInvitation).where(EtInvitation.email == "a@x.gov.tw"))).scalars().all()
+        rows = (await db.execute(select(EtInvitation).where(EtInvitation.email == "ivl@x.gov.tw"))).scalars().all()
         assert len(rows) == 1, "再次寄送不得建新列"
         assert rows[0].invitation_id == first_id
         assert rows[0].token_hash != first_hash, "再次寄送必須換新 token"
 
     async def test_同一次貼上的重複_email_只寄一封(self, client, db) -> None:
         teacher = await _user(db, "iv_t07", ROLE_TEACHER)
+        await _account(db, "ivm@x.gov.tw", user_id="iv_m01")
         cid = await _published_course(client, db, teacher)
-        r = await _invite(client, teacher, cid, "A@x.gov.tw, a@x.gov.tw\na@X.gov.tw")
+        r = await _invite(client, teacher, cid, "IVM@x.gov.tw, ivm@x.gov.tw\nivm@X.gov.tw")
         assert r.json()["sent"] == 1
 
     async def test_草稿課程不可邀請(self, client, db) -> None:
         teacher = await _user(db, "iv_t08", ROLE_TEACHER)
         created = await client.post(_COURSES, json={"course_name": "草稿課程"}, headers=_bearer(teacher))
         cid = created.json()["course_id"]
-        r = await _invite(client, teacher, cid, "a@x.gov.tw")
+        await _account(db, "ivn@x.gov.tw", user_id="iv_n01")
+        r = await _invite(client, teacher, cid, "ivn@x.gov.tw")
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_INVITE_004"
 
@@ -219,9 +272,52 @@ class TestSendInvitations:
         teacher = await _user(db, "iv_t09", ROLE_TEACHER)
         other = await _user(db, "iv_t10", ROLE_TEACHER)
         cid = await _published_course(client, db, teacher)
-        r = await _invite(client, other, cid, "a@x.gov.tw")
+        await _account(db, "ivo@x.gov.tw", user_id="iv_o01")
+        r = await _invite(client, other, cid, "ivo@x.gov.tw")
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+class TestUnknownEmailIsRejected:
+    """SA 裁示：Email 邀請只收既有 EDMS 使用者。
+
+    教師是用貼的，打錯一個字就會把課程資訊寄給系統外的陌生人，而他自己要到 US12 待加入
+    清單才可能發現——且 `SEND_STATUS_CODE` 只記「排入佇列」，連退信都不會顯示在那裡。
+    """
+
+    async def test_寄送時查無帳號一律擋下且不建邀請列(self, client, db) -> None:
+        teacher = await _user(db, "un_t01", ROLE_TEACHER)
+        await _account(db, "known@x.gov.tw", user_id="un_k01")
+        cid = await _published_course(client, db, teacher)
+
+        r = await _invite(client, teacher, cid, "known@x.gov.tw, typo@x.gov.tw")
+
+        assert r.status_code == 422
+        body = r.json()
+        assert body["error_code"] == "ET_INVITE_005"
+        assert body["unknown_emails"] == ["typo@x.gov.tw"], "須指出是哪幾筆"
+        # 全批擋下：不可只寄有帳號的那幾封（教師會以為全部都寄出去了）
+        assert (await db.execute(select(EtInvitation))).scalars().all() == []
+
+    async def test_預覽階段就擋下_不必等到按寄出(self, client, db) -> None:
+        teacher = await _user(db, "un_t02", ROLE_TEACHER)
+        cid = await _published_course(client, db, teacher)
+
+        r = await client.post(
+            f"{_COURSES}/{cid}/invitations/preview",
+            json={"emails": "nobody@x.gov.tw"},
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_INVITE_005"
+
+    async def test_錯誤訊息本身不含_email(self, client, db) -> None:
+        """`sti-error-codes`：`error_message` 不得嵌入動態值，明細走 `unknown_emails`。"""
+        teacher = await _user(db, "un_t03", ROLE_TEACHER)
+        cid = await _published_course(client, db, teacher)
+
+        r = await _invite(client, teacher, cid, "typo2@x.gov.tw")
+        assert "typo2@x.gov.tw" not in r.json()["error_message"]
 
 
 class TestAcceptInvitation:
@@ -288,7 +384,9 @@ class TestAcceptInvitation:
         """
         teacher = await _user(db, "ac_t04", ROLE_TEACHER)
         invitee = await _user(db, "ac_s05", email="office_ac_s05@edms.local")
-        cid, token = await self._invited_token(client, db, teacher, "personal_ac_s05@example.com")
+        # 邀請寄到**另一位使用者**的信箱，但由 ac_s05 登入後點連結——仍可加入。
+        await _user(db, "ac_s05b", email="other_ac_s05@edms.local")
+        cid, token = await self._invited_token(client, db, teacher, "other_ac_s05@edms.local")
 
         r = await client.post(_ACCEPT, json={"token": token}, headers=_bearer(invitee))
         assert r.status_code == 200, r.text
@@ -343,9 +441,10 @@ class TestAcceptInvitation:
         from app.et.invitation.repository import EtInvitationRepository
 
         teacher = await _user(db, "cs_t01", ROLE_TEACHER)
+        await _account(db, "ivp@x.gov.tw", user_id="iv_p01")
         cid = await _published_course(client, db, teacher)
-        await _invite(client, teacher, cid, "a@x.gov.tw")
-        row = await db.scalar(select(EtInvitation).where(EtInvitation.email == "a@x.gov.tw"))
+        await _invite(client, teacher, cid, "ivp@x.gov.tw")
+        row = await db.scalar(select(EtInvitation).where(EtInvitation.email == "ivp@x.gov.tw"))
 
         repo = EtInvitationRepository()
         first = await repo.consume_pending(db, invitation_id=row.invitation_id, operator=OperatorInfo(user_id="u1"))

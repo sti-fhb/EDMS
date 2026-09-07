@@ -59,12 +59,13 @@ from app.et.invitation.repository import EtInvitationRepository
 from app.et.invitation.rules import ensure_invitable, parse_emails
 from app.et.invitation.schemas import EmailInviteResult, InviteAcceptResult, InvitePreview
 from app.et.notify.course_invite import (
+    PREVIEW_NAME_MASK,
     build_course_invite_params,
     invite_link,
     preview_invite_link,
 )
 from app.et.notify.mailer import TEMPLATE_COURSE_INVITE
-from app.et.notify.repository import EtNotifyRepository
+from app.et.notify.repository import EtNotifyRepository, Recipient
 from app.et.notify.service import EtNotifier
 from app.services import AuditLogService, NotifyService
 
@@ -80,6 +81,7 @@ _NOT_FOUND = AppError(status_code=404, detail="查無此課程", error_code="ET_
 #: 有效」，那正是轉發者想要的回饋。
 _LINK_INVALID = AppError(status_code=404, detail="邀請連結無效或已失效", error_code="ET_INVITE_001")
 _COURSE_CLOSED = AppError(status_code=409, detail="此課程目前關閉中", error_code="ET_INVITE_002")
+_NO_EMAILS = AppError(status_code=422, detail="Email 格式不正確或數量超過上限", error_code="ET_INVITE_003")
 
 #: 排入 outbox 的結果碼（`ET_INVITATION.SEND_STATUS_CODE`，VARCHAR(20)）。
 STATUS_QUEUED: Final = "QUEUED"
@@ -106,44 +108,42 @@ class EtInvitationService:
     async def preview(self, db: AsyncSession, course_id: int, *, raw_emails: str, actor_id: str) -> InvitePreview:
         """依統一範本渲染邀請信預覽（唯讀，FR-ET-US8-07）。
 
-        以**第 1 筆**收件人為範例：每位收件人的邀請連結不同，逐封預覽沒有意義。
-        連結以佔位字樣呈現（`preview_invite_link`）——預覽當下尚未產生任何 token，
-        給出一條真的可以用的連結才是問題。
+        預覽**與收件人無關**：姓名以 `PREVIEW_NAME_MASK`、邀請連結以 `…` 取代——兩者都是
+        逐收件人不同的東西，填任何一位的資料都會讓教師誤以為每封信都長那樣。其餘內容
+        （課程名稱、閱課期間、邀請碼）本來就人人相同，所以這份預覽對整批收件人都成立。
+
+        連結不給真值還有一個理由：預覽當下尚未產生任何 token，給出一條真的可以用的
+        連結才是問題。
 
         Raises:
             AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002` 非擁有者；
                 422 `ET_INVITE_003` Email 不合法；422 `ET_INVITE_004` 課程非已發布；
+                422 `ET_INVITE_005` 有 Email 尚無 EDMS 帳號；
                 404/409/422 `DP_MAIL_*` 範本問題。
         """
         course = await self._require_invitable_course(db, course_id, actor_id)
         emails = parse_emails(raw_emails)
         if not emails:
-            raise AppError(status_code=422, detail="Email 格式不正確或數量超過上限", error_code="ET_INVITE_003")
+            raise _NO_EMAILS
+        # 於此就擋下查無帳號者，教師不必等到按下「確認寄出」才發現打錯字。
+        await self._require_known_recipients(db, emails)
 
-        sample = emails[0]
         rendered = await self._notify.render_preview(
             db,
             template_code=TEMPLATE_COURSE_INVITE,
             module=_MODULE,
             params=build_course_invite_params(
-                # 預覽**不查 `DP_USER` 取真實姓名**：`ensure_owner` 擋得住「看別人的課程」，
-                # 擋不住「拿任意 Email 反覆呼叫預覽」——若把查到的姓名渲染後回傳，這支端點
-                # 就成了帳號列舉兼真實姓名揭露的 oracle（連與教育訓練無關的 DP / DM 使用者
-                # 都問得到）。預覽的目的是看範本長相，不是看某人叫什麼；用 Email 原字串即可，
-                # 那也正是尚無帳號之受邀者實際會看到的樣子。
-                user_name=sample,
+                # 姓名以佔位字樣呈現、不填任何一位收件人的資料：預覽只有一份，而每封信
+                # 代入的是各自的姓名。填第 1 筆會讓教師以為每封信都長那樣；填 Email 更糟
+                # ——實際寄出用的是帳號姓名，預覽與收到的信對不起來。見 PREVIEW_NAME_MASK。
+                user_name=PREVIEW_NAME_MASK,
                 teacher_name=await self._people.user_name(db, course.owner_id) or "",
                 course=course,
                 course_url=preview_invite_link(),
                 invitation_code=course.invitation_code,
             ),
         )
-        return InvitePreview(
-            subject=rendered.subject,
-            body=rendered.body,
-            recipient_sample=sample,
-            recipient_count=len(emails),
-        )
+        return InvitePreview(subject=rendered.subject, body=rendered.body)
 
     async def send(
         self, db: AsyncSession, course_id: int, *, raw_emails: str, operator: OperatorInfo
@@ -159,20 +159,23 @@ class EtInvitationService:
         course = await self._require_invitable_course(db, course_id, operator.user_id)
         emails = parse_emails(raw_emails)
         if not emails:
-            raise AppError(status_code=422, detail="Email 格式不正確或數量超過上限", error_code="ET_INVITE_003")
+            raise _NO_EMAILS
+        # **重跑預覽的全部驗證**——預覽是體驗，不是把關。順帶取得各人姓名，
+        # 不必再逐筆查一次（單次上限 50 筆，逐筆查就是 50 趟往返）。
+        recipients = await self._require_known_recipients(db, emails)
 
         teacher_name = await self._people.user_name(db, course.owner_id) or ""
         sent = 0
         failed: list[str] = []
-        for email in emails:
+        for recipient in recipients:
             # 每位收件人一組獨立 token：明文只入信中連結，DB 只存 SHA-256。
             plaintext = generate_invitation_token()
             result = await self._notifier.notify(
                 db,
                 template_code=TEMPLATE_COURSE_INVITE,
-                recipients=[email],
+                recipients=[recipient.email],
                 params=build_course_invite_params(
-                    user_name=await self._display_name(db, email),
+                    user_name=recipient.user_name,
                     teacher_name=teacher_name,
                     course=course,
                     course_url=invite_link(plaintext),
@@ -183,7 +186,7 @@ class EtInvitationService:
             await self._repo.upsert_pending(
                 db,
                 course_id=course_id,
-                email=email,
+                email=recipient.email,
                 token_hash=hash_token(plaintext),
                 send_status_code=STATUS_QUEUED if queued else STATUS_SEND_FAILED,
                 operator=operator,
@@ -191,7 +194,7 @@ class EtInvitationService:
             if queued:
                 sent += 1
             else:
-                failed.append(email)
+                failed.append(recipient.email)
 
         # 收件人**不寫進 description**：那是個資，而稽核表的保存期比業務資料長。
         # 需要知道寄給誰時查 `ET_INVITATION`（有 `COURSE_ID` 可對上本筆稽核的 target_id）。
@@ -276,11 +279,32 @@ class EtInvitationService:
         ensure_invitable(course_status=course.status)
         return course
 
-    async def _display_name(self, db: AsyncSession, email: str) -> str:
-        """`{USER_NAME}` 之值：有帳號用姓名，沒有就用 Email 原字串。
+    async def _require_known_recipients(self, db: AsyncSession, emails: list[str]) -> list[Recipient]:
+        """比對 `DP_USER`，**查無帳號者一律擋下**（不建邀請列、不寄信）。
 
-        Email 邀請的對象**可能尚無帳號**（那正是它存在的理由）。範本開頭是
-        「{USER_NAME} 您好：」，留空會變成「 您好：」。
+        SA 裁示：Email 邀請的對象必須是既有的 EDMS 使用者。教師是用貼的，打錯一個字就會
+        把課程資訊寄給系統外的陌生人，而他自己要到 US12 待加入清單才可能發現——且因
+        `SEND_STATUS_CODE` 只記「排入佇列」（Q3 裁示 A），連退信都不會反映在那張清單上。
+        擋在寄出之前是唯一看得見的時點。
+
+        > 取捨：這使本端點可被用來「一次貼 50 筆 Email、得知哪些有 EDMS 帳號」。呼叫者是
+        > 已認證的教師 / 管理者，且只得到有無帳號的布林值（不回姓名等個資），SA 已評估
+        > 可接受；router 之使用者維度限流一併限制了探測速率。
+
+        Returns:
+            依 `emails` 原順序排列之收件人（含姓名，供寄信時個人化）。
+
+        Raises:
+            AppError: 任一筆查無帳號（422 `ET_INVITE_005`）。是哪幾筆放在
+                `extra.unknown_emails`——`error_message` 依 `sti-error-codes` 不得嵌入動態值。
         """
-        recipient = await self._people.recipient_by_email(db, email)
-        return recipient.user_name if recipient is not None else email
+        by_email = {r.email: r for r in await self._people.recipients_by_emails(db, emails)}
+        unknown = [e for e in emails if e not in by_email]
+        if unknown:
+            raise AppError(
+                status_code=422,
+                detail="以下 Email 尚未建立 EDMS 帳號，請確認拼寫或請管理者先建立帳號",
+                error_code="ET_INVITE_005",
+                extra={"unknown_emails": unknown},
+            )
+        return [by_email[e] for e in emails]

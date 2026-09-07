@@ -25,13 +25,14 @@ class InvitePreview(BaseModel):
 
     `subject` / `body` 由平台範本渲染而來，教師**不可編輯**（FR-ET-US8-07：範本由管理者
     於 DP 後台統一維護）。前端據此以唯讀欄位呈現。
+
+    **不回傳收件人範例或筆數**：預覽以 `PREVIEW_NAME_MASK` 取代收件人姓名、以 `…` 取代
+    token，內容因此與「這次要寄給誰」完全無關——回傳收件人資訊只會讓教師以為預覽是
+    針對某一位產生的。筆數前端自己算得出來（同一套 `parseEmails` 規則）。
     """
 
     subject: str
     body: str
-    #: 預覽以第 1 筆收件人為範例——每位收件人的連結不同，逐封預覽沒有意義。
-    recipient_sample: str
-    recipient_count: int
 
 
 class EmailInviteResult(BaseModel):

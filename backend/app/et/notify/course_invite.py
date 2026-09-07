@@ -62,6 +62,15 @@ DIGEST_PARAM_KEYS: Final[frozenset[str]] = frozenset({"USER_NAME", "COURSE_LIST"
 #: （命名避開 `TOKEN` 字樣：ruff `S105` 會把含該字的常數賦值視為硬編碼機密。）
 _PREVIEW_LINK_MASK: Final = "…"
 
+#: 預覽信中代替收件人姓名的字樣。
+#:
+#: 範本內文開頭是「{USER_NAME} 您好：」，而**每位收件人代入的是各自的姓名**。預覽只有
+#: 一份，若填入某一位（例如第 1 筆）的資料，教師一次邀請 3 個人卻只看到其中一位的稱謂，
+#: 會誤以為三封信都長那樣；填 Email 更糟——實際寄出用的是帳號姓名，兩者對不起來。
+#: 填一個一眼看得出是佔位的字樣，預覽就與收件人無關，也順帶讓「改了收件人清單要不要
+#: 重新預覽」這個問題消失（內容根本不會變）。
+PREVIEW_NAME_MASK: Final = "〔收件人姓名〕"
+
 
 def _base_url() -> str:
     """前端站台根網址（去尾斜線）。
@@ -107,8 +116,9 @@ def build_course_invite_params(
     """組 `COURSE_INVITE` 之範本參數。
 
     Args:
-        user_name: 收件人顯示名稱。Email 邀請之對象可能尚無帳號，此時由呼叫端傳入
-            Email 原字串——範本開頭為「{USER_NAME} 您好：」，留空會變成「 您好：」。
+        user_name: 收件人顯示名稱（`DP_USER.USER_NAME`）。**不可留空**——範本開頭為
+            「{USER_NAME} 您好：」，空字串會渲染成「 您好：」。預覽情境請傳
+            `PREVIEW_NAME_MASK` 而非任何一位收件人的資料。
         teacher_name: 課程擁有者姓名。
         course: 課程列（取名稱與起訖時間）。
         course_url: 學習連結或邀請連結，依觸發路徑而異（見模組 docstring）。
