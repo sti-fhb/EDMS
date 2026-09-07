@@ -332,7 +332,7 @@ class TestGrading:
         teacher = await _user(db, "t_att08", ROLE_TEACHER)
         student = await _user(db, "s_att08")
         course = await _course_with_quiz(client, db, teacher, code="32000008")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, teacher, course["quiz_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()

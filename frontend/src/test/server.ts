@@ -1168,6 +1168,7 @@ export const handlers = [
   }),
   http.post("/api/et/invitations/accept", () =>
     HttpResponse.json({ course_id: 7, course_name: "採血作業新進人員訓練", already_joined: false }),
+  ),
 
   // ── ET06 測驗作答（US6 / #279）──────────────────────────────────────────
   http.get("/api/et/quizzes/:quizId/intro", ({ params }) =>

@@ -101,9 +101,17 @@ def rate_limit_by_et_user(limiter: SlidingWindowRateLimiter, scope: str) -> Call
     一個位址；但使用者維度可用「多開帳號」線性擴張（自助註冊是開的），故通常兩個維度
     同時掛，IP 那側放寬到不會誤傷同一 NAT 出口的同事。
 
-    ⚠️ `enrollment/router.py` 另有一份同名的區域實作（早於本函式，且把 limiter 寫死在
-    閉包裡）。**新端點請一律用本函式**；`enrollment` 那份待 #273（另一個 session 正在
-    動該目錄）合併後再收斂，避免現在製造無謂的衝突。
+    ⚠️ 目前全模組有**三份**使用者維度限流器，本函式是唯一的共用版：
+
+    | 位置 | 來源 | 差異 |
+    |---|---|---|
+    | 本函式 | #279 | 接受 limiter 參數，可共用 |
+    | `enrollment/router.py::rate_limit_by_user` | #247 | limiter 寫死在閉包；其 unit test 以該簽章呼叫 |
+    | `invitation/router.py::rate_limit_invites` | #273 | 同上，當時尚無共用的家可放 |
+
+    **新端點請一律用本函式**。另外兩份的收斂**不在 #279 範圍內**——`enrollment` 那支要
+    同步改 `tests/unit/et/test_enrollment_rate_limit.py`（以舊簽章呼叫），`invitation` 那支
+    則不在本 issue 的 footprint 內。兩者一起收斂另開 refactor issue 處理。
 
     Raises:
         AppError: 視窗內超過門檻（429 / `COMMON_429`）。
