@@ -19,7 +19,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
-from app.et.constants import ITEM_MATERIAL
+from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL
 from app.et.course.repository import (
     EtChapterRepository,
     EtCourseRepository,
@@ -49,7 +49,9 @@ from app.et.course.schemas import (
     ItemRow,
     TagOption,
 )
+from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.material.repository import EtMaterialRepository
+from app.et.notify.mailer import CourseInviteMailer
 from app.et.quiz.repository import EtQuizRepository
 from app.et.roles.authz import ET_ADMIN, ET_STUDENT, ET_TEACHER
 from app.services import AuditLogService
@@ -74,6 +76,8 @@ class EtCourseService:
         materials: EtMaterialRepository | None = None,
         quizzes: EtQuizRepository | None = None,
         audit: AuditLogService | None = None,
+        tag_invite: EtTagInviteRepository | None = None,
+        invite_mailer: CourseInviteMailer | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._tags = tags or EtCourseTagRepository()
@@ -82,6 +86,8 @@ class EtCourseService:
         self._materials = materials or EtMaterialRepository()
         self._quizzes = quizzes or EtQuizRepository()
         self._audit = audit or AuditLogService()
+        self._tag_invite = tag_invite or EtTagInviteRepository()
+        self._invite_mailer = invite_mailer or CourseInviteMailer()
 
     # ── 課程 ────────────────────────────────────────────────────────────────
 
@@ -176,8 +182,39 @@ class EtCourseService:
             operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_COURSE")
-        await self._tags.apply(db, course_id, to_add=desired - current, to_remove=current - desired, operator=operator)
+        tags_add = desired - current
+        await self._tags.apply(db, course_id, to_add=tags_add, to_remove=current - desired, operator=operator)
         await self._log(db, "UPDATE", operator.user_id, course_id, "編輯課程基本資料")
+
+        if course.status == COURSE_PUBLISHED and tags_add:
+            await self._backfill_new_tag_members(db, course, tags_add, operator=operator)
+
+    async def _backfill_new_tag_members(
+        self, db: AsyncSession, course, tag_ids: set[int], *, operator: OperatorInfo
+    ) -> None:
+        """已發布課程新增標籤 → 補帶入該標籤人員並寄通知信（FR-ET-US8-04 / #273）。
+
+        **只對新增的標籤解析人員**（`target_user_ids_for_tags`）：用全部課程標籤會把
+        「發布後才被貼上舊標籤的人」也一併帶入，而那條路徑另有出口（貼標追溯於貼標
+        當下觸發），在這裡順手做會讓同一人被兩條路徑各邀請一次。
+
+        草稿課程不走這裡——草稿的標籤可自由增刪，帶入與寄信一律等到發布當下
+        （FR-ET-US3-12）；否則教師編輯期間每加一個標籤就會寄出一批信。
+
+        既有學員不重複加入由 `bulk_enroll_returning` 的 `ON CONFLICT DO NOTHING` 保證，
+        且它只回傳真正新增者，故寄信對象自然也不含既有學員。
+        """
+        user_ids = await self._tag_invite.target_user_ids_for_tags(db, sorted(tag_ids))
+        invited = await self._tag_invite.bulk_enroll_returning(db, course.course_id, user_ids, operator=operator)
+        if not invited:
+            return
+        await self._log(db, "UPDATE", operator.user_id, course.course_id, f"新增標籤補帶入 {len(invited)} 位學員")
+        # 重新載入課程：上面的更新走 Core UPDATE，手上的 ORM 物件仍是舊快照，
+        # 直接拿去組信會寄出改名前的課程名稱與起訖時間。
+        await db.refresh(course)
+        await self._invite_mailer.send_course_invite(
+            db, course=course, invitation_code=course.invitation_code, user_ids=invited
+        )
 
     async def delete_draft(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
         """刪除草稿課程（SA 裁示 Q1）：本體與其下章節 / 項目一併軟刪。

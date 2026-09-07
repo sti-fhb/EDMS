@@ -17,7 +17,7 @@ import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import type { ReactNode } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { JoinCourseDialog } from "./JoinCourseDialog"
 import { COMPLETION_STATUS_LABEL } from "./myCoursesSchemas"
@@ -49,7 +49,15 @@ import { formatDateTime } from "../../utils/date"
 export function EtMyCoursesPage() {
   const navigate = useNavigate()
   const { message } = useNotification()
-  const [joinOpen, setJoinOpen] = useState(false)
+  const [searchParams] = useSearchParams()
+
+  // 教師以「複製邀請連結」/ QR Code 傳出的網址帶 `?code=`（#273）。落地即開啟加入視窗
+  // 並預填該碼——不自動送出，AC 8 的預覽是明訂的一步。
+  //
+  // 於 `useState` 的初始值判定而非 effect：這是從網址直接推導得出的，不需要先渲染一次
+  // 空狀態再用 setState 補（`react-hooks/set-state-in-effect` 亦擋在 effect 內同步 setState）。
+  const initialCode = searchParams.get("code") ?? ""
+  const [joinOpen, setJoinOpen] = useState(initialCode !== "")
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: QUERY_KEYS.etMyCourses.list(),
@@ -129,6 +137,7 @@ export function EtMyCoursesPage() {
 
       <JoinCourseDialog
         open={joinOpen}
+        initialCode={initialCode}
         onClose={() => setJoinOpen(false)}
         onJoined={handleJoined}
         onAlreadyJoined={(courseId, pendingOpen, courseName) => {

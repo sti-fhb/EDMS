@@ -1111,6 +1111,28 @@ export const handlers = [
   http.post("/api/et/items/:itemId/viewed", ({ params }) =>
     HttpResponse.json({ item_id: Number(params.itemId), completed: false }),
   ),
+
+  // ── ET02 邀請學員（US8 / #273）──────────────────────────────────────────
+  // 預覽由**後端**以統一範本渲染後回傳（非前端拼字串），故 handler 也回完整字串。
+  // 預覽內容**與收件人無關**（姓名與邀請連結皆為佔位字樣），故 handler 不看 emails。
+  http.post("/api/et/courses/:courseId/invitations/preview", () =>
+    HttpResponse.json({
+      subject: "【教育訓練】您已被加入課程「採血作業新進人員訓練」",
+      body: [
+        "〔收件人姓名〕 您好：",
+        "",
+        "您已被加入由 王大明 開設之課程「採血作業新進人員訓練」。",
+      ].join("\n"),
+    }),
+  ),
+  http.post("/api/et/courses/:courseId/invitations", async ({ request }) => {
+    const { emails } = (await request.json()) as { emails: string }
+    const list = emails.split(/[\s,;，、；]+/).filter(Boolean)
+    return HttpResponse.json({ sent: list.length, failed: [] })
+  }),
+  http.post("/api/et/invitations/accept", () =>
+    HttpResponse.json({ course_id: 7, course_name: "採血作業新進人員訓練", already_joined: false }),
+  ),
 ]
 
 export const server = setupServer(...handlers)

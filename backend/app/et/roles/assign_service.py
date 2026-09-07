@@ -6,9 +6,9 @@
 **本轉接層為 `ET_USER_ROLE` / `ET_USER_TAG` 之權威寫入口**，不信任呼叫端輸入，
 一律先驗證再寫。
 
-> **範圍界定**：本 issue（#185 Foundation）交付指派本身；**貼標追溯**（新增標籤時
-> 自動補加入該標籤所有「已發布且未關閉」課程並寄彙整信）依賴課程 / 選課 / 通知服務，
-> 屬 ET Issue #2（US1 T043）與 #8（US8），於此標 TODO。
+**貼標追溯**（新增標籤時自動補加入該標籤所有「已發布且未關閉」課程並寄彙整信）於
+#273 落地，見 `_backfill_tagged_courses`；#185 交付時因依賴課程 / 選課 / 通知服務而
+只留 TODO。
 """
 
 import logging
@@ -19,8 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.module_assign import AssignmentView
+from app.core.operator import OperatorInfo
 from app.et.catalog.models import EtTag, EtUserTag
-from app.et.constants import ALL_ROLES, ROLE_ADMIN
+from app.et.constants import ALL_ROLES, ROLE_ADMIN, ROLE_STUDENT
+from app.et.enrollment.tag_invite import EtTagInviteRepository
+from app.et.notify.mailer import CourseInviteMailer
 from app.et.roles.models import EtUserRole
 from app.services import AuditLogService
 
@@ -74,8 +77,15 @@ def ensure_not_self_admin_removal(operator_id: str, user_id: str, roles: set[str
 class EtAssignService:
     """ET 角色 / 標籤指派（DP 後台權限管理之寫入實作）。"""
 
-    def __init__(self, audit: AuditLogService | None = None) -> None:
+    def __init__(
+        self,
+        audit: AuditLogService | None = None,
+        tag_invite: EtTagInviteRepository | None = None,
+        invite_mailer: CourseInviteMailer | None = None,
+    ) -> None:
         self._audit = audit or AuditLogService()
+        self._tag_invite = tag_invite or EtTagInviteRepository()
+        self._invite_mailer = invite_mailer or CourseInviteMailer()
 
     async def get_users_assignments(self, db: AsyncSession, user_ids: list[str]) -> dict[str, AssignmentView]:
         """批次載入一頁使用者之 ET 角色與標籤現況（避免逐列 N+1）。
@@ -181,9 +191,11 @@ class EtAssignService:
 
         await db.flush()
 
-        # TODO(ET Issue #2 / #8)：貼標追溯——新增標籤時補加入該標籤所有「已發布且未關閉」
-        # 課程（JOIN_SOURCE=TAG_DEFAULT）並寄彙整信；移除時既有 ET_ENROLLMENT 不變動。
-        # 依賴課程 / 選課 / 通知服務，本 Foundation issue 尚未具備。
+        # 貼標追溯（#273 落地，取代 #185 之 TODO）：**只在新增標籤時**觸發。
+        # 移除標籤刻意什麼都不做——FR-ET-US8-06 明定既有課程之學員名單不變動
+        # （已加入者可繼續學習），只影響「之後新發布之該標籤課程」。
+        if tags_add and ROLE_STUDENT in roles:
+            await self._backfill_tagged_courses(db, user_id, tags_add, operator_id=operator_id)
 
         await self._audit.log_action(
             db,
@@ -196,6 +208,39 @@ class EtAssignService:
             description="變更 ET 角色 / 受訓單位標籤指派",
             after_value={"roles": sorted(roles), "tags": sorted(groups, key=int)},
         )
+
+    async def _backfill_tagged_courses(
+        self, db: AsyncSession, user_id: str, tag_ids: set[str], *, operator_id: str
+    ) -> None:
+        """新增標籤 → 補加入該標籤所有「已發布且未關閉」課程 → 寄**彙整一封**。
+
+        FR-ET-US8-05。逐課一封會讓當事人在管理者按下儲存的那一刻同時收到十幾封信，
+        故一次貼標只寄一封列出全部新加入課程的彙整信（`COURSE_INVITE_DIGEST`）。
+
+        **限具學員角色者**：呼叫端已以 `ROLE_STUDENT in roles` 過濾——`roles` 是本次
+        指派的**目標集合**（全量覆寫語意），故它同時涵蓋「本來就是學員」與「這次一併
+        被授予學員角色」兩種情形，不必再查一次 `ET_USER_ROLE`。
+
+        **被移除的學員不會被帶回**：`bulk_enroll_returning` 用 `ON CONFLICT DO NOTHING`
+        （#247 SA Q1 裁示 C）。貼標追溯也是標籤帶入的一種，同受該裁示拘束——要讓被移除
+        者回來只能由教師明確 Email 邀請。
+
+        寄信失敗不影響指派：`EtNotifier` 已吞掉 `AppError`（見其 docstring），
+        故此處不需 try/except，管理者的角色 / 標籤異動不會因為信寄不出去而回滾。
+        """
+        courses = await self._tag_invite.courses_for_tags(db, sorted(int(t) for t in tag_ids))
+        if not courses:
+            return
+        operator = OperatorInfo(user_id=operator_id)
+        joined = [
+            course
+            for course in courses
+            if await self._tag_invite.bulk_enroll_returning(db, course.course_id, [user_id], operator=operator)
+        ]
+        if not joined:
+            return
+        logger.info("貼標追溯補加入 user=%s courses=%d", user_id, len(joined))
+        await self._invite_mailer.send_digest(db, user_id=user_id, courses=joined)
 
     async def _validate_tags_enabled(self, db: AsyncSession, tag_ids: set[str]) -> None:
         """新增之標籤須存在且為啟用中——停用標籤不可**新增**指派（既有指派保留）。"""

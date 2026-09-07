@@ -53,11 +53,14 @@ LoginEmailStr = Annotated[
 #
 # 順序：pydantic 先 strip 再驗 pattern（已實測），故前後空白（含換行）維持既有的 strip 行為，
 # 只有**內部**的控制字元會被拒。
-_SAFE_NAME_PATTERN = r"^[^\x00-\x1f\x7f-\x9f\u2028\u2029]+$"
+# 公開常數：長度上限不同、但同樣會進入信件內文的欄位需要重用這條 pattern
+# （如 `ET_COURSE.COURSE_NAME`，上限 100——見 `app/et/course/schemas.py`）。
+# `SafeNameStr` 只是「這條 pattern + strip + 長度 50」的組合。
+SAFE_SINGLE_LINE_PATTERN = r"^[^\x00-\x1f\x7f-\x9f\u2028\u2029]+$"
 
 # 姓名進入點（自助註冊 / 本人改姓名 / 管理者代建與維護）：strip + 長度 + 拒控制字元。
 # 長度 50 對齊 `DP_USER.USER_NAME`。管理者輸入的姓名同樣會進邀請信內文，故不因「已認證」而放寬。
 SafeNameStr = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=_SAFE_NAME_PATTERN),
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=SAFE_SINGLE_LINE_PATTERN),
 ]

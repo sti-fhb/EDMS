@@ -123,3 +123,44 @@ describe("ET04 我的課程", () => {
     expect(await screen.findByText(/將於課程開放後出現於清單/)).toBeInTheDocument()
   })
 })
+
+describe("ET04 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
+  it("網址帶 ?code= 時自動開啟加入視窗並預填該碼", async () => {
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    renderWithProviders(<EtMyCoursesPage />, undefined, ["/et/my-courses?code=83052617"])
+
+    // 教師「複製邀請連結」與 QR Code 都指向這個網址；學員落地後不該還要自己重打 8 碼
+    expect(await screen.findByDisplayValue("83052617")).toBeInTheDocument()
+  })
+
+  it("預填後**不自動送出**——AC 8 的預覽是明訂的一步", async () => {
+    let previewCalled = false
+    server.use(
+      http.post("/api/et/enrollments/preview", () => {
+        previewCalled = true
+        return HttpResponse.json({
+          course_id: 7,
+          course_name: "採血作業新進人員訓練",
+          owner_name: "王教師",
+          chapter_count: 2,
+          already_joined: false,
+          open_start_at: null,
+        })
+      }),
+    )
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    renderWithProviders(<EtMyCoursesPage />, undefined, ["/et/my-courses?code=83052617"])
+
+    expect(await screen.findByDisplayValue("83052617")).toBeInTheDocument()
+    expect(previewCalled).toBe(false)
+    expect(screen.getByRole("button", { name: "查詢" })).toBeEnabled()
+  })
+
+  it("網址沒有 code 時不自動開啟視窗", async () => {
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    renderWithProviders(<EtMyCoursesPage />)
+
+    await screen.findByRole("button", { name: "加入新課程" })
+    expect(screen.queryByLabelText(/邀請碼/)).not.toBeInTheDocument()
+  })
+})

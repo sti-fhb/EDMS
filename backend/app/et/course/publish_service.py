@@ -1,26 +1,29 @@
-"""ET02 課程發布 Service（US3 / #204）。
+"""ET02 課程發布 Service（US3 / #204、#247、#273）。
 
-發布是本模組唯一**有外部後果**的動作：通過檢核即產生邀請碼並（於 `ET-8`）觸發標籤
-自動邀請、對所有符合標籤的學員寄信（FR-ET-US3-12）。檢核放過一門空課程，代價是
-全體學員收到通知去看一門沒有內容的課——故 `publish()` **必定**重跑檢核，不因前端
-已呼叫過 `check()` 而略過。
+發布是本模組唯一**有外部後果**的動作：通過檢核即產生邀請碼、觸發標籤自動邀請，並對
+所有被帶入的學員寄信（FR-ET-US3-12）。檢核放過一門空課程，代價是全體學員收到通知去
+看一門沒有內容的課——故 `publish()` **必定**重跑檢核，不因前端已呼叫過 `check()` 而略過。
 
-## 發布的三件事
+## 發布的四件事
 
 1. 狀態變更 + 首次發布時間
 2. 產生邀請碼
 3. **依受訓單位標籤帶入學員**（#247 追加，見下）
+4. **對本次被帶入者逐人寄通知信**（#273 追加）
 
-### 標籤帶入為何在 #247 才補
+### 標籤帶入與寄信為何分兩次交付
 
 #204 交付時把整個 FR-ET-US3-12 都推給 `ET-8`、只留接點。實測後發現那樣不成立：
 課程掛了「護理師」標籤發布出去，具該標籤的學員**不會被帶進課程**，教師只能把 8 碼
 邀請碼一個一個發。受訓單位標籤在發布流程裡等於沒有作用，而 `ET-4` 的我的課程對多數
-學員永遠是空的。
+學員永遠是空的——故 #247 先補上帶入本身。
 
-仍屬 `ET-8` 而不在此的：**寄通知信**、Email 邀請（另一種 `JOIN_SOURCE`）、
-`ET_INVITATION` 待加入清單。硬塞一套臨時寄信邏輯，等 `ET-8` 真的做時會與它自己鋪的
-範本 / 寄送路徑打架——那部分維持原判斷。
+當時未一併寄信，是為了避免臨時寄信邏輯與 `ET-8` 自己鋪的範本 / 寄送路徑打架。#273
+落地後兩者收斂於 `app/et/notify/`（範本、params 組法、失敗不回滾皆在該處），本檔只
+負責在正確的時點呼叫它。
+
+仍不在本檔的：Email 邀請（另一種 `JOIN_SOURCE`，見 `app/et/invitation/`）、
+`ET_INVITATION` 待加入清單（`ET-12`）。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +40,7 @@ from app.et.course.repository import EtCourseRepository
 from app.et.course.rules import ensure_owner
 from app.et.course.schemas import PublishBlockerRow, PublishCheckResult, PublishResult
 from app.et.enrollment.tag_invite import EtTagInviteRepository
+from app.et.notify.mailer import CourseInviteMailer
 from app.services import AuditLogService, ParamService
 
 _MODULE = "ET"
@@ -59,12 +63,14 @@ class EtPublishService:
         params: ParamService | None = None,
         audit: AuditLogService | None = None,
         tag_invite: EtTagInviteRepository | None = None,
+        invite_mailer: CourseInviteMailer | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._publish = publish_repo or EtPublishRepository()
         self._params = params or ParamService()
         self._audit = audit or AuditLogService()
         self._tag_invite = tag_invite or EtTagInviteRepository()
+        self._invite_mailer = invite_mailer or CourseInviteMailer()
 
     async def check(self, db: AsyncSession, course_id: int, *, actor_id: str) -> PublishCheckResult:
         """發布預檢：回傳缺漏清單，**不改變任何狀態**。
@@ -118,19 +124,27 @@ class EtPublishService:
 
         # 依受訓單位標籤帶入學員（FR-ET-US3-12 前半，#247 追加）。已在課程中者略過、
         # 已被移除者不會被帶回來（見 `tag_invite` docstring）。
-        invited = await self._tag_invite.bulk_enroll(
+        invited_ids = await self._tag_invite.bulk_enroll_returning(
             db, course_id, await self._tag_invite.target_user_ids(db, course_id), operator=operator
         )
-        if invited:
-            await self._log(db, operator.user_id, course_id, f"依受訓單位標籤帶入 {invited} 位學員")
+        if invited_ids:
+            await self._log(db, operator.user_id, course_id, f"依受訓單位標籤帶入 {len(invited_ids)} 位學員")
 
-        # 寄通知信屬 `ET-8`（FR-ET-US3-12 後半）——仍不在此。
+        # 寄通知信（FR-ET-US3-12 後半 / FR-ET-US8-03，#273 補上）。**只寄給本次真的被加
+        # 進來的人**——重新發布時已在課程中者不該再收到一次「您已被加入」。
+        #
+        # `invitation_code` 傳新產生的 `code` 而非 `course.invitation_code`：`mark_published`
+        # 是一道 UPDATE，手上的 `course` 仍是更新前的快照（邀請碼當時還是 None）。
+        #
+        # 寄信失敗不回滾加入（AC 3）——由 `EtNotifier` 吞掉 `AppError`，此處不需 try/except。
+        await self._invite_mailer.send_course_invite(db, course=course, invitation_code=code, user_ids=invited_ids)
+
         return PublishResult(
             course_id=course_id,
             status=COURSE_PUBLISHED,
             invitation_code=code,
             version=course.version + 1,
-            invited_count=invited,
+            invited_count=len(invited_ids),
         )
 
     # ── 內部 ────────────────────────────────────────────────────────────────
