@@ -124,5 +124,5 @@ def shuffled(ids: list[int]) -> list[int]:
     重現由快照達成。
     """
     out = list(ids)
-    random.shuffle(out)  # noqa: S311 — 呈現順序，非密碼學用途（見 docstring）
+    random.shuffle(out)
     return out

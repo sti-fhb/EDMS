@@ -31,8 +31,6 @@ normalize 時覆蓋率仍然正確（AC 7 因此自然成立）。
 from collections.abc import Container, Sequence
 from typing import Final, NamedTuple
 
-from app.et.constants import ITEM_QUIZ
-
 #: 解鎖門檻（FR-ET-US5-05）。
 COVERAGE_THRESHOLD_PCT: Final = 80
 
@@ -151,8 +149,8 @@ class ItemState(NamedTuple):
     treat_as_done: bool
 
 
-def build_item_state(item_id: int, item_type: str, *, completed_ids: Container[int]) -> ItemState:
-    """由項目型別與完成集合組出 `ItemState`。
+def build_item_state(item_id: int, *, completed_ids: Container[int]) -> ItemState:
+    """由完成集合組出 `ItemState`。
 
     ⚠️ **讀取路徑（側欄旗標）與寫入路徑（擋下鎖定項目）必須共用本函式**。兩邊各自
     組一份的話，`treat_as_done` 這條「測驗恆視為通過」的規則就有兩個版本——而它們
@@ -160,12 +158,13 @@ def build_item_state(item_id: int, item_type: str, *, completed_ids: Container[i
     抓到的狀態。
     """
     completed = item_id in completed_ids
-    return ItemState(
-        item_id=item_id,
-        completed=completed,
-        # 測驗於 `ET-6` 交付前恆視為通過——否則它後面的一切永久鎖死
-        treat_as_done=completed or item_type == ITEM_QUIZ,
-    )
+    # `ET-6a`（#279）交付後測驗改為讀真實及格狀態——`ET_PROGRESS.IS_COMPLETED` 於提交
+    # 及格時由 `attempt/service` 回寫，`spec_us5` AC 12「測驗未及格阻擋解鎖」隨即成立。
+    #
+    # 在此之前這裡寫的是 `completed or item_type == ITEM_QUIZ`（測驗恆視為通過）——
+    # 因為當時沒有測驗結果可查，照 `completed=False` 判定會讓測驗之後的所有項目與章節
+    # 永久鎖死。該權宜已不再需要，`item_type` 因此退場。
+    return ItemState(item_id=item_id, completed=completed, treat_as_done=completed)
 
 
 def locked_item_ids(chapters: Sequence[Sequence[ItemState]]) -> frozenset[int]:

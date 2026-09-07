@@ -1,0 +1,125 @@
+"""ET06 測驗作答 API（US6 / #279）——學員端。
+
+router-level 掛 `get_et_context`（任一 ET 角色）；真正的授權在 service 的四道守門
+（反查鏈 → 在籍 OR 擁有者 → 項目已解鎖 → 尚有次數），見 `service` 模組 docstring。
+
+## 為何暫存是 PUT
+
+同一題重複暫存是**覆寫**語意（`UQ(ATTEMPT_ID, QUESTION_ID)`），冪等。學員在同一題上
+改三次答案不該產生三筆紀錄。
+
+## 本模組不寫稽核日誌
+
+比照 #274 `progress/router` 的同一理由：`AuditLogService.log_action` 以單一固定 key 的
+`pg_advisory_xact_lock` 序列化稽核鏈並持有至整個外層交易，掛在「每切一題就呼叫一次」
+的暫存端點上會讓**所有模組**的稽核寫入排隊等同一把鎖。
+
+作答軌跡完整保存在 `ET_QUIZ_ATTEMPT_M` / `_D`（append-only、永不刪除），追溯需求由
+那兩張表滿足——它們比稽核日誌更完整（連每一題選了什麼都在）。
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+from app.core.operator import OperatorInfo, get_operator
+from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.et.attempt.schemas import AnswerReq, AttemptResult, AttemptState, QuizIntro
+from app.et.attempt.service import EtAttemptService
+from app.et.course.schemas import MAX_BIGINT
+from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
+
+#: 每位使用者每分鐘之作答相關請求數。
+#:
+#: 正常作答一分鐘內頂多切幾題（每切一題一次暫存），120 遠高於任何正常操作。限流的對象
+#: 是「反覆呼叫開始作答」——每次成功都會建立一筆 attempt 與整組 `_D` 明細列。
+_ATTEMPT_RATE_MAX = 120
+_ATTEMPT_IP_RATE_MAX = 900
+
+_limiter = SlidingWindowRateLimiter(max_requests=_ATTEMPT_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_ip_limiter = SlidingWindowRateLimiter(max_requests=_ATTEMPT_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_SCOPE = "et-attempt"
+
+router = APIRouter(
+    prefix="/api/et",
+    tags=["et-attempt"],
+    dependencies=[
+        Depends(get_et_context),
+        Depends(rate_limit_by_et_user(_limiter, _SCOPE)),
+        Depends(rate_limit_by_ip(_ip_limiter, _SCOPE)),
+    ],
+)
+_service = EtAttemptService()
+
+
+@router.get("/quizzes/{quiz_id}/intro", response_model=QuizIntro)
+async def quiz_intro(
+    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> QuizIntro:
+    """引導頁：題數、及格分數、時限、剩餘次數、上次與最高成績（AC 1）。
+
+    `time_limit_min` 為 `null` 代表**不限時**——前端須顯示「不限時」而非「0 分」。
+    """
+    return await _service.intro(db, quiz_id, user_id=ctx.user_id)
+
+
+@router.post("/quizzes/{quiz_id}/attempts", response_model=AttemptState, status_code=status.HTTP_201_CREATED)
+async def start_attempt(
+    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptState:
+    """開始作答：建立 attempt、凍結快照、洗牌（AC 3 / AC 4）。
+
+    **已有未完成的作答時回既有那一筆**（`resumed=true`），不建新的、不吃次數
+    （#279 SA 裁示 Q1 = A）。
+
+    Raises:
+        AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / 項目尚未解鎖；
+            409 `ET_ATTEMPT_002` 重考次數已用完。
+    """
+    return await _service.start(db, quiz_id, operator=operator)
+
+
+@router.get("/attempts/{attempt_id}", response_model=AttemptState)
+async def attempt_state(
+    attempt_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptState:
+    """取作答狀態：依快照順序的題目、已暫存答案、剩餘秒數（AC 5）。
+
+    `remaining_sec` 由後端自 `STARTED_AT` 推導——**中途離開仍持續扣時間**（wireframe
+    引導頁明訂），故不可由前端每次載入重新起算。
+    """
+    return await _service.state(db, attempt_id, user_id=ctx.user_id)
+
+
+@router.put("/attempts/{attempt_id}/answers/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def save_answer(
+    attempt_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    question_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: AnswerReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """暫存單題作答（切換題目時觸發）。空清單為合法輸入——學員可以取消勾選。"""
+    await _service.save_answer(db, attempt_id, question_id, req, operator=operator)
+
+
+@router.post("/attempts/{attempt_id}/submit", response_model=AttemptResult)
+async def submit_attempt(
+    attempt_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptResult:
+    """提交並即時自動閱卷，回總分 / 及格 / 逐題明細（AC 7～11）。
+
+    **逾時不拒收**——記為 `TIMEOUT` 但照常計分（AC 6）。及格時回寫項目完成，
+    下一項 / 下一章隨之解鎖（AC 12）。
+    """
+    return await _service.submit(db, attempt_id, operator=operator)
