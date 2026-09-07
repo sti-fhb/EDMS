@@ -308,7 +308,10 @@
 **業務規則**:
 - 同 QUIZ_ID 下至少 1 題；同 QUESTION_ID 下選項至少 2 個、至多 6 個
 - 多選題建立時系統強制檢核「至少 1 個正確選項」
-- 刪除題目時 DELETED=1（軟刪除）；學員於該題之 ET_QUIZ_ATTEMPT_D **亦連帶軟刪除（DELETED=1）**（2026-08-24 變更，原為 hard delete）
+- 刪除題目時 DELETED=1（軟刪除）；學員於該題之 ET_QUIZ_ATTEMPT_D **不受影響**（2026-09-04 / #279 SA 裁示 Q2 = C 變更；2026-08-24 #202 曾改為連帶軟刪除，再前為 hard delete）
+  - **理由**：#202 的連帶目的是「不要**硬**刪掉學員資料」，其代價清單只涵蓋 #5 / #9 / #14 三張**統計型** issue，未含 US6 的「學員回看自己那次考卷」。照連帶做下去，學員會看到「總分 75、明細只列 4 題加起來 60」這種對不起來的成績單——`ET_QUIZ_ATTEMPT_M.SCORE` 是閱卷當下凍結的，不因題目後來被刪而改變。
+  - `ET_QUIZ_ATTEMPT_D` **自給自足**：`STEM_SNAPSHOT` / `OPTIONS_SNAPSHOT` / `POINTS_SNAPSHOT` / `SELECTED_OPTIONS` 足以渲染明細，完全不需要讀 `ET_QUESTION` / `ET_OPTION`。
+  - 🔴 **連帶約束（給 US9 / US14）**：成績統計一律讀 `ET_QUIZ_ATTEMPT_M.SCORE`，**不得**回頭重新加總 `ET_QUIZ_ATTEMPT_D.SCORE`——重新加總等於不信任閱卷結果。
 
 ---
 
