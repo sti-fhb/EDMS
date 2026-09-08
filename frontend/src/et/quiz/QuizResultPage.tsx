@@ -66,7 +66,7 @@ export function EtQuizResultPage() {
       <Paper variant="outlined" sx={{ p: 3, textAlign: "center" }}>
         <Typography variant="h6">測驗完成</Typography>
         <Typography variant="h3" color={result.is_pass ? "success.main" : "error.main"} sx={{ my: 1 }}>
-          {result.score} / 100 分
+          {result.score} / {result.points_total} 分
         </Typography>
         <Chip
           color={result.is_pass ? "success" : "error"}

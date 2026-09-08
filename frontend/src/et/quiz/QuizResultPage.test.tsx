@@ -19,6 +19,7 @@ const RESULT: AttemptResult = {
   attempt_no: 1,
   status: "SUBMITTED",
   score: "50.00",
+  points_total: 100,
   pass_score: 80,
   is_pass: false,
   submitted_at: "2026-09-04T10:00:00Z",

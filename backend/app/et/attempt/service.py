@@ -31,6 +31,7 @@
 
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -55,7 +56,13 @@ from app.et.attempt.schemas import (
     QuestionResult,
     QuizIntro,
 )
-from app.et.constants import ATTEMPT_SUBMITTED, ATTEMPT_TIMEOUT, QUESTION_MULTIPLE
+from app.et.constants import (
+    ATTEMPT_IN_PROGRESS,
+    ATTEMPT_SUBMITTED,
+    ATTEMPT_TIMEOUT,
+    COURSE_CLOSED,
+    QUESTION_MULTIPLE,
+)
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access
 from app.et.progress.repository import EtProgressRepository
@@ -65,6 +72,8 @@ _NOT_FOUND = AppError(status_code=404, detail="查無此測驗", error_code="ET_
 _NO_ATTEMPTS = AppError(status_code=409, detail="重考次數已用完，請聯繫教師重置", error_code="ET_ATTEMPT_002")
 _ALREADY_SUBMITTED = AppError(status_code=409, detail="此作答已提交，無法變更", error_code="ET_ATTEMPT_003")
 _BAD_ANSWER = AppError(status_code=422, detail="作答資料無效", error_code="ET_ATTEMPT_004")
+_EXPIRED = AppError(status_code=409, detail="作答時間已到，請提交本次作答", error_code="ET_ATTEMPT_005")
+_CLOSED = AppError(status_code=409, detail="此課程目前關閉中，無法開始新的作答", error_code="ET_ATTEMPT_006")
 
 #: 明細的結果三態（前端據此上色；**由後端判定**）。
 OUTCOME_CORRECT = "CORRECT"
@@ -92,7 +101,7 @@ class EtAttemptService:
 
     async def intro(self, db: AsyncSession, quiz_id: int, *, user_id: str) -> QuizIntro:
         """引導頁資訊（AC 1 / AC 2）。"""
-        quiz, _item_id, _course_id = await self._require_access(db, quiz_id, user_id)
+        quiz, _item_id, _course_id, status, _is_preview = await self._require_access(db, quiz_id, user_id)
         total = await self._repo.attempt_total(db, user_id=user_id, quiz_id=quiz_id)
         base = await self._repo.reset_base(db, user_id=user_id, quiz_id=quiz_id)
         last, best, passed = await self._repo.score_summary(db, user_id=user_id, quiz_id=quiz_id)
@@ -108,8 +117,9 @@ class EtAttemptService:
             max_retry=quiz.max_retry,
             remaining_attempts=remaining_attempts(total=total, reset_base=base, max_retry=quiz.max_retry),
             # 有未完成的作答時恆可進入——那是「繼續」而不是「開始」，不受次數限制
+            # 關閉課程不可開新作答，但**已在作答者仍可繼續**（`spec_us6` 場景 27）
             can_start=in_progress is not None
-            or can_start_attempt(total=total, reset_base=base, max_retry=quiz.max_retry),
+            or (status != COURSE_CLOSED and can_start_attempt(total=total, reset_base=base, max_retry=quiz.max_retry)),
             last_score=last,
             best_score=best,
             is_passed=passed,
@@ -128,12 +138,17 @@ class EtAttemptService:
             AppError: 404 查無 / 無權 / 項目未解鎖；409 `ET_ATTEMPT_002` 次數用完。
         """
         user_id = operator.user_id
-        quiz, item_id, course_id = await self._require_access(db, quiz_id, user_id)
+        quiz, item_id, course_id, course_status, is_preview = await self._require_access(db, quiz_id, user_id)
 
         existing = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
         if existing is not None:
             return await self._state(db, existing, quiz_name=quiz.quiz_name, resumed=True)
 
+        # ⚠️ 課程關閉後**不可開新作答**（`spec_us6` 場景 27 / #255 裁示 Q2「寫全停」）。
+        # 只擋「開新的」——上面的續作分支已先返回，故關閉當下已在作答的 attempt 仍可
+        # 完成並計分，那正是場景 27 要保的那條窄縫。
+        if course_status == COURSE_CLOSED:
+            raise _CLOSED
         # 解鎖只在「開始」時檢查——見模組 docstring
         if await self._progress_service.is_item_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
             raise _NOT_FOUND
@@ -147,18 +162,32 @@ class EtAttemptService:
             # 沒有題目的測驗開不起來——建立一個零題的 attempt 會直接吃掉一次作答次數
             raise _NOT_FOUND
         options = await self._repo.options_by_question(db, [q.question_id for q in questions])
-        attempt = await self._repo.create_attempt(
-            db,
-            user_id=user_id,
-            course_id=course_id,
-            quiz=quiz,
-            attempt_no=total + 1,
-            question_order=shuffled([q.question_id for q in questions]),
-            option_order={q.question_id: shuffled([o.option_id for o in options[q.question_id]]) for q in questions},
-            questions=questions,
-            options_by_question=options,
-            operator=operator,
-        )
+        try:
+            attempt = await self._repo.create_attempt(
+                db,
+                user_id=user_id,
+                course_id=course_id,
+                quiz=quiz,
+                attempt_no=total + 1,
+                question_order=shuffled([q.question_id for q in questions]),
+                option_order={
+                    q.question_id: shuffled([o.option_id for o in options[q.question_id]]) for q in questions
+                },
+                questions=questions,
+                options_by_question=options,
+                operator=operator,
+            )
+        except IntegrityError:
+            # 兩個分頁同時按「開始作答」：各自讀到相同的 `total`、算出相同的 `ATTEMPT_NO`，
+            # 後 commit 的一方撞 `UQ_ET_ATTEMPT_USER_QUIZ_NO`。
+            #
+            # **次數本身不會被繞過**（擋住的正是那個唯一鍵），但落敗方原本會變成一個使用者
+            # 可穩定重現的 500。改為重讀後以「續作」回應——那也正是使用者期待看到的結果。
+            await db.rollback()
+            existing = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
+            if existing is None:
+                raise _NO_ATTEMPTS from None
+            return await self._state(db, existing, quiz_name=quiz.quiz_name, resumed=True)
         return await self._state(db, attempt, quiz_name=quiz.quiz_name, resumed=False)
 
     async def state(self, db: AsyncSession, attempt_id: int, *, user_id: str) -> AttemptState:
@@ -174,11 +203,20 @@ class EtAttemptService:
     ) -> None:
         """暫存單題作答（AC 5）。
 
-        **不擋逾時**：學員的網路慢了幾秒不該讓他剛選的答案消失，而逾時的效果由提交時的
-        `TIMEOUT` 判定統一處理——時間到之後暫存的答案本來就進不了那次閱卷之外的地方。
+        ## 逾時後**拒收新答案**，但仍允許提交
+
+        `submit` 閱卷讀的是 `SELECTED_OPTIONS` 的**當前值**，而 `is_timed_out` 只決定
+        `STATUS` 標成 `TIMEOUT` 還是 `SUBMITTED`——不影響計分。所以若這裡不擋，時限等於
+        完全沒有強制力：學員可以關掉分頁、查三小時資料、回來逐題寫入再提交，照樣滿分。
+        （倒數計時器只是顯示，它被停掉、被改時間、分頁被凍結都不影響後端。）
+
+        擋的是**寫入**、不是**提交**——`spec_us6` 場景 10 要的是「以時間到當下的作答狀態
+        自動提交」，沒收學員已經寫好的考卷不在其中。
         """
         attempt = await self._require_own_attempt(db, attempt_id, operator.user_id)
         self._ensure_in_progress(attempt)
+        if is_timed_out(started_at=attempt.started_at, time_limit_min=attempt.time_limit_snapshot, now=utcnow()):
+            raise _EXPIRED
         ok = await self._repo.save_answer(
             db,
             attempt_id=attempt_id,
@@ -212,9 +250,18 @@ class EtAttemptService:
                 points=detail.points_snapshot,
             )
         total = sum(per_question.values(), Decimal(0))
-        is_pass = total >= attempt.pass_score_snapshot
+        points_total = sum(d.points_snapshot for d in details)
+        # ⚠️ **以實得 ÷ 配分總和 正規化**，不直接拿 `total` 比 `PASS_SCORE_SNAPSHOT`。
+        #
+        # 「各題配分總和 = 100」只在**課程發布當下**檢核（`publish_rules`），發布後教師
+        # 仍可改配分或增刪題目（本檔的 `TestSnapshotIsolation` 就是在已發布課程上做的）。
+        # 總和被改成 300 時，答對三分之一就會 ≥ 80 而及格；改成 50 時則**任何人都不可能
+        # 及格**——而測驗自本 issue 起是硬性的解鎖門檻，那會讓整門課後半段對全班永久鎖死。
+        #
+        # 總和為 100 時本式與直接比較完全等價，故不牴觸 spec 的「總分 ≥ 及格分數」。
+        is_pass = points_total > 0 and (total * 100 / points_total) >= attempt.pass_score_snapshot
         timed_out = is_timed_out(started_at=attempt.started_at, time_limit_min=attempt.time_limit_snapshot, now=now)
-        await self._repo.submit(
+        moved = await self._repo.submit(
             db,
             attempt=attempt,
             status=ATTEMPT_TIMEOUT if timed_out else ATTEMPT_SUBMITTED,
@@ -224,8 +271,11 @@ class EtAttemptService:
             submitted_at=now,
             operator=operator,
         )
+        if not moved:
+            # 另一個並行請求已經完成轉移——不重複閱卷，也不覆蓋它寫下的分數
+            raise _ALREADY_SUBMITTED
 
-        if is_pass:
+        if is_pass and not await self._is_preview(db, attempt=attempt):
             await self._mark_item_completed(db, attempt=attempt, operator=operator)
 
         quiz = await self._repo.get_quiz(db, attempt.quiz_id)
@@ -238,6 +288,7 @@ class EtAttemptService:
             attempt_no=attempt.attempt_no,
             status=attempt.status,
             score=total,
+            points_total=points_total,
             pass_score=attempt.pass_score_snapshot,
             is_pass=is_pass,
             submitted_at=now,
@@ -251,7 +302,13 @@ class EtAttemptService:
     # ── 內部 ────────────────────────────────────────────────────────────────
 
     async def _require_access(self, db: AsyncSession, quiz_id: int, user_id: str):
-        """守門 1 + 2：反查鏈與「在籍 OR 擁有者」。"""
+        """守門 1 + 2：反查鏈與「在籍 OR 擁有者」。
+
+        Returns:
+            `(quiz, item_id, course_id, course_status, is_preview)`。`is_preview` 為
+            「是擁有者且**不在籍**」——教師預覽不得累積進度（#255 裁示 Q1），判定與
+            `progress/service._guard_write` 一致。
+        """
         quiz = await self._repo.get_quiz(db, quiz_id)
         context = await self._repo.quiz_context(db, quiz_id)
         if quiz is None or context is None:
@@ -261,11 +318,12 @@ class EtAttemptService:
         if course is None:
             raise _NOT_FOUND
         enrolled = await self._learning.is_enrolled(db, user_id=user_id, course_id=course_id)
+        is_owner = course.owner_id == user_id
         try:
-            ensure_can_access(enrolled=enrolled, is_owner=course.owner_id == user_id)
+            ensure_can_access(enrolled=enrolled, is_owner=is_owner)
         except AppError:
             raise _NOT_FOUND from None
-        return quiz, item_id, course_id
+        return quiz, item_id, course_id, course.status, is_owner and not enrolled
 
     async def _require_own_attempt(self, db: AsyncSession, attempt_id: int, user_id: str):
         """只有 attempt 的**本人**能讀寫它。
@@ -280,8 +338,25 @@ class EtAttemptService:
 
     @staticmethod
     def _ensure_in_progress(attempt) -> None:
-        if attempt.status != "IN_PROGRESS":
+        if attempt.status != ATTEMPT_IN_PROGRESS:
             raise _ALREADY_SUBMITTED
+
+    async def _is_preview(self, db: AsyncSession, *, attempt) -> bool:
+        """該 attempt 是否為擁有者預覽（是擁有者且**不在籍**）。
+
+        #255 裁示 Q1 明訂教師預覽**不得寫入** `ET_PROGRESS`（`learning/rules.py` 的
+        `ensure_can_access` docstring 特別標了「給 ET-5b」的警告）——否則教師預覽完就
+        出現在自己課程的完課統計裡，正是該裁示要避開的後果。判定與
+        `progress/service._guard_write` 的 `_PreviewOnly` 分支一致。
+
+        > `ET_QUIZ_ATTEMPT_M` 的列仍會產生（教師要看得到作答頁，那是預覽的用途）。
+        > 它不掛在任何 `ET_ENROLLMENT` 上，故不進 US9 以在籍學員為母體的統計。
+        """
+        course = await self._learning.get_course(db, attempt.course_id)
+        if course is None:
+            return False
+        enrolled = await self._learning.is_enrolled(db, user_id=attempt.user_id, course_id=attempt.course_id)
+        return course.owner_id == attempt.user_id and not enrolled
 
     async def _mark_item_completed(self, db: AsyncSession, *, attempt, operator: OperatorInfo) -> None:
         """及格 → 回寫項目層完成（AC 12），下一項 / 下一章隨之解鎖。
@@ -310,6 +385,7 @@ class EtAttemptService:
             quiz_id=attempt.quiz_id,
             quiz_name=quiz_name,
             attempt_no=attempt.attempt_no,
+            status=attempt.status,
             pass_score=attempt.pass_score_snapshot,
             time_limit_min=attempt.time_limit_snapshot,
             remaining_sec=remaining_seconds(

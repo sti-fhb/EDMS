@@ -22,6 +22,7 @@ from app.dp.users.models import DpUser
 from app.et.constants import (
     ATTEMPT_SUBMITTED,
     ATTEMPT_TIMEOUT,
+    COURSE_CLOSED,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ITEM_QUIZ,
@@ -447,6 +448,133 @@ class TestSnapshotIsolation:
             await db.scalars(select(EtQuizAttemptD.deleted).where(EtQuizAttemptD.attempt_id == attempt["attempt_id"]))
         )
         assert rows == [0, 0], "刪題不得連帶軟刪除學員的作答明細（裁示 Q2 = C）"
+
+
+class TestWriteGuards:
+    """review 抓到的三道守門——都是「規則寫在別處但這裡沒接上」。"""
+
+    async def test_逾時後不可再暫存答案(self, client, db) -> None:
+        """**時限的唯一強制力**。
+
+        `submit` 閱卷讀的是 `SELECTED_OPTIONS` 的當前值，而逾時只決定 `STATUS` 標成
+        `TIMEOUT`——不影響計分。若暫存不擋逾時，學員可以關掉分頁、慢慢查完資料、回來
+        逐題寫入再提交，照樣滿分，時限完全形同虛設。
+        """
+        teacher = await _user(db, "t_att16", ROLE_TEACHER)
+        student = await _user(db, "s_att16")
+        course = await _course_with_quiz(client, db, teacher, code="32000016")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await client.put(
+            f"/api/et/quizzes/{course['quiz_id']}",
+            json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": 10, "max_retry": 3, "version": 0},
+            headers=_bearer(teacher),
+        )
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await db.execute(
+            update(EtQuizAttemptM)
+            .where(EtQuizAttemptM.attempt_id == attempt["attempt_id"])
+            .values(started_at=utcnow() - timedelta(minutes=20))
+        )
+        await db.commit()
+
+        r = await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]),
+            json={"selected_options": [q["options"][0]["option_id"]]},
+            headers=h,
+        )
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_ATTEMPT_005"
+
+    async def test_課程關閉後不可開新作答(self, client, db) -> None:
+        """#255 裁示 Q2「關閉 = 讀照舊、寫全停」+ `spec_us6` 場景 27。"""
+        teacher = await _user(db, "t_att17", ROLE_TEACHER)
+        student = await _user(db, "s_att17")
+        course = await _course_with_quiz(client, db, teacher, code="32000017")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        r = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(student))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_ATTEMPT_006"
+
+    async def test_課程關閉時已在作答者仍可提交並計分(self, client, db) -> None:
+        """場景 27 要保的那條窄縫——關閉當下已在作答的 attempt 不可被沒收。"""
+        teacher = await _user(db, "t_att18", ROLE_TEACHER)
+        student = await _user(db, "s_att18")
+        course = await _course_with_quiz(client, db, teacher, code="32000018")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
+        await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]), json={"selected_options": [correct]}, headers=h
+        )
+        # 作答中課程被關閉
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
+        await db.flush()
+
+        r = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        assert r.status_code == 200, r.text
+        assert float(r.json()["score"]) == 100.0
+        assert r.json()["is_pass"] is True
+
+    async def test_教師預覽不寫入學習進度(self, client, db) -> None:
+        """#255 裁示 Q1（`learning/rules.py` 特別標了「給 ET-5b」的警告）。
+
+        教師預覽完就出現在自己課程的完課統計裡，正是該裁示要避開的後果。
+        """
+        teacher = await _user(db, "t_att19", ROLE_TEACHER)
+        course = await _course_with_quiz(client, db, teacher, code="32000019")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        h = _bearer(teacher)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
+        await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]), json={"selected_options": [correct]}, headers=h
+        )
+
+        r = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        assert r.status_code == 200, r.text
+        assert r.json()["is_pass"] is True, "教師仍看得到自己的成績（預覽的用途）"
+        completed = await db.scalar(
+            select(EtProgress).where(EtProgress.user_id == teacher, EtProgress.item_id == course["quiz_item_id"])
+        )
+        assert completed is None, "教師預覽不得寫入 ET_PROGRESS（#255 裁示 Q1）"
+
+    async def test_配分總和非一百時以百分比判定及格(self, client, db) -> None:
+        """「配分總和 = 100」只在**發布當下**檢核，發布後教師仍可改。
+
+        總和被改成 200 時，若直接拿 `total` 比 `PASS_SCORE`，答對一半（100 分）就會及格；
+        改成 50 時則**任何人都不可能及格**——而測驗自本 issue 起是硬性解鎖門檻，那會讓
+        整門課後半段對全班永久鎖死。
+        """
+        teacher = await _user(db, "t_att20", ROLE_TEACHER)
+        student = await _user(db, "s_att20")
+        course = await _course_with_quiz(client, db, teacher, code="32000020")
+        q1 = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, teacher, course["quiz_id"], points=100)  # 總和 200
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        correct = next(o["option_id"] for o in q1["options"] if o["is_correct"])
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.put(
+            _answer_url(attempt["attempt_id"], q1["question_id"]), json={"selected_options": [correct]}, headers=h
+        )
+
+        r = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        assert float(r.json()["score"]) == 100.0
+        assert r.json()["points_total"] == 200
+        assert r.json()["is_pass"] is False, "100/200 = 50% < 80%，不應及格"
 
 
 class TestRetryLimit:

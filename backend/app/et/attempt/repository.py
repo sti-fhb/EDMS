@@ -17,6 +17,7 @@
 """
 
 import json
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -29,6 +30,8 @@ from app.et.attempt.rules import OptionSnapshot
 from app.et.constants import ATTEMPT_IN_PROGRESS
 from app.et.course.models import EtChapter, EtItem
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
+
+logger = logging.getLogger(__name__)
 
 
 class EtAttemptRepository:
@@ -214,9 +217,30 @@ class EtAttemptRepository:
         per_question: dict[int, Decimal],
         submitted_at: datetime,
         operator: OperatorInfo,
-    ) -> None:
-        """寫入閱卷結果（逐題得分 + 主檔總分與狀態）。"""
+    ) -> bool:
+        """寫入閱卷結果（逐題得分 + 主檔總分與狀態）；回傳是否真的由本次完成轉移。
+
+        主檔以**條件式 UPDATE**（`WHERE STATUS = IN_PROGRESS`）轉移狀態並檢查 `rowcount`。
+        先在記憶體比對狀態再無條件寫回的話，兩個並行的 `submit` 都會通過檢查，後寫的一方
+        會用自己讀到的答案覆蓋分數——`SELECTED_OPTIONS` 與 `SCORE` 因此可能對不起來，而
+        `ET_QUIZ_ATTEMPT_D` 正是本模組不寫稽核日誌時唯一的追溯來源。
+        """
         from sqlalchemy import update
+
+        moved = await db.execute(
+            update(EtQuizAttemptM)
+            .where(EtQuizAttemptM.attempt_id == attempt.attempt_id, EtQuizAttemptM.status == ATTEMPT_IN_PROGRESS)
+            .values(
+                status=status,
+                score=total,
+                is_pass=is_pass,
+                submitted_at=submitted_at,
+                updated_user=operator.user_id,
+                updated_date=submitted_at,
+            )
+        )
+        if moved.rowcount == 0:
+            return False
 
         for question_id, score in per_question.items():
             await db.execute(
@@ -224,13 +248,13 @@ class EtAttemptRepository:
                 .where(EtQuizAttemptD.attempt_id == attempt.attempt_id, EtQuizAttemptD.question_id == question_id)
                 .values(score=score, updated_user=operator.user_id, updated_date=submitted_at)
             )
+        await db.flush()
+        # 讓呼叫端手上的 ORM 物件與剛寫入的值一致（回應直接讀它）
         attempt.status = status
         attempt.score = total
         attempt.is_pass = is_pass
         attempt.submitted_at = submitted_at
-        attempt.updated_user = operator.user_id
-        attempt.updated_date = submitted_at
-        await db.flush()
+        return True
 
     # ── 授權反查：**一條鏈推導，不拼裝**（比照 #274 `progress/repository`）────────
 
@@ -248,6 +272,10 @@ class EtAttemptRepository:
         )
         found = rows.all()
         if len(found) != 1:
+            if len(found) > 1:
+                # fail-closed 是對的（不拼裝 A 課課程 + B 課項目），但它會讓該測驗的
+                # 五個端點全部永久 404 而畫面上毫無線索。至少留一筆可追查的訊號。
+                logger.warning("測驗 %s 被 %d 個章節項目引用，授權反查無法定案", quiz_id, len(found))
             return None
         return found[0][0], found[0][1]
 

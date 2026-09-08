@@ -8,14 +8,20 @@ router-level 掛 `get_et_context`（任一 ET 角色）；真正的授權在 ser
 同一題重複暫存是**覆寫**語意（`UQ(ATTEMPT_ID, QUESTION_ID)`），冪等。學員在同一題上
 改三次答案不該產生三筆紀錄。
 
-## 本模組不寫稽核日誌
+## 本模組不寫稽核日誌——**這是 spec 明訂的，不是取捨**
 
-比照 #274 `progress/router` 的同一理由：`AuditLogService.log_action` 以單一固定 key 的
-`pg_advisory_xact_lock` 序列化稽核鏈並持有至整個外層交易，掛在「每切一題就呼叫一次」
-的暫存端點上會讓**所有模組**的稽核寫入排隊等同一把鎖。
+`docs/specs/et/spec.md` §稽核來源功能碼的結語寫得很清楚：
 
-作答軌跡完整保存在 `ET_QUIZ_ATTEMPT_M` / `_D`（append-only、永不刪除），追溯需求由
-那兩張表滿足——它們比稽核日誌更完整（連每一題選了什麼都在）。
+> 一般資料異動之建立者 / 異動者與時間由各表標準稽核欄位承載，**不逐筆寫
+> `DP_AUDIT_LOG`**；僅上表所列之權限、破例與關鍵狀態變更寫入。
+
+而那張表**沒有學員作答**——與測驗有關的只有 `ET-QUIZ-RESET`（教師重置重考次數，屬
+破例動作，US9）。學員作答是一般資料異動，由 `ET_QUIZ_ATTEMPT_M` / `_D` 的標準稽核欄位
+承載；那兩張表 append-only、永不刪除，且比稽核日誌更完整（連每一題選了什麼都在）。
+
+> 附帶一提，即使沒有這條規定，把稽核掛在暫存端點上也是錯的：`log_action` 以**單一固定
+> key** 的 `pg_advisory_xact_lock` 序列化稽核鏈並持有至整個外層交易，而暫存是每切一題
+> 就呼叫一次——排隊的會是**所有模組**的稽核寫入。但那只是佐證，真正的依據是上面那條。
 """
 
 from typing import Annotated
@@ -80,7 +86,7 @@ async def start_attempt(
 
     Raises:
         AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / 項目尚未解鎖；
-            409 `ET_ATTEMPT_002` 重考次數已用完。
+            409 `ET_ATTEMPT_002` 重考次數已用完；409 `ET_ATTEMPT_006` 課程已關閉。
     """
     return await _service.start(db, quiz_id, operator=operator)
 
@@ -107,7 +113,11 @@ async def save_answer(
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """暫存單題作答（切換題目時觸發）。空清單為合法輸入——學員可以取消勾選。"""
+    """暫存單題作答（切換題目時觸發）。空清單為合法輸入——學員可以取消勾選。
+
+    **逾時後拒收**（409 `ET_ATTEMPT_005`）——否則時限完全沒有強制力：關掉分頁、慢慢查完
+    資料再回來逐題寫入即可滿分。提交本身不受此限（見 `submit`）。
+    """
     await _service.save_answer(db, attempt_id, question_id, req, operator=operator)
 
 

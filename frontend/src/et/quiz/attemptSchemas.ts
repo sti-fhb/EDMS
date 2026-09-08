@@ -27,6 +27,8 @@ export interface AttemptState {
   quiz_id: number
   quiz_name: string
   attempt_no: number
+  /** 目前狀態；非 `IN_PROGRESS` 時前端不再渲染作答畫面。 */
+  status: "IN_PROGRESS" | "SUBMITTED" | "TIMEOUT"
   pass_score: number
   time_limit_min: number | null
   /**
@@ -65,6 +67,8 @@ export interface AttemptResult {
   attempt_no: number
   status: "SUBMITTED" | "TIMEOUT"
   score: string
+  /** 本次的配分總和。**分母用它、不可寫死 100**——發布後教師仍可改配分或增刪題目。 */
+  points_total: number
   pass_score: number
   is_pass: boolean
   submitted_at: string

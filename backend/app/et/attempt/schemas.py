@@ -54,6 +54,9 @@ class AttemptState(BaseModel):
     quiz_id: int
     quiz_name: str
     attempt_no: int
+    #: 目前狀態。前端據此在「已提交後又用上一頁回到作答頁」時導向結果頁，
+    #: 而不是讓學員對著一份其實已經交出去的考卷繼續作答。
+    status: str
     pass_score: int
     time_limit_min: int | None
     remaining_sec: int | None
@@ -67,7 +70,11 @@ class AnswerReq(BaseModel):
     空清單為合法輸入——學員可以取消勾選（多選）或清掉答案，那與「從未作答」等價。
     """
 
-    selected_options: list[int] = Field(default_factory=list, max_length=MAX_SELECTED_OPTIONS)
+    #: 元素亦加界限：計分面不可利用（外來 id 只會落進「誤選」使分數下降），但不設界的話
+    #: 任意整數會被原樣寫進 `SELECTED_OPTIONS`。比照 `course/schemas.py` 對 `tag_id` 的作法。
+    selected_options: list[int] = Field(
+        default_factory=list, max_length=MAX_SELECTED_OPTIONS, json_schema_extra={"items": {"minimum": 1}}
+    )
 
 
 class OptionResult(BaseModel):
@@ -107,6 +114,9 @@ class AttemptResult(BaseModel):
     attempt_no: int
     status: str
     score: Decimal
+    #: 本次 attempt 的配分總和（快照）。**前端的分母用它、不可寫死 100**——「總和 = 100」
+    #: 只在課程發布當下檢核，發布後教師仍可改配分或增刪題目。
+    points_total: int
     pass_score: int
     is_pass: bool
     submitted_at: datetime

@@ -75,16 +75,24 @@ export function EtQuizAnswerPage() {
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
+  /**
+   * 送出單題暫存。
+   *
+   * @param required 失敗時是否往外拋。
+   *   - `false`（切換題目）：靜默——切題不該因為暫存失敗而卡住，提交前還會再送一次。
+   *   - `true`（**提交前**）：必須拋。學員在最後一題作答後直接按提交時，這是那一題唯一
+   *     的落地機會；靜默吞掉會讓它從閱卷中消失，而學員看到的是「已提交並完成閱卷」。
+   */
   const flushAnswer = useCallback(
-    async (questionId: number | null) => {
+    async (questionId: number | null, { required = false }: { required?: boolean } = {}) => {
       if (questionId === null) return
       const selected = answers[questionId] ?? []
       if (savedRef.current[questionId] === JSON.stringify(selected)) return
       try {
         await attemptApi.saveAnswer(attemptId, questionId, selected)
         savedRef.current[questionId] = JSON.stringify(selected)
-      } catch {
-        // 靜默：切題不該因為暫存失敗而卡住；提交前會再送一次
+      } catch (err) {
+        if (required) throw err
       }
     },
     [answers, attemptId],
@@ -92,8 +100,9 @@ export function EtQuizAnswerPage() {
 
   const submit = useMutation({
     mutationFn: async () => {
-      // ⚠️ 先把當前題送出去——否則最後一題作答後直接提交會漏掉那一題
-      await flushAnswer(currentId)
+      // ⚠️ 先把當前題送出去——否則最後一題作答後直接提交會漏掉那一題。
+      // `required` 讓這次失敗會中止提交並顯示錯誤，而不是送出一份缺一題的考卷。
+      await flushAnswer(currentId, { required: true })
       return attemptApi.submit(attemptId)
     },
     onSuccess: (result) => {
@@ -121,6 +130,22 @@ export function EtQuizAnswerPage() {
     )
   }
   if (error) return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
+  if (data.status !== "IN_PROGRESS") {
+    // 已提交後用上一頁回到本頁——不要讓學員對著一份已經交出去的考卷繼續作答，
+    // 那會一路寫到按提交才收到 409。
+    return (
+      <Alert
+        severity="info"
+        action={
+          <Button size="small" onClick={() => navigate(`/et/quizzes/${data.quiz_id}`)}>
+            回測驗頁
+          </Button>
+        }
+      >
+        本次作答已提交，無法再變更。
+      </Alert>
+    )
+  }
 
   const questions: QuestionForAnswering[] = data.questions.map((q) => ({
     ...q,
