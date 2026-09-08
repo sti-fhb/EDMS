@@ -21,6 +21,8 @@
 比照 `progress/router.py` 已登記的同類例外。
 """
 
+import logging
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,13 +53,41 @@ from app.et.survey_fill.schemas import (
     SurveySubmitResult,
 )
 
-_NOT_ENROLLED = AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_SURVEY_011")
+logger = logging.getLogger(__name__)
 
-#: 課程沒有問卷（或問卷已刪除）時，以 id 定址的填寫端點之回應。
-#:
-#: 與 `ET_SURVEY_001`（教師端「查無此問卷」）共用同一碼與訊息：學員這一側的定址是
-#: 課程而非問卷，而「這門課沒有問卷」與「問卷不存在」對他是同一件事。
-_NO_SURVEY = AppError(status_code=404, detail="查無此問卷", error_code="ET_SURVEY_001")
+
+def _not_enrolled() -> AppError:
+    """非在籍。
+
+    ⚠️ **工廠函式而非模組層級常數**，這是刻意與 `app/et/` 其餘 20+ 處慣例不同的。
+
+    `AppError` 繼承 `HTTPException`，是可變物件；CPython 在 raise 一個「已帶
+    `__traceback__` 的既有實例」時會把本次傳播的每個 frame **附加**到既有 traceback
+    之後，而模組層級的實例永遠被 module globals 持有 → traceback 只增不減，每筆都釘住
+    一個 frame 及其 locals（含請求 body 與 `Authorization` header）。實測 100 次 raise
+    即累積 400 筆。
+
+    本檔兩個 403 / 404 是**未認證成本最低的路徑**（任一登入者對任意 `course_id` 迴圈
+    呼叫即可觸發，不需在籍、不需該課程存在），故不沿用那個慣例。
+
+    > 全 codebase 的 singleton 清理屬平台層，另開 issue 追蹤；此處只是不再新增。
+    """
+    return AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_SURVEY_011")
+
+
+def _no_survey() -> AppError:
+    """課程沒有問卷（或問卷已刪除）時，以 id 定址的填寫端點之回應。
+
+    與 `ET_SURVEY_001`（教師端「查無此問卷」）共用同一碼與訊息：學員這一側的定址是
+    課程而非問卷，而「這門課沒有問卷」與「問卷不存在」對他是同一件事。
+
+    工廠函式的理由同 `_not_enrolled`。
+    """
+    return AppError(status_code=404, detail="查無此問卷", error_code="ET_SURVEY_001")
+
+
+def _already_submitted() -> AppError:
+    return AppError(status_code=409, detail="您已填寫過此問卷", error_code="ET_SURVEY_013")
 
 
 class EtSurveyFillService:
@@ -77,6 +107,15 @@ class EtSurveyFillService:
 
     async def entry(self, db: AsyncSession, *, course_id: int, user_id: str, completed: bool) -> SurveyEntry | None:
         """側欄入口狀態（AC 1 / AC 2）；課程無問卷時回 `None`。
+
+        🔴 **呼叫端必須先完成在籍 / 擁有者判定——本函式不做任何授權檢核。**
+        這與 `get_form` / `submit`（兩者都走 `_require_facts`）不對稱，是刻意的：它服務
+        的是 `/learn` 的聚合回應，而那支端點在呼叫此處**之前**已經跑過
+        `ensure_can_access`（`learning/service.structure`）。
+
+        重複判定會讓 `/learn` 多一次在籍查詢，但**漏掉判定就是一個安靜的資訊洩漏點**
+        （本函式會回 `survey_id` / `survey_name` / 自己的 `submitted_at`）。新增第二個
+        呼叫端時請先確認該路徑已判過。
 
         `completed` 由呼叫端傳入而非在此計算——`learning/service.structure()` 手上
         已經有項目清單與完成集合，再查一次進度只是白跑一趟。
@@ -145,7 +184,20 @@ class EtSurveyFillService:
 
         specs = await self._question_specs(db, facts.survey_id)
         answers = [AnswerDraft(sq_id=a.sq_id, so_id=a.so_id, answer_text=a.answer_text) for a in req.answers]
-        validate_answers(questions=specs, answers=answers)
+        try:
+            validate_answers(questions=specs, answers=answers)
+        except AppError as exc:
+            # 畸形作答（`ET_SURVEY_017`）是自家 UI 產不出來的請求，本身即是高可信度的
+            # 濫用訊號。**不記 `answer_text` 內容**（`sti-backend-logging`：個資完整值
+            # 不進 log），只記代碼與筆數。
+            logger.warning(
+                "課後問卷作答不合規 user=%s course_id=%s error_code=%s answers=%s",
+                operator.user_id,
+                course_id,
+                exc.error_code,
+                len(answers),
+            )
+            raise
         rows = build_detail_rows(questions=specs, answers=answers)
 
         try:
@@ -154,7 +206,23 @@ class EtSurveyFillService:
                     db, survey_id=facts.survey_id, rows=rows, operator=operator
                 )
         except IntegrityError:
-            raise AppError(status_code=409, detail="您已填寫過此問卷", error_code="ET_SURVEY_013") from None
+            # **自我驗證後才轉 409**，不無條件把任何 `IntegrityError` 都說成「已填寫過」。
+            #
+            # `create_response` 內有兩次 flush（主檔、明細），明細那側還有 `SQ_ID` /
+            # `SO_ID` 兩個 FK。若日後某個約束被違反而一律回 `ET_SURVEY_013`，學員會看到
+            # 「您已填寫過此問卷」——而前端把那個代碼當成功處理（他的問卷確實常常是已
+            # 送出的），於是「什麼都沒寫進去」會被呈現為送出成功，且沒有任何痕跡。
+            #
+            # 以「我的填答列是否真的存在」判定，而非解析 driver 的 constraint 名稱：後者
+            # 綁 asyncpg 的例外屬性，換 driver 就靜默失效。比照
+            # `enrollment/service.join` 併發路徑「重查是否有 winner」的作法。
+            after = await self._fill.entry_facts(db, course_id=course_id, user_id=operator.user_id)
+            if after is None or after.submitted_at is None:
+                logger.exception(
+                    "課後問卷送出遇到非重複送出之完整性錯誤 user=%s course_id=%s", operator.user_id, course_id
+                )
+                raise
+            raise _already_submitted() from None
         return SurveySubmitResult(response_id=response_id, submitted_at=submitted_at)
 
     # ── 內部 ────────────────────────────────────────────────────────────────
@@ -166,10 +234,18 @@ class EtSurveyFillService:
         用它問出「哪些課程建了問卷」——那是課程結構的資訊，不該對非成員開放。
         """
         if not await self._learning.is_enrolled(db, user_id=user_id, course_id=course_id):
-            raise _NOT_ENROLLED
+            # 對非成員一律回同一個 403（課程不存在 / 草稿 / 無問卷 / 有問卷但你不在籍
+            # 四種情形不可區分），故枚舉者從回應學不到東西——但**嘗試本身要留痕**，
+            # 否則「同一帳號對數百個 course_id 連續取得 403」在預設 log level 下毫無
+            # 證據（`app_error_handler` 只有 `logger.debug`）。
+            #
+            # 不寫 `DP_AUDIT_LOG`：見本模組 docstring 之稽核範圍說明。這裡要的是應用層
+            # 的監測面，不是資安稽核鏈。
+            logger.warning("非在籍者嘗試存取課後問卷 user=%s course_id=%s", user_id, course_id)
+            raise _not_enrolled()
         facts = await self._fill.entry_facts(db, course_id=course_id, user_id=user_id)
         if facts is None:
-            raise _NO_SURVEY
+            raise _no_survey()
         return facts
 
     async def _completed(self, db: AsyncSession, *, course_id: int, user_id: str) -> bool:
@@ -199,6 +275,12 @@ class EtSurveyFillService:
 
         必須逐題比對，否則學員可送出別題的選項 id，讓 US9 的統計出現不屬於該題的選項
         （而那份統計沒有任何地方會察覺）。
+
+        ⚠️ **這道檢查不是原子的**：讀取與 INSERT 之間沒有鎖。題目凍結
+        （`ET_SURVEY_003`）在**第一筆填答出現前不生效**，所以第一位學員送出的那一瞬間，
+        若教師正好更新題目（舊選項軟刪 + 新選項自 1 起插入），學員送的 `SO_ID` 仍能通過
+        FK（軟刪的列實體還在）而被寫入。窗口極窄且需要教師同時操作，評估為可接受；
+        真要處理，最小成本是在 `begin_nested()` 內重讀一次 `option_ids` 再比對。
         """
         questions, options = await self._load(db, survey_id)
         by_question: dict[int, set[int]] = {}

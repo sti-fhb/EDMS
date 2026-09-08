@@ -235,6 +235,15 @@ class EtProgressRepository:
         await db.flush()
 
     async def completed_item_ids(self, db: AsyncSession, *, user_id: str, course_id: int) -> set[int]:
+        """該學員在此課程已完成的項目 id。
+
+        ⚠️ 課程歸屬以 `ET_PROGRESS.COURSE_ID`（寫入當下存下的冗餘欄位）判定，而
+        `completion_counts_by_course` 是以 `ET_CHAPTER.COURSE_ID`（當前的結構事實）推導。
+        目前沒有「把項目搬到另一門課」的功能，兩者不可能分歧；已刪除項目的列亦由呼叫端
+        取交集排除（見 `learning/service.structure` 的完課判定），與那支用 SQL JOIN 排除
+        的效果相同。**若日後支援項目搬移，這兩處必須一起改**——不然完課會依呼叫路徑
+        給出不同答案。
+        """
         rows = await db.scalars(
             select(EtProgress.item_id).where(
                 EtProgress.user_id == user_id,
@@ -245,18 +254,12 @@ class EtProgressRepository:
         )
         return set(rows)
 
-    async def completion_pct_by_course(
-        self, db: AsyncSession, *, user_id: str, course_ids: list[int]
-    ) -> dict[int, int]:
-        """各課程之學習進度百分比＝**完成項目數 ÷ 總項目數**（與側欄進度條同一定義）。
-
-        ⚠️ **不可拿 `== 100` 當「完課」的判定**——本函式四捨五入（201 項完成 200 項
-        時 `round(99.5)` 就是 100）。顯示層差半項無妨，但完課是課後問卷入口與線下核可
-        的閘門，會讓最後一項還沒完成就開放。要判完課請用
-        `completion_counts_by_course` + `enrollment.rules.is_course_completed`。
-        """
-        counts = await self.completion_counts_by_course(db, user_id=user_id, course_ids=course_ids)
-        return {course_id: completion_pct(*counts[course_id]) for course_id in counts}
+    # ⚠️ 這裡曾有一支 `completion_pct_by_course`（#274），直接回四捨五入後的百分比。
+    # #284 起移除：所有呼叫端都改用下方的 `completion_counts_by_course` + 純函式
+    # `completion_pct`（顯示）/ `enrollment.rules.is_course_completed`（閘門）。
+    #
+    # **刻意不留著那支**——留一個「回 100 卻不代表全部完成」的公開方法，正是下一個人
+    # 拿它當完課閘門的入口，而那個偏差不會有任何地方察覺（見 `completion_pct` 的說明）。
 
     async def completion_counts_by_course(
         self, db: AsyncSession, *, user_id: str, course_ids: list[int]

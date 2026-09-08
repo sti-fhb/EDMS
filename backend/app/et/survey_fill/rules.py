@@ -156,7 +156,7 @@ def validate_answers(*, questions: list[QuestionSpec], answers: list[AnswerDraft
             #
             # 同一題送兩次必須在此擋下而非讓它掉進 INSERT——那會撞
             # `UQ_ET_SURVEY_RESPONSE_D_RESPONSE_Q` 變成 500。
-            raise _MALFORMED
+            raise _malformed()
         seen.add(answer.sq_id)
         if question.question_type == SURVEY_QUESTION_SINGLE:
             _validate_single(question, answer)
@@ -215,23 +215,30 @@ def build_detail_rows(*, questions: list[QuestionSpec], answers: list[AnswerDraf
 
 # ── 內部 ──────────────────────────────────────────────────────────────────────
 
-#: 畸形請求之統一回應。訊息寫「請重新整理後再試」——前端的處置就是重載表單。
-_MALFORMED: Final = AppError(
-    status_code=422, detail="作答內容與問卷題目不符，請重新整理後再試", error_code="ET_SURVEY_017"
-)
+
+def _malformed() -> AppError:
+    """畸形請求之統一回應。訊息寫「請重新整理後再試」——前端的處置就是重載表單。
+
+    ⚠️ **工廠函式而非模組層級常數。** raise 一個帶著既有 `__traceback__` 的實例會讓
+    CPython 把本次傳播的每個 frame 附加上去，而模組層級的實例永遠被 module globals
+    持有 → traceback 只增不減，每筆釘住一個 frame 及其 locals（含最多 200 筆作答的
+    請求 body）。本函式是**單次請求代價最大**的拒絕路徑，故不沿用 `app/et/` 其餘處的
+    singleton 慣例（那些的清理屬平台層，另開 issue）。
+    """
+    return AppError(status_code=422, detail="作答內容與問卷題目不符，請重新整理後再試", error_code="ET_SURVEY_017")
 
 
 def _validate_single(question: QuestionSpec, answer: AnswerDraft) -> None:
     if answer.answer_text is not None:
         # 兩欄互斥（`data-model` 明示由應用層把關、不設 CHECK constraint）。
-        raise _MALFORMED
+        raise _malformed()
     if answer.so_id is None or answer.so_id not in question.option_ids:
-        raise _MALFORMED
+        raise _malformed()
 
 
 def _validate_text(answer: AnswerDraft) -> None:
     if answer.so_id is not None:
-        raise _MALFORMED
+        raise _malformed()
     if len(answer.answer_text or "") > ANSWER_TEXT_MAX_LEN:
         raise AppError(
             status_code=422,

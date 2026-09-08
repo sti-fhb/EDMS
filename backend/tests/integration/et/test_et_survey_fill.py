@@ -498,6 +498,51 @@ class TestSubmit:
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_SURVEY_017"
 
+    async def test_問答題超過150字回_ET_SURVEY_016(self, client, db) -> None:
+        """FR-ET-US13-02「至多 150 字，超過時 MUST 阻擋」。
+
+        🔴 **本條測的是「HTTP 層真的回得出 `ET_SURVEY_016`」**，不只是 rules 層。
+        schema 的 `max_length` 若也設 150，超長輸入會先被 `validation_exception_handler`
+        轉成 `COMMON_422`「以下欄位不符規定」，`ET_SURVEY_016` 與它承諾的訊息就永遠到
+        不了前端——那條錯誤碼會變成只存在於文件與 unit test 裡的空頭承諾。故 schema 層
+        放寬到 `ANSWER_TEXT_INPUT_MAX_LEN`，業務上限由 rules 判定。
+        """
+        ctx = await _ready(client, db, "sub10")
+
+        r = await client.post(
+            _submit_url(ctx["course_id"]),
+            json={
+                "answers": [
+                    *_single_answers(ctx["questions"]),
+                    {"sq_id": ctx["questions"][2]["sq_id"], "answer_text": "字" * 151},
+                ]
+            },
+            headers=_bearer(ctx["student"]),
+        )
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_SURVEY_016"
+        assert r.json()["error_message"] == "文字答案至多 150 字"
+
+    async def test_問答題恰好150字可送出(self, client, db) -> None:
+        ctx = await _ready(client, db, "sub11")
+
+        r = await client.post(
+            _submit_url(ctx["course_id"]),
+            json={
+                "answers": [
+                    *_single_answers(ctx["questions"]),
+                    {"sq_id": ctx["questions"][2]["sq_id"], "answer_text": "字" * 150},
+                ]
+            },
+            headers=_bearer(ctx["student"]),
+        )
+
+        assert r.status_code == 201, r.text
+        rows = await _detail_rows(db, ctx["survey"]["survey_id"])
+        assert rows[2].answer_text is not None
+        assert len(rows[2].answer_text) == 150, "VARCHAR(150) 以字元計，150 個中文字不溢位"
+
     async def test_失敗之送出不留下主檔(self, client, db) -> None:
         """驗證不合規的送出**完全不寫入**——否則學員會有一筆空的填答，且再也不能填。"""
         ctx = await _ready(client, db, "sub09")

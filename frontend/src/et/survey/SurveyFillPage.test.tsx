@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtSurveyFillPage } from "./SurveyFillPage"
 import type { SurveyEntryState, SurveyForm } from "./surveyFillSchemas"
@@ -73,6 +73,10 @@ async function confirmDialog(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("EtSurveyFillPage", () => {
+  // `navigate` 是 module 層的共用 spy，且 vitest 沒有設 `clearMocks`——不清的話
+  // `not.toHaveBeenCalledWith` 會被前面測試留下的呼叫記錄弄成假綠。
+  beforeEach(() => navigate.mockClear())
+
   it("渲染題目、選項與問卷名稱", async () => {
     mockForm()
     renderWithProviders(<EtSurveyFillPage />)
@@ -282,6 +286,49 @@ describe("EtSurveyFillPage", () => {
 
       expect(await screen.findByText("問卷已送出，感謝您的回饋")).toBeInTheDocument()
       expect(screen.queryByText("您已填寫過此問卷")).not.toBeInTheDocument()
+    })
+
+    it("後端回 409 時確認對話框會關閉並導回課程頁", async () => {
+      // 🔴 這兩條斷言是本測試的重點，不是附帶檢查。
+      //
+      // `mutateAsync()` 即使 `onError` 已處理仍會 reject，而送出是由 `confirm({ onOk })`
+      // 觸發的——`onOk` 一 reject，`NotificationContext` 就只解除 loading、**刻意保留
+      // 對話框**。若把 409 的處理放在 `onError`，畫面會同時留著「綠色成功提示」與
+      // 「送出後即不可修改，確定送出嗎？」的對話框，而且不導頁。
+      //
+      // 只斷言「有成功訊息、沒有錯誤訊息」抓不到那個缺口。
+      const user = userEvent.setup()
+      mockForm()
+      captureSubmit(409)
+      renderWithProviders(<EtSurveyFillPage />)
+
+      await user.click(await screen.findByRole("radio", { name: "滿意" }))
+      await user.click(screen.getByRole("radio", { name: "適當" }))
+      await user.click(screen.getByRole("button", { name: /送出問卷/ }))
+      await confirmDialog(user)
+
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/courses/1/learn"))
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    })
+
+    it("真正的錯誤仍顯示錯誤訊息且保留對話框", async () => {
+      // 與上一條互為對照：只有「已填寫過」轉成功，其餘照舊走錯誤路徑。
+      const user = userEvent.setup()
+      mockForm()
+      server.use(
+        http.post("/api/et/courses/:courseId/survey/response", () =>
+          HttpResponse.json({ error_code: "ET_SURVEY_014", error_message: "課程已關閉，無法填寫問卷" }, { status: 409 }),
+        ),
+      )
+      renderWithProviders(<EtSurveyFillPage />)
+
+      await user.click(await screen.findByRole("radio", { name: "滿意" }))
+      await user.click(screen.getByRole("radio", { name: "適當" }))
+      await user.click(screen.getByRole("button", { name: /送出問卷/ }))
+      await confirmDialog(user)
+
+      expect(await screen.findByText("課程已關閉，無法填寫問卷")).toBeInTheDocument()
+      expect(navigate).not.toHaveBeenCalledWith("/et/courses/1/learn")
     })
   })
 

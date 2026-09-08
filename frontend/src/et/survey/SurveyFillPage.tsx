@@ -80,26 +80,34 @@ export function EtSurveyFillPage() {
   const backToCourse = useCallback(() => navigate(`/et/courses/${courseId}/learn`), [courseId, navigate])
 
   const submitting = useMutation({
-    mutationFn: () => surveyFillApi.submit(courseId, toAnswerPayload(data?.questions ?? [], draft)),
+    /**
+     * `ET_SURVEY_013`（已填寫過）在此**轉為成功**，不走 `onError`。
+     *
+     * 開兩個分頁各按一次送出時，第二次的 409 是**正確結果**——他的問卷確實已經送出。
+     *
+     * ⚠️ 這段判斷必須在 `mutationFn` 內，不能放在 `onError`：`mutateAsync()` 無論
+     * `onError` 有沒有處理都會 reject，而送出是由 `confirm({ onOk })` 觸發的——
+     * `onOk` 一 reject，`NotificationContext` 就只解除 loading、**刻意保留對話框**
+     * （那是給真正失敗的情境用的）。結果會是「綠色成功提示」與「確認對話框」同時
+     * 留在畫面上、也不導頁。
+     */
+    mutationFn: async () => {
+      try {
+        await surveyFillApi.submit(courseId, toAnswerPayload(data?.questions ?? [], draft))
+      } catch (err) {
+        if (toApiError(err).errorCode !== "ET_SURVEY_013") throw err
+      }
+    },
     onSuccess: () => {
       message.success("問卷已送出，感謝您的回饋")
       // 側欄入口要從「填寫課後問卷」變成「查看我的填答」——那份狀態在 `/learn` 的
       // 回應裡，不重抓的話學員回到課程頁會看到已經不成立的入口。
       void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.etLearn.structure(courseId) })
+      // 表單本身也要失效：他從入口再點進來時該看到唯讀的自己填答，而非填寫態。
+      void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.etSurvey.form(courseId) })
       backToCourse()
     },
-    onError: (err) => {
-      const apiError = toApiError(err)
-      if (apiError.errorCode === "ET_SURVEY_013") {
-        // **不當錯誤處理**：開兩個分頁各按一次送出時，第二次的 409 是正確結果——他的
-        // 問卷確實已經送出了。顯示紅色錯誤會讓他以為失敗。重抓表單即轉唯讀。
-        message.success("問卷已送出，感謝您的回饋")
-        void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.etSurvey.form(courseId) })
-        void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.etLearn.structure(courseId) })
-        return
-      }
-      message.error(apiError.errorMessage)
-    },
+    onError: (err) => message.error(toApiError(err).errorMessage),
   })
 
   // 已送出者的作答由伺服器狀態推導，**不複製進 state**——複製一份只會多一個要同步的

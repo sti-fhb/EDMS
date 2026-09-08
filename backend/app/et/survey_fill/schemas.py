@@ -13,15 +13,30 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.et.survey_fill.rules import ANSWER_TEXT_MAX_LEN
-
-#: 單次送出之題數上限（**請求大小防護，非業務規則**）。
+#: 單次送出之題數上限（**寫入筆數的界限，非記憶體防護**）。
 #:
 #: 業務判定在 `rules.validate_answers`（逐題比對題目清單，多送 / 少送都擋）。這裡放寬
-#: 到 200 只是不讓單一請求塞進上萬列——問卷實務上不會超過數十題，而 `data-model` 未訂
+#: 到 200 只是不讓單一請求寫進上萬列——問卷實務上不會超過數十題，而 `data-model` 未訂
 #: 題數上限，故不能拿它當業務界限。同 `enrollment/schemas.INVITATION_CODE_INPUT_MAX_LEN`
 #: 之取捨。
+#:
+#: ⚠️ **它擋不住「用超大 body 佔記憶體」**：FastAPI 在解析 dependency 之前就把整個
+#: body 讀進記憶體並 `json()`，本上限是在那之後才生效的。request body 的總量上限屬
+#: 部署層（反向代理 `client_max_body_size`），全專案目前沒有設，已列 follow-up。
 MAX_ANSWERS_PER_REQUEST = 200
+
+#: 文字答案之**請求大小防護**（非業務規則）。
+#:
+#: 業務上限是 `ANSWER_TEXT_MAX_LEN`（150 字，FR-ET-US13-02），由
+#: `rules._validate_text` 判定並回 `ET_SURVEY_016`「文字答案至多 150 字」。
+#:
+#: ⚠️ **這裡刻意放寬到 1000 而不是直接寫 150**：schema 層若也擋 150，超長輸入會先被
+#: `validation_exception_handler` 轉成 `COMMON_422`「以下欄位不符規定：answer_text」，
+#: `ET_SURVEY_016` 與它承諾的訊息就永遠到不了前端——那條錯誤碼會變成只存在於文件與
+#: unit test 裡的空頭承諾。分兩層的職責同
+#: `enrollment/schemas.INVITATION_CODE_INPUT_MAX_LEN`（放寬到 32，業務判定 8 碼在
+#: rules）。
+ANSWER_TEXT_INPUT_MAX_LEN = 1000
 
 
 class SurveyEntry(BaseModel):
@@ -104,7 +119,9 @@ class SurveyAnswerIn(BaseModel):
 
     sq_id: int = Field(ge=1)
     so_id: int | None = Field(default=None, ge=1)
-    answer_text: str | None = Field(default=None, max_length=ANSWER_TEXT_MAX_LEN)
+    #: 業務上限 150 字由 `rules._validate_text` 判定（`ET_SURVEY_016`）；此處是請求大小
+    #: 防護，見 `ANSWER_TEXT_INPUT_MAX_LEN` 的說明。
+    answer_text: str | None = Field(default=None, max_length=ANSWER_TEXT_INPUT_MAX_LEN)
 
 
 class SurveySubmitReq(BaseModel):
