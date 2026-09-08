@@ -25,6 +25,18 @@ from app.et.progress.models import EtEnrollment, EtProgress, EtProgressInterval,
 from app.et.progress.rules import Segment
 
 
+def completion_pct(done: int, total: int) -> int:
+    """完成項目數 ÷ 總項目數，四捨五入為整數百分比（**僅供顯示**）。
+
+    沒有任何項目的課程回 `0` 而非除零——教師剛建好還沒放內容時很常見。
+
+    ⚠️ 回 100 **不代表全部完成**（201 項完成 200 項即 `round(99.5) = 100`）。純函式
+    置於此處而非 `rules`：`progress/rules.py` 由另一個 issue 進行中，且本式與
+    `completion_counts_by_course` 是同一件事的兩半，放在一起才看得出來。
+    """
+    return 0 if total == 0 else min(100, round(done * 100 / total))
+
+
 class EtProgressRepository:
     """`ET_PROGRESS` / `_VIDEO` / `_INTERVAL` 之讀寫。"""
 
@@ -238,6 +250,19 @@ class EtProgressRepository:
     ) -> dict[int, int]:
         """各課程之學習進度百分比＝**完成項目數 ÷ 總項目數**（與側欄進度條同一定義）。
 
+        ⚠️ **不可拿 `== 100` 當「完課」的判定**——本函式四捨五入（201 項完成 200 項
+        時 `round(99.5)` 就是 100）。顯示層差半項無妨，但完課是課後問卷入口與線下核可
+        的閘門，會讓最後一項還沒完成就開放。要判完課請用
+        `completion_counts_by_course` + `enrollment.rules.is_course_completed`。
+        """
+        counts = await self.completion_counts_by_course(db, user_id=user_id, course_ids=course_ids)
+        return {course_id: completion_pct(*counts[course_id]) for course_id in counts}
+
+    async def completion_counts_by_course(
+        self, db: AsyncSession, *, user_id: str, course_ids: list[int]
+    ) -> dict[int, tuple[int, int]]:
+        """各課程之 `(完成項目數, 總項目數)`——進度百分比與完課判定的共同來源。
+
         以兩支 `GROUP BY` 聚合查詢取得，**不逐課程查**——「我的課程」一次可能列出數十
         門課，N+1 會讓那一頁隨選課數線性變慢。
 
@@ -247,6 +272,10 @@ class EtProgressRepository:
 
         課程層以 `ET_CHAPTER.COURSE_ID` 推導而非 `ET_PROGRESS.COURSE_ID`：後者是寫入當下
         存下的冗餘欄位，前者才是當前的結構事實。
+
+        Returns:
+            `{course_id: (done, total)}`，`course_ids` 中每一個都有值（沒有項目的課程
+            回 `(0, 0)`）。
         """
         if not course_ids:
             return {}
@@ -275,12 +304,9 @@ class EtProgressRepository:
         )
         done_by_course = dict(done.all())
 
-        result: dict[int, int] = {}
-        for course_id in course_ids:
-            total = total_by_course.get(course_id, 0)
-            # 沒有任何項目的課程回 0 而非除零——教師剛建好還沒放內容時很常見
-            result[course_id] = 0 if total == 0 else min(100, round(done_by_course.get(course_id, 0) * 100 / total))
-        return result
+        return {
+            course_id: (done_by_course.get(course_id, 0), total_by_course.get(course_id, 0)) for course_id in course_ids
+        }
 
     # ── 上次檢視項目（#274 SA Q1 裁示 B）────────────────────────────────────
 

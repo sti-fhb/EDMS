@@ -93,14 +93,28 @@ def ensure_not_removed(*, is_removed: bool) -> None:
         )
 
 
-def derive_completion_status(progress_pct: int) -> str:
-    """由學習進度百分比導出完課三態（`data-model` §ET_ENROLLMENT：「**即時計算**」）。
+def is_course_completed(*, done: int, total: int) -> bool:
+    """該學員是否已完課＝**該課程所有未刪除項目皆已完成**。
 
-    | `progress_pct` | 三態 |
+    ⚠️ **刻意收 `(done, total)` 而非百分比**：`completion_pct` 會四捨五入，201 個項目
+    完成 200 個時它回 100。完課是課後問卷入口（US13 AC 1）與線下核可（US16）的閘門，
+    用四捨五入後的值判定會讓最後一項還沒完成就開放——而那種偏差不會有任何地方察覺。
+
+    `total == 0` 回 `False`：按字面定義空課程是 vacuous truth（該算完課），但那會讓
+    學員一加入就看到課後問卷入口。發布檢核強制 ≥1 章節 + ≥1 教材，已發布課程走不到
+    這裡；真的走到就是資料異常，取較保守的那一側。
+    """
+    return total > 0 and done >= total
+
+
+def derive_completion_status(*, done: int, total: int) -> str:
+    """由完成/總項目數導出完課三態（`data-model` §ET_ENROLLMENT：「**即時計算**」）。
+
+    | 條件 | 三態 |
     |---|---|
-    | `0` | `NOT_STARTED` |
-    | `1`–`99` | `IN_PROGRESS` |
-    | `100` | `COMPLETED` |
+    | `done == 0` | `NOT_STARTED` |
+    | `0 < done < total` | `IN_PROGRESS` |
+    | `done >= total > 0` | `COMPLETED` |
 
     ## 為何即時計算而不維護儲存欄位
 
@@ -121,14 +135,13 @@ def derive_completion_status(progress_pct: int) -> str:
     直接 `WHERE COMPLETION_STATUS = 'COMPLETED'` 會得到零筆，而且不會報錯。
 
     Args:
-        progress_pct: 完成項目數 ÷ 總項目數（見
-            `progress.repository.completion_pct_by_course`）。沒有任何項目的課程回
-            `0` 而非 100——空課程按字面定義是 vacuous truth，但那會讓學員剛加入就看到
-            課後問卷入口；且發布檢核強制 ≥1 章節 + ≥1 教材，已發布課程走不到那裡。
+        done: 已完成之項目數。
+        total: 該課程未刪除之項目總數（見
+            `progress.repository.completion_counts_by_course`）。
     """
-    if progress_pct >= 100:
+    if is_course_completed(done=done, total=total):
         return COMPLETION_COMPLETED
-    if progress_pct <= 0:
+    if done <= 0:
         return COMPLETION_NOT_STARTED
     return COMPLETION_IN_PROGRESS
 
