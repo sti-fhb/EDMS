@@ -30,6 +30,7 @@ from app.core.exceptions import AppError
 from app.et.common.dm_client import get_dm_document_client
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL
 from app.et.course.models import EtItem
+from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access, playback_rates
 from app.et.learning.schemas import (
@@ -44,6 +45,7 @@ from app.et.learning.schemas import (
 from app.et.material.storage import resolve_within_root
 from app.et.progress.repository import EtProgressRepository
 from app.et.progress.rules import build_item_state, locked_item_ids
+from app.et.survey_fill.service import EtSurveyFillService
 from app.services import ParamService
 
 #: 倍速上限之參數代碼。單值參數，明細碼固定 `VALUE`（比照 #204 的邀請碼長度）。
@@ -69,10 +71,12 @@ class EtLearningService:
         repository: EtLearningRepository | None = None,
         params: ParamService | None = None,
         progress: EtProgressRepository | None = None,
+        survey_fill: EtSurveyFillService | None = None,
     ) -> None:
         self._repo = repository or EtLearningRepository()
         self._params = params or ParamService()
         self._progress = progress or EtProgressRepository()
+        self._survey_fill = survey_fill or EtSurveyFillService()
 
     async def structure(self, db: AsyncSession, course_id: int, *, user_id: str) -> LearnStructure:
         """ET05 左側導覽之完整結構（AC 1 / AC 2）。
@@ -107,6 +111,16 @@ class EtLearningService:
             chapters=[c.chapter_id for c in chapters], rows=rows, completed_ids=completed_ids, is_preview=is_preview
         )
 
+        # 課後問卷入口（#284）。完課判定**用已載入的資料算**，不再查一次進度——
+        # `all_item_ids ⊆ completed_ids` 與 `is_course_completed(done, total)` 是同一
+        # 件事：前者問「每個當前項目都有完成紀錄嗎」，後者是它的計數表述。
+        #
+        # `completed_ids` 可能含已刪除項目的 id（`ET_PROGRESS` 的列在項目被刪除後仍
+        # 留著，那是學習歷史），故取交集而非直接比長度。
+        all_item_ids = {item.item_id for item, _, _ in rows}
+        completed = is_course_completed(done=len(all_item_ids & completed_ids), total=len(all_item_ids))
+        survey = await self._survey_fill.entry(db, course_id=course_id, user_id=user_id, completed=completed)
+
         max_rate = await self._params.get_int_param(db, _MAX_RATE_PARAM, "VALUE", _DEFAULT_MAX_RATE)
         return LearnStructure(
             course_id=course.course_id,
@@ -118,6 +132,7 @@ class EtLearningService:
             last_item_id=(
                 None if is_preview else await self._progress.get_last_item_id(db, user_id=user_id, course_id=course_id)
             ),
+            survey=survey,
             chapters=[
                 ChapterNode(
                     chapter_id=c.chapter_id,
