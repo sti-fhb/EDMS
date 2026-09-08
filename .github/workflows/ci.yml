@@ -149,6 +149,10 @@ jobs:
           # CI 屬非 production；設 true 以免 FRONTEND_BASE_URL prod 護欄擋下 settings 載入
           # （alembic 不經 conftest，需在此顯式注入）
           DEBUG: "true"
+          # 測試 DB 不種示範帳號（migration 7b24b5dea3ad）——那 5 個帳號會混進
+          # 「列全部使用者 / 全部管理者 / DM_VIEWER 母體」等斷言的預期值。
+          # tests/integration/conftest.py 重建 schema 時亦注入同一變數。
+          SEED_DEMO_ACCOUNTS: "false"
         run: uv run alembic upgrade head
 
       # -n auto：pytest-xdist 依核心數並行跑（integration 為 I/O-bound）

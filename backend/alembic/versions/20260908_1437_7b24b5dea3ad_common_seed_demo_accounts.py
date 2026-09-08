@@ -14,6 +14,11 @@ Create Date: 2026-09-08 14:37:14.518094
 - 影響 Table：`DP_USER`（帳號主檔）、`DP_PWD_HIST`（密碼歷程 SEQ_NO=1）、
   `DM_USER_ROLE`、`ET_USER_ROLE`（角色指派）
 - 不做任何 DDL，純資料 seed
+- 以 `SEED_DEMO_ACCOUNTS`（預設 true）控制是否種入；**測試環境一律 false**——測試 DB
+  同樣跑 `alembic upgrade head`，這批帳號會混進「列全部使用者 / 全部管理者 /
+  DM_VIEWER 母體」等斷言的預期值（實測 7 條 integration 測試因此失敗）。
+  注入點：`.github/workflows/ci.yml` 的 migration 步驟與
+  `tests/integration/conftest.py` 的 `apply_migrations`。
 
 角色配置（一次涵蓋 DM 4 角色與 ET 3 角色）：
 
@@ -35,13 +40,17 @@ Create Date: 2026-09-08 14:37:14.518094
 使用者第一次改密碼的歷程會從第 2 筆起算、且防重用比對少一筆基準。
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Sequence, Union
 
 from sqlalchemy import text
 
 from alembic import op
+from app.core.config import settings
 from app.core.password_policy import hash_password
+
+logger = logging.getLogger("alembic.runtime.migration")
 
 # revision identifiers, used by Alembic.
 revision: str = "7b24b5dea3ad"
@@ -95,6 +104,13 @@ _UPSERT_ET_ROLE = text(
 
 
 def upgrade() -> None:
+    # 測試環境（CI / 本機 pytest）設 SEED_DEMO_ACCOUNTS=false 略過：測試 DB 同樣跑
+    # `alembic upgrade head`，這 5 個帳號會混進「列全部使用者 / 全部管理者 / DM_VIEWER
+    # 母體」等斷言的預期值。schema 不受影響，僅不種資料。
+    if not settings.SEED_DEMO_ACCOUNTS:
+        logger.info("SEED_DEMO_ACCOUNTS=false，略過示範帳號 seed")
+        return
+
     conn = op.get_bind()
     now = datetime.now(timezone.utc)
 
