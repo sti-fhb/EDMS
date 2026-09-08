@@ -33,4 +33,13 @@ export const attemptApi = {
     const { data } = await http.post<AttemptResult>(`/et/attempts/${attemptId}/submit`)
     return data
   },
+
+  /**
+   * 取**已提交** attempt 的成績明細（複習用）。與 `submit` 回傳同一個型別——同一份成績單，
+   * 差別只在取得時機，若兩邊型別分家，明細頁就得為兩種來源各寫一套渲染。
+   */
+  result: async (attemptId: number): Promise<AttemptResult> => {
+    const { data } = await http.get<AttemptResult>(`/et/attempts/${attemptId}/result`)
+    return data
+  },
 }

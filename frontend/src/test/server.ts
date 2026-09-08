@@ -42,6 +42,51 @@ const ATTEMPT_STATE = {
   ],
 }
 
+/**
+ * ET06 閱卷結果——`POST submit` 與 `GET result` **共用同一份**。
+ *
+ * 兩個端點回的是同一次作答的同一份成績，差別只在取得時機；分開寫遲早會有人只改一邊，
+ * 而那正好是「剛提交看到的分數」跟「回頭複習看到的分數」對不上的情境。
+ */
+const ATTEMPT_RESULT = {
+  attempt_id: 800,
+  quiz_id: 700,
+  attempt_no: 1,
+  status: "SUBMITTED",
+  score: "50.00",
+  points_total: 100,
+  pass_score: 80,
+  is_pass: false,
+  submitted_at: "2026-09-04T10:00:00Z",
+  remaining_attempts: 3,
+  questions: [
+    {
+      question_id: 901,
+      question_type: "SINGLE",
+      stem: "採血前應先確認什麼？",
+      points: 50,
+      score: "50.00",
+      outcome: "CORRECT",
+      options: [
+        { option_id: 9011, text: "捐血人身分", is_correct: true, selected: true },
+        { option_id: 9012, text: "天氣", is_correct: false, selected: false },
+      ],
+    },
+    {
+      question_id: 902,
+      question_type: "MULTIPLE",
+      stem: "以下哪些必須檢查？",
+      points: 50,
+      score: "0.00",
+      outcome: "WRONG",
+      options: [
+        { option_id: 9021, text: "體溫", is_correct: true, selected: false },
+        { option_id: 9022, text: "視力", is_correct: false, selected: true },
+      ],
+    },
+  ],
+}
+
 export const handlers = [
   http.post("/api/login", () =>
     HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false }),
@@ -1187,6 +1232,7 @@ export const handlers = [
       best_score: null,
       is_passed: false,
       in_progress_attempt_id: null,
+      last_attempt_id: null,
     }),
   ),
   http.post("/api/et/quizzes/:quizId/attempts", ({ params }) =>
@@ -1197,44 +1243,10 @@ export const handlers = [
   ),
   http.put("/api/et/attempts/:attemptId/answers/:questionId", () => new HttpResponse(null, { status: 204 })),
   http.post("/api/et/attempts/:attemptId/submit", ({ params }) =>
-    HttpResponse.json({
-      attempt_id: Number(params.attemptId),
-      quiz_id: 700,
-      attempt_no: 1,
-      status: "SUBMITTED",
-      score: "50.00",
-      points_total: 100,
-      pass_score: 80,
-      is_pass: false,
-      submitted_at: "2026-09-04T10:00:00Z",
-      remaining_attempts: 3,
-      questions: [
-        {
-          question_id: 901,
-          question_type: "SINGLE",
-          stem: "採血前應先確認什麼？",
-          points: 50,
-          score: "50.00",
-          outcome: "CORRECT",
-          options: [
-            { option_id: 9011, text: "捐血人身分", is_correct: true, selected: true },
-            { option_id: 9012, text: "天氣", is_correct: false, selected: false },
-          ],
-        },
-        {
-          question_id: 902,
-          question_type: "MULTIPLE",
-          stem: "以下哪些必須檢查？",
-          points: 50,
-          score: "0.00",
-          outcome: "WRONG",
-          options: [
-            { option_id: 9021, text: "體溫", is_correct: true, selected: false },
-            { option_id: 9022, text: "視力", is_correct: false, selected: true },
-          ],
-        },
-      ],
-    }),
+    HttpResponse.json({ ...ATTEMPT_RESULT, attempt_id: Number(params.attemptId) }),
+  ),
+  http.get("/api/et/attempts/:attemptId/result", ({ params }) =>
+    HttpResponse.json({ ...ATTEMPT_RESULT, attempt_id: Number(params.attemptId) }),
   ),
 ]
 

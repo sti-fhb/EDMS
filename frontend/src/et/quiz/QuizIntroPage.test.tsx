@@ -28,6 +28,7 @@ const BASE: QuizIntro = {
   best_score: null,
   is_passed: false,
   in_progress_attempt_id: null,
+  last_attempt_id: null,
 }
 
 function mockIntro(overrides: Partial<QuizIntro>) {
@@ -62,6 +63,33 @@ describe("ET06 測驗引導頁", () => {
     renderWithProviders(<EtQuizIntroPage />)
 
     expect(await screen.findByText("重考次數已用完，請聯繫教師重置")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /開始作答/ })).toBeDisabled()
+  })
+
+  it("從未作答時不顯示「查看上次作答明細」", async () => {
+    mockIntro({ last_attempt_id: null })
+    renderWithProviders(<EtQuizIntroPage />)
+
+    await screen.findByRole("button", { name: /開始作答/ })
+    expect(screen.queryByRole("button", { name: /查看上次作答明細/ })).not.toBeInTheDocument()
+  })
+
+  it("有作答紀錄時可查看上次作答明細", async () => {
+    mockIntro({ last_attempt_id: 800, last_score: "50.00", best_score: "50.00" })
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizIntroPage />)
+
+    await user.click(await screen.findByRole("button", { name: /查看上次作答明細/ }))
+
+    expect(navigate).toHaveBeenCalledWith("/et/attempts/800/result")
+  })
+
+  it("次數用盡仍可查看上次作答明細（複習）", async () => {
+    // 次數用完的學員正是最需要回頭看錯在哪的人；把複習跟著作答一起關掉等於懲罰他考不好
+    mockIntro({ can_start: false, remaining_attempts: 0, last_attempt_id: 800 })
+    renderWithProviders(<EtQuizIntroPage />)
+
+    expect(await screen.findByRole("button", { name: /查看上次作答明細/ })).toBeEnabled()
     expect(screen.getByRole("button", { name: /開始作答/ })).toBeDisabled()
   })
 

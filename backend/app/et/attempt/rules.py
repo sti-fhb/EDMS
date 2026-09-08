@@ -50,16 +50,16 @@ def score_question(question_type: str, selected: list[int], options: list[Option
     if question_type != QUESTION_MULTIPLE:
         # 單選收到多個選項＝前端壞了或有人繞過 UI。**不可**因為「其中一個對」就給分。
         hit = len(chosen) == 1 and chosen.issubset(correct_ids)
-        return Decimal(points) if hit else Decimal(0)
-
-    required = len(correct_ids)
-    if required == 0:
+        raw = Decimal(points) if hit else Decimal(0)
+    elif (required := len(correct_ids)) == 0:
         # 建題時強制至少 1 個正確選項（`data-model`），但資料異常不該讓提交 500
-        return Decimal(0)
-    hit = len(chosen & correct_ids)
-    miss = len(chosen - correct_ids)
-    # `max(0, ...)` 不是防呆而是規則——負分會讓這題倒扣其他題的分數
-    raw = Decimal(max(0, hit - miss)) * Decimal(points) / Decimal(required)
+        raw = Decimal(0)
+    else:
+        # `max(0, ...)` 不是防呆而是規則——負分會讓這題倒扣其他題的分數
+        got = max(0, len(chosen & correct_ids) - len(chosen - correct_ids))
+        raw = Decimal(got) * Decimal(points) / Decimal(required)
+    # 一律對齊 `DECIMAL(5,2)`：不 quantize 的分支存進 DB 再讀回來會變成 `100.00`，
+    # 於是「剛提交」與「回頭複習」看到同一次作答卻是 `100` 與 `100.00` 兩種寫法
     return raw.quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 

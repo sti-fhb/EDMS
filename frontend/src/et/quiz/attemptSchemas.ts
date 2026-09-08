@@ -93,6 +93,13 @@ export interface QuizIntro {
   is_passed: boolean
   /** 有未完成的作答時帶其 id，按鈕改為「繼續作答」。 */
   in_progress_attempt_id: number | null
+  /**
+   * 最近一次**已提交**的 attempt；`null` = 從未作答完成。
+   *
+   * 供「查看上次作答明細」。此入口**不受 `can_start` 影響**——次數用完的學員正是最需要
+   * 回頭看錯在哪的人，把複習跟著作答一起關掉等於懲罰他考不好。
+   */
+  last_attempt_id: number | null
 }
 
 /** 導覽列的題目狀態。 */

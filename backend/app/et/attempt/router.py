@@ -105,6 +105,20 @@ async def attempt_state(
     return await _service.state(db, attempt_id, user_id=ctx.user_id)
 
 
+@router.get("/attempts/{attempt_id}/result", response_model=AttemptResult)
+async def attempt_result(
+    attempt_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptResult:
+    """取**已提交** attempt 的成績與逐題明細（複習用）。
+
+    分數不重算——提交當下已寫入，重算等於不信任閱卷結果。尚未提交者回 404，與「不存在」
+    「非本人」共用同一回應。
+    """
+    return await _service.result(db, attempt_id, user_id=ctx.user_id)
+
+
 @router.put("/attempts/{attempt_id}/answers/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def save_answer(
     attempt_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],

@@ -37,6 +37,7 @@ export const QUERY_KEYS = {
   etQuiz: {
     intro: (quizId: number) => ["et", "quizzes", quizId, "intro"] as const,
     attempt: (attemptId: number) => ["et", "attempts", attemptId] as const,
+    result: (attemptId: number) => ["et", "attempts", attemptId, "result"] as const,
   },
   moduleSummary: {
     get: () => ["module-summary"] as const,

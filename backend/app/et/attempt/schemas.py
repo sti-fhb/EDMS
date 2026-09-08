@@ -149,3 +149,8 @@ class QuizIntro(BaseModel):
     best_score: Decimal | None
     is_passed: bool
     in_progress_attempt_id: int | None
+    #: 最近一次**已提交**的 attempt；`None` = 從未作答完成。
+    #:
+    #: 供引導頁的「查看上次作答明細」——**次數用盡時該入口仍須可用**，複習正是次數
+    #: 用完的學員最需要的東西，把它一起關掉等於懲罰他考不好。
+    last_attempt_id: int | None

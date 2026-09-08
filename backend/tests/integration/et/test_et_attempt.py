@@ -626,6 +626,96 @@ class TestRetryLimit:
         assert body["last_score"] is None
 
 
+class TestReviewLastAttempt:
+    """「查看上次作答明細」——提交後回頭複習的路徑。"""
+
+    async def test_已提交的作答可再取回同一份成績(self, client, db) -> None:
+        """明細取自 `_D.SCORE` / `_M.SCORE`，**不重算**。
+
+        重算等於不信任閱卷結果；閱卷依當時快照算，事後任何改動都不該回頭影響它。
+        """
+        teacher = await _user(db, "t_att16", ROLE_TEACHER)
+        student = await _user(db, "s_att16")
+        course = await _course_with_quiz(client, db, teacher, code="32000016")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]),
+            json={"selected_options": [q["options"][0]["option_id"]]},
+            headers=h,
+        )
+        submitted = (await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)).json()
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=h)
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["score"] == submitted["score"]
+        assert body["is_pass"] == submitted["is_pass"]
+        assert body["points_total"] == submitted["points_total"]
+        assert body["questions"] == submitted["questions"], "複習看到的明細與提交當下不一致"
+
+    async def test_進行中的作答沒有成績可看(self, client, db) -> None:
+        """未提交 → 404，與「不存在」「非本人」共用同一回應，不讓差異變成存在性 oracle。"""
+        teacher = await _user(db, "t_att17", ROLE_TEACHER)
+        student = await _user(db, "s_att17")
+        course = await _course_with_quiz(client, db, teacher, code="32000017")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=h)
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_ATTEMPT_001"
+
+    async def test_不可讀他人的成績明細(self, client, db) -> None:
+        teacher = await _user(db, "t_att18", ROLE_TEACHER)
+        owner = await _user(db, "s_att18a")
+        other = await _user(db, "s_att18b")
+        course = await _course_with_quiz(client, db, teacher, code="32000018")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, owner, course["course_id"])
+        await _enroll(db, other, course["course_id"])
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(owner))).json()
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=_bearer(owner))
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=_bearer(other))
+
+        assert r.status_code == 404, r.text
+
+    async def test_次數用盡仍給得到上次作答的入口(self, client, db) -> None:
+        """複習正是次數用完的學員最需要的——把入口跟著作答一起關掉等於懲罰他考不好。"""
+        teacher = await _user(db, "t_att19", ROLE_TEACHER)
+        student = await _user(db, "s_att19")
+        course = await _course_with_quiz(client, db, teacher, code="32000019")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await client.put(
+            f"/api/et/quizzes/{course['quiz_id']}",
+            json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": None, "max_retry": 0, "version": 0},
+            headers=_bearer(teacher),
+        )
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        before = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=h)
+        assert before.json()["last_attempt_id"] is None, "尚未作答就給了複習入口"
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=h)
+
+        assert r.status_code == 200, r.text
+        assert r.json()["can_start"] is False, "MAX_RETRY=0 且已作答 1 次，應不可再作答"
+        assert r.json()["last_attempt_id"] == attempt["attempt_id"]
+
+
 class TestAttemptOwnership:
     async def test_不可讀他人的作答(self, client, db) -> None:
         teacher = await _user(db, "t_att15", ROLE_TEACHER)

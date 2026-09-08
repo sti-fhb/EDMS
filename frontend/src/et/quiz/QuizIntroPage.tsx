@@ -1,4 +1,5 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
+import HistoryIcon from "@mui/icons-material/History"
 import PlayArrowIcon from "@mui/icons-material/PlayArrow"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
@@ -142,10 +143,24 @@ export function EtQuizIntroPage() {
           {/* ET-MSG-ET06-001；**inline 而非 Snackbar**——這是頁面的持續狀態，不是一次性事件 */}
           {!data.can_start && <Alert severity="info">重考次數已用完，請聯繫教師重置</Alert>}
 
-          <Stack direction="row" spacing={2} justifyContent="center">
+          <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>
             <Button variant="outlined" onClick={() => navigate(-1)}>
               取消
             </Button>
+            {/*
+              有作答紀錄就給複習入口，**不受 `can_start` 影響**：次數用完的學員正是最需要
+              回頭看錯在哪的人，把複習跟著作答一起關掉等於懲罰他考不好。
+            */}
+            {data.last_attempt_id !== null && (
+              <Button
+                variant="outlined"
+                size="large"
+                startIcon={<HistoryIcon />}
+                onClick={() => navigate(`/et/attempts/${data.last_attempt_id}/result`)}
+              >
+                查看上次作答明細
+              </Button>
+            )}
             <Button
               variant="contained"
               size="large"

@@ -124,6 +124,7 @@ class EtAttemptService:
             best_score=best,
             is_passed=passed,
             in_progress_attempt_id=in_progress.attempt_id if in_progress else None,
+            last_attempt_id=await self._repo.last_submitted_attempt_id(db, user_id=user_id, quiz_id=quiz_id),
         )
 
     # ── 開始 / 續作 ─────────────────────────────────────────────────────────
@@ -295,6 +296,45 @@ class EtAttemptService:
             remaining_attempts=remaining_attempts(total=used_total, reset_base=base, max_retry=max_retry),
             questions=[
                 _to_result(detail, per_question[detail.question_id])
+                for detail in _in_snapshot_order(details, attempt.question_order)
+            ],
+        )
+
+    async def result(self, db: AsyncSession, attempt_id: int, *, user_id: str) -> AttemptResult:
+        """取**已提交** attempt 的成績與逐題明細（供引導頁的「查看上次作答明細」）。
+
+        分數不重算——逐題得分於提交當下已寫入 `ET_QUIZ_ATTEMPT_D.SCORE`、總分寫入
+        `_M.SCORE`。重算等於不信任閱卷結果，而閱卷是依當時快照算的，事後任何改動都不該
+        回頭影響它（同一條原則見 `quiz/repository.soft_delete_questions` 給 US9 / US14
+        的約束）。
+
+        Raises:
+            AppError: 404 `ET_ATTEMPT_001`——不存在、非本人，或**尚未提交**（沒有成績
+                可看）。三者共用同一回應，不讓差異變成存在性 oracle。
+        """
+        attempt = await self._require_own_attempt(db, attempt_id, user_id)
+        if attempt.status == ATTEMPT_IN_PROGRESS:
+            # 放行的話正確答案會在作答**進行中**就送出去——這條守門同時是安全邊界
+            raise _NOT_FOUND
+        details = await self._repo.list_details(db, attempt_id)
+        quiz = await self._repo.get_quiz(db, attempt.quiz_id)
+        total = await self._repo.attempt_total(db, user_id=user_id, quiz_id=attempt.quiz_id)
+        base = await self._repo.reset_base(db, user_id=user_id, quiz_id=attempt.quiz_id)
+        return AttemptResult(
+            attempt_id=attempt.attempt_id,
+            quiz_id=attempt.quiz_id,
+            attempt_no=attempt.attempt_no,
+            status=attempt.status,
+            score=attempt.score if attempt.score is not None else Decimal(0),
+            points_total=sum(d.points_snapshot for d in details),
+            pass_score=attempt.pass_score_snapshot,
+            is_pass=bool(attempt.is_pass),
+            submitted_at=attempt.submitted_at or attempt.started_at,
+            remaining_attempts=remaining_attempts(
+                total=total, reset_base=base, max_retry=quiz.max_retry if quiz else 0
+            ),
+            questions=[
+                _to_result(detail, detail.score if detail.score is not None else Decimal(0))
                 for detail in _in_snapshot_order(details, attempt.question_order)
             ],
         )

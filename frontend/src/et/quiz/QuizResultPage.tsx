@@ -1,8 +1,11 @@
+import ChevronRightIcon from "@mui/icons-material/ChevronRight"
 import ReplayIcon from "@mui/icons-material/Replay"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
+import CircularProgress from "@mui/material/CircularProgress"
+import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Table from "@mui/material/Table"
@@ -12,9 +15,15 @@ import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import Typography from "@mui/material/Typography"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
 
+import { AnswerReviewDialog } from "./AnswerReviewDialog"
 import type { AttemptResult, QuestionResult } from "./attemptSchemas"
+import { attemptApi } from "./attemptService"
+import { QUERY_KEYS } from "../../constants/queryKeys"
+import { toApiError } from "../../services/http"
 
 const OUTCOME_LABEL: Record<QuestionResult["outcome"], { text: string; color: "success" | "warning" | "error" }> = {
   CORRECT: { text: "答對", color: "success" },
@@ -29,28 +38,54 @@ function optionText(options: QuestionResult["options"], predicate: (o: QuestionR
 }
 
 /**
- * ET06 結果頁（AC 7 / AC 11）。
+ * ET06 結果頁（AC 7 / AC 11）——剛提交的成績單，也是「查看上次作答明細」的複習頁。
+ *
+ * ## 兩種進入方式
+ *
+ * | 來源 | 資料 |
+ * |---|---|
+ * | 剛提交（`navigate` 帶 state）| 直接用提交的回應 |
+ * | 引導頁的「查看上次作答明細」／重新整理／貼連結 | `GET /attempts/{id}/result` |
+ *
+ * 有 state 時不重抓——那份回應就是同一份成績（分數於提交當下凍結，後端也是讀存下來的
+ * 值而非重算）。
  *
  * ## 正確答案**強制顯示**
  *
- * `spec_us6` FR-09 明訂「MUST NOT 提供教師關閉正確答案顯示之選項」——這頁沒有任何
- * 條件式隱藏，看到的就是全部。成績單的用途是讓學員知道自己錯在哪。
- *
- * ## 結果來自提交時的回應（router state）
- *
- * 提交的回應已經帶了完整明細，再打一次 API 只是多一次往返。直接以網址進入（重新整理、
- * 貼連結）時沒有 state——那屬「歷次作答回看」的範圍（#280），此處明確提示而不是留白。
+ * `spec_us6` FR-09 明訂「MUST NOT 提供教師關閉正確答案顯示之選項」。表格只給摘要，
+ * 完整題幹與逐選項對錯在[檢討視窗](./AnswerReviewDialog.tsx)——表格不顯示題目，未點開
+ * 之前不必看到。
  */
 export function EtQuizResultPage() {
   const navigate = useNavigate()
-  const result = (useLocation().state ?? null) as AttemptResult | null
+  const { attemptId: attemptIdParam } = useParams<{ attemptId: string }>()
+  const attemptId = Number(attemptIdParam)
+  const fromSubmit = (useLocation().state ?? null) as AttemptResult | null
+  const [reviewIndex, setReviewIndex] = useState<number | null>(null)
+  const needsFetch = fromSubmit === null && Number.isFinite(attemptId) && attemptId > 0
 
+  const { data, isPending, error } = useQuery({
+    queryKey: QUERY_KEYS.etQuiz.result(attemptId),
+    queryFn: () => attemptApi.result(attemptId),
+    enabled: needsFetch,
+    retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
+  })
+
+  const result = fromSubmit ?? data ?? null
+
+  // `enabled: false` 時 `isPending` 恆為 true，故轉圈的條件必須連 `needsFetch` 一起判——
+  // 否則網址代碼無效會停在一個永遠不會結束的轉圈上
+  if (needsFetch && isPending) {
+    return (
+      <Stack alignItems="center" sx={{ py: 6 }}>
+        <CircularProgress />
+      </Stack>
+    )
+  }
   if (result === null) {
     return (
       <Stack spacing={2}>
-        <Alert severity="info">
-          此頁顯示剛提交的成績。若要回看先前的作答紀錄，請自測驗引導頁進入「歷次作答紀錄」。
-        </Alert>
+        <Alert severity="error">{error ? toApiError(error).errorMessage : "查無此作答紀錄"}</Alert>
         <Box>
           <Button variant="outlined" onClick={() => navigate("/et/my-courses")}>
             回到我的課程
@@ -106,6 +141,9 @@ export function EtQuizResultPage() {
         <Typography variant="subtitle1" gutterBottom>
           答題明細
         </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          點任一列檢視該題的完整題目與選項。
+        </Typography>
         <TableContainer sx={{ overflowX: "auto" }}>
           <Table size="small">
             <TableHead>
@@ -116,13 +154,14 @@ export function EtQuizResultPage() {
                 <TableCell>正確答案</TableCell>
                 <TableCell>結果</TableCell>
                 <TableCell align="right">得分</TableCell>
+                <TableCell sx={{ width: 40 }} />
               </TableRow>
             </TableHead>
             <TableBody>
               {result.questions.map((question, i) => {
                 const outcome = OUTCOME_LABEL[question.outcome]
                 return (
-                  <TableRow key={question.question_id}>
+                  <TableRow key={question.question_id} hover sx={{ cursor: "pointer" }} onClick={() => setReviewIndex(i)}>
                     <TableCell>Q{i + 1}</TableCell>
                     <TableCell>{question.question_type === "MULTIPLE" ? "多選" : "單選"}</TableCell>
                     <TableCell>{optionText(question.options, (o) => o.selected)}</TableCell>
@@ -134,6 +173,22 @@ export function EtQuizResultPage() {
                     <TableCell align="right">
                       {question.score} / {question.points}
                     </TableCell>
+                    <TableCell>
+                      {/*
+                        整列可點是給滑鼠的；`<tr>` 本身不可聚焦，鍵盤使用者需要一個真的
+                        按鈕才進得去這個視窗。點它時不再冒泡觸發整列那一次。
+                      */}
+                      <IconButton
+                        size="small"
+                        aria-label={`檢視第 ${i + 1} 題`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setReviewIndex(i)
+                        }}
+                      >
+                        <ChevronRightIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
                 )
               })}
@@ -141,6 +196,15 @@ export function EtQuizResultPage() {
           </Table>
         </TableContainer>
       </Paper>
+
+      <AnswerReviewDialog
+        question={reviewIndex === null ? null : (result.questions[reviewIndex] ?? null)}
+        index={reviewIndex ?? 0}
+        total={result.questions.length}
+        onClose={() => setReviewIndex(null)}
+        onPrev={() => setReviewIndex((i) => Math.max(0, (i ?? 0) - 1))}
+        onNext={() => setReviewIndex((i) => Math.min(result.questions.length - 1, (i ?? 0) + 1))}
+      />
     </Stack>
   )
 }

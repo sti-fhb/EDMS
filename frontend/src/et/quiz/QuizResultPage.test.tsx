@@ -1,16 +1,24 @@
 import { screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { HttpResponse, http } from "msw"
 import { describe, expect, it, vi } from "vitest"
 
 import type { AttemptResult } from "./attemptSchemas"
 import { EtQuizResultPage } from "./QuizResultPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
+import { server } from "../../test/server"
 
 const navigate = vi.fn()
 let state: AttemptResult | null = null
 
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigate, useLocation: () => ({ state }) }
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+    useLocation: () => ({ state }),
+    useParams: () => ({ attemptId: "800" }),
+  }
 })
 
 const RESULT: AttemptResult = {
@@ -53,14 +61,76 @@ const RESULT: AttemptResult = {
 }
 
 describe("ET06 結果頁", () => {
+  it("表格本身不顯示題幹——題目在點開之後才出現", () => {
+    state = RESULT
+    renderWithProviders(<EtQuizResultPage />)
+
+    expect(screen.queryByText("採血前應先確認什麼？")).not.toBeInTheDocument()
+    expect(screen.queryByText("以下哪些必須檢查？")).not.toBeInTheDocument()
+  })
+
+  it("點某一列開啟檢討視窗，內含完整題目與全部選項", async () => {
+    // wireframe：「點任一列檢視題目與選項，複習檢討」
+    state = RESULT
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizResultPage />)
+
+    await user.click(screen.getByRole("row", { name: /Q2/ }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("以下哪些必須檢查？")
+    // 學員沒選「體溫」（正確答案），視窗中仍須看得到它
+    expect(dialog).toHaveTextContent("體溫")
+    expect(dialog).toHaveTextContent("視力")
+  })
+
+  it("選項以三種狀態標示：選對 / 選錯 / 漏選", async () => {
+    // 「你的答案 A,B ／ 正確答案 A,B,E」要讀者自己做集合減法；逐項標示才一眼看得出差在哪
+    state = RESULT
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizResultPage />)
+
+    await user.click(screen.getByRole("row", { name: /Q2/ }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("正確答案 ⚠ 你漏選") // 體溫：對但沒選
+    expect(dialog).toHaveTextContent("你的答案 ✗ 錯誤") // 視力：選了但錯
+    expect(dialog).not.toHaveTextContent("你的答案 ✓ 正確") // Q2 全錯，不該出現綠色標示
+  })
+
+  it("鍵盤使用者也進得去檢討視窗", async () => {
+    // `<tr>` 本身不可聚焦——整列可點只服務滑鼠，需要一顆真的按鈕
+    state = RESULT
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizResultPage />)
+
+    await user.click(screen.getByRole("button", { name: "檢視第 1 題" }))
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent("採血前應先確認什麼？")
+  })
+
+  it("檢討視窗可連續翻題，第一題無上一題、最後一題無下一題", async () => {
+    state = RESULT
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizResultPage />)
+
+    await user.click(screen.getByRole("row", { name: /Q1/ }))
+    expect(await screen.findByRole("dialog")).toHaveTextContent("採血前應先確認什麼？")
+    expect(screen.getByRole("button", { name: /上一題/ })).toBeDisabled()
+
+    await user.click(screen.getByRole("button", { name: /下一題/ }))
+    expect(screen.getByRole("dialog")).toHaveTextContent("以下哪些必須檢查？")
+    expect(screen.getByRole("button", { name: /下一題/ })).toBeDisabled()
+  })
+
   it("強制顯示正確答案（AC 11 / FR-09）", () => {
     // `spec_us6` FR-09：MUST NOT 提供教師關閉正確答案顯示之選項——這頁沒有任何條件式隱藏
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
 
-    const rows = screen.getAllByRole("row")
-    expect(rows[1]).toHaveTextContent("捐血人身分") // 你的答案 + 正確答案
-    expect(rows[2]).toHaveTextContent("體溫") // 學員沒選，仍須顯示正確答案
+    // 以內容定位而非索引——每題現在有兩個 `<TableRow>`（摘要 + 可展開區），索引會位移
+    expect(screen.getByRole("row", { name: /Q1/ })).toHaveTextContent("捐血人身分") // 你的答案 + 正確答案
+    expect(screen.getByRole("row", { name: /Q2/ })).toHaveTextContent("體溫") // 學員沒選，仍須顯示正確答案
   })
 
   it("未作答顯示「未作答」而非空白", () => {
@@ -112,10 +182,24 @@ describe("ET06 結果頁", () => {
     expect(navigate).toHaveBeenCalledWith("/et/quizzes/700")
   })
 
-  it("直接以網址進入（無結果）時給明確提示而非留白", () => {
+  it("直接以網址進入（重新整理 / 複習）時改由 API 取回成績", async () => {
+    // 這頁同時是引導頁「查看上次作答明細」的落點；沒有 router state 不能再是死路
     state = null
     renderWithProviders(<EtQuizResultPage />)
 
-    expect(screen.getByText(/此頁顯示剛提交的成績/)).toBeInTheDocument()
+    expect(await screen.findByText(/50\.00 \/ 100 分/)).toBeInTheDocument()
+    expect(screen.getByRole("row", { name: /Q1/ })).toBeInTheDocument()
+  })
+
+  it("查無該筆作答時顯示錯誤而非空白頁", async () => {
+    state = null
+    server.use(
+      http.get("/api/et/attempts/:attemptId/result", () =>
+        HttpResponse.json({ error_code: "ET_ATTEMPT_001", error_message: "查無此測驗" }, { status: 404 }),
+      ),
+    )
+    renderWithProviders(<EtQuizResultPage />)
+
+    expect(await screen.findByText("查無此測驗")).toBeInTheDocument()
   })
 })
