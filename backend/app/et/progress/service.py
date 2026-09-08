@@ -296,8 +296,8 @@ class EtProgressService:
         return locked_item_ids(
             [
                 [
-                    build_item_state(item_id, completed_ids=completed_ids)
-                    for item_id, _item_type in by_chapter.get(c.chapter_id, [])
+                    build_item_state(item_id, item_type, completed_ids=completed_ids)
+                    for item_id, item_type in by_chapter.get(c.chapter_id, [])
                 ]
                 for c in chapters
             ]

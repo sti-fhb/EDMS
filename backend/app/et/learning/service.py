@@ -156,7 +156,7 @@ class EtLearningService:
                     [
                         # 與寫入路徑的擋鎖判定（`progress/service._locked_ids`）共用同一支
                         # ——兩邊各組一份的話，分岔的表現是「側欄顯示解鎖但後端擋下」。
-                        build_item_state(item.item_id, completed_ids=completed_ids)
+                        build_item_state(item.item_id, item.item_type, completed_ids=completed_ids)
                         for item, _, _ in by_chapter.get(chapter_id, [])
                     ]
                     for chapter_id in chapters

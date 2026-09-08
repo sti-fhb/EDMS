@@ -263,8 +263,15 @@ class TestStartAttempt:
 
 
 class TestGrading:
-    async def test_單選答對得滿分並解鎖下一章(self, client, db) -> None:
-        """AC 8 + AC 12——閱卷、及格判定、回寫項目完成、下一章解鎖一整條鏈。"""
+    async def test_單選答對得滿分並回寫項目完成(self, client, db) -> None:
+        """AC 8：閱卷 → 及格判定 → 回寫 `ET_PROGRESS.IS_COMPLETED`。
+
+        ⚠️ **不驗「因此解鎖下一章」**——`spec_us5` AC 12（測驗未及格阻擋解鎖）依 #279
+        裁示 2 = C **尚未啟用**：`build_item_state` 目前仍讓測驗恆視為通過，因為
+        「重置重考次數」（US9）未實作，掛上門檻會讓次數用盡的學員永久鎖死且無從補救。
+
+        本測試因此只釘住「及格會寫進度」這件事——那是 `ET-9` 啟用門檻時的前提。
+        """
         teacher = await _user(db, "t_att06", ROLE_TEACHER)
         student = await _user(db, "s_att06")
         course = await _course_with_quiz(client, db, teacher, code="32000006", extra_chapter=True)
@@ -283,16 +290,15 @@ class TestGrading:
         assert float(r.json()["score"]) == 100.0
         assert r.json()["is_pass"] is True
         assert r.json()["status"] == ATTEMPT_SUBMITTED
-        # 及格 → 項目完成 → 第 2 章解鎖
         completed = await db.scalar(
             select(EtProgress.is_completed).where(
                 EtProgress.user_id == student, EtProgress.item_id == course["quiz_item_id"]
             )
         )
-        assert completed is True
+        assert completed is True, "及格須回寫項目完成（側欄的打勾與日後的解鎖門檻都靠它）"
         structure = await client.get(f"{_COURSES}/{course['course_id']}/learn", headers=h)
         items = {i["item_id"]: i for c in structure.json()["chapters"] for i in c["items"]}
-        assert items[course["next_item_id"]]["locked"] is False
+        assert items[course["quiz_item_id"]]["completed"] is True, "側欄應顯示已完成"
 
     async def test_多選部分計分依快照(self, client, db) -> None:
         """`spec_us6` 場景 14：應選 3、配分 100、答對 2、誤選 1 → `(2−1)÷3×100` = 33.33。"""
