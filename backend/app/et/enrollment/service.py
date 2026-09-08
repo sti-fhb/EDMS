@@ -29,6 +29,7 @@ from app.et.constants import (
 )
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.rules import (
+    derive_completion_status,
     ensure_course_joinable,
     ensure_not_removed,
     is_listed_in_my_courses,
@@ -88,7 +89,10 @@ class EtEnrollmentService:
                 course_id=course.course_id,
                 course_name=course.course_name,
                 status=course.status,
-                completion_status=enrollment.completion_status,
+                # #284：由 `progress` 即時導出，**不讀** `enrollment.completion_status`
+                # ——那個欄位只有加入課程時寫入的 `NOT_STARTED`，沒有任何路徑推進它，
+                # 讀它會讓下方 `_summarize` 的四項統計永遠顯示全部「未開始」。
+                completion_status=derive_completion_status(progress.get(course.course_id, 0)),
                 tags=tags.get(course.course_id, []),
                 chapter_count=chapters.get(course.course_id, 0),
                 open_start_at=course.open_start_at,
@@ -138,7 +142,7 @@ class EtEnrollmentService:
         if existing is not None:
             await self._guard_not_removed(db, existing.is_removed, user_id=operator.user_id, course_id=course.course_id)
             # 重複加入不重複寫入、也不報錯——AC 10 要的是「導向該課程」。
-            return _to_result(course, existing.completion_status)
+            return _to_result(course, await self._completion_status(db, operator.user_id, course.course_id))
 
         try:
             # SAVEPOINT：「查無既有列」與 INSERT 之間有空隙，雙擊「確認加入」或前端
@@ -158,12 +162,13 @@ class EtEnrollmentService:
                 )
         except IntegrityError:
             # 併發的另一個請求先寫成功了——結果與「已加入」完全相同，回既有列即可。
-            # 重查而非直接回預設值：另一端有可能寫的是別的 `COMPLETION_STATUS`。
+            # 仍須重查：要看那一列的 `IS_REMOVED`（併發的贏家有可能是一筆已被移除的
+            # 舊列被重新啟用），完課狀態則與上面同樣走即時計算。
             winner = await self._enrollments.get_enrollment(db, user_id=operator.user_id, course_id=course.course_id)
             if winner is None:
                 raise
             await self._guard_not_removed(db, winner.is_removed, user_id=operator.user_id, course_id=course.course_id)
-            return _to_result(course, winner.completion_status)
+            return _to_result(course, await self._completion_status(db, operator.user_id, course.course_id))
 
         await self._audit.log_action(
             db,
@@ -179,6 +184,16 @@ class EtEnrollmentService:
         return _to_result(course, COMPLETION_NOT_STARTED)
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _completion_status(self, db: AsyncSession, user_id: str, course_id: int) -> str:
+        """單一課程之完課狀態（即時計算，#284）。
+
+        只在「已加入過」的回應路徑用得到——新加入者必然是 `NOT_STARTED`，不必為此
+        多查一次。`my_courses` 走的是批次版（`completion_pct_by_course` 一次算完所有
+        課程），不共用此函式，否則那一頁會退回 N+1。
+        """
+        pct = await self._progress.completion_pct_by_course(db, user_id=user_id, course_ids=[course_id])
+        return derive_completion_status(pct.get(course_id, 0))
 
     async def _guard_not_removed(self, db: AsyncSession, is_removed: bool, *, user_id: str, course_id: int) -> None:
         """擋下被移除者的重新加入，並**留下稽核紀錄**。

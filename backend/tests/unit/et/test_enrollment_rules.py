@@ -5,9 +5,17 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.core.exceptions import AppError
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.constants import (
+    COMPLETION_COMPLETED,
+    COMPLETION_IN_PROGRESS,
+    COMPLETION_NOT_STARTED,
+    COURSE_CLOSED,
+    COURSE_DRAFT,
+    COURSE_PUBLISHED,
+)
 from app.et.enrollment.rules import (
     INVITATION_CODE_LENGTH,
+    derive_completion_status,
     ensure_course_joinable,
     ensure_not_removed,
     is_listed_in_my_courses,
@@ -130,3 +138,30 @@ class TestIsListedInMyCourses:
         `open_start_at` 不影響結果：課程能被關閉必然已經發布並開放過。
         """
         assert is_listed_in_my_courses(status=COURSE_CLOSED, open_start_at=open_start_at, now=_NOW)
+
+
+class TestDeriveCompletionStatus:
+    """完課三態由學習進度百分比導出（#284 前置：#274 遺漏之修正）。
+
+    `data-model` §ET_ENROLLMENT 對 `COMPLETION_STATUS` 的說明是「**即時計算**」，
+    而在此之前該欄只有加入課程時寫入的 `NOT_STARTED`，沒有任何路徑推進它。
+    """
+
+    def test_零進度為未開始(self) -> None:
+        assert derive_completion_status(0) == COMPLETION_NOT_STARTED
+
+    def test_百分之百為已完成(self) -> None:
+        assert derive_completion_status(100) == COMPLETION_COMPLETED
+
+    @pytest.mark.parametrize("pct", [1, 50, 99])
+    def test_中間值為進行中(self, pct: int) -> None:
+        assert derive_completion_status(pct) == COMPLETION_IN_PROGRESS
+
+    def test_零項目課程視為未開始而非已完成(self) -> None:
+        """`completion_pct_by_course` 對沒有任何項目的課程回 `0`。
+
+        按「所有項目皆完成」的字面定義，空課程是 vacuous truth（該算完課），但那會
+        讓學員剛加入就看到課後問卷入口。取 0% 與側欄進度條顯示的數字一致——且發布
+        檢核強制 ≥1 章節 + ≥1 教材，已發布課程不會真的走到這裡。
+        """
+        assert derive_completion_status(0) == COMPLETION_NOT_STARTED

@@ -17,7 +17,13 @@ from datetime import datetime
 from typing import Final
 
 from app.core.exceptions import AppError
-from app.et.constants import COURSE_CLOSED, COURSE_PUBLISHED
+from app.et.constants import (
+    COMPLETION_COMPLETED,
+    COMPLETION_IN_PROGRESS,
+    COMPLETION_NOT_STARTED,
+    COURSE_CLOSED,
+    COURSE_PUBLISHED,
+)
 from app.et.course.publish_rules import is_visible_to_student
 
 #: 邀請碼長度（`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)`）。
@@ -85,6 +91,46 @@ def ensure_not_removed(*, is_removed: bool) -> None:
             detail="您已被移除出此課程，如需重新加入請聯繫教師",
             error_code="ET_ENROLL_003",
         )
+
+
+def derive_completion_status(progress_pct: int) -> str:
+    """由學習進度百分比導出完課三態（`data-model` §ET_ENROLLMENT：「**即時計算**」）。
+
+    | `progress_pct` | 三態 |
+    |---|---|
+    | `0` | `NOT_STARTED` |
+    | `1`–`99` | `IN_PROGRESS` |
+    | `100` | `COMPLETED` |
+
+    ## 為何即時計算而不維護儲存欄位
+
+    `ET_ENROLLMENT.COMPLETION_STATUS` 在 #284 之前**只有加入課程時寫入的
+    `NOT_STARTED`**，沒有任何路徑推進它——於是「我的課程」上方的四項統計永遠顯示
+    全部「未開始」。#274 的 issue body 寫了要做完課判定，但那句話不在它的 15 條 AC
+    內，所以 AC 逐條盤點與收尾摘要都沒抓到。
+
+    補法有兩條，選了即時計算（#284 SA Q2 裁示 A）：進度變動的入口有**三個**
+    （`progress` 的區段上報、`items/{id}/viewed`、`attempt` 的提交），維護儲存值就得
+    在三處同步更新，漏掉任一個就產生「查詢查得到的」與「頁面看到的」不一致——而那
+    正是 `data-model` 選「即時計算」要避開的問題。
+
+    ⚠️ **`COMPLETION_STATUS` 與 `COMPLETED_AT` 兩個儲存欄位自此永遠停在初始值**
+    （裁示 A：留著標記不使用、不加 migration）。日後 `ET-9`（完課率）、`ET-16`
+    （週報）、`ET-16` 之線下核可前提檢核（`data-model` §ET_APPROVAL 明寫「僅當
+    `COMPLETION_STATUS = COMPLETED` 時可寫入核可」）一律**不得讀那兩個欄位**——
+    直接 `WHERE COMPLETION_STATUS = 'COMPLETED'` 會得到零筆，而且不會報錯。
+
+    Args:
+        progress_pct: 完成項目數 ÷ 總項目數（見
+            `progress.repository.completion_pct_by_course`）。沒有任何項目的課程回
+            `0` 而非 100——空課程按字面定義是 vacuous truth，但那會讓學員剛加入就看到
+            課後問卷入口；且發布檢核強制 ≥1 章節 + ≥1 教材，已發布課程走不到那裡。
+    """
+    if progress_pct >= 100:
+        return COMPLETION_COMPLETED
+    if progress_pct <= 0:
+        return COMPLETION_NOT_STARTED
+    return COMPLETION_IN_PROGRESS
 
 
 def is_listed_in_my_courses(*, status: str, open_start_at: datetime | None, now: datetime) -> bool:
