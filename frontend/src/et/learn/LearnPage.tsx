@@ -31,7 +31,7 @@ import { toApiError } from "../../services/http"
  * | AC 3 定位至上次觀看位置 | ✅ #274（`last_item_id` + 影片內 `last_position_sec`）|
  * | AC 8–11 解鎖阻擋 | ✅ #274 |
  * | AC 12 測驗未及格阻擋 | ⛔ `ET-6` 未實作——測驗恆視為通過，不擋住後續 |
- * | AC 18–21 課後問卷入口 | ⛔ `ET-15` 未實作 | 不顯示 |
+ * | AC 18–21 課後問卷入口 | ✅ #284（側欄底部，狀態由後端導出）|
  *
  * ## 課程關閉
  *
@@ -173,6 +173,8 @@ export function EtLearnPage() {
             activeItemId={active?.item_id ?? null}
             onSelect={handleSelect}
             showProgress={!data.is_owner}
+            survey={data.survey}
+            onSurveyClick={() => navigate(`/et/courses/${courseId}/survey`)}
           />
         </Grid>
         <Grid size={{ xs: 12, md: 9 }}>

@@ -1,10 +1,14 @@
 import ArrowRightCircleIcon from "@mui/icons-material/ArrowCircleRight"
+import AssignmentIcon from "@mui/icons-material/Assignment"
+import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn"
 import CheckCircleIcon from "@mui/icons-material/CheckCircle"
 import DescriptionIcon from "@mui/icons-material/Description"
 import LockIcon from "@mui/icons-material/Lock"
 import QuizIcon from "@mui/icons-material/Quiz"
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked"
 import Box from "@mui/material/Box"
+import Button from "@mui/material/Button"
+import Divider from "@mui/material/Divider"
 import LinearProgress from "@mui/material/LinearProgress"
 import List from "@mui/material/List"
 import ListItemButton from "@mui/material/ListItemButton"
@@ -16,6 +20,8 @@ import Typography from "@mui/material/Typography"
 
 import { itemDisplayState } from "./learnSchemas"
 import type { ChapterNode, ItemNode } from "./learnSchemas"
+import type { SurveyEntry } from "../survey/surveyFillSchemas"
+import { formatDateTime } from "../../utils/date"
 
 interface Props {
   chapters: ChapterNode[]
@@ -29,6 +35,13 @@ interface Props {
    * （前端拿到的 `is_owner` 分不出這兩種情形）。純屬顯示上的缺漏，完成 / 解鎖判定不受影響。
    */
   showProgress: boolean
+  /**
+   * 課後問卷入口狀態（#284）。`null`（該課程沒有問卷）或 `HIDDEN`（未完課 / 問卷停用）
+   * 時**整塊不渲染**，連分隔線都不留——留一塊空的區域會讓學員以為那裡有東西還沒載入。
+   */
+  survey: SurveyEntry | null
+  /** 點擊入口（前往問卷頁）。 */
+  onSurveyClick: () => void
 }
 
 /**
@@ -46,10 +59,13 @@ interface Props {
  * 故一律可點、由 `onSelect` 那端判斷 `locked` 決定提示或切換；視覺上仍以 `aria-disabled`
  * 與淡化表達不可用。
  *
- * ⚠️ wireframe 的側欄底部另有「填寫課後問卷」入口——**本 issue 不做**（`ET-15` 未實作，
- * 且顯示條件需完課判定）。照抄會做出一顆永遠不會動作的按鈕。
+ * ## 側欄底部的課後問卷入口（#284）
+ *
+ * 顯示條件由後端導出（`survey.state`），前端不自行從進度推導——「完課」的定義是
+ * 「所有未刪除項目皆完成」，在此重算一次遲早會與後端的閘門分歧，而分歧的表現是
+ * 「入口出現了但送出被擋」。
  */
-export function ChapterNav({ chapters, activeItemId, onSelect, showProgress }: Props) {
+export function ChapterNav({ chapters, activeItemId, onSelect, showProgress, survey, onSurveyClick }: Props) {
   if (chapters.length === 0) {
     return (
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -108,7 +124,37 @@ export function ChapterNav({ chapters, activeItemId, onSelect, showProgress }: P
           </li>
         ))}
       </List>
+      <SurveyEntryBlock survey={survey} onClick={onSurveyClick} />
     </Paper>
+  )
+}
+
+/** 側欄底部之課後問卷入口（AC 1 / AC 2 / AC 10 / AC 11）。 */
+function SurveyEntryBlock({ survey, onClick }: { survey: SurveyEntry | null; onClick: () => void }) {
+  if (survey === null || survey.state === "HIDDEN") return null
+
+  const submitted = survey.state === "SUBMITTED"
+  return (
+    <>
+      <Divider />
+      <Box sx={{ p: 2 }}>
+        <Button
+          variant="outlined"
+          color="success"
+          size="small"
+          fullWidth
+          startIcon={submitted ? <AssignmentTurnedInIcon /> : <AssignmentIcon />}
+          onClick={onClick}
+        >
+          {submitted ? "查看我的填答" : "填寫課後問卷"}
+        </Button>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          {submitted
+            ? `已於 ${formatDateTime(survey.submitted_at)} 送出`
+            : "具名、一人一次，送出後不可修改"}
+        </Typography>
+      </Box>
+    </>
   )
 }
 

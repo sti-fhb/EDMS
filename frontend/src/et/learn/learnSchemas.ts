@@ -1,5 +1,7 @@
 /** ET05 章節學習型別（對齊後端 `app/et/learning/schemas.py`）。 */
 
+import type { SurveyEntry } from "../survey/surveyFillSchemas"
+
 /** 章節項目類型（對齊後端 `ET_ITEM_TYPE`）。 */
 export type ItemType = "MATERIAL" | "QUIZ"
 
@@ -43,6 +45,14 @@ export interface LearnStructure {
    * 影片內的秒數是另一半，在 `MaterialVideoRow.last_position_sec`。
    */
   last_item_id: number | null
+  /**
+   * 課後問卷入口狀態（#284）。**null = 該課程沒有問卷**（問卷為選配，US3 AC 23），
+   * 此時側欄整塊不渲染。
+   *
+   * 隨本回應一併回傳而非另開端點：側欄必須在第一次繪製就決定「渲染入口 / 不渲染」，
+   * 二次請求會造成可見的跳動。
+   */
+  survey: SurveyEntry | null
   chapters: ChapterNode[]
 }
 
