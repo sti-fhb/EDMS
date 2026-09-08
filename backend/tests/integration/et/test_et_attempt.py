@@ -657,6 +657,9 @@ class TestReviewLastAttempt:
         assert body["is_pass"] == submitted["is_pass"]
         assert body["points_total"] == submitted["points_total"]
         assert body["questions"] == submitted["questions"], "複習看到的明細與提交當下不一致"
+        # 結果頁靠它導回學習頁——重考入口（測驗面板）在那裡，測驗已無獨立引導頁
+        assert body["course_id"] == course["course_id"]
+        assert submitted["course_id"] == course["course_id"]
 
     async def test_進行中的作答沒有成績可看(self, client, db) -> None:
         """未提交 → 404，與「不存在」「非本人」共用同一回應，不讓差異變成存在性 oracle。"""

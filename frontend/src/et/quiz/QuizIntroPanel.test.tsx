@@ -4,14 +4,14 @@ import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { QuizIntro } from "./attemptSchemas"
-import { EtQuizIntroPage } from "./QuizIntroPage"
+import { QuizIntroPanel } from "./QuizIntroPanel"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigate, useParams: () => ({ quizId: "700" }) }
+  return { ...actual, useNavigate: () => navigate }
 })
 
 const BASE: QuizIntro = {
@@ -37,10 +37,10 @@ function mockIntro(overrides: Partial<QuizIntro>) {
 
 beforeEach(() => navigate.mockReset())
 
-describe("ET06 測驗引導頁", () => {
+describe("ET06 測驗資訊面板", () => {
   it("顯示題數、作答時間、及格分數、剩餘次數（AC 1）", async () => {
     mockIntro({})
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     expect(await screen.findByText("基本概念測驗")).toBeInTheDocument()
     expect(screen.getByText("題數")).toBeInTheDocument()
@@ -52,7 +52,7 @@ describe("ET06 測驗引導頁", () => {
   it("不限時顯示「不限時」而非 0 分（AC 2）", async () => {
     // `null` 當成 0 會讓學員以為一進去就結束
     mockIntro({ time_limit_min: null })
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     expect(await screen.findByText("不限時")).toBeInTheDocument()
     expect(screen.queryByText("0")).not.toBeInTheDocument()
@@ -60,7 +60,7 @@ describe("ET06 測驗引導頁", () => {
 
   it("次數用盡時禁用按鈕並提示（ET-MSG-ET06-001）", async () => {
     mockIntro({ can_start: false, remaining_attempts: 0 })
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     expect(await screen.findByText("重考次數已用完，請聯繫教師重置")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /開始作答/ })).toBeDisabled()
@@ -68,7 +68,7 @@ describe("ET06 測驗引導頁", () => {
 
   it("從未作答時不顯示「查看上次作答明細」", async () => {
     mockIntro({ last_attempt_id: null })
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     await screen.findByRole("button", { name: /開始作答/ })
     expect(screen.queryByRole("button", { name: /查看上次作答明細/ })).not.toBeInTheDocument()
@@ -77,7 +77,7 @@ describe("ET06 測驗引導頁", () => {
   it("有作答紀錄時可查看上次作答明細", async () => {
     mockIntro({ last_attempt_id: 800, last_score: "50.00", best_score: "50.00" })
     const user = userEvent.setup()
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     await user.click(await screen.findByRole("button", { name: /查看上次作答明細/ }))
 
@@ -87,7 +87,7 @@ describe("ET06 測驗引導頁", () => {
   it("次數用盡仍可查看上次作答明細（複習）", async () => {
     // 次數用完的學員正是最需要回頭看錯在哪的人；把複習跟著作答一起關掉等於懲罰他考不好
     mockIntro({ can_start: false, remaining_attempts: 0, last_attempt_id: 800 })
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     expect(await screen.findByRole("button", { name: /查看上次作答明細/ })).toBeEnabled()
     expect(screen.getByRole("button", { name: /開始作答/ })).toBeDisabled()
@@ -95,7 +95,7 @@ describe("ET06 測驗引導頁", () => {
 
   it("有未完成的作答時按鈕改為「繼續作答」", async () => {
     mockIntro({ in_progress_attempt_id: 800 })
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     expect(await screen.findByRole("button", { name: /繼續作答/ })).toBeInTheDocument()
   })
@@ -103,7 +103,7 @@ describe("ET06 測驗引導頁", () => {
   it("同時顯示最近一次與最高分", async () => {
     // 只給最近一次會讓重考後考差的學員以為自己退步了；只給最高分則看不出本次表現
     mockIntro({ last_score: "60.00", best_score: "85.00", is_passed: true })
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     const alert = await screen.findByText(/最近一次成績/)
     expect(alert).toHaveTextContent("60.00")
@@ -113,7 +113,7 @@ describe("ET06 測驗引導頁", () => {
   it("點開始作答後導向答題頁", async () => {
     mockIntro({})
     const user = userEvent.setup()
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     await user.click(await screen.findByRole("button", { name: /開始作答/ }))
 
@@ -131,7 +131,7 @@ describe("ET06 測驗引導頁", () => {
       ),
     )
     const user = userEvent.setup()
-    renderWithProviders(<EtQuizIntroPage />)
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     await user.click(await screen.findByRole("button", { name: /開始作答/ }))
 

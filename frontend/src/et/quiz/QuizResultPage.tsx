@@ -122,17 +122,18 @@ export function EtQuizResultPage() {
         )}
 
         <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
-          {canRetry && (
-            <Button
-              variant="contained"
-              startIcon={<ReplayIcon />}
-              onClick={() => navigate(`/et/quizzes/${result.quiz_id}`)}
-            >
-              重新作答
-            </Button>
-          )}
-          <Button variant="outlined" onClick={() => navigate("/et/my-courses")}>
-            回到我的課程
+          {/*
+            **只留這一顆**。重考的入口只有一個：學習頁的測驗面板——從這裡直接開新的
+            attempt 會少掉作答注意事項，而且誤觸就吃掉一次次數。學習頁會依 `LAST_ITEM_ID`
+            自動落回該測驗項目，所以回去就看得到「開始作答」；要去別的課程，那頁的返回
+            路徑本來就通到我的課程，不必在這裡再開一條。
+          */}
+          <Button
+            variant="contained"
+            startIcon={canRetry ? <ReplayIcon /> : undefined}
+            onClick={() => navigate(`/et/courses/${result.course_id}/learn`)}
+          >
+            {canRetry ? "回課程重新作答" : "返回課程"}
           </Button>
         </Stack>
       </Paper>
@@ -200,10 +201,7 @@ export function EtQuizResultPage() {
       <AnswerReviewDialog
         question={reviewIndex === null ? null : (result.questions[reviewIndex] ?? null)}
         index={reviewIndex ?? 0}
-        total={result.questions.length}
         onClose={() => setReviewIndex(null)}
-        onPrev={() => setReviewIndex((i) => Math.max(0, (i ?? 0) - 1))}
-        onNext={() => setReviewIndex((i) => Math.min(result.questions.length - 1, (i ?? 0) + 1))}
       />
     </Stack>
   )

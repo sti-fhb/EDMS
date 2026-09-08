@@ -81,17 +81,22 @@ describe("ET05 章節學習頁", () => {
     expect(await screen.findByText("採血流程概論教材")).toBeInTheDocument()
   })
 
-  it("測驗項目點「開始測驗」導向引導頁（AC 10）", async () => {
-    // `ET-6a`（#279）交付前這裡是「顯示入口但只給提示」——因為導到不存在的路由會給
-    // 學員白畫面，看起來像壞掉而不像還沒做。現在路由存在了，改為真的導過去。
+  it("測驗項目就地顯示測驗資訊，可直接開始作答（AC 10）", async () => {
+    // 影片與文件都是點了就看得到內容；測驗沒有理由先給一顆按鈕、按了才跳到另一頁看
+    // 題數與及格分數。原本的 `/et/quizzes/:quizId` 引導頁已移除。
     mockStructure({})
     const user = userEvent.setup()
     renderWithProviders(<EtLearnPage />)
 
     await user.click(await screen.findByText("基本概念測驗"))
-    await user.click(await screen.findByRole("button", { name: "開始測驗" }))
 
-    expect(navigate).toHaveBeenCalledWith("/et/quizzes/2000")
+    // 資訊直接出現在內容區，不需要再跳一頁
+    expect(await screen.findByText("題數")).toBeInTheDocument()
+    expect(screen.getByText("及格分數")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /開始作答/ }))
+
+    expect(navigate).toHaveBeenCalledWith("/et/attempts/800")
   })
 
   it("課程已關閉時顯示唯讀提示，且內容照常呈現（AC 23 / 裁示 Q2=A）", async () => {
@@ -138,7 +143,7 @@ describe("ET05 章節學習頁", () => {
       mockStructure({ last_item_id: 101 })
       renderWithProviders(<EtLearnPage />)
 
-      expect(await screen.findByRole("button", { name: "開始測驗" })).toBeInTheDocument()
+      expect(await screen.findByRole("button", { name: /開始作答/ })).toBeInTheDocument()
     })
 
     it("鎖定項目點擊時擋下並提示（AC 6 / ET-MSG-ET05-001）", async () => {
@@ -150,8 +155,8 @@ describe("ET05 章節學習頁", () => {
 
       // **提示而非靜默無反應**——學員需要知道為什麼點不動
       expect(await screen.findByText("請先完成本章節之影片學習")).toBeInTheDocument()
-      // 內容區沒有切過去（測驗入口不該出現）
-      expect(screen.queryByRole("button", { name: "開始測驗" })).not.toBeInTheDocument()
+      // 內容區沒有切過去（測驗面板不該出現）
+      expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
 
     it("側欄顯示課程進度（完成項目數 ÷ 總項目數）", async () => {

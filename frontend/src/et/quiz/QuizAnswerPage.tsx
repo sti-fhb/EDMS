@@ -132,13 +132,13 @@ export function EtQuizAnswerPage() {
   if (error) return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
   if (data.status !== "IN_PROGRESS") {
     // 已提交後用上一頁回到本頁——不要讓學員對著一份已經交出去的考卷繼續作答，
-    // 那會一路寫到按提交才收到 409。
+    // 那會一路寫到按提交才收到 409。導向這次的成績，那才是他回來想找的東西。
     return (
       <Alert
         severity="info"
         action={
-          <Button size="small" onClick={() => navigate(`/et/quizzes/${data.quiz_id}`)}>
-            回測驗頁
+          <Button size="small" onClick={() => navigate(`/et/attempts/${attemptId}/result`)}>
+            查看成績
           </Button>
         }
       >

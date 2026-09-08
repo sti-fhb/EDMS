@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { describe, expect, it, vi } from "vitest"
@@ -24,6 +24,7 @@ vi.mock("react-router-dom", async (orig) => {
 const RESULT: AttemptResult = {
   attempt_id: 800,
   quiz_id: 700,
+  course_id: 7,
   attempt_no: 1,
   status: "SUBMITTED",
   score: "50.00",
@@ -92,10 +93,25 @@ describe("ET06 結果頁", () => {
 
     await user.click(screen.getByRole("row", { name: /Q2/ }))
 
+    // 狀態由 icon 承載（色條單獨存在對色覺障礙者不可靠），以 icon 的 aria-label 驗
     const dialog = await screen.findByRole("dialog")
-    expect(dialog).toHaveTextContent("正確答案 ⚠ 你漏選") // 體溫：對但沒選
-    expect(dialog).toHaveTextContent("你的答案 ✗ 錯誤") // 視力：選了但錯
-    expect(dialog).not.toHaveTextContent("你的答案 ✓ 正確") // Q2 全錯，不該出現綠色標示
+    expect(within(dialog).getByLabelText("漏選")).toBeInTheDocument() // 體溫：對但沒選
+    expect(within(dialog).getByLabelText("選錯")).toBeInTheDocument() // 視力：選了但錯
+    expect(within(dialog).queryByLabelText("答對")).not.toBeInTheDocument() // Q2 全錯
+  })
+
+  it("沒有文字標籤時仍給得出圖例", async () => {
+    // ⚠ 的語意是「漏選」不是「警告」——icon 不自明，拿掉標籤就必須有圖例
+    state = RESULT
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizResultPage />)
+
+    await user.click(screen.getByRole("row", { name: /Q1/ }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("答對")
+    expect(dialog).toHaveTextContent("選錯")
+    expect(dialog).toHaveTextContent("漏選")
   })
 
   it("鍵盤使用者也進得去檢討視窗", async () => {
@@ -109,18 +125,18 @@ describe("ET06 結果頁", () => {
     expect(await screen.findByRole("dialog")).toHaveTextContent("採血前應先確認什麼？")
   })
 
-  it("檢討視窗可連續翻題，第一題無上一題、最後一題無下一題", async () => {
+  it("檢討視窗顯示本題得分，且不重複列出你的答案／正確答案", async () => {
+    // 逐項標示就是為了取代那兩串文字；兩個都留著等於同一件事講兩遍
     state = RESULT
     const user = userEvent.setup()
     renderWithProviders(<EtQuizResultPage />)
 
-    await user.click(screen.getByRole("row", { name: /Q1/ }))
-    expect(await screen.findByRole("dialog")).toHaveTextContent("採血前應先確認什麼？")
-    expect(screen.getByRole("button", { name: /上一題/ })).toBeDisabled()
+    await user.click(screen.getByRole("row", { name: /Q2/ }))
 
-    await user.click(screen.getByRole("button", { name: /下一題/ }))
-    expect(screen.getByRole("dialog")).toHaveTextContent("以下哪些必須檢查？")
-    expect(screen.getByRole("button", { name: /下一題/ })).toBeDisabled()
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("本題得分 0.00 / 50")
+    expect(dialog).not.toHaveTextContent("你的答案：")
+    expect(dialog).not.toHaveTextContent("正確答案：")
   })
 
   it("強制顯示正確答案（AC 11 / FR-09）", () => {
@@ -128,7 +144,7 @@ describe("ET06 結果頁", () => {
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
 
-    // 以內容定位而非索引——每題現在有兩個 `<TableRow>`（摘要 + 可展開區），索引會位移
+    // 表格摘要就給正確答案，不必點開視窗才看得到
     expect(screen.getByRole("row", { name: /Q1/ })).toHaveTextContent("捐血人身分") // 你的答案 + 正確答案
     expect(screen.getByRole("row", { name: /Q2/ })).toHaveTextContent("體溫") // 學員沒選，仍須顯示正確答案
   })
@@ -141,22 +157,31 @@ describe("ET06 結果頁", () => {
     expect(screen.getByRole("row", { name: /Q2/ })).toHaveTextContent("視力")
   })
 
-  it("未及格且有剩餘次數時顯示重新作答（ET-MSG-ET06-004）", () => {
+  it("未及格且有剩餘次數時提示可重考（ET-MSG-ET06-004）", () => {
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
 
     expect(screen.getByText("未達及格分數，您仍有重考機會")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /重新作答/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /回課程重新作答/ })).toBeInTheDocument()
   })
 
-  it("未及格但次數用盡時不顯示重新作答", () => {
+  it("未及格但次數用盡時不提重考", () => {
     state = { ...RESULT, remaining_attempts: 0 }
     renderWithProviders(<EtQuizResultPage />)
 
-    expect(screen.queryByRole("button", { name: /重新作答/ })).not.toBeInTheDocument()
+    expect(screen.queryByText("未達及格分數，您仍有重考機會")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "返回課程" })).toBeInTheDocument()
   })
 
-  it("及格時不顯示重新作答", () => {
+  it("成績區只給一個去處——返回課程", () => {
+    // 兩顆意思相近的返回鍵（返回課程 / 回到我的課程）只是讓人多想一次該按哪個
+    state = RESULT
+    renderWithProviders(<EtQuizResultPage />)
+
+    expect(screen.queryByRole("button", { name: /回到我的課程/ })).not.toBeInTheDocument()
+  })
+
+  it("及格時不提重考", () => {
     state = { ...RESULT, is_pass: true, score: "100.00" }
     renderWithProviders(<EtQuizResultPage />)
 
@@ -172,14 +197,14 @@ describe("ET06 結果頁", () => {
     expect(screen.getByText(/作答時間到，已自動提交/)).toBeInTheDocument()
   })
 
-  it("重新作答導回該測驗的引導頁而非 attempt", () => {
-    // `attempt_id` 與 `quiz_id` 是兩個獨立序列，用前者推後者會導到錯的測驗
+  it("重考導回該課程的學習頁——重考入口只有測驗面板一個", () => {
+    // 從結果頁直接開新 attempt 會跳過作答注意事項，且誤觸就吃掉一次次數
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
 
-    screen.getByRole("button", { name: /重新作答/ }).click()
+    screen.getByRole("button", { name: /回課程重新作答/ }).click()
 
-    expect(navigate).toHaveBeenCalledWith("/et/quizzes/700")
+    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn")
   })
 
   it("直接以網址進入（重新整理 / 複習）時改由 API 取回成績", async () => {

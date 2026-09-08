@@ -62,8 +62,10 @@ export interface QuestionResult {
 
 export interface AttemptResult {
   attempt_id: number
-  /** 供「重新作答」導回引導頁——`attempt_id` 與 `quiz_id` 是兩個獨立的序列，不可互推。 */
+  /** `attempt_id` 與 `quiz_id` 是兩個獨立的序列，不可互推。 */
   quiz_id: number
+  /** 供導回該課程的學習頁——重考的入口（測驗面板）在那裡。 */
+  course_id: number
   attempt_no: number
   status: "SUBMITTED" | "TIMEOUT"
   score: string

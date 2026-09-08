@@ -108,9 +108,12 @@ class AttemptResult(BaseModel):
     """提交後的閱卷結果（AC 7）。"""
 
     attempt_id: int
-    #: 供結果頁的「重新作答」導回引導頁。少了它前端只能從 `attempt_id` 猜，而那會導到
-    #: 錯的測驗——`attempt_id` 與 `quiz_id` 是兩個獨立的序列。
+    #: 這次作答屬於哪個測驗。少了它前端只能從 `attempt_id` 猜，而那會導到錯的測驗——
+    #: `attempt_id` 與 `quiz_id` 是兩個獨立的序列。
     quiz_id: int
+    #: 供結果頁導回該課程的學習頁（測驗資訊與「開始作答」都在那裡的側欄項目內）。
+    #: 學習頁會依 `LAST_ITEM_ID` 自動落回該測驗項目，故不需要再帶 `item_id`。
+    course_id: int
     attempt_no: int
     status: str
     score: Decimal

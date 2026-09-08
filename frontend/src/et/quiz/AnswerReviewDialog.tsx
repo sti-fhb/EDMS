@@ -1,9 +1,9 @@
+import type { SvgIconComponent } from "@mui/icons-material"
 import CancelIcon from "@mui/icons-material/Cancel"
 import CheckCircleIcon from "@mui/icons-material/CheckCircle"
 import CloseIcon from "@mui/icons-material/Close"
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked"
 import WarningAmberIcon from "@mui/icons-material/WarningAmber"
-import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import Dialog from "@mui/material/Dialog"
@@ -11,17 +11,16 @@ import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
 import IconButton from "@mui/material/IconButton"
-import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
 import type { OptionResult, QuestionResult } from "./attemptSchemas"
 
 /**
- * 選項的四種狀態——**顏色是這個視窗的主要資訊**。
+ * 選項的四種狀態。
  *
  * 「你的答案 A, B, C ／ 正確答案 A, B, C, E」這種兩串文字要讀者自己做集合減法才知道
- * 差在哪；逐項上色則一眼看得出「哪個選對了、哪個選錯了、哪個漏了」。
+ * 差在哪；逐項標示則一眼看得出「哪個選對了、哪個選錯了、哪個漏了」。
  */
 type OptionState = "correct" | "wrong" | "missed" | "neutral"
 
@@ -32,49 +31,29 @@ function optionState(option: OptionResult): OptionState {
   return "neutral"
 }
 
-const STATE_STYLE: Record<
-  OptionState,
-  { bg: string; border: string; icon: typeof CheckCircleIcon; iconColor: "success" | "error" | "warning" | "disabled"; badge?: { text: string; color: "success" | "error" | "warning" } }
-> = {
-  correct: {
-    bg: "success.light",
-    border: "success.main",
-    icon: CheckCircleIcon,
-    iconColor: "success",
-    badge: { text: "你的答案 ✓ 正確", color: "success" },
-  },
-  wrong: {
-    bg: "error.light",
-    border: "error.main",
-    icon: CancelIcon,
-    iconColor: "error",
-    badge: { text: "你的答案 ✗ 錯誤", color: "error" },
-  },
-  missed: {
-    bg: "warning.light",
-    border: "warning.main",
-    icon: WarningAmberIcon,
-    iconColor: "warning",
-    badge: { text: "正確答案 ⚠ 你漏選", color: "warning" },
-  },
-  neutral: { bg: "transparent", border: "divider", icon: RadioButtonUncheckedIcon, iconColor: "disabled" },
+interface StateStyle {
+  color: string
+  icon: SvgIconComponent
+  /** 圖例用的說明；選項列上**不重複顯示**。 */
+  legend: string
 }
+
+const STATE_STYLE: Record<OptionState, StateStyle> = {
+  correct: { color: "success.main", icon: CheckCircleIcon, legend: "答對" },
+  wrong: { color: "error.main", icon: CancelIcon, legend: "選錯" },
+  missed: { color: "warning.main", icon: WarningAmberIcon, legend: "漏選" },
+  neutral: { color: "text.disabled", icon: RadioButtonUncheckedIcon, legend: "未選且非答案" },
+}
+
+/** 圖例的三種狀態；`neutral` 不入列——沒選也不是答案，本來就不需要解釋。 */
+const LEGEND: OptionState[] = ["correct", "wrong", "missed"]
 
 interface Props {
   /** `null` = 不開啟。 */
   question: QuestionResult | null
-  /** 題號（1 起算），供標題與導覽顯示。 */
+  /** 題號（0 起算），供標題顯示。 */
   index: number
-  total: number
   onClose: () => void
-  onPrev: () => void
-  onNext: () => void
-}
-
-/** 逗號分隔的選項文字；空選擇顯示「未作答」而非空白（空白看起來像壞掉）。 */
-function joinOptions(options: OptionResult[], predicate: (o: OptionResult) => boolean) {
-  const picked = options.filter(predicate).map((o) => o.text)
-  return picked.length > 0 ? picked.join("、") : "未作答"
 }
 
 /**
@@ -83,24 +62,31 @@ function joinOptions(options: OptionResult[], predicate: (o: OptionResult) => bo
  * ## 為何是彈出視窗而不是列內展開
  *
  * 題幹上限 500 字、選項至多 6 個——展開在表格內會把整列撐到佔滿畫面，而且相鄰題目的
- * 對照關係全被推開。獨立視窗給得起完整篇幅，也讓「上一題 / 下一題」的連續檢討成立：
- * 那是複習時真正在做的動作，而在表格裡它等於反覆展開收合。
+ * 對照關係全被推開。獨立視窗給得起完整篇幅。表格因此**不顯示題幹**。
  *
- * 表格因此**不顯示題幹**——摘要就該是摘要，題目在這裡看。
+ * ## 對錯只靠左側色條與 icon
+ *
+ * 初版每個選項都是飽和色塊加一枚「你的答案 ✗ 錯誤」標籤。六個選項就是六塊飽和色加六
+ * 段重複文字——顏色本來要當重點提示，結果整面都是重點，等於沒有重點。現在顏色退成 3px
+ * 色條，文字回到主角位置；狀態的文字說明集中在上方圖例講一次。
  */
-export function AnswerReviewDialog({ question, index, total, onClose, onPrev, onNext }: Props) {
+export function AnswerReviewDialog({ question, index, onClose }: Props) {
   return (
     <Dialog open={question !== null} onClose={onClose} fullWidth maxWidth="sm">
       {question !== null && (
         <>
           <DialogTitle sx={{ pr: 6 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <span>題目檢討 — Q{index + 1}</span>
               <Chip
                 size="small"
                 color={question.question_type === "MULTIPLE" ? "info" : "default"}
                 label={question.question_type === "MULTIPLE" ? "多選題" : "單選題"}
               />
+              {/* 得分移到標題列——它是這一題的結論，不該埋在選項底下 */}
+              <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
+                本題得分 {question.score} / {question.points}
+              </Typography>
             </Stack>
             <IconButton
               aria-label="關閉"
@@ -114,77 +100,57 @@ export function AnswerReviewDialog({ question, index, total, onClose, onPrev, on
 
           <DialogContent dividers>
             <Stack spacing={2}>
-              <Paper variant="outlined" sx={{ p: 2, bgcolor: "action.hover" }}>
-                <Typography variant="caption" color="text.secondary">
-                  題目
-                </Typography>
-                <Typography variant="body1">{question.stem}</Typography>
-              </Paper>
+              <Typography variant="body1">{question.stem}</Typography>
 
-              <Box>
-                <Typography variant="caption" color="text.secondary">
-                  選項（依顏色判讀對錯）
-                </Typography>
-                <Stack spacing={1} sx={{ mt: 1 }}>
-                  {question.options.map((option) => {
-                    const state = optionState(option)
-                    const style = STATE_STYLE[state]
-                    const Icon = style.icon
-                    return (
-                      <Paper
-                        key={option.option_id}
-                        variant="outlined"
-                        sx={{
-                          p: 1.5,
-                          bgcolor: style.bg,
-                          borderColor: style.border,
-                          // 純底色對色覺障礙者不可靠——icon 與右側標籤同時承載同一個資訊
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                        }}
-                      >
-                        <Icon fontSize="small" color={style.iconColor} />
-                        <Typography variant="body2" sx={{ flexGrow: 1 }}>
-                          {option.text}
-                        </Typography>
-                        {style.badge && <Chip size="small" color={style.badge.color} label={style.badge.text} />}
-                      </Paper>
-                    )
-                  })}
-                </Stack>
-              </Box>
+              {/* 沒有文字標籤就一定要有圖例——icon 的語意不是自明的（⚠ 是「漏選」不是「警告」）*/}
+              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+                {LEGEND.map((state) => {
+                  const Icon = STATE_STYLE[state].icon
+                  return (
+                    <Stack key={state} direction="row" spacing={0.5} alignItems="center">
+                      <Icon fontSize="small" sx={{ color: STATE_STYLE[state].color }} />
+                      <Typography variant="caption" color="text.secondary">
+                        {STATE_STYLE[state].legend}
+                      </Typography>
+                    </Stack>
+                  )
+                })}
+              </Stack>
 
-              <Stack
-                direction="row"
-                spacing={2}
-                justifyContent="space-between"
-                flexWrap="wrap"
-                sx={{ pt: 1, borderTop: 1, borderColor: "divider" }}
-              >
-                <Typography variant="body2" color="text.secondary">
-                  你的答案：<strong>{joinOptions(question.options, (o) => o.selected)}</strong>
-                  {"　｜　"}
-                  {/* AC 11：強制顯示，無教師可關閉之選項 */}
-                  正確答案：<strong>{joinOptions(question.options, (o) => o.is_correct)}</strong>
-                </Typography>
-                <Typography variant="body2">
-                  本題得分：
-                  <strong>
-                    {question.score} / {question.points}
-                  </strong>
-                </Typography>
+              <Stack spacing={1}>
+                {question.options.map((option) => {
+                  const state = optionState(option)
+                  const style = STATE_STYLE[state]
+                  const Icon = style.icon
+                  return (
+                    <Stack
+                      key={option.option_id}
+                      direction="row"
+                      spacing={1.5}
+                      alignItems="center"
+                      sx={{
+                        py: 1.25,
+                        pl: 1.5,
+                        borderLeft: 3,
+                        borderColor: style.color,
+                        borderRadius: 0.5,
+                        bgcolor: "action.hover",
+                      }}
+                    >
+                      {/*
+                        icon 與色條承載同一個狀態。色條單獨存在對色覺障礙者不可靠，
+                        而 icon 的形狀（✓ / ✗ / ⚠ / ○）不依賴顏色也分得出來。
+                      */}
+                      <Icon fontSize="small" sx={{ color: style.color }} aria-label={style.legend} />
+                      <Typography variant="body2">{option.text}</Typography>
+                    </Stack>
+                  )
+                })}
               </Stack>
             </Stack>
           </DialogContent>
 
           <DialogActions>
-            <Button size="small" disabled={index <= 0} onClick={onPrev}>
-              ← 上一題
-            </Button>
-            <Button size="small" disabled={index >= total - 1} onClick={onNext}>
-              下一題 →
-            </Button>
             <Button variant="contained" size="small" onClick={onClose}>
               關閉
             </Button>

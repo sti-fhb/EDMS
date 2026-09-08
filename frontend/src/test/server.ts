@@ -51,6 +51,7 @@ const ATTEMPT_STATE = {
 const ATTEMPT_RESULT = {
   attempt_id: 800,
   quiz_id: 700,
+  course_id: 7,
   attempt_no: 1,
   status: "SUBMITTED",
   score: "50.00",
