@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     # 未設定或查無帳號時 seed 跳過並記 log，不使 migration 失敗（CI / 新環境不受影響）。
     ET_BOOTSTRAP_ADMIN_EMAIL: str = ""
 
+    # 示範測試帳號 seed（migration 7b24b5dea3ad）開關。預設種入——一般環境（本機 / 部署）
+    # 皆需要一組可登入的帳號做手動驗證。**測試環境一律設 false**：測試 DB 同樣以
+    # `alembic upgrade head` 建置，這些帳號會混進「列全部使用者 / 全部管理者 / DM_VIEWER
+    # 母體」等斷言的預期值（CI 實測 7 條 integration 測試因此失敗），
+    # 見 tests/integration/conftest.py 之 apply_migrations 與 .github/workflows/ci.yml。
+    SEED_DEMO_ACCOUNTS: bool = True
+
     @model_validator(mode="after")
     def _validate_jwt_secret_strength(self) -> "Settings":
         """依所選演算法強制 HMAC 密鑰最小長度，啟動即擋弱 / 未替換的預設密鑰。

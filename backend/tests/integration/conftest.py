@@ -125,7 +125,9 @@ def apply_migrations():
         cwd=str(BACKEND_DIR),
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        # SEED_DEMO_ACCOUNTS=false：測試 DB 不種示範帳號（migration 7b24b5dea3ad）。
+        # 那 5 個帳號會混進「列全部使用者 / 全部管理者 / DM_VIEWER 母體」等斷言的預期值。
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "SEED_DEMO_ACCOUNTS": "false"},
         encoding="utf-8",
         errors="replace",
     )

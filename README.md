@@ -147,13 +147,15 @@ Migration 執行完成後，會自動建立以下 seed 資料：
 
 執行 `alembic upgrade head` 後，可使用以下示範帳號登入：
 
-| 帳號（Email）| 密碼 | 角色 | 業務模組 | 說明 |
-|------|------|------|---------|------|
-| `admin@edms.local` | `changeme` | 管理者 | 全部 | 系統初始管理者 |
-| `teacher@edms.local` | `changeme` | 教師 | 採血 | 教師示範帳號 |
-| `student@edms.local` | `changeme` | 學員 | 採血 | 學員示範帳號 |
+| 帳號（Email）| 密碼 | DM 角色 | ET 角色 | 說明 |
+|------|------|---------|---------|------|
+| `admin@edms.local` | `Edms@Test2026` | `DM_ADMIN` | `ADMIN` | 雙模組管理者，可進 DP 後台 |
+| `editor@edms.local` | `Edms@Test2026` | `DM_EDITOR` | `STUDENT` | 文件編輯者示範帳號 |
+| `reviewer@edms.local` | `Edms@Test2026` | `DM_REVIEWER` | `STUDENT` | 文件審核者示範帳號 |
+| `teacher@edms.local` | `Edms@Test2026` | `DM_VIEWER` | `TEACHER` | 教師示範帳號 |
+| `student@edms.local` | `Edms@Test2026` | `DM_VIEWER` | `STUDENT` | 學員示範帳號 |
 
-> 示範帳號由 seed migration 建立；正式部署時請刪除或更換密碼。
+> 示範帳號由 seed migration `7b24b5dea3ad_common_seed_demo_accounts` 建立；正式部署時請刪除或更換密碼（`alembic downgrade` 至該版之前即可整批移除）。
 
 ---
 
