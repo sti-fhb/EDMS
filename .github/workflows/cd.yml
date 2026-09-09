@@ -49,6 +49,12 @@ concurrency:
 env:
   AR_HOST: asia-east1-docker.pkg.dev
   AR_BASE: asia-east1-docker.pkg.dev/blood-system-dev/edms-image
+  # 關閉 build-push-action 自動上傳的 build record（<owner>~<repo>~XXXXXX.dockerbuild）。
+  # 每 build 一個映像就多一筆 artifact，只為了能在本機 docker buildx history import
+  # 檢視建置歷程；本專案沒有這個需求，留著只是讓 artifact 列表塞滿雜訊。
+  # 刻意不設 DOCKER_BUILD_SUMMARY=false —— job summary 的 build 摘要仍有用，
+  # 此處只停掉「附上可下載紀錄檔」這件事。
+  DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
   build-and-push:

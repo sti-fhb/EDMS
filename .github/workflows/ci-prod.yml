@@ -59,6 +59,12 @@ env:
   # nginx:alpine 幾乎不佔額外空間——edms-nginx 本身即 FROM nginx:alpine，layer 共用。
   # postgres:17 的版本須與 docker-compose.yml 一致。
   BASE_IMAGES: postgres:17 nginx:alpine
+  # 關閉 build-push-action 自動上傳的 build record（<owner>~<repo>~XXXXXX.dockerbuild）。
+  # 每 build 一個映像就多一筆 artifact，只為了能在本機 docker buildx history import
+  # 檢視建置歷程；本專案沒有這個需求，留著只是讓 artifact 列表塞滿雜訊、蓋掉真正
+  # 要下載的 edms-images-*。刻意不設 DOCKER_BUILD_SUMMARY=false —— job summary 的
+  # build 摘要仍有用，此處只停掉「附上可下載紀錄檔」這件事。
+  DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
   build:
