@@ -239,6 +239,55 @@ describe("ET05 章節學習頁", () => {
 
       expect(screen.queryByRole("button", { name: /課後問卷|我的填答/ })).not.toBeInTheDocument()
     })
+
+    it("後端回應完全沒有 survey 欄位時，整頁仍正常呈現", async () => {
+      // 🔴 2026-09-08 手動測試踩到的真實情境：前端是本分支、後端還沒有這個欄位
+      // （前後端分開部署，或本機打到另一個 worktree 的後端）→ `survey` 是 `undefined`。
+      //
+      // 原本寫 `survey === null` 的嚴格比對會在 `survey.state` 上拋 TypeError，讓 router
+      // 的 error boundary 把**整個 ET05 頁**換成「Unexpected Application Error!」——
+      // 章節、教材、進度全部消失，只因為少一個選配欄位。
+      //
+      // 上面那條 `survey: null` 的測試抓不到這個：mock 一律帶了該欄位。這裡刻意送出
+      // **沒有 survey 鍵**的回應。
+      server.use(
+        http.get("/api/et/courses/:courseId/learn", () =>
+          HttpResponse.json({
+            course_id: 1,
+            course_name: "採血作業新進人員訓練",
+            status: "PUBLISHED",
+            is_owner: false,
+            is_closed: false,
+            playback_rates: [1.0],
+            last_item_id: null,
+            chapters: [
+              {
+                chapter_id: 10,
+                chapter_name: "第一章 採血基本流程",
+                sort_order: 1,
+                items: [
+                  {
+                    item_id: 100,
+                    item_type: "MATERIAL",
+                    sort_order: 1,
+                    title: "採血流程概論",
+                    material_id: 1000,
+                    quiz_id: null,
+                    locked: false,
+                    completed: false,
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      )
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByText("第一章 採血基本流程")).toBeInTheDocument()
+      expect(screen.getByText("採血流程概論")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /課後問卷|我的填答/ })).not.toBeInTheDocument()
+    })
   })
 })
 

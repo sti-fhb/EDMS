@@ -38,8 +38,14 @@ interface Props {
   /**
    * 課後問卷入口狀態（#284）。`null`（該課程沒有問卷）或 `HIDDEN`（未完課 / 問卷停用）
    * 時**整塊不渲染**，連分隔線都不留——留一塊空的區域會讓學員以為那裡有東西還沒載入。
+   *
+   * ⚠️ 型別含 `undefined`：後端契約是 `SurveyEntry | null`，但 `/learn` 的回應**沒有經過
+   * Zod 驗證**（`learnSchemas.ts` 只是 TS interface），所以「後端還沒有這個欄位」時它在
+   * 執行期就是 `undefined`。前端先部署、或本機打到還沒更新的後端時就會遇到——2026-09-08
+   * 手動測試時真的踩到（前端是本分支、後端是另一個 worktree 的），整個 ET05 頁被
+   * router 的 error boundary 換成錯誤畫面。**少一個選配欄位不該讓整頁消失。**
    */
-  survey: SurveyEntry | null
+  survey: SurveyEntry | null | undefined
   /** 點擊入口（前往問卷頁）。 */
   onSurveyClick: () => void
 }
@@ -130,8 +136,16 @@ export function ChapterNav({ chapters, activeItemId, onSelect, showProgress, sur
 }
 
 /** 側欄底部之課後問卷入口（AC 1 / AC 2 / AC 10 / AC 11）。 */
-function SurveyEntryBlock({ survey, onClick }: { survey: SurveyEntry | null; onClick: () => void }) {
-  if (survey === null || survey.state === "HIDDEN") return null
+function SurveyEntryBlock({
+  survey,
+  onClick,
+}: {
+  survey: SurveyEntry | null | undefined
+  onClick: () => void
+}) {
+  // `!survey` 而非 `survey === null`：後端沒有這個欄位時是 `undefined`（見 `Props.survey`），
+  // 寫成嚴格比對會在 `survey.state` 上拋 TypeError，把整個 ET05 頁換成錯誤畫面。
+  if (!survey || survey.state === "HIDDEN") return null
 
   const submitted = survey.state === "SUBMITTED"
   return (
