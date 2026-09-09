@@ -1,4 +1,3 @@
-import HistoryIcon from "@mui/icons-material/History"
 import PlayArrowIcon from "@mui/icons-material/PlayArrow"
 import Alert from "@mui/material/Alert"
 import Button from "@mui/material/Button"
@@ -13,6 +12,7 @@ import Typography from "@mui/material/Typography"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 
+import { AttemptHistory } from "./AttemptHistory"
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -143,8 +143,20 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
         </List>
       </Alert>
 
-      {/* ET-MSG-ET06-001；**inline 而非 Snackbar**——這是頁面的持續狀態，不是一次性事件 */}
-      {!data.can_start && <Alert severity="info">重考次數已用完，請聯繫教師重置</Alert>}
+      {/*
+        **inline 而非 Snackbar**——這是頁面的持續狀態，不是一次性事件。
+
+        ⚠️ `can_start === false` 有兩種成因，訊息不可混為一句：課程關閉時叫學員「聯繫教師
+        重置」是叫他去做一件沒有用的事（重置的是重考次數，不會讓關閉的課程重新開放）。
+      */}
+      {!data.can_start &&
+        (data.course_closed ? (
+          /* ET-MSG-ET06-005（#280 裁示 Q3 = B：不輪詢，於此與成績頁事後告知）*/
+          <Alert severity="warning">此課程已關閉，無法再開新作答</Alert>
+        ) : (
+          /* ET-MSG-ET06-001 */
+          <Alert severity="info">重考次數已用完，請聯繫教師重置</Alert>
+        ))}
 
       <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
         <Button
@@ -156,21 +168,14 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
         >
           {resuming ? "繼續作答" : "開始作答"}
         </Button>
-        {/*
-          有作答紀錄就給複習入口，**不受 `can_start` 影響**：次數用完的學員正是最需要
-          回頭看錯在哪的人，把複習跟著作答一起關掉等於懲罰他考不好。
-        */}
-        {data.last_attempt_id !== null && (
-          <Button
-            variant="outlined"
-            size="large"
-            startIcon={<HistoryIcon />}
-            onClick={() => navigate(`/et/attempts/${data.last_attempt_id}/result`)}
-          >
-            查看上次作答明細
-          </Button>
-        )}
       </Stack>
+
+      {/*
+        歷次清單取代 #279 的「查看上次作答明細」單點入口（#280 裁示 Q2 = B）。那顆按鈕
+        本來就是 `ET-6b` 未交付前的過渡——學員想回看的往往是第 1 次，只給最近一次等於
+        把最有價值的那筆藏起來。**不受 `can_start` 影響**：次數用完的學員最需要複習。
+      */}
+      <AttemptHistory quizId={quizId} />
     </Stack>
   )
 }

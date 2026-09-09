@@ -60,6 +60,7 @@ const ATTEMPT_RESULT = {
   is_pass: false,
   submitted_at: "2026-09-04T10:00:00Z",
   remaining_attempts: 3,
+  course_closed: false,
   questions: [
     {
       question_id: 901,
@@ -1234,6 +1235,7 @@ export const handlers = [
       is_passed: false,
       in_progress_attempt_id: null,
       last_attempt_id: null,
+      course_closed: false,
     }),
   ),
   http.post("/api/et/quizzes/:quizId/attempts", ({ params }) =>
@@ -1248,6 +1250,27 @@ export const handlers = [
   ),
   http.get("/api/et/attempts/:attemptId/result", ({ params }) =>
     HttpResponse.json({ ...ATTEMPT_RESULT, attempt_id: Number(params.attemptId) }),
+  ),
+  // ET-6b 歷次作答清單（#280）
+  http.get("/api/et/quizzes/:quizId/attempts", () =>
+    HttpResponse.json([
+      {
+        attempt_id: 799,
+        attempt_no: 1,
+        submitted_at: "2026-09-03T02:12:00Z",
+        score: "65.00",
+        is_pass: false,
+        status: "SUBMITTED",
+      },
+      {
+        attempt_id: 800,
+        attempt_no: 2,
+        submitted_at: "2026-09-04T10:00:00Z",
+        score: "50.00",
+        is_pass: false,
+        status: "SUBMITTED",
+      },
+    ]),
   ),
 ]
 

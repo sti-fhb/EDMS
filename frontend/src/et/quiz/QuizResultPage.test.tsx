@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { describe, expect, it, vi } from "vitest"
@@ -33,6 +33,7 @@ const RESULT: AttemptResult = {
   is_pass: false,
   submitted_at: "2026-09-04T10:00:00Z",
   remaining_attempts: 3,
+  course_closed: false,
   questions: [
     {
       question_id: 901,
@@ -230,5 +231,24 @@ describe("ET06 結果頁", () => {
     renderWithProviders(<EtQuizResultPage />)
 
     expect(await screen.findByText("查無此測驗")).toBeInTheDocument()
+  })
+
+  it("課程關閉時顯示 ET-MSG-ET06-005 且不給重考鈕", async () => {
+    // 後端已擋關閉後開新作答；前端不該給一顆按了必失敗的鈕
+    state = { ...RESULT, course_closed: true }
+    renderWithProviders(<EtQuizResultPage />)
+
+    expect(await screen.findByText("此課程已關閉，無法再開新作答")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /重新作答/ })).not.toBeInTheDocument()
+  })
+
+  it("回看**舊** attempt 時不顯示重考鈕", async () => {
+    // `remaining_attempts` 講的是「現在還剩幾次」，與正在看的那一次無關；顯示在第 1 次的
+    // 回看畫面上會讓學員以為能從那裡重考
+    state = { ...RESULT, attempt_no: 1 } // MSW 的歷次清單有第 2 次，故這是舊的
+    renderWithProviders(<EtQuizResultPage />)
+
+    await screen.findByText(/50\.00 \/ 100 分/)
+    await waitFor(() => expect(screen.queryByRole("button", { name: /重新作答/ })).not.toBeInTheDocument())
   })
 })

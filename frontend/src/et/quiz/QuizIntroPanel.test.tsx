@@ -29,6 +29,7 @@ const BASE: QuizIntro = {
   is_passed: false,
   in_progress_attempt_id: null,
   last_attempt_id: null,
+  course_closed: false,
 }
 
 function mockIntro(overrides: Partial<QuizIntro>) {
@@ -66,31 +67,52 @@ describe("ET06 測驗資訊面板", () => {
     expect(screen.getByRole("button", { name: /開始作答/ })).toBeDisabled()
   })
 
-  it("從未作答時不顯示「查看上次作答明細」", async () => {
+  it("有歷次紀錄時顯示清單，可回看任一次（不限最近一次）", async () => {
+    // #279 只給「上次」的單點入口，那是過渡；學員想回看的往往正是第 1 次
+    mockIntro({ last_attempt_id: 800, last_score: "50.00", best_score: "65.00" })
+    const user = userEvent.setup()
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    expect(await screen.findByText("歷次作答紀錄")).toBeInTheDocument()
+    await user.click(screen.getByRole("row", { name: /第 1 次/ }))
+
+    expect(navigate).toHaveBeenCalledWith("/et/attempts/799/result")
+  })
+
+  it("從未作答時整塊清單不顯示", async () => {
+    // 一張空表格會讓學員以為系統把他的紀錄弄丟了
+    server.use(http.get("/api/et/quizzes/:quizId/attempts", () => HttpResponse.json([])))
     mockIntro({ last_attempt_id: null })
     renderWithProviders(<QuizIntroPanel quizId={700} />)
 
     await screen.findByRole("button", { name: /開始作答/ })
-    expect(screen.queryByRole("button", { name: /查看上次作答明細/ })).not.toBeInTheDocument()
+    expect(screen.queryByText("歷次作答紀錄")).not.toBeInTheDocument()
   })
 
-  it("有作答紀錄時可查看上次作答明細", async () => {
-    mockIntro({ last_attempt_id: 800, last_score: "50.00", best_score: "50.00" })
-    const user = userEvent.setup()
-    renderWithProviders(<QuizIntroPanel quizId={700} />)
-
-    await user.click(await screen.findByRole("button", { name: /查看上次作答明細/ }))
-
-    expect(navigate).toHaveBeenCalledWith("/et/attempts/800/result")
-  })
-
-  it("次數用盡仍可查看上次作答明細（複習）", async () => {
+  it("次數用盡仍可回看歷次（複習）", async () => {
     // 次數用完的學員正是最需要回頭看錯在哪的人；把複習跟著作答一起關掉等於懲罰他考不好
     mockIntro({ can_start: false, remaining_attempts: 0, last_attempt_id: 800 })
     renderWithProviders(<QuizIntroPanel quizId={700} />)
 
-    expect(await screen.findByRole("button", { name: /查看上次作答明細/ })).toBeEnabled()
+    expect(await screen.findByText("歷次作答紀錄")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /開始作答/ })).toBeDisabled()
+  })
+
+  it("課程關閉時的訊息是關閉，不是「次數用完請聯繫教師重置」", async () => {
+    // 兩種成因對學員的意義相反：關閉時叫他去找教師重置，是叫他做一件沒有用的事
+    mockIntro({ can_start: false, course_closed: true })
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    expect(await screen.findByText("此課程已關閉，無法再開新作答")).toBeInTheDocument()
+    expect(screen.queryByText("重考次數已用完，請聯繫教師重置")).not.toBeInTheDocument()
+  })
+
+  it("次數用完且課程未關閉時顯示重置提示", async () => {
+    mockIntro({ can_start: false, remaining_attempts: 0, course_closed: false })
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    expect(await screen.findByText("重考次數已用完，請聯繫教師重置")).toBeInTheDocument()
+    expect(screen.queryByText("此課程已關閉，無法再開新作答")).not.toBeInTheDocument()
   })
 
   it("有未完成的作答時按鈕改為「繼續作答」", async () => {

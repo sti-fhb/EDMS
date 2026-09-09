@@ -76,6 +76,19 @@ export function EtQuizResultPage() {
 
   const result = fromSubmit ?? data ?? null
 
+  // 判斷「正在看的是不是最新一次」。沿用 `AttemptHistory` 的同一個 query key，故從測驗
+  // 面板進來時走的是快取、不會多一趟往返。
+  //
+  // 尚未載入時預設 **true**：剛提交完的情境最常見，預設 false 會讓按鈕先消失再冒出來。
+  const { data: history } = useQuery({
+    queryKey: QUERY_KEYS.etQuiz.history(result?.quiz_id ?? 0),
+    queryFn: () => attemptApi.history(result?.quiz_id ?? 0),
+    enabled: result !== null,
+    retry: false,
+  })
+  const isLatestAttempt =
+    history === undefined || result === null || !history.some((a) => a.attempt_no > result.attempt_no)
+
   // `enabled: false` 時 `isPending` 恆為 true，故轉圈的條件必須連 `needsFetch` 一起判——
   // 否則網址代碼無效會停在一個永遠不會結束的轉圈上
   if (needsFetch && isPending) {
@@ -98,7 +111,10 @@ export function EtQuizResultPage() {
     )
   }
 
-  const canRetry = !result.is_pass && result.remaining_attempts > 0
+  // ⚠️ 回看**舊** attempt 時不可顯示重考——那是「本次成績」才有的動作，出現在第 1 次的
+  // 回看畫面上會讓學員以為能從那裡重考，而 `remaining_attempts` 講的是現在還剩幾次、
+  // 與他正在看的那一次無關。課程關閉後也不可重考（後端已擋，前端不該給一顆必失敗的鈕）。
+  const canRetry = !result.is_pass && result.remaining_attempts > 0 && !result.course_closed && isLatestAttempt
   return (
     <Stack spacing={2}>
       {/*
@@ -108,6 +124,13 @@ export function EtQuizResultPage() {
       {fromSubmit?.left_window === true && (
         <Alert severity="warning">因離開作答視窗，本次作答已自動提交。</Alert>
       )}
+
+      {/*
+        ET-MSG-ET06-005（#280 裁示 Q3 = B）。原 spec 要在**作答中**告知，但作答頁刻意
+        不重抓（重抓會把尚未暫存的答案蓋回畫面），而場景 27 保證作答中的 attempt 照常
+        完成並計分——學員不會因為不知情而損失任何東西，故改於此處告知。
+      */}
+      {result.course_closed && <Alert severity="warning">此課程已關閉，無法再開新作答</Alert>}
 
       <Paper variant="outlined" sx={{ p: 3, textAlign: "center" }}>
         <Typography variant="h6">測驗完成</Typography>

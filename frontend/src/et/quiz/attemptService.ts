@@ -1,10 +1,20 @@
 import { http } from "../../services/http"
-import type { AttemptResult, AttemptState, QuizIntro } from "./attemptSchemas"
+import type { AttemptResult, AttemptState, AttemptSummary, QuizIntro } from "./attemptSchemas"
 
-/** ET06 測驗作答 API（US6 / #279）。 */
+/** ET06 測驗作答 API（US6 / #279、#280）。 */
 export const attemptApi = {
   intro: async (quizId: number): Promise<QuizIntro> => {
     const { data } = await http.get<QuizIntro>(`/et/quizzes/${quizId}/intro`)
+    return data
+  },
+
+  /**
+   * 歷次作答清單（**每一次**，不限最近一次）。
+   *
+   * 課程關閉後與被移除的學員**仍讀得到**——後端的授權只看 `USER_ID`，不問課程資格。
+   */
+  history: async (quizId: number): Promise<AttemptSummary[]> => {
+    const { data } = await http.get<AttemptSummary[]>(`/et/quizzes/${quizId}/attempts`)
     return data
   },
 

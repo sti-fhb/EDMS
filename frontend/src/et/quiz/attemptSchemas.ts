@@ -75,7 +75,24 @@ export interface AttemptResult {
   is_pass: boolean
   submitted_at: string
   remaining_attempts: number
+  /** 課程是否已關閉——成績頁據以顯示 ET-MSG-ET06-005（#280 裁示 Q3 = B：事後告知）。 */
+  course_closed: boolean
   questions: QuestionResult[]
+}
+
+/**
+ * 歷次作答清單的一列（#280 AC 1）。
+ *
+ * **只含已閱卷的 attempt**——進行中的還沒有成績；「繼續作答」由
+ * `QuizIntro.in_progress_attempt_id` 負責，不在這份清單裡。
+ */
+export interface AttemptSummary {
+  attempt_id: number
+  attempt_no: number
+  submitted_at: string
+  score: string
+  is_pass: boolean
+  status: "SUBMITTED" | "TIMEOUT"
 }
 
 /**
@@ -113,6 +130,14 @@ export interface QuizIntro {
    * 回頭看錯在哪的人，把複習跟著作答一起關掉等於懲罰他考不好。
    */
   last_attempt_id: number | null
+  /**
+   * 課程是否已關閉。
+   *
+   * ⚠️ **`can_start === false` 有兩種成因**（次數用完、課程關閉），對學員的意義相反：
+   * 前者聯繫教師重置有用，後者重置一點用也沒有。少了這個欄位就只能寫死一句「重考次數
+   * 已用完，請聯繫教師重置」，而那會叫課程關閉的學員去做一件沒有用的事。
+   */
+  course_closed: boolean
 }
 
 /** 導覽列的題目狀態。 */
