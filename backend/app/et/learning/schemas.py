@@ -9,6 +9,8 @@
 
 from pydantic import BaseModel
 
+from app.et.survey_fill.schemas import SurveyEntry
+
 #: 可於頁內嵌入預覽的 MIME（AC 15）。其餘一律走「下載原檔」（AC 16）。
 PREVIEWABLE_MIMES = frozenset({"application/pdf"})
 
@@ -54,6 +56,12 @@ class LearnStructure(BaseModel):
         last_item_id: 上次檢視之項目（#274 SA Q1 裁示 B）。`None` = 還沒看過任何項目
             → 前端定位第 1 章第 1 項。影片內的秒數是另一半，在
             `MaterialVideoRow.last_position_sec`。
+        survey: 課後問卷入口狀態（#284）。**`None` = 該課程沒有問卷**（問卷為選配，
+            US3 AC 23），此時側欄整塊不渲染。
+
+            隨本回應一併回傳而非另開端點：側欄必須在第一次繪製就決定「渲染入口 /
+            不渲染」，二次請求會造成可見的跳動，而「未完課 → 不顯示」是最常見的狀態，
+            為它多打一趟請求不划算。
     """
 
     course_id: int
@@ -63,6 +71,7 @@ class LearnStructure(BaseModel):
     is_closed: bool
     playback_rates: list[float]
     last_item_id: int | None
+    survey: SurveyEntry | None
     chapters: list[ChapterNode]
 
 

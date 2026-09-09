@@ -5,14 +5,24 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.core.exceptions import AppError
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.constants import (
+    COMPLETION_COMPLETED,
+    COMPLETION_IN_PROGRESS,
+    COMPLETION_NOT_STARTED,
+    COURSE_CLOSED,
+    COURSE_DRAFT,
+    COURSE_PUBLISHED,
+)
 from app.et.enrollment.rules import (
     INVITATION_CODE_LENGTH,
+    derive_completion_status,
     ensure_course_joinable,
     ensure_not_removed,
+    is_course_completed,
     is_listed_in_my_courses,
     normalize_invitation_code,
 )
+from app.et.progress.repository import completion_pct
 
 pytestmark = pytest.mark.unit
 
@@ -130,3 +140,67 @@ class TestIsListedInMyCourses:
         `open_start_at` 不影響結果：課程能被關閉必然已經發布並開放過。
         """
         assert is_listed_in_my_courses(status=COURSE_CLOSED, open_start_at=open_start_at, now=_NOW)
+
+
+class TestIsCourseCompleted:
+    """完課＝該課程所有未刪除項目皆已完成（US13 AC 1 與 US16 核可前提的閘門）。"""
+
+    def test_全部完成為完課(self) -> None:
+        assert is_course_completed(done=3, total=3)
+
+    def test_差一項不算完課(self) -> None:
+        assert not is_course_completed(done=2, total=3)
+
+    def test_零項目課程不算完課(self) -> None:
+        """按字面定義空課程是 vacuous truth，但那會讓學員一加入就看到問卷入口。
+
+        發布檢核強制 ≥1 章節 + ≥1 教材，已發布課程走不到這裡；真的走到就是資料異常，
+        取較保守的那一側。
+        """
+        assert not is_course_completed(done=0, total=0)
+
+    def test_完成數大於總數仍為完課(self) -> None:
+        """`ET_PROGRESS` 的列在項目被刪除後仍留著，理論上可能多於當前項目數。
+
+        `>=` 而非 `==`：若寫 `==`，教師刪掉一個學員已完成的項目就會讓他從完課退回
+        進行中，而他實際上該看到的內容一項都沒少。
+        """
+        assert is_course_completed(done=4, total=3)
+
+    def test_四捨五入為百分之百但未全部完成時不算完課(self) -> None:
+        """🔴 這是本函式收 `(done, total)` 而非百分比的唯一理由。
+
+        201 個項目完成 200 個 → `completion_pct` 回 `round(99.5) = 100`。若拿那個 100
+        當閘門，最後一項還沒完成問卷入口就開了，而顯示上看起來一切正常——沒有任何
+        地方會察覺這個偏差。
+        """
+        assert completion_pct(200, 201) == 100, "前提：顯示層真的會四捨五入到 100"
+        assert not is_course_completed(done=200, total=201)
+
+
+class TestDeriveCompletionStatus:
+    """完課三態由完成/總項目數導出（#284 前置：#274 遺漏之修正）。
+
+    `data-model` §ET_ENROLLMENT 對 `COMPLETION_STATUS` 的說明是「**即時計算**」，
+    而在此之前該欄只有加入課程時寫入的 `NOT_STARTED`，沒有任何路徑推進它。
+    """
+
+    def test_零進度為未開始(self) -> None:
+        assert derive_completion_status(done=0, total=3) == COMPLETION_NOT_STARTED
+
+    def test_全部完成為已完成(self) -> None:
+        assert derive_completion_status(done=3, total=3) == COMPLETION_COMPLETED
+
+    @pytest.mark.parametrize(("done", "total"), [(1, 100), (1, 2), (99, 100)])
+    def test_中間值為進行中(self, done: int, total: int) -> None:
+        assert derive_completion_status(done=done, total=total) == COMPLETION_IN_PROGRESS
+
+    def test_四捨五入為百分之百時仍為進行中(self) -> None:
+        """與 `is_course_completed` 同一個邊界——統計與閘門不可分歧。
+
+        若兩者用不同定義，學員會看到卡片標「已完成」卻沒有問卷入口。
+        """
+        assert derive_completion_status(done=200, total=201) == COMPLETION_IN_PROGRESS
+
+    def test_零項目課程為未開始(self) -> None:
+        assert derive_completion_status(done=0, total=0) == COMPLETION_NOT_STARTED

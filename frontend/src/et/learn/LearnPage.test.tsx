@@ -27,6 +27,7 @@ function mockStructure(overrides: Partial<LearnStructure>) {
         is_closed: false,
         playback_rates: [0.75, 1.0, 1.25, 1.5, 2.0],
         last_item_id: null,
+        survey: null,
         chapters: [
           {
             chapter_id: 10,
@@ -128,15 +129,6 @@ describe("ET05 章節學習頁", () => {
     expect(await screen.findByText("您尚未加入此課程")).toBeInTheDocument()
   })
 
-  it("整頁不出現課後問卷入口（`ET-15` 未實作）", async () => {
-    mockStructure({})
-    renderWithProviders(<EtLearnPage />)
-    await screen.findByText("第一章 採血基本流程")
-
-    // wireframe 側欄底部有這顆按鈕，但本 issue 不做——照抄會做出永遠不動作的元件
-    expect(screen.queryByRole("button", { name: /問卷/ })).not.toBeInTheDocument()
-  })
-
   describe("進度與解鎖（#274）", () => {
     it("重新進入定位至上次檢視之項目（AC 11）", async () => {
       // 第 1 章第 1 項是教材、第 2 項是測驗；`last_item_id` 指向測驗 → 應直接開在測驗
@@ -186,6 +178,115 @@ describe("ET05 章節學習頁", () => {
       expect(screen.getAllByTestId("CheckCircleIcon")).toHaveLength(1) // 已完成 ✓
       expect(screen.getByTestId("ArrowCircleRightIcon")).toBeInTheDocument() // 進行中 →
       expect(screen.getByTestId("LockIcon")).toBeInTheDocument() // 鎖定 🔒
+    })
+  })
+
+  describe("課後問卷入口（#284 / AC 18–21）", () => {
+    it("可填時顯示「填寫課後問卷」並可進入問卷頁", async () => {
+      const user = userEvent.setup()
+      mockStructure({
+        survey: { survey_id: 5, survey_name: "課後滿意度問卷", state: "FILLABLE", submitted_at: null },
+      })
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByRole("button", { name: "填寫課後問卷" }))
+
+      expect(screen.getByText(/具名、一人一次/)).toBeInTheDocument()
+      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey")
+    })
+
+    it("已送出時改顯示「查看我的填答」與送出時間", async () => {
+      mockStructure({
+        survey: {
+          survey_id: 5,
+          survey_name: "課後滿意度問卷",
+          state: "SUBMITTED",
+          submitted_at: "2026-09-08T06:30:00Z",
+        },
+      })
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByRole("button", { name: "查看我的填答" })).toBeInTheDocument()
+      expect(screen.getByText(/已於 .* 送出/)).toBeInTheDocument()
+    })
+
+    it("課程關閉且未填時入口仍顯示（AC 10：點進去才見關閉提示）", async () => {
+      mockStructure({
+        is_closed: true,
+        status: "CLOSED",
+        survey: { survey_id: 5, survey_name: "課後滿意度問卷", state: "COURSE_CLOSED", submitted_at: null },
+      })
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByRole("button", { name: "填寫課後問卷" })).toBeInTheDocument()
+    })
+
+    it("未完課（HIDDEN）時整塊不渲染", async () => {
+      mockStructure({
+        survey: { survey_id: 5, survey_name: "課後滿意度問卷", state: "HIDDEN", submitted_at: null },
+      })
+      renderWithProviders(<EtLearnPage />)
+      await screen.findByText("第一章 採血基本流程")
+
+      expect(screen.queryByRole("button", { name: /課後問卷|我的填答/ })).not.toBeInTheDocument()
+      expect(screen.queryByText(/具名、一人一次/)).not.toBeInTheDocument()
+    })
+
+    it("課程無問卷（null）時整塊不渲染", async () => {
+      mockStructure({ survey: null })
+      renderWithProviders(<EtLearnPage />)
+      await screen.findByText("第一章 採血基本流程")
+
+      expect(screen.queryByRole("button", { name: /課後問卷|我的填答/ })).not.toBeInTheDocument()
+    })
+
+    it("後端回應完全沒有 survey 欄位時，整頁仍正常呈現", async () => {
+      // 🔴 2026-09-08 手動測試踩到的真實情境：前端是本分支、後端還沒有這個欄位
+      // （前後端分開部署，或本機打到另一個 worktree 的後端）→ `survey` 是 `undefined`。
+      //
+      // 原本寫 `survey === null` 的嚴格比對會在 `survey.state` 上拋 TypeError，讓 router
+      // 的 error boundary 把**整個 ET05 頁**換成「Unexpected Application Error!」——
+      // 章節、教材、進度全部消失，只因為少一個選配欄位。
+      //
+      // 上面那條 `survey: null` 的測試抓不到這個：mock 一律帶了該欄位。這裡刻意送出
+      // **沒有 survey 鍵**的回應。
+      server.use(
+        http.get("/api/et/courses/:courseId/learn", () =>
+          HttpResponse.json({
+            course_id: 1,
+            course_name: "採血作業新進人員訓練",
+            status: "PUBLISHED",
+            is_owner: false,
+            is_closed: false,
+            playback_rates: [1.0],
+            last_item_id: null,
+            chapters: [
+              {
+                chapter_id: 10,
+                chapter_name: "第一章 採血基本流程",
+                sort_order: 1,
+                items: [
+                  {
+                    item_id: 100,
+                    item_type: "MATERIAL",
+                    sort_order: 1,
+                    title: "採血流程概論",
+                    material_id: 1000,
+                    quiz_id: null,
+                    locked: false,
+                    completed: false,
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      )
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByText("第一章 採血基本流程")).toBeInTheDocument()
+      expect(screen.getByText("採血流程概論")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /課後問卷|我的填答/ })).not.toBeInTheDocument()
     })
   })
 })

@@ -55,6 +55,7 @@ from app.et.material.router import router as et_material_router
 from app.et.progress.router import router as et_progress_router
 from app.et.quiz.router import router as et_quiz_router
 from app.et.survey.router import router as et_survey_router
+from app.et.survey_fill.router import router as et_survey_fill_router
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,7 @@ app.include_router(et_course_router)
 app.include_router(et_material_router)
 app.include_router(et_quiz_router)
 app.include_router(et_survey_router)
+app.include_router(et_survey_fill_router)
 app.include_router(et_enrollment_router)
 app.include_router(et_invitation_router)
 app.include_router(et_learning_router)

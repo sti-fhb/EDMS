@@ -29,6 +29,7 @@ from app.et.constants import (
 )
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.rules import (
+    derive_completion_status,
     ensure_course_joinable,
     ensure_not_removed,
     is_listed_in_my_courses,
@@ -41,7 +42,7 @@ from app.et.enrollment.schemas import (
     MyCoursesResult,
     MyCoursesSummary,
 )
-from app.et.progress.repository import EtProgressRepository
+from app.et.progress.repository import EtProgressRepository, completion_pct
 from app.services import AuditLogService
 
 _MODULE = "ET"
@@ -81,19 +82,30 @@ class EtEnrollmentService:
         chapters = await self._enrollments.chapter_counts(db, course_ids)
         # #274 起為真值（原為恆 0 的接點）——完成項目數 ÷ 總項目數，與 ET05 側欄的
         # 課程進度條同一定義，兩處顯示的數字必須一致。
-        progress = await self._progress.completion_pct_by_course(db, user_id=user_id, course_ids=course_ids)
+        #
+        # #284 起取**原始計數**而非百分比：進度條要四捨五入後的顯示值、完課三態要精確
+        # 的 `done >= total`（見 `is_course_completed` 的 201/200 邊界）。同一次查詢供
+        # 兩者使用，卡片上的「已完成」標示與問卷入口就不會分歧。
+        counts = await self._progress.completion_counts_by_course(db, user_id=user_id, course_ids=course_ids)
+        status_by_course = {
+            cid: derive_completion_status(done=done, total=total) for cid, (done, total) in counts.items()
+        }
+        pct_by_course = {cid: completion_pct(done, total) for cid, (done, total) in counts.items()}
 
         courses = [
             MyCourseRow(
                 course_id=course.course_id,
                 course_name=course.course_name,
                 status=course.status,
-                completion_status=enrollment.completion_status,
+                # #284：由 `counts` 即時導出，**不讀** `enrollment.completion_status`
+                # ——那個欄位只有加入課程時寫入的 `NOT_STARTED`，沒有任何路徑推進它，
+                # 讀它會讓下方 `_summarize` 的四項統計永遠顯示全部「未開始」。
+                completion_status=status_by_course.get(course.course_id, COMPLETION_NOT_STARTED),
                 tags=tags.get(course.course_id, []),
                 chapter_count=chapters.get(course.course_id, 0),
                 open_start_at=course.open_start_at,
                 open_end_at=course.open_end_at,
-                progress_pct=progress.get(course.course_id, 0),
+                progress_pct=pct_by_course.get(course.course_id, 0),
             )
             for enrollment, course in visible
         ]
@@ -138,7 +150,7 @@ class EtEnrollmentService:
         if existing is not None:
             await self._guard_not_removed(db, existing.is_removed, user_id=operator.user_id, course_id=course.course_id)
             # 重複加入不重複寫入、也不報錯——AC 10 要的是「導向該課程」。
-            return _to_result(course, existing.completion_status)
+            return _to_result(course, await self._completion_status(db, operator.user_id, course.course_id))
 
         try:
             # SAVEPOINT：「查無既有列」與 INSERT 之間有空隙，雙擊「確認加入」或前端
@@ -158,12 +170,13 @@ class EtEnrollmentService:
                 )
         except IntegrityError:
             # 併發的另一個請求先寫成功了——結果與「已加入」完全相同，回既有列即可。
-            # 重查而非直接回預設值：另一端有可能寫的是別的 `COMPLETION_STATUS`。
+            # 仍須重查：要看那一列的 `IS_REMOVED`（併發的贏家有可能是一筆已被移除的
+            # 舊列被重新啟用），完課狀態則與上面同樣走即時計算。
             winner = await self._enrollments.get_enrollment(db, user_id=operator.user_id, course_id=course.course_id)
             if winner is None:
                 raise
             await self._guard_not_removed(db, winner.is_removed, user_id=operator.user_id, course_id=course.course_id)
-            return _to_result(course, winner.completion_status)
+            return _to_result(course, await self._completion_status(db, operator.user_id, course.course_id))
 
         await self._audit.log_action(
             db,
@@ -179,6 +192,17 @@ class EtEnrollmentService:
         return _to_result(course, COMPLETION_NOT_STARTED)
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _completion_status(self, db: AsyncSession, user_id: str, course_id: int) -> str:
+        """單一課程之完課狀態（即時計算，#284）。
+
+        只在「已加入過」的回應路徑用得到——新加入者必然是 `NOT_STARTED`，不必為此
+        多查一次。`my_courses` 走的是批次版（一次算完所有課程），不共用此函式，
+        否則那一頁會退回 N+1。
+        """
+        counts = await self._progress.completion_counts_by_course(db, user_id=user_id, course_ids=[course_id])
+        done, total = counts.get(course_id, (0, 0))
+        return derive_completion_status(done=done, total=total)
 
     async def _guard_not_removed(self, db: AsyncSession, is_removed: bool, *, user_id: str, course_id: int) -> None:
         """擋下被移除者的重新加入，並**留下稽核紀錄**。

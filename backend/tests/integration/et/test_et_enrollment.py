@@ -24,12 +24,13 @@ from app.et.constants import (
     COMPLETION_NOT_STARTED,
     COURSE_CLOSED,
     COURSE_PUBLISHED,
+    ITEM_MATERIAL,
     ROLE_STUDENT,
     ROLE_TEACHER,
     SOURCE_INVITATION_CODE,
 )
 from app.et.course.models import EtCourse
-from app.et.progress.models import EtEnrollment
+from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
@@ -127,6 +128,34 @@ async def _chapter(client, teacher: str, course_id: int, name: str = "第一章"
     r = await client.post(f"{_COURSES}/{course_id}/chapters", json={"chapter_name": name}, headers=_bearer(teacher))
     assert r.status_code == 201, r.text
     return r.json()["chapter_id"]
+
+
+async def _item(client, teacher: str, chapter_id: int) -> int:
+    r = await client.post(
+        f"/api/et/chapters/{chapter_id}/items", json={"item_type": ITEM_MATERIAL}, headers=_bearer(teacher)
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["item_id"]
+
+
+async def _complete(db, user_id: str, course_id: int, item_id: int) -> None:
+    """把一個項目標記為已完成（直接寫 `ET_PROGRESS`）。
+
+    不走 `items/{id}/viewed` 端點：那條路徑的完成判定屬 `ET-5b`（#274）的驗證範圍，
+    此處要的只是「有一列 `IS_COMPLETED=true`」這個前提。
+    """
+    db.add(
+        EtProgress(
+            user_id=user_id,
+            course_id=course_id,
+            item_id=item_id,
+            is_completed=True,
+            created_user=user_id,
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
+    await db.flush()
 
 
 async def _join(client, student: str, code: str):
@@ -409,20 +438,66 @@ class TestMyCourses:
         assert card["progress_pct"] == 0, "進度依賴 ET_PROGRESS（ET-5），本 issue 恆為 0"
 
     async def test_已完成課程計入完成數(self, client, db) -> None:
+        """#284：完課狀態改為由 `ET_PROGRESS` **即時計算**，不再讀儲存欄位。
+
+        ⚠️ 本測試原本直接 `UPDATE ET_ENROLLMENT SET COMPLETION_STATUS='COMPLETED'`
+        再驗統計——那只釘住了 `_summarize` 的分類對映，**沒有驗證任何一條真實的完課
+        路徑**。而該欄位當時全專案只有加入課程時寫入的 `NOT_STARTED`，於是統計在真
+        實使用中永遠顯示全部「未開始」，測試卻是綠的。改為造真實進度。
+        """
         teacher = await _user(db, "t_enr14", ROLE_TEACHER)
         student = await _user(db, "s_enr14")
         cid = await _course(client, db, teacher, code="10000014")
+        item_id = await _item(client, teacher, await _chapter(client, teacher, cid))
         assert (await _join(client, student, "10000014")).status_code == 201
-        await db.execute(
-            update(EtEnrollment)
-            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid)
-            .values(completion_status=COMPLETION_COMPLETED)
-        )
-        await db.flush()
+        await _complete(db, student, cid, item_id)
+
+        body = (await client.get(_MY_COURSES, headers=_bearer(student))).json()
+
+        assert body["summary"] == {"joined": 1, "in_progress": 0, "not_started": 0, "completed": 1}
+        assert body["courses"][0]["completion_status"] == COMPLETION_COMPLETED
+        assert body["courses"][0]["progress_pct"] == 100
+
+    async def test_部分完成為進行中(self, client, db) -> None:
+        """三態的中間值——兩項只完成一項。
+
+        `NOT_STARTED` 與 `COMPLETED` 各有一條測試，缺這條的話「>0 且 <100」那一段
+        沒有任何整合層的證據，而它是實際使用中最常見的狀態。
+        """
+        teacher = await _user(db, "t_enr20", ROLE_TEACHER)
+        student = await _user(db, "s_enr20")
+        cid = await _course(client, db, teacher, code="10000020")
+        chapter_id = await _chapter(client, teacher, cid)
+        first = await _item(client, teacher, chapter_id)
+        await _item(client, teacher, chapter_id)
+        assert (await _join(client, student, "10000020")).status_code == 201
+        await _complete(db, student, cid, first)
+
+        body = (await client.get(_MY_COURSES, headers=_bearer(student))).json()
+
+        assert body["summary"] == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0}
+        assert body["courses"][0]["progress_pct"] == 50
+
+    async def test_教師新增項目使完課狀態自動回退(self, client, db) -> None:
+        """完課回退在即時計算下**自動成立**（`spec_us13` AC 13 / FR-ET-US13-08）。
+
+        教師在學員完課後新增章節 → 分母變大 → 百分比下降 → 退回 `IN_PROGRESS`。
+        維護儲存欄位的作法要另寫一條「重算所有已完課學員」的路徑才能達到同樣效果，
+        而那條路徑的觸發點在教師端、很容易漏。
+        """
+        teacher = await _user(db, "t_enr21", ROLE_TEACHER)
+        student = await _user(db, "s_enr21")
+        cid = await _course(client, db, teacher, code="10000021")
+        chapter_id = await _chapter(client, teacher, cid)
+        item_id = await _item(client, teacher, chapter_id)
+        assert (await _join(client, student, "10000021")).status_code == 201
+        await _complete(db, student, cid, item_id)
+        assert (await client.get(_MY_COURSES, headers=_bearer(student))).json()["summary"]["completed"] == 1
+
+        await _item(client, teacher, await _chapter(client, teacher, cid, name="第二章"))
 
         summary = (await client.get(_MY_COURSES, headers=_bearer(student))).json()["summary"]
-
-        assert summary == {"joined": 1, "in_progress": 0, "not_started": 0, "completed": 1}
+        assert summary == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0}
 
     async def test_已關閉課程仍顯示(self, client, db) -> None:
         """AC 5 / AC 13：顯示「已關閉」標示、可唯讀回看。
