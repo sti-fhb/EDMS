@@ -28,7 +28,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
-from app.et.constants import SURVEY_QUESTION_SINGLE
+from app.core.utils import utcnow
+from app.et.constants import COURSE_CLOSED, SURVEY_QUESTION_SINGLE
+from app.et.course.rules import is_effectively_closed
 from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository
 from app.et.progress.repository import EtProgressRepository
@@ -315,9 +317,18 @@ def _state_of(facts: SurveyEntryFacts, *, completed: bool) -> str:
     只是把 dataclass 攤成四個具名參數；判定順序全在 `rules.derive_entry_state`——
     「已填優先於課程狀態」那條規則**只有一份實作**，在此重寫一次遲早會分歧。
     """
+    # #288：閱課期間已過亦視同關閉——映射成 `COURSE_CLOSED` 後交給 `derive_entry_state`，
+    # 那支已正確處理已關閉（未填者見提示、已填者仍可回看，AC 10 / 11）。在此映射而非改動
+    # `derive_entry_state` 的簽章，是因為「期間已過」與「已關閉」對問卷入口的後果完全相同
+    # ——多一個參數只會讓那支純函式多一種要測的組合，卻不會產生任何不同的結果。
+    course_status = (
+        COURSE_CLOSED
+        if is_effectively_closed(status=facts.course_status, open_end_at=facts.open_end_at, now=utcnow())
+        else facts.course_status
+    )
     return derive_entry_state(
         survey_active=facts.survey_active,
         completed=completed,
         already_submitted=facts.submitted_at is not None,
-        course_status=facts.course_status,
+        course_status=course_status,
     )

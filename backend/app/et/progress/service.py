@@ -50,7 +50,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL
+from app.core.utils import utcnow
+from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
+from app.et.course.rules import is_effectively_closed
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access
 from app.et.progress.repository import EtProgressRepository
@@ -262,7 +264,9 @@ class EtProgressService:
             # 但與 `learning/service.structure` 的草稿保密處理對齊——日後新增下架功能時
             # 這裡不必再想一次。
             raise _NOT_FOUND
-        if course.status == COURSE_CLOSED:
+        if is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()):
+            # #288：期間已過亦視同關閉，回同一個 `ET_PROGRESS_001`——對學員而言「課程
+            # 關了」與「閱課期間過了」是同一件事（這次觀看不算進度），下一步也相同。
             raise _CLOSED
         if item_id is not None and await self.is_item_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
             # **鎖定中的項目視同不存在**——回 404 而非 403，與其餘以 id 定址的端點一致，

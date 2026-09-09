@@ -92,45 +92,45 @@ def ensure_reopenable(status: str) -> None:
         raise AppError(status_code=409, detail="僅已關閉課程可再開課", error_code="ET_COURSE_007")
 
 
-def is_within_open_window(
-    *, status: str, open_start_at: datetime | None, open_end_at: datetime | None, now: datetime
-) -> bool:
-    """課程當下**對學員**是否開放（#288 SA Q1 裁示 A）。
+def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: datetime) -> bool:
+    """課程對學員是否**視同關閉**（#288 SA Q1 裁示 A）。
+
+    「已關閉」或「已發布但閱課期間已過」兩者皆是——後者是本函式補上的缺口。
 
     ## 這支函式補上的是一個實際存在的缺口
 
-    `spec_us11` 場景 7、FR-ET-US11-03 與 `data-model` §ET_COURSE 業務規則（「學員可見性：
-    `STATUS = PUBLISHED` 且 `now >= OPEN_START_AT` 方於學員端顯示；**`now > OPEN_END_AT`
-    視同關閉**」）三處都要求「應用層即時判定」，但在本 issue 之前**全後端沒有任何地方
-    讀 `OPEN_END_AT` 做存取判定**——閱課期間結束後，課程照常可加入、可累積進度、可作答、
-    可填問卷，而且會一直如此（到期自動轉 `CLOSED` 屬 `ET-16`，尚未實作）。
+    `spec_us11` 場景 7、FR-ET-US11-03 與 `data-model` §ET_COURSE 業務規則（「`now >
+    OPEN_END_AT` 視同關閉」）三處都要求「應用層即時判定」，但在本 issue 之前**全後端
+    沒有任何地方讀 `OPEN_END_AT` 做存取判定**——閱課期間結束後，課程照常可加入、可累積
+    進度、可作答、可填問卷，而且會一直如此（到期自動轉 `CLOSED` 屬 `ET-16`，未實作）。
 
-    ## 為何收斂成一支純函式而非各處各寫
+    ## 🔴 為何**只看訖止、不看起始**
 
-    四處存取判定（`enrollment` 兩處、`learning`、`progress`、`survey_fill`）問的是同一件
-    事，而條件有三個輸入。各寫一次最可能漏掉的是 `open_start_at` 那一半——漏掉會讓起始
-    時間未到的課程變成可存取，而那條規則（AC 4）已有測試釘著，漂移會在別的地方爆。
+    「起始時間未到」與「視同關閉」是兩件不同的事，混在一起會推翻兩條既有決定：
 
-    ## 兩個空值的保守方向刻意相反
+    1. **#247 SA Q2 裁示 A：起始時間未到之課程仍可加入。** 若本函式要求「起始已到」，
+       `ensure_course_joinable` 會開始擋下起始前的加入，直接違反該裁示。
+    2. **草稿與起始未到都不是「關閉」。** `learning` 以本函式的結果驅動「此課程目前
+       關閉中」的唯讀提示；把草稿（教師預覽）或起始未到判成關閉，教師與學員會看到一句
+       與事實不符的提示。
 
-    - `open_start_at is None` → **不開放**。已發布課程必有起訖（發布檢核
-      `BLOCK_NO_SCHEDULE`），為空即資料異常；沿用 `is_visible_to_student` 對空值取
-      「不給看」的既有裁示。
-    - `open_end_at is None` → **開放**。為空代表「沒有結束日」，不該因為一個缺失的欄位
-      去關掉一門教師沒有要求關閉的課程。
+    起始時間的可見性判定已由 `publish_rules.is_visible_to_student` 承載（`my_courses`
+    清單用），本函式不重複它。
+
+    ## 呼叫端一律以「與 `CLOSED` 相同」處理
+
+    回 `True` 時各處的行為與 `STATUS = CLOSED` 完全一致——邀請碼失效、進度寫入 409、
+    問卷不可填、ET05 唯讀回看。**不可**改成「視同不存在」：已關閉課程仍要留在我的課程
+    清單、仍可唯讀回看（AC 9 / 10），把它當成不可見會讓學員的歷史紀錄從眼前消失。
 
     ⚠️ **`attempt/` 目前未接上本函式**——該目錄由 #280 進行中（footprint 保護）。故期間
     已過時仍可開新作答，與其餘四處不一致；已列為 #288 的 follow-up。
-
-    Returns:
-        `True` = 學員此刻可存取（累積進度 / 作答 / 填問卷）；`False` = 視同關閉
-        （仍可唯讀回看，見各呼叫端）。
     """
-    if status != COURSE_PUBLISHED:
-        return False
-    if open_start_at is None or now < open_start_at:
-        return False
-    return open_end_at is None or now <= open_end_at
+    if status == COURSE_CLOSED:
+        return True
+    # 訖止為空代表「沒有結束日」——不該因為一個缺失的欄位去關掉一門教師沒有要求關閉
+    # 的課程。已發布課程必有起訖（發布檢核 `BLOCK_NO_SCHEDULE`），為空即資料異常。
+    return status == COURSE_PUBLISHED and open_end_at is not None and now > open_end_at
 
 
 def ensure_reopen_schedule(*, open_end_at: datetime, now: datetime) -> None:
@@ -144,7 +144,7 @@ def ensure_reopen_schedule(*, open_end_at: datetime, now: datetime) -> None:
 
     那個理由在再開課**不存在**——再開課的兩個時間是 FR-ET-US11-09 明訂「強制重新設定」
     的，沒有沿用舊值的問題。而若不檢核，直呼 API 就能造出「已發布但期間已過」的課程：
-    教師端看到「已發布」，學員端卻被 `is_within_open_window` 判為視同關閉而進不去，
+    教師端看到「已發布」，學員端卻被 `is_effectively_closed` 判為視同關閉而進不去，
     **狀態自相矛盾，且沒有任何地方會察覺**。
 
     **只檢核訖止、不檢核起始**：起始允許落在過去——「補開一段已經開始的期間」是合理

@@ -19,7 +19,7 @@ from app.et.course.rules import (
     ensure_reopenable,
     ensure_reorder_complete,
     ensure_tag_change_allowed,
-    is_within_open_window,
+    is_effectively_closed,
     resequence,
 )
 
@@ -227,79 +227,54 @@ class TestEnsureReopenSchedule:
         ensure_reopen_schedule(open_end_at=_NOW + timedelta(days=1), now=_NOW)
 
 
-class TestIsWithinOpenWindow:
-    """課程當下對學員是否開放（#288 SA Q1 裁示 A 的共用判定）。
+class TestIsEffectivelyClosed:
+    """課程對學員是否視同關閉（#288 SA Q1 裁示 A）。
 
     `spec_us11` 場景 7 / FR-ET-US11-03 與 `data-model` §ET_COURSE 業務規則都要求
     「`now > OPEN_END_AT` 視同關閉」，而在本 issue 之前**全後端沒有任何地方讀
     `OPEN_END_AT` 做存取判定**。
     """
 
-    def test_期間內之已發布課程為開放(self) -> None:
-        assert is_within_open_window(
-            status=COURSE_PUBLISHED,
-            open_start_at=_NOW - timedelta(days=1),
-            open_end_at=_NOW + timedelta(days=1),
-            now=_NOW,
-        )
+    def test_已關閉為視同關閉(self) -> None:
+        assert is_effectively_closed(status=COURSE_CLOSED, open_end_at=_NOW + timedelta(days=1), now=_NOW)
 
-    def test_訖止時間已過為不開放(self) -> None:
+    def test_已發布且期間已過為視同關閉(self) -> None:
         """🔴 本函式存在的唯一理由。此前這種課程「照常運作」——可加入、可作答、可填問卷。"""
-        assert not is_within_open_window(
-            status=COURSE_PUBLISHED,
-            open_start_at=_NOW - timedelta(days=30),
-            open_end_at=_NOW - timedelta(seconds=1),
-            now=_NOW,
-        )
+        assert is_effectively_closed(status=COURSE_PUBLISHED, open_end_at=_NOW - timedelta(seconds=1), now=_NOW)
 
-    def test_恰好等於訖止時間仍為開放(self) -> None:
+    def test_恰好等於訖止時間尚未視同關閉(self) -> None:
         """spec 寫「`now > OPEN_END_AT` 視同關閉」——嚴格大於，等於的那一瞬間還在期間內。"""
-        assert is_within_open_window(
-            status=COURSE_PUBLISHED,
-            open_start_at=_NOW - timedelta(days=1),
-            open_end_at=_NOW,
-            now=_NOW,
-        )
+        assert not is_effectively_closed(status=COURSE_PUBLISHED, open_end_at=_NOW, now=_NOW)
 
-    def test_起始時間未到為不開放(self) -> None:
-        """AC 4 / `is_visible_to_student` 的既有規則，一併由本函式承載。
+    def test_已發布且期間內不視同關閉(self) -> None:
+        assert not is_effectively_closed(status=COURSE_PUBLISHED, open_end_at=_NOW + timedelta(days=1), now=_NOW)
 
-        ⚠️ 這是把四處判定收斂成一支純函式的主要理由——各自寫一次最可能漏掉的就是
-        這一半，而漏掉會讓起始時間未到的課程變成可存取。
+    def test_草稿不視同關閉(self) -> None:
+        """🔴 草稿不是「關閉」。
+
+        `learning` 以本函式驅動「此課程目前關閉中」的唯讀提示；把草稿判成關閉，教師
+        預覽自己的草稿課程時會看到一句與事實不符的提示。
         """
-        assert not is_within_open_window(
-            status=COURSE_PUBLISHED,
-            open_start_at=_NOW + timedelta(seconds=1),
-            open_end_at=_NOW + timedelta(days=30),
-            now=_NOW,
-        )
+        assert not is_effectively_closed(status=COURSE_DRAFT, open_end_at=_NOW - timedelta(days=1), now=_NOW)
 
-    def test_恰好等於起始時間即為開放(self) -> None:
-        """邊界沿用 `publish_rules.is_visible_to_student` 的 `now >= open_start_at`。"""
-        assert is_within_open_window(
-            status=COURSE_PUBLISHED, open_start_at=_NOW, open_end_at=_NOW + timedelta(days=1), now=_NOW
-        )
+    def test_訖止為空不視同關閉(self) -> None:
+        """為空代表「沒有結束日」——不該因為一個缺失的欄位去關掉一門教師沒有要求關閉的課。
 
-    @pytest.mark.parametrize("status", [COURSE_DRAFT, COURSE_CLOSED])
-    def test_非已發布一律不開放(self, status: str) -> None:
-        """已關閉走的是既有的 `STATUS` 判定；本函式把兩種來源合為同一個答案。"""
-        assert not is_within_open_window(
-            status=status, open_start_at=_NOW - timedelta(days=1), open_end_at=_NOW + timedelta(days=1), now=_NOW
-        )
-
-    def test_起始時間為空不開放(self) -> None:
-        """已發布課程必有起訖（發布檢核 `BLOCK_NO_SCHEDULE`），為空即資料異常 → 取較保守的一側。"""
-        assert not is_within_open_window(
-            status=COURSE_PUBLISHED, open_start_at=None, open_end_at=_NOW + timedelta(days=1), now=_NOW
-        )
-
-    def test_訖止時間為空視為無期限開放(self) -> None:
-        """與起始為空刻意不同：起始為空代表「不知道何時開始」→ 不可見（沿用既有裁示）；
-        訖止為空代表「沒有結束日」→ 不該因此把課程關掉。
-
-        兩者都只可能在資料異常時出現，但保守的方向相反：前者保守＝不給看，後者保守＝
-        不要無故關閉一門教師沒有要求關閉的課程。
+        已發布課程必有起訖（發布檢核 `BLOCK_NO_SCHEDULE`），為空即資料異常。與
+        `open_start_at` 的保守方向相反是刻意的：那一半由
+        `publish_rules.is_visible_to_student` 承載，本函式不重複它。
         """
-        assert is_within_open_window(
-            status=COURSE_PUBLISHED, open_start_at=_NOW - timedelta(days=1), open_end_at=None, now=_NOW
-        )
+        assert not is_effectively_closed(status=COURSE_PUBLISHED, open_end_at=None, now=_NOW)
+
+    def test_不看起始時間(self) -> None:
+        """🔴 本函式**只看訖止**，這是為了不推翻 #247 SA Q2 裁示 A。
+
+        那條裁示明訂「起始時間未到之課程**仍可加入**」。若本函式要求「起始已到」，
+        `ensure_course_joinable` 會開始擋下起始前的加入，直接違反該裁示——而那個違反
+        不會有任何測試抓到，因為 #247 的測試驗的是「可加入」而非「本函式回什麼」。
+
+        本函式的簽章刻意**不收 `open_start_at`**，讓那個錯誤在型別層就寫不出來。
+        """
+        import inspect
+
+        assert "open_start_at" not in inspect.signature(is_effectively_closed).parameters

@@ -41,6 +41,9 @@ class SurveyEntryFacts:
     survey_name: str
     survey_active: bool
     course_status: str
+    #: 閱課訖止時間（#288）。呼叫端以 `course.rules.is_effectively_closed` 判定「期間
+    #: 已過視同關閉」——`course_status` 單獨不足以表達那個狀態。
+    open_end_at: datetime | None
     submitted_at: datetime | None
 
 
@@ -72,6 +75,7 @@ class EtSurveyFillRepository:
                     EtSurvey.survey_name,
                     EtSurvey.is_active,
                     EtCourse.status,
+                    EtCourse.open_end_at,
                     EtSurveyResponseM.submitted_at,
                 )
                 .select_from(EtSurvey)
@@ -92,7 +96,8 @@ class EtSurveyFillRepository:
             survey_name=row[1],
             survey_active=row[2],
             course_status=row[3],
-            submitted_at=row[4],
+            open_end_at=row[4],
+            submitted_at=row[5],
         )
 
     async def my_answers(self, db: AsyncSession, *, survey_id: int, user_id: str) -> list[MyAnswer]:

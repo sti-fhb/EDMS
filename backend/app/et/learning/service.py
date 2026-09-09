@@ -27,9 +27,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
+from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, ITEM_MATERIAL
+from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
 from app.et.course.models import EtItem
+from app.et.course.rules import is_effectively_closed
 from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access, playback_rates
@@ -133,7 +135,10 @@ class EtLearningService:
             course_name=course.course_name,
             status=course.status,
             is_owner=is_owner,
-            is_closed=course.status == COURSE_CLOSED,
+            # #288：期間已過亦視同關閉（`spec_us11` 場景 7 / FR-ET-US11-03）。與
+            # `STATUS = CLOSED` 走完全相同的路徑——只多一條頂部唯讀提示，**不過濾任何
+            # 內容**（#255 裁示 Q2=A）。
+            is_closed=is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()),
             playback_rates=list(playback_rates(max_rate=max_rate)),
             last_item_id=(
                 None if is_preview else await self._progress.get_last_item_id(db, user_id=user_id, course_id=course_id)

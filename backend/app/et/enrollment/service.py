@@ -74,7 +74,12 @@ class EtEnrollmentService:
         visible = [
             (enrollment, course)
             for enrollment, course in await self._enrollments.list_active_enrollments(db, user_id)
-            if is_listed_in_my_courses(status=course.status, open_start_at=course.open_start_at, now=now)
+            if is_listed_in_my_courses(
+                status=course.status,
+                open_start_at=course.open_start_at,
+                open_end_at=course.open_end_at,
+                now=now,
+            )
         ]
 
         course_ids = [course.course_id for _, course in visible]
@@ -248,7 +253,7 @@ class EtEnrollmentService:
         course = await self._enrollments.get_by_invitation_code(db, normalized)
         if course is None:
             raise _CODE_INVALID
-        ensure_course_joinable(course_status=course.status)
+        ensure_course_joinable(course_status=course.status, open_end_at=course.open_end_at, now=utcnow())
         return course
 
 

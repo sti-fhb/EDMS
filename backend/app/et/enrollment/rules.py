@@ -21,10 +21,10 @@ from app.et.constants import (
     COMPLETION_COMPLETED,
     COMPLETION_IN_PROGRESS,
     COMPLETION_NOT_STARTED,
-    COURSE_CLOSED,
     COURSE_PUBLISHED,
 )
 from app.et.course.publish_rules import is_visible_to_student
+from app.et.course.rules import is_effectively_closed
 
 #: 邀請碼長度（`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)`）。
 INVITATION_CODE_LENGTH: Final = 8
@@ -49,22 +49,30 @@ def normalize_invitation_code(raw: str) -> str | None:
     return candidate if _CODE_PATTERN.fullmatch(candidate) else None
 
 
-def ensure_course_joinable(*, course_status: str) -> None:
+def ensure_course_joinable(*, course_status: str, open_end_at: datetime | None, now: datetime) -> None:
     """課程當前狀態是否允許加入（AC 9 / ET-MSG-ET04-002）。
 
     判定依據是**課程當前狀態**而非碼是否存在——邀請碼於課程關閉期間失效、
     再開課後恢復有效（`spec_us4` Clarifications），碼本身自始至終不變。
 
-    ⚠️ **本函式不看 `OPEN_END_AT`，全後端目前也沒有任何地方看它**（它只用於顯示與
-    發布檢核）。閱課期間結束後若 `STATUS` 仍是 `PUBLISHED`，課程依然可加入、也依然
-    留在我的課程清單。spec 說「到期自動關閉」，但自動關閉屬 `ET-11`（未實作）——
-    到期的執行點目前不存在，不是散落在別處。`ET-11` 設計時須決定「期間結束 = 不可
-    加入」要落在這裡還是靠自動 `CLOSED`，別因為這裡查不到就假設有人已經做了。
+    ## 閱課期間已過 = 視同關閉（#288 補上）
+
+    原本本函式**只看 `STATUS`**，而全後端沒有任何地方讀 `OPEN_END_AT` 做存取判定——
+    閱課期間結束後課程依然可加入。`spec_us11` 場景 7 / FR-ET-US11-03 與 `data-model`
+    §ET_COURSE 三處都要求「應用層即時判定」，#288 SA Q1 裁示 A 把它落在此處與另外三個
+    子模組（`learning` / `progress` / `survey_fill`）。
+
+    期間已過時回**與 `CLOSED` 相同的** `ET_ENROLL_002`「此課程目前關閉中」：對學員而言
+    兩者是同一件事（這門課現在不能加入），而 spec 的用語正是「視同關閉」。
+
+    ⚠️ **起始時間未到仍可加入**（#247 SA Q2 裁示 A）——故 `is_effectively_closed`
+    刻意只看訖止、不看起始，本函式亦不自行補上起始判定。
 
     Raises:
-        AppError: 409 `ET_ENROLL_002` 課程關閉中；404 `ET_ENROLL_001` 非已發布課程。
+        AppError: 409 `ET_ENROLL_002` 課程關閉中（或閱課期間已過）；
+            404 `ET_ENROLL_001` 非已發布課程。
     """
-    if course_status == COURSE_CLOSED:
+    if is_effectively_closed(status=course_status, open_end_at=open_end_at, now=now):
         raise AppError(status_code=409, detail="此課程目前關閉中", error_code="ET_ENROLL_002")
     if course_status != COURSE_PUBLISHED:
         # 邀請碼於發布時才產生，草稿課程照理取不到碼；真的走到這裡只可能是資料異常。
@@ -146,14 +154,20 @@ def derive_completion_status(*, done: int, total: int) -> str:
     return COMPLETION_IN_PROGRESS
 
 
-def is_listed_in_my_courses(*, status: str, open_start_at: datetime | None, now: datetime) -> bool:
+def is_listed_in_my_courses(
+    *, status: str, open_start_at: datetime | None, open_end_at: datetime | None, now: datetime
+) -> bool:
     """課程是否出現在學員的「我的課程」清單（AC 4 / AC 5）。
 
-    - **已發布**：委由 `is_visible_to_student` 判定（須 `now >= OPEN_START_AT`）；
+    - **已關閉（或閱課期間已過）**：一律顯示（AC 5 / AC 13、US11 AC 9）——卡片標
+      「已關閉」，點擊可唯讀回看。`open_start_at` 不影響結果：課程能被關閉，必然已經
+      發布並開放過。
+    - **已發布且期間內**：委由 `is_visible_to_student` 判定（須 `now >= OPEN_START_AT`）；
       起始時間未到者不顯示（AC 4）。
-    - **已關閉**：一律顯示（AC 5 / AC 13）——卡片標「已關閉」，點擊可唯讀回看。
-      `open_start_at` 不影響結果：課程能被關閉，必然已經發布並開放過。
+
+    ⚠️ 期間已過者**必須留在清單**（#288）。把它們過濾掉會讓學員的歷史紀錄從眼前消失
+    ——那與 US11 AC 9「已關閉課程仍顯示於列表並標示已關閉」相反。
     """
-    if status == COURSE_CLOSED:
+    if is_effectively_closed(status=status, open_end_at=open_end_at, now=now):
         return True
     return is_visible_to_student(status=status, open_start_at=open_start_at, now=now)
