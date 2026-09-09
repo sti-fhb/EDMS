@@ -5,10 +5,12 @@
 """
 
 import re
+from datetime import datetime
 from typing import Final
 
 from app.core.exceptions import AppError
 from app.et.constants import COURSE_PUBLISHED
+from app.et.course.rules import is_effectively_closed
 
 #: 單次可邀請之 Email 數上限。
 #:
@@ -69,15 +71,28 @@ def parse_emails(raw: str) -> list[str]:
     return list(seen)
 
 
-def ensure_invitable(*, course_status: str) -> None:
-    """僅「已發布」課程可邀請學員（FR-ET-US8-01）。
+def ensure_invitable(*, course_status: str, open_end_at: datetime | None, now: datetime) -> None:
+    """僅「已發布**且閱課期間內**」的課程可邀請學員（FR-ET-US8-01 / #288）。
 
     草稿尚無邀請碼、學員端也看不到課程；已關閉課程的學習頁為唯讀，把人邀請進去只會
     讓他點開後什麼都不能做。再開課後 `STATUS` 回 `PUBLISHED`，本檢核自然恢復通過——
     不需要額外的「恢復」邏輯。
 
+    ## 兩種擋法給**兩個不同的錯誤碼**（#288）
+
+    | 情況 | 回應 | 教師看到 |
+    |---|---|---|
+    | 草稿 / 已關閉 | 422 `ET_INVITE_004` | 僅已發布課程可邀請學員 |
+    | 已發布但期間已過 | 409 `ET_INVITE_002` | 此課程目前關閉中 |
+
+    共用 `ET_INVITE_004` 會對第二種情況說出一句與畫面矛盾的話——教師的課程明明標著
+    「已發布」，卻被告知「僅已發布課程可邀請」。`ET_INVITE_002`（此課程目前關閉中）
+    是既有代碼，`accept` 對同一情況已用它，兩條路徑因此一致。
+
     Raises:
-        AppError: 課程非已發布（422 `ET_INVITE_004`）。
+        AppError: 422 `ET_INVITE_004` 課程非已發布；409 `ET_INVITE_002` 期間已過。
     """
     if course_status != COURSE_PUBLISHED:
         raise AppError(status_code=422, detail="僅已發布課程可邀請學員", error_code="ET_INVITE_004")
+    if is_effectively_closed(status=course_status, open_end_at=open_end_at, now=now):
+        raise AppError(status_code=409, detail="此課程目前關閉中", error_code="ET_INVITE_002")
