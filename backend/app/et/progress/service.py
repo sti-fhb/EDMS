@@ -264,13 +264,13 @@ class EtProgressService:
             raise _NOT_FOUND
         if course.status == COURSE_CLOSED:
             raise _CLOSED
-        if item_id is not None and await self._is_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
+        if item_id is not None and await self.is_item_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
             # **鎖定中的項目視同不存在**——回 404 而非 403，與其餘以 id 定址的端點一致，
             # 不讓回應差異變成「這個 item_id 存在」的 oracle。
             raise _NOT_FOUND
 
-    async def _is_locked(self, db: AsyncSession, *, course_id: int, user_id: str, item_id: int) -> bool:
-        """單一項目是否鎖定。
+    async def is_item_locked(self, db: AsyncSession, *, course_id: int, user_id: str, item_id: int) -> bool:
+        """單一項目是否鎖定。**公開**——`attempt` 子模組於「開始作答」時亦須此判定。
 
         **已完成者永不鎖定**（`is_item_unlocked` 的同一條規則）——先問這一題可讓「回頭
         複習已學過的項目」只花一次查詢，而不必為了得到同一個答案重算整門課的解鎖狀態。

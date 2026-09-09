@@ -235,24 +235,35 @@ class EtQuizRepository:
         await db.flush()
 
     async def soft_delete_questions(self, db: AsyncSession, question_ids: list[int], operator: OperatorInfo) -> None:
-        """軟刪除題目、其選項，及學員於該題之作答明細。
+        """軟刪除題目與其選項。**學員的作答明細不動**。
 
-        > `ET_QUIZ_ATTEMPT_D` **亦連帶軟刪除**（2026-08-24 #202 裁示，原 spec 為 hard
-        > delete）。成績查詢務必排除 `DELETED = 1`，否則已刪題目的得分會被計入。
+        ## 為何不連帶軟刪除 `ET_QUIZ_ATTEMPT_D`（2026-09-04 / #279 SA 裁示 Q2 = C）
 
-        `ET_QUIZ_ATTEMPT_M`（作答主檔）**不刪**——刪的是題目、不是整場作答；該場作答
-        仍存在，只是少了這一題。整場作廢是刪除測驗時的事（見 `soft_delete_cascade`）。
+        2026-08-24 #202 曾加上連帶軟刪除，目的是「**不要硬刪掉學員資料**」（原 spec 規定
+        hard delete，該次推翻）。但其代價清單只涵蓋 **#5 / #9 / #14** 三張**統計型**
+        issue，**沒有列入 US6 的「學員回看自己那次考卷」**——是一個沒被想到的用途。
+
+        照原本的連帶做下去，學員會看到「總分 75、明細只列 4 題加起來 60」這種自己對不
+        起來的成績單：`ET_QUIZ_ATTEMPT_M.SCORE` 是閱卷當下算好凍結的，不因題目後來被刪
+        而改變（也不該改，那是既成事實）。
+
+        `ET_QUIZ_ATTEMPT_D` 是**自給自足**的——`STEM_SNAPSHOT` / `OPTIONS_SNAPSHOT` /
+        `POINTS_SNAPSHOT` / `SELECTED_OPTIONS` 足以渲染明細，完全不需要讀 `ET_QUESTION`。
+        題目被刪除對這筆明細沒有任何影響，除非我們自己去標記它。
+
+        > 🔴 **給 `ET-9` / `ET-14` 的連帶約束**：成績統計一律讀
+        > `ET_QUIZ_ATTEMPT_M.SCORE`（閱卷當下凍結的總分），**不得**回頭重新加總
+        > `ET_QUIZ_ATTEMPT_D.SCORE`——重新加總等於不信任閱卷結果，而閱卷是依當時快照
+        > 算的，事後任何改動都不該回頭影響它。
+
+        `ET_QUIZ_ATTEMPT_M`（作答主檔）同樣不刪——刪的是題目、不是整場作答。整場作廢是
+        刪除測驗時的事（見 `soft_delete_cascade`）。
         """
         if not question_ids:
             return
         audit = {"deleted": 1, "updated_user": operator.user_id, "updated_date": utcnow()}
         await db.execute(
             update(EtOption).where(EtOption.question_id.in_(question_ids), EtOption.deleted == 0).values(**audit)
-        )
-        await db.execute(
-            update(EtQuizAttemptD)
-            .where(EtQuizAttemptD.question_id.in_(question_ids), EtQuizAttemptD.deleted == 0)
-            .values(**audit)
         )
         await db.execute(
             update(EtQuestion).where(EtQuestion.question_id.in_(question_ids), EtQuestion.deleted == 0).values(**audit)

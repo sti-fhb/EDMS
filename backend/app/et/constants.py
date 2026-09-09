@@ -62,6 +62,12 @@ ATTEMPT_TIMEOUT: Final = "TIMEOUT"
 
 ALL_ATTEMPT_STATUSES: Final = frozenset({ATTEMPT_IN_PROGRESS, ATTEMPT_SUBMITTED, ATTEMPT_TIMEOUT})
 
+#: 已閱卷、有成績可看的狀態。
+#:
+#: 供「取成績明細」白名單用。**不要改寫成 `!= IN_PROGRESS`**——那是預設放行，新增任何
+#: 狀態都會自動落進可看側，把正確答案送給一個沒有成績的 attempt。
+GRADED_STATUSES: Final = frozenset({ATTEMPT_SUBMITTED, ATTEMPT_TIMEOUT})
+
 # ── ET_QUESTION_TYPE：題型（多選採部分計分）───────────────────────────────────
 QuestionType = Literal["SINGLE", "MULTIPLE"]
 

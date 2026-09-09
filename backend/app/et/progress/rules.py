@@ -155,15 +155,26 @@ def build_item_state(item_id: int, item_type: str, *, completed_ids: Container[i
     """由項目型別與完成集合組出 `ItemState`。
 
     ⚠️ **讀取路徑（側欄旗標）與寫入路徑（擋下鎖定項目）必須共用本函式**。兩邊各自
-    組一份的話，`treat_as_done` 這條「測驗恆視為通過」的規則就有兩個版本——而它們
-    分岔的表現是「側欄顯示解鎖但後端擋下」，一個學員完全無法理解、也不會有測試自然
-    抓到的狀態。
+    組一份的話，`treat_as_done` 這條規則就有兩個版本——而它們分岔的表現是「側欄顯示
+    解鎖但後端擋下」，一個學員完全無法理解、也不會有測試自然抓到的狀態。
     """
     completed = item_id in completed_ids
+    # 🔴 **測驗仍恆視為通過**——`spec_us5` AC 12「測驗未及格阻擋解鎖」**尚未啟用**。
+    #
+    # `ET-6a`（#279）已交付真實的及格判定：提交及格時 `attempt/service` 會回寫
+    # `ET_PROGRESS.IS_COMPLETED`，所以側欄的 `completed` 打勾是真的。但**解鎖門檻**
+    # 仍刻意不掛上去，理由是**目前沒有任何補救途徑**：
+    #
+    # - 「重置重考次數」屬 US9（`ET-9`），尚未實作——全專案沒有任何程式碼寫入
+    #   `ET_QUIZ_RETRY_RESET`，只有 `attempt/repository` 在讀它
+    # - 故一旦學員次數用盡且未及格，該課程後半段對他**永久鎖死**，只能改資料庫救
+    # - `ET_ATTEMPT_002` 的訊息「請聯繫教師重置」會指向一個不存在的功能
+    #
+    # #279 裁示 2 = C：等 `ET-9` 交付重置功能後，把下面的 `or item_type == ITEM_QUIZ`
+    # 拿掉即可啟用 AC 12——**改這一行就好，其餘判定已經就位**。
     return ItemState(
         item_id=item_id,
         completed=completed,
-        # 測驗於 `ET-6` 交付前恆視為通過——否則它後面的一切永久鎖死
         treat_as_done=completed or item_type == ITEM_QUIZ,
     )
 

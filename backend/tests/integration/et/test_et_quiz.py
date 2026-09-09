@@ -433,8 +433,16 @@ class TestReorderQuestions:
 
 
 class TestDeleteQuestion:
-    async def test_刪除題目連帶軟刪選項與作答明細(self, client, db) -> None:
-        """作答**主檔**不刪——刪的是一題，不是整場作答。"""
+    async def test_刪除題目軟刪選項但不動學員作答明細(self, client, db) -> None:
+        """**2026-09-04 / #279 SA 裁示 Q2 = C 起，作答明細不再連帶軟刪除。**
+
+        #202 曾加上連帶軟刪除，目的是「不要**硬**刪掉學員資料」（原 spec 為 hard
+        delete）。但其代價清單只涵蓋 #5 / #9 / #14 三張統計型 issue，**沒有列入 US6 的
+        「學員回看自己那次考卷」**——照原本的連帶做下去，學員會看到「總分 75、明細只
+        列 4 題加起來 60」這種自己對不起來的成績單。
+
+        作答**主檔**同樣不刪——刪的是一題，不是整場作答。
+        """
         uid = await _user(db, "ETQ_D1")
         cid, qid = await _quiz(client, uid)
         question = await _add_question(client, uid, qid)
@@ -475,7 +483,10 @@ class TestDeleteQuestion:
         options = list(await db.scalars(select(EtOption).where(EtOption.question_id == question["question_id"])))
         assert options and all(o.deleted == 1 for o in options)
         details = list(await db.scalars(select(EtQuizAttemptD).where(EtQuizAttemptD.attempt_id == attempt.attempt_id)))
-        assert details and all(d.deleted == 1 for d in details), "作答明細應軟刪（#202 裁示，原為 hard delete）"
+        assert details and all(d.deleted == 0 for d in details), (
+            "作答明細**不得**被連帶軟刪除——`ET_QUIZ_ATTEMPT_D` 自給自足（四個快照欄位"
+            "足以渲染明細），題目被刪對它沒有影響（#279 裁示 Q2 = C）"
+        )
         await db.refresh(attempt)
         assert attempt.deleted == 0, "作答主檔不應被刪——刪的是一題，不是整場作答"
 
