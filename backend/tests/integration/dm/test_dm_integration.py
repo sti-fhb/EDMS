@@ -183,14 +183,15 @@ async def test_list_func_code_filter(db):
     now = utcnow()
     db.add_all(
         [
-            DmFunc(func_code="BS04", func_name="領血確認", created_user="seed", created_date=now),
-            DmFunc(func_code="BS05", func_name="用血回報", created_user="seed", created_date=now),
+            # ZT 前綴為測試專用代碼（主系統無此模組），避免與業務種子的真實代碼撞 PK
+            DmFunc(func_code="ZT04", func_name="測試作業項目一", created_user="seed", created_date=now),
+            DmFunc(func_code="ZT05", func_name="測試作業項目二", created_user="seed", created_date=now),
         ]
     )
     await db.flush()
-    await _published_doc(db, "DM-TRAINING-000030", name="F1", func_code="BS04")
-    await _published_doc(db, "DM-TRAINING-000031", name="F2", func_code="BS05")
-    items = await _svc.list_training_documents(db, func_code="BS04")
+    await _published_doc(db, "DM-TRAINING-000030", name="F1", func_code="ZT04")
+    await _published_doc(db, "DM-TRAINING-000031", name="F2", func_code="ZT05")
+    items = await _svc.list_training_documents(db, func_code="ZT04")
     assert [i.doc_name for i in items] == ["F1"]
 
 

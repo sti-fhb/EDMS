@@ -16,8 +16,9 @@ pytestmark = pytest.mark.integration
 
 
 async def _seed_catalog(db):
-    # MANUAL 分類已由業務種子建立，此處只補測試用 func（func 不在種子內）
-    db.add(DmFunc(func_code="BS04", func_name="領血確認", created_user="s", created_date=utcnow()))
+    # MANUAL 分類與作業項目皆已有業務種子；此處另補測試專用 func。
+    # 代碼用 ZT 前綴（主系統無此模組），避免與種子的真實代碼（BS04 等）撞 PK。
+    db.add(DmFunc(func_code="ZT04", func_name="測試作業項目", created_user="s", created_date=utcnow()))
     await db.flush()
 
 
@@ -30,7 +31,7 @@ async def test_document_and_version_fk(db):
             doc_id="DM-MANUAL-000001",
             doc_name="領血手冊",
             category_code="MANUAL",
-            func_code="BS04",
+            func_code="ZT04",
             status="DRAFT",
             created_user="editor",
             created_date=now,
@@ -66,7 +67,7 @@ async def test_manual_func_unique_when_published(db):
             doc_id="DM-MANUAL-000001",
             doc_name="手冊A",
             category_code="MANUAL",
-            func_code="BS04",
+            func_code="ZT04",
             status="PUBLISHED",
             created_user="e",
             created_date=now,
@@ -78,7 +79,7 @@ async def test_manual_func_unique_when_published(db):
             doc_id="DM-MANUAL-000002",
             doc_name="手冊B",
             category_code="MANUAL",
-            func_code="BS04",
+            func_code="ZT04",
             status="PUBLISHED",
             created_user="e",
             created_date=now,
@@ -97,7 +98,7 @@ async def test_manual_func_draft_not_blocked(db):
             doc_id="DM-MANUAL-000001",
             doc_name="手冊A",
             category_code="MANUAL",
-            func_code="BS04",
+            func_code="ZT04",
             status="PUBLISHED",
             created_user="e",
             created_date=now,
@@ -108,14 +109,14 @@ async def test_manual_func_draft_not_blocked(db):
             doc_id="DM-MANUAL-000002",
             doc_name="手冊B草稿",
             category_code="MANUAL",
-            func_code="BS04",
+            func_code="ZT04",
             status="DRAFT",
             created_user="e",
             created_date=now,
         )
     )
     await db.flush()  # 不應拋錯
-    rows = (await db.execute(select(DmDocument).where(DmDocument.func_code == "BS04"))).scalars().all()
+    rows = (await db.execute(select(DmDocument).where(DmDocument.func_code == "ZT04"))).scalars().all()
     assert len(rows) == 2
 
 
@@ -128,7 +129,7 @@ async def test_doc_read_dedup_unique(db):
             doc_id="DM-MANUAL-000001",
             doc_name="D",
             category_code="MANUAL",
-            func_code="BS04",
+            func_code="ZT04",
             status="PUBLISHED",
             created_user="e",
             created_date=now,

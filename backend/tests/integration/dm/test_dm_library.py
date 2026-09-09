@@ -238,10 +238,11 @@ async def test_pending_obsolete_visible_to_viewer(db):
 
 
 async def test_manual_func_filter_unique(db):
-    await _make_func(db, "BS04", "領血確認")
-    await _seed_doc(db, doc_id="DM-MANUAL-000090", name="BS04手冊", category="MANUAL", func_code="BS04")
+    # ZT 前綴為測試專用代碼（主系統無此模組），避免與業務種子的真實代碼撞 PK
+    await _make_func(db, "ZT04", "測試作業項目")
+    await _seed_doc(db, doc_id="DM-MANUAL-000090", name="ZT04手冊", category="MANUAL", func_code="ZT04")
     await _seed_doc(db, doc_id="DM-MANUAL-000091", name="其他手冊", category="MANUAL", func_code=None)
-    assert await _ids(db, category="MANUAL", func_code="BS04") == {"DM-MANUAL-000090"}
+    assert await _ids(db, category="MANUAL", func_code="ZT04") == {"DM-MANUAL-000090"}
 
 
 async def test_sort_desc_and_pagination(db):
