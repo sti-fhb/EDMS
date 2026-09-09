@@ -1,0 +1,231 @@
+# ============================================================
+# CI-Prod —— 手動指定版本產出 Docker 映像（不部署）
+#
+# 用途：在 Actions UI 點 [Run workflow]（或以 gh 下指令），指定任意 commit /
+#       tag 建置 edms-backend 與 edms-nginx，推到 GitHub Container Registry
+#       供本機 docker pull；需要離線檔時可勾 export_tar 額外產出 tar.gz。
+#
+# 與 cd.yml 的分工：
+#   cd.yml  push main 自動觸發 → build + push Artifact Registry（部署由 VM 側
+#           的 edms-deploy.timer 主動拉取，見 docs/infra/deployment.md）
+#   本檔    手動觸發、可指定版本 → 只 build + push ghcr.io，**完全不影響線上**
+#
+# 為什麼推 ghcr.io 而不是 Artifact Registry：
+#   1. AR 需要 GCP 專案權限，開發者本機無法 pull
+#   2. cd.yml 走 WIF，而其 attribute condition 綁定 repo + refs/heads/main
+#      —— 手動指定舊 commit / 其他 ref 時取不到 GCP 身分，本檔改用 ghcr 即
+#      完全不需 GCP 認證（僅用內建 GITHUB_TOKEN），也不必放寬 WIF 條件
+#
+# ⚠️ 本 repo 為 public。ghcr 的 package 預設為 private，可於 package 設定改為
+#    public —— 改了之後拉取不需 PAT，且 public package 不計入儲存配額。
+#
+# 產物取用（本機）：
+#   docker pull ghcr.io/sti-fhb/edms-backend:<sha>
+#   package 仍為 private 時需先登入（PAT 需 read:packages scope）：
+#   echo <PAT> | docker login ghcr.io -u <你的 GitHub 帳號> --password-stdin
+#   每次執行的 Summary 頁會列出當次的完整指令。
+# ============================================================
+
+name: CI-Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'commit SHA / tag / branch（留空＝取所選分支最新）'
+        required: false
+        default: ''
+        type: string
+      export_tar:
+        description: '額外產出可下載的 tar.gz（含 postgres:17 與 nginx:alpine，供本機模擬離線部署）'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+  # 刻意不要 id-token：本檔不碰 GCP，不需要 WIF 的 OIDC token
+
+concurrency:
+  group: edms-ci-prod
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # ghcr 路徑一律小寫。sti-fhb 本身即小寫，直接寫死比 github.repository_owner 好讀
+  NAMESPACE: sti-fhb
+  # 一併打包進 tar.gz 的官方映像：本機模擬離線部署時就不需再連 Docker Hub。
+  # nginx:alpine 幾乎不佔額外空間——edms-nginx 本身即 FROM nginx:alpine，layer 共用。
+  # postgres:17 的版本須與 docker-compose.yml 一致。
+  BASE_IMAGES: postgres:17 nginx:alpine
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 指定版本
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ inputs.commit || github.ref }}
+          # 指定任意 commit SHA 時，shallow clone 可能取不到該物件
+          fetch-depth: 0
+
+      # 版本標示一律取 checkout 後的實際 HEAD。
+      # ⚠️ 不可用 github.sha —— workflow_dispatch 時它是「被 dispatch 的 ref 的 HEAD」，
+      #    而非 inputs.commit。用它打 tag 會產出「標示 A 版、內容是 B 版」的映像。
+      - name: 取得實際 commit
+        id: rev
+        run: |
+          SHA="$(git rev-parse --short=7 HEAD)"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "backend=${REGISTRY}/${NAMESPACE}/edms-backend:${SHA}" >> "$GITHUB_OUTPUT"
+          echo "nginx=${REGISTRY}/${NAMESPACE}/edms-nginx:${SHA}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### 建置版本"
+            echo ""
+            echo "| 項目 | 值 |"
+            echo "|------|-----|"
+            echo "| commit | ${SHA} |"
+            echo "| 訊息 | $(git log -1 --format=%s) |"
+            echo "| 日期 | $(git log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 登入 ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      # GitHub-hosted runner 每次都是全新環境，沒有本地 layer cache，
+      # 故用 GitHub Actions cache（type=gha）補回來。scope 刻意與 cd.yml 相同，
+      # 兩支共用同一份 cache，手動出版才不會每次都是冷 build。
+      - name: 設定 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build edms-backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          load: true          # 載入本地 daemon，供下方驗證步驟使用
+          tags: ${{ steps.rev.outputs.backend }}
+          cache-from: type=gha,scope=edms-backend
+          cache-to: type=gha,scope=edms-backend,mode=max
+
+      # 交付標的為院內封閉網路，映像不得在執行期依賴對外連線。
+      # uv run 預設會先把環境同步到與 uv.lock 一致，而映像刻意以 --no-dev 建置，
+      # uv 便判定 dev 依賴缺漏而連 PyPI 下載——院內無網路即容器起不來。
+      # 根因由 backend/Dockerfile 的 ENV UV_NO_SYNC=1 收斂；此處每次實測一次。
+      #
+      # ⚠️ 探針刻意用最小的 uv run python，**不要用 alembic heads**：
+      # 本專案有 migration 在 module 層 from app.core.config import settings，
+      # 使 alembic 相關指令需要一整組通過驗證的 production 設定，探針會隨設定
+      # 規則增修而失效（2026-09-03 首次 CD 即因此誤判為「封閉網路不可執行」）。
+      # 本步驟要驗的只是「uv run 不會嘗試對外同步」，與 app 設定無關。
+      - name: 驗證映像可於封閉網路執行
+        run: |
+          if ! OUT=$(docker run --rm --network none "${{ steps.rev.outputs.backend }}" uv run python -c "print('offline-ok')" 2>&1); then
+            echo "::error::映像在無對外網路的環境下無法執行。"
+            echo "::error::請確認 backend/Dockerfile 的 ENV UV_NO_SYNC=1 未被移除。"
+            echo "::error::實際輸出：${OUT}"
+            exit 1
+          fi
+          echo "映像可於封閉網路執行（--network none 驗證通過）：${OUT}"
+
+      # 手動出版可指定任意舊 commit，該版本的 migration 鏈未必收斂，
+      # 故不比照 cd.yml 以「本次是否動到 migration」為條件——一律檢查。
+      #
+      # alembic 會載入所有 migration 檔，而其中有一支在 module 層 import settings，
+      # 故需提供可通過驗證的最小設定。DEBUG=true 放寬 production 專屬檢核；
+      # 這些值僅供離線讀取 migration 版本檔使用，不連任何資料庫。
+      - name: 檢查 Alembic heads
+        run: |
+          if ! HEADS=$(docker run --rm \
+            -e DEBUG=true \
+            -e DATABASE_URL="postgresql+asyncpg://probe:probe@localhost:5432/probe" \
+            -e JWT_SECRET_KEY="ci-probe-only-not-a-real-secret-0123456789" \
+            "${{ steps.rev.outputs.backend }}" uv run alembic heads 2>&1); then
+            echo "::error::alembic heads 執行失敗（非 head 數問題）。實際輸出：${HEADS}"
+            exit 1
+          fi
+          COUNT=$(echo "$HEADS" | grep -c . || true)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::該版本有 ${COUNT} 個 Alembic head，以此映像跑 migration 會失敗。"
+            echo "$HEADS"
+            exit 1
+          fi
+          echo "Alembic head 正常（單一 head）"
+
+      - name: Build edms-nginx（含前端建置）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: nginx/Dockerfile
+          load: true          # 先載入本地，驗證通過才 push
+          tags: ${{ steps.rev.outputs.nginx }}
+          cache-from: type=gha,scope=edms-nginx
+          cache-to: type=gha,scope=edms-nginx,mode=max
+
+      # 前端建置失敗不會讓 docker build 非零結束，只會產出一個空站台，
+      # 到本機起起來看到白畫面才發現。故在此明確驗一次。
+      - name: 驗證前端靜態檔已包含於 nginx 映像
+        run: |
+          docker run --rm --entrypoint sh "${{ steps.rev.outputs.nginx }}" \
+            -c 'test -f /usr/share/nginx/html/index.html' \
+            || { echo "::error::nginx 映像內找不到前端 index.html，前端建置可能失敗。"; exit 1; }
+
+      # 刻意只打 :<sha>，不打 :latest —— VM 側部署腳本以 tag 比對決定要不要部署，
+      # 手動出的舊版本若覆蓋 :latest 會污染那個判斷依據。
+      - name: Push 到 ghcr.io
+        run: |
+          docker push "${{ steps.rev.outputs.backend }}"
+          docker push "${{ steps.rev.outputs.nginx }}"
+          {
+            echo ""
+            echo "### 本機取用"
+            echo ""
+            echo "package 仍為 private 時需先登入（PAT 需 read:packages scope）："
+            echo ""
+            echo "    echo <PAT> | docker login ghcr.io -u <你的 GitHub 帳號> --password-stdin"
+            echo "    docker pull ${{ steps.rev.outputs.backend }}"
+            echo "    docker pull ${{ steps.rev.outputs.nginx }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 匯出 tar.gz
+        if: fromJSON(inputs.export_tar)
+        id: tar
+        run: |
+          for img in $BASE_IMAGES; do docker pull "$img"; done
+          TAR_NAME="edms-images-${{ steps.rev.outputs.sha }}.tar.gz"
+          TAR="${{ runner.temp }}/${TAR_NAME}"
+          docker save \
+            "${{ steps.rev.outputs.backend }}" \
+            "${{ steps.rev.outputs.nginx }}" \
+            $BASE_IMAGES \
+            | gzip > "$TAR"
+          echo "path=${TAR}" >> "$GITHUB_OUTPUT"
+          {
+            echo ""
+            echo "### 離線檔"
+            echo ""
+            echo "大小 $(du -h "$TAR" | cut -f1)，含 edms-backend、edms-nginx、${BASE_IMAGES}"
+            echo ""
+            echo "    gh run download ${{ github.run_id }} -D .\\dist"
+            echo "    docker load -i .\\dist\\edms-images-${{ steps.rev.outputs.sha }}\\${TAR_NAME}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # public repo 的 Actions 儲存與執行時間皆不計費，故此處保留 7 天，
+      # 不必比照 TBMS 收到 1 天（TBMS 為 private，與 e2e artifact 共吃 2 GB 配額）。
+      - name: 上傳 tar.gz
+        if: fromJSON(inputs.export_tar)
+        uses: actions/upload-artifact@v4
+        with:
+          name: edms-images-${{ steps.rev.outputs.sha }}
+          path: ${{ steps.tar.outputs.path }}
+          retention-days: 7
+          compression-level: 0    # tar.gz 已壓過，再壓一次純浪費 CPU
+
+      - name: 清理登入憑證
+        if: always()
+        run: docker logout "$REGISTRY" || true
