@@ -126,6 +126,27 @@ class EtAttemptRepository:
             .limit(1)
         )
 
+    async def list_attempts(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> list[EtQuizAttemptM]:
+        """該學員於該測驗的**每一次**已閱卷作答（#280 AC 1）。
+
+        依 `ATTEMPT_NO` 遞增——wireframe 是「第 1 次 → 第 2 次」，而學員想回看的往往
+        正是第 1 次。狀態走與 `service.result` 同一組白名單，否則清單會給出一個
+        `result` 拒絕的 id，前端就得到一顆按了必 404 的列。
+
+        **不分頁**：`MAX_RETRY` 使單一測驗的 attempt 數為個位數。
+        """
+        rows = await db.scalars(
+            select(EtQuizAttemptM)
+            .where(
+                EtQuizAttemptM.user_id == user_id,
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.status.in_(GRADED_STATUSES),
+                EtQuizAttemptM.deleted == 0,
+            )
+            .order_by(EtQuizAttemptM.attempt_no)
+        )
+        return list(rows)
+
     async def get_attempt(self, db: AsyncSession, attempt_id: int) -> EtQuizAttemptM | None:
         return await db.scalar(
             select(EtQuizAttemptM).where(EtQuizAttemptM.attempt_id == attempt_id, EtQuizAttemptM.deleted == 0)

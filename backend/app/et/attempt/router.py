@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
-from app.et.attempt.schemas import AnswerReq, AttemptResult, AttemptState, QuizIntro
+from app.et.attempt.schemas import AnswerReq, AttemptResult, AttemptState, AttemptSummary, QuizIntro
 from app.et.attempt.service import EtAttemptService
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
@@ -71,6 +71,22 @@ async def quiz_intro(
     `time_limit_min` 為 `null` 代表**不限時**——前端須顯示「不限時」而非「0 分」。
     """
     return await _service.intro(db, quiz_id, user_id=ctx.user_id)
+
+
+@router.get("/quizzes/{quiz_id}/attempts", response_model=list[AttemptSummary])
+async def attempt_history(
+    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> list[AttemptSummary]:
+    """歷次作答清單：**每一次**已閱卷的作答，依 `ATTEMPT_NO` 遞增（#280 AC 1）。
+
+    **不分頁**——`MAX_RETRY` 使單一測驗的 attempt 數為個位數。
+
+    授權只看 `USER_ID`，**不問課程資格**：課程關閉後與被移除的學員仍須看得到自己的歷史
+    （`spec_us6` 場景 25 / 28）。查無資料回空清單而非 404——後者會變成存在性 oracle。
+    """
+    return await _service.history(db, quiz_id, user_id=ctx.user_id)
 
 
 @router.post("/quizzes/{quiz_id}/attempts", response_model=AttemptState, status_code=status.HTTP_201_CREATED)

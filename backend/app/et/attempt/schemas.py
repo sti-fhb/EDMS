@@ -138,7 +138,28 @@ class AttemptResult(BaseModel):
     submitted_at: datetime
     #: 提交後剩餘的可作答次數；> 0 且未及格時前端顯示「重新作答」。
     remaining_attempts: int
+    #: 課程是否已關閉——成績頁據以顯示 ET-MSG-ET06-005。
+    #:
+    #: `spec_us6` 場景 27 的訊息原本要在**作答中**告知，但作答頁刻意不重抓（重抓會把
+    #: 尚未暫存的答案蓋回畫面），而場景 27 本身保證作答中的 attempt 照樣完成並計分——
+    #: 學員不會因為不知情而損失任何東西，故改於此時告知（#280 裁示 Q3 = B）。
+    course_closed: bool
     questions: list[QuestionResult]
+
+
+class AttemptSummary(BaseModel):
+    """歷次作答清單的一列（#280 AC 1）。
+
+    **只列已閱卷的 attempt**（`GRADED_STATUSES`）——進行中的還沒有成績，列出來只會是
+    一列空白；「繼續作答」由 `QuizIntro.in_progress_attempt_id` 負責，不是這裡。
+    """
+
+    attempt_id: int
+    attempt_no: int
+    submitted_at: datetime
+    score: Decimal
+    is_pass: bool
+    status: Literal["SUBMITTED", "TIMEOUT"]
 
 
 class QuizIntro(BaseModel):
@@ -170,3 +191,9 @@ class QuizIntro(BaseModel):
     #: 供引導頁的「查看上次作答明細」——**次數用盡時該入口仍須可用**，複習正是次數
     #: 用完的學員最需要的東西，把它一起關掉等於懲罰他考不好。
     last_attempt_id: int | None
+    #: 課程是否已關閉。
+    #:
+    #: ⚠️ **`can_start=False` 有兩種成因**（次數用完、課程關閉），對學員的意義完全相反：
+    #: 前者聯繫教師重置有用，後者重置一點用也沒有。少了這個欄位前端只能寫死一句
+    #: 「重考次數已用完，請聯繫教師重置」，而那會叫課程關閉的學員去做一件沒有用的事。
+    course_closed: bool
