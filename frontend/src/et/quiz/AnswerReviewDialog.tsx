@@ -140,8 +140,13 @@ export function AnswerReviewDialog({ question, index, onClose }: Props) {
                       {/*
                         icon 與色條承載同一個狀態。色條單獨存在對色覺障礙者不可靠，
                         而 icon 的形狀（✓ / ✗ / ⚠ / ○）不依賴顏色也分得出來。
+
+                        ⚠️ **必須用 `titleAccess` 而不是 `aria-label`**：MUI 的 `SvgIcon` 對
+                        沒給 `titleAccess` 的圖示一律加 `aria-hidden="true"`，而使用者傳入的
+                        `aria-label` 只會落進其後的 spread、蓋不掉它。兩者並存時整個節點被
+                        移出可及性樹——螢幕報讀使用者讀不到任何狀態，畫面上卻完全正常。
                       */}
-                      <Icon fontSize="small" sx={{ color: style.color }} aria-label={style.legend} />
+                      <Icon fontSize="small" sx={{ color: style.color }} titleAccess={style.legend} />
                       <Typography variant="body2">{option.text}</Typography>
                     </Stack>
                   )

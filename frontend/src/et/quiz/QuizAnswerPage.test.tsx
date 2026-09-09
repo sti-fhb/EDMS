@@ -13,7 +13,20 @@ vi.mock("react-router-dom", async (orig) => {
   return { ...actual, useNavigate: () => navigate, useParams: () => ({ attemptId: "800" }) }
 })
 
-beforeEach(() => navigate.mockReset())
+/** jsdom 的 `document.hidden` 是唯讀 getter，只能覆寫屬性描述子。 */
+function setHidden(hidden: boolean) {
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden })
+}
+
+function hideTab() {
+  setHidden(true)
+  document.dispatchEvent(new Event("visibilitychange"))
+}
+
+beforeEach(() => {
+  navigate.mockReset()
+  setHidden(false)
+})
 
 describe("ET06 答題頁", () => {
   it("依快照順序呈現題目，且**不含正確答案**", async () => {
@@ -167,5 +180,79 @@ describe("ET06 答題頁", () => {
     renderWithProviders(<EtQuizAnswerPage />)
 
     expect(await screen.findByText(/已回到您未完成的作答/)).toBeInTheDocument()
+  })
+
+  describe("離開作答視窗自動提交", () => {
+    it("作答中切換分頁即自動提交，並在結果頁說明原因", async () => {
+      renderWithProviders(<EtQuizAnswerPage />)
+      await screen.findByText("採血前應先確認什麼？")
+
+      hideTab()
+
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith(
+          "/et/attempts/800/result",
+          expect.objectContaining({ state: expect.objectContaining({ left_window: true }) }),
+        ),
+      )
+    })
+
+    it("切換到並排的另一個視窗也算離開", async () => {
+      // 只聽 `visibilitychange` 會漏掉這個——本分頁仍然可見，而「並排開第二個視窗對照
+      // 上一次的答案卷」正是這個機制要擋的用法
+      renderWithProviders(<EtQuizAnswerPage />)
+      await screen.findByText("採血前應先確認什麼？")
+
+      window.dispatchEvent(new Event("blur"))
+
+      await waitFor(() => expect(navigate).toHaveBeenCalled())
+    })
+
+    it("分頁「變回可見」不會觸發提交", async () => {
+      // `visibilitychange` 兩個方向都會觸發；不判 `document.hidden` 會在切回來時再交一次
+      renderWithProviders(<EtQuizAnswerPage />)
+      await screen.findByText("採血前應先確認什麼？")
+
+      setHidden(false)
+      document.dispatchEvent(new Event("visibilitychange"))
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(navigate).not.toHaveBeenCalled()
+    })
+
+    it("作答前先在注意事項與畫面上告知", async () => {
+      // 誤觸的代價是一次作答次數，事前不講等於用規則懲罰不知情的人
+      renderWithProviders(<EtQuizAnswerPage />)
+
+      expect(await screen.findByText(/請勿切換視窗或分頁/)).toBeInTheDocument()
+    })
+
+    it("已提交的作答再切換分頁不會重送", async () => {
+      // 不擋的話「已提交後用上一頁回來」再切個分頁就打一次注定 409 的提交
+      server.use(
+        http.get("/api/et/attempts/:attemptId", () =>
+          HttpResponse.json({
+            attempt_id: 800,
+            quiz_id: 700,
+            quiz_name: "測驗",
+            attempt_no: 1,
+            status: "SUBMITTED",
+            pass_score: 80,
+            time_limit_min: 10,
+            remaining_sec: 0,
+            resumed: false,
+            questions: [],
+          }),
+        ),
+      )
+      renderWithProviders(<EtQuizAnswerPage />)
+      await screen.findByText(/本次作答已提交/)
+
+      hideTab()
+      window.dispatchEvent(new Event("blur"))
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(navigate).not.toHaveBeenCalled()
+    })
   })
 })

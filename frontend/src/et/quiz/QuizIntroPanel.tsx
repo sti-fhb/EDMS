@@ -130,6 +130,16 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
               <ListItemText primary={text} slotProps={{ primary: { variant: "body2" } }} />
             </ListItem>
           ))}
+          {/*
+            這條與其他四條分開、加粗：其他四條講的是「別這樣做，否則不方便」，這條講的是
+            「這樣做會直接失去這次作答」。混在同一串等寬文字裡會被當成一般叮嚀讀過去。
+          */}
+          <ListItem sx={{ display: "list-item", py: 0 }} disablePadding>
+            <ListItemText
+              primary="作答期間切換到其他視窗或分頁，將立即自動提交本次作答"
+              slotProps={{ primary: { variant: "body2", fontWeight: "bold" } }}
+            />
+          </ListItem>
         </List>
       </Alert>
 

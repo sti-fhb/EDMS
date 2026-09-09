@@ -78,6 +78,17 @@ export interface AttemptResult {
   questions: QuestionResult[]
 }
 
+/**
+ * 提交後導向結果頁時帶的 router state。
+ *
+ * `left_window` 是**前端自己知道的事**（後端只看到一次普通提交），故不放進 `AttemptResult`
+ * ——那個型別對齊後端 schema，混進純前端欄位會讓人以為 API 有回傳它。
+ */
+export interface ResultNavState extends AttemptResult {
+  /** 本次提交由「離開作答視窗」觸發，非學員主動按提交。 */
+  left_window?: boolean
+}
+
 export interface QuizIntro {
   quiz_id: number
   quiz_name: string

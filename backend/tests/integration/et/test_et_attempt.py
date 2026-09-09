@@ -634,9 +634,9 @@ class TestReviewLastAttempt:
 
         重算等於不信任閱卷結果；閱卷依當時快照算，事後任何改動都不該回頭影響它。
         """
-        teacher = await _user(db, "t_att16", ROLE_TEACHER)
-        student = await _user(db, "s_att16")
-        course = await _course_with_quiz(client, db, teacher, code="32000016")
+        teacher = await _user(db, "t_att22", ROLE_TEACHER)
+        student = await _user(db, "s_att22")
+        course = await _course_with_quiz(client, db, teacher, code="32000022")
         q = await _add_question(client, teacher, course["quiz_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
@@ -661,11 +661,47 @@ class TestReviewLastAttempt:
         assert body["course_id"] == course["course_id"]
         assert submitted["course_id"] == course["course_id"]
 
+    async def test_提交後教師改配分不影響回看的成績(self, client, db) -> None:
+        """**「不重算」的破壞性測試**。
+
+        只比對「剛提交」與「立刻回看」兩次是否一致，改成現算也會通過——中間沒人動題目，
+        兩次數值本來就一樣。要驗的是提交**之後**題目被改，回看仍是提交當下的快照。
+        """
+        teacher = await _user(db, "t_att21", ROLE_TEACHER)
+        student = await _user(db, "s_att21")
+        course = await _course_with_quiz(client, db, teacher, code="32000021")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]), json={"selected_options": [correct]}, headers=h
+        )
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+        # 提交後教師把配分砍半、題幹改掉、正確答案換成另一個選項
+        flipped = [{**o, "is_correct": not o["is_correct"]} for o in q["options"]]
+        await client.put(
+            f"/api/et/questions/{q['question_id']}",
+            json={"question_type": QUESTION_SINGLE, "stem": "改過的題幹", "points": 50, "options": flipped},
+            headers=_bearer(teacher),
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=h)
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert float(body["score"]) == 100.0, "重算會變 0（正確答案被換掉）"
+        assert body["points_total"] == 100, "重算會變 50"
+        assert body["questions"][0]["stem"] == "題幹", "題幹亦須為快照"
+        assert body["questions"][0]["outcome"] == "CORRECT"
+
     async def test_進行中的作答沒有成績可看(self, client, db) -> None:
         """未提交 → 404，與「不存在」「非本人」共用同一回應，不讓差異變成存在性 oracle。"""
-        teacher = await _user(db, "t_att17", ROLE_TEACHER)
-        student = await _user(db, "s_att17")
-        course = await _course_with_quiz(client, db, teacher, code="32000017")
+        teacher = await _user(db, "t_att23", ROLE_TEACHER)
+        student = await _user(db, "s_att23")
+        course = await _course_with_quiz(client, db, teacher, code="32000023")
         await _add_question(client, teacher, course["quiz_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
@@ -677,11 +713,56 @@ class TestReviewLastAttempt:
         assert r.status_code == 404, r.text
         assert r.json()["error_code"] == "ET_ATTEMPT_001"
 
+    async def test_逾時自動提交的作答也看得到成績(self, client, db) -> None:
+        """狀態白名單須含 `TIMEOUT`——逾時仍照常計分，成績當然也要看得到。
+
+        只測 `SUBMITTED` 的話，白名單漏掉 `TIMEOUT` 會讓一整類學員的成績永遠 404。
+        """
+        teacher = await _user(db, "t_att26", ROLE_TEACHER)
+        student = await _user(db, "s_att26")
+        course = await _course_with_quiz(client, db, teacher, code="32000026")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+        # 直接改狀態：真的等到逾時要等掉整個時限，而這裡要驗的是白名單不是計時
+        await db.execute(
+            update(EtQuizAttemptM)
+            .where(EtQuizAttemptM.attempt_id == attempt["attempt_id"])
+            .values(status=ATTEMPT_TIMEOUT)
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=h)
+
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == ATTEMPT_TIMEOUT
+
+    async def test_已軟刪除的作答取不到成績(self, client, db) -> None:
+        """`DELETED = 1` 的 attempt 不得再回傳答案卷（教師刪項目會連帶軟刪）。"""
+        teacher = await _user(db, "t_att27", ROLE_TEACHER)
+        student = await _user(db, "s_att27")
+        course = await _course_with_quiz(client, db, teacher, code="32000027")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+        await db.execute(
+            update(EtQuizAttemptM).where(EtQuizAttemptM.attempt_id == attempt["attempt_id"]).values(deleted=1)
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=h)
+
+        assert r.status_code == 404, r.text
+
     async def test_不可讀他人的成績明細(self, client, db) -> None:
-        teacher = await _user(db, "t_att18", ROLE_TEACHER)
-        owner = await _user(db, "s_att18a")
-        other = await _user(db, "s_att18b")
-        course = await _course_with_quiz(client, db, teacher, code="32000018")
+        teacher = await _user(db, "t_att24", ROLE_TEACHER)
+        owner = await _user(db, "s_att24a")
+        other = await _user(db, "s_att24b")
+        course = await _course_with_quiz(client, db, teacher, code="32000024")
         await _add_question(client, teacher, course["quiz_id"], points=100)
         await _enroll(db, owner, course["course_id"])
         await _enroll(db, other, course["course_id"])
@@ -695,9 +776,9 @@ class TestReviewLastAttempt:
 
     async def test_次數用盡仍給得到上次作答的入口(self, client, db) -> None:
         """複習正是次數用完的學員最需要的——把入口跟著作答一起關掉等於懲罰他考不好。"""
-        teacher = await _user(db, "t_att19", ROLE_TEACHER)
-        student = await _user(db, "s_att19")
-        course = await _course_with_quiz(client, db, teacher, code="32000019")
+        teacher = await _user(db, "t_att25", ROLE_TEACHER)
+        student = await _user(db, "s_att25")
+        course = await _course_with_quiz(client, db, teacher, code="32000025")
         await _add_question(client, teacher, course["quiz_id"], points=100)
         await client.put(
             f"/api/et/quizzes/{course['quiz_id']}",

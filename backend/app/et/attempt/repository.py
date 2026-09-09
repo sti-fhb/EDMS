@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.attempt.rules import OptionSnapshot
-from app.et.constants import ATTEMPT_IN_PROGRESS
+from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES
 from app.et.course.models import EtChapter, EtItem
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
 
@@ -110,13 +110,16 @@ class EtAttemptRepository:
 
         取 `ATTEMPT_NO` 最大者而非 `SUBMITTED_AT`：續作的 attempt 可能比後開的先提交，
         而「上次」對學員的意思是「上一次作答」，那是次序不是時間。
+
+        狀態以**白名單**篩（與 `service.result` 同一組），不用 `!= IN_PROGRESS`——否則新增
+        狀態時這裡會開始回傳一個 `result` 拒絕的 id，前端就得到一顆按了必 404 的按鈕。
         """
         return await db.scalar(
             select(EtQuizAttemptM.attempt_id)
             .where(
                 EtQuizAttemptM.user_id == user_id,
                 EtQuizAttemptM.quiz_id == quiz_id,
-                EtQuizAttemptM.status != ATTEMPT_IN_PROGRESS,
+                EtQuizAttemptM.status.in_(GRADED_STATUSES),
                 EtQuizAttemptM.deleted == 0,
             )
             .order_by(EtQuizAttemptM.attempt_no.desc())

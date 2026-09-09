@@ -93,11 +93,15 @@ describe("ET06 結果頁", () => {
 
     await user.click(screen.getByRole("row", { name: /Q2/ }))
 
-    // 狀態由 icon 承載（色條單獨存在對色覺障礙者不可靠），以 icon 的 aria-label 驗
+    // 狀態由 icon 承載（色條單獨存在對色覺障礙者不可靠）。
+    //
+    // ⚠️ 以 `getByRole("img")` 驗而**不是** `getByLabelText`：後者不檢查 `aria-hidden`，
+    // 於是 icon 被 MUI 加上 `aria-hidden="true"`（沒給 `titleAccess` 時的預設）而整個
+    // 移出可及性樹時，`getByLabelText` 照樣找得到——螢幕報讀使用者讀不到，測試卻是綠的。
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("漏選")).toBeInTheDocument() // 體溫：對但沒選
-    expect(within(dialog).getByLabelText("選錯")).toBeInTheDocument() // 視力：選了但錯
-    expect(within(dialog).queryByLabelText("答對")).not.toBeInTheDocument() // Q2 全錯
+    expect(within(dialog).getByRole("img", { name: "漏選" })).toBeInTheDocument() // 體溫：對但沒選
+    expect(within(dialog).getByRole("img", { name: "選錯" })).toBeInTheDocument() // 視力：選了但錯
+    expect(within(dialog).queryByRole("img", { name: "答對" })).not.toBeInTheDocument() // Q2 全錯
   })
 
   it("沒有文字標籤時仍給得出圖例", async () => {

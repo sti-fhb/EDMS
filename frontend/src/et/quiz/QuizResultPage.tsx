@@ -20,7 +20,7 @@ import { useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { AnswerReviewDialog } from "./AnswerReviewDialog"
-import type { AttemptResult, QuestionResult } from "./attemptSchemas"
+import type { QuestionResult, ResultNavState } from "./attemptSchemas"
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { toApiError } from "../../services/http"
@@ -60,7 +60,10 @@ export function EtQuizResultPage() {
   const navigate = useNavigate()
   const { attemptId: attemptIdParam } = useParams<{ attemptId: string }>()
   const attemptId = Number(attemptIdParam)
-  const fromSubmit = (useLocation().state ?? null) as AttemptResult | null
+  const routerState = (useLocation().state ?? null) as ResultNavState | null
+  // state 一律優先於網址，所以**必須**確認它講的是同一次作答。不比對的話「網址是 A、
+  // 畫面渲染 B 的成績」會是一個完全無警訊的 bug——分數、題目、答案全部照常渲染。
+  const fromSubmit = routerState?.attempt_id === attemptId ? routerState : null
   const [reviewIndex, setReviewIndex] = useState<number | null>(null)
   const needsFetch = fromSubmit === null && Number.isFinite(attemptId) && attemptId > 0
 
@@ -98,6 +101,14 @@ export function EtQuizResultPage() {
   const canRetry = !result.is_pass && result.remaining_attempts > 0
   return (
     <Stack spacing={2}>
+      {/*
+        為什麼考卷會突然被交出去，必須說清楚——不說的話學員只會看到一個他沒按過提交的
+        成績頁，而那看起來像系統壞掉。
+      */}
+      {fromSubmit?.left_window === true && (
+        <Alert severity="warning">因離開作答視窗，本次作答已自動提交。</Alert>
+      )}
+
       <Paper variant="outlined" sx={{ p: 3, textAlign: "center" }}>
         <Typography variant="h6">測驗完成</Typography>
         <Typography variant="h3" color={result.is_pass ? "success.main" : "error.main"} sx={{ my: 1 }}>

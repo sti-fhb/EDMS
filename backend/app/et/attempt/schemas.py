@@ -12,13 +12,20 @@
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
+
+from app.et.constants import AttemptStatus
+from app.et.course.schemas import MAX_BIGINT
 
 #: 單題可選的選項數上限（`data-model`：同題目下選項 2–6 個）。
 #:
 #: 這是**請求大小防護**——正常的多選題最多勾 6 個，收到上百個代表不是正常操作。
 MAX_SELECTED_OPTIONS = 6
+
+#: 外來的 `OPTION_ID`：正整數且不超過 `BIGINT`。
+OptionId = Annotated[int, Field(ge=1, le=MAX_BIGINT)]
 
 
 class OptionForAnswering(BaseModel):
@@ -56,7 +63,7 @@ class AttemptState(BaseModel):
     attempt_no: int
     #: 目前狀態。前端據此在「已提交後又用上一頁回到作答頁」時導向結果頁，
     #: 而不是讓學員對著一份其實已經交出去的考卷繼續作答。
-    status: str
+    status: AttemptStatus
     pass_score: int
     time_limit_min: int | None
     remaining_sec: int | None
@@ -72,9 +79,11 @@ class AnswerReq(BaseModel):
 
     #: 元素亦加界限：計分面不可利用（外來 id 只會落進「誤選」使分數下降），但不設界的話
     #: 任意整數會被原樣寫進 `SELECTED_OPTIONS`。比照 `course/schemas.py` 對 `tag_id` 的作法。
-    selected_options: list[int] = Field(
-        default_factory=list, max_length=MAX_SELECTED_OPTIONS, json_schema_extra={"items": {"minimum": 1}}
-    )
+    #:
+    #: ⚠️ 界限必須寫在**元素型別**上。原本寫成 `json_schema_extra={"items": {"minimum": 1}}`，
+    #: 那只進 OpenAPI 文件、**執行期完全不驗**——`[-1, 0]` 與 300 位數的整數照樣收下，
+    #: 而註解卻宣稱已經擋住了。
+    selected_options: list[OptionId] = Field(default_factory=list, max_length=MAX_SELECTED_OPTIONS)
 
 
 class OptionResult(BaseModel):
@@ -113,9 +122,13 @@ class AttemptResult(BaseModel):
     quiz_id: int
     #: 供結果頁導回該課程的學習頁（測驗資訊與「開始作答」都在那裡的側欄項目內）。
     #: 學習頁會依 `LAST_ITEM_ID` 自動落回該測驗項目，故不需要再帶 `item_id`。
+    #:
+    #: 取自 `ET_QUIZ_ATTEMPT_M.COURSE_ID`（開始作答當下的快照），**不由 `quiz_id` 現查**。
     course_id: int
     attempt_no: int
-    status: str
+    #: 成績單只可能出於已閱卷的兩種狀態；收窄成 `Literal` 讓「白名單漏掉一種」
+    #: 在此變成 pydantic 的驗證錯誤，而不是靜默送出一份沒有成績的明細。
+    status: Literal["SUBMITTED", "TIMEOUT"]
     score: Decimal
     #: 本次 attempt 的配分總和（快照）。**前端的分母用它、不可寫死 100**——「總和 = 100」
     #: 只在課程發布當下檢核，發布後教師仍可改配分或增刪題目。

@@ -15,10 +15,11 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
-import type { AttemptState, QuestionForAnswering } from "./attemptSchemas"
+import type { AttemptState, QuestionForAnswering, ResultNavState } from "./attemptSchemas"
 import { attemptApi } from "./attemptService"
 import { CountdownTimer } from "./CountdownTimer"
 import { QuestionNav } from "./QuestionNav"
+import { useAutoSubmitOnLeave } from "./useAutoSubmitOnLeave"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -98,6 +99,9 @@ export function EtQuizAnswerPage() {
     [answers, attemptId],
   )
 
+  /** 本次提交是不是「離開作答視窗」觸發的——結果頁要據此說明為什麼考卷被交出去。 */
+  const leftWindowRef = useRef(false)
+
   const submit = useMutation({
     mutationFn: async () => {
       // ⚠️ 先把當前題送出去——否則最後一題作答後直接提交會漏掉那一題。
@@ -106,11 +110,14 @@ export function EtQuizAnswerPage() {
       return attemptApi.submit(attemptId)
     },
     onSuccess: (result) => {
-      message.success("已提交並完成閱卷")
-      navigate(`/et/attempts/${attemptId}/result`, { state: result })
+      const left = leftWindowRef.current
+      message.success(left ? "已離開作答視窗，本次作答已自動提交" : "已提交並完成閱卷")
+      const state: ResultNavState = left ? { ...result, left_window: true } : result
+      navigate(`/et/attempts/${attemptId}/result`, { state })
     },
     onError: (err) => {
       submittingRef.current = false
+      leftWindowRef.current = false
       message.error(toApiError(err).errorMessage)
     },
   })
@@ -120,6 +127,17 @@ export function EtQuizAnswerPage() {
     submittingRef.current = true
     submit.mutate()
   }, [submit])
+
+  const submitOnLeave = useCallback(() => {
+    if (submittingRef.current) return
+    // 在 `doSubmit` **之前**設旗標：`onSuccess` 讀的是它，晚設會讓自動提交看起來像手動提交
+    leftWindowRef.current = true
+    doSubmit()
+  }, [doSubmit])
+
+  // 作答中離開視窗 → 自動交卷。`enabled` 讓已提交的 attempt 與載入中都不掛監聽——
+  // 否則「已提交後用上一頁回來」再切個分頁就會打一次注定 409 的提交。
+  useAutoSubmitOnLeave({ enabled: data?.status === "IN_PROGRESS", onLeave: submitOnLeave })
 
   if (!attemptIdValid) return <Alert severity="error">作答代碼無效</Alert>
   if (isPending) {
@@ -172,6 +190,14 @@ export function EtQuizAnswerPage() {
 
   return (
     <Box>
+      {/*
+        常駐而非一次性 Snackbar：這是整段作答期間都成立的規則，而 Snackbar 幾秒後就消失，
+        學員在第 8 分鐘切走分頁時早就看不到它了。
+      */}
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        <strong>請勿切換視窗或分頁</strong>——離開本畫面將立即自動提交本次作答。
+      </Alert>
+
       {data.resumed && (
         <Alert severity="info" sx={{ mb: 2 }}>
           已回到您未完成的作答（第 {data.attempt_no} 次）。剩餘時間自開始作答時起算。

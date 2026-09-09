@@ -61,6 +61,7 @@ from app.et.constants import (
     ATTEMPT_SUBMITTED,
     ATTEMPT_TIMEOUT,
     COURSE_CLOSED,
+    GRADED_STATUSES,
     QUESTION_MULTIPLE,
 )
 from app.et.learning.repository import EtLearningRepository
@@ -286,7 +287,10 @@ class EtAttemptService:
         return AttemptResult(
             attempt_id=attempt.attempt_id,
             quiz_id=attempt.quiz_id,
-            course_id=await self._course_id_of(db, attempt.quiz_id),
+            # 用 attempt 自己那欄，**不現查** `quiz_context()`：那條反查在章節被刪或引用不唯一
+            # 時回 `None`，而這行位在閱卷 flush 之後——一 raise 就把剛寫入的成績一起回滾掉。
+            # 教師刪章節 / 刪項目沒有「有人作答中」的守門，那不是理論情境。
+            course_id=attempt.course_id,
             attempt_no=attempt.attempt_no,
             status=attempt.status,
             score=total,
@@ -314,8 +318,12 @@ class EtAttemptService:
                 可看）。三者共用同一回應，不讓差異變成存在性 oracle。
         """
         attempt = await self._require_own_attempt(db, attempt_id, user_id)
-        if attempt.status == ATTEMPT_IN_PROGRESS:
-            # 放行的話正確答案會在作答**進行中**就送出去——這條守門同時是安全邊界
+        if attempt.status not in GRADED_STATUSES:
+            # 放行的話正確答案會在作答**進行中**就送出去——這條守門同時是安全邊界。
+            #
+            # ⚠️ 白名單而非 `!= IN_PROGRESS`：後者是**預設放行**的形狀，日後新增任何狀態
+            # （US9 的重置、人工閱卷的待審、作廢…）都會自動落進放行側，把答案卷送給一個
+            # 根本沒有成績的 attempt——而且不會有任何測試變紅。
             raise _NOT_FOUND
         details = await self._repo.list_details(db, attempt_id)
         quiz = await self._repo.get_quiz(db, attempt.quiz_id)
@@ -324,7 +332,7 @@ class EtAttemptService:
         return AttemptResult(
             attempt_id=attempt.attempt_id,
             quiz_id=attempt.quiz_id,
-            course_id=await self._course_id_of(db, attempt.quiz_id),
+            course_id=attempt.course_id,
             attempt_no=attempt.attempt_no,
             status=attempt.status,
             score=attempt.score if attempt.score is not None else Decimal(0),
@@ -342,17 +350,6 @@ class EtAttemptService:
         )
 
     # ── 內部 ────────────────────────────────────────────────────────────────
-
-    async def _course_id_of(self, db: AsyncSession, quiz_id: int) -> int:
-        """測驗所屬課程，供結果頁導回學習頁。
-
-        反查不到（章節被刪、引用不唯一）時 404 而非回 0：一個導不回去的成績頁還能看，
-        但一顆連到 `/et/courses/0/learn` 的按鈕會把學員送進一個不存在的課程。
-        """
-        context = await self._repo.quiz_context(db, quiz_id)
-        if context is None:
-            raise _NOT_FOUND
-        return context[1]
 
     async def _require_access(self, db: AsyncSession, quiz_id: int, user_id: str):
         """守門 1 + 2：反查鏈與「在籍 OR 擁有者」。
