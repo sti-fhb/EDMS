@@ -32,6 +32,23 @@ class EtLearningRepository:
     async def get_course(self, db: AsyncSession, course_id: int) -> EtCourse | None:
         return await db.scalar(select(EtCourse).where(EtCourse.course_id == course_id, EtCourse.deleted == 0))
 
+    async def was_removed(self, db: AsyncSession, *, user_id: str, course_id: int) -> bool:
+        """該學員是否**曾加入但被移除**。
+
+        與 `is_enrolled` 互補：後者問「現在還在不在」，本函式問「不在的原因是被移除
+        還是從未加入」。兩者的差別只在訊息，但那個訊息決定學員接下來做什麼——被移除者
+        再去找一次邀請碼是白費力氣（依 #247 裁示 C，他也不能自行加回）。
+        """
+        found = await db.scalar(
+            select(EtEnrollment.enrollment_id).where(
+                EtEnrollment.user_id == user_id,
+                EtEnrollment.course_id == course_id,
+                EtEnrollment.is_removed.is_(True),
+                EtEnrollment.deleted == 0,
+            )
+        )
+        return found is not None
+
     async def is_enrolled(self, db: AsyncSession, *, user_id: str, course_id: int) -> bool:
         """該學員是否**仍具成員資格**。
 

@@ -1003,3 +1003,26 @@ class TestClosedAndRemovedBoundaries:
 
         assert submitted.status_code == 200, submitted.text
         assert len(history.json()) == 1, "已完成的那次須計入歷史"
+
+    async def test_被移除者看到的是被移除而非尚未加入(self, client, db) -> None:
+        """AC 9 後半 / ET-MSG-ET06-006：next navigation 的訊息要說對原因。
+
+        「您尚未加入此課程」會讓被移除的學員以為自己走錯課程、再去找一次邀請碼——
+        而依 #247 裁示 C 他也不能自行加回，那是白費力氣。
+        """
+        teacher = await _user(db, "t_att36", ROLE_TEACHER)
+        student = await _user(db, "s_att36")
+        course = await _course_with_quiz(client, db, teacher, code="32000036")
+        await _enroll(db, student, course["course_id"])
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+            .values(is_removed=True)
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/courses/{course['course_id']}/learn", headers=_bearer(student))
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_LEARN_004"
+        assert r.json()["error_message"] == "您已被該課程移除"

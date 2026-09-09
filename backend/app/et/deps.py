@@ -109,9 +109,14 @@ def rate_limit_by_et_user(limiter: SlidingWindowRateLimiter, scope: str) -> Call
     | `enrollment/router.py::rate_limit_by_user` | #247 | limiter 寫死在閉包；其 unit test 以該簽章呼叫 |
     | `invitation/router.py::rate_limit_invites` | #273 | 同上，當時尚無共用的家可放 |
 
-    **新端點請一律用本函式**。另外兩份的收斂**不在 #279 範圍內**——`enrollment` 那支要
-    同步改 `tests/unit/et/test_enrollment_rate_limit.py`（以舊簽章呼叫），`invitation` 那支
-    則不在本 issue 的 footprint 內。兩者一起收斂另開 refactor issue 處理。
+    **新端點請一律用本函式**。另外兩份**刻意保留、不收斂**（2026-09-09 裁示；#290 已因
+    此關閉）：收斂要改 `enrollment` 的簽章，而 `tests/unit/et/test_enrollment_rate_limit.py`
+    正是以該簽章呼叫——為了省 18 行去動一個已測過的安全控制不划算，而三份的行為完全相同，
+    drift 風險由本表管住。
+
+    ⚠️ 真正的限制不是這三份複製，而是**行程內計數**：`core/rate_limit.py` 明載「前提為
+    應用以單一 process 運行」，`README.md` 亦載明 uvicorn 以 `--workers 1` 啟動。多 worker
+    部署時實際上限是 `門檻 × N`——那是已知並接受的部署前提，收斂複製對它毫無幫助。
 
     Raises:
         AppError: 視窗內超過門檻（429 / `COMMON_429`）。
