@@ -1,9 +1,10 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AttemptHistory } from "./AttemptHistory"
+import { attemptApi } from "./attemptService"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -12,6 +13,18 @@ vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
   return { ...actual, useNavigate: () => navigate }
 })
+
+/**
+ * 等到 `history` 這次請求**真的結束**（成功或失敗）才往下斷言。
+ *
+ * ⚠️ 不可用固定 `setTimeout`：這個套件在平行模式下常整批停頓 5 秒以上，寫死的延遲會
+ * 變成偶發紅燈；而延遲太短又會讓「渲染為空」在請求還沒回來時就通過，成為假綠。
+ * 綁在請求的生命週期上，兩種問題都沒有。
+ */
+async function settled(spy: ReturnType<typeof vi.spyOn>) {
+  await waitFor(() => expect(spy).toHaveBeenCalled())
+  await (spy.mock.results[0]!.value as Promise<unknown>).catch(() => undefined)
+}
 
 beforeEach(() => navigate.mockReset())
 
@@ -93,10 +106,11 @@ describe("ET06 歷次作答紀錄", () => {
   it("零筆時整塊不顯示", async () => {
     // 一張空表格會讓學員以為系統把他的紀錄弄丟了
     server.use(http.get("/api/et/quizzes/:quizId/attempts", () => HttpResponse.json([])))
+    const spy = vi.spyOn(attemptApi, "history")
     const { container } = renderWithProviders(<AttemptHistory quizId={700} />)
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(container).toBeEmptyDOMElement()
+    await settled(spy)
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 
   it("查詢失敗時靜默不顯示，且不噴例外", async () => {
@@ -107,9 +121,10 @@ describe("ET06 歷次作答紀錄", () => {
         HttpResponse.json({ error_code: "COMMON_500", error_message: "壞了" }, { status: 500 }),
       ),
     )
+    const spy = vi.spyOn(attemptApi, "history")
     const { container } = renderWithProviders(<AttemptHistory quizId={700} />)
 
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(container).toBeEmptyDOMElement()
+    await settled(spy)
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
   })
 })
