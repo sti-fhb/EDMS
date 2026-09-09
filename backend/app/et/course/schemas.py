@@ -364,3 +364,59 @@ class PublishResult(BaseModel):
     #: 回這個數字是為了讓教師在發布當下就知道「標籤有沒有生效」——0 通常代表課程掛
     #: 的標籤沒有任何人掛，那是設定問題，等學員反映「看不到課」才發現就太晚了。
     invited_count: int = 0
+
+
+class CloseCourseReq(BaseModel):
+    """關閉課程（US11 AC 1）。
+
+    只帶樂觀鎖版本——關閉沒有任何可調的參數（`CLOSED_AT` 由伺服器取 `utcnow()`，
+    不接受請求指定，否則教師可偽造關閉時點）。
+    """
+
+    version: int = Field(ge=0)
+
+
+class ReopenCourseReq(_CourseFields):
+    """再開課（US11 AC 8）——**起訖時間為必填**。
+
+    繼承 `_CourseFields` 是為了沿用兩件既有的事：時區補正（`_ensure_aware`）與
+    「迄 > 起」（`_end_after_start`）。但那支的欄位皆為選填（草稿允許留空），故此處以
+    `model_validator` 補上必填——FR-ET-US11-09 明訂「強制要求重新設定一組新的起訖
+    時間，未填妥 MUST NOT 送出」。
+
+    ⚠️ **`course_name` 等繼承來的欄位在此不使用**：本請求只改起訖時間與狀態。以
+    `_CourseFields` 為基底是為了共用驗證器，不是為了共用欄位——`model_config` 的
+    `extra` 預設為 `ignore`，多帶的欄位不會被寫入（寫入欄位由 `mark_reopened` 明列）。
+
+    > 「迄 > 當下」不在此檢核，而在 `rules.ensure_reopen_schedule`：那是業務規則，
+    > 需要回 `ET_COURSE_008` 與其專屬訊息；放在 schema 會被
+    > `validation_exception_handler` 轉成 `COMMON_422`，讓那個錯誤碼永遠到不了前端
+    > （#284 的 `ET_SURVEY_016` 就曾經如此）。
+    """
+
+    version: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _schedule_required(self) -> "ReopenCourseReq":
+        if self.open_start_at is None or self.open_end_at is None:
+            raise ValueError("再開課須填妥開放起始與訖止時間")
+        return self
+
+
+class CourseStatusResult(BaseModel):
+    """關閉 / 再開課之結果（回應）。
+
+    兩支端點共用同一個形狀——前端要的都是「新狀態 + 新版本 + 兩個時間」，分成兩個
+    schema 只會讓前端寫兩條幾乎相同的型別。
+
+    Attributes:
+        closed_at: 最近一次關閉時間。**再開課後仍會帶值**（FR-ET-US11-10：保留供
+            追溯），故前端不可用「有沒有值」判斷是否已關閉——那要看 `status`。
+    """
+
+    course_id: int
+    status: str
+    open_start_at: datetime | None
+    open_end_at: datetime | None
+    closed_at: datetime | None
+    version: int

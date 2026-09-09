@@ -29,15 +29,18 @@ from app.et.course.schemas import (
     ChapterItem,
     ChapterRenameReq,
     ChapterReorderReq,
+    CloseCourseReq,
     CourseCreateReq,
     CourseCreateResult,
     CourseDetail,
+    CourseStatusResult,
     CourseUpdateReq,
     ItemCreateReq,
     ItemReorderReq,
     ItemRow,
     PublishCheckResult,
     PublishResult,
+    ReopenCourseReq,
     TagOption,
 )
 from app.et.course.service import EtCourseService
@@ -247,3 +250,51 @@ async def publish_course(
     > 與邀請碼產生。
     """
     return await _publish_service.publish(db, course_id, operator=operator)
+
+
+@router.post(
+    "/courses/{course_id}/close",
+    response_model=CourseStatusResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def close_course(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: CloseCourseReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> CourseStatusResult:
+    """關閉課程（US11 / #288）：立即轉「已關閉」並寫入關閉時間。
+
+    **僅已發布課程**可關閉（409 `ET_COURSE_006`）。無過渡狀態——`PENDING_CLOSE` 已於
+    2026-07-02 廢除（關閉可逆、無需終態保護）。
+
+    ## 為何是具名動作而非 `PUT /courses/{id}` 改 `status`
+
+    比照 `publish`：狀態轉換有各自的前提與副作用（此處寫 `CLOSED_AT`），不是一個欄位的
+    賦值。若走 `PUT`，`status` 會成為可任意賦值的欄位——那條路徑能把 `CLOSED` 直接寫成
+    `DRAFT`，繞過整個狀態機。
+    """
+    return await _publish_service.close(db, course_id, req, operator=operator)
+
+
+@router.post(
+    "/courses/{course_id}/reopen",
+    response_model=CourseStatusResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def reopen_course(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: ReopenCourseReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> CourseStatusResult:
+    """再開課（US11 / #288）：**強制帶一組新起訖時間**後狀態回「已發布」。
+
+    **僅已關閉課程**可再開課（409 `ET_COURSE_007`）。學員進度接續保留、邀請碼沿用原碼
+    恢復有效、`URGENT_REMIND_SENT` 歸零。
+
+    **會重跑發布六項檢核**（#288 SA Q2 裁示 A）——關閉期間教師端仍可編輯內容，故課程
+    可能已不符發布條件；不合格回 422 `ET_PUBLISH_001` + `blockers`（與 `publish` 共用
+    同碼與同一份缺漏清單形狀）。
+    """
+    return await _publish_service.reopen(db, course_id, req, operator=operator)

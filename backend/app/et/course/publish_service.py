@@ -33,12 +33,20 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
 from app.et.common.invitation_code import generate_invitation_code
-from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.common.optimistic_lock import ensure_version_matched
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.publish_repository import EtPublishRepository
 from app.et.course.publish_rules import PublishBlocker, evaluate_publish
 from app.et.course.repository import EtCourseRepository
-from app.et.course.rules import ensure_owner
-from app.et.course.schemas import PublishBlockerRow, PublishCheckResult, PublishResult
+from app.et.course.rules import ensure_closable, ensure_owner, ensure_reopen_schedule, ensure_reopenable
+from app.et.course.schemas import (
+    CloseCourseReq,
+    CourseStatusResult,
+    PublishBlockerRow,
+    PublishCheckResult,
+    PublishResult,
+    ReopenCourseReq,
+)
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.notify.mailer import CourseInviteMailer
 from app.services import AuditLogService, ParamService
@@ -109,10 +117,10 @@ class EtPublishService:
             )
 
         code = await self._generate_code(db)
-        rowcount = await self._courses.mark_published(
+        new_version = await self._courses.mark_published(
             db, course_id, course.version, invitation_code=code, published_at=utcnow(), operator=operator
         )
-        if not rowcount:
+        if new_version is None:
             # 版本在檢核與寫入之間被改動——此時整份檢核結果都已過時，回 409 讓教師
             # 重新載入再發一次，而不是用舊結果硬寫。
             raise AppError(
@@ -143,8 +151,121 @@ class EtPublishService:
             course_id=course_id,
             status=COURSE_PUBLISHED,
             invitation_code=code,
-            version=course.version + 1,
+            version=new_version,
             invited_count=len(invited_ids),
+        )
+
+    async def close(
+        self, db: AsyncSession, course_id: int, req: CloseCourseReq, *, operator: OperatorInfo
+    ) -> CourseStatusResult:
+        """關閉課程（US11 AC 1 / FR-ET-US11-02）——立即轉 `CLOSED`，無過渡狀態。
+
+        關閉**不做任何內容檢核**：它是收斂動作，把一門已發布的課程停下來不需要它合格。
+        （再開課才要重跑檢核，見 `reopen`。）
+
+        關閉當下作答中的 attempt **不受影響**——Attempt Snapshot 讓它可以完成並計分
+        （FR-ET-US11-04，#279 已實作），本端點不去中止任何 attempt。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001` 查無課程；403 `ET_COURSE_002` 非擁有者；
+                409 `ET_COURSE_006` 課程狀態不允許關閉；409 `ET_LOCK_001` 版本不符。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        ensure_closable(course.status)
+
+        closed_at = utcnow()
+        # 兩個時間先取下來——`mark_closed` 是 ORM-enabled UPDATE，執行後 `course` 上的
+        # 欄位會被 SQLAlchemy 同步，屆時再讀就分不出「更新前的值」與「剛寫進去的值」。
+        # 關閉不動起訖時間，故此處讀到的即是回應要帶的值。
+        open_start_at, open_end_at = course.open_start_at, course.open_end_at
+        new_version = await self._courses.mark_closed(
+            db, course_id, req.version, closed_at=closed_at, operator=operator
+        )
+        # `mark_closed` 以 `RETURNING` 回新版本，`None` 表示沒有列符合（版本不符）。
+        ensure_version_matched(rowcount=0 if new_version is None else 1, entity="ET_COURSE")
+        await self._log(db, operator.user_id, course_id, "關閉課程")
+
+        return CourseStatusResult(
+            course_id=course_id,
+            status=COURSE_CLOSED,
+            open_start_at=open_start_at,
+            open_end_at=open_end_at,
+            closed_at=closed_at,
+            version=new_version,
+        )
+
+    async def reopen(
+        self, db: AsyncSession, course_id: int, req: ReopenCourseReq, *, operator: OperatorInfo
+    ) -> CourseStatusResult:
+        """再開課（US11 AC 8 / FR-ET-US11-09）——重設起訖時間後回 `PUBLISHED`。
+
+        ## 為何重跑發布六項檢核（#288 SA Q2 裁示 A）
+
+        2026-07-02 的變更明訂**關閉期間教師端課程內容仍可編輯**（供準備下次開課）。兩條
+        規則放在一起就產生 spec 沒有回答的情形：教師可以在關閉期間把某章節刪光、把測驗
+        配分改成不等於 100、或讓引用的 DM 文件被廢止，然後再開課——課程回到 `PUBLISHED`
+        而它已經不符合發布條件。學員面對的會是 0 題的測驗（那是章節解鎖條件之一，他會
+        卡在空考卷前）、配分不對的測驗、或指向廢止文件的教材。
+
+        不重跑等於把發布檢核變成**一次性的**：課程只要關閉過一次，就能永久繞過它。
+
+        故複用 `publish` 的同一組檢核與**同一個錯誤碼** `ET_PUBLISH_001` + `blockers`
+        ——同一種語意不分兩碼，前端也能直接複用缺漏清單的呈現。
+
+        > 也因此本方法放在 `publish_service` 而非 `service`：它需要 `_evaluate`
+        > （快照 + 問 DM 廢止狀態）。三支狀態轉換（`publish` / `close` / `reopen`）
+        > 放在同一支 service，是狀態機的三條邊。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；409 `ET_COURSE_007`
+                課程狀態不允許再開課；422 `ET_COURSE_008` 新訖止時間未晚於當下；
+                422 `ET_PUBLISH_001` 六項檢核未通過（body 另帶 `blockers`）；
+                409 `ET_LOCK_001` 版本不符。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        ensure_reopenable(course.status)
+        # 兩者的必填與「迄 > 起」已由 `ReopenCourseReq._schedule_required` 與繼承來的
+        # `_end_after_start` 保證，走到這裡必定非 `None`。取區域變數只是讓下方的傳遞
+        # 不必一路帶著 `| None` 的型別，不是額外的防禦。
+        start_at, end_at = req.open_start_at, req.open_end_at
+        ensure_reopen_schedule(open_end_at=end_at, now=utcnow())
+
+        blockers = await self._evaluate(db, course)
+        if blockers:
+            raise AppError(
+                status_code=422,
+                detail="發布條件未滿足",
+                error_code="ET_PUBLISH_001",
+                extra={
+                    "blockers": [{"code": b.code, "message": b.message, "target_id": b.target_id} for b in blockers]
+                },
+            )
+
+        # 同 `close`：先取下 `CLOSED_AT`，UPDATE 之後 `course` 上的值已被同步。
+        closed_at = course.closed_at
+        new_version = await self._courses.mark_reopened(
+            db,
+            course_id,
+            req.version,
+            open_start_at=start_at,
+            open_end_at=end_at,
+            operator=operator,
+        )
+        ensure_version_matched(rowcount=0 if new_version is None else 1, entity="ET_COURSE")
+        await self._log(db, operator.user_id, course_id, "再開課")
+
+        # **不重寄邀請信、不重產邀請碼**（Clarifications 明訂）——邀請碼恢復有效是各處
+        # 守門判 `STATUS` 自動達成的。`publish` 的標籤帶入與寄信在此刻意不呼叫：學員已在
+        # 課程中，再開課不是一次新的招生。
+        return CourseStatusResult(
+            course_id=course_id,
+            status=COURSE_PUBLISHED,
+            open_start_at=start_at,
+            open_end_at=end_at,
+            # 保留最近一次關閉時間供追溯（FR-ET-US11-10）——故前端不可用「有沒有值」
+            # 判斷是否已關閉，那要看 `status`。
+            closed_at=closed_at,
+            version=new_version,
         )
 
     # ── 內部 ────────────────────────────────────────────────────────────────
