@@ -4,20 +4,28 @@
 不需 DB。需查 `ET_TAG.IS_ACTIVE`、`ET_PROGRESS` 連帶刪除等真互動者寫 integration。
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from app.core.exceptions import AppError
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.rules import (
+    ensure_closable,
     ensure_deletable,
     ensure_item_reorder_complete,
     ensure_owner,
+    ensure_reopen_schedule,
+    ensure_reopenable,
     ensure_reorder_complete,
     ensure_tag_change_allowed,
+    is_within_open_window,
     resequence,
 )
 
 pytestmark = pytest.mark.unit
+
+_NOW = datetime(2026, 9, 9, 10, 0, tzinfo=timezone.utc)
 
 
 class TestEnsureOwner:
@@ -154,3 +162,144 @@ class TestEnsureItemReorderComplete:
         with pytest.raises(AppError) as chapter_exc:
             chapter_rule(current_ids={1}, requested=[])
         assert item_exc.value.error_code != chapter_exc.value.error_code
+
+
+class TestEnsureClosable:
+    """僅已發布課程可關閉（US11 AC 2 / FR-ET-US11-01）。"""
+
+    def test_已發布課程可關閉(self) -> None:
+        ensure_closable(COURSE_PUBLISHED)
+
+    def test_草稿課程不可關閉(self) -> None:
+        """草稿沒有學員、沒有邀請碼，關閉它沒有語意——要移除草稿走既有 DELETE。"""
+        with pytest.raises(AppError) as exc:
+            ensure_closable(COURSE_DRAFT)
+        assert exc.value.status_code == 409
+        assert exc.value.error_code == "ET_COURSE_006"
+
+    def test_已關閉課程不可再關閉(self) -> None:
+        with pytest.raises(AppError) as exc:
+            ensure_closable(COURSE_CLOSED)
+        assert exc.value.status_code == 409
+        assert exc.value.error_code == "ET_COURSE_006"
+
+
+class TestEnsureReopenable:
+    """僅已關閉課程可再開課（US11 AC 8）。"""
+
+    def test_已關閉課程可再開課(self) -> None:
+        ensure_reopenable(COURSE_CLOSED)
+
+    @pytest.mark.parametrize("status", [COURSE_DRAFT, COURSE_PUBLISHED])
+    def test_非已關閉不可再開課(self, status: str) -> None:
+        """與 `ensure_closable` **分開兩個錯誤碼**：兩者的下一步不同（去發布 / 去再開課）。"""
+        with pytest.raises(AppError) as exc:
+            ensure_reopenable(status)
+        assert exc.value.status_code == 409
+        assert exc.value.error_code == "ET_COURSE_007"
+
+
+class TestEnsureReopenSchedule:
+    """再開課的新訖止時間須晚於當下（SA Q3 裁示 A）。"""
+
+    def test_未來的訖止時間通過(self) -> None:
+        ensure_reopen_schedule(open_end_at=_NOW + timedelta(days=30), now=_NOW)
+
+    def test_已過的訖止時間被擋(self) -> None:
+        """否則再開課當下課程又立刻符合「期間已過」——狀態自相矛盾（已發布卻進不去）。"""
+        with pytest.raises(AppError) as exc:
+            ensure_reopen_schedule(open_end_at=_NOW - timedelta(seconds=1), now=_NOW)
+        assert exc.value.status_code == 422
+        assert exc.value.error_code == "ET_COURSE_008"
+
+    def test_恰好等於當下被擋(self) -> None:
+        """邊界取「須嚴格晚於」——等於當下代表期間在這一瞬間結束，開了也沒有時間可用。"""
+        with pytest.raises(AppError) as exc:
+            ensure_reopen_schedule(open_end_at=_NOW, now=_NOW)
+        assert exc.value.error_code == "ET_COURSE_008"
+
+    def test_不檢核起始時間(self) -> None:
+        """裁示 A 只要求檢核訖止。
+
+        起始時間允許落在過去——「補開一段已經開始的期間」是合理操作（教師想讓學員
+        從上週就能看）。這也與 2026-08-24 裁示（起始不對比當下）方向一致。
+        """
+        ensure_reopen_schedule(open_end_at=_NOW + timedelta(days=1), now=_NOW)
+
+
+class TestIsWithinOpenWindow:
+    """課程當下對學員是否開放（#288 SA Q1 裁示 A 的共用判定）。
+
+    `spec_us11` 場景 7 / FR-ET-US11-03 與 `data-model` §ET_COURSE 業務規則都要求
+    「`now > OPEN_END_AT` 視同關閉」，而在本 issue 之前**全後端沒有任何地方讀
+    `OPEN_END_AT` 做存取判定**。
+    """
+
+    def test_期間內之已發布課程為開放(self) -> None:
+        assert is_within_open_window(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW - timedelta(days=1),
+            open_end_at=_NOW + timedelta(days=1),
+            now=_NOW,
+        )
+
+    def test_訖止時間已過為不開放(self) -> None:
+        """🔴 本函式存在的唯一理由。此前這種課程「照常運作」——可加入、可作答、可填問卷。"""
+        assert not is_within_open_window(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW - timedelta(days=30),
+            open_end_at=_NOW - timedelta(seconds=1),
+            now=_NOW,
+        )
+
+    def test_恰好等於訖止時間仍為開放(self) -> None:
+        """spec 寫「`now > OPEN_END_AT` 視同關閉」——嚴格大於，等於的那一瞬間還在期間內。"""
+        assert is_within_open_window(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW - timedelta(days=1),
+            open_end_at=_NOW,
+            now=_NOW,
+        )
+
+    def test_起始時間未到為不開放(self) -> None:
+        """AC 4 / `is_visible_to_student` 的既有規則，一併由本函式承載。
+
+        ⚠️ 這是把四處判定收斂成一支純函式的主要理由——各自寫一次最可能漏掉的就是
+        這一半，而漏掉會讓起始時間未到的課程變成可存取。
+        """
+        assert not is_within_open_window(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW + timedelta(seconds=1),
+            open_end_at=_NOW + timedelta(days=30),
+            now=_NOW,
+        )
+
+    def test_恰好等於起始時間即為開放(self) -> None:
+        """邊界沿用 `publish_rules.is_visible_to_student` 的 `now >= open_start_at`。"""
+        assert is_within_open_window(
+            status=COURSE_PUBLISHED, open_start_at=_NOW, open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
+
+    @pytest.mark.parametrize("status", [COURSE_DRAFT, COURSE_CLOSED])
+    def test_非已發布一律不開放(self, status: str) -> None:
+        """已關閉走的是既有的 `STATUS` 判定；本函式把兩種來源合為同一個答案。"""
+        assert not is_within_open_window(
+            status=status, open_start_at=_NOW - timedelta(days=1), open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
+
+    def test_起始時間為空不開放(self) -> None:
+        """已發布課程必有起訖（發布檢核 `BLOCK_NO_SCHEDULE`），為空即資料異常 → 取較保守的一側。"""
+        assert not is_within_open_window(
+            status=COURSE_PUBLISHED, open_start_at=None, open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
+
+    def test_訖止時間為空視為無期限開放(self) -> None:
+        """與起始為空刻意不同：起始為空代表「不知道何時開始」→ 不可見（沿用既有裁示）；
+        訖止為空代表「沒有結束日」→ 不該因此把課程關掉。
+
+        兩者都只可能在資料異常時出現，但保守的方向相反：前者保守＝不給看，後者保守＝
+        不要無故關閉一門教師沒有要求關閉的課程。
+        """
+        assert is_within_open_window(
+            status=COURSE_PUBLISHED, open_start_at=_NOW - timedelta(days=1), open_end_at=None, now=_NOW
+        )
