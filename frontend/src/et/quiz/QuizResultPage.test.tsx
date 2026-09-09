@@ -242,6 +242,20 @@ describe("ET06 結果頁", () => {
     expect(screen.queryByRole("button", { name: /重新作答/ })).not.toBeInTheDocument()
   })
 
+  it("確為最新一次時，等歷次清單載入完成後重考鈕仍在", async () => {
+    // ⚠️ 這條刻意 **await** 到 history 查詢 resolve 才斷言。其餘同步的重考鈕測試驗到的是
+    // `isLatestAttempt` 的**載入中預設值**，不是它真的被解析為 true——兩者都綠才代表這條
+    // 路徑沒有迴歸。MSW 的歷次清單最大是第 2 次，故此處用 attempt_no: 2。
+    state = { ...RESULT, attempt_no: 2 }
+    renderWithProviders(<EtQuizResultPage />)
+
+    await screen.findByText(/50\.00 \/ 100 分/)
+    await waitFor(() => expect(screen.getByRole("button", { name: /回課程重新作答/ })).toBeInTheDocument())
+    // 再等一輪，確認不是「還沒載入完」的假象
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.getByRole("button", { name: /回課程重新作答/ })).toBeInTheDocument()
+  })
+
   it("回看**舊** attempt 時不顯示重考鈕", async () => {
     // `remaining_attempts` 講的是「現在還剩幾次」，與正在看的那一次無關；顯示在第 1 次的
     // 回看畫面上會讓學員以為能從那裡重考

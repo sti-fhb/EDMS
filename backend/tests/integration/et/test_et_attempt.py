@@ -893,6 +893,21 @@ class TestAttemptHistory:
         assert [q["question_id"] for q in first_result.json()["questions"]] == list(reversed(second_order))
         assert [q["question_id"] for q in second_result.json()["questions"]] == second_order
 
+    async def test_不存在或無權之測驗回空清單而非404(self, client, db) -> None:
+        """**反 oracle 迴歸**。
+
+        回 404 就能分辨「這個 quiz_id 存在但你沒紀錄」與「不存在」，可用來二分掃描全站
+        有效的 `quiz_id`。`history()` 刻意不分支、不 raise——但那是一個很容易被「順手補上
+        `_require_access`」推翻的設計，而推翻之後沒有任何既有測試會紅。
+        """
+        student = await _user(db, "s_att37")
+        await db.commit()
+
+        r = await client.get("/api/et/quizzes/999999999/attempts", headers=_bearer(student))
+
+        assert r.status_code == 200, "不可分辨『不存在』與『你沒有紀錄』"
+        assert r.json() == []
+
     async def test_不可讀他人的歷次清單(self, client, db) -> None:
         teacher = await _user(db, "t_att31", ROLE_TEACHER)
         owner = await _user(db, "s_att31a")
@@ -1000,9 +1015,13 @@ class TestClosedAndRemovedBoundaries:
 
         submitted = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
         history = await client.get(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+        blocked = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
 
         assert submitted.status_code == 200, submitted.text
         assert len(history.json()) == 1, "已完成的那次須計入歷史"
+        # ⚠️ 這條斷言原本漏了——測試名稱與 docstring 都寫「不可開新」，但主體只驗了提交。
+        # `_require_access` → `ensure_can_access` 失敗後收斂成 404（不用 403，見模組 docstring）。
+        assert blocked.status_code == 404, blocked.text
 
     async def test_被移除者看到的是被移除而非尚未加入(self, client, db) -> None:
         """AC 9 後半 / ET-MSG-ET06-006：next navigation 的訊息要說對原因。

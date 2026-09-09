@@ -81,7 +81,7 @@ async def attempt_history(
 ) -> list[AttemptSummary]:
     """歷次作答清單：**每一次**已閱卷的作答，依 `ATTEMPT_NO` 遞增（#280 AC 1）。
 
-    **不分頁**——`MAX_RETRY` 使單一測驗的 attempt 數為個位數。
+    **不分頁**——`MAX_RETRY` 的 schema 上限雖為 999，實務上是個位數。
 
     授權只看 `USER_ID`，**不問課程資格**：課程關閉後與被移除的學員仍須看得到自己的歷史
     （`spec_us6` 場景 25 / 28）。查無資料回空清單而非 404——後者會變成存在性 oracle。

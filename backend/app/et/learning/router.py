@@ -29,16 +29,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.schemas import MAX_BIGINT
-from app.et.deps import EtContext, get_et_context
+from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
 from app.et.learning.schemas import LearnStructure, MaterialContent, VideoTicket
 from app.et.learning.service import EtLearningService
 from app.et.learning.video_ticket import TICKET_TTL_SECONDS, issue_video_ticket, verify_video_ticket
 
+#: 每位使用者 / 每個 IP 每分鐘之學員端內容請求數。
+#:
+#: ⚠️ `GET /courses/{id}/learn` 的回應**可四分**——404（不存在或草稿）／403 `ET_LEARN_002`
+#: （存在但你沒加入）／403 `ET_LEARN_004`（存在且你曾被移除）／200（在籍或擁有者）。沒有
+#: 上限的話，任一登入者（ET 學員角色人人都有）即可用它逐一探測全站有效的 `course_id`
+#: 與自己的過往關係。這是本模組唯一可被任意登入者反覆呼叫的授權判定入口。
+#:
+#: 門檻比照 `attempt/router.py`：正常學習一分鐘內載入結構的次數遠低於 120。
+_LEARN_RATE_MAX = 120
+_LEARN_IP_RATE_MAX = 900
+
+_limiter = SlidingWindowRateLimiter(max_requests=_LEARN_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_ip_limiter = SlidingWindowRateLimiter(max_requests=_LEARN_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_SCOPE = "et-learning"
+
 router = APIRouter(
     prefix="/api/et",
     tags=["et-learning"],
-    dependencies=[Depends(get_et_context)],
+    dependencies=[
+        Depends(get_et_context),
+        Depends(rate_limit_by_et_user(_limiter, _SCOPE)),
+        Depends(rate_limit_by_ip(_ip_limiter, _SCOPE)),
+    ],
 )
 _service = EtLearningService()
 
@@ -127,6 +147,9 @@ def _ensure_file_present(path: str) -> None:
 #
 # ⚠️ **不要往這個 router 加其他端點**。它是唯一一處沒有 router-level 認證的地方，
 # 新端點掛進來等於預設無認證，而那種遺漏在測試裡看不出來（測試會帶票）。
+#
+# 也**刻意不掛限流**：Range 請求會讓播放器對同一支影片打很多次，套用一般門檻會在正常
+# 觀看時就誤殺。它的存取控制是「票」——票由已認證的路徑簽發、有 TTL，不是靠次數。
 media_router = APIRouter(prefix="/api/et", tags=["et-learning-media"])
 
 

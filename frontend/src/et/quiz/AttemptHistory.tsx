@@ -95,7 +95,9 @@ export function AttemptHistory({ quizId }: { quizId: number }) {
                   </Stack>
                 </TableCell>
                 <TableCell>{formatSubmittedAt(attempt.submitted_at)}</TableCell>
-                <TableCell align="right">{attempt.score}</TableCell>
+                <TableCell align="right">
+                  {attempt.score} / {attempt.points_total}
+                </TableCell>
                 <TableCell>
                   <Chip
                     size="small"

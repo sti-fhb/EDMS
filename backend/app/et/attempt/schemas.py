@@ -158,6 +158,9 @@ class AttemptSummary(BaseModel):
     attempt_no: int
     submitted_at: datetime
     score: Decimal
+    #: 該次的配分總和（快照）。**不可省略**——「總和 = 100」只在發布當下檢核，發布後
+    #: 教師仍可改配分，少了分母時 60/100 與 60/300 在清單上都只是「60」。
+    points_total: int
     is_pass: bool
     status: Literal["SUBMITTED", "TIMEOUT"]
 

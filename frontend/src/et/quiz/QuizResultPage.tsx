@@ -79,7 +79,10 @@ export function EtQuizResultPage() {
   // 判斷「正在看的是不是最新一次」。沿用 `AttemptHistory` 的同一個 query key，故從測驗
   // 面板進來時走的是快取、不會多一趟往返。
   //
-  // 尚未載入時預設 **true**：剛提交完的情境最常見，預設 false 會讓按鈕先消失再冒出來。
+  // 尚未載入時預設 **true**（fail-open）：剛提交完的情境最常見，預設 false 會讓按鈕先消失
+  // 再冒出來。查詢失敗時（`retry: false`）也會停在 true——代價是舊 attempt 的回看畫面可能
+  // 顯示重考文案。**刻意接受**：該按鈕只是 `navigate` 回學習頁，不會開新 attempt、不會消耗
+  // 次數（真正開 attempt 的唯一入口是測驗面板，且後端有三道守門），最壞情況是文案誤導。
   const { data: history } = useQuery({
     queryKey: QUERY_KEYS.etQuiz.history(result?.quiz_id ?? 0),
     queryFn: () => attemptApi.history(result?.quiz_id ?? 0),

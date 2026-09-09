@@ -91,6 +91,9 @@ export interface AttemptSummary {
   attempt_no: number
   submitted_at: string
   score: string
+  /** 該次的配分總和。**不可省略分母**——發布後教師仍可改配分，60/100 與 60/300 在
+   * 清單上都只顯示「60」時，「結業成績以最高分為準」那句話就變成誤導。 */
+  points_total: number
   is_pass: boolean
   status: "SUBMITTED" | "TIMEOUT"
 }

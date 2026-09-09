@@ -143,6 +143,7 @@ class EtAttemptService:
         以測驗不存在或無權為由回 404 反而會變成存在性 oracle。
         """
         rows = await self._repo.list_attempts(db, user_id=user_id, quiz_id=quiz_id)
+        points = await self._repo.points_total_by_attempt(db, [row.attempt_id for row in rows])
         return [
             AttemptSummary(
                 attempt_id=row.attempt_id,
@@ -150,6 +151,7 @@ class EtAttemptService:
                 # 已閱卷者三欄必有值；`or` 的預設只是讓型別收斂，不是預期會走到的路徑
                 submitted_at=row.submitted_at or row.started_at,
                 score=row.score if row.score is not None else Decimal(0),
+                points_total=points.get(row.attempt_id, 0),
                 is_pass=bool(row.is_pass),
                 status=row.status,
             )

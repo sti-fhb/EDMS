@@ -15,6 +15,29 @@ pytestmark = pytest.mark.unit
 class TestEnsureCanAccess:
     """授權：在籍 **OR** 擁有者（#255 SA Q1 裁示 A）。"""
 
+    def test_removed_旗標不得擋下在籍者(self) -> None:
+        """**在籍優先於任何歷史狀態**（#280）。
+
+        `ensure_can_access` 目前先判 `enrolled or is_owner` 才看 `removed`，所以正確。
+        但若有人把 `if removed: raise` 前置（看起來很自然），就會擋掉一個曾被移除、
+        後來又被重新加入的合法學員——而那種帳號在測試資料裡通常不存在，不會有人發現。
+        """
+        ensure_can_access(enrolled=True, is_owner=False, removed=True)
+        ensure_can_access(enrolled=False, is_owner=True, removed=True)
+
+    def test_被移除者收到專屬錯誤碼(self) -> None:
+        """`ET_LEARN_004` 與 `ET_LEARN_002` 同為 403、擋的力道相同，差別只在訊息。"""
+        with pytest.raises(AppError) as exc:
+            ensure_can_access(enrolled=False, is_owner=False, removed=True)
+        assert exc.value.status_code == 403
+        assert exc.value.error_code == "ET_LEARN_004"
+
+    def test_從未加入者仍收到既有錯誤碼(self) -> None:
+        """`removed` 預設 False——不傳的四個既有呼叫點行為不變。"""
+        with pytest.raises(AppError) as exc:
+            ensure_can_access(enrolled=False, is_owner=False)
+        assert exc.value.error_code == "ET_LEARN_002"
+
     def test_在籍學員可存取(self) -> None:
         ensure_can_access(enrolled=True, is_owner=False)
 
