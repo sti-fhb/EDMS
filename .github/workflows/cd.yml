@@ -72,13 +72,13 @@ jobs:
       # public repo 內不得存放任何長期憑證；WIF 的 attribute condition 必須綁到
       # repo + ref（refs/heads/main），只綁 repo 會讓任何分支的 workflow 都能取得身分。
       - name: 認證 GCP（Workload Identity Federation）
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_BUILD_SERVICE_ACCOUNT }}
 
       - name: 設定 gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Artifact Registry 認證
         run: gcloud auth configure-docker "${AR_HOST}" --quiet
@@ -121,10 +121,10 @@ jobs:
       # GitHub-hosted runner 每次都是全新環境，沒有本地 layer cache，
       # 故改用 GitHub Actions cache（type=gha）補回來，否則每次都是冷 build。
       - name: 設定 Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build edms-backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           load: true          # 載入本地 daemon，供下方兩個驗證步驟使用
@@ -179,7 +179,7 @@ jobs:
           docker push "${AR_BASE}/edms-backend:latest"
 
       - name: Build & Push edms-nginx（含前端建置）
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: nginx/Dockerfile
