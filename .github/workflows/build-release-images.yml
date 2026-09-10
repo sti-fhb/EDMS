@@ -1,5 +1,10 @@
 # ============================================================
-# CI-Prod —— 手動指定版本產出 Docker 映像（不部署）
+# Build Release Images —— 手動指定版本產出 Docker 映像（不部署）
+#
+# ⚠️ 本 workflow **與部署環境無關**：它只是「在指定的 commit 出映像」。
+#    同一份映像會同時裝到正式機與測試機 —— PROD／TEST 的差異全在院內
+#    安裝時產生的設定檔（主機名稱與各自獨立的金鑰）。院內部署的組裝與
+#    手冊在 TBMS repo 的 scripts/onprem-stack/。
 #
 # 用途：在 Actions UI 點 [Run workflow]（或以 gh 下指令），指定任意 commit /
 #       tag 建置 edms-backend 與 edms-nginx，推到 GitHub Container Registry
@@ -26,7 +31,7 @@
 #   每次執行的 Summary 頁會列出當次的完整指令。
 # ============================================================
 
-name: CI-Prod
+name: Build Release Images
 
 on:
   workflow_dispatch:
@@ -48,7 +53,7 @@ permissions:
   # 刻意不要 id-token：本檔不碰 GCP，不需要 WIF 的 OIDC token
 
 concurrency:
-  group: edms-ci-prod
+  group: edms-build-release-images
   cancel-in-progress: false
 
 env:
