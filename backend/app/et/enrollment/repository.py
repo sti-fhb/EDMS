@@ -123,6 +123,30 @@ class EtEnrollmentRepository:
             )
         )
 
+    async def enrolled_user_ids(self, db: AsyncSession, course_id: int) -> list[str]:
+        """該課程之**在籍**學員 `USER_ID`（ET-13 / #303）。
+
+        **濾掉 `IS_REMOVED`**：已被教師移出課程者不該再收到課程更新通知
+        （`issues.md` AC 1 明列）。與 `get_enrollment` 的**刻意不濾**相反——那支要靠
+        `IS_REMOVED` 區分「已加入」與「曾加入但被移除」，此處則是「現在還在不在」。
+
+        **不濾完課狀態**：`spec_us3` 場景 29 明寫通知「包含已完課學員」——他們正是最
+        需要知道課程多了新內容的人。
+
+        Returns:
+            依 `USER_ID` 排序（使寄信順序可預期、測試可重現）。
+        """
+        rows = await db.scalars(
+            select(EtEnrollment.user_id)
+            .where(
+                EtEnrollment.course_id == course_id,
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+            )
+            .order_by(EtEnrollment.user_id)
+        )
+        return list(rows.all())
+
     async def create(
         self,
         db: AsyncSession,
