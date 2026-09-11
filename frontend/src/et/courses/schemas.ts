@@ -132,3 +132,37 @@ export const ChapterNameSchema = z
   .trim()
   .min(1, { message: "請輸入章節名稱" })
   .max(CHAPTER_NAME_MAX_LEN, { message: `章節名稱不可超過 ${CHAPTER_NAME_MAX_LEN} 字元` })
+
+
+/** ET01 課程列表的一張卡片（對齊後端 `CourseCard`）。 */
+export interface CourseCard {
+  course_id: number
+  course_name: string
+  status: "DRAFT" | "PUBLISHED" | "CLOSED"
+  open_start_at: string | null
+  open_end_at: string | null
+  owner_id: string
+  /** 取自 `DP_USER`；帳號已刪時為 `null`。 */
+  owner_name: string | null
+  tags: TagOption[]
+  chapter_count: number
+  /** **在籍**學員數——已移除者不計入。 */
+  student_count: number
+  /**
+   * 由**後端**判定，決定「檢視」標籤與進入模式。
+   *
+   * 前端不可自行比對 `owner_id` 與當前使用者——那等於把授權語意複製一份到瀏覽器，
+   * 而那一份遲早與後端分岔。
+   */
+  is_owner: boolean
+}
+
+/** 課程列表查詢條件。`scope` 決定狀態過濾，兩者相反（見後端 `build_list_stmt`）。 */
+export interface CourseListParams {
+  scope: "mine" | "all"
+  q?: string
+  tag_id?: number
+  owner_id?: string
+  page?: number
+  limit?: number
+}

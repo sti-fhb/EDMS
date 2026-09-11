@@ -1008,6 +1008,15 @@ export const handlers = [
       { tag_id: 2, tag_name: "護理師", is_active: true },
     ]),
   ),
+  // ⚠️ 字面路徑（`capabilities` / `filter-tags`）必須排在 `:courseId` **之前**——MSW 依
+  // 註冊順序比對，排在後面會被 `:courseId="filter-tags"` 吃掉，拿到的是課程詳情**物件**
+  // 而非陣列。與 FastAPI 路由宣告順序是同一類坑，但這裡不會報錯、只在渲染時才爆。
+  http.get("/api/et/courses/filter-tags", () =>
+    HttpResponse.json([
+      { tag_id: 1, tag_name: "護理師", is_active: true },
+      { tag_id: 2, tag_name: "已裁撤單位", is_active: false },
+    ]),
+  ),
   http.get("/api/et/courses/:courseId", ({ params }) =>
     HttpResponse.json({
       course_id: Number(params.courseId),
@@ -1030,6 +1039,57 @@ export const handlers = [
       ],
     }),
   ),
+  // ET01 課程清單（US7 / #299）
+  http.get("/api/et/courses", ({ request }) => {
+    const query = new URL(request.url).searchParams
+    const scope = query.get("scope")
+    const mine = {
+      course_id: 11,
+      course_name: "採血作業新進人員訓練",
+      status: "PUBLISHED",
+      open_start_at: "2026-04-15T01:00:00Z",
+      open_end_at: "2026-07-31T09:00:00Z",
+      owner_id: "t01",
+      owner_name: "陳大華",
+      tags: [{ tag_id: 1, tag_name: "護理師", is_active: true }],
+      chapter_count: 5,
+      student_count: 28,
+      is_owner: true,
+    }
+    const others = {
+      course_id: 12,
+      course_name: "捐血人健康評估標準教學",
+      status: "PUBLISHED",
+      open_start_at: null,
+      open_end_at: null,
+      owner_id: "t02",
+      owner_name: "林助教",
+      tags: [],
+      chapter_count: 3,
+      student_count: 9,
+      is_owner: false,
+    }
+    // 草稿課的聚合值刻意與 `mine` 不同——兩張卡片若數字一樣，`getByText("5 章節")` 會
+    // 因找到兩個節點而失敗，而那是 fixture 的問題、不是頁面的問題
+    const draft = {
+      ...mine,
+      course_id: 13,
+      course_name: "草稿課",
+      status: "DRAFT",
+      tags: [],
+      chapter_count: 1,
+      student_count: 0,
+    }
+    // `owner_id` 由 fixture 實際過濾——建立者選單的行為取決於「篩選後結果只剩一個人」
+    // 這件事，handler 若忽略該參數就永遠測不到它
+    const ownerId = query.get("owner_id")
+    const all = scope === "all" ? [mine, others] : [mine, draft]
+    const data = ownerId === null ? all : all.filter((c) => c.owner_id === ownerId)
+    return HttpResponse.json({
+      data,
+      meta: { total: data.length, page: 1, limit: 12, total_pages: 1 },
+    })
+  }),
   http.post("/api/et/courses", () => HttpResponse.json({ course_id: 99, version: 0 }, { status: 201 })),
   http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
   http.post("/api/et/courses/:courseId/chapters", () =>
