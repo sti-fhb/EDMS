@@ -52,9 +52,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
+from app.core.utils import utcnow
 from app.et.common.tokens import generate_invitation_token, hash_token
 from app.et.constants import COURSE_PUBLISHED, INVITATION_PENDING, INVITATION_REVOKED
-from app.et.course.rules import ensure_owner
+from app.et.course.rules import ensure_owner, is_effectively_closed
 from app.et.invitation.repository import EtInvitationRepository
 from app.et.invitation.rules import ensure_invitable, parse_emails
 from app.et.invitation.schemas import EmailInviteResult, InviteAcceptResult, InvitePreview
@@ -233,8 +234,12 @@ class EtInvitationService:
         if invitation.status != INVITATION_PENDING:
             return await self._already_consumed(db, course, user_id=operator.user_id)
 
-        if course.status != COURSE_PUBLISHED:
-            # 關閉期間連結暫時失效，再開課後恢復——與邀請碼同一規則（#273 Q2 裁示）。
+        # 關閉期間連結暫時失效，再開課後恢復——與邀請碼同一規則（#273 Q2 裁示）。
+        # #288：**閱課期間已過亦視同關閉**。少了後者，教師在期間內寄出的連結會在期間過後
+        # 仍可被接受，受邀者加入的卻是一門他進去後什麼都不能做的課程。
+        if course.status != COURSE_PUBLISHED or is_effectively_closed(
+            status=course.status, open_end_at=course.open_end_at, now=utcnow()
+        ):
             raise _COURSE_CLOSED
 
         # 先原子消耗、再加入：輸掉競態者不會建出第二筆選課列（見 repository 之說明）。
@@ -276,7 +281,7 @@ class EtInvitationService:
         if course is None:
             raise _NOT_FOUND
         ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
-        ensure_invitable(course_status=course.status)
+        ensure_invitable(course_status=course.status, open_end_at=course.open_end_at, now=utcnow())
         return course
 
     async def _require_known_recipients(self, db: AsyncSession, emails: list[str]) -> list[Recipient]:

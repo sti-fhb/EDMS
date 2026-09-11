@@ -35,12 +35,21 @@ export interface MyCourseRow {
   course_id: number
   course_name: string
   status: CourseStatus
+  /**
+   * 對學員**視同關閉**（#288）：`status === "CLOSED"` **或**「已發布但閱課期間已過」。
+   *
+   * ⚠️ 卡片的「已關閉」標示看本欄，**不要自己判 `status === "CLOSED"`**——期間已過者
+   * 的 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 `ET-16`、未實作），只看
+   * `status` 會讓卡片標「已發布」而點進去 ET05 卻是唯讀的。與 ET05 的
+   * `LearnStructure.is_closed` 同名同義。
+   */
+  is_closed: boolean
   completion_status: CompletionStatus
   tags: string[]
   chapter_count: number
   open_start_at: string | null
   open_end_at: string | null
-  /** **本 issue 恆為 0**——進度累積依賴 `ET_PROGRESS`，屬 `ET-5`。 */
+  /** 學習進度百分比＝完成項目數 ÷ 總項目數（#274 填實；原為恆 0 的接點）。 */
   progress_pct: number
 }
 

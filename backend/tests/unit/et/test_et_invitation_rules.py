@@ -5,6 +5,8 @@
 否則同一個人會收到兩封信、或建出兩列 `ET_INVITATION`。
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.core.exceptions import AppError
@@ -12,6 +14,9 @@ from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.invitation.rules import MAX_EMAILS_PER_REQUEST, ensure_invitable, parse_emails
 
 pytestmark = pytest.mark.unit
+
+_NOW = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+_DAY = timedelta(days=1)
 
 
 class TestParseEmails:
@@ -82,12 +87,31 @@ class TestParseEmails:
 class TestEnsureInvitable:
     """AC 1：僅已發布課程可邀請學員。"""
 
-    def test_已發布可邀請(self) -> None:
-        ensure_invitable(course_status=COURSE_PUBLISHED)
+    def test_已發布且期間內可邀請(self) -> None:
+        ensure_invitable(course_status=COURSE_PUBLISHED, open_end_at=_NOW + _DAY, now=_NOW)
+
+    def test_沒有訖止時間可邀請(self) -> None:
+        """訖止為空代表「沒有結束日」——不該因為一個缺失的欄位擋下邀請。"""
+        ensure_invitable(course_status=COURSE_PUBLISHED, open_end_at=None, now=_NOW)
 
     @pytest.mark.parametrize("status", [COURSE_DRAFT, COURSE_CLOSED])
     def test_草稿與已關閉不可邀請(self, status: str) -> None:
         with pytest.raises(AppError) as exc:
-            ensure_invitable(course_status=status)
+            ensure_invitable(course_status=status, open_end_at=_NOW + _DAY, now=_NOW)
         assert exc.value.error_code == "ET_INVITE_004"
         assert exc.value.status_code == 422
+
+    def test_期間已過不可邀請且為關閉中之錯誤碼(self) -> None:
+        """#288：期間已過視同關閉，回 `ET_INVITE_002`（此課程目前關閉中）。
+
+        **不可**與草稿共用 `ET_INVITE_004`：那句「僅已發布課程可邀請學員」對一門狀態
+        確實是「已發布」的課程說不通，教師會以為系統壞了。
+        """
+        with pytest.raises(AppError) as exc:
+            ensure_invitable(course_status=COURSE_PUBLISHED, open_end_at=_NOW - _DAY, now=_NOW)
+        assert exc.value.error_code == "ET_INVITE_002"
+        assert exc.value.status_code == 409
+
+    def test_訖止恰為當下仍可邀請(self) -> None:
+        """邊界：`is_effectively_closed` 為嚴格大於，訖止當下那一刻尚未過期。"""
+        ensure_invitable(course_status=COURSE_PUBLISHED, open_end_at=_NOW, now=_NOW)

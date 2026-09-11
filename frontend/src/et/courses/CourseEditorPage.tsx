@@ -1,5 +1,7 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
 import ContentCopyIcon from "@mui/icons-material/ContentCopy"
+import LockIcon from "@mui/icons-material/Lock"
+import LockOpenIcon from "@mui/icons-material/LockOpen"
 import PersonAddIcon from "@mui/icons-material/PersonAdd"
 import VisibilityIcon from "@mui/icons-material/Visibility"
 import Alert from "@mui/material/Alert"
@@ -35,6 +37,7 @@ import { MaterialDialog } from "./MaterialDialog"
 import { InviteStudentsDialog } from "./InviteStudentsDialog"
 import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
+import { ReopenCourseDialog } from "./ReopenCourseDialog"
 import { SurveyDialog } from "./SurveyDialog"
 import { SurveySection } from "./SurveySection"
 import { coursesApi } from "./coursesService"
@@ -126,6 +129,14 @@ export function EtCourseEditorPage() {
   const [publishOpen, setPublishOpen] = useState(false)
   const [blockers, setBlockers] = useState<PublishBlocker[]>([])
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
+  const [reopenOpen, setReopenOpen] = useState(false)
+  /**
+   * 再開課重跑發布檢核的缺漏——與 `blockers`（發布用）分開。
+   *
+   * 共用一份會讓兩個視窗互相污染：發布視窗殘留的缺漏會在再開課視窗一開就顯示，
+   * 而那可能是上一次發布嘗試留下的，跟這次再開課無關。
+   */
+  const [reopenBlockers, setReopenBlockers] = useState<PublishBlocker[]>([])
 
   const {
     data: course,
@@ -349,6 +360,75 @@ export function EtCourseEditorPage() {
   const openPublish = () => {
     if (validateForm()) saveThenCheckMut.mutate()
   }
+
+  // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
+
+  /**
+   * 關閉前的確認——關閉會立刻影響**所有在籍學員**，不是只影響操作者自己。
+   *
+   * 內容列出會停掉的四件事：學員無從得知課程為何突然不能操作，教師按下去之前就該
+   * 知道自己關掉了什麼。可逆這件事也要說，否則教師會誤以為這是不可回復的動作而不敢按。
+   *
+   * ⚠️ 錯誤在 `onOk` 內就地 catch（比照 `handleDeleteChapter`）——讓 rejection 逃出去
+   * 會使 `NotificationContext` 刻意保留確認視窗，而版本衝突另有自己的 Dialog，
+   * 兩個視窗會疊在一起。
+   */
+  const requestClose = () => {
+    confirm({
+      title: "關閉課程",
+      content:
+        "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
+        "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。",
+      // 「確認關閉」而非「關閉課程」：與標題列那顆同名會讓畫面上同時存在兩個同名
+      // 按鈕（無障礙名稱重複）。措辭亦與「確認發布」/「確認再開課」一致。
+      okText: "確認關閉",
+      onOk: async () => {
+        try {
+          await coursesApi.close(courseId as number, course?.version ?? 0)
+          message.success("課程已關閉")
+          invalidate()
+        } catch (err) {
+          handleError(err)
+        }
+      },
+    })
+  }
+
+  const reopenMut = useMutation({
+    /**
+     * 422 `ET_PUBLISH_001` 在 `mutationFn` 內就地轉成「顯示缺漏」，**不往外拋**。
+     *
+     * 走 `onError` 的話 `mutateAsync` 仍會 reject，而缺漏並不是一個需要 toast 的失敗
+     * ——視窗裡已經逐條列出來了。#284 在問卷送出的 409 上踩過這個坑：`onError` 處理
+     * 完之後 promise 照樣 reject，外層看到的是「操作失敗」。
+     */
+    mutationFn: async (payload: { openStartAt: string; openEndAt: string }) => {
+      try {
+        return await coursesApi.reopen(courseId as number, {
+          open_start_at: payload.openStartAt,
+          open_end_at: payload.openEndAt,
+          version: course?.version ?? 0,
+        })
+      } catch (err) {
+        const { errorCode, payload: body } = toApiError(err)
+        const returned = (body as { blockers?: PublishBlocker[] } | undefined)?.blockers
+        if (errorCode === "ET_PUBLISH_001" && returned) {
+          setReopenBlockers(returned)
+          return undefined
+        }
+        throw err
+      }
+    },
+    onSuccess: (result) => {
+      // `undefined` = 檢核未通過，缺漏已顯示在視窗內，視窗要留著讓教師看
+      if (result === undefined) return
+      message.success("課程已再開課")
+      setReopenOpen(false)
+      setReopenBlockers([])
+      invalidate()
+    },
+    onError: handleError,
+  })
 
   /**
    * 缺漏項目所指的測驗名稱——後端只回 `target_id`，名稱由前端自課程詳細對照。
@@ -679,6 +759,32 @@ export function EtCourseEditorPage() {
             邀請學員
           </Button>
         )}
+        {/*
+          關閉 / 再開課（US11 AC 1 / AC 8、#288）。兩者互斥且各只在對應狀態出現——
+          草稿沒有學員也沒有邀請碼，關閉它沒有語意（要移除草稿走既有的刪除）。
+
+          `ml: "auto"` 只掛在該列的**第一顆**按鈕上：已發布時第一顆是「邀請學員」，
+          已關閉時第一顆是「再開課」。兩顆都掛會讓它們被推到兩端、中間空一大段。
+        */}
+        {status === "PUBLISHED" && !readOnly && course !== undefined && (
+          <Button variant="outlined" size="small" color="warning" startIcon={<LockIcon />} onClick={requestClose}>
+            關閉課程
+          </Button>
+        )}
+        {status === "CLOSED" && !readOnly && course !== undefined && (
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<LockOpenIcon />}
+            sx={{ ml: "auto" }}
+            onClick={() => {
+              setReopenBlockers([])
+              setReopenOpen(true)
+            }}
+          >
+            再開課
+          </Button>
+        )}
       </Stack>
 
       {course !== undefined && (
@@ -694,6 +800,20 @@ export function EtCourseEditorPage() {
       {readOnly && (
         <Alert severity="warning" icon={<VisibilityIcon />} sx={{ mb: 2 }}>
           <strong>檢視模式</strong> — 此課程由 <strong>{course?.owner_name ?? "他人"}</strong> 建立，您僅可閱覽，無法編輯。
+        </Alert>
+      )}
+
+      {/*
+        已關閉提示（US11 AC 6 / #288）。
+
+        ⚠️ 刻意寫明「課程內容仍可編輯」：關閉停的是**學員端**（不可加入、不可累積進度、
+        不可作答、不可填問卷），教師端的編輯照舊。少了這句，教師會以為關閉後這頁是唯讀
+        的而不敢改——AC 6 的整個用意就是讓他能在關閉期間整理教材再開課。
+      */}
+      {status === "CLOSED" && (
+        <Alert severity="info" icon={<LockIcon />} sx={{ mb: 2 }}>
+          <strong>此課程已關閉</strong> — 學員無法加入、累積學習進度或填寫問卷，邀請碼暫時失效；
+          已加入的學員仍可唯讀回看內容與成績。<strong>課程內容仍可編輯</strong>，整理完畢後按「再開課」即可恢復。
         </Alert>
       )}
 
@@ -1127,6 +1247,18 @@ export function EtCourseEditorPage() {
         onClose={() => {
           setPublishOpen(false)
           setPublishResult(null)
+        }}
+      />
+
+      <ReopenCourseDialog
+        open={reopenOpen}
+        submitting={reopenMut.isPending}
+        blockers={reopenBlockers}
+        quizNames={quizNames}
+        onSubmit={(openStartAt, openEndAt) => reopenMut.mutate({ openStartAt, openEndAt })}
+        onClose={() => {
+          setReopenOpen(false)
+          setReopenBlockers([])
         }}
       />
 

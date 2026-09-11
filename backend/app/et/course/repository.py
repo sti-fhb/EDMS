@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ITEM_QUIZ
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ITEM_QUIZ
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.material.repository import EtMaterialRepository
@@ -81,20 +81,28 @@ class EtCourseRepository:
         invitation_code: str,
         published_at: datetime,
         operator: OperatorInfo,
-    ) -> int:
+    ) -> int | None:
         """發布課程：狀態轉 `PUBLISHED`、寫入邀請碼與首次發布時間（#204）。
 
         `FIRST_PUBLISHED_AT` 以 `COALESCE` 保留既有值——歷經再開課（`ET-11`）不變
         （data-model §ET_COURSE）。本 issue 只由草稿發布一次，但寫法先對，避免
         `ET-11` 接手時把首次發布時間覆寫成再開課時間。
 
-        帶樂觀鎖：檢核與寫入之間若有人改動課程，rowcount 為 0，呼叫端據此讓教師
-        重新載入——而不是拿一份過時的檢核結果硬寫。
+        帶樂觀鎖：檢核與寫入之間若有人改動課程，回 `None`，呼叫端據此讓教師重新載入
+        ——而不是拿一份過時的檢核結果硬寫。
+
+        ⚠️ **#288 改為以 `RETURNING` 回新版本**（原為 rowcount）。原本呼叫端寫
+        `PublishResult(version=course.version + 1)`，但 `update(EtCourse)` 是
+        ORM-enabled UPDATE、SQLAlchemy 會同步 identity map，執行後 `course.version`
+        **已經是新值**——再 `+ 1` 就回了一個比 DB 大 1 的版本。那個值沒有造成使用者
+        可見的問題（前端只顯示回應裡的邀請碼，寫入用的是 `GET /courses/{id}` 重抓的
+        版本），但它是一個 API 回應裡的錯誤資料，且 #288 的 `mark_closed` /
+        `mark_reopened` 若照抄同一形狀會讓測試必須把那個謊寫進斷言。
 
         Returns:
-            受影響列數。
+            新的 `VERSION`；`None` = 沒有列符合（版本不符）。
         """
-        result = await db.execute(
+        return await db.scalar(
             update(EtCourse)
             .where(EtCourse.course_id == course_id, EtCourse.deleted == 0, EtCourse.version == version)
             .values(
@@ -105,9 +113,92 @@ class EtCourseRepository:
                 updated_user=operator.user_id,
                 updated_date=utcnow(),
             )
+            .returning(EtCourse.version)
         )
-        await db.flush()
-        return result.rowcount
+
+    async def mark_closed(
+        self, db: AsyncSession, course_id: int, version: int, *, closed_at: datetime, operator: OperatorInfo
+    ) -> int | None:
+        """關閉課程：狀態轉 `CLOSED`、寫入最近一次關閉時間（US11 AC 1）。
+
+        ## 刻意不動 `OPEN_END_AT`
+
+        手動關閉與到期關閉的差別就在這裡——手動關閉時閱課期間可能還沒到，把
+        `OPEN_END_AT` 一併改成 `now` 會讓「為什麼關的」這個資訊消失，而 `CLOSED_AT`
+        已經記錄了時點。再開課時兩個時間都會被強制覆寫，也不需要先清掉。
+
+        `INVITATION_CODE` 亦不動：關閉期間邀請碼**失效但不作廢**（Clarifications 明訂
+        再開課沿用原碼、不重產），失效是由各處守門判 `STATUS` 達成的。
+
+        ## 以 `RETURNING` 回新版本，不由呼叫端自行 `+ 1`
+
+        `update(EtCourse)` 是 **ORM-enabled UPDATE**，SQLAlchemy 會同步 identity map
+        ——執行後手上那個 `EtCourse` 物件的 `version` **已經是新值**。呼叫端若再寫
+        `course.version + 1` 就會多加一次，回給前端一個比 DB 大 1 的版本，而前端下一次
+        帶它寫入必然 409。
+
+        > `publish` 的 `PublishResult.version` 目前就是這個形狀（回 `course.version + 1`
+        > 而 DB 已是該值）。它沒有造成使用者可見的問題，因為前端用的是
+        > `GET /courses/{id}` 重抓的值、不消費那個欄位——已於 #288 的 PR 說明提出。
+        > 本方法以 `RETURNING` 明確回值，不依賴上述同步行為。
+
+        Returns:
+            新的 `VERSION`；`None` = 沒有列符合（版本不符），呼叫端據此拋
+            `ET_LOCK_001`。
+        """
+        return await db.scalar(
+            update(EtCourse)
+            .where(EtCourse.course_id == course_id, EtCourse.deleted == 0, EtCourse.version == version)
+            .values(
+                status=COURSE_CLOSED,
+                closed_at=closed_at,
+                version=EtCourse.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+            .returning(EtCourse.version)
+        )
+
+    async def mark_reopened(
+        self,
+        db: AsyncSession,
+        course_id: int,
+        version: int,
+        *,
+        open_start_at: datetime,
+        open_end_at: datetime,
+        operator: OperatorInfo,
+    ) -> int | None:
+        """再開課：狀態回 `PUBLISHED`、覆寫新起訖時間、加急提醒旗標歸零（US11 AC 8）。
+
+        ## 三個欄位刻意**不動**
+
+        - `CLOSED_AT`：保留最近一次關閉時間供追溯（FR-ET-US11-10 明訂）
+        - `FIRST_PUBLISHED_AT`：歷經再開課不變（`data-model` §ET_COURSE；`mark_published`
+          已用 `COALESCE` 為此預留）
+        - `INVITATION_CODE`：沿用原 8 碼、不重產（Clarifications 明訂），恢復有效是由
+          各處守門判 `STATUS` 自動達成的
+
+        `URGENT_REMIND_SENT` 必須歸 `false`——否則依新起訖時間算出的訖止前 3 天加急提醒
+        不會再發（`ET-16` / SCHET002 以該旗標判斷是否已寄）。
+
+        Returns:
+            新的 `VERSION`；`None` = 版本不符（理由同 `mark_closed`）。
+        """
+        return await db.scalar(
+            update(EtCourse)
+            .where(EtCourse.course_id == course_id, EtCourse.deleted == 0, EtCourse.version == version)
+            .values(
+                status=COURSE_PUBLISHED,
+                open_start_at=open_start_at,
+                open_end_at=open_end_at,
+                urgent_remind_sent=False,
+                version=EtCourse.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+            .returning(EtCourse.version)
+        )
 
     async def list_invitation_codes(self, db: AsyncSession) -> set[str]:
         """所有已使用之邀請碼（供產碼時判重）。

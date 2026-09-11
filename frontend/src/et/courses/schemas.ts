@@ -78,6 +78,28 @@ export const COURSE_STATUS_LABEL: Record<string, string> = {
   CLOSED: "已關閉",
 }
 
+/** 再開課送出的新起訖時間（US11 / #288）——兩者皆必填，對齊後端 `ReopenCourseReq`。 */
+export interface ReopenPayload {
+  open_start_at: string
+  open_end_at: string
+  version: number
+}
+
+/**
+ * 關閉 / 再開課之結果（對齊後端 `CourseStatusResult`）。
+ *
+ * ⚠️ `closed_at` **再開課後仍會帶值**（FR-ET-US11-10：保留供追溯），故不可用
+ * 「有沒有值」判斷課程是否關閉中——那要看 `status`。
+ */
+export interface CourseStatusResult {
+  course_id: number
+  status: string
+  open_start_at: string | null
+  open_end_at: string | null
+  closed_at: string | null
+  version: number
+}
+
 // ── 表單驗證（Zod）────────────────────────────────────────────────────────────
 
 import { z } from "zod"

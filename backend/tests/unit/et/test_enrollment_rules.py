@@ -69,7 +69,7 @@ class TestNormalizeInvitationCode:
 
 class TestEnsureCourseJoinable:
     def test_已發布課程可加入(self) -> None:
-        ensure_course_joinable(course_status=COURSE_PUBLISHED)
+        ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=_NOW + timedelta(days=1), now=_NOW)
 
     def test_已關閉課程被擋(self) -> None:
         """AC 9 / ET-MSG-ET04-002：邀請碼於關閉期間失效、再開課後恢復有效。
@@ -77,7 +77,7 @@ class TestEnsureCourseJoinable:
         故判定依據是**課程當前狀態**，不是碼本身存不存在。
         """
         with pytest.raises(AppError) as exc:
-            ensure_course_joinable(course_status=COURSE_CLOSED)
+            ensure_course_joinable(course_status=COURSE_CLOSED, open_end_at=_NOW + timedelta(days=1), now=_NOW)
         assert exc.value.status_code == 409
         assert exc.value.error_code == "ET_ENROLL_002"
 
@@ -88,7 +88,7 @@ class TestEnsureCourseJoinable:
         洩漏一門尚未發布之課程的存在。
         """
         with pytest.raises(AppError) as exc:
-            ensure_course_joinable(course_status=COURSE_DRAFT)
+            ensure_course_joinable(course_status=COURSE_DRAFT, open_end_at=_NOW + timedelta(days=1), now=_NOW)
         assert exc.value.status_code == 404
         assert exc.value.error_code == "ET_ENROLL_001"
 
@@ -113,21 +113,37 @@ class TestIsListedInMyCourses:
     """AC 4 / AC 5：清單可見性。"""
 
     def test_已發布且已開始可見(self) -> None:
-        assert is_listed_in_my_courses(status=COURSE_PUBLISHED, open_start_at=_NOW - timedelta(days=1), now=_NOW)
+        assert is_listed_in_my_courses(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW - timedelta(days=1),
+            open_end_at=_NOW + timedelta(days=1),
+            now=_NOW,
+        )
 
     def test_起始時間未到不可見(self) -> None:
         """AC 4：起始時間未到之課程不顯示於清單。"""
-        assert not is_listed_in_my_courses(status=COURSE_PUBLISHED, open_start_at=_NOW + timedelta(minutes=1), now=_NOW)
+        assert not is_listed_in_my_courses(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW + timedelta(minutes=1),
+            open_end_at=_NOW + timedelta(days=1),
+            now=_NOW,
+        )
 
     def test_恰好等於起始時間即可見(self) -> None:
         """邊界沿用 `publish_rules.is_visible_to_student` 之 `now >= open_start_at`。"""
-        assert is_listed_in_my_courses(status=COURSE_PUBLISHED, open_start_at=_NOW, now=_NOW)
+        assert is_listed_in_my_courses(
+            status=COURSE_PUBLISHED, open_start_at=_NOW, open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
 
     def test_起始時間為空不可見(self) -> None:
-        assert not is_listed_in_my_courses(status=COURSE_PUBLISHED, open_start_at=None, now=_NOW)
+        assert not is_listed_in_my_courses(
+            status=COURSE_PUBLISHED, open_start_at=None, open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
 
     def test_草稿不可見(self) -> None:
-        assert not is_listed_in_my_courses(status=COURSE_DRAFT, open_start_at=_NOW - timedelta(days=1), now=_NOW)
+        assert not is_listed_in_my_courses(
+            status=COURSE_DRAFT, open_start_at=_NOW - timedelta(days=1), open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
 
     @pytest.mark.parametrize("open_start_at", [_NOW - timedelta(days=1), _NOW + timedelta(days=1), None])
     def test_已關閉課程一律可見(self, open_start_at: datetime | None) -> None:
@@ -139,7 +155,9 @@ class TestIsListedInMyCourses:
 
         `open_start_at` 不影響結果：課程能被關閉必然已經發布並開放過。
         """
-        assert is_listed_in_my_courses(status=COURSE_CLOSED, open_start_at=open_start_at, now=_NOW)
+        assert is_listed_in_my_courses(
+            status=COURSE_CLOSED, open_start_at=open_start_at, open_end_at=_NOW + timedelta(days=1), now=_NOW
+        )
 
 
 class TestIsCourseCompleted:
@@ -204,3 +222,46 @@ class TestDeriveCompletionStatus:
 
     def test_零項目課程為未開始(self) -> None:
         assert derive_completion_status(done=0, total=0) == COMPLETION_NOT_STARTED
+
+
+class TestOpenWindowExpired:
+    """閱課期間已過 = 視同關閉（#288 SA Q1 裁示 A）。
+
+    在 #288 之前**全後端沒有任何地方讀 `OPEN_END_AT` 做存取判定**——期間結束後課程
+    依然可加入、依然留在我的課程清單，而且會一直如此（到期自動轉 `CLOSED` 屬 `ET-16`）。
+    """
+
+    def test_期間已過不可加入且與已關閉同碼(self) -> None:
+        """對學員而言「已關閉」與「期間已過」是同一件事，故用同一個 `ET_ENROLL_002`。"""
+        with pytest.raises(AppError) as exc:
+            ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=_NOW - timedelta(seconds=1), now=_NOW)
+        assert exc.value.status_code == 409
+        assert exc.value.error_code == "ET_ENROLL_002"
+
+    def test_期間內可加入(self) -> None:
+        ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=_NOW + timedelta(days=1), now=_NOW)
+
+    def test_起始時間未到仍可加入(self) -> None:
+        """🔴 #247 SA Q2 裁示 A。
+
+        本函式**不看起始時間**——那條裁示明訂起始前仍可加入（前端以 `pending_open`
+        提示「已加入，課程開放後將出現於清單」）。若 #288 的期間判定順手把起始也納入，
+        會靜默推翻它，而 #247 的測試驗的是「可加入」、不會指出是哪一個判定擋的。
+        """
+        ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=_NOW + timedelta(days=30), now=_NOW)
+
+    def test_訖止為空可加入(self) -> None:
+        """為空即資料異常（發布檢核要求必填），取「不要無故擋下」的那一側。"""
+        ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=None, now=_NOW)
+
+    def test_期間已過仍留在我的課程清單(self) -> None:
+        """US11 AC 9：已關閉課程仍顯示於列表並標示「已關閉」。
+
+        過濾掉會讓學員的歷史紀錄從眼前消失——與該 AC 相反。
+        """
+        assert is_listed_in_my_courses(
+            status=COURSE_PUBLISHED,
+            open_start_at=_NOW - timedelta(days=30),
+            open_end_at=_NOW - timedelta(seconds=1),
+            now=_NOW,
+        )

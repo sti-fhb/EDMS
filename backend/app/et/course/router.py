@@ -14,13 +14,14 @@ router-level 掛 `get_et_context`（需任一 ET 角色，無則 403 `ET_AUTH_00
 課程才知道擁有者，無法以 dependency 表達。
 """
 
-from typing import Annotated
+from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.publish_service import EtPublishService
 from app.et.course.schemas import (
     MAX_BIGINT,
@@ -29,20 +30,61 @@ from app.et.course.schemas import (
     ChapterItem,
     ChapterRenameReq,
     ChapterReorderReq,
+    CloseCourseReq,
     CourseCreateReq,
     CourseCreateResult,
     CourseDetail,
+    CourseStatusResult,
     CourseUpdateReq,
     ItemCreateReq,
     ItemReorderReq,
     ItemRow,
     PublishCheckResult,
     PublishResult,
+    ReopenCourseReq,
     TagOption,
 )
 from app.et.course.service import EtCourseService
-from app.et.deps import EtContext, get_et_context, require_et_roles
+from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
+
+#: 狀態轉換與發布檢核之使用者維度上限（每分鐘）。
+#:
+#: 正常操作：發布一門課是 1 次 publish-check + 1 次 publish；關閉 / 再開課各 1 次。
+#: 一位教師一天按不到 5 次，20 遠高於任何真實使用。
+#:
+#: ## 為何**不**掛在 router 層
+#:
+#: 本 router 同時承載課程 / 章節 / 項目的全部編輯端點。掛在 router 層會把「教師連續
+#: 拖拉重排章節」也算進同一個桶——那是高頻的正常操作，會被誤擋。
+#:
+#: ## 為何四支端點**共用同一個分桶**
+#:
+#: 貴的是 `_evaluate`（`snapshot` 的 7 個彙總查詢 + 逐份 DM 文件循序查詢），而
+#: `publish-check` / `publish` / `reopen` 三支都會跑它。只擋 `reopen` 的話，放大路徑
+#: 換一支端點就照樣開著。`close` 一併納入是因為它與 `reopen` 構成迴圈：每次成功都寫
+#: 一列 append-only 的 `DP_AUDIT_LOG`，而 `AuditLogService` 會取交易層級的
+#: `pg_advisory_xact_lock`——無上限的 close ⇄ reopen 迴圈會序列化**全平台**的稽核寫入。
+#:
+#: ⚠️ `reopen` 的成本在**版本檢核之前**就付掉了（順序是 `ensure_reopenable` →
+#: `ensure_reopen_schedule` → `_evaluate` → `mark_reopened`）。帶一個錯的 `version`
+#: 連打，每一發都付完整成本、最後才回 409，永遠不會成功但成本無上界。
+_STATUS_RATE_MAX: Final = 20
+
+#: 同一 IP 每分鐘之合計上限。放寬到不會誤傷同一 NAT 出口的教師群；本維度擋的是
+#: 「多開帳號線性放大」，不是管制個別使用者。比照 `survey_fill` 的 30 : 300 比例。
+_STATUS_IP_RATE_MAX: Final = 200
+
+_status_limiter = SlidingWindowRateLimiter(max_requests=_STATUS_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_status_ip_limiter = SlidingWindowRateLimiter(max_requests=_STATUS_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+
+_STATUS_SCOPE: Final = "et-course-status"
+
+#: 發布檢核與狀態轉換共用之限流 dependency（四支端點掛同一組，見 `_STATUS_RATE_MAX`）。
+_status_rate_limit: Final = [
+    Depends(rate_limit_by_et_user(_status_limiter, _STATUS_SCOPE)),
+    Depends(rate_limit_by_ip(_status_ip_limiter, _STATUS_SCOPE)),
+]
 
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
@@ -213,7 +255,7 @@ async def delete_item(
 @router.get(
     "/courses/{course_id}/publish-check",
     response_model=PublishCheckResult,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
 )
 async def check_publish(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
@@ -231,7 +273,7 @@ async def check_publish(
 @router.post(
     "/courses/{course_id}/publish",
     response_model=PublishResult,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
 )
 async def publish_course(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
@@ -247,3 +289,51 @@ async def publish_course(
     > 與邀請碼產生。
     """
     return await _publish_service.publish(db, course_id, operator=operator)
+
+
+@router.post(
+    "/courses/{course_id}/close",
+    response_model=CourseStatusResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+)
+async def close_course(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: CloseCourseReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> CourseStatusResult:
+    """關閉課程（US11 / #288）：立即轉「已關閉」並寫入關閉時間。
+
+    **僅已發布課程**可關閉（409 `ET_COURSE_006`）。無過渡狀態——`PENDING_CLOSE` 已於
+    2026-07-02 廢除（關閉可逆、無需終態保護）。
+
+    ## 為何是具名動作而非 `PUT /courses/{id}` 改 `status`
+
+    比照 `publish`：狀態轉換有各自的前提與副作用（此處寫 `CLOSED_AT`），不是一個欄位的
+    賦值。若走 `PUT`，`status` 會成為可任意賦值的欄位——那條路徑能把 `CLOSED` 直接寫成
+    `DRAFT`，繞過整個狀態機。
+    """
+    return await _publish_service.close(db, course_id, req, operator=operator)
+
+
+@router.post(
+    "/courses/{course_id}/reopen",
+    response_model=CourseStatusResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+)
+async def reopen_course(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    req: ReopenCourseReq,
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> CourseStatusResult:
+    """再開課（US11 / #288）：**強制帶一組新起訖時間**後狀態回「已發布」。
+
+    **僅已關閉課程**可再開課（409 `ET_COURSE_007`）。學員進度接續保留、邀請碼沿用原碼
+    恢復有效、`URGENT_REMIND_SENT` 歸零。
+
+    **會重跑發布六項檢核**（#288 SA Q2 裁示 A）——關閉期間教師端仍可編輯內容，故課程
+    可能已不符發布條件；不合格回 422 `ET_PUBLISH_001` + `blockers`（與 `publish` 共用
+    同碼與同一份缺漏清單形狀）。
+    """
+    return await _publish_service.reopen(db, course_id, req, operator=operator)

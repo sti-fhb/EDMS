@@ -6,6 +6,8 @@ import type {
   CourseCreateResult,
   CourseDetail,
   CoursePayload,
+  CourseStatusResult,
+  ReopenPayload,
   TagOption,
 } from "./schemas"
 
@@ -61,5 +63,27 @@ export const coursesApi = {
 
   deleteChapter: async (chapterId: number): Promise<void> => {
     await http.delete(`/et/chapters/${chapterId}`)
+  },
+
+  /**
+   * 關閉課程（US11 AC 1 / #288）——僅已發布課程可關閉。
+   *
+   * 具名動作而非 `PUT` 改 `status`：狀態轉換有自己的前提與副作用（寫 `CLOSED_AT`），
+   * 走 `PUT` 會讓 `status` 變成可任意賦值的欄位而繞過整個狀態機。
+   */
+  close: async (courseId: number, version: number): Promise<CourseStatusResult> => {
+    const { data } = await http.post<CourseStatusResult>(`/et/courses/${courseId}/close`, { version })
+    return data
+  },
+
+  /**
+   * 再開課（US11 AC 8 / #288）——**強制帶一組新起訖時間**。
+   *
+   * 會重跑發布六項檢核（SA Q2 裁示 A）：關閉期間教師端仍可編輯內容，課程可能已不符
+   * 發布條件，不合格回 422 `ET_PUBLISH_001` + `blockers`（與 `publish` 同形狀）。
+   */
+  reopen: async (courseId: number, payload: ReopenPayload): Promise<CourseStatusResult> => {
+    const { data } = await http.post<CourseStatusResult>(`/et/courses/${courseId}/reopen`, payload)
+    return data
   },
 }

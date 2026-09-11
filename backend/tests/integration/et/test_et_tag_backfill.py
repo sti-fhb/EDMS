@@ -9,6 +9,8 @@
 讓失敗訊息指向 DP 的權限層，看不出 ET 的行為對不對（比照 `test_et_tag_invite.py`）。
 """
 
+from datetime import datetime, timedelta
+
 import pytest
 from sqlalchemy import select
 
@@ -80,14 +82,31 @@ async def _tag(db, name: str) -> int:
     return tag.tag_id
 
 
-async def _course(db, owner: str, name: str, tag_id: int, *, status: str = COURSE_PUBLISHED) -> int:
-    """直接落庫建課程——本檔驗的是貼標追溯，不需要走完整的發布檢核。"""
+async def _course(
+    db,
+    owner: str,
+    name: str,
+    tag_id: int,
+    *,
+    status: str = COURSE_PUBLISHED,
+    open_end_at: datetime | None = None,
+) -> int:
+    """直接落庫建課程——本檔驗的是貼標追溯，不需要走完整的發布檢核。
+
+    ⚠️ `open_end_at` 預設為**未來**（+365 天）。原本寫的是 `now`，那讓每一門 fixture
+    課程在建立的下一刻就「閱課期間已過」——在 #288 之前沒有任何程式碼讀 `OPEN_END_AT`
+    做存取判定，所以看不出來；#288 把「期間已過視同關閉」接上貼標追溯之後，那些課程
+    全部被正確地排除，4 條測試因此變紅。**紅的是 fixture 不是產品**：一門真實的已發布
+    課程不會把訖止設在建立的那一瞬間（發布檢核要求填起訖，教師也不會那樣填）。
+
+    要驗「期間已過不補加入」時明確傳一個過去的時間（見 `test_期間已過之課程不補加入`）。
+    """
     now = utcnow()
     course = EtCourse(
         course_name=name,
         status=status,
         open_start_at=now,
-        open_end_at=now,
+        open_end_at=open_end_at if open_end_at is not None else now + timedelta(days=365),
         owner_id=owner,
         invitation_code=None,
         urgent_remind_sent=False,
@@ -168,6 +187,26 @@ class TestTagBackfill:
 
         row = await db.scalar(select(EtEnrollment).where(EtEnrollment.user_id == student))
         assert row.join_source == SOURCE_TAG_DEFAULT
+
+    async def test_期間已過之課程不補加入(self, db) -> None:
+        """#288：`STATUS` 仍是 `PUBLISHED` 但閱課期間已過者**視同關閉**，不補加入。
+
+        這條補的是一個實際存在的繞道：教師對期間已過的課程送 Email 邀請會被擋
+        （409 `ET_INVITE_002`），但只要改成「幫課程加一個標籤」、或管理者幫某使用者
+        貼標籤，該標籤的學員就會被帶入那門課並收到邀請信——而他進去什麼都不能做。
+
+        到期自動轉 `CLOSED` 屬 `ET-16`（未實作），所以「已發布但期間已過」是常態而非
+        過渡狀態，不能只靠 `STATUS` 判斷。
+        """
+        teacher = await _user(db, "bf_t05", ROLE_TEACHER)
+        student = await _user(db, "bf_s05")
+        tag_id = await _tag(db, "護理師_bf05")
+        await _course(db, teacher, "期間已過課程", tag_id, open_end_at=utcnow() - timedelta(days=1))
+        live = await _course(db, teacher, "期間內課程", tag_id)
+
+        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+
+        assert await _enrolled_course_ids(db, student) == [live]
 
     async def test_草稿與已關閉課程不補加入(self, db) -> None:
         """spec：補加入該標籤之所有「**已發布且未關閉**」課程。"""
