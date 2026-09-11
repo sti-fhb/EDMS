@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL
@@ -32,6 +33,7 @@ from app.et.course.rules import (
     ensure_owner,
     ensure_reorder_complete,
     ensure_tag_change_allowed,
+    is_effectively_closed,
     resequence,
 )
 from app.et.course.schemas import (
@@ -186,7 +188,18 @@ class EtCourseService:
         await self._tags.apply(db, course_id, to_add=tags_add, to_remove=current - desired, operator=operator)
         await self._log(db, "UPDATE", operator.user_id, course_id, "編輯課程基本資料")
 
-        if course.status == COURSE_PUBLISHED and tags_add:
+        # 期間已過亦視同關閉（#288）——否則「關閉期間不可邀請學員」（FR-ET-US11-07）
+        # 會被這條路徑整個繞過：Email 邀請已擋（409 `ET_INVITE_002`），但只要改成「幫
+        # 課程加一個標籤」，該標籤的學員就會被帶入並收到邀請信，而他進去什麼都不能做。
+        #
+        # ⚠️ 判定用 `req.open_end_at`（**本次要寫入的新值**）而非 `course.open_end_at`
+        # ——`course` 是更新前讀的，此刻已過期。教師若在同一次 PUT 裡把訖止延到未來
+        # 並加標籤，那門課已不再視同關閉，帶入是正確行為；用舊值會誤擋。
+        if (
+            course.status == COURSE_PUBLISHED
+            and tags_add
+            and not is_effectively_closed(status=course.status, open_end_at=req.open_end_at, now=utcnow())
+        ):
             await self._backfill_new_tag_members(db, course, tags_add, operator=operator)
 
     async def _backfill_new_tag_members(

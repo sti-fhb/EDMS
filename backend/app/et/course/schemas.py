@@ -31,6 +31,10 @@ MAX_ITEM_IDS = 500
 ITEM_TITLE_MAX_LEN = 100
 # BIGINT 上限：路徑參數與 ID 超出時，asyncpg 比對會溢位成 500 而非 404。
 MAX_BIGINT = 9_223_372_036_854_775_807
+# INT4 上限：`VERSION` 於 DB 為 `Integer`（見 `models.py`）。樂觀鎖版本由請求帶入，
+# 超出 int4 時 asyncpg 綁定參數即拋出，落到未處理例外 handler 變成通用 500——而那是
+# 一個「版本不符」的請求，應該回 409。比照本檔對 `tag_id` 一律加上界的作法。
+MAX_INT4 = 2_147_483_647
 
 
 def _strip_or_none(value: str | None) -> str | None:
@@ -41,7 +45,63 @@ def _strip_or_none(value: str | None) -> str | None:
     return stripped or None
 
 
-class _CourseFields(BaseModel):
+class _ScheduleFields(BaseModel):
+    """開放起訖時間與其共用驗證。
+
+    ## 為何獨立於 `_CourseFields`
+
+    `ReopenCourseReq` 只需要這兩個欄位與它們的驗證器，**不需要 `course_name`**。
+    原本它直接繼承 `_CourseFields` 來「沿用驗證器」，結果連 `course_name` 的必填性
+    一起繼承了——前端再開課只送起訖與 `version`，每一次都被擋成 422 `COMMON_422`
+    「以下欄位不符規定：course_name」，而教師在再開課視窗從未見過那個欄位。
+
+    後端整合測試沒抓到，是因為測試自己在 JSON 裡補了 `course_name`（那不是真實呼叫端
+    會送的內容）；前端測試的 MSW handler 又不驗 request body。三層測試各自成立，卻
+    沒有一層驗過「前端實際組出的 payload 能通過後端 schema」。
+
+    > 教訓：**以繼承換取驗證器時，一併繼承的必填欄位是負債**。要共用驗證，就只繼承
+    > 那些驗證所涵蓋的欄位。
+    """
+
+    open_start_at: datetime | None = None
+    open_end_at: datetime | None = None
+
+    @field_validator("open_start_at", "open_end_at")
+    @classmethod
+    def _ensure_aware(cls, v: datetime | None) -> datetime | None:
+        """外部進來的 naive datetime 補 UTC（`sti-backend-modules` §時間處理）。
+
+        `OPEN_START_AT` / `OPEN_END_AT` 於 DB 為 `TIMESTAMPTZ`；若收到無時區之值
+        （如 `<input type="datetime-local">` 原樣送出的 `2026-04-15T09:00`），
+        PostgreSQL 會以**連線時區**解讀而靜默位移，使「起始時間前學員不可見」
+        （#204）與「期間已過視同關閉」（#288）等時間判定算錯。
+
+        本專案前端已於 `utils/date.fromDateTimeLocalInput` 轉為帶時區之 ISO 8601；
+        此處為深度防禦，涵蓋其他客戶端與直呼 API 的情況。
+        """
+        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> "_ScheduleFields":
+        """課程訖止時間須晚於起始時間。
+
+        兩者皆填時才檢核——草稿允許留空（FR-ET-US3-01），發布必填之檢核屬 #204。
+
+        **「起始須 ≥ 當下」不在此檢核**：該規則只對「使用者這次改動的值」成立
+        （SA 裁示，2026-08-24）。已發布課程的起始時間必然落在過去，若後端無條件檢核，
+        教師之後編輯該課程（AC 28 允許）會因為沿用原值而永遠存不了檔。故該約束落在
+        前端輸入層（選擇器 `minDateTime` + 僅對已變更之值驗證）。
+
+        再開課的「訖止須晚於**當下**」則另由 `rules.ensure_reopen_schedule` 檢核——
+        那是業務規則、需要專屬錯誤碼 `ET_COURSE_008`，放在 schema 會被
+        `validation_exception_handler` 壓成 `COMMON_422`。
+        """
+        if self.open_start_at and self.open_end_at and self.open_end_at <= self.open_start_at:
+            raise ValueError("課程訖止時間須晚於起始時間")
+        return self
+
+
+class _CourseFields(_ScheduleFields):
     """課程基本資料之共用欄位與驗證（建立 / 更新皆適用）。
 
     **僅課程名稱必填**——受訓單位標籤與起訖時間為「發布時」必填（FR-ET-US3-01），
@@ -58,8 +118,6 @@ class _CourseFields(BaseModel):
         StringConstraints(min_length=1, max_length=COURSE_NAME_MAX_LEN, pattern=SAFE_SINGLE_LINE_PATTERN),
     ]
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LEN)
-    open_start_at: datetime | None = None
-    open_end_at: datetime | None = None
     require_approval: bool = False
     tag_ids: list[int] = Field(default_factory=list, max_length=MAX_TAG_IDS)
 
@@ -84,36 +142,6 @@ class _CourseFields(BaseModel):
         if any(not (0 < tag_id <= MAX_BIGINT) for tag_id in v):
             raise ValueError("受訓單位標籤 ID 不合法")
         return v
-
-    @field_validator("open_start_at", "open_end_at")
-    @classmethod
-    def _ensure_aware(cls, v: datetime | None) -> datetime | None:
-        """外部進來的 naive datetime 補 UTC（`sti-backend-modules` §時間處理）。
-
-        `OPEN_START_AT` / `OPEN_END_AT` 於 DB 為 `TIMESTAMPTZ`；若收到無時區之值
-        （如 `<input type="datetime-local">` 原樣送出的 `2026-04-15T09:00`），
-        PostgreSQL 會以**連線時區**解讀而靜默位移，使「起始時間前學員不可見」
-        （#204）與「到期自動關閉」（#16 SCHET002）等時間判定算錯。
-
-        本專案前端已於 `utils/date.fromDateTimeLocalInput` 轉為帶時區之 ISO 8601；
-        此處為深度防禦，涵蓋其他客戶端與直呼 API 的情況。
-        """
-        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
-
-    @model_validator(mode="after")
-    def _end_after_start(self) -> "_CourseFields":
-        """課程訖止時間須晚於起始時間。
-
-        兩者皆填時才檢核——草稿允許留空（FR-ET-US3-01），發布必填之檢核屬 #204。
-
-        **「起始須 ≥ 當下」不在此檢核**：該規則只對「使用者這次改動的值」成立
-        （SA 裁示，2026-08-24）。已發布課程的起始時間必然落在過去，若後端無條件檢核，
-        教師之後編輯該課程（AC 28 允許）會因為沿用原值而永遠存不了檔。故該約束落在
-        前端輸入層（選擇器 `minDateTime` + 僅對已變更之值驗證）。
-        """
-        if self.open_start_at and self.open_end_at and self.open_end_at <= self.open_start_at:
-            raise ValueError("課程訖止時間須晚於起始時間")
-        return self
 
 
 class CourseCreateReq(_CourseFields):
@@ -148,7 +176,7 @@ class CourseUpdateReq(_CourseFields):
     故不使用 `exclude_unset`。**不含 `chapters`**——課程存在後章節由專屬端點維護。
     """
 
-    version: int = Field(ge=0)
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class ChapterCreateReq(BaseModel):
@@ -168,7 +196,7 @@ class ChapterCreateReq(BaseModel):
 class ChapterRenameReq(ChapterCreateReq):
     """更名章節；`version` 供樂觀鎖檢核。"""
 
-    version: int = Field(ge=0)
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class ChapterReorderReq(BaseModel):
@@ -179,7 +207,7 @@ class ChapterReorderReq(BaseModel):
     """
 
     chapter_ids: list[int] = Field(max_length=MAX_CHAPTER_IDS)
-    version: int = Field(ge=0)
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class ItemCreateReq(BaseModel):
@@ -215,7 +243,7 @@ class ItemReorderReq(BaseModel):
     """
 
     item_ids: list[int] = Field(max_length=MAX_ITEM_IDS)
-    version: int = Field(ge=0)
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class ItemRow(BaseModel):
@@ -373,20 +401,23 @@ class CloseCourseReq(BaseModel):
     不接受請求指定，否則教師可偽造關閉時點）。
     """
 
-    version: int = Field(ge=0)
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
-class ReopenCourseReq(_CourseFields):
-    """再開課（US11 AC 8）——**起訖時間為必填**。
+class ReopenCourseReq(_ScheduleFields):
+    """再開課（US11 AC 8）——**只有起訖時間與版本**，起訖皆必填。
 
-    繼承 `_CourseFields` 是為了沿用兩件既有的事：時區補正（`_ensure_aware`）與
-    「迄 > 起」（`_end_after_start`）。但那支的欄位皆為選填（草稿允許留空），故此處以
-    `model_validator` 補上必填——FR-ET-US11-09 明訂「強制要求重新設定一組新的起訖
-    時間，未填妥 MUST NOT 送出」。
+    繼承 `_ScheduleFields`（而**非** `_CourseFields`）：需要的是時區補正
+    （`_ensure_aware`）與「迄 > 起」（`_end_after_start`）兩個驗證器，而那兩個驗證器
+    只涵蓋這兩個欄位。基底欄位皆為選填（草稿允許留空），故此處以 `model_validator`
+    補上必填——FR-ET-US11-09 明訂「強制要求重新設定一組新的起訖時間，未填妥
+    MUST NOT 送出」。
 
-    ⚠️ **`course_name` 等繼承來的欄位在此不使用**：本請求只改起訖時間與狀態。以
-    `_CourseFields` 為基底是為了共用驗證器，不是為了共用欄位——`model_config` 的
-    `extra` 預設為 `ignore`，多帶的欄位不會被寫入（寫入欄位由 `mark_reopened` 明列）。
+    ⚠️ **曾經繼承 `_CourseFields` 而壞掉**：那支的 `course_name` 是必填，於是再開課
+    也要求它。前端只送起訖與 `version`，每一次都被擋成 422 `COMMON_422`「以下欄位
+    不符規定：course_name」——而教師在再開課視窗從未見過那個欄位。詳見
+    `_ScheduleFields` 的 docstring。**本請求不改課程名稱等基本資料**（那走
+    `PUT /courses/{id}`），寫入欄位由 `mark_reopened` 明列。
 
     > 「迄 > 當下」不在此檢核，而在 `rules.ensure_reopen_schedule`：那是業務規則，
     > 需要回 `ET_COURSE_008` 與其專屬訊息；放在 schema 會被
@@ -394,7 +425,7 @@ class ReopenCourseReq(_CourseFields):
     > （#284 的 `ET_SURVEY_016` 就曾經如此）。
     """
 
-    version: int = Field(ge=0)
+    version: int = Field(ge=0, le=MAX_INT4)
 
     @model_validator(mode="after")
     def _schedule_required(self) -> "ReopenCourseReq":

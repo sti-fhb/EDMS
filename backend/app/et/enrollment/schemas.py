@@ -61,11 +61,21 @@ class MyCourseRow(BaseModel):
         progress_pct: 當前學習進度百分比＝**完成項目數 ÷ 總項目數**（#274 填實，
             原為恆 0 的接點）。與 ET05 側欄的課程進度條同一定義——同一門課在兩個
             畫面顯示不同的數字，使用者只會當成其中一個壞了。
+        is_closed: 對學員而言**視同關閉**（#288）：`status == "CLOSED"` **或**
+            「已發布但閱課期間已過」皆為 `True`。
     """
 
     course_id: int
     course_name: str
     status: str
+    #: 卡片的「已關閉」標示一律看本欄，**不要自己判 `status == "CLOSED"`**。
+    #:
+    #: 少了這一欄，期間已過的課程會以 `status: "PUBLISHED"` 出現在清單、卡片標「已發布」，
+    #: 但學員點進去 ET05 立刻看到「此課程已關閉」的唯讀提示，累積進度 / 填問卷全部 409
+    #: ——**卡片與詳細頁在使用者眼前互相矛盾**。到期自動轉 `CLOSED` 屬 `ET-16`（未實作），
+    #: 那個矛盾不會自己消失，得由後端把「視同關閉」一起回出來。與 ET05 的
+    #: `LearnStructure.is_closed` 同名同義，兩個畫面用同一個判定。
+    is_closed: bool
     completion_status: str
     tags: list[str]
     chapter_count: int

@@ -27,6 +27,7 @@ from app.et.constants import (
     COMPLETION_NOT_STARTED,
     SOURCE_INVITATION_CODE,
 )
+from app.et.course.rules import is_effectively_closed
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.rules import (
     derive_completion_status,
@@ -102,6 +103,10 @@ class EtEnrollmentService:
                 course_id=course.course_id,
                 course_name=course.course_name,
                 status=course.status,
+                # #288：卡片的「已關閉」標示看這一欄，不看 `status`——期間已過者的
+                # `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 `ET-16`、未實作），
+                # 只看 `status` 會讓卡片標「已發布」而點進去卻什麼都不能做。
+                is_closed=is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now),
                 # #284：由 `counts` 即時導出，**不讀** `enrollment.completion_status`
                 # ——那個欄位只有加入課程時寫入的 `NOT_STARTED`，沒有任何路徑推進它，
                 # 讀它會讓下方 `_summarize` 的四項統計永遠顯示全部「未開始」。

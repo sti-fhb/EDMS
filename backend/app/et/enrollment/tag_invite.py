@@ -28,7 +28,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,17 +76,30 @@ class EtTagInviteRepository:
         return await self._resolve_students(db, rows.all())
 
     async def courses_for_tags(self, db: AsyncSession, tag_ids: Sequence[int]) -> list[EtCourse]:
-        """掛有指定標籤之**已發布且未關閉**課程（貼標追溯用，FR-ET-US8-05）。
+        """掛有指定標籤之**已發布且未視同關閉**課程（貼標追溯用，FR-ET-US8-05）。
 
-        `STATUS='PUBLISHED'` 一項即涵蓋「已發布且未關閉」——`CLOSED` 是獨立狀態
-        （`DRAFT → PUBLISHED ⇄ CLOSED`），關閉的課程不該把新貼標的人拉進去，
-        他進去也不能累積進度。再開課後該人不會被補上，那是 `ET-11` 的範圍。
+        ## 兩個條件，不是一個
+
+        `STATUS='PUBLISHED'` 只涵蓋一半。`CLOSED` 固然被它排除（狀態機為
+        `DRAFT → PUBLISHED ⇄ CLOSED`），但**閱課期間已過的課程狀態仍是 `PUBLISHED`**
+        ——到期自動轉 `CLOSED` 屬 `ET-16`、未實作，所以那是常態而非過渡狀態
+        （見 `course.rules.is_effectively_closed`）。
+
+        少了期間條件，FR-ET-US11-07「關閉期間不可邀請學員」會被這條路徑整個繞過：
+        教師對期間已過的課程送 Email 邀請會被擋（409 `ET_INVITE_002`），但只要改去
+        **幫課程加一個標籤**、或管理者在 DP 後台**幫某使用者貼標籤**，該標籤的學員就
+        會被 `bulk_enroll` 進那門課並收到邀請信——而他進去什麼都不能做。
+
+        ⚠️ 此處以 SQL 條件重述 `is_effectively_closed` 的語意（`OPEN_END_AT` 為空或
+        仍在未來）。那支純函式吃的是單一課程的欄位值，無法下推成 WHERE；兩邊的判定
+        必須一致，改動時請同步。
 
         Returns:
             依 `COURSE_ID` 排序、去重之課程列（排序使彙整信的課程順序可預期）。
         """
         if not tag_ids:
             return []
+        now = utcnow()
         rows = await db.scalars(
             select(EtCourse)
             .join(EtCourseTag, EtCourseTag.course_id == EtCourse.course_id)
@@ -94,6 +107,8 @@ class EtTagInviteRepository:
                 EtCourseTag.tag_id.in_(list(tag_ids)),
                 EtCourseTag.deleted == 0,
                 EtCourse.status == COURSE_PUBLISHED,
+                # 訖止為空＝沒有結束日，不因缺欄位排除一門教師沒要求關閉的課程
+                or_(EtCourse.open_end_at.is_(None), EtCourse.open_end_at > now),
                 EtCourse.deleted == 0,
             )
             .order_by(EtCourse.course_id)

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
 from app.et.common.invitation_code import generate_invitation_code
@@ -320,6 +321,12 @@ class EtPublishService:
         return course
 
     async def _log(self, db: AsyncSession, operator_id: str, course_id: int, description: str) -> None:
+        """發布 / 關閉 / 再開課之稽核（US11 在 `spec.md` §稽核來源功能碼清單內）。
+
+        帶 `source_ip`：關閉一門課會立刻影響**全部在籍學員**，這筆紀錄少了來源 IP 就
+        只能追到帳號、追不到來源。`invitation` 與 `enrollment` 的稽核本來就都帶，
+        course 模組原先漏了。
+        """
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -329,4 +336,5 @@ class EtPublishService:
             operator_id=operator_id,
             target_id=str(course_id),
             description=description,
+            source_ip=get_client_ip(),
         )

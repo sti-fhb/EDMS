@@ -193,7 +193,10 @@ function StatCard({
 }
 
 function CourseCard({ course, onOpen }: { course: MyCourseRow; onOpen: () => void }) {
-  const closed = course.status === "CLOSED"
+  // #288：看後端算好的 `is_closed`，**不要**自己判 `status === "CLOSED"`。期間已過的
+  // 課程 `status` 仍是 `PUBLISHED`（到期自動轉 CLOSED 屬 ET-16、未實作），只看 status
+  // 會讓卡片標「已發布」而點進去 ET05 卻是唯讀的——兩個畫面在使用者眼前互相矛盾。
+  const closed = course.is_closed
 
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>

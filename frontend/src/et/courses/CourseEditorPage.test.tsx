@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtCourseEditorPage } from "./CourseEditorPage"
+import { coursesApi } from "./coursesService"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -387,5 +388,65 @@ describe("ET02 課程關閉與再開課", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "確認再開課" })).not.toBeInTheDocument(),
     )
+  })
+
+  it("再開課送出的 body 只有後端 ReopenCourseReq 接受的三個欄位", async () => {
+    // 🔴 迴歸測試。後端 `ReopenCourseReq` 原本繼承 `_CourseFields`，連 `course_name` 的
+    // 必填性一起繼承了，而前端從不送它 → 真實操作每次都 422，AC 8 完全不可用。
+    //
+    // 這個缺陷躲過三層測試：後端整合測試自己多塞 `course_name`、MSW handler 不驗 body、
+    // ReopenCourseDialog 測試用假的 `onSubmit`。**沒有一層驗過「前端組出的 payload
+    // 與後端 schema 相符」**，所以這裡直接斷言送出的鍵集合。
+    //
+    // 走 service 層而非 UI：`DateTimePicker` 在 jsdom 無法以 userEvent 可靠填值（本專案
+    // 無任何測試做到過），而缺陷在 payload 的形狀、不在選擇器的互動。頁面把哪些值放進
+    // payload 由 `ReopenPayload` 的型別在 `tsc -b` 時保證。
+    //
+    // ⚠️ 對應的後端測試是
+    // `test_et_course_close_reopen.py::TestReopen::test_以前端實際送出的欄位再開課`，
+    // 兩者是同一份契約的兩端，改動任一邊請同步。
+    let body: Record<string, unknown> | undefined
+    server.use(
+      http.post("/api/et/courses/:courseId/reopen", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          course_id: 1,
+          status: "PUBLISHED",
+          open_start_at: "2026-10-01T00:00:00Z",
+          open_end_at: "2027-10-31T00:00:00Z",
+          closed_at: "2026-09-09T03:00:00Z",
+          version: 6,
+        })
+      }),
+    )
+
+    await coursesApi.reopen(1, {
+      open_start_at: "2026-10-01T00:00:00.000Z",
+      open_end_at: "2027-10-31T00:00:00.000Z",
+      version: 5,
+    })
+
+    expect(Object.keys(body ?? {}).sort()).toEqual(["open_end_at", "open_start_at", "version"])
+  })
+
+  it("關閉送出的 body 只有 version", async () => {
+    let body: Record<string, unknown> | undefined
+    server.use(
+      http.post("/api/et/courses/:courseId/close", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          course_id: 1,
+          status: "CLOSED",
+          open_start_at: null,
+          open_end_at: null,
+          closed_at: "2026-09-09T03:00:00Z",
+          version: 6,
+        })
+      }),
+    )
+
+    await coursesApi.close(1, 5)
+
+    expect(body).toEqual({ version: 5 })
   })
 })

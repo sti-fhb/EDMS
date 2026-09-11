@@ -1,23 +1,25 @@
 """ET02 課程關閉與再開課整合測試（US11 / #288）。
 
-狀態前提（`ensure_closable` / `ensure_reopenable` / `ensure_reopen_schedule`）與開放期間
-判定（`is_within_open_window`）已在 `tests/unit/et/test_course_rules.py` 以純函式涵蓋。
+狀態前提（`ensure_closable` / `ensure_reopenable` / `ensure_reopen_schedule`）與「視同關閉」
+判定（`is_effectively_closed`）已在 `tests/unit/et/test_course_rules.py` 以純函式涵蓋。
 此處只驗**需要真 DB 才驗得了**的事：
 
 1. 兩支端點的接線與各欄位的實際寫入（`CLOSED_AT` 寫了、`URGENT_REMIND_SENT` 歸零）
 2. 三個刻意**不動**的欄位（`CLOSED_AT` 於再開課保留、`FIRST_PUBLISHED_AT`、`INVITATION_CODE`）
 3. 樂觀鎖（版本不符回 409）
-4. 擁有權邊界
+4. 擁有權邊界**與角色閘**（兩道不同的閘：`ensure_owner` 擋不住「沒有教師角色的擁有者」）
 5. **再開課重跑發布六項檢核**（SA Q2 裁示 A）——需要真的把課程弄壞才驗得出
 6. 關閉 / 再開課可重複多次
 7. 關閉期間教師端仍可編輯課程內容（AC 6）
+8. **再開課請求以前端實際送出的欄位為準**（`test_以前端實際送出的欄位再開課`）——
+   其餘案例為了方便多塞了 `course_name`，那掩蓋過一次真實環境必然失敗的缺陷
 
 關閉後**學員端**的行為在 `test_et_closed_course_behaviours.py`（那些跨七個子模組，
 不屬於本檔的「兩支端點」範圍）。
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -28,6 +30,7 @@ from app.et.constants import (
     COURSE_CLOSED,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
+    ROLE_STUDENT,
     ROLE_TEACHER,
 )
 from app.et.course.models import EtCourse
@@ -42,7 +45,12 @@ def _bearer(user_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {create_access_token(sub=user_id, ttl_minutes=15)}"}
 
 
-async def _user(db, user_id: str) -> str:
+async def _user(db, user_id: str, *, role: str = ROLE_TEACHER) -> str:
+    """建使用者並賦予單一 ET 角色（預設教師——本檔多數案例是教師操作）。
+
+    `role` 可覆寫，用於驗**角色閘**（與擁有權是兩道不同的閘，見
+    `test_學員角色關閉回403`）。
+    """
     now = utcnow()
     db.add(
         DpUser(
@@ -58,11 +66,7 @@ async def _user(db, user_id: str) -> str:
             created_date=now,
         )
     )
-    db.add(
-        EtUserRole(
-            user_id=user_id, role=ROLE_TEACHER, is_active=True, created_user="SYSTEM", created_date=now, deleted=0
-        )
-    )
+    db.add(EtUserRole(user_id=user_id, role=role, is_active=True, created_user="SYSTEM", created_date=now, deleted=0))
     await db.flush()
     return user_id
 
@@ -230,6 +234,39 @@ class TestClose:
         assert r.json()["error_code"] == "ET_COURSE_002"
         assert (await _course_row(db, ctx["course_id"])).status == COURSE_PUBLISHED
 
+    async def test_學員角色關閉回403(self, client, db) -> None:
+        """角色閘（`require_et_roles(ET_TEACHER, ET_ADMIN)`）——與擁有權是**兩道不同的閘**。
+
+        原本全部測試都用教師帳號，所以 `dependencies=[...]` 那一行漏掉時不會有任何測試
+        變紅：擁有權閘擋得住「別人的課」，但擋不住「這個人根本沒有教師角色」。
+        """
+        owner = await _user(db, "t_cl08")
+        ctx = await _published_course(client, db, owner)
+        student = await _user(db, "s_cl08", role=ROLE_STUDENT)
+
+        r = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(student)
+        )
+
+        assert r.status_code == 403, r.text
+        assert (await _course_row(db, ctx["course_id"])).status == COURSE_PUBLISHED
+
+    async def test_教師角色被停用後即使仍是擁有者也擋下(self, client, db) -> None:
+        """被撤掉 `ET_TEACHER` 但仍是 `OWNER_ID` 的人——`ensure_owner` 對他是**通過的**，
+        唯一擋他的就是角色閘。這是最容易被漏掉的一種情境。
+        """
+        owner = await _user(db, "t_cl09")
+        ctx = await _published_course(client, db, owner)
+        await db.execute(update(EtUserRole).where(EtUserRole.user_id == owner).values(is_active=False))
+        await db.flush()
+
+        r = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(owner)
+        )
+
+        assert r.status_code == 403, r.text
+        assert (await _course_row(db, ctx["course_id"])).status == COURSE_PUBLISHED
+
     async def test_關閉寫入稽核紀錄(self, client, db) -> None:
         """`spec.md` §稽核來源功能碼明列 `ET-COURSE` 涵蓋「關閉 / 再開課」，US11 在表內。
 
@@ -255,6 +292,95 @@ class TestClose:
 
 
 class TestReopen:
+    async def test_以前端實際送出的欄位再開課(self, client, db) -> None:
+        """🔴 迴歸測試：請求**只帶起訖時間與 version**，不帶 `course_name`。
+
+        `ReopenCourseReq` 原本繼承 `_CourseFields`（為了沿用時區補正與「迄 > 起」兩個
+        驗證器），於是把 `course_name` 的**必填性**一起繼承了。前端的 `ReopenPayload`
+        只有三個欄位，所以真實操作每一次都被擋成 422 `COMMON_422`「以下欄位不符規定：
+        course_name」——而教師在再開課視窗從未見過那個欄位，AC 8 在真實環境完全不可用。
+
+        本檔其餘案例都沒抓到，是因為它們在 JSON 裡**多塞了** `course_name`（那不是真實
+        呼叫端會送的內容）；前端測試的 MSW handler 又不驗 request body。三層測試各自
+        成立，卻沒有一層驗過「前端實際組出的 payload 能通過後端 schema」。
+
+        ⚠️ 這條測試的 payload 必須與 `frontend/src/et/courses/schemas.ts` 的
+        `ReopenPayload` **逐欄一致**。改動任一邊時請同步。
+        """
+        uid = await _user(db, "t_ro00")
+        ctx = await _published_course(client, db, uid)
+        closed = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
+        )
+
+        r = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/reopen",
+            json={
+                "open_start_at": _future(1),
+                "open_end_at": _future(400),
+                "version": closed.json()["version"],
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == COURSE_PUBLISHED
+
+    async def test_再開課不改動課程名稱(self, client, db) -> None:
+        """再開課只改起訖與狀態。夾帶 `course_name` 也不會被寫入（schema 已無此欄位）。
+
+        基本資料的修改走 `PUT /courses/{id}`——兩支端點的職責不重疊，否則「再開課」會
+        變成一個可以順手改任何欄位的後門。
+        """
+        uid = await _user(db, "t_ro00b")
+        ctx = await _published_course(client, db, uid)
+        original = (await _course_row(db, ctx["course_id"])).course_name
+        closed = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
+        )
+
+        r = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/reopen",
+            json={
+                "course_name": "被夾帶的新名稱",
+                "open_start_at": _future(1),
+                "open_end_at": _future(400),
+                "version": closed.json()["version"],
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 200, r.text
+        assert (await _course_row(db, ctx["course_id"])).course_name == original
+
+    async def test_再開課寫入稽核紀錄(self, client, db) -> None:
+        """與 `test_關閉寫入稽核紀錄` 對稱——US11 在 `spec.md` §稽核來源功能碼表內。
+
+        關閉有測試、再開課沒有的話，日後重構誤刪 `_log` 只會讓一半的路徑變紅。
+        """
+        from app.dp.audit.models import DpAuditLog
+
+        uid = await _user(db, "t_ro08")
+        ctx = await _published_course(client, db, uid)
+        closed = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
+        )
+
+        await client.post(
+            f"{_COURSES}/{ctx['course_id']}/reopen",
+            json={"open_start_at": _future(1), "open_end_at": _future(400), "version": closed.json()["version"]},
+            headers=_bearer(uid),
+        )
+
+        rows = (
+            await db.scalars(
+                select(DpAuditLog).where(
+                    DpAuditLog.func_name == "ET-COURSE", DpAuditLog.target_id == str(ctx["course_id"])
+                )
+            )
+        ).all()
+        assert any(r.description == "再開課" for r in rows)
+
     async def test_再開課回PUBLISHED並歸零加急提醒旗標(self, client, db) -> None:
         """AC 8 / FR-ET-US11-09。
 

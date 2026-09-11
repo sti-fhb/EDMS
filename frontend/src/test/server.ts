@@ -1130,6 +1130,9 @@ export const handlers = [
           course_id: 1,
           course_name: "採血作業新進人員訓練",
           status: "PUBLISHED",
+          // #288：由後端算出的「視同關閉」。`status` 與 `is_closed` 刻意不同源——
+          // 期間已過的課程 `status` 仍是 `PUBLISHED` 而 `is_closed` 為 true。
+          is_closed: false,
           completion_status: "IN_PROGRESS",
           tags: ["護理師", "軍人"],
           chapter_count: 5,
@@ -1141,6 +1144,7 @@ export const handlers = [
           course_id: 2,
           course_name: "血品安全與品保概論",
           status: "CLOSED",
+          is_closed: true,
           completion_status: "NOT_STARTED",
           tags: ["全體"],
           chapter_count: 4,

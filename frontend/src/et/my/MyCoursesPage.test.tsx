@@ -42,6 +42,34 @@ describe("ET04 我的課程", () => {
     expect(screen.getAllByText(/閱課期間/)).toHaveLength(2)
   })
 
+  it("期間已過者即使 status 仍是 PUBLISHED 也顯示「已關閉」（#288）", async () => {
+    // 卡片看後端算好的 `is_closed`，不自己判 `status === "CLOSED"`。到期自動轉 CLOSED
+    // 屬 ET-16（未實作），所以「status=PUBLISHED 但 is_closed=true」是常態而非過渡狀態。
+    // 若前端改回判 status，這張卡會標成「已發布」，而學員點進去 ET05 是唯讀的——
+    // 兩個畫面在使用者眼前互相矛盾。
+    mockMyCourses({
+      summary: { joined: 1, in_progress: 0, not_started: 1, completed: 0 },
+      courses: [
+        {
+          course_id: 9,
+          course_name: "期間已過的課程",
+          status: "PUBLISHED",
+          is_closed: true,
+          completion_status: "NOT_STARTED",
+          tags: ["全體"],
+          chapter_count: 2,
+          open_start_at: "2026-01-01T00:00:00Z",
+          open_end_at: "2026-02-01T00:00:00Z",
+          progress_pct: 0,
+        },
+      ],
+    })
+    renderWithProviders(<EtMyCoursesPage />)
+
+    expect(await screen.findByText("期間已過的課程")).toBeInTheDocument()
+    expect(screen.getByText("已關閉")).toBeInTheDocument()
+  })
+
   it("已關閉課程顯示「已關閉」標示（AC 5）", async () => {
     renderWithProviders(<EtMyCoursesPage />)
 

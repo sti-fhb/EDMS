@@ -338,10 +338,14 @@ class TestEnrollmentBlocked:
         assert got.status_code == 409, got.text
         assert got.json()["error_code"] == "ET_ENROLL_002"
 
-    async def test_已關閉課程仍留在我的課程清單(self, client, db, source: str) -> None:
+    async def test_已關閉課程仍留在我的課程清單並標示已關閉(self, client, db, source: str) -> None:
         """AC 9 / US11 FR-05：已關閉課程 MUST 仍顯示於 ET04 並標示「已關閉」。
 
         過濾掉會讓學員的歷史紀錄從眼前消失；卡片仍要能點進去唯讀回看。
+
+        `is_closed` 是本 issue 新增的欄位（#288）：**期間已過時 `status` 仍是
+        `PUBLISHED`**，卡片若自己判 `status == "CLOSED"` 會標成「已發布」，而學員點進去
+        ET05 是唯讀的——兩個畫面互相矛盾。這條測試在 `expired` 那一輪就是釘住這件事。
         """
         ctx = await _ready(client, db, f"en2{source[:3]}")
         await _apply_close(client, db, ctx, source)
@@ -349,7 +353,20 @@ class TestEnrollmentBlocked:
         got = await client.get("/api/et/my-courses", headers=_bearer(ctx["student"]))
 
         assert got.status_code == 200, got.text
-        assert [row["course_id"] for row in got.json()["courses"]] == [ctx["course_id"]]
+        rows = got.json()["courses"]
+        assert [row["course_id"] for row in rows] == [ctx["course_id"]]
+        assert rows[0]["is_closed"] is True
+        # 兩種來源的 `status` 刻意不同：關閉端點會改狀態，期間已過不會
+        assert rows[0]["status"] == ("CLOSED" if source == "endpoint" else "PUBLISHED")
+
+    async def test_期間內的課程is_closed為false(self, client, db, source: str) -> None:
+        """對照組——否則上一條可能只是因為 `is_closed` 恆為 `True` 而通過。"""
+        ctx = await _ready(client, db, f"en3{source[:3]}")
+
+        got = await client.get("/api/et/my-courses", headers=_bearer(ctx["student"]))
+
+        assert got.status_code == 200, got.text
+        assert got.json()["courses"][0]["is_closed"] is False
 
 
 @pytest.mark.parametrize("source", _SOURCES)
