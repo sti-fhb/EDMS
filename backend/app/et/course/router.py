@@ -14,13 +14,14 @@ router-level 掛 `get_et_context`（需任一 ET 角色，無則 403 `ET_AUTH_00
 課程才知道擁有者，無法以 dependency 表達。
 """
 
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.core.pagination import PagedResponse
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.publish_service import EtPublishService
 from app.et.course.schemas import (
@@ -31,6 +32,7 @@ from app.et.course.schemas import (
     ChapterRenameReq,
     ChapterReorderReq,
     CloseCourseReq,
+    CourseCard,
     CourseCreateReq,
     CourseCreateResult,
     CourseDetail,
@@ -89,6 +91,61 @@ _status_rate_limit: Final = [
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
 _publish_service = EtPublishService()
+
+
+@router.get(
+    "/courses",
+    response_model=PagedResponse[CourseCard],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def list_courses(
+    scope: Annotated[Literal["mine", "all"], Query()],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    tag_id: Annotated[int | None, Query(ge=1, le=MAX_BIGINT)] = None,
+    owner_id: Annotated[str | None, Query(max_length=20)] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 12,
+) -> PagedResponse[CourseCard]:
+    """ET01 課程清單（`FR-ET-US7-01`~`-04`）。
+
+    | `scope` | 擁有者 | 狀態 |
+    |---|---|---|
+    | `mine` | 限本人 | **全部**（草稿 / 已發布 / 已關閉）——教師要管理自己的課 |
+    | `all` | 不限 | **僅已發布**——草稿的存在對他人是秘密，已關閉者不列入 |
+
+    `q` 依課程名稱模糊比對（萬用字元已跳脫）；`tag_id` 為該課程多標籤中任一命中即列出；
+    `owner_id` 僅於 `scope=all` 有意義，`scope=mine` 時**忽略而不報錯**——那是前端切分頁
+    時沒清乾淨，不是使用者做錯事。
+
+    `limit` 預設 12：卡片網格在桌機是每列三張，12 剛好四列。
+    """
+    return await _service.list_courses(
+        db,
+        actor_id=ctx.user_id,
+        scope=scope,
+        keyword=q,
+        tag_id=tag_id,
+        owner_id=owner_id,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/courses/filter-tags",
+    response_model=list[TagOption],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def list_filter_tags(db: AsyncSession = Depends(get_db)) -> list[TagOption]:
+    """ET01 篩選用的標籤下拉：**`ET_TAG` 全部，含停用者**。
+
+    ⚠️ 與 `GET /tags` **語意相反、不可互換**：那支是 ET02 編輯時掛標籤用的（停用者不得
+    新掛，故排除），本支是查詢用的（要查得到掛著已停用標籤的**歷史課程**）。用錯會讓
+    舊課程從此搜不到，而畫面上不會有任何異常。
+    """
+    return await _service.list_filter_tags(db)
 
 
 @router.get(
