@@ -19,9 +19,10 @@ from app.core.exceptions import AppError
 PLAYBACK_RATE_OPTIONS: Final[tuple[float, ...]] = (0.75, 1.0, 1.25, 1.5, 2.0)
 
 _NO_ACCESS = AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_LEARN_002")
+_REMOVED = AppError(status_code=403, detail="您已被該課程移除", error_code="ET_LEARN_004")
 
 
-def ensure_can_access(*, enrolled: bool, is_owner: bool) -> None:
+def ensure_can_access(*, enrolled: bool, is_owner: bool, removed: bool = False) -> None:
     """學員端內容之存取判定：**在籍 OR 擁有者**（#255 SA Q1 裁示 A）。
 
     影片與 DM 文件是**實體檔案**。少了這道判定，任何登入者（ET 學員角色人人都有）
@@ -39,11 +40,21 @@ def ensure_can_access(*, enrolled: bool, is_owner: bool) -> None:
     （#255 裁示 Q1 一併載明）。否則教師預覽完就出現在自己課程的完課統計裡，正好是
     本裁示要避開的後果。
 
+    ## `removed` 為何是選填
+
+    「曾加入但被移除」與「從未加入」對學員的意義完全不同：前者需要知道自己**發生了
+    什麼事**（ET-MSG-ET06-006），後者只是走錯地方。但這個區別只在 ET05 的入口需要
+    （`spec_us6` 場景 28 的 next navigation），其餘四個呼叫點問的都是「能不能拿這份
+    資料」——那裡多傳一個參數只會讓每個呼叫點都要去查一次它不需要的東西。
+
+    故預設 `False`：不傳就沿用既有行為，`ET_LEARN_002`。
+
     Raises:
-        AppError: 兩者皆非（403 `ET_LEARN_002`）。
+        AppError: 被移除者 403 `ET_LEARN_004`；其餘兩者皆非 403 `ET_LEARN_002`。
     """
-    if not (enrolled or is_owner):
-        raise _NO_ACCESS
+    if enrolled or is_owner:
+        return
+    raise _REMOVED if removed else _NO_ACCESS
 
 
 def playback_rates(*, max_rate: float) -> tuple[float, ...]:

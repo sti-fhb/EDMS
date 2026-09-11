@@ -187,7 +187,12 @@ class TestAuthorization:
         assert r.json()["is_owner"] is True, "前端據此顯示預覽模式提示"
 
     async def test_被移除之學員取不到教材(self, client, db) -> None:
-        """#247 SA Q1 裁示 C 的延伸——不在籍即不可存取。"""
+        """#247 SA Q1 裁示 C 的延伸——不在籍即不可存取。
+
+        ⚠️ 存取被擋這件事不變，**變的是訊息**：#280 起被移除者收到 `ET_LEARN_004`
+        「您已被該課程移除」而非 `ET_LEARN_002`「您尚未加入此課程」（`spec_us6` 場景 28）。
+        兩者都是 403，擋的力道完全相同。
+        """
         teacher = await _user(db, "t_learn04", ROLE_TEACHER)
         student = await _user(db, "s_learn04")
         ids = await _course_with_material(client, db, teacher)
@@ -202,7 +207,7 @@ class TestAuthorization:
         r = await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(student))
 
         assert r.status_code == 403
-        assert r.json()["error_code"] == "ET_LEARN_002"
+        assert r.json()["error_code"] == "ET_LEARN_004"
 
     async def test_他人教材之_doc_id_不可搭配自己有權的教材(self, client, db) -> None:
         """路徑為 `/materials/{material_id}/docs/{doc_id}/file`，授權由 material 側判定。

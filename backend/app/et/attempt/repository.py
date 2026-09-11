@@ -126,6 +126,46 @@ class EtAttemptRepository:
             .limit(1)
         )
 
+    async def list_attempts(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> list[EtQuizAttemptM]:
+        """該學員於該測驗的**每一次**已閱卷作答（#280 AC 1）。
+
+        依 `ATTEMPT_NO` 遞增——wireframe 是「第 1 次 → 第 2 次」，而學員想回看的往往
+        正是第 1 次。狀態走與 `service.result` 同一組白名單，否則清單會給出一個
+        `result` 拒絕的 id，前端就得到一顆按了必 404 的列。
+
+        **不分頁**：`MAX_RETRY` 的 schema 上限雖為 999，實務上是個位數，單一測驗的 attempt 數
+        不會多到需要分頁。若日後真的出現大量 attempt，這裡要改成分頁而不是提高門檻。
+        """
+        rows = await db.scalars(
+            select(EtQuizAttemptM)
+            .where(
+                EtQuizAttemptM.user_id == user_id,
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.status.in_(GRADED_STATUSES),
+                EtQuizAttemptM.deleted == 0,
+            )
+            .order_by(EtQuizAttemptM.attempt_no)
+        )
+        return list(rows)
+
+    async def points_total_by_attempt(self, db: AsyncSession, attempt_ids: list[int]) -> dict[int, int]:
+        """各 attempt 的配分總和（`SUM(POINTS_SNAPSHOT)`）。
+
+        **一次 grouped query 取全部**，不是逐筆查——歷次清單一次要顯示多筆。
+
+        清單需要它是因為「配分總和 = 100」只在課程發布當下檢核，發布後教師仍可改配分。
+        少了分母，第 1 次的 60/100 與第 2 次的 60/300 在清單上都只是「60」，而「結業成績
+        以最高分為準」那句話就變成誤導。
+        """
+        if not attempt_ids:
+            return {}
+        rows = await db.execute(
+            select(EtQuizAttemptD.attempt_id, func.sum(EtQuizAttemptD.points_snapshot))
+            .where(EtQuizAttemptD.attempt_id.in_(attempt_ids), EtQuizAttemptD.deleted == 0)
+            .group_by(EtQuizAttemptD.attempt_id)
+        )
+        return {attempt_id: int(total or 0) for attempt_id, total in rows.all()}
+
     async def get_attempt(self, db: AsyncSession, attempt_id: int) -> EtQuizAttemptM | None:
         return await db.scalar(
             select(EtQuizAttemptM).where(EtQuizAttemptM.attempt_id == attempt_id, EtQuizAttemptM.deleted == 0)

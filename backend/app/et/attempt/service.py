@@ -50,6 +50,7 @@ from app.et.attempt.schemas import (
     AnswerReq,
     AttemptResult,
     AttemptState,
+    AttemptSummary,
     OptionForAnswering,
     OptionResult,
     QuestionForAnswering,
@@ -126,7 +127,36 @@ class EtAttemptService:
             is_passed=passed,
             in_progress_attempt_id=in_progress.attempt_id if in_progress else None,
             last_attempt_id=await self._repo.last_submitted_attempt_id(db, user_id=user_id, quiz_id=quiz_id),
+            course_closed=status == COURSE_CLOSED,
         )
+
+    # ── 歷次作答 ────────────────────────────────────────────────────────────
+
+    async def history(self, db: AsyncSession, quiz_id: int, *, user_id: str) -> list[AttemptSummary]:
+        """該學員於該測驗的歷次作答清單（#280 AC 1）。
+
+        ⚠️ **刻意不走 `_require_access`**。那支問的是「在籍 OR 擁有者」，而課程關閉後的
+        學員與被移除的學員都會被它擋掉——但 `spec_us6` 場景 25 / 28 明確要求他們**仍可
+        回看自己的歷史**。授權依據只有 `USER_ID`：課程層的資格會變，「這是誰的考卷」不會。
+
+        因此本支也**不需要**任何課程層守門——它只回自己的東西，查不到就是空清單。
+        以測驗不存在或無權為由回 404 反而會變成存在性 oracle。
+        """
+        rows = await self._repo.list_attempts(db, user_id=user_id, quiz_id=quiz_id)
+        points = await self._repo.points_total_by_attempt(db, [row.attempt_id for row in rows])
+        return [
+            AttemptSummary(
+                attempt_id=row.attempt_id,
+                attempt_no=row.attempt_no,
+                # 已閱卷者三欄必有值；`or` 的預設只是讓型別收斂，不是預期會走到的路徑
+                submitted_at=row.submitted_at or row.started_at,
+                score=row.score if row.score is not None else Decimal(0),
+                points_total=points.get(row.attempt_id, 0),
+                is_pass=bool(row.is_pass),
+                status=row.status,
+            )
+            for row in rows
+        ]
 
     # ── 開始 / 續作 ─────────────────────────────────────────────────────────
 
@@ -299,6 +329,7 @@ class EtAttemptService:
             is_pass=is_pass,
             submitted_at=now,
             remaining_attempts=remaining_attempts(total=used_total, reset_base=base, max_retry=max_retry),
+            course_closed=await self._is_course_closed(db, attempt.course_id),
             questions=[
                 _to_result(detail, per_question[detail.question_id])
                 for detail in _in_snapshot_order(details, attempt.question_order)
@@ -343,6 +374,7 @@ class EtAttemptService:
             remaining_attempts=remaining_attempts(
                 total=total, reset_base=base, max_retry=quiz.max_retry if quiz else 0
             ),
+            course_closed=await self._is_course_closed(db, attempt.course_id),
             questions=[
                 _to_result(detail, detail.score if detail.score is not None else Decimal(0))
                 for detail in _in_snapshot_order(details, attempt.question_order)
@@ -350,6 +382,15 @@ class EtAttemptService:
         )
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _is_course_closed(self, db: AsyncSession, course_id: int) -> bool:
+        """課程是否已關閉，供成績頁顯示 ET-MSG-ET06-005。
+
+        查不到課程時回 `False` 而非拋錯：成績本身與課程狀態無關，為了一則提示訊息而讓
+        整份成績單 404 是本末倒置。
+        """
+        course = await self._learning.get_course(db, course_id)
+        return course is not None and course.status == COURSE_CLOSED
 
     async def _require_access(self, db: AsyncSession, quiz_id: int, user_id: str):
         """守門 1 + 2：反查鏈與「在籍 OR 擁有者」。

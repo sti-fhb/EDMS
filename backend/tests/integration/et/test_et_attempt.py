@@ -815,3 +815,233 @@ class TestAttemptOwnership:
         r = await client.get(f"/api/et/attempts/{attempt['attempt_id']}", headers=_bearer(other))
 
         assert r.status_code == 404, r.text
+
+
+class TestAttemptHistory:
+    """ET-6b 歷次作答清單（#280 AC 1 / AC 3）。"""
+
+    async def test_歷次清單列出全部次別(self, client, db) -> None:
+        """AC 1：列出**每一次**，不限最近一次。"""
+        teacher = await _user(db, "t_att28", ROLE_TEACHER)
+        student = await _user(db, "s_att28")
+        course = await _course_with_quiz(client, db, teacher, code="32000028")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        for _ in range(2):
+            started = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+            await client.post(f"/api/et/attempts/{started['attempt_id']}/submit", headers=h)
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert [a["attempt_no"] for a in body] == [1, 2], "須依 ATTEMPT_NO 遞增列出每一次"
+        assert all(a["submitted_at"] is not None for a in body)
+        assert {"attempt_id", "attempt_no", "submitted_at", "score", "is_pass", "status"} <= set(body[0])
+
+    async def test_清單不含進行中的作答(self, client, db) -> None:
+        """清單是「作答**紀錄**」；進行中的還沒有成績，列出來只會是一列空白。"""
+        teacher = await _user(db, "t_att29", ROLE_TEACHER)
+        student = await _user(db, "s_att29")
+        course = await _course_with_quiz(client, db, teacher, code="32000029")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        first = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{first['attempt_id']}/submit", headers=h)
+        # 第 2 次刻意不提交
+        await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+
+        assert [a["attempt_no"] for a in r.json()] == [1], "進行中的第 2 次不該入列"
+
+    async def test_兩次作答各依自己的順序快照(self, client, db) -> None:
+        """AC 3：不同 attempt **不互相污染**。
+
+        ⚠️ 洗牌可能兩次剛好相同——那樣測不出污染。故直接改寫第 1 次的順序快照使其
+        **確定**與第 2 次相反，再驗兩邊各自吻合自己的快照。
+        """
+        teacher = await _user(db, "t_att30", ROLE_TEACHER)
+        student = await _user(db, "s_att30")
+        course = await _course_with_quiz(client, db, teacher, code="32000030")
+        for _ in range(3):
+            await _add_question(client, teacher, course["quiz_id"], points=30)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        first = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{first['attempt_id']}/submit", headers=h)
+        second = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{second['attempt_id']}/submit", headers=h)
+        raw = await db.scalar(
+            select(EtQuizAttemptM.question_order).where(EtQuizAttemptM.attempt_id == second["attempt_id"])
+        )
+        second_order = json.loads(raw)
+        await db.execute(
+            update(EtQuizAttemptM)
+            .where(EtQuizAttemptM.attempt_id == first["attempt_id"])
+            .values(question_order=json.dumps(list(reversed(second_order))))
+        )
+        await db.commit()
+
+        first_result = await client.get(f"/api/et/attempts/{first['attempt_id']}/result", headers=h)
+        second_result = await client.get(f"/api/et/attempts/{second['attempt_id']}/result", headers=h)
+
+        assert [q["question_id"] for q in first_result.json()["questions"]] == list(reversed(second_order))
+        assert [q["question_id"] for q in second_result.json()["questions"]] == second_order
+
+    async def test_不存在或無權之測驗回空清單而非404(self, client, db) -> None:
+        """**反 oracle 迴歸**。
+
+        回 404 就能分辨「這個 quiz_id 存在但你沒紀錄」與「不存在」，可用來二分掃描全站
+        有效的 `quiz_id`。`history()` 刻意不分支、不 raise——但那是一個很容易被「順手補上
+        `_require_access`」推翻的設計，而推翻之後沒有任何既有測試會紅。
+        """
+        student = await _user(db, "s_att37")
+        await db.commit()
+
+        r = await client.get("/api/et/quizzes/999999999/attempts", headers=_bearer(student))
+
+        assert r.status_code == 200, "不可分辨『不存在』與『你沒有紀錄』"
+        assert r.json() == []
+
+    async def test_不可讀他人的歷次清單(self, client, db) -> None:
+        teacher = await _user(db, "t_att31", ROLE_TEACHER)
+        owner = await _user(db, "s_att31a")
+        other = await _user(db, "s_att31b")
+        course = await _course_with_quiz(client, db, teacher, code="32000031")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, owner, course["course_id"])
+        await _enroll(db, other, course["course_id"])
+        started = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(owner))).json()
+        await client.post(f"/api/et/attempts/{started['attempt_id']}/submit", headers=_bearer(owner))
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(other))
+
+        assert r.status_code == 200, r.text
+        assert r.json() == [], "只能看到自己的，不是別人的"
+
+
+class TestClosedAndRemovedBoundaries:
+    """ET-6b 課程關閉與被移除的邊界（#280 AC 6 / 7 / 8 / 9）。
+
+    這四條的行為 **#279 已經實作**（`start()` 的續作分支先返回、`_require_own_attempt`
+    只比對 `USER_ID`），但**沒有任何測試釘住**——本類別就是那些測試。
+    """
+
+    async def test_關閉後仍可提交進行中的作答(self, client, db) -> None:
+        """AC 6 / `spec_us6` 場景 27：關閉當下已在作答者，沿用快照完成並計分。"""
+        teacher = await _user(db, "t_att32", ROLE_TEACHER)
+        student = await _user(db, "s_att32")
+        course = await _course_with_quiz(client, db, teacher, code="32000032")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
+        await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]), json={"selected_options": [correct]}, headers=h
+        )
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        r = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        assert r.status_code == 200, r.text
+        assert float(r.json()["score"]) == 100.0, "關閉不影響閱卷"
+        assert r.json()["status"] == ATTEMPT_SUBMITTED
+
+    async def test_關閉後仍可讀歷次與明細(self, client, db) -> None:
+        """AC 8：唯讀回看不受課程資格影響——用課程資格判定會讓學員連自己的歷史都讀不到。"""
+        teacher = await _user(db, "t_att33", ROLE_TEACHER)
+        student = await _user(db, "s_att33")
+        course = await _course_with_quiz(client, db, teacher, code="32000033")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        history = await client.get(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+        detail = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=h)
+
+        assert history.status_code == 200, history.text
+        assert len(history.json()) == 1
+        assert detail.status_code == 200, detail.text
+
+    async def test_關閉時引導頁的原因是關閉而非次數用完(self, client, db) -> None:
+        """`can_start` 的兩種成因對學員的意義完全不同。
+
+        混為一句會叫課程關閉的學員去「聯繫教師重置」——而重置對他一點用也沒有。
+        """
+        teacher = await _user(db, "t_att34", ROLE_TEACHER)
+        student = await _user(db, "s_att34")
+        course = await _course_with_quiz(client, db, teacher, code="32000034")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["can_start"] is False
+        assert r.json()["course_closed"] is True, "次數還有剩，不可作答的原因是課程關閉"
+
+    async def test_被移除後仍可提交但不可開新(self, client, db) -> None:
+        """AC 9 / `spec_us6` 場景 28：當前 attempt 完成並計入歷史，只有之後不能再開新的。
+
+        提交當下就擋等於讓學員剛寫完的一份考卷憑空消失。
+        """
+        teacher = await _user(db, "t_att35", ROLE_TEACHER)
+        student = await _user(db, "s_att35")
+        course = await _course_with_quiz(client, db, teacher, code="32000035")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+            .values(is_removed=True)
+        )
+        await db.commit()
+
+        submitted = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+        history = await client.get(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+        blocked = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+
+        assert submitted.status_code == 200, submitted.text
+        assert len(history.json()) == 1, "已完成的那次須計入歷史"
+        # ⚠️ 這條斷言原本漏了——測試名稱與 docstring 都寫「不可開新」，但主體只驗了提交。
+        # `_require_access` → `ensure_can_access` 失敗後收斂成 404（不用 403，見模組 docstring）。
+        assert blocked.status_code == 404, blocked.text
+
+    async def test_被移除者看到的是被移除而非尚未加入(self, client, db) -> None:
+        """AC 9 後半 / ET-MSG-ET06-006：next navigation 的訊息要說對原因。
+
+        「您尚未加入此課程」會讓被移除的學員以為自己走錯課程、再去找一次邀請碼——
+        而依 #247 裁示 C 他也不能自行加回，那是白費力氣。
+        """
+        teacher = await _user(db, "t_att36", ROLE_TEACHER)
+        student = await _user(db, "s_att36")
+        course = await _course_with_quiz(client, db, teacher, code="32000036")
+        await _enroll(db, student, course["course_id"])
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+            .values(is_removed=True)
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/courses/{course['course_id']}/learn", headers=_bearer(student))
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_LEARN_004"
+        assert r.json()["error_message"] == "您已被該課程移除"

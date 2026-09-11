@@ -97,7 +97,13 @@ class EtLearningService:
             raise _NOT_FOUND
         enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
         is_owner = course.owner_id == user_id
-        ensure_can_access(enrolled=enrolled, is_owner=is_owner)
+        # 被移除者要看到「您已被該課程移除」而不是「您尚未加入此課程」——後者會讓他以為
+        # 自己走錯課程、再去找一次邀請碼（`spec_us6` 場景 28 的 next navigation）。
+        # 只在這個入口多查一次：其餘呼叫點問的是「能不能拿資料」，不需要區分原因。
+        removed = (
+            not enrolled and not is_owner and await self._repo.was_removed(db, user_id=user_id, course_id=course_id)
+        )
+        ensure_can_access(enrolled=enrolled, is_owner=is_owner, removed=removed)
 
         chapters = await self._repo.chapters(db, course_id)
         rows = await self._repo.items_with_titles(db, [c.chapter_id for c in chapters])

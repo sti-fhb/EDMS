@@ -38,6 +38,7 @@ export const QUERY_KEYS = {
     intro: (quizId: number) => ["et", "quizzes", quizId, "intro"] as const,
     attempt: (attemptId: number) => ["et", "attempts", attemptId] as const,
     result: (attemptId: number) => ["et", "attempts", attemptId, "result"] as const,
+    history: (quizId: number) => ["et", "quizzes", quizId, "attempts"] as const,
   },
   etSurvey: {
     form: (courseId: number) => ["et", "survey", "form", courseId] as const,
