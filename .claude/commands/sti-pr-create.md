@@ -38,14 +38,26 @@ git fetch origin main
 git log HEAD..origin/main --oneline
 ```
 
+接著查落後**涉及哪些檔**——commit 數只講「落後多少」，這一步才講「落後在哪」：
+
+```bash
+git diff origin/main..HEAD --numstat | awk '$1==0 && $2>0'
+```
+
+`--numstat` 輸出三欄為「增行、刪行、檔名」，上式篩出相對 main **只有減、沒有增**的檔案，代表 main 上有、而你分支缺的內容（例如別人剛合併的 workflow、migration、共用設定）。
+
 - 若有落後的 commit，顯示：
   ```
   ⚠️ 目前分支落後 main {N} 個 commit，建議先合併：
   git merge origin/main
 
+  落後涉及的檔案（main 有、本分支缺）：
+  {逐檔列出上式的輸出，格式「檔名（缺 N 行）」；無輸出則寫「無，落後的 commit 未觸及本分支持有的檔案」}
+
   未合併 main 可能導致：
   - CI pipeline 缺失（不會自動跑測試）
-  - 與其他 PR 的程式碼衝突
+  - CI 跑在舊基底——本分支綠不代表合到現在的 main 上仍綠
+  - 語意衝突延後才撞出來（例如他人已改了你呼叫的函式簽章）
   - 共用規則或設定不一致
 
   1. 自動執行 merge
@@ -54,6 +66,12 @@ git log HEAD..origin/main --oneline
   使用者選擇 `1` 後執行 `git merge origin/main`，若有衝突則提示手動解決後重新執行指令。
 
 - 若已同步，顯示：「✅ 分支已同步 main。」
+
+#### 判讀須知（避免誤報）
+
+- ⚠️ **不可把這份輸出說成「合併會刪掉這些檔」**。GitHub 的 squash merge 走三方合併，**分支沒碰過的檔案會保留 main 的版本**。2026-09-11 以 `git merge-tree --write-tree` 實測確認：拿一支落後的分支模擬合併，main 新增的檔仍在、內容與 main 逐位元相同（blob hash 一致），分支持有的舊版沒有勝出。這個輸出**只是落後指標**，據此對他人發「即將刪檔」的警報會造成假警報。
+- 不要改用 `--diff-filter=D` 取代：那只抓得到「檔案被刪除」，抓不到「**檔案還在、但內容是舊版**」——後者才是落後最常見的樣子。
+- 必須用兩點 `origin/main..HEAD`，不可用三點 `...`：三點比的是共同祖先，看不見 main 後來多了什麼，也就看不出落後。
 
 ---
 
