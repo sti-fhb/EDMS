@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from app.core.schema_types import SAFE_SINGLE_LINE_PATTERN
+from app.et.constants import CourseStatus
 
 # 課程描述長度上限（spec_us3 AC 1「至多 500 字」）。
 # data-model 之 `DESCRIPTION` 為 TEXT 無長度限制，故由應用層把關；前端另以 Zod 同步檢核。
@@ -451,3 +452,53 @@ class CourseStatusResult(BaseModel):
     open_end_at: datetime | None
     closed_at: datetime | None
     version: int
+
+
+class CourseCard(BaseModel):
+    """ET01 課程列表的一張卡片（`FR-ET-US7-03`）。
+
+    `is_owner` 決定前端的兩件事：卡片右上要不要顯示「檢視」標籤、點擊進編輯或唯讀模式
+    （`FR-ET-US7-04`）。**由後端判定**——前端若自行比對 `owner_id` 與當前使用者，等於
+    把授權語意複製一份到瀏覽器，而那一份遲早與後端分岔。
+    """
+
+    course_id: int
+    course_name: str
+    status: CourseStatus
+    open_start_at: datetime | None
+    open_end_at: datetime | None
+    owner_id: str
+    #: 取自 `DP_USER.USER_NAME`；查無（帳號已刪）時為 `None`，前端顯示為「—」。
+    owner_name: str | None
+    tags: list[TagOption]
+    #: 未刪除之章節數。
+    chapter_count: int
+    #: **在籍**學員數——已移除者（`IS_REMOVED`）不計入。卡片上的數字問的是「現在有幾個
+    #: 人在上這門課」，不是「歷來有幾個人加入過」。
+    student_count: int
+    is_owner: bool
+    #: 是否**視同關閉**（`rules.is_effectively_closed`）——「已關閉」或「已發布但閱課
+    #: 期間已過」皆為 `True`。前端的狀態 pill 看這個欄位，**不要自己判 `status`**：
+    #: 期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬未實作的 ET-16），
+    #: 自行判定會標成「已發布」，而學員其實早已進不去。
+    is_closed: bool
+
+
+class CourseRow(BaseModel):
+    """`paginate()` 與 `CourseCard` 之間的中介——**只含 `ET_COURSE` 自身的欄位**。
+
+    `paginate()` 以 `result.scalars()` 取結果（只拿第一欄），故清單查詢只能選 `EtCourse`；
+    聚合值由 service 批次補齊後才組成 `CourseCard`。
+
+    刻意**不讓 `CourseCard` 的聚合欄位帶預設值**——那樣雖然能一步到位，但漏補時會靜默
+    送出 0 而不是報錯。多一個中介型別換「少一個欄位就是 TypeError」。
+    """
+
+    model_config = {"from_attributes": True}
+
+    course_id: int
+    course_name: str
+    status: CourseStatus
+    open_start_at: datetime | None
+    open_end_at: datetime | None
+    owner_id: str

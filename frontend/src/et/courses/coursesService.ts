@@ -1,6 +1,9 @@
 import { http } from "../../services/http"
+import type { PagedResult } from "../../hooks/usePagedQuery"
 import type {
   Capabilities,
+  CourseCard,
+  CourseListParams,
   ChapterItem,
   CourseCreatePayload,
   CourseCreateResult,
@@ -16,6 +19,28 @@ export const coursesApi = {
   /** 當前使用者之課程操作能力（回「能力」而非「角色」，比照 DM `Capabilities`）。 */
   getCapabilities: async (): Promise<Capabilities> => {
     const { data } = await http.get<Capabilities>("/et/courses/capabilities")
+    return data
+  },
+
+  /**
+   * ET01 課程清單（US7 / #299）。
+   *
+   * `scope` 決定狀態過濾且兩者相反：`mine` 含草稿與已關閉（教師要管理自己的課），
+   * `all` 僅已發布（草稿的存在對他人是秘密）。
+   */
+  list: async (params: CourseListParams): Promise<PagedResult<CourseCard>> => {
+    const { data } = await http.get<PagedResult<CourseCard>>("/et/courses", { params })
+    return data
+  },
+
+  /**
+   * ET01 篩選用的標籤下拉：**全部含停用者**。
+   *
+   * ⚠️ 與 `listTags()` 語意相反、不可互換——那支是 ET02 編輯時掛標籤用的（停用者不得
+   * 新掛故排除）。用錯會讓掛著已停用標籤的歷史課程搜不到，而畫面上沒有任何異常。
+   */
+  listFilterTags: async (): Promise<TagOption[]> => {
+    const { data } = await http.get<TagOption[]>("/et/courses/filter-tags")
     return data
   },
 

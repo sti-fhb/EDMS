@@ -1,4 +1,4 @@
-"""ET02 課程 / 章節 / 課程標籤 Repository（US3 / #202）。
+"""ET02 課程 / 章節 / 課程標籤 Repository（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 依 `sti-backend-modules`：Repository 只 `flush()`、不 `commit()`；查詢一律帶
 `DELETED = 0`；時間一律 `utcnow()`。
@@ -13,6 +13,8 @@ from datetime import datetime
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR
+from app.core.like_escape import contains as like_contains
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag
@@ -20,7 +22,7 @@ from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ITEM
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.material.repository import EtMaterialRepository
-from app.et.progress.models import EtProgress
+from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz
 from app.et.quiz.repository import EtQuizRepository
 
@@ -199,6 +201,164 @@ class EtCourseRepository:
             )
             .returning(EtCourse.version)
         )
+
+    def build_list_stmt(
+        self,
+        *,
+        actor_id: str,
+        scope: str,
+        keyword: str | None = None,
+        tag_id: int | None = None,
+        owner_id: str | None = None,
+        now: datetime,
+    ):
+        """ET01 課程清單的查詢（`FR-ET-US7-01`/`-02`），供 `paginate()` 使用。
+
+        ## 兩種 scope 的狀態過濾**相反**
+
+        | scope | 擁有者 | 狀態 |
+        |---|---|---|
+        | `mine` | 限本人 | **全部**（草稿 / 已發布 / 已關閉）——教師要管理自己的課 |
+        | `all` | 不限 | **僅已發布且期間未過**——見下 |
+
+        ## `all` 的「已發布」是 `is_effectively_closed` 的否定，不是 `STATUS` 比對
+
+        #288 立了「`PUBLISHED` 但 `OPEN_END_AT` 已過 = 視同關閉」的規則，且明訂呼叫端
+        一律以「與 `CLOSED` 相同」處理。若此處只比對 `STATUS = 'PUBLISHED'`，期間已過
+        的課程會留在「全部課程」——而學員早已進不去（邀請碼失效、進度寫入 409）。教師
+        點進去看到的是一門對外已死的課，卡片卻標著「已發布」。
+
+        這同時讓 AC 9（「已關閉」pill 僅出現於「我建立的」）自動成立：`all` 既然排除了
+        視同關閉者，那個 pill 就不可能出現在該分頁。
+
+        條件與 `rules.is_effectively_closed` 同義但寫成 SQL——該函式吃單列 Python 物件，
+        這裡要能下推到 DB 做分頁。**兩處若要改，必須一起改。**
+
+        ## 本查詢**只選 `EtCourse`**
+
+        `paginate()` 取結果用 `result.scalars()`，**只會拿第一欄**——把聚合值塞進同一個
+        select 會被靜默丟掉。章節數 / 學員數 / 標籤 / 建立者姓名改由 service 以該頁的
+        `course_id` 批次補齊（見 `counts_by_course` 等），不是 N+1。
+        """
+        stmt = select(EtCourse).where(EtCourse.deleted == 0)
+
+        if scope == "mine":
+            stmt = stmt.where(EtCourse.owner_id == actor_id)
+        else:
+            stmt = stmt.where(
+                EtCourse.status == COURSE_PUBLISHED,
+                # 訖止為空＝沒有結束日，不因缺欄位關掉一門教師沒要求關閉的課
+                # （與 `rules.is_effectively_closed` 的同一條判斷對齊）
+                or_(EtCourse.open_end_at.is_(None), EtCourse.open_end_at >= now),
+            )
+            if owner_id:
+                stmt = stmt.where(EtCourse.owner_id == owner_id)
+
+        if keyword:
+            # ⚠️ 必須跳脫——不跳脫時使用者輸入 `%` 會變成「列出全部」、`_` 變單字元萬用，
+            # 而且**沒有任何錯誤訊息**。`like_escape` 模組的用法明訂要搭配具名的
+            # `LIKE_ESCAPE_CHAR`，不要自己寫字面的反斜線。
+            #
+            # 用 `ilike` 而非 `like`：這是搜尋框，使用者不該因為大小寫打錯而找不到課程。
+            stmt = stmt.where(EtCourse.course_name.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR))
+
+        if tag_id is not None:
+            # 一課程多標籤，任一命中即列出（`FR-ET-US7-02`）。用 EXISTS 而非 JOIN——
+            # JOIN 會在課程掛多個標籤時產生重複列。
+            #
+            # **不濾 `EtTag.is_active`**：停用標籤仍須可用於篩選，否則掛著已停用標籤的
+            # 歷史課程從此搜不到（`spec.md` §受訓單位標籤規則：停用僅影響新課程掛載）。
+            stmt = stmt.where(
+                select(EtCourseTag.course_tag_id)
+                .where(
+                    EtCourseTag.course_id == EtCourse.course_id,
+                    EtCourseTag.tag_id == tag_id,
+                    EtCourseTag.deleted == 0,
+                )
+                .correlate(EtCourse)
+                .exists()
+            )
+
+        # 新的在前，與 ET04「我的課程」一致
+        return stmt.order_by(EtCourse.created_date.desc(), EtCourse.course_id.desc())
+
+    async def counts_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, tuple[int, int]]:
+        """`{course_id: (章節數, 在籍學員數)}`——**兩次 grouped query，不是逐筆**。
+
+        一頁十幾張卡，逐筆再查兩次就是幾十次往返。
+
+        ⚠️ 學員數**必須同時濾 `IS_REMOVED` 與 `DELETED`**：兩者語意不同（見
+        `learning/repository.is_enrolled`）。卡片上的數字問的是「現在有幾個人在上」，
+        不是「歷來有幾個人加入過」。
+
+        ⚠️ 兩個計數**不可合併成一次 JOIN**——兩個一對多關聯相乘會讓計數互相灌水
+        （2 章節 × 3 學員 → 兩邊都變 6）。
+        """
+        if not course_ids:
+            return {}
+        chapters = dict(
+            (
+                await db.execute(
+                    select(EtChapter.course_id, func.count())
+                    .where(EtChapter.course_id.in_(course_ids), EtChapter.deleted == 0)
+                    .group_by(EtChapter.course_id)
+                )
+            ).all()
+        )
+        students = dict(
+            (
+                await db.execute(
+                    select(EtEnrollment.course_id, func.count())
+                    .where(
+                        EtEnrollment.course_id.in_(course_ids),
+                        EtEnrollment.is_removed.is_(False),
+                        EtEnrollment.deleted == 0,
+                    )
+                    .group_by(EtEnrollment.course_id)
+                )
+            ).all()
+        )
+        return {cid: (int(chapters.get(cid, 0)), int(students.get(cid, 0))) for cid in course_ids}
+
+    async def tags_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, list[EtTag]]:
+        """`{course_id: [EtTag, ...]}`——一次 JOIN 取回整頁的標籤。
+
+        **不濾 `EtTag.is_active`**：課程既有已掛的停用標籤仍須顯示，否則卡片上的標籤
+        會憑空少一個（`spec.md` §受訓單位標籤規則：停用僅影響新課程掛載）。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseTag.course_id, EtTag)
+                .join(EtTag, EtTag.tag_id == EtCourseTag.tag_id)
+                .where(
+                    EtCourseTag.course_id.in_(course_ids),
+                    EtCourseTag.deleted == 0,
+                    EtTag.deleted == 0,
+                )
+                .order_by(EtCourseTag.course_id, EtTag.tag_name)
+            )
+        ).all()
+        grouped: dict[int, list[EtTag]] = {cid: [] for cid in course_ids}
+        for course_id, tag in rows:
+            grouped[course_id].append(tag)
+        return grouped
+
+    async def list_all_tags(self, db: AsyncSession) -> list[EtTag]:
+        """篩選下拉的標籤來源：**`ET_TAG` 全部（含停用者）**。
+
+        ⚠️ 與同檔 `EtCourseTagRepository.list_options` **語意相反**，兩者不可互換：
+
+        | 用途 | 來源 | 為何 |
+        |---|---|---|
+        | ET02 編輯時掛標籤 | 啟用中 + 該課程已掛之停用者 | 停用標籤不得**新掛**（FR-ET-US3-03）|
+        | ET01 清單篩選（本函式）| **全部含停用** | 要查得到掛著已停用標籤的**歷史課程** |
+
+        用錯會讓舊課程從此搜不到，而畫面上不會有任何異常。
+        """
+        rows = await db.scalars(select(EtTag).where(EtTag.deleted == 0).order_by(EtTag.tag_name))
+        return list(rows)
 
     async def list_invitation_codes(self, db: AsyncSession) -> set[str]:
         """所有已使用之邀請碼（供產碼時判重）。

@@ -1,4 +1,4 @@
-"""ET02 課程骨架與章節編排 Service（US3 / #202）。
+"""ET02 課程骨架與章節編排 Service（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 **稽核**：ET 於 `spec.md` §稽核來源功能碼明列 `ET-COURSE` 涵蓋「課程建立 / 編輯 /
 發布 / 關閉 / 再開課，及其下章節、教材、測驗、問卷之編修與刪除」，故本模組之 CUD
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
@@ -42,9 +43,11 @@ from app.et.course.schemas import (
     ChapterItem,
     ChapterRenameReq,
     ChapterReorderReq,
+    CourseCard,
     CourseCreateReq,
     CourseCreateResult,
     CourseDetail,
+    CourseRow,
     CourseUpdateReq,
     ItemCreateReq,
     ItemReorderReq,
@@ -121,6 +124,89 @@ class EtCourseService:
             await self._chapters.append(db, course.course_id, name, operator)
         await self._log(db, "CREATE", operator.user_id, course.course_id, "建立課程草稿")
         return CourseCreateResult(course_id=course.course_id, version=course.version)
+
+    async def list_courses(
+        self,
+        db: AsyncSession,
+        *,
+        actor_id: str,
+        scope: str,
+        keyword: str | None,
+        tag_id: int | None,
+        owner_id: str | None,
+        page: int,
+        limit: int,
+    ) -> PaginatedResult[CourseCard]:
+        """ET01 課程清單（`FR-ET-US7-01`~`-04`）。
+
+        ## 為何分兩段：先 `paginate()`，再批次補齊
+
+        `paginate()` 以 `result.scalars()` 取結果，**只拿第一欄**——聚合值塞進同一個
+        select 會被靜默丟掉。故清單查詢只選 `EtCourse`，章節數 / 學員數 / 標籤 /
+        建立者姓名以**該頁的 `course_id`** 批次補齊：三次固定成本的查詢，與頁面筆數無關。
+
+        分頁一律走 `core/pagination.paginate()`（專案規範），不自行拼 offset/limit。
+
+        ## `now` 只取一次
+
+        過濾（`build_list_stmt`）與每張卡片的 `is_closed` 必須以**同一個時點**判定。各自
+        呼叫 `utcnow()` 會在跨越 `OPEN_END_AT` 的那一瞬間產生自相矛盾的回應——課程被列
+        進「全部課程」，卡片卻標著「已關閉」。
+        """
+        now = utcnow()
+        stmt = self._courses.build_list_stmt(
+            actor_id=actor_id, scope=scope, keyword=keyword, tag_id=tag_id, owner_id=owner_id, now=now
+        )
+        paged = await paginate(db, stmt, page=page, limit=limit, schema=CourseRow)
+        rows: list[CourseRow] = paged["data"]
+        course_ids = [r.course_id for r in rows]
+
+        counts = await self._courses.counts_by_course(db, course_ids)
+        tags = await self._courses.tags_by_course(db, course_ids)
+        owner_names = await self._owner_names(db, {r.owner_id for r in rows})
+
+        cards = [
+            CourseCard(
+                course_id=r.course_id,
+                course_name=r.course_name,
+                status=r.status,
+                open_start_at=r.open_start_at,
+                open_end_at=r.open_end_at,
+                owner_id=r.owner_id,
+                owner_name=owner_names.get(r.owner_id),
+                tags=[TagOption.model_validate(t) for t in tags.get(r.course_id, [])],
+                chapter_count=counts.get(r.course_id, (0, 0))[0],
+                student_count=counts.get(r.course_id, (0, 0))[1],
+                # **由後端判定**——前端自行比對 owner_id 等於把授權語意複製一份到瀏覽器
+                is_owner=r.owner_id == actor_id,
+                # 期間已過者 `status` 仍是 `PUBLISHED`（自動轉 `CLOSED` 屬未實作的
+                # ET-16），前端若自己判 `status` 會把它標成「已發布」
+                is_closed=is_effectively_closed(status=r.status, open_end_at=r.open_end_at, now=now),
+            )
+            for r in rows
+        ]
+        return {"data": cards, "meta": paged["meta"]}
+
+    async def list_filter_tags(self, db: AsyncSession) -> list[TagOption]:
+        """篩選下拉的標籤來源：**全部含停用者**（與 ET02 編輯用的 `list_tag_options` 相反）。
+
+        停用標籤若排除，掛著它的歷史課程就從此搜不到，而畫面上不會有任何異常。
+        """
+        return [TagOption.model_validate(t) for t in await self._courses.list_all_tags(db)]
+
+    async def _owner_names(self, db: AsyncSession, owner_ids: set[str]) -> dict[str, str]:
+        """`{user_id: user_name}`——**一次查回整頁**，不逐筆。
+
+        唯讀查詢 `DP_USER`，屬 `spec.md` §外模組 table 引用清單 A 之既有例外（US7 已列）。
+        """
+        if not owner_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(DpUser.user_id, DpUser.user_name).where(DpUser.user_id.in_(owner_ids), DpUser.deleted == 0)
+            )
+        ).all()
+        return {user_id: name for user_id, name in rows}
 
     async def get_detail(self, db: AsyncSession, course_id: int, *, actor_id: str) -> CourseDetail:
         """課程詳細（含章節與標籤）。他人課程可閱覽，以 `is_owner` 表達可否編輯。"""
