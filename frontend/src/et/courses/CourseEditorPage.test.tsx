@@ -248,3 +248,144 @@ describe("ET02 課程編輯頁", () => {
     expect(await screen.findByText("請輸入章節名稱")).toBeInTheDocument()
   })
 })
+
+// ── ET02 關閉與再開課（US11 / #288）──────────────────────────────────────────
+
+/** 以指定狀態與擁有權覆蓋課程詳細——關閉 / 再開課按鈕全由這兩者決定。 */
+function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {}) {
+  server.use(
+    http.get("/api/et/courses/:courseId", () =>
+      HttpResponse.json({
+        course_id: 1,
+        course_name: "採血作業訓練",
+        description: null,
+        status,
+        open_start_at: "2026-09-01T00:00:00Z",
+        open_end_at: "2027-09-30T00:00:00Z",
+        require_approval: false,
+        version: 5,
+        owner_id: "U1",
+        owner_name: "王教師",
+        is_owner: isOwner,
+        tag_ids: [2],
+        chapters: [],
+        invitation_code: isOwner ? "01234567" : null,
+      }),
+    ),
+  )
+}
+
+describe("ET02 課程關閉與再開課", () => {
+  it("已發布課程顯示「關閉課程」，不顯示「再開課」", async () => {
+    useCourse("PUBLISHED")
+    renderEditor()
+    expect(await screen.findByRole("button", { name: "關閉課程" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
+  })
+
+  it("已關閉課程顯示「再開課」，不顯示「關閉課程」與「邀請學員」", async () => {
+    // AC 5 / FR-ET-US11-07：關閉期間不可邀請學員，故按鈕一併收起（後端另以
+    // ET_INVITE_004 把關）。再開課後 status 回 PUBLISHED，兩顆按鈕自然互換。
+    useCourse("CLOSED")
+    renderEditor()
+
+    expect(await screen.findByRole("button", { name: "再開課" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "邀請學員" })).not.toBeInTheDocument()
+  })
+
+  it("已關閉提示明確寫出「課程內容仍可編輯」（AC 6）", async () => {
+    // 少了這句，教師會以為關閉後這頁是唯讀的而不敢改——AC 6 的整個用意就是讓他能在
+    // 關閉期間整理教材再開課。
+    useCourse("CLOSED")
+    renderEditor()
+    expect(await screen.findByText(/此課程已關閉/)).toBeInTheDocument()
+    expect(screen.getByText(/課程內容仍可編輯/)).toBeInTheDocument()
+  })
+
+  it("草稿不顯示關閉 / 再開課（草稿沒有學員也沒有邀請碼，關閉沒有語意）", async () => {
+    useCourse("DRAFT")
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+    expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
+  })
+
+  it("非擁有者（檢視模式）不顯示關閉 / 再開課", async () => {
+    useCourse("PUBLISHED", { isOwner: false })
+    renderEditor()
+    await screen.findByText(/檢視模式/)
+    expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
+  })
+
+  it("關閉前先確認，且確認內容說明學員仍可唯讀回看與可再開課", async () => {
+    // 關閉會立刻影響所有在籍學員。可逆這件事也要說，否則教師會誤以為這是不可回復的
+    // 動作而不敢按。
+    const user = userEvent.setup()
+    useCourse("PUBLISHED")
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "關閉課程" }))
+
+    expect(await screen.findByText(/已加入的學員仍可唯讀回看內容與成績/)).toBeInTheDocument()
+    expect(screen.getByText(/課程內容於關閉期間仍可編輯，之後可再開課/)).toBeInTheDocument()
+  })
+
+  it("確認關閉時送出當前版本（樂觀鎖）", async () => {
+    const user = userEvent.setup()
+    let body: unknown
+    useCourse("PUBLISHED")
+    server.use(
+      http.post("/api/et/courses/:courseId/close", async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({
+          course_id: 1,
+          status: "CLOSED",
+          open_start_at: "2026-09-01T00:00:00Z",
+          open_end_at: "2027-09-30T00:00:00Z",
+          closed_at: "2026-09-09T03:00:00Z",
+          version: 6,
+        })
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "關閉課程" }))
+    await user.click(await screen.findByRole("button", { name: "確認關閉" }))
+
+    await waitFor(() => expect(body).toEqual({ version: 5 }))
+    expect(await screen.findByText("課程已關閉")).toBeInTheDocument()
+  })
+
+  it("關閉遇版本衝突時顯示衝突視窗而非成功訊息", async () => {
+    const user = userEvent.setup()
+    useCourse("PUBLISHED")
+    server.use(
+      http.post("/api/et/courses/:courseId/close", () =>
+        HttpResponse.json(
+          { error_code: "ET_LOCK_001", error_message: "資料已被其他人修改" },
+          { status: 409 },
+        ),
+      ),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "關閉課程" }))
+    await user.click(await screen.findByRole("button", { name: "確認關閉" }))
+
+    expect(await screen.findByText("內容已被其他裝置變更，請重新整理後再儲存。")).toBeInTheDocument()
+    expect(screen.queryByText("課程已關閉")).not.toBeInTheDocument()
+  })
+
+  it("再開課視窗可開啟與取消（時間欄位之填值見 ReopenCourseDialog.test.tsx）", async () => {
+    const user = userEvent.setup()
+    useCourse("CLOSED")
+    renderEditor()
+
+    await user.click(await screen.findByRole("button", { name: "再開課" }))
+    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "取消" }))
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "確認再開課" })).not.toBeInTheDocument(),
+    )
+  })
+})

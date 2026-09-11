@@ -1097,6 +1097,29 @@ export const handlers = [
       version: 1,
     }),
   ),
+  // ET02 關閉與再開課（US11 / #288）。`closed_at` 於再開課後**仍帶值**（FR-ET-US11-10
+  // 保留供追溯），fixture 照實反映——若回 null，任何誤用「有沒有值」判斷關閉狀態的
+  // 程式碼都會在測試裡剛好通過，而正式環境會錯。
+  http.post("/api/et/courses/:courseId/close", ({ params }) =>
+    HttpResponse.json({
+      course_id: Number(params.courseId),
+      status: "CLOSED",
+      open_start_at: "2026-09-01T00:00:00Z",
+      open_end_at: "2027-09-30T00:00:00Z",
+      closed_at: "2026-09-09T03:00:00Z",
+      version: 2,
+    }),
+  ),
+  http.post("/api/et/courses/:courseId/reopen", ({ params }) =>
+    HttpResponse.json({
+      course_id: Number(params.courseId),
+      status: "PUBLISHED",
+      open_start_at: "2026-10-01T00:00:00Z",
+      open_end_at: "2027-10-31T00:00:00Z",
+      closed_at: "2026-09-09T03:00:00Z",
+      version: 3,
+    }),
+  ),
 
   // ── ET04 我的課程與加入新課程（US4 / #247）────────────────────────────────
   http.get("/api/et/my-courses", () =>
