@@ -1,4 +1,4 @@
-"""ET02 課程骨架與章節編排 API（US3 / #202）。
+"""ET02 課程骨架與章節編排 API（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 router-level 掛 `get_et_context`（需任一 ET 角色，無則 403 `ET_AUTH_001`）。
 

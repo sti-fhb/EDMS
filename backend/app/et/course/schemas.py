@@ -477,6 +477,11 @@ class CourseCard(BaseModel):
     #: 人在上這門課」，不是「歷來有幾個人加入過」。
     student_count: int
     is_owner: bool
+    #: 是否**視同關閉**（`rules.is_effectively_closed`）——「已關閉」或「已發布但閱課
+    #: 期間已過」皆為 `True`。前端的狀態 pill 看這個欄位，**不要自己判 `status`**：
+    #: 期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬未實作的 ET-16），
+    #: 自行判定會標成「已發布」，而學員其實早已進不去。
+    is_closed: bool
 
 
 class CourseRow(BaseModel):

@@ -1055,6 +1055,7 @@ export const handlers = [
       chapter_count: 5,
       student_count: 28,
       is_owner: true,
+      is_closed: false,
     }
     const others = {
       course_id: 12,
@@ -1068,6 +1069,7 @@ export const handlers = [
       chapter_count: 3,
       student_count: 9,
       is_owner: false,
+      is_closed: false,
     }
     // 草稿課的聚合值刻意與 `mine` 不同——兩張卡片若數字一樣，`getByText("5 章節")` 會
     // 因找到兩個節點而失敗，而那是 fixture 的問題、不是頁面的問題

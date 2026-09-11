@@ -60,14 +60,22 @@ async def _user(db, user_id: str, *, roles: tuple[str, ...] = (ROLE_TEACHER,), n
     return user_id
 
 
-async def _course(db, *, owner: str, name: str, status: str = COURSE_PUBLISHED) -> int:
+async def _course(
+    db,
+    *,
+    owner: str,
+    name: str,
+    status: str = COURSE_PUBLISHED,
+    ends_in: timedelta | None = timedelta(days=30),
+) -> int:
+    """`ends_in` 為 `None` 代表 `OPEN_END_AT` 留空（沒有結束日），負值代表期間已過。"""
     now = utcnow()
     course = EtCourse(
         course_name=name,
         status=status,
         owner_id=owner,
         open_start_at=now - timedelta(days=1),
-        open_end_at=now + timedelta(days=30),
+        open_end_at=None if ends_in is None else now + ends_in,
         version=0,
         require_approval=False,
         urgent_remind_sent=False,
@@ -292,7 +300,11 @@ class TestCardFields:
 
 
 class TestPaginationShape:
-    """AC 11：回應為專案標準的 `{ data, meta }`。"""
+    """回應為專案標準的分頁格式（`sti-backend-modules` 慣例）。
+
+    `spec_us7` 的 Acceptance Scenarios 只到 AC 10，此處不掛 AC 編號——掛了會讓後續
+    以 spec 編號回溯測試的人去找一條不存在的 AC。
+    """
 
     async def test_回應為_data_meta_標準格式(self, client, db) -> None:
         me = await _user(db, "t_cl16")
@@ -313,3 +325,151 @@ class TestPaginationShape:
         r = await client.get(_URL, params={"scope": "everything"}, headers=_bearer(me))
 
         assert r.status_code == 422, r.text
+
+    async def test_前端送出的完整參數集合可通過後端驗證(self, client, db) -> None:
+        """**契約測試**：這裡的參數集合必須與 `CourseListParams`（前端）逐字一致。
+
+        前後端各有一份查詢參數型別，而兩邊都不驗對方。後端測試若自行多送或少送欄位，
+        「前端實際組出的 query string 能不能通過後端 schema」就永遠沒有一層驗過——
+        參數改名或加上限時會表現成「篩選送出後 422 或被靜默忽略」，而三層測試各自都綠。
+
+        對應的前端斷言在 `CourseListPage.test.tsx`「送出的查詢參數恰為契約所列」。
+        """
+        me = await _user(db, "t_cl18")
+        tag_id = await _tag(db, "護理師_cl18")
+        await db.commit()
+
+        r = await client.get(
+            _URL,
+            params={"scope": "all", "q": "採血", "tag_id": tag_id, "owner_id": me, "page": 1, "limit": 12},
+            headers=_bearer(me),
+        )
+
+        assert r.status_code == 200, r.text
+
+    async def test_關鍵字長度上限與前端輸入框一致(self, client, db) -> None:
+        """後端 `max_length=100`；前端關鍵字輸入框也必須卡在 100。
+
+        兩邊不一致時使用者打到第 101 個字就 422，而畫面上只會顯示一句「課程清單載入
+        失敗」——沒有任何線索指向「你打太長了」。
+        """
+        me = await _user(db, "t_cl19")
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "mine", "q": "字" * 101}, headers=_bearer(me))
+
+        assert r.status_code == 422, "後端上限若放寬，前端輸入框的 maxLength 要一起改"
+
+
+class TestAuthorization:
+    """兩支新端點皆掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`。"""
+
+    async def test_學員呼叫課程清單回四零三(self, client, db) -> None:
+        me = await _user(db, "s_cl20", roles=(ROLE_STUDENT,))
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(me))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"
+
+    async def test_學員呼叫篩選標籤回四零三(self, client, db) -> None:
+        # 另開一條而非併進上一條：整合測試中預期失敗的請求會回滾前置資料，
+        # 同一條裡的第二次呼叫會變成 401（使用者列已不存在）
+        me = await _user(db, "s_cl21", roles=(ROLE_STUDENT,))
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-tags", headers=_bearer(me))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"
+
+
+class TestFilterTags:
+    """`GET /courses/filter-tags`：篩選下拉的來源，語意與 ET02 編輯用的 `/tags` **相反**。"""
+
+    async def test_下拉含已停用標籤(self, client, db) -> None:
+        """**這是本端點存在的唯一理由**（`FR-ET-US7-02`）。
+
+        若改用 `/tags`（排除停用者），掛著已停用標籤的歷史課程就從此搜不到，而畫面上
+        不會有任何異常——沒有錯誤、沒有空狀態，只是那些課程再也不出現。
+        """
+        me = await _user(db, "t_cl22")
+        retired = await _tag(db, "已裁撤單位_cl22", is_active=False)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-tags", headers=_bearer(me))
+
+        assert r.status_code == 200, r.text
+        by_id = {t["tag_id"]: t for t in r.json()}
+        assert retired in by_id, "停用標籤必須留在篩選下拉裡"
+        assert by_id[retired]["is_active"] is False, "前端要據此標示「（已停用）」"
+
+    async def test_與編輯用的_tags_端點確實不同(self, client, db) -> None:
+        """兩支端點對同一個停用標籤給出相反的答案——這正是不可互換的證據。"""
+        me = await _user(db, "t_cl23")
+        retired = await _tag(db, "已裁撤單位_cl23", is_active=False)
+        await db.commit()
+
+        filter_tags = await client.get(f"{_URL}/filter-tags", headers=_bearer(me))
+        edit_tags = await client.get("/api/et/tags", headers=_bearer(me))
+
+        assert retired in {t["tag_id"] for t in filter_tags.json()}
+        assert retired not in {t["tag_id"] for t in edit_tags.json()}
+
+
+class TestEffectivelyClosed:
+    """「`PUBLISHED` 但 `OPEN_END_AT` 已過 = 視同關閉」（#288 SA Q1 裁示 A）。
+
+    到期自動轉 `CLOSED` 屬未實作的 ET-16，故期間已過的課程 `STATUS` 仍是 `PUBLISHED`
+    ——清單若只比對 `STATUS`，會把一門學員早已進不去的課列成「已發布」。
+    """
+
+    async def test_期間已過者不列入全部課程(self, client, db) -> None:
+        owner = await _user(db, "t_cl24")
+        viewer = await _user(db, "t_cl25")
+        await _course(db, owner=owner, name="期間已過課_cl24", ends_in=-timedelta(days=1))
+        await _course(db, owner=owner, name="期間未過課_cl24", ends_in=timedelta(days=1))
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        names = {c["course_name"] for c in r.json()["data"]}
+        assert names == {"期間未過課_cl24"}, "期間已過者視同關閉，不該出現在全部課程"
+
+    async def test_沒有訖止日者仍列入全部課程(self, client, db) -> None:
+        """訖止為空＝沒有結束日，不該因為一個缺失的欄位去關掉課程。"""
+        owner = await _user(db, "t_cl26")
+        viewer = await _user(db, "t_cl27")
+        await _course(db, owner=owner, name="無訖止課_cl26", ends_in=None)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        assert {c["course_name"] for c in r.json()["data"]} == {"無訖止課_cl26"}
+
+    async def test_我建立的仍看得到期間已過者且標為視同關閉(self, client, db) -> None:
+        """教師要管理自己的課，期間已過不代表要從他眼前消失——但要標對狀態。"""
+        me = await _user(db, "t_cl28")
+        await _course(db, owner=me, name="期間已過課_cl28", ends_in=-timedelta(days=1))
+        await _course(db, owner=me, name="期間未過課_cl28", ends_in=timedelta(days=1))
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "mine"}, headers=_bearer(me))
+
+        by_name = {c["course_name"]: c for c in r.json()["data"]}
+        assert by_name["期間已過課_cl28"]["is_closed"] is True
+        assert by_name["期間已過課_cl28"]["status"] == COURSE_PUBLISHED, (
+            "STATUS 不該被查詢端改寫——視同關閉是應用層的即時判定，不是資料狀態"
+        )
+        assert by_name["期間未過課_cl28"]["is_closed"] is False
+
+    async def test_手動關閉者亦為視同關閉(self, client, db) -> None:
+        me = await _user(db, "t_cl29")
+        await _course(db, owner=me, name="手動關閉課_cl29", status=COURSE_CLOSED)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "mine"}, headers=_bearer(me))
+
+        card = next(c for c in r.json()["data"] if c["course_name"] == "手動關閉課_cl29")
+        assert card["is_closed"] is True

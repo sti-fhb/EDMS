@@ -21,6 +21,7 @@ function makeCourse(overrides: Partial<CourseCardData> = {}): CourseCardData {
     chapter_count: 5,
     student_count: 28,
     is_owner: true,
+    is_closed: false,
     ...overrides,
   }
 }
@@ -62,6 +63,24 @@ describe("ET01 課程卡片", () => {
     renderWithProviders(<CourseCard course={makeCourse({ status })} onOpen={vi.fn()} />)
 
     expect(screen.getByText(label)).toBeInTheDocument()
+  })
+
+  it("期間已過的課程標成「已關閉」，不因 status 仍是 PUBLISHED 就標「已發布」", () => {
+    // 到期自動轉 CLOSED 屬未實作的 ET-16，所以期間已過時 status 仍是 PUBLISHED。
+    // 照 status 標會寫成「已發布」，但學員早已進不去——卡片會騙人。
+    renderWithProviders(
+      <CourseCard course={makeCourse({ status: "PUBLISHED", is_closed: true })} onOpen={vi.fn()} />,
+    )
+
+    expect(screen.getByText("已關閉")).toBeInTheDocument()
+    expect(screen.queryByText("已發布")).not.toBeInTheDocument()
+  })
+
+  it("草稿不因 is_closed 被改標成「已關閉」", () => {
+    renderWithProviders(<CourseCard course={makeCourse({ status: "DRAFT", is_closed: true })} onOpen={vi.fn()} />)
+
+    expect(screen.getByText("草稿")).toBeInTheDocument()
+    expect(screen.queryByText("已關閉")).not.toBeInTheDocument()
   })
 
   it("開課期間起訖齊全時兩端都顯示", () => {

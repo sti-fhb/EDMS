@@ -1,4 +1,4 @@
-"""ET02 課程 / 章節 / 課程標籤 Repository（US3 / #202）。
+"""ET02 課程 / 章節 / 課程標籤 Repository（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 依 `sti-backend-modules`：Repository 只 `flush()`、不 `commit()`；查詢一律帶
 `DELETED = 0`；時間一律 `utcnow()`。
@@ -210,6 +210,7 @@ class EtCourseRepository:
         keyword: str | None = None,
         tag_id: int | None = None,
         owner_id: str | None = None,
+        now: datetime,
     ):
         """ET01 課程清單的查詢（`FR-ET-US7-01`/`-02`），供 `paginate()` 使用。
 
@@ -218,7 +219,20 @@ class EtCourseRepository:
         | scope | 擁有者 | 狀態 |
         |---|---|---|
         | `mine` | 限本人 | **全部**（草稿 / 已發布 / 已關閉）——教師要管理自己的課 |
-        | `all` | 不限 | **僅已發布**——草稿的存在對他人是秘密，已關閉者不列入 |
+        | `all` | 不限 | **僅已發布且期間未過**——見下 |
+
+        ## `all` 的「已發布」是 `is_effectively_closed` 的否定，不是 `STATUS` 比對
+
+        #288 立了「`PUBLISHED` 但 `OPEN_END_AT` 已過 = 視同關閉」的規則，且明訂呼叫端
+        一律以「與 `CLOSED` 相同」處理。若此處只比對 `STATUS = 'PUBLISHED'`，期間已過
+        的課程會留在「全部課程」——而學員早已進不去（邀請碼失效、進度寫入 409）。教師
+        點進去看到的是一門對外已死的課，卡片卻標著「已發布」。
+
+        這同時讓 AC 9（「已關閉」pill 僅出現於「我建立的」）自動成立：`all` 既然排除了
+        視同關閉者，那個 pill 就不可能出現在該分頁。
+
+        條件與 `rules.is_effectively_closed` 同義但寫成 SQL——該函式吃單列 Python 物件，
+        這裡要能下推到 DB 做分頁。**兩處若要改，必須一起改。**
 
         ## 本查詢**只選 `EtCourse`**
 
@@ -231,7 +245,12 @@ class EtCourseRepository:
         if scope == "mine":
             stmt = stmt.where(EtCourse.owner_id == actor_id)
         else:
-            stmt = stmt.where(EtCourse.status == COURSE_PUBLISHED)
+            stmt = stmt.where(
+                EtCourse.status == COURSE_PUBLISHED,
+                # 訖止為空＝沒有結束日，不因缺欄位關掉一門教師沒要求關閉的課
+                # （與 `rules.is_effectively_closed` 的同一條判斷對齊）
+                or_(EtCourse.open_end_at.is_(None), EtCourse.open_end_at >= now),
+            )
             if owner_id:
                 stmt = stmt.where(EtCourse.owner_id == owner_id)
 

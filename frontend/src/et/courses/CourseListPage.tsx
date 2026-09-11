@@ -14,11 +14,12 @@ import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { CourseCard } from "./CourseCard"
 import { coursesApi } from "./coursesService"
+import { KEYWORD_MAX_LENGTH } from "./schemas"
 import type { CourseListParams } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
@@ -71,16 +72,22 @@ export function EtCourseListPage() {
     queryFn: coursesApi.listFilterTags,
   })
 
-  const params: CourseListParams = useMemo(
+  // **不含建立者**的查詢條件。主查詢與建立者選項的來源都由它衍生——未套用建立者篩選時
+  // 兩者是同一個物件，queryKey 完全相同，TanStack 只會打一次 API。
+  const baseParams: CourseListParams = useMemo(
     () => ({
       scope,
       ...(debouncedKeyword ? { q: debouncedKeyword } : {}),
       ...(tagId !== "" ? { tag_id: tagId } : {}),
-      ...(scope === "all" && ownerId !== "" ? { owner_id: ownerId } : {}),
       page,
       limit: PAGE_SIZE,
     }),
-    [scope, debouncedKeyword, tagId, ownerId, page],
+    [scope, debouncedKeyword, tagId, page],
+  )
+
+  const params: CourseListParams = useMemo(
+    () => (scope === "all" && ownerId !== "" ? { ...baseParams, owner_id: ownerId } : baseParams),
+    [baseParams, scope, ownerId],
   )
 
   const { data, isPending, isError, error } = usePagedQuery(QUERY_KEYS.etCourses.list(params), () =>
@@ -96,22 +103,28 @@ export function EtCourseListPage() {
   }
 
   const hasFilters = debouncedKeyword !== "" || tagId !== "" || ownerId !== ""
-  const rows = data?.data
-  const courses = rows ?? []
+  const courses = data?.data ?? []
   const totalPages = data?.meta.total_pages ?? 0
 
-  // 「全部課程」的建立者選項取自當前結果——列出沒有課程的教師只會產生「選了必定零筆」
-  // 的選項。
+  // 建立者選項取自**未套用建立者篩選**的同一份查詢。
   //
-  // ⚠️ **選定某位建立者後就不再更新**：那時的結果只剩他一個人，拿去重算會讓選單塌成
-  // 單一選項，使用者想改選別人得先切回「全部」再選一次。
-  const [ownerOptions, setOwnerOptions] = useState<[string, string][]>([])
-  useEffect(() => {
-    if (ownerId !== "" || rows === undefined) return
+  // ⚠️ 不可直接用 `courses`：選了某位建立者之後，結果就只剩他一個人，選單會塌成單一
+  // 選項——使用者想改選別人，得先切回「全部」再選一次。
+  //
+  // 未選建立者時 `baseParams` 就是 `params` 本身，queryKey 完全相同、直接命中同一筆
+  // 快取；只有在套用建立者篩選期間才會有第二次請求。
+  const { data: ownerSource } = usePagedQuery(
+    QUERY_KEYS.etCourses.list(baseParams),
+    () => coursesApi.list(baseParams),
+    { enabled: scope === "all" },
+  )
+  const ownerOptions = useMemo(() => {
     const seen = new Map<string, string>()
-    for (const c of rows) if (!seen.has(c.owner_id)) seen.set(c.owner_id, c.owner_name ?? c.owner_id)
-    setOwnerOptions([...seen.entries()])
-  }, [rows, ownerId])
+    for (const c of ownerSource?.data ?? []) {
+      if (!seen.has(c.owner_id)) seen.set(c.owner_id, c.owner_name ?? c.owner_id)
+    }
+    return [...seen.entries()]
+  }, [ownerSource])
 
   return (
     <Box>
@@ -143,7 +156,12 @@ export function EtCourseListPage() {
                 setKeyword(e.target.value)
                 setPage(1)
               }}
-              slotProps={{ input: { startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1 }} /> } }}
+              slotProps={{
+                input: { startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1 }} /> },
+                // 對齊後端 `Query(max_length=100)`。不卡的話打到第 101 個字就 422，
+                // 而畫面上只會出現一句「課程清單載入失敗」，沒有線索指向長度
+                htmlInput: { maxLength: KEYWORD_MAX_LENGTH },
+              }}
             />
           </Grid>
           <Grid size={{ xs: 12, md: 3 }}>

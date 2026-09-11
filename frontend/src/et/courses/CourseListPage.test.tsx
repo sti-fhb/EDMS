@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtCourseListPage } from "./CourseListPage"
+import { KEYWORD_MAX_LENGTH } from "./schemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -103,14 +104,38 @@ describe("ET01 課程列表", () => {
   })
 
   it("「建立者」篩選只在「全部課程」出現，且不佔位", async () => {
-    renderWithProviders(<EtCourseListPage />)
+    const { unmount } = renderWithProviders(<EtCourseListPage />)
     await screen.findByText("採血作業新進人員訓練")
     expect(screen.queryByLabelText("建立者")).not.toBeInTheDocument()
 
+    // 一定要先 unmount：`searchParams` 是模組層變數，第一棵樹之後只要有任何一次
+    // re-render 就會讀到改動後的值，也長出一個「建立者」，斷言就會撞到兩個節點
+    unmount()
     searchParams = new URLSearchParams({ scope: "all" })
     renderWithProviders(<EtCourseListPage />)
 
     expect(await screen.findByLabelText("建立者")).toBeInTheDocument()
+  })
+
+  it("送出的查詢參數恰為契約所列，關鍵字卡在後端同一個上限", async () => {
+    // 前後端各有一份查詢參數型別，兩邊都不驗對方。沒有這條，參數改名或加上限會表現成
+    // 「篩選送出後 422 或被靜默忽略」，而前端測試、MSW、後端測試各自都綠。
+    // 對應的後端斷言：test_et_course_list.py::test_前端送出的完整參數集合可通過後端驗證
+    const seen: URLSearchParams[] = []
+    server.use(
+      http.get("/api/et/courses", ({ request }) => {
+        seen.push(new URL(request.url).searchParams)
+        return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 12, total_pages: 1 } })
+      }),
+    )
+    renderWithProviders(<EtCourseListPage />)
+
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+
+    expect([...seen[0].keys()].sort()).toEqual(["limit", "page", "scope"])
+    // 關鍵字上限與後端 Query(max_length=100) 同源；放寬後端時這裡會提醒一起改
+    expect(screen.getByLabelText("關鍵字")).toHaveAttribute("maxLength", String(KEYWORD_MAX_LENGTH))
+    expect(KEYWORD_MAX_LENGTH).toBe(100)
   })
 
   it("選定建立者後選單不塌成一個人，還能直接改選別人", async () => {

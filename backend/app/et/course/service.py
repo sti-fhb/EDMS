@@ -1,4 +1,4 @@
-"""ET02 課程骨架與章節編排 Service（US3 / #202）。
+"""ET02 課程骨架與章節編排 Service（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 **稽核**：ET 於 `spec.md` §稽核來源功能碼明列 `ET-COURSE` 涵蓋「課程建立 / 編輯 /
 發布 / 關閉 / 再開課，及其下章節、教材、測驗、問卷之編修與刪除」，故本模組之 CUD
@@ -146,9 +146,16 @@ class EtCourseService:
         建立者姓名以**該頁的 `course_id`** 批次補齊：三次固定成本的查詢，與頁面筆數無關。
 
         分頁一律走 `core/pagination.paginate()`（專案規範），不自行拼 offset/limit。
+
+        ## `now` 只取一次
+
+        過濾（`build_list_stmt`）與每張卡片的 `is_closed` 必須以**同一個時點**判定。各自
+        呼叫 `utcnow()` 會在跨越 `OPEN_END_AT` 的那一瞬間產生自相矛盾的回應——課程被列
+        進「全部課程」，卡片卻標著「已關閉」。
         """
+        now = utcnow()
         stmt = self._courses.build_list_stmt(
-            actor_id=actor_id, scope=scope, keyword=keyword, tag_id=tag_id, owner_id=owner_id
+            actor_id=actor_id, scope=scope, keyword=keyword, tag_id=tag_id, owner_id=owner_id, now=now
         )
         paged = await paginate(db, stmt, page=page, limit=limit, schema=CourseRow)
         rows: list[CourseRow] = paged["data"]
@@ -172,6 +179,9 @@ class EtCourseService:
                 student_count=counts.get(r.course_id, (0, 0))[1],
                 # **由後端判定**——前端自行比對 owner_id 等於把授權語意複製一份到瀏覽器
                 is_owner=r.owner_id == actor_id,
+                # 期間已過者 `status` 仍是 `PUBLISHED`（自動轉 `CLOSED` 屬未實作的
+                # ET-16），前端若自己判 `status` 會把它標成「已發布」
+                is_closed=is_effectively_closed(status=r.status, open_end_at=r.open_end_at, now=now),
             )
             for r in rows
         ]

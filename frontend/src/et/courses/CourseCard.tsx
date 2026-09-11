@@ -17,6 +17,19 @@ const STATUS_LABEL: Record<CourseCardData["status"], { text: string; color: "def
   CLOSED: { text: "已關閉", color: "warning" },
 }
 
+/**
+ * 卡片上的狀態 pill。
+ *
+ * ⚠️ **不是單純的 `STATUS_LABEL[status]`**：閱課期間已過時 `status` 仍是 `PUBLISHED`
+ * （到期自動轉 `CLOSED` 屬未實作的 ET-16），照著它標會寫成「已發布」，而學員早已進不去。
+ * 視同關閉由後端的 `is_closed` 給——前端自行比對 `open_end_at` 等於把規則複製一份到
+ * 瀏覽器，而那一份用的是使用者的本機時鐘。
+ */
+function statusOf(course: CourseCardData) {
+  // 草稿沒有「期間已過」可言（後端也不會把它判成視同關閉），維持「草稿」
+  return course.is_closed && course.status !== "DRAFT" ? STATUS_LABEL.CLOSED : STATUS_LABEL[course.status]
+}
+
 /** `2026-04-15 09:00`；兩端都沒有時回 `—`（起訖為選填，草稿階段常是空的）。 */
 function formatRange(start: string | null, end: string | null): string {
   const fmt = (iso: string | null) => {
@@ -46,7 +59,7 @@ function formatRange(start: string | null, end: string | null): string {
  * 按 Tab 就到得了。（#296 的表格得另外補一顆 `IconButton`，是因為 `<tr>` 不可聚焦。）
  */
 export function CourseCard({ course, onOpen }: { course: CourseCardData; onOpen: (courseId: number) => void }) {
-  const status = STATUS_LABEL[course.status]
+  const status = statusOf(course)
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
       <CardActionArea onClick={() => onOpen(course.course_id)} sx={{ height: "100%", p: 2, alignItems: "stretch" }}>

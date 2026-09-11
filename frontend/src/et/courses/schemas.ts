@@ -155,14 +155,32 @@ export interface CourseCard {
    * 而那一份遲早與後端分岔。
    */
   is_owner: boolean
+  /**
+   * 是否**視同關閉**——「已關閉」或「已發布但閱課期間已過」皆為 `true`。
+   *
+   * ⚠️ 狀態 pill 看這個欄位，**不要自己判 `status`**：期間已過時 `status` 仍是
+   * `PUBLISHED`（到期自動轉 `CLOSED` 屬未實作的 ET-16），自行判定會標成「已發布」，
+   * 而學員其實早已進不去。
+   */
+  is_closed: boolean
 }
 
-/** 課程列表查詢條件。`scope` 決定狀態過濾，兩者相反（見後端 `build_list_stmt`）。 */
+/**
+ * 課程列表查詢條件。`scope` 決定狀態過濾，兩者相反（見後端 `build_list_stmt`）。
+ *
+ * ⚠️ **這是與後端共用的契約**。欄位集合有兩條互相指名的測試：前端
+ * `CourseListPage.test.tsx`「送出的查詢參數恰為契約所列」、後端
+ * `test_et_course_list.py::test_前端送出的完整參數集合可通過後端驗證`。改這裡要一起改。
+ */
 export interface CourseListParams {
   scope: "mine" | "all"
+  /** 後端 `Query(max_length=100)`；輸入框以 `KEYWORD_MAX_LENGTH` 卡住同一個上限。 */
   q?: string
   tag_id?: number
   owner_id?: string
   page?: number
   limit?: number
 }
+
+/** 關鍵字長度上限，對齊後端 `Query(max_length=100)`。兩邊必須一起改。 */
+export const KEYWORD_MAX_LENGTH = 100
