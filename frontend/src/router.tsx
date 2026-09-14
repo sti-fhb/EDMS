@@ -189,7 +189,17 @@ export const router = createBrowserRouter([
                   </RequireEtCourseManager>
                 ),
               },
-              { path: "students", element: <EtStudentsPage /> },
+              {
+                // ET03 含學員個別成績與**具名**問卷填答（`FR-ET-US9-08`），是 ET 個資
+                // 密度最高的一頁——守衛與 `courses/:courseId` 同為 `can_manage_courses`
+                // （教師或管理者），與後端 `require_et_roles(ET_TEACHER, ET_ADMIN)` 一致。
+                path: "students",
+                element: (
+                  <RequireEtCourseManager>
+                    <EtStudentsPage />
+                  </RequireEtCourseManager>
+                ),
+              },
               { path: "approvals", element: <EtApprovalQueryPage /> },
               { path: "my-courses", element: <EtMyCoursesPage /> },
               // ET05 章節學習（#255）：學員自我的課程卡片進入，非側欄項目

@@ -1,0 +1,231 @@
+import { screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { HttpResponse, http } from "msw"
+import { describe, expect, it, vi } from "vitest"
+
+import { EtStudentsPage } from "./StudentsPage"
+import { renderWithProviders } from "../../test/renderWithProviders"
+import { server } from "../../test/server"
+
+/** 選到預設課程——三個區塊都要先選課程才會渲染。 */
+async function selectCourse(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByLabelText("課程"))
+  await user.click(await screen.findByRole("option", { name: "採血作業新進人員訓練" }))
+}
+
+describe("ET03 學員學習狀況追蹤", () => {
+  it("未選課程時三區塊都不渲染", async () => {
+    renderWithProviders(<EtStudentsPage />)
+
+    expect(await screen.findByText("請先於右上選擇要檢視的課程。")).toBeInTheDocument()
+    expect(screen.queryByText("已加入學員")).not.toBeInTheDocument()
+  })
+
+  it("選課程後顯示三個區塊", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText("已加入學員")).toBeInTheDocument()
+    expect(await screen.findByText("作答明細")).toBeInTheDocument()
+    expect(await screen.findByText("問卷結果")).toBeInTheDocument()
+  })
+
+  it("完全未作答者的平均成績顯示破折號而非 0", async () => {
+    // 0 分與未作答意義相反——混為一談會讓教師誤判需要輔導的對象
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    const row = (await screen.findByText("李小華")).closest("tr")!
+    // 欄序：學員 / 加入日期 / 完課狀態 / 學習進度 / 平均成績 / 最後活動 / 操作
+    const avgCell = within(row).getAllByRole("cell")[4]
+    expect(avgCell).toHaveTextContent("—")
+    expect(avgCell).not.toHaveTextContent("0")
+  })
+
+  it("未作答的測驗仍列出並標示「尚未作答」", async () => {
+    // 整個測驗不出現的話，教師分不出「他沒考」與「這門課沒這個測驗」
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "王小明" }))
+
+    expect(await screen.findByText("進階測驗")).toBeInTheDocument()
+    expect(await screen.findByText("尚未作答")).toBeInTheDocument()
+  })
+
+  it("點歷次作答開啟逐題明細，走的是教師端端點", async () => {
+    const spy = vi.fn()
+    server.use(
+      http.get("/api/et/attempts/:attemptId/detail", ({ params }) => {
+        spy(params.attemptId)
+        return HttpResponse.json({
+          attempt_id: 11,
+          user_id: "s01",
+          user_name: "王小明",
+          quiz_name: "基本概念測驗",
+          attempt_no: 1,
+          submitted_at: "2026-04-22T02:12:00Z",
+          score: "65.00",
+          points_total: 100,
+          pass_score: 80,
+          is_pass: false,
+          questions: [],
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "王小明" }))
+    await user.click(await screen.findByText("第 1 次"))
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("11"))
+  })
+
+  it("統計檢視的問答題只顯示已答人數，文字在明細", async () => {
+    // 2026-08-28 裁示：長短不一的文字會把單選題的分布擠到看不見
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText(/問答題 — 已答 1 人/)).toBeInTheDocument()
+    expect(screen.queryByText("希望多一點實作")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "明細" }))
+
+    expect(await screen.findByText("希望多一點實作")).toBeInTheDocument()
+  })
+
+  it("課程無問卷時整個區塊不渲染", async () => {
+    // AC 11 明訂隱藏——顯示「尚無問卷」會讓教師以為自己該去建一份，而問卷是選配
+    server.use(
+      http.get("/api/et/courses/:courseId/survey-result", () =>
+        HttpResponse.json({
+          has_survey: false,
+          survey_name: null,
+          filled_count: 0,
+          not_filled_count: 0,
+          questions: [],
+          details: [],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    await screen.findByText("已加入學員")
+    expect(screen.queryByText("問卷結果")).not.toBeInTheDocument()
+  })
+
+  it("重置需二次確認，且成功後顯示提示", async () => {
+    const spy = vi.fn()
+    server.use(
+      http.post("/api/et/courses/:courseId/students/:userId/quizzes/:quizId/retry-reset", () => {
+        spy()
+        return HttpResponse.json({ user_id: "s01", quiz_id: 1, used_attempts: 0 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "王小明" }))
+    // 該學員有兩個測驗 → 兩顆按鈕；取 fixture 中 can_reset=true 的第一顆
+    const resetButtons = await screen.findAllByRole("button", { name: /重置重考次數/ })
+    await user.click(resetButtons[0])
+
+    // 確認框出現前不可送出——重置是不可逆的破例動作
+    expect(spy).not.toHaveBeenCalled()
+    expect(await screen.findByText(/確定重置 王小明/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "確定" }))
+
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(await screen.findByText("已重置重考次數")).toBeInTheDocument()
+  })
+
+  it("不可重置時按鈕停用", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "王小明" }))
+
+    const buttons = await screen.findAllByRole("button", { name: /重置重考次數/ })
+    // fixture：第一個測驗 can_reset=true、第二個 false（未作答）
+    expect(buttons[0]).toBeEnabled()
+    expect(buttons[1]).toBeDisabled()
+  })
+
+  it("課程已關閉時停用管理動作，並說明原因與下一步", async () => {
+    // 🔴 ET-16 未實作，期間已過的課程 status 仍是 PUBLISHED——不說明的話，教師看到的
+    // 是一門標著「已發布」的課程卻什麼都不能點，那在他眼中是「系統壞了」
+    server.use(
+      http.get("/api/et/courses", () =>
+        HttpResponse.json({
+          data: [
+            {
+              course_id: 11,
+              course_name: "採血作業新進人員訓練",
+              status: "PUBLISHED",
+              open_start_at: null,
+              open_end_at: "2026-01-01T00:00:00Z",
+              owner_id: "t01",
+              owner_name: "陳大華",
+              tags: [],
+              chapter_count: 1,
+              student_count: 2,
+              is_owner: true,
+              is_closed: true,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 100, total_pages: 1 },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText(/目前為/)).toBeInTheDocument()
+    expect(screen.getByText(/再開課/)).toBeInTheDocument()
+    const removeButtons = await screen.findAllByRole("button", { name: /移除/ })
+    expect(removeButtons[0]).toBeDisabled()
+  })
+
+  it("課程已關閉仍可閱覽與匯出", async () => {
+    // AC 10：關閉只停寫入（#255 裁示 Q2=A「讀照舊、寫全停」）
+    server.use(
+      http.get("/api/et/courses", () =>
+        HttpResponse.json({
+          data: [
+            {
+              course_id: 11,
+              course_name: "採血作業新進人員訓練",
+              status: "CLOSED",
+              open_start_at: null,
+              open_end_at: null,
+              owner_id: "t01",
+              owner_name: "陳大華",
+              tags: [],
+              chapter_count: 1,
+              student_count: 2,
+              is_owner: true,
+              is_closed: true,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 100, total_pages: 1 },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    const rows = await screen.findAllByText("王小明")
+    expect(rows.length).toBeGreaterThan(0)
+    const exports = screen.getAllByRole("link", { name: /匯出 CSV/ })
+    expect(exports[0]).toBeEnabled()
+  })
+})

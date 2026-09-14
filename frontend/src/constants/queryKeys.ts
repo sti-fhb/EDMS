@@ -34,6 +34,14 @@ export const QUERY_KEYS = {
   etMyCourses: {
     list: () => ["et", "my-courses"] as const,
   },
+  /** ET03 學員學習狀況追蹤（US9 / #322）——三個區塊各自的 key，切課程時一起失效。 */
+  etStudents: {
+    list: (courseId: number, params: Record<string, unknown>) =>
+      ["et", "tracking", courseId, "students", params] as const,
+    attemptOverview: (courseId: number) => ["et", "tracking", courseId, "attempt-overview"] as const,
+    attemptDetail: (attemptId: number) => ["et", "tracking", "attempts", attemptId] as const,
+    surveyResult: (courseId: number) => ["et", "tracking", courseId, "survey-result"] as const,
+  },
   etLearn: {
     structure: (courseId: number) => ["et", "learn", courseId] as const,
     material: (materialId: number) => ["et", "learn", "materials", materialId] as const,

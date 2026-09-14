@@ -1021,6 +1021,167 @@ export const handlers = [
       { tag_id: 2, tag_name: "已裁撤單位", is_active: false },
     ]),
   ),
+  // ET03 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
+  // （`/students`、`/attempt-overview`…），與上面的純 `:courseId` 不會互相吃掉；仍放在
+  // 它之前，維持「路徑愈具體愈前面」的一致排法。
+  http.get("/api/et/courses/:courseId/students", () =>
+    HttpResponse.json({
+      data: [
+        {
+          user_id: "s01",
+          user_name: "王小明",
+          joined_at: "2026-04-01T02:00:00Z",
+          completion_status: "COMPLETED",
+          progress_pct: 100,
+          avg_score: "88.50",
+          last_activity_at: "2026-05-02T06:30:00Z",
+        },
+        {
+          user_id: "s02",
+          user_name: "李小華",
+          joined_at: "2026-04-02T02:00:00Z",
+          completion_status: "NOT_STARTED",
+          progress_pct: 0,
+          // null ＝ 完全未作答，畫面顯示「—」而非 0
+          avg_score: null,
+          last_activity_at: null,
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.get("/api/et/courses/:courseId/attempt-overview", () =>
+    HttpResponse.json({
+      students: [
+        {
+          user_id: "s01",
+          user_name: "王小明",
+          quizzes: [
+            {
+              quiz_id: 1,
+              quiz_name: "基本概念測驗",
+              max_retry: 1,
+              used_attempts: 2,
+              is_passed: false,
+              can_reset: true,
+              attempts: [
+                {
+                  attempt_id: 11,
+                  attempt_no: 1,
+                  submitted_at: "2026-04-22T02:12:00Z",
+                  score: "65.00",
+                  points_total: 100,
+                  is_pass: false,
+                },
+                {
+                  attempt_id: 12,
+                  attempt_no: 2,
+                  submitted_at: "2026-05-02T06:05:00Z",
+                  score: "75.00",
+                  points_total: 100,
+                  is_pass: false,
+                },
+              ],
+            },
+            {
+              quiz_id: 2,
+              quiz_name: "進階測驗",
+              max_retry: 3,
+              used_attempts: 0,
+              is_passed: false,
+              can_reset: false,
+              // 空陣列＝尚未作答；該測驗仍要列出（ET-MSG-ET03-005）
+              attempts: [],
+            },
+          ],
+        },
+      ],
+    }),
+  ),
+  http.get("/api/et/courses/:courseId/survey-result", () =>
+    HttpResponse.json({
+      has_survey: true,
+      survey_name: "課程滿意度回饋問卷",
+      filled_count: 1,
+      not_filled_count: 1,
+      questions: [
+        {
+          sq_id: 1,
+          stem: "課程內容是否符合期待？",
+          question_type: "SINGLE",
+          answered_count: 1,
+          options: [
+            { so_id: 1, option_text: "非常滿意", count: 1 },
+            { so_id: 2, option_text: "普通", count: 0 },
+          ],
+        },
+        {
+          sq_id: 2,
+          stem: "其他建議",
+          question_type: "TEXT",
+          answered_count: 1,
+          // 問答題在統計檢視只有已答人數，沒有選項分布（2026-08-28 裁示）
+          options: [],
+        },
+      ],
+      details: [
+        {
+          user_id: "s01",
+          user_name: "王小明",
+          submitted_at: "2026-05-02T07:00:00Z",
+          answers: [
+            { sq_id: 1, option_text: "非常滿意", answer_text: null },
+            { sq_id: 2, option_text: null, answer_text: "希望多一點實作" },
+          ],
+        },
+      ],
+    }),
+  ),
+  http.get("/api/et/attempts/:attemptId/detail", ({ params }) =>
+    HttpResponse.json({
+      attempt_id: Number(params.attemptId),
+      user_id: "s01",
+      user_name: "王小明",
+      quiz_name: "基本概念測驗",
+      attempt_no: 1,
+      submitted_at: "2026-04-22T02:12:00Z",
+      score: "65.00",
+      points_total: 100,
+      pass_score: 80,
+      is_pass: false,
+      questions: [
+        {
+          question_id: 1,
+          question_type: "SINGLE",
+          stem: "採血前應先確認什麼？",
+          points: "50.00",
+          score: "50.00",
+          outcome: "CORRECT",
+          options: [
+            { option_id: 1, option_text: "捐血人身分", is_correct: true, is_selected: true },
+            { option_id: 2, option_text: "天氣", is_correct: false, is_selected: false },
+          ],
+        },
+        {
+          question_id: 2,
+          question_type: "MULTIPLE",
+          stem: "下列何者為必要步驟？",
+          points: "50.00",
+          score: "15.00",
+          outcome: "PARTIAL",
+          options: [
+            { option_id: 3, option_text: "核對資料", is_correct: true, is_selected: true },
+            { option_id: 4, option_text: "消毒", is_correct: true, is_selected: false },
+            { option_id: 5, option_text: "跳過確認", is_correct: false, is_selected: true },
+          ],
+        },
+      ],
+    }),
+  ),
+  http.post("/api/et/courses/:courseId/students/:userId/quizzes/:quizId/retry-reset", () =>
+    HttpResponse.json({ user_id: "s01", quiz_id: 1, used_attempts: 0 }),
+  ),
+  http.delete("/api/et/courses/:courseId/students/:userId", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/et/courses/:courseId", ({ params }) =>
     HttpResponse.json({
       course_id: Number(params.courseId),
