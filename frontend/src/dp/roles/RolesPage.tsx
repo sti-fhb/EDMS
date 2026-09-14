@@ -19,9 +19,9 @@ import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 
-import { MODULE_LABELS, MODULE_ROLES, rolesApi } from "./rolesService"
+import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -36,8 +36,11 @@ import { formatDateTime } from "../../utils/date"
  * 每列角色核取 + 群組多選兩維度獨立、即時生效；核心寫入與自我保護在各模組 provider。
  */
 export function RolesPage() {
-  const { data: modules, isPending } = useQuery({ queryKey: ["roles", "modules"], queryFn: rolesApi.modules })
+  const { data: rawModules, isPending } = useQuery({ queryKey: ["roles", "modules"], queryFn: rolesApi.modules })
   const [selected, setSelected] = useState<string | null>(null)
+  // 後端回的是 registry 註冊順序，顯示順序由前端決定（#310）；排序須在衍生 active 之前，
+  // 否則預設選中的仍是排序前的第一個。
+  const modules = useMemo(() => (rawModules ? sortModulesForTabs(rawModules) : undefined), [rawModules])
   // 於 render 期衍生 active（避免 effect 內 setState）：使用者選過用其值，否則預設第一個
   const active = selected ?? (modules && modules.length > 0 ? modules[0] : null)
 
