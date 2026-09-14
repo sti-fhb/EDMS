@@ -1082,13 +1082,14 @@
     <div class="wf-card p-0">
       <table class="table wf-table mb-0 align-middle">
         <thead><tr>
-          <th>Job</th><th>所屬模組</th><th>Cron</th><th>最近執行</th>
+          <th>Job</th><th style="width:22rem;">說明</th><th>所屬模組</th><th>Cron</th><th>最近執行</th>
         </tr></thead>
         <tbody>
-          <tr><td>SCHDP001 閒置帳號禁用 + 密碼到期提醒</td><td>DP</td><td>0 1 * * *</td><td>2026-07-06 01:00</td></tr>
-          <tr><td>SCHET001 每週統計與週報</td><td>ET</td><td>0 10 * * 1</td><td>2026-07-06 10:00</td></tr>
-          <tr><td>SCHET002 每日課程時窗檢查 / 加急提醒</td><td>ET</td><td>0 2 * * *</td><td>2026-07-06 02:00</td></tr>
-          <tr><td>SCHDM001 KPI 週報 / 未讀提醒</td><td>DM</td><td>0 10 * * 1</td><td>2026-07-06 10:00</td></tr>
+          <!-- 說明欄（DESCRIPTION，#311）：JOB_NAME 為短名詞，工作內容細節寫於此欄、唯讀不可編輯 -->
+          <tr><td>SCHDP001 平台每日作業</td><td>每日 08:00 執行，停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHET001 ET 週統計與週報</td><td>每週一 08:00 執行，寫入課程週統計快照並寄出學習進度週報</td><td>ET</td><td>0 8 * * 1</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>每日 08:00 執行，關閉已逾閱課期間之課程，並對截止前 ET_URGENT_REMIND_DAYS 天未完課者寄加急提醒</td><td>ET</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>每週一 08:00 執行，寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>0 8 * * 1</td><td>2026-07-06 08:00</td></tr>
         </tbody>
       </table>
     </div>

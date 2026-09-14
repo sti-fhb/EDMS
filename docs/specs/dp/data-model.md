@@ -124,6 +124,7 @@ erDiagram
     DP_SCHEDULE {
         VARCHAR JOB_ID PK "SCHDP001等"
         VARCHAR JOB_NAME
+        VARCHAR DESCRIPTION "這支 job 在做什麼"
         VARCHAR MODULE "DP/ET/DM"
         VARCHAR CRON_EXPR
         VARCHAR HANDLER_REF "執行程式參照"
@@ -289,7 +290,8 @@ erDiagram
 | 欄位 | 型別 | 必填 | 預設 | 說明 |
 |------|------|------|------|------|
 | JOB_ID | VARCHAR(20) | Y | — | PK；`SCH{模組}{3 碼}`（SCHDP001 / SCHET001 / SCHET002 / SCHDM001）|
-| JOB_NAME | VARCHAR(100) | Y | — | 作業名稱 |
+| JOB_NAME | VARCHAR(100) | Y | — | 作業名稱（短名詞；工作內容細節寫 `DESCRIPTION`）|
+| DESCRIPTION | VARCHAR(200) | N | — | 這支 job 在做什麼（格式：「{頻率}執行，{動作與受影響的資料}」）。**唯讀、不開放 UI 編輯**——描述的是程式行為，管理者改了不會改變行為、只會讓說明與實作不符（#311）|
 | MODULE | VARCHAR(5) | Y | — | job 所屬模組（handler 提供方）|
 | CRON_EXPR | VARCHAR(50) | Y | — | cron 表達式（模組排程時間參數異動時由模組同步更新）|
 | HANDLER_REF | VARCHAR(200) | Y | — | 執行程式參照（Python dotted path，引擎動態 import）|

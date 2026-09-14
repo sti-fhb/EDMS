@@ -947,7 +947,10 @@ export const handlers = [
     HttpResponse.json([
       {
         job_id: "SCHDP001",
-        job_name: "平台每日作業（閒置帳號禁用 + 密碼到期提醒）",
+        job_name: "平台每日作業",
+        description:
+          "每日 08:00 執行，停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、" +
+          "對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列",
         module: "DP",
         cron_expr: "0 8 * * *",
         is_enabled: true,
@@ -957,7 +960,8 @@ export const handlers = [
       },
       {
         job_id: "SCHET001",
-        job_name: "ET 週報 / 提醒（預留）",
+        job_name: "ET 週統計與週報",
+        description: "每週一 08:00 執行，寫入課程週統計快照並寄出學習進度週報（handler 待 ET-16 實作）",
         module: "ET",
         cron_expr: "0 8 * * 1",
         is_enabled: false,
