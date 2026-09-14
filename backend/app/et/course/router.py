@@ -229,7 +229,15 @@ async def create_course(
     return await _service.create_draft(db, req, operator=operator)
 
 
-@router.put("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.put(
+    "/courses/{course_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    # #301：原本只有 router-level 的 `get_et_context`（任一 ET 角色即可，而學員角色於帳號
+    # 建立時自動授予、人人皆有）＋ service 的 `ensure_owner`。缺口是「教師角色被停用但仍是
+    # OWNER_ID」——`ensure_owner` 對他放行，於是他不能關閉自己的課（`close` 有角色閘），
+    # 卻還能編輯與刪除它。同 router 內 POST / publish / close / reopen / add_chapter 皆已有閘。
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
 async def update_course(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     req: CourseUpdateReq,
@@ -240,7 +248,12 @@ async def update_course(
     await _service.update_basic(db, course_id, req, operator=operator)
 
 
-@router.delete("/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/courses/{course_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    # #301：同 `update_course`——`ensure_owner` 擋不住「教師角色已停用但仍是 OWNER_ID」者。
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
 async def delete_course(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),

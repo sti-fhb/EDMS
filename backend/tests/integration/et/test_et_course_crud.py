@@ -4,6 +4,8 @@
 稽核寫入。純集合／字串規則已於 `tests/unit/et/test_course_rules.py` 覆蓋，此處不重複。
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select, update
 
@@ -554,3 +556,171 @@ class TestTagOptions:
 
         r_plain = await client.get("/api/et/tags", headers=_bearer(uid))
         assert tags[0] not in [t["tag_id"] for t in r_plain.json()], "不帶 course_id 時不應出現"
+
+
+class TestUpdateDeleteRoleGate:
+    """`PUT` / `DELETE /courses/{id}` 之角色閘（#301）。
+
+    兩支原本只有 router-level 的 `get_et_context`（任一 ET 角色即可，而學員角色於帳號
+    建立時自動授予、人人皆有）＋ service 的 `ensure_owner`。同 router 內的 `POST` /
+    `publish` / `close` / `reopen` / `add_chapter` 都有 `require_et_roles`，這兩支沒有。
+
+    ⚠️ **下方前兩條在補角色閘之前就已經是綠的**——學員不是 `OWNER_ID`，`ensure_owner`
+    先擋下他並回同一個 403。它們驗的是「非擁有者被擋」這個既有行為不回歸，**不足以證明
+    角色閘存在**。唯一能抓到本缺口的是第三條（擁有者本人、教師角色已停用），實測在無閘
+    時回 204。這也是這個缺口能存在這麼久的原因：表面上的負向測試都是綠的。
+    """
+
+    async def test_僅學員者不可更新課程(self, client, db) -> None:
+        owner = await _user(db, "ETC_G1")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(owner))
+        cid = created.json()["course_id"]
+        student = await _user(db, "ETC_G2", roles=(ROLE_STUDENT,))
+
+        r = await client.put(
+            f"{_URL}/{cid}", json={"course_name": "被改的名字", "version": 0}, headers=_bearer(student)
+        )
+        assert r.status_code == 403
+
+    async def test_僅學員者不可刪除課程(self, client, db) -> None:
+        owner = await _user(db, "ETC_G3")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(owner))
+        cid = created.json()["course_id"]
+        student = await _user(db, "ETC_G4", roles=(ROLE_STUDENT,))
+
+        r = await client.delete(f"{_URL}/{cid}", headers=_bearer(student))
+        assert r.status_code == 403
+
+    async def test_教師角色被停用但仍為擁有者者不可更新課程(self, client, db) -> None:
+        """本檔最容易漏的情境——`ensure_owner` 對他是放行的，只有角色閘擋得住。
+
+        教師角色被停用是離職 / 轉調的標準第一步；帳號仍 ACTIVE、`OWNER_ID` 仍是他，
+        於是他不能關閉自己的課（`close` 有角色閘），卻還能編輯與刪除它。
+        """
+        uid = await _user(db, "ETC_G5")
+        created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(uid))
+        cid = created.json()["course_id"]
+        # 停用教師角色（保留學員角色，模擬真實的「撤銷教學權限」而非刪帳號）
+        await db.execute(
+            update(EtUserRole).where(EtUserRole.user_id == uid, EtUserRole.role == ROLE_TEACHER).values(is_active=False)
+        )
+        db.add(
+            EtUserRole(
+                user_id=uid,
+                role=ROLE_STUDENT,
+                is_active=True,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+
+        r = await client.put(f"{_URL}/{cid}", json={"course_name": "還是改得動", "version": 0}, headers=_bearer(uid))
+        assert r.status_code == 403, "教師角色已停用者不應再能編輯課程（ensure_owner 會放行，須靠角色閘）"
+
+
+class TestExtendRevivesCourse:
+    """`PUT` 延長期間使「已到期課程」復活時須重跑發布六項檢核（#301，SA 裁示「要檢查」）。
+
+    #288 讓「再開課」重跑檢核，理由是「不重跑等於把發布檢核變成一次性的」。但**期間已過**
+    的課程不必走再開課就能復活：狀態仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 ET-16、未實作，
+    故此為常態），教師只要用 `PUT` 把 `open_end_at` 改到未來，課程立刻恢復可用。
+
+    實際傷害不抽象：六項之一是 `OBSOLETE_DOC`（教材不得引用已廢止的 DM 文件）。該路徑會讓
+    學員繼續讀一份已廢止的 SOP 當現行教材，而那正是該項檢核存在的理由。
+
+    **檢核刻意只在「復活」時觸發**——單純調整未來期間、或延長一門仍在開放中的課程都不受
+    影響（見 `test_仍在開放中者延長期間不跑檢核`），否則教師改期間時會被指向章節的錯誤擋下。
+    """
+
+    async def test_復活且不符檢核被擋下(self, client, db) -> None:
+        uid = await _user(db, "ETC_R1")
+        created = await client.post(
+            _URL,
+            json={
+                "course_name": "到期課程",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": "2026-02-01T00:00:00+00:00",
+            },
+            headers=_bearer(uid),
+        )
+        cid = created.json()["course_id"]
+        # 直接改 DB 成「已發布且期間已過」——模擬時間流逝，不經端點（PUT 會擋過去的訖止）
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == cid)
+            .values(status=COURSE_PUBLISHED, open_end_at=utcnow() - timedelta(days=3))
+        )
+        await db.flush()
+
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={
+                "course_name": "到期課程",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": (utcnow() + timedelta(days=30)).replace(microsecond=0).isoformat(),
+                "version": 0,
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_PUBLISH_001"
+        codes = {b["code"] for b in r.json()["blockers"]}
+        assert "NO_CHAPTER" in codes, f"應帶出缺漏清單，實得 {codes}"
+        row = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
+        db.expire(row)
+        row = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
+        assert row.open_end_at < utcnow(), "被擋下時不得寫入新的訖止時間"
+
+    async def test_仍在開放中者延長期間不跑檢核(self, client, db) -> None:
+        """收窄的證明：課程仍在開放中（非復活），即使不符發布條件也放行。
+
+        否則教師想把一門正常運作的課程延長一個月，會被「課程至少須有 1 個章節」擋下——
+        那個錯誤訊息與他的操作無關，只會讓他困惑。
+        """
+        uid = await _user(db, "ETC_R2")
+        created = await client.post(
+            _URL,
+            json={
+                "course_name": "開放中課程",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": (utcnow() + timedelta(days=10)).replace(microsecond=0).isoformat(),
+            },
+            headers=_bearer(uid),
+        )
+        cid = created.json()["course_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == cid).values(status=COURSE_PUBLISHED))
+        await db.flush()
+
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={
+                "course_name": "開放中課程",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": (utcnow() + timedelta(days=40)).replace(microsecond=0).isoformat(),
+                "version": 0,
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 204, f"開放中課程延長期間不應跑檢核：{r.text}"
+
+    async def test_草稿課程不受影響(self, client, db) -> None:
+        """草稿本來就不對學員可見，發布時才檢核（#204），此處不應誤擋。"""
+        uid = await _user(db, "ETC_R3")
+        created = await client.post(_URL, json={"course_name": "草稿"}, headers=_bearer(uid))
+        cid = created.json()["course_id"]
+
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={
+                "course_name": "草稿",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": (utcnow() + timedelta(days=30)).replace(microsecond=0).isoformat(),
+                "version": 0,
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text

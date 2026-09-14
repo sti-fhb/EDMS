@@ -26,6 +26,8 @@
 `ET_INVITATION` 待加入清單（`ET-12`）。
 """
 
+from datetime import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -39,7 +41,13 @@ from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.publish_repository import EtPublishRepository
 from app.et.course.publish_rules import PublishBlocker, evaluate_publish
 from app.et.course.repository import EtCourseRepository
-from app.et.course.rules import ensure_closable, ensure_owner, ensure_reopen_schedule, ensure_reopenable
+from app.et.course.rules import (
+    ensure_closable,
+    ensure_owner,
+    ensure_reopen_schedule,
+    ensure_reopenable,
+    is_effectively_closed,
+)
 from app.et.course.schemas import (
     CloseCourseReq,
     CourseStatusResult,
@@ -270,6 +278,55 @@ class EtPublishService:
         )
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def ensure_revival_publishable(
+        self, db: AsyncSession, course, *, new_end_at: datetime | None, now: datetime
+    ) -> None:
+        """`PUT /courses/{id}` 延長期間若會讓一門**視同關閉**的課程復活，重跑發布六項檢核（#301）。
+
+        ## 為何 `PUT` 也要檢核
+
+        #288 讓「再開課」重跑檢核（SA Q2 裁示 A），理由是「不重跑等於把發布檢核變成一次性的」。
+        但**期間已過**的課程不必走再開課就能復活——狀態仍是 `PUBLISHED`（到期自動轉 `CLOSED`
+        屬 ET-16、未實作，故此為常態），教師只要把 `OPEN_END_AT` 改到未來或清空即可。
+
+        六項之一是 `OBSOLETE_DOC`（教材不得引用已廢止的 DM 文件）。該路徑會讓學員繼續讀一份
+        已廢止的 SOP 當現行教材，而那正是該項檢核存在的理由；另有 `NO_CHAPTER`（章節被刪光）
+        與 `QUIZ_NO_QUESTION`（0 題測驗會讓學員卡在空考卷前）。
+
+        ## 為何只在「復活」時觸發
+
+        若每次 `PUT` 都檢核，教師想把一門正常運作的課程延長一個月，會被「課程至少須有 1 個
+        章節」之類與其操作無關的訊息擋下。故條件收窄為三者同時成立：
+
+        1. 狀態為 `PUBLISHED`——草稿本來不對學員可見（發布時才檢核）；`CLOSED` 改不了狀態、
+           只能走 `reopen`（那條已經會檢核）
+        2. 變更前**視同關閉**（`is_effectively_closed`）
+        3. 變更後不再視同關閉——新訖止晚於當下，或**清空**（`None` 語意為「沒有結束日」）
+
+        與 `reopen` 共用同一組檢核與同一個錯誤碼 `ET_PUBLISH_001` + `blockers`，前端可直接
+        複用缺漏清單的呈現。
+
+        Raises:
+            AppError: 422 `ET_PUBLISH_001` 六項檢核未通過（body 另帶 `blockers`）。
+        """
+        if course.status != COURSE_PUBLISHED:
+            return
+        was_closed = is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now)
+        will_be_open = new_end_at is None or new_end_at > now
+        if not (was_closed and will_be_open):
+            return
+
+        blockers = await self._evaluate(db, course)
+        if blockers:
+            raise AppError(
+                status_code=422,
+                detail="發布條件未滿足",
+                error_code="ET_PUBLISH_001",
+                extra={
+                    "blockers": [{"code": b.code, "message": b.message, "target_id": b.target_id} for b in blockers]
+                },
+            )
 
     async def _evaluate(self, db: AsyncSession, course) -> tuple[PublishBlocker, ...]:
         """組快照 → 問 DM 廢止狀態 → 交給純函式判斷。"""
