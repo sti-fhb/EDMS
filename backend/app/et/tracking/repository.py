@@ -13,9 +13,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.users.models import DpUser  # 唯讀 join（已列於 et/spec.md §外模組 table 引用清單）
+from app.et.constants import GRADED_STATUSES
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
-from app.et.quiz.models import EtQuizAttemptM
+from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
 
 
 class EtTrackingRepository:
@@ -174,3 +175,96 @@ class EtTrackingRepository:
     async def get_course(self, db: AsyncSession, course_id: int) -> EtCourse | None:
         """取課程（未刪除）——供擁有權與「視同關閉」判定。"""
         return await db.scalar(select(EtCourse).where(EtCourse.course_id == course_id, EtCourse.deleted == 0))
+
+    async def quizzes_of_course(self, db: AsyncSession, course_id: int) -> list[EtQuiz]:
+        """該課程之所有測驗（依章節與項目順序）。
+
+        來源是 `ET_ITEM` 而非 `ET_QUIZ` 自身——測驗是掛在章節項目下的，未掛載的孤兒
+        測驗不屬於任何課程。JOIN 鏈同時濾三層軟刪除：章節、項目、測驗。
+        """
+        rows = await db.execute(
+            select(EtQuiz)
+            .select_from(EtItem)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .join(EtQuiz, EtQuiz.quiz_id == EtItem.quiz_id)
+            .where(
+                EtChapter.course_id == course_id,
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+                EtQuiz.deleted == 0,
+            )
+            .order_by(EtChapter.sort_order.asc(), EtItem.sort_order.asc())
+        )
+        return list(rows.scalars().all())
+
+    async def attempts_of_course(self, db: AsyncSession, course_id: int) -> list[EtQuizAttemptM]:
+        """該課程之**所有已閱卷** attempt（全班、全測驗，一次取回）。
+
+        區塊 2 要「一次列出所有曾作答之學員」，逐學員查就是 N+1。一門課的 attempt
+        量級是「學員數 × 測驗數 × 重考次數」，仍遠小於分頁的必要門檻。
+
+        **只取已閱卷**（`GRADED_STATUSES`）：進行中的還沒有成績，列出來是一列空白。
+        與學員端 `attempt/repository.list_attempts` 同一組白名單。
+        """
+        rows = await db.execute(
+            select(EtQuizAttemptM)
+            .where(
+                EtQuizAttemptM.course_id == course_id,
+                EtQuizAttemptM.status.in_(GRADED_STATUSES),
+                EtQuizAttemptM.deleted == 0,
+            )
+            .order_by(EtQuizAttemptM.user_id.asc(), EtQuizAttemptM.quiz_id.asc(), EtQuizAttemptM.attempt_no.asc())
+        )
+        return list(rows.scalars().all())
+
+    async def reset_bases_of_course(self, db: AsyncSession, course_id: int) -> dict[tuple[str, int], int]:
+        """`{(user_id, quiz_id): 重置基準}`——一次取全班。
+
+        基準為 `MAX(ATTEMPT_COUNT_AT_RESET)`，與 `attempt/repository.reset_base()` 同
+        定義（那支是單一學員單一測驗，此處為整門課批次）。無重置紀錄者不在 key 裡，
+        呼叫端視為 0。
+
+        以 `ET_QUIZ_RETRY_RESET` JOIN `ET_QUIZ` 再回推課程——該表本身只有
+        `(USER_ID, QUIZ_ID)`，沒有課程欄位。
+        """
+        quiz_ids = (
+            select(EtItem.quiz_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtChapter.course_id == course_id,
+                EtItem.quiz_id.is_not(None),
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+            )
+        )
+        rows = await db.execute(
+            select(
+                EtQuizRetryReset.user_id,
+                EtQuizRetryReset.quiz_id,
+                func.max(EtQuizRetryReset.attempt_count_at_reset),
+            )
+            # `ET_QUIZ_RETRY_RESET` 是 **append-only**（`AuditLogBaseModel`，只有
+            # `CREATED_*`），**沒有 `DELETED` 欄位**——它是「已用次數」的計算基準，
+            # 能被軟刪除就等於能讓學員的配額憑空回復而查不到是誰做的。
+            .where(EtQuizRetryReset.quiz_id.in_(quiz_ids))
+            .group_by(EtQuizRetryReset.user_id, EtQuizRetryReset.quiz_id)
+        )
+        return {(user_id, quiz_id): base for user_id, quiz_id, base in rows.all()}
+
+    async def get_attempt_with_course(self, db: AsyncSession, attempt_id: int):
+        """取 attempt 與其課程——**教師端授權以課程擁有者判定**。
+
+        ⚠️ 與學員端 `attempt/service._require_own_attempt` 的判定**不同**：那支比對
+        `USER_ID`（只能看自己的考卷），教師要看的正是別人的。但**不可放寬成「任何教師
+        都能看」**——那等於全站考卷對所有教師公開，故改以「該 attempt 所屬課程的
+        `OWNER_ID` == 操作者」判定。
+
+        用 `ATTEMPT.COURSE_ID`（提交當下的快照欄位）而非現查反查鏈：章節被刪或項目被
+        移動時反查會斷，而那時考卷仍該看得到。
+        """
+        rows = await db.execute(
+            select(EtQuizAttemptM, EtCourse)
+            .join(EtCourse, EtCourse.course_id == EtQuizAttemptM.course_id)
+            .where(EtQuizAttemptM.attempt_id == attempt_id, EtQuizAttemptM.deleted == 0, EtCourse.deleted == 0)
+        )
+        return rows.first()

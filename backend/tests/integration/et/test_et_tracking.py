@@ -388,3 +388,150 @@ class TestStudentListAuthorization:
 
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_AUTH_001"
+
+
+class TestAttemptOverview:
+    """區塊 2：作答明細總覽（AC 4 / 6 / FR-ET-US9-04）。"""
+
+    async def test_一次列出所有曾作答學員(self, client, db) -> None:
+        """FR-ET-US9-04 明訂「**一次列出所有曾作答之學員**（不設學員篩選）」。"""
+        teacher = await _user(db, "t_tr11")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, name="小考")
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        answered = await _user(db, "s_tr11a", roles=(ROLE_STUDENT,), name="有作答")
+        silent = await _user(db, "s_tr11b", roles=(ROLE_STUDENT,), name="沒作答")
+        await _enroll(db, answered, course_id)
+        await _enroll(db, silent, course_id)
+        await _attempt(
+            db, user_id=answered, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("70"), is_pass=False
+        )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        names = [s["user_name"] for s in r.json()["students"]]
+        assert names == ["有作答"], "未作答者不進區塊 2（他在區塊 1 仍看得到）"
+
+    async def test_展開見歷次attempt清單(self, client, db) -> None:
+        """AC 4：每列顯示作答時間、總分、是否及格；重考多次者**每次都在**。"""
+        teacher = await _user(db, "t_tr12")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, name="小考")
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr12", roles=(ROLE_STUDENT,), name="考三次")
+        await _enroll(db, student, course_id)
+        for no, score in ((1, "50"), (2, "70"), (3, "90")):
+            await _attempt(
+                db,
+                user_id=student,
+                course_id=course_id,
+                quiz_id=quiz_id,
+                no=no,
+                score=Decimal(score),
+                is_pass=(score == "90"),
+            )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        quizzes = r.json()["students"][0]["quizzes"]
+        assert len(quizzes) == 1
+        attempts = quizzes[0]["attempts"]
+        assert [a["attempt_no"] for a in attempts] == [1, 2, 3], "不限最近一次，且依次別遞增"
+        assert [a["score"] for a in attempts] == ["50.00", "70.00", "90.00"]
+        assert attempts[2]["is_pass"] is True
+
+    async def test_未作答之測驗標示尚未作答(self, client, db) -> None:
+        """AC 8 / ET-MSG-ET03-005：該學員對某測驗無 attempt 時仍要列出那個測驗。
+
+        整個測驗不出現的話，教師分不出「他沒考」與「這門課沒這個測驗」。
+        """
+        teacher = await _user(db, "t_tr13")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        done_quiz = await _quiz(db, name="考過的")
+        skipped_quiz = await _quiz(db, name="沒考的")
+        await _item(db, chapter_id, title="考過的", order=1, quiz_id=done_quiz)
+        await _item(db, chapter_id, title="沒考的", order=2, quiz_id=skipped_quiz)
+        student = await _user(db, "s_tr13", roles=(ROLE_STUDENT,), name="只考一科")
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db, user_id=student, course_id=course_id, quiz_id=done_quiz, no=1, score=Decimal("80"), is_pass=True
+        )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        by_quiz = {q["quiz_name"]: q for q in r.json()["students"][0]["quizzes"]}
+        assert by_quiz["沒考的"]["attempts"] == []
+        assert len(by_quiz["考過的"]["attempts"]) == 1
+
+
+class TestAttemptDetailForTeacher:
+    """區塊 2：教師端單次逐題明細（AC 4 / FR-ET-US9-05）。"""
+
+    async def test_教師可看自己課程學員的逐題明細(self, client, db) -> None:
+        teacher = await _user(db, "t_tr14")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr14", roles=(ROLE_STUDENT,), name="學員")
+        await _enroll(db, student, course_id)
+        attempt_id = await _attempt(
+            db, user_id=student, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("75"), is_pass=False
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt_id}/detail", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["attempt_id"] == attempt_id
+        assert r.json()["user_name"] == "學員", "教師端要知道這是誰的考卷"
+
+    async def test_他人課程之attempt明細回四零三(self, client, db) -> None:
+        """🔴 授權以「該 attempt 的**課程擁有者**」判定，不是學員端的 `USER_ID` 比對。
+
+        學員端 `_require_own_attempt` 只能看自己的；教師端要能看別人的，但**只限自己
+        課程裡的**。放寬成「任何教師都能看」等於全站考卷對所有教師公開。
+        """
+        owner = await _user(db, "t_tr15")
+        outsider = await _user(db, "t_tr16")
+        course_id = await _course(db, owner=owner)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr15", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        attempt_id = await _attempt(
+            db, user_id=student, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("60"), is_pass=False
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt_id}/detail", headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_學員角色不可用教師端明細端點(self, client, db) -> None:
+        """學員要看自己的明細有學員端端點；本支是教師端，角色閘擋下。"""
+        teacher = await _user(db, "t_tr17")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr17", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        attempt_id = await _attempt(
+            db, user_id=student, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("60"), is_pass=False
+        )
+        await db.commit()
+
+        r = await client.get(f"/api/et/attempts/{attempt_id}/detail", headers=_bearer(student))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"

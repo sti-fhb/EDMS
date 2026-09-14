@@ -18,7 +18,7 @@ from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, r
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
-from app.et.tracking.schemas import StudentRow
+from app.et.tracking.schemas import AttemptOverview, StudentRow, TeacherAttemptDetail
 from app.et.tracking.service import EtTrackingService
 
 #: 每位使用者 / 每個 IP 每分鐘之教師端查詢數。
@@ -69,3 +69,46 @@ async def list_students(
     不可顯示 0——0 分與未作答意義相反）。
     """
     return await _service.list_students(db, course_id, actor_id=ctx.user_id, page=page, limit=limit)
+
+
+@router.get(
+    "/courses/{course_id}/attempt-overview",
+    response_model=AttemptOverview,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def attempt_overview(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptOverview:
+    """區塊 2：所有**曾作答**學員 × 各測驗之 attempt 摘要（`FR-ET-US9-04`）。
+
+    **不分頁**——規格明訂「一次列出所有曾作答之學員（不設學員篩選）」，且本區塊為
+    摺疊式，一次載入的是摘要而非逐題明細。
+
+    已作答學員的**未作答測驗仍會列出**（`attempts` 為空）：整個測驗不出現的話，教師
+    分不出「他沒考」與「這門課沒這個測驗」。
+    """
+    return await _service.attempt_overview(db, course_id, actor_id=ctx.user_id)
+
+
+@router.get(
+    "/attempts/{attempt_id}/detail",
+    response_model=TeacherAttemptDetail,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def attempt_detail(
+    attempt_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> TeacherAttemptDetail:
+    """區塊 2：教師端檢視單次 attempt 的逐題明細（`FR-ET-US9-05`）。
+
+    ⚠️ **與學員端 `GET /attempts/{id}/result` 是不同的端點、不同的授權**：那支以
+    `USER_ID` 比對（只能看自己的），本支以「該 attempt 所屬課程的擁有者」判定。
+    **不可**為了複用而放寬學員端那支——那會讓任何學員拿 `attempt_id` 就能看別人的考卷。
+
+    逐題內容依該次 attempt 的快照渲染，與學員端同一支組裝函式：同一份資料兩端必須長得
+    一樣，否則教師與學員對著同一次作答會看到不同的對錯。
+    """
+    return await _service.attempt_detail(db, attempt_id, actor_id=ctx.user_id)
