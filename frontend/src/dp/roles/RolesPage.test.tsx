@@ -45,6 +45,25 @@ describe("RolesPage 權限管理", () => {
     expect(screen.queryByText("文件管理（DM）")).not.toBeInTheDocument()
   })
 
+  it("頁籤依前端定義排序：ET 左、DM 右，且預設選中 ET（後端回序不影響）", async () => {
+    // 後端回的是 registry 註冊順序（DM 先註冊），畫面順序不應跟著它跑
+    server.use(http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM", "ET"])))
+    renderWithProviders(<RolesPage />)
+    await screen.findByText("教育訓練（ET）")
+    const tabs = screen.getAllByRole("tab")
+    expect(tabs.map((t) => t.textContent)).toEqual(["教育訓練（ET）", "文件管理（DM）"])
+    // 預設選中第一個＝排序後的 ET（active 由排序後的陣列衍生）
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("未列於顯示順序的模組代碼仍渲染，排在已知模組之後", async () => {
+    server.use(http.get("/api/dp/roles/modules", () => HttpResponse.json(["XX", "DM", "ET"])))
+    renderWithProviders(<RolesPage />)
+    await screen.findByText("教育訓練（ET）")
+    const tabs = screen.getAllByRole("tab")
+    expect(tabs.map((t) => t.textContent)).toEqual(["教育訓練（ET）", "文件管理（DM）", "XX"])
+  })
+
   it("帳號欄顯示 email、最後異動顯示操作者姓名（非原始 ID）", async () => {
     renderWithProviders(<RolesPage />)
     await screen.findByText("王曉明")

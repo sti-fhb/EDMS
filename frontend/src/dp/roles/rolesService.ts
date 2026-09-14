@@ -83,3 +83,26 @@ export const MODULE_ROLES: Record<string, { code: string; label: string }[]> = {
 
 /** 模組代碼 → 頁籤顯示名。 */
 export const MODULE_LABELS: Record<string, string> = { DM: "文件管理（DM）", ET: "教育訓練（ET）" }
+
+/**
+ * 頁籤顯示順序（ET 左、DM 右）。
+ *
+ * 後端 `GET /dp/roles/modules` 的順序來自 `module_assign_registry` 的註冊順序，也就是 `main.py`
+ * 兩行 bootstrap 呼叫的先後——那是啟動流程的副產品，重排 import 或抽出 bootstrap 就會變，
+ * 且沒有任何測試會抓到。顯示順序屬畫面決策，故在前端顯式定義（#310）。
+ */
+const MODULE_TAB_ORDER = ["ET", "DM"]
+
+/**
+ * 依 `MODULE_TAB_ORDER` 排出頁籤順序；未列入者保持原相對順序、排在已知模組之後
+ * （日後新增模組時不會從畫面消失）。回傳新陣列，不動入參。
+ */
+export function sortModulesForTabs(modules: readonly string[]): string[] {
+  return [...modules].sort((a, b) => {
+    const ia = MODULE_TAB_ORDER.indexOf(a)
+    const ib = MODULE_TAB_ORDER.indexOf(b)
+    if (ia === -1) return ib === -1 ? 0 : 1
+    if (ib === -1) return -1
+    return ia - ib
+  })
+}
