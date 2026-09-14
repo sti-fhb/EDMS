@@ -455,7 +455,7 @@
         <label class="form-label small">關鍵字</label>
         <div class="input-group input-group-sm">
           <span class="input-group-text"><i class="bi bi-search"></i></span>
-          <input type="text" class="form-control" placeholder="課程名稱 / 描述">
+          <input type="text" class="form-control" placeholder="課程名稱" maxlength="100">
         </div>
       </div>
       <div class="col-md-3">
@@ -635,13 +635,26 @@
     </div>
   </div>
 
+  <nav class="text-center mt-3">
+    <ul class="pagination pagination-sm justify-content-center mb-0">
+      <li class="page-item disabled"><a class="page-link">«</a></li>
+      <li class="page-item active"><a class="page-link">1</a></li>
+      <li class="page-item"><a class="page-link">2</a></li>
+      <li class="page-item"><a class="page-link">3</a></li>
+      <li class="page-item"><a class="page-link">»</a></li>
+    </ul>
+  </nav>
+
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
     <strong>本畫面用途：</strong>教師課程列表，為新增與編輯之入口<br>
+    <strong>分頁（2026-09-14 補）：</strong>課程清單採<strong>後端分頁</strong>，每頁 12 筆（桌機每列三張、四列一頁）。依 `CLAUDE.md`「Client-side 分頁僅限資料量 &lt; 200 筆的管理類設定資料，其餘一律後端分頁」——課程非管理類設定資料且數量會成長。原畫面稿漏畫分頁器，於 #299 實作時發現並補上<br>
     <strong>範圍篩選 tab（2026-07-02 變更）：</strong>「我建立的」顯示 owner = 當前使用者之<strong>全部狀態</strong>課程（含草稿 / 已發布 / 已關閉，供本人管理）；「全部課程」<strong>僅顯示所有教師之「已發布」課程</strong>（草稿與已關閉不列入），額外提供「建立者」篩選<br>
     <strong>卡片呈現（2026-07-02 變更）：</strong>課程以卡片網格呈現，<strong>不再依模組分組</strong>；每張卡片顯示課程名稱、<strong>受訓單位標籤 badges（可多個）</strong>、狀態 pill（草稿 / 已發布 / 已關閉）、<strong>課程起訖時間</strong>、章節數、學員人數、建立者姓名<br>
     <strong>搜尋條件（2026-07-02 變更）：</strong>原「關聯模組」改為「<strong>受訓單位標籤</strong>」（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）<br>
+    <strong>關鍵字比對範圍（2026-09-14 修正）：</strong>僅比對<strong>課程名稱</strong>，不含描述。原 placeholder 誤寫「課程名稱 / 描述」，與 `FR-ET-US7-02` 及場景 4「課程名稱模糊比對」不符，已更正。長度上限 100 字元（與後端 `q` 參數一致）<br>
+    <strong>受訓單位標籤為單選（2026-09-14 澄清）：</strong>`FR-ET-US7-02` 的「任一命中即列出（一課程多標籤 OR）」指的是<strong>一門課掛了多個標籤時任一命中</strong>，不是使用者可複選多個標籤；畫面為單一下拉即為正解。下拉來源為 <code>ET_TAG</code> <strong>全部標籤（含已停用者）</strong>——停用僅影響新課程掛載，既有課程仍須查得到，故停用者標示「（已停用）」但保留可選<br>
     <strong>點擊課程卡片之行為依擁有權判定：</strong>
     <ul style="margin:0.25rem 0 0.5rem 1.2rem;">
       <li><strong>自己建立</strong> → 進入 ET02 <strong>編輯模式</strong>（全功能）</li>
@@ -2083,12 +2096,39 @@
       </button>
     </div>
 
+    <!-- 歷次作答紀錄（2026-07-02 新增；2026-09-09 / #280 裁示 Q2 = B 由成績頁移至此）
+         無「本次」底色標示——面板上沒有「正在看哪一次」的概念。 -->
+    <hr class="my-4">
+    <h6 class="fw-bold"><i class="bi bi-clock-history me-1"></i>歷次作答紀錄 <small class="text-muted fw-normal">（每次作答皆獨立記錄；結業成績以最高分為準；點任一列可回看該次逐題明細）</small></h6>
+    <table class="table table-sm wf-table mb-0 table-hover" style="cursor:pointer;">
+      <thead><tr><th>次別</th><th>作答時間</th><th>分數</th><th>是否及格</th><th>明細</th></tr></thead>
+      <tbody>
+        <tr onclick="showToast('開啟第 1 次作答之逐題明細（依該次題目順序快照渲染）')">
+          <td><strong>第 1 次</strong></td>
+          <td class="small">2026-04-22 10:12</td>
+          <td><strong>65</strong> 分</td>
+          <td><span class="status-pill status-failed">未及格</span></td>
+          <td class="text-muted small">查看逐題明細 <i class="bi bi-chevron-right"></i></td>
+        </tr>
+        <tr onclick="showToast('開啟第 2 次作答之逐題明細')">
+          <td><strong>第 2 次</strong></td>
+          <td class="small">2026-05-22 14:05</td>
+          <td><strong>75</strong> 分</td>
+          <td><span class="status-pill status-failed">未及格</span></td>
+          <td class="text-muted small">查看逐題明細 <i class="bi bi-chevron-right"></i></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>學員可回看自己<strong>每一次</strong>作答之成績與逐題明細（不限最近一次；各次依其題目 / 選項順序快照顯示）；教師端亦可於 ET03「作答明細」查看。</div>
+
   </div>
 
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
     <strong>本畫面用途：</strong>學員按下「開始測驗」後的引導頁；說明測驗規則與計時邏輯，按確認後正式開始計時並進入 ET06 作答頁<br>
+    <strong>⚠️ 實作差異（2026-09-09 / #279）：</strong>本畫面已<strong>不是獨立頁面</strong>，內容改為在 ET05 章節學習頁的內容區<strong>就地渲染為測驗面板</strong>。影片與文件都是點了就看得到內容，測驗沒有理由先給一顆按鈕、按了才跳頁看題數與及格分數。本稿保留為版面參考<br>
+    <strong>歷次作答紀錄（2026-09-09 / #280 裁示 Q2 = B 由成績頁移入本面板）：</strong>列出<strong>每一次 attempt</strong>（作答時間 / 分數 / 是否及格），點任一列可回看該次逐題明細。原 spec 場景 22 寫「自引導頁點」而 wireframe 畫在成績頁，兩者矛盾；裁示置於測驗面板——學員想回看的往往正是第 1 次，而「先進到最近一次的成績頁再從那裡找清單」把最有價值的那筆藏在兩層之後<br>
     <strong>進入時機：</strong>從 ET05 課程學習頁的測驗項目「開始測驗」按鈕觸發<br>
     <strong>測驗資訊區（grid）：</strong>視覺化呈現題數、作答時間、及格分數、可重考次數 — 來自管理者於 ET02 測驗 modal 之設定<br>
     <strong>注意事項：</strong>明確告知作答規則（計時、不可中斷、提交後即時閱卷）— 避免學員誤觸<br>
@@ -2210,32 +2250,8 @@
       </table>
     </div>
 
-    <!-- 歷次作答紀錄（2026-07-02 新增：學員可回看每一次 attempt 之成績與逐題明細）
-         ⚠️ 2026-09-09 / #280 裁示 Q2 = B：此區塊已移至測驗資訊面板（et-quiz-intro），不再位於成績頁。
-         下方保留為版面參考；實作以測驗面板為準，且無「本次」底色標示（面板上沒有「正在看哪一次」）。 -->
-    <div class="wf-card">
-      <h6 class="fw-bold"><i class="bi bi-clock-history me-1"></i>歷次作答紀錄 <small class="text-muted fw-normal">（每次作答皆獨立記錄；結業成績以最高分為準；點任一列可回看該次逐題明細）</small></h6>
-      <table class="table table-sm wf-table mb-0 table-hover" style="cursor:pointer;">
-        <thead><tr><th>次別</th><th>作答時間</th><th>分數</th><th>是否及格</th><th>明細</th></tr></thead>
-        <tbody>
-          <tr onclick="showToast('開啟第 1 次作答之逐題明細（依該次題目順序快照渲染）')">
-            <td><strong>第 1 次</strong></td>
-            <td class="small">2026-04-22 10:12</td>
-            <td><strong>65</strong> 分</td>
-            <td><span class="status-pill status-failed">未及格</span></td>
-            <td class="text-muted small">查看逐題明細 <i class="bi bi-chevron-right"></i></td>
-          </tr>
-          <tr onclick="showToast('開啟第 2 次（本次）作答之逐題明細')" style="background:#f1f8e9;">
-            <td><strong>第 2 次</strong> <span class="badge bg-light text-muted">本次</span></td>
-            <td class="small">2026-05-22 14:05</td>
-            <td><strong>75</strong> 分</td>
-            <td><span class="status-pill status-failed">未及格</span></td>
-            <td class="text-muted small">查看逐題明細 <i class="bi bi-chevron-right"></i></td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>學員可回看自己<strong>每一次</strong>作答之成績與逐題明細（不限最近一次；各次依其題目 / 選項順序快照顯示）；教師端亦可於 ET03「作答明細」查看。</div>
-    </div>
+    <!-- 歷次作答紀錄已於 2026-09-09 / #280 裁示 Q2 = B 移至測驗資訊面板（et-quiz-intro）。
+         成績頁不再重複呈現——同一份清單出現在兩處，學員會不確定兩邊是不是同一件事。 -->
   </div>
 
   <details class="wf-screen-note" open>
