@@ -202,6 +202,39 @@ class EtCourseRepository:
             .returning(EtCourse.version)
         )
 
+    async def transfer_owner(
+        self, db: AsyncSession, course_id: int, version: int, *, to_owner_id: str, operator: OperatorInfo
+    ) -> int | None:
+        """改寫課程擁有者（ET-13 / #303）。
+
+        `OWNER_ID` 原則上**永久不可變更**（`data-model` §ET_COURSE 第 7 欄），管理者
+        代為轉讓是明訂的唯一例外（`spec.md:177`），故本方法是全 repository 唯一寫
+        `owner_id` 的地方（`create_draft` 之外）。
+
+        **只改 `OWNER_ID`**：不動狀態、起訖、邀請碼、`FIRST_PUBLISHED_AT`——轉讓換的是
+        「誰管這門課」，不是課程本身的任何屬性。
+
+        以 `RETURNING` 回新版本，不由呼叫端自行 `+1`：`update(EtCourse)` 是
+        ORM-enabled UPDATE，SQLAlchemy 會同步 identity map，執行後手上物件的 `version`
+        已是新值，再加一次會回給前端一個比 DB 大 1 的版本（#288 修過 `publish` 的
+        同一個形狀）。
+
+        Returns:
+            新的 `VERSION`；`None` = 沒有列符合（版本不符或課程已軟刪），呼叫端據此拋
+            `ET_LOCK_001`。
+        """
+        return await db.scalar(
+            update(EtCourse)
+            .where(EtCourse.course_id == course_id, EtCourse.deleted == 0, EtCourse.version == version)
+            .values(
+                owner_id=to_owner_id,
+                version=EtCourse.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+            .returning(EtCourse.version)
+        )
+
     def build_list_stmt(
         self,
         *,

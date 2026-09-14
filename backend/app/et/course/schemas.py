@@ -36,6 +36,11 @@ MAX_BIGINT = 9_223_372_036_854_775_807
 # 超出 int4 時 asyncpg 綁定參數即拋出，落到未處理例外 handler 變成通用 500——而那是
 # 一個「版本不符」的請求，應該回 409。比照本檔對 `tag_id` 一律加上界的作法。
 MAX_INT4 = 2_147_483_647
+# 使用者 ID 長度：對齊 `DP_USER.USER_ID` / `ET_USER_ROLE.USER_ID` 之 `String(20)`。
+USER_ID_MAX_LEN = 20
+# 轉讓原因長度：`ET_OWNER_TRANSFER.REASON` 為 TEXT（無 DB 上限），此處設一個「一段說明
+# 文字」的合理界限——不設上限等於讓單一請求可寫入任意大小的 append-only 列。
+TRANSFER_REASON_MAX_LEN = 500
 
 
 def _strip_or_none(value: str | None) -> str | None:
@@ -451,6 +456,44 @@ class CourseStatusResult(BaseModel):
     open_start_at: datetime | None
     open_end_at: datetime | None
     closed_at: datetime | None
+    version: int
+
+
+class TransferOwnerReq(BaseModel):
+    """管理者代為轉讓課程擁有者（ET-13 / US1 補強 / #303）。
+
+    ⚠️ **`reason` 為必填且不得全空白**。它是 #303 SA Q2 裁示 A（不檢核原擁有者是否
+    離職／失能）之下**唯一的事前控制**——事後追溯靠 `ET_OWNER_TRANSFER` 與
+    `DP_AUDIT_LOG`，事前就只有「你得說出為什麼」。`min_length` 擋不掉 `"   "`，故另以
+    validator 檢核（比照 `_CourseFields._name_not_blank`）。
+
+    `to_owner_id` 的長度上限對齊 `DP_USER.USER_ID` / `ET_USER_ROLE.USER_ID` 的
+    `String(20)`——超長值在 DB 比對只會查無，擋在入口比較明確。
+    """
+
+    to_owner_id: str = Field(min_length=1, max_length=USER_ID_MAX_LEN)
+    reason: str = Field(min_length=1, max_length=TRANSFER_REASON_MAX_LEN)
+    version: int = Field(ge=0, le=MAX_INT4)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        """全空白之原因等同未填。"""
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("轉讓原因不得為空白")
+        return stripped
+
+
+class TransferOwnerResult(BaseModel):
+    """轉讓結果。
+
+    回**新的擁有者與版本**：前端據此重載課程（`is_owner` 隨之改變），版本供後續寫入
+    帶入樂觀鎖。
+    """
+
+    course_id: int
+    owner_id: str
     version: int
 
 
