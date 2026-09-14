@@ -113,10 +113,10 @@ jobs:
       # 故用 GitHub Actions cache（type=gha）補回來。scope 刻意與 cd.yml 相同，
       # 兩支共用同一份 cache，手動出版才不會每次都是冷 build。
       - name: 設定 Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build edms-backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           load: true          # 載入本地 daemon，供下方驗證步驟使用
@@ -169,7 +169,7 @@ jobs:
           echo "Alembic head 正常（單一 head）"
 
       - name: Build edms-nginx（含前端建置）
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: nginx/Dockerfile
@@ -230,7 +230,7 @@ jobs:
       # 不必比照 TBMS 收到 1 天（TBMS 為 private，與 e2e artifact 共吃 2 GB 配額）。
       - name: 上傳 tar.gz
         if: fromJSON(inputs.export_tar)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: edms-images-${{ steps.rev.outputs.sha }}
           path: ${{ steps.tar.outputs.path }}
