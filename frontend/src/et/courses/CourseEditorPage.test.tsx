@@ -450,3 +450,102 @@ describe("ET02 課程關閉與再開課", () => {
     expect(body).toEqual({ version: 5 })
   })
 })
+
+// ── ET-13 轉讓擁有者（#303）──────────────────────────────────────────────────
+
+/**
+ * 覆寫操作能力——`can_transfer_owner` 決定入口是否出現。
+ *
+ * 🔴 **必須在 `useCourse()` 之後呼叫**，否則這個 handler 不會生效。
+ *
+ * `server.use` 是**前插**（後註冊者先比對），而 `useCourse` 註冊的
+ * `/api/et/courses/:courseId` 會把字面路徑 `/api/et/courses/capabilities` 當成
+ * `courseId="capabilities"` 吃掉，回傳一個課程詳細物件——於是 `capabilities` 變成
+ * `undefined`，入口永遠不出現。
+ *
+ * 症狀完全不像原因：畫面上只是少一顆按鈕，沒有任何錯誤。這與 FastAPI 的路由順序陷阱
+ * 同形（`/courses/capabilities` 也必須宣告在 `/courses/{course_id}` 之前）。
+ */
+function useCapabilities(canTransfer: boolean) {
+  server.use(
+    http.get("/api/et/courses/capabilities", () =>
+      HttpResponse.json({
+        can_create_course: true,
+        can_manage_courses: true,
+        can_learn: true,
+        can_transfer_owner: canTransfer,
+      }),
+    ),
+  )
+}
+
+describe("ET02 轉讓擁有者", () => {
+  it("管理者看得到「轉讓擁有者」入口", async () => {
+    useCourse("PUBLISHED")
+    useCapabilities(true)
+    renderEditor()
+    expect(await screen.findByRole("button", { name: "轉讓擁有者" })).toBeInTheDocument()
+  })
+
+  it("非管理者看不到入口", async () => {
+    // `can_manage_courses` 教師也是 true，故入口**必須**看 `can_transfer_owner`；
+    // 判錯會讓每位教師都看到一顆按下去必定 403 的按鈕。
+    useCourse("PUBLISHED")
+    useCapabilities(false)
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+    expect(screen.queryByRole("button", { name: "轉讓擁有者" })).not.toBeInTheDocument()
+  })
+
+  it("管理者檢視他人課程（唯讀模式）時入口仍在", async () => {
+    // 🔴 這是本頁唯一一顆「非擁有者才會用到」的按鈕。若比照其他按鈕加上 `!readOnly`，
+    // 它會永遠不出現——而管理者要處理的正是別人的課程。
+    useCourse("PUBLISHED", { isOwner: false })
+    useCapabilities(true)
+    renderEditor()
+
+    await screen.findByText(/檢視模式/)
+    expect(screen.getByRole("button", { name: "轉讓擁有者" })).toBeInTheDocument()
+    // 對照組：關閉 / 再開課在唯讀模式下不顯示
+    expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
+  })
+
+  it("視窗的接收教師不含現任擁有者", async () => {
+    // 選了必定回 409 `ET_OWNER_002`，不該出現在選項裡。
+    const user = userEvent.setup()
+    useCourse("PUBLISHED")
+    useCapabilities(true)
+    server.use(
+      http.get("/api/et/teachers", () =>
+        HttpResponse.json([
+          { user_id: "U1", user_name: "王教師" }, // 現任擁有者（`useCourse` 的 owner_id）
+          { user_id: "U2", user_name: "李教師" },
+        ]),
+      ),
+    )
+    renderEditor()
+
+    await user.click(await screen.findByRole("button", { name: "轉讓擁有者" }))
+    await user.click(await screen.findByRole("combobox", { name: /接收教師/ }))
+
+    expect(await screen.findByRole("option", { name: /李教師/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /王教師/ })).not.toBeInTheDocument()
+  })
+
+  it("轉讓送出的 body 恰為後端 TransferOwnerReq 的三個欄位", async () => {
+    // 🔴 契約測試，與後端 `test_et_owner_transfer.py::TestTransfer` 互為同一份契約的兩端。
+    // #288 的 CRITICAL 正是「沒有任何一層驗過前端組出的 payload 能通過後端 schema」。
+    let body: Record<string, unknown> | undefined
+    server.use(
+      http.post("/api/et/courses/:courseId/transfer-owner", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ course_id: 1, owner_id: "U2", version: 6 })
+      }),
+    )
+
+    await coursesApi.transferOwner(1, { to_owner_id: "U2", reason: "原教師離職", version: 5 })
+
+    expect(Object.keys(body ?? {}).sort()).toEqual(["reason", "to_owner_id", "version"])
+    expect(body).toEqual({ to_owner_id: "U2", reason: "原教師離職", version: 5 })
+  })
+})

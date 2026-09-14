@@ -454,6 +454,45 @@ export function EtCourseEditorPage() {
   })
 
   /**
+   * 轉讓擁有者（ET-13 / #303）。
+   *
+   * 「接收者不具教師角色」（422 `ET_OWNER_001`）與「已是擁有者」（409 `ET_OWNER_002`）
+   * 在 `mutationFn` 內就地轉成視窗內的錯誤訊息、**不往外拋**：兩者都是「選錯人」，
+   * 使用者改個選項就該能再送，飄一則 toast 反而讓他看不出是哪一欄的問題。
+   *
+   * 走 `onError` 的話 `mutateAsync` 仍會 reject（#284 在問卷送出的 409 上踩過這個坑）。
+   * 樂觀鎖衝突則仍交給 `handleError` 的專屬 Dialog——那要使用者確實知道沒存進去。
+   */
+  const transferMut = useMutation({
+    mutationFn: async (payload: { toOwnerId: string; reason: string }) => {
+      try {
+        return await coursesApi.transferOwner(courseId as number, {
+          to_owner_id: payload.toOwnerId,
+          reason: payload.reason,
+          version: course?.version ?? 0,
+        })
+      } catch (err) {
+        const { errorCode, errorMessage } = toApiError(err)
+        if (errorCode === "ET_OWNER_001" || errorCode === "ET_OWNER_002") {
+          setTransferError(errorMessage)
+          return undefined
+        }
+        throw err
+      }
+    },
+    onSuccess: (result) => {
+      // `undefined` = 選錯人，錯誤已顯示在視窗內，視窗要留著讓管理者改選
+      if (result === undefined) return
+      message.success("已轉讓擁有者")
+      setTransferOpen(false)
+      setTransferError(null)
+      // 重載課程詳細——`is_owner` 隨即變為 false，整頁切換成檢視模式
+      invalidate()
+    },
+    onError: handleError,
+  })
+
+  /**
    * 缺漏項目所指的測驗名稱——後端只回 `target_id`，名稱由前端自課程詳細對照。
    *
    * `items` 以 `?? []` 兜底：後端恆回此欄位，但少一個欄位不該讓整個編輯頁白畫面
@@ -1303,15 +1342,13 @@ export function EtCourseEditorPage() {
       {course !== undefined && (
         <TransferOwnerDialog
           open={transferOpen}
-          submitting={false}
+          submitting={transferMut.isPending}
           courseName={course.course_name}
           currentOwnerName={course.owner_name ?? course.owner_id}
           // 現任擁有者不列入可選——選了必定回 409 `ET_OWNER_002`
           teachers={teachers.filter((t) => t.user_id !== course.owner_id)}
           error={transferError}
-          onSubmit={() => {
-            /* 階段 A：純版面，尚未接線 */
-          }}
+          onSubmit={(toOwnerId, reason) => transferMut.mutate({ toOwnerId, reason })}
           onClose={() => {
             setTransferOpen(false)
             setTransferError(null)
