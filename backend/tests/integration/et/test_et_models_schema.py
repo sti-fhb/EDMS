@@ -25,7 +25,7 @@ from app.et.constants import (
     SURVEY_QUESTION_SINGLE,
 )
 from app.et.course.models import EtChapter, EtCourse, EtItem
-from app.et.invitation.models import EtInvitation, EtOwnerTransfer
+from app.et.invitation.models import EtInvitation
 from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtEnrollment, EtProgress, EtProgressInterval, EtProgressVideo
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
@@ -329,18 +329,6 @@ class TestInvitationAndStats:
                     status=INVITATION_PENDING,
                     sent_at=_now(),
                     last_sent_at=_now(),
-                )
-            )
-        )
-        db.add(
-            EtOwnerTransfer(
-                **_audit_ao(
-                    course_id=course.course_id,
-                    from_owner_id=_U,
-                    to_owner_id="OTHER",
-                    reason="原教師離職",
-                    executed_by=_U,
-                    executed_at=_now(),
                 )
             )
         )

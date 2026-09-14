@@ -45,7 +45,6 @@
 | 重考次數重置 | ET_QUIZ_RETRY_RESET | 明細 | 測驗作答主檔 | 教師重置某學員某測驗重考次數之紀錄（append-only，作為已用次數之計算基準）（2026-08-19 新增）|
 | 作答明細 | ET_QUIZ_ATTEMPT_D | 明細 | 各題作答明細 | 學員於某次 attempt 之各題作答內容與得分 |
 | 邀請紀錄 | ET_INVITATION | 主表 | Email 邀請 | Email 邀請寄送紀錄（含課程、Email、狀態）|
-| 擁有者轉讓紀錄 | ET_OWNER_TRANSFER | 主表 | 擁有者轉讓 | 管理者代為轉讓課程擁有者之稽核紀錄 |
 | 課後問卷 | ET_SURVEY | 主表 | 課後問卷 | 課程之課後回饋問卷（0～1 份 / 課程）；有人填答後題目凍結 |
 | 問卷題目 | ET_SURVEY_QUESTION | 主表 | 問卷題目 | 問卷下之單選題（題幹、順序）|
 | 問卷選項 | ET_SURVEY_OPTION | 明細 | 問卷選項 | 問卷題目之選項（如 滿意 / 普通 / 不滿意），教師自訂 |
@@ -155,7 +154,7 @@
 | 4 | 課程狀態 | STATUS | VARCHAR(20) | Y | 參見 Lookup `ET_COURSE_STATUS`（DRAFT / PUBLISHED / CLOSED；PUBLISHED ⇄ CLOSED 可逆）|
 | 5 | 開放起始時間 | OPEN_START_AT | TIMESTAMP | N | 閱課期間起；發布時必填（應用層檢核）；起始前學員不可見 |
 | 6 | 開放訖止時間 | OPEN_END_AT | TIMESTAMP | N | 閱課期間迄；發布時必填；到期系統自動轉 CLOSED；再開課時重設 |
-| 7 | 擁有者 ID | OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID；建立當下記錄；本欄位永久不可變更（管理者代為轉讓為例外，需寫 ET_OWNER_TRANSFER）|
+| 7 | 擁有者 ID | OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID；建立當下記錄；**本欄位永久不可變更、無例外**（2026-09-14 裁示取消擁有者轉讓；必要時僅能直接改 DB）|
 | 8 | 邀請碼 | INVITATION_CODE | VARCHAR(8) | N | 8 碼純數字，唯一；**草稿無碼、課程發布時系統自動產生**（發布後永久不可變更）；DB 設 NULLable，發布後之非空由應用層保證；課程關閉期間失效 |
 | 9 | 首次發布時間 | FIRST_PUBLISHED_AT | TIMESTAMP | N | 第一次發布之時間戳；**僅供稽核、不顯示於 UI**（開課日期語意已移交 OPEN_START_AT；歷經再開課不變）|
 | 10 | 最近關閉時間 | CLOSED_AT | TIMESTAMP | N | 最近一次狀態變更為 CLOSED 之時間戳（再開課後保留供追溯）|
@@ -491,7 +490,7 @@
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- **append-only**：每次重置 INSERT 一筆，不可修改 / 刪除（稽核完整性，比照 `ET_OWNER_TRANSFER`）；同一學員同一測驗可重置多次
+- **append-only**：每次重置 INSERT 一筆，不可修改 / 刪除（稽核完整性）；同一學員同一測驗可重置多次
 - **已用重考次數之計算**（取代原「歸 0」之刪除語意）：
   - 總作答次數 `total` = COUNT(該學員該測驗之 ET_QUIZ_ATTEMPT_M)
   - 基準 `base` = MAX(ATTEMPT_COUNT_AT_RESET)（無重置紀錄時為 0）
@@ -546,25 +545,6 @@
 - 「再次寄送」更新 LAST_SENT_AT，不建新紀錄
 - 「撤回」更新 STATUS = REVOKED 與 REVOKED_AT；該 token 失效
 - 每次寄送（含首次與再次寄送）更新 SEND_STATUS_CODE；寄送失敗時 STATUS 維持 PENDING（列於 US12 待加入清單、可重寄），不因寄信失敗回滾邀請
-
----
-
-### 擁有者轉讓紀錄（ET_OWNER_TRANSFER）
-
-| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
-|---|---------|---------|---------|------|------|
-| 1 | 轉讓 ID | TRANSFER_ID | BIGINT | PK | 主鍵 |
-| 2 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
-| 3 | 轉讓前擁有者 | FROM_OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
-| 4 | 轉讓後擁有者 | TO_OWNER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
-| 5 | 轉讓原因 | REASON | TEXT | Y | 管理者填寫之原因（如「原教師離職」）|
-| 6 | 執行管理者 | EXECUTED_BY | VARCHAR(20) | Y | FK → DP_USER.USER_ID；執行轉讓之管理者 |
-| 7 | 執行時間 | EXECUTED_AT | TIMESTAMP | Y | |
-| - | 標準欄位 | — | — | — | （同上）|
-
-**業務規則**:
-- 每筆轉讓 INSERT 一筆紀錄，不可修改 / 刪除（稽核完整性）
-- 同時更新 ET_COURSE.OWNER_ID = TO_OWNER_ID
 
 ---
 
@@ -844,7 +824,6 @@ erDiagram
     ET_COURSE ||--o{ ET_CHAPTER : contains
     ET_COURSE ||--o{ ET_ENROLLMENT : enrolls
     ET_COURSE ||--o{ ET_INVITATION : invites
-    ET_COURSE ||--o{ ET_OWNER_TRANSFER : transfers
     ET_COURSE ||--o| ET_SURVEY : has_survey
     ET_COURSE ||--o{ ET_WEEKLY_STAT : snapshots
     ET_COURSE ||--o{ ET_APPROVAL : approves

@@ -1,7 +1,10 @@
-"""ET 邀請與擁有者轉讓 model（ET_INVITATION / ET_OWNER_TRANSFER）。
+"""ET 邀請 model（ET_INVITATION）。
 
 `ET_INVITATION` 為 **Email 邀請**紀錄（標籤自動邀請直接寫 `ET_ENROLLMENT`、不經本表）。
-`ET_OWNER_TRANSFER` 為 append-only 稽核紀錄。
+
+> 本檔原另含 `EtOwnerTransfer`（`ET_OWNER_TRANSFER`）。2026-09-14 裁示取消擁有者轉讓
+> 功能——`ET_COURSE.OWNER_ID` 建立後即為終局，無人可於系統內變更——該 model 與表
+> 一併移除（migration `b3e91c4a7d28`）。
 """
 
 from datetime import datetime
@@ -15,12 +18,11 @@ from sqlalchemy import (
     Index,
     PrimaryKeyConstraint,
     String,
-    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.base_model import AuditLogBaseModel, BaseModel
+from app.core.base_model import BaseModel
 
 
 class EtInvitation(BaseModel):
@@ -58,33 +60,3 @@ class EtInvitation(BaseModel):
     joined_at: Mapped[Optional[datetime]] = mapped_column("JOINED_AT", DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[Optional[datetime]] = mapped_column("REVOKED_AT", DateTime(timezone=True), nullable=True)
     send_status_code: Mapped[Optional[str]] = mapped_column("SEND_STATUS_CODE", String(20), nullable=True)
-
-
-class EtOwnerTransfer(AuditLogBaseModel):
-    """課程擁有者轉讓紀錄（ET_OWNER_TRANSFER；append-only、僅 CREATED_*）。
-
-    `ET_COURSE.OWNER_ID` 原則上永久不可變更；**例外**為擁有者離職 / 帳號失能時由
-    管理者代為轉讓——每次轉讓 INSERT 一列、不可修改 / 刪除（稽核完整性），
-    同時更新 `ET_COURSE.OWNER_ID`。一般教師不可主動轉讓。
-
-    另需寫入平台 `DP_AUDIT_LOG`（`FUNC_NAME=ET-OWNER`）。
-    """
-
-    __tablename__ = "ET_OWNER_TRANSFER"
-    __table_args__ = (
-        PrimaryKeyConstraint("TRANSFER_ID", name="PK_ET_OWNER_TRANSFER"),
-        Index("IX_ET_OWNER_TRANSFER_COURSE", "COURSE_ID"),
-    )
-
-    transfer_id: Mapped[int] = mapped_column("TRANSFER_ID", BigInteger, Identity(), nullable=False)
-    course_id: Mapped[int] = mapped_column(
-        "COURSE_ID",
-        BigInteger,
-        ForeignKey("ET_COURSE.COURSE_ID", name="FK_ET_OWNER_TRANSFER_COURSE"),
-        nullable=False,
-    )
-    from_owner_id: Mapped[str] = mapped_column("FROM_OWNER_ID", String(20), nullable=False)
-    to_owner_id: Mapped[str] = mapped_column("TO_OWNER_ID", String(20), nullable=False)
-    reason: Mapped[str] = mapped_column("REASON", Text, nullable=False)
-    executed_by: Mapped[str] = mapped_column("EXECUTED_BY", String(20), nullable=False)
-    executed_at: Mapped[datetime] = mapped_column("EXECUTED_AT", DateTime(timezone=True), nullable=False)

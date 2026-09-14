@@ -111,4 +111,5 @@ export const coursesApi = {
     const { data } = await http.post<CourseStatusResult>(`/et/courses/${courseId}/reopen`, payload)
     return data
   },
+
 }

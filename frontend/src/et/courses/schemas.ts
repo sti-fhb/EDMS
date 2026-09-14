@@ -184,3 +184,4 @@ export interface CourseListParams {
 
 /** 關鍵字長度上限，對齊後端 `Query(max_length=100)`。兩邊必須一起改。 */
 export const KEYWORD_MAX_LENGTH = 100
+

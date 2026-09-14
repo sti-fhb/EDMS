@@ -88,6 +88,30 @@ _status_rate_limit: Final = [
     Depends(rate_limit_by_ip(_status_ip_limiter, _STATUS_SCOPE)),
 ]
 
+#: 新增章節之上限（每分鐘）。**與 `_STATUS_RATE_MAX` 分桶**。
+#:
+#: 自 #303 起，對已發布課程新增章節會對**全班在籍學員**各寄一封 `COURSE_UPDATE`：
+#: 一次 POST = N 次「查範本 + 寫 outbox」，N 等於在籍人數、無上界。掛「全體」標籤的
+#: 課程發布時會把全站學員帶入，於是 N 可以是整個組織。
+#:
+#: 門檻取 30：「儲存並繼續新增」是連續操作（#203），教師一口氣建十幾個章節是正常的；
+#: 30 容得下那種用法，但把「每秒數發」的放大關掉。
+_CHAPTER_RATE_MAX: Final = 30
+
+#: 同一 IP 每分鐘之合計上限。比照 `survey_fill` 的 1 : 10 比例放寬，避免誤傷同一 NAT
+#: 出口的教師群。
+_CHAPTER_IP_RATE_MAX: Final = 300
+
+_chapter_limiter = SlidingWindowRateLimiter(max_requests=_CHAPTER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_chapter_ip_limiter = SlidingWindowRateLimiter(max_requests=_CHAPTER_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+
+_CHAPTER_SCOPE: Final = "et-course-chapter"
+
+_chapter_rate_limit: Final = [
+    Depends(rate_limit_by_et_user(_chapter_limiter, _CHAPTER_SCOPE)),
+    Depends(rate_limit_by_ip(_chapter_ip_limiter, _CHAPTER_SCOPE)),
+]
+
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
 _publish_service = EtPublishService()
@@ -230,6 +254,16 @@ async def delete_course(
     "/courses/{course_id}/chapters",
     response_model=ChapterItem,
     status_code=status.HTTP_201_CREATED,
+    # ET-13：本端點自 #303 起會對**全班在籍學員**各寄一封 `COURSE_UPDATE`，成了一個
+    # 群發放大面——N 無上界、觸發成本卻只是一次 POST。故補上兩道：
+    #
+    # 1. **角色閘**：原本只有 router-level 的 `get_et_context`（任一 ET 角色即可，而學員
+    #    角色人人自動有）＋ service 的 `ensure_owner`。教師角色被停用是離職 / 轉調的標準
+    #    第一步，但只要帳號仍 ACTIVE、`OWNER_ID` 仍是他，他就還能新增章節並觸發群發。
+    #    （`PUT`/`DELETE /courses/{id}` 等同型缺口屬既有行為，已登記於 #301。）
+    # 2. **限流**：自建分桶，**不併入 `_status_rate_limit`**——那個桶的門檻是照「一天按
+    #    不到 5 次」設的，而「儲存並繼續新增」是連續操作，併進去會誤擋。
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_chapter_rate_limit],
 )
 async def add_chapter(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],

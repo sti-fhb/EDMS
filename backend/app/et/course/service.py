@@ -54,8 +54,10 @@ from app.et.course.schemas import (
     ItemRow,
     TagOption,
 )
+from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.material.repository import EtMaterialRepository
+from app.et.notify.course_update import CourseUpdateMailer
 from app.et.notify.mailer import CourseInviteMailer
 from app.et.quiz.repository import EtQuizRepository
 from app.et.roles.authz import ET_ADMIN, ET_STUDENT, ET_TEACHER
@@ -83,6 +85,8 @@ class EtCourseService:
         audit: AuditLogService | None = None,
         tag_invite: EtTagInviteRepository | None = None,
         invite_mailer: CourseInviteMailer | None = None,
+        enrollments: EtEnrollmentRepository | None = None,
+        course_update_mailer: CourseUpdateMailer | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._tags = tags or EtCourseTagRepository()
@@ -93,6 +97,8 @@ class EtCourseService:
         self._audit = audit or AuditLogService()
         self._tag_invite = tag_invite or EtTagInviteRepository()
         self._invite_mailer = invite_mailer or CourseInviteMailer()
+        self._enrollments = enrollments or EtEnrollmentRepository()
+        self._course_update_mailer = course_update_mailer or CourseUpdateMailer()
 
     # ── 課程 ────────────────────────────────────────────────────────────────
 
@@ -333,11 +339,53 @@ class EtCourseService:
     async def add_chapter(
         self, db: AsyncSession, course_id: int, req: ChapterCreateReq, *, operator: OperatorInfo
     ) -> ChapterItem:
-        """新增章節，追加至最末。"""
-        await self._require_owned(db, course_id, operator.user_id)
+        """新增章節，追加至最末；**已發布課程另通知在籍學員**（ET-13 / #303）。
+
+        ## 為何通知掛在這裡而不是新開一支端點
+
+        `spec_us3` 場景 29 的觸發條件就是「已發布課程新增章節」——那即是本方法。獨立
+        端點會讓「新增了章節但忘記通知」成為可能，而那個漏失沒有任何地方會察覺。
+
+        ## 草稿不通知
+
+        草稿對學員不可見、也不會有 enrollment。判定看**課程狀態**而非「有沒有人」——
+        後者在資料異常（草稿卻有選課列）時會寄出一封指向學員進不去的課程的信。
+
+        ## 寄信失敗不影響章節
+
+        `EtNotifier` 於唯一出口吞掉 `AppError`（見其 docstring）：管理者停用範本或收件人
+        超上限時，章節仍然建立成功。本方法**不因寄信結果改變任何回傳值**。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
         chapter = await self._chapters.append(db, course_id, req.chapter_name, operator)
+        if course.status == COURSE_PUBLISHED:
+            await self._notify_chapter_added(db, course, req.chapter_name)
+        # ⚠️ 稽核**刻意排在通知之後**：`AuditLogService.log_action` 會取
+        # `pg_advisory_xact_lock`，而那是**交易層級**鎖——持有到整個外層交易 commit 為止
+        # （見 `dp/audit/repository.acquire_chain_lock` 的 docstring）。若先寫稽核，接下來
+        # 逐人寄信的 N 次查詢全程都握著**全平台唯一**的稽核鏈鎖，期間任何人的登入、DM
+        # 送審、DP 帳號異動的稽核寫入都得排隊。
+        #
+        # 該 docstring 自己寫了「因會呼叫稽核的情境頻率不高，可接受；若未來高頻呼叫需
+        # 縮小臨界區再評估」——本路徑正是它預留的那個情況。順序一換，鎖的持有時間就只
+        # 剩 commit 本身。
         await self._log(db, "CREATE", operator.user_id, course_id, "新增章節")
         return ChapterItem.model_validate(chapter)
+
+    async def _notify_chapter_added(self, db: AsyncSession, course, chapter_name: str) -> None:
+        """對在籍學員寄課程內容更新通知（`COURSE_UPDATE`）。
+
+        完課狀態的「回退為進行中」**不在此寫入任何欄位**（#303 SA Q1 裁示 A）：
+        `ET_ENROLLMENT.COMPLETION_STATUS` 在現行程式碼中只被寫一次（加入課程時的
+        `NOT_STARTED`）且**從未被讀**——所有讀取端自 #284 起一律以
+        `derive_completion_status(done, total)` 即時導出。新增章節使項目總數變大，
+        狀態自動從「已完成」回到「進行中」；再寫一份欄位只會多一個會與導出值分歧的
+        事實來源，而分歧的表現（清單說已完成、追蹤說進行中）沒有任何地方會察覺。
+        """
+        user_ids = await self._enrollments.enrolled_user_ids(db, course.course_id)
+        await self._course_update_mailer.send_course_update(
+            db, course=course, new_chapter_name=chapter_name, user_ids=user_ids
+        )
 
     async def rename_chapter(
         self, db: AsyncSession, chapter_id: int, req: ChapterRenameReq, *, operator: OperatorInfo

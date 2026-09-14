@@ -27,7 +27,6 @@
 - [ ] T016 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_M** 測驗作答主檔（含 **ATTEMPT_NO**〔(USER_ID, QUIZ_ID, ATTEMPT_NO) 邏輯唯一〕、QUESTION_ORDER / OPTION_ORDER / 規則快照欄位）（2026-08-19 補 ATTEMPT_NO）
 - [ ] T017 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_D** 作答明細（含題目 / 選項 / 配分快照欄位）
 - [ ] T018 [P] 建立資料庫 Migration：**ET_INVITATION** 邀請紀錄，含 TOKEN 唯一索引
-- [ ] T019 [P] 建立資料庫 Migration：**ET_OWNER_TRANSFER** 擁有者轉讓稽核紀錄
 - [ ] T020 [P] ~~建立 ET_PARAM 系統參數 Migration~~ **廢除**：系統參數集中於平台 `DP_PARAM`（前綴 `ET_`），由平台 DP 建表；ET 不建 param migration（2026-07-08 集中化）
 - [ ] T021 定義 Lookup 代碼**應用層常數**（ET_USER_ROLE_TYPE、ET_COURSE_STATUS〔DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除〕、ET_ENROLLMENT_SOURCE〔含 TAG_DEFAULT〕、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類；另 T156 增列 ET_APPROVAL_RESULT，合計 9 類），參照 data-model.md §Lookup 代碼定義。**（2026-08-20 定案：不建 lookup 表、不 seed 資料——本專案無 lookup 表機制，比照 DM 以模組層常數表達，如 `app/dm/detail/repository.py` 之 `_OBSOLETE`；DB 欄位維持 `VARCHAR`、值域由應用層把關）**
 - [ ] T022 建立 ET_TAG 初始資料（5 筆：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師，皆 IS_BUILTIN），參照 data-model.md（2026-07-02 改寫，原 ET_MODULE 7 筆廢除）
@@ -250,12 +249,10 @@
 
 ---
 
-## Phase 15: 章節更新通知與擁有者轉讓（跨 US 補強）
+## Phase 15: 章節更新通知（跨 US 補強）
 
 - [ ] T112 實作章節更新通知 Service：教師於已發布課程新增章節時自動寄信通知所有 ET_ENROLLMENT（過濾 IS_REMOVED）；同時將該課程已完課學員之完課狀態回退為 IN_PROGRESS（已填問卷不失效）
 - [ ] T113 實作章節更新通知寄送（平台範本 `DP_NOTIFY_TEMPLATE` `MODULE=ET` / `TEMPLATE_CODE=COURSE_UPDATE`）：呼叫平台發信服務傳 template_code + 變數（user_name、course_name、new_chapter_name、course_link）（2026-07-08 集中化：範本存平台 `DP_NOTIFY_TEMPLATE`）
-- [ ] T114 實作擁有者轉讓 Service：管理者執行；寫入 ET_OWNER_TRANSFER 稽核紀錄；更新 ET_COURSE.OWNER_ID
-- [ ] T115 實作擁有者轉讓 UI（於 US1 權限管理頁或 US7 課程列表延伸）：管理者選擇課程與接收教師、填寫原因、確認轉讓
 
 ---
 
@@ -439,7 +436,7 @@ Phase 16 (整合收尾，含 T152~T155、T163 新增情境)
 | US10 個人資料維護（P2）| **1**（原 5，廢除 4；個資維護由 DP 提供，ET 僅留導向連結）|
 | US11 課程關閉與再開課（P3）| 5 |
 | US12 待加入邀請追蹤（P3）| 5 |
-| 跨 US 補強（章節通知 / 擁有者轉讓）| 4 |
+| 跨 US 補強（章節通知）| 2 |
 | 整合與收尾 | 9 |
 | Phase 17：2026-07-02 變更新增 | 27（Migrations 5、標籤 2、自動邀請 2、時窗 2、問卷 4、排程 4、明細 2、範本 1、整測 4、週報 CSV 下載端點 1〔T164，2026-08-19 新增〕）|
 | Phase 18：2026-07-17 線下核可（US16 / US17）| 8（Migration 1、核可作業 5、查詢 1、整測 1）|

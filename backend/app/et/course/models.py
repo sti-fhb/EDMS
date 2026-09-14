@@ -38,8 +38,9 @@ class EtCourse(BaseModel):
     `INVITATION_CODE`：8 碼純數字、全域唯一；**草稿無碼、發布時系統自動產生**、
     發布後永久不可變更。DB 設 NULLable，發布後之非空由應用層保證。
 
-    `OWNER_ID` 建立當下記錄、**永久不可變更**——例外為管理者代為轉讓（離職 / 帳號失能），
-    須另寫 `ET_OWNER_TRANSFER` 稽核紀錄。
+    `OWNER_ID` 建立當下記錄、**永久不可變更，且無例外**——2026-09-14 裁示取消擁有者
+    轉讓功能（教師與管理者皆不可），本欄位在應用層只有 `create_draft` 一個寫入點。
+    極少數必須強制接手的情況改由直接修改資料庫處理，該路徑不留應用層紀錄。
 
     `FIRST_PUBLISHED_AT` 僅供稽核、不顯示於 UI（開課日期語意已移交 `OPEN_START_AT`，
     歷經再開課不變）。`URGENT_REMIND_SENT` 於再開課重設起訖時歸 false。
