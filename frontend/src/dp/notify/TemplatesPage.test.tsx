@@ -120,14 +120,13 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     expect(await screen.findByText("範本已更新")).toBeInTheDocument()
   })
 
-  it("行內改管道 → 即時儲存成功", async () => {
+  it("管道為唯讀：顯示現值文字、無下拉可改（#307）", async () => {
     const user = userEvent.setup()
     renderWithProviders(<TemplatesPage />)
     await gotoEtTab(user)
-    // 管道下拉（MUI Select 以 combobox 呈現）改為「系統內部+email」
-    const select = await screen.findByRole("combobox")
-    await user.click(select)
-    await user.click(await screen.findByRole("option", { name: "系統內部+email" }))
-    expect(await screen.findByText("範本已更新")).toBeInTheDocument()
+    // 現值仍看得見——管理者需能回答「這則通知是走 Email 還是靠畫面呈現」
+    expect(await screen.findByText("Email")).toBeInTheDocument()
+    // 但沒有任何編輯入口（原本管道欄是 MUI Select，以 combobox 呈現）
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
   })
 })

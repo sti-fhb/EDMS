@@ -140,14 +140,18 @@ async def test_system_template_block_disable(db, admin_gate):
 
 
 async def test_system_template_block_channel_msg(db, admin_gate):
-    """系統信不可把 channel 改為 MSG（移除 Email 通道＝實質停用）→ DP_MAIL_003（Security Review）。"""
+    """系統信改 channel 為 MSG 仍被擋——#307 起由「channel 一律不可改」的通則涵蓋（DP_MAIL_009）。
+
+    原以 DP_MAIL_003（系統信保護）擋；該分支於 #307 移除，因 channel 對所有範本皆不可改，
+    系統信不再需要專屬判斷。
+    """
     admin_gate()
     await _make_template(db, module="DP", code="SYS_CH", is_system=True, version=1)
     with pytest.raises(AppError) as exc:
         await TemplateAdminService().update_template(
             db, module="DP", template_code="SYS_CH", data=_upd(channel="MSG", is_enabled=True, version=1), operator=_OP
         )
-    assert exc.value.status_code == 403 and exc.value.error_code == "DP_MAIL_003"
+    assert exc.value.status_code == 403 and exc.value.error_code == "DP_MAIL_009"
 
 
 async def test_system_template_subject_editable(db, admin_gate):
@@ -204,17 +208,24 @@ async def test_update_not_found(db, admin_gate):
 # ---- 管道含站內可存（AC8）----
 
 
-async def test_update_channel_both_allowed(db, admin_gate):
+async def test_update_channel_change_rejected(db, admin_gate):
+    """改 channel 一律被拒（#307）：CHANNEL 與實際遞送／呈現的對應寫在程式裡，非資料驅動。
+
+    原測試斷言非系統信可改為 BOTH。#307 推翻：改成 MSG 會讓通知靜默消失（send_email 回
+    CHANNEL_NOT_EMAIL、queued_count=0，且不會因此多出任何畫面呈現）；改成 EMAIL 則會把
+    為站內訊息佇列準備的內容當 Email 寄出。兩個方向都不報錯，故一律唯讀。
+    """
     admin_gate(et_admins=("etadmin",))
-    await _make_template(db, module="ET", code="ET_CH", version=1)
-    resp = await TemplateAdminService().update_template(
-        db,
-        module="ET",
-        template_code="ET_CH",
-        data=_upd(channel="BOTH", version=1),
-        operator=OperatorInfo(user_id="etadmin"),
-    )
-    assert resp.channel == "BOTH"
+    await _make_template(db, module="ET", code="ET_CH", channel="EMAIL", version=1)
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module="ET",
+            template_code="ET_CH",
+            data=_upd(channel="BOTH", version=1),
+            operator=OperatorInfo(user_id="etadmin"),
+        )
+    assert exc.value.status_code == 403 and exc.value.error_code == "DP_MAIL_009"
 
 
 # ---- HTTP 端點抽樣（router→schema→service 串接）----

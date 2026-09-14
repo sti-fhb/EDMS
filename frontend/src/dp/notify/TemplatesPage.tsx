@@ -1,10 +1,8 @@
 import EmailIcon from "@mui/icons-material/Email"
 import Button from "@mui/material/Button"
-import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
 import Tabs from "@mui/material/Tabs"
-import TextField from "@mui/material/TextField"
 import { useMemo, useState } from "react"
 
 import { TemplateForm } from "./TemplateForm"
@@ -35,7 +33,7 @@ const CHANNELS: { value: Channel; label: string }[] = [
  * 系統信可編主旨 / 內文但不可停用、不可移除 Email 通道；儲存採 VERSION 樂觀鎖，衝突時提示重載。
  */
 export function TemplatesPage() {
-  const { templates, loading, refresh, formVisible, editingRecord, saving, openEdit, closeForm, changeChannel, toggleEnabled, saveContent } =
+  const { templates, loading, refresh, formVisible, editingRecord, saving, openEdit, closeForm, toggleEnabled, saveContent } =
     useTemplates()
   const [module, setModule] = useState("DP")
 
@@ -54,22 +52,11 @@ export function TemplatesPage() {
         key: "channel",
         title: "管道",
         width: 220,
-        render: (_v, r) => (
-          <TextField
-            select
-            size="small"
-            value={r.channel}
-            onChange={(e) => changeChannel(r, e.target.value as Channel)}
-            sx={{ width: 190 }}
-          >
-            {/* 系統信須保留 Email 通道（不可改為僅系統內部、否則等同停用），排除「系統內部」選項 */}
-            {CHANNELS.filter((c) => !(r.is_system && c.value === "MSG")).map((c) => (
-              <MenuItem key={c.value} value={c.value}>
-                {c.label}
-              </MenuItem>
-            ))}
-          </TextField>
-        ),
+        // #307：唯讀。管道與「實際怎麼送 / 怎麼呈現」的對應寫在程式裡、非資料驅動——改成
+        // 系統內部會讓通知靜默消失（不寄信，也不會因此多出畫面呈現），改成 Email 則會把為
+        // 站內訊息佇列準備的內容當信寄出。仍顯示現值：管理者需能回答「這則通知走 Email 還是
+        // 靠畫面呈現」。後端另以 DP_MAIL_009 擋（權限邊界在後端，此處只是不給入口）。
+        render: (_v, r) => <span>{CHANNELS.find((c) => c.value === r.channel)?.label ?? r.channel}</span>,
       },
       {
         key: "actions",
@@ -99,7 +86,7 @@ export function TemplatesPage() {
         ),
       },
     ],
-    [changeChannel, toggleEnabled, openEdit],
+    [toggleEnabled, openEdit],
   )
 
   const handleTabChange = (v: string) => {
