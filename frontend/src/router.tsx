@@ -7,8 +7,11 @@ import { VerifyEmailPage } from "./auth/VerifyEmailPage"
 import { AppShell } from "./layouts/AppShell"
 import {
   RequireDmAdmin,
+  RequireDmEditor,
   RequireDmPersonal,
   RequireDmReviewer,
+  RequireEtCourseCreator,
+  RequireEtCourseManager,
   RequireModule,
   RequireModuleAdmin,
 } from "./layouts/RequireAccess"
@@ -88,8 +91,24 @@ export const router = createBrowserRouter([
               { index: true, element: <Navigate to="/dm/library" replace /> },
               { path: "library", element: <DmLibraryPage /> },
               // US5 新增 / 編輯（靜態 new 置於動態 :docId 前，避免被誤捕）
-              { path: "documents/new", element: <DmEditorPage /> },
-              { path: "documents/:docId/edit", element: <DmEditorPage /> },
+              // #306：限 DM_EDITOR——#250 補了 review / me / change-log 的守衛卻漏了這兩條，
+              // 直接輸入網址會渲染出完整編輯器，填完按儲存才被後端 DM_AUTH_002 擋。
+              {
+                path: "documents/new",
+                element: (
+                  <RequireDmEditor>
+                    <DmEditorPage />
+                  </RequireDmEditor>
+                ),
+              },
+              {
+                path: "documents/:docId/edit",
+                element: (
+                  <RequireDmEditor>
+                    <DmEditorPage />
+                  </RequireDmEditor>
+                ),
+              },
               { path: "documents/:docId", element: <DmDetailPage /> },
               // #250：限 DM_REVIEWER——原本直接輸入網址會渲染出簽核畫面空殼
               {
@@ -142,8 +161,9 @@ export const router = createBrowserRouter([
             // 教育訓練模組殼（#202）：側欄 4 項對齊 wireframe ET 側欄；
             // 課程列表以外目前為 StubPage，功能於對應 US issue 填實。
             // #250：整段 /et 需任一 ET 角色（對齊側欄 requiresModule=ET）。
-            // 課程編輯等頁另需 TEACHER / ADMIN，但目前無對應的 access 端點可供前端判定，
-            // 故僅做群組層守衛，細粒度仍由後端 require_et_roles 把關（見 PR 說明之後續項）。
+            // #306：課程建立 / 編輯之細粒度守衛已補上——當初「無對應 access 端點可供前端判定」
+            // 的限制已不成立（`GET /et/courses/capabilities` 回 can_create_course /
+            // can_manage_courses）。權限邊界仍在後端 require_et_roles，前端只是不給空殼入口。
             path: "et",
             element: <RequireModule module="ET" />,
             children: [
@@ -151,8 +171,24 @@ export const router = createBrowserRouter([
               { index: true, element: <EtHomeRedirect /> },
               { path: "courses", element: <EtCourseListPage /> },
               // ET02 為課程列表之子頁、非側欄項目；靜態 new 置於動態 :courseId 前避免被誤捕
-              { path: "courses/new", element: <EtCourseEditorPage /> },
-              { path: "courses/:courseId", element: <EtCourseEditorPage /> },
+              // #306：建立限教師（can_create_course）；編輯既有課程用 can_manage_courses——
+              // 管理者不建課程但要能管理，兩者角色集不同（見 et/course/schemas.py）。
+              {
+                path: "courses/new",
+                element: (
+                  <RequireEtCourseCreator>
+                    <EtCourseEditorPage />
+                  </RequireEtCourseCreator>
+                ),
+              },
+              {
+                path: "courses/:courseId",
+                element: (
+                  <RequireEtCourseManager>
+                    <EtCourseEditorPage />
+                  </RequireEtCourseManager>
+                ),
+              },
               { path: "students", element: <EtStudentsPage /> },
               { path: "approvals", element: <EtApprovalQueryPage /> },
               { path: "my-courses", element: <EtMyCoursesPage /> },

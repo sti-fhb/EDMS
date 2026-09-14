@@ -4,7 +4,9 @@ import { Outlet } from "react-router-dom"
 import { AccessDenied } from "../components/AccessDenied"
 import { useDmAdminAccess } from "../dm/access/useDmAdminAccess"
 import { useDmReviewerAccess } from "../dm/access/useDmReviewerAccess"
+import { useLibraryCapabilities } from "../dm/library/useLibrary"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
+import { useEtCourseCapabilities } from "../et/courses/useCourses"
 import type { ModuleKey } from "./navItems"
 import { useModuleSummary } from "./useModuleSummary"
 
@@ -74,4 +76,45 @@ export function RequireDmPersonal({ children }: { children?: ReactNode }) {
   if (!summary) return null
   if (!hasDmRole) return <AccessDenied />
   return <Gate allowed={access?.can_access ?? false} pending={isPending || !access}>{children}</Gate>
+}
+
+/**
+ * 需具 DM 編輯者（文件新增 / 編輯，#306）。
+ *
+ * `can_create` 與文件庫「新增文件」按鈕同源——按鈕本來就依它隱藏，缺的是直接輸入網址時
+ * 的守衛（原僅群組層 `RequireModule`，會渲染出完整編輯器空殼）。
+ */
+export function RequireDmEditor({ children }: { children?: ReactNode }) {
+  const { data: summary } = useModuleSummary()
+  const hasDmRole = summary?.dm.has_role ?? false
+  const { data: caps, isPending } = useLibraryCapabilities(hasDmRole)
+  if (!summary) return null
+  if (!hasDmRole) return <AccessDenied />
+  return <Gate allowed={caps?.can_create ?? false} pending={isPending || !caps}>{children}</Gate>
+}
+
+/** 需具 ET 教師（建立課程，#306）；對齊「新增課程」入口之 `can_create_course`。 */
+export function RequireEtCourseCreator({ children }: { children?: ReactNode }) {
+  const { data: summary } = useModuleSummary()
+  const hasEtRole = summary?.et.has_role ?? false
+  const { data: caps, isPending } = useEtCourseCapabilities(hasEtRole)
+  if (!summary) return null
+  if (!hasEtRole) return <AccessDenied />
+  return <Gate allowed={caps?.can_create_course ?? false} pending={isPending || !caps}>{children}</Gate>
+}
+
+/**
+ * 需具 ET 教師**或管理者**（編輯既有課程，#306）。
+ *
+ * 用 `can_manage_courses` 而非 `can_create_course`：後者只涵蓋教師，而
+ * `app/et/course/schemas.py` 明載「管理者不建課程但要能管理，兩者的角色集不同」——
+ * 用 `can_create_course` 包這條路由會把純管理者擋在課程編輯頁外。
+ */
+export function RequireEtCourseManager({ children }: { children?: ReactNode }) {
+  const { data: summary } = useModuleSummary()
+  const hasEtRole = summary?.et.has_role ?? false
+  const { data: caps, isPending } = useEtCourseCapabilities(hasEtRole)
+  if (!summary) return null
+  if (!hasEtRole) return <AccessDenied />
+  return <Gate allowed={caps?.can_manage_courses ?? false} pending={isPending || !caps}>{children}</Gate>
 }

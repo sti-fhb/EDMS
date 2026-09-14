@@ -2,7 +2,16 @@ import { screen, waitFor } from "@testing-library/react"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 
-import { RequireDmAdmin, RequireDmPersonal, RequireDmReviewer, RequireModule, RequireModuleAdmin } from "./RequireAccess"
+import {
+  RequireDmAdmin,
+  RequireDmEditor,
+  RequireDmPersonal,
+  RequireDmReviewer,
+  RequireEtCourseCreator,
+  RequireEtCourseManager,
+  RequireModule,
+  RequireModuleAdmin,
+} from "./RequireAccess"
 import { renderWithProviders } from "../test/renderWithProviders"
 import { server } from "../test/server"
 
@@ -116,5 +125,107 @@ describe("RequireDmPersonal（個人專區）", () => {
     server.use(summaryHandler(false, false), http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })))
     renderWithProviders(<RequireDmPersonal>{CHILD}</RequireDmPersonal>)
     expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+})
+
+/** ET module-summary handler（`summaryHandler` 之 et.has_role 恆為 true，此處可控）。 */
+function etSummaryHandler(etHasRole: boolean) {
+  return http.get("/api/dp/user/module-summary", () =>
+    HttpResponse.json({
+      et: { has_role: etHasRole, is_admin: false },
+      dm: { has_role: false, is_admin: false },
+    }),
+  )
+}
+
+// #306：編輯器路由原本只有群組層 RequireModule，直接輸入網址會渲染出完整編輯器空殼。
+
+describe("RequireDmEditor", () => {
+  it("具 DM 角色但非編輯者（can_create=false）→ 無權限畫面，不渲染編輯器", async () => {
+    server.use(
+      summaryHandler(false, false),
+      http.get("/api/dm/library/capabilities", () => HttpResponse.json({ can_create: false })),
+    )
+    renderWithProviders(<RequireDmEditor>{CHILD}</RequireDmEditor>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+    expect(screen.queryByText("受保護內容")).not.toBeInTheDocument()
+  })
+
+  it("具編輯者 → 正常渲染子頁", async () => {
+    server.use(summaryHandler(false, false)) // 預設 handler：can_create=true
+    renderWithProviders(<RequireDmEditor>{CHILD}</RequireDmEditor>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+
+  it("無任何 DM 角色 → 無權限畫面，且不打 capabilities（避免非 DM 使用者觸發 403）", async () => {
+    let called = 0
+    server.use(
+      summaryHandler(false, false, false),
+      http.get("/api/dm/library/capabilities", () => {
+        called += 1
+        return HttpResponse.json({ can_create: true })
+      }),
+    )
+    renderWithProviders(<RequireDmEditor>{CHILD}</RequireDmEditor>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+    expect(called).toBe(0)
+  })
+})
+
+describe("RequireEtCourseCreator", () => {
+  it("非教師（can_create_course=false）→ 無權限畫面", async () => {
+    server.use(
+      etSummaryHandler(true),
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({ can_create_course: false, can_manage_courses: true, can_learn: true }),
+      ),
+    )
+    renderWithProviders(<RequireEtCourseCreator>{CHILD}</RequireEtCourseCreator>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+  })
+
+  it("具教師 → 正常渲染子頁", async () => {
+    server.use(etSummaryHandler(true)) // 預設 handler：can_create_course=true
+    renderWithProviders(<RequireEtCourseCreator>{CHILD}</RequireEtCourseCreator>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+})
+
+describe("RequireEtCourseManager", () => {
+  it("純管理者（can_create_course=false 但 can_manage_courses=true）→ 可進課程編輯頁", async () => {
+    // 用 can_create_course 包這條路由會誤擋純管理者——schema 明載兩者角色集不同
+    server.use(
+      etSummaryHandler(true),
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({ can_create_course: false, can_manage_courses: true, can_learn: true }),
+      ),
+    )
+    renderWithProviders(<RequireEtCourseManager>{CHILD}</RequireEtCourseManager>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+
+  it("純學員（兩者皆 false）→ 無權限畫面", async () => {
+    server.use(
+      etSummaryHandler(true),
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({ can_create_course: false, can_manage_courses: false, can_learn: true }),
+      ),
+    )
+    renderWithProviders(<RequireEtCourseManager>{CHILD}</RequireEtCourseManager>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+  })
+
+  it("無任何 ET 角色 → 無權限畫面，且不打 capabilities", async () => {
+    let called = 0
+    server.use(
+      etSummaryHandler(false),
+      http.get("/api/et/courses/capabilities", () => {
+        called += 1
+        return HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true })
+      }),
+    )
+    renderWithProviders(<RequireEtCourseManager>{CHILD}</RequireEtCourseManager>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+    expect(called).toBe(0)
   })
 })
