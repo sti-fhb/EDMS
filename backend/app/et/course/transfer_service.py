@@ -119,9 +119,27 @@ class EtOwnerTransferService:
             result="SUCCESS",
             operator_id=operator.user_id,
             target_id=str(course_id),
-            # 靜態文案——`sti-error-codes` 不得嵌入動態值。轉讓前後擁有者與原因落在
-            # `ET_OWNER_TRANSFER` 的欄位裡，那張表本來就是為此存在的。
+            # 靜態文案——`sti-error-codes` 不得嵌入動態值。
             description="轉讓課程擁有者",
+            # 轉讓前後擁有者走 `before_value` / `after_value`，**不是** `description`。
+            #
+            # `spec.md:177` 要求 `DP_AUDIT_LOG` 記錄「轉讓人 / 接收人 / 時間 / 原因」。
+            # 只寫 `target_id` + 靜態 description 的話那一列只說得出「某管理者對課程 X 做了
+            # 一次 ET-OWNER UPDATE」，連換給誰都查不到，而：
+            #
+            # 1. `ET_OWNER_TRANSFER` **沒有雜湊鏈**（append-only 僅靠應用層約定），把唯一
+            #    的實質證據放在那裡，等於 ET 權限面最高的操作沒有防竄改稽核；
+            # 2. 稽核 CSV 匯出的欄位**不含 `description`**（`query_service._CSV_COLUMNS`
+            #    只有時間 / 操作者 / 功能 / 類別 / 結果 / 對象 / IP / 異動前值 / 異動後值），
+            #    稽核人員匯出時前後值兩欄會是空的。
+            #
+            # 這兩欄會併入鏈式 `ROW_HASH`、經 `_mask_sensitive` 遮罩後 `json.dumps`，
+            # 不存在格式注入面（`dp/users/service.py`、`dm/roles/assign_service.py` 同用法）。
+            #
+            # ⚠️ `reason` **刻意不放進來**：它是使用者自由文字，留在
+            # `ET_OWNER_TRANSFER.REASON` 即可，沒必要塞進 append-only 的雜湊鏈。
+            before_value={"owner_id": from_owner_id},
+            after_value={"owner_id": req.to_owner_id},
             source_ip=get_client_ip(),
         )
         return TransferOwnerResult(
@@ -151,6 +169,9 @@ class EtOwnerTransferService:
                 EtUserRole.is_active.is_(True),
                 EtUserRole.deleted == 0,
                 DpUser.deleted == 0,
+                # 與 `_has_teacher_role` **必須同一組條件**：下拉列得出來、送出卻被擋，
+                # 或反過來（下拉沒有、直呼 API 卻成功），兩種都是 bug。
+                DpUser.status == "ACTIVE",
             )
             .order_by(DpUser.user_name, DpUser.user_id)
             .distinct()
@@ -165,13 +186,30 @@ class EtOwnerTransferService:
 
         比對 `IS_ACTIVE`（比照 `deps.require_et_roles`）：被停用的角色不算有，否則可以
         把課程轉給一位實質上已無教師權限的人。
+
+        ## 也要看 `DP_USER` 的帳號狀態
+
+        只查 `ET_USER_ROLE` 不夠：帳號已刪或已停用時，那列角色可能還在。而
+        `get_jwt_payload` 每個請求都擋掉 deleted / 非 `ACTIVE` 的帳號，接收者因此
+        **永遠登不進來**——結果正是本檢核要避免的那件事：一門沒有人能編輯的課程。
+        「離職接手」這個 use case 會一步踏進那個狀態。
+
+        ⚠️ **不納入 `LOCKED_UNTIL`**：帳號鎖定是暫時狀態（連續登入失敗），擋掉它只會
+        製造新的誤擋——那位教師過幾分鐘就能登入了。
+
+        > 與 #303 SA Q2 裁示 A 無關：那條談的是**原**擁有者是否須已離職，此處是
+        > **接收者**能不能用。兩者是不同的人、不同的問題。
         """
         found = await db.scalar(
-            select(EtUserRole.user_id).where(
+            select(EtUserRole.user_id)
+            .join(DpUser, DpUser.user_id == EtUserRole.user_id)
+            .where(
                 EtUserRole.user_id == user_id,
                 EtUserRole.role == ROLE_TEACHER,
                 EtUserRole.is_active.is_(True),
                 EtUserRole.deleted == 0,
+                DpUser.deleted == 0,
+                DpUser.status == "ACTIVE",
             )
         )
         return found is not None

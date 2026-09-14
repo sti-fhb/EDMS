@@ -358,9 +358,18 @@ class EtCourseService:
         """
         course = await self._require_owned(db, course_id, operator.user_id)
         chapter = await self._chapters.append(db, course_id, req.chapter_name, operator)
-        await self._log(db, "CREATE", operator.user_id, course_id, "新增章節")
         if course.status == COURSE_PUBLISHED:
             await self._notify_chapter_added(db, course, req.chapter_name)
+        # ⚠️ 稽核**刻意排在通知之後**：`AuditLogService.log_action` 會取
+        # `pg_advisory_xact_lock`，而那是**交易層級**鎖——持有到整個外層交易 commit 為止
+        # （見 `dp/audit/repository.acquire_chain_lock` 的 docstring）。若先寫稽核，接下來
+        # 逐人寄信的 N 次查詢全程都握著**全平台唯一**的稽核鏈鎖，期間任何人的登入、DM
+        # 送審、DP 帳號異動的稽核寫入都得排隊。
+        #
+        # 該 docstring 自己寫了「因會呼叫稽核的情境頻率不高，可接受；若未來高頻呼叫需
+        # 縮小臨界區再評估」——本路徑正是它預留的那個情況。順序一換，鎖的持有時間就只
+        # 剩 commit 本身。
+        await self._log(db, "CREATE", operator.user_id, course_id, "新增章節")
         return ChapterItem.model_validate(chapter)
 
     async def _notify_chapter_added(self, db: AsyncSession, course, chapter_name: str) -> None:

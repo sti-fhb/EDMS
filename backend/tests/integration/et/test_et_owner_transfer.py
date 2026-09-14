@@ -190,6 +190,11 @@ class TestTransfer:
         assert rows[0].created_user == admin
         assert rows[0].source_ip is not None, "關係到全部在籍學員的破例變更，須留來源 IP"
         assert receiver not in (rows[0].description or ""), "不得嵌入使用者 ID"
+        # `spec.md:177` 要求 DP_AUDIT_LOG 記錄轉讓人 / 接收人。它們走 before/after
+        # （會併入鏈式 ROW_HASH、且是 CSV 匯出實際含有的欄位），不是 description。
+        assert owner in (rows[0].before_value or "")
+        assert receiver in (rows[0].after_value or "")
+        assert "原教師離職" not in (rows[0].after_value or ""), "自由文字留在 ET_OWNER_TRANSFER"
         assert "原教師離職" not in (rows[0].description or ""), "原因落在 ET_OWNER_TRANSFER，不進 description"
 
     async def test_轉讓後擁有權易主(self, client, db) -> None:
@@ -271,6 +276,35 @@ class TestValidation:
         assert r.status_code == 409, r.text
         assert r.json()["error_code"] == "ET_OWNER_002"
         assert await _transfers(db, ctx["course_id"]) == []
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("deleted", 1), ("status", "INACTIVE")],
+    )
+    async def test_接收者帳號已刪或已停用回422(self, client, db, field: str, value) -> None:
+        """接收者的**帳號狀態**也要看，不只是 `ET_USER_ROLE`。
+
+        `get_jwt_payload` 每個請求都擋掉 deleted / 非 `ACTIVE` 的帳號，所以轉給這種人
+        的結果是**他永遠登不進來** —— 正好造出這道檢核要避免的東西：一門沒有人能編輯
+        的課程。而「離職接手」正是最可能踏進去的情境。
+
+        ⚠️ 與 #303 SA Q2 裁示 A 無關：那條談的是**原**擁有者是否須已離職；此處是
+        **接收者**能不能用，是不同的人、不同的問題。
+        """
+        from sqlalchemy import update as sa_update
+
+        admin = await _user(db, f"a_va07{field[:3]}", ROLE_ADMIN)
+        owner = await _user(db, f"t_va07{field[:3]}", ROLE_TEACHER)
+        receiver = await _user(db, f"t_va07{field[:3]}b", ROLE_TEACHER)
+        ctx = await _course(client, db, owner)
+        await db.execute(sa_update(DpUser).where(DpUser.user_id == receiver).values(**{field: value}))
+        await db.flush()
+
+        r = await _transfer(client, ctx["course_id"], actor=admin, to_owner=receiver, version=ctx["version"])
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_OWNER_001"
+        assert (await _course_row(db, ctx["course_id"])).owner_id == owner
 
     async def test_接收者不存在回422(self, client, db) -> None:
         """查無帳號者自然不具教師角色，走同一個碼——不另分一碼，因為管理者的下一步
