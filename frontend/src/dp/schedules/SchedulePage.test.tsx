@@ -46,6 +46,15 @@ describe("SchedulePage 排程作業總覽（可編輯）", () => {
     expect(screen.getByText("停用")).toBeInTheDocument() // ET 預留列
   })
 
+  it("顯示說明欄：管理者據此判斷 job 在做什麼（#311）", async () => {
+    renderWithProviders(<SchedulePage />)
+
+    // 先等資料列——表頭在載入前就渲染，findByRole("columnheader") 會立刻滿足
+    await screen.findByText(/SCHDP001/)
+    expect(screen.getByRole("columnheader", { name: "說明" })).toBeInTheDocument()
+    expect(screen.getByText(/停用連續閒置超過/)).toBeInTheDocument()
+  })
+
   it("點歷程 → 開 Dialog 顯示執行歷程", async () => {
     const user = userEvent.setup()
     renderWithProviders(<SchedulePage />)

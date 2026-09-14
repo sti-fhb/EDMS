@@ -48,6 +48,25 @@ async def test_list_schedules(client, db):
     assert jobs["SCHDP001"]["cron_expr"] and "is_enabled" in jobs["SCHDP001"]
 
 
+async def test_list_schedules_returns_description(client, db):
+    """#311：回傳說明欄，且 JOB_NAME 已拆短（工作內容改由 DESCRIPTION 承載）。
+
+    原本沒有說明欄，管理者只能靠 JOB_NAME 判斷 job 在做什麼——SCHDP001 因此被塞成
+    「平台每日作業（閒置帳號禁用 + 密碼到期提醒 + 清理逾期待驗證列）」，每次工作內容
+    變動都得改那串字並開一支 migration（見 070865346fb4）。
+    """
+    await _seed_user(db)
+    r = await client.get("/api/dp/schedules", headers=_auth())
+
+    assert r.status_code == 200
+    jobs = {j["job_id"]: j for j in r.json()}
+    dp001 = jobs["SCHDP001"]
+    assert dp001["job_name"] == "平台每日作業"  # 拆短：不再承載工作內容細節
+    # 三批工作內容移入說明（原本全塞在 JOB_NAME 裡）
+    desc = dp001["description"] or ""
+    assert "閒置" in desc and "密碼" in desc and "待驗證" in desc
+
+
 async def test_list_logs_paginated(client, db):
     """AC7：某 job 執行歷程（後端分頁）。"""
     await _seed_user(db)

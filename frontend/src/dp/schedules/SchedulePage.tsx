@@ -40,6 +40,14 @@ export function SchedulePage() {
   const columns = useMemo<AppColumn<ScheduleRow>[]>(
     () => [
       { key: "job_id", title: "Job", render: (_v, r) => `${r.job_id} — ${r.job_name}` },
+      // #311：說明欄——JOB_NAME 為短名詞，工作內容細節在此。文字較長，限寬並允許換行，
+      // 避免撐開其他欄位（表格為 tableLayout 預設，長字串會擠壓 cron / 時間欄）。
+      {
+        key: "description",
+        title: "說明",
+        width: 320,
+        render: (_v, r) => <span style={{ whiteSpace: "normal" }}>{r.description ?? "—"}</span>,
+      },
       { key: "module", title: "所屬模組", dataIndex: "module" },
       { key: "cron_expr", title: "Cron", dataIndex: "cron_expr" },
       {

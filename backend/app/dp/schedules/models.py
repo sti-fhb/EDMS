@@ -20,6 +20,11 @@ class DpSchedule(BaseModel):
 
     job_id: Mapped[str] = mapped_column("JOB_ID", String(20), nullable=False)
     job_name: Mapped[str] = mapped_column("JOB_NAME", String(100), nullable=False)
+    #: 這支 job 在做什麼（#311）。JOB_NAME 為短名詞、工作內容細節寫此欄——否則細節只能塞進
+    #: JOB_NAME，每次異動都得改那串字並開一支 migration（見 070865346fb4）。
+    #: 不開放 UI 編輯（ScheduleUpdate 未含此欄）：它描述的是程式行為，管理者改了不會改變
+    #: 行為，只會讓說明與實作不符。
+    description: Mapped[Optional[str]] = mapped_column("DESCRIPTION", String(200), nullable=True)
     module: Mapped[str] = mapped_column("MODULE", String(5), nullable=False)
     cron_expr: Mapped[str] = mapped_column("CRON_EXPR", String(50), nullable=False)
     handler_ref: Mapped[str] = mapped_column("HANDLER_REF", String(200), nullable=False)

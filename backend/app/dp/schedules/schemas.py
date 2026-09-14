@@ -13,6 +13,8 @@ class ScheduleResponse(BaseModel):
 
     job_id: str
     job_name: str
+    #: 這支 job 在做什麼（#311）；唯讀——`ScheduleUpdate` 刻意不含此欄。
+    description: Optional[str] = None
     module: str
     cron_expr: str
     is_enabled: bool

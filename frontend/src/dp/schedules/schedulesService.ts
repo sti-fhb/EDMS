@@ -5,6 +5,8 @@ import type { PagedResult } from "../../hooks/usePagedQuery"
 export interface ScheduleRow {
   job_id: string
   job_name: string
+  /** 這支 job 在做什麼（#311）；唯讀——不在 `ScheduleUpdatePayload` 內。 */
+  description: string | null
   module: string
   cron_expr: string
   is_enabled: boolean

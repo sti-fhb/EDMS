@@ -28,6 +28,7 @@
 - **FR-DP-US11-04**: job handler 由所屬模組提供並向引擎註冊；需要業務資料時反向 import 模組 service（平台 job → 模組 service）
 - **FR-DP-US11-05**: 平台自身排程 `SCHDP001`（每日）MUST 執行：① 閒置帳號禁用（`ACTIVE` 帳號 `LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`，天數為平台級參數；**`LAST_LOGIN_DATE` 為 null〔從未登入〕時以 `CREATED_DATE` 為閒置起算基準**；禁用寫稽核 `func_name=DP-USERS`、operator=SYSTEM）；② 密碼效期到期前提醒（`PWD_CHANGED_DATE`+`EXPIRY_DAYS` 距今 ≤ `EXPIRY_REMIND_DAYS`，預設到期前 7 天起、**每日跑均寄出直至變更 / 到期**，經 US6 寄 `MODULE=DP`「密碼到期提醒」）；兩者結果寫入稽核 / outbox，各批次逐筆容錯（單一使用者失敗不擋其他）
 - **FR-DP-US11-06**: DP 後台 MUST 提供排程總覽畫面（共用項，ET / DM 管理者皆可檢視）：job 清單（含下次執行時間）與執行歷程；**MAY 編輯 `JOB_NAME` / `CRON_EXPR` / 啟停（`IS_ENABLED`）**，`CRON_EXPR` / `IS_ENABLED` 變更即時套到運行中的引擎；**MUST NOT 提供手動補跑**（補跑各模組自理，FR-03）；**`HANDLER_REF` / `MODULE` / `JOB_ID` MUST NOT 可經 UI 修改**（`HANDLER_REF` 改＝任意程式執行風險）
+- **FR-DP-US11-08**: job 清單 MUST 顯示 `DESCRIPTION`（這支 job 在做什麼）；該欄 **MUST NOT 可經 UI 修改**——它描述的是程式行為，管理者改了不會改變行為、只會讓說明與實作不符，變更途徑為 IT 直接操作 DB。`JOB_NAME` 為短名詞，工作內容細節一律寫入 `DESCRIPTION`（#311）
 - **FR-DP-US11-07**: 排程時間等業務參數存 `DP_PARAM`（前綴分模組，如 `ET_WEEKLY_STAT_DAY_TIME`、`DM_WEEKLY_SCHED_DAY_TIME`），由各模組管理者於 US5 維護；引擎 MUST 於觸發時讀取最新值
 
 ## 系統訊息
