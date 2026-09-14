@@ -251,7 +251,11 @@
 
 ## Phase 15: 章節更新通知（跨 US 補強）
 
-- [ ] T112 實作章節更新通知 Service：教師於已發布課程新增章節時自動寄信通知所有 ET_ENROLLMENT（過濾 IS_REMOVED）；同時將該課程已完課學員之完課狀態回退為 IN_PROGRESS（已填問卷不失效）
+- [ ] T112 實作章節更新通知 Service：教師於已發布課程新增章節時自動寄信通知所有 ET_ENROLLMENT（過濾 IS_REMOVED）；新增章節使完課分母變大，已完課學員之完課狀態隨即回到「進行中」（已填問卷不失效）
+
+> ⚠️ **完課狀態的回退不寫欄位**（#303 SA Q1 裁示 A，2026-09-14）：`ET_ENROLLMENT.COMPLETION_STATUS` 目前**只在加入課程時寫入一次 `NOT_STARTED`、從未被任何讀取端使用**——所有讀取端一律以 `derive_completion_status(done, total)` 即時導出。因此「回退」是即時導出的自然結果，不需要也不應該再下一道 `UPDATE ... WHERE COMPLETION_STATUS='COMPLETED'`：那道 UPDATE 會永遠匹配零列，卻不報錯、不影響行為，因而**難以察覺它是空的**。
+>
+> 若日後 US9 / US14 需要讀該欄位，必須先補齊它的維護路徑（見 T092 / T145）。
 - [ ] T113 實作章節更新通知寄送（平台範本 `DP_NOTIFY_TEMPLATE` `MODULE=ET` / `TEMPLATE_CODE=COURSE_UPDATE`）：呼叫平台發信服務傳 template_code + 變數（user_name、course_name、new_chapter_name、course_link）（2026-07-08 集中化：範本存平台 `DP_NOTIFY_TEMPLATE`）
 
 ---
