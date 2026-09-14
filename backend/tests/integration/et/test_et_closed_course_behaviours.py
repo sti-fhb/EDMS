@@ -24,10 +24,10 @@
 跑兩次——那正是 SA Q1 裁示 A 要達成的一致性，也是最容易在日後被改壞的部分：任何一處
 只判 `STATUS` 的新程式碼，都會讓 `expired` 那一半變紅。
 
-⚠️ **`attempt/` 只驗 `STATUS` 那一種**：該目錄由 #280 進行中（footprint 保護），本
-issue 未替它接上期間判定，故期間已過時仍可開新作答。那個已知缺口在下方以 `xfail`
-標記而非略過——`xfail` 在被修好時會變成 `XPASS` 讓 CI 變紅，於是「有人補上了」這件事
-會自己浮出來；`skip` 不會。
+**六個目錄現在都驗兩種來源**。`attempt/` 是最後接上的（#313）——它在 #288 當下受 #280 的
+footprint 保護，期間已過仍可開新作答，該缺口以 `xfail(strict=True)` 標記而非略過：`xfail`
+在被修好時會轉成 `XPASS` 讓 CI 變紅，於是「有人補上了」這件事會自己浮出來；`skip` 不會。
+那個標記已隨 #313 移除。
 """
 
 from datetime import timedelta
@@ -453,11 +453,12 @@ class TestSurveyBlocked:
         assert got.json()["survey"]["state"] == "COURSE_CLOSED"
 
 
+@pytest.mark.parametrize("source", _SOURCES)
 class TestAttemptBlocked:
     """`attempt/`：關閉後不可開新作答，但**已在作答者可完成**（#279 / `spec_us6` 場景 27）。
 
-    ⚠️ 只驗 `STATUS` 那一種來源——`attempt/` 在 #280 的 ⛔ 清單內，本 issue 未替它接上
-    期間判定。期間已過的那一種以最後一條 `xfail` 標記。
+    #313 起**兩種來源都驗**（`endpoint` 與 `expired`）——在此之前只驗 `STATUS`，期間已過
+    的那一種以 `xfail` 標記，因為 `attempt/` 當時受 #280 的 footprint 保護。
     """
 
     async def _started(self, client, db, slug: str) -> tuple[dict, dict]:
@@ -467,25 +468,28 @@ class TestAttemptBlocked:
         assert started.status_code == 201, started.text
         return ctx, started.json()
 
-    async def test_關閉後不可開新作答(self, client, db) -> None:
-        ctx = await _ready(client, db, "at1", with_quiz=True)
+    async def test_關閉後不可開新作答(self, client, db, source: str) -> None:
+        ctx = await _ready(client, db, f"at1{source[:3]}", with_quiz=True)
         await _complete_course(db, ctx)
-        await _apply_close(client, db, ctx, "endpoint")
+        await _apply_close(client, db, ctx, source)
 
         got = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(ctx["student"]))
 
         assert got.status_code == 409, got.text
         assert got.json()["error_code"] == "ET_ATTEMPT_006"
 
-    async def test_關閉當下作答中的attempt仍可提交計分(self, client, db) -> None:
+    async def test_關閉當下作答中的attempt仍可提交計分(self, client, db, source: str) -> None:
         """AC 3 / FR-ET-US11-04：Attempt Snapshot 讓它完成並計分。
 
         這是關閉**不能**做的事——把作答中的 attempt 一併中止，會讓學員剛寫完的答案
         在按下送出的那一刻消失。
+
+        ⚠️ 也是 #313 最容易打壞的一條：擋「開新的」時只要把守門往前挪到續作分支之前，
+        這條窄縫就沒了，而 `spec_us6` 場景 27 明訂要保住它。
         """
-        ctx, attempt = await self._started(client, db, "at2")
+        ctx, attempt = await self._started(client, db, f"at2{source[:3]}")
         question = attempt["questions"][0]
-        await _apply_close(client, db, ctx, "endpoint")
+        await _apply_close(client, db, ctx, source)
 
         saved = await client.put(
             f"/api/et/attempts/{attempt['attempt_id']}/answers/{question['question_id']}",
@@ -500,35 +504,64 @@ class TestAttemptBlocked:
         assert submitted.status_code == 200, submitted.text
         assert submitted.json()["score"] is not None
 
-    async def test_關閉後仍可查看已提交的成績(self, client, db) -> None:
+    async def test_關閉後仍可查看已提交的成績(self, client, db, source: str) -> None:
         """唯讀回看涵蓋成績——關閉只停寫入（#255 裁示 Q2=A）。"""
-        ctx, attempt = await self._started(client, db, "at3")
+        ctx, attempt = await self._started(client, db, f"at3{source[:3]}")
         submitted = await client.post(
             f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=_bearer(ctx["student"])
         )
         assert submitted.status_code == 200, submitted.text
-        await _apply_close(client, db, ctx, "endpoint")
+        await _apply_close(client, db, ctx, source)
 
         got = await client.get(f"/api/et/attempts/{attempt['attempt_id']}/result", headers=_bearer(ctx["student"]))
 
         assert got.status_code == 200, got.text
 
-    @pytest.mark.xfail(
-        reason=(
-            "已知缺口（#288 刻意留下）：`attempt/` 未接上 `is_effectively_closed`，"
-            "該目錄由 #280 進行中、受 footprint 保護。以 xfail 而非 skip 標記——被補上時"
-            "會轉為 XPASS 讓 CI 變紅，那件事因此不需要有人記得。"
-        ),
-        strict=True,
-    )
-    async def test_期間已過亦應不可開新作答(self, client, db) -> None:
-        ctx = await _ready(client, db, "at4", with_quiz=True)
+    async def test_引導頁標示不可開始且課程已關閉(self, client, db, source: str) -> None:
+        """AC 2：`can_start` 與 `course_closed` 兩個欄位都要跟著關閉狀態走。
+
+        只擋住 `POST /attempts` 而不改引導頁，學員會看到一顆「開始作答」按鈕、按下去才
+        吃到 409——那是把規則藏到最後一刻才揭露。
+        """
+        ctx = await _ready(client, db, f"at5{source[:3]}", with_quiz=True)
         await _complete_course(db, ctx)
-        await _apply_close(client, db, ctx, "expired")
+        await _apply_close(client, db, ctx, source)
+
+        got = await client.get(f"/api/et/quizzes/{ctx['quiz_id']}/intro", headers=_bearer(ctx["student"]))
+
+        assert got.status_code == 200, got.text
+        assert got.json()["can_start"] is False
+        assert got.json()["course_closed"] is True
+
+
+class TestAttemptOpenWhenNotClosed:
+    """未關閉時不可因本次改動而誤擋——`is_effectively_closed` 的另一半。"""
+
+    async def test_沒有訖止日不視為關閉(self, client, db) -> None:
+        """AC 4：`OPEN_END_AT` 為空＝沒有結束日。
+
+        不該因為一個缺失的欄位去關掉一門教師沒有要求關閉的課。若 SQL / Python 任一側把
+        `None` 當成「早就過期」，這條會紅。
+        """
+        ctx = await _ready(client, db, "at6", with_quiz=True)
+        await _complete_course(db, ctx)
+        await db.execute(
+            update(EtCourse).where(EtCourse.course_id == ctx["course_id"]).values(open_end_at=None)
+        )
+        await db.commit()
 
         got = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(ctx["student"]))
 
-        assert got.status_code == 409, got.text
+        assert got.status_code == 201, got.text
+
+    async def test_期間未過仍可開新作答(self, client, db) -> None:
+        """守門的「否」那一半——只驗擋得住而不驗放得行，改成無條件 409 也會全綠。"""
+        ctx = await _ready(client, db, "at7", with_quiz=True)
+        await _complete_course(db, ctx)
+
+        got = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(ctx["student"]))
+
+        assert got.status_code == 201, got.text
 
 
 class TestReopenRestoresEverything:

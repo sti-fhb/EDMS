@@ -120,11 +120,13 @@ def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: dat
     ## 呼叫端一律以「與 `CLOSED` 相同」處理
 
     回 `True` 時各處的行為與 `STATUS = CLOSED` 完全一致——邀請碼失效、進度寫入 409、
-    問卷不可填、ET05 唯讀回看。**不可**改成「視同不存在」：已關閉課程仍要留在我的課程
-    清單、仍可唯讀回看（AC 9 / 10），把它當成不可見會讓學員的歷史紀錄從眼前消失。
+    問卷不可填、ET05 唯讀回看、**不可開新作答**。**不可**改成「視同不存在」：已關閉課程
+    仍要留在我的課程清單、仍可唯讀回看（AC 9 / 10），把它當成不可見會讓學員的歷史紀錄
+    從眼前消失。
 
-    ⚠️ **`attempt/` 目前未接上本函式**——該目錄由 #280 進行中（footprint 保護）。故期間
-    已過時仍可開新作答，與其餘四處不一致；已列為 #288 的 follow-up。
+    `attempt/` 是最後接上的呼叫端（#313）——它在 #288 當下受 #280 的 footprint 保護而
+    暫留缺口，期間以 `xfail(strict=True)` 標記在
+    `test_et_closed_course_behaviours.py`，補上時自動轉 `XPASS` 讓 CI 提醒。
     """
     if status == COURSE_CLOSED:
         return True
