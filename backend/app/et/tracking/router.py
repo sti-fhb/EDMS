@@ -9,7 +9,7 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -189,3 +189,51 @@ async def survey_result(
     統計檢視之**問答題僅回已答人數、不回文字**（2026-08-28 裁示）；文字答案在明細檢視。
     """
     return await _service.survey_result(db, course_id, actor_id=ctx.user_id)
+
+
+@router.get(
+    "/courses/{course_id}/students.csv",
+    response_class=Response,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def export_students_csv(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """匯出區塊 1 之學員清單（`FR-ET-US9-09`）——**全量**，不受畫面分頁限制。
+
+    課程已關閉時**仍可匯出**（AC 10 明訂）——匯出是讀不是寫，套上寫入閘會讓教師在
+    課程結束後拿不走自己的教學紀錄。
+    """
+    content = await _service.export_students_csv(db, course_id, actor_id=ctx.user_id)
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="course-{course_id}-students.csv"'},
+    )
+
+
+@router.get(
+    "/courses/{course_id}/survey-result.csv",
+    response_class=Response,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def export_survey_csv(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """匯出區塊 3 之問卷結果（`FR-ET-US9-09`）——**含問答題之文字答案**。
+
+    🔴 **具名資料**（`FR-ET-US9-08`）：僅本課程教師與管理者可匯出。CSV 是最容易被當成
+    「只是下載」而漏掉把關的入口。
+
+    課程無問卷時 404——回只有表頭的空檔案會讓教師以為「沒有人填」。
+    """
+    content = await _service.export_survey_csv(db, course_id, actor_id=ctx.user_id)
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="course-{course_id}-survey.csv"'},
+    )

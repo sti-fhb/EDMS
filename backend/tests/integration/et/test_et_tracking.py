@@ -1068,3 +1068,125 @@ class TestSurveyResult:
 
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+class TestCsvExport:
+    """兩支 CSV 匯出（AC 9 / FR-ET-US9-09）。"""
+
+    async def test_學員清單csv含完整欄位與BOM(self, client, db) -> None:
+        """含 UTF-8 BOM——沒有它 Excel 開啟會把中文顯示成亂碼。"""
+        teacher = await _user(db, "t_tr40")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        await _item(db, chapter_id, title="教材", order=1)
+        student = await _user(db, "s_tr40", roles=(ROLE_STUDENT,), name="王小明")
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.content.startswith(b"\xef\xbb\xbf"), "缺 BOM 會讓 Excel 顯示亂碼"
+        text = r.content.decode("utf-8-sig")
+        assert "王小明" in text
+        for header in ("學員", "加入日期", "完課狀態", "學習進度", "平均成績", "最後活動"):
+            assert header in text, f"缺欄位：{header}"
+
+    async def test_學員清單csv不受分頁限制(self, client, db) -> None:
+        """匯出是**全量**——分頁是畫面的事，CSV 的用途正是帶走全部。"""
+        teacher = await _user(db, "t_tr41")
+        course_id = await _course(db, owner=teacher)
+        for idx in range(25):
+            student = await _user(db, f"s_tr41{idx:02d}", roles=(ROLE_STUDENT,), name=f"學員{idx:02d}")
+            await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        text = r.content.decode("utf-8-sig")
+        assert text.count("學員") >= 25, "每位學員一列（預設分頁 20 筆不該限制匯出）"
+
+    async def test_csv防公式注入(self, client, db) -> None:
+        """🔴 CWE-1236：試算表會把 `=` `+` `-` `@` 開頭的欄位當**公式執行**。
+
+        本 CSV 含學員姓名與問答題自由文字，正是最典型的注入輸入。`sanitize_csv_cell`
+        前置單引號中和，令試算表視為文字。
+        """
+        teacher = await _user(db, "t_tr42")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr42", roles=(ROLE_STUDENT,), name="=1+1")
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        text = r.content.decode("utf-8-sig")
+        assert "'=1+1" in text, "危險前導字元必須被中和"
+
+    async def test_問卷結果csv含問答題文字(self, client, db) -> None:
+        """FR-ET-US9-09 明訂問卷 CSV **MUST 含問答題之文字答案**。
+
+        統計檢視刻意不顯示那些文字（會擠掉單選分布），但 CSV 的用途本就是帶走細節——
+        兩者不衝突，且少了文字的匯出等於讓教師拿不到問卷最有價值的部分。
+        """
+        teacher = await _user(db, "t_tr43")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        single = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        good = await _so(db, single, text="滿意", order=1)
+        text_q = await _sq(db, survey_id, stem="建議？", order=2, is_text=True)
+        student = await _user(db, "s_tr43", roles=(ROLE_STUDENT,), name="陳同學")
+        await _enroll(db, student, course_id)
+        await _respond(db, survey_id, student, [(single, good, None), (text_q, None, "希望多一點實作")])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        text = r.content.decode("utf-8-sig")
+        assert "陳同學" in text, "問卷填答為具名資料"
+        assert "希望多一點實作" in text, "MUST 含問答題文字答案"
+        assert "滿意" in text
+
+    async def test_課程無問卷時匯出回四零四(self, client, db) -> None:
+        """畫面上本區塊是隱藏的，會打到這支就代表前端狀態已過期。
+
+        回一個只有表頭的空 CSV 會讓教師以為「問卷沒有人填」，而實際上是沒有問卷。
+        """
+        teacher = await _user(db, "t_tr44")
+        course_id = await _course(db, owner=teacher)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 404
+        assert r.json()["error_code"] == "ET_TRACK_001"
+
+    async def test_他人課程之csv回四零三(self, client, db) -> None:
+        """匯出與畫面同一道授權——CSV 是最容易被當成「只是下載」而漏掉把關的入口。"""
+        owner = await _user(db, "t_tr45")
+        outsider = await _user(db, "t_tr46")
+        course_id = await _course(db, owner=owner)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_已關閉課程仍可匯出(self, client, db) -> None:
+        """AC 10 明訂關閉後「仍可閱覽三區塊全部內容（**含匯出 CSV**）」。
+
+        匯出是讀，不是寫——套上寫入閘會讓教師在課程結束後拿不走自己的教學紀錄。
+        """
+        teacher = await _user(db, "t_tr47")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr47", roles=(ROLE_STUDENT,), name="結訓學員")
+        await _enroll(db, student, course_id)
+        await _close_course(db, course_id, "expired")
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert "結訓學員" in r.content.decode("utf-8-sig")

@@ -5,12 +5,15 @@
 管理者可見，而本頁其餘兩區塊同樣含學員的個別成績，故一律同等把關。
 """
 
+import csv
+import io
 from collections import Counter
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
@@ -18,6 +21,7 @@ from app.core.utils import utcnow
 from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
 from app.et.attempt.service import _in_snapshot_order, _to_result
+from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
 from app.et.course.rules import ensure_owner, is_effectively_closed
 from app.et.enrollment.rules import derive_completion_status
 from app.et.tracking.repository import EtTrackingRepository
@@ -46,6 +50,7 @@ _ENROLLMENT_NOT_FOUND = AppError(status_code=404, detail="查無此學員之選�
 _CANNOT_RESET = AppError(
     status_code=409, detail="此測驗不符重置條件（次數未用盡、已及格或尚未作答）", error_code="ET_TRACK_002"
 )
+_SURVEY_NOT_FOUND = AppError(status_code=404, detail="此課程未設定課後問卷", error_code="ET_TRACK_001")
 _COURSE_CLOSED = AppError(status_code=409, detail="課程已關閉，無法執行此管理動作", error_code="ET_TRACK_003")
 
 _MODULE = "ET"
@@ -376,6 +381,90 @@ class EtTrackingService:
             ],
         )
 
+    async def export_students_csv(self, db: AsyncSession, course_id: int, *, actor_id: str) -> bytes:
+        """區塊 1 之 CSV（`FR-ET-US9-09`）——**全量，不受分頁限制**。
+
+        分頁是畫面的事；CSV 的用途正是帶走全部。故此處不呼叫 `list_students`（那支帶
+        `page` / `limit`），改以同一組聚合查詢取全班。
+
+        ## 匯出是「讀」，不套寫入閘
+
+        AC 10 明訂課程關閉後「仍可閱覽三區塊全部內容（**含匯出 CSV**）」。套上
+        `_require_writable` 會讓教師在課程結束後拿不走自己的教學紀錄。
+        """
+        await self._require_owner(db, course_id, actor_id)
+        rows = await self._all_student_rows(db, course_id)
+        return _write_csv(
+            ("學員", "加入日期", "完課狀態", "學習進度", "平均成績", "最後活動"),
+            [
+                (
+                    row.user_name or "—",
+                    _fmt_dt(row.joined_at),
+                    _COMPLETION_LABEL.get(row.completion_status, row.completion_status),
+                    f"{row.progress_pct}%",
+                    str(row.avg_score) if row.avg_score is not None else "—",
+                    _fmt_dt(row.last_activity_at),
+                )
+                for row in rows
+            ],
+        )
+
+    async def export_survey_csv(self, db: AsyncSession, course_id: int, *, actor_id: str) -> bytes:
+        """區塊 3 之 CSV（`FR-ET-US9-09`）——**MUST 含問答題之文字答案**。
+
+        統計檢視刻意不顯示那些文字（會把單選題的分布擠到看不見，2026-08-28 裁示），但
+        CSV 的用途本就是帶走細節；少了文字的匯出等於讓教師拿不到問卷最有價值的部分。
+
+        課程無問卷時 404 而非回空 CSV——只有表頭的檔案會讓教師以為「沒有人填」，而實際
+        上是這門課根本沒有問卷。
+        """
+        result = await self.survey_result(db, course_id, actor_id=actor_id)
+        if not result.has_survey:
+            raise _SURVEY_NOT_FOUND
+
+        questions = result.questions
+        header = ("學員", "填答時間", *(q.stem for q in questions))
+        answers_by_user = {
+            row.user_id: {a.sq_id: (a.option_text or a.answer_text or "") for a in row.answers}
+            for row in result.details
+        }
+        return _write_csv(
+            header,
+            [
+                (
+                    row.user_name or "—",
+                    _fmt_dt(row.submitted_at),
+                    *(answers_by_user.get(row.user_id, {}).get(q.sq_id, "") for q in questions),
+                )
+                for row in result.details
+            ],
+        )
+
+    async def _all_student_rows(self, db: AsyncSession, course_id: int) -> list[StudentRow]:
+        """全班學員（**不分頁**）——匯出專用。
+
+        與 `list_students` 共用同一組聚合查詢與同一個組裝函式，讓畫面與 CSV 的數字不會
+        分岔（兩份實作遲早對不起來，而對不起來的表現是教師拿去核對時發現差一個人）。
+        """
+        rows = await db.execute(self._repo.build_student_list_stmt(course_id=course_id))
+        enrollments = [EnrollmentRow.model_validate(e) for e in rows.scalars().all()]
+        user_ids = [e.user_id for e in enrollments]
+
+        counts = await self._repo.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
+        avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
+        last_submits = await self._repo.last_submitted_at_by_student(db, course_id=course_id, user_ids=user_ids)
+        names = await self._repo.user_names(db, set(user_ids))
+        return [
+            _to_student_row(
+                e,
+                counts=counts.get(e.user_id, (0, 0)),
+                avg_score=avg_scores.get(e.user_id),
+                last_submitted_at=last_submits.get(e.user_id),
+                user_name=names.get(e.user_id),
+            )
+            for e in enrollments
+        ]
+
 
 def _to_student_row(
     enrollment: EnrollmentRow,
@@ -453,3 +542,37 @@ def _to_quiz_row(quiz, *, attempts: list, reset_base: int, points: dict[int, int
             for a in attempts
         ],
     )
+
+
+#: 完課狀態的中文顯示——CSV 是給人看的，不是給程式解析的。
+_COMPLETION_LABEL = {
+    COMPLETION_NOT_STARTED: "未開始",
+    COMPLETION_IN_PROGRESS: "進行中",
+    COMPLETION_COMPLETED: "已完成",
+}
+
+
+def _fmt_dt(value: datetime | None) -> str:
+    """`2026-04-15 09:00`；`None` 回破折號（與畫面一致）。"""
+    return value.strftime("%Y-%m-%d %H:%M") if value is not None else "—"
+
+
+def _write_csv(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> bytes:
+    """組 CSV，**逐格經 `sanitize_csv_cell`**，輸出帶 UTF-8 BOM。
+
+    ## 兩個都不可省
+
+    1. 🔴 **公式注入防護**（CWE-1236）：試算表會把 `=` `+` `-` `@` 開頭的欄位當公式
+       **執行**。本檔含學員姓名與問答題自由文字——正是最典型的注入輸入。
+       `sanitize_csv_cell` 前置單引號中和。**逐格做，不可只對部分欄位**。
+    2. **UTF-8 BOM**（`utf-8-sig`）：沒有它，Excel 開啟會把中文顯示成亂碼。
+
+    用 `csv.writer` 而非手拼字串——逗號 / 換行 / 引號的跳脫交給標準庫，手拼遲早在
+    某個含逗號的課程名稱上壞掉。
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([sanitize_csv_cell(cell) for cell in header])
+    for row in rows:
+        writer.writerow([sanitize_csv_cell(str(cell)) for cell in row])
+    return buf.getvalue().encode("utf-8-sig")
