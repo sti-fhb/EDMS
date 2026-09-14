@@ -128,3 +128,15 @@ class TeacherAttemptDetail(BaseModel):
     pass_score: int
     is_pass: bool
     questions: list[QuestionResult]
+
+
+class RetryResetResult(BaseModel):
+    """重置重考次數之結果。
+
+    回 `used_attempts=0` 讓前端不必重抓整個區塊就能更新那一列；完整狀態仍以下一次
+    `attempt-overview` 為準。
+    """
+
+    user_id: str
+    quiz_id: int
+    used_attempts: int

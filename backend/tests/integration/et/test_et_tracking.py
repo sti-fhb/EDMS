@@ -10,16 +10,19 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import func, select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.constants import (
+    ATTEMPT_IN_PROGRESS,
     ATTEMPT_SUBMITTED,
     COMPLETION_COMPLETED,
     COMPLETION_IN_PROGRESS,
     COMPLETION_NOT_STARTED,
+    COURSE_CLOSED,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ITEM_QUIZ,
@@ -30,7 +33,7 @@ from app.et.constants import (
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.progress.models import EtEnrollment, EtProgress
-from app.et.quiz.models import EtQuiz, EtQuizAttemptM
+from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
@@ -209,6 +212,26 @@ async def _attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int, s
     db.add(row)
     await db.flush()
     return row.attempt_id
+
+
+async def _close_course(db, course_id: int, source: str) -> None:
+    """讓課程「視同關閉」——兩種來源行為必須相同。
+
+    `status` 走 `STATUS = CLOSED`；`expired` 把 `OPEN_END_AT` 改到過去。後者在本系統是
+    **常態而非過渡狀態**——到期自動轉 `CLOSED` 屬 `ET-16`（未實作），故期間過了而
+    `STATUS` 仍是 `PUBLISHED` 的課程一直存在。只判 `STATUS` 的實作會讓 `expired`
+    那一半變紅。
+    """
+    now = utcnow()
+    values = (
+        {"status": COURSE_CLOSED, "closed_at": now}
+        if source == "status"
+        else {"open_start_at": now - timedelta(days=30), "open_end_at": now - timedelta(days=1)}
+    )
+    await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(**values))
+    await db.flush()
+    # 服務層是另一次查詢，但同一個 session 的 identity map 可能還握著舊的課程列
+    db.expire_all()
 
 
 _URL = "/api/et/courses"
@@ -535,3 +558,290 @@ class TestAttemptDetailForTeacher:
 
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_AUTH_001"
+
+
+class TestResetRetry:
+    """重置重考次數（AC 6 / FR-ET-US9-06）。"""
+
+    def _url(self, course_id: int, user_id: str, quiz_id: int) -> str:
+        return f"{_URL}/{course_id}/students/{user_id}/quizzes/{quiz_id}/retry-reset"
+
+    async def test_次數用盡且未及格可重置且不刪紀錄(self, client, db) -> None:
+        """🔴 AC 6 明訂「重置後**歷次 attempt 明細仍完整可回看**」。
+
+        刪除 attempt 會同時毀掉學員的歷史與教師的追蹤資料——而那個損失沒有任何地方
+        救得回來。本測試在重置後直接數 DB 的列。
+        """
+        teacher = await _user(db, "t_tr18")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=1)  # 總配額 2 次
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr18", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        for no in (1, 2):
+            await _attempt(
+                db,
+                user_id=student,
+                course_id=course_id,
+                quiz_id=quiz_id,
+                no=no,
+                score=Decimal("50"),
+                is_pass=False,
+            )
+        await db.commit()
+
+        r = await client.post(self._url(course_id, student, quiz_id), headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        kept = await db.scalar(
+            select(func.count(EtQuizAttemptM.attempt_id)).where(
+                EtQuizAttemptM.user_id == student, EtQuizAttemptM.quiz_id == quiz_id
+            )
+        )
+        assert kept == 2, "重置 MUST NOT 刪除任何 attempt"
+        base = await db.scalar(
+            select(func.max(EtQuizRetryReset.attempt_count_at_reset)).where(
+                EtQuizRetryReset.user_id == student, EtQuizRetryReset.quiz_id == quiz_id
+            )
+        )
+        assert base == 2, "基準應為重置當下的 attempt 總數"
+
+    async def test_重置後該學員可再作答(self, client, db) -> None:
+        """重置的意義就在這裡——`used` 歸零、`can_reset` 轉回 false。"""
+        teacher = await _user(db, "t_tr19")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=1)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr19", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        for no in (1, 2):
+            await _attempt(
+                db,
+                user_id=student,
+                course_id=course_id,
+                quiz_id=quiz_id,
+                no=no,
+                score=Decimal("50"),
+                is_pass=False,
+            )
+        await db.commit()
+        await client.post(self._url(course_id, student, quiz_id), headers=_bearer(teacher))
+
+        r = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        quiz_row = r.json()["students"][0]["quizzes"][0]
+        assert quiz_row["used_attempts"] == 0, "本輪已用次數應歸零"
+        assert quiz_row["can_reset"] is False, "配額已滿，不該再顯示可重置"
+        assert len(quiz_row["attempts"]) == 2, "歷次明細仍完整可回看"
+
+    async def test_次數未用盡不可重置(self, client, db) -> None:
+        """AC 6 的負向：還剩最後一次時按下去會白送一輪配額。"""
+        teacher = await _user(db, "t_tr20")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=3)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr20", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db,
+            user_id=student,
+            course_id=course_id,
+            quiz_id=quiz_id,
+            no=1,
+            score=Decimal("50"),
+            is_pass=False,
+        )
+        await db.commit()
+
+        r = await client.post(self._url(course_id, student, quiz_id), headers=_bearer(teacher))
+
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_TRACK_002"
+
+    async def test_已及格不可重置(self, client, db) -> None:
+        teacher = await _user(db, "t_tr21")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=0)  # 總配額 1 次
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr21", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db,
+            user_id=student,
+            course_id=course_id,
+            quiz_id=quiz_id,
+            no=1,
+            score=Decimal("95"),
+            is_pass=True,
+        )
+        await db.commit()
+
+        r = await client.post(self._url(course_id, student, quiz_id), headers=_bearer(teacher))
+
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_TRACK_002"
+
+
+class TestRemoveStudent:
+    """移除學員（AC 7 / 8 / FR-ET-US9-10）。"""
+
+    async def test_移除寫入標記且歷史保留(self, client, db) -> None:
+        teacher = await _user(db, "t_tr22")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        item_id = await _item(db, chapter_id, title="教材", order=1)
+        student = await _user(db, "s_tr22", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _complete_item(db, student, course_id, item_id)
+        await db.commit()
+
+        r = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(teacher))
+
+        assert r.status_code == 204, r.text
+        db.expire_all()
+        row = await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == course_id)
+        )
+        assert row.is_removed is True
+        assert row.removed_at is not None, "REMOVED_AT 為稽核依據，必須寫入"
+        kept = await db.scalar(select(func.count(EtProgress.progress_id)).where(EtProgress.user_id == student))
+        assert kept == 1, "學習歷史 MUST 完整保留供稽核"
+
+    async def test_移除後不再出現於清單(self, client, db) -> None:
+        teacher = await _user(db, "t_tr23")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr23", roles=(ROLE_STUDENT,), name="要被移除的")
+        await _enroll(db, student, course_id)
+        await db.commit()
+        await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(teacher))
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.json()["data"] == []
+
+    async def test_移除作答中學員其attempt仍保留(self, client, db) -> None:
+        """AC 7：有 `IN_PROGRESS` attempt 時仍允許移除，**該 attempt 保留並計入歷史**。
+
+        警告文案（ET-MSG-ET03-003）由前端顯示；後端不擋——擋下來會讓教師沒辦法移除一個
+        正在作答的人，而那正是最需要移除的情境。
+        """
+        teacher = await _user(db, "t_tr24")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr24", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        now = utcnow()
+        db.add(
+            EtQuizAttemptM(
+                user_id=student,
+                course_id=course_id,
+                quiz_id=quiz_id,
+                attempt_no=1,
+                started_at=now,
+                submitted_at=None,
+                status=ATTEMPT_IN_PROGRESS,
+                score=None,
+                is_pass=None,
+                pass_score_snapshot=80,
+                time_limit_snapshot=None,
+                question_order="[]",
+                option_order="{}",
+                created_user=student,
+                created_date=now,
+                deleted=0,
+            )
+        )
+        await db.commit()
+
+        r = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(teacher))
+
+        assert r.status_code == 204, r.text
+        kept = await db.scalar(select(func.count(EtQuizAttemptM.attempt_id)).where(EtQuizAttemptM.user_id == student))
+        assert kept == 1, "作答中的 attempt 必須保留並計入歷史"
+
+    async def test_移除已移除者回四零四(self, client, db) -> None:
+        """重複移除不是「無害的冪等」——它代表教師看到的清單已過期。"""
+        teacher = await _user(db, "t_tr25")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr25", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id, removed=True)
+        await db.commit()
+
+        r = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(teacher))
+
+        assert r.status_code == 404
+        assert r.json()["error_code"] == "ET_TRACK_001"
+
+
+@pytest.mark.parametrize("source", ["status", "expired"])
+class TestClosedCourseIsReadOnly:
+    """AC 10 / FR-ET-US9-11：課程已關閉時可讀不可寫。
+
+    **兩種來源都驗**——「已發布但期間已過」在本系統是常態（ET-16 未實作），只判
+    `STATUS` 的實作會讓 `expired` 那一半變紅。
+    """
+
+    async def test_已關閉時不可重置(self, client, db, source: str) -> None:
+        teacher = await _user(db, f"t_tr26{source[:3]}")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=0)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, f"s_tr26{source[:3]}", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db,
+            user_id=student,
+            course_id=course_id,
+            quiz_id=quiz_id,
+            no=1,
+            score=Decimal("50"),
+            is_pass=False,
+        )
+        await _close_course(db, course_id, source)
+        await db.commit()
+
+        r = await client.post(
+            f"{_URL}/{course_id}/students/{student}/quizzes/{quiz_id}/retry-reset", headers=_bearer(teacher)
+        )
+
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_TRACK_003"
+
+    async def test_已關閉時不可移除(self, client, db, source: str) -> None:
+        teacher = await _user(db, f"t_tr27{source[:3]}")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, f"s_tr27{source[:3]}", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _close_course(db, course_id, source)
+        await db.commit()
+
+        r = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(teacher))
+
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_TRACK_003"
+
+    async def test_已關閉仍可閱覽(self, client, db, source: str) -> None:
+        """AC 10 的另一半：關閉只停**寫入**，閱覽照常（#255 裁示 Q2=A「讀照舊、寫全停」）。
+
+        只驗擋得住而不驗讀得到的話，把整頁改成 409 也會全綠。
+        """
+        teacher = await _user(db, f"t_tr28{source[:3]}")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, f"s_tr28{source[:3]}", roles=(ROLE_STUDENT,), name="仍看得到")
+        await _enroll(db, student, course_id)
+        await _close_course(db, course_id, source)
+        await db.commit()
+
+        listed = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+        overview = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        assert listed.status_code == 200, listed.text
+        assert [row["user_name"] for row in listed.json()["data"]] == ["仍看得到"]
+        assert overview.status_code == 200, overview.text

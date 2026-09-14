@@ -12,6 +12,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.operator import OperatorInfo
+from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（已列於 et/spec.md §外模組 table 引用清單）
 from app.et.constants import GRADED_STATUSES
 from app.et.course.models import EtChapter, EtCourse, EtItem
@@ -224,29 +226,19 @@ class EtTrackingRepository:
         定義（那支是單一學員單一測驗，此處為整門課批次）。無重置紀錄者不在 key 裡，
         呼叫端視為 0。
 
-        以 `ET_QUIZ_RETRY_RESET` JOIN `ET_QUIZ` 再回推課程——該表本身只有
-        `(USER_ID, QUIZ_ID)`，沒有課程欄位。
         """
-        quiz_ids = (
-            select(EtItem.quiz_id)
-            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
-            .where(
-                EtChapter.course_id == course_id,
-                EtItem.quiz_id.is_not(None),
-                EtItem.deleted == 0,
-                EtChapter.deleted == 0,
-            )
-        )
         rows = await db.execute(
             select(
                 EtQuizRetryReset.user_id,
                 EtQuizRetryReset.quiz_id,
                 func.max(EtQuizRetryReset.attempt_count_at_reset),
             )
-            # `ET_QUIZ_RETRY_RESET` 是 **append-only**（`AuditLogBaseModel`，只有
-            # `CREATED_*`），**沒有 `DELETED` 欄位**——它是「已用次數」的計算基準，
-            # 能被軟刪除就等於能讓學員的配額憑空回復而查不到是誰做的。
-            .where(EtQuizRetryReset.quiz_id.in_(quiz_ids))
+            # 本表自己就有 `COURSE_ID`，不必繞 `ET_ITEM` 反推課程。
+            #
+            # ⚠️ **append-only**（`AuditLogBaseModel`，只有 `CREATED_*`），**沒有
+            # `DELETED` 欄位**——它是「已用次數」的計算基準，能被軟刪除就等於能讓學員的
+            # 配額憑空回復而查不到是誰做的。
+            .where(EtQuizRetryReset.course_id == course_id)
             .group_by(EtQuizRetryReset.user_id, EtQuizRetryReset.quiz_id)
         )
         return {(user_id, quiz_id): base for user_id, quiz_id, base in rows.all()}
@@ -268,3 +260,121 @@ class EtTrackingRepository:
             .where(EtQuizAttemptM.attempt_id == attempt_id, EtQuizAttemptM.deleted == 0, EtCourse.deleted == 0)
         )
         return rows.first()
+
+    async def get_enrollment(self, db: AsyncSession, *, course_id: int, user_id: str) -> EtEnrollment | None:
+        """該學員於該課程之**未移除** enrollment。
+
+        已移除者回 `None`（由呼叫端轉 404）——重複移除不是「無害的冪等」，它代表教師
+        看到的清單已經過期，靜默成功會讓他以為剛才那一下有效。
+        """
+        return await db.scalar(
+            select(EtEnrollment).where(
+                EtEnrollment.course_id == course_id,
+                EtEnrollment.user_id == user_id,
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+            )
+        )
+
+    async def get_quiz_in_course(self, db: AsyncSession, *, course_id: int, quiz_id: int) -> EtQuiz | None:
+        """該測驗是否屬於該課程——**防止跨課程操作**。
+
+        沒有這道檢查的話，教師可以拿自己課程的 `course_id` 配上別人課程的 `quiz_id`
+        去重置：`ensure_owner` 只看課程，不會察覺 `quiz_id` 來自別處。
+        """
+        return await db.scalar(
+            select(EtQuiz)
+            .select_from(EtItem)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .join(EtQuiz, EtQuiz.quiz_id == EtItem.quiz_id)
+            .where(
+                EtChapter.course_id == course_id,
+                EtItem.quiz_id == quiz_id,
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+                EtQuiz.deleted == 0,
+            )
+        )
+
+    async def attempt_facts(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> tuple[int, bool]:
+        """`(已提交 attempt 總數, 是否曾及格)`——供 `can_reset_retry` 判定。
+
+        總數含**所有**已閱卷的 attempt（不扣重置基準），因為重置基準本身就要寫入這個
+        總數；扣掉基準的「本輪已用次數」由 `round_used_attempts` 在呼叫端算。
+        """
+        total = await db.scalar(
+            select(func.count(EtQuizAttemptM.attempt_id)).where(
+                EtQuizAttemptM.user_id == user_id,
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.status.in_(GRADED_STATUSES),
+                EtQuizAttemptM.deleted == 0,
+            )
+        )
+        passed = await db.scalar(
+            select(func.count(EtQuizAttemptM.attempt_id)).where(
+                EtQuizAttemptM.user_id == user_id,
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.is_pass.is_(True),
+                EtQuizAttemptM.deleted == 0,
+            )
+        )
+        return total or 0, bool(passed)
+
+    async def reset_base_of(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> int:
+        """該學員於該測驗之重置基準（`MAX(ATTEMPT_COUNT_AT_RESET)`），無紀錄回 0。"""
+        base = await db.scalar(
+            select(func.max(EtQuizRetryReset.attempt_count_at_reset)).where(
+                EtQuizRetryReset.user_id == user_id, EtQuizRetryReset.quiz_id == quiz_id
+            )
+        )
+        return base or 0
+
+    async def add_retry_reset(
+        self,
+        db: AsyncSession,
+        *,
+        course_id: int,
+        user_id: str,
+        quiz_id: int,
+        attempt_count: int,
+        operator: OperatorInfo,
+    ) -> None:
+        """寫入一筆重置紀錄（**append-only，不刪任何 attempt**）。
+
+        `ATTEMPT_COUNT_AT_RESET` 存重置當下的 attempt 總數作為新基準；之後
+        `round_used_attempts(total, base)` 算出的本輪已用次數即從 0 起算。
+
+        🔴 這是「重置次數歸 0」與「歷次 attempt 永久可回看」能並存的唯一做法
+        （`data-model` 2026-08-19 為此新增本表）。**改成刪除 attempt 會同時毀掉學員的
+        歷史與教師的追蹤資料**，而 AC 6 明訂重置後明細仍須完整。
+        """
+        now = utcnow()
+        db.add(
+            EtQuizRetryReset(
+                course_id=course_id,
+                user_id=user_id,
+                quiz_id=quiz_id,
+                attempt_count_at_reset=attempt_count,
+                # `EXECUTED_BY` / `EXECUTED_AT` 是**業務語意**的執行者與時點（供 UI 查詢
+                # 「誰在何時重置過」），與 `CREATED_*` 的資安稽核欄位並存、不互相取代
+                # ——同一條原則見 `spec.md`「語意碼 vs. 業務紀錄表」。
+                executed_by=operator.user_id,
+                executed_at=now,
+                created_user=operator.user_id,
+                created_date=now,
+            )
+        )
+        await db.flush()
+
+    async def mark_removed(self, db: AsyncSession, enrollment: EtEnrollment, *, operator: OperatorInfo) -> None:
+        """標記移除（`IS_REMOVED` + `REMOVED_AT`）——**軟刪，學習歷史完整保留**。
+
+        `ET_PROGRESS` / `ET_QUIZ_ATTEMPT_M` 一律不動：FR-ET-US9-10 明訂歷史保留供稽核，
+        且 AC 7 要求作答中的 attempt 仍可完成。
+        """
+        now = utcnow()
+        enrollment.is_removed = True
+        enrollment.removed_at = now
+        enrollment.updated_user = operator.user_id
+        enrollment.updated_date = now
+        await db.flush()

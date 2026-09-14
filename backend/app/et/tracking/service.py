@@ -11,26 +11,42 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
+from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
+from app.core.utils import utcnow
 from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
 from app.et.attempt.service import _in_snapshot_order, _to_result
-from app.et.course.rules import ensure_owner
+from app.et.course.rules import ensure_owner, is_effectively_closed
 from app.et.enrollment.rules import derive_completion_status
 from app.et.tracking.repository import EtTrackingRepository
 from app.et.tracking.rules import can_reset_retry
 from app.et.tracking.schemas import (
     AttemptOverview,
     EnrollmentRow,
+    RetryResetResult,
     StudentRow,
     TeacherAttemptDetail,
     TeacherAttemptRow,
     TeacherQuizRow,
     TeacherStudentAttempts,
 )
+from app.services import AuditLogService
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程", error_code="ET_COURSE_001")
 _ATTEMPT_NOT_FOUND = AppError(status_code=404, detail="查無此作答紀錄", error_code="ET_ATTEMPT_001")
+_QUIZ_NOT_FOUND = AppError(status_code=404, detail="查無此測驗", error_code="ET_TRACK_001")
+_ENROLLMENT_NOT_FOUND = AppError(status_code=404, detail="查無此學員之選課紀錄", error_code="ET_TRACK_001")
+_CANNOT_RESET = AppError(
+    status_code=409, detail="此測驗不符重置條件（次數未用盡、已及格或尚未作答）", error_code="ET_TRACK_002"
+)
+_COURSE_CLOSED = AppError(status_code=409, detail="課程已關閉，無法執行此管理動作", error_code="ET_TRACK_003")
+
+_MODULE = "ET"
+#: 教師破例動作，另存 `ET_QUIZ_RETRY_RESET` 業務紀錄（`spec.md` §稽核來源功能碼）。
+_FUNC_RESET = "ET-QUIZ-RESET"
+#: 學員邀請 / 加入 / 移除共用（同上表，US8 / US12 / US9）。
+_FUNC_ENROLLMENT = "ET-ENROLLMENT"
 
 
 class EtTrackingService:
@@ -40,11 +56,13 @@ class EtTrackingService:
         self,
         repository: EtTrackingRepository | None = None,
         attempts: EtAttemptRepository | None = None,
+        audit: AuditLogService | None = None,
     ) -> None:
         self._repo = repository or EtTrackingRepository()
         # 重用 attempt 模組的查詢（配分總和、逐題明細）——那些是同一份資料，
         # 各寫一份遲早與學員端分岔，而分岔的表現是同一次作答兩邊分數不同。
         self._attempts = attempts or EtAttemptRepository()
+        self._audit = audit or AuditLogService()
 
     async def list_students(
         self, db: AsyncSession, course_id: int, *, actor_id: str, page: int, limit: int
@@ -172,6 +190,98 @@ class EtTrackingService:
             is_pass=bool(attempt.is_pass),
             questions=[_to_result(d, d.score if d.score is not None else Decimal(0)) for d in ordered],
         )
+
+    async def reset_retry(
+        self, db: AsyncSession, course_id: int, user_id: str, quiz_id: int, *, operator: OperatorInfo
+    ) -> RetryResetResult:
+        """重置某學員於某測驗之重考次數（`FR-ET-US9-06`）。
+
+        ## 以 `ET_QUIZ_RETRY_RESET` 記基準，**不刪任何 attempt**
+
+        AC 6 明訂「重置後歷次 attempt 明細仍完整可回看」。刪除 attempt 會同時毀掉學員的
+        歷史與教師的追蹤資料，而那個損失沒有任何地方救得回來。
+
+        ## 三道守門
+
+        1. 擁有權（`ensure_owner`）
+        2. 課程未視同關閉（`ET_TRACK_003`）——含「已發布但期間已過」
+        3. 符合重置條件（`can_reset_retry`；`ET_TRACK_002`）
+        """
+        course = await self._require_writable(db, course_id, operator.user_id)
+        quiz = await self._repo.get_quiz_in_course(db, course_id=course_id, quiz_id=quiz_id)
+        if quiz is None:
+            raise _QUIZ_NOT_FOUND
+        if await self._repo.get_enrollment(db, course_id=course_id, user_id=user_id) is None:
+            raise _ENROLLMENT_NOT_FOUND
+
+        total, is_passed = await self._repo.attempt_facts(db, user_id=user_id, quiz_id=quiz_id)
+        base = await self._repo.reset_base_of(db, user_id=user_id, quiz_id=quiz_id)
+        used = round_used_attempts(total=total, reset_base=base)
+        if not can_reset_retry(used=used, max_retry=quiz.max_retry, is_passed=is_passed, has_attempt=total > 0):
+            raise _CANNOT_RESET
+
+        await self._repo.add_retry_reset(
+            db, course_id=course_id, user_id=user_id, quiz_id=quiz_id, attempt_count=total, operator=operator
+        )
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_RESET,
+            action_type="UPDATE",
+            result="SUCCESS",
+            operator_id=operator.user_id,
+            target_id=f"{course.course_id}:{user_id}:{quiz_id}",
+            description="重置學員重考次數",
+        )
+        return RetryResetResult(user_id=user_id, quiz_id=quiz_id, used_attempts=0)
+
+    async def remove_student(self, db: AsyncSession, course_id: int, user_id: str, *, operator: OperatorInfo) -> None:
+        """移除學員（`FR-ET-US9-10`）——`IS_REMOVED` + `REMOVED_AT`，學習歷史保留。
+
+        ## 作答中的 attempt **不擋、不中止**
+
+        AC 7 明訂有 `IN_PROGRESS` attempt 時仍允許移除、該 attempt 保留並計入歷史。
+        警告文案（ET-MSG-ET03-003）由前端顯示；後端擋下來會讓教師沒辦法移除一個正在
+        作答的人，而那正是最需要移除的情境。
+
+        ## 已移除者回 404 而非靜默成功
+
+        重複移除代表教師看到的清單已經過期，靜默成功會讓他以為剛才那一下有效。
+        """
+        await self._require_writable(db, course_id, operator.user_id)
+        enrollment = await self._repo.get_enrollment(db, course_id=course_id, user_id=user_id)
+        if enrollment is None:
+            raise _ENROLLMENT_NOT_FOUND
+
+        await self._repo.mark_removed(db, enrollment, operator=operator)
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_ENROLLMENT,
+            action_type="DELETE",
+            result="SUCCESS",
+            operator_id=operator.user_id,
+            target_id=f"{course_id}:{user_id}",
+            description="移除課程學員",
+        )
+
+    async def _require_writable(self, db: AsyncSession, course_id: int, actor_id: str):
+        """擁有者 + 課程未視同關閉——所有**管理動作**的共同前置。
+
+        ⚠️ 「已關閉」用 `is_effectively_closed` 而非比對 `STATUS`：到期自動轉 `CLOSED`
+        屬未實作的 `ET-16`，故「已發布但 `OPEN_END_AT` 已過」在本系統是**常態**。只判
+        `STATUS` 會讓期間已過的課程仍可被重置 / 移除，與 ET 其餘六處的關閉語意不一致。
+
+        唯讀查詢**不走這支**——AC 10 明訂關閉後三區塊仍可閱覽（#255 裁示 Q2=A
+        「讀照舊、寫全停」）。
+        """
+        course = await self._repo.get_course(db, course_id)
+        if course is None:
+            raise _NOT_FOUND
+        ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+        if is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()):
+            raise _COURSE_CLOSED
+        return course
 
 
 def _to_student_row(

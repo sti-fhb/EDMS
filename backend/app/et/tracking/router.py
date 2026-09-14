@@ -9,16 +9,17 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
-from app.et.tracking.schemas import AttemptOverview, StudentRow, TeacherAttemptDetail
+from app.et.tracking.schemas import AttemptOverview, RetryResetResult, StudentRow, TeacherAttemptDetail
 from app.et.tracking.service import EtTrackingService
 
 #: 每位使用者 / 每個 IP 每分鐘之教師端查詢數。
@@ -112,3 +113,51 @@ async def attempt_detail(
     一樣，否則教師與學員對著同一次作答會看到不同的對錯。
     """
     return await _service.attempt_detail(db, attempt_id, actor_id=ctx.user_id)
+
+
+@router.post(
+    "/courses/{course_id}/students/{user_id}/quizzes/{quiz_id}/retry-reset",
+    response_model=RetryResetResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def reset_retry(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    user_id: Annotated[str, Path(max_length=20)],
+    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> RetryResetResult:
+    """重置某學員於某測驗之重考次數（`FR-ET-US9-06`）。
+
+    **以測驗為單位**，非整門課一次重置（AC 19 明訂）。僅當該學員於該測驗之已用次數
+    用盡且尚未及格時可執行，否則 409 `ET_TRACK_002`。
+
+    🔴 **不刪除任何 attempt**——以 `ET_QUIZ_RETRY_RESET` 記基準達成「次數歸 0」，讓
+    「歷次明細永久可回看」與之並存。
+
+    課程視同關閉（含期間已過）時 409 `ET_TRACK_003`。
+    """
+    return await _service.reset_retry(db, course_id, user_id, quiz_id, operator=operator)
+
+
+@router.delete(
+    "/courses/{course_id}/students/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def remove_student(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    user_id: Annotated[str, Path(max_length=20)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """移除課程學員（`FR-ET-US9-10`）——軟刪，**學習歷史完整保留供稽核**。
+
+    有 `IN_PROGRESS` attempt 時**仍允許移除**，該 attempt 保留並可完成（AC 7）；警告
+    文案 ET-MSG-ET03-003 由前端顯示。
+
+    已移除者回 404 `ET_TRACK_001`：重複移除代表教師的清單已過期，靜默成功會誤導他。
+
+    課程視同關閉（含期間已過）時 409 `ET_TRACK_003`。
+    """
+    await _service.remove_student(db, course_id, user_id, operator=operator)
