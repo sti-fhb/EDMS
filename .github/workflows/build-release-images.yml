@@ -37,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       commit:
-        description: 'commit SHA / tag / branch（留空＝取所選分支最新）'
+        description: 'commit SHA（短或完整皆可）/ tag / branch（留空＝取所選分支最新）'
         required: false
         default: ''
         type: string
@@ -77,12 +77,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout 指定版本
+      # ⚠️ 刻意不把 inputs.commit 放進 checkout 的 ref：
+      #    actions/checkout 只有在 ref 為**完整 40 字元 SHA** 時才當 commit 處理，
+      #    其餘一律去找同名 branch／tag，於是填短 SHA 會得到
+      #    「A branch or tag with the name 'xxxxxxx' could not be found」。
+      #    而人手邊有的、以及打包工具核對版本時印出來的都是短 SHA。
+      #    改為先 checkout 所選分支（取完整歷史），再自行切版本 —— 短 SHA、
+      #    完整 SHA、tag、branch 就都能用。
+      - name: Checkout（取完整歷史）
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ inputs.commit || github.ref }}
           # 指定任意 commit SHA 時，shallow clone 可能取不到該物件
           fetch-depth: 0
+
+      # 版本字串經由 env 傳入，不直接內插進 shell —— workflow_dispatch 的輸入
+      # 是任意字串，內插等同把它當程式碼執行（script injection）。
+      - name: 切到指定版本
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          # fetch-depth: 0 已取得所有分支歷史，但 tag 未必在內，先補齊。
+          git fetch --tags --force --quiet origin || true
+          if ! git checkout --detach --quiet "$COMMIT" 2>/dev/null; then
+            # 該 commit 不在任何分支上（例如分支已刪）時，直接向遠端要這個物件。
+            if git fetch --no-tags --quiet origin "$COMMIT" 2>/dev/null; then
+              git checkout --detach --quiet FETCH_HEAD
+            else
+              echo "::error::在 ${{ github.repository }} 找不到 '$COMMIT'。"
+              echo "::error::可填短／完整 commit SHA、tag 或分支名；請確認該 commit 已 push。"
+              exit 1
+            fi
+          fi
+          echo "已切到 $(git rev-parse --short=7 HEAD)　$(git log -1 --format=%s)"
 
       # 版本標示一律取 checkout 後的實際 HEAD。
       # ⚠️ 不可用 github.sha —— workflow_dispatch 時它是「被 dispatch 的 ref 的 HEAD」，
