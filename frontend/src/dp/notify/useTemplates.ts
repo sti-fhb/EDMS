@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback } from "react"
 
 import { templatesApi } from "./templatesService"
-import type { Channel, Template, TemplateUpdatePayload } from "./templatesService"
+import type { Template, TemplateUpdatePayload } from "./templatesService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { useCrudForm } from "../../hooks/useCrudForm"
@@ -51,9 +51,6 @@ export function useTemplates() {
     [message, invalidate],
   )
 
-  /** 行內改管道（即時儲存）。 */
-  const changeChannel = useCallback((t: Template, channel: Channel) => save(t, { channel }), [save])
-
   /** 行內啟用 / 停用（即時儲存；系統信由後端擋 + 前端 disable）。 */
   const toggleEnabled = useCallback((t: Template) => save(t, { is_enabled: !t.is_enabled }), [save])
 
@@ -86,7 +83,6 @@ export function useTemplates() {
     saving,
     openEdit,
     closeForm,
-    changeChannel,
     toggleEnabled,
     saveContent,
   }

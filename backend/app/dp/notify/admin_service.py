@@ -23,6 +23,7 @@ _NOT_FOUND_MSG = "通知範本不存在"
 _FORBIDDEN_MSG = "無權限維護此模組之範本"
 _SYSTEM_MSG = "系統信不可停用或刪除（主旨與內文可編輯）"
 _CONFLICT_MSG = "內容已被他人修改，請重新載入後再儲存"
+_CHANNEL_READONLY_MSG = "通知管道不可修改，如需變更請洽系統管理人員"
 
 
 def _snapshot(t: DpNotifyTemplate) -> dict:
@@ -75,10 +76,19 @@ class TemplateAdminService:
         if module not in self._visible_modules(is_et, is_dm):
             raise AppError(status_code=403, detail=_FORBIDDEN_MSG, error_code="DP_MAIL_005")
 
-        # 系統信（IS_SYSTEM）保護：擋停用（is_enabled=false）與「移除 Email 通道」——channel 改為 MSG
-        # 會使系統信 Email 靜默不寄、實質等同停用（Security Review），故一併擋（須保留 EMAIL / BOTH）。
-        # 旗標驅動、不硬編碼碼清單；主旨 / 內文仍可編。
-        if template.is_system and (not data.is_enabled or data.channel == "MSG"):
+        # CHANNEL 唯讀（#307）：管道與「實際怎麼送 / 怎麼呈現」的對應寫在程式裡、不是資料驅動的，
+        # 兩個方向的改動都會靜默失效——
+        #   EMAIL / BOTH → MSG：send_email 回 CHANNEL_NOT_EMAIL、queued_count=0，而畫面呈現
+        #     （個人專區事件動態、簽核中心停留天數標紅）是各功能各自實作的、不會因此多出來，
+        #     等於整則通知消失；
+        #   MSG → EMAIL / BOTH：把為「未來站內訊息佇列」準備的內容當 Email 寄出。
+        # 送出現值不算變更，前端照常送整包 payload 不受影響。解除條件：站內訊息佇列實作後。
+        if data.channel != template.channel:
+            raise AppError(status_code=403, detail=_CHANNEL_READONLY_MSG, error_code="DP_MAIL_009")
+
+        # 系統信（IS_SYSTEM）保護：擋停用（is_enabled=false）。旗標驅動、不硬編碼碼清單；主旨 /
+        # 內文仍可編。原本一併擋的「channel 改 MSG」已由上方通則涵蓋，故移除該分支。
+        if template.is_system and not data.is_enabled:
             raise AppError(status_code=403, detail=_SYSTEM_MSG, error_code="DP_MAIL_003")
 
         before = _snapshot(template)
