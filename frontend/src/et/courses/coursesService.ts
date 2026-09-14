@@ -12,9 +12,6 @@ import type {
   CourseStatusResult,
   ReopenPayload,
   TagOption,
-  TeacherOption,
-  TransferOwnerPayload,
-  TransferOwnerResult,
 } from "./schemas"
 
 /** ET02 課程骨架與章節編排 API（US3 / #202）。 */
@@ -115,26 +112,4 @@ export const coursesApi = {
     return data
   },
 
-  /**
-   * 可接收課程的教師清單（ET-13 / #303）——轉讓視窗下拉之來源。
-   *
-   * 僅管理者可呼叫（後端 `require_et_roles(ET_ADMIN)`）。不分頁：單一組織，教師為
-   * 數十人量級。
-   */
-  listTeachers: async (): Promise<TeacherOption[]> => {
-    const { data } = await http.get<TeacherOption[]>("/et/teachers")
-    return data
-  },
-
-  /**
-   * 管理者代為轉讓課程擁有者（ET-13 / #303）。
-   *
-   * `OWNER_ID` 原則上永久不可變更，本端點是 spec 明訂的唯一例外（擁有者離職 / 帳號
-   * 失能）。**必填轉讓原因**，後端於同一交易內雙寫 `ET_OWNER_TRANSFER` 與
-   * `DP_AUDIT_LOG`。轉讓後 `is_owner` 隨之易主。
-   */
-  transferOwner: async (courseId: number, payload: TransferOwnerPayload): Promise<TransferOwnerResult> => {
-    const { data } = await http.post<TransferOwnerResult>(`/et/courses/${courseId}/transfer-owner`, payload)
-    return data
-  },
 }

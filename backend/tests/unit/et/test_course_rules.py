@@ -19,7 +19,6 @@ from app.et.course.rules import (
     ensure_reopenable,
     ensure_reorder_complete,
     ensure_tag_change_allowed,
-    ensure_transferable,
     is_effectively_closed,
     resequence,
 )
@@ -279,32 +278,3 @@ class TestIsEffectivelyClosed:
         import inspect
 
         assert "open_start_at" not in inspect.signature(is_effectively_closed).parameters
-
-
-class TestEnsureTransferable:
-    """擁有者轉讓之純檢核（ET-13 / US1 補強）。
-
-    ⚠️ 本函式**不檢核操作者是否為管理者**——那由 router 的
-    `require_et_roles(ET_ADMIN)` 承擔，是一道 dependency 層的閘。也**不檢核原擁有者
-    是否已離職／帳號失能**（#303 SA Q2 裁示 A：`spec.md:177` 的「離職 / 帳號失能時」
-    是這個例外的動機而非前提；強制檢核會擋掉轉調、留職停薪代管、部門重組等合理情境，
-    控制手段是必填原因 + 雙寫稽核）。
-    """
-
-    def test_轉讓給其他教師可通過(self) -> None:
-        ensure_transferable(to_owner_id="t_new", current_owner_id="t_old")
-
-    def test_轉讓給現任擁有者回409(self) -> None:
-        """不是「重複操作無害」：它會寫一筆 from == to 的轉讓紀錄，讓稽核出現一筆
-        什麼都沒改的變更，日後追查「這門課換過幾手」時得自己過濾掉這種列。
-        """
-        with pytest.raises(AppError) as exc:
-            ensure_transferable(to_owner_id="t_same", current_owner_id="t_same")
-        assert exc.value.error_code == "ET_OWNER_002"
-        assert exc.value.status_code == 409
-
-    def test_錯誤訊息不嵌入使用者ID(self) -> None:
-        """`sti-error-codes`：訊息不得嵌入動態值——防 log injection，亦不洩漏他人帳號。"""
-        with pytest.raises(AppError) as exc:
-            ensure_transferable(to_owner_id="t_same", current_owner_id="t_same")
-        assert "t_same" not in exc.value.detail

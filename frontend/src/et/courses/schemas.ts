@@ -55,13 +55,6 @@ export interface Capabilities {
   can_manage_courses: boolean
   /** 具學員角色 → 顯示側欄「我的課程」。 */
   can_learn: boolean
-  /**
-   * 具管理者角色 → ET02 顯示「轉讓擁有者」入口（ET-13 / #303）。
-   *
-   * **不可用 `can_manage_courses` 代替**——那條教師也是 true，會讓每位教師都看到一顆
-   * 按下去必定 403 的按鈕。
-   */
-  can_transfer_owner: boolean
 }
 
 export interface CoursePayload {
@@ -192,33 +185,3 @@ export interface CourseListParams {
 /** 關鍵字長度上限，對齊後端 `Query(max_length=100)`。兩邊必須一起改。 */
 export const KEYWORD_MAX_LENGTH = 100
 
-// ── 擁有者轉讓（ET-13 / #303）────────────────────────────────────────────────
-
-/**
- * 轉讓原因長度上限。
- *
- * ⚠️ 必須與後端 `course/schemas.py` 的 `TRANSFER_REASON_MAX_LEN` **同值**。ET-7 才踩過
- * 同型的坑（關鍵字輸入前端無上限、後端 `max_length=100`，使用者打到第 101 個字就 422），
- * 由 `TransferOwnerDialog.test.tsx` 的契約測試釘住。
- */
-export const TRANSFER_REASON_MAX_LENGTH = 500
-
-/** 轉讓視窗「接收教師」下拉之一列（對齊後端 `TeacherOption`）。 */
-export interface TeacherOption {
-  user_id: string
-  user_name: string
-}
-
-/** 轉讓送出的內容（對齊後端 `TransferOwnerReq`）。 */
-export interface TransferOwnerPayload {
-  to_owner_id: string
-  reason: string
-  version: number
-}
-
-/** 轉讓結果（對齊後端 `TransferOwnerResult`）。 */
-export interface TransferOwnerResult {
-  course_id: number
-  owner_id: string
-  version: number
-}

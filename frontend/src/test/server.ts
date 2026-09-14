@@ -1003,29 +1003,8 @@ export const handlers = [
     HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
   ),
   // ET02 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
-  // 預設**不具**管理者能力：`can_transfer_owner` 為 false，故多數測試看不到「轉讓
-  // 擁有者」入口。要驗那顆按鈕的測試以 server.use 覆寫為 true——預設給 true 會讓
-  // 「非管理者不該看到」這類斷言在沒有覆寫時假性通過。
   http.get("/api/et/courses/capabilities", () =>
-    HttpResponse.json({
-      can_create_course: true,
-      can_manage_courses: true,
-      can_learn: true,
-      can_transfer_owner: false,
-    }),
-  ),
-  // ET-13 轉讓擁有者（#303）
-  // ⚠️ 字面路徑 `/api/et/teachers` 與 `:courseId` 無關，不受 handler 順序影響；
-  // 但 `/courses/:courseId/transfer-owner` 是在動態段**之後**再接字面段，MSW 能正確
-  // 比對，不需要特別排序（會被吃掉的是 `/courses/<字面>` 這種形狀）。
-  http.get("/api/et/teachers", () =>
-    HttpResponse.json([
-      { user_id: "U2", user_name: "李教師" },
-      { user_id: "U3", user_name: "張教師" },
-    ]),
-  ),
-  http.post("/api/et/courses/:courseId/transfer-owner", ({ params }) =>
-    HttpResponse.json({ course_id: Number(params.courseId), owner_id: "U2", version: 4 }),
+    HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
   ),
   http.get("/api/et/tags", () =>
     HttpResponse.json([

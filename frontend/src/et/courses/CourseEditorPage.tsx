@@ -3,7 +3,6 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import LockIcon from "@mui/icons-material/Lock"
 import LockOpenIcon from "@mui/icons-material/LockOpen"
 import PersonAddIcon from "@mui/icons-material/PersonAdd"
-import SwapHorizIcon from "@mui/icons-material/SwapHoriz"
 import VisibilityIcon from "@mui/icons-material/Visibility"
 import Alert from "@mui/material/Alert"
 import Autocomplete from "@mui/material/Autocomplete"
@@ -40,7 +39,6 @@ import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
 import { ReopenCourseDialog } from "./ReopenCourseDialog"
 import { SurveyDialog } from "./SurveyDialog"
-import { TransferOwnerDialog } from "./TransferOwnerDialog"
 import { SurveySection } from "./SurveySection"
 import { coursesApi } from "./coursesService"
 import type { MaterialSavePayload } from "./MaterialDialog"
@@ -139,9 +137,6 @@ export function EtCourseEditorPage() {
    * 而那可能是上一次發布嘗試留下的，跟這次再開課無關。
    */
   const [reopenBlockers, setReopenBlockers] = useState<PublishBlocker[]>([])
-  const [transferOpen, setTransferOpen] = useState(false)
-  /** 轉讓的後端錯誤（接收者不具教師角色、已是擁有者）——顯示在視窗內，不飄 toast。 */
-  const [transferError, setTransferError] = useState<string | null>(null)
 
   const {
     data: course,
@@ -157,24 +152,6 @@ export function EtCourseEditorPage() {
   const { data: tagOptions = [] } = useQuery({
     queryKey: QUERY_KEYS.etCourses.tags(courseId),
     queryFn: () => coursesApi.listTags(courseId),
-  })
-  /** 操作能力——`can_transfer_owner` 決定「轉讓擁有者」入口是否出現（ET-13 / #303）。 */
-  const { data: capabilities } = useQuery({
-    queryKey: QUERY_KEYS.etCourses.capabilities(),
-    queryFn: coursesApi.getCapabilities,
-    staleTime: Infinity,
-  })
-  /**
-   * 可接收課程的教師清單——**只在轉讓視窗開著時才抓**。
-   *
-   * 它是一支 admin-only 端點，非管理者呼叫會 403；掛在頁面層會讓每位教師進課程編輯頁
-   * 就多送一個必然失敗的請求。比照 `surveyTemplates` 的 `enabled: surveyOpen`。
-   */
-  const { data: teachers = [] } = useQuery({
-    queryKey: QUERY_KEYS.etCourses.teachers(),
-    queryFn: coursesApi.listTeachers,
-    enabled: transferOpen,
-    staleTime: Infinity,
   })
   /**
    * 課程之課後問卷。**尚未建立時後端回 `null`（200）**，不是錯誤。
@@ -448,45 +425,6 @@ export function EtCourseEditorPage() {
       message.success("課程已再開課")
       setReopenOpen(false)
       setReopenBlockers([])
-      invalidate()
-    },
-    onError: handleError,
-  })
-
-  /**
-   * 轉讓擁有者（ET-13 / #303）。
-   *
-   * 「接收者不具教師角色」（422 `ET_OWNER_001`）與「已是擁有者」（409 `ET_OWNER_002`）
-   * 在 `mutationFn` 內就地轉成視窗內的錯誤訊息、**不往外拋**：兩者都是「選錯人」，
-   * 使用者改個選項就該能再送，飄一則 toast 反而讓他看不出是哪一欄的問題。
-   *
-   * 走 `onError` 的話 `mutateAsync` 仍會 reject（#284 在問卷送出的 409 上踩過這個坑）。
-   * 樂觀鎖衝突則仍交給 `handleError` 的專屬 Dialog——那要使用者確實知道沒存進去。
-   */
-  const transferMut = useMutation({
-    mutationFn: async (payload: { toOwnerId: string; reason: string }) => {
-      try {
-        return await coursesApi.transferOwner(courseId as number, {
-          to_owner_id: payload.toOwnerId,
-          reason: payload.reason,
-          version: course?.version ?? 0,
-        })
-      } catch (err) {
-        const { errorCode, errorMessage } = toApiError(err)
-        if (errorCode === "ET_OWNER_001" || errorCode === "ET_OWNER_002") {
-          setTransferError(errorMessage)
-          return undefined
-        }
-        throw err
-      }
-    },
-    onSuccess: (result) => {
-      // `undefined` = 選錯人，錯誤已顯示在視窗內，視窗要留著讓管理者改選
-      if (result === undefined) return
-      message.success("已轉讓擁有者")
-      setTransferOpen(false)
-      setTransferError(null)
-      // 重載課程詳細——`is_owner` 隨即變為 false，整頁切換成檢視模式
       invalidate()
     },
     onError: handleError,
@@ -845,33 +783,6 @@ export function EtCourseEditorPage() {
             }}
           >
             再開課
-          </Button>
-        )}
-        {/*
-          轉讓擁有者（ET-13 / #303）——**僅管理者**，且**不看 `readOnly`**。
-
-          這是本頁唯一一顆「非擁有者才會用到」的按鈕：管理者處理的正是別人的課程，
-          此時 `readOnly` 為 true。若比照其餘按鈕加上 `!readOnly`，它就永遠不會出現。
-
-          `can_transfer_owner` 只在具管理者角色時為 true——不可改用
-          `can_manage_courses`，那條教師也是 true，會讓每位教師看到一顆按下去必定
-          403 的按鈕（`plan.md:221`：一般教師不可主動轉讓，含擁有者本人）。
-
-          新增模式（`course === undefined`）不顯示：還沒有課程可以轉讓。
-        */}
-        {capabilities?.can_transfer_owner && course !== undefined && (
-          <Button
-            variant="outlined"
-            size="small"
-            color="warning"
-            startIcon={<SwapHorizIcon />}
-            sx={{ ml: readOnly ? "auto" : undefined }}
-            onClick={() => {
-              setTransferError(null)
-              setTransferOpen(true)
-            }}
-          >
-            轉讓擁有者
           </Button>
         )}
       </Stack>
@@ -1338,23 +1249,6 @@ export function EtCourseEditorPage() {
           setPublishResult(null)
         }}
       />
-
-      {course !== undefined && (
-        <TransferOwnerDialog
-          open={transferOpen}
-          submitting={transferMut.isPending}
-          courseName={course.course_name}
-          currentOwnerName={course.owner_name ?? course.owner_id}
-          // 現任擁有者不列入可選——選了必定回 409 `ET_OWNER_002`
-          teachers={teachers.filter((t) => t.user_id !== course.owner_id)}
-          error={transferError}
-          onSubmit={(toOwnerId, reason) => transferMut.mutate({ toOwnerId, reason })}
-          onClose={() => {
-            setTransferOpen(false)
-            setTransferError(null)
-          }}
-        />
-      )}
 
       <ReopenCourseDialog
         open={reopenOpen}

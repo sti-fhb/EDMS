@@ -45,12 +45,8 @@ from app.et.course.schemas import (
     PublishResult,
     ReopenCourseReq,
     TagOption,
-    TeacherOption,
-    TransferOwnerReq,
-    TransferOwnerResult,
 )
 from app.et.course.service import EtCourseService
-from app.et.course.transfer_service import EtOwnerTransferService
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
@@ -119,7 +115,6 @@ _chapter_rate_limit: Final = [
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
 _publish_service = EtPublishService()
-_transfer_service = EtOwnerTransferService()
 
 
 @router.get(
@@ -192,28 +187,6 @@ async def list_tag_options(
     可選清單但既有已掛者保留，前端需要那些資料才顯示得出已掛的 chip。
     """
     return await _service.list_tag_options(db, course_id=course_id)
-
-
-@router.get(
-    "/teachers",
-    response_model=list[TeacherOption],
-    # 與轉讓端點同一道閘：這份清單只為轉讓而存在，且教師姓名是輕度個資。
-    #
-    # 另掛限流：它是一支對 `DP_USER × ET_USER_ROLE` 的全量 join 查詢、不分頁。雖為
-    # admin-only、且前端以 `enabled: transferOpen` + `staleTime: Infinity` 節流，但前端
-    # 節流不是控制——直呼 API 不受它約束。共用轉讓的分桶（同一個功能的兩個面）。
-    dependencies=[Depends(require_et_roles(ET_ADMIN)), *_status_rate_limit],
-)
-async def list_teachers(db: AsyncSession = Depends(get_db)) -> list[TeacherOption]:
-    """可接收課程的教師清單——轉讓視窗「接收教師」下拉之來源（ET-13 / #303）。
-
-    僅列具**啟用中**教師角色者；停用角色者不列出，否則下拉會出現一個選了必定回 422
-    `ET_OWNER_001` 的人。不分頁（單一組織，教師為數十人量級）。
-
-    ⚠️ 路徑刻意是 `/teachers` 而非 `/courses/teachers`——後者會被
-    `GET /courses/{course_id}` 依宣告順序吃掉（`course_id` 為 int，會回 422）。
-    """
-    return await _transfer_service.list_teachers(db)
 
 
 @router.get("/courses/capabilities", response_model=Capabilities)
@@ -455,35 +428,3 @@ async def reopen_course(
     同碼與同一份缺漏清單形狀）。
     """
     return await _publish_service.reopen(db, course_id, req, operator=operator)
-
-
-@router.post(
-    "/courses/{course_id}/transfer-owner",
-    response_model=TransferOwnerResult,
-    # 🔴 **僅管理者**——ET 唯一一支 admin-only 端點，也是唯一刻意繞過 `ensure_owner`
-    # 的寫入（管理者轉讓的正是他不擁有的課程）。漏掉這一行的後果不是「少一層防護」，
-    # 而是任何教師都能搬走任何人的課程，且擁有權檢核擋不住他——它已被刻意移除。
-    #
-    # ⚠️ 不可比照本 router 其餘端點寫成 `require_et_roles(ET_TEACHER, ET_ADMIN)`：
-    # `plan.md:221` 明訂**一般教師不可主動轉讓**，含擁有者本人。
-    dependencies=[Depends(require_et_roles(ET_ADMIN)), *_status_rate_limit],
-)
-async def transfer_course_owner(
-    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    req: TransferOwnerReq,
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> TransferOwnerResult:
-    """管理者代為轉讓課程擁有者（ET-13 / #303）。
-
-    `ET_COURSE.OWNER_ID` 原則上永久不可變更（`data-model` §ET_COURSE 第 7 欄），本端點
-    是 `spec.md:177` 明訂的唯一例外——用於擁有者離職 / 帳號失能等情境。
-
-    **必填轉讓原因**，並於同一交易內雙寫 `ET_OWNER_TRANSFER`（append-only 業務紀錄）與
-    `DP_AUDIT_LOG`（`FUNC_NAME=ET-OWNER`）。
-
-    接收者須具**啟用中的教師角色**（422 `ET_OWNER_001`），且不得是現任擁有者
-    （409 `ET_OWNER_002`）。轉讓後 `is_owner` 隨 `OWNER_ID` 改變而自動易主——新擁有者
-    可編輯，原擁有者僅可閱覽，不需額外程式碼。
-    """
-    return await _transfer_service.transfer(db, course_id, req, operator=operator)

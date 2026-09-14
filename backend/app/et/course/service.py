@@ -500,10 +500,6 @@ class EtCourseService:
             can_create_course=ET_TEACHER in roles,
             can_manage_courses=bool(roles & {ET_TEACHER, ET_ADMIN}),
             can_learn=ET_STUDENT in roles,
-            # ET-13：轉讓是**僅管理者**的破例操作（`plan.md:221` 一般教師不可主動轉讓）。
-            # 不能用 `can_manage_courses` 判——那條教師也是 true，會讓每位教師都看到一顆
-            # 按下去必定 403 的按鈕。
-            can_transfer_owner=ET_ADMIN in roles,
         )
 
     # ── 標籤下拉 ────────────────────────────────────────────────────────────

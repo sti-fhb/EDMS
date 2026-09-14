@@ -30,37 +30,6 @@ def ensure_owner(*, owner_id: str, actor_id: str) -> None:
         raise AppError(status_code=403, detail="僅課程擁有者可編輯", error_code="ET_COURSE_002")
 
 
-def ensure_transferable(*, to_owner_id: str, current_owner_id: str) -> None:
-    """擁有者轉讓之純檢核（US1 補強 / #303）。
-
-    `ET_COURSE.OWNER_ID` 原則上**永久不可變更**（`data-model` §ET_COURSE 第 7 欄），
-    管理者代為轉讓是明訂的唯一例外（`spec.md:177`）。
-
-    ## 本函式刻意**不**檢核的兩件事
-
-    1. **操作者是否為管理者**——由 router 的 `require_et_roles(ET_ADMIN)` 承擔。那是一道
-       dependency 層的閘，在 service 被呼叫之前就擋下；在此重複檢核需要把角色清單一路
-       傳進來，而那個參數只會有一個呼叫端在用。
-    2. **原擁有者是否已離職 / 帳號失能**——#303 SA Q2 裁示 A。`spec.md:177` 的「擁有者
-       離職 / 帳號失能時」是這個例外**存在的動機**，不是後端必須檢核的前提；強制檢核會
-       擋掉轉調、留職停薪代管、部門重組等合理情境，而這些都不會讓帳號變成非 `ACTIVE`。
-       控制手段是**必填轉讓原因** + 雙寫稽核（`ET_OWNER_TRANSFER` + `DP_AUDIT_LOG`），
-       且轉讓可逆（再轉回去即可，每次都留紀錄）。
-
-    「接收者須具教師角色」需查 `ET_USER_ROLE`，屬 DB 互動，由 service 檢核並回
-    `ET_OWNER_001`。
-
-    Args:
-        to_owner_id: 接收課程的使用者 `USER_ID`。
-        current_owner_id: 課程當前之 `OWNER_ID`。
-
-    Raises:
-        AppError: 409 `ET_OWNER_002`，接收者已是本課程擁有者。
-    """
-    if to_owner_id == current_owner_id:
-        raise AppError(status_code=409, detail="該使用者已是本課程擁有者", error_code="ET_OWNER_002")
-
-
 def ensure_tag_change_allowed(status: str, *, current: set[int], desired: set[int]) -> None:
     """草稿可自由增刪標籤；**非草稿僅可新增、不可移除**（FR-ET-US3-02）。
 
