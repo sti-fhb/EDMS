@@ -29,12 +29,21 @@ from app.et.constants import (
     ROLE_STUDENT,
     ROLE_TEACHER,
     SOURCE_INVITATION_CODE,
+    SURVEY_QUESTION_SINGLE,
+    SURVEY_QUESTION_TEXT,
 )
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
 from app.et.roles.models import EtUserRole
+from app.et.survey.models import (
+    EtSurvey,
+    EtSurveyOption,
+    EtSurveyQuestion,
+    EtSurveyResponseD,
+    EtSurveyResponseM,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -212,6 +221,72 @@ async def _attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int, s
     db.add(row)
     await db.flush()
     return row.attempt_id
+
+
+async def _survey(db, course_id: int, *, name: str = "課後問卷") -> int:
+    now = utcnow()
+    survey = EtSurvey(
+        course_id=course_id,
+        survey_name=name,
+        is_active=True,
+        version=0,
+        created_user="admin01",
+        created_date=now,
+        deleted=0,
+    )
+    db.add(survey)
+    await db.flush()
+    return survey.survey_id
+
+
+async def _sq(db, survey_id: int, *, stem: str, order: int, is_text: bool = False) -> int:
+    now = utcnow()
+    q = EtSurveyQuestion(
+        survey_id=survey_id,
+        question_type=SURVEY_QUESTION_TEXT if is_text else SURVEY_QUESTION_SINGLE,
+        stem=stem,
+        sort_order=order,
+        version=0,
+        created_user="admin01",
+        created_date=now,
+        deleted=0,
+    )
+    db.add(q)
+    await db.flush()
+    return q.sq_id
+
+
+async def _so(db, sq_id: int, *, text: str, order: int) -> int:
+    now = utcnow()
+    o = EtSurveyOption(
+        sq_id=sq_id, option_text=text, sort_order=order, created_user="admin01", created_date=now, deleted=0
+    )
+    db.add(o)
+    await db.flush()
+    return o.so_id
+
+
+async def _respond(db, survey_id: int, user_id: str, answers: list[tuple[int, int | None, str | None]]) -> None:
+    """一位學員的一次填答。`answers` 為 `(sq_id, so_id, answer_text)`。"""
+    now = utcnow()
+    m = EtSurveyResponseM(
+        survey_id=survey_id, user_id=user_id, submitted_at=now, created_user=user_id, created_date=now, deleted=0
+    )
+    db.add(m)
+    await db.flush()
+    for sq_id, so_id, text in answers:
+        db.add(
+            EtSurveyResponseD(
+                response_id=m.response_id,
+                sq_id=sq_id,
+                so_id=so_id,
+                answer_text=text,
+                created_user=user_id,
+                created_date=now,
+                deleted=0,
+            )
+        )
+    await db.flush()
 
 
 async def _close_course(db, course_id: int, source: str) -> None:
@@ -845,3 +920,151 @@ class TestClosedCourseIsReadOnly:
         assert listed.status_code == 200, listed.text
         assert [row["user_name"] for row in listed.json()["data"]] == ["仍看得到"]
         assert overview.status_code == 200, overview.text
+
+
+class TestSurveyResult:
+    """區塊 3：問卷結果（AC 9 / 10 / 11 / FR-ET-US9-07）。"""
+
+    async def test_課程無問卷時回空(self, client, db) -> None:
+        """AC 11 / FR-ET-US9-07：課程無問卷時**本區塊隱藏**。
+
+        回 `has_survey=false` 讓前端決定不渲染整個區塊——回 404 會讓前端分不出
+        「這門課沒問卷」與「你沒權限 / 課程不存在」。
+        """
+        teacher = await _user(db, "t_tr30")
+        course_id = await _course(db, owner=teacher)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["has_survey"] is False
+
+    async def test_單選題統計選項分布(self, client, db) -> None:
+        """AC 9：單選題呈現各選項人數。百分比由前端算（後端只回原始人數）。"""
+        teacher = await _user(db, "t_tr31")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        good = await _so(db, sq, text="滿意", order=1)
+        soso = await _so(db, sq, text="普通", order=2)
+        for idx, so_id in enumerate((good, good, soso)):
+            student = await _user(db, f"s_tr31{idx}", roles=(ROLE_STUDENT,))
+            await _enroll(db, student, course_id)
+            await _respond(db, survey_id, student, [(sq, so_id, None)])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        body = r.json()
+        assert body["has_survey"] is True
+        counts = {o["option_text"]: o["count"] for o in body["questions"][0]["options"]}
+        assert counts == {"滿意": 2, "普通": 1}
+
+    async def test_問答題統計只回已答人數不回文字(self, client, db) -> None:
+        """🔴 FR-ET-US9-07（2026-08-28 裁示）：**統計檢視**之問答題僅呈現已答人數。
+
+        長短不一的文字會把單選題的分布擠到看不見；問答題的價值在逐則閱讀，本就屬明細。
+        故統計區段**不可**帶出 `answer_text`——那會讓裁示失效，而畫面上只是「變得很長」。
+        """
+        teacher = await _user(db, "t_tr32")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="建議？", order=1, is_text=True)
+        student = await _user(db, "s_tr32", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _respond(db, survey_id, student, [(sq, None, "希望多一點實作")])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        question = r.json()["questions"][0]
+        assert question["answered_count"] == 1
+        assert question["options"] == [], "問答題沒有選項分布"
+        assert "希望多一點實作" not in r.text.split('"details"')[0], "統計區段不可帶出文字答案"
+
+    async def test_明細逐學員具名且含問答文字(self, client, db) -> None:
+        """AC 10 / FR-ET-US9-07：**明細檢視**逐學員具名，問答題顯示文字答案。"""
+        teacher = await _user(db, "t_tr33")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        single = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        good = await _so(db, single, text="滿意", order=1)
+        text_q = await _sq(db, survey_id, stem="建議？", order=2, is_text=True)
+        student = await _user(db, "s_tr33", roles=(ROLE_STUDENT,), name="陳同學")
+        await _enroll(db, student, course_id)
+        await _respond(db, survey_id, student, [(single, good, None), (text_q, None, "課程很紮實")])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        detail = r.json()["details"][0]
+        assert detail["user_name"] == "陳同學", "問卷填答為具名資料"
+        answers = {a["sq_id"]: a for a in detail["answers"]}
+        assert answers[single]["option_text"] == "滿意"
+        assert answers[text_q]["answer_text"] == "課程很紮實"
+
+    async def test_已填未填人數以在籍學員為母體(self, client, db) -> None:
+        """AC 9：整份問卷之已填 / 未填人數。
+
+        未填人數的母體是**在籍學員**（已移除者不計入，比照完課率分母的定義）。
+        """
+        teacher = await _user(db, "t_tr34")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        opt = await _so(db, sq, text="滿意", order=1)
+        filled = await _user(db, "s_tr34a", roles=(ROLE_STUDENT,))
+        blank = await _user(db, "s_tr34b", roles=(ROLE_STUDENT,))
+        gone = await _user(db, "s_tr34c", roles=(ROLE_STUDENT,))
+        await _enroll(db, filled, course_id)
+        await _enroll(db, blank, course_id)
+        await _enroll(db, gone, course_id, removed=True)
+        await _respond(db, survey_id, filled, [(sq, opt, None)])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        body = r.json()
+        assert body["filled_count"] == 1
+        assert body["not_filled_count"] == 1, "已移除的學員不計入母體"
+
+    async def test_尚無填答時統計為零而非空區塊(self, client, db) -> None:
+        """AC 12 / ET-MSG-ET03-006：各選項 0 人、已填 0 / 未填 N；明細為空清單。
+
+        整個 `questions` 回空陣列會讓教師以為問卷沒有題目。
+        """
+        teacher = await _user(db, "t_tr35")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        await _so(db, sq, text="滿意", order=1)
+        student = await _user(db, "s_tr35", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        body = r.json()
+        assert body["has_survey"] is True
+        assert len(body["questions"]) == 1, "題目仍要列出，只是統計為 0"
+        assert body["questions"][0]["options"][0]["count"] == 0
+        assert body["filled_count"] == 0
+        assert body["not_filled_count"] == 1
+        assert body["details"] == []
+
+    async def test_他人課程之問卷結果回四零三(self, client, db) -> None:
+        """🔴 FR-ET-US9-08：問卷填答為**具名**資料，僅本課程教師與管理者可見。
+
+        這是本頁個資密度最高的一處——它把「誰說了什麼」直接對應到姓名。
+        """
+        owner = await _user(db, "t_tr36")
+        outsider = await _user(db, "t_tr37")
+        course_id = await _course(db, owner=owner)
+        await _survey(db, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"

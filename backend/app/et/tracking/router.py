@@ -19,7 +19,13 @@ from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, r
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
-from app.et.tracking.schemas import AttemptOverview, RetryResetResult, StudentRow, TeacherAttemptDetail
+from app.et.tracking.schemas import (
+    AttemptOverview,
+    RetryResetResult,
+    StudentRow,
+    SurveyResult,
+    TeacherAttemptDetail,
+)
 from app.et.tracking.service import EtTrackingService
 
 #: 每位使用者 / 每個 IP 每分鐘之教師端查詢數。
@@ -161,3 +167,25 @@ async def remove_student(
     課程視同關閉（含期間已過）時 409 `ET_TRACK_003`。
     """
     await _service.remove_student(db, course_id, user_id, operator=operator)
+
+
+@router.get(
+    "/courses/{course_id}/survey-result",
+    response_model=SurveyResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def survey_result(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> SurveyResult:
+    """區塊 3：問卷結果之統計與明細（`FR-ET-US9-07`）。
+
+    🔴 **具名資料**（`FR-ET-US9-08`）：僅本課程教師與管理者可見。
+
+    課程無問卷時回 `has_survey=false`（前端據此隱藏整個區塊），**不回 404**——那會讓
+    前端分不出「這門課沒問卷」與「你沒權限」。
+
+    統計檢視之**問答題僅回已答人數、不回文字**（2026-08-28 裁示）；文字答案在明細檢視。
+    """
+    return await _service.survey_result(db, course_id, actor_id=ctx.user_id)

@@ -140,3 +140,69 @@ class RetryResetResult(BaseModel):
     user_id: str
     quiz_id: int
     used_attempts: int
+
+
+class SurveyOptionStat(BaseModel):
+    """統計檢視：單選題的一個選項。
+
+    **只回原始人數、不回百分比**——分母的定義（已填該題 vs 已填問卷）在單選題必填的
+    前提下恆等，但把計算留在前端可避免「後端算好的百分比」與「前端顯示的人數」四捨
+    五入不一致。
+    """
+
+    so_id: int
+    option_text: str
+    count: int
+
+
+class SurveyQuestionStat(BaseModel):
+    """統計檢視的一題。
+
+    ⚠️ **問答題不帶文字答案**（2026-08-28 裁示，`FR-ET-US9-07`）：長短不一的文字會把
+    單選題的分布擠到看不見；問答題的價值在逐則閱讀，本就屬明細檢視。故此處只回
+    `answered_count`，`options` 為空陣列。
+    """
+
+    sq_id: int
+    stem: str
+    question_type: str
+    #: 已作答此題的人數。單選題等於各選項人數之和；問答題是唯一的統計值。
+    answered_count: int
+    #: 單選題的選項分布；問答題恆為空陣列。
+    options: list[SurveyOptionStat]
+
+
+class SurveyDetailAnswer(BaseModel):
+    """明細檢視：某學員對某題的作答。"""
+
+    sq_id: int
+    #: 單選題所選之選項文字；問答題為 `None`。
+    option_text: str | None
+    #: 問答題之文字答案；單選題為 `None`。
+    answer_text: str | None
+
+
+class SurveyDetailRow(BaseModel):
+    """明細檢視的一位學員（**具名**）。"""
+
+    user_id: str
+    user_name: str | None
+    submitted_at: datetime
+    answers: list[SurveyDetailAnswer]
+
+
+class SurveyResult(BaseModel):
+    """區塊 3 的完整回應（`FR-ET-US9-07`）。
+
+    `has_survey=False` 時其餘欄位皆為空——前端據此**不渲染整個區塊**（AC 11 明訂隱藏）。
+    回 404 會讓前端分不出「這門課沒問卷」與「你沒權限 / 課程不存在」。
+    """
+
+    has_survey: bool
+    survey_name: str | None
+    #: 已填答人數。
+    filled_count: int
+    #: 未填答人數；母體為**在籍**學員（已移除者不計入，比照完課率分母）。
+    not_filled_count: int
+    questions: list[SurveyQuestionStat]
+    details: list[SurveyDetailRow]

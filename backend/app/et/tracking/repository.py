@@ -19,6 +19,13 @@ from app.et.constants import GRADED_STATUSES
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
+from app.et.survey.models import (
+    EtSurvey,
+    EtSurveyOption,
+    EtSurveyQuestion,
+    EtSurveyResponseD,
+    EtSurveyResponseM,
+)
 
 
 class EtTrackingRepository:
@@ -378,3 +385,64 @@ class EtTrackingRepository:
         enrollment.updated_user = operator.user_id
         enrollment.updated_date = now
         await db.flush()
+
+    async def get_survey(self, db: AsyncSession, course_id: int) -> EtSurvey | None:
+        """該課程之問卷（一門課 0~1 份）；無問卷回 `None`。"""
+        return await db.scalar(select(EtSurvey).where(EtSurvey.course_id == course_id, EtSurvey.deleted == 0))
+
+    async def survey_questions(self, db: AsyncSession, survey_id: int) -> list[EtSurveyQuestion]:
+        """問卷題目（依 `SORT_ORDER`）。"""
+        rows = await db.execute(
+            select(EtSurveyQuestion)
+            .where(EtSurveyQuestion.survey_id == survey_id, EtSurveyQuestion.deleted == 0)
+            .order_by(EtSurveyQuestion.sort_order.asc())
+        )
+        return list(rows.scalars().all())
+
+    async def survey_options(self, db: AsyncSession, sq_ids: list[int]) -> dict[int, list[EtSurveyOption]]:
+        """`{sq_id: [選項]}`——一次取回所有題目的選項，不逐題查。"""
+        if not sq_ids:
+            return {}
+        rows = await db.execute(
+            select(EtSurveyOption)
+            .where(EtSurveyOption.sq_id.in_(sq_ids), EtSurveyOption.deleted == 0)
+            .order_by(EtSurveyOption.sort_order.asc())
+        )
+        grouped: dict[int, list[EtSurveyOption]] = {}
+        for option in rows.scalars().all():
+            grouped.setdefault(option.sq_id, []).append(option)
+        return grouped
+
+    async def survey_responses(self, db: AsyncSession, survey_id: int) -> list[EtSurveyResponseM]:
+        """該問卷的所有填答主檔（依提交時間）。"""
+        rows = await db.execute(
+            select(EtSurveyResponseM)
+            .where(EtSurveyResponseM.survey_id == survey_id, EtSurveyResponseM.deleted == 0)
+            .order_by(EtSurveyResponseM.submitted_at.asc())
+        )
+        return list(rows.scalars().all())
+
+    async def survey_answers(self, db: AsyncSession, response_ids: list[int]) -> list[EtSurveyResponseD]:
+        """所有填答明細——**一次取回**，供統計與明細兩種檢視共用。
+
+        統計與明細是同一份資料的兩種呈現，查兩次會讓兩邊在併發填答時對不起來。
+        """
+        if not response_ids:
+            return []
+        rows = await db.execute(
+            select(EtSurveyResponseD).where(
+                EtSurveyResponseD.response_id.in_(response_ids), EtSurveyResponseD.deleted == 0
+            )
+        )
+        return list(rows.scalars().all())
+
+    async def enrolled_count(self, db: AsyncSession, course_id: int) -> int:
+        """**在籍**學員數——已移除者不計入（比照完課率分母的定義）。"""
+        total = await db.scalar(
+            select(func.count(EtEnrollment.enrollment_id)).where(
+                EtEnrollment.course_id == course_id,
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+            )
+        )
+        return total or 0

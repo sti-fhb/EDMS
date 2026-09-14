@@ -5,6 +5,7 @@
 管理者可見，而本頁其餘兩區塊同樣含學員的個別成績，故一律同等把關。
 """
 
+from collections import Counter
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -26,6 +27,11 @@ from app.et.tracking.schemas import (
     EnrollmentRow,
     RetryResetResult,
     StudentRow,
+    SurveyDetailAnswer,
+    SurveyDetailRow,
+    SurveyOptionStat,
+    SurveyQuestionStat,
+    SurveyResult,
     TeacherAttemptDetail,
     TeacherAttemptRow,
     TeacherQuizRow,
@@ -282,6 +288,93 @@ class EtTrackingService:
         if is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()):
             raise _COURSE_CLOSED
         return course
+
+    async def survey_result(self, db: AsyncSession, course_id: int, *, actor_id: str) -> SurveyResult:
+        """區塊 3：問卷結果之統計與明細（`FR-ET-US9-07` / `-08`）。
+
+        ## 具名資料，授權從嚴
+
+        `FR-ET-US9-08` 明訂問卷填答之統計與明細**僅本課程教師與管理者可見**。這是本頁
+        個資密度最高的一處——它把「誰說了什麼」直接對應到姓名。
+
+        ## 課程無問卷回 `has_survey=False`，不回 404
+
+        AC 11 要求「本區塊隱藏」。回 404 會讓前端分不出「這門課沒問卷」與「你沒權限 /
+        課程不存在」，而那兩種情況的處理完全不同。
+
+        ## 統計與明細取自**同一次**查詢
+
+        兩者是同一份資料的兩種呈現；分兩次查會讓它們在併發填答時對不起來（統計說 3 人
+        填了、明細只列出 2 位）。
+        """
+        await self._require_owner(db, course_id, actor_id)
+
+        survey = await self._repo.get_survey(db, course_id)
+        if survey is None:
+            return SurveyResult(
+                has_survey=False,
+                survey_name=None,
+                filled_count=0,
+                not_filled_count=0,
+                questions=[],
+                details=[],
+            )
+
+        questions = await self._repo.survey_questions(db, survey.survey_id)
+        options = await self._repo.survey_options(db, [q.sq_id for q in questions])
+        responses = await self._repo.survey_responses(db, survey.survey_id)
+        answers = await self._repo.survey_answers(db, [r.response_id for r in responses])
+        enrolled = await self._repo.enrolled_count(db, course_id)
+        names = await self._repo.user_names(db, {r.user_id for r in responses})
+
+        by_response: dict[int, list] = {}
+        option_counts: Counter = Counter()
+        answered_by_sq: Counter = Counter()
+        for a in answers:
+            by_response.setdefault(a.response_id, []).append(a)
+            answered_by_sq[a.sq_id] += 1
+            if a.so_id is not None:
+                option_counts[a.so_id] += 1
+
+        option_text = {o.so_id: o.option_text for opts in options.values() for o in opts}
+        filled = len(responses)
+        return SurveyResult(
+            has_survey=True,
+            survey_name=survey.survey_name,
+            filled_count=filled,
+            # 母體為在籍學員；`max(0, ...)` 防禦「填答後被移除」造成的負數
+            not_filled_count=max(0, enrolled - filled),
+            questions=[
+                SurveyQuestionStat(
+                    sq_id=q.sq_id,
+                    stem=q.stem,
+                    question_type=q.question_type,
+                    answered_count=answered_by_sq.get(q.sq_id, 0),
+                    # ⚠️ 問答題不帶文字答案（2026-08-28 裁示）——它屬明細檢視
+                    options=[
+                        SurveyOptionStat(so_id=o.so_id, option_text=o.option_text, count=option_counts.get(o.so_id, 0))
+                        for o in options.get(q.sq_id, [])
+                    ],
+                )
+                for q in questions
+            ],
+            details=[
+                SurveyDetailRow(
+                    user_id=r.user_id,
+                    user_name=names.get(r.user_id),
+                    submitted_at=r.submitted_at,
+                    answers=[
+                        SurveyDetailAnswer(
+                            sq_id=a.sq_id,
+                            option_text=option_text.get(a.so_id) if a.so_id is not None else None,
+                            answer_text=a.answer_text,
+                        )
+                        for a in by_response.get(r.response_id, [])
+                    ],
+                )
+                for r in responses
+            ],
+        )
 
 
 def _to_student_row(
