@@ -24,7 +24,7 @@
 
 ## 閱卷只讀快照
 
-`_grade()` 的輸入全部來自 `ET_QUIZ_ATTEMPT_D` 的四個 `*_SNAPSHOT` 欄位。**不可**回頭查
+`submit()` 內閱卷的輸入全部來自 `ET_QUIZ_ATTEMPT_D` 的四個 `*_SNAPSHOT` 欄位。**不可**回頭查
 `ET_QUESTION` / `ET_OPTION`——教師在學員作答期間改了配分或正確答案時，回查會靜默改變
 計分結果，而學員拿到的是一個看起來正常的分數（`spec_us6` 場景 26）。
 """
@@ -71,6 +71,7 @@ from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access
 from app.et.progress.repository import EtProgressRepository
 from app.et.progress.service import EtProgressService
+from app.et.quiz.models import EtQuiz
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此測驗", error_code="ET_ATTEMPT_001")
 _NO_ATTEMPTS = AppError(status_code=409, detail="重考次數已用完，請聯繫教師重置", error_code="ET_ATTEMPT_002")
@@ -94,19 +95,21 @@ class QuizAccess:
     更難讀，且多一個欄位就要改每一個解構點。`survey_fill` 的 `SurveyEntryFacts` 是同一
     情境的既有範式。
 
+    **刻意不帶 `is_preview`**（「是擁有者且不在籍」）：唯一的消費端是及格後的項目完成
+    回寫，而那裡是以該 `attempt` 重算（`_is_preview(attempt=...)`）而非沿用開始當下的
+    值。放進來會是一個沒有讀取端的欄位，隨時間與真實判定漂移而不會有測試抓到。
+
     Attributes:
-        is_preview: 「是擁有者且**不在籍**」——教師預覽不得累積進度（#255 裁示 Q1）。
         open_end_at: 閱課訖止。與 `course_status` **一起**交給
             `course.rules.is_effectively_closed`——`course_status` 單獨不足以表達
             「已發布但期間已過」那個狀態。
     """
 
-    quiz: object
+    quiz: EtQuiz
     item_id: int
     course_id: int
     course_status: str
     open_end_at: datetime | None
-    is_preview: bool
 
     def is_closed(self, *, now: datetime) -> bool:
         """課程對學員是否視同關閉（`CLOSED` 或已發布但期間已過）。"""
@@ -207,7 +210,7 @@ class EtAttemptService:
         """
         user_id = operator.user_id
         access = await self._require_access(db, quiz_id, user_id)
-        quiz, item_id, course_id, is_preview = access.quiz, access.item_id, access.course_id, access.is_preview
+        quiz, item_id, course_id = access.quiz, access.item_id, access.course_id
 
         existing = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
         if existing is not None:
@@ -284,6 +287,17 @@ class EtAttemptService:
 
         擋的是**寫入**、不是**提交**——`spec_us6` 場景 10 要的是「以時間到當下的作答狀態
         自動提交」，沒收學員已經寫好的考卷不在其中。
+
+        ## ⚠️ 本支**不受課程關閉守門**，理由同 `spec_us6` 場景 27
+
+        課程視同關閉後仍可暫存——這是刻意的，不是漏掉。場景 27 保的是「已在作答者可
+        完成」，而不讓學員寫答案的話，「可完成」就只剩一個空殼：他能按提交，但交出去的
+        是一份空白考卷。
+
+        attempt 模組在課程視同關閉後仍可寫入的路徑共**三條**：本支（暫存）、`submit()`
+        （提交計分）、`_mark_item_completed()`（及格回寫項目完成）。三條同源於場景 27。
+        日後若有人要替本支補上課程關閉守門，請先確認場景 27 是否已被推翻——否則學員在
+        關閉當下寫到一半的答案會存不進去，而畫面上只會出現一個沒有來由的錯誤。
         """
         attempt = await self._require_own_attempt(db, attempt_id, operator.user_id)
         self._ensure_in_progress(attempt)
@@ -369,7 +383,8 @@ class EtAttemptService:
             is_pass=is_pass,
             submitted_at=now,
             remaining_attempts=remaining_attempts(total=used_total, reset_base=base, max_retry=max_retry),
-            course_closed=await self._is_course_closed(db, attempt.course_id),
+            # 共用上面逾時判定用的 `now`——同一份回應的欄位不該各自取時間（同 `intro()`）
+            course_closed=await self._is_course_closed(db, attempt.course_id, now=now),
             questions=[
                 _to_result(detail, per_question[detail.question_id])
                 for detail in _in_snapshot_order(details, attempt.question_order)
@@ -423,11 +438,15 @@ class EtAttemptService:
 
     # ── 內部 ────────────────────────────────────────────────────────────────
 
-    async def _is_course_closed(self, db: AsyncSession, course_id: int) -> bool:
+    async def _is_course_closed(self, db: AsyncSession, course_id: int, *, now: datetime | None = None) -> bool:
         """課程是否**視同關閉**，供成績頁顯示 ET-MSG-ET06-005。
 
         含「已發布但閱課期間已過」（#313）——與 `intro()` / `start()` 用同一支
         `is_effectively_closed`，否則成績頁會說課程還開著、而學員其實已經不能再作答。
+
+        `now` 由呼叫端傳入時共用同一個時點——`submit()` 已為逾時判定算過一次，同一份回應
+        裡的兩個欄位若各自取時間，理論上可在跨越 `OPEN_END_AT` 的那一瞬間互相矛盾。
+        省略時自行取，供沒有現成時點的呼叫端使用。
 
         查不到課程時回 `False` 而非拋錯：成績本身與課程狀態無關，為了一則提示訊息而讓
         整份成績單 404 是本末倒置。
@@ -435,7 +454,7 @@ class EtAttemptService:
         course = await self._learning.get_course(db, course_id)
         if course is None:
             return False
-        return is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow())
+        return is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now or utcnow())
 
     async def _require_access(self, db: AsyncSession, quiz_id: int, user_id: str) -> QuizAccess:
         """守門 1 + 2：反查鏈與「在籍 OR 擁有者」。
@@ -465,7 +484,6 @@ class EtAttemptService:
             course_id=course_id,
             course_status=course.status,
             open_end_at=course.open_end_at,
-            is_preview=is_owner and not enrolled,
         )
 
     async def _require_own_attempt(self, db: AsyncSession, attempt_id: int, user_id: str):

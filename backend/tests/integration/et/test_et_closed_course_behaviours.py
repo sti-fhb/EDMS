@@ -504,6 +504,27 @@ class TestAttemptBlocked:
         assert submitted.status_code == 200, submitted.text
         assert submitted.json()["score"] is not None
 
+    async def test_關閉後重新進入仍取回未完成的作答(self, client, db, source: str) -> None:
+        """AC 3 的**續作路徑**——與「提交已開好的 attempt」是不同的一條。
+
+        ⚠️ 這條在 #313 之前沒有任何測試涵蓋。既有的
+        `test_關閉當下作答中的attempt仍可提交計分` 走 `PUT answers` / `POST submit`
+        （經 `_require_own_attempt`），**完全不經過 `start()`**；把 `start()` 的關閉守門
+        往上挪到續作分支之前，那條測試照樣全綠，而學員一離開頁面就再也回不到自己寫到
+        一半的考卷。
+
+        `spec_us6` 場景 27 保的是「已在作答者可完成」，離開再回來仍屬同一件事。
+        """
+        ctx, attempt = await self._started(client, db, f"at8{source[:3]}")
+        await _apply_close(client, db, ctx, source)
+
+        # 關閉後重新呼叫「開始作答」——應回既有那一筆（resumed），而非 409
+        got = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(ctx["student"]))
+
+        assert got.status_code == 201, got.text
+        assert got.json()["attempt_id"] == attempt["attempt_id"], "應取回同一筆，不是開新的"
+        assert got.json()["resumed"] is True
+
     async def test_關閉後仍可查看已提交的成績(self, client, db, source: str) -> None:
         """唯讀回看涵蓋成績——關閉只停寫入（#255 裁示 Q2=A）。"""
         ctx, attempt = await self._started(client, db, f"at3{source[:3]}")
@@ -545,10 +566,12 @@ class TestAttemptOpenWhenNotClosed:
         """
         ctx = await _ready(client, db, "at6", with_quiz=True)
         await _complete_course(db, ctx)
-        await db.execute(
-            update(EtCourse).where(EtCourse.course_id == ctx["course_id"]).values(open_end_at=None)
-        )
-        await db.commit()
+        await db.execute(update(EtCourse).where(EtCourse.course_id == ctx["course_id"]).values(open_end_at=None))
+        # `flush()` 而非 `commit()`：`db` fixture 以 rollback 收尾，commit 會把本測試的
+        # 前置資料留到 session 結束。`expire_all()` 的理由同 `_apply_close()`——服務層是
+        # 另一次查詢，但同一個 session 的 identity map 可能還握著舊的課程列。
+        await db.flush()
+        db.expire_all()
 
         got = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(ctx["student"]))
 
