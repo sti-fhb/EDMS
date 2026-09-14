@@ -343,6 +343,12 @@ class Capabilities(BaseModel):
     #: 學員角色於帳號建立時自動授予，故多數人為 true；但管理者可停用個別指派
     #: （`load_et_roles` 只取 `IS_ACTIVE=true`），被停用者不該再看到學員入口。
     can_learn: bool
+    #: 具**管理者**角色 → ET02 顯示「轉讓擁有者」入口（ET-13 / #303）。
+    #:
+    #: **不可用 `can_manage_courses` 代替**：那條教師也是 true，會讓每位教師都看到一顆
+    #: 按下去必定 403 的按鈕（`plan.md:221` 明訂一般教師不可主動轉讓，含擁有者本人）。
+    #: 前端隱藏僅為 UX，後端另以 `require_et_roles(ET_ADMIN)` 把關。
+    can_transfer_owner: bool
 
 
 class TagOption(BaseModel):
@@ -483,6 +489,17 @@ class TransferOwnerReq(BaseModel):
         if not stripped:
             raise ValueError("轉讓原因不得為空白")
         return stripped
+
+
+class TeacherOption(BaseModel):
+    """轉讓視窗「接收教師」下拉之一列（ET-13 / #303）。
+
+    **只回 `USER_ID` 與姓名**——下拉不需要 Email 或其他欄位，多回等於把一份使用者個資
+    表暴露在一支為了轉讓而存在的端點上。
+    """
+
+    user_id: str
+    user_name: str
 
 
 class TransferOwnerResult(BaseModel):

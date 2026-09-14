@@ -324,6 +324,58 @@ class TestValidation:
         assert r.json()["error_code"] == "ET_COURSE_001"
 
 
+class TestTeacherOptions:
+    """`GET /api/et/teachers`——轉讓視窗「接收教師」下拉的資料來源。
+
+    規劃階段漏列了這支：`issues.md` T115「管理者選擇課程 + 接收教師」需要一份教師清單，
+    而 ET 原本沒有任何列教師的端點（`GET /api/dp/users` 是 DP 的分頁端點，且不帶
+    `ET_USER_ROLE`，篩不出誰是 ET 教師）。
+    """
+
+    async def test_列出啟用中的教師(self, client, db) -> None:
+        admin = await _user(db, "a_to01", ROLE_ADMIN)
+        teacher = await _user(db, "t_to01", ROLE_TEACHER)
+        await _user(db, "s_to01", ROLE_STUDENT)
+
+        r = await client.get("/api/et/teachers", headers=_bearer(admin))
+
+        assert r.status_code == 200, r.text
+        ids = [row["user_id"] for row in r.json()]
+        assert teacher in ids
+        assert "s_to01" not in ids, "學員不是可接收的對象"
+
+    async def test_回傳姓名供下拉顯示(self, client, db) -> None:
+        """只回 `user_id` 的話管理者得自己記住誰是誰——下拉要顯示得出人名。"""
+        admin = await _user(db, "a_to02", ROLE_ADMIN)
+        teacher = await _user(db, "t_to02", ROLE_TEACHER)
+
+        r = await client.get("/api/et/teachers", headers=_bearer(admin))
+
+        row = next(x for x in r.json() if x["user_id"] == teacher)
+        assert row["user_name"] == f"測試{teacher}"
+
+    async def test_停用角色者不列出(self, client, db) -> None:
+        """比照 `_has_teacher_role`：停用的角色不算有，否則下拉會列出一個選了會 422 的人。"""
+        from sqlalchemy import update as sa_update
+
+        admin = await _user(db, "a_to03", ROLE_ADMIN)
+        teacher = await _user(db, "t_to03", ROLE_TEACHER)
+        await db.execute(sa_update(EtUserRole).where(EtUserRole.user_id == teacher).values(is_active=False))
+        await db.flush()
+
+        r = await client.get("/api/et/teachers", headers=_bearer(admin))
+
+        assert teacher not in [row["user_id"] for row in r.json()]
+
+    async def test_非管理者不可列教師(self, client, db) -> None:
+        """教師姓名清單是輕度個資，且這支只為轉讓而存在——與轉讓端點同一道閘。"""
+        teacher = await _user(db, "t_to04", ROLE_TEACHER)
+
+        r = await client.get("/api/et/teachers", headers=_bearer(teacher))
+
+        assert r.status_code == 403, r.text
+
+
 class TestAuthorization:
     """🔴 admin-only 的閘。漏掉時擁有權檢核**擋不住**——它已被刻意移除。"""
 

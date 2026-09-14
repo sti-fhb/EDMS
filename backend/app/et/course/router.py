@@ -45,6 +45,7 @@ from app.et.course.schemas import (
     PublishResult,
     ReopenCourseReq,
     TagOption,
+    TeacherOption,
     TransferOwnerReq,
     TransferOwnerResult,
 )
@@ -167,6 +168,24 @@ async def list_tag_options(
     可選清單但既有已掛者保留，前端需要那些資料才顯示得出已掛的 chip。
     """
     return await _service.list_tag_options(db, course_id=course_id)
+
+
+@router.get(
+    "/teachers",
+    response_model=list[TeacherOption],
+    # 與轉讓端點同一道閘：這份清單只為轉讓而存在，且教師姓名是輕度個資。
+    dependencies=[Depends(require_et_roles(ET_ADMIN))],
+)
+async def list_teachers(db: AsyncSession = Depends(get_db)) -> list[TeacherOption]:
+    """可接收課程的教師清單——轉讓視窗「接收教師」下拉之來源（ET-13 / #303）。
+
+    僅列具**啟用中**教師角色者；停用角色者不列出，否則下拉會出現一個選了必定回 422
+    `ET_OWNER_001` 的人。不分頁（單一組織，教師為數十人量級）。
+
+    ⚠️ 路徑刻意是 `/teachers` 而非 `/courses/teachers`——後者會被
+    `GET /courses/{course_id}` 依宣告順序吃掉（`course_id` 為 int，會回 422）。
+    """
+    return await _transfer_service.list_teachers(db)
 
 
 @router.get("/courses/capabilities", response_model=Capabilities)

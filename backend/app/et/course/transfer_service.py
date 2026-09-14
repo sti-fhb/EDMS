@@ -42,11 +42,12 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.constants import ROLE_TEACHER
 from app.et.course.repository import EtCourseRepository
 from app.et.course.rules import ensure_transferable
-from app.et.course.schemas import TransferOwnerReq, TransferOwnerResult
+from app.et.course.schemas import TeacherOption, TransferOwnerReq, TransferOwnerResult
 from app.et.invitation.models import EtOwnerTransfer
 from app.et.roles.models import EtUserRole
 from app.services import AuditLogService
@@ -128,6 +129,33 @@ class EtOwnerTransferService:
             owner_id=req.to_owner_id,
             version=new_version,  # type: ignore[arg-type]
         )
+
+    async def list_teachers(self, db: AsyncSession) -> list[TeacherOption]:
+        """可接收課程的教師清單（轉讓視窗的下拉來源）。
+
+        **不分頁**：EDMS 為單一組織，教師人數是數十的量級，與 `list_tag_options` 同一
+        判斷（`sti-frontend-modules` 的 client-side 分頁門檻為 200 筆）。
+
+        **排除停用角色**（比照 `_has_teacher_role` 與 `deps.require_et_roles`）：否則
+        下拉會列出一個選了必定回 422 `ET_OWNER_001` 的人。
+
+        **不排除現任擁有者**：本端點不知道是為哪一門課開的（它沒有 `course_id`）。
+        「已是擁有者」由 `ensure_transferable` 於送出時回 409 `ET_OWNER_002`，前端亦可
+        自行以 `course.owner_id` 過濾——兩者都比讓這支端點去理解課程脈絡乾淨。
+        """
+        rows = await db.execute(
+            select(DpUser.user_id, DpUser.user_name)
+            .join(EtUserRole, EtUserRole.user_id == DpUser.user_id)
+            .where(
+                EtUserRole.role == ROLE_TEACHER,
+                EtUserRole.is_active.is_(True),
+                EtUserRole.deleted == 0,
+                DpUser.deleted == 0,
+            )
+            .order_by(DpUser.user_name, DpUser.user_id)
+            .distinct()
+        )
+        return [TeacherOption(user_id=uid, user_name=name) for uid, name in rows]
 
     async def _has_teacher_role(self, db: AsyncSession, user_id: str) -> bool:
         """接收者是否具**啟用中**的教師角色。

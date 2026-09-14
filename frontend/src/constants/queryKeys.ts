@@ -21,6 +21,7 @@ export const QUERY_KEYS = {
   },
   etCourses: {
     capabilities: () => ["et", "courses", "capabilities"] as const,
+    teachers: () => ["et", "teachers"] as const,
     list: (params: CourseListParams) => ["et", "courses", "list", params] as const,
     filterTags: () => ["et", "courses", "filter-tags"] as const,
     detail: (courseId: number) => ["et", "courses", courseId] as const,
