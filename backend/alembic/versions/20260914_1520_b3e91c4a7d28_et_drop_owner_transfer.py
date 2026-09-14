@@ -12,8 +12,12 @@
 #303 開發期間實作、於同一個 issue 內依裁示移除，未曾合併上線。故 `upgrade` 不需要
 搬移資料，`downgrade` 重建空表即可。
 
+本支原以 `cb17257ddf60` 為 down_revision，但 #323（`DP_SCHEDULE` 新增 DESCRIPTION）先行
+合併且同樣接在該 revision 之後，形成雙 head。依「先合併者不動、後合併者改自己」的約定，
+改接於 `b3f7c2e8a591` 之後。兩者無資料相依，順序不影響結果。
+
 Revision ID: b3e91c4a7d28
-Revises: cb17257ddf60
+Revises: b3f7c2e8a591
 Create Date: 2026-09-14 15:20:00.000000
 """
 
@@ -24,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b3e91c4a7d28"
-down_revision: Union[str, None] = "cb17257ddf60"
+down_revision: Union[str, None] = "b3f7c2e8a591"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
