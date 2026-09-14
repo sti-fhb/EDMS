@@ -243,7 +243,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(navigateSpy).toHaveBeenCalledWith("/dm/me?tab=drafts") // 導回草稿匣（Round-1）
   }, 20000)
 
-  it("續編新版本草稿：名稱唯讀、版號/摘要留白（Round-1：不帶舊值）", async () => {
+  it("續編新版本草稿：名稱唯讀、版號/摘要帶入上次草稿值（#308 推翻 Round-1 留白）", async () => {
     server.use(
       http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
         HttpResponse.json({
@@ -269,8 +269,11 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     renderWithProviders(<DmEditorPage />)
     expect(await screen.findByText("編輯文件 — 已發布B")).toBeInTheDocument()
     expect(screen.getByLabelText(/文件名稱/)).toBeDisabled() // 已發布文件之新版草稿名稱唯讀
-    expect(screen.getByLabelText(/新版本號/)).toHaveValue("") // 新版本不帶舊版號、留白（Round-1）
-    expect(screen.getByLabelText(/變更摘要/)).toHaveValue("") // 新版本不帶舊摘要、留白
+    // #308：改為一律帶入——版號重複已由送審的 version_no_taken 擋掉，留白只是讓使用者看不到上次寫了什麼
+    expect(screen.getByLabelText(/新版本號/)).toHaveValue("2.0-draft")
+    expect(screen.getByLabelText(/變更摘要/)).toHaveValue("新版草摘")
+    // 取代留白原本的提醒作用
+    expect(screen.getAllByText(/送審前請確認反映本次變更/).length).toBeGreaterThan(0)
   })
 
   it("續編已廢止孤兒草稿：顯示已廢止警示、鎖送簽/存草稿（#222 安全）", async () => {

@@ -25,6 +25,11 @@ import { useDetail, useVersions } from "../detail/useDetail"
 
 const TAG_GROUP_LABELS: Record<string, string> = { MODULE: "適用模組", NATURE: "文件性質", LEGAL: "法規關聯" }
 
+const VERSION_NO_HINT = "由撰寫者自行輸入（系統不建議版號）"
+
+/** 續編時版號 / 摘要帶的是上次草稿值（#308），以此提示取代原本「留白」的提醒作用。 */
+const DRAFT_PREFILL_HINT = "此為上次草稿內容，送審前請確認反映本次變更"
+
 /** 後端 error_code → 對應表單欄位（用於 inline 標紅）；未列者以 Snackbar 呈現。 */
 const ERROR_FIELD: Record<string, keyof EditorForm> = {
   DM_DOC_005: "audience_ids", // 無可見對象（DM-MSG-DM03-008）
@@ -89,6 +94,8 @@ export function DmEditorPage() {
   const nameEditable = isContinueDraft && !!draftMeta?.name_editable
   // 已廢止文件之孤兒草稿：不可續編 / 送簽（後端亦擋 DM_DOC_018）；此處鎖動作、提示改用刪除。
   const draftObsolete = isContinueDraft && draftMeta?.doc_status === "OBSOLETE"
+  // 續編時版號 / 摘要帶的是上次草稿值（#308），於欄位下方提示；新增文件無此情形。
+  const draftPrefillHint = isContinueDraft && draftMeta ? DRAFT_PREFILL_HINT : ""
   // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM02 詳細。
   const editName = isContinueDraft ? (draftMeta?.doc_name ?? "") : (detail?.doc_name ?? "")
   const editCategoryName = isContinueDraft ? (draftMeta?.category_name ?? "") : (detail?.category_name ?? "")
@@ -310,18 +317,22 @@ export function DmEditorPage() {
     setForm((prev) => ({ ...prev, audience_ids: docTags.audience_ids, retrieval_ids: docTags.retrieval_ids }))
   }, [isNew, docTags])
 
-  // 續編模式：一次性預帶既有草稿內容。首版草稿帶回名稱 / func / 版號 / 摘要 / 前次審核者；
-  // 新版本草稿（父已發布）之版號 / 摘要**不預帶、留白**（每次續編填全新版號與本次變更摘要，回饋 Round-1）。
+  // 續編模式：一次性預帶既有草稿內容——名稱 / func / 版號 / 摘要 / 前次審核者，四種情況
+  // （首版 / 新版本 × 自存 / 退回）一致。
+  //
+  // #308 推翻 Round-1 的「新版本草稿版號 / 摘要留白」：留白的目的是逼使用者填全新版號，但
+  // 送審時 `version_no_taken`（editor/service.py）已擋掉與同文件既有版本重複的版號，留白對此
+  // 沒有額外貢獻；代價卻是使用者看不到自己上次寫了什麼（值其實在 DB 裡），且與其他欄位都預帶
+  // 的行為不一致，看起來像資料遺失。改以欄位下方的提示達成「請確認反映本次變更」的提醒。
   useEffect(() => {
     if (isNew || metaPrefilled.current || !draftMeta) return
     metaPrefilled.current = true
-    const firstVersion = draftMeta.doc_status === "DRAFT"
     setForm((prev) => ({
       ...prev,
       doc_name: draftMeta.doc_name,
       func_code: draftMeta.func_code ?? "",
-      version_no: firstVersion ? (draftMeta.version_no ?? "") : "",
-      change_summary: firstVersion ? (draftMeta.change_summary ?? "") : "",
+      version_no: draftMeta.version_no ?? "",
+      change_summary: draftMeta.change_summary ?? "",
       reviewer_id: draftMeta.assigned_reviewer ?? "",
     }))
   }, [isNew, draftMeta])
@@ -511,7 +522,7 @@ export function DmEditorPage() {
                 value={form.version_no}
                 onChange={(e) => setField("version_no", e.target.value)}
                 error={!!errors.version_no}
-                helperText={errors.version_no || "由撰寫者自行輸入（系統不建議版號）"}
+                helperText={errors.version_no || [VERSION_NO_HINT, draftPrefillHint].filter(Boolean).join("；")}
               />
               <TextField
                 label={isNew ? "首版摘要" : "變更摘要"}
@@ -523,7 +534,7 @@ export function DmEditorPage() {
                 value={form.change_summary}
                 onChange={(e) => setField("change_summary", e.target.value)}
                 error={!!errors.change_summary}
-                helperText={errors.change_summary}
+                helperText={errors.change_summary || draftPrefillHint}
               />
             </Stack>
           </Paper>
