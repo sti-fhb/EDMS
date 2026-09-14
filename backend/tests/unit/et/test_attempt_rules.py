@@ -20,8 +20,10 @@ from decimal import Decimal
 import pytest
 
 from app.et.attempt.rules import (
+    AnswerSnapshot,
     OptionSnapshot,
     can_start_attempt,
+    grade_details,
     is_timed_out,
     remaining_attempts,
     remaining_seconds,
@@ -193,3 +195,70 @@ class TestShuffled:
 
     def test_空清單回空(self) -> None:
         assert shuffled([]) == []
+
+
+class TestGradeDetails:
+    """整份考卷的閱卷（#325 由 `submit()` 抽出）。
+
+    抽出的理由不是整潔，是**它即將有第二個呼叫端**：SCHET002 結清逾期未提交的 attempt
+    時（#317）要用同一套判定。及格與否的那道正規化若複製一份，兩邊遲早分岔，而分岔的
+    表徵是「同一份考卷，學員自己按提交及格、被排程結清就不及格」——沒有任何錯誤訊息。
+    """
+
+    @staticmethod
+    def _answer(question_id: int, *, points: int, correct: bool) -> AnswerSnapshot:
+        """單選題一題：`correct=True` 表示學員選中正確選項。"""
+        return AnswerSnapshot(
+            question_id=question_id,
+            question_type=QUESTION_SINGLE,
+            selected=[2] if correct else [1],
+            options=_options(False, True),
+            points=points,
+        )
+
+    def test_逐題得分與總分(self) -> None:
+        answers = [
+            self._answer(101, points=60, correct=True),
+            self._answer(102, points=40, correct=False),
+        ]
+        result = grade_details(answers, pass_score=Decimal("80"))
+        assert result.per_question == {101: Decimal("60.00"), 102: Decimal("0.00")}
+        assert result.total == Decimal("60.00")
+        assert result.points_total == 100
+
+    def test_配分總和100時達及格分數即及格(self) -> None:
+        answers = [self._answer(101, points=80, correct=True), self._answer(102, points=20, correct=False)]
+        assert grade_details(answers, pass_score=Decimal("80")).is_pass is True
+
+    def test_配分總和被改大時不因絕對分數達標而及格(self) -> None:
+        """教師於發布後把配分總和改成 300：答對 100 分（三分之一）**不**該及格。
+
+        「各題配分總和 = 100」只在發布當下檢核，發布後仍可改配分或增刪題目。
+        直接拿總分比及格分數，這裡會誤判為及格。
+        """
+        answers = [
+            self._answer(101, points=100, correct=True),
+            self._answer(102, points=100, correct=False),
+            self._answer(103, points=100, correct=False),
+        ]
+        result = grade_details(answers, pass_score=Decimal("80"))
+        assert result.total == Decimal("100.00")
+        assert result.points_total == 300
+        assert result.is_pass is False
+
+    def test_配分總和被改小時全對仍應及格(self) -> None:
+        """配分總和被改成 50：直接比較的話**任何人都不可能**及格，整門課後半段永久鎖死。"""
+        answers = [self._answer(101, points=25, correct=True), self._answer(102, points=25, correct=True)]
+        result = grade_details(answers, pass_score=Decimal("80"))
+        assert result.total == Decimal("50.00")
+        assert result.is_pass is True
+
+    def test_零題不及格且不除以零(self) -> None:
+        result = grade_details([], pass_score=Decimal("80"))
+        assert result.points_total == 0
+        assert result.total == Decimal(0)
+        assert result.is_pass is False
+
+    def test_配分全為零不及格且不除以零(self) -> None:
+        answers = [self._answer(101, points=0, correct=True)]
+        assert grade_details(answers, pass_score=Decimal("80")).is_pass is False

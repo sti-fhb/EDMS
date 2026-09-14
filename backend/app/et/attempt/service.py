@@ -39,13 +39,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.attempt.repository import EtAttemptRepository, parse_options_snapshot, parse_selected
+from app.et.attempt.repository import EtAttemptRepository, parse_options_snapshot, parse_selected, to_answers
 from app.et.attempt.rules import (
     can_start_attempt,
+    grade_details,
     is_timed_out,
     remaining_attempts,
     remaining_seconds,
-    score_question,
     shuffled,
 )
 from app.et.attempt.schemas import (
@@ -327,25 +327,10 @@ class EtAttemptService:
 
         now = utcnow()
         details = await self._repo.list_details(db, attempt_id)
-        per_question: dict[int, Decimal] = {}
-        for detail in details:
-            per_question[detail.question_id] = score_question(
-                detail.type_snapshot,
-                parse_selected(detail.selected_options),
-                parse_options_snapshot(detail.options_snapshot),
-                points=detail.points_snapshot,
-            )
-        total = sum(per_question.values(), Decimal(0))
-        points_total = sum(d.points_snapshot for d in details)
-        # ⚠️ **以實得 ÷ 配分總和 正規化**，不直接拿 `total` 比 `PASS_SCORE_SNAPSHOT`。
-        #
-        # 「各題配分總和 = 100」只在**課程發布當下**檢核（`publish_rules`），發布後教師
-        # 仍可改配分或增刪題目（本檔的 `TestSnapshotIsolation` 就是在已發布課程上做的）。
-        # 總和被改成 300 時，答對三分之一就會 ≥ 80 而及格；改成 50 時則**任何人都不可能
-        # 及格**——而測驗自本 issue 起是硬性的解鎖門檻，那會讓整門課後半段對全班永久鎖死。
-        #
-        # 總和為 100 時本式與直接比較完全等價，故不牴觸 spec 的「總分 ≥ 及格分數」。
-        is_pass = points_total > 0 and (total * 100 / points_total) >= attempt.pass_score_snapshot
+        # 閱卷（含「實得 ÷ 配分總和」之正規化）在 `rules.grade_details`——SCHET002 結清
+        # 逾期未提交的 attempt 時走同一支，兩邊對及格與否不可能分岔（#317 / #325）。
+        graded = grade_details(to_answers(details), pass_score=attempt.pass_score_snapshot)
+        per_question, total, points_total, is_pass = graded
         timed_out = is_timed_out(started_at=attempt.started_at, time_limit_min=attempt.time_limit_snapshot, now=now)
         moved = await self._repo.submit(
             db,
