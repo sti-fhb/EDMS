@@ -26,7 +26,7 @@
 | 10 | 個人資料維護導向連結 | US10 / UCET011 | P2-延伸 | T100（1 任務；T097 ~ T099 / T101 廢除）| — |
 | 11 | ET02 課程關閉與再開課 | US11 / UCET003 | P3-輔助 | T102 ~ T106（5 任務）| #3, #6 |
 | 12 | ET03 待加入邀請追蹤 | US12 / UCET006 | P3-輔助 | T107 ~ T111（5 任務）| #8 |
-| 13 | 跨 US 補強：章節更新通知 + 擁有者轉讓 | — | 補強 | T112 ~ T115（4 任務）| #3, #2 |
+| 13 | 跨 US 補強：章節更新通知 | — | 補強 | T112 ~ T113（2 任務）| #3 |
 | 14 | 整合測試 + 安全 + 部署 | — | 收尾 | T116 ~ T124 + T152 ~ T155（13 任務）| 全部 |
 | 15 | 課後問卷（建立 / 填寫）| US13 / UCET013（建立屬 US3）| P2-延伸 | T141 ~ T143（3 任務）| #3, #5 |
 | 16 | 排程統計與提醒（SCHET001 / SCHET002）| US14 / UCET014 | P2-延伸 | T139, T145 ~ T148, T164（6 任務）| #4, #5, #17 |
@@ -457,29 +457,27 @@
 
 ---
 
-## Issue #13：跨 US 補強（章節更新通知 + 擁有者轉讓）
+## Issue #13：跨 US 補強（章節更新通知）
 
-**對應規格**：plan.md §複雜度追蹤（章節更新通知 = US3 補強；擁有者轉讓 = US1 補強）
+**對應規格**：plan.md §複雜度追蹤（章節更新通知 = US3 補強）
+
+> ⚠️ 本 issue 原另含「擁有者轉讓」（T114 / T115）。2026-09-14 裁示**取消該功能**——
+> 教師與管理者皆不可於系統內轉讓課程擁有者，`OWNER_ID` 建立後即為終局；必須強制接手
+> 時直接改 DB。相關 AC、任務與 `ET_OWNER_TRANSFER` 表均已移除（migration
+> `b3e91c4a7d28`）。
 **階段**：補強（依各父 Issue 完成後追加）
 **前置條件**：
 - Issue #3 完成（章節更新通知依賴課程發布後新增章節之觸發）
-- Issue #2 完成（擁有者轉讓由管理者執行）
 
 **涵蓋 Tasks**：
 - T112 章節更新通知 Service（教師於已發布課程新增章節時自動寄信給所有 enrollment；完課狀態回退為 IN_PROGRESS；已填問卷不失效）
 - T113 章節更新通知寄送（平台範本 `DP_NOTIFY_TEMPLATE` `MODULE=ET` / `TEMPLATE_CODE=COURSE_UPDATE`，經平台發信服務）
-- T114 擁有者轉讓 Service（寫 ET_OWNER_TRANSFER 稽核 + 更新 ET_COURSE.OWNER_ID）
-- T115 擁有者轉讓 UI（管理者選擇課程 + 接收教師 + 原因 + 確認轉讓）
 
 **驗收條件**：
-1. 教師於已發布課程新增章節後，系統自動寄送 ET_NEW_CHAPTER 通知信給所有 enrollment（過濾 IS_REMOVED）
+1. 教師於已發布課程新增章節後，系統自動寄送 `COURSE_UPDATE` 通知信給所有 enrollment（過濾 IS_REMOVED）
 2. 章節更新後，該課程已完課之學員之 ET_ENROLLMENT.COMPLETION_STATUS 回退為 IN_PROGRESS
-3. 管理者可於平台 DP 後台權限管理或 ET01 課程列表執行擁有者轉讓
-4. 擁有者轉讓必填轉讓原因；系統寫入 ET_OWNER_TRANSFER 稽核紀錄
-5. 一般教師不可主動轉讓（轉讓按鈕僅管理者可見）
-6. 轉讓後新擁有者於 ET01「我建立的」分頁可見該課程；原擁有者僅可閱覽
 
-**Labels**：`補強`, `US3-extension`, `US1-extension`, `notification`, `audit`, `backend`, `frontend`
+**Labels**：`補強`, `US3-extension`, `notification`, `backend`
 
 ---
 

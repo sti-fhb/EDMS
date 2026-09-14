@@ -178,7 +178,7 @@ class EtQuizAttemptD(BaseModel):
 class EtQuizRetryReset(AuditLogBaseModel):
     """重考次數重置紀錄（ET_QUIZ_RETRY_RESET，2026-08-19 新增；append-only、僅 CREATED_*）。
 
-    每次重置 INSERT 一列、不可修改 / 刪除（稽核完整性，比照 `ET_OWNER_TRANSFER`）；
+    每次重置 INSERT 一列、不可修改 / 刪除（稽核完整性）；
     同一學員同一測驗可重置多次。
 
     **已用重考次數之計算**（取代原「歸 0」之刪除語意）：
