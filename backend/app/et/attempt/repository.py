@@ -18,6 +18,7 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
@@ -26,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.attempt.rules import OptionSnapshot
+from app.et.attempt.rules import AnswerSnapshot, OptionSnapshot
 from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES
 from app.et.course.models import EtChapter, EtItem
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
@@ -382,3 +383,22 @@ def parse_options_snapshot(raw: str) -> list[OptionSnapshot]:
 def parse_selected(raw: str | None) -> list[int]:
     """`SELECTED_OPTIONS` JSON → id 清單；`None` / 空字串視為未作答。"""
     return json.loads(raw) if raw else []
+
+
+def to_answers(details: Sequence[EtQuizAttemptD]) -> list[AnswerSnapshot]:
+    """明細列 → `grade_details()` 的輸入。
+
+    放在本檔而非 `rules`：它要拆 JSON 欄位，而 `rules` 刻意不認得任何持久化形式。
+    兩個閱卷呼叫端（`submit()` 與 SCHET002 的結清）共用本函式，確保兩邊餵進去的
+    快照解讀方式一致。
+    """
+    return [
+        AnswerSnapshot(
+            question_id=d.question_id,
+            question_type=d.type_snapshot,
+            selected=parse_selected(d.selected_options),
+            options=parse_options_snapshot(d.options_snapshot),
+            points=d.points_snapshot,
+        )
+        for d in details
+    ]

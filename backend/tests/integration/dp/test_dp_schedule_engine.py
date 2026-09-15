@@ -101,13 +101,27 @@ async def test_write_skipped_log(db):
 
 
 async def test_list_enabled_excludes_disabled(db):
-    """AC5：引擎僅載入 IS_ENABLED=true（種子 SCHDP001 啟用、SCHDM001 由 US13 接線啟用；SCHET 預留停用不載入）。"""
+    """AC5：引擎僅載入 `IS_ENABLED=true`。
+
+    停用側以**本測試自己停用**的 job 驗，不借用某一列 seed 當下剛好是停用——那種寫法會
+    在該 job 日後被接線啟用時無預警轉紅（#325 接上 SCHET001 / SCHET002 時即如此），而紅
+    的原因與被測行為無關。
+    """
+    from sqlalchemy import update
+
+    from app.dp.schedules.models import DpSchedule
+
+    await db.execute(update(DpSchedule).where(DpSchedule.job_id == "SCHDM002").values(is_enabled=False))
+    await db.flush()
+
     enabled = await ScheduleRepository().list_enabled(db)
     ids = {j.job_id for j in enabled}
 
     assert "SCHDP001" in ids
-    assert "SCHDM001" in ids  # US13 接上 KPI 週報 handler 並啟用
-    assert "SCHET001" not in ids and "SCHET002" not in ids  # ET 排程仍為預留停用
+    assert "SCHDM002" not in ids, "停用中的 job 不得被引擎載入"
+    # 沒有任何啟用中的 job 停留在預留的 placeholder——載入它會讓引擎每次觸發都 import
+    # 失敗，寫一筆沒有人看的 FAILED 然後安靜地什麼都不做
+    assert all(not j.handler_ref.endswith(".pending") for j in enabled)
 
 
 async def test_list_all_includes_disabled(db):
@@ -148,11 +162,16 @@ async def test_run_job_wrapper_commits(db, monkeypatch):
 
 
 async def test_start_scheduler_registers_enabled_and_shutdown(db):
-    """AC1/AC5：start_scheduler 載入啟用中 job（SCHDP001 註冊、SCHET 不註冊）；shutdown 不拋例外。"""
+    """AC1：`start_scheduler` 註冊啟用中 job；shutdown 不拋例外。
+
+    ⚠️ 本測試**驗不到「停用者不註冊」**：`start_scheduler` 自開 `AsyncSessionLocal`
+    （另一條連線），看不到測試交易內的改動，只讀得到 seed 的狀態；而 seed 的啟停狀態
+    會隨各模組接線而變。該行為改由 `test_list_enabled_excludes_disabled` 覆蓋——那支吃
+    測試 session，可以自己造出停用狀態。
+    """
     scheduler = await start_scheduler()
     try:
         assert scheduler is not None
         assert scheduler.get_job("SCHDP001") is not None
-        assert scheduler.get_job("SCHET001") is None  # 預留停用列不註冊
     finally:
         await shutdown_scheduler(scheduler)

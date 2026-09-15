@@ -112,10 +112,17 @@ def require_module_admin(module: str) -> Callable[..., Awaitable[JwtPayload]]:
 
 
 # DP 後台之預設門檻模組：spec_us4 / us5 / us7 / us9 / us10 / us11 皆定義操作者為「ET 或 DM 管理者」
-_BACKOFFICE_MODULES: tuple[str, ...] = ("ET", "DM")
+#
+# 公開（非底線）是因為 `dp/schedules/service` 需要同一組值作為「無模組 checker 之資源」的
+# 回退門檻——複製一份字面值會讓日後新增模組時兩處分岔，而分岔的表徵是某個後台功能對新模組
+# 管理者靜默地全部 403。
+BACKOFFICE_MODULES: tuple[str, ...] = ("ET", "DM")
+
+#: 舊名保留（本檔內部與既有呼叫端沿用）。
+_BACKOFFICE_MODULES = BACKOFFICE_MODULES
 
 
-def require_any_module_admin(modules: Iterable[str] = _BACKOFFICE_MODULES) -> Callable[..., Awaitable[JwtPayload]]:
+def require_any_module_admin(modules: Iterable[str] = BACKOFFICE_MODULES) -> Callable[..., Awaitable[JwtPayload]]:
     """產生「要求為任一指定模組管理者」的 FastAPI dependency（#250）。
 
     供 DP 後台各 router 掛於 router-level，取代原先僅認證的 `get_jwt_payload`——

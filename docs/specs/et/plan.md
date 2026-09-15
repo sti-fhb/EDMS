@@ -169,7 +169,6 @@ ET 參數集中於平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`；2026-07-08 集�
 | `ET_VIDEO_MAX_SIZE_MB` | 教材影片單檔大小上限 | `500` |
 | `ET_VIDEO_PLAYBACK_MAX_RATE` | 影片播放倍速上限（**只能往下限縮**，選項清單前端寫死）| `2` |
 | `ET_INVITATION_CODE_LENGTH` | 邀請碼長度（純數字）| `8` |
-| `ET_WEEKLY_STAT_DAY_TIME` | SCHET001 每週統計與週報執行時間 | `MON 10:00` |
 | `ET_URGENT_REMIND_DAYS` | SCHET002 截止前加急提醒天數 | `3` |
 
 > 密碼重設 / Email 變更驗證連結有效時間改為**平台級 `DP_` 參數**（認證 TTL 由平台 DP 提供），不再掛 ET 參數。通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`，管理者於 US15 UI 維護），原 `EMAIL_NOTIFY_*` 參數廢除。ET 不自建參數表 / 範本表（2026-07-08 集中化，見 [../../requirements/RQDP.md](../../requirements/RQDP.md)）。

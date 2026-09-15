@@ -133,7 +133,8 @@ async def daily_window_job() -> None   # SCHET002：每日到期關閉 + 截止�
 | 登錄 | `DP_SCHEDULE.HANDLER_REF` 填完整 dotted path（如 `app.et.schedules.handlers.weekly_stat_job`）；引擎白名單已含 `app.et.` |
 | 現況 | `DP_SCHEDULE` 已預留 SCHET001 / SCHET002 兩列、`IS_ENABLED=false`；ET 提供 handler 並填入 `HANDLER_REF` 後由平台開啟 |
 | 例外 | 由引擎捕捉並記 `DP_SCHEDULE_LOG`（FAILED），不外拋阻斷排程器；ET 端仍應逐課程容錯，避免單筆失敗中斷整批 |
-| 執行時間 | 由 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `ET_URGENT_REMIND_DAYS` 控制（經 `ParamService` 讀取） |
+| 執行時點 | 由 `DP_SCHEDULE.CRON_EXPR` 控制（排程引擎唯一讀取來源；DP 後台「排程管理」可編輯、即時生效）|
+| 加急提醒天數 | 由 `DP_PARAM.ET_URGENT_REMIND_DAYS` 控制（業務門檻，handler 經 `ParamService` 讀取）|
 | 寄信 | 一律經 `NotifyService`（平台唯一發信服務 → `DP_EMAIL_LOG` outbox）；**平台不支援附件**，週報逐學員明細以 CSV 下載連結提供（見 [spec_us14.md](../spec_us14.md) FR-ET-US14-11） |
 
 ---

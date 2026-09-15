@@ -30,7 +30,7 @@
 - [ ] T020 [P] ~~建立 ET_PARAM 系統參數 Migration~~ **廢除**：系統參數集中於平台 `DP_PARAM`（前綴 `ET_`），由平台 DP 建表；ET 不建 param migration（2026-07-08 集中化）
 - [ ] T021 定義 Lookup 代碼**應用層常數**（ET_USER_ROLE_TYPE、ET_COURSE_STATUS〔DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除〕、ET_ENROLLMENT_SOURCE〔含 TAG_DEFAULT〕、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類；另 T156 增列 ET_APPROVAL_RESULT，合計 9 類），參照 data-model.md §Lookup 代碼定義。**（2026-08-20 定案：不建 lookup 表、不 seed 資料——本專案無 lookup 表機制，比照 DM 以模組層常數表達，如 `app/dm/detail/repository.py` 之 `_OBSOLETE`；DB 欄位維持 `VARCHAR`、值域由應用層把關）**
 - [ ] T022 建立 ET_TAG 初始資料（5 筆：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師，皆 IS_BUILTIN），參照 data-model.md（2026-07-02 改寫，原 ET_MODULE 7 筆廢除）
-- [ ] T023 建立 ET 系統參數 seed（於平台 `DP_PARAM`，前綴 `ET_`：ET_VIDEO_ALLOWED_FORMATS / ET_VIDEO_MAX_SIZE_MB / ET_VIDEO_PLAYBACK_MAX_RATE / ET_INVITATION_CODE_LENGTH / ET_WEEKLY_STAT_DAY_TIME / ET_URGENT_REMIND_DAYS），參照 data-model.md（2026-07-08 集中化：ET 不自建參數表；密碼重設 TTL 改平台級 `DP_` 參數；EMAIL_NOTIFY_* 已移至 `DP_NOTIFY_TEMPLATE`）
+- [ ] T023 建立 ET 系統參數 seed（於平台 `DP_PARAM`，前綴 `ET_`：ET_VIDEO_ALLOWED_FORMATS / ET_VIDEO_MAX_SIZE_MB / ET_VIDEO_PLAYBACK_MAX_RATE / ET_INVITATION_CODE_LENGTH / ET_URGENT_REMIND_DAYS），參照 data-model.md（2026-07-08 集中化：ET 不自建參數表；密碼重設 TTL 改平台級 `DP_` 參數；EMAIL_NOTIFY_* 已移至 `DP_NOTIFY_TEMPLATE`）
 - [ ] T165 [P] 建立資料庫 Migration：**ET_MATERIAL_VIDEO** 教材影片子表（FILE_PATH / FILE_NAME / **DURATION_SEC** / FILE_SIZE_BYTES / SORT_ORDER；(MATERIAL_ID, SORT_ORDER) 邏輯唯一）（2026-08-19 新增，S4 拆表結案）
 - [ ] T166 [P] 建立資料庫 Migration：**ET_MATERIAL_DOC** 教材引用文件子表（**DOC_ID VARCHAR(20)**，非 DB 外鍵；(MATERIAL_ID, DOC_ID) 邏輯唯一）（2026-08-19 新增）
 - [ ] T167 [P] 建立資料庫 Migration：**ET_PROGRESS_VIDEO** 影片進度（COVERAGE_PCT / LAST_POSITION_SEC；(USER_ID, VIDEO_ID) 邏輯唯一）（2026-08-19 新增）
@@ -251,7 +251,11 @@
 
 ## Phase 15: 章節更新通知（跨 US 補強）
 
-- [ ] T112 實作章節更新通知 Service：教師於已發布課程新增章節時自動寄信通知所有 ET_ENROLLMENT（過濾 IS_REMOVED）；同時將該課程已完課學員之完課狀態回退為 IN_PROGRESS（已填問卷不失效）
+- [ ] T112 實作章節更新通知 Service：教師於已發布課程新增章節時自動寄信通知所有 ET_ENROLLMENT（過濾 IS_REMOVED）；新增章節使完課分母變大，已完課學員之完課狀態隨即回到「進行中」（已填問卷不失效）
+
+> ⚠️ **完課狀態的回退不寫欄位**（#303 SA Q1 裁示 A，2026-09-14）：`ET_ENROLLMENT.COMPLETION_STATUS` 目前**只在加入課程時寫入一次 `NOT_STARTED`、從未被任何讀取端使用**——所有讀取端一律以 `derive_completion_status(done, total)` 即時導出。因此「回退」是即時導出的自然結果，不需要也不應該再下一道 `UPDATE ... WHERE COMPLETION_STATUS='COMPLETED'`：那道 UPDATE 會永遠匹配零列，卻不報錯、不影響行為，因而**難以察覺它是空的**。
+>
+> 若日後 US9 / US14 需要讀該欄位，必須先補齊它的維護路徑（見 T092 / T145）。
 - [ ] T113 實作章節更新通知寄送（平台範本 `DP_NOTIFY_TEMPLATE` `MODULE=ET` / `TEMPLATE_CODE=COURSE_UPDATE`）：呼叫平台發信服務傳 template_code + 變數（user_name、course_name、new_chapter_name、course_link）（2026-07-08 集中化：範本存平台 `DP_NOTIFY_TEMPLATE`）
 
 ---
@@ -308,7 +312,7 @@
 ### 排程統計與提醒（US14）
 
 - [ ] T145 [US14] 實作 SCHET001 統計快照 Service（job handler 於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄）：統計開放中課程（平均進度%、三態人數、完課率、已加入數）寫入 ET_WEEKLY_STAT（append-only）
-- [ ] T146 [US14] 實作週報產生與寄送：教師（自己課程）/ 管理者（全域）各一封；內文摘要（含與上週比較、距訖止天數、未開始名單）+ 逐學員明細 CSV **下載連結**（變數 `{{REPORT_CSV_URL}}`，非附件——平台發信服務不支援附件，見 T164）；平台範本 WEEKLY_REPORT（`DP_NOTIFY_TEMPLATE` `MODULE=ET`），經平台發信服務寄送
+- [ ] T146 [US14] 實作週報產生與寄送：教師（自己課程）/ 管理者（全域）各一封；內文摘要（含與上週比較、距訖止天數；**不列學員姓名**）+ 逐學員明細 CSV **下載連結**（變數 `{{REPORT_CSV_URL}}`，非附件——平台發信服務不支援附件，見 T164）；平台範本 WEEKLY_REPORT（`DP_NOTIFY_TEMPLATE` `MODULE=ET`），經平台發信服務寄送
 - [ ] T164 [US14] 實作**週報逐學員明細 CSV 下載端點**（2026-08-19 新增，取代原郵件附件設計）：依課程產生逐學員 CSV（姓名、Email〔唯讀 join `DP_USER`〕、進度%、完課狀態、最後活動時間）；**需登入**（平台 DP JWT），未登入導向登入頁；授權由 ET 判定——教師僅限自己為 `ET_COURSE.OWNER_ID` 之課程、管理者全域，越權回無權限；內容於請求當下即時查詢（非寄信時凍結），課程關閉後仍可下載；端點 URL 由 T146 以 `{{REPORT_CSV_URL}}` 帶入週報內文
 - [ ] T147 [US14] 實作每週未看提醒：對進度 0% 學員一人一信彙整（平台範本 WEEKLY_REMIND，`MODULE=ET`）；>0% / 已完課 / 已移除不寄
 - [ ] T148 [US14] 實作截止前加急提醒（SCHET002 job handler 內）：訖止前 N 天（`DP_PARAM.ET_URGENT_REMIND_DAYS`）對所有未完課學員寄信（平台範本 URGENT_REMIND，`MODULE=ET`）；URGENT_REMIND_SENT 防重複；再開課歸零

@@ -17,6 +17,7 @@ wireframe 引導頁的作答注意事項明訂「點擊『開始作答』後立�
 """
 
 import random
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple
@@ -61,6 +62,59 @@ def score_question(question_type: str, selected: list[int], options: list[Option
     # 一律對齊 `DECIMAL(5,2)`：不 quantize 的分支存進 DB 再讀回來會變成 `100.00`，
     # 於是「剛提交」與「回頭複習」看到同一次作答卻是 `100` 與 `100.00` 兩種寫法
     return raw.quantize(_CENTS, rounding=ROUND_HALF_UP)
+
+
+class AnswerSnapshot(NamedTuple):
+    """一題的閱卷輸入（全部取自 `ET_QUIZ_ATTEMPT_D` 的 `*_SNAPSHOT` 欄位）。
+
+    由 `repository.to_answers()` 自明細列組出——**不回頭查 `ET_QUESTION` / `ET_OPTION`**，
+    理由見本模組開頭。
+    """
+
+    question_id: int
+    question_type: str
+    selected: list[int]
+    options: list[OptionSnapshot]
+    points: int
+
+
+class GradeResult(NamedTuple):
+    """整份考卷的閱卷結果。"""
+
+    per_question: dict[int, Decimal]
+    total: Decimal
+    points_total: int
+    is_pass: bool
+
+
+def grade_details(answers: Sequence[AnswerSnapshot], *, pass_score: Decimal) -> GradeResult:
+    """整份考卷閱卷（AC 7～11）。
+
+    ## 為何以「實得 ÷ 配分總和」正規化，而不直接拿總分比 `pass_score`
+
+    「各題配分總和 = 100」只在**課程發布當下**檢核（`publish_rules`），發布後教師仍可
+    改配分或增刪題目。總和被改成 300 時，答對三分之一就會 ≥ 80 而及格；改成 50 時則
+    **任何人都不可能及格**——而測驗是硬性的解鎖門檻，那會讓整門課後半段對全班永久鎖死。
+
+    總和為 100 時本式與直接比較完全等價，故不牴觸 spec 的「總分 ≥ 及格分數」。
+
+    ## 兩個呼叫端
+
+    `AttemptService.submit()`（學員自己提交）與 SCHET002 結清逾期未提交之 attempt
+    （#317）。兩者對「及格與否」必須得到同一個答案，否則同一份考卷會因為「誰按的提交」
+    而有不同結果——且不會有任何錯誤訊息。
+
+    Args:
+        pass_score: `PASS_SCORE_SNAPSHOT`（開始作答時凍結的及格分數）。
+    """
+    per_question = {
+        a.question_id: score_question(a.question_type, a.selected, a.options, points=a.points) for a in answers
+    }
+    total = sum(per_question.values(), Decimal(0))
+    points_total = sum(a.points for a in answers)
+    # `points_total > 0` 同時擋掉「零題」與「配分全為零」——兩者都會讓下式除以零
+    is_pass = points_total > 0 and (total * 100 / points_total) >= pass_score
+    return GradeResult(per_question=per_question, total=total, points_total=points_total, is_pass=is_pass)
 
 
 def round_used_attempts(*, total: int, reset_base: int) -> int:

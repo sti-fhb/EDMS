@@ -32,6 +32,7 @@ import { EtInviteLandingPage } from "./et/invite/InviteLandingPage"
 import { EtLearnPage } from "./et/learn/LearnPage"
 import { EtQuizAnswerPage } from "./et/quiz/QuizAnswerPage"
 import { EtQuizResultPage } from "./et/quiz/QuizResultPage"
+import { EtWeeklyReportDownloadPage } from "./et/reports/WeeklyReportDownloadPage"
 import { EtMyCoursesPage } from "./et/my/MyCoursesPage"
 import { EtSurveyFillPage } from "./et/survey/SurveyFillPage"
 import { EtStudentsPage } from "./et/students/StudentsPage"
@@ -170,6 +171,16 @@ export const router = createBrowserRouter([
               // 依能力分流（#247 AC 1）：純學員 → ET04 我的課程；具建課能力者 → 課程列表
               { index: true, element: <EtHomeRedirect /> },
               { path: "courses", element: <EtCourseListPage /> },
+              {
+                // 週報明細下載之中繼頁（#325）：輸出含學員姓名 / Email，個資密度與 ET03
+                // 同級，故守衛比照——權限邊界仍在後端（會 403），前端只是不給空殼入口。
+                path: "reports/weekly",
+                element: (
+                  <RequireEtCourseManager>
+                    <EtWeeklyReportDownloadPage />
+                  </RequireEtCourseManager>
+                ),
+              },
               // ET02 為課程列表之子頁、非側欄項目；靜態 new 置於動態 :courseId 前避免被誤捕
               // #306：建立限教師（can_create_course）；編輯既有課程用 can_manage_courses——
               // 管理者不建課程但要能管理，兩者角色集不同（見 et/course/schemas.py）。

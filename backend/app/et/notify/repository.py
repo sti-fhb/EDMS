@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，見模組 docstring）
 
+#: `DP_USER.STATUS` 之啟用值；非此值者一律被 `core/auth.py` 擋在 API 之外。
+_STATUS_ACTIVE = "ACTIVE"
+
 
 @dataclass(frozen=True)
 class Recipient:
@@ -41,6 +44,39 @@ class EtNotifyRepository:
         rows = await db.execute(
             select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
                 DpUser.user_id.in_(list(user_ids)),
+                DpUser.deleted == 0,
+            )
+        )
+        return sorted(
+            (Recipient(user_id=uid, user_name=name, email=email) for uid, name, email in rows if email),
+            key=lambda r: r.user_id,
+        )
+
+    async def active_recipients(self, db: AsyncSession, user_ids: Sequence[str]) -> list[Recipient]:
+        """同 `recipients`，但**只取帳號狀態為 `ACTIVE` 者**——供排程之週期性信件使用。
+
+        ## 為何不是直接改 `recipients`
+
+        那支刻意不濾帳號狀態，理由見其 docstring（收件對象要與成員資格是同一組人，否則
+        「3 人被加入卻只寄 2 封」而無人知道少了誰）。那個決定對**事件觸發**的信是對的。
+
+        ## 為何**週期性**的信必須濾
+
+        `app/dp/users/service.py::disable_idle_accounts` 每日把閒置逾 90 天的帳號設為
+        `DISABLED`，而它**完全不碰 `ET_USER_ROLE`**——於是那個人的 ET 角色列還在。
+        `core/auth.py` 對非 `ACTIVE` 帳號一律 403，也就是說**停用擋住了 API、卻擋不住信**：
+        一位離職／被自動停用的管理者，其信箱會無限期地每週收到全站課程統計與學員姓名，
+        而郵件是當時唯一還通的管道。
+
+        事件觸發的信只在當下寄一次、且以動作為前提（有人把他加進課程）；週期性的信沒有
+        任何動作為前提，只要角色列還在就會一直寄下去——兩者的風險量級不同。
+        """
+        if not user_ids:
+            return []
+        rows = await db.execute(
+            select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
+                DpUser.user_id.in_(list(user_ids)),
+                DpUser.status == _STATUS_ACTIVE,
                 DpUser.deleted == 0,
             )
         )

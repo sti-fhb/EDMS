@@ -5,7 +5,7 @@
 > **2026-07-08 平台對齊（DP）**：**ET 通知範本維護移至平台 DP 後台「通知範本」畫面（`MODULE=ET`）**，ET 管理者於 DP 後台按模組過濾只編輯 `MODULE=ET` 之列；ET 不再自設「系統設定」畫面。本 US 之範本清單、變數、啟用 / 停用與觸發規則**全數保留**，僅維護入口改為 DP 後台。功能作業代碼 ET09 沿用。
 > **2026-07-17 變更（線下核可）**：ET 可維護範本由 6 類增為 **7 類**，新增「核可通過通知」（`APPROVAL_PASSED`），觸發於 [spec_us16.md](spec_us16.md) US16 核可「通過」時；同其他範本可編輯主旨 / 內文與啟用 / 停用。
 
-ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課程 / 學習相關通知信之統一範本（存於平台 `DP_NOTIFY_TEMPLATE`，`MODULE=ET`，**7 類**內建範本代碼（2026-07-17 增列核可通過通知），seed 於部署時由平台寫入）：可編輯各範本之**主旨與內文**（支援變數如 `{{COURSE_NAME}}`、`{{OPEN_START_AT}}`、`{{OPEN_END_AT}}`、`{{COURSE_URL}}`、`{{USER_NAME}}`）並**啟用 / 停用**該範本（比照 DM；停用後該類信件不寄送），**不可新增 / 刪除範本代碼**；另可於 DP 後台「系統參數與清單」調整排程參數（週報執行時間 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME`、加急提醒天數 `DP_PARAM.ET_URGENT_REMIND_DAYS`）。範本集中於平台 DP，ET 寄信呼叫平台唯一發信服務（傳 `template_code`）；ET 管理者僅編輯 `MODULE=ET` 之列。**教師不可逐課修改信件內容**——所有寄出信件一律依平台範本渲染，確保內容統一。**密碼重設（US2）與帳號變更驗證（US10）之信件不納入本畫面**，為平台系統信（`MODULE=DP`）採系統固定範本、由平台於 DP 後台維護、ET 不開放編輯（帳號安全信件，2026-07-08 集中化）。
+ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課程 / 學習相關通知信之統一範本（存於平台 `DP_NOTIFY_TEMPLATE`，`MODULE=ET`，**7 類**內建範本代碼（2026-07-17 增列核可通過通知），seed 於部署時由平台寫入）：可編輯各範本之**主旨與內文**（支援變數如 `{{COURSE_NAME}}`、`{{OPEN_START_AT}}`、`{{OPEN_END_AT}}`、`{{COURSE_URL}}`、`{{USER_NAME}}`）並**啟用 / 停用**該範本（比照 DM；停用後該類信件不寄送），**不可新增 / 刪除範本代碼**；另可於 DP 後台「系統參數與清單」調整加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`）；排程**執行時點**於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`）。範本集中於平台 DP，ET 寄信呼叫平台唯一發信服務（傳 `template_code`）；ET 管理者僅編輯 `MODULE=ET` 之列。**教師不可逐課修改信件內容**——所有寄出信件一律依平台範本渲染，確保內容統一。**密碼重設（US2）與帳號變更驗證（US10）之信件不納入本畫面**，為平台系統信（`MODULE=DP`）採系統固定範本、由平台於 DP 後台維護、ET 不開放編輯（帳號安全信件，2026-07-08 集中化）。
 
 **Priority**: P3
 
@@ -33,7 +33,7 @@ ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課�
 
 ### 排程參數調整
 
-7. **Given** ET 管理者於 DP 後台「系統參數與清單」（前綴 `ET_`）排程參數區，**When** 修改「週報執行時間」（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME`）並儲存，**Then** SCHET001 下次依新時間執行
+7. **Given** ET 管理者於 DP 後台「排程管理」，**When** 修改 SCHET001 之 `CRON_EXPR` 並儲存，**Then** 該變更即時套用至運行中的排程引擎，SCHET001 下次依新時點執行
 8. **Given** 管理者修改「加急提醒天數」（`DP_PARAM.ET_URGENT_REMIND_DAYS`，正整數檢核），**When** 儲存，**Then** SCHET002 依新天數判定加急提醒時點
 
 ### 權限與統一性
@@ -52,7 +52,7 @@ ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課�
 - **FR-ET-US15-05**: 系統 MUST 以版本號（樂觀鎖）控制並行編輯；後儲存者版本不符時 MUST 拒絕儲存並提示「內容已被其他使用者變更，請重新整理後再儲存」
 - **FR-ET-US15-06**: 系統 MUST 提供各範本之啟用 / 停用開關；停用（IS_ACTIVE = false）時該類信件 MUST NOT 寄送，惟其觸發事件（如課程發布之自動加入學員）MUST 照常運作；切回啟用（IS_ACTIVE = true）後 MUST 恢復寄送
 - **FR-ET-US15-07**: 系統 MUST 將密碼重設（US2）與帳號變更驗證（US10）信件排除於 ET 通知範本清單（`MODULE=ET`）之外（此二信為 `MODULE=DP` 系統固定範本），MUST NOT 開放編輯或啟用 / 停用（帳號安全信件）
-- **FR-ET-US15-08**: 系統 MUST 提供排程參數調整：週報執行時間（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME`）供 SCHET001 下次依新時間執行、加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`，須為正整數）供 SCHET002 依新天數判定加急提醒時點；排程參數存平台 `DP_PARAM`（前綴 `ET_`），維護 UI 於 DP 後台「系統參數與清單」（按模組過濾）
+- **FR-ET-US15-08**: 系統 MUST 提供加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`，須為正整數）之調整供 SCHET002 依新天數判定加急提醒時點；該參數存平台 `DP_PARAM`（前綴 `ET_`），維護 UI 於 DP 後台「系統參數與清單」（按模組過濾）。排程**執行時點**不以參數控制——排程引擎只讀 `DP_SCHEDULE.CRON_EXPR`，維護 UI 於 DP 後台「排程管理」
 - **FR-ET-US15-09**: 系統 MUST 僅允許 ET 管理者於 DP 後台存取 ET 通知範本維護（`MODULE=ET`）；非管理者角色（教師 / 學員）MUST 被拒絕存取且入口不顯示
 - **FR-ET-US15-10**: 系統 MUST 使所有寄出信件一律依平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）統一範本渲染、經平台唯一發信服務寄送；教師於 ET02 Email 邀請（[US8](spec_us8.md)）等情境僅可預覽，MUST NOT 逐課編輯主旨與內文
 
