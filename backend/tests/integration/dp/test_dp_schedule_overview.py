@@ -104,13 +104,24 @@ async def test_no_collection_mutation_or_rerun(client, db):
 
 
 async def test_list_includes_next_run(client, db):
-    """#1：啟用中 job 回下次執行時間；停用 job 之 next_run 為 None。"""
+    """#1：啟用中 job 回下次執行時間；停用 job 之 next_run 為 None。
+
+    停用側以**本測試自己停用**的 job 驗，不借用某一列 seed 當下剛好是停用——那種寫法會
+    在該 job 日後被接線啟用時無預警轉紅（#325 接上 SCHET001 時即如此）。
+    """
+    from sqlalchemy import update
+
+    from app.dp.schedules.models import DpSchedule
+
     await _seed_user(db)
+    await db.execute(update(DpSchedule).where(DpSchedule.job_id == "SCHDM002").values(is_enabled=False))
+    await db.flush()
+
     r = await client.get("/api/dp/schedules", headers=_auth())
     jobs = {j["job_id"]: j for j in r.json()}
 
     assert jobs["SCHDP001"]["is_enabled"] is True and jobs["SCHDP001"]["next_run_date"] is not None
-    assert jobs["SCHET001"]["is_enabled"] is False and jobs["SCHET001"]["next_run_date"] is None
+    assert jobs["SCHDM002"]["is_enabled"] is False and jobs["SCHDM002"]["next_run_date"] is None
 
 
 async def test_update_schedule_edits_name_cron_enabled(client, db):
