@@ -1024,6 +1024,21 @@ export const handlers = [
   // ET03 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
   // （`/students`、`/attempt-overview`…），與上面的純 `:courseId` 不會互相吃掉；仍放在
   // 它之前，維持「路徑愈具體愈前面」的一致排法。
+  // 兩支 CSV 匯出。放在 `/students` 之前（「路徑愈具體愈前面」），雖然 `students` 與
+  // `students.csv` 是不同的字面 segment、不會互相吃掉，但排法保持一致比較不會出事。
+  //
+  // 回真的 body 是必要的：前端拿它 `URL.createObjectURL`，回空會讓成功路徑走不完，
+  // 於是「匯出成功的提示」這條測試會假綠（catch 先接走）。
+  http.get("/api/et/courses/:courseId/students.csv", () =>
+    HttpResponse.text("學員,加入日期\n王小明,2026-04-01\n", {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
+  http.get("/api/et/courses/:courseId/survey-result.csv", () =>
+    HttpResponse.text("學員,題目,答案\n王小明,滿意度,滿意\n", {
+      headers: { "Content-Type": "text/csv; charset=utf-8" },
+    }),
+  ),
   http.get("/api/et/courses/:courseId/students", () =>
     HttpResponse.json({
       data: [
@@ -1035,6 +1050,7 @@ export const handlers = [
           progress_pct: 100,
           avg_score: "88.50",
           last_activity_at: "2026-05-02T06:30:00Z",
+          has_in_progress_attempt: false,
         },
         {
           user_id: "s02",
@@ -1045,6 +1061,9 @@ export const handlers = [
           // null ＝ 完全未作答，畫面顯示「—」而非 0
           avg_score: null,
           last_activity_at: null,
+          // 兩位學員刻意一 true 一 false——移除確認框的警告版 / 一般版是兩則不同訊息，
+          // 全部同值的 fixture 只能驗到其中一邊
+          has_in_progress_attempt: true,
         },
       ],
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },

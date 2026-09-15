@@ -224,6 +224,36 @@ async def _attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int, s
     return row.attempt_id
 
 
+async def _in_progress_attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int = 1) -> int:
+    """建一筆**作答中**（未提交）的 attempt。
+
+    與 `_attempt` 的差別只在 `status` 與 `submitted_at`，但這兩欄正是 `ET-MSG-ET03-003`
+    要分辨的東西——合用一個 helper 加參數會讓「這條在驗作答中」從測試名稱裡消失。
+    """
+    now = utcnow()
+    row = EtQuizAttemptM(
+        user_id=user_id,
+        course_id=course_id,
+        quiz_id=quiz_id,
+        attempt_no=no,
+        started_at=now - timedelta(minutes=5),
+        submitted_at=None,
+        status=ATTEMPT_IN_PROGRESS,
+        score=None,
+        is_pass=None,
+        pass_score_snapshot=80,
+        time_limit_snapshot=None,
+        question_order="[]",
+        option_order="{}",
+        created_user=user_id,
+        created_date=now,
+        deleted=0,
+    )
+    db.add(row)
+    await db.flush()
+    return row.attempt_id
+
+
 async def _survey(db, course_id: int, *, name: str = "課後問卷") -> int:
     now = utcnow()
     survey = EtSurvey(
@@ -1366,3 +1396,88 @@ class TestExportAudit:
             )
         )
         assert logged == 0
+
+
+class TestInProgressAttemptFlag:
+    """`has_in_progress_attempt`——`ET-MSG-ET03-003` 的前提（#322 收尾盤點補）。
+
+    AC 7 要求「若該學員有 `IN_PROGRESS` attempt **跳警告**」。前端要能分辨，後端就得
+    回這個事實；原先 `StudentRow` 沒有這個欄位，前端只能無條件顯示「若正在作答」的
+    模糊文案——那等於把警告稀釋成每次都出現的免責聲明。
+    """
+
+    async def test_有作答中attempt的學員被標記(self, client, db) -> None:
+        teacher = await _user(db, "t_tr70")
+        course_id = await _course(db, owner=teacher)
+        quiz_id = await _quiz(db)
+        chapter_id = await _chapter(db, course_id)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr70", roles=(ROLE_STUDENT,), name="作答中的人")
+        await _enroll(db, student, course_id)
+        await _in_progress_attempt(db, user_id=student, course_id=course_id, quiz_id=quiz_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["data"][0]["has_in_progress_attempt"] is True
+
+    async def test_只有已提交attempt者不算作答中(self, client, db) -> None:
+        """已交卷就不是「正在作答」——移除他不需要那段警告。"""
+        teacher = await _user(db, "t_tr71")
+        course_id = await _course(db, owner=teacher)
+        quiz_id = await _quiz(db)
+        chapter_id = await _chapter(db, course_id)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr71", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db, user_id=student, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("90"), is_pass=True
+        )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["data"][0]["has_in_progress_attempt"] is False
+
+    async def test_他人作答中不影響同課程其他學員(self, client, db) -> None:
+        """旗標必須逐人判定。整課程有無作答中的 attempt 是另一回事——
+        用課程層級的存在性判斷會讓全班每一列都跳警告。"""
+        teacher = await _user(db, "t_tr72")
+        course_id = await _course(db, owner=teacher)
+        quiz_id = await _quiz(db)
+        chapter_id = await _chapter(db, course_id)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        busy = await _user(db, "s_tr72a", roles=(ROLE_STUDENT,), name="甲同學")
+        idle = await _user(db, "s_tr72b", roles=(ROLE_STUDENT,), name="乙同學")
+        await _enroll(db, busy, course_id)
+        await _enroll(db, idle, course_id)
+        await _in_progress_attempt(db, user_id=busy, course_id=course_id, quiz_id=quiz_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        flags = {row["user_id"]: row["has_in_progress_attempt"] for row in r.json()["data"]}
+        assert flags == {busy: True, idle: False}
+
+    async def test_作答中與完課狀態是兩回事(self, client, db) -> None:
+        """`completion_status` 的 `IN_PROGRESS` 指**課程學習**進行中（由完成項目數導出），
+        與「有作答中的 attempt」無關。兩者同名不同義，是本次漏接的根因。"""
+        teacher = await _user(db, "t_tr73")
+        course_id = await _course(db, owner=teacher)
+        quiz_id = await _quiz(db)
+        chapter_id = await _chapter(db, course_id)
+        item_id = await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        await _item(db, chapter_id, title="講義", order=2)
+        student = await _user(db, "s_tr73", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await _complete_item(db, student, course_id, item_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        row = r.json()["data"][0]
+        assert row["completion_status"] == COMPLETION_IN_PROGRESS, "學習進行中"
+        assert row["has_in_progress_attempt"] is False, "但沒有任何作答中的 attempt"

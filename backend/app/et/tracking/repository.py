@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（已列於 et/spec.md §外模組 table 引用清單）
-from app.et.constants import GRADED_STATUSES
+from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
@@ -167,6 +167,37 @@ class EtTrackingRepository:
             .group_by(EtQuizAttemptM.user_id)
         )
         return {user_id: submitted for user_id, submitted in rows.all()}
+
+    async def in_progress_attempt_user_ids(self, db: AsyncSession, *, course_id: int, user_ids: list[str]) -> set[str]:
+        """本課程中**有作答中（未提交）attempt** 的學員集合（`ET-MSG-ET03-003`）。
+
+        ## 為何逐人判定，不做課程層級的存在性判斷
+
+        「這門課有人在作答」與「**這位**學員在作答」是兩回事。用前者會讓全班每一列
+        都跳出警告，警告出現在不需要的地方就會被當成雜訊略過——真正該停下來看的那次
+        也一起被略過。
+
+        ## 與 `completion_status` 的 `IN_PROGRESS` 無關
+
+        那個值是**課程學習**進行中（由完成項目數導出），與有沒有正在寫的考卷無關。
+        兩者同名不同義，正是本欄位補得這麼晚的原因。
+
+        回 `set` 而非 `dict`：呼叫端只問有無，回 bool 的 dict 會讓 `.get()` 的預設值
+        變成另一個要想的問題。
+        """
+        if not user_ids:
+            return set()
+        rows = await db.execute(
+            select(EtQuizAttemptM.user_id)
+            .where(
+                EtQuizAttemptM.user_id.in_(user_ids),
+                EtQuizAttemptM.course_id == course_id,
+                EtQuizAttemptM.status == ATTEMPT_IN_PROGRESS,
+                EtQuizAttemptM.deleted == 0,
+            )
+            .distinct()
+        )
+        return {user_id for (user_id,) in rows.all()}
 
     async def user_names(self, db: AsyncSession, user_ids: set[str]) -> dict[str, str]:
         """`{user_id: user_name}`——**一次查回整頁**，不逐筆。

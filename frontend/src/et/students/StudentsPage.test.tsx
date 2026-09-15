@@ -251,4 +251,62 @@ describe("ET03 學員學習狀況追蹤", () => {
     }
     expect(screen.queryAllByRole("link", { name: /匯出 CSV/ })).toHaveLength(0)
   })
+
+  it("匯出成功要有提示——瀏覽器下載是無聲的", async () => {
+    // ET-MSG-ET03-007。檔案落到下載資料夾、頁面完全沒有變化，少了這則提示，教師
+    // 按下匯出後唯一的回饋是「什麼都沒發生」，於是再按一次。
+    //
+    // jsdom 沒有實作 `URL.createObjectURL`，不補的話成功路徑會拋 TypeError 被 catch
+    // 接走——那樣這條測試會變成在驗錯誤處理，而且是綠的。
+    //
+    // ⚠️ **只補這兩個方法，不要 `vi.stubGlobal("URL", {...URL})`**：`URL` 是 class，
+    // 展開不會帶到靜態方法，換掉整個 global 會讓 MSW 與 axios 解析不了網址，後面每一條
+    // 測試的課程下拉都會變成空的——而且失敗訊息指向 `selectCourse`，看起來像別的 bug。
+    const createObjectURL = vi.fn(() => "blob:mock")
+    const revokeObjectURL = vi.fn()
+    Object.assign(URL, { createObjectURL, revokeObjectURL })
+
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await screen.findAllByText("王小明")
+
+    await user.click(screen.getAllByRole("button", { name: /匯出 CSV/ })[0])
+
+    expect(await screen.findByText("CSV 已匯出")).toBeInTheDocument()
+    expect(createObjectURL).toHaveBeenCalledOnce()
+  })
+
+  it("移除作答中的學員才跳警告，一般學員不跳", async () => {
+    // AC 7 / ET-MSG-ET03-003。原先兩種情況合用一句「該學員**若**正在作答……」，
+    // 把警告稀釋成每次都出現的免責聲明——每次都出現的警告等於沒有警告。
+    //
+    // fixture 裡 s01 王小明 `has_in_progress_attempt: false`、s02 李小華 `true`，
+    // 同一條測試驗兩邊，避免只驗到其中一種而誤以為分支有效。
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await screen.findAllByText("王小明")
+
+    // 用 regex：按鈕文字是「移除」，但外層 Tooltip 的 title 會參與可及名稱計算，
+    // 精確比對 "移除" 會找不到。
+    const removes = screen.getAllByRole("button", { name: /移除/ })
+
+    // 王小明（沒有作答中的考卷）→ 一般確認，不是 alert
+    await user.click(removes[0])
+    const plain = await screen.findByRole("dialog")
+    expect(within(plain).getByText(/確定移除 王小明/)).toBeInTheDocument()
+    expect(within(plain).queryByRole("alert")).not.toBeInTheDocument()
+    await user.click(within(plain).getByRole("button", { name: "取消" }))
+    // Dialog 開著時 MUI 會把背景設 `aria-hidden`，收合動畫跑完前表格的按鈕不在可及性
+    // 樹裡——不等它消失就再查，會得到「找不到移除按鈕」這種指向錯方向的失敗。
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+    // 李小華（作答中）→ 警告版，且文案要講明 attempt 會保留
+    await user.click(screen.getAllByRole("button", { name: /移除/ })[1])
+    const warned = await screen.findByRole("dialog")
+    const alert = within(warned).getByRole("alert")
+    expect(alert).toHaveTextContent("李小華作答中")
+    expect(alert).toHaveTextContent("保留並計入歷史")
+  })
 })
