@@ -342,7 +342,7 @@ ET 之資安稽核統一寫入平台 `DP_AUDIT_LOG`（經 `AuditLogService`）�
 
 僅針對**開放中**（已發布且於起訖期間內）之課程執行；已關閉 / 未到起始之課程不納入；已完課學員不收提醒。
 
-**SCHET001 每週統計與週報**（每週一 10:00 執行；時間由 `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 控制；於平台 `DP_SCHEDULE` 註冊、由平台引擎執行）：
+**SCHET001 每週統計與週報**（每週一 10:00 執行；時點於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`）；於平台 `DP_SCHEDULE` 註冊、由平台引擎執行）：
 
 | 動作 | 內容 |
 |------|------|
@@ -630,7 +630,7 @@ spec.md 已規範：「**當前登入之管理者無法停用自己之管理者�
 - **影片儲存**：影片採本地上傳，不串接外部影音平台（YouTube、Vimeo 等）。可接受之格式（預設 mp4 / webm）與單檔大小上限（預設 500 MB）由**系統參數**（平台 `DP_PARAM`，`PARAM_ID` 前綴 `ET_`：`ET_VIDEO_ALLOWED_FORMATS` / `ET_VIDEO_MAX_SIZE_MB`）控制；ET 系統參數集中於平台 DP（2026-07-08），維護 UI 於 DP 後台「系統參數與清單」（按模組過濾）
 - **DM 文件分類**：教師可選用之文件限 DM「訓練教材」分類；其他分類不出現於下拉選項
 - **完課定義**：學員完成課程中所有章節之學習與測驗即視為完課；完課率公式已於 spec §完課定義與完課率計算 定義；填寫問卷不是完課條件
-- **排程執行環境**：SCHET001（每週）/ SCHET002（每日）於平台 `DP_SCHEDULE` 註冊、由平台單一排程引擎執行（`DP_SCHEDULE_LOG` 記錄）；job handler 由 ET 提供（需要業務資料時反向 import ET service）；執行時間與加急天數由 `DP_PARAM`（前綴 `ET_`：`ET_WEEKLY_STAT_DAY_TIME` / `ET_URGENT_REMIND_DAYS`）控制
+- **排程執行環境**：SCHET001（每週）/ SCHET002（每日）於平台 `DP_SCHEDULE` 註冊、由平台單一排程引擎執行（`DP_SCHEDULE_LOG` 記錄）；job handler 由 ET 提供（需要業務資料時反向 import ET service）；執行時點於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`）；加急天數由 `DP_PARAM.ET_URGENT_REMIND_DAYS` 控制（業務門檻，由 handler 自行讀取）
 - **個資處理**：使用者 Email 與姓名為一般個資，不需加密儲存；密碼採雜湊儲存；問卷填答具名屬一般個資
 - **跨模組互動細節**：請求 / 回應格式、錯誤碼由 `specs/et/contracts/` 規範（待 `/speckit.plan` 階段產出）
 - **數量 / 長度上限延遲決定**：課程 / 章節 / 教材 / 測驗 / 題目 / 問卷題目之**數量上限**，以及課程描述 / 章節名稱 / 教材說明文字 / 測驗名稱 / 學員人數等**長度與容量上限**，於 `/speckit.plan` 與 data-model 階段依效能與業務情境綜合決定，spec 階段不預先綁定
@@ -653,7 +653,7 @@ spec.md 已規範：「**當前登入之管理者無法停用自己之管理者�
 
 | 排程編號 | 名稱 | 頻率 | 內容 |
 |---------|------|------|------|
-| SCHET001 | 每週統計與週報 | 每週一 10:00（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 可調）| 統計快照寫入 ET_WEEKLY_STAT；週報寄教師＋管理者；進度 0% 學員寄未看提醒（一人一信彙整）|
+| SCHET001 | 每週統計與週報 | 每週一 10:00（於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`））| 統計快照寫入 ET_WEEKLY_STAT；週報寄教師＋管理者；進度 0% 學員寄未看提醒（一人一信彙整）|
 | SCHET002 | 每日課程時窗檢查 | 每日 | 到期課程自動轉 CLOSED；訖止前 3 天（`DP_PARAM.ET_URGENT_REMIND_DAYS` 可調）對未完課學員寄加急提醒（每課一次）|
 
 > 兩支排程均於平台 `DP_SCHEDULE` 註冊、由平台單一排程引擎執行、`DP_SCHEDULE_LOG` 記錄；job handler 由 ET 提供（需要業務資料時反向 import ET service）（2026-07-08 集中化）。

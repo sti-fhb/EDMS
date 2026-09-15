@@ -566,7 +566,7 @@
 - T148 截止前加急提醒（訖止前 N 天、所有未完課者、每課一次）
 
 **驗收條件**：
-1. SCHET001 於每週一 10:00（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 可調）由平台排程引擎執行（於 `DP_SCHEDULE` 註冊、`DP_SCHEDULE_LOG` 記錄）；僅統計開放中課程
+1. SCHET001 於每週一 10:00（於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`））由平台排程引擎執行（於 `DP_SCHEDULE` 註冊、`DP_SCHEDULE_LOG` 記錄）；僅統計開放中課程
 2. 每門課程寫入一筆 ET_WEEKLY_STAT（課程×統計日期唯一；含平均進度%、三態人數、完課率、已加入數）
 3. 教師收到自己開放中課程之週報、管理者收到全域週報；內文含平均進度%（與上週比較）、人數分布、完課率、距訖止天數、未開始名單，以及逐學員明細 **CSV 下載連結**（`{{REPORT_CSV_URL}}`；**非郵件附件**——平台唯一發信服務不支援附件）
 4. 點擊週報之 CSV 下載連結需登入方可取得；教師僅能下載自己為擁有者之課程明細、管理者可下載全域；越權存取被擋
@@ -597,7 +597,7 @@
 1. 部署後平台 `DP_NOTIFY_TEMPLATE` 存在 `MODULE=ET` 之 7 類範本：COURSE_INVITE / COURSE_INVITE_DIGEST / COURSE_UPDATE / WEEKLY_REMIND / URGENT_REMIND / WEEKLY_REPORT / APPROVAL_PASSED；範本代碼固定、不可由 ET 新增或刪除
 2. ET 管理者於**平台 DP 後台「通知範本」**可見且僅可編輯 `MODULE=ET` 之列；密碼重設 / 帳號變更驗證（`MODULE=DP`）不在其可編輯範圍
 3. 各寄信點（T136 邀請 / T112 內容更新 / T146 週報 / T147 週提醒 / T148 加急 / T159 核可通過）於寄送前檢查對應範本之 `IS_ACTIVE`；停用時**不寄該類信件**，但觸發事件（自動加入學員、統計快照等）照常運作
-4. 排程參數（`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` / `ET_URGENT_REMIND_DAYS`）於 DP 後台「系統參數與清單」調整後，ET 排程於下次執行即套用
+4. 加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`）於 DP 後台「系統參數與清單」調整後，SCHET002 於下次執行即套用；排程**執行時點**則於 DP 後台「排程管理」調整 `CRON_EXPR`（即時生效）
 5. **不驗收**範本編輯 UI、變數插入、未定義變數警告、樂觀鎖 —— 屬平台 DP 職責，已於 DP Issue #92 驗收
 
 **Labels**：`P3-輔助`, `US15`, `UCET015`, `notification`, `backend`

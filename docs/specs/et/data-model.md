@@ -700,7 +700,6 @@
 | `ET_VIDEO_MAX_SIZE_MB` | `500` | 教材影片單檔大小上限 |
 | `ET_VIDEO_PLAYBACK_MAX_RATE` | `2` | 影片播放倍速上限（播放器提供 0.75 / 1 / 1.25 / 1.5 / 2）；**只能往下限縮、不能往上新增選項**——選項清單為前端寫死（2026-08-19 #181；對應 DP #171 判為 `READONLY`）|
 | `ET_INVITATION_CODE_LENGTH` | `8` | 邀請碼長度（純數字）|
-| `ET_WEEKLY_STAT_DAY_TIME` | `MON 10:00` | SCHET001 每週統計與週報執行時間 |
 | `ET_URGENT_REMIND_DAYS` | `3` | SCHET002 截止前加急提醒天數（訖止前 N 天）|
 
 > **密碼重設 / Email 變更驗證連結有效時間**改為**平台級 `DP_` 參數**（認證 TTL 由平台 DP 提供，見 [spec_us2.md](spec_us2.md)、[spec_us10.md](spec_us10.md)），不再掛 ET 參數。

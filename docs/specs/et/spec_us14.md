@@ -3,7 +3,7 @@
 > 對應 UC：UCET014 ｜ 功能選項：SCH（排程統計與提醒，無操作畫面）｜ Priority：P2 ｜ Wireframe：排程作業，無操作畫面 ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 新增（客戶需求變更 item 4：每週自動統計看課百分比並回傳，同時通知未看者）。
 
-系統以兩支排程自動統計看課狀況並寄發提醒，**僅針對開放中**（已發布且於起訖期間內）之課程執行：**SCHET001 每週統計與週報**（每週一 10:00，`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 可調）——統計各開放中課程並留存快照 `ET_WEEKLY_STAT`，寄週報予教師（自己建立之課程）與管理者（全域），並對**進度 0%（完全未開始）**之學員寄未看提醒（一人一信彙整）；**SCHET002 每日課程時窗檢查**（每日執行）——到期課程自動轉 CLOSED（→ [spec_us11.md](spec_us11.md) US11），並於**訖止前 3 天**（`DP_PARAM.ET_URGENT_REMIND_DAYS` 可調）對未完課學員寄加急提醒（每課只寄一次）。本 US 無 UI 畫面（純排程作業）；信件採 [spec_us15.md](spec_us15.md) US15 統一範本。**排程集中於平台 DP（2026-07-08）**：SCHET001 / SCHET002 於平台 `DP_SCHEDULE` 註冊、由平台單一排程引擎執行、`DP_SCHEDULE_LOG` 記錄執行歷程；job handler 由 ET 提供（需要業務資料時反向 import ET service）；寄信呼叫平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）。
+系統以兩支排程自動統計看課狀況並寄發提醒，**僅針對開放中**（已發布且於起訖期間內）之課程執行：**SCHET001 每週統計與週報**（每週一 10:00，於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`））——統計各開放中課程並留存快照 `ET_WEEKLY_STAT`，寄週報予教師（自己建立之課程）與管理者（全域），並對**進度 0%（完全未開始）**之學員寄未看提醒（一人一信彙整）；**SCHET002 每日課程時窗檢查**（每日執行）——到期課程自動轉 CLOSED（→ [spec_us11.md](spec_us11.md) US11），並於**訖止前 3 天**（`DP_PARAM.ET_URGENT_REMIND_DAYS` 可調）對未完課學員寄加急提醒（每課只寄一次）。本 US 無 UI 畫面（純排程作業）；信件採 [spec_us15.md](spec_us15.md) US15 統一範本。**排程集中於平台 DP（2026-07-08）**：SCHET001 / SCHET002 於平台 `DP_SCHEDULE` 註冊、由平台單一排程引擎執行、`DP_SCHEDULE_LOG` 記錄執行歷程；job handler 由 ET 提供（需要業務資料時反向 import ET service）；寄信呼叫平台唯一發信服務（經 `DP_EMAIL_LOG` outbox）。
 
 **Priority**: P2
 
@@ -15,7 +15,7 @@
 
 ### SCHET001 — 每週統計與快照
 
-1. **Given** 排定時間到（每週一 10:00，`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 可調），**When** 平台排程引擎觸發 SCHET001（於 `DP_SCHEDULE` 註冊），**Then** 系統對每門**開放中**課程統計：平均看課進度%、未開始 / 進行中 / 已完課人數、完課率、已加入人數（不含已移除）
+1. **Given** 排定時間到（每週一 10:00，於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`）），**When** 平台排程引擎觸發 SCHET001（於 `DP_SCHEDULE` 註冊），**Then** 系統對每門**開放中**課程統計：平均看課進度%、未開始 / 進行中 / 已完課人數、完課率、已加入人數（不含已移除）
 2. **Given** 統計完成，**When** 寫入快照，**Then** 每門課程 INSERT 一筆 `ET_WEEKLY_STAT`（課程 × 統計日期唯一；append-only，不回頭修改）
 3. **Given** 課程已關閉或尚未到起始時間，**When** SCHET001 執行，**Then** 該課程**不納入**統計與提醒
 
@@ -57,7 +57,7 @@
 ## Functional Requirements
 
 - **FR-ET-US14-01**: 系統 MUST 僅對「開放中」（已發布且於起訖期間內）之課程執行 SCHET001 與 SCHET002 之統計與提醒；已關閉或尚未到起始時間之課程 MUST NOT 納入統計與提醒
-- **FR-ET-US14-02**: 系統 MUST 於排定時間（每週一 10:00，`DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 可調）由平台排程引擎執行 SCHET001（於 `DP_SCHEDULE` 註冊、`DP_SCHEDULE_LOG` 記錄），對每門開放中課程統計平均看課進度%、未開始 / 進行中 / 已完課人數、完課率與已加入人數（不含已移除）
+- **FR-ET-US14-02**: 系統 MUST 於排定時間（每週一 10:00，於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`））由平台排程引擎執行 SCHET001（於 `DP_SCHEDULE` 註冊、`DP_SCHEDULE_LOG` 記錄），對每門開放中課程統計平均看課進度%、未開始 / 進行中 / 已完課人數、完課率與已加入人數（不含已移除）
 - **FR-ET-US14-03**: 系統 MUST 於每次 SCHET001 統計完成時，為每門課程以 append-only 方式 INSERT 一筆 `ET_WEEKLY_STAT` 快照（課程 × 統計日期唯一），MUST NOT 回頭修改既有快照
 - **FR-ET-US14-04**: 系統 MUST 於快照寫入後寄送週報：每位教師收到一封（僅含自己建立之開放中課程）、每位管理者收到一封全域週報；內文 MUST 含各課程平均看課進度%（含與上週快照比較之增減）、人數分布、完課率、距訖止天數與未開始名單，並提供逐學員明細之 **CSV 下載連結**（`{{REPORT_CSV_URL}}`，非郵件附件——平台唯一發信服務不支援附件）；當該課程無上週快照時「與上週比較」MUST 顯示「—」而非錯誤
 - **FR-ET-US14-05**: 系統 MUST 於 SCHET001 提醒階段，對進度為 0%（完全未開始）之學員寄送一封彙整未看提醒信（範本 `WEEKLY_REMIND`，列出其所有未開始課程與各課程截止時間）；進度 > 0%、已完課或已被移除者 MUST NOT 就該課程列入週提醒
