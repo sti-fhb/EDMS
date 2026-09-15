@@ -199,11 +199,14 @@ async def _course(client, db, slug: str, *, time_limit_min: int | None = 30, qui
     }
 
 
-async def _expire(db, course_id: int) -> None:
-    """把閱課期間推到過去（`STATUS` 仍為 `PUBLISHED`——這正是 #317 描述的常態）。"""
-    await db.execute(
-        update(EtCourse).where(EtCourse.course_id == course_id).values(open_end_at=utcnow() - timedelta(days=1))
-    )
+async def _expire(db, course_id: int, **ago) -> None:
+    """把閱課期間推到過去（`STATUS` 仍為 `PUBLISHED`——這正是 #317 描述的常態）。
+
+    預設推到 **2 天前**，明確越過 `SETTLE_GRACE_HOURS`（24 小時）的寬限期；要驗「寬限期
+    內不結清」的案例請自行傳入較短的 `ago`（如 `minutes=1`）。
+    """
+    delta = timedelta(**ago) if ago else timedelta(days=2)
+    await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(open_end_at=utcnow() - delta))
     await db.flush()
 
 
@@ -460,6 +463,61 @@ class TestSettleStaleAttempts:
         await db.flush()
 
         settled = await EtScheduleService().settle_stale_attempts(db)
+
+        assert settled == 0
+        assert (await _attempt(db, attempt_id)).status == ATTEMPT_IN_PROGRESS
+
+
+class TestSettleTiming:
+    """何時**還不可以**結清——`spec_us6` 場景 27 的保障不得被本作業推翻（Security H-1）。"""
+
+    async def test_課程剛到期而作答時限未到則不結清(self, client, db) -> None:
+        """學員 07:30 開始 60 分鐘測驗、課程 08:00 到期、排程 08:00 執行——他還有 30 分鐘
+        合法時間。若課程一關就結清，這份考卷會被強制交出並記為「逾時」，與事實不符。"""
+        ctx = await _course(client, db, "grc1", time_limit_min=60)
+        attempt_id = await _start_attempt(client, ctx)
+        await _expire(db, ctx["course_id"], minutes=1)
+
+        settled = await EtScheduleService().settle_stale_attempts(db)
+
+        assert settled == 0
+        assert (await _attempt(db, attempt_id)).status == ATTEMPT_IN_PROGRESS
+
+    async def test_不限時測驗於寬限期內不結清(self, client, db) -> None:
+        ctx = await _course(client, db, "grc2", time_limit_min=None)
+        attempt_id = await _start_attempt(client, ctx)
+        await _expire(db, ctx["course_id"], minutes=1)
+
+        settled = await EtScheduleService().settle_stale_attempts(db)
+
+        assert settled == 0
+        assert (await _attempt(db, attempt_id)).status == ATTEMPT_IN_PROGRESS
+
+    async def test_掃描後課程被再開課則不結清(self, client, db) -> None:
+        """掃描與寫入之間教師按了再開課。沿用掃描結果會把一門已重新開放的課程裡、
+        學員**正在寫**的考卷結清掉。
+
+        以 stub 掃描器重現「掃描時已到期、寫入前已再開課」的時序——真實批次中這個窗口
+        等於整批的執行時間。
+        """
+        ctx = await _course(client, db, "grc3")
+        attempt_id = await _start_attempt(client, ctx)
+        await _expire(db, ctx["course_id"])
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == ctx["course_id"])
+            .values(open_end_at=utcnow() + timedelta(days=30))
+        )
+        await db.flush()
+
+        class _StaleScan:
+            async def expired_published_course_ids(self, db_, now):
+                return []
+
+            async def stale_in_progress_attempt_ids(self, db_, now):
+                return [attempt_id]
+
+        settled = await EtScheduleService(repository=_StaleScan()).settle_stale_attempts(db)
 
         assert settled == 0
         assert (await _attempt(db, attempt_id)).status == ATTEMPT_IN_PROGRESS

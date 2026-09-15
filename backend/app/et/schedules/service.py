@@ -15,8 +15,12 @@
 
 實質上被收斂的只有「無限期地回來繼續寫」：在本作業存在之前，`IN_PROGRESS` 的 attempt
 沒有任何生命週期上限，而「期間已過而 `STATUS` 仍是 `PUBLISHED`」是常態（沒有東西會把
-狀態推到 `CLOSED`），於是那條窄縫在時間軸上沒有上界。本作業每日執行，上界因此收斂為
-「關閉後到下一次排程」。
+狀態推到 `CLOSED`），於是那條窄縫在時間軸上沒有上界。
+
+上界由 `rules.should_settle` 定義，**不是「課程一關就結清」**：限時測驗等作答時限過完，
+不限時測驗等課程關閉滿 `SETTLE_GRACE_HOURS`。否則「學員還剩多少合法作答時間」會取決於
+課程訖止與排程時點的相對位置——07:30 開始一份 60 分鐘測驗、課程 08:00 到期、排程 08:00
+執行，他還有 30 分鐘卻被強制交卷，那正是場景 27 要保障的情境。
 
 ## 為何掃「所有視同關閉」而非「本次剛關的」
 
@@ -46,12 +50,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.attempt.repository import EtAttemptRepository, to_answers
-from app.et.attempt.rules import grade_details
-from app.et.constants import ATTEMPT_IN_PROGRESS, ATTEMPT_TIMEOUT, COURSE_PUBLISHED
+from app.et.attempt.rules import grade_details, is_timed_out
+from app.et.constants import ATTEMPT_IN_PROGRESS, ATTEMPT_TIMEOUT, COURSE_CLOSED, COURSE_PUBLISHED
 from app.et.course.repository import EtCourseRepository
+from app.et.course.rules import is_effectively_closed
 from app.et.learning.repository import EtLearningRepository
 from app.et.progress.repository import EtProgressRepository
 from app.et.schedules.repository import EtScheduleRepository
+from app.et.schedules.rules import should_settle
 from app.services import AuditLogService
 
 logger = logging.getLogger(__name__)
@@ -150,6 +156,10 @@ class EtScheduleService:
         閱卷走 `rules.grade_details`——與學員自己按提交時**完全同一支**。兩邊若各寫一份，
         表徵會是同一份考卷因「誰按的提交」而及格與否不同，且沒有任何錯誤訊息。
 
+        **不是「課程一關就全部結清」**：每一筆還要通過 `rules.should_settle`（限時測驗
+        等時限過完、不限時測驗等關閉滿 24 小時），否則會把學員手上還有合法作答時間的
+        考卷收走——`spec_us6` 場景 27 明訂那是不可以的。未達門檻者留到下一輪重掃。
+
         **不寫稽核**：`attempt` 模組本來就不寫（見 `attempt/repository.submit` 之
         docstring，追溯來源是 `ET_QUIZ_ATTEMPT_D`），本路徑沿用同一決定，不在此處另立
         一套只有排程才有的稽核。
@@ -175,9 +185,24 @@ class EtScheduleService:
         """單筆結清；回傳是否真的由本次完成轉移。
 
         **逐筆重取**而非沿用掃描時的實體，理由同 `_close_one`。
+
+        ## 寫入前重驗兩件事
+
+        1. **課程是否仍視同關閉**：掃描與寫入之間教師可能按了再開課。沿用掃描結果會把
+           一門已經重新開放的課程裡、學員**正在寫**的考卷結清掉。
+        2. **是否真的沒有合法作答時間了**：見 `rules.should_settle`——限時測驗要等時限
+           過完，不限時測驗要等關閉滿寬限期。少了這道，`spec_us6` 場景 27 會被本作業
+           推翻。
         """
         attempt = await self._attempts.get_attempt(db, attempt_id)
         if attempt is None or attempt.status != ATTEMPT_IN_PROGRESS:
+            return False
+        course = await self._learning.get_course(db, attempt.course_id)
+        if course is None or not is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now):
+            return False
+        closed_since = course.closed_at if course.status == COURSE_CLOSED else course.open_end_at
+        timed_out = is_timed_out(started_at=attempt.started_at, time_limit_min=attempt.time_limit_snapshot, now=now)
+        if not should_settle(closed_since=closed_since, timed_out=timed_out, now=now):
             return False
         details = await self._attempts.list_details(db, attempt.attempt_id)
         graded = grade_details(to_answers(details), pass_score=attempt.pass_score_snapshot)
@@ -194,11 +219,11 @@ class EtScheduleService:
         if not moved:
             # 學員在掃描與寫入之間自己按了提交——他的成績為準，不覆蓋
             return False
-        if graded.is_pass and not await self._is_preview(db, attempt):
+        if graded.is_pass and not await self._is_preview(db, attempt, course):
             await self._mark_item_completed(db, attempt)
         return True
 
-    async def _is_preview(self, db: AsyncSession, attempt) -> bool:
+    async def _is_preview(self, db: AsyncSession, attempt, course) -> bool:
         """該 attempt 是否為擁有者預覽（是擁有者且**不在籍**）。
 
         ⚠️ **本判定不可省略**，即使結清路徑不經 `AttemptService`：教師可對自己課程開
@@ -207,10 +232,9 @@ class EtScheduleService:
         統計裡。`AttemptService.submit()` 於同一位置以 `_is_preview` 擋下；漏掉這道，
         一筆被遺忘的預覽 attempt 會在課程關閉後由排程悄悄寫進進度表，而且不會有任何
         錯誤訊息。
+
+        `course` 由呼叫端傳入（`_settle_one` 已為了重驗關閉狀態取過一次），不重查。
         """
-        course = await self._learning.get_course(db, attempt.course_id)
-        if course is None:
-            return False
         enrolled = await self._learning.is_enrolled(db, user_id=attempt.user_id, course_id=attempt.course_id)
         return course.owner_id == attempt.user_id and not enrolled
 

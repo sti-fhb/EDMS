@@ -7,7 +7,12 @@ Create Date: 2026-09-14 18:10:00.000000
 接上 SCHET002（到期自動關閉 + 結清逾期未提交之作答）handler 並啟用。
 
 異動說明：
-- 影響 Table：DP_SCHEDULE（更新 SCHET002 一列）
+- 影響 Table：DP_SCHEDULE（更新 SCHET002 一列）、ET_QUIZ_ATTEMPT_M（新增 partial index）
+- 新增 `IX_ET_ATTEMPT_IN_PROGRESS`（partial，`WHERE "STATUS"='IN_PROGRESS' AND "DELETED"=0`）：
+  SCHET002 每日掃「仍未提交的作答」，而 `ET_QUIZ_ATTEMPT_M` 是 append-only、永不刪除，
+  既有索引只有 `(USER_ID, QUIZ_ID)` 與 `(COURSE_ID)`，`STATUS` 無索引 → 該查詢等同每日
+  全表掃 + 四層 JOIN，成本隨歷史作答量無上限成長。partial index 只收 `IN_PROGRESS` 的列
+  （母體天然很小，因為作答完就離開這個狀態），體積不隨歷史成長。
 - HANDLER_REF 由預留 placeholder `app.et.schedules.handlers.pending` 改為
   `app.et.schedules.handlers.daily_job`；IS_ENABLED 啟用（handler 已交付）。
   HANDLER_REF / MODULE 不可經排程編輯 API 修改（RCE 防護），故由 migration 接線
@@ -22,6 +27,7 @@ Create Date: 2026-09-14 18:10:00.000000
 
 from typing import Sequence, Union
 
+import sqlalchemy as sa
 from sqlalchemy import text
 
 from alembic import op
@@ -52,9 +58,19 @@ def _update(handler: str, description: str, enabled: bool) -> None:
     )
 
 
+_INDEX_NAME = "IX_ET_ATTEMPT_IN_PROGRESS"
+
+
 def upgrade() -> None:
     _update(_HANDLER, _DESCRIPTION, True)
+    op.create_index(
+        _INDEX_NAME,
+        "ET_QUIZ_ATTEMPT_M",
+        ["ATTEMPT_ID"],
+        postgresql_where=sa.text("\"STATUS\" = 'IN_PROGRESS' AND \"DELETED\" = 0"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(_INDEX_NAME, table_name="ET_QUIZ_ATTEMPT_M")
     _update(_HANDLER_OLD, _DESCRIPTION_OLD, False)
