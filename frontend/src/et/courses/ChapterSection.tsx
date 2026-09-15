@@ -27,7 +27,6 @@ import type { ChapterItem } from "./schemas"
 
 interface ItemHandlers {
   /** 新增模式（章節尚未寫入 DB）時停用項目操作——項目須掛在已存在的章節下。 */
-  itemsDisabled: boolean
   onAddItem: (chapter: ChapterItem, itemType: ItemType) => void
   onOpenItem: (item: ItemRow) => void
   onDeleteItem: (item: ItemRow) => void
@@ -49,7 +48,6 @@ function ChapterRow({
   readOnly,
   onRename,
   onDelete,
-  itemsDisabled,
   onAddItem,
   onOpenItem,
   onDeleteItem,
@@ -112,7 +110,6 @@ function ChapterRow({
       <ItemList
         items={chapter.items}
         readOnly={readOnly}
-        disabled={itemsDisabled}
         onAdd={(itemType) => onAddItem(chapter, itemType)}
         onOpen={onOpenItem}
         onDelete={onDeleteItem}
