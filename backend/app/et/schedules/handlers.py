@@ -1,7 +1,7 @@
 """ET 排程 handler（US14 / #325）。
 
 `SCHET002`（每日）＝ `daily_job`（`DP_SCHEDULE.HANDLER_REF` 指向本 callable）：
-① 到期自動關閉 ② 結清逾期未提交之作答。
+① 到期自動關閉 ② 結清逾期未提交之作答 ③ 截止前加急提醒。
 
 handler 為 async 無參、自管 session（比照 `app.dp.schedules.handlers.daily_platform_job`
 與 `app.dm.review.reminder.run`）。
@@ -62,4 +62,7 @@ async def daily_job() -> None:
     async with AsyncSessionLocal() as db:
         settled = await service.settle_stale_attempts(db)
 
-    logger.info("SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆", closed, settled)
+    async with AsyncSessionLocal() as db:
+        urgent = await service.send_urgent_reminds(db)
+
+    logger.info("SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆、加急提醒 %d 封", closed, settled, urgent)

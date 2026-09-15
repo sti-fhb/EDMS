@@ -43,6 +43,7 @@
 """
 
 import logging
+from datetime import datetime
 from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,14 +52,26 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.attempt.repository import EtAttemptRepository, to_answers
 from app.et.attempt.rules import grade_details, is_timed_out
-from app.et.constants import ATTEMPT_IN_PROGRESS, ATTEMPT_TIMEOUT, COURSE_CLOSED, COURSE_PUBLISHED
+from app.et.constants import (
+    ATTEMPT_IN_PROGRESS,
+    ATTEMPT_TIMEOUT,
+    COMPLETION_COMPLETED,
+    COURSE_CLOSED,
+    COURSE_PUBLISHED,
+)
 from app.et.course.repository import EtCourseRepository
 from app.et.course.rules import is_effectively_closed
+from app.et.enrollment.repository import EtEnrollmentRepository
+from app.et.enrollment.rules import derive_completion_status
 from app.et.learning.repository import EtLearningRepository
+from app.et.notify.repository import EtNotifyRepository
+from app.et.notify.schedule_mail import TEMPLATE_URGENT_REMIND, build_urgent_remind_params
+from app.et.notify.service import EtNotifier
 from app.et.progress.repository import EtProgressRepository
 from app.et.schedules.repository import EtScheduleRepository
-from app.et.schedules.rules import should_settle
-from app.services import AuditLogService
+from app.et.schedules.rules import needs_urgent_remind, should_settle
+from app.et.tracking.repository import EtTrackingRepository
+from app.services import AuditLogService, ParamService
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +83,10 @@ _FUNC_NAME_ATTEMPT: Final = "ET-ATTEMPT"
 
 #: 排程沒有登入者。記成學員本人會讓稽核看起來像「他自己提交的」。
 _SYSTEM_OPERATOR: Final = OperatorInfo(user_id="SYSTEM")
+
+#: 訖止前幾天寄加急提醒（`DP_PARAM`，管理者於 DP 後台可調）。
+_URGENT_PARAM_ID: Final = "ET_URGENT_REMIND_DAYS"
+_URGENT_DAYS_DEFAULT: Final = 3
 
 
 class EtScheduleService:
@@ -83,6 +100,11 @@ class EtScheduleService:
         progress: EtProgressRepository | None = None,
         learning: EtLearningRepository | None = None,
         audit: AuditLogService | None = None,
+        enrollments: EtEnrollmentRepository | None = None,
+        tracking: EtTrackingRepository | None = None,
+        notifier: EtNotifier | None = None,
+        notify_repo: EtNotifyRepository | None = None,
+        params: ParamService | None = None,
     ) -> None:
         self._repo = repository or EtScheduleRepository()
         self._courses = courses or EtCourseRepository()
@@ -90,6 +112,11 @@ class EtScheduleService:
         self._progress = progress or EtProgressRepository()
         self._learning = learning or EtLearningRepository()
         self._audit = audit or AuditLogService()
+        self._enrollments = enrollments or EtEnrollmentRepository()
+        self._tracking = tracking or EtTrackingRepository()
+        self._notifier = notifier or EtNotifier()
+        self._notify_repo = notify_repo or EtNotifyRepository()
+        self._params = params or ParamService()
 
     async def close_expired_courses(self, db: AsyncSession) -> int:
         """已逾閱課期間之課程轉 `CLOSED` + 稽核（FR-ET-US14-06）。
@@ -257,6 +284,73 @@ class EtScheduleService:
         """
         enrolled = await self._learning.is_enrolled(db, user_id=attempt.user_id, course_id=attempt.course_id)
         return course.owner_id == attempt.user_id and not enrolled
+
+    async def send_urgent_reminds(self, db: AsyncSession, *, now: datetime | None = None) -> int:
+        """訖止前 N 天，對**所有未完課**學員寄加急提醒（T148 / FR-ET-US14-07、-08）。
+
+        對象**不設進度門檻**（與每週未看提醒只寄 0% 者不同）——`spec_us14` Clarifications
+        明訂加急信是「開始後停滯者」的最後防線。
+
+        每門課只寄一次（`URGENT_REMIND_SENT`）；再開課重設起訖後該旗標歸零、重新計算
+        （由 `course/repository.mark_reopened` 負責）。
+
+        **旗標與寄信同一個交易**：分開的話，寄信成功而旗標寫入失敗會讓全班隔天再收一次。
+
+        Returns:
+            實際寄出的封數。
+        """
+        now = now or utcnow()
+        urgent_days = await self._params.get_int_param(db, _URGENT_PARAM_ID, "VALUE", _URGENT_DAYS_DEFAULT)
+        sent = 0
+        for course in await self._repo.urgent_candidate_courses(db, now):
+            if not needs_urgent_remind(
+                open_end_at=course.open_end_at, urgent_days=urgent_days, already_sent=False, now=now
+            ):
+                continue
+            try:
+                sent += await self._remind_one(db, course, now=now)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception("SCHET002 加急提醒失敗 course_id=%s", course.course_id)
+        return sent
+
+    async def _remind_one(self, db: AsyncSession, course, *, now) -> int:
+        """單門課之加急提醒；回傳排入 outbox 的封數。"""
+        user_ids = await self._unfinished_user_ids(db, course.course_id)
+        queued = 0
+        for recipient in await self._notify_repo.recipients(db, user_ids):
+            result = await self._notifier.notify(
+                db,
+                template_code=TEMPLATE_URGENT_REMIND,
+                recipients=[recipient.email],
+                params=build_urgent_remind_params(
+                    user_name=recipient.user_name,
+                    course_id=course.course_id,
+                    course_name=course.course_name,
+                    open_end_at=course.open_end_at,
+                ),
+            )
+            queued += result.queued_count
+        # 旗標**無論是否真的寄出去**都要置起：範本被停用時 `queued` 為 0，但那是管理者
+        # 刻意關掉這類信，不是失敗；不置旗標會讓這門課每天重跑一次整段推導。
+        await self._repo.mark_urgent_remind_sent(db, course_id=course.course_id, operator=_SYSTEM_OPERATOR)
+        return queued
+
+    async def _unfinished_user_ids(self, db: AsyncSession, course_id: int) -> list[str]:
+        """該課程之**未完課**在籍學員。
+
+        完課與否一律即時導出（`derive_completion_status`）——`ET_ENROLLMENT.COMPLETION_STATUS`
+        只在加入時寫入 `NOT_STARTED` 且從未推進，讀它會讓**全班**都被判為未完課，於是
+        已完課的人也收到「您尚未完課」的催促信。
+        """
+        user_ids = await self._enrollments.enrolled_user_ids(db, course_id)
+        counts = await self._tracking.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
+        return [
+            uid
+            for uid, (done, total) in counts.items()
+            if derive_completion_status(done=done, total=total) != COMPLETION_COMPLETED
+        ]
 
     async def _mark_item_completed(self, db: AsyncSession, attempt) -> None:
         """及格 → 回寫項目層完成。
