@@ -80,7 +80,16 @@ class TestAc3Seeds:
         assert sum(1 for t in tags if t[1]) == 1, "全系統僅 1 筆 IS_ALL"
         assert all(t[2] for t in tags), "種子皆為內建標籤"
 
-    async def test_et_參數六項種入平台表(self, db, et_registered) -> None:
+    async def test_et_參數五項種入平台表(self, db, et_registered) -> None:
+        """ET 於 `DP_PARAM` 的參數清單。
+
+        原為六項；`ET_WEEKLY_STAT_DAY_TIME` 已於 #325 移除（SA Q1 裁示 A）——排程的
+        **執行時點**唯一事實來源是 `DP_SCHEDULE.CRON_EXPR`，留著一個沒有人讀的參數會讓
+        管理者在 DP 後台改了它卻完全沒有效果、且無任何錯誤訊息。
+
+        `ET_URGENT_REMIND_DAYS` 留著且仍然有效：它是**業務門檻**（訖止前幾天）而非排程
+        時點，由 SCHET002 的 handler 於執行時自行讀取。
+        """
         rows = await db.execute(
             text('SELECT "PARAM_ID" FROM "DP_PARAM_M" WHERE "PARAM_ID" LIKE :p ORDER BY 1'), {"p": "ET\\_%"}
         )
@@ -90,7 +99,6 @@ class TestAc3Seeds:
             "ET_VIDEO_ALLOWED_FORMATS",
             "ET_VIDEO_MAX_SIZE_MB",
             "ET_VIDEO_PLAYBACK_MAX_RATE",
-            "ET_WEEKLY_STAT_DAY_TIME",
         ]
 
     async def test_et_通知範本七類且_channel_為平台正規詞彙(self, db, et_registered) -> None:
