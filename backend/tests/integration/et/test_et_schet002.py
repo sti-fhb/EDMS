@@ -546,3 +546,40 @@ class TestCloseAudit:
         assert "自動關閉" in log.description
         # 排程沒有請求來源，硬填會讓該欄位變成不可信
         assert log.source_ip is None
+
+    async def test_結清作答寫入ET_ATTEMPT稽核(self, client, db) -> None:
+        """學員自己按提交不寫稽核；**系統代替他交卷**要寫——那是系統對成績的單方面變更，
+        少了它，學員問「我的考卷為什麼被交出去、分數哪來的」時系統答不出來。"""
+        ctx = await _course(client, db, "aud2")
+        attempt_id = await _start_attempt(client, ctx)
+        await _answer(client, ctx, attempt_id, correct=True)
+        await _expire(db, ctx["course_id"])
+
+        await EtScheduleService().settle_stale_attempts(db)
+
+        log = await db.scalar(
+            select(DpAuditLog).where(
+                DpAuditLog.func_name == "ET-ATTEMPT",
+                DpAuditLog.target_id == str(attempt_id),
+            )
+        )
+        assert log is not None
+        assert log.created_user == "SYSTEM"
+        assert log.before_value is not None and log.after_value is not None
+
+    async def test_學員自行提交不寫ET_ATTEMPT稽核(self, client, db) -> None:
+        """界線的另一半：一般作答提交不進資安稽核（追溯來源是逐題快照）。"""
+        ctx = await _course(client, db, "aud3")
+        attempt_id = await _start_attempt(client, ctx)
+        await _answer(client, ctx, attempt_id, correct=True)
+
+        submitted = await client.post(f"/api/et/attempts/{attempt_id}/submit", headers=_bearer(ctx["student"]))
+        assert submitted.status_code == 200, submitted.text
+
+        log = await db.scalar(
+            select(DpAuditLog).where(
+                DpAuditLog.func_name == "ET-ATTEMPT",
+                DpAuditLog.target_id == str(attempt_id),
+            )
+        )
+        assert log is None

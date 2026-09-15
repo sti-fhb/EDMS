@@ -59,6 +59,15 @@ class ModuleAdminGate:
         # 嚴格布林收斂：只在明確 True 放行；truthy 非 bool（如角色清單 / int）一律 fail-closed
         return result is True
 
+    def has_checker(self, module: str) -> bool:
+        """該模組是否已註冊 checker。
+
+        供呼叫端區分「此人不是該模組管理者」與「該模組根本沒有管理者這個概念」兩種情況
+        ——兩者在 `is_module_admin` 都回 `False`，但處置不同：前者應擋下，後者若一律擋下
+        會讓平台自身（`DP`）的資源變成**沒有任何人**能維護。
+        """
+        return module in self._checkers
+
     async def is_any_module_admin(self, modules: Iterable[str], user_id: str, db: AsyncSession) -> bool:
         """user_id 是否為 modules 中**任一**模組的管理者（#250）。
 
@@ -112,10 +121,17 @@ def require_module_admin(module: str) -> Callable[..., Awaitable[JwtPayload]]:
 
 
 # DP 後台之預設門檻模組：spec_us4 / us5 / us7 / us9 / us10 / us11 皆定義操作者為「ET 或 DM 管理者」
-_BACKOFFICE_MODULES: tuple[str, ...] = ("ET", "DM")
+#
+# 公開（非底線）是因為 `dp/schedules/service` 需要同一組值作為「無模組 checker 之資源」的
+# 回退門檻——複製一份字面值會讓日後新增模組時兩處分岔，而分岔的表徵是某個後台功能對新模組
+# 管理者靜默地全部 403。
+BACKOFFICE_MODULES: tuple[str, ...] = ("ET", "DM")
+
+#: 舊名保留（本檔內部與既有呼叫端沿用）。
+_BACKOFFICE_MODULES = BACKOFFICE_MODULES
 
 
-def require_any_module_admin(modules: Iterable[str] = _BACKOFFICE_MODULES) -> Callable[..., Awaitable[JwtPayload]]:
+def require_any_module_admin(modules: Iterable[str] = BACKOFFICE_MODULES) -> Callable[..., Awaitable[JwtPayload]]:
     """產生「要求為任一指定模組管理者」的 FastAPI dependency（#250）。
 
     供 DP 後台各 router 掛於 router-level，取代原先僅認證的 `get_jwt_payload`——

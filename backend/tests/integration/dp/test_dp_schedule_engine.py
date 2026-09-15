@@ -101,13 +101,18 @@ async def test_write_skipped_log(db):
 
 
 async def test_list_enabled_excludes_disabled(db):
-    """AC5：引擎僅載入 IS_ENABLED=true（種子 SCHDP001 啟用、SCHDM001 由 US13 接線啟用；SCHET 預留停用不載入）。"""
+    """AC5：引擎僅載入 IS_ENABLED=true。
+
+    各 job 的啟用狀態隨其 handler 是否交付而變——本斷言的價值在於「未交付 handler 的
+    預留列不可被載入」（載入會讓引擎每次觸發都因 import 失敗寫一筆 FAILED）。
+    """
     enabled = await ScheduleRepository().list_enabled(db)
     ids = {j.job_id for j in enabled}
 
     assert "SCHDP001" in ids
     assert "SCHDM001" in ids  # US13 接上 KPI 週報 handler 並啟用
-    assert "SCHET001" not in ids and "SCHET002" not in ids  # ET 排程仍為預留停用
+    assert "SCHET002" in ids  # ET-16 第一段接上到期關閉 + 結清逾期作答 handler 並啟用
+    assert "SCHET001" not in ids  # 週統計 / 週報 handler 待 ET-16 第二段，仍為預留停用
 
 
 async def test_list_all_includes_disabled(db):

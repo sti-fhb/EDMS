@@ -64,6 +64,9 @@ logger = logging.getLogger(__name__)
 
 _MODULE: Final = "ET"
 _FUNC_NAME: Final = "ET-COURSE"
+#: 系統代替學員交卷屬「破例與關鍵狀態變更」（spec.md §稽核來源功能碼），與學員自己按提交
+#: 不同——後者不寫稽核。
+_FUNC_NAME_ATTEMPT: Final = "ET-ATTEMPT"
 
 #: 排程沒有登入者。記成學員本人會讓稽核看起來像「他自己提交的」。
 _SYSTEM_OPERATOR: Final = OperatorInfo(user_id="SYSTEM")
@@ -160,9 +163,11 @@ class EtScheduleService:
         等時限過完、不限時測驗等關閉滿 24 小時），否則會把學員手上還有合法作答時間的
         考卷收走——`spec_us6` 場景 27 明訂那是不可以的。未達門檻者留到下一輪重掃。
 
-        **不寫稽核**：`attempt` 模組本來就不寫（見 `attempt/repository.submit` 之
-        docstring，追溯來源是 `ET_QUIZ_ATTEMPT_D`），本路徑沿用同一決定，不在此處另立
-        一套只有排程才有的稽核。
+        **寫稽核（`ET-ATTEMPT`）**：學員自己按提交不寫稽核（那是他自己的動作，追溯來源
+        是 `ET_QUIZ_ATTEMPT_D`），但本路徑是**系統代替他交卷**——屬 spec.md §稽核來源功能碼
+        所稱的「破例與關鍵狀態變更」，與 `ET-QUIZ-RESET`（教師破例重置重考次數）同類。
+        少了它，學員問「我的考卷為什麼被交出去、分數哪來的」時，系統唯一能拿出的只有
+        `UPDATED_USER='SYSTEM'`。
 
         Returns:
             實際結清的 attempt 數。
@@ -221,6 +226,21 @@ class EtScheduleService:
             return False
         if graded.is_pass and not await self._is_preview(db, attempt, course):
             await self._mark_item_completed(db, attempt)
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_NAME_ATTEMPT,
+            action_type="UPDATE",
+            result="SUCCESS",
+            operator_id=_SYSTEM_OPERATOR.user_id,
+            target_id=str(attempt.attempt_id),
+            description=(
+                f"課程關閉後逾期未提交，系統結清並計分"
+                f"（course_id={attempt.course_id}、逾時={timed_out}、及格={graded.is_pass}）"
+            ),
+            before_value={"status": ATTEMPT_IN_PROGRESS},
+            after_value={"status": ATTEMPT_TIMEOUT, "score": str(graded.total), "is_pass": graded.is_pass},
+        )
         return True
 
     async def _is_preview(self, db: AsyncSession, attempt, course) -> bool:
