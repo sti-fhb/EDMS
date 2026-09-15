@@ -22,6 +22,7 @@ from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL
+from app.et.course.publish_service import EtPublishService
 from app.et.course.repository import (
     EtChapterRepository,
     EtCourseRepository,
@@ -87,6 +88,7 @@ class EtCourseService:
         invite_mailer: CourseInviteMailer | None = None,
         enrollments: EtEnrollmentRepository | None = None,
         course_update_mailer: CourseUpdateMailer | None = None,
+        publish: EtPublishService | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._tags = tags or EtCourseTagRepository()
@@ -99,6 +101,9 @@ class EtCourseService:
         self._invite_mailer = invite_mailer or CourseInviteMailer()
         self._enrollments = enrollments or EtEnrollmentRepository()
         self._course_update_mailer = course_update_mailer or CourseUpdateMailer()
+        # #301：`update_basic` 需要發布六項檢核（`_evaluate` 在 publish service——它要組快照
+        # 並問 DM 廢止狀態）。單向依賴：publish service 不反向引用本類別。
+        self._publish = publish or EtPublishService()
 
     # ── 課程 ────────────────────────────────────────────────────────────────
 
@@ -255,12 +260,21 @@ class EtCourseService:
     async def update_basic(
         self, db: AsyncSession, course_id: int, req: CourseUpdateReq, *, operator: OperatorInfo
     ) -> None:
-        """更新基本資料與標籤（全量覆寫）。"""
+        """更新基本資料與標籤（全量覆寫）。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；409 `ET_LOCK_001` 版本不符；
+                422 `ET_PUBLISH_001` 本次延期會讓一門視同關閉的課程復活、但六項檢核未通過
+                （#301，見 `EtPublishService.ensure_revival_publishable`）。
+        """
         course = await self._require_owned(db, course_id, operator.user_id)
         current = await self._tags.list_tag_ids(db, course_id)
         desired = set(req.tag_ids)
         ensure_tag_change_allowed(course.status, current=current, desired=desired)
         await self._ensure_tags_selectable(db, desired - current)
+        # #301：期間延長若會讓一門已到期（視同關閉）的課程復活，重跑發布六項檢核——否則
+        # 「再開課要檢核」形同虛設，繞過它只要改一個日期。只在復活時觸發，見該方法 docstring。
+        await self._publish.ensure_revival_publishable(db, course, new_end_at=req.open_end_at, now=utcnow())
 
         rowcount = await self._courses.update_basic(
             db,
