@@ -19,6 +19,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import utcnow
+from app.dp.users.account_status import is_account_disabled
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL
@@ -186,7 +187,7 @@ class EtCourseService:
                 open_end_at=r.open_end_at,
                 owner_id=r.owner_id,
                 owner_name=owner_names.get(r.owner_id, (None, False))[0],
-                owner_is_deleted=owner_names.get(r.owner_id, (None, False))[1],
+                owner_is_disabled=owner_names.get(r.owner_id, (None, False))[1],
                 tags=[TagOption.model_validate(t) for t in tags.get(r.course_id, [])],
                 chapter_count=counts.get(r.course_id, (0, 0))[0],
                 student_count=counts.get(r.course_id, (0, 0))[1],
@@ -208,32 +209,51 @@ class EtCourseService:
         return [TagOption.model_validate(t) for t in await self._courses.list_all_tags(db)]
 
     async def _owner_names(self, db: AsyncSession, owner_ids: set[str]) -> dict[str, tuple[str, bool]]:
-        """`{user_id: (user_name, 是否已停用)}`——**一次查回整頁**，不逐筆。
+        """`{user_id: (user_name, 帳號是否已停用)}`——**一次查回整頁**，不逐筆。
 
         唯讀查詢 `DP_USER`，屬 `spec.md` §外模組 table 引用清單 A 之既有例外（US7 已列）。
 
-        ## 🔴 **刻意不濾 `DELETED`**（#330 / SA 裁示 2026-09-15）
+        ## 三種狀態，不可混為兩種（#330）
 
-        本支原本濾掉停用者，於是他們的課程在卡片上顯示「—」、在建立者下拉顯示**帳號
-        ID**（前端 `?? owner_id`），而詳細頁又顯示姓名——同一個人三種身份。
+        | 情況 | 回傳 | 畫面 |
+        |---|---|---|
+        | 帳號正常 | `(姓名, False)` | `王大明` |
+        | 帳號已停用 | `(姓名, True)` | `王大明（已停用帳號）` |
+        | 查無此列（含 `DELETED=1`）| 不在 key 裡 → 呼叫端拿 `(None, False)` | `—` |
 
-        而過濾的方向本來就是反的：露出帳號 ID 比露出姓名更能唯一指認一個人，且是可拿
-        去嘗試登入的字串。故改為**回姓名 + 停用旗標**，由前端呈現為「王大明（已停用）」。
+        第三種代表 `DP_USER` 根本沒有這個人（資料不一致），與「停用」是兩回事；混用會讓
+        真正的資料問題被當成正常狀態而永遠沒人查。
 
-        擁有者已停用代表**沒有人能編輯這門課、需要交接**，姓名在此情境是交接資訊而非
-        個資揭露——課程的 `CREATED_USER` 本來就存著他的帳號。
+        ## 🔴 停用讀的是 `STATUS`，**不是 `DELETED`**
 
-        **查無此人**（`DP_USER` 根本沒有該列）與**已停用**是兩回事：前者不在回傳的 key
-        裡（呼叫端得到 `None`），代表資料不一致、該查；混為一談會讓真正的問題被當成正常。
+        EDMS **沒有刪除使用者的功能**——`dp/users/router.py` 只有 `PATCH /{id}/status`，
+        全 repo 沒有任何 code path 會把 `DP_USER.DELETED` 設成 1。離職 / 轉調的實際處理
+        是停用（`STATUS='DISABLED'`），SCHDP001 閒置 90 天也是寫同一欄。
+
+        本支最初讀 `DELETED`，那個旗標在正式環境恆為 `False`，畫面上
+        永遠不會出現標記。改讀 `STATUS` 後才真的涵蓋交接情境。
+
+        判定委派 `dp.users.account_status.is_account_disabled()`——該模組明訂「`STATUS`
+        值域屬 DP 語意，其他模組不得自行解讀」，在這裡寫 `== "DISABLED"` 會讓 DP 日後
+        新增第三種狀態時，ET 靜默地把它算成「未停用」。
+
+        ## 為何不濾掉停用者
+
+        本支原本帶 `DELETED == 0` 且不回停用資訊，於是停用擁有者的課程在卡片上顯示
+        「—」、在建立者下拉顯示 `owner_id`、而詳細頁（另一條沒過濾的查詢）顯示姓名——
+        同一個人三種身份。擁有者停用代表**沒有人能編輯這門課、需要交接**，姓名是交接
+        資訊；揭露對象限 `require_et_roles(ET_TEACHER, ET_ADMIN)`，即交接情境本身的對象。
         """
         if not owner_ids:
             return {}
         rows = (
             await db.execute(
-                select(DpUser.user_id, DpUser.user_name, DpUser.deleted).where(DpUser.user_id.in_(owner_ids))
+                select(DpUser.user_id, DpUser.user_name, DpUser.status).where(
+                    DpUser.user_id.in_(owner_ids), DpUser.deleted == 0
+                )
             )
         ).all()
-        return {user_id: (name, bool(deleted)) for user_id, name, deleted in rows}
+        return {user_id: (name, is_account_disabled(status)) for user_id, name, status in rows}
 
     async def get_detail(self, db: AsyncSession, course_id: int, *, actor_id: str) -> CourseDetail:
         """課程詳細（含章節與標籤）。他人課程可閱覽，以 `is_owner` 表達可否編輯。"""
@@ -242,7 +262,7 @@ class EtCourseService:
             raise _NOT_FOUND
         # 共用 `_owner_names()`——本支原本自己寫一條沒有 `DELETED` 判斷的查詢，正是
         # #330 那三種答案不一致的源頭。兩條查詢分開維護，遲早再分岔一次。
-        owner_name, owner_is_deleted = (await self._owner_names(db, {course.owner_id})).get(
+        owner_name, owner_is_disabled = (await self._owner_names(db, {course.owner_id})).get(
             course.owner_id, (None, False)
         )
         tag_ids = await self._tags.list_tag_ids(db, course_id)
@@ -260,7 +280,7 @@ class EtCourseService:
             version=course.version,
             owner_id=course.owner_id,
             owner_name=owner_name,
-            owner_is_deleted=owner_is_deleted,
+            owner_is_disabled=owner_is_disabled,
             is_owner=is_owner,
             tag_ids=sorted(tag_ids),
             # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者

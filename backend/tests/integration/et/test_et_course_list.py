@@ -477,7 +477,12 @@ class TestEffectivelyClosed:
 
 
 class TestDeletedOwnerDisplay:
-    """停用的擁有者：顯示「姓名（已停用）」（#330 / SA 裁示 2026-09-15）。
+    """停用的擁有者：顯示「姓名（已停用帳號）」（#330 / SA 裁示 2026-09-15）。
+
+    🔴 **觸發條件是 `DP_USER.STATUS='DISABLED'`，不是 `DELETED=1`。** EDMS 沒有刪除
+    使用者的功能（`dp/users/router.py` 只有 `PATCH /{id}/status`），全 repo 沒有任何
+    code path 會把 `DELETED` 設成 1——本測試最初用軟刪造狀態，驗到的是一個在正式環境
+    永遠不會發生的情境，而實作也就跟著只對那個情境生效。
 
     ## 修正前三個畫面對同一個人給三種答案
 
@@ -495,7 +500,7 @@ class TestDeletedOwnerDisplay:
         owner = await _user(db, "t_del01", name="王大明")
         await _course(db, owner=owner, name="離職者的課")
         viewer = await _user(db, "t_del01b", name="李小華")
-        await db.execute(update(DpUser).where(DpUser.user_id == owner).values(deleted=1))
+        await db.execute(update(DpUser).where(DpUser.user_id == owner).values(status="DISABLED"))
         await db.commit()
 
         r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
@@ -503,7 +508,7 @@ class TestDeletedOwnerDisplay:
         assert r.status_code == 200, r.text
         card = next(c for c in r.json()["data"] if c["course_name"] == "離職者的課")
         assert card["owner_name"] == "王大明", "停用不等於匿名——交接時需要知道是誰建的"
-        assert card["owner_is_deleted"] is True
+        assert card["owner_is_disabled"] is True
 
     async def test_正常擁有者旗標為_false(self, client, db) -> None:
         owner = await _user(db, "t_del02", name="陳美玲")
@@ -514,14 +519,14 @@ class TestDeletedOwnerDisplay:
 
         card = next(c for c in r.json()["data"] if c["course_name"] == "在職者的課")
         assert card["owner_name"] == "陳美玲"
-        assert card["owner_is_deleted"] is False
+        assert card["owner_is_disabled"] is False
 
     async def test_詳細頁與列表一致(self, client, db) -> None:
         """三個畫面必須對同一個事實給同一個答案——那是本 issue 的核心。"""
         owner = await _user(db, "t_del03", name="林志豪")
         course_id = await _course(db, owner=owner, name="一致性測試課")
         viewer = await _user(db, "t_del03b")
-        await db.execute(update(DpUser).where(DpUser.user_id == owner).values(deleted=1))
+        await db.execute(update(DpUser).where(DpUser.user_id == owner).values(status="DISABLED"))
         await db.commit()
 
         listed = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
@@ -530,7 +535,29 @@ class TestDeletedOwnerDisplay:
         card = next(c for c in listed.json()["data"] if c["course_id"] == course_id)
         body = detail.json()
         assert body["owner_name"] == card["owner_name"] == "林志豪"
-        assert body["owner_is_deleted"] == card["owner_is_deleted"] is True
+        assert body["owner_is_disabled"] == card["owner_is_disabled"] is True
+
+    async def test_帳號被鎖定不算停用(self, client, db) -> None:
+        """🔴 鎖定是暫時的、會自動解除；停用是有人決定的，在改回來之前一直有效。
+
+        把連續登入失敗而被鎖 15 分鐘的教師標成「已停用帳號」，會讓看到的人以為他離職。
+        `dp.users.account_status` 因此有兩支判定函式（`is_account_usable` 看鎖定、
+        `is_account_disabled` 不看），本條釘住 ET 用的是後者——少了它，日後有人覺得
+        「兩支好像一樣」而合併時不會有任何測試變紅。
+        """
+        owner = await _user(db, "t_del05", name="被鎖的人")
+        await _course(db, owner=owner, name="鎖定測試課")
+        viewer = await _user(db, "t_del05b")
+        await db.execute(
+            update(DpUser).where(DpUser.user_id == owner).values(locked_until=utcnow() + timedelta(minutes=15))
+        )
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        card = next(c for c in r.json()["data"] if c["course_name"] == "鎖定測試課")
+        assert card["owner_name"] == "被鎖的人"
+        assert card["owner_is_disabled"] is False, "鎖定不是停用"
 
     async def test_查無此人與已停用是兩件事(self, client, db) -> None:
         """`owner_name` 為 `None` 代表 `DP_USER` 根本沒有這一列——資料不一致。
@@ -548,4 +575,4 @@ class TestDeletedOwnerDisplay:
 
         card = next(c for c in r.json()["data"] if c["course_name"] == "孤兒課程")
         assert card["owner_name"] is None
-        assert card["owner_is_deleted"] is False, "查無此人不是『已停用』"
+        assert card["owner_is_disabled"] is False, "查無此人不是『已停用』"

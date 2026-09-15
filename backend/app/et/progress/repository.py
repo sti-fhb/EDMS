@@ -362,6 +362,15 @@ class EtProgressRepository:
         其妙跳掉」，且不會有任何錯誤。
 
         查無選課列時**靜默返回**：擁有者預覽沒有選課列，比照 `set_last_item()` 的處理。
+
+        ## ⚠️ 本支繞過 `EtProgressService._guard_write`（課程視同關閉時一律 409）
+
+        呼叫端是 `attempt` / `survey_fill` 的 service，直接進 repository。這是**刻意**的：
+        `spec_us6` 場景 27 允許「關閉當下已在作答者完成並計分」，那條窄縫裡的提交本來就
+        該記為一次活動；擋掉會讓活動時間與實際發生的事對不上。`_mark_item_completed`
+        對同一個繞道有更完整的說明。
+
+        但這件事不會自己顯現——日後若把關閉守門移到這一層，請先確認場景 27 仍成立。
         """
         row = await db.scalar(
             select(EtEnrollment).where(

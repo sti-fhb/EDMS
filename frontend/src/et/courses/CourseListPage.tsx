@@ -121,8 +121,8 @@ export function EtCourseListPage() {
   const ownerOptions = useMemo(() => {
     const seen = new Map<string, string>()
     for (const c of ownerSource?.data ?? []) {
-      // 🔴 不可 fallback 到 `owner_id`（#330）：帳號 ID 比姓名更能唯一指認一個人，
-      // 而且是可拿去嘗試登入的字串。停用者由 `ownerLabel` 標成「姓名（已停用）」。
+      // 不 fallback 到 `owner_id`（#330）：它是隨機代理鍵，顯示出來只是一串看不懂的字。
+      // 三個畫面共用 `ownerLabel`，停用者標成「姓名（已停用帳號）」。
       if (!seen.has(c.owner_id)) seen.set(c.owner_id, ownerLabel(c))
     }
     return [...seen.entries()]

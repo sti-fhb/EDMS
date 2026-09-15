@@ -17,7 +17,7 @@ function makeCourse(overrides: Partial<CourseCardData> = {}): CourseCardData {
     open_end_at: "2026-07-31T17:30:00",
     owner_id: "t01",
     owner_name: "陳大華",
-    owner_is_deleted: false,
+    owner_is_disabled: false,
     tags: [{ tag_id: 1, tag_name: "護理師", is_active: true }],
     chapter_count: 5,
     student_count: 28,
@@ -121,17 +121,17 @@ describe("ET01 課程卡片", () => {
     expect(screen.queryByText("護理師")).not.toBeInTheDocument()
   })
 
-  it("停用的建立者顯示「姓名（已停用）」，不是破折號也不是帳號 ID", () => {
+  it("停用的建立者顯示「姓名（已停用帳號）」，不是破折號也不是帳號 ID", () => {
     // #330：停用不等於匿名。擁有者停用代表沒有人能編輯這門課、需要交接，
     // 教師看到姓名才查得下去。
     renderWithProviders(
       <CourseCard
-        course={makeCourse({ is_owner: false, owner_name: "王大明", owner_is_deleted: true })}
+        course={makeCourse({ is_owner: false, owner_name: "王大明", owner_is_disabled: true })}
         onOpen={vi.fn()}
       />,
     )
 
-    expect(screen.getByText(/王大明（已停用）/)).toBeInTheDocument()
+    expect(screen.getByText(/王大明（已停用帳號）/)).toBeInTheDocument()
     expect(screen.queryByText("—")).not.toBeInTheDocument()
   })
 
@@ -140,7 +140,7 @@ describe("ET01 課程卡片", () => {
     // 會讓真正的資料問題被當成正常狀態。
     renderWithProviders(
       <CourseCard
-        course={makeCourse({ is_owner: false, owner_name: null, owner_is_deleted: false })}
+        course={makeCourse({ is_owner: false, owner_name: null, owner_is_disabled: false })}
         onOpen={vi.fn()}
       />,
     )
