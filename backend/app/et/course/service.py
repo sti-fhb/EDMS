@@ -34,6 +34,7 @@ from app.et.course.rules import (
     ensure_item_reorder_complete,
     ensure_owner,
     ensure_reorder_complete,
+    ensure_schedule_not_cleared,
     ensure_tag_change_allowed,
     is_effectively_closed,
     resequence,
@@ -271,6 +272,9 @@ class EtCourseService:
         current = await self._tags.list_tag_ids(db, course_id)
         desired = set(req.tag_ids)
         ensure_tag_change_allowed(course.status, current=current, desired=desired)
+        # #301：擋「清空訖止」——全量覆寫表單少送一個欄位就會讓課程永久不再視同關閉。
+        # 放在復活檢核之前：清空是要直接擋下的動作，不是「檢核通過就放行」的延期。
+        ensure_schedule_not_cleared(course.status, current_end_at=course.open_end_at, desired_end_at=req.open_end_at)
         await self._ensure_tags_selectable(db, desired - current)
         # #301：期間延長若會讓一門已到期（視同關閉）的課程復活，重跑發布六項檢核——否則
         # 「再開課要檢核」形同虛設，繞過它只要改一個日期。只在復活時觸發，見該方法 docstring。
