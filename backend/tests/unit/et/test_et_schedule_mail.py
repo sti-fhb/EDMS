@@ -15,7 +15,6 @@ from decimal import Decimal
 import pytest
 
 from app.et.notify.schedule_mail import (
-    MAX_NOT_STARTED_NAMES,
     NO_BASELINE,
     URGENT_REMIND_PARAM_KEYS,
     WEEKLY_REMIND_PARAM_KEYS,
@@ -26,7 +25,6 @@ from app.et.notify.schedule_mail import (
     build_weekly_remind_params,
     build_weekly_report_params,
     format_delta,
-    format_not_started,
 )
 from app.et.stats.rules import CourseStat
 
@@ -61,7 +59,7 @@ class TestParamKeys:
         """宣告與實作分岔時，宣告會通過測試而實際寄出去的是空信。"""
         report = build_weekly_report_params(
             recipient_name="王老師",
-            lines=[CourseReportLine("課程A", _stat(), Decimal("8.00"), 14, ["甲"])],
+            lines=[CourseReportLine("課程A", _stat(), Decimal("8.00"), 14)],
             csv_url="https://example.test/et/reports/weekly",
         )
         assert set(report) == WEEKLY_REPORT_PARAM_KEYS
@@ -80,7 +78,7 @@ class TestParamKeys:
         """`_SafeFormatter` 吃 `str`；傳進 `Decimal` / `datetime` 會在渲染時才爆。"""
         params = build_weekly_report_params(
             recipient_name="王老師",
-            lines=[CourseReportLine("課程A", _stat(), None, 3, [])],
+            lines=[CourseReportLine("課程A", _stat(), None, 3)],
             csv_url="https://example.test/x",
         )
         assert all(isinstance(v, str) for v in params.values())
@@ -102,29 +100,13 @@ class TestFormatDelta:
         assert format_delta(None) == NO_BASELINE
 
 
-class TestFormatNotStarted:
-    def test_全員已開始顯示無(self) -> None:
-        assert format_not_started([], 0) == "（無）"
-
-    def test_未超過上限全列(self) -> None:
-        assert format_not_started(["甲", "乙"], 2) == "甲、乙"
-
-    def test_超過上限截斷並附總數(self) -> None:
-        """掛「全體」標籤的課程開課第一週幾乎全是 0%，不設限會讓單封信塞進數百個姓名。"""
-        names = [f"學員{i}" for i in range(50)]
-        out = format_not_started(names, 50)
-        assert out.count("、") == MAX_NOT_STARTED_NAMES - 1
-        assert "…等共 50 人" in out
-        assert "學員0" in out and "學員49" not in out
-
-
 class TestReportSummary:
     def test_逐課一段且含六項指標(self) -> None:
         params = build_weekly_report_params(
             recipient_name="王老師",
             lines=[
-                CourseReportLine("課程A", _stat(), Decimal("8.00"), 14, ["甲", "乙", "丙"]),
-                CourseReportLine("課程B", _stat(cnt_not_started=0), None, 3, []),
+                CourseReportLine("課程A", _stat(), Decimal("8.00"), 14),
+                CourseReportLine("課程B", _stat(cnt_not_started=0), None, 3),
             ],
             csv_url="https://example.test/x",
         )
@@ -135,8 +117,6 @@ class TestReportSummary:
         assert "↑ 8.00" in summary and NO_BASELINE in summary
         assert "未開始 3 / 進行中 12 / 已完課 20（共 35 人）" in summary
         assert "完課率 57.14%｜距訖止 14 天" in summary
-        assert "未開始名單：甲、乙、丙" in summary
-        assert "未開始名單：（無）" in summary
 
     def test_無課程時摘要為空字串(self) -> None:
         """呼叫端不該寄出這封（空清單不寄信），但組法本身不得拋例外。"""

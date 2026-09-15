@@ -164,7 +164,8 @@ class TestWeeklyReportRecipients:
         await EtWeeklyReportService().send_weekly(db)
 
         body = next(m.body for m in await _mails(db, "WEEKLY_REPORT") if m.recipient == "wr_m1@edms.local")
-        assert "週報課程own" in body and "測試wr_s_mine" in body
+        assert "週報課程own" in body
+        assert "測試wr_s_mine" not in body, "信件內文不得含任何學員姓名（含自己課程的）"
         assert "週報課程oth" not in body, "教師的週報不得含他人課程"
         assert "測試wr_s_theirs" not in body, "教師的週報不得含他人課程的學員姓名"
 
@@ -316,4 +317,5 @@ class TestReportContent:
         assert "/et/reports/weekly" in body
         # 首次統計無前次快照 → 與上週比較顯示「—」（AC 5）
         assert "與上週 —" in body
-        assert "未開始名單：測試rc_s1" in body
+        # 信件內文**不得**出現任何學員姓名——它會隨轉寄離開所有存取控制
+        assert "測試rc_s1" not in body

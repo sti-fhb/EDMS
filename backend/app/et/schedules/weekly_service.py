@@ -106,8 +106,9 @@ class EtWeeklyReportService:
             )
             stat = summarize(counts)
             previous = await self._stats.previous_avg_progress(db, course_id=course.course_id, before=now.date())
+            # 未開始者的 id 只用於「寄未看提醒給誰」，**不進週報內文**——姓名不得出現在
+            # 可轉寄的信件裡（見 `schedule_mail.CourseReportLine`）
             not_started = [uid for uid, (done, _total) in counts.items() if done == 0]
-            names = await self._tracking.user_names(db, set(not_started))
             facts.append(
                 _CourseFacts(
                     course=course,
@@ -116,8 +117,6 @@ class EtWeeklyReportService:
                         stat=stat,
                         delta=progress_delta(stat.avg_progress_pct, previous),
                         days_left=_days_left(course.open_end_at, now),
-                        # 名單順序跟著 `not_started` 的順序，與 CSV 一致；查無姓名者顯示 id
-                        not_started_names=[names.get(uid, uid) for uid in not_started],
                     ),
                     not_started_user_ids=not_started,
                 )

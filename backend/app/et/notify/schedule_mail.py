@@ -38,25 +38,27 @@ WEEKLY_REPORT_PARAM_KEYS: Final[frozenset[str]] = frozenset({"RECIPIENT_NAME", "
 WEEKLY_REMIND_PARAM_KEYS: Final[frozenset[str]] = frozenset({"USER_NAME", "COURSE_LIST"})
 URGENT_REMIND_PARAM_KEYS: Final[frozenset[str]] = frozenset({"USER_NAME", "COURSE_NAME", "OPEN_END_AT", "COURSE_URL"})
 
-#: 週報之未開始名單最多列幾人（SA Q2 裁示 B）。
-#:
-#: 掛「全體」標籤的課程開課第一週幾乎全部是 0%，不設限會讓單封信塞進數百個姓名，
-#: 管理者版再乘上課程數。完整名單一律看 CSV。
-MAX_NOT_STARTED_NAMES: Final = 10
-
 #: 無前次快照時「與上週比較」之呈現（AC 5）。**不可用 `0`**——那會讓「沒有比較基準」
 #: 與「與上週持平」變成同一件事。
 NO_BASELINE: Final = "—"
 
 
 class CourseReportLine(NamedTuple):
-    """週報中的一門課程。"""
+    """週報中的一門課程。
+
+    ⚠️ **刻意不含任何學員姓名**（2026-09-15 裁示，取代原 SA Q2 裁示 B 的「列前 10 人」）。
+
+    原裁示要回答的是「名單太長怎麼辦」，而 Security Review 指出的是更前面一層：**信件
+    內文會隨轉寄離開所有存取控制**，10 個姓名和 100 個沒有本質差別。誰未開始由 CSV 下載
+    端點回答——那支有登入、有角色閘、有擁有權判定，還有 `ET-REPORT` 稽核。
+
+    摘要仍給得出「有幾人未開始」（`stat.cnt_not_started`），催辦所需的訊號不受影響。
+    """
 
     course_name: str
     stat: CourseStat
     delta: Decimal | None
     days_left: int
-    not_started_names: Sequence[str]
 
 
 def format_delta(delta: Decimal | None) -> str:
@@ -70,22 +72,15 @@ def format_delta(delta: Decimal | None) -> str:
     return "持平"
 
 
-def format_not_started(names: Sequence[str], total: int) -> str:
-    """未開始名單；超過 `MAX_NOT_STARTED_NAMES` 者截斷並附總數（SA Q2 裁示 B）。"""
-    if total == 0:
-        return "（無）"
-    shown = list(names[:MAX_NOT_STARTED_NAMES])
-    listed = "、".join(shown)
-    if total > len(shown):
-        return f"{listed} …等共 {total} 人（完整名單請由 CSV 下載）"
-    return listed
-
-
 def build_report_summary(lines: Sequence[CourseReportLine]) -> str:
     """組 `{REPORT_SUMMARY}`——逐課一段的多行純文字。
 
     平台渲染**內文時保留 LF**（僅主旨剝換行），故可安全使用換行排版
     （同 `build_digest_params` 的 `{COURSE_LIST}`）。
+
+    ⚠️ **不得在此加入任何學員姓名或 Email**（見 `CourseReportLine` 的說明）：這段字串
+    會進入信件內文，而信件可被轉寄到任何地方，不受登入、角色或擁有權的約束。逐學員的
+    資料一律由 `{REPORT_CSV_URL}` 那支端點提供。
     """
     blocks = []
     for line in lines:
@@ -95,8 +90,7 @@ def build_report_summary(lines: Sequence[CourseReportLine]) -> str:
             f"  平均進度 {stat.avg_progress_pct}%（與上週 {format_delta(line.delta)}）\n"
             f"  未開始 {stat.cnt_not_started} / 進行中 {stat.cnt_in_progress} / 已完課 {stat.cnt_completed}"
             f"（共 {stat.cnt_enrolled} 人）\n"
-            f"  完課率 {stat.completion_rate}%｜距訖止 {line.days_left} 天\n"
-            f"  未開始名單：{format_not_started(line.not_started_names, stat.cnt_not_started)}"
+            f"  完課率 {stat.completion_rate}%｜距訖止 {line.days_left} 天"
         )
     return "\n\n".join(blocks)
 

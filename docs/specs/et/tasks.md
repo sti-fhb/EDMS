@@ -312,7 +312,7 @@
 ### 排程統計與提醒（US14）
 
 - [ ] T145 [US14] 實作 SCHET001 統計快照 Service（job handler 於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄）：統計開放中課程（平均進度%、三態人數、完課率、已加入數）寫入 ET_WEEKLY_STAT（append-only）
-- [ ] T146 [US14] 實作週報產生與寄送：教師（自己課程）/ 管理者（全域）各一封；內文摘要（含與上週比較、距訖止天數、未開始名單）+ 逐學員明細 CSV **下載連結**（變數 `{{REPORT_CSV_URL}}`，非附件——平台發信服務不支援附件，見 T164）；平台範本 WEEKLY_REPORT（`DP_NOTIFY_TEMPLATE` `MODULE=ET`），經平台發信服務寄送
+- [ ] T146 [US14] 實作週報產生與寄送：教師（自己課程）/ 管理者（全域）各一封；內文摘要（含與上週比較、距訖止天數；**不列學員姓名**）+ 逐學員明細 CSV **下載連結**（變數 `{{REPORT_CSV_URL}}`，非附件——平台發信服務不支援附件，見 T164）；平台範本 WEEKLY_REPORT（`DP_NOTIFY_TEMPLATE` `MODULE=ET`），經平台發信服務寄送
 - [ ] T164 [US14] 實作**週報逐學員明細 CSV 下載端點**（2026-08-19 新增，取代原郵件附件設計）：依課程產生逐學員 CSV（姓名、Email〔唯讀 join `DP_USER`〕、進度%、完課狀態、最後活動時間）；**需登入**（平台 DP JWT），未登入導向登入頁；授權由 ET 判定——教師僅限自己為 `ET_COURSE.OWNER_ID` 之課程、管理者全域，越權回無權限；內容於請求當下即時查詢（非寄信時凍結），課程關閉後仍可下載；端點 URL 由 T146 以 `{{REPORT_CSV_URL}}` 帶入週報內文
 - [ ] T147 [US14] 實作每週未看提醒：對進度 0% 學員一人一信彙整（平台範本 WEEKLY_REMIND，`MODULE=ET`）；>0% / 已完課 / 已移除不寄
 - [ ] T148 [US14] 實作截止前加急提醒（SCHET002 job handler 內）：訖止前 N 天（`DP_PARAM.ET_URGENT_REMIND_DAYS`）對所有未完課學員寄信（平台範本 URGENT_REMIND，`MODULE=ET`）；URGENT_REMIND_SENT 防重複；再開課歸零
