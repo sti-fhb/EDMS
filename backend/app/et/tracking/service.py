@@ -109,6 +109,7 @@ class EtTrackingService:
         avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
         last_submits = await self._repo.last_submitted_at_by_student(db, course_id=course_id, user_ids=user_ids)
         names = await self._repo.user_names(db, set(user_ids))
+        in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
 
         rows = [
             _to_student_row(
@@ -117,6 +118,7 @@ class EtTrackingService:
                 avg_score=avg_scores.get(e.user_id),
                 last_submitted_at=last_submits.get(e.user_id),
                 user_name=names.get(e.user_id),
+                has_in_progress_attempt=e.user_id in in_progress,
             )
             for e in enrollments
         ]
@@ -492,6 +494,7 @@ class EtTrackingService:
         avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
         last_submits = await self._repo.last_submitted_at_by_student(db, course_id=course_id, user_ids=user_ids)
         names = await self._repo.user_names(db, set(user_ids))
+        in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
         return [
             _to_student_row(
                 e,
@@ -499,6 +502,7 @@ class EtTrackingService:
                 avg_score=avg_scores.get(e.user_id),
                 last_submitted_at=last_submits.get(e.user_id),
                 user_name=names.get(e.user_id),
+                has_in_progress_attempt=e.user_id in in_progress,
             )
             for e in enrollments
         ]
@@ -511,6 +515,7 @@ def _to_student_row(
     avg_score: float | None,
     last_submitted_at: datetime | None,
     user_name: str | None,
+    has_in_progress_attempt: bool,
 ) -> StudentRow:
     """組一列學員。`counts` 為 `(完成項目數, 總項目數)`。"""
     done, total = counts
@@ -525,6 +530,7 @@ def _to_student_row(
         avg_score=_round2(avg_score),
         # `LAST_ACTIVITY_AT` 不含測驗提交（只在檢視項目時更新），取兩者較晚者
         last_activity_at=_latest(enrollment.last_activity_at, last_submitted_at),
+        has_in_progress_attempt=has_in_progress_attempt,
     )
 
 

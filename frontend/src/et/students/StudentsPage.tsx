@@ -32,6 +32,21 @@ type Pending =
   | { kind: "remove"; student: StudentRow }
 
 /**
+ * 移除確認框的文案——**作答中與否是兩則不同的訊息**。
+ *
+ * 🔴 `ET-MSG-ET03-003`（警告版）只在該學員手上有未提交的 attempt 時出現。原先兩種
+ * 情況合用一句「該學員**若**正在作答……」，把警告稀釋成每次都出現的免責聲明——
+ * 而每次都出現的警告等於沒有警告，真正該停下來看的那次也會被一起略過。
+ */
+function removeMessage(pending: Pending | null): string {
+  if (pending?.kind !== "remove") return ""
+  const name = pending.student.user_name ?? "該學員"
+  return pending.student.has_in_progress_attempt
+    ? `${name}作答中，移除後其當前作答將保留並計入歷史。確定移除？`
+    : `確定移除 ${name}？學習歷史完整保留。`
+}
+
+/**
  * ET03 學員學習狀況追蹤（US9 / #322）。
  *
  * ## 「已加入」頁籤 = 一個課程的完整資料視圖，分三區塊
@@ -102,11 +117,14 @@ export function EtStudentsPage() {
     }
   }
 
-  /** 兩支 CSV 共用——匯出走 axios blob，失敗同樣要看得見。 */
+  /** 兩支 CSV 共用——匯出走 axios blob，成功與失敗都要看得見。 */
   const exportCsv = async (kind: "students" | "survey") => {
     if (courseId === "") return
     try {
       await (kind === "students" ? downloadStudentsCsv(courseId) : downloadSurveyCsv(courseId))
+      // ET-MSG-ET03-007。瀏覽器下載是**無聲**的：檔案落到下載資料夾、頁面完全沒變化。
+      // 少了這則，教師按下匯出後唯一的回饋是「什麼都沒發生」，於是再按一次。
+      notify.message.success("CSV 已匯出")
     } catch (err) {
       notify.message.error(toApiError(err).errorMessage)
     }
@@ -172,13 +190,18 @@ export function EtStudentsPage() {
       <Dialog open={pending !== null} onClose={() => !busy && setPending(null)}>
         <DialogTitle>{pending?.kind === "reset" ? "重置重考次數" : "移除學員"}</DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            {pending?.kind === "reset"
-              ? /* ET-MSG-ET03-001 */
-                `確定重置 ${pending.userName ?? "該學員"} 於「${pending.quiz.quiz_name}」之重考次數？歷次作答明細仍會完整保留。`
-              : /* ET-MSG-ET03-003：作答中的警告文案本身就是規格，不可簡化 */
-                `確定移除 ${pending?.kind === "remove" ? (pending.student.user_name ?? "該學員") : ""}？該學員若正在作答，其當前作答將保留並計入歷史；學習歷史完整保留。`}
-          </DialogContentText>
+          {pending?.kind === "remove" && pending.student.has_in_progress_attempt ? (
+            /* ET-MSG-ET03-003 為「警告」型訊息——用 Alert 而非純文字，
+               否則它與一般確認長得一模一樣，等於沒有分級。 */
+            <Alert severity="warning">{removeMessage(pending)}</Alert>
+          ) : (
+            <DialogContentText>
+              {pending?.kind === "reset"
+                ? /* ET-MSG-ET03-001 */
+                  `確定重置 ${pending.userName ?? "該學員"} 於「${pending.quiz.quiz_name}」之重考次數？歷次作答明細仍會完整保留。`
+                : removeMessage(pending)}
+            </DialogContentText>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPending(null)} disabled={busy}>

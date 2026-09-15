@@ -28,6 +28,14 @@ export interface StudentRow {
   avg_score: string | null
   /** 最近一次學習動作**或測驗提交**（後端已取兩者較晚者）。 */
   last_activity_at: string | null
+  /**
+   * 是否有**作答中（未提交）**的 attempt——決定移除確認框是否用警告版文案
+   * （`ET-MSG-ET03-003`）。
+   *
+   * ⚠️ 與上面的 `completion_status === "IN_PROGRESS"` **無關**：那是課程學習進行中
+   * （由完成項目數導出），這是「手上有一份還沒交的考卷」。兩者同名不同義。
+   */
+  has_in_progress_attempt: boolean
 }
 
 /** 區塊 2：某學員於某測驗的一次作答。 */

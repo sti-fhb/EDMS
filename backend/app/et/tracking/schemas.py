@@ -52,6 +52,12 @@ class StudentRow(BaseModel):
     avg_score: Decimal | None
     #: 最近一次學習動作**或測驗提交**時間（取兩者較晚者，見 service）。
     last_activity_at: datetime | None
+    #: 是否有**作答中（未提交）**的 attempt——供前端決定移除時是否顯示
+    #: `ET-MSG-ET03-003` 的警告版文案（AC 7）。
+    #:
+    #: ⚠️ 與上方 `completion_status` 的 `IN_PROGRESS` **無關**：那是課程學習進行中
+    #: （由完成項目數導出），這是「手上有一份還沒交的考卷」。
+    has_in_progress_attempt: bool
 
 
 class TeacherAttemptRow(BaseModel):
