@@ -16,7 +16,7 @@ import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
-import { studentsApi, studentsCsvPaths } from "./studentsService"
+import { studentsApi } from "./studentsService"
 import type { CompletionStatus, StudentRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
@@ -56,11 +56,13 @@ export function StudentListBlock({
   courseId,
   readOnly,
   onRemove,
+  onExport,
 }: {
   courseId: number
   /** 課程視同關閉時為 `true`——**只停寫入**，清單與匯出照常（AC 10）。 */
   readOnly: boolean
   onRemove: (student: StudentRow) => void
+  onExport: () => void
 }) {
   const [page, setPage] = useState(1)
   const params = { page, limit: PAGE_SIZE }
@@ -75,14 +77,9 @@ export function StudentListBlock({
     <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
         <BlockHeading index={1} title="已加入學員" note="本課程已加入之學員清單、完課狀態與進度" />
-        {/* 匯出是**讀**，課程關閉時照常可用（AC 10 明訂含匯出 CSV）*/}
-        <Button
-          size="small"
-          startIcon={<DownloadIcon />}
-          href={studentsCsvPaths.students(courseId)}
-          target="_blank"
-          rel="noopener"
-        >
+        {/* 匯出是**讀**，課程關閉時照常可用（AC 10 明訂含匯出 CSV）。
+            走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header */}
+        <Button size="small" startIcon={<DownloadIcon />} onClick={() => onExport()}>
           匯出 CSV
         </Button>
       </Stack>

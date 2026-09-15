@@ -225,7 +225,30 @@ describe("ET03 學員學習狀況追蹤", () => {
 
     const rows = await screen.findAllByText("王小明")
     expect(rows.length).toBeGreaterThan(0)
-    const exports = screen.getAllByRole("link", { name: /匯出 CSV/ })
+    const exports = screen.getAllByRole("button", { name: /匯出 CSV/ })
     expect(exports[0]).toBeEnabled()
+  })
+
+  it("匯出是按鈕而非連結——連結帶不出 Bearer token", async () => {
+    // 🔴 本專案的 access token 是 memory-only Bearer，只在 axios 的 request interceptor
+    // 注入；後端用 HTTPBearer、全站沒有 cookie 認證。`<a href="/api/...">` 是瀏覽器原生
+    // 導覽，不經 axios、不帶 header——那樣的匯出會直接 401。
+    //
+    // ⚠️ 這條斷言的是 **role**，因為那是 href 與 onClick 唯一在 DOM 上分得出來的差別。
+    // 原本的測試寫 `getAllByRole("link")` 且只檢查 enabled，所以它對 401 完全無感——
+    // 一個永遠失敗的連結，在畫面上與正常的一模一樣。
+    //
+    // 修法照 `dm/kpi/kpiService.ts` 的 `downloadKpiCsv`（DM 三處匯出皆同一寫法）。
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await screen.findAllByText("王小明")
+
+    const exports = screen.getAllByRole("button", { name: /匯出 CSV/ })
+    expect(exports.length).toBeGreaterThanOrEqual(2) // 區塊 1 與區塊 3 各一
+    for (const button of exports) {
+      expect(button).not.toHaveAttribute("href")
+    }
+    expect(screen.queryAllByRole("link", { name: /匯出 CSV/ })).toHaveLength(0)
   })
 })

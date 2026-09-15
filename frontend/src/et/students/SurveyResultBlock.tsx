@@ -16,7 +16,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { BlockHeading } from "./BlockHeading"
-import { studentsApi, studentsCsvPaths } from "./studentsService"
+import { studentsApi } from "./studentsService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 
 type View = "stats" | "details"
@@ -36,7 +36,7 @@ type View = "stats" | "details"
  *
  * 🔴 **具名資料**——明細列出「誰說了什麼」，是本頁個資密度最高的一處。
  */
-export function SurveyResultBlock({ courseId }: { courseId: number }) {
+export function SurveyResultBlock({ courseId, onExport }: { courseId: number; onExport: () => void }) {
   const [view, setView] = useState<View>("stats")
   const { data, isPending, isError } = useQuery({
     queryKey: QUERY_KEYS.etStudents.surveyResult(courseId),
@@ -66,13 +66,8 @@ export function SurveyResultBlock({ courseId }: { courseId: number }) {
             <ToggleButton value="stats">統計</ToggleButton>
             <ToggleButton value="details">明細</ToggleButton>
           </ToggleButtonGroup>
-          <Button
-            size="small"
-            startIcon={<DownloadIcon />}
-            href={studentsCsvPaths.survey(courseId)}
-            target="_blank"
-            rel="noopener"
-          >
+          {/* 走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header */}
+          <Button size="small" startIcon={<DownloadIcon />} onClick={() => onExport()}>
             匯出 CSV
           </Button>
         </Stack>

@@ -15,6 +15,7 @@ from sqlalchemy import func, select, update
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
 from app.et.constants import (
     ATTEMPT_IN_PROGRESS,
@@ -1160,7 +1161,7 @@ class TestCsvExport:
         r = await client.get(f"{_URL}/{course_id}/survey-result.csv", headers=_bearer(teacher))
 
         assert r.status_code == 404
-        assert r.json()["error_code"] == "ET_TRACK_001"
+        assert r.json()["error_code"] == "ET_TRACK_005"
 
     async def test_他人課程之csv回四零三(self, client, db) -> None:
         """匯出與畫面同一道授權——CSV 是最容易被當成「只是下載」而漏掉把關的入口。"""
@@ -1190,3 +1191,178 @@ class TestCsvExport:
 
         assert r.status_code == 200, r.text
         assert "結訓學員" in r.content.decode("utf-8-sig")
+
+
+class TestWriteEndpointAuthorization:
+    """兩支**寫入**端點與 `attempt-overview` 的授權（Security Review M-2 補）。
+
+    原本只測了四支唯讀端點的「他人課程 403」，獨獨漏掉寫入端點——而那兩支的後果比
+    唯讀嚴重得多（改別人學員的配額、把別人的學員移除）。
+    """
+
+    async def test_他人課程之重置回四零三(self, client, db) -> None:
+        owner = await _user(db, "t_tr50")
+        outsider = await _user(db, "t_tr51")
+        course_id = await _course(db, owner=owner)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=0)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr50", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.post(
+            f"{_URL}/{course_id}/students/{student}/quizzes/{quiz_id}/retry-reset", headers=_bearer(outsider)
+        )
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_他人課程之移除回四零三(self, client, db) -> None:
+        owner = await _user(db, "t_tr52")
+        outsider = await _user(db, "t_tr53")
+        course_id = await _course(db, owner=owner)
+        student = await _user(db, "s_tr52", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_他人課程之作答總覽回四零三(self, client, db) -> None:
+        owner = await _user(db, "t_tr54")
+        outsider = await _user(db, "t_tr55")
+        course_id = await _course(db, owner=owner)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_學員角色不可重置(self, client, db) -> None:
+        teacher = await _user(db, "t_tr56")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, max_retry=0)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr56", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.post(
+            f"{_URL}/{course_id}/students/{student}/quizzes/{quiz_id}/retry-reset", headers=_bearer(student)
+        )
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"
+
+    async def test_學員角色不可移除(self, client, db) -> None:
+        teacher = await _user(db, "t_tr57")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr57", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(student))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"
+
+    async def test_不可拿別的課程的測驗來重置(self, client, db) -> None:
+        """🔴 這是整份 PR 裡**唯一一道 `ensure_owner` 看不到的防線**。
+
+        教師拿自己課程的 `course_id` 配上別人課程的 `quiz_id`：`ensure_owner` 只檢查
+        課程，完全不會察覺 `quiz_id` 來自別處。擋下來的是 `get_quiz_in_course`。
+
+        沒有這條測試釘住的話，日後有人為了省一次查詢把它拿掉，CI 會全綠。
+        """
+        mine = await _user(db, "t_tr58")
+        theirs = await _user(db, "t_tr59")
+        my_course = await _course(db, owner=mine, name="我的課")
+        their_course = await _course(db, owner=theirs, name="他的課")
+        their_chapter = await _chapter(db, their_course)
+        their_quiz = await _quiz(db, name="他的小考", max_retry=0)
+        await _item(db, their_chapter, title="他的小考", order=1, quiz_id=their_quiz)
+        student = await _user(db, "s_tr58", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, my_course)
+        await _enroll(db, student, their_course)
+        await _attempt(
+            db,
+            user_id=student,
+            course_id=their_course,
+            quiz_id=their_quiz,
+            no=1,
+            score=Decimal("50"),
+            is_pass=False,
+        )
+        await db.commit()
+
+        r = await client.post(
+            f"{_URL}/{my_course}/students/{student}/quizzes/{their_quiz}/retry-reset", headers=_bearer(mine)
+        )
+
+        assert r.status_code == 404, "測驗不屬於該課程，不可跨課程重置"
+        assert r.json()["error_code"] == "ET_TRACK_004"
+
+
+class TestExportAudit:
+    """具名個資匯出留痕（SA 裁示 2026-09-14 / Security Review M-3）。"""
+
+    async def test_匯出學員清單寫稽核(self, client, db) -> None:
+        teacher = await _user(db, "t_tr60")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr60", roles=(ROLE_STUDENT,), name="王小明")
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        logged = await db.scalar(
+            select(func.count(DpAuditLog.log_id)).where(
+                DpAuditLog.func_name == "ET-EXPORT",
+                DpAuditLog.created_user == teacher,
+                DpAuditLog.target_id == str(course_id),
+            )
+        )
+        assert logged == 1, "匯出是把全班具名資料帶離系統，必須留痕"
+
+    async def test_稽核不寫入姓名或答案內容(self, client, db) -> None:
+        """稽核記「誰在何時帶走了多少」，不記內容。
+
+        把姓名或問答文字寫進 `DP_AUDIT_LOG` 等於把個資複製到第二個地方——稽核表的保存
+        期限與存取控制都與業務表不同。
+        """
+        teacher = await _user(db, "t_tr61")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr61", roles=(ROLE_STUDENT,), name="極機密姓名")
+        await _enroll(db, student, course_id)
+        await db.commit()
+        await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        description = await db.scalar(
+            select(DpAuditLog.description).where(
+                DpAuditLog.func_name == "ET-EXPORT", DpAuditLog.created_user == teacher
+            )
+        )
+        assert "極機密姓名" not in (description or "")
+        assert "1 筆" in (description or ""), "應記筆數"
+
+    async def test_無問卷時不留無意義的匯出紀錄(self, client, db) -> None:
+        """404 的請求沒有帶走任何東西，不該產生稽核列。"""
+        teacher = await _user(db, "t_tr62")
+        course_id = await _course(db, owner=teacher)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 404
+        logged = await db.scalar(
+            select(func.count(DpAuditLog.log_id)).where(
+                DpAuditLog.func_name == "ET-EXPORT", DpAuditLog.created_user == teacher
+            )
+        )
+        assert logged == 0

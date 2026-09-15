@@ -19,10 +19,11 @@ import { AttemptOverviewBlock } from "./AttemptOverviewBlock"
 import { StudentListBlock } from "./StudentListBlock"
 import { SurveyResultBlock } from "./SurveyResultBlock"
 import { TeacherAttemptDialog } from "./TeacherAttemptDialog"
-import { studentsApi } from "./studentsService"
+import { downloadStudentsCsv, downloadSurveyCsv, studentsApi } from "./studentsService"
 import type { StudentRow, TeacherQuizRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
+import { toApiError } from "../../services/http"
 import { coursesApi } from "../courses/coursesService"
 
 /** 待確認的操作——兩者都需要二次確認，且文案本身就是規格（ET-MSG-ET03-001 / -003）。 */
@@ -69,8 +70,10 @@ export function EtStudentsPage() {
   // 由後端算好的 `is_closed`——**不自己判 `status`**：期間已過時 status 仍是 PUBLISHED
   const readOnly = selected?.is_closed ?? false
 
+  /** 寫入成功後一次失效該課程的三個區塊。用 `QUERY_KEYS` 的前綴而非裸字面值——
+      後者不會跟著 key 結構改動，會安靜地算錯失效範圍。 */
   const invalidateAll = (id: number) => {
-    queryClient.invalidateQueries({ queryKey: ["et", "tracking", id] })
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.etStudents.all(id) })
   }
 
   const confirm = async () => {
@@ -86,8 +89,26 @@ export function EtStudentsPage() {
       }
       invalidateAll(courseId)
       setPending(null)
+    } catch (err) {
+      // 🔴 破壞性動作失敗**必須看得見**。少了這段，403 / 409（不符重置條件、課程已
+      // 關閉）/ 404（清單已過期）/ 429 全部靜默——教師看到的是「按了沒反應」，而
+      // 確認框還留在原地，他會再按一次。
+      //
+      // 刻意**不關閉確認框**：讓教師看著同一個對話框讀到失敗原因，比把它關掉再彈一則
+      // Snackbar 更容易把因果連起來。
+      notify.message.error(toApiError(err).errorMessage)
     } finally {
       setBusy(false)
+    }
+  }
+
+  /** 兩支 CSV 共用——匯出走 axios blob，失敗同樣要看得見。 */
+  const exportCsv = async (kind: "students" | "survey") => {
+    if (courseId === "") return
+    try {
+      await (kind === "students" ? downloadStudentsCsv(courseId) : downloadSurveyCsv(courseId))
+    } catch (err) {
+      notify.message.error(toApiError(err).errorMessage)
     }
   }
 
@@ -134,6 +155,7 @@ export function EtStudentsPage() {
             courseId={courseId}
             readOnly={readOnly}
             onRemove={(student) => setPending({ kind: "remove", student })}
+            onExport={() => void exportCsv("students")}
           />
           <AttemptOverviewBlock
             courseId={courseId}
@@ -141,7 +163,7 @@ export function EtStudentsPage() {
             onOpenDetail={setAttemptId}
             onReset={(userId, userName, quiz) => setPending({ kind: "reset", userId, userName, quiz })}
           />
-          <SurveyResultBlock courseId={courseId} />
+          <SurveyResultBlock courseId={courseId} onExport={() => void exportCsv("survey")} />
         </>
       )}
 

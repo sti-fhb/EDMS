@@ -234,18 +234,32 @@ class EtTrackingRepository:
         呼叫端視為 0。
 
         """
+        quiz_ids = (
+            select(EtItem.quiz_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtChapter.course_id == course_id,
+                EtItem.quiz_id.is_not(None),
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+            )
+        )
         rows = await db.execute(
             select(
                 EtQuizRetryReset.user_id,
                 EtQuizRetryReset.quiz_id,
                 func.max(EtQuizRetryReset.attempt_count_at_reset),
             )
-            # 本表自己就有 `COURSE_ID`，不必繞 `ET_ITEM` 反推課程。
+            # ⚠️ **以 `QUIZ_ID` 過濾，不以 `COURSE_ID`**——基準的口徑必須與
+            # `attempt/repository.reset_base()`（作答流程實際採用的那支）**逐字一致**。
+            # 本表雖有 `COURSE_ID`，但那支只認 `(USER_ID, QUIZ_ID)`；此處若多帶課程條件，
+            # 同一個測驗掛在兩門課時兩邊會算出不同的基準，表現為「按鈕可點、按下去 409」
+            # （或反之）。
             #
-            # ⚠️ **append-only**（`AuditLogBaseModel`，只有 `CREATED_*`），**沒有
-            # `DELETED` 欄位**——它是「已用次數」的計算基準，能被軟刪除就等於能讓學員的
-            # 配額憑空回復而查不到是誰做的。
-            .where(EtQuizRetryReset.course_id == course_id)
+            # **append-only**（`AuditLogBaseModel`，只有 `CREATED_*`），**沒有 `DELETED`
+            # 欄位**——它是已用次數的計算基準，能被軟刪除就等於能讓配額憑空回復而查不到
+            # 是誰做的。
+            .where(EtQuizRetryReset.quiz_id.in_(quiz_ids))
             .group_by(EtQuizRetryReset.user_id, EtQuizRetryReset.quiz_id)
         )
         return {(user_id, quiz_id): base for user_id, quiz_id, base in rows.all()}
@@ -264,7 +278,14 @@ class EtTrackingRepository:
         rows = await db.execute(
             select(EtQuizAttemptM, EtCourse)
             .join(EtCourse, EtCourse.course_id == EtQuizAttemptM.course_id)
-            .where(EtQuizAttemptM.attempt_id == attempt_id, EtQuizAttemptM.deleted == 0, EtCourse.deleted == 0)
+            .where(
+                EtQuizAttemptM.attempt_id == attempt_id,
+                # 只給已閱卷的——`IN_PROGRESS` 那筆還沒有成績，回出去的是學員正在寫的
+                # 答案而非考卷。學員端 `/result` 同一組白名單。
+                EtQuizAttemptM.status.in_(GRADED_STATUSES),
+                EtQuizAttemptM.deleted == 0,
+                EtCourse.deleted == 0,
+            )
         )
         return rows.first()
 

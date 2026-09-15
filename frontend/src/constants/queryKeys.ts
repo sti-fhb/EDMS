@@ -36,6 +36,8 @@ export const QUERY_KEYS = {
   },
   /** ET03 學員學習狀況追蹤（US9 / #322）——三個區塊各自的 key，切課程時一起失效。 */
   etStudents: {
+    /** 整個課程的追蹤資料前綴——切換課程或寫入後以此一次失效三個區塊。 */
+    all: (courseId: number) => ["et", "tracking", courseId] as const,
     list: (courseId: number, params: Record<string, unknown>) =>
       ["et", "tracking", courseId, "students", params] as const,
     attemptOverview: (courseId: number) => ["et", "tracking", courseId, "attempt-overview"] as const,

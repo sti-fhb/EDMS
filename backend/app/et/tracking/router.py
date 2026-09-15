@@ -128,7 +128,7 @@ async def attempt_detail(
 )
 async def reset_retry(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    user_id: Annotated[str, Path(max_length=20)],
+    user_id: Annotated[str, Path(max_length=20, pattern=r"^[A-Za-z0-9_.\-]+$")],
     quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -153,7 +153,7 @@ async def reset_retry(
 )
 async def remove_student(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    user_id: Annotated[str, Path(max_length=20)],
+    user_id: Annotated[str, Path(max_length=20, pattern=r"^[A-Za-z0-9_.\-]+$")],
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:

@@ -20,7 +20,7 @@ from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import utcnow
 from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
-from app.et.attempt.service import _in_snapshot_order, _to_result
+from app.et.attempt.service import in_snapshot_order, to_question_result
 from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
 from app.et.course.rules import ensure_owner, is_effectively_closed
 from app.et.enrollment.rules import derive_completion_status
@@ -45,12 +45,14 @@ from app.services import AuditLogService
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程", error_code="ET_COURSE_001")
 _ATTEMPT_NOT_FOUND = AppError(status_code=404, detail="查無此作答紀錄", error_code="ET_ATTEMPT_001")
-_QUIZ_NOT_FOUND = AppError(status_code=404, detail="查無此測驗", error_code="ET_TRACK_001")
 _ENROLLMENT_NOT_FOUND = AppError(status_code=404, detail="查無此學員之選課紀錄", error_code="ET_TRACK_001")
+#: 測驗不存在**或不屬於該課程**——與 `ET_TRACK_001` 分碼，前端才分得出「學員不在這門課」
+#: 與「這個測驗不是這門課的」，兩者的下一步完全不同。
+_QUIZ_NOT_FOUND = AppError(status_code=404, detail="查無此測驗，或該測驗不屬於此課程", error_code="ET_TRACK_004")
 _CANNOT_RESET = AppError(
     status_code=409, detail="此測驗不符重置條件（次數未用盡、已及格或尚未作答）", error_code="ET_TRACK_002"
 )
-_SURVEY_NOT_FOUND = AppError(status_code=404, detail="此課程未設定課後問卷", error_code="ET_TRACK_001")
+_SURVEY_NOT_FOUND = AppError(status_code=404, detail="此課程未設定課後問卷", error_code="ET_TRACK_005")
 _COURSE_CLOSED = AppError(status_code=409, detail="課程已關閉，無法執行此管理動作", error_code="ET_TRACK_003")
 
 _MODULE = "ET"
@@ -58,6 +60,14 @@ _MODULE = "ET"
 _FUNC_RESET = "ET-QUIZ-RESET"
 #: 學員邀請 / 加入 / 移除共用（同上表，US8 / US12 / US9）。
 _FUNC_ENROLLMENT = "ET-ENROLLMENT"
+#: 具名個資之匯出（SA 裁示 2026-09-14）。**`spec.md` §稽核來源功能碼尚未收錄本碼**，
+#: 待 SA 同步該表。
+#:
+#: 為何只有匯出寫、畫面讀取不寫：匯出是「把全班具名資料**帶離系統**」的動作——檔案
+#: 落地後就脫離存取控制，事後只能靠這筆紀錄回答「是誰帶走的」。單純在畫面上看則仍在
+#: 系統邊界內、受既有授權約束。專案現行慣例是匯出一律不寫稽核（DM 的 KPI / 變更紀錄 /
+#: 廢止、DP 稽核匯出皆然），本頁因個資密度最高而例外。
+_FUNC_EXPORT = "ET-EXPORT"
 
 
 class EtTrackingService:
@@ -172,9 +182,15 @@ class EtTrackingService:
         （只能看自己的考卷），教師要看的正是別人的。但**不可放寬成「任何教師都能看」**
         ——那等於全站考卷對所有教師公開。
 
+        ## 只給**已閱卷**的 attempt
+
+        學員端 `/attempts/{id}/result` 明訂「尚未提交者回 404」。教師端若不比照，兩端對
+        同一筆 `IN_PROGRESS` 會給出不同答案——而教師看到的是一份「當下作答狀態」，那不是
+        成績，是學員還在寫的答案。`GRADED_STATUSES` 是兩端共用的白名單。
+
         ## 依快照渲染，不回查題庫
 
-        `_to_result` 讀的全是 `ET_QUIZ_ATTEMPT_D` 的 `*_SNAPSHOT` 欄位（與學員端同一支
+        `to_question_result` 讀的全是 `ET_QUIZ_ATTEMPT_D` 的 `*_SNAPSHOT` 欄位（與學員端同一支
         函式）。回查 `ET_QUESTION` / `ET_OPTION` 會讓教師改過配分或正確答案之後，歷史
         明細靜默變樣（`spec_us6` 場景 26）。
         """
@@ -187,7 +203,7 @@ class EtTrackingService:
         quiz = await self._attempts.get_quiz(db, attempt.quiz_id)
         details = await self._attempts.list_details(db, attempt_id)
         names = await self._repo.user_names(db, {attempt.user_id})
-        ordered = _in_snapshot_order(details, attempt.question_order)
+        ordered = in_snapshot_order(details, attempt.question_order)
         return TeacherAttemptDetail(
             attempt_id=attempt.attempt_id,
             user_id=attempt.user_id,
@@ -199,7 +215,7 @@ class EtTrackingService:
             points_total=sum(d.points_snapshot for d in details),
             pass_score=attempt.pass_score_snapshot,
             is_pass=bool(attempt.is_pass),
-            questions=[_to_result(d, d.score if d.score is not None else Decimal(0)) for d in ordered],
+            questions=[to_question_result(d, d.score if d.score is not None else Decimal(0)) for d in ordered],
         )
 
     async def reset_retry(
@@ -394,6 +410,7 @@ class EtTrackingService:
         """
         await self._require_owner(db, course_id, actor_id)
         rows = await self._all_student_rows(db, course_id)
+        await self._log_export(db, course_id, actor_id=actor_id, what="學員清單", count=len(rows))
         return _write_csv(
             ("學員", "加入日期", "完課狀態", "學習進度", "平均成績", "最後活動"),
             [
@@ -421,6 +438,9 @@ class EtTrackingService:
         result = await self.survey_result(db, course_id, actor_id=actor_id)
         if not result.has_survey:
             raise _SURVEY_NOT_FOUND
+        # 🔴 這一支帶走的是**具名問卷填答全文**（誰說了什麼），是本模組個資密度最高的
+        # 輸出——稽核寫在 `has_survey` 檢查**之後**，未設問卷的 404 不留無意義的紀錄。
+        await self._log_export(db, course_id, actor_id=actor_id, what="問卷結果", count=len(result.details))
 
         questions = result.questions
         header = ("學員", "填答時間", *(q.stem for q in questions))
@@ -438,6 +458,24 @@ class EtTrackingService:
                 )
                 for row in result.details
             ],
+        )
+
+    async def _log_export(self, db: AsyncSession, course_id: int, *, actor_id: str, what: str, count: int) -> None:
+        """記錄一次具名個資匯出（SA 裁示 2026-09-14）。
+
+        `description` 帶**筆數**而非內容——稽核要能回答「誰在何時帶走了多少」，把姓名或
+        答案文字寫進 `DP_AUDIT_LOG` 等於把個資複製到第二個地方，與 `sti-error-codes`
+        「訊息不嵌入動態值」的理由相同。
+        """
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_EXPORT,
+            action_type="EXPORT",
+            result="SUCCESS",
+            operator_id=actor_id,
+            target_id=str(course_id),
+            description=f"匯出{what} CSV（{count} 筆）",
         )
 
     async def _all_student_rows(self, db: AsyncSession, course_id: int) -> list[StudentRow]:

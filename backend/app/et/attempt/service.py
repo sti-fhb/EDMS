@@ -386,8 +386,8 @@ class EtAttemptService:
             # 共用上面逾時判定用的 `now`——同一份回應的欄位不該各自取時間（同 `intro()`）
             course_closed=await self._is_course_closed(db, attempt.course_id, now=now),
             questions=[
-                _to_result(detail, per_question[detail.question_id])
-                for detail in _in_snapshot_order(details, attempt.question_order)
+                to_question_result(detail, per_question[detail.question_id])
+                for detail in in_snapshot_order(details, attempt.question_order)
             ],
         )
 
@@ -431,8 +431,8 @@ class EtAttemptService:
             ),
             course_closed=await self._is_course_closed(db, attempt.course_id),
             questions=[
-                _to_result(detail, detail.score if detail.score is not None else Decimal(0))
-                for detail in _in_snapshot_order(details, attempt.question_order)
+                to_question_result(detail, detail.score if detail.score is not None else Decimal(0))
+                for detail in in_snapshot_order(details, attempt.question_order)
             ],
         )
 
@@ -570,13 +570,17 @@ class EtAttemptService:
                     ],
                     selected_options=parse_selected(d.selected_options),
                 )
-                for d in _in_snapshot_order(details, attempt.question_order)
+                for d in in_snapshot_order(details, attempt.question_order)
             ],
         )
 
 
-def _in_snapshot_order(details: list, question_order: str) -> list:
+def in_snapshot_order(details: list, question_order: str) -> list:
     """依 `QUESTION_ORDER` 快照排列明細。
+
+    **公開介面**（無底線）：`tracking/service.py` 的教師端逐題明細重用本函式——同一次
+    作答在學員端與教師端**必須長得一樣**，各寫一份遲早分岔，而分岔的表現是兩邊看到不同
+    的題序或對錯。改動本函式前請一併跑 `test_et_tracking.py -k DetailForTeacher`。
 
     **不可依 `DETAIL_ID` 或 `QUESTION_ID` 排序**——那會讓同一次 attempt 在跳題前後看到
     不同的題序（AC 5 明訂同 attempt 內順序固定）。
@@ -587,8 +591,12 @@ def _in_snapshot_order(details: list, question_order: str) -> list:
     return sorted(details, key=lambda d: order.get(d.question_id, len(order)))
 
 
-def _to_result(detail, score: Decimal) -> QuestionResult:
-    """組逐題明細——**此時才帶正確答案**（AC 11 強制顯示，無教師可關閉之選項）。"""
+def to_question_result(detail, score: Decimal) -> QuestionResult:
+    """組逐題明細——**此時才帶正確答案**（AC 11 強制顯示，無教師可關閉之選項）。
+
+    **公開介面**（無底線）：理由同 `in_snapshot_order`——教師端 `tracking/service.py`
+    重用本函式，兩端呈現的對錯與得分必須一致。
+    """
     options = parse_options_snapshot(detail.options_snapshot)
     selected = set(parse_selected(detail.selected_options))
     if score >= detail.points_snapshot and detail.points_snapshot > 0:

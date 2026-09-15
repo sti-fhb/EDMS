@@ -45,22 +45,49 @@ export const studentsApi = {
    * 不可重置時停用按鈕並說明原因。
    */
   resetRetry: async (courseId: number, userId: string, quizId: number): Promise<void> => {
-    await http.post(`/et/courses/${courseId}/students/${userId}/quizzes/${quizId}/retry-reset`)
+    // `encodeURIComponent`：值目前來自後端回應故安全，但這是零成本的防禦
+    await http.post(
+      `/et/courses/${courseId}/students/${encodeURIComponent(userId)}/quizzes/${quizId}/retry-reset`,
+    )
   },
 
   /** 移除學員（軟刪；學習歷史保留）。 */
   removeStudent: async (courseId: number, userId: string): Promise<void> => {
-    await http.delete(`/et/courses/${courseId}/students/${userId}`)
+    await http.delete(`/et/courses/${courseId}/students/${encodeURIComponent(userId)}`)
   },
 }
 
 /**
- * 兩支 CSV 匯出的相對路徑。
+ * 兩支 CSV 匯出——**必須經 axios 取 blob，不可用 `<a href>` 直接導覽**。
  *
- * **不用 axios 取回再組 Blob**——那樣要自行處理 `Content-Disposition` 與記憶體，而瀏覽器
- * 原生就會依該標頭下載。由呼叫端組出完整 URL 後開新視窗即可。
+ * 🔴 本專案的 access token 是 **memory-only Bearer**（見 `services/http.ts`：刻意不落
+ * `localStorage`），只在 axios 的 request interceptor 注入；後端用 `HTTPBearer`，全站
+ * **沒有 cookie 認證**。瀏覽器原生導覽不經 axios、不帶 header，那兩支匯出會直接 401。
+ *
+ * ⚠️ **不要改用 query string 帶 token 來「修好」它**——`et/learning/video_ticket.py` 的
+ * docstring 已列出代價：nginx error_log、Cloudflare Tunnel（不受我方管轄）與瀏覽器歷史
+ * 都會記下完整 URI。而這兩支匯出取得的是**全班具名問卷填答與個別成績**。
+ *
+ * 形狀照抄 `dm/kpi/kpiService.ts` 的 `downloadKpiCsv`（DM 三處匯出皆同一寫法）。
  */
-export const studentsCsvPaths = {
-  students: (courseId: number) => `/api/et/courses/${courseId}/students.csv`,
-  survey: (courseId: number) => `/api/et/courses/${courseId}/survey-result.csv`,
+async function downloadCsv(path: string, filename: string): Promise<void> {
+  const { data } = await http.get<Blob>(path, { responseType: "blob" })
+  const url = URL.createObjectURL(data)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** 匯出區塊 1 之學員清單。 */
+export async function downloadStudentsCsv(courseId: number): Promise<void> {
+  await downloadCsv(`/et/courses/${courseId}/students.csv`, `course-${courseId}-students.csv`)
+}
+
+/** 匯出區塊 3 之問卷結果（含問答題文字答案）。 */
+export async function downloadSurveyCsv(courseId: number): Promise<void> {
+  await downloadCsv(`/et/courses/${courseId}/survey-result.csv`, `course-${courseId}-survey.csv`)
 }
