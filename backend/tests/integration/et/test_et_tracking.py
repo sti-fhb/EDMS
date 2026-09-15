@@ -1481,3 +1481,49 @@ class TestInProgressAttemptFlag:
         row = r.json()["data"][0]
         assert row["completion_status"] == COMPLETION_IN_PROGRESS, "學習進行中"
         assert row["has_in_progress_attempt"] is False, "但沒有任何作答中的 attempt"
+
+
+class TestLastActivityColumn:
+    """區塊 1 的「最後活動」欄（AC 2）。
+
+    ⚠️ 這一欄在 #322 交付時**沒有任何測試覆蓋**——當時 service 層有一段「取
+    `LAST_ACTIVITY_AT` 與 `MAX(SUBMITTED_AT)` 較晚者」的補償邏輯，#334 把欄位修好後
+    把它移除，移除當下沒有任何測試變紅，才發現這個缺口。
+    """
+
+    async def test_如實回傳選課列的最後活動時間(self, client, db) -> None:
+        teacher = await _user(db, "t_tr80")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr80", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        moment = utcnow() - timedelta(hours=5)
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course_id)
+            .values(last_activity_at=moment)
+        )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        returned = r.json()["data"][0]["last_activity_at"]
+        assert returned is not None
+        assert returned.startswith(moment.strftime("%Y-%m-%dT%H:%M"))
+
+    async def test_從未活動者回傳_null(self, client, db) -> None:
+        """加入課程不是學習動作（見 `test_et_enrollment.py`），所以剛加入者這欄是空的。
+
+        回 `None` 而非加入時間——把加入當成活動會讓「加了就沒再上線」的學員看起來
+        一直很活躍，而那正是催課要找的人。
+        """
+        teacher = await _user(db, "t_tr81")
+        course_id = await _course(db, owner=teacher)
+        student = await _user(db, "s_tr81", roles=(ROLE_STUDENT,))
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["data"][0]["last_activity_at"] is None

@@ -361,8 +361,15 @@ class EtAttemptService:
             # 另一個並行請求已經完成轉移——不重複閱卷，也不覆蓋它寫下的分數
             raise _ALREADY_SUBMITTED
 
-        if is_pass and not await self._is_preview(db, attempt=attempt):
-            await self._mark_item_completed(db, attempt=attempt, operator=operator)
+        if not await self._is_preview(db, attempt=attempt):
+            # 最後活動時間（#334）：**不看及格與否**。活動時間記的是「有沒有動作」，
+            # 及格才更新會讓一個連考三次都沒過的學員在教師端看起來像三週沒上線——
+            # 而那正是最需要被看見的人。
+            #
+            # 放在 `moved` 檢查之後：併發的第二個請求沒有真的提交，不該留下活動痕跡。
+            await self._touch_activity(db, attempt=attempt, operator=operator)
+            if is_pass:
+                await self._mark_item_completed(db, attempt=attempt, operator=operator)
 
         quiz = await self._repo.get_quiz(db, attempt.quiz_id)
         max_retry = quiz.max_retry if quiz else 0
@@ -518,6 +525,18 @@ class EtAttemptService:
             return False
         enrolled = await self._learning.is_enrolled(db, user_id=attempt.user_id, course_id=attempt.course_id)
         return course.owner_id == attempt.user_id and not enrolled
+
+    async def _touch_activity(self, db: AsyncSession, *, attempt, operator: OperatorInfo) -> None:
+        """提交測驗即一次學習活動——更新 `ET_ENROLLMENT.LAST_ACTIVITY_AT`（#334）。
+
+        用 `touch_activity()` 而非 `set_last_item()`：後者會連帶改寫「上次讀到哪」，
+        提交測驗不該移動學員的續讀位置（`test_提交不改變上次讀到哪` 釘住這件事）。
+        """
+        context = await self._repo.quiz_context(db, attempt.quiz_id)
+        if context is None:
+            return
+        _, course_id = context
+        await self._progress.touch_activity(db, user_id=attempt.user_id, course_id=course_id, operator=operator)
 
     async def _mark_item_completed(self, db: AsyncSession, *, attempt, operator: OperatorInfo) -> None:
         """及格 → 回寫項目層完成（AC 12），下一項 / 下一章隨之解鎖。

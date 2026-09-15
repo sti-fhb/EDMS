@@ -26,8 +26,10 @@ export interface CourseDetail {
   require_approval: boolean
   version: number
   owner_id: string
-  /** 建立者姓名（唯讀 join DP_USER；查無 null）——檢視模式 banner 用。 */
+  /** 建立者姓名（唯讀 join DP_USER；**查無此人**時 null）——檢視模式 banner 用。 */
   owner_name: string | null
+  /** 建立者帳號是否已停用（#330）。用 `ownerLabel()` 組字串，不要各頁自己拼。 */
+  owner_is_deleted: boolean
   /** 當前使用者是否為擁有者；false 時全頁唯讀（spec.md §擁有權判定）。 */
   is_owner: boolean
   tag_ids: number[]
@@ -142,8 +144,10 @@ export interface CourseCard {
   open_start_at: string | null
   open_end_at: string | null
   owner_id: string
-  /** 取自 `DP_USER`；帳號已刪時為 `null`。 */
+  /** 取自 `DP_USER`；**查無此人**（資料不一致）時為 `null`。帳號停用時仍回姓名。 */
   owner_name: string | null
+  /** 建立者帳號是否已停用（#330）。用 `ownerLabel()` 組字串，不要各頁自己拼。 */
+  owner_is_deleted: boolean
   tags: TagOption[]
   chapter_count: number
   /** **在籍**學員數——已移除者不計入。 */
@@ -185,3 +189,16 @@ export interface CourseListParams {
 /** 關鍵字長度上限，對齊後端 `Query(max_length=100)`。兩邊必須一起改。 */
 export const KEYWORD_MAX_LENGTH = 100
 
+/**
+ * 建立者顯示字串——**三個畫面共用同一支**（#330）。
+ *
+ * 修正前卡片顯示「—」、建立者下拉顯示**帳號 ID**、詳細頁顯示姓名，同一個人三種身份。
+ * 根因是三處各自寫 fallback。集中在這裡，下一個要顯示建立者的地方就不必再決定一次。
+ *
+ * 🔴 **絕不回傳 `owner_id`**。帳號 ID 比姓名更能唯一指認一個人，且是可拿去嘗試登入的
+ * 字串——原本 `CourseListPage` 的 `?? owner_id` 正是這個問題。
+ */
+export function ownerLabel(owner: { owner_name: string | null; owner_is_deleted: boolean }): string {
+  if (owner.owner_name === null) return "—"
+  return owner.owner_is_deleted ? `${owner.owner_name}（已停用）` : owner.owner_name
+}

@@ -19,7 +19,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { CourseCard } from "./CourseCard"
 import { coursesApi } from "./coursesService"
-import { KEYWORD_MAX_LENGTH } from "./schemas"
+import { KEYWORD_MAX_LENGTH, ownerLabel } from "./schemas"
 import type { CourseListParams } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
@@ -121,7 +121,9 @@ export function EtCourseListPage() {
   const ownerOptions = useMemo(() => {
     const seen = new Map<string, string>()
     for (const c of ownerSource?.data ?? []) {
-      if (!seen.has(c.owner_id)) seen.set(c.owner_id, c.owner_name ?? c.owner_id)
+      // 🔴 不可 fallback 到 `owner_id`（#330）：帳號 ID 比姓名更能唯一指認一個人，
+      // 而且是可拿去嘗試登入的字串。停用者由 `ownerLabel` 標成「姓名（已停用）」。
+      if (!seen.has(c.owner_id)) seen.set(c.owner_id, ownerLabel(c))
     }
     return [...seen.entries()]
   }, [ownerSource])

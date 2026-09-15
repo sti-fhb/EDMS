@@ -1045,3 +1045,103 @@ class TestClosedAndRemovedBoundaries:
         assert r.status_code == 403, r.text
         assert r.json()["error_code"] == "ET_LEARN_004"
         assert r.json()["error_message"] == "您已被該課程移除"
+
+
+class TestSubmitTouchesLastActivity:
+    """提交測驗要更新 `ET_ENROLLMENT.LAST_ACTIVITY_AT`（#334 / SA 裁示 2026-09-15 方向 b）。
+
+    `data-model` 定義該欄位是「最近一次學習動作 **/ 測驗提交**時間」，但在 #334 之前
+    全 codebase 只有 `progress.set_last_item()`（檢視項目）會寫它——定義裡「測驗提交」
+    那一半沒有實作。學員開著測驗寫 30 分鐘再交，那個欄位會停在他進入測驗的時間。
+    """
+
+    async def test_提交後最後活動時間前進(self, client, db) -> None:
+        teacher = await _user(db, "t_act01", ROLE_TEACHER)
+        student = await _user(db, "s_act01")
+        course = await _course_with_quiz(client, db, teacher, code="33000001")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        # 先把最後活動時間壓到很早，才驗得出「有沒有前進」
+        old = utcnow() - timedelta(days=3)
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+            .values(last_activity_at=old)
+        )
+        await db.flush()
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+
+        r = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        assert r.status_code == 200, r.text
+        row = await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+        )
+        await db.refresh(row)
+        assert row.last_activity_at > old, "提交測驗是一次學習活動"
+
+    async def test_未及格也算一次活動(self, client, db) -> None:
+        """活動時間記的是「有沒有動作」，不是「做得好不好」。
+
+        及格才更新會讓一個連考三次都沒過的學員在教師端看起來像三週沒上線——那正是最
+        需要被看見的人。
+        """
+        teacher = await _user(db, "t_act02", ROLE_TEACHER)
+        student = await _user(db, "s_act02")
+        course = await _course_with_quiz(client, db, teacher, code="33000002")
+        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        old = utcnow() - timedelta(days=3)
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+            .values(last_activity_at=old)
+        )
+        await db.flush()
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        wrong = next(o["option_id"] for o in q["options"] if not o["is_correct"])
+        await client.put(
+            _answer_url(attempt["attempt_id"], q["question_id"]), json={"selected_options": [wrong]}, headers=h
+        )
+
+        r = await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        assert r.status_code == 200, r.text
+        assert r.json()["is_pass"] is False
+        row = await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+        )
+        await db.refresh(row)
+        assert row.last_activity_at > old
+
+    async def test_提交不改變上次讀到哪(self, client, db) -> None:
+        """🔴 `LAST_ITEM_ID` 必須原封不動。
+
+        既有的 `set_last_item()` 會**連帶**寫這一欄，若圖方便直接呼叫它，學員下次回到
+        課程會被帶到測驗那一項而不是他真正讀到的地方——症狀是「續讀位置莫名其妙跳掉」，
+        而且不會有任何錯誤。
+        """
+        teacher = await _user(db, "t_act03", ROLE_TEACHER)
+        student = await _user(db, "s_act03")
+        course = await _course_with_quiz(client, db, teacher, code="33000003", extra_chapter=True)
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        # 學員上次讀到第二章的教材
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+            .values(last_item_id=course["next_item_id"])
+        )
+        await db.flush()
+        attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+
+        await client.post(f"/api/et/attempts/{attempt['attempt_id']}/submit", headers=h)
+
+        row = await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == course["course_id"])
+        )
+        await db.refresh(row)
+        assert row.last_item_id == course["next_item_id"], "提交測驗不該改變續讀位置"

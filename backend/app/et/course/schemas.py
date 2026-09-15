@@ -295,6 +295,11 @@ class CourseDetail(BaseModel):
     version: int
     owner_id: str
     owner_name: str | None
+    #: 擁有者帳號是否已停用（#330）。前端呈現為「姓名（已停用）」。
+    #:
+    #: ⚠️ 與 `owner_name is None` **不同**：後者代表 `DP_USER` 根本沒有該列（資料不一致），
+    #: 本旗標則是「人還在、帳號停用了」。混為一談會讓真正的資料問題被當成正常狀態。
+    owner_is_deleted: bool = False
     is_owner: bool
     tag_ids: list[int]
     chapters: list[ChapterItem]
@@ -470,6 +475,11 @@ class CourseCard(BaseModel):
     owner_id: str
     #: 取自 `DP_USER.USER_NAME`；查無（帳號已刪）時為 `None`，前端顯示為「—」。
     owner_name: str | None
+    #: 擁有者帳號是否已停用（#330）。前端呈現為「姓名（已停用）」。
+    #:
+    #: ⚠️ 與 `owner_name is None` **不同**：後者代表 `DP_USER` 根本沒有該列（資料不一致），
+    #: 本旗標則是「人還在、帳號停用了」。混為一談會讓真正的資料問題被當成正常狀態。
+    owner_is_deleted: bool = False
     tags: list[TagOption]
     #: 未刪除之章節數。
     chapter_count: int

@@ -185,7 +185,8 @@ class EtCourseService:
                 open_start_at=r.open_start_at,
                 open_end_at=r.open_end_at,
                 owner_id=r.owner_id,
-                owner_name=owner_names.get(r.owner_id),
+                owner_name=owner_names.get(r.owner_id, (None, False))[0],
+                owner_is_deleted=owner_names.get(r.owner_id, (None, False))[1],
                 tags=[TagOption.model_validate(t) for t in tags.get(r.course_id, [])],
                 chapter_count=counts.get(r.course_id, (0, 0))[0],
                 student_count=counts.get(r.course_id, (0, 0))[1],
@@ -206,26 +207,44 @@ class EtCourseService:
         """
         return [TagOption.model_validate(t) for t in await self._courses.list_all_tags(db)]
 
-    async def _owner_names(self, db: AsyncSession, owner_ids: set[str]) -> dict[str, str]:
-        """`{user_id: user_name}`——**一次查回整頁**，不逐筆。
+    async def _owner_names(self, db: AsyncSession, owner_ids: set[str]) -> dict[str, tuple[str, bool]]:
+        """`{user_id: (user_name, 是否已停用)}`——**一次查回整頁**，不逐筆。
 
         唯讀查詢 `DP_USER`，屬 `spec.md` §外模組 table 引用清單 A 之既有例外（US7 已列）。
+
+        ## 🔴 **刻意不濾 `DELETED`**（#330 / SA 裁示 2026-09-15）
+
+        本支原本濾掉停用者，於是他們的課程在卡片上顯示「—」、在建立者下拉顯示**帳號
+        ID**（前端 `?? owner_id`），而詳細頁又顯示姓名——同一個人三種身份。
+
+        而過濾的方向本來就是反的：露出帳號 ID 比露出姓名更能唯一指認一個人，且是可拿
+        去嘗試登入的字串。故改為**回姓名 + 停用旗標**，由前端呈現為「王大明（已停用）」。
+
+        擁有者已停用代表**沒有人能編輯這門課、需要交接**，姓名在此情境是交接資訊而非
+        個資揭露——課程的 `CREATED_USER` 本來就存著他的帳號。
+
+        **查無此人**（`DP_USER` 根本沒有該列）與**已停用**是兩回事：前者不在回傳的 key
+        裡（呼叫端得到 `None`），代表資料不一致、該查；混為一談會讓真正的問題被當成正常。
         """
         if not owner_ids:
             return {}
         rows = (
             await db.execute(
-                select(DpUser.user_id, DpUser.user_name).where(DpUser.user_id.in_(owner_ids), DpUser.deleted == 0)
+                select(DpUser.user_id, DpUser.user_name, DpUser.deleted).where(DpUser.user_id.in_(owner_ids))
             )
         ).all()
-        return {user_id: name for user_id, name in rows}
+        return {user_id: (name, bool(deleted)) for user_id, name, deleted in rows}
 
     async def get_detail(self, db: AsyncSession, course_id: int, *, actor_id: str) -> CourseDetail:
         """課程詳細（含章節與標籤）。他人課程可閱覽，以 `is_owner` 表達可否編輯。"""
         course = await self._courses.get(db, course_id)
         if course is None:
             raise _NOT_FOUND
-        owner_name = await db.scalar(select(DpUser.user_name).where(DpUser.user_id == course.owner_id))
+        # 共用 `_owner_names()`——本支原本自己寫一條沒有 `DELETED` 判斷的查詢，正是
+        # #330 那三種答案不一致的源頭。兩條查詢分開維護，遲早再分岔一次。
+        owner_name, owner_is_deleted = (await self._owner_names(db, {course.owner_id})).get(
+            course.owner_id, (None, False)
+        )
         tag_ids = await self._tags.list_tag_ids(db, course_id)
         chapters = await self._chapters.list_by_course(db, course_id)
         items_by_chapter = await self._items_by_chapter(db, [c.chapter_id for c in chapters])
@@ -241,6 +260,7 @@ class EtCourseService:
             version=course.version,
             owner_id=course.owner_id,
             owner_name=owner_name,
+            owner_is_deleted=owner_is_deleted,
             is_owner=is_owner,
             tag_ids=sorted(tag_ids),
             # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者
