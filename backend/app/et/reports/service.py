@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
+from app.core.request_context import get_client_ip
 from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
 from app.et.deps import EtContext
 from app.et.enrollment.repository import EtEnrollmentRepository
@@ -40,6 +41,13 @@ from app.et.reports.repository import EtReportsRepository
 from app.et.roles.authz import ET_ADMIN
 from app.et.stats.repository import EtStatsRepository
 from app.et.tracking.repository import EtTrackingRepository
+from app.services import AuditLogService
+
+_MODULE: Final = "ET"
+#: 大量個資匯出之稽核功能碼（spec.md §稽核來源功能碼）。
+_FUNC_NAME_REPORT: Final = "ET-REPORT"
+#: 未指定課程時之 `target_id`——代表「呼叫者權限範圍內的全部開放中課程」。
+_TARGET_ALL: Final = "ALL"
 
 _CSV_HEADERS: Final = ["課程名稱", "姓名", "Email", "進度%", "完課狀態", "最後活動時間"]
 
@@ -64,22 +72,45 @@ class EtReportsService:
         enrollments: EtEnrollmentRepository | None = None,
         tracking: EtTrackingRepository | None = None,
         notify_repo: EtNotifyRepository | None = None,
+        audit: AuditLogService | None = None,
     ) -> None:
         self._repo = repository or EtReportsRepository()
         self._stats = stats or EtStatsRepository()
         self._enrollments = enrollments or EtEnrollmentRepository()
         self._tracking = tracking or EtTrackingRepository()
         self._notify_repo = notify_repo or EtNotifyRepository()
+        self._audit = audit or AuditLogService()
 
     async def weekly_csv(self, db: AsyncSession, *, ctx: EtContext, course_id: int | None) -> str:
-        """產生逐學員明細 CSV（UTF-8 文字，BOM 由 router 補）。"""
+        """產生逐學員明細 CSV（UTF-8 文字，BOM 由 router 補）+ 稽核。
+
+        **寫稽核（`ET-REPORT`）**：這是 ET 模組個資輸出密度最高的一個動作——一次一個檔案，
+        含全站（管理者）或全班（教師）學員的姓名、Email、進度與最後活動時間。唯讀查詢
+        本來不寫稽核（見 `dm/kpi/router` 的同款決定），但那些是逐筆瀏覽；此處是**整批
+        帶走**。少了它，名單一旦外流，系統無法回答「誰在什麼時候拉過這份檔」。
+
+        記錄範圍與列數而非內容：`target_id` 為 `course_id` 或 `ALL`，描述帶輸出人次。
+        """
         courses = await self._scope(db, ctx=ctx, course_id=course_id)
         buf = io.StringIO()
         writer = csv.writer(buf)  # csv 模組處理逗號 / 換行 / 引號跳脫，禁手拼
         writer.writerow(_CSV_HEADERS)
+        exported = 0
         for course in courses:
             for row in await self._rows(db, course):
                 writer.writerow(row)
+                exported += 1
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_NAME_REPORT,
+            action_type="EXPORT",
+            result="SUCCESS",
+            operator_id=ctx.user_id,
+            target_id=str(course_id) if course_id is not None else _TARGET_ALL,
+            description=f"匯出週報逐學員明細（課程 {len(courses)} 門、{exported} 人次）",
+            source_ip=get_client_ip(),
+        )
         return buf.getvalue()
 
     async def _scope(self, db: AsyncSession, *, ctx: EtContext, course_id: int | None):

@@ -158,7 +158,7 @@ class EtWeeklyReportService:
         return sent
 
     async def _send_one_report(self, db: AsyncSession, user_id: str, lines: list[CourseReportLine]) -> bool:
-        recipients = await self._notify_repo.recipients(db, [user_id])
+        recipients = await self._notify_repo.active_recipients(db, [user_id])
         if not recipients:
             return False
         recipient = recipients[0]
@@ -196,7 +196,7 @@ class EtWeeklyReportService:
         return sent
 
     async def _send_one_remind(self, db: AsyncSession, user_id: str, courses: list[RemindCourse]) -> bool:
-        recipients = await self._notify_repo.recipients(db, [user_id])
+        recipients = await self._notify_repo.active_recipients(db, [user_id])
         if not recipients:
             return False
         recipient = recipients[0]

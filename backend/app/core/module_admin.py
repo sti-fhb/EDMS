@@ -59,15 +59,6 @@ class ModuleAdminGate:
         # 嚴格布林收斂：只在明確 True 放行；truthy 非 bool（如角色清單 / int）一律 fail-closed
         return result is True
 
-    def has_checker(self, module: str) -> bool:
-        """該模組是否已註冊 checker。
-
-        供呼叫端區分「此人不是該模組管理者」與「該模組根本沒有管理者這個概念」兩種情況
-        ——兩者在 `is_module_admin` 都回 `False`，但處置不同：前者應擋下，後者若一律擋下
-        會讓平台自身（`DP`）的資源變成**沒有任何人**能維護。
-        """
-        return module in self._checkers
-
     async def is_any_module_admin(self, modules: Iterable[str], user_id: str, db: AsyncSession) -> bool:
         """user_id 是否為 modules 中**任一**模組的管理者（#250）。
 

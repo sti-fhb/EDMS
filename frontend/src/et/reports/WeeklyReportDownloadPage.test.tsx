@@ -58,16 +58,31 @@ describe("EtWeeklyReportDownloadPage", () => {
     expect(downloadWeeklyCsv).not.toHaveBeenCalled()
   })
 
-  it("下載失敗顯示錯誤訊息並可重試", async () => {
-    downloadWeeklyCsv.mockRejectedValueOnce(new Error("伺服器忙碌"))
+  it("下載失敗顯示後端訊息並可重試", async () => {
+    // `responseType: "blob"` 的請求失敗時 `response.data` 是 **Blob**——用一般的錯誤解析
+    // 只會拿到 axios 的英文狀態碼，把後端說得清楚的那句蓋掉。此處以真實形狀構造。
+    downloadWeeklyCsv.mockRejectedValueOnce({
+      response: {
+        status: 403,
+        data: new Blob([JSON.stringify({ error_code: "ET_COURSE_002", error_message: "僅課程擁有者可下載" })]),
+      },
+    })
     renderAt("/et/reports/weekly")
 
-    expect(await screen.findByText("伺服器忙碌")).toBeInTheDocument()
+    expect(await screen.findByText("僅課程擁有者可下載")).toBeInTheDocument()
 
     downloadWeeklyCsv.mockResolvedValueOnce(undefined)
     await userEvent.click(screen.getByRole("button", { name: "重新下載" }))
 
     expect(await screen.findByText(/明細已開始下載/)).toBeInTheDocument()
     expect(downloadWeeklyCsv).toHaveBeenCalledTimes(2)
+  })
+
+  it("courseId 為空值時視為無效，不送出 course_id=0", async () => {
+    // `Number("")` 是 0 且通過 `Number.isInteger`——寬鬆的驗證會讓這種壞連結送到後端吃 422
+    renderAt("/et/reports/weekly?courseId=")
+
+    expect(await screen.findByText(/課程代碼無效/)).toBeInTheDocument()
+    expect(downloadWeeklyCsv).not.toHaveBeenCalled()
   })
 })

@@ -319,7 +319,7 @@ class EtScheduleService:
         """單門課之加急提醒；回傳排入 outbox 的封數。"""
         user_ids = await self._unfinished_user_ids(db, course.course_id)
         queued = 0
-        for recipient in await self._notify_repo.recipients(db, user_ids):
+        for recipient in await self._notify_repo.active_recipients(db, user_ids):
             result = await self._notifier.notify(
                 db,
                 template_code=TEMPLATE_URGENT_REMIND,

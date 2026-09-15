@@ -2,6 +2,7 @@ import { Alert, Box, Button, CircularProgress, Stack, Typography } from "@mui/ma
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 
+import { toBlobApiError } from "../../services/http"
 import { downloadWeeklyCsv } from "./reportsService"
 
 /**
@@ -22,8 +23,11 @@ import { downloadWeeklyCsv } from "./reportsService"
 export function EtWeeklyReportDownloadPage() {
   const [params] = useSearchParams()
   const raw = params.get("courseId")
-  const courseId = raw === null ? undefined : Number(raw)
-  const invalidCourseId = raw !== null && !Number.isInteger(courseId)
+  // 以字面樣式判定而非 `Number.isInteger`：`Number("")` → 0、`Number("-5")` → -5、
+  // `Number("0x10")` → 16、`Number("1e3")` → 1000 全都是整數，於是 `?courseId=` 這種
+  // 壞連結會被送到後端吃 422，而不是在這裡顯示「連結無效」——那正是這段驗證的用意
+  const invalidCourseId = raw !== null && !/^[1-9]\d*$/.test(raw)
+  const courseId = raw === null || invalidCourseId ? undefined : Number(raw)
 
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle")
   const [message, setMessage] = useState("")
@@ -37,7 +41,12 @@ export function EtWeeklyReportDownloadPage() {
       setState("done")
     } catch (err) {
       setState("error")
-      setMessage(err instanceof Error ? err.message : "下載失敗，請稍後再試")
+      // ⚠️ 必須用 `toBlobApiError`：`responseType: "blob"` 的請求失敗時 `response.data`
+      // 是 Blob，一般的錯誤解析取不到 `error_message`，畫面只會顯示 axios 的
+      // 「Request failed with status code 403」——把後端「僅課程擁有者可下載」這種
+      // 說得清楚的訊息整個蓋掉，而點到轉寄連結的人正是最需要看到那句話的人
+      const apiErr = await toBlobApiError(err)
+      setMessage(apiErr.errorMessage || "下載失敗，請稍後再試")
     }
   }, [courseId])
 

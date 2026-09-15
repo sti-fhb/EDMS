@@ -5,6 +5,8 @@ JOB_ID 唯讀、HANDLER_REF / MODULE 永不可改（改 HANDLER_REF＝RCE，見 
 編輯即時套到運行中的引擎（apply_job_change），並寫稽核。
 """
 
+from typing import Final
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -17,6 +19,11 @@ from app.dp.schedules.schemas import ScheduleResponse, ScheduleUpdate
 from app.services import AuditLogService
 
 _FUNC_NAME = "DP-SCHEDULE"
+
+#: 無對應模組管理者角色、由後台共用維護的排程所屬模組。
+#:
+#: 目前只有平台自身（`DP`）。明列而非以「有沒有註冊 checker」推導——見 `_ensure_may_edit`。
+_SHARED_MODULES: Final[frozenset[str]] = frozenset({"DP"})
 
 
 class ScheduleService:
@@ -49,18 +56,24 @@ class ScheduleService:
 
         ## 平台自身的排程（`MODULE='DP'`）維持共用
 
-        `module_admin_gate` 沒有 `DP` 的 checker（平台沒有「DP 管理者」這個角色概念），
-        一律以所屬模組判定會讓 `SCHDP001` 變成**沒有任何人**能維護。故未註冊 checker 的
-        模組回退為 router-level 的同一組門檻（ET 或 DM 任一管理者）——與本次變更前的
-        行為相同，不新增也不縮減平台排程的可維護性。
+        平台沒有「DP 管理者」這個角色概念（`module_admin_gate` 沒有 `DP` 的 checker），
+        一律以所屬模組判定會讓 `SCHDP001` 變成**沒有任何人**能維護。故明列於
+        `_SHARED_MODULES` 者回退為 router-level 的同一組門檻（ET 或 DM 任一管理者）——與
+        本次變更前的行為相同，不新增也不縮減平台排程的可維護性。
+
+        ⚠️ **判準是「明列於共用清單」而非「沒有註冊 checker」**。後者寫起來更短，但方向
+        是 fail-open：日後任何新模組只要忘記呼叫 `module_admin_gate.register`（那只是
+        `main.py` 的一行 import 期呼叫，漏掉不會有任何錯誤訊息），它的排程就會**靜默地**
+        變成全體後台管理者可編輯。`ModuleAdminGate` 其餘每一條路徑（未註冊、checker 拋
+        例外、回傳非嚴格 `True`）都是 fail-closed，這裡不該是唯一的例外。
 
         Raises:
             AppError: 非該模組管理者（403 DP_AUTH_006，與 `require_module_admin` 同碼）。
         """
-        if module_admin_gate.has_checker(job.module):
-            allowed = await module_admin_gate.is_module_admin(job.module, operator.user_id, db)
-        else:
+        if job.module in _SHARED_MODULES:
             allowed = await module_admin_gate.is_any_module_admin(BACKOFFICE_MODULES, operator.user_id, db)
+        else:
+            allowed = await module_admin_gate.is_module_admin(job.module, operator.user_id, db)
         if not allowed:
             raise AppError(status_code=403, detail="需要模組管理者權限", error_code="DP_AUTH_006")
 

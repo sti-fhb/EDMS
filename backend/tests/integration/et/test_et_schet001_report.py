@@ -148,6 +148,26 @@ class TestWeeklyReportRecipients:
         assert reports == 1
         assert await _recipients(db, "WEEKLY_REPORT") == {"wr_t1@edms.local"}
 
+    async def test_教師週報內文不含他人課程與學員姓名(self, client, db) -> None:
+        """只斷言收件人集合是不夠的——`_send_reports` 的集合運算若寫歪（例如把 `facts`
+        全給每個 owner），收件人仍然只有他一個，但**信的內容多出別人的學員姓名**，
+        而週報內文會隨轉寄離開任何存取控制。"""
+        mine = await _user(db, "wr_m1", ROLE_TEACHER)
+        theirs = await _user(db, "wr_o1", ROLE_TEACHER)
+        my_course = await _course(client, db, mine, "own")
+        their_course = await _course(client, db, theirs, "oth")
+        my_student = await _user(db, "wr_s_mine", ROLE_STUDENT)
+        their_student = await _user(db, "wr_s_theirs", ROLE_STUDENT)
+        await _enroll(db, user_id=my_student, course_id=my_course["course_id"])
+        await _enroll(db, user_id=their_student, course_id=their_course["course_id"])
+
+        await EtWeeklyReportService().send_weekly(db)
+
+        body = next(m.body for m in await _mails(db, "WEEKLY_REPORT") if m.recipient == "wr_m1@edms.local")
+        assert "週報課程own" in body and "測試wr_s_mine" in body
+        assert "週報課程oth" not in body, "教師的週報不得含他人課程"
+        assert "測試wr_s_theirs" not in body, "教師的週報不得含他人課程的學員姓名"
+
     async def test_管理者收到全域週報(self, client, db) -> None:
         teacher = await _user(db, "wr_t2", ROLE_TEACHER)
         await _user(db, "wr_a2", ROLE_ADMIN)
@@ -180,6 +200,24 @@ class TestWeeklyReportRecipients:
         await EtWeeklyReportService().send_weekly(db)
 
         assert await _recipients(db, "WEEKLY_REPORT") == {"wr_a4@edms.local"}
+
+    async def test_DP帳號已停用者不收(self, client, db) -> None:
+        """ET 角色列還在、但 `DP_USER.STATUS` 已非 `ACTIVE`。
+
+        `disable_idle_accounts` 每日把閒置逾 90 天的帳號設為 `DISABLED`，而它**完全不碰
+        `ET_USER_ROLE`**。`core/auth.py` 對非 `ACTIVE` 帳號一律 403——也就是說停用擋住了
+        API、卻擋不住信：離職者的信箱會無限期每週收到全站統計與學員姓名，而郵件是當時
+        唯一還通的管道。
+        """
+        teacher = await _user(db, "wr_t7", ROLE_TEACHER)
+        disabled_admin = await _user(db, "wr_a7", ROLE_ADMIN)
+        await _course(client, db, teacher, "r7")
+        await db.execute(update(DpUser).where(DpUser.user_id == disabled_admin).values(status="DISABLED"))
+        await db.flush()
+
+        await EtWeeklyReportService().send_weekly(db)
+
+        assert await _recipients(db, "WEEKLY_REPORT") == {"wr_t7@edms.local"}
 
     async def test_名下無開放中課程之教師不收(self, client, db) -> None:
         """沿用 `COURSE_INVITE_DIGEST` 的「空清單不寄信」——不寄一封列表為空的信。"""

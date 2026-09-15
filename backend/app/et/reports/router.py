@@ -12,11 +12,32 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.et.deps import EtContext, require_et_roles
+from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.et.course.schemas import MAX_INT4
+from app.et.deps import EtContext, rate_limit_by_et_user, require_et_roles
 from app.et.reports.service import EtReportsService
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
-router = APIRouter(prefix="/api/et/reports", tags=["et-reports"])
+#: 每位使用者 / 每個 IP 每分鐘之明細匯出次數。
+#:
+#: **比 ET03 的瀏覽端點（180 / 600）緊得多**：這是匯出不是瀏覽，一次呼叫就拿到整批個資，
+#: 正常使用不會連打。而它的工作量無上限——管理者不帶 `course_id` 時要對**全站**開放中
+#: 課程各跑一輪聚合，全程佔住一條 DB 連線，而後端以 `--workers 1` 啟動。
+_USER_RATE = 10
+_IP_RATE = 60
+_SCOPE = "et-report-export"
+
+_user_limiter = SlidingWindowRateLimiter(max_requests=_USER_RATE, window_seconds=RATE_WINDOW_SECONDS)
+_ip_limiter = SlidingWindowRateLimiter(max_requests=_IP_RATE, window_seconds=RATE_WINDOW_SECONDS)
+
+router = APIRouter(
+    prefix="/api/et/reports",
+    tags=["et-reports"],
+    dependencies=[
+        Depends(rate_limit_by_et_user(_user_limiter, _SCOPE)),
+        Depends(rate_limit_by_ip(_ip_limiter, _SCOPE)),
+    ],
+)
 
 _service = EtReportsService()
 
@@ -28,6 +49,8 @@ async def download_weekly_students_csv(
     course_id: int | None = Query(
         default=None,
         ge=1,
+        # BIGINT 上限：超出時 asyncpg 綁定參數會溢位成 500 而非 404（同 `course/schemas.py`）
+        le=MAX_INT4,
         description="省略時為呼叫者權限範圍內的全部開放中課程（週報信中的連結即為此形式）",
     ),
 ) -> Response:
