@@ -34,6 +34,7 @@ from sqlalchemy import select, update
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import (
@@ -49,7 +50,7 @@ from app.et.constants import (
     ROLE_TEACHER,
     SOURCE_INVITATION_CODE,
 )
-from app.et.course.models import EtCourse
+from app.et.course.models import EtChapter, EtCourse
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuizAttemptM
 from app.et.roles.models import EtUserRole
@@ -96,11 +97,17 @@ async def _tag(db, name: str) -> int:
     return tag_id
 
 
-async def _course(client, db, slug: str, *, time_limit_min: int | None = 30) -> dict:
+async def _course(client, db, slug: str, *, time_limit_min: int | None = 30, quiz_first: bool = False) -> dict:
     """一門已發布課程（1 教材 + 1 小考）+ 一位在籍學員。
 
     ⚠️ 標籤用課程專屬名稱、**不用「全體」**：後者會在發布時把全站學員角色者都帶進課程
     並排入通知信，讓測試相依於 DB 裡有多少學員。
+
+    Args:
+        quiz_first: 測驗排在教材**之前**。解鎖判定對擁有者一樣適用（`_locked_ids` 不看
+            是不是教師），而教師預覽時 `mark_item_viewed` 走 `_PreviewOnly` 分支、不寫
+            `ET_PROGRESS`，於是**教師永遠解不開非第一項的測驗**。要造出「教師預覽 attempt」
+            就只能讓測驗是第一項。
     """
     teacher = await _user(db, f"t_{slug}", ROLE_TEACHER)
     student = await _user(db, f"s_{slug}", ROLE_STUDENT)
@@ -125,19 +132,30 @@ async def _course(client, db, slug: str, *, time_limit_min: int | None = 30) -> 
     assert ch.status_code == 201, ch.text
     chapter_id = ch.json()["chapter_id"]
 
-    mat = await client.post(
-        f"/api/et/chapters/{chapter_id}/items",
-        json={"item_type": ITEM_MATERIAL, "title": "教材"},
-        headers=_bearer(teacher),
-    )
-    assert mat.status_code == 201, mat.text
+    async def _add_material():
+        res = await client.post(
+            f"/api/et/chapters/{chapter_id}/items",
+            json={"item_type": ITEM_MATERIAL, "title": "教材"},
+            headers=_bearer(teacher),
+        )
+        assert res.status_code == 201, res.text
+        return res
 
-    quiz = await client.post(
-        f"/api/et/chapters/{chapter_id}/items",
-        json={"item_type": ITEM_QUIZ, "title": "小考", "time_limit_min": time_limit_min},
-        headers=_bearer(teacher),
-    )
-    assert quiz.status_code == 201, quiz.text
+    async def _add_quiz():
+        res = await client.post(
+            f"/api/et/chapters/{chapter_id}/items",
+            json={"item_type": ITEM_QUIZ, "title": "小考", "time_limit_min": time_limit_min},
+            headers=_bearer(teacher),
+        )
+        assert res.status_code == 201, res.text
+        return res
+
+    if quiz_first:
+        quiz = await _add_quiz()
+        mat = await _add_material()
+    else:
+        mat = await _add_material()
+        quiz = await _add_quiz()
     quiz_id = quiz.json()["quiz_id"]
     question = await client.post(
         f"/api/et/quizzes/{quiz_id}/questions",
@@ -391,3 +409,82 @@ class TestSettleStaleAttempts:
         await EtScheduleService().settle_stale_attempts(db)
 
         assert (await _attempt(db, attempt_id)).updated_user == "SYSTEM"
+
+    async def test_教師預覽之attempt結清後不寫入進度(self, client, db) -> None:
+        """教師可對自己課程開 attempt 而**不必在籍**（`ensure_can_access(enrolled, is_owner)`）。
+
+        #255 裁示 Q1 明訂教師預覽不得寫入 `ET_PROGRESS`——否則教師預覽完就出現在自己
+        課程的完課統計裡。`AttemptService.submit()` 以 `_is_preview` 擋下；結清路徑繞過了
+        那支 Service，若不自行補上同一道判定，一筆被遺忘的預覽 attempt 就會在課程關閉後
+        由排程悄悄寫進進度表，且沒有任何錯誤訊息。
+        """
+        # 測驗須為章節第一項：解鎖判定對擁有者一樣適用，而教師「看教材」走
+        # `_PreviewOnly` 分支不寫進度，故永遠解不開排在教材之後的測驗
+        ctx = await _course(client, db, "stlp", quiz_first=True)
+        teacher = ctx["teacher"]
+        started = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(teacher))
+        assert started.status_code == 201, started.text
+        attempt_id = started.json()["attempt_id"]
+        state = await client.get(f"/api/et/attempts/{attempt_id}", headers=_bearer(teacher))
+        chosen = [o["option_id"] for o in state.json()["questions"][0]["options"] if o["text"] == "甲"][0]
+        saved = await client.put(
+            f"/api/et/attempts/{attempt_id}/answers/{ctx['question_id']}",
+            json={"selected_options": [chosen]},
+            headers=_bearer(teacher),
+        )
+        assert saved.status_code == 204, saved.text
+        await _expire(db, ctx["course_id"])
+
+        await EtScheduleService().settle_stale_attempts(db)
+
+        row = await _attempt(db, attempt_id)
+        # 考卷照常結清計分（`ET_QUIZ_ATTEMPT_M` 的列本來就會產生，那是預覽的用途）
+        assert row.status == ATTEMPT_TIMEOUT
+        assert row.is_pass is True
+        # 但**不得**寫進度——這正是 #255 裁示 Q1 要避開的後果
+        progress = await db.scalar(
+            select(EtProgress.progress_id).where(
+                EtProgress.user_id == teacher,
+                EtProgress.item_id == ctx["quiz_item_id"],
+                EtProgress.deleted == 0,
+            )
+        )
+        assert progress is None
+
+    async def test_軟刪除章節下的attempt不被結清(self, client, db) -> None:
+        """教師刪掉整章後，那些 attempt 的考卷已無對應題目，結清它們沒有意義。"""
+        ctx = await _course(client, db, "stld")
+        attempt_id = await _start_attempt(client, ctx)
+        await _expire(db, ctx["course_id"])
+        await db.execute(update(EtChapter).where(EtChapter.course_id == ctx["course_id"]).values(deleted=1))
+        await db.flush()
+
+        settled = await EtScheduleService().settle_stale_attempts(db)
+
+        assert settled == 0
+        assert (await _attempt(db, attempt_id)).status == ATTEMPT_IN_PROGRESS
+
+
+class TestCloseAudit:
+    """到期自動關閉之稽核（與教師手動關閉對等）。"""
+
+    async def test_到期關閉寫入稽核(self, client, db) -> None:
+        """關閉一門課會立刻影響全部在籍學員。手動關閉有稽核、自動關閉沒有的話，
+        事後查「這門課為什麼關了」會在自動關閉的案例上一無所獲。"""
+        ctx = await _course(client, db, "aud1")
+        await _expire(db, ctx["course_id"])
+
+        await EtScheduleService().close_expired_courses(db)
+
+        # 同一課程的 `ET-COURSE` 稽核還有發布那筆（operator 是教師），故以 SYSTEM 定位
+        log = await db.scalar(
+            select(DpAuditLog).where(
+                DpAuditLog.func_name == "ET-COURSE",
+                DpAuditLog.target_id == str(ctx["course_id"]),
+                DpAuditLog.created_user == "SYSTEM",
+            )
+        )
+        assert log is not None
+        assert "自動關閉" in log.description
+        # 排程沒有請求來源，硬填會讓該欄位變成不可信
+        assert log.source_ip is None

@@ -32,17 +32,25 @@ def _effectively_closed(now: datetime):
 class EtScheduleRepository:
     """SCHET002 之批次掃描查詢。"""
 
-    async def expired_published_courses(self, db: AsyncSession, now: datetime) -> list[EtCourse]:
-        """已逾 `OPEN_END_AT` 但狀態仍為 `PUBLISHED` 之課程（FR-ET-US14-06）。
+    async def expired_published_course_ids(self, db: AsyncSession, now: datetime) -> list[int]:
+        """已逾 `OPEN_END_AT` 但狀態仍為 `PUBLISHED` 之課程 id（FR-ET-US14-06）。
 
         **不含**已是 `CLOSED` 者——它們已經關過了，再關一次只會覆寫 `CLOSED_AT`，把
         「什麼時候關的」這個資訊每日往後推。
 
         `open_end_at.is_not(None)` 是必要的：`NULL` 在 SQL 的比較中不為真，本可省略，
         但寫出來讓「草稿可以沒有訖止、已發布必有」這件事在查詢裡看得見。
+
+        ## 只回 id，不回 ORM 物件
+
+        呼叫端**逐筆 commit / rollback**（見 `service` 的兩個理由）。`rollback()` 一律讓
+        已載入的 ORM 物件過期——不論 session 是否設 `expire_on_commit=False`。若在此回傳
+        實體，下一圈存取 `course.version` 會觸發 lazy refresh，而屬性存取無法 await，
+        於是整批在**第一次失敗之後**死於 `MissingGreenlet`，而不是繼續處理其餘課程。
+        呼叫端據 id 逐筆重取，順帶拿到最新版本與狀態。
         """
         rows = await db.scalars(
-            select(EtCourse)
+            select(EtCourse.course_id)
             .where(
                 EtCourse.status == COURSE_PUBLISHED,
                 EtCourse.open_end_at.is_not(None),
@@ -53,8 +61,10 @@ class EtScheduleRepository:
         )
         return list(rows.all())
 
-    async def stale_in_progress_attempts(self, db: AsyncSession, now: datetime) -> list[EtQuizAttemptM]:
-        """視同關閉之課程下，仍為 `IN_PROGRESS` 的 attempt（#317）。
+    async def stale_in_progress_attempt_ids(self, db: AsyncSession, now: datetime) -> list[int]:
+        """視同關閉之課程下，仍為 `IN_PROGRESS` 的 attempt id（#317）。
+
+        只回 id 的理由同 `expired_published_course_ids`。
 
         課程層以 `ET_CHAPTER.COURSE_ID` 反查而非 `ET_QUIZ_ATTEMPT_M.COURSE_ID`：後者是
         開始作答當下存下的冗餘欄位，前者才是當前的結構事實（同 `progress/repository`
@@ -64,7 +74,7 @@ class EtScheduleRepository:
         對應題目，結清它們沒有意義，且 `_mark_item_completed` 的反查本來就會落空。
         """
         rows = await db.scalars(
-            select(EtQuizAttemptM)
+            select(EtQuizAttemptM.attempt_id)
             .join(EtQuiz, EtQuiz.quiz_id == EtQuizAttemptM.quiz_id)
             # ⚠️ FK 方向是 `ET_ITEM.QUIZ_ID` → `ET_QUIZ`（測驗本體不帶 item_id），
             # 同 `attempt/repository.quiz_context`

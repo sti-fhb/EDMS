@@ -6,11 +6,15 @@
 handler 為 async 無參、自管 session（比照 `app.dp.schedules.handlers.daily_platform_job`
 與 `app.dm.review.reminder.run`）。
 
-## 兩批各自交易
+## 兩批各自 session，且 service 內**逐筆** commit
 
 第二批失敗不該讓第一批已完成的關閉一起回滾——那會讓「課程到期了卻還開著」這件事在
 結清邏輯出錯時無限延續，而那正是本 job 要修的狀態。同一個理由見 `daily_platform_job`
 的三批次拆法。
+
+交易邊界在 `EtScheduleService` 內、以**單筆**為單位（見該模組 docstring 的兩個理由：
+批次容錯與稽核鏈鎖的持有時間），故本層**不呼叫 `commit()`**——那會是一個永遠沒有東西
+可提交的呼叫，讀者卻會以為交易邊界在這裡。
 
 ## 順序：先關閉、後結清
 
@@ -38,10 +42,8 @@ async def daily_job() -> None:
 
     async with AsyncSessionLocal() as db:
         closed = await service.close_expired_courses(db)
-        await db.commit()
 
     async with AsyncSessionLocal() as db:
         settled = await service.settle_stale_attempts(db)
-        await db.commit()
 
     logger.info("SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆", closed, settled)
