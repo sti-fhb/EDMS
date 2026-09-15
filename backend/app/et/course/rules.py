@@ -48,6 +48,49 @@ def ensure_tag_change_allowed(status: str, *, current: set[int], desired: set[in
         raise AppError(status_code=422, detail="已發布課程不可移除既有標籤", error_code="ET_COURSE_003")
 
 
+def ensure_schedule_not_cleared(
+    status: str, *, current_end_at: datetime | None, desired_end_at: datetime | None
+) -> None:
+    """草稿可自由改起訖；**非草稿不得把 `OPEN_END_AT` 清空**（#301 留言追加）。
+
+    `CourseUpdateReq` 是全量覆寫（schema docstring：「非 partial update，故不使用
+    `exclude_unset`」），所以擁有者只要送一次**不含** `open_end_at` 的 PUT，已發布課程的
+    訖止就變成 `NULL`。
+
+    ## 為何比「把訖止改到未來」嚴重
+
+    延期只是把期限往後推，課程仍有期限、到期後 `is_effectively_closed` 會再次生效。
+    清成 `NULL` 是**永久失效**——該函式對 `NULL` 一律回 `False`（見其註解：不該因為一個
+    缺失的欄位去關掉一門教師沒有要求關閉的課程），課程從此再也不會視同關閉，連帶讓
+    #288 + #313 接上的六處守門全部失效：`attempt` 不可開新作答、`enrollment` 邀請碼失效、
+    `invitation` 連結失效、`progress` 寫入 409、`survey_fill` 不可填、`learning` 唯讀提示。
+
+    ## 為何擋「清空」這個動作，而非「訖止為空」這個狀態
+
+    系統內真實存在 `PUBLISHED` 且 `OPEN_END_AT` 為 `NULL` 的課程——發布檢核的
+    `BLOCK_NO_SCHEDULE` 只在 `publish` 當下跑一次，之後沒有任何地方維持該不變量。
+    若改成擋狀態，那些既存課程會連其他欄位都改不了。
+
+    ## 為何不改成「`PUBLISHED` 且 `NULL` 視同關閉」
+
+    那會推翻 #288 已裁示的語意，也會讓 #313 的 `test_沒有訖止日不視為關閉` 預期反轉。
+
+    Args:
+        status: 課程當前狀態（`ET_COURSE_STATUS`）。
+        current_end_at: 課程現有之 `OPEN_END_AT`。
+        desired_end_at: 本次欲設定之 `OPEN_END_AT`。
+
+    Raises:
+        AppError: 422 `ET_COURSE_009`，非草稿課程嘗試清空訖止時間。
+    """
+    if status != COURSE_DRAFT and current_end_at is not None and desired_end_at is None:
+        raise AppError(
+            status_code=422,
+            detail="已發布課程不可清空閱課結束時間，如需停止請改用關閉課程",
+            error_code="ET_COURSE_009",
+        )
+
+
 def ensure_deletable(status: str) -> None:
     """僅草稿課程可刪除（SA 裁示 Q1，#202）。
 

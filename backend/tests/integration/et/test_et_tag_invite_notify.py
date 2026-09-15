@@ -273,6 +273,9 @@ class TestAddTagToPublishedCourse:
             f"{_COURSES}/{cid}",
             json={
                 "course_name": "採血作業新進人員訓練",
+                # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": detail["open_end_at"],
                 "tag_ids": [*detail["tag_ids"], second_tag],
                 "version": detail["version"],
             },
@@ -309,6 +312,9 @@ class TestAddTagToPublishedCourse:
             f"{_COURSES}/{cid}",
             json={
                 "course_name": "採血作業新進人員訓練",
+                # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": detail["open_end_at"],
                 "tag_ids": [*detail["tag_ids"], second_tag],
                 "version": detail["version"],
             },
@@ -342,6 +348,9 @@ class TestAddTagToPublishedCourse:
             f"{_COURSES}/{cid}",
             json={
                 "course_name": "改名後的課程名稱",
+                # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": detail["open_end_at"],
                 "tag_ids": [*detail["tag_ids"], second_tag],
                 "version": detail["version"],
             },
@@ -387,6 +396,9 @@ class TestAddTagToPublishedCourse:
             f"{_COURSES}/{cid}",
             json={
                 "course_name": "改過的課程名稱",
+                # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": detail["open_end_at"],
                 "tag_ids": detail["tag_ids"],
                 "version": detail["version"],
             },

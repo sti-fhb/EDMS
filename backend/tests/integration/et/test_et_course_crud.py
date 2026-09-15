@@ -724,3 +724,90 @@ class TestExtendRevivesCourse:
             headers=_bearer(uid),
         )
         assert r.status_code == 204, r.text
+
+
+class TestScheduleNotCleared:
+    """非草稿課程不得把 `open_end_at` 清為 `NULL`（#301 留言追加）。
+
+    `CourseUpdateReq` 是**全量覆寫**（schema docstring 明寫「非 partial update，故不使用
+    `exclude_unset`」），所以擁有者只要送一次**不含** `open_end_at` 的 PUT，已發布課程的
+    訖止就變成 `NULL`。
+
+    ## 為何比「改到未來」嚴重
+
+    延期只是把期限往後推，課程仍有期限、到期後 `is_effectively_closed` 會再次生效。
+    清成 `NULL` 則是**永久失效**——該函式對 `NULL` 一律回 `False`，課程從此再也不會視同
+    關閉，連帶讓 #288 + #313 接上的六處守門全部失效（`attempt` 不可開新作答、`enrollment`
+    邀請碼失效、`invitation` 連結失效、`progress` 寫入 409、`survey_fill` 不可填、
+    `learning` 唯讀提示）。
+
+    ## 為何不改成「`PUBLISHED` 且 `NULL` 視同關閉」
+
+    那會推翻 #288 已裁示的語意（`rules.py` 明寫「不該因為一個缺失的欄位去關掉一門教師沒有
+    要求關閉的課程」），也會讓 #313 的 `test_沒有訖止日不視為關閉` 預期反轉。
+    """
+
+    async def test_已發布課程不得清空訖止(self, client, db) -> None:
+        uid = await _user(db, "ETC_S1")
+        end_at = (utcnow() + timedelta(days=30)).replace(microsecond=0)
+        created = await client.post(
+            _URL,
+            json={
+                "course_name": "有期限的課",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": end_at.isoformat(),
+            },
+            headers=_bearer(uid),
+        )
+        cid = created.json()["course_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == cid).values(status=COURSE_PUBLISHED))
+        await db.flush()
+
+        # 全量覆寫表單：不含 open_end_at 即等同送 None
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={"course_name": "有期限的課", "open_start_at": "2026-01-01T00:00:00+00:00", "version": 0},
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_COURSE_009"
+        db.expire_all()
+        row = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
+        assert row.open_end_at is not None, "被擋下時既有訖止不得被清空"
+
+    async def test_草稿課程可自由清空訖止(self, client, db) -> None:
+        """草稿本來就不對學員可見、發布時才檢核起訖（`BLOCK_NO_SCHEDULE`），此處不應誤擋。"""
+        uid = await _user(db, "ETC_S2")
+        created = await client.post(
+            _URL,
+            json={
+                "course_name": "草稿",
+                "open_start_at": "2026-01-01T00:00:00+00:00",
+                "open_end_at": (utcnow() + timedelta(days=30)).replace(microsecond=0).isoformat(),
+            },
+            headers=_bearer(uid),
+        )
+        cid = created.json()["course_id"]
+
+        r = await client.put(
+            f"{_URL}/{cid}",
+            json={"course_name": "草稿", "version": 0},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text
+
+    async def test_原本就沒有訖止者不受影響(self, client, db) -> None:
+        """擋的是「清空」這個動作，不是「訖止為空」這個狀態。
+
+        系統內真實存在 `PUBLISHED` 且 `open_end_at` 為 `NULL` 的課程（見
+        `test_et_attempt.py` 的測試課程）。若改成擋狀態，那些課程會連其他欄位都改不了。
+        """
+        uid = await _user(db, "ETC_S3")
+        created = await client.post(_URL, json={"course_name": "無期限課"}, headers=_bearer(uid))
+        cid = created.json()["course_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == cid).values(status=COURSE_PUBLISHED))
+        await db.flush()
+
+        r = await client.put(f"{_URL}/{cid}", json={"course_name": "改個名字", "version": 0}, headers=_bearer(uid))
+        assert r.status_code == 204, r.text

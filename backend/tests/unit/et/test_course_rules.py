@@ -18,6 +18,7 @@ from app.et.course.rules import (
     ensure_reopen_schedule,
     ensure_reopenable,
     ensure_reorder_complete,
+    ensure_schedule_not_cleared,
     ensure_tag_change_allowed,
     is_effectively_closed,
     resequence,
@@ -278,3 +279,30 @@ class TestIsEffectivelyClosed:
         import inspect
 
         assert "open_start_at" not in inspect.signature(is_effectively_closed).parameters
+
+
+class TestEnsureScheduleNotCleared:
+    """#301 留言：非草稿不得把 `OPEN_END_AT` 清空——清成 `NULL` 會讓課程永久不再視同關閉。"""
+
+    def test_草稿可清空(self) -> None:
+        ensure_schedule_not_cleared(COURSE_DRAFT, current_end_at=_NOW, desired_end_at=None)
+
+    def test_已發布清空被擋(self) -> None:
+        with pytest.raises(AppError) as exc:
+            ensure_schedule_not_cleared(COURSE_PUBLISHED, current_end_at=_NOW, desired_end_at=None)
+        assert exc.value.status_code == 422
+        assert exc.value.error_code == "ET_COURSE_009"
+
+    def test_已關閉清空亦被擋(self) -> None:
+        """關閉可再開課，屆時沿用的仍是這組欄位；不因暫時關閉而放寬。"""
+        with pytest.raises(AppError):
+            ensure_schedule_not_cleared(COURSE_CLOSED, current_end_at=_NOW, desired_end_at=None)
+
+    def test_原本就為空者不擋(self) -> None:
+        """擋的是「清空」這個動作，不是「為空」這個狀態——`PUBLISHED` 且訖止為 `NULL`
+        的課程真實存在（`BLOCK_NO_SCHEDULE` 只在 publish 當下跑一次），擋狀態會讓那些
+        課程連其他欄位都改不了。"""
+        ensure_schedule_not_cleared(COURSE_PUBLISHED, current_end_at=None, desired_end_at=None)
+
+    def test_改成另一個時間不擋(self) -> None:
+        ensure_schedule_not_cleared(COURSE_PUBLISHED, current_end_at=_NOW, desired_end_at=_NOW)
