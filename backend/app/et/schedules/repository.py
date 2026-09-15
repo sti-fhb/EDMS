@@ -38,8 +38,15 @@ class EtScheduleRepository:
         **不含**已是 `CLOSED` 者——它們已經關過了，再關一次只會覆寫 `CLOSED_AT`，把
         「什麼時候關的」這個資訊每日往後推。
 
-        `open_end_at.is_not(None)` 是必要的：`NULL` 在 SQL 的比較中不為真，本可省略，
-        但寫出來讓「草稿可以沒有訖止、已發布必有」這件事在查詢裡看得見。
+        `open_end_at.is_not(None)` 在 SQL 語意上可省略（`NULL < now` 不為真），寫出來是為了
+        讓下面這件事在查詢裡看得見：
+
+        ⚠️ **`OPEN_END_AT` 為 `NULL` 的已發布課程會被本查詢排除，因而永遠不會自動關閉**，
+        其下的 attempt 也就永遠不會被結清。發布檢核要求起訖必填（`publish_rules`），但
+        `PUT /courses/{id}` 曾可把已發布課程的訖止**清成 `NULL`**（全量覆寫表單少送一個欄位
+        即可），而清成 `NULL` 是永久失效——`is_effectively_closed` 從此對該課程一律回
+        `False`。該破口由 **#328** 於入口處堵上；本查詢刻意**不**在此另做補救，否則兩處
+        對「什麼叫視同關閉」的定義就會分岔。
 
         ## 只回 id，不回 ORM 物件
 
