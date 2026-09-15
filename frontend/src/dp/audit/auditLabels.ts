@@ -16,6 +16,8 @@ const ACTION_LABELS: Record<string, string> = {
   CREATE: "新增",
   UPDATE: "修改",
   DELETE: "刪除",
+  // ET03 具名個資匯出（#322 / SA 裁示 2026-09-14）
+  EXPORT: "匯出",
 }
 
 const RESULT_LABELS: Record<string, string> = {

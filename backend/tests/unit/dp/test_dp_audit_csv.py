@@ -34,7 +34,14 @@ def _resp(**overrides) -> AuditLogResponse:
 
 @pytest.mark.parametrize(
     ("code", "expected"),
-    [("LOGIN", "登入"), ("LOGOUT", "登出"), ("CREATE", "新增"), ("UPDATE", "修改"), ("DELETE", "刪除")],
+    [
+        ("LOGIN", "登入"),
+        ("LOGOUT", "登出"),
+        ("CREATE", "新增"),
+        ("UPDATE", "修改"),
+        ("DELETE", "刪除"),
+        ("EXPORT", "匯出"),
+    ],
 )
 def test_csv_action_type_中文化(code: str, expected: str) -> None:
     assert _csv_cell(_resp(action_type=code), "action_type") == expected
@@ -46,8 +53,15 @@ def test_csv_result_中文化(code: str, expected: str) -> None:
 
 
 def test_csv_未知碼原樣輸出() -> None:
-    assert _csv_cell(_resp(action_type="EXPORT"), "action_type") == "EXPORT"
-    assert _csv_cell(_resp(result="PARTIAL"), "result") == "PARTIAL"
+    """對照表查不到的碼原樣輸出，不因查不到而變成空白。
+
+    ⚠️ 樣本刻意用**不可能成為真實碼**的字串。這裡原本寫 `"EXPORT"` / `"PARTIAL"`，而
+    #322 為 ET03 具名個資匯出新增了 `EXPORT` 後，本測試就從「驗 fallback」默默變成
+    「驗中文化」而失敗——拿看起來合理的真實字串當「未知」的樣本，等於賭它永遠不會被
+    實作。新增碼時請改補進 `test_csv_action_type_中文化` 的參數表，不要動這裡的樣本。
+    """
+    assert _csv_cell(_resp(action_type="NOT_A_REAL_ACTION"), "action_type") == "NOT_A_REAL_ACTION"
+    assert _csv_cell(_resp(result="NOT_A_REAL_RESULT"), "result") == "NOT_A_REAL_RESULT"
 
 
 def test_csv_其他欄位不受中文化影響() -> None:
