@@ -45,6 +45,30 @@ def is_account_usable(*, status: str, locked_until: Optional[datetime], now: dat
     return locked_until is None or locked_until <= now
 
 
+def is_account_disabled(status: str) -> bool:
+    """帳號是否已停用（`STATUS` 非 `ACTIVE`）。
+
+    ## 與 `is_account_usable` 的差別：**不看鎖定**
+
+    鎖定是暫時的、會自動解除；停用是管理者（或 SCHDP001 閒置 90 天）的決定，在有人改
+    回來之前一直有效。ET 的課程擁有者標記要的是後者——把連續登入失敗而被鎖 15 分鐘的
+    教師標成「已停用帳號」是錯的。
+
+    ## 為何放在 DP
+
+    本模組 docstring 明訂「`STATUS` 值域屬 DP 語意，其他模組不得自行解讀」。ET02 課程
+    清單需要判定擁有者是否停用（#330），若在 ET 那側寫 `status == "DISABLED"`，DP 日後
+    新增第三種狀態時 ET 會靜默地把它算成「未停用」。
+
+    Args:
+        status: `DP_USER.STATUS` 原始值。
+
+    Returns:
+        非 `ACTIVE` 一律視為停用（fail-closed，與 `is_account_usable` 同一立場）。
+    """
+    return status != _STATUS_ACTIVE
+
+
 def account_usable_clause(now: datetime) -> ColumnElement[bool]:
     """「帳號可用」之 SQL 條件，供 `select().where()` 掛載。
 

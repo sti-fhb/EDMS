@@ -338,6 +338,56 @@ class EtProgressRepository:
         row.updated_date = now
         await db.flush()
 
+    async def touch_activity(self, db: AsyncSession, *, user_id: str, course_id: int, operator: OperatorInfo) -> None:
+        """只更新 `LAST_ACTIVITY_AT`，**不碰 `LAST_ITEM_ID`**（#334 / SA 裁示 2026-09-15）。
+
+        ## 什麼算一次「學習活動」
+
+        `data-model` §ET_ENROLLMENT 定義本欄為「最近一次學習動作 / 測驗提交時間」。
+        目前的完整清單是：
+
+        | 活動 | 寫入點 |
+        |---|---|
+        | 檢視項目 | `set_last_item()`（連帶寫 `LAST_ITEM_ID`）|
+        | 提交測驗 | `attempt/service.submit()` → 本函式 |
+        | 填答問卷 | `survey_fill/service.submit()` → 本函式 |
+
+        **加入課程不算**——見 `test_et_enrollment.py`「加入不是學習動作」。新增活動種類
+        時請一併更新本表，否則下一個人得把三個模組都讀過才知道漏了哪個。
+
+        ## 為何不共用 `set_last_item()`
+
+        那支會**連帶**寫 `LAST_ITEM_ID`。提交測驗與填問卷都不該改變「上次讀到哪」——
+        否則學員下次回到課程會被帶到測驗而不是他真正讀到的地方，症狀是「續讀位置莫名
+        其妙跳掉」，且不會有任何錯誤。
+
+        查無選課列時**靜默返回**：擁有者預覽沒有選課列，比照 `set_last_item()` 的處理。
+
+        ## ⚠️ 本支繞過 `EtProgressService._guard_write`（課程視同關閉時一律 409）
+
+        呼叫端是 `attempt` / `survey_fill` 的 service，直接進 repository。這是**刻意**的：
+        `spec_us6` 場景 27 允許「關閉當下已在作答者完成並計分」，那條窄縫裡的提交本來就
+        該記為一次活動；擋掉會讓活動時間與實際發生的事對不上。`_mark_item_completed`
+        對同一個繞道有更完整的說明。
+
+        但這件事不會自己顯現——日後若把關閉守門移到這一層，請先確認場景 27 仍成立。
+        """
+        row = await db.scalar(
+            select(EtEnrollment).where(
+                EtEnrollment.user_id == user_id,
+                EtEnrollment.course_id == course_id,
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+            )
+        )
+        if row is None:
+            return
+        now = utcnow()
+        row.last_activity_at = now
+        row.updated_user = operator.user_id
+        row.updated_date = now
+        await db.flush()
+
     async def get_last_item_id(self, db: AsyncSession, *, user_id: str, course_id: int) -> int | None:
         return await db.scalar(
             select(EtEnrollment.last_item_id).where(
