@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.et.constants import ATTEMPT_IN_PROGRESS, COURSE_CLOSED, COURSE_PUBLISHED
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.quiz.models import EtQuiz, EtQuizAttemptM
+from app.et.roles.models import EtUserRole
 
 
 def _effectively_closed(now: datetime):
@@ -31,6 +32,22 @@ def _effectively_closed(now: datetime):
 
 class EtScheduleRepository:
     """SCHET002 之批次掃描查詢。"""
+
+    async def active_role_user_ids(self, db: AsyncSession, role: str) -> set[str]:
+        """目前**仍持有**該 ET 角色者（`IS_ACTIVE` 為真且未軟刪）。
+
+        週報收件人依此推導，而非只看 `ET_COURSE.OWNER_ID`：教師角色被停用是離職 / 轉調
+        的標準第一步，而課程的 `OWNER_ID` 是不變的——只看擁有者會讓已離職者繼續每週收到
+        課程週報（內含全班姓名）。該課程仍會出現在管理者的全域週報裡，不會沒人看到。
+        """
+        rows = await db.scalars(
+            select(EtUserRole.user_id).where(
+                EtUserRole.role == role,
+                EtUserRole.is_active.is_(True),
+                EtUserRole.deleted == 0,
+            )
+        )
+        return set(rows.all())
 
     async def expired_published_course_ids(self, db: AsyncSession, now: datetime) -> list[int]:
         """已逾 `OPEN_END_AT` 但狀態仍為 `PUBLISHED` 之課程 id（FR-ET-US14-06）。

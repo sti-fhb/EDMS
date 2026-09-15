@@ -10,6 +10,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -21,6 +22,15 @@ from app.et.constants import COURSE_PUBLISHED
 from app.et.course.models import EtCourse
 from app.et.stats.models import EtWeeklyStat
 from app.et.stats.rules import CourseStat
+
+
+class OpenCourse(NamedTuple):
+    """開放中課程之週報所需欄位（純值，不是 ORM 實體——理由見 `open_courses`）。"""
+
+    course_id: int
+    course_name: str
+    owner_id: str
+    open_end_at: datetime
 
 
 class EtStatsRepository:
@@ -53,6 +63,28 @@ class EtStatsRepository:
             .order_by(EtCourse.course_id)
         )
         return list(rows.all())
+
+    async def open_courses(self, db: AsyncSession, now: datetime) -> list[OpenCourse]:
+        """開放中課程之 `(id, 名稱, 擁有者, 訖止)`——週報渲染所需的欄位。
+
+        **回純值而非 ORM 實體**：週報的寄送階段逐人 commit，而 `commit()` / `rollback()`
+        會讓已載入的實體過期，下一圈存取屬性即觸發 lazy refresh 而死於 `MissingGreenlet`
+        （同 `schedules/repository` 的說明）。讀階段一次取完轉成純值，寄階段就與 session
+        狀態無關。
+        """
+        rows = await db.execute(
+            select(EtCourse.course_id, EtCourse.course_name, EtCourse.owner_id, EtCourse.open_end_at)
+            .where(
+                EtCourse.status == COURSE_PUBLISHED,
+                EtCourse.open_start_at.is_not(None),
+                EtCourse.open_start_at <= now,
+                EtCourse.open_end_at.is_not(None),
+                EtCourse.open_end_at >= now,
+                EtCourse.deleted == 0,
+            )
+            .order_by(EtCourse.course_id)
+        )
+        return [OpenCourse(*row) for row in rows.all()]
 
     async def previous_avg_progress(self, db: AsyncSession, *, course_id: int, before: date) -> Decimal | None:
         """該課程**在 `before` 之前**最近一次快照的平均進度；沒有則 `None`（AC 5 的「—」）。

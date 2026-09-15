@@ -14,11 +14,12 @@ import importlib
 
 import pytest
 
-from app.et.schedules.handlers import daily_job
+from app.et.schedules.handlers import daily_job, weekly_job
 
 pytestmark = pytest.mark.unit
 
 #: 與 migration 寫進 `DP_SCHEDULE.HANDLER_REF` 的字串**逐字相同**。
+_SCHET001_HANDLER_REF = "app.et.schedules.handlers.weekly_job"
 _SCHET002_HANDLER_REF = "app.et.schedules.handlers.daily_job"
 
 #: 排程引擎的動態 import 白名單（`dp/schedules/scheduler._ALLOWED_HANDLER_PREFIXES`）。
@@ -31,17 +32,22 @@ def _resolve(handler_ref: str):
     return getattr(importlib.import_module(module_path), attr)
 
 
-class TestSchet002HandlerRef:
-    def test_解析得到的正是daily_job(self) -> None:
-        assert _resolve(_SCHET002_HANDLER_REF) is daily_job
+@pytest.mark.parametrize(
+    ("handler_ref", "expected"),
+    [(_SCHET001_HANDLER_REF, weekly_job), (_SCHET002_HANDLER_REF, daily_job)],
+    ids=["SCHET001", "SCHET002"],
+)
+class TestHandlerRef:
+    def test_解析得到的正是該handler(self, handler_ref: str, expected) -> None:
+        assert _resolve(handler_ref) is expected
 
-    def test_在引擎的白名單命名空間內(self) -> None:
+    def test_在引擎的白名單命名空間內(self, handler_ref: str, expected) -> None:
         """白名單之外的 `HANDLER_REF` 會被引擎拒載（CWE-470 縱深防禦）。"""
-        assert _SCHET002_HANDLER_REF.startswith(_ALLOWED_PREFIXES)
+        assert handler_ref.startswith(_ALLOWED_PREFIXES)
 
-    def test_是async無參callable(self) -> None:
+    def test_是async無參callable(self, handler_ref: str, expected) -> None:
         """引擎以 `await handler()` 呼叫——帶參數或非 coroutine 會在執行當下才爆。"""
         import inspect
 
-        assert inspect.iscoroutinefunction(daily_job)
-        assert not inspect.signature(daily_job).parameters
+        assert inspect.iscoroutinefunction(expected)
+        assert not inspect.signature(expected).parameters

@@ -22,18 +22,34 @@ handler 為 async 無參、自管 session（比照 `app.dp.schedules.handlers.da
 課的結清都慢一天。第二批的母體是「所有視同關閉」，不限於本次剛關的，故即使第一批
 全部失敗，先前已關閉課程的結清照常進行。
 
-## SCHET001 尚未實作
+`SCHET001`（每週）＝ `weekly_job`：① 統計快照 ② 週報 ③ 每週未看提醒。
 
-`SCHET001`（每週統計與週報）之 handler 待 ET-16 第二段交付；在那之前該列於
-`DP_SCHEDULE` 維持 `IS_ENABLED = false`，引擎不會嘗試載入它。
+## 快照與寄信分離
+
+FR-ET-US14-09 明訂「寄送失敗 MUST NOT 影響已寫入之統計快照資料」。故快照與寄信是各自
+獨立的 session 與交易，不是同一個交易裡的 try/except——後者仍會讓兩件事共用交易邊界，
+寄信階段的任何回滾都可能把快照一起帶走。
 """
 
 import logging
 
 from app.core.db import AsyncSessionLocal
 from app.et.schedules.service import EtScheduleService
+from app.et.schedules.weekly_service import EtWeeklyReportService
+from app.et.stats.service import EtStatsService
 
 logger = logging.getLogger(__name__)
+
+
+async def weekly_job() -> None:
+    """SCHET001 每週作業：統計快照 + 週報 + 每週未看提醒。"""
+    async with AsyncSessionLocal() as db:
+        written = await EtStatsService().take_snapshots(db)
+
+    async with AsyncSessionLocal() as db:
+        reports, reminds = await EtWeeklyReportService().send_weekly(db)
+
+    logger.info("SCHET001 完成：快照 %d 筆、週報 %d 封、未看提醒 %d 封", written, reports, reminds)
 
 
 async def daily_job() -> None:
