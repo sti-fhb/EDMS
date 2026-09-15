@@ -29,8 +29,8 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import dayjs from "dayjs"
 import type { Dayjs } from "dayjs"
-import { useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useEffect, useRef, useState } from "react"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
@@ -83,10 +83,17 @@ const EMPTY_FORM = {
  * **非擁有者為唯讀**（`spec.md` §擁有權判定）：顯示檢視模式提示，所有輸入停用、
  * 操作按鈕不顯示。後端另以 `ET_COURSE_002` 把關，前端隱藏僅為 UX。
  */
+/** 自動存草稿後要接著建立的項目（#335）——由 navigate state 跨元件重新掛載帶過去。 */
+interface PendingAddItem {
+  chapterIndex: number
+  itemType: ItemType
+}
+
 export function EtCourseEditorPage() {
   const { courseId: courseIdParam } = useParams<{ courseId: string }>()
   const courseId = courseIdParam ? Number(courseIdParam) : undefined
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const { message, confirm } = useNotification()
 
@@ -206,11 +213,12 @@ export function EtCourseEditorPage() {
         chapter_name: c.name,
         sort_order: i + 1,
         version: 0,
-        // 暫存章節尚未寫入 DB，掛不了項目——ItemList 於新增模式停用
+        // 暫存章節尚未寫入 DB，項目要等課程存檔後才掛得上（#335 之自動存草稿接手）
         items: [],
       }))
     : (course?.chapters ?? [])
   const status = course?.status ?? "DRAFT"
+
 
   /** 版本衝突以 Dialog 呈現而非 snackbar——使用者必須確實知道自己的編輯沒存進去。 */
   const handleError = (err: unknown) => {
@@ -643,7 +651,43 @@ export function EtCourseEditorPage() {
     })
   }
 
+  // 自動存草稿後由 navigate state 帶進來的待辦項目（#335）：課程與章節此時已寫入 DB，
+  // 依索引取真正的 `chapter_id` 再建項目並開視窗。只執行一次——ref 守衛在 state 被
+  // 清掉之前就攔住重入（`navigate(..., { replace: true, state: null })` 會再觸發一次 render）。
+  const pendingAddItem = (location.state as { pendingAddItem?: PendingAddItem } | null)?.pendingAddItem
+  const pendingHandled = useRef(false)
+
+  useEffect(() => {
+    if (!pendingAddItem || pendingHandled.current || isNew) return
+    const target = course?.chapters?.[pendingAddItem.chapterIndex]
+    if (!target) return // 等課程載入；載入後本 effect 會再跑一次
+    pendingHandled.current = true
+    // 清掉 state：否則使用者在本頁重新整理會再建一個空項目
+    navigate(location.pathname, { replace: true, state: null })
+    void (async () => {
+      try {
+        const created = await itemsApi.add(target.chapter_id, pendingAddItem.itemType, "")
+        invalidate()
+        setUnsavedNewItemId(created.item_id)
+        setOpenItem(created)
+      } catch (err) {
+        handleError(err)
+      }
+    })()
+    // deps 完整列出：`handleError` / `invalidate` 每次 render 都是新函式，本 effect 因此
+    // 會隨 render 重跑——但 `pendingHandled` ref 在首次真正執行時就設旗標，重入被擋在
+    // 最前面，故不需要 eslint-disable 來掩蓋依賴。
+  }, [pendingAddItem, course?.chapters, isNew, handleError, invalidate, location.pathname, navigate])
+
   const handleAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
+    // 新增模式：課程還不存在，項目掛不上去（`ET_ITEM` 需要真的 `CHAPTER_ID`）。
+    // 先自動存草稿再繼續，而不是要使用者先去按一次「儲存草稿」——那個斷點沒有業務
+    // 意義，章節那層（`CourseCreateReq.chapters`）當初就是為此讓課程與章節一次送出。
+    // 形狀比照 Moodle 的「Save and display」：把存檔藏在「往下走」的按鈕語意裡。
+    if (isNew) {
+      await autoSaveThenAddItem(chapter, itemType)
+      return
+    }
     try {
       // 不代填名稱——使用者開了視窗第一件事就是把預設值選起來刪掉。
       // 空名稱只是「還沒填」的過渡狀態，儲存時後端仍必填。
@@ -652,6 +696,37 @@ export function EtCourseEditorPage() {
       // 建完直接開視窗——空殼本身沒有內容，不開等於要使用者再點一次
       setUnsavedNewItemId(created.item_id)
       setOpenItem(created)
+    } catch (err) {
+      handleError(err)
+    }
+  }
+
+  /**
+   * 新增模式按「新增項目」：存草稿 → 導向編輯頁 → 由該頁接手建立項目並開視窗（#335）。
+   *
+   * ## 為何導向而非留在本頁用 state 切換
+   *
+   * 留在 `/et/courses/new` 的話，使用者一重新整理會看到空白的新增頁，而課程其實
+   * 已經建好了——他會再建一門。導向後網址即為 `/et/courses/{id}`，重新整理安全。
+   * 用 `replace` 是因為 `/new` 在草稿建立後已失效，返回鍵不該回到那裡。
+   *
+   * ## 為何用 chapterIndex 而非 chapter_id
+   *
+   * `POST /courses` 的回應只有 `course_id` / `version`，**不含新建章節的 id**。而
+   * 暫存章節的 id 是前端的負數計數器，對後端無意義。後端按 `chapters` 陣列順序
+   * 逐一 append（見 `EtCourseService.create_draft`），故索引可對應——由編輯頁載入
+   * 課程後依索引取真正的 `chapter_id`。
+   */
+  const autoSaveThenAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
+    if (!validateForm()) return
+    const chapterIndex = stagedChapters.findIndex((c) => c.id === chapter.chapter_id)
+    try {
+      const created = await coursesApi.create({ ...toPayload(), chapters: stagedChapters.map((c) => c.name) })
+      message.success("已自動儲存草稿")
+      navigate(`/et/courses/${created.course_id}`, {
+        replace: true,
+        state: { pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType } },
+      })
     } catch (err) {
       handleError(err)
     }
@@ -1006,7 +1081,6 @@ export function EtCourseEditorPage() {
           )
           chapterMut.mutate(() => coursesApi.reorderChapters(courseId, ids, course?.version ?? 0))
         }}
-        itemsDisabled={isNew}
         onAddItem={handleAddItem}
         onOpenItem={(item) => {
           setItemError(null)

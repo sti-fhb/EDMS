@@ -64,11 +64,8 @@ describe("章節項目清單", () => {
     expect(screen.getByText("採血示範影片")).toBeInTheDocument()
   })
 
-  it("新增模式停用新增按鈕並說明原因", () => {
-    renderList({ items: [], disabled: true })
-    expect(screen.getByRole("button", { name: "新增項目" })).toBeDisabled()
-    expect(screen.getByText("請先儲存草稿後再新增項目")).toBeInTheDocument()
-  })
+  // 原有「新增模式停用新增按鈕並說明原因」一條已移除：#335 起新增模式按下去即自動存
+  // 草稿再繼續（`disabled` prop 與那句提示一併刪除），不再有需要解釋的停用狀態。
 
   it("空清單顯示引導文字", () => {
     renderList({ items: [] })

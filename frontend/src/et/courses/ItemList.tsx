@@ -111,7 +111,6 @@ interface ItemListProps {
   items?: ItemRow[]
   readOnly: boolean
   /** 新增模式（章節尚未建立於後端）時停用——項目須掛在已存在的章節下。 */
-  disabled?: boolean
   onAdd: (itemType: ItemType) => void
   onOpen: (item: ItemRow) => void
   onDelete: (item: ItemRow) => void
@@ -129,7 +128,6 @@ export function ItemList({
   // 降級成「這個章節沒有項目」比整頁崩潰好得多
   items = [],
   readOnly,
-  disabled = false,
   onAdd,
   onOpen,
   onDelete,
@@ -169,7 +167,6 @@ export function ItemList({
               size="small"
               variant="outlined"
               startIcon={<AddIcon />}
-              disabled={disabled}
               aria-haspopup="menu"
               onClick={(e) => setMenuAnchor(e.currentTarget)}
             >
@@ -195,7 +192,7 @@ export function ItemList({
 
       {items.length === 0 ? (
         <Typography variant="caption" color="text.disabled" sx={{ display: "block", py: 1 }}>
-          {disabled ? "請先儲存草稿後再新增項目" : "尚無項目——點「新增項目」加入教材或測驗"}
+          尚無項目——點「新增項目」加入教材或測驗
         </Typography>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

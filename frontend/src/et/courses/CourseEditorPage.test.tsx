@@ -10,13 +10,21 @@ import { server } from "../../test/server"
 
 // useParams 可變（切換新增 / 編輯模式）；比照 DM `DmEditorPage.test.tsx`
 // ——`renderWithProviders` 內建之 MemoryRouter 無法指定 initialEntries。
-const { navigateSpy, paramsRef } = vi.hoisted(() => ({
+const { navigateSpy, paramsRef, locationRef } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
   paramsRef: { current: {} as Record<string, string | undefined> },
+  // 自動存草稿（#335）跨了元件重新掛載——待開啟的項目由 navigate 的 state 帶過去，
+  // 故 useLocation 也須可控。
+  locationRef: { current: { pathname: "/et/courses/new", state: null } as { pathname: string; state: unknown } },
 }))
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigateSpy, useParams: () => paramsRef.current }
+  return {
+    ...actual,
+    useNavigate: () => navigateSpy,
+    useParams: () => paramsRef.current,
+    useLocation: () => locationRef.current,
+  }
 })
 
 /** 編輯模式：帶 courseId 路由參數。 */
@@ -34,6 +42,7 @@ function renderNewEditor() {
 
 beforeEach(() => {
   navigateSpy.mockClear()
+  locationRef.current = { pathname: "/et/courses/new", state: null }
 })
 
 describe("ET02 課程編輯頁", () => {
@@ -229,6 +238,84 @@ describe("ET02 課程編輯頁", () => {
     expect(screen.getByRole("textbox", { name: "課程描述" })).toHaveValue("")
     expect(screen.getByLabelText("本課程需線下核可")).not.toBeChecked()
     expect(screen.getByLabelText("狀態")).toHaveValue("草稿")
+  })
+
+  it("新增模式可直接按「新增項目」：自動存草稿後導向編輯頁並帶出待開啟的項目（#335）", async () => {
+    const user = userEvent.setup()
+    const captured: { body?: { course_name: string; chapters: string[] } } = {}
+    server.use(
+      http.post("/api/et/courses", async ({ request }) => {
+        captured.body = (await request.json()) as NonNullable<typeof captured.body>
+        return HttpResponse.json({ course_id: 77, version: 0 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await user.type(await screen.findByRole("textbox", { name: "課程名稱" }), "自動存草稿課程")
+    await user.click(screen.getByRole("button", { name: "新增章節" }))
+    await user.type(await screen.findByLabelText("章節名稱"), "第一章")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    // 按鈕不再 disable——按下去就走「存草稿 → 繼續下一步」（比照 Moodle 的 Save and display）
+    await user.click(await screen.findByRole("button", { name: "新增項目" }))
+    await user.click(await screen.findByRole("menuitem", { name: /教材/ }))
+
+    // 課程與暫存章節一次送出
+    await waitFor(() => expect(captured.body?.chapters).toEqual(["第一章"]))
+    // 導向編輯頁（replace：返回鍵不該回到已失效的 /new），並把待開啟的項目帶過去
+    await waitFor(() =>
+      expect(navigateSpy).toHaveBeenCalledWith(
+        "/et/courses/77",
+        expect.objectContaining({
+          replace: true,
+          state: { pendingAddItem: { chapterIndex: 0, itemType: "MATERIAL" } },
+        }),
+      ),
+    )
+  })
+
+  it("課程名稱未填時按「新增項目」→ 標欄位錯誤、不建立草稿（#335）", async () => {
+    const user = userEvent.setup()
+    let created = 0
+    server.use(
+      http.post("/api/et/courses", () => {
+        created += 1
+        return HttpResponse.json({ course_id: 78, version: 0 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await screen.findByRole("textbox", { name: "課程名稱" })
+    await user.click(screen.getByRole("button", { name: "新增章節" }))
+    await user.type(await screen.findByLabelText("章節名稱"), "第一章")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    await user.click(await screen.findByRole("button", { name: "新增項目" }))
+    await user.click(await screen.findByRole("menuitem", { name: /教材/ }))
+
+    expect(await screen.findByText("請輸入課程名稱")).toBeInTheDocument()
+    await waitFor(() => expect(created).toBe(0))
+    expect(navigateSpy).not.toHaveBeenCalled()
+  })
+
+  it("帶 pendingAddItem 進編輯頁時自動建立該項目並開啟視窗（#335 的後半）", async () => {
+    let addedTo: number | null = null
+    server.use(
+      http.post("/api/et/chapters/:chapterId/items", async ({ params }) => {
+        addedTo = Number(params.chapterId)
+        return HttpResponse.json(
+          { item_id: 501, item_type: "MATERIAL", title: "", sort_order: 1, material_id: 601, quiz_id: null },
+          { status: 201 },
+        )
+      }),
+    )
+    locationRef.current = {
+      pathname: "/et/courses/1",
+      state: { pendingAddItem: { chapterIndex: 0, itemType: "MATERIAL" } },
+    }
+    renderEditor("1")
+
+    // 章節載入後依 index 取出真正的 chapter_id 再建項目——建立課程的回應只有 course_id
+    await waitFor(() => expect(addedTo).not.toBeNull())
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 
   it("「儲存並發布」按鈕呈現但停用（發布屬 #204）", async () => {
