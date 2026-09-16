@@ -15,17 +15,32 @@ login 收斂之後，攻擊者仍可從 `/api/register` 分辨出「這個 Email
 一封啟用信、還沒設過密碼」的人。對這批人發仿冒的啟用信成功率遠高於盲發——他們真的在等
 這封信，而且沒有既有密碼可比對、更難察覺異常。
 
-## 收斂到什麼程度
+## 收斂到什麼程度（與**沒有**收斂到的程度）
 
-合併後仍可分辨 `{已註冊 或 已受邀}` 與 `{其他}`（前者 409、後者 202），因為「已註冊」本來
-就是公開可探測的（同 login 的 `DP_AUTH_008`，#208 AC 2 明訂保留）。**但「誰被邀請了」已無法
-單獨判定**——那正是本次要關掉的那一格。
+**單看本端點**，合併後只可分辨 `{已註冊 或 已受邀}` 與 `{其他}`（前者 409、後者 202），
+因為「已註冊」本來就是公開可探測的（同 login 的 `DP_AUTH_008`，#208 AC 2 明訂保留）。
+
+⚠️ **但「誰被邀請了」並未真正關閉，探測成本只是從 1 個請求變成 2 個。** 交叉比對即可切開：
+
+```
+① POST /api/login（密碼任意）→ DP_AUTH_007  ⇒ 無未刪除的 DP_USER 列
+② POST /api/register          → DP_USER_001 ⇒ DP_USER 列存在（含軟刪）或有未逾期邀請
+①∩② = {未逾期 ADMIN_INVITE} ∪ {軟刪除的 DP_USER}
+```
+
+第二項在本專案是**空集合**（系統無刪除使用者功能，`DP_USER.DELETED` 從不被設定；
+`email_exists` 含軟刪、`get_by_email` 排除軟刪，本該構成雜訊的差集實際上為空），
+於是交集就是邀請名單本身。
+
+`TestCrossEndpointResidual` 把這個殘留**釘住**——不是因為它可接受，而是因為「被測試釘住的
+已知殘留」與「被誤以為已關閉的洞」是兩件事。根治要讓未逾期邀請離開 409 集合，會動到
+`spec_us2` AC 6a 的對外行為，屬另一張 issue。
 """
 
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
@@ -126,25 +141,64 @@ async def test_統一訊息同時鋪出登入與收信兩條路(client, db) -> N
     assert "信" in message and "連結" in message, "受邀者唯一走得通的是點信裡的連結"
 
 
-async def test_冷卻武裝時兩者仍不可區分(client, db) -> None:
+@pytest.mark.parametrize("state", ["registered", "invited"])
+async def test_冷卻武裝時仍回終局狀態而非429(client, db, state: str) -> None:
     """位置差也是 oracle：若一個擋在冷卻前、一個擋在冷卻後，武裝時會變成 409 vs 429。
 
-    `assert_email_available` 把兩個檢核合併在冷卻 check **之前**就是為了這個；本條確認該性質
-    不只存在於程式結構，也真的成立於端點行為。
+    ⚠️ **冷卻 key 是 `verify-send:acct:{email}`，必須武裝到「被測的那個 Email」。**
+    先前這條測試以另一個 Email 成功註冊來「武裝冷卻」，但那只蓋了那個 Email 的章，被測
+    Email 的 key 從未被蓋——於是把檢核移回冷卻之後（本條要防的回歸）它仍會全綠，等於沒有守衛。
+    現改為：先對**同一個** Email 成功註冊（真的寄出 → 蓋章），再讓它變成不可用狀態。
+
+    這也對應真實情境：使用者自助註冊後 600 秒內完成驗證或收到邀請，冷卻章仍在。
     """
-    await _verified_user(db, user_id="u_cool_enum", email="cool-registered@edms.local")
-    await _admin_invite(db, email="cool-invited@edms.local")
+    email = f"armed-{state}@edms.local"
+
+    primed = await client.post("/api/register", json=_payload(email))
+    assert primed.status_code == 202, primed.text  # 真的排入 outbox → verify-send:acct:{email} 蓋章
+
+    # 此刻才讓該 Email 變成「不可用」；pending 列先清掉，避免與待測狀態並存
+    await db.execute(delete(DpPendingRegistration).where(DpPendingRegistration.email == email))
+    if state == "registered":
+        await _verified_user(db, user_id=f"u_{state}", email=email)
+    else:
+        await _admin_invite(db, email=email)
     await db.commit()
 
-    # 以一次成功註冊武裝冷卻（router 的 key 為 Email 維度，但冷卻器是同一個單例）
-    primed = await client.post("/api/register", json=_payload("fresh-cool@edms.local"))
-    assert primed.status_code == 202, primed.text
+    blocked = await client.post("/api/register", json=_payload(email))
 
-    registered = await client.post("/api/register", json=_payload("cool-registered@edms.local"))
-    invited = await client.post("/api/register", json=_payload("cool-invited@edms.local"))
+    assert blocked.status_code == 409, "終局狀態應優先於冷卻回應（#86）——回 429 代表檢核被移到冷卻之後"
+    assert blocked.json()["error_code"] == "DP_USER_001"
 
-    assert _signature(registered) == _signature(invited)
-    assert registered.status_code == 409, "終局狀態應優先於冷卻回應（#86），且兩者一致"
+
+class TestCrossEndpointResidual:
+    """**已知未關閉**：login × register 交叉比對仍可取出「未逾期邀請」。
+
+    釘住它的理由與 `test_dp_login_no_enumeration.py::TestVerifiedAccountUnchanged` 相同——
+    讓殘留成為「被寫下來且有守衛的事實」。若日後根治（讓未逾期邀請離開 409 集合），本 class
+    會轉紅，那時請連同這段說明一起刪除，而不是改斷言。
+    """
+
+    async def test_交叉比對仍可切出未逾期邀請(self, client, db) -> None:
+        """三種 Email 走同一組兩個請求，只有「已受邀」落在 (007, 409) 這一格。
+
+        這條測試的價值不在「驗證正確行為」，而在**量化殘留的精確度**：若日後有人以為
+        #208 已經關掉邀請列舉而據此做決策（例如放寬邀請信的內容），這裡寫著它沒有。
+        """
+        await _verified_user(db, user_id="u_x_reg", email="x-registered@edms.local")
+        await _admin_invite(db, email="x-invited@edms.local")
+        await db.commit()
+
+        async def probe(email: str) -> tuple[str | None, int]:
+            login = await client.post("/api/login", json={"email": email, "password": "AnyPwd1234"})
+            register = await client.post("/api/register", json=_payload(email))
+            return login.json().get("error_code"), register.status_code
+
+        assert await probe("x-registered@edms.local") == ("DP_AUTH_008", 409)
+        assert await probe("x-invited@edms.local") == ("DP_AUTH_007", 409), (
+            "（007, 409）這一格目前唯一對應「未逾期 ADMIN_INVITE」——這就是尚未關閉的殘留"
+        )
+        assert await probe("x-absent@edms.local") == ("DP_AUTH_007", 202)
 
 
 async def test_受邀列未被探測動到(client, db) -> None:

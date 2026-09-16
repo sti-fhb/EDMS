@@ -137,6 +137,11 @@ class TestPendingRowNotObservable:
 
         這條與上面兩條方向相反：上面要求「看不出差別」，這條要求「查得出差別」。
         兩者同時成立才是正確的修法；只做到前者會讓事故調查失去追溯能力。
+
+        **描述必須同時帶得出「是哪一種」與「被探測的是誰」。** 本路徑沒有 user_id 可填
+        （operator 為 `SYSTEM`、無 `target_id`），若描述只有五個字的原因，調查能知道「有人打到
+        待驗證列」卻答不出「哪些受邀者被探測過」——AC 4 的「對內可追溯」會退化成單純的計數。
+        Email 以 `mask_email` 遮罩後才寫入（規範禁記個資完整值）。
         """
         await _pending(db, email="audit_pending@edms.local")
 
@@ -152,7 +157,10 @@ class TestPendingRowNotObservable:
             .scalars()
             .all()
         )
-        assert "帳號未驗證" in reasons and "帳號不存在" in reasons, f"稽核 reason 應可區分，實得：{set(reasons)}"
+        joined = "｜".join(r or "" for r in reasons)
+        assert "帳號未驗證" in joined and "帳號不存在" in joined, f"稽核 reason 應可區分，實得：{set(reasons)}"
+        assert "a***@edms.local" in joined, "應記下被探測的 Email（遮罩後），否則追溯力只剩計數"
+        assert "audit_pending@edms.local" not in joined, "不得寫入未遮罩的完整 Email"
 
 
 class TestVerifiedAccountUnchanged:

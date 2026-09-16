@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, create_access_token
 from app.core.exceptions import AppError
+from app.core.log_redaction import mask_email
 from app.core.password_hashing import verify_password_async
 from app.core.password_policy import is_password_expired
 from app.core.request_context import get_client_ip
@@ -58,9 +59,21 @@ class AuthService:
 
         **已知殘留、且為刻意保留**：`DP_AUTH_008` 與 `DP_AUTH_007` 仍可區分，故「某 Email 是否為
         已驗證帳號」依然可探測（#208 AC 2 明訂維持既有 `DP_AUTH_008` 行為）。本次收斂的是
-        **待驗證列的有無**——亦即「誰被邀請了」。同理，`verify_password_async` 只在帳號存在時執行
-        所造成的時間差也不另行弭平：它洩漏的事實與 `DP_AUTH_008` 完全相同，補 dummy hash 不會
-        減少任何可探測資訊。
+        **待驗證列的有無**。
+
+        同理，`verify_password_async` 只在「帳號存在 ∧ ACTIVE ∧ 未鎖定」時才執行所造成的時間差也
+        不另行弭平：它可推得的集合恰為 `DP_AUTH_008` / `004` / `005` 已公開的集合，補 dummy hash
+        不減少任何可探測資訊。
+
+        ⚠️ **但這個等價只在 AC 2 成立時成立。** 若日後決定把 `DP_AUTH_008` 也併進 `DP_AUTH_007`，
+        **必須同時補 dummy verify**，否則合併只是換皮——而且更糟，因為系統那時「看起來已防列舉」。
+        另注意密碼運算的併發閘（`core/password_hashing`，逾量回 `COMMON_503`）會把這個統計性的
+        時間差升級為**類別式**訊號：閘滿時存在帳號回 503、不存在帳號照樣回 401，不需取樣即可分辨。
+        現況下結論不變（仍落在 008 已公開的集合內），但「時間差難以利用」這個直覺在此並不成立。
+
+        ⚠️ **另一項已知殘留（跨端點）**：本端點的 `DP_AUTH_007` 與 `/api/register` 的 `DP_USER_001`
+        交叉比對，仍可取出「未逾期的管理者邀請」——見 `register_service._EMAIL_UNAVAILABLE_MSG`
+        上方說明。由 `test_dp_register_no_enumeration.py::TestCrossEndpointResidual` 釘住。
 
         Raises:
             AppError: 查無有效帳號（401 DP_AUTH_007）、密碼錯誤（401 DP_AUTH_008）、
@@ -83,7 +96,12 @@ class AuthService:
             # 統一訊息同時寫著「若尚未註冊請先註冊」。
             pending = await self._repo.get_pending_by_email(db, email)
             reason = "帳號未驗證" if pending is not None and pending.expires_date > now else "帳號不存在"
-            await self._fail(db, _SYSTEM_USER, ip, reason, 401, _NO_ACCOUNT_MESSAGE, "DP_AUTH_007")
+            # 帶上遮罩後的 Email：此路徑沒有 user_id 可填（operator 為 SYSTEM），只記「有人打到
+            # 待驗證列」而不記「打的是誰」，事故調查就只剩計數——問不出「哪些受邀者被探測過」，
+            # 而那正是本次防護的標的。遮罩規則沿用 `mask_email`（規範禁記個資完整值）。
+            await self._fail(
+                db, _SYSTEM_USER, ip, f"{reason}（{mask_email(email)}）", 401, _NO_ACCOUNT_MESSAGE, "DP_AUTH_007"
+            )
 
         if user.locked_until is not None and user.locked_until > now:
             await self._fail(db, user.user_id, ip, "帳號鎖定中", 403, "帳號已鎖定，請洽管理者或稍後再試", "DP_AUTH_005")

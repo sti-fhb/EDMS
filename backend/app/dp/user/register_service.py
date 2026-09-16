@@ -38,7 +38,22 @@ from app.services import AuditLogService, NotifyService, ParamService
 # 於是文案上的模糊只對人類有效，對腳本一清二楚。攻擊者可用組織 Email 命名規則逐一探測，
 # 命中者就是「此刻正在等一封啟用信、還沒設過密碼」的人——對這批人發仿冒啟用信的成功率遠高於盲發。
 #
-# 合併後可分辨的只剩「{已註冊 或 已受邀} vs {其他}」，**無法再單獨判定「誰被邀請了」**。
+# 合併後**單看本端點**可分辨的只剩「{已註冊 或 已受邀} vs {其他}」。
+#
+# ⚠️ **但這一格並未真正關閉，只是從 1 個請求變成 2 個。** 配上 login 保留的 `DP_AUTH_008`
+# （#208 AC 2 明訂保留）即可把該集合切開：
+#
+#     ① POST /api/login（密碼任意）→ DP_AUTH_007  ⇒ 無未刪除的 DP_USER 列
+#     ② POST /api/register          → DP_USER_001 ⇒ DP_USER 列存在（含軟刪）或有未逾期邀請
+#     ①∩② = {未逾期 ADMIN_INVITE} ∪ {軟刪除的 DP_USER}
+#
+# 而第二項在本專案是**空集合**——系統沒有刪除使用者的功能，`DP_USER.DELETED` 從不被設定
+# （`email_exists` 含軟刪、`get_by_email` 排除軟刪，差集本該是雜訊，實際上不是）。於是交集
+# 就是邀請名單本身。單 IP 受 login 限流 10 次/分，數百人的組織名單一小時內可跑完。
+#
+# 根治需讓「未逾期邀請」離開 409 集合（例如回與正常註冊同形的 202、不寄信不覆蓋），那會動到
+# `spec_us2` AC 6a 與 FR-02/03 的對外行為，屬另一張 issue。此處先如實記載並以測試釘住殘留，
+# 使它是「已知且被守衛」而非「被誤以為已關閉」。
 #
 # ⚠️ 訊息必須同時鋪出兩條路。舊的 `_EMAIL_TAKEN_MSG` 說「請直接登入或使用忘記密碼」——受邀者
 # 沒有 `DP_USER` 列，忘記密碼對他是防列舉的靜默 no-op，照著做等於走進死路。
@@ -111,8 +126,8 @@ class RegisterService:
             source_ip=get_client_ip(),
         )
 
-    async def assert_email_available(self, db: AsyncSession, email: str) -> None:
-        """Email 不可用 → 409 DP_USER_001；可用則靜默通過。
+    async def assert_email_available(self, db: AsyncSession, email: str) -> DpPendingRegistration | None:
+        """Email 不可用 → 409 DP_USER_001；可用則回傳該 Email 的待驗證列（無則 None）。
 
         「不可用」涵蓋兩種狀態，且**刻意不可區分**（#208）：
 
@@ -129,13 +144,24 @@ class RegisterService:
         #86 的理由在合併後仍成立：兩者皆為**終局狀態**，等倒數結束也不會改變，且都不送信、
         冷卻在此無防狂發價值，先擋可免使用者白等一輪。
 
-        register() 內部亦呼叫本方法（單一 409 來源），故服務層獨立呼叫時語意不變。
+        ⚠️ **兩次查詢一律都跑，不可在第一次命中就 short-circuit**：兩個分支的 error_code 與
+        訊息既已相同，**DB round-trip 次數就成為最後一道可觀測差異**。若「已註冊」查一次就 raise、
+        「已受邀」查兩次才 raise，攻擊者取樣多次取中位數即可把次毫秒級的落差自網路 jitter 中分離，
+        於是「誰被邀請了」從「回應內容可辨」降級成「回應延遲可辨」而非真的消失。
+
+        此路徑**不受寄信冷卻節流**（冷卻只掛在「可用」分支上），同一 Email 每分鐘可被取樣至
+        `REGISTER_RATE_MAX` 次且可長期累積，取樣成本極低。`AuthService.login()` 對同一問題的
+        寫法相同——無條件先查 pending，再決定 reason。
+
+        register() 內部亦呼叫本方法（單一 409 來源），故服務層獨立呼叫時語意不變；回傳的
+        `pending` 供 register() 重用，免去第二次查詢。
         """
-        if await self._repo.email_exists(db, email):
-            raise AppError(status_code=409, detail=_EMAIL_UNAVAILABLE_MSG, error_code="DP_USER_001")
+        registered = await self._repo.email_exists(db, email)
         pending = await self._repo.get_pending_by_email(db, email)
-        if pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > utcnow():
+        invited = pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > utcnow()
+        if registered or invited:
             raise AppError(status_code=409, detail=_EMAIL_UNAVAILABLE_MSG, error_code="DP_USER_001")
+        return pending
 
     async def register(self, db: AsyncSession, *, email: str, user_name: str) -> bool:
         """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色、不收密碼**。
