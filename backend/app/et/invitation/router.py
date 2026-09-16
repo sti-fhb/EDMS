@@ -29,7 +29,7 @@ outbox，若無次數上限，本系統就成了一個「發送者身分完全�
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -134,6 +134,47 @@ async def send_invitations(
     **重跑預覽的全部驗證**——預覽是體驗，不是把關（比照 `enrollment` 的 preview/join）。
     """
     return await _service.send(db, course_id, raw_emails=req.emails, operator=operator)
+
+
+@router.post(
+    "/invitations/{invitation_id}/resend",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(rate_limit_invites())],
+)
+async def resend_invitation(
+    invitation_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """再次寄送邀請信（`FR-ET-US12-03`）。
+
+    掛 `rate_limit_invites()`——本支會**實際寄信**，與 `send_invitations` 同一個濫用面。
+
+    課程關閉期間回 409（`FR-ET-US12-06`）。**換新 token，受邀者手上的舊信會失效。**
+    """
+    await _service.resend(db, invitation_id, operator=operator)
+
+
+@router.post(
+    "/invitations/{invitation_id}/revoke",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def revoke_invitation(
+    invitation_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """撤回邀請（`FR-ET-US12-04`）——原連結即刻失效。
+
+    🔴 **不掛關閉守門**（SA 裁示 2026-09-16）：撤回是止血動作，課程關閉期間仍須可執行。
+    理由見 `service._require_owned_course` 的 docstring；`test_課程關閉時仍可撤回邀請`
+    釘住此行為。
+
+    用 `POST .../revoke` 而非 `DELETE`：這是狀態轉換（`PENDING → REVOKED`，紀錄保留供
+    稽核），不是刪除。
+    """
+    await _service.revoke(db, invitation_id, operator=operator)
 
 
 @router.post("/invitations/accept", response_model=InviteAcceptResult)

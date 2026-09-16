@@ -218,6 +218,96 @@ class EtInvitationService:
         )
         return EmailInviteResult(sent=sent, failed=failed)
 
+    async def resend(self, db: AsyncSession, invitation_id: int, *, operator: OperatorInfo) -> None:
+        """再次寄送同一封邀請信（`FR-ET-US12-03`）。
+
+        ## 「同一封」指同一範本、同一收件人，**不是同一條連結**
+
+        `TOKEN_HASH` 存的是雜湊，原始 token 不可還原，所以技術上也做不到沿用。而
+        `upsert_pending()` 的 docstring 已裁定**必須換新 token**：舊 token 已隨信流出，
+        沿用會讓「一次性」只是延後生效。副作用是受邀者手上的舊信會失效（點了得
+        `ET_INVITE_001`），這是既有設計的必然結果。
+
+        **走 `_require_invitable_course`（含關閉守門）**——關閉期間不該再招生
+        （`FR-ET-US12-06`）。與 `revoke()` 的差別見 `_require_owned_course` 的 docstring。
+
+        整條寄信管線重用 `send()` 的作法（`_require_known_recipients` → `notify` →
+        `upsert_pending`），不另開第二套路徑。
+
+        Raises:
+            AppError: 404 `ET_INVITE_001` 查無或非待加入；403 `ET_COURSE_002` 非擁有者；
+                409 `ET_INVITE_002` 課程關閉中；422 `ET_INVITE_005` 收件人已無 EDMS 帳號。
+        """
+        invitation = await self._repo.get_by_id(db, invitation_id)
+        if invitation is None or invitation.status != INVITATION_PENDING:
+            raise _LINK_INVALID
+        course = await self._require_invitable_course(db, invitation.course_id, operator.user_id)
+
+        recipients = await self._require_known_recipients(db, [invitation.email])
+        recipient = recipients[0]
+        teacher_name = await self._people.user_name(db, course.owner_id) or ""
+        plaintext = generate_invitation_token()
+        result = await self._notifier.notify(
+            db,
+            template_code=TEMPLATE_COURSE_INVITE,
+            recipients=[recipient.email],
+            params=build_course_invite_params(
+                user_name=recipient.user_name,
+                teacher_name=teacher_name,
+                course=course,
+                course_url=invite_link(plaintext),
+                invitation_code=course.invitation_code,
+            ),
+        )
+        queued = result.queued_count > 0
+        await self._repo.upsert_pending(
+            db,
+            course_id=invitation.course_id,
+            email=invitation.email,
+            token_hash=hash_token(plaintext),
+            send_status_code=STATUS_QUEUED if queued else STATUS_SEND_FAILED,
+            operator=operator,
+        )
+        # 收件人不寫進 description（個資；稽核表保存期比業務資料長），比照 `send()`。
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_NAME,
+            action_type="UPDATE",
+            result="SUCCESS" if queued else "FAIL",
+            operator_id=operator.user_id,
+            target_id=str(invitation.course_id),
+            description="再次寄送邀請信",
+        )
+
+    async def revoke(self, db: AsyncSession, invitation_id: int, *, operator: OperatorInfo) -> None:
+        """撤回邀請（`FR-ET-US12-04`）——原連結即刻失效。
+
+        🔴 **走 `_require_owned_course`，刻意不含關閉守門**（SA 裁示 2026-09-16）。理由與
+        「不可合併這兩支」的說明見 `_require_owned_course` 的 docstring。
+
+        已撤回者再撤回回 404 而非靜默成功：重複撤回代表教師的清單已過期，靜默成功會
+        讓他以為剛才那次有作用。
+
+        Raises:
+            AppError: 404 `ET_INVITE_001` 查無或非待加入；403 `ET_COURSE_002` 非擁有者。
+        """
+        invitation = await self._repo.get_by_id(db, invitation_id)
+        if invitation is None or invitation.status != INVITATION_PENDING:
+            raise _LINK_INVALID
+        await self._require_owned_course(db, invitation.course_id, operator.user_id)
+        await self._repo.mark_revoked(db, invitation=invitation, operator=operator)
+        await self._audit.log_action(
+            db,
+            module=_MODULE,
+            func_name=_FUNC_NAME,
+            action_type="UPDATE",
+            result="SUCCESS",
+            operator_id=operator.user_id,
+            target_id=str(invitation.course_id),
+            description="撤回邀請",
+        )
+
     async def accept(self, db: AsyncSession, *, token: str, operator: OperatorInfo) -> InviteAcceptResult:
         """受邀者以邀請連結加入課程（FR-ET-US8-09）。
 

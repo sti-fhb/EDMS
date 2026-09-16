@@ -5,6 +5,8 @@
 `test_被移除的學員可經_email_邀請回到課程` 是那句話第一次有對應操作。
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select, update
 
@@ -549,3 +551,160 @@ class TestPendingInviteList:
 
         assert r.status_code == 200, r.text
         assert len(r.json()["data"]) == 1
+
+
+class TestResendInvitation:
+    """再次寄送（AC 3）。"""
+
+    async def test_再次寄送更新最後寄送時間且不建新列(self, client, db) -> None:
+        """`data-model` §ET_INVITATION：「再次寄送」更新 `LAST_SENT_AT`，**不建新紀錄**。
+
+        建新列會讓同一個受邀者在清單上出現多次，教師無從判斷該重寄哪一筆；且舊 token
+        不會失效。
+        """
+        teacher = await _user(db, "t_rs01", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "resend01@edms.local")
+        await _invite(client, teacher, course_id, "resend01@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        row = listed.json()["data"][0]
+        before = row["last_sent_at"]
+
+        r = await client.post(f"/api/et/invitations/{row['invitation_id']}/resend", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        after = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        rows = after.json()["data"]
+        assert len(rows) == 1, "不可建新列"
+        assert rows[0]["last_sent_at"] >= before
+
+    async def test_再次寄送換新token舊連結失效(self, client, db) -> None:
+        """舊 token 已隨信流出，沿用會讓「一次性」只是延後生效（`upsert_pending` docstring）。"""
+        teacher = await _user(db, "t_rs02", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        student = await _account(db, "resend02@edms.local")
+        await _invite(client, teacher, course_id, "resend02@edms.local")
+        await db.commit()
+        old_token = await _token_for(db, "resend02@edms.local")
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        await client.post(
+            f"/api/et/invitations/{listed.json()['data'][0]['invitation_id']}/resend", headers=_bearer(teacher)
+        )
+        await db.commit()
+
+        r = await client.post(_ACCEPT, json={"token": old_token}, headers=_bearer(student))
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_INVITE_001"
+
+    async def test_手動關閉時不可再次寄送(self, client, db) -> None:
+        """AC 7 的「寫」那一半——**來源一：教師手動關閉**。
+
+        ⚠️ 回 `ET_INVITE_004`（422）而非 `ET_INVITE_002`（409）。#288 刻意分流：
+        草稿 / 已關閉 → `004`「僅已發布課程可邀請學員」；**已發布但期間已過** → `002`
+        「此課程目前關閉中」。共用一碼會對一門 `STATUS` 確實是 `PUBLISHED` 的課程說出
+        與教師畫面矛盾的話。
+        """
+        teacher = await _user(db, "t_rs03", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "resend03@edms.local")
+        await _invite(client, teacher, course_id, "resend03@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/resend", headers=_bearer(teacher))
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_INVITE_004"
+
+    async def test_閱課期間已過時不可再次寄送(self, client, db) -> None:
+        """AC 7 的「寫」那一半——**來源二：已發布但閱課期間已過**（ET-16 掃到之前的空窗）。
+
+        這條與上一條是同一個 AC 的兩種來源，回的碼不同（見上）。只驗其中一種會讓另一
+        條路徑無覆蓋——而「期間已過但狀態仍是 PUBLISHED」在 ET-16 排程執行前是真實狀態。
+        """
+        teacher = await _user(db, "t_rs04", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "resend04@edms.local")
+        await _invite(client, teacher, course_id, "resend04@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+        # 狀態維持 PUBLISHED，只把訖止推到過去
+        await db.execute(
+            update(EtCourse).where(EtCourse.course_id == course_id).values(open_end_at=utcnow() - timedelta(days=1))
+        )
+        await db.commit()
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/resend", headers=_bearer(teacher))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_INVITE_002"
+
+
+class TestRevokeInvitation:
+    """撤回邀請（AC 4）。"""
+
+    async def test_撤回寫入狀態與時間並移出清單(self, client, db) -> None:
+        teacher = await _user(db, "t_rv01", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "revoke01@edms.local")
+        await _invite(client, teacher, course_id, "revoke01@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/revoke", headers=_bearer(teacher))
+
+        assert r.status_code == 204, r.text
+        row = await db.scalar(select(EtInvitation).where(EtInvitation.invitation_id == invitation_id))
+        await db.refresh(row)
+        assert row.status == INVITATION_REVOKED
+        assert row.revoked_at is not None
+        after = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        assert after.json()["data"] == [], "撤回後自待加入清單移除"
+
+    async def test_課程關閉時仍可撤回邀請(self, client, db) -> None:
+        """🔴 **SA 裁示 2026-09-16：撤回不受課程關閉影響。**
+
+        這是本 issue 唯一偏離 ET 模組「讀照舊、寫全停」慣例的地方。`FR-ET-US12-06` 只
+        點名「再次寄送」，而撤回與重寄方向相反——重寄讓**更多人**進來，撤回讓**某人
+        不能**進來。
+
+        教師發現邀請寄錯人（例如打錯 Email 寄到外部單位）時，若課程剛好到期自動關閉
+        而撤回被擋，那條錯誤連結會一直有效到再開課為止，且再開課當下立刻可用。
+
+        **本測試存在的唯一理由**：日後有人依慣例把關閉守門補到 `revoke()` 上時，要有
+        東西會紅。少了它，那個行為改變不會被任何測試發現。
+        """
+        teacher = await _user(db, "t_rv02", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "revoke02@edms.local")
+        await _invite(client, teacher, course_id, "revoke02@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/revoke", headers=_bearer(teacher))
+
+        assert r.status_code == 204, "撤回是止血動作，關閉期間必須仍可執行"
+
+    async def test_他人不可撤回別人課程的邀請(self, client, db) -> None:
+        owner = await _user(db, "t_rv03", ROLE_TEACHER)
+        other = await _user(db, "t_rv03b", ROLE_TEACHER)
+        course_id = await _published_course(client, db, owner)
+        await _account(db, "revoke03@edms.local")
+        await _invite(client, owner, course_id, "revoke03@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(owner))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/revoke", headers=_bearer(other))
+
+        assert r.status_code == 403, r.text

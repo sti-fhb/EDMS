@@ -13,6 +13,7 @@ from app.et.constants import (
     COMPLETION_NOT_STARTED,
     INVITATION_JOINED,
     INVITATION_PENDING,
+    INVITATION_REVOKED,
     SOURCE_EMAIL_INVITE,
 )
 from app.et.course.models import EtCourse
@@ -104,6 +105,33 @@ class EtInvitationRepository:
             )
             .order_by(EtInvitation.last_sent_at.asc(), EtInvitation.invitation_id.asc())
         )
+
+    async def get_by_id(self, db: AsyncSession, invitation_id: int) -> EtInvitation | None:
+        """依 `INVITATION_ID` 取邀請——**不限狀態**。
+
+        呼叫端需要靠 `STATUS` 分辨「已加入」「已撤回」「待加入」三種情況並給不同回應，
+        在這裡先濾掉會讓它們全部塌成「查無」。
+        """
+        return await db.scalar(
+            select(EtInvitation).where(
+                EtInvitation.invitation_id == invitation_id,
+                EtInvitation.deleted == 0,
+            )
+        )
+
+    async def mark_revoked(self, db: AsyncSession, *, invitation: EtInvitation, operator: OperatorInfo) -> None:
+        """撤回：`STATUS → REVOKED` 並寫 `REVOKED_AT`。
+
+        **不清掉 `TOKEN_HASH`**——`accept()` 要靠它比對出「這個 token 屬於一筆已撤回的
+        邀請」才能回 `ET_INVITE_006`；清掉的話那條連結會退化成「查無」（`ET_INVITE_001`），
+        受邀者看到的訊息就與 `FR-ET-US12-05` 不符。
+        """
+        now = utcnow()
+        invitation.status = INVITATION_REVOKED
+        invitation.revoked_at = now
+        invitation.updated_user = operator.user_id
+        invitation.updated_date = now
+        await db.flush()
 
     async def get_by_token_hash(self, db: AsyncSession, token_hash: str) -> EtInvitation | None:
         return await db.scalar(
