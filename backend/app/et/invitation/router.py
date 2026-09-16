@@ -138,7 +138,7 @@ async def send_invitations(
 
 @router.post(
     "/invitations/{invitation_id}/resend",
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(rate_limit_invites())],
 )
 async def resend_invitation(
@@ -150,7 +150,12 @@ async def resend_invitation(
 
     掛 `rate_limit_invites()`——本支會**實際寄信**，與 `send_invitations` 同一個濫用面。
 
-    課程關閉期間回 409（`FR-ET-US12-06`）。**換新 token，受邀者手上的舊信會失效。**
+    課程關閉期間回 409 / 422（`FR-ET-US12-06`）。**換新 token，受邀者手上的舊信會失效。**
+
+    **排入信件佇列失敗時回 503 並整筆回滾**（token 不換、信不排入）——204 一律代表真的
+    寄出去了，前端可以無條件顯示成功。見 `service.resend()` 的說明。
+
+    204 而非 200：與本模組（及 ET 其餘「純動作、無回應內容」端點）一致。
     """
     await _service.resend(db, invitation_id, operator=operator)
 

@@ -96,6 +96,10 @@ _LINK_INVALID = AppError(status_code=404, detail="邀請連結無效或已失效
 #: 410 Gone 而非 404：資源確實存在過、已被擁有者主動移除，這正是 410 的語意。
 _LINK_REVOKED = AppError(status_code=410, detail="此邀請已撤回", error_code="ET_INVITE_006")
 _COURSE_CLOSED = AppError(status_code=409, detail="此課程目前關閉中", error_code="ET_INVITE_002")
+#: 重寄時排入信件佇列失敗。**必須讓整筆交易回滾**——token 在此之前已換新，不回滾的話
+#: 淨效果是「一鍵讓對方的連結失效，而且沒有新信寄出」，比什麼都不做更糟。
+#: 與 `send()` 的不對稱是刻意的：初次寄送失敗只是「沒建成」，重寄失敗會**毀掉一條還能用的連結**。
+_RESEND_FAILED = AppError(status_code=503, detail="邀請信寄送失敗，請稍後再試", error_code="ET_INVITE_007")
 _NO_EMAILS = AppError(status_code=422, detail="Email 格式不正確或數量超過上限", error_code="ET_INVITE_003")
 
 #: 排入 outbox 的結果碼（`ET_INVITATION.SEND_STATUS_CODE`，VARCHAR(20)）。
@@ -185,19 +189,9 @@ class EtInvitationService:
         for recipient in recipients:
             # 每位收件人一組獨立 token：明文只入信中連結，DB 只存 SHA-256。
             plaintext = generate_invitation_token()
-            result = await self._notifier.notify(
-                db,
-                template_code=TEMPLATE_COURSE_INVITE,
-                recipients=[recipient.email],
-                params=build_course_invite_params(
-                    user_name=recipient.user_name,
-                    teacher_name=teacher_name,
-                    course=course,
-                    course_url=invite_link(plaintext),
-                    invitation_code=course.invitation_code,
-                ),
+            queued = await self._deliver(
+                db, course=course, recipient=recipient, teacher_name=teacher_name, plaintext=plaintext
             )
-            queued = result.queued_count > 0
             await self._repo.upsert_pending(
                 db,
                 course_id=course_id,
@@ -231,61 +225,69 @@ class EtInvitationService:
 
         ## 「同一封」指同一範本、同一收件人，**不是同一條連結**
 
-        `TOKEN_HASH` 存的是雜湊，原始 token 不可還原，所以技術上也做不到沿用。而
+        `TOKEN_HASH` 存的是雜湊，原始 token 不可還原，技術上也做不到沿用。而
         `upsert_pending()` 的 docstring 已裁定**必須換新 token**：舊 token 已隨信流出，
         沿用會讓「一次性」只是延後生效。副作用是受邀者手上的舊信會失效（點了得
-        `ET_INVITE_001`），這是既有設計的必然結果。
+        `ET_INVITE_001`），這是既有設計的必然結果，前端確認框會明說。
 
-        **走 `_require_invitable_course`（含關閉守門）**——關閉期間不該再招生
+        ## 三個順序都是刻意的
+
+        1. **擁有權檢查在狀態檢查之前**——反過來會讓他人課程的邀請以 403/404 的差異
+           洩漏「該 id 是否仍為 `PENDING`」，而 `INVITATION_ID` 是連號的
+        2. **`rotate_token` 在寄信之前**——它以主鍵 + `STATUS=PENDING` 為條件，能擋下
+           「重寄與撤回交錯」；寄信在後才能在失敗時一起回滾
+        3. **排入失敗直接拋錯**（`_RESEND_FAILED`）讓整筆交易回滾。不回滾的話 token 已換
+           新而信沒寄出，等於一鍵讓對方的連結失效且無人知情——比什麼都不做更糟。與
+           `send()`「寄信失敗不回滾邀請」的不對稱是刻意的：初次寄送失敗只是沒建成，
+           重寄失敗會**毀掉一條還能用的連結**
+
+        走 `_require_invitable_course`（含關閉守門）——關閉期間不該再招生
         （`FR-ET-US12-06`）。與 `revoke()` 的差別見 `_require_owned_course` 的 docstring。
 
-        整條寄信管線重用 `send()` 的作法（`_require_known_recipients` → `notify` →
-        `upsert_pending`），不另開第二套路徑。
-
         Raises:
-            AppError: 404 `ET_INVITE_001` 查無或非待加入；403 `ET_COURSE_002` 非擁有者；
-                409 `ET_INVITE_002` 課程關閉中；422 `ET_INVITE_005` 收件人已無 EDMS 帳號。
+            AppError: 404 `ET_COURSE_001` 查無課程；403 `ET_COURSE_002` 非擁有者；
+                409 `ET_INVITE_002` / 422 `ET_INVITE_004` 課程不可邀請；
+                404 `ET_INVITE_001` 查無邀請或已非待加入；
+                422 `ET_INVITE_005` 收件人已無 EDMS 帳號；503 `ET_INVITE_007` 排入失敗。
         """
         invitation = await self._repo.get_by_id(db, invitation_id)
-        if invitation is None or invitation.status != INVITATION_PENDING:
+        if invitation is None:
             raise _LINK_INVALID
         course = await self._require_invitable_course(db, invitation.course_id, operator.user_id)
+        if invitation.status != INVITATION_PENDING:
+            raise _LINK_INVALID
 
         recipients = await self._require_known_recipients(db, [invitation.email])
         recipient = recipients[0]
         teacher_name = await self._people.user_name(db, course.owner_id) or ""
         plaintext = generate_invitation_token()
-        result = await self._notifier.notify(
+        rotated = await self._repo.rotate_token(
             db,
-            template_code=TEMPLATE_COURSE_INVITE,
-            recipients=[recipient.email],
-            params=build_course_invite_params(
-                user_name=recipient.user_name,
-                teacher_name=teacher_name,
-                course=course,
-                course_url=invite_link(plaintext),
-                invitation_code=course.invitation_code,
-            ),
-        )
-        queued = result.queued_count > 0
-        await self._repo.upsert_pending(
-            db,
-            course_id=invitation.course_id,
-            email=invitation.email,
+            invitation_id=invitation_id,
             token_hash=hash_token(plaintext),
-            send_status_code=STATUS_QUEUED if queued else STATUS_SEND_FAILED,
+            send_status_code=STATUS_QUEUED,
             operator=operator,
         )
+        if not rotated:
+            # 輸掉與 accept / revoke 的競態——該邀請已被消耗或撤回，不該再寄。
+            raise _LINK_INVALID
+        if not await self._deliver(
+            db, course=course, recipient=recipient, teacher_name=teacher_name, plaintext=plaintext
+        ):
+            raise _RESEND_FAILED
+
         # 收件人不寫進 description（個資；稽核表保存期比業務資料長），比照 `send()`。
+        # `target_id` 帶 invitation_id：一門課一天可能多次重寄，只有 course_id 無法定位。
         await self._audit.log_action(
             db,
             module=_MODULE,
             func_name=_FUNC_NAME,
             action_type="UPDATE",
-            result="SUCCESS" if queued else "FAIL",
+            result="SUCCESS",
             operator_id=operator.user_id,
-            target_id=str(invitation.course_id),
+            target_id=f"{invitation.course_id}:{invitation_id}",
             description="再次寄送邀請信",
+            source_ip=get_client_ip(),
         )
 
     async def revoke(self, db: AsyncSession, invitation_id: int, *, operator: OperatorInfo) -> None:
@@ -294,17 +296,22 @@ class EtInvitationService:
         🔴 **走 `_require_owned_course`，刻意不含關閉守門**（SA 裁示 2026-09-16）。理由與
         「不可合併這兩支」的說明見 `_require_owned_course` 的 docstring。
 
-        已撤回者再撤回回 404 而非靜默成功：重複撤回代表教師的清單已過期，靜默成功會
-        讓他以為剛才那次有作用。
+        擁有權檢查排在狀態檢查之前，理由同 `resend()`（避免以 403/404 的差異洩漏狀態）。
+
+        **撤回本身是原子的**（`mark_revoked` 把 `STATUS=PENDING` 寫在 `WHERE` 裡）：與
+        `accept()` 交錯時只會有一方成功，不會把已寫入的 `JOINED` 蓋成 `REVOKED`。輸掉
+        競態回 404——那代表學員已經加入了，教師該改用 US9 的「移除學員」。
 
         Raises:
-            AppError: 404 `ET_INVITE_001` 查無或非待加入；403 `ET_COURSE_002` 非擁有者。
+            AppError: 404 `ET_COURSE_001` 查無課程；403 `ET_COURSE_002` 非擁有者；
+                404 `ET_INVITE_001` 查無邀請、已加入或已撤回。
         """
         invitation = await self._repo.get_by_id(db, invitation_id)
-        if invitation is None or invitation.status != INVITATION_PENDING:
+        if invitation is None:
             raise _LINK_INVALID
         await self._require_owned_course(db, invitation.course_id, operator.user_id)
-        await self._repo.mark_revoked(db, invitation=invitation, operator=operator)
+        if not await self._repo.mark_revoked(db, invitation_id=invitation_id, operator=operator):
+            raise _LINK_INVALID
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -312,8 +319,9 @@ class EtInvitationService:
             action_type="UPDATE",
             result="SUCCESS",
             operator_id=operator.user_id,
-            target_id=str(invitation.course_id),
+            target_id=f"{invitation.course_id}:{invitation_id}",
             description="撤回邀請",
+            source_ip=get_client_ip(),
         )
 
     async def accept(self, db: AsyncSession, *, token: str, operator: OperatorInfo) -> InviteAcceptResult:
@@ -386,6 +394,31 @@ class EtInvitationService:
         if enrollment is None or enrollment.is_removed:
             raise _LINK_INVALID
         return InviteAcceptResult(course_id=course.course_id, course_name=course.course_name, already_joined=True)
+
+    async def _deliver(self, db: AsyncSession, *, course, recipient, teacher_name: str, plaintext: str) -> bool:
+        """把一封邀請信排入 outbox。`send()` 與 `resend()` 共用。
+
+        抽出的是**組參數 + 寄信**這一段，不含持久化——兩邊的持久化語意不同：
+        `send()` 用 `upsert_pending`（可新建列），`resend()` 用 `rotate_token`（只認主鍵、
+        絕不新建，見該函式 docstring）。硬要連持久化一起共用，會把 `resend` 重新拖回
+        「憑空造出一列」的那個 bug。
+
+        Returns:
+            True 表示已排入 outbox。**非** SMTP 真實結果（平台為 outbox 架構）。
+        """
+        result = await self._notifier.notify(
+            db,
+            template_code=TEMPLATE_COURSE_INVITE,
+            recipients=[recipient.email],
+            params=build_course_invite_params(
+                user_name=recipient.user_name,
+                teacher_name=teacher_name,
+                course=course,
+                course_url=invite_link(plaintext),
+                invitation_code=course.invitation_code,
+            ),
+        )
+        return result.queued_count > 0
 
     async def _require_owned_course(self, db: AsyncSession, course_id: int, actor_id: str):
         """課程存在 + 呼叫者為擁有者。**刻意不含 `ensure_invitable`（關閉判定）。**

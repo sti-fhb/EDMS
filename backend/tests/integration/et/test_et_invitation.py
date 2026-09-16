@@ -8,7 +8,7 @@
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -111,12 +111,16 @@ async def _invite(client, teacher: str, course_id: int, emails: str):
 
 async def _token_for(db, email: str) -> str:
     """由 outbox 內文取出實際寄出的明文 token（DB 只存雜湊，測試也拿不到明文）。"""
+    # ⚠️ 必須排序：重寄後同一收件人會有兩封 PENDING 信，無 `order_by` 時取到哪一封
+    # 由執行計畫決定。取**最新**的那封——呼叫端要的一律是「剛剛寄出的那個 token」。
     log = await db.scalar(
-        select(DpEmailLog).where(
+        select(DpEmailLog)
+        .where(
             DpEmailLog.recipient == email,
             DpEmailLog.template_code == "COURSE_INVITE",
             DpEmailLog.status == "PENDING",
         )
+        .order_by(DpEmailLog.message_id.desc())
     )
     assert log is not None, "沒有寄出任何信，無從取得 token"
     marker = "/et/invite?token="
@@ -573,7 +577,7 @@ class TestResendInvitation:
 
         r = await client.post(f"/api/et/invitations/{row['invitation_id']}/resend", headers=_bearer(teacher))
 
-        assert r.status_code == 200, r.text
+        assert r.status_code == 204, r.text
         after = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
         rows = after.json()["data"]
         assert len(rows) == 1, "不可建新列"
@@ -774,3 +778,62 @@ class TestRevokedLinkMessage:
 
         assert r.status_code == 200, r.text
         assert r.json()["already_joined"] is True, "已加入者直接導向，不是錯誤"
+
+
+class TestInviteWriteRaces:
+    """撤回 / 重寄的原子性（Security Review M-1 / M-2）。
+
+    兩支寫入原本都是「先查後改」——而**同一個檔案**的 `consume_pending` docstring 早就
+    寫明那是 TOCTOU（`🔴 條件必須寫在 WHERE 裡，不可先查後改`），還附了 EvalPlanQual
+    的完整說明。本組測試釘住修正後的行為。
+    """
+
+    async def test_已加入者不可被撤回(self, client, db) -> None:
+        """撤回輸掉與 `accept` 的競態時回 404，**不可把 `JOINED` 蓋成 `REVOKED`**。
+
+        真的蓋掉的話：學員已入課、`ET_ENROLLMENT` 已建立，教師卻收到 204 且該列自清單
+        消失——他不會知道要改用 US9 的「移除學員」。
+        """
+        teacher = await _user(db, "t_wr01", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        student = await _account(db, "race01@edms.local")
+        await _invite(client, teacher, course_id, "race01@edms.local")
+        await db.commit()
+        token = await _token_for(db, "race01@edms.local")
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+        accepted = await client.post(_ACCEPT, json={"token": token}, headers=_bearer(student))
+        assert accepted.status_code == 200, accepted.text
+        await db.commit()
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/revoke", headers=_bearer(teacher))
+
+        assert r.status_code == 404, r.text
+        row = await db.scalar(select(EtInvitation).where(EtInvitation.invitation_id == invitation_id))
+        await db.refresh(row)
+        assert row.status == INVITATION_JOINED, "已加入的狀態不可被撤回覆蓋"
+
+    async def test_已撤回者不可再重寄(self, client, db) -> None:
+        """🔴 重寄**不得憑空造出新列**。
+
+        原實作用 `upsert_pending(course_id, email)`，而 `ET_INVITATION` 沒有該組合的唯一
+        鍵——找不到 `PENDING` 列時它會**新建一列**，於是剛被撤回的對象會重新拿到一條
+        有效連結，清單上也多出一列（違反 data-model 的「再次寄送不建新紀錄」）。
+        """
+        teacher = await _user(db, "t_wr02", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "race02@edms.local")
+        await _invite(client, teacher, course_id, "race02@edms.local")
+        await db.commit()
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        invitation_id = listed.json()["data"][0]["invitation_id"]
+        await client.post(f"/api/et/invitations/{invitation_id}/revoke", headers=_bearer(teacher))
+        await db.commit()
+
+        r = await client.post(f"/api/et/invitations/{invitation_id}/resend", headers=_bearer(teacher))
+
+        assert r.status_code == 404, r.text
+        total = await db.scalar(
+            select(func.count(EtInvitation.invitation_id)).where(EtInvitation.course_id == course_id)
+        )
+        assert total == 1, "不可新建列——已撤回者不該因重寄而復活"

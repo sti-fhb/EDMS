@@ -229,7 +229,9 @@ export function EtStudentsPage() {
       <TeacherAttemptDialog attemptId={attemptId} onClose={() => setAttemptId(null)} />
 
       <Dialog open={pending !== null} onClose={() => !busy && setPending(null)}>
-        <DialogTitle>{DIALOG_TITLE[pending?.kind ?? "remove"]}</DialogTitle>
+        {/* `pending` 為 null 是關閉動畫期間——給空字串，不要 fallback 到某個動作的
+            標題，否則每次關閉都會閃一下「移除學員」。 */}
+        <DialogTitle>{pending === null ? "" : DIALOG_TITLE[pending.kind]}</DialogTitle>
         <DialogContent>
           {pending?.kind === "remove" && pending.student.has_in_progress_attempt ? (
             /* ET-MSG-ET03-003 為「警告」型訊息——用 Alert 而非純文字，
