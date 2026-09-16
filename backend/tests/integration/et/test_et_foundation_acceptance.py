@@ -12,10 +12,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.exceptions import AppError
-from app.core.module_admin import module_admin_gate
 from app.core.module_assign import module_assign_registry
-from app.core.module_provisioning import module_provisioning_gate
-from app.core.module_roles import module_role_gate
 from app.core.utils import utcnow
 from app.et import constants as c
 from app.et.bootstrap import register_et_module
@@ -29,17 +26,23 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def et_registered():
-    """註冊 ET 四閘 checker / provider；**teardown 清除避免污染其他模組測試**。
+    """確保 ET 四閘 checker / provider 已註冊；**teardown 還原為啟動時的狀態**。
 
-    比照 `tests/integration/dp/test_dp_roles.py` 之 `dm_registered`。聚合閘為 module-level
-    單例，若不清除會讓「未註冊模組 → fail-closed」類測試在同一 worker 內失準。
+    ⚠️ **teardown 是 `register_et_module()` 而不是 `unregister`**。`main.py` 於啟動時就
+    註冊了 ET（`register_et_module()`），所以「已註冊」才是整個執行期的基線；清成未註冊
+    等於留下一個正式環境從不存在的狀態給後續測試。
+
+    這個坑會**靜默**發作：`ModuleProvisioningGate.grant_default_role` 對未註冊模組是
+    no-op（只寫一行 log），於是 DP 註冊驗證會照常成功、使用者卻拿不到 ET 學員角色。
+    `test_et_student_full_flow.py` 曾因此在單獨跑時綠、全套跑時紅。
+
+    原本的 teardown 是為了不讓「未註冊模組 → fail-closed」類測試失準，但那類測試現在
+    都自行 unregister（見 `test_dp_module_admin_gate.py`），或改用**永不會被註冊**的
+    模組碼 `XX`（見 `test_dp_roles.py` 的說明），不依賴本 fixture 的殘留狀態。
     """
     register_et_module()
     yield
-    module_assign_registry.unregister("ET")
-    module_admin_gate.unregister("ET")
-    module_role_gate.unregister("ET")
-    module_provisioning_gate.unregister("ET")
+    register_et_module()  # 還原啟動基線，而非清成未註冊
 
 
 class TestAc2LookupNotMaterialised:
