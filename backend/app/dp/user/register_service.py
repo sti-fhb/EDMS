@@ -52,7 +52,7 @@ from app.services import AuditLogService, NotifyService, ParamService
 # 就是邀請名單本身。單 IP 受 login 限流 10 次/分，數百人的組織名單一小時內可跑完。
 #
 # 根治需讓「未逾期邀請」離開 409 集合（例如回與正常註冊同形的 202、不寄信不覆蓋），那會動到
-# `spec_us2` AC 6a 與 FR-02/03 的對外行為，屬另一張 issue。此處先如實記載並以測試釘住殘留，
+# `spec_us2` AC 6a 與 FR-02/03 的對外行為，**追蹤於 #345**。此處先如實記載並以測試釘住殘留，
 # 使它是「已知且被守衛」而非「被誤以為已關閉」。
 #
 # ⚠️ 訊息必須同時鋪出兩條路。舊的 `_EMAIL_TAKEN_MSG` 說「請直接登入或使用忘記密碼」——受邀者
@@ -186,9 +186,9 @@ class RegisterService:
         #    擋未逾期邀請是 #125：step 2 的覆蓋不分 kind，若不擋，自助註冊會刪掉管理者的邀請列
         #    （該列從邀請清單消失、原邀請信連結失效）且管理者毫無感知。逾期的邀請則放行覆蓋——
         #    邀請既已失效，不應讓該 Email 被永久佔住。
-        await self.assert_email_available(db, email)
+        #    回傳值直接重用：檢核已查過同一列，再查一次只是多一趟 round-trip。
+        pending = await self.assert_email_available(db, email)
         now = utcnow()
-        pending = await self._repo.get_pending_by_email(db, email)
 
         # 2. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256、
         #    PWD_HASH 留空，密碼於驗證步當場設定）

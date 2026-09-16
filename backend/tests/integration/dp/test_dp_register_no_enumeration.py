@@ -34,7 +34,7 @@ login 收斂之後，攻擊者仍可從 `/api/register` 分辨出「這個 Email
 
 `TestCrossEndpointResidual` 把這個殘留**釘住**——不是因為它可接受，而是因為「被測試釘住的
 已知殘留」與「被誤以為已關閉的洞」是兩件事。根治要讓未逾期邀請離開 409 集合，會動到
-`spec_us2` AC 6a 的對外行為，屬另一張 issue。
+`spec_us2` AC 6a 的對外行為，**追蹤於 #345**。
 """
 
 from datetime import timedelta
@@ -176,7 +176,10 @@ class TestCrossEndpointResidual:
 
     釘住它的理由與 `test_dp_login_no_enumeration.py::TestVerifiedAccountUnchanged` 相同——
     讓殘留成為「被寫下來且有守衛的事實」。若日後根治（讓未逾期邀請離開 409 集合），本 class
-    會轉紅，那時請連同這段說明一起刪除，而不是改斷言。
+    會轉紅，那時請連同這段說明一起刪除，而不是改斷言（#345 的驗收條件已寫明此事）。
+
+    另有一條互補的殘留——`/api/register` 的 429 洩漏「該 Email 有未逾期的自助註冊待驗證列」
+    （#213 引入，走共用冷卻 key）——追蹤於 **#346**，本 class 不涵蓋它。
     """
 
     async def test_交叉比對仍可切出未逾期邀請(self, client, db) -> None:

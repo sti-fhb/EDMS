@@ -73,7 +73,7 @@ class AuthService:
 
         ⚠️ **另一項已知殘留（跨端點）**：本端點的 `DP_AUTH_007` 與 `/api/register` 的 `DP_USER_001`
         交叉比對，仍可取出「未逾期的管理者邀請」——見 `register_service._EMAIL_UNAVAILABLE_MSG`
-        上方說明。由 `test_dp_register_no_enumeration.py::TestCrossEndpointResidual` 釘住。
+        上方說明。由 `test_dp_register_no_enumeration.py::TestCrossEndpointResidual` 釘住，追蹤於 **#345**。
 
         Raises:
             AppError: 查無有效帳號（401 DP_AUTH_007）、密碼錯誤（401 DP_AUTH_008）、
