@@ -253,7 +253,7 @@
       <div class="mb-3"><label class="form-label form-label-sm">確認密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="再次輸入密碼"></div>
       <button class="btn btn-tsbms w-100" onclick="loginVerifySubmit()"><i class="bi bi-shield-check me-1"></i>設定密碼並啟用</button>
       <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>密碼複雜度讀平台參數（PWD_POLICY）；設定後即以此 Email 直接登入。<span class="text-danger">密碼不合規 / 兩次不一致改顯示 DP-MSG-DP02-002 / 003（token 仍有效，可原頁重試）；連結無效 / 逾時顯示 DP-MSG-DP02-006 / 007 + 重新註冊指引。</span></div>
-      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；成功後提示 DP-MSG-DP02-005 並導登入。與下方 US4「帳號啟用落點」為<strong>孿生頁</strong>——同一個殼、同一套密碼檢核，只差文案與呼叫的端點（`/verify-email` 收 <code>SELF_REGISTER</code>、`/activate-account` 收 <code>ADMIN_INVITE</code>）。啟用副作用僅在此步落地：建 <code>ACTIVE</code> DP_USER + 授 ET 學員 + 雙稽核 + 首筆 PWD_HIST + 刪 pending 列。未驗證帳號登入 → DP-MSG-DP02-008（DP_AUTH_010）+ 重寄。</div>
+      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；成功後提示 DP-MSG-DP02-005 並導登入。與下方 US4「帳號啟用落點」為<strong>孿生頁</strong>——同一個殼、同一套密碼檢核，只差文案與呼叫的端點（`/verify-email` 收 <code>SELF_REGISTER</code>、`/activate-account` 收 <code>ADMIN_INVITE</code>）。啟用副作用僅在此步落地：建 <code>ACTIVE</code> DP_USER + 授 ET 學員 + 雙稽核 + 首筆 PWD_HIST + 刪 pending 列。未驗證帳號登入 → <strong>與「未註冊」完全相同</strong>之 DP-MSG-DP01-001（DP_AUTH_007），畫面同時提供「前往註冊」與「重寄驗證信」兩個入口（#208 防帳號列舉；DP-MSG-DP02-008 / DP_AUTH_010 已退役）。</div>
     </div>
 
     <!-- 帳號啟用落點（管理者邀請信連結 /activate?token=... 之落點；US4 邀請流程，使用者自設密碼） -->
@@ -1370,7 +1370,8 @@ function loginShowError(type) {
   var box = document.getElementById('login-error'), txt = document.getElementById('login-error-text');
   if (!box || !txt) return;
   if (!type) { box.style.display = 'none'; txt.textContent = ''; return; }
-  var msgs = { 'no_account': '查無此帳號，請先註冊', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請洽管理者或稍後再試', 'disabled': '帳號已停用，請洽管理者', 'rate_limited': '嘗試次數過多，請稍後再試' };
+  // no_account 涵蓋「未註冊 / 未驗證 / 已受邀 / 待驗證列逾期」四種狀態，文案刻意一致（#208）
+  var msgs = { 'no_account': '帳號或密碼錯誤。若尚未註冊請先註冊；若剛完成註冊，請至信箱點選驗證連結，未收到信可重新寄送', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請洽管理者或稍後再試', 'disabled': '帳號已停用，請洽管理者', 'rate_limited': '嘗試次數過多，請稍後再試' };
   txt.textContent = msgs[type] || '登入失敗'; box.style.display = '';
 }
 function loginForgotPw()     { _loginShow('login-forgot-1'); }

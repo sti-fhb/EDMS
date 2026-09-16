@@ -22,7 +22,7 @@ import { toApiError } from "../services/http"
 
 /**
  * 登入 overlay（全畫面遮罩）：登入 / 註冊分頁。
- * 登入：帳密 + 錯誤提示（後端 error_message）；查無帳號可切註冊、未驗證（DP_AUTH_010）可重寄驗證信。
+ * 登入：帳密 + 錯誤提示（後端 error_message）；`DP_AUTH_007` 同時給出「前往註冊」與「重寄驗證信」兩條出路。
  * 註冊（US2 #56）：RegisterForm，送出後於分頁內顯示「驗證信已寄」（不跳登入，需驗證後才能登入）。
  */
 export function LoginOverlay() {
@@ -127,15 +127,18 @@ export function LoginOverlay() {
                 {errorMessage !== null && (
                   <Alert severity="error" sx={{ mb: 2 }}>
                     {errorMessage}
+                    {/*
+                      #208：後端已不再區分「查無帳號」與「尚未驗證」（否則匿名者密碼隨便填即可
+                      列舉待驗證列，含「誰被邀請了」）。前端因此也**不能**靠 error code 決定顯示
+                      哪一條出路——只有使用者自己知道是哪一種，所以兩條並列，由本人選。
+                      兩者缺一即讓某一類使用者走進死路：缺註冊 → 逾期者被指向靜默不寄的重寄；
+                      缺重寄 → 剛註冊未收到信者只能重註冊。
+                    */}
                     {errorCode === "DP_AUTH_007" && (
-                      <Box component="span" sx={{ ml: 1 }}>
+                      <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 2 }}>
                         <Link component="button" type="button" underline="hover" onClick={() => setTab("register")}>
                           前往註冊
                         </Link>
-                      </Box>
-                    )}
-                    {errorCode === "DP_AUTH_010" && (
-                      <Box component="span" sx={{ ml: 1 }}>
                         <Link
                           component="button"
                           type="button"

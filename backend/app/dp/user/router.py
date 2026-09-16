@@ -164,9 +164,11 @@ async def register(
     使用者白等倒數。pending / 全新 Email 維持冷卻優先，防狂發語意不變。
     """
     _register_limiter.hit(f"register:acct:{data.email}")
-    # 已驗證帳號優先於冷卻回應（#86）：該狀態是終局的，等倒數結束也不會變，
-    # 且此路徑本來就不送信、冷卻無防狂發價值——先擋可免使用者白等一輪。
-    await _register_service.assert_email_not_registered(db, data.email)
+    # Email 不可用（已驗證帳號 / 未逾期邀請）優先於冷卻回應（#86）：兩者皆為終局狀態，等倒數
+    # 結束也不會變，且都不送信、冷卻無防狂發價值——先擋可免使用者白等一輪。
+    # ⚠️ 兩種狀態必須在**同一步**被擋下（#208），否則冷卻武裝時一個回 409、一個回 429，
+    # 位置差本身就是 oracle。合併於 assert_email_available 內，見該方法 docstring。
+    await _register_service.assert_email_available(db, data.email)
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
     key = _verify_send_key(data.email)
     _verify_send_cooldown.check(key, cooldown_sec)

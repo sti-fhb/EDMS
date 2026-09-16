@@ -1,6 +1,6 @@
 """認證服務（US1）：登入 / 換發 / 登出。
 
-帳密驗證（bcrypt）、錯誤分流（帳號不存在 / 密碼錯誤，明確訊息 spec_us1 Clarification）、
+帳密驗證（bcrypt）、錯誤分流（查無有效帳號 / 密碼錯誤；前者對四種帳號狀態統一回應，#208 防列舉）、
 失敗計數與自動鎖定、成功核發 JWT（auth_time + 短 TTL）；登入 / 登出 / 鎖定寫稽核（SRVDP003，含來源 IP）。
 門檻值（FAIL_LOCK_COUNT / LOCK_MINUTES / ACCESS_TTL_MIN / EXPIRY_DAYS）讀平台級 DP_PARAM（SRVDP001）。
 """
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, create_access_token
 from app.core.exceptions import AppError
+from app.core.log_redaction import mask_email
 from app.core.password_hashing import verify_password_async
 from app.core.password_policy import is_password_expired
 from app.core.request_context import get_client_ip
@@ -27,6 +28,14 @@ _DEFAULT_LOCK_MINUTES = 30
 _DEFAULT_ACCESS_TTL_MIN = 15
 _DEFAULT_EXPIRY_DAYS = 90
 _DEFAULT_RENEW_MAX_HOURS = 8
+
+# 查無有效 DP_USER 列時的**唯一**對外訊息（#208 防帳號列舉）。
+#
+# 四種狀態共用這一句：完全不存在、自助註冊未驗證、管理者已邀請、待驗證列已逾期。
+# 句子必須同時鋪出三條自助出路（註冊 / 點驗證連結 / 重寄），因為說話的人**不知道**
+# 對方是哪一種——這正是 #56 當初加 DP_AUTH_010 想解決、而本次改以「一句話涵蓋全部」解決的事。
+# 改動此字串前請先確認新句子仍同時涵蓋三條路，否則會讓某一類使用者走進死路。
+_NO_ACCOUNT_MESSAGE = "帳號或密碼錯誤。若尚未註冊請先註冊；若剛完成註冊，請至信箱點選驗證連結，未收到信可重新寄送"
 
 
 class AuthService:
@@ -45,33 +54,54 @@ class AuthService:
     async def login(self, db: AsyncSession, *, email: str, password: str) -> LoginResponse:
         """帳密登入：驗證 → 核發 JWT，並寫登入稽核。
 
+        `DP_AUTH_007` 涵蓋「查無有效 DP_USER 列」的全部情形（不存在 / 未驗證 / 已邀請 / 逾期），
+        訊息一律為 `_NO_ACCOUNT_MESSAGE`；能區分它們的只有稽核 reason（#208）。
+
+        **已知殘留、且為刻意保留**：`DP_AUTH_008` 與 `DP_AUTH_007` 仍可區分，故「某 Email 是否為
+        已驗證帳號」依然可探測（#208 AC 2 明訂維持既有 `DP_AUTH_008` 行為）。本次收斂的是
+        **待驗證列的有無**。
+
+        同理，`verify_password_async` 只在「帳號存在 ∧ ACTIVE ∧ 未鎖定」時才執行所造成的時間差也
+        不另行弭平：它可推得的集合恰為 `DP_AUTH_008` / `004` / `005` 已公開的集合，補 dummy hash
+        不減少任何可探測資訊。
+
+        ⚠️ **但這個等價只在 AC 2 成立時成立。** 若日後決定把 `DP_AUTH_008` 也併進 `DP_AUTH_007`，
+        **必須同時補 dummy verify**，否則合併只是換皮——而且更糟，因為系統那時「看起來已防列舉」。
+        另注意密碼運算的併發閘（`core/password_hashing`，逾量回 `COMMON_503`）會把這個統計性的
+        時間差升級為**類別式**訊號：閘滿時存在帳號回 503、不存在帳號照樣回 401，不需取樣即可分辨。
+        現況下結論不變（仍落在 008 已公開的集合內），但「時間差難以利用」這個直覺在此並不成立。
+
+        ⚠️ **另一項已知殘留（跨端點）**：本端點的 `DP_AUTH_007` 與 `/api/register` 的 `DP_USER_001`
+        交叉比對，仍可取出「未逾期的管理者邀請」——見 `register_service._EMAIL_UNAVAILABLE_MSG`
+        上方說明。由 `test_dp_register_no_enumeration.py::TestCrossEndpointResidual` 釘住，追蹤於 **#345**。
+
         Raises:
-            AppError: 帳號不存在（401 DP_AUTH_007）、密碼錯誤（401 DP_AUTH_008）、
+            AppError: 查無有效帳號（401 DP_AUTH_007）、密碼錯誤（401 DP_AUTH_008）、
                 鎖定中（403 DP_AUTH_005）、停用（403 DP_AUTH_004）。
         """
         ip = get_client_ip()
         now = utcnow()
         user = await self._repo.get_by_email(db, email)
         if user is None:
-            # 方案 B：未驗證帳號不在 DP_USER，僅在待驗證表。若該 Email 有**未逾期**的待驗證列 → 專屬提示
-            # （引導驗證 / 重寄），而非誤導的「查無此帳號」（#56）。
+            # 防帳號列舉（#208）：查無 DP_USER 列時，**對外一律同一個 401 + 同一句話**，
+            # 對內（稽核）仍區分原因。兩者刻意脫鉤——稽核是內部軌跡，不因防列舉而失去追溯能力。
             #
-            # 逾期列必須視為不存在（#212），與 resend 的定義一致。否則會構成死路：逾期列讓登入永久回
-            # DP_AUTH_010「請重新寄送」→ 前端據此渲染重寄鈕 → 重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章
-            # → 使用者每按一次就把自己的「重新註冊」路徑再鎖一個冷卻週期，而 UI 全程指向重寄。
-            # 回 DP_AUTH_007「請先註冊」才是此時唯一走得通的動作。
+            # 方案 B 下未驗證帳號不在 DP_USER，只在待驗證表，於是「有無待驗證列」原本會從回應漏出去：
+            # 匿名者密碼隨便填就能問出某個 Email 是否**被組織邀請過**（`ADMIN_INVITE` 列同樣命中）。
+            # 舊的 DP_AUTH_010 是 #56 為了不讓未驗證者看到誤導的「查無此帳號」而加的，引導本身有必要，
+            # 但不必靠「只對這類人顯示」達成——`_NO_ACCOUNT_MESSAGE` 對所有人一致地鋪出全部三條出路。
+            #
+            # 逾期列一律視為不存在（#212，與 resend 的定義一致）。此處逾期與否只影響稽核 reason，
+            # 不再影響對外回應，所以 #212 的死路（UI 永遠指向重寄、而重寄對逾期列靜默不寄）不會重開：
+            # 統一訊息同時寫著「若尚未註冊請先註冊」。
             pending = await self._repo.get_pending_by_email(db, email)
-            if pending is not None and pending.expires_date > now:
-                await self._fail(
-                    db,
-                    _SYSTEM_USER,
-                    ip,
-                    "帳號未驗證",
-                    401,
-                    "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送",
-                    "DP_AUTH_010",
-                )
-            await self._fail(db, _SYSTEM_USER, ip, "帳號不存在", 401, "查無此帳號，請先註冊", "DP_AUTH_007")
+            reason = "帳號未驗證" if pending is not None and pending.expires_date > now else "帳號不存在"
+            # 帶上遮罩後的 Email：此路徑沒有 user_id 可填（operator 為 SYSTEM），只記「有人打到
+            # 待驗證列」而不記「打的是誰」，事故調查就只剩計數——問不出「哪些受邀者被探測過」，
+            # 而那正是本次防護的標的。遮罩規則沿用 `mask_email`（規範禁記個資完整值）。
+            await self._fail(
+                db, _SYSTEM_USER, ip, f"{reason}（{mask_email(email)}）", 401, _NO_ACCOUNT_MESSAGE, "DP_AUTH_007"
+            )
 
         if user.locked_until is not None and user.locked_until > now:
             await self._fail(db, user.user_id, ip, "帳號鎖定中", 403, "帳號已鎖定，請洽管理者或稍後再試", "DP_AUTH_005")
@@ -93,7 +123,7 @@ class AuthService:
             )
             if new_count is None:
                 # 密碼驗證與遞增之間帳號遭並發軟刪（極罕見）：對齊帳號不存在路徑（consume_reset_token 同慣例）
-                await self._fail(db, user.user_id, ip, "帳號不存在", 401, "查無此帳號，請先註冊", "DP_AUTH_007")
+                await self._fail(db, user.user_id, ip, "帳號不存在", 401, _NO_ACCOUNT_MESSAGE, "DP_AUTH_007")
             reason = "連續失敗達上限，帳號鎖定" if new_count >= fail_lock else "密碼錯誤"
             await self._fail(db, user.user_id, ip, reason, 401, "密碼錯誤", "DP_AUTH_008")
 
