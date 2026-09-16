@@ -21,3 +21,21 @@ docs/wireframes/**/temp/
 
 # IDE 個人設定（JetBrains）：屬開發者本機偏好，不進版控
 .idea/
+
+# Claude Code 的本機設定：**屬個人機器，不進版控**
+#
+# 本 repo 為 public，而這兩個檔累積的是本機的權限允許清單——內含 dev 連線字串
+# （如 PGPASSWORD=postgres）、每個 worktree 的絕對路徑、分支名與開發中的功能名。
+# 2026-09-16 曾因 `git add -A` 差點把 settings.json（85KB）暫存進 commit。
+#
+# ⚠️ 只擋未追蹤的檔：`git add -f` 仍可強制加入，且任一檔一旦被 commit 過，本規則
+# 即對它失效（須先 `git rm --cached`）。
+#
+# 該共享的專案層級設定放 .claude/ 下的子目錄（agents / commands / rules / skills /
+# sti-rules），那些已在版控內、不受本規則影響。
+.claude/settings.json
+.claude/settings.local.json
+
+# Python bytecode（backend/.gitignore 已涵蓋 backend/；此處補 docs/ 等其他位置）
+__pycache__/
+*.py[cod]
