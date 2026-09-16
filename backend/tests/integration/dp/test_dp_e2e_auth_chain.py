@@ -26,6 +26,7 @@ from app.dp.user.register_service import RegisterService
 from app.dp.user.service import AuthService
 from app.dp.user.verify_service import VerifyService
 from app.dp.users.models import DpUser
+from app.et.bootstrap import register_et_module
 
 pytestmark = pytest.mark.integration
 
@@ -64,7 +65,12 @@ def et_gate():
 
     module_provisioning_gate.register("ET", _grant)
     yield granted
-    module_provisioning_gate.unregister("ET")
+    # ⚠️ **teardown 還原真實 granter，而非 unregister**。`main.py` 於啟動時就呼叫
+    # `register_et_module()`，「已註冊」是整個執行期的基線；清成未註冊留下的是正式環境
+    # 從不存在的狀態，而 `grant_default_role` 對未註冊模組是 **no-op（只寫一行 log）**——
+    # 於是後續測試的註冊驗證照常回 200，使用者卻拿不到 ET 學員角色，**沒有任何東西會紅**。
+    # `test_et_student_full_flow.py` 曾因此單獨跑綠、與本檔同 worker 時紅。
+    register_et_module()
 
 
 async def test_self_service_auth_chain(db, et_gate):
