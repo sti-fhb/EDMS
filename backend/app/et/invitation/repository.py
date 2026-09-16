@@ -13,6 +13,7 @@ from app.et.constants import (
     COMPLETION_NOT_STARTED,
     INVITATION_JOINED,
     INVITATION_PENDING,
+    INVITATION_REVOKED,
     SOURCE_EMAIL_INVITE,
 )
 from app.et.course.models import EtCourse
@@ -86,6 +87,119 @@ class EtInvitationRepository:
         db.add(invitation)
         await db.flush()
         return invitation
+
+    def build_pending_list_stmt(self, *, course_id: int):
+        """該課程之**待加入**邀請（供 `paginate()`）。
+
+        只取 `PENDING`：`JOINED` 已列於 US9「已加入」分頁、`REVOKED` 是教師已明示不要
+        的人，三者混列會讓教師分不出哪些還需要追。
+
+        排序以 `LAST_SENT_AT` 由舊到新——最久沒動靜的排最前面，那是最需要處理的。
+        """
+        return (
+            select(EtInvitation)
+            .where(
+                EtInvitation.course_id == course_id,
+                EtInvitation.status == INVITATION_PENDING,
+                EtInvitation.deleted == 0,
+            )
+            .order_by(EtInvitation.last_sent_at.asc(), EtInvitation.invitation_id.asc())
+        )
+
+    async def get_by_id(self, db: AsyncSession, invitation_id: int) -> EtInvitation | None:
+        """依 `INVITATION_ID` 取邀請——**不限狀態**。
+
+        呼叫端需要靠 `STATUS` 分辨「已加入」「已撤回」「待加入」三種情況並給不同回應，
+        在這裡先濾掉會讓它們全部塌成「查無」。
+        """
+        return await db.scalar(
+            select(EtInvitation).where(
+                EtInvitation.invitation_id == invitation_id,
+                EtInvitation.deleted == 0,
+            )
+        )
+
+    async def mark_revoked(self, db: AsyncSession, *, invitation_id: int, operator: OperatorInfo) -> bool:
+        """原子撤回：**只有仍為 `PENDING` 才成功**（`PENDING → REVOKED`，終態）。
+
+        🔴 **條件寫在 `WHERE` 裡，不可先查後改**——理由與 `consume_pending` 完全相同，
+        且此處的併發對手正是 `consume_pending` 本身：
+
+        1. T1 `accept` 以 `WHERE STATUS='PENDING'` 原子改為 `JOINED`、建立 `ET_ENROLLMENT`
+        2. T2 `revoke` 在 T1 commit 前讀到 `PENDING`、通過應用層檢查
+        3. T1 commit → T2 若發出不帶狀態條件的 `UPDATE`，會把剛寫入的 `JOINED` **蓋成
+           `REVOKED`**（lost update），而 `ET_ENROLLMENT` 已經建立
+
+        結果是學員**確實已入課**，教師卻收到 204、該列自清單消失，且沒有任何訊號告訴他
+        「這個人已經進來了，要改用 US9 的移除」。撤回的整個用途就是跟受邀者搶時間，這個
+        視窗正好落在雙方都活躍的時刻。
+
+        **不清 `TOKEN_HASH`**：`accept()` 要靠它比對出「這個 token 屬於一筆已撤回的邀請」
+        才能回 `ET_INVITE_006`；清掉的話那條連結會退化成「查無」（`ET_INVITE_001`），
+        受邀者看到的訊息就與 `FR-ET-US12-05` 不符。
+
+        Returns:
+            True 表示本次呼叫完成撤回；False 表示該列已非 `PENDING`（被 `accept` 消耗或
+            已撤回），呼叫端應回 404。
+        """
+        now = utcnow()
+        result = await db.execute(
+            update(EtInvitation)
+            .where(
+                EtInvitation.invitation_id == invitation_id,
+                EtInvitation.status == INVITATION_PENDING,
+                EtInvitation.deleted == 0,
+            )
+            .values(
+                status=INVITATION_REVOKED,
+                revoked_at=now,
+                updated_user=operator.user_id,
+                updated_date=now,
+            )
+        )
+        await db.flush()
+        return (result.rowcount or 0) > 0
+
+    async def rotate_token(
+        self,
+        db: AsyncSession,
+        *,
+        invitation_id: int,
+        token_hash: str,
+        send_status_code: str,
+        operator: OperatorInfo,
+    ) -> bool:
+        """再次寄送：**以 `INVITATION_ID` 換新 token**，只有仍為 `PENDING` 才成功。
+
+        🔴 **不可改用 `upsert_pending(course_id, email)`**——那支在找不到 `PENDING` 列時會
+        **新建一列**，而 `ET_INVITATION` 沒有 `(COURSE_ID, EMAIL)` 唯一鍵。若在重寄期間
+        該邀請被撤回（或被接受），upsert 會憑空造出一列全新的 `PENDING` + 有效 token：
+        **剛被撤回的對象重新拿到可用的連結**，清單上也多出一列（違反 data-model 的
+        「再次寄送不建新紀錄」）。
+
+        本支以主鍵定址 + `STATUS = PENDING` 條件，兩種交錯都只會命中 0 列。
+
+        Returns:
+            True 表示 token 已換新；False 表示該列已非 `PENDING`，呼叫端應回 404。
+        """
+        now = utcnow()
+        result = await db.execute(
+            update(EtInvitation)
+            .where(
+                EtInvitation.invitation_id == invitation_id,
+                EtInvitation.status == INVITATION_PENDING,
+                EtInvitation.deleted == 0,
+            )
+            .values(
+                token_hash=token_hash,
+                last_sent_at=now,
+                send_status_code=send_status_code,
+                updated_user=operator.user_id,
+                updated_date=now,
+            )
+        )
+        await db.flush()
+        return (result.rowcount or 0) > 0
 
     async def get_by_token_hash(self, db: AsyncSession, token_hash: str) -> EtInvitation | None:
         return await db.scalar(

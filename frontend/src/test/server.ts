@@ -1069,6 +1069,28 @@ export const handlers = [
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
+  // ET-12 待加入邀請（#342）。兩列刻意不同寄送時間，驗排序與時間顯示。
+  http.get("/api/et/courses/:courseId/invitations", () =>
+    HttpResponse.json({
+      data: [
+        {
+          invitation_id: 901,
+          email: "chenmh@edms.local",
+          last_sent_at: "2026-05-20T01:00:00Z",
+          status: "PENDING",
+        },
+        {
+          invitation_id: 902,
+          email: "liutc@edms.local",
+          last_sent_at: "2026-05-22T03:30:00Z",
+          status: "PENDING",
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.post("/api/et/invitations/:invitationId/resend", () => new HttpResponse(null, { status: 204 })),
+  http.post("/api/et/invitations/:invitationId/revoke", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/et/courses/:courseId/attempt-overview", () =>
     HttpResponse.json({
       students: [
