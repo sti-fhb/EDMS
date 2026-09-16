@@ -87,6 +87,24 @@ class EtInvitationRepository:
         await db.flush()
         return invitation
 
+    def build_pending_list_stmt(self, *, course_id: int):
+        """該課程之**待加入**邀請（供 `paginate()`）。
+
+        只取 `PENDING`：`JOINED` 已列於 US9「已加入」分頁、`REVOKED` 是教師已明示不要
+        的人，三者混列會讓教師分不出哪些還需要追。
+
+        排序以 `LAST_SENT_AT` 由舊到新——最久沒動靜的排最前面，那是最需要處理的。
+        """
+        return (
+            select(EtInvitation)
+            .where(
+                EtInvitation.course_id == course_id,
+                EtInvitation.status == INVITATION_PENDING,
+                EtInvitation.deleted == 0,
+            )
+            .order_by(EtInvitation.last_sent_at.asc(), EtInvitation.invitation_id.asc())
+        )
+
     async def get_by_token_hash(self, db: AsyncSession, token_hash: str) -> EtInvitation | None:
         return await db.scalar(
             select(EtInvitation).where(EtInvitation.token_hash == token_hash, EtInvitation.deleted == 0)

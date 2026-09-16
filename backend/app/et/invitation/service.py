@@ -51,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.pagination import PaginatedResult, paginate
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.et.common.tokens import generate_invitation_token, hash_token
@@ -58,7 +59,12 @@ from app.et.constants import COURSE_PUBLISHED, INVITATION_PENDING, INVITATION_RE
 from app.et.course.rules import ensure_owner, is_effectively_closed
 from app.et.invitation.repository import EtInvitationRepository
 from app.et.invitation.rules import ensure_invitable, parse_emails
-from app.et.invitation.schemas import EmailInviteResult, InviteAcceptResult, InvitePreview
+from app.et.invitation.schemas import (
+    EmailInviteResult,
+    InviteAcceptResult,
+    InvitePreview,
+    PendingInviteRow,
+)
 from app.et.notify.course_invite import (
     PREVIEW_NAME_MASK,
     build_course_invite_params,
@@ -274,6 +280,42 @@ class EtInvitationService:
         if enrollment is None or enrollment.is_removed:
             raise _LINK_INVALID
         return InviteAcceptResult(course_id=course.course_id, course_name=course.course_name, already_joined=True)
+
+    async def _require_owned_course(self, db: AsyncSession, course_id: int, actor_id: str):
+        """課程存在 + 呼叫者為擁有者。**刻意不含 `ensure_invitable`（關閉判定）。**
+
+        🔴 **不要與 `_require_invitable_course()` 合併**——兩者差一個關閉守門，而那個差別
+        是刻意的：
+
+        | 用途 | 關閉時 |
+        |---|---|
+        | 待加入清單（唯讀）| 照常可看（`FR-ET-US12-06` 明訂）|
+        | 撤回邀請 | **仍可執行**（SA 裁示 2026-09-16）|
+        | 再次寄送 | 擋（用 `_require_invitable_course`）|
+
+        撤回是**止血**動作：教師發現邀請寄錯人（例如打錯 Email 寄到外部單位）時，若課程
+        剛好到期自動關閉而撤回被擋，那條錯誤連結會一直有效到再開課為止，且再開課當下
+        立刻可用。限制它只會讓錯誤持續更久。
+
+        `test_課程關閉時仍可撤回邀請` 釘住這件事——少了它，日後有人依 ET 模組「寫全停」
+        的慣例把守門補上，不會有任何測試變紅。
+        """
+        course = await self._repo.get_course(db, course_id)
+        if course is None:
+            raise _NOT_FOUND
+        ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+        return course
+
+    async def list_pending(
+        self, db: AsyncSession, course_id: int, *, actor_id: str, page: int, limit: int
+    ) -> PaginatedResult[PendingInviteRow]:
+        """ET-12 待加入清單（`FR-ET-US12-01`）。
+
+        唯讀，故走 `_require_owned_course`——課程關閉時照常可看。
+        """
+        await self._require_owned_course(db, course_id, actor_id)
+        stmt = self._repo.build_pending_list_stmt(course_id=course_id)
+        return await paginate(db, stmt, page=page, limit=limit, schema=PendingInviteRow)
 
     async def _require_invitable_course(self, db: AsyncSession, course_id: int, actor_id: str):
         """課程存在 + 呼叫者為擁有者 + 課程已發布。"""

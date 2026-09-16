@@ -29,11 +29,12 @@ outbox，若無次數上限，本系統就成了一個「發送者身分完全�
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.core.pagination import PagedResponse
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, require_et_roles
@@ -43,6 +44,7 @@ from app.et.invitation.schemas import (
     InviteAcceptReq,
     InviteAcceptResult,
     InvitePreview,
+    PendingInviteRow,
 )
 from app.et.invitation.service import EtInvitationService
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
@@ -80,6 +82,25 @@ def rate_limit_invites() -> Callable[..., Awaitable[None]]:
 
 router = APIRouter(prefix="/api/et", tags=["et-invitation"], dependencies=[Depends(get_et_context)])
 _service = EtInvitationService()
+
+
+@router.get(
+    "/courses/{course_id}/invitations",
+    response_model=PagedResponse[PendingInviteRow],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def list_pending_invitations(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> PagedResponse[PendingInviteRow]:
+    """ET03「待加入」分頁之清單（`FR-ET-US12-01`）。
+
+    **課程關閉時照常可讀**——`FR-ET-US12-06` 明訂關閉只停「再次寄送」，不停閱覽。
+    """
+    return await _service.list_pending(db, course_id, actor_id=ctx.user_id, page=page, limit=limit)
 
 
 @router.post(

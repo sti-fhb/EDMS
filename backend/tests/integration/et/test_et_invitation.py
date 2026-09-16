@@ -6,7 +6,7 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -19,6 +19,7 @@ from app.et.constants import (
     COURSE_CLOSED,
     INVITATION_JOINED,
     INVITATION_PENDING,
+    INVITATION_REVOKED,
     ITEM_MATERIAL,
     ROLE_STUDENT,
     ROLE_TEACHER,
@@ -471,3 +472,80 @@ class TestAcceptInvitation:
         r = await client.post(_ACCEPT, json={"token": token}, headers=_bearer(invitee))
         assert r.status_code == 409
         assert r.json()["error_code"] == "ET_INVITE_002"
+
+
+class TestPendingInviteList:
+    """ET-12 待加入清單（AC 1 / 2 / 6）。
+
+    清單只列 `PENDING`——`JOINED` 已在「已加入」分頁（US9），`REVOKED` 是終態且教師
+    已明示不要那個人。三者混列會讓教師分不出哪些還需要追。
+    """
+
+    async def test_待加入清單只列PENDING(self, client, db) -> None:
+        teacher = await _user(db, "t_pi01", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "pending01@edms.local")
+        await _account(db, "joined01@edms.local")
+        await _account(db, "revoked01@edms.local")
+        await _invite(client, teacher, course_id, "pending01@edms.local,joined01@edms.local,revoked01@edms.local")
+        # 一筆改 JOINED、一筆改 REVOKED（撤回端點於步驟 2 才做）
+        await db.execute(
+            update(EtInvitation)
+            .where(EtInvitation.course_id == course_id, EtInvitation.email == "joined01@edms.local")
+            .values(status=INVITATION_JOINED, joined_at=utcnow())
+        )
+        await db.execute(
+            update(EtInvitation)
+            .where(EtInvitation.course_id == course_id, EtInvitation.email == "revoked01@edms.local")
+            .values(status=INVITATION_REVOKED, revoked_at=utcnow())
+        )
+        await db.commit()
+
+        r = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        emails = [row["email"] for row in r.json()["data"]]
+        assert emails == ["pending01@edms.local"]
+
+    async def test_待加入清單欄位齊全(self, client, db) -> None:
+        teacher = await _user(db, "t_pi02", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "fields01@edms.local")
+        await _invite(client, teacher, course_id, "fields01@edms.local")
+        await db.commit()
+
+        r = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+
+        row = r.json()["data"][0]
+        assert row["email"] == "fields01@edms.local"
+        assert row["status"] == INVITATION_PENDING
+        # 顯示 LAST_SENT_AT 而非 SENT_AT：教師重寄後畫面日期不變會讓他以為沒寄出去
+        assert row["last_sent_at"] is not None
+        assert "invitation_id" in row, "前端要用它呼叫重寄 / 撤回"
+
+    async def test_他人課程不可讀待加入清單(self, client, db) -> None:
+        """擁有權判定——非擁有者拿不到別人課程的受邀 Email 名單。"""
+        owner = await _user(db, "t_pi03", ROLE_TEACHER)
+        other = await _user(db, "t_pi03b", ROLE_TEACHER)
+        course_id = await _published_course(client, db, owner)
+        await _account(db, "secret01@edms.local")
+        await _invite(client, owner, course_id, "secret01@edms.local")
+        await db.commit()
+
+        r = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(other))
+
+        assert r.status_code == 403, r.text
+
+    async def test_課程已關閉仍可讀待加入清單(self, client, db) -> None:
+        """AC 7 的「讀」那一半——關閉只停寫入，清單照常可看。"""
+        teacher = await _user(db, "t_pi04", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        await _account(db, "closed01@edms.local")
+        await _invite(client, teacher, course_id, "closed01@edms.local")
+        await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_CLOSED))
+        await db.commit()
+
+        r = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert len(r.json()["data"]) == 1
