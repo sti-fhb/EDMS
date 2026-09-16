@@ -225,6 +225,14 @@ class EtSurveyFillService:
                 )
                 raise
             raise _already_submitted() from None
+
+        # 最後活動時間（#334 / SA 裁示 2026-09-15）。放在 INSERT 成功**之後**：撞唯一約束
+        # 的第二個請求沒有真的送出，不該留下活動痕跡。
+        #
+        # ⚠️ 與 `FR-ET-US13-07`「問卷不計入學習進度、不是完課條件」**不衝突**——那管的是
+        # `ET_PROGRESS` 與完課判定，本欄是「這個人還在不在動」。`TestNoProgressSideEffect`
+        # 仍然釘住前者。
+        await self._progress.touch_activity(db, user_id=operator.user_id, course_id=course_id, operator=operator)
         return SurveySubmitResult(response_id=response_id, submitted_at=submitted_at)
 
     # ── 內部 ────────────────────────────────────────────────────────────────

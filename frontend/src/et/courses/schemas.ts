@@ -26,8 +26,15 @@ export interface CourseDetail {
   require_approval: boolean
   version: number
   owner_id: string
-  /** 建立者姓名（唯讀 join DP_USER；查無 null）——檢視模式 banner 用。 */
+  /** 建立者姓名（唯讀 join DP_USER；**查無此人**時 null）——檢視模式 banner 用。 */
   owner_name: string | null
+  /**
+   * 建立者帳號是否已停用（#330）。用 `ownerLabel()` 組字串，不要各頁自己拼。
+   *
+   * 來源是後端的 `DP_USER.STATUS`——**不是** `DELETED`（EDMS 沒有刪除使用者的功能，
+   * 那個欄位恆為 0）。
+   */
+  owner_is_disabled: boolean
   /** 當前使用者是否為擁有者；false 時全頁唯讀（spec.md §擁有權判定）。 */
   is_owner: boolean
   tag_ids: number[]
@@ -142,8 +149,15 @@ export interface CourseCard {
   open_start_at: string | null
   open_end_at: string | null
   owner_id: string
-  /** 取自 `DP_USER`；帳號已刪時為 `null`。 */
+  /** 取自 `DP_USER`；**查無此人**（資料不一致）時為 `null`。帳號停用時仍回姓名。 */
   owner_name: string | null
+  /**
+   * 建立者帳號是否已停用（#330）。用 `ownerLabel()` 組字串，不要各頁自己拼。
+   *
+   * 來源是後端的 `DP_USER.STATUS`——**不是** `DELETED`（EDMS 沒有刪除使用者的功能，
+   * 那個欄位恆為 0）。
+   */
+  owner_is_disabled: boolean
   tags: TagOption[]
   chapter_count: number
   /** **在籍**學員數——已移除者不計入。 */
@@ -185,3 +199,22 @@ export interface CourseListParams {
 /** 關鍵字長度上限，對齊後端 `Query(max_length=100)`。兩邊必須一起改。 */
 export const KEYWORD_MAX_LENGTH = 100
 
+/**
+ * 建立者顯示字串——**三個畫面共用同一支**（#330）。
+ *
+ * 修正前卡片顯示「—」、建立者下拉顯示 `owner_id`、詳細頁顯示姓名，同一個人三種身份。
+ * 根因是三處各自寫 fallback。集中在這裡，下一個要顯示建立者的地方就不必再決定一次。
+ *
+ * 三種狀態刻意分開：
+ * - 正常 → `王大明`
+ * - 帳號已停用 → `王大明（已停用帳號）`——代表沒有人能編輯這門課、需要交接
+ * - `owner_name === null` → `—`，代表 `DP_USER` 查無此列（資料不一致），與停用是兩回事
+ *
+ * 不回傳 `owner_id`：它是 `uuid4().hex[:20]` 的隨機代理鍵（登入帳號是 EMAIL），對使用者
+ * 沒有意義，顯示它只會讓畫面出現一串看不懂的字。**這不是一道安全防護**——`owner_id`
+ * 本來就在 API 回應與下拉的 DOM 屬性裡，拿掉的只有顯示文字。
+ */
+export function ownerLabel(owner: { owner_name: string | null; owner_is_disabled: boolean }): string {
+  if (owner.owner_name === null) return "—"
+  return owner.owner_is_disabled ? `${owner.owner_name}（已停用帳號）` : owner.owner_name
+}

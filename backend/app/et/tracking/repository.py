@@ -139,35 +139,6 @@ class EtTrackingRepository:
         )
         return {user_id: float(avg) for user_id, avg in rows.all()}
 
-    async def last_submitted_at_by_student(
-        self, db: AsyncSession, *, course_id: int, user_ids: list[str]
-    ) -> dict[str, object]:
-        """`{user_id: 最後一次測驗提交時間}`。
-
-        ⚠️ **`ET_ENROLLMENT.LAST_ACTIVITY_AT` 不含測驗提交**——它只在
-        `progress/repository.set_last_item()`（檢視項目）被更新，而 `data-model`
-        §ET_ENROLLMENT 定義該欄位是「最近一次學習動作 / **測驗提交**時間」。
-
-        學員開著測驗寫 30 分鐘再提交時，那個欄位會停在進入測驗的時間。本支補上缺的那
-        一半，由 service 取兩者較晚者。
-
-        > 在查詢層補齊而非去修 `attempt/`：本 issue 不該擴張到別的模組的寫入路徑；
-        > `attempt` 提交時不更新該欄位這個落差另列 follow-up。
-        """
-        if not user_ids:
-            return {}
-        rows = await db.execute(
-            select(EtQuizAttemptM.user_id, func.max(EtQuizAttemptM.submitted_at))
-            .where(
-                EtQuizAttemptM.user_id.in_(user_ids),
-                EtQuizAttemptM.course_id == course_id,
-                EtQuizAttemptM.submitted_at.is_not(None),
-                EtQuizAttemptM.deleted == 0,
-            )
-            .group_by(EtQuizAttemptM.user_id)
-        )
-        return {user_id: submitted for user_id, submitted in rows.all()}
-
     async def in_progress_attempt_user_ids(self, db: AsyncSession, *, course_id: int, user_ids: list[str]) -> set[str]:
         """本課程中**有作答中（未提交）attempt** 的學員集合（`ET-MSG-ET03-003`）。
 

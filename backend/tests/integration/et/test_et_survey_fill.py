@@ -11,6 +11,8 @@
 5. 在籍與非在籍的授權邊界
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select, update
 
@@ -713,6 +715,64 @@ class TestNoProgressSideEffect:
         assert before["courses"][0]["progress_pct"] == after["courses"][0]["progress_pct"]
         rows = (await db.scalars(select(EtProgress).where(EtProgress.course_id == ctx["course_id"]))).all()
         assert len(rows) == 1, "問卷不產生 ET_PROGRESS 列"
+
+
+class TestSurveyTouchesLastActivity:
+    """填答問卷要更新 `ET_ENROLLMENT.LAST_ACTIVITY_AT`（#334 / SA 裁示 2026-09-15 方向 b）。
+
+    ⚠️ 與上面的 `TestNoProgressSideEffect` **不衝突**：`FR-ET-US13-07` 說的是問卷不計入
+    **學習進度**、不是完課條件——那管的是 `ET_PROGRESS` 與完課判定。最後活動時間是
+    「這個人還在不在動」，與「他學了多少」是兩回事，ET03 也分成兩欄呈現。
+    """
+
+    async def test_送出問卷後最後活動時間前進(self, client, db) -> None:
+        ctx = await _ready(client, db, "act10")
+        old = utcnow() - timedelta(days=3)
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == ctx["student"], EtEnrollment.course_id == ctx["course_id"])
+            .values(last_activity_at=old)
+        )
+        await db.flush()
+
+        r = await client.post(
+            _submit_url(ctx["course_id"]),
+            json={"answers": _single_answers(ctx["questions"])},
+            headers=_bearer(ctx["student"]),
+        )
+
+        assert r.status_code == 201, r.text
+        row = await db.scalar(
+            select(EtEnrollment).where(
+                EtEnrollment.user_id == ctx["student"], EtEnrollment.course_id == ctx["course_id"]
+            )
+        )
+        await db.refresh(row)
+        assert row.last_activity_at > old, "填答問卷是一次學習活動"
+
+    async def test_送出問卷不改變上次讀到哪(self, client, db) -> None:
+        """同 attempt：不可圖方便呼叫 `set_last_item()`，那會連帶改寫續讀位置。"""
+        ctx = await _ready(client, db, "act11")
+        await db.execute(
+            update(EtEnrollment)
+            .where(EtEnrollment.user_id == ctx["student"], EtEnrollment.course_id == ctx["course_id"])
+            .values(last_item_id=ctx["item_id"])
+        )
+        await db.flush()
+
+        await client.post(
+            _submit_url(ctx["course_id"]),
+            json={"answers": _single_answers(ctx["questions"])},
+            headers=_bearer(ctx["student"]),
+        )
+
+        row = await db.scalar(
+            select(EtEnrollment).where(
+                EtEnrollment.user_id == ctx["student"], EtEnrollment.course_id == ctx["course_id"]
+            )
+        )
+        await db.refresh(row)
+        assert row.last_item_id == ctx["item_id"]
 
 
 async def _close(db, course_id: int) -> None:

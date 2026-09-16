@@ -10,6 +10,7 @@ import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
 import type { CourseCard as CourseCardData } from "./schemas"
+import { ownerLabel } from "./schemas"
 
 const STATUS_LABEL: Record<CourseCardData["status"], { text: string; color: "default" | "success" | "warning" }> = {
   DRAFT: { text: "草稿", color: "default" },
@@ -90,7 +91,7 @@ export function CourseCard({ course, onOpen }: { course: CourseCardData; onOpen:
               <Stack direction="row" spacing={0.5} alignItems="center">
                 <PersonIcon fontSize="inherit" />
                 <Typography variant="caption">
-                  {course.owner_name ?? "—"}
+                  {ownerLabel(course)}
                   {course.is_owner && "（您）"}
                 </Typography>
               </Stack>

@@ -60,6 +60,7 @@ import {
   type CourseDetail,
   type CoursePayload,
 } from "./schemas"
+import { ownerLabel } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -874,7 +875,7 @@ export function EtCourseEditorPage() {
 
       {readOnly && (
         <Alert severity="warning" icon={<VisibilityIcon />} sx={{ mb: 2 }}>
-          <strong>檢視模式</strong> — 此課程由 <strong>{course?.owner_name ?? "他人"}</strong> 建立，您僅可閱覽，無法編輯。
+          <strong>檢視模式</strong> — 此課程由 <strong>{course ? ownerLabel(course) : "他人"}</strong> 建立，您僅可閱覽，無法編輯。
         </Alert>
       )}
 

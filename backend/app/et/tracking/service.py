@@ -107,7 +107,6 @@ class EtTrackingService:
 
         counts = await self._repo.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
         avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
-        last_submits = await self._repo.last_submitted_at_by_student(db, course_id=course_id, user_ids=user_ids)
         names = await self._repo.user_names(db, set(user_ids))
         in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
 
@@ -116,7 +115,6 @@ class EtTrackingService:
                 e,
                 counts=counts.get(e.user_id, (0, 0)),
                 avg_score=avg_scores.get(e.user_id),
-                last_submitted_at=last_submits.get(e.user_id),
                 user_name=names.get(e.user_id),
                 has_in_progress_attempt=e.user_id in in_progress,
             )
@@ -492,7 +490,6 @@ class EtTrackingService:
 
         counts = await self._repo.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
         avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
-        last_submits = await self._repo.last_submitted_at_by_student(db, course_id=course_id, user_ids=user_ids)
         names = await self._repo.user_names(db, set(user_ids))
         in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
         return [
@@ -500,7 +497,6 @@ class EtTrackingService:
                 e,
                 counts=counts.get(e.user_id, (0, 0)),
                 avg_score=avg_scores.get(e.user_id),
-                last_submitted_at=last_submits.get(e.user_id),
                 user_name=names.get(e.user_id),
                 has_in_progress_attempt=e.user_id in in_progress,
             )
@@ -513,7 +509,6 @@ def _to_student_row(
     *,
     counts: tuple[int, int],
     avg_score: float | None,
-    last_submitted_at: datetime | None,
     user_name: str | None,
     has_in_progress_attempt: bool,
 ) -> StudentRow:
@@ -528,8 +523,9 @@ def _to_student_row(
         completion_status=derive_completion_status(done=done, total=total),
         progress_pct=_pct(done, total),
         avg_score=_round2(avg_score),
-        # `LAST_ACTIVITY_AT` 不含測驗提交（只在檢視項目時更新），取兩者較晚者
-        last_activity_at=_latest(enrollment.last_activity_at, last_submitted_at),
+        # 直接讀欄位——#334 起 `LAST_ACTIVITY_AT` 已涵蓋檢視項目 / 提交測驗 / 填答問卷
+        # 三種活動（見 `progress/repository.touch_activity` 的清單），不再需要本層補償。
+        last_activity_at=enrollment.last_activity_at,
         has_in_progress_attempt=has_in_progress_attempt,
     )
 
@@ -550,12 +546,6 @@ def _round2(value: float | None) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def _latest(*values):
-    """取非 `None` 者中最晚的一個；全為 `None` 時回 `None`。"""
-    present = [v for v in values if v is not None]
-    return max(present) if present else None
 
 
 def _to_quiz_row(quiz, *, attempts: list, reset_base: int, points: dict[int, int]) -> TeacherQuizRow:

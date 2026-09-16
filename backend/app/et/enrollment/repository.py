@@ -105,6 +105,15 @@ class EtEnrollmentRepository:
 
         濾 `DELETED`——本檔其餘查詢皆濾，這裡漏掉會讓已刪除教師的姓名繼續出現在
         預覽畫面。
+
+        ## 🔴 本支**刻意不與 `course/service._owner_names()` 同調**（#330）
+
+        那支於 #330 拿掉了過濾、改回「姓名（已停用帳號）」，因為它的觀眾是
+        `require_et_roles(ET_TEACHER, ET_ADMIN)`——即交接情境本身的對象。
+
+        **本支的觀眾是全體學員**（邀請碼預覽畫面），與交接無關。日後若有人為了「三個
+        畫面一致」而來收斂，請不要把這裡一起改掉：那會把停用教師的狀態廣播給全校學員，
+        而那不在 #330 的裁示範圍內。
         """
         return await db.scalar(select(DpUser.user_name).where(DpUser.user_id == owner_id, DpUser.deleted == 0))
 
