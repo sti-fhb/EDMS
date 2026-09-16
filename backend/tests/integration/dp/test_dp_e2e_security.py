@@ -4,8 +4,9 @@
 _auth 覆蓋）：
 - **登入端點限流**：同 IP 逾門檻 → 429（驗限流器確實接到 /api/login，非僅單元）。
 - **防帳號列舉一致**：忘記密碼對「存在 / 不存在」帳號回應一致、不洩漏帳號是否存在。
-- **登入訊息分流為刻意 UX**：登入對「不存在 / 未驗證 / 密碼錯」回不同碼——此為 spec_us1
-  Clarification 明訂之引導式 UX，非列舉盲點；與忘記密碼的一致回應並存，各司其職。
+- **登入不洩漏待驗證列**：登入對「不存在 / 未驗證 / 已邀請」回同一碼同一句（#208）；
+  與「密碼錯」的 `DP_AUTH_008` 之差異為 #208 AC 2 明訂保留。四種狀態的完整比對與
+  稽核可區分性見 `test_dp_login_no_enumeration.py`，此處只留跨概念的姿態檢查。
 """
 
 from datetime import timedelta
@@ -109,20 +110,28 @@ async def test_forgot_password_does_not_reveal_account_existence(db):
     assert notify_absent.calls == []  # 不存在 → 不寄，但對外回應一致
 
 
-async def test_login_branching_is_intentional_ux(db):
-    """登入對三種情境回不同碼（spec_us1 明訂引導 UX，非列舉盲點）：不存在 / 未驗證 / 密碼錯。"""
+async def test_login_does_not_reveal_pending_registration(db):
+    """登入對「不存在」與「未驗證」回完全相同的回應（#208）。
+
+    這條原本斷言三者相異，理由是 spec_us1 Clarification 把分流訂為引導式 UX。#208 推翻了
+    該判斷：未驗證與已邀請的專屬回應讓匿名者密碼隨便填就能問出「誰被邀請了」，而引導可
+    由一句涵蓋全部出路的中性訊息達成，不需靠「只對這類人顯示」。
+
+    與忘記密碼（上一條）現在是同一種姿態——兩個端點對同一份資料的保護標準終於一致。
+    """
     await _make_user(db, user_id="verified", email="verified@edms.local")
     await _seed_pending(db, email="pending@edms.local")
 
-    # 不存在 → DP_AUTH_007
     with pytest.raises(AppError) as e_absent:
         await AuthService().login(db, email="unknown@edms.local", password=_PWD)
-    # 未驗證（僅在待驗證表）→ DP_AUTH_010
     with pytest.raises(AppError) as e_pending:
         await AuthService().login(db, email="pending@edms.local", password=_PWD)
-    # 已驗證、密碼錯 → DP_AUTH_008
     with pytest.raises(AppError) as e_wrong:
         await AuthService().login(db, email="verified@edms.local", password="wrong-pwd")
 
-    codes = {e_absent.value.error_code, e_pending.value.error_code, e_wrong.value.error_code}
-    assert codes == {"DP_AUTH_007", "DP_AUTH_010", "DP_AUTH_008"}  # 三者相異＝刻意分流
+    def sig(exc):
+        return (exc.value.status_code, exc.value.error_code, exc.value.detail)
+
+    assert sig(e_absent) == sig(e_pending), "待驗證列的有無不得從回應看出"
+    # DP_AUTH_008 仍相異：#208 AC 2 明訂保留（鎖定計數掛在該路徑上），非遺漏。
+    assert e_wrong.value.error_code == "DP_AUTH_008"

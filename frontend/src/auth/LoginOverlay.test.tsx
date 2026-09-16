@@ -11,6 +11,14 @@ import { useAuth } from "./useAuth"
 import { server } from "../test/server"
 import { muiTheme } from "../styles/muiTheme"
 
+/**
+ * 後端對「查無有效 DP_USER 列」的唯一訊息（#208 `_NO_ACCOUNT_MESSAGE`）。
+ *
+ * 四種帳號狀態（不存在 / 自助註冊未驗證 / 管理者已邀請 / 待驗證列逾期）共用它，
+ * 所以測試裡也只該有這一個字串——若哪天出現第二個，就是後端又把回應分岔回去了。
+ */
+const NEUTRAL_MESSAGE = "帳號或密碼錯誤。若尚未註冊請先註冊；若剛完成註冊，請至信箱點選驗證連結，未收到信可重新寄送"
+
 function Harness() {
   const { isAuthenticated, mustChangePwd } = useAuth()
   const status = !isAuthenticated ? "anon" : mustChangePwd ? "must-change" : "authed"
@@ -57,7 +65,7 @@ describe("LoginOverlay", () => {
     expect(await screen.findByText("版本 1.0.0-test")).toBeInTheDocument()
   })
 
-  it("密碼錯誤 → 顯示錯誤訊息、維持未登入", async () => {
+  it("密碼錯誤 → 顯示錯誤訊息、維持未登入、不出現註冊 / 重寄入口", async () => {
     server.use(
       http.post("/api/login", () =>
         HttpResponse.json({ error_code: "DP_AUTH_008", error_message: "密碼錯誤" }, { status: 401 }),
@@ -67,22 +75,40 @@ describe("LoginOverlay", () => {
     await submitLogin()
     expect(await screen.findByText("密碼錯誤")).toBeInTheDocument()
     expect(screen.getByTestId("status")).toHaveTextContent("anon")
+    // 已驗證帳號打錯密碼時給出這兩條路只會誤導；同時確認 DP_AUTH_007 那條不是「永遠都顯示」。
+    expect(screen.queryByRole("button", { name: "前往註冊" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "重寄驗證信" })).not.toBeInTheDocument()
   })
 
-  it("查無帳號 → 顯示訊息並提供註冊入口", async () => {
+  it("查無有效帳號（DP_AUTH_007）→ 同時提供註冊與重寄兩條出路", async () => {
+    // #208：後端已不再區分「查無帳號」與「尚未驗證」，前端因此也無從得知該顯示哪一條。
+    // 兩條並列由本人選；少任何一條都會讓某一類使用者走進死路。
     server.use(
       http.post("/api/login", () =>
-        HttpResponse.json(
-          { error_code: "DP_AUTH_007", error_message: "查無此帳號，請先註冊" },
-          { status: 401 },
-        ),
+        HttpResponse.json({ error_code: "DP_AUTH_007", error_message: NEUTRAL_MESSAGE }, { status: 401 }),
       ),
     )
     renderLogin()
     await submitLogin()
-    expect(await screen.findByText("查無此帳號，請先註冊")).toBeInTheDocument()
-    // 「前往註冊」為切換至註冊分頁的按鈕（in-page 動作，非導航連結）
+    expect(await screen.findByText(NEUTRAL_MESSAGE)).toBeInTheDocument()
+    // 兩者皆為 in-page 動作的按鈕（非導航連結）
     expect(screen.getByRole("button", { name: "前往註冊" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
+  })
+
+  it("長訊息完整顯示、不被截斷（DP_AUTH_007 的中性訊息含三條指引）", async () => {
+    // 統一訊息比原本的「查無此帳號，請先註冊」長得多，Alert 內需完整呈現（#208 AC 5）。
+    server.use(
+      http.post("/api/login", () =>
+        HttpResponse.json({ error_code: "DP_AUTH_007", error_message: NEUTRAL_MESSAGE }, { status: 401 }),
+      ),
+    )
+    renderLogin()
+    await submitLogin()
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("尚未註冊請先註冊")
+    expect(alert).toHaveTextContent("請至信箱點選驗證連結")
+    expect(alert).toHaveTextContent("未收到信可重新寄送")
   })
 
   it("須變更密碼 → 登入成功但進強制變更頁殼", async () => {
@@ -95,24 +121,6 @@ describe("LoginOverlay", () => {
     await submitLogin()
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("must-change"))
     expect(screen.getByText("強制變更頁殼")).toBeInTheDocument()
-  })
-
-  it("未驗證帳號登入（DP_AUTH_010）→ 顯示提示並提供重寄驗證信", async () => {
-    server.use(
-      http.post("/api/login", () =>
-        HttpResponse.json(
-          {
-            error_code: "DP_AUTH_010",
-            error_message: "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送",
-          },
-          { status: 401 },
-        ),
-      ),
-    )
-    renderLogin()
-    await submitLogin()
-    expect(await screen.findByText(/尚未完成 Email 驗證/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
   })
 
   async function fillRegister(user: ReturnType<typeof userEvent.setup>, over: Partial<Record<string, string>> = {}) {
@@ -179,7 +187,7 @@ describe("LoginOverlay", () => {
     server.use(
       http.post("/api/login", () =>
         HttpResponse.json(
-          { error_code: "DP_AUTH_010", error_message: "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送" },
+          { error_code: "DP_AUTH_007", error_message: NEUTRAL_MESSAGE },
           { status: 401 },
         ),
       ),
@@ -197,7 +205,7 @@ describe("LoginOverlay", () => {
     server.use(
       http.post("/api/login", () =>
         HttpResponse.json(
-          { error_code: "DP_AUTH_010", error_message: "此帳號尚未完成 Email 驗證，請至信箱點驗證連結或重新寄送" },
+          { error_code: "DP_AUTH_007", error_message: NEUTRAL_MESSAGE },
           { status: 401 },
         ),
       ),

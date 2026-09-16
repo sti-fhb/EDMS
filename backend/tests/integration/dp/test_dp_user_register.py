@@ -131,14 +131,19 @@ async def _make_admin_invite(db, email: str, *, minutes: int):
 
 
 async def test_register_blocked_by_unexpired_admin_invite(db):
-    """#125 AC1/AC2：未逾期的管理者邀請 → 409 DP_USER_011，且邀請列完全未被覆蓋。"""
+    """#125 AC1/AC2：未逾期的管理者邀請 → 409，且邀請列完全未被覆蓋。
+
+    碼於 #208 由 `DP_USER_011` 併入 `DP_USER_001`——單獨的 011 等於把「誰被邀請了」開放給
+    匿名列舉（訊息措辭再謹慎也沒用，`error_code` 同樣在回應本體裡）。「與已註冊無法區分」
+    這件事由 `test_dp_register_no_enumeration.py` 正面驗證，此處只確認 #125 的保護未受影響。
+    """
     email = "invited@edms.local"
     original_token = await _make_admin_invite(db, email, minutes=30)
 
     with pytest.raises(AppError) as exc:
         await RegisterService().register(db, email=email, user_name="想自己註冊")
     assert exc.value.status_code == 409
-    assert exc.value.error_code == "DP_USER_011"
+    assert exc.value.error_code == "DP_USER_001"
 
     # 邀請列原封不動：token 未換（原邀請連結仍可用）、kind / 姓名未被覆蓋
     row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()

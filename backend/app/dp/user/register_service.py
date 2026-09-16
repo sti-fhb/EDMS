@@ -30,10 +30,22 @@ from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
 
-_EMAIL_TAKEN_MSG = "此 Email 已被註冊，請直接登入或使用忘記密碼"
-# 措辭刻意不提「管理者邀請」：本端點為公開匿名，不對外揭露組織脈絡（該句型亦常被釣魚信複用）。
-# 認證後的管理者端點（DP_USER_010）則可明說，此不對稱為刻意設計。
-_INVITE_PENDING_MSG = "此 Email 已有待完成的帳號啟用程序，請至信箱收取信件完成啟用"
+# 匿名註冊端點對「此 Email 不可用」的**唯一**回應（#208）。
+#
+# 兩種狀態共用它：已被已驗證帳號佔用、有未逾期的管理者邀請（`ADMIN_INVITE`）。
+# 原本分為 `DP_USER_001` 與 `DP_USER_011`，措辭上雖已刻意不提「管理者邀請」，但 `app_error_handler`
+# 會把 `error_code` 一起放進回應本體——`DP_USER_011` 是有文件的穩定代碼、語意就是「管理者邀請未逾期」，
+# 於是文案上的模糊只對人類有效，對腳本一清二楚。攻擊者可用組織 Email 命名規則逐一探測，
+# 命中者就是「此刻正在等一封啟用信、還沒設過密碼」的人——對這批人發仿冒啟用信的成功率遠高於盲發。
+#
+# 合併後可分辨的只剩「{已註冊 或 已受邀} vs {其他}」，**無法再單獨判定「誰被邀請了」**。
+#
+# ⚠️ 訊息必須同時鋪出兩條路。舊的 `_EMAIL_TAKEN_MSG` 說「請直接登入或使用忘記密碼」——受邀者
+# 沒有 `DP_USER` 列，忘記密碼對他是防列舉的靜默 no-op，照著做等於走進死路。
+_EMAIL_UNAVAILABLE_MSG = (
+    "此 Email 已有帳號或進行中的啟用程序。若已完成註冊請直接登入（忘記密碼可自助重設）；"
+    "若曾收到啟用或驗證信，請至信箱點選連結完成設定"
+)
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _DEFAULT_TTL_MIN = 30
 _FUNC_NAME = "DP-REGISTER"
@@ -99,17 +111,31 @@ class RegisterService:
             source_ip=get_client_ip(),
         )
 
-    async def assert_email_not_registered(self, db: AsyncSession, email: str) -> None:
-        """Email 已被「已驗證帳號」佔用 → 409 DP_USER_001；未佔用則靜默通過。
+    async def assert_email_available(self, db: AsyncSession, email: str) -> None:
+        """Email 不可用 → 409 DP_USER_001；可用則靜默通過。
 
-        供 router 在「驗證信寄送冷卻」**之前**呼叫（#86）：「已是正式帳號」是終局狀態，
-        等冷卻倒數結束也不會改變，先擋掉可免使用者白等一輪才被告知「已被註冊」。
-        對已驗證帳號本來就直接 409、不會送信，冷卻在此無防狂發價值。
+        「不可用」涵蓋兩種狀態，且**刻意不可區分**（#208）：
+
+        1. 已被已驗證帳號佔用
+        2. 有未逾期的管理者邀請（`ADMIN_INVITE`，#125 不得被自助註冊覆蓋）
+
+        第 2 種原本回 `DP_USER_011`，等於把「誰被邀請了」開放給匿名列舉（見 `_EMAIL_UNAVAILABLE_MSG`
+        上方說明）。兩者現在共用同一碼、同一句話。
+
+        ⚠️ **兩個檢核必須留在同一個位置**：本方法由 router 在「驗證信寄送冷卻」**之前**呼叫（#86），
+        若把邀請那一項留在 `register()` 內（冷卻 check 之後），兩種狀態在冷卻武裝時會分別回 409 與
+        429，位置差本身就重建了 oracle。合併於此是為了讓它們連「在哪一步被擋下」都相同。
+
+        #86 的理由在合併後仍成立：兩者皆為**終局狀態**，等倒數結束也不會改變，且都不送信、
+        冷卻在此無防狂發價值，先擋可免使用者白等一輪。
 
         register() 內部亦呼叫本方法（單一 409 來源），故服務層獨立呼叫時語意不變。
         """
         if await self._repo.email_exists(db, email):
-            raise AppError(status_code=409, detail=_EMAIL_TAKEN_MSG, error_code="DP_USER_001")
+            raise AppError(status_code=409, detail=_EMAIL_UNAVAILABLE_MSG, error_code="DP_USER_001")
+        pending = await self._repo.get_pending_by_email(db, email)
+        if pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > utcnow():
+            raise AppError(status_code=409, detail=_EMAIL_UNAVAILABLE_MSG, error_code="DP_USER_001")
 
     async def register(self, db: AsyncSession, *, email: str, user_name: str) -> bool:
         """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色、不收密碼**。
@@ -127,18 +153,16 @@ class RegisterService:
         提交由 get_db 於請求成功時負責；任一檢核失敗於寫入前拋 AppError，get_db rollback 無副作用。
 
         Raises:
-            AppError: Email 已被已驗證帳號佔用（409 DP_USER_001）、該 Email 有未逾期的管理者
-                邀請（409 DP_USER_011）、並發競態（409 DP_USER_005）。
+            AppError: Email 不可用——已被已驗證帳號佔用**或**有未逾期的管理者邀請
+                （兩者同為 409 DP_USER_001，刻意不可區分，#208）、並發競態（409 DP_USER_005）。
         """
-        # 1. Email 未被「已驗證帳號」佔用（未驗證的 pending 列於 step 3 覆蓋，不擋）
-        await self.assert_email_not_registered(db, email)
-        # 1-1. 不得覆蓋管理者發出且仍有效的邀請（#125）。step 3 的覆蓋不分 kind，若不在此擋下，
-        #      自助註冊會刪掉管理者的邀請列（該列從邀請清單消失、原邀請信連結失效），且管理者
-        #      毫無感知。逾期的邀請則放行覆蓋——邀請既已失效，不應讓該 Email 被永久佔住。
+        # 1. Email 可用性（已驗證帳號佔用 / 未逾期邀請；未驗證的 SELF_REGISTER 列於 step 2 覆蓋，不擋）。
+        #    擋未逾期邀請是 #125：step 2 的覆蓋不分 kind，若不擋，自助註冊會刪掉管理者的邀請列
+        #    （該列從邀請清單消失、原邀請信連結失效）且管理者毫無感知。逾期的邀請則放行覆蓋——
+        #    邀請既已失效，不應讓該 Email 被永久佔住。
+        await self.assert_email_available(db, email)
         now = utcnow()
         pending = await self._repo.get_pending_by_email(db, email)
-        if pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > now:
-            raise AppError(status_code=409, detail=_INVITE_PENDING_MSG, error_code="DP_USER_011")
 
         # 2. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256、
         #    PWD_HASH 留空，密碼於驗證步當場設定）

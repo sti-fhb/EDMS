@@ -71,11 +71,15 @@ async def test_register_and_resend_share_cooldown_budget(client):
 
 
 async def test_register_check_failure_does_not_start_cooldown(client, db):
-    """註冊在 service 層被擋（409）→ 未送信、不 record 冷卻；隨後對同 Email 仍可正常寄送。
+    """註冊被擋（409）→ 未送信、不 record 冷卻；隨後對同 Email 仍可正常寄送。
 
-    原本以「弱密碼 422」觸發，但 #212 之後註冊不收密碼、無密碼檢核。改用「該 Email 有未逾期
-    的管理者邀請」（409 DP_USER_011）——它同樣位於冷卻 check 之後、record 之前，能驗到
-    「檢核失敗不誤觸冷卻」這個性質。
+    觸發條件換過兩次：原以「弱密碼 422」，#212 之後註冊不收密碼而改用「未逾期的管理者邀請」
+    （當時回 `DP_USER_011`，位置在冷卻 check **之後**）。#208 又把該檢核連同已驗證帳號一起
+    前移到冷卻 check **之前**——兩種「Email 不可用」的狀態必須在同一步被擋下，否則冷卻武裝時
+    一個 409、一個 429，位置差本身就是 oracle。
+
+    因此本條現在驗的是較弱但仍必要的性質：**被擋下的註冊不得留下冷卻章**。至於「真的寄出才
+    蓋章」（#213 的核心）由本檔 `test_probe_by_attacker_does_not_block_victim_registration` 覆蓋。
     """
     email = "cool-invite@edms.local"
     now = utcnow()
@@ -96,7 +100,7 @@ async def test_register_check_failure_does_not_start_cooldown(client, db):
 
     blocked = await client.post("/api/register", json=_reg_payload(email))
     assert blocked.status_code == 409
-    assert blocked.json()["error_code"] == "DP_USER_011"
+    assert blocked.json()["error_code"] == "DP_USER_001"  # #208：與「已被註冊」同碼
 
     # 因上一步未 record，冷卻未啟動 → resend 應放行（非 429）
     resend = await client.post("/api/resend-verification", json={"email": email})

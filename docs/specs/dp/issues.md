@@ -952,7 +952,7 @@ DP 模組**收尾整合驗收**：以跨 US 端到端整合測試驗證各 Succe
 - **T049 為 follow-up 非本 issue**（2026-08-03 使用者裁示範圍 A）：授權閘骨架（`is_module_admin` fail-closed gate + `require_module_admin` factory + service 層模組過濾）**已就緒**，缺的只是「掛上 router」與「ET/DM 註冊 checker」。因 ET/DM 未落地，現在掛閘會鎖死後台，故遞延；暫行案 A（`get_jwt_payload`）維持不動。
 - **稽核鏈為單一全域鏈**：`DP_AUDIT_LOG` 以 advisory lock 序列化寫入、`ROW_HASH` 串接前一列 hash（非 per-func_name 分鏈）；`verify_chain` 依插入序（`ID`）走訪全表重算。竄改偵測涵蓋 before/after 值、`FUNC_NAME`、`ACTION_TYPE` 等入 hash 之欄位。
 - **無狀態 JWT、無 refresh token**：T047 換發驗收針對「以現行有效 access token 靜默換新」+ 單日 8h 上限（`DP_AUTH_003`），非 refresh token 機制。
-- **登入訊息分流非防列舉盲點**：登入對「帳號不存在 / 未驗證 / 密碼錯誤」回不同訊息（`DP_AUTH_007/010/008`）為 spec_us1 Clarification 明訂之 UX；忘記密碼 / 註冊維持防列舉一致訊息。T053 測試須同時涵蓋兩種策略並註記差異為刻意設計。
+- **~~登入訊息分流非防列舉盲點~~（2026-09-16 由 #208 推翻）**：原記載「登入對『帳號不存在 / 未驗證 / 密碼錯誤』回不同訊息（`DP_AUTH_007/010/008`）為 spec_us1 Clarification 明訂之 UX」。該判斷在「未驗證」那一格是錯的——`get_pending_by_email` 不濾 `kind`，`ADMIN_INVITE` 列同樣命中，於是「誰被邀請了」可被匿名列舉。現 `DP_AUTH_010` 退役、併入 `DP_AUTH_007`，登入與忘記密碼 / 註冊的防列舉標準一致。`DP_AUTH_008` 仍相異為 #208 AC 2 明訂保留（鎖定計數掛在該路徑），屬已知殘留而非刻意 UX。
 - **DB append-only GRANT 屬部署層**：應用層已落地 append-only（repo 無 update/delete、端點 405）；DB 層 `GRANT INSERT, SELECT`（撤 UPDATE/DELETE）於 ops 套用，本 issue 只文件化不落 migration。
 - **無新表 / migration**：驗鏈工具為讀取端；整合測試不改 schema。
 

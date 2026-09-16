@@ -120,12 +120,19 @@ async def test_verify_idempotent_when_already_verified(db, et_stub):
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_001"
 
 
-async def test_login_unverified_returns_specific_message(db):
-    """未驗證帳號（僅 pending、不在 DP_USER）嘗試登入 → 401 DP_AUTH_010（非查無此帳號）。"""
+async def test_login_unverified_gets_generic_message_with_guidance(db):
+    """未驗證帳號（僅 pending、不在 DP_USER）登入 → 401 DP_AUTH_007 + 中性訊息（#208）。
+
+    此處原本斷言 DP_AUTH_010（#56 為避免未驗證者看到誤導的「查無此帳號」而設）。#208 移除了
+    該專屬回應——它讓匿名者可列舉待驗證列——但 #56 的顧慮仍然成立，所以改由統一訊息承接：
+    未驗證者看到的不再是「查無此帳號，請先註冊」，而是同時含驗證連結與重寄指引的一句話。
+    回應與「查無此帳號」一字不差，是刻意的。
+    """
     await _seed_pending(db, email="pendinglogin@edms.local")
     with pytest.raises(AppError) as exc:
         await AuthService().login(db, email="pendinglogin@edms.local", password=_GOOD_PWD)
-    assert exc.value.status_code == 401 and exc.value.error_code == "DP_AUTH_010"
+    assert exc.value.status_code == 401 and exc.value.error_code == "DP_AUTH_007"
+    assert "驗證連結" in exc.value.detail and "重新寄送" in exc.value.detail
 
 
 async def test_resend_replaces_token(db):
@@ -171,18 +178,23 @@ async def test_resend_expired_pending_is_noop(db):
     assert mails == []
 
 
-async def test_login_with_expired_pending_says_not_registered(db):
-    """逾期待驗證列 → 登入回 DP_AUTH_007「請先註冊」，而非 DP_AUTH_010「請重新寄送」（#212）。
+async def test_login_with_expired_pending_offers_registration_path(db):
+    """逾期待驗證列 → 登入的訊息必須含「註冊」這條路（#212 的死路防線）。
 
-    登入與 resend 必須對「逾期」用同一個定義，否則構成死路：逾期列讓登入永久回 DP_AUTH_010
-    → 前端據此渲染重寄鈕 → 重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章 → 使用者每按一次就把
-    自己「重新註冊」的路徑再鎖一個冷卻週期，而 UI 全程指向重寄。此時唯一走得通的動作是重新註冊。
+    #212 的原始情境：逾期列讓登入永久回 DP_AUTH_010「請重新寄送」→ 前端據此渲染重寄鈕 →
+    重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章 → 使用者每按一次就把自己「重新註冊」的路徑再鎖
+    一個冷卻週期，而 UI 全程指向重寄。此時唯一走得通的動作是重新註冊。
+
+    #208 統一回應後，這條死路的防線**換了位置**：不再靠「逾期時改回另一個 error code」，而靠
+    「統一訊息本身就寫著若尚未註冊請先註冊」。所以這裡斷言的是**訊息內容**而非碼——碼已無法
+    區分逾期與否（那正是 #208 的目的），能保證使用者不被鎖死的只剩訊息。
     """
     await _seed_pending(db, email="expiredlogin@edms.local", minutes=-1)
 
     with pytest.raises(AppError) as exc:
         await AuthService().login(db, email="expiredlogin@edms.local", password=_GOOD_PWD)
     assert exc.value.status_code == 401 and exc.value.error_code == "DP_AUTH_007"
+    assert "註冊" in exc.value.detail, "逾期者唯一走得通的動作是重新註冊，訊息必須提到它"
 
 
 async def test_verify_grant_failure_propagates(db):
