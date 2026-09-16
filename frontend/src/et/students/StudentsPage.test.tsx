@@ -309,4 +309,75 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(alert).toHaveTextContent("李小華作答中")
     expect(alert).toHaveTextContent("保留並計入歷史")
   })
+
+  it("待加入分頁列出已寄出但未加入的邀請", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    await user.click(screen.getByRole("tab", { name: "待加入" }))
+
+    expect(await screen.findByText("chenmh@edms.local")).toBeInTheDocument()
+    expect(screen.getByText("liutc@edms.local")).toBeInTheDocument()
+    // 佔位 Alert 必須已被取代——它是使用者點得到的可見缺口
+    expect(screen.queryByText(/尚未實作/)).not.toBeInTheDocument()
+  })
+
+  it("撤回邀請需二次確認，文案須講明原連結會失效", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(screen.getByRole("tab", { name: "待加入" }))
+    await screen.findByText("chenmh@edms.local")
+
+    await user.click(screen.getAllByRole("button", { name: "撤回" })[0])
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/原邀請連結將失效/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "確定" }))
+
+    expect(await screen.findByText("邀請已撤回")).toBeInTheDocument()
+  })
+
+  it("課程已關閉時：再次寄送禁用，但撤回仍可用", async () => {
+    // 🔴 這條釘住 SA 裁示（2026-09-16）。兩個動作方向相反：重寄是讓更多人進來、撤回是
+    // 讓某人不能進來。教師發現邀請寄錯人時若撤回被擋，那條錯誤連結會一直有效到再開課。
+    //
+    // 少了這條，日後有人依 ET 模組「寫全停」的慣例把撤回也禁用，不會有任何測試變紅。
+    server.use(
+      http.get("/api/et/courses", () =>
+        HttpResponse.json({
+          data: [
+            {
+              course_id: 11,
+              course_name: "採血作業新進人員訓練",
+              status: "PUBLISHED",
+              open_start_at: null,
+              open_end_at: "2026-01-01T00:00:00Z",
+              owner_id: "t01",
+              owner_name: "陳大華",
+              tags: [],
+              chapter_count: 1,
+              student_count: 2,
+              is_owner: true,
+              is_closed: true,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 100, total_pages: 1 },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(screen.getByRole("tab", { name: "待加入" }))
+    await screen.findByText("chenmh@edms.local")
+
+    expect(screen.getAllByRole("button", { name: /再次寄送/ })[0]).toBeDisabled()
+    expect(screen.getAllByRole("button", { name: "撤回" })[0]).toBeEnabled()
+    // 禁用必須說明原因，且要講明撤回不受影響
+    expect(screen.getByText(/暫無法/)).toBeInTheDocument()
+    expect(screen.getByText(/撤回邀請不受影響/)).toBeInTheDocument()
+  })
+
 })

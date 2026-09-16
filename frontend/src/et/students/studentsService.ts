@@ -2,6 +2,7 @@ import { http } from "../../services/http"
 import type { PagedResult } from "../../hooks/usePagedQuery"
 import type {
   AttemptOverview,
+  PendingInviteRow,
   StudentRow,
   SurveyResult,
   TeacherAttemptDetail,
@@ -49,6 +50,35 @@ export const studentsApi = {
     await http.post(
       `/et/courses/${courseId}/students/${encodeURIComponent(userId)}/quizzes/${quizId}/retry-reset`,
     )
+  },
+
+  /** ET-12：待加入邀請清單（分頁）。課程關閉時照常可讀。 */
+  listPendingInvites: async (
+    courseId: number,
+    params: { page?: number; limit?: number },
+  ): Promise<PagedResult<PendingInviteRow>> => {
+    const { data } = await http.get<PagedResult<PendingInviteRow>>(`/et/courses/${courseId}/invitations`, { params })
+    return data
+  },
+
+  /**
+   * ET-12：再次寄送邀請信。
+   *
+   * ⚠️ **會換新 token，受邀者手上的舊信隨即失效**（`upsert_pending` 的既有設計：舊 token
+   * 已隨信流出，沿用會讓「一次性」只是延後生效）。課程關閉期間回 409 / 422。
+   */
+  resendInvite: async (invitationId: number): Promise<void> => {
+    await http.post(`/et/invitations/${invitationId}/resend`)
+  },
+
+  /**
+   * ET-12：撤回邀請——原連結即刻失效。
+   *
+   * **課程關閉期間仍可執行**（SA 裁示 2026-09-16）：撤回是止血動作，擋掉只會讓寄錯的
+   * 連結一直有效到再開課。與 `resendInvite` 的差別即在此。
+   */
+  revokeInvite: async (invitationId: number): Promise<void> => {
+    await http.post(`/et/invitations/${invitationId}/revoke`)
   },
 
   /** 移除學員（軟刪；學習歷史保留）。 */

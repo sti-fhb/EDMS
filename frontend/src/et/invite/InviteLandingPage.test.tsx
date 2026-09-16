@@ -59,6 +59,25 @@ describe("EtInviteLandingPage", () => {
     expect(mockNavigate).not.toHaveBeenCalled()
   })
 
+  it("邀請已被教師撤回時顯示專用訊息（ET-MSG-ET03-104）", async () => {
+    // ET-12 / #342。後端於 2026-09-16 起把「已撤回」自 ET_INVITE_001 分流為
+    // ET_INVITE_006（410），本頁**不需要特別處理**——它直接渲染後端的 error_message。
+    //
+    // 本測試釘住的正是這個「不需要處理」：若日後有人把錯誤呈現改成固定文案，或依
+    // error_code 寫死對照表而漏了 006，受邀者會看回「連結無效」——那與 FR-ET-US12-05
+    // 要求的「此邀請已撤回」不符，而且他會以為是信壞了、跑去找教師。
+    server.use(
+      http.post("/api/et/invitations/accept", () =>
+        HttpResponse.json({ error_code: "ET_INVITE_006", error_message: "此邀請已撤回" }, { status: 410 }),
+      ),
+    )
+    renderAt("/et/invite?token=revoked-one")
+
+    expect(await screen.findByText("此邀請已撤回")).toBeInTheDocument()
+    expect(screen.queryByText("邀請連結無效或已失效")).not.toBeInTheDocument()
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
   it("課程關閉期間顯示關閉中訊息", async () => {
     server.use(
       http.post("/api/et/invitations/accept", () =>

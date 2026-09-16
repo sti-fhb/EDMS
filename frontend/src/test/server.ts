@@ -1029,6 +1029,28 @@ export const handlers = [
   //
   // 回真的 body 是必要的：前端拿它 `URL.createObjectURL`，回空會讓成功路徑走不完，
   // 於是「匯出成功的提示」這條測試會假綠（catch 先接走）。
+  // ET-12 待加入邀請（#342）。兩列刻意不同寄送時間，驗排序與時間顯示。
+  http.get("/api/et/courses/:courseId/invitations", () =>
+    HttpResponse.json({
+      data: [
+        {
+          invitation_id: 901,
+          email: "chenmh@edms.local",
+          last_sent_at: "2026-05-20T01:00:00Z",
+          status: "PENDING",
+        },
+        {
+          invitation_id: 902,
+          email: "liutc@edms.local",
+          last_sent_at: "2026-05-22T03:30:00Z",
+          status: "PENDING",
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  http.post("/api/et/invitations/:invitationId/resend", () => new HttpResponse(null, { status: 200 })),
+  http.post("/api/et/invitations/:invitationId/revoke", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/et/courses/:courseId/students.csv", () =>
     HttpResponse.text("學員,加入日期\n王小明,2026-04-01\n", {
       headers: { "Content-Type": "text/csv; charset=utf-8" },

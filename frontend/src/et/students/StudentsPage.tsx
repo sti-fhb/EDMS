@@ -19,8 +19,9 @@ import { AttemptOverviewBlock } from "./AttemptOverviewBlock"
 import { StudentListBlock } from "./StudentListBlock"
 import { SurveyResultBlock } from "./SurveyResultBlock"
 import { TeacherAttemptDialog } from "./TeacherAttemptDialog"
+import { PendingInviteBlock } from "./PendingInviteBlock"
 import { downloadStudentsCsv, downloadSurveyCsv, studentsApi } from "./studentsService"
-import type { StudentRow, TeacherQuizRow } from "./schemas"
+import type { PendingInviteRow, StudentRow, TeacherQuizRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -30,6 +31,16 @@ import { coursesApi } from "../courses/coursesService"
 type Pending =
   | { kind: "reset"; userId: string; userName: string | null; quiz: TeacherQuizRow }
   | { kind: "remove"; student: StudentRow }
+  | { kind: "resend"; invite: PendingInviteRow }
+  | { kind: "revoke"; invite: PendingInviteRow }
+
+/** 四種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。 */
+const DIALOG_TITLE: Record<Pending["kind"], string> = {
+  reset: "重置重考次數",
+  remove: "移除學員",
+  resend: "再次寄送邀請",
+  revoke: "撤回邀請",
+}
 
 /**
  * 移除確認框的文案——**作答中與否是兩則不同的訊息**。
@@ -38,6 +49,25 @@ type Pending =
  * 情況合用一句「該學員**若**正在作答……」，把警告稀釋成每次都出現的免責聲明——
  * 而每次都出現的警告等於沒有警告，真正該停下來看的那次也會被一起略過。
  */
+/** 四種動作的確認文案。`remove` 的警告版由呼叫端另以 `<Alert>` 呈現。 */
+function confirmMessage(pending: Pending | null): string {
+  if (pending === null) return ""
+  switch (pending.kind) {
+    case "reset":
+      // ET-MSG-ET03-001
+      return `確定重置 ${pending.userName ?? "該學員"} 於「${pending.quiz.quiz_name}」之重考次數？歷次作答明細仍會完整保留。`
+    case "resend":
+      // 🔴「原連結將失效」必須講——重寄會換新 token，受邀者手上的舊信隨即作廢。
+      // 不講的話，教師會以為只是「再提醒一次」，而對方點舊信會看到「連結無效」。
+      return `確定重新寄送邀請信至 ${pending.invite.email}？原邀請連結將失效，對方須改用新信中的連結。`
+    case "revoke":
+      // ET-MSG-ET03-102。「原邀請連結將失效」是規格文案，不可簡化。
+      return `確定撤回對 ${pending.invite.email} 的邀請？原邀請連結將失效。`
+    default:
+      return removeMessage(pending)
+  }
+}
+
 function removeMessage(pending: Pending | null): string {
   if (pending?.kind !== "remove") return ""
   const name = pending.student.user_name ?? "該學員"
@@ -98,9 +128,15 @@ export function EtStudentsPage() {
       if (pending.kind === "reset") {
         await studentsApi.resetRetry(courseId, pending.userId, pending.quiz.quiz_id)
         notify.message.success("已重置重考次數")
-      } else {
+      } else if (pending.kind === "remove") {
         await studentsApi.removeStudent(courseId, pending.student.user_id)
         notify.message.success("已移除學員")
+      } else if (pending.kind === "resend") {
+        await studentsApi.resendInvite(pending.invite.invitation_id)
+        notify.message.success("邀請信已重新寄出")
+      } else {
+        await studentsApi.revokeInvite(pending.invite.invitation_id)
+        notify.message.success("邀請已撤回")
       }
       invalidateAll(courseId)
       setPending(null)
@@ -159,7 +195,12 @@ export function EtStudentsPage() {
       {courseId === "" ? (
         <Alert severity="info">請先於右上選擇要檢視的課程。</Alert>
       ) : tab === "pending" ? (
-        <Alert severity="info">「待加入」邀請追蹤屬 ET-12，尚未實作。</Alert>
+        <PendingInviteBlock
+          courseId={courseId}
+          readOnly={readOnly}
+          onResend={(invite) => setPending({ kind: "resend", invite })}
+          onRevoke={(invite) => setPending({ kind: "revoke", invite })}
+        />
       ) : (
         <>
           {readOnly && (
@@ -188,19 +229,14 @@ export function EtStudentsPage() {
       <TeacherAttemptDialog attemptId={attemptId} onClose={() => setAttemptId(null)} />
 
       <Dialog open={pending !== null} onClose={() => !busy && setPending(null)}>
-        <DialogTitle>{pending?.kind === "reset" ? "重置重考次數" : "移除學員"}</DialogTitle>
+        <DialogTitle>{DIALOG_TITLE[pending?.kind ?? "remove"]}</DialogTitle>
         <DialogContent>
           {pending?.kind === "remove" && pending.student.has_in_progress_attempt ? (
             /* ET-MSG-ET03-003 為「警告」型訊息——用 Alert 而非純文字，
                否則它與一般確認長得一模一樣，等於沒有分級。 */
             <Alert severity="warning">{removeMessage(pending)}</Alert>
           ) : (
-            <DialogContentText>
-              {pending?.kind === "reset"
-                ? /* ET-MSG-ET03-001 */
-                  `確定重置 ${pending.userName ?? "該學員"} 於「${pending.quiz.quiz_name}」之重考次數？歷次作答明細仍會完整保留。`
-                : removeMessage(pending)}
-            </DialogContentText>
+            <DialogContentText>{confirmMessage(pending)}</DialogContentText>
           )}
         </DialogContent>
         <DialogActions>

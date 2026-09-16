@@ -167,3 +167,22 @@ export interface CourseOption {
   is_closed: boolean
   tags: TagOption[]
 }
+
+/**
+ * ET-12「待加入」分頁的一列（`FR-ET-US12-01`）。
+ *
+ * `status` 恆為 `"PENDING"`——清單已於後端過濾。仍回傳是因為 spec 明訂欄位須含邀請
+ * 狀態，且日後清單擴及其他狀態時不必改結構。
+ */
+export interface PendingInviteRow {
+  invitation_id: number
+  email: string
+  /**
+   * **最後**寄送時間，不是首次。
+   *
+   * 教師按「再次寄送」後若畫面日期不變，他會以為沒寄出去而重複點——所以顯示的是
+   * `LAST_SENT_AT`。
+   */
+  last_sent_at: string
+  status: string
+}
