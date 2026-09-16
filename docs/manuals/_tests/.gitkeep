@@ -1,0 +1,3 @@
+# 測試項目原稿放這裡（一個模組一檔）。
+# 本檔存在的唯一目的是讓空目錄進得了版控——gen_acceptance_form.py 預設讀本目錄，
+# 目錄不存在會拋 FileNotFoundError（全新 clone 尚無任何手冊時就會踩到）。
