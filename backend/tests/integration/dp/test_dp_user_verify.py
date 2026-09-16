@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.exceptions import AppError
 from app.core.module_provisioning import module_provisioning_gate
@@ -17,6 +17,8 @@ from app.dp.user.service import AuthService
 from app.dp.user.token import generate_reset_token, hash_token
 from app.dp.user.verify_service import ResendVerificationService, VerifyService
 from app.dp.users.models import DpUser
+from app.et.bootstrap import register_et_module
+from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
 
@@ -35,7 +37,12 @@ def et_stub():
 
     module_provisioning_gate.register("ET", _grant)
     yield granted
-    module_provisioning_gate.unregister("ET")
+    # ⚠️ **teardown 還原真實 granter，而非 unregister**。`main.py` 於啟動時就呼叫
+    # `register_et_module()`，「已註冊」是整個執行期的基線；清成未註冊留下的是正式環境
+    # 從不存在的狀態，而 `grant_default_role` 對未註冊模組是 **no-op（只寫一行 log）**——
+    # 於是後續測試的註冊驗證照常回 200，使用者卻拿不到 ET 學員角色，**沒有任何東西會紅**。
+    # `test_et_student_full_flow.py` 曾因此單獨跑綠、與本檔同 worker 時紅。
+    register_et_module()
 
 
 async def _seed_pending(db, *, email: str, minutes: int = 30, plaintext: str | None = None) -> str:
@@ -210,15 +217,28 @@ async def test_verify_grant_failure_propagates(db):
         with pytest.raises(RuntimeError):
             await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
     finally:
-        module_provisioning_gate.unregister("ET")
+        register_et_module()  # 還原啟動基線（理由見檔頭的 et_stub fixture）
 
 
 async def test_verify_grant_noop_when_unregistered(db):
-    """ET 未掛 granter（無 et_stub）→ grant_default_role no-op、不擋驗證；帳號仍建立成功。"""
-    token = await _seed_pending(db, email="noet@edms.local")
-    await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
-    user = (await db.execute(select(DpUser).where(DpUser.email == "noet@edms.local"))).scalar_one()
-    assert user.status == "ACTIVE"
+    """ET 未掛 granter → `grant_default_role` no-op、不擋驗證；帳號仍建立成功。
+
+    ⚠️ **本測試自行製造「未註冊」狀態並還原**。原本它不做任何事、只靠「前一個測試的
+    teardown 剛好把 ET 清掉」——測試名說 `when_unregistered`，實際上卻是在驗當下這個
+    worker 碰巧的狀態。單獨跑、或執行順序一變，驗到的就是「已註冊」那條路。
+    """
+    module_provisioning_gate.unregister("ET")
+    try:
+        token = await _seed_pending(db, email="noet@edms.local")
+        await VerifyService().verify(db, token=token, new_password=_VERIFY_PWD, confirm_password=_VERIFY_PWD)
+        user = (await db.execute(select(DpUser).where(DpUser.email == "noet@edms.local"))).scalar_one()
+        assert user.status == "ACTIVE"
+        # 真的沒授角色——否則「no-op」只是沒被觀察到
+        assert (
+            await db.scalar(select(func.count()).select_from(EtUserRole).where(EtUserRole.user_id == user.user_id)) == 0
+        )
+    finally:
+        register_et_module()
 
 
 async def test_verify_consumed_token_reclick_rejected(db, et_stub):

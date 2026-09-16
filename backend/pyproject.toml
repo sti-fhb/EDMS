@@ -85,7 +85,14 @@ testpaths = ["tests"]
 markers = [
     "unit: 單元測試，不依賴外部資源",
     "integration: 整合測試，需要資料庫連線",
+    # slow：建 500+ 筆測資的效能量測（ET-14 T122）。預設**不跑**——準備資料要數十秒，
+    # 放進每次 CI 會讓所有人多等。需要時 `uv run pytest -m slow`。
+    # ⚠️ 代價：效能劣化不會被 CI 擋下。這些測試是「上線前驗證 + 懷疑變慢時的量測工具」，
+    # 不是持續的效能守門員（真正的守門需要基準值管理與穩定的執行環境）。
+    "slow: 需大量測資的效能量測，預設排除",
 ]
+# 預設排除 slow；`-m slow` 或 `-m "slow or unit"` 等顯式指定可覆蓋本設定。
+addopts = "-m 'not slow'"
 
 [tool.coverage.run]
 source = ["app"]
