@@ -708,3 +708,69 @@ class TestRevokeInvitation:
         r = await client.post(f"/api/et/invitations/{invitation_id}/revoke", headers=_bearer(other))
 
         assert r.status_code == 403, r.text
+
+
+class TestRevokedLinkMessage:
+    """已撤回連結的專用訊息（AC 5 / `FR-ET-US12-05` / `ET-MSG-ET03-104`）。
+
+    ## 這組測試是成對的，不可只留一條
+
+    SA 於 2026-09-16 裁示把「已撤回」自 `ET_INVITE_001` 分流出來，接受的是**持有有效
+    token 者可知其狀態**——不是「任何人拿亂數 token 都能問出它曾否存在」。
+
+    所以 `test_已撤回回006` 驗它**會**出現，`test_查無token仍回001` 驗它**不會**被放寬
+    成「找不到有效邀請」的通用分支。少了後者，`ET_INVITE_006` 很容易在日後重構時被
+    擴大到整個 `invitation is None` 的路徑上，那就成了存在性 oracle 的放大版。
+    """
+
+    async def test_已撤回連結回006(self, client, db) -> None:
+        teacher = await _user(db, "t_rl01", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        student = await _account(db, "revlink01@edms.local")
+        await _invite(client, teacher, course_id, "revlink01@edms.local")
+        await db.commit()
+        token = await _token_for(db, "revlink01@edms.local")
+        listed = await client.get(f"{_COURSES}/{course_id}/invitations", headers=_bearer(teacher))
+        await client.post(
+            f"/api/et/invitations/{listed.json()['data'][0]['invitation_id']}/revoke", headers=_bearer(teacher)
+        )
+        await db.commit()
+
+        r = await client.post(_ACCEPT, json={"token": token}, headers=_bearer(student))
+
+        assert r.status_code == 410, r.text
+        assert r.json()["error_code"] == "ET_INVITE_006"
+
+    async def test_查無token仍回001(self, client, db) -> None:
+        """🔴 從未存在過的 token **不可**得到「已撤回」。
+
+        分流若放寬到 `invitation is None`，攻擊者就能用亂數 token 列舉「哪些曾經存在」。
+        """
+        student = await _user(db, "s_rl02")
+        await db.commit()
+
+        r = await client.post(_ACCEPT, json={"token": "this-token-never-existed-at-all"}, headers=_bearer(student))
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_INVITE_001", "查無 ≠ 已撤回"
+
+    async def test_已加入的token不回006(self, client, db) -> None:
+        """已消耗（`JOINED`）**不分流**——那是另一種終態，且 spec 只要求撤回有專用訊息。
+
+        ⚠️ 已加入者再點連結**回 200 + `already_joined=true`**，不是錯誤（US8 AC 8：不重複
+        加入、直接導向）。本條驗的是它沒有被誤導向 `ET_INVITE_006`。
+        """
+        teacher = await _user(db, "t_rl03", ROLE_TEACHER)
+        course_id = await _published_course(client, db, teacher)
+        student = await _account(db, "revlink03@edms.local")
+        await _invite(client, teacher, course_id, "revlink03@edms.local")
+        await db.commit()
+        token = await _token_for(db, "revlink03@edms.local")
+        first = await client.post(_ACCEPT, json={"token": token}, headers=_bearer(student))
+        assert first.status_code == 200, first.text
+        await db.commit()
+
+        r = await client.post(_ACCEPT, json={"token": token}, headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["already_joined"] is True, "已加入者直接導向，不是錯誤"

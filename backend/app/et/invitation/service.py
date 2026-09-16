@@ -84,9 +84,17 @@ _MODULE = "ET"
 _FUNC_NAME = "ET-ENROLLMENT"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程", error_code="ET_COURSE_001")
-#: 查無 / 已消耗 / 已撤回 / 格式不符**共用同一碼**——拆碼會告訴持有者「這個 token 曾經
-#: 有效」，那正是轉發者想要的回饋。
+#: 查無 / 格式不符**共用同一碼**——拆碼會告訴持有者「這個 token 曾經有效」，那正是
+#: 轉發者想要的回饋。
+#:
+#: ⚠️ **「已撤回」自 2026-09-16 起分流至 `_LINK_REVOKED`**（SA 裁示，`FR-ET-US12-05`）。
+#: 那次放寬接受的是「**持有有效 token 者**可知其狀態」——邀請 token 寄到特定信箱，能拿到
+#: 它的人本來就知道它存在。**查無 token 仍必須回本碼**，否則亂數試探即可列舉曾存在的
+#: token 空間（`test_查無token仍回001` 釘住）。
 _LINK_INVALID = AppError(status_code=404, detail="邀請連結無效或已失效", error_code="ET_INVITE_001")
+#: 已撤回——**只在「查得到該列且 `STATUS = REVOKED`」時使用**（`ET-MSG-ET03-104`）。
+#: 410 Gone 而非 404：資源確實存在過、已被擁有者主動移除，這正是 410 的語意。
+_LINK_REVOKED = AppError(status_code=410, detail="此邀請已撤回", error_code="ET_INVITE_006")
 _COURSE_CLOSED = AppError(status_code=409, detail="此課程目前關閉中", error_code="ET_INVITE_002")
 _NO_EMAILS = AppError(status_code=422, detail="Email 格式不正確或數量超過上限", error_code="ET_INVITE_003")
 
@@ -314,19 +322,27 @@ class EtInvitationService:
         判斷順序見模組 docstring——**不可調換**。
 
         Raises:
-            AppError: 404 `ET_INVITE_001` 連結無效 / 已被使用；409 `ET_INVITE_002` 課程關閉中。
+            AppError: 404 `ET_INVITE_001` 連結無效 / 查無；410 `ET_INVITE_006` 此邀請已撤回；
+                409 `ET_INVITE_002` 課程關閉中。
         """
         invitation = await self._repo.get_by_token_hash(db, hash_token(token))
-        if invitation is None or invitation.status == INVITATION_REVOKED:
+        # 🔴 兩個分支**必須分開**：查無 → 001（不洩漏存在性）；查得到且已撤回 → 006。
+        # 合併成 `invitation is None or ... REVOKED` 再回 006，會讓從未存在過的 token 也
+        # 被告知「已撤回」——那是存在性 oracle 的放大版，不是 SA 裁示接受的範圍。
+        if invitation is None:
             raise _LINK_INVALID
+        if invitation.status == INVITATION_REVOKED:
+            raise _LINK_REVOKED
 
         course = await self._repo.get_course(db, invitation.course_id)
         if course is None:
             raise _LINK_INVALID
 
         # 「已消耗」判定**先於**課程狀態判定：反過來的話，持有已消耗 token 的第三人在課程
-        # 關閉期間會拿到 409「此課程目前關閉中」而非 404「連結無效」——那等於向他確認這個
-        # token 真實存在，與「查無 / 已消耗 / 已撤回共用同一碼」的用意相牴觸。
+        # 關閉期間會拿到 409「此課程目前關閉中」，那等於向他確認這個 token 真實存在。
+        #
+        # 走到這裡的非 `PENDING` 只剩 `JOINED`（`REVOKED` 已於上方分流），回 200 +
+        # `already_joined`（US8 AC 8：不重複加入、直接導向），不是錯誤。
         if invitation.status != INVITATION_PENDING:
             return await self._already_consumed(db, course, user_id=operator.user_id)
 
