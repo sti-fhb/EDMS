@@ -41,6 +41,7 @@ from app.et.constants import COURSE_PUBLISHED
 
 # ── 缺漏代碼（供前端定位到對應區塊）────────────────────────────────────────────
 BLOCK_NO_CHAPTER: Final = "NO_CHAPTER"
+BLOCK_CHAPTER_EMPTY: Final = "CHAPTER_EMPTY"
 BLOCK_NO_MATERIAL: Final = "NO_MATERIAL"
 BLOCK_NO_TAG: Final = "NO_TAG"
 BLOCK_NO_SCHEDULE: Final = "NO_SCHEDULE"
@@ -51,6 +52,15 @@ BLOCK_OBSOLETE_DOC: Final = "OBSOLETE_DOC"
 
 #: 各測驗配分總和之目標值（`data-model.md` §ET_QUIZ）。
 REQUIRED_POINTS_TOTAL: Final = 100
+
+
+@dataclass(frozen=True)
+class ChapterSummary:
+    """發布檢核所需之單一章節摘要（#358 第 3 項）。"""
+
+    chapter_id: int
+    #: 該章節底下未刪除的項目數（教材與測驗合計）。
+    item_count: int
 
 
 @dataclass(frozen=True)
@@ -70,7 +80,10 @@ class CourseSnapshot:
     open_start_at: datetime | None
     open_end_at: datetime | None
     tag_count: int
-    chapter_count: int
+    #: 逐章節摘要。**章節數由本欄位導出**（見 `chapter_count`），不另存計數——
+    #: 兩個欄位並存時遲早會出現「`chapter_count=3` 但 `chapters` 只有 1 筆」的組合，
+    #: 而那種不一致在測試裡建得出來、在正式環境卻不會發生，等於讓測試驗了假資料。
+    chapters: tuple[ChapterSummary, ...]
     material_count: int
     quizzes: tuple[QuizSummary, ...]
     doc_ids: frozenset[str]
@@ -80,6 +93,11 @@ class CourseSnapshot:
     #: 同一個值會讓 AC 23 失效：每一門沒建問卷的課程都會被擋住發布。
     survey_question_count: int | None = None
 
+    @property
+    def chapter_count(self) -> int:
+        """章節數——由 `chapters` 導出。"""
+        return len(self.chapters)
+
 
 @dataclass(frozen=True)
 class PublishBlocker:
@@ -88,7 +106,7 @@ class PublishBlocker:
     Attributes:
         code: 供前端定位到對應區塊之代碼（見本模組 `BLOCK_*`）。
         message: **靜態**說明文案，不內插使用者輸入。
-        target_id: 出問題的對象 ID（目前僅測驗用），無對應者為 `None`。
+        target_id: 出問題的對象 ID（測驗為 `QUIZ_ID`、空章節為 `CHAPTER_ID`），無對應者為 `None`。
     """
 
     code: str
@@ -105,12 +123,24 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
             由 service 經 `DmDocumentService.get_current_by_doc_id` 查妥後傳入。
 
     Returns:
-        缺漏清單，順序固定為「課程層 → 測驗層 → 文件層」，使前端呈現順序穩定。
+        缺漏清單，順序固定為「課程層 → 章節層 → 測驗層 → 文件層」，使前端呈現順序穩定。
     """
     blockers: list[PublishBlocker] = []
 
     if snapshot.chapter_count < 1:
         blockers.append(PublishBlocker(BLOCK_NO_CHAPTER, "課程至少須有 1 個章節"))
+    # 第八項（#358 第 3 項）：**逐章節**檢核，與上一行的全課程層是兩件事。
+    #
+    # `material_count` 是全課程的教材總數，只要任一章節有教材就通過——其餘章節可以
+    # completely 空著。空章節對學員是一個點進去什麼都沒有的段落。
+    #
+    # ⚠️ 空章節**不會**讓學員卡住：`progress/rules.locked_item_ids` 明文把沒有項目的
+    # 章節視為已完成（`all([])` 為 `True`），否則整門課的後半段會永久鎖死。完課率也
+    # 不受影響（分子分母都以 `ET_ITEM` 計，空章節各貢獻 0）。所以這是「不該發布出去」
+    # 而非「已發布的會出事」。
+    for chapter in snapshot.chapters:
+        if chapter.item_count < 1:
+            blockers.append(PublishBlocker(BLOCK_CHAPTER_EMPTY, "章節至少須有 1 份教材或測驗", chapter.chapter_id))
     if snapshot.material_count < 1:
         blockers.append(PublishBlocker(BLOCK_NO_MATERIAL, "課程至少須有 1 份教材"))
     if snapshot.tag_count < 1:

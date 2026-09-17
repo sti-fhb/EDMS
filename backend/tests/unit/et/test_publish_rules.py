@@ -11,6 +11,7 @@ import pytest
 
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.publish_rules import (
+    BLOCK_CHAPTER_EMPTY,
     BLOCK_NO_CHAPTER,
     BLOCK_NO_MATERIAL,
     BLOCK_NO_SCHEDULE,
@@ -19,6 +20,7 @@ from app.et.course.publish_rules import (
     BLOCK_QUIZ_NO_QUESTION,
     BLOCK_QUIZ_POINTS,
     BLOCK_SURVEY_NO_QUESTION,
+    ChapterSummary,
     CourseSnapshot,
     QuizSummary,
     evaluate_publish,
@@ -43,7 +45,7 @@ def _snapshot(**overrides) -> CourseSnapshot:
         "open_start_at": _dt(1),
         "open_end_at": _dt(30),
         "tag_count": 1,
-        "chapter_count": 1,
+        "chapters": (ChapterSummary(chapter_id=1, item_count=1),),
         "material_count": 1,
         "quizzes": (),
         "doc_ids": frozenset(),
@@ -74,8 +76,52 @@ class TestEvaluatePublishHappyPath:
 
 class TestEvaluatePublishEachCheck:
     def test_無章節被擋(self) -> None:
-        blockers = evaluate_publish(_snapshot(chapter_count=0), obsolete_doc_ids=frozenset())
+        blockers = evaluate_publish(_snapshot(chapters=()), obsolete_doc_ids=frozenset())
         assert [b.code for b in blockers] == [BLOCK_NO_CHAPTER]
+
+    def test_空章節被擋並指出是哪一章(self) -> None:
+        """#358 第 3 項：`material_count` 是**全課程**總數，只要任一章節有教材就通過。
+
+        教師因此可以建一堆空章節然後照樣發布，而學員點進去什麼都沒有。缺漏要帶
+        `target_id`（chapter_id），否則教師只知道「有空章節」卻不知道是哪一個。
+        """
+        snapshot = _snapshot(
+            chapters=(
+                ChapterSummary(chapter_id=11, item_count=2),
+                ChapterSummary(chapter_id=12, item_count=0),
+            )
+        )
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert [b.code for b in blockers] == [BLOCK_CHAPTER_EMPTY]
+        assert blockers[0].target_id == 12, "要指出是哪一章，不能只說「有空章節」"
+
+    def test_多個空章節各報一條(self) -> None:
+        """一次回全部缺漏——只報第一個會讓教師修一次、再被擋一次。"""
+        snapshot = _snapshot(
+            chapters=(
+                ChapterSummary(chapter_id=11, item_count=0),
+                ChapterSummary(chapter_id=12, item_count=1),
+                ChapterSummary(chapter_id=13, item_count=0),
+            )
+        )
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert [b.target_id for b in blockers] == [11, 13]
+
+    def test_章節只有測驗沒有教材亦可通過章節層檢核(self) -> None:
+        """🔴 章節層要的是「至少一項」，**不是「至少一份教材」**。
+
+        全課程層的 `NO_MATERIAL` 是另一條獨立檢核（本測試的基準快照 `material_count=1`
+        讓它通過）。兩者是不同層級、可並存——不是取代關係。
+        """
+        snapshot = _snapshot(chapters=(ChapterSummary(chapter_id=11, item_count=1),))
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert blockers == ()
 
     def test_無教材被擋(self) -> None:
         blockers = evaluate_publish(_snapshot(material_count=0), obsolete_doc_ids=frozenset())
@@ -169,7 +215,7 @@ class TestSurveyCheck:
 class TestEvaluatePublishCombined:
     def test_多項缺漏全部列出(self) -> None:
         """AC 26 要求提示**具體缺漏項目**——只回第一項會讓教師修一次、再被擋一次。"""
-        snapshot = _snapshot(chapter_count=0, material_count=0, tag_count=0, open_start_at=None)
+        snapshot = _snapshot(chapters=(), material_count=0, tag_count=0, open_start_at=None)
         codes = {b.code for b in evaluate_publish(snapshot, obsolete_doc_ids=frozenset())}
         assert codes == {BLOCK_NO_CHAPTER, BLOCK_NO_MATERIAL, BLOCK_NO_TAG, BLOCK_NO_SCHEDULE}
 
@@ -194,7 +240,7 @@ class TestEvaluatePublishCombined:
         對齊 `sti-error-codes`：訊息內插使用者資料會把它原樣吐回前端，且教師端能看到
         的名稱前端本來就有（課程詳細），不需後端再送一次。
         """
-        snapshot = _snapshot(chapter_count=0, quizzes=(QuizSummary(quiz_id=5, question_count=0, points_total=0),))
+        snapshot = _snapshot(chapters=(), quizzes=(QuizSummary(quiz_id=5, question_count=0, points_total=0),))
         for blocker in evaluate_publish(snapshot, obsolete_doc_ids=frozenset()):
             assert "5" not in blocker.message
             assert blocker.message == blocker.message.strip()
