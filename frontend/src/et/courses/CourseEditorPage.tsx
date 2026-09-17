@@ -1320,8 +1320,19 @@ export function EtCourseEditorPage() {
         quizNames={quizNames}
         onPublish={() => publishMut.mutate()}
         onClose={() => {
+          // 🔴 **關閉結果視窗後才導回列表**（#358 第 4 項），不在 `onSuccess` 當下導。
+          //
+          // 「儲存草稿」成功即導回（第 274 行），發布原本卻停在編輯頁——教師按完
+          // 「儲存並發布」後看不出有沒有成功。但不能照抄草稿的做法：`publishResult`
+          // 帶著「已依受訓單位標籤帶入 N 位學員」與**邀請碼**，立刻導回等於把那兩樣
+          // 從畫面上抽掉，而邀請碼只有這一次會顯示。
+          //
+          // 故導回時機綁在使用者**主動關閉**結果視窗。發布失敗時不會有 `publishResult`
+          // （改設 `blockers` 留在原地讓他補缺漏），所以這裡不會誤導向。
+          const published = publishResult !== null
           setPublishOpen(false)
           setPublishResult(null)
+          if (published) navigate("/et/courses")
         }}
       />
 
