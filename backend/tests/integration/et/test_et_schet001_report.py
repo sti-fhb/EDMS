@@ -24,7 +24,7 @@ from sqlalchemy import select, update
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
-from app.dp.notify.models import DpEmailLog
+from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import ITEM_MATERIAL, ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER, SOURCE_INVITATION_CODE
@@ -319,3 +319,101 @@ class TestReportContent:
         assert "與上週 —" in body
         # 信件內文**不得**出現任何學員姓名——它會隨轉寄離開所有存取控制
         assert "測試rc_s1" not in body
+
+
+class TestTemplateDisabled:
+    """AC 3（ET-17 / #353）：停用一支範本不得波及同一次執行的其他產出。
+
+    ## 為什麼這不是「重複測平台的 IS_ACTIVE 檢查」
+
+    「停用 → 不寄」的判斷在平台 `send_email` **一處**，測五個寄信點只是測同一行五次。
+    本 class 驗的是 AC 3 的**後半句**——「但觸發事件照常運作」——而那一半在每個寄信點
+    都不一樣，SCHET001 尤其特別：
+
+    `send_weekly()` 在**同一次呼叫、同一個 session** 裡依序做兩件事：
+
+    ```python
+    facts = await self._collect(db, now)
+    reports = await self._send_reports(db, facts)   # WEEKLY_REPORT
+    reminds = await self._send_reminds(db, facts)   # WEEKLY_REMIND
+    ```
+
+    **順序耦合是真的風險**：若 `_send_reports` 因範本停用而拋錯，`_send_reminds` 連跑都
+    不會跑——管理者停用了週報，學員的未看提醒跟著一起消失，而沒有任何地方會說。
+
+    ## 統計快照為什麼不在本 class 驗
+
+    `handlers.weekly_job` 對快照與寄信各開**獨立的 `AsyncSessionLocal`**
+    （`handlers.py:46-50`），快照在寄信之前就已提交。寄信階段無論怎麼失敗都**不可能**
+    回滾快照——那是結構保證，不是行為，寫成測試只會測到 session 的語意而非本模組的邏輯。
+    真正會被寄信影響的是「同一次 `send_weekly` 內的另一種信」，也就是下面兩條。
+    """
+
+    @staticmethod
+    async def _disable(db, template_code: str) -> None:
+        """停用範本並**提交**前置資料。
+
+        ⚠️ `commit()` 不是可有可無的。`_send_reports` 在「沒寄成」時會呼叫
+        `await db.rollback()`（`weekly_service.py:153`），而整合測試的 session 以 savepoint
+        併入外層交易——那個 rollback 會把**測試自己剛建的學員與選課列一起回滾掉**，
+        於是後面的 `_send_reminds` 查不到任何人，`reminds` 變成 0。
+
+        那會讓「停用週報連帶吃掉未看提醒」這個結論**看起來成立**，但它其實是測試環境
+        的產物：正式環境裡 `_collect` 之前的資料早已提交，rollback 只丟掉未提交的工作。
+        先 commit 把前置資料壓到 savepoint 之下，才量得到真正的耦合。
+        """
+        await db.execute(
+            update(DpNotifyTemplate)
+            .where(DpNotifyTemplate.module == "ET", DpNotifyTemplate.template_code == template_code)
+            .values(is_enabled=False)
+        )
+        await db.commit()
+
+    async def test_週報範本停用時未看提醒照常寄出(self, client, db) -> None:
+        """停用 `WEEKLY_REPORT` → 週報 0 封，但**未看提醒不受影響**。"""
+        teacher = await _user(db, "td_t1", ROLE_TEACHER)
+        ctx = await _course(client, db, teacher, "td1")
+        await _enroll(db, user_id=await _user(db, "td_s1", ROLE_STUDENT), course_id=ctx["course_id"])
+        await self._disable(db, "WEEKLY_REPORT")
+
+        reports, reminds = await EtWeeklyReportService().send_weekly(db)
+
+        assert reports == 0, "範本已停用，不該寄出週報"
+        assert await _mails(db, "WEEKLY_REPORT") == []
+        assert reminds == 1, "停用週報不得連帶吃掉未看提醒——兩者在同一次呼叫裡依序執行"
+        assert await _recipients(db, "WEEKLY_REMIND") == {"td_s1@edms.local"}
+
+    async def test_未看提醒範本停用時週報照常寄出(self, client, db) -> None:
+        """反向：停用 `WEEKLY_REMIND` → 提醒 0 封，週報不受影響。
+
+        與上一條互為對照。只驗單向的話，把兩支寄信實作成「共用一個 early return」
+        仍會讓其中一條綠。
+        """
+        teacher = await _user(db, "td_t2", ROLE_TEACHER)
+        ctx = await _course(client, db, teacher, "td2")
+        await _enroll(db, user_id=await _user(db, "td_s2", ROLE_STUDENT), course_id=ctx["course_id"])
+        await self._disable(db, "WEEKLY_REMIND")
+
+        reports, reminds = await EtWeeklyReportService().send_weekly(db)
+
+        assert reminds == 0, "範本已停用，不該寄出未看提醒"
+        assert await _mails(db, "WEEKLY_REMIND") == []
+        assert reports == 1, "停用未看提醒不得連帶吃掉週報"
+        assert await _recipients(db, "WEEKLY_REPORT") == {"td_t2@edms.local"}
+
+    async def test_兩支範本皆停用時不拋例外(self, client, db) -> None:
+        """整支 job 不得因「管理者把 ET 的週信全關了」而記成 FAILED。
+
+        `weekly_job` 對 `send_weekly` 的例外沒有攔截——拋出去會讓該次排程在
+        `DP_SCHEDULE` 的執行歷程記成 `FAILED`，管理者看到紅字後會去找一個不存在的 bug，
+        而實際上系統完全照他的設定在運作。
+        """
+        teacher = await _user(db, "td_t3", ROLE_TEACHER)
+        ctx = await _course(client, db, teacher, "td3")
+        await _enroll(db, user_id=await _user(db, "td_s3", ROLE_STUDENT), course_id=ctx["course_id"])
+        await self._disable(db, "WEEKLY_REPORT")
+        await self._disable(db, "WEEKLY_REMIND")
+
+        reports, reminds = await EtWeeklyReportService().send_weekly(db)
+
+        assert (reports, reminds) == (0, 0)
