@@ -44,6 +44,7 @@ from app.dp.schedules.router import router as dp_schedule_router
 from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
 from app.dp.users.router import router as dp_users_router
+from app.et.approval.router import router as et_approval_router
 from app.et.attempt.router import router as et_attempt_router
 from app.et.bootstrap import register_et_module
 from app.et.course.router import router as et_course_router
@@ -163,6 +164,7 @@ app.include_router(et_invitation_router)
 app.include_router(et_learning_router)
 app.include_router(et_learning_media_router)
 app.include_router(et_tracking_router)
+app.include_router(et_approval_router)
 app.include_router(et_progress_router)
 app.include_router(et_reports_router)
 app.include_router(et_attempt_router)

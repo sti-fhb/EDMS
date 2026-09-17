@@ -380,4 +380,282 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(screen.getByText(/撤回邀請不受影響/)).toBeInTheDocument()
   })
 
+  // ── US16 線下考核核可（#352）──────────────────────────────────────────────
+
+  /** 覆寫學員清單為「已啟用線下核可」的課程。 */
+  function withApproval(rows: Record<string, unknown>[]) {
+    server.use(
+      http.get("/api/et/courses/:courseId/students", () =>
+        HttpResponse.json({ data: rows, meta: { total: rows.length, page: 1, limit: 20, total_pages: 1 } }),
+      ),
+    )
+  }
+
+  /** 覆寫課程清單為「閱課期間已過」——`is_closed` 由後端算，前端不自己判 status。 */
+  function withClosedCourse() {
+    server.use(
+      http.get("/api/et/courses", () =>
+        HttpResponse.json({
+          data: [
+            {
+              course_id: 1,
+              course_name: "採血作業新進人員訓練",
+              status: "PUBLISHED",
+              open_start_at: null,
+              open_end_at: "2026-01-01T00:00:00Z",
+              owner_id: "t01",
+              owner_name: "陳大華",
+              tags: [],
+              chapter_count: 1,
+              student_count: 2,
+              is_owner: true,
+              is_closed: true,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 100, total_pages: 1 },
+        }),
+      ),
+    )
+  }
+
+  const baseRow = {
+    joined_at: "2026-04-01T02:00:00Z",
+    completion_status: "COMPLETED",
+    progress_pct: 100,
+    avg_score: "88.50",
+    last_activity_at: "2026-05-02T06:30:00Z",
+    has_in_progress_attempt: false,
+    approval_note: null,
+    approved_by_name: null,
+    approved_at: null,
+    approval_version: null,
+  }
+
+  it("未啟用線下核可的課程完全不顯示核可欄與工具列", async () => {
+    // 預設 handler 的兩列 approval_status 皆為 null（REQUIRE_APPROVAL = false）
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    // ⚠️ 用「李小華」而非「王小明」——後者同時出現在區塊 2 的作答明細，
+    // `findByText` 會抓到多個而拋錯（不是元件壞了）。
+    await screen.findByText("李小華")
+
+    expect(screen.queryByText("核可狀態")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "批次核可通過" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("checkbox", { name: "全選本頁待核可學員" })).not.toBeInTheDocument()
+  })
+
+  it("啟用核可時待核可者可勾選、未達核可資格者的勾選框停用", async () => {
+    // 🔴 未完課者在 UI 就擋掉——後端仍會跳過，但教師不該按了才知道
+    withApproval([
+      { ...baseRow, user_id: "s01", user_name: "王小明", approval_status: "PENDING" },
+      {
+        ...baseRow,
+        user_id: "s02",
+        user_name: "李小華",
+        completion_status: "IN_PROGRESS",
+        progress_pct: 75,
+        approval_status: "NOT_ELIGIBLE",
+      },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await screen.findByText("核可狀態")
+
+    expect(screen.getByText("未達核可資格")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "選取 王小明" })).toBeEnabled()
+    expect(screen.getByRole("checkbox", { name: "選取 李小華" })).toBeDisabled()
+  })
+
+  it("已有核可結果者只給撤銷，不給直接改判", async () => {
+    // wireframe 行 1358：已通過的列只有「撤銷」。允許直接點「不通過」等於繞過
+    // 「撤銷須填原因」（FR-ET-US16-06）
+    withApproval([
+      {
+        ...baseRow,
+        user_id: "s01",
+        // 刻意不用「王小明」——區塊 2 的作答明細也有同名按鈕，`findByText` 會抓到多個
+        user_name: "陳受訓",
+        approval_status: "PASSED",
+        approved_by_name: "王主任",
+        approved_at: "2026-05-19T01:00:00Z",
+        approval_version: 1,
+      },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    const row = (await screen.findByText("陳受訓")).closest("tr")!
+
+    expect(within(row).getByRole("button", { name: "撤銷" })).toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "通過" })).not.toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "不通過" })).not.toBeInTheDocument()
+    expect(within(row).getByText(/王主任 核可/)).toBeInTheDocument()
+  })
+
+  it("撤銷原因未填時 inline 擋下且不送出請求", async () => {
+    // ET-MSG-ET03-305。錯誤掛在那個輸入框上，不是飄到畫面角落的 Snackbar
+    const spy = vi.fn()
+    server.use(
+      http.post("/api/et/courses/:courseId/approvals/:userId/revoke", () => {
+        spy()
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    withApproval([
+      { ...baseRow, user_id: "s01", user_name: "王小明", approval_status: "PASSED", approval_version: 3 },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "撤銷" }))
+    await user.click(await screen.findByRole("button", { name: "確定" }))
+
+    expect(await screen.findByText("請填寫撤銷原因")).toBeInTheDocument()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("撤銷帶回原樣的 version 與去空白後的原因", async () => {
+    const spy = vi.fn()
+    server.use(
+      http.post("/api/et/courses/:courseId/approvals/:userId/revoke", async ({ request }) => {
+        spy(await request.json())
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    withApproval([
+      { ...baseRow, user_id: "s01", user_name: "王小明", approval_status: "PASSED", approval_version: 3 },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "撤銷" }))
+    await user.type(await screen.findByLabelText(/撤銷原因/), "  考核紀錄登錄錯誤  ")
+    await user.click(screen.getByRole("button", { name: "確定" }))
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ reason: "考核紀錄登錄錯誤", version: 3 }))
+  })
+
+  it("單筆核可全部被跳過時顯示錯誤而非成功", async () => {
+    // 🔴 後端回 200 + approved=0。只看狀態碼就報「已完成核可」會讓教師以為寫進去了
+    server.use(
+      http.post("/api/et/courses/:courseId/approvals", () =>
+        HttpResponse.json({ approved: 0, skipped: [{ user_id: "s01", reason: "NOT_COMPLETED" }] }),
+      ),
+    )
+    withApproval([{ ...baseRow, user_id: "s01", user_name: "王小明", approval_status: "PENDING" }])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "通過" }))
+    await user.click(await screen.findByRole("button", { name: "確定" }))
+
+    // ET-MSG-ET03-304
+    expect(await screen.findByText("學員尚未完課，無法核可")).toBeInTheDocument()
+    expect(screen.queryByText("已完成核可")).not.toBeInTheDocument()
+  })
+
+  it("批次部分成功時逐理由列出跳過筆數", async () => {
+    // 兩種跳過對教師的下一步不同（等他完課 vs 先撤銷），壓成一句他不知道該做什麼
+    server.use(
+      http.post("/api/et/courses/:courseId/approvals", () =>
+        HttpResponse.json({
+          approved: 1,
+          skipped: [
+            { user_id: "s02", reason: "NOT_COMPLETED" },
+            { user_id: "s03", reason: "ALREADY_APPROVED" },
+          ],
+        }),
+      ),
+    )
+    withApproval([
+      { ...baseRow, user_id: "s01", user_name: "王小明", approval_status: "PENDING" },
+      { ...baseRow, user_id: "s02", user_name: "李小華", approval_status: "PENDING" },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("checkbox", { name: "全選本頁待核可學員" }))
+    await user.click(screen.getByRole("button", { name: "批次核可通過" }))
+    await user.click(await screen.findByRole("button", { name: "確定" }))
+
+    expect(await screen.findByText(/已核可 1 筆/)).toBeInTheDocument()
+    expect(screen.getByText(/尚未完課（1 筆）/)).toBeInTheDocument()
+    expect(screen.getByText(/已有核可紀錄（1 筆）/)).toBeInTheDocument()
+  })
+
+  it("不通過的確認框有備註欄，通過的沒有", async () => {
+    // FR-ET-US16-04：FAIL 得附備註。PASS 顯示備註欄只會在 DB 留一堆空備註
+    withApproval([{ ...baseRow, user_id: "s01", user_name: "王小明", approval_status: "PENDING" }])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    await user.click(await screen.findByRole("button", { name: "通過" }))
+    expect(await screen.findByText(/確定核可王小明為「通過」/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/備註/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "取消" }))
+    await user.click(await screen.findByRole("button", { name: "不通過" }))
+    expect(await screen.findByLabelText(/備註/)).toBeInTheDocument()
+  })
+
+  it("換頁後清空勾選，工具列回到停用而不會送出空名單", async () => {
+    // 🔴 `selected` 是純 id 的 Set，真正送出的名單是 `rows.filter(...)`——只認本頁。
+    // 不清的話：第 1 頁勾人 → 翻頁 → `selected.size` 仍非零（按鈕還亮著），但
+    // `selectedRows` 是空的，按下去會送出空 user_ids → 後端 422，教師看到一個對不上
+    // 任何操作的錯誤。
+    const spy = vi.fn()
+    server.use(
+      http.post("/api/et/courses/:courseId/approvals", () => {
+        spy()
+        return HttpResponse.json({ approved: 1, skipped: [] })
+      }),
+      http.get("/api/et/courses/:courseId/students", ({ request }) => {
+        const page = new URL(request.url).searchParams.get("page") ?? "1"
+        const row =
+          page === "1"
+            ? { ...baseRow, user_id: "s01", user_name: "第一頁學員", approval_status: "PENDING" }
+            : { ...baseRow, user_id: "s02", user_name: "第二頁學員", approval_status: "NOT_ELIGIBLE" }
+        return HttpResponse.json({ data: [row], meta: { total: 2, page: Number(page), limit: 20, total_pages: 2 } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("checkbox", { name: "選取 第一頁學員" }))
+    expect(screen.getByRole("button", { name: "批次核可通過" })).toBeEnabled()
+
+    await user.click(screen.getByRole("button", { name: "Go to page 2" }))
+    await screen.findByText("第二頁學員")
+
+    expect(screen.getByRole("button", { name: "批次核可通過" })).toBeDisabled()
+    expect(spy).not.toHaveBeenCalled()
+
+    // 🔴 這一段釘的是**清空**本身，上面那段其實只驗到 `disabled` 改看 `selectedRows`
+    // 那一半的修正（換頁後本頁沒人被勾，按鈕本來就會停用）。
+    //
+    // 回到第 1 頁時勾選框必須是**未勾**的。若 `selected` 沒被清空，它會維持勾選，而
+    // 那正是「在第 2 頁按全選會無聲蓋掉第 1 頁選取」那條路徑的前提。
+    await user.click(screen.getByRole("button", { name: "Go to page 1" }))
+    await screen.findByText("第一頁學員")
+
+    expect(screen.getByRole("checkbox", { name: "選取 第一頁學員" })).not.toBeChecked()
+  })
+
+  it("課程已關閉時核可與批次全部停用但狀態照常顯示", async () => {
+    // AC 12「讀照舊、寫全停」——狀態欄不可跟著消失，那是閱覽內容
+    withClosedCourse()
+    withApproval([{ ...baseRow, user_id: "s01", user_name: "陳受訓", approval_status: "PENDING" }])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    const row = (await screen.findByText("陳受訓")).closest("tr")!
+
+    expect(within(row).getByText("待核可")).toBeInTheDocument()
+    expect(within(row).getByRole("button", { name: "通過" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "批次核可通過" })).toBeDisabled()
+    expect(screen.getByRole("checkbox", { name: "選取 陳受訓" })).toBeDisabled()
+  })
 })

@@ -1053,6 +1053,14 @@ export const handlers = [
           avg_score: "88.50",
           last_activity_at: "2026-05-02T06:30:00Z",
           has_in_progress_attempt: false,
+          // 預設課程 `REQUIRE_APPROVAL = false`——五個核可欄位全為 null，
+          // 前端據此**完全不渲染**核可欄、勾選框與工具列（`FR-ET-US16-02`）。
+          // 需要核可情境的測試以 `server.use()` 覆寫本 handler。
+          approval_status: null,
+          approval_note: null,
+          approved_by_name: null,
+          approved_at: null,
+          approval_version: null,
         },
         {
           user_id: "s02",
@@ -1066,6 +1074,11 @@ export const handlers = [
           // 兩位學員刻意一 true 一 false——移除確認框的警告版 / 一般版是兩則不同訊息，
           // 全部同值的 fixture 只能驗到其中一邊
           has_in_progress_attempt: true,
+          approval_status: null,
+          approval_note: null,
+          approved_by_name: null,
+          approved_at: null,
+          approval_version: null,
         },
       ],
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },

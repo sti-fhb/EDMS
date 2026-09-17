@@ -1,6 +1,8 @@
 import { http } from "../../services/http"
 import type { PagedResult } from "../../hooks/usePagedQuery"
 import type {
+  ApprovalResult,
+  ApproveResult,
   AttemptOverview,
   PendingInviteRow,
   StudentRow,
@@ -84,6 +86,44 @@ export const studentsApi = {
   /** 移除學員（軟刪；學習歷史保留）。 */
   removeStudent: async (courseId: number, userId: string): Promise<void> => {
     await http.delete(`/et/courses/${courseId}/students/${encodeURIComponent(userId)}`)
+  },
+
+  /**
+   * US16：核可一位或多位學員（`FR-ET-US16-04` / `-05`）。
+   *
+   * **單筆即 `userIds` 長度為 1**——與批次同一支端點。
+   *
+   * ⚠️ 回 200 不代表寫入了：全部被跳過時 `approved` 為 0 而 `skipped` 逐筆帶理由。
+   * 呼叫端必須看 `skipped`，否則教師會看到「已完成核可」而實際上什麼都沒發生。
+   */
+  approve: async (
+    courseId: number,
+    userIds: string[],
+    result: ApprovalResult,
+    resultNote?: string,
+  ): Promise<ApproveResult> => {
+    const { data } = await http.post<ApproveResult>(`/et/courses/${courseId}/approvals`, {
+      user_ids: userIds,
+      result,
+      result_note: resultNote ?? null,
+    })
+    return data
+  },
+
+  /**
+   * US16：撤銷核可（`FR-ET-US16-06`）——**原因必填**。
+   *
+   * `version` 是樂觀鎖，原樣帶回 `StudentRow.approval_version`；不符回 409
+   * `ET_APPROVAL_004`（`ET-MSG-ET03-308`「請重新整理後再試」）。
+   *
+   * ⚠️ **是 POST 不是 DELETE**：那一列仍在，只是 `IS_REVOKED` 翻成 true 並記下原因，
+   * 之後還能重新核可（同一列 update）。
+   */
+  revokeApproval: async (courseId: number, userId: string, reason: string, version: number): Promise<void> => {
+    await http.post(`/et/courses/${courseId}/approvals/${encodeURIComponent(userId)}/revoke`, {
+      reason,
+      version,
+    })
   },
 }
 

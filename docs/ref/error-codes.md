@@ -214,6 +214,11 @@
 | ET_ATTEMPT_004 | 422 | 作答資料無效 |
 | ET_ATTEMPT_005 | 409 | 作答時間已到，請提交本次作答 |
 | ET_ATTEMPT_006 | 409 | 此課程目前關閉中，無法開始新的作答 |
+| ET_APPROVAL_001 | 409 | 此課程未啟用線下核可 |
+| ET_APPROVAL_002 | 409 | 課程已關閉，無法執行此管理動作 |
+| ET_APPROVAL_003 | 404 | 查無核可紀錄 |
+| ET_APPROVAL_004 | 409 | 核可狀態已被其他人變更，請重新整理後再試 |
+| ET_APPROVAL_005 | 422 | 請填寫撤銷原因 |
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
 >
@@ -332,3 +337,11 @@
 | DM_DOC_018 | 409 | 此文件已廢止，無法續編或送審，請刪除此草稿（US5 續編 #222）|
 
 > `DM_ROLE_001`（US1 自我保護）：DM 之 `assign_roles_audiences` 轉接層回呼（`../specs/dp/contracts/module-callbacks.md` §3）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 spec_us7 FR-06）。
+
+> `ET_APPROVAL_001` ~ `005`（#352 線下核可）：
+>
+> - **沒有「學員尚未完課」的錯誤碼，這是刻意的。** `ET-MSG-ET03-304`「學員尚未完課，無法核可」在 `spec_us16` 裡歸類為錯誤、觸發情境是「場景 3：對未完課學員核可」——但同一個場景 3 又明訂那顆按鈕根本不顯示。核可端點讓單筆與批次走**同一條路徑**（單筆即 `user_ids` 長度為 1），未完課一律回 `skipped[reason=NOT_COMPLETED]`，前端據筆數選訊息（單筆 `304`、批次 `303`）。註冊一個沒有任何地方 raise 的碼，只會讓下一個人去找它不存在的呼叫點。
+> - **`002` 與 `ET_TRACK_003` 訊息相同但不共用**：兩者分屬不同端點（核可 / 撤銷 vs 重置重考 / 移除學員），各自模組持有自己的碼是 ET 的既有作法（`ET_INVITE_002` 與 `ET_ENROLL_002` 同樣是「此課程目前關閉中」而不共用）。判定一律用 `is_effectively_closed` 而非比對 `STATUS`——ET-16 的 SCHET002 執行前，期間已過的課程 `STATUS` 仍是 `PUBLISHED`。
+> - **`003` 與 `004` 分流**：查無核可紀錄回 `003`（這個人從來沒被核可過），查得到但版本不符或已被撤銷回 `004`（你看到的畫面過期了）。合併會讓前端只能顯示一句模稜兩可的話，而兩者的下一步不同——前者該去核可，後者該重新整理。
+> - **`005` 不交給 Pydantic 的 `min_length=1`**：那個放行 `"   "`，而撤銷原因是**事後回答「為什麼這筆核可被推翻」的唯一欄位**（`ET_APPROVAL` 因 `(COURSE_ID, USER_ID)` 唯一而 update 覆寫，前次結果只存在 `DP_AUDIT_LOG`）。且 Pydantic 失敗回 `COMMON_422` 不帶欄位名，前端無從把 `ET-MSG-ET03-305` 掛回那個輸入框。
+> - **授權一律沿用 `ET_COURSE_001` / `ET_COURSE_002`**，不自建——判定為 `ensure_owner_or_admin`（owner ∪ 管理者，`FR-ET-US16-07`）。

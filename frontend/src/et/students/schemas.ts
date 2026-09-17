@@ -10,6 +10,45 @@ import type { TagOption } from "../courses/schemas"
 /** 完課三態，由後端**即時計算**（不讀 `ET_ENROLLMENT` 的同名死欄位）。 */
 export type CompletionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"
 
+/**
+ * 線下核可綜合狀態四態（US16 / #352），由後端以**完課狀態 × `ET_APPROVAL`** 即時衍生。
+ *
+ * `FR-ET-US16-02` 明訂 MUST NOT 另存狀態欄位——所以這四個值在 DB 裡不存在，
+ * 每次查詢重算。前端不可自行由 `completion_status` 推導。
+ */
+export type ApprovalStatus = "NOT_ELIGIBLE" | "PENDING" | "PASSED" | "FAILED"
+
+/** 核可結果二態（`ET_APPROVAL_RESULT`）。**不記考核分數**（`FR-ET-US16-04`）。 */
+export type ApprovalResult = "PASS" | "FAIL"
+
+/**
+ * 批次核可時某一筆沒有寫入的理由。
+ *
+ * | 值 | 前端訊息 |
+ * |---|---|
+ * | `NOT_COMPLETED` | 單筆 `ET-MSG-ET03-304`（錯誤）/ 批次 `ET-MSG-ET03-303`（提示）|
+ * | `ALREADY_APPROVED` | `ET-MSG-ET03-309` |
+ * | `NOT_ENROLLED` | `ET-MSG-ET03-309` 的同形句（`ET-MSG-ET03-310`）|
+ */
+export type SkipReason = "NOT_COMPLETED" | "ALREADY_APPROVED" | "NOT_ENROLLED"
+
+export interface SkippedItem {
+  user_id: string
+  reason: SkipReason
+}
+
+/**
+ * 核可結果。
+ *
+ * ⚠️ **`approved === 0` 也是 HTTP 200**——全部被跳過時後端不回錯誤（單筆與批次共用
+ * 同一條路徑，分兩種回應格式會讓前端對同一個動作維護兩套解析）。所以呼叫端**必須看
+ * `skipped`**，不可只看 HTTP 狀態碼就報「已完成核可」。
+ */
+export interface ApproveResult {
+  approved: number
+  skipped: SkippedItem[]
+}
+
 /** 區塊 1 的一列學員。 */
 export interface StudentRow {
   user_id: string
@@ -36,6 +75,24 @@ export interface StudentRow {
    * （由完成項目數導出），這是「手上有一份還沒交的考卷」。兩者同名不同義。
    */
   has_in_progress_attempt: boolean
+
+  /**
+   * 線下核可綜合狀態（US16）。
+   *
+   * 🔴 **`null` 代表該課程 `REQUIRE_APPROVAL = false`**，此時整個核可欄、勾選框與
+   * 工具列都不渲染（`FR-ET-US16-02`）。不是「還沒被核可」——那是 `"PENDING"`。
+   *
+   * 下面四個欄位同樣在未啟用時為 `null`；`approval_status` 為 `"NOT_ELIGIBLE"` 或
+   * `"PENDING"`（尚無紀錄）時它們也是 `null`。
+   */
+  approval_status: ApprovalStatus | null
+  /** 核可備註（`RESULT_NOTE`），多用於「不通過」的原因。 */
+  approval_note: string | null
+  /** 核可人姓名。wireframe 的「{核可人} 核可 {日期}」小字。 */
+  approved_by_name: string | null
+  approved_at: string | null
+  /** 樂觀鎖版本——撤銷時**原樣帶回**，不可自行遞增或省略。 */
+  approval_version: number | null
 }
 
 /** 區塊 2：某學員於某測驗的一次作答。 */

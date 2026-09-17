@@ -11,7 +11,7 @@
 from datetime import datetime
 
 from app.core.exceptions import AppError
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ROLE_ADMIN
 
 
 def ensure_owner(*, owner_id: str, actor_id: str) -> None:
@@ -25,9 +25,52 @@ def ensure_owner(*, owner_id: str, actor_id: str) -> None:
 
     Raises:
         AppError: 403 `ET_COURSE_002`，操作者非擁有者。
+
+    ## 🚨 不要在本函式加管理者旁路
+
+    課程編輯 / 刪除 / 章節操作都在呼叫它，加了旁路等於一次放寬那全部——而
+    `spec.md` §擁有權判定明訂「他人課程僅可閱覽（唯讀），編輯與其他操作按鈕皆不顯示」，
+    且 2026-09-14 已裁示取消「管理者代為轉讓」這條唯一的破例路徑。
+
+    需要「owner 或管理者」的場合請改用 `ensure_owner_or_admin`。
     """
     if owner_id != actor_id:
         raise AppError(status_code=403, detail="僅課程擁有者可編輯", error_code="ET_COURSE_002")
+
+
+def ensure_owner_or_admin(*, owner_id: str, actor_id: str, actor_roles: frozenset[str]) -> None:
+    """課程擁有者**或 ET 管理者**皆可執行（`FR-ET-US16-07`）。
+
+    Args:
+        owner_id: 課程之 `OWNER_ID`。
+        actor_id: 當前操作者 `USER_ID`。
+        actor_roles: 操作者之 ET 角色集（`EtContext.roles`）。
+
+    Raises:
+        AppError: 403 `ET_COURSE_002`，操作者既非擁有者亦非管理者。
+
+    ## 為何另開一支而不是改 `ensure_owner`
+
+    兩者的適用面完全不同：`ensure_owner` 管的是**課程本身的編輯權**（改名、刪章節、
+    發布），那是 `OWNER_ID` 的專屬領域；本函式管的是**對該課程學員的管理動作**，
+    `spec.md` §角色表明訂管理者具備「學員線下考核核可（通過 / 不通過、撤銷）與核可
+    查詢（可查全部學員）」。把兩者合併會讓管理者連別人的課程內容都能改。
+
+    ## 這不是新概念
+
+    `reports/service.py` 的週報早有同樣的旁路（`if ET_ADMIN not in ctx.roles and
+    course.owner_id != ctx.user_id`），管理者看全域、教師看自己的班。本函式只是把那段
+    行內判斷收斂成具名規則，讓 ET03 的三支讀取端點與核可端點共用同一個定義。
+
+    ## ⚠️ 後端放寬了，前端進入路徑還沒有
+
+    SA 裁示 2026-09-17 Q1 = C：本層放寬，但 ET03 的課程下拉維持 `scope=mine`
+    （`frontend/src/et/students/StudentsPage.tsx`），管理者的進入路徑併入 US17（ET-19）。
+    這是**刻意的中間狀態**，不是漏做——別看到前端沒開就把這裡的旁路拿掉。
+    """
+    if ROLE_ADMIN in actor_roles:
+        return
+    ensure_owner(owner_id=owner_id, actor_id=actor_id)
 
 
 def ensure_tag_change_allowed(status: str, *, current: set[int], desired: set[int]) -> None:

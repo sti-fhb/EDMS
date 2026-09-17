@@ -1,8 +1,24 @@
 """ET03 學員學習狀況追蹤 Service（US9 / #322）。
 
 **授權兩層**：router 層 `require_et_roles(ET_TEACHER, ET_ADMIN)`，service 層
-`ensure_owner`——`FR-ET-US9-08` 明訂問卷填答為具名資料，其統計與明細僅本課程教師與
-管理者可見，而本頁其餘兩區塊同樣含學員的個別成績，故一律同等把關。
+`ensure_owner_or_admin`——`FR-ET-US9-08` 明訂問卷填答為具名資料，其統計與明細僅本課程
+教師與管理者可見，而本頁其餘兩區塊同樣含學員的個別成績，故一律同等把關。
+
+## 讀取端點為 owner ∪ 管理者，寫入端點仍為 owner-only（#352 / SA 裁示 Q1 = C）
+
+| 端點 | 判定 |
+|---|---|
+| 學員清單 / 測驗總覽 / 作答明細 / 問卷結果 / 兩支 CSV 匯出 | `ensure_owner_or_admin` |
+| 重置重考次數 / 移除學員（`_require_writable`）| `ensure_owner`（**未放寬**）|
+
+放寬讀取是因為 US16 的線下核可執行者含管理者（`spec.md` §角色表 / `FR-ET-US16-07`），
+而核可的入口就是本頁——只放寬核可端點、不放寬本頁讀取，管理者連那張表都看不到。
+
+**重置重考與移除學員刻意不放寬**：那兩支是 US9 的課程管理動作，不在 US16 的裁示範圍，
+擅自一起放寬等於替另一張 US 做決定。
+
+⚠️ 前端 ET03 的課程下拉仍為 `scope=mine`，管理者目前沒有進入路徑——裁示明訂留到 US17
+（ET-19）。這是**刻意的中間狀態**，不是漏做。
 """
 
 import csv
@@ -18,12 +34,16 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import utcnow
+from app.et.approval.repository import EtApprovalRepository
+from app.et.approval.rules import derive_approval_status
+from app.et.approval.schemas import ApprovalRow
 from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
 from app.et.attempt.service import in_snapshot_order, to_question_result
 from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
-from app.et.course.rules import ensure_owner, is_effectively_closed
-from app.et.enrollment.rules import derive_completion_status
+from app.et.course.models import EtCourse
+from app.et.course.rules import ensure_owner, ensure_owner_or_admin, is_effectively_closed
+from app.et.enrollment.rules import derive_completion_status, is_course_completed
 from app.et.tracking.repository import EtTrackingRepository
 from app.et.tracking.rules import can_reset_retry
 from app.et.tracking.schemas import (
@@ -77,16 +97,28 @@ class EtTrackingService:
         self,
         repository: EtTrackingRepository | None = None,
         attempts: EtAttemptRepository | None = None,
+        approvals: EtApprovalRepository | None = None,
         audit: AuditLogService | None = None,
     ) -> None:
         self._repo = repository or EtTrackingRepository()
         # 重用 attempt 模組的查詢（配分總和、逐題明細）——那些是同一份資料，
         # 各寫一份遲早與學員端分岔，而分岔的表現是同一次作答兩邊分數不同。
         self._attempts = attempts or EtAttemptRepository()
+        # 只用 approval 的**查詢**，不碰它的 service——核可的寫入、寄信與稽核不在本頁
+        # 的職責裡。方向是單向的：本模組讀 `approval.repository`，`approval.service`
+        # 讀 `tracking.repository` 的完課計數，兩者都只跨到對方的 repository 層。
+        self._approvals = approvals or EtApprovalRepository()
         self._audit = audit or AuditLogService()
 
     async def list_students(
-        self, db: AsyncSession, course_id: int, *, actor_id: str, page: int, limit: int
+        self,
+        db: AsyncSession,
+        course_id: int,
+        *,
+        actor_id: str,
+        actor_roles: frozenset[str],
+        page: int,
+        limit: int,
     ) -> PaginatedResult[StudentRow]:
         """區塊 1：已加入學員清單（`FR-ET-US9-02` / `-03`）。
 
@@ -97,8 +129,14 @@ class EtTrackingService:
 
         ⚠️ 三個聚合**刻意分開查**：把它們併進同一個 `GROUP BY` 會讓兩個一對多關聯互相
         灌大彼此的計數（2 項目 × 3 次作答 → 兩個數字都變 6）。
+
+        ## 核可狀態是第四個查詢，而且**只在需要時才查**
+
+        `ET_APPROVAL` 是第三個一對多關聯，同樣**絕不可**併進上述 `GROUP BY`。而
+        `REQUIRE_APPROVAL = false` 的課程根本不顯示核可欄，此時多查一次是純粹的浪費
+        ——ET03 是教師頻繁切換課程的頁面。
         """
-        await self._require_owner(db, course_id, actor_id)
+        course = await self._require_owner(db, course_id, actor_id, actor_roles)
 
         stmt = self._repo.build_student_list_stmt(course_id=course_id)
         paged = await paginate(db, stmt, page=page, limit=limit, schema=EnrollmentRow)
@@ -107,8 +145,16 @@ class EtTrackingService:
 
         counts = await self._repo.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
         avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
-        names = await self._repo.user_names(db, set(user_ids))
         in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
+
+        approvals = (
+            await self._approvals.rows_by_course(db, course_id=course_id, user_ids=user_ids)
+            if course.require_approval
+            else {}
+        )
+        # 核可人的姓名與學員的姓名一起查——核可人多半是同一個人（教師本人），
+        # 分兩次查等於為了一兩個 id 多跑一趟。
+        names = await self._repo.user_names(db, set(user_ids) | {a.approved_by for a in approvals.values()})
 
         rows = [
             _to_student_row(
@@ -117,19 +163,39 @@ class EtTrackingService:
                 avg_score=avg_scores.get(e.user_id),
                 user_name=names.get(e.user_id),
                 has_in_progress_attempt=e.user_id in in_progress,
+                require_approval=course.require_approval,
+                approval=approvals.get(e.user_id),
+                approver_names=names,
             )
             for e in enrollments
         ]
         return {"data": rows, "meta": paged["meta"]}
 
-    async def _require_owner(self, db: AsyncSession, course_id: int, actor_id: str) -> None:
-        """課程存在且操作者為擁有者，否則 404 / 403。"""
+    async def _require_owner(
+        self, db: AsyncSession, course_id: int, actor_id: str, actor_roles: frozenset[str]
+    ) -> EtCourse:
+        """課程存在且操作者為擁有者**或管理者**，否則 404 / 403。
+
+        ⚠️ 名稱保留為 `_require_owner` 但判定已放寬（SA 裁示 2026-09-17 Q1 = C）：
+        `spec.md` §角色表與 `FR-ET-US16-07` 都明訂管理者可對任一課程的學員執行核可與
+        核可查詢，而核可的入口就是本頁——只放寬核可端點、不放寬本頁的讀取，管理者會
+        連那張表都看不到，功能等於沒有。
+
+        判定改用 `ensure_owner_or_admin` 而非在此處寫 `if ET_ADMIN in roles`：
+        `ensure_owner` 本身**維持原樣**，它還被 ET01 / ET02 的課程編輯端點使用，
+        在那支加旁路會讓管理者連別人的課程內容都能改。
+
+        ⚠️ 前端課程下拉仍為 `scope=mine`，管理者目前沒有進入路徑——裁示明訂留到 US17。
+        """
         course = await self._repo.get_course(db, course_id)
         if course is None:
             raise _NOT_FOUND
-        ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+        ensure_owner_or_admin(owner_id=course.owner_id, actor_id=actor_id, actor_roles=actor_roles)
+        return course
 
-    async def attempt_overview(self, db: AsyncSession, course_id: int, *, actor_id: str) -> AttemptOverview:
+    async def attempt_overview(
+        self, db: AsyncSession, course_id: int, *, actor_id: str, actor_roles: frozenset[str]
+    ) -> AttemptOverview:
         """區塊 2：所有曾作答學員 × 各測驗之 attempt 摘要（`FR-ET-US9-04`）。
 
         ## 三次查詢取全班，不逐學員
@@ -143,7 +209,7 @@ class EtTrackingService:
         （`attempts` 為空 + `ET-MSG-ET03-005`「尚未作答」），否則教師分不出「他沒考」
         與「這門課沒這個測驗」。
         """
-        await self._require_owner(db, course_id, actor_id)
+        await self._require_owner(db, course_id, actor_id, actor_roles)
 
         quizzes = await self._repo.quizzes_of_course(db, course_id)
         attempts = await self._repo.attempts_of_course(db, course_id)
@@ -173,7 +239,9 @@ class EtTrackingService:
         ]
         return AttemptOverview(students=students)
 
-    async def attempt_detail(self, db: AsyncSession, attempt_id: int, *, actor_id: str) -> TeacherAttemptDetail:
+    async def attempt_detail(
+        self, db: AsyncSession, attempt_id: int, *, actor_id: str, actor_roles: frozenset[str]
+    ) -> TeacherAttemptDetail:
         """區塊 2：教師端檢視單次 attempt 之逐題明細（`FR-ET-US9-05`）。
 
         ## 授權以「該 attempt 所屬課程的擁有者」判定
@@ -198,7 +266,7 @@ class EtTrackingService:
         if found is None:
             raise _ATTEMPT_NOT_FOUND
         attempt, course = found
-        ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+        ensure_owner_or_admin(owner_id=course.owner_id, actor_id=actor_id, actor_roles=actor_roles)
 
         quiz = await self._attempts.get_quiz(db, attempt.quiz_id)
         details = await self._attempts.list_details(db, attempt_id)
@@ -310,7 +378,9 @@ class EtTrackingService:
             raise _COURSE_CLOSED
         return course
 
-    async def survey_result(self, db: AsyncSession, course_id: int, *, actor_id: str) -> SurveyResult:
+    async def survey_result(
+        self, db: AsyncSession, course_id: int, *, actor_id: str, actor_roles: frozenset[str]
+    ) -> SurveyResult:
         """區塊 3：問卷結果之統計與明細（`FR-ET-US9-07` / `-08`）。
 
         ## 具名資料，授權從嚴
@@ -328,7 +398,7 @@ class EtTrackingService:
         兩者是同一份資料的兩種呈現；分兩次查會讓它們在併發填答時對不起來（統計說 3 人
         填了、明細只列出 2 位）。
         """
-        await self._require_owner(db, course_id, actor_id)
+        await self._require_owner(db, course_id, actor_id, actor_roles)
 
         survey = await self._repo.get_survey(db, course_id)
         if survey is None:
@@ -397,7 +467,9 @@ class EtTrackingService:
             ],
         )
 
-    async def export_students_csv(self, db: AsyncSession, course_id: int, *, actor_id: str) -> bytes:
+    async def export_students_csv(
+        self, db: AsyncSession, course_id: int, *, actor_id: str, actor_roles: frozenset[str]
+    ) -> bytes:
         """區塊 1 之 CSV（`FR-ET-US9-09`）——**全量，不受分頁限制**。
 
         分頁是畫面的事；CSV 的用途正是帶走全部。故此處不呼叫 `list_students`（那支帶
@@ -408,7 +480,7 @@ class EtTrackingService:
         AC 10 明訂課程關閉後「仍可閱覽三區塊全部內容（**含匯出 CSV**）」。套上
         `_require_writable` 會讓教師在課程結束後拿不走自己的教學紀錄。
         """
-        await self._require_owner(db, course_id, actor_id)
+        await self._require_owner(db, course_id, actor_id, actor_roles)
         rows = await self._all_student_rows(db, course_id)
         await self._log_export(db, course_id, actor_id=actor_id, what="學員清單", count=len(rows))
         return _write_csv(
@@ -426,7 +498,9 @@ class EtTrackingService:
             ],
         )
 
-    async def export_survey_csv(self, db: AsyncSession, course_id: int, *, actor_id: str) -> bytes:
+    async def export_survey_csv(
+        self, db: AsyncSession, course_id: int, *, actor_id: str, actor_roles: frozenset[str]
+    ) -> bytes:
         """區塊 3 之 CSV（`FR-ET-US9-09`）——**MUST 含問答題之文字答案**。
 
         統計檢視刻意不顯示那些文字（會把單選題的分布擠到看不見，2026-08-28 裁示），但
@@ -435,7 +509,7 @@ class EtTrackingService:
         課程無問卷時 404 而非回空 CSV——只有表頭的檔案會讓教師以為「沒有人填」，而實際
         上是這門課根本沒有問卷。
         """
-        result = await self.survey_result(db, course_id, actor_id=actor_id)
+        result = await self.survey_result(db, course_id, actor_id=actor_id, actor_roles=actor_roles)
         if not result.has_survey:
             raise _SURVEY_NOT_FOUND
         # 🔴 這一支帶走的是**具名問卷填答全文**（誰說了什麼），是本模組個資密度最高的
@@ -483,6 +557,14 @@ class EtTrackingService:
 
         與 `list_students` 共用同一組聚合查詢與同一個組裝函式，讓畫面與 CSV 的數字不會
         分岔（兩份實作遲早對不起來，而對不起來的表現是教師拿去核對時發現差一個人）。
+
+        ## 📌 CSV **刻意不含核可欄**（SD 自決，#352 規劃 §15）
+
+        US16 未要求核可進匯出，而 CSV 是 US9 的輸出——加一欄會改變既有檔案格式，而
+        教師端可能已有依欄位位置處理的試算表。故此處固定傳 `require_approval=False`，
+        讓核可欄位全為 `None`、不進 `_CSV_HEADERS`。
+
+        需要「核可清單」時應走 US17（ET-19 核可查詢），那支本來就是為跨課程查詢設計的。
         """
         rows = await db.execute(self._repo.build_student_list_stmt(course_id=course_id))
         enrollments = [EnrollmentRow.model_validate(e) for e in rows.scalars().all()]
@@ -499,6 +581,9 @@ class EtTrackingService:
                 avg_score=avg_scores.get(e.user_id),
                 user_name=names.get(e.user_id),
                 has_in_progress_attempt=e.user_id in in_progress,
+                require_approval=False,
+                approval=None,
+                approver_names={},
             )
             for e in enrollments
         ]
@@ -511,8 +596,21 @@ def _to_student_row(
     avg_score: float | None,
     user_name: str | None,
     has_in_progress_attempt: bool,
+    require_approval: bool,
+    approval: ApprovalRow | None,
+    approver_names: dict[str, str],
 ) -> StudentRow:
-    """組一列學員。`counts` 為 `(完成項目數, 總項目數)`。"""
+    """組一列學員。`counts` 為 `(完成項目數, 總項目數)`。
+
+    ## 核可欄位在 `require_approval = False` 時**全部留 `None`**
+
+    不是「有核可欄但值是空的」，是整組欄位不存在——前端據此決定不渲染核可欄、勾選框
+    與工具列（`FR-ET-US16-02`）。給預設值會讓「這門課不做線下核可」與「做，但這個人
+    還沒被核可」長得一樣。
+
+    🔴 **完課判定用 `is_course_completed(done, total)`，不是 `progress_pct >= 100`**：
+    後者四捨五入，201 個項目完成 200 個時回 100，核可按鈕會在最後一項還沒完成時就出現。
+    """
     done, total = counts
     return StudentRow(
         user_id=enrollment.user_id,
@@ -527,6 +625,19 @@ def _to_student_row(
         # 三種活動（見 `progress/repository.touch_activity` 的清單），不再需要本層補償。
         last_activity_at=enrollment.last_activity_at,
         has_in_progress_attempt=has_in_progress_attempt,
+        approval_status=(
+            derive_approval_status(
+                completed=is_course_completed(done=done, total=total),
+                result=approval.result if approval else None,
+                is_revoked=approval.is_revoked if approval else False,
+            )
+            if require_approval
+            else None
+        ),
+        approval_note=approval.result_note if require_approval and approval else None,
+        approved_by_name=approver_names.get(approval.approved_by) if require_approval and approval else None,
+        approved_at=approval.approved_at if require_approval and approval else None,
+        approval_version=approval.version if require_approval and approval else None,
     )
 
 

@@ -9,12 +9,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.core.exceptions import AppError
-from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ROLE_ADMIN, ROLE_TEACHER
 from app.et.course.rules import (
     ensure_closable,
     ensure_deletable,
     ensure_item_reorder_complete,
     ensure_owner,
+    ensure_owner_or_admin,
     ensure_reopen_schedule,
     ensure_reopenable,
     ensure_reorder_complete,
@@ -46,6 +47,47 @@ class TestEnsureOwner:
         with pytest.raises(AppError) as exc:
             ensure_owner(owner_id="u1", actor_id="u2")
         assert "u1" not in exc.value.detail and "u2" not in exc.value.detail
+
+
+class TestEnsureOwnerOrAdmin:
+    """owner ∪ 管理者（`FR-ET-US16-07`，US16 / #352）。
+
+    與 `ensure_owner` **刻意分開**：那支管的是課程本身的編輯權（改名、刪章節、發布），
+    本支管的是對該課程學員的管理動作。合併會讓管理者連別人的課程內容都能改，直接違反
+    `spec.md` §擁有權判定。
+    """
+
+    def test_擁有者可通過(self) -> None:
+        ensure_owner_or_admin(owner_id="u1", actor_id="u1", actor_roles=frozenset({ROLE_TEACHER}))
+
+    def test_管理者即使非擁有者亦可通過(self) -> None:
+        """`spec.md` §角色表：管理者具備「學員線下考核核可（通過 / 不通過、撤銷）」。"""
+        ensure_owner_or_admin(owner_id="u1", actor_id="u2", actor_roles=frozenset({ROLE_ADMIN}))
+
+    def test_他人課程之教師被擋(self) -> None:
+        """`FR-ET-US16-07`：非 owner 之**其他教師** MUST NOT 顯示核可操作。"""
+        with pytest.raises(AppError) as exc:
+            ensure_owner_or_admin(owner_id="u1", actor_id="u2", actor_roles=frozenset({ROLE_TEACHER}))
+        assert exc.value.status_code == 403
+        assert exc.value.error_code == "ET_COURSE_002"
+
+    def test_無角色者被擋(self) -> None:
+        with pytest.raises(AppError) as exc:
+            ensure_owner_or_admin(owner_id="u1", actor_id="u2", actor_roles=frozenset())
+        assert exc.value.error_code == "ET_COURSE_002"
+
+    def test_兼具教師與管理者亦可通過(self) -> None:
+        """多重角色權限取聯集（`spec.md` §多重角色）。"""
+        ensure_owner_or_admin(owner_id="u1", actor_id="u2", actor_roles=frozenset({ROLE_TEACHER, ROLE_ADMIN}))
+
+    def test_管理者身分不改變_ensure_owner_的行為(self) -> None:
+        """🚨 釘住「不要在 `ensure_owner` 加旁路」——它沒有 roles 參數，也不該有。
+
+        若日後有人把旁路加進 `ensure_owner`，課程編輯 / 刪除 / 章節操作會一起被放寬，
+        而那些端點沒有任何測試在看管理者。這一格讓那個改動立刻變紅。
+        """
+        with pytest.raises(AppError):
+            ensure_owner(owner_id="u1", actor_id="u2")
 
 
 class TestEnsureTagChangeAllowed:

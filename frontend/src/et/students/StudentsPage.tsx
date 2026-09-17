@@ -21,25 +21,80 @@ import { SurveyResultBlock } from "./SurveyResultBlock"
 import { TeacherAttemptDialog } from "./TeacherAttemptDialog"
 import { PendingInviteBlock } from "./PendingInviteBlock"
 import { downloadStudentsCsv, downloadSurveyCsv, studentsApi } from "./studentsService"
-import type { PendingInviteRow, StudentRow, TeacherQuizRow } from "./schemas"
+import type {
+  ApprovalResult,
+  ApproveResult,
+  PendingInviteRow,
+  SkipReason,
+  StudentRow,
+  TeacherQuizRow,
+} from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { coursesApi } from "../courses/coursesService"
 
-/** 待確認的操作——兩者都需要二次確認，且文案本身就是規格（ET-MSG-ET03-001 / -003）。 */
+/** 待確認的操作——全部需要二次確認，且文案本身就是規格（ET-MSG-ET03-001 / -003 / -301 …）。 */
 type Pending =
   | { kind: "reset"; userId: string; userName: string | null; quiz: TeacherQuizRow }
   | { kind: "remove"; student: StudentRow }
   | { kind: "resend"; invite: PendingInviteRow }
   | { kind: "revoke"; invite: PendingInviteRow }
+  /** US16 核可（單筆即 `students` 長度為 1）。 */
+  | { kind: "approve"; students: StudentRow[]; result: ApprovalResult }
+  /** US16 撤銷核可——**與 `revoke`（撤回邀請）是兩件事**，故不共用 kind。 */
+  | { kind: "revokeApproval"; student: StudentRow }
 
-/** 四種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。 */
+/** 六種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。 */
 const DIALOG_TITLE: Record<Pending["kind"], string> = {
   reset: "重置重考次數",
   remove: "移除學員",
   resend: "再次寄送邀請",
   revoke: "撤回邀請",
+  approve: "線下核可",
+  revokeApproval: "撤銷核可",
+}
+
+/** 三種跳過理由對應的提示。`NOT_COMPLETED` 的文案依筆數分流，故不在此表。 */
+const SKIP_LABEL: Record<SkipReason, string> = {
+  NOT_COMPLETED: "尚未完課",
+  ALREADY_APPROVED: "已有核可紀錄",
+  NOT_ENROLLED: "已不在此課程",
+}
+
+/**
+ * 把核可結果翻成給教師看的一句話（`ET-MSG-ET03-302` / `-303` / `-304` / `-309`）。
+ *
+ * 🔴 **`approved === 0` 也是 HTTP 200**——後端讓單筆與批次走同一條路徑，全部被跳過時
+ * 不回錯誤。只看狀態碼就報「已完成核可」會讓教師以為寫進去了。
+ *
+ * 單筆與批次的訊息**型別不同**：spec 把 `304`（單筆未完課）列為**錯誤**、`303`（批次
+ * 含未完課）列為**提示**。同一件事在兩種情境下的嚴重度不同——批次跳過一兩個人是預期
+ * 中的，單獨對一個人按「通過」卻沒寫進去則是操作失敗。
+ */
+function approveOutcome(
+  result: ApproveResult,
+  requested: number,
+): { severity: "success" | "warning" | "error"; text: string } {
+  if (result.skipped.length === 0) {
+    return { severity: "success", text: "已完成核可" } // ET-MSG-ET03-302
+  }
+  if (requested === 1) {
+    const reason = result.skipped[0].reason
+    // ET-MSG-ET03-304（未完課）／-309（已有核可紀錄）
+    return {
+      severity: "error",
+      text: reason === "NOT_COMPLETED" ? "學員尚未完課，無法核可" : `無法核可：${SKIP_LABEL[reason]}`,
+    }
+  }
+  // 批次：逐理由聚合，讓教師知道各要做什麼（等他完課 vs 先撤銷）
+  const counts = new Map<SkipReason, number>()
+  for (const item of result.skipped) counts.set(item.reason, (counts.get(item.reason) ?? 0) + 1)
+  const detail = [...counts].map(([reason, n]) => `${SKIP_LABEL[reason]}（${n} 筆）`).join("、")
+  return {
+    severity: result.approved > 0 ? "warning" : "error",
+    text: `已核可 ${result.approved} 筆；已跳過：${detail}`, // ET-MSG-ET03-303 / -309
+  }
 }
 
 /**
@@ -63,6 +118,19 @@ function confirmMessage(pending: Pending | null): string {
     case "revoke":
       // ET-MSG-ET03-102。「原邀請連結將失效」是規格文案，不可簡化。
       return `確定撤回對 ${pending.invite.email} 的邀請？原邀請連結將失效。`
+    case "approve": {
+      // ET-MSG-ET03-301。批次帶筆數——教師勾了 12 個人卻只看到「確定核可所選學員？」
+      // 時，無從察覺自己少勾或多勾了。
+      const who =
+        pending.students.length === 1
+          ? (pending.students[0].user_name ?? "該學員")
+          : `所選 ${pending.students.length} 位學員`
+      const verdict = pending.result === "PASS" ? "通過" : "不通過"
+      const mail = pending.result === "PASS" ? "核可後系統將寄送通知信給學員。" : "不通過不寄送通知信。"
+      return `確定核可${who}為「${verdict}」？${mail}`
+    }
+    case "revokeApproval":
+      return `確定撤銷 ${pending.student.user_name ?? "該學員"} 的核可？撤銷後回到「待核可」，之後仍可重新核可。`
     default:
       return removeMessage(pending)
   }
@@ -101,6 +169,22 @@ export function EtStudentsPage() {
   const [attemptId, setAttemptId] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
+  /** 核可備註（不通過用，選填）與撤銷原因（必填）共用——兩者不會同時出現。 */
+  const [noteInput, setNoteInput] = useState("")
+  /** 撤銷原因為空時的 inline 錯誤（`ET-MSG-ET03-305`）。 */
+  const [reasonError, setReasonError] = useState(false)
+
+  /** 開啟確認框時一併清掉上一次的輸入——留著會讓下一次撤銷帶上別人的原因。 */
+  const openPending = (next: Pending) => {
+    setNoteInput("")
+    setReasonError(false)
+    setPending(next)
+  }
+  const closePending = () => {
+    setPending(null)
+    setNoteInput("")
+    setReasonError(false)
+  }
 
   // 課程下拉取自 ET01 的清單（`scope=mine`）——教師只能追蹤自己建立的課程，
   // 與後端 `ensure_owner` 一致；列出他人課程只會產生「選了必定 403」的選項。
@@ -123,6 +207,13 @@ export function EtStudentsPage() {
 
   const confirm = async () => {
     if (pending === null || courseId === "") return
+    // 🔴 撤銷原因必填**擋在送出之前**（`ET-MSG-ET03-305`）：inline 錯誤掛在那個輸入框
+    // 上，比送出後收一則 Snackbar 更容易讓教師知道要補什麼。後端仍會擋（422），這裡
+    // 只是不讓他白跑一趟。
+    if (pending.kind === "revokeApproval" && noteInput.trim() === "") {
+      setReasonError(true)
+      return
+    }
     setBusy(true)
     try {
       if (pending.kind === "reset") {
@@ -134,12 +225,32 @@ export function EtStudentsPage() {
       } else if (pending.kind === "resend") {
         await studentsApi.resendInvite(pending.invite.invitation_id)
         notify.message.success("邀請信已重新寄出")
+      } else if (pending.kind === "approve") {
+        const outcome = await studentsApi.approve(
+          courseId,
+          pending.students.map((s) => s.user_id),
+          pending.result,
+          // 備註只在「不通過」時送——`FR-ET-US16-04` 明訂 FAIL 得附備註，
+          // 通過的確認框不顯示該欄位，送出空字串只會在 DB 留一堆空備註。
+          pending.result === "FAIL" ? noteInput.trim() || undefined : undefined,
+        )
+        const { severity, text } = approveOutcome(outcome, pending.students.length)
+        notify.message[severity](text)
+      } else if (pending.kind === "revokeApproval") {
+        // `approval_version` 在有核可紀錄時必為數字；撤銷鈕只對已有結果的列顯示。
+        await studentsApi.revokeApproval(
+          courseId,
+          pending.student.user_id,
+          noteInput.trim(),
+          pending.student.approval_version ?? 0,
+        )
+        notify.message.success("已撤銷核可") // ET-MSG-ET03-306
       } else {
         await studentsApi.revokeInvite(pending.invite.invitation_id)
         notify.message.success("邀請已撤回")
       }
       invalidateAll(courseId)
-      setPending(null)
+      closePending()
     } catch (err) {
       // 🔴 破壞性動作失敗**必須看得見**。少了這段，403 / 409（不符重置條件、課程已
       // 關閉）/ 404（清單已過期）/ 429 全部靜默——教師看到的是「按了沒反應」，而
@@ -198,8 +309,8 @@ export function EtStudentsPage() {
         <PendingInviteBlock
           courseId={courseId}
           readOnly={readOnly}
-          onResend={(invite) => setPending({ kind: "resend", invite })}
-          onRevoke={(invite) => setPending({ kind: "revoke", invite })}
+          onResend={(invite) => openPending({ kind: "resend", invite })}
+          onRevoke={(invite) => openPending({ kind: "revoke", invite })}
         />
       ) : (
         <>
@@ -213,14 +324,21 @@ export function EtStudentsPage() {
           <StudentListBlock
             courseId={courseId}
             readOnly={readOnly}
-            onRemove={(student) => setPending({ kind: "remove", student })}
+            onRemove={(student) => openPending({ kind: "remove", student })}
             onExport={() => void exportCsv("students")}
+            onApprove={(students, result) =>
+              openPending(
+                result === null
+                  ? { kind: "revokeApproval", student: students[0] }
+                  : { kind: "approve", students, result },
+              )
+            }
           />
           <AttemptOverviewBlock
             courseId={courseId}
             readOnly={readOnly}
             onOpenDetail={setAttemptId}
-            onReset={(userId, userName, quiz) => setPending({ kind: "reset", userId, userName, quiz })}
+            onReset={(userId, userName, quiz) => openPending({ kind: "reset", userId, userName, quiz })}
           />
           <SurveyResultBlock courseId={courseId} onExport={() => void exportCsv("survey")} />
         </>
@@ -228,7 +346,7 @@ export function EtStudentsPage() {
 
       <TeacherAttemptDialog attemptId={attemptId} onClose={() => setAttemptId(null)} />
 
-      <Dialog open={pending !== null} onClose={() => !busy && setPending(null)}>
+      <Dialog open={pending !== null} onClose={() => !busy && closePending()} fullWidth maxWidth="xs">
         {/* `pending` 為 null 是關閉動畫期間——給空字串，不要 fallback 到某個動作的
             標題，否則每次關閉都會閃一下「移除學員」。 */}
         <DialogTitle>{pending === null ? "" : DIALOG_TITLE[pending.kind]}</DialogTitle>
@@ -240,15 +358,56 @@ export function EtStudentsPage() {
           ) : (
             <DialogContentText>{confirmMessage(pending)}</DialogContentText>
           )}
+
+          {/* 不通過可附備註（`FR-ET-US16-04`），**選填** */}
+          {pending?.kind === "approve" && pending.result === "FAIL" && (
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              size="small"
+              sx={{ mt: 2 }}
+              label="備註（選填）"
+              placeholder="例：實機操作未達標準"
+              value={noteInput}
+              onChange={(e) => setNoteInput(e.target.value)}
+            />
+          )}
+
+          {/* 撤銷原因**必填**（`FR-ET-US16-06`）。錯誤以 helperText 掛在欄位上而非
+              Snackbar——錯誤就在這個輸入框，訊息飄到畫面角落等於要教師自己連連看。 */}
+          {pending?.kind === "revokeApproval" && (
+            <TextField
+              required
+              fullWidth
+              multiline
+              minRows={2}
+              size="small"
+              sx={{ mt: 2 }}
+              label="撤銷原因"
+              placeholder="例：考核紀錄登錄錯誤"
+              value={noteInput}
+              error={reasonError}
+              helperText={reasonError ? "請填寫撤銷原因" : "此原因會寫入稽核紀錄"}
+              onChange={(e) => {
+                setNoteInput(e.target.value)
+                if (reasonError) setReasonError(false)
+              }}
+            />
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPending(null)} disabled={busy}>
+          <Button onClick={closePending} disabled={busy}>
             取消
           </Button>
           <Button
             onClick={confirm}
             disabled={busy}
-            color={pending?.kind === "remove" ? "error" : "primary"}
+            color={
+              pending?.kind === "remove" || (pending?.kind === "approve" && pending.result === "FAIL")
+                ? "error"
+                : "primary"
+            }
             variant="contained"
           >
             確定
