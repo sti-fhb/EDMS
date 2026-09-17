@@ -79,10 +79,14 @@ class AuditLogRepository:
         全平台共用的**單一固定 key**——持鎖期間所有寫稽核的動作（**包含登入**）都會排隊。
 
         🔴 給下一個寫批次型呼叫者：**不要在逐筆迴圈裡呼叫 `log_action`**。第一筆就會取走
-        這把鎖，之後整批的 DB 往返與外部動作全都在持鎖狀態下進行。參考
-        `app/et/approval/service.py::approve` 的作法（累積 `pending_audits`、迴圈後統一寫）。
-        根治需縮小臨界區（巢狀交易 / savepoint）或改用非阻塞的鏈接策略，追蹤於 #352 的
-        follow-up。
+        這把鎖，之後整批的 DB 往返與外部動作（寄信、跨模組呼叫）全都在持鎖狀態下進行。
+        正確作法見 `app/et/approval/service.py::approve`——累積 `pending_audits`、迴圈
+        結束後統一寫，把持鎖窗壓到「N 次稽核寫入 + commit」。
+
+        目前**刻意不根治**（2026-09-17 裁示）：移出迴圈後剩下的持有時間在本系統規模下
+        （內部系統、同時在線數十人）不構成問題，而真正會讓人再踩一次的是這段註解本身，
+        故修在這裡而非開一張不會被排進來的 issue。若日後真的需要更短的臨界區，方向是
+        巢狀交易 / savepoint 或改用非阻塞的鏈接策略。
         並行不分岔之正確性以 advisory lock 語意 + code review 保證，未做並發實測
         （現行 per-test rollback fixture 難以模擬多 committed 交易並發）。
         """
