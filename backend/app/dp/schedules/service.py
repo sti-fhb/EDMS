@@ -22,7 +22,12 @@ _FUNC_NAME = "DP-SCHEDULE"
 
 #: 無對應模組管理者角色、由後台共用維護的排程所屬模組。
 #:
-#: 目前只有平台自身（`DP`）。明列而非以「有沒有註冊 checker」推導——見 `_ensure_may_edit`。
+#: ⚠️ **把 `"DP"` 從這裡拿掉會讓平台排程變成沒有任何人能維護。** 平台沒有「DP 管理者」
+#: 這個角色概念（`module_admin_gate` 沒有 `DP` 的 checker），因此一律以所屬模組判定時，
+#: `SCHDP001` 會對每一個人都回 403——包含所有後台管理者。明列於此者回退為 router-level
+#: 的同一組門檻（ET 或 DM 任一管理者）。
+#:
+#: 明列而非以「有沒有註冊 checker」推導：後者方向是 fail-open。完整理由見 `_ensure_may_edit`。
 _SHARED_MODULES: Final[frozenset[str]] = frozenset({"DP"})
 
 

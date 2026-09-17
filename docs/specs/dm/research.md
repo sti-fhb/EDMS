@@ -92,7 +92,7 @@
 - **應看（分母）= 可見對象名單**: 沿用 §5b 可見性（掛「全體」→全部閱覽者、否則 OR 交集），**不排除**兼編輯/審核/管理者（與發布通知一致）。KPI 已看＝分母 ∩ 目前發布版之 `DM_DOC_READ` distinct CREATED_USER。
 - **版本重置**: KPI 綁「目前發布版（CURRENT_VERSION_ID）」；發新版→VERSION_ID 改變→已看自然歸零（要大家重看新版）。
 - **範圍 = 全部已發布文件**: KPI 統計 / 儀表板（DM10）/ 管理者週報 / **未讀提醒**均涵蓋全部已發布文件。未讀提醒是否寄送**由管理者於平台 DP 後台通知範本「未讀提醒」（MODULE=DM）啟用 / 停用統一控制**（比照 ET）；**不設文件層個別開關**（2026-07-02 移除原 `WEEKLY_REMIND_VIEWER` 旗標——避免逐文件維護負擔，統一開關更單純）。
-- **排程 SCHDM001（每週執行，星期＋時間可設定，預設週一 10:00）**: 一個作業算 KPI→寄管理者週報（Email，內文摘要 + CSV）→寄未看閱覽者提醒（Email，一人一信彙整）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步，不阻塞排程；`SCHDM001` 於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供。新增 `KPI_WEEKLY` / `UNREAD_REMIND` 兩事件（EMAIL_ONLY，存 `DP_NOTIFY_TEMPLATE` MODULE=DM）。**每週執行時間**由管理者於平台 DP 後台「**排程管理**」編輯 `SCHDM001` 的 `CRON_EXPR`（預設 `0 10 * * 1` 即週一 10:00，即時生效），KPI 週報與未讀提醒共用同一時間同批執行。
+- **排程 SCHDM001（每週執行，星期＋時間可設定，預設週一 10:00）**: 一個作業算 KPI→寄管理者週報（Email，內文摘要 + CSV）→寄未看閱覽者提醒（Email，一人一信彙整）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步，不阻塞排程；`SCHDM001` 於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供。新增 `KPI_WEEKLY` / `UNREAD_REMIND` 兩事件（EMAIL_ONLY，存 `DP_NOTIFY_TEMPLATE` MODULE=DM）。**每週執行時間**由管理者於平台 DP 後台「**排程管理**」編輯 `SCHDM001` 的 `CRON_EXPR`（預設 `0 10 * * 0` 即週一 10:00 UTC，即時生效），KPI 週報與未讀提醒共用同一時間同批執行。
 
   > ⚠️ 原文為「由管理者於通知範本設定、存於 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`…（對齊 ET `DP_PARAM.ET_WEEKLY_STAT_DAY_TIME` 設計）」。**該設計已於 #325 取消**（ET 側移除該參數），本處於 **#332** 一併更正——引擎只讀 `CRON_EXPR`，`DP_PARAM` 從未被讀。
 - **Rationale**: 客戶要「已看/未看 KPI + 每週回報 + 催未看」；分母不排除、範圍全部為客戶 2026-06-29 決定；未讀提醒之開關由管理者以範本統一控制（2026-07-02 客戶變更，取代原文件層旗標）。

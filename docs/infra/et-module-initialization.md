@@ -133,13 +133,29 @@ ET_USER_ROLE 初始為空
 
 | Job | `CRON_EXPR` | 台北時間 | Handler | 做什麼 |
 |---|---|---|---|---|
-| **SCHET001** | `0 10 * * 1` | 每週一 18:00 | `app.et.schedules.handlers.weekly_job` | 週統計快照 + 週報（管理者）+ 未完課提醒（學員）|
+| **SCHET001** | `0 10 * * 0` | 每週一 18:00 | `app.et.schedules.handlers.weekly_job` | 週統計快照 + 週報（管理者）+ 未完課提醒（學員）|
 | **SCHET002** | `0 8 * * *` | 每日 16:00 | `app.et.schedules.handlers.daily_job` | 到期自動關閉 + 結清逾期未提交的作答 + 截止前加急提醒 |
 
 ### ⚠️ `CRON_EXPR` 是 **UTC**
 
 `CronTrigger.from_crontab(cron_expr, timezone="UTC")`。`0 8 * * *` 是台北 **16:00**，
 不是早上八點。排定「上班時間寄信」時請自行換算。
+
+### ⚠️ day-of-week 是 **週一為 0**，不是標準 crontab 的週日為 0
+
+APScheduler 把 cron 的 dow 欄位直接塞進它自己的 `day_of_week`（`0=Monday`），**不做**
+標準 crontab（`0=Sunday`）的轉換：
+
+| dow | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| 實際 | 週一 | 週二 | 週三 | 週四 | 週五 | 週六 | 週日 |
+
+旁證：`7` 會被直接拒絕（`the last value (7) is higher than the maximum value (6)`），
+而標準 crontab 接受 7 為週日。
+
+SCHET001 與 SCHDM001 原本都寫 `0 10 * * 1`，實際跑在**週二**，已於 #332
+（`c8b4e2f1d97a`）更正為 `0 10 * * 0`。釘住這條語意的測試在
+`backend/tests/unit/dp/test_dp_schedule_cron_weekday.py`。
 
 ### 沒有手動重跑的端點
 

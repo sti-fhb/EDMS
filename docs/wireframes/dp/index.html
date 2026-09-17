@@ -1078,14 +1078,17 @@
     <div class="wf-card p-0">
       <table class="table wf-table mb-0 align-middle">
         <thead><tr>
-          <th>Job</th><th style="width:22rem;">說明</th><th>所屬模組</th><th>Cron</th><th>最近執行</th>
+          <th>Job</th><th style="width:22rem;">說明</th><th>所屬模組</th><th>執行時點</th><th>Cron</th><th>最近執行</th>
         </tr></thead>
         <tbody>
           <!-- 說明欄（DESCRIPTION，#311）：JOB_NAME 為短名詞，工作內容細節寫於此欄、唯讀不可編輯 -->
-          <tr><td>SCHDP001 平台每日作業</td><td>每日 08:00 執行，停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHET001 ET 週統計與週報</td><td>每週一 08:00 執行，寫入課程週統計快照並寄出學習進度週報</td><td>ET</td><td>0 8 * * 1</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>每日 08:00 執行，關閉已逾閱課期間之課程，並對截止前 ET_URGENT_REMIND_DAYS 天未完課者寄加急提醒</td><td>ET</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>每週一 08:00 執行，寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>0 8 * * 1</td><td>2026-07-06 08:00</td></tr>
+          <!-- 執行時點（#332）：由 CRON_EXPR 現算、標 UTC（cron 本身是 UTC，與右側編輯的值同一套）。
+               說明欄不再寫時點——兩者無同步機制，曾出現說明欄 08:00 而 cron 為 10:00 的矛盾。
+               dow 以「週一為 0」（APScheduler 語意），故週一是 0 而非 1。 -->
+          <tr><td>SCHDP001 平台每日作業</td><td>停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>每日 08:00 UTC</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHET001 ET 週統計與週報</td><td>寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒</td><td>ET</td><td>每週一 10:00 UTC</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>關閉已逾閱課期間之課程，並結清這些課程中逾期未提交之作答（標 TIMEOUT 並計分）</td><td>ET</td><td>每日 08:00 UTC</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>每週一 10:00 UTC</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
         </tbody>
       </table>
     </div>

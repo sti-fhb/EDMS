@@ -3,11 +3,14 @@
 涵蓋 AC7：唯讀 job 清單 + 執行歷程分頁 + 無啟停 / 補跑端點（405）+ 未登入 401。
 """
 
+import re
+
 import pytest
 
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
 from app.dp.schedules.repository import ScheduleRepository
+from app.dp.schedules.scheduler import next_run
 from app.dp.users.models import DpUser
 
 # usefixtures(backoffice_admin)：本檔驗後台功能之業務邏輯，非授權；#250 起後台 router
@@ -65,6 +68,48 @@ async def test_list_schedules_returns_description(client, db):
     # 三批工作內容移入說明（原本全塞在 JOB_NAME 裡）
     desc = dp001["description"] or ""
     assert "閒置" in desc and "密碼" in desc and "待驗證" in desc
+
+
+@pytest.mark.parametrize("job_id", ["SCHDM001", "SCHET001"])
+async def test_週報排程實際觸發日為週一(client, db, job_id):
+    """#332：兩支週報的 CRON_EXPR 必須**真的**落在週一。
+
+    釘的是**實際觸發日**而非 cron 字串。原本兩支都是 `0 10 * * 1`，而規格、說明欄、
+    已移除的 `DM_WEEKLY_SCHED_DAY_TIME`（`週一,10:00`）全寫「週一」——但 APScheduler 的
+    day-of-week 以週一為 0，`1` 是**週二**，於是兩支週報整整晚一天跑了一段時間。
+
+    沒有任何測試釘住觸發日，是它能活這麼久的原因：cron 字串看起來「很像」週一。
+    若日後有人把 `0` 改回比較直覺的 `1`，這裡會紅。
+    """
+    await _seed_user(db)
+    r = await client.get("/api/dp/schedules", headers=_auth())
+
+    job = {j["job_id"]: j for j in r.json()}[job_id]
+    fire = next_run(job["cron_expr"])
+    assert fire is not None, f"{job_id} 的 cron 無法解析：{job['cron_expr']}"
+    assert fire.weekday() == 0, (
+        f"{job_id} 的 {job['cron_expr']} 觸發於 {fire:%Y-%m-%d}（週{'一二三四五六日'[fire.weekday()]}），應為週一"
+    )
+    assert (fire.hour, fire.minute) == (10, 0)
+
+
+async def test_說明欄不再承載執行時點(client, db):
+    """#332：執行時點的唯一事實來源是 `CRON_EXPR`，說明欄只描述職責。
+
+    原本五筆說明欄都以「每日 08:00 執行，」「每週一 10:00 執行，」開頭，而 `CRON_EXPR`
+    可由管理者在**同一個畫面**上改，兩者沒有同步機制。已經歪過一次：`SCHDM001` 的 cron
+    於 `9eb4dd6e496b` 改為 10:00，12 天後回填說明欄的 `b3f7c2e8a591` 抄的仍是舊的 08:00。
+
+    斷言的是「不含時鐘時間」而非比對整串文字——後者會在每次改文案時假性轉紅，卻擋不住
+    真正的問題（有人又把時點寫回去）。
+    """
+    await _seed_user(db)
+    r = await client.get("/api/dp/schedules", headers=_auth())
+
+    for job in r.json():
+        desc = job["description"] or ""
+        assert not re.search(r"\d{1,2}:\d{2}", desc), f"{job['job_id']} 的說明欄仍寫著執行時點：{desc}"
+        assert desc, f"{job['job_id']} 的說明欄不應為空"
 
 
 async def test_list_logs_paginated(client, db):
