@@ -29,7 +29,14 @@
 - **FR-DP-US11-05**: 平台自身排程 `SCHDP001`（每日）MUST 執行：① 閒置帳號禁用（`ACTIVE` 帳號 `LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`，天數為平台級參數；**`LAST_LOGIN_DATE` 為 null〔從未登入〕時以 `CREATED_DATE` 為閒置起算基準**；禁用寫稽核 `func_name=DP-USERS`、operator=SYSTEM）；② 密碼效期到期前提醒（`PWD_CHANGED_DATE`+`EXPIRY_DAYS` 距今 ≤ `EXPIRY_REMIND_DAYS`，預設到期前 7 天起、**每日跑均寄出直至變更 / 到期**，經 US6 寄 `MODULE=DP`「密碼到期提醒」）；兩者結果寫入稽核 / outbox，各批次逐筆容錯（單一使用者失敗不擋其他）
 - **FR-DP-US11-06**: DP 後台 MUST 提供排程總覽畫面（共用項，ET / DM 管理者皆可檢視）：job 清單（含下次執行時間）與執行歷程；**MAY 編輯 `JOB_NAME` / `CRON_EXPR` / 啟停（`IS_ENABLED`）**，`CRON_EXPR` / `IS_ENABLED` 變更即時套到運行中的引擎；**MUST NOT 提供手動補跑**（補跑各模組自理，FR-03）；**`HANDLER_REF` / `MODULE` / `JOB_ID` MUST NOT 可經 UI 修改**（`HANDLER_REF` 改＝任意程式執行風險）
 - **FR-DP-US11-08**: job 清單 MUST 顯示 `DESCRIPTION`（這支 job 在做什麼）；該欄 **MUST NOT 可經 UI 修改**——它描述的是程式行為，管理者改了不會改變行為、只會讓說明與實作不符，變更途徑為 IT 直接操作 DB。`JOB_NAME` 為短名詞，工作內容細節一律寫入 `DESCRIPTION`（#311）
-- **FR-DP-US11-07**: 排程時間等業務參數存 `DP_PARAM`（前綴分模組，如 `ET_WEEKLY_STAT_DAY_TIME`、`DM_WEEKLY_SCHED_DAY_TIME`），由各模組管理者於 US5 維護；引擎 MUST 於觸發時讀取最新值
+- **FR-DP-US11-07**（2026-09-17 由 #332 改訂）: 排程之**執行時點**唯一由 `DP_SCHEDULE.CRON_EXPR` 控制（於 DP 後台「排程管理」編輯，經 `apply_job_change` **即時生效**，見 FR-06）；引擎 MUST NOT 自 `DP_PARAM` 讀取任何排程時點。`DP_PARAM`（前綴分模組）用於各模組的**業務門檻**參數（如 `DM_REMIND_THRESHOLD` 簽核停留天數、`ET_URGENT_REMIND_DAYS` 截止前天數），由各模組管理者於 US5 維護、**各模組 handler 於執行時自行讀取**
+    > **改訂理由**：原條文寫「排程時間等業務參數存 `DP_PARAM`…引擎 MUST 於觸發時讀取最新值」，而**那條 MUST 從未被實作**——`app/dp/schedules/scheduler.py` 只以 `CronTrigger.from_crontab(job.cron_expr, ...)` 註冊，完全不讀 `DP_PARAM`。
+    >
+    > 後果不是「功能缺了」，而是**管理者在 DP 後台改那個參數會完全沒有效果且無任何錯誤訊息**——與 #171（參數缺維護層級）、#307（通知 CHANNEL 改了靜默失效）同族。
+    >
+    > 收斂方向選「改規格配合實作」而非反過來，理由是**能改時間的地方與被讀的地方必須合一**：排程管理頁本來就有 UI、有權限（`require_any_module_admin()`，與參數頁同一道閘）、有稽核，且變更即時生效不必重啟。
+    >
+    > 兩個曾被本條點名的參數皆已移除：`ET_WEEKLY_STAT_DAY_TIME`（#325 / `d5a81f37c6b2`）、`DM_WEEKLY_SCHED_DAY_TIME`（#332 / `a3f7c21e58d9`）。
 
 ## 系統訊息
 

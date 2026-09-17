@@ -5,7 +5,7 @@ SRVDP001（ParamService）讀回——確認 TBMS 前例 A（各模組 migration
 """
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.dp.notify.models import DpNotifyTemplate
 from app.services import ParamService
@@ -39,10 +39,32 @@ async def test_dm_template_channels(db):
     assert all(not r.is_system for r in rows.values())  # DM 範本非系統信、可停用
 
 
+async def test_dm_參數三項種入平台表(db):
+    """DM 於 `DP_PARAM` 的參數清單。
+
+    原為四項；`DM_WEEKLY_SCHED_DAY_TIME` 已於 **#332** 移除——排程的**執行時點**唯一
+    事實來源是 `DP_SCHEDULE.CRON_EXPR`，留著一個沒有人讀的參數會讓管理者在 DP 後台
+    改了它卻完全沒有效果、且無任何錯誤訊息（ET 側於 #325 同樣處置）。
+
+    `DM_REMIND_THRESHOLD` 留著且仍然有效：它是**業務門檻**（簽核停留幾天）而非排程
+    時點，由 SCHDM002 的 handler 於執行時自行讀取。
+
+    ⚠️ **斷言完整清單而非逐項取值**：後者對「多出一個沒人讀的參數」毫無反應，而那正是
+    本次要消滅的形狀。
+    """
+    rows = await db.execute(
+        text('SELECT "PARAM_ID" FROM "DP_PARAM_M" WHERE "PARAM_ID" LIKE :p ORDER BY 1'), {"p": r"DM\_%"}
+    )
+    assert rows.scalars().all() == [
+        "DM_FILE_MAX_MB",
+        "DM_FILE_TYPES",
+        "DM_REMIND_THRESHOLD",
+    ]
+
+
 async def test_dm_params_readable_via_srvdp001(db):
     """DM_ 參數經 SRVDP001（ParamService）讀回正確值（跨模組讀取路徑）。"""
     svc = ParamService()
     assert await svc.get_int_param(db, "DM_REMIND_THRESHOLD", "VALUE", 0) == 7
     assert await svc.get_int_param(db, "DM_FILE_MAX_MB", "VALUE", 0) == 50
-    assert await svc.get_param_value(db, "DM_WEEKLY_SCHED_DAY_TIME", "VALUE") == "週一,10:00"
     assert "pdf" in (await svc.get_param_value(db, "DM_FILE_TYPES", "VALUE") or "")

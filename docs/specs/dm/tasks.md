@@ -24,7 +24,7 @@
 - [ ] T011 [P] 建立資料庫 Migration：`DM_CHANGE_LOG`（append-only 公開變更歷程：OPERATION、APPLICANT、APPROVER、NOTE），參照 data-model.md
 - [ ] T012 ~~建立 `DM_NOTIFY_TEMPLATE` / `DM_PARAM` Migration~~ **已廢除（2026-07-08 集中化）**：通知範本改存平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、系統參數改存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`），由平台 DP 建 migration；DM 不建此二表。維護 / 編輯 UI 於平台 DP 系統管理後台（按模組過濾，DM 不自設系統設定畫面）。
 - [ ] T012a ~~建立 `DM_NOTIFY_QUEUE` Migration~~ **已廢除（2026-07-08 集中化）**：非同步寄送改用平台 outbox `DP_EMAIL_LOG`（呼叫平台唯一發信服務、傳 `template_code`）；DM 不建佇列表。
-- [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）為 DM 業務種子。**通知範本 / 參數種子改由平台 DP 建（2026-07-08 集中化）**：9 通知範本寫入 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`；`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM 參數寫入 `DP_PARAM`（前綴 `DM_`：`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`）；發信引擎調校參數（重試 / 限流 / 重試間隔）屬平台級 `MAIL` 參數組（`RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2；無失敗告警參數——失敗率由 IT 監控負責，2026-07-09 對齊平台），由 DP 種子建立。參照 data-model.md 代碼表與平台 DP 規格
+- [ ] T013 建立種子資料：4 內建分類（SOP/MANUAL/TRAINING/OTHER + 分類碼）、4 標籤組（**AUDIENCE（權限）/MODULE/NATURE/LEGAL（檢索）；原 ROLE 移除**）、可見對象預設值（全體/護理師/軍人/醫檢師/行政人員）為 DM 業務種子。**通知範本 / 參數種子改由平台 DP 建（2026-07-08 集中化）**：9 通知範本寫入 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`；`DOC_PUBLISH`＝撰寫者+相符閱覽者、含 `KPI_WEEKLY` / `UNREAD_REMIND`＝EMAIL_ONLY）、DM 參數寫入 `DP_PARAM`（前綴 `DM_`：`DM_REMIND_THRESHOLD`=7、`DM_FILE_MAX_MB`=50、`DM_FILE_TYPES`、~~`DM_WEEKLY_SCHED_DAY_TIME`=`週一,10:00`~~（**#332 移除**，排程時點改由 `CRON_EXPR` 單一控制））；發信引擎調校參數（重試 / 限流 / 重試間隔）屬平台級 `MAIL` 參數組（`RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2；無失敗告警參數——失敗率由 IT 監控負責，2026-07-09 對齊平台），由 DP 種子建立。參照 data-model.md 代碼表與平台 DP 規格
 
 ---
 
@@ -69,7 +69,7 @@
 - [ ] T025 [US1] 實作催辦門檻設定：值域 1–30 天（預設 7）、寫平台 `DP_PARAM.DM_REMIND_THRESHOLD`（前綴 `DM_`，經平台參數服務），維護 UI 於平台 DP 系統管理後台（按模組過濾），對應 FR-004
 - [ ] T026 [US1] DM 端權限轉接層：供平台 DP dp-roles 呼叫之模組端回呼（列 / 指派 DM 四角色）、4 角色複選即時生效、寫 `DM_USER_ROLE(_LOG)`、「最後異動」、自我保護、不檢核 0 管理者；維護 UI 於平台 DP 後台「權限管理」，對應 FR-005/006/008
 - [ ] T027 [US1] DM 端：9 內建通知範本之種子與語意（「文件發布通知」＝撰寫者+相符閱覽者、含「KPI 週報」「未讀提醒」＝EMAIL_ONLY、自動催辦含門檻）寫平台 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）；主旨 / 內文編輯 UI 於平台 DP 後台「通知範本」（按模組過濾、只操作 MODULE=DM 的列），對應 FR-007
-- [ ] T027b [US1] DM 端：KPI 週報 / 未讀提醒之「每週執行時間」（星期＋時間，兩者共用）存平台 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`（前綴 `DM_`，格式 `星期,HH:MM`，預設 `週一,10:00`），供 SCHDM001 讀取；設定 UI 於平台 DP 後台通知範本 detail，對應 spec_us13 FR-004a
+- [x] ~~T027b [US1] DM 端：KPI 週報 / 未讀提醒之「每週執行時間」存平台 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`，供 SCHDM001 讀取~~ **整條作廢（#332）**：該參數從未被任何程式讀取，已由 migration `a3f7c21e58d9` 移除。執行時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制（DP 後台「排程管理」編輯、即時生效），無須 DM 端另存參數。
 - [ ] T027a [US1] DM 端可見對象授權轉接層：供平台 DP 呼叫之模組端（使用者 × AUDIENCE 標籤指派、即時生效、寫異動紀錄、「最後異動」）+ `DM_USER_TAG` 落地；AUDIENCE 值停用 soft-retire 提示受影響文件 / 閱覽者數；維護 UI 於平台 DP 後台，對應 FR-009/FR-010
 
 ---
@@ -216,7 +216,7 @@
 
 - [ ] T059a [US13] 實作閱讀 KPI 計算 dm/service/kpi：依可見性名單（含「全體」、不排除任何人）× 目前發布版之 `DM_DOC_READ`（distinct CREATED_USER）算應看/已看/未看/百分比；發新版以新版計；**應看＝0 顯示「—（無對應閱覽者）」且不列入整體平均閱讀率**，對應 FR-001/003
 - [ ] T059b [US13] 實作 KPI 儀表板 dm/kpi（DM10，**僅 DM_ADMIN、後端擋 URL**）：逐文件應看/已看/未看/百分比、關鍵字/分類查詢、CSV 匯出、空資料提示（DM-MSG-DM10-001），對應 FR-002
-- [ ] T059c [US13] 實作排程 `SCHDM001` 之 **DM job handler**（於平台 `DP_SCHEDULE` 註冊、由平台引擎每週執行、`DP_SCHEDULE_LOG` 記錄；執行時間讀平台 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`，前綴 `DM_`，預設週一 10:00）：算全部已發布文件 KPI → KPI 週報（管理者，內文摘要 + CSV）+ 未讀提醒（未看閱覽者，一人一信彙整，**涵蓋全部已發布文件；「未讀提醒」範本停用則整批不寄**）呼叫平台唯一發信服務、經 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-004/004a/005/006、research §9c
+- [ ] T059c [US13] 實作排程 `SCHDM001` 之 **DM job handler**（於平台 `DP_SCHEDULE` 註冊、由平台引擎每週執行、`DP_SCHEDULE_LOG` 記錄；執行時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 1`；**#332 已移除原擬讀取的 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`**）：算全部已發布文件 KPI → KPI 週報（管理者，內文摘要 + CSV）+ 未讀提醒（未看閱覽者，一人一信彙整，**涵蓋全部已發布文件；「未讀提醒」範本停用則整批不寄**）呼叫平台唯一發信服務、經 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-004/004a/005/006、research §9c
 
 ---
 
