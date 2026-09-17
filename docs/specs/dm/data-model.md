@@ -355,7 +355,7 @@ erDiagram
 
 - **通知範本 → `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）**：DM 10 項內建事件（`DOC_SUBMIT` / `DOC_REJECT` / `DOC_PUBLISH` / `OBS_SUBMIT` / `OBS_APPROVE` / `OBS_REJECT` / `SUBMIT_WITHDRAWN` / `KPI_WEEKLY` / `UNREAD_REMIND` / `AUTO_REMIND`）改存 `DP_NOTIFY_TEMPLATE`，欄位含 `EVENT_NAME` / `SUBJECT` / `BODY` / `CHANNEL`（EMAIL_MSG＝Email+站內 / MSG_ONLY＝僅站內，自動催辦用 / EMAIL_ONLY＝僅 Email，文件發布通知 / KPI 週報 / 未讀提醒用）/ `IS_ENABLED` 由 DP 表提供。編輯 UI 於平台 DP 系統管理後台「通知範本」畫面（DM 管理者按模組過濾、只編輯 `MODULE=DM` 的列）。`DOC_PUBLISH`（核准發布時觸發，發撰寫者 + 相符閱覽者）、`KPI_WEEKLY` / `UNREAD_REMIND`（排程 SCHDM001 觸發）皆 CHANNEL=EMAIL_ONLY、非同步批次寄送。原「文件發布(撰寫者,EMAIL_MSG)」與「發布通知閱覽者」已於 2026-06-29 合併為單一 `DOC_PUBLISH`。
 - **寄件佇列 → 平台 outbox `DP_EMAIL_LOG`**：DM 之非同步寄送（`DOC_PUBLISH` / `KPI_WEEKLY` / `UNREAD_REMIND`）改呼叫平台唯一發信服務（傳 `template_code`），由平台 outbox 非同步寄送並記錄狀態 / 重試 / `CALLER_MODULE=DM`。原 worker「寄送時即時組信」（未讀提醒即時算該收件人未看清單、KPI 週報即時算統計 + CSV）之行為改由平台發信服務承載；發布通知之收件名單仍於發布當下組出（快照）。
-- **系統參數 → 平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）**：DM 參數改存 `DP_PARAM`，平台提供唯讀查詢服務；維護介面於平台 DP 後台（DM 管理者只看 DM 參數，按模組過濾）。DM 參數 key：`DM_REMIND_THRESHOLD`（催辦門檻）、`DM_FILE_MAX_MB`、`DM_FILE_TYPES`、`DM_WEEKLY_SCHED_DAY_TIME`（KPI 週報 / 未讀提醒每週執行時間，格式 `星期,HH:MM`，如 `週一,10:00`，預設 `週一,10:00`，由管理者於平台 DP 後台通知範本設定、兩者共用）。原發信引擎調校 `DM_MAIL_MAX_RETRY` / `DM_MAIL_RATE_PER_MIN` / `DM_MAIL_FAIL_ALERT_PCT` 屬發信引擎，因發信引擎集中於平台，已改為**平台級 `MAIL` 參數組**（`RETRY_MAX` / `RATE_PER_MIN` / `RETRY_INTERVAL_MIN`，不再掛 `DM_`；失敗告警作廢——由 IT 監控負責，2026-07-09 對齊平台），凡引用處改述為「平台發信引擎參數」。
+- **系統參數 → 平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）**：DM 參數改存 `DP_PARAM`，平台提供唯讀查詢服務；維護介面於平台 DP 後台（DM 管理者只看 DM 參數，按模組過濾）。DM 參數 key：`DM_REMIND_THRESHOLD`（催辦門檻）、`DM_FILE_MAX_MB`、`DM_FILE_TYPES`。**排程執行時點不存 `DP_PARAM`**——`SCHDM001` 的執行時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制（於 DP 後台「排程管理」編輯、即時生效）；原 `DM_WEEKLY_SCHED_DAY_TIME` 從未被任何程式讀取，已於 #332 移除（ET 側 `ET_WEEKLY_STAT_DAY_TIME` 於 #325 同樣處置）。原發信引擎調校 `DM_MAIL_MAX_RETRY` / `DM_MAIL_RATE_PER_MIN` / `DM_MAIL_FAIL_ALERT_PCT` 屬發信引擎，因發信引擎集中於平台，已改為**平台級 `MAIL` 參數組**（`RETRY_MAX` / `RATE_PER_MIN` / `RETRY_INTERVAL_MIN`，不再掛 `DM_`；失敗告警作廢——由 IT 監控負責，2026-07-09 對齊平台），凡引用處改述為「平台發信引擎參數」。
 
 ---
 
@@ -420,7 +420,7 @@ erDiagram
 
 | 代碼 | 名稱 | 週期 | 說明 |
 |------|------|------|------|
-| SCHDM001 | 閱讀 KPI 週報與未讀提醒 | 每週執行（星期＋時間可設定，預設週一 10:00，存於 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`）；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供 | 計算全部已發布文件之閱讀 KPI；寄 KPI 週報予管理者（內文摘要 + CSV）、未讀提醒予未看閱覽者（一人一信彙整、涵蓋全部已發布文件；未讀提醒範本停用則不寄）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步 |
+| SCHDM001 | 閱讀 KPI 週報與未讀提醒 | 每週執行（時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 1` 即週一 10:00；於 DP 後台「排程管理」編輯、即時生效）；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供 | 計算全部已發布文件之閱讀 KPI；寄 KPI 週報予管理者（內文摘要 + CSV）、未讀提醒予未看閱覽者（一人一信彙整、涵蓋全部已發布文件；未讀提醒範本停用則不寄）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步 |
 
 ---
 

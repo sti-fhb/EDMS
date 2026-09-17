@@ -16,6 +16,18 @@
 
 ---
 
+
+> ## ⚠️ 2026-09-17（#332）：`DM_WEEKLY_SCHED_DAY_TIME` 已移除
+>
+> 本檔多處（#127 Foundation 交付紀錄、US13 的 task 與驗收條件等）提及 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`
+> 作為 `SCHDM001` 的執行時間來源。**那個參數已由 migration `a3f7c21e58d9` 移除**——它自 `b7fa4b6e4fe7`
+> 種入以來從未被任何程式讀取，而平台引擎只讀 `DP_SCHEDULE.CRON_EXPR`。
+>
+> **本檔的相關敘述刻意不逐處改寫**：它們是「當時規劃 / 交付了什麼」的紀錄，改掉等於抹去演進軌跡。
+> 現況以 [spec.md](spec.md)、[spec_us13.md](spec_us13.md)、[data-model.md](data-model.md) 為準：
+> **排程執行時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制**，於 DP 後台「排程管理」編輯、經 `apply_job_change`
+> 即時生效。`DM_REMIND_THRESHOLD` 不受影響——它是業務門檻而非時點，由 handler 執行時自行讀取。
+
 ## Issue 總覽
 
 | # | 標題 | 對應 | 階段 | 涵蓋 Tasks | 主要前置 | GitHub # | 狀態 |

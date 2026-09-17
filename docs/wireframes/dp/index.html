@@ -654,8 +654,6 @@
       <div class="row g-3">
         <div class="col-md-4"><label class="form-label small mb-1">自動催辦停留門檻（天）<code class="ms-1">DM_REMIND_THRESHOLD</code></label><input type="number" class="form-control form-control-sm" value="7">
           <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>停留超過門檻自動催辦（1–30 天）</div></div>
-        <div class="col-md-4"><label class="form-label small mb-1">KPI 週報 / 未讀提醒執行時間 <code class="ms-1">DM_WEEKLY_SCHED_DAY_TIME</code></label><input type="text" class="form-control form-control-sm" value="週一 10:00">
-          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>對應排程 SCHDM001</div></div>
         <div class="col-md-2"><label class="form-label small mb-1">上傳大小上限（MB）</label><input type="number" class="form-control form-control-sm" value="50"></div>
         <div class="col-md-2"><label class="form-label small mb-1">允許類型</label><input type="text" class="form-control form-control-sm" value="pdf,docx"></div>
       </div>
@@ -688,8 +686,6 @@
       <div class="row g-3">
         <div class="col-md-3"><label class="form-label small mb-1">影片大小上限（MB）<code class="ms-1">ET_VIDEO_MAX_SIZE_MB</code></label><input type="number" class="form-control form-control-sm" value="500"></div>
         <div class="col-md-3"><label class="form-label small mb-1">允許影片格式 <code class="ms-1">ET_VIDEO_ALLOWED_FORMATS</code></label><input type="text" class="form-control form-control-sm" value="mp4,mov"></div>
-        <div class="col-md-3"><label class="form-label small mb-1">每週統計 / 週報執行時間 <code class="ms-1">ET_WEEKLY_STAT_DAY_TIME</code></label><input type="text" class="form-control form-control-sm" value="週一 10:00">
-          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>對應排程 SCHET001</div></div>
         <div class="col-md-3"><label class="form-label small mb-1">截止前加急提醒天數 <code class="ms-1">ET_URGENT_REMIND_DAYS</code></label><input type="number" class="form-control form-control-sm" value="3">
           <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>對應排程 SCHET002</div></div>
       </div>
@@ -1113,7 +1109,7 @@
       <ul class="mb-0 mt-2">
         <li>平台提供<strong>單一排程執行引擎</strong>（如 APScheduler）＋ <strong><code>DP_SCHEDULE</code> DB 註冊表</strong>（cron / 執行程式 / 啟停）；多實例部署時以 <strong>leader 選舉</strong>確保只有一個實例觸發（單一實例可簡化）。</li>
         <li>各模組排程 job（ET SCHET001/002、DM SCHDM001）於 <code>DP_SCHEDULE</code> 登錄；job handler 由各模組提供，需要業務資料時<strong>反向 import 模組 service</strong>（平台 job → 模組 service）。</li>
-        <li>平台以 <code>DP_SCHEDULE_LOG</code> 記錄執行歷程（起訖 / 成功失敗 / 錯誤）；排程時間參數存 <code>DP_PARAM</code>（前綴分模組，如 <code>ET_WEEKLY_STAT_DAY_TIME</code> / <code>DM_WEEKLY_SCHED_DAY_TIME</code>）。</li>
+        <li>平台以 <code>DP_SCHEDULE_LOG</code> 記錄執行歷程（起訖 / 成功失敗 / 錯誤）。<strong>排程的執行時點只由本頁的 <code>CRON_EXPR</code> 控制</strong>（編輯後經 <code>apply_job_change</code> 即時生效）——<code>DP_PARAM</code> <strong>不存任何排程時點</strong>（FR-DP-US11-07，#332 改訂；原 <code>ET_WEEKLY_STAT_DAY_TIME</code> / <code>DM_WEEKLY_SCHED_DAY_TIME</code> 已分別於 #325 / #332 移除）。<code>DP_PARAM</code> 只存各模組的<strong>業務門檻</strong>（如 <code>ET_URGENT_REMIND_DAYS</code> / <code>DM_REMIND_THRESHOLD</code>），由各模組 handler 執行時自行讀取。</li>
         <li>本頁為<strong>唯讀</strong>檢視（共用項，ET / DM 管理者皆可檢視）：<strong>不可於 UI 啟停或手動補跑</strong>——啟停由 DB / 部署管理（2026-07-08 釐清第 1 輪）。</li>
         <li>平台自身排程 <code>SCHDP001</code>（每日）：① 連續 90 日未登入之帳號自動禁用；② 密碼到期前提醒（預設 7 天前起，寄 <code>MODULE=DP</code>「密碼到期提醒」）。</li>
         <li>前次執行未完成而下次 cron 到期 → <strong>跳過本次並記 SKIPPED</strong>（不重複執行同一 job）；單一 job 失敗不影響其他 job。</li>

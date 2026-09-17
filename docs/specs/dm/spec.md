@@ -185,7 +185,7 @@ DM 畫面碼原僅散見於各 spec 敘述、無集中定義；2026-08-13（#156
 | 閱讀紀錄（DM_DOC_READ）| 使用者下載「目前發布版」之閱讀事件（使用者 × 文件 × 版本 × 時間）；作為閱讀 KPI「已看」判定；預覽不記錄；獨立於公開變更歷程 |
 | 通知範本（`DP_NOTIFY_TEMPLATE` MODULE=DM）| DM 9 項內建事件之範本集中於平台 DP（「文件發布通知」發撰寫者+相符閱覽者、「KPI 週報」「未讀提醒」皆僅 Email、非同步）；事件固定不可新增，個別可啟用 / 停用、主旨 / 內文可編輯；**編輯 UI 於平台 DP 系統管理後台「通知範本」**（DM 管理者只編輯 MODULE=DM 的列、按模組過濾），完整欄位見平台 DP data-model |
 | 寄件 outbox（平台 `DP_EMAIL_LOG`）| DM 之非同步寄送（文件發布通知 / KPI 週報 / 未讀提醒）改呼叫平台唯一發信服務（傳 template_code），由平台 outbox 非同步寄送並記錄狀態，使發布 / 排程不因大量寄信而阻塞；DM 不自建佇列表 |
-| 系統參數（平台 `DP_PARAM` 前綴 `DM_`）| DM 參數集中於平台 DP；**自動催辦門檻**（`DM_REMIND_THRESHOLD`）、**每週排程時間**（`DM_WEEKLY_SCHED_DAY_TIME`）由 DM 管理者於平台 DP 後台「系統參數與清單」維護、**檔案大小上限 / 可上傳格式**（`DM_FILE_MAX_MB` / `DM_FILE_TYPES`）等由 IT 設定；平台提供唯讀查詢服務、維護 UI 於平台 DP 後台（按模組過濾）；發信引擎調校參數屬平台級 `DP_`（見〈跨模組共用規則〉） |
+| 系統參數（平台 `DP_PARAM` 前綴 `DM_`）| DM 參數集中於平台 DP；**自動催辦門檻**（`DM_REMIND_THRESHOLD`）由 DM 管理者於平台 DP 後台「系統參數與清單」維護；**每週排程時間**改於 DP 後台「排程管理」編輯 `SCHDM001` 的 `CRON_EXPR`（**已於 #332 移除**：排程時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制）、**檔案大小上限 / 可上傳格式**（`DM_FILE_MAX_MB` / `DM_FILE_TYPES`）等由 IT 設定；平台提供唯讀查詢服務、維護 UI 於平台 DP 後台（按模組過濾）；發信引擎調校參數屬平台級 `DP_`（見〈跨模組共用規則〉） |
 
 > 角色指派異動採稽核欄位記錄（異動者 / 異動時間，寫入異動紀錄）；DM 不另設權限變更查詢介面，完整歷史保留於 DB 供稽核（per §角色指派與異動紀錄）。各實體完整欄位定義於 `data-model.md`（待 `/speckit.plan` 階段產出）。
 
@@ -200,7 +200,7 @@ DM 畫面碼原僅散見於各 spec 敘述、無集中定義；2026-08-13（#156
 - **文件編號**：每份文件具備唯一識別碼 DOC_ID（格式 `DM-{分類碼}-{6 位流水號}`，如 `DM-SOP-000123`，流水號依分類各自獨立），作為對外引用與檢索之基準；版號 / 名稱可變，DOC_ID 永久不變
 - **歷史保留**：所有版本以邏輯方式永久保留（DELETED=0），不開放實體刪除，僅允許廢止整份文件
 - **獨立部署**：本模組與 ET 同屬獨立部署，僅與 ET 共用帳號系統
-- **系統管理 / 參數 / 通知範本 / 排程 / 發信集中於平台 DP（2026-07-08 集中化）**：DM 不自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`，亦**不自設系統管理維護畫面（原 DM09）**。系統參數存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`，平台提供唯讀查詢服務）、通知範本存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、非同步寄送改呼叫平台唯一發信服務並經 outbox `DP_EMAIL_LOG`、排程 `SCHDM001` 於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄、job handler 仍由 DM 提供）。**權限管理（DM 四角色＋可見對象授權指派）、系統參數與清單（分類 / func_name / 可見對象 / 檢索標籤定義、催辦門檻 / 排程時間）、通知範本之維護 / 編輯 UI 統一於平台 DP 系統管理後台**（DM 管理者於 DP 後台操作、按模組過濾，只見 / 只改 `MODULE=DM` / `DM_` 前綴的項，與 ET / 平台互不可見）。**通用參數（催辦門檻 / 排程時間 / 檔案上限 `DM_REMIND_THRESHOLD` / `DM_WEEKLY_SCHED_DAY_TIME` / `DM_FILE_MAX_MB` / `DM_FILE_TYPES`）存 `DP_PARAM`（前綴 `DM_`）、通知範本存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）；分類 / func_name / 標籤等受控主檔為 DM 自持表（`DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`，含 `IS_BUILTIN` / `GROUP_TYPE` 等富語意欄位與手冊唯一部分索引所需之真欄），其維護於 DP 後台「系統參數與清單」畫面經 catalog 轉接層由 DP 後台呼叫 DM（比照 roles 轉接層）；「指派 / 關聯」（使用者×角色 `DM_USER_ROLE`、使用者×可見對象授權 `DM_USER_TAG`、文件×標籤 `DM_DOC_TAG`）與角色判定 / 業務規則落地仍屬 DM**（2026-08-06 #127 實作對齊：受控主檔為 DM 表、非 DP_PARAM；原「分類/func/標籤清單存 DP_PARAM」措辭過寬，已修正）。發信引擎調校參數（重試 / 速率 / 重試間隔）因發信引擎集中於平台，屬平台級 `MAIL` 參數（失敗率告警由 IT 監控負責、不做系統內通報，2026-07-09 對齊平台）
+- **系統管理 / 參數 / 通知範本 / 排程 / 發信集中於平台 DP（2026-07-08 集中化）**：DM 不自持 `DM_PARAM` / `DM_NOTIFY_TEMPLATE` / `DM_NOTIFY_QUEUE`，亦**不自設系統管理維護畫面（原 DM09）**。系統參數存平台 `DP_PARAM`（`PARAM_ID` 前綴 `DM_`，平台提供唯讀查詢服務）、通知範本存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）、非同步寄送改呼叫平台唯一發信服務並經 outbox `DP_EMAIL_LOG`、排程 `SCHDM001` 於 `DP_SCHEDULE` 註冊由平台引擎執行（`DP_SCHEDULE_LOG` 記錄、job handler 仍由 DM 提供）。**權限管理（DM 四角色＋可見對象授權指派）、系統參數與清單（分類 / func_name / 可見對象 / 檢索標籤定義、催辦門檻 / 排程時間）、通知範本之維護 / 編輯 UI 統一於平台 DP 系統管理後台**（DM 管理者於 DP 後台操作、按模組過濾，只見 / 只改 `MODULE=DM` / `DM_` 前綴的項，與 ET / 平台互不可見）。**通用參數（催辦門檻 / 檔案上限 `DM_REMIND_THRESHOLD` / `DM_FILE_MAX_MB` / `DM_FILE_TYPES`）存 `DP_PARAM`（前綴 `DM_`）；**排程時點不在其中**（**已於 #332 移除**：排程時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制）、通知範本存 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）；分類 / func_name / 標籤等受控主檔為 DM 自持表（`DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`，含 `IS_BUILTIN` / `GROUP_TYPE` 等富語意欄位與手冊唯一部分索引所需之真欄），其維護於 DP 後台「系統參數與清單」畫面經 catalog 轉接層由 DP 後台呼叫 DM（比照 roles 轉接層）；「指派 / 關聯」（使用者×角色 `DM_USER_ROLE`、使用者×可見對象授權 `DM_USER_TAG`、文件×標籤 `DM_DOC_TAG`）與角色判定 / 業務規則落地仍屬 DM**（2026-08-06 #127 實作對齊：受控主檔為 DM 表、非 DP_PARAM；原「分類/func/標籤清單存 DP_PARAM」措辭過寬，已修正）。發信引擎調校參數（重試 / 速率 / 重試間隔）因發信引擎集中於平台，屬平台級 `MAIL` 參數（失敗率告警由 IT 監控負責、不做系統內通報，2026-07-09 對齊平台）
 
 ### 文件狀態機
 
@@ -322,7 +322,7 @@ DM 同時處理三類送審：**新增 / 新版本 / 廢止**
 - **已看 / 未看 / 百分比**：已看＝分母中已下載目前發布版者；未看＝其餘；百分比＝已看 ÷ 應看
 - **版本更新即重置**：發布新版本後 KPI 改以新版計算，原已看舊版者對新版視為未看
 - **管理者儀表板（DM10）**：僅 DM_ADMIN；逐文件列 文件 / 分類 / 應看 / 已看 / 未看 / 百分比，可查詢排序；統計範圍為全部已發布文件
-- **每週排程（`SCHDM001`，每週執行；星期＋時間可由管理者於通知範本設定，預設週一 10:00，存 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供；KPI 週報與未讀提醒共用）**：① **KPI 週報**寄管理者（Email；內文摘要〔總數 / 平均閱讀率 / 閱讀率最低前 N / 儀表板連結〕+ CSV 逐文件附件；涵蓋全部已發布文件）；② **未讀提醒**寄未看之閱覽者（Email；一人一信、彙整其所有未看文件；**涵蓋全部已發布文件**）
+- **每週排程（`SCHDM001`，每週執行；時點由管理者於 DP 後台「排程管理」編輯 `CRON_EXPR`，預設 `0 10 * * 1` 即週一 10:00（**已於 #332 移除**：排程時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制）；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供；KPI 週報與未讀提醒共用）**：① **KPI 週報**寄管理者（Email；內文摘要〔總數 / 平均閱讀率 / 閱讀率最低前 N / 儀表板連結〕+ CSV 逐文件附件；涵蓋全部已發布文件）；② **未讀提醒**寄未看之閱覽者（Email；一人一信、彙整其所有未看文件；**涵蓋全部已發布文件**）
 - **未讀提醒之統一控制**：是否寄送由管理者於平台 DP 後台通知範本「未讀提醒」（MODULE=DM）**啟用 / 停用**統一控制（比照 ET）；**不設文件層個別開關**（2026-07-02 移除原 `WEEKLY_REMIND_VIEWER` 旗標）
 - 排程寄信皆經平台發信服務 + outbox `DP_EMAIL_LOG` **非同步批次**，不同步阻塞
 
