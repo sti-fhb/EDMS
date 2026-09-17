@@ -29,9 +29,9 @@ const OUTCOME = {
 
 /** 選項的三種標示：選對＝綠、選錯＝紅、漏選的正確答案＝黃。 */
 function optionColor(option: OptionResult): string | undefined {
-  if (option.is_selected && option.is_correct) return "success.main"
-  if (option.is_selected && !option.is_correct) return "error.main"
-  if (!option.is_selected && option.is_correct) return "warning.main"
+  if (option.selected && option.is_correct) return "success.main"
+  if (option.selected && !option.is_correct) return "error.main"
+  if (!option.selected && option.is_correct) return "warning.main"
   return undefined
 }
 
@@ -47,8 +47,8 @@ function QuestionRow({ question, index }: { question: QuestionResult; index: num
       <Stack spacing={0.5} sx={{ mt: 1 }}>
         {question.options.map((option) => (
           <Typography key={option.option_id} variant="body2" sx={{ color: optionColor(option) }}>
-            {option.is_selected ? "☑" : "☐"} {option.option_text}
-            {!option.is_selected && option.is_correct && "（正確答案，未選）"}
+            {option.selected ? "☑" : "☐"} {option.text}
+            {!option.selected && option.is_correct && "（正確答案，未選）"}
           </Typography>
         ))}
       </Stack>

@@ -1213,9 +1213,12 @@ export const handlers = [
           points: "50.00",
           score: "50.00",
           outcome: "CORRECT",
+          // 🔴 欄位名以**後端 `attempt/schemas.OptionResult`** 為準：`text` / `selected`，
+          // 不是 `option_text` / `is_selected`。#358 的根因正是前端型別抄錯了名字，而這份
+          // fixture 當時跟著錯，於是假資料與 bug 互相印證、測試照樣綠。
           options: [
-            { option_id: 1, option_text: "捐血人身分", is_correct: true, is_selected: true },
-            { option_id: 2, option_text: "天氣", is_correct: false, is_selected: false },
+            { option_id: 1, text: "捐血人身分", is_correct: true, selected: true },
+            { option_id: 2, text: "天氣", is_correct: false, selected: false },
           ],
         },
         {
@@ -1226,9 +1229,9 @@ export const handlers = [
           score: "15.00",
           outcome: "PARTIAL",
           options: [
-            { option_id: 3, option_text: "核對資料", is_correct: true, is_selected: true },
-            { option_id: 4, option_text: "消毒", is_correct: true, is_selected: false },
-            { option_id: 5, option_text: "跳過確認", is_correct: false, is_selected: true },
+            { option_id: 3, text: "核對資料", is_correct: true, selected: true },
+            { option_id: 4, text: "消毒", is_correct: true, selected: false },
+            { option_id: 5, text: "跳過確認", is_correct: false, selected: true },
           ],
         },
       ],

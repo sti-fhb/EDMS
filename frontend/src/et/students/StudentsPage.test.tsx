@@ -55,6 +55,35 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(await screen.findByText("尚未作答")).toBeInTheDocument()
   })
 
+  it("逐題明細顯示學員實際選了什麼（#358 第 1 項）", async () => {
+    // 🔴 這條是 #358 的回歸測試。原本前端 `OptionResult` 抄錯了後端欄位名
+    // （`option_text` / `is_selected` vs 後端的 `text` / `selected`），於是執行期讀到
+    // `undefined`：選項文字全空白、`selected` 為 falsy 故每一題都標成未選——**連滿分的
+    // 題目都顯示「（正確答案，未選）」**。
+    //
+    // 為什麼當初沒被抓到，有兩層：
+    //   1. 前端型別是 TypeScript `interface`，只存在於編譯期，執行期不驗證（依
+    //      `sti-zod-conventions.md`，API 回應型別本來就保留手寫 interface，不改 zod）
+    //   2. **MSW fixture 當時也用前端的錯名字**，假資料與 bug 互相印證；而唯一會開啟
+    //      本對話框的測試又把 `questions` 覆寫成 `[]`，那些選項從來沒被渲染過
+    //
+    // 所以本測試刻意**不覆寫 handler**，走預設 fixture（已對齊後端欄位名）真的渲染選項。
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("button", { name: "王小明" }))
+    await user.click(await screen.findByText("第 1 次"))
+
+    // 選對 → 已勾選；fixture 的 Q1 選項 1 是 selected + correct
+    expect(await screen.findByText(/☑ 捐血人身分/)).toBeInTheDocument()
+    // 未選且非正解 → 未勾選、且不該有「正確答案」字樣
+    expect(screen.getByText(/☐ 天氣/)).toBeInTheDocument()
+    // 🔴 漏選的正確答案才顯示這句；Q1 全對，所以「捐血人身分」不可帶它
+    expect(screen.getByText(/☑ 捐血人身分/)).not.toHaveTextContent("正確答案，未選")
+    // Q2 的「消毒」是正解但沒選 → 這才是該顯示的那一個
+    expect(screen.getByText(/☐ 消毒（正確答案，未選）/)).toBeInTheDocument()
+  })
+
   it("點歷次作答開啟逐題明細，走的是教師端端點", async () => {
     const spy = vi.fn()
     server.use(
