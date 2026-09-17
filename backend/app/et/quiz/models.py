@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -119,6 +120,23 @@ class EtQuizAttemptM(BaseModel):
         UniqueConstraint("USER_ID", "QUIZ_ID", "ATTEMPT_NO", name="UQ_ET_ATTEMPT_USER_QUIZ_NO"),
         Index("IX_ET_ATTEMPT_USER_QUIZ", "USER_ID", "QUIZ_ID"),
         Index("IX_ET_ATTEMPT_COURSE", "COURSE_ID"),
+        # SCHET002 每日掃「仍未提交的作答」。本表 append-only、永不刪除，而 `STATUS` 無索引
+        # → 該查詢等同每日全表掃 + 四層 JOIN，成本隨歷史作答量無上限成長。partial index 只
+        # 收 `IN_PROGRESS` 的列（母體天然很小，作答完就離開這個狀態），體積不隨歷史成長。
+        #
+        # ⚠️ **這裡的宣告必須與 `c7d4a1e93b52` 的 `op.create_index(...)` 逐字一致。**
+        # 該索引原本只存在於 migration、沒有宣告在此——於是 model 的 metadata 裡不存在它，
+        # `alembic revision --autogenerate` 一律判定為「要刪掉」，下一個產 migration 的人會
+        # 拿到一行 `op.drop_index("IX_ET_ATTEMPT_IN_PROGRESS", ...)` 夾在自己的變更裡。
+        #
+        # 刪掉它**不會有任何測試變紅**：效能測試預設被 `slow` marker 排除，且量的是學員
+        # 清單與影片區段、不碰這條掃描。唯一表徵是「每日排程越跑越久」，要等歷史作答量
+        # 長起來才看得出來。（由 #352 的 `alembic check` 發現，#325 的遺漏。）
+        Index(
+            "IX_ET_ATTEMPT_IN_PROGRESS",
+            "ATTEMPT_ID",
+            postgresql_where=text('"STATUS" = \'IN_PROGRESS\' AND "DELETED" = 0'),
+        ),
     )
 
     attempt_id: Mapped[int] = mapped_column("ATTEMPT_ID", BigInteger, Identity(), nullable=False)
