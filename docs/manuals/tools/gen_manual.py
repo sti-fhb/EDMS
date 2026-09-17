@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -35,7 +36,7 @@ from docx.shared import Pt, Cm, RGBColor
 
 sys.path.insert(0, str(Path(__file__).parent))
 from manual_config import (   # noqa: E402  專案專屬設定一律自本檔讀取
-    ORGANISATION, PROJECT_NAME, MANUAL_DOC_NAME as DOC_NAME, AUTHOR,
+    ORGANISATION, PROJECT_NAME, MANUAL_DOC_NAME as DOC_NAME, AUTHORS,
     DOC_VERSION, MODULE_NAMES, MODULE_DIRS, MANUAL_NAME_RE,
     NON_MANUAL_FILES, NON_MANUAL_DIRS)
 
@@ -248,12 +249,53 @@ def _add_toc_field(paragraph) -> None:
         run._r.append(el)
 
 
+def _git_account(source: Path, *, created: bool) -> str | None:
+    """取該檔之 git 提交者帳號；created=True 取建檔者，否則取最後修改者。
+
+    回 None 表示尚未進版控（剛寫成、還沒 commit），由呼叫端改用當前 git 使用者。
+    """
+    flag = ["--diff-filter=A"] if created else ["-1"]
+    result = subprocess.run(["git", "log", *flag, "--format=%an", "--", str(source)],
+                            capture_output=True, text=True, encoding="utf-8")
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    # git log 由新到舊：建檔者取最末筆（最早一次新增），最後修改者取首筆
+    return lines[-1] if created else lines[0]
+
+
+def _current_account() -> str:
+    result = subprocess.run(["git", "config", "user.name"],
+                            capture_output=True, text=True, encoding="utf-8")
+    return result.stdout.strip()
+
+
+def _person(source: Path, *, created: bool) -> str:
+    """該檔之撰寫人（建檔者）或修訂人（最後修改者），回正式姓名。
+
+    ⛔ 查無對應者一律停止，不以帳號或他人姓名頂替——作者欄印錯人即交付瑕疵。
+    """
+    account = _git_account(source, created=created) or _current_account()
+    if account in AUTHORS:
+        return AUTHORS[account]
+    raise SystemExit(
+        f"找不到 git 帳號「{account}」對應之姓名（來源：{source.name}）。\n"
+        f"請於 docs/manuals/tools/manual_config.py 之 AUTHORS 補上一行：\n"
+        f'    "{account}": "你的正式姓名",')
+
+
 def build_front_matter(doc: Document, break_p, title: str, module: str | None,
-                       doc_name: str = DOC_NAME) -> None:
+                       doc_name: str = DOC_NAME, source: Path | None = None) -> None:
     """封面、修訂履歷、目錄——一律插入第 1 節。
 
     測試報告與操作手冊共用本函式，僅文件名稱（doc_name）不同。
+
+    作者與修訂人依 `source` 之 git 紀錄判定，兩者**語意不同**：作者為建立該檔者、
+    修訂人為最後改動者。1.0 版通常相同，其後改版則未必——修訂履歷要記的是這一版
+    是誰改的，⛔ 不可一律填原作者。
     """
+    author = _person(source, created=True) if source else ""
+    reviser = _person(source, created=False) if source else ""
     def cover_line(text: str = "", size: int | None = None):
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -286,7 +328,7 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
     info.style = "Table Grid"
     info.alignment = WD_TABLE_ALIGNMENT.CENTER
     for label, value in (("版本", DOC_VERSION), ("建立日期", today),
-                         ("更新日期", ""), ("作者", AUTHOR)):
+                         ("更新日期", ""), ("作者", author)):
         cells = info.add_row().cells
         cells[0].text = label
         cells[1].text = value
@@ -309,7 +351,7 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
 
     row = history.add_row().cells
     for i, (cell, text, width) in enumerate(
-            zip(row, (DOC_VERSION, today, FIRST_RELEASE_NOTE, AUTHOR), HISTORY_WIDTHS)):
+            zip(row, (DOC_VERSION, today, FIRST_RELEASE_NOTE, reviser), HISTORY_WIDTHS)):
         cell.width = width
         cell.text = text
         if i != 2:                                   # 說明欄靠左，其餘置中
@@ -575,7 +617,7 @@ def _verify_output(md_path: Path, out_path: Path) -> list[str]:
 def build_manual(md_path: Path, out_path: Path) -> None:
     doc, break_p = open_template()
     title = convert_body(doc, md_path)          # 先轉內文以取得文件標題
-    build_front_matter(doc, break_p, title, _extract_module(md_path))
+    build_front_matter(doc, break_p, title, _extract_module(md_path), source=md_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out_path))
 

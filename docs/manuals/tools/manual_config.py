@@ -19,8 +19,27 @@ PROJECT_NAME = "國軍醫院設立捐血站裝備整備案"
 MANUAL_DOC_NAME = "系統操作手冊"      # 操作手冊之文件名
 REPORT_DOC_NAME = "測試報告"          # 測試報告之文件名
 FORM_TITLE = f"{ORGANISATION}測試報告"  # 測試報告表首之標題
-AUTHOR = "朱可棠 (Claire)"
 DOC_VERSION = "1.0"
+
+# 撰寫人：**不寫死**，依各文件之 git 提交者判定——誰寫的那份，作者欄就印誰。
+# 本表只把 git 帳號換成印在文件上的正式姓名；⚠️ 查無對應者，產生器會停下來要求
+# 補上，⛔ 不以帳號或他人姓名頂替——作者欄印錯人即交付瑕疵。
+#
+# 機制同步自 TBMS（`fix(manuals): 文件之作者依 git 提交者判定` 331892bed），
+# **但本表只列本 repo 實際有提交紀錄者，⛔ 不整表照抄**：
+#
+# 1. 本 repo 為 **public**，而 TBMS 為 private。整表照抄等同把「GitHub 帳號 ↔ 真實
+#    姓名」的對照從私有搬上公開網路，且 git 歷史移不掉。git 歷史本身只有帳號、
+#    沒有對照，是這張表提供了連結。
+# 2. 未提交過者列在表裡也不會讓任何事運作得更好——查無對應時產生器本就會停下來
+#    指出補在何處，**那是設計行為而非缺陷**，屆時由當事人自行補自己的姓名。
+#
+# ⚠️ 另有提交者 `chanalin.li`（本機 commit 所用之公司 email 身分，與 `chanalin1229`
+# 的 GitHub 網頁合併身分交替出現）**2026-09-16 裁示不補入**，理由同上。
+AUTHORS = {
+    "KO-TANG": "朱可棠",
+    "chanalin1229": "李坤諭",
+}
 
 # ---- 二、模組 ------------------------------------------------------------
 # 兩者用途不同：MODULE_DIRS 決定「哪些資料夾算模組」，MODULE_NAMES 決定「封面印什麼」。
@@ -60,7 +79,7 @@ MSG_CODE_RE = re.compile(
     r"|\b[A-Z]{2}_[A-Z]+(?:_[A-Z]+)*_\d{3}\b"   # 如 ET_COURSE_009、DP_MAIL_009
 )
 
-# 資料表名稱，如 BS_INVENTORY。自 MODULE_DIRS 組成，新增模組時毋須另改此處。
+# 資料表名稱，如 ET_ENROLLMENT。自 MODULE_DIRS 組成，新增模組時毋須另改此處。
 TABLE_NAME_RE = re.compile(
     rf"\b({'|'.join(d.upper() for d in MODULE_DIRS)})_[A-Z_]{{3,}}\b")
 
