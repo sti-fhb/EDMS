@@ -23,9 +23,10 @@ from manual_config import (   # noqa: E402  專案專屬設定一律自本檔讀
     MODULE_DIRS, MANUAL_NAME_RE, MSG_CODE_RE, TABLE_NAME_RE, NON_MANUAL_FILES)
 
 MANUAL_ROOT = Path("docs/manuals")
-# 底線開頭之資料夾（_shots、_tests、_images）為內部工作文件，不進交付文件，
-# 故不受〈禁止事項〉拘束——測試項目原稿本就要寫測試用語，以手冊規則檢查必然誤報。
-# ⚠️ 判準 MUST 與 gen_manual.py 一致，否則會出現「檢查得過但產不出來」之落差。
+# 底線開頭之資料夾中，_shots（待拍清單）與 _images 為內部工作文件，不進交付文件，
+# 不予檢查；⚠️ **_tests 例外**——測試項目會產出交付院方之測試報告，同受〈禁止事項〉
+# 與〈不使用人稱代詞〉拘束，故納入檢查，其與手冊相異之處由 is_test_file 分流。
+INTERNAL_DIRS = ("_shots", "_images")
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 IMAGE_RE = re.compile(r"!\[(?P<alt>.*?)\]\((?P<src>.+?)\)")
@@ -37,6 +38,12 @@ ICON_RE = re.compile("[\U0001F300-\U0001FAFF☀-➿⬀-⯿️✅❌❗⚠]")
 ISSUE_RE = re.compile(r"(?<![A-Za-z0-9])#\d{3,}|\bPR\s*#\d+")
 SOURCE_REF_RE = re.compile(r"\b\w+\.(ts|tsx|py)\b")
 TEST_TERM_RE = re.compile(r"首測|複測|回測|陪測")
+# 反向表述之典型句型。手冊為產品使用說明，寫「你要做什麼」而非「系統沒做什麼」；
+# ⚠️ 僅提示不擋，少數情形確實只能反向陳述，由人判斷（見規範〈一律正向表述〉）
+NEGATIVE_VOICE_RE = re.compile(r"系統(?:並|也)?不|不會自動|全系統唯一|唯一看得到|不提供")
+# 人稱代詞：交付文件不用「你」「我」，改以本站／該站人員／作業人員表達，或直接省略。
+# ⚠️ 「他」不納入——「他院區」「他站」「其他」皆為既有用語，誤報會淹沒真問題
+PRONOUN_RE = re.compile(r"你|我(?!方)")
 ALLOWED_QUOTE_PREFIX = ("注意：", "重要：")
 
 
@@ -114,6 +121,12 @@ def check_file(path: Path, report: Report) -> None:
             report.error(path, no, "含程式檔名")
         if TEST_TERM_RE.search(line):
             report.error(path, no, "含測試流程用語")
+        if not is_test_file and (m := NEGATIVE_VOICE_RE.search(line)):
+            report.warn(path, no, f"疑似反向表述「{m.group()}」；手冊寫該功能做什麼、"
+                                  f"如何操作，不寫「系統沒做什麼」")
+        if m := PRONOUN_RE.search(line):
+            report.warn(path, no, f"含人稱代詞「{m.group()}」；改以本站／該站人員／"
+                                  f"作業人員表達，或直接省略")
 
     if h1_count != 1:
         report.error(path, 1, f"應恰有一個一級標題（作業名），實際 {h1_count} 個")
@@ -151,7 +164,7 @@ def main() -> int:
     if args.source.is_dir():
         candidates = [p for p in sorted(args.source.rglob("*.md"))
                       if p.name not in NON_MANUAL_FILES
-                      and not any(d.startswith("_") for d in p.parent.parts)]
+                      and not any(d in INTERNAL_DIRS for d in p.parent.parts)]
         targets, skipped = [], []
         for path in candidates:
             # 模組目錄下之檔案須符合命名慣例，否則非本流程產出
