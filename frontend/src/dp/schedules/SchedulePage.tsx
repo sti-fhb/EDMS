@@ -16,6 +16,7 @@ import type { AppColumn } from "../../components/AppTable"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { formatDateTime } from "../../utils/date"
+import { formatCronSchedule } from "./cron"
 import { ScheduleForm } from "./ScheduleForm"
 import { useSchedules } from "./useSchedules"
 import type { ScheduleLogRow, ScheduleRow } from "./schedulesService"
@@ -49,6 +50,13 @@ export function SchedulePage() {
         render: (_v, r) => <span style={{ whiteSpace: "normal" }}>{r.description ?? "—"}</span>,
       },
       { key: "module", title: "所屬模組", dataIndex: "module" },
+      // #332：執行時點一律由 CRON_EXPR 現算，不由說明欄承載——說明欄與 cron 曾經各寫各的
+      // 而沒有同步機制，實際歪過一次。判讀不出來的運算式顯示 —，原始值仍在右邊 Cron 欄。
+      {
+        key: "schedule_time",
+        title: "執行時點",
+        render: (_v, r) => formatCronSchedule(r.cron_expr) ?? "—",
+      },
       { key: "cron_expr", title: "Cron", dataIndex: "cron_expr" },
       {
         key: "is_enabled",

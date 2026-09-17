@@ -420,7 +420,7 @@ erDiagram
 
 | 代碼 | 名稱 | 週期 | 說明 |
 |------|------|------|------|
-| SCHDM001 | 閱讀 KPI 週報與未讀提醒 | 每週執行（時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 1` 即週一 10:00；於 DP 後台「排程管理」編輯、即時生效）；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供 | 計算全部已發布文件之閱讀 KPI；寄 KPI 週報予管理者（內文摘要 + CSV）、未讀提醒予未看閱覽者（一人一信彙整、涵蓋全部已發布文件；未讀提醒範本停用則不寄）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步 |
+| SCHDM001 | 閱讀 KPI 週報與未讀提醒 | 每週執行（時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 0` 即週一 10:00 UTC；於 DP 後台「排程管理」編輯、即時生效）；於平台 `DP_SCHEDULE` 註冊、平台引擎執行、`DP_SCHEDULE_LOG` 記錄，job handler 由 DM 提供 | 計算全部已發布文件之閱讀 KPI；寄 KPI 週報予管理者（內文摘要 + CSV）、未讀提醒予未看閱覽者（一人一信彙整、涵蓋全部已發布文件；未讀提醒範本停用則不寄）；寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步 |
 
 ---
 

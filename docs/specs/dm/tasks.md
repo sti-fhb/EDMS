@@ -216,7 +216,7 @@
 
 - [ ] T059a [US13] 實作閱讀 KPI 計算 dm/service/kpi：依可見性名單（含「全體」、不排除任何人）× 目前發布版之 `DM_DOC_READ`（distinct CREATED_USER）算應看/已看/未看/百分比；發新版以新版計；**應看＝0 顯示「—（無對應閱覽者）」且不列入整體平均閱讀率**，對應 FR-001/003
 - [ ] T059b [US13] 實作 KPI 儀表板 dm/kpi（DM10，**僅 DM_ADMIN、後端擋 URL**）：逐文件應看/已看/未看/百分比、關鍵字/分類查詢、CSV 匯出、空資料提示（DM-MSG-DM10-001），對應 FR-002
-- [ ] T059c [US13] 實作排程 `SCHDM001` 之 **DM job handler**（於平台 `DP_SCHEDULE` 註冊、由平台引擎每週執行、`DP_SCHEDULE_LOG` 記錄；執行時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 1`；**#332 已移除原擬讀取的 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`**）：算全部已發布文件 KPI → KPI 週報（管理者，內文摘要 + CSV）+ 未讀提醒（未看閱覽者，一人一信彙整，**涵蓋全部已發布文件；「未讀提醒」範本停用則整批不寄**）呼叫平台唯一發信服務、經 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-004/004a/005/006、research §9c
+- [ ] T059c [US13] 實作排程 `SCHDM001` 之 **DM job handler**（於平台 `DP_SCHEDULE` 註冊、由平台引擎每週執行、`DP_SCHEDULE_LOG` 記錄；執行時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 0`（**#332 更正**：原寫 `0 10 * * 1`，但 APScheduler 的 dow 以週一為 0，該值實際跑在週二）；**#332 已移除原擬讀取的 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`**）：算全部已發布文件 KPI → KPI 週報（管理者，內文摘要 + CSV）+ 未讀提醒（未看閱覽者，一人一信彙整，**涵蓋全部已發布文件；「未讀提醒」範本停用則整批不寄**）呼叫平台唯一發信服務、經 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-004/004a/005/006、research §9c
 
 ---
 
