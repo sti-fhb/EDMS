@@ -105,16 +105,16 @@ class TestEnsureRevokeReason:
     def test_空字串擋下(self) -> None:
         with pytest.raises(AppError) as exc:
             ensure_revoke_reason("")
-        assert exc.value.error_code == "ET_APPROVAL_006"
+        assert exc.value.error_code == "ET_APPROVAL_005"
         assert exc.value.status_code == 422
 
     def test_僅空白字元擋下(self) -> None:
         """🔴 這一格是本組測試存在的理由，`min_length=1` 在這裡會放行。"""
         with pytest.raises(AppError) as exc:
             ensure_revoke_reason("   \t\n  ")
-        assert exc.value.error_code == "ET_APPROVAL_006"
+        assert exc.value.error_code == "ET_APPROVAL_005"
 
     def test_None_擋下(self) -> None:
         with pytest.raises(AppError) as exc:
             ensure_revoke_reason(None)
-        assert exc.value.error_code == "ET_APPROVAL_006"
+        assert exc.value.error_code == "ET_APPROVAL_005"

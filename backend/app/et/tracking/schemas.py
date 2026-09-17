@@ -59,6 +59,26 @@ class StudentRow(BaseModel):
     #: （由完成項目數導出），這是「手上有一份還沒交的考卷」。
     has_in_progress_attempt: bool
 
+    # ── 線下核可（US16 / #352）──────────────────────────────────────────────
+    #
+    # 🔴 **五個欄位在 `REQUIRE_APPROVAL = false` 時全部為 `None`**，前端據此不渲染整個
+    # 核可欄與工具列（`FR-ET-US16-02` 明訂僅於啟用之課程顯示）。
+    #
+    # 不用 `False` / 空字串當「沒有」——那會讓「未啟用核可」與「啟用了但這個人還沒被
+    # 核可」長得一樣，而前者該隱藏整欄、後者該顯示「待核可」。
+
+    #: 綜合狀態四態（`NOT_ELIGIBLE` / `PENDING` / `PASSED` / `FAILED`），
+    #: 由完課狀態 × `ET_APPROVAL` **即時衍生**（`FR-ET-US16-02`：MUST NOT 另存欄位）。
+    approval_status: str | None = None
+    #: 核可備註（`RESULT_NOTE`）；無紀錄或未填時為 `None`。
+    approval_note: str | None = None
+    #: 核可人姓名（取自 `DP_USER.USER_NAME`）；帳號已刪時為 `None`。
+    #: wireframe 的「{核可人} 核可 {日期}」小字需要它。
+    approved_by_name: str | None = None
+    approved_at: datetime | None = None
+    #: 樂觀鎖版本，前端撤銷時原樣帶回（`FR-ET-US16-11`）。
+    approval_version: int | None = None
+
 
 class TeacherAttemptRow(BaseModel):
     """區塊 2：某學員於某測驗的一次作答（AC 4）。

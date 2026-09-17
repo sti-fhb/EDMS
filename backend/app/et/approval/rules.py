@@ -25,7 +25,7 @@ STATUS_PENDING: Final = "PENDING"
 STATUS_PASSED: Final = "PASSED"
 STATUS_FAILED: Final = "FAILED"
 
-_REASON_REQUIRED = AppError(status_code=422, detail="請填寫撤銷原因", error_code="ET_APPROVAL_006")
+_REASON_REQUIRED = AppError(status_code=422, detail="請填寫撤銷原因", error_code="ET_APPROVAL_005")
 
 
 def derive_approval_status(*, completed: bool, result: str | None, is_revoked: bool) -> str:
@@ -84,7 +84,7 @@ def ensure_revoke_reason(reason: str | None) -> str:
         去頭尾空白後的原因。
 
     Raises:
-        AppError: 422 `ET_APPROVAL_006`，原因為 `None`、空字串或**全為空白**。
+        AppError: 422 `ET_APPROVAL_005`，原因為 `None`、空字串或**全為空白**。
 
     ## 為何不交給 Pydantic 的 `min_length=1`
 

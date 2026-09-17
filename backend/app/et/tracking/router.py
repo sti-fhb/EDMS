@@ -75,7 +75,9 @@ async def list_students(
     `avg_score` 為**已作答測驗**之最高分平均；完全未作答時回 `null`（前端顯示「—」，
     不可顯示 0——0 分與未作答意義相反）。
     """
-    return await _service.list_students(db, course_id, actor_id=ctx.user_id, page=page, limit=limit)
+    return await _service.list_students(
+        db, course_id, actor_id=ctx.user_id, actor_roles=ctx.roles, page=page, limit=limit
+    )
 
 
 @router.get(
@@ -96,7 +98,7 @@ async def attempt_overview(
     已作答學員的**未作答測驗仍會列出**（`attempts` 為空）：整個測驗不出現的話，教師
     分不出「他沒考」與「這門課沒這個測驗」。
     """
-    return await _service.attempt_overview(db, course_id, actor_id=ctx.user_id)
+    return await _service.attempt_overview(db, course_id, actor_id=ctx.user_id, actor_roles=ctx.roles)
 
 
 @router.get(
@@ -118,7 +120,7 @@ async def attempt_detail(
     逐題內容依該次 attempt 的快照渲染，與學員端同一支組裝函式：同一份資料兩端必須長得
     一樣，否則教師與學員對著同一次作答會看到不同的對錯。
     """
-    return await _service.attempt_detail(db, attempt_id, actor_id=ctx.user_id)
+    return await _service.attempt_detail(db, attempt_id, actor_id=ctx.user_id, actor_roles=ctx.roles)
 
 
 @router.post(
@@ -188,7 +190,7 @@ async def survey_result(
 
     統計檢視之**問答題僅回已答人數、不回文字**（2026-08-28 裁示）；文字答案在明細檢視。
     """
-    return await _service.survey_result(db, course_id, actor_id=ctx.user_id)
+    return await _service.survey_result(db, course_id, actor_id=ctx.user_id, actor_roles=ctx.roles)
 
 
 @router.get(
@@ -206,7 +208,7 @@ async def export_students_csv(
     課程已關閉時**仍可匯出**（AC 10 明訂）——匯出是讀不是寫，套上寫入閘會讓教師在
     課程結束後拿不走自己的教學紀錄。
     """
-    content = await _service.export_students_csv(db, course_id, actor_id=ctx.user_id)
+    content = await _service.export_students_csv(db, course_id, actor_id=ctx.user_id, actor_roles=ctx.roles)
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
@@ -231,7 +233,7 @@ async def export_survey_csv(
 
     課程無問卷時 404——回只有表頭的空檔案會讓教師以為「沒有人填」。
     """
-    content = await _service.export_survey_csv(db, course_id, actor_id=ctx.user_id)
+    content = await _service.export_survey_csv(db, course_id, actor_id=ctx.user_id, actor_roles=ctx.roles)
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
