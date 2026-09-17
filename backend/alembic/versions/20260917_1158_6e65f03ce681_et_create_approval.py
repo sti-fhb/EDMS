@@ -1,7 +1,7 @@
 """et_create_approval
 
 Revision ID: 6e65f03ce681
-Revises: a3f7c21e58d9
+Revises: c8b4e2f1d97a
 Create Date: 2026-09-17 11:58:13.552766
 
 建 `ET_APPROVAL`（線下考核核可紀錄，US16 / #352）——ET 模組的**第 29 張表**。
@@ -46,7 +46,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "6e65f03ce681"
-down_revision: Union[str, None] = "a3f7c21e58d9"
+down_revision: Union[str, None] = "c8b4e2f1d97a"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
