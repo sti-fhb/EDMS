@@ -54,14 +54,32 @@ class EtQuizService:
         self._audit = audit or AuditLogService()
 
     async def get_detail(self, db: AsyncSession, quiz_id: int, *, actor_id: str) -> QuizDetail:
-        """測驗詳細——設定、題目與選項一次帶齊，並附配分總和。"""
-        quiz, _ = await self._require_owned(db, quiz_id, actor_id)
+        """測驗詳細——設定、題目與選項一次帶齊，並附配分總和。
+
+        ## 他人課程可讀，但**看不到答案**（#358 第 2 項，SA 裁示 2026-09-17）
+
+        `FR-ET-US7-04` 明訂他人建立之課程可唯讀瀏覽，原本此處走 `_require_owned` 而回
+        403，於是教師乙開啟教師甲的課程、點開測驗視窗只看到空白。
+
+        但整份開放會開一個洞：本回應含 `OptionRow.is_correct`（完整答案），而
+        `spec.md` §多重角色明訂**同一人可兼具教師與學員**，且 `quiz_id` 在學員端的
+        學習頁拿得到——等於讓兼具兩種角色的人先看自己正要考的答案。
+
+        故非擁有者取得的是「題目可讀、答案遮蔽」：`is_correct` 一律為 `None`，並以
+        `answers_visible=False` 明示（不是遮成 `False`——那會顯示「0 個正解」，是錯誤
+        資訊而非隱藏）。
+        """
+        quiz, _, owner_id = await self._resolve_quiz(db, quiz_id)
+        answers_visible = owner_id == actor_id
         questions = await self._quizzes.list_questions(db, quiz_id)
         options = await self._quizzes.list_options(db, [q.question_id for q in questions])
 
         by_question: dict[int, list[OptionRow]] = {}
         for option in options:
-            by_question.setdefault(option.question_id, []).append(OptionRow.model_validate(option))
+            row = OptionRow.model_validate(option)
+            if not answers_visible:
+                row = row.model_copy(update={"is_correct": None})
+            by_question.setdefault(option.question_id, []).append(row)
 
         return QuizDetail(
             quiz_id=quiz.quiz_id,
@@ -86,6 +104,7 @@ class EtQuizService:
             # 由後端算：讓前端自行加總會在題目分頁載入時算錯。**不在此阻擋 ≠ 100**——
             # 逐題新增時總和必然一度不等於 100，阻擋發布是 #204 的事。
             points_total=sum(q.points for q in questions),
+            answers_visible=answers_visible,
         )
 
     async def update_settings(
@@ -193,7 +212,15 @@ class EtQuizService:
         ensure_option_count_valid(len(req.options))
         ensure_correct_options_valid(req.question_type, correct_count=sum(1 for o in req.options if o.is_correct))
 
-    async def _require_owned(self, db: AsyncSession, quiz_id: int, actor_id: str):
+    async def _resolve_quiz(self, db: AsyncSession, quiz_id: int):
+        """取測驗與其所屬課程，**不判擁有者**——供唯讀路徑使用。
+
+        Returns:
+            `(quiz, course_id, owner_id)`。
+
+        ⚠️ 這支**不是**守門。寫入路徑一律改用 `_require_owned`；拿它去做寫入等於把
+        題庫編輯權開放給所有教師。
+        """
         quiz = await self._quizzes.get(db, quiz_id)
         if quiz is None:
             raise _NOT_FOUND
@@ -201,6 +228,14 @@ class EtQuizService:
         if resolved is None:
             raise _NOT_FOUND  # 孤兒測驗：UI 無從到達，不揭露其存在
         course_id, owner_id = resolved
+        return quiz, course_id, owner_id
+
+    async def _require_owned(self, db: AsyncSession, quiz_id: int, actor_id: str):
+        """取測驗並確認擁有者——**寫入路徑專用**。
+
+        讀取請用 `_resolve_quiz`（#358 第 2 項：他人課程可唯讀瀏覽，但答案遮蔽）。
+        """
+        quiz, course_id, owner_id = await self._resolve_quiz(db, quiz_id)
         ensure_owner(owner_id=owner_id, actor_id=actor_id)
         return quiz, course_id
 

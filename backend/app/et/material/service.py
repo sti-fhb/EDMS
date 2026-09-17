@@ -55,8 +55,24 @@ class EtMaterialService:
         self._audit = audit or AuditLogService()
 
     async def get_detail(self, db: AsyncSession, material_id: int, *, actor_id: str) -> MaterialDetail:
-        """教材詳細——影片與 DM 文件引用一次帶齊。"""
-        material, _ = await self._require_owned(db, material_id, actor_id)
+        """教材詳細——影片與 DM 文件引用一次帶齊。
+
+        ## 讀取端**不套擁有者判定**（#358 第 2 項）
+
+        `FR-ET-US7-04` 與 US7 場景 8 明訂他人建立之課程可進入**唯讀瀏覽**，ET02 手冊亦
+        寫「開啟他人建立的課程時進入檢視模式，所有欄位停用」——「停用」指不可編輯，
+        不是看不到內容。
+
+        原本此處走 `_require_owned`，於是教師乙開啟教師甲的課程、點開教材視窗會拿到
+        403，畫面是**空白**（前端沒有錯誤呈現，就只是沒有內容）。同一頁的課後問卷卻
+        正常顯示——因為 `survey/service.get_by_course` 早就是唯讀開放的。三者不一致。
+
+        收斂方向為「可讀、不可寫」：本函式改為只驗存在，寫入路徑仍走 `_require_owned`。
+        ⛔ **不可反過來把問卷也收緊**——那會讓檢視模式變成只看得到殼。
+
+        角色門檻仍在 router（`require_et_roles(ET_TEACHER, ET_ADMIN)`），學員進不來。
+        """
+        material, _, _ = await self._resolve_material(db, material_id)
         videos = await self._materials.list_videos(db, material_id)
         docs = await self._materials.list_docs(db, material_id)
         return MaterialDetail(
@@ -229,8 +245,15 @@ class EtMaterialService:
 
     # ── 內部 ────────────────────────────────────────────────────────────────
 
-    async def _require_owned(self, db: AsyncSession, material_id: int, actor_id: str):
-        """取教材並確認其所屬課程之擁有者為操作者。"""
+    async def _resolve_material(self, db: AsyncSession, material_id: int):
+        """取教材與其所屬課程，**不判擁有者**——供唯讀路徑使用。
+
+        Returns:
+            `(material, course_id, owner_id)`。
+
+        ⚠️ 這支**不是**守門，只負責「存在嗎、掛在哪門課下」。任何寫入路徑都必須改用
+        `_require_owned`；直接拿它去做寫入等於把編輯權開放給所有教師。
+        """
         material = await self._materials.get(db, material_id)
         if material is None:
             raise _NOT_FOUND
@@ -238,6 +261,14 @@ class EtMaterialService:
         if resolved is None:
             raise _NOT_FOUND  # 孤兒教材：UI 無從到達，不揭露其存在
         course_id, owner_id = resolved
+        return material, course_id, owner_id
+
+    async def _require_owned(self, db: AsyncSession, material_id: int, actor_id: str):
+        """取教材並確認其所屬課程之擁有者為操作者——**寫入路徑專用**。
+
+        讀取路徑請用 `_resolve_material`（#358 第 2 項：他人課程可唯讀瀏覽）。
+        """
+        material, course_id, owner_id = await self._resolve_material(db, material_id)
         ensure_owner(owner_id=owner_id, actor_id=actor_id)
         return material, course_id
 

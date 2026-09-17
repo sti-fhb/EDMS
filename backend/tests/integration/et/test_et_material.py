@@ -154,12 +154,37 @@ class TestGetDetail:
         assert r.status_code == 404
         assert r.json()["error_code"] == "ET_MATERIAL_001"
 
-    async def test_非擁有者不可讀取(self, client, db) -> None:
+    async def test_非擁有者可讀取_他人課程為唯讀瀏覽(self, client, db) -> None:
+        """🔴 本測試**原本斷言 403**，那是 #358 第 2 項回報的缺陷被測試釘住了。
+
+        `FR-ET-US7-04` 與 US7 場景 8 明訂他人建立之課程可進入唯讀瀏覽；ET02 手冊的
+        「所有欄位停用」指不可編輯，不是看不到內容。原行為讓教師乙開啟教師甲的課程、
+        點開教材視窗只看到空白，而同一頁的課後問卷正常顯示（`survey` 早就是開放的）。
+
+        角色門檻仍在 router（學員進不來），寫入仍為 owner-only（見下一條）。
+        """
         owner = await _user(db, "ETM_G3")
         other = await _user(db, "ETM_G4")
         mid = await _material(client, owner)
         r = await client.get(f"/api/et/materials/{mid}", headers=_bearer(other))
-        assert r.status_code == 403
+        assert r.status_code == 200, r.text
+        assert r.json()["material_id"] == mid
+
+    async def test_非擁有者不可寫入(self, client, db) -> None:
+        """讀放寬了，寫**沒有**——這是「可讀、不可寫」的另一半。
+
+        少了這條，日後有人把 `update` 也改成 `_resolve_material`（看起來像一致性修正）
+        不會有任何測試變紅，而那等於把所有教師的課程互相開放編輯。
+        """
+        owner = await _user(db, "ETM_G3W")
+        other = await _user(db, "ETM_G4W")
+        mid = await _material(client, owner)
+        r = await client.put(
+            f"/api/et/materials/{mid}",
+            headers=_bearer(other),
+            json={"material_name": "被別人改的名字", "version": 0},
+        )
+        assert r.status_code == 403, r.text
         assert r.json()["error_code"] == "ET_COURSE_002"
 
 

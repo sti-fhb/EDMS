@@ -189,13 +189,70 @@ class TestQuizSettings:
         assert r.status_code == 409
         assert r.json()["error_code"] == "ET_LOCK_001"
 
-    async def test_非擁有者不可讀取(self, client, db) -> None:
-        """回應含 `is_correct`（正確答案）——非擁有者讀得到等於答案外洩。"""
+    async def test_非擁有者可讀題目但答案被遮蔽(self, client, db) -> None:
+        """🔴 本測試**原本斷言 403**（#358 第 2 項）。
+
+        `FR-ET-US7-04` 明訂他人課程可唯讀瀏覽，原行為讓教師乙點開測驗視窗只看到空白。
+        但整份開放會外洩答案——原 docstring 寫的「非擁有者讀得到等於答案外洩」**仍然
+        成立**，因為 `spec.md` §多重角色明訂同一人可兼具教師與學員，而 `quiz_id` 在學員
+        端的學習頁拿得到。
+
+        SA 裁示（2026-09-17）：題目可讀、答案遮蔽。
+        """
         owner = await _user(db, "ETQ_S5")
         other = await _user(db, "ETQ_S6")
         _, qid = await _quiz(client, owner)
+        await client.post(f"/api/et/quizzes/{qid}/questions", json=_question_body(), headers=_bearer(owner))
+
         r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(other))
-        assert r.status_code == 403
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["answers_visible"] is False
+        options = body["questions"][0]["options"]
+        assert options, "題目與選項本身要讀得到"
+        assert all(o["option_text"] for o in options), "選項文字不遮"
+        # 🔴 遮成 None 而非 False——後者會讓畫面顯示「0 個正解」，那是錯誤資訊不是隱藏
+        assert all(o["is_correct"] is None for o in options)
+
+    async def test_擁有者讀得到答案(self, client, db) -> None:
+        """遮蔽只針對非擁有者——少了這條，把 `answers_visible` 寫死成 False 也會全綠。"""
+        owner = await _user(db, "ETQ_S5B")
+        _, qid = await _quiz(client, owner)
+        await client.post(f"/api/et/quizzes/{qid}/questions", json=_question_body(), headers=_bearer(owner))
+
+        r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(owner))
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["answers_visible"] is True
+        options = body["questions"][0]["options"]
+        assert any(o["is_correct"] is True for o in options)
+
+    async def test_非擁有者不可寫入題目(self, client, db) -> None:
+        """讀放寬了，寫**沒有**。少了這條，日後把 `add_question` 也改成 `_resolve_quiz`
+        （看起來像一致性修正）不會有任何測試變紅，而那等於開放所有教師改別人的題庫。
+        """
+        owner = await _user(db, "ETQ_S5C")
+        other = await _user(db, "ETQ_S6C")
+        _, qid = await _quiz(client, owner)
+
+        r = await client.post(
+            f"/api/et/quizzes/{qid}/questions",
+            headers=_bearer(other),
+            json={
+                "question_type": "SINGLE",
+                "stem": "別人加的題目",
+                "points": 10,
+                "options": [
+                    {"option_text": "A", "is_correct": True},
+                    {"option_text": "B", "is_correct": False},
+                ],
+            },
+        )
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
 
     async def test_查無測驗回_404(self, client, db) -> None:
         uid = await _user(db, "ETQ_S7")
