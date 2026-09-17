@@ -229,6 +229,68 @@ class TestQuizSettings:
         options = body["questions"][0]["options"]
         assert any(o["is_correct"] is True for o in options)
 
+    async def test_非擁有者不可更新測驗設定(self, client, db) -> None:
+        """讀放寬之後，六支寫入路徑**每一支**都要有非擁有者測試。
+
+        本 PR 把 `get_detail` 從 `_require_owned` 改成 `_resolve_quiz`（只驗存在）。
+        若日後有人比照那個改法把寫入路徑也換過去——看起來像一致性修正——沒有測試會紅，
+        而那等於開放所有教師改別人的測驗。
+
+        對照組是 material 側：`update` 與 `upload_video` 兩支寫入都有覆蓋。測驗側原本
+        只有 `delete_question` 有，本 PR 把其餘五支補齊。
+        """
+        owner = await _user(db, "ETQ_S7")
+        other = await _user(db, "ETQ_S8")
+        _, qid = await _quiz(client, owner)
+
+        r = await client.put(
+            f"/api/et/quizzes/{qid}",
+            headers=_bearer(other),
+            json={
+                "quiz_name": "被別人改的名字",
+                "description": None,
+                "pass_score": 60,
+                "time_limit_min": None,
+                "max_retry": 0,
+                "version": 0,
+            },
+        )
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_非擁有者不可更新題目(self, client, db) -> None:
+        owner = await _user(db, "ETQ_S9")
+        other = await _user(db, "ETQ_S10")
+        _, qid = await _quiz(client, owner)
+        question = await _add_question(client, owner, qid)
+
+        r = await client.put(
+            f"/api/et/questions/{question['question_id']}",
+            headers=_bearer(other),
+            json={**_question_body(stem="被別人改的題幹"), "version": question["version"]},
+        )
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_非擁有者不可重排題目(self, client, db) -> None:
+        owner = await _user(db, "ETQ_S11")
+        other = await _user(db, "ETQ_S12")
+        _, qid = await _quiz(client, owner)
+        first = await _add_question(client, owner, qid)
+
+        r = await client.put(
+            f"/api/et/quizzes/{qid}/questions/order",
+            headers=_bearer(other),
+            # ⚠️ 必須送合法 body：Pydantic 驗證**先於**授權判定，少了 `version` 會拿到
+            # 422 而不是 403——那樣這條測試就驗不到它要驗的東西。
+            json={"question_ids": [first["question_id"]], "version": 0},
+        )
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
     async def test_非擁有者不可寫入題目(self, client, db) -> None:
         """讀放寬了，寫**沒有**。少了這條，日後把 `add_question` 也改成 `_resolve_quiz`
         （看起來像一致性修正）不會有任何測試變紅，而那等於開放所有教師改別人的題庫。
