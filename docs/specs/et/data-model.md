@@ -375,7 +375,7 @@
 
 **業務規則**:
 - (COURSE_ID, USER_ID) **邏輯唯一**：一位學員於一門課程 0～1 筆核可紀錄
-- **前提檢核**：僅當該學員 ET_ENROLLMENT.COMPLETION_STATUS = COMPLETED（線上完課）且 ET_COURSE.REQUIRE_APPROVAL = true 時可寫入核可
+- **前提檢核**：僅當該學員**已線上完課**且 ET_COURSE.REQUIRE_APPROVAL = true 時可寫入核可。🔴 完課狀態 **MUST 即時計算**（完成項目數 vs 總項目數），**不可讀 `ET_ENROLLMENT.COMPLETION_STATUS`**——該欄位只在加入課程時寫入一次 `NOT_STARTED`、無推進路徑，讀它會讓核可入口對每個人都不出現且不報錯（2026-09-17 修訂，原文誤植為讀該欄位）
 - **結果二態**：RESULT ∈ {PASS, FAIL}；不記考核分數；FAIL（不通過）亦留紀錄
 - **撤銷**：IS_REVOKED = true 時 REVOKE_REASON 必填、寫入 REVOKED_BY / REVOKED_AT；撤銷後學員綜合狀態回到「待核可」，可重新核可（重核時 update 本筆：IS_REVOKED 回 false、更新 RESULT / APPROVED_BY / APPROVED_AT、清 REVOKE_* 欄位）
 - **通知**：RESULT = PASS 且非撤銷狀態時，寄「核可通過通知」（`DP_NOTIFY_TEMPLATE`，`MODULE=ET`，`APPROVAL_PASSED`）；FAIL 與撤銷不寄信

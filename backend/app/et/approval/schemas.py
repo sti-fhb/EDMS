@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 #: 而他在 US17 核可查詢裡看得到。正常 UI 走不到（清單本來就不列已移除者），這是防繞過
 #: 與「載入後才被移除」的競態。
 #:
-#: 📌 `NOT_ENROLLED` 於 `spec_us16.md` §訊息類型**尚無對應訊息碼**，已列為 SA 同步項。
+#: 對應訊息 `ET-MSG-ET03-310`（2026-09-17 隨本 issue 增列於 `spec_us16.md` §訊息類型）。
 SkipReason = Literal["NOT_COMPLETED", "ALREADY_APPROVED", "NOT_ENROLLED"]
 
 

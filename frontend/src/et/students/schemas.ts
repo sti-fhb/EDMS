@@ -28,7 +28,7 @@ export type ApprovalResult = "PASS" | "FAIL"
  * |---|---|
  * | `NOT_COMPLETED` | 單筆 `ET-MSG-ET03-304`（錯誤）/ 批次 `ET-MSG-ET03-303`（提示）|
  * | `ALREADY_APPROVED` | `ET-MSG-ET03-309` |
- * | `NOT_ENROLLED` | 尚無 spec 訊息碼（待 SA 指定），暫用通用句 |
+ * | `NOT_ENROLLED` | `ET-MSG-ET03-309` 的同形句（`ET-MSG-ET03-310`）|
  */
 export type SkipReason = "NOT_COMPLETED" | "ALREADY_APPROVED" | "NOT_ENROLLED"
 

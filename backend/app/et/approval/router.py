@@ -74,7 +74,7 @@ async def approve(
     |---|---|---|
     | `NOT_COMPLETED` | 尚未線上完課 | 單筆 `ET-MSG-ET03-304` / 批次 `ET-MSG-ET03-303` |
     | `ALREADY_APPROVED` | 已有未撤銷的核可紀錄 | `ET-MSG-ET03-309` |
-    | `NOT_ENROLLED` | 已不在此課程 | 待 SA 指定訊息碼 |
+    | `NOT_ENROLLED` | 已不在此課程 | `ET-MSG-ET03-310` |
 
     **只有 PASS 寄 `APPROVAL_PASSED` 通知**；FAIL 不寄（`FR-ET-US16-08`）。
     寄信失敗不回滾核可——紀錄已是業務事實，學員於 US17 核可查詢看得到。
