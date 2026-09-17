@@ -72,6 +72,17 @@ class AuditLogRepository:
         commit / rollback 才釋放（非僅「讀前列→插入」窄臨界區）。因會呼叫稽核的情境
         （登入登出、帳號 / 角色權限異動）頻率不高，可接受；若未來高頻呼叫需縮小臨界區，
         再評估改用巢狀交易 / savepoint。
+
+        ⚠️ **「頻率不高」的前提自 #352 起不再普遍成立**（2026-09-17）：ET03 線下核可
+        （`ET-APPROVAL`）是**單一交易內最多 100 次**的批次呼叫者。該模組已把稽核寫入
+        移出逐筆迴圈、累積到最後才寫，把持鎖窗壓到「N 次稽核寫入 + commit」，但鎖仍是
+        全平台共用的**單一固定 key**——持鎖期間所有寫稽核的動作（**包含登入**）都會排隊。
+
+        🔴 給下一個寫批次型呼叫者：**不要在逐筆迴圈裡呼叫 `log_action`**。第一筆就會取走
+        這把鎖，之後整批的 DB 往返與外部動作全都在持鎖狀態下進行。參考
+        `app/et/approval/service.py::approve` 的作法（累積 `pending_audits`、迴圈後統一寫）。
+        根治需縮小臨界區（巢狀交易 / savepoint）或改用非阻塞的鏈接策略，追蹤於 #352 的
+        follow-up。
         並行不分岔之正確性以 advisory lock 語意 + code review 保證，未做並發實測
         （現行 per-test rollback fixture 難以模擬多 committed 交易並發）。
         """

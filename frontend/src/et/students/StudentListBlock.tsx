@@ -126,6 +126,21 @@ export function StudentListBlock({
   // 送出的卻是 200 個人。
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableIds))
 
+  // 🔴 **換頁必須清空勾選**。`selected` 是純 id 的 Set，而真正送出的名單是
+  // `rows.filter(...)`——只認**本頁**的列。不清的話會出現兩種都沒有錯誤訊號的狀況：
+  //
+  // 1. 第 1 頁勾 3 人 → 翻到第 2 頁：`selected.size` 仍是 3（工具列維持啟用），但
+  //    `selectedRows` 是空的 → 送出空 `user_ids` → 後端 422，教師看到一個對不上任何
+  //    操作的錯誤。
+  // 2. 承上，在第 2 頁按「全選本頁」：`toggleAll` 用新 Set **整個覆蓋** `selected`，
+  //    第 1 頁那 3 人被無聲清掉，而請求會成功送出——**只是少了 3 個人**。
+  //
+  // 清空的語意也與「批次只作用於本頁」一致（見 `toggleAll` 上方）。
+  const goToPage = (next: number) => {
+    setPage(next)
+    setSelected(new Set())
+  }
+
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -146,7 +161,7 @@ export function StudentListBlock({
               <Button
                 size="small"
                 variant="contained"
-                disabled={readOnly || selected.size === 0}
+                disabled={readOnly || selectedRows.length === 0}
                 onClick={() => onApprove(selectedRows, "PASS")}
               >
                 批次核可通過
@@ -154,7 +169,7 @@ export function StudentListBlock({
               <Button
                 size="small"
                 color="error"
-                disabled={readOnly || selected.size === 0}
+                disabled={readOnly || selectedRows.length === 0}
                 onClick={() => onApprove(selectedRows, "FAIL")}
               >
                 批次不通過
@@ -187,7 +202,7 @@ export function StudentListBlock({
                         size="small"
                         inputProps={{ "aria-label": "全選本頁待核可學員" }}
                         checked={allSelected}
-                        indeterminate={selected.size > 0 && !allSelected}
+                        indeterminate={selectedRows.length > 0 && !allSelected}
                         disabled={readOnly || selectableIds.length === 0}
                         onChange={toggleAll}
                       />
@@ -327,7 +342,7 @@ export function StudentListBlock({
           </TableContainer>
           {totalPages > 1 && (
             <Stack alignItems="center" sx={{ mt: 2 }}>
-              <Pagination count={totalPages} page={page} onChange={(_, p) => setPage(p)} />
+              <Pagination count={totalPages} page={page} onChange={(_, p) => goToPage(p)} />
             </Stack>
           )}
         </>

@@ -136,6 +136,20 @@ class EtApprovalService:
         approver_name = await self._people.user_name(db, operator.user_id) or ""
         approved = 0
         skipped: list[SkippedItem] = []
+        # 🔴 稽核**累積到迴圈結束後才寫**，不在迴圈內逐筆呼叫 `log_action`。
+        #
+        # `AuditLogService.log_action` 的第一步是 `pg_advisory_xact_lock`——**單一固定
+        # key 的交易層級鎖，持有到外層交易 commit 為止**（見 `acquire_chain_lock` 的
+        # docstring）。在迴圈內呼叫的話，鎖從第一位學員就被取走，然後在持鎖狀態下再跑
+        # 完剩下 99 輪的 UPDATE / INSERT / 寄信。
+        #
+        # 那把鎖是**全平台共用**的：期間所有寫稽核的動作都會排隊，其中包含 `DP-AUTH`
+        # 的登入成功 / 失敗。也就是一位教師跑大批次時全站登入會卡住，而且不需要惡意
+        # ——一個 100 人的班加一次不耐煩的重複點擊就會發生。
+        #
+        # 移出迴圈後，持鎖窗從「整批處理 + 逐筆寄信」縮成「N 次稽核寫入 + commit」。
+        # 交易語意不變：仍與核可寫入同一個交易，一起成功或一起回滾。
+        pending_audits: list[dict] = []
 
         for user_id in user_ids:
             if user_id not in enrolled:
@@ -164,18 +178,15 @@ class EtApprovalService:
                 continue
 
             after = await self._repo.get_one(db, course_id=course_id, user_id=user_id)
-            await self._audit.log_action(
-                db,
-                module=_MODULE,
-                func_name=_FUNC_NAME,
-                action_type="UPDATE" if before is not None else "CREATE",
-                result="SUCCESS",
-                operator_id=operator.user_id,
-                target_id=f"{course_id}:{user_id}",
-                description="線下核可",
-                before_value=before.model_dump(mode="json") if before is not None else None,
-                after_value={"result": payload.result, "version": after.version if after else None},
-                source_ip=get_client_ip(),
+            pending_audits.append(
+                {
+                    "action_type": "UPDATE" if before is not None else "CREATE",
+                    "target_id": f"{course_id}:{user_id}",
+                    # `before` 已是 Pydantic 副本（`rows_by_course` 回的是 `ApprovalRow`），
+                    # 不會被後續的 ORM update 就地改掉——`revoke()` 踩過那個坑。
+                    "before_value": before.model_dump(mode="json") if before is not None else None,
+                    "after_value": {"result": payload.result, "version": after.version if after else None},
+                }
             )
             approved += 1
 
@@ -187,6 +198,19 @@ class EtApprovalService:
                     approved_at=after.approved_at,
                     user_id=user_id,
                 )
+
+        source_ip = get_client_ip()
+        for entry in pending_audits:
+            await self._audit.log_action(
+                db,
+                module=_MODULE,
+                func_name=_FUNC_NAME,
+                result="SUCCESS",
+                operator_id=operator.user_id,
+                description="線下核可",
+                source_ip=source_ip,
+                **entry,
+            )
 
         return ApproveResult(approved=approved, skipped=skipped)
 

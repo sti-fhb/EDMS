@@ -341,6 +341,64 @@ class TestApprovalGate:
         assert r.status_code == 200, r.text
         assert r.json()["data"][0]["approval_status"] == "PASSED"
 
+    async def test_再開課後恢復可核可(self, client, db) -> None:
+        """AC 12 的第三段：「再開課後恢復」。
+
+        關閉的判定是**即時計算**的（`is_effectively_closed`），沒有任何地方存下
+        「這門課被擋過」的狀態，所以恢復是自動的。這條測試釘的正是這件事——若日後
+        有人把關閉判定改成讀某個持久化旗標，恢復就會失效而其他測試全綠。
+        """
+        teacher = await _user(db, "t_ap09")
+        course_id = await _course(db, owner=teacher, open_end_at=utcnow() - timedelta(days=1))
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap09a", item_id)
+        await db.commit()
+        blocked = await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+        assert blocked.status_code == 409
+
+        # 再開課＝重設一組新的起訖時間（`FR-ET-US11-09`）
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == course_id)
+            .values(status=COURSE_PUBLISHED, open_end_at=utcnow() + timedelta(days=30))
+        )
+        await db.commit()
+
+        r = await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["approved"] == 1
+
+    async def test_管理者仍不可重置重考次數或移除學員(self, client, db) -> None:
+        """🚨 釘住「刻意不放寬」的邊界。
+
+        SA 裁示 Q1 = C 只放寬**讀取**端點與核可 / 撤銷；重置重考次數與移除學員是 US9 的
+        課程管理動作，不在 US16 的裁示範圍內，仍走 `_require_writable` → `ensure_owner`。
+
+        目前行為正確是因為那條路徑根本沒被本 issue 觸及——但「沒改到」不是保證。少了這
+        一條，日後有人把 `_require_writable` 也換成 `ensure_owner_or_admin`（看起來很像
+        一致性修正）不會有任何測試變紅。
+        """
+        owner = await _user(db, "t_ap15")
+        admin = await _user(db, "a_ap15", roles=(ROLE_ADMIN,))
+        course_id = await _course(db, owner=owner)
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap15a", item_id)
+        await db.commit()
+
+        removed = await client.delete(f"{_URL}/{course_id}/students/{student}", headers=_bearer(admin))
+
+        assert removed.status_code == 403, removed.text
+        assert removed.json()["error_code"] == "ET_COURSE_002"
+
 
 class TestApproveWrite:
     """核可的寫入（AC 3）。"""
@@ -797,6 +855,69 @@ class TestNotification:
 
         assert len(await _pending_mails(db)) == before
 
+    async def test_撤銷後重核為通過會再寄一次信(self, client, db) -> None:
+        """AC 7 的最後一句：「重核為 PASS 時**再寄信**」。
+
+        重核走的是 `reapprove` 而非 `insert_approval`，兩條路徑在 `_write_approval` 裡
+        都回 True、之後才判斷要不要寄——少了這條測試，日後若有人把寄信搬進
+        `insert_approval` 那一側（看起來像「只有新建才通知」），重核就會靜默不寄，而學員
+        不知道自己已經恢復通過。
+        """
+        teacher = await _user(db, "t_ap44")
+        course_id = await _course(db, owner=teacher)
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap44a", item_id)
+        await db.commit()
+        await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+        row = await _approval_of(db, course_id, student)
+        assert row is not None
+        await client.post(
+            f"{_URL}/{course_id}/approvals/{student}/revoke",
+            headers=_bearer(teacher),
+            json={"reason": "登錄錯誤", "version": row.version},
+        )
+        assert len(await _pending_mails(db)) == 1, "撤銷不寄信，此時仍只有首次核可那一封"
+
+        await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+
+        assert len(await _pending_mails(db)) == 2, "重核為通過必須再寄一次"
+
+    async def test_撤銷後重核為不通過不寄信(self, client, db) -> None:
+        """重核的寄信規則沿用 `FR-ET-US16-08`，不因為是「重核」而例外。"""
+        teacher = await _user(db, "t_ap45")
+        course_id = await _course(db, owner=teacher)
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap45a", item_id)
+        await db.commit()
+        await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+        row = await _approval_of(db, course_id, student)
+        assert row is not None
+        await client.post(
+            f"{_URL}/{course_id}/approvals/{student}/revoke",
+            headers=_bearer(teacher),
+            json={"reason": "登錄錯誤", "version": row.version},
+        )
+
+        await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_FAIL},
+        )
+
+        assert len(await _pending_mails(db)) == 1, "重核為不通過不寄信"
+
     async def test_批次逐人一封不合批(self, client, db) -> None:
         """🔴 範本內文含 `{USER_NAME}`，而平台 `send_email` 對整批收件人**只渲染一次**。
 
@@ -1018,6 +1139,19 @@ class TestAudit:
         logs = sorted(await self._logs(db), key=lambda x: x.log_id)
         assert [x.action_type for x in logs] == ["CREATE", "UPDATE", "UPDATE"]
         assert "考核紀錄登錄錯誤" in (logs[2].before_value or ""), "重核必須留下被它覆寫的撤銷紀錄"
+
+        # 🔴 撤銷那一列的 before 必須是**撤銷前**的狀態（未撤銷的 PASS）。
+        #
+        # 這條斷言存在的理由：ORM-enabled `update()` 會把 session 內符合條件的實體
+        # **屬性同步成新值**。若 `before` 在 UPDATE 之後才序列化，它會變成撤銷**後**的
+        # 樣子——而稽核照常寫出一列、欄位齊全、格式正確，只是 before 等於 after、
+        # 內容失去意義。**不會有任何東西變紅**，除非像這裡一樣直接比對內容。
+        #
+        # （本 issue 的第一版正是這個形狀，但因為漏了 `model_validate` 而拋
+        # `AttributeError` 炸得很大聲。把轉型寫在 UPDATE 之後就會安靜地錯。）
+        assert '"is_revoked": false' in (logs[1].before_value or ""), "撤銷的 before 應為撤銷前狀態"
+        assert '"is_revoked": true' in (logs[1].after_value or "")
+        assert logs[1].before_value != logs[1].after_value
 
     async def test_撤銷原因不寫進稽核description(self, client, db) -> None:
         """原因是自由文字，寫進 `description` 就把 log injection 的面打開了。

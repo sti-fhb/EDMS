@@ -64,6 +64,13 @@ class EtApproval(BaseModel):
     # 🚨 不要改成 `postgresql_where=text('"IS_REVOKED" = false')`。改了會讓同一人同一
     # 課出現多列，直接推翻 `data-model` 的「0～1 筆 / 學員 / 課程」，而症狀是 ET03 的
     # 核可欄開始出現重複列、且撤銷後重核會靜默新建一列（`REVOKE_*` 永遠留在舊列上）。
+    #
+    # 🚨 **也不要替本表加軟刪除路徑**（把 `DELETED` 設為 1），除非同時把這個唯一鍵改成
+    # `postgresql_where='"DELETED" = 0'` 的部分唯一索引。本表所有讀寫都濾 `DELETED = 0`，
+    # 而 `insert_approval` 的 `ON CONFLICT DO NOTHING` 認的是**全表**唯一鍵——一筆被軟刪
+    # 的列會讓該學員的新核可永遠撞上衝突，畫面顯示「待核可」卻怎麼核可都回「已有核可
+    # 紀錄」。目前**沒有任何程式碼**會設這個欄位（作廢走 `IS_REVOKED`），所以這是純未來
+    # 風險，但它一旦發生沒有任何訊號。
     __table_args__ = (
         PrimaryKeyConstraint("APPROVAL_ID", name="PK_ET_APPROVAL"),
         UniqueConstraint("COURSE_ID", "USER_ID", name="UQ_ET_APPROVAL_COURSE_USER"),

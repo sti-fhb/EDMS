@@ -1,7 +1,7 @@
 """線下核可之請求 / 回應 schema（US16 / #352）。"""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -54,7 +54,12 @@ class ApproveReq(BaseModel):
     docstring 的不對稱說明）。
     """
 
-    user_ids: list[str] = Field(min_length=1, max_length=100)
+    # ⚠️ `Field(min_length/max_length)` 在 list 上限的是**陣列長度**，不是元素長度。
+    # 元素另外標註 `max_length=20` 對齊 `DP_USER.USER_ID VARCHAR(20)` 與撤銷路徑的
+    # `Path(max_length=20)`——沒有它的話，100 個各數 MB 的字串會完整進入記憶體、
+    # 被塞進兩支查詢的 IN 清單，並**原樣反射**回 `skipped[].user_id`。
+    # （本專案未掛 request body 大小限制的 middleware。）
+    user_ids: list[Annotated[str, Field(min_length=1, max_length=20)]] = Field(min_length=1, max_length=100)
     result: Literal["PASS", "FAIL"]
     #: 選填備註（如不通過原因、考核情形）。`FR-ET-US16-04` 明訂 FAIL 得附備註；
     #: PASS 亦允許填寫，spec 未限制。
@@ -70,7 +75,7 @@ class RevokeReq(BaseModel):
     """
 
     reason: str = Field(max_length=1000)
-    #: 操作者在畫面上看到的那一版。不符即 409 `ET_APPROVAL_005`。
+    #: 操作者在畫面上看到的那一版。不符即 409 `ET_APPROVAL_004`。
     version: int = Field(ge=0)
 
 

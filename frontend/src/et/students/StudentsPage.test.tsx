@@ -601,6 +601,49 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(await screen.findByLabelText(/備註/)).toBeInTheDocument()
   })
 
+  it("換頁後清空勾選，工具列回到停用而不會送出空名單", async () => {
+    // 🔴 `selected` 是純 id 的 Set，真正送出的名單是 `rows.filter(...)`——只認本頁。
+    // 不清的話：第 1 頁勾人 → 翻頁 → `selected.size` 仍非零（按鈕還亮著），但
+    // `selectedRows` 是空的，按下去會送出空 user_ids → 後端 422，教師看到一個對不上
+    // 任何操作的錯誤。
+    const spy = vi.fn()
+    server.use(
+      http.post("/api/et/courses/:courseId/approvals", () => {
+        spy()
+        return HttpResponse.json({ approved: 1, skipped: [] })
+      }),
+      http.get("/api/et/courses/:courseId/students", ({ request }) => {
+        const page = new URL(request.url).searchParams.get("page") ?? "1"
+        const row =
+          page === "1"
+            ? { ...baseRow, user_id: "s01", user_name: "第一頁學員", approval_status: "PENDING" }
+            : { ...baseRow, user_id: "s02", user_name: "第二頁學員", approval_status: "NOT_ELIGIBLE" }
+        return HttpResponse.json({ data: [row], meta: { total: 2, page: Number(page), limit: 20, total_pages: 2 } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await user.click(await screen.findByRole("checkbox", { name: "選取 第一頁學員" }))
+    expect(screen.getByRole("button", { name: "批次核可通過" })).toBeEnabled()
+
+    await user.click(screen.getByRole("button", { name: "Go to page 2" }))
+    await screen.findByText("第二頁學員")
+
+    expect(screen.getByRole("button", { name: "批次核可通過" })).toBeDisabled()
+    expect(spy).not.toHaveBeenCalled()
+
+    // 🔴 這一段釘的是**清空**本身，上面那段其實只驗到 `disabled` 改看 `selectedRows`
+    // 那一半的修正（換頁後本頁沒人被勾，按鈕本來就會停用）。
+    //
+    // 回到第 1 頁時勾選框必須是**未勾**的。若 `selected` 沒被清空，它會維持勾選，而
+    // 那正是「在第 2 頁按全選會無聲蓋掉第 1 頁選取」那條路徑的前提。
+    await user.click(screen.getByRole("button", { name: "Go to page 1" }))
+    await screen.findByText("第一頁學員")
+
+    expect(screen.getByRole("checkbox", { name: "選取 第一頁學員" })).not.toBeChecked()
+  })
+
   it("課程已關閉時核可與批次全部停用但狀態照常顯示", async () => {
     // AC 12「讀照舊、寫全停」——狀態欄不可跟著消失，那是閱覽內容
     withClosedCourse()

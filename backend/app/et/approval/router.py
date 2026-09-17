@@ -4,8 +4,15 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
 `ensure_owner_or_admin` 判定（`FR-ET-US16-07`：owner 或管理者）。兩層都要：角色閘擋掉
 學員，擁有權閘擋掉「別的教師」。
 
-限流沿用 ET03 既有的 `et-tracking` scope——本模組的端點是同一個畫面上的動作，各自
-記一份配額等於把該頁的實際上限放大一倍。
+## 限流**刻意獨立計數**，不與 `et-tracking` 共用
+
+雖然本模組的端點與 ET03 三區塊在同一個畫面上，配額仍分開（`_SCOPE = "et-approval"`，
+另建一對 limiter）。兩者的性質不同：tracking 是唯讀查詢，教師頻繁切換課程與展開區塊，
+一次操作可能打好幾支，故 180/分；核可是**寫入**，而且一個請求最多觸發 100 封信，值得
+比照寫入類端點單獨設限（60/分）。
+
+共用一份的話，兩種行為會互相吃額度——教師只是多看幾次清單就可能把核可的配額耗掉，
+而那是他真正需要能送出的動作。
 """
 
 from typing import Annotated
