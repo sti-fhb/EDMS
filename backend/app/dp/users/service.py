@@ -408,15 +408,22 @@ class UsersService:
         從未登入者以 CREATED_DATE 為基準（見 repository.find_idle_active）。**逐筆各自 commit**：
         單一帳號失敗 rollback 不擋其餘，且每筆結束即釋放稽核 chain 之 advisory xact lock（避免整批
         持鎖阻塞並行登入稽核）。回傳成功禁用筆數。
+
+        ⚠️ **迴圈只帶 id、逐筆重取實體**：`rollback()` 會使掃描階段取得的 ORM 實體**全數過期**
+        （連 PK 都不能再讀——屬性存取觸發 lazy refresh，async 下無 greenlet context 即
+        `MissingGreenlet`）。沿用掃描階段的實體會讓上面那句「不擋其餘」在第一次失敗後就不成立。
         """
         idle_days = await self._params.get_int_param(db, "LOGIN", "IDLE_DISABLE_DAYS", 90)
         now = utcnow()
         idle_before = now - timedelta(days=idle_days)
-        users = await self._repo.find_idle_active(db, idle_before=idle_before)
+        user_ids = [u.user_id for u in await self._repo.find_idle_active(db, idle_before=idle_before)]
 
         disabled = 0
-        for user in users:
+        for user_id in user_ids:
             try:
+                user = await self._repo.get_by_id(db, user_id)
+                if user is None:  # 掃描後才被刪除（軟刪除）——跳過而非整批失敗
+                    continue
                 await self._repo.set_status(db, user=user, status="DISABLED", operator_id=_SYSTEM_USER, now=now)
                 await self._audit.log_action(
                     db,
@@ -425,7 +432,7 @@ class UsersService:
                     action_type="UPDATE",
                     result="SUCCESS",
                     operator_id=_SYSTEM_USER,
-                    target_id=user.user_id,
+                    target_id=user_id,
                     description=f"閒置逾 {idle_days} 日自動禁用",
                     before_value={"status": "ACTIVE"},
                     after_value={"status": "DISABLED"},
@@ -434,7 +441,7 @@ class UsersService:
                 disabled += 1
             except Exception:
                 await db.rollback()
-                logger.exception("SCHDP001 閒置禁用失敗 user_id=%s", user.user_id)
+                logger.exception("SCHDP001 閒置禁用失敗 user_id=%s", user_id)
         return disabled
 
     async def purge_expired_pending(self, db: AsyncSession) -> int:
@@ -474,28 +481,36 @@ class UsersService:
         """密碼將於 `EXPIRY_REMIND_DAYS`（預設 7）天內到期之啟用帳號經 SRVDP002 寄 `PWD_EXPIRY_REMIND`。
 
         每日跑均寄（不去重，spec_us11 FR-05）；**逐筆各自 commit**、失敗 rollback 不擋其餘。回傳寄出筆數。
+
+        ⚠️ **掃描階段就把要用的欄位轉成純值**：`rollback()` 會使 ORM 實體全數過期，而本迴圈
+        開頭就要讀 `pwd_changed_date` 算到期日——那行在 `try` **之外**，一旦拋 `MissingGreenlet`
+        連本函式的 except 都接不到，例外會直接穿到排程外層。本函式不需要實體（只寄信），
+        故不逐筆重取，直接帶純值即可。
         """
         expiry_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", 90)
         remind_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_REMIND_DAYS", 7)
         now = utcnow()
         not_expired_after = now - timedelta(days=expiry_days)
         remind_on_or_before = now - timedelta(days=expiry_days - remind_days)
-        users = await self._repo.find_pwd_expiring(
-            db, not_expired_after=not_expired_after, remind_on_or_before=remind_on_or_before
-        )
+        targets = [
+            (u.user_id, u.email, u.user_name, u.pwd_changed_date)
+            for u in await self._repo.find_pwd_expiring(
+                db, not_expired_after=not_expired_after, remind_on_or_before=remind_on_or_before
+            )
+        ]
 
         sent = 0
-        for user in users:
-            expiry_date = user.pwd_changed_date + timedelta(days=expiry_days)
+        for user_id, email, user_name, pwd_changed_date in targets:
+            expiry_date = pwd_changed_date + timedelta(days=expiry_days)
             days_left = max((expiry_date - now).days, 0)
             try:
                 await self._notify.send_email(
                     db,
-                    recipients=[user.email],
+                    recipients=[email],
                     template_code=_PWD_EXPIRY_TEMPLATE,
                     module="DP",
                     params={
-                        "user_name": user.user_name,
+                        "user_name": user_name,
                         "expiry_date": expiry_date.strftime("%Y-%m-%d"),
                         "days_left": str(days_left),
                     },
@@ -505,7 +520,7 @@ class UsersService:
                 sent += 1
             except Exception:
                 await db.rollback()
-                logger.exception("SCHDP001 密碼到期提醒寄送失敗 user_id=%s", user.user_id)
+                logger.exception("SCHDP001 密碼到期提醒寄送失敗 user_id=%s", user_id)
         return sent
 
     async def _invite_ttl_min(self, db: AsyncSession) -> int:

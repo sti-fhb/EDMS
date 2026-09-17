@@ -17,6 +17,7 @@ from app.dp.user.repository import AuthRepository
 from app.dp.users.models import DpUser
 from app.dp.users.repository import UsersRepository
 from app.dp.users.service import UsersService
+from app.services import NotifyService
 
 pytestmark = pytest.mark.integration
 
@@ -69,6 +70,70 @@ async def test_disables_idle_over_threshold(db):
     )
     assert len(audits) == 1
     assert audits[0].created_user == "SYSTEM" and audits[0].action_type == "UPDATE"
+
+
+async def test_閒置禁用單筆失敗不中止整批(db, monkeypatch):
+    """逐筆容錯必須真的容錯：第一筆失敗後，其餘仍要被處理完。
+
+    原本會整批中止，而且失敗得很隱蔽——`rollback()` 會使**掃描階段取得的 ORM 實體全數
+    過期**，接著那行 `logger.exception(..., user.user_id)` 的屬性存取觸發 lazy refresh，
+    在 async 下沒有 greenlet context 就拋 `MissingGreenlet`。
+
+    也就是說：爆掉的正是那行「告訴你哪一筆失敗」的 log，於是既沒有錯誤歸因、後面的
+    帳號也全部沒被處理，而排程紀錄上只會看到一個籠統的失敗。
+
+    這裡固定讓**第一個被處理到的**失敗（不假設掃描順序），第二筆必須照常完成。
+    """
+    now = utcnow()
+    await _seed_user(db, user_id="idle_a", email="idle_a@x.com", last_login=now - timedelta(days=120))
+    await _seed_user(db, user_id="idle_b", email="idle_b@x.com", last_login=now - timedelta(days=120))
+    await db.commit()
+
+    original = UsersRepository.set_status
+    calls = {"n": 0}
+
+    async def flaky(self, db_, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("模擬單筆失敗")
+        return await original(self, db_, **kwargs)
+
+    monkeypatch.setattr(UsersRepository, "set_status", flaky)
+
+    disabled = await _service.disable_idle_accounts(db)
+
+    assert calls["n"] == 2, "第一筆失敗後就沒再處理第二筆——整批被中止了"
+    assert disabled == 1
+
+
+async def test_密碼到期提醒單筆失敗不中止整批(db, monkeypatch):
+    """同上，但這支更嚴重：下一圈的 `user.pwd_changed_date` 在 `try` **之外**。
+
+    `disable_idle_accounts` 的屬性存取還在 try 內（至少會被自己的 except 接住），而這支
+    迴圈開頭就讀 `user.pwd_changed_date` 算到期日——rollback 之後那行直接拋出，連本函式
+    的 except 都接不到，例外會一路穿到排程外層。
+    """
+    now = utcnow()
+    pwd_changed = now - timedelta(days=85)  # 90 天到期、提前 7 天提醒 → 落在視窗內
+    await _seed_user(db, user_id="exp_a", email="exp_a@x.com", pwd_changed=pwd_changed)
+    await _seed_user(db, user_id="exp_b", email="exp_b@x.com", pwd_changed=pwd_changed)
+    await db.commit()
+
+    original = NotifyService.send_email
+    calls = {"n": 0}
+
+    async def flaky(self, db_, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("模擬單筆寄信失敗")
+        return await original(self, db_, **kwargs)
+
+    monkeypatch.setattr(NotifyService, "send_email", flaky)
+
+    sent = await _service.send_pwd_expiry_reminders(db)
+
+    assert calls["n"] == 2, "第一筆失敗後就沒再處理第二筆——整批被中止了"
+    assert sent == 1
 
 
 async def test_idle_null_last_login_uses_created_date(db):
