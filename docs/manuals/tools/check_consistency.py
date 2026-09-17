@@ -174,6 +174,11 @@ def check_spec_catalog(report: Report, manual_ops: dict[str, str]) -> None:
             report.error(
                 f"名稱與規範對照表不符：{code} 手冊作「{name}」、規範作「{catalog[code]}」")
 
+    # 本檢查僅對「代碼在表內」者生效，故整個模組未列時會靜默失效——明白報出
+    for module in sorted({code[:2] for code in manual_ops} - {code[:2] for code in catalog}):
+        report.warn(f"規範對照表未列 {module} 之作業名稱，該模組之名稱核對形同未做；"
+                    f"請補入〈七、用語規範〉之作業名稱對照表")
+
 
 def main() -> int:
     if not MANUAL_ROOT.exists():

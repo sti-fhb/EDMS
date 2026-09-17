@@ -193,11 +193,11 @@ def _add_operation(doc, operation: str, items: list[tuple[str, str]], first: boo
 
 
 def build_report(module: str, operations: list[tuple[str, list[tuple[str, str]]]],
-                 out_path: Path) -> None:
+                 out_path: Path, source: Path) -> None:
     doc, break_p = open_template()
     for index, (operation, items) in enumerate(operations):
         _add_operation(doc, operation, items, first=(index == 0))
-    build_front_matter(doc, break_p, module, None, doc_name=DOC_NAME)
+    build_front_matter(doc, break_p, module, None, doc_name=DOC_NAME, source=source)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out_path))
@@ -220,7 +220,7 @@ def main() -> None:
         except ValueError as exc:
             print(f"略過：{exc}")
             continue
-        build_report(module, operations, args.output / f"{md.stem}.docx")
+        build_report(module, operations, args.output / f"{md.stem}.docx", md)
 
 
 if __name__ == "__main__":
