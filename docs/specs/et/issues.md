@@ -600,6 +600,13 @@
 4. 加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`）於 DP 後台「系統參數與清單」調整後，SCHET002 於下次執行即套用；排程**執行時點**則於 DP 後台「排程管理」調整 `CRON_EXPR`（即時生效）
 5. **不驗收**範本編輯 UI、變數插入、未定義變數警告、樂觀鎖 —— 屬平台 DP 職責，已於 DP Issue #92 驗收
 
+> **2026-09-17 查證補註（#353）**：AC 3 的達成方式與字面不同，**照字面 grep 會找不到而誤判為未做**。
+>
+> - **`IS_ACTIVE` 的檢查不在「各寄信點」，而在平台 `send_email` 一處**（`app/dp/notify/service.py`，停用時回 `SendResult(queued_count=0, skipped_reason="TEMPLATE_DISABLED")` 且**不拋例外**）。ET 端六個寄信點**沒有任何額外檢查**——單一事實來源優於六處重複判斷，這是刻意的。
+> - **「觸發事件照常運作」由兩層保證，皆非寄信檢查**：(1) `EtNotifier.send`（`app/et/notify/service.py`）於唯一出口吞掉 `AppError`；(2) `handlers.weekly_job` / `daily_job` 各階段用**獨立 session**，統計快照在寄信之前的另一個 session 就已提交，寄信失敗不可能回滾它。
+> - **`APPROVAL_PASSED` 已 seed 但無寄信點**——T159 核可通過屬 Issue #18（ET-18）。ET 實際只用到 6 類，第 7 類為 ET-18 預留。本 AC 因此**無法在 ET-18 之前完全驗收**。
+> - 停用時「觸發事件照常運作」的測試覆蓋：T112 / T148 於 #325 已有；T136 / T146 / T147 於 #353 補齊。
+
 **Labels**：`P3-輔助`, `US15`, `UCET015`, `notification`, `backend`
 
 ---

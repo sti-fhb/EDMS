@@ -12,7 +12,7 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
@@ -442,3 +442,42 @@ class TestNotifyFailureDoesNotBreakPublish:
         )
         assert row is not None, "寄信失敗不得回滾學員的加入"
         assert row.is_removed is False
+
+    async def test_範本停用時學員仍被加入且不寄信(self, client, db) -> None:
+        """AC 3（ET-17 / #353）：**停用**與**不存在**是兩條不同的路徑，兩條都不得回滾加入。
+
+        上一條驗的是「範本不存在」——平台 `send_email` 拋 `AppError`，靠 `EtNotifier`
+        於唯一出口吞掉。本條驗的是「管理者把範本停用」——平台**不拋例外**，而是回
+        `SendResult(queued_count=0, skipped_reason="TEMPLATE_DISABLED")`。
+
+        兩條路徑的程式碼完全不同（一條走 except、一條走正常回傳），所以驗了一條不蘊含
+        另一條。而**停用才是實際會發生的那條**：管理者在 DP 後台點一下即可，刪除範本則
+        沒有 UI。
+
+        ⚠️ 斷言必須**同時**涵蓋「人有進去」與「信沒寄出」。只驗前者的話，把停用實作成
+        「照寄不誤」也會綠；只驗後者的話，把整段帶入邏輯拿掉也會綠。
+        """
+        from app.dp.notify.models import DpNotifyTemplate
+
+        teacher = await _user(db, "tn_t07", ROLE_TEACHER)
+        tag_id = await _new_tag(db, "護理師_tn07")
+        student = await _user(db, "tn_s08")
+        await _tag_user(db, student, tag_id)
+        cid = await _publishable_course(client, db, teacher)
+        await _attach_tag(db, cid, tag_id)
+        await db.execute(
+            update(DpNotifyTemplate)
+            .where(DpNotifyTemplate.module == "ET", DpNotifyTemplate.template_code == _INVITE)
+            .values(is_enabled=False)
+        )
+        await db.flush()
+
+        r = await client.post(f"{_COURSES}/{cid}/publish", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["invited_count"] == 1, "停用範本不影響帶入人數的計算"
+        row = await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid)
+        )
+        assert row is not None and row.is_removed is False, "範本停用不得回滾學員的加入"
+        assert await _pending_invites(db) == [], "範本已停用，不該有任何信排進 outbox"
