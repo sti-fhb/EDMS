@@ -77,6 +77,7 @@ export function InviteStudentsDialog({
   const [sending, setSending] = useState(false)
   const [mailFailures, setMailFailures] = useState<string[]>([])
   const [unknownEmails, setUnknownEmails] = useState<string[]>([])
+  const [disabledEmails, setDisabledEmails] = useState<string[]>([])
 
   const resetAll = useCallback(() => {
     setEmails("")
@@ -84,6 +85,7 @@ export function InviteStudentsDialog({
     setPreview(null)
     setMailFailures([])
     setUnknownEmails([])
+    setDisabledEmails([])
   }, [])
 
   const handleClose = useCallback(() => {
@@ -103,15 +105,26 @@ export function InviteStudentsDialog({
   }, [emails])
 
   /**
-   * 後端錯誤呈現。`ET_INVITE_005`（有 Email 尚無 EDMS 帳號）另外把清單攤開——
-   * `error_message` 依規範不得嵌入動態值，是哪幾筆放在 `unknown_emails`。
+   * 後端錯誤呈現。兩支「是哪幾筆」型的錯誤另外把清單攤開——`error_message` 依規範不得
+   * 嵌入動態值，明細一律走 `extra`。
+   *
+   * ⚠️ `ET_INVITE_005`（尚無帳號）與 `ET_INVITE_008`（已停用）**分開呈現**，不可合併成
+   * 一句「這些 Email 有問題」：前者的下一步是請管理者建帳號，後者照做會得到一個重複
+   * 帳號。兩者的補救方向相反。
    */
   const showApiError = useCallback(
     (err: unknown) => {
       const apiError = toApiError(err)
-      if (apiError.errorCode === "ET_INVITE_005") {
-        const list = apiError.payload?.unknown_emails
-        setUnknownEmails(Array.isArray(list) ? (list as string[]) : [])
+      const detail: Record<string, string> = {
+        ET_INVITE_005: "unknown_emails",
+        ET_INVITE_008: "disabled_emails",
+      }
+      const key = detail[apiError.errorCode ?? ""]
+      if (key !== undefined) {
+        const list = apiError.payload?.[key]
+        const emails = Array.isArray(list) ? (list as string[]) : []
+        if (key === "unknown_emails") setUnknownEmails(emails)
+        else setDisabledEmails(emails)
         setEmailsError(apiError.errorMessage)
         return
       }
@@ -123,6 +136,7 @@ export function InviteStudentsDialog({
   const handleNext = useCallback(async () => {
     if (!validateLocally()) return
     setUnknownEmails([])
+    setDisabledEmails([])
     setLoadingPreview(true)
     try {
       setPreview(await invitationsApi.preview(courseId, emails))
@@ -138,6 +152,7 @@ export function InviteStudentsDialog({
     // 否則教師可以在看過預覽後把清單改成不合法的內容再直接送出。
     if (!validateLocally()) return
     setUnknownEmails([])
+    setDisabledEmails([])
     setSending(true)
     try {
       const result = await invitationsApi.send(courseId, emails)
@@ -202,6 +217,7 @@ export function InviteStudentsDialog({
                   setEmails(e.target.value)
                   setEmailsError(null)
                   setUnknownEmails([])
+                  setDisabledEmails([])
                   setMailFailures([])
                   // **不清掉預覽**：預覽內容與收件人無關（姓名與連結都是佔位字樣），
                   // 加減 Email 不會改變那封信長什麼樣子。清掉只會逼教師多按一次「下一步」。
@@ -247,6 +263,13 @@ export function InviteStudentsDialog({
               {unknownEmails.length > 0 && (
                 <Alert severity="warning">
                   以下 Email 尚未建立 EDMS 帳號，無法寄送邀請：{unknownEmails.join("、")}
+                </Alert>
+              )}
+
+              {disabledEmails.length > 0 && (
+                <Alert severity="warning">
+                  以下帳號<strong>已停用</strong>，無法邀請（請確認名單或請管理者先啟用）：
+                  {disabledEmails.join("、")}
                 </Alert>
               )}
 

@@ -1,13 +1,10 @@
-"""Email 邀請之請求 / 回應 schema（US8 / #273）。"""
+"""Email 邀請之請求 / 回應 schema（US8 / #273、#362）。"""
 
 from pydantic import BaseModel, Field
 
 #: 收件人輸入框的整段文字上限。50 筆 × 254（Email 長度上限）+ 分隔符仍有餘裕；
 #: 設上限是為了讓超長貼上在 Pydantic 就被擋下，而非走完 regex 再拒絕。
 _RAW_EMAILS_MAX_LEN = 16_000
-
-#: `secrets.token_urlsafe(32)` 產出 43 字元；留餘裕但仍擋掉明顯的灌大字串。
-_TOKEN_MAX_LEN = 128
 
 
 class EmailInviteReq(BaseModel):
@@ -26,9 +23,13 @@ class InvitePreview(BaseModel):
     `subject` / `body` 由平台範本渲染而來，教師**不可編輯**（FR-ET-US8-07：範本由管理者
     於 DP 後台統一維護）。前端據此以唯讀欄位呈現。
 
-    **不回傳收件人範例或筆數**：預覽以 `PREVIEW_NAME_MASK` 取代收件人姓名、以 `…` 取代
-    token，內容因此與「這次要寄給誰」完全無關——回傳收件人資訊只會讓教師以為預覽是
-    針對某一位產生的。筆數前端自己算得出來（同一套 `parseEmails` 規則）。
+    **不回傳收件人範例或筆數**：預覽以 `PREVIEW_NAME_MASK` 取代收件人姓名，內容因此與
+    「這次要寄給誰」完全無關——回傳收件人資訊只會讓教師以為預覽是針對某一位產生的。
+    筆數前端自己算得出來（同一套 `parseEmails` 規則）。
+
+    ⚠️ 連結給的是**真值**（`learn_link`）。#362 之前它是遮罩過的 `…`，因為那時每人的
+    一次性 token 不同、預覽當下也尚未產生；改為學習頁連結後人人相同，遮起來反而讓預覽
+    與實際寄出的信對不起來。
     """
 
     subject: str

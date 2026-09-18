@@ -19,11 +19,20 @@ _STATUS_ACTIVE = "ACTIVE"
 
 @dataclass(frozen=True)
 class Recipient:
-    """一位可寄信的收件人。"""
+    """一位可寄信的收件人。
+
+    `status` 為 `DP_USER.STATUS` 原值，**刻意設為必填**：#362 讓 Email 邀請從「只是寄信」
+    變成「寫入成員資格」，呼叫端必須能判斷帳號是否已停用。給預設值會讓忘記帶的呼叫端
+    fail-open（把停用帳號當成正常人），必填則是 `TypeError`、當場就發現。
+
+    ⚠️ 判定一律經 `dp/users/account_status.is_account_disabled()`，**不要**自行比對
+    `"DISABLED"`——`STATUS` 值域屬 DP 語意。
+    """
 
     user_id: str
     user_name: str
     email: str
+    status: str
 
 
 class EtNotifyRepository:
@@ -42,13 +51,17 @@ class EtNotifyRepository:
         if not user_ids:
             return []
         rows = await db.execute(
-            select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
+            select(DpUser.user_id, DpUser.user_name, DpUser.email, DpUser.status).where(
                 DpUser.user_id.in_(list(user_ids)),
                 DpUser.deleted == 0,
             )
         )
         return sorted(
-            (Recipient(user_id=uid, user_name=name, email=email) for uid, name, email in rows if email),
+            (
+                Recipient(user_id=uid, user_name=name, email=email, status=status)
+                for uid, name, email, status in rows
+                if email
+            ),
             key=lambda r: r.user_id,
         )
 
@@ -74,14 +87,18 @@ class EtNotifyRepository:
         if not user_ids:
             return []
         rows = await db.execute(
-            select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
+            select(DpUser.user_id, DpUser.user_name, DpUser.email, DpUser.status).where(
                 DpUser.user_id.in_(list(user_ids)),
                 DpUser.status == _STATUS_ACTIVE,
                 DpUser.deleted == 0,
             )
         )
         return sorted(
-            (Recipient(user_id=uid, user_name=name, email=email) for uid, name, email in rows if email),
+            (
+                Recipient(user_id=uid, user_name=name, email=email, status=status)
+                for uid, name, email, status in rows
+                if email
+            ),
             key=lambda r: r.user_id,
         )
 
@@ -93,16 +110,27 @@ class EtNotifyRepository:
 
         `DP_USER.EMAIL` 以小寫儲存（見 `dp/user` 之註冊流程），呼叫端須先正規化
         （`invitation/rules.parse_emails` 已做）。
+
+        ## 回傳 `status`，讓呼叫端自己決定停用帳號怎麼辦
+
+        本方法**不**在 SQL 裡濾掉停用帳號——兩個呼叫端要的行為相反：標籤帶入那條路只是
+        寄信（寄給停用者無害），Email 邀請那條會**寫入成員資格**（見
+        `invitation/service._require_known_recipients`）。故值域判定交給呼叫端，以
+        `dp/users/account_status.is_account_disabled()` 為準，**不得**自行比對 `"DISABLED"`
+        字面值（`STATUS` 值域屬 DP 語意）。
+
+        ⚠️ `DELETED = 0` 這道過濾對停用者**完全無效**：EDMS 沒有刪除使用者的功能，
+        `DP_USER.DELETED` 從來沒有任何 code path 會設成 1，停用一律走 `STATUS`。
         """
         if not emails:
             return []
         rows = await db.execute(
-            select(DpUser.user_id, DpUser.user_name, DpUser.email).where(
+            select(DpUser.user_id, DpUser.user_name, DpUser.email, DpUser.status).where(
                 DpUser.email.in_(list(emails)),
                 DpUser.deleted == 0,
             )
         )
-        return [Recipient(user_id=uid, user_name=name, email=email) for uid, name, email in rows]
+        return [Recipient(user_id=uid, user_name=name, email=email, status=status) for uid, name, email, status in rows]
 
     async def user_name(self, db: AsyncSession, user_id: str) -> str | None:
         """使用者顯示姓名（課程擁有者用於 `{TEACHER_NAME}`）。"""

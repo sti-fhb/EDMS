@@ -1,29 +1,28 @@
-"""ET02 邀請學員 API（US8 / #273）。
+"""ET02 邀請學員 API（US8 / #273、#362）。
 
 ## 為何預覽與寄送都是 POST
 
 收件人清單是個資。放在 query string 會進 access log、瀏覽器歷史與 Referer——即使
 不寫入任何地方，它也不該出現在 URL 裡。同 `enrollment/router.py` 對邀請碼的判斷。
 
-## 限流：`send` / `preview` 掛，`accept` 不掛
+## 限流：`send` / `preview` 共用同一個使用者維度分桶
 
-**`send` / `preview` 掛使用者維度限流**。`send` 每次可對最多 50 個**任意網域**的位址寫入
-outbox，若無次數上限，本系統就成了一個「發送者身分完全合法（SPF / DKIM 皆通過本組織
-網域）」的對外投遞管道——即使信件內容不可控，SMTP 資源、`DP_EMAIL_LOG` 膨脹與組織信譽
-（退信率）仍是實質的濫用面。`preview` 共用同一分桶：兩者是同一件事的兩半，分開計數會讓
-實際額度變成兩倍。
+`send` 每次可對最多 50 個**任意網域**的位址寫入 outbox，若無次數上限，本系統就成了一個
+「發送者身分完全合法（SPF / DKIM 皆通過本組織網域）」的對外投遞管道——即使信件內容
+不可控，SMTP 資源、`DP_EMAIL_LOG` 膨脹與組織信譽（退信率）仍是實質的濫用面。`preview`
+共用同一分桶：兩者是同一件事的兩半，分開計數會讓實際額度變成兩倍。
 
-**`accept` 不掛**。`enrollment` 的邀請碼端點掛了雙維度限流，因為 8 碼純數字只有 10^8 種、
-且 200/404 的差異就是一個可枚舉的 oracle。邀請 token 是 `secrets.token_urlsafe(32)`
-（256 bits），枚舉不可行——為它加限流只會在正常使用者反覆點信中連結時誤傷，卻擋不到任何
-實際攻擊。**不為不存在的情境寫防禦碼**（`sti-coding-style`）。
+⚠️ **#362 起這個額度不只限寄信速率，也限「加人」速率**：`send` 現在會直接寫
+`ET_ENROLLMENT`，同時也是「一次貼 50 筆 Email、看哪些有帳號」這個探測面的速率上限。
+調整額度時三件事要一起想，不能只算 outbox。
 
 ## 授權
 
-- 預覽 / 寄送：`require_et_roles(TEACHER, ADMIN)` + service 層 `ensure_owner`
-  （擁有權要先讀出課程才知道，無法用 dependency 表達）。
-- accept：只掛 `get_et_context`——受邀者就是一般學員，門檻是**持有有效 token**，
-  不是任何角色。
+`require_et_roles(TEACHER, ADMIN)` + service 層 `ensure_owner`（擁有權要先讀出課程才
+知道，無法用 dependency 表達）。兩支端點都經 `_require_invitable_course`，沒有例外路徑。
+
+> #362 之前還有一支 `POST /et/invitations/accept`（受邀者點信中連結加入），它**不掛限流**
+> 且只驗 token。邀請即加入之後整支移除——沒有要接受的東西了。
 """
 
 from collections.abc import Awaitable, Callable
