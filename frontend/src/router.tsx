@@ -28,7 +28,6 @@ import { EtApprovalQueryPage } from "./et/approval/ApprovalQueryPage"
 import { EtCourseEditorPage } from "./et/courses/CourseEditorPage"
 import { EtCourseListPage } from "./et/courses/CourseListPage"
 import { EtHomeRedirect } from "./et/EtHomeRedirect"
-import { EtInviteLandingPage } from "./et/invite/InviteLandingPage"
 import { EtLearnPage } from "./et/learn/LearnPage"
 import { EtQuizAnswerPage } from "./et/quiz/QuizAnswerPage"
 import { EtQuizResultPage } from "./et/quiz/QuizResultPage"
@@ -217,9 +216,9 @@ export const router = createBrowserRouter([
               { path: "courses/:courseId/learn", element: <EtLearnPage /> },
               // ET05 課後問卷填寫（#284）：自 ET05 側欄底部入口進入，非側欄項目
               { path: "courses/:courseId/survey", element: <EtSurveyFillPage /> },
-              // Email 邀請連結落點（#273）：置於登入殼**之內**——加入課程需要登入者身分，
-              // 未登入時由 LoginOverlay 擋在前面，登入後 token 仍在網址上、流程自然接續。
-              { path: "invite", element: <EtInviteLandingPage /> },
+              // ⚠️ `/et/invite?token=…`（Email 邀請落點，#273）已於 #362 移除：邀請即加入，
+              // 沒有要「接受」的東西。**已寄出的舊信裡那條連結會 404**——裁示明示接受
+              // （受邀者是既有帳號，在「我的課程」就看得到課程，死連結不擋任何人進課程）。
               // 測驗資訊沒有自己的頁——它就地渲染在 ET05 學習頁的內容區（`ContentPane`），
               // 與影片 / 文件一致。作答與成績才是獨立畫面。
               { path: "attempts/:attemptId", element: <EtQuizAnswerPage /> },

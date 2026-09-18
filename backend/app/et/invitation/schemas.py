@@ -1,7 +1,5 @@
 """Email 邀請之請求 / 回應 schema（US8 / #273）。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 #: 收件人輸入框的整段文字上限。50 筆 × 254（Email 長度上限）+ 分隔符仍有餘裕；
@@ -59,44 +57,3 @@ class EmailInviteResult(BaseModel):
     joined: int
     #: 加入成功但信件**排入 outbox 失敗**者之 Email。
     mail_failed: list[str]
-
-
-class InviteAcceptReq(BaseModel):
-    """受邀者點擊連結後送出的 token。"""
-
-    token: str = Field(min_length=1, max_length=_TOKEN_MAX_LEN)
-
-
-class InviteAcceptResult(BaseModel):
-    """加入結果——供前端導向 ET05 學習頁。
-
-    `already_joined=true` 代表「本來就在課程中」（AC 8：不重複加入、直接導向），
-    非錯誤。
-    """
-
-    course_id: int
-    course_name: str
-    already_joined: bool
-
-
-class PendingInviteRow(BaseModel):
-    """ET-12 待加入清單的一列（`FR-ET-US12-01`）。
-
-    ## 時間欄回 `LAST_SENT_AT`，不回 `SENT_AT`
-
-    Wireframe 的欄位標題寫「邀請寄出日」，但教師按下「再次寄送」後若畫面日期不變，
-    他會以為沒寄出去而重複點。`SENT_AT`（首次寄出）本 issue 不回——需要時再加。
-
-    ## `status` 恆為 `PENDING`，仍照 spec 回
-
-    清單已過濾為只有待加入者，故本欄目前是常數。`FR-ET-US12-01` 明訂欄位須含邀請
-    狀態，且日後若清單擴及其他狀態不必改結構。
-    """
-
-    model_config = {"from_attributes": True}
-
-    invitation_id: int
-    email: str
-    #: 最近一次寄出時間（再次寄送會更新）。
-    last_sent_at: datetime
-    status: str

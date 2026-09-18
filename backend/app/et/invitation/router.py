@@ -29,22 +29,18 @@ outbox，若無次數上限，本系統就成了一個「發送者身分完全�
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
-from app.core.pagination import PagedResponse
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, require_et_roles
 from app.et.invitation.schemas import (
     EmailInviteReq,
     EmailInviteResult,
-    InviteAcceptReq,
-    InviteAcceptResult,
     InvitePreview,
-    PendingInviteRow,
 )
 from app.et.invitation.service import EtInvitationService
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
@@ -84,25 +80,6 @@ router = APIRouter(prefix="/api/et", tags=["et-invitation"], dependencies=[Depen
 _service = EtInvitationService()
 
 
-@router.get(
-    "/courses/{course_id}/invitations",
-    response_model=PagedResponse[PendingInviteRow],
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
-)
-async def list_pending_invitations(
-    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    ctx: EtContext = Depends(get_et_context),
-    db: AsyncSession = Depends(get_db),
-) -> PagedResponse[PendingInviteRow]:
-    """ET03「待加入」分頁之清單（`FR-ET-US12-01`）。
-
-    **課程關閉時照常可讀**——`FR-ET-US12-06` 明訂關閉只停「再次寄送」，不停閱覽。
-    """
-    return await _service.list_pending(db, course_id, actor_id=ctx.user_id, page=page, limit=limit)
-
-
 @router.post(
     "/courses/{course_id}/invitations/preview",
     response_model=InvitePreview,
@@ -134,62 +111,3 @@ async def send_invitations(
     **重跑預覽的全部驗證**——預覽是體驗，不是把關（比照 `enrollment` 的 preview/join）。
     """
     return await _service.send(db, course_id, raw_emails=req.emails, operator=operator)
-
-
-@router.post(
-    "/invitations/{invitation_id}/resend",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(rate_limit_invites())],
-)
-async def resend_invitation(
-    invitation_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """再次寄送邀請信（`FR-ET-US12-03`）。
-
-    掛 `rate_limit_invites()`——本支會**實際寄信**，與 `send_invitations` 同一個濫用面。
-
-    課程關閉期間回 409 / 422（`FR-ET-US12-06`）。**換新 token，受邀者手上的舊信會失效。**
-
-    **排入信件佇列失敗時回 503 並整筆回滾**（token 不換、信不排入）——204 一律代表真的
-    寄出去了，前端可以無條件顯示成功。見 `service.resend()` 的說明。
-
-    204 而非 200：與本模組（及 ET 其餘「純動作、無回應內容」端點）一致。
-    """
-    await _service.resend(db, invitation_id, operator=operator)
-
-
-@router.post(
-    "/invitations/{invitation_id}/revoke",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
-)
-async def revoke_invitation(
-    invitation_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """撤回邀請（`FR-ET-US12-04`）——原連結即刻失效。
-
-    🔴 **不掛關閉守門**（SA 裁示 2026-09-16）：撤回是止血動作，課程關閉期間仍須可執行。
-    理由見 `service._require_owned_course` 的 docstring；`test_課程關閉時仍可撤回邀請`
-    釘住此行為。
-
-    用 `POST .../revoke` 而非 `DELETE`：這是狀態轉換（`PENDING → REVOKED`，紀錄保留供
-    稽核），不是刪除。
-    """
-    await _service.revoke(db, invitation_id, operator=operator)
-
-
-@router.post("/invitations/accept", response_model=InviteAcceptResult)
-async def accept_invitation(
-    req: InviteAcceptReq,
-    operator: OperatorInfo = Depends(get_operator),
-    db: AsyncSession = Depends(get_db),
-) -> InviteAcceptResult:
-    """受邀者以邀請連結加入課程（AC 7 / AC 8）。
-
-    已加入者再點同一條連結不重複加入、回 `already_joined=true` 供前端導向學習頁。
-    """
-    return await _service.accept(db, token=req.token, operator=operator)

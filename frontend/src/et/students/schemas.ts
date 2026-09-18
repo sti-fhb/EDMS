@@ -241,20 +241,8 @@ export interface CourseOption {
 }
 
 /**
- * ET-12「待加入」分頁的一列（`FR-ET-US12-01`）。
+ * 原有 `PendingInviteRow`（ET-12「待加入」分頁的一列）已隨 #362 移除。
  *
- * `status` 恆為 `"PENDING"`——清單已於後端過濾。仍回傳是因為 spec 明訂欄位須含邀請
- * 狀態，且日後清單擴及其他狀態時不必改結構。
+ * ⚠️ 不要把 `ApprovalStatus` 的 `"PENDING"` 誤認為它的遺留——那是**核可**尚未裁定，
+ * 與已廢除的邀請狀態無關。
  */
-export interface PendingInviteRow {
-  invitation_id: number
-  email: string
-  /**
-   * **最後**寄送時間，不是首次。
-   *
-   * 教師按「再次寄送」後若畫面日期不變，他會以為沒寄出去而重複點——所以顯示的是
-   * `LAST_SENT_AT`。
-   */
-  last_sent_at: string
-  status: string
-}

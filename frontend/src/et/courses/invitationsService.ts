@@ -1,5 +1,5 @@
 import { http } from "../../services/http"
-import type { EmailInviteResult, InviteAcceptResult, InvitePreview } from "./invitationSchemas"
+import type { EmailInviteResult, InvitePreview } from "./invitationSchemas"
 
 /**
  * ET02 邀請學員 API（US8 / #273）。
@@ -14,14 +14,9 @@ export const invitationsApi = {
     return data
   },
 
+  /** 寄出邀請信並**直接把收件人加入課程**（#362，不再經「待加入」）。 */
   send: async (courseId: number, emails: string): Promise<EmailInviteResult> => {
     const { data } = await http.post<EmailInviteResult>(`/et/courses/${courseId}/invitations`, { emails })
-    return data
-  },
-
-  /** 受邀者以邀請連結加入課程（落點頁用）。 */
-  accept: async (token: string): Promise<InviteAcceptResult> => {
-    const { data } = await http.post<InviteAcceptResult>("/et/invitations/accept", { token })
     return data
   },
 }
