@@ -137,6 +137,35 @@ class DmDocTag(BaseModel):
     )
 
 
+class DmVersionTag(BaseModel):
+    """版本標籤快照（DM_VERSION_TAG，明細）。
+
+    該**版本提議**之標籤（可見對象 / 檢索），於存草稿當下寫入；核准發布時才套用至文件層
+    `DM_DOC_TAG`（生效值），退回 / 撤回不套用。兩層語意切割見 #377：可見對象為權限控制，
+    不得於草稿階段即改變已發布文件之可見範圍（推翻 spec_us5 FR-003 原「存檔當下即生效」）。
+    唯一約束 (VERSION_ID, TAG_ID)。
+    """
+
+    __tablename__ = "DM_VERSION_TAG"
+    __table_args__ = (
+        PrimaryKeyConstraint("VERSION_TAG_ID", name="PK_DM_VERSION_TAG"),
+        UniqueConstraint("VERSION_ID", "TAG_ID", name="UQ_DM_VERSION_TAG_VERSION_TAG"),
+        Index("IX_DM_VERSION_TAG_VERSION", "VERSION_ID"),
+        Index("IX_DM_VERSION_TAG_TAG", "TAG_ID"),
+    )
+
+    version_tag_id: Mapped[int] = mapped_column("VERSION_TAG_ID", BigInteger, Identity(), nullable=False)
+    version_id: Mapped[int] = mapped_column(
+        "VERSION_ID",
+        BigInteger,
+        ForeignKey("DM_DOC_VERSION.VERSION_ID", name="FK_DM_VERSION_TAG_VERSION"),
+        nullable=False,
+    )
+    tag_id: Mapped[int] = mapped_column(
+        "TAG_ID", BigInteger, ForeignKey("DM_TAG.TAG_ID", name="FK_DM_VERSION_TAG_TAG"), nullable=False
+    )
+
+
 class DmDocRead(AuditLogBaseModel):
     """閱讀紀錄（DM_DOC_READ，append-only 事件）。
 

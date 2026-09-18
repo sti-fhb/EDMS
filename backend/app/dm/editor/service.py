@@ -47,6 +47,8 @@ _OBSOLETE = "OBSOLETE"
 _REJECTED = "REJECTED"
 _WITHDRAWN = "WITHDRAWN"
 _MANUAL = "MANUAL"
+# 訓練教材：ET 端唯一可跨模組引用之分類，取教材不套可見性條件，故免填可見對象（#377）
+_TRAINING = "TRAINING"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
 _NEW = "NEW"
@@ -156,7 +158,9 @@ class EditorService:
             op=op,
             assigned_reviewer=(assigned_reviewer or "").strip() or None,
         )
-        await self._repo.set_tags(db, doc_id=doc.doc_id, tag_ids=tag_ids, op=op)
+        # 首版同樣只寫版本層快照：首版未發布前文件層為空，文件庫本就查不到（狀態非 PUBLISHED），
+        # 核准發布時一併套用至文件層（#377）。
+        await self._repo.set_version_tags(db, version_id=ver.version_id, tag_ids=tag_ids, op=op)
         await self._log(
             db,
             action_type="CREATE",
@@ -220,10 +224,11 @@ class EditorService:
         op: OperatorInfo,
         assigned_reviewer: str | None = None,
     ) -> VersionResult:
-        """既有文件新增 DRAFT 版本（身份欄不吃）+ 覆寫文件層標籤（可見對象 / 檢索）。
+        """既有文件新增 DRAFT 版本（身份欄不吃）+ 寫入該版本之標籤快照（可見對象 / 檢索）。
 
-        存草稿不卡必填（US5）：版號 / 摘要 / 檔案皆可空，送簽時才完整檢核。標籤為文件層（DM_DOC_TAG
-        無 version_id），編輯時即時生效；前端編輯模式以 GET tags 端點預帶既有標籤供修改，避免誤清。
+        存草稿不卡必填（US5）：版號 / 摘要 / 檔案皆可空，送簽時才完整檢核。標籤寫**版本層**
+        （DM_VERSION_TAG），核准發布時才套用至文件層生效（#377）——存草稿不再改變已發布文件之
+        可見範圍；前端編輯模式以 GET tags 端點預帶既有標籤供修改，避免誤清。
         """
         version_no = (version_no or "").strip()
         change_summary = (change_summary or "").strip()
@@ -268,7 +273,8 @@ class EditorService:
             raise AppError(
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             ) from exc
-        await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)  # 文件層標籤覆寫（即時生效）
+        # 版本層快照（不碰文件層）：核准發布時才套用，退回 / 撤回不套用（#377）
+        await self._repo.set_version_tags(db, version_id=ver.version_id, tag_ids=tag_ids, op=op)
         await self._log(
             db,
             action_type="CREATE",
@@ -384,7 +390,7 @@ class EditorService:
                 doc.doc_name = doc_name.strip()
             doc.func_code = await self._resolve_func(db, doc.category_code, func_code)  # 非手冊類清為 None
             doc.updated_user, doc.updated_date = op.user_id, now
-        await self._repo.set_tags(db, doc_id=doc_id, tag_ids=tag_ids, op=op)
+        await self._repo.set_version_tags(db, version_id=version_id, tag_ids=tag_ids, op=op)  # 版本層快照（#377）
         await db.flush()
         await self._log(
             db,
@@ -483,7 +489,9 @@ class EditorService:
             raise AppError(status_code=422, detail="請先上傳文件檔案", error_code="DM_DOC_004")
         if doc.category_code == _MANUAL and not doc.func_code:
             raise AppError(status_code=422, detail="系統操作手冊須指定關聯作業項目", error_code="DM_DOC_004")
-        if not await self._repo.has_audience_tag(db, doc.doc_id):
+        # 可見對象必填：查**版本層**快照（文件層於核准發布時才更新，送簽當下仍為舊值）。
+        # TRAINING 免填——教材由 ET 引用，ET 取教材不套可見性條件，可見對象對其零作用（#377）。
+        if doc.category_code != _TRAINING and not await self._repo.has_audience_tag(db, ver.version_id):
             raise AppError(status_code=422, detail="文件至少需掛 1 個可見對象", error_code="DM_DOC_005")
         if (
             doc.category_code == _MANUAL

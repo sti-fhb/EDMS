@@ -13,7 +13,7 @@ from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_VIEWER
 from app.dm.roles.models import DmUserRole
@@ -211,6 +211,45 @@ class ReviewCenterRepository:
         )
         # 不於此 flush：呼叫端 approve 於本呼叫前已 flush 版本切換，後續稽核 / 通知查詢會 autoflush，
         # 交易由 get_db 統一 commit（避免多一次 round-trip，Code Review LOW）。
+
+    async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:
+        """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
+
+        標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
+        差異式覆寫（手法同 editor 之 `set_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
+        軟刪除，以避開 UQ(DOC_ID, TAG_ID)。
+
+        Args:
+            doc_id: 文件編號。
+            version_id: 本次核准發布之版本（其快照即新的生效值）。
+            user_id: 核准者（寫入稽核欄位）。
+        """
+        now = utcnow()
+        wanted = list(
+            (
+                await db.scalars(
+                    select(DmVersionTag.tag_id).where(
+                        DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0
+                    )
+                )
+            ).all()
+        )
+        wanted_set = set(wanted)
+        existing = {
+            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
+        }
+        for tid in wanted:
+            row = existing.get(tid)
+            if row is None:
+                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=user_id, created_date=now))
+            elif row.deleted != 0:
+                row.deleted = 0
+                row.updated_user, row.updated_date = user_id, now
+        for tid, row in existing.items():
+            if tid not in wanted_set and row.deleted == 0:
+                row.deleted = 1
+                row.updated_user, row.updated_date = user_id, now
+        await db.flush()
 
     async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
         return (

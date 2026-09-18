@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.review.models import DmReview
 from app.dm.roles.reviewer_query import assignable_reviewers_stmt
 from app.dp.users.models import DpUser
@@ -119,13 +119,55 @@ class EditorRepository:
                 row.updated_user, row.updated_date = op.user_id, now
         await db.flush()
 
-    async def has_audience_tag(self, db: AsyncSession, doc_id: str) -> bool:
-        """該文件是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。"""
+    async def set_version_tags(
+        self, db: AsyncSession, *, version_id: int, tag_ids: Sequence[int], op: OperatorInfo
+    ) -> None:
+        """設定**版本層**標籤快照為指定集合——差異式覆寫（手法同 `set_tags`）。
+
+        草稿階段之標籤提議值存於此；核准發布時由簽核端套用至文件層 `DM_DOC_TAG`（#377）。
+        採軟刪除復用避開 UQ(VERSION_ID, TAG_ID)：目標集內既有列復活 / 新列插入、目標集外之有效列軟刪除。
+        """
+        now = utcnow()
+        wanted = list(dict.fromkeys(tag_ids))  # 去重、保序
+        wanted_set = set(wanted)
+        existing = {
+            row.tag_id: row
+            for row in (await db.scalars(select(DmVersionTag).where(DmVersionTag.version_id == version_id))).all()
+        }
+        for tid in wanted:
+            row = existing.get(tid)
+            if row is None:
+                db.add(DmVersionTag(version_id=version_id, tag_id=tid, created_user=op.user_id, created_date=now))
+            elif row.deleted != 0:
+                row.deleted = 0
+                row.updated_user, row.updated_date = op.user_id, now
+        for tid, row in existing.items():
+            if tid not in wanted_set and row.deleted == 0:
+                row.deleted = 1
+                row.updated_user, row.updated_date = op.user_id, now
+        await db.flush()
+
+    async def get_version_tag_ids(self, db: AsyncSession, version_id: int) -> list[int]:
+        """取該版本之有效標籤 TAG_ID（供核准發布時套用至文件層、續編時預帶）。"""
+        rows = await db.scalars(
+            select(DmVersionTag.tag_id).where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+        )
+        return list(rows.all())
+
+    async def has_audience_tag(self, db: AsyncSession, version_id: int) -> bool:
+        """該**版本**是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。
+
+        查版本層快照而非文件層：標籤於核准發布時才套用至文件層，送簽當下文件層仍為舊值（#377）。
+        """
         got = await db.scalar(
-            select(DmDocTag.doc_tag_id)
-            .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+            select(DmVersionTag.version_tag_id)
+            .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
-            .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0, DmTagGroup.group_type == _AUDIENCE)
+            .where(
+                DmVersionTag.version_id == version_id,
+                DmVersionTag.deleted == 0,
+                DmTagGroup.group_type == _AUDIENCE,
+            )
         )
         return got is not None
 
