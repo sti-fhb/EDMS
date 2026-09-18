@@ -36,6 +36,16 @@ Create Date: 2026-09-18 10:30:00.000000
 兩種錯法的代價不對稱：`DO NOTHING` 的錯由教師一次點擊修好（現在邀請即加入，立刻
 生效）；`DO UPDATE` 的錯是把已被移除的人放回課程且**無人會發現**。
 
+## 為何 SELECT 帶 `ORDER BY "SENT_AT"`
+
+`ET_INVITATION` **沒有** (COURSE_ID, EMAIL) 唯一約束（`checklists/requirements.md` 早已
+記過這個缺口），所以同一人同一課可能有多列 `PENDING`。
+
+`ON CONFLICT DO NOTHING` 本身擋得住同一句 INSERT 內的重複——實測 2 列來源只插入 1 列
+（`DO UPDATE` 才會拋 "cannot affect row a second time"）。但**留下哪一列沒有保證**，
+於是 `JOINED_AT` 會是那幾次邀請中任意一次的 `SENT_AT`。加上排序後固定取**最早**那次，
+也就是「教師第一次邀請他」的時點，與單筆情形的語意一致。
+
 ## 查無帳號的 Email 一併落空
 
 SA 裁示「只邀請既有帳號」是後來才加的檢核，早期可能留有寄給非 EDMS 帳號的 `PENDING`
@@ -80,6 +90,7 @@ _BACKFILL = text(
     FROM "ET_INVITATION" i
     JOIN "DP_USER" u ON lower(u."EMAIL") = lower(i."EMAIL")
     WHERE i."STATUS" = 'PENDING' AND i."DELETED" = 0
+    ORDER BY i."SENT_AT"
     ON CONFLICT ON CONSTRAINT "UQ_ET_ENROLLMENT_USER_COURSE" DO NOTHING
     """
 )
