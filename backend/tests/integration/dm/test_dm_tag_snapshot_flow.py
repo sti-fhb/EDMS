@@ -6,9 +6,10 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmTag
@@ -159,6 +160,38 @@ async def test_approve_applies_version_tags_to_doc(db):
     await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
 
     assert await _doc_tag_ids(db, doc_id) == {aud_b}
+
+
+async def test_submit_blocked_when_version_snapshot_empty(db):
+    """送簽檢核確實讀版本層：文件層有可見對象、版本層為空 → 仍擋 DM_DOC_005。
+
+    此即 migration 必須回填在途草稿的原因——檢核來源改為版本層後，改動前既有的草稿若不回填，
+    送簽會被誤擋。回填 SQL 本身屬 schema/資料操作，依 sti-testing 不另寫一次性驗收測試。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, _ = await _two_audience_ids(db)
+    doc_id, _v1 = await _publish_first_version(db, audience_id=aud_a)
+    assert await _doc_tag_ids(db, doc_id) == {aud_a}  # 文件層有值
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_ids=[aud_a],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="改版",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    # 模擬「migration 未回填」之在途草稿：抹除該版本快照
+    await db.execute(delete(DmVersionTag).where(DmVersionTag.version_id == ver2.version_id))
+    await db.flush()
+
+    with pytest.raises(AppError) as exc:
+        await _editor.submit(db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    assert exc.value.error_code == "DM_DOC_005"
 
 
 async def test_reject_keeps_doc_tags_unchanged(db):

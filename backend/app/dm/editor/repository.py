@@ -28,6 +28,15 @@ _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
 
 
+def _split_by_group(rows) -> dict[str, list[str]]:
+    """把 (TAG_ID, GROUP_TYPE) 列依組型分為可見對象 / 檢索兩組（TAG_ID 轉字串供前端表單用）。"""
+    audience: list[str] = []
+    retrieval: list[str] = []
+    for tag_id, group_type in rows:
+        (audience if group_type == _AUDIENCE else retrieval).append(str(tag_id))
+    return {"audience_ids": audience, "retrieval_ids": retrieval}
+
+
 class EditorRepository:
     """文件寫入 + 送簽前檢核查詢。"""
 
@@ -231,11 +240,19 @@ class EditorRepository:
             .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
             .order_by(DmTag.tag_id)
         )
-        audience: list[str] = []
-        retrieval: list[str] = []
-        for tag_id, group_type in rows.all():
-            (audience if group_type == _AUDIENCE else retrieval).append(str(tag_id))
-        return {"audience_ids": audience, "retrieval_ids": retrieval}
+        return _split_by_group(rows.all())
+
+    async def get_version_tags(self, db: AsyncSession, version_id: int) -> dict[str, list[str]]:
+        """取該版本快照之標籤，依組型分為可見對象 / 檢索（TAG_ID 字串），供續編既有草稿時預帶。"""
+        rows = await db.execute(
+            select(DmTag.tag_id, DmTagGroup.group_type)
+            .select_from(DmVersionTag)
+            .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+            .order_by(DmTag.tag_id)
+        )
+        return _split_by_group(rows.all())
 
     async def version_no_taken(self, db: AsyncSession, doc_id: str, version_no: str) -> bool:
         """版本號是否已被本文件之「已發布」版本使用（PUBLISHED / SUPERSEDED）。

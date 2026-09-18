@@ -401,11 +401,20 @@ class EditorService:
         )
         return VersionResult(version_id=version_id, previewable=previewable)
 
-    async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> EditorDocTags:
-        """取文件現有標籤（可見對象 / 檢索之 TAG_ID），供編輯模式表單預帶。查無文件 → 404。"""
+    async def get_doc_tags(self, db: AsyncSession, doc_id: str, *, user_id: str) -> EditorDocTags:
+        """取編輯模式表單預帶之標籤（可見對象 / 檢索之 TAG_ID）。查無文件 → 404。
+
+        本人已有進行中版本 → 取其**版本層快照**（該版本提議中的值，續編時才看得到自己上次的修改）；
+        否則以文件層現值初始化（新開版本時預帶目前生效之標籤供修改，避免誤清）。#377
+        """
         if await self._repo.get_document(db, doc_id) is None:
             raise _NOT_FOUND
-        tags = await self._repo.get_doc_tags(db, doc_id)
+        open_ver = await self._repo.get_author_open_version(db, doc_id, user_id)
+        tags = (
+            await self._repo.get_version_tags(db, open_ver.version_id)
+            if open_ver is not None
+            else await self._repo.get_doc_tags(db, doc_id)
+        )
         return EditorDocTags(audience_ids=tags["audience_ids"], retrieval_ids=tags["retrieval_ids"])
 
     # ── 送簽 ──────────────────────────────────────────

@@ -261,11 +261,6 @@ class ReviewCenterService:
         if doc.status != _PUBLISHED:  # 首版：文件轉已發布（已發布文件之新版維持 PUBLISHED）
             doc.status = _PUBLISHED
             doc.updated_user, doc.updated_date = op.user_id, now
-        # 標籤生效點：把本版之版本層快照套用至文件層（#377）。必須早於下方收件名單計算——
-        # DOC_PUBLISH 依可見對象組決定收件人（FR-008），須以本次核准後新生效之可見對象為準。
-        await self._repo.apply_version_tags_to_doc(
-            db, doc_id=doc.doc_id, version_id=new_ver.version_id, user_id=op.user_id
-        )
         try:
             async with (
                 db.begin_nested()
@@ -281,6 +276,15 @@ class ReviewCenterService:
                 ) from exc
             raise
 
+        # 標籤生效點：把本版之版本層快照套用至文件層（#377）。位置的兩個約束——
+        # (1) 須在上方 SAVEPOINT flush **之後**：本方法內含查詢會觸發 autoflush，若置於其前會把
+        #     doc 的狀態變更提前送出，使撞 UX_DM_DOCUMENT_MANUAL_FUNC 的 IntegrityError 逸出
+        #     SAVEPOINT 保護、無法映射為 DM_DOC_007；
+        # (2) 須在下方 `_notify_publish` **之前**：DOC_PUBLISH 依可見對象組決定收件人（FR-008），
+        #     須以本次核准後新生效之可見對象為準。
+        await self._repo.apply_version_tags_to_doc(
+            db, doc_id=doc.doc_id, version_id=new_ver.version_id, user_id=op.user_id
+        )
         await self._repo.write_change_log(
             db,
             doc_id=doc.doc_id,
