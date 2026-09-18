@@ -111,10 +111,17 @@ describe("PublishDialog：有缺漏", () => {
 describe("PublishDialog：發布成功", () => {
   const result = { course_id: 1, status: "PUBLISHED", invitation_code: "01234567", version: 1, invited_count: 0 }
 
-  it("顯示邀請碼與不可變更的說明", () => {
+  it("顯示邀請碼，且不帶「發布後永久不可變更」的括號說明（#359 第 2 項）", () => {
     render(<PublishDialog {...BASE_PROPS} result={result} />)
     expect(screen.getByText("01234567")).toBeInTheDocument()
-    expect(screen.getByText("課程邀請碼（發布後永久不可變更）")).toBeInTheDocument()
+    expect(screen.getByText("課程邀請碼")).toBeInTheDocument()
+    // 負向斷言：AC 要的是「不再顯示」。上面那條用 getByText 精確比對，理論上括號版
+    // 不會通過——但那是**副作用**而非它在驗的事；文案再改一次（例如改成「邀請碼」）
+    // 時它照樣綠，括號卻可能被加回來。故把「不可出現」單獨寫出來。
+    //
+    // 規則本身沒有消失，只是改由 ET02 手冊承載（「邀請碼於發布當下產生，之後沿用同
+    // 一組」）——畫面不寫、手冊寫「看不出來的規則」是刻意的分工。
+    expect(screen.queryByText(/永久不可變更/)).not.toBeInTheDocument()
   })
 
   it("成功後不再顯示發布鈕", () => {

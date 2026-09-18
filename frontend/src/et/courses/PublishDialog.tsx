@@ -80,7 +80,7 @@ export function PublishDialog({
             )}
             <Box>
               <Typography variant="caption" color="text.secondary">
-                課程邀請碼（發布後永久不可變更）
+                課程邀請碼
               </Typography>
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Typography variant="h5" fontFamily="monospace" letterSpacing={4}>
