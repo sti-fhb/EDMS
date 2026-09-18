@@ -178,9 +178,12 @@ describe("SurveyDialog：凍結", () => {
     expect(screen.queryByLabelText("拖曳調整第 1 題順序")).not.toBeInTheDocument()
   })
 
-  it("問卷名稱仍可編輯——名稱不影響已填答資料的意義", () => {
+  it("問卷名稱一併停用——2026-09-18 裁示凍結後不再提供改名入口", () => {
+    // 後端仍放行改名（`ET_SURVEY` 的 update 未擋），本次是**前端收掉入口**。
+    // 卡片上的編輯鈕於凍結時已停用，此處一併停用是為了讓元件內部一致——
+    // 否則單看本檔會以為凍結仍可改名。
     render(<SurveyDialog {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByLabelText(/問卷名稱/)).toBeEnabled()
+    expect(screen.getByLabelText(/問卷名稱/)).toBeDisabled()
   })
 })
 

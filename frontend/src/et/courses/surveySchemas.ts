@@ -48,7 +48,12 @@ export interface SurveyDetail {
   survey_name: string
   is_active: boolean
   version: number
-  /** 已有任何填答 → 題目與選項凍結（AC 21）。問卷名稱與停用**不受此限**。 */
+  /**
+   * 已有任何填答 → 題目與選項凍結（AC 21）。**停用不受此限**。
+   *
+   * 問卷名稱原本也不受此限，自 #364（2026-09-18 裁示）起前端一併收起改名入口；
+   * ⚠️ 後端 update 仍放行改名，此處只影響 UI。
+   */
   frozen: boolean
   responded_count: number
   pending_count: number

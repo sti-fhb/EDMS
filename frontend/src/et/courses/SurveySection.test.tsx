@@ -166,9 +166,35 @@ describe("SurveySection：刪除與停用互補（#238）", () => {
 describe("SurveySection：凍結", () => {
   const frozen = makeSurvey({ frozen: true, responded_count: 3 })
 
-  it("顯示凍結標記", () => {
+  it("不再顯示「已凍結」標記——原因改由停用的編輯鈕自己說明", () => {
     render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByText("已凍結")).toBeInTheDocument()
+    expect(screen.queryByText("已凍結")).not.toBeInTheDocument()
+  })
+
+  it("編輯鈕停用", () => {
+    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
+    expect(screen.getByRole("button", { name: "編輯" })).toBeDisabled()
+  })
+
+  it("停用的編輯鈕帶出原因與仍可做的事（#335）", async () => {
+    // 一顆灰掉而不說明原因的按鈕，教師無法判斷是壞了還是不該按。
+    // 提示須同時講「不能做什麼」與「還能做什麼」，否則資訊量比原本的 Chip 更少。
+    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
+    // disabled 按鈕帶 `pointer-events: none`，user-event 預設會拒絕對它操作。
+    // Tooltip 掛在外層 `<span>`（disabled 元素不發滑鼠事件），指標進入按鈕區域時
+    // 事件會冒泡到該 span——關掉這道檢查才模擬得出使用者實際的滑入動作。
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.hover(screen.getByRole("button", { name: "編輯" }))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip).toHaveTextContent(/已有學員填答/)
+    expect(tip).toHaveTextContent(/僅可停用問卷/)
+  })
+
+  it("未凍結時編輯鈕沒有提示", async () => {
+    // 防止 Tooltip 的 title 寫成常數——那會讓每張卡片都掛一個沒意義的提示。
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} />)
+    await userEvent.hover(screen.getByRole("button", { name: "編輯" }))
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
   })
 
   it("停用問卷仍可按——AC 21 明訂凍結後教師僅可停用", () => {
@@ -178,9 +204,9 @@ describe("SurveySection：凍結", () => {
     expect(screen.getByRole("button", { name: "停用問卷" })).toBeEnabled()
   })
 
-  it("仍可開啟視窗檢視", () => {
-    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByRole("button", { name: "編輯" })).toBeEnabled()
+  it("唯讀者即使凍結仍可檢視——那是他看內容的唯一入口", () => {
+    render(<SurveySection {...BASE_PROPS} survey={frozen} readOnly />)
+    expect(screen.getByRole("button", { name: "檢視" })).toBeEnabled()
   })
 })
 

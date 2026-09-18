@@ -26,7 +26,13 @@ export const surveyApi = {
     return data
   },
 
-  /** 更新名稱與啟用狀態。**凍結後仍可呼叫**——停用問卷走的正是這條（AC 21）。 */
+  /**
+   * 更新名稱與啟用狀態。**凍結後仍可呼叫**——停用問卷走的正是這條（AC 21）。
+   *
+   * ⚠️ 「凍結後仍可呼叫」指的是**停用**：改名雖然後端也放行，但前端自 #364 起於凍結時
+   * 不再提供入口（編輯鈕停用、視窗內名稱欄一併停用）。所以本函式在凍結情境下的**唯一
+   * 呼叫來源是停用**，不要據此以為 UI 上還有改名路徑。
+   */
   update: async (
     surveyId: number,
     payload: { survey_name: string; is_active: boolean; version: number },
