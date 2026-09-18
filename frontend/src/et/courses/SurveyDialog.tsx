@@ -155,10 +155,15 @@ interface SurveyDialogProps {
  * 「套用模板」——教師不必先決定用哪組。`templates` 仍是陣列（後端契約如此），
  * 這裡取第一組。
  *
- * ## 凍結（沿用 #204）
+ * ## 凍結（#204，範圍於 #364 擴及名稱）
  *
- * 有學員填答後題目與選項凍結，編輯入口全部收起。**問卷名稱不受此限**——
- * 名稱不影響已填答資料的意義。停用問卷的入口在卡片上（`SurveySection`），不在此視窗。
+ * 有學員填答後題目與選項凍結，編輯入口全部收起。停用問卷的入口在卡片上
+ * （`SurveySection`），不在此視窗。
+ *
+ * 🔴 **問卷名稱自 #364 起一併凍結**（2026-09-18 裁示）。原本不受此限（名稱不影響已填答
+ * 資料的意義），但卡片上的編輯鈕於凍結時已停用，此視窗對擁有者即不可達；名稱欄若還
+ * 是可編輯的，單看本檔會得到「凍結仍可改名」的錯誤結論。⚠️ **後端 update 仍放行改名**
+ * ——收掉的是前端入口，不是後端規則。
  *
  * ## 關閉時的未存草稿
  *
@@ -271,7 +276,8 @@ export function SurveyDialog({
               label="問卷名稱"
               fullWidth
               sx={{ mb: 2, maxWidth: 380 }}
-              disabled={readOnly}
+              // `locked` 而非 `readOnly`：名稱自 #364 起一併凍結，與本視窗其餘入口同一規則
+              disabled={locked}
               value={nameDraft ?? survey.survey_name}
               slotProps={{ htmlInput: { maxLength: SURVEY_NAME_MAX_LEN } }}
               onChange={(e) => setNameDraft(e.target.value)}

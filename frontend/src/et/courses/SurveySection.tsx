@@ -2,7 +2,6 @@ import AddIcon from "@mui/icons-material/Add"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined"
 import PollOutlinedIcon from "@mui/icons-material/PollOutlined"
-import LockIcon from "@mui/icons-material/Lock"
 import PauseCircleOutlineIcon from "@mui/icons-material/PauseCircleOutline"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
@@ -12,6 +11,7 @@ import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
+import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
@@ -51,10 +51,21 @@ interface SurveySectionProps {
  * 一顆沒有效果的按鈕；反過來已發布課程不給刪（`ET_SURVEY_007`），停用才是它的出路。
  * 前端隱藏僅為 UX，後端另以 `ET_SURVEY_007` 把關。
  *
- * ## 凍結（沿用 #204）
+ * ## 凍結（#204，呈現方式於 #364 改訂）
  *
  * 有學員填答後題目與選項凍結，但**停用仍可用**——AC 21 明訂此時教師僅可停用問卷。
  * （能凍結代表已有填答，也就必然是已發布課程，所以停用鈕一定在。）
+ *
+ * 呈現改為「**停用編輯鈕並說明原因**」，不再掛「已凍結」標記——原本要按進視窗才會
+ * 發現題目改不了。⚠️ `readOnly` 時編輯鈕不可停用，那是非擁有者唯一的檢視入口。
+ *
+ * 🔴 **凍結後不再提供改名入口**（2026-09-18 裁示）。`ET_SURVEY` 的 update **後端仍放行
+ * 改名**，本次只收前端入口，故這不是「後端擋下」而是「前端不給」——見
+ * [[surveyService.update]] 的註解。⛔ 日後若覺得「凍結還能改名」是 bug，請先查本行：
+ * 那曾是刻意的設計（名稱不影響已填答資料的意義），是使用者裁示改掉的，不是漏做。
+ *
+ * ℹ️ 凍結後**擁有者仍看得到題目與選項**——ET03 的「問卷結果」區塊逐題列出題幹與選項
+ * （`et/students/SurveyResultBlock`，不受 `frozen` 影響）。⛔ 不需要為此另開檢視入口。
  *
  * ## 不顯示填答狀況
  *
@@ -157,6 +168,10 @@ export function SurveySection({
   }
 
   // ── 已建立（摘要列，比照教材 / 測驗項目）──────────────────────────────────
+  // 提示文字與 disabled 共用同一個判定（比照 `CourseEditorPage` 的 `isNew`）——
+  // 兩處各寫一次會在其中一處改動時靜默不一致：唯讀者會看到一句對他不成立的提示。
+  const editDisabled = survey.frozen && !readOnly
+
   return (
     <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -193,10 +208,29 @@ export function SurveySection({
             </Typography>
           </Box>
           {!survey.is_active && <Chip size="small" label="已停用" />}
-          {survey.frozen && <Chip size="small" color="warning" icon={<LockIcon />} label="已凍結" />}
-          <Button size="small" variant="outlined" startIcon={<EditOutlinedIcon />} onClick={onOpen}>
-            {readOnly ? "檢視" : "編輯"}
-          </Button>
+          {/*
+            凍結的呈現：**停用編輯鈕 + 說明原因**，不掛「已凍結」標記（2026-09-18 裁示）。
+            標記只講狀態、不講後果，教師得按進去、發現題目旁的按鈕不見了才知道改不了。
+
+            提示須同時講「不能做什麼」與「還能做什麼」——拿掉標記之後若只寫「不可編輯」，
+            資訊量比原本的標記更少（#335「補上 disable 原因提示」的同一類缺陷）。
+
+            ⚠️ `readOnly` 時**不可**停用：那顆鈕是非擁有者看問卷內容的唯一入口。
+          */}
+          <Tooltip title={editDisabled ? "已有學員填答，題目與選項不可再修改。此時僅可停用問卷。" : ""}>
+            {/* disabled 的按鈕不發滑鼠事件，Tooltip 需要一層可接收事件的容器（比照 `CourseEditorPage` 的發布鈕）*/}
+            <span>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<EditOutlinedIcon />}
+                disabled={editDisabled}
+                onClick={onOpen}
+              >
+                {readOnly ? "檢視" : "編輯"}
+              </Button>
+            </span>
+          </Tooltip>
           {/*
             停用**只在已發布課程出現**（2026-08-31 實測回饋）：停用的作用是讓學員端
             不再顯示填寫入口，而草稿課程學員本來就看不到——那裡該用的是刪除。
