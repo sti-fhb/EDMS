@@ -9,9 +9,10 @@
 """
 
 import os
+from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -21,7 +22,8 @@ from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dp.users.models import DpUser
 from app.et.common.dm_client import TRAINING_CATEGORY
-from app.et.constants import ITEM_MATERIAL, ROLE_TEACHER
+from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL, ROLE_TEACHER
+from app.et.course.models import EtCourse
 from app.et.material.models import EtMaterial, EtMaterialDoc
 from app.et.roles.models import EtUserRole
 
@@ -70,6 +72,35 @@ async def _material(client, uid: str) -> int:
         headers=_bearer(uid),
     )
     return item.json()["material_id"]
+
+
+async def _material_with_course(client, uid: str) -> tuple[int, int]:
+    """同 `_material`，但一併回 `course_id`。
+
+    #358 M-1 起，非擁有者只能讀「已發布且期間未過」的課程，驗授權時要能改課程狀態。
+    """
+    created = await client.post(_COURSES, json={"course_name": "課程"}, headers=_bearer(uid))
+    cid = created.json()["course_id"]
+    ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(uid))
+    item = await client.post(
+        f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+        json={"item_type": ITEM_MATERIAL, "title": "教材"},
+        headers=_bearer(uid),
+    )
+    return cid, item.json()["material_id"]
+
+
+async def _publish_course(db, course_id: int) -> None:
+    """把課程直接改成「已發布且期間未過」。
+
+    走正式發布 API 要先湊齊六項檢核（標籤 / 起訖 / 教材…），那些與本檔要驗的授權無關。
+    """
+    await db.execute(
+        update(EtCourse)
+        .where(EtCourse.course_id == course_id)
+        .values(status=COURSE_PUBLISHED, open_end_at=utcnow() + timedelta(days=30))
+    )
+    await db.commit()
 
 
 async def _dm_doc(db, doc_id: str, *, name="訓練文件", status="PUBLISHED", category=TRAINING_CATEGORY) -> None:
@@ -165,10 +196,28 @@ class TestGetDetail:
         """
         owner = await _user(db, "ETM_G3")
         other = await _user(db, "ETM_G4")
-        mid = await _material(client, owner)
+        cid, mid = await _material_with_course(client, owner)
+        # M-1：非擁有者只能讀「已發布且期間未過」的課程
+        await _publish_course(db, cid)
+
         r = await client.get(f"/api/et/materials/{mid}", headers=_bearer(other))
+
         assert r.status_code == 200, r.text
         assert r.json()["material_id"] == mid
+
+    async def test_非擁有者不可讀他人草稿的教材(self, client, db) -> None:
+        """#358 M-1：唯讀瀏覽的入口是 ET01「全部課程」清單，而它**不列草稿**。
+
+        本檔對應的 `material/router.py` 檔頭原本就寫著這條顧慮（違反 `spec_us3` AC 8），
+        角色閘只把它從「任何登入者」縮成「任何教師」。回 404 不揭露存在。
+        """
+        owner = await _user(db, "ETM_G3D")
+        other = await _user(db, "ETM_G4D")
+        mid = await _material(client, owner)  # 未發布 ＝ 草稿
+
+        r = await client.get(f"/api/et/materials/{mid}", headers=_bearer(other))
+
+        assert r.status_code == 404, r.text
 
     async def test_非擁有者不可寫入(self, client, db) -> None:
         """讀放寬了，寫**沒有**——這是「可讀、不可寫」的另一半。

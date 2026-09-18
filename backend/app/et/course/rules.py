@@ -73,6 +73,41 @@ def ensure_owner_or_admin(*, owner_id: str, actor_id: str, actor_roles: frozense
     ensure_owner(owner_id=owner_id, actor_id=actor_id)
 
 
+def is_browsable_by_non_owner(*, status: str, open_end_at: datetime | None, now: datetime) -> bool:
+    """非擁有者之教師 / 管理者是否可**唯讀瀏覽**此課程的內容（`FR-ET-US7-04`、US7 場景 8）。
+
+    Args:
+        status: 課程當前狀態（`ET_COURSE_STATUS`）。
+        open_end_at: 閱課結束時間；`None` 表示沒有結束日。
+        now: 當下時間。
+
+    Returns:
+        已發布且閱課期間未過者為 `True`。
+
+    ## 條件刻意與 ET01「全部課程」清單一致
+
+    唯讀瀏覽的**入口**就是那份清單，而它只列「已發布且期間未過」者
+    （`course/repository.list_courses` 的 `scope != "mine"` 分支）。判定不一致的話會出現
+    「清單上看不到、但用 id 直接打 API 讀得到」——`material/router.py` 的檔頭正是為此
+    寫著「等同任何登入者都能讀到他人**草稿**課程的教材內容，違反 `spec_us3` AC 8」。
+
+    ## 🔴 與另兩支判定的分工，不要互相取代
+
+    | 函式 | 看什麼 | 用在哪 |
+    |---|---|---|
+    | 本函式 | `PUBLISHED` **且訖止未過** | 他人課程的唯讀瀏覽（教師端）|
+    | `publish_rules.is_visible_to_student` | `PUBLISHED` **且起始已到** | 學員端可見性 |
+    | `is_effectively_closed` | `CLOSED` **或**訖止已過 | 寫入守門（關閉期間停寫）|
+
+    三者看的是不同欄位：本函式與清單看**訖止**、學員可見性看**起始**。而
+    `is_effectively_closed` 對**草稿**回 `False`（草稿不是「關閉」，見其 docstring），
+    所以**不能**單用 `not is_effectively_closed(...)` 代替本函式——那會讓草稿通過。
+    """
+    if status != COURSE_PUBLISHED:
+        return False
+    return not is_effectively_closed(status=status, open_end_at=open_end_at, now=now)
+
+
 def ensure_tag_change_allowed(status: str, *, current: set[int], desired: set[int]) -> None:
     """草稿可自由增刪標籤；**非草稿僅可新增、不可移除**（FR-ET-US3-02）。
 

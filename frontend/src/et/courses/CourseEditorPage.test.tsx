@@ -368,7 +368,12 @@ describe("ET02 課程編輯頁", () => {
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
 
-    expect(await screen.findByText("章節至少須有 1 份教材或測驗")).toBeInTheDocument()
+    // 🔴 `CHAPTER_EMPTY` 的 `target_id` 是 **chapter_id**（fixture 的 12 = 第二章），
+    // 不是 quiz_id。原本兩個對話框都一律查 `quizNames`——撞號時會標成某個不相干的
+    // 測驗、不撞號時名稱整個消失，而後端帶 `target_id` 的唯一理由就是「指出是哪一個」。
+    expect(await screen.findByText(/章節至少須有 1 份教材或測驗（章節「第二章」）/)).toBeInTheDocument()
+    // 「去哪裡修」的第二行提示也要有——`BLOCKER_HINT` 原本沒有這個鍵
+    expect(screen.getByText(/請於該章節新增教材或測驗/)).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole("button", { name: "取消" }))

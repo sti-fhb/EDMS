@@ -19,7 +19,7 @@ import { useState } from "react"
 
 import { validateReopenSchedule } from "./reopenSchedule"
 import type { ReopenScheduleErrors } from "./reopenSchedule"
-import { BLOCKER_HINT } from "./surveySchemas"
+import { BLOCKER_HINT, blockerLabel } from "./surveySchemas"
 import type { PublishBlocker } from "./surveySchemas"
 
 interface ReopenCourseDialogProps {
@@ -27,8 +27,10 @@ interface ReopenCourseDialogProps {
   submitting: boolean
   /** 再開課重跑發布檢核所回的缺漏項目（422 `ET_PUBLISH_001`）；空陣列 = 沒有缺漏。 */
   blockers: PublishBlocker[]
-  /** 缺漏項目所指向的測驗名稱（`target_id` → 名稱），由頁面自課程詳細對照後傳入。 */
+  /** 缺漏項目所指向的測驗名稱（`quiz_id` → 名稱），由頁面自課程詳細對照後傳入。 */
   quizNames: Record<number, string>
+  /** 同上，但為 `chapter_id` → 章節名稱。兩者是獨立序號，不可混用。 */
+  chapterNames: Record<number, string>
   onSubmit: (openStartAt: string, openEndAt: string) => void
   onClose: () => void
 }
@@ -64,6 +66,7 @@ export function ReopenCourseDialog({
   submitting,
   blockers,
   quizNames,
+  chapterNames,
   onSubmit,
   onClose,
 }: ReopenCourseDialogProps) {
@@ -107,9 +110,7 @@ export function ReopenCourseDialog({
                     </ListItemIcon>
                     <ListItemText
                       primary={
-                        blocker.target_id !== null && quizNames[blocker.target_id]
-                          ? `${blocker.message}（測驗「${quizNames[blocker.target_id]}」）`
-                          : blocker.message
+                        blockerLabel(blocker, quizNames, chapterNames)
                       }
                       secondary={BLOCKER_HINT[blocker.code]}
                     />

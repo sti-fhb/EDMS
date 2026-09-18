@@ -331,7 +331,9 @@ export function QuizDialog({
                             {/* 非擁有者讀他人測驗時答案被遮蔽（#358 第 2 項）。此時**不顯示**
                                 正解數——`is_correct` 為 null，直接 filter 會算出「0 個」，
                                 那是錯誤資訊而非隱藏。 */}
-                            {quiz?.answers_visible === false
+                            {/* `!== true` 而非 `=== false`：欄位缺失或型別漂移時落到安全分支，
+                                否則會顯示「正確 0 個」——正是本段要避免的錯誤資訊 */}
+                            {quiz?.answers_visible !== true
                               ? " ｜ 檢視他人課程時不顯示正確答案"
                               : ` ｜ 正確 ${question.options.filter((o) => o.is_correct).length} 個`}
                           </Typography>

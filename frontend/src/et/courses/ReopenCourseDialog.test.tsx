@@ -31,6 +31,7 @@ function renderDialog(props: Partial<Parameters<typeof ReopenCourseDialog>[0]> =
         submitting={false}
         blockers={[]}
         quizNames={{}}
+        chapterNames={{}}
         onSubmit={onSubmit}
         onClose={onClose}
         {...props}

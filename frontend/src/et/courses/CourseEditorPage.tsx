@@ -452,6 +452,13 @@ export function EtCourseEditorPage() {
     }
   }
 
+  // `CHAPTER_EMPTY` 的 target_id 是 chapter_id，與 quiz_id 是兩個獨立序號——
+  // 各自一份對照表，`PublishDialog` 依 code 決定查哪一份（#358 第 3 項）。
+  const chapterNames: Record<number, string> = {}
+  for (const chapter of chapters) {
+    chapterNames[chapter.chapter_id] = chapter.chapter_name
+  }
+
   /**
    * 基本資料驗證——「儲存草稿」與「儲存並發布」共用。
    *
@@ -1318,6 +1325,7 @@ export function EtCourseEditorPage() {
         blockers={blockers}
         result={publishResult}
         quizNames={quizNames}
+        chapterNames={chapterNames}
         onPublish={() => publishMut.mutate()}
         onClose={() => {
           // 🔴 **關閉結果視窗後才導回列表**（#358 第 4 項），不在 `onSuccess` 當下導。
@@ -1341,6 +1349,7 @@ export function EtCourseEditorPage() {
         submitting={reopenMut.isPending}
         blockers={reopenBlockers}
         quizNames={quizNames}
+        chapterNames={chapterNames}
         onSubmit={(openStartAt, openEndAt) => reopenMut.mutate({ openStartAt, openEndAt })}
         onClose={() => {
           setReopenOpen(false)

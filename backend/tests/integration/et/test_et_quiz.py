@@ -9,7 +9,7 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -90,6 +90,26 @@ async def _add_question(client, uid: str, quiz_id: int, **kwargs) -> dict:
     r = await client.post(f"/api/et/quizzes/{quiz_id}/questions", json=_question_body(**kwargs), headers=_bearer(uid))
     assert r.status_code == 201, r.text
     return r.json()
+
+
+async def _publish_course(db, course_id: int) -> None:
+    """把課程直接改成「已發布且期間未過」。
+
+    #358 M-1 起，非擁有者只能讀這種課程；發布走正式 API 要先湊齊標籤 / 起訖 / 教材
+    等六項檢核，而那些與本檔要驗的授權無關，故直接改欄位。
+    """
+    from datetime import timedelta
+
+    from app.core.utils import utcnow
+    from app.et.constants import COURSE_PUBLISHED
+    from app.et.course.models import EtCourse
+
+    await db.execute(
+        update(EtCourse)
+        .where(EtCourse.course_id == course_id)
+        .values(status=COURSE_PUBLISHED, open_end_at=utcnow() + timedelta(days=30))
+    )
+    await db.commit()
 
 
 class TestQuizSettings:
@@ -201,8 +221,10 @@ class TestQuizSettings:
         """
         owner = await _user(db, "ETQ_S5")
         other = await _user(db, "ETQ_S6")
-        _, qid = await _quiz(client, owner)
+        cid, qid = await _quiz(client, owner)
         await client.post(f"/api/et/quizzes/{qid}/questions", json=_question_body(), headers=_bearer(owner))
+        # M-1：非擁有者只能讀「已發布且期間未過」的課程
+        await _publish_course(db, cid)
 
         r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(other))
 
@@ -214,6 +236,23 @@ class TestQuizSettings:
         assert all(o["option_text"] for o in options), "選項文字不遮"
         # 🔴 遮成 None 而非 False——後者會讓畫面顯示「0 個正解」，那是錯誤資訊不是隱藏
         assert all(o["is_correct"] is None for o in options)
+
+    async def test_非擁有者不可讀他人草稿的題庫(self, client, db) -> None:
+        """#358 M-1：唯讀瀏覽的入口是 ET01「全部課程」清單，而它**不列草稿**。
+
+        不判課程狀態的話，「清單上看不到、但用 id 直接打 API 讀得到」——`quiz/router.py`
+        的檔頭原本就寫著這條顧慮（違反 `spec_us3` AC 8），角色閘只把它從「任何登入者」
+        縮成「任何教師」。
+
+        回 404 而非 403：與孤兒測驗同一個處理，不揭露「這筆存在但你看不到」。
+        """
+        owner = await _user(db, "ETQ_S13")
+        other = await _user(db, "ETQ_S14")
+        _, qid = await _quiz(client, owner)  # 未發布 ＝ 草稿
+
+        r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(other))
+
+        assert r.status_code == 404, r.text
 
     async def test_擁有者讀得到答案(self, client, db) -> None:
         """遮蔽只針對非擁有者——少了這條，把 `answers_visible` 寫死成 False 也會全綠。"""
