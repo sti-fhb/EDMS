@@ -43,9 +43,6 @@ export const QUERY_KEYS = {
     attemptOverview: (courseId: number) => ["et", "tracking", courseId, "attempt-overview"] as const,
     attemptDetail: (attemptId: number) => ["et", "tracking", "attempts", attemptId] as const,
     surveyResult: (courseId: number) => ["et", "tracking", courseId, "survey-result"] as const,
-    /** ET-12 待加入邀請（#342）。掛在同一個 `all()` 前綴下，切課程時一併失效。 */
-    pendingInvites: (courseId: number, params: Record<string, unknown>) =>
-      ["et", "tracking", courseId, "pending-invites", params] as const,
   },
   etLearn: {
     structure: (courseId: number) => ["et", "learn", courseId] as const,

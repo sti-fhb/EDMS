@@ -9,12 +9,15 @@
 別處——見 `app/et/invitation/service.py` 模組 docstring 的取捨表。
 """
 
+from datetime import timedelta
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.audit.models import DpAuditLog
 from app.dp.notify.models import DpEmailLog
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
@@ -274,6 +277,48 @@ class TestSendInvitations:
         rows = await _enrollments(db, cid)
         assert len(rows) == 1, "重複邀請不得建第二列"
 
+    async def test_重複邀請不得改寫既有學員的加入日與來源(self, client, db) -> None:
+        """🔴 `upsert_enrollment` 的 `DO UPDATE` 必須帶 `WHERE IS_REMOVED`。
+
+        #362 之前這條路徑由**受邀者本人**對**自己那一列**執行（accept），撞鍵幾乎只可能
+        是「他被移除過」。改成邀請即加入之後**教師一次可對 50 列執行**，而重貼整份名冊
+        「補寄一次」是最可能的操作。
+
+        少了那個 `WHERE`，名冊裡原本由標籤帶入、兩個月前就加入的人會被改成今天加入、
+        來源改寫成 `EMAIL_INVITE`——ET03 以 `JOINED_AT` 排序、「加入日」欄位與任何依加入
+        時點判讀的報表全部失真，**而且沒有任何訊號**（回應照樣說已加入、稽核照樣記）。
+
+        兩位 code reviewer 獨立指出同一條，故本測試釘死它。
+        """
+        teacher = await _user(db, "iv_t14", ROLE_TEACHER)
+        student = await _account(db, "ivq@x.gov.tw", user_id="iv_q01")
+        cid = await _published_course(client, db, teacher)
+        # 先以「標籤帶入」的身分在籍，且加入時點在過去
+        long_ago = utcnow() - timedelta(days=60)
+        db.add(
+            EtEnrollment(
+                user_id=student,
+                course_id=cid,
+                join_source="TAG_DEFAULT",
+                joined_at=long_ago,
+                completion_status="IN_PROGRESS",
+                is_removed=False,
+                created_user="SYSTEM",
+                created_date=long_ago,
+                deleted=0,
+            )
+        )
+        await db.flush()
+
+        r = await _invite(client, teacher, cid, "ivq@x.gov.tw")
+
+        assert r.status_code == 200, r.text
+        rows = await _enrollments(db, cid)
+        assert len(rows) == 1
+        await db.refresh(rows[0])
+        assert rows[0].join_source == "TAG_DEFAULT", "已在籍者的來源不得被邀請改寫"
+        assert rows[0].joined_at == long_ago, "已在籍者的加入日不得被邀請改寫"
+
     async def test_同一次貼上的重複_email_只加入一次(self, client, db) -> None:
         teacher = await _user(db, "iv_t07", ROLE_TEACHER)
         await _account(db, "ivn@x.gov.tw", user_id="iv_n01")
@@ -342,6 +387,110 @@ class TestSendInvitations:
         r = await _invite(client, other, cid, "ivp@x.gov.tw")
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+class TestDisabledAccountIsRejected:
+    """停用帳號不可被邀請（#347 第一項，隨 #362 一併處理）。
+
+    `DP_USER.DELETED` **從來沒有任何 code path 會設成 1**，停用一律走 `STATUS`——所以
+    `recipients_by_emails` 的 `DELETED = 0` 對停用者完全無效。
+
+    #362 之前這個缺口的後果有限：停用者收到信也登不進來（`core/auth.py` 每請求查
+    `STATUS`），他只會停在「待加入」清單上讓教師看見並撤回。取消待加入之後他會被**直接
+    寫進 `ET_ENROLLMENT`**，而 ET03 清單與週報只濾 `IS_REMOVED` / `DELETED`——一個永遠
+    不可能完課的帳號會永久坐在完訓率的分母裡，還會出現在具名 CSV 中。
+    """
+
+    async def _disabled(self, db, email: str, user_id: str) -> str:
+        uid = await _account(db, email, user_id=user_id)
+        await db.execute(update(DpUser).where(DpUser.user_id == uid).values(status="DISABLED"))
+        await db.flush()
+        return uid
+
+    async def test_停用帳號一律擋下且不加入任何人(self, client, db) -> None:
+        teacher = await _user(db, "dis_t01", ROLE_TEACHER)
+        await _account(db, "active@x.gov.tw", user_id="dis_a01")
+        await self._disabled(db, "left@x.gov.tw", "dis_d01")
+        cid = await _published_course(client, db, teacher)
+
+        r = await _invite(client, teacher, cid, "active@x.gov.tw, left@x.gov.tw")
+
+        assert r.status_code == 422, r.text
+        body = r.json()
+        assert body["error_code"] == "ET_INVITE_008"
+        assert body["disabled_emails"] == ["left@x.gov.tw"], "須指出是哪幾筆"
+        # 全批擋下：不可只加入正常的那幾位（教師會以為全部都寄出去了）
+        assert await _enrollments(db, cid) == []
+
+    async def test_與查無帳號分碼(self, client, db) -> None:
+        """🔴 不可共用 `ET_INVITE_005`。
+
+        「請管理者建帳號」對一個**已經有帳號**的人是錯的指示，教師照做會得到一個重複
+        帳號。兩者的下一步完全相反，故必須分碼。
+        """
+        teacher = await _user(db, "dis_t02", ROLE_TEACHER)
+        await self._disabled(db, "left2@x.gov.tw", "dis_d02")
+        cid = await _published_course(client, db, teacher)
+
+        r = await _invite(client, teacher, cid, "left2@x.gov.tw")
+
+        assert r.json()["error_code"] == "ET_INVITE_008"
+        assert "尚未建立" not in r.json()["error_message"], "不可說成查無帳號"
+
+    async def test_鎖定中的帳號仍可被邀請(self, client, db) -> None:
+        """⚠️ 只擋「停用」，**不擋「鎖定中」**。
+
+        `LOCKED_UNTIL` 是連續登入失敗的暫時性鎖，幾分鐘後自動解除。因為某人剛才打錯
+        密碼就拒絕教師邀請他，教師完全無從理解——故判定用 `is_account_disabled()`
+        而非 `is_account_usable()`。少了這條，日後有人「順手改成更嚴格」不會被發現。
+        """
+        teacher = await _user(db, "dis_t03", ROLE_TEACHER)
+        locked = await _account(db, "locked@x.gov.tw", user_id="dis_l01")
+        await db.execute(
+            update(DpUser).where(DpUser.user_id == locked).values(locked_until=utcnow() + timedelta(minutes=15))
+        )
+        await db.flush()
+        cid = await _published_course(client, db, teacher)
+
+        r = await _invite(client, teacher, cid, "locked@x.gov.tw")
+
+        assert r.status_code == 200, r.text
+        assert r.json()["joined"] == 1
+
+
+class TestInviteAudit:
+    """把人加進課程必須**逐人**可追溯（Security Review MEDIUM-2）。"""
+
+    async def test_每位受邀者各一列稽核且不含個資(self, client, db) -> None:
+        """「把某人加進課程」不需要他同意，他卻會因此出現在具名的問卷結果與完訓統計裡。
+
+        事後問「誰把我加進去的」，彙總列（`target_id = 課程`）答不出來。同模組的**移除**
+        學員早就是逐人一列——減人可追溯、加人不可追溯，那個不對稱正好反了。
+
+        ⚠️ 稽核**必須在加入迴圈結束後才寫**：`log_action` 會取一把全平台單一 key 的交易級
+        advisory lock，在逐筆迴圈裡呼叫會讓整批的 DB 往返與寄信都在持鎖狀態下進行，
+        期間所有寫稽核的動作（含登入）全平台排隊。本條只驗結果，持鎖窗由 code review 守。
+        """
+        teacher = await _user(db, "aud_t01", ROLE_TEACHER)
+        await _account(db, "auda@x.gov.tw", user_id="aud_a01")
+        await _account(db, "audb@x.gov.tw", user_id="aud_b01")
+        cid = await _published_course(client, db, teacher)
+
+        await _invite(client, teacher, cid, "auda@x.gov.tw, audb@x.gov.tw")
+
+        logs = (
+            (
+                await db.execute(
+                    select(DpAuditLog).where(DpAuditLog.func_name == "ET-ENROLLMENT").order_by(DpAuditLog.log_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [log.target_id for log in logs] == [f"{cid}:aud_a01", f"{cid}:aud_b01"]
+        for log in logs:
+            assert "@" not in (log.description or ""), "description 不得含 Email"
+            assert "姓名" not in (log.description or ""), "description 不得含姓名"
 
 
 class TestUnknownEmailIsRejected:

@@ -122,6 +122,33 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     expect(screen.queryByLabelText("主旨")).not.toBeInTheDocument()
   })
 
+  it("後端回 ET_INVITE_008 時另外列出已停用的帳號，且不說成「尚未建立」", async () => {
+    // 🔴 與 `ET_INVITE_005` 分開呈現。合併成一句「這些 Email 有問題」會讓教師去請管理者
+    // 建帳號——而那個人已經有帳號了，照做會得到一個重複帳號。兩者的補救方向相反。
+    const user = userEvent.setup()
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations/preview", () =>
+        HttpResponse.json(
+          {
+            error_code: "ET_INVITE_008",
+            error_message: "以下帳號已停用，無法邀請；請確認名單或請管理者先啟用帳號",
+            disabled_emails: ["left@x.gov.tw"],
+          },
+          { status: 422 },
+        ),
+      ),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+
+    await user.type(screen.getByLabelText("學員 Email"), "left@x.gov.tw")
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+
+    const alert = (await screen.findByText(/無法邀請（請確認名單或請管理者先啟用）/)).closest('[role="alert"]')
+    expect(alert).toHaveTextContent("left@x.gov.tw")
+    expect(screen.queryByText(/尚未建立 EDMS 帳號/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("主旨")).not.toBeInTheDocument()
+  })
+
   it("格式錯誤時不打 API，直接在欄位下方指出是哪幾筆", async () => {
     const user = userEvent.setup()
     let called = false

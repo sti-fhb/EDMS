@@ -46,6 +46,19 @@ Create Date: 2026-09-18 10:30:00.000000
 於是 `JOINED_AT` 會是那幾次邀請中任意一次的 `SENT_AT`。加上排序後固定取**最早**那次，
 也就是「教師第一次邀請他」的時點，與單筆情形的語意一致。
 
+## JOIN 的兩個條件都是刻意的
+
+`u."DELETED" = 0` 與執行期 `recipients_by_emails` 對齊（實務上恆真——EDMS 無刪除使用者
+功能——但兩邊不一致本身就是日後誤讀的來源）。
+
+`lower()` 比對是因為 `UQ_DP_USER_EMAIL` 為**大小寫敏感**的唯一鍵，`A@x` 與 `a@x` 在
+schema 上可並存。真的並存時兩個帳號都會被加入課程——那是對的：教師邀的那個 Email
+確實對應到這兩個人，少加任何一個都是錯的。
+
+**不濾帳號狀態**：回填的是教師**過去已經按下寄出**的邀請，當時停用檢核還不存在
+（`ET_INVITE_008` 隨本次一併加入）。在這裡補判會讓「回填」變成「重新套用今天的規則」，
+而那不是 migration 該做的事——停用帳號進到名單後由教師於 ET03 移除即可。
+
 ## 查無帳號的 Email 一併落空
 
 SA 裁示「只邀請既有帳號」是後來才加的檢核，早期可能留有寄給非 EDMS 帳號的 `PENDING`
@@ -88,7 +101,7 @@ _BACKFILL = text(
     SELECT u."USER_ID", i."COURSE_ID", :source, i."SENT_AT", :completion,
            false, 'SYSTEM', i."SENT_AT", 0
     FROM "ET_INVITATION" i
-    JOIN "DP_USER" u ON lower(u."EMAIL") = lower(i."EMAIL")
+    JOIN "DP_USER" u ON lower(u."EMAIL") = lower(i."EMAIL") AND u."DELETED" = 0
     WHERE i."STATUS" = 'PENDING' AND i."DELETED" = 0
     ORDER BY i."SENT_AT"
     ON CONFLICT ON CONSTRAINT "UQ_ET_ENROLLMENT_USER_COURSE" DO NOTHING

@@ -40,6 +40,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.dp.users.account_status import is_account_disabled
 from app.et.course.rules import ensure_owner
 from app.et.invitation.repository import EtInvitationRepository
 from app.et.invitation.rules import ensure_invitable, parse_emails
@@ -69,7 +70,7 @@ _NO_EMAILS = AppError(status_code=422, detail="Email 格式不正確或數量超
 
 
 class EtInvitationService:
-    """Email 邀請之預覽、寄送與受邀加入。"""
+    """Email 邀請之預覽與寄送（#362 起「寄送」即「加入」，無受邀加入這一步）。"""
 
     def __init__(
         self,
@@ -99,7 +100,7 @@ class EtInvitationService:
         Raises:
             AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002` 非擁有者；
                 422 `ET_INVITE_003` Email 不合法；422 `ET_INVITE_004` 課程非已發布；
-                422 `ET_INVITE_005` 有 Email 尚無 EDMS 帳號；
+                422 `ET_INVITE_005` 有 Email 尚無 EDMS 帳號；422 `ET_INVITE_008` 有帳號已停用；
                 404/409/422 `DP_MAIL_*` 範本問題。
         """
         course = await self._require_invitable_course(db, course_id, actor_id)
@@ -175,21 +176,52 @@ class EtInvitationService:
                 mail_failed.append(recipient.email)
         joined = len(recipients)
 
-        # 收件人**不寫進 description**：那是個資，而稽核表的保存期比業務資料長。
-        # 需要知道加了誰時查 `ET_ENROLLMENT`（`JOIN_SOURCE = EMAIL_INVITE` + `COURSE_ID`
-        # 可對上本筆稽核的 target_id）。`ET_INVITATION` 已隨 #362 移除。
-        await self._audit.log_action(
-            db,
-            module=_MODULE,
-            func_name=_FUNC_NAME,
-            action_type="CREATE",
-            result="SUCCESS",
-            operator_id=operator.user_id,
-            target_id=str(course_id),
-            description=f"Email 邀請加入 {joined} 位（信件排入失敗 {len(mail_failed)} 筆）",
-            source_ip=get_client_ip(),
-        )
+        await self._write_audit(db, course_id=course_id, recipients=recipients, operator=operator)
         return EmailInviteResult(joined=joined, mail_failed=mail_failed)
+
+    async def _write_audit(
+        self, db: AsyncSession, *, course_id: int, recipients: list[Recipient], operator: OperatorInfo
+    ) -> None:
+        """逐人一列稽核——**但一定在加入迴圈結束之後才寫**。
+
+        ## 為何逐人而非一筆彙總
+
+        「把某人加進課程」是不需要他同意的動作，而他會因此出現在具名的問卷結果、核可
+        名單與完訓統計裡。事後若有人問「誰把我加進去的」，彙總列（`target_id = 課程`、
+        `description = 加入 N 位`）答不出來。
+
+        同模組的**移除**學員早就是逐人一列、`target_id = f"{course_id}:{user_id}"`
+        （`tracking/service.py`）——減人可追溯、加人不可追溯，這個不對稱正好反了。
+
+        原本的說法是「需要知道加了誰時查 `ET_ENROLLMENT`」，但那張表是**可變的業務
+        資料**：同一支 `send()` 的 upsert 會改寫 `JOIN_SOURCE` 與 `JOINED_AT`，事後查到
+        的值不保證對應到某一次動作。稽核表的保存期比業務資料長，追溯責任不該外包給它。
+
+        ## 🔴 為何不在迴圈裡直接寫
+
+        `AuditLogService.log_action` 會取一把**全平台單一固定 key** 的交易級 advisory
+        lock（`dp/audit/repository.acquire_chain_lock`），持有到外層交易 commit 為止。
+        在逐筆迴圈裡呼叫，第一筆就取走鎖，之後整批的 DB 往返與**寄信**都在持鎖狀態下
+        進行——期間所有寫稽核的動作（**包含登入**）全平台排隊。#352 踩過一次，作法同
+        `approval/service.py::approve`：迴圈只累積、結束後統一寫。
+
+        `source_ip` 也在迴圈外取一次：同一個請求的來源不會變，逐筆取只是重複工作。
+        """
+        source_ip = get_client_ip()
+        for recipient in recipients:
+            # `description` / `target_id` 只放 `USER_ID`，**不放 Email 或姓名**——
+            # 那是個資，而稽核表的保存期比業務資料長（移除路徑同此作法）。
+            await self._audit.log_action(
+                db,
+                module=_MODULE,
+                func_name=_FUNC_NAME,
+                action_type="CREATE",
+                result="SUCCESS",
+                operator_id=operator.user_id,
+                target_id=f"{course_id}:{recipient.user_id}",
+                description="Email 邀請加入課程",
+                source_ip=source_ip,
+            )
 
     async def _deliver(self, db: AsyncSession, *, course, recipient, teacher_name: str) -> bool:
         """把一封邀請信排入 outbox。
@@ -230,7 +262,7 @@ class EtInvitationService:
         return course
 
     async def _require_known_recipients(self, db: AsyncSession, emails: list[str]) -> list[Recipient]:
-        """比對 `DP_USER`，**查無帳號者一律擋下**（不加入、不寄信）。
+        """比對 `DP_USER`，**查無帳號或帳號已停用者一律擋下**（不加入、不寄信）。
 
         SA 裁示：Email 邀請的對象必須是既有的 EDMS 使用者。教師是用貼的，打錯一個字就會
         把課程資訊寄給系統外的陌生人，而他**永遠不會發現**——寄信結果只記「排入佇列」
@@ -240,16 +272,29 @@ class EtInvitationService:
         🔴 這道檢核同時是 #362「取消待加入」的前提：正因為收件人一定是既有帳號，才能
         在寄信當下就把人加進 `ET_ENROLLMENT`。放寬它之前請先重讀模組 docstring。
 
-        > 取捨：這使本端點可被用來「一次貼 50 筆 Email、得知哪些有 EDMS 帳號」。呼叫者是
-        > 已認證的教師 / 管理者，且只得到有無帳號的布林值（不回姓名等個資），SA 已評估
-        > 可接受；router 之使用者維度限流一併限制了探測速率。
+        ## 停用帳號擋下（#347 第一項，隨 #362 一併處理）
+
+        `DP_USER.DELETED` **從來沒有任何 code path 會設成 1**（EDMS 無刪除使用者功能），
+        離職／轉調／閒置 90 天自動禁用走的都是 `STATUS`——所以 `recipients_by_emails` 的
+        `DELETED = 0` 對停用者完全無效。
+
+        #362 之前這個缺口的後果有限：停用者收到信也登不進來（`core/auth.py` 每請求查
+        `STATUS`，非 `ACTIVE` 回 403），他只會停在「待加入」清單上讓教師看見。**取消待
+        加入之後後果變嚴重**——他會被直接寫進 `ET_ENROLLMENT`，而 ET03 清單與週報只濾
+        `IS_REMOVED` / `DELETED`，於是一個永遠不可能完課的帳號會**永久坐在完訓率的分母
+        裡**，還會出現在具名 CSV 中。
+
+        ⚠️ 只擋「停用」，**不擋「鎖定中」**：`LOCKED_UNTIL` 是連續登入失敗的暫時性鎖，
+        幾分鐘後自動解除。因為某人剛才打錯密碼就拒絕教師邀請他，教師完全無從理解。
+        故用 `is_account_disabled()` 而非 `is_account_usable()`。
 
         Returns:
             依 `emails` 原順序排列之收件人（含姓名，供寄信時個人化）。
 
         Raises:
-            AppError: 任一筆查無帳號（422 `ET_INVITE_005`）。是哪幾筆放在
-                `extra.unknown_emails`——`error_message` 依 `sti-error-codes` 不得嵌入動態值。
+            AppError: 任一筆查無帳號（422 `ET_INVITE_005`，明細在 `extra.unknown_emails`）；
+                任一筆帳號已停用（422 `ET_INVITE_008`，明細在 `extra.disabled_emails`）。
+                `error_message` 依 `sti-error-codes` 不得嵌入動態值，故明細一律走 `extra`。
         """
         by_email = {r.email: r for r in await self._people.recipients_by_emails(db, emails)}
         unknown = [e for e in emails if e not in by_email]
@@ -259,5 +304,15 @@ class EtInvitationService:
                 detail="以下 Email 尚未建立 EDMS 帳號，請確認拼寫或請管理者先建立帳號",
                 error_code="ET_INVITE_005",
                 extra={"unknown_emails": unknown},
+            )
+        # 🔴 與 `ET_INVITE_005` **分碼**：兩者的下一步完全不同——「請管理者建帳號」對一個
+        # 已經有帳號的人是錯的指示，教師照做會得到一個重複帳號。
+        disabled = [e for e in emails if is_account_disabled(by_email[e].status)]
+        if disabled:
+            raise AppError(
+                status_code=422,
+                detail="以下帳號已停用，無法邀請；請確認名單或請管理者先啟用帳號",
+                error_code="ET_INVITE_008",
+                extra={"disabled_emails": disabled},
             )
         return [by_email[e] for e in emails]
