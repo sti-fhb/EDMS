@@ -908,7 +908,7 @@ export function EtCourseEditorPage() {
       {course?.invitation_code && (
         <Alert severity="info" sx={{ mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-            <span>課程邀請碼（發布後永久不可變更）：</span>
+            <span>課程邀請碼：</span>
             <Typography component="span" fontFamily="monospace" fontWeight={700} letterSpacing={3}>
               {course.invitation_code}
             </Typography>

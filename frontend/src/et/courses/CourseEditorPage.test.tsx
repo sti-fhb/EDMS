@@ -427,6 +427,17 @@ function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {
 }
 
 describe("ET02 課程關閉與再開課", () => {
+  it("編輯頁的邀請碼不帶「發布後永久不可變更」的括號說明（#359 第 2 項）", async () => {
+    useCourse("PUBLISHED")
+    renderEditor()
+
+    // 邀請碼本身與複製鈕行為不變（AC）
+    expect(await screen.findByText("01234567")).toBeInTheDocument()
+    // 規則改由 ET02 手冊承載（「邀請碼於發布當下產生，之後沿用同一組」）——畫面不寫、
+    // 手冊寫「看不出來的規則」是刻意的分工。
+    expect(screen.queryByText(/永久不可變更/)).not.toBeInTheDocument()
+  })
+
   it("已發布課程顯示「關閉課程」，不顯示「再開課」", async () => {
     useCourse("PUBLISHED")
     renderEditor()
