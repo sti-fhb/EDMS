@@ -31,7 +31,13 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
 afterEach(() => {
   cleanup()
   server.resetHandlers()
-  localStorage.clear()
+  // 純邏輯測試以檔首 `// @vitest-environment node` 跳過 jsdom（#376），那個環境沒有
+  // `localStorage`——少了這道判定，那些檔案的**每一條**測試都會死在這行的
+  // `ReferenceError`，而錯誤指向本檔、不指向測試，很難看出是環境問題。
+  //
+  // 用 `typeof` 而非 try/catch：後者會把真正的清理失敗一起吞掉，讓測試間的污染變成
+  // 靜默問題。`cleanup()` 不需要同樣處理——它在 node 環境下實測不拋錯。
+  if (typeof localStorage !== "undefined") localStorage.clear()
 })
 
 afterAll(() => server.close())
