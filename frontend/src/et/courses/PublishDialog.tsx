@@ -17,7 +17,7 @@ import ListItemText from "@mui/material/ListItemText"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
-import { BLOCKER_HINT } from "./surveySchemas"
+import { BLOCKER_HINT, blockerLabel } from "./surveySchemas"
 import type { PublishBlocker, PublishResult } from "./surveySchemas"
 
 interface PublishDialogProps {
@@ -30,6 +30,8 @@ interface PublishDialogProps {
   result: PublishResult | null
   /** 缺漏項目所指向的測驗名稱（`target_id` → 名稱），由頁面自課程詳細對照後傳入。 */
   quizNames: Record<number, string>
+  /** `chapter_id` → 章節名稱。供 `CHAPTER_EMPTY` 指出是哪一章（#358 第 3 項）。 */
+  chapterNames: Record<number, string>
   onPublish: () => void
   onClose: () => void
 }
@@ -55,6 +57,7 @@ export function PublishDialog({
   blockers,
   result,
   quizNames,
+  chapterNames,
   onPublish,
   onClose,
 }: PublishDialogProps) {
@@ -121,9 +124,7 @@ export function PublishDialog({
                   </ListItemIcon>
                   <ListItemText
                     primary={
-                      blocker.target_id !== null && quizNames[blocker.target_id]
-                        ? `${blocker.message}（測驗「${quizNames[blocker.target_id]}」）`
-                        : blocker.message
+                      blockerLabel(blocker, quizNames, chapterNames)
                     }
                     secondary={BLOCKER_HINT[blocker.code]}
                   />

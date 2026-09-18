@@ -89,7 +89,18 @@ export interface DmDocOption {
 export interface OptionRow {
   option_id: number
   option_text: string
-  is_correct: boolean
+  /**
+   * 🔴 **`null` 代表「本次請求無權檢視答案」**，不是「此選項非正解」（#358 第 2 項）。
+   *
+   * 非該課程擁有者讀取他人測驗時，後端一律遮成 `null`——`FR-ET-US7-04` 要的是唯讀
+   * 瀏覽，而答案不在瀏覽所需之內；且多重角色可並存，兼具教師與學員者否則能先看到
+   * 自己正要考的答案。
+   *
+   * ⚠️ 判斷「有幾個正解」請先看 `QuizDetail.answers_visible`，**不要直接
+   * `filter(o => o.is_correct)`**——`null` 是 falsy，那樣會顯示「0 個正解」，
+   * 是錯誤資訊而非隱藏。
+   */
+  is_correct: boolean | null
   sort_order: number
 }
 
@@ -114,6 +125,8 @@ export interface QuizDetail {
   questions: QuestionRow[]
   /** 後端算出之配分總和——UI 常駐顯示，未達 100 不阻擋儲存。 */
   points_total: number
+  /** 本次請求是否看得到正確答案（僅該課程擁有者為 `true`）。見 `OptionRow.is_correct`。 */
+  answers_visible: boolean
 }
 
 // ── 表單驗證（Zod）──────────────────────────────────────────────────────────

@@ -318,6 +318,69 @@ describe("ET02 課程編輯頁", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 
+  it("發布成功後先看到結果，關閉結果視窗才導回列表（#358 第 4 項）", async () => {
+    // 🔴 不可在 `onSuccess` 當下導回。`publishResult` 帶著「帶入 N 位學員」與**邀請碼**，
+    // 而邀請碼只有這一次會顯示——立刻導回等於把它從畫面上抽掉。
+    //
+    // 對照組是「儲存草稿」：它 `onSuccess` 就導回（上方有測試），因為沒有結果要看。
+    const user = userEvent.setup()
+    server.use(
+      http.put("/api/et/courses/:courseId", () => HttpResponse.json({ course_id: 1, version: 1 })),
+      http.get("/api/et/courses/:courseId/publish-check", () =>
+        HttpResponse.json({ can_publish: true, blockers: [] }),
+      ),
+      http.post("/api/et/courses/:courseId/publish", () =>
+        HttpResponse.json({
+          course_id: 1,
+          status: "PUBLISHED",
+          invitation_code: "ABC12345",
+          version: 1,
+          invited_count: 7,
+        }),
+      ),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
+    await user.click(await screen.findByRole("button", { name: "確認發布" }))
+
+    // 結果仍在畫面上，且**此時還沒導回**
+    expect(await screen.findByText(/已依受訓單位標籤帶入 7 位學員/)).toBeInTheDocument()
+    expect(screen.getByText("ABC12345")).toBeInTheDocument()
+    expect(navigateSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "關閉" }))
+
+    expect(navigateSpy).toHaveBeenCalledWith("/et/courses")
+  })
+
+  it("發布失敗時留在編輯頁，不導回（#358 第 4 項）", async () => {
+    // 失敗會改設 `blockers` 讓教師就地補缺漏；導回列表等於要他自己找回那門課。
+    const user = userEvent.setup()
+    server.use(
+      http.put("/api/et/courses/:courseId", () => HttpResponse.json({ course_id: 1, version: 1 })),
+      http.get("/api/et/courses/:courseId/publish-check", () =>
+        HttpResponse.json({
+          can_publish: false,
+          blockers: [{ code: "CHAPTER_EMPTY", message: "章節至少須有 1 份教材或測驗", target_id: 12 }],
+        }),
+      ),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
+
+    // 🔴 `CHAPTER_EMPTY` 的 `target_id` 是 **chapter_id**（fixture 的 12 = 第二章），
+    // 不是 quiz_id。原本兩個對話框都一律查 `quizNames`——撞號時會標成某個不相干的
+    // 測驗、不撞號時名稱整個消失，而後端帶 `target_id` 的唯一理由就是「指出是哪一個」。
+    expect(await screen.findByText(/章節至少須有 1 份教材或測驗（章節「第二章」）/)).toBeInTheDocument()
+    // 「去哪裡修」的第二行提示也要有——`BLOCKER_HINT` 原本沒有這個鍵
+    expect(screen.getByText(/請於該章節新增教材或測驗/)).toBeInTheDocument()
+    expect(navigateSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    expect(navigateSpy).not.toHaveBeenCalled()
+  })
+
   it("「儲存並發布」按鈕呈現但停用（發布屬 #204）", async () => {
     renderNewEditor()
     const publish = await screen.findByRole("button", { name: "儲存並發布" })

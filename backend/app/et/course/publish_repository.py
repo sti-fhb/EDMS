@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.et.catalog.models import EtCourseTag
 from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ
 from app.et.course.models import EtChapter, EtCourse, EtItem
-from app.et.course.publish_rules import CourseSnapshot, QuizSummary
+from app.et.course.publish_rules import ChapterSummary, CourseSnapshot, QuizSummary
 from app.et.material.models import EtMaterialDoc
 from app.et.quiz.models import EtQuestion
 from app.et.survey.models import EtSurvey, EtSurveyQuestion
@@ -39,13 +39,14 @@ class EtPublishRepository:
         Returns:
             供 `evaluate_publish` 判斷之快照。
         """
-        chapter_ids = await self._chapter_ids(db, course.course_id)
+        chapters = await self._chapter_summaries(db, course.course_id)
+        chapter_ids = [c.chapter_id for c in chapters]
         return CourseSnapshot(
             status=course.status,
             open_start_at=course.open_start_at,
             open_end_at=course.open_end_at,
             tag_count=await self._tag_count(db, course.course_id),
-            chapter_count=len(chapter_ids),
+            chapters=chapters,
             material_count=await self._item_count(db, chapter_ids, ITEM_MATERIAL),
             quizzes=await self._quiz_summaries(db, chapter_ids),
             doc_ids=await self._doc_ids(db, chapter_ids),
@@ -72,11 +73,24 @@ class EtPublishRepository:
             or 0
         )
 
-    async def _chapter_ids(self, db: AsyncSession, course_id: int) -> list[int]:
-        rows = await db.scalars(
-            select(EtChapter.chapter_id).where(EtChapter.course_id == course_id, EtChapter.deleted == 0)
+    async def _chapter_summaries(self, db: AsyncSession, course_id: int) -> tuple[ChapterSummary, ...]:
+        """逐章節的項目數（#358 第 3 項）。
+
+        🔴 **`LEFT OUTER JOIN`，不可用 INNER**：沒有項目的章節正是本次要抓的對象，
+        INNER JOIN 會讓它們整個從結果消失，檢核永遠不觸發——而測試若只用「有項目的
+        章節」建資料也看不出來。與下方 `_quiz_summaries` 踩過的是同一個坑。
+
+        依 `SORT_ORDER` 排序，使缺漏清單的順序與教師在畫面上看到的章節順序一致。
+        """
+        rows = await db.execute(
+            select(EtChapter.chapter_id, func.count(EtItem.item_id))
+            .select_from(EtChapter)
+            .outerjoin(EtItem, (EtItem.chapter_id == EtChapter.chapter_id) & (EtItem.deleted == 0))
+            .where(EtChapter.course_id == course_id, EtChapter.deleted == 0)
+            .group_by(EtChapter.chapter_id, EtChapter.sort_order)
+            .order_by(EtChapter.sort_order)
         )
-        return list(rows)
+        return tuple(ChapterSummary(chapter_id=cid, item_count=count) for cid, count in rows.all())
 
     async def _tag_count(self, db: AsyncSession, course_id: int) -> int:
         """課程已掛之受訓單位標籤數。

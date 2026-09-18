@@ -1,8 +1,16 @@
 """ET 測驗設定與題目 API（US3 / #203）。
 
 router-level 掛 `get_et_context` + `require_et_roles(ET_TEACHER, ET_ADMIN)`——本
-router 服務的是 ET02 教師編輯畫面，且**回應含正確答案**（`OptionRow.is_correct`）。
+router 服務的是 ET02 教師編輯畫面，且回應含 `OptionRow.is_correct`（正確答案）。
 若只掛 `get_et_context`，等同任何登入者（人人皆有學員角色）都能把答案撈出來。
+
+⚠️ **答案只對該課程擁有者可見（#358 第 2 項）**：`GET /quizzes/{id}` 對非擁有者把
+`is_correct` 遮成 `None`，並以 `QuizDetail.answers_visible=False` 明示。理由是多重角色
+可並存——兼具教師與學員者否則能先看到自己正要考的答案。寫入路徑仍為 owner-only。
+
+⚠️ 非擁有者亦**只能讀「已發布且期間未過」的課程**（#358 M-1）：唯讀瀏覽的入口是
+ET01「全部課程」清單，而它只列符合該條件者；不判的話用 id 直接打 API 就讀得到他人
+草稿的題庫，違反 `spec_us3` AC 8。不符者回 404（不揭露存在）。
 
 > 學員端的測驗作答有自己的端點與回應形狀（**不含 `is_correct`**），屬 #6。
 > 兩者共用 model、但**絕不可共用 schema**。

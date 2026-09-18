@@ -9,6 +9,7 @@
 """
 
 from datetime import datetime
+from typing import NamedTuple
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,19 @@ from app.et.material.repository import EtMaterialRepository
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz
 from app.et.quiz.repository import EtQuizRepository
+
+
+class ResolvedCourse(NamedTuple):
+    """由教材 / 測驗反查到的所屬課程（`resolve_owner` 的回傳）。
+
+    刻意**不是 ORM 實體**：呼叫端只需要這四個值來做授權判定，回實體會讓它們有機會
+    順手改課程欄位，也會在逐筆 commit 的情境下踩到「rollback 使實體 expire」那個坑。
+    """
+
+    course_id: int
+    owner_id: str
+    status: str
+    open_end_at: datetime | None
 
 
 class EtCourseRepository:
@@ -664,8 +678,8 @@ class EtItemRepository:
 
     async def resolve_owner(
         self, db: AsyncSession, *, material_id: int | None = None, quiz_id: int | None = None
-    ) -> tuple[int, str] | None:
-        """由教材 / 測驗反查其所屬課程，回 `(course_id, owner_id)`。
+    ) -> ResolvedCourse | None:
+        """由教材 / 測驗反查其所屬課程。
 
         單次 join 而非「教材 → 項目 → 章節 → 課程」四段查詢：擁有權判定在每個教材 /
         測驗端點都要做一次，四段查詢會讓每個請求多三個 round trip。
@@ -681,14 +695,19 @@ class EtItemRepository:
         else:
             return None
         row = await db.execute(
-            select(EtCourse.course_id, EtCourse.owner_id)
+            # `status` / `open_end_at` 一併取回：非擁有者的唯讀瀏覽要判「已發布且期間
+            # 未過」（#358 M-1）。分兩次查等於為每個教材 / 測驗端點多一個 round trip，
+            # 而這支的存在理由正是避免那件事。
+            select(EtCourse.course_id, EtCourse.owner_id, EtCourse.status, EtCourse.open_end_at)
             .join(EtChapter, EtChapter.course_id == EtCourse.course_id)
             .join(EtItem, EtItem.chapter_id == EtChapter.chapter_id)
             .where(condition, EtItem.deleted == 0, EtChapter.deleted == 0, EtCourse.deleted == 0)
             .limit(1)
         )
         found = row.first()
-        return (found[0], found[1]) if found else None
+        if found is None:
+            return None
+        return ResolvedCourse(course_id=found[0], owner_id=found[1], status=found[2], open_end_at=found[3])
 
     async def apply_order(self, db: AsyncSession, order_map: dict[int, int], operator: OperatorInfo) -> None:
         """依 `{item_id: sort_order}` 批次更新順序（**兩階段寫入**）。

@@ -10,7 +10,7 @@ const BASE_PROPS = {
   publishing: false,
   blockers: [],
   result: null,
-  quizNames: {},
+  quizNames: {}, chapterNames: {},
   onPublish: () => {},
   onClose: () => {},
 }
@@ -85,6 +85,7 @@ describe("PublishDialog：有缺漏", () => {
         {...BASE_PROPS}
         blockers={[{ code: "QUIZ_NO_QUESTION", message: "測驗至少須有 1 題", target_id: 999 }]}
         quizNames={{}}
+      chapterNames={{}}
       />,
     )
     expect(screen.getByText("測驗至少須有 1 題")).toBeInTheDocument()

@@ -165,12 +165,57 @@ export interface PublishResult {
 export const BLOCKER_HINT: Record<string, string> = {
   NO_CHAPTER: "請於「章節」區塊新增至少 1 個章節",
   NO_MATERIAL: "請於章節內新增至少 1 份教材",
+  CHAPTER_EMPTY: "請於該章節新增教材或測驗，或刪除這個空章節",
   NO_TAG: "請於「基本資料」選擇受訓單位標籤",
   NO_SCHEDULE: "請於「基本資料」填寫課程起訖時間",
   QUIZ_POINTS: "請調整該測驗各題配分，使總和為 100",
   QUIZ_NO_QUESTION: "請為該測驗新增至少 1 題",
   SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或停用該問卷",
   OBSOLETE_DOC: "請於教材中移除已廢止文件之引用",
+}
+
+/**
+ * 缺漏代碼 → 其 `target_id` 指向哪一種物件。
+ *
+ * 🔴 **`target_id` 的意義依 `code` 而定，不是一律 `quiz_id`。** `CHAPTER_EMPTY`
+ * （#358 第 3 項）帶的是 `chapter_id`，而 `chapter_id` 與 `quiz_id` 是兩個各自獨立
+ * 的序號：
+ *
+ * - 撞號時 → 空章節會被標成「（測驗「某測驗」）」，指向一個毫不相干的物件
+ * - 不撞號時 → 名稱整個查不到，教師看不出是哪一章，後端帶 `target_id` 的用途落空
+ *
+ * ⚠️ **未列於此表的代碼一律不標名稱**（fail-closed）。日後新增帶 `target_id` 的代碼
+ * 若忘了登記，結果是「少一段括號」而不是「標到別的東西」。
+ */
+export const BLOCKER_TARGET_KIND: Record<string, "quiz" | "chapter"> = {
+  QUIZ_POINTS: "quiz",
+  QUIZ_NO_QUESTION: "quiz",
+  CHAPTER_EMPTY: "chapter",
+}
+
+/**
+ * 缺漏文案——**`target_id` 指向哪一種物件由 `code` 決定**，不可一律當 `quiz_id`。
+ *
+ * `PublishDialog`（發布）與 `ReopenCourseDialog`（再開課）呈現的是**同一組缺漏**
+ * （後端兩條路徑共用 `evaluate_publish`），故文案也共用這一支。原本兩處各自複製了
+ * 一段「查 `quizNames`」的行內判斷，`CHAPTER_EMPTY` 一加就同時在兩個地方標錯。
+ */
+export function blockerLabel(
+  blocker: PublishBlocker,
+  quizNames: Record<number, string>,
+  chapterNames: Record<number, string>,
+): string {
+  if (blocker.target_id === null) return blocker.message
+  const kind = BLOCKER_TARGET_KIND[blocker.code]
+  if (kind === "chapter") {
+    const name = chapterNames[blocker.target_id]
+    return name ? `${blocker.message}（章節「${name}」）` : blocker.message
+  }
+  if (kind === "quiz") {
+    const name = quizNames[blocker.target_id]
+    return name ? `${blocker.message}（測驗「${name}」）` : blocker.message
+  }
+  return blocker.message
 }
 
 // ── 模板（對齊後端 `app/et/survey/templates.py`）─────────────────────────────

@@ -136,12 +136,27 @@ export interface AttemptOverview {
   students: TeacherStudentAttempts[]
 }
 
-/** 逐題明細的一個選項（沿用學員端 `OptionResult` 形狀）。 */
+/**
+ * 逐題明細的一個選項。
+ *
+ * 🔴 **欄位名以後端 `app/et/attempt/schemas.py::OptionResult` 為準**：`text` / `selected`，
+ * **不是** `option_text` / `is_selected`。本檔其餘型別多用 `xxx_text` 風格，但這一個不行
+ * ——它是後端回應的原樣，而那個 schema 由學員端與教師端**兩個端點共用**
+ * （`attempt/service.py::to_question_result`），改後端等於動到已交付的學員端 API。
+ *
+ * ⚠️ 這裡曾經抄錯過（#358）：型別是 TypeScript `interface`、只存在於編譯期，執行期讀到
+ * `undefined` 不會爆——選項文字變空白、`selected` 為 falsy 故每題都標成未選，**連滿分的
+ * 題目都顯示「（正確答案，未選）」**，而且不報錯、CI 全綠。
+ *
+ * 依 `sti-zod-conventions.md`，API 回應型別**保留手寫 interface**（zod 只用於表單），
+ * 所以防護不是執行期驗證，而是後端 `test_attempt_option_result_contract.py` 釘住欄位名 +
+ * 前端 fixture 以後端名字撰寫 + 一條真的渲染選項的測試。
+ */
 export interface OptionResult {
   option_id: number
-  option_text: string
+  text: string
   is_correct: boolean
-  is_selected: boolean
+  selected: boolean
 }
 
 /** 逐題明細的一題。 */

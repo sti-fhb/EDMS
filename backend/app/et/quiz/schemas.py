@@ -112,13 +112,27 @@ class QuestionReorderReq(BaseModel):
 
 
 class OptionRow(BaseModel):
-    """選項列（回應）。"""
+    """選項列（回應）。
+
+    🔴 **`is_correct` 為 `None` 代表「本次請求無權檢視答案」**，不是「此選項非正解」
+    （#358 第 2 項）。非該課程擁有者讀取測驗時一律遮蔽——`FR-ET-US7-04` 要的是唯讀
+    **瀏覽**，而答案不在瀏覽所需之內。
+
+    ⚠️ 為何非遮成 `False`：那會讓非擁有者看到「0 個正解」，是**錯誤資訊**而非隱藏。
+    呼叫端請一併看 `QuizDetail.answers_visible`，不要從 `None` 自行推斷原因。
+
+    ## 為何這個洞值得堵
+
+    `spec.md` §多重角色明訂角色可重複指派、權限取聯集——**同一個人可以既是教師又是
+    學員**。而 `quiz_id` 在學員端的學習頁本來就拿得到。若對所有教師開放答案，一位
+    兼具兩種角色的人就能先拉到自己正要考的那份測驗的答案。
+    """
 
     model_config = {"from_attributes": True}
 
     option_id: int
     option_text: str
-    is_correct: bool
+    is_correct: bool | None
     sort_order: int
 
 
@@ -151,3 +165,8 @@ class QuizDetail(BaseModel):
     version: int
     questions: list[QuestionRow]
     points_total: int
+    #: 本次請求是否看得到正確答案（僅該課程擁有者為 `True`）。
+    #:
+    #: 明確給一個布林，而不是讓前端從 `OptionRow.is_correct is None` 反推——前端需要
+    #: 的是「要不要顯示『N 個正解』這一欄」，而那是**整份測驗**的性質，不是逐選項的。
+    answers_visible: bool

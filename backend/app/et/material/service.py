@@ -16,11 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.utils import utcnow
 from app.et.common.dm_client import TRAINING_CATEGORY, get_dm_document_client
 from app.et.common.html_sanitize import sanitize_material_html
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.course.repository import EtItemRepository
-from app.et.course.rules import ensure_owner
+from app.et.course.rules import ensure_owner, is_browsable_by_non_owner
 from app.et.material import storage
 from app.et.material.repository import EtMaterialRepository
 from app.et.material.rules import ensure_material_has_media, ensure_video_name_unused
@@ -39,6 +40,25 @@ _DEFAULT_FORMATS = "mp4,webm"
 _DEFAULT_MAX_SIZE_MB = 500
 
 
+def _ensure_browsable(*, owner_id: str, actor_id: str, status: str, open_end_at) -> None:
+    """非擁有者只能讀「已發布且期間未過」的課程（#358 M-1 / `spec_us3` AC 8）。
+
+    🔴 **這支只能用在讀取路徑。** 寫入路徑走 `ensure_owner`（403）——把本判定放進兩者
+    共用的 `_resolve_*` helper 會讓非擁有者對他人**草稿**的寫入從 403 變成 404，而那
+    三條寫入防護測試正是這樣抓到的。
+
+    唯讀瀏覽的入口是 ET01「全部課程」清單，它只列符合此條件者；不判的話「清單上看
+    不到、但用 id 直接打 API 讀得到他人草稿內容」。
+
+    回 404 而非 403：與孤兒資源同一個處理，不揭露「這筆存在但你看不到」。比照
+    `learning/service` 對學員連草稿的存在都不揭露。
+    """
+    if owner_id == actor_id:
+        return
+    if not is_browsable_by_non_owner(status=status, open_end_at=open_end_at, now=utcnow()):
+        raise _NOT_FOUND
+
+
 class EtMaterialService:
     """教材內容之讀取、編修與 DM 文件引用。"""
 
@@ -55,8 +75,27 @@ class EtMaterialService:
         self._audit = audit or AuditLogService()
 
     async def get_detail(self, db: AsyncSession, material_id: int, *, actor_id: str) -> MaterialDetail:
-        """教材詳細——影片與 DM 文件引用一次帶齊。"""
-        material, _ = await self._require_owned(db, material_id, actor_id)
+        """教材詳細——影片與 DM 文件引用一次帶齊。
+
+        ## 讀取端**不套擁有者判定**（#358 第 2 項）
+
+        `FR-ET-US7-04` 與 US7 場景 8 明訂他人建立之課程可進入**唯讀瀏覽**，ET02 手冊亦
+        寫「開啟他人建立的課程時進入檢視模式，所有欄位停用」——「停用」指不可編輯，
+        不是看不到內容。
+
+        原本此處走 `_require_owned`，於是教師乙開啟教師甲的課程、點開教材視窗會拿到
+        403，畫面是**空白**（前端沒有錯誤呈現，就只是沒有內容）。同一頁的課後問卷卻
+        正常顯示——因為 `survey/service.get_by_course` 早就是唯讀開放的。三者不一致。
+
+        收斂方向為「可讀、不可寫」：本函式改為只驗存在，寫入路徑仍走 `_require_owned`。
+        ⛔ **不可反過來把問卷也收緊**——那會讓檢視模式變成只看得到殼。
+
+        角色門檻仍在 router（`require_et_roles(ET_TEACHER, ET_ADMIN)`），學員進不來。
+        """
+        material, resolved = await self._resolve_material(db, material_id)
+        _ensure_browsable(
+            owner_id=resolved.owner_id, actor_id=actor_id, status=resolved.status, open_end_at=resolved.open_end_at
+        )
         videos = await self._materials.list_videos(db, material_id)
         docs = await self._materials.list_docs(db, material_id)
         return MaterialDetail(
@@ -229,17 +268,34 @@ class EtMaterialService:
 
     # ── 內部 ────────────────────────────────────────────────────────────────
 
-    async def _require_owned(self, db: AsyncSession, material_id: int, actor_id: str):
-        """取教材並確認其所屬課程之擁有者為操作者。"""
+    async def _resolve_material(self, db: AsyncSession, material_id: int):
+        """取教材與其所屬課程，**不判擁有者**——供唯讀路徑使用。
+
+        Returns:
+            `(material, ResolvedCourse)`——後者含 `course_id` / `owner_id` / `status` /
+            `open_end_at`，供呼叫端自行決定要套哪一道守門。
+
+        ⚠️ 這支**不是**守門，只負責「存在嗎、掛在哪門課下」。讀取路徑要接
+        `_ensure_browsable`，寫入路徑要接 `ensure_owner`（見 `_require_owned`）。
+        把任何一道守門塞進本函式都會污染另一條路徑——#358 M-1 的第一版就是這樣讓
+        非擁有者對他人草稿的寫入從 403 變成 404。
+        """
         material = await self._materials.get(db, material_id)
         if material is None:
             raise _NOT_FOUND
         resolved = await self._items.resolve_owner(db, material_id=material_id)
         if resolved is None:
             raise _NOT_FOUND  # 孤兒教材：UI 無從到達，不揭露其存在
-        course_id, owner_id = resolved
-        ensure_owner(owner_id=owner_id, actor_id=actor_id)
-        return material, course_id
+        return material, resolved
+
+    async def _require_owned(self, db: AsyncSession, material_id: int, actor_id: str):
+        """取教材並確認其所屬課程之擁有者為操作者——**寫入路徑專用**。
+
+        讀取路徑請用 `_resolve_material`（#358 第 2 項：他人課程可唯讀瀏覽）。
+        """
+        material, resolved = await self._resolve_material(db, material_id)
+        ensure_owner(owner_id=resolved.owner_id, actor_id=actor_id)
+        return material, resolved.course_id
 
     async def _doc_row(self, db: AsyncSession, doc) -> DocRow:
         """組出單筆引用列——名稱 / 版號 / 廢止狀態一律即時查 DM，不落地。

@@ -144,6 +144,37 @@ class TestPublishCheck:
         cid = await _publishable_course(client, db, uid)
         assert (await _check(client, uid, cid))["can_publish"] is True
 
+    async def test_空章節擋下發布並指出是哪一章(self, client, db) -> None:
+        """#358 第 3 項。**必須在整合層驗**，unit 測不到的是那支彙總查詢。
+
+        🔴 `_chapter_summaries` 用的是 `LEFT OUTER JOIN`——沒有項目的章節正是要抓的對象，
+        INNER JOIN 會讓它們整個從結果消失、檢核永遠不觸發，而純函式的測試全綠。與
+        `_quiz_summaries` 的 0 題測驗踩過同一個坑（見本檔檔頭第 1 點）。
+        """
+        uid = await _user(db, "t_pc_empty")
+        cid = await _publishable_course(client, db, uid)
+        empty = await client.post(
+            f"{_COURSES}/{cid}/chapters", json={"chapter_name": "還沒放東西的一章"}, headers=_bearer(uid)
+        )
+        empty_id = empty.json()["chapter_id"]
+
+        body = await _check(client, uid, cid)
+
+        assert body["can_publish"] is False
+        chapter_blockers = [b for b in body["blockers"] if b["code"] == "CHAPTER_EMPTY"]
+        assert len(chapter_blockers) == 1
+        assert chapter_blockers[0]["target_id"] == empty_id
+
+    async def test_每章都有項目時不報空章節(self, client, db) -> None:
+        """基準課程本來就每章有教材——少了這條，把檢核寫成恆真也會「通過」上一條。"""
+        uid = await _user(db, "t_pc_nonempty")
+        cid = await _publishable_course(client, db, uid)
+
+        body = await _check(client, uid, cid)
+
+        assert body["can_publish"] is True
+        assert body["blockers"] == []
+
     async def test_無標籤與無時間之缺漏(self, client, db) -> None:
         uid = await _user(db, "t_pc03")
         created = await client.post(_COURSES, json={"course_name": "空課程"}, headers=_bearer(uid))

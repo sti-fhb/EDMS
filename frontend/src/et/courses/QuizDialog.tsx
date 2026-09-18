@@ -149,7 +149,11 @@ export function QuizDialog({
     question_type: question.question_type as QuestionType,
     stem: question.stem,
     points: question.points,
-    options: question.options.map((o) => ({ option_text: o.option_text, is_correct: o.is_correct })),
+    // `is_correct` 於非擁有者讀取時為 `null`（#358 第 2 項的答案遮蔽），但編輯入口在
+    // `readOnly` 時就不渲染（`readOnly = !course.is_owner`，與遮蔽是同一個條件），
+    // 所以這裡拿不到 null。以 `=== true` 收斂而非 `!!` 只是讓型別對齊；
+    // 真正的守門在後端——非擁有者的寫入一律 403 `ET_COURSE_002`。
+    options: question.options.map((o) => ({ option_text: o.option_text, is_correct: o.is_correct === true })),
   })
 
   const pointsTotal = quiz?.points_total ?? 0
@@ -323,8 +327,15 @@ export function QuizDialog({
                         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                           <Typography variant="body2">{question.stem}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            {question.options.length} 個選項 ｜ 正確{" "}
-                            {question.options.filter((o) => o.is_correct).length} 個
+                            {question.options.length} 個選項
+                            {/* 非擁有者讀他人測驗時答案被遮蔽（#358 第 2 項）。此時**不顯示**
+                                正解數——`is_correct` 為 null，直接 filter 會算出「0 個」，
+                                那是錯誤資訊而非隱藏。 */}
+                            {/* `!== true` 而非 `=== false`：欄位缺失或型別漂移時落到安全分支，
+                                否則會顯示「正確 0 個」——正是本段要避免的錯誤資訊 */}
+                            {quiz?.answers_visible !== true
+                              ? " ｜ 檢視他人課程時不顯示正確答案"
+                              : ` ｜ 正確 ${question.options.filter((o) => o.is_correct).length} 個`}
                           </Typography>
                         </Box>
                         <Chip size="small" label={`${question.points} 分`} />
