@@ -16,6 +16,7 @@ const BASE_PROPS = {
   readOnly: false,
   templates: TEMPLATES,
   onClose: noop,
+  onCreate: noop,
   onRename: noop,
   onApplyTemplate: noop,
   onSaveQuestion: noop,
@@ -159,6 +160,58 @@ describe("SurveyDialog：模板（#238）", () => {
   it("唯讀時不顯示模板", () => {
     render(<SurveyDialog {...BASE_PROPS} survey={makeSurvey({ questions: [] })} readOnly />)
     expect(screen.queryByRole("button", { name: "套用模板" })).not.toBeInTheDocument()
+  })
+})
+
+describe("SurveyDialog：建立步驟（#359 第 1 項）", () => {
+  it("survey 為 null 時顯示建立標題與名稱欄，不顯示題目區", () => {
+    render(<SurveyDialog {...BASE_PROPS} survey={null} />)
+
+    expect(screen.getByText("新增課後問卷")).toBeInTheDocument()
+    expect(screen.getByLabelText(/問卷名稱/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "建立" })).toBeInTheDocument()
+    // 題目要等問卷建立後才編輯得了——此時還沒有 survey_id 可掛
+    expect(screen.queryByRole("button", { name: "新增題目" })).not.toBeInTheDocument()
+  })
+
+  it("名稱留空按建立會擋下並提示", async () => {
+    const onCreate = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onCreate={onCreate} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "建立" }))
+
+    expect(screen.getByText("請輸入問卷名稱")).toBeInTheDocument()
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it("輸入名稱後建立會帶去除空白的值", async () => {
+    const onCreate = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onCreate={onCreate} />)
+
+    await userEvent.type(screen.getByLabelText(/問卷名稱/), "  滿意度  ")
+    await userEvent.click(screen.getByRole("button", { name: "建立" }))
+
+    expect(onCreate).toHaveBeenCalledWith("滿意度")
+  })
+
+  it("建立步驟已打字時關閉視窗回報 dirty", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onClose={onClose} />)
+
+    await userEvent.type(screen.getByLabelText(/問卷名稱/), "滿意度")
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
+
+    // 此時還沒有任何東西被建立，但名稱已經打了字——呼叫端要據此問一聲
+    expect(onClose).toHaveBeenCalledWith(true)
+  })
+
+  it("建立步驟未打字時關閉視窗不回報 dirty", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onClose={onClose} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
+
+    expect(onClose).toHaveBeenCalledWith(false)
   })
 })
 

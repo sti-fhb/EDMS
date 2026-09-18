@@ -1183,7 +1183,11 @@ export function EtCourseEditorPage() {
         isDraftCourse={status === "DRAFT"}
         saving={surveyMut.isPending}
         error={surveyError}
-        onCreate={(name) => surveyMut.mutate(() => surveyApi.create(courseId as number, name))}
+        // #359 第 1 項：直接開視窗，名稱於視窗內填。**不預建空殼**——取消時什麼都沒發生。
+        onCreate={() => {
+          setSurveyError(null)
+          setSurveyOpen(true)
+        }}
         onOpen={() => {
           setSurveyError(null)
           setSurveyOpen(true)
@@ -1220,6 +1224,7 @@ export function EtCourseEditorPage() {
         templates={surveyTemplates}
         saving={surveyMut.isPending}
         error={surveyError}
+        onCreate={(name) => surveyMut.mutate(() => surveyApi.create(courseId as number, name))}
         onClose={(dirty) => {
           // 題目編輯器展開中代表有還沒存的內容，直接關掉會讓它無聲消失
           // （#203 實測回饋：「有填入值按取消跳出提示」）
@@ -1229,7 +1234,11 @@ export function EtCourseEditorPage() {
           }
           confirm({
             title: "放棄變更",
-            content: "尚未儲存的題目內容將不會保留，確定關閉？",
+            // 建立步驟與編輯步驟的後果不同：前者是「問卷不會被建立」，後者是「問卷留著、
+            // 這次的題目編輯不保留」。共用一句會讓教師以為取消會連問卷一起刪掉。
+            content: survey
+              ? "尚未儲存的題目內容將不會保留，確定關閉？"
+              : "問卷尚未建立，關閉後不會保留已填的名稱。確定關閉？",
             okText: "確定",
             onOk: () => setSurveyOpen(false),
           })

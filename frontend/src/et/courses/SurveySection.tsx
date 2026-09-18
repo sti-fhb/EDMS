@@ -10,12 +10,9 @@ import Chip from "@mui/material/Chip"
 import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
-import TextField from "@mui/material/TextField"
 import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
-import { useState } from "react"
 
-import { SURVEY_NAME_MAX_LEN, SurveyNameSchema } from "./surveySchemas"
 import type { SurveyDetail } from "./surveySchemas"
 
 interface SurveySectionProps {
@@ -28,7 +25,8 @@ interface SurveySectionProps {
   isDraftCourse: boolean
   saving?: boolean
   error?: string | null
-  onCreate: (surveyName: string) => void
+  /** 開啟建立視窗（#359 第 1 項）。名稱與題目都在視窗內填，此處不再 inline 收名稱。 */
+  onCreate: () => void
   onOpen: () => void
   onDeactivate: () => void
   onDelete: () => void
@@ -84,9 +82,6 @@ export function SurveySection({
   onDeactivate,
   onDelete,
 }: SurveySectionProps) {
-  const [nameDraft, setNameDraft] = useState<string | null>(null)
-  const [nameError, setNameError] = useState("")
-
   const header = (
     <Typography variant="subtitle2" fontWeight={700}>
       課後問卷{" "}
@@ -98,22 +93,17 @@ export function SurveySection({
 
   // ── 尚未建立 ────────────────────────────────────────────────────────────
   if (survey === null || survey === undefined) {
-    const creating = nameDraft !== null
     return (
       <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           {header}
-          {!readOnly && !creating && (
+          {!readOnly && (
             <Button
               size="small"
               variant="outlined"
               startIcon={<AddIcon />}
               disabled={disabled || survey === undefined}
-              onClick={() => {
-                setNameError("")
-                // 空字串而非預設名稱——#203 實測回饋：不要幫使用者填預設值
-                setNameDraft("")
-              }}
+              onClick={onCreate}
             >
               新增問卷
             </Button>
@@ -123,46 +113,9 @@ export function SurveySection({
           學員完課後開放填寫（具名、一人一次）。填寫問卷不是完課條件、不計入學習進度。
         </Typography>
 
-        {creating ? (
-          <Stack direction="row" spacing={1} alignItems="flex-start">
-            <TextField
-              autoFocus
-              size="small"
-              label="問卷名稱"
-              required
-              fullWidth
-              value={nameDraft}
-              error={Boolean(nameError)}
-              helperText={nameError}
-              slotProps={{ htmlInput: { maxLength: SURVEY_NAME_MAX_LEN } }}
-              onChange={(e) => setNameDraft(e.target.value)}
-            />
-            <Button size="small" onClick={() => setNameDraft(null)}>
-              取消
-            </Button>
-            <Button
-              size="small"
-              variant="contained"
-              disabled={saving}
-              onClick={() => {
-                const parsed = SurveyNameSchema.safeParse(nameDraft ?? "")
-                if (!parsed.success) {
-                  setNameError(parsed.error.issues[0]?.message ?? "問卷名稱不正確")
-                  return
-                }
-                setNameError("")
-                setNameDraft(null)
-                onCreate(parsed.data)
-              }}
-            >
-              建立
-            </Button>
-          </Stack>
-        ) : (
           <Typography variant="caption" color="text.disabled" sx={{ display: "block", py: 1 }}>
             {disabled ? "請先儲存草稿後再新增問卷" : "尚未建立課後問卷"}
           </Typography>
-        )}
       </Paper>
     )
   }
