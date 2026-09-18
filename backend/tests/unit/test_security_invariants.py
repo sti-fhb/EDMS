@@ -26,6 +26,7 @@ AC 9 列了四項上線門檻。前三項在程式碼裡**已經成立**，但**
 import os
 import re
 import secrets
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -242,3 +243,90 @@ class TestProductionStartupGuards:
             "DM_FILE_STORAGE_ROOT": "./var/dm_files",
         }
         assert Settings(_env_file=None, **dev).DEBUG is True
+
+
+class TestCSP設定契約:
+    """`nginx/security-headers.conf` 的 CSP 指令清單（#366）。
+
+    這份設定不經任何測試——它是 nginx 設定檔，本機 dev 走 vite **完全不經 nginx**，
+    所以 CSP 的缺漏只在部署環境出現。而 CSP 違規**只進瀏覽器 console**，不會變成前端
+    錯誤：#366 的症狀是學員端 PDF 預覽「一個空框」——blob 取得成功、`error` 為 null、
+    `loading` 已結束，三個條件分支全走完卻沒東西可顯示。
+
+    ⚠️ **本檔的其他測試釘的是「函式庫預設值會無聲改變」，這一組釘的是另一種東西：
+    CSP 的 fallback 機制會讓「少寫一條」看起來像「沒設限制」。** 未宣告的 fetch
+    directive 回落到 `default-src`，而 `default-src 'self'` 不含 `blob:`——所以漏寫
+    `frame-src` 不是「沒限制」，是「限制成 'self'」，方向與直覺相反。
+    """
+
+    _CONF = Path(__file__).resolve().parents[2].parent / "nginx" / "security-headers.conf"
+
+    def _csp(self) -> str:
+        text = self._CONF.read_text(encoding="utf-8")
+        match = re.search(r'add_header\s+Content-Security-Policy\s+"([^"]+)"', text)
+        assert match is not None, f"找不到 CSP 設定行：{self._CONF}"
+        return match.group(1)
+
+    def _directive(self, name: str) -> str | None:
+        for part in self._csp().split(";"):
+            tokens = part.split()
+            if tokens and tokens[0] == name:
+                return " ".join(tokens[1:])
+        return None
+
+    def test_設定檔存在(self) -> None:
+        assert self._CONF.is_file(), f"路徑推導錯誤：{self._CONF}"
+
+    @pytest.mark.parametrize(
+        ("directive", "用途"),
+        [
+            ("img-src", "favicon/svg 與檔案下載預覽"),
+            ("media-src", "ET 影音教材播放"),
+            ("frame-src", "學員端 PDF 教材預覽（iframe 載入 blob URL）"),
+        ],
+    )
+    def test_需要_blob_的指令都明確放行(self, directive: str, 用途: str) -> None:
+        """每個要用 blob URL 的指令都**必須自己宣告**，不能靠 `default-src` 兜。
+
+        這條若紅了，代表對應的功能在部署環境會安靜失效——沒有錯誤訊息、CI 全綠。
+        """
+        value = self._directive(directive)
+        assert value is not None, f"{directive} 未宣告 → 回落到 default-src 'self'，{用途} 會被擋"
+        assert "blob:" in value, f"{directive} 未放行 blob: → {用途} 會被擋（現值：{value}）"
+
+    def test_default_src_不含_blob_故不能靠它兜(self) -> None:
+        """釘住「為什麼每條都要自己寫」的前提。
+
+        若日後有人為了省事把 `blob:` 加進 `default-src`，上面那組測試會**假綠**——
+        因為回落機制讓所有未宣告的指令都拿到 blob:。那是放寬全站而非修好個別功能。
+        """
+        default_src = self._directive("default-src")
+        assert default_src is not None
+        assert "blob:" not in default_src, "default-src 放行 blob: 等於全站放寬，應逐條宣告"
+
+    def test_反向的三道限制未被放寬(self) -> None:
+        """⛔ `frame-ancestors` / `object-src` 管的是**反方向**，不該為了 #366 動它們。
+
+        - `frame-ancestors 'none'`：別人不能 iframe 本站（防點擊劫持）
+        - `object-src 'none'`：`<object>` / `<embed>` 全禁
+
+        `frame-src` 管的是「本站能 iframe 什麼」。三者容易混淆，而放寬前兩者是安全性
+        退步**且修不好** PDF 預覽——這是 #366 最容易被亂試出來的錯誤修法，故釘住。
+        """
+        assert self._directive("frame-ancestors") == "'none'"
+        assert self._directive("object-src") == "'none'"
+
+    def test_nginx_是全站安全標頭的來源(self) -> None:
+        """釘住「這份設定就是全站來源」這件事本身，不擴及 app 端。
+
+        本來想順手釘「app 端不得再設 nosniff」（設定檔第 19-20 行明文警告會疊出兩個同名
+        header），但寫完一跑就被推翻：`app/et/learning/router.py:183` **刻意**在影片串流
+        回應上加 `nosniff`，且附完整理由——該端點以 `inline` 回使用者上傳的位元組，關掉
+        MIME 嗅探是縱深防禦。
+
+        所以設定檔那句警告針對的是「全站再設一次」（middleware），不是個別端點的防禦。
+        兩者的差別沒有寫在設定檔裡，已回報到 #263 一併釐清。
+        """
+        conf = self._CONF.read_text(encoding="utf-8")
+        for header in ("X-Content-Type-Options", "Referrer-Policy", "Content-Security-Policy"):
+            assert header in conf, f"{header} 不在 nginx 設定內——全站來源的前提不成立"
