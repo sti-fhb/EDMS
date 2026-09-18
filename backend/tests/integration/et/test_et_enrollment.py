@@ -7,7 +7,8 @@
 2. 被移除的學員撞不到 `UQ_ET_ENROLLMENT_USER_COURSE`——應用層先擋（裁示 C）
 3. 重複加入不產生第二列
 4. 清單只回自己的課程，且統計與卡片來自同一次查詢
-5. 「起始時間未到可加入、但清單不顯示」這組**必須合看才成立**的行為（裁示 A）
+5. 「起始時間未到可加入，且清單顯示為**尚未開放**」（裁示 A × #363）——原行為是
+   「可加入但不顯示」，#363 推翻了後半
 """
 
 import pytest
@@ -386,12 +387,18 @@ class TestRemovedStudentCannotRejoin:
 
 
 class TestPendingOpenCourse:
-    async def test_起始時間未到可加入但清單不顯示(self, client, db) -> None:
-        """#247 SA Q2 裁示 A + AC 4——**兩件事必須合看**。
+    async def test_起始時間未到仍列於清單並標記未開放(self, client, db) -> None:
+        """#363 推翻本測試的原斷言（原為「可加入但清單不顯示」）。
 
-        分開看都正常：加入成功是對的，清單不顯示也是對的（AC 4）。湊在一起才是那個
-        死角——學員看到「已加入」✓ 卻在清單一片空白，以為失敗而反覆重試。
-        `pending_open` 就是讓前端把提示換成「課程開放後將出現於清單」的依據。
+        原行為＝ #247 SA Q2 裁示 A（起始時間未到仍可加入）× AC 4（起始時間未到不顯示），
+        兩條各自都有裁示依據，相乘就是「加得進去、但看不到」。
+
+        ⚠️ **本測試原本的 docstring 就已經描述了那個死角**（「學員看到『已加入』✓ 卻在
+        清單一片空白，以為失敗而反覆重試」），但把解法定為「加入當下以 `pending_open`
+        提示」。那不足夠——提示只出現一次，而空白清單是學員**每次回來都會再看到**的。
+
+        而最誤導的是統計：`joined` 由同一份清單導出，所以學員看到「已加入課程 **0**」
+        ——那不是「還沒開放」，是明確地說「你沒有加入任何課程」。
         """
         teacher = await _user(db, "t_enr11", ROLE_TEACHER)
         student = await _user(db, "s_enr11")
@@ -402,8 +409,37 @@ class TestPendingOpenCourse:
 
         assert joined.status_code == 201, joined.text
         assert joined.json()["pending_open"] is True
-        assert listed.json()["courses"] == []
-        assert listed.json()["summary"]["joined"] == 0
+
+        body = listed.json()
+        assert len(body["courses"]) == 1, "已加入的課程必須出現在清單上"
+        card = body["courses"][0]
+        assert card["is_pending_open"] is True
+        assert card["is_closed"] is False, "未開放與已關閉是清單上的兩端，不可混為一談"
+        assert card["open_start_at"] is not None, "卡片要標開放時點，否則學員不知道要等到何時"
+        assert body["summary"]["joined"] == 1
+
+    async def test_未開放課程不計入未開始(self, client, db) -> None:
+        """#363：`not_started` 的意思是「已開放、還沒開始學」，與「還沒開放」不同。
+
+        未開放課程的 `completion_status` 由進度計數導出，必然是 `NOT_STARTED`（done=0），
+        所以**不排除就會被算進「未開始」**——而學員對那兩者能做的事完全不同（一個是
+        去上課、一個是等）。故獨立成 `pending_open` 一項。
+        """
+        teacher = await _user(db, "t_enr13", ROLE_TEACHER)
+        student = await _user(db, "s_enr13")
+        await _course(client, db, teacher, code="10000013", start_offset_days=7)
+        await _join(client, student, "10000013")
+
+        summary = (await client.get(_MY_COURSES, headers=_bearer(student))).json()["summary"]
+
+        assert summary["pending_open"] == 1
+        assert summary["not_started"] == 0, "未開放被算進「未開始」＝同一個詞指兩件事"
+        assert summary["in_progress"] == 0 and summary["completed"] == 0
+        # 各項之和須等於總數，否則畫面上讀不通（`MyCoursesSummary` docstring）
+        assert (
+            summary["in_progress"] + summary["not_started"] + summary["completed"] + summary["pending_open"]
+            == summary["joined"]
+        )
 
     async def test_預覽帶開放時間供前端提示(self, client, db) -> None:
         teacher = await _user(db, "t_enr12", ROLE_TEACHER)
@@ -429,7 +465,7 @@ class TestMyCourses:
 
         body = (await client.get(_MY_COURSES, headers=_bearer(student))).json()
 
-        assert body["summary"] == {"joined": 1, "in_progress": 0, "not_started": 1, "completed": 0}
+        assert body["summary"] == {"joined": 1, "in_progress": 0, "not_started": 1, "completed": 0, "pending_open": 0}
         card = body["courses"][0]
         assert card["course_name"] == "採血作業新進人員訓練"
         assert card["tags"] == ["護理師", "軍人"]
@@ -454,7 +490,7 @@ class TestMyCourses:
 
         body = (await client.get(_MY_COURSES, headers=_bearer(student))).json()
 
-        assert body["summary"] == {"joined": 1, "in_progress": 0, "not_started": 0, "completed": 1}
+        assert body["summary"] == {"joined": 1, "in_progress": 0, "not_started": 0, "completed": 1, "pending_open": 0}
         assert body["courses"][0]["completion_status"] == COMPLETION_COMPLETED
         assert body["courses"][0]["progress_pct"] == 100
 
@@ -475,7 +511,7 @@ class TestMyCourses:
 
         body = (await client.get(_MY_COURSES, headers=_bearer(student))).json()
 
-        assert body["summary"] == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0}
+        assert body["summary"] == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0, "pending_open": 0}
         assert body["courses"][0]["progress_pct"] == 50
 
     async def test_教師新增項目使完課狀態自動回退(self, client, db) -> None:
@@ -497,7 +533,7 @@ class TestMyCourses:
         await _item(client, teacher, await _chapter(client, teacher, cid, name="第二章"))
 
         summary = (await client.get(_MY_COURSES, headers=_bearer(student))).json()["summary"]
-        assert summary == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0}
+        assert summary == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0, "pending_open": 0}
 
     async def test_已關閉課程仍顯示(self, client, db) -> None:
         """AC 5 / AC 13：顯示「已關閉」標示、可唯讀回看。

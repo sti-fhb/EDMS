@@ -1410,7 +1410,7 @@ export const handlers = [
   // ── ET04 我的課程與加入新課程（US4 / #247）────────────────────────────────
   http.get("/api/et/my-courses", () =>
     HttpResponse.json({
-      summary: { joined: 2, in_progress: 1, not_started: 1, completed: 0 },
+      summary: { joined: 3, in_progress: 1, not_started: 1, completed: 0, pending_open: 1 },
       courses: [
         {
           course_id: 1,
@@ -1419,6 +1419,7 @@ export const handlers = [
           // #288：由後端算出的「視同關閉」。`status` 與 `is_closed` 刻意不同源——
           // 期間已過的課程 `status` 仍是 `PUBLISHED` 而 `is_closed` 為 true。
           is_closed: false,
+          is_pending_open: false,
           completion_status: "IN_PROGRESS",
           tags: ["護理師", "軍人"],
           chapter_count: 5,
@@ -1431,11 +1432,29 @@ export const handlers = [
           course_name: "血品安全與品保概論",
           status: "CLOSED",
           is_closed: true,
+          is_pending_open: false,
           completion_status: "NOT_STARTED",
           tags: ["全體"],
           chapter_count: 4,
           open_start_at: "2026-05-01T08:00:00Z",
           open_end_at: "2026-10-31T17:00:00Z",
+          progress_pct: 0,
+        },
+        {
+          // #363：已加入但閱課起始時間未到。卡片不可點擊、不顯示完課狀態
+          // （`completion_status` 必為 NOT_STARTED，但學員此刻不可能開始學）。
+          course_id: 3,
+          course_name: "輸血反應辨識與處理",
+          status: "PUBLISHED",
+          is_closed: false,
+          is_pending_open: true,
+          completion_status: "NOT_STARTED",
+          // 刻意用與其他兩張不同的標籤：既有測試以 getByText("護理師") 取單一元素，
+          // 重複會讓它撞「找到多個」而紅——那與本 issue 無關，不該為 fixture 放寬斷言。
+          tags: ["醫檢師"],
+          chapter_count: 3,
+          open_start_at: "2026-12-01T01:00:00Z",
+          open_end_at: "2027-01-31T17:00:00Z",
           progress_pct: 0,
         },
       ],

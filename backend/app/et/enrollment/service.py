@@ -34,6 +34,7 @@ from app.et.enrollment.rules import (
     ensure_course_joinable,
     ensure_not_removed,
     is_listed_in_my_courses,
+    is_pending_open,
     normalize_invitation_code,
 )
 from app.et.enrollment.schemas import (
@@ -107,6 +108,9 @@ class EtEnrollmentService:
                 # `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 `ET-16`、未實作），
                 # 只看 `status` 會讓卡片標「已發布」而點進去卻什麼都不能做。
                 is_closed=is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now),
+                # #363：與 `is_closed` 對稱的另一端——已加入但閱課起始時間未到。
+                # 由後端判定並回出，前端不自己比時間（瀏覽器時鐘可被改）。
+                is_pending_open=is_pending_open(status=course.status, open_start_at=course.open_start_at, now=now),
                 # #284：由 `counts` 即時導出，**不讀** `enrollment.completion_status`
                 # ——那個欄位只有加入課程時寫入的 `NOT_STARTED`，沒有任何路徑推進它，
                 # 讀它會讓下方 `_summarize` 的四項統計永遠顯示全部「未開始」。
@@ -271,15 +275,21 @@ def _to_result(course, completion_status: str) -> JoinResult:
 
 
 def _summarize(courses: list[MyCourseRow]) -> MyCoursesSummary:
-    """由清單導出四項統計（AC 2）。
+    """由清單導出五項統計（AC 2，#363 加入 `pending_open`）。
 
     以 `COMPLETION_STATUS` 分類（`data-model` §ET_COMPLETION_STATUS）。未知值不計入
-    三項分類但仍計入 `joined`——分類漏一個值時卡片仍在畫面上，統計卻靜默少一，
-    總數與三項之和不符正是那種情況的訊號。
+    分類但仍計入 `joined`——分類漏一個值時卡片仍在畫面上，統計卻靜默少一，
+    總數與各項之和不符正是那種情況的訊號。
+
+    ⚠️ **尚未開放的課程從三項學習狀態中排除**（#363）。它們的 `completion_status` 由
+    進度計數導出，必然是 `NOT_STARTED`（done=0）——若不排除就會被算進「未開始」，而
+    那一項的意思是「已開放、還沒開始學」。見 `MyCoursesSummary` 的 docstring。
     """
+    learning = [c for c in courses if not c.is_pending_open]
     return MyCoursesSummary(
         joined=len(courses),
-        in_progress=sum(1 for c in courses if c.completion_status == COMPLETION_IN_PROGRESS),
-        not_started=sum(1 for c in courses if c.completion_status == COMPLETION_NOT_STARTED),
-        completed=sum(1 for c in courses if c.completion_status == COMPLETION_COMPLETED),
+        in_progress=sum(1 for c in learning if c.completion_status == COMPLETION_IN_PROGRESS),
+        not_started=sum(1 for c in learning if c.completion_status == COMPLETION_NOT_STARTED),
+        completed=sum(1 for c in learning if c.completion_status == COMPLETION_COMPLETED),
+        pending_open=sum(1 for c in courses if c.is_pending_open),
     )

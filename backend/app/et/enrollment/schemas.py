@@ -76,6 +76,12 @@ class MyCourseRow(BaseModel):
     #: 那個矛盾不會自己消失，得由後端把「視同關閉」一起回出來。與 ET05 的
     #: `LearnStructure.is_closed` 同名同義，兩個畫面用同一個判定。
     is_closed: bool
+    #: 已加入但**閱課起始時間未到**（#363）。卡片據此改為不可點擊並標開放時點。
+    #:
+    #: 與 `is_closed` 對稱：兩者都是「列在清單上但不可學習」，一個在期間前、一個在期間後。
+    #: 前端**不要自己拿 `open_start_at` 跟現在比**——那會讓「未開放」的判定在後端與前端
+    #: 各有一份，而兩者的時鐘不同（瀏覽器時鐘可被使用者改）。
+    is_pending_open: bool
     completion_status: str
     tags: list[str]
     chapter_count: int
@@ -89,12 +95,22 @@ class MyCoursesSummary(BaseModel):
 
     `joined` 為總數（wireframe 有此卡），其餘三項為 AC 2 明列之三種學習狀態。
     wireframe 的三張卡缺「未開始」，以 AC 為準並保留總數卡，故為四項。
+
+    ## `pending_open` 為何不併進 `not_started`（#363）
+
+    `not_started` 的定義是 `COMPLETION_STATUS == NOT_STARTED`：**已加入、課程已開放、
+    還沒開始學**。而 `pending_open` 是「課程還沒開放」——學員此刻**不可能**開始學。
+
+    兩者併在一起會讓「未開始」同時指兩件事，而學員能做的事完全不同（一個是「去上課」、
+    一個是「等」）。故獨立一項，且 `joined == in_progress + not_started + completed +
+    pending_open`。
     """
 
     joined: int
     in_progress: int
     not_started: int
     completed: int
+    pending_open: int
 
 
 class MyCoursesResult(BaseModel):

@@ -4,6 +4,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle"
 import DateRangeIcon from "@mui/icons-material/DateRange"
 import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered"
 import HourglassTopIcon from "@mui/icons-material/HourglassTop"
+import LockClockIcon from "@mui/icons-material/LockClock"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Card from "@mui/material/Card"
@@ -99,6 +100,9 @@ export function EtMyCoursesPage() {
         <StatCard label="已加入課程" value={summary?.joined ?? 0} icon={<BookIcon />} />
         <StatCard label="進行中" value={summary?.in_progress ?? 0} icon={<HourglassTopIcon />} color="warning.main" />
         <StatCard label="未開始" value={summary?.not_started ?? 0} icon={<FormatListNumberedIcon />} />
+        {/* #363：「尚未開放」與「未開始」是兩件事——前者學員此刻不可能開始學，後者是
+            已開放但還沒開始。用同一個詞會讓學員誤判自己該做什麼。 */}
+        <StatCard label="尚未開放" value={summary?.pending_open ?? 0} icon={<LockClockIcon />} />
         <StatCard label="已完成" value={summary?.completed ?? 0} icon={<CheckCircleIcon />} color="success.main" />
         <Grid size={{ xs: 6, md: 2.4 }}>
           <Paper
@@ -152,10 +156,14 @@ export function EtMyCoursesPage() {
           // 帶課程名稱：學員可能是被標籤自動邀請帶進去的、從未輸入過邀請碼，
           // 只說「您已加入此課程」會讓人以為是剛才那次查詢把他加進去的。
           //
-          // 未開放時**必須說明白**：光說「已加入」而清單是空的（AC 4），學員會以為
-          // 系統壞了——實測就是這樣回報的。
+          // #363：原文案是「將於課程開放後出現於清單」——那在清單會過濾掉未開放課程
+          // 的時代是對的，現在**已經不成立**（課程就在清單上，標「尚未開放」）。留著
+          // 會叫學員去等一件已經發生的事。
+          //
+          // 仍需單獨一則：此時不導向課程（點不進去），只說「已加入」會讓學員不知道
+          // 接下來該做什麼。
           if (pendingOpen) {
-            message.info(`您已加入「${courseName}」，將於課程開放後出現於清單`)
+            message.info(`您已加入「${courseName}」，課程開放後即可開始學習`)
             return
           }
           // AC 10：不重複加入，**直接導向該課程**（#255 起目的地已存在）。
@@ -197,39 +205,68 @@ function CourseCard({ course, onOpen }: { course: MyCourseRow; onOpen: () => voi
   // 課程 `status` 仍是 `PUBLISHED`（到期自動轉 CLOSED 屬 ET-16、未實作），只看 status
   // 會讓卡片標「已發布」而點進去 ET05 卻是唯讀的——兩個畫面在使用者眼前互相矛盾。
   const closed = course.is_closed
+  // #363：同理看後端算好的 `is_pending_open`，不自己比時間（瀏覽器時鐘可被改）。
+  const pendingOpen = course.is_pending_open
 
-  return (
-    <Card variant="outlined" sx={{ height: "100%" }}>
-      <CardActionArea onClick={onOpen} sx={{ p: 2, height: "100%", alignItems: "flex-start" }}>
-        <Stack spacing={1} sx={{ width: "100%" }}>
-          <Stack direction="row" spacing={0.5}>
-            <Chip
-              size="small"
-              label={COMPLETION_STATUS_LABEL[course.completion_status]}
-              color={course.completion_status === "COMPLETED" ? "success" : "warning"}
-            />
-            {closed && <Chip size="small" label="已關閉" />}
-          </Stack>
+  const body = (
+    <Stack spacing={1} sx={{ width: "100%" }}>
+      <Stack direction="row" spacing={0.5}>
+        {/* #363：尚未開放時**不顯示完課狀態**。那個 chip 會寫「未開始」，而學員此刻
+            不可能開始學——同一個詞指兩件事正是本 issue 要消除的誤讀。 */}
+        {pendingOpen ? (
+          <Chip size="small" label="尚未開放" />
+        ) : (
+          <Chip
+            size="small"
+            label={COMPLETION_STATUS_LABEL[course.completion_status]}
+            color={course.completion_status === "COMPLETED" ? "success" : "warning"}
+          />
+        )}
+        {closed && <Chip size="small" label="已關閉" />}
+      </Stack>
 
-          <Typography variant="subtitle1">{course.course_name}</Typography>
+      <Typography variant="subtitle1">{course.course_name}</Typography>
 
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-            {course.tags.map((tag) => (
-              <Chip key={tag} size="small" variant="outlined" label={tag} />
-            ))}
-          </Stack>
+      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+        {course.tags.map((tag) => (
+          <Chip key={tag} size="small" variant="outlined" label={tag} />
+        ))}
+      </Stack>
 
-          <Typography variant="caption" color="text.secondary">
-            <DateRangeIcon fontSize="inherit" sx={{ verticalAlign: "middle", mr: 0.5 }} />
-            閱課期間 {formatDateTime(course.open_start_at)} ～ {formatDateTime(course.open_end_at)}
-          </Typography>
+      <Typography variant="caption" color="text.secondary">
+        <DateRangeIcon fontSize="inherit" sx={{ verticalAlign: "middle", mr: 0.5 }} />
+        閱課期間 {formatDateTime(course.open_start_at)} ～ {formatDateTime(course.open_end_at)}
+      </Typography>
 
+      {pendingOpen ? (
+        // 進度條與「完成 0%」對還不能開始的課程只是雜訊；換成學員真正需要的那一件事：
+        // 要等到什麼時候。
+        <Typography variant="caption" color="text.secondary">
+          將於 {formatDateTime(course.open_start_at)} 開放學習｜{course.chapter_count} 章節
+        </Typography>
+      ) : (
+        <>
           <LinearProgress variant="determinate" value={course.progress_pct} />
           <Typography variant="caption" color="text.secondary">
             完成 {course.progress_pct}%｜{course.chapter_count} 章節
           </Typography>
-        </Stack>
-      </CardActionArea>
+        </>
+      )}
+    </Stack>
+  )
+
+  // #363：尚未開放者**整張卡不可點擊**——不渲染 `CardActionArea`，而非把它設為
+  // `disabled`。後者會把整張卡連課程名稱一起調暗，而學員來這裡正是為了確認自己加入了
+  // 哪一門課；那個資訊必須清楚可讀。
+  return (
+    <Card variant="outlined" sx={{ height: "100%" }}>
+      {pendingOpen ? (
+        <Box sx={{ p: 2 }}>{body}</Box>
+      ) : (
+        <CardActionArea onClick={onOpen} sx={{ p: 2, height: "100%", alignItems: "flex-start" }}>
+          {body}
+        </CardActionArea>
+      )}
     </Card>
   )
 }

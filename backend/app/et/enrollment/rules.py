@@ -154,20 +154,48 @@ def derive_completion_status(*, done: int, total: int) -> str:
     return COMPLETION_IN_PROGRESS
 
 
+def is_pending_open(*, status: str, open_start_at: datetime | None, now: datetime) -> bool:
+    """已加入、已發布，但**閱課起始時間尚未到**（#363）。
+
+    這是「學習頁還不能進，但學員必須看得到自己加入了」的狀態。與 `is_effectively_closed`
+    對稱：兩者都是「列在清單上但不可學習」，只是一個在前、一個在後。
+
+    `open_start_at is None` **不算**本狀態（維持原行為，不列入清單）——那不是「還沒到
+    時間」而是「沒有時間」，兩者的處置不同，混在一起會讓前端無從顯示開放時點。
+    """
+    return status == COURSE_PUBLISHED and open_start_at is not None and now < open_start_at
+
+
 def is_listed_in_my_courses(
     *, status: str, open_start_at: datetime | None, open_end_at: datetime | None, now: datetime
 ) -> bool:
-    """課程是否出現在學員的「我的課程」清單（AC 4 / AC 5）。
+    """課程是否出現在學員的「我的課程」清單（AC 4 / AC 5，#363 改訂）。
 
     - **已關閉（或閱課期間已過）**：一律顯示（AC 5 / AC 13、US11 AC 9）——卡片標
       「已關閉」，點擊可唯讀回看。`open_start_at` 不影響結果：課程能被關閉，必然已經
       發布並開放過。
-    - **已發布且期間內**：委由 `is_visible_to_student` 判定（須 `now >= OPEN_START_AT`）；
-      起始時間未到者不顯示（AC 4）。
+    - **已發布但起始時間未到**：顯示（#363）——卡片不可點擊並標開放時點，見
+      `is_pending_open`。
+    - **已發布且期間內**：委由 `is_visible_to_student` 判定。
+
+    ## #363 推翻了原本 AC 4 的「起始時間未到不顯示」
+
+    原行為與 #247 SA Q2 裁示 A（起始時間未到**仍允許加入**）相乘，產生「加得進去、
+    但看不到」：學員在加入對話框看到「已加入 ✓ 本課程將於 X 開放學習」，然後那門課
+    就從畫面上消失。
+
+    ⚠️ **比從頭到尾都不提更糟的是統計**：`_summarize` 與卡片清單同一份母體，所以被
+    濾掉的課程連 `joined` 都不算——學員看到的是「已加入課程 **0**」。那個 0 不是
+    「還沒開放」，是明確地說「你沒有加入任何課程」。
+
+    原本的緩解措施（加入當下以 `pending_open` 提示開放時點）不足：提示只出現一次，
+    而「清單一片空白」是學員每次回來都會再看到一次的。
 
     ⚠️ 期間已過者**必須留在清單**（#288）。把它們過濾掉會讓學員的歷史紀錄從眼前消失
     ——那與 US11 AC 9「已關閉課程仍顯示於列表並標示已關閉」相反。
     """
     if is_effectively_closed(status=status, open_end_at=open_end_at, now=now):
+        return True
+    if is_pending_open(status=status, open_start_at=open_start_at, now=now):
         return True
     return is_visible_to_student(status=status, open_start_at=open_start_at, now=now)
