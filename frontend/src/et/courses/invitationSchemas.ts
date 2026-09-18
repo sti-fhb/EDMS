@@ -68,24 +68,24 @@ export type InviteEmailsValues = z.infer<typeof InviteEmailsSchema>
 /**
  * 邀請信預覽（唯讀）。
  *
- * **內容與收件人無關**：後端以佔位字樣取代收件人姓名與邀請連結（兩者逐收件人不同），
- * 其餘（課程名稱、閱課期間、邀請碼）人人相同。因此改動 Email 清單**不需要**重新預覽，
- * 也不回傳收件人範例或筆數（筆數前端自己用 `parseEmails` 算）。
+ * **內容與收件人無關**：後端以佔位字樣取代收件人姓名（逐收件人不同），其餘（課程名稱、
+ * 閱課期間、邀請碼、學習連結）人人相同。因此改動 Email 清單**不需要**重新預覽，也不
+ * 回傳收件人範例或筆數（筆數前端自己用 `parseEmails` 算）。
  */
 export interface InvitePreview {
   subject: string
   body: string
 }
 
-/** 寄出結果；`failed` 為排入寄送佇列失敗者。 */
+/**
+ * 寄出結果（#362：邀請即加入）。
+ *
+ * `joined` 與 `mailFailed` **刻意分開**，且不可在畫面上合成一句話：加入成功而信寄失敗
+ * 是一個真實且**無法補救**的組合（待加入清單與重寄功能隨 #362 一起移除）。說成
+ * 「寄出 N 筆、失敗 M 筆」會讓教師以為失敗的那幾位沒進課程，而他們其實已經在學員
+ * 清單裡了。
+ */
 export interface EmailInviteResult {
-  sent: number
-  failed: string[]
-}
-
-/** 受邀者加入結果。 */
-export interface InviteAcceptResult {
-  course_id: number
-  course_name: string
-  already_joined: boolean
+  joined: number
+  mail_failed: string[]
 }

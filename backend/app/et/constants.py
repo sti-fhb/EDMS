@@ -44,14 +44,9 @@ SOURCE_TAG_DEFAULT: Final = "TAG_DEFAULT"
 
 ALL_ENROLLMENT_SOURCES: Final = frozenset({SOURCE_EMAIL_INVITE, SOURCE_INVITATION_CODE, SOURCE_TAG_DEFAULT})
 
-# ── ET_INVITATION_STATUS：Email 邀請狀態（JOINED / REVOKED 為終態）─────────────
-InvitationStatus = Literal["PENDING", "JOINED", "REVOKED"]
-
-INVITATION_PENDING: Final = "PENDING"
-INVITATION_JOINED: Final = "JOINED"
-INVITATION_REVOKED: Final = "REVOKED"
-
-ALL_INVITATION_STATUSES: Final = frozenset({INVITATION_PENDING, INVITATION_JOINED, INVITATION_REVOKED})
+# ── ET_INVITATION_STATUS 已於 #362 移除 ───────────────────────────────────────
+# Email 邀請不再有「待加入」中間狀態（邀請即寫 ET_ENROLLMENT），整張 ET_INVITATION
+# 連同這組值域一併廢除。`SOURCE_EMAIL_INVITE` 保留——那記的是「怎麼進來的」，仍在用。
 
 # ── ET_ATTEMPT_STATUS：測驗作答狀態 ───────────────────────────────────────────
 AttemptStatus = Literal["IN_PROGRESS", "SUBMITTED", "TIMEOUT"]
@@ -114,12 +109,12 @@ APPROVAL_FAIL: Final = "FAIL"
 
 ALL_APPROVAL_RESULTS: Final = frozenset({APPROVAL_PASS, APPROVAL_FAIL})
 
-# ── 全部 10 類之對照（供測試與文件比對；非執行期邏輯使用）─────────────────────
+# ── 全部 9 類之對照（供測試與文件比對；非執行期邏輯使用）──────────────────────
+# 原為 10 類，`ET_INVITATION_STATUS` 隨 #362 移除。
 LOOKUP_SETS: Final[dict[str, frozenset[str]]] = {
     "ET_USER_ROLE_TYPE": ALL_ROLES,
     "ET_COURSE_STATUS": ALL_COURSE_STATUSES,
     "ET_ENROLLMENT_SOURCE": ALL_ENROLLMENT_SOURCES,
-    "ET_INVITATION_STATUS": ALL_INVITATION_STATUSES,
     "ET_ATTEMPT_STATUS": ALL_ATTEMPT_STATUSES,
     "ET_QUESTION_TYPE": ALL_QUESTION_TYPES,
     "ET_SURVEY_QUESTION_TYPE": ALL_SURVEY_QUESTION_TYPES,

@@ -85,24 +85,6 @@ async def _tag(db, name: str) -> int:
     return tag.tag_id
 
 
-async def _invite_token(db, email: str) -> str:
-    """由 outbox 取出課程邀請信的明文 token。"""
-    log = await db.scalar(
-        select(DpEmailLog).where(
-            DpEmailLog.recipient == email,
-            DpEmailLog.template_code == "COURSE_INVITE",
-            DpEmailLog.status == "PENDING",
-        )
-    )
-    assert log is not None, f"未寄出邀請信給 {email}"
-    marker = "/et/invite?token="
-    start = log.body.index(marker) + len(marker)
-    end = start
-    while end < len(log.body) and log.body[end] not in '\n \r"<':
-        end += 1
-    return log.body[start:end]
-
-
 async def test_教師從建立課程到看見學員成果的完整流程(client, db) -> None:
     """AC 1 的完整鏈：建立 → 掛標籤 → 編章節 / 教材 / 測驗 → 建問卷 → 設起訖 → 發布
     （自動邀請）→ Email 邀請 → 追蹤三區塊。
@@ -228,17 +210,24 @@ async def test_教師從建立課程到看見學員成果的完整流程(client,
     )
     assert tag_mail is not None, "被標籤帶入的學員未收到通知信"
 
-    # ── 階段 7：另以 Email 邀請一位學員，並走完他那側的 accept ────────────────
+    # ── 階段 7：另以 Email 邀請一位學員——#362 起**寄出即加入**，受邀者無需任何動作 ──
     invited = await client.post(
         f"{_COURSES}/{course_id}/invitations",
         json={"emails": "invited-flow@x.gov.tw"},
         headers=_bearer(teacher),
     )
     assert invited.status_code == 200, invited.text
+    assert invited.json() == {"joined": 1, "mail_failed": []}
 
-    token = await _invite_token(db, "invited-flow@x.gov.tw")
-    accepted = await client.post("/api/et/invitations/accept", json={"token": token}, headers=_bearer(invited_student))
-    assert accepted.status_code == 200, accepted.text
+    # 🔴 這裡**沒有**第二次呼叫。#362 之前是「取出信中 token → POST accept」，那兩步
+    # 一起消失了——本檔要釘的接縫因此變成「教師一個動作就讓那個人出現在 ET03」。
+    invite_mail = await db.scalar(
+        select(DpEmailLog).where(
+            DpEmailLog.recipient == "invited-flow@x.gov.tw",
+            DpEmailLog.template_code == "COURSE_INVITE",
+        )
+    )
+    assert invite_mail is not None, "受邀學員未收到通知信"
 
     by_mail = await db.scalar(
         select(EtEnrollment).where(

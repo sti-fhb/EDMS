@@ -58,14 +58,15 @@ class TestAc2LookupNotMaterialised:
         )
         assert rows.scalars().all() == [], "Lookup 代碼應為應用層常數，不得建表"
 
-    async def test_十類常數皆有定義(self, db, et_registered) -> None:
-        """#185 建置時為 9 類；#238 新增 `ET_SURVEY_QUESTION_TYPE`（問卷問答題型）增為 10 類。
+    async def test_九類常數皆有定義(self, db, et_registered) -> None:
+        """#185 建置時 9 類 → #238 新增 `ET_SURVEY_QUESTION_TYPE` 增為 10 類
+        → #362 移除 `ET_INVITATION_STATUS`（邀請即加入，無中間狀態）回到 9 類。
 
-        > 同一個不變量在 `tests/unit/et/test_constants.py::test_共十類代碼集合` 也有一份
+        > 同一個不變量在 `tests/unit/et/test_constants.py::test_共九類代碼集合` 也有一份
         > 守門。兩處都寫死類別數是刻意的——unit 那份跑得快、先失敗；本條屬 Foundation
         > 驗收，確保「代碼不建表、以常數表達」這個 AC 隨模組成長仍成立。
         """
-        assert len(c.LOOKUP_SETS) == 10
+        assert len(c.LOOKUP_SETS) == 9
         assert all(values for values in c.LOOKUP_SETS.values())
 
 
