@@ -31,7 +31,7 @@ from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
 from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
 from app.et.course.models import EtItem
-from app.et.course.rules import is_effectively_closed
+from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access, playback_rates
@@ -56,6 +56,9 @@ _DEFAULT_MAX_RATE = 2
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
 _DELETED = AppError(status_code=404, detail="此內容已刪除", error_code="ET_LEARN_003")
+#: #374：已加入但課程尚未開放。**403 而非 404**——課程的存在對在籍學員不是秘密
+#: （他自己加入的、卡片就在我的課程清單上），要告訴他的是「還沒開始」而非「查無此課」。
+_NOT_YET_OPEN = AppError(status_code=403, detail="此課程尚未開放，請於開放時間後再進入", error_code="ET_LEARN_005")
 
 #: 取檔端點之統一「取不到」回應。
 #:
@@ -106,6 +109,15 @@ class EtLearningService:
             not enrolled and not is_owner and await self._repo.was_removed(db, user_id=user_id, course_id=course_id)
         )
         ensure_can_access(enrolled=enrolled, is_owner=is_owner, removed=removed)
+        # #374：起始時間未到者不得進入——擁有者（教師預覽）豁免。
+        #
+        # ⚠️ 與「已關閉」的處置**相反**：關閉後仍可唯讀回看（#288 AC 9／10），因為那是
+        # 學員曾經學過的歷史；尚未開放的課程他從未學過，讀得到只是提前取得內容。
+        #
+        # 在 #374 之前擋住學員的只有「我的課程清單上沒有那張卡、沒有連結可點」——
+        # `open_start_at` 在 learning/ 與 progress/ 一次都沒出現，深連結因此暢通。
+        if not is_owner and is_pending_open(status=course.status, open_start_at=course.open_start_at, now=utcnow()):
+            raise _NOT_YET_OPEN
 
         chapters = await self._repo.chapters(db, course_id)
         rows = await self._repo.items_with_titles(db, [c.chapter_id for c in chapters])
