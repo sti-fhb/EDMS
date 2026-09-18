@@ -1,3 +1,8 @@
+// @vitest-environment node
+// 純邏輯測試：不碰 DOM，**也不經 app 的 axios 發請求**——跳過 jsdom 省下建置環境的
+// 開銷（#376）。⚠️ 日後若在本檔加入會發送請求的測試，請把這兩行拿掉：`http` 的
+// baseURL 是相對路徑 `/api`，node 環境沒有 document origin，axios 會改走 http
+// adapter 並以 `TypeError: Invalid URL` 失敗。
 import { describe, expect, it } from "vitest"
 
 import { moveId } from "./chapterOrder"
