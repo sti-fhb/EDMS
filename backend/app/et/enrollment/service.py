@@ -27,14 +27,13 @@ from app.et.constants import (
     COMPLETION_NOT_STARTED,
     SOURCE_INVITATION_CODE,
 )
-from app.et.course.rules import is_effectively_closed
+from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.rules import (
     derive_completion_status,
     ensure_course_joinable,
     ensure_not_removed,
     is_listed_in_my_courses,
-    is_pending_open,
     normalize_invitation_code,
 )
 from app.et.enrollment.schemas import (

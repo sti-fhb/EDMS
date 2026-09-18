@@ -24,7 +24,7 @@ from app.et.constants import (
     COURSE_PUBLISHED,
 )
 from app.et.course.publish_rules import is_visible_to_student
-from app.et.course.rules import is_effectively_closed
+from app.et.course.rules import is_effectively_closed, is_pending_open
 
 #: 邀請碼長度（`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)`）。
 INVITATION_CODE_LENGTH: Final = 8
@@ -152,18 +152,6 @@ def derive_completion_status(*, done: int, total: int) -> str:
     if done <= 0:
         return COMPLETION_NOT_STARTED
     return COMPLETION_IN_PROGRESS
-
-
-def is_pending_open(*, status: str, open_start_at: datetime | None, now: datetime) -> bool:
-    """已加入、已發布，但**閱課起始時間尚未到**（#363）。
-
-    這是「學習頁還不能進，但學員必須看得到自己加入了」的狀態。與 `is_effectively_closed`
-    對稱：兩者都是「列在清單上但不可學習」，只是一個在前、一個在後。
-
-    `open_start_at is None` **不算**本狀態（維持原行為，不列入清單）——那不是「還沒到
-    時間」而是「沒有時間」，兩者的處置不同，混在一起會讓前端無從顯示開放時點。
-    """
-    return status == COURSE_PUBLISHED and open_start_at is not None and now < open_start_at
 
 
 def is_listed_in_my_courses(

@@ -66,7 +66,7 @@ from app.et.constants import (
     GRADED_STATUSES,
     QUESTION_MULTIPLE,
 )
-from app.et.course.rules import is_effectively_closed
+from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access
 from app.et.progress.repository import EtProgressRepository
@@ -79,6 +79,7 @@ _ALREADY_SUBMITTED = AppError(status_code=409, detail="此作答已提交，無�
 _BAD_ANSWER = AppError(status_code=422, detail="作答資料無效", error_code="ET_ATTEMPT_004")
 _EXPIRED = AppError(status_code=409, detail="作答時間已到，請提交本次作答", error_code="ET_ATTEMPT_005")
 _CLOSED = AppError(status_code=409, detail="此課程目前關閉中，無法開始新的作答", error_code="ET_ATTEMPT_006")
+_NOT_YET_OPEN = AppError(status_code=409, detail="此課程尚未開放，無法開始作答", error_code="ET_ATTEMPT_007")
 
 #: 明細的結果三態（前端據此上色；**由後端判定**）。
 OUTCOME_CORRECT = "CORRECT"
@@ -110,10 +111,20 @@ class QuizAccess:
     course_id: int
     course_status: str
     open_end_at: datetime | None
+    #: #374：閱課起始時間。判定「尚未開放」用，與 `open_end_at` 成對。
+    open_start_at: datetime | None
 
     def is_closed(self, *, now: datetime) -> bool:
         """課程對學員是否視同關閉（`CLOSED` 或已發布但期間已過）。"""
         return is_effectively_closed(status=self.course_status, open_end_at=self.open_end_at, now=now)
+
+    def is_pending_open(self, *, now: datetime) -> bool:
+        """課程是否尚未開放（已發布但起始未到，#374）。
+
+        與 `is_closed` 成對但**處置不同**：關閉後既有作答仍可檢視、只是不能開新的；
+        尚未開放則連題目都不該讀得到。詳見 `course.rules.is_pending_open`。
+        """
+        return is_pending_open(status=self.course_status, open_start_at=self.open_start_at, now=now)
 
 
 class EtAttemptService:
@@ -222,6 +233,10 @@ class EtAttemptService:
         #
         # 「視同關閉」含「已發布但閱課期間已過」（#313）：到期自動轉 `CLOSED` 屬未實作的
         # ET-16，故期間過了而 `STATUS` 仍是 `PUBLISHED` 在本系統是常態而非過渡狀態。
+        # #374：起始未到不得開新作答。與關閉同一位置、同一形狀——差別只在訊息，因為
+        # 學員的下一步不同（等開放 vs 已經沒機會了）。
+        if access.is_pending_open(now=utcnow()):
+            raise _NOT_YET_OPEN
         if access.is_closed(now=utcnow()):
             raise _CLOSED
         # 解鎖只在「開始」時檢查——見模組 docstring
@@ -476,6 +491,7 @@ class EtAttemptService:
             course_id=course_id,
             course_status=course.status,
             open_end_at=course.open_end_at,
+            open_start_at=course.open_start_at,
         )
 
     async def _require_own_attempt(self, db: AsyncSession, attempt_id: int, user_id: str):

@@ -52,7 +52,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
-from app.et.course.rules import is_effectively_closed
+from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.learning.repository import EtLearningRepository
 from app.et.learning.rules import ensure_can_access
 from app.et.progress.repository import EtProgressRepository
@@ -71,6 +71,9 @@ from app.et.progress.schemas import IntervalReportReq, ItemViewedResult, VideoPr
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
 _CLOSED = AppError(status_code=409, detail="此課程目前關閉中，無法累積學習進度", error_code="ET_PROGRESS_001")
 _BAD_SEGMENTS = AppError(status_code=422, detail="播放區段資料無效", error_code="ET_PROGRESS_002")
+#: #374：課程尚未開放。與 `_CLOSED` 同為 409——對學員而言「還沒開始」與「已經結束」
+#: 都是「這次觀看不算進度」，差別只在訊息與下一步（等 vs 不必再等）。
+_NOT_YET_OPEN = AppError(status_code=409, detail="此課程尚未開放，無法累積學習進度", error_code="ET_PROGRESS_003")
 
 #: 單一 `(USER_ID, VIDEO_ID)` 的區段列數上界；超過即**就地合併**，不等前端呼叫 normalize。
 #:
@@ -264,6 +267,10 @@ class EtProgressService:
             # 但與 `learning/service.structure` 的草稿保密處理對齊——日後新增下架功能時
             # 這裡不必再想一次。
             raise _NOT_FOUND
+        # #374：起始未到不得累積進度。位置在擁有者預覽（`_PreviewOnly`）**之後**——
+        # 教師預覽已關閉／未開放的課程都該拿到「什麼都沒發生」，與關閉那條同一形狀。
+        if is_pending_open(status=course.status, open_start_at=course.open_start_at, now=utcnow()):
+            raise _NOT_YET_OPEN
         if is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()):
             # #288：期間已過亦視同關閉，回同一個 `ET_PROGRESS_001`——對學員而言「課程
             # 關了」與「閱課期間過了」是同一件事（這次觀看不算進度），下一步也相同。

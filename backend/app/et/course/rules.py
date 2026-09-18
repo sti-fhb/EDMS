@@ -96,8 +96,9 @@ def is_browsable_by_non_owner(*, status: str, open_end_at: datetime | None, now:
     | 函式 | 看什麼 | 用在哪 |
     |---|---|---|
     | 本函式 | `PUBLISHED` **且訖止未過** | 他人課程的唯讀瀏覽（教師端）|
-    | `publish_rules.is_visible_to_student` | `PUBLISHED` **且起始已到** | 學員端可見性 |
+    | `publish_rules.is_visible_to_student` | `PUBLISHED` **且起始已到** | 學員端清單可見性 |
     | `is_effectively_closed` | `CLOSED` **或**訖止已過 | 寫入守門（關閉期間停寫）|
+    | `is_pending_open` | `PUBLISHED` **且起始未到** | 學員端讀寫守門（#374）|
 
     三者看的是不同欄位：本函式與清單看**訖止**、學員可見性看**起始**。而
     `is_effectively_closed` 對**草稿**回 `False`（草稿不是「關閉」，見其 docstring），
@@ -235,8 +236,9 @@ def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: dat
        關閉中」的唯讀提示；把草稿（教師預覽）或起始未到判成關閉，教師與學員會看到一句
        與事實不符的提示。
 
-    起始時間的可見性判定已由 `publish_rules.is_visible_to_student` 承載（`my_courses`
-    清單用），本函式不重複它。
+    起始時間那一側由 `is_pending_open`（本檔下方）承載——**#374 之前它只驅動清單**
+    （`publish_rules.is_visible_to_student` → `my_courses`），沒有任何存取守門讀它，
+    於是學員知道 URL 就能在課程開放前學習並完課。本函式仍不重複它。
 
     ## 呼叫端一律以「與 `CLOSED` 相同」處理
 
@@ -254,6 +256,40 @@ def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: dat
     # 訖止為空代表「沒有結束日」——不該因為一個缺失的欄位去關掉一門教師沒有要求關閉
     # 的課程。已發布課程必有起訖（發布檢核 `BLOCK_NO_SCHEDULE`），為空即資料異常。
     return status == COURSE_PUBLISHED and open_end_at is not None and now > open_end_at
+
+
+def is_pending_open(*, status: str, open_start_at: datetime | None, now: datetime) -> bool:
+    """課程**已發布但閱課起始時間尚未到**（#363 引入清單用，#374 起兼任存取守門）。
+
+    與 `is_effectively_closed` 對稱：兩者都是「課程存在、學員也在籍，但此刻不能學習」，
+    一個在期間**前**、一個在期間**後**。
+
+    ## 🔴 兩者的處置**不同**，不要當成同一件事
+
+    | | 讀（教材 / 結構 / 測驗題目）| 寫（進度 / 作答）|
+    |---|---|---|
+    | `is_effectively_closed` | ✅ **可唯讀回看**（#288 AC 9／10）| ⛔ 全停（#255 裁示 Q2）|
+    | 本函式 | ⛔ **不可** | ⛔ 不可 |
+
+    已關閉課程讀得到，是因為學員**曾經學過**、那是他的歷史紀錄；尚未開放的課程他從未
+    學過，讀得到只是提前取得內容。所以本函式**讀寫都擋**。
+
+    ## 為何不共用 `publish_rules.is_visible_to_student`
+
+    那支看起來剛好是這個判定，但它對 `CLOSED` **也回 `False`**（它問的是「能否開始
+    學習」）。拿它守門會把已關閉課程一起擋掉，直接推翻 #288 的唯讀回看。本函式只取
+    「起始未到」那一半。
+
+    ## `open_start_at is None` 不算本狀態
+
+    那不是「還沒到時間」而是「沒有時間」——卡片會標「尚未開放」卻無時點可顯示，而守門
+    擋下它等於讓一門資料異常的課程對所有人消失。已發布課程必有起訖（發布檢核
+    `BLOCK_NO_SCHEDULE`），為空即資料異常，取較寬鬆的那一側並留給發布檢核處理。
+
+    ⚠️ **擁有者（教師預覽）不受本判定約束**——豁免寫在各呼叫點，不在本函式內，因為
+    「是不是擁有者」與「課程開放了沒」是兩個獨立的問題（#255 裁示 Q1）。
+    """
+    return status == COURSE_PUBLISHED and open_start_at is not None and now < open_start_at
 
 
 def ensure_reopen_schedule(*, open_end_at: datetime, now: datetime) -> None:
