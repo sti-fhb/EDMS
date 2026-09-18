@@ -20,15 +20,16 @@ function mockMyCourses(body: MyCoursesResult) {
 }
 
 describe("ET04 我的課程", () => {
-  it("統計卡顯示四項數字（AC 2）", async () => {
+  it("統計卡顯示五項數字（AC 2 + #363）", async () => {
     renderWithProviders(<EtMyCoursesPage />)
 
-    // 「已加入 2、進行中 1、未開始 1、已完成 0」——四項皆須呈現。
-    // wireframe 只畫了三張（缺「未開始」），此處以 AC 2 為準。
+    // wireframe 只畫了三張（缺「未開始」），以 AC 2 為準補為四張；#363 再加「尚未開放」。
     expect(await screen.findByText("已加入課程")).toBeInTheDocument()
     expect(screen.getByText("進行中")).toBeInTheDocument()
     expect(screen.getByText("未開始")).toBeInTheDocument()
     expect(screen.getByText("已完成")).toBeInTheDocument()
+    // #363：與「未開始」**並存且不同義**——前者是「還沒開放」，後者是「已開放、還沒開始學」。
+    expect(screen.getByText("尚未開放")).toBeInTheDocument()
   })
 
   it("課程卡片顯示名稱、標籤、章節數與閱課期間（AC 3）", async () => {
@@ -38,8 +39,11 @@ describe("ET04 我的課程", () => {
     expect(screen.getByText("護理師")).toBeInTheDocument()
     expect(screen.getByText("軍人")).toBeInTheDocument()
     expect(screen.getByText(/5 章節/)).toBeInTheDocument()
-    // 兩張卡片都有閱課期間——用 getAllByText，`getByText` 會因找到多個而失敗。
-    expect(screen.getAllByText(/閱課期間/)).toHaveLength(2)
+    // **每一張**卡片都要有閱課期間（含尚未開放者）。與卡片數比較而非寫死數字——
+    // 原本寫死 2，#363 在 fixture 加第三張卡時就因此轉紅，而那與本斷言的用意無關。
+    const cardCount = document.querySelectorAll(".MuiCard-root").length
+    expect(cardCount).toBeGreaterThan(1)
+    expect(screen.getAllByText(/閱課期間/)).toHaveLength(cardCount)
   })
 
   it("期間已過者即使 status 仍是 PUBLISHED 也顯示「已關閉」（#288）", async () => {
@@ -48,13 +52,14 @@ describe("ET04 我的課程", () => {
     // 若前端改回判 status，這張卡會標成「已發布」，而學員點進去 ET05 是唯讀的——
     // 兩個畫面在使用者眼前互相矛盾。
     mockMyCourses({
-      summary: { joined: 1, in_progress: 0, not_started: 1, completed: 0 },
+      summary: { joined: 1, in_progress: 0, not_started: 1, completed: 0, pending_open: 0 },
       courses: [
         {
           course_id: 9,
           course_name: "期間已過的課程",
           status: "PUBLISHED",
           is_closed: true,
+          is_pending_open: false,
           completion_status: "NOT_STARTED",
           tags: ["全體"],
           chapter_count: 2,
@@ -70,6 +75,45 @@ describe("ET04 我的課程", () => {
     expect(screen.getByText("已關閉")).toBeInTheDocument()
   })
 
+  it("尚未開放的課程出現在清單且不可點擊（#363）", async () => {
+    renderWithProviders(<EtMyCoursesPage />)
+
+    // 預設 fixture 第三張是 is_pending_open: true
+    expect(await screen.findByText("輸血反應辨識與處理")).toBeInTheDocument()
+
+    // 卡片不可點擊：不渲染 CardActionArea，所以整張卡沒有 button 角色
+    const card = screen.getByText("輸血反應辨識與處理").closest(".MuiCard-root")
+    expect(card).not.toBeNull()
+    expect(card!.querySelector("button")).toBeNull()
+    expect(card!.querySelector(".MuiCardActionArea-root")).toBeNull()
+  })
+
+  it("尚未開放的卡片標開放時點，且**不顯示**完課狀態（#363）", async () => {
+    renderWithProviders(<EtMyCoursesPage />)
+
+    const card = (await screen.findByText("輸血反應辨識與處理")).closest(".MuiCard-root")!
+    const text = card.textContent ?? ""
+
+    // 學員真正需要的那一件事：要等到什麼時候
+    expect(text).toMatch(/將於.+開放學習/)
+    // ⛔ 不可出現「未開始」——`completion_status` 必為 NOT_STARTED，但學員此刻不可能
+    // 開始學。同一個詞指兩件事正是本 issue 要消除的誤讀。
+    expect(text).not.toContain("未開始")
+    expect(text).toContain("尚未開放")
+    // 進度條對還不能開始的課程只是雜訊
+    expect(card.querySelector(".MuiLinearProgress-root")).toBeNull()
+    expect(text).not.toContain("完成 0%")
+  })
+
+  it("已開放的課程仍可點擊進入（#363 不得回歸）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtMyCoursesPage />)
+
+    await user.click(await screen.findByText("採血作業新進人員訓練"))
+
+    expect(navigateSpy).toHaveBeenCalled()
+  })
+
   it("已關閉課程顯示「已關閉」標示（AC 5）", async () => {
     renderWithProviders(<EtMyCoursesPage />)
 
@@ -78,7 +122,7 @@ describe("ET04 我的課程", () => {
   })
 
   it("無任何課程時顯示空狀態提示", async () => {
-    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     renderWithProviders(<EtMyCoursesPage />)
 
     expect(await screen.findByText(/尚未加入任何課程/)).toBeInTheDocument()
@@ -125,7 +169,7 @@ describe("ET04 我的課程", () => {
     expect(screen.queryByText("章節學習頁尚未開放")).not.toBeInTheDocument()
   })
 
-  it("已加入但課程尚未開放時，提示要說明清單為何是空的", async () => {
+  it("已加入但課程尚未開放時，提示要說明接下來該做什麼（#363 改文案）", async () => {
     server.use(
       http.post("/api/et/enrollments/preview", () =>
         HttpResponse.json({
@@ -138,7 +182,7 @@ describe("ET04 我的課程", () => {
         }),
       ),
     )
-    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     const user = userEvent.setup()
     renderWithProviders(<EtMyCoursesPage />)
 
@@ -146,15 +190,20 @@ describe("ET04 我的課程", () => {
     await user.type(screen.getByLabelText(/邀請碼/), "12345678")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    // 實測回報：只說「您已加入此課程」而清單是空的（AC 4），學員會以為系統壞了。
-    // 裁示 A 的提示原本只做在「新加入」那條路徑，漏了「已加入 + 未開放」這個組合。
-    expect(await screen.findByText(/將於課程開放後出現於清單/)).toBeInTheDocument()
+    // 實測回報：只說「您已加入此課程」，學員不知道接下來該做什麼。裁示 A 的提示原本
+    // 只做在「新加入」那條路徑，漏了「已加入 + 未開放」這個組合。
+    //
+    // ⚠️ #363 改了文案：原本說「將於課程開放後**出現於清單**」，那是清單會過濾掉未開放
+    // 課程時代的說法，現在課程就在清單上（標「尚未開放」）——留著會叫學員去等一件已經
+    // 發生的事。
+    expect(await screen.findByText(/課程開放後即可開始學習/)).toBeInTheDocument()
+    expect(screen.queryByText(/出現於清單/)).not.toBeInTheDocument()
   })
 })
 
 describe("ET04 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
   it("網址帶 ?code= 時自動開啟加入視窗並預填該碼", async () => {
-    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     renderWithProviders(<EtMyCoursesPage />, undefined, ["/et/my-courses?code=83052617"])
 
     // 教師「複製邀請連結」與 QR Code 都指向這個網址；學員落地後不該還要自己重打 8 碼
@@ -176,7 +225,7 @@ describe("ET04 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
         })
       }),
     )
-    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     renderWithProviders(<EtMyCoursesPage />, undefined, ["/et/my-courses?code=83052617"])
 
     expect(await screen.findByDisplayValue("83052617")).toBeInTheDocument()
@@ -185,7 +234,7 @@ describe("ET04 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
   })
 
   it("網址沒有 code 時不自動開啟視窗", async () => {
-    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0 }, courses: [] })
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     renderWithProviders(<EtMyCoursesPage />)
 
     await screen.findByRole("button", { name: "加入新課程" })

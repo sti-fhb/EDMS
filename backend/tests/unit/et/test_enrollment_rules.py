@@ -20,6 +20,7 @@ from app.et.enrollment.rules import (
     ensure_not_removed,
     is_course_completed,
     is_listed_in_my_courses,
+    is_pending_open,
     normalize_invitation_code,
 )
 from app.et.progress.repository import completion_pct
@@ -120,9 +121,16 @@ class TestIsListedInMyCourses:
             now=_NOW,
         )
 
-    def test_起始時間未到不可見(self) -> None:
-        """AC 4：起始時間未到之課程不顯示於清單。"""
-        assert not is_listed_in_my_courses(
+    def test_起始時間未到仍列於清單(self) -> None:
+        """#363 推翻原 AC 4 的「起始時間未到不顯示」。
+
+        原行為與 #247 SA Q2 裁示 A（起始時間未到仍可加入）相乘＝「加得進去、看不到」。
+        更糟的是統計：`_summarize` 與卡片同一份母體，濾掉課程連 `joined` 都不算，學員
+        看到「已加入課程 0」——那不是「還沒開放」，是明確地說「你沒有加入任何課程」。
+
+        改為顯示，卡片不可點擊並標開放時點（`is_pending_open`）。
+        """
+        assert is_listed_in_my_courses(
             status=COURSE_PUBLISHED,
             open_start_at=_NOW + timedelta(minutes=1),
             open_end_at=_NOW + timedelta(days=1),
@@ -135,7 +143,12 @@ class TestIsListedInMyCourses:
             status=COURSE_PUBLISHED, open_start_at=_NOW, open_end_at=_NOW + timedelta(days=1), now=_NOW
         )
 
-    def test_起始時間為空不可見(self) -> None:
+    def test_起始時間為空仍不可見(self) -> None:
+        """#363 **刻意不改這一條**：`None` 不是「還沒到時間」而是「沒有時間」。
+
+        若把它一併列出，卡片會標「尚未開放」卻沒有開放時點可顯示——那是比消失更難
+        理解的狀態。已發布課程的起訖由發布檢核把關，此處維持原行為。
+        """
         assert not is_listed_in_my_courses(
             status=COURSE_PUBLISHED, open_start_at=None, open_end_at=_NOW + timedelta(days=1), now=_NOW
         )
@@ -158,6 +171,31 @@ class TestIsListedInMyCourses:
         assert is_listed_in_my_courses(
             status=COURSE_CLOSED, open_start_at=open_start_at, open_end_at=_NOW + timedelta(days=1), now=_NOW
         )
+
+
+class TestIsPendingOpen:
+    """#363：已加入、已發布，但閱課起始時間尚未到。"""
+
+    def test_起始時間未到為真(self) -> None:
+        assert is_pending_open(status=COURSE_PUBLISHED, open_start_at=_NOW + timedelta(minutes=1), now=_NOW)
+
+    def test_恰好等於起始時間為假(self) -> None:
+        """邊界與 `is_visible_to_student` 互補：`now >= open_start_at` 即已開放。
+
+        兩者必須在同一點翻轉，否則會出現「既不可學習、也不標未開放」的一瞬間。
+        """
+        assert not is_pending_open(status=COURSE_PUBLISHED, open_start_at=_NOW, now=_NOW)
+
+    def test_已開始為假(self) -> None:
+        assert not is_pending_open(status=COURSE_PUBLISHED, open_start_at=_NOW - timedelta(days=1), now=_NOW)
+
+    def test_起始時間為空為假(self) -> None:
+        """「沒有時間」不是「還沒到時間」——見 `is_pending_open` docstring。"""
+        assert not is_pending_open(status=COURSE_PUBLISHED, open_start_at=None, now=_NOW)
+
+    def test_草稿為假(self) -> None:
+        """草稿本來就不在清單上，不需要也不應該標「尚未開放」。"""
+        assert not is_pending_open(status=COURSE_DRAFT, open_start_at=_NOW + timedelta(days=1), now=_NOW)
 
 
 class TestIsCourseCompleted:

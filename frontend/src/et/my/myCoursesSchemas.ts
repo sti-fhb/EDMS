@@ -44,6 +44,15 @@ export interface MyCourseRow {
    * `LearnStructure.is_closed` 同名同義。
    */
   is_closed: boolean
+  /**
+   * 已加入但**閱課起始時間未到**（#363）。卡片據此改為不可點擊並標開放時點。
+   *
+   * 與 `is_closed` 對稱：兩者都是「列在清單上但不可學習」，一個在期間前、一個在期間後。
+   *
+   * ⚠️ **不要自己拿 `open_start_at` 跟 `Date.now()` 比**——那會讓判定在後端與前端各有
+   * 一份，而瀏覽器時鐘可被使用者改。一律看本欄。
+   */
+  is_pending_open: boolean
   completion_status: CompletionStatus
   tags: string[]
   chapter_count: number
@@ -58,6 +67,16 @@ export interface MyCoursesSummary {
   in_progress: number
   not_started: number
   completed: number
+  /**
+   * 已加入但課程尚未開放的門數（#363）。
+   *
+   * ⚠️ **與 `not_started` 是兩件事。** `not_started` 是「已開放、還沒開始學」，本欄是
+   * 「還沒開放」——學員此刻不可能開始學。合併顯示會讓「未開始」同時指兩件事，而學員
+   * 能做的事完全不同（一個是去上課、一個是等）。
+   *
+   * `joined === in_progress + not_started + completed + pending_open`。
+   */
+  pending_open: number
 }
 
 export interface MyCoursesResult {
