@@ -140,11 +140,18 @@ class ReviewCenterService:
                     previewable=is_previewable(cv.file_mime or ""),
                 )
         is_obsolete = review.review_type == _OBSOLETE
+        # 標籤呈現（#377）：新增 / 新版本取本次送審版本之快照，廢止取文件層現值（見 repository docstring）
+        tags = await self._repo.get_review_tag_names(
+            db, review_type=review.review_type, doc_id=row.doc_id, version_id=row.new_version_id
+        )
         return ReviewDetail(
             review_id=row.review_id,
             doc_id=row.doc_id,
             doc_name=row.doc_name,
             category_code=row.category_code,
+            category_name=row.category_name,
+            audience_tags=tags["audience"],
+            retrieval_tags=tags["retrieval"],
             review_type=row.review_type,
             change_summary=row.change_summary,
             submit_date=row.submit_date,

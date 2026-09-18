@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.dm.catalog.models import DmTag
+from app.dm.catalog.models import DmCategory, DmTag
 from app.dm.document.models import DmDocTag, DmVersionTag
 from app.dm.editor.service import EditorService
 from app.dm.review.center_service import ReviewCenterService
@@ -65,6 +65,10 @@ async def _two_audience_ids(db) -> tuple[int, int]:
     ids = list(rows.all())
     assert len(ids) == 2, "seed 需至少 2 個 AUDIENCE 標籤"
     return ids[0], ids[1]
+
+
+async def _tag_name(db, tag_id: int) -> str:
+    return await db.scalar(select(DmTag.tag_name).where(DmTag.tag_id == tag_id))
 
 
 async def _doc_tag_ids(db, doc_id) -> set[int]:
@@ -160,6 +164,37 @@ async def test_approve_applies_version_tags_to_doc(db):
     await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
 
     assert await _doc_tag_ids(db, doc_id) == {aud_b}
+
+
+async def test_review_detail_shows_version_snapshot_tags(db):
+    """AC6/9：新版本送審之明細，標籤取該版本快照（非文件層現值），並附分類中文名。"""
+    await _seed_editor_and_reviewer(db)
+    aud_a, aud_b = await _two_audience_ids(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_ids=[aud_b],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="改版",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+
+    detail = await _review.get_detail(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    # 審核者看到的是「本次送審提議、核准後會生效」的可見對象，而非文件層目前值（aud_a）
+    assert detail.audience_tags == [await _tag_name(db, aud_b)]
+    assert detail.category_name == await db.scalar(
+        select(DmCategory.category_name).where(DmCategory.category_code == "SOP")
+    )
 
 
 async def test_submit_blocked_when_version_snapshot_empty(db):

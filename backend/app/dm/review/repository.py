@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
-from app.dm.catalog.models import DmTag, DmTagGroup
+from app.dm.catalog.models import DmCategory, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_VIEWER
@@ -23,6 +23,7 @@ _PENDING = "PENDING"
 _PUBLISHED = "PUBLISHED"
 _SUPERSEDED = "SUPERSEDED"
 _AUDIENCE = "AUDIENCE"
+_OBSOLETE = "OBSOLETE"
 _ALL_AUDIENCE_TAG = "全體"
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
 
@@ -82,6 +83,7 @@ class ReviewCenterRepository:
                 DmReview.created_user.label("submitter_id"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
+                DmCategory.category_name,
                 DmDocument.current_version_id,
                 DmDocVersion.version_id.label("new_version_id"),
                 DmDocVersion.version_no.label("new_version_no"),
@@ -92,6 +94,7 @@ class ReviewCenterRepository:
                 DpUser.user_name.label("submitter_name"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
+            .outerjoin(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .outerjoin(DpUser, DmReview.created_user == DpUser.user_id)
             .where(DmReview.review_id == review_id)
@@ -211,6 +214,47 @@ class ReviewCenterRepository:
         )
         # 不於此 flush：呼叫端 approve 於本呼叫前已 flush 版本切換，後續稽核 / 通知查詢會 autoflush，
         # 交易由 get_db 統一 commit（避免多一次 round-trip，Code Review LOW）。
+
+    async def get_review_tag_names(
+        self, db: AsyncSession, *, review_type: str, doc_id: str, version_id: int | None
+    ) -> dict[str, list[str]]:
+        """取簽核明細呈現用之標籤名稱，依送審類型決定來源（#377）。
+
+        NEW / NEW_VERSION → 該送審版本之**版本層快照**：審核者看到的即本次送審提議、且核准後會生效
+        的值。OBSOLETE → **文件層現值**：廢止之 VERSION_ID 指向目前發布版、無草稿階段快照，且廢止
+        決策關注的是「此文件目前的可見範圍」。
+
+        Args:
+            review_type: 送審類型（NEW / NEW_VERSION / OBSOLETE）。
+            doc_id: 文件編號（廢止類之來源）。
+            version_id: 送審版本（新增 / 新版本之來源）；為 None 時退回文件層。
+
+        Returns:
+            {"audience": [...], "retrieval": [...]}，值為標籤名稱（中文）。
+        """
+        if review_type == _OBSOLETE or version_id is None:
+            stmt = (
+                select(DmTag.tag_name, DmTagGroup.group_type)
+                .select_from(DmDocTag)
+                .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+                .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
+                .order_by(DmTag.tag_id)
+            )
+        else:
+            stmt = (
+                select(DmTag.tag_name, DmTagGroup.group_type)
+                .select_from(DmVersionTag)
+                .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
+                .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+                .order_by(DmTag.tag_id)
+            )
+        audience: list[str] = []
+        retrieval: list[str] = []
+        for tag_name, group_type in (await db.execute(stmt)).all():
+            (audience if group_type == _AUDIENCE else retrieval).append(tag_name)
+        return {"audience": audience, "retrieval": retrieval}
 
     async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:
         """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
