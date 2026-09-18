@@ -68,7 +68,7 @@ from app.et.invitation.schemas import (
 from app.et.notify.course_invite import (
     PREVIEW_NAME_MASK,
     build_course_invite_params,
-    invite_link,
+    learn_link,
     preview_invite_link,
 )
 from app.et.notify.mailer import TEMPLATE_COURSE_INVITE
@@ -167,13 +167,28 @@ class EtInvitationService:
     async def send(
         self, db: AsyncSession, course_id: int, *, raw_emails: str, operator: OperatorInfo
     ) -> EmailInviteResult:
-        """對每筆 Email 建立 / 更新 `ET_INVITATION` 並寄出邀請信（FR-ET-US8-08）。
+        """對每筆 Email **直接加入課程**並寄出邀請信（FR-ET-US8-08、#362）。
 
-        **邀請列先寫、寄信在後，且寄信失敗不回滾邀請**（data-model §ET_INVITATION：
-        寄送失敗時 `STATUS` 維持 `PENDING`、列於 US12 待加入清單可重寄）。
+        ## 邀請即加入，不再有「待加入」中間狀態
+
+        原流程是寫一列 `ET_INVITATION` PENDING、等對方點信中連結才建 `ET_ENROLLMENT`。
+        裁示取消那一段（2026-09-17）的理由：**邀請對象限平台既有帳號**，被邀請者不需要
+        任何動作就能在「我的課程」看到課程，所以「待加入」與「已加入」在**學員端沒有
+        任何行為差異**，只在教師端多一個要記得去看的頁面——而教師看不到被邀請的人出現
+        在學員清單裡，會以為邀請失敗（2026-09-17 手測回報）。
+
+        ## 🔴 加入先寫、寄信在後，且**寄信失敗不回滾加入**
+
+        與原本「寄信失敗不回滾邀請列」同一個方向，但代價不同：原本失敗者留在待加入
+        清單、教師可重寄；**現在沒有重寄的途徑**（US12 的補救隨功能一起移除）。
+
+        接受這個代價的理由是學員**不依賴那封信**——他在「我的課程」就看得到。信只是
+        提醒，不是加入的必要條件。信沒到最壞是他晚一點才發現，而非加不進來。
+
+        ⚠️ 故回應的 `joined` 與 `mail_failed` **必須分開**，見 `EmailInviteResult`。
 
         Returns:
-            `sent`（成功排入 outbox 的封數）與 `failed`（排入失敗的 Email）。
+            `joined`（實際加入人數，與學員清單一致）與 `mail_failed`（信件排入失敗者）。
         """
         course = await self._require_invitable_course(db, course_id, operator.user_id)
         emails = parse_emails(raw_emails)
@@ -184,29 +199,25 @@ class EtInvitationService:
         recipients = await self._require_known_recipients(db, emails)
 
         teacher_name = await self._people.user_name(db, course.owner_id) or ""
-        sent = 0
-        failed: list[str] = []
+        mail_failed: list[str] = []
         for recipient in recipients:
-            # 每位收件人一組獨立 token：明文只入信中連結，DB 只存 SHA-256。
-            plaintext = generate_invitation_token()
-            queued = await self._deliver(
-                db, course=course, recipient=recipient, teacher_name=teacher_name, plaintext=plaintext
+            # 🔴 **加入在寄信之前**。反過來寫（寄信成功才加入）會讓「範本被停用」這種
+            # 與學員無關的設定問題擋掉整批加入，而加入是教師真正要的那件事。
+            #
+            # `upsert_enrollment` 而非 INSERT：被移除的學員那一列還在
+            # （`UQ_ET_ENROLLMENT_USER_COURSE` 為全表唯一），INSERT 會撞鍵。且教師的
+            # **明確重新邀請**得以把他帶回來——那是 #247 SA Q1 裁示 C 的一側，與標籤
+            # 帶入的 `DO NOTHING` 刻意不共用實作（見該函式 docstring）。
+            await self._repo.upsert_enrollment(
+                db, user_id=recipient.user_id, course_id=course_id, operator=operator
             )
-            await self._repo.upsert_pending(
-                db,
-                course_id=course_id,
-                email=recipient.email,
-                token_hash=hash_token(plaintext),
-                send_status_code=STATUS_QUEUED if queued else STATUS_SEND_FAILED,
-                operator=operator,
-            )
-            if queued:
-                sent += 1
-            else:
-                failed.append(recipient.email)
+            if not await self._deliver(db, course=course, recipient=recipient, teacher_name=teacher_name):
+                mail_failed.append(recipient.email)
+        joined = len(recipients)
 
         # 收件人**不寫進 description**：那是個資，而稽核表的保存期比業務資料長。
-        # 需要知道寄給誰時查 `ET_INVITATION`（有 `COURSE_ID` 可對上本筆稽核的 target_id）。
+        # 需要知道加了誰時查 `ET_ENROLLMENT`（`JOIN_SOURCE = EMAIL_INVITE` + `COURSE_ID`
+        # 可對上本筆稽核的 target_id）。`ET_INVITATION` 已隨 #362 移除。
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -215,10 +226,10 @@ class EtInvitationService:
             result="SUCCESS",
             operator_id=operator.user_id,
             target_id=str(course_id),
-            description=f"寄送 Email 邀請 {len(emails)} 筆（成功排入 {sent} 筆）",
+            description=f"Email 邀請加入 {joined} 位（信件排入失敗 {len(mail_failed)} 筆）",
             source_ip=get_client_ip(),
         )
-        return EmailInviteResult(sent=sent, failed=failed)
+        return EmailInviteResult(joined=joined, mail_failed=mail_failed)
 
     async def resend(self, db: AsyncSession, invitation_id: int, *, operator: OperatorInfo) -> None:
         """再次寄送同一封邀請信（`FR-ET-US12-03`）。
@@ -395,13 +406,17 @@ class EtInvitationService:
             raise _LINK_INVALID
         return InviteAcceptResult(course_id=course.course_id, course_name=course.course_name, already_joined=True)
 
-    async def _deliver(self, db: AsyncSession, *, course, recipient, teacher_name: str, plaintext: str) -> bool:
-        """把一封邀請信排入 outbox。`send()` 與 `resend()` 共用。
+    async def _deliver(self, db: AsyncSession, *, course, recipient, teacher_name: str) -> bool:
+        """把一封邀請信排入 outbox。
 
-        抽出的是**組參數 + 寄信**這一段，不含持久化——兩邊的持久化語意不同：
-        `send()` 用 `upsert_pending`（可新建列），`resend()` 用 `rotate_token`（只認主鍵、
-        絕不新建，見該函式 docstring）。硬要連持久化一起共用，會把 `resend` 重新拖回
-        「憑空造出一列」的那個 bug。
+        ## 信中連結改為學習頁，不再是一次性 token（#362）
+
+        原本 `COURSE_URL` 塞 `invite_link(plaintext)`——那條連結的用途是讓受邀者
+        「接受邀請」。邀請即加入之後沒有要接受的東西了，故改塞 `learn_link`，與**標籤
+        自動邀請**那條路徑統一（`notify/mailer.py` 本來就是這樣）。
+
+        ⚠️ 這也是為什麼 `ET_INVITATION` 連同 token 一起移除得掉：token 存在的唯一理由
+        是 accept 流程。
 
         Returns:
             True 表示已排入 outbox。**非** SMTP 真實結果（平台為 outbox 架構）。
@@ -414,7 +429,7 @@ class EtInvitationService:
                 user_name=recipient.user_name,
                 teacher_name=teacher_name,
                 course=course,
-                course_url=invite_link(plaintext),
+                course_url=learn_link(course.course_id),
                 invitation_code=course.invitation_code,
             ),
         )

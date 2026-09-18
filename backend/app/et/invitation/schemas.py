@@ -38,14 +38,27 @@ class InvitePreview(BaseModel):
 
 
 class EmailInviteResult(BaseModel):
-    """寄出結果。
+    """邀請結果（#362：邀請即加入）。
 
-    `failed` 為**排入 outbox 失敗**者（範本停用 / 渲染失敗）；真實 SMTP 結果於此刻
-    尚不可知（平台為 outbox 架構），故不代表「對方收不到」。見 `service.py` 說明。
+    ## 🔴 `joined` 與 `mail_failed` 是兩件事，刻意分開
+
+    原欄位是 `sent`（寄信封數）+ `failed`，因為當時「加入」還要等對方點連結，寄信
+    成功與否幾乎等同於邀請成功與否。**#362 之後不是了**——加入在寄信之前就完成，
+    所以「已加入但信沒寄出」是一個真實的結果組合。
+
+    合成一個數字會讓教師以為「沒寄出 ＝ 沒加入」，而那個人其實已經在學員清單裡；
+    ⚠️ 而且「待加入」清單移除後**沒有重寄的途徑**（US12 的補救隨功能一起消失），
+    教師只能從 DP 的通知紀錄查寄信結果。故兩個欄位都必須讓他看到。
+
+    `mail_failed` 為**排入 outbox 失敗**者（範本停用 / 渲染失敗）；真實 SMTP 結果於此
+    刻尚不可知（平台為 outbox 架構），故不代表「對方收不到」。
     """
 
-    sent: int
-    failed: list[str]
+    #: 實際加入此課程的人數（AC 5：與學員清單一致）。已在課程中者亦計入——他們在
+    #: 清單上，教師看到的數字必須對得上那份清單。
+    joined: int
+    #: 加入成功但信件**排入 outbox 失敗**者之 Email。
+    mail_failed: list[str]
 
 
 class InviteAcceptReq(BaseModel):

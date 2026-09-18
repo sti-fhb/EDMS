@@ -212,21 +212,36 @@ class TestPreview:
 class TestSendInvitations:
     """AC 6：寄出並記錄 `SEND_STATUS_CODE`。"""
 
-    async def test_每筆_email_建立待加入邀請並寄信(self, client, db) -> None:
+    async def test_每筆_email_直接加入課程並寄信(self, client, db) -> None:
+        """#362：邀請**即加入**，不再經「待加入」中間狀態。
+
+        原行為是寫一列 `ET_INVITATION` PENDING、等對方點連結才建 `ET_ENROLLMENT`。
+        裁示取消那一段的理由：邀請對象限**平台既有帳號**，被邀請者不需要任何動作就能
+        在「我的課程」看到課程（`ET_ENROLLMENT` 已建列），所以「待加入」與「已加入」
+        在學員端**沒有任何行為差異**，只在教師端多一個要記得去看的頁面——而教師看不到
+        被邀請的人出現在學員清單裡，會以為邀請失敗。
+        """
         teacher = await _user(db, "iv_t04", ROLE_TEACHER)
         await _account(db, "ivi@x.gov.tw", user_id="iv_i01")
         await _account(db, "ivj@x.gov.tw", user_id="iv_j01")
         cid = await _published_course(client, db, teacher)
 
         r = await _invite(client, teacher, cid, "ivi@x.gov.tw, ivj@x.gov.tw")
-        assert r.status_code == 200, r.text
-        assert r.json() == {"sent": 2, "failed": []}
 
-        rows = (await db.execute(select(EtInvitation).order_by(EtInvitation.email))).scalars().all()
-        assert [row.email for row in rows] == ["ivi@x.gov.tw", "ivj@x.gov.tw"]
-        assert all(row.status == INVITATION_PENDING for row in rows)
-        assert all(row.send_status_code == "QUEUED" for row in rows)
-        assert all(row.token_hash for row in rows)
+        assert r.status_code == 200, r.text
+        # `joined` 與 `mail_failed` **刻意分開**：加入成功而信寄失敗現在是一個真實且
+        # 無法補救的組合（待加入清單沒了，教師不能重寄）。合成一個數字會讓教師
+        # 以為「沒寄出 ＝ 沒加入」，而那個人其實已經在課程裡了。
+        assert r.json() == {"joined": 2, "mail_failed": []}
+
+        rows = (
+            await db.execute(
+                select(EtEnrollment).where(EtEnrollment.course_id == cid).order_by(EtEnrollment.user_id)
+            )
+        ).scalars().all()
+        assert [row.user_id for row in rows] == ["iv_i01", "iv_j01"]
+        assert all(row.join_source == SOURCE_EMAIL_INVITE for row in rows)
+        assert all(row.is_removed is False for row in rows)
 
     async def test_明文_token_不落庫(self, client, db) -> None:
         """DB 只存 SHA-256；該表外洩不得反推出可用的連結。"""
