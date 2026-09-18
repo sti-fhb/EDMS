@@ -64,6 +64,9 @@ interface SurveySectionProps {
  * [[surveyService.update]] 的註解。⛔ 日後若覺得「凍結還能改名」是 bug，請先查本行：
  * 那曾是刻意的設計（名稱不影響已填答資料的意義），是使用者裁示改掉的，不是漏做。
  *
+ * ℹ️ 凍結後**擁有者仍看得到題目與選項**——ET03 的「問卷結果」區塊逐題列出題幹與選項
+ * （`et/students/SurveyResultBlock`，不受 `frozen` 影響）。⛔ 不需要為此另開檢視入口。
+ *
  * ## 不顯示填答狀況
  *
  * 已填 / 未填人數屬 `spec_us9` 之「問卷結果」區塊（`ET-9`），在 ET02 重複顯示只是
@@ -165,6 +168,10 @@ export function SurveySection({
   }
 
   // ── 已建立（摘要列，比照教材 / 測驗項目）──────────────────────────────────
+  // 提示文字與 disabled 共用同一個判定（比照 `CourseEditorPage` 的 `isNew`）——
+  // 兩處各寫一次會在其中一處改動時靜默不一致：唯讀者會看到一句對他不成立的提示。
+  const editDisabled = survey.frozen && !readOnly
+
   return (
     <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -210,14 +217,14 @@ export function SurveySection({
 
             ⚠️ `readOnly` 時**不可**停用：那顆鈕是非擁有者看問卷內容的唯一入口。
           */}
-          <Tooltip title={survey.frozen && !readOnly ? "已有學員填答，題目與選項不可再修改。此時僅可停用問卷。" : ""}>
+          <Tooltip title={editDisabled ? "已有學員填答，題目與選項不可再修改。此時僅可停用問卷。" : ""}>
             {/* disabled 的按鈕不發滑鼠事件，Tooltip 需要一層可接收事件的容器（比照 `CourseEditorPage` 的發布鈕）*/}
             <span>
               <Button
                 size="small"
                 variant="outlined"
                 startIcon={<EditOutlinedIcon />}
-                disabled={survey.frozen && !readOnly}
+                disabled={editDisabled}
                 onClick={onOpen}
               >
                 {readOnly ? "檢視" : "編輯"}

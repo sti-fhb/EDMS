@@ -208,6 +208,15 @@ describe("SurveySection：凍結", () => {
     render(<SurveySection {...BASE_PROPS} survey={frozen} readOnly />)
     expect(screen.getByRole("button", { name: "檢視" })).toBeEnabled()
   })
+
+  it("唯讀者的檢視鈕即使凍結也沒有提示——那句話只對擁有者成立", async () => {
+    // `frozen && readOnly` 是本次新增 `!readOnly` 條件才出現的象限。少了這條，
+    // 日後有人把判定簡化成只看 `survey.frozen` 不會有東西變紅，而唯讀者會在一顆
+    // 按得下去的「檢視」鈕上看到「僅可停用問卷」——他根本沒有停用的權限。
+    render(<SurveySection {...BASE_PROPS} survey={frozen} readOnly />)
+    await userEvent.hover(screen.getByRole("button", { name: "檢視" }))
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  })
 })
 
 describe("SurveySection：唯讀（非擁有者）", () => {
