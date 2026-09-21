@@ -178,6 +178,28 @@ describe("ET10 核可查詢：共通", () => {
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
   })
 
+  it("🔴 `module-summary` 未回來前不渲染任何視角——避免管理者閃現不適用的提示", async () => {
+    // 只等 `capabilities` 的話，整頁重新載入時它可能先回來，此時 `summary` 還是
+    // undefined → `isAdmin` 退回 false → 管理者會**短暫看到**「僅顯示您所開設的課程」。
+    // 它會自我修正，但那句是裁示 C 的強制配套，閃現錯誤版本與顯示錯誤版本同樣不可接受。
+    server.use(
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({ can_create_course: false, can_manage_courses: true, can_learn: false }),
+      ),
+      // 讓 module-summary 慢於 capabilities 回來
+      http.get("/api/dp/user/module-summary", async () => {
+        await new Promise((r) => setTimeout(r, 80))
+        return HttpResponse.json({ et: { has_role: true, is_admin: true }, dm: { has_role: false, is_admin: false } })
+      }),
+    )
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    // capabilities 先回來的那個空窗期：不得已 isAdmin=false 渲染出教師視角
+    expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("學員姓名")).toBeInTheDocument()
+    expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
+  })
+
   it("兼具教師與學員角色時顯示教師視角", async () => {
     // 他自己的已通過課程在 ET04「我的課程」看得到；兩張表塞同一頁只會讓畫面變長。
     asRole("teacher")

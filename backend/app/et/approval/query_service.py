@@ -25,10 +25,15 @@ from app.et.approval.query_rules import visible_clause
 from app.et.approval.schemas import ApprovalQueryRow, MyApprovalRow, _ApprovalCore
 from app.et.roles.authz import is_admin
 
+#: 姓名必填（SA Q2 裁示 A）。
+#:
+#: ⚠️ **不共用 `COMMON_001`**（未提供任何更新欄位）：`docs/ref/error-codes.md` 的對照表是
+#: code → message 的 1:1 映射，而本情境的訊息是「請輸入學員姓名」。同一個代碼掛兩種訊息
+#: 會讓依該表建對照（例如前端 i18n）的人拿到與畫面不符的字串。
 _NAME_REQUIRED = AppError(
     status_code=422,
     detail="請輸入學員姓名",
-    error_code="COMMON_001",
+    error_code="ET_APPROVAL_006",
 )
 
 
@@ -52,7 +57,7 @@ class EtApprovalQueryService:
         """教師 / 管理者依學員姓名查詢核可紀錄。
 
         Raises:
-            AppError: `user_name` 去空白後為空（422 `COMMON_001`）。
+            AppError: `user_name` 去空白後為空（422 `ET_APPROVAL_006`）。
 
         ⚠️ 姓名必填是 SA Q2 裁示 A 的落地。理由不是安全潔癖，而是**留白查全部沒有對應
         需求**（客戶要的是「用姓名查」），而它會回傳 `user_id` 與姓名對照——等於提供一份

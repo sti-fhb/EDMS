@@ -220,6 +220,7 @@
 | ET_APPROVAL_003 | 404 | 查無核可紀錄 |
 | ET_APPROVAL_004 | 409 | 核可狀態已被其他人變更，請重新整理後再試 |
 | ET_APPROVAL_005 | 422 | 請填寫撤銷原因 |
+| ET_APPROVAL_006 | 422 | 請輸入學員姓名 |
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
 >
@@ -364,3 +365,9 @@
 > - **`003` 與 `004` 分流**：查無核可紀錄回 `003`（這個人從來沒被核可過），查得到但版本不符或已被撤銷回 `004`（你看到的畫面過期了）。合併會讓前端只能顯示一句模稜兩可的話，而兩者的下一步不同——前者該去核可，後者該重新整理。
 > - **`005` 不交給 Pydantic 的 `min_length=1`**：那個放行 `"   "`，而撤銷原因是**事後回答「為什麼這筆核可被推翻」的唯一欄位**（`ET_APPROVAL` 因 `(COURSE_ID, USER_ID)` 唯一而 update 覆寫，前次結果只存在 `DP_AUDIT_LOG`）。且 Pydantic 失敗回 `COMMON_422` 不帶欄位名，前端無從把 `ET-MSG-ET03-305` 掛回那個輸入框。
 > - **授權一律沿用 `ET_COURSE_001` / `ET_COURSE_002`**，不自建——判定為 `ensure_owner_or_admin`（owner ∪ 管理者，`FR-ET-US16-07`）。
+
+> `ET_APPROVAL_006`（#385 ET10 核可查詢，US17 SA Q2 裁示 A：查詢姓名必填）：
+>
+> - **不共用 `COMMON_001`**（未提供任何更新欄位）：本表是 code → message 的 **1:1 映射**，而本情境的訊息是「請輸入學員姓名」。同一個代碼掛兩種訊息，會讓依本表建對照（例如前端 i18n）的人拿到與畫面不符的字串。語意上兩者都是「必填缺漏」，但那不足以抵銷訊息對不上的代價。
+> - **與 `005` 同一種取捨**：Pydantic 的 `min_length=1` 放行 `"   "`，且失敗回 `COMMON_422` 不帶欄位名，前端無從把錯誤掛回那個輸入框。故 router 的 `Query(min_length=1)` 只擋空字串，全空白由 service 的 `strip()` 擋下。
+> - ⚠️ **必填本身是 SA 裁示而非防呆**：留白查全部**沒有對應需求**（客戶要的是「用姓名查」），而該查詢會回傳 `user_id` 與姓名對照——留白等於提供一份有受訓紀錄的員工名冊。放寬前請重讀 `spec_us17.md`。

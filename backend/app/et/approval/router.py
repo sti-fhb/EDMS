@@ -162,7 +162,7 @@ async def search_approvals(
     的 `strip()` 擋下回 422。
 
     Raises:
-        AppError: 422 `COMMON_001` 姓名為空白；403 `ET_AUTH_001` 非教師 / 管理者。
+        AppError: 422 `ET_APPROVAL_006` 姓名為空白；403 `ET_AUTH_001` 非教師 / 管理者。
     """
     return await _query.search(
         db,

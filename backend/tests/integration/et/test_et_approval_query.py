@@ -203,6 +203,50 @@ class TestTeacherScope:
         assert body["meta"]["total"] == len(body["data"]) == 2
 
 
+class TestResultFilterInteraction:
+    """`result` 篩選參數 × 可見範圍條件的交互作用。
+
+    🔴 這組是 review 時才想到要補的：`visible` 是一個 `OR`，而 `result` 是另一個 `AND`
+    上去的條件。兩者相乘之後的實際範圍不是讀一眼就看得出來的——推理說「`AND result=FAIL`
+    會讓 OR 的左側（要求 PASS）恆假、於是收斂成僅自己 owner」，但**推理不是驗證**。
+    """
+
+    async def test_教師篩不通過時仍只看得到自己課程的(self, client, db) -> None:
+        """若 SQLAlchemy 沒替 `visible` 的 OR 加括號，這條會撈到他人課程的不通過。"""
+        f = await _fixture(db)
+        r = await client.get(_QUERY, params={"user_name": "林", "result": "FAIL"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert _names(r.json()) == set(), "林佳蓉的不通過只在他人課程，教師不該看到"
+
+    async def test_教師篩通過時看得到自己課程已撤銷的(self, client, db) -> None:
+        """自己 owner 的課程不受結果分流限制——已撤銷的通過仍在可見範圍內。
+
+        ⚠️ 必須另建一門 `own` 的課：`(COURSE_ID, USER_ID)` 為**全表唯一**，一位學員於
+        一門課至多一筆核可，不能在 fixture 既有的課 A 上再給王大明加一筆。
+        """
+        f = await _fixture(db)
+        e = await _course(db, owner=f["own"], name="輸血反應處置流程培訓")
+        await _approval(
+            db,
+            course_id=e,
+            user_id=f["wang"],
+            result=APPROVAL_PASS,
+            approved_by=f["own"],
+            revoked_by=f["own"],
+            revoke_reason="自己課程的撤銷",
+        )
+        r = await client.get(_QUERY, params={"user_name": "王大明", "result": "PASS"}, headers=_bearer(f["own"]))
+        rows = r.json()["data"]
+        assert [row["is_revoked"] for row in rows] == [True]
+        assert rows[0]["revoke_reason"] == "自己課程的撤銷"
+
+    async def test_篩選值不在值域時回422(self, client, db) -> None:
+        """`result` 走 router 的 pattern 驗證，不合法的值不該被當成「不篩」而放行全部。"""
+        f = await _fixture(db)
+        r = await client.get(_QUERY, params={"user_name": "林", "result": "WHATEVER"}, headers=_bearer(f["own"]))
+        assert r.status_code == 422
+
+
 class TestAdminScope:
     async def test_管理者可查非自己建立課程的全部紀錄(self, client, db) -> None:
         f = await _fixture(db)

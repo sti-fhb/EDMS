@@ -38,14 +38,20 @@ export function EtApprovalQueryPage() {
   // 同時具教師與管理者身分的人它也是 true，`!can_create_course` 會把他誤判成非管理者
   // 而顯示一句不適用的範圍提示。`module-summary` 的 `et.is_admin` 與後端
   // `authz.is_admin()` 同源，是唯一正確的來源。
-  const { data: summary } = useModuleSummary()
+  //
+  // 🔴 **兩支查詢都要等**：只等 `capabilities` 的話，整頁重新載入時它可能先回來，
+  // 此時 `summary` 仍是 undefined → `isAdmin` 退回 false → 管理者會**短暫看到**
+  // 「僅顯示您所開設的課程」這句對他不適用的提示。它會自我修正，但那句話是裁示 C 的
+  // 強制配套（見 `TeacherApprovalQuery` docstring）——一句被當成規格的提示，
+  // 閃現錯誤版本與顯示錯誤版本同樣不可接受。
+  const { data: summary, isPending: summaryPending } = useModuleSummary()
 
   return (
     <Box>
       <Typography variant="h5" gutterBottom>
         核可查詢
       </Typography>
-      {isPending ? (
+      {isPending || summaryPending ? (
         <Typography variant="body2" color="text.secondary">
           載入中…
         </Typography>

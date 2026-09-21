@@ -19,10 +19,11 @@
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR
 from app.core.like_escape import contains as like_contains
-from app.dp.users.models import DpUser
+from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.approval.models import EtApproval
 from app.et.constants import APPROVAL_PASS
 from app.et.course.models import EtCourse
@@ -31,7 +32,7 @@ from app.et.course.models import EtCourse
 class EtApprovalQueryRepository:
     """核可紀錄之查詢（教師 / 管理者依姓名查、學員查自己已通過）。"""
 
-    def teacher_query_stmt(self, *, user_name: str, visible, result: str | None = None) -> Select:
+    def teacher_query_stmt(self, *, user_name: str, visible: ColumnElement[bool], result: str | None = None) -> Select:
         """教師 / 管理者依學員姓名查詢的語句（未套 offset/limit，供 `paginate()`）。
 
         🔴 **姓名比對必須跳脫 LIKE 萬用字元**：未跳脫時使用者輸入 `%` 會變成「查全部」，
