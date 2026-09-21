@@ -181,7 +181,15 @@ export function EtStudentsPage() {
     queryFn: () => coursesApi.list(listParams),
   })
 
-  const options = courses?.data ?? []
+  // #359 第 4 項：**排除草稿**。草稿課程於發布時才帶入學員，選了只會看到三個空區塊，
+  // 而畫面不會說明為什麼——教師會以為壞掉。
+  //
+  // 過濾放前端（2026-09-18 使用者裁示）：ET01 的清單本身沒有錯，草稿是它該有的內容；
+  // 錯的是 ET03 對同一份清單的需求不同。改後端等於為單一消費者多開一個 `scope`。
+  //
+  // ⚠️ **已關閉課程必須保留**——ET-11 AC 10：關閉後仍可閱覽學員清單、作答明細與問卷
+  // 結果，只是不可再重置／移除。只排除 `DRAFT`，不要用 `is_closed` 或 `status !== "PUBLISHED"`。
+  const options = (courses?.data ?? []).filter((c) => c.status !== "DRAFT")
   const selected = options.find((c) => c.course_id === courseId)
   // 由後端算好的 `is_closed`——**不自己判 `status`**：期間已過時 status 仍是 PUBLISHED
   const readOnly = selected?.is_closed ?? false
