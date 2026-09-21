@@ -364,22 +364,27 @@ class EtQuizService:
         quiz = await self._quizzes.get(db, quiz_id)
         course = await self._courses.get(db, course_id)
         course_url = learn_link(course_id)
-        for user_id, attempt_count in affected:
-            await self._tracking.add_retry_reset(
-                db,
-                course_id=course_id,
-                user_id=user_id,
-                quiz_id=quiz_id,
-                attempt_count=attempt_count,
-                operator=operator,
-            )
-            await self._progress.set_item_completed(
-                db, user_id=user_id, course_id=course_id, item_id=item_id, completed=False, operator=operator
-            )
-            # ⚠️ 逐人寄、不合批：範本內文含 `{USER_NAME}`，而平台 `send_email` 對整批
-            # 收件人只渲染一次——合批會讓所有人收到同一個名字的信。
-            #
-            # 寄信在迴圈內、稽核在迴圈外，兩者刻意不同：寄信不取全域鎖，稽核會。
+
+        # 兩項寫入**批次化**：本批次的人數由系統決定、沒有上限（不像教師勾選的核可
+        # 批次有 100 筆 schema 上限），逐筆寫等於 2N 次往返。
+        await self._tracking.add_retry_resets(
+            db, course_id=course_id, quiz_id=quiz_id, entries=affected, operator=operator
+        )
+        await self._progress.set_item_completed_bulk(
+            db,
+            user_ids=[user_id for user_id, _ in affected],
+            course_id=course_id,
+            item_id=item_id,
+            completed=False,
+            operator=operator,
+        )
+
+        # ⚠️ 寄信**不能**比照批次化：範本內文含 `{USER_NAME}`，而平台 `send_email`
+        # 對整批收件人只渲染一次——合批會讓所有人收到同一個名字的信。這是範本渲染
+        # 的硬限制，不是還沒優化。
+        #
+        # 寄信在迴圈內、稽核在迴圈外，兩者刻意不同：寄信不取全域鎖，`log_action` 會。
+        for user_id, _ in affected:
             await self._mailer.send_quiz_retest_required(
                 db, course=course, quiz_name=quiz.quiz_name, course_url=course_url, user_id=user_id
             )

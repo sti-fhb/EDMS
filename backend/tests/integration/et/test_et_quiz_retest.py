@@ -322,6 +322,12 @@ class TestRequireRetestOnQuizChange:
         pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
         assert pending == 2, "兩位受影響的學員應各排入一封；逐人一封而非合批（範本含 {USER_NAME}）"
 
+        # 批次寫入（`add_retry_resets` / `set_item_completed_bulk`）要對**每一位**生效。
+        # 只驗信件數不夠：批次 INSERT 若只寫進第一筆，信照樣會寄兩封。
+        for uid in ("ZTS005", "ZTS006"):
+            _, resets, done = await _facts(db, uid=uid, quiz_id=qid, item_id=item_id)
+            assert (resets, done) == (1, False), f"{uid} 的重置基準與完成旗標都要生效"
+
     async def test_新增題目也能要求重測(self, client, db):
         teacher = await _user(db, "ZTT006")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
