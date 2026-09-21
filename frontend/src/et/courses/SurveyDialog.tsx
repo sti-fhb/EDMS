@@ -133,6 +133,8 @@ interface SurveyDialogProps {
   error?: string | null
   /** `dirty` 為 true 表示有題目正在編輯、內容尚未儲存，由呼叫端決定是否先確認。 */
   onClose: (dirty: boolean) => void
+  /** 建立問卷（#359 第 1 項）。`survey` 為 `null` 且本視窗開啟時進入建立步驟。 */
+  onCreate: (surveyName: string) => void
   onRename: (surveyName: string) => void
   onApplyTemplate: (templateCode: string) => void
   onSaveQuestion: (sqId: number | null, values: SurveyQuestionFormValues) => void
@@ -155,10 +157,15 @@ interface SurveyDialogProps {
  * 「套用模板」——教師不必先決定用哪組。`templates` 仍是陣列（後端契約如此），
  * 這裡取第一組。
  *
- * ## 凍結（沿用 #204）
+ * ## 凍結（#204，範圍於 #364 擴及名稱）
  *
- * 有學員填答後題目與選項凍結，編輯入口全部收起。**問卷名稱不受此限**——
- * 名稱不影響已填答資料的意義。停用問卷的入口在卡片上（`SurveySection`），不在此視窗。
+ * 有學員填答後題目與選項凍結，編輯入口全部收起。停用問卷的入口在卡片上
+ * （`SurveySection`），不在此視窗。
+ *
+ * 🔴 **問卷名稱自 #364 起一併凍結**（2026-09-18 裁示）。原本不受此限（名稱不影響已填答
+ * 資料的意義），但卡片上的編輯鈕於凍結時已停用，此視窗對擁有者即不可達；名稱欄若還
+ * 是可編輯的，單看本檔會得到「凍結仍可改名」的錯誤結論。⚠️ **後端 update 仍放行改名**
+ * ——收掉的是前端入口，不是後端規則。
  *
  * ## 關閉時的未存草稿
  *
@@ -179,6 +186,7 @@ export function SurveyDialog({
   saving = false,
   error = null,
   onClose,
+  onCreate,
   onRename,
   onApplyTemplate,
   onSaveQuestion,
@@ -210,10 +218,29 @@ export function SurveyDialog({
     if (next) onReorder(next)
   }
 
-  /** 題目編輯器展開中 = 有未儲存的內容。問卷名稱失焦即存，不計入。 */
-  const isDirty = editing !== undefined
+  /** #359 第 1 項：`survey` 為 `null` 代表尚未建立，本視窗進入「建立」步驟。 */
+  const creating = !loading && survey === null
+  const [createName, setCreateName] = useState("")
+  const [createError, setCreateError] = useState("")
+
+  /** 題目編輯器展開中 = 有未儲存的內容。問卷名稱失焦即存，不計入。
+   *
+   * 建立步驟另計：此時還沒有任何東西被建立，但名稱已經打了字就該問一聲——
+   * 與既有項目視窗的 dirty 契約同一形狀。
+   */
+  const isDirty = creating ? createName.trim() !== "" : editing !== undefined
 
   const handleClose = () => onClose(isDirty)
+
+  const submitCreate = () => {
+    const parsed = SurveyNameSchema.safeParse(createName)
+    if (!parsed.success) {
+      setCreateError(parsed.error.issues[0]?.message ?? "問卷名稱不正確")
+      return
+    }
+    setCreateError("")
+    onCreate(parsed.data)
+  }
 
   const commitName = () => {
     if (nameDraft === null || !survey || nameDraft === survey.survey_name) {
@@ -237,7 +264,7 @@ export function SurveyDialog({
       slotProps={{ paper: { sx: { height: "min(680px, 90vh)" } } }}
     >
       <DialogTitle sx={{ pr: 6 }}>
-        {readOnly ? "檢視課後問卷" : "編輯課後問卷"}
+        {creating ? "新增課後問卷" : readOnly ? "檢視課後問卷" : "編輯課後問卷"}
         <IconButton
           // 名稱與底部的「關閉」刻意不同——同名會讓輔助技術與測試都分不出是哪一顆
           aria-label="關閉視窗"
@@ -249,7 +276,41 @@ export function SurveyDialog({
       </DialogTitle>
 
       <DialogContent dividers>
-        {loading || !survey ? (
+        {creating ? (
+          // #359 第 1 項：**不預先建立空殼**。教師取消時什麼都沒發生，不需要孤兒清理。
+          //
+          // ⚠️ 刻意不照抄測驗的「先建空殼、取消時刪掉」——那條路徑的空殼名稱可留空
+          // （`course/service.py` 新增項目時 `title` 允許空字串），而發布檢核**不驗名稱**
+          // （只有 `BLOCK_QUIZ_NO_QUESTION` / `BLOCK_SURVEY_NO_QUESTION`）。照抄會把
+          // 「未命名問卷可以發布」這個既有缺口複製到問卷側。
+          <Stack spacing={2} sx={{ py: 1 }}>
+            {error && <Alert severity="error">{error}</Alert>}
+            <Typography variant="body2" color="text.secondary">
+              先為問卷命名，建立後即可於本視窗接著編輯題目。
+            </Typography>
+            <TextField
+              autoFocus
+              size="small"
+              label="問卷名稱"
+              required
+              fullWidth
+              sx={{ maxWidth: 380 }}
+              value={createName}
+              error={Boolean(createError)}
+              helperText={createError}
+              slotProps={{ htmlInput: { maxLength: SURVEY_NAME_MAX_LEN } }}
+              onChange={(e) => setCreateName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCreate()
+              }}
+            />
+            <Stack direction="row" spacing={1}>
+              <Button variant="contained" disabled={saving} onClick={submitCreate}>
+                建立
+              </Button>
+            </Stack>
+          </Stack>
+        ) : loading || !survey ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress />
           </Stack>
@@ -271,7 +332,8 @@ export function SurveyDialog({
               label="問卷名稱"
               fullWidth
               sx={{ mb: 2, maxWidth: 380 }}
-              disabled={readOnly}
+              // `locked` 而非 `readOnly`：名稱自 #364 起一併凍結，與本視窗其餘入口同一規則
+              disabled={locked}
               value={nameDraft ?? survey.survey_name}
               slotProps={{ htmlInput: { maxLength: SURVEY_NAME_MAX_LEN } }}
               onChange={(e) => setNameDraft(e.target.value)}

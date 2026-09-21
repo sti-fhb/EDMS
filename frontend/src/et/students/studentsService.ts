@@ -4,7 +4,6 @@ import type {
   ApprovalResult,
   ApproveResult,
   AttemptOverview,
-  PendingInviteRow,
   StudentRow,
   SurveyResult,
   TeacherAttemptDetail,
@@ -54,36 +53,12 @@ export const studentsApi = {
     )
   },
 
-  /** ET-12：待加入邀請清單（分頁）。課程關閉時照常可讀。 */
-  listPendingInvites: async (
-    courseId: number,
-    params: { page?: number; limit?: number },
-  ): Promise<PagedResult<PendingInviteRow>> => {
-    const { data } = await http.get<PagedResult<PendingInviteRow>>(`/et/courses/${courseId}/invitations`, { params })
-    return data
-  },
-
   /**
-   * ET-12：再次寄送邀請信。
+   * 移除學員（軟刪；學習歷史保留）。
    *
-   * ⚠️ **會換新 token，受邀者手上的舊信隨即失效**（`upsert_pending` 的既有設計：舊 token
-   * 已隨信流出，沿用會讓「一次性」只是延後生效）。課程關閉期間回 409 / 422。
+   * #362 之後這也是**寄錯人時唯一的止血途徑**——原本的「撤回邀請」隨待加入清單一併
+   * 移除，而被邀請的人現在按下寄出的當下就已經在課程裡了。
    */
-  resendInvite: async (invitationId: number): Promise<void> => {
-    await http.post(`/et/invitations/${invitationId}/resend`)
-  },
-
-  /**
-   * ET-12：撤回邀請——原連結即刻失效。
-   *
-   * **課程關閉期間仍可執行**（SA 裁示 2026-09-16）：撤回是止血動作，擋掉只會讓寄錯的
-   * 連結一直有效到再開課。與 `resendInvite` 的差別即在此。
-   */
-  revokeInvite: async (invitationId: number): Promise<void> => {
-    await http.post(`/et/invitations/${invitationId}/revoke`)
-  },
-
-  /** 移除學員（軟刪；學習歷史保留）。 */
   removeStudent: async (courseId: number, userId: string): Promise<void> => {
     await http.delete(`/et/courses/${courseId}/students/${encodeURIComponent(userId)}`)
   },

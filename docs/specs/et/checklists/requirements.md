@@ -64,7 +64,7 @@
 - **待補（不擋 SD 開發、建議補強）**：
   - **訊息類型表之 Bootstrap class 標註**（spec.md §Requirements）：ET / DM / DP **三模組 spec 用字完全相同**，屬跨模組共用慣例。ET 單方改為 MUI 會破壞一致性，故本次**不動**；若要更新應三模組同批處理（獨立議題）。
   - ET → DP 之參數唯讀查詢與排程註冊（`DP_SCHEDULE` job handler 介面）無獨立契約檔（spec.md §跨模組介接總覽有列，DP 端已上線可直接參照實作）。
-  - `ET_INVITATION` 未定義同一課程重複邀請同一 Email 之行為（無 (COURSE_ID, EMAIL) 唯一約束）。
+  - ~~`ET_INVITATION` 未定義同一課程重複邀請同一 Email 之行為（無 (COURSE_ID, EMAIL) 唯一約束）。~~ ✅ **已消解（2026-09-18 #362）**：整張 `ET_INVITATION` 移除，重複邀請改由 `ET_ENROLLMENT` 的 `UQ_ET_ENROLLMENT_USER_COURSE`（全表唯一）以 upsert 收斂，行為已由 `FR-ET-US8-09` 明訂。
   - JSON 字串欄位（`QUESTION_ORDER` / `OPTIONS_SNAPSHOT` 等）與「`ET_PROGRESS_INTERVAL` 刻意不用 JSON」原則不一致；專案為 PostgreSQL 17，JSONB 可用，建議 plan 階段統一表態。
   - wireframe：空資料狀態偏少；側欄殘留「系統設定」死連結（該畫面已移交 DP）；plan.md 之 wireframe 描述與 checklists「待產出」標註陳舊。
 - **2026-07-17 客戶線下核可需求**已傳播至 spec（US16 / US17 索引、§線下核可規則、7 類範本、SC-013）、spec_us16 / spec_us17（新）、spec_us3（REQUIRE_APPROVAL 欄位 + FR-16）、spec_us9 / spec_us15（交叉引用 / 7 類）、data-model（ET_APPROVAL、ET_COURSE.REQUIRE_APPROVAL、ET_APPROVAL_RESULT）、plan / tasks（Phase 18、T156~T163）/ issues（#18 / #19）/ research（#23 走法 A）/ contracts（APPROVAL_PASSED）/ RQET / usecases（UCET016 / UCET017）/ wireframe（ET03 核可欄 + ET10 查詢）。核可為獨立維度，不影響完課率 / 問卷 / 週報。

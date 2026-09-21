@@ -16,6 +16,7 @@ const BASE_PROPS = {
   readOnly: false,
   templates: TEMPLATES,
   onClose: noop,
+  onCreate: noop,
   onRename: noop,
   onApplyTemplate: noop,
   onSaveQuestion: noop,
@@ -162,6 +163,58 @@ describe("SurveyDialog：模板（#238）", () => {
   })
 })
 
+describe("SurveyDialog：建立步驟（#359 第 1 項）", () => {
+  it("survey 為 null 時顯示建立標題與名稱欄，不顯示題目區", () => {
+    render(<SurveyDialog {...BASE_PROPS} survey={null} />)
+
+    expect(screen.getByText("新增課後問卷")).toBeInTheDocument()
+    expect(screen.getByLabelText(/問卷名稱/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "建立" })).toBeInTheDocument()
+    // 題目要等問卷建立後才編輯得了——此時還沒有 survey_id 可掛
+    expect(screen.queryByRole("button", { name: "新增題目" })).not.toBeInTheDocument()
+  })
+
+  it("名稱留空按建立會擋下並提示", async () => {
+    const onCreate = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onCreate={onCreate} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "建立" }))
+
+    expect(screen.getByText("請輸入問卷名稱")).toBeInTheDocument()
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it("輸入名稱後建立會帶去除空白的值", async () => {
+    const onCreate = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onCreate={onCreate} />)
+
+    await userEvent.type(screen.getByLabelText(/問卷名稱/), "  滿意度  ")
+    await userEvent.click(screen.getByRole("button", { name: "建立" }))
+
+    expect(onCreate).toHaveBeenCalledWith("滿意度")
+  })
+
+  it("建立步驟已打字時關閉視窗回報 dirty", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onClose={onClose} />)
+
+    await userEvent.type(screen.getByLabelText(/問卷名稱/), "滿意度")
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
+
+    // 此時還沒有任何東西被建立，但名稱已經打了字——呼叫端要據此問一聲
+    expect(onClose).toHaveBeenCalledWith(true)
+  })
+
+  it("建立步驟未打字時關閉視窗不回報 dirty", async () => {
+    const onClose = vi.fn()
+    render(<SurveyDialog {...BASE_PROPS} survey={null} onClose={onClose} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "關閉視窗" }))
+
+    expect(onClose).toHaveBeenCalledWith(false)
+  })
+})
+
 describe("SurveyDialog：凍結", () => {
   const frozen = makeSurvey({ frozen: true, responded_count: 3 })
 
@@ -178,9 +231,12 @@ describe("SurveyDialog：凍結", () => {
     expect(screen.queryByLabelText("拖曳調整第 1 題順序")).not.toBeInTheDocument()
   })
 
-  it("問卷名稱仍可編輯——名稱不影響已填答資料的意義", () => {
+  it("問卷名稱一併停用——2026-09-18 裁示凍結後不再提供改名入口", () => {
+    // 後端仍放行改名（`ET_SURVEY` 的 update 未擋），本次是**前端收掉入口**。
+    // 卡片上的編輯鈕於凍結時已停用，此處一併停用是為了讓元件內部一致——
+    // 否則單看本檔會以為凍結仍可改名。
     render(<SurveyDialog {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByLabelText(/問卷名稱/)).toBeEnabled()
+    expect(screen.getByLabelText(/問卷名稱/)).toBeDisabled()
   })
 })
 

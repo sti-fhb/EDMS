@@ -63,24 +63,17 @@ describe("SurveySection：尚未建立", () => {
     expect(screen.getByText("請先儲存草稿後再新增問卷")).toBeInTheDocument()
   })
 
-  it("名稱留空按建立會擋下並提示", async () => {
+  it("點「新增問卷」直接開視窗，不再 inline 收名稱（#359 第 1 項）", async () => {
     const onCreate = vi.fn()
     render(<SurveySection {...BASE_PROPS} survey={null} onCreate={onCreate} />)
+
     await userEvent.click(screen.getByRole("button", { name: "新增問卷" }))
-    await userEvent.click(screen.getByRole("button", { name: "建立" }))
 
-    expect(screen.getByText("請輸入問卷名稱")).toBeInTheDocument()
-    expect(onCreate).not.toHaveBeenCalled()
-  })
-
-  it("輸入名稱後建立會帶去除空白的值", async () => {
-    const onCreate = vi.fn()
-    render(<SurveySection {...BASE_PROPS} survey={null} onCreate={onCreate} />)
-    await userEvent.click(screen.getByRole("button", { name: "新增問卷" }))
-    await userEvent.type(screen.getByLabelText(/問卷名稱/), "  滿意度  ")
-    await userEvent.click(screen.getByRole("button", { name: "建立" }))
-
-    expect(onCreate).toHaveBeenCalledWith("滿意度")
+    // 原本按下去會在原地展開「問卷名稱 + 建立 / 取消」，要再按一次「編輯」才開得了
+    // 題目視窗。名稱與驗證都移進視窗，改由 `SurveyDialog` 的建立步驟負責。
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByLabelText(/問卷名稱/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "建立" })).not.toBeInTheDocument()
   })
 
   it("唯讀時不顯示新增鈕", () => {
@@ -166,9 +159,35 @@ describe("SurveySection：刪除與停用互補（#238）", () => {
 describe("SurveySection：凍結", () => {
   const frozen = makeSurvey({ frozen: true, responded_count: 3 })
 
-  it("顯示凍結標記", () => {
+  it("不再顯示「已凍結」標記——原因改由停用的編輯鈕自己說明", () => {
     render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByText("已凍結")).toBeInTheDocument()
+    expect(screen.queryByText("已凍結")).not.toBeInTheDocument()
+  })
+
+  it("編輯鈕停用", () => {
+    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
+    expect(screen.getByRole("button", { name: "編輯" })).toBeDisabled()
+  })
+
+  it("停用的編輯鈕帶出原因與仍可做的事（#335）", async () => {
+    // 一顆灰掉而不說明原因的按鈕，教師無法判斷是壞了還是不該按。
+    // 提示須同時講「不能做什麼」與「還能做什麼」，否則資訊量比原本的 Chip 更少。
+    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
+    // disabled 按鈕帶 `pointer-events: none`，user-event 預設會拒絕對它操作。
+    // Tooltip 掛在外層 `<span>`（disabled 元素不發滑鼠事件），指標進入按鈕區域時
+    // 事件會冒泡到該 span——關掉這道檢查才模擬得出使用者實際的滑入動作。
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.hover(screen.getByRole("button", { name: "編輯" }))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip).toHaveTextContent(/已有學員填答/)
+    expect(tip).toHaveTextContent(/僅可停用問卷/)
+  })
+
+  it("未凍結時編輯鈕沒有提示", async () => {
+    // 防止 Tooltip 的 title 寫成常數——那會讓每張卡片都掛一個沒意義的提示。
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} />)
+    await userEvent.hover(screen.getByRole("button", { name: "編輯" }))
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
   })
 
   it("停用問卷仍可按——AC 21 明訂凍結後教師僅可停用", () => {
@@ -178,9 +197,18 @@ describe("SurveySection：凍結", () => {
     expect(screen.getByRole("button", { name: "停用問卷" })).toBeEnabled()
   })
 
-  it("仍可開啟視窗檢視", () => {
-    render(<SurveySection {...BASE_PROPS} survey={frozen} />)
-    expect(screen.getByRole("button", { name: "編輯" })).toBeEnabled()
+  it("唯讀者即使凍結仍可檢視——那是他看內容的唯一入口", () => {
+    render(<SurveySection {...BASE_PROPS} survey={frozen} readOnly />)
+    expect(screen.getByRole("button", { name: "檢視" })).toBeEnabled()
+  })
+
+  it("唯讀者的檢視鈕即使凍結也沒有提示——那句話只對擁有者成立", async () => {
+    // `frozen && readOnly` 是本次新增 `!readOnly` 條件才出現的象限。少了這條，
+    // 日後有人把判定簡化成只看 `survey.frozen` 不會有東西變紅，而唯讀者會在一顆
+    // 按得下去的「檢視」鈕上看到「僅可停用問卷」——他根本沒有停用的權限。
+    render(<SurveySection {...BASE_PROPS} survey={frozen} readOnly />)
+    await userEvent.hover(screen.getByRole("button", { name: "檢視" }))
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
   })
 })
 

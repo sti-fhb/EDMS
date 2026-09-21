@@ -13,6 +13,7 @@ from app.et.constants import (
     COURSE_DRAFT,
     COURSE_PUBLISHED,
 )
+from app.et.course.rules import is_pending_open
 from app.et.enrollment.rules import (
     INVITATION_CODE_LENGTH,
     derive_completion_status,
@@ -20,7 +21,6 @@ from app.et.enrollment.rules import (
     ensure_not_removed,
     is_course_completed,
     is_listed_in_my_courses,
-    is_pending_open,
     normalize_invitation_code,
 )
 from app.et.progress.repository import completion_pct

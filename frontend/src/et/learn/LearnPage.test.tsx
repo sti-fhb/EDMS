@@ -118,6 +118,22 @@ describe("ET05 章節學習頁", () => {
     expect(screen.getByText(/不會累積學習進度/)).toBeInTheDocument()
   })
 
+  it("課程尚未開放時顯示後端訊息，而非通用錯誤（#374）", async () => {
+    // 深連結進來才會走到這裡——我的課程清單上那張卡已經是不可點擊的（#363）。
+    // 後端守門於 #374 補上；在此之前這個請求會回 200，學員可提前學習並完課。
+    server.use(
+      http.get("/api/et/courses/:courseId/learn", () =>
+        HttpResponse.json(
+          { error_code: "ET_LEARN_005", error_message: "此課程尚未開放，請於開放時間後再進入" },
+          { status: 403 },
+        ),
+      ),
+    )
+    renderWithProviders(<EtLearnPage />)
+
+    expect(await screen.findByText("此課程尚未開放，請於開放時間後再進入")).toBeInTheDocument()
+  })
+
   it("非在籍者顯示後端的錯誤訊息", async () => {
     server.use(
       http.get("/api/et/courses/:courseId/learn", () =>

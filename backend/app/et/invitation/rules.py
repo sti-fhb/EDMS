@@ -28,7 +28,7 @@ MAX_EMAILS_PER_REQUEST: Final[int] = 50
 _SEPARATORS: Final = re.compile(r"[\s,;，、；]+")
 
 #: Email 格式。刻意保守（不追求 RFC 5322 全集）：這是「教師手貼的清單」，寬鬆比對只會
-#: 讓錯字變成一封永遠寄不到的信，而使用者要到 US12 待加入清單才會發現。
+#: 讓錯字變成一封永遠寄不到的信，而**沒有任何地方會顯示它寄不到**（US12 待加入清單已隨 #362 移除）。
 #: 結尾用 `\Z` 而非 `$`：Python 的 `$` 也匹配「字串結尾前的單一換行」，故結尾帶 LF 的字串
 #: 會通過 `$` 版本。目前不可利用（`_SEPARATORS` 的 `\s` 已把換行當分隔符切掉），但那意味著
 #: header injection 的唯一防線是「分隔符恰好包含 `\s`」——若日後為了支援 `"名字 <a@b.co>"`
@@ -87,7 +87,7 @@ def ensure_invitable(*, course_status: str, open_end_at: datetime | None, now: d
 
     共用 `ET_INVITE_004` 會對第二種情況說出一句與畫面矛盾的話——教師的課程明明標著
     「已發布」，卻被告知「僅已發布課程可邀請」。`ET_INVITE_002`（此課程目前關閉中）
-    是既有代碼，`accept` 對同一情況已用它，兩條路徑因此一致。
+    是既有代碼（#362 前 `accept` 對同一情況也用它）。
 
     Raises:
         AppError: 422 `ET_INVITE_004` 課程非已發布；409 `ET_INVITE_002` 期間已過。

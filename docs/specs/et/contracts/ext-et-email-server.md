@@ -5,7 +5,7 @@
 **提供方**: 平台模組（DP）唯一發信服務（經 `DP_EMAIL_LOG` outbox → 外部 SMTP）
 **呼叫方**: 教育訓練模組（ET）
 **建立日期**: 2026-06-09（2026-07-02 依客戶 6 項需求變更改寫；2026-07-08 集中化改走平台發信服務）
-**對應 US**: [spec_us2.md](../spec_us2.md) US2、[spec_us3.md](../spec_us3.md) US3、[spec_us8.md](../spec_us8.md) US8、[spec_us10.md](../spec_us10.md) US10、[spec_us12.md](../spec_us12.md) US12、[spec_us14.md](../spec_us14.md) US14、[spec_us15.md](../spec_us15.md) US15、[spec_us16.md](../spec_us16.md) US16
+**對應 US**: [spec_us2.md](../spec_us2.md) US2、[spec_us3.md](../spec_us3.md) US3、[spec_us8.md](../spec_us8.md) US8、[spec_us10.md](../spec_us10.md) US10、[spec_us14.md](../spec_us14.md) US14、[spec_us15.md](../spec_us15.md) US15、[spec_us16.md](../spec_us16.md) US16
 
 ---
 
@@ -58,7 +58,7 @@ ET 模組寄送課程 / 學習 / 帳號相關 Email 一律**呼叫平台唯一�
    - 帳號安全信（密碼重設 / 帳號變更驗證）：由平台 DP 以其系統信（MODULE=DP）寄送
 4. 平台渲染主旨 / 內文（未定義之變數以空字串帶入，per US15），寫入 outbox DP_EMAIL_LOG（含 CALLER_MODULE=ET）
 5. 平台發信引擎非同步將 DP_EMAIL_LOG 之待寄項目經 SMTP 寄出、更新寄送狀態（重試 / 速率由平台處理；失敗率告警由 IT 監控負責，不做系統內通報）
-6. ET 端依平台回應更新對應業務 DB / 寫入 log（如 ET_INVITATION.LAST_SENT_AT、status_code、URGENT_REMIND_SENT）
+6. ET 端依平台回應更新對應業務 DB / 寫入 log（如 `URGENT_REMIND_SENT`）
 ```
 
 ---
@@ -176,7 +176,7 @@ ET 模組寄送課程 / 學習 / 帳號相關 Email 一律**呼叫平台唯一�
 - **收件對象**：一律為個人 Email；不設單位信箱。
 - **寄送失敗處理**（重試 / 速率由平台發信引擎統一處理，ET 端不自建 retry；失敗率告警由 IT 監控負責）：
   - 課程邀請通知（標籤自動邀請）：**非同步**寄送（平台 outbox），**失敗不回滾**已加入狀態（學員仍成功加入）；失敗記於 `DP_EMAIL_LOG` / log。
-  - 課程邀請通知（Email 邀請補件）：`ET_INVITATION` 保留 `PENDING` 並寫 status_code，教師可於 [spec_us12.md](../spec_us12.md) US12「待加入」分頁點「再次寄送」。
+  - 課程邀請通知（Email 邀請補件）：該收件人**仍已加入課程**（`ET_ENROLLMENT` 已寫入），系統於寄送回應中列出信件排入失敗之 Email 供教師另行通知。**無重寄機制**——2026-09-18（#362）取消待加入狀態時，US12 的「再次寄送」一併移除。
   - 密碼重設信 / 帳號變更驗證信：為平台系統信；使用者端顯示「請稍後再試」；token 已寫入 `DP_USER`（平台模組 DP 定義），可重試。
   - 課程內容更新 / 週報 / 週提醒 / 加急提醒：失敗記於 `DP_EMAIL_LOG` / 系統 log，**不影響**觸發事件本身（章節新增、統計快照、`URGENT_REMIND_SENT` 標記照常）。
 - **加急提醒防重複**：`URGENT_REMIND` 每門課程只寄一次，以 `ET_COURSE.URGENT_REMIND_SENT` 控制；再開課重設起訖後歸 false 重新計。

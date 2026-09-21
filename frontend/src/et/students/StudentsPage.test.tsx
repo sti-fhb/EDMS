@@ -21,6 +21,40 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(screen.queryByText("已加入學員")).not.toBeInTheDocument()
   })
 
+  it("區塊標題不再顯示「區塊 N」編號（#359 第 3 項）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText("已加入學員")).toBeInTheDocument()
+    // ⛔ `spec_us9` 仍稱「區塊 1 / 2 / 3」，但那是**規格內部的條列用語**、不是畫面文字。
+    // 手測回饋：教師說的是「作答明細那一塊」，編號對他不構成指稱工具。
+    expect(screen.queryByText(/^區塊 [123]$/)).not.toBeInTheDocument()
+  })
+
+  it("問卷結果不再標「（母體為在籍學員）」（#359 第 3 項）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText(/已填 .* 人/)).toBeInTheDocument()
+    expect(screen.queryByText(/母體為在籍學員/)).not.toBeInTheDocument()
+  })
+
+  it("課程下拉排除草稿、但保留已關閉（#359 第 4 項）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+
+    await user.click(await screen.findByLabelText("課程"))
+
+    // 草稿課於發布時才帶入學員，選了只會看到三個空區塊而畫面不說明為什麼
+    expect(screen.queryByRole("option", { name: "草稿課" })).not.toBeInTheDocument()
+    // ⚠️ 已關閉**必須保留**——ET-11 AC 10：關閉後仍可閱覽學員清單、作答明細與問卷結果，
+    // 只是不可再重置／移除。用 `is_closed` 或 `status !== "PUBLISHED"` 過濾會誤殺它。
+    expect(screen.getByRole("option", { name: "已關閉的課" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "採血作業新進人員訓練" })).toBeInTheDocument()
+  })
+
   it("選課程後顯示三個區塊", async () => {
     const user = userEvent.setup()
     renderWithProviders(<EtStudentsPage />)
@@ -339,74 +373,21 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(alert).toHaveTextContent("保留並計入歷史")
   })
 
-  it("待加入分頁列出已寄出但未加入的邀請", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<EtStudentsPage />)
-    await selectCourse(user)
-
-    await user.click(screen.getByRole("tab", { name: "待加入" }))
-
-    expect(await screen.findByText("chenmh@edms.local")).toBeInTheDocument()
-    expect(screen.getByText("liutc@edms.local")).toBeInTheDocument()
-    // 佔位 Alert 必須已被取代——它是使用者點得到的可見缺口
-    expect(screen.queryByText(/尚未實作/)).not.toBeInTheDocument()
-  })
-
-  it("撤回邀請需二次確認，文案須講明原連結會失效", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<EtStudentsPage />)
-    await selectCourse(user)
-    await user.click(screen.getByRole("tab", { name: "待加入" }))
-    await screen.findByText("chenmh@edms.local")
-
-    await user.click(screen.getAllByRole("button", { name: "撤回" })[0])
-
-    const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText(/原邀請連結將失效/)).toBeInTheDocument()
-    await user.click(within(dialog).getByRole("button", { name: "確定" }))
-
-    expect(await screen.findByText("邀請已撤回")).toBeInTheDocument()
-  })
-
-  it("課程已關閉時：再次寄送禁用，但撤回仍可用", async () => {
-    // 🔴 這條釘住 SA 裁示（2026-09-16）。兩個動作方向相反：重寄是讓更多人進來、撤回是
-    // 讓某人不能進來。教師發現邀請寄錯人時若撤回被擋，那條錯誤連結會一直有效到再開課。
+  it("沒有分頁列——待加入已隨 #362 移除，選好課程就直接看到三區塊", async () => {
+    // 原本這裡有三條測試釘「待加入」分頁（清單、撤回二次確認、關閉時重寄禁用但撤回可用，
+    // 含 2026-09-16 那條 SA 裁示）。功能整組移除後它們釘的規則不再存在，故刪除而非改寫。
     //
-    // 少了這條，日後有人依 ET 模組「寫全停」的慣例把撤回也禁用，不會有任何測試變紅。
-    server.use(
-      http.get("/api/et/courses", () =>
-        HttpResponse.json({
-          data: [
-            {
-              course_id: 11,
-              course_name: "採血作業新進人員訓練",
-              status: "PUBLISHED",
-              open_start_at: null,
-              open_end_at: "2026-01-01T00:00:00Z",
-              owner_id: "t01",
-              owner_name: "陳大華",
-              tags: [],
-              chapter_count: 1,
-              student_count: 2,
-              is_owner: true,
-              is_closed: true,
-            },
-          ],
-          meta: { total: 1, page: 1, limit: 100, total_pages: 1 },
-        }),
-      ),
-    )
+    // 留下這一條反向斷言：日後若有人把 tab 加回來（例如為了塞別的清單），
+    // 「教師要多點一下才看得到學員」這個回歸會被抓到。
     const user = userEvent.setup()
     renderWithProviders(<EtStudentsPage />)
     await selectCourse(user)
-    await user.click(screen.getByRole("tab", { name: "待加入" }))
-    await screen.findByText("chenmh@edms.local")
 
-    expect(screen.getAllByRole("button", { name: /再次寄送/ })[0]).toBeDisabled()
-    expect(screen.getAllByRole("button", { name: "撤回" })[0]).toBeEnabled()
-    // 禁用必須說明原因，且要講明撤回不受影響
-    expect(screen.getByText(/暫無法/)).toBeInTheDocument()
-    expect(screen.getByText(/撤回邀請不受影響/)).toBeInTheDocument()
+    // 等區塊真的載完再斷言「沒有 tab」——否則畫面還在載入時查不到 tab 也會通過。
+    // 用區塊標題而非學員姓名：同一個姓名在「已加入學員」與「作答明細」兩區都出現。
+    expect(await screen.findByText("已加入學員")).toBeInTheDocument()
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument()
+    expect(screen.queryByText("待加入")).not.toBeInTheDocument()
   })
 
   // ── US16 線下考核核可（#352）──────────────────────────────────────────────

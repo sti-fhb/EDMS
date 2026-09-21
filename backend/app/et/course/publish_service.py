@@ -22,8 +22,8 @@
 落地後兩者收斂於 `app/et/notify/`（範本、params 組法、失敗不回滾皆在該處），本檔只
 負責在正確的時點呼叫它。
 
-仍不在本檔的：Email 邀請（另一種 `JOIN_SOURCE`，見 `app/et/invitation/`）、
-`ET_INVITATION` 待加入清單（`ET-12`）。
+仍不在本檔的：Email 邀請（另一種 `JOIN_SOURCE`，見 `app/et/invitation/`）。
+（原本還有「`ET_INVITATION` 待加入清單（`ET-12`）」一項，已隨 #362 移除。）
 """
 
 from datetime import datetime

@@ -23,7 +23,10 @@
 
 ## 條件一律寫在 `WHERE` 裡，不可先查後改
 
-比照同模組 `invitation/repository.mark_revoked` 與 `consume_pending` 的裁定。
+此裁定原出自同模組 `invitation/repository` 的 `mark_revoked` / `consume_pending`，
+兩者已隨 #362 移除（邀請即加入，沒有待加入列可撤回或消耗）——**規則本身不隨之失效**，
+本檔與 `dp/audit` 的條件式 UPDATE 仍依它。
+
 PostgreSQL 在 READ COMMITTED 下，被鎖的列釋放後會**重新求值 `WHERE`**
 （EvalPlanQual），所以條件放在 `WHERE` 裡才擋得住交錯；先在 Python 判斷再發出不帶
 條件的 `UPDATE` 會是 lost update。
