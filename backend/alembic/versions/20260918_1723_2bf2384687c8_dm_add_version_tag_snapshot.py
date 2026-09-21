@@ -1,7 +1,7 @@
 """dm_add_version_tag_snapshot
 
 Revision ID: 2bf2384687c8
-Revises: 6e65f03ce681
+Revises: f1d93a5c7b04
 Create Date: 2026-09-18 17:23:32.801312
 
 新增版本標籤快照表，標籤改為核准發布時生效。
@@ -24,13 +24,20 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "2bf2384687c8"
-down_revision: Union[str, None] = "6e65f03ce681"
+down_revision: Union[str, None] = "f1d93a5c7b04"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 # 回填：以所屬文件當下之有效標籤作為在途版本之快照——撰寫者編輯當時看到的即此值。
-# ON CONFLICT 僅為重跑保險：來源已篩 DELETED=0，(VERSION_ID, TAG_ID) 於單次語句內天然唯一。
-_BACKFILL_INFLIGHT = text(
+#
+# ⚠️ **匯出供測試直接執行**（`tests/integration/dm/test_dm_version_tag_backfill_migration.py`），
+# 測試不得重抄一份：重抄會 drift，屆時測試綠燈而實際 migration 是另一套邏輯。
+#
+# ON CONFLICT 為重跑保險。單次語句內 (VERSION_ID, TAG_ID) 之唯一性**依賴** DM_DOC_TAG 的
+# UQ(DOC_ID, TAG_ID) 為無條件全表唯一——若該約束日後被改為 partial index（如加 WHERE DELETED=0），
+# 同一 (DOC_ID, TAG_ID) 可存在多列，本語句即會產生重複鍵而由 DO NOTHING 吸收（留哪一列無保證）。
+# 測試有一條刻意造出來源重複以釘住此行為。
+BACKFILL_INFLIGHT = text(
     'INSERT INTO "DM_VERSION_TAG" ("VERSION_ID", "TAG_ID", "CREATED_USER", "CREATED_DATE", "DELETED") '
     'SELECT v."VERSION_ID", t."TAG_ID", :u, :now, 0 '
     'FROM "DM_DOC_VERSION" v '
@@ -58,7 +65,7 @@ def upgrade() -> None:
     )
     op.create_index("IX_DM_VERSION_TAG_VERSION", "DM_VERSION_TAG", ["VERSION_ID"], unique=False)
     op.create_index("IX_DM_VERSION_TAG_TAG", "DM_VERSION_TAG", ["TAG_ID"], unique=False)
-    op.execute(_BACKFILL_INFLIGHT.bindparams(u="SYSTEM", now=datetime.now(timezone.utc)))
+    op.execute(BACKFILL_INFLIGHT.bindparams(u="SYSTEM", now=datetime.now(timezone.utc)))
 
 
 def downgrade() -> None:
