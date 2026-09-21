@@ -15,6 +15,7 @@
 交易由 get_db 於請求結束統一 commit；本層僅 flush，故核准 + 狀態轉移 + 變更歷程 + 通知同一交易原子成立。
 """
 
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
@@ -38,6 +39,12 @@ from app.dm.review.schemas import (
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_ADMIN, has_role
 from app.services import AuditLogService
+
+logger = logging.getLogger(__name__)
+
+#: `DP_USER.STATUS` 的啟用值。催辦只寄給啟用中的審核者（#395）——
+#: 與 `dm/kpi/repository.py` 三處的 `status == _ACTIVE` 對齊，該模組原本兩支排程答案相反。
+_ACTIVE_USER = "ACTIVE"
 
 _NEW = "NEW"
 _NEW_VERSION = "NEW_VERSION"
@@ -497,7 +504,26 @@ class ReviewCenterService:
         rows = await self._repo.list_overdue_pending(db, threshold_days)
         count = 0
         for r in rows:
-            if not r.reviewer_email:
+            # #395：`STATUS='DISABLED'` 只擋 API（`core/auth.py` 403），不碰 `DM_USER_ROLE`
+            # 也不碰歷史指派欄位。所以被停用的審核者仍會留在這份清單上，而那筆 PENDING
+            # 永遠卡著、永遠超過門檻——每天寄一封給一個進不來的人，案件單調遞增。
+            #
+            # ⚠️ **跳過必須留下痕跡**：只停止寄信會讓積壓變成隱形的。這些案件仍是 PENDING、
+            # 仍無人能處理，只是不再有人被打擾——那可能比每天寄信更糟。
+            unreachable = (
+                "審核者帳號未啟用"
+                if (r.reviewer_status != _ACTIVE_USER or r.reviewer_deleted)
+                else ("查無審核者 Email" if not r.reviewer_email else None)
+            )
+            if unreachable:
+                logger.warning(
+                    "催辦未寄出：%s review_id=%s doc_id=%s reviewer=%s 已停留 %s 天",
+                    unreachable,
+                    r.review_id,
+                    r.doc_id,
+                    r.assigned_reviewer,
+                    self._repo.waiting_days(r.submit_date),
+                )
                 continue
             await self._notifier.notify(
                 db,
