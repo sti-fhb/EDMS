@@ -87,6 +87,23 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument()
   })
 
+  it("明細顯示文件資訊：分類中文名 + 本次送審之可見對象 / 檢索標籤（#377）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await screen.findByText(/簽核明細 —/)
+
+    expect(screen.getByText("可見對象")).toBeInTheDocument()
+    expect(screen.getByText("檢索標籤")).toBeInTheDocument()
+    // 標籤值以 chip 呈現（僅明細區塊有這些字串，清單無）
+    expect(screen.getByText("全體")).toBeInTheDocument()
+    expect(screen.getByText("護理師")).toBeInTheDocument()
+    expect(screen.getByText("採血")).toBeInTheDocument()
+    // 分類顯示中文名而非 SOP：清單兩列 + 明細一處
+    expect(screen.getAllByText("標準作業程序").length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText("SOP")).not.toBeInTheDocument()
+  })
+
   it("深連結 ?reviewId= 自動展開該筆簽核明細（個人專區前往簽核中心）", async () => {
     renderWithProviders(<DmReviewPage />, undefined, ["/dm/review?reviewId=502"])
     // 未點任何列，明細面板即自動展開

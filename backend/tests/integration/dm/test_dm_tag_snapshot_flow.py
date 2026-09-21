@@ -15,6 +15,7 @@ from app.core.utils import utcnow
 from app.dm.catalog.models import DmCategory, DmTag
 from app.dm.document.models import DmDocTag, DmVersionTag
 from app.dm.editor.service import EditorService
+from app.dm.personal.service import PersonalService
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER
 from app.dm.roles.models import DmUserRole
@@ -164,6 +165,67 @@ async def test_approve_applies_version_tags_to_doc(db):
     await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
 
     assert await _doc_tag_ids(db, doc_id) == {aud_b}
+
+
+async def test_training_audience_ids_discarded_server_side(db):
+    """TRAINING 即使繞過前端帶入 audience_ids，伺服端亦不寫入；送簽不被擋，核准後文件層仍為空。
+
+    spec_us5 FR-009：該分類 MUST NOT 寫入可見對象。前端雖已隱藏欄位，直接呼叫 API 仍須擋下——
+    否則核准發布後會套用至文件層，使教材出現在純閱覽者的文件庫檢索結果。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, _ = await _two_audience_ids(db)
+
+    created = await _editor.create_document(
+        db,
+        doc_name="用血回報訓練教材",
+        category_code="TRAINING",
+        func_code=None,
+        audience_ids=[aud_a],  # 繞過前端直接帶入
+        retrieval_ids=[],
+        version_no="1.0",
+        change_summary="首版",
+        file_name="t.pdf",
+        file_bytes=b"%PDF-1.4 t",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    assert await _version_tag_ids(db, created.version_id) == set()  # 靜默丟棄
+
+    # 免填可見對象仍可送簽（不擋 DM_DOC_005），核准後文件層維持空集合
+    submitted = await _editor.submit(
+        db, doc_id=created.doc_id, version_id=created.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    assert await _doc_tag_ids(db, created.doc_id) == set()
+
+
+async def test_withdraw_does_not_apply_version_tags(db):
+    """撤回送審 MUST NOT 套用標籤——與退回對稱（防日後比照 approve 誤加套用）。"""
+    await _seed_editor_and_reviewer(db)
+    aud_a, aud_b = await _two_audience_ids(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_ids=[aud_b],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="改版",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    await PersonalService().withdraw(db, review_id=submitted.review_id, op=_op("ed"))
+
+    assert await _doc_tag_ids(db, doc_id) == {aud_a}  # 文件層不受影響
+    assert await _version_tag_ids(db, ver2.version_id) == {aud_b}  # 草稿保留自己的快照
 
 
 async def test_review_detail_shows_version_snapshot_tags(db):

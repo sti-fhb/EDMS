@@ -49,8 +49,12 @@ const ERROR_FIELD: Record<string, keyof EditorForm> = {
  *
  * - **新增模式**（`/dm/documents/new`）：填 名稱 / 分類 /（MANUAL）func / 可見對象 / 檢索標籤 /
  *   首版版號 / 摘要 + 上傳單檔 → 存草稿 或 送簽（指定審核者）。
- * - **編輯模式**（`/dm/documents/:docId/edit`）：名稱 / 分類 / func 唯讀；改版號 / 摘要 / 檔案 →
- *   存草稿 或 送簽。標籤 / 可見性沿用文件既有、不於此變更（見後端 service 說明）。
+ * - **編輯模式**（`/dm/documents/:docId/edit`）：名稱 / 分類 / func 唯讀；改版號 / 摘要 / 檔案 /
+ *   標籤 → 存草稿 或 送簽。
+ *
+ * 標籤採兩層（#377）：此處所改為該版本之提議值（後端寫 `DM_VERSION_TAG`），**核准發布時才生效**；
+ * 表單預帶本人進行中版本之快照，無則帶文件層現值。TRAINING 分類隱藏可見對象欄且送出時清空
+ * （spec_us5 FR-009：教材由 ET 引用，不設可見對象）。
  *
  * 送簽 = 先建草稿（新增 POST /documents 或加版 POST /versions）再 POST /submit；建草稿結果快取於
  * `persisted`，送簽失敗（如 func 重複）可原地重試而不重複建立、亦不觸發單一草稿擋（DM_DOC_009）。

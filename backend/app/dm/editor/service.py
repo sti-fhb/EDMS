@@ -1,11 +1,14 @@
 """文件新增與編輯服務（US5 / DM03，寫入編排）。
 
-編排三張表寫入（DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG）與跨模組送審 / 通知：
+編排三張表寫入（DM_DOCUMENT / DM_DOC_VERSION / DM_VERSION_TAG）與跨模組送審 / 通知：
 
-- **新增模式**：配 DOC_ID（並發撞號重試）→ 建 DRAFT 文件 + DRAFT 首版 + 標籤。
+- **新增模式**：配 DOC_ID（並發撞號重試）→ 建 DRAFT 文件 + DRAFT 首版 + 版本層標籤快照。
 - **編輯新版本**：既有文件加 DRAFT 版本（**單一草稿**：已有未送簽草稿則擋 DM_DOC_009；廢止待簽核擋
-  DM_DOC_008）+ 文件層標籤覆寫；身份欄（名稱 / 分類 / func）不吃。
-- **送簽**：送簽前檢核（可見對象 ≥1 / 版號 / MANUAL func 唯一）→ `ReviewService.submit(NEW|NEW_VERSION)`
+  DM_DOC_008）+ 版本層標籤快照覆寫；身份欄（名稱 / 分類 / func）不吃。
+- **標籤兩層（#377）**：草稿階段只寫 `DM_VERSION_TAG`（該版本提議值），核准發布時才由簽核端套用至
+  `DM_DOC_TAG`（生效值、可見性判定依據）；退回 / 撤回不套用。TRAINING 分類不寫可見對象（FR-009）。
+- **送簽**：送簽前檢核（可見對象 ≥1〔查版本層、TRAINING 除外〕/ 版號 / MANUAL func 唯一）→
+  `ReviewService.submit(NEW|NEW_VERSION)`
   → 版本 / 文件 STATUS 轉 PENDING_REVIEW（已發布文件維持 PUBLISHED）→ `DmNotifier` 通知審核者。
 
 檔案先 `validate_upload` 檢核（大小 / 副檔名）再 `save_upload` 落盤（系統 FILE_ID 命名、防路徑穿越）。
@@ -140,7 +143,7 @@ class EditorService:
         change_summary = (change_summary or "").strip()
         await self._ensure_category(db, category_code)
         func_code = await self._resolve_func(db, category_code, func_code)
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
+        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids, category_code)
 
         doc = await self._create_doc_with_retry(
             db, category_code=category_code, doc_name=doc_name, func_code=func_code, op=op
@@ -252,7 +255,7 @@ class EditorService:
             raise AppError(
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             )
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
+        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids, doc.category_code)
         fmeta = await self._store_file(db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes)
         try:
             async with db.begin_nested():  # SAVEPOINT：並發撞單一草稿（同人）只回退本次 INSERT
@@ -371,7 +374,7 @@ class EditorService:
         # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids)
+        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids, doc.category_code)
 
         now = utcnow()
         previewable = is_previewable(ver.file_mime or "") if ver.file_mime else False
@@ -574,9 +577,17 @@ class EditorService:
         return func_code
 
     async def _validate_tags(
-        self, db: AsyncSession, audience_ids: Sequence[int], retrieval_ids: Sequence[int]
+        self, db: AsyncSession, audience_ids: Sequence[int], retrieval_ids: Sequence[int], category_code: str
     ) -> list[int]:
-        """驗證可見對象須屬 AUDIENCE 組、檢索標籤須屬 RETRIEVAL 型（皆啟用中）；回合併後之 tag_id 清單。"""
+        """驗證可見對象須屬 AUDIENCE 組、檢索標籤須屬 RETRIEVAL 型（皆啟用中）；回合併後之 tag_id 清單。
+
+        TRAINING 分類之 `audience_ids` 一律**靜默丟棄**（spec_us5 FR-009：該分類 MUST NOT 寫入可見對象）。
+        前端雖已隱藏該欄位，仍須於伺服端把關——否則直接呼叫 API 可讓教材掛上可見對象，核准發布後經
+        `apply_version_tags_to_doc` 套用至文件層，使教材出現在純閱覽者的文件庫檢索結果（`visibility.py`
+        純依標籤判定、無分類例外）。採靜默丟棄而非 422：此欄於該分類本就不該存在，擋下只會讓合法呼叫失敗。
+        """
+        if category_code == _TRAINING:
+            audience_ids = []
         all_ids = list(dict.fromkeys([*audience_ids, *retrieval_ids]))
         if not all_ids:
             return []

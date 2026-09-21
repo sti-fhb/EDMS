@@ -1,4 +1,7 @@
-"""文件新增與編輯資料存取（US5，寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG + 送簽前檢核查詢）。
+"""文件新增與編輯資料存取（US5，寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_VERSION_TAG + 送簽前檢核查詢）。
+
+標籤只寫版本層 `DM_VERSION_TAG`（#377）；文件層 `DM_DOC_TAG` 於此僅供編輯模式預帶讀取，其寫入
+（核准發布時套用）屬簽核端職責，見 `dm/review/repository.py` 之 `apply_version_tags_to_doc`。
 
 僅 flush 不 commit（交易由 service / middleware 負責）。跨子模組（同屬 DM）直接引用 Model。
 指定審核者清單為 `DM_USER_ROLE`（DM 自持）join `DP_USER` 之唯讀查詢。
@@ -102,36 +105,10 @@ class EditorRepository:
         await db.flush()
         return ver
 
-    async def set_tags(self, db: AsyncSession, *, doc_id: str, tag_ids: Sequence[int], op: OperatorInfo) -> None:
-        """設定文件標籤為指定集合（可見對象 + 檢索）——差異式覆寫。
-
-        標籤為**文件層**（DM_DOC_TAG 無 version_id），編輯新版本改標籤即改此。採軟刪除復用避開
-        UQ(DOC_ID, TAG_ID)：目標集內既有列復活（deleted=0）/ 新列插入、目標集外之有效列軟刪除。
-        新增文件（無既有列）時等同全插入。
-        """
-        now = utcnow()
-        wanted = list(dict.fromkeys(tag_ids))  # 去重、保序
-        wanted_set = set(wanted)
-        existing = {
-            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
-        }
-        for tid in wanted:
-            row = existing.get(tid)
-            if row is None:
-                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=op.user_id, created_date=now))
-            elif row.deleted != 0:
-                row.deleted = 0
-                row.updated_user, row.updated_date = op.user_id, now
-        for tid, row in existing.items():
-            if tid not in wanted_set and row.deleted == 0:
-                row.deleted = 1
-                row.updated_user, row.updated_date = op.user_id, now
-        await db.flush()
-
     async def set_version_tags(
         self, db: AsyncSession, *, version_id: int, tag_ids: Sequence[int], op: OperatorInfo
     ) -> None:
-        """設定**版本層**標籤快照為指定集合——差異式覆寫（手法同 `set_tags`）。
+        """設定**版本層**標籤快照為指定集合——差異式覆寫。
 
         草稿階段之標籤提議值存於此；核准發布時由簽核端套用至文件層 `DM_DOC_TAG`（#377）。
         採軟刪除復用避開 UQ(VERSION_ID, TAG_ID)：目標集內既有列復活 / 新列插入、目標集外之有效列軟刪除。
@@ -155,13 +132,6 @@ class EditorRepository:
                 row.deleted = 1
                 row.updated_user, row.updated_date = op.user_id, now
         await db.flush()
-
-    async def get_version_tag_ids(self, db: AsyncSession, version_id: int) -> list[int]:
-        """取該版本之有效標籤 TAG_ID（供核准發布時套用至文件層、續編時預帶）。"""
-        rows = await db.scalars(
-            select(DmVersionTag.tag_id).where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
-        )
-        return list(rows.all())
 
     async def has_audience_tag(self, db: AsyncSession, version_id: int) -> bool:
         """該**版本**是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。

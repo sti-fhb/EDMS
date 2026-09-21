@@ -262,7 +262,7 @@ class ReviewCenterRepository:
         """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
 
         標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
-        差異式覆寫（手法同 editor 之 `set_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
+        差異式覆寫（手法同 editor 之 `set_version_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
         軟刪除，以避開 UQ(DOC_ID, TAG_ID)。
 
         Args:
