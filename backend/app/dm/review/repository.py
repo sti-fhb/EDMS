@@ -42,10 +42,12 @@ class ReviewCenterRepository:
                 DmReview.created_user.label("submitter_id"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
+                DmCategory.category_name,
                 DmDocVersion.version_no,
                 DpUser.user_name.label("submitter_name"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
+            .outerjoin(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .outerjoin(DpUser, DmReview.created_user == DpUser.user_id)
             # US8 起 OBSOLETE（廢止類）亦可於簽核中心處理，故不再排除；approve / reject 依 review_type 分流。

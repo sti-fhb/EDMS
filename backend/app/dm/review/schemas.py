@@ -15,6 +15,7 @@ class PendingItem(BaseModel):
     doc_id: str
     doc_name: str
     category_code: str
+    category_name: str | None  # 分類中文名（清單顯示用，對齊 wireframe 之分類 pill）
     review_type: str  # NEW / NEW_VERSION / OBSOLETE
     version_no: str | None  # 送審版本號（草稿版可能為空）
     submitter_id: str  # 送審者（review.created_user）

@@ -98,6 +98,7 @@ class ReviewCenterService:
                 doc_id=r.doc_id,
                 doc_name=r.doc_name,
                 category_code=r.category_code,
+                category_name=r.category_name,
                 review_type=r.review_type,
                 version_no=r.version_no,
                 submitter_id=r.submitter_id,
