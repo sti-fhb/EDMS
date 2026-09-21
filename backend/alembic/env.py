@@ -24,11 +24,11 @@ from app.dp.schedules.models import DpSchedule, DpScheduleLog  # noqa: F401
 from app.dp.user.models import DpPwdHistory, DpPwdReset  # noqa: F401
 from app.dp.users.models import DpUser  # noqa: F401
 
-# ET 模組（#185 Foundation 28 表；#352 補上 Foundation 明文排除的 ET_APPROVAL，共 29 表）
+# ET 模組（#185 Foundation 28 表；#352 補上 Foundation 明文排除的 ET_APPROVAL → 29；
+# #362 移除 ET_INVITATION（邀請即加入，無待加入中間狀態）→ 28 表）
 from app.et.approval.models import EtApproval  # noqa: F401
 from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag  # noqa: F401
 from app.et.course.models import EtChapter, EtCourse, EtItem  # noqa: F401
-from app.et.invitation.models import EtInvitation  # noqa: F401
 from app.et.material.models import (  # noqa: F401
     EtMaterial,
     EtMaterialDoc,

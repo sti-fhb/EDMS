@@ -26,9 +26,9 @@
 - [ ] T015 [P] 建立資料庫 Migration：**ET_PROGRESS_INTERVAL** 影片觀看區段，含 (USER_ID, **VIDEO_ID**) 索引（2026-08-19 變更：原掛 ITEM_ID，多支影片時無法區辨）
 - [ ] T016 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_M** 測驗作答主檔（含 **ATTEMPT_NO**〔(USER_ID, QUIZ_ID, ATTEMPT_NO) 邏輯唯一〕、QUESTION_ORDER / OPTION_ORDER / 規則快照欄位）（2026-08-19 補 ATTEMPT_NO）
 - [ ] T017 [P] 建立資料庫 Migration：**ET_QUIZ_ATTEMPT_D** 作答明細（含題目 / 選項 / 配分快照欄位）
-- [ ] T018 [P] 建立資料庫 Migration：**ET_INVITATION** 邀請紀錄，含 TOKEN 唯一索引
+- [x] ~~T018 [P] 建立資料庫 Migration：**ET_INVITATION** 邀請紀錄，含 TOKEN 唯一索引~~ **已於 #362 反向移除**（邀請即加入，無中間狀態；migration `f1d93a5c7b04` DROP TABLE）
 - [ ] T020 [P] ~~建立 ET_PARAM 系統參數 Migration~~ **廢除**：系統參數集中於平台 `DP_PARAM`（前綴 `ET_`），由平台 DP 建表；ET 不建 param migration（2026-07-08 集中化）
-- [ ] T021 定義 Lookup 代碼**應用層常數**（ET_USER_ROLE_TYPE、ET_COURSE_STATUS〔DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除〕、ET_ENROLLMENT_SOURCE〔含 TAG_DEFAULT〕、ET_INVITATION_STATUS、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類；另 T156 增列 ET_APPROVAL_RESULT，合計 9 類），參照 data-model.md §Lookup 代碼定義。**（2026-08-20 定案：不建 lookup 表、不 seed 資料——本專案無 lookup 表機制，比照 DM 以模組層常數表達，如 `app/dm/detail/repository.py` 之 `_OBSOLETE`；DB 欄位維持 `VARCHAR`、值域由應用層把關）**
+- [ ] T021 定義 Lookup 代碼**應用層常數**（ET_USER_ROLE_TYPE、ET_COURSE_STATUS〔DRAFT / PUBLISHED / CLOSED，PENDING_CLOSE 已移除〕、ET_ENROLLMENT_SOURCE〔含 TAG_DEFAULT〕、~~ET_INVITATION_STATUS~~〔#362 移除〕、ET_ATTEMPT_STATUS、ET_QUESTION_TYPE、ET_ITEM_TYPE、ET_COMPLETION_STATUS 共 8 類；另 T156 增列 ET_APPROVAL_RESULT，合計 9 類），參照 data-model.md §Lookup 代碼定義。**（2026-08-20 定案：不建 lookup 表、不 seed 資料——本專案無 lookup 表機制，比照 DM 以模組層常數表達，如 `app/dm/detail/repository.py` 之 `_OBSOLETE`；DB 欄位維持 `VARCHAR`、值域由應用層把關）**
 - [ ] T022 建立 ET_TAG 初始資料（5 筆：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師，皆 IS_BUILTIN），參照 data-model.md（2026-07-02 改寫，原 ET_MODULE 7 筆廢除）
 - [ ] T023 建立 ET 系統參數 seed（於平台 `DP_PARAM`，前綴 `ET_`：ET_VIDEO_ALLOWED_FORMATS / ET_VIDEO_MAX_SIZE_MB / ET_VIDEO_PLAYBACK_MAX_RATE / ET_INVITATION_CODE_LENGTH / ET_URGENT_REMIND_DAYS），參照 data-model.md（2026-07-08 集中化：ET 不自建參數表；密碼重設 TTL 改平台級 `DP_` 參數；EMAIL_NOTIFY_* 已移至 `DP_NOTIFY_TEMPLATE`）
 - [ ] T165 [P] 建立資料庫 Migration：**ET_MATERIAL_VIDEO** 教材影片子表（FILE_PATH / FILE_NAME / **DURATION_SEC** / FILE_SIZE_BYTES / SORT_ORDER；(MATERIAL_ID, SORT_ORDER) 邏輯唯一）（2026-08-19 新增，S4 拆表結案）
@@ -178,14 +178,14 @@
 ## Phase 10: US8 — UCET004 邀請學員（P2）
 
 > **Story 目標**: 發布時標籤自動邀請＋寄信（主要）；Email 邀請 / 邀請碼補件（2026-07-02 更新）
-> **獨立測試**: 掛多標籤課程發布後對應人員聯集去重自動加入且各收一封通知信；Email 邀請含有效與無效 Email，有效寄出、無效列入待加入清單
+> **獨立測試**: 掛多標籤課程發布後對應人員聯集去重自動加入且各收一封通知信；Email 邀請含有效與無效 Email 時**整批擋下**並列出無效者（#362 更新：原為「有效寄出、無效列入待加入清單」）
 > **規格子檔**: [spec_us8.md](spec_us8.md)
 > **前置**: US3 完成（課程已發布、已掛標籤）；US1 完成（標籤庫與人×標籤對應）；Email Server 已配置
 
-- [ ] T086 [US8] 實作 ET_INVITATION Repository（CRUD、依 COURSE_ID + EMAIL 查詢、狀態流轉）
-- [ ] T087 [US8] 實作 Email 邀請 Service：產生 token、建立 ET_INVITATION 紀錄（PENDING）、呼叫 Email Server 寄信；寄信成功 / 失敗皆寫 status_code
+- [x] ~~T086 [US8] 實作 ET_INVITATION Repository~~ **已於 #362 移除**（表已 DROP）
+- [x] T087 [US8] 實作 Email 邀請 Service：#362 後改為**直接寫 `ET_ENROLLMENT`**（upsert）並寄通知信；回應分開回傳已加入人數與信件排入失敗清單（原為產生 token、建 PENDING 紀錄）
 - [ ] T088 [US8] 實作邀請信寄送（平台範本 `DP_NOTIFY_TEMPLATE` `MODULE=ET` / `TEMPLATE_CODE=COURSE_INVITE`）：呼叫平台發信服務傳 template_code + 變數（課程名稱、起訖時間、邀請連結、邀請碼）；**統一範本，教師不可編輯主旨與內文**（2026-07-08 集中化）
-- [ ] T089 [US8] 實作邀請連結驗證 Endpoint：驗證 token + ET_INVITATION 狀態；自動加入課程（寫 ET_ENROLLMENT，來源 = EMAIL_INVITE）；ET_INVITATION 狀態更新為 JOINED；已加入則跳轉至 ET05
+- [x] ~~T089 [US8] 實作邀請連結驗證 Endpoint~~ **已於 #362 移除**（`POST /et/invitations/accept` 與前端落點頁一併刪除；加入時點提前到教師按下寄出）
 - [ ] T090 [US8] 實作邀請學員 UI（ET02 右上按鈕，僅 PUBLISHED 狀態顯示）：Email 邀請視窗（多筆輸入 + 統一範本信件**預覽（唯讀）** + 寄出）+ 邀請碼視窗（複製 + QR Code；關閉期間失效提示）（2026-07-02 更新）
 - [ ] T091 [US8] ~~模組預設帶入 Service~~ → 併入 T136 標籤自動邀請 Service（2026-07-02 廢除改寫；保留編號不再使用）
 
@@ -202,7 +202,7 @@
 - [ ] T093 [US9] 實作重置重考次數 Service（2026-08-19 定案實作方式）：限定條件「該學員於該測驗已用重考次數 = `MAX_RETRY` 且尚未及格」；重置時於 **`ET_QUIZ_RETRY_RESET`** INSERT 一筆（記錄當下 attempt 總數為新基準、執行者、時間），**不得刪除任何 attempt**；已用重考次數 = max(0, COUNT(attempt) − MAX(基準) − 1)。課程 CLOSED 期間停用。UI 按鈕位於區塊 2 作答明細之各測驗標題列（以測驗為單位；2026-07-02 移入 → T149）
 - [ ] T094 [US9] 實作移除學員 Service：寫入 ET_ENROLLMENT.IS_REMOVED = true、REMOVED_AT；若該學員有 IN_PROGRESS attempt 跳警告但允許完成
 - [ ] T095 [US9] 實作匯出 CSV Service：依當前篩選條件產生 CSV（含完整欄位）
-- [ ] T096 [US9] 實作 ET03 學員頁面（「已加入」頁籤區塊 1 學員清單 + 「待加入」頁籤）：課程下拉 + 學員清單 + 個別操作**僅移除學員**（區塊 1）+ 匯出 CSV 按鈕（依條件啟用 / 禁用；課程已關閉時僅可閱覽）（2026-07-02 更新；作答明細 → T149 區塊 2、重置重考次數按鈕併入 T149 各測驗標題列、問卷結果 → T144 區塊 3）
+- [ ] T096 [US9] 實作 ET03 學員頁面（區塊 1 學員清單；「待加入」頁籤已於 #362 移除、分頁列一併拆除）：課程下拉 + 學員清單 + 個別操作**僅移除學員**（區塊 1）+ 匯出 CSV 按鈕（依條件啟用 / 禁用；課程已關閉時僅可閱覽）（2026-07-02 更新；作答明細 → T149 區塊 2、重置重考次數按鈕併入 T149 各測驗標題列、問卷結果 → T144 區塊 3）
 
 ---
 
@@ -234,18 +234,18 @@
 
 ---
 
-## Phase 14: US12 — UCET006 待加入邀請追蹤（P3）
+## ~~Phase 14: US12 — UCET006 待加入邀請追蹤（P3）~~ — **整個 Phase 已於 2026-09-18（#362）取消**
 
-> **Story 目標**: 教師追蹤已寄出未加入之邀請、再次寄送 / 撤回
-> **獨立測試**: 對待加入邀請執行「再次寄送」觸發新 Email；執行「撤回邀請」使連結失效
-> **規格子檔**: [spec_us12.md](spec_us12.md) | **驗收情境**: 7 條
-> **前置**: US8 完成
+> 取消理由與被放棄的能力見 [spec_us12.md](spec_us12.md)。**不是延後，是取消**：邀請即加入
+> 之後沒有「待加入」這個狀態可追蹤。T107~T111 編號不重用。
+>
+> 這個 Phase 曾經**部分落地過**（#342 做了清單 / 重寄 / 撤回），於 #362 一併移除。
 
-- [ ] T107 [US12] 實作待加入邀請查詢 Service：依 COURSE_ID 列出 ET_INVITATION 狀態 = PENDING
-- [ ] T108 [US12] 實作再次寄送 Service：重新呼叫 Email Server 寄出；更新 ET_INVITATION.LAST_SENT_AT
-- [ ] T109 [US12] 實作撤回邀請 Service：ET_INVITATION 狀態更新為 REVOKED、寫入 REVOKED_AT；token 失效
-- [ ] T110 [US12] 實作邀請連結失效之 UI：學員點擊已撤回邀請顯示「此邀請已撤回」訊息頁
-- [ ] T111 [US12] 實作 ET03 待加入分頁：清單（Email / 寄送時間 / 邀請狀態）+ 再次寄送 / 撤回按鈕
+- [x] ~~T107 [US12] 實作待加入邀請查詢 Service~~ 取消
+- [x] ~~T108 [US12] 實作再次寄送 Service~~ 取消
+- [x] ~~T109 [US12] 實作撤回邀請 Service~~ 取消
+- [x] ~~T110 [US12] 實作邀請連結失效之 UI~~ 取消
+- [x] ~~T111 [US12] 實作 ET03 待加入分頁~~ 取消
 
 ---
 
@@ -380,7 +380,7 @@ Phase 8 (US6 線上測驗) ←──────── 學員考核
     ↓
 Phase 11 (US9 學員追蹤) ── 可平行 ── Phase 12 (US10 個資維護)
     ↓
-Phase 13 (US11 關閉/再開課) ── 可平行 ── Phase 14 (US12 待加入追蹤)
+Phase 13 (US11 關閉/再開課)   〔Phase 14 (US12 待加入追蹤) 已取消，#362〕
     ↓
 Phase 15 (跨 US 補強)
     ↓
@@ -399,7 +399,7 @@ Phase 16 (整合收尾，含 T152~T155、T163 新增情境)
 - Phase 2 內的 T025~T032 可平行執行（獨立工具）
 - Phase 7 (US5) / Phase 9 (US7) / Phase 10 (US8) 可平行
 - Phase 11 (US9) / Phase 12 (US10) 可平行
-- Phase 13 (US11) / Phase 14 (US12) 可平行
+- ~~Phase 13 (US11) / Phase 14 (US12) 可平行~~（Phase 14 已取消，#362）
 - 各 Phase 內標記 [P] 的任務可平行執行
 
 ---
@@ -439,7 +439,7 @@ Phase 16 (整合收尾，含 T152~T155、T163 新增情境)
 | US9 學員學習狀況追蹤（P2）| 5 |
 | US10 個人資料維護（P2）| **1**（原 5，廢除 4；個資維護由 DP 提供，ET 僅留導向連結）|
 | US11 課程關閉與再開課（P3）| 5 |
-| US12 待加入邀請追蹤（P3）| 5 |
+| ~~US12 待加入邀請追蹤（P3）~~ | ~~5~~ **取消（#362）** |
 | 跨 US 補強（章節通知）| 2 |
 | 整合與收尾 | 9 |
 | Phase 17：2026-07-02 變更新增 | 27（Migrations 5、標籤 2、自動邀請 2、時窗 2、問卷 4、排程 4、明細 2、範本 1、整測 4、週報 CSV 下載端點 1〔T164，2026-08-19 新增〕）|

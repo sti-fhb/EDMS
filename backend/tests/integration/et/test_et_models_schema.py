@@ -18,14 +18,12 @@ from app.et.constants import (
     ATTEMPT_SUBMITTED,
     COMPLETION_IN_PROGRESS,
     COURSE_DRAFT,
-    INVITATION_PENDING,
     ITEM_MATERIAL,
     QUESTION_SINGLE,
     SOURCE_TAG_DEFAULT,
     SURVEY_QUESTION_SINGLE,
 )
 from app.et.course.models import EtChapter, EtCourse, EtItem
-from app.et.invitation.models import EtInvitation
 from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtEnrollment, EtProgress, EtProgressInterval, EtProgressVideo
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
@@ -317,21 +315,11 @@ class TestSurveyChain:
         await db.rollback()
 
 
-class TestInvitationAndStats:
-    async def test_邀請_轉讓_週統計(self, db) -> None:
+class TestStats:
+    """原為 `TestInvitationAndStats`——`ET_INVITATION` 已隨 #362 移除（邀請即加入）。"""
+
+    async def test_週統計可寫入(self, db) -> None:
         course = await _make_course(db, "課程J")
-        db.add(
-            EtInvitation(
-                **_audit(
-                    course_id=course.course_id,
-                    email="a@example.com",
-                    token_hash="h" * 64,
-                    status=INVITATION_PENDING,
-                    sent_at=_now(),
-                    last_sent_at=_now(),
-                )
-            )
-        )
         db.add(
             EtWeeklyStat(
                 **_audit_ao(
@@ -348,8 +336,8 @@ class TestInvitationAndStats:
         )
         await db.flush()
 
-        got = await db.scalar(select(EtInvitation).where(EtInvitation.course_id == course.course_id))
-        assert len(got.token_hash) == 64, "只存 SHA-256 雜湊、不存明文"
+        got = await db.scalar(select(EtWeeklyStat).where(EtWeeklyStat.course_id == course.course_id))
+        assert got.cnt_enrolled == 6
 
     async def test_週統計同課程同日唯一(self, db) -> None:
         course = await _make_course(db, "課程K")

@@ -1084,28 +1084,8 @@ export const handlers = [
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
-  // ET-12 待加入邀請（#342）。兩列刻意不同寄送時間，驗排序與時間顯示。
-  http.get("/api/et/courses/:courseId/invitations", () =>
-    HttpResponse.json({
-      data: [
-        {
-          invitation_id: 901,
-          email: "chenmh@edms.local",
-          last_sent_at: "2026-05-20T01:00:00Z",
-          status: "PENDING",
-        },
-        {
-          invitation_id: 902,
-          email: "liutc@edms.local",
-          last_sent_at: "2026-05-22T03:30:00Z",
-          status: "PENDING",
-        },
-      ],
-      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
-    }),
-  ),
-  http.post("/api/et/invitations/:invitationId/resend", () => new HttpResponse(null, { status: 204 })),
-  http.post("/api/et/invitations/:invitationId/revoke", () => new HttpResponse(null, { status: 204 })),
+  // ET-12 待加入邀請（#342）之 handler 已隨 #362 移除——`GET .../invitations`、
+  // `POST /invitations/:id/resend`、`/revoke` 三支端點在後端已不存在。
   http.get("/api/et/courses/:courseId/attempt-overview", () =>
     HttpResponse.json({
       students: [
@@ -1528,9 +1508,9 @@ export const handlers = [
     HttpResponse.json({ item_id: Number(params.itemId), completed: false }),
   ),
 
-  // ── ET02 邀請學員（US8 / #273）──────────────────────────────────────────
+  // ── ET02 邀請學員（US8 / #273、#362）────────────────────────────────────
   // 預覽由**後端**以統一範本渲染後回傳（非前端拼字串），故 handler 也回完整字串。
-  // 預覽內容**與收件人無關**（姓名與邀請連結皆為佔位字樣），故 handler 不看 emails。
+  // 預覽內容**與收件人無關**（姓名為佔位字樣），故 handler 不看 emails。
   http.post("/api/et/courses/:courseId/invitations/preview", () =>
     HttpResponse.json({
       subject: "【教育訓練】您已被加入課程「採血作業新進人員訓練」",
@@ -1538,17 +1518,19 @@ export const handlers = [
         "〔收件人姓名〕 您好：",
         "",
         "您已被加入由 王大明 開設之課程「採血作業新進人員訓練」。",
+        "",
+        "課程連結：https://edms.example/et/courses/7/learn",
       ].join("\n"),
     }),
   ),
+  // #362：回 `joined` / `mail_failed`（原為 `sent` / `failed`）。欄位名改了而值域沒改，
+  // 舊名在 TS 端會被型別擋下，但**這份 fixture 不受型別檢查**——寫錯只會讓元件讀到
+  // undefined 然後在 `.length` 上爆，所以這裡與 `invitationSchemas.ts` 必須人工對齊。
   http.post("/api/et/courses/:courseId/invitations", async ({ request }) => {
     const { emails } = (await request.json()) as { emails: string }
     const list = emails.split(/[\s,;，、；]+/).filter(Boolean)
-    return HttpResponse.json({ sent: list.length, failed: [] })
+    return HttpResponse.json({ joined: list.length, mail_failed: [] })
   }),
-  http.post("/api/et/invitations/accept", () =>
-    HttpResponse.json({ course_id: 7, course_name: "採血作業新進人員訓練", already_joined: false }),
-  ),
 
   // ── ET06 測驗作答（US6 / #279）──────────────────────────────────────────
   http.get("/api/et/quizzes/:quizId/intro", ({ params }) =>

@@ -8,8 +8,6 @@ import DialogContentText from "@mui/material/DialogContentText"
 import DialogTitle from "@mui/material/DialogTitle"
 import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
-import Tab from "@mui/material/Tab"
-import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -19,16 +17,8 @@ import { AttemptOverviewBlock } from "./AttemptOverviewBlock"
 import { StudentListBlock } from "./StudentListBlock"
 import { SurveyResultBlock } from "./SurveyResultBlock"
 import { TeacherAttemptDialog } from "./TeacherAttemptDialog"
-import { PendingInviteBlock } from "./PendingInviteBlock"
 import { downloadStudentsCsv, downloadSurveyCsv, studentsApi } from "./studentsService"
-import type {
-  ApprovalResult,
-  ApproveResult,
-  PendingInviteRow,
-  SkipReason,
-  StudentRow,
-  TeacherQuizRow,
-} from "./schemas"
+import type { ApprovalResult, ApproveResult, SkipReason, StudentRow, TeacherQuizRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -38,19 +28,20 @@ import { coursesApi } from "../courses/coursesService"
 type Pending =
   | { kind: "reset"; userId: string; userName: string | null; quiz: TeacherQuizRow }
   | { kind: "remove"; student: StudentRow }
-  | { kind: "resend"; invite: PendingInviteRow }
-  | { kind: "revoke"; invite: PendingInviteRow }
   /** US16 核可（單筆即 `students` 長度為 1）。 */
   | { kind: "approve"; students: StudentRow[]; result: ApprovalResult }
-  /** US16 撤銷核可——**與 `revoke`（撤回邀請）是兩件事**，故不共用 kind。 */
+  /**
+   * US16 撤銷核可。
+   *
+   * 命名保留 `revokeApproval` 而不簡化為 `revoke`：#362 之前另有一個 `revoke`（撤回
+   * 邀請），兩者曾經並存且是完全不同的動作。改名會讓日後讀 git 歷史的人把兩者混為一談。
+   */
   | { kind: "revokeApproval"; student: StudentRow }
 
-/** 六種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。 */
+/** 四種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。 */
 const DIALOG_TITLE: Record<Pending["kind"], string> = {
   reset: "重置重考次數",
   remove: "移除學員",
-  resend: "再次寄送邀請",
-  revoke: "撤回邀請",
   approve: "線下核可",
   revokeApproval: "撤銷核可",
 }
@@ -111,13 +102,6 @@ function confirmMessage(pending: Pending | null): string {
     case "reset":
       // ET-MSG-ET03-001
       return `確定重置 ${pending.userName ?? "該學員"} 於「${pending.quiz.quiz_name}」之重考次數？歷次作答明細仍會完整保留。`
-    case "resend":
-      // 🔴「原連結將失效」必須講——重寄會換新 token，受邀者手上的舊信隨即作廢。
-      // 不講的話，教師會以為只是「再提醒一次」，而對方點舊信會看到「連結無效」。
-      return `確定重新寄送邀請信至 ${pending.invite.email}？原邀請連結將失效，對方須改用新信中的連結。`
-    case "revoke":
-      // ET-MSG-ET03-102。「原邀請連結將失效」是規格文案，不可簡化。
-      return `確定撤回對 ${pending.invite.email} 的邀請？原邀請連結將失效。`
     case "approve": {
       // ET-MSG-ET03-301。批次帶筆數——教師勾了 12 個人卻只看到「確定核可所選學員？」
       // 時，無從察覺自己少勾或多勾了。
@@ -149,7 +133,11 @@ function removeMessage(pending: Pending | null): string {
  *
  * ## 「已加入」頁籤 = 一個課程的完整資料視圖，分三區塊
  *
- * ①已加入學員 ②作答明細 ③問卷結果。「待加入」tab 屬 `ET-12`，本 issue 只放佔位。
+ * ①已加入學員 ②作答明細 ③問卷結果。
+ *
+ * 原本上方還有「已加入 / 待加入」兩個 tab，`待加入` 於 #362 隨 `ET_INVITATION` 一併
+ * 移除——Email 邀請現在寄出即加入，被邀請的人直接出現在①，沒有第二個清單可看。單剩
+ * 一個 tab 沒有意義，故整組 `<Tabs>` 也移除。
  *
  * ## 課程已關閉時只停**寫入**
  *
@@ -165,7 +153,6 @@ export function EtStudentsPage() {
   const notify = useNotification()
   const queryClient = useQueryClient()
   const [courseId, setCourseId] = useState<number | "">("")
-  const [tab, setTab] = useState<"joined" | "pending">("joined")
   const [attemptId, setAttemptId] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
@@ -222,9 +209,6 @@ export function EtStudentsPage() {
       } else if (pending.kind === "remove") {
         await studentsApi.removeStudent(courseId, pending.student.user_id)
         notify.message.success("已移除學員")
-      } else if (pending.kind === "resend") {
-        await studentsApi.resendInvite(pending.invite.invitation_id)
-        notify.message.success("邀請信已重新寄出")
       } else if (pending.kind === "approve") {
         const outcome = await studentsApi.approve(
           courseId,
@@ -236,7 +220,7 @@ export function EtStudentsPage() {
         )
         const { severity, text } = approveOutcome(outcome, pending.students.length)
         notify.message[severity](text)
-      } else if (pending.kind === "revokeApproval") {
+      } else {
         // `approval_version` 在有核可紀錄時必為數字；撤銷鈕只對已有結果的列顯示。
         await studentsApi.revokeApproval(
           courseId,
@@ -245,9 +229,6 @@ export function EtStudentsPage() {
           pending.student.approval_version ?? 0,
         )
         notify.message.success("已撤銷核可") // ET-MSG-ET03-306
-      } else {
-        await studentsApi.revokeInvite(pending.invite.invitation_id)
-        notify.message.success("邀請已撤回")
       }
       invalidateAll(courseId)
       closePending()
@@ -298,20 +279,8 @@ export function EtStudentsPage() {
         </TextField>
       </Stack>
 
-      <Tabs value={tab} onChange={(_, v: "joined" | "pending") => setTab(v)} sx={{ mb: 2 }}>
-        <Tab value="joined" label="已加入" />
-        <Tab value="pending" label="待加入" />
-      </Tabs>
-
       {courseId === "" ? (
         <Alert severity="info">請先於右上選擇要檢視的課程。</Alert>
-      ) : tab === "pending" ? (
-        <PendingInviteBlock
-          courseId={courseId}
-          readOnly={readOnly}
-          onResend={(invite) => openPending({ kind: "resend", invite })}
-          onRevoke={(invite) => openPending({ kind: "revoke", invite })}
-        />
       ) : (
         <>
           {readOnly && (

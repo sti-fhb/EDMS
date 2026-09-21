@@ -57,11 +57,6 @@ COURSE_INVITE_PARAM_KEYS: Final[frozenset[str]] = frozenset(
 #: `COURSE_INVITE_DIGEST` 之佔位。
 DIGEST_PARAM_KEYS: Final[frozenset[str]] = frozenset({"USER_NAME", "COURSE_LIST"})
 
-#: 預覽信中代替真實 token 的字樣——每位收件人之 token 於寄出當下才產生，
-#: 預覽不得出現一條真的可以用的連結。
-#: （命名避開 `TOKEN` 字樣：ruff `S105` 會把含該字的常數賦值視為硬編碼機密。）
-_PREVIEW_LINK_MASK: Final = "…"
-
 #: 預覽信中代替收件人姓名的字樣。
 #:
 #: 範本內文開頭是「{USER_NAME} 您好：」，而**每位收件人代入的是各自的姓名**。預覽只有
@@ -81,21 +76,13 @@ def _base_url() -> str:
 
 
 def learn_link(course_id: int) -> str:
-    """ET05 章節學習頁連結——收件人已在課程中時用（標籤帶入 / 彙整信）。"""
-    return f"{_base_url()}/et/courses/{course_id}/learn"
+    """ET05 章節學習頁連結——四條寄信路徑共用（#362 後 Email 邀請亦然）。
 
-
-def invite_link(token: str) -> str:
-    """Email 邀請連結（帶明文 token）——收件人可能尚無帳號、也尚未加入課程。
-
-    明文僅存在於信件連結中；`ET_INVITATION` 只存 `hash_token()` 之結果。
+    #362 之前，Email 邀請走的是 `/et/invite?token=…` 一次性連結（收件人尚未加入課程，
+    得先「接受邀請」）。邀請即加入之後沒有要接受的東西，收件人在信寄出當下已是學員，
+    故與標籤帶入那條路徑統一為學習頁連結——**這也是 token 得以整組移除的原因**。
     """
-    return f"{_base_url()}/et/invite?token={token}"
-
-
-def preview_invite_link() -> str:
-    """寄送預覽用之連結樣板（不含可用 token）。"""
-    return invite_link(_PREVIEW_LINK_MASK)
+    return f"{_base_url()}/et/courses/{course_id}/learn"
 
 
 def format_open_at(value: datetime | None) -> str:

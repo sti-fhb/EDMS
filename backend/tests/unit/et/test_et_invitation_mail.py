@@ -23,9 +23,7 @@ from app.et.notify.course_invite import (
     build_course_invite_params,
     build_digest_params,
     format_open_at,
-    invite_link,
     learn_link,
-    preview_invite_link,
 )
 
 pytestmark = pytest.mark.unit
@@ -110,27 +108,22 @@ class TestFormatOpenAt:
 
 
 class TestLinks:
-    """連結一律由 `settings.FRONTEND_BASE_URL` 組出，且容忍設定值尾端斜線。"""
+    """連結一律由 `settings.FRONTEND_BASE_URL` 組出，且容忍設定值尾端斜線。
+
+    #362 起**只剩這一種連結**：邀請信原本走 `/et/invite?token=…`（一次性、逐人不同），
+    邀請即加入之後收件人在信寄出當下已是學員，沒有要「接受」的東西了。
+    """
 
     def test_學習連結指向_et05_學習頁(self) -> None:
         assert learn_link(12).endswith("/et/courses/12/learn")
 
-    def test_邀請連結帶明文_token(self) -> None:
-        assert invite_link("abc123").endswith("/et/invite?token=abc123")
-
     def test_連結以設定之_base_url_起頭(self) -> None:
         base = settings.FRONTEND_BASE_URL.rstrip("/")
         assert learn_link(12).startswith(base)
-        assert invite_link("abc123").startswith(base)
 
     def test_base_url_尾端斜線不會產生雙斜線(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "FRONTEND_BASE_URL", "https://edms.example/")
         assert learn_link(7) == "https://edms.example/et/courses/7/learn"
-
-    def test_預覽連結不含真實_token(self) -> None:
-        """預覽當下尚未產生 token（每位收件人各自獨立），不可出現可用的連結。"""
-        preview = preview_invite_link()
-        assert preview.endswith("/et/invite?token=…")
 
 
 class TestDigestCourseList:

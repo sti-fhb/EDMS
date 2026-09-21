@@ -28,9 +28,17 @@ class TestEnrollmentSource:
         assert c.ALL_ENROLLMENT_SOURCES == frozenset({"EMAIL_INVITE", "INVITATION_CODE", "TAG_DEFAULT"})
 
 
-class TestInvitationStatus:
-    def test_三態(self) -> None:
-        assert c.ALL_INVITATION_STATUSES == frozenset({"PENDING", "JOINED", "REVOKED"})
+class TestInvitationStatusRemoved:
+    """`ET_INVITATION_STATUS` 隨 #362 廢除（原為 PENDING / JOINED / REVOKED）。
+
+    邀請即加入之後沒有「待加入」這個中間狀態，整張 `ET_INVITATION` 一併移除。本條擋的
+    是日後有人把它加回來卻沒重新檢討前提——見 `invitation/service.py` 模組 docstring
+    的 🔴 那段（只邀請既有帳號才是這個決策成立的條件）。
+    """
+
+    def test_值域已不存在(self) -> None:
+        assert not hasattr(c, "ALL_INVITATION_STATUSES")
+        assert "ET_INVITATION_STATUS" not in c.LOOKUP_SETS
 
 
 class TestAttemptStatus:
@@ -60,16 +68,17 @@ class TestApprovalResult:
 
 
 class TestLookupCoverage:
-    def test_共十類代碼集合(self) -> None:
-        """data-model §Lookup 代碼定義列 10 類，全部須有對應常數集合。
+    def test_共九類代碼集合(self) -> None:
+        """data-model §Lookup 代碼定義列 9 類，全部須有對應常數集合。
 
-        第 10 類 `ET_SURVEY_QUESTION_TYPE` 於 2026-08-28（#238）新增——問卷加入問答
-        題型，推翻了原本「題型一律單選（不設題型欄位）」的規定。
+        沿革：#185 建置時 9 類 → #238（2026-08-28）新增 `ET_SURVEY_QUESTION_TYPE`
+        （問卷加入問答題型，推翻「題型一律單選」）增為 10 類 → #362（2026-09-18）
+        移除 `ET_INVITATION_STATUS`（邀請即加入，無中間狀態）回到 9 類。
 
         本條寫死類別數是刻意的：它是 `constants.py` 與 data-model §Lookup 之間唯一的
         守門。加了常數卻沒更新文件（或反之）時，這裡會先失敗。
         """
-        assert len(c.LOOKUP_SETS) == 10
+        assert len(c.LOOKUP_SETS) == 9
         # 每一類都非空，且成員皆為大寫英數底線（DB 欄位為 VARCHAR，值域由應用層把關）
         for name, values in c.LOOKUP_SETS.items():
             assert values, f"{name} 不得為空"

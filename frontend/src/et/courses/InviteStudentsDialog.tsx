@@ -41,13 +41,20 @@ function joinUrlFor(code: string): string {
 }
 
 /**
- * ET02 邀請學員視窗（US8 / #273）。
+ * ET02 邀請學員視窗（US8 / #273、#362）。
  *
  * ## 這個視窗是「補件」用的
  *
  * 學員的主要來源是**發布課程時依受訓單位標籤自動帶入**（並自動寄出通知信）。本視窗
  * 供教師追加不在標籤內的人（Email 邀請），或把邀請碼交給學員自行加入。頂部的說明是
  * 刻意的——否則教師會以為必須逐一邀請每一位學員。
+ *
+ * ## 🔴 「邀請」＝ 直接加入，措辭不可退回成「已寄出」（#362）
+ *
+ * 按下確認寄出的當下，收件人就進了學員清單（後端寫 `ET_ENROLLMENT`），信只是通知。
+ * 原本的「待加入」中間狀態與其重寄 / 撤回一併移除，所以**寄信失敗沒有補救途徑**——
+ * 畫面上任何一句把「寄出」當成「加入」同義詞的話，都會讓教師以為失敗的那幾位沒進課程
+ * 而重按一次（實際是多寄一封信），或反過來以為成功的那幾位還沒進去而去別處找他們。
  *
  * ## 為何預覽是唯讀
  *
@@ -68,15 +75,17 @@ export function InviteStudentsDialog({
   const [preview, setPreview] = useState<InvitePreview | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
-  const [partialFailures, setPartialFailures] = useState<string[]>([])
+  const [mailFailures, setMailFailures] = useState<string[]>([])
   const [unknownEmails, setUnknownEmails] = useState<string[]>([])
+  const [disabledEmails, setDisabledEmails] = useState<string[]>([])
 
   const resetAll = useCallback(() => {
     setEmails("")
     setEmailsError(null)
     setPreview(null)
-    setPartialFailures([])
+    setMailFailures([])
     setUnknownEmails([])
+    setDisabledEmails([])
   }, [])
 
   const handleClose = useCallback(() => {
@@ -96,15 +105,26 @@ export function InviteStudentsDialog({
   }, [emails])
 
   /**
-   * 後端錯誤呈現。`ET_INVITE_005`（有 Email 尚無 EDMS 帳號）另外把清單攤開——
-   * `error_message` 依規範不得嵌入動態值，是哪幾筆放在 `unknown_emails`。
+   * 後端錯誤呈現。兩支「是哪幾筆」型的錯誤另外把清單攤開——`error_message` 依規範不得
+   * 嵌入動態值，明細一律走 `extra`。
+   *
+   * ⚠️ `ET_INVITE_005`（尚無帳號）與 `ET_INVITE_008`（已停用）**分開呈現**，不可合併成
+   * 一句「這些 Email 有問題」：前者的下一步是請管理者建帳號，後者照做會得到一個重複
+   * 帳號。兩者的補救方向相反。
    */
   const showApiError = useCallback(
     (err: unknown) => {
       const apiError = toApiError(err)
-      if (apiError.errorCode === "ET_INVITE_005") {
-        const list = apiError.payload?.unknown_emails
-        setUnknownEmails(Array.isArray(list) ? (list as string[]) : [])
+      const detail: Record<string, string> = {
+        ET_INVITE_005: "unknown_emails",
+        ET_INVITE_008: "disabled_emails",
+      }
+      const key = detail[apiError.errorCode ?? ""]
+      if (key !== undefined) {
+        const list = apiError.payload?.[key]
+        const emails = Array.isArray(list) ? (list as string[]) : []
+        if (key === "unknown_emails") setUnknownEmails(emails)
+        else setDisabledEmails(emails)
         setEmailsError(apiError.errorMessage)
         return
       }
@@ -116,6 +136,7 @@ export function InviteStudentsDialog({
   const handleNext = useCallback(async () => {
     if (!validateLocally()) return
     setUnknownEmails([])
+    setDisabledEmails([])
     setLoadingPreview(true)
     try {
       setPreview(await invitationsApi.preview(courseId, emails))
@@ -131,15 +152,17 @@ export function InviteStudentsDialog({
     // 否則教師可以在看過預覽後把清單改成不合法的內容再直接送出。
     if (!validateLocally()) return
     setUnknownEmails([])
+    setDisabledEmails([])
     setSending(true)
     try {
       const result = await invitationsApi.send(courseId, emails)
-      if (result.failed.length > 0) {
-        // 部分失敗**不關閉視窗**：教師需要看到是哪幾筆才知道要不要重打一次。
-        setPartialFailures(result.failed)
+      if (result.mail_failed.length > 0) {
+        // 寄信失敗**不關閉視窗**：那幾位已經加入了，教師要看到是誰才能改用別的方式通知。
+        // ⚠️ 這裡**不是**「部分失敗」——`joined` 涵蓋全部收件人，失敗的只有那封通知信。
+        setMailFailures(result.mail_failed)
         return
       }
-      message.success("邀請信已寄出")
+      message.success(`已將 ${result.joined} 位加入課程並寄出通知信`)
       handleClose()
     } catch (err) {
       showApiError(err)
@@ -194,7 +217,8 @@ export function InviteStudentsDialog({
                   setEmails(e.target.value)
                   setEmailsError(null)
                   setUnknownEmails([])
-                  setPartialFailures([])
+                  setDisabledEmails([])
+                  setMailFailures([])
                   // **不清掉預覽**：預覽內容與收件人無關（姓名與連結都是佔位字樣），
                   // 加減 Email 不會改變那封信長什麼樣子。清掉只會逼教師多按一次「下一步」。
                 }}
@@ -211,7 +235,7 @@ export function InviteStudentsDialog({
                     信件內容由管理者統一維護，僅可預覽、不可編輯
                   </Alert>
                   <Typography variant="caption" color="text.secondary">
-                    每位收件人皆收到相同內容；稱謂與邀請連結於寄出時各自帶入。
+                    每位收件人皆收到相同內容；稱謂於寄出時各自帶入。
                   </Typography>
                   <TextField
                     label="主旨"
@@ -231,7 +255,7 @@ export function InviteStudentsDialog({
                   />
                   <Typography variant="caption" color="text.secondary">
                     <InfoOutlinedIcon fontSize="inherit" sx={{ verticalAlign: "middle", mr: 0.5 }} />
-                    實際寄出時，系統會為每位收件人產生獨立的一次性邀請連結；連結被使用後即失效，請勿轉寄。
+                    收件人於寄出當下即加入課程，不需要點信中連結；信內連結為課程學習頁。
                   </Typography>
                 </Stack>
               )}
@@ -242,9 +266,17 @@ export function InviteStudentsDialog({
                 </Alert>
               )}
 
-              {partialFailures.length > 0 && (
+              {disabledEmails.length > 0 && (
                 <Alert severity="warning">
-                  部分 Email 寄送失敗，已列入待加入清單可再寄送：{partialFailures.join("、")}
+                  以下帳號<strong>已停用</strong>，無法邀請（請確認名單或請管理者先啟用）：
+                  {disabledEmails.join("、")}
+                </Alert>
+              )}
+
+              {mailFailures.length > 0 && (
+                <Alert severity="warning">
+                  以下收件人<strong>已加入課程</strong>，但通知信寄送失敗，請改以其他方式告知：
+                  {mailFailures.join("、")}
                 </Alert>
               )}
             </Stack>
@@ -299,7 +331,7 @@ export function InviteStudentsDialog({
       <DialogActions>
         {tab === 0 && (
           <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", ml: 1 }}>
-            將寄出 {recipientCount} 封邀請信
+            將直接加入 {recipientCount} 位並各寄一封通知信
           </Typography>
         )}
         <Button variant="outlined" size="small" onClick={handleClose}>

@@ -53,6 +53,9 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
 
     await user.click(screen.getByRole("button", { name: "確認寄出" }))
     await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // #362：成功訊息講的是「加入」而非只有「寄出」——那才是教師真正要的那件事，
+    // 且學員清單會立刻多一位，訊息若只說寄出會與畫面對不起來。
+    expect(await screen.findByText("已將 1 位加入課程並寄出通知信")).toBeInTheDocument()
   })
 
   it("修改 Email 清單後預覽**保留**——內容與收件人無關，不必重新預覽", async () => {
@@ -68,7 +71,7 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     // 加減 Email 不會改變那封信長什麼樣子，清掉只會逼教師多按一次「下一步」
     expect(screen.getByLabelText("主旨")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "確認寄出" })).toBeInTheDocument()
-    expect(screen.getByText("將寄出 2 封邀請信")).toBeInTheDocument()
+    expect(screen.getByText("將直接加入 2 位並各寄一封通知信")).toBeInTheDocument()
   })
 
   it("預覽後把清單改成不合法內容，直接按寄出仍會被本地驗證擋下", async () => {
@@ -77,7 +80,7 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     server.use(
       http.post("/api/et/courses/:courseId/invitations", () => {
         sendCalled = true
-        return HttpResponse.json({ sent: 1, failed: [] })
+        return HttpResponse.json({ joined: 1, mail_failed: [] })
       }),
     )
     renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
@@ -119,6 +122,33 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     expect(screen.queryByLabelText("主旨")).not.toBeInTheDocument()
   })
 
+  it("後端回 ET_INVITE_008 時另外列出已停用的帳號，且不說成「尚未建立」", async () => {
+    // 🔴 與 `ET_INVITE_005` 分開呈現。合併成一句「這些 Email 有問題」會讓教師去請管理者
+    // 建帳號——而那個人已經有帳號了，照做會得到一個重複帳號。兩者的補救方向相反。
+    const user = userEvent.setup()
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations/preview", () =>
+        HttpResponse.json(
+          {
+            error_code: "ET_INVITE_008",
+            error_message: "以下帳號已停用，無法邀請；請確認名單或請管理者先啟用帳號",
+            disabled_emails: ["left@x.gov.tw"],
+          },
+          { status: 422 },
+        ),
+      ),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+
+    await user.type(screen.getByLabelText("學員 Email"), "left@x.gov.tw")
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+
+    const alert = (await screen.findByText(/無法邀請（請確認名單或請管理者先啟用）/)).closest('[role="alert"]')
+    expect(alert).toHaveTextContent("left@x.gov.tw")
+    expect(screen.queryByText(/尚未建立 EDMS 帳號/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("主旨")).not.toBeInTheDocument()
+  })
+
   it("格式錯誤時不打 API，直接在欄位下方指出是哪幾筆", async () => {
     const user = userEvent.setup()
     let called = false
@@ -137,12 +167,16 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     expect(called).toBe(false)
   })
 
-  it("部分寄送失敗時不關閉視窗並列出失敗的 Email", async () => {
+  it("寄信失敗時不關閉視窗，且必須說明那些人**已經加入**了", async () => {
+    // 🔴 #362 的關鍵一條。`joined` 涵蓋全部 2 位，`mail_failed` 只有信沒寄成的那 1 位——
+    // 原文案「部分 Email 寄送失敗，已列入待加入清單可再寄送」現在有兩處是錯的：沒有
+    // 待加入清單、也沒有重寄。教師若照字面理解會去找一個不存在的地方補救，
+    // 而那個人其實已經在學員清單裡了。
     const user = userEvent.setup()
     const onClose = vi.fn()
     server.use(
       http.post("/api/et/courses/:courseId/invitations", () =>
-        HttpResponse.json({ sent: 1, failed: ["b@x.gov.tw"] }),
+        HttpResponse.json({ joined: 2, mail_failed: ["b@x.gov.tw"] }),
       ),
     )
     renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} onClose={onClose} />)
@@ -152,19 +186,21 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "確認寄出" })).toBeInTheDocument())
     await user.click(screen.getByRole("button", { name: "確認寄出" }))
 
-    // 鎖定「部分寄送失敗」那一則 Alert：畫面上另有說明用的 info Alert，
+    // 鎖定那一則 warning Alert：畫面上另有說明用的 info Alert，
     // 而輸入框裡也有同一組 Email——用 role 或全頁文字搜尋都會撞到別的節點。
-    const alert = (await screen.findByText(/部分 Email 寄送失敗/)).closest('[role="alert"]')
+    const alert = (await screen.findByText(/通知信寄送失敗/)).closest('[role="alert"]')
     expect(alert).toHaveTextContent("b@x.gov.tw")
+    expect(alert).toHaveTextContent("已加入課程")
+    expect(alert).not.toHaveTextContent("待加入")
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("顯示將寄出的封數", async () => {
+  it("顯示將加入的人數", async () => {
     const user = userEvent.setup()
     renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
     await user.type(screen.getByLabelText("學員 Email"), "a@x.gov.tw,b@x.gov.tw,a@x.gov.tw")
     // 重複者去重後為 2 封
-    expect(screen.getByText("將寄出 2 封邀請信")).toBeInTheDocument()
+    expect(screen.getByText("將直接加入 2 位並各寄一封通知信")).toBeInTheDocument()
   })
 })
 

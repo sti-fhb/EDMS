@@ -44,7 +44,6 @@
 | 測驗作答 | ET_QUIZ_ATTEMPT_M | 主表（主+明細）| 測驗作答主檔 | 學員某次測驗 attempt（含次數、快照、得分、是否及格）|
 | 重考次數重置 | ET_QUIZ_RETRY_RESET | 明細 | 測驗作答主檔 | 教師重置某學員某測驗重考次數之紀錄（append-only，作為已用次數之計算基準）（2026-08-19 新增）|
 | 作答明細 | ET_QUIZ_ATTEMPT_D | 明細 | 各題作答明細 | 學員於某次 attempt 之各題作答內容與得分 |
-| 邀請紀錄 | ET_INVITATION | 主表 | Email 邀請 | Email 邀請寄送紀錄（含課程、Email、狀態）|
 | 課後問卷 | ET_SURVEY | 主表 | 課後問卷 | 課程之課後回饋問卷（0～1 份 / 課程）；有人填答後題目凍結 |
 | 問卷題目 | ET_SURVEY_QUESTION | 主表 | 問卷題目 | 問卷下之單選題（題幹、順序）|
 | 問卷選項 | ET_SURVEY_OPTION | 明細 | 問卷選項 | 問卷題目之選項（如 滿意 / 普通 / 不滿意），教師自訂 |
@@ -524,27 +523,24 @@
 
 ---
 
-### 邀請紀錄（ET_INVITATION）
+### 邀請紀錄（ET_INVITATION）— **已於 2026-09-18（#362）移除**
 
-| # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
-|---|---------|---------|---------|------|------|
-| 1 | 邀請 ID | INVITATION_ID | BIGINT | PK | 主鍵 |
-| 2 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
-| 3 | 受邀 Email | EMAIL | VARCHAR(255) | Y | 受邀對象之 Email |
-| 4 | 邀請 token | TOKEN | VARCHAR(64) | Y | 邀請連結之 token |
-| 5 | 邀請狀態 | STATUS | VARCHAR(20) | Y | 參見 Lookup `ET_INVITATION_STATUS`（PENDING / JOINED / REVOKED）|
-| 6 | 寄出時間 | SENT_AT | TIMESTAMP | Y | 首次寄出時間 |
-| 7 | 最近寄出時間 | LAST_SENT_AT | TIMESTAMP | Y | 最近一次寄出時間（再次寄送時更新）|
-| 8 | 加入時間 | JOINED_AT | TIMESTAMP | N | 學員點擊連結加入課程之時間 |
-| 9 | 撤回時間 | REVOKED_AT | TIMESTAMP | N | 教師撤回邀請之時間 |
-| 10 | 寄送結果碼 | SEND_STATUS_CODE | VARCHAR(20) | N | 最近一次寄信結果（成功 / 失敗原因碼）；寄送失敗時記錄，供 US12 待加入清單顯示與重寄判斷 |
-| - | 標準欄位 | — | — | — | （同上）|
+Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下就寫 `ET_ENROLLMENT`
+（`JOIN_SOURCE = EMAIL_INVITE`），信件只是通知。本表連同 token、`ET_INVITATION_STATUS`
+值域與 US12 的清單 / 重寄 / 撤回一併廢除。
 
-**業務規則**:
-- STATUS 流轉：PENDING → JOINED 或 REVOKED；JOINED / REVOKED 為終態
-- 「再次寄送」更新 LAST_SENT_AT，不建新紀錄
-- 「撤回」更新 STATUS = REVOKED 與 REVOKED_AT；該 token 失效
-- 每次寄送（含首次與再次寄送）更新 SEND_STATUS_CODE；寄送失敗時 STATUS 維持 PENDING（列於 US12 待加入清單、可重寄），不因寄信失敗回滾邀請
+**為何整張表都不需要了**：SA 早先已裁示 Email 邀請只收**平台既有帳號**，而既有帳號一旦
+有 `ET_ENROLLMENT` 列就能在「我的課程」看到課程——受邀者從來不需要那封信才能進課程。
+「待加入」因此只存在於教師端，且是會誤導他的那一端：被邀請的人**不會**出現在學員清單
+裡，教師以為邀請失敗（2026-09-17 手測回報）。
+
+🔴 **本決策的前提是「只邀請既有帳號」。** 若日後改為可邀請尚未註冊的外部 Email，
+「待加入」就會重新有意義（那時的受邀者確實需要一條連結才進得來），本節必須重新檢討。
+
+**資料處理**：migration `f1d93a5c7b04` 先把 `STATUS = 'PENDING'` 的列補成 `ET_ENROLLMENT`
+（`JOINED_AT` 取該筆的 `SENT_AT`），再 `DROP TABLE`。`JOINED` 已有選課列、`REVOKED` 是
+教師明示不要的人，兩者皆不回填；撞到既有列時 `DO NOTHING`（**不**把被移除的學員救回來，
+理由見該 migration 的 docstring）。
 
 ---
 
@@ -709,7 +705,7 @@
 
 ## Lookup 代碼定義（**應用層常數，不建表**）
 
-> **2026-08-20 定案**（2026-08-28 增為 10 類）：下列代碼**不建立資料表、不 seed 任何資料**，僅為**文件層之代碼定義**，實作時落為**應用層常數**。
+> **2026-08-20 定案**（2026-08-28 增為 10 類；2026-09-18 #362 移除 `ET_INVITATION_STATUS` 回到 **9 類**）：下列代碼**不建立資料表、不 seed 任何資料**，僅為**文件層之代碼定義**，實作時落為**應用層常數**。
 >
 > **理由**：本專案無 Lookup 代碼表機制——DM 之狀態欄位（`DM_DOCUMENT.STATUS` 等）為 `String(20)`，無 lookup 表、無 CHECK constraint、無 Enum，代碼以模組層常數表達（如 `app/dm/detail/repository.py` 之 `_OBSOLETE = "OBSOLETE"`、`_BROWSABLE_STATUSES`）。ET 若照原 T021 建 8~9 張 lookup 表，將與 DM / DP 之既有做法分歧、平白多出 9 張表與其維護成本。
 >
@@ -737,17 +733,14 @@
 
 | 代碼 | 顯示名稱 | 說明 |
 |------|---------|------|
-| EMAIL_INVITE | Email 邀請 | 透過 ET_INVITATION 邀請連結加入 |
+| EMAIL_INVITE | Email 邀請 | 教師於 ET02 以 Email 邀請，寄出當下即加入（#362 前為點擊信中連結加入）|
 | INVITATION_CODE | 邀請碼 | 透過 ET04 輸入邀請碼加入 |
 | TAG_DEFAULT | 標籤帶入 | 受訓單位標籤自動邀請帶入（2026-07-02 變更，原 MODULE_DEFAULT）|
 
-### ET_INVITATION_STATUS
+### ET_INVITATION_STATUS — **已於 2026-09-18（#362）移除**
 
-| 代碼 | 顯示名稱 | 說明 |
-|------|---------|------|
-| PENDING | 待加入 | 已寄出邀請信，學員尚未加入 |
-| JOINED | 已加入 | 學員點擊連結加入課程 |
-| REVOKED | 已撤回 | 教師撤回邀請，連結失效 |
+原為 PENDING / JOINED / REVOKED。邀請即加入之後沒有中間狀態，整組值域與 `ET_INVITATION`
+一併廢除，Lookup 代碼由 10 類回到 9 類。
 
 ### ET_ATTEMPT_STATUS
 
@@ -822,7 +815,6 @@ erDiagram
     ET_COURSE ||--o{ ET_COURSE_TAG : tagged
     ET_COURSE ||--o{ ET_CHAPTER : contains
     ET_COURSE ||--o{ ET_ENROLLMENT : enrolls
-    ET_COURSE ||--o{ ET_INVITATION : invites
     ET_COURSE ||--o| ET_SURVEY : has_survey
     ET_COURSE ||--o{ ET_WEEKLY_STAT : snapshots
     ET_COURSE ||--o{ ET_APPROVAL : approves
