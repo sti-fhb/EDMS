@@ -247,6 +247,62 @@ class TestResultFilterInteraction:
         assert r.status_code == 422
 
 
+class TestResultNoteRedaction:
+    """🔴 `RESULT_NOTE` 只對該課程 owner 與管理者顯示（SA 裁示 2026-09-21）。
+
+    裁示 C 原本只切**結果**維度，沒切**欄位**維度。而 `ApproveReq.result_note` 明文允許
+    `PASS` 附備註——負面評語只要掛在通過上，就會隨「通過可查全部」流向全體教師。
+    """
+
+    async def _pass_with_note(self, db, f) -> None:
+        """在**他人**課程給林佳蓉一筆帶備註的通過（教師依裁示 C 看得到這一列）。"""
+        e = await _course(db, owner=f["other"], name="輸血反應處置流程培訓")
+        await _approval(
+            db,
+            course_id=e,
+            user_id=f["lin"],
+            result=APPROVAL_PASS,
+            approved_by=f["other"],
+            note="第二次補考才通過，單採操作仍不穩",
+        )
+
+    async def test_他人課程的通過備註對教師遮蔽(self, client, db) -> None:
+        f = await _fixture(db)
+        await self._pass_with_note(db, f)
+
+        r = await client.get(_QUERY, params={"user_name": "林"}, headers=_bearer(f["own"]))
+
+        row = next(x for x in r.json()["data"] if x["course_name"] == "輸血反應處置流程培訓")
+        assert row["result_note"] is None, "他人課程的考核評語不得回傳"
+        assert "單採操作仍不穩" not in r.text, "評語不得以任何形式出現在回應中"
+
+    async def test_自己課程的通過備註照常顯示(self, client, db) -> None:
+        f = await _fixture(db)
+        e = await _course(db, owner=f["own"], name="血袋判讀實務")
+        await _approval(db, course_id=e, user_id=f["lin"], result=APPROVAL_PASS, approved_by=f["own"], note="操作熟練")
+
+        r = await client.get(_QUERY, params={"user_name": "林"}, headers=_bearer(f["own"]))
+
+        row = next(x for x in r.json()["data"] if x["course_name"] == "血袋判讀實務")
+        assert row["result_note"] == "操作熟練"
+
+    async def test_管理者看得到全部備註(self, client, db) -> None:
+        f = await _fixture(db)
+        await self._pass_with_note(db, f)
+
+        r = await client.get(_QUERY, params={"user_name": "林"}, headers=_bearer(f["admin"]))
+
+        notes = {x["course_name"]: x["result_note"] for x in r.json()["data"]}
+        assert notes["輸血反應處置流程培訓"] == "第二次補考才通過，單採操作仍不穩"
+        assert notes["捐血人健康評估標準教學"] == "實機操作需再加強", "不通過的備註也照常"
+
+    async def test_學員端本來就不含備註欄位(self, client, db) -> None:
+        """學員端是**結構性**不含（`MyApprovalRow` 沒這個欄位），不倚賴本次的遮蔽邏輯。"""
+        f = await _fixture(db)
+        r = await client.get(_MINE, headers=_bearer(f["lin"]))
+        assert all("result_note" not in row for row in r.json()["data"])
+
+
 class TestAdminScope:
     async def test_管理者可查非自己建立課程的全部紀錄(self, client, db) -> None:
         f = await _fixture(db)

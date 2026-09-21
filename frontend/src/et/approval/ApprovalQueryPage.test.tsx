@@ -71,7 +71,11 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     asRole("teacher")
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByText(/不通過與已撤銷的紀錄僅顯示您所開設的課程/)).toBeInTheDocument()
+    const hint = await screen.findByText(/僅顯示您所開設的課程/)
+    expect(hint).toBeInTheDocument()
+    // SA 2026-09-21 追加裁示：他人課程的考核備註也被遮蔽，提示必須一併涵蓋——
+    // 否則教師看到通過卻沒備註時會以為核可人沒寫，而不是被遮蔽了。
+    expect(hint).toHaveTextContent("考核備註")
   })
 
   it("查無資料顯示空狀態提示（ET-MSG-ET10-001）", async () => {
@@ -122,9 +126,41 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     await screen.findByLabelText("學員姓名")
     expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
   })
+
+  it("🔴 查詢失敗顯示錯誤，**不得**渲染成「查無符合條件」", async () => {
+    // 本頁的使用情境是排班前確認某人受訓完整與否，「查無紀錄」會被讀成「沒受過訓」
+    // ——那是方向最危險的假陰性。最容易撞到的是 429（查詢與核可寫入共用同一個分桶）。
+    asRole("teacher")
+    server.use(
+      http.get("/api/et/approvals", () =>
+        HttpResponse.json({ error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試" }, { status: 429 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名"), "林")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
+    expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
+  })
 })
 
 describe("ET10 核可查詢：學員視角", () => {
+  it("🔴 載入失敗顯示錯誤，**不得**渲染成「尚無已通過核可的課程」", async () => {
+    asRole("student")
+    server.use(
+      http.get("/api/et/approvals/mine", () =>
+        HttpResponse.json({ error_code: "COMMON_500", error_message: "系統發生錯誤" }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    expect(await screen.findByText("系統發生錯誤")).toBeInTheDocument()
+    expect(screen.queryByText("您目前尚無已通過核可的課程")).not.toBeInTheDocument()
+  })
+
   it("僅顯示自己已通過的課程，且不出現查詢框", async () => {
     asRole("student")
     renderWithProviders(<EtApprovalQueryPage />)

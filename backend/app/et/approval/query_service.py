@@ -73,8 +73,9 @@ class EtApprovalQueryService:
             visible=visible_clause(actor_id=actor_id, is_admin=is_admin(roles)),
             result=result,
         )
+        admin = is_admin(roles)
         paged = await paginate(db, stmt, page, limit, _ApprovalCore)
-        rows = await self._enrich(db, paged["data"])
+        rows = await self._enrich(db, paged["data"], actor_id=actor_id, is_admin=admin)
         return {"data": rows, "meta": paged["meta"]}
 
     async def mine(self, db: AsyncSession, *, actor_id: str, page: int, limit: int) -> PaginatedResult[MyApprovalRow]:
@@ -84,37 +85,61 @@ class EtApprovalQueryService:
         """
         stmt = self._repo.mine_stmt(user_id=actor_id)
         paged = await paginate(db, stmt, page, limit, _ApprovalCore)
-        names = await self._repo.course_names(db, [r.course_id for r in paged["data"]])
+        courses = await self._repo.courses(db, [r.course_id for r in paged["data"]])
         rows = [
             MyApprovalRow(
                 course_id=r.course_id,
-                course_name=names.get(r.course_id, ""),
+                course_name=courses[r.course_id].name if r.course_id in courses else "",
                 approved_at=r.approved_at,
             )
             for r in paged["data"]
         ]
         return {"data": rows, "meta": paged["meta"]}
 
-    async def _enrich(self, db: AsyncSession, core: list[_ApprovalCore]) -> list[ApprovalQueryRow]:
-        """補上課程名稱與三個人名（學員 / 核可人 / 撤銷人）。
+    async def _enrich(
+        self, db: AsyncSession, core: list[_ApprovalCore], *, actor_id: str, is_admin: bool
+    ) -> list[ApprovalQueryRow]:
+        """補上課程名稱與三個人名（學員 / 核可人 / 撤銷人），並遮蔽他人課程的考核評語。
 
         三種人名共用同一次 `user_names()` 查詢——它們都指向 `DP_USER`，分三次查只是
         多兩趟往返。
+
+        ## 🔴 `RESULT_NOTE` 只對該課程 owner 與管理者顯示（SA 裁示 2026-09-21）
+
+        裁示 C 原本只切了**結果**維度（不通過 / 已撤銷限自己 owner），沒切**欄位**維度。
+        但 `ApproveReq.result_note` 明文允許 `PASS` 附備註（上限 1000 字），於是：
+
+        > 教師甲在自己的課給某人 PASS，備註寫「第二次補考才通過，單採操作仍不穩」。
+        > 教師乙（與該課程、該學員毫無關係）查該學員 → 完整讀到那段評語。
+
+        裁示 C 的理由自己寫著「不通過與其 `RESULT_NOTE` 是考核評價，不該讓同儕教師隨意
+        翻閱」——負面評語只要掛在 PASS 上就整份流出去。這與 `query_rules` 防的「撤銷原因
+        從側門漏出」是同一類側門的另一半。
+
+        ⚠️ 遮蔽在**後端**，回傳 `None` 而非交給前端不渲染。
         """
         if not core:
             return []
-        course_names = await self._repo.course_names(db, [r.course_id for r in core])
+        courses = await self._repo.courses(db, [r.course_id for r in core])
         wanted = {r.user_id for r in core} | {r.approved_by for r in core}
         wanted |= {r.revoked_by for r in core if r.revoked_by}
         people = await self._repo.user_names(db, list(wanted))
+
+        def note_of(row: _ApprovalCore) -> str | None:
+            """他人課程的考核評語一律不回傳。查無課程時 fail-closed（遮蔽）。"""
+            if is_admin:
+                return row.result_note
+            course = courses.get(row.course_id)
+            return row.result_note if course is not None and course.owner_id == actor_id else None
+
         return [
             ApprovalQueryRow(
                 user_id=r.user_id,
                 user_name=people.get(r.user_id, ""),
                 course_id=r.course_id,
-                course_name=course_names.get(r.course_id, ""),
+                course_name=courses[r.course_id].name if r.course_id in courses else "",
                 result=r.result,
-                result_note=r.result_note,
+                result_note=note_of(r),
                 approved_at=r.approved_at,
                 approved_by_name=people.get(r.approved_by, ""),
                 is_revoked=r.is_revoked,

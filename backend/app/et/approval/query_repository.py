@@ -17,6 +17,8 @@
 之後連日後有人加上一對多 JOIN 都不會影響分頁數字。
 """
 
+from typing import NamedTuple
+
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -27,6 +29,17 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，�
 from app.et.approval.models import EtApproval
 from app.et.constants import APPROVAL_PASS
 from app.et.course.models import EtCourse
+
+
+class CourseBrief(NamedTuple):
+    """本頁涉及課程的名稱與擁有者。
+
+    `owner_id` **不是拿來顯示的**——它供 service 判斷「這筆紀錄是不是查詢者自己的課」，
+    以決定 `RESULT_NOTE` 要不要遮蔽（SA 裁示 2026-09-21，見 `query_service._enrich`）。
+    """
+
+    name: str
+    owner_id: str
 
 
 class EtApprovalQueryRepository:
@@ -55,6 +68,13 @@ class EtApprovalQueryRepository:
             .where(
                 EtApproval.deleted == 0,
                 EtCourse.deleted == 0,
+                # ⚠️ 此處濾學員側的 `DELETED`，而下方 `user_names()` **刻意不濾**——兩者
+                # 方向相反是有意的：這裡決定「誰會出現在查詢結果」，那裡只是把 id 換成
+                # 姓名（核可人可能已離職，但那筆核可仍是歷史事實）。
+                #
+                # 🔴 今天兩邊行為一致只是因為 `DP_USER.DELETED` 從未被任何程式設為 1。
+                # 一旦有人啟用該欄位，該學員的**所有核可紀錄會從連管理者的合規查詢裡一起
+                # 消失，且無任何訊號**。要改成不濾之前請先確認那是想要的結果。
                 DpUser.deleted == 0,
                 DpUser.user_name.ilike(like_contains(user_name), escape=LIKE_ESCAPE_CHAR),
                 visible,
@@ -84,14 +104,20 @@ class EtApprovalQueryRepository:
             .order_by(EtApproval.approved_at.desc(), EtApproval.approval_id.desc())
         )
 
-    async def course_names(self, db: AsyncSession, course_ids: list[int]) -> dict[int, str]:
-        """本頁涉及的課程名稱。"""
+    async def courses(self, db: AsyncSession, course_ids: list[int]) -> dict[int, CourseBrief]:
+        """本頁涉及的課程名稱與擁有者。
+
+        `owner_id` 是為了 `RESULT_NOTE` 的遮蔽判定而一併取回——這支查詢本來就要讀
+        `ET_COURSE`，多一個欄位不增加往返。
+        """
         if not course_ids:
             return {}
         rows = await db.execute(
-            select(EtCourse.course_id, EtCourse.course_name).where(EtCourse.course_id.in_(course_ids))
+            select(EtCourse.course_id, EtCourse.course_name, EtCourse.owner_id).where(
+                EtCourse.course_id.in_(course_ids)
+            )
         )
-        return {cid: name for cid, name in rows}
+        return {cid: CourseBrief(name=name, owner_id=owner) for cid, name, owner in rows}
 
     async def user_names(self, db: AsyncSession, user_ids: list[str]) -> dict[str, str]:
         """本頁涉及的使用者姓名（學員 / 核可人 / 撤銷人共用一次查詢）。
@@ -104,5 +130,5 @@ class EtApprovalQueryRepository:
         rows = await db.execute(select(DpUser.user_id, DpUser.user_name).where(DpUser.user_id.in_(user_ids)))
         # ⚠️ 不可寫成 `dict(rows)`——`Result` 本身不是可直接建字典的映射
         # （`TypeError: 'ChunkedIteratorResult' object is not subscriptable`），
-        # 要先逐列取出。與上面的 `course_names` 保持同一種寫法。
+        # 要先逐列取出。與上面的 `courses` 保持同一種寫法。
         return {uid: name for uid, name in rows}

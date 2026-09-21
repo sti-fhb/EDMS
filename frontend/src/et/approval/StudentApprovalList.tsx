@@ -14,6 +14,7 @@ import { useState } from "react"
 
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
+import { toApiError } from "../../services/http"
 import { formatDateTime } from "../../utils/date"
 import { approvalsApi } from "./approvalsService"
 import type { MyApprovalRow } from "./schemas"
@@ -28,8 +29,9 @@ import type { MyApprovalRow } from "./schemas"
  */
 export function StudentApprovalList() {
   const [page, setPage] = useState(1)
-  const { data, isPending } = usePagedQuery<MyApprovalRow>(QUERY_KEYS.etApprovals.mine(page), () =>
-    approvalsApi.mine({ page }),
+  const { data, isPending, isError, error } = usePagedQuery<MyApprovalRow>(
+    QUERY_KEYS.etApprovals.mine(page),
+    () => approvalsApi.mine({ page }),
   )
 
   if (isPending) {
@@ -38,6 +40,11 @@ export function StudentApprovalList() {
         載入中…
       </Typography>
     )
+  }
+
+  // 🔴 錯誤不可被渲染成「尚無已通過核可的課程」——那會讓學員以為自己的核可不見了。
+  if (isError) {
+    return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
   }
 
   const rows = data?.data ?? []
