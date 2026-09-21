@@ -87,6 +87,39 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(navigateSpy).not.toHaveBeenCalled()
   }, 20000)
 
+  it("分類選『訓練教材』→ 隱藏可見對象欄並說明不需設定（#377）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    expect(screen.getByRole("combobox", { name: /可見對象/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("combobox", { name: /分類/ }))
+    await user.click(await screen.findByRole("option", { name: "訓練教材" }))
+
+    expect(screen.queryByRole("combobox", { name: /可見對象/ })).not.toBeInTheDocument()
+    expect(screen.getByText("訓練教材由教育訓練模組引用，不需設定可見對象")).toBeInTheDocument()
+  }, 20000)
+
+  it("訓練教材未選可見對象仍可送簽（TRAINING 免填，#377）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    await user.type(screen.getByLabelText(/文件名稱/), "用血回報訓練教材")
+    await user.click(screen.getByRole("combobox", { name: /分類/ }))
+    await user.click(await screen.findByRole("option", { name: "訓練教材" }))
+    await user.type(screen.getByLabelText(/首版版本號/), "1.0")
+    await user.type(screen.getByLabelText(/首版摘要/), "首版內容")
+    await user.click(screen.getByRole("combobox", { name: /指定審核者/ }))
+    await user.click(await screen.findByRole("option", { name: "王審核" }))
+    await user.upload(fileInput(), pdfFile())
+
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+
+    // 不出現 DM-MSG-DM03-008 的可見對象錯誤，直接送出成功
+    expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
+    expect(screen.queryByText("請至少指定 1 個可見對象")).not.toBeInTheDocument()
+  }, 20000)
+
   it("送簽成功 → toast 已送交簽核並導向詳細（DM-MSG-DM03-006）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)

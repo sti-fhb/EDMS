@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
-from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.catalog.models import DmCategory, DmTag, DmTagGroup
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_VIEWER
 from app.dm.roles.models import DmUserRole
@@ -23,6 +23,7 @@ _PENDING = "PENDING"
 _PUBLISHED = "PUBLISHED"
 _SUPERSEDED = "SUPERSEDED"
 _AUDIENCE = "AUDIENCE"
+_OBSOLETE = "OBSOLETE"
 _ALL_AUDIENCE_TAG = "全體"
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
 
@@ -41,10 +42,12 @@ class ReviewCenterRepository:
                 DmReview.created_user.label("submitter_id"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
+                DmCategory.category_name,
                 DmDocVersion.version_no,
                 DpUser.user_name.label("submitter_name"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
+            .outerjoin(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .outerjoin(DpUser, DmReview.created_user == DpUser.user_id)
             # US8 起 OBSOLETE（廢止類）亦可於簽核中心處理，故不再排除；approve / reject 依 review_type 分流。
@@ -82,6 +85,7 @@ class ReviewCenterRepository:
                 DmReview.created_user.label("submitter_id"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
+                DmCategory.category_name,
                 DmDocument.current_version_id,
                 DmDocVersion.version_id.label("new_version_id"),
                 DmDocVersion.version_no.label("new_version_no"),
@@ -92,6 +96,7 @@ class ReviewCenterRepository:
                 DpUser.user_name.label("submitter_name"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
+            .outerjoin(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .outerjoin(DpUser, DmReview.created_user == DpUser.user_id)
             .where(DmReview.review_id == review_id)
@@ -211,6 +216,91 @@ class ReviewCenterRepository:
         )
         # 不於此 flush：呼叫端 approve 於本呼叫前已 flush 版本切換，後續稽核 / 通知查詢會 autoflush，
         # 交易由 get_db 統一 commit（避免多一次 round-trip，Code Review LOW）。
+
+    async def get_review_tag_names(
+        self, db: AsyncSession, *, review_type: str, doc_id: str, version_id: int | None
+    ) -> dict[str, list[str]]:
+        """取簽核明細呈現用之標籤名稱，依送審類型決定來源（#377）。
+
+        NEW / NEW_VERSION → 該送審版本之**版本層快照**：審核者看到的即本次送審提議、且核准後會生效
+        的值。OBSOLETE → **文件層現值**：廢止之 VERSION_ID 指向目前發布版、無草稿階段快照，且廢止
+        決策關注的是「此文件目前的可見範圍」。
+
+        Args:
+            review_type: 送審類型（NEW / NEW_VERSION / OBSOLETE）。
+            doc_id: 文件編號（廢止類之來源）。
+            version_id: 送審版本（新增 / 新版本之來源）；為 None 時退回文件層。
+
+        Returns:
+            {"audience": [...], "retrieval": [...]}，值為標籤名稱（中文）。
+        """
+        if review_type == _OBSOLETE or version_id is None:
+            stmt = (
+                select(DmTag.tag_name, DmTagGroup.group_type)
+                .select_from(DmDocTag)
+                .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+                .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
+                .order_by(DmTag.tag_id)
+            )
+        else:
+            stmt = (
+                select(DmTag.tag_name, DmTagGroup.group_type)
+                .select_from(DmVersionTag)
+                .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
+                .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+                .order_by(DmTag.tag_id)
+            )
+        audience: list[str] = []
+        retrieval: list[str] = []
+        for tag_name, group_type in (await db.execute(stmt)).all():
+            (audience if group_type == _AUDIENCE else retrieval).append(tag_name)
+        return {"audience": audience, "retrieval": retrieval}
+
+    async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:
+        """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
+
+        標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
+        差異式覆寫（手法同 editor 之 `set_version_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
+        軟刪除，以避開 UQ(DOC_ID, TAG_ID)。
+
+        ⚠️ **呼叫端不變式（新增呼叫點前必讀）**：本方法是 `DM_DOC_TAG`（權限判定依據）的**唯一寫入點**，
+        且**不自我驗證 `version_id` 是否屬於 `doc_id`**。目前安全性由呼叫端保證——`DmReview` 僅由
+        `editor.submit`（以 `get_version(doc_id, version_id)` 取版本）與 `obsolete.submit`
+        （用 `doc.current_version_id`）建立，兩者都把 version 綁死在同一份文件上。若日後新增其他呼叫點
+        （回滾、批次補發、管理者代辦等），務必自行確保這組配對正確，否則會把 A 文件的可見範圍改成
+        B 版本的提議值且不會報錯。
+
+        Args:
+            doc_id: 文件編號。
+            version_id: 本次核准發布之版本（其快照即新的生效值），**必須屬於 `doc_id`**。
+            user_id: 核准者（寫入稽核欄位）。
+        """
+        now = utcnow()
+        wanted = list(
+            (
+                await db.scalars(
+                    select(DmVersionTag.tag_id).where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+                )
+            ).all()
+        )
+        wanted_set = set(wanted)
+        existing = {
+            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
+        }
+        for tid in wanted:
+            row = existing.get(tid)
+            if row is None:
+                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=user_id, created_date=now))
+            elif row.deleted != 0:
+                row.deleted = 0
+                row.updated_user, row.updated_date = user_id, now
+        for tid, row in existing.items():
+            if tid not in wanted_set and row.deleted == 0:
+                row.deleted = 1
+                row.updated_user, row.updated_date = user_id, now
+        await db.flush()
 
     async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
         return (

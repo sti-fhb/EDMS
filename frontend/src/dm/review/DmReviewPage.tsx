@@ -23,6 +23,8 @@ import Typography from "@mui/material/Typography"
 import CloseIcon from "@mui/icons-material/Close"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+
+import { TRAINING_CATEGORY } from "../editor/schemas"
 import { useSearchParams } from "react-router-dom"
 
 import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
@@ -111,6 +113,51 @@ function DetailPanel({
         <IconButton size="small" onClick={onClose} aria-label="收合" title="收合">
           <CloseIcon fontSize="small" />
         </IconButton>
+      </Box>
+
+      {/* 文件資訊（#377）：分類與本次送審之標籤。可見對象於核准後生效，審核者須能核對是否選錯；
+          新增／新版本顯示該版本快照，廢止顯示文件層現值（由後端依 review_type 決定來源）。 */}
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, px: 2, py: 1.5, mb: 2 }}>
+        <Stack spacing={1}>
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
+              分類
+            </Typography>
+            <Typography variant="body2">{detail.category_name || detail.category_code}</Typography>
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
+              可見對象
+            </Typography>
+            {detail.audience_tags.length > 0 ? (
+              <Stack direction="row" gap={0.5} flexWrap="wrap">
+                {detail.audience_tags.map((t) => (
+                  <Chip key={t} size="small" color="primary" variant="outlined" label={t} />
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                {detail.category_code === TRAINING_CATEGORY ? "—（訓練教材不設定可見對象）" : "—"}
+              </Typography>
+            )}
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
+              檢索標籤
+            </Typography>
+            {detail.retrieval_tags.length > 0 ? (
+              <Stack direction="row" gap={0.5} flexWrap="wrap">
+                {detail.retrieval_tags.map((t) => (
+                  <Chip key={t} size="small" variant="outlined" label={t} />
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                —
+              </Typography>
+            )}
+          </Box>
+        </Stack>
       </Box>
 
       {/* 摘要（三類送審一致用「變更摘要」標題；廢止類內容為申請人填寫之廢止原因） */}
@@ -348,7 +395,9 @@ export function DmReviewPage() {
                             {REVIEW_TYPE_LABELS[row.review_type] ?? row.review_type}
                           </Typography>
                         </TableCell>
-                        <TableCell>{row.category_code}</TableCell>
+                        <TableCell>
+                          <Chip size="small" variant="outlined" label={row.category_name || row.category_code} />
+                        </TableCell>
                         <TableCell>{row.version_no ?? "—"}</TableCell>
                         <TableCell>{row.submitter_name ?? row.submitter_id}</TableCell>
                         <TableCell>{row.submit_date.slice(0, 10)}</TableCell>

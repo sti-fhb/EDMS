@@ -15,7 +15,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmFunc, DmTag
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.editor.service import EditorService
 from app.dm.review.models import DmReview
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
@@ -119,11 +119,17 @@ async def test_create_assigns_doc_id_and_draft(db):
     assert doc.status == "DRAFT" and doc.doc_name == "領血SOP"
     ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
     assert ver.status == "DRAFT" and ver.version_no == "1.0"
-    # 標籤：1 可見對象 + 1 檢索
+    # 標籤：1 可見對象 + 1 檢索，寫於**版本層**快照；文件層待核准發布才生效（#377）
     n = await db.scalar(
-        select(func.count()).select_from(DmDocTag).where(DmDocTag.doc_id == r.doc_id, DmDocTag.deleted == 0)
+        select(func.count())
+        .select_from(DmVersionTag)
+        .where(DmVersionTag.version_id == r.version_id, DmVersionTag.deleted == 0)
     )
     assert n == 2
+    doc_layer = await db.scalar(
+        select(func.count()).select_from(DmDocTag).where(DmDocTag.doc_id == r.doc_id, DmDocTag.deleted == 0)
+    )
+    assert doc_layer == 0
 
 
 async def test_doc_id_sequence_increments_per_category(db):
@@ -279,28 +285,45 @@ async def test_add_version_creates_draft_keeps_doc_published(db):
     assert doc.status == "PUBLISHED"  # 已發布文件之新版草稿不動文件狀態
 
 
-async def test_add_version_replaces_doc_tags(db):
-    """編輯模式覆寫文件層標籤（可見對象 / 檢索）——文件屬性、即時生效。"""
+async def test_add_version_replaces_version_tags(db):
+    """編輯模式以差異式覆寫改寫**版本層**快照；已發布文件之文件層標籤不受影響（#377）。"""
     await _publish_doc(db, "DM-SOP-000101", audience=("全體",))
-    await _add_version(db, "DM-SOP-000101", version_no="2.0", audience=("護理師",))
-    active = await db.scalars(
+    r = await _add_version(db, "DM-SOP-000101", version_no="2.0", audience=("護理師",))
+    snapshot = await db.scalars(
+        select(DmTag.tag_name)
+        .join(DmVersionTag, DmVersionTag.tag_id == DmTag.tag_id)
+        .where(DmVersionTag.version_id == r.version_id, DmVersionTag.deleted == 0)
+    )
+    assert set(snapshot.all()) == {"護理師"}
+    # 文件層維持發布時的值——草稿階段改標籤不再即時改變可見範圍
+    effective = await db.scalars(
         select(DmTag.tag_name)
         .join(DmDocTag, DmDocTag.tag_id == DmTag.tag_id)
         .where(DmDocTag.doc_id == "DM-SOP-000101", DmDocTag.deleted == 0)
     )
-    assert set(active.all()) == {"護理師"}  # 全體軟刪、護理師有效
+    assert set(effective.all()) == {"全體"}
 
 
 async def test_get_doc_tags_for_edit_prefill(db):
-    """編輯模式預帶：回傳文件現有可見對象 / 檢索標籤 ID。"""
+    """編輯模式預帶：本人無進行中版本 → 以文件層現值初始化（新開版本供修改，避免誤清）。"""
     rid = await _make_retrieval_tag(db, "平時")
     await _publish_doc(db, "DM-SOP-000105", audience=("全體",))
     # 加一個檢索標籤到文件
     db.add(DmDocTag(doc_id="DM-SOP-000105", tag_id=rid, created_user="ed", created_date=utcnow()))
     await db.flush()
-    tags = await _svc.get_doc_tags(db, "DM-SOP-000105")
+    tags = await _svc.get_doc_tags(db, "DM-SOP-000105", user_id="ed")
     all_aud = str(await _audience_id(db, "全體"))
     assert tags.audience_ids == [all_aud] and tags.retrieval_ids == [str(rid)]
+
+
+async def test_get_doc_tags_prefers_own_draft_snapshot(db):
+    """編輯模式預帶：本人已有進行中版本 → 取該版本快照，看得到自己上次存的修改（#377）。"""
+    await _publish_doc(db, "DM-SOP-000106", audience=("全體",))
+    await _add_version(db, "DM-SOP-000106", version_no="2.0", audience=("護理師",))
+
+    tags = await _svc.get_doc_tags(db, "DM-SOP-000106", user_id="ed")
+
+    assert tags.audience_ids == [str(await _audience_id(db, "護理師"))]  # 非文件層的「全體」
 
 
 async def test_add_version_integrity_race_maps_to_single_draft(db, monkeypatch):

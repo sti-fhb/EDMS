@@ -1,4 +1,7 @@
-"""文件新增與編輯資料存取（US5，寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG + 送簽前檢核查詢）。
+"""文件新增與編輯資料存取（US5，寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_VERSION_TAG + 送簽前檢核查詢）。
+
+標籤只寫版本層 `DM_VERSION_TAG`（#377）；文件層 `DM_DOC_TAG` 於此僅供編輯模式預帶讀取，其寫入
+（核准發布時套用）屬簽核端職責，見 `dm/review/repository.py` 之 `apply_version_tags_to_doc`。
 
 僅 flush 不 commit（交易由 service / middleware 負責）。跨子模組（同屬 DM）直接引用 Model。
 指定審核者清單為 `DM_USER_ROLE`（DM 自持）join `DP_USER` 之唯讀查詢。
@@ -13,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.review.models import DmReview
 from app.dm.roles.reviewer_query import assignable_reviewers_stmt
 from app.dp.users.models import DpUser
@@ -26,6 +29,15 @@ _PUBLISHED = "PUBLISHED"
 _MANUAL = "MANUAL"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
+
+
+def _split_by_group(rows) -> dict[str, list[str]]:
+    """把 (TAG_ID, GROUP_TYPE) 列依組型分為可見對象 / 檢索兩組（TAG_ID 轉字串供前端表單用）。"""
+    audience: list[str] = []
+    retrieval: list[str] = []
+    for tag_id, group_type in rows:
+        (audience if group_type == _AUDIENCE else retrieval).append(str(tag_id))
+    return {"audience_ids": audience, "retrieval_ids": retrieval}
 
 
 class EditorRepository:
@@ -93,23 +105,25 @@ class EditorRepository:
         await db.flush()
         return ver
 
-    async def set_tags(self, db: AsyncSession, *, doc_id: str, tag_ids: Sequence[int], op: OperatorInfo) -> None:
-        """設定文件標籤為指定集合（可見對象 + 檢索）——差異式覆寫。
+    async def set_version_tags(
+        self, db: AsyncSession, *, version_id: int, tag_ids: Sequence[int], op: OperatorInfo
+    ) -> None:
+        """設定**版本層**標籤快照為指定集合——差異式覆寫。
 
-        標籤為**文件層**（DM_DOC_TAG 無 version_id），編輯新版本改標籤即改此。採軟刪除復用避開
-        UQ(DOC_ID, TAG_ID)：目標集內既有列復活（deleted=0）/ 新列插入、目標集外之有效列軟刪除。
-        新增文件（無既有列）時等同全插入。
+        草稿階段之標籤提議值存於此；核准發布時由簽核端套用至文件層 `DM_DOC_TAG`（#377）。
+        採軟刪除復用避開 UQ(VERSION_ID, TAG_ID)：目標集內既有列復活 / 新列插入、目標集外之有效列軟刪除。
         """
         now = utcnow()
         wanted = list(dict.fromkeys(tag_ids))  # 去重、保序
         wanted_set = set(wanted)
         existing = {
-            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
+            row.tag_id: row
+            for row in (await db.scalars(select(DmVersionTag).where(DmVersionTag.version_id == version_id))).all()
         }
         for tid in wanted:
             row = existing.get(tid)
             if row is None:
-                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=op.user_id, created_date=now))
+                db.add(DmVersionTag(version_id=version_id, tag_id=tid, created_user=op.user_id, created_date=now))
             elif row.deleted != 0:
                 row.deleted = 0
                 row.updated_user, row.updated_date = op.user_id, now
@@ -119,13 +133,20 @@ class EditorRepository:
                 row.updated_user, row.updated_date = op.user_id, now
         await db.flush()
 
-    async def has_audience_tag(self, db: AsyncSession, doc_id: str) -> bool:
-        """該文件是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。"""
+    async def has_audience_tag(self, db: AsyncSession, version_id: int) -> bool:
+        """該**版本**是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。
+
+        查版本層快照而非文件層：標籤於核准發布時才套用至文件層，送簽當下文件層仍為舊值（#377）。
+        """
         got = await db.scalar(
-            select(DmDocTag.doc_tag_id)
-            .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+            select(DmVersionTag.version_tag_id)
+            .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
-            .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0, DmTagGroup.group_type == _AUDIENCE)
+            .where(
+                DmVersionTag.version_id == version_id,
+                DmVersionTag.deleted == 0,
+                DmTagGroup.group_type == _AUDIENCE,
+            )
         )
         return got is not None
 
@@ -189,11 +210,19 @@ class EditorRepository:
             .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
             .order_by(DmTag.tag_id)
         )
-        audience: list[str] = []
-        retrieval: list[str] = []
-        for tag_id, group_type in rows.all():
-            (audience if group_type == _AUDIENCE else retrieval).append(str(tag_id))
-        return {"audience_ids": audience, "retrieval_ids": retrieval}
+        return _split_by_group(rows.all())
+
+    async def get_version_tags(self, db: AsyncSession, version_id: int) -> dict[str, list[str]]:
+        """取該版本快照之標籤，依組型分為可見對象 / 檢索（TAG_ID 字串），供續編既有草稿時預帶。"""
+        rows = await db.execute(
+            select(DmTag.tag_id, DmTagGroup.group_type)
+            .select_from(DmVersionTag)
+            .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+            .order_by(DmTag.tag_id)
+        )
+        return _split_by_group(rows.all())
 
     async def version_no_taken(self, db: AsyncSession, doc_id: str, version_no: str) -> bool:
         """版本號是否已被本文件之「已發布」版本使用（PUBLISHED / SUPERSEDED）。

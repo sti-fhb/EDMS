@@ -37,8 +37,10 @@ erDiagram
     DM_CATEGORY ||--o{ DM_DOCUMENT : "分類"
     DM_FUNC ||--o| DM_DOCUMENT : "關聯作業項目"
     DM_DOCUMENT ||--o{ DM_DOC_VERSION : "含版本"
-    DM_DOCUMENT ||--o{ DM_DOC_TAG : "掛標籤"
+    DM_DOCUMENT ||--o{ DM_DOC_TAG : "掛標籤（生效）"
     DM_TAG ||--o{ DM_DOC_TAG : "被掛"
+    DM_DOC_VERSION ||--o{ DM_VERSION_TAG : "標籤快照（提議）"
+    DM_TAG ||--o{ DM_VERSION_TAG : "被掛（快照）"
     DM_TAG_GROUP ||--o{ DM_TAG : "含標籤"
     DP_USER ||--o{ DM_USER_TAG : "被授予可見對象"
     DM_TAG ||--o{ DM_USER_TAG : "授予"
@@ -116,6 +118,11 @@ erDiagram
     DM_DOC_TAG {
         BIGINT DOC_TAG_ID PK
         VARCHAR DOC_ID FK
+        BIGINT TAG_ID FK
+    }
+    DM_VERSION_TAG {
+        BIGINT VERSION_TAG_ID PK
+        BIGINT VERSION_ID FK
         BIGINT TAG_ID FK
     }
     DM_USER_TAG {
@@ -275,7 +282,9 @@ erDiagram
 
 ## DD — DM_DOC_TAG（文件標籤關聯，明細）
 
-文件 × 標籤多對多。含權限（可見對象）與檢索兩類標籤：**可見對象組必填至少 1 項**（應用層檢核，含通用值「全體」）；檢索組選填、多選 AND 檢索。
+文件 × 標籤多對多，語意為該文件**目前生效**之標籤——可見性判定（〈標籤式可見性〉）、文件庫檢索、發布通知收件名單皆讀此表。含權限（可見對象）與檢索兩類標籤：**可見對象組必填至少 1 項**（應用層檢核，含通用值「全體」；TRAINING 分類除外，見 [spec_us5.md](spec_us5.md) FR-009）；檢索組選填、多選 AND 檢索。
+
+> **寫入時機（#377）**：草稿階段之標籤修改寫入 `DM_VERSION_TAG`（版本層提議值），**僅於核准發布時**由簽核端套用至本表；退回 / 撤回不套用。故編輯者存草稿不會改變已發布文件之可見範圍。
 
 | 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
 |----------|----------|----------|------|------|------|
@@ -283,7 +292,19 @@ erDiagram
 | DOC_ID | 文件編號 | VARCHAR(20) | Y | | FK→ DM_DOCUMENT.DOC_ID |
 | TAG_ID | 標籤 ID | BIGINT | Y | | FK→ DM_TAG.TAG_ID |
 
-> 含標準欄位。唯一約束 (DOC_ID, TAG_ID)。應用層於送簽 / 發布檢核：該 DOC_ID 至少關聯 1 個 `AUDIENCE` 組標籤。
+> 含標準欄位。唯一約束 (DOC_ID, TAG_ID)。送簽之可見對象檢核查 `DM_VERSION_TAG`（該送審版本）而非本表，見下節。
+
+## DD — DM_VERSION_TAG（版本標籤快照，明細）
+
+版本 × 標籤多對多，語意為該**版本提議**之標籤（可見對象 + 檢索）。存草稿當下寫入；核准發布時套用至 `DM_DOC_TAG`（生效值），退回 / 撤回不套用。送簽之可見對象必填檢核（`DM_DOC_005`）查本表而非文件層——文件層於送簽當下仍為舊值。
+
+| 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
+|----------|----------|----------|------|------|------|
+| VERSION_TAG_ID | 關聯 ID | BIGINT | Y | 序號 | PK |
+| VERSION_ID | 版本 ID | BIGINT | Y | | FK→ DM_DOC_VERSION.VERSION_ID |
+| TAG_ID | 標籤 ID | BIGINT | Y | | FK→ DM_TAG.TAG_ID |
+
+> 含標準欄位。唯一約束 (VERSION_ID, TAG_ID)。導入時（migration `2bf2384687c8`）以所屬文件當下之有效 `DM_DOC_TAG` 回填 `STATUS IN ('DRAFT','PENDING_REVIEW')` 之在途版本，避免既有草稿送簽被誤擋；已發布 / 已退回版本不回填。
 
 ## DD — DM_USER_TAG（閱覽者可見對象授權，明細）
 

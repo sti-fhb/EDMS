@@ -12,6 +12,7 @@ export interface PendingItem {
   doc_id: string
   doc_name: string
   category_code: string
+  category_name: string | null // 分類中文名（清單顯示用）
   review_type: string // NEW / NEW_VERSION / OBSOLETE
   version_no: string | null
   submitter_id: string
@@ -34,6 +35,10 @@ export interface ReviewDetail {
   doc_id: string
   doc_name: string
   category_code: string
+  category_name: string | null // 分類中文名（顯示用；category_code 為英文碼）
+  // 本次送審之標籤（#377）：新增／新版本為該版本快照、廢止為文件層現值。供審核者核對可見對象。
+  audience_tags: string[]
+  retrieval_tags: string[]
   review_type: string
   change_summary: string | null
   submit_date: string

@@ -72,6 +72,8 @@ export interface DraftMeta {
 
 /** 系統操作手冊分類代碼（選此分類才顯示 / 必填關聯作業項目 func）。 */
 export const MANUAL_CATEGORY = "MANUAL"
+/** 訓練教材：由教育訓練模組引用，不設定可見對象（#377，spec_us5 FR-009 之例外）。 */
+export const TRAINING_CATEGORY = "TRAINING"
 
 /** 可內嵌預覽之 MIME（其餘如 Office 上傳時出橘色警示條 DM-MSG-DM03-002）。 */
 const PREVIEWABLE_MIMES = new Set(["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/gif"])
@@ -110,14 +112,16 @@ export const EMPTY_EDITOR_FORM: EditorForm = {
  * - **存草稿（forSubmit=false）不卡必填**：名稱 / 版號 / 摘要 / 可見對象 / func 皆可空（新增模式僅
  *   分類必填——DOC_ID 配號用）；檔案於呼叫端另處理（草稿可不附）。
  * - **送簽（forSubmit=true）** 完整檢核：名稱（新增）/ 版號 / 摘要 / 可見對象 ≥1 / 審核者 /（MANUAL）func。
+ * - **TRAINING 免填可見對象**（#377）：教材由 ET 引用、ET 取教材不套可見性條件，故不檢核。
  */
 export function makeEditorSchema(opts: {
   isNew: boolean
   isManual: boolean
   forSubmit: boolean
+  isTraining?: boolean // TRAINING 分類：可見對象免填
   requireName?: boolean // 續編首版草稿（名稱可改）送簽時亦要求名稱
 }) {
-  const { isNew, isManual, forSubmit, requireName = false } = opts
+  const { isNew, isManual, forSubmit, isTraining = false, requireName = false } = opts
   return z
     .object({
       doc_name:
@@ -127,9 +131,10 @@ export function makeEditorSchema(opts: {
       func_code: z.string(),
       version_no: forSubmit ? z.string().trim().min(1, { message: "請輸入版本號" }) : z.string(),
       change_summary: forSubmit ? z.string().trim().min(1, { message: "請輸入變更摘要" }) : z.string(),
-      audience_ids: forSubmit
-        ? z.array(z.string()).min(1, { message: "請至少指定 1 個可見對象" })
-        : z.array(z.string()),
+      audience_ids:
+        forSubmit && !isTraining
+          ? z.array(z.string()).min(1, { message: "請至少指定 1 個可見對象" })
+          : z.array(z.string()),
       retrieval_ids: z.array(z.string()),
       reviewer_id: forSubmit ? z.string().min(1, { message: "請指定審核者" }) : z.string(),
     })

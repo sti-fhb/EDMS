@@ -185,8 +185,11 @@ async def get_document_tags(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """編輯模式預帶：文件現有可見對象 / 檢索標籤（TAG_ID）。"""
-    return await _service.get_doc_tags(db, doc_id)
+    """編輯模式預帶：本人進行中版本之標籤快照，無則文件現有標籤（TAG_ID）。"""
+    # 本端點原缺角色閘（editor router 其餘端點皆有）：任一 DM 角色含純閱覽者皆可對任意 DOC_ID
+    # 取其標籤，並以 200/404 形成存在性 oracle（DOC_ID 可枚舉）。#377 security review MEDIUM-3 補上。
+    _ensure_editor(ctx)
+    return await _service.get_doc_tags(db, doc_id, user_id=ctx.user_id)
 
 
 @router.get("/reviewers", response_model=list[ReviewerItem])

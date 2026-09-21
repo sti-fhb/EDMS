@@ -14,7 +14,13 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
-import { EMPTY_EDITOR_FORM, isPreviewableMime, makeEditorSchema, MANUAL_CATEGORY } from "./schemas"
+import {
+  EMPTY_EDITOR_FORM,
+  isPreviewableMime,
+  makeEditorSchema,
+  MANUAL_CATEGORY,
+  TRAINING_CATEGORY,
+} from "./schemas"
 import type { EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
 import { useDocTags, useDraftMeta, useEditorOptions, useReviewers } from "./useEditor"
@@ -43,8 +49,12 @@ const ERROR_FIELD: Record<string, keyof EditorForm> = {
  *
  * - **新增模式**（`/dm/documents/new`）：填 名稱 / 分類 /（MANUAL）func / 可見對象 / 檢索標籤 /
  *   首版版號 / 摘要 + 上傳單檔 → 存草稿 或 送簽（指定審核者）。
- * - **編輯模式**（`/dm/documents/:docId/edit`）：名稱 / 分類 / func 唯讀；改版號 / 摘要 / 檔案 →
- *   存草稿 或 送簽。標籤 / 可見性沿用文件既有、不於此變更（見後端 service 說明）。
+ * - **編輯模式**（`/dm/documents/:docId/edit`）：名稱 / 分類 / func 唯讀；改版號 / 摘要 / 檔案 /
+ *   標籤 → 存草稿 或 送簽。
+ *
+ * 標籤採兩層（#377）：此處所改為該版本之提議值（後端寫 `DM_VERSION_TAG`），**核准發布時才生效**；
+ * 表單預帶本人進行中版本之快照，無則帶文件層現值。TRAINING 分類隱藏可見對象欄且送出時清空
+ * （spec_us5 FR-009：教材由 ET 引用，不設可見對象）。
  *
  * 送簽 = 先建草稿（新增 POST /documents 或加版 POST /versions）再 POST /submit；建草稿結果快取於
  * `persisted`，送簽失敗（如 func 重複）可原地重試而不重複建立、亦不觸發單一草稿擋（DM_DOC_009）。
@@ -88,6 +98,8 @@ export function DmEditorPage() {
   const editCategoryCode = isContinueDraft ? draftMeta?.category_code : detail?.category_code
   // isManual：新增模式看 form；續編首版看該文件分類（供 func 欄可編）。
   const isManual = isNew ? form.category_code === MANUAL_CATEGORY : editCategoryCode === MANUAL_CATEGORY
+  // isTraining（同上判定規則）：訓練教材由 ET 引用、ET 取教材不套可見性，故可見對象欄隱藏且不檢核（#377）
+  const isTraining = isNew ? form.category_code === TRAINING_CATEGORY : editCategoryCode === TRAINING_CATEGORY
   const fileNotPreviewable = file !== null && !isPreviewableMime(file.type)
 
   // 續編模式名稱可編（首版草稿 Q1=A）；其餘編輯情境名稱唯讀。
@@ -176,7 +188,7 @@ export function DmEditorPage() {
         doc_name: form.doc_name.trim(),
         category_code: form.category_code,
         func_code: isManual ? form.func_code : "",
-        audience_ids: form.audience_ids,
+        audience_ids: isTraining ? [] : form.audience_ids, // TRAINING 不掛可見對象（切換分類後亦不殘留）
         retrieval_ids: form.retrieval_ids,
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
@@ -192,7 +204,7 @@ export function DmEditorPage() {
         assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
-        audience_ids: form.audience_ids,
+        audience_ids: isTraining ? [] : form.audience_ids, // TRAINING 不掛可見對象（切換分類後亦不殘留）
         retrieval_ids: form.retrieval_ids,
         file,
       })
@@ -202,7 +214,7 @@ export function DmEditorPage() {
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
         assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
-        audience_ids: form.audience_ids,
+        audience_ids: isTraining ? [] : form.audience_ids, // TRAINING 不掛可見對象（切換分類後亦不殘留）
         retrieval_ids: form.retrieval_ids,
         file,
       })
@@ -223,7 +235,7 @@ export function DmEditorPage() {
   }
 
   function validate(forSubmit: boolean): boolean {
-    const schema = makeEditorSchema({ isNew, isManual, forSubmit, requireName: nameEditable })
+    const schema = makeEditorSchema({ isNew, isManual, forSubmit, isTraining, requireName: nameEditable })
     const result = schema.safeParse(form)
     const fieldErrors = getFieldErrors(result.success ? null : result.error)
     // 檔案僅送簽時必填；存草稿可先不附檔（US5「存草稿不卡」）。續編既有草稿若已有檔案（draftMeta.file_name），
@@ -466,25 +478,32 @@ export function DmEditorPage() {
                   )}
                 </>
               )}
-              {/* 可見對象 + 檢索標籤：新增與編輯模式皆可編（文件層屬性、即時生效） */}
-              <Autocomplete
-                multiple
-                size="small"
-                options={audienceOptions}
-                value={selectedAudiences}
-                onChange={(_, v: OptionItem[]) => setField("audience_ids", v.map((o) => o.code))}
-                getOptionLabel={(o) => o.name}
-                isOptionEqualToValue={(a, b) => a.code === b.code}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="可見對象"
-                    required
-                    error={!!errors.audience_ids}
-                    helperText={errors.audience_ids || "至少指定 1 個；「全體」表示所有閱覽者可見"}
-                  />
-                )}
-              />
+              {/* 可見對象 + 檢索標籤：新增與編輯模式皆可編；核准發布時才生效（#377）。
+                  TRAINING 不設可見對象——教材一律由教育訓練模組引用，故整欄隱藏。 */}
+              {isTraining ? (
+                <Alert severity="info" variant="outlined">
+                  訓練教材由教育訓練模組引用，不需設定可見對象
+                </Alert>
+              ) : (
+                <Autocomplete
+                  multiple
+                  size="small"
+                  options={audienceOptions}
+                  value={selectedAudiences}
+                  onChange={(_, v: OptionItem[]) => setField("audience_ids", v.map((o) => o.code))}
+                  getOptionLabel={(o) => o.name}
+                  isOptionEqualToValue={(a, b) => a.code === b.code}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="可見對象"
+                      required
+                      error={!!errors.audience_ids}
+                      helperText={errors.audience_ids || "至少指定 1 個；核准發布後生效"}
+                    />
+                  )}
+                />
+              )}
               <Autocomplete
                 multiple
                 size="small"

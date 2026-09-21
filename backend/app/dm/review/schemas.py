@@ -15,6 +15,7 @@ class PendingItem(BaseModel):
     doc_id: str
     doc_name: str
     category_code: str
+    category_name: str | None  # 分類中文名（清單顯示用，對齊 wireframe 之分類 pill）
     review_type: str  # NEW / NEW_VERSION / OBSOLETE
     version_no: str | None  # 送審版本號（草稿版可能為空）
     submitter_id: str  # 送審者（review.created_user）
@@ -41,6 +42,11 @@ class ReviewDetail(BaseModel):
     doc_id: str
     doc_name: str
     category_code: str
+    category_name: str | None  # 分類中文名（明細與清單顯示用，避免露出英文碼）
+    # 本次送審之標籤（#377）：NEW / NEW_VERSION 取版本層快照、OBSOLETE 取文件層現值。
+    # 供審核者核對可見對象是否選錯——核准後即為該文件生效之可見範圍。
+    audience_tags: list[str] = []
+    retrieval_tags: list[str] = []
     review_type: str
     change_summary: str | None
     submit_date: datetime

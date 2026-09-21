@@ -98,6 +98,7 @@ class ReviewCenterService:
                 doc_id=r.doc_id,
                 doc_name=r.doc_name,
                 category_code=r.category_code,
+                category_name=r.category_name,
                 review_type=r.review_type,
                 version_no=r.version_no,
                 submitter_id=r.submitter_id,
@@ -140,11 +141,18 @@ class ReviewCenterService:
                     previewable=is_previewable(cv.file_mime or ""),
                 )
         is_obsolete = review.review_type == _OBSOLETE
+        # 標籤呈現（#377）：新增 / 新版本取本次送審版本之快照，廢止取文件層現值（見 repository docstring）
+        tags = await self._repo.get_review_tag_names(
+            db, review_type=review.review_type, doc_id=row.doc_id, version_id=row.new_version_id
+        )
         return ReviewDetail(
             review_id=row.review_id,
             doc_id=row.doc_id,
             doc_name=row.doc_name,
             category_code=row.category_code,
+            category_name=row.category_name,
+            audience_tags=tags["audience"],
+            retrieval_tags=tags["retrieval"],
             review_type=row.review_type,
             change_summary=row.change_summary,
             submit_date=row.submit_date,
@@ -276,6 +284,15 @@ class ReviewCenterService:
                 ) from exc
             raise
 
+        # 標籤生效點：把本版之版本層快照套用至文件層（#377）。位置的兩個約束——
+        # (1) 須在上方 SAVEPOINT flush **之後**：本方法內含查詢會觸發 autoflush，若置於其前會把
+        #     doc 的狀態變更提前送出，使撞 UX_DM_DOCUMENT_MANUAL_FUNC 的 IntegrityError 逸出
+        #     SAVEPOINT 保護、無法映射為 DM_DOC_007；
+        # (2) 須在下方 `_notify_publish` **之前**：DOC_PUBLISH 依可見對象組決定收件人（FR-008），
+        #     須以本次核准後新生效之可見對象為準。
+        await self._repo.apply_version_tags_to_doc(
+            db, doc_id=doc.doc_id, version_id=new_ver.version_id, user_id=op.user_id
+        )
         await self._repo.write_change_log(
             db,
             doc_id=doc.doc_id,

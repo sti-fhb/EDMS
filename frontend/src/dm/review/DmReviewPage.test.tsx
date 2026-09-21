@@ -36,6 +36,9 @@ function useObsoleteReview() {
         doc_id: "DM-SOP-000009",
         doc_name: "待廢止 SOP",
         category_code: "SOP",
+        category_name: "標準作業程序",
+        audience_tags: ["全體"],
+        retrieval_tags: [],
         review_type: "OBSOLETE",
         change_summary: null,
         submit_date: "2026-08-18T10:00:00Z",
@@ -82,6 +85,23 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     // X 收合明細面板
     await user.click(screen.getByRole("button", { name: "收合" }))
     expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument()
+  })
+
+  it("明細顯示文件資訊：分類中文名 + 本次送審之可見對象 / 檢索標籤（#377）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await screen.findByText(/簽核明細 —/)
+
+    expect(screen.getByText("可見對象")).toBeInTheDocument()
+    expect(screen.getByText("檢索標籤")).toBeInTheDocument()
+    // 標籤值以 chip 呈現（僅明細區塊有這些字串，清單無）
+    expect(screen.getByText("全體")).toBeInTheDocument()
+    expect(screen.getByText("護理師")).toBeInTheDocument()
+    expect(screen.getByText("採血")).toBeInTheDocument()
+    // 分類顯示中文名而非 SOP：清單兩列 + 明細一處
+    expect(screen.getAllByText("標準作業程序").length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText("SOP")).not.toBeInTheDocument()
   })
 
   it("深連結 ?reviewId= 自動展開該筆簽核明細（個人專區前往簽核中心）", async () => {
