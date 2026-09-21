@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.notify.models import DpEmailLog
 from app.dp.users.models import DpUser
 from app.et.constants import (
     ATTEMPT_SUBMITTED,
@@ -304,6 +305,22 @@ class TestRequireRetestOnQuizChange:
 
         facts = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert facts == (1, 0, True), "選否時不應寫入基準、不應清除完成狀態"
+
+    async def test_受影響學員各收到一封通知信(self, client, db):
+        # ⚠️ 必須篩 STATUS='PENDING'：params key 對不上時平台會寫一列 FAILED 的空信，
+        # 不篩的話「有列」本身就成立，測試會假陽性通過而實際沒有人收到信。
+        teacher = await _user(db, "ZTT005")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS005", course_id=cid, item_id=item_id, quiz_id=qid)
+        await _passed_student(db, uid="ZTS006", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        assert r.status_code == 204, r.text
+
+        pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
+        assert pending == 2, "兩位受影響的學員應各排入一封；逐人一封而非合批（範本含 {USER_NAME}）"
 
     async def test_未通過的學員不受影響(self, client, db):
         # 未通過者本來就還要重考，寫基準等於白送一輪配額——而畫面上看不出哪裡不對。

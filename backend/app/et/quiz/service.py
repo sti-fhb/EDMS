@@ -14,8 +14,10 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.common.optimistic_lock import ensure_version_matched
-from app.et.course.repository import EtItemRepository
+from app.et.course.repository import EtCourseRepository, EtItemRepository
 from app.et.course.rules import ensure_owner, is_browsable_by_non_owner
+from app.et.notify.course_invite import learn_link
+from app.et.notify.quiz_retest_required import QuizRetestRequiredMailer
 from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.repository import EtQuizRepository
 from app.et.quiz.rules import (
@@ -71,6 +73,8 @@ class EtQuizService:
         audit: AuditLogService | None = None,
         tracking: EtTrackingRepository | None = None,
         progress: EtProgressRepository | None = None,
+        courses: EtCourseRepository | None = None,
+        mailer: QuizRetestRequiredMailer | None = None,
     ) -> None:
         self._quizzes = quizzes or EtQuizRepository()
         self._items = items or EtItemRepository()
@@ -80,6 +84,8 @@ class EtQuizService:
         # 自己的守門（如 `can_reset_retry` 拒絕已通過者），與本路徑的前提相反。
         self._tracking = tracking or EtTrackingRepository()
         self._progress = progress or EtProgressRepository()
+        self._courses = courses or EtCourseRepository()
+        self._mailer = mailer or QuizRetestRequiredMailer()
 
     async def get_detail(self, db: AsyncSession, quiz_id: int, *, actor_id: str) -> QuizDetail:
         """測驗詳細——設定、題目與選項一次帶齊，並附配分總和。
@@ -331,6 +337,12 @@ class EtQuizService:
         if item_id is None:
             return 0  # 孤兒測驗：沒有項目就沒有進度可清，也不會有學員作答
         affected = await self._quizzes.passed_student_attempt_counts(db, quiz_id)
+        if not affected:
+            return 0
+
+        quiz = await self._quizzes.get(db, quiz_id)
+        course = await self._courses.get(db, course_id)
+        course_url = learn_link(course_id)
         for user_id, attempt_count in affected:
             await self._tracking.add_retry_reset(
                 db,
@@ -342,6 +354,13 @@ class EtQuizService:
             )
             await self._progress.set_item_completed(
                 db, user_id=user_id, course_id=course_id, item_id=item_id, completed=False, operator=operator
+            )
+            # ⚠️ 逐人寄、不合批：範本內文含 `{USER_NAME}`，而平台 `send_email` 對整批
+            # 收件人只渲染一次——合批會讓所有人收到同一個名字的信。
+            #
+            # 寄信在迴圈內、稽核在迴圈外，兩者刻意不同：寄信不取全域鎖，稽核會。
+            await self._mailer.send_quiz_retest_required(
+                db, course=course, quiz_name=quiz.quiz_name, course_url=course_url, user_id=user_id
             )
         return len(affected)
 
