@@ -86,10 +86,7 @@ async def _create_temp_tables(db, *, doc_tag_unique: bool = True) -> None:
 
 async def _version(db, version_id: int, doc_id: str, status: str, deleted: int = 0) -> None:
     await db.execute(
-        text(
-            'INSERT INTO "DM_DOC_VERSION" ("VERSION_ID", "DOC_ID", "STATUS", "DELETED")'
-            " VALUES (:v, :d, :s, :del)"
-        ),
+        text('INSERT INTO "DM_DOC_VERSION" ("VERSION_ID", "DOC_ID", "STATUS", "DELETED") VALUES (:v, :d, :s, :del)'),
         {"v": version_id, "d": doc_id, "s": status, "del": deleted},
     )
 
