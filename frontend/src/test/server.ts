@@ -1013,6 +1013,68 @@ export const handlers = [
   http.get("/api/et/courses/capabilities", () =>
     HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
   ),
+  // ── ET10 核可查詢（US17 / #385）────────────────────────────────────────
+  // 教師 / 管理者視角：四筆涵蓋通過、不通過、已撤銷三種狀態。
+  http.get("/api/et/approvals", () =>
+    HttpResponse.json({
+      data: [
+        {
+          user_id: "s_lin",
+          user_name: "林佳蓉",
+          course_id: 11,
+          course_name: "採血作業新進人員訓練",
+          result: "PASS",
+          result_note: null,
+          approved_at: "2026-05-19T06:20:00Z",
+          approved_by_name: "王主任",
+          is_revoked: false,
+          revoke_reason: null,
+          revoked_by_name: null,
+          revoked_at: null,
+        },
+        {
+          user_id: "s_lin",
+          user_name: "林佳蓉",
+          course_id: 12,
+          course_name: "成分製備標準作業教學",
+          result: "FAIL",
+          result_note: "實機操作需再加強",
+          approved_at: "2026-05-12T02:05:00Z",
+          approved_by_name: "陳教官",
+          is_revoked: false,
+          revoke_reason: null,
+          revoked_by_name: null,
+          revoked_at: null,
+        },
+        {
+          user_id: "s_lin",
+          user_name: "林佳蓉",
+          course_id: 13,
+          course_name: "血品安全與品保概論",
+          result: "PASS",
+          result_note: null,
+          approved_at: "2026-04-30T01:00:00Z",
+          approved_by_name: "王主任",
+          is_revoked: true,
+          revoke_reason: "核可對象誤植",
+          revoked_by_name: "李管理員",
+          revoked_at: "2026-05-02T03:00:00Z",
+        },
+      ],
+      meta: { total: 3, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
+  // 學員視角：**刻意只有三個欄位**——後端不回傳 result / 備註 / 撤銷欄位（FR-ET-US17-03）。
+  // 這份 fixture 的欄位少本身就是規格的一部分，不要為了「方便」補齊。
+  http.get("/api/et/approvals/mine", () =>
+    HttpResponse.json({
+      data: [
+        { course_id: 11, course_name: "採血作業新進人員訓練", approved_at: "2026-05-19T06:20:00Z" },
+        { course_id: 14, course_name: "血品安全與品保概論", approved_at: "2026-03-11T01:00:00Z" },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
+  ),
   http.get("/api/et/tags", () =>
     HttpResponse.json([
       { tag_id: 1, tag_name: "全體", is_active: true },
