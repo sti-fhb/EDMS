@@ -16,6 +16,7 @@ from app.core.utils import utcnow
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.course.repository import EtItemRepository
 from app.et.course.rules import ensure_owner, is_browsable_by_non_owner
+from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.repository import EtQuizRepository
 from app.et.quiz.rules import (
     ensure_correct_options_valid,
@@ -32,6 +33,7 @@ from app.et.quiz.schemas import (
     QuizDetail,
     QuizUpdateReq,
 )
+from app.et.tracking.repository import EtTrackingRepository
 from app.services import AuditLogService
 
 _MODULE = "ET"
@@ -67,10 +69,17 @@ class EtQuizService:
         quizzes: EtQuizRepository | None = None,
         items: EtItemRepository | None = None,
         audit: AuditLogService | None = None,
+        tracking: EtTrackingRepository | None = None,
+        progress: EtProgressRepository | None = None,
     ) -> None:
         self._quizzes = quizzes or EtQuizRepository()
         self._items = items or EtItemRepository()
         self._audit = audit or AuditLogService()
+        # #361：要求已通過學員重測時要寫重置基準與清完成旗標，兩者的表分屬 tracking
+        # 與 progress。⚠️ 只用它們的 **repository**，不繞道各自的 service——後者帶有
+        # 自己的守門（如 `can_reset_retry` 拒絕已通過者），與本路徑的前提相反。
+        self._tracking = tracking or EtTrackingRepository()
+        self._progress = progress or EtProgressRepository()
 
     async def get_detail(self, db: AsyncSession, quiz_id: int, *, actor_id: str) -> QuizDetail:
         """測驗詳細——設定、題目與選項一次帶齊，並附配分總和。
@@ -150,6 +159,9 @@ class EtQuizService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_QUIZ")
+        await self._require_retest_if_asked(
+            db, quiz_id=quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
+        )
         await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗設定")
 
     async def add_question(
@@ -273,6 +285,61 @@ class EtQuizService:
             version=question.version,
             options=[OptionRow.model_validate(o) for o in options],
         )
+
+    async def _require_retest_if_asked(
+        self, db: AsyncSession, *, quiz_id: int, course_id: int, asked: bool, operator: OperatorInfo
+    ) -> int:
+        """教師選「要求重測」時，把該測驗的已通過學員退回未通過（#361）。
+
+        對每位已通過的學員做兩件事，**同一交易**：
+
+        1. 寫一列 `ET_QUIZ_RETRY_RESET` 基準 → 本輪已用次數歸 0
+        2. 清除該測驗項目的 `ET_PROGRESS.IS_COMPLETED` → 完課狀態隨之回退
+
+        ⛔ **不刪任何 attempt**。學員與教師仍可回看歷次明細（US6 AC 12 / US9 AC 6），
+        且 `ET_QUIZ_ATTEMPT_D` 是自給自足的快照，舊紀錄不因題目改動而錯亂。
+
+        ## 🔴 為何不重用 `tracking.reset_retry`
+
+        兩者**前提相反**。`can_reset_retry` 在 `is_passed=True` 時回 `False`，理由是
+        「他已經通過了；再考只有機會把成績弄低」——那條守門保護的是**教師手動**重置
+        一位卡住的學員（US9 AC 6）。本功能的對象**正是已通過的人**，是測驗內容變了
+        才要他重考，不是他考壞了要救他。
+
+        ⛔ **不要為了重用而放寬 `can_reset_retry`**，也不要把兩條路徑「統一」——那會讓
+        教師又能對已通過的學員按重置，把成績弄低。兩條看似重複的路徑是刻意的。
+
+        ## 🔴 為何稽核不在迴圈裡
+
+        `log_action` 的第一步是 `pg_advisory_xact_lock`——**單一固定 key 的交易層級鎖，
+        持有到外層交易 commit**。在迴圈內呼叫的話，第一位學員就取走它，之後整批的
+        UPDATE 與寄信全在持鎖狀態下進行，而那把鎖是全平台共用的（**包含登入**）。
+
+        形狀比照 `app/et/approval/service.py::approve`：迴圈只寫業務資料，稽核累積後
+        統一寫。⚠️ 本函式回傳受影響人數，由呼叫端在既有的 `_log` 裡一次記錄。
+
+        Returns:
+            受影響的學員人數；`asked=False` 或無人通過時為 0。
+        """
+        if not asked:
+            return 0
+        item_id = await self._quizzes.item_id_of_quiz(db, quiz_id)
+        if item_id is None:
+            return 0  # 孤兒測驗：沒有項目就沒有進度可清，也不會有學員作答
+        affected = await self._quizzes.passed_student_attempt_counts(db, quiz_id)
+        for user_id, attempt_count in affected:
+            await self._tracking.add_retry_reset(
+                db,
+                course_id=course_id,
+                user_id=user_id,
+                quiz_id=quiz_id,
+                attempt_count=attempt_count,
+                operator=operator,
+            )
+            await self._progress.set_item_completed(
+                db, user_id=user_id, course_id=course_id, item_id=item_id, completed=False, operator=operator
+            )
+        return len(affected)
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
         await self._audit.log_action(

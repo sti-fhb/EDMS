@@ -43,6 +43,12 @@ class QuizUpdateReq(BaseModel):
     time_limit_min: int | None = Field(default=None, ge=1)
     max_retry: int = Field(ge=0, le=999)
     version: int = Field(ge=0)
+    #: 是否要求**已通過**的學員重新測驗（#361）。
+    #:
+    #: 系統無法分辨「改錯字」與「改語意」，故不猜意圖——由教師在儲存時決定。
+    #: `True` 時該測驗的已通過學員：答題次數歸 0、測驗項目的完成旗標清除、各收一封
+    #: 通知信；⛔ **任一情形下都不刪 attempt**（US6 AC 12 / US9 AC 6 / #279 Q2=C）。
+    require_retest: bool = False
 
     @field_validator("quiz_name")
     @classmethod

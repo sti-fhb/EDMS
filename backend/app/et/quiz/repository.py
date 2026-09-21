@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.course.models import EtItem
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM
 
 #: 測驗設定之預設值（data-model §ET_QUIZ）。
@@ -313,3 +314,49 @@ class EtQuizRepository:
 
         await db.execute(update(EtQuiz).where(EtQuiz.quiz_id.in_(quiz_ids), EtQuiz.deleted == 0).values(**audit))
         await db.flush()
+
+    async def item_id_of_quiz(self, db: AsyncSession, quiz_id: int) -> int | None:
+        """該測驗掛在哪個章節項目上（`ET_ITEM.ITEM_ID`）。
+
+        測驗與課程的關聯**只經 `ET_ITEM.QUIZ_ID`**——`ET_QUIZ` 本身沒有 `COURSE_ID`。
+        清除學員的完成旗標需要 `ITEM_ID`（`ET_PROGRESS` 以項目為單位），故另取一次。
+
+        Returns:
+            項目 ID；孤兒測驗（未掛在任何項目下）回 `None`。
+        """
+        return await db.scalar(select(EtItem.item_id).where(EtItem.quiz_id == quiz_id, EtItem.deleted == 0).limit(1))
+
+    async def passed_student_attempt_counts(self, db: AsyncSession, quiz_id: int) -> list[tuple[str, int]]:
+        """該測驗**曾及格**之學員，及其 attempt 總數。
+
+        `attempt_count` 供 `add_retry_reset` 當新基準用——記重置當下的總數，之後
+        `round_used_attempts(total, base)` 算出的本輪已用次數即從 0 起算。
+
+        ⚠️ 判定用 `IS_PASS = True` 而非比對分數與當前 `PASS_SCORE`：及格與否在提交當下
+        就以 `PASS_SCORE_SNAPSHOT` 判定並寫入 `IS_PASS`。拿當前及格分數回頭重算，會讓
+        「教師調高及格分數」這個動作本身改變誰算通過過——而那正是本功能要處理的變更。
+
+        Returns:
+            `[(user_id, attempt_count), ...]`，依 `user_id` 排序使結果可預期。
+        """
+        passed = (
+            select(EtQuizAttemptM.user_id)
+            .where(
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.is_pass.is_(True),
+                EtQuizAttemptM.deleted == 0,
+            )
+            .distinct()
+            .scalar_subquery()
+        )
+        rows = await db.execute(
+            select(EtQuizAttemptM.user_id, func.count())
+            .where(
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.deleted == 0,
+                EtQuizAttemptM.user_id.in_(passed),
+            )
+            .group_by(EtQuizAttemptM.user_id)
+            .order_by(EtQuizAttemptM.user_id)
+        )
+        return [(uid, cnt) for uid, cnt in rows.all()]
