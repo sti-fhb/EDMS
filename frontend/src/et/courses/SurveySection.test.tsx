@@ -63,24 +63,17 @@ describe("SurveySection：尚未建立", () => {
     expect(screen.getByText("請先儲存草稿後再新增問卷")).toBeInTheDocument()
   })
 
-  it("名稱留空按建立會擋下並提示", async () => {
+  it("點「新增問卷」直接開視窗，不再 inline 收名稱（#359 第 1 項）", async () => {
     const onCreate = vi.fn()
     render(<SurveySection {...BASE_PROPS} survey={null} onCreate={onCreate} />)
+
     await userEvent.click(screen.getByRole("button", { name: "新增問卷" }))
-    await userEvent.click(screen.getByRole("button", { name: "建立" }))
 
-    expect(screen.getByText("請輸入問卷名稱")).toBeInTheDocument()
-    expect(onCreate).not.toHaveBeenCalled()
-  })
-
-  it("輸入名稱後建立會帶去除空白的值", async () => {
-    const onCreate = vi.fn()
-    render(<SurveySection {...BASE_PROPS} survey={null} onCreate={onCreate} />)
-    await userEvent.click(screen.getByRole("button", { name: "新增問卷" }))
-    await userEvent.type(screen.getByLabelText(/問卷名稱/), "  滿意度  ")
-    await userEvent.click(screen.getByRole("button", { name: "建立" }))
-
-    expect(onCreate).toHaveBeenCalledWith("滿意度")
+    // 原本按下去會在原地展開「問卷名稱 + 建立 / 取消」，要再按一次「編輯」才開得了
+    // 題目視窗。名稱與驗證都移進視窗，改由 `SurveyDialog` 的建立步驟負責。
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByLabelText(/問卷名稱/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "建立" })).not.toBeInTheDocument()
   })
 
   it("唯讀時不顯示新增鈕", () => {
