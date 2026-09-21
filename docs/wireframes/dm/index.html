@@ -1268,6 +1268,29 @@
           <button class="btn btn-sm btn-outline-secondary" onclick="hideReviewDetail()" title="收合"><i class="bi bi-x"></i></button>
         </div>
 
+        <!-- 文件資訊：分類 + 本次送審之可見對象 / 檢索標籤（#377） -->
+        <h6 class="small fw-bold mb-2"><i class="bi bi-info-circle me-1"></i>文件資訊</h6>
+        <div class="border rounded px-3 py-2 mb-2" style="font-size:0.9rem;">
+          <div class="mb-1">
+            <span class="text-muted me-2" style="display:inline-block; min-width:72px;">分類</span>
+            <span class="doc-category-pill cat-sop" id="review-detail-category">標準作業程序</span>
+          </div>
+          <div class="mb-1">
+            <span class="text-muted me-2" style="display:inline-block; min-width:72px;">可見對象</span>
+            <span id="review-detail-audience">
+              <span class="badge rounded-pill text-bg-light border">全體</span>
+              <span class="badge rounded-pill text-bg-light border">護理師</span>
+            </span>
+          </div>
+          <div>
+            <span class="text-muted me-2" style="display:inline-block; min-width:72px;">檢索標籤</span>
+            <span id="review-detail-retrieval">
+              <span class="badge rounded-pill text-bg-light border">採血</span>
+            </span>
+          </div>
+        </div>
+        <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>可見對象於<strong>核准發布時才生效</strong>，請於核准前確認是否正確。新增 / 新版本顯示本次送審之提議值；廢止顯示文件目前之可見範圍；訓練教材不設定可見對象。</div>
+
         <!-- 摘要（新版本顯示「變更摘要」、廢止顯示「廢止原因」） -->
         <h6 class="small fw-bold mb-2"><i class="bi bi-pencil-square me-1"></i><span id="review-detail-summary-label">變更摘要</span> <small class="text-muted fw-normal">（撰寫者填寫）</small></h6>
         <blockquote class="border-start border-4 ps-3 py-1 mb-3" id="review-detail-summary-block" style="background:#f1f8e9; font-size:0.9rem; border-left-color:#2e7d32;">

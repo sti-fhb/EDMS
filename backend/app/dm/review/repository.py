@@ -274,9 +274,7 @@ class ReviewCenterRepository:
         wanted = list(
             (
                 await db.scalars(
-                    select(DmVersionTag.tag_id).where(
-                        DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0
-                    )
+                    select(DmVersionTag.tag_id).where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
                 )
             ).all()
         )

@@ -35,9 +35,7 @@ class _StubRepo:
 
 
 def _doc(category_code: str):
-    return SimpleNamespace(
-        doc_id="DM-SOP-000001", status="PUBLISHED", category_code=category_code, func_code=None
-    )
+    return SimpleNamespace(doc_id="DM-SOP-000001", status="PUBLISHED", category_code=category_code, func_code=None)
 
 
 def _ver():
