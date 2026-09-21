@@ -296,6 +296,97 @@ describe("ET02 課程編輯頁", () => {
     expect(navigateSpy).not.toHaveBeenCalled()
   })
 
+  /**
+   * #361 的接線：測驗內容有變更、且有人通過過時，儲存前先問教師是否要求重測。
+   *
+   * ⚠️ 元件本身的行為（三顆鈕、ESC、文案）在 `RequireRetestDialog.test.tsx`；
+   * 這裡測的是**接線**——何時跳窗、決定之後 API 實際收到什麼。
+   */
+  async function openQuizDialog(passedCount: number | null) {
+    server.use(
+      http.post("/api/et/chapters/:chapterId/items", () =>
+        HttpResponse.json(
+          { item_id: 502, item_type: "QUIZ", title: "", sort_order: 1, material_id: null, quiz_id: 701 },
+          { status: 201 },
+        ),
+      ),
+      http.get("/api/et/quizzes/701", () =>
+        HttpResponse.json({
+          quiz_id: 701,
+          quiz_name: "輸血作業概念測驗",
+          description: null,
+          pass_score: 80,
+          time_limit_min: null,
+          max_retry: 2,
+          version: 0,
+          questions: [],
+          points_total: 0,
+          answers_visible: true,
+          passed_count: passedCount,
+        }),
+      ),
+    )
+    locationRef.current = {
+      pathname: "/et/courses/1",
+      state: { pendingAddItem: { chapterIndex: 0, itemType: "QUIZ" } },
+    }
+    renderEditor("1")
+    await screen.findByRole("dialog")
+  }
+
+  it("已有人通過時，儲存測驗設定會先問是否要求重測（而不是直接送出）", async () => {
+    const user = userEvent.setup()
+    const sent: { body?: { require_retest: boolean } } = {}
+    await openQuizDialog(3)
+    server.use(
+      http.put("/api/et/quizzes/701", async ({ request }) => {
+        sent.body = (await request.json()) as NonNullable<typeof sent.body>
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+
+    expect(await screen.findByText("是否要求已通過的學員重新測驗？")).toBeInTheDocument()
+    // 🔴 尚未決定之前不可送出——否則教師還沒選，學員狀態就已經變了。
+    expect(sent.body).toBeUndefined()
+  })
+
+  it("選「儲存並要求重測」後，API 收到 require_retest: true", async () => {
+    const user = userEvent.setup()
+    const sent: { body?: { require_retest: boolean } } = {}
+    await openQuizDialog(3)
+    server.use(
+      http.put("/api/et/quizzes/701", async ({ request }) => {
+        sent.body = (await request.json()) as NonNullable<typeof sent.body>
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+    await user.click(await screen.findByRole("button", { name: "儲存並要求重測" }))
+
+    await waitFor(() => expect(sent.body?.require_retest).toBe(true))
+  })
+
+  it("沒有人通過過時不跳窗，直接送出 require_retest: false", async () => {
+    // 新建測驗的常態。多一個對話框只是噪音。
+    const user = userEvent.setup()
+    const sent: { body?: { require_retest: boolean } } = {}
+    await openQuizDialog(0)
+    server.use(
+      http.put("/api/et/quizzes/701", async ({ request }) => {
+        sent.body = (await request.json()) as NonNullable<typeof sent.body>
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+
+    await waitFor(() => expect(sent.body?.require_retest).toBe(false))
+    expect(screen.queryByText("是否要求已通過的學員重新測驗？")).not.toBeInTheDocument()
+  })
+
   it("帶 pendingAddItem 進編輯頁時自動建立該項目並開啟視窗（#335 的後半）", async () => {
     let addedTo: number | null = null
     server.use(

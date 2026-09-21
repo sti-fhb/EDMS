@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.course.models import EtItem
+from app.et.progress.models import EtEnrollment
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM
 
 #: 測驗設定之預設值（data-model §ET_QUIZ）。
@@ -336,27 +337,30 @@ class EtQuizRepository:
         就以 `PASS_SCORE_SNAPSHOT` 判定並寫入 `IS_PASS`。拿當前及格分數回頭重算，會讓
         「教師調高及格分數」這個動作本身改變誰算通過過——而那正是本功能要處理的變更。
 
+        ⛔ **排除已被移出課程者**（`ET_ENROLLMENT.IS_REMOVED`）。
+
         Returns:
             `[(user_id, attempt_count), ...]`，依 `user_id` 排序使結果可預期。
         """
-        passed = (
-            select(EtQuizAttemptM.user_id)
-            .where(
-                EtQuizAttemptM.quiz_id == quiz_id,
-                EtQuizAttemptM.is_pass.is_(True),
-                EtQuizAttemptM.deleted == 0,
-            )
-            .distinct()
-            .scalar_subquery()
-        )
         rows = await db.execute(
             select(EtQuizAttemptM.user_id, func.count())
+            .join(
+                EtEnrollment,
+                (EtEnrollment.user_id == EtQuizAttemptM.user_id) & (EtEnrollment.course_id == EtQuizAttemptM.course_id),
+            )
             .where(
                 EtQuizAttemptM.quiz_id == quiz_id,
                 EtQuizAttemptM.deleted == 0,
-                EtQuizAttemptM.user_id.in_(passed),
+                # ⛔ 已被移出課程者排除。`mark_removed` 只設 `IS_REMOVED`，不動
+                # attempt 與 progress，所以不濾的話他會被寫重置基準、清完成旗標，
+                # 還收到一封「請重新測驗」的信——而他已經不在這門課了。
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
             )
             .group_by(EtQuizAttemptM.user_id)
+            # 單次掃描：`HAVING bool_or(IS_PASS)` 取「曾及格」，同時 `count(*)` 算全部
+            # attempt 數。分兩段（先 distinct 曾及格、再 `.in_()` 算數量）會掃兩次表。
+            .having(func.bool_or(EtQuizAttemptM.is_pass))
             .order_by(EtQuizAttemptM.user_id)
         )
         return [(uid, cnt) for uid, cnt in rows.all()]

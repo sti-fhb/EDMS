@@ -169,10 +169,10 @@ class EtQuizService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_QUIZ")
-        await self._require_retest_if_asked(
+        affected = await self._require_retest_if_asked(
             db, quiz_id=quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
         )
-        await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗設定")
+        await self._log(db, "UPDATE", operator.user_id, course_id, self._with_retest("更新測驗設定", affected))
 
     async def add_question(
         self, db: AsyncSession, quiz_id: int, req: QuestionCreateReq, *, operator: OperatorInfo
@@ -189,10 +189,10 @@ class EtQuizService:
             options=[(o.option_text, o.is_correct) for o in req.options],
             operator=operator,
         )
-        await self._require_retest_if_asked(
+        affected = await self._require_retest_if_asked(
             db, quiz_id=quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
         )
-        await self._log(db, "CREATE", operator.user_id, course_id, "新增測驗題目")
+        await self._log(db, "CREATE", operator.user_id, course_id, self._with_retest("新增測驗題目", affected))
         return await self._question_row(db, question)
 
     async def update_question(
@@ -215,10 +215,10 @@ class EtQuizService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_QUESTION")
-        await self._require_retest_if_asked(
+        affected = await self._require_retest_if_asked(
             db, quiz_id=question.quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
         )
-        await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗題目")
+        await self._log(db, "UPDATE", operator.user_id, course_id, self._with_retest("更新測驗題目", affected))
 
     async def delete_question(
         self, db: AsyncSession, question_id: int, *, require_retest: bool = False, operator: OperatorInfo
@@ -245,10 +245,10 @@ class EtQuizService:
         _, course_id = await self._require_owned(db, question.quiz_id, operator.user_id)
         await self._quizzes.soft_delete_questions(db, [question_id], operator)
         await self._quizzes.resequence_questions(db, question.quiz_id, operator)
-        await self._require_retest_if_asked(
+        affected = await self._require_retest_if_asked(
             db, quiz_id=question.quiz_id, course_id=course_id, asked=require_retest, operator=operator
         )
-        await self._log(db, "DELETE", operator.user_id, course_id, "刪除測驗題目")
+        await self._log(db, "DELETE", operator.user_id, course_id, self._with_retest("刪除測驗題目", affected))
 
     async def reorder_questions(
         self, db: AsyncSession, quiz_id: int, req: QuestionReorderReq, *, operator: OperatorInfo
@@ -384,6 +384,16 @@ class EtQuizService:
                 db, course=course, quiz_name=quiz.quiz_name, course_url=course_url, user_id=user_id
             )
         return len(affected)
+
+    @staticmethod
+    def _with_retest(description: str, affected: int) -> str:
+        """把「本次一併要求 N 位已通過學員重測」併進稽核描述。
+
+        ⚠️ 不併的話，`DP_AUDIT_LOG` 只會看到「更新測驗設定」，看不出這一下讓 N 位
+        學員的通過紀錄被清掉——而那是本動作最重的後果。資訊雖然也在
+        `ET_QUIZ_RETRY_RESET`，但追溯時不會有人先想到去查那張表。
+        """
+        return description if affected == 0 else f"{description}，並要求 {affected} 位已通過學員重測"
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
         await self._audit.log_action(
