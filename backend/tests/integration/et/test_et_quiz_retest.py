@@ -322,6 +322,92 @@ class TestRequireRetestOnQuizChange:
         pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
         assert pending == 2, "兩位受影響的學員應各排入一封；逐人一封而非合批（範本含 {USER_NAME}）"
 
+    async def test_新增題目也能要求重測(self, client, db):
+        teacher = await _user(db, "ZTT006")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS007", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+
+        body = {
+            "question_type": "SINGLE",
+            "stem": "輸血前應核對幾項資訊？",
+            "points": 10,
+            "options": [
+                {"option_text": "兩項", "is_correct": False},
+                {"option_text": "三項", "is_correct": True},
+            ],
+            "require_retest": True,
+        }
+        r = await client.post(f"/api/et/quizzes/{qid}/questions", json=body, headers=_bearer(teacher))
+        assert r.status_code == 201, r.text
+
+        _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert (resets, done) == (1, False), "新增題目是題目內容變更，應能觸發重測"
+
+    async def test_刪除題目也能要求重測且不刪作答明細(self, client, db):
+        teacher = await _user(db, "ZTT007")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS008", course_id=cid, item_id=item_id, quiz_id=qid)
+        add = await client.post(
+            f"/api/et/quizzes/{qid}/questions",
+            json={
+                "question_type": "SINGLE",
+                "stem": "待刪除的題目",
+                "points": 10,
+                "options": [
+                    {"option_text": "甲", "is_correct": True},
+                    {"option_text": "乙", "is_correct": False},
+                ],
+            },
+            headers=_bearer(teacher),
+        )
+        assert add.status_code == 201, add.text
+        question_id = add.json()["question_id"]
+        await db.commit()
+
+        r = await client.delete(f"/api/et/questions/{question_id}?require_retest=true", headers=_bearer(teacher))
+        assert r.status_code == 204, r.text
+
+        attempts, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert (resets, done) == (1, False), "刪除題目是題目內容變更，應能觸發重測"
+        assert attempts == 1, "⛔ 刪題不得連帶刪除 attempt（#279 裁示 Q2=C）"
+
+    async def test_排序不觸發重測(self, client, db):
+        # 只改呈現順序、不改題目與配分；而且 attempt 有 question_order 快照，
+        # 舊紀錄本來就不受影響——為此要全班重考沒有道理。
+        teacher = await _user(db, "ZTT008")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS009", course_id=cid, item_id=item_id, quiz_id=qid)
+        ids = []
+        for stem in ("第一題", "第二題"):
+            add = await client.post(
+                f"/api/et/quizzes/{qid}/questions",
+                json={
+                    "question_type": "SINGLE",
+                    "stem": stem,
+                    "points": 10,
+                    "options": [
+                        {"option_text": "甲", "is_correct": True},
+                        {"option_text": "乙", "is_correct": False},
+                    ],
+                },
+                headers=_bearer(teacher),
+            )
+            ids.append(add.json()["question_id"])
+        await db.commit()
+
+        # 排序帶的是**測驗層** version，而新增題目會把它推進，故現取。
+        detail = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+        r = await client.put(
+            f"/api/et/quizzes/{qid}/questions/order",
+            json={"question_ids": list(reversed(ids)), "version": detail.json()["version"]},
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
+
+        _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert (resets, done) == (0, True), "排序不是內容變更，不該把全班的通過紀錄清掉"
+
     async def test_未通過的學員不受影響(self, client, db):
         # 未通過者本來就還要重考，寫基準等於白送一輪配額——而畫面上看不出哪裡不對。
         teacher = await _user(db, "ZTT004")

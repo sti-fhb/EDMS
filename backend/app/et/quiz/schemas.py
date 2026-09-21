@@ -90,6 +90,12 @@ class QuestionCreateReq(BaseModel):
     #: 卻仍佔著學員的作答時間。2026-08-26 依實測回饋收緊。
     points: int = Field(ge=1, le=100)
     options: list[OptionInput] = Field(max_length=MAX_OPTIONS_PER_QUESTION)
+    #: 是否要求**已通過**的學員重新測驗（#361）。詳見 `QuizUpdateReq.require_retest`。
+    #:
+    #: ⛔ 排序端點（`QuestionReorderReq`）刻意**沒有**這個欄位——只改呈現順序不是內容
+    #: 變更，且 attempt 有 `question_order` 快照，舊紀錄本來就不受影響。為換順序要求
+    #: 全班重考沒有道理。
+    require_retest: bool = False
 
     @field_validator("stem")
     @classmethod
@@ -105,6 +111,7 @@ class QuestionUpdateReq(QuestionCreateReq):
     """
 
     version: int = Field(ge=0)
+    # `require_retest` 由 `QuestionCreateReq` 繼承而來，不重複宣告。
 
 
 class QuestionReorderReq(BaseModel):

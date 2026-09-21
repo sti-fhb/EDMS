@@ -189,6 +189,9 @@ class EtQuizService:
             options=[(o.option_text, o.is_correct) for o in req.options],
             operator=operator,
         )
+        await self._require_retest_if_asked(
+            db, quiz_id=quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
+        )
         await self._log(db, "CREATE", operator.user_id, course_id, "新增測驗題目")
         return await self._question_row(db, question)
 
@@ -212,14 +215,29 @@ class EtQuizService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_QUESTION")
+        await self._require_retest_if_asked(
+            db, quiz_id=question.quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
+        )
         await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗題目")
 
-    async def delete_question(self, db: AsyncSession, question_id: int, *, operator: OperatorInfo) -> None:
-        """刪除題目：本體、選項與學員作答明細皆軟刪，剩餘題目順序遞補。
+    async def delete_question(
+        self, db: AsyncSession, question_id: int, *, require_retest: bool = False, operator: OperatorInfo
+    ) -> None:
+        """刪除題目：本體與選項軟刪，剩餘題目順序遞補。
 
-        > 學員作答明細（`ET_QUIZ_ATTEMPT_D`）**亦連帶軟刪除**（2026-08-24 #202 裁示，
-        > 原 spec 為 hard delete）。成績查詢務必排除 `DELETED = 1`，否則已刪題目的
-        > 得分會被計入。作答**主檔**不刪——刪的是一題，不是整場作答。
+        🔴 **學員作答明細（`ET_QUIZ_ATTEMPT_D`）不動**（#279 裁示 Q2 = C，2026-09-04
+        推翻 #202 的連帶軟刪）。`soft_delete_questions` 只 update `ET_OPTION` 與
+        `ET_QUESTION`，`test_et_quiz.py::test_刪除題目軟刪選項但不動學員作答明細` 釘住
+        此行為。
+
+        ⛔ **不要為了「已刪題目不該計分」而把連帶加回來**。`ET_QUIZ_ATTEMPT_D` 是
+        自給自足的快照（題幹／選項／配分都存在裡面），而成績統計一律讀
+        `ET_QUIZ_ATTEMPT_M.SCORE`、**不回頭重新加總**。加回連帶的症狀是學員看到
+        「總分 75、明細只列 4 題加起來 60」這種自己對不起來的成績單。
+
+        Args:
+            require_retest: 是否要求已通過的學員重新測驗（#361）。刪題是題目內容變更，
+                故提供此選項；實際行為見 `_require_retest_if_asked`。
         """
         question = await self._quizzes.get_question(db, question_id)
         if question is None:
@@ -227,6 +245,9 @@ class EtQuizService:
         _, course_id = await self._require_owned(db, question.quiz_id, operator.user_id)
         await self._quizzes.soft_delete_questions(db, [question_id], operator)
         await self._quizzes.resequence_questions(db, question.quiz_id, operator)
+        await self._require_retest_if_asked(
+            db, quiz_id=question.quiz_id, course_id=course_id, asked=require_retest, operator=operator
+        )
         await self._log(db, "DELETE", operator.user_id, course_id, "刪除測驗題目")
 
     async def reorder_questions(
