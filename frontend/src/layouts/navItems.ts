@@ -44,8 +44,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // 點進去只會 403 的項目，純教師看到「我的課程」則是一個空清單。
       { label: "課程列表", path: "/et/courses", requiresEtManage: true },
       { label: "學員", path: "/et/students", requiresEtManage: true },
-      // 核可查詢**兩種角色都要**，但看到的內容不同：教師查所轄課程之核可紀錄，
-      // 學員查自己已通過核可的課程。不掛任何角色旗標＝具任一 ET 角色即顯示。
+      // 核可查詢**兩種角色都要**，但看到的內容不同：學員查自己已通過核可的課程；
+      // 教師依姓名查——**已通過**的涵蓋全部課程，**不通過 / 已撤銷 / 考核備註**僅限
+      // 自己所開設的課程（US17 SA 裁示 C，見 `app/et/approval/query_rules.py`）。
+      // 不掛任何角色旗標＝具任一 ET 角色即顯示；資料邊界完全由後端負責。
       { label: "核可查詢", path: "/et/approvals" },
       { label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
     ],
