@@ -1,4 +1,4 @@
-"""ET03 線下考核核可 API（US16 / #352）——教師 / 管理者端。
+"""ET03 線下考核核可 API（US16 / #352）＋ ET10 核可查詢（US17 / #385）。
 
 router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 service 的
 `ensure_owner_or_admin` 判定（`FR-ET-US16-07`：owner 或管理者）。兩層都要：角色閘擋掉
@@ -13,17 +13,23 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
 
 共用一份的話，兩種行為會互相吃額度——教師只是多看幾次清單就可能把核可的配額耗掉，
 而那是他真正需要能送出的動作。
+
+⚠️ **US17 的兩支查詢端點沿用同一個 `et-approval` 分桶**（60/分），這是刻意的取捨：
+60 次/分對一個要打字才送出的查詢很寬鬆，而為了限流另開一個 router 只會讓「核可相關的
+端點在哪個檔」多一個答案。代價是大量查詢會吃掉核可的額度——若日後真的撞到，再拆。
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.core.pagination import PagedResponse, PaginatedResult
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
-from app.et.approval.schemas import ApproveReq, ApproveResult, RevokeReq
+from app.et.approval.query_service import EtApprovalQueryService
+from app.et.approval.schemas import ApprovalQueryRow, ApproveReq, ApproveResult, MyApprovalRow, RevokeReq
 from app.et.approval.service import EtApprovalService
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
@@ -49,6 +55,7 @@ router = APIRouter(
 )
 
 _service = EtApprovalService()
+_query = EtApprovalQueryService()
 
 
 @router.post(
@@ -123,3 +130,64 @@ async def revoke(
         operator=operator,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── ET10 核可查詢（US17 / #385）──────────────────────────────────────────────
+
+
+@router.get(
+    "/approvals",
+    response_model=PagedResponse[ApprovalQueryRow],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def search_approvals(
+    user_name: Annotated[str, Query(min_length=1, max_length=50)],
+    result: Annotated[str | None, Query(pattern="^(PASS|FAIL)$")] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> PaginatedResult[ApprovalQueryRow]:
+    """依學員姓名查核可紀錄（`FR-ET-US17-01`）。
+
+    **可見範圍依 SA Q1 裁示 C 分流**（見 `query_rules.visible_clause`）：教師看得到
+    全部課程的「通過且未撤銷」，但「不通過」與「已撤銷」僅限自己 owner 的課程；
+    管理者不受限。
+
+    ⚠️ 教師視角的前端 MUST 常駐提示「不通過與已撤銷的紀錄僅顯示您所開設的課程」
+    ——那是本裁示的配套。少了它，教師看到某門課沒出現時會分不清是「還沒考」還是
+    「考了沒過」。
+
+    `user_name` **必填**（SA Q2 裁示 A）：`min_length=1` 擋空字串，全空白由 service
+    的 `strip()` 擋下回 422。
+
+    Raises:
+        AppError: 422 `COMMON_001` 姓名為空白；403 `ET_AUTH_001` 非教師 / 管理者。
+    """
+    return await _query.search(
+        db,
+        actor_id=ctx.user_id,
+        roles=ctx.roles,
+        user_name=user_name,
+        result=result,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get("/approvals/mine", response_model=PagedResponse[MyApprovalRow])
+async def my_approvals(
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> PaginatedResult[MyApprovalRow]:
+    """學員自查：自己**已通過（有效未撤銷）**的課程（`FR-ET-US17-03`）。
+
+    🔴 **不收任何 `user_id` 參數**——對象一律取自 token 的 `ctx.user_id`。
+    `FR-ET-US17-04`「學員竄改參數查他人」因此在介面上就沒有可竄改的參數，而不是靠
+    一道判斷式擋下；多帶的 query param 會被 FastAPI 忽略。
+
+    只掛 `get_et_context` 不掛角色閘：兼具教師身分者也是學員，這條路徑對他照常可用。
+    """
+    return await _query.mine(db, actor_id=ctx.user_id, page=page, limit=limit)
