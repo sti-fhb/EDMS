@@ -19,6 +19,16 @@ COPY frontend/ .
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
+# 站台掛載路徑。院內封閉網路只給單一 IP、單一 port，EDMS 與 TBMS 靠 URL 路徑
+# 前綴區分，交付包的 build 須傳 --build-arg VITE_BASE_PATH=/edms/
+# 並同時把 VITE_API_BASE_URL 設為 /edms/api。
+# 預設 "/" —— GCP 雲端版行為不變。值必須以斜線結尾。
+# ⚠️ 兩者只改其一即壞：只改 base 會讓 API 打到 /api（proxy 剝不到前綴、404）；
+#    只改 API base 會讓靜態資源仍指向 /assets（proxy 剝不到前綴、整頁空白）。
+# 詳見 TBMS repo 的 docs/infra/onprem-path-routing.md §5.1。
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
+
 RUN pnpm build
 
 # ── Stage 2：nginx serve 靜態檔案 ──────────────────────────────
