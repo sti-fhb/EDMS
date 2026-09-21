@@ -44,6 +44,11 @@ export const QUERY_KEYS = {
     attemptDetail: (attemptId: number) => ["et", "tracking", "attempts", attemptId] as const,
     surveyResult: (courseId: number) => ["et", "tracking", courseId, "survey-result"] as const,
   },
+  /** ET10 核可查詢（US17 / #385）。兩視角分開——它們的參數與回應欄位都不同。 */
+  etApprovals: {
+    search: (params: Record<string, unknown>) => ["et", "approvals", "search", params] as const,
+    mine: (page: number) => ["et", "approvals", "mine", page] as const,
+  },
   etLearn: {
     structure: (courseId: number) => ["et", "learn", courseId] as const,
     material: (materialId: number) => ["et", "learn", "materials", materialId] as const,

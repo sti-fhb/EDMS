@@ -109,3 +109,70 @@ class ApprovalRow(BaseModel):
     approved_by: str
     approved_at: datetime
     version: int
+
+
+class _ApprovalCore(BaseModel):
+    """`ET_APPROVAL` 的原始欄位——**僅供 `paginate()` 序列化用的中繼型別**。
+
+    `core/pagination.paginate` 以 `schema.model_validate(orm_item)` 序列化，只吃得到
+    ORM 實體上有的欄位；課程名稱與三個人名要另以批次查詢補齊（見
+    `query_repository` 模組 docstring）。故分頁先產出本型別，service 再補成對外的
+    `ApprovalQueryRow`。
+
+    ⚠️ 本型別**不對外**（前綴底線），不要拿它當 `response_model`——它少了姓名，
+    而姓名正是 `FR-ET-US17-01` 要求的欄位。
+    """
+
+    model_config = {"from_attributes": True}
+
+    course_id: int
+    user_id: str
+    result: str
+    result_note: str | None
+    is_revoked: bool
+    revoke_reason: str | None
+    approved_by: str
+    approved_at: datetime
+    revoked_by: str | None
+    revoked_at: datetime | None
+
+
+class ApprovalQueryRow(BaseModel):
+    """教師 / 管理者視角的一列（`FR-ET-US17-01`）。
+
+    含撤銷三件套（原因 / 人 / 時間）——它們是本視角**要求顯示**的欄位，與學員視角
+    刻意相反（見 `MyApprovalRow`）。
+    """
+
+    user_id: str
+    user_name: str
+    course_id: int
+    course_name: str
+    result: str
+    result_note: str | None
+    approved_at: datetime
+    approved_by_name: str
+    is_revoked: bool
+    revoke_reason: str | None
+    revoked_by_name: str | None
+    revoked_at: datetime | None
+
+
+class MyApprovalRow(BaseModel):
+    """學員自查視角的一列（`FR-ET-US17-03`）。
+
+    🔴 **刻意極簡，而且是「後端不回傳」不是「前端不渲染」**：
+
+    | 不含 | 理由 |
+    |---|---|
+    | `result` | 本清單恆為已通過，回傳它只是邀請前端拿來做判斷 |
+    | `result_note` | 教師寫的考核評語，不是給學員看的 |
+    | `is_revoked` / `revoke_reason` / `revoked_*` | 已撤銷者根本不在清單內；回傳欄位等於告知「這裡有東西被藏起來」 |
+    | `user_id` / `user_name` | 對象恆為呼叫者自己 |
+
+    靠前端過濾的話，打開 devtools 就看得到。
+    """
+
+    course_id: int
+    course_name: str
+    approved_at: datetime
