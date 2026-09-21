@@ -136,6 +136,10 @@ class EtQuizService:
             # 逐題新增時總和必然一度不等於 100，阻擋發布是 #204 的事。
             points_total=sum(q.points for q in questions),
             answers_visible=answers_visible,
+            # 只有擁有者拿得到人數：非擁有者給 `None`（不是 0），理由同 `is_correct` 的遮蔽。
+            passed_count=(
+                len(await self._quizzes.passed_student_attempt_counts(db, quiz_id)) if answers_visible else None
+            ),
         )
 
     async def update_settings(

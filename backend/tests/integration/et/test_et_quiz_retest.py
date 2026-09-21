@@ -231,6 +231,36 @@ async def _facts(db, *, uid: str, quiz_id: int, item_id: int) -> tuple[int, int,
     return attempts, resets, bool(done)
 
 
+class TestPassedCount:
+    """確認框要寫出受影響人數，否則教師無從判斷該選是或否。"""
+
+    async def test_測驗詳細帶出已通過人數(self, client, db):
+        teacher = await _user(db, "ZTT010")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS010", course_id=cid, item_id=item_id, quiz_id=qid)
+        await _passed_student(db, uid="ZTS011", course_id=cid, item_id=item_id, quiz_id=qid)
+        failed = await _user(db, "ZTS012", roles=(ROLE_STUDENT,))
+        await _enroll(db, failed, cid)
+        await _attempt(db, user_id=failed, course_id=cid, quiz_id=qid, no=1, score=30, is_pass=False)
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+        assert r.status_code == 200, r.text
+        assert r.json()["passed_count"] == 2, "只算曾及格者，未通過的不計入"
+
+    async def test_非擁有者看不到人數(self, client, db):
+        # 比照同一回應既有的答案遮蔽：非擁有者可讀題目，但看不到這門課的學員統計。
+        owner = await _user(db, "ZTT013")
+        other = await _user(db, "ZTT014")
+        cid, item_id, qid = await _course_with_quiz(db, owner)
+        await _passed_student(db, uid="ZTS013", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(other))
+        assert r.status_code == 200, r.text
+        assert r.json()["passed_count"] is None, "非擁有者應拿到 None 而非 0——0 是錯誤資訊"
+
+
 class TestRequireRetestOnQuizChange:
     async def test_選是時已通過學員次數歸零且完成狀態清除(self, client, db):
         teacher = await _user(db, "ZTT001")
