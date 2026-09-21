@@ -265,9 +265,16 @@ class ReviewCenterRepository:
         差異式覆寫（手法同 editor 之 `set_version_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
         軟刪除，以避開 UQ(DOC_ID, TAG_ID)。
 
+        ⚠️ **呼叫端不變式（新增呼叫點前必讀）**：本方法是 `DM_DOC_TAG`（權限判定依據）的**唯一寫入點**，
+        且**不自我驗證 `version_id` 是否屬於 `doc_id`**。目前安全性由呼叫端保證——`DmReview` 僅由
+        `editor.submit`（以 `get_version(doc_id, version_id)` 取版本）與 `obsolete.submit`
+        （用 `doc.current_version_id`）建立，兩者都把 version 綁死在同一份文件上。若日後新增其他呼叫點
+        （回滾、批次補發、管理者代辦等），務必自行確保這組配對正確，否則會把 A 文件的可見範圍改成
+        B 版本的提議值且不會報錯。
+
         Args:
             doc_id: 文件編號。
-            version_id: 本次核准發布之版本（其快照即新的生效值）。
+            version_id: 本次核准發布之版本（其快照即新的生效值），**必須屬於 `doc_id`**。
             user_id: 核准者（寫入稽核欄位）。
         """
         now = utcnow()

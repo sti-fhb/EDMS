@@ -11,11 +11,13 @@ orchestration 重用 `ReviewService.withdraw`（僅翻 DM_REVIEW 狀態）+ `Rev
 
 from datetime import timedelta
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.dm.document.models import DmVersionTag
 from app.dm.personal.repository import PersonalRepository
 from app.dm.personal.schemas import ActivityEvent, ActivityResponse, DraftItem, WithdrawResult
 from app.dm.review.repository import ReviewCenterRepository
@@ -102,6 +104,13 @@ class PersonalService:
         now = utcnow()
         version.deleted = 1
         version.updated_user, version.updated_date = op.user_id, now
+        # 連帶軟刪該版本之標籤快照（#377）：否則 DM_VERSION_TAG 留下 DELETED=0 的孤兒列。
+        # 不可被利用（已軟刪版本過不了 get_version 的 deleted==0，無法送簽 / 核准），純為資料一致。
+        await db.execute(
+            update(DmVersionTag)
+            .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+            .values(deleted=1, updated_user=op.user_id, updated_date=now)
+        )
         await db.flush()
         await self._audit.log_action(
             db,
