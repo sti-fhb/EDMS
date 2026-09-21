@@ -52,7 +52,6 @@ export function SurveyResultBlock({ courseId, onExport }: { courseId: number; on
     <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <BlockHeading
-          index={3}
           title="問卷結果"
           note={`${data.survey_name ?? "課後問卷"} 填答結果，具名`}
         />
@@ -74,7 +73,7 @@ export function SurveyResultBlock({ courseId, onExport }: { courseId: number; on
       </Stack>
 
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        已填 {data.filled_count} 人 ／ 未填 {data.not_filled_count} 人（母體為在籍學員）
+        已填 {data.filled_count} 人 ／ 未填 {data.not_filled_count} 人
       </Typography>
 
       {data.filled_count === 0 && (

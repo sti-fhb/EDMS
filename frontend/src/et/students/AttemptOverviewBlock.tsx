@@ -68,7 +68,6 @@ export function AttemptOverviewBlock({
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
       <BlockHeading
-        index={2}
         title="作答明細"
         note="一次列出所有已作答學員；點學員展開其歷次作答與逐題明細"
       />

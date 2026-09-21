@@ -1286,10 +1286,22 @@ export const handlers = [
       chapter_count: 1,
       student_count: 0,
     }
+    // #359 第 4 項：ET03 的課程下拉要排除草稿、**保留已關閉**（ET-11 AC 10）。
+    // 少了這一筆，「已關閉仍在下拉裡」那條斷言會因為母體裡根本沒有已關閉課程而假綠。
+    const closed = {
+      ...mine,
+      course_id: 14,
+      course_name: "已關閉的課",
+      status: "CLOSED",
+      tags: [],
+      chapter_count: 2,
+      student_count: 4,
+      is_closed: true,
+    }
     // `owner_id` 由 fixture 實際過濾——建立者選單的行為取決於「篩選後結果只剩一個人」
     // 這件事，handler 若忽略該參數就永遠測不到它
     const ownerId = query.get("owner_id")
-    const all = scope === "all" ? [mine, others] : [mine, draft]
+    const all = scope === "all" ? [mine, others] : [mine, draft, closed]
     const data = ownerId === null ? all : all.filter((c) => c.owner_id === ownerId)
     return HttpResponse.json({
       data,

@@ -21,6 +21,40 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(screen.queryByText("已加入學員")).not.toBeInTheDocument()
   })
 
+  it("區塊標題不再顯示「區塊 N」編號（#359 第 3 項）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText("已加入學員")).toBeInTheDocument()
+    // ⛔ `spec_us9` 仍稱「區塊 1 / 2 / 3」，但那是**規格內部的條列用語**、不是畫面文字。
+    // 手測回饋：教師說的是「作答明細那一塊」，編號對他不構成指稱工具。
+    expect(screen.queryByText(/^區塊 [123]$/)).not.toBeInTheDocument()
+  })
+
+  it("問卷結果不再標「（母體為在籍學員）」（#359 第 3 項）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    expect(await screen.findByText(/已填 .* 人/)).toBeInTheDocument()
+    expect(screen.queryByText(/母體為在籍學員/)).not.toBeInTheDocument()
+  })
+
+  it("課程下拉排除草稿、但保留已關閉（#359 第 4 項）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+
+    await user.click(await screen.findByLabelText("課程"))
+
+    // 草稿課於發布時才帶入學員，選了只會看到三個空區塊而畫面不說明為什麼
+    expect(screen.queryByRole("option", { name: "草稿課" })).not.toBeInTheDocument()
+    // ⚠️ 已關閉**必須保留**——ET-11 AC 10：關閉後仍可閱覽學員清單、作答明細與問卷結果，
+    // 只是不可再重置／移除。用 `is_closed` 或 `status !== "PUBLISHED"` 過濾會誤殺它。
+    expect(screen.getByRole("option", { name: "已關閉的課" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "採血作業新進人員訓練" })).toBeInTheDocument()
+  })
+
   it("選課程後顯示三個區塊", async () => {
     const user = userEvent.setup()
     renderWithProviders(<EtStudentsPage />)

@@ -144,7 +144,7 @@ export function StudentListBlock({
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-        <BlockHeading index={1} title="已加入學員" note="本課程已加入之學員清單、完課狀態與進度" />
+        <BlockHeading title="已加入學員" note="本課程已加入之學員清單、完課狀態與進度" />
         {/* 匯出是**讀**，課程關閉時照常可用（AC 10 明訂含匯出 CSV）。
             走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header */}
         <Button size="small" startIcon={<DownloadIcon />} onClick={() => onExport()}>
