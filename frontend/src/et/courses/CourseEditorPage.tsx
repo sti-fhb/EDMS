@@ -37,6 +37,7 @@ import { MaterialDialog } from "./MaterialDialog"
 import { InviteStudentsDialog } from "./InviteStudentsDialog"
 import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
+import { RequireRetestDialog } from "./RequireRetestDialog"
 import { ReopenCourseDialog } from "./ReopenCourseDialog"
 import { SurveyDialog } from "./SurveyDialog"
 import { SurveySection } from "./SurveySection"
@@ -131,6 +132,13 @@ export function EtCourseEditorPage() {
    * 長出一排幽靈項目。儲存成功後清除此標記——之後的取消就只是「不存這次的修改」。
    */
   const [unsavedNewItemId, setUnsavedNewItemId] = useState<number | null>(null)
+  /**
+   * 等待教師決定「是否要求已通過學員重測」的動作（#361）。
+   *
+   * ⚠️ `useState` 把函式參數當成 updater，存函式一定要包一層 `() => fn`，
+   * 否則 React 會呼叫它、把回傳值存進 state。
+   */
+  const [pendingRetestAction, setPendingRetestAction] = useState<((requireRetest: boolean) => void) | null>(null)
   /** 問卷區塊的錯誤（凍結、選項不足等）——與項目視窗的錯誤分開顯示於問卷卡片內。 */
   const [surveyError, setSurveyError] = useState<string | null>(null)
   const [surveyOpen, setSurveyOpen] = useState(false)
@@ -772,12 +780,31 @@ export function EtCourseEditorPage() {
     setUploading(false)
   }
 
+  /**
+   * 測驗內容有變更時，先問教師是否要求已通過的學員重測，再執行實際儲存（#361）。
+   *
+   * 沒有人通過過就不問——那是新建測驗的常態，多一個對話框只是噪音。
+   */
+  const askRetestThen = (run: (requireRetest: boolean) => void) => {
+    if ((quiz?.passed_count ?? 0) > 0) {
+      setPendingRetestAction(() => run)
+      return
+    }
+    run(false)
+  }
+
   const handleDeleteQuestion = (question: QuestionRow) => {
     confirm({
       title: "刪除題目",
-      content: "確定刪除此題目？學員於此題之作答紀錄與得分將一併移除。",
+      // ⚠️ 原文為「學員於此題之作答紀錄與得分將一併移除」——那是 #202 的行為，
+      // 已於 #279 裁示 Q2=C 推翻。`soft_delete_questions` 只軟刪題目與選項，
+      // 作答明細（自給自足的快照）完整保留，成績也不重算。
+      content: "確定刪除此題目？此題不再出現於之後的作答；已作答學員的紀錄與成績完整保留、仍可回看。",
       okText: "刪除",
-      onOk: () => runItemAction(() => quizzesApi.removeQuestion(question.question_id), invalidateQuiz),
+      onOk: () =>
+        askRetestThen((requireRetest) =>
+          void runItemAction(() => quizzesApi.removeQuestion(question.question_id, requireRetest), invalidateQuiz),
+        ),
     })
   }
 
@@ -1154,27 +1181,57 @@ export function EtCourseEditorPage() {
         error={itemError}
         onClose={requestCloseItem}
         onSaveSettings={(values) =>
-          void runItemAction(
-            () => quizzesApi.update(openQuizId as number, { ...values, version: quiz?.version ?? 0 }),
-            () => {
-              message.success("測驗已儲存")
-              invalidateQuiz()
-              // 課程詳細也要刷——項目列顯示的名稱取自測驗名稱
-              invalidate()
-              setUnsavedNewItemId(null)
-              closeItemDialog()
-            },
+          askRetestThen((requireRetest) =>
+            void runItemAction(
+              () =>
+                quizzesApi.update(openQuizId as number, {
+                  ...values,
+                  version: quiz?.version ?? 0,
+                  require_retest: requireRetest,
+                }),
+              () => {
+                message.success("測驗已儲存")
+                invalidateQuiz()
+                // 課程詳細也要刷——項目列顯示的名稱取自測驗名稱
+                invalidate()
+                setUnsavedNewItemId(null)
+                closeItemDialog()
+              },
+            ),
           )
         }
         onSaveQuestion={(questionId: number | null, values: QuestionFormValues) =>
-          void runItemAction(() => {
-            if (questionId === null) return quizzesApi.addQuestion(openQuizId as number, values)
-            const version = quiz?.questions.find((q) => q.question_id === questionId)?.version ?? 0
-            return quizzesApi.updateQuestion(questionId, { ...values, version })
-          }, invalidateQuiz)
+          askRetestThen((requireRetest) =>
+            void runItemAction(() => {
+              if (questionId === null) {
+                return quizzesApi.addQuestion(openQuizId as number, { ...values, require_retest: requireRetest })
+              }
+              const version = quiz?.questions.find((q) => q.question_id === questionId)?.version ?? 0
+              return quizzesApi.updateQuestion(questionId, { ...values, version, require_retest: requireRetest })
+            }, invalidateQuiz),
+          )
         }
         onDeleteQuestion={handleDeleteQuestion}
       />
+
+      {/*
+        ⚠️ **條件渲染，不要改成常駐掛載 `open={...}`。** MUI 的 Dialog 即使 `open=false`
+        也會參與 `aria-hidden` 的簿記，常駐一個會讓本頁其他測試的背景按鈕查不到而
+        逾時（實測：改成常駐後 `CourseEditorPage.test` 由 30/30 變成 28/30，兩條新增
+        模式的測試卡在 5000ms；移除渲染即恢復）。
+      */}
+      {pendingRetestAction !== null && (
+        <RequireRetestDialog
+          open
+          passedCount={quiz?.passed_count ?? 0}
+          onCancel={() => setPendingRetestAction(null)}
+          onDecide={(requireRetest) => {
+            const run = pendingRetestAction
+            setPendingRetestAction(null)
+            run(requireRetest)
+          }}
+        />
+      )}
 
       <SurveySection
         survey={isNew ? null : survey}
