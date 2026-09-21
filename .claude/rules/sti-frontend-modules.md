@@ -169,6 +169,24 @@ const { token, isAuthenticated, mustChangePwd, sessionExpired, login, logout, cl
 
 ---
 
+### 瀏覽器 storage：key 一律加 `edms_` 前綴
+
+目前 EDMS **完全不使用** `localStorage` / `sessionStorage`（token 為 memory-only，見上）。日後若要新增任何用途（記住偏好、草稿、收合狀態等），**key 一律加 `edms_` 前綴**：
+
+```ts
+localStorage.setItem("edms_last_category", id)   // ✅
+localStorage.setItem("last_category", id)        // ❌ 無前綴
+```
+
+**為什麼**：院內部署把 EDMS 與 TBMS 掛在**同一個位址**下，靠 URL 路徑（`/tbms`、`/edms`）區分，因此兩套系統**共用同一個 origin**。而 `localStorage` 是 per-origin、**不分路徑** —— key 撞名時兩套會互相覆寫。
+
+撞名的症狀極難聯想：使用者在 EDMS 操作之後，TBMS 那邊突然要重新登入（反之亦然），而兩套系統的程式碼各自看起來都沒問題。TBMS 側已將 token 類 key 全部改為 `tbms_` 前綴，並以 `constants/storage.test.ts` 守門。
+
+> 背景與完整脈絡見 TBMS repo 的 `docs/infra/onprem-path-routing.md` §六。
+> ⚠️ 這條規範在 EDMS 尚無實際 storage 用途時就先立，是因為「目前不撞」是巧合而非設計 —— 等真的加了才想到，通常是出事之後。
+
+---
+
 ### `date.ts` · `src/utils/date.ts`
 時間顯示用此模組，禁止 `new Date(...).toLocaleString(...)` 或自行時區換算。
 目前僅提供 **`formatDateTime(value)`**（`YYYY/MM/DD HH:mm` 本地，null/undefined 回空字串）。其餘格式化函式尚未建，需要時於此新增。
@@ -248,7 +266,7 @@ export const XxxListPage = () => {
 | `statusColumn` / `utils/columnFactories.tsx` | 未建（EDMS 狀態多為衍生值，非 `is_active`）|
 | `useInlineEdit`、`CrudPageLayout` 的 `editMode` / compound 子元件（`.Header`…）| 未建（CrudPageLayout 僅 props 版）|
 | `usePageTitle` | 未建 |
-| `extractApiError`、`STORAGE_KEYS` / `constants/storage.ts` | 不存在（用 `toApiError`；localStorage 目前無共用常數）|
+| `extractApiError`、`STORAGE_KEYS` / `constants/storage.ts` | 不存在（用 `toApiError`；EDMS 目前完全不用 localStorage。日後要用時 key 須加 `edms_` 前綴，見上方〈瀏覽器 storage〉）|
 | `useMenu`、`useWarMode` / `WarModeContext`、`ProtectedRoute`、`AppLayout`、`sidebarIcons.ts` | 不存在（EDMS 無 API 選單樹 / war-mode；登入守衛由 `RootLayout` + `LoginOverlay` 處理；shell 為 `AppShell`）|
 | `useAuth` 回 `{ full_name, station_name, roles }` + `clearUserCache` | 錯誤形狀（實為 `AuthState`，見上）|
 | `date.ts` 的 `formatLocalDatetime` / `formatDate` / `fromNow` / `localInputToUTC` / `utcToLocalInput` | 未建（僅 `formatDateTime`）|

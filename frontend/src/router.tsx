@@ -44,6 +44,18 @@ import { ProfilePage } from "./dp/user/ProfilePage"
 import { UsersPage } from "./dp/users/UsersPage"
 import { WelcomePage } from "./home/WelcomePage"
 
+/**
+ * 站台掛載路徑（去掉結尾斜線）。
+ *
+ * `import.meta.env.BASE_URL` 即 vite.config.ts 的 `base`，院內交付包為 "/edms/"、
+ * 其餘環境為 "/"。React Router 的 basename 不吃結尾斜線，故此處先去掉；
+ * 全部去完為空字串時退回 "/"（即掛在根路徑）。
+ *
+ * 不設 basename 的後果：路由比對會拿完整路徑 "/edms/dm/documents" 去對路由表，
+ * 全部不命中而落到 NotFound。
+ */
+const basename = import.meta.env.BASE_URL.replace(/\/$/, "") || "/"
+
 export const router = createBrowserRouter([
   // 密碼重設頁：信中連結落點，免登入（置於 RootLayout 外，不被登入 overlay 覆蓋）
   { path: "reset-password", element: <ResetPasswordPage /> },
@@ -229,4 +241,4 @@ export const router = createBrowserRouter([
       },
     ],
   },
-])
+], { basename })
