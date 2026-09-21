@@ -176,7 +176,7 @@ export function EtStudentsPage() {
   // 課程下拉取自 ET01 的清單（`scope=mine`）——教師只能追蹤自己建立的課程，
   // 與後端 `ensure_owner` 一致；列出他人課程只會產生「選了必定 403」的選項。
   const listParams = useMemo(() => ({ scope: "mine" as const, page: 1, limit: 100 }), [])
-  const { data: courses } = useQuery({
+  const { data: courses, isPending: coursesPending } = useQuery({
     queryKey: QUERY_KEYS.etCourses.list(listParams),
     queryFn: () => coursesApi.list(listParams),
   })
@@ -191,6 +191,14 @@ export function EtStudentsPage() {
   // 結果，只是不可再重置／移除。只排除 `DRAFT`，不要用 `is_closed` 或 `status !== "PUBLISHED"`。
   const options = (courses?.data ?? []).filter((c) => c.status !== "DRAFT")
   const selected = options.find((c) => c.course_id === courseId)
+  // #359 第 4 項 AC 3：沒有任何可選課程時要說明原因，而不是給一個打得開卻空的下拉。
+  //
+  // ⚠️ 排除草稿讓這個情境**變得更容易發生**——改之前只有草稿課的教師至少看得到自己的
+  // 課（雖然選了是三個空區塊），改之後他點開下拉是空的，分不出是「我沒有課」「我的課
+  // 都還沒發布」還是「壞了」。
+  //
+  // `coursesPending` 要分開判：載入中 `options` 也是空的，那時說「尚無已發布課程」是錯的。
+  const noCourses = !coursesPending && options.length === 0
   // 由後端算好的 `is_closed`——**不自己判 `status`**：期間已過時 status 仍是 PUBLISHED
   const readOnly = selected?.is_closed ?? false
 
@@ -276,6 +284,8 @@ export function EtStudentsPage() {
           label="課程"
           sx={{ minWidth: 260 }}
           value={courseId}
+          disabled={noCourses}
+          helperText={noCourses ? "尚無已發布的課程——課程發布後才會有學員" : undefined}
           onChange={(e) => setCourseId(e.target.value === "" ? "" : Number(e.target.value))}
         >
           <MenuItem value="">請選擇課程</MenuItem>
