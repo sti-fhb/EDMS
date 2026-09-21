@@ -70,13 +70,17 @@ export function DmEditorPage() {
   const { data: reviewers } = useReviewers()
   // 續編模式 meta（草稿匣「繼續編輯」）：有本人草稿 → 續編（draftMeta + PUT 更新既有版本）；
   // 無（後端 404 → null）→ 從 DM02 詳細載已發布文件 meta、走「加新版」（addVersion）。
-  const { data: draftMeta, isPending: draftMetaPending } = useDraftMeta(docId ?? "", !isNew)
+  const {
+    data: draftMeta,
+    isPending: draftMetaPending,
+    isFetching: draftMetaFetching,
+  } = useDraftMeta(docId ?? "", !isNew)
   const isContinueDraft = !isNew && !!draftMeta
   // 續編首版草稿（父文件 DRAFT）不打 DM02 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
   const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
-  const { data: docTags } = useDocTags(isNew ? "" : docId!, !isNew)
+  const { data: docTags, isFetching: docTagsFetching } = useDocTags(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
   const [file, setFile] = useState<File | null>(null)
@@ -249,6 +253,7 @@ export function DmEditorPage() {
   // 續編寫入後失效相關查詢，避免下次再進編輯讀到舊快取（誤以為沒存到，Round-1 回饋）。
   const invalidateAfterWrite = () => {
     if (isNew || !docId) return
+    qc.invalidateQueries({ queryKey: ["dm-editor", "doc-tags", docId] })
     qc.invalidateQueries({ queryKey: ["dm-editor", "draft-meta", docId] })
     qc.invalidateQueries({ queryKey: ["dm-detail", docId] })
     qc.invalidateQueries({ queryKey: ["dm-personal", "drafts"] })
@@ -323,11 +328,16 @@ export function DmEditorPage() {
   }, [blocker, confirm])
 
   // 編輯模式：載入文件現有標籤 → 一次性預帶進表單（不標記 dirty，尊重後續使用者編輯）。
+  //
+  // ⚠️ 必須等 `isFetching` 落下才預帶。TanStack Query 預設 `staleTime: 0`，重進本頁時會**同步吐出
+  // 上次的快取值**再背景 refetch；若此時就預帶，`tagsPrefilled` 這個一次性 guard 會鎖住舊值，
+  // 稍後 refetch 回來的新值再也寫不進表單——表現為「改了標籤存檔後，下次開啟還是舊值，要再改一次
+  // 才會真的存」（#377 手測回報）。
   useEffect(() => {
-    if (isNew || tagsPrefilled.current || !docTags) return
+    if (isNew || tagsPrefilled.current || !docTags || docTagsFetching) return
     tagsPrefilled.current = true
     setForm((prev) => ({ ...prev, audience_ids: docTags.audience_ids, retrieval_ids: docTags.retrieval_ids }))
-  }, [isNew, docTags])
+  }, [isNew, docTags, docTagsFetching])
 
   // 續編模式：一次性預帶既有草稿內容——名稱 / func / 版號 / 摘要 / 前次審核者，四種情況
   // （首版 / 新版本 × 自存 / 退回）一致。
@@ -336,8 +346,9 @@ export function DmEditorPage() {
   // 送審時 `version_no_taken`（editor/service.py）已擋掉與同文件既有版本重複的版號，留白對此
   // 沒有額外貢獻；代價卻是使用者看不到自己上次寫了什麼（值其實在 DB 裡），且與其他欄位都預帶
   // 的行為不一致，看起來像資料遺失。改以欄位下方的提示達成「請確認反映本次變更」的提醒。
+  // 同 tagsPrefilled：等 `isFetching` 落下才預帶，否則一次性 guard 會鎖住重進本頁時同步吐出的舊快取。
   useEffect(() => {
-    if (isNew || metaPrefilled.current || !draftMeta) return
+    if (isNew || metaPrefilled.current || !draftMeta || draftMetaFetching) return
     metaPrefilled.current = true
     setForm((prev) => ({
       ...prev,
@@ -347,7 +358,7 @@ export function DmEditorPage() {
       change_summary: draftMeta.change_summary ?? "",
       reviewer_id: draftMeta.assigned_reviewer ?? "",
     }))
-  }, [isNew, draftMeta])
+  }, [isNew, draftMeta, draftMetaFetching])
 
   // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM02 詳細載入。
   if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {

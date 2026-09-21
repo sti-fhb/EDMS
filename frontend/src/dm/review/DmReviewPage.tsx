@@ -115,16 +115,11 @@ function DetailPanel({
         </IconButton>
       </Box>
 
-      {/* 文件資訊（#377）：分類與本次送審之標籤。可見對象於核准後生效，審核者須能核對是否選錯；
-          新增／新版本顯示該版本快照，廢止顯示文件層現值（由後端依 review_type 決定來源）。 */}
+      {/* 本次送審之標籤（#377）：可見對象於核准後生效，審核者須能核對是否選錯；新增／新版本顯示
+          該版本快照，廢止顯示文件層現值（由後端依 review_type 決定來源）。
+          分類不在此重複顯示——待簽核清單該列已有分類 chip（手測回饋）。 */}
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, px: 2, py: 1.5, mb: 2 }}>
         <Stack spacing={1}>
-          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
-              分類
-            </Typography>
-            <Typography variant="body2">{detail.category_name || detail.category_code}</Typography>
-          </Box>
           <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
               可見對象

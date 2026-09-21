@@ -1,3 +1,4 @@
+import { QueryClient } from "@tanstack/react-query"
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
@@ -85,6 +86,34 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
     expect(await screen.findByText("請至少指定 1 個可見對象")).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
+  }, 20000)
+
+  it("存檔後重進編輯頁：標籤預帶新值，不被快取舊值鎖住（#377 手測回報）", async () => {
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    // 第一次進入：文件標籤為「全體」
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/tags", () =>
+        HttpResponse.json({ audience_ids: ["1"], retrieval_ids: [] }),
+      ),
+    )
+    const first = renderWithProviders(<DmEditorPage />, undefined, undefined, qc)
+    expect(await screen.findByText("全體")).toBeInTheDocument()
+    first.unmount()
+
+    // 模擬使用者改標籤並存檔後：伺服器端現在回「護理師」
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/tags", () =>
+        HttpResponse.json({ audience_ids: ["2"], retrieval_ids: [] }),
+      ),
+    )
+    renderWithProviders(<DmEditorPage />, undefined, undefined, qc)
+
+    // 重進時 TanStack Query（staleTime 0）會先同步吐出快取的「全體」再背景 refetch；
+    // 一次性預帶必須等 refetch 落定，否則 guard 會鎖住舊值 → 使用者以為沒存到。
+    expect(await screen.findByText("護理師")).toBeInTheDocument()
+    expect(screen.queryByText("全體")).not.toBeInTheDocument()
   }, 20000)
 
   it("分類選『訓練教材』→ 隱藏可見對象欄並說明不需設定（#377）", async () => {
