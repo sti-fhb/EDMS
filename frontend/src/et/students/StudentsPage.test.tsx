@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { HttpResponse, http } from "msw"
+import { HttpResponse, delay, http } from "msw"
 import { describe, expect, it, vi } from "vitest"
 
 import { EtStudentsPage } from "./StudentsPage"
@@ -39,6 +39,55 @@ describe("ET03 學員學習狀況追蹤", () => {
 
     expect(await screen.findByText(/已填 .* 人/)).toBeInTheDocument()
     expect(screen.queryByText(/母體為在籍學員/)).not.toBeInTheDocument()
+  })
+
+  it("教師只有草稿課程時，下拉停用並說明原因（#359 第 4 項 AC 3）", async () => {
+    // ⚠️ 排除草稿讓這個情境**變得更容易發生**：改之前只有草稿的教師至少看得到自己的課，
+    // 改之後下拉是空的——沒有這段說明，他分不出是「沒有課」「還沒發布」還是「壞了」。
+    server.use(
+      http.get("/api/et/courses", () =>
+        HttpResponse.json({
+          data: [
+            {
+              course_id: 21,
+              course_name: "只有草稿",
+              status: "DRAFT",
+              open_start_at: null,
+              open_end_at: null,
+              owner_id: "t01",
+              owner_name: "陳大華",
+              tags: [],
+              chapter_count: 1,
+              student_count: 0,
+              is_owner: true,
+              is_closed: false,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 12, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<EtStudentsPage />)
+
+    expect(await screen.findByText("尚無已發布的課程——課程發布後才會有學員")).toBeInTheDocument()
+    // MUI 的 select 把 disabled 表現為 combobox 上的 aria-disabled，不是原生 disabled 屬性
+    expect(screen.getByLabelText("課程")).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("載入中不得說「尚無已發布的課程」——那時還不知道（#359 第 4 項 AC 3）", async () => {
+    // ⚠️ `options` 在載入中也是空的。少了 `coursesPending` 的判斷，慢速連線下教師會看到
+    // 一句**假話**——與本 issue 要修的缺陷同一類（畫面告訴使用者一件不成立的事）。
+    server.use(
+      http.get("/api/et/courses", async () => {
+        await delay(200)
+        return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 12, total_pages: 1 } })
+      }),
+    )
+    renderWithProviders(<EtStudentsPage />)
+
+    expect(screen.queryByText(/尚無已發布的課程/)).not.toBeInTheDocument()
+    // 載完之後才該出現
+    expect(await screen.findByText(/尚無已發布的課程/)).toBeInTheDocument()
   })
 
   it("課程下拉排除草稿、但保留已關閉（#359 第 4 項）", async () => {
