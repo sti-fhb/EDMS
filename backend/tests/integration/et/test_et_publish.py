@@ -341,6 +341,30 @@ class TestUntitledItem:
         codes = [(b["code"], b["target_id"]) for b in body["blockers"]]
         assert ("ITEM_NO_TITLE", item.json()["item_id"]) in codes
 
+    async def test_缺漏順序與教師畫面上的章節順序一致(self, client, db) -> None:
+        """`_item_titles` 的 `ORDER BY` 是**有意義的**，不是隨手加的。
+
+        ⚠️ 這條測試是變異檢查逼出來的：把 `ORDER BY` 反轉成 `item_id.desc()` 之後
+        23 條整合測試**全綠**——那個排序的宣稱當時零測試承重。docstring 說「順序與
+        教師在畫面上看到的一致」，而沒有任何東西在守它。
+        """
+        uid = await _user(db, "t_ut05")
+        cid = await _publishable_course(client, db, uid)
+        item_ids = []
+        for name in ("甲章", "乙章"):
+            ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": name}, headers=_bearer(uid))
+            created = await client.post(
+                f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+                json={"item_type": ITEM_MATERIAL, "title": ""},
+                headers=_bearer(uid),
+            )
+            item_ids.append(created.json()["item_id"])
+
+        body = await _check(client, uid, cid)
+
+        untitled = [b["target_id"] for b in body["blockers"] if b["code"] == "ITEM_NO_TITLE"]
+        assert untitled == item_ids, "缺漏順序要跟著章節順序，教師才不用在清單與畫面之間對照"
+
     async def test_補上名稱後該缺漏消失(self, client, db) -> None:
         """釘住「修好就放行」——只驗擋得住，驗不出它是不是永遠擋著。"""
         uid = await _user(db, "t_ut04")
