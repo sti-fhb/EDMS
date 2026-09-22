@@ -90,6 +90,20 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(await screen.findByText(/尚無已發布的課程/)).toBeInTheDocument()
   })
 
+  it("課程清單載入失敗時說「載入失敗」，不得說「尚無已發布的課程」（#390 回歸）", async () => {
+    // 🔴 #390 自己引入的回歸：該 PR 只讀了 `isPending`，沒讀 `isError`。查詢失敗時
+    // `options` 同樣是空的，於是畫面斷言「尚無已發布的課程」——那正是 #390 要修的那一類
+    // **假陳述**（畫面告訴使用者一件不成立的事），而且比原本的缺陷更糟：教師會據此
+    // 以為「我真的沒有已發布的課程」，而不是「剛才沒載到，重整一下」。
+    server.use(http.get("/api/et/courses", () => HttpResponse.json({ detail: "boom" }, { status: 500 })))
+    renderWithProviders(<EtStudentsPage />)
+
+    expect(await screen.findByText(/課程清單載入失敗/)).toBeInTheDocument()
+    expect(screen.queryByText(/尚無已發布的課程/)).not.toBeInTheDocument()
+    // 失敗時也要停用——清單不完整，讓它可展開等於暗示「這就是全部」
+    expect(screen.getByLabelText("課程")).toHaveAttribute("aria-disabled", "true")
+  })
+
   it("課程下拉排除草稿、但保留已關閉（#359 第 4 項）", async () => {
     const user = userEvent.setup()
     renderWithProviders(<EtStudentsPage />)
