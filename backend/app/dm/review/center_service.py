@@ -526,6 +526,10 @@ class ReviewCenterService:
                 # 現在會發生；讀者不應據此認為「已刪除」這條路徑已被實作。
                 unreachable = "審核者帳號已停用"
             elif not r.reviewer_email:
+                # 分三類後這條只剩「`EMAIL` 為空字串」一途（`DP_USER.EMAIL` 是
+                # `nullable=False`，`None` 只會來自 outerjoin 落空，已由上面接走）。
+                # 原本 `if not r.reviewer_email` 單條守門其實是在兼差擋 outerjoin 落空，
+                # 那個真正的成因現在有自己的名字了。
                 unreachable = "查無審核者 Email"
             else:
                 unreachable = None

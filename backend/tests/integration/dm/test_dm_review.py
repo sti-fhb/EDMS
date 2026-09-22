@@ -503,6 +503,32 @@ async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, capl
     assert "審核者帳號已停用" not in caplog.text
 
 
+async def test_審核者_email_為空字串時跳過且留下_log(db, caplog):
+    """`DP_USER.EMAIL` 是 `nullable=False`，故此條只能由空字串觸發。
+
+    ⚠️ 這條是變異檢查抓出來的缺口：把 `elif not r.reviewer_email` 整條拿掉，29 條測試
+    **全綠**——原本這個分支零覆蓋。它在 main 上就存在（`if not r.reviewer_email: continue`），
+    但當時是在兼差擋 outerjoin 落空；三類分開後落空有自己的分支，剩下的才是本條。
+    """
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395e", "撰寫")
+    await _seed_user(db, "rev395e", "無信箱審核者", email="rev395e@e.com")
+    await db.execute(update(DpUser).where(DpUser.user_id == "rev395e").values(email=""))
+    await _doc(db, "DM-SOP-000399", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000399", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000399", v.version_id, review_type="NEW", reviewer="rev395e", submit=utcnow() - timedelta(days=10)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0
+    assert "查無審核者 Email" in caplog.text
+    assert "審核者帳號已停用" not in caplog.text, "帳號是 ACTIVE，不該被歸成停用"
+
+
 async def test_啟用中的審核者照常收到催辦(db):
     """回歸護欄：本次修正**只**排除非 ACTIVE 者，正常路徑不得受影響。"""
     from datetime import timedelta
