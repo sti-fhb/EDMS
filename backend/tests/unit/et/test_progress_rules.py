@@ -23,6 +23,7 @@ from app.et.progress.rules import (
     build_item_state,
     clamp_segment,
     coverage_pct,
+    first_blocking_item,
     is_item_unlocked,
     locked_item_ids,
     merge_segments,
@@ -273,6 +274,44 @@ class TestLockedItemIds:
 
     def test_無章節回空集合(self) -> None:
         assert locked_item_ids([]) == frozenset()
+
+
+class TestFirstBlockingItem:
+    """學習前緣——供 ET05 對鎖定項目給出**正確**的提示（`spec_us5` AC 12）。
+
+    AC 12 啟用後，鎖定多了「測驗未通過」這個成因；前端寫死的「請先完成本章節之影片
+    學習」會把考不過的學員指向錯的動作。
+    """
+
+    def test_回第一個未完成者(self) -> None:
+        chapters = [[_item(1, completed=True), _item(2)], [_item(3)]]
+        assert first_blocking_item(chapters) == 2
+
+    def test_跨章節仍取最早者(self) -> None:
+        """⛔ 不是「擋住該項的緊鄰前一項」。
+
+        第 1 章的項目 2 沒完成 → 第 2 章整章鎖著。對第 2 章的項目該說的是「先去做
+        項目 2」，而不是指向同樣鎖著的第 1 章末項。
+        """
+        chapters = [[_item(1, completed=True), _item(2), _item(3)], [_item(4)]]
+        assert first_blocking_item(chapters) == 2
+
+    def test_全部完成回_None(self) -> None:
+        chapters = [[_item(1, completed=True)], [_item(2, completed=True)]]
+        assert first_blocking_item(chapters) is None
+
+    def test_零題測驗不算前緣(self) -> None:
+        """它不擋路，自然也不是「學員該去做的下一件事」——指向它只會讓他更迷惑。"""
+        zero_question_quiz = _item(1, completed=False, treat_as_done=True)
+        chapters = [[zero_question_quiz, _item(2)]]
+        assert first_blocking_item(chapters) == 2
+
+    def test_空章節跳過(self) -> None:
+        chapters: list[list[ItemState]] = [[], [_item(1)]]
+        assert first_blocking_item(chapters) == 1
+
+    def test_無章節回_None(self) -> None:
+        assert first_blocking_item([]) is None
 
 
 class TestThreshold:

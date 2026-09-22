@@ -144,10 +144,15 @@ async def _course(client, db, teacher: str, *, code: str) -> dict:
     return result
 
 
-async def _sidebar(client, student: str, course_id: int) -> dict[int, dict]:
-    r = await client.get(f"{_COURSES}/{course_id}/learn", headers=_bearer(student))
+async def _learn(client, user_id: str, course_id: int) -> dict:
+    r = await client.get(f"{_COURSES}/{course_id}/learn", headers=_bearer(user_id))
     assert r.status_code == 200, r.text
-    return {i["item_id"]: i for c in r.json()["chapters"] for i in c["items"]}
+    return r.json()
+
+
+async def _sidebar(client, student: str, course_id: int) -> dict[int, dict]:
+    body = await _learn(client, student, course_id)
+    return {i["item_id"]: i for c in body["chapters"] for i in c["items"]}
 
 
 async def _attempt_quiz(client, student: str, quiz_id: int, *, correct: bool, question: dict) -> dict:
@@ -332,6 +337,65 @@ class TestZeroQuestionQuizDoesNotGate:
 
         assert items[items_created[0]]["locked"] is False, "第一項恆解鎖"
         assert items[items_created[1]]["locked"] is True, "未完成第一份教材就不該解鎖第二份"
+
+
+class TestBlockingItemType:
+    """`spec_us5` AC 12 的後半：阻擋**並提示**（ET-MSG-ET05-002）。
+
+    🔴 前端原本對任何鎖定項目都提示「請先完成本章節之影片學習」。AC 12 啟用前那句
+    永遠是對的（鎖定的唯一成因就是教材沒看完），啟用後會**把考不過的學員指向錯的
+    動作**——叫他去看早就看完的影片。故後端要說出前緣是哪一型。
+    """
+
+    async def test_前緣是測驗時回_QUIZ(self, client, db) -> None:
+        teacher = await _user(db, "t_gate10", ROLE_TEACHER)
+        student = await _user(db, "s_gate10")
+        course = await _course(client, db, teacher, code="33000010")
+        await _enroll(db, student, course["course_id"])
+        await _attempt_quiz(client, student, course["first_quiz_id"], correct=False, question=course["first_question"])
+
+        body = await _learn(client, student, course["course_id"])
+
+        assert body["blocking_item_type"] == ITEM_QUIZ
+
+    async def test_前緣是教材時回_MATERIAL(self, client, db) -> None:
+        """同一門課只換前緣的型別——確認它真的跟著前緣走，不是寫死。"""
+        teacher = await _user(db, "t_gate11", ROLE_TEACHER)
+        student = await _user(db, "s_gate11")
+        created = await client.post(_COURSES, json={"course_name": "教材在前"}, headers=_bearer(teacher))
+        course_id = created.json()["course_id"]
+        ch = await client.post(
+            f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(teacher)
+        )
+        await client.post(
+            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL},
+            headers=_bearer(teacher),
+        )
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == course_id)
+            .values(status=COURSE_PUBLISHED, invitation_code="33000011", open_start_at=utcnow() - timedelta(hours=1))
+        )
+        await _enroll(db, student, course_id)
+        await db.flush()
+
+        body = await _learn(client, student, course_id)
+
+        assert body["blocking_item_type"] == ITEM_MATERIAL
+
+    async def test_教師預覽恆為_None(self, client, db) -> None:
+        """教師不累積進度、也不套用鎖定，故沒有「前緣」可言。
+
+        ⚠️ 若照學員規則算，會對著自己的課提示「請先完成…」——而他根本不在學。
+        """
+        teacher = await _user(db, "t_gate12", ROLE_TEACHER)
+        course = await _course(client, db, teacher, code="33000012")
+
+        body = await _learn(client, teacher, course["course_id"])
+
+        assert body["is_owner"] is True
+        assert body["blocking_item_type"] is None
 
 
 class TestResetEscapeHatch:

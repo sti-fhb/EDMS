@@ -266,11 +266,9 @@ class TestGrading:
     async def test_單選答對得滿分並回寫項目完成(self, client, db) -> None:
         """AC 8：閱卷 → 及格判定 → 回寫 `ET_PROGRESS.IS_COMPLETED`。
 
-        ⚠️ **不驗「因此解鎖下一章」**——`spec_us5` AC 12（測驗未及格阻擋解鎖）依 #279
-        裁示 2 = C **尚未啟用**：`build_item_state` 目前仍讓測驗恆視為通過，因為
-        「重置重考次數」（US9）未實作，掛上門檻會讓次數用盡的學員永久鎖死且無從補救。
-
-        本測試因此只釘住「及格會寫進度」這件事——那是 `ET-9` 啟用門檻時的前提。
+        本測試釘住「及格會寫進度」這件事。`spec_us5` AC 12（測驗未及格阻擋解鎖）已於
+        2026-09-22（#361）啟用，其兩側（擋住 / 放行）另於 `test_et_quiz_gate.py` 完整
+        覆蓋，此處不重複。
         """
         teacher = await _user(db, "t_att06", ROLE_TEACHER)
         student = await _user(db, "s_att06")

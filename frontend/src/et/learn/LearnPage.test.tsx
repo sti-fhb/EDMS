@@ -28,6 +28,7 @@ function mockStructure(overrides: Partial<LearnStructure>) {
         playback_rates: [0.75, 1.0, 1.25, 1.5, 2.0],
         last_item_id: null,
         survey: null,
+        blocking_item_type: null,
         chapters: [
           {
             chapter_id: 10,
@@ -155,7 +156,7 @@ describe("ET05 章節學習頁", () => {
     })
 
     it("鎖定項目點擊時擋下並提示（AC 6 / ET-MSG-ET05-001）", async () => {
-      mockStructure({ chapters: lockedChapters() })
+      mockStructure({ chapters: lockedChapters(), blocking_item_type: "MATERIAL" })
       const user = userEvent.setup()
       renderWithProviders(<EtLearnPage />)
 
@@ -165,6 +166,20 @@ describe("ET05 章節學習頁", () => {
       expect(await screen.findByText("請先完成本章節之影片學習")).toBeInTheDocument()
       // 內容區沒有切過去（測驗面板不該出現）
       expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
+    })
+
+    it("前緣是測驗時改提示重考，不再叫他去看影片（AC 12 / ET-MSG-ET05-002）", async () => {
+      // 🔴 #361：AC 12 啟用後鎖定多了「測驗未通過」這個成因。沿用原本那句會叫一個
+      // 影片早就看完的學員再去看一次影片，而他真正該做的是重考——他照著提示做完全
+      // 沒有用，且畫面不會有任何其他線索。
+      mockStructure({ chapters: lockedChapters(), blocking_item_type: "QUIZ" })
+      const user = userEvent.setup()
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByText("基本概念測驗"))
+
+      expect(await screen.findByText("請通過本章節之測驗後解鎖")).toBeInTheDocument()
+      expect(screen.queryByText("請先完成本章節之影片學習")).not.toBeInTheDocument()
     })
 
     it("側欄顯示課程進度（完成項目數 ÷ 總項目數）", async () => {

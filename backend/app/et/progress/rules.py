@@ -196,6 +196,35 @@ def build_item_state(
     )
 
 
+def first_blocking_item(chapters: Sequence[Sequence[ItemState]]) -> int | None:
+    """課程順序中**第一個未視為完成**的項目；全部完成則 `None`。
+
+    供 ET05 對鎖定項目給出正確提示（`spec_us5` AC 12「阻擋**並提示**」）。AC 12 啟用
+    前，鎖定的唯一成因是教材未看完，前端寫死「請先完成本章節之影片學習」即可；啟用後
+    多了「測驗未通過」這個成因，同一句話會把學員指向錯的動作——叫他去看早就看完的
+    影片，而他真正該做的是重考。
+
+    ## 為何一個值就夠
+
+    解鎖規則是嚴格依序的（章節依序 + 章節內依序），故**所有鎖定都追溯到同一項**——
+    它就是學員的學習前緣。而前緣之前的項目全部已完成，所以它自己必然是解鎖的，也就是
+    「他現在真的做得到的下一件事」。
+
+    ⛔ 不要改成「擋住該項的緊鄰前一項」：跨章節時那會指向一個**他也還打不開**的項目。
+    例：第一章教材沒看完 → 第一章的測驗也鎖著 → 若對第二章的項目提示「請通過本章節
+    之測驗」，他點過去只會發現那個也是鎖的，反而更迷惑。
+
+    Args:
+        chapters: 已依 `SORT_ORDER` 排序的章節，每章為已排序的項目——與
+            `locked_item_ids` 同一份輸入，**順序即規則**。
+    """
+    for items in chapters:
+        for state in items:
+            if not state.treat_as_done:
+                return state.item_id
+    return None
+
+
 def locked_item_ids(chapters: Sequence[Sequence[ItemState]]) -> frozenset[int]:
     """依「章節依序 + 章節內依序」算出所有**鎖定**的項目（AC 5 / AC 6 + 裁示 Q2=A）。
 
