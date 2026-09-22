@@ -414,6 +414,28 @@ class TestRequireRetestOnQuizChange:
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert (resets, done) == (0, True), "排序不是內容變更，不該把全班的通過紀錄清掉"
 
+    async def test_重複儲存不會重複重置也不會重複寄信(self, client, db):
+        # 🔴 這條釘住「目前算通過」這個語意（`ATTEMPT_NO > MAX(ATTEMPT_COUNT_AT_RESET)`）。
+        #
+        # 若改回單純的「曾及格」（`bool_or(IS_PASS)`），該值重置後不會下降：確認框會
+        # 一直跳、教師每按一次就再寄 N 封信、再寫 N 列 append-only 的重置基準。
+        # 「手滑連按三次 → 全班收三封」很容易發生。
+        teacher = await _user(db, "ZTT030")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS030", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+
+        for round_no in (1, 2):
+            body = await _settings_body(db, qid, pass_score=80 + round_no, require_retest=True)
+            r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+            assert r.status_code == 204, f"第 {round_no} 次儲存：{r.text}"
+
+        _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert resets == 1, "第二次儲存時該學員已不算通過，不應再寫一列基準"
+        assert done is False
+        pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
+        assert pending == 1, "第二次儲存不應再寄一封——他已經被要求重測了"
+
     async def test_已被移出課程的學員不受影響也不收信(self, client, db):
         # 🔴 本功能的安全不變量之一。`mark_removed` 只設 `IS_REMOVED`、不動 attempt 與
         # progress，所以少了那道 JOIN 過濾，一位已離開課程的人會被寫重置基準、清完成
