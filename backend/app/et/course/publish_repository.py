@@ -103,9 +103,17 @@ class EtPublishRepository:
         依**章節順序 → 項目順序**排序，使缺漏清單的順序與教師在畫面上看到的一致
         （同 `_chapter_summaries` 的理由）。
 
-        > 若項目的教材／測驗列已軟刪除（孤兒項目），`coalesce` 會給空字串，於是該項目
-        > 被當成「未命名」擋下。那是**刻意的 fail-closed**：一門帶著孤兒項目的課程同樣
-        > 不該發布出去，而擋下來至少讓教師看得到有東西不對。
+        `coalesce` 的第三個參數 `""` 是**必要的**，不是防禦性冗餘：兩個 outer join 都
+        落空時該欄為 `NULL`，而 `ItemSummary.title` 是 `str`，下游 `evaluate_publish`
+        會對它呼叫 `.strip()`——`None` 會讓發布檢核 500。
+
+        > **孤兒項目（項目還在、其教材／測驗列已軟刪）今天不可達**：唯一的刪除路徑
+        > `EtItemRepository.soft_delete_with_cascade` 一律連 `ET_ITEM` 本體一起刪。
+        > 但那支的 docstring 自己指出 `ET_ITEM.MATERIAL_ID` 無 UNIQUE、日後若支援
+        > 「重用既有教材」就得把判斷改成「僅在無其他項目引用時才刪」——屆時刪掉 A
+        > 項目會軟刪共用的教材、讓 B 項目變成孤兒。到那時這裡會把 B 當成「未命名」
+        > 擋下發布：訊息不精確（教師會去找一個沒有名稱的項目），但方向是 fail-closed，
+        > 而帶著孤兒項目的課程本來就不該發布出去。
         """
         if not chapter_ids:
             return ()
