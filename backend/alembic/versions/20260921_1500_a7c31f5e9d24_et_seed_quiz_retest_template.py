@@ -1,7 +1,7 @@
 """et_seed_quiz_retest_template
 
 Revision ID: a7c31f5e9d24
-Revises: f1d93a5c7b04
+Revises: 2bf2384687c8
 Create Date: 2026-09-21 15:00:00.000000
 
 新增「測驗變更需重新測驗」通知範本（#361）。
@@ -36,7 +36,12 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "a7c31f5e9d24"
-down_revision: Union[str, None] = "f1d93a5c7b04"
+# 2026-09-22 rebase 後改掛於 `2bf2384687c8`（#377，DM_VERSION_TAG）之後。
+#
+# 原本與它同掛 `f1d93a5c7b04` 而形成雙 head。依 `sti-alembic-rules`：已 merge 的
+# migration 禁止改 `down_revision`、只能開匯流節點，但**本檔尚未合併**（已以
+# `git log origin/main -- <本檔>` 確認為空），故直接改掛較乾淨、不需多一個 merge 節點。
+down_revision: Union[str, None] = "2bf2384687c8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
