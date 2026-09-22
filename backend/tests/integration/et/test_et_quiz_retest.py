@@ -328,6 +328,16 @@ class TestRequireRetestOnQuizChange:
             _, resets, done = await _facts(db, uid=uid, quiz_id=qid, item_id=item_id)
             assert (resets, done) == (1, False), f"{uid} 的重置基準與完成旗標都要生效"
 
+        # 🔴 每封信的內文要是**收件人自己**的姓名。
+        #
+        # 範本含 `{USER_NAME}`，而平台 `send_email` 對整批收件人**只渲染一次**——若有人
+        # 把逐人迴圈「優化」成合批，信件數仍是 2、上面的斷言照樣過，但兩封信會寫同一
+        # 個人的名字。目前只靠迴圈結構保證，這條是唯一會在那時變紅的測試。
+        mails = (await db.execute(select(DpEmailLog).where(DpEmailLog.status == "PENDING"))).scalars().all()
+        for mail in mails:
+            uid = mail.recipient.split("@")[0]
+            assert f"測試{uid}" in mail.body, f"寄給 {mail.recipient} 的信內文必須是他自己的姓名"
+
     async def test_新增題目也能要求重測(self, client, db):
         teacher = await _user(db, "ZTT006")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
