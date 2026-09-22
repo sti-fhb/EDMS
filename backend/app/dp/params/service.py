@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
+from app.core.module_assign import module_assign_registry
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
@@ -18,6 +19,8 @@ from app.dp.params.models import DpParamMaster
 from app.dp.params.param_rules import validate_group_invariants, validate_param_value
 from app.dp.params.repository import ParamRepository
 from app.dp.params.schemas import (
+    ControlledItemResponse,
+    ControlledSectionResponse,
     ParamDetailCreate,
     ParamDetailResponse,
     ParamDetailUpdate,
@@ -108,6 +111,73 @@ def _detail_snapshot(detail) -> dict:
         "description": detail.description,
         "is_enabled": detail.is_enabled,
     }
+
+
+def _to_item(item) -> ControlledItemResponse:
+    return ControlledItemResponse(
+        code=item.code, name=item.name, is_builtin=item.is_builtin, is_enabled=item.is_enabled
+    )
+
+
+def _split_sections(module: str, kind, items) -> list[ControlledSectionResponse]:
+    """把一個 kind 的項目攤成畫面分區：有子分組者每組一區，否則整個 kind 一區。"""
+    if not kind.groups:
+        return [
+            ControlledSectionResponse(
+                module=module,
+                kind=kind.kind,
+                name=kind.name,
+                requires_code=kind.requires_code,
+                items=[_to_item(i) for i in items],
+            )
+        ]
+    return [
+        ControlledSectionResponse(
+            module=module,
+            kind=kind.kind,
+            name=kind.name,
+            requires_code=kind.requires_code,
+            group_code=group.code,
+            group_name=group.name,
+            items=[_to_item(i) for i in items if i.tag_group_code == group.code],
+        )
+        for group in kind.groups
+    ]
+
+
+class ControlledAdminService:
+    """US5 模組受控清單維護服務（#182）。
+
+    受控清單存於**模組自持表**（`DM_CATEGORY` / `DM_FUNC` / `DM_TAG` / `ET_TAG`），
+    DP 一律經 `module_assign_registry` 委派模組 provider，不直接讀寫模組表
+    （`sti-backend-boundaries`）。與 `ParamAdminService`（`DP_PARAM`）並存於同一畫面、
+    但兩者資料源與鎖定語意不同，故不合併模型。
+    """
+
+    async def list_visible(self, db: AsyncSession, user_id: str) -> list[ControlledSectionResponse]:
+        """列操作者可維護之受控清單分區（僅具該模組管理者身分者）。
+
+        逐模組取 provider → `list_controlled_kinds()` 取分區定義 → 逐分區取項目。
+        有子分組之 kind（DM 標籤）依組拆成多個分區，供畫面分區呈現。
+
+        Args:
+            db: 呼叫方 AsyncSession。
+            user_id: 操作者 USER_ID。
+
+        Returns:
+            分區清單；無任何模組管理者身分回空清單（fail-closed，不拋例外）。
+        """
+        sections: list[ControlledSectionResponse] = []
+        for module in module_assign_registry.registered_modules():
+            provider = module_assign_registry.get(module)
+            # checker 未註冊時 is_module_admin 回 False（fail-closed）——不得因 provider
+            # 已註冊就列出該模組清單
+            if provider is None or not await module_admin_gate.is_module_admin(module, user_id, db):
+                continue
+            for kind in await provider.list_controlled_kinds(db):
+                items = await provider.list_controlled(db, kind.kind)
+                sections.extend(_split_sections(module, kind, items))
+        return sections
 
 
 class ParamAdminService:

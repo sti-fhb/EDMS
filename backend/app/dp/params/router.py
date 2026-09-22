@@ -13,12 +13,19 @@ from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
-from app.dp.params.schemas import ParamDetailCreate, ParamDetailResponse, ParamDetailUpdate, ParamMasterResponse
-from app.dp.params.service import ParamAdminService
+from app.dp.params.schemas import (
+    ControlledSectionResponse,
+    ParamDetailCreate,
+    ParamDetailResponse,
+    ParamDetailUpdate,
+    ParamMasterResponse,
+)
+from app.dp.params.service import ControlledAdminService, ParamAdminService
 
 router = APIRouter(prefix="/api/dp/params", tags=["dp-params"], dependencies=[Depends(require_any_module_admin())])
 
 _service = ParamAdminService()
+_controlled = ControlledAdminService()
 
 
 @router.get("", response_model=list[ParamMasterResponse])
@@ -28,6 +35,15 @@ async def list_params(
 ):
     """列操作者可見之參數 / 清單（平台級共用 + 具管理者身分之模組級，前綴過濾）。"""
     return await _service.list_visible(db, payload.sub)
+
+
+@router.get("/controlled", response_model=list[ControlledSectionResponse])
+async def list_controlled_sections(
+    payload: JwtPayload = Depends(get_jwt_payload),
+    db: AsyncSession = Depends(get_db),
+):
+    """列操作者可維護之模組受控清單（模組自持表，經轉接層取得；模組過濾於 service enforce）。"""
+    return await _controlled.list_visible(db, payload.sub)
 
 
 @router.put("/{param_id}/details/{param_key}", response_model=ParamDetailResponse)

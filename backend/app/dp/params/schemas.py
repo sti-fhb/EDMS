@@ -48,6 +48,31 @@ class ParamMasterResponse(BaseModel):
     details: list[ParamDetailResponse]
 
 
+class ControlledItemResponse(BaseModel):
+    """模組受控清單之單一項（模組自持表，非 `DP_PARAM`）。"""
+
+    code: str
+    name: str
+    is_builtin: bool
+    is_enabled: bool
+
+
+class ControlledSectionResponse(BaseModel):
+    """受控清單之一個維護分區（維護頁用）。
+
+    一個 `kind` 通常對應一個分區；有子分組者（DM 標籤依 `DM_TAG_GROUP`）每組各一分區，
+    此時 `group_code` / `group_name` 非空。`requires_code` 決定新增表單要不要代碼欄。
+    """
+
+    module: str
+    kind: str
+    name: str
+    requires_code: bool
+    group_code: Optional[str] = None
+    group_name: Optional[str] = None
+    items: list[ControlledItemResponse]
+
+
 class ParamDetailUpdate(BaseModel):
     """更新明細請求：改名（param_name）/ 改值（param_value）/ 說明 / 啟停。
 
