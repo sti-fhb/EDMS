@@ -446,7 +446,7 @@ async def test_停用的審核者不再收到催辦(db, caplog):
     assert count == 0, "停用的審核者不該再收到催辦"
     # ⭐ 只停止寄信會把問題從吵鬧變成安靜——案件仍卡著、仍無人能處理，只是沒人被打擾。
     # 這條釘住「跳過要留下痕跡」，否則積壓變成隱形的。
-    assert "rev395a" in caplog.text and "審核者帳號未啟用" in caplog.text, (
+    assert "rev395a" in caplog.text and "審核者帳號已停用" in caplog.text, (
         "跳過未寄的催辦必須留下 log，否則永久卡住的案件會無聲累積"
     )
 
@@ -469,6 +469,38 @@ async def test_已刪除的審核者不再收到催辦(db):
     )
 
     assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 0
+
+
+async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, caplog):
+    """`list_overdue_pending` 走 `outerjoin`，查無使用者列時 `reviewer_status` 是 `None`。
+
+    ⚠️ 兩類**不能併成一句**：`None != "ACTIVE"` 也成立，若不分開，log 會說「帳號已停用」
+    而真相是「那個 user_id 不存在」——日後有人照這行 log 去翻停用清單會查不到人，
+    而兩者的補救動作不同（前者修資料、後者換審核者）。
+
+    `ASSIGNED_REVIEWER` 是 `String(20)` 且**無 FK**，故此列造得出來；送簽 API 雖有
+    `_ensure_assignable_reviewer`（#250）擋，DB 層不保證。
+    """
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395d", "撰寫")
+    await _doc(db, "DM-SOP-000398", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000398", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db,
+        "DM-SOP-000398",
+        v.version_id,
+        review_type="NEW",
+        reviewer="nobody395",  # DP_USER 查無此列
+        submit=utcnow() - timedelta(days=10),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0
+    assert "查無審核者帳號" in caplog.text, "孤兒指派要有自己的分類，否則被誤標成已停用"
+    assert "審核者帳號已停用" not in caplog.text
 
 
 async def test_啟用中的審核者照常收到催辦(db):

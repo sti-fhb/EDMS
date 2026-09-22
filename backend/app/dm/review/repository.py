@@ -373,6 +373,10 @@ class ReviewCenterRepository:
         故本支回出 `reviewer_status` / `reviewer_deleted`，由 `scan_overdue_and_remind`
         決定「不寄、但記下來」。判準不變：**週期性排程的收件人清單與寄信時點隔了時間，
         必須重新確認狀態**；差別只在確認的位置。
+
+        ⚠️ 審核者是 `outerjoin`，**`reviewer_status` 可能為 `None`**（該 `user_id` 查無
+        使用者列；`ASSIGNED_REVIEWER` 無 FK）。呼叫端須把它與「已停用」分開判讀——兩者
+        的補救動作不同：前者要修資料，後者要換審核者。
         """
         cutoff: datetime = utcnow() - timedelta(days=threshold_days)
         stmt = (
