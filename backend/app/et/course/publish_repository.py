@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.et.catalog.models import EtCourseTag
 from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ
 from app.et.course.models import EtChapter, EtCourse, EtItem
-from app.et.course.publish_rules import ChapterSummary, CourseSnapshot, QuizSummary
-from app.et.material.models import EtMaterialDoc
-from app.et.quiz.models import EtQuestion
+from app.et.course.publish_rules import ChapterSummary, CourseSnapshot, ItemSummary, QuizSummary
+from app.et.material.models import EtMaterial, EtMaterialDoc
+from app.et.quiz.models import EtQuestion, EtQuiz
 from app.et.survey.models import EtSurvey, EtSurveyQuestion
 
 
@@ -48,6 +48,7 @@ class EtPublishRepository:
             tag_count=await self._tag_count(db, course.course_id),
             chapters=chapters,
             material_count=await self._item_count(db, chapter_ids, ITEM_MATERIAL),
+            items=await self._item_titles(db, chapter_ids),
             quizzes=await self._quiz_summaries(db, chapter_ids),
             doc_ids=await self._doc_ids(db, chapter_ids),
             survey_question_count=await self._survey_question_count(db, course.course_id),
@@ -91,6 +92,33 @@ class EtPublishRepository:
             .order_by(EtChapter.sort_order)
         )
         return tuple(ChapterSummary(chapter_id=cid, item_count=count) for cid, count in rows.all())
+
+    async def _item_titles(self, db: AsyncSession, chapter_ids: list[int]) -> tuple[ItemSummary, ...]:
+        """逐項目的顯示名稱（#384）。
+
+        ⚠️ **名稱不在 `ET_ITEM` 上**——項目本身不存名稱（避免教材改名後不同步），
+        依 `ITEM_TYPE` 落在 `ET_MATERIAL.MATERIAL_NAME` 或 `ET_QUIZ.QUIZ_NAME`。
+        兩者以 outer join + `coalesce` 取回，形狀比照 `EtItemRepository.list_rows_by_chapters`。
+
+        依**章節順序 → 項目順序**排序，使缺漏清單的順序與教師在畫面上看到的一致
+        （同 `_chapter_summaries` 的理由）。
+
+        > 若項目的教材／測驗列已軟刪除（孤兒項目），`coalesce` 會給空字串，於是該項目
+        > 被當成「未命名」擋下。那是**刻意的 fail-closed**：一門帶著孤兒項目的課程同樣
+        > 不該發布出去，而擋下來至少讓教師看得到有東西不對。
+        """
+        if not chapter_ids:
+            return ()
+        rows = await db.execute(
+            select(EtItem.item_id, func.coalesce(EtMaterial.material_name, EtQuiz.quiz_name, ""))
+            .select_from(EtItem)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .outerjoin(EtMaterial, (EtItem.material_id == EtMaterial.material_id) & (EtMaterial.deleted == 0))
+            .outerjoin(EtQuiz, (EtItem.quiz_id == EtQuiz.quiz_id) & (EtQuiz.deleted == 0))
+            .where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
+            .order_by(EtChapter.sort_order, EtItem.sort_order, EtItem.item_id)
+        )
+        return tuple(ItemSummary(item_id=item_id, title=title) for item_id, title in rows.all())
 
     async def _tag_count(self, db: AsyncSession, course_id: int) -> int:
         """課程已掛之受訓單位標籤數。

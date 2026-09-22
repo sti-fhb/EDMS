@@ -12,6 +12,7 @@ import pytest
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.publish_rules import (
     BLOCK_CHAPTER_EMPTY,
+    BLOCK_ITEM_NO_TITLE,
     BLOCK_NO_CHAPTER,
     BLOCK_NO_MATERIAL,
     BLOCK_NO_SCHEDULE,
@@ -22,6 +23,7 @@ from app.et.course.publish_rules import (
     BLOCK_SURVEY_NO_QUESTION,
     ChapterSummary,
     CourseSnapshot,
+    ItemSummary,
     QuizSummary,
     evaluate_publish,
     is_visible_to_student,
@@ -47,6 +49,9 @@ def _snapshot(**overrides) -> CourseSnapshot:
         "tag_count": 1,
         "chapters": (ChapterSummary(chapter_id=1, item_count=1),),
         "material_count": 1,
+        # 基準快照的項目**有名稱**——否則每條測試都會多一條 ITEM_NO_TITLE 缺漏，
+        # 失敗原因就不再是它自己覆寫的那一項（見本函式 docstring）。
+        "items": (ItemSummary(item_id=101, title="第一份教材"),),
         "quizzes": (),
         "doc_ids": frozenset(),
         # None = 沒有問卷（選配，AC 23）；整數 = 有問卷且其題數
@@ -210,6 +215,71 @@ class TestSurveyCheck:
         """一門課程至多 1 份問卷，不需要 `target_id` 指出是哪一份。"""
         blockers = evaluate_publish(_snapshot(survey_question_count=0), obsolete_doc_ids=frozenset())
         assert blockers[0].target_id is None
+
+
+class TestItemTitleCheck:
+    """#384：未命名的教材／測驗不得發布出去。
+
+    缺口是兩個各自合理的設計相乘——建立時名稱可留空（2026-08-27 依實測回饋的刻意
+    設計），而「儲存時必填」擋不住「**不按儲存**」：教師新增項目 → 空殼已在 DB →
+    直接關掉視窗，那個空名稱項目就留在章節裡。發布檢核是最後一道防線。
+
+    ⚠️ 這類缺陷**沒有任何錯誤訊號**：CI 全綠、API 全部 200、畫面不報錯，
+    只有學員端章節導覽列上一行字是空的。
+    """
+
+    def test_未命名教材被擋並指出是哪一個項目(self) -> None:
+        snapshot = _snapshot(
+            items=(
+                ItemSummary(item_id=101, title="第一份教材"),
+                ItemSummary(item_id=102, title=""),
+            )
+        )
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert [b.code for b in blockers] == [BLOCK_ITEM_NO_TITLE]
+        assert blockers[0].target_id == 102, "要指出是哪一個項目，不能只說「有未命名項目」"
+
+    def test_多個未命名項目各報一條(self) -> None:
+        """一次回全部缺漏——只報第一個會讓教師修一次、再被擋一次。"""
+        snapshot = _snapshot(
+            items=(
+                ItemSummary(item_id=101, title=""),
+                ItemSummary(item_id=102, title="小考"),
+                ItemSummary(item_id=103, title=""),
+            )
+        )
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert [b.target_id for b in blockers] == [101, 103]
+
+    def test_只有空白字元視同未命名(self) -> None:
+        """🔴 判空用 `strip()`，不是 `not title`。
+
+        今天 DB 裡只可能是 `""`——三條寫入路徑都 strip 過（`ItemCreateReq._strip_title`、
+        `QuizUpdateReq._strip_required`、`MaterialUpdateReq._name_not_blank`）。但**發布
+        檢核是最後一道防線，它的正確性不該依賴上游三個 schema 永遠維持嚴格**；其中
+        任何一個放寬，這裡都是唯一還站著的那道。
+        """
+        snapshot = _snapshot(items=(ItemSummary(item_id=101, title="   "),))
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert [b.code for b in blockers] == [BLOCK_ITEM_NO_TITLE]
+
+    def test_有名稱的項目不被擋(self) -> None:
+        snapshot = _snapshot(items=(ItemSummary(item_id=101, title="第一章講義"),))
+        assert evaluate_publish(snapshot, obsolete_doc_ids=frozenset()) == ()
+
+    def test_訊息不內插項目名稱或編號(self) -> None:
+        """對齊本模組既有慣例：訊息一律靜態，出問題的對象以 `target_id` 表達。"""
+        snapshot = _snapshot(items=(ItemSummary(item_id=777, title=""),))
+
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=frozenset())
+
+        assert "777" not in blockers[0].message
 
 
 class TestEvaluatePublishCombined:

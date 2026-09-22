@@ -282,6 +282,99 @@ class TestPublishCheck:
         assert r.json()["error_code"] == "ET_COURSE_002"
 
 
+class TestUntitledItem:
+    """#384：未命名的教材／測驗不得發布出去。
+
+    ⚠️ 名稱**不在 `ET_ITEM` 上**——依 `ITEM_TYPE` 落在 `ET_MATERIAL.MATERIAL_NAME` 或
+    `ET_QUIZ.QUIZ_NAME`。整合測試在這裡有價值：`_item_titles` 的兩個 outer join +
+    `coalesce` 是純函式測不到的接線，接錯了 unit test 全綠而缺漏永遠不觸發
+    （同 `_quiz_summaries` 與 `_chapter_summaries` 踩過的 INNER JOIN 坑）。
+    """
+
+    async def test_建立項目時名稱仍可留空(self, client, db) -> None:
+        """🔴 AC 3：**不得為了修這個而推翻 2026-08-27 的裁示。**
+
+        原本前端會代填「新教材」/「新測驗」，實測發現使用者開視窗第一件事就是把那串
+        字選起來刪掉。修法只能加在**發布**這一關，不能把建立那關收緊——否則教師又會
+        看到代填的字。這條測試就是釘住這件事，讓日後「順手補個 min_length」會變紅。
+        """
+        uid = await _user(db, "t_ut01")
+        cid = await _publishable_course(client, db, uid)
+        ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名章"}, headers=_bearer(uid))
+
+        created = await client.post(
+            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": ""},
+            headers=_bearer(uid),
+        )
+
+        assert created.status_code == 201, created.text
+
+    async def test_未命名教材擋下發布並指出是哪一個項目(self, client, db) -> None:
+        uid = await _user(db, "t_ut02")
+        cid = await _publishable_course(client, db, uid)
+        ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名章"}, headers=_bearer(uid))
+        item = await client.post(
+            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": ""},
+            headers=_bearer(uid),
+        )
+
+        body = await _check(client, uid, cid)
+
+        assert body["can_publish"] is False
+        assert ("ITEM_NO_TITLE", item.json()["item_id"]) in [(b["code"], b["target_id"]) for b in body["blockers"]]
+
+    async def test_未命名測驗同樣被擋(self, client, db) -> None:
+        """測驗側單獨驗一次——`coalesce` 取的是**另一張表**的欄位，教材通過不代表測驗也通過。"""
+        uid = await _user(db, "t_ut03")
+        cid = await _publishable_course(client, db, uid)
+        ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名測驗章"}, headers=_bearer(uid))
+        item = await client.post(
+            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+            json={"item_type": ITEM_QUIZ, "title": ""},
+            headers=_bearer(uid),
+        )
+
+        body = await _check(client, uid, cid)
+
+        codes = [(b["code"], b["target_id"]) for b in body["blockers"]]
+        assert ("ITEM_NO_TITLE", item.json()["item_id"]) in codes
+
+    async def test_補上名稱後該缺漏消失(self, client, db) -> None:
+        """釘住「修好就放行」——只驗擋得住，驗不出它是不是永遠擋著。"""
+        uid = await _user(db, "t_ut04")
+        cid = await _publishable_course(client, db, uid)
+        ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名章"}, headers=_bearer(uid))
+        item = await client.post(
+            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": ""},
+            headers=_bearer(uid),
+        )
+        material_id = item.json()["material_id"]
+        before = await _check(client, uid, cid)
+        assert any(b["code"] == "ITEM_NO_TITLE" for b in before["blockers"])
+
+        saved = await client.put(
+            f"/api/et/materials/{material_id}",
+            # `description_html` 不可省：教材儲存另有「至少提供影片、文件或說明文字其中
+            # 一項」之檢核（`ET_MATERIAL_002`），少了它會 422 而非 200。
+            json={
+                "material_name": "補上的名稱",
+                "description_html": "<p>內容</p>",
+                "doc_ids": [],
+                "video_ids": [],
+                "version": 0,
+            },
+            headers=_bearer(uid),
+        )
+        assert saved.status_code == 204, saved.text
+
+        after = await _check(client, uid, cid)
+        assert not any(b["code"] == "ITEM_NO_TITLE" for b in after["blockers"])
+        assert after["can_publish"] is True
+
+
 class TestPublish:
     async def test_發布成功寫入三者(self, client, db) -> None:
         """AC 24：狀態、首次發布時間、8 碼邀請碼。"""
