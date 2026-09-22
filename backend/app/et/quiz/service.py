@@ -14,8 +14,11 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.common.optimistic_lock import ensure_version_matched
-from app.et.course.repository import EtItemRepository
+from app.et.course.repository import EtCourseRepository, EtItemRepository
 from app.et.course.rules import ensure_owner, is_browsable_by_non_owner
+from app.et.notify.course_invite import learn_link
+from app.et.notify.quiz_retest_required import QuizRetestRequiredMailer
+from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.repository import EtQuizRepository
 from app.et.quiz.rules import (
     ensure_correct_options_valid,
@@ -32,6 +35,7 @@ from app.et.quiz.schemas import (
     QuizDetail,
     QuizUpdateReq,
 )
+from app.et.tracking.repository import EtTrackingRepository
 from app.services import AuditLogService
 
 _MODULE = "ET"
@@ -67,10 +71,21 @@ class EtQuizService:
         quizzes: EtQuizRepository | None = None,
         items: EtItemRepository | None = None,
         audit: AuditLogService | None = None,
+        tracking: EtTrackingRepository | None = None,
+        progress: EtProgressRepository | None = None,
+        courses: EtCourseRepository | None = None,
+        mailer: QuizRetestRequiredMailer | None = None,
     ) -> None:
         self._quizzes = quizzes or EtQuizRepository()
         self._items = items or EtItemRepository()
         self._audit = audit or AuditLogService()
+        # #361：要求已通過學員重測時要寫重置基準與清完成旗標，兩者的表分屬 tracking
+        # 與 progress。⚠️ 只用它們的 **repository**，不繞道各自的 service——後者帶有
+        # 自己的守門（如 `can_reset_retry` 拒絕已通過者），與本路徑的前提相反。
+        self._tracking = tracking or EtTrackingRepository()
+        self._progress = progress or EtProgressRepository()
+        self._courses = courses or EtCourseRepository()
+        self._mailer = mailer or QuizRetestRequiredMailer()
 
     async def get_detail(self, db: AsyncSession, quiz_id: int, *, actor_id: str) -> QuizDetail:
         """測驗詳細——設定、題目與選項一次帶齊，並附配分總和。
@@ -127,6 +142,12 @@ class EtQuizService:
             # 逐題新增時總和必然一度不等於 100，阻擋發布是 #204 的事。
             points_total=sum(q.points for q in questions),
             answers_visible=answers_visible,
+            # 只有擁有者拿得到人數：非擁有者給 `None`（不是 0），理由同 `is_correct` 的遮蔽。
+            passed_count=(
+                len(await self._quizzes.passed_student_attempt_counts(db, quiz_id, course_id=resolved.course_id))
+                if answers_visible
+                else None
+            ),
         )
 
     async def update_settings(
@@ -150,7 +171,10 @@ class EtQuizService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_QUIZ")
-        await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗設定")
+        affected = await self._require_retest_if_asked(
+            db, quiz_id=quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
+        )
+        await self._log(db, "UPDATE", operator.user_id, course_id, self._with_retest("更新測驗設定", affected))
 
     async def add_question(
         self, db: AsyncSession, quiz_id: int, req: QuestionCreateReq, *, operator: OperatorInfo
@@ -167,7 +191,10 @@ class EtQuizService:
             options=[(o.option_text, o.is_correct) for o in req.options],
             operator=operator,
         )
-        await self._log(db, "CREATE", operator.user_id, course_id, "新增測驗題目")
+        affected = await self._require_retest_if_asked(
+            db, quiz_id=quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
+        )
+        await self._log(db, "CREATE", operator.user_id, course_id, self._with_retest("新增測驗題目", affected))
         return await self._question_row(db, question)
 
     async def update_question(
@@ -190,14 +217,29 @@ class EtQuizService:
             operator=operator,
         )
         ensure_version_matched(rowcount=rowcount, entity="ET_QUESTION")
-        await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗題目")
+        affected = await self._require_retest_if_asked(
+            db, quiz_id=question.quiz_id, course_id=course_id, asked=req.require_retest, operator=operator
+        )
+        await self._log(db, "UPDATE", operator.user_id, course_id, self._with_retest("更新測驗題目", affected))
 
-    async def delete_question(self, db: AsyncSession, question_id: int, *, operator: OperatorInfo) -> None:
-        """刪除題目：本體、選項與學員作答明細皆軟刪，剩餘題目順序遞補。
+    async def delete_question(
+        self, db: AsyncSession, question_id: int, *, require_retest: bool = False, operator: OperatorInfo
+    ) -> None:
+        """刪除題目：本體與選項軟刪，剩餘題目順序遞補。
 
-        > 學員作答明細（`ET_QUIZ_ATTEMPT_D`）**亦連帶軟刪除**（2026-08-24 #202 裁示，
-        > 原 spec 為 hard delete）。成績查詢務必排除 `DELETED = 1`，否則已刪題目的
-        > 得分會被計入。作答**主檔**不刪——刪的是一題，不是整場作答。
+        🔴 **學員作答明細（`ET_QUIZ_ATTEMPT_D`）不動**（#279 裁示 Q2 = C，2026-09-04
+        推翻 #202 的連帶軟刪）。`soft_delete_questions` 只 update `ET_OPTION` 與
+        `ET_QUESTION`，`test_et_quiz.py::test_刪除題目軟刪選項但不動學員作答明細` 釘住
+        此行為。
+
+        ⛔ **不要為了「已刪題目不該計分」而把連帶加回來**。`ET_QUIZ_ATTEMPT_D` 是
+        自給自足的快照（題幹／選項／配分都存在裡面），而成績統計一律讀
+        `ET_QUIZ_ATTEMPT_M.SCORE`、**不回頭重新加總**。加回連帶的症狀是學員看到
+        「總分 75、明細只列 4 題加起來 60」這種自己對不起來的成績單。
+
+        Args:
+            require_retest: 是否要求已通過的學員重新測驗（#361）。刪題是題目內容變更，
+                故提供此選項；實際行為見 `_require_retest_if_asked`。
         """
         question = await self._quizzes.get_question(db, question_id)
         if question is None:
@@ -205,7 +247,10 @@ class EtQuizService:
         _, course_id = await self._require_owned(db, question.quiz_id, operator.user_id)
         await self._quizzes.soft_delete_questions(db, [question_id], operator)
         await self._quizzes.resequence_questions(db, question.quiz_id, operator)
-        await self._log(db, "DELETE", operator.user_id, course_id, "刪除測驗題目")
+        affected = await self._require_retest_if_asked(
+            db, quiz_id=question.quiz_id, course_id=course_id, asked=require_retest, operator=operator
+        )
+        await self._log(db, "DELETE", operator.user_id, course_id, self._with_retest("刪除測驗題目", affected))
 
     async def reorder_questions(
         self, db: AsyncSession, quiz_id: int, req: QuestionReorderReq, *, operator: OperatorInfo
@@ -273,6 +318,89 @@ class EtQuizService:
             version=question.version,
             options=[OptionRow.model_validate(o) for o in options],
         )
+
+    async def _require_retest_if_asked(
+        self, db: AsyncSession, *, quiz_id: int, course_id: int, asked: bool, operator: OperatorInfo
+    ) -> int:
+        """教師選「要求重測」時，把該測驗的已通過學員退回未通過（#361）。
+
+        對每位已通過的學員做兩件事，**同一交易**：
+
+        1. 寫一列 `ET_QUIZ_RETRY_RESET` 基準 → 本輪已用次數歸 0
+        2. 清除該測驗項目的 `ET_PROGRESS.IS_COMPLETED` → 完課狀態隨之回退
+
+        ⛔ **不刪任何 attempt**。學員與教師仍可回看歷次明細（US6 AC 12 / US9 AC 6），
+        且 `ET_QUIZ_ATTEMPT_D` 是自給自足的快照，舊紀錄不因題目改動而錯亂。
+
+        ## 🔴 為何不重用 `tracking.reset_retry`
+
+        兩者**前提相反**。`can_reset_retry` 在 `is_passed=True` 時回 `False`，理由是
+        「他已經通過了；再考只有機會把成績弄低」——那條守門保護的是**教師手動**重置
+        一位卡住的學員（US9 AC 6）。本功能的對象**正是已通過的人**，是測驗內容變了
+        才要他重考，不是他考壞了要救他。
+
+        ⛔ **不要為了重用而放寬 `can_reset_retry`**，也不要把兩條路徑「統一」——那會讓
+        教師又能對已通過的學員按重置，把成績弄低。兩條看似重複的路徑是刻意的。
+
+        ## 🔴 為何稽核不在迴圈裡
+
+        `log_action` 的第一步是 `pg_advisory_xact_lock`——**單一固定 key 的交易層級鎖，
+        持有到外層交易 commit**。在迴圈內呼叫的話，第一位學員就取走它，之後整批的
+        UPDATE 與寄信全在持鎖狀態下進行，而那把鎖是全平台共用的（**包含登入**）。
+
+        形狀比照 `app/et/approval/service.py::approve`：迴圈只寫業務資料，稽核累積後
+        統一寫。⚠️ 本函式回傳受影響人數，由呼叫端在既有的 `_log` 裡一次記錄。
+
+        Returns:
+            受影響的學員人數；`asked=False` 或無人通過時為 0。
+        """
+        if not asked:
+            return 0
+        item_id = await self._quizzes.item_id_of_quiz(db, quiz_id, course_id=course_id)
+        if item_id is None:
+            return 0  # 孤兒測驗：沒有項目就沒有進度可清，也不會有學員作答
+        affected = await self._quizzes.passed_student_attempt_counts(db, quiz_id, course_id=course_id)
+        if not affected:
+            return 0
+
+        quiz = await self._quizzes.get(db, quiz_id)
+        course = await self._courses.get(db, course_id)
+        course_url = learn_link(course_id)
+
+        # 兩項寫入**批次化**：本批次的人數由系統決定、沒有上限（不像教師勾選的核可
+        # 批次有 100 筆 schema 上限），逐筆寫等於 2N 次往返。
+        await self._tracking.add_retry_resets(
+            db, course_id=course_id, quiz_id=quiz_id, entries=affected, operator=operator
+        )
+        await self._progress.set_item_completed_bulk(
+            db,
+            user_ids=[user_id for user_id, _ in affected],
+            course_id=course_id,
+            item_id=item_id,
+            completed=False,
+            operator=operator,
+        )
+
+        # ⚠️ 寄信**不能**比照批次化：範本內文含 `{USER_NAME}`，而平台 `send_email`
+        # 對整批收件人只渲染一次——合批會讓所有人收到同一個名字的信。這是範本渲染
+        # 的硬限制，不是還沒優化。
+        #
+        # 寄信在迴圈內、稽核在迴圈外，兩者刻意不同：寄信不取全域鎖，`log_action` 會。
+        for user_id, _ in affected:
+            await self._mailer.send_quiz_retest_required(
+                db, course=course, quiz_name=quiz.quiz_name, course_url=course_url, user_id=user_id
+            )
+        return len(affected)
+
+    @staticmethod
+    def _with_retest(description: str, affected: int) -> str:
+        """把「本次一併要求 N 位已通過學員重測」併進稽核描述。
+
+        ⚠️ 不併的話，`DP_AUDIT_LOG` 只會看到「更新測驗設定」，看不出這一下讓 N 位
+        學員的通過紀錄被清掉——而那是本動作最重的後果。資訊雖然也在
+        `ET_QUIZ_RETRY_RESET`，但追溯時不會有人先想到去查那張表。
+        """
+        return description if affected == 0 else f"{description}，並要求 {affected} 位已通過學員重測"
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
         await self._audit.log_action(

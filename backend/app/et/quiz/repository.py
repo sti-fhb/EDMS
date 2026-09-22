@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM
+from app.et.course.models import EtChapter, EtItem
+from app.et.progress.models import EtEnrollment
+from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
 
 #: 測驗設定之預設值（data-model §ET_QUIZ）。
 DEFAULT_PASS_SCORE = 80
@@ -313,3 +315,101 @@ class EtQuizRepository:
 
         await db.execute(update(EtQuiz).where(EtQuiz.quiz_id.in_(quiz_ids), EtQuiz.deleted == 0).values(**audit))
         await db.flush()
+
+    async def item_id_of_quiz(self, db: AsyncSession, quiz_id: int, *, course_id: int) -> int | None:
+        """該測驗於**指定課程**內掛在哪個章節項目上（`ET_ITEM.ITEM_ID`）。
+
+        測驗與課程的關聯**只經 `ET_ITEM.QUIZ_ID`**——`ET_QUIZ` 本身沒有 `COURSE_ID`。
+        清除學員的完成旗標需要 `ITEM_ID`（`ET_PROGRESS` 以項目為單位），故另取一次。
+
+        ⚠️ **以 `course_id` 收斂的理由**：`ET_ITEM.QUIZ_ID` 沒有唯一約束，而本查詢的
+        `.limit(1)` 沒有 ORDER BY。同一測驗若掛在兩個項目上，這裡與
+        `EtItemRepository.resolve_owner`（擁有者驗證的依據）可能挑到**不同課程**，
+        於是清掉的是另一門課學員的完成旗標。呼叫端的 `course_id` 本來就由該測驗反推
+        而來，帶進來即可讓兩處由建構上一致。
+
+        比照 `tracking/repository.get_quiz_in_course` 的同一道防護。
+
+        Returns:
+            項目 ID；孤兒測驗或不屬於該課程者回 `None`。
+        """
+        return await db.scalar(
+            select(EtItem.item_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtItem.quiz_id == quiz_id,
+                EtItem.deleted == 0,
+                EtChapter.course_id == course_id,
+                EtChapter.deleted == 0,
+            )
+            .limit(1)
+        )
+
+    async def passed_student_attempt_counts(
+        self, db: AsyncSession, quiz_id: int, *, course_id: int
+    ) -> list[tuple[str, int]]:
+        """該測驗於**指定課程**內**目前算通過**之學員，及其 attempt 總數。
+
+        `attempt_count` 供 `add_retry_reset` 當新基準用——記重置當下的總數，之後
+        `round_used_attempts(total, base)` 算出的本輪已用次數即從 0 起算。
+
+        ## 🔴 是「目前算通過」，不是「曾及格」
+
+        判定條件是「**在最近一次重置基準之後**仍有及格紀錄」，即
+        `IS_PASS AND ATTEMPT_NO > MAX(ATTEMPT_COUNT_AT_RESET)`。
+
+        ⚠️ 用「曾及格」（單純 `bool_or(IS_PASS)`）會讓這個值**重置後不會下降**，後果是：
+        確認框永遠會跳（即使剛剛才重置過）、教師每按一次就再寄 N 封信、再寫 N 列
+        `ET_QUIZ_RETRY_RESET`（append-only 只增不減）。「手滑連按三次 → 全班收三封」
+        很容易發生。改用本定義後，重置完該學員自然不在名單內，重複儲存不會重寄。
+
+        `ATTEMPT_NO > base` 之所以等於「在基準之後」：`attempt_no = total + 1`
+        （`attempt/service.py`）且 attempt **永不刪除**，故序號連續無跳號、序號即位置。
+
+        ⚠️ 及格與否用 `IS_PASS` 而非比對分數與當前 `PASS_SCORE`：及格在提交當下就以
+        `PASS_SCORE_SNAPSHOT` 判定並寫入。拿當前及格分數回頭重算，會讓「教師調高及格
+        分數」這個動作本身改變誰算通過過——而那正是本功能要處理的變更。
+
+        ⛔ **排除已被移出課程者**（`ET_ENROLLMENT.IS_REMOVED`）。
+
+        Returns:
+            `[(user_id, attempt_count), ...]`，依 `user_id` 排序使結果可預期。
+        """
+        # 每位學員的重置基準（無紀錄者為 NULL → 下方 coalesce 為 0）。
+        # 語意與 `tracking/repository.reset_base_of` 相同，只是一次取整批。
+        bases = (
+            select(
+                EtQuizRetryReset.user_id.label("user_id"),
+                func.max(EtQuizRetryReset.attempt_count_at_reset).label("base"),
+            )
+            .where(EtQuizRetryReset.quiz_id == quiz_id)
+            .group_by(EtQuizRetryReset.user_id)
+            .subquery()
+        )
+        base_col = func.coalesce(bases.c.base, 0)
+        rows = await db.execute(
+            select(EtQuizAttemptM.user_id, func.count())
+            .join(
+                EtEnrollment,
+                (EtEnrollment.user_id == EtQuizAttemptM.user_id) & (EtEnrollment.course_id == EtQuizAttemptM.course_id),
+            )
+            .outerjoin(bases, bases.c.user_id == EtQuizAttemptM.user_id)
+            .where(
+                EtQuizAttemptM.quiz_id == quiz_id,
+                EtQuizAttemptM.deleted == 0,
+                # 以呼叫端已驗過擁有權的那門課收斂，理由同 `item_id_of_quiz`——
+                # 不讓「同一測驗掛在多門課」的可能性擴散到受影響名單。
+                EtQuizAttemptM.course_id == course_id,
+                # ⛔ 已被移出課程者排除。`mark_removed` 只設 `IS_REMOVED`，不動
+                # attempt 與 progress，所以不濾的話他會被寫重置基準、清完成旗標，
+                # 還收到一封「請重新測驗」的信——而他已經不在這門課了。
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+            )
+            # `base_col` 每位學員恆為單一值，放進 GROUP BY 不改變分組，只是讓它能
+            # 出現在 HAVING 裡（Postgres 不允許 HAVING 直接引用未分組的欄位）。
+            .group_by(EtQuizAttemptM.user_id, base_col)
+            .having(func.bool_or(EtQuizAttemptM.is_pass & (EtQuizAttemptM.attempt_no > base_col)))
+            .order_by(EtQuizAttemptM.user_id)
+        )
+        return [(uid, cnt) for uid, cnt in rows.all()]

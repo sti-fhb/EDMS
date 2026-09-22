@@ -234,6 +234,50 @@ class EtProgressRepository:
         )
         await db.flush()
 
+    async def set_item_completed_bulk(
+        self,
+        db: AsyncSession,
+        *,
+        user_ids: list[str],
+        course_id: int,
+        item_id: int,
+        completed: bool,
+        operator: OperatorInfo,
+    ) -> None:
+        """批次設定**同一個項目**對多位學員的完成旗標——語意同 `set_item_completed`。
+
+        供 #361 使用：該批次的人數由系統決定、沒有上限，逐筆呼叫等於 N 次往返。
+        ⚠️ 只批次化往返次數，`ON CONFLICT` 的行為與單筆版完全一致。
+
+        Args:
+            user_ids: 受影響的學員；空陣列為 no-op。
+        """
+        if not user_ids:
+            return
+        now = utcnow()
+        await db.execute(
+            pg_insert(EtProgress)
+            .values(
+                [
+                    {
+                        "USER_ID": user_id,
+                        "COURSE_ID": course_id,
+                        "ITEM_ID": item_id,
+                        "IS_COMPLETED": completed,
+                        "CREATED_USER": operator.user_id,
+                        "CREATED_DATE": now,
+                        "DELETED": 0,
+                    }
+                    for user_id in user_ids
+                ]
+            )
+            .on_conflict_do_update(
+                constraint="UQ_ET_PROGRESS_USER_ITEM",
+                set_={"IS_COMPLETED": completed, "UPDATED_USER": operator.user_id, "UPDATED_DATE": now},
+            )
+        )
+        await db.flush()
+
     async def completed_item_ids(self, db: AsyncSession, *, user_id: str, course_id: int) -> set[int]:
         """該學員在此課程已完成的項目 id。
 

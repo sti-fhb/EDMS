@@ -396,6 +396,44 @@ class EtTrackingRepository:
         )
         await db.flush()
 
+    async def add_retry_resets(
+        self,
+        db: AsyncSession,
+        *,
+        course_id: int,
+        quiz_id: int,
+        entries: list[tuple[str, int]],
+        operator: OperatorInfo,
+    ) -> None:
+        """批次寫入重置紀錄——語意同 `add_retry_reset`，但**一次 flush**。
+
+        供 #361「測驗變更後要求全班已通過學員重測」使用：該批次的人數由系統決定、
+        沒有上限（不像教師勾選的核可批次有 100 筆 schema 上限），逐筆呼叫等於 N 次
+        往返。⚠️ 語意與單筆版完全一致，**不要**在此加任何單筆版沒有的判斷。
+
+        Args:
+            entries: `[(user_id, attempt_count_at_reset), ...]`。空陣列為 no-op。
+        """
+        if not entries:
+            return
+        now = utcnow()
+        db.add_all(
+            [
+                EtQuizRetryReset(
+                    course_id=course_id,
+                    user_id=user_id,
+                    quiz_id=quiz_id,
+                    attempt_count_at_reset=attempt_count,
+                    executed_by=operator.user_id,
+                    executed_at=now,
+                    created_user=operator.user_id,
+                    created_date=now,
+                )
+                for user_id, attempt_count in entries
+            ]
+        )
+        await db.flush()
+
     async def mark_removed(self, db: AsyncSession, enrollment: EtEnrollment, *, operator: OperatorInfo) -> None:
         """標記移除（`IS_REMOVED` + `REMOVED_AT`）——**軟刪，學習歷史完整保留**。
 

@@ -127,6 +127,13 @@ export interface QuizDetail {
   points_total: number
   /** 本次請求是否看得到正確答案（僅該課程擁有者為 `true`）。見 `OptionRow.is_correct`。 */
   answers_visible: boolean
+  /**
+   * 曾及格的學員人數（#361）——儲存時的「是否要求重測」確認框要寫出受影響人數。
+   *
+   * ⚠️ 非擁有者為 `null` 而非 0（0 是「沒有人通過」這個具體事實），同 `is_correct`
+   * 的遮蔽理由。判斷要不要跳確認框請用 `(passed_count ?? 0) > 0`。
+   */
+  passed_count: number | null
 }
 
 // ── 表單驗證（Zod）──────────────────────────────────────────────────────────

@@ -43,6 +43,12 @@ class QuizUpdateReq(BaseModel):
     time_limit_min: int | None = Field(default=None, ge=1)
     max_retry: int = Field(ge=0, le=999)
     version: int = Field(ge=0)
+    #: 是否要求**已通過**的學員重新測驗（#361）。
+    #:
+    #: 系統無法分辨「改錯字」與「改語意」，故不猜意圖——由教師在儲存時決定。
+    #: `True` 時該測驗的已通過學員：答題次數歸 0、測驗項目的完成旗標清除、各收一封
+    #: 通知信；⛔ **任一情形下都不刪 attempt**（US6 AC 12 / US9 AC 6 / #279 Q2=C）。
+    require_retest: bool = False
 
     @field_validator("quiz_name")
     @classmethod
@@ -84,6 +90,12 @@ class QuestionCreateReq(BaseModel):
     #: 卻仍佔著學員的作答時間。2026-08-26 依實測回饋收緊。
     points: int = Field(ge=1, le=100)
     options: list[OptionInput] = Field(max_length=MAX_OPTIONS_PER_QUESTION)
+    #: 是否要求**已通過**的學員重新測驗（#361）。詳見 `QuizUpdateReq.require_retest`。
+    #:
+    #: ⛔ 排序端點（`QuestionReorderReq`）刻意**沒有**這個欄位——只改呈現順序不是內容
+    #: 變更，且 attempt 有 `question_order` 快照，舊紀錄本來就不受影響。為換順序要求
+    #: 全班重考沒有道理。
+    require_retest: bool = False
 
     @field_validator("stem")
     @classmethod
@@ -99,6 +111,7 @@ class QuestionUpdateReq(QuestionCreateReq):
     """
 
     version: int = Field(ge=0)
+    # `require_retest` 由 `QuestionCreateReq` 繼承而來，不重複宣告。
 
 
 class QuestionReorderReq(BaseModel):
@@ -170,3 +183,10 @@ class QuizDetail(BaseModel):
     #: 明確給一個布林，而不是讓前端從 `OptionRow.is_correct is None` 反推——前端需要
     #: 的是「要不要顯示『N 個正解』這一欄」，而那是**整份測驗**的性質，不是逐選項的。
     answers_visible: bool
+    #: 曾及格的學員人數（#361）——儲存時的「是否要求重測」確認框要寫出受影響人數，
+    #: 否則教師無從判斷該選是或否。
+    #:
+    #: ⚠️ **非擁有者為 `None` 而非 0**：0 是「沒有人通過」這個具體事實，而非擁有者
+    #: 的實際狀態是「不該知道」。比照同一回應對 `is_correct` 的處理——遮成 `False`
+    #: 會顯示「0 個正解」，那是錯誤資訊而不是隱藏。
+    passed_count: int | None

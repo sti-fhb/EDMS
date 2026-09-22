@@ -661,9 +661,13 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 
 ### 通知信範本（DP_NOTIFY_TEMPLATE，`MODULE=ET`）
 
-> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 7 類通知範本以 `MODULE=ET` 存於平台集中表（2026-07-17 增列核可通過通知）；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET09 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
+> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 8 類通知範本以 `MODULE=ET` 存於平台集中表（2026-07-17 增列核可通過通知、2026-09-21 增列測驗變更需重測通知）；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET09 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
 
-**ET 內建範本**（部署時由平台 seed，`MODULE=ET`；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **7 類**：
+**ET 內建範本**（部署時由平台 seed，`MODULE=ET`；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **8 類**：
+
+> ⚠️ 「不可新增 / 刪除」的主詞是**管理者於 UI**。範本類別本身仍會隨功能增加，但一律走
+> 「改本表 + 新增 seed migration」，不由管理者自行建立——6 → 7（2026-07-17 `APPROVAL_PASSED`）
+> 與 7 → 8（2026-09-21 `QUIZ_RETEST_REQUIRED`，#361）皆是此路徑。
 
 | TEMPLATE_CODE | 名稱 | 觸發 |
 |---------------|------|------|
@@ -674,6 +678,7 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 | URGENT_REMIND | 截止前加急提醒 | SCHET002（訖止前 3 天）|
 | WEEKLY_REPORT | 週報 | SCHET001（教師 / 管理者）|
 | APPROVAL_PASSED | 核可通過通知 | US16 核可「通過」時（不通過 / 撤銷不寄）|
+| QUIZ_RETEST_REQUIRED | 測驗變更需重新測驗通知 | US3 教師變更測驗內容並選擇「要求已通過學員重測」時（逐人一封）|
 
 **業務規則**:
 - 教師不可逐課修改信件內容；寄出一律採平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）範本

@@ -103,12 +103,17 @@ export const quizzesApi = {
       time_limit_min: number | null
       max_retry: number
       version: number
+      /** 是否要求已通過的學員重新測驗（#361）。 */
+      require_retest: boolean
     },
   ): Promise<void> => {
     await http.put(`/et/quizzes/${quizId}`, payload)
   },
 
-  addQuestion: async (quizId: number, payload: QuestionPayload): Promise<QuestionRow> => {
+  addQuestion: async (
+    quizId: number,
+    payload: QuestionPayload & { require_retest: boolean },
+  ): Promise<QuestionRow> => {
     const { data } = await http.post<QuestionRow>(`/et/quizzes/${quizId}/questions`, payload)
     return data
   },
@@ -116,13 +121,14 @@ export const quizzesApi = {
   /** 選項為**全量覆寫**（後端把舊選項軟刪、插入新的）。 */
   updateQuestion: async (
     questionId: number,
-    payload: QuestionPayload & { version: number },
+    payload: QuestionPayload & { version: number; require_retest: boolean },
   ): Promise<void> => {
     await http.put(`/et/questions/${questionId}`, payload)
   },
 
-  removeQuestion: async (questionId: number): Promise<void> => {
-    await http.delete(`/et/questions/${questionId}`)
+  /** `require_retest` 走 query——DELETE 沒有 body（後端 router 同此約定）。 */
+  removeQuestion: async (questionId: number, requireRetest = false): Promise<void> => {
+    await http.delete(`/et/questions/${questionId}`, { params: { require_retest: requireRetest } })
   },
 
   /** 題目重排（教師端呈現順序）；`version` 為**測驗層**版本。 */

@@ -111,8 +111,13 @@ async def update_question(
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_question(
     question_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    # DELETE 沒有 body，故 `require_retest` 走 query（其餘三支寫在請求 body 內）。
+    require_retest: bool = False,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """刪除題目：本體、選項與學員作答明細皆軟刪，剩餘題目順序遞補。"""
-    await _service.delete_question(db, question_id, operator=operator)
+    """刪除題目：本體與選項軟刪，剩餘題目順序遞補。
+
+    🔴 **學員作答明細不動**（#279 裁示 Q2 = C）——詳見 service 層同名方法的 docstring。
+    """
+    await _service.delete_question(db, question_id, require_retest=require_retest, operator=operator)

@@ -105,13 +105,13 @@ class TestAc3Seeds:
             "ET_VIDEO_PLAYBACK_MAX_RATE",
         ]
 
-    async def test_et_通知範本七類且_channel_為平台正規詞彙(self, db, et_registered) -> None:
+    async def test_et_通知範本八類且_channel_為平台正規詞彙(self, db, et_registered) -> None:
         rows = await db.execute(
             text('SELECT "TEMPLATE_CODE", "CHANNEL", "IS_SYSTEM" FROM "DP_NOTIFY_TEMPLATE" WHERE "MODULE" = :m'),
             {"m": "ET"},
         )
         items = rows.all()
-        assert len(items) == 7
+        assert len(items) == 8
         assert {i[0] for i in items} == {
             "COURSE_INVITE",
             "COURSE_INVITE_DIGEST",
@@ -120,10 +120,13 @@ class TestAc3Seeds:
             "URGENT_REMIND",
             "WEEKLY_REPORT",
             "APPROVAL_PASSED",
+            # 2026-09-21 #361：7 → 8。增列一律走「改 data-model + seed migration」，
+            # 不由管理者自行建立——同 6 → 7（APPROVAL_PASSED）之路徑。
+            "QUIZ_RETEST_REQUIRED",
         }
         # CHANNEL 自創值會使平台 send_email 靜默不寄信
         assert all(i[1] in {"EMAIL", "MSG", "BOTH"} for i in items)
-        assert not any(i[2] for i in items), "ET 7 類皆為管理者可維護，非平台系統信"
+        assert not any(i[2] for i in items), "ET 8 類皆為管理者可維護，非平台系統信"
 
     async def test_週報範本含_csv_下載連結變數(self, db, et_registered) -> None:
         """2026-08-19 變更：郵件附件改為下載連結（平台發信不支援附件）。"""

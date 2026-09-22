@@ -30,6 +30,7 @@ const quiz: QuizDetail = {
   ],
   points_total: 60,
   answers_visible: true,
+  passed_count: 0,
 }
 
 function renderDialog(overrides: Partial<Parameters<typeof QuizDialog>[0]> = {}) {
