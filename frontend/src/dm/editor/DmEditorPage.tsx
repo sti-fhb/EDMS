@@ -131,10 +131,23 @@ export function DmEditorPage() {
 
   // 草稿內容欄位（會寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG）：變更後清草稿快取，
   // 使下次送簽重新建立、避免沿用已過時之草稿。
+  /**
+   * 使用者一動手就鎖定對應的預帶 guard——背景 refetch 落定後不得覆蓋已輸入的值。
+   *
+   * 預帶改為「等 isFetching 落下」之後（#396），表單在 refetch 期間**已經可互動**（載入 gate 只擋
+   * `draftMetaPending`，有快取時不擋），於是多出一段「使用者已輸入、guard 尚未鎖定」的視窗。若不在此
+   * 鎖定，refetch 落定時 prefill effect 會把伺服器值蓋掉使用者剛選的標籤或剛打的版號，且無任何提示。
+   */
+  const lockPrefillFor = (key: keyof EditorForm) => {
+    if (key === "audience_ids" || key === "retrieval_ids") tagsPrefilled.current = true
+    else metaPrefilled.current = true
+  }
+
   const setField = <K extends keyof EditorForm>(key: K, value: EditorForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
     setDirty(true)
     persisted.current = null
+    lockPrefillFor(key)
     setErrors((prev) => ({ ...prev, [key as string]: "" }))
   }
 
@@ -143,6 +156,7 @@ export function DmEditorPage() {
   const setReviewer = (value: string) => {
     setForm((prev) => ({ ...prev, reviewer_id: value }))
     setDirty(true)
+    lockPrefillFor("reviewer_id")
     setErrors((prev) => ({ ...prev, reviewer_id: "" }))
   }
 
