@@ -144,7 +144,9 @@ class EtQuizService:
             answers_visible=answers_visible,
             # 只有擁有者拿得到人數：非擁有者給 `None`（不是 0），理由同 `is_correct` 的遮蔽。
             passed_count=(
-                len(await self._quizzes.passed_student_attempt_counts(db, quiz_id)) if answers_visible else None
+                len(await self._quizzes.passed_student_attempt_counts(db, quiz_id, course_id=resolved.course_id))
+                if answers_visible
+                else None
             ),
         )
 
@@ -354,10 +356,10 @@ class EtQuizService:
         """
         if not asked:
             return 0
-        item_id = await self._quizzes.item_id_of_quiz(db, quiz_id)
+        item_id = await self._quizzes.item_id_of_quiz(db, quiz_id, course_id=course_id)
         if item_id is None:
             return 0  # 孤兒測驗：沒有項目就沒有進度可清，也不會有學員作答
-        affected = await self._quizzes.passed_student_attempt_counts(db, quiz_id)
+        affected = await self._quizzes.passed_student_attempt_counts(db, quiz_id, course_id=course_id)
         if not affected:
             return 0
 

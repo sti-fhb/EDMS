@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.course.models import EtItem
+from app.et.course.models import EtChapter, EtItem
 from app.et.progress.models import EtEnrollment
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM
 
@@ -316,19 +316,39 @@ class EtQuizRepository:
         await db.execute(update(EtQuiz).where(EtQuiz.quiz_id.in_(quiz_ids), EtQuiz.deleted == 0).values(**audit))
         await db.flush()
 
-    async def item_id_of_quiz(self, db: AsyncSession, quiz_id: int) -> int | None:
-        """該測驗掛在哪個章節項目上（`ET_ITEM.ITEM_ID`）。
+    async def item_id_of_quiz(self, db: AsyncSession, quiz_id: int, *, course_id: int) -> int | None:
+        """該測驗於**指定課程**內掛在哪個章節項目上（`ET_ITEM.ITEM_ID`）。
 
         測驗與課程的關聯**只經 `ET_ITEM.QUIZ_ID`**——`ET_QUIZ` 本身沒有 `COURSE_ID`。
         清除學員的完成旗標需要 `ITEM_ID`（`ET_PROGRESS` 以項目為單位），故另取一次。
 
-        Returns:
-            項目 ID；孤兒測驗（未掛在任何項目下）回 `None`。
-        """
-        return await db.scalar(select(EtItem.item_id).where(EtItem.quiz_id == quiz_id, EtItem.deleted == 0).limit(1))
+        ⚠️ **以 `course_id` 收斂的理由**：`ET_ITEM.QUIZ_ID` 沒有唯一約束，而本查詢的
+        `.limit(1)` 沒有 ORDER BY。同一測驗若掛在兩個項目上，這裡與
+        `EtItemRepository.resolve_owner`（擁有者驗證的依據）可能挑到**不同課程**，
+        於是清掉的是另一門課學員的完成旗標。呼叫端的 `course_id` 本來就由該測驗反推
+        而來，帶進來即可讓兩處由建構上一致。
 
-    async def passed_student_attempt_counts(self, db: AsyncSession, quiz_id: int) -> list[tuple[str, int]]:
-        """該測驗**曾及格**之學員，及其 attempt 總數。
+        比照 `tracking/repository.get_quiz_in_course` 的同一道防護。
+
+        Returns:
+            項目 ID；孤兒測驗或不屬於該課程者回 `None`。
+        """
+        return await db.scalar(
+            select(EtItem.item_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtItem.quiz_id == quiz_id,
+                EtItem.deleted == 0,
+                EtChapter.course_id == course_id,
+                EtChapter.deleted == 0,
+            )
+            .limit(1)
+        )
+
+    async def passed_student_attempt_counts(
+        self, db: AsyncSession, quiz_id: int, *, course_id: int
+    ) -> list[tuple[str, int]]:
+        """該測驗於**指定課程**內**曾及格**之學員，及其 attempt 總數。
 
         `attempt_count` 供 `add_retry_reset` 當新基準用——記重置當下的總數，之後
         `round_used_attempts(total, base)` 算出的本輪已用次數即從 0 起算。
@@ -351,6 +371,9 @@ class EtQuizRepository:
             .where(
                 EtQuizAttemptM.quiz_id == quiz_id,
                 EtQuizAttemptM.deleted == 0,
+                # 以呼叫端已驗過擁有權的那門課收斂，理由同 `item_id_of_quiz`——
+                # 不讓「同一測驗掛在多門課」的可能性擴散到受影響名單。
+                EtQuizAttemptM.course_id == course_id,
                 # ⛔ 已被移出課程者排除。`mark_removed` 只設 `IS_REMOVED`，不動
                 # attempt 與 progress，所以不濾的話他會被寫重置基準、清完成旗標，
                 # 還收到一封「請重新測驗」的信——而他已經不在這門課了。

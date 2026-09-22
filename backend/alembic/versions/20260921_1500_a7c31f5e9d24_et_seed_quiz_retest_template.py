@@ -52,7 +52,7 @@ _TEMPLATES: list[tuple] = [
         "【教育訓練】課程「{COURSE_NAME}」的測驗已更新，請重新測驗",
         "{USER_NAME} 您好：\n\n課程「{COURSE_NAME}」的測驗「{QUIZ_NAME}」內容已更新，"
         "教師要求已通過的學員重新測驗，您的作答次數已重新計算。\n"
-        "您先前歷次的作答紀錄與成績**完整保留**，仍可隨時回看。\n"
+        "您先前歷次的作答紀錄與成績完整保留，仍可隨時回看。\n"
         "學習連結：{COURSE_URL}" + _FOOTER,
         "USER_NAME,COURSE_NAME,QUIZ_NAME,COURSE_URL",
         "EMAIL",

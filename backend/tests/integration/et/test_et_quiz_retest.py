@@ -414,6 +414,47 @@ class TestRequireRetestOnQuizChange:
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert (resets, done) == (0, True), "排序不是內容變更，不該把全班的通過紀錄清掉"
 
+    async def test_已被移出課程的學員不受影響也不收信(self, client, db):
+        # 🔴 本功能的安全不變量之一。`mark_removed` 只設 `IS_REMOVED`、不動 attempt 與
+        # progress，所以少了那道 JOIN 過濾，一位已離開課程的人會被寫重置基準、清完成
+        # 旗標，還收到一封「請重新測驗」的信。
+        #
+        # ⚠️ 少了這條測試，那個 JOIN 在任何一次「這個 join 好像多餘」的重構中被拿掉，
+        # CI 會全綠，症狀只有「被移出課程的人莫名收到信」——在正式環境極難發現。
+        teacher = await _user(db, "ZTT020")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        gone = await _passed_student(db, uid="ZTS020", course_id=cid, item_id=item_id, quiz_id=qid)
+        enrollment = await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == gone, EtEnrollment.course_id == cid)
+        )
+        enrollment.is_removed = True
+        await db.commit()
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        assert r.status_code == 204, r.text
+
+        _, resets, done = await _facts(db, uid=gone, quiz_id=qid, item_id=item_id)
+        assert (resets, done) == (0, True), "已移出課程者不應被寫入基準、不應被清除完成狀態"
+        pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
+        assert pending == 0, "已移出課程者不應收到「請重新測驗」的信"
+
+    async def test_非擁有者無法觸發批次重置(self, client, db):
+        # 🔴 本功能的安全不變量之二。批次會改動**多位學員**的學習狀態，而守門只有
+        # 呼叫端的 `ensure_owner`。非擁有者除了被擋下之外，學員狀態必須完全沒動。
+        owner = await _user(db, "ZTT021")
+        other = await _user(db, "ZTT022")
+        cid, item_id, qid = await _course_with_quiz(db, owner)
+        stu = await _passed_student(db, uid="ZTS021", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(other))
+        assert r.status_code == 403, r.text
+
+        facts = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert facts == (1, 0, True), "被擋下時學員狀態必須完全沒動"
+
     async def test_未通過的學員不受影響(self, client, db):
         # 未通過者本來就還要重考，寫基準等於白送一輪配額——而畫面上看不出哪裡不對。
         teacher = await _user(db, "ZTT004")
