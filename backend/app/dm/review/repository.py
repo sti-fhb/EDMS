@@ -362,7 +362,22 @@ class ReviewCenterRepository:
         return sorted(emails)
 
     async def list_overdue_pending(self, db: AsyncSession, threshold_days: int) -> list[Row]:
-        """催辦掃描：停留 ≥ 門檻天數之 PENDING（含審核者 Email、文件名），供每日批次。"""
+        """催辦掃描：停留 ≥ 門檻天數之 PENDING（含審核者 Email、狀態、文件名），供每日批次。
+
+        ## 為何在這裡**不**濾掉非 ACTIVE 的審核者（#395）
+
+        ET-16 的 `EtNotifyRepository.active_recipients` 是在查詢層濾的，此處刻意不同：
+        那些案件**必須仍然被看見**。濾在查詢裡，呼叫端就無從得知有幾筆永久卡住的送審
+        ——只停止寄信會把問題從吵鬧變成安靜，而它們仍是 PENDING、仍無人能處理。
+
+        故本支回出 `reviewer_status` / `reviewer_deleted`，由 `scan_overdue_and_remind`
+        決定「不寄、但記下來」。判準不變：**週期性排程的收件人清單與寄信時點隔了時間，
+        必須重新確認狀態**；差別只在確認的位置。
+
+        ⚠️ 審核者是 `outerjoin`，**`reviewer_status` 可能為 `None`**（該 `user_id` 查無
+        使用者列；`ASSIGNED_REVIEWER` 無 FK）。呼叫端須把它與「已停用」分開判讀——兩者
+        的補救動作不同：前者要修資料，後者要換審核者。
+        """
         cutoff: datetime = utcnow() - timedelta(days=threshold_days)
         stmt = (
             select(
@@ -373,6 +388,8 @@ class ReviewCenterRepository:
                 DmDocument.doc_name,
                 DpUser.email.label("reviewer_email"),
                 DpUser.user_name.label("reviewer_name"),
+                DpUser.status.label("reviewer_status"),
+                DpUser.deleted.label("reviewer_deleted"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DpUser, DmReview.assigned_reviewer == DpUser.user_id)

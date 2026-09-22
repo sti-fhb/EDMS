@@ -15,6 +15,7 @@
 交易由 get_db 於請求結束統一 commit；本層僅 flush，故核准 + 狀態轉移 + 變更歷程 + 通知同一交易原子成立。
 """
 
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
@@ -37,7 +38,10 @@ from app.dm.review.schemas import (
 )
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_ADMIN, has_role
+from app.dp.users.account_status import is_account_disabled
 from app.services import AuditLogService
+
+logger = logging.getLogger(__name__)
 
 _NEW = "NEW"
 _NEW_VERSION = "NEW_VERSION"
@@ -497,7 +501,47 @@ class ReviewCenterService:
         rows = await self._repo.list_overdue_pending(db, threshold_days)
         count = 0
         for r in rows:
-            if not r.reviewer_email:
+            # #395：`STATUS='DISABLED'` 只擋 API（`core/auth.py` 403），不碰 `DM_USER_ROLE`
+            # 也不碰歷史指派欄位。所以被停用的審核者仍會留在這份清單上，而那筆 PENDING
+            # 永遠卡著、永遠超過門檻——每天寄一封給一個進不來的人，案件單調遞增。
+            #
+            # ⚠️ **跳過必須留下痕跡**：只停止寄信會讓積壓變成隱形的。這些案件仍是 PENDING、
+            # 仍無人能處理，只是不再有人被打擾——那可能比每天寄信更糟。
+            #
+            # ⚠️ 三類分開，因為**日後有人會照這行 log 去查**：`list_overdue_pending` 走
+            # `outerjoin`，查無使用者列時 `reviewer_status` 是 `None`。若與停用併成一類，
+            # log 會說「帳號未啟用」而真相是「那個 user_id 不存在」——拿著它去翻停用清單
+            # 會查不到人。`ASSIGNED_REVIEWER` 無 FK（`String(20)`），送簽時雖有
+            # `_ensure_assignable_reviewer` 擋（#250），DB 層仍不保證這一列對得上。
+            if r.reviewer_status is None:
+                unreachable = "查無審核者帳號"
+            elif is_account_disabled(r.reviewer_status) or r.reviewer_deleted:
+                # 判定委派 `dp.users.account_status`——該模組明訂「`STATUS` 值域屬 DP 語意，
+                # 其他模組不得自行解讀」。刻意用 `is_account_disabled()` 而非
+                # `is_account_usable()`：後者連「密碼打錯三次被鎖 15 分鐘」都算不可用，
+                # 而那位審核者明天就回來了，案件仍在他手上，不該因此漏收催辦。
+                #
+                # `reviewer_deleted` 目前恆為 0——系統無刪除使用者功能，`DP_USER.DELETED`
+                # 全無寫入點。保留是為了值域日後改變時預設不寄（fail-closed），不是因為
+                # 現在會發生；讀者不應據此認為「已刪除」這條路徑已被實作。
+                unreachable = "審核者帳號已停用"
+            elif not r.reviewer_email:
+                # 分三類後這條只剩「`EMAIL` 為空字串」一途（`DP_USER.EMAIL` 是
+                # `nullable=False`，`None` 只會來自 outerjoin 落空，已由上面接走）。
+                # 原本 `if not r.reviewer_email` 單條守門其實是在兼差擋 outerjoin 落空，
+                # 那個真正的成因現在有自己的名字了。
+                unreachable = "查無審核者 Email"
+            else:
+                unreachable = None
+            if unreachable:
+                logger.warning(
+                    "催辦未寄出：%s review_id=%s doc_id=%s reviewer=%s 已停留 %s 天",
+                    unreachable,
+                    r.review_id,
+                    r.doc_id,
+                    r.assigned_reviewer,
+                    self._repo.waiting_days(r.submit_date),
+                )
                 continue
             await self._notifier.notify(
                 db,

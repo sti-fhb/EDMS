@@ -7,10 +7,11 @@
 （US8 起 OBSOLETE 核准 / 退回已支援，廢止流程細節見 test_dm_obsolete_flow.py。）
 """
 
+import logging
 import os
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
@@ -417,6 +418,130 @@ async def test_scan_overdue_reminds(db):
     )
     count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
     assert count == 1
+
+
+async def test_停用的審核者不再收到催辦(db, caplog):
+    """#395：`STATUS='DISABLED'` 只擋 API，不碰歷史指派欄位。
+
+    後果不是「寄錯一次」而是**每天重複且案件永不消失**：審核者被停用 → 無法登入 →
+    那筆 PENDING 永遠卡著 → 永遠超過門檻 → 每天再寄一封給一個進不來的人。
+
+    ⚠️ **同模組內兩支排程原本對同一問題給出相反答案**：`dm/kpi/repository.py` 三處
+    （`:82` / `:114` / `:167`）都濾了 `status == ACTIVE`，催辦這支沒濾。
+    """
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395a", "撰寫")
+    await _seed_user(db, "rev395a", "停用審核者", email="rev395a@e.com")
+    await db.execute(update(DpUser).where(DpUser.user_id == "rev395a").values(status="DISABLED"))
+    await _doc(db, "DM-SOP-000395", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000395", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000395", v.version_id, review_type="NEW", reviewer="rev395a", submit=utcnow() - timedelta(days=10)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0, "停用的審核者不該再收到催辦"
+    # ⭐ 只停止寄信會把問題從吵鬧變成安靜——案件仍卡著、仍無人能處理，只是沒人被打擾。
+    # 這條釘住「跳過要留下痕跡」，否則積壓變成隱形的。
+    assert "rev395a" in caplog.text and "審核者帳號已停用" in caplog.text, (
+        "跳過未寄的催辦必須留下 log，否則永久卡住的案件會無聲累積"
+    )
+
+
+async def test_已刪除的審核者不再收到催辦(db):
+    """`DELETED=1` 與 `DISABLED` 同樣處置。
+
+    ⚠️ 註：`DP_USER.DELETED` 目前全系統沒有寫入點（系統無刪除使用者功能），所以這條在
+    正式環境恆為 False。仍然要擋——它是 `deleted` 語意的一部分，而不是「現在會發生」。
+    """
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395b", "撰寫")
+    await _seed_user(db, "rev395b", "已刪審核者", email="rev395b@e.com")
+    await db.execute(update(DpUser).where(DpUser.user_id == "rev395b").values(deleted=1))
+    await _doc(db, "DM-SOP-000396", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000396", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000396", v.version_id, review_type="NEW", reviewer="rev395b", submit=utcnow() - timedelta(days=10)
+    )
+
+    assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 0
+
+
+async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, caplog):
+    """`list_overdue_pending` 走 `outerjoin`，查無使用者列時 `reviewer_status` 是 `None`。
+
+    ⚠️ 兩類**不能併成一句**：`None != "ACTIVE"` 也成立，若不分開，log 會說「帳號已停用」
+    而真相是「那個 user_id 不存在」——日後有人照這行 log 去翻停用清單會查不到人，
+    而兩者的補救動作不同（前者修資料、後者換審核者）。
+
+    `ASSIGNED_REVIEWER` 是 `String(20)` 且**無 FK**，故此列造得出來；送簽 API 雖有
+    `_ensure_assignable_reviewer`（#250）擋，DB 層不保證。
+    """
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395d", "撰寫")
+    await _doc(db, "DM-SOP-000398", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000398", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db,
+        "DM-SOP-000398",
+        v.version_id,
+        review_type="NEW",
+        reviewer="nobody395",  # DP_USER 查無此列
+        submit=utcnow() - timedelta(days=10),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0
+    assert "查無審核者帳號" in caplog.text, "孤兒指派要有自己的分類，否則被誤標成已停用"
+    assert "審核者帳號已停用" not in caplog.text
+
+
+async def test_審核者_email_為空字串時跳過且留下_log(db, caplog):
+    """`DP_USER.EMAIL` 是 `nullable=False`，故此條只能由空字串觸發。
+
+    ⚠️ 這條是變異檢查抓出來的缺口：把 `elif not r.reviewer_email` 整條拿掉，29 條測試
+    **全綠**——原本這個分支零覆蓋。它在 main 上就存在（`if not r.reviewer_email: continue`），
+    但當時是在兼差擋 outerjoin 落空；三類分開後落空有自己的分支，剩下的才是本條。
+    """
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395e", "撰寫")
+    await _seed_user(db, "rev395e", "無信箱審核者", email="rev395e@e.com")
+    await db.execute(update(DpUser).where(DpUser.user_id == "rev395e").values(email=""))
+    await _doc(db, "DM-SOP-000399", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000399", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000399", v.version_id, review_type="NEW", reviewer="rev395e", submit=utcnow() - timedelta(days=10)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0
+    assert "查無審核者 Email" in caplog.text
+    assert "審核者帳號已停用" not in caplog.text, "帳號是 ACTIVE，不該被歸成停用"
+
+
+async def test_啟用中的審核者照常收到催辦(db):
+    """回歸護欄：本次修正**只**排除非 ACTIVE 者，正常路徑不得受影響。"""
+    from datetime import timedelta
+
+    await _seed_user(db, "ed395c", "撰寫")
+    await _seed_user(db, "rev395c", "正常審核者", email="rev395c@e.com")
+    await _doc(db, "DM-SOP-000397", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000397", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000397", v.version_id, review_type="NEW", reviewer="rev395c", submit=utcnow() - timedelta(days=10)
+    )
+
+    assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 1
 
 
 # ── HTTP 存取閘 ───────────────────────────────────
