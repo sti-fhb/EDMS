@@ -42,6 +42,30 @@ class ControlledItemView:
 
 
 @dataclass(frozen=True)
+class ControlledGroupView:
+    """受控清單之子分組（DM 標籤組；無子分組之 kind 回空 tuple）。"""
+
+    code: str
+    name: str
+
+
+@dataclass(frozen=True)
+class ControlledKindView:
+    """某模組可維護的一類受控主檔（§3.1 列舉用）。
+
+    DP 後台據此得知「該模組有哪些受控清單、畫面上各叫什麼、新增時要不要代碼欄」。
+    **由模組自報而非 DP 硬編碼對照表**——DP 不得認識模組語彙
+    （`sti-backend-boundaries`），且硬編碼會在模組新增 kind 時靜默漏列（fail-closed、
+    畫面少一區但不報錯，CI 抓不到）。
+    """
+
+    kind: str  # 傳回 list_controlled 的值
+    name: str  # 畫面區塊顯示名
+    requires_code: bool  # 新增時是否需使用者輸入代碼
+    groups: tuple[ControlledGroupView, ...] = ()  # 子分組；無則空
+
+
+@dataclass(frozen=True)
 class SetEnabledResult:
     """啟停結果；AUDIENCE 標籤停用（soft-retire）帶受影響數，其餘為 None。"""
 
@@ -60,6 +84,8 @@ class ModuleAssignProvider(Protocol):
     async def assign(
         self, db: AsyncSession, *, user_id: str, roles: set[str], groups: set[str], operator_id: str
     ) -> None: ...
+
+    async def list_controlled_kinds(self, db: AsyncSession) -> list[ControlledKindView]: ...
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False

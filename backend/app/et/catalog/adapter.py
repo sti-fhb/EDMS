@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.module_assign import ControlledItemView, SetEnabledResult
+from app.core.module_assign import ControlledItemView, ControlledKindView, SetEnabledResult
 from app.et.catalog.models import EtTag, EtUserTag
 from app.services import AuditLogService
 
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 _FUNC_NAME = "ET-CATALOG"
 _MODULE = "ET"
 _KIND_TAG = "TAG"
+# DP 後台之區塊顯示名——名稱權威在模組，DP 不硬編碼模組語彙
+_KIND_TAG_LABEL = "受訓單位標籤"
 _MAX_BIGINT = 9_223_372_036_854_775_807
 # 對應 ET_TAG.TAG_NAME 之 VARCHAR(50)
 _MAX_TAG_NAME_LEN = 50
@@ -60,6 +62,14 @@ class EtCatalogAdapter:
 
     def __init__(self, audit: AuditLogService | None = None) -> None:
         self._audit = audit or AuditLogService()
+
+    async def list_controlled_kinds(self, db: AsyncSession) -> list[ControlledKindView]:
+        """ET 可維護之受控主檔類別：僅受訓單位標籤一類、無子分組。
+
+        靜態宣告、**不查 DB**（`db` 僅為符合 Protocol 簽章）。`requires_code=False`——
+        `TAG_ID` 由 Identity 配號，新增時 `code` 由 ET 忽略、不需使用者輸入。
+        """
+        return [ControlledKindView(kind=_KIND_TAG, name=_KIND_TAG_LABEL, requires_code=False)]
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False

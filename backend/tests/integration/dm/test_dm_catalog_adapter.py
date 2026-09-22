@@ -30,6 +30,27 @@ async def test_list_controlled_covers_seeded(db):
     assert any(t.group_type == "AUDIENCE" for t in tags)
 
 
+async def test_list_controlled_kinds_covers_three(db):
+    """DM 宣告三類受控主檔；TAG 另帶子分組供 DP 分區呈現（#182 D1）。
+
+    DP 端無從得知模組有哪些 kind，硬編碼對照表會在新增 kind 時靜默漏列（fail-closed、
+    CI 抓不到），故由模組自報。組名取自 `DM_TAG_GROUP.TAG_GROUP_NAME`、非 DP 硬編碼。
+    """
+    kinds = {k.kind: k for k in await _svc.list_controlled_kinds(db)}
+    assert set(kinds) == {"CATEGORY", "FUNC", "TAG"}
+    # 分類碼 / func 代碼由管理者指定且建立後鎖定 → 新增表單需代碼欄
+    assert kinds["CATEGORY"].requires_code is True
+    assert kinds["FUNC"].requires_code is True
+    # TAG 之 code 為「所屬標籤組」、由 DP 從當前分區帶入，不是使用者輸入
+    assert kinds["TAG"].requires_code is False
+    assert all(k.name for k in kinds.values()), "顯示名不可為空"
+
+    groups = {g.code: g.name for g in kinds["TAG"].groups}
+    assert await _audience_group(db) in groups, "AUDIENCE 組須在子分組內（供可見對象維護）"
+    assert all(groups.values()), "組名須取自 DM_TAG_GROUP，不可為空"
+    assert kinds["CATEGORY"].groups == () and kinds["FUNC"].groups == ()
+
+
 async def test_create_rename_disable_category(db):
     """分類新增（碼英數鎖定）/ 改名 / 停用；停用後既有引用保留（IS_ENABLED=false 仍在）。"""
     await _svc.create_controlled(db, "CATEGORY", code="ZTAD", name="測試類", operator_id="admin")

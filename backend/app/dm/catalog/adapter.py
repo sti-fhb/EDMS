@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.module_assign import ControlledItemView, SetEnabledResult
+from app.core.module_assign import ControlledGroupView, ControlledItemView, ControlledKindView, SetEnabledResult
 from app.core.utils import utcnow
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
 from app.dm.catalog.service import CatalogService
@@ -38,6 +38,24 @@ class CatalogAdapter:
     def __init__(self, catalog: CatalogService | None = None, audit: AuditLogService | None = None) -> None:
         self._catalog = catalog or CatalogService()
         self._audit = audit or AuditLogService()
+
+    async def list_controlled_kinds(self, db: AsyncSession) -> list[ControlledKindView]:
+        """DM 可維護之受控主檔類別：分類 / 作業項目 / 標籤三類。
+
+        標籤另帶子分組供 DP 分區呈現（可見對象與三組檢索標籤）；**組名取自
+        `DM_TAG_GROUP.TAG_GROUP_NAME`**——標籤組可由資料異動，DP 硬編碼會與實際不符。
+        `requires_code`：分類 / 作業項目之代碼由管理者指定且建立後鎖定，故新增表單需代碼欄；
+        標籤之 `code` 為「所屬標籤組」、由 DP 自當前分區帶入，非使用者輸入。
+        """
+        rows = (
+            await db.execute(select(DmTagGroup).where(DmTagGroup.deleted == 0).order_by(DmTagGroup.tag_group_code))
+        ).scalars()
+        groups = tuple(ControlledGroupView(code=g.tag_group_code, name=g.tag_group_name) for g in rows)
+        return [
+            ControlledKindView(kind="CATEGORY", name="文件分類", requires_code=True),
+            ControlledKindView(kind="FUNC", name="關聯作業項目", requires_code=True),
+            ControlledKindView(kind="TAG", name="標籤", requires_code=False, groups=groups),
+        ]
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False
