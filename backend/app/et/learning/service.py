@@ -120,15 +120,23 @@ class EtLearningService:
             raise _NOT_YET_OPEN
 
         chapters = await self._repo.chapters(db, course_id)
-        rows = await self._repo.items_with_titles(db, [c.chapter_id for c in chapters])
+        chapter_ids = [c.chapter_id for c in chapters]
+        rows = await self._repo.items_with_titles(db, chapter_ids)
         # 擁有者預覽（是擁有者且**不在籍**）不累積進度，故完成集合為空、也不套用鎖定。
         # 教師若真的用邀請碼加入自己的課，他就是學員，一切照學員規則走。
         is_preview = is_owner and not enrolled
         completed_ids: set[int] = (
             set() if is_preview else await self._progress.completed_item_ids(db, user_id=user_id, course_id=course_id)
         )
+        # 預覽不套用鎖定，故與 `completed_ids` 同樣不必查——兩者的取得條件刻意寫成
+        # 同一形狀，避免日後有人只改其中一個。
+        zero_question = frozenset() if is_preview else await self._repo.zero_question_quiz_item_ids(db, chapter_ids)
         by_chapter = self._item_nodes(
-            chapters=[c.chapter_id for c in chapters], rows=rows, completed_ids=completed_ids, is_preview=is_preview
+            chapters=chapter_ids,
+            rows=rows,
+            completed_ids=completed_ids,
+            zero_question_quiz_item_ids=zero_question,
+            is_preview=is_preview,
         )
 
         # 課後問卷入口（#284）。完課判定**用已載入的資料算**，不再查一次進度——
@@ -173,6 +181,7 @@ class EtLearningService:
         chapters: list[int],
         rows: list[tuple[EtItem, str | None, str | None]],
         completed_ids: set[int],
+        zero_question_quiz_item_ids: frozenset[int],
         is_preview: bool,
     ) -> dict[int, list[ItemNode]]:
         """組側欄項目並套用解鎖判定（#274）。
@@ -194,7 +203,11 @@ class EtLearningService:
                     [
                         # 與寫入路徑的擋鎖判定（`progress/service._locked_ids`）共用同一支
                         # ——兩邊各組一份的話，分岔的表現是「側欄顯示解鎖但後端擋下」。
-                        build_item_state(item.item_id, item.item_type, completed_ids=completed_ids)
+                        build_item_state(
+                            item.item_id,
+                            completed_ids=completed_ids,
+                            zero_question_quiz_item_ids=zero_question_quiz_item_ids,
+                        )
                         for item, _, _ in by_chapter.get(chapter_id, [])
                     ]
                     for chapter_id in chapters

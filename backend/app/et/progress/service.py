@@ -300,15 +300,17 @@ class EtProgressService:
         """
         completed_ids = await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id)
         chapters = await self._learning.chapters(db, course_id)
-        rows = await self._learning.items_with_titles(db, [c.chapter_id for c in chapters])
-        by_chapter: dict[int, list[tuple[int, str]]] = {}
+        chapter_ids = [c.chapter_id for c in chapters]
+        rows = await self._learning.items_with_titles(db, chapter_ids)
+        zero_question = await self._learning.zero_question_quiz_item_ids(db, chapter_ids)
+        by_chapter: dict[int, list[int]] = {}
         for item, _, _ in rows:
-            by_chapter.setdefault(item.chapter_id, []).append((item.item_id, item.item_type))
+            by_chapter.setdefault(item.chapter_id, []).append(item.item_id)
         return locked_item_ids(
             [
                 [
-                    build_item_state(item_id, item_type, completed_ids=completed_ids)
-                    for item_id, item_type in by_chapter.get(c.chapter_id, [])
+                    build_item_state(item_id, completed_ids=completed_ids, zero_question_quiz_item_ids=zero_question)
+                    for item_id in by_chapter.get(c.chapter_id, [])
                 ]
                 for c in chapters
             ]
