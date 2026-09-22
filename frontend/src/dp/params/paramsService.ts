@@ -37,6 +37,53 @@ export interface DetailCreatePayload {
   sort_order?: number
 }
 
+/** 受控清單之單一項（模組自持表，非 DP_PARAM）。鎖定語意在**項目層**（is_builtin），與 DP_PARAM 的 detail_lock 不同。 */
+export interface ControlledItem {
+  code: string
+  name: string
+  is_builtin: boolean
+  is_enabled: boolean
+}
+
+/** 受控清單之一個維護分區。有子分組者（DM 標籤依標籤組）每組一區，group_* 非空。 */
+export interface ControlledSection {
+  module: string
+  kind: string
+  name: string
+  /** true＝新增時需使用者輸入代碼（DM 分類 / 作業項目）；false＝模組自行配號或由分區帶入。 */
+  requires_code: boolean
+  group_code: string | null
+  group_name: string | null
+  items: ControlledItem[]
+}
+
+/** 啟停結果；僅 DM 可見對象停用（soft-retire）帶受影響數。該數字為**下限**（見 #388）。 */
+export interface ControlledToggleResult {
+  affected_docs: number | null
+  affected_viewers: number | null
+}
+
+/** 模組受控清單維護 API（#182）。 */
+export const controlledApi = {
+  async list(): Promise<ControlledSection[]> {
+    const { data } = await http.get<ControlledSection[]>("/dp/params/controlled")
+    return data
+  },
+  async create(module: string, kind: string, payload: { code?: string; name: string }): Promise<void> {
+    await http.post(`/dp/params/controlled/${module}/${kind}`, payload)
+  },
+  async rename(module: string, kind: string, code: string, name: string): Promise<void> {
+    await http.put(`/dp/params/controlled/${module}/${kind}/${encodeURIComponent(code)}`, { name })
+  },
+  async setEnabled(module: string, kind: string, code: string, enabled: boolean): Promise<ControlledToggleResult> {
+    const { data } = await http.patch<ControlledToggleResult>(
+      `/dp/params/controlled/${module}/${kind}/${encodeURIComponent(code)}/enabled`,
+      { enabled },
+    )
+    return data
+  },
+}
+
 /** 系統參數維護 API（US5）。路徑相對於 baseURL（/api）。 */
 export const paramsApi = {
   async list(): Promise<ParamMaster[]> {

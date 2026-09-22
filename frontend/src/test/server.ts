@@ -785,6 +785,38 @@ export const handlers = [
       created_date: "2026-05-01T00:00:00Z",
     }),
   ),
+  // #182 模組受控清單（模組自持表，與 DP_PARAM 並存於同一畫面）。
+  // 置於 /api/dp/params 之前：MSW 靜態陣列先寫先贏，避免日後有人把 params 改成萬用路徑時被吃掉。
+  http.get("/api/dp/params/controlled", () =>
+    HttpResponse.json([
+      {
+        module: "DM",
+        kind: "CATEGORY",
+        name: "文件分類",
+        requires_code: true,
+        group_code: null,
+        group_name: null,
+        items: [
+          { code: "SOP", name: "標準作業程序", is_builtin: true, is_enabled: true },
+          { code: "ZTX", name: "自訂類", is_builtin: false, is_enabled: false },
+        ],
+      },
+      {
+        module: "DM",
+        kind: "TAG",
+        name: "標籤",
+        requires_code: false,
+        group_code: "AUDIENCE",
+        group_name: "可見對象／單位",
+        items: [{ code: "11", name: "護理師", is_builtin: false, is_enabled: true }],
+      },
+    ]),
+  ),
+  http.post("/api/dp/params/controlled/:module/:kind", () => new HttpResponse(null, { status: 201 })),
+  http.put("/api/dp/params/controlled/:module/:kind/:code", () => new HttpResponse(null, { status: 204 })),
+  http.patch("/api/dp/params/controlled/:module/:kind/:code/enabled", () =>
+    HttpResponse.json({ affected_docs: 3, affected_viewers: 2 }),
+  ),
   // US5 系統參數維護（預設 happy path；含平台 VALUE / LIST 與 DM 鎖定清單供 UI 驗證）
   http.get("/api/dp/params", () =>
     HttpResponse.json([

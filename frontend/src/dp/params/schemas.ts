@@ -31,6 +31,21 @@ export const ParamItemNameSchema = z
   .min(1, { message: "請輸入內容" })
   .max(100, { message: "名稱長度不可超過 100 字元" })
 
+/** 受控項名稱：非空 ≤50。上限取兩模組較嚴者（ET_TAG.TAG_NAME VARCHAR(50)），避免送出後才被後端擋。 */
+export const ControlledNameSchema = z
+  .string()
+  .trim()
+  .min(1, { message: "請輸入名稱" })
+  .max(50, { message: "名稱長度不可超過 50 字元" })
+
+/** 受控項代碼：英數、≤10（DM_CATEGORY.CATEGORY_CODE / DM_FUNC.FUNC_CODE）。格式權威檢核仍在模組端。 */
+export const ControlledCodeSchema = z
+  .string()
+  .trim()
+  .min(1, { message: "請輸入代碼" })
+  .max(10, { message: "代碼長度不可超過 10 字元" })
+  .regex(/^[A-Za-z0-9]+$/, { message: "代碼僅允許英文與數字" })
+
 /** 編輯參數值：非空 ≤500。伺服器端做型別 / 值域權威檢核。 */
 export const ParamValueSchema = z
   .string()
