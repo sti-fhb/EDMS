@@ -176,7 +176,11 @@ export function EtStudentsPage() {
   // 課程下拉取自 ET01 的清單（`scope=mine`）——教師只能追蹤自己建立的課程，
   // 與後端 `ensure_owner` 一致；列出他人課程只會產生「選了必定 403」的選項。
   const listParams = useMemo(() => ({ scope: "mine" as const, page: 1, limit: 100 }), [])
-  const { data: courses, isPending: coursesPending } = useQuery({
+  const {
+    data: courses,
+    isPending: coursesPending,
+    isError: coursesFailed,
+  } = useQuery({
     queryKey: QUERY_KEYS.etCourses.list(listParams),
     queryFn: () => coursesApi.list(listParams),
   })
@@ -197,8 +201,25 @@ export function EtStudentsPage() {
   // 課（雖然選了是三個空區塊），改之後他點開下拉是空的，分不出是「我沒有課」「我的課
   // 都還沒發布」還是「壞了」。
   //
-  // `coursesPending` 要分開判：載入中 `options` 也是空的，那時說「尚無已發布課程」是錯的。
-  const noCourses = !coursesPending && options.length === 0
+  // 🔴 空的 `options` 有**三種**成因，畫面必須分得出來——說錯比不說更糟：
+  //
+  // | 成因 | `emptyReason` | 該說什麼 |
+  // |---|---|---|
+  // | 還在載入 | `null` | 什麼都別說（那時還不知道）|
+  // | 載入失敗 | `"failed"` | 「載入失敗」——**不可以**說「尚無已發布的課程」 |
+  // | 載完且真的沒有 | `"none"` | 「尚無已發布的課程」 |
+  //
+  // 第二列是 #390 自己引入的回歸：該 PR 只讀 `isPending`，於是查詢失敗時畫面斷言
+  // 「尚無已發布的課程」。那是一句**假話**，而且比原本的缺陷更糟——教師會據此以為
+  // 自己真的沒有已發布的課程，而不是「剛才沒載到，重整一下」。
+  //
+  // ⚠️ 收斂成**單一判斷**而非「停用旗標 + 訊息」兩條平行條件：前者兩處各自演化就會
+  // 出現「停用了卻沒說為什麼」或反之。停用與訊息是同一件事的兩面——沒有可選項目。
+  const emptyReason: "failed" | "none" | null = coursesFailed
+    ? "failed"
+    : !coursesPending && options.length === 0
+      ? "none"
+      : null
   // 由後端算好的 `is_closed`——**不自己判 `status`**：期間已過時 status 仍是 PUBLISHED
   const readOnly = selected?.is_closed ?? false
 
@@ -284,8 +305,14 @@ export function EtStudentsPage() {
           label="課程"
           sx={{ minWidth: 260 }}
           value={courseId}
-          disabled={noCourses}
-          helperText={noCourses ? "尚無已發布的課程——課程發布後才會有學員" : undefined}
+          disabled={emptyReason !== null}
+          helperText={
+            emptyReason === "failed"
+              ? "課程清單載入失敗，請重新整理後再試"
+              : emptyReason === "none"
+                ? "尚無已發布的課程——課程發布後才會有學員"
+                : undefined
+          }
           onChange={(e) => setCourseId(e.target.value === "" ? "" : Number(e.target.value))}
         >
           <MenuItem value="">請選擇課程</MenuItem>
