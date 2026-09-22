@@ -165,31 +165,8 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
 
     if snapshot.chapter_count < 1:
         blockers.append(PublishBlocker(BLOCK_NO_CHAPTER, "課程至少須有 1 個章節"))
-    # 第八項（#358 第 3 項）：**逐章節**檢核，與上一行的全課程層是兩件事。
-    #
-    # `material_count` 是全課程的教材總數，只要任一章節有教材就通過——其餘章節可以
-    # completely 空著。空章節對學員是一個點進去什麼都沒有的段落。
-    #
-    # ⚠️ 空章節**不會**讓學員卡住：`progress/rules.locked_item_ids` 明文把沒有項目的
-    # 章節視為已完成（`all([])` 為 `True`），否則整門課的後半段會永久鎖死。完課率也
-    # 不受影響（分子分母都以 `ET_ITEM` 計，空章節各貢獻 0）。所以這是「不該發布出去」
-    # 而非「已發布的會出事」。
-    for chapter in snapshot.chapters:
-        if chapter.item_count < 1:
-            blockers.append(PublishBlocker(BLOCK_CHAPTER_EMPTY, "章節至少須有 1 份教材或測驗", chapter.chapter_id))
-    # 項目層（#384）：未命名的教材／測驗不得發布出去。
-    #
-    # 建立時名稱可留空是刻意設計（`ItemCreateReq` 之 docstring，2026-08-27 依實測回饋），
-    # 而它自己指的防線「儲存時仍必填」**擋不住「不按儲存」**——教師新增項目時空殼已經
-    # 在 DB 裡，直接關掉視窗就留下了。`unsavedNewItemId` 只在同一次視窗互動內有效。
-    #
-    # 🔴 判空用 `strip()` 而非 `not title`：今天三條寫入路徑都 strip 過（`ItemCreateReq`
-    # `_strip_title`、`QuizUpdateReq._strip_required`、`MaterialUpdateReq._name_not_blank`），
-    # 所以 DB 裡只可能是 `""`。但發布是最後一道防線，它的正確性不該依賴上游三個 schema
-    # 永遠維持嚴格——任一個放寬，這裡是唯一還站著的那道。
-    for item in snapshot.items:
-        if not item.title.strip():
-            blockers.append(PublishBlocker(BLOCK_ITEM_NO_TITLE, "教材與測驗須填寫名稱", item.item_id))
+    blockers += _chapter_blockers(snapshot)
+    blockers += _item_blockers(snapshot)
     if snapshot.material_count < 1:
         blockers.append(PublishBlocker(BLOCK_NO_MATERIAL, "課程至少須有 1 份教材"))
     if snapshot.tag_count < 1:
@@ -198,16 +175,7 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
         # 起、訖任一未填只回一條——教師要補的是「閱課期間」這件事，拆成兩條會讓
         # 缺漏清單看起來比實際嚴重。
         blockers.append(PublishBlocker(BLOCK_NO_SCHEDULE, "課程起訖時間須填寫完整"))
-
-    for quiz in snapshot.quizzes:
-        if quiz.question_count < 1:
-            # 0 題的測驗總分必然是 0，不再另報「配分不等於 100」——那只是噪音，
-            # 教師要做的是先加題目，加完配分自然要重算。
-            blockers.append(PublishBlocker(BLOCK_QUIZ_NO_QUESTION, "測驗至少須有 1 題", quiz.quiz_id))
-        elif quiz.points_total != REQUIRED_POINTS_TOTAL:
-            blockers.append(
-                PublishBlocker(BLOCK_QUIZ_POINTS, f"測驗各題配分總和須等於 {REQUIRED_POINTS_TOTAL}", quiz.quiz_id)
-            )
+    blockers += _quiz_blockers(snapshot)
 
     # 有問卷才檢查——與 AC 23「未建立問卷不阻擋發布」不衝突。一份 0 題的問卷對學員
     # 而言是個打不開的空殼，與 0 題測驗同型。不需要 `target_id`：一門課程至多 1 份問卷。
@@ -218,6 +186,60 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
         blockers.append(PublishBlocker(BLOCK_OBSOLETE_DOC, "請先移除已廢止文件之引用"))
 
     return tuple(blockers)
+
+
+def _chapter_blockers(snapshot: CourseSnapshot) -> list[PublishBlocker]:
+    """章節層（第八項，#358 第 3 項）：**逐章節**檢核，與全課程層的 `NO_MATERIAL` 是兩件事。
+
+    `material_count` 是全課程的教材總數，只要任一章節有教材就通過——其餘章節可以完全
+    空著。空章節對學員是一個點進去什麼都沒有的段落。
+
+    ⚠️ 空章節**不會**讓學員卡住：`progress/rules.locked_item_ids` 明文把沒有項目的章節
+    視為已完成（`all([])` 為 `True`），否則整門課的後半段會永久鎖死。完課率也不受影響
+    （分子分母都以 `ET_ITEM` 計，空章節各貢獻 0）。所以這是「不該發布出去」而非
+    「已發布的會出事」。
+    """
+    return [
+        PublishBlocker(BLOCK_CHAPTER_EMPTY, "章節至少須有 1 份教材或測驗", chapter.chapter_id)
+        for chapter in snapshot.chapters
+        if chapter.item_count < 1
+    ]
+
+
+def _item_blockers(snapshot: CourseSnapshot) -> list[PublishBlocker]:
+    """項目層（第九項，#384）：未命名的教材／測驗不得發布出去。
+
+    建立時名稱可留空是刻意設計（`ItemCreateReq` 之 docstring，2026-08-27 依實測回饋），
+    而它自己指的防線「儲存時仍必填」**擋不住「不按儲存」**——教師新增項目時空殼已經在
+    DB 裡，直接關掉視窗就留下了。`unsavedNewItemId` 只在同一次視窗互動內有效。
+
+    🔴 判空用 `strip()` 而非 `not title`：今天三條寫入路徑都 strip 過（`ItemCreateReq`
+    `_strip_title`、`QuizUpdateReq._strip_required`、`MaterialUpdateReq._name_not_blank`），
+    所以 DB 裡只可能是 `""`。但發布是最後一道防線，它的正確性不該依賴上游三個 schema
+    永遠維持嚴格——任一個放寬，這裡是唯一還站著的那道。
+    """
+    return [
+        PublishBlocker(BLOCK_ITEM_NO_TITLE, "教材與測驗須填寫名稱", item.item_id)
+        for item in snapshot.items
+        if not item.title.strip()
+    ]
+
+
+def _quiz_blockers(snapshot: CourseSnapshot) -> list[PublishBlocker]:
+    """測驗層（第六項與 AC 24 的配分項）：每個測驗至少 1 題，且各題配分總和 = 100。
+
+    0 題的測驗總分必然是 0，故兩者為 `elif` 而非各報一條——同時報「沒題目」與「配分
+    不等於 100」只是噪音，教師要做的是先加題目，加完配分自然要重算。
+    """
+    blockers: list[PublishBlocker] = []
+    for quiz in snapshot.quizzes:
+        if quiz.question_count < 1:
+            blockers.append(PublishBlocker(BLOCK_QUIZ_NO_QUESTION, "測驗至少須有 1 題", quiz.quiz_id))
+        elif quiz.points_total != REQUIRED_POINTS_TOTAL:
+            blockers.append(
+                PublishBlocker(BLOCK_QUIZ_POINTS, f"測驗各題配分總和須等於 {REQUIRED_POINTS_TOTAL}", quiz.quiz_id)
+            )
+    return blockers
 
 
 def is_visible_to_student(*, status: str, open_start_at: datetime | None, now: datetime) -> bool:
