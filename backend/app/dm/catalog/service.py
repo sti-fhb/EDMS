@@ -70,15 +70,28 @@ class CatalogService:
         """停用 AUDIENCE 可見對象（soft-retire）：is_enabled=False + 回傳受影響文件 / 閱覽者數。
 
         既有 DM_DOC_TAG / DM_USER_TAG 列保留（不收回可見性），僅擋後續指派。
+
+        兩個計數皆須濾 `DELETED = 0`：標籤關聯採**軟刪除復用**（移除＝`deleted=1` 不刪列，
+        以避開唯一約束），不濾會把已移除的文件關聯與已撤銷的閱覽者授權算進去。本數字自 #182
+        起會呈現給管理者作為「要不要停用」的依據，高估會誤導該判斷。
+
+        ⚠️ **已知限制**：在途草稿的 `DM_VERSION_TAG` 快照未計入，故本數字為**下限**
+        （DP 端據此標示「至少 N 份」）。該低估待 #388 處理。
         """
         tag = await db.scalar(select(DmTag).where(DmTag.tag_id == tag_id))
         if tag is None:
             raise AppError(status_code=404, detail="查無此可見對象", error_code="DM_CATALOG_002")
         affected_docs = (
-            await db.scalar(select(func.count()).select_from(DmDocTag).where(DmDocTag.tag_id == tag_id)) or 0
+            await db.scalar(
+                select(func.count()).select_from(DmDocTag).where(DmDocTag.tag_id == tag_id, DmDocTag.deleted == 0)
+            )
+            or 0
         )
         affected_viewers = (
-            await db.scalar(select(func.count()).select_from(DmUserTag).where(DmUserTag.tag_id == tag_id)) or 0
+            await db.scalar(
+                select(func.count()).select_from(DmUserTag).where(DmUserTag.tag_id == tag_id, DmUserTag.deleted == 0)
+            )
+            or 0
         )
         tag.is_enabled = False
         tag.updated_user = operator
