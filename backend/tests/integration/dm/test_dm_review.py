@@ -428,12 +428,23 @@ async def test_停用的審核者不再收到催辦(db, caplog):
 
     ⚠️ **同模組內兩支排程原本對同一問題給出相反答案**：`dm/kpi/repository.py` 三處
     （`:82` / `:114` / `:167`）都濾了 `status == ACTIVE`，催辦這支沒濾。
+
+    ## 🔴 停用走**產品路徑**，不直接 `UPDATE`（#395 AC 3）
+
+    直接 `UPDATE ... SET STATUS='DISABLED'` 驗到的只是「我在測試裡寫的那個字串會被擋」
+    ——那是拿自己的假設當輸入。改呼叫 `UsersService.set_status(action="disable")`
+    之後，驗的是**產品真的做了什麼**：它寫進 `DP_USER.STATUS` 的值（不論日後改成什麼）
+    會被催辦認出來。兩者在今天結果相同，差別在 DP 改值域的那一天——那時直接 UPDATE
+    的版本會**繼續通過**，而這個版本會紅。
     """
     from datetime import timedelta
 
+    from app.dp.users.service import UsersService
+
     await _seed_user(db, "ed395a", "撰寫")
     await _seed_user(db, "rev395a", "停用審核者", email="rev395a@e.com")
-    await db.execute(update(DpUser).where(DpUser.user_id == "rev395a").values(status="DISABLED"))
+    # 停用者與操作者必須不同人——`set_status` 有自我保護（403 DP_USER_006）
+    await UsersService().set_status(db, user_id="rev395a", action="disable", operator=OperatorInfo(user_id="ed395a"))
     await _doc(db, "DM-SOP-000395", status="PENDING_REVIEW")
     v = await _add_version(db, "DM-SOP-000395", "1.0", status="PENDING_REVIEW")
     await _review(
@@ -456,6 +467,11 @@ async def test_已刪除的審核者不再收到催辦(db):
 
     ⚠️ 註：`DP_USER.DELETED` 目前全系統沒有寫入點（系統無刪除使用者功能），所以這條在
     正式環境恆為 False。仍然要擋——它是 `deleted` 語意的一部分，而不是「現在會發生」。
+
+    🔴 本條**只能**直接 `UPDATE`，這不是 #395 AC 3 所指的那個問題：AC 3 要求走產品路徑，
+    前提是那條路徑存在（停用有 `UsersService.set_status`）。刪除使用者**沒有產品路徑**
+    ——沒有 API、沒有排程、沒有任何寫入點。所以這條測的本來就是「一個假想的未來狀態」，
+    而不是「產品做出來的狀態」，兩者不可混為一談。
     """
     from datetime import timedelta
 
