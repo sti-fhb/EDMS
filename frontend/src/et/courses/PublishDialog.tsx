@@ -32,6 +32,8 @@ interface PublishDialogProps {
   quizNames: Record<number, string>
   /** `chapter_id` → 章節名稱。供 `CHAPTER_EMPTY` 指出是哪一章（#358 第 3 項）。 */
   chapterNames: Record<number, string>
+  /** item_id → **所屬章節**名稱（`ITEM_NO_TITLE` 用；該項目自己沒有名稱）。 */
+  itemChapterNames: Record<number, string>
   onPublish: () => void
   onClose: () => void
 }
@@ -58,6 +60,7 @@ export function PublishDialog({
   result,
   quizNames,
   chapterNames,
+  itemChapterNames,
   onPublish,
   onClose,
 }: PublishDialogProps) {
@@ -124,7 +127,7 @@ export function PublishDialog({
                   </ListItemIcon>
                   <ListItemText
                     primary={
-                      blockerLabel(blocker, quizNames, chapterNames)
+                      blockerLabel(blocker, { quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames })
                     }
                     secondary={BLOCKER_HINT[blocker.code]}
                   />

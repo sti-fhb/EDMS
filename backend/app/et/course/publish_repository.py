@@ -7,7 +7,7 @@ CRUD 性質不同。
 ## 設計要點：一次查完，交給純函式判斷
 
 所有查詢在此做完並組成 `CourseSnapshot`，判斷全部交給 `publish_rules.evaluate_publish`。
-這樣六項檢核的所有組合都能以 unit test 涵蓋，不必為「沒有章節」「配分 90」「引用了
+這樣所有檢核的組合都能以 unit test 涵蓋，不必為「沒有章節」「配分 90」「引用了
 廢止文件」各建一份真資料。
 
 **不在此查 DM 廢止狀態**——那是跨模組 I/O，須經 `app/services` 之 `DmDocumentService`

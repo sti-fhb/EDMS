@@ -177,6 +177,7 @@ export const BLOCKER_HINT: Record<string, string> = {
   QUIZ_NO_QUESTION: "請為該測驗新增至少 1 題",
   SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或停用該問卷",
   OBSOLETE_DOC: "請於教材中移除已廢止文件之引用",
+  ITEM_NO_TITLE: "請開啟該項目並填寫名稱，或刪除這個未命名的項目",
 }
 
 /**
@@ -192,10 +193,32 @@ export const BLOCKER_HINT: Record<string, string> = {
  * ⚠️ **未列於此表的代碼一律不標名稱**（fail-closed）。日後新增帶 `target_id` 的代碼
  * 若忘了登記，結果是「少一段括號」而不是「標到別的東西」。
  */
-export const BLOCKER_TARGET_KIND: Record<string, "quiz" | "chapter"> = {
+export const BLOCKER_TARGET_KIND: Record<string, "quiz" | "chapter" | "itemChapter"> = {
   QUIZ_POINTS: "quiz",
   QUIZ_NO_QUESTION: "quiz",
   CHAPTER_EMPTY: "chapter",
+  // ⭐ `ITEM_NO_TITLE`（#384）刻意對到 **itemChapter** 而非一份 item_id → 項目名稱的
+  // 對照表：那個項目**依定義沒有名字**，查它會永遠落空、永遠退回裸訊息。
+  //
+  // 實測驗證過本表的 fail-closed 承諾：先不登記此鍵跑一次，渲染結果**恰好等於**裸訊息
+  // 「教材與測驗須填寫名稱」，一個括號都沒有——確實是降級，不是標到別的物件。
+  ITEM_NO_TITLE: "itemChapter",
+}
+
+/**
+ * 缺漏文案要用到的三份對照表。
+ *
+ * 🔴 **收成具名物件而非三個位置參數**：三者都是 `Record<number, string>`，位置參數
+ * 寫反會**編譯通過而且靜默標錯物件**——那正是 `BLOCKER_TARGET_KIND` 這張表當初
+ * （#358 security review）要防的那一類缺陷，不該在它自己的呼叫端重新開一個。
+ */
+export interface BlockerNames {
+  /** quiz_id → 測驗名稱 */
+  quiz: Record<number, string>
+  /** chapter_id → 章節名稱 */
+  chapter: Record<number, string>
+  /** item_id → **所屬章節**名稱（`ITEM_NO_TITLE` 用；該項目自己沒有名稱）。 */
+  itemChapter: Record<number, string>
 }
 
 /**
@@ -205,20 +228,21 @@ export const BLOCKER_TARGET_KIND: Record<string, "quiz" | "chapter"> = {
  * （後端兩條路徑共用 `evaluate_publish`），故文案也共用這一支。原本兩處各自複製了
  * 一段「查 `quizNames`」的行內判斷，`CHAPTER_EMPTY` 一加就同時在兩個地方標錯。
  */
-export function blockerLabel(
-  blocker: PublishBlocker,
-  quizNames: Record<number, string>,
-  chapterNames: Record<number, string>,
-): string {
+export function blockerLabel(blocker: PublishBlocker, names: BlockerNames): string {
   if (blocker.target_id === null) return blocker.message
   const kind = BLOCKER_TARGET_KIND[blocker.code]
   if (kind === "chapter") {
-    const name = chapterNames[blocker.target_id]
+    const name = names.chapter[blocker.target_id]
     return name ? `${blocker.message}（章節「${name}」）` : blocker.message
   }
   if (kind === "quiz") {
-    const name = quizNames[blocker.target_id]
+    const name = names.quiz[blocker.target_id]
     return name ? `${blocker.message}（測驗「${name}」）` : blocker.message
+  }
+  if (kind === "itemChapter") {
+    // 標的是項目，但顯示的是**它所屬的章節**——項目自己沒有名稱可標（#384）。
+    const name = names.itemChapter[blocker.target_id]
+    return name ? `${blocker.message}（章節「${name}」的項目）` : blocker.message
   }
   return blocker.message
 }
