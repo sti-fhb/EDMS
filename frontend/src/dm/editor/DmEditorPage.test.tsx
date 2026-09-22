@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { http, HttpResponse } from "msw"
+import { delay, http, HttpResponse } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DmEditorPage } from "./DmEditorPage"
@@ -114,6 +114,40 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     // 一次性預帶必須等 refetch 落定，否則 guard 會鎖住舊值 → 使用者以為沒存到。
     expect(await screen.findByText("護理師")).toBeInTheDocument()
     expect(screen.queryByText("全體")).not.toBeInTheDocument()
+  }, 20000)
+
+  it("refetch 期間已動手改標籤 → 落定後不覆蓋使用者的選擇（#396 補審之競態）", async () => {
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    // 第一次進入：填充快取（可見對象＝全體）
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/tags", () =>
+        HttpResponse.json({ audience_ids: ["1"], retrieval_ids: [] }),
+      ),
+    )
+    const first = renderWithProviders(<DmEditorPage />, undefined, undefined, qc)
+    expect(await screen.findByText("全體")).toBeInTheDocument()
+    first.unmount()
+
+    // 第二次進入：伺服器仍回「全體」但刻意延遲。有快取 → 載入 gate 不擋，表單此時已可互動，
+    // 使用者搶在 refetch 落定前改成「護理師」；落定後不得被伺服器值蓋回去。
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/tags", async () => {
+        await delay(400)
+        return HttpResponse.json({ audience_ids: ["1"], retrieval_ids: [] })
+      }),
+    )
+    renderWithProviders(<DmEditorPage />, undefined, undefined, qc)
+
+    const user = userEvent.setup({ delay: null })
+    await user.click(await screen.findByRole("combobox", { name: /可見對象/ }))
+    await user.click(await screen.findByRole("option", { name: "護理師" }))
+    expect(screen.getByText("護理師")).toBeInTheDocument()
+
+    // 等 refetch 確定落定（超過上面的 400ms）後再斷言，確保驗到的是「落定後」的狀態
+    await new Promise((r) => setTimeout(r, 700))
+    expect(screen.getByText("護理師")).toBeInTheDocument()
   }, 20000)
 
   it("分類選『訓練教材』→ 隱藏可見對象欄並說明不需設定（#377）", async () => {
