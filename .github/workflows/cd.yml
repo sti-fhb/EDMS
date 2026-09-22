@@ -178,17 +178,58 @@ jobs:
           docker push "${AR_BASE}/edms-backend:${SHORT_SHA}"
           docker push "${AR_BASE}/edms-backend:latest"
 
-      - name: Build & Push edms-nginx（含前端建置）
+      # 🔴 前綴 build-arg 不可省：線上自 2026-09-22 起改以 URL 路徑分流
+      #   （https://bms.tbsf.tw/edms/），front-proxy 會把 /edms 前綴 rewrite 掉才
+      #    轉給本系統的 nginx，但**瀏覽器看到的網址仍帶前綴** —— 靜態資源與
+      #    API base 若不帶前綴，抓到的會是 /assets/...、/api/...，那是 TBMS 的
+      #    位置，全部落到 proxy 的 404。
+      #
+      # ⚠️ 兩個參數必須同時給，只給一個都會壞且症狀不同：
+      #    只給 base → API 打到 /api，proxy 剝不到前綴、全部 404
+      #    只給 api  → 靜態資源指向 /assets，proxy 剝不到前綴、整頁空白
+      #
+      # 與 build-release-images.yml（院內交付包）用相同的值：線上與院內自
+      # 2026-09-22 起是同一套架構，差別只在映像要進哪個 registry。
+      - name: Build edms-nginx（含前端建置，帶路徑前綴）
         uses: docker/build-push-action@v7
         with:
           context: .
           file: nginx/Dockerfile
-          push: true
-          tags: |
-            ${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}
-            ${{ env.AR_BASE }}/edms-nginx:latest
+          load: true          # 先載入本地，驗證通過才 push
+          tags: ${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}
+          build-args: |
+            VITE_BASE_PATH=/edms/
+            VITE_API_BASE_URL=/edms/api
           cache-from: type=gha,scope=edms-nginx
           cache-to: type=gha,scope=edms-nginx,mode=max
+
+      # 前端建置失敗不會讓 docker build 非零結束，只會產出一個空站台；
+      # build-arg 打錯字更隱蔽（Docker 對未知的 build-arg 只給 warning）。
+      # 兩者都要等到有人打開網站才會發現，故在 push 之前擋下 ——
+      # 與 build-release-images.yml 用同一組斷言。
+      - name: 驗證 nginx 映像的資源路徑與 API base 均帶 /edms 前綴
+        run: |
+          IMG="${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}"
+          docker run --rm --entrypoint sh "$IMG" \
+            -c 'test -f /usr/share/nginx/html/index.html' \
+            || { echo "::error::nginx 映像內找不到前端 index.html，前端建置可能失敗。"; exit 1; }
+
+          docker run --rm --entrypoint sh "$IMG" \
+            -c 'grep -q "/edms/assets/" /usr/share/nginx/html/index.html' \
+            || { echo "::error::index.html 的資源路徑不帶 /edms/ 前綴 —— VITE_BASE_PATH 未生效，上線會整頁空白。"; exit 1; }
+
+          docker run --rm --entrypoint sh "$IMG" \
+            -c 'grep -rq "/edms/api" /usr/share/nginx/html/assets/' \
+            || { echo "::error::bundle 內找不到 /edms/api —— VITE_API_BASE_URL 未生效，上線後 API 會全部 404。"; exit 1; }
+
+          echo "資源路徑與 API base 均帶 /edms 前綴"
+
+      # 驗證通過才推。:latest 與 :<sha> 一起打，語意與改動前相同。
+      - name: Push edms-nginx
+        run: |
+          docker tag "${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}" "${{ env.AR_BASE }}/edms-nginx:latest"
+          docker push "${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}"
+          docker push "${{ env.AR_BASE }}/edms-nginx:latest"
 
       # SHA tag 是 VM 側部署腳本的觸發依據：它比對 main 的最新 commit 是否
       # 已有對應的映像 tag，有才部署——確保程式碼與映像一致，不會拉到半成品。

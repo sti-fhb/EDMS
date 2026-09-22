@@ -1,6 +1,6 @@
 # EDMS 部署說明
 
-> **狀態：已於 2026-09-03 上線**，`https://edms.tbsf.tw` 服務中。§2 的前置條件皆已完成（GCP 資源、WIF、VM 安裝、SMTP）。
+> **狀態：已於 2026-09-03 上線**；2026-09-22 起網址改為 `https://bms.tbsf.tw/edms/`（舊網址 `https://edms.tbsf.tw` 由 front-proxy 301 轉址，待既存信件連結過期後移除）。§2 的前置條件皆已完成（GCP 資源、WIF、VM 安裝、SMTP）。
 >
 > 本檔同時是**重建環境的依據**——若日後要在新機器上重來一次，§2 就是完整的步驟。
 >
@@ -49,7 +49,7 @@ flowchart TD
     D -->|"pull"| AR
     D --> EN
     EN --> EB --> ED
-    PX -->|"Host: edms.tbsf.tw"| EN
+    PX -->|"/edms/ → 剝前綴"| EN
 ```
 
 **GitHub 與 VM 之間沒有任何連線**——兩側都只碰 Artifact Registry。
@@ -258,11 +258,13 @@ sudo docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml up 
 
 #### 驗證
 
-在 `https://edms.tbsf.tw/` 走一次「忘記密碼」，確認信箱收到。失敗時看 `sudo docker logs edms-backend --tail 30`。
+在 `https://bms.tbsf.tw/edms/` 走一次「忘記密碼」，確認信箱收到（連結須為 `.../edms/...`）。失敗時看 `sudo docker logs edms-backend --tail 30`。
 
 ### 2.7 Cloudflare
 
-`edms.tbsf.tw` 的 public hostname 指向 `http://10.140.0.3:80`（與 TBMS 同一目的地，由 front-proxy 依 Host 分流）。此項已完成。
+`bms.tbsf.tw` 的 public hostname 指向 `http://10.140.0.3:80`，front-proxy 依 **URL 路徑前綴**把 `/edms/` 轉給本系統、`/tbms/` 轉給 TBMS。
+
+> 🗓️ `edms.tbsf.tw` 指向同一目的地，proxy 對它回 301 至 `bms.tbsf.tw/edms$request_uri`（路徑與 query string 一起帶走，故既存的開通信／重設信連結仍有效）。所有既存連結過期後即可移除該 hostname。
 
 ---
 
