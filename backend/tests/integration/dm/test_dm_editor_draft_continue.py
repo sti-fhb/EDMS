@@ -218,6 +218,37 @@ async def test_draft_meta_prefills_last_reviewer_when_rejected(db):
 # ── 續編更新既有 DRAFT 版本 ─────────────────────────
 
 
+async def test_update_draft_version_tag_change_is_read_back(db):
+    """續編改可見對象後，編輯模式預帶應立即為新值（#377 手測回報之後端側驗證）。
+
+    手測症狀「改了標籤存檔、下次開啟仍是舊值」的根因在前端快取時序（見 DmEditorPage 的 tagsPrefilled
+    guard），後端這條路徑本身正確；本測試釘住後端契約，避免日後把根因誤指到這裡。
+    """
+    await _seed_user(db, "ed", "撰寫")
+    r = await _first_version_draft(db)
+    aud_all = await _audience_id(db, "全體")
+    aud_nurse = await _audience_id(db, "護理師")
+
+    await _svc.update_draft_version(
+        db,
+        doc_id=r.doc_id,
+        version_id=r.version_id,
+        doc_name=None,
+        audience_ids=[aud_nurse],
+        retrieval_ids=[],
+        version_no="1.1",
+        change_summary="改可見對象",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op(),
+    )
+
+    tags = await _svc.get_doc_tags(db, r.doc_id, user_id="ed")
+    assert tags.audience_ids == [str(aud_nurse)]
+    assert str(aud_all) not in tags.audience_ids
+
+
 async def test_update_draft_version_in_place_no_new_row(db):
     await _seed_user(db, "ed", "撰寫")
     r = await _first_version_draft(db)

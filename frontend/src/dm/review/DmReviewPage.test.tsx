@@ -87,7 +87,7 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument()
   })
 
-  it("明細顯示文件資訊：分類中文名 + 本次送審之可見對象 / 檢索標籤（#377）", async () => {
+  it("明細顯示本次送審之可見對象 / 檢索標籤；分類不重複顯示（#377）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmReviewPage />)
     await user.click(await screen.findByText("領血確認標準作業程序"))
@@ -99,8 +99,8 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     expect(screen.getByText("全體")).toBeInTheDocument()
     expect(screen.getByText("護理師")).toBeInTheDocument()
     expect(screen.getByText("採血")).toBeInTheDocument()
-    // 分類顯示中文名而非 SOP：清單兩列 + 明細一處
-    expect(screen.getAllByText("標準作業程序").length).toBeGreaterThanOrEqual(2)
+    // 分類只在清單各列出現（mock 兩列皆 SOP），明細不再重複顯示 → 恰為 2 個、且為中文名
+    expect(screen.getAllByText("標準作業程序")).toHaveLength(2)
     expect(screen.queryByText("SOP")).not.toBeInTheDocument()
   })
 

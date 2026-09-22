@@ -16,10 +16,13 @@ export function renderWithProviders(
   ui: ReactElement,
   options?: Omit<RenderOptions, "wrapper">,
   initialEntries?: string[], // 需測 query param / 深連結時傳入（如 ["/dm/review?reviewId=801"]）
+  sharedQueryClient?: QueryClient, // 跨多次 render 共用快取時傳入（測「重進頁面讀到舊快取」這類時序）
 ) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const queryClient =
+    sharedQueryClient ??
+    new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
