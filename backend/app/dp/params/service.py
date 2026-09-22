@@ -19,8 +19,12 @@ from app.dp.params.models import DpParamMaster
 from app.dp.params.param_rules import validate_group_invariants, validate_param_value
 from app.dp.params.repository import ParamRepository
 from app.dp.params.schemas import (
+    ControlledCreate,
     ControlledItemResponse,
+    ControlledRename,
     ControlledSectionResponse,
+    ControlledToggle,
+    ControlledToggleResponse,
     ParamDetailCreate,
     ParamDetailResponse,
     ParamDetailUpdate,
@@ -178,6 +182,56 @@ class ControlledAdminService:
                 items = await provider.list_controlled(db, kind.kind)
                 sections.extend(_split_sections(module, kind, items))
         return sections
+
+    async def _require_manageable(self, db: AsyncSession, module: str, user_id: str):
+        """取該模組 provider，並確認操作者為該模組管理者。
+
+        Raises:
+            AppError: 非該模組管理者、或該模組未註冊 provider（403 DP_PARAM_003，fail-closed）。
+        """
+        provider = module_assign_registry.get(module)
+        if provider is None or not await module_admin_gate.is_module_admin(module, user_id, db):
+            raise AppError(status_code=403, detail=_FORBIDDEN_MSG, error_code="DP_PARAM_003")
+        return provider
+
+    async def create(
+        self, db: AsyncSession, *, module: str, kind: str, data: ControlledCreate, operator: OperatorInfo
+    ) -> None:
+        """新增受控項（委派模組）。代碼格式 / 重複檢核與稽核皆由模組負責。
+
+        Raises:
+            AppError: 越權（403 DP_PARAM_003）；模組自身之業務碼（重複 / 格式 / 查無）原樣透出。
+        """
+        provider = await self._require_manageable(db, module, operator.user_id)
+        await provider.create_controlled(db, kind, code=data.code or "", name=data.name, operator_id=operator.user_id)
+
+    async def rename(
+        self, db: AsyncSession, *, module: str, kind: str, code: str, data: ControlledRename, operator: OperatorInfo
+    ) -> None:
+        """受控項改名（委派模組）。內建項之保護規則歸模組（前端隱藏入口僅為 UX）。
+
+        Raises:
+            AppError: 越權（403 DP_PARAM_003）；模組業務碼原樣透出。
+        """
+        provider = await self._require_manageable(db, module, operator.user_id)
+        await provider.rename_controlled(db, kind, code=code, new_name=data.name, operator_id=operator.user_id)
+
+    async def set_enabled(
+        self, db: AsyncSession, *, module: str, kind: str, code: str, data: ControlledToggle, operator: OperatorInfo
+    ) -> ControlledToggleResponse:
+        """受控項啟停（委派模組；不刪除）。
+
+        Returns:
+            受影響數（僅 DM 可見對象 soft-retire 有值）；該數字為下限，見 schema 說明。
+
+        Raises:
+            AppError: 越權（403 DP_PARAM_003）；模組業務碼原樣透出。
+        """
+        provider = await self._require_manageable(db, module, operator.user_id)
+        result = await provider.set_controlled_enabled(
+            db, kind, code=code, enabled=data.enabled, operator_id=operator.user_id
+        )
+        return ControlledToggleResponse(affected_docs=result.affected_docs, affected_viewers=result.affected_viewers)
 
 
 class ParamAdminService:

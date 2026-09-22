@@ -73,6 +73,39 @@ class ControlledSectionResponse(BaseModel):
     items: list[ControlledItemResponse]
 
 
+class ControlledCreate(BaseModel):
+    """新增受控項請求。
+
+    `code` 之語意依分區而定（見 `ControlledSectionResponse.requires_code`）：需代碼者由使用者輸入、
+    有子分組者由前端帶入所屬組代碼、兩者皆非則模組忽略。**格式檢核歸模組**（DP 不重複實作）。
+    """
+
+    code: Optional[str] = None
+    name: _NameStr
+
+
+class ControlledRename(BaseModel):
+    """受控項改名請求（代碼建立後鎖定，不可改）。"""
+
+    name: _NameStr
+
+
+class ControlledToggle(BaseModel):
+    """受控項啟停請求（不刪除、淘汰改停用）。"""
+
+    enabled: bool
+
+
+class ControlledToggleResponse(BaseModel):
+    """啟停結果；僅 DM 可見對象停用（soft-retire）帶受影響數，其餘為 null。
+
+    受影響數為**下限**——在途草稿之版本層標籤快照未計入（#388），畫面須標示「至少」。
+    """
+
+    affected_docs: Optional[int] = None
+    affected_viewers: Optional[int] = None
+
+
 class ParamDetailUpdate(BaseModel):
     """更新明細請求：改名（param_name）/ 改值（param_value）/ 說明 / 啟停。
 

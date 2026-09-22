@@ -10,17 +10,24 @@
 import pytest
 
 from app.core.auth import create_access_token
+from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
 from app.core.module_assign import module_assign_registry
+from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.bootstrap import register_dm_module
+from app.dm.catalog.models import DmTag
 from app.dm.roles.gate import dm_is_module_admin
+from app.dp.params.schemas import ControlledCreate, ControlledRename, ControlledToggle
 from app.dp.params.service import ControlledAdminService
 from app.dp.users.models import DpUser
 from app.et.bootstrap import register_et_module
 from app.et.roles.gate import et_is_module_admin
 
 pytestmark = pytest.mark.integration
+
+_OP_DM = OperatorInfo(user_id="dmadmin")
+_OP_ET = OperatorInfo(user_id="etadmin")
 
 
 @pytest.fixture
@@ -115,6 +122,116 @@ async def test_未註冊provider之模組不出現(db, admin_gate):
     sections = await ControlledAdminService().list_visible(db, "dmadmin")
 
     assert not [s for s in sections if s.module == "ZT_ABSENT"]
+
+
+# ---- 寫入（委派模組；模組自身的業務規則由各模組 adapter 測試覆蓋）----
+
+
+async def test_新增與改名受控項(db, admin_gate):
+    """DP 只做委派與授權；代碼格式 / 重複檢核歸模組。"""
+    admin_gate(dm_admins=("dmadmin",))
+    svc = ControlledAdminService()
+
+    await svc.create(
+        db, module="DM", kind="CATEGORY", data=ControlledCreate(code="ZTDP1", name="受控新增"), operator=_OP_DM
+    )
+    await svc.rename(
+        db, module="DM", kind="CATEGORY", code="ZTDP1", data=ControlledRename(name="受控改名"), operator=_OP_DM
+    )
+
+    sections = await svc.list_visible(db, "dmadmin")
+    cats = next(s for s in sections if s.module == "DM" and s.kind == "CATEGORY")
+    assert {i.code: i.name for i in cats.items}["ZTDP1"] == "受控改名"
+
+
+async def test_新增受控項時代碼可省略(db, admin_gate):
+    """`requires_code=False` 之分區（ET 標籤）不需代碼——TAG_ID 由模組自行配號。"""
+    admin_gate(et_admins=("etadmin",))
+    svc = ControlledAdminService()
+
+    await svc.create(db, module="ET", kind="TAG", data=ControlledCreate(name="ZT受訓單位"), operator=_OP_ET)
+
+    sections = await svc.list_visible(db, "etadmin")
+    tags = next(s for s in sections if s.module == "ET" and s.kind == "TAG")
+    assert "ZT受訓單位" in {i.name for i in tags.items}
+
+
+async def test_停用受控項不刪除(db, admin_gate):
+    admin_gate(dm_admins=("dmadmin",))
+    svc = ControlledAdminService()
+    await svc.create(
+        db, module="DM", kind="CATEGORY", data=ControlledCreate(code="ZTDP2", name="待停用"), operator=_OP_DM
+    )
+
+    await svc.set_enabled(
+        db, module="DM", kind="CATEGORY", code="ZTDP2", data=ControlledToggle(enabled=False), operator=_OP_DM
+    )
+
+    sections = await svc.list_visible(db, "dmadmin")
+    cats = next(s for s in sections if s.module == "DM" and s.kind == "CATEGORY")
+    item = {i.code: i for i in cats.items}["ZTDP2"]
+    assert item.is_enabled is False, "停用不刪除，項目仍在清單內"
+
+
+async def test_停用可見對象回受影響數(db, admin_gate):
+    """soft-retire 之受影響數須傳回 DP 供畫面提示（module-callbacks §3.1 指定落點）。
+
+    該數字為下限（在途草稿之 `DM_VERSION_TAG` 未計，#388），畫面標示「至少 N」。
+    """
+    admin_gate(dm_admins=("dmadmin",))
+    svc = ControlledAdminService()
+    tag = DmTag(tag_group_code="AUDIENCE", tag_name="ZT停用提示", created_user="e", created_date=utcnow())
+    db.add(tag)
+    await db.flush()
+
+    result = await svc.set_enabled(
+        db, module="DM", kind="TAG", code=str(tag.tag_id), data=ControlledToggle(enabled=False), operator=_OP_DM
+    )
+
+    assert result.affected_docs == 0 and result.affected_viewers == 0
+
+
+async def test_越權維護他模組受控項被拒(db, admin_gate):
+    """A-strict：伺服器端 enforce，非僅前端隱藏入口。"""
+    admin_gate(et_admins=("etadmin",))
+
+    with pytest.raises(AppError) as e:
+        await ControlledAdminService().create(
+            db, module="DM", kind="CATEGORY", data=ControlledCreate(code="ZTDP3", name="越權"), operator=_OP_ET
+        )
+
+    assert e.value.status_code == 403
+    assert e.value.error_code == "DP_PARAM_003"
+
+
+async def test_未註冊模組之寫入被拒(db, admin_gate):
+    """provider 未註冊 → fail-closed 403（不得 500）。"""
+    admin_gate(dm_admins=("dmadmin",))
+    module_assign_registry.unregister("ZT_ABSENT")
+
+    with pytest.raises(AppError) as e:
+        await ControlledAdminService().set_enabled(
+            db,
+            module="ZT_ABSENT",
+            kind="TAG",
+            code="1",
+            data=ControlledToggle(enabled=False),
+            operator=_OP_DM,
+        )
+
+    assert e.value.status_code == 403
+    assert e.value.error_code == "DP_PARAM_003"
+
+
+async def test_模組業務碼原樣透出(db, admin_gate):
+    """模組自身之錯誤碼不映射為 DP_PARAM_*——映射會讓前端無法單靠 error_code 分辨情境。"""
+    admin_gate(et_admins=("etadmin",))
+    svc = ControlledAdminService()
+
+    with pytest.raises(AppError) as e:
+        await svc.create(db, module="ET", kind="TAG", data=ControlledCreate(name="護理師"), operator=_OP_ET)
+
+    assert e.value.error_code == "ET_TAG_002", "名稱重複應回模組碼，非 DP_PARAM_005"
 
 
 async def test_http_列受控清單需管理者身分(db, client, admin_gate):
