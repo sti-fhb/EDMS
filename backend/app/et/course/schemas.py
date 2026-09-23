@@ -217,22 +217,41 @@ class ItemCreateReq(BaseModel):
     後端於**同一交易**內建立對應之 `ET_MATERIAL` / `ET_QUIZ` 空殼——前端不需先建
     教材再建項目，避免中途失敗留下孤兒。
 
-    ## 名稱可留空（2026-08-27 依實測回饋）
+    ## 🔴 名稱必填（2026-09-23 / #414 收回「可留空」）
 
-    原本前端會代填「新教材」/「新測驗」。那是替使用者做決定——他開了視窗第一件事
-    就是把那串字選起來刪掉。改為建立時可空、開啟視窗即為空白欄位讓他直接輸入。
+    2026-08-27 曾依實測回饋改為可留空，當時的理由與其失效之處：
 
-    **儲存時仍必填**（`MaterialUpdateReq` / `QuizUpdateReq` 之 `min_length=1`）——
-    空名稱只是「還沒填」的過渡狀態，不是可以存檔的樣子。
+    > 原本前端會代填「新教材」/「新測驗」。那是替使用者做決定——他開了視窗第一件事
+    > 就是把那串字選起來刪掉。改為建立時可空、開啟視窗即為空白欄位讓他直接輸入。
+    >
+    > **儲存時仍必填**（`MaterialUpdateReq` / `QuizUpdateReq` 之 `min_length=1`）——
+    > 空名稱只是「還沒填」的過渡狀態，不是可以存檔的樣子。
+
+    ⚠️ **「儲存時仍必填」對更新路徑成立，但空殼在建立當下就已經落地了。** 前端的清理
+    只掛在「取消」上，所以換頁、重新整理、按「儲存草稿」都會把一個沒有名稱的項目留在
+    章節裡——2026-09-23 手測即回報此狀況。
+
+    #384 / PR #406 已於發布檢核補上 `BLOCK_ITEM_NO_TITLE`，但那是**發布時**才擋；本次
+    把門檻移到建立當下，使「沒有名稱的項目」從一開始就造不出來。
+
+    ⭐ 「不要替使用者代填預設值」那個判斷仍然成立且未被推翻——現在的做法是**建立前先
+    問名稱**（前端 `NewItemDialog`），既不代填也不留空，而不是回頭去填「新教材」。
+
+    ⛔ **不要把 `default=""` 加回來**。既有的空名稱項目不受影響（本 schema 只管建立），
+    教師開啟編輯視窗補名稱即可。
     """
 
     item_type: Literal["MATERIAL", "QUIZ"]
-    title: str = Field(default="", max_length=ITEM_TITLE_MAX_LEN)
+    title: str = Field(min_length=1, max_length=ITEM_TITLE_MAX_LEN)
 
     @field_validator("title")
     @classmethod
     def _strip_title(cls, v: str) -> str:
-        return v.strip()
+        # 先 strip 再判空——`min_length` 擋不掉「   」這種全空白，而那與留空沒有差別。
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("項目名稱不得為空白")
+        return stripped
 
 
 class ItemReorderReq(BaseModel):

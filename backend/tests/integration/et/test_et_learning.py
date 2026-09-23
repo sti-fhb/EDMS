@@ -79,7 +79,7 @@ async def _course_with_material(client, db, teacher: str, *, name: str = "採血
 
     item = await client.post(
         f"/api/et/chapters/{chapter_id}/items",
-        json={"item_type": ITEM_MATERIAL},
+        json={"item_type": ITEM_MATERIAL, "title": "教材"},
         headers=_bearer(teacher),
     )
     assert item.status_code == 201, item.text

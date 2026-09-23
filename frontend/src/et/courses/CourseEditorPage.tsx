@@ -35,6 +35,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
 import { InviteStudentsDialog } from "./InviteStudentsDialog"
+import { NewItemDialog } from "./NewItemDialog"
 import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
 import { RequireRetestDialog } from "./RequireRetestDialog"
@@ -89,6 +90,13 @@ const EMPTY_FORM = {
 interface PendingAddItem {
   chapterIndex: number
   itemType: ItemType
+  /**
+   * 項目名稱（#414）。
+   *
+   * ⚠️ **名稱在導向之前就問完**，不是到了編輯頁再問——後者等於在使用者眼前先換一次
+   * 頁再跳視窗，而且重新整理就遺失。名稱隨 navigate state 一起過去。
+   */
+  title: string
 }
 
 export function EtCourseEditorPage() {
@@ -139,6 +147,14 @@ export function EtCourseEditorPage() {
    * 否則 React 會呼叫它、把回傳值存進 state。
    */
   const [pendingRetestAction, setPendingRetestAction] = useState<((requireRetest: boolean) => void) | null>(null)
+  /**
+   * 已選好型別、等待命名的新項目（#414）。
+   *
+   * ⚠️ 名稱問完才呼叫 `itemsApi.add`——在此之前 DB 裡什麼都沒有，取消即真的什麼都
+   * 沒發生。這正是本 issue 要的：空殼原本在按下「新增項目」的當下就落地了。
+   */
+  const [namingItem, setNamingItem] = useState<{ chapter: ChapterItem; itemType: ItemType } | null>(null)
+  const [creatingItem, setCreatingItem] = useState(false)
   /** 問卷區塊的錯誤（凍結、選項不足等）——與項目視窗的錯誤分開顯示於問卷卡片內。 */
   const [surveyError, setSurveyError] = useState<string | null>(null)
   const [surveyOpen, setSurveyOpen] = useState(false)
@@ -696,7 +712,7 @@ export function EtCourseEditorPage() {
     navigate(location.pathname, { replace: true, state: null })
     void (async () => {
       try {
-        const created = await itemsApi.add(target.chapter_id, pendingAddItem.itemType, "")
+        const created = await itemsApi.add(target.chapter_id, pendingAddItem.itemType, pendingAddItem.title)
         invalidate()
         setUnsavedNewItemId(created.item_id)
         setOpenItem(created)
@@ -709,25 +725,46 @@ export function EtCourseEditorPage() {
     // 最前面，故不需要 eslint-disable 來掩蓋依賴。
   }, [pendingAddItem, course?.chapters, isNew, handleError, invalidate, location.pathname, navigate])
 
-  const handleAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
-    // 新增模式：課程還不存在，項目掛不上去（`ET_ITEM` 需要真的 `CHAPTER_ID`）。
-    // 先自動存草稿再繼續，而不是要使用者先去按一次「儲存草稿」——那個斷點沒有業務
-    // 意義，章節那層（`CourseCreateReq.chapters`）當初就是為此讓課程與章節一次送出。
-    // 形狀比照 Moodle 的「Save and display」：把存檔藏在「往下走」的按鈕語意裡。
-    if (isNew) {
-      await autoSaveThenAddItem(chapter, itemType)
-      return
-    }
+  /**
+   * 按下「新增項目」→ **先問名稱**（#414），確認後才真的建立。
+   *
+   * 2026-08-27 起此處原本直接以空名稱建 DB 空殼，理由是「不代填『新教材』——使用者
+   * 開了視窗第一件事就是把預設值選起來刪掉」。⭐ 那個判斷仍然成立（`NewItemDialog`
+   * 也沒有代填），被推翻的是它的前提「空名稱只是還沒填的過渡狀態」——空殼在建立當下
+   * 就落地了，而清理只掛在「取消」上，換頁 / 重新整理 / 按「儲存草稿」都會留下它。
+   */
+  const handleAddItem = (chapter: ChapterItem, itemType: ItemType) => {
+    // 🔴 **新增模式下課程本身的必填要先擋**，否則使用者會先打完項目名稱、按下「建立」
+    // 才被告知「課程名稱未填」——那個錯誤與他剛做的事無關，而他剛輸入的名稱也白打了。
+    // 擋在這裡即維持 #335 原本的行為：按下「新增項目」當場標出欄位錯誤。
+    if (isNew && !validateForm()) return
+    setNamingItem({ chapter, itemType })
+  }
+
+  /** 命名視窗按下「建立」。 */
+  const confirmNewItem = async (title: string) => {
+    if (!namingItem) return
+    const { chapter, itemType } = namingItem
+    setCreatingItem(true)
     try {
-      // 不代填名稱——使用者開了視窗第一件事就是把預設值選起來刪掉。
-      // 空名稱只是「還沒填」的過渡狀態，儲存時後端仍必填。
-      const created = await itemsApi.add(chapter.chapter_id, itemType, "")
+      // 新增模式：課程還不存在，項目掛不上去（`ET_ITEM` 需要真的 `CHAPTER_ID`）。
+      // 先自動存草稿再繼續，而不是要使用者先去按一次「儲存草稿」——那個斷點沒有業務
+      // 意義，章節那層（`CourseCreateReq.chapters`）當初就是為此讓課程與章節一次送出。
+      // 形狀比照 Moodle 的「Save and display」：把存檔藏在「往下走」的按鈕語意裡。
+      if (isNew) {
+        await autoSaveThenAddItem(chapter, itemType, title)
+        return
+      }
+      const created = await itemsApi.add(chapter.chapter_id, itemType, title)
       invalidate()
-      // 建完直接開視窗——空殼本身沒有內容，不開等於要使用者再點一次
+      // 建完直接開視窗——剛建的項目還沒有內容，不開等於要使用者再點一次
       setUnsavedNewItemId(created.item_id)
       setOpenItem(created)
     } catch (err) {
       handleError(err)
+    } finally {
+      setCreatingItem(false)
+      setNamingItem(null)
     }
   }
 
@@ -747,15 +784,16 @@ export function EtCourseEditorPage() {
    * 逐一 append（見 `EtCourseService.create_draft`），故索引可對應——由編輯頁載入
    * 課程後依索引取真正的 `chapter_id`。
    */
-  const autoSaveThenAddItem = async (chapter: ChapterItem, itemType: ItemType) => {
-    if (!validateForm()) return
+  const autoSaveThenAddItem = async (chapter: ChapterItem, itemType: ItemType, title: string) => {
+    // 表單驗證已於 `handleAddItem` 做過（要在開啟命名視窗**之前**擋），此處不重複——
+    // 兩處各驗一次會讓規則有兩個版本，而命名視窗開啟期間表單是碰不到的。
     const chapterIndex = stagedChapters.findIndex((c) => c.id === chapter.chapter_id)
     try {
       const created = await coursesApi.create({ ...toPayload(), chapters: stagedChapters.map((c) => c.name) })
       message.success("已自動儲存草稿")
       navigate(`/et/courses/${created.course_id}`, {
         replace: true,
-        state: { pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType } },
+        state: { pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType, title } },
       })
     } catch (err) {
       handleError(err)
@@ -1234,6 +1272,13 @@ export function EtCourseEditorPage() {
         逾時（實測：改成常駐後 `CourseEditorPage.test` 由 30/30 變成 28/30，兩條新增
         模式的測試卡在 5000ms；移除渲染即恢復）。
       */}
+      {/* 新增項目前先取得名稱（#414）。⚠️ 同樣是**條件渲染**，理由見上方 RequireRetestDialog。 */}
+      <NewItemDialog
+        itemType={namingItem?.itemType ?? null}
+        submitting={creatingItem}
+        onCancel={() => setNamingItem(null)}
+        onConfirm={confirmNewItem}
+      />
       {pendingRetestAction !== null && (
         <RequireRetestDialog
           open
