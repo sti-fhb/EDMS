@@ -68,6 +68,10 @@ export function NewItemDialog({ itemType, submitting, onCancel, onConfirm }: New
   const label = itemType === "MATERIAL" ? "教材" : "測驗"
 
   const submit = () => {
+    // 🔴 **Enter 也要受 `submitting` 保護**。`submitting` 只 disable 了「建立」按鈕，
+    // 而鍵盤的 auto-repeat 會在長按時連發 keydown——少了這一行，長按 Enter 會送出 N 次
+    // `itemsApi.add`、建出一排重複項目（該端點沒有掛限流）。
+    if (submitting) return
     const parsed = ItemTitleSchema.safeParse(title)
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "名稱不正確")

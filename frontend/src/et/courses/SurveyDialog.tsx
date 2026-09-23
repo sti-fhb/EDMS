@@ -279,10 +279,12 @@ export function SurveyDialog({
         {creating ? (
           // #359 第 1 項：**不預先建立空殼**。教師取消時什麼都沒發生，不需要孤兒清理。
           //
-          // ⚠️ 刻意不照抄測驗的「先建空殼、取消時刪掉」——那條路徑的空殼名稱可留空
-          // （`course/service.py` 新增項目時 `title` 允許空字串），而發布檢核**不驗名稱**
-          // （只有 `BLOCK_QUIZ_NO_QUESTION` / `BLOCK_SURVEY_NO_QUESTION`）。照抄會把
-          // 「未命名問卷可以發布」這個既有缺口複製到問卷側。
+          // ⚠️ 刻意不照抄測驗當時的「先建空殼、取消時刪掉」——那條路徑的空殼名稱可留空，
+          // 而發布檢核不驗名稱，照抄會把「未命名問卷可以發布」這個缺口複製到問卷側。
+          //
+          // ⭐ 那個缺口已於 #384（發布檢核補 `BLOCK_ITEM_NO_TITLE`）與 #414（建立時名稱
+          // 必填、前端 `NewItemDialog` 先問名稱）兩次修掉——**測驗與教材現在走的正是本處
+          // 這個形狀**。本註解保留為沿革：它是先做對的那一側。
           <Stack spacing={2} sx={{ py: 1 }}>
             {error && <Alert severity="error">{error}</Alert>}
             <Typography variant="body2" color="text.secondary">

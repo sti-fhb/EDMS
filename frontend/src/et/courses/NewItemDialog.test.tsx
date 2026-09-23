@@ -70,6 +70,21 @@ describe("NewItemDialog：新增項目前先取得名稱（#414）", () => {
     expect(onConfirm).toHaveBeenCalledWith("採血流程")
   })
 
+  it("送出中時 Enter 不再重複送出（#414 security review LOW-1）", async () => {
+    // 🔴 `submitting` 只 disable 了「建立」按鈕，而鍵盤 auto-repeat 會在長按時連發
+    // keydown。少了 `submit` 開頭那行守衛，長按 Enter 會送出 N 次建立請求、建出一排
+    // 重複項目——而該端點沒有掛限流。
+    const onConfirm = vi.fn()
+    renderWithProviders(
+      <NewItemDialog itemType="MATERIAL" submitting onCancel={vi.fn()} onConfirm={onConfirm} />,
+    )
+    const field = screen.getByRole("textbox", { name: "教材名稱" })
+    await userEvent.type(field, "採血流程")
+    await userEvent.type(field, "{Enter}{Enter}{Enter}")
+
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
   it("取消不回報任何名稱", async () => {
     // 🔴 本 issue 的核心：取消時 DB 裡什麼都沒有，不需要任何清理。
     // 舊行為是按下「新增項目」當下就建了空殼，清理只掛在取消上。

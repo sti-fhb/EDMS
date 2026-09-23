@@ -331,7 +331,7 @@ describe("ET02 課程編輯頁", () => {
     )
     locationRef.current = {
       pathname: "/et/courses/1",
-      state: { pendingAddItem: { chapterIndex: 0, itemType: "QUIZ" } },
+      state: { pendingAddItem: { chapterIndex: 0, itemType: "QUIZ", title: "小考" } },
     }
     renderEditor("1")
     await screen.findByRole("dialog")
