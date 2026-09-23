@@ -182,6 +182,18 @@ def build_item_state(
     ⛔ 不要改成「擋住並在側欄提示」：教師把題目全刪掉重建的那段時間，全班會卡在一份
     開不起來的考卷前，而他不會知道自己做了這件事。
 
+    ## 這個例外的代價止於何處
+
+    `treat_as_done` **只存在於本模組**（定義於此，消費者只有 `locked_item_ids` 與
+    `first_blocking_item`），從未進入任何完課判定——完課、課後問卷入口、線下核可四處
+    的 `is_course_completed(done, total)` 一律取自真實的 `ET_PROGRESS.IS_COMPLETED`
+    計數。所以 0 題例外**灌不了完課率、拿不到問卷入口、通不過核可**，它放寬的只有
+    「下一格能不能點」。
+
+    ⭐ 這是本例外可以接受的核心理由，也是它的界限：**若日後有人讓 `treat_as_done`
+    參與完課或核可判定，本例外立刻變成偽造完訓紀錄的路徑**，屆時必須改採在上游擋住
+    （`quiz/service.delete_question` 不許把已發布課程的測驗刪到 0 題）。
+
     Args:
         completed_ids: 該學員已完成的 `ITEM_ID`。
         zero_question_quiz_item_ids: 目前沒有任何未刪除題目之測驗的 `ITEM_ID`

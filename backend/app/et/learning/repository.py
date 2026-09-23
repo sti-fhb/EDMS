@@ -15,13 +15,33 @@ material_id →               item → chapter → course_id
 `course_id`），那等於沒有授權。
 """
 
-from sqlalchemy import func, select
+from collections.abc import Iterable
+
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtEnrollment
 from app.et.quiz.models import EtQuestion, EtQuiz
+
+#: `items_with_titles` 的一列：項目本體、教材名稱、測驗名稱、是否為 0 題測驗。
+LearnItemRow = tuple[EtItem, str | None, str | None, bool]
+
+
+def zero_question_quiz_item_ids(rows: Iterable[LearnItemRow]) -> frozenset[int]:
+    """自 `items_with_titles` 的輸出取出 **0 題測驗**之 `ITEM_ID`（`spec_us5` AC 12）。
+
+    供 `progress/rules.build_item_state` 判定「這一項現在不可能完成，故不當閘門」
+    ——理由與代價見該函式的 docstring。
+
+    ⭐ **推導只存在這一支**。側欄（`learning/service`）與後端守門（`progress/service`）
+    都必須得到同一個集合；各自寫一次 `if ... is_zero` 看似無害，但那正是
+    `build_item_state` 整個防呆設計要避免的東西——兩份規則遲早只改到一份。
+
+    回 `ITEM_ID` 而非 `QUIZ_ID`：解鎖判定以項目為單位。
+    """
+    return frozenset(item.item_id for item, _, _, is_zero_question_quiz in rows if is_zero_question_quiz)
 
 
 class EtLearningRepository:
@@ -125,59 +145,46 @@ class EtLearningRepository:
         )
         return list(rows)
 
-    async def items_with_titles(
-        self, db: AsyncSession, chapter_ids: list[int]
-    ) -> list[tuple[EtItem, str | None, str | None]]:
-        """章節下的項目，連同教材名稱與測驗名稱。
+    async def items_with_titles(self, db: AsyncSession, chapter_ids: list[int]) -> list[LearnItemRow]:
+        """章節下的項目，連同教材名稱、測驗名稱，與「是否為 0 題測驗」。
 
         兩個 `LEFT OUTER JOIN`——項目**必為兩者之一**（`MATERIAL_ID` / `QUIZ_ID` 互斥），
         用 INNER JOIN 會讓另一型別的項目整批消失，而側欄就會少掉一半內容。
+
+        `is_zero_question_quiz` 隨本查詢一併取回而非另開一支（`spec_us5` AC 12）：
+        `progress/service._locked_ids` 在**最高頻的 `report_intervals` 路徑上**，而它
+        本來就要呼叫本方法——多一支查詢就是在該路徑上多一次往返。一併取回另有一個好處：
+        兩份資料出自同一次查詢，不可能互相矛盾。
+
+        ⚠️ 題數用**相關子查詢**而非 `JOIN ET_QUESTION` + `GROUP BY HAVING`：後者要在
+        同一個 `GROUP BY` 裡放進一對多，日後若有人再加一個一對多（如選項）就會是笛卡兒
+        積，算出偏大但看起來合理的數字。子查詢沒有這個面。
         """
         if not chapter_ids:
             return []
-        rows = await db.execute(
-            select(EtItem, EtMaterial.material_name, EtQuiz.quiz_name)
-            .select_from(EtItem)
-            .outerjoin(EtMaterial, (EtMaterial.material_id == EtItem.material_id) & (EtMaterial.deleted == 0))
-            .outerjoin(EtQuiz, (EtQuiz.quiz_id == EtItem.quiz_id) & (EtQuiz.deleted == 0))
-            .where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
-            .order_by(EtItem.chapter_id, EtItem.sort_order, EtItem.item_id)
-        )
-        return [(item, material_name, quiz_name) for item, material_name, quiz_name in rows.all()]
-
-    async def zero_question_quiz_item_ids(self, db: AsyncSession, chapter_ids: list[int]) -> frozenset[int]:
-        """這些章節中，**目前一題都沒有**之測驗項目的 `ITEM_ID`（`spec_us5` AC 12）。
-
-        供 `progress/rules.build_item_state` 判定「這一項現在不可能完成，故不當閘門」
-        ——理由與代價見該函式的 docstring。
-
-        回 `ITEM_ID` 而非 `QUIZ_ID`：解鎖判定以項目為單位，在此換算可讓兩個呼叫端都
-        不必自己 join 一次（各自換算就是把同一條規則寫兩遍，而這正是 `build_item_state`
-        要避免的東西）。
-
-        ⚠️ 用**相關子查詢**而非 `JOIN ET_QUESTION` + `GROUP BY HAVING`：後者要在同一個
-        `GROUP BY` 裡放進一對多，日後若有人再加一個一對多（如選項）就會是笛卡兒積，
-        算出偏大但看起來合理的數字。子查詢沒有這個面。
-        """
-        if not chapter_ids:
-            return frozenset()
         question_count = (
             select(func.count())
             .select_from(EtQuestion)
             .where(EtQuestion.quiz_id == EtItem.quiz_id, EtQuestion.deleted == 0)
             .scalar_subquery()
         )
-        rows = await db.scalars(
-            select(EtItem.item_id).where(
-                EtItem.chapter_id.in_(chapter_ids),
-                EtItem.deleted == 0,
-                # 教材項目之 `QUIZ_ID` 為 NULL，子查詢會得到 0——不排除的話整批教材
-                # 都會被當成「零題測驗」而繞過解鎖判定。
-                EtItem.quiz_id.is_not(None),
-                question_count == 0,
+        rows = await db.execute(
+            select(
+                EtItem,
+                EtMaterial.material_name,
+                EtQuiz.quiz_name,
+                # 🔴 `QUIZ_ID IS NOT NULL` 不可省：教材項目之 `QUIZ_ID` 為 NULL，題數
+                # 子查詢對它同樣得 0——少了它會讓**每一個教材項目**都被當成零題測驗而
+                # 整批繞過解鎖判定，且 AC 12 看起來仍有啟用（測驗那格擋得住）。
+                and_(EtItem.quiz_id.is_not(None), question_count == 0).label("is_zero_question_quiz"),
             )
+            .select_from(EtItem)
+            .outerjoin(EtMaterial, (EtMaterial.material_id == EtItem.material_id) & (EtMaterial.deleted == 0))
+            .outerjoin(EtQuiz, (EtQuiz.quiz_id == EtItem.quiz_id) & (EtQuiz.deleted == 0))
+            .where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
+            .order_by(EtItem.chapter_id, EtItem.sort_order, EtItem.item_id)
         )
-        return frozenset(rows)
+        return [(item, material_name, quiz_name, bool(is_zero)) for item, material_name, quiz_name, is_zero in rows]
 
     # ── 教材內容 ────────────────────────────────────────────────────────────
 

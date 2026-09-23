@@ -74,6 +74,12 @@ class LearnStructure(BaseModel):
 
             ⚠️ 是**整份結構一個值**，不是逐項一個：解鎖規則嚴格依序，故所有鎖定都追溯
             到同一項（見 `progress/rules.first_blocking_item`）。
+
+            ℹ️ 型別為 `str` 而非 `Literal["MATERIAL", "QUIZ"]`——本專案的**請求** schema
+            用 `Literal`（如 `course/schemas.ItemCreateReq.item_type`），**回應** schema
+            一律用 `str`（本檔 `ItemNode.item_type`、`course/schemas.ItemRow.item_type`）。
+            只收斂這一個會讓它變成同一組回應裡的異類。值出自本系統自己的 DB，不是外部
+            輸入，故 `Literal` 的驗證價值也有限。
     """
 
     course_id: int
