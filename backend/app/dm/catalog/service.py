@@ -21,6 +21,8 @@ from app.dm.document.models import DmDocTag
 
 # 分類碼字元集：僅英數（作為 PK、且下游 next_doc_id 以此碼組 LIKE pattern，須排除萬用字元）
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
+# 對應 DM_CATEGORY.CATEGORY_CODE 之 VARCHAR(10)
+_MAX_CODE_LEN = 10
 
 
 @dataclass(frozen=True)
@@ -35,8 +37,12 @@ class CatalogService:
     """受控資料維護（分類為代表；func / tag 同一機制）。"""
 
     async def create_category(self, db: AsyncSession, *, code: str, name: str, operator: str) -> DmCategory:
-        """新增自訂分類（分類碼建立後鎖定＝PK；格式須英數 422 DM_CATALOG_003；重複碼 409 DM_CATALOG_001）。"""
-        if not _CODE_PATTERN.match(code):
+        """新增自訂分類（分類碼建立後鎖定＝PK；格式須英數 422 DM_CATALOG_003；重複碼 409 DM_CATALOG_001）。
+
+        長度上限對應 `CATEGORY_CODE` 之 VARCHAR(10)——未擋會在 INSERT 時由 DB 拋
+        `value too long`，落成未攔截的 500。#182 讓 DP 後台第一次可外部呼叫此路徑。
+        """
+        if not _CODE_PATTERN.match(code) or len(code) > _MAX_CODE_LEN:
             raise AppError(status_code=422, detail="代碼格式不合法，僅允許英文與數字", error_code="DM_CATALOG_003")
         exists = await db.scalar(select(DmCategory.category_code).where(DmCategory.category_code == code))
         if exists is not None:
@@ -70,15 +76,28 @@ class CatalogService:
         """停用 AUDIENCE 可見對象（soft-retire）：is_enabled=False + 回傳受影響文件 / 閱覽者數。
 
         既有 DM_DOC_TAG / DM_USER_TAG 列保留（不收回可見性），僅擋後續指派。
+
+        兩個計數皆須濾 `DELETED = 0`：標籤關聯採**軟刪除復用**（移除＝`deleted=1` 不刪列，
+        以避開唯一約束），不濾會把已移除的文件關聯與已撤銷的閱覽者授權算進去。本數字自 #182
+        起會呈現給管理者作為「要不要停用」的依據，高估會誤導該判斷。
+
+        ⚠️ **已知限制**：在途草稿的 `DM_VERSION_TAG` 快照未計入，故本數字為**下限**
+        （DP 端據此標示「至少 N 份」）。該低估待 #388 處理。
         """
         tag = await db.scalar(select(DmTag).where(DmTag.tag_id == tag_id))
         if tag is None:
             raise AppError(status_code=404, detail="查無此可見對象", error_code="DM_CATALOG_002")
         affected_docs = (
-            await db.scalar(select(func.count()).select_from(DmDocTag).where(DmDocTag.tag_id == tag_id)) or 0
+            await db.scalar(
+                select(func.count()).select_from(DmDocTag).where(DmDocTag.tag_id == tag_id, DmDocTag.deleted == 0)
+            )
+            or 0
         )
         affected_viewers = (
-            await db.scalar(select(func.count()).select_from(DmUserTag).where(DmUserTag.tag_id == tag_id)) or 0
+            await db.scalar(
+                select(func.count()).select_from(DmUserTag).where(DmUserTag.tag_id == tag_id, DmUserTag.deleted == 0)
+            )
+            or 0
         )
         tag.is_enabled = False
         tag.updated_user = operator

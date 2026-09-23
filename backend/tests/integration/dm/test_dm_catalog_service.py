@@ -50,6 +50,40 @@ async def test_require_category_404(db):
     assert e.value.error_code == "DM_CATALOG_002"
 
 
+async def test_audience_soft_retire_排除已軟刪除之關聯(db):
+    """受影響數須濾 `DELETED = 0`——標籤關聯採**軟刪除復用**（移除＝`deleted=1` 不刪列，
+    見 `dm/editor/repository.py` 的 upsert），不濾會把「曾經掛過、後來被移除」的文件與
+    已撤銷的閱覽者授權一併算進去，數字偏高。
+
+    本數字自 #182 起是 DP07 停用可見對象時呈現給管理者的決策依據，高估會讓他誤判影響範圍；
+    且與 `DM_VERSION_TAG` 未計的低估方向相反、互相掩蓋，使誤差方向不明。先修此項讓誤差
+    收斂為單一方向（已知偏低），介面才能誠實標示「至少 N 份」。`DM_VERSION_TAG` 之低估待 #388。
+    """
+    now = utcnow()
+    tag = DmTag(tag_group_code="AUDIENCE", tag_name="ZT受影響數", created_user="e", created_date=now)
+    db.add(tag)
+    await db.flush()
+    for doc_id in ("DM-SOP-900001", "DM-SOP-900002"):
+        db.add(
+            DmDocument(
+                doc_id=doc_id, doc_name="d", category_code="SOP", status="PUBLISHED", created_user="e", created_date=now
+            )
+        )
+    await db.flush()
+    # 一份有效、一份已移除（軟刪除列仍在）
+    db.add(DmDocTag(doc_id="DM-SOP-900001", tag_id=tag.tag_id, created_user="e", created_date=now, deleted=0))
+    db.add(DmDocTag(doc_id="DM-SOP-900002", tag_id=tag.tag_id, created_user="e", created_date=now, deleted=1))
+    # 一位有效、一位已撤銷授權
+    db.add(DmUserTag(user_id="ztv1", tag_id=tag.tag_id, created_user="admin", created_date=now, deleted=0))
+    db.add(DmUserTag(user_id="ztv2", tag_id=tag.tag_id, created_user="admin", created_date=now, deleted=1))
+    await db.flush()
+
+    result = await _svc.soft_retire_audience_tag(db, tag_id=tag.tag_id, operator="admin")
+
+    assert result.affected_docs == 1, "已移除之文件關聯不得計入"
+    assert result.affected_viewers == 1, "已撤銷之閱覽者授權不得計入"
+
+
 async def test_audience_soft_retire_returns_affected_counts(db):
     """停用可見對象 soft-retire：is_enabled=false + 回傳受影響文件 / 閱覽者數，既有列不收回。"""
     now = utcnow()

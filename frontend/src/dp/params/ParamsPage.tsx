@@ -9,14 +9,22 @@ import { useMemo, useState } from "react"
 
 import { AppTable } from "../../components/AppTable"
 import type { AppColumn } from "../../components/AppTable"
+import { ControlledEditPanel } from "./ControlledEditPanel"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { useCrudForm } from "../../hooks/useCrudForm"
 import { ParamEditPanel } from "./ParamEditPanel"
 import type { ParamRow } from "./ParamEditPanel"
+import { useControlled } from "./useControlled"
 import { useParams } from "./useParams"
-import type { ParamMaster } from "./paramsService"
+import type { ControlledSection, ParamMaster } from "./paramsService"
 
 type Scope = ParamMaster["scope"]
+
+/** 表格的一列：`DP_PARAM` 兩型（見 ParamRow）+ 模組受控清單一型。兩個資料源僅於呈現層合併。 */
+type Row = ParamRow | { rowKey: string; kind: "controlled"; section: ControlledSection }
+
+/** 受控清單只會落在模組頁籤（無平台級受控清單）。 */
+const sectionKey = (s: ControlledSection) => `${s.module}:${s.kind}:${s.group_code ?? ""}`
 
 const SCOPE_TABS: { scope: Scope; label: string }[] = [
   { scope: "platform", label: "平台（共用）" },
@@ -32,55 +40,94 @@ const SCOPE_TABS: { scope: Scope; label: string }[] = [
  */
 export function ParamsPage() {
   const { masters, loading, saveDetail, toggleItem, addItem } = useParams()
+  const { sections, loading: controlledLoading, addControlled, renameControlled, toggleControlled } = useControlled()
   const [scope, setScope] = useState<Scope>("platform")
-  const { formVisible, editingRecord, openEdit, closeForm } = useCrudForm<ParamRow>()
+  const { formVisible, editingRecord, openEdit, closeForm } = useCrudForm<Row>()
 
-  // 僅顯示「有資料」的頁籤（模組級無管理者權限時後端不回該前綴 → 不顯示該頁籤）
-  const visibleTabs = useMemo(() => SCOPE_TABS.filter((t) => masters.some((m) => m.scope === t.scope)), [masters])
+  // 僅顯示「有資料」的頁籤（模組級無管理者權限時後端不回該前綴 / 該模組 → 不顯示該頁籤）
+  const visibleTabs = useMemo(
+    () =>
+      SCOPE_TABS.filter(
+        (t) => masters.some((m) => m.scope === t.scope) || sections.some((s) => s.module === t.scope),
+      ),
+    [masters, sections],
+  )
   const activeScope = visibleTabs.some((t) => t.scope === scope) ? scope : (visibleTabs[0]?.scope ?? "platform")
   const shown = useMemo(() => masters.filter((m) => m.scope === activeScope), [masters, activeScope])
+  const shownSections = useMemo(() => sections.filter((s) => s.module === activeScope), [sections, activeScope])
 
-  // 條列：VALUE 型每明細一列；LIST 型整組一列（展開管理項目）
-  const rows = useMemo<ParamRow[]>(
-    () =>
-      shown.flatMap((m): ParamRow[] =>
+  // 條列：VALUE 型每明細一列；LIST 型整組一列；受控清單每分區一列（皆展開管理項目）
+  const rows = useMemo<Row[]>(
+    () => [
+      ...shown.flatMap((m): Row[] =>
         m.param_type === "LIST"
           ? [{ rowKey: m.param_id, kind: "list", master: m }]
           : m.details.map((d) => ({ rowKey: `${m.param_id}:${d.param_key}`, kind: "value", master: m, detail: d })),
       ),
-    [shown],
+      ...shownSections.map((s): Row => ({ rowKey: sectionKey(s), kind: "controlled", section: s })),
+    ],
+    [shown, shownSections],
   )
 
-  // 由最新 masters 重新推導編輯中的列，避免 LIST 新增 / 啟停後 editingRecord 快照過期
-  const liveRow = useMemo<ParamRow | null>(() => {
+  // 由最新資料重新推導編輯中的列，避免新增 / 啟停後 editingRecord 快照過期
+  const liveRow = useMemo<Row | null>(() => {
     if (!editingRecord) return null
+    if (editingRecord.kind === "controlled") {
+      const s = sections.find((ss) => sectionKey(ss) === editingRecord.rowKey)
+      return s ? { rowKey: sectionKey(s), kind: "controlled", section: s } : null
+    }
     const m = masters.find((mm) => mm.param_id === editingRecord.master.param_id)
     if (!m) return null
     if (editingRecord.kind === "list") return { rowKey: m.param_id, kind: "list", master: m }
     const d = m.details.find((dd) => dd.param_key === editingRecord.detail.param_key)
     return d ? { rowKey: `${m.param_id}:${d.param_key}`, kind: "value", master: m, detail: d } : null
-  }, [editingRecord, masters])
+  }, [editingRecord, masters, sections])
 
-  const columns = useMemo<AppColumn<ParamRow>[]>(
+  const columns = useMemo<AppColumn<Row>[]>(
     () => [
       {
         key: "code",
         title: "參數代碼",
         render: (_v, r) => (
-          <span style={{ fontFamily: "monospace" }}>{r.kind === "value" ? r.detail.param_key : r.master.param_id}</span>
+          <span style={{ fontFamily: "monospace" }}>
+            {r.kind === "controlled"
+              ? (r.section.group_code ?? r.section.kind)
+              : r.kind === "value"
+                ? r.detail.param_key
+                : r.master.param_id}
+          </span>
         ),
       },
-      { key: "name", title: "中文名稱", render: (_v, r) => (r.kind === "value" ? r.detail.param_name : r.master.param_name) },
+      {
+        key: "name",
+        title: "中文名稱",
+        render: (_v, r) =>
+          r.kind === "controlled"
+            ? (r.section.group_name ?? r.section.name)
+            : r.kind === "value"
+              ? r.detail.param_name
+              : r.master.param_name,
+      },
       {
         key: "value",
         title: "參數值",
-        render: (_v, r) => (r.kind === "value" ? (r.detail.param_value ?? "—") : `${r.master.details.length} 項`),
+        render: (_v, r) =>
+          r.kind === "controlled"
+            ? `${r.section.items.length} 項`
+            : r.kind === "value"
+              ? (r.detail.param_value ?? "—")
+              : `${r.master.details.length} 項`,
       },
       {
         key: "desc",
         title: "說明",
         // 用 || 而非 ??：說明清空後為空字串，也應回顯「—」
-        render: (_v, r) => (r.kind === "value" ? r.detail.description || "—" : r.master.description || "—"),
+        render: (_v, r) =>
+          r.kind === "controlled"
+            ? (r.section.group_name ? r.section.name : "模組受控清單")
+            : r.kind === "value"
+              ? r.detail.description || "—"
+              : r.master.description || "—",
       },
       {
         key: "actions",
@@ -122,7 +169,7 @@ export function ParamsPage() {
         )
       }
       table={
-        loading ? (
+        loading || controlledLoading ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress aria-label="載入中" />
           </Stack>
@@ -136,7 +183,17 @@ export function ParamsPage() {
       }
       form={
         formVisible &&
-        liveRow && (
+        liveRow &&
+        (liveRow.kind === "controlled" ? (
+          <ControlledEditPanel
+            key={liveRow.rowKey}
+            section={liveRow.section}
+            onAdd={addControlled}
+            onRename={renameControlled}
+            onToggle={toggleControlled}
+            onClose={closeForm}
+          />
+        ) : (
           <ParamEditPanel
             key={liveRow.rowKey}
             row={liveRow}
@@ -145,7 +202,7 @@ export function ParamsPage() {
             onAdd={addItem}
             onClose={closeForm}
           />
-        )
+        ))
       }
     />
   )

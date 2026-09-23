@@ -150,7 +150,8 @@ describe("ParamsPage 系統參數維護流程", () => {
     await screen.findByText("閒置自動登出（分鐘）")
 
     await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
-    await openEditByRow(user, "文件分類")
+    // 以 param_id 定位而非名稱：#182 起同頁另有模組受控清單，其分區名稱同為「文件分類」
+    await openEditByRow(user, "DM_DOC_CATEGORY")
 
     expect(await screen.findByText("SOP")).toBeInTheDocument()
     expect(screen.getByText("代碼鎖定")).toBeInTheDocument()
@@ -349,5 +350,151 @@ describe("ParamsPage 系統參數維護流程", () => {
     await user.click(screen.getByRole("button", { name: "新增" }))
     await waitFor(() => expect(bodies).toHaveLength(2))
     expect(bodies[1]).toEqual({ param_key: "TECH", param_name: "醫檢師" })
+  })
+})
+
+/**
+ * 依受控分區的「代碼」欄定位並展開（`group_code ?? kind`，如 CATEGORY / AUDIENCE）。
+ *
+ * 不用名稱定位：MSW 預設的 `DP_PARAM` fixture 仍含 `DM_DOC_CATEGORY`（名稱同為「文件分類」），
+ * 與受控清單同名會讓 `getByText` 找到多筆。該 fixture 屬本 issue 要更正的舊模型（見 PR 說明）。
+ */
+async function openControlledRow(user: UserEvent, code: string) {
+  const rowEl = screen.getByText(code).closest("tr")
+  if (!rowEl) throw new Error(`找不到代碼為「${code}」的受控分區列`)
+  await user.click(within(rowEl).getByRole("button", { name: "編輯" }))
+}
+
+describe("ParamsPage 模組受控清單（#182）", () => {
+  it("受控清單與 DP_PARAM 同表條列，切到 DM 頁籤可見兩種來源", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    expect(await screen.findByText("模組受控清單")).toBeInTheDocument() // 受控清單（模組自持表）
+    expect(screen.getByText("可見對象／單位")).toBeInTheDocument() // 標籤依標籤組分區
+    expect(screen.getByText("DM_DOC_CATEGORY")).toBeInTheDocument() // DP_PARAM 來源同表並存
+  })
+
+  it("內建項代碼唯讀（僅可改名），自訂項無鎖定圖示", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+    await openControlledRow(user, "CATEGORY")
+
+    // 內建項：代碼旁有唯讀鎖；名稱欄仍可編輯（#182 D2：is_builtin＝代碼鎖定、僅可改名）
+    expect(screen.getByTitle("代碼唯讀")).toBeInTheDocument()
+    expect(screen.getByLabelText("SOP 名稱")).toBeEnabled()
+    expect(screen.getByLabelText("ZTX 名稱")).toBeEnabled()
+  })
+
+  it("需代碼之分區才顯示代碼欄；不需代碼者只填名稱", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    await openControlledRow(user, "CATEGORY") // requires_code: true
+    expect(screen.getByLabelText("新增代碼")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "關閉" }))
+    await openControlledRow(user, "AUDIENCE") // requires_code: false
+    expect(screen.queryByLabelText("新增代碼")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("新增名稱")).toBeInTheDocument()
+  })
+
+  it("停用受控項需先確認，成功後提示受影響數以「至少」表述", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+    await openControlledRow(user, "AUDIENCE")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+    await user.click(await screen.findByRole("button", { name: "確定停用" }))
+
+    // 「至少」不可省：在途草稿之版本層標籤快照未計入（#388），此數字為下限
+    expect(await screen.findByText(/至少影響 3 份文件、2 位使用者/)).toBeInTheDocument()
+  })
+
+  it("只回使用者數的模組（ET）不得顯示「0 份文件」", async () => {
+    // ET 之 set_controlled_enabled 只回 affected_viewers，affected_docs 恆為 null——
+    // 以 `?? 0` 補零會對沒有文件概念的模組顯示字面錯誤的「至少影響 0 份文件」
+    server.use(
+      http.get("/api/dp/params/controlled", () =>
+        HttpResponse.json([
+          {
+            module: "ET",
+            kind: "TAG",
+            name: "受訓單位標籤",
+            requires_code: false,
+            group_code: null,
+            group_name: null,
+            items: [{ code: "7", name: "護理師", is_builtin: true, is_enabled: true }],
+          },
+        ]),
+      ),
+      http.patch("/api/dp/params/controlled/:module/:kind/:code/enabled", () =>
+        HttpResponse.json({ affected_docs: null, affected_viewers: 4 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
+    await openControlledRow(user, "TAG")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+    await user.click(await screen.findByRole("button", { name: "確定停用" }))
+
+    expect(await screen.findByText("已停用，至少影響 4 位使用者")).toBeInTheDocument()
+    expect(screen.queryByText(/0 份文件/)).not.toBeInTheDocument()
+  })
+
+  it("新增受控項：有子分組者代碼帶入所屬組，不要求使用者輸入", async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.post("/api/dp/params/controlled/:module/:kind", async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return new HttpResponse(null, { status: 201 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+    await openControlledRow(user, "AUDIENCE")
+
+    await user.type(screen.getByLabelText("新增名稱"), "放射師")
+    await user.click(screen.getByRole("button", { name: "新增" }))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ code: "AUDIENCE", name: "放射師" })
+  })
+
+  it("代碼格式不合前端先擋，不送出", async () => {
+    const posted: unknown[] = []
+    server.use(
+      http.post("/api/dp/params/controlled/:module/:kind", async ({ request }) => {
+        posted.push(await request.json())
+        return new HttpResponse(null, { status: 201 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+    await openControlledRow(user, "CATEGORY")
+
+    await user.type(screen.getByLabelText("新增代碼"), "ZT_X") // 底線非英數
+    await user.type(screen.getByLabelText("新增名稱"), "測試")
+    await user.click(screen.getByRole("button", { name: "新增" }))
+
+    expect(await screen.findByText("代碼僅允許英文與數字")).toBeInTheDocument()
+    expect(posted).toHaveLength(0)
   })
 })

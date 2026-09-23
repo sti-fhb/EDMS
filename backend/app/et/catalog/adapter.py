@@ -4,9 +4,9 @@ ET 之受控主檔僅一類：**受訓單位標籤庫 `ET_TAG`**（`kind='TAG'`�
 DP 後台「系統參數與清單」，經本轉接層呼叫——**DP 不直接寫 ET 表**。比照
 `app/dm/catalog/adapter.py`。
 
-> ⚠️ **DP 端目前尚未接上受控主檔維護**（`list_controlled` / `set_controlled_enabled`
-> 全 backend 無 DP 呼叫者，見 #182）。本轉接層先行交付以符合 Protocol，端到端驗證
-> 待 #182。
+> ✅ **DP 端已接上受控主檔維護（#182）**：DP07「系統參數與清單」經
+> `module_assign_registry` 呼叫 `list_controlled_kinds` / `list_controlled` /
+> `create_controlled` / `rename_controlled` / `set_controlled_enabled`。
 
 **「全體」標籤保護**：`IS_ALL=true` 之標籤不可停用、不可改名（`ET_TAG_001`）。
 此為 ET 業務規則，**伺服器端保護必須在 ET**——DP 端之 `is_builtin` 旗標與前端隱藏
@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.module_assign import ControlledItemView, SetEnabledResult
+from app.core.module_assign import ControlledItemView, ControlledKindView, SetEnabledResult
 from app.et.catalog.models import EtTag, EtUserTag
 from app.services import AuditLogService
 
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 _FUNC_NAME = "ET-CATALOG"
 _MODULE = "ET"
 _KIND_TAG = "TAG"
+# DP 後台之區塊顯示名——名稱權威在模組，DP 不硬編碼模組語彙
+_KIND_TAG_LABEL = "受訓單位標籤"
 _MAX_BIGINT = 9_223_372_036_854_775_807
 # 對應 ET_TAG.TAG_NAME 之 VARCHAR(50)
 _MAX_TAG_NAME_LEN = 50
@@ -60,6 +62,14 @@ class EtCatalogAdapter:
 
     def __init__(self, audit: AuditLogService | None = None) -> None:
         self._audit = audit or AuditLogService()
+
+    async def list_controlled_kinds(self, db: AsyncSession) -> list[ControlledKindView]:
+        """ET 可維護之受控主檔類別：僅受訓單位標籤一類、無子分組。
+
+        靜態宣告、**不查 DB**（`db` 僅為符合 Protocol 簽章）。`requires_code=False`——
+        `TAG_ID` 由 Identity 配號，新增時 `code` 由 ET 忽略、不需使用者輸入。
+        """
+        return [ControlledKindView(kind=_KIND_TAG, name=_KIND_TAG_LABEL, requires_code=False)]
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False
@@ -145,12 +155,17 @@ class EtCatalogAdapter:
     async def rename_controlled(
         self, db: AsyncSession, kind: str, *, code: str, new_name: str, operator_id: str
     ) -> None:
-        """標籤改名。**內建標籤（含「全體」）不可改名**。"""
+        """標籤改名。**僅「全體」（`IS_ALL`）不可改名**；其餘內建標籤可改名（代碼仍鎖定）。
+
+        保護條件用 `is_all` 而非 `is_builtin`：種子 5 筆皆 `IS_BUILTIN=true`，以 `is_builtin`
+        把關會使全部內建標籤都不能改名，逾越契約（`srv-et-dp-module-callbacks.md` §「全體」保護
+        只保護 `IS_ALL`）。#182 定案 D2 統一 `is_builtin` 為「代碼鎖定、僅可改名」之全平台語意。
+        """
         _ensure_tag_kind(kind)
         new_name = _normalise_tag_name(new_name)
         tag = await self._require_tag(db, code)
-        if tag.is_builtin:
-            raise AppError(status_code=422, detail="內建標籤不可停用或改名", error_code="ET_TAG_001")
+        if tag.is_all:
+            raise AppError(status_code=422, detail="「全體」標籤不可停用或改名", error_code="ET_TAG_001")
 
         dup = await db.scalar(
             select(EtTag.tag_id).where(EtTag.tag_name == new_name, EtTag.tag_id != tag.tag_id, EtTag.deleted == 0)
@@ -189,7 +204,7 @@ class EtCatalogAdapter:
         _ensure_tag_kind(kind)
         tag = await self._require_tag(db, code)
         if not enabled and tag.is_all:
-            raise AppError(status_code=422, detail="內建標籤不可停用或改名", error_code="ET_TAG_001")
+            raise AppError(status_code=422, detail="「全體」標籤不可停用或改名", error_code="ET_TAG_001")
 
         if tag.is_active == enabled:
             return SetEnabledResult()  # 無異動

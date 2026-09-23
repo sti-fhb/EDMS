@@ -55,9 +55,9 @@ class DmRoleAudienceView:
 
 - **批次讀取（決策 3=B）**：一次回一頁使用者之現況，key＝`user_id`；查無指派者回**空集合之 View**（非缺 key）。避免清單頁逐列 N+1。`assign_*` 仍為單筆（一次改一位）。
 - **標籤 / 可見對象回「代碼」而非名稱（決策 1=A）**——**來源依模組不同**：
-  - **ET** 之 `tags` 為 `DP_PARAM`（`ET_` 前綴）之 **PARAM_KEY 集合**；中文顯示名由 **DP 讀 `DP_PARAM`（SRVDP001, US5 之 `PARAM_NAME`）** 對應。
-  - **DM** 之 `audiences` 為 **`DM_TAG`（`AUDIENCE` 組）之 `TAG_ID` 集合**（DM 自持表，2026-08-06 #127 對齊 dm/spec.md §跨模組共用規則）；中文顯示名與**可選清單**由 **DM 經 catalog 轉接層提供**（見 §3.1 `list_audiences`），DP 不讀 DP_PARAM 取 DM 可見對象。
-  - 各模組不重複回名稱、名稱權威在各自來源；此為 ET（DP_PARAM）與 DM（DM_TAG）之刻意差異。
+  - **ET** 之 `tags` 為 **`ET_TAG` 之 `TAG_ID` 集合**（ET 自持表；2026-09-22 #182 更正，原記為 `DP_PARAM` `ET_` 前綴之 PARAM_KEY 集合）。
+  - **DM** 之 `audiences` 為 **`DM_TAG`（`AUDIENCE` 組）之 `TAG_ID` 集合**（DM 自持表，2026-08-06 #127 對齊 dm/spec.md §跨模組共用規則）。
+  - 兩模組**同走本轉接層**：中文顯示名與可選清單皆由模組經 catalog 轉接層提供（見 §3.1 `list_audiences`），DP 不讀 `DP_PARAM` 取模組之標籤 / 可見對象。各模組不重複回名稱、名稱權威在各自來源。
 - **最後異動欄（決策 2=A）**：View 帶 `last_modified_by` / `last_modified_date`（來源模組表 `UPDATED_*`），供 dp-roles 表格「最後異動」欄呈現。
 - 角色種類為固定 enum（ET：ADMIN / TEACHER / STUDENT；DM：ADMIN / EDITOR / REVIEWER / VIEWER）
 - **自我保護判定在模組**：operator 取消自己之管理者角色 → 模組 raise `AppError`（error_code 由各模組於其 contracts 定案，如 SRVET / SRVDM 之自我保護碼）；**DP 端統一映射為 `DP-MSG-DP06-001` 呈現**（非逐字透傳模組訊息，見 spec_us7 FR-06）。不檢核「至少 1 名管理者」。
@@ -66,21 +66,32 @@ class DmRoleAudienceView:
 
 ## 3.1 受控主檔維護（US1「系統參數與清單」＋「權限管理」可見對象清單）
 
-適用於**受控主檔為模組自持表**之情形：DM 之分類 / func_name / 標籤庫皆為 DM 表（`DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`，含 `IS_BUILTIN` / `GROUP_TYPE` 等富語意欄位與手冊唯一部分索引所需之真欄，**非 `DP_PARAM`**）。DP 後台「系統參數與清單」畫面經本轉接層呼叫模組維護、「權限管理」畫面經 `list_audiences` 取可見對象可選清單（比照 §3 roles 轉接層，DP 不直接寫模組表）。**ET** 之受訓單位標籤存 `DP_PARAM`（`ET_` 前綴）、由 DP 直接維護，**不走本轉接層**。
+適用於**受控主檔為模組自持表**之情形：DM 之分類 / func_name / 標籤庫皆為 DM 表（`DM_CATEGORY` / `DM_FUNC` / `DM_TAG_GROUP` / `DM_TAG`，含 `IS_BUILTIN` / `GROUP_TYPE` 等富語意欄位與手冊唯一部分索引所需之真欄，**非 `DP_PARAM`**）。DP 後台「系統參數與清單」畫面經本轉接層呼叫模組維護、「權限管理」畫面經 `list_audiences` 取可見對象可選清單（比照 §3 roles 轉接層，DP 不直接寫模組表）。**ET** 之受訓單位標籤同為模組自持表（`ET_TAG`）、**同走本轉接層**（2026-09-22 #182 更正，原記為「存 `DP_PARAM`、由 DP 直接維護、不走本轉接層」）。
 
 ```python
-# DM 提供（DP 後台「系統參數與清單」/「權限管理」呼叫）
+# ET / DM 提供（DP 後台「系統參數與清單」/「權限管理」呼叫）
+def list_controlled_kinds() -> list[ControlledKindView]   # 模組自報可維護之 kind；DP 不硬編碼
 def list_controlled(kind: str, *, enabled_only: bool = False) -> list[ControlledItemView]
 def create_controlled(kind: str, code: str, name: str, operator_id: str) -> None
 def rename_controlled(kind: str, code: str, new_name: str, operator_id: str) -> None
 def set_controlled_enabled(kind: str, code: str, enabled: bool, operator_id: str) -> SetEnabledResult
 def list_audiences(*, enabled_only: bool = True) -> list[ControlledItemView]  # = list_controlled('TAG') 之 AUDIENCE 組；供權限管理可見對象核取清單
 
+class ControlledGroupView:
+    code: str                    # 子分組代碼（DM 標籤組）
+    name: str                    # 子分組顯示名（取自 DM_TAG_GROUP.TAG_GROUP_NAME）
+
+class ControlledKindView:
+    kind: str                    # 傳回 list_controlled 的值
+    name: str                    # 畫面區塊顯示名（如「文件分類」「受訓單位標籤」）
+    requires_code: bool          # 新增時是否需使用者輸入代碼
+    groups: tuple[ControlledGroupView, ...] = ()   # 子分組；無則空
+
 class ControlledItemView:
     kind: str                    # 'CATEGORY' | 'FUNC' | 'TAG'
     code: str                    # CATEGORY_CODE / FUNC_CODE；TAG 用 TAG_ID（字串化）
     name: str
-    is_builtin: bool             # 內建項：代碼鎖定、僅可改名
+    is_builtin: bool             # 內建項：代碼鎖定、**僅可改名**（全平台統一語意，#182 D2）
     is_enabled: bool
     group_type: str | None       # 僅 TAG：'AUDIENCE' | 'RETRIEVAL'
     tag_group_code: str | None   # 僅 TAG：所屬標籤組
@@ -122,6 +133,7 @@ async def run() -> None      # SCHET001 / SCHET002 / SCHDM001；SCHDP001 由 DP 
 
 | 日期 | 異動 |
 |------|------|
+| 2026-09-22 | #182：§3 / §3.1 之 ET 段落對齊程式碼——ET 之受訓單位標籤為自持表 `ET_TAG`、**同走 §3.1 轉接層**，移除「存 `DP_PARAM`、由 DP 直接維護、不走本轉接層」與「ET / DM 之刻意差異」敘述；§3.1 新增 `list_controlled_kinds()` 與 `ControlledKindView` / `ControlledGroupView`（模組自報 kind、顯示名、是否需代碼與子分組，DP 不硬編碼模組語彙）；`is_builtin` 註明為全平台統一語意「代碼鎖定、僅可改名」|
 | 2026-07-09 | 首版；SRVET / SRVDM 正式編碼待各模組 contracts 定案回填 |
 | 2026-08-06 | DM US1 交付前自檢（`/sti-sa-precheck dm us1`）修 3 處 #127 集中化後之 drift：**§3** `DmRoleAudienceView.audiences` 來源由「`DP_PARAM` `DM_` 前綴 PARAM_KEY」更正為 **`DM_TAG`（AUDIENCE 組）之 TAG_ID**（DM 自持表；顯示名與清單由 DM 經 §3.1 提供，非 DP 讀 DP_PARAM）——標明 ET（DP_PARAM）/ DM（DM_TAG）刻意差異；新增 **§3.1 受控主檔維護轉接層**（`list_controlled` / `create` / `rename` / `set_controlled_enabled` / `list_audiences` + `ControlledItemView` / `SetEnabledResult`），定義 DP 後台呼叫 DM 維護 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG` 及 AUDIENCE soft-retire 觸發落點（DP 呼叫 → DM 執行回受影響數）|
 | 2026-07-27 | US7 交付前自檢（`/sti-sa-precheck #7`）補 §3：定義 `EtRoleTagView` / `DmRoleAudienceView` 欄位（roles / tags｜audiences 之 PARAM_KEY 集合 + last_modified_*）；讀取改**批次** `get_users_roles_*(user_ids)`（避免 N+1，決策 3=B）；標籤回代碼、名稱由 DP 讀 DP_PARAM 對應（決策 1=A）；自我保護錯誤由 DP 統一映射為 DP-MSG-DP06-001（同步 spec_us7 FR-06）|

@@ -8,6 +8,7 @@ export const QUERY_KEYS = {
   },
   params: {
     list: () => ["params", "list"] as const,
+    controlled: () => ["params", "controlled"] as const,
   },
   templates: {
     list: () => ["templates", "list"] as const,

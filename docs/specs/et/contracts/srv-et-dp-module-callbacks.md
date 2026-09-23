@@ -21,6 +21,7 @@ DP 端之掛鉤**已全部就緒並在等待 ET 註冊**（平台 core 之四個
 | 管理者判定 | `app/core/module_admin.py` | 已備，ET 未註冊 → 恆回 `False` |
 | 預設角色授予 | `app/core/module_provisioning.py` | 已備，**`app/dp/user/activation.py` 已在呼叫**；ET 未註冊 → no-op |
 | 角色 / 群組指派 | `app/core/module_assign.py` | 已備，ET 未註冊 → DP 後台回 404 `DP_ROLE_003` |
+| 受控主檔維護 | `app/core/module_assign.py`（§3.1）| **DP07 已接上消費端（#182）**；ET 未註冊 → 該模組清單不顯示、寫入 403 `DP_PARAM_003` |
 | 角色摘要 | `app/core/module_roles.py` | 已備，ET 未註冊 → 恆回 `False` |
 | 排程 handler | `app/dp/schedules/scheduler.py` | 白名單已含 `app.et.`；`DP_SCHEDULE` 已預留 SCHET001 / SCHET002 兩列（`IS_ENABLED=false`） |
 
@@ -86,6 +87,7 @@ async def assign(db, *, user_id: str, roles: set[str], groups: set[str], operato
 ## SRVET004 — 受控主檔維護：受訓單位標籤庫（DP §3.1）
 
 ```python
+async def list_controlled_kinds(db) -> list[ControlledKindView]
 async def list_controlled(db, kind: str, *, enabled_only: bool = False) -> list[ControlledItemView]
 async def create_controlled(db, kind: str, *, code: str, name: str, operator_id: str) -> None
 async def rename_controlled(db, kind: str, *, code: str, new_name: str, operator_id: str) -> None
@@ -98,16 +100,17 @@ ET 之受控主檔僅一類：**受訓單位標籤庫 `ET_TAG`**（`kind='TAG'`�
 | 項目 | 規則 |
 |------|------|
 | 儲存 | **ET 自持表 `ET_TAG`**（非 `DP_PARAM`）；`code` 為 `TAG_ID` 字串化、`name` 為 `TAG_NAME` |
-| `is_builtin` | 內建種子（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）回 `true`，供 DP 決定是否提供操作入口 |
-| 「全體」保護 | `IS_ALL=true` 之標籤**不可停用、不可改名**；ET 於 `set_controlled_enabled` / `rename_controlled` 伺服器端拒絕（`ET_TAG_001`）。**前端隱藏僅為 UX，保護必須在 ET** |
+| kind 列舉 | `list_controlled_kinds()` 回單一 `TAG`（顯示名「受訓單位標籤」、`requires_code=false`、無子分組）。**由模組自報**——DP 不得硬編碼各模組的 kind 清單與中文名（#182 D1）|
+| `is_builtin` | 內建種子（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）回 `true`。全平台統一語意＝**代碼鎖定、僅可改名**（#182 D2）；DP 據此把代碼欄設為唯讀，**不得據此禁止改名** |
+| 「全體」保護 | `IS_ALL=true` 之標籤**不可停用、不可改名**；ET 於 `set_controlled_enabled` / `rename_controlled` 伺服器端拒絕（`ET_TAG_001`）。**前端隱藏僅為 UX，保護必須在 ET**。⚠️ 保護條件為 `IS_ALL` 而非 `IS_BUILTIN`——種子 5 筆皆 `IS_BUILTIN=true`，以後者把關會使全部內建標籤都不能改名（#182 修正之偏差）|
 | 停用語意 | soft-retire：停用後不可再掛至新課程，已掛之既有課程與 `ET_COURSE_TAG` 不受影響（比照 DM AUDIENCE） |
 | 不刪除 | 僅停用，不提供刪除 |
 | 唯一性 | `TAG_NAME` 唯一 |
 | 稽核 | 經 `AuditLogService` 寫 `DP_AUDIT_LOG`（`MODULE=ET`、`FUNC_NAME=ET-ROLES`） |
 
-> ⚠️ **與 DP 契約現行文字不一致（待 DP 對齊，見 #182）**：`module-callbacks.md` §3 / §3.1 目前仍寫「ET 之受訓單位標籤存 `DP_PARAM`、由 DP 直接維護、**不走本轉接層**」，並稱此為「ET 與 DM 之刻意差異」。該敘述已不成立——DP 程式碼 `dp/roles/service.py` 之 `group_options()` 為模組無關實作（取 provider → `list_audiences()`，不讀 `DP_PARAM`），且 DM 已於 2026-08-06（#127）改為自持表。**ET 依本檔實作（走轉接層）**，DP 側文件對齊由 #182 處理。
+> ✅ **DP 側已對齊（#182，2026-09-22）**：`module-callbacks.md` §3 / §3.1 原寫「ET 之受訓單位標籤存 `DP_PARAM`、由 DP 直接維護、**不走本轉接層**」並稱此為「ET 與 DM 之刻意差異」，該敘述已移除。ET 與 DM 同走轉接層。
 >
-> ⚠️ **DP 端尚未接上受控主檔維護**：`list_controlled` / `set_controlled_enabled` 等目前全 backend 無 DP 呼叫者（僅 DM 實作、無消費端）。ET 交付本介面後，實際生效仍待 #182。
+> ✅ **DP 端已接上受控主檔維護（#182）**：DP07「系統參數與清單」經 `module_assign_registry` 呼叫 `list_controlled_kinds` / `list_controlled` / `create_controlled` / `rename_controlled` / `set_controlled_enabled`，受訓單位標籤已可自後台維護。
 
 ## SRVET005 — 使用者模組角色摘要（DP §4）
 
@@ -149,7 +152,7 @@ async def daily_window_job() -> None   # SCHET002：每日到期關閉 + 截止�
 | `ET_ROLE_001` | 403 | 無法停用自己之管理者角色 | SRVET003 自我保護；DP 映射為 `DP-MSG-DP06-001` |
 | `ET_ROLE_002` | 422 | 指定之受訓單位標籤無效或未啟用 | SRVET003 指派值檢核 |
 | `ET_ROLE_003` | 422 | 指定之角色代碼無效 | SRVET003 角色代碼檢核 |
-| `ET_TAG_001` | 422 | 內建標籤不可停用或改名 | SRVET004「全體」等內建標籤保護 |
+| `ET_TAG_001` | 422 | 「全體」標籤不可停用或改名 | SRVET004「全體」（`IS_ALL`）保護；**內建但非「全體」之標籤可改名**（#182 D2）|
 
 > 命名比照 DM 既有慣例（`DM_AUTH_001` / `DM_ROLE_001~003`）。`ET_ROLE_001` 之 DP 端映射依 DP 契約「以 `_ROLE_001` 結尾判別」之約定。
 
@@ -160,8 +163,8 @@ async def daily_window_job() -> None   # SCHET002：每日到期關閉 + 截止�
 | 項目 | 狀態 |
 |------|------|
 | DP 端四個聚合閘 + 排程白名單 + `DP_SCHEDULE` 預留列 | ✅ 已就緒，等 ET 註冊 |
-| DP 後台受控主檔維護（SRVET004 之消費端） | ⚠️ **未接上**，見 #182 |
-| DP `module-callbacks.md` §3 / §3.1 之 ET 段落 | ⚠️ **stale**，待 #182 對齊 |
+| DP 後台受控主檔維護（SRVET004 之消費端） | ✅ 已接上（#182）|
+| DP `module-callbacks.md` §3 / §3.1 之 ET 段落 | ✅ 已對齊（#182）|
 | DP 真授權閘掛 router | ⚠️ 目前為暫行案（任何登入者可存取），**待 ET 註冊 checker 後才能啟用**，見 #113 |
 
 > **雙向依賴**：ET 註冊 checker 是 DP 收尾（#113）的前置——DP 後台現階段對所有登入者開放，正是因為 fail-closed 閘在無模組註冊時會鎖死整個後台。
@@ -173,3 +176,4 @@ async def daily_window_job() -> None   # SCHET002：每日到期關閉 + 截止�
 | 日期 | 版本 | 說明 |
 |------|------|------|
 | 2026-08-19 | 1.0 | 首版（#181）。回填 SRVET001 ~ SRVET006 編碼；定案 ET 端簽章、`ET_TAG` 受控主檔語意、「全體」保護落點與 5 個 error code；標註 §3.1 與 DP 契約現行文字之不一致（待 #182 對齊）及 DP 端未接消費端之現況 |
+| 2026-09-22 | 1.1 | #182：DP 端已接上受控主檔維護消費端，移除兩處「待 #182」標註與依賴狀態之 ⚠️；新增 `list_controlled_kinds()`（模組自報可維護之 kind 與子分組，DP 不硬編碼）；`ET_TAG_001` 之保護範圍由「內建標籤」更正為「全體」（`IS_ALL`）——原實作以 `is_builtin` 把關逾越本契約，致 5 筆內建標籤全不可改名 |

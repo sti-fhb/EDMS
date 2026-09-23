@@ -6,7 +6,7 @@ provider，註冊進 `module_assign_registry` 供 DP 後台呼叫。registry 之
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.module_assign import AssignmentView, ControlledItemView, SetEnabledResult
+from app.core.module_assign import AssignmentView, ControlledItemView, ControlledKindView, SetEnabledResult
 from app.dm.catalog.adapter import CatalogAdapter
 from app.dm.roles.assign_service import AssignService
 
@@ -27,6 +27,9 @@ class DmAssignProvider:
         await self._assign.assign_roles_audiences(
             db, user_id=user_id, roles=roles, audiences=groups, operator_id=operator_id
         )
+
+    async def list_controlled_kinds(self, db: AsyncSession) -> list[ControlledKindView]:
+        return await self._catalog.list_controlled_kinds(db)
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False

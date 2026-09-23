@@ -4,6 +4,8 @@
 停用保留既有引用、AUDIENCE 標籤停用 soft-retire 回受影響數、list_audiences，以及 provider 註冊。
 """
 
+import json
+
 import pytest
 from sqlalchemy import select
 
@@ -12,6 +14,7 @@ from app.core.module_assign import module_assign_registry
 from app.dm.bootstrap import register_dm_module
 from app.dm.catalog.adapter import CatalogAdapter
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
+from app.dp.audit.models import DpAuditLog
 
 pytestmark = pytest.mark.integration
 
@@ -28,6 +31,64 @@ async def test_list_controlled_covers_seeded(db):
     assert any(c.code == "SOP" and c.is_builtin for c in cats)
     tags = await _svc.list_controlled(db, "TAG")
     assert any(t.group_type == "AUDIENCE" for t in tags)
+
+
+async def test_改名稽核含異動前值(db):
+    """FR-DP-US5-06 要求稽核含前後值。
+
+    AUDIENCE 標籤即文件可見性之授權群組，改名等於「成員不變、群組身分標籤易手」；
+    無前值則事後無從還原原名。前值須於**改值之前**取得——ORM 就地更新後再讀屬性會拿到
+    新值，寫出 before == after 且不會失敗（靜默錯誤），故一併斷言兩者相異。
+    """
+    group = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=group, name="ZT改名前", operator_id="admin")
+    tag_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_name == "ZT改名前"))
+
+    await _svc.rename_controlled(db, "TAG", code=str(tag_id), new_name="ZT改名後", operator_id="admin")
+
+    log = (
+        await db.execute(
+            select(DpAuditLog)
+            .where(DpAuditLog.target_id == str(tag_id), DpAuditLog.action_type == "UPDATE")
+            .order_by(DpAuditLog.log_id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert json.loads(log.before_value)["name"] == "ZT改名前"
+    assert json.loads(log.after_value)["name"] == "ZT改名後"
+
+
+async def test_新增標籤之稽核以_tag_id_定位(db):
+    """新增 TAG 時 `code` 是所屬標籤組，用它當 target_id 無法定位被建立的是哪個標籤。"""
+    group = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=group, name="ZT稽核定位", operator_id="admin")
+    tag_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_name == "ZT稽核定位"))
+
+    exists = await db.scalar(
+        select(DpAuditLog.log_id).where(DpAuditLog.target_id == str(tag_id), DpAuditLog.action_type == "CREATE")
+    )
+    assert exists is not None, "CREATE 稽核之 target_id 應為新建標籤的 TAG_ID，而非所屬標籤組代碼"
+
+
+async def test_list_controlled_kinds_covers_three(db):
+    """DM 宣告三類受控主檔；TAG 另帶子分組供 DP 分區呈現（#182 D1）。
+
+    DP 端無從得知模組有哪些 kind，硬編碼對照表會在新增 kind 時靜默漏列（fail-closed、
+    CI 抓不到），故由模組自報。組名取自 `DM_TAG_GROUP.TAG_GROUP_NAME`、非 DP 硬編碼。
+    """
+    kinds = {k.kind: k for k in await _svc.list_controlled_kinds(db)}
+    assert set(kinds) == {"CATEGORY", "FUNC", "TAG"}
+    # 分類碼 / func 代碼由管理者指定且建立後鎖定 → 新增表單需代碼欄
+    assert kinds["CATEGORY"].requires_code is True
+    assert kinds["FUNC"].requires_code is True
+    # TAG 之 code 為「所屬標籤組」、由 DP 從當前分區帶入，不是使用者輸入
+    assert kinds["TAG"].requires_code is False
+    assert all(k.name for k in kinds.values()), "顯示名不可為空"
+
+    groups = {g.code: g.name for g in kinds["TAG"].groups}
+    assert await _audience_group(db) in groups, "AUDIENCE 組須在子分組內（供可見對象維護）"
+    assert all(groups.values()), "組名須取自 DM_TAG_GROUP，不可為空"
+    assert kinds["CATEGORY"].groups == () and kinds["FUNC"].groups == ()
 
 
 async def test_create_rename_disable_category(db):

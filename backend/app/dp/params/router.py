@@ -13,12 +13,23 @@ from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
-from app.dp.params.schemas import ParamDetailCreate, ParamDetailResponse, ParamDetailUpdate, ParamMasterResponse
-from app.dp.params.service import ParamAdminService
+from app.dp.params.schemas import (
+    ControlledCreate,
+    ControlledRename,
+    ControlledSectionResponse,
+    ControlledToggle,
+    ControlledToggleResponse,
+    ParamDetailCreate,
+    ParamDetailResponse,
+    ParamDetailUpdate,
+    ParamMasterResponse,
+)
+from app.dp.params.service import ControlledAdminService, ParamAdminService
 
 router = APIRouter(prefix="/api/dp/params", tags=["dp-params"], dependencies=[Depends(require_any_module_admin())])
 
 _service = ParamAdminService()
+_controlled = ControlledAdminService()
 
 
 @router.get("", response_model=list[ParamMasterResponse])
@@ -28,6 +39,53 @@ async def list_params(
 ):
     """列操作者可見之參數 / 清單（平台級共用 + 具管理者身分之模組級，前綴過濾）。"""
     return await _service.list_visible(db, payload.sub)
+
+
+@router.get("/controlled", response_model=list[ControlledSectionResponse])
+async def list_controlled_sections(
+    payload: JwtPayload = Depends(get_jwt_payload),
+    db: AsyncSession = Depends(get_db),
+):
+    """列操作者可維護之模組受控清單（模組自持表，經轉接層取得；模組過濾於 service enforce）。"""
+    return await _controlled.list_visible(db, payload.sub)
+
+
+@router.post("/controlled/{module}/{kind}", status_code=201)
+async def create_controlled_item(
+    module: str,
+    kind: str,
+    data: ControlledCreate,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+) -> None:
+    """新增受控項；代碼格式 / 重複檢核與稽核由模組負責，越權由 service 擋。"""
+    await _controlled.create(db, module=module, kind=kind, data=data, operator=operator)
+
+
+@router.put("/controlled/{module}/{kind}/{code}", status_code=204)
+async def rename_controlled_item(
+    module: str,
+    kind: str,
+    code: str,
+    data: ControlledRename,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+) -> None:
+    """受控項改名（代碼建立後鎖定）；內建項保護規則歸模組。"""
+    await _controlled.rename(db, module=module, kind=kind, code=code, data=data, operator=operator)
+
+
+@router.patch("/controlled/{module}/{kind}/{code}/enabled", response_model=ControlledToggleResponse)
+async def set_controlled_item_enabled(
+    module: str,
+    kind: str,
+    code: str,
+    data: ControlledToggle,
+    db: AsyncSession = Depends(get_db),
+    operator: OperatorInfo = Depends(get_operator),
+):
+    """受控項啟停（不刪除）。DM 可見對象停用回受影響數（下限，見 schema）。"""
+    return await _controlled.set_enabled(db, module=module, kind=kind, code=code, data=data, operator=operator)
 
 
 @router.put("/{param_id}/details/{param_key}", response_model=ParamDetailResponse)

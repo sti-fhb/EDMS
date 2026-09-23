@@ -211,13 +211,27 @@ class TestAc4AdminCanAssign:
 class TestCatalogMaintenance:
     """受控主檔維護之業務保護與稽核（Code Review 補強：rename / create 原無測試）。"""
 
-    async def test_內建標籤不可改名(self, db, et_registered) -> None:
+    async def test_全體標籤不可改名(self, db, et_registered) -> None:
+        """「全體」（`IS_ALL`）為改名保護之唯一對象（契約 srv-et-dp-module-callbacks.md §「全體」保護）。"""
         provider = module_assign_registry.get("ET")
-        tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "護理師"})
+        tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "IS_ALL" = true'))
         with pytest.raises(AppError) as e:
-            await provider.rename_controlled(db, "TAG", code=str(tag_id), new_name="護理人員", operator_id="ET_CAT_OP")
+            await provider.rename_controlled(db, "TAG", code=str(tag_id), new_name="所有人", operator_id="ET_CAT_OP")
         assert e.value.status_code == 422
         assert e.value.error_code == "ET_TAG_001"
+
+    async def test_內建但非全體之標籤可改名(self, db, et_registered) -> None:
+        """種子 5 筆皆 `IS_BUILTIN=true`，以 `is_builtin` 當改名保護條件會使 5 筆全不可改名。
+
+        契約只保護 `IS_ALL`（#182 決策 D2）。本測試鎖住「內建 ≠ 不可改名」，
+        避免保護條件再度收斂回 `is_builtin`——該偏差因 DP 端長期無呼叫者而從未被執行到。
+        """
+        provider = module_assign_registry.get("ET")
+        tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "護理師"})
+        await provider.rename_controlled(db, "TAG", code=str(tag_id), new_name="護理人員", operator_id="ET_CAT_OP")
+        names = {i.name for i in await provider.list_controlled(db, "TAG")}
+        assert "護理人員" in names
+        assert "護理師" not in names
 
     async def test_新增標籤名稱重複被擋(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")

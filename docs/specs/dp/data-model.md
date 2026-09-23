@@ -359,7 +359,18 @@ erDiagram
 
 ### 模組級參數與清單（`ET_` / `DM_` 前綴；依 [`_refs/09-平台模組.md`](../../_refs/09-平台模組.md) §5.2）
 
-`ET_VIDEO_ALLOWED_FORMATS`、`ET_VIDEO_MAX_SIZE_MB`、`ET_URGENT_REMIND_DAYS`、`ET_TRAINING_UNIT`（LIST，含 `ALL`）；`DM_DOC_CATEGORY`（LIST，`DETAIL_LOCK`）、`DM_FUNC_NAME`（LIST）、`DM_AUDIENCE`（LIST，含 `ALL`）、`DM_TAG_MODULE` / `DM_TAG_NATURE` / `DM_TAG_LEGAL`（LIST）、`DM_REMIND_THRESHOLD`、`DM_FILE_MAX_MB` / `DM_FILE_TYPES`。
+`ET_VIDEO_ALLOWED_FORMATS`、`ET_VIDEO_MAX_SIZE_MB`、`ET_URGENT_REMIND_DAYS`；`DM_REMIND_THRESHOLD`、`DM_FILE_MAX_MB` / `DM_FILE_TYPES`。
+
+> ⚠️ **清單型（LIST）之模組項目不存 `DP_PARAM`**（2026-09-22 #182 更正）。原列於此的七項——`ET_TRAINING_UNIT`、`DM_DOC_CATEGORY`、`DM_FUNC_NAME`、`DM_AUDIENCE`、`DM_TAG_MODULE` / `DM_TAG_NATURE` / `DM_TAG_LEGAL`——**全部為各模組自持表**：
+>
+> | 原 `PARAM_ID` | 實際來源 |
+> |--------------|---------|
+> | `ET_TRAINING_UNIT` | `ET_TAG` |
+> | `DM_DOC_CATEGORY` | `DM_CATEGORY` |
+> | `DM_FUNC_NAME` | `DM_FUNC` |
+> | `DM_AUDIENCE`、`DM_TAG_*` | `DM_TAG_GROUP` + `DM_TAG`（以 `GROUP_TYPE` 分 AUDIENCE / RETRIEVAL）|
+>
+> DM 六項於 2026-08-06（#127）改為自持表、ET 一項自始即為 `ET_TAG`；DP07 經 `module_assign_registry` 之受控主檔轉接層維護（見 [module-callbacks.md](contracts/module-callbacks.md) §3.1），DP 不自持這些清單。
 
 > ⚠️ **`DP_PARAM` 不存排程執行時點**（FR-DP-US11-07，2026-09-17 由 #332 改訂）。`ET_WEEKLY_STAT_DAY_TIME`（#325）與 `DM_WEEKLY_SCHED_DAY_TIME`（#332）已移除——引擎只讀 `DP_SCHEDULE.CRON_EXPR`，留著會讓管理者改了沒效果且無錯誤訊息。`DM_REMIND_THRESHOLD` / `ET_URGENT_REMIND_DAYS` 是**業務門檻**不是時點，留著且有效。
 

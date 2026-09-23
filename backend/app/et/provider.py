@@ -9,7 +9,7 @@ registry 之 `groups` 對 ET＝受訓單位標籤（`app/core/module_assign.py` 
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.module_assign import AssignmentView, ControlledItemView, SetEnabledResult
+from app.core.module_assign import AssignmentView, ControlledItemView, ControlledKindView, SetEnabledResult
 from app.et.catalog.adapter import EtCatalogAdapter
 from app.et.roles.assign_service import EtAssignService
 
@@ -28,6 +28,9 @@ class EtAssignProvider:
         self, db: AsyncSession, *, user_id: str, roles: set[str], groups: set[str], operator_id: str
     ) -> None:
         await self._assign.assign(db, user_id=user_id, roles=roles, groups=groups, operator_id=operator_id)
+
+    async def list_controlled_kinds(self, db: AsyncSession) -> list[ControlledKindView]:
+        return await self._catalog.list_controlled_kinds(db)
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False
