@@ -222,29 +222,64 @@ export interface BlockerNames {
 }
 
 /**
- * 缺漏文案——**`target_id` 指向哪一種物件由 `code` 決定**，不可一律當 `quiz_id`。
+ * 單一缺漏所指對象的文字（如 `測驗「小考」`）；無對象或查不到名稱時回 `null`。
  *
- * `PublishDialog`（發布）與 `ReopenCourseDialog`（再開課）呈現的是**同一組缺漏**
- * （後端兩條路徑共用 `evaluate_publish`），故文案也共用這一支。原本兩處各自複製了
- * 一段「查 `quizNames`」的行內判斷，`CHAPTER_EMPTY` 一加就同時在兩個地方標錯。
+ * **`target_id` 指向哪一種物件由 `code` 決定**，不可一律當 `quiz_id`。
+ *
+ * ⚠️ 查不到名稱回 `null` 而非空字串——呼叫端要據此**整個略過**這個對象，而不是印出
+ * 一組空的引號。這是 `BLOCKER_TARGET_KIND` fail-closed 承諾的延伸（見該表）。
  */
-export function blockerLabel(blocker: PublishBlocker, names: BlockerNames): string {
-  if (blocker.target_id === null) return blocker.message
+function blockerTargetText(blocker: PublishBlocker, names: BlockerNames): string | null {
+  if (blocker.target_id === null) return null
   const kind = BLOCKER_TARGET_KIND[blocker.code]
   if (kind === "chapter") {
     const name = names.chapter[blocker.target_id]
-    return name ? `${blocker.message}（章節「${name}」）` : blocker.message
+    return name ? `章節「${name}」` : null
   }
   if (kind === "quiz") {
     const name = names.quiz[blocker.target_id]
-    return name ? `${blocker.message}（測驗「${name}」）` : blocker.message
+    return name ? `測驗「${name}」` : null
   }
   if (kind === "itemChapter") {
     // 標的是項目，但顯示的是**它所屬的章節**——項目自己沒有名稱可標（#384）。
     const name = names.itemChapter[blocker.target_id]
-    return name ? `${blocker.message}（章節「${name}」的項目）` : blocker.message
+    return name ? `章節「${name}」的項目` : null
   }
-  return blocker.message
+  return null
+}
+
+/**
+ * 把缺漏依 `code` 分組（#412）。
+ *
+ * 同一種缺漏可能對應多個對象（一門課有兩個測驗配分未達 100 就是兩條），逐條列會讓
+ * 教師得自己認出「這兩條其實是同一件事」，缺漏種類一多還得捲動。
+ *
+ * 🔴 **用 `Map` 而非物件累加**：`Map` 保有插入順序，而插入順序即後端 `evaluate_publish`
+ * 的回傳順序「課程層 → 章節層 → 測驗層 → 文件層」。改用物件字面量會讓純數字字串的
+ * key 被 JS 重排，⛔ 不要為了「看起來簡單」換掉它。
+ */
+export function groupBlockers(blockers: PublishBlocker[]): PublishBlocker[][] {
+  const groups = new Map<string, PublishBlocker[]>()
+  for (const blocker of blockers) {
+    const existing = groups.get(blocker.code)
+    if (existing) existing.push(blocker)
+    else groups.set(blocker.code, [blocker])
+  }
+  return [...groups.values()]
+}
+
+/**
+ * 一組同 `code` 缺漏的文案：訊息 + 全部對象並列。
+ *
+ * `PublishDialog`（發布）與 `ReopenCourseDialog`（再開課）呈現的是**同一組缺漏**
+ * （後端兩條路徑共用 `evaluate_publish`），故文案也共用這一支。原本兩處各自複製了
+ * 一段「查 `quizNames`」的行內判斷，`CHAPTER_EMPTY` 一加就同時在兩個地方標錯。
+ *
+ * ⚠️ **一個對象都查不到名稱時退回裸訊息**，不印出空括號——與單一對象時的降級一致。
+ */
+export function blockerGroupLabel(group: PublishBlocker[], names: BlockerNames): string {
+  const targets = group.map((b) => blockerTargetText(b, names)).filter((text): text is string => text !== null)
+  return targets.length > 0 ? `${group[0].message}（${targets.join("、")}）` : group[0].message
 }
 
 // ── 模板（對齊後端 `app/et/survey/templates.py`）─────────────────────────────

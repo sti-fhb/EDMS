@@ -1,4 +1,3 @@
-import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -6,10 +5,6 @@ import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
-import List from "@mui/material/List"
-import ListItem from "@mui/material/ListItem"
-import ListItemIcon from "@mui/material/ListItemIcon"
-import ListItemText from "@mui/material/ListItemText"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
@@ -17,9 +12,9 @@ import dayjs from "dayjs"
 import type { Dayjs } from "dayjs"
 import { useState } from "react"
 
+import { BlockerList } from "./BlockerList"
 import { validateReopenSchedule } from "./reopenSchedule"
 import type { ReopenScheduleErrors } from "./reopenSchedule"
-import { BLOCKER_HINT, blockerLabel } from "./surveySchemas"
 import type { PublishBlocker } from "./surveySchemas"
 
 interface ReopenCourseDialogProps {
@@ -105,21 +100,10 @@ export function ReopenCourseDialog({
               <Alert severity="error">
                 課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
               </Alert>
-              <List dense disablePadding>
-                {blockers.map((blocker, index) => (
-                  <ListItem key={`${blocker.code}-${blocker.target_id ?? index}`} disableGutters>
-                    <ListItemIcon sx={{ minWidth: 32 }}>
-                      <ErrorOutlineIcon color="error" fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={
-                        blockerLabel(blocker, { quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames })
-                      }
-                      secondary={BLOCKER_HINT[blocker.code]}
-                    />
-                  </ListItem>
-                ))}
-              </List>
+              <BlockerList
+                blockers={blockers}
+                names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+              />
             </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">

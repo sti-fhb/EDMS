@@ -91,8 +91,9 @@ describe("PublishDialog：有缺漏", () => {
     expect(screen.getByText("測驗至少須有 1 題")).toBeInTheDocument()
   })
 
-  it("同一代碼的多個測驗各自成列", () => {
-    // key 若只用 code，兩筆 QUIZ_POINTS 會撞——React 會警告且可能漏render 其中一筆。
+  it("同一代碼的多個測驗合併為一列，對象並列（#412）", () => {
+    // 2026-09-23 手測回報：原本兩筆 QUIZ_POINTS 各自成列，教師得自己認出「這兩條其實
+    // 是同一件事」；缺漏種類一多還得捲動。
     render(
       <PublishDialog
         {...BASE_PROPS}
@@ -103,8 +104,58 @@ describe("PublishDialog：有缺漏", () => {
         quizNames={{ 1: "小考A", 2: "小考B" }}
       />,
     )
+    expect(screen.getByText("測驗各題配分總和須等於 100（測驗「小考A」、測驗「小考B」）")).toBeInTheDocument()
+    // 合併後「去哪裡修」只出現一次——重複的提示是逐條列最吵的部分
+    expect(screen.getAllByText("請調整該測驗各題配分，使總和為 100")).toHaveLength(1)
+  })
+
+  it("只有一個對象時不多出頓號或空括號（#412）", () => {
+    render(
+      <PublishDialog
+        {...BASE_PROPS}
+        blockers={[{ code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 1 }]}
+        quizNames={{ 1: "小考A" }}
+      />,
+    )
     expect(screen.getByText("測驗各題配分總和須等於 100（測驗「小考A」）")).toBeInTheDocument()
-    expect(screen.getByText("測驗各題配分總和須等於 100（測驗「小考B」）")).toBeInTheDocument()
+  })
+
+  it("一組中只有部分對象查得到名稱時，只列查得到的（#412）", () => {
+    // `BLOCKER_TARGET_KIND` 的 fail-closed 承諾延伸到合併：查不到的整個略過，
+    // 不印出一組空引號。
+    render(
+      <PublishDialog
+        {...BASE_PROPS}
+        blockers={[
+          { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 1 },
+          { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 999 },
+        ]}
+        quizNames={{ 1: "小考A" }}
+      />,
+    )
+    expect(screen.getByText("測驗各題配分總和須等於 100（測驗「小考A」）")).toBeInTheDocument()
+  })
+
+  it("多種缺漏混合時，種類順序維持後端的回傳順序（#412）", () => {
+    // `evaluate_publish` 的順序是「課程層 → 章節層 → 測驗層 → 文件層」，前端分組
+    // 不得打亂它——`groupBlockers` 用 Map 保序即為此。
+    render(
+      <PublishDialog
+        {...BASE_PROPS}
+        blockers={[
+          { code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null },
+          { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 1 },
+          { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 2 },
+          { code: "OBSOLETE_DOC", message: "請先移除已廢止文件之引用", target_id: null },
+        ]}
+        quizNames={{ 1: "小考A", 2: "小考B" }}
+      />,
+    )
+    const rows = screen.getAllByRole("listitem").map((li) => li.textContent ?? "")
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toContain("受訓單位標籤")
+    expect(rows[1]).toContain("測驗「小考A」、測驗「小考B」")
+    expect(rows[2]).toContain("已廢止文件")
   })
 })
 
