@@ -1,4 +1,3 @@
-import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -6,10 +5,6 @@ import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
-import List from "@mui/material/List"
-import ListItem from "@mui/material/ListItem"
-import ListItemIcon from "@mui/material/ListItemIcon"
-import ListItemText from "@mui/material/ListItemText"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
@@ -17,9 +12,9 @@ import dayjs from "dayjs"
 import type { Dayjs } from "dayjs"
 import { useState } from "react"
 
+import { BlockerList } from "./BlockerList"
 import { validateReopenSchedule } from "./reopenSchedule"
 import type { ReopenScheduleErrors } from "./reopenSchedule"
-import { BLOCKER_HINT, blockerLabel } from "./surveySchemas"
 import type { PublishBlocker } from "./surveySchemas"
 
 interface ReopenCourseDialogProps {
@@ -96,7 +91,10 @@ export function ReopenCourseDialog({
   const blocked = blockers.length > 0
 
   return (
-    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+    // `md` 而非 `sm`（#413）：兩個 `DateTimePicker` 並排時，`sm` 讓每個欄位只剩約
+    // 240px，而桌面版選擇器的「日曆 + 時 + 分 + AM/PM」四欄比欄位本身還寬，於是整個
+    // 長到對話框外面去（手測回報「日曆都超出去了」）。
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
       <DialogTitle>再開課</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
@@ -105,21 +103,10 @@ export function ReopenCourseDialog({
               <Alert severity="error">
                 課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
               </Alert>
-              <List dense disablePadding>
-                {blockers.map((blocker, index) => (
-                  <ListItem key={`${blocker.code}-${blocker.target_id ?? index}`} disableGutters>
-                    <ListItemIcon sx={{ minWidth: 32 }}>
-                      <ErrorOutlineIcon color="error" fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={
-                        blockerLabel(blocker, { quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames })
-                      }
-                      secondary={BLOCKER_HINT[blocker.code]}
-                    />
-                  </ListItem>
-                ))}
-              </List>
+              <BlockerList
+                blockers={blockers}
+                names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+              />
             </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">

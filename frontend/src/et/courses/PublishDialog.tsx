@@ -1,6 +1,5 @@
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline"
 import ContentCopyIcon from "@mui/icons-material/ContentCopy"
-import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -10,14 +9,10 @@ import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
 import IconButton from "@mui/material/IconButton"
-import List from "@mui/material/List"
-import ListItem from "@mui/material/ListItem"
-import ListItemIcon from "@mui/material/ListItemIcon"
-import ListItemText from "@mui/material/ListItemText"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
-import { BLOCKER_HINT, blockerLabel } from "./surveySchemas"
+import { BlockerList } from "./BlockerList"
 import type { PublishBlocker, PublishResult } from "./surveySchemas"
 
 interface PublishDialogProps {
@@ -117,23 +112,10 @@ export function PublishDialog({
         ) : (
           <Stack spacing={1}>
             <Alert severity="error">發布條件未滿足，請先補齊以下項目。</Alert>
-            <List dense disablePadding>
-              {blockers.map((blocker, index) => (
-                // 以索引補進 key：同一 `code` 可能對應多個測驗（`target_id` 不同），
-                // 單用 code 會重複；code + target_id 已足夠唯一，索引僅作保險。
-                <ListItem key={`${blocker.code}-${blocker.target_id ?? index}`} disableGutters>
-                  <ListItemIcon sx={{ minWidth: 32 }}>
-                    <ErrorOutlineIcon color="error" fontSize="small" />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={
-                      blockerLabel(blocker, { quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames })
-                    }
-                    secondary={BLOCKER_HINT[blocker.code]}
-                  />
-                </ListItem>
-              ))}
-            </List>
+            <BlockerList
+              blockers={blockers}
+              names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+            />
           </Stack>
         )}
       </DialogContent>

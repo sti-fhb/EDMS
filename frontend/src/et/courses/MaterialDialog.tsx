@@ -134,6 +134,12 @@ export function MaterialDialog({
   onSave,
   onUploadVideo,
 }: MaterialDialogProps) {
+  // 對話框本體——供「教材文件」下拉選單當作溢出邊界（#413），見該處註解。
+  //
+  // ⚠️ 用 **callback ref 寫進 state** 而非 `useRef`：邊界要在 render 期間讀取，而
+  // `ref.current` 在 render 期間是禁止讀的（ESLint `Cannot access refs during render`），
+  // 且第一次 render 時它必然是 `null`——選單會靜默退回預設的視窗邊界，也就是沒修。
+  const [paperEl, setPaperEl] = useState<HTMLDivElement | null>(null)
   const [name, setName] = useState("")
   const [descriptionHtml, setDescriptionHtml] = useState("")
   const [docs, setDocs] = useState<DocRow[]>([])
@@ -244,7 +250,8 @@ export function MaterialDialog({
       onClose={() => onClose(isDirty)}
       maxWidth="md"
       fullWidth
-      slotProps={{ paper: { sx: { height: "min(680px, 90vh)" } } }}
+      // `paperRef` 供「教材文件」的下拉選單把自己限制在對話框範圍內（#413），見該處註解。
+      slotProps={{ paper: { ref: setPaperEl, sx: { height: "min(680px, 90vh)" } } }}
     >
       <DialogTitle>{readOnly ? "檢視教材" : "編輯教材"}</DialogTitle>
       <DialogContent dividers>
@@ -390,6 +397,25 @@ export function MaterialDialog({
                   value={null}
                   blurOnSelect
                   onChange={(_, selected) => selected && addDoc(selected)}
+                  // 🔴 **把選單限制在對話框內**（#413）。MUI 預設把 popper portal 到
+                  // `body`，`flip` 的邊界因此是**視窗**——對話框下方還有視窗空間時它
+                  // 不會往上翻，選單就長到對話框外面去（手測回報「下拉選單超出去」）。
+                  //
+                  // ⚠️ 這不是「對話框不夠高」：它已經是 `min(680px, 90vh)`，在 720p 上
+                  // 就是 648px、幾乎滿版，再加高也沒有空間。⛔ 不要改成調高度。
+                  //
+                  // ⛔ 也不要改用 `disablePortal`：那會讓選單變成 `DialogContent` 的子
+                  // 元素，被它的捲動容器裁掉——症狀從「長出去」變成「只看得到半截」。
+                  slotProps={{
+                    popper: {
+                      modifiers: [
+                        { name: "flip", options: { boundary: paperEl, padding: 8 } },
+                        { name: "preventOverflow", options: { boundary: paperEl, padding: 8 } },
+                      ],
+                    },
+                    // 選項再多也不把對話框塞爆；超過即自己捲動。
+                    listbox: { sx: { maxHeight: 240 } },
+                  }}
                   renderOption={(props, option) => (
                     <li {...props} key={option.doc_id}>
                       <Stack sx={{ width: "100%" }}>
