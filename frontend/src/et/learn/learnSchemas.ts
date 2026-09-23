@@ -18,7 +18,12 @@ export interface ItemNode {
    * **教師預覽恆為 false**——他沒有進度可累積，照學員規則算會被鎖在第 1 項。
    */
   locked: boolean
-  /** 是否已完成（#274）。測驗項目於 `ET-6` 交付前恆為 false，但它不擋住後續。 */
+  /**
+   * 是否已完成（#274）。測驗項目的完成 = **該測驗已及格**（#279 起回寫進度）。
+   *
+   * ⚠️ 自 #361 起未及格的測驗**會擋住後續**（`spec_us5` AC 12）。例外只有一題都
+   * 沒有的測驗——那種考不了也就救不了，見後端 `progress/rules.build_item_state`。
+   */
   completed: boolean
 }
 
@@ -53,6 +58,15 @@ export interface LearnStructure {
    * 二次請求會造成可見的跳動。
    */
   survey: SurveyEntry | null
+  /**
+   * 擋住學習前緣的那一項是什麼型別；全部完成或教師預覽時為 `null`（#361）。
+   *
+   * 🔴 **由後端給，前端只做「型別 → 文案」的對應。** 自行推導要用到解鎖規則
+   * （依序 + 0 題測驗例外），那等於把同一條規則寫成兩個版本。
+   *
+   * ⚠️ 整份結構一個值，不是逐項一個——解鎖規則嚴格依序，所有鎖定都追溯到同一項。
+   */
+  blocking_item_type: ItemType | null
   chapters: ChapterNode[]
 }
 

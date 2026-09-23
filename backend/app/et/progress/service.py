@@ -53,7 +53,7 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
 from app.et.course.rules import is_effectively_closed, is_pending_open
-from app.et.learning.repository import EtLearningRepository
+from app.et.learning.repository import EtLearningRepository, zero_question_quiz_item_ids
 from app.et.learning.rules import ensure_can_access
 from app.et.progress.repository import EtProgressRepository
 from app.et.progress.rules import (
@@ -294,21 +294,27 @@ class EtProgressService:
     async def _locked_ids(self, db: AsyncSession, *, course_id: int, user_id: str) -> frozenset[int]:
         """該學員在此課程中**目前鎖定**的項目。
 
-        與側欄旗標（`learning/service._item_nodes`）共用 `build_item_state` 與
-        `locked_item_ids`——兩邊各算一份的話，分岔的表現會是「側欄顯示解鎖但後端擋下」，
-        一個學員完全無法理解、也不會有測試自然抓到的狀態。
+        與側欄旗標（`learning/service._item_nodes`）共用 `build_item_state`、
+        `locked_item_ids` 與 `zero_question_quiz_item_ids`——兩邊各算一份的話，分岔的
+        表現會是「側欄顯示解鎖但後端擋下」，一個學員完全無法理解、也不會有測試自然
+        抓到的狀態。
+
+        ⚠️ 本方法在**最高頻的 `report_intervals` 路徑**上，故 0 題測驗的旗標隨
+        `items_with_titles` 一併取回，**不另發一次查詢**。
         """
         completed_ids = await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id)
         chapters = await self._learning.chapters(db, course_id)
-        rows = await self._learning.items_with_titles(db, [c.chapter_id for c in chapters])
-        by_chapter: dict[int, list[tuple[int, str]]] = {}
-        for item, _, _ in rows:
-            by_chapter.setdefault(item.chapter_id, []).append((item.item_id, item.item_type))
+        chapter_ids = [c.chapter_id for c in chapters]
+        rows = await self._learning.items_with_titles(db, chapter_ids)
+        zero_question = zero_question_quiz_item_ids(rows)
+        by_chapter: dict[int, list[int]] = {}
+        for item, *_ in rows:
+            by_chapter.setdefault(item.chapter_id, []).append(item.item_id)
         return locked_item_ids(
             [
                 [
-                    build_item_state(item_id, item_type, completed_ids=completed_ids)
-                    for item_id, item_type in by_chapter.get(c.chapter_id, [])
+                    build_item_state(item_id, completed_ids=completed_ids, zero_question_quiz_item_ids=zero_question)
+                    for item_id in by_chapter.get(c.chapter_id, [])
                 ]
                 for c in chapters
             ]

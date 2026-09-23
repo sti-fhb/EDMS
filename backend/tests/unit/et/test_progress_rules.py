@@ -20,8 +20,10 @@ from app.et.progress.rules import (
     COVERAGE_THRESHOLD_PCT,
     ItemState,
     Segment,
+    build_item_state,
     clamp_segment,
     coverage_pct,
+    first_blocking_item,
     is_item_unlocked,
     locked_item_ids,
     merge_segments,
@@ -159,6 +161,48 @@ class TestIsItemUnlocked:
         assert is_item_unlocked(previous_completed=False, self_completed=True)
 
 
+class TestBuildItemState:
+    """`treat_as_done` 的餵值——AC 12「測驗未及格阻擋解鎖」的判斷點（#361 AC 7）。
+
+    🔴 **本類是 `build_item_state` 的第一批直接測試**。在此之前它沒有任何 unit test，
+    那一行只被整合測試間接碰到——而它一旦與側欄分岔，表現是「側欄顯示解鎖但後端擋下」，
+    正是整合測試最不容易自然抓到的一種。
+    """
+
+    def test_未通過的測驗擋住後續(self) -> None:
+        """AC 12 的本體：沒通過就是沒完成，後面的東西不該開。
+
+        2026-09-22 之前這裡恆為 `True`（`or item_type == ITEM_QUIZ`），理由是當時
+        `ET_QUIZ_RETRY_RESET` 全專案無人寫入、次數用盡即永久鎖死。ET-9（#329）交付
+        重置後該前提消失。
+        """
+        state = build_item_state(7, completed_ids=set(), zero_question_quiz_item_ids=frozenset())
+
+        assert state.completed is False
+        assert state.treat_as_done is False, "未通過的測驗必須擋住後續，否則 AC 12 等於沒啟用"
+
+    def test_通過後不再擋(self) -> None:
+        state = build_item_state(7, completed_ids={7}, zero_question_quiz_item_ids=frozenset())
+
+        assert (state.completed, state.treat_as_done) == (True, True)
+
+    def test_零題測驗不當閘門(self) -> None:
+        """🔴 **0 題的測驗沒有任何逃生門**，故不得拿它當閘門。
+
+        `attempt/service` 對 0 題測驗直接回 404（建一個零題 attempt 會白吃一次次數），
+        學員因此**連考都考不了**、永遠拿不到 `IS_COMPLETED`。而 ET03 的重置鈕也不會
+        出現——`can_reset_retry` 要求 `used > max_retry`，他連一次都用不掉。
+
+        形狀與 `locked_item_ids` 對「空章節」的處理完全相同：不擋路，改由發布檢核
+        （`BLOCK_QUIZ_NO_QUESTION`）在上游擋住。⛔ 不要改成「擋住並提示」——教師把
+        題目全刪掉重建的那段時間，全班會卡在一份開不起來的考卷前。
+        """
+        state = build_item_state(7, completed_ids=set(), zero_question_quiz_item_ids=frozenset({7}))
+
+        assert state.completed is False, "側欄仍不打勾——他確實沒通過"
+        assert state.treat_as_done is True, "但不得擋住後續"
+
+
 def _item(item_id: int, *, completed: bool = False, treat_as_done: bool | None = None) -> ItemState:
     """測試用項目。`treat_as_done` 未指定時等同 `completed`（一般教材項目的情形）。"""
     return ItemState(
@@ -206,25 +250,68 @@ class TestLockedItemIds:
         chapters: list[list[ItemState]] = [[], [_item(1), _item(2)]]
         assert locked_item_ids(chapters) == frozenset({2})
 
-    def test_測驗項目不擋住後續(self) -> None:
-        """**`ET-6` 未交付前，測驗恆視為通過**（規劃留言之範圍邊界）。
+    def test_視為完成但未完成的項目不擋住後續(self) -> None:
+        """`treat_as_done=True` 而 `completed=False` 的項目不擋路，但自己不打勾。
 
-        沒有測驗結果可查；若照 `completed=False` 判定，測驗之後的所有項目與章節會
-        永久鎖死，學員的課程就此停在那裡。判斷點留在 `treat_as_done`。
+        ⚠️ **本條驗的是 `locked_item_ids` 怎麼用這兩個欄位，不是誰會產生這種組合。**
+        2026-09-22 之前唯一的來源是「測驗恆視為通過」（AC 12 未啟用）；AC 12 啟用後
+        改為只有 **0 題的測驗**會落在這個組合（見 `TestBuildItemState`）。兩者的共同
+        點是「這一項現在不可能完成，擋住它等於永久鎖死」。
+
+        ⛔ 不要因為舊名稱叫「測驗項目不擋住後續」就把它讀成「測驗永遠不擋」——那已經
+        不成立了。
         """
-        quiz = _item(2, completed=False, treat_as_done=True)
-        chapters = [[_item(1, completed=True), quiz, _item(3)], [_item(4)]]
-        # 測驗本身未完成（側欄不打勾）但**不擋住**其後的項目 3
+        ungated = _item(2, completed=False, treat_as_done=True)
+        chapters = [[_item(1, completed=True), ungated, _item(3)], [_item(4)]]
+        # 它自己未完成（側欄不打勾）但**不擋住**其後的項目 3
         assert locked_item_ids(chapters) == frozenset({4})
 
-    def test_章節末尾之測驗不擋住下一章(self) -> None:
-        """接上：測驗在章末時，它也不能擋住整個下一章。"""
-        quiz = _item(2, completed=False, treat_as_done=True)
-        chapters = [[_item(1, completed=True), quiz], [_item(3), _item(4)]]
+    def test_視為完成但未完成的項目在章末也不擋住下一章(self) -> None:
+        """接上：它在章末時，也不能擋住整個下一章。"""
+        ungated = _item(2, completed=False, treat_as_done=True)
+        chapters = [[_item(1, completed=True), ungated], [_item(3), _item(4)]]
         assert locked_item_ids(chapters) == frozenset({4})
 
     def test_無章節回空集合(self) -> None:
         assert locked_item_ids([]) == frozenset()
+
+
+class TestFirstBlockingItem:
+    """學習前緣——供 ET05 對鎖定項目給出**正確**的提示（`spec_us5` AC 12）。
+
+    AC 12 啟用後，鎖定多了「測驗未通過」這個成因；前端寫死的「請先完成本章節之影片
+    學習」會把考不過的學員指向錯的動作。
+    """
+
+    def test_回第一個未完成者(self) -> None:
+        chapters = [[_item(1, completed=True), _item(2)], [_item(3)]]
+        assert first_blocking_item(chapters) == 2
+
+    def test_跨章節仍取最早者(self) -> None:
+        """⛔ 不是「擋住該項的緊鄰前一項」。
+
+        第 1 章的項目 2 沒完成 → 第 2 章整章鎖著。對第 2 章的項目該說的是「先去做
+        項目 2」，而不是指向同樣鎖著的第 1 章末項。
+        """
+        chapters = [[_item(1, completed=True), _item(2), _item(3)], [_item(4)]]
+        assert first_blocking_item(chapters) == 2
+
+    def test_全部完成回_None(self) -> None:
+        chapters = [[_item(1, completed=True)], [_item(2, completed=True)]]
+        assert first_blocking_item(chapters) is None
+
+    def test_零題測驗不算前緣(self) -> None:
+        """它不擋路，自然也不是「學員該去做的下一件事」——指向它只會讓他更迷惑。"""
+        zero_question_quiz = _item(1, completed=False, treat_as_done=True)
+        chapters = [[zero_question_quiz, _item(2)]]
+        assert first_blocking_item(chapters) == 2
+
+    def test_空章節跳過(self) -> None:
+        chapters: list[list[ItemState]] = [[], [_item(1)]]
+        assert first_blocking_item(chapters) == 1
+
+    def test_無章節回_None(self) -> None:
+        assert first_blocking_item([]) is None
 
 
 class TestThreshold:

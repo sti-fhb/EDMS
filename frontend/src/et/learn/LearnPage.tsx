@@ -30,7 +30,7 @@ import { toApiError } from "../../services/http"
  * |---|---|
  * | AC 3 定位至上次觀看位置 | ✅ #274（`last_item_id` + 影片內 `last_position_sec`）|
  * | AC 8–11 解鎖阻擋 | ✅ #274 |
- * | AC 12 測驗未及格阻擋 | ⛔ `ET-6` 未實作——測驗恆視為通過，不擋住後續 |
+ * | AC 12 測驗未及格阻擋 | ✅ #361（提示依 `blocking_item_type` 分兩種；0 題測驗不當閘門）|
  * | AC 18–21 課後問卷入口 | ✅ #284（側欄底部，狀態由後端導出）|
  *
  * ## 課程關閉
@@ -105,16 +105,28 @@ export function EtLearnPage() {
    *
    * 鎖定項目**擋下並提示**（ET-MSG-ET05-001），不是靜默無反應——學員需要知道為什麼
    * 點不動，否則只會以為系統壞了。
+   *
+   * 🔴 **提示依前緣的型別分兩種**（#361）。AC 12 啟用前，鎖定的唯一成因是教材沒看完，
+   * 寫死「請先完成本章節之影片學習」永遠是對的；啟用後多了「測驗未通過」這個成因，
+   * 同一句話會把學員指向**錯的動作**——叫他去看早就看完的影片，而他該做的是重考。
+   *
+   * ⛔ 不要在前端自行推導前緣（例如掃 `chapters` 找第一個 `!completed`）：那會漏掉
+   * 「0 題測驗不當閘門」的例外而指向一個不是真兇的項目。後端已算好。
    */
+  const blockingItemType = data?.blocking_item_type ?? null
   const handleSelect = useCallback(
     (item: ItemNode) => {
       if (item.locked) {
-        message.warning("請先完成本章節之影片學習")
+        message.warning(
+          blockingItemType === "QUIZ"
+            ? "請通過本章節之測驗後解鎖" // ET-MSG-ET05-002
+            : "請先完成本章節之影片學習", // ET-MSG-ET05-001
+        )
         return
       }
       setActiveItemId(item.item_id)
     },
-    [message],
+    [message, blockingItemType],
   )
 
   if (!courseIdValid) {

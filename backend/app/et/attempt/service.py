@@ -223,6 +223,16 @@ class EtAttemptService:
         access = await self._require_access(db, quiz_id, user_id)
         quiz, item_id, course_id = access.quiz, access.item_id, access.course_id
 
+        # ⚠️ **進行中的 attempt 是一張存續的通行證，它會跨越「重新上鎖」。** 本分支在
+        # 下方三道守門（未開放 / 已關閉 / 項目未解鎖）之前返回，這是刻意的——不讓教師
+        # 的調整中斷一份已經寫到一半的考卷（場景 27 的窄縫）。
+        #
+        # 自 #361 啟用 AC 12 後，這條窄縫多了一個組合：學員可在某個短暫的解鎖窗口
+        # （例如教師把前一份測驗的題目全刪掉的期間）先開一個 attempt 掛著不交，等閘門
+        # 恢復後再提交。這是**已知而非漏看**。
+        #
+        # ⛔ 要收緊的話，正確的位置是限制 attempt 的最長存活時間，**不是**在本分支加上
+        # 解鎖判定——後者會打到場景 27 要保的那條窄縫。
         existing = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
         if existing is not None:
             return await self._state(db, existing, quiz_name=quiz.quiz_name, resumed=True)

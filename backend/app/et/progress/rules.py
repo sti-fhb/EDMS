@@ -31,8 +31,6 @@ normalize 時覆蓋率仍然正確（AC 7 因此自然成立）。
 from collections.abc import Container, Sequence
 from typing import Final, NamedTuple
 
-from app.et.constants import ITEM_QUIZ
-
 #: 解鎖門檻（FR-ET-US5-05）。
 COVERAGE_THRESHOLD_PCT: Final = 80
 
@@ -141,9 +139,8 @@ class ItemState(NamedTuple):
     Attributes:
         completed: 側欄顯示用的「已完成」。
         treat_as_done: 供**解鎖判定**使用的「視為完成」。多數情況等同 `completed`，
-            但**測驗項目在 `ET-6` 交付前恆為 `True`**——沒有測驗結果可查，若照
-            `completed=False` 判定，測驗之後的所有項目與章節會永久鎖死，學員的課程
-            就此停在那裡。判斷點留在此欄位，`ET-6` 只需改餵值來源。
+            例外只有**現在不可能完成的項目**——擋住那種項目等於永久鎖死。判斷點集中
+            在此欄位，見 `build_item_state`。
     """
 
     item_id: int
@@ -151,32 +148,93 @@ class ItemState(NamedTuple):
     treat_as_done: bool
 
 
-def build_item_state(item_id: int, item_type: str, *, completed_ids: Container[int]) -> ItemState:
-    """由項目型別與完成集合組出 `ItemState`。
+def build_item_state(
+    item_id: int, *, completed_ids: Container[int], zero_question_quiz_item_ids: Container[int]
+) -> ItemState:
+    """由完成集合組出 `ItemState`（`spec_us5` AC 12 之判斷點）。
 
     ⚠️ **讀取路徑（側欄旗標）與寫入路徑（擋下鎖定項目）必須共用本函式**。兩邊各自
     組一份的話，`treat_as_done` 這條規則就有兩個版本——而它們分岔的表現是「側欄顯示
     解鎖但後端擋下」，一個學員完全無法理解、也不會有測試自然抓到的狀態。
+
+    ⭐ 兩個參數都是**必填的 keyword-only**，正是為此：呼叫端漏餵會當場 `TypeError`，
+    而不是安靜地算出與另一邊不同的答案。⛔ 不要給它們預設值。
+
+    ## 為何 0 題的測驗不當閘門
+
+    AC 12 於 2026-09-22（#361）啟用——在此之前測驗恆視為通過，理由是「次數用盡即
+    永久鎖死且無從補救」；`ET-9`（#329）交付 ET03 重置後該前提消失。
+
+    但重置只解決**次數**用盡。0 題的測驗是另一種死路，重置完全救不了：
+
+    - `attempt/service` 對 0 題測驗直接回 404（建一個零題 attempt 會白吃一次次數），
+      學員**連考都考不了**，`IS_COMPLETED` 永遠拿不到
+    - ET03 的重置鈕也不會出現——`can_reset_retry` 要求 `used > max_retry`，而他一次
+      都用不掉，`used` 恆為 0
+
+    發布檢核有 `BLOCK_QUIZ_NO_QUESTION`，但那是**發布當下**的一次性檢核；發布後教師
+    仍可把題目全刪掉（`quiz/service.delete_question` 不擋最後一題）。
+
+    故比照本模組 `locked_item_ids` 對「空章節」的處理——**不擋路**，由發布檢核在上游
+    擋住。兩者是同一個形狀：一個現在不可能完成的容器，擋住它只會讓整門課後半段永久
+    鎖死，而畫面上完全看不出原因。
+
+    ⛔ 不要改成「擋住並在側欄提示」：教師把題目全刪掉重建的那段時間，全班會卡在一份
+    開不起來的考卷前，而他不會知道自己做了這件事。
+
+    ## 這個例外的代價止於何處
+
+    `treat_as_done` **只存在於本模組**（定義於此，消費者只有 `locked_item_ids` 與
+    `first_blocking_item`），從未進入任何完課判定——完課、課後問卷入口、線下核可四處
+    的 `is_course_completed(done, total)` 一律取自真實的 `ET_PROGRESS.IS_COMPLETED`
+    計數。所以 0 題例外**灌不了完課率、拿不到問卷入口、通不過核可**，它放寬的只有
+    「下一格能不能點」。
+
+    ⭐ 這是本例外可以接受的核心理由，也是它的界限：**若日後有人讓 `treat_as_done`
+    參與完課或核可判定，本例外立刻變成偽造完訓紀錄的路徑**，屆時必須改採在上游擋住
+    （`quiz/service.delete_question` 不許把已發布課程的測驗刪到 0 題）。
+
+    Args:
+        completed_ids: 該學員已完成的 `ITEM_ID`。
+        zero_question_quiz_item_ids: 目前沒有任何未刪除題目之測驗的 `ITEM_ID`
+            （由 `learning/repository.zero_question_quiz_item_ids` 查出）。**只含測驗
+            項目**，故此處不需再比對 `ITEM_TYPE`。
     """
     completed = item_id in completed_ids
-    # 🔴 **測驗仍恆視為通過**——`spec_us5` AC 12「測驗未及格阻擋解鎖」**尚未啟用**。
-    #
-    # `ET-6a`（#279）已交付真實的及格判定：提交及格時 `attempt/service` 會回寫
-    # `ET_PROGRESS.IS_COMPLETED`，所以側欄的 `completed` 打勾是真的。但**解鎖門檻**
-    # 仍刻意不掛上去，理由是**目前沒有任何補救途徑**：
-    #
-    # - 「重置重考次數」屬 US9（`ET-9`），尚未實作——全專案沒有任何程式碼寫入
-    #   `ET_QUIZ_RETRY_RESET`，只有 `attempt/repository` 在讀它
-    # - 故一旦學員次數用盡且未及格，該課程後半段對他**永久鎖死**，只能改資料庫救
-    # - `ET_ATTEMPT_002` 的訊息「請聯繫教師重置」會指向一個不存在的功能
-    #
-    # #279 裁示 2 = C：等 `ET-9` 交付重置功能後，把下面的 `or item_type == ITEM_QUIZ`
-    # 拿掉即可啟用 AC 12——**改這一行就好，其餘判定已經就位**。
     return ItemState(
         item_id=item_id,
         completed=completed,
-        treat_as_done=completed or item_type == ITEM_QUIZ,
+        treat_as_done=completed or item_id in zero_question_quiz_item_ids,
     )
+
+
+def first_blocking_item(chapters: Sequence[Sequence[ItemState]]) -> int | None:
+    """課程順序中**第一個未視為完成**的項目；全部完成則 `None`。
+
+    供 ET05 對鎖定項目給出正確提示（`spec_us5` AC 12「阻擋**並提示**」）。AC 12 啟用
+    前，鎖定的唯一成因是教材未看完，前端寫死「請先完成本章節之影片學習」即可；啟用後
+    多了「測驗未通過」這個成因，同一句話會把學員指向錯的動作——叫他去看早就看完的
+    影片，而他真正該做的是重考。
+
+    ## 為何一個值就夠
+
+    解鎖規則是嚴格依序的（章節依序 + 章節內依序），故**所有鎖定都追溯到同一項**——
+    它就是學員的學習前緣。而前緣之前的項目全部已完成，所以它自己必然是解鎖的，也就是
+    「他現在真的做得到的下一件事」。
+
+    ⛔ 不要改成「擋住該項的緊鄰前一項」：跨章節時那會指向一個**他也還打不開**的項目。
+    例：第一章教材沒看完 → 第一章的測驗也鎖著 → 若對第二章的項目提示「請通過本章節
+    之測驗」，他點過去只會發現那個也是鎖的，反而更迷惑。
+
+    Args:
+        chapters: 已依 `SORT_ORDER` 排序的章節，每章為已排序的項目——與
+            `locked_item_ids` 同一份輸入，**順序即規則**。
+    """
+    for items in chapters:
+        for state in items:
+            if not state.treat_as_done:
+                return state.item_id
+    return None
 
 
 def locked_item_ids(chapters: Sequence[Sequence[ItemState]]) -> frozenset[int]:

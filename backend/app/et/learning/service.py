@@ -30,10 +30,9 @@ from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
 from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
-from app.et.course.models import EtItem
 from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.enrollment.rules import is_course_completed
-from app.et.learning.repository import EtLearningRepository
+from app.et.learning.repository import EtLearningRepository, LearnItemRow, zero_question_quiz_item_ids
 from app.et.learning.rules import ensure_can_access, playback_rates
 from app.et.learning.schemas import (
     PREVIEWABLE_MIMES,
@@ -46,7 +45,7 @@ from app.et.learning.schemas import (
 )
 from app.et.material.storage import resolve_within_root
 from app.et.progress.repository import EtProgressRepository
-from app.et.progress.rules import build_item_state, locked_item_ids
+from app.et.progress.rules import build_item_state, first_blocking_item, locked_item_ids
 from app.et.survey_fill.service import EtSurveyFillService
 from app.services import ParamService
 
@@ -120,15 +119,23 @@ class EtLearningService:
             raise _NOT_YET_OPEN
 
         chapters = await self._repo.chapters(db, course_id)
-        rows = await self._repo.items_with_titles(db, [c.chapter_id for c in chapters])
+        chapter_ids = [c.chapter_id for c in chapters]
+        rows = await self._repo.items_with_titles(db, chapter_ids)
         # 擁有者預覽（是擁有者且**不在籍**）不累積進度，故完成集合為空、也不套用鎖定。
         # 教師若真的用邀請碼加入自己的課，他就是學員，一切照學員規則走。
         is_preview = is_owner and not enrolled
         completed_ids: set[int] = (
             set() if is_preview else await self._progress.completed_item_ids(db, user_id=user_id, course_id=course_id)
         )
-        by_chapter = self._item_nodes(
-            chapters=[c.chapter_id for c in chapters], rows=rows, completed_ids=completed_ids, is_preview=is_preview
+        # 預覽不套用鎖定，故與 `completed_ids` 同樣給空集合——兩者的取得條件刻意寫成
+        # 同一形狀，避免日後有人只改其中一個。旗標隨 `rows` 一併取回，不另查一次。
+        zero_question = frozenset() if is_preview else zero_question_quiz_item_ids(rows)
+        by_chapter, blocking_item_type = self._item_nodes(
+            chapters=chapter_ids,
+            rows=rows,
+            completed_ids=completed_ids,
+            zero_question_quiz_item_ids=zero_question,
+            is_preview=is_preview,
         )
 
         # 課後問卷入口（#284）。完課判定**用已載入的資料算**，不再查一次進度——
@@ -137,7 +144,7 @@ class EtLearningService:
         #
         # `completed_ids` 可能含已刪除項目的 id（`ET_PROGRESS` 的列在項目被刪除後仍
         # 留著，那是學習歷史），故取交集而非直接比長度。
-        all_item_ids = {item.item_id for item, _, _ in rows}
+        all_item_ids = {item.item_id for item, *_ in rows}
         completed = is_course_completed(done=len(all_item_ids & completed_ids), total=len(all_item_ids))
         survey = await self._survey_fill.entry(db, course_id=course_id, user_id=user_id, completed=completed)
 
@@ -156,6 +163,7 @@ class EtLearningService:
                 None if is_preview else await self._progress.get_last_item_id(db, user_id=user_id, course_id=course_id)
             ),
             survey=survey,
+            blocking_item_type=blocking_item_type,
             chapters=[
                 ChapterNode(
                     chapter_id=c.chapter_id,
@@ -171,36 +179,43 @@ class EtLearningService:
     def _item_nodes(
         *,
         chapters: list[int],
-        rows: list[tuple[EtItem, str | None, str | None]],
+        rows: list[LearnItemRow],
         completed_ids: set[int],
+        zero_question_quiz_item_ids: frozenset[int],
         is_preview: bool,
-    ) -> dict[int, list[ItemNode]]:
-        """組側欄項目並套用解鎖判定（#274）。
+    ) -> tuple[dict[int, list[ItemNode]], str | None]:
+        """組側欄項目並套用解鎖判定（#274），另回「擋住學習前緣的那一項是什麼型別」。
 
         `rows` 已由 repository 依 `(CHAPTER_ID, SORT_ORDER, ITEM_ID)` 排序，
         `chapters` 依 `SORT_ORDER`——**順序即解鎖規則**，故此處按 `chapters` 的順序
         取值餵給 `locked_item_ids`，不可改用 `dict` 的插入序（沒有項目的章節不會出現
         在 `by_chapter` 裡，會讓章節序列少一節）。
-        """
-        by_chapter: dict[int, list[tuple[EtItem, str | None, str | None]]] = {}
-        for item, material_name, quiz_name in rows:
-            by_chapter.setdefault(item.chapter_id, []).append((item, material_name, quiz_name))
 
-        locked = (
-            frozenset()
-            if is_preview
-            else locked_item_ids(
-                [
-                    [
-                        # 與寫入路徑的擋鎖判定（`progress/service._locked_ids`）共用同一支
-                        # ——兩邊各組一份的話，分岔的表現是「側欄顯示解鎖但後端擋下」。
-                        build_item_state(item.item_id, item.item_type, completed_ids=completed_ids)
-                        for item, _, _ in by_chapter.get(chapter_id, [])
-                    ]
-                    for chapter_id in chapters
-                ]
-            )
-        )
+        ⚠️ 前緣**必須用同一個 `states`** 算，不可改用 `rows` 直接掃——`rows` 依
+        `CHAPTER_ID` 排序，而章節的顯示順序是 `SORT_ORDER`，兩者在教師調整過章節順序
+        後就不一致。用錯的順序會指向錯的項目，而那個錯誤只在調過順序的課程才出現。
+        """
+        by_chapter: dict[int, list[LearnItemRow]] = {}
+        for row in rows:
+            by_chapter.setdefault(row[0].chapter_id, []).append(row)
+
+        states = [
+            [
+                # 與寫入路徑的擋鎖判定（`progress/service._locked_ids`）共用同一支
+                # ——兩邊各組一份的話，分岔的表現是「側欄顯示解鎖但後端擋下」。
+                build_item_state(
+                    item.item_id,
+                    completed_ids=completed_ids,
+                    zero_question_quiz_item_ids=zero_question_quiz_item_ids,
+                )
+                for item, *_ in by_chapter.get(chapter_id, [])
+            ]
+            for chapter_id in chapters
+        ]
+        locked = frozenset() if is_preview else locked_item_ids(states)
+        blocking_id = None if is_preview else first_blocking_item(states)
+        item_types = {item.item_id: item.item_type for item, *_ in rows}
+        blocking_item_type = None if blocking_id is None else item_types[blocking_id]
         return {
             chapter_id: [
                 ItemNode(
@@ -214,10 +229,10 @@ class EtLearningService:
                     locked=item.item_id in locked,
                     completed=item.item_id in completed_ids,
                 )
-                for item, material_name, quiz_name in items
+                for item, material_name, quiz_name, _ in items
             ]
             for chapter_id, items in by_chapter.items()
-        }
+        }, blocking_item_type
 
     async def material_content(self, db: AsyncSession, material_id: int, *, user_id: str) -> MaterialContent:
         """教材內容：說明文字 + 影片清單 + DM 文件清單（含廢止旗標）。"""

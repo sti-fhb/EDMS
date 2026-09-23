@@ -23,8 +23,11 @@ class ItemNode(BaseModel):
         locked: 是否鎖定（#274）。章節依序 + 章節內依序，見
             `progress.rules.locked_item_ids`。**教師預覽恆為 `False`**——他沒有進度可
             累積（#255 裁示 Q1），照學員規則算會把他鎖在第 1 項，預覽就失去意義。
-        completed: 是否已完成（#274）。測驗項目在 `ET-6` 交付前恆為 `False`——它不打勾，
-            但也不擋住後續（見 `ItemState.treat_as_done`）。
+        completed: 是否已完成（#274）。測驗項目的完成 = **該測驗已及格**（#279 起於提交
+            及格時回寫 `ET_PROGRESS`）。
+
+            ⚠️ 自 #361 起未及格的測驗**會擋住後續**（`spec_us5` AC 12）。例外只有一題
+            都沒有的測驗——那種考不了也就救不了，見 `progress.rules.build_item_state`。
     """
 
     item_id: int
@@ -62,6 +65,21 @@ class LearnStructure(BaseModel):
             隨本回應一併回傳而非另開端點：側欄必須在第一次繪製就決定「渲染入口 /
             不渲染」，二次請求會造成可見的跳動，而「未完課 → 不顯示」是最常見的狀態，
             為它多打一趟請求不划算。
+        blocking_item_type: 擋住學習前緣的那一項之 `ITEM_TYPE`（`MATERIAL` / `QUIZ`），
+            全部完成或教師預覽時為 `None`。供前端對鎖定項目給出**正確**的提示
+            （`spec_us5` AC 12「阻擋並提示」）。
+
+            🔴 **由後端給而非前端自行推導**：推導要用到解鎖規則（依序 + 0 題測驗例外），
+            前端自己算一份就是把同一條規則寫成兩個版本。前端只做「型別 → 文案」的對應。
+
+            ⚠️ 是**整份結構一個值**，不是逐項一個：解鎖規則嚴格依序，故所有鎖定都追溯
+            到同一項（見 `progress/rules.first_blocking_item`）。
+
+            ℹ️ 型別為 `str` 而非 `Literal["MATERIAL", "QUIZ"]`——本專案的**請求** schema
+            用 `Literal`（如 `course/schemas.ItemCreateReq.item_type`），**回應** schema
+            一律用 `str`（本檔 `ItemNode.item_type`、`course/schemas.ItemRow.item_type`）。
+            只收斂這一個會讓它變成同一組回應裡的異類。值出自本系統自己的 DB，不是外部
+            輸入，故 `Literal` 的驗證價值也有限。
     """
 
     course_id: int
@@ -73,6 +91,7 @@ class LearnStructure(BaseModel):
     last_item_id: int | None
     survey: SurveyEntry | None
     chapters: list[ChapterNode]
+    blocking_item_type: str | None
 
 
 class MaterialVideoRow(BaseModel):
