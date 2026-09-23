@@ -21,6 +21,8 @@ from app.dm.document.models import DmDocTag
 
 # 分類碼字元集：僅英數（作為 PK、且下游 next_doc_id 以此碼組 LIKE pattern，須排除萬用字元）
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
+# 對應 DM_CATEGORY.CATEGORY_CODE 之 VARCHAR(10)
+_MAX_CODE_LEN = 10
 
 
 @dataclass(frozen=True)
@@ -35,8 +37,12 @@ class CatalogService:
     """受控資料維護（分類為代表；func / tag 同一機制）。"""
 
     async def create_category(self, db: AsyncSession, *, code: str, name: str, operator: str) -> DmCategory:
-        """新增自訂分類（分類碼建立後鎖定＝PK；格式須英數 422 DM_CATALOG_003；重複碼 409 DM_CATALOG_001）。"""
-        if not _CODE_PATTERN.match(code):
+        """新增自訂分類（分類碼建立後鎖定＝PK；格式須英數 422 DM_CATALOG_003；重複碼 409 DM_CATALOG_001）。
+
+        長度上限對應 `CATEGORY_CODE` 之 VARCHAR(10)——未擋會在 INSERT 時由 DB 拋
+        `value too long`，落成未攔截的 500。#182 讓 DP 後台第一次可外部呼叫此路徑。
+        """
+        if not _CODE_PATTERN.match(code) or len(code) > _MAX_CODE_LEN:
             raise AppError(status_code=422, detail="代碼格式不合法，僅允許英文與數字", error_code="DM_CATALOG_003")
         exists = await db.scalar(select(DmCategory.category_code).where(DmCategory.category_code == code))
         if exists is not None:

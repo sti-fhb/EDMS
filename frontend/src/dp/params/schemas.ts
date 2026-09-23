@@ -31,7 +31,13 @@ export const ParamItemNameSchema = z
   .min(1, { message: "請輸入內容" })
   .max(100, { message: "名稱長度不可超過 100 字元" })
 
-/** 受控項名稱：非空 ≤50。上限取兩模組較嚴者（ET_TAG.TAG_NAME VARCHAR(50)），避免送出後才被後端擋。 */
+/**
+ * 受控項名稱：非空 ≤50。上限取各模組**最窄**之欄位（DM_CATEGORY.CATEGORY_NAME /
+ * DM_TAG.TAG_NAME / ET_TAG.TAG_NAME 皆為 VARCHAR(50)），與後端 `_ControlledNameStr` 同值。
+ *
+ * 取捨：DM_FUNC.FUNC_NAME 實為 VARCHAR(100)，於此一併收斂至 50——各 kind 共用同一輸入元件，
+ * 依 kind 給不同上限會讓「同一顆新增鈕有時能打 100 字」，判斷成本高於那 50 字的價值。
+ */
 export const ControlledNameSchema = z
   .string()
   .trim()

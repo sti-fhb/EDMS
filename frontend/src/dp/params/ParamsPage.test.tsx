@@ -418,7 +418,41 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await user.click(await screen.findByRole("button", { name: "確定停用" }))
 
     // 「至少」不可省：在途草稿之版本層標籤快照未計入（#388），此數字為下限
-    expect(await screen.findByText(/至少影響 3 份文件、2 位閱覽者/)).toBeInTheDocument()
+    expect(await screen.findByText(/至少影響 3 份文件、2 位使用者/)).toBeInTheDocument()
+  })
+
+  it("只回使用者數的模組（ET）不得顯示「0 份文件」", async () => {
+    // ET 之 set_controlled_enabled 只回 affected_viewers，affected_docs 恆為 null——
+    // 以 `?? 0` 補零會對沒有文件概念的模組顯示字面錯誤的「至少影響 0 份文件」
+    server.use(
+      http.get("/api/dp/params/controlled", () =>
+        HttpResponse.json([
+          {
+            module: "ET",
+            kind: "TAG",
+            name: "受訓單位標籤",
+            requires_code: false,
+            group_code: null,
+            group_name: null,
+            items: [{ code: "7", name: "護理師", is_builtin: true, is_enabled: true }],
+          },
+        ]),
+      ),
+      http.patch("/api/dp/params/controlled/:module/:kind/:code/enabled", () =>
+        HttpResponse.json({ affected_docs: null, affected_viewers: 4 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
+    await openControlledRow(user, "TAG")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+    await user.click(await screen.findByRole("button", { name: "確定停用" }))
+
+    expect(await screen.findByText("已停用，至少影響 4 位使用者")).toBeInTheDocument()
+    expect(screen.queryByText(/0 份文件/)).not.toBeInTheDocument()
   })
 
   it("新增受控項：有子分組者代碼帶入所屬組，不要求使用者輸入", async () => {

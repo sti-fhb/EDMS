@@ -21,6 +21,8 @@ from app.dm.catalog.service import CatalogService
 from app.services import AuditLogService
 
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
+# 對應 DM_CATEGORY.CATEGORY_CODE / DM_FUNC.FUNC_CODE 之 VARCHAR(10)
+_MAX_CODE_LEN = 10
 _KINDS = ("CATEGORY", "FUNC", "TAG")
 _AUDIENCE = "AUDIENCE"
 # 通用值「全體」為**文件端**語意（文件掛上即所有閱覽者可見），非「指派給某使用者」的可見對象，
@@ -192,7 +194,13 @@ def _ensure_kind(kind: str) -> None:
 
 
 def _ensure_code(code: str) -> None:
-    if not _CODE_PATTERN.match(code):
+    """代碼格式檢核：英數且不超過欄位長度。
+
+    長度上限對應 `DM_FUNC.FUNC_CODE` / `DM_CATEGORY.CATEGORY_CODE` 之 VARCHAR(10)；
+    未擋會在 INSERT 時由 DB 拋 `value too long`，落成未攔截的 500 而非乾淨的 422。
+    #182 讓 DP 後台第一次可外部呼叫此路徑，該缺口從此可達。
+    """
+    if not _CODE_PATTERN.match(code) or len(code) > _MAX_CODE_LEN:
         raise AppError(status_code=422, detail="代碼格式不合法，僅允許英文與數字", error_code="DM_CATALOG_003")
 
 

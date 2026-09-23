@@ -4,9 +4,9 @@ ET 之受控主檔僅一類：**受訓單位標籤庫 `ET_TAG`**（`kind='TAG'`�
 DP 後台「系統參數與清單」，經本轉接層呼叫——**DP 不直接寫 ET 表**。比照
 `app/dm/catalog/adapter.py`。
 
-> ⚠️ **DP 端目前尚未接上受控主檔維護**（`list_controlled` / `set_controlled_enabled`
-> 全 backend 無 DP 呼叫者，見 #182）。本轉接層先行交付以符合 Protocol，端到端驗證
-> 待 #182。
+> ✅ **DP 端已接上受控主檔維護（#182）**：DP07「系統參數與清單」經
+> `module_assign_registry` 呼叫 `list_controlled_kinds` / `list_controlled` /
+> `create_controlled` / `rename_controlled` / `set_controlled_enabled`。
 
 **「全體」標籤保護**：`IS_ALL=true` 之標籤不可停用、不可改名（`ET_TAG_001`）。
 此為 ET 業務規則，**伺服器端保護必須在 ET**——DP 端之 `is_builtin` 旗標與前端隱藏

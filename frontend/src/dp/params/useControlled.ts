@@ -9,10 +9,21 @@ import type { ControlledSection } from "./paramsService"
 
 const _SAVED_MSG = "已儲存並即時生效"
 
-/** 受影響數提示用「至少」：在途草稿之版本層標籤快照未計入（#388），此數字為下限。 */
+/**
+ * 受影響數提示；只組出**模組實際回報**的項目。
+ *
+ * 兩個計數不對稱：DM 可見對象回文件數 + 使用者數，ET 受訓單位標籤只回使用者數
+ * （`affected_docs` 恆為 null——ET 沒有文件概念）。若以 `?? 0` 補零會對 ET 顯示
+ * 「至少影響 0 份文件」，是字面上錯誤的資訊。
+ *
+ * 用「至少」：在途草稿之版本層標籤快照未計入（#388），此數字為下限。
+ */
 function affectedText(docs: number | null, viewers: number | null): string | null {
-  if (docs === null && viewers === null) return null
-  return `已停用，至少影響 ${docs ?? 0} 份文件、${viewers ?? 0} 位閱覽者`
+  const parts = [
+    docs === null ? null : `${docs} 份文件`,
+    viewers === null ? null : `${viewers} 位使用者`,
+  ].filter((p): p is string => p !== null)
+  return parts.length > 0 ? `已停用，至少影響 ${parts.join("、")}` : null
 }
 
 /**
