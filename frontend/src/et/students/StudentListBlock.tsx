@@ -107,11 +107,9 @@ export function StudentListBlock({
   const approvalEnabled = rows.some((r) => typeof r.approval_status === "string")
 
   // 可勾選的只有「待核可」——未完課（NOT_ELIGIBLE）沒有資格，已通過 / 未通過要改判得先
-  // 撤銷並填原因（wireframe 對已有結果者只給「撤銷」）。後端對這兩類一律跳過，此處讓
-  // 教師在按下去之前就看得出來。
-  const selectableIds = rows.filter((r) => r.approval_status === "PENDING").map((r) => r.user_id)
+  // 撤銷並填原因（wireframe 對已有結果者只給「撤銷」）。後端對這兩類一律跳過，逐列的
+  // `canApprove` 讓教師在按下去之前就看得出來。
   const selectedRows = rows.filter((r) => selected.has(r.user_id))
-  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
 
   const toggle = (userId: string) =>
     setSelected((prev) => {
@@ -121,21 +119,16 @@ export function StudentListBlock({
       return next
     })
 
-  // 全選只涵蓋**本頁**的待核可者（wireframe 表頭 `title="全選已完課學員"` 在表格內，
-  // 語意是本頁）。跨頁全選在分頁清單上是常見的誤操作來源——教師看得到的是 20 列，
-  // 送出的卻是 200 個人。
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableIds))
-
-  // 🔴 **換頁必須清空勾選**。`selected` 是純 id 的 Set，而真正送出的名單是
-  // `rows.filter(...)`——只認**本頁**的列。不清的話會出現兩種都沒有錯誤訊號的狀況：
+  // 🔴 **換頁必須清空勾選。⛔ 不要因為全選鈕拿掉了就一併移除這段。**
   //
-  // 1. 第 1 頁勾 3 人 → 翻到第 2 頁：`selected.size` 仍是 3（工具列維持啟用），但
-  //    `selectedRows` 是空的 → 送出空 `user_ids` → 後端 422，教師看到一個對不上任何
-  //    操作的錯誤。
-  // 2. 承上，在第 2 頁按「全選本頁」：`toggleAll` 用新 Set **整個覆蓋** `selected`，
-  //    第 1 頁那 3 人被無聲清掉，而請求會成功送出——**只是少了 3 個人**。
+  // `selected` 是純 id 的 Set，而真正送出的名單是 `rows.filter(...)`——只認**本頁**的
+  // 列。不清的話：第 1 頁勾 3 人 → 翻到第 2 頁，`selected.size` 仍是 3（工具列維持
+  // 啟用），但 `selectedRows` 是空的 → 送出空 `user_ids` → 後端 422，教師看到一個對
+  // 不上任何操作的錯誤。**這條與全選無關，逐一勾選同樣會踩到。**
   //
-  // 清空的語意也與「批次只作用於本頁」一致（見 `toggleAll` 上方）。
+  // > 2026-09-23（#415）依裁示移除表頭全選鈕，改由教師逐一勾選。原本另有一種只有全選
+  // > 才踩得到的狀況（在第 2 頁按全選會用新 Set 整個覆蓋 `selected`，第 1 頁那幾人被
+  // > 無聲清掉而請求照樣成功、只是少了人），隨該鈕一併消失。
   const goToPage = (next: number) => {
     setPage(next)
     setSelected(new Set())
@@ -196,18 +189,9 @@ export function StudentListBlock({
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  {approvalEnabled && (
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        size="small"
-                        inputProps={{ "aria-label": "全選本頁待核可學員" }}
-                        checked={allSelected}
-                        indeterminate={selectedRows.length > 0 && !allSelected}
-                        disabled={readOnly || selectableIds.length === 0}
-                        onChange={toggleAll}
-                      />
-                    </TableCell>
-                  )}
+                  {/* 空的表頭格——逐列仍有勾選框，少一格會讓整排欄位錯位。
+                      全選鈕已於 #415 依裁示移除，改由教師逐一勾選。 */}
+                  {approvalEnabled && <TableCell padding="checkbox" />}
                   <TableCell>學員</TableCell>
                   <TableCell>加入日期</TableCell>
                   <TableCell>完課狀態</TableCell>
@@ -215,6 +199,10 @@ export function StudentListBlock({
                   <TableCell align="right">平均成績</TableCell>
                   {approvalEnabled && <TableCell>核可狀態</TableCell>}
                   <TableCell>最後活動</TableCell>
+                  {/* 「核可」與「操作」分欄（#415）：核可是對學習結果的裁示，移除是對
+                      名單的管理。混在一欄時「移除」緊鄰「不通過」，而兩者的後果差距極大
+                      ——一個是判定未通過，一個是把人踢出課程。 */}
+                  {approvalEnabled && <TableCell align="center">核可</TableCell>}
                   <TableCell align="center">操作</TableCell>
                 </TableRow>
               </TableHead>
@@ -288,51 +276,55 @@ export function StudentListBlock({
                         </TableCell>
                       )}
                       <TableCell>{formatDateTime(row.last_activity_at)}</TableCell>
-                      <TableCell align="center">
-                        <Stack direction="row" spacing={0.5} justifyContent="center">
-                          {/* 三顆核可鈕依狀態互斥（wireframe 行 1345~1372）：
-                              待核可 → 通過 + 不通過；已有結果 → 只有撤銷（不給直接改判，
-                              改判須先撤銷並填原因）；未達核可資格 → 兩者皆無。 */}
-                          {canApprove && (
-                            <>
-                              <Button size="small" disabled={readOnly} onClick={() => onApprove([row], "PASS")}>
-                                通過
-                              </Button>
+                      {approvalEnabled && (
+                        <TableCell align="center">
+                          <Stack direction="row" spacing={0.5} justifyContent="center">
+                            {/* 三顆核可鈕依狀態互斥（wireframe 行 1345~1372）：
+                                待核可 → 通過 + 不通過；已有結果 → 只有撤銷（不給直接改判，
+                                改判須先撤銷並填原因）；未達核可資格 → 兩者皆無。 */}
+                            {canApprove && (
+                              <>
+                                <Button size="small" disabled={readOnly} onClick={() => onApprove([row], "PASS")}>
+                                  通過
+                                </Button>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  disabled={readOnly}
+                                  onClick={() => onApprove([row], "FAIL")}
+                                >
+                                  不通過
+                                </Button>
+                              </>
+                            )}
+                            {hasResult && (
                               <Button
                                 size="small"
-                                color="error"
+                                color="secondary"
                                 disabled={readOnly}
-                                onClick={() => onApprove([row], "FAIL")}
+                                onClick={() => onApprove([row], null)}
                               >
-                                不通過
+                                撤銷
                               </Button>
-                            </>
-                          )}
-                          {hasResult && (
+                            )}
+                          </Stack>
+                        </TableCell>
+                      )}
+                      <TableCell align="center">
+                        <Tooltip title={readOnly ? "課程已關閉，無法移除學員" : "移除學員"}>
+                          {/* span 包住：disabled 的按鈕不觸發事件，Tooltip 會失效 */}
+                          <span>
                             <Button
                               size="small"
-                              color="secondary"
+                              color="error"
+                              startIcon={<PersonRemoveIcon />}
                               disabled={readOnly}
-                              onClick={() => onApprove([row], null)}
+                              onClick={() => onRemove(row)}
                             >
-                              撤銷
+                              移除
                             </Button>
-                          )}
-                          <Tooltip title={readOnly ? "課程已關閉，無法移除學員" : "移除學員"}>
-                            {/* span 包住：disabled 的按鈕不觸發事件，Tooltip 會失效 */}
-                            <span>
-                              <Button
-                                size="small"
-                                color="error"
-                                startIcon={<PersonRemoveIcon />}
-                                disabled={readOnly}
-                                onClick={() => onRemove(row)}
-                              >
-                                移除
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        </Stack>
+                          </span>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   )

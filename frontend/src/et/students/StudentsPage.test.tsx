@@ -649,7 +649,9 @@ describe("ET03 學員學習狀況追蹤", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtStudentsPage />)
     await selectCourse(user)
-    await user.click(await screen.findByRole("checkbox", { name: "全選本頁待核可學員" }))
+    // #415 起表頭沒有全選鈕，教師逐一勾選
+    await user.click(await screen.findByRole("checkbox", { name: "選取 王小明" }))
+    await user.click(screen.getByRole("checkbox", { name: "選取 李小華" }))
     await user.click(screen.getByRole("button", { name: "批次核可通過" }))
     await user.click(await screen.findByRole("button", { name: "確定" }))
 
@@ -730,5 +732,38 @@ describe("ET03 學員學習狀況追蹤", () => {
     expect(within(row).getByRole("button", { name: "通過" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "批次核可通過" })).toBeDisabled()
     expect(screen.getByRole("checkbox", { name: "選取 陳受訓" })).toBeDisabled()
+  })
+
+  it("表頭沒有全選勾選框（#415）", async () => {
+    withApproval([{ ...baseRow, user_id: "s01", user_name: "陳受訓", approval_status: "PENDING" }])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await screen.findByText("陳受訓")
+
+    expect(screen.queryByRole("checkbox", { name: /全選/ })).not.toBeInTheDocument()
+    // 逐列的勾選框不受影響——批次核可仍靠它
+    expect(screen.getByRole("checkbox", { name: "選取 陳受訓" })).toBeInTheDocument()
+  })
+
+  it("核可與移除分屬兩欄，移除不與不通過相鄰（#415）", async () => {
+    // 🔴 兩者的後果差距極大：一個是判定未通過，一個是把人踢出課程。
+    withApproval([{ ...baseRow, user_id: "s01", user_name: "陳受訓", approval_status: "PENDING" }])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    const row = (await screen.findByText("陳受訓")).closest("tr")!
+
+    const headers = screen.getAllByRole("columnheader").map((th) => th.textContent ?? "")
+    expect(headers).toContain("核可")
+    expect(headers).toContain("操作")
+
+    const cells = within(row).getAllByRole("cell")
+    const approvalCell = cells[headers.indexOf("核可")]
+    const actionCell = cells[headers.indexOf("操作")]
+    expect(within(approvalCell).getByRole("button", { name: "通過" })).toBeInTheDocument()
+    expect(within(approvalCell).getByRole("button", { name: "不通過" })).toBeInTheDocument()
+    expect(within(approvalCell).queryByRole("button", { name: "移除" })).not.toBeInTheDocument()
+    expect(within(actionCell).getByRole("button", { name: "移除" })).toBeInTheDocument()
   })
 })

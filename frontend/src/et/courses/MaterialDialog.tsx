@@ -135,7 +135,11 @@ export function MaterialDialog({
   onUploadVideo,
 }: MaterialDialogProps) {
   // 對話框本體——供「教材文件」下拉選單當作溢出邊界（#413），見該處註解。
-  const paperRef = useRef<HTMLDivElement>(null)
+  //
+  // ⚠️ 用 **callback ref 寫進 state** 而非 `useRef`：邊界要在 render 期間讀取，而
+  // `ref.current` 在 render 期間是禁止讀的（ESLint `Cannot access refs during render`），
+  // 且第一次 render 時它必然是 `null`——選單會靜默退回預設的視窗邊界，也就是沒修。
+  const [paperEl, setPaperEl] = useState<HTMLDivElement | null>(null)
   const [name, setName] = useState("")
   const [descriptionHtml, setDescriptionHtml] = useState("")
   const [docs, setDocs] = useState<DocRow[]>([])
@@ -247,7 +251,7 @@ export function MaterialDialog({
       maxWidth="md"
       fullWidth
       // `paperRef` 供「教材文件」的下拉選單把自己限制在對話框範圍內（#413），見該處註解。
-      slotProps={{ paper: { ref: paperRef, sx: { height: "min(680px, 90vh)" } } }}
+      slotProps={{ paper: { ref: setPaperEl, sx: { height: "min(680px, 90vh)" } } }}
     >
       <DialogTitle>{readOnly ? "檢視教材" : "編輯教材"}</DialogTitle>
       <DialogContent dividers>
@@ -405,8 +409,8 @@ export function MaterialDialog({
                   slotProps={{
                     popper: {
                       modifiers: [
-                        { name: "flip", options: { boundary: paperRef.current, padding: 8 } },
-                        { name: "preventOverflow", options: { boundary: paperRef.current, padding: 8 } },
+                        { name: "flip", options: { boundary: paperEl, padding: 8 } },
+                        { name: "preventOverflow", options: { boundary: paperEl, padding: 8 } },
                       ],
                     },
                     // 選項再多也不把對話框塞爆；超過即自己捲動。
