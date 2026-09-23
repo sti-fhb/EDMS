@@ -13,6 +13,24 @@ from app.dm.review.models import DmReview
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，同 dm/review、dm/detail）
 
 _DRAFT = "DRAFT"
+_PENDING = "PENDING"
+
+
+def _within_window_or_pending(since: datetime):
+    """動態清單的時間條件：近 N 天內有動作，**或**仍在 `PENDING`（#395 D-1）。
+
+    ## 為何 `PENDING` 不受窗口限制
+
+    窗口的語意是「近期**歷程**」，而 `PENDING` 是**當前狀態**不是歷程。一筆卡住的送審
+    `complete_date` 為 `NULL`、`submit_date` 又早於窗口，兩個條件都不成立——那一列
+    **根本不會從資料庫回來**，於是撰寫者連撤回的入口都沒有（撤回按鈕渲染在每一列事件上）。
+
+    ⚠️ 判準刻意是 **`PENDING` 本身**，不是「逾催辦門檻」：後者得把 `DM_REMIND_THRESHOLD`
+    傳進查詢層，使「這筆案件存不存在於畫面上」取決於一個**催辦設定**。兩件事不該綁在一起。
+
+    ⛔ 豁免只給 `PENDING`：已結案者仍受窗口限制，否則動態會無限成長——那正是窗口存在的理由。
+    """
+    return or_(DmReview.submit_date >= since, DmReview.complete_date >= since, DmReview.status == _PENDING)
 
 
 class PersonalRepository:
@@ -85,6 +103,13 @@ class PersonalRepository:
                 DmReview.complete_date,
                 DmDocument.doc_name,
                 party_user.user_name.label("party_name"),
+                # 對造人帳號狀態（#395 D-2）。**不在查詢層判定**——`STATUS` 值域屬 DP 語意，
+                # 由 service 經 `dp.users.account_status.is_account_disabled()` 解讀。
+                #
+                # ⚠️ `party_user` 是 `outerjoin`，查無使用者時兩欄皆為 `None`；那是「查無帳號」
+                # 而非「已停用」，兩者補救動作不同（修資料 vs 換審核者），呼叫端須分開判讀。
+                party_user.status.label("party_status"),
+                party_user.deleted.label("party_deleted"),
             )
             .join(DmDocument, (DmReview.doc_id == DmDocument.doc_id) & (DmDocument.deleted == 0))
             .outerjoin(party_user, party_col == party_user.user_id)
@@ -98,7 +123,7 @@ class PersonalRepository:
         """
         stmt = self._activity_select(party_col=DmReview.assigned_reviewer).where(
             DmReview.created_user == user_id,
-            or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
+            _within_window_or_pending(since),
         )
         return list((await db.execute(stmt)).all())
 
@@ -106,6 +131,6 @@ class PersonalRepository:
         """審核者視角近 30 天狀態變動事件（assigned_reviewer＝我）；對造人 party_name＝送審者姓名。"""
         stmt = self._activity_select(party_col=DmReview.created_user).where(
             DmReview.assigned_reviewer == user_id,
-            or_(DmReview.submit_date >= since, DmReview.complete_date >= since),
+            _within_window_or_pending(since),
         )
         return list((await db.execute(stmt)).all())

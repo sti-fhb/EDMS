@@ -23,6 +23,7 @@ from app.dm.personal.schemas import ActivityEvent, ActivityResponse, DraftItem, 
 from app.dm.review.repository import ReviewCenterRepository
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, has_role
+from app.dp.users.account_status import is_account_disabled
 from app.services import AuditLogService, ParamService
 
 _NEW = "NEW"
@@ -37,6 +38,32 @@ _REJECTED = "REJECTED"
 _WITHDRAWN = "WITHDRAWN"
 _TERMINAL = (_APPROVED, _REJECTED, _WITHDRAWN)  # 送審週期終態（各對應一筆 resolved 事件）
 _ACTIVITY_DAYS = 30
+_UNREACHABLE_NOT_FOUND = "NOT_FOUND"
+_UNREACHABLE_DISABLED = "DISABLED"
+
+
+def _party_unreachable(row) -> str | None:
+    """對造人帳號是否不可達（#395 D-2）；可達回 None。
+
+    ⚠️ **兩類分開，不可併成一句**：`party_user` 是 `outerjoin`，查無使用者時
+    `party_status` 為 `None`，而 `None != "ACTIVE"` 也成立——併成一類就會告訴撰寫者
+    「審核者帳號已停用」，但真相是「那個 user_id 不存在」。兩者補救動作不同
+    （修資料 vs 換審核者），與催辦 log 的三分法（`dm/review/center_service.py`）同一判準。
+
+    判定委派 `dp.users.account_status.is_account_disabled()`——該模組明訂「`STATUS` 值域屬
+    DP 語意，其他模組不得自行解讀」。刻意不用 `is_account_usable()`：後者連「密碼打錯三次
+    被鎖 15 分鐘」都算不可用，而那人明天就回來，不該讓撰寫者據此去撤回一筆好好的送審。
+
+    `party_deleted` 目前恆為 0（系統無刪除使用者功能、`DP_USER.DELETED` 無寫入點）；
+    保留是為了值域日後改變時預設標示為不可達（fail-closed），不是因為現在會發生。
+    """
+    if row.party_status is None:
+        return _UNREACHABLE_NOT_FOUND
+    if is_account_disabled(row.party_status) or row.party_deleted:
+        return _UNREACHABLE_DISABLED
+    return None
+
+
 _REMIND_THRESHOLD_DEFAULT = 7  # DM_REMIND_THRESHOLD 預設；逾此天數之 PENDING 於審核者視角顯「催辦中」
 _REVIEW_NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
 _DRAFT_NOT_FOUND = AppError(status_code=404, detail="查無此草稿版本或無權存取", error_code="DM_DOC_001")
@@ -207,11 +234,17 @@ class PersonalService:
         """把送審週期列展開為狀態變動事件，過濾近 30 天內，時間新→舊排序。
 
         一次送審週期：PENDING → 一列送審事件（待處理 / 催辦中 / 送審中）；已完成 → 送審列 + 結果列兩列。
+
+        ⚠️ **`PENDING` 的送審事件不受 30 天窗口限制**（#395 D-1，查詢層條件見
+        `repository._within_window_or_pending`）：窗口的語意是「近期**歷程**」，而 `PENDING`
+        是**當前狀態**。卡住的送審掉出窗口，撰寫者連撤回的入口都沒有——撤回鈕渲染在每一列上。
+        豁免只給 `PENDING`，已結案者仍受窗口限制（下方 `resolved` 那半未改）。
         """
         events: list[ActivityEvent] = []
         for r in rows:
             overdue = r.status == _PENDING and (now - r.submit_date).days >= threshold
-            if r.submit_date >= since:  # 送審 / 發起廢止事件
+            unreachable = _party_unreachable(r)
+            if r.submit_date >= since or r.status == _PENDING:  # 送審 / 發起廢止事件
                 events.append(
                     ActivityEvent(
                         review_id=r.review_id,
@@ -223,6 +256,7 @@ class PersonalService:
                         event_time=r.submit_date,
                         is_overdue=overdue,
                         party_name=r.party_name,
+                        party_unreachable=unreachable,
                     )
                 )
             if r.status in _TERMINAL and r.complete_date is not None and r.complete_date >= since:
@@ -237,6 +271,7 @@ class PersonalService:
                         event_time=r.complete_date,
                         is_overdue=False,
                         party_name=r.party_name,
+                        party_unreachable=unreachable,
                     )
                 )
         # 時間新→舊；同時點以 review_id 為次序穩定排序（repository 已不下 order_by，順序由此決定）
