@@ -468,6 +468,20 @@ export function EtCourseEditorPage() {
   }
 
   /**
+   * `ITEM_NO_TITLE` 的 target_id 是 item_id，但**那個項目依定義沒有名字可顯示**
+   * （#384）——所以這裡對照的不是項目名稱，是**它所屬的章節名稱**。
+   *
+   * 查 `itemNames` 會永遠落空、永遠退回裸訊息，教師就看不出是哪一個項目；改標章節
+   * 至少把他帶到正確的段落。
+   */
+  const itemChapterNames: Record<number, string> = {}
+  for (const chapter of chapters) {
+    for (const item of chapter.items ?? []) {
+      itemChapterNames[item.item_id] = chapter.chapter_name
+    }
+  }
+
+  /**
    * 基本資料驗證——「儲存草稿」與「儲存並發布」共用。
    *
    * 有錯時把訊息寫進 `errors`（逐欄標示）並回 `false`；通過則清空並回 `true`。
@@ -1392,6 +1406,7 @@ export function EtCourseEditorPage() {
         result={publishResult}
         quizNames={quizNames}
         chapterNames={chapterNames}
+        itemChapterNames={itemChapterNames}
         onPublish={() => publishMut.mutate()}
         onClose={() => {
           // 🔴 **關閉結果視窗後才導回列表**（#358 第 4 項），不在 `onSuccess` 當下導。
@@ -1416,6 +1431,7 @@ export function EtCourseEditorPage() {
         blockers={reopenBlockers}
         quizNames={quizNames}
         chapterNames={chapterNames}
+        itemChapterNames={itemChapterNames}
         onSubmit={(openStartAt, openEndAt) => reopenMut.mutate({ openStartAt, openEndAt })}
         onClose={() => {
           setReopenOpen(false)

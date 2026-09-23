@@ -10,7 +10,7 @@ const BASE_PROPS = {
   publishing: false,
   blockers: [],
   result: null,
-  quizNames: {}, chapterNames: {},
+  quizNames: {}, chapterNames: {}, itemChapterNames: {},
   onPublish: () => {},
   onClose: () => {},
 }

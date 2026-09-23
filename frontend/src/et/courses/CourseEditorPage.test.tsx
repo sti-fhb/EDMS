@@ -472,6 +472,64 @@ describe("ET02 課程編輯頁", () => {
     expect(navigateSpy).not.toHaveBeenCalled()
   })
 
+  it("未命名項目的缺漏標的是所屬章節，不是項目自己（#384）", async () => {
+    // 🔴 `ITEM_NO_TITLE` 的 `target_id` 是 **item_id**，而那個項目**依定義沒有名字**。
+    // 若照直覺去查一份 item_id → 項目名稱的對照表，會永遠落空、永遠退回裸訊息，
+    // 教師看不出是哪一個——後端帶 `target_id` 的唯一理由又落空一次（同 #358 第 3 項）。
+    // 故改標**它所屬的章節**：名字查得到，而且正好把教師帶到要修的那一段。
+    const user = userEvent.setup()
+    server.use(
+      http.get("/api/et/courses/:courseId", ({ params }) =>
+        HttpResponse.json({
+          course_id: Number(params.courseId),
+          course_name: "採血作業訓練",
+          description: "課程說明",
+          status: "DRAFT",
+          open_start_at: null,
+          open_end_at: null,
+          require_approval: false,
+          version: 0,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          tag_ids: [2],
+          chapters: [
+            { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] },
+            {
+              chapter_id: 12,
+              chapter_name: "第二章",
+              sort_order: 2,
+              version: 0,
+              items: [
+                {
+                  item_id: 21,
+                  item_type: "MATERIAL",
+                  title: "",
+                  material_id: 501,
+                  quiz_id: null,
+                  sort_order: 1,
+                  version: 0,
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+      http.put("/api/et/courses/:courseId", () => HttpResponse.json({ course_id: 1, version: 1 })),
+      http.get("/api/et/courses/:courseId/publish-check", () =>
+        HttpResponse.json({
+          can_publish: false,
+          blockers: [{ code: "ITEM_NO_TITLE", message: "教材與測驗須填寫名稱", target_id: 21 }],
+        }),
+      ),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
+
+    expect(await screen.findByText(/教材與測驗須填寫名稱（章節「第二章」的項目）/)).toBeInTheDocument()
+    expect(screen.getByText(/請開啟該項目並填寫名稱/)).toBeInTheDocument()
+  })
+
   it("「儲存並發布」按鈕呈現但停用（發布屬 #204）", async () => {
     renderNewEditor()
     const publish = await screen.findByRole("button", { name: "儲存並發布" })

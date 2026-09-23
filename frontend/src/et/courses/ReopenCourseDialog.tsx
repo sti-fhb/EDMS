@@ -31,6 +31,8 @@ interface ReopenCourseDialogProps {
   quizNames: Record<number, string>
   /** 同上，但為 `chapter_id` → 章節名稱。兩者是獨立序號，不可混用。 */
   chapterNames: Record<number, string>
+  /** item_id → **所屬章節**名稱（`ITEM_NO_TITLE` 用；該項目自己沒有名稱）。 */
+  itemChapterNames: Record<number, string>
   onSubmit: (openStartAt: string, openEndAt: string) => void
   onClose: () => void
 }
@@ -67,6 +69,7 @@ export function ReopenCourseDialog({
   blockers,
   quizNames,
   chapterNames,
+  itemChapterNames,
   onSubmit,
   onClose,
 }: ReopenCourseDialogProps) {
@@ -110,7 +113,7 @@ export function ReopenCourseDialog({
                     </ListItemIcon>
                     <ListItemText
                       primary={
-                        blockerLabel(blocker, quizNames, chapterNames)
+                        blockerLabel(blocker, { quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames })
                       }
                       secondary={BLOCKER_HINT[blocker.code]}
                     />
