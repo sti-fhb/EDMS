@@ -212,6 +212,22 @@ class EtLearningService:
             ]
             for chapter_id in chapters
         ]
+        # 🔴 **這裡算出的 `locked` 是回應裡的顯示旗標，不是守門。**
+        #
+        # 依序解鎖（`spec_us5` AC 5 / 6 / 9）的**執行點只有兩處**：
+        #   - `attempt/service.py` 的 `is_item_locked` —— 擋「開始作答」
+        #   - `progress/service.py` 的 `is_item_locked` —— 擋「寫入進度 / 完成」
+        #
+        # 本模組的內容端點（`material_content` / `doc_file` / 影片 ticket）**一律不驗鎖定**，
+        # 只驗課程存取權。所以在籍學員直接打 API 可以**預先讀取**未解鎖章節的教材內容；
+        # 目前阻止這件事的只有前端的「濾掉鎖定項目」（`LearnPage`）。
+        #
+        # 影響評估（2026-09-23 / #416 查證）：規則的**實質目的仍被執行**——預先讀得到，
+        # 但進度與完課一格都拿不到（兩個執行點都擋）。故列為已知落差而非缺陷，未開票。
+        #
+        # ⚠️ **日後若要補上「未解鎖不得讀取內容」，加在上述端點，不要靠前端過濾。**
+        # 同理，前端也不該做出通用的「顯示指定的鎖定項目」能力——那會直接把這個落差
+        # 變成可見的洞（#416 的 `?quiz=` 落點因此刻意在鎖定時改為提示，不顯示內容）。
         locked = frozenset() if is_preview else locked_item_ids(states)
         blocking_id = None if is_preview else first_blocking_item(states)
         item_types = {item.item_id: item.item_type for item, *_ in rows}

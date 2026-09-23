@@ -9,12 +9,22 @@ import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
 const navigate = vi.fn()
+/** 目前網址的 query string（`?quiz=` 落點用，#416）。各測試自行覆寫。 */
+const search = { current: "" }
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigate, useParams: () => ({ courseId: "1" }) }
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+    useParams: () => ({ courseId: "1" }),
+    useSearchParams: () => [new URLSearchParams(search.current), vi.fn()],
+  }
 })
 
-beforeEach(() => navigate.mockReset())
+beforeEach(() => {
+  navigate.mockReset()
+  search.current = ""
+})
 
 function mockStructure(overrides: Partial<LearnStructure>) {
   server.use(
@@ -209,6 +219,51 @@ describe("ET05 章節學習頁", () => {
       expect(screen.getAllByTestId("CheckCircleIcon")).toHaveLength(1) // 已完成 ✓
       expect(screen.getByTestId("ArrowCircleRightIcon")).toBeInTheDocument() // 進行中 →
       expect(screen.getByTestId("LockIcon")).toBeInTheDocument() // 鎖定 🔒
+    })
+  })
+
+  describe("由測驗結果頁指定落點（#416）", () => {
+    it("帶 ?quiz= 時落在該測驗，不受 last_item_id 影響", async () => {
+      // 🔴 這是本 issue 的核心：原本結果頁只導 `/learn`，落點交給三段 fallback 推導，
+      // 而第二段（`last_item_id`）外面包了 `openable` 過濾——指到的項目一旦鎖定就被
+      // 靜默丟棄、掉到第三段 `openable[0]`＝第一章第一項。於是「回課程重新作答」
+      // 有時回到測驗、有時跳去別章，**同一顆按鈕兩次結果不同**。
+      //
+      // `last_item_id` 在此刻意指向**教材**（100），若落點仍由它決定就會顯示教材內容。
+      search.current = "?quiz=2000"
+      mockStructure({ last_item_id: 100 })
+      renderWithProviders(<EtLearnPage />)
+
+      // 測驗入口頁的特徵（題數 / 及格分數 / 開始作答），不是教材內容
+      expect(await screen.findByText("題數")).toBeInTheDocument()
+      expect(screen.getByText("及格分數")).toBeInTheDocument()
+      expect(screen.queryByText("採血流程概論教材")).not.toBeInTheDocument()
+    })
+
+    it("找不到對應測驗的項目時退回原本的落點推導", async () => {
+      // 網址被手改、或該測驗項目已被教師刪除。不該整頁壞掉，照原規則走。
+      search.current = "?quiz=999999"
+      mockStructure({ last_item_id: 100 })
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByText("採血流程概論教材")).toBeInTheDocument()
+    })
+
+    it("指定的測驗當下鎖定時明確提示，不靜默跳去別章（AC 4）", async () => {
+      // ⚠️ 這條路徑今天很難走到：學員能開始作答代表該項目當時未鎖定，而
+      // `locked_item_ids` 的「已完成永不鎖定」使考不及格不會讓它自己變鎖定。
+      // 成立情境是教師在這中間調整了章節順序、或要求已通過學員重測（#361）。
+      //
+      // ⛔ 處置刻意**沿用既有的 ET-MSG-ET05-001/002**，而不是把鎖定項目顯示出來——
+      // 後者會變成一個通用的「顯示未解鎖項目」能力，而未解鎖**教材**的內容端點
+      // 後端並不擋（見 `learning/service.py` 的註解），那會直接開一個洞。
+      search.current = "?quiz=2000"
+      mockStructure({ chapters: lockedChapters(), blocking_item_type: "MATERIAL", last_item_id: 100 })
+      renderWithProviders(<EtLearnPage />)
+
+      expect(await screen.findByText("請先完成本章節之影片學習")).toBeInTheDocument()
+      // 沒有把鎖定的測驗面板顯示出來
+      expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
   })
 

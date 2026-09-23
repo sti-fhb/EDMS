@@ -121,7 +121,17 @@ class AttemptResult(BaseModel):
     #: `attempt_id` 與 `quiz_id` 是兩個獨立的序列。
     quiz_id: int
     #: 供結果頁導回該課程的學習頁（測驗資訊與「開始作答」都在那裡的側欄項目內）。
-    #: 學習頁會依 `LAST_ITEM_ID` 自動落回該測驗項目，故不需要再帶 `item_id`。
+    #:
+    #: 🔴 **不需要再帶 `item_id`，但理由不是原本寫的那個**（#416 更正）。原註解寫
+    #: 「學習頁會依 `LAST_ITEM_ID` 自動落回該測驗項目」——**那是錯的**：學習頁那一段
+    #: 外面包了「濾掉鎖定項目」的過濾，`LAST_ITEM_ID` 指到的項目一旦鎖定就被靜默丟棄，
+    #: 落點掉到第一章第一項。那正是 #416 的症狀。
+    #:
+    #: 真正的理由是**前端自己對得起來**：結果頁拿 `quiz_id` 導向 `…/learn?quiz={id}`，
+    #: 而學習頁結構的每個項目都帶 `quiz_id`（`learning/schemas.ItemNode`）。
+    #: ⛔ 不在此改帶 `item_id`：那需要現查 `quiz_context()`，而本 schema 的組出點位在
+    #: 閱卷 flush 之後——該反查在章節被刪時回 `None` 並 raise，會把剛寫入的成績一起
+    #: 回滾掉（見 `service.py` 對 `course_id` 的同一段說明）。
     #:
     #: 取自 `ET_QUIZ_ATTEMPT_M.COURSE_ID`（開始作答當下的快照），**不由 `quiz_id` 現查**。
     course_id: int
