@@ -23,6 +23,7 @@ import {
   DRAFT_KIND_LABELS,
   REVIEW_TYPE_LABELS,
   authorEventLabel,
+  partyUnreachableText,
   reviewerEventLabel,
 } from "./schemas"
 import { personalApi } from "./personalService"
@@ -173,6 +174,7 @@ function ActivityRow({
   const navigate = useNavigate()
   const label =
     perspective === "author" ? authorEventLabel(event) : reviewerEventLabel(event)
+  const unreachable = partyUnreachableText(event.party_unreachable, perspective)
   // 操作只掛在「當前送審中」事件（submitted 且 PENDING）
   const actionable = event.event_kind === "submitted" && event.status === "PENDING"
 
@@ -191,7 +193,16 @@ function ActivityRow({
       <TableCell>
         <Chip size="small" color={label.tone} label={label.text} />
       </TableCell>
-      <TableCell>{event.party_name ?? "—"}</TableCell>
+      <TableCell>
+        {event.party_name ?? "—"}
+        {/* #395 D-2：對造人帳號不可達時說明原因——讓「知道」與「能做」落在同一個人身上。
+            撰寫者本來就能撤回重送（撤回鈕就在同一列），缺的只是沒人告訴他該撤回。 */}
+        {unreachable && (
+          <Typography variant="caption" color="error" display="block">
+            {unreachable}
+          </Typography>
+        )}
+      </TableCell>
       <TableCell>{formatDateTime(event.event_time)}</TableCell>
       <TableCell>
         {actionable && perspective === "author" && (

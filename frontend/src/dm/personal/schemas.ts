@@ -31,6 +31,9 @@ export interface ActivityEvent {
   event_time: string
   is_overdue: boolean // 僅 PENDING 之 submitted 事件；審核者視角逾門檻顯「催辦中」
   party_name: string | null // 撰寫者視角＝指定審核者；審核者視角＝送審者
+  // 對造人帳號不可達之原因（#395 D-2）：null 可達 / "DISABLED" 已停用 / "NOT_FOUND" 查無帳號。
+  // ⚠️ 兩類不可併成一句——補救動作不同（查無要修資料、停用要換審核者）。
+  party_unreachable: string | null
 }
 
 export interface ActivityResponse {
@@ -74,6 +77,7 @@ export function authorEventLabel(e: {
   review_type: string
   status: string
   event_kind: string
+  is_overdue: boolean
 }): EventLabel {
   const isObsolete = e.review_type === "OBSOLETE"
   if (e.event_kind === "resolved") {
@@ -82,8 +86,24 @@ export function authorEventLabel(e: {
     return { text: "已撤回", tone: "default" } // WITHDRAWN
   }
   // submitted
-  if (e.status === "PENDING") return { text: isObsolete ? "廢止待簽核" : "送審中", tone: "warning" }
+  if (e.status === "PENDING") {
+    // 🔴 #395 D-2：卡 1 天與卡 100 天原本字樣完全相同——本函式根本不吃 `is_overdue`，
+    // 而該欄位其實早就送到前端了。撰寫者因此沒有任何訊號知道該撤回重送。
+    if (e.is_overdue) return { text: isObsolete ? "廢止逾期未審" : "逾期未審", tone: "error" }
+    return { text: isObsolete ? "廢止待簽核" : "送審中", tone: "warning" }
+  }
   return { text: isObsolete ? "發起廢止" : "送審", tone: "default" } // 已完成週期之送審起點
+}
+
+/** 對造人不可達之說明（#395 D-2）；可達回 null。視角決定稱謂：撰寫者看到的對造人是審核者。 */
+export function partyUnreachableText(
+  reason: string | null,
+  perspective: "author" | "reviewer",
+): string | null {
+  const who = perspective === "author" ? "審核者" : "送審者"
+  if (reason === "DISABLED") return `${who}帳號已停用`
+  if (reason === "NOT_FOUND") return `查無${who}帳號`
+  return null
 }
 
 /**

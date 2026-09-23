@@ -74,4 +74,101 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     renderWithProviders(<DmPersonalPage />)
     expect(await screen.findByText(/載入動態失敗/)).toBeInTheDocument()
   })
+  it("審核者帳號已停用時，撰寫者看得出原因並可據以撤回（#395 AC 4 選項 D）", async () => {
+    // ⭐ 撰寫者本來就能撤回重送，缺的只是**沒有任何東西告訴他該撤回**——他看到的是
+    // 「送審中」，卡 1 天和卡 100 天字樣完全相同，而審核者已經登不進系統了。
+    const { server } = await import("../../test/server")
+    const { http, HttpResponse } = await import("msw")
+    server.use(
+      http.get("/api/dm/personal/activity", () =>
+        HttpResponse.json({
+          author: [
+            {
+              review_id: 901,
+              doc_id: "DM-SOP-000901",
+              doc_name: "卡住的文件",
+              review_type: "NEW",
+              status: "PENDING",
+              event_kind: "submitted",
+              event_time: "2026-07-01T09:00:00Z",
+              is_overdue: true,
+              party_name: "李停用",
+              party_unreachable: "DISABLED",
+            },
+          ],
+          reviewer: [],
+        }),
+      ),
+    )
+    renderWithProviders(<DmPersonalPage />)
+
+    expect(await screen.findByText("卡住的文件")).toBeInTheDocument()
+    expect(screen.getByText(/審核者帳號已停用/)).toBeInTheDocument()
+    // 知道之後要做得到：撤回鈕必須同時在
+    expect(screen.getByRole("button", { name: "撤回送審" })).toBeInTheDocument()
+  })
+
+  it("查無審核者帳號與已停用顯示不同文字（#395 D-2）", async () => {
+    // ⚠️ 兩類不可併成一句——補救動作不同（修資料 vs 換審核者），與催辦 log 的三分法同判準。
+    const { server } = await import("../../test/server")
+    const { http, HttpResponse } = await import("msw")
+    server.use(
+      http.get("/api/dm/personal/activity", () =>
+        HttpResponse.json({
+          author: [
+            {
+              review_id: 902,
+              doc_id: "DM-SOP-000902",
+              doc_name: "孤兒指派文件",
+              review_type: "NEW",
+              status: "PENDING",
+              event_kind: "submitted",
+              event_time: "2026-07-01T09:00:00Z",
+              is_overdue: true,
+              party_name: null,
+              party_unreachable: "NOT_FOUND",
+            },
+          ],
+          reviewer: [],
+        }),
+      ),
+    )
+    renderWithProviders(<DmPersonalPage />)
+
+    expect(await screen.findByText(/查無審核者帳號/)).toBeInTheDocument()
+    expect(screen.queryByText(/審核者帳號已停用/)).not.toBeInTheDocument()
+  })
+
+  it("撰寫者視角逾催辦門檻顯「逾期未審」，不再只說「送審中」（#395 D-2）", async () => {
+    // 🔴 卡 1 天與卡 100 天原本字樣完全相同——`authorEventLabel` 根本不吃 `is_overdue`，
+    // 而該欄位其實早就送到前端了。
+    const { server } = await import("../../test/server")
+    const { http, HttpResponse } = await import("msw")
+    server.use(
+      http.get("/api/dm/personal/activity", () =>
+        HttpResponse.json({
+          author: [
+            {
+              review_id: 903,
+              doc_id: "DM-SOP-000903",
+              doc_name: "等很久的文件",
+              review_type: "NEW",
+              status: "PENDING",
+              event_kind: "submitted",
+              event_time: "2026-07-01T09:00:00Z",
+              is_overdue: true,
+              party_name: "王審核",
+              party_unreachable: null,
+            },
+          ],
+          reviewer: [],
+        }),
+      ),
+    )
+    renderWithProviders(<DmPersonalPage />)
+
+    expect(await screen.findByText("等很久的文件")).toBeInTheDocument()
+    expect(screen.getByText("逾期未審")).toBeInTheDocument()
+    expect(screen.queryByText("送審中")).not.toBeInTheDocument()
+  })
 })

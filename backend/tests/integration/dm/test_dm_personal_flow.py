@@ -464,3 +464,139 @@ async def test_access_false_for_viewer_or_admin_only(db, client):
 async def test_http_drafts_requires_auth(db, client):
     resp = await client.get("/api/dm/personal/drafts")
     assert resp.status_code == 401
+
+
+# ── #395 D：永久卡住的送審必須看得見、且看得出卡在哪 ──────────
+
+
+async def test_pending_送審超過動態窗口仍看得見(db):
+    """🔴 卡住的案件在 30 天後從撰寫者畫面**完全消失**——連撤回的入口都沒了（#395 AC 4 選項 D-1）。
+
+    撤回（`withdraw`）本身沒有時間限制，三道守門只有查無 / 非本人 / 非 PENDING。但撤回鈕渲染在
+    「我的文件動態」的**每一列事件**上，而該清單原本是 30 天窗口：`PENDING` 的 `complete_date`
+    是 `NULL`，`submit_date` 又早於窗口，兩個條件都不成立——**那一列根本沒從資料庫回來**。
+
+    ⚠️ 窗口豁免的判準是 **`PENDING` 本身**，不是「逾催辦門檻」：30 天窗口的語意是「近期**歷程**」，
+    而 `PENDING` 是**當前狀態**不是歷程。若改以門檻判定，「這筆案件存不存在於畫面上」就會取決於
+    `DM_REMIND_THRESHOLD` 這個**催辦設定**——兩件事不該綁在一起。
+    """
+    await _seed_user(db, "ed395d1", "撰寫")
+    await _seed_user(db, "rev395d1", "審核")
+    await _doc(db, "DM-SOP-000560", status="PENDING_REVIEW", author="ed395d1")
+    v = await _version(db, "DM-SOP-000560", "1.0", status="PENDING_REVIEW", author="ed395d1")
+    await _review(
+        db,
+        "DM-SOP-000560",
+        v.version_id,
+        review_type="NEW",
+        status="PENDING",
+        reviewer="rev395d1",
+        author="ed395d1",
+        submit=utcnow() - timedelta(days=100),  # 遠早於 30 天窗口
+    )
+
+    act = await _svc.list_activity(db, user_id="ed395d1", roles=[DM_EDITOR])
+
+    rows = [a for a in act.author if a.doc_id == "DM-SOP-000560"]
+    assert rows, "卡住的送審必須留在動態上，否則撰寫者連撤回的入口都沒有"
+    assert rows[0].event_kind == "submitted" and rows[0].status == "PENDING"
+    assert rows[0].is_overdue, "早已超過催辦門檻，應標為逾期"
+
+
+async def test_已完成的送審仍受_30_天窗口限制(db):
+    """回歸護欄：豁免只給 `PENDING`，**不得**把整個窗口廢掉。
+
+    已結案的送審是歷程，超過窗口就該消失——否則動態會無限成長，而那是窗口存在的理由。
+    """
+    await _seed_user(db, "ed395d2", "撰寫")
+    await _doc(db, "DM-SOP-000561", status="PUBLISHED", author="ed395d2")
+    v = await _version(db, "DM-SOP-000561", "1.0", status="PUBLISHED", author="ed395d2")
+    await _review(
+        db,
+        "DM-SOP-000561",
+        v.version_id,
+        review_type="NEW",
+        status="APPROVED",
+        author="ed395d2",
+        submit=utcnow() - timedelta(days=100),
+        complete=utcnow() - timedelta(days=99),
+    )
+
+    act = await _svc.list_activity(db, user_id="ed395d2", roles=[DM_EDITOR])
+    assert not [a for a in act.author if a.doc_id == "DM-SOP-000561"], "已結案且逾窗口者不該出現"
+
+
+async def test_審核者帳號已停用時撰寫者看得出原因(db):
+    """⭐ D-2：讓「知道」與「能做」落在同一個人身上（#395 AC 4）。
+
+    撰寫者本來就能撤回重送，缺的只是**沒有任何東西告訴他該撤回**——他看到的是「送審中」，
+    卡 1 天和卡 100 天字樣完全相同，而審核者已經登不進系統了。
+    """
+    from app.dp.users.service import UsersService
+
+    await _seed_user(db, "ed395d3", "撰寫")
+    await _seed_user(db, "rev395d3", "停用審核者")
+    # 走產品路徑停用（#395 AC 3 的判準：不直接 UPDATE）
+    await UsersService().set_status(db, user_id="rev395d3", action="disable", operator=OperatorInfo(user_id="ed395d3"))
+    await _doc(db, "DM-SOP-000562", status="PENDING_REVIEW", author="ed395d3")
+    v = await _version(db, "DM-SOP-000562", "1.0", status="PENDING_REVIEW", author="ed395d3")
+    await _review(
+        db,
+        "DM-SOP-000562",
+        v.version_id,
+        review_type="NEW",
+        status="PENDING",
+        reviewer="rev395d3",
+        author="ed395d3",
+        submit=utcnow() - timedelta(days=40),
+    )
+
+    act = await _svc.list_activity(db, user_id="ed395d3", roles=[DM_EDITOR])
+    row = next(a for a in act.author if a.doc_id == "DM-SOP-000562")
+    assert row.party_unreachable == "DISABLED", "撰寫者必須看得出審核者已停用，否則他不知道要撤回"
+
+
+async def test_查無審核者帳號與已停用分屬兩類(db):
+    """⚠️ 兩類不可併成一句——補救動作不同（修資料 vs 換審核者），與 #399 的 log 分類同一判準。
+
+    `DM_REVIEW.ASSIGNED_REVIEWER` 是 `String(20)` 且**無 FK**，故孤兒列造得出來；
+    `party_user` 是 `outerjoin`，查無使用者時整組欄位皆為 `None`。
+    """
+    await _seed_user(db, "ed395d4", "撰寫")
+    await _doc(db, "DM-SOP-000563", status="PENDING_REVIEW", author="ed395d4")
+    v = await _version(db, "DM-SOP-000563", "1.0", status="PENDING_REVIEW", author="ed395d4")
+    await _review(
+        db,
+        "DM-SOP-000563",
+        v.version_id,
+        review_type="NEW",
+        status="PENDING",
+        reviewer="nobody395d4",  # DP_USER 查無此列
+        author="ed395d4",
+        submit=utcnow() - timedelta(days=40),
+    )
+
+    act = await _svc.list_activity(db, user_id="ed395d4", roles=[DM_EDITOR])
+    row = next(a for a in act.author if a.doc_id == "DM-SOP-000563")
+    assert row.party_unreachable == "NOT_FOUND"
+
+
+async def test_審核者正常時不標示不可達(db):
+    """回歸護欄：只標示真正不可達者，正常路徑不得受影響。"""
+    await _seed_user(db, "ed395d5", "撰寫")
+    await _seed_user(db, "rev395d5", "正常審核者")
+    await _doc(db, "DM-SOP-000564", status="PENDING_REVIEW", author="ed395d5")
+    v = await _version(db, "DM-SOP-000564", "1.0", status="PENDING_REVIEW", author="ed395d5")
+    await _review(
+        db,
+        "DM-SOP-000564",
+        v.version_id,
+        review_type="NEW",
+        status="PENDING",
+        reviewer="rev395d5",
+        author="ed395d5",
+    )
+
+    act = await _svc.list_activity(db, user_id="ed395d5", roles=[DM_EDITOR])
+    row = next(a for a in act.author if a.doc_id == "DM-SOP-000564")
+    assert row.party_unreachable is None

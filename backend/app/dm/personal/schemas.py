@@ -46,6 +46,14 @@ class ActivityEvent(BaseModel):
     event_time: datetime  # 該事件發生時間（submitted＝送審時間、resolved＝完成時間）
     is_overdue: bool  # 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻（審核者視角顯「催辦中」，AC5）
     party_name: str | None  # 撰寫者視角＝指定審核者姓名；審核者視角＝送審者姓名
+    #: 對造人帳號不可達之原因（#395 D-2）：`None` 可達／`"DISABLED"` 已停用／`"NOT_FOUND"` 查無帳號。
+    #:
+    #: ⚠️ 兩類**刻意不併成一句**——補救動作不同（查無要修資料、停用要換審核者），與催辦 log 的
+    #: 三分法同一判準（`dm/review/center_service.py`）。
+    #:
+    #: 撰寫者視角下它回答的是「我的審核者還能不能處理這件事」：停用者登不進系統，那筆送審
+    #: 永遠卡著，而撰寫者本來就能撤回重送——缺的只是**沒有任何東西告訴他該撤回**。
+    party_unreachable: str | None
 
 
 class ActivityResponse(BaseModel):

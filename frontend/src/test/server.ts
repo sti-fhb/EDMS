@@ -555,6 +555,7 @@ export const handlers = [
           event_time: "2026-08-23T09:00:00Z",
           is_overdue: false,
           party_name: "王審核",
+          party_unreachable: null,
         },
         // 已完成週期展開為兩事件（送審 + 退回），驗證狀態變動歷程
         {
@@ -567,6 +568,7 @@ export const handlers = [
           event_time: "2026-08-22T09:00:00Z",
           is_overdue: false,
           party_name: "王審核",
+          party_unreachable: null,
         },
         {
           review_id: 803,
@@ -578,6 +580,7 @@ export const handlers = [
           event_time: "2026-08-20T09:00:00Z",
           is_overdue: false,
           party_name: "王審核",
+          party_unreachable: null,
         },
       ],
       reviewer: [
@@ -591,6 +594,7 @@ export const handlers = [
           event_time: "2026-08-10T10:00:00Z",
           is_overdue: true,
           party_name: "陳送審",
+          party_unreachable: null,
         },
         // 審核者視角已完成項也展開為 送審 + 結果 兩列（Round-4 item 2）
         {
@@ -603,6 +607,7 @@ export const handlers = [
           event_time: "2026-08-22T09:00:00Z",
           is_overdue: false,
           party_name: "陳送審",
+          party_unreachable: null,
         },
         {
           review_id: 804,
@@ -614,6 +619,7 @@ export const handlers = [
           event_time: "2026-08-20T10:00:00Z",
           is_overdue: false,
           party_name: "陳送審",
+          party_unreachable: null,
         },
       ],
     }),
