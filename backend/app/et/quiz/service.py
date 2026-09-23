@@ -14,8 +14,9 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.common.optimistic_lock import ensure_version_matched
+from app.et.constants import COURSE_PUBLISHED
 from app.et.course.repository import EtCourseRepository, EtItemRepository
-from app.et.course.rules import ensure_owner, is_browsable_by_non_owner
+from app.et.course.rules import ensure_owner, is_browsable_by_non_owner, is_effectively_closed
 from app.et.notify.course_invite import learn_link
 from app.et.notify.quiz_retest_required import QuizRetestRequiredMailer
 from app.et.progress.repository import EtProgressRepository
@@ -43,6 +44,11 @@ _FUNC_NAME = "ET-COURSE"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此測驗", error_code="ET_QUIZ_001")
 _QUESTION_NOT_FOUND = AppError(status_code=404, detail="查無此題目", error_code="ET_QUESTION_001")
+_LAST_QUESTION = AppError(
+    status_code=409,
+    detail="測驗至少須有 1 題，已發布課程不可刪除最後一題",
+    error_code="ET_QUESTION_005",
+)
 
 
 def _ensure_browsable(*, owner_id: str, actor_id: str, status: str, open_end_at) -> None:
@@ -158,7 +164,8 @@ class EtQuizService:
         `description` 為**純文字**（SA 裁示 #203 Q1），與教材說明文字分屬兩條路徑——
         **不經 HTML 消毒**，前端亦須以純文字渲染。
         """
-        _, course_id = await self._require_owned(db, quiz_id, operator.user_id)
+        _, resolved = await self._require_owned(db, quiz_id, operator.user_id)
+        course_id = resolved.course_id
         rowcount = await self._quizzes.update_settings(
             db,
             quiz_id,
@@ -180,7 +187,8 @@ class EtQuizService:
         self, db: AsyncSession, quiz_id: int, req: QuestionCreateReq, *, operator: OperatorInfo
     ) -> QuestionRow:
         """新增題目（含其全部選項），追加至最末。"""
-        _, course_id = await self._require_owned(db, quiz_id, operator.user_id)
+        _, resolved = await self._require_owned(db, quiz_id, operator.user_id)
+        course_id = resolved.course_id
         self._validate_options(req)
         question = await self._quizzes.add_question(
             db,
@@ -204,7 +212,8 @@ class EtQuizService:
         question = await self._quizzes.get_question(db, question_id)
         if question is None:
             raise _QUESTION_NOT_FOUND
-        _, course_id = await self._require_owned(db, question.quiz_id, operator.user_id)
+        _, resolved = await self._require_owned(db, question.quiz_id, operator.user_id)
+        course_id = resolved.course_id
         self._validate_options(req)
         rowcount = await self._quizzes.replace_question(
             db,
@@ -244,7 +253,9 @@ class EtQuizService:
         question = await self._quizzes.get_question(db, question_id)
         if question is None:
             raise _QUESTION_NOT_FOUND
-        _, course_id = await self._require_owned(db, question.quiz_id, operator.user_id)
+        _, resolved = await self._require_owned(db, question.quiz_id, operator.user_id)
+        course_id = resolved.course_id
+        await self._ensure_not_last_question_of_live_course(db, quiz_id=question.quiz_id, resolved=resolved)
         await self._quizzes.soft_delete_questions(db, [question_id], operator)
         await self._quizzes.resequence_questions(db, question.quiz_id, operator)
         affected = await self._require_retest_if_asked(
@@ -260,7 +271,8 @@ class EtQuizService:
         這是教師端的呈現順序。學員作答時的順序由系統洗牌並凍結於 attempt 快照（#6），
         不依此欄位。
         """
-        _, course_id = await self._require_owned(db, quiz_id, operator.user_id)
+        _, resolved = await self._require_owned(db, quiz_id, operator.user_id)
+        course_id = resolved.course_id
         current = await self._quizzes.list_questions(db, quiz_id)
         ensure_question_reorder_complete(current_ids={q.question_id for q in current}, requested=req.question_ids)
         rowcount = await self._quizzes.bump_version(db, quiz_id, req.version, operator)
@@ -298,6 +310,51 @@ class EtQuizService:
             raise _NOT_FOUND  # 孤兒測驗：UI 無從到達，不揭露其存在
         return quiz, resolved
 
+    async def _ensure_not_last_question_of_live_course(self, db: AsyncSession, *, quiz_id: int, resolved) -> None:
+        """已發布且學員仍可作答的課程，其測驗不得被刪到 0 題（#410）。
+
+        ## 這道守門補的是一個**時間差**，不是一條新規則
+
+        規則早就有——`course/publish_rules.BLOCK_QUIZ_NO_QUESTION`（「測驗至少須有 1 題」）。
+        但 `evaluate_publish` 全專案只有一個呼叫點（`publish_service._blockers`，`publish` 與
+        `reopen` 共用），所以它**只在發布／再開課那一刻跑**；發布之後教師把題目全刪掉，
+        沒有任何地方會再檢核。本函式把同一條規則補到編輯路徑上。
+
+        ## 後果為何值得擋
+
+        `attempt/service.start` 對 0 題測驗回 404（建一個零題 attempt 會白吃一次作答次數），
+        該項目因此永遠拿不到 `IS_COMPLETED`。而完課要求**每一項**皆完成
+        （`enrollment/rules.is_course_completed`），於是**整門課永遠無法完課**，連帶
+        課後問卷入口（US13 AC 1）與線下核可（US16）都拿不到——而教師端完全沒有訊號。
+
+        ## ⛔ 這道守門**不取代** `progress/rules.build_item_state` 的 0 題例外
+
+        兩層方向相反、互補：
+
+        | 層 | 作用 | 保護對象 |
+        |---|---|---|
+        | 本函式（上游）| 讓新資料進不了 0 題狀態 | 未來 |
+        | `build_item_state`（下游，#361）| 既有的 0 題測驗不鎖死學員 | 本守門上線**前**已存在的資料 |
+
+        只做上游，守門上線前已是 0 題的測驗仍會鎖死學員；只做下游，此狀態會持續被製造。
+
+        ## 為何範圍是「已發布**且**未視同關閉」
+
+        - **草稿不納入**：教師逐題建立時必然經過 0 題，擋住會讓「建了一題想換掉」做不到
+        - **視同關閉不納入**：`is_effectively_closed` 的課程學員本來就不能作答，0 題測驗
+          傷不到任何人（`is_browsable_by_non_owner` 那條路已擋在學員端）
+
+        Raises:
+            AppError: 已發布課程之測驗僅剩 1 題（409 `ET_QUESTION_005`）。
+        """
+        if resolved.status != COURSE_PUBLISHED:
+            return
+        if is_effectively_closed(status=resolved.status, open_end_at=resolved.open_end_at, now=utcnow()):
+            return
+        remaining = await self._quizzes.list_questions(db, quiz_id)
+        if len(remaining) <= 1:
+            raise _LAST_QUESTION
+
     async def _require_owned(self, db: AsyncSession, quiz_id: int, actor_id: str):
         """取測驗並確認擁有者——**寫入路徑專用**。
 
@@ -305,7 +362,7 @@ class EtQuizService:
         """
         quiz, resolved = await self._resolve_quiz(db, quiz_id)
         ensure_owner(owner_id=resolved.owner_id, actor_id=actor_id)
-        return quiz, resolved.course_id
+        return quiz, resolved
 
     async def _question_row(self, db: AsyncSession, question) -> QuestionRow:
         options = await self._quizzes.list_options(db, [question.question_id])

@@ -672,3 +672,85 @@ class TestDeleteQuestion:
         question = await _add_question(client, owner, qid)
         r = await client.delete(f"/api/et/questions/{question['question_id']}", headers=_bearer(other))
         assert r.status_code == 403
+
+
+# ── #410：已發布課程的測驗不得被刪到 0 題 ────────────────────
+
+
+async def test_已發布課程刪最後一題被擋(db, client):
+    """🔴 發布檢核是**一次性**的，`evaluate_publish` 全專案只有一個呼叫點（`publish_service._blockers`），
+    `publish` 與 `reopen` 共用——之後教師怎麼改都不會再被檢核到。#410 就是那個時間差。
+
+    後果不是「發布出一個 0 題測驗」，是**發布後才被刪成 0 題**：
+    `attempt/service.start` 對 0 題測驗回 404（建零題 attempt 會白吃一次次數），該項目
+    因此永遠拿不到 `IS_COMPLETED`，而完課要求每一項皆完成 → **整門課永遠無法完課**，
+    連帶課後問卷入口（US13 AC 1）與線下核可（US16）都拿不到。教師端則完全沒有訊號。
+    """
+    uid = await _user(db, "q410a")
+    cid, qid = await _quiz(client, uid)
+    q = await _add_question(client, uid, qid)
+    await _publish_course(db, cid)
+
+    r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 409, r.text
+    assert r.json()["error_code"] == "ET_QUESTION_005"
+    # 題目必須還在——擋下來卻已經刪掉等於沒擋
+    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert len(left.json()["questions"]) == 1
+
+
+async def test_已發布課程刪非最後一題照常(db, client):
+    """回歸護欄：守門只擋「刪到 0 題」，不是禁止已發布課程刪題。"""
+    uid = await _user(db, "q410b")
+    cid, qid = await _quiz(client, uid)
+    q1 = await _add_question(client, uid, qid, points=50)
+    await _add_question(client, uid, qid, points=50)
+    await _publish_course(db, cid)
+
+    r = await client.delete(f"/api/et/questions/{q1['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 204, r.text
+    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert len(left.json()["questions"]) == 1
+
+
+async def test_草稿課程刪最後一題照常(db, client):
+    """⚠️ 草稿**不受此限**——教師逐題建立時必然經過 0 題的狀態（AC 2）。
+
+    把守門套成「一律不許刪到 0 題」會讓「建了一題又想換掉」變成做不到。
+    """
+    uid = await _user(db, "q410c")
+    _, qid = await _quiz(client, uid)  # 不發布
+    q = await _add_question(client, uid, qid)
+
+    r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 204, r.text
+    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert left.json()["questions"] == []
+
+
+async def test_已關閉課程刪最後一題不受限(db, client):
+    """⚠️ 守門範圍是「已發布**且**學員仍可作答」——`is_effectively_closed` 的課程學員
+    本來就不能作答，0 題測驗傷不到任何人，不需納入（issue 注意事項明列）。
+    """
+    from datetime import timedelta
+
+    from app.et.constants import COURSE_PUBLISHED
+    from app.et.course.models import EtCourse
+
+    uid = await _user(db, "q410d")
+    cid, qid = await _quiz(client, uid)
+    q = await _add_question(client, uid, qid)
+    # 已發布但閱課期間已過 → is_effectively_closed
+    await db.execute(
+        update(EtCourse)
+        .where(EtCourse.course_id == cid)
+        .values(status=COURSE_PUBLISHED, open_end_at=utcnow() - timedelta(days=1))
+    )
+    await db.flush()
+
+    r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 204, r.text
