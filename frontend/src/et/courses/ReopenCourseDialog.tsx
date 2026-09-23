@@ -91,7 +91,10 @@ export function ReopenCourseDialog({
   const blocked = blockers.length > 0
 
   return (
-    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+    // `md` 而非 `sm`（#413）：兩個 `DateTimePicker` 並排時，`sm` 讓每個欄位只剩約
+    // 240px，而桌面版選擇器的「日曆 + 時 + 分 + AM/PM」四欄比欄位本身還寬，於是整個
+    // 長到對話框外面去（手測回報「日曆都超出去了」）。
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
       <DialogTitle>再開課</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
