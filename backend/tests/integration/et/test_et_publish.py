@@ -11,7 +11,7 @@
 """
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -27,6 +27,8 @@ from app.et.constants import (
     SURVEY_QUESTION_SINGLE,
 )
 from app.et.course.models import EtCourse
+from app.et.material.models import EtMaterial
+from app.et.quiz.models import EtQuiz
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
@@ -282,6 +284,37 @@ class TestPublishCheck:
         assert r.json()["error_code"] == "ET_COURSE_002"
 
 
+async def _untitled_item(client, db, uid: str, chapter_id: int, item_type: str) -> dict:
+    """建立一個**未命名**的項目——先以合法名稱建立，再以 DB 直寫清掉名稱。
+
+    🔴 **不可改回「以空 title 呼叫 API」。** #414 起建立時名稱必填（422），那條路已經
+    走不通了。
+
+    ⭐ 而改走 DB 直寫**不是為了規避新守門**，它正是本情境唯一正確的建構方式：
+    `BLOCK_ITEM_NO_TITLE` 這道發布檢核保護的是**#414 守門上線前就已經未命名的既有
+    資料**——那種資料按定義不會經過新守門，所以測試也不該經過它。
+
+    ⛔ 若日後發現這幾條建不起來，**不要刪掉它們**。發布檢核與建立守門是兩層、方向
+    相反：建立那道讓新資料進不了未命名狀態，發布這道保護既有資料。刪掉下游等於把
+    既有未命名項目的保護一併拿掉。
+    """
+    created = await client.post(
+        f"/api/et/chapters/{chapter_id}/items",
+        json={"item_type": item_type, "title": "待清空"},
+        headers=_bearer(uid),
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    if item_type == ITEM_MATERIAL:
+        await db.execute(
+            update(EtMaterial).where(EtMaterial.material_id == body["material_id"]).values(material_name="")
+        )
+    else:
+        await db.execute(update(EtQuiz).where(EtQuiz.quiz_id == body["quiz_id"]).values(quiz_name=""))
+    await db.flush()
+    return body
+
+
 class TestUntitledItem:
     """#384：未命名的教材／測驗不得發布出去。
 
@@ -291,12 +324,31 @@ class TestUntitledItem:
     （同 `_quiz_summaries` 與 `_chapter_summaries` 踩過的 INNER JOIN 坑）。
     """
 
-    async def test_建立項目時名稱仍可留空(self, client, db) -> None:
-        """🔴 AC 3：**不得為了修這個而推翻 2026-08-27 的裁示。**
+    async def test_建立項目時名稱必填(self, client, db) -> None:
+        """🔴 **本條於 2026-09-23（#414）取代了一條刻意設計來擋住它的測試**，理由如下。
 
-        原本前端會代填「新教材」/「新測驗」，實測發現使用者開視窗第一件事就是把那串
-        字選起來刪掉。修法只能加在**發布**這一關，不能把建立那關收緊——否則教師又會
-        看到代填的字。這條測試就是釘住這件事，讓日後「順手補個 min_length」會變紅。
+        原測試名為 `test_建立項目時名稱仍可留空`，docstring 寫著：
+
+        > 🔴 AC 3：**不得為了修這個而推翻 2026-08-27 的裁示。**
+        > 原本前端會代填「新教材」/「新測驗」，實測發現使用者開視窗第一件事就是把那串
+        > 字選起來刪掉。修法只能加在**發布**這一關，不能把建立那關收緊——否則教師又會
+        > 看到代填的字。這條測試就是釘住這件事，讓日後「順手補個 min_length」會變紅。
+
+        ## 為何仍然收緊了
+
+        那段推論是「收緊建立 ⇒ 必須代填 ⇒ 教師看到代填的字」，而**中間那一步不成立**。
+        #414 新增了第三條路：前端 `NewItemDialog` 在建立**之前**先問名稱，既不代填也
+        不留空（欄位開啟時是空的，`NewItemDialog.test.tsx` 有測試釘住）。
+
+        ⭐ 所以 2026-08-27 裁示的**目的**（不要替使用者代填）完全保住了，被取代的是它
+        當時選的**手段**（建立時允許留空）——那個手段有副作用：空殼在按下「新增項目」
+        的當下就落地，而前端清理只掛在「取消」上，換頁 / 重新整理 / 按「儲存草稿」都會
+        把未命名項目留在章節裡。2026-09-23 手測即回報此狀況。
+
+        ## ⛔ 「不代填」這條要求沒有消失，只是換了地方釘
+
+        它現在由 `frontend/.../NewItemDialog.test.tsx::不代填預設值——欄位一開始是空的`
+        承重。**若有人日後想在建立時代填預設名稱，那條會變紅。**
         """
         uid = await _user(db, "t_ut01")
         cid = await _publishable_course(client, db, uid)
@@ -308,38 +360,30 @@ class TestUntitledItem:
             headers=_bearer(uid),
         )
 
-        assert created.status_code == 201, created.text
+        assert created.status_code == 422, created.text
 
     async def test_未命名教材擋下發布並指出是哪一個項目(self, client, db) -> None:
         uid = await _user(db, "t_ut02")
         cid = await _publishable_course(client, db, uid)
         ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名章"}, headers=_bearer(uid))
-        item = await client.post(
-            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL, "title": ""},
-            headers=_bearer(uid),
-        )
+        item = await _untitled_item(client, db, uid, ch.json()["chapter_id"], ITEM_MATERIAL)
 
         body = await _check(client, uid, cid)
 
         assert body["can_publish"] is False
-        assert ("ITEM_NO_TITLE", item.json()["item_id"]) in [(b["code"], b["target_id"]) for b in body["blockers"]]
+        assert ("ITEM_NO_TITLE", item["item_id"]) in [(b["code"], b["target_id"]) for b in body["blockers"]]
 
     async def test_未命名測驗同樣被擋(self, client, db) -> None:
         """測驗側單獨驗一次——`coalesce` 取的是**另一張表**的欄位，教材通過不代表測驗也通過。"""
         uid = await _user(db, "t_ut03")
         cid = await _publishable_course(client, db, uid)
         ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名測驗章"}, headers=_bearer(uid))
-        item = await client.post(
-            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-            json={"item_type": ITEM_QUIZ, "title": ""},
-            headers=_bearer(uid),
-        )
+        item = await _untitled_item(client, db, uid, ch.json()["chapter_id"], ITEM_QUIZ)
 
         body = await _check(client, uid, cid)
 
         codes = [(b["code"], b["target_id"]) for b in body["blockers"]]
-        assert ("ITEM_NO_TITLE", item.json()["item_id"]) in codes
+        assert ("ITEM_NO_TITLE", item["item_id"]) in codes
 
     async def test_缺漏順序與教師畫面上的章節順序一致(self, client, db) -> None:
         """`_item_titles` 的 `ORDER BY` 是**有意義的**，不是隨手加的。
@@ -353,12 +397,8 @@ class TestUntitledItem:
         item_ids = []
         for name in ("甲章", "乙章"):
             ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": name}, headers=_bearer(uid))
-            created = await client.post(
-                f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-                json={"item_type": ITEM_MATERIAL, "title": ""},
-                headers=_bearer(uid),
-            )
-            item_ids.append(created.json()["item_id"])
+            created = await _untitled_item(client, db, uid, ch.json()["chapter_id"], ITEM_MATERIAL)
+            item_ids.append(created["item_id"])
 
         body = await _check(client, uid, cid)
 
@@ -370,12 +410,8 @@ class TestUntitledItem:
         uid = await _user(db, "t_ut04")
         cid = await _publishable_course(client, db, uid)
         ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "空名章"}, headers=_bearer(uid))
-        item = await client.post(
-            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL, "title": ""},
-            headers=_bearer(uid),
-        )
-        material_id = item.json()["material_id"]
+        item = await _untitled_item(client, db, uid, ch.json()["chapter_id"], ITEM_MATERIAL)
+        material_id = item["material_id"]
         before = await _check(client, uid, cid)
         assert any(b["code"] == "ITEM_NO_TITLE" for b in before["blockers"])
 
