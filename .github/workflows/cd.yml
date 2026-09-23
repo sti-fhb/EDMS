@@ -152,6 +152,27 @@ jobs:
           fi
           echo "映像可於封閉網路執行（--network none 驗證通過）：${OUT}"
 
+      # 🔴 這道護欄的存在理由，就是它擋下的那次事故（#360）：
+      # README 第 80、214 行都寫明「映像檔須加裝 ffmpeg」，但 backend/Dockerfile 從
+      # #254 起就沒裝，而**沒有任何既有檢查會發現**——CI runner 自己裝了 ffmpeg
+      # （見 ci.yml「確保 ffmpeg 可用」），所以單元與整合測試全綠；本機開發照 README
+      # 裝了，所以開發時也正常。缺口只在部署映像，且症狀是 422「無法解析影片長度，
+      # 請改用其他格式」——一則看似在講格式的訊息，會把人導向去換影片檔而不是查環境。
+      #
+      # 故此處驗的不是「程式碼對不對」，是「**映像裡真的有那支執行檔**」。
+      # 用 `-version` 而非實際探測一支影片：只要能執行就代表安裝成功，
+      # 而準備一支測試影片會讓本步驟多一個維護負擔。
+      - name: 驗證映像內含 ffprobe（ET 影片上傳的硬性前提）
+        run: |
+          if ! OUT=$(docker run --rm --network none "${AR_BASE}/edms-backend:${SHORT_SHA}" ffprobe -version 2>&1 | head -1); then
+            echo "::error::映像內找不到 ffprobe —— ET 教材影片將**一律上傳失敗**（422 ET_MATERIAL_004）。"
+            echo "::error::請確認 backend/Dockerfile 安裝 ffmpeg 的那一行未被移除。"
+            echo "::error::⚠️ 此缺口不會讓任何測試變紅：CI runner 與本機開發環境各自裝了 ffmpeg。"
+            echo "::error::實際輸出：${OUT}"
+            exit 1
+          fi
+          echo "映像內含 ffprobe：${OUT}"
+
       # 雙 head 提前 fail-fast：在 image 還沒 push 前先擋下。
       # alembic heads 為離線指令（只讀 migration 版本檔、不連 DB）。
       - name: 檢查 Alembic heads（雙 head 提前 fail-fast）
