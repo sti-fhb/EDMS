@@ -389,9 +389,21 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 
 ## 6. 上傳上限
 
-`nginx/nginx.conf` 的 `/api/` 設 `client_max_body_size 100m`。這是**實際生效的上限**——front-proxy 那層放行 620m，瓶頸在這裡。
+`nginx/nginx.conf` 的 `location /api/` 設 **`client_max_body_size 501m`**（#305 / PR `a203d3d`，2026-09-11）。
+
+> 🔴 **本節原本寫 `100m` 並斷言「這是實際生效的上限，瓶頸在這裡」——數字與結論都是錯的**（已於 #360 更正）。數字停在 #305 之前；結論則從未經過實機查證。2026-09-23 實測：對 `https://bms.tbsf.tw/edms/` 送 4 MB body，proxy 鏈先回 `100 Continue`（代表已比對 `Content-Length` 並放行）、最終由 app 回 405，**全線通過**。瓶頸不在 EDMS nginx。
+>
+> ⚠️ 這句話真正的危害不是數字錯，是「**瓶頸在這裡**」會讓讀者停止往下查——#360 的四個假設全繞著 body size 打轉，而真因是**部署映像缺 ffmpeg**，照那個方向查到底也找不到。
+
+⚠️ **`client_max_body_size` 只寫在 `location /api/` 內**，`location /` 與 server 層都沒設，故非 `/api/` 的請求落在 nginx 預設的 **1m**。目前無影響（前端只對 `/api/` 上傳），但日後若新增其他上傳路徑，別假設 501m 是全站生效。
 
 須依實際需求調整（DM 受控文件、ET 教材含影音），並與 app 端自身的上限一致，否則超量請求會由 nginx 自產 HTML 413 而非結構化錯誤碼。
+
+### 系統層依賴：ffmpeg
+
+`edms-backend` 映像**必須含 ffmpeg**（`backend/Dockerfile`）。ET 教材影片上傳時以 `ffprobe` 解析長度，`ET_MATERIAL_VIDEO.DURATION_SEC` 為 NOT NULL 且**取不到不得存檔**，故少了它**所有影片一律上傳失敗**（422 `ET_MATERIAL_004`）。
+
+由 `cd.yml` 的「驗證映像內含 ffprobe」每次部署實測。**不要只靠本文件或 README 的文字要求**——#360 正是「README 寫了、Dockerfile 沒做、而沒有任何檢查會發現」。
 
 ---
 

@@ -1,5 +1,26 @@
 FROM python:3.12-slim
 
+# ffmpeg：本專案**唯一的系統層依賴**（其餘 11 個皆為純 Python 套件）。
+# ET 教材影片上傳時以其中的 `ffprobe` 解析長度，而 `ET_MATERIAL_VIDEO.DURATION_SEC`
+# 是 ET05 觀看覆蓋率的分母、data-model 訂為 NOT NULL，故**取不到不得存檔**。
+#
+# 🔴 少了它，**所有影片一律上傳失敗**（422 `ET_MATERIAL_004`「無法解析影片長度」），
+#    與檔案大小無關。#360 就是這樣壞的：README 第 80、214 行都寫明「映像檔須加裝
+#    ffmpeg」，但本 Dockerfile 從 #254 起就沒裝，而**沒有任何東西會因此變紅**——
+#    CI runner 自己裝了（`ci.yml` 的「確保 ffmpeg 可用」），所以測試全綠；本機開發
+#    照 README 裝了，所以開發時正常。只有部署環境壞，且症狀是一則看似在講格式的
+#    錯誤訊息（「請改用其他格式」），會把人導向去換影片檔而不是查環境。
+#
+# 放在最前面是為了 layer cache：它幾乎不變，擺在 COPY 程式碼之後會讓每次改碼都重裝。
+# `--no-install-recommends` 省掉一批用不到的編解碼週邊；`rm -rf` 不留 apt 索引。
+# 本行需要 build 時有網路——院內封閉網路的約束管的是**執行期**（見下方 UV_NO_SYNC），
+# build 一律在 CI 進行，不受該約束。
+#
+# ⚠️ 移除或改動本行前，先確認 `cd.yml` 的「驗證映像內含 ffprobe」仍會擋下。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # 安裝 uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
