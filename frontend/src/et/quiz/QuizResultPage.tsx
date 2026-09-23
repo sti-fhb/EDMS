@@ -161,14 +161,21 @@ export function EtQuizResultPage() {
         <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
           {/*
             **只留這一顆**。重考的入口只有一個：學習頁的測驗面板——從這裡直接開新的
-            attempt 會少掉作答注意事項，而且誤觸就吃掉一次次數。學習頁會依 `LAST_ITEM_ID`
-            自動落回該測驗項目，所以回去就看得到「開始作答」；要去別的課程，那頁的返回
-            路徑本來就通到我的課程，不必在這裡再開一條。
+            attempt 會少掉作答注意事項，而且誤觸就吃掉一次次數。要去別的課程，那頁的
+            返回路徑本來就通到我的課程，不必在這裡再開一條。
+
+            🔴 `?quiz=` 不可省（#416）。本註解原本寫「學習頁會依 `LAST_ITEM_ID` 自動落回
+            該測驗項目，所以回去就看得到開始作答」——**那個假設不成立**：學習頁的
+            `last_item_id` 那一段外面包了 `openable` 過濾，指到的項目一旦鎖定就被靜默
+            丟棄、掉到第一章第一項。於是同一顆按鈕兩次會落在不同地方。而且
+            `last_item_id` 只是「上次檢視的項目」，本來就不保證等於他剛考完的那個測驗。
+
+            兩種文案（重考 / 返回）用同一個落點：學員看完成績要回去的地方就是那個測驗。
           */}
           <Button
             variant="contained"
             startIcon={canRetry ? <ReplayIcon /> : undefined}
-            onClick={() => navigate(`/et/courses/${result.course_id}/learn`)}
+            onClick={() => navigate(`/et/courses/${result.course_id}/learn?quiz=${result.quiz_id}`)}
           >
             {canRetry ? "回課程重新作答" : "返回課程"}
           </Button>

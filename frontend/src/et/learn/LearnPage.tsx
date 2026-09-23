@@ -8,8 +8,8 @@ import IconButton from "@mui/material/IconButton"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { ChapterNav } from "./ChapterNav"
 import { ContentPane } from "./ContentPane"
@@ -42,6 +42,7 @@ export function EtLearnPage() {
   const { courseId: courseIdParam } = useParams<{ courseId: string }>()
   const courseId = Number(courseIdParam)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const { message } = useNotification()
   const [activeItemId, setActiveItemId] = useState<number | null>(null)
@@ -67,12 +68,32 @@ export function EtLearnPage() {
   // 一個要同步的來源，而 query 重抓時那份會過期。
   //
   // ⚠️ **退回的候選都要濾掉鎖定項目**：教師事後調整章節順序後，`last_item_id` 可能指向
-  // 一個現在已鎖定的項目。不濾的話頁面會自動開啟它，並對它送出 `markViewed`——後端會
-  // 回 404（守門 4），但那是一個學員沒做錯任何事卻失敗的請求。
+  // 一個現在已鎖定的項目，而**鎖定項目的內容不該被顯示出來**。
+  //
+  // 🔴 這行註解原本寫的理由是「不濾的話會對它送出 `markViewed`、後端回 404」——**那個
+  // 理由已經被下方 `activeItemIdForEffect` 的 `!active.locked` 涵蓋了**（#416 查證）。
+  // 本過濾實際承重的是上一段：防止未解鎖內容被渲染。兩者差別在要不要保留它——是要。
   const allItems = data?.chapters.flatMap((c) => c.items) ?? []
   const openable = allItems.filter((i) => !i.locked)
+
+  // #416：測驗結果頁以 `?quiz=` 指定落點，**優先於所有推導**。
+  //
+  // 原本結果頁只導 `/learn`，落點交給下方三段 fallback。而 `last_item_id` 那段外面包了
+  // `openable`，指到的項目一旦鎖定就被靜默丟棄、掉到 `openable[0]`＝第一章第一項——
+  // 同一顆「回課程重新作答」兩次會落在不同地方。即使沒掉到第三段，`last_item_id` 也只是
+  // 「上次檢視的項目」，本來就不保證等於他剛考完的那個測驗。
+  //
+  // 用 `quiz_id` 而非 `item_id` 對應：`AttemptResult` 本來就帶 `quiz_id`，而每個項目也
+  // 都有 `quiz_id`——後端不必多存一份 item 快照。⛔ 不在閱卷路徑上現查 item：
+  // `attempt/service.py` 已說明那條反查在章節被刪時會 raise，而它位在閱卷 flush 之後，
+  // 一 raise 就把剛寫入的成績一起回滾掉。
+  const requestedQuizId = Number(searchParams.get("quiz")) || null
+  const requested = requestedQuizId === null ? null : (allItems.find((i) => i.quiz_id === requestedQuizId) ?? null)
+
   const active =
     allItems.find((i) => i.item_id === activeItemId) ??
+    // 鎖定時**不**採用——改由下方的提示告知原因，而不是把未解鎖項目顯示出來。
+    (requested !== null && !requested.locked ? requested : null) ??
     openable.find((i) => i.item_id === data?.last_item_id) ??
     openable[0] ??
     null
@@ -128,6 +149,32 @@ export function EtLearnPage() {
     },
     [message, blockingItemType],
   )
+
+  /**
+   * #416 AC 4：`?quiz=` 指定的項目**當下鎖定**時，明確說明而不是靜默落到別處。
+   *
+   * ⚠️ 這條路今天很難走到：學員能開始作答代表該項目當時未鎖定，而
+   * `progress/rules.locked_item_ids` 的「已完成永不鎖定」使**考不及格不會讓它自己變鎖定**。
+   * 成立情境是這中間教師調整了章節順序，或要求已通過學員重測（#361）而使後續項目回鎖。
+   *
+   * ⛔ 刻意**沿用側欄點選的同一組訊息**，而不是把鎖定項目顯示出來——後者等於做出一個
+   * 通用的「顯示未解鎖項目」能力，而未解鎖**教材**的內容端點後端並不擋
+   * （見 `learning/service.py` 算 `locked` 那段的註解），那會直接開一個洞。
+   *
+   * `warnedQuizIdRef` 讓同一個目標只提示一次：本元件會因 query 重抓而多次 render，
+   * 少了它每次都會再彈一個 snackbar。
+   */
+  const requestedLockedQuizId = requested !== null && requested.locked ? requested.quiz_id : null
+  const warnedQuizIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (requestedLockedQuizId === null || warnedQuizIdRef.current === requestedLockedQuizId) return
+    warnedQuizIdRef.current = requestedLockedQuizId
+    message.warning(
+      blockingItemType === "QUIZ"
+        ? "請通過本章節之測驗後解鎖" // ET-MSG-ET05-002
+        : "請先完成本章節之影片學習", // ET-MSG-ET05-001
+    )
+  }, [requestedLockedQuizId, blockingItemType, message])
 
   if (!courseIdValid) {
     return (

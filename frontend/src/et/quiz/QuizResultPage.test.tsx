@@ -202,14 +202,30 @@ describe("ET06 結果頁", () => {
     expect(screen.getByText(/作答時間到，已自動提交/)).toBeInTheDocument()
   })
 
-  it("重考導回該課程的學習頁——重考入口只有測驗面板一個", () => {
-    // 從結果頁直接開新 attempt 會跳過作答注意事項，且誤觸就吃掉一次次數
+  it("重考導回該課程的學習頁，並指定落在本測驗（#416）", () => {
+    // 從結果頁直接開新 attempt 會跳過作答注意事項，且誤觸就吃掉一次次數，故重考入口
+    // 只有測驗面板一個。
+    //
+    // 🔴 但只導 `/learn` 不夠：落點會交給學習頁的三段 fallback 推導，而其中的
+    // `last_item_id` 外面包了 `openable` 過濾——指到的項目一旦鎖定就被靜默丟棄、
+    // 掉到第一章第一項。**同一顆按鈕兩次會落在不同地方。** 故帶上 `?quiz=`。
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
 
     screen.getByRole("button", { name: /回課程重新作答/ }).click()
 
-    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn")
+    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn?quiz=700")
+  })
+
+  it("未及格且無剩餘次數時的「返回課程」落點相同（AC 3）", () => {
+    // AC 3 要求把這一顆的落點也明確定義。兩顆是同一個按鈕、只換文案，落點沒有理由不同
+    // ——學員看完成績要回去的地方就是那個測驗。
+    state = { ...RESULT, is_pass: false, remaining_attempts: 0 }
+    renderWithProviders(<EtQuizResultPage />)
+
+    screen.getByRole("button", { name: "返回課程" }).click()
+
+    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn?quiz=700")
   })
 
   it("直接以網址進入（重新整理 / 複習）時改由 API 取回成績", async () => {
