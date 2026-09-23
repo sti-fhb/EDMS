@@ -26,7 +26,7 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
    `/api/dp/users`，掛 `require_any_module_admin()`，教師拿不到）
 2. **角色受控**：`ET_TEACHER` 由管理者指派，非自助取得
 
-⚠️ 另需知道的事實：`GET /approvals` 是 ET **第一支讓非管理者教師讀到無關課程學員資料**
+⚠️ 另需知道的事實：`POST /approvals/search` 是 ET **第一支讓非管理者教師讀到無關課程學員資料**
 的端點（既有的 `tracking` / `reports` 全部走 owner 過濾）。SA 裁示 C 已接受這個暴露面，
 但它是新的，不是沿用。
 """
@@ -41,7 +41,14 @@ from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse, PaginatedResult
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.approval.query_service import EtApprovalQueryService
-from app.et.approval.schemas import ApprovalQueryRow, ApproveReq, ApproveResult, MyApprovalRow, RevokeReq
+from app.et.approval.schemas import (
+    ApprovalQueryRow,
+    ApprovalSearchReq,
+    ApproveReq,
+    ApproveResult,
+    MyApprovalRow,
+    RevokeReq,
+)
 from app.et.approval.service import EtApprovalService
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
@@ -147,20 +154,31 @@ async def revoke(
 # ── ET10 核可查詢（US17 / #385）──────────────────────────────────────────────
 
 
-@router.get(
-    "/approvals",
+@router.post(
+    "/approvals/search",
     response_model=PagedResponse[ApprovalQueryRow],
     dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
 )
 async def search_approvals(
-    user_name: Annotated[str, Query(min_length=1, max_length=50)],
-    result: Annotated[str | None, Query(pattern="^(PASS|FAIL)$")] = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    req: ApprovalSearchReq,
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> PaginatedResult[ApprovalQueryRow]:
     """依學員姓名查核可紀錄（`FR-ET-US17-01`）。
+
+    ## 🔴 為何是 POST 而且查詢條件走 body（#391）
+
+    `user_name` 必定是一個人的姓名，而 **URL 會被 nginx `error_log` 與 Cloudflare 的
+    請求日誌記下來**（前者格式不可自訂、後者不在本系統掌控範圍）。改走 body 之後，
+    那兩處只看得到 `/api/et/approvals/search`。完整背景見 `ApprovalSearchReq` 的 docstring。
+
+    ⚠️ **這是一個不寫入的 POST。** 專案規則要求「寫入型 API 一律注入 `OperatorInfo`
+    填寫 `CREATED_*`」，本端點**刻意不注入**——它不寫任何資料，用 POST 的唯一理由是
+    上述的日誌問題，語意仍是讀取。同理不寫稽核日誌。
+
+    ⛔ 路徑用 `/approvals/search` 而非 `POST /approvals`：後者在語意上是「建立一筆
+    核可」，而建立核可已經是 `POST /courses/{course_id}/approvals`。不讓兩個 POST
+    在同一個名詞上表示相反的事。
 
     **可見範圍依 SA Q1 裁示 C 分流**（見 `query_rules.visible_clause`）：教師看得到
     全部課程的「通過且未撤銷」，但「不通過」與「已撤銷」僅限自己 owner 的課程；
@@ -180,10 +198,10 @@ async def search_approvals(
         db,
         actor_id=ctx.user_id,
         roles=ctx.roles,
-        user_name=user_name,
-        result=result,
-        page=page,
-        limit=limit,
+        user_name=req.user_name,
+        result=req.result,
+        page=req.page,
+        limit=req.limit,
     )
 
 

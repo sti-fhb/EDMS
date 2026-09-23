@@ -80,7 +80,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
 
   it("查無資料顯示空狀態提示（ET-MSG-ET10-001）", async () => {
     asRole("teacher")
-    server.use(http.get("/api/et/approvals", () => HttpResponse.json(EMPTY)))
+    server.use(http.post("/api/et/approvals/search", () => HttpResponse.json(EMPTY)))
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
@@ -90,11 +90,41 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     expect(await screen.findByText("查無符合條件的核可紀錄")).toBeInTheDocument()
   })
 
+  it("學員姓名走 request body，網址裡沒有（#391）", async () => {
+    // 🔴 本端點是 POST 的唯一理由：`user_name` 必定是一個人的姓名，而網址會被
+    // nginx `error_log` 與 Cloudflare 的請求日誌記下來（前者格式不可自訂、後者不在
+    // 本系統掌控範圍），body 不會。
+    //
+    // ⛔ 若有人為了「比較 RESTful」把 service 改回 `http.get(url, { params })`，
+    // 姓名就回到網址裡，而**畫面行為完全正常**——沒有任何東西看起來壞掉。
+    // 本條與後端的 `test_姓名走query_string不被接受` 是同一道紅線的兩端。
+    asRole("teacher")
+    const seen: { url?: string; body?: { user_name?: string } } = {}
+    server.use(
+      http.post("/api/et/approvals/search", async ({ request }) => {
+        seen.url = request.url
+        seen.body = (await request.json()) as NonNullable<typeof seen.body>
+        return HttpResponse.json(EMPTY)
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名"), "林佳蓉")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    await waitFor(() => expect(seen.body?.user_name).toBe("林佳蓉"))
+    expect(seen.url).not.toContain("林佳蓉")
+    expect(seen.url).not.toContain("user_name")
+    // 連編碼過的形式也不行——`encodeURIComponent` 後是看不出來的百分號序列
+    expect(seen.url).not.toContain(encodeURIComponent("林佳蓉"))
+  })
+
   it("姓名未填時不送出請求（SA Q2 裁示 A）", async () => {
     asRole("teacher")
     let called = false
     server.use(
-      http.get("/api/et/approvals", () => {
+      http.post("/api/et/approvals/search", () => {
         called = true
         return HttpResponse.json(EMPTY)
       }),
@@ -132,7 +162,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     // ——那是方向最危險的假陰性。最容易撞到的是 429（查詢與核可寫入共用同一個分桶）。
     asRole("teacher")
     server.use(
-      http.get("/api/et/approvals", () =>
+      http.post("/api/et/approvals/search", () =>
         HttpResponse.json({ error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試" }, { status: 429 }),
       ),
     )

@@ -1053,7 +1053,8 @@ export const handlers = [
   ),
   // ── ET10 核可查詢（US17 / #385）────────────────────────────────────────
   // 教師 / 管理者視角：四筆涵蓋通過、不通過、已撤銷三種狀態。
-  http.get("/api/et/approvals", () =>
+  // ⚠️ **POST + body**（#391）——姓名不進 query string，見 `approvalsService.search`。
+  http.post("/api/et/approvals/search", () =>
     HttpResponse.json({
       data: [
         {

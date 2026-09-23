@@ -158,6 +158,44 @@ class ApprovalQueryRow(BaseModel):
     revoked_at: datetime | None
 
 
+class ApprovalSearchReq(BaseModel):
+    """ET10 核可查詢的查詢條件（`FR-ET-US17-01`）。
+
+    ## 🔴 為何走 request body 而不是 query string（#391）
+
+    `user_name` **必定是一個人的姓名**——這個參數沒有別的用法。而 URL 會被沿路的東西
+    記下來、body 不會：
+
+    | 記錄點 | 狀態 |
+    |---|---|
+    | EDMS 自家 access log | ✅ 已處理（`$request_uri` 去尾 + uvicorn `--no-access-log`）|
+    | **EDMS nginx `error_log`** | ⚠️ 記錄完整 request，見下 |
+    | **Cloudflare 請求日誌** | ⚠️ 記錄完整 URI，不在本系統掌控範圍 |
+
+    nginx 的 error log 格式**不可自訂**，壓抑之需把層級提到 `crit`，代價是失去後端
+    中斷的可觀測性，故不採（`nginx/log-format.conf` 的既有註記已寫明這兩條殘留）。
+
+    故本查詢用 `POST /approvals/search`。⛔ **不要為了「相容」或「比較 RESTful」補一個
+    `Query(...)` 的退路**——那等於把姓名放回網址，而且功能會正常運作、不會有任何東西
+    變紅（`test_姓名走query_string不被接受` 是那道紅線）。
+
+    ⚠️ 本端點是**不寫入的 POST**：用 POST 的唯一理由是上述的日誌問題，語意仍是讀取，
+    故**刻意不注入** `get_operator`、不寫稽核日誌。
+
+    > 📌 同類問題在其他四支端點仍未處理（`/dp/users` 與 `/dp/users/invites` 的 `q`
+    > ——值可能是 Email、`/dp/audit` 的 `operator`、`/dm/library` 的 `author`）。
+    > 見 #391 的收尾摘要。
+    """
+
+    #: 學員姓名（部分比對）。必填——SA Q2 裁示 A：留白查全部沒有對應需求，且會傾印員工名冊。
+    #: `min_length=1` 擋空字串，全空白由 service 的 `strip()` 擋下回 `ET_APPROVAL_006`。
+    user_name: Annotated[str, Field(min_length=1, max_length=50)]
+    #: `PASS` / `FAIL`；`None` 為不限。
+    result: Annotated[Literal["PASS", "FAIL"] | None, Field(default=None)] = None
+    page: Annotated[int, Field(default=1, ge=1)] = 1
+    limit: Annotated[int, Field(default=20, ge=1, le=100)] = 20
+
+
 class MyApprovalRow(BaseModel):
     """學員自查視角的一列（`FR-ET-US17-03`）。
 
