@@ -142,6 +142,42 @@ def apply_migrations():
         _drop_and_recreate_schema(name)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def app_imported():
+    """先觸發 `main` 的**模組層**註冊，使任何改寫全域 gate 的 fixture 都晚於它（#367）。
+
+    ## 真正的機制是 import，不是 lifespan
+
+    `main.py` 在**模組層**（`:173` `register_dm_module()` / `:179` `register_et_module()`）
+    註冊真實 checker——不在 `lifespan` 裡。而測試用的 `ASGITransport` **根本不跑
+    lifespan**（見 `client` fixture 的 docstring），所以 lifespan 在整個測試期從未執行。
+
+    壞掉的順序是這樣的：
+
+    1. `backoffice_admin` 註冊 always-true —— 此時 `main` **還不在 `sys.modules`**
+    2. 隨後 `client` fixture 執行 `import main` —— 模組層第一次執行，
+       `register_et_module()` 把 always-true **覆蓋掉**
+    3. 該請求 403
+
+    第二條測試起 `main` 已在 `sys.modules`，import 成為 no-op，於是 always-true 活得下來
+    ——這就是「單獨跑紅、整批跑只有第一條紅、完整 CI 全綠」的成因。
+
+    ## 為何用 session-scoped autouse
+
+    autouse 且 scope 較高者必定早於 function-scoped fixture 建立，故此處保證
+    「模組層註冊」先於任何 fixture 的 gate 改寫。
+
+    與 `apply_migrations`（同為 session-scoped autouse）**無順序要求**：`import main` 不連
+    資料庫——`app/core/db.py` 的 `create_async_engine()` 只建 engine 物件，SQLAlchemy 到
+    首次使用才連線。所以本 fixture 不依賴 migration 是否已跑。
+
+    ⚠️ `test_dp_backoffice_gate.py` 那些 `module_admin_gate.register(...)` **不受影響**，
+    因為它們寫在**測試函式本體**裡——本體必定晚於所有 fixture，也就晚於 `import main`。
+    但那是**位置造成的巧合**而非設計；本 fixture 讓順序改由相依宣告保證。
+    """
+    import main  # noqa: F401 —— 只為觸發模組層註冊，不使用其符號
+
+
 @pytest.fixture(scope="session")
 async def test_engine(apply_migrations):
     """Session 級別測試 engine（NullPool，不維持連線池）。"""
@@ -201,8 +237,13 @@ async def client(db):
 
 
 @pytest.fixture
-def backoffice_admin():
+def backoffice_admin(app_imported):
     """讓本測試的操作者通過 DP 後台授權閘（#250）。
+
+    ⚠️ `app_imported` 是**必要相依**，不是裝飾（#367）：少了它，本 fixture 註冊的
+    always-true 會在稍後 `client` fixture `import main` 時被模組層的真實 checker 覆蓋，
+    使該 session 的第一條後台測試必定 403。雖然 `app_imported` 是 autouse、拿掉這個
+    參數目前仍會動，但**明寫出來才看得出這裡有順序要求**。
 
     DP 後台六個 router 自 #250 起掛 `require_any_module_admin()`（需 ET 或 DM 任一模組
     管理者）。驗「後台功能本身的業務邏輯」而非授權的測試，以本 fixture 註冊 always-true
