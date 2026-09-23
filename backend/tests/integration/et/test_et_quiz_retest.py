@@ -361,24 +361,33 @@ class TestRequireRetestOnQuizChange:
         assert (resets, done) == (1, False), "新增題目是題目內容變更，應能觸發重測"
 
     async def test_刪除題目也能要求重測且不刪作答明細(self, client, db):
+        """⚠️ 本測驗**必須先有兩題**才刪得掉一題（#410）。
+
+        `_course_with_quiz` 建的是零題測驗，原本只加一題就刪，而 #410 起已發布課程的
+        測驗不得被刪到 0 題（409 `ET_QUESTION_005`）。加兩題刪一題保住本條真正要驗的
+        東西——「刪題也算題目內容變更、應能觸發重測」與「不得連帶刪 attempt」——
+        而不是去驗那道新守門（那由 `test_et_quiz.py` 的四條負責）。
+        """
         teacher = await _user(db, "ZTT007")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
         stu = await _passed_student(db, uid="ZTS008", course_id=cid, item_id=item_id, quiz_id=qid)
-        add = await client.post(
-            f"/api/et/quizzes/{qid}/questions",
-            json={
-                "question_type": "SINGLE",
-                "stem": "待刪除的題目",
-                "points": 10,
-                "options": [
-                    {"option_text": "甲", "is_correct": True},
-                    {"option_text": "乙", "is_correct": False},
-                ],
-            },
-            headers=_bearer(teacher),
-        )
-        assert add.status_code == 201, add.text
-        question_id = add.json()["question_id"]
+        question_id = None
+        for stem in ("留下的題目", "待刪除的題目"):
+            add = await client.post(
+                f"/api/et/quizzes/{qid}/questions",
+                json={
+                    "question_type": "SINGLE",
+                    "stem": stem,
+                    "points": 10,
+                    "options": [
+                        {"option_text": "甲", "is_correct": True},
+                        {"option_text": "乙", "is_correct": False},
+                    ],
+                },
+                headers=_bearer(teacher),
+            )
+            assert add.status_code == 201, add.text
+            question_id = add.json()["question_id"]
         await db.commit()
 
         r = await client.delete(f"/api/et/questions/{question_id}?require_retest=true", headers=_bearer(teacher))

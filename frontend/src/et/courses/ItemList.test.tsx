@@ -7,8 +7,26 @@ import type { ItemRow } from "./itemSchemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
 const items: ItemRow[] = [
-  { item_id: 1, item_type: "MATERIAL", title: "採血示範影片", sort_order: 1, material_id: 10, quiz_id: null, version: 0 },
-  { item_id: 2, item_type: "QUIZ", title: "第一章小考", sort_order: 2, material_id: null, quiz_id: 20, version: 0 },
+  {
+    item_id: 1,
+    item_type: "MATERIAL",
+    title: "採血示範影片",
+    sort_order: 1,
+    material_id: 10,
+    quiz_id: null,
+    version: 0,
+    question_count: null,
+  },
+  {
+    item_id: 2,
+    item_type: "QUIZ",
+    title: "第一章小考",
+    sort_order: 2,
+    material_id: null,
+    quiz_id: 20,
+    version: 0,
+    question_count: 5,
+  },
 ]
 
 function renderList(overrides: Partial<Parameters<typeof ItemList>[0]> = {}) {
@@ -29,6 +47,41 @@ describe("章節項目清單", () => {
     expect(screen.getByText("第一章小考")).toBeInTheDocument()
     expect(screen.getByText("教材")).toBeInTheDocument()
     expect(screen.getByText("測驗")).toBeInTheDocument()
+  })
+
+  it("零題的測驗標示警示，教材與有題測驗不標（#410 AC 3）", () => {
+    // 🔴 教師端對這件事**完全沒有訊號**：發布檢核只在發布那一刻跑，之後把題目刪光
+    // 不擋也不提示。學員則開不起來（0 題測驗回 404），該項目永遠拿不到完成，
+    // 整門課因此永遠無法完課——而教師不會知道自己做了這件事。
+    //
+    // ⚠️ `0` 與 `null` 不可合併：教材的 `question_count` 是 `null`（不是測驗），
+    // 合併的話每個教材都會被標成異常。
+    renderList({
+      items: [
+        { item_id: 1, item_type: "MATERIAL", title: "講義", sort_order: 1, material_id: 10, quiz_id: null, version: 0, question_count: null },
+        { item_id: 2, item_type: "QUIZ", title: "零題小考", sort_order: 2, material_id: null, quiz_id: 20, version: 0, question_count: 0 },
+        { item_id: 3, item_type: "QUIZ", title: "有題小考", sort_order: 3, material_id: null, quiz_id: 21, version: 0, question_count: 3 },
+      ],
+    })
+
+    expect(screen.getAllByText("尚無題目")).toHaveLength(1)
+    // 反向斷言：整列只有一個警示，教材與有題測驗都不能被標到
+    expect(screen.getByLabelText("零題小考：尚無題目，學員無法作答")).toBeInTheDocument()
+  })
+
+  it("不擋操作——零題測驗照樣點得開、刪得掉（#410 AC 3）", async () => {
+    // AC 3 明訂「不擋操作」：教師正要補題目，擋住他等於逼他無法修復。
+    const user = userEvent.setup()
+    const zero: ItemRow = {
+      item_id: 2, item_type: "QUIZ", title: "零題小考", sort_order: 1,
+      material_id: null, quiz_id: 20, version: 0, question_count: 0,
+    }
+    const { onOpen } = renderList({ items: [zero] })
+
+    await user.click(screen.getByText("零題小考"))
+
+    expect(onOpen).toHaveBeenCalledWith(zero)
+    expect(screen.getByLabelText("刪除項目 零題小考")).toBeEnabled()
   })
 
   it("點項目名稱時開啟對應視窗", async () => {

@@ -15,7 +15,14 @@ from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
-from app.et.constants import ATTEMPT_IN_PROGRESS, ITEM_QUIZ, QUESTION_MULTIPLE, QUESTION_SINGLE, ROLE_TEACHER
+from app.et.constants import (
+    ATTEMPT_IN_PROGRESS,
+    ITEM_MATERIAL,
+    ITEM_QUIZ,
+    QUESTION_MULTIPLE,
+    QUESTION_SINGLE,
+    ROLE_TEACHER,
+)
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM
 from app.et.roles.models import EtUserRole
 
@@ -754,3 +761,33 @@ async def test_已關閉課程刪最後一題不受限(db, client):
     r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
 
     assert r.status_code == 204, r.text
+
+
+async def test_課程詳細頁帶出題數且教材為_None(db, client):
+    """#410 AC 3：教師端要看得出哪些測驗是 0 題。
+
+    🔴 **`0` 與 `None` 不可合併**：教材項目的 `QUIZ_ID` 是 NULL，題數子查詢對它同樣
+    得到 0。少一道「非測驗換成 `None`」，**每一個教材項目都會被標成 0 題異常**——
+    而那種錯 CI 會全綠（型別對、數字也對，只是意思反了）。
+
+    本條同時釘住三種狀態：教材（`None`）、零題測驗（`0`）、有題目的測驗（`1`）。
+    """
+    uid = await _user(db, "q410e")
+    created = await client.post(_COURSES, json={"course_name": "題數"}, headers=_bearer(uid))
+    cid = created.json()["course_id"]
+    ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(uid))
+    chapter_id = ch.json()["chapter_id"]
+    for item_type, title in ((ITEM_MATERIAL, "講義"), (ITEM_QUIZ, "零題小考"), (ITEM_QUIZ, "有題小考")):
+        r = await client.post(
+            f"/api/et/chapters/{chapter_id}/items",
+            json={"item_type": item_type, "title": title},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 201, r.text
+        if title == "有題小考":
+            await _add_question(client, uid, r.json()["quiz_id"])
+
+    detail = await client.get(f"{_COURSES}/{cid}", headers=_bearer(uid))
+
+    by_title = {i["title"]: i["question_count"] for i in detail.json()["chapters"][0]["items"]}
+    assert by_title == {"講義": None, "零題小考": 0, "有題小考": 1}

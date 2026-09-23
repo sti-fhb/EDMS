@@ -31,6 +31,7 @@ from app.et.constants import (
 )
 from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
+from app.et.quiz.models import EtQuestion
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
@@ -150,6 +151,23 @@ async def _learn(client, user_id: str, course_id: int) -> dict:
     return r.json()
 
 
+async def _empty_the_quiz(db, question_id: int) -> None:
+    """把測驗清成 0 題——**直接改資料庫，不走 API**（#410 起 API 走不通了）。
+
+    🔴 原本這兩條測試是走真實路徑的（發布後教師刪掉唯一一題），而 #410 已把那條路封死：
+    已發布課程的測驗不得被刪到 0 題（409 `ET_QUESTION_005`）。
+
+    ⚠️ **那不代表這兩條測試過時了，恰恰相反。** `build_item_state` 的 0 題例外保護的
+    正是**守門上線前就已經是 0 題的既有資料**——那種資料按定義**不會**經過新守門，
+    所以測試也不該經過它。改走 DB 直寫，測的才是真正要保護的那個情境。
+
+    ⛔ 不要因為「API 走不通了」就刪掉這兩條。上游守門只擋新資料，下游例外仍是既有
+    資料的唯一保護；兩層方向相反、互補（見 `progress/rules.build_item_state` docstring）。
+    """
+    await db.execute(update(EtQuestion).where(EtQuestion.question_id == question_id).values(deleted=1))
+    await db.flush()
+
+
 async def _sidebar(client, student: str, course_id: int) -> dict[int, dict]:
     body = await _learn(client, student, course_id)
     return {i["item_id"]: i for c in body["chapters"] for i in c["items"]}
@@ -262,22 +280,21 @@ class TestZeroQuestionQuizDoesNotGate:
     """0 題的測驗不當閘門——重置救不了的那種死路。"""
 
     async def test_題目被刪光的測驗不擋住後續(self, client, db) -> None:
-        """走真實路徑：發布後教師把唯一一題刪掉（`delete_question` 不擋最後一題）。
+        """既有的 0 題測驗（#410 守門上線前就存在的資料）不得擋住後續項目。
 
         此時學員**連考都考不了**（`attempt/service` 對 0 題測驗回 404），ET03 也不會
         給重置鈕（`can_reset_retry` 要求 `used > max_retry`，而他一次都用不掉）。
         擋住它等於整門課後半段永久鎖死且無從補救。
+
+        ⚠️ 2026-09-23（#410）起本測試改以 DB 直寫建構該狀態——理由見 `_empty_the_quiz`。
         """
         teacher = await _user(db, "t_gate05", ROLE_TEACHER)
         student = await _user(db, "s_gate05")
         course = await _course(client, db, teacher, code="33000005")
         await _enroll(db, student, course["course_id"])
 
-        deleted = await client.delete(
-            f"/api/et/questions/{course['first_question']['question_id']}", headers=_bearer(teacher)
-        )
+        await _empty_the_quiz(db, course["first_question"]["question_id"])
 
-        assert deleted.status_code == 204, deleted.text
         items = await _sidebar(client, student, course["course_id"])
         assert items[course["second_item_id"]]["locked"] is False, "0 題測驗不得擋住同章後續"
         # 後端守門必須同意——這正是側欄與守門分岔最可能出現的地方
@@ -294,7 +311,7 @@ class TestZeroQuestionQuizDoesNotGate:
         student = await _user(db, "s_gate06")
         course = await _course(client, db, teacher, code="33000006")
         await _enroll(db, student, course["course_id"])
-        await client.delete(f"/api/et/questions/{course['first_question']['question_id']}", headers=_bearer(teacher))
+        await _empty_the_quiz(db, course["first_question"]["question_id"])
 
         items = await _sidebar(client, student, course["course_id"])
 

@@ -24,7 +24,7 @@ from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.material.repository import EtMaterialRepository
 from app.et.progress.models import EtEnrollment, EtProgress
-from app.et.quiz.models import EtQuiz
+from app.et.quiz.models import EtQuestion, EtQuiz
 from app.et.quiz.repository import EtQuizRepository
 
 
@@ -626,23 +626,35 @@ class EtItemRepository:
     async def get(self, db: AsyncSession, item_id: int) -> EtItem | None:
         return await db.scalar(select(EtItem).where(EtItem.item_id == item_id, EtItem.deleted == 0))
 
-    async def list_rows_by_chapters(self, db: AsyncSession, chapter_ids: list[int]) -> list[tuple[EtItem, str]]:
-        """一次取多個章節之項目與顯示名稱，回 `(item, title)`。
+    async def list_rows_by_chapters(self, db: AsyncSession, chapter_ids: list[int]) -> list[tuple[EtItem, str, int]]:
+        """一次取多個章節之項目、顯示名稱與題數，回 `(item, title, question_count)`。
 
         以 outer join 取 `MATERIAL_NAME` / `QUIZ_NAME`——項目本身不存名稱（避免教材
         改名後不同步）。**批次查詢**：課程詳細頁一次要列出所有章節的項目，逐章節查
         會是 N+1。
+
+        第三欄為該測驗目前的題數（#410 AC 3：教師端要看得出 0 題的測驗）。以相關子查詢
+        取得而非再開一次批次查詢——後者要多一趟往返，且得自行處理「測驗存在但零題」與
+        「非測驗項目」在 dict 中無法區分的問題。非測驗項目（`quiz_id` 為 NULL）恆為 0，
+        由 service 換成 `None`。
         """
         if not chapter_ids:
             return []
+        question_count = (
+            select(func.count())
+            .select_from(EtQuestion)
+            .where(EtQuestion.quiz_id == EtItem.quiz_id, EtQuestion.deleted == 0)
+            .correlate(EtItem)
+            .scalar_subquery()
+        )
         rows = await db.execute(
-            select(EtItem, func.coalesce(EtMaterial.material_name, EtQuiz.quiz_name, ""))
+            select(EtItem, func.coalesce(EtMaterial.material_name, EtQuiz.quiz_name, ""), question_count)
             .outerjoin(EtMaterial, (EtItem.material_id == EtMaterial.material_id) & (EtMaterial.deleted == 0))
             .outerjoin(EtQuiz, (EtItem.quiz_id == EtQuiz.quiz_id) & (EtQuiz.deleted == 0))
             .where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0)
             .order_by(EtItem.chapter_id, EtItem.sort_order, EtItem.item_id)
         )
-        return [(row[0], row[1]) for row in rows.all()]
+        return [(row[0], row[1], row[2]) for row in rows.all()]
 
     async def append(
         self,

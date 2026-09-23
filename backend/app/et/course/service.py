@@ -519,6 +519,9 @@ class EtCourseService:
             material_id=item.material_id,
             quiz_id=item.quiz_id,
             version=item.version,
+            # 剛建立的測驗必然是 0 題（`create_shell`）——與列表路徑一致地回報，
+            # 否則新增測驗後畫面要等重新整理才看得到「尚無題目」的警示。
+            question_count=0 if req.item_type != ITEM_MATERIAL else None,
         )
 
     async def reorder_items(
@@ -587,7 +590,7 @@ class EtCourseService:
     async def _items_by_chapter(self, db: AsyncSession, chapter_ids: list[int]) -> dict[int, list[ItemRow]]:
         """批次取項目並依章節分組（課程詳細頁一次列出所有章節，逐章查會是 N+1）。"""
         grouped: dict[int, list[ItemRow]] = {}
-        for item, title in await self._items.list_rows_by_chapters(db, chapter_ids):
+        for item, title, question_count in await self._items.list_rows_by_chapters(db, chapter_ids):
             grouped.setdefault(item.chapter_id, []).append(
                 ItemRow(
                     item_id=item.item_id,
@@ -597,6 +600,9 @@ class EtCourseService:
                     material_id=item.material_id,
                     quiz_id=item.quiz_id,
                     version=item.version,
+                    # 非測驗項目的子查詢恆為 0（`quiz_id` 為 NULL、對不到任何題目），
+                    # 在此換成 `None`——0 專指「是測驗但沒題目」那個異常狀態。
+                    question_count=question_count if item.quiz_id is not None else None,
                 )
             )
         return grouped

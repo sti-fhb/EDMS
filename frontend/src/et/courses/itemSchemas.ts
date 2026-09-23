@@ -43,6 +43,14 @@ export interface ItemRow {
   material_id: number | null
   quiz_id: number | null
   version: number
+  /**
+   * 測驗目前題數；**非測驗項目為 `null`**（#410）。
+   *
+   * ⚠️ `0` 與 `null` 意義不同：`0` 是「這是測驗、但一題都沒有」——學員開不起來
+   * （後端回 404），該項目永遠拿不到完成，整門課因此永遠無法完課。`null` 只是
+   * 「這不是測驗」。合併成 0 會讓每個教材項目都被標成異常。
+   */
+  question_count: number | null
 }
 
 // ── 教材 ────────────────────────────────────────────────────────────────────
