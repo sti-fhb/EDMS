@@ -299,6 +299,18 @@ export function EtCourseEditorPage() {
   const startedInPast = originalStart !== null && dayjs(originalStart).isBefore(dayjs())
   const startFloor = startedInPast ? dayjs(originalStart) : dayjs()
 
+  /**
+   * 再開課模式下**一進入就是紅框**（欄位空著即為未完成），不等按下「確認再開課」。
+   *
+   * 裁示原文是「清空課程開始和結束的時間，並用紅色框起來提醒使用者重新設定時間」——
+   * 紅框本身就是提醒，等送出才變紅等於少了一次提示。
+   *
+   * ⚠️ 紅框歸紅框，**helperText 仍只在送出後才出現**：一進畫面就跳「請重新設定…」是對
+   * 還沒動手的人報錯，看起來像自己做錯了什麼。
+   */
+  const reopenStartEmpty = reopening && startAt === null
+  const reopenEndEmpty = reopening && endAt === null
+
   const toPayload = (): CoursePayload => ({
     course_name: form.course_name.trim(),
     description: form.description.trim() || null,
@@ -1207,7 +1219,9 @@ export function EtCourseEditorPage() {
                   size: "small",
                   fullWidth: true,
                   required: reopening,
-                  error: Boolean(reopening ? reopenErrors.start : errors.open_start_at),
+                  error: reopening
+                    ? Boolean(reopenErrors.start) || reopenStartEmpty
+                    : Boolean(errors.open_start_at),
                   helperText: reopening ? reopenErrors.start : errors.open_start_at,
                 },
                 actionBar: { actions: ["cancel", "accept"] },
@@ -1232,7 +1246,9 @@ export function EtCourseEditorPage() {
                   size: "small",
                   fullWidth: true,
                   required: reopening,
-                  error: Boolean(reopening ? reopenErrors.end : errors.open_end_at),
+                  error: reopening
+                    ? Boolean(reopenErrors.end) || reopenEndEmpty
+                    : Boolean(errors.open_end_at),
                   helperText: reopening ? reopenErrors.end : errors.open_end_at,
                 },
                 actionBar: { actions: ["cancel", "accept"] },
