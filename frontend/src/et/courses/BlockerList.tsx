@@ -17,7 +17,7 @@ interface BlockerListProps {
  *
  * ## 為何抽成共用元件
  *
- * `PublishDialog`（發布）與 `ReopenCourseDialog`（再開課）呈現的是**同一組缺漏**——
+ * `PublishDialog`（發布）與課程編輯頁的再開課模式呈現的是**同一組缺漏**——
  * 後端兩條路徑共用 `evaluate_publish`。這段渲染原本在兩處各有一份**逐字相同**的
  * 13 行 JSX，而 `blockerLabel` 的沿革已經記過同一個教訓：文案邏輯複製兩份時，
  * `CHAPTER_EMPTY` 一加就同時在兩個地方標錯。

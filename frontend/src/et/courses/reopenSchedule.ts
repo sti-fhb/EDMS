@@ -1,10 +1,12 @@
 /**
  * 再開課之新起訖時間驗證（US11 / FR-ET-US11-09 / #288）。
  *
- * 獨立成模組而非留在 `ReopenCourseDialog.tsx`：一來元件檔匯出非元件會破壞 Fast Refresh
- * （`react-refresh/only-export-components`），二來這是本視窗唯一會算錯的邏輯，而
- * `DateTimePicker` 在 jsdom 中無法以 `userEvent` 可靠地填值（本專案沒有任何測試做到
- * 過）。把規則抽成純函式即可完整覆蓋各邊界；選擇器本身的接線留給人工驗證。
+ * 獨立成模組而非留在元件檔（原為 `ReopenCourseDialog.tsx`，#428 起併入
+ * `CourseEditorPage`）：元件檔匯出非元件會破壞 Fast Refresh
+ * （`react-refresh/only-export-components`），而這是再開課唯一會算錯的邏輯。
+ *
+ * ⚠️ 起始時間規則與 `CourseEditorPage.validateForm` **相反**：本頁平時擋「起始早於
+ * 當下」，再開課刻意允許（補開一段已經開始的期間）。兩者不可互相代用。
  */
 
 import type { Dayjs } from "dayjs"
