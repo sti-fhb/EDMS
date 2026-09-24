@@ -131,7 +131,7 @@ async def _second_chapter_material(client, db, teacher: str, course_id: int) -> 
 
     item = await client.post(
         f"/api/et/chapters/{chapter_id}/items",
-        json={"item_type": ITEM_MATERIAL},
+        json={"item_type": ITEM_MATERIAL, "title": "第二章教材"},
         headers=_bearer(teacher),
     )
     assert item.status_code == 201, item.text
@@ -602,7 +602,7 @@ class TestLockedItemStillReadableWhenItShouldBe:
         # 教師在同一章插入一個新項目，並把它排到已完成項目之前。
         inserted = await client.post(
             f"/api/et/chapters/{ids['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL},
+            json={"item_type": ITEM_MATERIAL, "title": "事後插入的教材"},
             headers=_bearer(teacher),
         )
         assert inserted.status_code == 201, inserted.text
