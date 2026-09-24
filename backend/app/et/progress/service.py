@@ -292,11 +292,12 @@ class EtProgressService:
         複習已學過的項目」只花一次查詢，而不必為了得到同一個答案重算整門課的解鎖狀態。
         本方法在最高頻的 `report_intervals` 路徑上，那條捷徑正好覆蓋重看的情形。
         """
-        if item_id in await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id):
+        completed_ids = await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id)
+        if item_id in completed_ids:
             return False
-        return item_id in await self._locked_ids(db, course_id=course_id, user_id=user_id)
+        return item_id in await self._locked_ids(db, course_id=course_id, completed_ids=completed_ids)
 
-    async def _locked_ids(self, db: AsyncSession, *, course_id: int, user_id: str) -> frozenset[int]:
+    async def _locked_ids(self, db: AsyncSession, *, course_id: int, completed_ids: frozenset[int]) -> frozenset[int]:
         """該學員在此課程中**目前鎖定**的項目。
 
         與側欄旗標（`learning/service._item_nodes`）共用 `build_item_state`、
@@ -305,9 +306,10 @@ class EtProgressService:
         抓到的狀態。
 
         ⚠️ 本方法在**最高頻的 `report_intervals` 路徑**上，故 0 題測驗的旗標隨
-        `items_with_titles` 一併取回，**不另發一次查詢**。
+        `items_with_titles` 一併取回，**不另發一次查詢**。同理 `completed_ids` 由呼叫端
+        傳入：`is_item_locked` 為了「已完成者永不鎖定」的捷徑本來就查了一次，本方法
+        自己再查一次等於在同一個請求裡對同一張表問兩次同樣的問題。
         """
-        completed_ids = await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id)
         chapters = await self._learning.chapters(db, course_id)
         chapter_ids = [c.chapter_id for c in chapters]
         rows = await self._learning.items_with_titles(db, chapter_ids)
