@@ -27,6 +27,11 @@
 進度。反而掛上去會讓「教師事後調整章節順序、把學員正在看的項目鎖回去」時，前端
 `pagehide` 的收尾補送整批失敗。
 
+📌 **讀取側的同一道判定在 `learning/service._ensure_item_unlocked`**（#424）。本段原本
+只講寫入，而它被讀成涵蓋兩側——實際上讀取側曾有整整一段時間只靠前端 `openable` 過濾，
+正是本段說「不可以只靠」的那種東西。兩側現在都在後端，但**執行點是分開的兩處**：
+改動任一側時，另一側不會跟著變。
+
 ## ⚠️ 覆蓋率是**自陳資料**
 
 區段完全來自前端上報，後端只做裁切與聯集。一個 `[0, duration]` 的請求即可得到 100%
@@ -287,11 +292,12 @@ class EtProgressService:
         複習已學過的項目」只花一次查詢，而不必為了得到同一個答案重算整門課的解鎖狀態。
         本方法在最高頻的 `report_intervals` 路徑上，那條捷徑正好覆蓋重看的情形。
         """
-        if item_id in await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id):
+        completed_ids = await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id)
+        if item_id in completed_ids:
             return False
-        return item_id in await self._locked_ids(db, course_id=course_id, user_id=user_id)
+        return item_id in await self._locked_ids(db, course_id=course_id, completed_ids=completed_ids)
 
-    async def _locked_ids(self, db: AsyncSession, *, course_id: int, user_id: str) -> frozenset[int]:
+    async def _locked_ids(self, db: AsyncSession, *, course_id: int, completed_ids: frozenset[int]) -> frozenset[int]:
         """該學員在此課程中**目前鎖定**的項目。
 
         與側欄旗標（`learning/service._item_nodes`）共用 `build_item_state`、
@@ -300,9 +306,10 @@ class EtProgressService:
         抓到的狀態。
 
         ⚠️ 本方法在**最高頻的 `report_intervals` 路徑**上，故 0 題測驗的旗標隨
-        `items_with_titles` 一併取回，**不另發一次查詢**。
+        `items_with_titles` 一併取回，**不另發一次查詢**。同理 `completed_ids` 由呼叫端
+        傳入：`is_item_locked` 為了「已完成者永不鎖定」的捷徑本來就查了一次，本方法
+        自己再查一次等於在同一個請求裡對同一張表問兩次同樣的問題。
         """
-        completed_ids = await self._repo.completed_item_ids(db, user_id=user_id, course_id=course_id)
         chapters = await self._learning.chapters(db, course_id)
         chapter_ids = [c.chapter_id for c in chapters]
         rows = await self._learning.items_with_titles(db, chapter_ids)

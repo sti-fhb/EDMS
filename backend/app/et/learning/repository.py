@@ -102,6 +102,36 @@ class EtLearningRepository:
             )
         )
 
+    async def item_id_of_material(self, db: AsyncSession, material_id: int, *, course_id: int) -> int | None:
+        """教材 → 其所屬之章節項目（#424 的解鎖判定要用 `ITEM_ID`）。
+
+        與 `course_id_of_material` 走同一條鏈、同樣濾軟刪除——兩者必須對同一批列成立，
+        否則會出現「拿得到 course_id 卻拿不到 item_id」而讓解鎖判定被靜默跳過。
+
+        ⚠️ **`course_id` 必填**。今日「1 教材 : 1 項目」，不限定也只會有一列；但本檔
+        `course_id_of_material_any` 的 docstring 已預告教材日後可能被多門課程引用，屆時
+        不限定範圍就會反查到**別門課**的項目，而解鎖判定拿著它去問「這位學員在*本*課程
+        的進度」——算出來的鎖定狀態屬於另一門課。比照 `material_content` 對兩條反查鏈
+        的一致性檢核：不去猜哪一個才對。
+
+        影片不另開一支：`ET_MATERIAL_VIDEO` 掛在教材下，呼叫端取 `video.material_id`
+        後走本方法即可。
+        """
+        return await db.scalar(
+            select(EtItem.item_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtItem.material_id == material_id,
+                EtChapter.course_id == course_id,
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+            )
+            # `ET_ITEM` 的唯一索引是 `(CHAPTER_ID, SORT_ORDER)`——`MATERIAL_ID` 上沒有，
+            # 「一材一項」是應用層慣例而非 DB 不變量。同課重複引用時不指定排序的話，
+            # 取哪一列由資料庫決定，而兩列的解鎖狀態可能不同 ⇒ 同一個請求時而擋時而放。
+            .order_by(EtItem.item_id)
+        )
+
     async def course_id_of_material_any(self, db: AsyncSession, material_id: int) -> int | None:
         """教材 → 課程，**不濾軟刪除**。僅供授權判定使用。
 

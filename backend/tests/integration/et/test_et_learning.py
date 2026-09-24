@@ -116,6 +116,68 @@ async def _course_with_material(client, db, teacher: str, *, name: str = "採血
     }
 
 
+async def _second_chapter_material(client, db, teacher: str, course_id: int) -> dict:
+    """在既有課程加第二章 + 教材項目 + 影片，回傳該章的各層 id（#424）。
+
+    第二章對「剛加入、第一章還沒完成」的學員而言**是鎖定的**——依序解鎖的章節層規則
+    （`spec_us5` AC 9：前一章所有項目完成才解鎖下一章）。本 helper 的存在就是為了造出
+    那個狀態；用第一章驗不到任何東西，它對誰都是解鎖的。
+    """
+    ch = await client.post(
+        f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher)
+    )
+    assert ch.status_code == 201, ch.text
+    chapter_id = ch.json()["chapter_id"]
+
+    item = await client.post(
+        f"/api/et/chapters/{chapter_id}/items",
+        json={"item_type": ITEM_MATERIAL, "title": "第二章教材"},
+        headers=_bearer(teacher),
+    )
+    assert item.status_code == 201, item.text
+
+    video = EtMaterialVideo(
+        material_id=item.json()["material_id"],
+        file_path="dummy/second-chapter.mp4",
+        file_name="第二章影片.mp4",
+        duration_sec=300,
+        file_size_bytes=1024,
+        sort_order=1,
+        created_user=teacher,
+        created_date=utcnow(),
+        deleted=0,
+    )
+    db.add(video)
+    await db.flush()
+    return {
+        "chapter_id": chapter_id,
+        "item_id": item.json()["item_id"],
+        "material_id": item.json()["material_id"],
+        "video_id": video.video_id,
+    }
+
+
+async def _complete_material(client, user_id: str, *, video_id: int, item_id: int, duration_sec: int) -> None:
+    """把一個**含影片**的教材項目走到完成（#424 的反向驗收要用）。
+
+    ⚠️ 兩步缺一不可，且順序固定：含影片的教材**不是**「開啟即完成」——`mark_item_viewed`
+    對它只更新「上次檢視項目」（見 `progress/service.mark_item_viewed` 的 docstring），
+    完成與否由覆蓋率決定。故先上報涵蓋全片的區段，再呼叫 `viewed` 觸發完成判定。
+
+    走真實端點而非直接寫 `IS_COMPLETED`：這幾條測試要驗的是「完成之後解鎖會前進」，
+    直接寫 DB 等於跳過產生完成狀態的那段邏輯，測出來的綠燈證明不了學員實際走得通。
+    """
+    r = await client.post(
+        f"/api/et/videos/{video_id}/intervals",
+        json={"segments": [{"start_sec": 0, "end_sec": duration_sec}]},
+        headers=_bearer(user_id),
+    )
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/et/items/{item_id}/viewed", headers=_bearer(user_id))
+    assert r.status_code == 200, r.text
+    assert r.json()["completed"] is True, "前置條件不成立：教材未被判定為完成，後續的解鎖驗收會失去意義"
+
+
 async def _enroll(db, user_id: str, course_id: int) -> None:
     db.add(
         EtEnrollment(
@@ -346,6 +408,228 @@ class TestVideoFile:
 
         assert r.status_code == 404
         assert r.json()["error_code"] == "ET_LEARN_001"
+
+
+class TestLockedItemNotReadable:
+    """未解鎖項目的**內容不可讀取**（#424）。
+
+    `progress/service.py` 的模組 docstring 主張「解鎖判定**必須在後端執行**，
+    `spec_us5` AC 9 寫的是系統阻擋、不是畫面不給點」。那條原則原本只落實在**寫入**側
+    （`mark_item_viewed` / `report_intervals` / 開始作答），讀取側三支端點一律沒有判定
+    ——於是在籍學員以 `material_id` 直接打 API 就讀得到尚未解鎖的教材，而唯一擋住它的
+    是前端的 `openable` 過濾，正是那段 docstring 說「不可以只靠」的東西。
+
+    ⚠️ **這不是「可以偽造依序完訓」**：寫入側早就擋住了，讀了也不會產生完成紀錄。
+    本組測試釘的是「提前看到內容」這一側。
+    """
+
+    async def test_未解鎖教材的內容不可讀取(self, client, db) -> None:
+        teacher = await _user(db, "t_lock01", ROLE_TEACHER)
+        student = await _user(db, "s_lock01")
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.get(f"/api/et/materials/{second['material_id']}/content", headers=_bearer(student))
+
+        # 404 而非 403：與本模組既有慣例一致——以 id 定址的資源不讓回應差異變成 oracle
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_LEARN_001"
+
+    async def test_已解鎖的第一章教材照常可讀(self, client, db) -> None:
+        """⚠️ 與上一條成對：少了它，「全部擋掉」也會讓上一條通過。"""
+        teacher = await _user(db, "t_lock02", ROLE_TEACHER)
+        student = await _user(db, "s_lock02")
+        ids = await _course_with_material(client, db, teacher)
+        await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+
+    async def test_擁有者預覽不受解鎖限制(self, client, db) -> None:
+        """🔴 這一條是本次變更最容易做壞的地方。
+
+        `is_item_locked` 只吃 `user_id` 算進度，而**擁有者沒有進度**——天真地掛上去會
+        讓教師打不開自己課程第二章之後的教材，而且只在「他自己的課」這個情境出現。
+
+        既有的分流可直接沿用：授權通過後「不在籍」等同「擁有者預覽」
+        （`material_content` 的既有註解已載明），預覽本來就不累積進度、不受解鎖限制
+        （#255 裁示 Q1）。
+        """
+        teacher = await _user(db, "t_lock03", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+
+        r = await client.get(f"/api/et/materials/{second['material_id']}/content", headers=_bearer(teacher))
+
+        assert r.status_code == 200, "擁有者預覽必須看得到全部內容，否則教師檢查不了自己的課"
+
+    async def test_未解鎖教材不可發播放票(self, client, db) -> None:
+        """影片走「發票 → 憑票取檔」，授權只在發票時做一次，故判定要掛在發票端。"""
+        teacher = await _user(db, "t_lock04", ROLE_TEACHER)
+        student = await _user(db, "s_lock04")
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.post(f"/api/et/videos/{second['video_id']}/ticket", headers=_bearer(student))
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_LEARN_001"
+
+    async def test_已解鎖教材仍可發播放票(self, client, db) -> None:
+        """與上一條成對，理由同 `test_已解鎖的第一章教材照常可讀`。"""
+        teacher = await _user(db, "t_lock05", ROLE_TEACHER)
+        student = await _user(db, "s_lock05")
+        ids = await _course_with_material(client, db, teacher)
+        await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.post(f"/api/et/videos/{ids['video_id']}/ticket", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+
+    def test_三支讀取端點都掛了判定(self) -> None:
+        """🔴 **結構性測試**，因為 `doc_file` 的行為測試沒有鑑別力。
+
+        上面兩組（內容、播放票）以 200 vs 404 驗得出來，但 `doc_file` 不行——
+        **「項目鎖定」與「該 doc_id 未被此教材引用」同回 404 `ET_LEARN_001`**
+        （見 `test_他人教材之_doc_id_不可搭配自己有權的教材`），兩者外部觀察不到差異。
+        那是刻意的設計（不讓回應差異變成 oracle），但代價是行為測試分不出判定有沒有跑。
+
+        ⛔ 寫一條「鎖定時回 404」的整合測試會**看起來是覆蓋、實際不是**——拿掉判定
+        它照樣綠。與其留一條假證據，不如誠實改用結構性斷言：**每一支吐內容的端點都
+        呼叫了 `_ensure_item_unlocked`**。
+
+        比照 #367 的 `test_conftest_gate_ordering`：行為測試不可能時，改驗結構。
+        ⚠️ 它驗的是「有沒有掛」，不是「掛對了沒」——掛對了由上面四條行為測試負責。
+
+        兩個刻意的設計：
+
+        1. **用 `ast` 找真正的呼叫節點，不做字串比對**。`inspect.getsource` 拿到的源碼
+           含 docstring 與註解，`"_ensure_item_unlocked" in source` 會被一句提到它的
+           註解餵成綠燈——而本 issue 的成因正是「註解宣稱的事情程式沒做」。
+        2. **清單是 fail-closed 的**：`EtLearningService` 上每一支公開方法都必須落進
+           `要掛` 或 `豁免` 其中之一，否則本測試紅。寫死三個名字的話，第四支讀取端點
+           漏掛時它不會紅——而那正是最可能發生、也最需要被擋下的情形。
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from app.et.learning.service import EtLearningService
+
+        要掛 = {"material_content", "ensure_video_accessible", "doc_file"}
+        豁免 = {
+            "structure": "回的是側欄結構與 locked 旗標本身，不含教材內容",
+            "video_file_by_ticket": "憑票放行；授權與解鎖判定都在發票端 ensure_video_accessible",
+        }
+        公開方法 = {name for name in vars(EtLearningService) if not name.startswith("_")}
+        assert 公開方法 == 要掛 | set(豁免), (
+            f"`EtLearningService` 的公開方法有增減：{公開方法 ^ (要掛 | set(豁免))}。"
+            "請把它加進「要掛」或「豁免」（附理由）——新端點若吐得出教材內容卻沒掛判定，"
+            "未解鎖的內容就又讀得到了（#424）。"
+        )
+
+        for name in sorted(要掛):
+            tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(EtLearningService, name))))
+            呼叫了 = any(
+                isinstance(node.func, ast.Attribute) and node.func.attr == "_ensure_item_unlocked"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+            )
+            assert 呼叫了, f"{name} 未掛解鎖判定——未解鎖的內容會讀得到（#424）"
+
+
+class TestLockedItemStillReadableWhenItShouldBe:
+    """#424 的**反向**驗收：補上判定後，原本讀得到的三種情形仍須讀得到。
+
+    issue 的「⛔ 不要在沒有裁示的情況下直接掛上判定」列了三條代價，三條的症狀都是
+    「學員 / 教師突然打不開本來看得到的東西」，而且**只在特定狀態下出現**——平常跑
+    一遍看不出來，要等有人回頭複習、或課程關閉之後才炸。故三條各釘一次：
+
+    1. 課程關閉後的唯讀回看（#288 AC 9/10）→ `test_課程關閉後仍讀得到已學過的教材`
+    2. 教師預覽（#255 裁示 Q1）→ 已由 `TestLockedItemNotReadable.test_擁有者預覽不受解鎖限制` 涵蓋
+    3. 已完成項目永不鎖定 → `test_已完成的項目被排到未完成項目之後仍可讀`
+
+    ⚠️ 這幾條不是在測 `is_item_locked`（那有自己的 unit 測試），而是在測**呼叫端有沒有
+    把它接歪**——例如把「不在籍」當成「無權」而擋掉擁有者，或在關閉課程的路徑上提早
+    回絕。接歪的表現都是綠燈的 `is_item_locked` 配上打不開的畫面。
+    """
+
+    async def test_完成第一章後第二章的教材變成可讀(self, client, db) -> None:
+        """解鎖是會**前進**的——擋下未解鎖不能連帶擋死已解鎖的後續章節。
+
+        與 `TestLockedItemNotReadable.test_未解鎖教材的內容不可讀取` 成對：兩條走同一組
+        helper 造出同一個狀態，那條驗「完成前 404」、本條驗「完成後 200」。少了本條，
+        一個「一律 404」的實作也會讓那條綠。
+
+        ⛔ **不要把「完成前應為 404」加回本條當前置斷言**。整合測試裡一個預期失敗的
+        請求會連帶回滾本測試建立的前置資料，後續的上報就會對著空的課程打、回 404——
+        症狀看起來像解鎖判定壞了，實際是測試自己把資料清掉了。前後兩態只能分兩條測。
+        """
+        teacher = await _user(db, "t_lock06", ROLE_TEACHER)
+        student = await _user(db, "s_lock06")
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        await _complete_material(client, student, video_id=ids["video_id"], item_id=ids["item_id"], duration_sec=600)
+
+        after = await client.get(f"/api/et/materials/{second['material_id']}/content", headers=_bearer(student))
+        assert after.status_code == 200, after.text
+
+    async def test_已完成的項目被排到未完成項目之後仍可讀(self, client, db) -> None:
+        """教師事後在前面插入項目，**不得把學員已學過的內容鎖回去**。
+
+        順序規則本身會說「你前面有一項沒完成 ⇒ 你被鎖」，若讀取端只問順序不問完成，
+        學員昨天看完的教材今天會打不開——而他什麼都沒做錯，教師也不知道自己做了什麼。
+
+        ⚠️ **「已完成永不鎖定」在兩層各實作了一次，而且互相冗餘**（2026-09-24 以變異
+        驗證）：`progress/rules.locked_item_ids` 的 `state.completed or ...`、與
+        `progress/service.is_item_locked` 開頭的捷徑。**只拿掉其中一層，本測試照樣綠**
+        ——兩層都拿掉才紅。所以本條釘的是**行為**，不是任一層的實作；別把它讀成
+        「某一層有測試保護」而放心去動那一層。
+        """
+        teacher = await _user(db, "t_lock07", ROLE_TEACHER)
+        student = await _user(db, "s_lock07")
+        ids = await _course_with_material(client, db, teacher)
+        await _enroll(db, student, ids["course_id"])
+        await _complete_material(client, student, video_id=ids["video_id"], item_id=ids["item_id"], duration_sec=600)
+
+        # 教師在同一章插入一個新項目，並把它排到已完成項目之前。
+        inserted = await client.post(
+            f"/api/et/chapters/{ids['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": "事後插入的教材"},
+            headers=_bearer(teacher),
+        )
+        assert inserted.status_code == 201, inserted.text
+        await db.execute(update(EtItem).where(EtItem.item_id == inserted.json()["item_id"]).values(sort_order=0))
+        await db.flush()
+
+        r = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=_bearer(student))
+
+        assert r.status_code == 200, "已完成的項目不得因為前面被插入新項目而變得讀不到"
+
+    async def test_課程關閉後仍讀得到已學過的教材(self, client, db) -> None:
+        """#288 AC 9/10：關閉後轉唯讀，**回看**不受影響。
+
+        關閉會擋掉寫入（`report_intervals` 回 409），所以這條要先完成、後關閉——順序反了
+        會變成在測「關閉擋寫入」，而那是另一條測試的事。
+        """
+        teacher = await _user(db, "t_lock08", ROLE_TEACHER)
+        student = await _user(db, "s_lock08")
+        ids = await _course_with_material(client, db, teacher)
+        await _enroll(db, student, ids["course_id"])
+        await _complete_material(client, student, video_id=ids["video_id"], item_id=ids["item_id"], duration_sec=600)
+        await db.execute(update(EtCourse).where(EtCourse.course_id == ids["course_id"]).values(status=COURSE_CLOSED))
+        await db.flush()
+
+        r = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
 
 
 class TestVideoTicketFlow:
