@@ -658,17 +658,17 @@ const reopened = {
  * ⚠️ 必須點在 section 上，點外層的 `role="group"` 不會讓任何一段取得焦點，打的字全部
  * 落空而**測試照樣往下跑**。
  */
-async function fillDateTime(
-  user: ReturnType<typeof userEvent.setup>,
-  label: RegExp,
-  keys: string,
-) {
+async function fillDateTime(label: RegExp, keys: string) {
   const field = screen.getAllByLabelText(label).find((el) => el.getAttribute("role") === "group")
   if (!field) throw new Error(`找不到日期時間欄位：${label}`)
   const first = field.querySelector<HTMLElement>(".MuiPickersSectionList-section")
   if (!first) throw new Error(`欄位沒有可輸入的區段：${label}`)
-  await user.click(first)
-  await user.keyboard(keys)
+  // ⚠️ 自備 `delay: null` 的 typist，不沿用測試的 `user`。一次填值是 14 個按鍵、兩個
+  // 欄位就 28 個，照預設每鍵 await 一輪會讓單條測試逼近 5s 的預設 timeout——實測本檔
+  // 最慢的一條在**單檔**跑就已經 4.5s，全套件並行時必爆（2026-09-24）。
+  const typist = userEvent.setup({ delay: null })
+  await typist.click(first)
+  await typist.keyboard(keys)
 }
 
 describe("ET02 課程關閉與再開課", () => {
@@ -850,8 +850,8 @@ describe("ET02 課程關閉與再開課", () => {
     useCourse("CLOSED")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "110120270800AM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "110120270800AM")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
@@ -890,8 +890,8 @@ describe("ET02 課程關閉與再開課", () => {
     // 進出一輪 + 真的送出一次，全程不得有任何一般更新
     await user.click(screen.getByRole("button", { name: "取消再開課" }))
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
     await screen.findByText("課程已再開課")
 
@@ -924,8 +924,8 @@ describe("ET02 課程關閉與再開課", () => {
     )
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
@@ -943,8 +943,8 @@ describe("ET02 課程關閉與再開課", () => {
     server.use(http.post("/api/et/courses/:courseId/reopen", () => HttpResponse.json(reopened)))
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
@@ -974,8 +974,8 @@ describe("ET02 課程關閉與再開課", () => {
     )
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
@@ -1044,8 +1044,8 @@ describe("ET02 課程關閉與再開課", () => {
     useCourse("CLOSED")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
 
     const submit = screen.getByRole("button", { name: "確認再開課" })
     await user.click(submit)
@@ -1076,8 +1076,8 @@ describe("ET02 課程關閉與再開課", () => {
     )
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(user, /課程起始時間/, "110120270900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "110120270900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
     await screen.findByText(/課程至少須有 1 份教材/)
 
@@ -1110,8 +1110,8 @@ describe("ET02 課程關閉與再開課", () => {
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
     // 補開一段已經開始的期間：起始 2026-08-01，比再開課前的 2026-09-01 更早
-    await fillDateTime(user, /課程起始時間/, "080120260900AM")
-    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "080120260900AM")
+    await fillDateTime(/課程訖止時間/, "123120270500PM")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
     await screen.findByText("課程已再開課")
 
