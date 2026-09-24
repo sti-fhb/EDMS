@@ -6,6 +6,7 @@
 問卷 / 發布屬 #204；`STATUS` 目前僅寫入 `DRAFT`。
 """
 
+import re
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
@@ -183,7 +184,19 @@ class CourseUpdateReq(_CourseFields):
 class ChapterCreateReq(BaseModel):
     """新增章節（追加至最末，`SORT_ORDER` 由後端計算）。"""
 
-    chapter_name: str = Field(min_length=1, max_length=CHAPTER_NAME_MAX_LEN)
+    #: 拒內部控制 / 斷行字元——**章節名稱會進入通知信內文**（範本 `COURSE_UPDATE` 之
+    #: `{NEW_CHAPTER_NAME}`），與 `course_name` 同一條理由：平台發信層對主旨剝換行、
+    #: 但對內文刻意保留 LF，故多行名稱會原樣渲染成信件內容。
+    #:
+    #: ⚠️ 攻擊者需教師權限（建章節須為課程擁有者），但 `SafeNameStr` 的註解已裁示過
+    #: 「不因已認證而放寬」——同一條理由在此成立。
+    #:
+    #: ⛔ 這**不**消除信件內文注入，只降低保真度（同一行的完整句子仍放得進去）。
+    #: 真正消除需改範本設計，屬產品決策——見 `core/schema_types.py`。
+    chapter_name: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=CHAPTER_NAME_MAX_LEN, pattern=SAFE_SINGLE_LINE_PATTERN),
+    ]
 
     @field_validator("chapter_name")
     @classmethod
@@ -247,10 +260,34 @@ class ItemCreateReq(BaseModel):
     @field_validator("title")
     @classmethod
     def _strip_title(cls, v: str) -> str:
-        # 先 strip 再判空——`min_length` 擋不掉「   」這種全空白，而那與留空沒有差別。
+        """去前後空白；拒全空白（#414），並拒**內部**控制 / 斷行字元（#423）。
+
+        ## 為何兩道都在這裡，而不是掛 `Field(pattern=)`
+
+        - **空白**：`min_length` 擋不掉「   」——它在 strip 之前跑，而那與留空沒有差別
+        - **控制字元**：掛 `pattern` 會在 strip **之前**驗，於是「前後帶換行」會從
+          「被去掉」變成「被拒絕」。`chapter_name` / `quiz_name` 沒有 strip 的
+          validator，掛 `pattern` 對它們沒有這個副作用；本欄有，故改在此處驗
+
+        兩道同在一個 validator 裡，「先 strip 再驗」的順序也就看得見。
+
+        ## 為何要拒控制字元
+
+        本欄建出的空殼名稱**立刻就是** `ET_QUIZ.QUIZ_NAME`（`course/service.py` →
+        `quiz/repository.create_shell`），而該欄會進入 `QUIZ_RETEST_REQUIRED` 通知信的
+        **內文**（`{QUIZ_NAME}`）。與 `course_name` / `chapter_name` 同一條理由，
+        見 `core/schema_types.py`。
+
+        ⚠️ **本欄同時是 `MATERIAL_NAME` 與 `QUIZ_NAME` 兩個下游的來源**
+        （`course/service.py` 依 `item_type` 分流），而只有後者進信件。教材名稱因此是
+        順帶收緊——⛔ 別因為「教材名稱沒進信件」就認為這道守門多餘而拿掉它，那會讓
+        測驗名稱的**建立**路徑一起失守。
+        """
         stripped = v.strip()
         if not stripped:
             raise ValueError("項目名稱不得為空白")
+        if not re.match(SAFE_SINGLE_LINE_PATTERN, stripped):
+            raise ValueError("名稱不得含控制字元或換行")
         return stripped
 
 
