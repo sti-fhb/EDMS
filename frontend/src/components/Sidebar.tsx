@@ -94,7 +94,19 @@ function NavGroupSection({ group }: { group: NavGroup }) {
               }}
             >
               <ArticleIcon sx={{ width: 20, mr: 1, fontSize: "0.95rem", flexShrink: 0 }} />
-              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: "0.85rem" }} />
+              {/*
+                畫面編號與名稱刻意拆成兩個相鄰 span（視覺上仍是連續一行「ET01 課程列表」）。
+                如此既有的可見性測試（`getByText("課程列表")` 等，驗 #247 / #250 的角色分流）
+                不必隨編號改寫——它們得以繼續作為「本次沒弄壞可見性」的獨立證據。
+              */}
+              <ListItemText
+                primary={
+                  <>
+                    <Box component="span">{item.code}</Box> <Box component="span">{item.label}</Box>
+                  </>
+                }
+                primaryTypographyProps={{ fontSize: "0.85rem" }}
+              />
             </ListItemButton>
           ))}
         </List>

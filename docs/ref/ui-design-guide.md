@@ -549,6 +549,22 @@ MUI: `LinearProgress` + 自訂 label overlay
 | 主文字 | `#333` | `palette.text.primary` |
 | 次文字 | `#999` | `palette.text.secondary` |
 
+### 已記載的例外：認證頁專屬色（不進本對照表）
+
+下列色值**刻意不收錄為通用 token**，集中於 `frontend/src/auth/authBackground.ts`：
+
+| 用途 | 色值 | 常數 |
+|------|------|------|
+| 認證頁漸層背景 | `linear-gradient(135deg, #e4eadc, #f2f5ee, #fdf2f2)` | `AUTH_BG_GRADIENT` |
+| 登入頁副標（系統英文名）| `#78716c` | `AUTH_SUBTITLE_COLOR` |
+
+**為何不進 token**：兩者皆為對齊主專案 TBMS 登入頁之專屬視覺，只用於認證頁；`#78716c` 與
+既有的 `text.secondary`（`#999`）、`text.disabled`（MUI 預設半透明黑）**值都不同**，硬映射過去
+等於改了顏色。集中為具名常數是為了避免色碼散落在元件內——這是**有記載的例外**，不是漏改。
+
+> 日後若認證頁專屬色增為多項或需跨頁共用，再評估以 MUI `declare module` 型別擴充加入自訂
+> palette key（如 `palette.authAccent`），屆時本節一併移除。
+
 ---
 
 ## 24. Icon 對照表（Bootstrap Icons → MUI Icons）

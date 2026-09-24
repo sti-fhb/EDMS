@@ -207,12 +207,55 @@ describe("Sidebar", () => {
     expect(groupTitles).toEqual(["教育訓練", "文件管理", "系統管理者後台"])
   })
 
+  it("每個導覽項顯示畫面編號，且群組內依編號排序（#421）", async () => {
+    // 編號取自各模組 spec 之〈畫面代號對照表〉，非自訂。編號不連續屬正常——
+    // 部分畫面無側欄入口（ET02 課程建立為子頁、DM02 詳細頁由清單進入、DP01~04 為登入/個資頁）。
+    renderWithProviders(<Sidebar />)
+    await screen.findByText("系統管理者後台")
+    const nav = screen.getByRole("navigation", { name: "主導覽" })
+    await waitFor(() => expect(nav.querySelectorAll("a")).toHaveLength(16))
+
+    const links = Array.from(nav.querySelectorAll("a")).map((a) => a.textContent?.trim() ?? "")
+    expect(links).toEqual([
+      "ET01 課程列表",
+      "ET03 學員",
+      "ET04 我的課程",
+      "ET10 核可查詢",
+      "DM01 文件庫",
+      "DM04 簽核中心",
+      "DM06 已廢止文件查詢",
+      "DM07 個人專區",
+      "DM08 文件變更歷程查詢",
+      "DM10 閱讀統計 KPI",
+      "DP05 使用者管理",
+      "DP06 權限管理",
+      "DP07 系統參數與清單維護",
+      "DP08 通知範本維護",
+      "DP09 操作記錄查詢",
+      "DP10 排程作業總覽",
+    ])
+  })
+
+  it("畫面編號格式正確、群組內不重複且已排序（#421 資料不變量）", () => {
+    // 純資料斷言：擋住「新增項目時忘了填編號 / 填錯格式 / 插在錯的位置」。
+    for (const group of NAV_GROUPS) {
+      const codes = group.items.map((item) => item.code)
+      expect(codes.every((code) => /^(ET|DM|DP)\d{2}$/.test(code))).toBe(true)
+      expect(new Set(codes).size).toBe(codes.length)
+      expect(codes).toEqual([...codes].sort())
+    }
+  })
+
   it("每個顯示中的導覽項目連到對應路由", async () => {
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())
     for (const group of NAV_GROUPS) {
       for (const item of group.items) {
-        expect(await screen.findByRole("link", { name: item.label })).toHaveAttribute("href", item.path)
+        // 連結的 accessible name 為完整文字（編號 + 名稱）；由 NAV_GROUPS 推導，不另抄一份對照表
+        expect(await screen.findByRole("link", { name: `${item.code} ${item.label}` })).toHaveAttribute(
+          "href",
+          item.path,
+        )
       }
     }
   })
