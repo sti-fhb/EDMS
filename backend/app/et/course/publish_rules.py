@@ -27,8 +27,11 @@ AC 24 明列五項：至少 1 章節 + 1 教材、至少 1 個受訓單位標籤
 
 第八項「**每個章節至少 1 份教材或測驗**」為 #358 第 3 項（2026-09-17 手測回饋）新增。
 
-第九項「**教材與測驗須填寫名稱**」為 #384 新增。它補的是**建立**那一側——`ItemCreateReq`
-允許名稱留空（刻意設計），而它自稱的防線「儲存時仍必填」擋不住「不按儲存」。
+第九項「**教材與測驗須填寫名稱**」為 #384 新增。當時 `ItemCreateReq` 允許名稱留空，而
+它自稱的防線「儲存時仍必填」擋不住「不按儲存」。
+
+⚠️ **2026-09-23（#414）起建立時名稱已必填**，故本項改為保護**#414 上線前**就已經未命名的
+既有資料。⛔ 不要因為「上游已經擋住了」就拿掉它——那批舊資料按定義不會經過新守門。
 
 ⚠️ **這四項都不在 AC 24 裡，而是實機測試才發現的——對照 AC 找不到是正常的，不要
 因此刪掉。** 每一項的來源都寫在上面；它們共同的形狀是「AC 假設了某件事不會發生，
@@ -85,7 +88,7 @@ class ItemSummary:
     """
 
     item_id: int
-    #: 顯示名稱；空字串代表教師建立後從未填寫（`ItemCreateReq.title` 允許留空）。
+    #: 顯示名稱；空字串＝**#414 之前**建立且從未填寫者（該版本 `ItemCreateReq.title` 可留空）。
     title: str
 
 
@@ -209,14 +212,17 @@ def _chapter_blockers(snapshot: CourseSnapshot) -> list[PublishBlocker]:
 def _item_blockers(snapshot: CourseSnapshot) -> list[PublishBlocker]:
     """項目層（第九項，#384）：未命名的教材／測驗不得發布出去。
 
-    建立時名稱可留空是刻意設計（`ItemCreateReq` 之 docstring，2026-08-27 依實測回饋），
-    而它自己指的防線「儲存時仍必填」**擋不住「不按儲存」**——教師新增項目時空殼已經在
-    DB 裡，直接關掉視窗就留下了。`unsavedNewItemId` 只在同一次視窗互動內有效。
+    #384 當時建立可留空是刻意設計（2026-08-27 依實測回饋），而它指的防線「儲存時仍必填」
+        **擋不住「不按儲存」**——空殼在新增當下就進 DB，關掉視窗就留下了。
 
-    🔴 判空用 `strip()` 而非 `not title`：今天三條寫入路徑都 strip 過（`ItemCreateReq`
-    `_strip_title`、`QuizUpdateReq._strip_required`、`MaterialUpdateReq._name_not_blank`），
-    所以 DB 裡只可能是 `""`。但發布是最後一道防線，它的正確性不該依賴上游三個 schema
-    永遠維持嚴格——任一個放寬，這裡是唯一還站著的那道。
+        ⚠️ **#414（2026-09-23）已把守門前移到建立**（`ItemCreateReq.title` 為 `min_length=1`），
+        故本檢核現在保護的是**那之前**留下的既有未命名資料。⛔ 仍不可拿掉：下游本來就不該
+        依賴上游，而且那批舊資料不會經過新守門。
+
+        🔴 判空用 `strip()` 而非 `not title`：今天三條寫入路徑都 strip 過（`ItemCreateReq`
+        `_strip_title`、`QuizUpdateReq._strip_required`、`MaterialUpdateReq._name_not_blank`），
+        所以 DB 裡只可能是 `""`。但發布是最後一道防線，它的正確性不該依賴上游三個 schema
+        永遠維持嚴格——任一個放寬，這裡是唯一還站著的那道。
     """
     return [
         PublishBlocker(BLOCK_ITEM_NO_TITLE, "教材與測驗須填寫名稱", item.item_id)

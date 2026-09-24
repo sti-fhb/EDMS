@@ -94,7 +94,7 @@ async def _course_with_quiz(client, db, teacher: str, *, code: str, extra_chapte
         )
         item2 = await client.post(
             f"/api/et/chapters/{ch2.json()['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL},
+            json={"item_type": ITEM_MATERIAL, "title": "教材"},
             headers=_bearer(teacher),
         )
         result["next_item_id"] = item2.json()["item_id"]
@@ -227,7 +227,7 @@ class TestStartAttempt:
         ch1 = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(teacher))
         await client.post(
             f"/api/et/chapters/{ch1.json()['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL},
+            json={"item_type": ITEM_MATERIAL, "title": "教材"},
             headers=_bearer(teacher),
         )
         ch2 = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher))

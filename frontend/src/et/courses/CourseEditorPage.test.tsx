@@ -258,6 +258,9 @@ describe("ET02 課程編輯頁", () => {
     // 按鈕不再 disable——按下去就走「存草稿 → 繼續下一步」（比照 Moodle 的 Save and display）
     await user.click(await screen.findByRole("button", { name: "新增項目" }))
     await user.click(await screen.findByRole("menuitem", { name: /教材/ }))
+    // #414：名稱在導向**之前**問完，隨 navigate state 一起帶過去
+    await user.type(await screen.findByRole("textbox", { name: "教材名稱" }), "採血流程概論")
+    await user.click(screen.getByRole("button", { name: "建立" }))
 
     // 課程與暫存章節一次送出
     await waitFor(() => expect(captured.body?.chapters).toEqual(["第一章"]))
@@ -267,7 +270,7 @@ describe("ET02 課程編輯頁", () => {
         "/et/courses/77",
         expect.objectContaining({
           replace: true,
-          state: { pendingAddItem: { chapterIndex: 0, itemType: "MATERIAL" } },
+          state: { pendingAddItem: { chapterIndex: 0, itemType: "MATERIAL", title: "採血流程概論" } },
         }),
       ),
     )
@@ -328,7 +331,7 @@ describe("ET02 課程編輯頁", () => {
     )
     locationRef.current = {
       pathname: "/et/courses/1",
-      state: { pendingAddItem: { chapterIndex: 0, itemType: "QUIZ" } },
+      state: { pendingAddItem: { chapterIndex: 0, itemType: "QUIZ", title: "小考" } },
     }
     renderEditor("1")
     await screen.findByRole("dialog")
@@ -389,24 +392,83 @@ describe("ET02 課程編輯頁", () => {
 
   it("帶 pendingAddItem 進編輯頁時自動建立該項目並開啟視窗（#335 的後半）", async () => {
     let addedTo: number | null = null
+    let sentTitle: string | undefined
     server.use(
-      http.post("/api/et/chapters/:chapterId/items", async ({ params }) => {
+      http.post("/api/et/chapters/:chapterId/items", async ({ params, request }) => {
         addedTo = Number(params.chapterId)
+        sentTitle = ((await request.json()) as { title?: string }).title
         return HttpResponse.json(
-          { item_id: 501, item_type: "MATERIAL", title: "", sort_order: 1, material_id: 601, quiz_id: null },
+          { item_id: 501, item_type: "MATERIAL", title: "採血流程概論", sort_order: 1, material_id: 601, quiz_id: null },
           { status: 201 },
         )
       }),
     )
     locationRef.current = {
       pathname: "/et/courses/1",
-      state: { pendingAddItem: { chapterIndex: 0, itemType: "MATERIAL" } },
+      state: { pendingAddItem: { chapterIndex: 0, itemType: "MATERIAL", title: "採血流程概論" } },
     }
     renderEditor("1")
 
     // 章節載入後依 index 取出真正的 chapter_id 再建項目——建立課程的回應只有 course_id
     await waitFor(() => expect(addedTo).not.toBeNull())
+    // #414：名稱在導向之前就問完了，此處必須原樣帶上，否則後端 422
+    expect(sentTitle).toBe("採血流程概論")
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  /**
+   * #414：新增項目前先取得名稱。
+   *
+   * ⚠️ 元件本身的行為（欄位、空白驗證、Enter、取消）在 `NewItemDialog.test.tsx`；
+   * 此處只驗**接線**——真正要釘住的是「取消時後端一次都沒被呼叫」。
+   */
+  it("按下新增項目不會立刻建立——名稱確認後才送出（#414）", async () => {
+    let created = 0
+    let sentTitle: string | undefined
+    server.use(
+      http.post("/api/et/chapters/:chapterId/items", async ({ request }) => {
+        created += 1
+        sentTitle = ((await request.json()) as { title?: string }).title
+        return HttpResponse.json(
+          { item_id: 502, item_type: "QUIZ", title: "小考", sort_order: 1, material_id: null, quiz_id: 602 },
+          { status: 201 },
+        )
+      }),
+    )
+    const user = userEvent.setup()
+    renderEditor("1")
+    // 每個章節各有一顆「新增項目」，取第一章那顆
+    await user.click((await screen.findAllByRole("button", { name: "新增項目" }))[0])
+    await user.click(await screen.findByRole("menuitem", { name: /測驗/ }))
+
+    // 名稱還沒填——此時後端不該收到任何東西
+    expect(created).toBe(0)
+
+    await user.type(await screen.findByRole("textbox", { name: "測驗名稱" }), "小考")
+    await user.click(screen.getByRole("button", { name: "建立" }))
+
+    await waitFor(() => expect(created).toBe(1))
+    expect(sentTitle).toBe("小考")
+  })
+
+  it("在命名視窗按取消，後端一次都沒被呼叫（#414）", async () => {
+    // 🔴 這是本 issue 的核心。舊行為是按下「新增項目」的當下就建了空殼，而清理只掛在
+    // 「取消」上——換頁、重新整理、按「儲存草稿」都會把一個沒有名稱的項目留在章節裡。
+    let created = 0
+    server.use(
+      http.post("/api/et/chapters/:chapterId/items", () => {
+        created += 1
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderEditor("1")
+    await user.click((await screen.findAllByRole("button", { name: "新增項目" }))[0])
+    await user.click(await screen.findByRole("menuitem", { name: /教材/ }))
+    await user.click(await screen.findByRole("button", { name: "取消" }))
+
+    expect(created).toBe(0)
+    expect(screen.queryByRole("textbox", { name: "教材名稱" })).not.toBeInTheDocument()
   })
 
   it("發布成功後先看到結果，關閉結果視窗才導回列表（#358 第 4 項）", async () => {

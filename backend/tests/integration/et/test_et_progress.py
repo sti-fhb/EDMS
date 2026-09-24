@@ -82,7 +82,9 @@ async def _chapter_with_item(client, db, teacher: str, course_id: int, *, name: 
     chapter_id = ch.json()["chapter_id"]
 
     item = await client.post(
-        f"/api/et/chapters/{chapter_id}/items", json={"item_type": ITEM_MATERIAL}, headers=_bearer(teacher)
+        f"/api/et/chapters/{chapter_id}/items",
+        json={"item_type": ITEM_MATERIAL, "title": "教材"},
+        headers=_bearer(teacher),
     )
     assert item.status_code == 201, item.text
     result = {

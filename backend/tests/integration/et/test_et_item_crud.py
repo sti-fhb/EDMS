@@ -108,11 +108,18 @@ class TestAddItem:
         rows = await db.scalars(select(EtItem).where(EtItem.chapter_id == chapter_id).order_by(EtItem.sort_order))
         assert [i.sort_order for i in rows] == [1, 2, 3]
 
-    async def test_名稱可留空由使用者於視窗內填寫(self, client, db) -> None:
-        """不代填「新教材」——使用者開了視窗第一件事就是把預設值選起來刪掉。
+    async def test_名稱全空白時無法建立(self, client, db) -> None:
+        """🔴 2026-09-23（#414）收回「名稱可留空」。
 
-        空名稱只是「還沒填」的過渡狀態；**儲存時仍必填**（見
-        `test_名稱全空白時無法儲存`）。
+        原契約是「建立可空、儲存必填」，理由是「不代填『新教材』——使用者開了視窗第一
+        件事就是把預設值選起來刪掉」。⭐ **那個判斷仍然成立且未被推翻**；被推翻的是它
+        的前提「空名稱只是還沒填的過渡狀態」——空殼在建立當下就落地了，而前端的清理只
+        掛在「取消」上，換頁 / 重新整理 / 按「儲存草稿」都會把它留在章節裡。
+
+        現在的做法是**建立前先問名稱**（前端 `NewItemDialog`），既不代填也不留空。
+
+        ⚠️ `min_length=1` 擋不掉「   」——它有長度。故 `_strip_title` 在 strip 之後
+        再判一次，否則全空白等同留空。
         """
         uid = await _user(db, "ETI_A4")
         _, chapter_id = await _chapter(client, uid)
@@ -121,10 +128,10 @@ class TestAddItem:
             json={"item_type": ITEM_MATERIAL, "title": "   "},
             headers=_bearer(uid),
         )
-        assert r.status_code == 201, r.text
-        assert r.json()["title"] == ""
+        assert r.status_code == 422, r.text
 
-    async def test_未帶名稱亦可建立(self, client, db) -> None:
+    async def test_未帶名稱時無法建立(self, client, db) -> None:
+        """⛔ 不要把 `default=""` 加回來——那等於讓沒有名稱的項目重新變成建得出來的。"""
         uid = await _user(db, "ETI_A4B")
         _, chapter_id = await _chapter(client, uid)
         r = await client.post(
@@ -132,13 +139,17 @@ class TestAddItem:
             json={"item_type": ITEM_MATERIAL},
             headers=_bearer(uid),
         )
-        assert r.status_code == 201, r.text
+        assert r.status_code == 422, r.text
 
     async def test_名稱全空白時無法儲存(self, client, db) -> None:
-        """建立可空、儲存必填——空名稱不是可以存檔的樣子。"""
+        """更新路徑的必填**不受本次變更影響**，仍須各自守住。
+
+        ⚠️ 建立與更新是兩道各自獨立的門：建立那道（#414）擋的是「一開始就沒有名稱」，
+        更新這道擋的是「有名稱的項目被改成空白」。少了任一道都留得下未命名項目。
+        """
         uid = await _user(db, "ETI_A4C")
         _, chapter_id = await _chapter(client, uid)
-        item = await _add_item(client, uid, chapter_id, ITEM_MATERIAL, "")
+        item = await _add_item(client, uid, chapter_id, ITEM_MATERIAL, "原始名稱")
         r = await client.put(
             f"/api/et/materials/{item['material_id']}",
             json={

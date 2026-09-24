@@ -123,7 +123,7 @@ async def _course(client, db, teacher: str, *, code: str) -> dict:
     )
     third = await client.post(
         f"/api/et/chapters/{ch2.json()['chapter_id']}/items",
-        json={"item_type": ITEM_MATERIAL},
+        json={"item_type": ITEM_MATERIAL, "title": "教材"},
         headers=_bearer(teacher),
     )
     result = {
@@ -336,7 +336,7 @@ class TestZeroQuestionQuizDoesNotGate:
             (
                 await client.post(
                     f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-                    json={"item_type": ITEM_MATERIAL},
+                    json={"item_type": ITEM_MATERIAL, "title": "教材"},
                     headers=_bearer(teacher),
                 )
             ).json()["item_id"]
@@ -386,7 +386,7 @@ class TestBlockingItemType:
         )
         await client.post(
             f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL},
+            json={"item_type": ITEM_MATERIAL, "title": "教材"},
             headers=_bearer(teacher),
         )
         await db.execute(
