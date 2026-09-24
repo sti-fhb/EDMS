@@ -242,6 +242,15 @@ export function EtCourseEditorPage() {
     setStartAt(course.open_start_at ? dayjs(course.open_start_at) : null)
     setEndAt(course.open_end_at ? dayjs(course.open_end_at) : null)
     setOriginalStart(course.open_start_at)
+    // 🔴 **再開課模式也要跟著退出**（#428 code review 的 HIGH）。
+    //
+    // `courses/:courseId` 這條路由沒有 `key={courseId}`，React Router 只換參數時**不會
+    // 重新掛載元件**，故 `reopening` 會跟著使用者從課程 A 帶到課程 B（上一頁 / 下一頁、
+    // 直接改網址都會走到）。結果是一門根本不是關閉中的課程顯示著再開課模式：一般儲存
+    // 被擋死，而按下「確認再開課」是對**錯的課程**送出請求。
+    setReopening(false)
+    setReopenErrors({})
+    setReopenBlockers([])
   }
 
   const isNew = courseId === undefined
@@ -1065,6 +1074,11 @@ export function EtCourseEditorPage() {
           <strong>再開課：請重新設定開放起訖時間</strong> — 原本的起訖時間已清空，這是刻意的：
           沿用舊值會把課程再開成一段已經過去的期間，學員一樣進不來。
           <strong>尚未變更任何資料</strong>，按「取消再開課」即可還原。
+          <Box component="span" sx={{ display: "block", mt: 0.5 }}>
+            {/* ⚠️ 這句原本在 `ReopenCourseDialog` 裡，移除對話框時一併不見了（#428 code
+                review 的 MEDIUM）。教師第一次再開課最擔心的就是學員得從頭來過。 */}
+            學員的學習進度與成績會<strong>接續保留</strong>，原邀請碼沿用並恢復有效。
+          </Box>
         </Alert>
       )}
 
