@@ -814,6 +814,13 @@ describe("ET02 課程關閉與再開課", () => {
   })
 
   it("再開課模式未填時間即確認會逐欄標示必填（#428）", async () => {
+    let called = 0
+    server.use(
+      http.post("/api/et/courses/:courseId/reopen", () => {
+        called += 1
+        return HttpResponse.json(reopened)
+      }),
+    )
     const user = userEvent.setup()
     useCourse("CLOSED")
     renderEditor()
@@ -821,8 +828,11 @@ describe("ET02 課程關閉與再開課", () => {
 
     await user.click(await screen.findByRole("button", { name: "確認再開課" }))
 
-    expect(await screen.findByText("請選擇新的開放起始時間")).toBeInTheDocument()
-    expect(screen.getByText("請選擇新的開放訖止時間")).toBeInTheDocument()
+    expect(await screen.findByText("請重新設定課程起始時間")).toBeInTheDocument()
+    expect(screen.getByText("請重新設定課程訖止時間")).toBeInTheDocument()
+    // ⚠️ 顯式斷言而非靠「兩欄皆空時 `startAt!.toISOString()` 會自己拋例外」這個副作用——
+    // 那是巧合式的保護（下一條測試的註解記著同一個教訓）。
+    expect(called).toBe(0)
   })
 
   it("再開課的時間不合規時擋在前端，不送出請求（#428）", async () => {
@@ -970,11 +980,80 @@ describe("ET02 課程關閉與再開課", () => {
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
     expect(await screen.findByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
-    // 停在再開課模式，且不報成功
-    expect(screen.getByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    // 停在再開課模式，且不報成功。⚠️ 要驗**仍可按**——缺漏是「補完再送一次」而非終局失敗
+    expect(screen.getByRole("button", { name: "確認再開課" })).toBeEnabled()
     expect(screen.queryByText("課程已再開課")).not.toBeInTheDocument()
     // ⚠️ 缺漏走 422，但**不可**走成一般的錯誤 toast——視窗裡已逐條列出來了
     expect(screen.queryByText(/操作失敗/)).not.toBeInTheDocument()
+  })
+
+  it("切換到另一門課程時會退出再開課模式（#428）", async () => {
+    // 🔴 `courses/:courseId` 這條路由沒有 `key={courseId}`，React Router 只換參數時**不會
+    // 重新掛載元件**（本檔開頭把 `useParams` 做成可變就是為了模擬這件事）。少了重置，
+    // `reopening` 會跟著使用者從課程 A 帶到課程 B：一門根本不是關閉中的課程顯示著再開課
+    // 模式，一般儲存被擋死，而按「確認再開課」是對**錯的課程**送出請求。
+    //
+    // 上一頁 / 下一頁與直接改網址都會走到這條路徑，不需要回列表頁。
+    const user = userEvent.setup()
+    server.use(
+      http.get("/api/et/courses/:courseId", ({ params }) => {
+        const id = Number(params.courseId)
+        return HttpResponse.json({
+          course_id: id,
+          course_name: `課程 ${id}`,
+          description: null,
+          status: id === 1 ? "CLOSED" : "PUBLISHED",
+          open_start_at: "2026-09-01T00:00:00Z",
+          open_end_at: "2027-09-30T00:00:00Z",
+          require_approval: false,
+          version: 5,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          tag_ids: [2],
+          chapters: [],
+          invitation_code: "01234567",
+        })
+      }),
+    )
+    const { rerender } = renderEditor("1")
+    await user.click(await screen.findByRole("button", { name: "再開課" }))
+    await screen.findByRole("button", { name: "確認再開課" })
+
+    paramsRef.current = { courseId: "2" }
+    rerender(<EtCourseEditorPage />)
+
+    expect(await screen.findByDisplayValue("課程 2")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "確認再開課" })).not.toBeInTheDocument()
+    expect(screen.queryByText(/請重新設定開放起訖時間/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument()
+  })
+
+  it("再開課送出中停用送出鈕，防連點造出兩次再開課（#428）", async () => {
+    // 🔴 補刪除 `ReopenCourseDialog.test.tsx` 一併失去的覆蓋。後端有樂觀鎖兜底，但第二次
+    // 請求仍會白跑一趟並吃掉一格限流（`reopen` 與 publish / close 共用 20 次/分鐘的桶）。
+    let calls = 0
+    server.use(
+      http.post("/api/et/courses/:courseId/reopen", async () => {
+        calls += 1
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        return HttpResponse.json(reopened)
+      }),
+    )
+    const user = userEvent.setup()
+    useCourse("CLOSED")
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "再開課" }))
+    await fillDateTime(user, /課程起始時間/, "110120270900AM")
+    await fillDateTime(user, /課程訖止時間/, "123120270500PM")
+
+    const submit = screen.getByRole("button", { name: "確認再開課" })
+    await user.click(submit)
+
+    expect(submit).toBeDisabled()
+    expect(screen.getByRole("button", { name: "取消再開課" })).toBeDisabled()
+    await screen.findByText("課程已再開課")
+    expect(calls).toBe(1)
   })
 
   it("上一次再開課的缺漏不會殘留到下一次（#428）", async () => {

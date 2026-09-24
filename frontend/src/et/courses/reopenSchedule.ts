@@ -40,9 +40,11 @@ export function validateReopenSchedule(
   now: Dayjs,
 ): ReopenScheduleErrors {
   const errors: ReopenScheduleErrors = {}
-  if (!startAt) errors.start = "請選擇新的開放起始時間"
+  // ⚠️ 文案跟著欄位標籤走（「課程起始時間」/「課程訖止時間」）。原本寫「開放起始時間」
+  // 是對話框時代的措辭——當時欄位就叫那個名字，搬到編輯頁共用欄位後才對不上。
+  if (!startAt) errors.start = "請重新設定課程起始時間"
   if (!endAt) {
-    errors.end = "請選擇新的開放訖止時間"
+    errors.end = "請重新設定課程訖止時間"
     return errors
   }
   // 「晚於起始」優先於「晚於當下」：起始填了 2027 而訖止填 2026 時，「須晚於起始」
