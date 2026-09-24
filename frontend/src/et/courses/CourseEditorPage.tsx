@@ -475,16 +475,24 @@ export function EtCourseEditorPage() {
       setReopening(false)
       setReopenErrors({})
       setReopenBlockers([])
-      // 🔴 **明確寫回這兩個欄位**（#428 順帶修掉的既有缺陷）。
+      // 🔴 **起始時間的基準值要跟著走**（#428 順帶修掉的既有缺陷）。
       //
       // 表單初值的 guard 是 `loadedCourseId !== course.course_id`——只在載入到**另一門**
-      // 課程時才重設。`invalidate()` 重抓的是同一門課，故欄位會保留舊值，教師得離開再
-      // 進來才看得到新時間（2026-09-24 手測回報）。
+      // 課程時才重設。`invalidate()` 重抓的是同一門課，故 `originalStart` 會停在再開課
+      // **之前**的值，本頁便繼續以它當起始時間的下限：教師把課程補開在更早的日期
+      // （後端允許）之後，再編任何欄位按儲存就會被「不可再往前調整」擋住，而錯誤訊息
+      // 指的正是他剛剛才成功送出的時間。
       //
       // ⛔ 不可改成放寬那道 guard：它擋的是「每次 refetch 都把使用者正在輸入的內容蓋掉」
       // （見其註解）。本路徑知道新值是什麼，直接寫回即可。
-      setStartAt(dayjs(variables.openStartAt))
-      setEndAt(dayjs(variables.openEndAt))
+      //
+      // ⚠️ 刻意取 `variables` 而非 `result.open_start_at`：`originalStart` 是拿去跟
+      // `startAt?.toISOString()` 做**字串**比較的（見 `startChanged`），而伺服器格式
+      // （`...T01:00:00Z`）與 dayjs 的（`...T01:00:00.000Z`）不相等，改用回應值會讓
+      // `startChanged` 恆真。要換來源必須一併正規化格式。
+      //
+      // ℹ️ 起訖時間**不需要**在此寫回——值是教師在本頁上輸入的，本來就停在畫面上
+      //（2026-09-24 變異檢查：拿掉 `setStartAt` / `setEndAt` 全部測試照樣綠）。
       setOriginalStart(variables.openStartAt)
       invalidate()
     },
@@ -593,6 +601,17 @@ export function EtCourseEditorPage() {
   }
 
   const handleSave = () => {
+    // 🔴 **再開課模式下絕不走一般更新。**
+    //
+    // `enterReopen()` 把 `startAt` / `endAt` 清成 `null`，而這兩個正是 `toPayload()` 送給
+    // `PUT /courses/{id}` 的 `open_start_at` / `open_end_at`。後端這兩欄是選填（草稿允許
+    // 留空）且為全量覆寫，故一個帶 `null` 的 PUT 會把課程的開放期間**寫成 NULL**——而且
+    // 不會報錯：教師看到「已儲存」，學員卻再也進不來。
+    //
+    // ⛔ 不可只靠「再開課模式不顯示儲存鈕」擋（本次 security review 的 MEDIUM-1）。那是
+    // 把資料寫入的防線放在呈現層，日後任何人加回一顆儲存鈕、加自動存草稿（#335 的機制
+    // 已存在於新增模式）或把動作列抽成共用元件，都會靜默打開這條路。
+    if (reopening) return
     if (validateForm()) saveMut.mutate()
   }
 
@@ -1043,8 +1062,8 @@ export function EtCourseEditorPage() {
       */}
       {reopening && (
         <Alert severity="warning" icon={<LockOpenIcon />} sx={{ mb: 2 }}>
-          <strong>再開課：請重新設定開放起訖時間</strong> — 原本的起訖時間已清空，這是刻意的
-          （`FR-ET-US11-09` 要求重新設定一組新的期間，沿用舊值會把課程再開成一段已經過去的期間）。
+          <strong>再開課：請重新設定開放起訖時間</strong> — 原本的起訖時間已清空，這是刻意的：
+          沿用舊值會把課程再開成一段已經過去的期間，學員一樣進不來。
           <strong>尚未變更任何資料</strong>，按「取消再開課」即可還原。
         </Alert>
       )}
@@ -1542,31 +1561,31 @@ export function EtCourseEditorPage() {
                 </>
               ) : (
                 <>
-              <Button size="small" onClick={() => navigate("/et/courses")}>
-                取消
-              </Button>
-              <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
-                {status === "DRAFT" ? "儲存草稿" : "儲存"}
-              </Button>
-              {/*
-                僅草稿可發布。已發布課程的後續編輯**即時生效、不需重新發布**（AC 28），
-                故發布不是常駐動作——已發布時直接不顯示，而非顯示一顆按了會回
-                `ET_PUBLISH_002` 的按鈕。
-              */}
-              {status === "DRAFT" && (
-                <Tooltip title={isNew ? "請先儲存草稿後再發布" : ""}>
-                  <span>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      disabled={isNew || saveThenCheckMut.isPending}
-                      onClick={openPublish}
-                    >
-                      儲存並發布
-                    </Button>
-                  </span>
-                </Tooltip>
-              )}
+                  <Button size="small" onClick={() => navigate("/et/courses")}>
+                    取消
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
+                    {status === "DRAFT" ? "儲存草稿" : "儲存"}
+                  </Button>
+                  {/*
+                    僅草稿可發布。已發布課程的後續編輯**即時生效、不需重新發布**（AC 28），
+                    故發布不是常駐動作——已發布時直接不顯示，而非顯示一顆按了會回
+                    `ET_PUBLISH_002` 的按鈕。
+                  */}
+                  {status === "DRAFT" && (
+                    <Tooltip title={isNew ? "請先儲存草稿後再發布" : ""}>
+                      <span>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={isNew || saveThenCheckMut.isPending}
+                          onClick={openPublish}
+                        >
+                          儲存並發布
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  )}
                 </>
               )}
             </Stack>
