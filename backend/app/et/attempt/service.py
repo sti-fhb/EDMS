@@ -146,7 +146,28 @@ class EtAttemptService:
     # ── 引導頁 ──────────────────────────────────────────────────────────────
 
     async def intro(self, db: AsyncSession, quiz_id: int, *, user_id: str) -> QuizIntro:
-        """引導頁資訊（AC 1 / AC 2）。"""
+        """引導頁資訊（AC 1 / AC 2）。
+
+        ## 🔴 本端點**刻意沒有解鎖判定**——SA 於 2026-09-24 裁示不修（#424 收尾時提出）
+
+        事實先講清楚，免得下一個人以為是漏的：在籍學員對一個**鎖定中**的測驗打這支，
+        拿得到 `description` / `question_count` / `pass_score` / `time_limit_min` /
+        `max_retry`；且下方 `can_start` 的算式**不含鎖定項**，會回 `True`，實際上要到
+        本檔 `start` 裡的 `is_item_locked` 才擋得下來。
+
+        不修的理由：那幾個欄位是**考試規則**，不是題目——學員遲早要看到，提前知道及格分
+        與題數不構成優勢。題目本身沒有外流（`list_questions` 在此只取 `len()`）。而偽造
+        依序完訓的路徑一樣擋著。與 #424 擋下的「提前讀到教材本體」相比小一個量級，
+        而 #424 本身已評為低。
+
+        ⚠️ **裁示的前提是「沒有入口」**：今日學員走不到鎖定測驗的引導頁——側欄不連、
+        `?quiz=` 深連結在 #416 已改為鎖定時顯示提示而不進頁。若日後有人加了任何能落在
+        鎖定測驗引導頁的入口，這個裁示的前提就沒了，`can_start=True` 也會變成使用者
+        看得見的矛盾（按鈕可按、按下去被擋）。**那時要重新裁，不是沿用本段。**
+
+        📌 對照組在 `learning/service._item_nodes` 的註解：讀取側三支吐教材內容的端點
+        已於 #424 掛上判定，本端點不在其內。
+        """
         access = await self._require_access(db, quiz_id, user_id)
         quiz = access.quiz
         # 過濾與回應欄位以**同一個時點**判定——各自取 `utcnow()` 會在跨越 `OPEN_END_AT`

@@ -273,12 +273,11 @@ class EtLearningService:
         # 三處共用 `EtProgressService.is_item_locked` 這一份規則，但**各自呼叫**：新增
         # 第四種入口（又一支取檔端點、又一種作答方式）時不會自動被涵蓋，要自己掛上去。
         #
-        # ⚠️ **已知仍未涵蓋：`attempt/service.intro`**（`GET /quizzes/{id}/intro`）。在籍
-        # 學員對鎖定中的測驗打它，拿得到 `description` / `question_count` / `pass_score` /
-        # `time_limit_min` / `max_retry`；且 `can_start` 不含鎖定項，會回 `true` 而由
-        # `start` 才擋下。與本段擋的是同一類事（提前看到內容），面小很多但性質相同。
-        # #424 的範圍是「三支吐教材內容的端點」，未延伸到測驗引導頁——**別把上面那句
-        # 「讀取內容已擋」讀成涵蓋它**，那正是本 issue 在修的毛病。
+        # ⚠️ **上面那句「擋讀取內容」只涵蓋教材，不含測驗引導頁**——`attempt/service.intro`
+        # （`GET /quizzes/{id}/intro`）刻意沒有解鎖判定，SA 於 2026-09-24 裁示不修。
+        # 理由、它實際露出哪些欄位、以及那個裁示所依賴的前提（今日走不到鎖定測驗的
+        # 引導頁），都寫在 `attempt/service.intro` 的 docstring 裡——**那才是原文**，
+        # 這裡只負責讓讀到本段的人不要把涵蓋範圍讀大。
         #
         # 📌 沿革：讀取側原本不驗鎖定，只靠前端 `LearnPage` 的 `openable` 過濾。2026-09-23
         # 於 #416 review 中查出後評為「已知落差」——理由是實質目的仍被執行（預先讀得到，
