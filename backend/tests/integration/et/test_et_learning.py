@@ -116,6 +116,47 @@ async def _course_with_material(client, db, teacher: str, *, name: str = "採血
     }
 
 
+async def _second_chapter_material(client, db, teacher: str, course_id: int) -> dict:
+    """在既有課程加第二章 + 教材項目 + 影片，回傳該章的各層 id（#424）。
+
+    第二章對「剛加入、第一章還沒完成」的學員而言**是鎖定的**——依序解鎖的章節層規則
+    （`spec_us5` AC 9：前一章所有項目完成才解鎖下一章）。本 helper 的存在就是為了造出
+    那個狀態；用第一章驗不到任何東西，它對誰都是解鎖的。
+    """
+    ch = await client.post(
+        f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher)
+    )
+    assert ch.status_code == 201, ch.text
+    chapter_id = ch.json()["chapter_id"]
+
+    item = await client.post(
+        f"/api/et/chapters/{chapter_id}/items",
+        json={"item_type": ITEM_MATERIAL},
+        headers=_bearer(teacher),
+    )
+    assert item.status_code == 201, item.text
+
+    video = EtMaterialVideo(
+        material_id=item.json()["material_id"],
+        file_path="dummy/second-chapter.mp4",
+        file_name="第二章影片.mp4",
+        duration_sec=300,
+        file_size_bytes=1024,
+        sort_order=1,
+        created_user=teacher,
+        created_date=utcnow(),
+        deleted=0,
+    )
+    db.add(video)
+    await db.flush()
+    return {
+        "chapter_id": chapter_id,
+        "item_id": item.json()["item_id"],
+        "material_id": item.json()["material_id"],
+        "video_id": video.video_id,
+    }
+
+
 async def _enroll(db, user_id: str, course_id: int) -> None:
     db.add(
         EtEnrollment(
@@ -346,6 +387,111 @@ class TestVideoFile:
 
         assert r.status_code == 404
         assert r.json()["error_code"] == "ET_LEARN_001"
+
+
+class TestLockedItemNotReadable:
+    """未解鎖項目的**內容不可讀取**（#424）。
+
+    `progress/service.py` 的模組 docstring 主張「解鎖判定**必須在後端執行**，
+    `spec_us5` AC 9 寫的是系統阻擋、不是畫面不給點」。那條原則原本只落實在**寫入**側
+    （`mark_item_viewed` / `report_intervals` / 開始作答），讀取側三支端點一律沒有判定
+    ——於是在籍學員以 `material_id` 直接打 API 就讀得到尚未解鎖的教材，而唯一擋住它的
+    是前端的 `openable` 過濾，正是那段 docstring 說「不可以只靠」的東西。
+
+    ⚠️ **這不是「可以偽造依序完訓」**：寫入側早就擋住了，讀了也不會產生完成紀錄。
+    本組測試釘的是「提前看到內容」這一側。
+    """
+
+    async def test_未解鎖教材的內容不可讀取(self, client, db) -> None:
+        teacher = await _user(db, "t_lock01", ROLE_TEACHER)
+        student = await _user(db, "s_lock01")
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.get(f"/api/et/materials/{second['material_id']}/content", headers=_bearer(student))
+
+        # 404 而非 403：與本模組既有慣例一致——以 id 定址的資源不讓回應差異變成 oracle
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_LEARN_001"
+
+    async def test_已解鎖的第一章教材照常可讀(self, client, db) -> None:
+        """⚠️ 與上一條成對：少了它，「全部擋掉」也會讓上一條通過。"""
+        teacher = await _user(db, "t_lock02", ROLE_TEACHER)
+        student = await _user(db, "s_lock02")
+        ids = await _course_with_material(client, db, teacher)
+        await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+
+    async def test_擁有者預覽不受解鎖限制(self, client, db) -> None:
+        """🔴 這一條是本次變更最容易做壞的地方。
+
+        `is_item_locked` 只吃 `user_id` 算進度，而**擁有者沒有進度**——天真地掛上去會
+        讓教師打不開自己課程第二章之後的教材，而且只在「他自己的課」這個情境出現。
+
+        既有的分流可直接沿用：授權通過後「不在籍」等同「擁有者預覽」
+        （`material_content` 的既有註解已載明），預覽本來就不累積進度、不受解鎖限制
+        （#255 裁示 Q1）。
+        """
+        teacher = await _user(db, "t_lock03", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+
+        r = await client.get(f"/api/et/materials/{second['material_id']}/content", headers=_bearer(teacher))
+
+        assert r.status_code == 200, "擁有者預覽必須看得到全部內容，否則教師檢查不了自己的課"
+
+    async def test_未解鎖教材不可發播放票(self, client, db) -> None:
+        """影片走「發票 → 憑票取檔」，授權只在發票時做一次，故判定要掛在發票端。"""
+        teacher = await _user(db, "t_lock04", ROLE_TEACHER)
+        student = await _user(db, "s_lock04")
+        ids = await _course_with_material(client, db, teacher)
+        second = await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.post(f"/api/et/videos/{second['video_id']}/ticket", headers=_bearer(student))
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_LEARN_001"
+
+    async def test_已解鎖教材仍可發播放票(self, client, db) -> None:
+        """與上一條成對，理由同 `test_已解鎖的第一章教材照常可讀`。"""
+        teacher = await _user(db, "t_lock05", ROLE_TEACHER)
+        student = await _user(db, "s_lock05")
+        ids = await _course_with_material(client, db, teacher)
+        await _second_chapter_material(client, db, teacher, ids["course_id"])
+        await _enroll(db, student, ids["course_id"])
+
+        r = await client.post(f"/api/et/videos/{ids['video_id']}/ticket", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+
+    def test_三支讀取端點都掛了判定(self) -> None:
+        """🔴 **結構性測試**，因為 `doc_file` 的行為測試沒有鑑別力。
+
+        上面兩組（內容、播放票）以 200 vs 404 驗得出來，但 `doc_file` 不行——
+        **「項目鎖定」與「該 doc_id 未被此教材引用」同回 404 `ET_LEARN_001`**
+        （見 `test_他人教材之_doc_id_不可搭配自己有權的教材`），兩者外部觀察不到差異。
+        那是刻意的設計（不讓回應差異變成 oracle），但代價是行為測試分不出判定有沒有跑。
+
+        ⛔ 寫一條「鎖定時回 404」的整合測試會**看起來是覆蓋、實際不是**——拿掉判定
+        它照樣綠。與其留一條假證據，不如誠實改用結構性斷言：**三支端點都呼叫了
+        `_ensure_item_unlocked`**。
+
+        比照 #367 的 `test_conftest_gate_ordering`：行為測試不可能時，改驗結構。
+        ⚠️ 它驗的是「有沒有掛」，不是「掛對了沒」——掛對了由上面四條行為測試負責。
+        """
+        import inspect
+
+        from app.et.learning.service import EtLearningService
+
+        for name in ("material_content", "ensure_video_accessible", "doc_file"):
+            source = inspect.getsource(getattr(EtLearningService, name))
+            assert "_ensure_item_unlocked" in source, f"{name} 未掛解鎖判定——未解鎖的內容會讀得到（#424）"
 
 
 class TestVideoTicketFlow:

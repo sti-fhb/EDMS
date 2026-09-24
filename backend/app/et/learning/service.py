@@ -46,6 +46,7 @@ from app.et.learning.schemas import (
 from app.et.material.storage import resolve_within_root
 from app.et.progress.repository import EtProgressRepository
 from app.et.progress.rules import build_item_state, first_blocking_item, locked_item_ids
+from app.et.progress.service import EtProgressService
 from app.et.survey_fill.service import EtSurveyFillService
 from app.services import ParamService
 
@@ -76,11 +77,53 @@ class EtLearningService:
         params: ParamService | None = None,
         progress: EtProgressRepository | None = None,
         survey_fill: EtSurveyFillService | None = None,
+        progress_service: EtProgressService | None = None,
     ) -> None:
         self._repo = repository or EtLearningRepository()
         self._params = params or ParamService()
         self._progress = progress or EtProgressRepository()
         self._survey_fill = survey_fill or EtSurveyFillService()
+        # 解鎖判定（#424）。⚠️ 與側欄旗標共用 `EtProgressService.is_item_locked`，
+        # 不在此另算一份——兩邊分岔的表現會是「側欄顯示解鎖但取內容被擋」，
+        # 學員完全無法理解，而且不會有測試自然抓到。
+        self._progress_service = progress_service or EtProgressService()
+
+    async def _ensure_item_unlocked(self, db: AsyncSession, *, course_id: int, user_id: str, material_id: int) -> bool:
+        """未解鎖項目的**內容不得讀取**（#424）；回傳該使用者是否在籍（供呼叫端重用）。
+
+        ## 為何讀取側也要擋
+
+        `progress/service.py` 的模組 docstring 主張「解鎖判定**必須在後端執行**——
+        `spec_us5` AC 9 寫的是系統阻擋，不是畫面不給點」。那條原則原本只落實在寫入側，
+        讀取側僅靠前端 `LearnPage` 的 `openable` 過濾，正是該 docstring 說「不可以只靠」
+        的東西。SA 於 2026-09-24 裁示補上（#424 選項 A）。
+
+        ⚠️ 本判定擋的是「提前看到內容」，**不是「偽造依序完訓」**——後者早由
+        `mark_item_viewed` / `report_intervals` / 開始作答的同一判定擋住。
+
+        ## 🔴 不在籍即為擁有者預覽，一律放行
+
+        授權已由呼叫端的 `_require_access_by_course` 完成（在籍 **OR** 擁有者），故此處
+        「不在籍」只可能是擁有者。而 `is_item_locked` 只依**該使用者的進度**推導，擁有者
+        沒有進度 ⇒ 判定會說第二章以後全部鎖定。少了這道分流，教師會打不開自己課程的
+        後段教材，且只在「他自己的課」這個情境出現（#255 裁示 Q1：預覽不累積進度）。
+
+        `item_id` 取不到（教材或其項目已軟刪）時放行：那是既有的 `_DELETED` /
+        `_FILE_NOT_FOUND` 路徑要回報的事，在此攔下只會把「已刪除」講成「查無」。
+
+        Raises:
+            AppError: 404 `ET_LEARN_001`——與本模組既有慣例一致，以 id 定址的資源
+                不讓「無權」與「不存在」的回應差異變成 oracle。
+        """
+        enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
+        if not enrolled:
+            return enrolled
+        item_id = await self._repo.item_id_of_material(db, material_id)
+        if item_id is None:
+            return enrolled
+        if await self._progress_service.is_item_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
+            raise _FILE_NOT_FOUND
+        return enrolled
 
     async def structure(self, db: AsyncSession, course_id: int, *, user_id: str) -> LearnStructure:
         """ET05 左側導覽之完整結構（AC 1 / AC 2）。
@@ -278,7 +321,10 @@ class EtLearningService:
         # 授權已於上方通過（在籍 OR 擁有者），故「不在籍」在這裡等同「擁有者預覽」。
         # 預覽不累積進度（#255 裁示 Q1）——不查也不回，查了只會拿到一片 0，而那個 0 會
         # 被前端當成「看了 0%」而非「不適用」。
-        enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
+        #
+        # 解鎖判定（#424）順便把 `enrolled` 帶回來——它本來就要查這一項，分兩次查等於
+        # 在最常走的路徑上多一趟往返。
+        enrolled = await self._ensure_item_unlocked(db, course_id=course_id, user_id=user_id, material_id=material_id)
         video_progress = (
             await self._progress.video_progress_of_material(db, user_id=user_id, material_id=material_id)
             if enrolled
@@ -325,6 +371,9 @@ class EtLearningService:
         if video is None or course_id is None:
             raise _FILE_NOT_FOUND
         await self._require_access_by_course(db, course_id=course_id, user_id=user_id)
+        # 判定掛在**發票端**：取檔端點憑票放行、不重跑授權（見本方法 docstring）。
+        # 影片掛在教材下，故以 `video.material_id` 走同一支判定（#424）。
+        await self._ensure_item_unlocked(db, course_id=course_id, user_id=user_id, material_id=video.material_id)
 
     async def video_file_by_ticket(self, db: AsyncSession, video_id: int) -> tuple[str, str]:
         """憑票取檔：解析實體路徑與檔名（供 router 出 `FileResponse`）。
@@ -349,6 +398,7 @@ class EtLearningService:
         if course_id is None:
             raise _FILE_NOT_FOUND
         await self._require_access_by_course(db, course_id=course_id, user_id=user_id)
+        await self._ensure_item_unlocked(db, course_id=course_id, user_id=user_id, material_id=material_id)
         if not await self._repo.doc_belongs_to_material(db, material_id=material_id, doc_id=doc_id):
             # 未經此檢查，在籍任一課程者即可用自己有權的 material_id 搭配任意 doc_id
             # 取走全站被引用過的文件。

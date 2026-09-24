@@ -102,6 +102,22 @@ class EtLearningRepository:
             )
         )
 
+    async def item_id_of_material(self, db: AsyncSession, material_id: int) -> int | None:
+        """教材 → 其所屬之章節項目（#424 的解鎖判定要用 `ITEM_ID`）。
+
+        與 `course_id_of_material` 走同一條鏈、同樣濾軟刪除——兩者必須對同一批列成立，
+        否則會出現「拿得到 course_id 卻拿不到 item_id」而讓解鎖判定被靜默跳過。
+
+        影片不另開一支：`ET_MATERIAL_VIDEO` 掛在教材下，呼叫端取 `video.material_id`
+        後走本方法即可。
+        """
+        return await db.scalar(
+            select(EtItem.item_id).where(
+                EtItem.material_id == material_id,
+                EtItem.deleted == 0,
+            )
+        )
+
     async def course_id_of_material_any(self, db: AsyncSession, material_id: int) -> int | None:
         """教材 → 課程，**不濾軟刪除**。僅供授權判定使用。
 
