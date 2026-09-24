@@ -796,6 +796,15 @@ describe("ET02 課程關閉與再開課", () => {
     // 🔴 本設計的核心：清空只發生在畫面上
     expect(screen.queryByDisplayValue(/09\/01\/2026/)).not.toBeInTheDocument()
     expect(screen.getByText(/按「取消再開課」即可還原/)).toBeInTheDocument()
+
+    // 🔴 裁示原文是「清空…並用紅色框起來提醒使用者重新設定時間」——紅框本身就是提醒，
+    // 等按下「確認再開課」才變紅等於少了一次提示。
+    for (const label of [/課程起始時間/, /課程訖止時間/]) {
+      const field = screen.getAllByLabelText(label).find((el) => el.getAttribute("role") === "group")
+      expect(field?.className).toMatch(/Mui-error/)
+    }
+    // ⚠️ 紅框歸紅框：還沒動手的人不該看到錯誤訊息
+    expect(screen.queryByText("請重新設定課程起始時間")).not.toBeInTheDocument()
   })
 
   it("取消再開課會把清掉的時間還原（#428）", async () => {
