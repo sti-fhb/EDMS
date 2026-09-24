@@ -134,12 +134,6 @@ export function MaterialDialog({
   onSave,
   onUploadVideo,
 }: MaterialDialogProps) {
-  // 對話框本體——供「教材文件」下拉選單當作溢出邊界（#413），見該處註解。
-  //
-  // ⚠️ 用 **callback ref 寫進 state** 而非 `useRef`：邊界要在 render 期間讀取，而
-  // `ref.current` 在 render 期間是禁止讀的（ESLint `Cannot access refs during render`），
-  // 且第一次 render 時它必然是 `null`——選單會靜默退回預設的視窗邊界，也就是沒修。
-  const [paperEl, setPaperEl] = useState<HTMLDivElement | null>(null)
   const [name, setName] = useState("")
   const [descriptionHtml, setDescriptionHtml] = useState("")
   const [docs, setDocs] = useState<DocRow[]>([])
@@ -250,11 +244,14 @@ export function MaterialDialog({
       onClose={() => onClose(isDirty)}
       maxWidth="md"
       fullWidth
-      // `paperRef` 供「教材文件」的下拉選單把自己限制在對話框範圍內（#413），見該處註解。
-      slotProps={{ paper: { ref: setPaperEl, sx: { height: "min(680px, 90vh)" } } }}
+      slotProps={{ paper: { sx: { height: "min(680px, 90vh)" } } }}
     >
       <DialogTitle>{readOnly ? "檢視教材" : "編輯教材"}</DialogTitle>
-      <DialogContent dividers>
+      {/* 🔴 `position: relative` 是給下拉選單當定位祖先用的（#413，2026-09-24）。
+          少了它，`disablePortal` 的 popper 會以**對話框本體**為定位基準而逃出本捲動區，
+          撐大外層的捲動範圍——畫面上會同時出現內外兩條捲軸。設定之後選單被關在這一層，
+          只留內側那條。 */}
+      <DialogContent dividers sx={{ position: "relative" }}>
         {loading ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress />
@@ -397,23 +394,37 @@ export function MaterialDialog({
                   value={null}
                   blurOnSelect
                   onChange={(_, selected) => selected && addDoc(selected)}
-                  // 🔴 **把選單限制在對話框內**（#413）。MUI 預設把 popper portal 到
-                  // `body`，`flip` 的邊界因此是**視窗**——對話框下方還有視窗空間時它
-                  // 不會往上翻，選單就長到對話框外面去（手測回報「下拉選單超出去」）。
+                  // 🔴 **選單必須留在對話框內**（#413，2026-09-24 裁示）。
                   //
-                  // ⚠️ 這不是「對話框不夠高」：它已經是 `min(680px, 90vh)`，在 720p 上
-                  // 就是 648px、幾乎滿版，再加高也沒有空間。⛔ 不要改成調高度。
+                  // MUI 預設把 popper portal 到 `body`，於是它不受對話框約束、直接長到
+                  // 外面去（手測回報「下拉選單超出去」）。`disablePortal` 讓它變成
+                  // `DialogContent` 的子元素，**被捲動容器裁切**——選單只在對話框內呈現，
+                  // 超出的部分不顯示，使用者往下捲即可看到其餘選項。
                   //
-                  // ⛔ 也不要改用 `disablePortal`：那會讓選單變成 `DialogContent` 的子
-                  // 元素，被它的捲動容器裁掉——症狀從「長出去」變成「只看得到半截」。
+                  // ⚠️ 「會被裁切」是**要的行為**，不是副作用。此處原本的註解把它列為
+                  // ⛔ 不可用（理由寫「症狀從長出去變成只看得到半截」），那是把使用者
+                  // 的需求猜錯了——裁切正是需求本身。
+                  //
+                  // ⛔ 兩條走不通的路，不要再試：
+                  //   1. 調對話框高度——欄位在**捲動區**內，捲到底時它下方的空間固定
+                  //      （說明文字＋內距＋按鈕列約 110px），加高只是一次看到更多內容。
+                  //   2. popper 的 `flip` / `preventOverflow` boundary 指向對話框本體
+                  //      ——2026-09-23 實測於 GCP **完全無效**；已排除 ref 沒轉進去
+                  //      （jsdom 驗過拿得到 HTMLElement）與 MUI 不吃 modifiers 兩種解釋。
                   slotProps={{
                     popper: {
-                      modifiers: [
-                        { name: "flip", options: { boundary: paperEl, padding: 8 } },
-                        { name: "preventOverflow", options: { boundary: paperEl, padding: 8 } },
-                      ],
+                      disablePortal: true,
+                      // 🔴 **關掉 `flip`，一律往下開。**
+                      //
+                      // `disablePortal` 讓 popper 的裁切範圍變成內容區，於是 MUI 預設的
+                      // `flip` 判定「下方空間不足」就自動往上翻——選單蓋住上方的影片清單，
+                      // 2026-09-24 實測比未修正前更糟。
+                      //
+                      // 往上開在這裡沒有意義：選單本來就該被裁切，超出的部分由使用者
+                      // 往下捲即可看到。⛔ 不要為了「讓它自己找空間」而把 flip 打開。
+                      modifiers: [{ name: "flip", enabled: false }],
                     },
-                    // 選項再多也不把對話框塞爆；超過即自己捲動。
+                    // 選項再多也不把對話框塞爆；超過即在選單內自己捲動。
                     listbox: { sx: { maxHeight: 240 } },
                   }}
                   renderOption={(props, option) => (
@@ -449,7 +460,11 @@ export function MaterialDialog({
           </Stack>
         )}
       </DialogContent>
-      <DialogActions>
+      {/* 🔴 **按鈕列要壓在下拉選單之上**（#413，2026-09-24 裁示）。
+          `disablePortal` 的 popper 逃出了 `DialogContent` 的裁切範圍（其定位祖先不是
+          `DialogContent`），會蓋住「取消／儲存」。墊高 z-index 並給底色，讓選單鑽到
+          按鈕列**底下**——按鈕永遠點得到，選單被這條橫幅切齊。 */}
+      <DialogActions sx={{ position: "relative", zIndex: (t) => t.zIndex.modal + 1, bgcolor: "background.paper" }}>
         <Button onClick={() => onClose(isDirty)}>{readOnly ? "關閉" : "取消"}</Button>
         {!readOnly && (
           <Button

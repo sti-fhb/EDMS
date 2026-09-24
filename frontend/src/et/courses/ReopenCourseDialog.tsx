@@ -91,10 +91,16 @@ export function ReopenCourseDialog({
   const blocked = blockers.length > 0
 
   return (
-    // `md` 而非 `sm`（#413）：兩個 `DateTimePicker` 並排時，`sm` 讓每個欄位只剩約
-    // 240px，而桌面版選擇器的「日曆 + 時 + 分 + AM/PM」四欄比欄位本身還寬，於是整個
-    // 長到對話框外面去（手測回報「日曆都超出去了」）。
-    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
+    // ⚠️ **日曆仍會超出本對話框，這是已知且刻意不在此修的**（#413 → #428）。
+    //
+    // #419 曾把 `maxWidth` 由 `sm` 改為 `md`，理由寫「欄位太窄裝不下選擇器的四欄」
+    // ——那個診斷是**錯的**：溢出是**垂直**的。桌面版 `DateTimePicker` 的彈出層約
+    // 390px 高，而本對話框只有約 250px，**彈出層比對話框本身還高**，加寬或加高都
+    // 難看。實測於 GCP 確認 `md` 完全無效，已改回 `sm`。
+    //
+    // ⛔ 不要再嘗試在這裡修版面。2026-09-24 裁示改為**就地清空編輯頁的起訖時間並
+    // 標示**、移除本對話框（#428），屆時這個問題會隨之消失。
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>再開課</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
