@@ -584,9 +584,14 @@ class TestLockedItemStillReadableWhenItShouldBe:
     async def test_已完成的項目被排到未完成項目之後仍可讀(self, client, db) -> None:
         """教師事後在前面插入項目，**不得把學員已學過的內容鎖回去**。
 
-        `is_item_locked` 的「已完成者永不鎖定」捷徑正是為這件事存在。順序規則本身會說
-        「你前面有一項沒完成 ⇒ 你被鎖」，若讀取端只問順序不問完成，學員昨天看完的教材
-        今天會打不開——而他什麼都沒做錯，教師也不知道自己做了什麼。
+        順序規則本身會說「你前面有一項沒完成 ⇒ 你被鎖」，若讀取端只問順序不問完成，
+        學員昨天看完的教材今天會打不開——而他什麼都沒做錯，教師也不知道自己做了什麼。
+
+        ⚠️ **「已完成永不鎖定」在兩層各實作了一次，而且互相冗餘**（2026-09-24 以變異
+        驗證）：`progress/rules.locked_item_ids` 的 `state.completed or ...`、與
+        `progress/service.is_item_locked` 開頭的捷徑。**只拿掉其中一層，本測試照樣綠**
+        ——兩層都拿掉才紅。所以本條釘的是**行為**，不是任一層的實作；別把它讀成
+        「某一層有測試保護」而放心去動那一層。
         """
         teacher = await _user(db, "t_lock07", ROLE_TEACHER)
         student = await _user(db, "s_lock07")
