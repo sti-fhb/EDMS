@@ -4,9 +4,11 @@
 走到 service 時必然合法。業務規則（選項數、正確選項數符題型）才進 rules。
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator
+
+from app.core.schema_types import SAFE_SINGLE_LINE_PATTERN
 
 # `QUIZ_NAME` 為 VARCHAR(100)、`STEM` 為 VARCHAR(500)、`OPTION_TEXT` 為 VARCHAR(200)。
 QUIZ_NAME_MAX_LEN = 100
@@ -35,7 +37,16 @@ class QuizUpdateReq(BaseModel):
     及格分數」也得把整份題庫重送，且與 FR-ET-US3-15「不同實體並行編輯互不衝突」相衝。
     """
 
-    quiz_name: str = Field(min_length=1, max_length=QUIZ_NAME_MAX_LEN)
+    #: 拒內部控制 / 斷行字元——**測驗名稱會進入通知信內文**（範本 `QUIZ_RETEST_REQUIRED`
+    #: 之 `{QUIZ_NAME}`：「課程「{COURSE_NAME}」的測驗「{QUIZ_NAME}」內容已更新」）。
+    #: 與 `course_name` / `chapter_name` 同一條理由，見 `core/schema_types.py`。
+    #:
+    #: ⚠️ 本缺口由 #423 的 AC 5 盤點抓到——該 issue 的正文只點名章節名稱，但「同一條
+    #: 推理只是當初沒套上去」對測驗名稱一樣成立。
+    quiz_name: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=QUIZ_NAME_MAX_LEN, pattern=SAFE_SINGLE_LINE_PATTERN),
+    ]
     #: 測驗說明——**純文字**（SA 裁示 #203 Q1），不經 WYSIWYG、不走 HTML 消毒。
     description: str | None = Field(default=None, max_length=QUIZ_DESCRIPTION_MAX_LEN)
     pass_score: int = Field(ge=0, le=100)
