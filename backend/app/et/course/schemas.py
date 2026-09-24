@@ -261,6 +261,12 @@ class ItemRow(BaseModel):
     material_id: int | None
     quiz_id: int | None
     version: int
+    #: 測驗目前題數；非測驗項目為 `None`（#410 AC 3）。
+    #:
+    #: ⚠️ 0 與 `None` 意義不同：`0` 是「這是測驗、但一題都沒有」——那是教師端要看見的
+    #: 異常（學員開不起來、該項目永遠拿不到 `IS_COMPLETED`）；`None` 是「這不是測驗」。
+    #: 合併成 0 會讓每個教材項目都被標成異常。
+    question_count: int | None = None
 
 
 class ChapterItem(BaseModel):

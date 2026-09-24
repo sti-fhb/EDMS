@@ -12,9 +12,11 @@ import ArticleOutlinedIcon from "@mui/icons-material/ArticleOutlined"
 import ChecklistIcon from "@mui/icons-material/Checklist"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator"
+import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
+import Tooltip from "@mui/material/Tooltip"
 import IconButton from "@mui/material/IconButton"
 import ListItemIcon from "@mui/material/ListItemIcon"
 import ListItemText from "@mui/material/ListItemText"
@@ -92,6 +94,24 @@ function ItemRowView({ item, readOnly, onOpen, onDelete }: ItemRowViewProps) {
             {item.title || UNNAMED_ITEM_LABEL}
           </Typography>
         </Button>
+        {/* #410 AC 3：零題的測驗在教師端要看得見。發布檢核只在**發布那一刻**跑
+            （`evaluate_publish` 全專案只有一個呼叫點），之後把題目刪光不擋也不提示，
+            而學員會開不起來、該項目永遠拿不到完成 → 整門課永遠無法完課。
+            ⛔ **只提示、不擋操作**：教師正要補題目，擋住他等於逼他無法修復。
+            ⚠️ 判定用 `=== 0` 而非 falsy——`null` 是「不是測驗」，用 `!item.question_count`
+            會把每個教材項目都標成異常。 */}
+        {item.question_count === 0 && (
+          <Tooltip title="學員無法作答；請補上題目">
+            <Chip
+              size="small"
+              color="warning"
+              variant="outlined"
+              icon={<WarningAmberOutlinedIcon />}
+              label="尚無題目"
+              aria-label={`${item.title || UNNAMED_ITEM_LABEL}：尚無題目，學員無法作答`}
+            />
+          </Tooltip>
+        )}
         {!readOnly && (
           <IconButton
             size="small"

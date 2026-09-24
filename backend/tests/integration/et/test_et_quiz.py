@@ -15,7 +15,14 @@ from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
-from app.et.constants import ATTEMPT_IN_PROGRESS, ITEM_QUIZ, QUESTION_MULTIPLE, QUESTION_SINGLE, ROLE_TEACHER
+from app.et.constants import (
+    ATTEMPT_IN_PROGRESS,
+    ITEM_MATERIAL,
+    ITEM_QUIZ,
+    QUESTION_MULTIPLE,
+    QUESTION_SINGLE,
+    ROLE_TEACHER,
+)
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM
 from app.et.roles.models import EtUserRole
 
@@ -672,3 +679,115 @@ class TestDeleteQuestion:
         question = await _add_question(client, owner, qid)
         r = await client.delete(f"/api/et/questions/{question['question_id']}", headers=_bearer(other))
         assert r.status_code == 403
+
+
+# ── #410：已發布課程的測驗不得被刪到 0 題 ────────────────────
+
+
+async def test_已發布課程刪最後一題被擋(db, client):
+    """🔴 發布檢核是**一次性**的，`evaluate_publish` 全專案只有一個呼叫點（`publish_service._blockers`），
+    `publish` 與 `reopen` 共用——之後教師怎麼改都不會再被檢核到。#410 就是那個時間差。
+
+    後果不是「發布出一個 0 題測驗」，是**發布後才被刪成 0 題**：
+    `attempt/service.start` 對 0 題測驗回 404（建零題 attempt 會白吃一次次數），該項目
+    因此永遠拿不到 `IS_COMPLETED`，而完課要求每一項皆完成 → **整門課永遠無法完課**，
+    連帶課後問卷入口（US13 AC 1）與線下核可（US16）都拿不到。教師端則完全沒有訊號。
+    """
+    uid = await _user(db, "q410a")
+    cid, qid = await _quiz(client, uid)
+    q = await _add_question(client, uid, qid)
+    await _publish_course(db, cid)
+
+    r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 409, r.text
+    assert r.json()["error_code"] == "ET_QUESTION_005"
+    # 題目必須還在——擋下來卻已經刪掉等於沒擋
+    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert len(left.json()["questions"]) == 1
+
+
+async def test_已發布課程刪非最後一題照常(db, client):
+    """回歸護欄：守門只擋「刪到 0 題」，不是禁止已發布課程刪題。"""
+    uid = await _user(db, "q410b")
+    cid, qid = await _quiz(client, uid)
+    q1 = await _add_question(client, uid, qid, points=50)
+    await _add_question(client, uid, qid, points=50)
+    await _publish_course(db, cid)
+
+    r = await client.delete(f"/api/et/questions/{q1['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 204, r.text
+    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert len(left.json()["questions"]) == 1
+
+
+async def test_草稿課程刪最後一題照常(db, client):
+    """⚠️ 草稿**不受此限**——教師逐題建立時必然經過 0 題的狀態（AC 2）。
+
+    把守門套成「一律不許刪到 0 題」會讓「建了一題又想換掉」變成做不到。
+    """
+    uid = await _user(db, "q410c")
+    _, qid = await _quiz(client, uid)  # 不發布
+    q = await _add_question(client, uid, qid)
+
+    r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 204, r.text
+    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert left.json()["questions"] == []
+
+
+async def test_已關閉課程刪最後一題不受限(db, client):
+    """⚠️ 守門範圍是「已發布**且**學員仍可作答」——`is_effectively_closed` 的課程學員
+    本來就不能作答，0 題測驗傷不到任何人，不需納入（issue 注意事項明列）。
+    """
+    from datetime import timedelta
+
+    from app.et.constants import COURSE_PUBLISHED
+    from app.et.course.models import EtCourse
+
+    uid = await _user(db, "q410d")
+    cid, qid = await _quiz(client, uid)
+    q = await _add_question(client, uid, qid)
+    # 已發布但閱課期間已過 → is_effectively_closed
+    await db.execute(
+        update(EtCourse)
+        .where(EtCourse.course_id == cid)
+        .values(status=COURSE_PUBLISHED, open_end_at=utcnow() - timedelta(days=1))
+    )
+    await db.flush()
+
+    r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 204, r.text
+
+
+async def test_課程詳細頁帶出題數且教材為_None(db, client):
+    """#410 AC 3：教師端要看得出哪些測驗是 0 題。
+
+    🔴 **`0` 與 `None` 不可合併**：教材項目的 `QUIZ_ID` 是 NULL，題數子查詢對它同樣
+    得到 0。少一道「非測驗換成 `None`」，**每一個教材項目都會被標成 0 題異常**——
+    而那種錯 CI 會全綠（型別對、數字也對，只是意思反了）。
+
+    本條同時釘住三種狀態：教材（`None`）、零題測驗（`0`）、有題目的測驗（`1`）。
+    """
+    uid = await _user(db, "q410e")
+    created = await client.post(_COURSES, json={"course_name": "題數"}, headers=_bearer(uid))
+    cid = created.json()["course_id"]
+    ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(uid))
+    chapter_id = ch.json()["chapter_id"]
+    for item_type, title in ((ITEM_MATERIAL, "講義"), (ITEM_QUIZ, "零題小考"), (ITEM_QUIZ, "有題小考")):
+        r = await client.post(
+            f"/api/et/chapters/{chapter_id}/items",
+            json={"item_type": item_type, "title": title},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 201, r.text
+        if title == "有題小考":
+            await _add_question(client, uid, r.json()["quiz_id"])
+
+    detail = await client.get(f"{_COURSES}/{cid}", headers=_bearer(uid))
+
+    by_title = {i["title"]: i["question_count"] for i in detail.json()["chapters"][0]["items"]}
+    assert by_title == {"講義": None, "零題小考": 0, "有題小考": 1}
