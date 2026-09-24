@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import type { FormEvent } from "react"
 
-import { AUTH_BG_GRADIENT } from "./authBackground"
+import { AUTH_BG_GRADIENT, AUTH_SUBTITLE_COLOR } from "./authBackground"
 import { ForgotPasswordForm } from "./ForgotPasswordForm"
 import { RegisterForm } from "./RegisterForm"
 import { authApi } from "./authService"
@@ -88,11 +88,16 @@ export function LoginOverlay() {
       }}
     >
       <Card sx={{ width: 400, maxWidth: "100%", p: 4, position: "relative" }}>
-        <Typography variant="h5" align="center" sx={{ fontWeight: 600, color: "#1b5e20" }}>
-          EDMS
+        {/*
+          標題區對齊主專案 TBMS 之結構（#421）：主標為系統中文名（h5 / 600 / 主色）、
+          副標為英文名（13px / 次要色）。**刻意不套用 TBMS 的品牌綠**——EDMS 有自己的
+          `primary.main`，登入頁標題與頂列 AppBar 同色才是系統內一致；副標色兩邊本就相同。
+        */}
+        <Typography variant="h5" align="center" sx={{ fontWeight: 600, color: "primary.main" }}>
+          教育訓練文件管理系統
         </Typography>
-        <Typography align="center" sx={{ color: "#78716c", fontSize: 13, mb: 2 }}>
-          教育文件管理系統
+        <Typography align="center" sx={{ color: AUTH_SUBTITLE_COLOR, fontSize: 13, mb: 2 }}>
+          Education &amp; Document Management System
         </Typography>
         {forgotMode ? (
           <ForgotPasswordForm onBack={() => setForgotMode(false)} />

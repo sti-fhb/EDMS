@@ -1,5 +1,15 @@
 /** 統一 shell 側欄的導覽群組（#89 P1）。P1「系統管理者後台」；DM「文件管理」群組於 P4（#127）加入。 */
 export interface NavItem {
+  /**
+   * 畫面代號（#421）：**取自各模組 spec 之〈畫面代號對照表〉，不得自訂**
+   * （`docs/specs/{dp,et,dm}/spec.md`）。格式為模組碼 + 兩位數字。
+   *
+   * 編號在側欄中不連續是正常的——部分畫面沒有側欄入口：`DP00` 為登入後主頁（中性歡迎頁、
+   * index route）、`DP01`~`DP04` 為登入 / 註冊 / 忘記密碼 / 個資頁、`ET02` 課程建立為課程列表
+   * 之子頁、`DM02` 文件詳細頁由清單進入。
+   * 交付甲方的文件以此編號標示作業，畫面上必須對得起來。
+   */
+  code: string
   label: string
   path: string
   /** 個人專區入口可見性（US9 FR-004）：需具編輯者或審核者角色（DM-local access 判定，SA 裁示 Q1=C）。 */
@@ -42,14 +52,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // 群組門檻（requiresModule）只判「有無任一 ET 角色」；群組內再依角色分流
       // （#247）——ET 三種角色可任意組合，純學員看到「課程列表 / 學員」等於看到
       // 點進去只會 403 的項目，純教師看到「我的課程」則是一個空清單。
-      { label: "課程列表", path: "/et/courses", requiresEtManage: true },
-      { label: "學員", path: "/et/students", requiresEtManage: true },
+      { code: "ET01", label: "課程列表", path: "/et/courses", requiresEtManage: true },
+      { code: "ET03", label: "學員", path: "/et/students", requiresEtManage: true },
+      { code: "ET04", label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
       // 核可查詢**兩種角色都要**，但看到的內容不同：學員查自己已通過核可的課程；
       // 教師依姓名查——**已通過**的涵蓋全部課程，**不通過 / 已撤銷 / 考核備註**僅限
       // 自己所開設的課程（US17 SA 裁示 C，見 `app/et/approval/query_rules.py`）。
       // 不掛任何角色旗標＝具任一 ET 角色即顯示；資料邊界完全由後端負責。
-      { label: "核可查詢", path: "/et/approvals" },
-      { label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
+      { code: "ET10", label: "核可查詢", path: "/et/approvals" },
     ],
   },
   {
@@ -58,15 +68,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "文件管理",
     requiresModule: "DM",
     items: [
-      { label: "文件庫", path: "/dm/library" },
+      { code: "DM01", label: "文件庫", path: "/dm/library" },
       // 簽核中心（#250）：限 DM_REVIEWER——原本管理者 / 編輯者也看得到，但清單依
       // assigned_reviewer=登入者 過濾，點進去永遠空白（SA Q3=A 裁示嚴格只認審核者）
-      { label: "簽核中心", path: "/dm/review", requiresDmReviewerAccess: true },
-      { label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
-      { label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
-      { label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
+      { code: "DM04", label: "簽核中心", path: "/dm/review", requiresDmReviewerAccess: true },
+      { code: "DM06", label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
+      { code: "DM07", label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
+      { code: "DM08", label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
       // US13 KPI 為管理者功能，與路由守衛 RequireDmAdmin 一致（#250 / main 同時補上此 flag）
-      { label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
+      { code: "DM10", label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
     ],
   },
   {
@@ -76,12 +86,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "系統管理者後台",
     requiresAnyModuleAdmin: true,
     items: [
-      { label: "使用者管理", path: "/dp/users" },
-      { label: "系統參數", path: "/dp/params" },
-      { label: "通知範本", path: "/dp/templates" },
-      { label: "角色 / 權限", path: "/dp/roles" },
-      { label: "稽核日誌", path: "/dp/audit" },
-      { label: "排程總覽", path: "/dp/schedule" },
+      // 標籤一律採用 spec 對照表之畫面名稱（#421）：交付文件以畫面碼 + 名稱標示作業，
+      // 側欄若用簡稱（如「稽核日誌」對 DP09「操作記錄查詢」），甲方對不起來。
+      { code: "DP05", label: "使用者管理", path: "/dp/users" },
+      { code: "DP06", label: "權限管理", path: "/dp/roles" },
+      { code: "DP07", label: "系統參數與清單維護", path: "/dp/params" },
+      { code: "DP08", label: "通知範本維護", path: "/dp/templates" },
+      { code: "DP09", label: "操作記錄查詢", path: "/dp/audit" },
+      { code: "DP10", label: "排程作業總覽", path: "/dp/schedule" },
     ],
   },
 ]

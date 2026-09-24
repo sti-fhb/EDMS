@@ -58,9 +58,12 @@ describe("LoginOverlay", () => {
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authed"))
   })
 
-  it("顯示副標「教育文件管理系統」與版號（忘記密碼下方）", async () => {
+  it("主標為系統中文名、副標為英文名，並顯示版號（#421 對齊主專案）", async () => {
     renderLogin()
-    expect(screen.getByText("教育文件管理系統")).toBeInTheDocument()
+    expect(screen.getByText("教育訓練文件管理系統")).toBeInTheDocument()
+    expect(screen.getByText("Education & Document Management System")).toBeInTheDocument()
+    // 標題區不再出現縮寫「EDMS」（#421）
+    expect(screen.queryByText("EDMS")).not.toBeInTheDocument()
     // 版號取自公開 /api/version（MSW 預設 1.0.0-test）
     expect(await screen.findByText("版本 1.0.0-test")).toBeInTheDocument()
   })

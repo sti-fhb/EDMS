@@ -19,7 +19,8 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   return (
     <Box sx={{ display: "flex" }}>
-      <AppHeader title="EDMS 教育訓練文件管理系統" onMenuClick={() => setSidebarOpen((open) => !open)} />
+      {/* #421：標題移除縮寫「EDMS」，只留系統中文名（與登入頁主標一致） */}
+      <AppHeader title="教育訓練文件管理系統" onMenuClick={() => setSidebarOpen((open) => !open)} />
       {sidebarOpen && (
         <Drawer
           variant="permanent"

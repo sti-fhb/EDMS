@@ -12,7 +12,8 @@ import { AuthProvider } from "../auth/AuthProvider"
 import { WelcomePage } from "../home/WelcomePage"
 import { muiTheme } from "../styles/muiTheme"
 
-const HEADER_TITLE = "EDMS 教育訓練文件管理系統"
+// #421：頂列標題移除縮寫「EDMS」，只留系統中文名
+const HEADER_TITLE = "教育訓練文件管理系統"
 
 /**
  * 以真實 AuthProvider + memory router 渲染「RootLayout → AppShell → WelcomePage」，
@@ -73,8 +74,8 @@ describe("AppShell 統一導覽殼", () => {
     await screen.findByText(HEADER_TITLE)
     // 已登入：登入表單已撤除
     expect(screen.queryByLabelText("帳號（Email）")).not.toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "個資選單" }))
-    await user.click(screen.getByRole("menuitem", { name: "登出" }))
+    // #421：登出改為頂列上的獨立按鈕，不再收在個資下拉選單裡
+    await user.click(screen.getByRole("button", { name: "登出" }))
     // 登出後 LoginOverlay 重現（回登入頁）
     await waitFor(() => expect(screen.getByLabelText("帳號（Email）")).toBeInTheDocument())
   })
