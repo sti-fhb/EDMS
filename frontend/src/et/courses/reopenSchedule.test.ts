@@ -17,20 +17,20 @@ describe("validateReopenSchedule（US11 / #288）", () => {
 
   it("起始留空 → 標示起始欄", () => {
     expect(validateReopenSchedule(null, NOW.add(30, "day"), NOW)).toEqual({
-      start: "請選擇新的開放起始時間",
+      start: "請重新設定課程起始時間",
     })
   })
 
   it("訖止留空 → 標示訖止欄", () => {
-    expect(validateReopenSchedule(NOW, null, NOW).end).toBe("請選擇新的開放訖止時間")
+    expect(validateReopenSchedule(NOW, null, NOW).end).toBe("請重新設定課程訖止時間")
   })
 
   it("兩者皆留空 → 兩欄都標示", () => {
     // FR-ET-US11-09「強制要求重新設定一組新的起訖時間」——視窗兩欄皆不預填，
     // 教師直接按確認時必須兩欄都指出來，只標一欄他會以為另一欄沒問題。
     const errors = validateReopenSchedule(null, null, NOW)
-    expect(errors.start).toBe("請選擇新的開放起始時間")
-    expect(errors.end).toBe("請選擇新的開放訖止時間")
+    expect(errors.start).toBe("請重新設定課程起始時間")
+    expect(errors.end).toBe("請重新設定課程訖止時間")
   })
 
   it("訖止早於起始 → 報「須晚於起始」而非「須晚於目前時間」", () => {

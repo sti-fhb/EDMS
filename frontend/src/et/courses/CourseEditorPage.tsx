@@ -39,10 +39,12 @@ import { NewItemDialog } from "./NewItemDialog"
 import { PublishDialog } from "./PublishDialog"
 import { QuizDialog } from "./QuizDialog"
 import { RequireRetestDialog } from "./RequireRetestDialog"
-import { ReopenCourseDialog } from "./ReopenCourseDialog"
 import { SurveyDialog } from "./SurveyDialog"
 import { SurveySection } from "./SurveySection"
+import { BlockerList } from "./BlockerList"
 import { coursesApi } from "./coursesService"
+import { validateReopenSchedule } from "./reopenSchedule"
+import type { ReopenScheduleErrors } from "./reopenSchedule"
 import type { MaterialSavePayload } from "./MaterialDialog"
 import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
 import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
@@ -164,7 +166,18 @@ export function EtCourseEditorPage() {
   const [publishOpen, setPublishOpen] = useState(false)
   const [blockers, setBlockers] = useState<PublishBlocker[]>([])
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
-  const [reopenOpen, setReopenOpen] = useState(false)
+  /**
+   * 再開課「就地編輯」模式（#428）。
+   *
+   * 🔴 **進入模式時只清空畫面上的欄位，DB 完全不動。** 教師中途反悔時按「取消再開課」
+   * 即可還原（值從 `course` 取回），不會留下一門起訖時間被清掉的課程——這是本設計最
+   * 容易漏的一塊，原本的對話框有「取消」，就地編輯沒有。
+   *
+   * ⛔ 不要改成「進入模式就先送一次清空的更新」：那會讓反悔變成需要補救的狀態，而且
+   * 中途關掉瀏覽器就回不去了。
+   */
+  const [reopening, setReopening] = useState(false)
+  const [reopenErrors, setReopenErrors] = useState<ReopenScheduleErrors>({})
   /**
    * 再開課重跑發布檢核的缺漏——與 `blockers`（發布用）分開。
    *
@@ -229,6 +242,15 @@ export function EtCourseEditorPage() {
     setStartAt(course.open_start_at ? dayjs(course.open_start_at) : null)
     setEndAt(course.open_end_at ? dayjs(course.open_end_at) : null)
     setOriginalStart(course.open_start_at)
+    // 🔴 **再開課模式也要跟著退出**（#428 code review 的 HIGH）。
+    //
+    // `courses/:courseId` 這條路由沒有 `key={courseId}`，React Router 只換參數時**不會
+    // 重新掛載元件**，故 `reopening` 會跟著使用者從課程 A 帶到課程 B（上一頁 / 下一頁、
+    // 直接改網址都會走到）。結果是一門根本不是關閉中的課程顯示著再開課模式：一般儲存
+    // 被擋死，而按下「確認再開課」是對**錯的課程**送出請求。
+    setReopening(false)
+    setReopenErrors({})
+    setReopenBlockers([])
   }
 
   const isNew = courseId === undefined
@@ -276,6 +298,18 @@ export function EtCourseEditorPage() {
    */
   const startedInPast = originalStart !== null && dayjs(originalStart).isBefore(dayjs())
   const startFloor = startedInPast ? dayjs(originalStart) : dayjs()
+
+  /**
+   * 再開課模式下**一進入就是紅框**（欄位空著即為未完成），不等按下「確認再開課」。
+   *
+   * 裁示原文是「清空課程開始和結束的時間，並用紅色框起來提醒使用者重新設定時間」——
+   * 紅框本身就是提醒，等送出才變紅等於少了一次提示。
+   *
+   * ⚠️ 紅框歸紅框，**helperText 仍只在送出後才出現**：一進畫面就跳「請重新設定…」是對
+   * 還沒動手的人報錯，看起來像自己做錯了什麼。
+   */
+  const reopenStartEmpty = reopening && startAt === null
+  const reopenEndEmpty = reopening && endAt === null
 
   const toPayload = (): CoursePayload => ({
     course_name: form.course_name.trim(),
@@ -455,16 +489,68 @@ export function EtCourseEditorPage() {
         throw err
       }
     },
-    onSuccess: (result) => {
-      // `undefined` = 檢核未通過，缺漏已顯示在視窗內，視窗要留著讓教師看
+    onSuccess: (result, variables) => {
+      // `undefined` = 檢核未通過，缺漏已顯示在頁面上，模式要留著讓教師處理
       if (result === undefined) return
       message.success("課程已再開課")
-      setReopenOpen(false)
+      setReopening(false)
+      setReopenErrors({})
       setReopenBlockers([])
+      // 🔴 **起始時間的基準值要跟著走**（#428 順帶修掉的既有缺陷）。
+      //
+      // 表單初值的 guard 是 `loadedCourseId !== course.course_id`——只在載入到**另一門**
+      // 課程時才重設。`invalidate()` 重抓的是同一門課，故 `originalStart` 會停在再開課
+      // **之前**的值，本頁便繼續以它當起始時間的下限：教師把課程補開在更早的日期
+      // （後端允許）之後，再編任何欄位按儲存就會被「不可再往前調整」擋住，而錯誤訊息
+      // 指的正是他剛剛才成功送出的時間。
+      //
+      // ⛔ 不可改成放寬那道 guard：它擋的是「每次 refetch 都把使用者正在輸入的內容蓋掉」
+      // （見其註解）。本路徑知道新值是什麼，直接寫回即可。
+      //
+      // ⚠️ 刻意取 `variables` 而非 `result.open_start_at`：`originalStart` 是拿去跟
+      // `startAt?.toISOString()` 做**字串**比較的（見 `startChanged`），而伺服器格式
+      // （`...T01:00:00Z`）與 dayjs 的（`...T01:00:00.000Z`）不相等，改用回應值會讓
+      // `startChanged` 恆真。要換來源必須一併正規化格式。
+      //
+      // ℹ️ 起訖時間**不需要**在此寫回——值是教師在本頁上輸入的，本來就停在畫面上
+      //（2026-09-24 變異檢查：拿掉 `setStartAt` / `setEndAt` 全部測試照樣綠）。
+      setOriginalStart(variables.openStartAt)
       invalidate()
     },
     onError: handleError,
   })
+
+  /** 進入再開課模式：**只清空畫面**，DB 不動（#428）。 */
+  const enterReopen = () => {
+    setReopenBlockers([])
+    setReopenErrors({})
+    setStartAt(null)
+    setEndAt(null)
+    setReopening(true)
+  }
+
+  /** 取消再開課：把欄位還原成伺服器上的值。 */
+  const cancelReopen = () => {
+    setReopening(false)
+    setReopenErrors({})
+    setReopenBlockers([])
+    setStartAt(course?.open_start_at ? dayjs(course.open_start_at) : null)
+    setEndAt(course?.open_end_at ? dayjs(course.open_end_at) : null)
+  }
+
+  /**
+   * 確認再開課。
+   *
+   * ⚠️ 用 `validateReopenSchedule` 而非本頁的 `validateForm`——兩者的起始時間規則**相反**：
+   * 本頁擋「起始早於當下」，而再開課刻意允許（「補開一段已經開始的期間」是合理操作，
+   * 見 `reopenSchedule.ts`）。用錯會擋掉後端允許的合法操作，而畫面上沒有任何線索。
+   */
+  const submitReopen = () => {
+    const next = validateReopenSchedule(startAt, endAt, dayjs())
+    setReopenErrors(next)
+    if (Object.keys(next).length > 0) return
+    reopenMut.mutate({ openStartAt: startAt!.toISOString(), openEndAt: endAt!.toISOString() })
+  }
 
   /**
    * 缺漏項目所指的測驗名稱——後端只回 `target_id`，名稱由前端自課程詳細對照。
@@ -536,6 +622,17 @@ export function EtCourseEditorPage() {
   }
 
   const handleSave = () => {
+    // 🔴 **再開課模式下絕不走一般更新。**
+    //
+    // `enterReopen()` 把 `startAt` / `endAt` 清成 `null`，而這兩個正是 `toPayload()` 送給
+    // `PUT /courses/{id}` 的 `open_start_at` / `open_end_at`。後端這兩欄是選填（草稿允許
+    // 留空）且為全量覆寫，故一個帶 `null` 的 PUT 會把課程的開放期間**寫成 NULL**——而且
+    // 不會報錯：教師看到「已儲存」，學員卻再也進不來。
+    //
+    // ⛔ 不可只靠「再開課模式不顯示儲存鈕」擋（本次 security review 的 MEDIUM-1）。那是
+    // 把資料寫入的防線放在呈現層，日後任何人加回一顆儲存鈕、加自動存草稿（#335 的機制
+    // 已存在於新增模式）或把動作列抽成共用元件，都會靜默打開這條路。
+    if (reopening) return
     if (validateForm()) saveMut.mutate()
   }
 
@@ -942,10 +1039,8 @@ export function EtCourseEditorPage() {
             size="small"
             startIcon={<LockOpenIcon />}
             sx={{ ml: "auto" }}
-            onClick={() => {
-              setReopenBlockers([])
-              setReopenOpen(true)
-            }}
+            disabled={reopening}
+            onClick={enterReopen}
           >
             再開課
           </Button>
@@ -975,11 +1070,44 @@ export function EtCourseEditorPage() {
         不可作答、不可填問卷），教師端的編輯照舊。少了這句，教師會以為關閉後這頁是唯讀
         的而不敢改——AC 6 的整個用意就是讓他能在關閉期間整理教材再開課。
       */}
-      {status === "CLOSED" && (
+      {status === "CLOSED" && !reopening && (
         <Alert severity="info" icon={<LockIcon />} sx={{ mb: 2 }}>
           <strong>此課程已關閉</strong> — 學員無法加入、累積學習進度或填寫問卷，邀請碼暫時失效；
           已加入的學員仍可唯讀回看內容與成績。<strong>課程內容仍可編輯</strong>，整理完畢後按「再開課」即可恢復。
         </Alert>
+      )}
+
+      {/*
+        再開課模式（#428）。
+        ⚠️ **必須說明「為什麼被清空」**——只給紅框的話，教師會以為資料掉了。
+      */}
+      {reopening && (
+        <Alert severity="warning" icon={<LockOpenIcon />} sx={{ mb: 2 }}>
+          <strong>再開課：請重新設定開放起訖時間</strong> — 原本的起訖時間已清空，這是刻意的：
+          沿用舊值會把課程再開成一段已經過去的期間，學員一樣進不來。
+          <strong>尚未變更任何資料</strong>，按「取消再開課」即可還原。
+          <Box component="span" sx={{ display: "block", mt: 0.5 }}>
+            {/* ⚠️ 這句原本在 `ReopenCourseDialog` 裡，移除對話框時一併不見了（#428 code
+                review 的 MEDIUM）。教師第一次再開課最擔心的就是學員得從頭來過。 */}
+            學員的學習進度與成績會<strong>接續保留</strong>，原邀請碼沿用並恢復有效。
+          </Box>
+        </Alert>
+      )}
+
+      {/*
+        再開課的發布檢核缺漏。⚠️ 與發布的 `blockers` **刻意分開**——共用一份會讓上一次
+        發布嘗試殘留的缺漏在此顯示，而那與這次再開課無關（見 `reopenBlockers` 的宣告）。
+      */}
+      {reopening && reopenBlockers.length > 0 && (
+        <Stack spacing={1} sx={{ mb: 2 }}>
+          <Alert severity="error">
+            課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
+          </Alert>
+          <BlockerList
+            blockers={reopenBlockers}
+            names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+          />
+        </Stack>
       )}
 
       {/*
@@ -1077,27 +1205,52 @@ export function EtCourseEditorPage() {
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 4" } }}>
+            {/* ⚠️ 再開課模式**不套 `startFloor`**：本頁平時擋「起始早於當下」，而再開課
+                刻意允許（補開一段已經開始的期間是合理操作，見 `reopenSchedule.ts`）。
+                沿用 `startFloor` 會讓那些日期變成灰底不可選，擋掉後端允許的操作。 */}
             <DateTimePicker
               label="課程起始時間"
               value={startAt}
               disabled={readOnly}
-              minDateTime={startFloor}
+              minDateTime={reopening ? undefined : startFloor}
               onChange={(v) => setStartAt(v)}
               slotProps={{
-                textField: { size: "small", fullWidth: true, error: Boolean(errors.open_start_at), helperText: errors.open_start_at },
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  required: reopening,
+                  error: reopening
+                    ? Boolean(reopenErrors.start) || reopenStartEmpty
+                    : Boolean(errors.open_start_at),
+                  helperText: reopening ? reopenErrors.start : errors.open_start_at,
+                },
                 actionBar: { actions: ["cancel", "accept"] },
               }}
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 4" } }}>
+            {/* 再開課模式的訖止下限為「起始與當下之較晚者」——沿用原對話框的規則
+                （後端 `ensure_reopen_schedule` 只要求訖止晚於當下）。 */}
             <DateTimePicker
               label="課程訖止時間"
               value={endAt}
               disabled={readOnly}
-              minDateTime={startAt ?? undefined}
+              minDateTime={
+                reopening
+                  ? (startAt && startAt.isAfter(dayjs()) ? startAt : dayjs())
+                  : (startAt ?? undefined)
+              }
               onChange={(v) => setEndAt(v)}
               slotProps={{
-                textField: { size: "small", fullWidth: true, error: Boolean(errors.open_end_at), helperText: errors.open_end_at },
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  required: reopening,
+                  error: reopening
+                    ? Boolean(reopenErrors.end) || reopenEndEmpty
+                    : Boolean(errors.open_end_at),
+                  helperText: reopening ? reopenErrors.end : errors.open_end_at,
+                },
                 actionBar: { actions: ["cancel", "accept"] },
               }}
             />
@@ -1411,35 +1564,59 @@ export function EtCourseEditorPage() {
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Typography variant="caption" color="text.secondary">
-              {status === "DRAFT"
-                ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 個受訓單位標籤、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
-                : "已發布課程的編輯即時生效，不需重新發布。"}
+              {reopening
+                ? "再開課會重跑發布檢核；關閉期間若移除了必要內容，會在上方列出缺漏。尚未變更任何資料。"
+                : status === "DRAFT"
+                  ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 個受訓單位標籤、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
+                  : "已發布課程的編輯即時生效，不需重新發布。"}
             </Typography>
             <Stack direction="row" spacing={1}>
-              <Button size="small" onClick={() => navigate("/et/courses")}>
-                取消
-              </Button>
-              <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
-                {status === "DRAFT" ? "儲存草稿" : "儲存"}
-              </Button>
-              {/*
-                僅草稿可發布。已發布課程的後續編輯**即時生效、不需重新發布**（AC 28），
-                故發布不是常駐動作——已發布時直接不顯示，而非顯示一顆按了會回
-                `ET_PUBLISH_002` 的按鈕。
-              */}
-              {status === "DRAFT" && (
-                <Tooltip title={isNew ? "請先儲存草稿後再發布" : ""}>
-                  <span>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      disabled={isNew || saveThenCheckMut.isPending}
-                      onClick={openPublish}
-                    >
-                      儲存並發布
-                    </Button>
-                  </span>
-                </Tooltip>
+              {/* 再開課模式換成專屬的兩顆（#428）。
+                  ⚠️ 一般的「儲存」在此刻意**不顯示**——`reopen` 是另一支端點，它會跑
+                  `ensure_reopenable` 與發布檢核。若教師按了「儲存」，時間會以一般更新
+                  寫入而**課程仍是關閉的**，那是一個看起來成功、實際沒再開課的結果。 */}
+              {reopening ? (
+                <>
+                  <Button size="small" disabled={reopenMut.isPending} onClick={cancelReopen}>
+                    取消再開課
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    disabled={reopenMut.isPending}
+                    onClick={submitReopen}
+                  >
+                    確認再開課
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button size="small" onClick={() => navigate("/et/courses")}>
+                    取消
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
+                    {status === "DRAFT" ? "儲存草稿" : "儲存"}
+                  </Button>
+                  {/*
+                    僅草稿可發布。已發布課程的後續編輯**即時生效、不需重新發布**（AC 28），
+                    故發布不是常駐動作——已發布時直接不顯示，而非顯示一顆按了會回
+                    `ET_PUBLISH_002` 的按鈕。
+                  */}
+                  {status === "DRAFT" && (
+                    <Tooltip title={isNew ? "請先儲存草稿後再發布" : ""}>
+                      <span>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={isNew || saveThenCheckMut.isPending}
+                          onClick={openPublish}
+                        >
+                          儲存並發布
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  )}
+                </>
               )}
             </Stack>
           </Stack>
@@ -1473,19 +1650,6 @@ export function EtCourseEditorPage() {
         }}
       />
 
-      <ReopenCourseDialog
-        open={reopenOpen}
-        submitting={reopenMut.isPending}
-        blockers={reopenBlockers}
-        quizNames={quizNames}
-        chapterNames={chapterNames}
-        itemChapterNames={itemChapterNames}
-        onSubmit={(openStartAt, openEndAt) => reopenMut.mutate({ openStartAt, openEndAt })}
-        onClose={() => {
-          setReopenOpen(false)
-          setReopenBlockers([])
-        }}
-      />
 
       <Dialog open={chapterDialogOpen} onClose={() => setChapterDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>新增章節</DialogTitle>
