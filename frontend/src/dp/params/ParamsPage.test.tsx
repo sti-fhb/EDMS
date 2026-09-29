@@ -41,6 +41,7 @@ function useStatefulValueParam() {
               description,
               sort_order: null,
               is_enabled: true,
+              edit_scope: "ADMIN",
             },
           ],
         },
@@ -57,6 +58,7 @@ function useStatefulValueParam() {
         description,
         sort_order: null,
         is_enabled: true,
+        edit_scope: "ADMIN",
       })
     }),
   )
@@ -496,5 +498,35 @@ describe("ParamsPage 模組受控清單（#182）", () => {
 
     expect(await screen.findByText("代碼僅允許英文與數字")).toBeInTheDocument()
     expect(posted).toHaveLength(0)
+  })
+})
+
+describe("ParamsPage 維護層級（#171）", () => {
+  /** 取含指定文字之列的 <tr>；找不到即拋（避免 within(null) 的無聲通過）。 */
+  function rowOf(rowText: string): HTMLElement {
+    const row = screen.getByText(rowText).closest("tr")
+    if (!row) throw new Error(`找不到含「${rowText}」的列`)
+    return row
+  }
+
+  it("READONLY 明細仍顯示現值並標示「IT 設定」，但沒有編輯入口", async () => {
+    renderWithProviders(<ParamsPage />)
+    // 先等該列渲染出來再做否定斷言——否則「找不到編輯鈕」可能只是資料還沒到，
+    // 守衛拿掉也一樣會通過（#421 踩過這個坑）。
+    expect(await screen.findByText("驗證信重寄冷卻（秒）")).toBeInTheDocument()
+
+    const row = rowOf("驗證信重寄冷卻（秒）")
+    expect(within(row).getByText("600")).toBeInTheDocument() // READONLY 的用意：現值看得到
+    expect(within(row).getByText("IT 設定")).toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "編輯" })).toBeNull()
+  })
+
+  it("同一主檔的 ADMIN 明細照常可編輯（證明上一條的否定斷言分辨得出差異）", async () => {
+    renderWithProviders(<ParamsPage />)
+    expect(await screen.findByText("閒置自動登出（分鐘）")).toBeInTheDocument()
+
+    const row = rowOf("閒置自動登出（分鐘）")
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeInTheDocument()
+    expect(within(row).queryByText("IT 設定")).toBeNull()
   })
 })
