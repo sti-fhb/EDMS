@@ -87,7 +87,26 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    expect(await screen.findByText("查無符合條件的核可紀錄")).toBeInTheDocument()
+    expect(await screen.findByText(/查無符合條件的核可紀錄/)).toBeInTheDocument()
+    // 🔴 教師必須被告知「可能不在您的可見範圍內」：本頁用於「排班前確認某人受訓完整
+    // 與否」，而「查無」會被讀成「這個人沒受過訓」——那是方向最危險的假陰性，且
+    // 可見範圍分流（SA Q1 裁示 C）讓它在正式使用時一定會發生。
+    expect(screen.getByText(/可能是該紀錄不在您的可見範圍內/)).toBeInTheDocument()
+  })
+
+  it("管理者的空狀態不提可見範圍（他沒有範圍限制，那句話對他是錯的）（#436）", async () => {
+    // ⚠️ 反向斷言。對管理者說「可能不在您的可見範圍內」會讓他去找一個不存在的原因
+    // ——他的 `visible_clause` 是 `true()`，查不到就是真的沒有。
+    asRole("admin")
+    server.use(http.post("/api/et/approvals/search", () => HttpResponse.json(EMPTY)))
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    expect(await screen.findByText(/查無符合條件的核可紀錄/)).toBeInTheDocument()
+    expect(screen.queryByText(/可見範圍/)).not.toBeInTheDocument()
   })
 
   it("Email 與姓名共用同一欄，同樣送進 body（#436）", async () => {
