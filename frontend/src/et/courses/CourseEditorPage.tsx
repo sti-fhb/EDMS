@@ -101,6 +101,18 @@ interface PendingAddItem {
   title: string
 }
 
+/**
+ * 自動存草稿後要接著建立的問卷（#435）——與 `PendingAddItem` 同一個機制、不同的 key。
+ *
+ * ⚠️ 刻意不與 `pendingAddItem` 合併成一個帶 `kind` 的聯合型別：兩者到達後要做的事
+ * 不同（項目要依索引反查 `chapter_id`、問卷直接掛 `course_id`），合併只會讓接手的
+ * effect 變成一個對兩種形狀分岔的函式，而它們之間沒有共用邏輯。
+ */
+interface PendingAddSurvey {
+  /** 問卷名稱。理由同 `PendingAddItem.title`：在導向之前就問完。 */
+  surveyName: string
+}
+
 export function EtCourseEditorPage() {
   const { courseId: courseIdParam } = useParams<{ courseId: string }>()
   const courseId = courseIdParam ? Number(courseIdParam) : undefined
@@ -825,6 +837,27 @@ export function EtCourseEditorPage() {
     // 最前面，故不需要 eslint-disable 來掩蓋依賴。
   }, [pendingAddItem, course?.chapters, isNew, handleError, invalidate, location.pathname, navigate])
 
+  // 同上，問卷版（#435）。問卷掛課程層級，不需要等章節載入——拿到 `courseId` 即可建立。
+  const pendingAddSurvey = (location.state as { pendingAddSurvey?: PendingAddSurvey } | null)?.pendingAddSurvey
+  const pendingSurveyHandled = useRef(false)
+
+  useEffect(() => {
+    if (!pendingAddSurvey || pendingSurveyHandled.current || isNew || courseId === undefined) return
+    pendingSurveyHandled.current = true
+    navigate(location.pathname, { replace: true, state: null })
+    void (async () => {
+      try {
+        await surveyApi.create(courseId, pendingAddSurvey.surveyName)
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.survey(courseId) })
+        // 建完直接開視窗接續編輯題目——與編輯模式下按「建立」之後的樣子一致，
+        // 使用者不該因為中間插了一次自動存草稿就得再點一次。
+        setSurveyOpen(true)
+      } catch (err) {
+        handleError(err)
+      }
+    })()
+  }, [pendingAddSurvey, isNew, courseId, handleError, location.pathname, navigate, qc])
+
   /**
    * 按下「新增項目」→ **先問名稱**（#414），確認後才真的建立。
    *
@@ -888,13 +921,19 @@ export function EtCourseEditorPage() {
     // 表單驗證已於 `handleAddItem` 做過（要在開啟命名視窗**之前**擋），此處不重複——
     // 兩處各驗一次會讓規則有兩個版本，而命名視窗開啟期間表單是碰不到的。
     const chapterIndex = stagedChapters.findIndex((c) => c.id === chapter.chapter_id)
+    await autoSaveThenNavigate({ pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType, title } })
+  }
+
+  /**
+   * 存草稿 → 導向 `/et/courses/{id}`，把「接下來要做的事」放進 navigate state（#335 / #435）。
+   *
+   * 失敗時**不導向**：錯誤顯示在原處，使用者留在新增頁、剛輸入的內容還在。
+   */
+  const autoSaveThenNavigate = async (state: { pendingAddItem: PendingAddItem } | { pendingAddSurvey: PendingAddSurvey }) => {
     try {
       const created = await coursesApi.create({ ...toPayload(), chapters: stagedChapters.map((c) => c.name) })
       message.success("已自動儲存草稿")
-      navigate(`/et/courses/${created.course_id}`, {
-        replace: true,
-        state: { pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType, title } },
-      })
+      navigate(`/et/courses/${created.course_id}`, { replace: true, state })
     } catch (err) {
       handleError(err)
     }
@@ -1451,12 +1490,15 @@ export function EtCourseEditorPage() {
       <SurveySection
         survey={isNew ? null : survey}
         readOnly={readOnly}
-        disabled={isNew}
         isDraftCourse={status === "DRAFT"}
         saving={surveyMut.isPending}
         error={surveyError}
         // #359 第 1 項：直接開視窗，名稱於視窗內填。**不預建空殼**——取消時什麼都沒發生。
         onCreate={() => {
+          // 🔴 理由與 `handleAddItem` 逐字相同（#435）：新增模式下課程本身的必填要先擋，
+          // 否則使用者會先打完問卷名稱、按下「建立」才被告知「課程名稱未填」——那個錯誤
+          // 與他剛做的事無關，而他剛輸入的名稱也白打了。
+          if (isNew && !validateForm()) return
           setSurveyError(null)
           setSurveyOpen(true)
         }}
@@ -1496,7 +1538,16 @@ export function EtCourseEditorPage() {
         templates={surveyTemplates}
         saving={surveyMut.isPending}
         error={surveyError}
-        onCreate={(name) => surveyMut.mutate(() => surveyApi.create(courseId as number, name))}
+        onCreate={(name) => {
+          // 新增模式：課程還不存在，問卷掛不上去（`ET_SURVEY` 需要真的 `COURSE_ID`）。
+          // ⚠️ 自動存草稿發生在**按下建立之後**，不是開視窗的時候——否則教師開了視窗
+          // 又改變主意，課程草稿已經被建出來了，而 #359 的承諾是「取消時什麼都沒發生」。
+          if (isNew) {
+            void autoSaveThenNavigate({ pendingAddSurvey: { surveyName: name } })
+            return
+          }
+          surveyMut.mutate(() => surveyApi.create(courseId as number, name))
+        }}
         onClose={(dirty) => {
           // 題目編輯器展開中代表有還沒存的內容，直接關掉會讓它無聲消失
           // （#203 實測回饋：「有填入值按取消跳出提示」）

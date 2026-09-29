@@ -19,13 +19,15 @@ interface SurveySectionProps {
   /** `null` = 尚未建立問卷（正常狀態，非錯誤）；`undefined` = 尚在載入。 */
   survey: SurveyDetail | null | undefined
   readOnly: boolean
-  /** 新增模式（課程尚未建立於後端）時停用——問卷須掛在已存在的課程下。 */
-  disabled?: boolean
   /** 課程是否為草稿——決定「刪除問卷」入口是否出現（#238）。 */
   isDraftCourse: boolean
   saving?: boolean
   error?: string | null
-  /** 開啟建立視窗（#359 第 1 項）。名稱與題目都在視窗內填，此處不再 inline 收名稱。 */
+  /**
+   * 開啟建立視窗（#359 第 1 項）。名稱與題目都在視窗內填，此處不再 inline 收名稱。
+   *
+   * 新增模式下呼叫端會先驗課程必填再開視窗（#435），故本元件不需要知道那件事。
+   */
   onCreate: () => void
   onOpen: () => void
   onDeactivate: () => void
@@ -73,7 +75,6 @@ interface SurveySectionProps {
 export function SurveySection({
   survey,
   readOnly,
-  disabled = false,
   isDraftCourse,
   saving = false,
   error = null,
@@ -102,7 +103,10 @@ export function SurveySection({
               size="small"
               variant="outlined"
               startIcon={<AddIcon />}
-              disabled={disabled || survey === undefined}
+              // 只在「還不知道有沒有問卷」時停用（`undefined` = 載入中）。
+              // ⚠️ 新增模式**不再停用**（#435）——課程尚未建立不是教師該處理的事，
+              // 按下去由 `CourseEditorPage` 自動存草稿再接手，比照項目的 #335。
+              disabled={survey === undefined}
               onClick={onCreate}
             >
               新增問卷
@@ -114,15 +118,13 @@ export function SurveySection({
         </Typography>
 
           <Typography variant="caption" color="text.disabled" sx={{ display: "block", py: 1 }}>
-            {disabled ? "請先儲存草稿後再新增問卷" : "尚未建立課後問卷"}
+            尚未建立課後問卷
           </Typography>
       </Paper>
     )
   }
 
   // ── 已建立（摘要列，比照教材 / 測驗項目）──────────────────────────────────
-  // 提示文字與 disabled 共用同一個判定（比照 `CourseEditorPage` 的 `isNew`）——
-  // 兩處各寫一次會在其中一處改動時靜默不一致：唯讀者會看到一句對他不成立的提示。
   const editDisabled = survey.frozen && !readOnly
 
   return (
