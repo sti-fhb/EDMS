@@ -299,8 +299,10 @@ class ParamAdminService:
             # （SRVDP001）執行期讀取，那條路徑不得受維護層級影響，否則 MAIL.RATE_PER_MIN
             # 會讀不到而 fallback 到程式碼預設值：行為變了卻沒有任何錯誤訊息。
             #
-            # 此處判「是不是 HIDDEN」而非「是不是三值之一」，方向與 is_editable_scope 相反且刻意：
-            # 未知值應**列得出來**（看得見）但不可編輯，而非整列從畫面上消失。
+            # 未知 EDIT_SCOPE 在這條路徑上**不會**變成「列得出來但不可編輯」——
+            # ParamDetailResponse.edit_scope 是 Literal，未知值會在序列化時拋 ValidationError，
+            # 使整頁 500。此情形由 CK_DP_PARAM_D_EDIT_SCOPE 擋在資料層而不會發生；
+            # 真正需要 fail-closed 的是寫入路徑，那由 is_editable_scope() 負責（見其 docstring）。
             details = [d for d in all_details if d.edit_scope != EDIT_SCOPE_HIDDEN]
             # 整組皆 HIDDEN（如 MAIL）→ 連主檔一併不回傳，避免畫面出現 0 項的空群組。
             # 限定「本來就有明細」才跳過：本來就沒有明細的 LIST 主檔須留著，否則新建的清單
@@ -383,6 +385,12 @@ class ParamAdminService:
         self, db: AsyncSession, *, param_id: str, data: ParamDetailCreate, operator: OperatorInfo
     ) -> ParamDetailResponse:
         """新增 LIST 型清單項。
+
+        **本方法刻意不看 `EDIT_SCOPE`**：該欄管的是「既有列誰能改」，不管「清單能不能被加列」。
+        要讓整組清單不可變動請設 `DETAIL_LOCK=true`（下方那道檢核），兩者分工見 spec_us5
+        〈三個相鄰機制的分工〉。把 LIST 的幾個明細標成 READONLY 而未設 DETAIL_LOCK 時，
+        管理者仍能新增項目改變 get_param_list() 的結果——今日無可觸發對象（唯一的 LIST 主檔
+        ACTION_TYPE 在 _require_visible_master 就被擋掉），日後新增 LIST 主檔時 MUST 一併確認。
 
         Raises:
             AppError: 主檔不存在 / 越權、非 LIST 型（400 DP_PARAM_006）、

@@ -367,6 +367,22 @@ async def test_readonly_detail_rejects_every_field(db, admin_gate, payload):
     assert exc.value.error_code == "DP_PARAM_007"
 
 
+async def test_readonly_check_precedes_value_validation(db, admin_gate):
+    """層級檢核在值域驗證**之前**：改不動的列，值合不合法無關緊要。
+
+    這條刻意送一個**超出值域**的值（`JWT.ACCESS_TTL_MIN` 值域 1–15，此處送 9999）。
+    上面幾條送的是合法值，兩種檢核順序都會得到 007——**分辨不出順序**；唯有送非法值
+    才能證明層級先跑（否則會先被 `DP_PARAM_001` 擋下）。
+    順序若反過來，等於對一個改不動的參數洩露它的值域規則。
+    """
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(param_value="9999"), operator=_OP
+        )
+    assert exc.value.error_code == "DP_PARAM_007"  # 不是 DP_PARAM_001
+
+
 async def test_hidden_detail_update_rejected(db, admin_gate):
     admin_gate()
     with pytest.raises(AppError) as exc:
@@ -386,6 +402,19 @@ async def test_hidden_details_excluded_from_list(db, admin_gate):
     assert "JWT" in ids and "LOGIN" in ids
     keys = {(m.param_id, d.param_key) for m in result for d in m.details}
     assert ("MAIL", "RATE_PER_MIN") not in keys
+
+
+async def test_master_without_details_is_still_listed(db, admin_gate):
+    """「整組皆 HIDDEN 不回傳」不得誤殺「本來就沒有明細」的主檔。
+
+    兩者在 `list_visible` 是同一個分支的兩半。若寫成「過濾後為空就跳過」，新建的 LIST
+    主檔會連第一個項目都加不進去——維護頁的新增入口就在主檔那一列上。
+    """
+    admin_gate()
+    await _make_master(db, "EMPTY_LIST", param_type="LIST", name="尚無項目的清單", details=())
+    ids = {m.param_id for m in await ParamAdminService().list_visible(db, "admin01")}
+    assert "EMPTY_LIST" in ids
+    assert "MAIL" not in ids  # 對照：有明細但全為 HIDDEN 者才該被跳過
 
 
 async def test_edit_scope_returned_and_mixed_within_group(db, admin_gate):

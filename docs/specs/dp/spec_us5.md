@@ -60,11 +60,21 @@
 
 | 機制 | 位置 | 管什麼 | 錯誤碼 |
 |------|------|--------|-------|
-| `DP_PARAM_M.DETAIL_LOCK` | 主檔欄位 | 明細**碼值**（`PARAM_KEY`）建立後不可改 | `DP_PARAM_002` |
+| `DP_PARAM_M.DETAIL_LOCK` | 主檔欄位 | 明細**碼值**（`PARAM_KEY`）建立後不可改，**且不可新增清單項** | `DP_PARAM_002` |
 | 系統 enum 清單（程式碼側） | `service.py` 之 `_SYSTEM_PARAM_IDS` | **主檔層**：整個 `PARAM_ID` 不屬於維護面（目前僅 `ACTION_TYPE`）| `DP_PARAM_004`（404）|
 | `DP_PARAM_D.EDIT_SCOPE` | 明細欄位 | **明細層**：這一列誰可以改 | `DP_PARAM_007`（403）|
 
 三者正交。`ACTION_TYPE` 的 5 列雖亦標為 `HIDDEN`（使分類在資料層完整），但實際擋人的是主檔層那道——它先執行。
+
+> ⚠️ **LIST 的「整組保護」歸 `DETAIL_LOCK`，不歸 `EDIT_SCOPE`。**
+>
+> `EDIT_SCOPE` 只管**既有列**能不能改，**不管清單能不能被加列**。因此把 LIST 的某幾個明細標成
+> `READONLY` **並不會**阻止管理者新增項目——被標記的那幾列一根寒毛沒動，但 `get_param_list()`
+> 的結果變了，形狀與 FR-DP-US5-11 要防的靜默改變相同。
+>
+> 要讓整組清單不可變動，**MUST 同時設 `DETAIL_LOCK=true`**（它會讓 `POST /details` 回
+> `DP_PARAM_002`）。此分工今日無可觸發對象——唯一的 LIST 型主檔 `ACTION_TYPE` 在主檔層就被
+> 擋掉——故本次未加程式碼強制，先明載於此。
 
 ### 兩項刻意的限制
 
