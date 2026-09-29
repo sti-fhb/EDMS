@@ -475,6 +475,78 @@ describe("ET02 課程編輯頁", () => {
   })
 
   /**
+   * #442：關閉教材視窗的確認文字原本對兩種情形共用同一句，而它們的後果不同。
+   *
+   * 既有教材已上傳的影片**不會**因為按取消而移除（影片是選檔即上傳，見 `MaterialDialog`
+   * 的模組 docstring），但文字宣稱「尚未儲存的變更將不會保留」——教師據此以為自己
+   * 取消掉了。新建立的項目則是取消連項目一起刪，影片跟著消失，那句話成立。
+   */
+  async function openExistingMaterial(videos: { video_id: number; file_name: string }[]) {
+    server.use(
+      http.get("/api/et/courses/:courseId", () =>
+        HttpResponse.json({
+          course_id: 1,
+          course_name: "採血作業訓練",
+          description: null,
+          require_approval: false,
+          tag_ids: [],
+          status: "DRAFT",
+          version: 0,
+          is_owner: true,
+          open_start_at: null,
+          open_end_at: null,
+          chapters: [
+            {
+              chapter_id: 11,
+              chapter_name: "第一章",
+              sort_order: 1,
+              version: 0,
+              items: [
+                { item_id: 401, item_type: "MATERIAL", title: "採血示範", sort_order: 1, material_id: 601, quiz_id: null },
+              ],
+            },
+          ],
+        }),
+      ),
+      http.get("/api/et/materials/601", () =>
+        HttpResponse.json({
+          material_id: 601,
+          material_name: "採血示範",
+          description_html: "<p>原本的說明</p>",
+          version: 0,
+          videos: videos.map((v, i) => ({ ...v, duration_sec: 600, file_size_bytes: 1024, sort_order: i + 1 })),
+          docs: [],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderEditor("1")
+    await user.click(await screen.findByText("採血示範"))
+    await screen.findByRole("dialog")
+    return user
+  }
+
+  it("既有教材含已上傳影片時，取消的確認文字說明影片會留著（#442）", async () => {
+    const user = await openExistingMaterial([{ video_id: 1, file_name: "demo.mp4" }])
+    // 改個欄位讓 dirty 成立，否則直接關不跳確認
+    await user.clear(await screen.findByRole("textbox", { name: "項目標題" }))
+    await user.type(screen.getByRole("textbox", { name: "項目標題" }), "改過的名稱")
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    expect(await screen.findByText(/已上傳的影片不在此列/)).toBeInTheDocument()
+  }, 15000)
+
+  it("既有教材沒有影片時不提影片——那句話對他不成立（#442）", async () => {
+    const user = await openExistingMaterial([])
+    await user.clear(await screen.findByRole("textbox", { name: "項目標題" }))
+    await user.type(screen.getByRole("textbox", { name: "項目標題" }), "改過的名稱")
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    expect(await screen.findByText(/尚未儲存的變更將不會保留/)).toBeInTheDocument()
+    expect(screen.queryByText(/已上傳的影片不在此列/)).not.toBeInTheDocument()
+  }, 15000)
+
+  /**
    * #361 的接線：測驗內容有變更、且有人通過過時，儲存前先問教師是否要求重測。
    *
    * ⚠️ 元件本身的行為（三顆鈕、ESC、文案）在 `RequireRetestDialog.test.tsx`；
