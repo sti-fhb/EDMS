@@ -276,6 +276,113 @@ describe("ET02 課程編輯頁", () => {
     )
   })
 
+  /**
+   * #435：新增模式下「新增問卷」原本是 disabled 的，提示「請先儲存草稿後再新增問卷」——
+   * 同一張編輯頁上，章節本地暫存、項目自動存草稿，只有問卷把存檔這個動作推給教師。
+   *
+   * 形狀照抄 #335 的項目：名稱在導向**之前**於視窗內填完，隨 navigate state 帶過去。
+   */
+  it("新增模式可直接按「新增問卷」：自動存草稿後導向編輯頁並帶出待建立的問卷（#435）", async () => {
+    const user = userEvent.setup()
+    const captured: { body?: { course_name: string; chapters: string[] } } = {}
+    server.use(
+      http.post("/api/et/courses", async ({ request }) => {
+        captured.body = (await request.json()) as NonNullable<typeof captured.body>
+        return HttpResponse.json({ course_id: 88, version: 0 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await user.type(await screen.findByRole("textbox", { name: "課程名稱" }), "有問卷的新課程")
+
+    await user.click(await screen.findByRole("button", { name: "新增問卷" }))
+    await user.type(await screen.findByRole("textbox", { name: /問卷名稱/ }), "訓後滿意度調查")
+    await user.click(screen.getByRole("button", { name: "建立" }))
+
+    await waitFor(() => expect(captured.body?.course_name).toBe("有問卷的新課程"))
+    await waitFor(() =>
+      expect(navigateSpy).toHaveBeenCalledWith(
+        "/et/courses/88",
+        expect.objectContaining({
+          replace: true,
+          state: { pendingAddSurvey: { surveyName: "訓後滿意度調查" } },
+        }),
+      ),
+    )
+  }, 15000)
+
+  /**
+   * ⚠️ 這條釘的是 #359 的承諾：「取消時什麼都沒發生」。
+   *
+   * 自動存草稿必須發生在**按下建立之後**，不可提前到開視窗的時候——否則教師開了
+   * 視窗又改變主意，課程草稿已經被建出來了，而他以為自己什麼都沒做。
+   */
+  it("新增模式開了問卷視窗又關掉：課程草稿一次都沒建（#435）", async () => {
+    const user = userEvent.setup()
+    let created = 0
+    server.use(
+      http.post("/api/et/courses", () => {
+        created += 1
+        return HttpResponse.json({ course_id: 89, version: 0 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await user.type(await screen.findByRole("textbox", { name: "課程名稱" }), "不會被建立的課程")
+
+    await user.click(await screen.findByRole("button", { name: "新增問卷" }))
+    await screen.findByRole("textbox", { name: /問卷名稱/ })
+    await user.click(screen.getByRole("button", { name: "關閉視窗" }))
+
+    await waitFor(() => expect(created).toBe(0))
+    expect(navigateSpy).not.toHaveBeenCalled()
+  }, 15000)
+
+  it("課程名稱未填時按「新增問卷」→ 標欄位錯誤、不開視窗（#435）", async () => {
+    const user = userEvent.setup()
+    let created = 0
+    server.use(
+      http.post("/api/et/courses", () => {
+        created += 1
+        return HttpResponse.json({ course_id: 90, version: 0 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await screen.findByRole("textbox", { name: "課程名稱" })
+
+    await user.click(await screen.findByRole("button", { name: "新增問卷" }))
+
+    // 比照 `handleAddItem`：錯誤要在他打問卷名稱**之前**出現，否則那個錯誤與他剛做的事無關
+    expect(await screen.findByText("請輸入課程名稱")).toBeInTheDocument()
+    expect(screen.queryByRole("textbox", { name: /問卷名稱/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(created).toBe(0))
+    expect(navigateSpy).not.toHaveBeenCalled()
+  }, 15000)
+
+  it("帶 pendingAddSurvey 進編輯頁時自動建立該問卷並開啟視窗（#435 的後半）", async () => {
+    let sentName: string | undefined
+    let createdOn: number | null = null
+    server.use(
+      http.get("/api/et/courses/:courseId/survey", () => HttpResponse.json(null)),
+      http.post("/api/et/courses/:courseId/survey", async ({ params, request }) => {
+        createdOn = Number(params.courseId)
+        sentName = ((await request.json()) as { survey_name?: string }).survey_name
+        return HttpResponse.json(
+          { survey_id: 31, survey_name: "訓後滿意度調查", is_active: true, version: 0, questions: [] },
+          { status: 201 },
+        )
+      }),
+    )
+    locationRef.current = {
+      pathname: "/et/courses/1",
+      state: { pendingAddSurvey: { surveyName: "訓後滿意度調查" } },
+    }
+    renderEditor("1")
+
+    await waitFor(() => expect(createdOn).toBe(1))
+    // 名稱在導向之前就問完了，此處必須原樣帶上，否則後端 422
+    expect(sentName).toBe("訓後滿意度調查")
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  }, 15000)
+
   it("課程名稱未填時按「新增項目」→ 標欄位錯誤、不建立草稿（#335）", async () => {
     const user = userEvent.setup()
     let created = 0
