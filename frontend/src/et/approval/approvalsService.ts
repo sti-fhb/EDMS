@@ -12,7 +12,7 @@ export const approvalsApi = {
   /**
    * 教師 / 管理者依學員姓名查詢。可見範圍由後端依 SA Q1 裁示 C 分流。
    *
-   * 🔴 **`POST` 且條件走 body，不是 query string**（#391）。`user_name` 必定是一個人的
+   * 🔴 **`POST` 且條件走 body，不是 query string**（#391）。`keyword` 必定是姓名或 Email（皆為個資），是一個人的
    * 姓名，而網址會被 nginx `error_log` 與 Cloudflare 的請求日誌記下來（前者格式不可
    * 自訂、後者不在本系統掌控範圍）；body 不會。
    *

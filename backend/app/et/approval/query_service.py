@@ -13,7 +13,7 @@
 ## SA 裁示（2026-09-21）
 
 - **Q1 = C**：教師（非管理者）依結果分流，見 `query_rules.visible_clause`
-- **Q2 = A**：`user_name` 必填，去空白後為空視為未填
+- **Q2 = A**：`keyword` 必填，去空白後為空視為未填（#436 起可為姓名或 Email）
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +49,7 @@ class EtApprovalQueryService:
         *,
         actor_id: str,
         roles: frozenset[str],
-        user_name: str,
+        keyword: str,
         result: str | None,
         page: int,
         limit: int,
@@ -57,19 +57,19 @@ class EtApprovalQueryService:
         """教師 / 管理者依學員姓名查詢核可紀錄。
 
         Raises:
-            AppError: `user_name` 去空白後為空（422 `ET_APPROVAL_006`）。
+            AppError: `keyword` 去空白後為空（422 `ET_APPROVAL_006`）。
 
         ⚠️ 姓名必填是 SA Q2 裁示 A 的落地。理由不是安全潔癖，而是**留白查全部沒有對應
         需求**（客戶要的是「用姓名查」），而它會回傳 `user_id` 與姓名對照——等於提供一份
         有受訓紀錄的員工名冊。日後若需要「班級核可總表」，那屬 ET03 的範疇（以課程為
         單位），不由本查詢承接。
         """
-        keyword = user_name.strip()
+        keyword = keyword.strip()
         if not keyword:
             raise _NAME_REQUIRED
 
         stmt = self._repo.teacher_query_stmt(
-            user_name=keyword,
+            keyword=keyword,
             visible=visible_clause(actor_id=actor_id, is_admin=is_admin(roles)),
             result=result,
         )
