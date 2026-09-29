@@ -262,8 +262,9 @@ async def test_review_detail_shows_version_snapshot_tags(db):
 
     detail = await _review.get_detail(db, review_id=submitted.review_id, op=_op("rev1"))
 
-    # 審核者看到的是「本次送審提議、核准後會生效」的可見對象，而非文件層目前值（aud_a）
-    assert detail.audience_tags == [await _tag_name(db, aud_b)]
+    # 審核者看到的是「本次送審提議、核准後會生效」的可見對象，而非文件層目前值（aud_a）。
+    # 呈現為 (單位, 職位) 配對字串（#437）——多筆配對時拆成兩排標籤會無從對應。
+    assert detail.audience_tags == [f"全單位 + {await _tag_name(db, aud_b)}"]
     assert detail.category_name == await db.scalar(
         select(DmCategory.category_name).where(DmCategory.category_code == "SOP")
     )

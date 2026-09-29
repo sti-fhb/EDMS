@@ -10,13 +10,22 @@ from sqlalchemy import func, select
 from app.core.exceptions import AppError
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.roles.assign_service import AssignService
+from app.dm.roles.assign_service import AssignService, encode_pair
 from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, DM_REVIEWER
 from app.dm.roles.models import DmUserRole, DmUserRoleLog
 
 pytestmark = pytest.mark.integration
 
 _svc = AssignService()
+
+
+async def _unit_tag_id(db) -> int:
+    """取一個啟用中之具體單位（排除通用值「全單位」——人不會屬於它）。"""
+    return await db.scalar(
+        select(DmTag.tag_id)
+        .where(DmTag.tag_group_code == "UNIT", DmTag.tag_name != "全單位", DmTag.is_enabled.is_(True))
+        .limit(1)
+    )
 
 
 async def _audience_tag_id(db) -> int:
@@ -87,20 +96,22 @@ async def test_admin_can_remove_other_admin(db):
 
 
 async def test_assign_audience_and_disabled_rejected(db):
-    """有效 AUDIENCE 授權寫入；非 AUDIENCE / 未啟用之 tag_id → DM_ROLE_002。"""
+    """有效 (單位, 職位) 配對授權寫入；配對任一端無效 / 未啟用 → DM_ROLE_002（#437）。"""
     tag_id = await _audience_tag_id(db)
+    unit_id = await _unit_tag_id(db)
+    pair = encode_pair(unit_id, tag_id)
     await _svc.assign_roles_audiences(
-        db, user_id="AS_V", roles={DM_EDITOR}, audiences={str(tag_id)}, operator_id="ADMIN"
+        db, user_id="AS_V", roles={DM_EDITOR}, audiences={pair}, operator_id="ADMIN"
     )
     view = (await _svc.get_users_roles_audiences(db, ["AS_V"]))["AS_V"]
-    assert str(tag_id) in view.groups
+    assert pair in view.groups
     granted = await db.scalar(
         select(func.count()).select_from(DmUserTag).where(DmUserTag.user_id == "AS_V", DmUserTag.deleted == 0)
     )
     assert granted == 1
     with pytest.raises(AppError) as e:
         await _svc.assign_roles_audiences(
-            db, user_id="AS_V", roles={DM_EDITOR}, audiences={"999999"}, operator_id="ADMIN"
+            db, user_id="AS_V", roles={DM_EDITOR}, audiences={f"{unit_id}:999999"}, operator_id="ADMIN"
         )
     assert e.value.error_code == "DM_ROLE_002"
 

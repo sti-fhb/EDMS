@@ -29,6 +29,7 @@ _PUBLISHED = "PUBLISHED"
 _MANUAL = "MANUAL"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
+_UNIT = "UNIT"  # 單位標籤組之 GROUP_TYPE（#437）
 
 
 def _split_by_group(rows) -> dict[str, list]:
@@ -377,6 +378,20 @@ class EditorRepository:
             select(DmTag.tag_id, DmTag.tag_name)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
             .where(DmTagGroup.group_type == _AUDIENCE, DmTag.is_enabled.is_(True))
+            .order_by(DmTag.tag_id)
+        )
+        return list((await db.execute(stmt)).all())
+
+    async def list_unit_tags(self, db: AsyncSession) -> list[Row]:
+        """單位下拉（UNIT 組、啟用中；**含通用值「全單位」**＝不限單位）。
+
+        單位為可見對象配對之一端（#437）。其 `GROUP_TYPE` 獨立為 `'UNIT'`，故不會被
+        `list_audience_tags`（查 `GROUP_TYPE='AUDIENCE'`）收進職位下拉。
+        """
+        stmt = (
+            select(DmTag.tag_id, DmTag.tag_name)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmTagGroup.group_type == _UNIT, DmTag.is_enabled.is_(True))
             .order_by(DmTag.tag_id)
         )
         return list((await db.execute(stmt)).all())

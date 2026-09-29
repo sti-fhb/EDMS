@@ -137,16 +137,19 @@ async def test_disable_audience_tag_soft_retire_returns_affected(db):
     assert tag.is_enabled is False
 
 
-async def test_list_audiences_only_audience_group(db):
-    """list_audiences 僅回 AUDIENCE 組（供權限管理核取清單）。"""
+async def test_list_audiences_returns_both_dimensions(db):
+    """list_audiences 回職位與單位兩個維度，供權限管理組成 (單位, 職位) 配對（#437）。"""
     auds = await _svc.list_audiences(db)
-    assert len(auds) >= 1 and all(a.group_type == "AUDIENCE" for a in auds)
+    kinds = {a.group_type for a in auds}
+    assert kinds == {"AUDIENCE", "UNIT"}
+    assert all(a.kind == "TAG" for a in auds)
 
 
 async def test_list_audiences_excludes_all_universal_tag(db):
-    """list_audiences 排除通用值「全體」——它是文件端「所有閱覽者可見」，非可指派給個別使用者之可見對象。"""
+    """排除兩個通用值——「全體」/「全單位」是**文件端**「不限」之語意，非可指派給個人者。"""
     auds = await _svc.list_audiences(db)
-    assert "全體" not in {a.name for a in auds}
+    names = {a.name for a in auds}
+    assert "全體" not in names and "全單位" not in names
 
 
 async def test_maintenance_writes_audit(db):

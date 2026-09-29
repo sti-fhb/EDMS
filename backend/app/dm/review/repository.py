@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy import Row, and_, exists, func, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
@@ -231,31 +232,42 @@ class ReviewCenterRepository:
             doc_id: 文件編號（廢止類之來源）。
             version_id: 送審版本（新增 / 新版本之來源）；為 None 時退回文件層。
 
+        可見對象以 (單位, 職位) 配對呈現（#437），值為「單位 + 職位」之組合字串，例如
+        「國防部軍醫局 + 護理師」——審核者需看到的是**哪種人看得到**，拆成兩排標籤會讓
+        多筆配對無從對應（見 issue #437「為何不採單位集 ∧ 職位集」）。
+
         Returns:
-            {"audience": [...], "retrieval": [...]}，值為標籤名稱（中文）。
+            {"audience": [...], "retrieval": [...]}，值為中文字串。
         """
+        unit_tag = aliased(DmTag, name="dm_unit_tag")
         if review_type == _OBSOLETE or version_id is None:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type)
+                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
                 .select_from(DmDocTag)
                 .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .outerjoin(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
                 .order_by(DmTag.tag_id)
             )
         else:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type)
+                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
                 .select_from(DmVersionTag)
                 .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .outerjoin(unit_tag, DmVersionTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
                 .order_by(DmTag.tag_id)
             )
         audience: list[str] = []
         retrieval: list[str] = []
-        for tag_name, group_type in (await db.execute(stmt)).all():
-            (audience if group_type == _AUDIENCE else retrieval).append(tag_name)
+        for tag_name, group_type, unit_name in (await db.execute(stmt)).all():
+            if group_type != _AUDIENCE:
+                retrieval.append(tag_name)
+            else:
+                # 單位缺漏者（導入配對前之殘留）仍列出職位，讓審核者看得到它、而非默默消失
+                audience.append(f"{unit_name} + {tag_name}" if unit_name else tag_name)
         return {"audience": audience, "retrieval": retrieval}
 
     async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:

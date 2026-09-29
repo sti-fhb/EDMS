@@ -569,11 +569,13 @@ class EditorService:
         cats = await self._repo.list_categories(db)
         funcs = await self._repo.list_funcs(db)
         auds = await self._repo.list_audience_tags(db)
+        units = await self._repo.list_unit_tags(db)
         rtags = await self._repo.list_retrieval_tags(db)
         return EditorOptions(
             categories=[OptionItem(code=c.category_code, name=c.category_name) for c in cats],
             funcs=[OptionItem(code=f.func_code, name=f.func_name) for f in funcs],
             audiences=[OptionItem(code=str(t.tag_id), name=t.tag_name) for t in auds],
+            units=[OptionItem(code=str(t.tag_id), name=t.tag_name) for t in units],
             retrieval_tags=[
                 OptionItem(code=str(t.tag_id), name=t.tag_name, group_code=t.tag_group_code) for t in rtags
             ],

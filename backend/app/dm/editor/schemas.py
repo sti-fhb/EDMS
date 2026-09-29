@@ -94,5 +94,6 @@ class EditorOptions(BaseModel):
 
     categories: list[OptionItem]
     funcs: list[OptionItem]  # 系統操作手冊之關聯作業項目
-    audiences: list[OptionItem]  # 可見對象（含「全體」）
+    audiences: list[OptionItem]  # 可見對象之職位（含通用值「全體」）
+    units: list[OptionItem]  # 可見對象之單位（含通用值「全單位」＝不限單位，#437）
     retrieval_tags: list[OptionItem]  # 檢索標籤（分組）

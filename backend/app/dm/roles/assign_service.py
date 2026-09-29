@@ -26,6 +26,7 @@ from app.dm.roles.models import DmUserRole, DmUserRoleLog
 from app.services import AuditLogService
 
 _AUDIENCE_GROUP_TYPE = "AUDIENCE"
+_UNIT_GROUP_TYPE = "UNIT"  # 單位標籤組（#437）
 _GRANT = "GRANT"
 _REVOKE = "REVOKE"
 
@@ -59,7 +60,7 @@ class AssignService:
 
         tag_rows = await db.execute(select(DmUserTag).where(DmUserTag.user_id.in_(user_ids), DmUserTag.deleted == 0))
         for t in tag_rows.scalars():
-            groups[t.user_id].add(str(t.tag_id))
+            groups[t.user_id].add(encode_pair(t.unit_tag_id, t.tag_id))
             _track_last(last_by, last_at, t.user_id, t.updated_user or t.created_user, t.updated_date or t.created_date)
 
         for uid in user_ids:
@@ -81,7 +82,7 @@ class AssignService:
         """
         # 輸入防呆（本轉接層為 DM_USER_ROLE / DM_USER_TAG 之權威寫入口，不信任呼叫端）
         _ensure_valid_roles(roles)
-        _ensure_numeric_ids(audiences)
+        _ensure_valid_pairs(audiences)
         # 自我保護先於任何寫入：若 operator 對自己儲存之角色集不含 DM_ADMIN 即拒絕
         ensure_not_self_admin_removal(operator_id, user_id, roles)
 
@@ -97,10 +98,12 @@ class AssignService:
             await self._set_role(db, user_id, role, active=False, operator_id=operator_id)
         for role in sorted(roles_add):
             await self._set_role(db, user_id, role, active=True, operator_id=operator_id)
-        for tag_id in sorted(aud_remove):
-            await self._set_audience(db, user_id, int(tag_id), active=False, operator_id=operator_id)
-        for tag_id in sorted(aud_add):
-            await self._set_audience(db, user_id, int(tag_id), active=True, operator_id=operator_id)
+        for pair in sorted(aud_remove):
+            unit_id, role_id = decode_pair(pair)
+            await self._set_audience(db, user_id, role_id, unit_id, active=False, operator_id=operator_id)
+        for pair in sorted(aud_add):
+            unit_id, role_id = decode_pair(pair)
+            await self._set_audience(db, user_id, role_id, unit_id, active=True, operator_id=operator_id)
 
         await db.flush()
         await self._audit.log_action(
@@ -141,14 +144,31 @@ class AssignService:
         )
 
     async def _set_audience(
-        self, db: AsyncSession, user_id: str, tag_id: int, *, active: bool, operator_id: str
+        self, db: AsyncSession, user_id: str, tag_id: int, unit_tag_id: int | None, *, active: bool, operator_id: str
     ) -> None:
-        """授予 / 撤銷單一可見對象授權（軟刪除復用；最後異動記於 UPDATED_*）。"""
-        row = await db.scalar(select(DmUserTag).where(DmUserTag.user_id == user_id, DmUserTag.tag_id == tag_id))
+        """授予 / 撤銷單一 (單位, 職位) 配對授權（軟刪除復用；最後異動記於 UPDATED_*）。
+
+        查詢鍵為 `(USER_ID, TAG_ID, UNIT_TAG_ID)` 整組（#437）——同一職位可對應多個單位，
+        僅以 `TAG_ID` 定位會撈到另一個單位的配對並就地改掉。
+
+        `unit_tag_id` 為 None 代表單位未指定（導入配對前之既有授權），以 `IS NULL` 比對。
+        """
+        unit_match = DmUserTag.unit_tag_id.is_(None) if unit_tag_id is None else DmUserTag.unit_tag_id == unit_tag_id
+        row = await db.scalar(
+            select(DmUserTag).where(DmUserTag.user_id == user_id, DmUserTag.tag_id == tag_id, unit_match)
+        )
         now = utcnow()
         if active:
             if row is None:
-                db.add(DmUserTag(user_id=user_id, tag_id=tag_id, created_user=operator_id, created_date=now))
+                db.add(
+                    DmUserTag(
+                        user_id=user_id,
+                        tag_id=tag_id,
+                        unit_tag_id=unit_tag_id,
+                        created_user=operator_id,
+                        created_date=now,
+                    )
+                )
             else:
                 row.deleted = 0
                 row.updated_user, row.updated_date = operator_id, now
@@ -156,23 +176,51 @@ class AssignService:
             row.deleted = 1
             row.updated_user, row.updated_date = operator_id, now
 
-    async def _validate_audiences_enabled(self, db: AsyncSession, tag_ids: set[str]) -> None:
-        """新增之可見對象 MUST 屬 AUDIENCE 組且啟用；否則 DM_ROLE_002。"""
+    async def _validate_audiences_enabled(self, db: AsyncSession, pairs: set[str]) -> None:
+        """新增之配對兩端 MUST 各屬 AUDIENCE / UNIT 組且啟用；否則 DM_ROLE_002。
+
+        兩端分別驗組別（#437）：職位放到單位欄（或反之）於 DB 層無從攔截——`UNIT_TAG_ID` 之 FK
+        只能保證指向 `DM_TAG`。人側之單位允許未指定（None），該情形不需驗。
+        """
+        if not pairs:
+            return
+        decoded = [decode_pair(p) for p in pairs]
+        role_ids = {role_id for _, role_id in decoded}
+        unit_ids = {unit_id for unit_id, _ in decoded if unit_id is not None}
+        await self._ensure_tags_in_group(db, role_ids, _AUDIENCE_GROUP_TYPE)
+        await self._ensure_tags_in_group(db, unit_ids, _UNIT_GROUP_TYPE)
+
+    async def _ensure_tags_in_group(self, db: AsyncSession, tag_ids: set[int], group_type: str) -> None:
+        """指定標籤全數存在、啟用中且屬該組型；否則 DM_ROLE_002。"""
         if not tag_ids:
             return
-        ints = {int(t) for t in tag_ids}
         valid = await db.execute(
             select(DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
             .where(
-                DmTag.tag_id.in_(ints),
+                DmTag.tag_id.in_(tag_ids),
                 DmTag.is_enabled.is_(True),
-                DmTagGroup.group_type == _AUDIENCE_GROUP_TYPE,
+                DmTagGroup.group_type == group_type,
             )
         )
-        valid_ids = set(valid.scalars())
-        if ints - valid_ids:
+        if tag_ids - set(valid.scalars()):
             raise AppError(status_code=422, detail="指定之可見對象無效或未啟用", error_code="DM_ROLE_002")
+
+
+def encode_pair(unit_tag_id: int | None, tag_id: int) -> str:
+    """把 (單位, 職位) 配對編為 `"{unit}:{role}"`（#437）。
+
+    `AssignmentView.groups` 之元素型別為 `str`（跨模組共用契約，各模組自定語意），故 DM 以此
+    字串攜帶配對。單位未指定者編為 `":{role}"`——空字串與任何 TAG_ID 皆不相等，集合差異運算
+    因此能正確區分「未指定單位」與「某個具體單位」兩種授權。
+    """
+    return f"{'' if unit_tag_id is None else unit_tag_id}:{tag_id}"
+
+
+def decode_pair(pair: str) -> tuple[int | None, int]:
+    """把 `encode_pair` 之字串解回 `(單位 TAG_ID | None, 職位 TAG_ID)`。"""
+    unit_str, _, role_str = pair.partition(":")
+    return (int(unit_str) if unit_str else None), int(role_str)
 
 
 def _ensure_valid_roles(roles: set[str]) -> None:
@@ -181,10 +229,15 @@ def _ensure_valid_roles(roles: set[str]) -> None:
         raise AppError(status_code=422, detail="指定之角色代碼無效", error_code="DM_ROLE_003")
 
 
-def _ensure_numeric_ids(tag_ids: set[str]) -> None:
-    """可見對象值 MUST 為數字 TAG_ID；否則 DM_ROLE_002（避免 int() 轉型丟未攔截 500）。"""
-    if any(not t.isdigit() for t in tag_ids):
-        raise AppError(status_code=422, detail="指定之可見對象無效或未啟用", error_code="DM_ROLE_002")
+def _ensure_valid_pairs(pairs: set[str]) -> None:
+    """可見對象值 MUST 為 `"{unit}:{role}"` 格式（單位可空）；否則 DM_ROLE_002。
+
+    防呆先於任何 `int()` 轉型——格式錯誤若流到 `decode_pair` 會丟 ValueError 而非 422。
+    """
+    for p in pairs:
+        unit_str, sep, role_str = p.partition(":")
+        if not sep or not role_str.isdigit() or (unit_str and not unit_str.isdigit()):
+            raise AppError(status_code=422, detail="指定之可見對象無效或未啟用", error_code="DM_ROLE_002")
 
 
 def _track_last(
