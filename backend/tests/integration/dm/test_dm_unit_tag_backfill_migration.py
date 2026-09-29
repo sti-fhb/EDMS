@@ -42,12 +42,7 @@ def _load_migration():
 async def _create_temp_tables(db) -> None:
     """建立回填涉及的三張表之暫存版（僅含本回填會讀寫的欄位）。"""
     await db.execute(
-        text(
-            'CREATE TEMP TABLE "DM_TAG" ('
-            '  "TAG_ID" bigint,'
-            '  "TAG_GROUP_CODE" varchar(20)'
-            ") ON COMMIT DROP"
-        )
+        text('CREATE TEMP TABLE "DM_TAG" (  "TAG_ID" bigint,  "TAG_GROUP_CODE" varchar(20)) ON COMMIT DROP')
     )
     await db.execute(
         text(
@@ -79,9 +74,7 @@ async def _create_temp_tables(db) -> None:
 
 async def _doc_tag(db, doc_id: str, tag_id: int, unit_tag_id: int | None = None, deleted: int = 0) -> None:
     await db.execute(
-        text(
-            'INSERT INTO "DM_DOC_TAG" ("DOC_ID", "TAG_ID", "UNIT_TAG_ID", "DELETED") VALUES (:d, :t, :u, :del)'
-        ),
+        text('INSERT INTO "DM_DOC_TAG" ("DOC_ID", "TAG_ID", "UNIT_TAG_ID", "DELETED") VALUES (:d, :t, :u, :del)'),
         {"d": doc_id, "t": tag_id, "u": unit_tag_id, "del": deleted},
     )
 
@@ -89,8 +82,7 @@ async def _doc_tag(db, doc_id: str, tag_id: int, unit_tag_id: int | None = None,
 async def _version_tag(db, version_id: int, tag_id: int, unit_tag_id: int | None = None, deleted: int = 0) -> None:
     await db.execute(
         text(
-            'INSERT INTO "DM_VERSION_TAG" ("VERSION_ID", "TAG_ID", "UNIT_TAG_ID", "DELETED") '
-            "VALUES (:v, :t, :u, :del)"
+            'INSERT INTO "DM_VERSION_TAG" ("VERSION_ID", "TAG_ID", "UNIT_TAG_ID", "DELETED") VALUES (:v, :t, :u, :del)'
         ),
         {"v": version_id, "t": tag_id, "u": unit_tag_id, "del": deleted},
     )

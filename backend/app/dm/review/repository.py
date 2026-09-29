@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy import Row, and_, exists, func, select
-from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow

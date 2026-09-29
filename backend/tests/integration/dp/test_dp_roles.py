@@ -72,6 +72,17 @@ async def _audience_tag_id(db) -> int:
     )
 
 
+async def _dm_audience_group(db) -> str:
+    """DM 之群組值＝(單位, 職位) 配對編碼（#437）；DP 端僅原樣傳遞，不解讀其語意。"""
+    unit_id = await db.scalar(
+        select(DmTag.tag_id)
+        .join(DmTagGroup)
+        .where(DmTagGroup.group_type == "UNIT", DmTag.tag_name != "全單位", DmTag.is_enabled.is_(True))
+        .limit(1)
+    )
+    return f"{unit_id}:{await _audience_tag_id(db)}"
+
+
 async def test_manageable_modules_dm_admin_only(db, dm_registered):
     """DM 管理者 → 可管理模組含 DM；ET 未註冊 → 不出現。"""
     await _grant_dm(db, "op_admin", DM_ADMIN)
@@ -106,9 +117,9 @@ async def test_require_manageable_enforces(db, dm_registered):
 async def test_assign_delegates_to_dm_provider_and_audits(db, dm_registered):
     """DM 管理者指派 → 委派 DM provider 寫 DM_USER_ROLE / DM_USER_TAG + 模組側稽核。"""
     await _grant_dm(db, "adm", DM_ADMIN)
-    tag_id = await _audience_tag_id(db)
+    group = await _dm_audience_group(db)
     op = OperatorInfo(user_id="adm")
-    await _svc.assign(db, module="DM", user_id="tgt", roles=[DM_EDITOR], groups=[str(tag_id)], operator=op)
+    await _svc.assign(db, module="DM", user_id="tgt", roles=[DM_EDITOR], groups=[group], operator=op)
     roles = {
         r
         for r in (

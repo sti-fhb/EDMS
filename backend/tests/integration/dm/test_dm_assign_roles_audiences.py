@@ -100,9 +100,7 @@ async def test_assign_audience_and_disabled_rejected(db):
     tag_id = await _audience_tag_id(db)
     unit_id = await _unit_tag_id(db)
     pair = encode_pair(unit_id, tag_id)
-    await _svc.assign_roles_audiences(
-        db, user_id="AS_V", roles={DM_EDITOR}, audiences={pair}, operator_id="ADMIN"
-    )
+    await _svc.assign_roles_audiences(db, user_id="AS_V", roles={DM_EDITOR}, audiences={pair}, operator_id="ADMIN")
     view = (await _svc.get_users_roles_audiences(db, ["AS_V"]))["AS_V"]
     assert pair in view.groups
     granted = await db.scalar(

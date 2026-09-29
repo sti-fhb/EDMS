@@ -23,9 +23,11 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+
 async def _all_units_id(db):
     """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
 
 _svc = EditorService()
 _PDF = "application/pdf"

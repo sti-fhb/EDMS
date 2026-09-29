@@ -343,9 +343,7 @@ async def test_get_doc_tags_prefers_own_draft_snapshot(db):
 
     tags = await _svc.get_doc_tags(db, "DM-SOP-000106", user_id="ed")
 
-    assert [p.audience_id for p in tags.audience_pairs] == [
-        str(await _audience_id(db, "護理師"))
-    ]  # 非文件層的「全體」
+    assert [p.audience_id for p in tags.audience_pairs] == [str(await _audience_id(db, "護理師"))]  # 非文件層的「全體」
 
 
 async def test_add_version_integrity_race_maps_to_single_draft(db, monkeypatch):
