@@ -791,6 +791,15 @@ export function EtCourseEditorPage() {
    * | 新項目、填了東西 | 確認後刪掉 |
    * | 既有項目、沒改過 | 直接關 |
    * | 既有項目、改過 | 確認後關（項目本身保留） |
+   *
+   * ## 🔴 既有教材的已上傳影片**不在「放棄」的範圍內**（#442）
+   *
+   * 影片是選檔即上傳（`MaterialDialog` 模組 docstring 記著理由：檔案傳輸沒辦法暫存在
+   * 請求裡），所以按取消它仍在伺服器上。原本兩種情境共用「尚未儲存的變更將不會保留」
+   * 一句，對既有教材是**不成立**的宣稱——教師據此以為自己取消掉了。
+   *
+   * 兩種情境不可合併成一句更含糊的話：新項目那邊取消是連項目帶空殼一起刪，影片跟著
+   * 消失，原句成立且該保持；含糊化等於把一句正確的話也弄成不精確的。
    */
   const requestCloseItem = (dirty: boolean) => {
     const isUnsavedNew = unsavedNewItemId !== null
@@ -799,11 +808,15 @@ export function EtCourseEditorPage() {
       else closeItemDialog()
       return
     }
+    // 只在「既有教材且真的有影片」時才提——沒有影片還講一句影片，對他同樣不成立。
+    const keepsUploadedVideos = !isUnsavedNew && (material?.videos.length ?? 0) > 0
     confirm({
       title: "放棄變更",
       content: isUnsavedNew
         ? "變更內容不會儲存，此項目也不會建立。確定取消？"
-        : "尚未儲存的變更將不會保留，確定關閉？",
+        : keepsUploadedVideos
+          ? "尚未儲存的變更將不會保留。已上傳的影片不在此列——它在選擇檔案時就已保存，取消不會移除。確定關閉？"
+          : "尚未儲存的變更將不會保留，確定關閉？",
       okText: "確定",
       onOk: isUnsavedNew ? discardUnsavedItem : closeItemDialog,
     })

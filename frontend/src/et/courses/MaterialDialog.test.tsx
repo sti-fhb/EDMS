@@ -58,6 +58,21 @@ describe("教材編輯視窗", () => {
     expect(screen.getByText("採血流程訓練教材")).toBeInTheDocument()
   })
 
+  /**
+   * #442：影片是本視窗**唯一**一選檔就送出的東西（模組 docstring 記著理由：檔案傳輸
+   * 沒辦法暫存在請求裡）。那個代價原本只寫在程式碼註解裡，畫面上一字未提——教師
+   * 上傳完按取消，影片其實還在。
+   */
+  it("影片區塊明示上傳後即已保存（#442）", () => {
+    renderDialog()
+    expect(screen.getByText(/影片選擇檔案後立即上傳並保存/)).toBeInTheDocument()
+  })
+
+  it("唯讀時不顯示上傳保存的提示——他上傳不了，那句話對他沒有意義（#442）", () => {
+    renderDialog({ readOnly: true })
+    expect(screen.queryByText(/影片選擇檔案後立即上傳並保存/)).not.toBeInTheDocument()
+  })
+
   it("影片顯示長度與檔案大小", () => {
     renderDialog()
     // 945 秒 = 15:45；188743680 bytes = 180 MB

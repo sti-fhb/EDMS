@@ -294,6 +294,16 @@ export function MaterialDialog({
               <Typography variant="subtitle2" gutterBottom>
                 影片檔
               </Typography>
+              {/* #442：本視窗唯一一個「不等按儲存」的東西，畫面上原本一字未提——
+                  教師上傳完按取消，影片其實還在。理由見模組 docstring（檔案傳輸沒辦法
+                  暫存在請求裡）；⛔ 不要為了讓行為一致而改成延後上傳，那會讓格式錯誤
+                  延到按儲存才回報（#360 的「無法解析影片長度」是伺服器端判定的）。
+                  唯讀者不顯示：他上傳不了，這句話對他沒有意義。 */}
+              {!readOnly && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                  影片選擇檔案後立即上傳並保存，不需按儲存；取消也不會移除，要移除請按影片列右側的刪除。
+                </Typography>
+              )}
               {/* 緊貼上傳區——使用者按下上傳時視線在這裡，訊息飄到視窗頂端等於沒說 */}
               {(uploadError ?? localUploadError) && (
                 <Alert severity="error" sx={{ mb: 1 }}>
