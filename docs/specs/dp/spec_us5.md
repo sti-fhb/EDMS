@@ -20,6 +20,8 @@
 6. **Given** 輸入之參數值不合法（型別錯誤 / 超出值域），**When** 儲存，**Then** 阻擋並提示（DP-MSG-DP07-001）
 7. **Given** ET 管理者以直接呼叫 API 之方式存取 `DM_` 前綴項，**When** 請求到達，**Then** 伺服器端拒絕（DP-MSG-DP07-003，非僅前端過濾）
 8. **Given** ET / DM 模組透過唯讀查詢服務讀取自己前綴之定義，**When** 清單項剛被停用，**Then** 模組端下拉即時反映（僅列啟用中項；既有引用之顯示由模組自理）
+9. **Given** 參數明細標為 `READONLY`（如 `ET_VIDEO_ALLOWED_FORMATS`），**When** 管理者進入維護頁，**Then** 該列**顯示現值**並標示由 IT 設定、**無編輯入口**；直接呼叫 API 修改其值 / 名稱 / 說明 / 啟停之任一項，伺服器端一律拒絕（DP-MSG-DP07-007）
+10. **Given** 參數明細標為 `HIDDEN`（如 `MAIL.RATE_PER_MIN`），**When** 管理者進入維護頁，**Then** 該列**完全不出現**；但模組經唯讀查詢服務讀取該參數 MUST 照常取得其值（維護層級不影響執行期行為）
 
 ## Functional Requirements
 
@@ -31,8 +33,43 @@
 - **FR-DP-US5-08**（#182 新增）: 清單型之**模組受控主檔**（文件分類 / 關聯作業項目 / 標籤庫 / 受訓單位標籤）存於**各模組自持表**、不存 `DP_PARAM`；維護頁 MUST 經受控主檔轉接層（[module-callbacks.md](contracts/module-callbacks.md) §3.1）委派模組，DP 不直接讀寫模組表。可維護之類別、其畫面顯示名、是否需輸入代碼與子分組 MUST 由**模組自報**（`list_controlled_kinds`），DP **不得硬編碼**模組語彙——硬編碼會在模組新增類別時靜默漏列（畫面少一區、不報錯）
 - **FR-DP-US5-09**（#182 新增）: 受控項之鎖定語意 MUST 全平台一致——`is_builtin=true` 代表**代碼建立後鎖定、僅可改名**；維護頁據此將代碼欄設為唯讀，**不得據此禁止改名**。更嚴格之保護（如 ET「全體」不可停用 / 改名）由各模組於伺服器端拒絕，前端隱藏僅為 UX
 - **FR-DP-US5-10**（#182 新增）: 停用可見對象類標籤時 MUST 呈現受影響數（文件 / 閱覽者）供管理者判斷。該數字目前**未計入在途草稿之版本層標籤快照**，故為下限，訊息 MUST 以「至少」表述（`DP-MSG-DP07-006`）；精確計數待 #388
+- **FR-DP-US5-11**（#171 新增）: 每筆參數明細 MUST 帶維護層級（`DP_PARAM_D.EDIT_SCOPE`，值為 `ADMIN` / `READONLY` / `HIDDEN`）。`READONLY` MUST 於維護頁顯示現值但**整列不可編輯**（值 / 名稱 / 說明 / 啟停皆擋）、`HIDDEN` MUST NOT 出現於維護頁；兩者之寫入 MUST 於伺服器端拒絕（`DP-MSG-DP07-007`），前端不渲染入口僅為 UX。`READONLY` / `HIDDEN` 之值**由 IT 直接操作資料庫變更**，系統不提供介面——這是刻意的取捨，見下〈維護層級〉
 - **FR-DP-US5-06**: 所有參數 / 清單異動 MUST 寫入 `DP_AUDIT_LOG`（含異動前後值）並即時生效
 - **FR-DP-US5-07**: 編輯平台級參數 MUST 先顯示影響全平台之警告
+
+## 維護層級（FR-DP-US5-11 落地）
+
+### 為何需要三級而非「可改 / 不可改」布林
+
+25 個 VALUE 明細中 `READONLY` 佔 9 項（36%）。若只有兩級，這 9 項只能二選一：
+
+- **藏起來** → 管理者無法回答使用者「單檔上限多少」「能傳什麼影片格式」
+- **開放改** → 發生 #170 那種靜默故障（`ET_VIDEO_ALLOWED_FORMATS` 填 `.mov`，檔案傳得上去、播不出來）
+
+兩者皆不可接受，故分三級。
+
+### 三級定義
+
+| 值 | 維護頁呈現 | 可否編輯 | 判準 |
+|----|-----------|---------|------|
+| `ADMIN` | 正常列出 | ✅ | 純業務／資安政策，值域寬鬆、改錯可回復，本來就該由甲方決定 |
+| `READONLY` | 顯示現值 + 「IT 設定」標記 | ❌ 整列 | 管理者需知現值以回答使用者，但值受實作或環境限制，改錯會造成功能異常 |
+| `HIDDEN` | 完全不出現 | ❌ | 純技術／部署調校，業務端不需知道，出現在畫面只是雜訊 |
+
+### 三個相鄰機制的分工（勿混用）
+
+| 機制 | 位置 | 管什麼 | 錯誤碼 |
+|------|------|--------|-------|
+| `DP_PARAM_M.DETAIL_LOCK` | 主檔欄位 | 明細**碼值**（`PARAM_KEY`）建立後不可改 | `DP_PARAM_002` |
+| 系統 enum 清單（程式碼側） | `service.py` 之 `_SYSTEM_PARAM_IDS` | **主檔層**：整個 `PARAM_ID` 不屬於維護面（目前僅 `ACTION_TYPE`）| `DP_PARAM_004`（404）|
+| `DP_PARAM_D.EDIT_SCOPE` | 明細欄位 | **明細層**：這一列誰可以改 | `DP_PARAM_007`（403）|
+
+三者正交。`ACTION_TYPE` 的 5 列雖亦標為 `HIDDEN`（使分類在資料層完整），但實際擋人的是主檔層那道——它先執行。
+
+### 兩項刻意的限制
+
+1. **`READONLY` ＝整列唯讀，不只擋值。** 若只擋 `PARAM_VALUE` 而開放停用，管理者停用 `DM_FILE_TYPES` 即可讓 `get_param_value()` 回 `None` 使呼叫端 fallback 到程式碼預設值——繞過唯讀改變了系統實際行為，而畫面上那一列的「值」看起來沒被動過。
+2. **本機制只作用於 DP07。** `READONLY` 的用意是「管理者看得到現值以回答使用者」，但使用者實際操作的畫面目前仍有硬編碼文案（如 DM 編輯頁的「單檔最大 50 MB」、教材上傳的 `accept` 屬性）不跟著參數走。IT 依上述途徑改了 DB 後，DP07 顯示新值、那些畫面仍說舊話。此為**已知缺口**，待另案處理。
 
 ## 參數型別 / 值域驗證規則（FR-DP-US5-03 落地）
 
@@ -40,25 +77,25 @@
 
 ### 平台級 VALUE 參數（多鍵參數組，PARAM_TYPE=VALUE）
 
-| PARAM_ID | PARAM_KEY | 中文名稱（PARAM_NAME）| 型別 | 值域 | 依據 |
-|----------|-----------|------------------|------|------|------|
-| `JWT` | `ACCESS_TTL_MIN` | 閒置自動登出（分鐘） | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）|
-| `JWT` | `RENEW_MAX_HOURS` | 單次登入時效上限（小時） | 正整數（時）| 1–24 | 建議（單日上限）|
-| `PWD_POLICY` | `MIN_LEN` | 密碼最小長度（一般使用者） | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）|
-| `PWD_POLICY` | `ADMIN_MIN_LEN` | 密碼最小長度（特權帳號） | 正整數 | ≥ `MIN_LEN`（預設 12）| spec 明載（特權 12）|
-| `PWD_POLICY` | `CHAR_TYPES` | 字元組合要求（種類數） | 正整數 | 1–4（大小寫 / 數字 / 符號 4 類）| spec 明載 |
-| `PWD_POLICY` | `HISTORY_COUNT` | 密碼歷史記憶次數 | 非負整數 | 0–24（預設 3）| 建議 |
-| `PWD_POLICY` | `EXPIRY_DAYS` | 密碼最長效期（天） | 正整數（天）| 1–90 | spec 明載（最短 1、最長 90）|
-| `PWD_POLICY` | `EXPIRY_REMIND_DAYS` | 密碼到期提醒天數（天） | 正整數（天）| 1 ≤ 值 < `EXPIRY_DAYS`（預設 7）| 建議（須早於到期）|
-| `LOGIN` | `FAIL_LOCK_COUNT` | 登入失敗鎖定次數 | 正整數 | ≥ 1（預設 5，建議 3–10）| spec 明載（預設 5）|
-| `LOGIN` | `LOCK_MINUTES` | 帳號鎖定時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
-| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 密碼重設連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
-| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 |
-| `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| ≥ 1（預設 90）| spec 明載 |
-| `LOGIN` | `VERIFY_SEND_COOLDOWN_SEC` | 驗證信重寄冷卻（秒） | 正整數（秒）| 60–3600（預設 600）| #74 / #76 |
-| `MAIL` | `RATE_PER_MIN` | 每分鐘寄信上限（封） | 正整數 | ≥ 1（預設 60）| 建議 |
-| `MAIL` | `RETRY_MAX` | 寄信重試上限次數 | 非負整數 | 0–10（預設 5）| 建議 |
-| `MAIL` | `RETRY_INTERVAL_MIN` | 寄信重試間隔（分鐘） | 正整數（分）| ≥ 1（預設 2）| 建議 |
+| PARAM_ID | PARAM_KEY | 中文名稱（PARAM_NAME）| 型別 | 值域 | 依據 | 維護層級 |
+|----------|-----------|------------------|------|------|------|----------|
+| `JWT` | `ACCESS_TTL_MIN` | 閒置自動登出（分鐘） | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）| `READONLY` |
+| `JWT` | `RENEW_MAX_HOURS` | 單次登入時效上限（小時） | 正整數（時）| 1–24 | 建議（單日上限）| `READONLY` |
+| `PWD_POLICY` | `MIN_LEN` | 密碼最小長度（一般使用者） | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）| `ADMIN` |
+| `PWD_POLICY` | `ADMIN_MIN_LEN` | 密碼最小長度（特權帳號） | 正整數 | ≥ `MIN_LEN`（預設 12）| spec 明載（特權 12）| `ADMIN` |
+| `PWD_POLICY` | `CHAR_TYPES` | 字元組合要求（種類數） | 正整數 | 1–4（大小寫 / 數字 / 符號 4 類）| spec 明載 | `ADMIN` |
+| `PWD_POLICY` | `HISTORY_COUNT` | 密碼歷史記憶次數 | 非負整數 | 0–24（預設 3）| 建議 | `ADMIN` |
+| `PWD_POLICY` | `EXPIRY_DAYS` | 密碼最長效期（天） | 正整數（天）| 1–90 | spec 明載（最短 1、最長 90）| `ADMIN` |
+| `PWD_POLICY` | `EXPIRY_REMIND_DAYS` | 密碼到期提醒天數（天） | 正整數（天）| 1 ≤ 值 < `EXPIRY_DAYS`（預設 7）| 建議（須早於到期）| `ADMIN` |
+| `LOGIN` | `FAIL_LOCK_COUNT` | 登入失敗鎖定次數 | 正整數 | ≥ 1（預設 5，建議 3–10）| spec 明載（預設 5）| `ADMIN` |
+| `LOGIN` | `LOCK_MINUTES` | 帳號鎖定時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 | `ADMIN` |
+| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 密碼重設連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 | `ADMIN` |
+| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 | `ADMIN` |
+| `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| ≥ 1（預設 90）| spec 明載 | `ADMIN` |
+| `LOGIN` | `VERIFY_SEND_COOLDOWN_SEC` | 驗證信重寄冷卻（秒） | 正整數（秒）| 60–3600（預設 600）| #74 / #76 | `READONLY` |
+| `MAIL` | `RATE_PER_MIN` | 每分鐘寄信上限（封） | 正整數 | ≥ 1（預設 60）| 建議 | `HIDDEN` |
+| `MAIL` | `RETRY_MAX` | 寄信重試上限次數 | 非負整數 | 0–10（預設 5）| 建議 | `HIDDEN` |
+| `MAIL` | `RETRY_INTERVAL_MIN` | 寄信重試間隔（分鐘） | 正整數（分）| ≥ 1（預設 2）| 建議 | `HIDDEN` |
 
 ### 跨欄位一致性（同 PARAM_ID 內）
 
@@ -81,6 +118,7 @@
 | DP-MSG-DP07-004 | 成功 | 已儲存並即時生效 | FR-DP-US5-06 完成 |
 | DP-MSG-DP07-005 | 警告 | 此為平台級參數，變更將影響全平台（ET 與 DM）| FR-DP-US5-07 平台級編輯 |
 | DP-MSG-DP07-006 | 成功 | 已停用，至少影響 N 份文件、M 位閱覽者 | FR-DP-US5-10 可見對象 soft-retire；「至少」不可省略——數字為下限 |
+| DP-MSG-DP07-007 | 錯誤 | 此參數由 IT 設定，不可於畫面修改 | FR-DP-US5-11 `READONLY` / `HIDDEN` 明細之寫入。畫面本就無編輯入口，此訊息用於直接呼叫 API 之情形 |
 
 ## 前置依賴
 
