@@ -1,6 +1,6 @@
 """排程總覽 / 編輯服務（US11）。
 
-總覽唯讀列 job（含由 cron 計算之下次執行時間）；編輯僅開放 JOB_NAME / CRON_EXPR / IS_ENABLED，
+總覽唯讀列 job（含由 cron 計算之下次執行時間）；編輯僅開放 JOB_NAME / DESCRIPTION / CRON_EXPR / IS_ENABLED，
 JOB_ID 唯讀、HANDLER_REF / MODULE 永不可改（改 HANDLER_REF＝RCE，見 scheduler._resolve_handler 白名單）。
 編輯即時套到運行中的引擎（apply_job_change），並寫稽核。
 """

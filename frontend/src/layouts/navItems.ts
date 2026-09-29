@@ -124,7 +124,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
 ]
 
-/** 無側欄入口、但有自己頁面標題的畫面（子頁）。 */
+/** 無側欄入口、但有自己頁面標題的畫面（子頁）。ET02 頁面依模式以 `title` 覆寫為「新增課程」/「課程編輯」，此 label 僅為後備。 */
 const SUBPAGE_SCREENS: readonly Screen[] = [{ code: "ET02", label: "課程建立", icon: EditNoteIcon }]
 
 const SCREENS: ReadonlyMap<string, Screen> = new Map(
