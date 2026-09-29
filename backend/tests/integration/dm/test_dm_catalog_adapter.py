@@ -145,6 +145,17 @@ async def test_list_audiences_returns_both_dimensions(db):
     assert all(a.kind == "TAG" for a in auds)
 
 
+async def test_list_controlled_kinds_includes_unit_group(db):
+    """UNIT 組自動出現在可維護之標籤分組（#437）。
+
+    `list_controlled_kinds` 由 `DM_TAG_GROUP` 動態讀取，故新增標籤組不需改程式即可於 DP 後台維護——
+    這是客戶日後補單位（例如三總院內捐血站）的路徑，值得釘住，否則被改成硬編碼清單也不會有人發現。
+    """
+    kinds = await _svc.list_controlled_kinds(db)
+    tag_kind = next(k for k in kinds if k.kind == "TAG")
+    assert "UNIT" in {g.code for g in tag_kind.groups}
+
+
 async def test_list_audiences_excludes_all_universal_tag(db):
     """排除兩個通用值——「全體」/「全單位」是**文件端**「不限」之語意，非可指派給個人者。"""
     auds = await _svc.list_audiences(db)
