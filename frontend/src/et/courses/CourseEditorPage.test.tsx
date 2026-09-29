@@ -383,6 +383,74 @@ describe("ET02 課程編輯頁", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   }, 15000)
 
+  /**
+   * #435 AC 4：導向後重新整理不會再建一個問卷。
+   *
+   * ⚠️ **本測試的守衛條件與正式環境相反，而那正好讓它更嚴格。** 正式環境有兩道：
+   * `navigate(..., { state: null })` 把 state 清掉，以及 `pendingSurveyHandled` ref
+   * 擋重入。但測試裡 `useNavigate` 是 spy，location 不會真的改變——`pendingAddSurvey`
+   * 始終為真，且 effect 的 deps 含每次 render 都變的 `handleError`，所以它會不斷重跑。
+   * 於是**唯一擋住重複建立的就是 ref**，count 若不是 1 就是 ref 失效。
+   *
+   * 另外斷言清 state 的那次 navigate 有發生——它是正式環境「重新整理安全」的那一半，
+   * 在這裡驗不到效果，只驗它有被呼叫。
+   */
+  it("pendingAddSurvey 只會建立一次，且會清掉 navigate state（#435 AC 4）", async () => {
+    let created = 0
+    server.use(
+      http.get("/api/et/courses/:courseId/survey", () => HttpResponse.json(null)),
+      http.post("/api/et/courses/:courseId/survey", () => {
+        created += 1
+        return HttpResponse.json(
+          { survey_id: 32, survey_name: "只建一次", is_active: true, version: 0, questions: [] },
+          { status: 201 },
+        )
+      }),
+    )
+    locationRef.current = {
+      pathname: "/et/courses/1",
+      state: { pendingAddSurvey: { surveyName: "只建一次" } },
+    }
+    renderEditor("1")
+
+    await screen.findByRole("dialog")
+    // 建立後 invalidate 會再觸發查詢與 render；等它們都跑完再數
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+    await waitFor(() => expect(created).toBe(1))
+    expect(created).toBe(1)
+    expect(navigateSpy).toHaveBeenCalledWith("/et/courses/1", { replace: true, state: null })
+  }, 15000)
+
+  /**
+   * #435 AC 5：自動存草稿失敗時不導向，且不留下半建的問卷。
+   *
+   * 「半建」在這條路徑上的具體樣子是：課程沒建成卻已經送出了建問卷的請求。導向沒發生
+   * 就不會走到建立那一步，但那是**推論**——這裡直接數問卷端點被打了幾次。
+   */
+  it("自動存草稿失敗時不導向、也不送出建立問卷（#435 AC 5）", async () => {
+    const user = userEvent.setup()
+    let surveyCreated = 0
+    server.use(
+      http.post("/api/et/courses", () =>
+        HttpResponse.json({ error_code: "ET_COURSE_999", error_message: "伺服器錯誤" }, { status: 500 }),
+      ),
+      http.post("/api/et/courses/:courseId/survey", () => {
+        surveyCreated += 1
+        return HttpResponse.json({ survey_id: 33 }, { status: 201 })
+      }),
+    )
+    renderNewEditor()
+    await user.type(await screen.findByRole("textbox", { name: "課程名稱" }), "存檔會失敗的課程")
+
+    await user.click(await screen.findByRole("button", { name: "新增問卷" }))
+    await user.type(await screen.findByRole("textbox", { name: /問卷名稱/ }), "不會被建立的問卷")
+    await user.click(screen.getByRole("button", { name: "建立" }))
+
+    expect(await screen.findByText("伺服器錯誤")).toBeInTheDocument()
+    expect(navigateSpy).not.toHaveBeenCalled()
+    await waitFor(() => expect(surveyCreated).toBe(0))
+  }, 15000)
+
   it("課程名稱未填時按「新增項目」→ 標欄位錯誤、不建立草稿（#335）", async () => {
     const user = userEvent.setup()
     let created = 0
