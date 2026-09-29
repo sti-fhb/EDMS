@@ -164,11 +164,11 @@ async def search_approvals(
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> PaginatedResult[ApprovalQueryRow]:
-    """依學員姓名查核可紀錄（`FR-ET-US17-01`）。
+    """依學員**姓名或 Email** 查核可紀錄（`FR-ET-US17-01`、#436）。
 
     ## 🔴 為何是 POST 而且查詢條件走 body（#391）
 
-    `user_name` 必定是一個人的姓名，而 **URL 會被 nginx `error_log` 與 Cloudflare 的
+    `keyword` 必定是一個人的姓名或 Email（兩者皆為個資），而 **URL 會被 nginx `error_log` 與 Cloudflare 的
     請求日誌記下來**（前者格式不可自訂、後者不在本系統掌控範圍）。改走 body 之後，
     那兩處只看得到 `/api/et/approvals/search`。完整背景見 `ApprovalSearchReq` 的 docstring。
 
@@ -188,17 +188,17 @@ async def search_approvals(
     ——那是本裁示的配套。少了它，教師看到某門課沒出現時會分不清是「還沒考」還是
     「考了沒過」。
 
-    `user_name` **必填**（SA Q2 裁示 A）：`min_length=1` 擋空字串，全空白由 service
+    `keyword` **必填**（SA Q2 裁示 A）：`min_length=1` 擋空字串，全空白由 service
     的 `strip()` 擋下回 422。
 
     Raises:
-        AppError: 422 `ET_APPROVAL_006` 姓名為空白；403 `ET_AUTH_001` 非教師 / 管理者。
+        AppError: 422 `ET_APPROVAL_006` 關鍵字為空白；403 `ET_AUTH_001` 非教師 / 管理者。
     """
     return await _query.search(
         db,
         actor_id=ctx.user_id,
         roles=ctx.roles,
-        user_name=req.user_name,
+        keyword=req.keyword,
         result=req.result,
         page=req.page,
         limit=req.limit,

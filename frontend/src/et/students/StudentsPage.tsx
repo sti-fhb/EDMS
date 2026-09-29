@@ -7,6 +7,7 @@ import DialogContent from "@mui/material/DialogContent"
 import DialogContentText from "@mui/material/DialogContentText"
 import DialogTitle from "@mui/material/DialogTitle"
 import MenuItem from "@mui/material/MenuItem"
+import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
@@ -297,32 +298,37 @@ export function EtStudentsPage() {
 
   return (
     <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Typography variant="h5">學員</Typography>
-        <TextField
-          select
-          size="small"
-          label="課程"
-          sx={{ minWidth: 260 }}
-          value={courseId}
-          disabled={emptyReason !== null}
-          helperText={
-            emptyReason === "failed"
-              ? "課程清單載入失敗，請重新整理後再試"
-              : emptyReason === "none"
-                ? "尚無已發布的課程——課程發布後才會有學員"
-                : undefined
-          }
-          onChange={(e) => setCourseId(e.target.value === "" ? "" : Number(e.target.value))}
-        >
-          <MenuItem value="">請選擇課程</MenuItem>
-          {options.map((c) => (
-            <MenuItem key={c.course_id} value={c.course_id}>
-              {c.course_name}
-            </MenuItem>
-          ))}
-        </TextField>
-      </Stack>
+      {/* 課程選擇列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
+          ⚠️ 下方三個區塊（已加入學員 / 作答明細 / 問卷結果）**本來就各自有 `Paper`**，
+          缺的只有這一條：標題與下拉裸放在灰底上，看起來像懸空。 */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
+          <Typography variant="h5">學員</Typography>
+          <TextField
+            select
+            size="small"
+            label="課程"
+            sx={{ minWidth: 260 }}
+            value={courseId}
+            disabled={emptyReason !== null}
+            helperText={
+              emptyReason === "failed"
+                ? "課程清單載入失敗，請重新整理後再試"
+                : emptyReason === "none"
+                  ? "尚無已發布的課程——課程發布後才會有學員"
+                  : undefined
+            }
+            onChange={(e) => setCourseId(e.target.value === "" ? "" : Number(e.target.value))}
+          >
+            <MenuItem value="">請選擇課程</MenuItem>
+            {options.map((c) => (
+              <MenuItem key={c.course_id} value={c.course_id}>
+                {c.course_name}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Stack>
+      </Paper>
 
       {courseId === "" ? (
         <Alert severity="info">請先於右上選擇要檢視的課程。</Alert>

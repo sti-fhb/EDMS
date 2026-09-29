@@ -41,7 +41,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.type(await screen.findByLabelText("學員姓名"), "林")
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
     // fixture 三列同屬林佳蓉，故鎖定其中一列而非全頁比對
@@ -56,7 +56,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.type(await screen.findByLabelText("學員姓名"), "林")
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
     const row = (await screen.findByText("血品安全與品保概論")).closest("tr")!
@@ -84,22 +84,20 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.type(await screen.findByLabelText("學員姓名"), "查無此人")
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
     expect(await screen.findByText("查無符合條件的核可紀錄")).toBeInTheDocument()
   })
 
-  it("學員姓名走 request body，網址裡沒有（#391）", async () => {
-    // 🔴 本端點是 POST 的唯一理由：`user_name` 必定是一個人的姓名，而網址會被
-    // nginx `error_log` 與 Cloudflare 的請求日誌記下來（前者格式不可自訂、後者不在
-    // 本系統掌控範圍），body 不會。
+  it("Email 與姓名共用同一欄，同樣送進 body（#436）", async () => {
+    // ⚠️ 標籤改了、後端也支援了，但**沒有東西驗證前端真的把 Email 送出去**——
+    // 少了這條，把輸入框綁錯 state 或在送出前過濾掉 `@` 都不會有任何東西變紅。
     //
-    // ⛔ 若有人為了「比較 RESTful」把 service 改回 `http.get(url, { params })`，
-    // 姓名就回到網址裡，而**畫面行為完全正常**——沒有任何東西看起來壞掉。
-    // 本條與後端的 `test_姓名走query_string不被接受` 是同一道紅線的兩端。
+    // 🔴 Email 是個資、且比姓名更能唯一定位一個人，故 #391 的「不得進網址」對它
+    // **更**適用，不是更寬鬆。此處一併釘住。
     asRole("teacher")
-    const seen: { url?: string; body?: { user_name?: string } } = {}
+    const seen: { url?: string; body?: { keyword?: string } } = {}
     server.use(
       http.post("/api/et/approvals/search", async ({ request }) => {
         seen.url = request.url
@@ -110,17 +108,45 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.type(await screen.findByLabelText("學員姓名"), "林佳蓉")
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "lin@edms.local")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    await waitFor(() => expect(seen.body?.user_name).toBe("林佳蓉"))
+    await waitFor(() => expect(seen.body?.keyword).toBe("lin@edms.local"))
+    expect(seen.url).not.toContain("lin@edms.local")
+    expect(seen.url).not.toContain(encodeURIComponent("lin@edms.local"))
+  })
+
+  it("關鍵字走 request body，網址裡沒有（#391）", async () => {
+    // 🔴 本端點是 POST 的唯一理由：`keyword` 必定是姓名或 Email（皆為個資），而網址會被
+    // nginx `error_log` 與 Cloudflare 的請求日誌記下來（前者格式不可自訂、後者不在
+    // 本系統掌控範圍），body 不會。
+    //
+    // ⛔ 若有人為了「比較 RESTful」把 service 改回 `http.get(url, { params })`，
+    // 姓名就回到網址裡，而**畫面行為完全正常**——沒有任何東西看起來壞掉。
+    // 本條與後端的 `test_姓名走query_string不被接受` 是同一道紅線的兩端。
+    asRole("teacher")
+    const seen: { url?: string; body?: { keyword?: string } } = {}
+    server.use(
+      http.post("/api/et/approvals/search", async ({ request }) => {
+        seen.url = request.url
+        seen.body = (await request.json()) as NonNullable<typeof seen.body>
+        return HttpResponse.json(EMPTY)
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "林佳蓉")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    await waitFor(() => expect(seen.body?.keyword).toBe("林佳蓉"))
     expect(seen.url).not.toContain("林佳蓉")
-    expect(seen.url).not.toContain("user_name")
+    expect(seen.url).not.toContain("keyword")
     // 連編碼過的形式也不行——`encodeURIComponent` 後是看不出來的百分號序列
     expect(seen.url).not.toContain(encodeURIComponent("林佳蓉"))
   })
 
-  it("姓名未填時不送出請求（SA Q2 裁示 A）", async () => {
+  it("關鍵字未填時不送出請求（SA Q2 裁示 A）", async () => {
     asRole("teacher")
     let called = false
     server.use(
@@ -134,7 +160,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
 
     await user.click(await screen.findByRole("button", { name: "查詢" }))
 
-    expect(await screen.findByText("請輸入學員姓名")).toBeInTheDocument()
+    expect(await screen.findByText("請輸入學員姓名或 Email")).toBeInTheDocument()
     expect(called).toBe(false)
   })
 
@@ -143,17 +169,17 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.type(await screen.findByLabelText("學員姓名"), "   ")
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "   ")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    expect(await screen.findByText("請輸入學員姓名")).toBeInTheDocument()
+    expect(await screen.findByText("請輸入學員姓名或 Email")).toBeInTheDocument()
   })
 
   it("查詢前不顯示空狀態——那會讓人以為已經查過且查無資料", async () => {
     asRole("teacher")
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await screen.findByLabelText("學員姓名")
+    await screen.findByLabelText("學員姓名或 Email")
     expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
   })
 
@@ -169,7 +195,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.type(await screen.findByLabelText("學員姓名"), "林")
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
     expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
@@ -240,7 +266,7 @@ describe("ET10 核可查詢：共通", () => {
     asRole("admin")
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByLabelText("學員姓名")).toBeInTheDocument()
+    expect(await screen.findByLabelText("學員姓名或 Email")).toBeInTheDocument()
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
   })
 
@@ -262,7 +288,7 @@ describe("ET10 核可查詢：共通", () => {
 
     // capabilities 先回來的那個空窗期：不得已 isAdmin=false 渲染出教師視角
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
-    expect(await screen.findByLabelText("學員姓名")).toBeInTheDocument()
+    expect(await screen.findByLabelText("學員姓名或 Email")).toBeInTheDocument()
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
   })
 
@@ -271,6 +297,6 @@ describe("ET10 核可查詢：共通", () => {
     asRole("teacher")
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByLabelText("學員姓名")).toBeInTheDocument()
+    expect(await screen.findByLabelText("學員姓名或 Email")).toBeInTheDocument()
   })
 })

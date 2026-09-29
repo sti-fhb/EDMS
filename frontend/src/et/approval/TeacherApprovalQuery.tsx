@@ -33,7 +33,10 @@ const RESULT_OPTIONS = [
 ] as const
 
 /**
- * 教師 / 管理者視角——依學員姓名查核可紀錄（`FR-ET-US17-01`）。
+ * 教師 / 管理者視角——依學員**姓名或 Email** 查核可紀錄（`FR-ET-US17-01`、#436）。
+ *
+ * ⚠️ 兩者共用同一個輸入框、擇一命中即可：同名同姓時姓名不足以定位，而 Email 是帳號的
+ * 唯一鍵。分兩欄會讓「隨便給個識別資訊找到人」這個實際用法變成要先想「我手上這個是哪種」。
  *
  * ## 🔴 範圍提示是 SA 裁示 C 的配套，不是可選的 UX 潤飾
  *
@@ -58,7 +61,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   const [result, setResult] = useState("")
   const [page, setPage] = useState(1)
   /** 已送出的查詢條件。`null` = 尚未查詢過（與「查過但沒資料」是兩回事）。 */
-  const [submitted, setSubmitted] = useState<{ user_name: string; result: string } | null>(null)
+  const [submitted, setSubmitted] = useState<{ keyword: string; result: string } | null>(null)
   /** 姓名欄位的本地驗證訊息。與下方查詢本身的 `queryError` 是兩回事，刻意分開命名。 */
   const [nameError, setNameError] = useState<string | null>(null)
 
@@ -67,7 +70,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
     QUERY_KEYS.etApprovals.search(params ?? {}),
     () =>
       approvalsApi.search({
-        user_name: submitted!.user_name,
+        keyword: submitted!.keyword,
         result: (submitted!.result || undefined) as "PASS" | "FAIL" | undefined,
         page,
       }),
@@ -78,12 +81,12 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
     // SA Q2 裁示 A：姓名必填。前端先擋是為了讓教師當場看到，後端仍會回 422。
     const keyword = nameInput.trim()
     if (keyword === "") {
-      setNameError("請輸入學員姓名")
+      setNameError("請輸入學員姓名或 Email")
       return
     }
     setNameError(null)
     setPage(1)
-    setSubmitted({ user_name: keyword, result })
+    setSubmitted({ keyword, result })
   }
 
   const rows = data?.data ?? []
@@ -98,53 +101,58 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         </Alert>
       )}
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="flex-start">
-        <TextField
-          label="學員姓名"
-          size="small"
-          sx={{ minWidth: 260 }}
-          value={nameInput}
-          error={nameError !== null}
-          helperText={nameError ?? "可輸入部分姓名"}
-          onChange={(e) => {
-            setNameInput(e.target.value)
-            setNameError(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit()
-          }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-        <TextField
-          select
-          label="核可結果"
-          size="small"
-          sx={{ minWidth: 150 }}
-          value={result}
-          onChange={(e) => setResult(e.target.value)}
-        >
-          {RESULT_OPTIONS.map((o) => (
-            <MenuItem key={o.value} value={o.value}>
-              {o.label}
-            </MenuItem>
-          ))}
-        </TextField>
-        <Button variant="contained" size="medium" startIcon={<SearchIcon />} onClick={submit} sx={{ mt: 0.25 }}>
-          查詢
-        </Button>
-      </Stack>
+      {/* 搜尋列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
+          裸放在灰底上時欄位看起來像懸空的，而下方結果表格有 Paper 框，上下半部
+          視覺不一致會讓人以為畫面還沒載完。 */}
+      <Paper sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="flex-start">
+          <TextField
+            label="學員姓名或 Email"
+            size="small"
+            sx={{ minWidth: 260 }}
+            value={nameInput}
+            error={nameError !== null}
+            helperText={nameError ?? "可輸入部分姓名或 Email"}
+            onChange={(e) => {
+              setNameInput(e.target.value)
+              setNameError(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit()
+            }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+          <TextField
+            select
+            label="核可結果"
+            size="small"
+            sx={{ minWidth: 150 }}
+            value={result}
+            onChange={(e) => setResult(e.target.value)}
+          >
+            {RESULT_OPTIONS.map((o) => (
+              <MenuItem key={o.value} value={o.value}>
+                {o.label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Button variant="contained" size="medium" startIcon={<SearchIcon />} onClick={submit} sx={{ mt: 0.25 }}>
+            查詢
+          </Button>
+        </Stack>
+      </Paper>
 
       {submitted === null ? (
         <Typography variant="body2" color="text.secondary">
-          輸入學員姓名後按「查詢」。
+          輸入學員姓名或 Email 後按「查詢」。
         </Typography>
       ) : isPending ? (
         <Typography variant="body2" color="text.secondary">

@@ -167,26 +167,26 @@ class TestTeacherScope:
 
     async def test_教師查得他人課程的通過紀錄(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
         assert r.status_code == 200, r.text
         assert "成分製備標準作業教學" in _names(r.json()), "他人課程的通過紀錄應可見（裁示 C）"
 
     async def test_教師查不到他人課程的不通過(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
         assert "捐血人健康評估標準教學" not in _names(r.json())
 
     async def test_教師查不到他人課程已撤銷的通過(self, client, db) -> None:
         """🔴 被撤銷的通過其 `RESULT` 仍是 PASS——只依 RESULT 分流會讓撤銷原因外洩。"""
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
         body = r.json()
         assert "血品安全與品保概論" not in _names(body)
         assert "核可對象誤植" not in r.text, "撤銷原因不得出現在他人課程的回應中"
 
     async def test_教師看得到自己課程的不通過(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "王大明"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "王大明"}, headers=_bearer(f["own"]))
         rows = r.json()["data"]
         assert [row["result"] for row in rows] == [APPROVAL_FAIL]
         assert rows[0]["result_note"] is None or "加強" not in (rows[0]["result_note"] or "")
@@ -198,7 +198,7 @@ class TestTeacherScope:
         「共 4 筆」卻只翻得出 2 筆，而且不會有任何錯誤訊息。
         """
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
         body = r.json()
         assert body["meta"]["total"] == len(body["data"]) == 2
 
@@ -214,7 +214,7 @@ class TestResultFilterInteraction:
     async def test_教師篩不通過時仍只看得到自己課程的(self, client, db) -> None:
         """若 SQLAlchemy 沒替 `visible` 的 OR 加括號，這條會撈到他人課程的不通過。"""
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林", "result": "FAIL"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林", "result": "FAIL"}, headers=_bearer(f["own"]))
         assert r.status_code == 200, r.text
         assert _names(r.json()) == set(), "林佳蓉的不通過只在他人課程，教師不該看到"
 
@@ -235,7 +235,7 @@ class TestResultFilterInteraction:
             revoked_by=f["own"],
             revoke_reason="自己課程的撤銷",
         )
-        r = await client.post(_QUERY, json={"user_name": "王大明", "result": "PASS"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "王大明", "result": "PASS"}, headers=_bearer(f["own"]))
         rows = r.json()["data"]
         assert [row["is_revoked"] for row in rows] == [True]
         assert rows[0]["revoke_reason"] == "自己課程的撤銷"
@@ -243,7 +243,7 @@ class TestResultFilterInteraction:
     async def test_篩選值不在值域時回422(self, client, db) -> None:
         """`result` 走 router 的 pattern 驗證，不合法的值不該被當成「不篩」而放行全部。"""
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林", "result": "WHATEVER"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林", "result": "WHATEVER"}, headers=_bearer(f["own"]))
         assert r.status_code == 422
 
 
@@ -270,7 +270,7 @@ class TestResultNoteRedaction:
         f = await _fixture(db)
         await self._pass_with_note(db, f)
 
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
 
         row = next(x for x in r.json()["data"] if x["course_name"] == "輸血反應處置流程培訓")
         assert row["result_note"] is None, "他人課程的考核評語不得回傳"
@@ -281,7 +281,7 @@ class TestResultNoteRedaction:
         e = await _course(db, owner=f["own"], name="血袋判讀實務")
         await _approval(db, course_id=e, user_id=f["lin"], result=APPROVAL_PASS, approved_by=f["own"], note="操作熟練")
 
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["own"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
 
         row = next(x for x in r.json()["data"] if x["course_name"] == "血袋判讀實務")
         assert row["result_note"] == "操作熟練"
@@ -290,7 +290,7 @@ class TestResultNoteRedaction:
         f = await _fixture(db)
         await self._pass_with_note(db, f)
 
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["admin"]))
 
         notes = {x["course_name"]: x["result_note"] for x in r.json()["data"]}
         assert notes["輸血反應處置流程培訓"] == "第二次補考才通過，單採操作仍不穩"
@@ -306,7 +306,7 @@ class TestResultNoteRedaction:
 class TestAdminScope:
     async def test_管理者可查非自己建立課程的全部紀錄(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["admin"]))
         assert r.status_code == 200, r.text
         assert _names(r.json()) == {
             "採血作業新進人員訓練",
@@ -317,7 +317,7 @@ class TestAdminScope:
 
     async def test_管理者看得到撤銷原因與撤銷人(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["admin"]))
         revoked = next(row for row in r.json()["data"] if row["is_revoked"])
         assert revoked["revoke_reason"] == "核可對象誤植"
         assert revoked["revoked_by_name"] == "李管理員"
@@ -327,7 +327,7 @@ class TestAdminScope:
 class TestQueryBehaviour:
     async def test_回應含課程名稱與核可人姓名(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林佳蓉"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "林佳蓉"}, headers=_bearer(f["admin"]))
         row = next(x for x in r.json()["data"] if x["course_name"] == "採血作業新進人員訓練")
         assert row["user_name"] == "林佳蓉"
         assert row["approved_by_name"] == "王主任"
@@ -341,7 +341,7 @@ class TestQueryBehaviour:
 
     async def test_姓名只有空白視為未填(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "   "}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "   "}, headers=_bearer(f["admin"]))
         assert r.status_code == 422
 
     async def test_姓名走query_string不被接受(self, client, db) -> None:
@@ -368,19 +368,37 @@ class TestQueryBehaviour:
     async def test_姓名輸入百分號不得變成查全部(self, client, db) -> None:
         """🔴 未跳脫時 `%` 會讓 Q2 的必填形同虛設，**且沒有任何錯誤訊息**。"""
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "%"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "%"}, headers=_bearer(f["admin"]))
         assert r.status_code == 200, r.text
         assert r.json()["data"] == [], "`%` 應被當成字面字元，查無姓名含 % 的人"
 
     async def test_底線也要跳脫(self, client, db) -> None:
-        """`_` 是 LIKE 的單字元萬用字元，與 `%` 同屬必須跳脫的對象。"""
+        """`_` 是 LIKE 的單字元萬用字元，與 `%` 同屬必須跳脫的對象。
+
+        🔴 **本條在 #436（加入 Email 比對）之後必須改寫，否則它失去鑑別力。**
+
+        原本斷言「查 `_` 回空」——那在「只比對姓名」時成立（沒有人的姓名含底線）。
+        但 fixture 的 Email 是 `s_lin@…` / `s_wang@…`，**兩個都含字面底線**，於是
+        不論跳脫有沒有壞，查 `_` 都會回全部——**測試分不出兩種情形**。
+
+        改為鑑別式：另建一位 Email **不含**底線的學員，查 `_` 時他必須**不**出現。
+        跳脫若失效，`_` 會變成單字元萬用字元而命中他。
+        """
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "_"}, headers=_bearer(f["admin"]))
-        assert r.json()["data"] == []
+        # Email 不含底線；姓名也不含，故只有「跳脫失效」才會讓他出現
+        noun = await _user(db, "sxnoun", roles=(ROLE_STUDENT,), name="趙一")
+        await _approval(db, course_id=f["a"], user_id=noun, result=APPROVAL_PASS, approved_by=f["own"])
+
+        r = await client.post(_QUERY, json={"keyword": "_"}, headers=_bearer(f["admin"]))
+
+        assert r.status_code == 200, r.text
+        ids = {row["user_id"] for row in r.json()["data"]}
+        assert noun not in ids, "`_` 應被當成字面字元；命中無底線的帳號代表跳脫失效"
+        assert f["lin"] in ids, "含字面底線的 Email 應照常命中"
 
     async def test_學員不可使用教師端查詢(self, client, db) -> None:
         f = await _fixture(db)
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["lin"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["lin"]))
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_AUTH_001"
 
@@ -439,7 +457,7 @@ class TestSoftDeleteAndIsolation:
         row.deleted = 1
         await db.flush()
 
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["admin"]))
         assert "採血作業新進人員訓練" not in _names(r.json())
 
     async def test_不回傳已軟刪除課程的核可紀錄(self, client, db) -> None:
@@ -448,5 +466,49 @@ class TestSoftDeleteAndIsolation:
         course.deleted = 1
         await db.flush()
 
-        r = await client.post(_QUERY, json={"user_name": "林"}, headers=_bearer(f["admin"]))
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["admin"]))
         assert "採血作業新進人員訓練" not in _names(r.json())
+
+
+class TestKeywordMatchesNameOrEmail:
+    """#436：單一欄位可用**姓名或 Email** 查詢，擇一命中即可。
+
+    同名同姓時姓名不足以定位，而 Email 是帳號的唯一鍵——手測正是為此回報。
+    """
+
+    async def test_以_email_查得到(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "s_lin@edms.local"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert _names(r.json()), "以 Email 應查得到該學員的核可紀錄"
+
+    async def test_email_部分比對也命中(self, client, db) -> None:
+        """與姓名同為 `contains` 語意——教師記得帳號前半段就查得到。"""
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "s_lin"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert _names(r.json())
+
+    async def test_姓名仍照常查得到(self, client, db) -> None:
+        """回歸護欄：加了 Email 不得讓姓名失效。"""
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert _names(r.json())
+
+    async def test_兩者皆不命中時回空(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "查無此人"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert r.json()["data"] == []
+
+    async def test_email_的萬用字元一樣要跳脫(self, client, db) -> None:
+        """🔴 與姓名同一條理由：未跳脫時 `%` 等於「查全部」，而**沒有任何錯誤訊息**。
+
+        ⚠️ 加了第二個比對欄位就多一個要跳脫的地方——`or_` 的任一邊漏跳脫，整條
+        `or_` 就恆真。本條同時涵蓋兩邊（`%` 對姓名也不該命中）。
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "%"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert r.json()["data"] == [], "`%` 必須被當成字面字元，不得變成查全部"
