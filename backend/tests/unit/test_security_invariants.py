@@ -330,3 +330,90 @@ class TestCSP設定契約:
         conf = self._CONF.read_text(encoding="utf-8")
         for header in ("X-Content-Type-Options", "Referrer-Policy", "Content-Security-Policy"):
             assert header in conf, f"{header} 不在 nginx 設定內——全站來源的前提不成立"
+
+
+class Test前端快取設定契約:
+    """`nginx/nginx.conf` 的快取指令（#441）。
+
+    SPA 的正確設定是**一組不對稱的規則**：入口 HTML 每次回源驗證、雜湊資產永久快取。
+    少了前半就是 #441 —— `index.html` 沒有任何 `Cache-Control`，瀏覽器改用啟發式快取
+    自行決定存多久，而它指向的舊 bundle 是 `immutable, max-age=31536000`，會從本機
+    快取秒載、整年不重抓。使用者跑的是一個完全舊版的前端，且**沒有任何跡象**。
+
+    ⚠️ 2026-09-29 手測 #428 時實際被咬：程式已合併、CD 已 build、VM 已部署、線上
+    bundle 抓下來 grep 得到新字串，但測試者瀏覽器跑的是舊版。**而舊版底下 6 個測試
+    項目有 4 項看起來照樣通過**，回報長成「大部分都對，只有兩項怪怪的」，把人推向去
+    查那兩項的程式邏輯。
+
+    這份設定和 `TestCSP設定契約` 一樣不經任何執行期測試（本機 dev 走 vite 完全不經
+    nginx），故同樣以解析設定檔的方式釘住。
+    """
+
+    _CONF = Path(__file__).resolve().parents[2].parent / "nginx" / "nginx.conf"
+
+    def _location(self, pattern: str) -> str:
+        """取出指定 location 區塊的內容（單層大括號，本檔無巢狀 location）。"""
+        text = self._CONF.read_text(encoding="utf-8")
+        start = text.find(f"location {pattern} {{")
+        assert start != -1, f"找不到 location {pattern}：{self._CONF}"
+        depth = 0
+        for i in range(text.index("{", start), len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        raise AssertionError(f"location {pattern} 的大括號未閉合")
+
+    def test_設定檔存在(self) -> None:
+        assert self._CONF.is_file(), f"路徑推導錯誤：{self._CONF}"
+
+    def test_index_html_每次回源驗證(self) -> None:
+        """SPA 入口不得被瀏覽器自行決定快取多久。
+
+        這條若紅了，部署新版之後使用者可能繼續跑舊版前端，且看起來像是程式沒生效。
+        """
+        block = self._location("/")
+        match = re.search(r'add_header\s+Cache-Control\s+"([^"]+)"', block)
+        assert match is not None, "location / 未設 Cache-Control → 瀏覽器啟發式快取決定存多久（#441）"
+        value = match.group(1)
+        assert "no-cache" in value or "no-store" in value, (
+            f"location / 的 Cache-Control 必須要求回源驗證，現值：{value}"
+        )
+
+    def test_location_根目錄有重新_include_安全標頭(self) -> None:
+        """🔴 加了 `add_header` 就必須重新 include —— 否則 HTML 回應**靜默失去全部安全標頭**。
+
+        nginx 的繼承規則：location 內只要出現任何一個 `add_header`，server 層的
+        `add_header` 就**全部失效**。`security-headers.conf` 的檔頭與靜態資源那個
+        location（第 37-38 行）都記著這件事。
+
+        ⚠️ 本條釘的是「#441 的修法自己不要製造一個更大的洞」：CSP / HSTS / nosniff
+        全部由 server 層的 include 提供，而承載它們的**正是 HTML 回應**。掉了不會有
+        任何錯誤訊息，CSP 違規只進瀏覽器 console。
+        """
+        block = self._location("/")
+        if "add_header" not in block:
+            pytest.skip("location / 沒有 add_header，未觸發遮蔽規則")
+        assert "include /etc/nginx/security-headers.conf" in block, (
+            "location / 有 add_header 但未重新 include security-headers.conf"
+            " → CSP / HSTS / nosniff 會從 HTML 回應上消失"
+        )
+
+    def test_雜湊資產仍為長效不可變快取(self) -> None:
+        """⛔ 反方向的限制：不要為了修 #441 把靜態資產也改成不快取。
+
+        Vite 產出的檔名帶內容雜湊，內容變了檔名就變，故永久快取是**正確且必要**的
+        （否則每次進站重抓整包 bundle）。#441 的病根是入口 HTML 沒設，不是資產設錯。
+        把資產一起改成 `no-cache` 會讓症狀消失而代價是全站變慢——那是最容易亂試出來
+        的錯誤修法，故釘住。
+        """
+        block = self._location(r"~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$")
+        match = re.search(r'add_header\s+Cache-Control\s+"([^"]+)"', block)
+        assert match is not None, "靜態資產的 Cache-Control 不見了"
+        value = match.group(1)
+        assert "immutable" in value, f"雜湊資產應為 immutable，現值：{value}"
+        assert "no-cache" not in value and "no-store" not in value, (
+            f"雜湊資產不該關閉快取（#441 的病根在入口 HTML，不在這裡）：{value}"
+        )
