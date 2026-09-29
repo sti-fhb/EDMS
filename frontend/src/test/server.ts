@@ -358,7 +358,8 @@ export const handlers = [
       doc_name: "領血確認標準作業程序",
       category_code: "SOP",
       category_name: "標準作業程序",
-      audience_tags: ["全體", "護理師"],
+      // 後端以「單位 + 職位」成對回傳（#437）；前端直接呈現，不在畫面端組字串
+      audience_tags: ["全單位 + 全體", "國防部軍醫局 + 護理師"],
       retrieval_tags: ["採血"],
       review_type: "NEW_VERSION",
       change_summary: "補充第 5 點異常通報流程",
