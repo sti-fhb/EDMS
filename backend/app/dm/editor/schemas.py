@@ -43,10 +43,17 @@ class ReviewerItem(BaseModel):
     user_name: str
 
 
-class EditorDocTags(BaseModel):
-    """文件現有標籤（TAG_ID 字串），供編輯模式預帶可改。"""
+class AudiencePair(BaseModel):
+    """可見對象之 (單位, 職位) 配對（#437）；ID 為 `DM_TAG.TAG_ID` 字串。"""
 
-    audience_ids: list[str]
+    unit_id: str
+    audience_id: str
+
+
+class EditorDocTags(BaseModel):
+    """文件現有標籤，供編輯模式預帶可改。"""
+
+    audience_pairs: list[AudiencePair]
     retrieval_ids: list[str]
 
 

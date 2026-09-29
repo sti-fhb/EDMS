@@ -22,6 +22,10 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
 _editor = EditorService()
 _review = ReviewCenterService()
 _PDF = "application/pdf"
@@ -72,7 +76,8 @@ async def _create_manual(db, *, name, func_code, author="ed"):
         doc_name=name,
         category_code=_MANUAL,
         func_code=func_code,
-        audience_ids=[await _audience_id(db, "全體")],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[await _audience_id(db, "全體")],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版",

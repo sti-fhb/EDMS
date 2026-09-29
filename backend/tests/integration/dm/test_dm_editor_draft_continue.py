@@ -23,6 +23,10 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
 _svc = EditorService()
 _PDF = "application/pdf"
 
@@ -65,7 +69,8 @@ async def _first_version_draft(db, *, name="首版草稿文件", version_no="1.0
         doc_name=name,
         category_code="SOP",
         func_code=None,
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no=version_no,
         change_summary=summary,
@@ -234,7 +239,8 @@ async def test_update_draft_version_tag_change_is_read_back(db):
         doc_id=r.doc_id,
         version_id=r.version_id,
         doc_name=None,
-        audience_ids=[aud_nurse],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_nurse],
         retrieval_ids=[],
         version_no="1.1",
         change_summary="改可見對象",
@@ -245,8 +251,9 @@ async def test_update_draft_version_tag_change_is_read_back(db):
     )
 
     tags = await _svc.get_doc_tags(db, r.doc_id, user_id="ed")
-    assert tags.audience_ids == [str(aud_nurse)]
-    assert str(aud_all) not in tags.audience_ids
+    role_ids = [p.audience_id for p in tags.audience_pairs]
+    assert role_ids == [str(aud_nurse)]
+    assert str(aud_all) not in role_ids
 
 
 async def test_update_draft_version_in_place_no_new_row(db):
@@ -259,7 +266,8 @@ async def test_update_draft_version_in_place_no_new_row(db):
         doc_id=r.doc_id,
         version_id=r.version_id,
         doc_name=None,
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.1",
         change_summary="續編修訂",
@@ -284,7 +292,8 @@ async def test_update_draft_version_updates_doc_name_when_parent_draft(db):
         doc_id=r.doc_id,
         version_id=r.version_id,
         doc_name="改過的名稱",
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版摘要",
@@ -307,7 +316,8 @@ async def test_update_draft_version_ignores_doc_name_when_published(db):
         doc_id="DM-SOP-000901",
         version_id=nv.version_id,
         doc_name="想改但不該生效",
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改摘要",
@@ -330,7 +340,8 @@ async def test_update_draft_version_non_draft_blocked(db):
             doc_id="DM-SOP-000902",
             version_id=cur.version_id,  # PUBLISHED 版本
             doc_name=None,
-            audience_ids=[aud],
+            audience_unit_ids=[await _all_units_id(db)],
+            audience_role_ids=[aud],
             retrieval_ids=[],
             version_no="9.9",
             change_summary="x",
@@ -353,7 +364,8 @@ async def test_update_draft_version_non_owner_blocked(db):
             doc_id=r.doc_id,
             version_id=r.version_id,
             doc_name=None,
-            audience_ids=[aud],
+            audience_unit_ids=[await _all_units_id(db)],
+            audience_role_ids=[aud],
             retrieval_ids=[],
             version_no="1.1",
             change_summary="x",
@@ -392,7 +404,8 @@ async def test_update_draft_version_rename_requires_doc_owner(db):
         doc_id=r.doc_id,
         version_id=ov.version_id,
         doc_name="他人想改名",
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.0-b",
         change_summary="b",
@@ -414,7 +427,8 @@ async def test_create_persists_assigned_reviewer_for_draft_prefill(db):
         doc_name="x",
         category_code="SOP",
         func_code=None,
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="s",
@@ -439,7 +453,8 @@ async def test_update_draft_version_persists_assigned_reviewer(db):
         version_id=r.version_id,
         doc_name=None,
         assigned_reviewer="rev1",
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版摘要",
@@ -490,7 +505,8 @@ async def test_update_draft_version_updates_func_when_first_version_manual(db):
         version_id=ver.version_id,
         doc_name="手冊草稿",
         func_code="F1",
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="x",
@@ -514,7 +530,8 @@ async def test_update_draft_version_blocked_when_doc_obsolete(db):
             doc_id="DM-SOP-000910",
             version_id=ver.version_id,
             doc_name=None,
-            audience_ids=[aud],
+            audience_unit_ids=[await _all_units_id(db)],
+            audience_role_ids=[aud],
             retrieval_ids=[],
             version_no="2.1",
             change_summary="想續編",

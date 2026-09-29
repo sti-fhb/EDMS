@@ -263,7 +263,8 @@ class ReviewCenterRepository:
 
         標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
         差異式覆寫（手法同 editor 之 `set_version_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
-        軟刪除，以避開 UQ(DOC_ID, TAG_ID)。
+        軟刪除，以避開 UQ(DOC_ID, TAG_ID, UNIT_TAG_ID)。**比對鍵為 `(TAG_ID, UNIT_TAG_ID)` 整組**
+        （#437）——可見對象為 (單位, 職位) 配對，僅以 `TAG_ID` 比對會把不同單位的同一職位視為同一列。
 
         ⚠️ **呼叫端不變式（新增呼叫點前必讀）**：本方法是 `DM_DOC_TAG`（權限判定依據）的**唯一寫入點**，
         且**不自我驗證 `version_id` 是否屬於 `doc_id`**。目前安全性由呼叫端保證——`DmReview` 僅由
@@ -280,24 +281,37 @@ class ReviewCenterRepository:
         now = utcnow()
         wanted = list(
             (
-                await db.scalars(
-                    select(DmVersionTag.tag_id).where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+                await db.execute(
+                    select(DmVersionTag.tag_id, DmVersionTag.unit_tag_id).where(
+                        DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0
+                    )
                 )
             ).all()
         )
+        wanted = [(r[0], r[1]) for r in wanted]
         wanted_set = set(wanted)
         existing = {
-            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
+            (row.tag_id, row.unit_tag_id): row
+            for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
         }
-        for tid in wanted:
-            row = existing.get(tid)
+        for key in wanted:
+            row = existing.get(key)
             if row is None:
-                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=user_id, created_date=now))
+                tag_id, unit_tag_id = key
+                db.add(
+                    DmDocTag(
+                        doc_id=doc_id,
+                        tag_id=tag_id,
+                        unit_tag_id=unit_tag_id,
+                        created_user=user_id,
+                        created_date=now,
+                    )
+                )
             elif row.deleted != 0:
                 row.deleted = 0
                 row.updated_user, row.updated_date = user_id, now
-        for tid, row in existing.items():
-            if tid not in wanted_set and row.deleted == 0:
+        for key, row in existing.items():
+            if key not in wanted_set and row.deleted == 0:
                 row.deleted = 1
                 row.updated_user, row.updated_date = user_id, now
         await db.flush()

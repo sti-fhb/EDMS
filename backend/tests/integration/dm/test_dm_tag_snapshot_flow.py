@@ -23,6 +23,10 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
 _editor = EditorService()
 _review = ReviewCenterService()
 _PDF = "application/pdf"
@@ -93,7 +97,8 @@ async def _publish_first_version(db, *, audience_id: int) -> tuple[str, int]:
         doc_name="標籤快照測試文件",
         category_code="SOP",
         func_code=None,
-        audience_ids=[audience_id],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[audience_id],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版",
@@ -126,7 +131,8 @@ async def test_draft_tag_change_does_not_touch_doc_tag(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],  # 改成另一組可見對象
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],  # 改成另一組可見對象
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -150,7 +156,8 @@ async def test_approve_applies_version_tags_to_doc(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -181,7 +188,8 @@ async def test_training_audience_ids_discarded_server_side(db):
         doc_name="用血回報訓練教材",
         category_code="TRAINING",
         func_code=None,
-        audience_ids=[aud_a],  # 繞過前端直接帶入
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_a],  # 繞過前端直接帶入
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版",
@@ -210,7 +218,8 @@ async def test_withdraw_does_not_apply_version_tags(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -237,7 +246,8 @@ async def test_review_detail_shows_version_snapshot_tags(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -273,7 +283,8 @@ async def test_submit_blocked_when_version_snapshot_empty(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_a],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_a],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -300,7 +311,8 @@ async def test_reject_keeps_doc_tags_unchanged(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
