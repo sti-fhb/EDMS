@@ -21,6 +21,7 @@ import { CourseCard } from "./CourseCard"
 import { coursesApi } from "./coursesService"
 import { KEYWORD_MAX_LENGTH, ownerLabel } from "./schemas"
 import type { CourseListParams } from "./schemas"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
@@ -130,9 +131,7 @@ export function EtCourseListPage() {
 
   return (
     <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-        <Typography variant="h5">課程列表</Typography>
-      </Stack>
+      <ScreenHeader code="ET01" />
 
       <Tabs value={scope} onChange={(_, v: Scope) => changeScope(v)} sx={{ mb: 1 }}>
         <Tab value="mine" label="我建立的" />

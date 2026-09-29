@@ -28,6 +28,7 @@ import {
 } from "./schemas"
 import { personalApi } from "./personalService"
 import { useActivity, useDrafts } from "./usePersonal"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
 import { toApiError } from "../../services/http"
@@ -42,10 +43,8 @@ export function DmPersonalPage() {
   // 支援 ?tab=drafts 深連結（如編輯器續編後導回草稿匣）；預設「我的文件動態」。
   const [tab, setTab] = useState<"activity" | "drafts">(searchParams.get("tab") === "drafts" ? "drafts" : "activity")
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        個人專區
-      </Typography>
+    <Box>
+      <ScreenHeader code="DM07" />
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="activity" label="我的文件動態" />
         <Tab value="drafts" label="草稿匣" />

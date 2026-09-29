@@ -17,7 +17,7 @@ describe("ET03 學員學習狀況追蹤", () => {
   it("未選課程時三區塊都不渲染", async () => {
     renderWithProviders(<EtStudentsPage />)
 
-    expect(await screen.findByText("請先於右上選擇要檢視的課程。")).toBeInTheDocument()
+    expect(await screen.findByText("請先於上方選擇要檢視的課程。")).toBeInTheDocument()
     expect(screen.queryByText("已加入學員")).not.toBeInTheDocument()
   })
 

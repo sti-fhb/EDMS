@@ -246,6 +246,11 @@ describe("Sidebar", () => {
     }
   })
 
+  it("每個功能的 icon 互不相同（側欄上要能以 icon 分辨功能）", () => {
+    const icons = NAV_GROUPS.flatMap((group) => group.items.map((item) => item.icon))
+    expect(new Set(icons).size).toBe(icons.length)
+  })
+
   it("每個顯示中的導覽項目連到對應路由", async () => {
     renderWithProviders(<Sidebar />)
     await waitFor(() => expect(screen.getByText("文件管理")).toBeInTheDocument())

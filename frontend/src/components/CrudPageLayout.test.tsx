@@ -8,7 +8,7 @@ describe("CrudPageLayout", () => {
   it("渲染標題與各 slot（篩選 / 操作 / 表格 / 分頁 / 表單）", () => {
     renderWithProviders(
       <CrudPageLayout
-        title="使用者管理"
+        code="DP05"
         filterContent={<div>filter-slot</div>}
         actions={<button>actions-slot</button>}
         table={<div>table-slot</div>}

@@ -1,4 +1,3 @@
-import EmailIcon from "@mui/icons-material/Email"
 import Button from "@mui/material/Button"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
@@ -96,8 +95,7 @@ export function TemplatesPage() {
 
   return (
     <CrudPageLayout
-      icon={<EmailIcon color="primary" />}
-      title="通知範本維護"
+      code="DP08"
       actions={<CrudActions onRefresh={refresh} />}
       filterContent={
         visibleTabs.length > 0 && (

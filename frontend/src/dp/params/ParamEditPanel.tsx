@@ -99,7 +99,7 @@ function ValueEditBody({
   }
 
   return (
-    <FormCard title={detail.param_name} onSave={handleSave} onCancel={onClose} cancelLabel="關閉">
+    <FormCard title={`編輯系統參數 — ${detail.param_name}`} onSave={handleSave} onCancel={onClose} cancelLabel="關閉">
       <Stack spacing={2}>
         <TextField
           autoFocus
@@ -203,7 +203,7 @@ function ListEdit({ row, onSaveDetail, onToggle, onAdd, onClose }: ParamEditPane
   return (
     <Paper variant="outlined" sx={{ p: 3, mt: 2, maxWidth: 600, border: 2, borderColor: "primary.main" }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <Typography variant="h6">{master.param_name}</Typography>
+        <Typography variant="h6">編輯系統參數 — {master.param_name}</Typography>
         {master.detail_lock && <Chip size="small" icon={<LockIcon />} label="代碼鎖定" />}
       </Stack>
 

@@ -2,6 +2,7 @@ import Box from "@mui/material/Box"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useModuleSummary } from "../../layouts/useModuleSummary"
 import { coursesApi } from "../courses/coursesService"
@@ -48,9 +49,7 @@ export function EtApprovalQueryPage() {
 
   return (
     <Box>
-      <Typography variant="h5" gutterBottom>
-        核可查詢
-      </Typography>
+      <ScreenHeader code="ET10" />
       {isPending || summaryPending ? (
         <Typography variant="body2" color="text.secondary">
           載入中…

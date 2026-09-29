@@ -1,5 +1,4 @@
 import LockIcon from "@mui/icons-material/Lock"
-import TuneIcon from "@mui/icons-material/Tune"
 import Alert from "@mui/material/Alert"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
@@ -154,8 +153,7 @@ export function ParamsPage() {
 
   return (
     <CrudPageLayout
-      icon={<TuneIcon color="primary" />}
-      title="系統參數與清單維護"
+      code="DP07"
       filterContent={
         !loading &&
         visibleTabs.length > 0 && (

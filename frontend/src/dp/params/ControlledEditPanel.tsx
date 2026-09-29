@@ -79,7 +79,7 @@ export function ControlledEditPanel({ section, onAdd, onRename, onToggle, onClos
   return (
     <Paper variant="outlined" sx={{ p: 3, mt: 2, maxWidth: 600, border: 2, borderColor: "primary.main" }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <Typography variant="h6">{title}</Typography>
+        <Typography variant="h6">編輯系統參數 — {title}</Typography>
         <Chip size="small" label={section.module} />
       </Stack>
 

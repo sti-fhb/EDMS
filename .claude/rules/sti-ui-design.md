@@ -28,6 +28,7 @@ paths:
 | `CrudPageLayout` | `src/components/CrudPageLayout.tsx` | **CRUD 列表頁骨架**（標題列 + 篩選 / 操作 + 表格 + 分頁 + 表單 slot；props 版） |
 | `AppShell` | `src/layouts/AppShell.tsx` | 登入後主佈局（頂列 + 可收合側欄 + 內容區） |
 | `Sidebar` | `src/components/Sidebar.tsx` | 側欄導覽（項目來自 `layouts/navItems.ts` 的 `NAV_GROUPS`） |
+| `ScreenHeader` | `src/components/ScreenHeader.tsx` | 功能頁左上標題列（icon + 名稱 + 綠底線；依畫面代號取自 `navItems`） |
 | `AppHeader` | `src/components/AppHeader.tsx` | 頂部 Navbar（標題 + 個資選單 + 側欄切換） |
 | `AppTable` | `src/components/AppTable.tsx` | 統一表格（`AppColumn<T>` 定義欄位） |
 | `FormCard` | `src/components/FormCard.tsx` | 表單卡片容器（綠色 2px 邊框、max-width 600、展開式） |
@@ -35,7 +36,7 @@ paths:
 | `CrudActions` | `src/components/CrudActions.tsx` | 重新整理 + 新增 按鈕組 |
 | `useNotification` | `src/contexts/NotificationContext.tsx` | 通知 / 確認對話框 |
 
-> ⚠️ 下列元件**目前 EDMS 不存在**（TBMS 母專案有、EDMS 未 bootstrap 或不適用），勿引用：`AppLayout`、`Breadcrumb`、`ScreenHeader`、`StatusChip`、`ProtectedRoute`、`useWarMode` / 戰時模式。狀態標籤目前各頁自行以 MUI `Chip` 呈現；登入守衛由 `RootLayout` + `LoginOverlay` 處理。詳見 `sti-frontend-modules.md`「規劃中／尚未實作」。
+> ⚠️ 下列元件**目前 EDMS 不存在**（TBMS 母專案有、EDMS 未 bootstrap 或不適用），勿引用：`AppLayout`、`Breadcrumb`、`StatusChip`、`ProtectedRoute`、`useWarMode` / 戰時模式。狀態標籤目前各頁自行以 MUI `Chip` 呈現；登入守衛由 `RootLayout` + `LoginOverlay` 處理。詳見 `sti-frontend-modules.md`「規劃中／尚未實作」。
 
 ### CRUD 列表頁必須使用 `CrudPageLayout`
 
@@ -44,8 +45,7 @@ paths:
 ```tsx
 // ✅ 正確：使用 CrudPageLayout
 <CrudPageLayout
-  icon={<Settings />}
-  title="系統參數管理"
+  code="DP07"
   filterContent={<TextField size="small" placeholder="搜尋..." />}
   actions={<Button variant="contained" size="small">新增</Button>}
   table={<AppTable columns={columns} data={items} rowKey="id" loading={loading} />}

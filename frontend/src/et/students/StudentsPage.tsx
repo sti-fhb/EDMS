@@ -8,9 +8,7 @@ import DialogContentText from "@mui/material/DialogContentText"
 import DialogTitle from "@mui/material/DialogTitle"
 import MenuItem from "@mui/material/MenuItem"
 import Paper from "@mui/material/Paper"
-import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
-import Typography from "@mui/material/Typography"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
@@ -20,6 +18,7 @@ import { SurveyResultBlock } from "./SurveyResultBlock"
 import { TeacherAttemptDialog } from "./TeacherAttemptDialog"
 import { downloadStudentsCsv, downloadSurveyCsv, studentsApi } from "./studentsService"
 import type { ApprovalResult, ApproveResult, SkipReason, StudentRow, TeacherQuizRow } from "./schemas"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -298,40 +297,39 @@ export function EtStudentsPage() {
 
   return (
     <Box>
+      <ScreenHeader code="ET03" />
+
       {/* 課程選擇列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
           ⚠️ 下方三個區塊（已加入學員 / 作答明細 / 問卷結果）**本來就各自有 `Paper`**，
-          缺的只有這一條：標題與下拉裸放在灰底上，看起來像懸空。 */}
+          缺的只有這一條：下拉裸放在灰底上，看起來像懸空。標題則統一由 ScreenHeader 呈現。 */}
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
-          <Typography variant="h5">學員</Typography>
-          <TextField
-            select
-            size="small"
-            label="課程"
-            sx={{ minWidth: 260 }}
-            value={courseId}
-            disabled={emptyReason !== null}
-            helperText={
-              emptyReason === "failed"
-                ? "課程清單載入失敗，請重新整理後再試"
-                : emptyReason === "none"
-                  ? "尚無已發布的課程——課程發布後才會有學員"
-                  : undefined
-            }
-            onChange={(e) => setCourseId(e.target.value === "" ? "" : Number(e.target.value))}
-          >
-            <MenuItem value="">請選擇課程</MenuItem>
-            {options.map((c) => (
-              <MenuItem key={c.course_id} value={c.course_id}>
-                {c.course_name}
-              </MenuItem>
-            ))}
-          </TextField>
-        </Stack>
+        <TextField
+          select
+          size="small"
+          label="課程"
+          sx={{ minWidth: 260 }}
+          value={courseId}
+          disabled={emptyReason !== null}
+          helperText={
+            emptyReason === "failed"
+              ? "課程清單載入失敗，請重新整理後再試"
+              : emptyReason === "none"
+                ? "尚無已發布的課程——課程發布後才會有學員"
+                : undefined
+          }
+          onChange={(e) => setCourseId(e.target.value === "" ? "" : Number(e.target.value))}
+        >
+          <MenuItem value="">請選擇課程</MenuItem>
+          {options.map((c) => (
+            <MenuItem key={c.course_id} value={c.course_id}>
+              {c.course_name}
+            </MenuItem>
+          ))}
+        </TextField>
       </Paper>
 
       {courseId === "" ? (
-        <Alert severity="info">請先於右上選擇要檢視的課程。</Alert>
+        <Alert severity="info">請先於上方選擇要檢視的課程。</Alert>
       ) : (
         <>
           {readOnly && (
