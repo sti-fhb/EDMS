@@ -9,7 +9,7 @@ import type { ScheduleRow, ScheduleUpdatePayload } from "./schedulesService"
 import { FormCard } from "../../components/FormCard"
 import { getFieldErrors } from "../../utils/zodUtils"
 
-/** 編輯排程：JOB_ID 唯讀；JOB_NAME / CRON_EXPR / 啟停 可改。cron 變更即時生效。
+/** 編輯排程：JOB_ID 唯讀；JOB_NAME / 說明 / CRON_EXPR / 啟停 可改。cron 變更即時生效。
  *  表格下方展開之卡片（非 Modal，對齊其他維護頁）；由 SchedulePage 以 `key={job.job_id}`
  *  重掛，故 useState 每次以該列值初始化。 */
 export function ScheduleForm({
@@ -24,6 +24,7 @@ export function ScheduleForm({
   onCancel: () => void
 }) {
   const [jobName, setJobName] = useState(job.job_name)
+  const [description, setDescription] = useState(job.description ?? "")
   const [cronExpr, setCronExpr] = useState(job.cron_expr)
   const [isEnabled, setIsEnabled] = useState(job.is_enabled)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -31,6 +32,7 @@ export function ScheduleForm({
   const handleSave = () => {
     const parsed = ScheduleUpdateSchema.safeParse({
       job_name: jobName,
+      description,
       cron_expr: cronExpr,
       is_enabled: isEnabled,
     })
@@ -50,6 +52,17 @@ export function ScheduleForm({
           fullWidth
           error={Boolean(fieldErrors.job_name)}
           helperText={fieldErrors.job_name}
+        />
+        <TextField
+          label="說明"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          size="small"
+          fullWidth
+          multiline
+          error={Boolean(fieldErrors.description)}
+          // FR-DP-US11-07a：執行時點由 cron 現算顯示；說明裡寫時間不會跟著 cron 改，遲早變成錯的
+          helperText={fieldErrors.description ?? "描述這支作業做什麼；請勿寫執行時間（畫面已依 Cron 顯示）"}
         />
         <TextField
           label="Cron 表達式"

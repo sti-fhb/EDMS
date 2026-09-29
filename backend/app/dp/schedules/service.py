@@ -85,7 +85,7 @@ class ScheduleService:
     async def update_job(
         self, db: AsyncSession, *, job_id: str, data: ScheduleUpdate, operator: OperatorInfo
     ) -> ScheduleResponse:
-        """編輯排程（name / cron / 啟停）+ 稽核 + 即時套到引擎。
+        """編輯排程（name / 說明 / cron / 啟停）+ 稽核 + 即時套到引擎。
 
         Raises:
             AppError: job 不存在（404 DP_SCHED_001）、**非該 job 所屬模組之管理者**
@@ -101,12 +101,26 @@ class ScheduleService:
         except ValueError as exc:
             raise AppError(status_code=422, detail=f"cron 表達式不合法：{exc}", error_code="DP_SCHED_002") from exc
 
-        before = {"job_name": job.job_name, "cron_expr": job.cron_expr, "is_enabled": job.is_enabled}
+        # 未帶 description 維持原值；帶空字串（strip 後）或 null 一律存 NULL，不存空字串
+        description = (data.description or None) if "description" in data.model_fields_set else job.description
+        before = {
+            "job_name": job.job_name,
+            "description": job.description,
+            "cron_expr": job.cron_expr,
+            "is_enabled": job.is_enabled,
+        }
+        after = {
+            "job_name": data.job_name,
+            "description": description,
+            "cron_expr": data.cron_expr,
+            "is_enabled": data.is_enabled,
+        }
         now = utcnow()
         await self._repo.update_job(
             db,
             job=job,
             job_name=data.job_name,
+            description=description,
             cron_expr=data.cron_expr,
             is_enabled=data.is_enabled,
             operator_id=operator.user_id,
@@ -122,7 +136,7 @@ class ScheduleService:
             target_id=job_id,
             description="編輯排程作業",
             before_value=before,
-            after_value={"job_name": data.job_name, "cron_expr": data.cron_expr, "is_enabled": data.is_enabled},
+            after_value=after,
         )
         # 即時套到運行中的引擎（引擎未啟動則 no-op、下次啟動生效）；DB 為權威，若後續 commit 失敗於重啟自癒。
         apply_job_change(job_id, cron_expr=data.cron_expr, is_enabled=data.is_enabled, handler_ref=job.handler_ref)
