@@ -271,7 +271,7 @@ export function groupBlockers(blockers: PublishBlocker[]): PublishBlocker[][] {
 /**
  * 一組同 `code` 缺漏的文案：訊息 + 全部對象並列。
  *
- * `PublishDialog`（發布）與 `ReopenCourseDialog`（再開課）呈現的是**同一組缺漏**
+ * `PublishDialog`（發布）與課程編輯頁的再開課模式呈現的是**同一組缺漏**
  * （後端兩條路徑共用 `evaluate_publish`），故文案也共用這一支。原本兩處各自複製了
  * 一段「查 `quizNames`」的行內判斷，`CHAPTER_EMPTY` 一加就同時在兩個地方標錯。
  *

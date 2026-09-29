@@ -1,10 +1,12 @@
 /**
  * 再開課之新起訖時間驗證（US11 / FR-ET-US11-09 / #288）。
  *
- * 獨立成模組而非留在 `ReopenCourseDialog.tsx`：一來元件檔匯出非元件會破壞 Fast Refresh
- * （`react-refresh/only-export-components`），二來這是本視窗唯一會算錯的邏輯，而
- * `DateTimePicker` 在 jsdom 中無法以 `userEvent` 可靠地填值（本專案沒有任何測試做到
- * 過）。把規則抽成純函式即可完整覆蓋各邊界；選擇器本身的接線留給人工驗證。
+ * 獨立成模組而非留在元件檔（原為 `ReopenCourseDialog.tsx`，#428 起併入
+ * `CourseEditorPage`）：元件檔匯出非元件會破壞 Fast Refresh
+ * （`react-refresh/only-export-components`），而這是再開課唯一會算錯的邏輯。
+ *
+ * ⚠️ 起始時間規則與 `CourseEditorPage.validateForm` **相反**：本頁平時擋「起始早於
+ * 當下」，再開課刻意允許（補開一段已經開始的期間）。兩者不可互相代用。
  */
 
 import type { Dayjs } from "dayjs"
@@ -38,9 +40,11 @@ export function validateReopenSchedule(
   now: Dayjs,
 ): ReopenScheduleErrors {
   const errors: ReopenScheduleErrors = {}
-  if (!startAt) errors.start = "請選擇新的開放起始時間"
+  // ⚠️ 文案跟著欄位標籤走（「課程起始時間」/「課程訖止時間」）。原本寫「開放起始時間」
+  // 是對話框時代的措辭——當時欄位就叫那個名字，搬到編輯頁共用欄位後才對不上。
+  if (!startAt) errors.start = "請重新設定課程起始時間"
   if (!endAt) {
-    errors.end = "請選擇新的開放訖止時間"
+    errors.end = "請重新設定課程訖止時間"
     return errors
   }
   // 「晚於起始」優先於「晚於當下」：起始填了 2027 而訖止填 2026 時，「須晚於起始」
