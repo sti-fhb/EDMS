@@ -118,12 +118,12 @@ async def test_list_visible_non_admin_sees_platform_only(db, admin_gate):
 async def test_update_value_valid_audits_and_takes_effect(db, admin_gate):
     admin_gate()
     await ParamAdminService().update_detail(
-        db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(param_value="10"), operator=_OP
+        db, param_id="LOGIN", param_key="FAIL_LOCK_COUNT", data=ParamDetailUpdate(param_value="10"), operator=_OP
     )
     # 稽核 UPDATE 一筆
-    assert await _count_audit(db, "JWT.ACCESS_TTL_MIN", "UPDATE") == 1
+    assert await _count_audit(db, "LOGIN.FAIL_LOCK_COUNT", "UPDATE") == 1
     # SRVDP001 即時讀到新值（同交易、不快取）
-    assert await ParamService().get_int_param(db, "JWT", "ACCESS_TTL_MIN", 15) == 10
+    assert await ParamService().get_int_param(db, "LOGIN", "FAIL_LOCK_COUNT", 5) == 10
 
 
 async def test_update_description_audits_before_after(db, admin_gate):
@@ -136,7 +136,7 @@ async def test_update_description_audits_before_after(db, admin_gate):
     seeded = (
         await db.execute(
             select(DpParamDetail.description).where(
-                DpParamDetail.param_id == "JWT", DpParamDetail.param_key == "ACCESS_TTL_MIN"
+                DpParamDetail.param_id == "LOGIN", DpParamDetail.param_key == "FAIL_LOCK_COUNT"
             )
         )
     ).scalar_one()
@@ -144,18 +144,20 @@ async def test_update_description_audits_before_after(db, admin_gate):
 
     await ParamAdminService().update_detail(
         db,
-        param_id="JWT",
-        param_key="ACCESS_TTL_MIN",
-        data=ParamDetailUpdate(param_value="10", description="閒置逾時自動登出"),
+        param_id="LOGIN",
+        param_key="FAIL_LOCK_COUNT",
+        data=ParamDetailUpdate(param_value="10", description="連續失敗幾次後鎖定"),
         operator=_OP,
     )
     log = (
         await db.execute(
-            select(DpAuditLog).where(DpAuditLog.target_id == "JWT.ACCESS_TTL_MIN", DpAuditLog.action_type == "UPDATE")
+            select(DpAuditLog).where(
+                DpAuditLog.target_id == "LOGIN.FAIL_LOCK_COUNT", DpAuditLog.action_type == "UPDATE"
+            )
         )
     ).scalar_one()
     assert json.loads(log.before_value)["description"] == seeded
-    assert json.loads(log.after_value)["description"] == "閒置逾時自動登出"
+    assert json.loads(log.after_value)["description"] == "連續失敗幾次後鎖定"
 
 
 async def test_update_description_cleared_to_null(db, admin_gate):
@@ -163,19 +165,20 @@ async def test_update_description_cleared_to_null(db, admin_gate):
     admin_gate()
     svc = ParamAdminService()
     await svc.update_detail(
-        db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(description="先填"), operator=_OP
+        db, param_id="LOGIN", param_key="FAIL_LOCK_COUNT", data=ParamDetailUpdate(description="先填"), operator=_OP
     )
     result = await svc.update_detail(
-        db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(description=None), operator=_OP
+        db, param_id="LOGIN", param_key="FAIL_LOCK_COUNT", data=ParamDetailUpdate(description=None), operator=_OP
     )
     assert result.description is None
 
 
 async def test_update_value_out_of_range_rejected(db, admin_gate):
     admin_gate()
+    # CHAR_TYPES 值域 1~4（param_rules）；5 超出上限
     with pytest.raises(AppError) as exc:
         await ParamAdminService().update_detail(
-            db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(param_value="16"), operator=_OP
+            db, param_id="PWD_POLICY", param_key="CHAR_TYPES", data=ParamDetailUpdate(param_value="5"), operator=_OP
         )
     assert exc.value.status_code == 422 and exc.value.error_code == "DP_PARAM_001"
 
@@ -324,6 +327,149 @@ async def test_create_on_missing_param_404(db, admin_gate):
             db, param_id="NOPE", data=ParamDetailCreate(param_key="X", param_name="測試"), operator=_OP
         )
     assert exc.value.status_code == 404 and exc.value.error_code == "DP_PARAM_004"
+
+
+# ---- 維護層級 EDIT_SCOPE（#171）----
+
+
+async def test_readonly_detail_update_rejected(db, admin_gate):
+    """READONLY 明細不得由管理者於維護面修改——伺服器端擋，前端不渲染入口只是 UX。"""
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=ParamDetailUpdate(param_value="10"), operator=_OP
+        )
+    assert exc.value.status_code == 403 and exc.value.error_code == "DP_PARAM_007"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        ParamDetailUpdate(param_value="10"),
+        ParamDetailUpdate(param_name="改名"),
+        ParamDetailUpdate(description="改說明"),
+        ParamDetailUpdate(is_enabled=False),
+    ],
+    ids=["param_value", "param_name", "description", "is_enabled"],
+)
+async def test_readonly_detail_rejects_every_field(db, admin_gate, payload):
+    """D2：READONLY ＝整列唯讀，四個可編輯欄位逐一皆須擋下。
+
+    `is_enabled` 尤其不可漏——`ParamService.get_param_value()` 對停用明細回 None，呼叫端
+    隨即 fallback 到程式碼裡的預設值。能停用就等於繞過 READONLY 改變了系統實際採用的值，
+    而畫面上那一列的「值」看起來沒被動過（正是本 issue 要防的 #170 形狀）。
+    """
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db, param_id="JWT", param_key="ACCESS_TTL_MIN", data=payload, operator=_OP
+        )
+    assert exc.value.error_code == "DP_PARAM_007"
+
+
+async def test_hidden_detail_update_rejected(db, admin_gate):
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db, param_id="MAIL", param_key="RATE_PER_MIN", data=ParamDetailUpdate(param_value="120"), operator=_OP
+        )
+    # 403 而非 404：回 404 等於宣稱「此參數不存在」，與事實不符
+    assert exc.value.status_code == 403 and exc.value.error_code == "DP_PARAM_007"
+
+
+async def test_hidden_details_excluded_from_list(db, admin_gate):
+    """HIDDEN 明細不出現於維護頁；整組皆 HIDDEN 之主檔（MAIL）連主檔一併不回傳。"""
+    admin_gate()
+    result = await ParamAdminService().list_visible(db, "admin01")
+    ids = {m.param_id for m in result}
+    assert "MAIL" not in ids  # 三個明細皆 HIDDEN → 不留下 0 項的空群組
+    assert "JWT" in ids and "LOGIN" in ids
+    keys = {(m.param_id, d.param_key) for m in result for d in m.details}
+    assert ("MAIL", "RATE_PER_MIN") not in keys
+
+
+async def test_edit_scope_returned_and_mixed_within_group(db, admin_gate):
+    """READONLY 明細仍列出（管理者需知現值以回答使用者）並帶 edit_scope 供前端決定入口。
+
+    同時鎖住「同一群組內混層級」——LOGIN 底下 FAIL_LOCK_COUNT 可改、VERIFY_SEND_COOLDOWN_SEC
+    不可改。這正是本欄位放在 `DP_PARAM_D`（明細）而非 `DP_PARAM_M`（主檔）的原因。
+    """
+    admin_gate()
+    result = await ParamAdminService().list_visible(db, "admin01")
+    jwt = {d.param_key: d.edit_scope for d in next(m for m in result if m.param_id == "JWT").details}
+    assert jwt["ACCESS_TTL_MIN"] == "READONLY"
+    login = {d.param_key: d.edit_scope for d in next(m for m in result if m.param_id == "LOGIN").details}
+    assert login["FAIL_LOCK_COUNT"] == "ADMIN"
+    assert login["VERIFY_SEND_COOLDOWN_SEC"] == "READONLY"
+
+
+async def test_edit_scope_does_not_affect_runtime_reads(db, admin_gate):
+    """EDIT_SCOPE 只管維護面，不得影響執行期讀取——故濾在 service 層、不在 repository。
+
+    若把 HIDDEN 濾進 `ParamRepository`，寄信 worker 讀 `MAIL.RATE_PER_MIN` 會得 None 而
+    fallback 到程式碼預設值：行為變了、卻沒有任何錯誤訊息。
+    """
+    admin_gate()
+    svc = ParamService()
+    assert await svc.get_int_param(db, "MAIL", "RATE_PER_MIN", -1) == 60  # HIDDEN 照樣讀得到
+    assert await svc.get_param_value(db, "JWT", "ACCESS_TTL_MIN") == "15"  # READONLY 亦然
+
+
+async def test_module_filter_precedes_edit_scope(db, admin_gate):
+    """兩層獨立且模組過濾先行：ET 管理者對 DM 的 READONLY 參數應得越權碼，而非 IT 設定碼。
+
+    反過來會讓「你不是這個模組的管理者」與「這個參數誰都不能改」在前端無法分辨。
+    """
+    admin_gate(et_admins=("etadmin",))
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db,
+            param_id="DM_FILE_TYPES",
+            param_key="VALUE",
+            data=ParamDetailUpdate(param_value="pdf"),
+            operator=OperatorInfo(user_id="etadmin"),
+        )
+    assert exc.value.error_code == "DP_PARAM_003"
+
+
+async def test_dm_admin_sees_readonly_param_but_cannot_edit(db, admin_gate):
+    """AC9 的另一半：模組過濾放行、層級擋下——看得到、改不動。"""
+    admin_gate(dm_admins=("dmadmin",))
+    svc = ParamAdminService()
+    result = await svc.list_visible(db, "dmadmin")
+    dm = next(m for m in result if m.param_id == "DM_FILE_TYPES")
+    assert dm.details[0].edit_scope == "READONLY"  # 看得到
+    with pytest.raises(AppError) as exc:
+        await svc.update_detail(
+            db,
+            param_id="DM_FILE_TYPES",
+            param_key="VALUE",
+            data=ParamDetailUpdate(param_value="pdf"),
+            operator=OperatorInfo(user_id="dmadmin"),
+        )
+    assert exc.value.error_code == "DP_PARAM_007"  # 改不動
+
+
+async def test_detail_lock_and_edit_scope_report_distinct_codes(db, admin_gate):
+    """AC10：兩機制正交，各自回自己的碼——DETAIL_LOCK 管碼值、EDIT_SCOPE 管誰能改這一列。"""
+    admin_gate()
+    await _make_master(db, "LOCKED_RO", param_type="LIST", detail_lock=True, details=[("SOP", "程序", 1, True)])
+    svc = ParamAdminService()
+    detail = await svc._repo.get_detail(db, "LOCKED_RO", "SOP")
+    detail.edit_scope = "READONLY"
+    await db.flush()
+
+    with pytest.raises(AppError) as lock_exc:  # 新增碼值 → DETAIL_LOCK
+        await svc.create_detail(
+            db, param_id="LOCKED_RO", data=ParamDetailCreate(param_key="NEW", param_name="新"), operator=_OP
+        )
+    assert lock_exc.value.error_code == "DP_PARAM_002"
+
+    with pytest.raises(AppError) as scope_exc:  # 改既有列 → EDIT_SCOPE
+        await svc.update_detail(
+            db, param_id="LOCKED_RO", param_key="SOP", data=ParamDetailUpdate(param_name="改名"), operator=_OP
+        )
+    assert scope_exc.value.error_code == "DP_PARAM_007"
 
 
 # ---- HTTP 接線抽樣（認證 + 列表回應）----

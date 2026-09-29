@@ -23,6 +23,11 @@ class ParamItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# 維護層級（#171）。HIDDEN 之明細不會出現在回應中，但仍列於此——本型別描述的是
+# DP_PARAM_D.EDIT_SCOPE 的值域（與 DB 之 CK_DP_PARAM_D_EDIT_SCOPE 同一組），非「回應可能出現的值」。
+EditScope = Literal["ADMIN", "READONLY", "HIDDEN"]
+
+
 class ParamDetailResponse(BaseModel):
     """參數明細回應（維護頁用）。"""
 
@@ -34,6 +39,8 @@ class ParamDetailResponse(BaseModel):
     description: Optional[str]
     sort_order: Optional[int]
     is_enabled: bool
+    # 前端據此決定要不要渲染「編輯」入口；擋寫由伺服器端負責，此欄僅供 UX
+    edit_scope: EditScope
 
 
 class ParamMasterResponse(BaseModel):
