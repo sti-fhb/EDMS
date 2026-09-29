@@ -2,6 +2,9 @@
 
 驗證：閱覽者僅見「全體」或其可見對象授權相符之文件；編輯者 / 審核者 / 管理者不過濾（見全部）。
 使用業務種子之 AUDIENCE 標籤（全體 / 護理師 / 軍人）。
+
+本檔文件一律掛單位「全單位」（#437 導入配對後之「不限單位」表達），對應既有文件回填後的狀態，
+故本檔驗的仍是**職位維度**行為；配對本身之行為見 `test_dm_visibility_pair.py`。
 """
 
 import pytest
@@ -21,6 +24,10 @@ async def _tag_id(db, tag_name: str) -> int:
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == tag_name))
 
 
+async def _all_units_id(db) -> int:
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 async def _doc_with_audience(db, doc_id: str, audience_tag_name: str):
     now = utcnow()
     db.add(
@@ -29,7 +36,15 @@ async def _doc_with_audience(db, doc_id: str, audience_tag_name: str):
         )
     )
     await db.flush()
-    db.add(DmDocTag(doc_id=doc_id, tag_id=await _tag_id(db, audience_tag_name), created_user="e", created_date=now))
+    db.add(
+        DmDocTag(
+            doc_id=doc_id,
+            tag_id=await _tag_id(db, audience_tag_name),
+            unit_tag_id=await _all_units_id(db),
+            created_user="e",
+            created_date=now,
+        )
+    )
     await db.flush()
 
 

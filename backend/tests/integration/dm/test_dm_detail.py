@@ -119,9 +119,19 @@ async def _seed_doc(
     vid = await _add_version(db, doc_id, "1.0", author=author)
     doc.current_version_id = vid
     await db.flush()
+    # 可見對象為 (單位, 職位) 配對；單位一律「全單位」＝不限單位（#437）。檢索標籤無單位維度。
+    all_units_id = await db.scalar(
+        select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位")
+    )
     for tn in audience_tags:
         db.add(
-            DmDocTag(doc_id=doc_id, tag_id=await _audience_tag_id(db, tn), created_user=author, created_date=utcnow())
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=await _audience_tag_id(db, tn),
+                unit_tag_id=all_units_id,
+                created_user=author,
+                created_date=utcnow(),
+            )
         )
     for tid in retrieval_tag_ids:
         db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=author, created_date=utcnow()))

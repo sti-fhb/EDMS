@@ -106,8 +106,20 @@ async def _seed_doc(
     await db.flush()
     doc.current_version_id = ver.version_id
     await db.flush()
+    # 可見對象為 (單位, 職位) 配對；單位一律「全單位」＝不限單位（#437）。檢索標籤無單位維度。
+    all_units_id = await db.scalar(
+        select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位")
+    )
     for tname in audience_tags:
-        db.add(DmDocTag(doc_id=doc_id, tag_id=await _audience_tag_id(db, tname), created_user=author, created_date=now))
+        db.add(
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=await _audience_tag_id(db, tname),
+                unit_tag_id=all_units_id,
+                created_user=author,
+                created_date=now,
+            )
+        )
     for tid in retrieval_tag_ids:
         db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=author, created_date=now))
     await db.flush()

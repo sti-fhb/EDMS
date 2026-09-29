@@ -61,6 +61,11 @@ async def _audience_tag_id(db, tag_name: str) -> int:
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == tag_name))
 
 
+async def _all_units_tag_id(db) -> int:
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 async def _doc_with_real_file(db, tmp_path, doc_id: str, *, version_no: str = "1.0") -> int:
     """建一份掛「全體」的已發布文件，且**磁碟上真的有檔**（FileResponse 會實際串流）。
 
@@ -84,6 +89,7 @@ async def _doc_with_real_file(db, tmp_path, doc_id: str, *, version_no: str = "1
             DmDocTag(
                 doc_id=doc_id,
                 tag_id=await _audience_tag_id(db, "全體"),
+                unit_tag_id=await _all_units_tag_id(db),  # 「全單位」＝不限單位（#437 配對語意）
                 created_user="seed",
                 created_date=utcnow(),
             )
@@ -242,7 +248,16 @@ class TestDownloadToKpiSeam:
         )
         db.add(doc)
         await db.flush()
-        db.add(DmDocTag(doc_id=doc_id, tag_id=tag_id, created_user="seed", created_date=utcnow()))
+        db.add(
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=tag_id,
+                unit_tag_id=await _all_units_tag_id(db),  # 「全單位」＝不限單位（#437 配對語意）
+                created_user="seed",
+                created_date=utcnow(),
+            )
+        )
+        # 人側單位留 NULL＝未指定：僅匹配文件側「全單位」，即導入配對前之可見範圍
         db.add(DmUserTag(user_id="aud_in", tag_id=tag_id, created_user="seed", created_date=utcnow()))
         version = DmDocVersion(
             doc_id=doc_id,
