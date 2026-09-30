@@ -1,7 +1,7 @@
 """dm_add_unit_tag_pair
 
 Revision ID: a9a9b0d378c5
-Revises: 6f7bb0f23d38
+Revises: 71ca59c07bd1
 Create Date: 2026-09-29 14:04:20.675680
 
 可見對象改為（單位, 職位）配對，三表加 UNIT_TAG_ID。
@@ -27,7 +27,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "a9a9b0d378c5"
-down_revision: Union[str, None] = "6f7bb0f23d38"
+down_revision: Union[str, None] = "71ca59c07bd1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
