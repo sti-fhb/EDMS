@@ -9,6 +9,7 @@ import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
+import Divider from "@mui/material/Divider"
 import FormControlLabel from "@mui/material/FormControlLabel"
 import IconButton from "@mui/material/IconButton"
 import MenuItem from "@mui/material/MenuItem"
@@ -25,6 +26,7 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
+import type { ReactNode } from "react"
 
 import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rolesService"
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
@@ -65,20 +67,27 @@ export function RolesPage() {
   return (
     <Box>
       <ScreenHeader code="DP02" />
-      <FilterCard>
-        <Tabs value={active ?? modules[0]} onChange={(_, v) => setSelected(v)}>
-          {modules.map((m) => (
-            <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />
-          ))}
-        </Tabs>
-      </FilterCard>
-      {active && <AssignmentsTab module={active} />}
+      {active && (
+        <AssignmentsTab
+          module={active}
+          tabs={
+            <Tabs value={active} onChange={(_, v) => setSelected(v)}>
+              {modules.map((m) => (
+                <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />
+              ))}
+            </Tabs>
+          }
+        />
+      )}
     </Box>
   )
 }
 
-/** 單一模組之權限指派表（查使用者 + 角色核取 + 群組多選）。 */
-function AssignmentsTab({ module }: { module: string }) {
+/**
+ * 單一模組之權限指派表（查使用者 + 角色核取 + 群組多選）。
+ * `tabs`（模組頁籤）由父層傳入，與關鍵字查詢放在同一張白底卡（比照 DP01 使用者管理）。
+ */
+function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
   const qc = useQueryClient()
   const { message } = useNotification()
   const [keyword, setKeyword] = useState("")
@@ -136,10 +145,12 @@ function AssignmentsTab({ module }: { module: string }) {
   const roleDefs = MODULE_ROLES[module] ?? []
   const rows = data?.data ?? []
 
-  // 版面比照 CrudPageLayout：篩選列一張白底卡、表格一張白底卡（DP01 使用者管理同樣結構）
+  // 版面比照 DP01 使用者管理：頁籤 + 關鍵字查詢同一張白底卡、表格一張白底卡
   return (
     <>
       <FilterCard>
+        {tabs}
+        <Divider sx={{ mb: 2 }} />
         <Box sx={{ display: "flex", gap: 1 }}>
           <TextField
             size="small"
