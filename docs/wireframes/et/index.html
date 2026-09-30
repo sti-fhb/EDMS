@@ -1659,16 +1659,21 @@
     <div class="screen-meta">et/approvalQuery.jsp (ET10)</div>
   </div>
 
-  <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> 本畫面依登入角色顯示不同視角：<strong>教師 / 管理者</strong>可依姓名查全部學員之核可課程（含通過 / 不通過 / 已撤銷）；<strong>學員</strong>僅見自己「已通過」的課程（不顯示不通過 / 撤銷、不得查他人）。此處同時呈現兩視角供 review；正式畫面依角色擇一。查詢範圍由後端依身分控管（不以前端隱藏為唯一防線）。不提供核可證明 / 結業證書輸出。</div>
+  <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> 本畫面依登入角色顯示不同視角：<strong>教師 / 管理者</strong>可依姓名 / Email 或課程查學員之核可課程（含通過 / 不通過 / 已撤銷）；<strong>學員</strong>僅見自己「已通過」的課程（不顯示不通過 / 撤銷、不得查他人）。此處同時呈現兩視角供 review；正式畫面依角色擇一。查詢範圍由後端依身分控管（不以前端隱藏為唯一防線）。不提供核可證明 / 結業證書輸出。</div>
 
   <!-- 視角 A：教師 / 管理者 -->
   <div class="wf-card mb-3">
-    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-1"></i>教師 / 管理者視角 — 依姓名查全部學員</h6>
-    <div class="d-flex gap-2 mb-3">
-      <div class="input-group input-group-sm" style="width: 20rem;">
+    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-1"></i>教師 / 管理者視角 — 依姓名 / Email 或課程查</h6>
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <div class="input-group input-group-sm" style="width: 18rem;">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" placeholder="輸入學員姓名（可模糊）" value="林">
+        <input type="text" class="form-control" placeholder="姓名或 Email（可模糊）" value="林">
       </div>
+      <select class="form-select form-select-sm" style="width: 13rem;">
+        <option selected>全部課程</option>
+        <option>採血作業新進人員訓練</option>
+        <option>成分製備標準作業教學</option>
+      </select>
       <select class="form-select form-select-sm" style="width: 10rem;">
         <option selected>全部結果</option>
         <option>僅通過</option>
@@ -1677,6 +1682,7 @@
       </select>
       <button class="btn btn-tsbms btn-sm" onclick="showToast('查詢核可紀錄（demo）')"><i class="bi bi-search me-1"></i>查詢</button>
     </div>
+    <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> <strong>關鍵字與課程至少給一個</strong>（2026-09-29 #439 改訂 <code>FR-ET-US17-07</code>；原為「姓名必填」）：只選課程即可列出該課程的核可紀錄——使用者常常<strong>正是不知道有誰可以查</strong>。兩者皆不給仍拒絕，那才是原條文要防的「留白查全部」。<br>⚠️ 課程下拉<strong>只列已有核可紀錄的課程</strong>（不是課程清單：核可多落在已結束的課程上，而 ET01 的「全部課程」恰好排除那些）；教師僅列其自有課程，管理者不限。非管理者以他人課程篩選一律拒絕（<code>FR-ET-US17-08</code>）——下拉是呈現，擋在後端才算數。<br>⚠️ 下拉為空時須說明成因（載入失敗／尚無核可紀錄），不得給一個打得開卻空的選單；且管理者版不得說「您開設的課程」——他沒有自有課程。</div>
     <table class="table table-sm wf-table mb-0">
       <thead>
         <tr>
