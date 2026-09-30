@@ -21,6 +21,10 @@ function asRole(role: "teacher" | "admin" | "student") {
       HttpResponse.json({
         can_create_course: role === "teacher",
         can_manage_courses: canManage,
+        // #463 新增。本頁**刻意不掛任何 capability 旗標**（兩種角色都要進得去，見
+        // `schemas.ts` 的說明），故此欄位不影響本檔任何斷言——補上只為 fixture 與
+        // 真實回應同形，免得日後有人加旗標時拿到 `undefined` 而非 `false`。
+        can_track_students: role === "teacher",
         can_learn: role === "student",
       }),
     ),
@@ -422,7 +426,12 @@ describe("ET04 核可查詢：共通", () => {
     // 它會自我修正，但那句是裁示 C 的強制配套，閃現錯誤版本與顯示錯誤版本同樣不可接受。
     server.use(
       http.get("/api/et/courses/capabilities", () =>
-        HttpResponse.json({ can_create_course: false, can_manage_courses: true, can_learn: false }),
+        HttpResponse.json({
+          can_create_course: false,
+          can_manage_courses: true,
+          can_track_students: false,
+          can_learn: false,
+        }),
       ),
       // 讓 module-summary 慢於 capabilities 回來
       http.get("/api/dp/user/module-summary", async () => {

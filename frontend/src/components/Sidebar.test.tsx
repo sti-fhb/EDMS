@@ -116,7 +116,7 @@ describe("Sidebar", () => {
     // 群組門檻只判「有無任一 ET 角色」——不夠。純學員看到「課程列表 / 學員」等於
     // 看到點進去只會 403 的項目。
     await waitFor(() => expect(screen.queryByText("課程列表")).not.toBeInTheDocument())
-    expect(screen.queryByText("學員")).not.toBeInTheDocument()
+    expect(screen.queryByText("學員學習表現")).not.toBeInTheDocument()
   })
 
   it("純管理者看不到「學員」，但看得到課程列表與核可查詢（#463）", async () => {
@@ -136,7 +136,7 @@ describe("Sidebar", () => {
 
     expect(await screen.findByText("課程列表")).toBeInTheDocument()
     expect(screen.getByText("核可查詢")).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByText("學員")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText("學員學習表現")).not.toBeInTheDocument())
   })
 
   it("🔴 兼具教師與管理者者仍看得到「學員」（#463）", async () => {
@@ -154,7 +154,7 @@ describe("Sidebar", () => {
     )
     renderWithProviders(<Sidebar />)
 
-    expect(await screen.findByText("學員")).toBeInTheDocument()
+    expect(await screen.findByText("學員學習表現")).toBeInTheDocument()
   })
 
   it("學員角色被停用者看不到「我的課程」（#247）", async () => {
@@ -264,7 +264,7 @@ describe("Sidebar", () => {
     const links = Array.from(nav.querySelectorAll("a")).map((a) => a.textContent?.trim() ?? "")
     expect(links).toEqual([
       "ET01 課程列表",
-      "ET02 學員",
+      "ET02 學員學習表現",
       "ET03 我的課程",
       "ET04 核可查詢",
       "DM01 文件庫",
