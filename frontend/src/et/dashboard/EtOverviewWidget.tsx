@@ -111,7 +111,7 @@ function AdminBlock({ card }: { card: AdminCard }) {
           <Stack spacing={0.5} sx={{ mb: 1 }}>
             {card.by_unit.map((unit) => (
               <Typography key={unit.tag_name} variant="body2">
-                {unit.tag_name}　{unit.completion_rate}%
+                {unit.tag_name} {unit.completion_rate}%
                 <Typography component="span" variant="caption" color="text.secondary">
                   （{unit.completed} / {unit.enrolled} 人）
                 </Typography>

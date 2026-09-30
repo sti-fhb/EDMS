@@ -53,7 +53,6 @@ from app.et.tracking.repository import EtTrackingRepository
 logger = logging.getLogger(__name__)
 
 
-
 class _CourseFacts(NamedTuple):
     """一門開放中課程於本次執行的全部衍生值（純值，與 session 無關）。"""
 
@@ -205,4 +204,3 @@ class EtWeeklyReportService:
             params=build_weekly_remind_params(user_name=recipient.user_name, courses=courses),
         )
         return result.queued_count > 0
-
