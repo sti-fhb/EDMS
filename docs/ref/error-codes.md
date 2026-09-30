@@ -367,7 +367,7 @@
 > - **`002` 與 `ET_TRACK_003` 訊息相同但不共用**：兩者分屬不同端點（核可 / 撤銷 vs 重置重考 / 移除學員），各自模組持有自己的碼是 ET 的既有作法（`ET_INVITE_002` 與 `ET_ENROLL_002` 同樣是「此課程目前關閉中」而不共用）。判定一律用 `is_effectively_closed` 而非比對 `STATUS`——ET-16 的 SCHET002 執行前，期間已過的課程 `STATUS` 仍是 `PUBLISHED`。
 > - **`003` 與 `004` 分流**：查無核可紀錄回 `003`（這個人從來沒被核可過），查得到但版本不符或已被撤銷回 `004`（你看到的畫面過期了）。合併會讓前端只能顯示一句模稜兩可的話，而兩者的下一步不同——前者該去核可，後者該重新整理。
 > - **`005` 不交給 Pydantic 的 `min_length=1`**：那個放行 `"   "`，而撤銷原因是**事後回答「為什麼這筆核可被推翻」的唯一欄位**（`ET_APPROVAL` 因 `(COURSE_ID, USER_ID)` 唯一而 update 覆寫，前次結果只存在 `DP_AUDIT_LOG`）。且 Pydantic 失敗回 `COMMON_422` 不帶欄位名，前端無從把 `ET-MSG-ET02-305` 掛回那個輸入框。
-> - **授權一律沿用 `ET_COURSE_001` / `ET_COURSE_002`**，不自建——判定為 `ensure_owner_or_admin`（owner ∪ 管理者，`FR-ET-US16-07`）。
+> - **授權一律沿用 `ET_COURSE_001` / `ET_COURSE_002`**，不自建——判定為 `ensure_owner_or_admin`（owner ∪ 管理者；⚠️ `FR-ET-US16-07` 已於 #463 改訂為「**UI 執行者**限 owner」，後端刻意未收窄）。
 
 > `ET_APPROVAL_006`（#385 ET04 核可查詢，US17 SA Q2 裁示 A：查詢條件必填）：
 >

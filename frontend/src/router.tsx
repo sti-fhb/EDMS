@@ -12,6 +12,7 @@ import {
   RequireDmReviewer,
   RequireEtCourseCreator,
   RequireEtCourseManager,
+  RequireEtStudentTracking,
   RequireModule,
   RequireModuleAdmin,
 } from "./layouts/RequireAccess"
@@ -213,13 +214,17 @@ export const router = createBrowserRouter([
               },
               {
                 // ET02 含學員個別成績與**具名**問卷填答（`FR-ET-US9-08`），是 ET 個資
-                // 密度最高的一頁——守衛與 `courses/:courseId` 同為 `can_manage_courses`
-                // （教師或管理者），與後端 `require_et_roles(ET_TEACHER, ET_ADMIN)` 一致。
+                // 密度最高的一頁。
+                //
+                // 🔴 守衛為 `can_track_students`（**教師**）而非 `can_manage_courses`
+                // （教師或管理者，#463）——本頁的課程下拉是 `scope=mine`，純管理者進來
+                // 只有一個空下拉。**比後端嚴是刻意的**：後端讀取端點開放給管理者是為了
+                // US16 的核可，不是為了讓他瀏覽本頁（見 `et/tracking/service.py`）。
                 path: "students",
                 element: (
-                  <RequireEtCourseManager>
+                  <RequireEtStudentTracking>
                     <EtStudentsPage />
-                  </RequireEtCourseManager>
+                  </RequireEtStudentTracking>
                 ),
               },
               { path: "approvals", element: <EtApprovalQueryPage /> },

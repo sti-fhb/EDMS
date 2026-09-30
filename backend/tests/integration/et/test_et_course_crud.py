@@ -224,6 +224,38 @@ class TestCapabilities:
         # 管理者不建課程但要能管理——用 `can_create_course` 判斷側欄會把他擋在外面。
         assert (a["can_create_course"], a["can_manage_courses"]) == (False, True)
 
+    async def test_純管理者不得追蹤學員(self, client, db) -> None:
+        """#463：純管理者的學員頁恆空（下拉為 `scope=mine`），故不提供入口。
+
+        🔴 **`can_track_students` 與 `can_manage_courses` 必須分得開**。兩者在管理者
+        身上取值相反，而側欄與路由守衛原本共用後者——那正是本 issue 的成因。
+        """
+        admin = await _user(db, "ETC_P7", roles=(ROLE_ADMIN,))
+        a = (await client.get(f"{_URL}/capabilities", headers=_bearer(admin))).json()
+        assert a["can_track_students"] is False
+        assert a["can_manage_courses"] is True, "課程列表仍要看得到（只是沒有「我建立的」）"
+
+    async def test_教師可追蹤學員(self, client, db) -> None:
+        teacher = await _user(db, "ETC_P8")
+        t = (await client.get(f"{_URL}/capabilities", headers=_bearer(teacher))).json()
+        assert t["can_track_students"] is True
+
+    async def test_兼具教師與管理者者不受影響(self, client, db) -> None:
+        """🔴 判定依據是「**具教師角色**」，不是「非管理者」。
+
+        寫成 `not is_admin` 的話，兼任者會被一起擋掉——而他有自己的課要追蹤。
+        這種錯在只用純角色帳號測試時**不會浮現**。
+        """
+        both = await _user(db, "ETC_P9", roles=(ROLE_TEACHER, ROLE_ADMIN))
+        b = (await client.get(f"{_URL}/capabilities", headers=_bearer(both))).json()
+        assert b["can_track_students"] is True
+        assert b["can_create_course"] is True
+
+    async def test_學員不得追蹤學員(self, client, db) -> None:
+        student = await _user(db, "ETC_PA", roles=(ROLE_STUDENT,))
+        s = (await client.get(f"{_URL}/capabilities", headers=_bearer(student))).json()
+        assert s["can_track_students"] is False
+
 
 class TestInvitationCodeVisibility:
     """邀請碼於課程詳細僅 owner 可見（#247 補 #204 之缺口）。"""

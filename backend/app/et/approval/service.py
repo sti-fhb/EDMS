@@ -1,8 +1,10 @@
 """線下核可 Service（US16 / #352）。
 
 **授權兩層**：router 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`，service 以
-`ensure_owner_or_admin` 判定擁有權——`FR-ET-US16-07` 明訂執行者限該課程 owner（教師）
-或管理者，非 owner 之其他教師不得核可。
+`ensure_owner_or_admin` 判定擁有權——owner ∪ 管理者，非 owner 之其他教師不得核可。
+
+⚠️ `FR-ET-US16-07` 已於 #463 改訂為「**UI 執行者**限 owner」（管理者無 ET02 入口），
+後端授權刻意未收窄。本層描述的是後端，仍然正確。
 
 ## 🔴 稽核不是附加動作，是歷程的唯一載體
 

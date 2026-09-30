@@ -56,10 +56,25 @@ export interface CourseCreateResult {
 }
 
 export interface Capabilities {
-  /** 具教師角色（SA 裁示 Q2）→ 顯示「新增課程」入口。 */
+  /** 具教師角色（SA 裁示 Q2）→ 顯示「新增課程」入口，以及課程列表的「我建立的」分頁。 */
   can_create_course: boolean
-  /** 具教師或管理者角色 → 顯示側欄教學管理項（課程列表 / 學員 / 核可查詢）。 */
+  /**
+   * 具教師或管理者角色 → 顯示側欄之**課程列表**與課程編輯頁。
+   *
+   * ⚠️ **不涵蓋學員頁與核可查詢**，儘管它曾經是那兩者的判定來源：學員頁改用
+   * `can_track_students`（#463），核可查詢則**刻意不掛任何旗標**（兩種角色都要進得去，
+   * 看到的內容不同）。
+   */
   can_manage_courses: boolean
+  /**
+   * 具**教師**角色 → 顯示側欄之「學員」。
+   *
+   * 🔴 與 `can_create_course` 今天同值但**問的是不同的事**（能不能開課 vs 有沒有學員
+   * 可追蹤）；與 `can_manage_courses` 的差別則是它涵蓋管理者，而管理者的學員頁是空的
+   *（課程下拉為 `scope=mine`）——那正是 #463 要修的東西。完整理由見後端
+   * `app/et/course/schemas.py` 的 `Capabilities`。
+   */
+  can_track_students: boolean
   /** 具學員角色 → 顯示側欄「我的課程」。 */
   can_learn: boolean
 }

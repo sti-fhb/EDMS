@@ -1,8 +1,11 @@
 """ET02 線下考核核可 API（US16 / #352）＋ ET04 核可查詢（US17 / #385）。
 
 router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 service 的
-`ensure_owner_or_admin` 判定（`FR-ET-US16-07`：owner 或管理者）。兩層都要：角色閘擋掉
-學員，擁有權閘擋掉「別的教師」。
+`ensure_owner_or_admin` 判定（owner ∪ 管理者）。兩層都要：角色閘擋掉學員，擁有權閘擋掉
+「別的教師」。
+
+⚠️ `FR-ET-US16-07` 已於 #463 改訂為「**UI 執行者**限 owner」，後端授權刻意未收窄——
+本段描述的是後端，仍然正確；但別據以認為管理者在畫面上做得到核可（他沒有入口）。
 
 ## 限流**刻意獨立計數**，不與 `et-tracking` 共用
 

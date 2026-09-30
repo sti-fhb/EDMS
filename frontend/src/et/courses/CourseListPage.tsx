@@ -14,7 +14,7 @@ import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { CourseCard } from "./CourseCard"
@@ -52,7 +52,7 @@ type Scope = "mine" | "all"
 export function EtCourseListPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const scope: Scope = searchParams.get("scope") === "all" ? "all" : "mine"
+  const urlScope: Scope = searchParams.get("scope") === "all" ? "all" : "mine"
 
   const [keyword, setKeyword] = useState("")
   const [tagId, setTagId] = useState<number | "">("")
@@ -66,6 +66,38 @@ export function EtCourseListPage() {
     queryKey: QUERY_KEYS.etCourses.capabilities(),
     queryFn: coursesApi.getCapabilities,
   })
+
+  // 🔴 純 ET 管理者（無教師角色）沒有「我建立的」（#463）
+  //
+  // 建課需 `ET_TEACHER`，所以他的 `scope=mine` 是空的——而預設就是 `mine`，他一進
+  // 頁面就停在一個沒有東西的分頁，且畫面不會說明為什麼。
+  //
+  // ⚠️ **「恆空」這個說法不成立，別拿它當恆真前提**：`OWNER_ID` 於建課當下寫入，而角色
+  // 可事後停用（`course/router.py:236` 自己記著「教師角色被停用但仍是 OWNER_ID」這個
+  // 狀態存在——離職 / 轉調的標準處理是停用角色，不是刪資料）。那種人的 `scope=mine`
+  // **不是空的**，而他改完之後會失去自己草稿與已關閉課程的入口（已發布的仍在「全部
+  // 課程」）。已記於 #463 的注意事項；要處理需多一支「是否實際擁有課程」的查詢。
+  //
+  // ⛔ 這種錯在只用純角色帳號的測試裡**結構性地看不到**——測試只組角色集，不會造出
+  // 「有 OWNER_ID 殘留但無教師角色」的帳號。
+  //
+  // ⚠️ 判定用 `can_create_course`（具教師角色）而**不是**「非管理者」：兼任教師與
+  // 管理者者有自己的課，寫成後者會把他一起擋掉。
+  //
+  // ⚠️ `capabilities` 是非同步的，**未回來前不查清單**（下方 `enabled`）——否則管理者
+  // 會先以 `scope=mine` 打一次、拿到空清單閃出「查無課程」，再被換掉。那一閃是假的。
+  const canCreateCourse = capabilities?.can_create_course ?? false
+  const scope: Scope = capabilities === undefined || canCreateCourse ? urlScope : "all"
+
+  // 無教師角色者沒有分頁可切，`changeScope` 永遠不會被呼叫——網址若留著 `?scope=mine`，
+  // 「網址說的」與「畫面顯示的」會是兩件事（貼給同事或自己重整時尤其明顯）。
+  useEffect(() => {
+    // ⚠️ 用 `searchParams.get("scope")` 而不是 `urlScope`——後者把「**完全沒有參數**」
+    // 也推導成 `"mine"`，於是每次進頁面都會多打一次什麼都沒改的 `setSearchParams`。
+    if (capabilities !== undefined && !canCreateCourse && searchParams.get("scope") === "mine") {
+      setSearchParams({}, { replace: true })
+    }
+  }, [capabilities, canCreateCourse, searchParams, setSearchParams])
 
   const { data: filterTags } = useQuery({
     queryKey: QUERY_KEYS.etCourses.filterTags(),
@@ -92,9 +124,28 @@ export function EtCourseListPage() {
     [baseParams, scope, ownerId],
   )
 
-  const { data, isPending, isError, error } = usePagedQuery(QUERY_KEYS.etCourses.list(params), () =>
-    coursesApi.list(params),
+  const {
+    data,
+    isPending: coursesPending,
+    isError,
+    error,
+  } = usePagedQuery(
+    QUERY_KEYS.etCourses.list(params),
+    () => coursesApi.list(params),
+    // 等 `capabilities` 回來才查——理由見上方 `scope` 的推導。
+    { enabled: capabilities !== undefined },
   )
+
+  // 🔴 **等 capabilities 的期間也算載入中**，不可只看 `coursesPending`。
+  //
+  // `usePagedQuery` 把 `isPending` 收斂成 `enabled && query.isPending`（刻意如此，
+  // 為了讓未啟用的頁籤不顯示載入中）。所以上面的 `enabled` 在等待期間會讓
+  // `coursesPending` 為 **false**，而 `data` 仍是 `undefined` → `courses.length === 0`
+  // → 直接渲染「您尚未建立任何課程」。
+  //
+  // ⚠️ 那正是本次要消滅的假空狀態，只是換了個地方重新出現——而且**影響所有使用者**，
+  // 不限管理者。`test_等 capabilities 的期間顯示載入中` 是那道紅線。
+  const isPending = capabilities === undefined || coursesPending
 
   const changeScope = (next: Scope) => {
     setSearchParams(next === "mine" ? {} : { scope: next })
@@ -134,17 +185,36 @@ export function EtCourseListPage() {
     <Box>
       <ScreenHeader code="ET01" />
 
+      {/* 無教師角色者只有「全部課程」一個分頁，整組 Tabs 不渲染——只剩一個分頁的
+          Tabs 看起來像「另一個分頁載入失敗」。白底卡（#470）保留，三個模組的分頁頁面
+          才會長得一樣。 */}
       <FilterCard>
-        <Tabs value={scope} onChange={(_, v: Scope) => changeScope(v)}>
-          <Tab value="mine" label="我建立的" />
-          <Tab value="all" label="全部課程" />
-        </Tabs>
+        {canCreateCourse ? (
+          <Tabs value={scope} onChange={(_, v: Scope) => changeScope(v)}>
+            <Tab value="mine" label="我建立的" />
+            <Tab value="all" label="全部課程" />
+          </Tabs>
+        ) : (
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            全部課程
+          </Typography>
+        )}
       </FilterCard>
 
-      {/* 常駐說明，非 Snackbar——它是頁面的持續規則，不是一次性事件 */}
+      {/* 常駐說明，非 Snackbar——它是頁面的持續規則，不是一次性事件。
+          ⚠️ 只對具教師角色者顯示：純管理者建不了課程，「自己建立之課程進入編輯模式」
+          對他**恆為假**（所有課程都會落在 `ensure_owner` 的唯讀側）。 */}
       <Alert severity="info" sx={{ mb: 2 }}>
-        點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；點擊
-        <strong>他人建立</strong>之課程進入<strong>檢視模式（唯讀）</strong>，僅可閱覽不可編輯內容。
+        {canCreateCourse ? (
+          <>
+            點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；點擊
+            <strong>他人建立</strong>之課程進入<strong>檢視模式（唯讀）</strong>，僅可閱覽不可編輯內容。
+          </>
+        ) : (
+          <>
+            課程一律以<strong>檢視模式（唯讀）</strong>開啟，僅可閱覽不可編輯內容——編輯限該課程建立者。
+          </>
+        )}
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
@@ -214,7 +284,7 @@ export function EtCourseListPage() {
             </Grid>
           )}
           <Grid size={{ xs: 12, md: scope === "all" ? 2 : 4 }}>
-            {capabilities?.can_create_course && (
+            {canCreateCourse && (
               <Button
                 fullWidth
                 variant="contained"
@@ -246,7 +316,7 @@ export function EtCourseListPage() {
               <Typography color="text.secondary">
                 {scope === "mine" ? "您尚未建立任何課程" : "目前沒有已發布的課程"}
               </Typography>
-              {scope === "mine" && capabilities?.can_create_course && (
+              {scope === "mine" && canCreateCourse && (
                 <Button variant="outlined" startIcon={<AddCircleOutlineIcon />} onClick={() => navigate("/et/courses/new")}>
                   建立第一門課程
                 </Button>
