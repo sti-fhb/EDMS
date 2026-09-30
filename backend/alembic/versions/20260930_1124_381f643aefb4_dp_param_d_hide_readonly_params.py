@@ -1,7 +1,7 @@
 """dp_param_d_hide_readonly_params
 
 Revision ID: 381f643aefb4
-Revises: 71ca59c07bd1
+Revises: a9a9b0d378c5
 Create Date: 2026-09-30 11:24:00.000000
 
 9 項 READONLY 參數改為 HIDDEN，不再出現於 DP03（#459）。
@@ -36,7 +36,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "381f643aefb4"
-down_revision: Union[str, None] = "71ca59c07bd1"
+down_revision: Union[str, None] = "a9a9b0d378c5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
