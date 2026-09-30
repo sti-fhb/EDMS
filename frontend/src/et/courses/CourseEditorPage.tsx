@@ -1151,15 +1151,24 @@ export function EtCourseEditorPage() {
         發布嘗試殘留的缺漏在此顯示，而那與這次再開課無關（見 `reopenBlockers` 的宣告）。
       */}
       {reopening && reopenBlockers.length > 0 && (
-        <Stack spacing={1} sx={{ mb: 2 }}>
-          <Alert severity="error">
-            課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
-          </Alert>
-          <BlockerList
-            blockers={reopenBlockers}
-            names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
-          />
-        </Stack>
+        // ⚠️ **這個 `Paper` 是必要的，不是裝飾**（#449）。`BlockerList` 原本只出現在
+        // `PublishDialog` 裡，靠 `DialogContent` 提供邊界與內距；#428 把它搬上頁面時
+        // 沿用了對話框內的 markup，於是項目直接貼在頁面背景上、撐滿整個頁寬，讀起來
+        // 像散落的頁面內容而不是一則待處理的清單。
+        //
+        // ⛔ 不要改成在 `BlockerList` 內部加邊界——那會連帶改變 `PublishDialog` 的呈現。
+        // 表面屬於呼叫端的版面責任，樣式沿用本頁其他區塊（基本資料等）的 `Paper`。
+        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+          <Stack spacing={1}>
+            <Alert severity="error">
+              課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
+            </Alert>
+            <BlockerList
+              blockers={reopenBlockers}
+              names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+            />
+          </Stack>
+        </Paper>
       )}
 
       {/*
