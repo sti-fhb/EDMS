@@ -4,6 +4,7 @@ import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import CircularProgress from "@mui/material/CircularProgress"
+import Divider from "@mui/material/Divider"
 import Grid from "@mui/material/Grid"
 import MenuItem from "@mui/material/MenuItem"
 import Pagination from "@mui/material/Pagination"
@@ -185,9 +186,9 @@ export function EtCourseListPage() {
     <Box>
       <ScreenHeader code="ET01" />
 
-      {/* 無教師角色者只有「全部課程」一個分頁，整組 Tabs 不渲染——只剩一個分頁的
-          Tabs 看起來像「另一個分頁載入失敗」。白底卡（#470）保留，三個模組的分頁頁面
-          才會長得一樣。 */}
+      {/* 分頁與搜尋條件同一張白底卡（比照 DP01 使用者管理）。
+          無教師角色者只有「全部課程」一個分頁，整組 Tabs 不渲染——只剩一個分頁的
+          Tabs 看起來像「另一個分頁載入失敗」，改以標題文字呈現。 */}
       <FilterCard>
         {canCreateCourse ? (
           <Tabs value={scope} onChange={(_, v: Scope) => changeScope(v)}>
@@ -199,25 +200,7 @@ export function EtCourseListPage() {
             全部課程
           </Typography>
         )}
-      </FilterCard>
-
-      {/* 常駐說明，非 Snackbar——它是頁面的持續規則，不是一次性事件。
-          ⚠️ 只對具教師角色者顯示：純管理者建不了課程，「自己建立之課程進入編輯模式」
-          對他**恆為假**（所有課程都會落在 `ensure_owner` 的唯讀側）。 */}
-      <Alert severity="info" sx={{ mb: 2 }}>
-        {canCreateCourse ? (
-          <>
-            點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；點擊
-            <strong>他人建立</strong>之課程進入<strong>檢視模式（唯讀）</strong>，僅可閱覽不可編輯內容。
-          </>
-        ) : (
-          <>
-            課程一律以<strong>檢視模式（唯讀）</strong>開啟，僅可閱覽不可編輯內容——編輯限該課程建立者。
-          </>
-        )}
-      </Alert>
-
-      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+        <Divider sx={{ mb: 2 }} />
         <Grid container spacing={2} alignItems="flex-end">
           <Grid size={{ xs: 12, md: 5 }}>
             <TextField
@@ -296,9 +279,26 @@ export function EtCourseListPage() {
             )}
           </Grid>
         </Grid>
-      </Paper>
+      </FilterCard>
 
-      {isError && <Alert severity="error">{(error as Error | null)?.message ?? "課程清單載入失敗"}</Alert>}
+      {/* 常駐說明，非 Snackbar——它是頁面的持續規則，不是一次性事件；說明的是下方課程卡的
+          點擊行為，故置於搜尋卡之後、緊貼清單。
+          ⚠️ 依角色換文案：純管理者建不了課程，「自己建立之課程進入編輯模式」
+          對他**恆為假**（所有課程都會落在 `ensure_owner` 的唯讀側）。 */}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        {canCreateCourse ? (
+          <>
+            點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；點擊
+            <strong>他人建立</strong>之課程進入<strong>檢視模式（唯讀）</strong>，僅可閱覽不可編輯內容。
+          </>
+        ) : (
+          <>
+            課程一律以<strong>檢視模式（唯讀）</strong>開啟，僅可閱覽不可編輯內容——編輯限該課程建立者。
+          </>
+        )}
+      </Alert>
+
+      {isError &&<Alert severity="error">{(error as Error | null)?.message ?? "課程清單載入失敗"}</Alert>}
 
       {isPending && (
         <Stack alignItems="center" sx={{ py: 6 }}>
