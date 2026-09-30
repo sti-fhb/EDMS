@@ -54,7 +54,7 @@ function formatDateTime(iso: string | null): string {
 }
 
 /**
- * ET03 區塊 1：已加入學員清單（`FR-ET-US9-02`）。
+ * ET02 區塊 1：已加入學員清單（`FR-ET-US9-02`）。
  *
  * ## 這個表格的列**不可點**
  *

@@ -24,7 +24,7 @@ import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { coursesApi } from "../courses/coursesService"
 
-/** 待確認的操作——全部需要二次確認，且文案本身就是規格（ET-MSG-ET03-001 / -003 / -301 …）。 */
+/** 待確認的操作——全部需要二次確認，且文案本身就是規格（ET-MSG-ET02-001 / -003 / -301 …）。 */
 type Pending =
   | { kind: "reset"; userId: string; userName: string | null; quiz: TeacherQuizRow }
   | { kind: "remove"; student: StudentRow }
@@ -54,7 +54,7 @@ const SKIP_LABEL: Record<SkipReason, string> = {
 }
 
 /**
- * 把核可結果翻成給教師看的一句話（`ET-MSG-ET03-302` / `-303` / `-304` / `-309`）。
+ * 把核可結果翻成給教師看的一句話（`ET-MSG-ET02-302` / `-303` / `-304` / `-309`）。
  *
  * 🔴 **`approved === 0` 也是 HTTP 200**——後端讓單筆與批次走同一條路徑，全部被跳過時
  * 不回錯誤。只看狀態碼就報「已完成核可」會讓教師以為寫進去了。
@@ -68,11 +68,11 @@ function approveOutcome(
   requested: number,
 ): { severity: "success" | "warning" | "error"; text: string } {
   if (result.skipped.length === 0) {
-    return { severity: "success", text: "已完成核可" } // ET-MSG-ET03-302
+    return { severity: "success", text: "已完成核可" } // ET-MSG-ET02-302
   }
   if (requested === 1) {
     const reason = result.skipped[0].reason
-    // ET-MSG-ET03-304（未完課）／-309（已有核可紀錄）
+    // ET-MSG-ET02-304（未完課）／-309（已有核可紀錄）
     return {
       severity: "error",
       text: reason === "NOT_COMPLETED" ? "學員尚未完課，無法核可" : `無法核可：${SKIP_LABEL[reason]}`,
@@ -84,14 +84,14 @@ function approveOutcome(
   const detail = [...counts].map(([reason, n]) => `${SKIP_LABEL[reason]}（${n} 筆）`).join("、")
   return {
     severity: result.approved > 0 ? "warning" : "error",
-    text: `已核可 ${result.approved} 筆；已跳過：${detail}`, // ET-MSG-ET03-303 / -309
+    text: `已核可 ${result.approved} 筆；已跳過：${detail}`, // ET-MSG-ET02-303 / -309
   }
 }
 
 /**
  * 移除確認框的文案——**作答中與否是兩則不同的訊息**。
  *
- * 🔴 `ET-MSG-ET03-003`（警告版）只在該學員手上有未提交的 attempt 時出現。原先兩種
+ * 🔴 `ET-MSG-ET02-003`（警告版）只在該學員手上有未提交的 attempt 時出現。原先兩種
  * 情況合用一句「該學員**若**正在作答……」，把警告稀釋成每次都出現的免責聲明——
  * 而每次都出現的警告等於沒有警告，真正該停下來看的那次也會被一起略過。
  */
@@ -100,10 +100,10 @@ function confirmMessage(pending: Pending | null): string {
   if (pending === null) return ""
   switch (pending.kind) {
     case "reset":
-      // ET-MSG-ET03-001
+      // ET-MSG-ET02-001
       return `確定重置 ${pending.userName ?? "該學員"} 於「${pending.quiz.quiz_name}」之重考次數？歷次作答明細仍會完整保留。`
     case "approve": {
-      // ET-MSG-ET03-301。批次帶筆數——教師勾了 12 個人卻只看到「確定核可所選學員？」
+      // ET-MSG-ET02-301。批次帶筆數——教師勾了 12 個人卻只看到「確定核可所選學員？」
       // 時，無從察覺自己少勾或多勾了。
       const who =
         pending.students.length === 1
@@ -129,7 +129,7 @@ function removeMessage(pending: Pending | null): string {
 }
 
 /**
- * ET03 學員學習狀況追蹤（US9 / #322）。
+ * ET02 學員學習狀況追蹤（US9 / #322）。
  *
  * ## 「已加入」頁籤 = 一個課程的完整資料視圖，分三區塊
  *
@@ -158,7 +158,7 @@ export function EtStudentsPage() {
   const [busy, setBusy] = useState(false)
   /** 核可備註（不通過用，選填）與撤銷原因（必填）共用——兩者不會同時出現。 */
   const [noteInput, setNoteInput] = useState("")
-  /** 撤銷原因為空時的 inline 錯誤（`ET-MSG-ET03-305`）。 */
+  /** 撤銷原因為空時的 inline 錯誤（`ET-MSG-ET02-305`）。 */
   const [reasonError, setReasonError] = useState(false)
 
   /** 開啟確認框時一併清掉上一次的輸入——留著會讓下一次撤銷帶上別人的原因。 */
@@ -189,7 +189,7 @@ export function EtStudentsPage() {
   // 而畫面不會說明為什麼——教師會以為壞掉。
   //
   // 過濾放前端（2026-09-18 使用者裁示）：ET01 的清單本身沒有錯，草稿是它該有的內容；
-  // 錯的是 ET03 對同一份清單的需求不同。改後端等於為單一消費者多開一個 `scope`。
+  // 錯的是 ET02 對同一份清單的需求不同。改後端等於為單一消費者多開一個 `scope`。
   //
   // ⚠️ **已關閉課程必須保留**——ET-11 AC 10：關閉後仍可閱覽學員清單、作答明細與問卷
   // 結果，只是不可再重置／移除。只排除 `DRAFT`，不要用 `is_closed` 或 `status !== "PUBLISHED"`。
@@ -231,7 +231,7 @@ export function EtStudentsPage() {
 
   const confirm = async () => {
     if (pending === null || courseId === "") return
-    // 🔴 撤銷原因必填**擋在送出之前**（`ET-MSG-ET03-305`）：inline 錯誤掛在那個輸入框
+    // 🔴 撤銷原因必填**擋在送出之前**（`ET-MSG-ET02-305`）：inline 錯誤掛在那個輸入框
     // 上，比送出後收一則 Snackbar 更容易讓教師知道要補什麼。後端仍會擋（422），這裡
     // 只是不讓他白跑一趟。
     if (pending.kind === "revokeApproval" && noteInput.trim() === "") {
@@ -265,7 +265,7 @@ export function EtStudentsPage() {
           noteInput.trim(),
           pending.student.approval_version ?? 0,
         )
-        notify.message.success("已撤銷核可") // ET-MSG-ET03-306
+        notify.message.success("已撤銷核可") // ET-MSG-ET02-306
       }
       invalidateAll(courseId)
       closePending()
@@ -287,7 +287,7 @@ export function EtStudentsPage() {
     if (courseId === "") return
     try {
       await (kind === "students" ? downloadStudentsCsv(courseId) : downloadSurveyCsv(courseId))
-      // ET-MSG-ET03-007。瀏覽器下載是**無聲**的：檔案落到下載資料夾、頁面完全沒變化。
+      // ET-MSG-ET02-007。瀏覽器下載是**無聲**的：檔案落到下載資料夾、頁面完全沒變化。
       // 少了這則，教師按下匯出後唯一的回饋是「什麼都沒發生」，於是再按一次。
       notify.message.success("CSV 已匯出")
     } catch (err) {
@@ -297,9 +297,9 @@ export function EtStudentsPage() {
 
   return (
     <Box>
-      <ScreenHeader code="ET03" />
+      <ScreenHeader code="ET02" />
 
-      {/* 課程選擇列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
+      {/* 課程選擇列——白底區塊，與 DM03「已廢止文件查詢」一致（#436）。
           ⚠️ 下方三個區塊（已加入學員 / 作答明細 / 問卷結果）**本來就各自有 `Paper`**，
           缺的只有這一條：下拉裸放在灰底上，看起來像懸空。標題則統一由 ScreenHeader 呈現。 */}
       <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
@@ -370,7 +370,7 @@ export function EtStudentsPage() {
         <DialogTitle>{pending === null ? "" : DIALOG_TITLE[pending.kind]}</DialogTitle>
         <DialogContent>
           {pending?.kind === "remove" && pending.student.has_in_progress_attempt ? (
-            /* ET-MSG-ET03-003 為「警告」型訊息——用 Alert 而非純文字，
+            /* ET-MSG-ET02-003 為「警告」型訊息——用 Alert 而非純文字，
                否則它與一般確認長得一模一樣，等於沒有分級。 */
             <Alert severity="warning">{removeMessage(pending)}</Alert>
           ) : (

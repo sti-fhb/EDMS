@@ -94,7 +94,7 @@ def ensure_revoke_reason(reason: str | None) -> str:
        ——本表因 `(COURSE_ID, USER_ID)` 唯一而以 update 覆寫，前次結果只存在
        `DP_AUDIT_LOG`，一個全是空白的原因等於沒有。
     2. Pydantic 驗證失敗回 `COMMON_422` 且**不回欄位名**（`error-codes.md` §設計原則），
-       前端無從把 `ET-MSG-ET03-305` 掛回那個輸入框。
+       前端無從把 `ET-MSG-ET02-305` 掛回那個輸入框。
     """
     if reason is None or not reason.strip():
         raise _REASON_REQUIRED

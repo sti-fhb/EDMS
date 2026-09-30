@@ -252,7 +252,7 @@ class TestNotifyOnChapterAdded:
     async def test_每次新增各寄一封(self, client, db) -> None:
         """contracts 明寫「每次新增即寄」且 `{{NEW_CHAPTER_NAME}}` 為單數。
 
-        ET02 的「儲存並繼續新增」會連續呼叫本端點，故 2 章節 × 1 學員 = 2 封。
+        ET05 的「儲存並繼續新增」會連續呼叫本端點，故 2 章節 × 1 學員 = 2 封。
         通知量放大的風險已記於 #303 規劃 §12。
         """
         ctx = await _course(client, db, "cu07")

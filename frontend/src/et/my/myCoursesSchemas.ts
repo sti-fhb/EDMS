@@ -1,4 +1,4 @@
-/** ET04 我的課程與加入新課程型別與表單驗證（對齊後端 `app/et/enrollment/schemas.py`）。 */
+/** ET03 我的課程與加入新課程型別與表單驗證（對齊後端 `app/et/enrollment/schemas.py`）。 */
 
 import { z } from "zod"
 
@@ -40,7 +40,7 @@ export interface MyCourseRow {
    *
    * ⚠️ 卡片的「已關閉」標示看本欄，**不要自己判 `status === "CLOSED"`**——期間已過者
    * 的 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 `ET-16`、未實作），只看
-   * `status` 會讓卡片標「已發布」而點進去 ET05 卻是唯讀的。與 ET05 的
+   * `status` 會讓卡片標「已發布」而點進去 ET06 卻是唯讀的。與 ET06 的
    * `LearnStructure.is_closed` 同名同義。
    */
   is_closed: boolean

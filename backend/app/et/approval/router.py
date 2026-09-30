@@ -1,4 +1,4 @@
-"""ET03 線下考核核可 API（US16 / #352）＋ ET10 核可查詢（US17 / #385）。
+"""ET02 線下考核核可 API（US16 / #352）＋ ET04 核可查詢（US17 / #385）。
 
 router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 service 的
 `ensure_owner_or_admin` 判定（`FR-ET-US16-07`：owner 或管理者）。兩層都要：角色閘擋掉
@@ -6,7 +6,7 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
 
 ## 限流**刻意獨立計數**，不與 `et-tracking` 共用
 
-雖然本模組的端點與 ET03 三區塊在同一個畫面上，配額仍分開（`_SCOPE = "et-approval"`，
+雖然本模組的端點與 ET02 三區塊在同一個畫面上，配額仍分開（`_SCOPE = "et-approval"`，
 另建一對 limiter）。兩者的性質不同：tracking 是唯讀查詢，教師頻繁切換課程與展開區塊，
 一次操作可能打好幾支，故 180/分；核可是**寫入**，而且一個請求最多觸發 100 封信，值得
 比照寫入類端點單獨設限（60/分）。
@@ -55,7 +55,7 @@ from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
-#: 寫入型端點，比 ET03 的查詢緊得多——核可是逐筆寄信的動作，一次批次最多 100 人。
+#: 寫入型端點，比 ET02 的查詢緊得多——核可是逐筆寄信的動作，一次批次最多 100 人。
 _USER_RATE = 60
 _IP_RATE = 200
 
@@ -99,9 +99,9 @@ async def approve(
 
     | 理由 | 意義 | 前端訊息 |
     |---|---|---|
-    | `NOT_COMPLETED` | 尚未線上完課 | 單筆 `ET-MSG-ET03-304` / 批次 `ET-MSG-ET03-303` |
-    | `ALREADY_APPROVED` | 已有未撤銷的核可紀錄 | `ET-MSG-ET03-309` |
-    | `NOT_ENROLLED` | 已不在此課程 | `ET-MSG-ET03-310` |
+    | `NOT_COMPLETED` | 尚未線上完課 | 單筆 `ET-MSG-ET02-304` / 批次 `ET-MSG-ET02-303` |
+    | `ALREADY_APPROVED` | 已有未撤銷的核可紀錄 | `ET-MSG-ET02-309` |
+    | `NOT_ENROLLED` | 已不在此課程 | `ET-MSG-ET02-310` |
 
     **只有 PASS 寄 `APPROVAL_PASSED` 通知**；FAIL 不寄（`FR-ET-US16-08`）。
     寄信失敗不回滾核可——紀錄已是業務事實，學員於 US17 核可查詢看得到。
@@ -131,7 +131,7 @@ async def revoke(
 ) -> Response:
     """撤銷核可（`FR-ET-US16-06`）——**原因必填**，撤銷後綜合狀態回「待核可」。
 
-    以 `version` 樂觀鎖檢核：不符回 409 `ET_APPROVAL_004`（`ET-MSG-ET03-308`
+    以 `version` 樂觀鎖檢核：不符回 409 `ET_APPROVAL_004`（`ET-MSG-ET02-308`
     「核可狀態已被其他人變更，請重新整理後再試」）。
 
     ⚠️ **撤銷是 POST 不是 DELETE**：它不刪除任何東西——那一列仍在，只是 `IS_REVOKED`
@@ -152,7 +152,7 @@ async def revoke(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ── ET10 核可查詢（US17 / #385）──────────────────────────────────────────────
+# ── ET04 核可查詢（US17 / #385）──────────────────────────────────────────────
 
 
 @router.post(
@@ -240,7 +240,7 @@ async def approval_filter_courses(
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> list[ApprovalCourseOption]:
-    """ET10 課程篩選下拉的選項——**有核可紀錄的**課程（#439）。
+    """ET04 課程篩選下拉的選項——**有核可紀錄的**課程（#439）。
 
     教師只取得自己開設的課，管理者不限。⚠️ 這與 `search` 的擁有權閘是**一組的**：
     下拉決定使用者選得到什麼，那道閘決定 API 收不收——只做前者等於沒做。

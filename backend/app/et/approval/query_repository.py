@@ -127,7 +127,7 @@ class EtApprovalQueryRepository:
         return stmt
 
     async def filter_course_options(self, db: AsyncSession, *, owner_id: str | None) -> list[tuple[int, str]]:
-        """ET10 課程下拉的選項：**有核可紀錄的**課程（#439）。
+        """ET04 課程下拉的選項：**有核可紀錄的**課程（#439）。
 
         Args:
             owner_id: 限定課程擁有者；`None`（管理者）表不限。

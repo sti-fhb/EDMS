@@ -1,4 +1,4 @@
-"""文件廢止申請（US8 / UCDM05 / DM02）schema。"""
+"""文件廢止申請（US8 / UCDM05 / DM07）schema。"""
 
 from pydantic import BaseModel
 

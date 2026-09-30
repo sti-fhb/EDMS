@@ -37,7 +37,7 @@ class TestSummarize:
         assert stat.completion_rate == Decimal("25.00")
 
     def test_平均進度為逐學員百分比之平均(self) -> None:
-        """與 ET03 頁面顯示的每人進度用**同一支** `completion_pct`——兩邊各算一份的話，
+        """與 ET02 頁面顯示的每人進度用**同一支** `completion_pct`——兩邊各算一份的話，
         教師把畫面上的數字自己平均會對不上週報，而兩個都「看起來合理」。"""
         stat = summarize({"a": (1, 4), "b": (3, 4)})  # 25% 與 75%
         assert stat.avg_progress_pct == Decimal("50.00")

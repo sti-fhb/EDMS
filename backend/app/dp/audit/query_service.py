@@ -49,7 +49,7 @@ _ACTION_LABELS: dict[str, str] = {
     "CREATE": "新增",
     "UPDATE": "修改",
     "DELETE": "刪除",
-    # ET03 具名個資匯出（#322 / SA 裁示 2026-09-14）
+    # ET02 具名個資匯出（#322 / SA 裁示 2026-09-14）
     "EXPORT": "匯出",
 }
 _RESULT_LABELS: dict[str, str] = {"SUCCESS": "成功", "FAIL": "失敗"}

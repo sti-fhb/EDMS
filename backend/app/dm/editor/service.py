@@ -1,4 +1,4 @@
-"""文件新增與編輯服務（US5 / DM03，寫入編排）。
+"""文件新增與編輯服務（US5 / DM08，寫入編排）。
 
 編排三張表寫入（DM_DOCUMENT / DM_DOC_VERSION / DM_VERSION_TAG）與跨模組送審 / 通知：
 
@@ -248,7 +248,7 @@ class EditorService:
         if doc is None:
             raise _NOT_FOUND
         self._ensure_not_obsolete(doc)  # 已廢止文件不得再加版
-        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
+        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM08-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
         # 每人每文件一份進行中版本（他人不擋）：已有草稿 → 請續編（DM_DOC_009）；已有審核中版本 → 擋，
@@ -305,7 +305,7 @@ class EditorService:
     # ── 續編草稿（#222）──────────────────────────────
 
     async def get_draft_meta(self, db: AsyncSession, *, doc_id: str, user_id: str) -> DraftMeta:
-        """續編模式 author-scoped 之編輯器 meta（供 DRAFT-status 文件亦可載，不經 DM02 詳細端點）。
+        """續編模式 author-scoped 之編輯器 meta（供 DRAFT-status 文件亦可載，不經 DM07 詳細端點）。
 
         回文件名稱 / 分類 / func / 父文件狀態 + 本人現有 DRAFT 版本內容（版號 / 摘要 / 檔案）+
         （退回 / 撤回草稿之）前次指定審核者。名稱可編輯性依父文件狀態（DRAFT 可改、PUBLISHED 唯讀，Q1=A）。
@@ -387,7 +387,7 @@ class EditorService:
         if ver.status != _DRAFT:
             raise AppError(status_code=409, detail="僅草稿版本可續編", error_code="DM_DRAFT_004")
         self._ensure_not_obsolete(doc)  # 已廢止文件之孤兒草稿不得續編（僅可刪除）
-        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
+        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM08-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
         tag_pairs = await self._validate_tags(
@@ -565,7 +565,7 @@ class EditorService:
         return [ReviewerItem(user_id=r.user_id, user_name=r.user_name) for r in rows]
 
     async def get_options(self, db: AsyncSession) -> EditorOptions:
-        """DM03 表單一次載入之受控下拉（分類 / func / 可見對象 / 檢索標籤，皆啟用中）。"""
+        """DM08 表單一次載入之受控下拉（分類 / func / 可見對象 / 檢索標籤，皆啟用中）。"""
         cats = await self._repo.list_categories(db)
         funcs = await self._repo.list_funcs(db)
         auds = await self._repo.list_audience_tags(db)
@@ -660,7 +660,7 @@ class EditorService:
 
 
 def _require(**fields: str) -> None:
-    """必填欄位非空檢核（strip 後為空即失敗）；缺任一 → 422 DM_DOC_004（DM-MSG-DM03-001）。"""
+    """必填欄位非空檢核（strip 後為空即失敗）；缺任一 → 422 DM_DOC_004（DM-MSG-DM08-001）。"""
     for name, value in fields.items():
         if not value:
             raise AppError(status_code=422, detail=f"必填欄位未填寫：{name}", error_code="DM_DOC_004")

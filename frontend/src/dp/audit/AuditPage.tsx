@@ -103,7 +103,7 @@ export function AuditPage() {
   return (
     <>
       <CrudPageLayout
-        code="DP09"
+        code="DP05"
         filterContent={
           <Stack
             direction={{ xs: "column", md: "row" }}

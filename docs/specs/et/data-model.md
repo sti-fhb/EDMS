@@ -661,7 +661,7 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 
 ### 通知信範本（DP_NOTIFY_TEMPLATE，`MODULE=ET`）
 
-> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 8 類通知範本以 `MODULE=ET` 存於平台集中表（2026-07-17 增列核可通過通知、2026-09-21 增列測驗變更需重測通知）；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET09 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
+> **由平台模組 DP 定義**（`DP_NOTIFY_TEMPLATE`；含 `MODULE` / `TEMPLATE_CODE` / `SUBJECT` / `BODY` / `IS_ACTIVE` / `VERSION` 等）；ET 不自持通知範本表。ET 8 類通知範本以 `MODULE=ET` 存於平台集中表（2026-07-17 增列核可通過通知、2026-09-21 增列測驗變更需重測通知）；完整欄位見平台 DP data-model。**編輯 UI 仍在 ET10 系統設定「通知範本」分頁**（ET 管理者只編輯 `MODULE=ET` 的列）；密碼重設 / 帳號變更驗證驗證信為平台系統信（`MODULE=DP`），不在 ET 清單內、由平台管理員維護（2026-07-08 集中化）。
 
 **ET 內建範本**（部署時由平台 seed，`MODULE=ET`；管理者於 US15 維護內容，不可新增 / 刪除範本代碼）——共 **8 類**：
 
@@ -703,7 +703,7 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 | `ET_INVITATION_CODE_LENGTH` | `8` | `READONLY` | 邀請碼長度（純數字）。`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)` 硬編，填 9 以上要到課程發布當下才拋錯 |
 | `ET_URGENT_REMIND_DAYS` | `3` | `ADMIN` | SCHET002 截止前加急提醒天數（訖止前 N 天）。純業務門檻，由 ET 管理者自行調整 |
 
-> **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171）：`READONLY` 者 ET 管理者於 DP07 **看得到現值**（以回答教師「能傳什麼格式、上限多少」）但**不可修改**，變更途徑為 IT 直接操作資料庫。定義見 [dp/spec_us5.md](../dp/spec_us5.md) FR-DP-US5-11。
+> **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171）：`READONLY` 者 ET 管理者於 DP03 **看得到現值**（以回答教師「能傳什麼格式、上限多少」）但**不可修改**，變更途徑為 IT 直接操作資料庫。定義見 [dp/spec_us5.md](../dp/spec_us5.md) FR-DP-US5-11。
 
 > **密碼重設 / Email 變更驗證連結有效時間**改為**平台級 `DP_` 參數**（認證 TTL 由平台 DP 提供，見 [spec_us2.md](spec_us2.md)、[spec_us10.md](spec_us10.md)），不再掛 ET 參數。
 > 通知範本改存 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）；原 `EMAIL_NOTIFY_*` 參數廢除。
@@ -740,8 +740,8 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 
 | 代碼 | 顯示名稱 | 說明 |
 |------|---------|------|
-| EMAIL_INVITE | Email 邀請 | 教師於 ET02 以 Email 邀請，寄出當下即加入（#362 前為點擊信中連結加入）|
-| INVITATION_CODE | 邀請碼 | 透過 ET04 輸入邀請碼加入 |
+| EMAIL_INVITE | Email 邀請 | 教師於 ET05 以 Email 邀請，寄出當下即加入（#362 前為點擊信中連結加入）|
+| INVITATION_CODE | 邀請碼 | 透過 ET03 輸入邀請碼加入 |
 | TAG_DEFAULT | 標籤帶入 | 受訓單位標籤自動邀請帶入（2026-07-02 變更，原 MODULE_DEFAULT）|
 
 ### ET_INVITATION_STATUS — **已於 2026-09-18（#362）移除**

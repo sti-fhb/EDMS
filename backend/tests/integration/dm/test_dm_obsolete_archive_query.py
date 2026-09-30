@@ -1,4 +1,4 @@
-"""已廢止文件查詢（US10 / UCDM08 / DM06）整合測試（真實 DB）。
+"""已廢止文件查詢（US10 / UCDM08 / DM03）整合測試（真實 DB）。
 
 涵蓋：DM_ADMIN 查詢已廢止清單（末版版號 + 廢止脈絡欄位：原作者〔末版作者〕/ 申請人 / 核准者 / 廢止時間 / 原因）、
 關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間過濾、CSV 匯出（含 BOM + 跳脫）、
@@ -132,7 +132,7 @@ async def test_admin_lists_obsolete_with_context_fields(db, client):
 
 
 async def test_only_approved_obsolete_included(db, client):
-    """PENDING_OBSOLETE（廢止待簽核仍在架）與 PUBLISHED 不入 DM06。"""
+    """PENDING_OBSOLETE（廢止待簽核仍在架）與 PUBLISHED 不入 DM03。"""
     await _seed_user(db, "adm", "管理員")
     await _grant(db, "adm", DM_ADMIN)
     await _seed_user(db, "author1", "作者")

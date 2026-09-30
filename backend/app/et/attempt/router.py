@@ -1,4 +1,4 @@
-"""ET06 測驗作答 API（US6 / #279）——學員端。
+"""ET07 測驗作答 API（US6 / #279）——學員端。
 
 router-level 掛 `get_et_context`（任一 ET 角色）；真正的授權在 service 的四道守門
 （反查鏈 → 在籍 OR 擁有者 → 項目已解鎖 → 尚有次數），見 `service` 模組 docstring。

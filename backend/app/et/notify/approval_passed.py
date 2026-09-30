@@ -1,6 +1,6 @@
 """核可通過通知信（US16 / #352）。
 
-教師 / 管理者於 ET03 對學員線下核可「**通過**」時寄出；**不通過與撤銷不寄**
+教師 / 管理者於 ET02 對學員線下核可「**通過**」時寄出；**不通過與撤銷不寄**
 （`FR-ET-US16-08`）。
 
 ## 本模組是 `APPROVAL_PASSED` 的第一個也是唯一的引用點
@@ -66,7 +66,7 @@ def build_approval_passed_params(
 
     ## 時間沿用 `format_open_at`
 
-    直接輸出 UTC 會讓信裡的核可時間比教師在 ET03 看到的**早 8 小時**。共用
+    直接輸出 UTC 會讓信裡的核可時間比教師在 ET02 看到的**早 8 小時**。共用
     `course_invite.format_open_at` 而不另寫一份：那支已對齊前端
     `utils/date.ts::formatDateTime` 的 `YYYY/MM/DD HH:mm`，兩份遲早分岔，而分岔的表現
     是同一個時間在畫面與信件上長得不一樣。
@@ -108,7 +108,7 @@ class ApprovalPassedMailer:
 
             寄送失敗不拋例外（`EtNotifier` 於唯一出口吞掉 `AppError`），**本層亦不因寄信
             結果改變任何業務判斷**：核可已經寫進去了，那是業務事實；信只是通知，學員仍
-            可於 ET10 核可查詢（US17）看到結果。這與 ET-12 `resend()` 寄信失敗要回滾的
+            可於 ET04 核可查詢（US17）看到結果。這與 ET-12 `resend()` 寄信失敗要回滾的
             不對稱是刻意的——那裡 token 已被換掉，不回滾會毀掉一條還能用的連結。
         """
         recipients = await self._repo.recipients(db, [user_id])

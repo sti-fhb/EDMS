@@ -1,4 +1,4 @@
-/** ET05 章節學習型別（對齊後端 `app/et/learning/schemas.py`）。 */
+/** ET06 章節學習型別（對齊後端 `app/et/learning/schemas.py`）。 */
 
 import type { SurveyEntry } from "../survey/surveyFillSchemas"
 

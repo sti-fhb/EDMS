@@ -163,7 +163,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 **後端 — 權限轉接層（T026，FR-005 / 006 / 008）**：
 - 實作 [module-callbacks.md](../dp/contracts/module-callbacks.md) §3 `get_users_roles_audiences(user_ids)` → `dict[user_id, DmRoleAudienceView]`（`roles` ⊂ {ADMIN/EDITOR/REVIEWER/VIEWER}、`audiences`＝`DM_TAG`（AUDIENCE 組）之 `TAG_ID` 集〔DM 自持表，非 DP_PARAM〕、`last_modified_by/date` 取自模組表 `UPDATED_*`）；**批次**載入一頁使用者避 N+1、查無指派回**空集合 View**（非缺 key）
-- `assign_roles_audiences(user_id, roles, audiences, operator_id)`：寫 `DM_USER_ROLE` + `DM_USER_ROLE_LOG`（append-only 異動）、**即時生效**、記「最後異動」；**自我保護**（operator 取消自己管理者角色 → raise `AppError` `DM_ROLE_001`，DP 端映射 `DP-MSG-DP06-001`）；**不檢核**「至少 1 名管理者」；audience 值 MUST 屬 `DM_TAG`（AUDIENCE 組、`IS_ENABLED=true`）啟用中清單（寫入前檢核）；**同交易**呼叫 SRVDP003 寫稽核（`MODULE=DM`）
+- `assign_roles_audiences(user_id, roles, audiences, operator_id)`：寫 `DM_USER_ROLE` + `DM_USER_ROLE_LOG`（append-only 異動）、**即時生效**、記「最後異動」；**自我保護**（operator 取消自己管理者角色 → raise `AppError` `DM_ROLE_001`，DP 端映射 `DP-MSG-DP02-001`）；**不檢核**「至少 1 名管理者」；audience 值 MUST 屬 `DM_TAG`（AUDIENCE 組、`IS_ENABLED=true`）啟用中清單（寫入前檢核）；**同交易**呼叫 SRVDP003 寫稽核（`MODULE=DM`）
 - §4 `has_any_role(user_id)`：入口頁 DM 卡狀態 + 側欄 DM 組可見性判定（包裝 #127 `authz.has_any_dm_role`）
 - 回呼註冊至 DP 呼叫之 registry（與 ET 同機制）
 
@@ -190,7 +190,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ### 驗收條件
 
 - [ ] DP 後台「權限管理」（DM 模組）經 `get_users_roles_audiences` 批次列出使用者之 DM 4 角色 + 可見對象 + 「最後異動」
-- [ ] 指派 / 取消角色即時生效、寫 `DM_USER_ROLE_LOG`、同交易 SRVDP003 稽核（`MODULE=DM`）；管理者取消自己 → `DM_ROLE_001`（DP 顯示 `DP-MSG-DP06-001`）；管理者間可互相停用、不檢核「至少 1 名管理者」
+- [ ] 指派 / 取消角色即時生效、寫 `DM_USER_ROLE_LOG`、同交易 SRVDP003 稽核（`MODULE=DM`）；管理者取消自己 → `DM_ROLE_001`（DP 顯示 `DP-MSG-DP02-001`）；管理者間可互相停用、不檢核「至少 1 名管理者」
 - [ ] 可見對象授權指派即時生效、寫異動；AUDIENCE 值停用 soft-retire 回傳受影響文件 / 閱覽者數、既有可見性不變；audience 值非 `DM_TAG`（AUDIENCE 組）啟用清單則拒絕
 - [ ] DP 後台「系統參數與清單」（DM 模組）可維護 DM 分類 / func_name / 標籤（新增 / 改名 / 啟停、**不刪除**、分類碼英數唯一 + 建立後鎖定）；停用後既有文件引用保留
 - [ ] 催辦門檻（1–30、預設 7）、每週執行時間（預設 `週一,10:00`）經 DP 後台按模組過濾維護、經 SRVDP001 讀回正確
@@ -212,7 +212,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
   - ✅ **AUDIENCE soft-retire 跨模組觸發落點**：DP 後台呼叫 DM `set_controlled_enabled(enabled=False)` → DM 端執行 soft-retire 回 `SetEnabledResult(affected_docs, affected_viewers)`、DP 呈現提示（§3.1）
   - ✅ **`DmRoleAudienceView.audiences` 來源**：`DM_TAG`（AUDIENCE 組）TAG_ID，非 DP_PARAM（module-callbacks §3 已更正）
 - **開工前 `/sti-plan` 尚待確認**：**參數值域校驗落點**（催辦門檻 1–30、每週時間格式）於 `DP_PARAM` 定義端（DP 通用參數編輯器）或 DM 端——參數為 `DP_PARAM`、由 DP dp-params 直接維護，值域屬 DM 業務規則，需確認 DP 參數定義是否承載值域 metadata
-- 自我保護 error_code `DM_ROLE_001` 已於 #126 定案（DP 統一映射 `DP-MSG-DP06-001`）
+- 自我保護 error_code `DM_ROLE_001` 已於 #126 定案（DP 統一映射 `DP-MSG-DP02-001`）
 - **省略 SITE / HOSPITAL 欄位**（對齊平台 DP，research §1）
 
 ### 相關文件
@@ -234,7 +234,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 **前置條件**：
 - **#0 Foundation（[#127](https://github.com/sti-fhb/EDMS/issues/127)，已交付合併）**：`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_TAG(_GROUP)` / `DM_CATEGORY` / `DM_FUNC` / `DM_USER_TAG` 表；**標籤式可見性判定 `dm/util/visibility`（T020a）**、角色授權 `authz`（T015）、受控資料查詢 `CatalogService`（T020，供分類 / func_name / 檢索標籤下拉）、DM 模組殼與路由骨架
 - **文件資料來源**：真實「已發布」文件經 US5（[#4] 新增編輯）+ US6（[#5] 簽核發布）產生；本 Issue 之整合測試以**種子 / fixture 直接寫入已發布文件**獨立驗證，不阻塞於 #4 / #5 交付
-- **點列去向**：文件詳細頁 US4（[#3]）；#3 未交付前前端先接路由骨架（進入 DM02 佔位）
+- **點列去向**：文件詳細頁 US4（[#3]）；#3 未交付前前端先接路由骨架（進入 DM07 佔位）
 
 ### 任務說明
 
@@ -304,18 +304,18 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #3：[P1-核心] DM — 文件詳細頁瀏覽（US4 / UCDM04 / DM02）（GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)）
+## Issue #3：[P1-核心] DM — 文件詳細頁瀏覽（US4 / UCDM04 / DM07）（GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)）
 
-**對應規格**：[spec_us4.md](spec_us4.md)（FR-001~007，UCDM04，訊息 DM-MSG-DM02-001~003）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_DOC_READ` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §3（單版本單檔 / 檔案存檔案系統）
-**對應畫面**：**DM02 文件詳細頁**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-detail`）——標題列 + 右側資訊面板 + 文件檔案區（預覽 / 下載）+ 版本歷程抽屜 +（編輯者）動作入口 / read-only 廢止模式
+**對應規格**：[spec_us4.md](spec_us4.md)（FR-001~007，UCDM04，訊息 DM-MSG-DM07-001~003）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_DOC_READ` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §3（單版本單檔 / 檔案存檔案系統）
+**對應畫面**：**DM07 文件詳細頁**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-detail`）——標題列 + 右側資訊面板 + 文件檔案區（預覽 / 下載）+ 版本歷程抽屜 +（編輯者）動作入口 / read-only 廢止模式
 **階段**：P1-核心
 **涵蓋 Tasks**：T031（詳細頁版面）、T032（檔案區：預覽 / 下載 + 寫 `DM_DOC_READ`）、T033（版本歷程抽屜）、T034（動作入口 + read-only 模式）
 
 ### 任務說明
 
-實作 **DM02 文件詳細頁**：閱讀目前發布版本、依格式線上預覽（PDF / 圖片）或下載原檔（Office 僅下載），展開版本歷程檢視所有版本，具編輯者角色者見「編輯新版本」/「廢止此文件」入口。上方標題列僅顯示識別與狀態（文件名稱 / DOC_ID / 目前版本 / 狀態），描述性 metadata 統一由右側「文件資訊」面板呈現（不重複）。**僅目前發布版可下載**（舊版僅預覽）；**下載目前發布版**寫一筆 `DM_DOC_READ`（KPI「已看」判定、預覽不記、同人同版去重）。自「已廢止文件查詢」（US10）進入時以 **read-only 模式**呈現。
+實作 **DM07 文件詳細頁**：閱讀目前發布版本、依格式線上預覽（PDF / 圖片）或下載原檔（Office 僅下載），展開版本歷程檢視所有版本，具編輯者角色者見「編輯新版本」/「廢止此文件」入口。上方標題列僅顯示識別與狀態（文件名稱 / DOC_ID / 目前版本 / 狀態），描述性 metadata 統一由右側「文件資訊」面板呈現（不重複）。**僅目前發布版可下載**（舊版僅預覽）；**下載目前發布版**寫一筆 `DM_DOC_READ`（KPI「已看」判定、預覽不記、同人同版去重）。自「已廢止文件查詢」（US10）進入時以 **read-only 模式**呈現。
 
-> ℹ️ **讀取型全端 issue**：後端詳細 / 版本 / 檔案存取端點（唯讀查詢 + 下載記錄 `DM_DOC_READ` 為唯一寫入）+ 前端 DM02 頁。檔案預覽 / 下載重用 #0 檔案儲存服務（T016）；本 issue 不改文件 / 版本寫入（屬 US5 / US6）、不實作編輯 / 廢止動作本身（僅入口導向 US5 / US8）。
+> ℹ️ **讀取型全端 issue**：後端詳細 / 版本 / 檔案存取端點（唯讀查詢 + 下載記錄 `DM_DOC_READ` 為唯一寫入）+ 前端 DM07 頁。檔案預覽 / 下載重用 #0 檔案儲存服務（T016）；本 issue 不改文件 / 版本寫入（屬 US5 / US6）、不實作編輯 / 廢止動作本身（僅入口導向 US5 / US8）。
 
 **前置條件**：
 - **#0 Foundation（[#127](https://github.com/sti-fhb/EDMS/issues/127)，已交付合併）**：`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_DOC_READ` / `DM_REVIEW` / 受控主檔表；**檔案儲存服務 `dm/service/file_store`（T016，MIME 判可預覽 / 僅下載、檔案系統存取）**、角色授權 `authz`（T015）、**標籤式可見性 `visibility`（T020a）**（存取控制：閱覽者不可開啟未授權可見對象之文件）、DM 模組殼與路由骨架
@@ -329,8 +329,8 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - **存取控制**：套 `visible_docs_condition`（閱覽者不可存取未授權可見對象之文件 → 404 / 403 `DM_DOC_001`）；編輯 / 審核 / 管理不過濾
 
 **後端 — 檔案存取 + 閱讀記錄（T032，FR-002 / 004 / 007）**：
-- `GET /api/dm/documents/{doc_id}/versions/{version_id}/file?disposition=preview|download`：經 `file_store` 串流檔案；**PDF / 圖片**可 `preview`（inline）+ `download`；**Office** 僅 `download`（`preview` → 提示 DM-MSG-DM02-001）
-- **僅目前發布版可下載**：舊版本 `download` → 403 `DM_DOC_002`（提示 DM-MSG-DM02-002「聯絡管理者」）；舊版本僅 `preview`
+- `GET /api/dm/documents/{doc_id}/versions/{version_id}/file?disposition=preview|download`：經 `file_store` 串流檔案；**PDF / 圖片**可 `preview`（inline）+ `download`；**Office** 僅 `download`（`preview` → 提示 DM-MSG-DM07-001）
+- **僅目前發布版可下載**：舊版本 `download` → 403 `DM_DOC_002`（提示 DM-MSG-DM07-002「聯絡管理者」）；舊版本僅 `preview`
 - **下載目前發布版** → 寫一筆 `DM_DOC_READ`（`DOC_ID` × `VERSION_ID` × `CREATED_USER` × 時間；**預覽不寫**；唯一約束 DOC×VERSION×USER 天然去重）
 
 **後端 — 版本歷程（T033，FR-003 / 004）**：
@@ -340,12 +340,12 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - 動作入口能力：`can_edit`（編輯者且**無進行中 PENDING 送審週期**〔查 `DM_REVIEW`，非看文件 STATUS〕）；送審中 / 廢止待簽核 → 入口失效
 - 已廢止（`OBSOLETE`）文件之 read-only 資料：廢止 banner（廢止時間 / 申請人 / 核准者 / 廢止原因 / **廢止附件下載，如有**〔取自 `DM_REVIEW` 廢止類〕）
 
-**前端 — DM02 詳細頁（T031~T034）** `frontend/src/dm/detail`：
+**前端 — DM07 詳細頁（T031~T034）** `frontend/src/dm/detail`：
 - 標題列（識別 + 狀態）+ 右側「文件資訊」面板（描述性 metadata、不與標題重複）
-- 文件檔案區：PDF / 圖片內嵌預覽 + 下載鈕；Office 顯示「下載原檔以本機應用程式開啟」+ DM-MSG-DM02-001（不預覽）
-- 版本歷程抽屜（時間軸）：所有版本；目前版可下載、舊版僅預覽（點下載 → DM-MSG-DM02-002）
+- 文件檔案區：PDF / 圖片內嵌預覽 + 下載鈕；Office 顯示「下載原檔以本機應用程式開啟」+ DM-MSG-DM07-001（不預覽）
+- 版本歷程抽屜（時間軸）：所有版本；目前版可下載、舊版僅預覽（點下載 → DM-MSG-DM07-002）
 - 動作入口（依 `can_edit`）：「編輯新版本」→ US5 編輯模式、「廢止此文件」→ US8；送審中 / 廢止待簽核時失效（灰階 + 提示）
-- **read-only 模式**（自 US10 進入，如 route 參數）：隱藏「文件檔案 + 文件資訊」整段、**自動展開版本歷程**、所有版本僅預覽、上方紅色廢止 banner（DM-MSG-DM02-003）
+- **read-only 模式**（自 US10 進入，如 route 參數）：隱藏「文件檔案 + 文件資訊」整段、**自動展開版本歷程**、所有版本僅預覽、上方紅色廢止 banner（DM-MSG-DM07-003）
 
 **測試**：
 - 後端 int：詳細資料（標題 / 資訊面板不重複欄位）；**存取控制**（閱覽者未授權可見對象 → 擋；編輯者見全部）；檔案存取（PDF / 圖片可預覽、Office 僅下載；舊版下載 403、僅預覽）；**下載目前版寫 `DM_DOC_READ` + 預覽不寫 + 同人同版去重**；版本歷程列所有版本；`can_edit`（編輯者且無 PENDING 送審 → true；有 PENDING → false）；廢止文件 read-only 資料（banner + 附件）
@@ -354,13 +354,13 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ### 驗收條件
 
 - [ ] 標題列僅顯示 文件名稱 / DOC_ID / 目前版本 / 狀態；描述性 metadata（分類 / 作者 / 發布日期 / 核准者 / 核准時間 / 標籤）僅於右側資訊面板、不重複（FR-001、AC1）
-- [ ] PDF / 圖片提供線上預覽 + 下載；Office 檔僅下載（DM-MSG-DM02-001、不預覽）（FR-002、AC2 / 3）
+- [ ] PDF / 圖片提供線上預覽 + 下載；Office 檔僅下載（DM-MSG-DM07-001、不預覽）（FR-002、AC2 / 3）
 - [ ] 版本歷程抽屜列**所有版本**（含歷史）之 版號 / 變更摘要 / 撰寫者 / 核准者 / 發布時間（FR-003、AC4）
-- [ ] **僅目前發布版可下載**；舊版僅預覽、下載被擋（DM-MSG-DM02-002 / `DM_DOC_002`）（FR-004、AC5）
+- [ ] **僅目前發布版可下載**；舊版僅預覽、下載被擋（DM-MSG-DM07-002 / `DM_DOC_002`）（FR-004、AC5）
 - [ ] **下載目前發布版**寫一筆 `DM_DOC_READ`（預覽不寫；同人同版去重）（FR-007）
 - [ ] 具編輯者角色顯示「編輯新版本」/「廢止此文件」入口（→ US5 / US8）；送審中 / 廢止待簽核（`DM_REVIEW` 有 PENDING）時入口失效（FR-005、AC6 / 7）
 - [ ] 閱覽者不可存取未授權可見對象之文件（後端 enforce）；編輯 / 審核 / 管理不受限（存取控制對齊 US3）
-- [ ] 自 US10 進入以 read-only 模式：隱藏檔案 + 資訊、自動展開版本歷程、所有版本僅預覽、紅色廢止 banner（廢止時間 / 申請人 / 核准者 / 原因 / 附件）（FR-006、AC8、DM-MSG-DM02-003）
+- [ ] 自 US10 進入以 read-only 模式：隱藏檔案 + 資訊、自動展開版本歷程、所有版本僅預覽、紅色廢止 banner（廢止時間 / 申請人 / 核准者 / 原因 / 附件）（FR-006、AC8、DM-MSG-DM07-003）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
 ### 依賴
@@ -377,7 +377,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - **`DM_DOC_READ` 只記「下載目前發布版」**：預覽（PDF / 圖片 inline）不記；發新版後 KPI「已看」綁新版本（US13 語意），本頁僅負責寫下載事件。
 - **舊版本永久保留但僅預覽**：稽核取得舊版原始檔須聯絡 DM_ADMIN（spec_us4 FR-004）；本頁不提供舊版下載途徑。
 - **檔案存取重用 #0 `file_store`（T016）**：單版本單檔、依 MIME 判可預覽（PDF / 圖片）/ 僅下載（Office）；不於本 issue 重造檔案服務。
-- **Error codes（開工前 `/sti-plan` 對齊）**：新增 `DM_DOC_001`（查無此文件或無權存取，404 / 403）、`DM_DOC_002`（舊版本不可下載，403）；訊息 DM-MSG-DM02-001~003 為 UI 提示。
+- **Error codes（開工前 `/sti-plan` 對齊）**：新增 `DM_DOC_001`（查無此文件或無權存取，404 / 403）、`DM_DOC_002`（舊版本不可下載，403）；訊息 DM-MSG-DM07-001~003 為 UI 提示。
 - **read-only 模式進入來源為 US10**（未交付）：本 issue 交付 read-only **渲染能力** + 廢止 banner 資料，實際入口待 US10 落地（架構差異、不阻塞）。
 - **省略 SITE / HOSPITAL 欄位**（對齊平台 DP，research §1）。
 
@@ -391,18 +391,18 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #4：[P1-核心] DM — 文件新增與編輯（US5 / UCDM06 / DM03）
+## Issue #4：[P1-核心] DM — 文件新增與編輯（US5 / UCDM06 / DM08）
 
-**對應規格**：[spec_us5.md](spec_us5.md)（FR-001~009，UCDM06，訊息 DM-MSG-DM03-001~009）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §4（單一送審週期）、§5（手冊唯一）
-**對應畫面**：**DM03 文件新增 / 編輯**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-upload`）——雙模式表單（新增：DOC_ID 配號 + 首版；編輯：身份欄唯讀 + 新版本）+ 可見對象 / 檢索標籤 + 單檔上傳（Office 警示）+ 指定審核者 + 存草稿 / 送簽
+**對應規格**：[spec_us5.md](spec_us5.md)（FR-001~009，UCDM06，訊息 DM-MSG-DM08-001~009）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW` / `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`）；[research.md](research.md) §4（單一送審週期）、§5（手冊唯一）
+**對應畫面**：**DM08 文件新增 / 編輯**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-upload`）——雙模式表單（新增：DOC_ID 配號 + 首版；編輯：身份欄唯讀 + 新版本）+ 可見對象 / 檢索標籤 + 單檔上傳（Office 警示）+ 指定審核者 + 存草稿 / 送簽
 **階段**：P1-核心
 **涵蓋 Tasks**：T035（新增模式 / DOC_ID 配號）、T035a（可見對象必填檢核）、T036（編輯模式 / 版本號檢核）、T037（func_name 單選 + 唯一檢核）、T038（單檔上傳 / Office 提醒）、T039（審核者排除自己 + 存草稿 + 送簽）
 
 ## 任務說明
 
-實作 **DM03 文件新增與編輯**：編輯者新增文件（建 DOC_ID、首版）或對既有文件上傳新版本，填必填欄位、選受控標籤（可見對象必填 ≥1、檢索標籤選填），指定審核者後送簽，或存為草稿續編。**新增模式**必填 文件名稱 / 分類 / 首版摘要 / 可見對象 ≥1，選填檢索標籤，首版版號由撰寫者自行輸入；分類為「系統操作手冊（MANUAL）」時額外單選 func_name。**編輯模式**（自 US4 詳細頁「編輯新版本」進入）文件名稱 / 分類 / func_name 唯讀，僅可改 檔案 / 變更摘要 / 標籤 / 指定審核者 / 版本號。送簽建立一筆 PENDING `DM_REVIEW`（NEW / NEW_VERSION）並通知指定審核者，文件 / 版本進入送審中。
+實作 **DM08 文件新增與編輯**：編輯者新增文件（建 DOC_ID、首版）或對既有文件上傳新版本，填必填欄位、選受控標籤（可見對象必填 ≥1、檢索標籤選填），指定審核者後送簽，或存為草稿續編。**新增模式**必填 文件名稱 / 分類 / 首版摘要 / 可見對象 ≥1，選填檢索標籤，首版版號由撰寫者自行輸入；分類為「系統操作手冊（MANUAL）」時額外單選 func_name。**編輯模式**（自 US4 詳細頁「編輯新版本」進入）文件名稱 / 分類 / func_name 唯讀，僅可改 檔案 / 變更摘要 / 標籤 / 指定審核者 / 版本號。送簽建立一筆 PENDING `DM_REVIEW`（NEW / NEW_VERSION）並通知指定審核者，文件 / 版本進入送審中。
 
-> ℹ️ **寫入型全端 issue（DM 第一個寫入功能）**：後端新增 `app/dm/editor`（建立 / 編輯 / 存草稿 / 送簽，寫 `DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` + 呼叫送審）+ 前端 DM03 表單。**組裝重用 #127 Foundation 既有工具**（DOC_ID 產生器 T017、file_store T016、ReviewService T019、authz T015、notify T018、catalog 轉接層、DB 約束），本 issue 不重造底層；**不含核准 / 發布**（屬 US6）、不含草稿匣列表 / 撤回（屬 US9）。
+> ℹ️ **寫入型全端 issue（DM 第一個寫入功能）**：後端新增 `app/dm/editor`（建立 / 編輯 / 存草稿 / 送簽，寫 `DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` + 呼叫送審）+ 前端 DM08 表單。**組裝重用 #127 Foundation 既有工具**（DOC_ID 產生器 T017、file_store T016、ReviewService T019、authz T015、notify T018、catalog 轉接層、DB 約束），本 issue 不重造底層；**不含核准 / 發布**（屬 US6）、不含草稿匣列表 / 撤回（屬 US9）。
 
 **前置條件**：
 - **#127 Foundation（已交付合併）**：`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_DOC_TAG` / `DM_REVIEW` 表 + DB 約束（`UX_DM_DOCUMENT_MANUAL_FUNC` 手冊唯一、`UQ_DM_DOC_VERSION_DOC_NO` 版本號唯一、`UQ_DM_DOC_TAG_DOC_TAG`）；**DOC_ID 產生器 `document/docid.py`（T017：`next_doc_id` MAX+1、並發由 PK 擋、呼叫端重試）**、**檔案儲存 `document/file_store.py`（T016：`validate_upload` 大小 `DM_FILE_001` / 副檔名 `DM_FILE_002`、`is_previewable`）**、**送審狀態機 `review/service.py`（T019：`submit` 審核者≠撰寫者 `DM_REVIEW_001` / 單一 PENDING 閘門 `DM_REVIEW_002`）**、**授權 `roles/authz.py`（T015）**、**通知 `notify/service.py`（T018：`DmNotifier.notify` 送簽用 `DOC_SUBMIT` 範本）**、catalog 轉接層（受控 func / tag / audience 下拉來源）
@@ -412,15 +412,15 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ## 範圍
 
 **後端 — 新增模式（T035 / T035a，FR-001 / 009）** `app/dm/editor`（router → service → repository，寫入）：
-- `POST /api/dm/documents`：建立草稿文件——配 DOC_ID（`next_doc_id` + 唯一衝突重試）、寫 `DM_DOCUMENT`（STATUS=DRAFT、CREATED_USER=撰寫者）+ 首版 `DM_DOC_VERSION`（STATUS=DRAFT、版本號自行輸入）+ `DM_DOC_TAG`（可見對象 ≥1 + 檢索標籤）；必填檢核（名稱 / 分類 / 首版摘要）未填 → 422（訊息 DM-MSG-DM03-001）；可見對象 <1 → 422（DM-MSG-DM03-008）
+- `POST /api/dm/documents`：建立草稿文件——配 DOC_ID（`next_doc_id` + 唯一衝突重試）、寫 `DM_DOCUMENT`（STATUS=DRAFT、CREATED_USER=撰寫者）+ 首版 `DM_DOC_VERSION`（STATUS=DRAFT、版本號自行輸入）+ `DM_DOC_TAG`（可見對象 ≥1 + 檢索標籤）；必填檢核（名稱 / 分類 / 首版摘要）未填 → 422（訊息 DM-MSG-DM08-001）；可見對象 <1 → 422（DM-MSG-DM08-008）
 - 寫入操作注入 `OperatorInfo` 填 `CREATED_*`；CUD 於 Service 層寫 AuditLog
 
 **後端 — 編輯模式（T036，FR-003 / 004）**：
-- `POST /api/dm/documents/{doc_id}/versions`：對既有文件新增一版（STATUS=DRAFT）——身份欄（名稱 / 分類 / func）不接受變更（唯讀，只吃 檔案 / 摘要 / 標籤 / 審核者 / 版本號）；版本號非空 + 同文件不重複（DB `UQ_DM_DOC_VERSION_DOC_NO` + 應用層友善 DM-MSG-DM03-009）；廢止待簽核（該 doc 有 PENDING OBSOLETE review）→ 阻擋 DM-MSG-DM03-004
+- `POST /api/dm/documents/{doc_id}/versions`：對既有文件新增一版（STATUS=DRAFT）——身份欄（名稱 / 分類 / func）不接受變更（唯讀，只吃 檔案 / 摘要 / 標籤 / 審核者 / 版本號）；版本號非空 + 同文件不重複（DB `UQ_DM_DOC_VERSION_DOC_NO` + 應用層友善 DM-MSG-DM08-009）；廢止待簽核（該 doc 有 PENDING OBSOLETE review）→ 阻擋 DM-MSG-DM08-004
 - 存取控制：僅 DM_EDITOR 可寫（存取閘 + 角色判定）
 
 **後端 — func 唯一 + 上傳（T037 / T038，FR-002 / 005）**：
-- MANUAL 分類：func_name 必填單選 + **送簽 / 發布前唯一檢核**（查 DM_DOCUMENT：同 func_code 於 CATEGORY=MANUAL AND STATUS=PUBLISHED 無他份；DB `UX_DM_DOCUMENT_MANUAL_FUNC` 雙保險）→ 重複阻擋 DM-MSG-DM03-003
+- MANUAL 分類：func_name 必填單選 + **送簽 / 發布前唯一檢核**（查 DM_DOCUMENT：同 func_code 於 CATEGORY=MANUAL AND STATUS=PUBLISHED 無他份；DB `UX_DM_DOCUMENT_MANUAL_FUNC` 雙保險）→ 重複阻擋 DM-MSG-DM08-003
 - 上傳：`file_store.validate_upload`（單檔 ≤ `DM_FILE_MAX_MB` 預設 50MB、副檔名白名單）；回可預覽旗標（`is_previewable`）供前端 Office 警示；每版本單檔
 
 **後端 — 存草稿 + 送簽（T039，FR-006 / 007 / 008）**：
@@ -428,12 +428,12 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - `POST /api/dm/documents/{doc_id}/submit`：送簽——呼叫 `ReviewService.submit(review_type=NEW|NEW_VERSION, assigned_reviewer, author_id, version_id)`（內含審核者≠撰寫者 `DM_REVIEW_001`、單一 PENDING `DM_REVIEW_002`）；送簽前檢核 可見對象 ≥1 / 版本號 / func 唯一；成功 → 版本轉 PENDING_REVIEW、文件轉送審中（首版 PENDING_REVIEW；已發布文件之新版維持 PUBLISHED）、`DmNotifier.notify(DOC_SUBMIT)` 通知指定審核者
 - 指定審核者下拉來源：具 DM_REVIEWER 角色且排除本人
 
-**前端 — DM03 表單（T035~T039）** `frontend/src/dm/editor`：
+**前端 — DM08 表單（T035~T039）** `frontend/src/dm/editor`：
 - 雙模式頁（新增 `/dm/documents/new`、編輯 `/dm/documents/:docId/edit`）：新增全欄可填；編輯 名稱/分類/func 唯讀、預帶上版、顯示目前版本 + 新版號輸入
 - 分類選 MANUAL → 條件式顯示 func_name 單選；可見對象多選（必填 ≥1、含全體）；檢索標籤多選（模組/性質/法規，選填）
 - 版本號自行輸入（無系統建議）；變更摘要 label 依模式切「首版摘要 / 變更摘要」
-- 單檔上傳（拖拉）；Office 檔 → 橘色警示條 + Modal 提醒（DM-MSG-DM03-002），可續行或改傳
-- 指定審核者下拉（排除自己）；動作：儲存為草稿（DM-MSG-DM03-007）/ 送交簽核（DM-MSG-DM03-006）/ 取消（dirty 追蹤 → 二次確認 DM-MSG-DM03-005）
+- 單檔上傳（拖拉）；Office 檔 → 橘色警示條 + Modal 提醒（DM-MSG-DM08-002），可續行或改傳
+- 指定審核者下拉（排除自己）；動作：儲存為草稿（DM-MSG-DM08-007）/ 送交簽核（DM-MSG-DM08-006）/ 取消（dirty 追蹤 → 二次確認 DM-MSG-DM08-005）
 
 **測試**：
 - 後端 int：新增建 DOC_ID + 首版 + 標籤（可見對象 ≥1）；可見對象缺漏擋；編輯模式身份欄唯讀 + 版本號空 / 重複擋；MANUAL func 唯一擋；上傳大小 / 型別擋 + 可預覽旗標；送簽建 PENDING review + 通知 + 審核者≠撰寫者擋 + 已有 PENDING 擋；廢止待簽核擋新版本；存草稿不送簽
@@ -441,15 +441,15 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ## 驗收條件
 
-- [ ] 新增模式建立 DOC_ID（`DM-{分類碼}-{6位流水號}`、依分類獨立、草稿即配號）+ 首版；必填 名稱 / 分類 / 首版摘要，未填擋（FR-001、AC1/3、DM-MSG-DM03-001）
-- [ ] 可見對象 / 單位必填 ≥1（含「全體」）；送簽 / 發布前未掛則擋（FR-009、AC3a、DM-MSG-DM03-008）
-- [ ] 分類 MANUAL 額外單選 func_name；送簽 / 發布前檢核同 func 至多一份已發布手冊，重複擋（FR-002、AC2/7、DM-MSG-DM03-003）
+- [ ] 新增模式建立 DOC_ID（`DM-{分類碼}-{6位流水號}`、依分類獨立、草稿即配號）+ 首版；必填 名稱 / 分類 / 首版摘要，未填擋（FR-001、AC1/3、DM-MSG-DM08-001）
+- [ ] 可見對象 / 單位必填 ≥1（含「全體」）；送簽 / 發布前未掛則擋（FR-009、AC3a、DM-MSG-DM08-008）
+- [ ] 分類 MANUAL 額外單選 func_name；送簽 / 發布前檢核同 func 至多一份已發布手冊，重複擋（FR-002、AC2/7、DM-MSG-DM08-003）
 - [ ] 編輯模式 名稱 / 分類 / func 唯讀，僅可改 檔案 / 摘要 / 標籤 / 審核者 / 版號（FR-003、AC4）
-- [ ] 版本號撰寫者自行輸入、無系統建議；非空且同文件不重複，否則擋（FR-004、AC4a、DM-MSG-DM03-009）
-- [ ] 上傳支援 PDF/Word/Excel/PPT/圖片、單版本單檔、上限 `DM_FILE_MAX_MB`（預設 50MB）；非預覽 Office 跳提醒 + 橘色警示條，PDF/圖片不觸發（FR-005、AC5、DM-MSG-DM03-002）
+- [ ] 版本號撰寫者自行輸入、無系統建議；非空且同文件不重複，否則擋（FR-004、AC4a、DM-MSG-DM08-009）
+- [ ] 上傳支援 PDF/Word/Excel/PPT/圖片、單版本單檔、上限 `DM_FILE_MAX_MB`（預設 50MB）；非預覽 Office 跳提醒 + 橘色警示條，PDF/圖片不觸發（FR-005、AC5、DM-MSG-DM08-002）
 - [ ] 指定審核者下拉僅列審核者角色且排除本人（FR-006、AC6）
-- [ ] 支援存草稿（不送簽、可續編）；送簽轉送審中 + 建 PENDING `DM_REVIEW`（NEW/NEW_VERSION）+ 通知指定審核者（FR-007、AC8、DM-MSG-DM03-006/007）
-- [ ] 廢止待簽核時擋上傳新版本（不可兩送審週期並存）；取消有未存變更 → 二次確認（FR-008、AC9/10、DM-MSG-DM03-004/005）
+- [ ] 支援存草稿（不送簽、可續編）；送簽轉送審中 + 建 PENDING `DM_REVIEW`（NEW/NEW_VERSION）+ 通知指定審核者（FR-007、AC8、DM-MSG-DM08-006/007）
+- [ ] 廢止待簽核時擋上傳新版本（不可兩送審週期並存）；取消有未存變更 → 二次確認（FR-008、AC9/10、DM-MSG-DM08-004/005）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
 ## 依賴
@@ -464,7 +464,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - ⚠️ **送審週期衝突以 `DM_REVIEW` PENDING 判定**（非文件 STATUS）：已由 `ReviewService.submit` 之單一 PENDING 閘門（`DM_REVIEW_002` + DB partial unique `UX_DM_REVIEW_ONE_PENDING`）保證；廢止待簽核擋新版本亦同此判定。
 - ⚠️ **本 issue 不發布**：送簽只建 PENDING review + 轉送審中；核准 → PUBLISHED / SUPERSEDED 屬 US6。首版送審文件層 STATUS=PENDING_REVIEW，已發布文件之新版送審文件層維持 PUBLISHED（新版在版本層 PENDING_REVIEW）。
 - ⚠️ **DOC_ID 並發配號**：`next_doc_id` 為 MAX+1，同分類並發可能撞號 → 由 PK 擋、**本 issue 呼叫端須以重試（catch IntegrityError 重取號）處理**。
-- ⚠️ **func 唯一 / 版本號唯一雙層**：DB 約束為底、應用層先查給友善訊息（DM-MSG-DM03-003 / 009），並以 IntegrityError 為並發後盾。
+- ⚠️ **func 唯一 / 版本號唯一雙層**：DB 約束為底、應用層先查給友善訊息（DM-MSG-DM08-003 / 009），並以 IntegrityError 為並發後盾。
 - **檔案落盤**：`validate_upload` 僅驗大小 / 副檔名；實際 byte 落盤 + magic-bytes 驗真實型別屬部署 / 落盤層（見 #160 storage-root 圍籬 follow-up）。本 issue `FILE_PATH` 寫入策略須與落盤層一致（開工前 `/sti-plan` 對齊）。
 - **Error codes（開工前 `/sti-plan` 對齊）**：沿用 `DM_FILE_001/002`、`DM_REVIEW_001/002`；US5 新增之寫入專屬 code（必填缺漏 / 可見對象缺漏 / 版本號重複 / 身份欄唯讀違反 / 廢止待簽核擋）須登記 `docs/ref/error-codes.md`（比照 US4 `DM_DOC_00x`）。
 - **存草稿亦須附檔（現況）**：每版本單一檔案、`DM_DOC_VERSION.FILE_NAME/PATH/SIZE/MIME` 皆 NOT NULL；存草稿即建立版本列（首版 / 新版本）故**須先上傳檔案**，無檔草稿非現行支援（如需放寬須改 data-model 為 nullable，屬 SA 業務決定）。已發布文件必有檔（發布版即帶檔之版本列）。
@@ -481,16 +481,16 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #5：[P1-核心] DM — 簽核處理（US6 / UCDM07 / DM04）（GitHub [#178](https://github.com/sti-fhb/EDMS/issues/178)，✅ 已交付 PR #180）
+## Issue #5：[P1-核心] DM — 簽核處理（US6 / UCDM07 / DM02）（GitHub [#178](https://github.com/sti-fhb/EDMS/issues/178)，✅ 已交付 PR #180）
 
-**對應規格**：[spec_us6.md](spec_us6.md)（FR-001~008，UCDM07，訊息 DM-MSG-DM04-001~006）；[data-model.md](data-model.md)（`DM_REVIEW` / `DM_DOC_VERSION` 狀態機 / `DM_DOCUMENT` / `DM_CHANGE_LOG`）；research §4（單一送審週期）
-**對應畫面**：**DM04 簽核中心**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-review`）——待簽核 / 已完成雙頁籤、清單 + 明細、核准並發布 / 退回
+**對應規格**：[spec_us6.md](spec_us6.md)（FR-001~008，UCDM07，訊息 DM-MSG-DM02-001~006）；[data-model.md](data-model.md)（`DM_REVIEW` / `DM_DOC_VERSION` 狀態機 / `DM_DOCUMENT` / `DM_CHANGE_LOG`）；research §4（單一送審週期）
+**對應畫面**：**DM02 簽核中心**（[wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-review`）——待簽核 / 已完成雙頁籤、清單 + 明細、核准並發布 / 退回
 **階段**：P1-核心
 **涵蓋 Tasks**：T040~T044
 
 ## 任務說明
 
-實作 **DM04 簽核處理**：審核者於簽核中心處理**指派給自己**之送審，核准並發布（NEW 首版 / NEW_VERSION 新版本）或退回。核准發布原子完成版本切換（新版 PUBLISHED、舊版 SUPERSEDED、`CURRENT_VERSION_ID` 更新）、寫公開變更歷程、以 `DOC_PUBLISH` 通知撰寫者 + 可見對象相符閱覽者；退回必填原因、被退版本回草稿並 `DOC_REJECT` 通知撰寫者。停留逾門檻每日催辦；已完成頁籤回顧。組裝重用 #127 Foundation（`ReviewService.approve/reject`、`DmChangeLog`、`DOC_PUBLISH`/`DOC_REJECT`/`AUTO_REMIND` 範本、排程引擎、visibility）。
+實作 **DM02 簽核處理**：審核者於簽核中心處理**指派給自己**之送審，核准並發布（NEW 首版 / NEW_VERSION 新版本）或退回。核准發布原子完成版本切換（新版 PUBLISHED、舊版 SUPERSEDED、`CURRENT_VERSION_ID` 更新）、寫公開變更歷程、以 `DOC_PUBLISH` 通知撰寫者 + 可見對象相符閱覽者；退回必填原因、被退版本回草稿並 `DOC_REJECT` 通知撰寫者。停留逾門檻每日催辦；已完成頁籤回顧。組裝重用 #127 Foundation（`ReviewService.approve/reject`、`DmChangeLog`、`DOC_PUBLISH`/`DOC_REJECT`/`AUTO_REMIND` 範本、排程引擎、visibility）。
 
 > ℹ️ **範圍切分（precheck）**：交付 `NEW`/`NEW_VERSION` 之核准/退回/發布 + 催辦 + 已完成；**`OBSOLETE` 核准（待 US8）、AC7 撤回消失（待 US9）不在範圍**（`DM_REVIEW_006` 擋 OBSOLETE、清單亦排除）。
 
@@ -505,7 +505,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - `GET /api/dm/reviews/completed`：已完成（APPROVED/REJECTED、文件名 keyword、後端分頁、不可再操作）— FR-007
 - 催辦 job `reminder.run`：每日掃停留 ≥ `DM_REMIND_THRESHOLD` → `AUTO_REMIND` Email；註冊於 `DP_SCHEDULE` **`SCHDM002`**（每日 08:00，migration `a1c8e6f4b920`）— FR-006
 
-**前端** `frontend/src/dm/review`：DM04 雙頁籤；待簽核主從明細（點列 → 變更摘要 + 版本對照表〔版本/狀態/檔案/動作〕+ X 收合）+ 核准二次確認 + 退回 Dialog（原因必填、Zod）+ 停留天數標紅；已完成唯讀 + 文件名搜尋 + 分頁。
+**前端** `frontend/src/dm/review`：DM02 雙頁籤；待簽核主從明細（點列 → 變更摘要 + 版本對照表〔版本/狀態/檔案/動作〕+ X 收合）+ 核准二次確認 + 退回 Dialog（原因必填、Zod）+ 停留天數標紅；已完成唯讀 + 文件名搜尋 + 分頁。
 
 **測試**：後端 int（清單只列自己 PENDING / 核准原子切換 / 退回回 DRAFT + 通知 / 已完成搜尋分頁 / 收件名單全體+指定 / 催辦掃描 / 授權 / 取檔白名單 / HTTP）+ 前端（雙頁籤 / 核准二次確認 / 退回必填 / 停留標紅 / 明細下載）。
 
@@ -513,8 +513,8 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 - [x] 待簽核僅列 `assigned_reviewer=登入者` 之 PENDING、不列指定審核者欄（FR-001）
 - [x] 明細可下載送審檔（新版本新舊並列）、不預覽（FR-002）
-- [x] 核准並發布（NEW/NEW_VERSION）二次確認後原子完成：新版 PUBLISHED + 舊版 SUPERSEDED + `CURRENT_VERSION_ID` + `DM_CHANGE_LOG(PUBLISH)` + `DOC_PUBLISH`（FR-003/005/008、DM-MSG-DM04-001）
-- [x] 退回必填原因 → 被退版本回 DRAFT、通知撰寫者（FR-004/005、DM-MSG-DM04-004/005）
+- [x] 核准並發布（NEW/NEW_VERSION）二次確認後原子完成：新版 PUBLISHED + 舊版 SUPERSEDED + `CURRENT_VERSION_ID` + `DM_CHANGE_LOG(PUBLISH)` + `DOC_PUBLISH`（FR-003/005/008、DM-MSG-DM02-001）
+- [x] 退回必填原因 → 被退版本回 DRAFT、通知撰寫者（FR-004/005、DM-MSG-DM02-004/005）
 - [x] 已完成頁籤搜尋分頁、不可再操作（FR-007）
 - [x] 催辦：停留 ≥ `DM_REMIND_THRESHOLD` 每日 `AUTO_REMIND` + 清單標紅（FR-006）
 - [x] 僅指定審核者本人可核准/退回；核准者自 Session（FR-005、`DM_REVIEW_005`）
@@ -598,16 +598,16 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #7：[P2-延伸] DM — 文件廢止申請（US8 / UCDM05 / DM02）（GitHub [#206](https://github.com/sti-fhb/EDMS/issues/206)）
+## Issue #7：[P2-延伸] DM — 文件廢止申請（US8 / UCDM05 / DM07）（GitHub [#206](https://github.com/sti-fhb/EDMS/issues/206)）
 
-**對應規格**：[spec_us8.md](spec_us8.md)（FR-001~005，UCDM05，訊息 DM-MSG-DM02-011~015）；[data-model.md](data-model.md)（`DM_DOCUMENT` 狀態機 PENDING_OBSOLETE / OBSOLETE、`DM_REVIEW`（REVIEW_TYPE=OBSOLETE + `OBSOLETE_FILE_*`）、`DM_CHANGE_LOG`（OPERATION=OBSOLETE））
-**對應畫面**：DM02 文件詳細頁（[DmDetailPage](../../../frontend/src/dm/detail/DmDetailPage.tsx)）之「廢止此文件」→ 廢止申請確認 modal（內容示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `openObsoleteModal`：必填廢止原因 + 選填單檔附件 + 選指定審核者）；已廢止後之 read-only banner（申請人 / 核准者 / 原因 / 附件）由 DM02 呈現
+**對應規格**：[spec_us8.md](spec_us8.md)（FR-001~005，UCDM05，訊息 DM-MSG-DM07-011~015）；[data-model.md](data-model.md)（`DM_DOCUMENT` 狀態機 PENDING_OBSOLETE / OBSOLETE、`DM_REVIEW`（REVIEW_TYPE=OBSOLETE + `OBSOLETE_FILE_*`）、`DM_CHANGE_LOG`（OPERATION=OBSOLETE））
+**對應畫面**：DM07 文件詳細頁（[DmDetailPage](../../../frontend/src/dm/detail/DmDetailPage.tsx)）之「廢止此文件」→ 廢止申請確認 modal（內容示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `openObsoleteModal`：必填廢止原因 + 選填單檔附件 + 選指定審核者）；已廢止後之 read-only banner（申請人 / 核准者 / 原因 / 附件）由 DM07 呈現
 **階段**：P2-延伸
 **涵蓋 Tasks**：T047（廢止申請對話框：必填原因 + 選填附件 + 選審核者 + 轉 PENDING_OBSOLETE 並通知）、T048（廢止待簽核行為：仍在架可下載、阻擋同時新版本送審、核准 / 退回）
 
 ## 任務說明
 
-實作**整份文件廢止申請**（編輯者由 DM02 發起）：必填廢止原因、選填單檔附件（格式 / 大小比照文件上傳）、選指定審核者（排除本人）→ 文件轉 **PENDING_OBSOLETE（廢止待簽核）** 並通知審核者。廢止待簽核期間**原發布版本仍持續對外**（在文件庫、可下載），至核准後才正式下架。核准 → 文件 **OBSOLETE（已廢止）** + 版本歷程末尾新增廢止紀錄（申請人 / 申請時間 / 原因 / 廢止附件（如有）/ 核准者 / 廢止時間）並通知撰寫者；退回 → 文件回 **PUBLISHED（已發布）** 並通知撰寫者。撤回交由 US9。
+實作**整份文件廢止申請**（編輯者由 DM07 發起）：必填廢止原因、選填單檔附件（格式 / 大小比照文件上傳）、選指定審核者（排除本人）→ 文件轉 **PENDING_OBSOLETE（廢止待簽核）** 並通知審核者。廢止待簽核期間**原發布版本仍持續對外**（在文件庫、可下載），至核准後才正式下架。核准 → 文件 **OBSOLETE（已廢止）** + 版本歷程末尾新增廢止紀錄（申請人 / 申請時間 / 原因 / 廢止附件（如有）/ 核准者 / 廢止時間）並通知撰寫者；退回 → 文件回 **PUBLISHED（已發布）** 並通知撰寫者。撤回交由 US9。
 
 > ⚠️ **本 issue 需延伸 US6（#178 已交付）之簽核處理**：US6 目前以 `DM_REVIEW_006`「廢止類送審之簽核暫未支援（待 US8）」在 [center_service.py](../../../backend/app/dm/review/center_service.py) `_ensure_actionable` **直接擋掉 OBSOLETE 的核准 / 退回**（同時 review 清單 repository 也排除 OBSOLETE）。spec_us8 FR-005 雖寫「核准 / 退回交由 US6」，但該路徑實為 stub——**US8 必須解除此封鎖並實作 OBSOLETE 核准 / 退回**（含版本歷程廢止紀錄與文件狀態轉換），此為本 issue 淨新增、非 US6 已完成之工作。
 
@@ -615,9 +615,9 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 **後端**（`app/dm`，router → service → repository）：
 - **T047 發起廢止**（FR-001/002）：新增發起端點（如 `POST /api/dm/documents/{doc_id}/obsolete`），掛 `get_dm_context` + 編輯者權限：
-  - **必填廢止原因**（缺 → DM-MSG-DM02-011）；**必選指定審核者**（缺 → DM-MSG-DM02-014）、**排除撰寫者本人**（重用 `ensure_reviewer_not_author` → `DM_REVIEW_001`）。
-  - **選填單檔附件**：格式 / 大小比照文件上傳，重用 [file_store](../../../backend/app/dm/document/file_store.py) `validate_upload`（違規 → `DM_FILE_001` / `DM_FILE_002`，對映 DM-MSG-DM02-015）+ 落地經 **storage-root fence（#160）** `resolve_within_root`，存 `DM_REVIEW.OBSOLETE_FILE_*`（T010 已建欄位）。
-  - 重用 `ReviewService.submit(review_type="OBSOLETE", version_id=current_version_id, reason=...)` 建立送審週期；**阻擋同時新版本送審**由「一文件至多一筆 PENDING」唯一索引天然涵蓋（→ `DM_REVIEW_002`，對映 DM-MSG-DM02-012，FR-004）；成功後文件轉 **PENDING_OBSOLETE**、以 `DmNotifier` 通知審核者，回 DM-MSG-DM02-013。
+  - **必填廢止原因**（缺 → DM-MSG-DM07-011）；**必選指定審核者**（缺 → DM-MSG-DM07-014）、**排除撰寫者本人**（重用 `ensure_reviewer_not_author` → `DM_REVIEW_001`）。
+  - **選填單檔附件**：格式 / 大小比照文件上傳，重用 [file_store](../../../backend/app/dm/document/file_store.py) `validate_upload`（違規 → `DM_FILE_001` / `DM_FILE_002`，對映 DM-MSG-DM07-015）+ 落地經 **storage-root fence（#160）** `resolve_within_root`，存 `DM_REVIEW.OBSOLETE_FILE_*`（T010 已建欄位）。
+  - 重用 `ReviewService.submit(review_type="OBSOLETE", version_id=current_version_id, reason=...)` 建立送審週期；**阻擋同時新版本送審**由「一文件至多一筆 PENDING」唯一索引天然涵蓋（→ `DM_REVIEW_002`，對映 DM-MSG-DM07-012，FR-004）；成功後文件轉 **PENDING_OBSOLETE**、以 `DmNotifier` 通知審核者，回 DM-MSG-DM07-013。
 - **T048 廢止待簽核行為 + 核准 / 退回**（FR-003/005）：
   - **仍對外**（FR-003）：驗證 PENDING_OBSOLETE 於文件庫（US3）/ 詳細頁（US4）仍列出且目前版本可下載（既有在架集合已含 PENDING_OBSOLETE，本 issue 驗證不回歸）。
   - **解除 US6 之 OBSOLETE 封鎖**：移除 / 改寫 `_ensure_actionable` 的 `DM_REVIEW_006` 分支與 review repository 對 OBSOLETE 的排除，實作：
@@ -626,16 +626,16 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
   - **撤回**：範圍外，交由 US9。
 
 **前端**（`frontend/src/dm/detail` 廢止申請 modal + 落地入口）：
-- DM02「廢止此文件」（`detail.is_editor && detail.can_edit`）目前 `navigate` 到 `/dm/documents/:docId/obsolete`（**router 尚無此路由**）。US8 落地此流程——依 spec / wireframe 為**確認 modal**（必填原因 + 選填單檔附件 + 選指定審核者），Zod 驗證（原因必填、附件格式 / 大小），送出成功 → toast DM-MSG-DM02-013 並回文件庫 / 刷新詳細頁為廢止待簽核。**設計取向傾向 dialog（對齊 wireframe `openObsoleteModal`、免新增 route）**，最終落地方式（dialog vs 新增 page 路由）於 `/sti-plan` 定案。
-- 已廢止後之 read-only banner（申請人 / 核准者 / 原因 / 附件提示）DM02 已具備 `obsolete_info` 呈現，本 issue 提供其資料來源。
+- DM07「廢止此文件」（`detail.is_editor && detail.can_edit`）目前 `navigate` 到 `/dm/documents/:docId/obsolete`（**router 尚無此路由**）。US8 落地此流程——依 spec / wireframe 為**確認 modal**（必填原因 + 選填單檔附件 + 選指定審核者），Zod 驗證（原因必填、附件格式 / 大小），送出成功 → toast DM-MSG-DM07-013 並回文件庫 / 刷新詳細頁為廢止待簽核。**設計取向傾向 dialog（對齊 wireframe `openObsoleteModal`、免新增 route）**，最終落地方式（dialog vs 新增 page 路由）於 `/sti-plan` 定案。
+- 已廢止後之 read-only banner（申請人 / 核准者 / 原因 / 附件提示）DM07 已具備 `obsolete_info` 呈現，本 issue 提供其資料來源。
 
 **測試**：後端 int（發起 → PENDING_OBSOLETE + 通知；缺原因 / 缺審核者 / 選自己 / 附件格式或大小違規之錯誤；新版本送審中發起廢止被擋；PENDING_OBSOLETE 仍列於文件庫且目前版可下載；核准 → OBSOLETE + 版本歷程廢止紀錄 + 通知撰寫者；退回 → PUBLISHED + 通知；HTTP 401/403）+ 前端（廢止 modal 必填原因驗證、附件選填、送出成功 toast、無編輯權時不顯示入口）。
 
 ## 驗收條件
 
-- [ ] 編輯者由 DM02 發起廢止：必填原因（缺 → DM-MSG-DM02-011）、選填單檔附件（格式 / 大小比照上傳，違規 → DM-MSG-DM02-015）、選審核者（缺 → DM-MSG-DM02-014、排除自己 → `DM_REVIEW_001`）（FR-001/002）
-- [ ] 送出成功 → 文件轉 PENDING_OBSOLETE、通知指定審核者、回 DM-MSG-DM02-013（FR-002）
-- [ ] 新版本送審進行中無法同時發起廢止（一文件一 PENDING）→ DM-MSG-DM02-012（`DM_REVIEW_002`，FR-004）
+- [ ] 編輯者由 DM07 發起廢止：必填原因（缺 → DM-MSG-DM07-011）、選填單檔附件（格式 / 大小比照上傳，違規 → DM-MSG-DM07-015）、選審核者（缺 → DM-MSG-DM07-014、排除自己 → `DM_REVIEW_001`）（FR-001/002）
+- [ ] 送出成功 → 文件轉 PENDING_OBSOLETE、通知指定審核者、回 DM-MSG-DM07-013（FR-002）
+- [ ] 新版本送審進行中無法同時發起廢止（一文件一 PENDING）→ DM-MSG-DM07-012（`DM_REVIEW_002`，FR-004）
 - [ ] 廢止待簽核期間文件仍列於文件庫且目前版本可下載（FR-003）
 - [ ] 核准 → 文件 OBSOLETE + 版本歷程末尾廢止紀錄（申請人 / 申請時間 / 原因 / 附件 / 核准者 / 廢止時間）+ 通知撰寫者（FR-005）
 - [ ] 退回 → 文件回 PUBLISHED + 通知撰寫者（FR-005）
@@ -645,7 +645,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ## 依賴
 
 - **#127 Foundation（已交付）**：`DM_REVIEW`（REVIEW_TYPE=OBSOLETE + `OBSOLETE_FILE_*`，T010 migration 已建）、`DM_CHANGE_LOG`、file_store、**storage-root fence（#160）**、`DmNotifier`、狀態機
-- **#155 US4 詳細頁（已交付）**：廢止發起入口（DM02「廢止此文件」）與已廢止 read-only banner（`obsolete_info`）
+- **#155 US4 詳細頁（已交付）**：廢止發起入口（DM07「廢止此文件」）與已廢止 read-only banner（`obsolete_info`）
 - **#178 US6 簽核處理（已交付，本 issue 需延伸）**：`ReviewService.submit` / 簽核中心核准 / 退回骨架——US8 解除其 `DM_REVIEW_006` OBSOLETE 封鎖並補實作核准 / 退回
 - **#169 US5（已交付）**：`file_store` 上傳驗證慣例（格式 / 大小）沿用於廢止附件
 
@@ -653,9 +653,9 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 - ⚠️ **延伸 US6（非新模組）**：核准 / 退回落在既有簽核中心流程；務必移除 `center_service._ensure_actionable` 的 `DM_REVIEW_006` 分支與 review repository 對 OBSOLETE 的排除，並同步更新 [error-codes.md](../../ref/error-codes.md) `DM_REVIEW_006` 描述（不再「待 US8」，或改標記為已停用）。
 - ⚠️ **廢止附件走 storage-root fence（#160）**：`OBSOLETE_FILE_PATH` 落地 / 讀取一律經 `resolve_within_root`，fail-closed。
-- **FR-004 由唯一索引天然涵蓋**：「一文件至多一筆 PENDING」（`UX_DM_REVIEW_ONE_PENDING`）已擋同時新版本送審 + 廢止；前端訊息對映 DM-MSG-DM02-012、後端沿用 `DM_REVIEW_002`。
-- **缺原因 / 缺審核者之 error_code**：DM-MSG-DM02-011 / 014 對應之後端 error_code 於 `/sti-plan` 定（可能新增 `DM_DOC_0xx` 或比照 `DM_DOC_004` 必填欄位樣式）；附件違規重用 `DM_FILE_001` / `DM_FILE_002`、選自己重用 `DM_REVIEW_001`、並發送審重用 `DM_REVIEW_002`。
-- **前端入口路由**：DM02 現有 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由；US8 落地時決定改 dialog（傾向）或補 page 路由（`/sti-plan` 定案）。
+- **FR-004 由唯一索引天然涵蓋**：「一文件至多一筆 PENDING」（`UX_DM_REVIEW_ONE_PENDING`）已擋同時新版本送審 + 廢止；前端訊息對映 DM-MSG-DM07-012、後端沿用 `DM_REVIEW_002`。
+- **缺原因 / 缺審核者之 error_code**：DM-MSG-DM07-011 / 014 對應之後端 error_code 於 `/sti-plan` 定（可能新增 `DM_DOC_0xx` 或比照 `DM_DOC_004` 必填欄位樣式）；附件違規重用 `DM_FILE_001` / `DM_FILE_002`、選自己重用 `DM_REVIEW_001`、並發送審重用 `DM_REVIEW_002`。
+- **前端入口路由**：DM07 現有 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由；US8 落地時決定改 dialog（傾向）或補 page 路由（`/sti-plan` 定案）。
 - **版本歷程廢止紀錄**：核准後於版本歷程末尾呈現，非新增版本列；欄位取自 `DM_REVIEW`（申請人 `CREATED_USER` / `SUBMIT_DATE` / `REASON` / `OBSOLETE_FILE_*` / `APPROVER_USER_ID` / `COMPLETE_DATE`）。
 
 ## 相關文件
@@ -667,17 +667,17 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #8：[P2-延伸] DM — 個人專區（US9 / UCDM09 / DM07）（GitHub [#219](https://github.com/sti-fhb/EDMS/issues/219)）
+## Issue #8：[P2-延伸] DM — 個人專區（US9 / UCDM09 / DM04）（GitHub [#219](https://github.com/sti-fhb/EDMS/issues/219)）
 
-**對應規格**：[spec_us9.md](spec_us9.md)（FR-001~004，UCDM09，訊息 DM-MSG-DM07-004/005）；[data-model.md](data-model.md)（`DM_DOC_VERSION` 草稿狀態、`DM_REVIEW`（PENDING→WITHDRAWN 撤回、REVIEW_TYPE 決定撤回回復狀態）、`DM_USER_ROLE` 角色判定）
-**對應畫面**：DM07 個人專區（左側 DM 功能列之個人工作區；示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-personal`：草稿匣 / 撤回送審 / 我的文件動態三塊）——**入口僅對具編輯者或審核者角色者顯示**
+**對應規格**：[spec_us9.md](spec_us9.md)（FR-001~004，UCDM09，訊息 DM-MSG-DM04-004/005）；[data-model.md](data-model.md)（`DM_DOC_VERSION` 草稿狀態、`DM_REVIEW`（PENDING→WITHDRAWN 撤回、REVIEW_TYPE 決定撤回回復狀態）、`DM_USER_ROLE` 角色判定）
+**對應畫面**：DM04 個人專區（左側 DM 功能列之個人工作區；示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-personal`：草稿匣 / 撤回送審 / 我的文件動態三塊）——**入口僅對具編輯者或審核者角色者顯示**
 **階段**：P2-延伸
 **涵蓋 Tasks**：T050（草稿匣）、T051（撤回送審）、T052（我的文件動態 + 個人專區入口可見性）。**T049（個人資料維護）已廢除**——姓名 / Email / 密碼變更由平台 DP 提供（UCDP004、右上使用者選單、共用 `DP_USER`），DM 不自建個資畫面。
 
 ## 任務說明
 
 實作**編輯者 / 審核者之個人工作區**（DM 左側功能列），含三塊 DM 業務：
-- **草稿匣**（FR-001，編輯者）：列未送審 / 被退回待修改 / 已撤回三類草稿；「繼續編輯 / 修改」進 US5（DM03），「刪除」須確認（DM-MSG-DM07-004、不可復原、僅影響草稿不動已發布版本）。
+- **草稿匣**（FR-001，編輯者）：列未送審 / 被退回待修改 / 已撤回三類草稿；「繼續編輯 / 修改」進 US5（DM08），「刪除」須確認（DM-MSG-DM04-004、不可復原、僅影響草稿不動已發布版本）。
 - **撤回送審**（FR-002，編輯者）：把卡住之送審撤回——新增 / 新版本 → 版本回草稿；廢止 → 文件回已發布；以**站內訊息**通知原指派審核者（不發 Email）；可重新編輯並改選新審核者再送；原送審週期之指定審核者紀錄保留不改寫。
 - **我的文件動態**（FR-003）：依角色 tab 呈現近 30 天事件（撰寫者視角：送審中 / 核准發布 / 退回 / 廢止待簽核 / 已廢止 / 已撤回；審核者視角：待處理 / 催辦中 / 已被撤回 / 已處理歷史）；兼具兩角色者兩 tab 皆顯示。
 - **入口可見性**（FR-004）：僅具**編輯者或審核者**角色者於左側見「個人專區」；純閱覽者 / 純管理者不顯示。
@@ -692,7 +692,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - **T052 我的文件動態**（FR-003）：`GET` 近 30 天事件，依角色（撰寫者 / 審核者）分視角回傳；資料來源 `DM_REVIEW` / `DM_CHANGE_LOG` / `DM_DOC_VERSION`。**入口可見性**（FR-004）：後端提供「具編輯者或審核者」判定（供 DP 依權限側欄 `has_any_role` 回呼 / 前端渲染）。
 - 存取：掛 `get_dm_context`；撤回 / 草稿刪除為寫入型（`get_operator` + 本人校驗 + 稽核）。
 
-**前端**（`frontend/src/dm/me` DM07 頁）：三區塊（草稿匣清單 + 續編/刪除、撤回送審動作、我的文件動態角色 tab）；掛左側功能列、**入口依「具編輯者或審核者」條件渲染**（對齊 #89 依權限側欄）；刪除確認（DM-MSG-DM07-004）、撤回成功 toast（DM-MSG-DM07-005）。`DmPersonalPage` 現為 stub、於本 issue 填實。
+**前端**（`frontend/src/dm/me` DM04 頁）：三區塊（草稿匣清單 + 續編/刪除、撤回送審動作、我的文件動態角色 tab）；掛左側功能列、**入口依「具編輯者或審核者」條件渲染**（對齊 #89 依權限側欄）；刪除確認（DM-MSG-DM04-004）、撤回成功 toast（DM-MSG-DM04-005）。`DmPersonalPage` 現為 stub、於本 issue 填實。
 
 **測試**：後端 int（草稿匣三類分類正確、刪除軟刪且不影響已發布、撤回各 review_type 狀態回復 + 站內訊息 + 保留原審核者、我的文件動態近 30 天 / 角色視角、入口可見性授權、HTTP 401/403）+ 前端（草稿匣三類渲染 / 續編導向 / 刪除確認、撤回 toast、動態 tab、無編輯/審核角色不顯示入口）。
 
@@ -700,8 +700,8 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 - [ ] 個人專區入口僅對具編輯者或審核者角色者顯示；純閱覽 / 純管理不顯示（FR-004、AC1）
 - [ ] 草稿匣列未送審 / 被退回 / 已撤回三類（FR-001、AC2）
-- [ ] 草稿「繼續編輯」進 US5；「刪除」須確認、軟刪、不影響已發布版本（FR-001、AC3、DM-MSG-DM07-004）
-- [ ] 撤回送審：NEW / NEW_VERSION → 草稿、OBSOLETE → 已發布；站內訊息通知原審核者；原審核者紀錄保留；可改選新審核者再送（FR-002、AC4、DM-MSG-DM07-005）
+- [ ] 草稿「繼續編輯」進 US5；「刪除」須確認、軟刪、不影響已發布版本（FR-001、AC3、DM-MSG-DM04-004）
+- [ ] 撤回送審：NEW / NEW_VERSION → 草稿、OBSOLETE → 已發布；站內訊息通知原審核者；原審核者紀錄保留；可改選新審核者再送（FR-002、AC4、DM-MSG-DM04-005）
 - [ ] 我的文件動態依角色 tab 呈現近 30 天事件；兼具兩角色者兩 tab 皆顯示（FR-003、AC5）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
@@ -730,55 +730,55 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #9：[P2-延伸] DM — 已廢止文件查詢（US10 / UCDM08 / DM06）（GitHub [#230](https://github.com/sti-fhb/EDMS/issues/230)，🚀 已開立）
+## Issue #9：[P2-延伸] DM — 已廢止文件查詢（US10 / UCDM08 / DM03）（GitHub [#230](https://github.com/sti-fhb/EDMS/issues/230)，🚀 已開立）
 
-**對應規格**：[spec_us10.md](spec_us10.md)（FR-001~005，UCDM08，訊息 DM-MSG-DM06-001/002）；[data-model.md](data-model.md)（`DM_DOCUMENT`（STATUS=OBSOLETE）、`DM_DOC_VERSION`（末版版號）、`DM_REVIEW`（OBSOLETE 已核准週期：申請人 / 核准者 / 廢止時間 / 廢止原因 / 廢止附件）、`DM_USER_ROLE`（DM_ADMIN 判定））
-**對應畫面**：DM06 已廢止文件查詢（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-obsolete`）——**入口與後端皆僅 DM_ADMIN 可存取**
+**對應規格**：[spec_us10.md](spec_us10.md)（FR-001~005，UCDM08，訊息 DM-MSG-DM03-001/002）；[data-model.md](data-model.md)（`DM_DOCUMENT`（STATUS=OBSOLETE）、`DM_DOC_VERSION`（末版版號）、`DM_REVIEW`（OBSOLETE 已核准週期：申請人 / 核准者 / 廢止時間 / 廢止原因 / 廢止附件）、`DM_USER_ROLE`（DM_ADMIN 判定））
+**對應畫面**：DM03 已廢止文件查詢（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-obsolete`）——**入口與後端皆僅 DM_ADMIN 可存取**
 **階段**：P2-延伸
 **涵蓋 Tasks**：T053（已廢止查詢清單 + 搜尋）、T054（CSV 匯出 + read-only 詳細頁導向 + 入口 / 存取閘）
 
 ## 任務說明
 
-實作 **DM06 已廢止文件查詢**（管理者，供稽核 / 醫療糾紛追溯 / 法規查核）：DM_ADMIN 以關鍵字（文件名 / 廢止原因）、分類、廢止日期區間搜尋**已廢止（STATUS=OBSOLETE）**文件，清單呈現廢止脈絡欄位，點列進入 **US4 read-only 詳細頁**檢視歷史版本，並可**匯出 CSV** 供封存。已廢止文件不出現於文件庫主清單（US3 已排除），一般使用者無法存取。
+實作 **DM03 已廢止文件查詢**（管理者，供稽核 / 醫療糾紛追溯 / 法規查核）：DM_ADMIN 以關鍵字（文件名 / 廢止原因）、分類、廢止日期區間搜尋**已廢止（STATUS=OBSOLETE）**文件，清單呈現廢止脈絡欄位，點列進入 **US4 read-only 詳細頁**檢視歷史版本，並可**匯出 CSV** 供封存。已廢止文件不出現於文件庫主清單（US3 已排除），一般使用者無法存取。
 
-> ℹ️ **讀取型全端 issue**：後端為唯讀查詢 + CSV 匯出；**read-only 詳細頁（US4 FR-006：隱藏檔案+文件資訊、版本歷程自動展開、僅預覽、廢止 banner + 廢止附件下載）已於 #3 交付、本 issue 直接重用**，不改動 DM02 瀏覽語意。本 issue 不產生廢止（廢止申請 / 核准屬 US8 / US6）。
+> ℹ️ **讀取型全端 issue**：後端為唯讀查詢 + CSV 匯出；**read-only 詳細頁（US4 FR-006：隱藏檔案+文件資訊、版本歷程自動展開、僅預覽、廢止 banner + 廢止附件下載）已於 #3 交付、本 issue 直接重用**，不改動 DM07 瀏覽語意。本 issue 不產生廢止（廢止申請 / 核准屬 US8 / US6）。
 
 ## 範圍
 
 **後端**（新模組 `app/dm/obsolete_archive/`〔暫名，開工時定〕，router → service → repository；與 US8 廢止申請之 `app/dm/obsolete/` 分離——一為查詢、一為寫入）：
 - **T053 查詢清單**（FR-002/003）：`GET /api/dm/obsolete-archive/documents`——列 STATUS=OBSOLETE 文件，搜尋條件：關鍵字（`DM_DOCUMENT.DOC_NAME` / 廢止原因 `DM_REVIEW.OBSOLETE_REASON`）、分類、廢止日期區間（廢止核准完成時間 `DM_REVIEW.COMPLETE_DATE`）。回欄位（FR-003）：文件名稱（含末版版號）/ 分類 / 原撰寫者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因。資料來源＝`DM_DOCUMENT` join `DM_DOC_VERSION`（末版）join `DM_REVIEW`（該文件 OBSOLETE 且 APPROVED 之週期）。後端分頁 `paginate()`（依廢止時間新→舊）。
 - **T054 CSV 匯出**（FR-005）：`GET /api/dm/obsolete-archive/documents/export`——依相同查詢條件回 CSV（欄位同清單），供稽核封存。
-- **存取閘**（FR-001）：兩端點皆掛 `get_dm_context` + **細粒度 `DM_ADMIN` 檢核**（非管理者 → 403，對應 DM-MSG-DM06-002）；**後端 MUST 擋直接 URL 存取**、非僅前端隱藏。查無結果回空清單（前端呈現 DM-MSG-DM06-001）。
+- **存取閘**（FR-001）：兩端點皆掛 `get_dm_context` + **細粒度 `DM_ADMIN` 檢核**（非管理者 → 403，對應 DM-MSG-DM03-002）；**後端 MUST 擋直接 URL 存取**、非僅前端隱藏。查無結果回空清單（前端呈現 DM-MSG-DM03-001）。
 - **入口可見性判定**：提供 DM_ADMIN 判定供前端側欄 per-item 閘（資料來源待 SA 定案，見注意事項）。
 
-**前端**（`frontend/src/dm/obsolete/DmObsoletePage.tsx` 現為 stub、於本 issue 填實）：DM06 查詢頁——搜尋列（關鍵字 / 分類 / 廢止日期區間）+ 結果清單（FR-003 欄位）+「匯出 CSV」鈕；點列導向 `/dm/documents/{docId}`（US4 read-only 詳細頁，已支援 OBSOLETE）；空結果提示 DM-MSG-DM06-001。側欄「已廢止文件查詢」項**僅 DM_ADMIN 顯示**（per-item 角色閘，比照 US9 個人專區入口機制）。
+**前端**（`frontend/src/dm/obsolete/DmObsoletePage.tsx` 現為 stub、於本 issue 填實）：DM03 查詢頁——搜尋列（關鍵字 / 分類 / 廢止日期區間）+ 結果清單（FR-003 欄位）+「匯出 CSV」鈕；點列導向 `/dm/documents/{docId}`（US4 read-only 詳細頁，已支援 OBSOLETE）；空結果提示 DM-MSG-DM03-001。側欄「已廢止文件查詢」項**僅 DM_ADMIN 顯示**（per-item 角色閘，比照 US9 個人專區入口機制）。
 
 **測試**：後端 int（DM_ADMIN 查得已廢止清單、關鍵字 / 分類 / 廢止日期區間過濾、欄位正確含末版版號與廢止脈絡、CSV 匯出內容、非 DM_ADMIN 403〔清單 + 匯出 + 直連〕、未登入 401、查無回空）+ 前端（查詢渲染 / 空結果提示 / 匯出鈕 / 點列導向 read-only 詳細、非管理者不顯示入口）。
 
 ## 驗收條件
 
-- [ ] DM06 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直接 URL 存取**（FR-001、AC1/AC6、DM-MSG-DM06-002）
+- [ ] DM03 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直接 URL 存取**（FR-001、AC1/AC6、DM-MSG-DM03-002）
 - [ ] 可依關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間查詢已廢止文件（FR-002、AC2）
 - [ ] 清單欄位含文件名稱（含末版版號）/ 分類 / 原撰寫者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因（FR-003、AC3）
 - [ ] 點任一筆進入 US4 read-only 詳細頁（隱藏檔案+文件資訊、版本歷程自動展開、僅預覽、廢止 banner + 廢止附件下載）（FR-004、AC4；重用 #3）
 - [ ] 支援 CSV 匯出當前查詢結果（FR-005、AC5）
-- [ ] 查無結果顯示 DM-MSG-DM06-001（FR-002）
+- [ ] 查無結果顯示 DM-MSG-DM03-001（FR-002）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
 ## 依賴
 
 - **#3 US4（已交付）**：read-only 詳細頁模式（FR-006：OBSOLETE read-only + 廢止 banner + 廢止附件下載）——本 issue 之點列去向直接重用，不重建
 - **#5 US6（已交付）/ #7 US8（已交付）**：已廢止文件之來源（廢止申請 → 核准）；`DM_REVIEW` OBSOLETE 已核准週期之申請人 / 核准者 / 時間 / 原因 / 附件
-- **#2 US3（已交付）**：文件庫已排除 OBSOLETE、確保已廢止文件僅由 DM06 查閱
+- **#2 US3（已交付）**：文件庫已排除 OBSOLETE、確保已廢止文件僅由 DM03 查閱
 - **#127 Foundation（已交付）**：`DM_USER_ROLE`（DM_ADMIN 判定）、`DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_REVIEW`
-- **DP #89 導覽重構（已落地）**：依權限側欄——DM06 入口掛其上（per-item DM_ADMIN 閘）
+- **DP #89 導覽重構（已落地）**：依權限側欄——DM03 入口掛其上（per-item DM_ADMIN 閘）
 
 ## 注意事項
 
 - **入口 / 存取閘為 DM_ADMIN**（與 US9 個人專區「編輯者或審核者」不同閘）：FR-001 要求**後端擋直連**，非僅前端隱藏；細粒度授權以 `has_role(ctx.roles, DM_ADMIN)` 判定。
 - **per-item 側欄角色閘資料來源**（待 SA 定案，同 US9 SA Q1 脈絡）：DM-local 判定端點（如 `GET /api/dm/obsolete-archive/access` → `{ can_access }`，不動 DP module-summary）vs 擴充 DP `module-summary` 帶 DM 角色細節（`is_admin` 等）——US9 採前者（A 過渡），本 issue 沿用或收斂由 `/sti-plan` 提請 SA。
 - **模組分離**：US8 廢止**申請**（寫入）已在 `app/dm/obsolete/`；本 issue 為廢止**查詢**（唯讀），另立模組避免讀寫混雜、命名勿衝突。
-- **read-only 詳細頁不重建**：US4 FR-006 已實作（`dm/detail` 之 `is_obsolete` / `obsolete_info` + 版本歷程自動展開 + 廢止附件下載授權含 DM_ADMIN）；本 issue 僅導向、不改 DM02。
+- **read-only 詳細頁不重建**：US4 FR-006 已實作（`dm/detail` 之 `is_obsolete` / `obsolete_info` + 版本歷程自動展開 + 廢止附件下載授權含 DM_ADMIN）；本 issue 僅導向、不改 DM07。
 - **CSV 匯出**：欄位對齊清單；注意廢止原因等文字之 CSV 跳脫（逗號 / 換行 / 引號），避免格式破損。
 
 ## 相關文件
@@ -790,16 +790,16 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 
 ---
 
-## Issue #10：[P3-輔助] DM — 文件變更歷程查詢（US11 / UCDM10 / DM08）（GitHub [#243](https://github.com/sti-fhb/EDMS/issues/243)，🚀 已開立）
+## Issue #10：[P3-輔助] DM — 文件變更歷程查詢（US11 / UCDM10 / DM05）（GitHub [#243](https://github.com/sti-fhb/EDMS/issues/243)，🚀 已開立）
 
-**對應規格**：[spec_us11.md](spec_us11.md)（FR-001~006，UCDM10，訊息 DM-MSG-DM08-001/002）；[data-model.md](data-model.md)（`DM_CHANGE_LOG`（append-only，`OPERATION`=PUBLISH/OBSOLETE、`APPLICANT_USER_ID` / `APPROVER_USER_ID` / `OPERATION_TIME` / `VERSION_ID` / `NOTE`）、`DM_DOCUMENT`（文件名）、`DM_DOC_VERSION`（版本號）、`DP_USER`（申請人 / 核准人姓名）、`DM_USER_ROLE`（DM_ADMIN 判定））
-**對應畫面**：DM08 文件變更歷程查詢（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-audit`）——**入口與後端皆僅 DM_ADMIN 可存取**
+**對應規格**：[spec_us11.md](spec_us11.md)（FR-001~006，UCDM10，訊息 DM-MSG-DM05-001/002）；[data-model.md](data-model.md)（`DM_CHANGE_LOG`（append-only，`OPERATION`=PUBLISH/OBSOLETE、`APPLICANT_USER_ID` / `APPROVER_USER_ID` / `OPERATION_TIME` / `VERSION_ID` / `NOTE`）、`DM_DOCUMENT`（文件名）、`DM_DOC_VERSION`（版本號）、`DP_USER`（申請人 / 核准人姓名）、`DM_USER_ROLE`（DM_ADMIN 判定））
+**對應畫面**：DM05 文件變更歷程查詢（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-audit`）——**入口與後端皆僅 DM_ADMIN 可存取**
 **階段**：P3-輔助
 **涵蓋 Tasks**：T055（變更歷程查詢清單 + 搜尋）、T056（CSV 匯出 + 入口 / 存取閘）
 
 ## 任務說明
 
-實作 **DM08 文件變更歷程查詢**（管理者，供資安稽核 / 合規追溯）：DM_ADMIN 跨文件查詢**公開變更歷程**（`DM_CHANGE_LOG` 之**發布 / 廢止**兩類事件），依日期區間、申請人 / 核准人（帳號或姓名）、操作類型篩選，清單呈現稽核欄位，並**匯出 CSV**。撰寫過程動作（上傳 / 編輯 / 送審 / 退回 / 撤回）與閱讀動作（下載 / 預覽）不入此公開歷程；系統設定變更亦不於本頁顯示。變更歷程**永久保留、不可竄改**。
+實作 **DM05 文件變更歷程查詢**（管理者，供資安稽核 / 合規追溯）：DM_ADMIN 跨文件查詢**公開變更歷程**（`DM_CHANGE_LOG` 之**發布 / 廢止**兩類事件），依日期區間、申請人 / 核准人（帳號或姓名）、操作類型篩選，清單呈現稽核欄位，並**匯出 CSV**。撰寫過程動作（上傳 / 編輯 / 送審 / 退回 / 撤回）與閱讀動作（下載 / 預覽）不入此公開歷程；系統設定變更亦不於本頁顯示。變更歷程**永久保留、不可竄改**。
 
 > ℹ️ **讀取型全端 issue**：後端為唯讀查詢 + CSV 匯出；資料來源 `DM_CHANGE_LOG` 之發布 / 廢止事件已由 **US6 核准發布 / US8→US6 核准廢止**（`app/dm/review/center_service`）寫入，**本 issue 不產生變更事件**。與 US10 已廢止查詢同屬「唯讀跨文件稽核查詢」，可大量鏡像其 `obsolete_archive` 範式（DM_ADMIN 硬閘 + `core/csv_export` + access 端點 + 前端逐項側欄閘）。
 
@@ -808,21 +808,21 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 **後端**（新模組 `app/dm/change_log/`〔暫名，開工時定〕，router → service → repository；與 US6/US8 之**寫入**端 `app/dm/review/` 分離——本 issue 純唯讀查詢）：
 - **T055 查詢清單**（FR-002/003）：`GET /api/dm/change-log/entries`〔端點命名開工定〕——列 `DM_CHANGE_LOG` 事件，搜尋條件：日期區間（`OPERATION_TIME`）、申請人 / 核准人（`APPLICANT_USER_ID` / `APPROVER_USER_ID` 之帳號或 `DP_USER.USER_NAME` ILIKE，單一輸入比對兩者）、操作類型（全部 / PUBLISH / OBSOLETE）。回欄位（FR-003）：時間 / 申請人 / 核准人 / 操作 / 文件名稱 / 版本號 / 備註（`NOTE`：發布＝變更摘要、廢止＝廢止原因）。資料來源＝`DM_CHANGE_LOG` join `DM_DOCUMENT`（文件名）join `DM_DOC_VERSION`（版本號）join `DP_USER`（姓名，唯讀報表例外）。後端分頁 `paginate()`（依 `OPERATION_TIME` 新→舊）。
 - **T056 CSV 匯出**（FR-004）：`GET /api/dm/change-log/entries/export`——依相同查詢條件回 CSV（欄位同清單），供資安稽核封存。**重用 `app/core/csv_export.py`**（US10 建立，含公式注入防護 + UTF-8 BOM）。
-- **存取閘**（FR-001）：兩端點皆掛 `get_dm_context` + 細粒度 `DM_ADMIN` 檢核（非管理者 → 403 `DM_AUTH_003`，對應 DM-MSG-DM08-002）；**後端 MUST 擋直接 URL 存取**。查無結果回空清單（前端呈現 DM-MSG-DM08-001）。
+- **存取閘**（FR-001）：兩端點皆掛 `get_dm_context` + 細粒度 `DM_ADMIN` 檢核（非管理者 → 403 `DM_AUTH_003`，對應 DM-MSG-DM05-002）；**後端 MUST 擋直接 URL 存取**。查無結果回空清單（前端呈現 DM-MSG-DM05-001）。
 - **入口可見性判定**：提供 DM_ADMIN 判定供前端側欄 per-item 閘（資料來源待 SA 定案，見注意事項）。
 
-**前端**（`frontend/src/dm/changelog/DmChangeLogPage.tsx` 現為 stub、於本 issue 填實）：DM08 查詢頁——搜尋列（日期起訖 / 申請人或核准人 / 操作類型）+ 結果清單（FR-003 七欄，操作以 badge 呈現發布 / 廢止）+「匯出 CSV」鈕；空結果提示 DM-MSG-DM08-001。側欄「文件變更歷程查詢」項**僅 DM_ADMIN 顯示**（per-item 角色閘，比照 US10）。
+**前端**（`frontend/src/dm/changelog/DmChangeLogPage.tsx` 現為 stub、於本 issue 填實）：DM05 查詢頁——搜尋列（日期起訖 / 申請人或核准人 / 操作類型）+ 結果清單（FR-003 七欄，操作以 badge 呈現發布 / 廢止）+「匯出 CSV」鈕；空結果提示 DM-MSG-DM05-001。側欄「文件變更歷程查詢」項**僅 DM_ADMIN 顯示**（per-item 角色閘，比照 US10）。
 
 **測試**：後端 int（DM_ADMIN 查得清單、日期 / 申請人或核准人 / 操作類型過濾、欄位正確含版本號與備註、**僅 PUBLISH/OBSOLETE 事件**〔驗撰寫過程 / 閱讀動作不入歷程〕、CSV 匯出內容、非 DM_ADMIN 403〔清單 + 匯出 + 直連〕、未登入 401、查無回空）+ 前端（查詢渲染 / 空結果提示 / 匯出鈕 / 操作 badge、非管理者不顯示入口）。
 
 ## 驗收條件
 
-- [ ] DM08 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直接 URL 存取**（FR-001、AC1、DM-MSG-DM08-002）
+- [ ] DM05 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直接 URL 存取**（FR-001、AC1、DM-MSG-DM05-002）
 - [ ] 可依日期區間 / 申請人或核准人（帳號或姓名）/ 操作類型（全部 / 發布 / 廢止）查詢（FR-002、AC2）
 - [ ] 清單欄位含時間 / 申請人 / 核准人 / 操作 / 文件名稱 / 版本號 / 備註（發布＝變更摘要、廢止＝廢止原因），依時間 DESC（FR-003、AC3）
 - [ ] 僅含發布 / 廢止兩類；撰寫過程動作（上傳 / 編輯 / 送審 / 退回 / 撤回）與閱讀動作（下載 / 預覽）不出現、系統設定變更不顯示（FR-001/FR-005、AC5/AC6）
 - [ ] 支援 CSV 匯出當前查詢結果（FR-004、AC4）
-- [ ] 查無結果顯示 DM-MSG-DM08-001（FR-002）
+- [ ] 查無結果顯示 DM-MSG-DM05-001（FR-002）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
 ## 依賴
@@ -831,7 +831,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 - **#7 US8（已交付）**：廢止核准之 OBSOLETE 事件來源
 - **#9 US10（已交付）**：鏡像其 `obsolete_archive` 唯讀查詢範式（手動 count+分頁 enriched 列）+ `app/core/csv_export`（公式注入防護）+ DM_ADMIN 硬閘（`DM_AUTH_003`）+ access 端點 + 前端側欄逐項閘
 - **#127 Foundation（已交付）**：`DM_CHANGE_LOG` / `DM_DOCUMENT` / `DM_DOC_VERSION` / `DM_USER_ROLE`
-- **DP #89 導覽重構（已落地）**：依權限側欄——DM08 入口掛其上（per-item DM_ADMIN 閘）
+- **DP #89 導覽重構（已落地）**：依權限側欄——DM05 入口掛其上（per-item DM_ADMIN 閘）
 
 ## 注意事項
 
@@ -854,13 +854,13 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
 ## Issue #11：[P3-輔助] DM — 跨模組教材引用（US12 / UCDM12）（GitHub [#183](https://github.com/sti-fhb/EDMS/issues/183)，✅ 已交付 PR #189）
 
 **對應規格**：[spec_us12.md](spec_us12.md)（FR-001~005，UCDM12，訊息 DM-MSG-ETREF-001）；[contracts/document-service.md](contracts/document-service.md)（SRVDM001 / SRVDM002，**權威**）；[data-model.md](data-model.md)（`DM_DOCUMENT` / `DM_DOC_VERSION`）
-**對應畫面**：無 DM 畫面（消費端 UI 在 ET 模組 ET02 / ET05）
+**對應畫面**：無 DM 畫面（消費端 UI 在 ET 模組 ET05 / ET06）
 **階段**：P3-輔助
 **涵蓋 Tasks**：T057（SRVDM001）、T058（SRVDM002）、T059（廢止通知 ET，**範圍外**）
 
 ## 任務說明
 
-DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `app/services/__init__.py` 匯出；ET 依 `sti-backend-boundaries` 不打掛 `DM_AUTH_001` 角色閘的 HTTP 端點）：SRVDM001 依 DOC_ID 取當前發布版、SRVDM002 取 TRAINING 分類清單、`read_file_for_reference` 供 ET 學員取教材檔。解鎖 ET #0（DM Service Client）/ #3（ET02 教材下拉）/ #5（ET05 取檔）。
+DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `app/services/__init__.py` 匯出；ET 依 `sti-backend-boundaries` 不打掛 `DM_AUTH_001` 角色閘的 HTTP 端點）：SRVDM001 依 DOC_ID 取當前發布版、SRVDM002 取 TRAINING 分類清單、`read_file_for_reference` 供 ET 學員取教材檔。解鎖 ET #0（DM Service Client）/ #3（ET05 教材下拉）/ #5（ET06 取檔）。
 
 ## 範圍
 
@@ -907,16 +907,16 @@ DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `ap
 
 ---
 
-## Issue #12：[P2-延伸] DM — 閱讀統計與 KPI + 排程 SCHDM001（US13 / UCDM13 / DM10）（GitHub [#248](https://github.com/sti-fhb/EDMS/issues/248)，🚀 已開立）
+## Issue #12：[P2-延伸] DM — 閱讀統計與 KPI + 排程 SCHDM001（US13 / UCDM13 / DM06）（GitHub [#248](https://github.com/sti-fhb/EDMS/issues/248)，🚀 已開立）
 
-**對應規格**：[spec_us13.md](spec_us13.md)（FR-001~007，UCDM13，訊息 DM-MSG-DM10-001/002）；[data-model.md](data-model.md)（`DM_DOC_READ`（下載目前發布版之閱讀事件，唯一 (DOC_ID, VERSION_ID, CREATED_USER)）、`DM_DOCUMENT`/`DM_DOC_VERSION`（目前發布版）、`DM_DOC_TAG`/`DM_USER_TAG`/`DM_TAG`（可見對象→應看名單）、`DM_USER_ROLE`（DM_ADMIN 判定）、平台 `DP_SCHEDULE`/`DP_SCHEDULE_LOG`（SCHDM001）、`DP_NOTIFY_TEMPLATE`（MODULE=DM，KPI_WEEKLY/UNREAD_REMIND）、`DP_EMAIL_LOG`（outbox）、`DP_PARAM`（`DM_WEEKLY_SCHED_DAY_TIME`））
-**對應畫面**：DM10 閱讀統計 KPI（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-kpi`）——**入口與後端皆僅 DM_ADMIN 可存取**
+**對應規格**：[spec_us13.md](spec_us13.md)（FR-001~007，UCDM13，訊息 DM-MSG-DM06-001/002）；[data-model.md](data-model.md)（`DM_DOC_READ`（下載目前發布版之閱讀事件，唯一 (DOC_ID, VERSION_ID, CREATED_USER)）、`DM_DOCUMENT`/`DM_DOC_VERSION`（目前發布版）、`DM_DOC_TAG`/`DM_USER_TAG`/`DM_TAG`（可見對象→應看名單）、`DM_USER_ROLE`（DM_ADMIN 判定）、平台 `DP_SCHEDULE`/`DP_SCHEDULE_LOG`（SCHDM001）、`DP_NOTIFY_TEMPLATE`（MODULE=DM，KPI_WEEKLY/UNREAD_REMIND）、`DP_EMAIL_LOG`（outbox）、`DP_PARAM`（`DM_WEEKLY_SCHED_DAY_TIME`））
+**對應畫面**：DM06 閱讀統計 KPI（左側 DM 功能列，示意見 [wireframes/dm/index.html](../../wireframes/dm/index.html) `dm-kpi`）——**入口與後端皆僅 DM_ADMIN 可存取**
 **階段**：P2-延伸
 **涵蓋 Tasks**：T059a（KPI 儀表板查詢 + CSV）、T059b（SCHDM001 排程 job handler：KPI 週報 + 未讀提醒）、T059c（KPI_WEEKLY / UNREAD_REMIND 範本 + 參數種子）
 
 ## 任務說明
 
-實作 **DM10 閱讀統計 KPI**（管理者，落實度追蹤）與**每週排程 SCHDM001**：DM_ADMIN 於儀表板逐文件即時查看**應看 / 已看 / 未看 / 閱讀率**（範圍全部已發布文件），可依關鍵字（文件名）/ 分類查詢、匯出 CSV；並由每週排程寄 **KPI 週報**予管理者、**未讀提醒**予未看之閱覽者。
+實作 **DM06 閱讀統計 KPI**（管理者，落實度追蹤）與**每週排程 SCHDM001**：DM_ADMIN 於儀表板逐文件即時查看**應看 / 已看 / 未看 / 閱讀率**（範圍全部已發布文件），可依關鍵字（文件名）/ 分類查詢、匯出 CSV；並由每週排程寄 **KPI 週報**予管理者、**未讀提醒**予未看之閱覽者。
 
 > ℹ️ **FR-001（下載寫 `DM_DOC_READ`）已於 US4（#3）交付**（`detail/prepare_file` 下載目前發布版寫入、唯一約束去重、預覽不寫）——本 issue **不重做**，僅消費該資料算 KPI。本 issue＝「KPI 查詢/儀表板」（唯讀）+「SCHDM001 排程 job」（跨模組）。KPI 查詢部分可鏡像 US10/US11 唯讀查詢範式 + 共用 `core/csv_export`；DM_ADMIN 側欄逐項閘沿用 **US11 A' 共用 `admin-access`**。
 
@@ -925,24 +925,24 @@ DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `ap
 **後端**（新模組 `app/dm/kpi/`〔暫名，開工時定〕）
 - **T059a 儀表板查詢**（FR-002/003）：`GET /api/dm/kpi/documents`——列全部已發布文件（含 PENDING_OBSOLETE？見注意事項），逐文件算：**應看**＝可見對象相符之閱覽者數（掛「全體」→ 全部閱覽者；否則文件 `DM_DOC_TAG`(AUDIENCE) ∩ 使用者 `DM_USER_TAG` ≠ ∅；OR 比對，重用 `dm/document/visibility` 之可見性語意反算，**不排除**兼具其他角色者）；**已看**＝該文件**目前發布版** `DM_DOC_READ` 之 distinct `CREATED_USER` ∩ 應看名單；**未看**＝應看−已看；**閱讀率**＝已看/應看（應看=0 → 回特殊值供前端顯示「—（無對應閱覽者）」且**不計入整體平均**）。搜尋：關鍵字（文件名）、分類。後端分頁 `paginate()`。另回**整體平均閱讀率**（排除應看=0 者）+「閱讀率<50% 文件數」供頂部統計卡。
 - **T059a CSV 匯出**（FR-002）：`GET /api/dm/kpi/documents/export`——同條件全量、欄位同清單（重用 `core/csv_export`）。
-- **存取閘**（FR-002）：`get_dm_context` + DM_ADMIN 硬閘（非管理者 403 `DM_AUTH_003`，對應 DM-MSG-DM10-002；後端擋直連）。查無回空（DM-MSG-DM10-001）。
-- **T059b SCHDM001 排程 job handler**（FR-004~007）：於 `app/dm/kpi/scheduler.py`〔暫名〕提供 async `run()`（**鏡像 `app/dm/review/reminder.py`（SCHDM002）**：無參、自管 session）；於平台 `DP_SCHEDULE` 註冊一列（`HANDLER_REF` 指向本 `run`、CRON 由 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`〔`星期,HH:MM`，預設 `週一,10:00`〕推導、平台引擎執行、`DP_SCHEDULE_LOG` 記錄）。`run` 內容：計算全部已發布文件 KPI → **執行當下逐位收件人算好內容**（SA 裁示：平台不做寄送時組信）→ ①寄 **KPI 週報**予所有 DM_ADMIN（內文摘要：總文件數 / 整體平均閱讀率 / 閱讀率最低前 5 份 / **儀表板連結**；逐文件明細 CSV 由 DM10 匯出、**不走附件**）②寄 **未讀提醒**予未看閱覽者（**逐人**算未看清單、一人一信彙整；無未看者不寄；範本停用則整批不寄）。逐一以固定 `params` 呼叫 `DmNotifier` → 平台發信服務 + outbox `DP_EMAIL_LOG` 非同步（沿用 US6 FR-008 機制）。
+- **存取閘**（FR-002）：`get_dm_context` + DM_ADMIN 硬閘（非管理者 403 `DM_AUTH_003`，對應 DM-MSG-DM06-002；後端擋直連）。查無回空（DM-MSG-DM06-001）。
+- **T059b SCHDM001 排程 job handler**（FR-004~007）：於 `app/dm/kpi/scheduler.py`〔暫名〕提供 async `run()`（**鏡像 `app/dm/review/reminder.py`（SCHDM002）**：無參、自管 session）；於平台 `DP_SCHEDULE` 註冊一列（`HANDLER_REF` 指向本 `run`、CRON 由 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`〔`星期,HH:MM`，預設 `週一,10:00`〕推導、平台引擎執行、`DP_SCHEDULE_LOG` 記錄）。`run` 內容：計算全部已發布文件 KPI → **執行當下逐位收件人算好內容**（SA 裁示：平台不做寄送時組信）→ ①寄 **KPI 週報**予所有 DM_ADMIN（內文摘要：總文件數 / 整體平均閱讀率 / 閱讀率最低前 5 份 / **儀表板連結**；逐文件明細 CSV 由 DM06 匯出、**不走附件**）②寄 **未讀提醒**予未看閱覽者（**逐人**算未看清單、一人一信彙整；無未看者不寄；範本停用則整批不寄）。逐一以固定 `params` 呼叫 `DmNotifier` → 平台發信服務 + outbox `DP_EMAIL_LOG` 非同步（沿用 US6 FR-008 機制）。
 - **T059c 種子**：`DP_NOTIFY_TEMPLATE`（MODULE=DM，`KPI_WEEKLY` / `UNREAD_REMIND`，CHANNEL=EMAIL_ONLY，可停用）+ `DP_PARAM` `DM_WEEKLY_SCHED_DAY_TIME`（預設 `週一,10:00`）種子（落點：平台 DP 表，比照既有 DM 範本/參數種子）。
 
-**前端**（`frontend/src/dm/kpi/DmKpiPage.tsx` 現為 stub、於本 issue 填實）：DM10 儀表板——頂部統計卡（整體平均閱讀率 / 閱讀率<50% 文件數）+ 搜尋列（關鍵字 / 分類）+ 清單（文件名稱 / 分類 / 目前版本 / 應看 / 已看 / 未看 / 閱讀率〔進度條或百分比，應看=0 顯示「—（無對應閱覽者）」〕）+「匯出 CSV」；空結果 DM-MSG-DM10-001。側欄「閱讀統計 KPI」項**僅 DM_ADMIN 顯示**（加 `requiresDmAdminAccess: true`，沿用 US11 A' 共用 `admin-access` + `useDmAdminAccess`）；access 先判（不先閃搜尋 UI）。
+**前端**（`frontend/src/dm/kpi/DmKpiPage.tsx` 現為 stub、於本 issue 填實）：DM06 儀表板——頂部統計卡（整體平均閱讀率 / 閱讀率<50% 文件數）+ 搜尋列（關鍵字 / 分類）+ 清單（文件名稱 / 分類 / 目前版本 / 應看 / 已看 / 未看 / 閱讀率〔進度條或百分比，應看=0 顯示「—（無對應閱覽者）」〕）+「匯出 CSV」；空結果 DM-MSG-DM06-001。側欄「閱讀統計 KPI」項**僅 DM_ADMIN 顯示**（加 `requiresDmAdminAccess: true`，沿用 US11 A' 共用 `admin-access` + `useDmAdminAccess`）；access 先判（不先閃搜尋 UI）。
 
 **測試**：後端 int（DM_ADMIN 查得逐文件 KPI 值〔應看/已看/未看/率正確，含「全體」與交集比對、應看=0 特殊值、發新版後已看重置〕、整體平均排除應看=0、關鍵字/分類過濾、CSV、非 DM_ADMIN 403、未登入 401、查無回空；SCHDM001 `run` handler：計算 + 產生 KPI 週報收件 = 全 DM_ADMIN、未讀提醒收件 = 未看閱覽者一人一信、範本停用不寄——經 `DP_EMAIL_LOG` STATUS='PENDING' 驗、篩範本 code 防假陽性）+ 前端（儀表板渲染 / 統計卡 / 空結果 / 匯出 / 非管理者不顯示入口）。
 
 ## 驗收條件
 
-- [ ] DM10 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直連**（FR-002、AC2、DM-MSG-DM10-002）
+- [ ] DM06 僅 DM_ADMIN 可進入；一般使用者側欄不顯示且**後端擋直連**（FR-002、AC2、DM-MSG-DM06-002）
 - [ ] 逐文件呈現 文件 / 分類 / 目前版本 / 應看 / 已看 / 未看 / 閱讀率，可依關鍵字（文件名）/ 分類查詢（FR-002、AC2）
 - [ ] 應看＝可見對象相符之閱覽者（「全體」→ 全部；OR 比對；不排除兼具其他角色者）；已看＝目前發布版 distinct 下載者 ∩ 應看；發新版後以新版重算（FR-003、AC3/AC4）
 - [ ] 應看=0 顯示「—（無對應閱覽者）」且不計入整體平均閱讀率（FR-003、AC3a）
 - [ ] 支援 CSV 匯出當前查詢結果（FR-002）
-- [ ] SCHDM001 每週執行（時間由 `DM_WEEKLY_SCHED_DAY_TIME` 設定、預設週一 10:00）：寄 KPI 週報予全 DM_ADMIN（摘要 + 儀表板連結、CSV 由 DM10 匯出不走附件）、未讀提醒予未看閱覽者（排程當下逐人算、一人一信彙整、涵蓋全部已發布文件）（FR-004/004a/005、AC5/AC6）
+- [ ] SCHDM001 每週執行（時間由 `DM_WEEKLY_SCHED_DAY_TIME` 設定、預設週一 10:00）：寄 KPI 週報予全 DM_ADMIN（摘要 + 儀表板連結、CSV 由 DM06 匯出不走附件）、未讀提醒予未看閱覽者（排程當下逐人算、一人一信彙整、涵蓋全部已發布文件）（FR-004/004a/005、AC5/AC6）
 - [ ] 排程寄信經平台發信服務 + outbox `DP_EMAIL_LOG` 非同步；範本（KPI 週報 / 未讀提醒）停用則對應信不寄、KPI 儀表板不受影響（FR-006、AC7/AC8）
-- [ ] 查無顯示 DM-MSG-DM10-001（FR-002）
+- [ ] 查無顯示 DM-MSG-DM06-001（FR-002）
 - [ ] `uv run pytest -q` 全綠；前端測試通過；ruff / ESLint / type-check / 覆蓋率門檻通過
 
 ## 依賴
@@ -959,7 +959,7 @@ DM 提供 ET 消費之 **in-process 服務門面** `DmDocumentService`（經 `ap
 
 - **入口 / 存取閘為 DM_ADMIN**：後端擋直連（`has_role(ctx.roles, DM_ADMIN)`），前端沿用 US11 A' 共用閘、不另建端點。
 - **「應看」母體（SA 裁示 2026-09-02，已定）**：母體＝**具 `DM_VIEWER` 角色之使用者**且可見對象相符（全體→全部 DM_VIEWER；否則 AUDIENCE ∩ 使用者可見對象授權 ≠ ∅）；兼具 EDITOR/ADMIN 之 VIEWER 仍算，**純 EDITOR/ADMIN 無 VIEWER 者不計入應看**。見 spec_us13 FR-003。
-- **KPI 週報不走 Email 附件（SA 裁示 2026-09-02，已定）**：平台發信服務不支援附件（`DmNotifier.notify` 僅 `recipients` + `params: dict[str,str]`）→ 週報改「**內文摘要 + 儀表板連結**」，逐文件明細 CSV 由 DM10 儀表板匯出。見 spec_us13 FR-004。
+- **KPI 週報不走 Email 附件（SA 裁示 2026-09-02，已定）**：平台發信服務不支援附件（`DmNotifier.notify` 僅 `recipients` + `params: dict[str,str]`）→ 週報改「**內文摘要 + 儀表板連結**」，逐文件明細 CSV 由 DM06 儀表板匯出。見 spec_us13 FR-004。
 - **逐人內容於排程當下算（SA 裁示 2026-09-02，已定）**：平台發信為「呼叫方備妥 params → outbox 非同步寄送」、不做寄送時動態組信 → `SCHDM001` 之 `run` 於執行當下**逐位收件人算好內容**（未讀提醒逐人算未看清單、週報算統計）後**逐一以固定 `params` enqueue**（不需平台新增即時組信能力）。見 spec_us13 FR-006。
 - **SCHDM001 註冊與 CRON**：`DM_WEEKLY_SCHED_DAY_TIME`（`星期,HH:MM`）→ 平台 `DP_SCHEDULE` CRON 之推導 / 更新（管理者於 DP 後台改時間時如何反映到排程）——`/sti-plan` 對齊平台排程註冊機制（比照 SCHDM002）。
 - **範圍：整體平均閱讀率**排除應看=0 文件（AC3a）；「閱讀率<50%」統計卡門檻為顯示用（非參數）。
@@ -998,7 +998,7 @@ DM 全 US（US1/US3~US13）已交付，本 issue 為**收尾**：補齊**跨 US 
 **驗證清單（彙整 + 補缺）**
 - **T063 權限 / 職責分離**：指定審核者排除自審、角色複選聯集、admin-only（已廢止查詢 / 變更歷程 / KPI）URL 僅管理者、純閱覽者 vs 管理者分區可見性。
 - **T063a 標籤式可見性（SC-010）**：閱覽者依可見對象授權（OR +「全體」）只見允許文件、未授予者僅見「全體」、**編輯 / 審核 / 管理者見全部**（維持現行設計，#253 已決議不收斂）；AUDIENCE 停用 soft-retire 不收回既有可見性；後端 API 亦套過濾（防繞過 UI）。
-- **T063b 閱讀 KPI / 排程（SC-011）**：下載記已看（預覽不記、同人同版去重）、發新版重置；DM10 應看/已看/未看/率正確；SCHDM001 每週寄週報 + 未讀提醒、範本停用不寄、經 outbox 非同步（**US13（#248）已交付並覆蓋**；本 issue 引用確認 SC-011）。
+- **T063b 閱讀 KPI / 排程（SC-011）**：下載記已看（預覽不記、同人同版去重）、發新版重置；DM06 應看/已看/未看/率正確；SCHDM001 每週寄週報 + 未讀提醒、範本停用不寄、經 outbox 非同步（**US13（#248）已交付並覆蓋**；本 issue 引用確認 SC-011）。
 - **T064 永久保留**：版本軟刪除不可實體刪；`DM_CHANGE_LOG` / `DM_USER_ROLE_LOG` append-only 不可竄改 / 刪除。
 - **T065 func_name 並發唯一**：並發發布同 func_name 由部分唯一索引把關 + 友善訊息（`DM_DOC_xxx`）。
 
@@ -1049,7 +1049,7 @@ DM 全 US（US1/US3~US13）已交付，本 issue 為**收尾**：補齊**跨 US 
 | 日期 | 異動 |
 |------|------|
 | 2026-08-05 | 首版建立。DM 分析文件對齊平台 DP 集中化後（spec / plan / research / data-model / tasks / wireframe，PR #122 + tasks.md 對齊）產出 issues.md：總覽表列 #0~#13 全貌 + Issue #0（Foundation）完整撰寫，採增量模式。**切分要點**：US2 登入不開獨立 issue（DP 提供、存取閘併 #0 T014）；US1 系統設定為轉接層模組端 + 業務規則 + 種子（維護 UI 在 DP 後台，精確契約待 /sti-plan）；US12 / US13 跨模組（依賴 ET 引用端 / DP 排程引擎）。DM 業務種子屬 #0；DM 通知範本 / 參數種子寫平台 DP 表之落點待 /sti-plan 確認。`DM-文件管理` label 待建（依 sti-label-rules）|
-| 2026-08-05 | US1 交付前自檢（`/sti-sa-precheck dm us1`）2 必補修正（PR #126）：轉接層命名對齊 DP 契約（`get_users_roles_audiences` / `assign_roles_audiences`）+ 自我保護 error_code `DM_ROLE_001`（DP 映射 `DP-MSG-DP06-001`）；AUDIENCE soft-retire 跨模組落點留為 US1 開工前 SA Q。`DM-文件管理` label 已建（#5319E7）|
+| 2026-08-05 | US1 交付前自檢（`/sti-sa-precheck dm us1`）2 必補修正（PR #126）：轉接層命名對齊 DP 契約（`get_users_roles_audiences` / `assign_roles_audiences`）+ 自我保護 error_code `DM_ROLE_001`（DP 映射 `DP-MSG-DP02-001`）；AUDIENCE soft-retire 跨模組落點留為 US1 開工前 SA Q。`DM-文件管理` label 已建（#5319E7）|
 | 2026-08-05 | Issue #0（Foundation）已開立為 GitHub [#127](https://github.com/sti-fhb/EDMS/issues/127)（labels `priority:P0` + `DM-文件管理`），回填總覽表 GitHub # 欄與 body header |
 | 2026-08-06 | Issue #0（#127）已交付合併（PR #129）。撰寫 Issue #1（US1 系統設定）完整 body：對應 spec_us1 FR-001~010 + module-callbacks §3/§4；涵蓋 T024~T027b。**切分要點**：US1 無獨立 DM 畫面（維護 UI 全在 DP 後台按模組過濾），淨新增主體為權限 / 可見對象**轉接層回呼**（`get_users_roles_audiences` / `assign_roles_audiences` / `has_any_role`）+ catalog 轉接層，其餘為 #127 已種之範本 / 參數 / 分類之維護驗證。Labels `P1-核心` + `DM-文件管理` + `US1` |
 | 2026-08-06 | US1 交付前自檢（`/sti-sa-precheck dm us1`）3 必補（皆 #127 集中化修正未回傳造成的 drift）：**(1)** spec_us1 開頭「定義存 DP_PARAM」措辭過寬 → 對齊 spec.md §跨模組共用規則（分類/func/標籤/可見對象＝DM 自持表）；**(2)** module-callbacks §3 `DmRoleAudienceView.audiences` 來源 DP_PARAM → `DM_TAG`（AUDIENCE 組）TAG_ID；**(3)** 新增 module-callbacks §3.1 catalog 轉接層契約（受控主檔維護 + `list_audiences` + AUDIENCE soft-retire 觸發落點）。開工前 3 項 SA Q 已定案 2 項（catalog 轉接層 / soft-retire 落點），剩「參數值域校驗落點」待 `/sti-plan` |
@@ -1057,15 +1057,15 @@ DM 全 US（US1/US3~US13）已交付，本 issue 為**收尾**：補齊**跨 US 
 | 2026-08-11 | 補「US2 → Foundation #0（#127）落地對照」表於 US2 說明段：逐條列 spec_us2 FR-001/002、DM-MSG-LOGIN-007、AC1~3 之落地位置與狀態，強化可追溯性。維持 US2 **不開獨立 issue** 之切分（DM 端僅存取閘 T014、已隨 #127 / PR #129 交付；AC1 導向之 DM00 儀表板屬 US7 / #6）。未新增總覽表列 |
 | 2026-08-11 | 撰寫 Issue #2（US3 文件庫與檢索 / DM01）完整 body：對應 spec_us3 FR-001~009 + UCDM03；涵蓋 T028 / T028a / T029 / T030。**切分要點**：讀取型全端（搜尋端點 + DM01 頁），核心可見性判定重用 #0 T020a、不改文件/版本寫入（屬 US5/US6）；狀態集合 `{PUBLISHED, PENDING_OBSOLETE}`、檢索標籤僅 RETRIEVAL（AUDIENCE 不入檢索下拉）、閱覽者套可見性過濾。前置 #0（必要）+ #4/#5（資料來源，以種子/fixture 獨立測試）。開工前 SA Q 候選：狀態集合 vs 可見性 STATUS AND 之交互（PENDING_OBSOLETE 對閱覽者可見）。Labels `P1-核心` + `DM-文件管理` + `US3`。總覽表 Issue #2 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #2（US3 文件庫與檢索）開立為 GitHub [#150](https://github.com/sti-fhb/EDMS/issues/150)（labels `P1-核心` + `DM-文件管理` + `US3`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us3`）結論 ✅ 齊備、無必補 |
-| 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM02）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM02 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
+| 2026-08-11 | 撰寫 Issue #3（US4 文件詳細頁瀏覽 / DM07）完整 body：對應 spec_us4 FR-001~007 + UCDM04；涵蓋 T031/T032/T033/T034。**切分要點**：讀取型全端（詳細/版本/檔案端點 + DM07 頁），檔案預覽/下載重用 #0 file_store（T016）、僅下載目前發布版寫 DM_DOC_READ（唯一寫入、預覽不記、同人同版去重）、存取控制套 visibility（對齊 US3、含撤銷授權濾 DELETED）；動作入口失效以 DM_REVIEW PENDING 判定（非文件 STATUS）；read-only 廢止模式進入來源為 US10（未交付、渲染能力先備）。前置 #0（必要）+ #4/#5（資料來源，種子/fixture 獨立測試）。開工前 SA Q 候選：DM_DOC_001/002 error code、檔案串流端點形狀。Labels `P1-核心` + `DM-文件管理` + `US4`。總覽表 Issue #3 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-11 | Issue #3（US4 文件詳細頁瀏覽）開立為 GitHub [#155](https://github.com/sti-fhb/EDMS/issues/155)（labels `P1-核心` + `DM-文件管理` + `US4`），回填總覽表 GitHub # / 狀態與 body header。交付前自檢（`/sti-sa-precheck dm us4`）結論 ✅ 齊備、無必補 |
-| 2026-08-17 | 撰寫 Issue #4（US5 文件新增與編輯 / DM03）完整 body：對應 spec_us5 FR-001~009 + UCDM06；涵蓋 T035/T035a/T036/T037/T038/T039。**切分要點**：DM 第一個**寫入型** issue，主體為組裝 #127 Foundation 既有工具（DOC_ID 產生器 T017、file_store T016 上傳驗證、ReviewService T019 送簽、notify T018 `DOC_SUBMIT`、DB 約束 手冊唯一/版本號唯一）；範圍到「送審中」為止——核准/發布屬 US6、草稿匣列表/撤回屬 US9。前置 #0（必要）+ #3/#5（入口/去向，以獨立測試不阻塞）。新增寫入專屬 error code 待開工前 `/sti-plan` 對齊登記 `docs/ref/error-codes.md`。Labels `P1-核心` + `DM-文件管理` + `US5`。總覽表 Issue #4 狀態改「📝 body 已撰寫（待開立）」 |
+| 2026-08-17 | 撰寫 Issue #4（US5 文件新增與編輯 / DM08）完整 body：對應 spec_us5 FR-001~009 + UCDM06；涵蓋 T035/T035a/T036/T037/T038/T039。**切分要點**：DM 第一個**寫入型** issue，主體為組裝 #127 Foundation 既有工具（DOC_ID 產生器 T017、file_store T016 上傳驗證、ReviewService T019 送簽、notify T018 `DOC_SUBMIT`、DB 約束 手冊唯一/版本號唯一）；範圍到「送審中」為止——核准/發布屬 US6、草稿匣列表/撤回屬 US9。前置 #0（必要）+ #3/#5（入口/去向，以獨立測試不阻塞）。新增寫入專屬 error code 待開工前 `/sti-plan` 對齊登記 `docs/ref/error-codes.md`。Labels `P1-核心` + `DM-文件管理` + `US5`。總覽表 Issue #4 狀態改「📝 body 已撰寫（待開立）」 |
 | 2026-08-21 | **US7 設計對齊導覽重構 #89**：DP spec_us1 FR-DP-US1-07（2026-07-28 D1/D2）定登入後主頁為中性歡迎頁、模組儀表板改為依權限疊加之 widget（不設獨立落地頁）；原 spec_us7「登入自動導向 DM00 獨立頁 / 無側欄入口 / home 返回」為 DM 單模組舊觀點、與 #89 衝突。據此更新 spec_us7（改為中性歡迎頁之 DM 文件概況 widget、加可見性要求）、spec.md（US7 描述 + DM00 畫面列移除「待辦彙總」）、issues.md Issue #6 body（前端改掛 WelcomePage widget、去獨立 `/dm` 落地）。後端 stats/announcements 端點不變。前端據此重塑（原 PR #195 之獨立頁改為 widget）|
-| 2026-08-21 | **回填 issues.md 至現況**（自 2026-08-17 後未維護、body 停在 Issue #4）：**(1)** 總覽表狀態 / GitHub # 更正——US5(#4)→已交付 [#169]（PR #172；spec 對齊 #175/#176）、US6(#5)→已交付 [#178]（PR #180）、US12(#11)→已交付 [#183]（PR #189；契約 #187；T059 範圍外）、US7(#6)→「body 已撰寫（待開立）」。**(2)** 補撰三張完整 body：Issue #5（US6 簽核處理 / DM04，含交付後差異：催辦排程 `SCHDM001`→`SCHDM002`、退回被退版本 `REJECTED`→`DRAFT` + 新增 `DM_DOC_012`）、Issue #6（US7 系統儀表板 / DM00，含交付前自檢建議：badge 來源 `DM_REVIEW.REVIEW_TYPE`、統計計入 `PENDING_OBSOLETE`、`spec.md` 待辦彙總措辭待 SA 修）、Issue #11（US12 跨模組引用，含 in-process Service 介面、TRAINING 分類白名單、T059 裁示 A 範圍外）。**(3)** 其餘未開工者維持待補：#7 US8 / #8 US9 / #9 US10 / #10 US11 / #12 US13 / #13 收尾。補強 follow-up #160（storage-root 圍籬，非 US）不列入總覽。US7 GitHub issue 尚未開立（依指示先補 issues.md、暫不開 issue）|
-| 2026-08-24 | 撰寫 Issue #7（US8 文件廢止申請 / UCDM05 / DM02）完整 body：對應 spec_us8 FR-001~005 + 訊息 DM-MSG-DM02-011~015；涵蓋 T047（廢止申請對話框：必填原因 + 選填單檔附件 + 選審核者 → PENDING_OBSOLETE 並通知）/ T048（廢止待簽核行為：仍在架可下載、阻擋同時新版本送審、核准 / 退回）。**關鍵切分**：**本 issue 需延伸 US6（#178 已交付）**——US6 目前以 `DM_REVIEW_006`「待 US8」在 `center_service._ensure_actionable` 擋掉 OBSOLETE 核准 / 退回（review repository 亦排除 OBSOLETE），spec_us8 FR-005 雖寫「核准 / 退回交由 US6」實為 stub，故 US8 淨新增＝解除封鎖 + 實作核准（→OBSOLETE + 版本歷程廢止紀錄）/ 退回（→PUBLISHED）。**重用**：`ReviewService.submit(review_type=OBSOLETE)`、file_store 上傳驗證（`DM_FILE_001/002`）+ storage-root fence #160 存 `DM_REVIEW.OBSOLETE_FILE_*`（T010）、`DmNotifier`；FR-004 同時新版本送審由「一文件一 PENDING」唯一索引天然涵蓋（`DM_REVIEW_002` / DM-MSG-DM02-012）。**待 plan**：缺原因（DM-MSG-DM02-011）/ 缺審核者（DM-MSG-DM02-014）之後端 error_code；前端入口（DM02 現 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由）落地為 dialog（傾向、對齊 wireframe `openObsoleteModal`）或補 page 路由。Labels `P2-延伸` + `DM-文件管理` + `US8`。總覽表 Issue #7 狀態改「📝 body 已撰寫（待開立）」；placeholder 收斂為 #8~#10。body 經 `/sti-sa-precheck dm us8` 交付前自檢 ✅ 齊備、無擋交付必補（wireframe `obsoleteModal` 完整、`OBS_SUBMIT/APPROVE/REJECT` 範本已 seed），5 項建議補強留待 `/sti-plan`。issues.md body 落地 PR #205（已合併）|
+| 2026-08-21 | **回填 issues.md 至現況**（自 2026-08-17 後未維護、body 停在 Issue #4）：**(1)** 總覽表狀態 / GitHub # 更正——US5(#4)→已交付 [#169]（PR #172；spec 對齊 #175/#176）、US6(#5)→已交付 [#178]（PR #180）、US12(#11)→已交付 [#183]（PR #189；契約 #187；T059 範圍外）、US7(#6)→「body 已撰寫（待開立）」。**(2)** 補撰三張完整 body：Issue #5（US6 簽核處理 / DM02，含交付後差異：催辦排程 `SCHDM001`→`SCHDM002`、退回被退版本 `REJECTED`→`DRAFT` + 新增 `DM_DOC_012`）、Issue #6（US7 系統儀表板 / DM00，含交付前自檢建議：badge 來源 `DM_REVIEW.REVIEW_TYPE`、統計計入 `PENDING_OBSOLETE`、`spec.md` 待辦彙總措辭待 SA 修）、Issue #11（US12 跨模組引用，含 in-process Service 介面、TRAINING 分類白名單、T059 裁示 A 範圍外）。**(3)** 其餘未開工者維持待補：#7 US8 / #8 US9 / #9 US10 / #10 US11 / #12 US13 / #13 收尾。補強 follow-up #160（storage-root 圍籬，非 US）不列入總覽。US7 GitHub issue 尚未開立（依指示先補 issues.md、暫不開 issue）|
+| 2026-08-24 | 撰寫 Issue #7（US8 文件廢止申請 / UCDM05 / DM07）完整 body：對應 spec_us8 FR-001~005 + 訊息 DM-MSG-DM07-011~015；涵蓋 T047（廢止申請對話框：必填原因 + 選填單檔附件 + 選審核者 → PENDING_OBSOLETE 並通知）/ T048（廢止待簽核行為：仍在架可下載、阻擋同時新版本送審、核准 / 退回）。**關鍵切分**：**本 issue 需延伸 US6（#178 已交付）**——US6 目前以 `DM_REVIEW_006`「待 US8」在 `center_service._ensure_actionable` 擋掉 OBSOLETE 核准 / 退回（review repository 亦排除 OBSOLETE），spec_us8 FR-005 雖寫「核准 / 退回交由 US6」實為 stub，故 US8 淨新增＝解除封鎖 + 實作核准（→OBSOLETE + 版本歷程廢止紀錄）/ 退回（→PUBLISHED）。**重用**：`ReviewService.submit(review_type=OBSOLETE)`、file_store 上傳驗證（`DM_FILE_001/002`）+ storage-root fence #160 存 `DM_REVIEW.OBSOLETE_FILE_*`（T010）、`DmNotifier`；FR-004 同時新版本送審由「一文件一 PENDING」唯一索引天然涵蓋（`DM_REVIEW_002` / DM-MSG-DM07-012）。**待 plan**：缺原因（DM-MSG-DM07-011）/ 缺審核者（DM-MSG-DM07-014）之後端 error_code；前端入口（DM07 現 `navigate("/dm/documents/:docId/obsolete")` 指向未存在路由）落地為 dialog（傾向、對齊 wireframe `openObsoleteModal`）或補 page 路由。Labels `P2-延伸` + `DM-文件管理` + `US8`。總覽表 Issue #7 狀態改「📝 body 已撰寫（待開立）」；placeholder 收斂為 #8~#10。body 經 `/sti-sa-precheck dm us8` 交付前自檢 ✅ 齊備、無擋交付必補（wireframe `obsoleteModal` 完整、`OBS_SUBMIT/APPROVE/REJECT` 範本已 seed），5 項建議補強留待 `/sti-plan`。issues.md body 落地 PR #205（已合併）|
 | 2026-08-24 | Issue #7（US8 文件廢止申請）開立為 GitHub [#206](https://github.com/sti-fhb/EDMS/issues/206)（labels `P2-延伸` + `DM-文件管理` + `US8`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #7 canonical 內容（連結轉 `../blob/main/` 形式、`OBS_*` 範本已 seed 補註、結尾 `Refs #178` 不自動關閉 US6）|
-| 2026-08-24 | US8（#206）交付並 close（PR #210 squash 合併 main `074298f`）：發起端點 `app/dm/obsolete/` + 延伸簽核中心 OBSOLETE 核准/退回（解除 `DM_REVIEW_006`）+ 廢止附件下載（授權 SA 裁示 **Q1=C**：僅 DM_ADMIN 或指定審核者、發起人不可）+ 前端 DM02 廢止 dialog / DM04 廢止明細；新增 error codes `DM_DOC_014/015/016`。Code review 抓到並修正 CRITICAL（`OBS_*` 通知 params key `author_name`→`applicant_name` + 補 `reason`，原致空信 FAILED）；SA 裁示 **Q2=A**（廢止 banner 承載紀錄、不插版本列）。security review 之 M1/M2/M3/L1（上傳/送審共用層加固）另開 follow-up **#211**。總覽 Issue #7 → ✅ 已交付。**順帶回填**：Issue #6（US7）狀態由「開發中」更正為 ✅ 已交付（PR #195，#193 已 close）|
-| 2026-08-24 | 撰寫 Issue #8（US9 個人專區 / UCDM09 / DM07）完整 body：對應 spec_us9 FR-001~004 + 訊息 DM-MSG-DM07-004/005；涵蓋 T050（草稿匣三類：未送審/被退回/已撤回）/ T051（撤回送審：NEW·NEW_VERSION→草稿、OBSOLETE→已發布、站內訊息通知原審核者、保留原審核者紀錄、改選再送）/ T052（我的文件動態角色 tab 近 30 天 + 個人專區入口可見性：僅編輯者或審核者）。**T049 個資維護已廢除**（平台 DP UCDP004，不自建）。**重用** `ReviewService.withdraw`（PENDING→WITHDRAWN，已存在）、US5 草稿續編/刪除、依權限側欄（#89）。**待 plan**：撤回站內訊息之通知範本/管道（data-model 通知事件表無「撤回」事件，採 MSG-only 既有或新增）、草稿三類分類依 `DM_REVIEW` 歷史之判定邏輯。Labels `P2-延伸` + `DM-文件管理` + `US9`。總覽 Issue #8 → 「📝 body 已撰寫（待開立）」；placeholder 收斂為 #9~#10 |
+| 2026-08-24 | US8（#206）交付並 close（PR #210 squash 合併 main `074298f`）：發起端點 `app/dm/obsolete/` + 延伸簽核中心 OBSOLETE 核准/退回（解除 `DM_REVIEW_006`）+ 廢止附件下載（授權 SA 裁示 **Q1=C**：僅 DM_ADMIN 或指定審核者、發起人不可）+ 前端 DM07 廢止 dialog / DM02 廢止明細；新增 error codes `DM_DOC_014/015/016`。Code review 抓到並修正 CRITICAL（`OBS_*` 通知 params key `author_name`→`applicant_name` + 補 `reason`，原致空信 FAILED）；SA 裁示 **Q2=A**（廢止 banner 承載紀錄、不插版本列）。security review 之 M1/M2/M3/L1（上傳/送審共用層加固）另開 follow-up **#211**。總覽 Issue #7 → ✅ 已交付。**順帶回填**：Issue #6（US7）狀態由「開發中」更正為 ✅ 已交付（PR #195，#193 已 close）|
+| 2026-08-24 | 撰寫 Issue #8（US9 個人專區 / UCDM09 / DM04）完整 body：對應 spec_us9 FR-001~004 + 訊息 DM-MSG-DM04-004/005；涵蓋 T050（草稿匣三類：未送審/被退回/已撤回）/ T051（撤回送審：NEW·NEW_VERSION→草稿、OBSOLETE→已發布、站內訊息通知原審核者、保留原審核者紀錄、改選再送）/ T052（我的文件動態角色 tab 近 30 天 + 個人專區入口可見性：僅編輯者或審核者）。**T049 個資維護已廢除**（平台 DP UCDP004，不自建）。**重用** `ReviewService.withdraw`（PENDING→WITHDRAWN，已存在）、US5 草稿續編/刪除、依權限側欄（#89）。**待 plan**：撤回站內訊息之通知範本/管道（data-model 通知事件表無「撤回」事件，採 MSG-only 既有或新增）、草稿三類分類依 `DM_REVIEW` 歷史之判定邏輯。Labels `P2-延伸` + `DM-文件管理` + `US9`。總覽 Issue #8 → 「📝 body 已撰寫（待開立）」；placeholder 收斂為 #9~#10 |
 | 2026-08-24 | US9 交付前自檢（`/sti-sa-precheck dm us9`）**1 必補**：FR-002 撤回要求「站內訊息通知原指派審核者」，但 data-model 通知事件表（9 項）**無撤回事件**、Foundation 亦未 seed → SD 無 template_code 可用。修正：新增 **`SUBMIT_WITHDRAWN`**（CHANNEL=MSG_ONLY、對象原指派審核者）至 data-model 通知事件表（→10 項）+ 集中化清單；spec_us9 FR-002 引用之、FR-001 補草稿三類判定規則（未送審=無 review / 被退回=最近 REJECTED / 已撤回=最近 WITHDRAWN）；issues.md #8 body 同步（T051 註明需 seed migration、注意事項兩項「待 plan」改為已定案）。實作時（T051）新增 `SUBMIT_WITHDRAWN` seed migration。修正折入 #218（issues.md body PR）同批 |
 | 2026-08-24 | Issue #8（US9 個人專區）開立為 GitHub [#219](https://github.com/sti-fhb/EDMS/issues/219)（labels `P2-延伸` + `DM-文件管理` + `US9`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #8 canonical 內容（連結轉 `../blob/main/`、驗收條件含 `SUBMIT_WITHDRAWN` seed migration） |
 | 2026-09-03 | Issue #13（收尾）開立為 GitHub [#257](https://github.com/sti-fhb/EDMS/issues/257)（labels `收尾` + `DM-文件管理`），回填總覽表 GitHub # / 狀態（🚀 已開立）與 body header。GitHub body 沿用 issues.md #13 canonical（連結轉 `../blob/main/`）。經 `/sti-sa-precheck` 交付前自檢 ✅ 齊備、無擋交付必補（SC-001/010/011 於 spec.md 明確、append-only/func_name 索引於 data-model 齊、SRVDM001/002 契約含無快取延遲），2 項 ⚠ 建議（效能量測基準、安全驗收判定）屬 SD 自決、已於 body 注意事項標註 |

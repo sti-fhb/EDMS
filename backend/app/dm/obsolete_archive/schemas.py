@@ -1,4 +1,4 @@
-"""已廢止文件查詢 schema（US10 / UCDM08 / DM06）。"""
+"""已廢止文件查詢 schema（US10 / UCDM08 / DM03）。"""
 
 from datetime import date, datetime
 

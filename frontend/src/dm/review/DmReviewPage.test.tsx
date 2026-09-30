@@ -61,7 +61,7 @@ function useObsoleteReview() {
   )
 }
 
-describe("DmReviewPage 簽核中心（DM04）", () => {
+describe("DmReviewPage 簽核中心（DM02）", () => {
   it("待簽核清單：列出指派項目、停留逾門檻標紅警示", async () => {
     renderWithProviders(<DmReviewPage />)
     expect(await screen.findByText("領血確認標準作業程序")).toBeInTheDocument()
@@ -112,7 +112,7 @@ describe("DmReviewPage 簽核中心（DM04）", () => {
     expect(screen.getByRole("button", { name: "核准並發布" })).toBeInTheDocument()
   })
 
-  it("核准並發布 → 二次確認 → 成功 toast（DM-MSG-DM04-001）", async () => {
+  it("核准並發布 → 二次確認 → 成功 toast（DM-MSG-DM02-001）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmReviewPage />)
     await user.click(await screen.findByText("領血確認標準作業程序"))

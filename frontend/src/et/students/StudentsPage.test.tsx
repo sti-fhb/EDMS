@@ -13,7 +13,7 @@ async function selectCourse(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("option", { name: "採血作業新進人員訓練" }))
 }
 
-describe("ET03 學員學習狀況追蹤", () => {
+describe("ET02 學員學習狀況追蹤", () => {
   it("未選課程時三區塊都不渲染", async () => {
     renderWithProviders(<EtStudentsPage />)
 
@@ -379,7 +379,7 @@ describe("ET03 學員學習狀況追蹤", () => {
   })
 
   it("匯出成功要有提示——瀏覽器下載是無聲的", async () => {
-    // ET-MSG-ET03-007。檔案落到下載資料夾、頁面完全沒有變化，少了這則提示，教師
+    // ET-MSG-ET02-007。檔案落到下載資料夾、頁面完全沒有變化，少了這則提示，教師
     // 按下匯出後唯一的回饋是「什麼都沒發生」，於是再按一次。
     //
     // jsdom 沒有實作 `URL.createObjectURL`，不補的話成功路徑會拋 TypeError 被 catch
@@ -404,7 +404,7 @@ describe("ET03 學員學習狀況追蹤", () => {
   })
 
   it("移除作答中的學員才跳警告，一般學員不跳", async () => {
-    // AC 7 / ET-MSG-ET03-003。原先兩種情況合用一句「該學員**若**正在作答……」，
+    // AC 7 / ET-MSG-ET02-003。原先兩種情況合用一句「該學員**若**正在作答……」，
     // 把警告稀釋成每次都出現的免責聲明——每次都出現的警告等於沒有警告。
     //
     // fixture 裡 s01 王小明 `has_in_progress_attempt: false`、s02 李小華 `true`，
@@ -568,7 +568,7 @@ describe("ET03 學員學習狀況追蹤", () => {
   })
 
   it("撤銷原因未填時 inline 擋下且不送出請求", async () => {
-    // ET-MSG-ET03-305。錯誤掛在那個輸入框上，不是飄到畫面角落的 Snackbar
+    // ET-MSG-ET02-305。錯誤掛在那個輸入框上，不是飄到畫面角落的 Snackbar
     const spy = vi.fn()
     server.use(
       http.post("/api/et/courses/:courseId/approvals/:userId/revoke", () => {
@@ -624,7 +624,7 @@ describe("ET03 學員學習狀況追蹤", () => {
     await user.click(await screen.findByRole("button", { name: "通過" }))
     await user.click(await screen.findByRole("button", { name: "確定" }))
 
-    // ET-MSG-ET03-304
+    // ET-MSG-ET02-304
     expect(await screen.findByText("學員尚未完課，無法核可")).toBeInTheDocument()
     expect(screen.queryByText("已完成核可")).not.toBeInTheDocument()
   })

@@ -291,7 +291,7 @@ class TestSendInvitations:
         「補寄一次」是最可能的操作。
 
         少了那個 `WHERE`，名冊裡原本由標籤帶入、兩個月前就加入的人會被改成今天加入、
-        來源改寫成 `EMAIL_INVITE`——ET03 以 `JOINED_AT` 排序、「加入日」欄位與任何依加入
+        來源改寫成 `EMAIL_INVITE`——ET02 以 `JOINED_AT` 排序、「加入日」欄位與任何依加入
         時點判讀的報表全部失真，**而且沒有任何訊號**（回應照樣說已加入、稽核照樣記）。
 
         兩位 code reviewer 獨立指出同一條，故本測試釘死它。
@@ -403,7 +403,7 @@ class TestDisabledAccountIsRejected:
 
     #362 之前這個缺口的後果有限：停用者收到信也登不進來（`core/auth.py` 每請求查
     `STATUS`），他只會停在「待加入」清單上讓教師看見並撤回。取消待加入之後他會被**直接
-    寫進 `ET_ENROLLMENT`**，而 ET03 清單與週報只濾 `IS_REMOVED` / `DELETED`——一個永遠
+    寫進 `ET_ENROLLMENT`**，而 ET02 清單與週報只濾 `IS_REMOVED` / `DELETED`——一個永遠
     不可能完課的帳號會永久坐在完訓率的分母裡，還會出現在具名 CSV 中。
     """
 

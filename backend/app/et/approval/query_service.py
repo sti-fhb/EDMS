@@ -100,13 +100,13 @@ class EtApprovalQueryService:
     async def filter_courses(
         self, db: AsyncSession, *, actor_id: str, roles: frozenset[str]
     ) -> list[ApprovalCourseOption]:
-        """ET10 課程下拉的選項——**有核可紀錄的**課程（#439）。
+        """ET04 課程下拉的選項——**有核可紀錄的**課程（#439）。
 
         教師只列自己開設的課，管理者不限。`ApprovalCourseOption` 的 docstring 說明為何
         母體是核可紀錄而不是課程清單。
 
         ⚠️ 回傳空清單有兩種成因（「沒開過課」與「開的課還沒有人被核可」），本方法
-        **不區分**——兩者的下一步相同（去 ET03 核可學員），而要分得出來得多一次查詢。
+        **不區分**——兩者的下一步相同（去 ET02 核可學員），而要分得出來得多一次查詢。
         前端據此顯示單一句說明，見 `TeacherApprovalQuery`。
         """
         owner_id = None if is_admin(roles) else actor_id

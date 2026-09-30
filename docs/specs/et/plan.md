@@ -48,23 +48,23 @@ Constitution 尚未設定（仍為模板），無違規項目。
 ```text
 specs/et/
 ├── spec.md              # 功能規格總檔
-├── spec_us1.md          # User Story 1：權限管理（ET07 / UCET010）
+├── spec_us1.md          # User Story 1：權限管理（ET08 / UCET010）
 ├── spec_us2.md          # User Story 2：登入 / 註冊 / 忘記密碼（UCET012）
-├── spec_us3.md          # User Story 3：課程建立與編輯（ET02 / UCET002）
-├── spec_us4.md          # User Story 4：我的課程與加入新課程（ET04 / UCET007）
-├── spec_us5.md          # User Story 5：章節學習（ET05 / UCET008）
-├── spec_us6.md          # User Story 6：線上測驗作答（ET06 / UCET009）
+├── spec_us3.md          # User Story 3：課程建立與編輯（ET05 / UCET002）
+├── spec_us4.md          # User Story 4：我的課程與加入新課程（ET03 / UCET007）
+├── spec_us5.md          # User Story 5：章節學習（ET06 / UCET008）
+├── spec_us6.md          # User Story 6：線上測驗作答（ET07 / UCET009）
 ├── spec_us7.md          # User Story 7：課程列表瀏覽（ET01 / UCET001）
-├── spec_us8.md          # User Story 8：邀請學員（ET02 / UCET004）
-├── spec_us9.md          # User Story 9：學員學習狀況追蹤（ET03 / UCET005）
-├── spec_us10.md         # User Story 10：個人資料維護（ET08 / UCET011）
-├── spec_us11.md         # User Story 11：課程關閉與再開課（ET02 / UCET003）
+├── spec_us8.md          # User Story 8：邀請學員（ET05 / UCET004）
+├── spec_us9.md          # User Story 9：學員學習狀況追蹤（ET02 / UCET005）
+├── spec_us10.md         # User Story 10：個人資料維護（ET09 / UCET011）
+├── spec_us11.md         # User Story 11：課程關閉與再開課（ET05 / UCET003）
 ├── spec_us12.md         # User Story 12：待加入邀請追蹤 — 已於 #362 廢止，僅存廢止說明
-├── spec_us13.md         # User Story 13：課後問卷填寫（ET05 / UCET013）（2026-07-02 新增）
+├── spec_us13.md         # User Story 13：課後問卷填寫（ET06 / UCET013）（2026-07-02 新增）
 ├── spec_us14.md         # User Story 14：排程統計與提醒（UCET014）（2026-07-02 新增）
-├── spec_us15.md         # User Story 15：通知信範本維護（ET09 / UCET015）（2026-07-02 新增）
-├── spec_us16.md         # User Story 16：學員線下考核核可（ET03 / UCET016）（2026-07-17 新增）
-├── spec_us17.md         # User Story 17：核可查詢（ET10 / UCET017）（2026-07-17 新增）
+├── spec_us15.md         # User Story 15：通知信範本維護（ET10 / UCET015）（2026-07-02 新增）
+├── spec_us16.md         # User Story 16：學員線下考核核可（ET02 / UCET016）（2026-07-17 新增）
+├── spec_us17.md         # User Story 17：核可查詢（ET04 / UCET017）（2026-07-17 新增）
 ├── plan.md              # 本文件（實作計畫）
 ├── research.md          # Phase 0 研究成果（設計決策紀錄）
 ├── data-model.md        # Phase 1 資料模型（ERD + DD）
@@ -94,9 +94,9 @@ frontend/src/et/{功能}/         # 頁面 / hooks / services / schemas（依功
 
 ```text
 use-cases/et/            # 使用案例（已完成，含 17 條 UCET001 ~ UCET017；UCET016 / UCET017 為 2026-07-17 線下核可新增）
-wireframes/et/index.html # 畫面原型（ET01 課程列表、ET02 課程建立與編輯、ET03 學員、ET04 我的課程、ET05 章節學習＋課後問卷、ET06 線上測驗、ET10 核可查詢）
+wireframes/et/index.html # 畫面原型（ET01 課程列表、ET05 課程建立與編輯、ET02 學員、ET03 我的課程、ET06 章節學習＋課後問卷、ET07 線上測驗、ET04 核可查詢）
                          # 註：原型以 Bootstrap 繪製（wireframe 慣例，per sti-spec-structure），實作為 React + MUI；
-                         #     ET07 權限管理 / ET08 個資 / ET09 通知範本之維護畫面已於 2026-07-08 移至平台 DP 後台，ET 不自建
+                         #     ET08 權限管理 / ET09 個資 / ET10 通知範本之維護畫面已於 2026-07-08 移至平台 DP 後台，ET 不自建
 requirements/RQET.md     # 需求清單（已完成）
 _refs/10-教育訓練文件管理模組.md  # 來源分析資料（source of truth）
 ```
@@ -111,8 +111,8 @@ _refs/10-教育訓練文件管理模組.md  # 來源分析資料（source of tru
 |------|---------|------|---------|------|
 | ET ↔ DM | 文件管理模組（DM） | — | **共用 `DP_USER`** | USER_ID / 帳號 / 密碼 / 姓名共用（帳號主檔由平台模組 DP 定義，認證由平台 DP 以簡單 JWT 提供）；但 ET / DM **各自管理自己的角色與受訓單位標籤**，互不影響 |
 | ET → DM | 文件管理模組（DM） | **SRVDM002** | 內部服務（經 `app/services` in-process 呼叫） | 查詢「訓練教材」分類（`category=TRAINING`）之有效文件清單（教師建立教材時下拉選取使用）|
-| ET → DM | 文件管理模組（DM） | **SRVDM001** | 內部服務（經 `app/services` in-process 呼叫） | 依 `docId`（VARCHAR(20)）取當前發布版 metadata 與廢止狀態；檔案本體另經 DM 檔案存取能力取得（學員端 ET05 文件預覽 / 下載原檔）|
-| ET → DM | 文件管理模組（DM） | — | 內部事件 / 查詢 | 偵測 DM 文件廢止狀態（教師端 ET02 編輯頁顯示警告、學員端 ET05 顯示「此文件已廢止」標籤）|
+| ET → DM | 文件管理模組（DM） | **SRVDM001** | 內部服務（經 `app/services` in-process 呼叫） | 依 `docId`（VARCHAR(20)）取當前發布版 metadata 與廢止狀態；檔案本體另經 DM 檔案存取能力取得（學員端 ET06 文件預覽 / 下載原檔）|
+| ET → DM | 文件管理模組（DM） | — | 內部事件 / 查詢 | 偵測 DM 文件廢止狀態（教師端 ET05 編輯頁顯示警告、學員端 ET06 顯示「此文件已廢止」標籤）|
 | ET → 平台 DP（發信）| 平台模組（DP）| — | 平台唯一發信服務（經 `DP_EMAIL_LOG` outbox → 外部 SMTP）| 課程邀請通知（US8）、章節更新通知（US3）、每週未看提醒 / 加急提醒 / 週報（US14）、核可通過通知（US16）採 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）可維護範本（US15，共 7 類）；密碼重設信（US2）、帳號（Email）變更驗證信（US10）為平台系統信（`MODULE=DP`，不可編輯）；ET 不自建寄件佇列 |
 
 > **2026-08-19 編碼對齊**：ET 側原將 SRVDM001 標為「清單」、SRVDM002 標為「內容」，與提供方 DM 之定稿契約**恰好對調**。已依 [DM contracts/document-service.md](../dm/contracts/document-service.md) 更正——**SRVDM001 = 依 DOC_ID 取當前發布版、SRVDM002 = 取分類文件清單**。同時更正 `docId` 型別（BIGINT → VARCHAR(20)）、分類碼（`TRAINING_MATERIAL` → `TRAINING`），並改以 `app/services` in-process Service 呼叫（不打 DM HTTP 端點——DM 存取閘要求 DM 角色，ET 學員未必具備）。

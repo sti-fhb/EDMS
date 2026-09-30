@@ -1,7 +1,7 @@
 import type { ActivityResponse, DraftItem, PersonalAccess, WithdrawResult } from "./schemas"
 import { http } from "../../services/http"
 
-/** 個人專區 API（US9 / DM07）。 */
+/** 個人專區 API（US9 / DM04）。 */
 export const personalApi = {
   listDrafts: async (): Promise<DraftItem[]> => {
     const { data } = await http.get<DraftItem[]>("/dm/personal/drafts")

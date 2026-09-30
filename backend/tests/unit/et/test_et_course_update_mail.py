@@ -52,7 +52,7 @@ class TestBuildParams:
         assert params["COURSE_NAME"] == "血品安全"
         assert params["NEW_CHAPTER_NAME"] == "第三章 異常處理"
 
-    def test_課程連結指向ET05學習頁(self) -> None:
+    def test_課程連結指向ET06學習頁(self) -> None:
         """收件人**已在課程中**（章節更新只寄給在籍學員），故連結是學習頁而非邀請頁。"""
         params = build_course_update_params(user_name="陳小明", course=_course(course_id=42), new_chapter_name="第二章")
         assert params["COURSE_URL"] == f"{settings.FRONTEND_BASE_URL.rstrip('/')}/et/courses/42/learn"

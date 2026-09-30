@@ -1,4 +1,4 @@
-"""文件詳細頁瀏覽（US4 / DM02）整合測試（真實 DB）。
+"""文件詳細頁瀏覽（US4 / DM07）整合測試（真實 DB）。
 
 驗證：詳細（標題/資訊面板）、存取控制（閱覽者未授權擋、編輯者見全部）、檔案存取（PDF 預覽/下載、
 Office 僅下載、舊版擋下載）、下載寫 DM_DOC_READ + 去重 + 預覽不寫、版本歷程、can_edit（PENDING 失效）、
@@ -215,7 +215,7 @@ async def test_editor_sees_any(db):
 
 @pytest.mark.parametrize("doc_status", ["DRAFT", "PENDING_REVIEW"])
 async def test_unpublished_doc_not_browsable_any_role(db, doc_status):
-    """未發布文件（草稿 / 送審中）不在 DM02 瀏覽——不分角色（閱覽者 / 編輯者 / 管理者）皆 404。
+    """未發布文件（草稿 / 送審中）不在 DM07 瀏覽——不分角色（閱覽者 / 編輯者 / 管理者）皆 404。
 
     草稿 / 送審中屬作者個人專區（US9）/ 審核者簽核中心（US6），不由詳細頁呈現。
     """

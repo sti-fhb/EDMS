@@ -1,4 +1,4 @@
-"""閱讀統計 KPI API（US13 / UCDM13 / DM10）。
+"""閱讀統計 KPI API（US13 / UCDM13 / DM06）。
 
 掛 DM 存取閘 `get_dm_context`；清單 / 匯出於 service 層再過 DM_ADMIN 硬閘（FR-002 擋直連）。
 唯讀查詢，無寫入、不寫稽核；資料來源 DM_DOC_READ 由 US4（detail）下載時寫入。
@@ -25,7 +25,7 @@ async def list_kpi(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ) -> KpiListResponse:
-    """DM10 閱讀統計 KPI（FR-002/003，DM_ADMIN）：逐文件應看/已看/未看/率 + 統計卡，後端分頁。"""
+    """DM06 閱讀統計 KPI（FR-002/003，DM_ADMIN）：逐文件應看/已看/未看/率 + 統計卡，後端分頁。"""
     return await _service.search(db, roles=ctx.roles, keyword=keyword, category=category, page=page, limit=limit)
 
 

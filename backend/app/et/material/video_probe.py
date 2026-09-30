@@ -1,6 +1,6 @@
 """以 `ffprobe` 取影片長度（#203 / SA 裁示 Q2）。
 
-`ET_MATERIAL_VIDEO.DURATION_SEC` 是 ET05 觀看覆蓋率公式的**分母**
+`ET_MATERIAL_VIDEO.DURATION_SEC` 是 ET06 觀看覆蓋率公式的**分母**
 （覆蓋率 = 已觀看區段聯集秒數 ÷ DURATION_SEC），故 data-model 訂為 NOT NULL 且
 **取得失敗不得存檔**——否則該影片覆蓋率永遠算不出、章節永久無法解鎖。
 

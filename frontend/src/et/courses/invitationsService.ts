@@ -2,7 +2,7 @@ import { http } from "../../services/http"
 import type { EmailInviteResult, InvitePreview } from "./invitationSchemas"
 
 /**
- * ET02 邀請學員 API（US8 / #273）。
+ * ET05 邀請學員 API（US8 / #273）。
  *
  * 預覽與寄送都是 POST：收件人清單是個資，放在 query string 會進 access log、
  * 瀏覽器歷史與 Referer。

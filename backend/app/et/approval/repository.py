@@ -84,7 +84,7 @@ class EtApprovalRepository:
         少了這道閘，核可會替一個不在班上的人建立 `ET_APPROVAL` 列，而他在 US17 核可
         查詢裡查得到自己「已通過」一門早就被移出的課。
 
-        正常 UI 走不到——ET03 的清單本來就不列已移除者。這道閘擋的是直接打 API 與
+        正常 UI 走不到——ET02 的清單本來就不列已移除者。這道閘擋的是直接打 API 與
         「教師開著頁面，另一位教師把人移除」的競態。
         """
         if not user_ids:
@@ -216,7 +216,7 @@ class EtApprovalRepository:
 
         Returns:
             True 表示本次撤銷完成；False 表示版本不符或該列已被撤銷，呼叫端回
-            409 `ET_APPROVAL_004`（`ET-MSG-ET03-308`「已被其他人變更，請重新整理」）。
+            409 `ET_APPROVAL_004`（`ET-MSG-ET02-308`「已被其他人變更，請重新整理」）。
 
         `IS_REVOKED = false` 那半段不只是樂觀鎖的補強：少了它，兩次帶同一個版本號的
         撤銷請求中第二次會**覆寫第一次的 `REVOKE_REASON` 與 `REVOKED_BY`**——第一位

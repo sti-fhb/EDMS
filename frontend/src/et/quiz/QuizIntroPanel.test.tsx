@@ -38,7 +38,7 @@ function mockIntro(overrides: Partial<QuizIntro>) {
 
 beforeEach(() => navigate.mockReset())
 
-describe("ET06 測驗資訊面板", () => {
+describe("ET07 測驗資訊面板", () => {
   it("顯示題數、作答時間、及格分數、剩餘次數（AC 1）", async () => {
     mockIntro({})
     renderWithProviders(<QuizIntroPanel quizId={700} />)
@@ -59,7 +59,7 @@ describe("ET06 測驗資訊面板", () => {
     expect(screen.queryByText("0")).not.toBeInTheDocument()
   })
 
-  it("次數用盡時禁用按鈕並提示（ET-MSG-ET06-001）", async () => {
+  it("次數用盡時禁用按鈕並提示（ET-MSG-ET07-001）", async () => {
     mockIntro({ can_start: false, remaining_attempts: 0 })
     renderWithProviders(<QuizIntroPanel quizId={700} />)
 

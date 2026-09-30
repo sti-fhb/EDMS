@@ -34,7 +34,7 @@ describe("DmChangeLogPage 文件變更歷程查詢", () => {
     expect(screen.getAllByText("李主任").length).toBeGreaterThan(0)
   })
 
-  it("空結果 → 顯示 DM-MSG-DM08-001", async () => {
+  it("空結果 → 顯示 DM-MSG-DM05-001", async () => {
     server.use(
       http.get("/api/dm/change-log/entries", () =>
         HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
@@ -52,7 +52,7 @@ describe("DmChangeLogPage 文件變更歷程查詢", () => {
     expect(downloadChangeLogCsv).toHaveBeenCalled()
   })
 
-  it("非管理者（admin-access can_access=false）→ 直接顯示無權限、不渲染搜尋 UI（DM-MSG-DM08-002）", async () => {
+  it("非管理者（admin-access can_access=false）→ 直接顯示無權限、不渲染搜尋 UI（DM-MSG-DM05-002）", async () => {
     server.use(http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<DmChangeLogPage />)
     expect(await screen.findByText("您無權限存取此頁面")).toBeInTheDocument()

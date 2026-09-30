@@ -278,7 +278,7 @@ erDiagram
 | APPROVER_USER_ID | 核准者 | VARCHAR(20) | N | | FK→ DP_USER；核准發布時寫入（自 Session）|
 | PUBLISHED_DATE | 發布時間 | TIMESTAMP | N | | 即核准時間 |
 
-> 含標準欄位（CREATED_USER = 該版本撰寫者 / 作者）。**版本號唯一只對已發布版本**：partial unique index `UX_DM_DOC_VERSION_RELEASED_NO (DOC_ID, VERSION_NO) WHERE STATUS IN ('PUBLISHED','SUPERSEDED')`；草稿可留空 / 重複，送簽時應用層檢核不與已發布重複（DM-MSG-DM03-009）。**每人每文件一份草稿**：partial unique index `UX_DM_DOC_VERSION_ONE_DRAFT (DOC_ID, CREATED_USER) WHERE STATUS='DRAFT'`（不同撰寫者可各自開草稿、互不阻擋；應用層另給 DM_DOC_009）。
+> 含標準欄位（CREATED_USER = 該版本撰寫者 / 作者）。**版本號唯一只對已發布版本**：partial unique index `UX_DM_DOC_VERSION_RELEASED_NO (DOC_ID, VERSION_NO) WHERE STATUS IN ('PUBLISHED','SUPERSEDED')`；草稿可留空 / 重複，送簽時應用層檢核不與已發布重複（DM-MSG-DM08-009）。**每人每文件一份草稿**：partial unique index `UX_DM_DOC_VERSION_ONE_DRAFT (DOC_ID, CREATED_USER) WHERE STATUS='DRAFT'`（不同撰寫者可各自開草稿、互不阻擋；應用層另給 DM_DOC_009）。
 
 ## DD — DM_DOC_TAG（文件標籤關聯，明細）
 
@@ -340,11 +340,11 @@ erDiagram
 | OBSOLETE_FILE_SIZE | 廢止附件大小 | BIGINT | N | | 位元組；上限比照文件上傳（`DP_PARAM` 之 `DM_FILE_MAX_MB`）|
 | OBSOLETE_FILE_MIME | 廢止附件 MIME | VARCHAR(100) | N | | 格式比照文件上傳（PDF / Office / 圖片）|
 
-> 含標準欄位。應用層約束：同一 DOC_ID 不可同時存在兩筆 STATUS=PENDING（單一送審週期，research.md §4）。廢止附件為選填單檔，格式 / 大小比照 `DM_DOC_VERSION` 之檔案規範（沿用檔案儲存服務）；於 DM04 簽核明細與 US10 已廢止查詢可下載。
+> 含標準欄位。應用層約束：同一 DOC_ID 不可同時存在兩筆 STATUS=PENDING（單一送審週期，research.md §4）。廢止附件為選填單檔，格式 / 大小比照 `DM_DOC_VERSION` 之檔案規範（沿用檔案儲存服務）；於 DM02 簽核明細與 US10 已廢止查詢可下載。
 
 ## DD — DM_CHANGE_LOG（公開變更歷程，append-only）
 
-僅記錄對外發布版本之發布 / 廢止事件；**append-only、永久保留、不可竄改 / 刪除**；供 DM08 跨文件查詢與 CSV 匯出。
+僅記錄對外發布版本之發布 / 廢止事件；**append-only、永久保留、不可竄改 / 刪除**；供 DM05 跨文件查詢與 CSV 匯出。
 
 | 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
 |----------|----------|----------|------|------|------|
@@ -393,7 +393,7 @@ erDiagram
 | SUPERSEDED | 版本 | 已被新版取代（僅預覽不可下載）|
 | REJECTED | **版本** | 送審被退回（文件層不使用；退回後文件回 DRAFT）|
 | PENDING_OBSOLETE | 文件 | 廢止待簽核（仍對外有效、仍在架）|
-| OBSOLETE | 文件 | 已廢止（自文件庫下架；僅 DM06 read-only 查）|
+| OBSOLETE | 文件 | 已廢止（自文件庫下架；僅 DM03 read-only 查）|
 
 ### 角色代碼（DM_USER_ROLE.ROLE_CODE）
 

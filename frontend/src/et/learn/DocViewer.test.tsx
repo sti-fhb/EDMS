@@ -28,7 +28,7 @@ function makeDoc(overrides: Partial<MaterialDocRow> = {}): MaterialDocRow {
   }
 }
 
-describe("ET05 DM 文件呈現", () => {
+describe("ET06 DM 文件呈現", () => {
   it("PDF 於頁內嵌入預覽（AC 15）", async () => {
     renderWithProviders(<DocViewer materialId={1} doc={makeDoc()} />)
 

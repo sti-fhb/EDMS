@@ -1,6 +1,6 @@
-"""文件廢止申請服務（US8 / UCDM05 / DM02）。
+"""文件廢止申請服務（US8 / UCDM05 / DM07）。
 
-編輯者於 DM02 對「已發布」文件發起整份廢止：必填廢止原因、選填單檔附件（格式 / 大小比照文件上傳，
+編輯者於 DM07 對「已發布」文件發起整份廢止：必填廢止原因、選填單檔附件（格式 / 大小比照文件上傳，
 沿用 `file_store` 檢核 + storage-root 圍籬落盤，存 `DM_REVIEW.OBSOLETE_FILE_*`）、選指定審核者（排除本人）。
 重用 `ReviewService.submit(OBSOLETE)` 建立送審週期（「一文件一 PENDING」唯一索引天然擋同時新版本送審，FR-004），
 文件轉 `PENDING_OBSOLETE`（仍在架、仍對外，FR-003）並以 `OBS_SUBMIT` 通知審核者。核准 / 退回由簽核中心（US6）處理。

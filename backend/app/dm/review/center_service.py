@@ -1,4 +1,4 @@
-"""簽核中心服務（US6 / DM04，寫入編排）。
+"""簽核中心服務（US6 / DM02，寫入編排）。
 
 重用 Foundation `ReviewService.approve/reject`（狀態機核心）並編排發布 / 退回之連帶效果：
 
@@ -202,7 +202,7 @@ class ReviewCenterService:
         """廢止附件下載（US8）：僅 DM_ADMIN 或該送審之指定審核者可下載（SA 裁示 Q1=C）。
 
         附件屬稽核佐證公文、非文件本體，採最小揭露——**發起人本人與一般閱覽者皆不可下載**。
-        路徑串流前過 storage-root 圍籬（#160）防逃逸。供 DM04 簽核明細與 US10 已廢止查詢共用。
+        路徑串流前過 storage-root 圍籬（#160）防逃逸。供 DM02 簽核明細與 US10 已廢止查詢共用。
         """
         review = await self._repo.get_review(db, review_id)
         if review is None or review.review_type != _OBSOLETE:

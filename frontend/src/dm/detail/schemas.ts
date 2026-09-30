@@ -1,4 +1,4 @@
-/** 文件詳細頁瀏覽（US4 / DM02）型別（對齊後端 app/dm/detail/schemas.py）。 */
+/** 文件詳細頁瀏覽（US4 / DM07）型別（對齊後端 app/dm/detail/schemas.py）。 */
 
 export interface FileMeta {
   version_id: number

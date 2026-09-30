@@ -18,7 +18,7 @@ params 的 key 若與範本佔位對不上，平台 `_SafeFormatter` 會拋 `Key
 若比照 `dp/users/service.py` 直接 `strftime` UTC 值，信件會寫出比教師設定**早 8 小時**
 的閱課期間——學員據此以為課程尚未開放或已經截止。輸出格式亦刻意對齊前端
 `frontend/src/utils/date.ts` 之 `formatDateTime`（`YYYY/MM/DD HH:mm`），使教師在
-ET02 看到的與學員信裡讀到的是同一串字。
+ET05 看到的與學員信裡讀到的是同一串字。
 
 > DP / DM 既有信件同樣直接輸出 UTC（多為僅日期、影響較小），本次不順手改動
 > （最小變更原則）；已於 #273 列為 follow-up。
@@ -76,7 +76,7 @@ def _base_url() -> str:
 
 
 def learn_link(course_id: int) -> str:
-    """ET05 章節學習頁連結——四條寄信路徑共用（#362 後 Email 邀請亦然）。
+    """ET06 章節學習頁連結——四條寄信路徑共用（#362 後 Email 邀請亦然）。
 
     #362 之前，Email 邀請走的是 `/et/invite?token=…` 一次性連結（收件人尚未加入課程，
     得先「接受邀請」）。邀請即加入之後沒有要接受的東西，收件人在信寄出當下已是學員，

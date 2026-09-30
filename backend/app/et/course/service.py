@@ -1,4 +1,4 @@
-"""ET02 課程骨架與章節編排 Service（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
+"""ET05 課程骨架與章節編排 Service（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 **稽核**：ET 於 `spec.md` §稽核來源功能碼明列 `ET-COURSE` 涵蓋「課程建立 / 編輯 /
 發布 / 關閉 / 再開課，及其下章節、教材、測驗、問卷之編修與刪除」，故本模組之 CUD
@@ -202,7 +202,7 @@ class EtCourseService:
         return {"data": cards, "meta": paged["meta"]}
 
     async def list_filter_tags(self, db: AsyncSession) -> list[TagOption]:
-        """篩選下拉的標籤來源：**全部含停用者**（與 ET02 編輯用的 `list_tag_options` 相反）。
+        """篩選下拉的標籤來源：**全部含停用者**（與 ET05 編輯用的 `list_tag_options` 相反）。
 
         停用標籤若排除，掛著它的歷史課程就從此搜不到，而畫面上不會有任何異常。
         """

@@ -1,4 +1,4 @@
-"""ET02 課程發布整合測試（US3 / #204）。
+"""ET05 課程發布整合測試（US3 / #204）。
 
 六項檢核的**組合邏輯**已由 `tests/unit/et/test_publish_rules.py` 以純函式涵蓋。
 這裡只驗需要真 DB 才驗得了的事：
@@ -469,7 +469,7 @@ class TestPublish:
         assert len(codes) == 3
 
     async def test_檢核未通過帶缺漏清單(self, client, db) -> None:
-        """AC 26 / ET-MSG-ET02-011：錯誤 body 須含**具體缺漏項目**。
+        """AC 26 / ET-MSG-ET05-011：錯誤 body 須含**具體缺漏項目**。
 
         這條同時驗 `AppError.extra` 的接線——沒接上的話 body 只會有
         `error_code` / `error_message` 兩個欄位，前端就只能顯示「發布條件未滿足」，

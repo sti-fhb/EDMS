@@ -21,7 +21,7 @@ import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 
 /**
- * ET05 章節學習頁（US5 / #255 + #274）。
+ * ET06 章節學習頁（US5 / #255 + #274）。
  *
  * `ET-5a`（#255）讓學員看得到內容；**`ET-5b`（#274）讓看了算數**——區段上報、覆蓋率、
  * 解鎖判定、定位至上次觀看位置。
@@ -132,7 +132,7 @@ export function EtLearnPage() {
   /**
    * 側欄點選（AC 6）。
    *
-   * 鎖定項目**擋下並提示**（ET-MSG-ET05-001），不是靜默無反應——學員需要知道為什麼
+   * 鎖定項目**擋下並提示**（ET-MSG-ET06-001），不是靜默無反應——學員需要知道為什麼
    * 點不動，否則只會以為系統壞了。
    *
    * 🔴 **提示依前緣的型別分兩種**（#361）。AC 12 啟用前，鎖定的唯一成因是教材沒看完，
@@ -148,8 +148,8 @@ export function EtLearnPage() {
       if (item.locked) {
         message.warning(
           blockingItemType === "QUIZ"
-            ? "請通過本章節之測驗後解鎖" // ET-MSG-ET05-002
-            : "請先完成本章節之影片學習", // ET-MSG-ET05-001
+            ? "請通過本章節之測驗後解鎖" // ET-MSG-ET06-002
+            : "請先完成本章節之影片學習", // ET-MSG-ET06-001
         )
         return
       }
@@ -179,8 +179,8 @@ export function EtLearnPage() {
     warnedQuizIdRef.current = requestedLockedQuizId
     message.warning(
       blockingItemType === "QUIZ"
-        ? "請通過本章節之測驗後解鎖" // ET-MSG-ET05-002
-        : "請先完成本章節之影片學習", // ET-MSG-ET05-001
+        ? "請通過本章節之測驗後解鎖" // ET-MSG-ET06-002
+        : "請先完成本章節之影片學習", // ET-MSG-ET06-001
     )
   }, [requestedLockedQuizId, blockingItemType, message])
 
@@ -219,7 +219,7 @@ export function EtLearnPage() {
         <Typography variant="h5">{data.course_name}</Typography>
       </Stack>
 
-      {/* ET-MSG-ET05-005；非阻擋進入之訊息頁，內容照常可看 */}
+      {/* ET-MSG-ET06-005；非阻擋進入之訊息頁，內容照常可看 */}
       {data.is_closed && (
         <Alert severity="info" sx={{ mb: 2 }}>
           此課程目前關閉中，僅可回看已學內容

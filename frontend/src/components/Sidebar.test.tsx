@@ -208,8 +208,7 @@ describe("Sidebar", () => {
   })
 
   it("每個導覽項顯示畫面編號，且群組內依編號排序（#421）", async () => {
-    // 編號取自各模組 spec 之〈畫面代號對照表〉，非自訂。編號不連續屬正常——
-    // 部分畫面無側欄入口（ET02 課程建立為子頁、DM02 詳細頁由清單進入、DP01~04 為登入/個資頁）。
+    // 編號取自各模組 spec 之〈畫面代號對照表〉，非自訂（2026-09-30 重編為側欄項目連號在前）。
     renderWithProviders(<Sidebar />)
     await screen.findByText("系統管理者後台")
     const nav = screen.getByRole("navigation", { name: "主導覽" })
@@ -218,31 +217,33 @@ describe("Sidebar", () => {
     const links = Array.from(nav.querySelectorAll("a")).map((a) => a.textContent?.trim() ?? "")
     expect(links).toEqual([
       "ET01 課程列表",
-      "ET03 學員",
-      "ET04 我的課程",
-      "ET10 核可查詢",
+      "ET02 學員",
+      "ET03 我的課程",
+      "ET04 核可查詢",
       "DM01 文件庫",
-      "DM04 簽核中心",
-      "DM06 已廢止文件查詢",
-      "DM07 個人專區",
-      "DM08 文件變更歷程查詢",
-      "DM10 閱讀統計 KPI",
-      "DP05 使用者管理",
-      "DP06 權限管理",
-      "DP07 系統參數與清單維護",
-      "DP08 通知範本維護",
-      "DP09 操作記錄查詢",
-      "DP10 排程作業總覽",
+      "DM02 簽核中心",
+      "DM03 已廢止文件查詢",
+      "DM04 個人專區",
+      "DM05 文件變更歷程查詢",
+      "DM06 閱讀統計 KPI",
+      "DP01 使用者管理",
+      "DP02 權限管理",
+      "DP03 系統參數與清單維護",
+      "DP04 通知範本維護",
+      "DP05 操作記錄查詢",
+      "DP06 排程作業總覽",
     ])
   })
 
-  it("畫面編號格式正確、群組內不重複且已排序（#421 資料不變量）", () => {
+  it("畫面編號格式正確，且各群組依側欄順序從 01 起連號（#421 資料不變量）", () => {
     // 純資料斷言：擋住「新增項目時忘了填編號 / 填錯格式 / 插在錯的位置」。
+    // 連號是 2026-09-30 重編的需求：在中間插入新項目（或刪除一項）這條就會紅——
+    // 那時要連同 spec〈畫面代號對照表〉與訊息碼一起重編，而不是只改這裡。
     for (const group of NAV_GROUPS) {
       const codes = group.items.map((item) => item.code)
       expect(codes.every((code) => /^(ET|DM|DP)\d{2}$/.test(code))).toBe(true)
-      expect(new Set(codes).size).toBe(codes.length)
-      expect(codes).toEqual([...codes].sort())
+      const prefix = codes[0].slice(0, 2)
+      expect(codes).toEqual(codes.map((_, i) => `${prefix}${String(i + 1).padStart(2, "0")}`))
     }
   })
 

@@ -1,4 +1,4 @@
-"""簽核處理（US6 / DM04）整合測試（真實 DB）。
+"""簽核處理（US6 / DM02）整合測試（真實 DB）。
 
 涵蓋：待簽核清單（只列自己 PENDING + 停留天數）、明細（新版本附舊版比對 / 非本人擋）、
 核准並發布（首版 NEW / 新版 NEW_VERSION 之原子版本切換 + CURRENT_VERSION_ID + DM_CHANGE_LOG + 通知）、

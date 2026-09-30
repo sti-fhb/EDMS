@@ -1,4 +1,4 @@
-"""文件新增與編輯（US5 / DM03）schema。
+"""文件新增與編輯（US5 / DM08）schema。
 
 寫入型端點以 multipart 收表單欄位 + 單一上傳檔（router 以 Form / UploadFile 宣告），
 故此處主要為回應 schema、送簽 JSON 請求與表單受控下拉；輸入之欄位級檢核於 service。
@@ -12,7 +12,7 @@ class CreateResult(BaseModel):
 
     doc_id: str
     version_id: int
-    previewable: bool  # 上傳檔是否可線上預覽（False=Office 等 → 前端出橘色警示條 DM-MSG-DM03-002）
+    previewable: bool  # 上傳檔是否可線上預覽（False=Office 等 → 前端出橘色警示條 DM-MSG-DM08-002）
 
 
 class VersionResult(BaseModel):
@@ -58,7 +58,7 @@ class EditorDocTags(BaseModel):
 
 
 class DraftMeta(BaseModel):
-    """續編草稿之編輯器 meta（author-scoped；供 DRAFT-status 文件亦可載，不經 DM02 詳細端點）。
+    """續編草稿之編輯器 meta（author-scoped；供 DRAFT-status 文件亦可載，不經 DM07 詳細端點）。
 
     父文件 DRAFT（首版草稿）→ `name_editable=True`（名稱可改，Q1=A）；父文件 PUBLISHED（新版本草稿）
     → `name_editable=False`（名稱唯讀，比照 FR-003）。分類綁 DOC_ID 一律唯讀，不提供可編輯性旗標。
@@ -90,7 +90,7 @@ class OptionItem(BaseModel):
 
 
 class EditorOptions(BaseModel):
-    """DM03 表單一次載入之受控下拉集合。"""
+    """DM08 表單一次載入之受控下拉集合。"""
 
     categories: list[OptionItem]
     funcs: list[OptionItem]  # 系統操作手冊之關聯作業項目

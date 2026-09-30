@@ -2,7 +2,7 @@ import type { ApproveResult, CompletedItem, PendingItem, RejectResult, ReviewDet
 import type { PagedResult } from "../../hooks/usePagedQuery"
 import { http } from "../../services/http"
 
-/** 簽核中心 API（US6 / DM04）。 */
+/** 簽核中心 API（US6 / DM02）。 */
 export const reviewApi = {
   listPending: async (): Promise<PendingItem[]> => {
     const { data } = await http.get<PendingItem[]>("/dm/reviews/pending")

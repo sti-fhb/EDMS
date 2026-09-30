@@ -447,7 +447,7 @@
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>本畫面用途：</strong>文件管理系統儀表板，**登入後預設落地頁**，提供各類型文件總數一覽 + 最新更新公告。本畫面無 sidebar 入口，從<strong>左上角 home icon</strong>或<strong>系統名稱「文件管理系統」</strong>點擊即可隨時返回<br>
     <strong>各類型文件總數：</strong>僅計入「已發布」之目前版本（不含送審中、草稿、已被取代之舊版本、已廢止文件）；分類分組對應 DM09 文件分類維護之內建 4 類。<strong>本區為純資訊顯示，不可點擊</strong><br>
-    <strong>最新更新公告：</strong>列出<strong>近 30 天內</strong>已發布的文件，含<strong>新增首版</strong>與<strong>新版本</strong>兩類事件；每筆顯示文件名、版號、變更摘要、發布時間、撰寫者、分類 pill。點擊任一筆進入 DM02 文件詳細頁。「查看全部文件」連結導向 DM01 文件庫<br>
+    <strong>最新更新公告：</strong>列出<strong>近 30 天內</strong>已發布的文件，含<strong>新增首版</strong>與<strong>新版本</strong>兩類事件；每筆顯示文件名、版號、變更摘要、發布時間、撰寫者、分類 pill。點擊任一筆進入 DM07 文件詳細頁。「查看全部文件」連結導向 DM01 文件庫<br>
     <strong>權限：</strong>所有登入使用者皆可瀏覽
   </details>
 </div>
@@ -690,21 +690,21 @@
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>本畫面用途：</strong>文件庫主清單，提供關鍵字、分類、發布日期、作者、標籤等檢索條件；分類選「系統操作手冊」時額外顯示「關聯作業項目（func_name）」下拉，供讀者依作業項目反查對應手冊<br>
     <strong>動作入口：</strong><br>
-    <span style="margin-left:1rem;">• 右上「<strong>新增文件</strong>」按鈕 → 直接進入 DM03 <strong>新增模式</strong>（僅 DM_EDITOR 可見）</span><br>
-    <span style="margin-left:1rem;">• 點擊任一文件列 → 進入 DM02 詳細頁瀏覽；若有編輯權限，再從 DM02 點「編輯新版本」進入 DM03 編輯模式</span><br>
+    <span style="margin-left:1rem;">• 右上「<strong>新增文件</strong>」按鈕 → 直接進入 DM08 <strong>新增模式</strong>（僅 DM_EDITOR 可見）</span><br>
+    <span style="margin-left:1rem;">• 點擊任一文件列 → 進入 DM07 詳細頁瀏覽；若有編輯權限，再從 DM07 點「編輯新版本」進入 DM08 編輯模式</span><br>
     <strong>顯示範圍：</strong>列表僅顯示「**已發布**」之目前版本（不含送審中、草稿、已廢止）<br>
     <span style="margin-left:1rem;">• <strong>舊版本（已被取代）</strong> — 進入文件詳細頁的「版本歷程」抽屜查閱（同一個 DOC_ID 下的歷史版本）</span><br>
-    <span style="margin-left:1rem;">• <strong>已廢止文件</strong> — DM01 完全查不到；僅 DM_ADMIN 可至 sidebar「已廢止文件查詢」（DM06）read-only 查看，含完整版本歷程</span><br>
+    <span style="margin-left:1rem;">• <strong>已廢止文件</strong> — DM01 完全查不到；僅 DM_ADMIN 可至 sidebar「已廢止文件查詢」（DM03）read-only 查看，含完整版本歷程</span><br>
     <strong>列表欄位：</strong>文件名稱 / 分類 / 狀態 / 發布日期 / 作者（系統操作手冊額外顯示對應 func_name）；下方另顯示已掛標籤 pills，可一眼識別文件適用情境<br>
     <strong>標籤搜尋：</strong>下拉 multi-select checkbox（僅列<strong>檢索標籤</strong>：適用模組／文件性質／法規關聯）；按鈕顯示已選個數，選取後於按鈕下方以 pill 列出，點 pill 的 × 可移除。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM 管理者於平台 DP 後台維護。「可見對象」（單位 + 職位）為權限標籤、不列入此檢索下拉<br>
     <strong>可見範圍（標籤式可見性）：</strong><strong>閱覽者</strong>只看得到 (全單位, 全體) 之文件，或其被授予之「單位 + 職位」配對與文件所掛者相符之文件（<strong>整組比對</strong>，非兩維各自比對）；<strong>編輯者／審核者／管理者不受此限，可見全部</strong>。單位不展開下層。可見對象授權由 DM_ADMIN 於 平台 DP 後台權限管理維護<br>
     <strong>顯示原則：</strong>列表預設僅顯示目前發布版本（CURRENT），不混雜歷史版本；歷史版本可進入文件詳細頁透過「版本歷程」抽屜查閱<br>
-    <strong>點擊單筆文件：</strong>進入文件詳細頁（DM02）<br>
-    <strong>權限說明：</strong>登入使用者依可見範圍閱讀（見上）；新增/編輯按鈕僅 DM_EDITOR 角色顯示；已廢止文件本畫面一律不顯示，DM_ADMIN 須另從 sidebar「已廢止文件查詢」（DM06）進入
+    <strong>點擊單筆文件：</strong>進入文件詳細頁（DM07）<br>
+    <strong>權限說明：</strong>登入使用者依可見範圍閱讀（見上）；新增/編輯按鈕僅 DM_EDITOR 角色顯示；已廢止文件本畫面一律不顯示，DM_ADMIN 須另從 sidebar「已廢止文件查詢」（DM03）進入
   </details>
 </div>
 
-<!-- ==================== DM02 文件詳細頁 ==================== -->
+<!-- ==================== DM07 文件詳細頁 ==================== -->
 <div class="screen" id="dm-detail">
   <div class="screen-header">
     <div>
@@ -716,7 +716,7 @@
         <span class="ms-2"><span class="status-pill status-published" id="detail-status-published">已發布</span><span class="status-pill status-obsolete" id="detail-status-obsolete" style="display:none;">已廢止</span></span>
       </div>
     </div>
-    <div class="screen-meta">dm/detail.jsp (DM02)</div>
+    <div class="screen-meta">dm/detail.jsp (DM07)</div>
   </div>
 
   <!-- 已廢止 banner（僅 read-only 模式顯示） -->
@@ -872,16 +872,16 @@
     <span style="margin-left:1rem;">• <strong>已被取代之舊版本</strong>：一律僅提供「預覽」按鈕，<strong>不開放下載與還原</strong>（避免使用者誤用舊規範）；若稽核需要取得舊版檔案，請聯絡 DM_ADMIN</span><br>
     <span style="margin-left:1rem;">• <strong>已廢止文件</strong>：所有版本（含廢止前最後發布版本）一律僅可預覽、不開放下載；資料永久保留供稽核</span><br>
     <span style="margin-left:1rem;">• <strong>整份文件廢止</strong>時，版本歷程末尾新增廢止紀錄（廢止者、時間、原因）</span><br>
-    <strong>本頁不另設「變更歷程」區塊：</strong>所有公開變更（發布／廢止）資訊已整合進版本歷程；DM_ADMIN 完整稽核請至 sidebar「文件變更歷程查詢」（DM08）<br>
-    <strong>編輯新版本：</strong>DM_EDITOR 可點擊進入 DM03 編輯模式（帶 doc_id 參數），新版號由撰寫者自行輸入（自由格式，無系統自動建議 / Major / Minor）<br>
-    <strong>廢止此文件：</strong><strong>DM_EDITOR</strong> 可發起；點擊「廢止此文件」跳出確認 modal，須<strong>必填廢止原因</strong>（可<strong>選填附加檔案</strong>，如函文公文，格式 / 大小比照文件上傳）後送出。送審期間文件狀態為「<strong>廢止待簽核</strong>」，<strong>原發布版本仍持續對外提供</strong>不受影響。通知該文件之指定審核者，於簽核中心（DM04）處理：<br>
+    <strong>本頁不另設「變更歷程」區塊：</strong>所有公開變更（發布／廢止）資訊已整合進版本歷程；DM_ADMIN 完整稽核請至 sidebar「文件變更歷程查詢」（DM05）<br>
+    <strong>編輯新版本：</strong>DM_EDITOR 可點擊進入 DM08 編輯模式（帶 doc_id 參數），新版號由撰寫者自行輸入（自由格式，無系統自動建議 / Major / Minor）<br>
+    <strong>廢止此文件：</strong><strong>DM_EDITOR</strong> 可發起；點擊「廢止此文件」跳出確認 modal，須<strong>必填廢止原因</strong>（可<strong>選填附加檔案</strong>，如函文公文，格式 / 大小比照文件上傳）後送出。送審期間文件狀態為「<strong>廢止待簽核</strong>」，<strong>原發布版本仍持續對外提供</strong>不受影響。通知該文件之指定審核者，於簽核中心（DM02）處理：<br>
     <span style="margin-left:1rem;">• <strong>核准</strong>：文件正式廢止、不再出現於文件庫主清單；版本歷程末尾新增廢止紀錄（含申請人、申請時間、廢止原因、廢止附件（如有）、核准者、核准時間）並通知撰寫者</span><br>
     <span style="margin-left:1rem;">• <strong>退回</strong>：文件回到「已發布」狀態，撰寫者收到退回通知與退回原因</span><br>
-    <strong>撰寫過程動作：</strong>上傳／編輯／送審／退回等個人視角紀錄請至 DM07 儀表板「文件草稿」區塊查看（不在本頁顯示）
+    <strong>撰寫過程動作：</strong>上傳／編輯／送審／退回等個人視角紀錄請至 DM04 儀表板「文件草稿」區塊查看（不在本頁顯示）
   </details>
 </div>
 
-<!-- ==================== DM03 新增/編輯文件 ==================== -->
+<!-- ==================== DM08 新增/編輯文件 ==================== -->
 <div class="screen" id="dm-upload">
   <div class="screen-header">
     <div>
@@ -891,7 +891,7 @@
         <span id="upload-title-edit">編輯文件 — 領血確認標準作業程序</span>
       </div>
       <div class="text-muted small mt-1" id="upload-mode-hint-edit">
-        <i class="bi bi-link-45deg me-1"></i>從 DM02 文件詳細頁點擊「編輯新版本」進入
+        <i class="bi bi-link-45deg me-1"></i>從 DM07 文件詳細頁點擊「編輯新版本」進入
       </div>
       <div class="text-muted small mt-1" id="upload-mode-hint-create" style="display:none;">
         <i class="bi bi-plus-circle me-1"></i>從 DM01 文件庫點擊「新增文件」進入
@@ -904,7 +904,7 @@
         <input type="radio" class="btn-check" name="upload-mode" id="upload-mode-edit-r" checked onclick="switchUploadMode('edit')">
         <label class="btn btn-outline-secondary" for="upload-mode-edit-r"><i class="bi bi-pencil me-1"></i>切換編輯</label>
       </div>
-      <div class="screen-meta">dm/upload.jsp (DM03)</div>
+      <div class="screen-meta">dm/upload.jsp (DM08)</div>
     </div>
   </div>
 
@@ -1117,9 +1117,9 @@
         </div>
         <!-- 不支援預覽格式警示（檔案為 Office 檔時顯示）-->
         <div class="wf-status-msg wf-status-warn mt-2" id="upload-nonpdf-warn" style="display:none;">
-          <i class="bi bi-exclamation-triangle me-1"></i>此檔案為 Office 格式（Word / Excel / PPT），<strong>閱讀者在 DM02 將無法線上預覽</strong>，僅能下載原檔以本機應用程式開啟。如需提供預覽，建議改上傳 PDF 版本。
+          <i class="bi bi-exclamation-triangle me-1"></i>此檔案為 Office 格式（Word / Excel / PPT），<strong>閱讀者在 DM07 將無法線上預覽</strong>，僅能下載原檔以本機應用程式開啟。如需提供預覽，建議改上傳 PDF 版本。
         </div>
-        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>僅支援上傳既有檔案（PDF/Word/Excel/PPT/圖片）；上傳後系統不修改原檔，閱讀者可直接下載原檔。<strong>建議優先採用 PDF 格式</strong> — PDF 與圖片支援 DM02 線上預覽，Office 格式（Word/Excel/PPT）上傳後將跳出提醒並僅提供下載。</div>
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>僅支援上傳既有檔案（PDF/Word/Excel/PPT/圖片）；上傳後系統不修改原檔，閱讀者可直接下載原檔。<strong>建議優先採用 PDF 格式</strong> — PDF 與圖片支援 DM07 線上預覽，Office 格式（Word/Excel/PPT）上傳後將跳出提醒並僅提供下載。</div>
       </div>
     </div>
 
@@ -1134,7 +1134,7 @@
           <option value="doctorw">吳醫師（檢驗科）</option>
           <option value="qabox">品保室</option>
         </select>
-        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>下拉清單僅顯示具備「審核者」角色之使用者（由 平台 DP 後台權限管理指派），且<strong>排除撰寫者本人</strong>（不可自審自核）。送出後系統僅通知本筆指定審核者；該審核者於 DM04 簽核中心可看到此項目。</div>
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>下拉清單僅顯示具備「審核者」角色之使用者（由 平台 DP 後台權限管理指派），且<strong>排除撰寫者本人</strong>（不可自審自核）。送出後系統僅通知本筆指定審核者；該審核者於 DM02 簽核中心可看到此項目。</div>
       </div>
 
       <div class="wf-card">
@@ -1165,7 +1165,7 @@
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>兩種進入模式：</strong><br>
     <span style="margin-left:1rem;">①<strong>新增模式</strong>：URL <code>dm/upload.jsp</code>（無 doc_id 參數），由 DM01「新增文件」按鈕進入。標題顯示「新增文件」，隱藏「目前版本」區塊，首版版號由撰寫者自行輸入（無預設值）</span><br>
-    <span style="margin-left:1rem;">②<strong>編輯模式</strong>：URL <code>dm/upload.jsp?doc_id=DM-SOP-000123</code>，由 DM02「編輯新版本」按鈕進入。標題顯示「編輯文件 — {文件名}」，預先帶入上一版的所有欄位；顯示「目前版本」（唯讀）與「新版本號」（撰寫者自行輸入）<br>
+    <span style="margin-left:1rem;">②<strong>編輯模式</strong>：URL <code>dm/upload.jsp?doc_id=DM-SOP-000123</code>，由 DM07「編輯新版本」按鈕進入。標題顯示「編輯文件 — {文件名}」，預先帶入上一版的所有欄位；顯示「目前版本」（唯讀）與「新版本號」（撰寫者自行輸入）<br>
     <span style="margin-left:1rem;">（右上角「切換新增/切換編輯」按鈕僅 wireframe 用，正式系統不會出現）</span><br>
     <strong>版本號規則：</strong>版本號由撰寫者自行輸入（格式「年 v版號」，如 2026 v1.0 / 2026 v2.1）；系統不自動建議、無 Major / Minor 升版，僅檢核非空且同文件內不重複。版本號送審後不可修改<br>
     <strong>變更摘要必填：</strong>會顯示於版本歷程與發布通知信中<br>
@@ -1175,20 +1175,20 @@
     <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（適用模組／文件性質／法規關聯〔檢索〕）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM 管理者於平台 DP 後台維護，供 DM01 搜尋使用<br>
     <strong>權限：</strong>本畫面僅 DM_EDITOR 角色可進入；角色由管理者於 平台 DP 後台權限管理指派<br>
     <strong>內容輸入：</strong>僅支援上傳檔案（PDF/Word/Excel/PPT/圖片，單檔最大 50 MB）；不提供線上編輯功能<br>
-    <span style="margin-left:1rem;">• <strong>不支援預覽格式提醒</strong>：上傳 Office 格式（Word/Excel/PPT）檔案時，系統跳出提醒視窗告知「閱讀者於 DM02 將無法線上預覽，僅能下載原檔」；撰寫者可選「重新選擇」改傳 PDF，或選「仍要使用此檔案」繼續送審。確認後檔案下方顯示橘色警示條（持續提示）。PDF 與圖片可線上預覽，不觸發提醒</span><br>
+    <span style="margin-left:1rem;">• <strong>不支援預覽格式提醒</strong>：上傳 Office 格式（Word/Excel/PPT）檔案時，系統跳出提醒視窗告知「閱讀者於 DM07 將無法線上預覽，僅能下載原檔」；撰寫者可選「重新選擇」改傳 PDF，或選「仍要使用此檔案」繼續送審。確認後檔案下方顯示橘色警示條（持續提示）。PDF 與圖片可線上預覽，不觸發提醒</span><br>
     <span style="margin-left:1rem;">• <strong>demo 模式</strong>：上傳區域提供 PDF / Word / Excel / PPT / 圖片五種範例切換連結，方便客戶確認提醒視窗與警示條樣式（正式系統不顯示此 demo 連結）</span><br>
-    <strong>取消編輯：</strong>若有未儲存變更，跳 confirm「離開將遺失未儲存的修改」→ 確定後返回（編輯模式返回 DM02，新增模式返回 DM01）；無變更直接返回不跳 confirm<br>
-    <strong>指定審核者：</strong>送交簽核前必選；下拉清單為 平台 DP 後台權限管理中具「審核者」角色之使用者，且<strong>排除撰寫者本人</strong>（職責分離，不可自審自核）。送出後系統<strong>只通知該指定審核者</strong>（不再通知所有審核者）；該審核者於 DM04 簽核中心可看到此項目<br>
+    <strong>取消編輯：</strong>若有未儲存變更，跳 confirm「離開將遺失未儲存的修改」→ 確定後返回（編輯模式返回 DM07，新增模式返回 DM01）；無變更直接返回不跳 confirm<br>
+    <strong>指定審核者：</strong>送交簽核前必選；下拉清單為 平台 DP 後台權限管理中具「審核者」角色之使用者，且<strong>排除撰寫者本人</strong>（職責分離，不可自審自核）。送出後系統<strong>只通知該指定審核者</strong>（不再通知所有審核者）；該審核者於 DM02 簽核中心可看到此項目<br>
     <strong>送交簽核：</strong>狀態變為「送審中」，系統 Email + 系統內訊息通知指定審核者<br>
     <strong>新版本發布原子操作：</strong>核准後系統自動執行（1）插入新版本紀錄；（2）原版本狀態改「已被取代」；（3）更新主檔 CURRENT_VERSION_ID 指標。外部 URL 完全不變
   </details>
 </div>
 
-<!-- ==================== DM04 簽核中心 ==================== -->
+<!-- ==================== DM02 簽核中心 ==================== -->
 <div class="screen" id="dm-review">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-check2-square me-2"></i>簽核中心</div>
-    <div class="screen-meta">dm/review.jsp (DM04)</div>
+    <div class="screen-meta">dm/review.jsp (DM02)</div>
   </div>
 
   <ul class="nav nav-tabs mb-3" role="tablist">
@@ -1494,11 +1494,11 @@
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>本畫面用途：</strong>簽核中心，審查者（DM_REVIEWER）處理待簽核文件，含兩個分頁：<strong>待簽核</strong> / <strong>已完成</strong><br>
-    <strong>指定審核者：</strong>每筆送審項目由撰寫者於 DM03 指定一名審核者；本清單<strong>僅顯示「指定審核者 = 當前登入者」之項目</strong>。撰寫者送出時系統會 Email + 系統內訊息通知該指定審核者；其他審核者不會看到此項目。<strong>因本頁為審核者本人視角、清單內每筆必然指派給自己，故不另列「指定審核者」欄</strong><br>
+    <strong>指定審核者：</strong>每筆送審項目由撰寫者於 DM08 指定一名審核者；本清單<strong>僅顯示「指定審核者 = 當前登入者」之項目</strong>。撰寫者送出時系統會 Email + 系統內訊息通知該指定審核者；其他審核者不會看到此項目。<strong>因本頁為審核者本人視角、清單內每筆必然指派給自己，故不另列「指定審核者」欄</strong><br>
     <strong>申請類型：</strong>同一清單同時處理三種申請：<br>
     <span style="margin-left:1rem;">• <span class="badge bg-success">新增</span> — 撰寫者於 DM01 點「新增文件」首次提交；核准後以撰寫者指定版號（預設 2026 v1.0）首次發布</span><br>
-    <span style="margin-left:1rem;">• <span class="badge bg-primary">新版本</span> — 撰寫者於 DM02 詳細頁點「編輯新版本」送審；核准後執行版本切換（依 §8.3 原子操作），舊版自動標記「已被取代」</span><br>
-    <span style="margin-left:1rem;">• <span class="badge bg-danger">廢止</span> — 撰寫者於 DM02 詳細頁點「廢止此文件」發起；核准後整份文件廢止，不再出現於文件庫主清單</span><br>
+    <span style="margin-left:1rem;">• <span class="badge bg-primary">新版本</span> — 撰寫者於 DM07 詳細頁點「編輯新版本」送審；核准後執行版本切換（依 §8.3 原子操作），舊版自動標記「已被取代」</span><br>
+    <span style="margin-left:1rem;">• <span class="badge bg-danger">廢止</span> — 撰寫者於 DM07 詳細頁點「廢止此文件」發起；核准後整份文件廢止，不再出現於文件庫主清單</span><br>
     <strong>待簽核分頁：</strong>列出所有送審中項目。<strong>點擊任一列</strong>展開「簽核明細」面板（同時間只展開一筆）；面板會依申請類型動態切換：<br>
     <span style="margin-left:1rem;">• 新增：顯示首版摘要 + 單一新增檔案（無新舊比對）+「核准並發布／退回」按鈕</span><br>
     <span style="margin-left:1rem;">• 新版本：顯示變更摘要 + 版本對照（舊／新版檔案可下載）+「核准並發布／退回」按鈕</span><br>
@@ -1510,15 +1510,15 @@
     <span style="margin-left:1rem;">• 新增 / 新版本：草稿 → 送審中 → 已核准/退回 → 已發布</span><br>
     <span style="margin-left:1rem;">• 廢止：已發布 → 廢止待簽核 → 已廢止/已發布（退回回原狀）</span><br>
     <strong>停留天數：</strong>顯示送審後經過的天數；**超過 7 天**之項目標紅警示（紅底 + ⚠️ icon），且系統會**自動發催辦信給指定審核者**（每日寄一次直到處理完，詳見 平台 DP 後台通知範本「自動催辦信」事件）<br>
-    <strong>卡住怎麼辦：</strong>若指定審核者長期未處理，**撰寫者**可至 DM07「我的文件動態」對該筆送審項目點「<strong>撤回送審</strong>」（撤回後文件回到草稿，撰寫者可重新編輯與選擇新審核者再送）；DM_ADMIN 不介入個別簽核項目
+    <strong>卡住怎麼辦：</strong>若指定審核者長期未處理，**撰寫者**可至 DM04「我的文件動態」對該筆送審項目點「<strong>撤回送審</strong>」（撤回後文件回到草稿，撰寫者可重新編輯與選擇新審核者再送）；DM_ADMIN 不介入個別簽核項目
   </details>
 </div>
 
-<!-- ==================== DM07 個人專區（我的文件動態 + 草稿匣 + 撤回送審）==================== -->
+<!-- ==================== DM04 個人專區（我的文件動態 + 草稿匣 + 撤回送審）==================== -->
 <div class="screen" id="dm-personal">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-person-workspace me-2"></i>個人專區</div>
-    <div class="screen-meta">dm/personal.jsp (DM07)</div>
+    <div class="screen-meta">dm/personal.jsp (DM04)</div>
   </div>
 
   <p class="text-muted fst-italic small">
@@ -1655,11 +1655,11 @@
   </div>
 </div>
 
-<!-- ==================== DM06 已廢止文件查詢 ==================== -->
+<!-- ==================== DM03 已廢止文件查詢 ==================== -->
 <div class="screen" id="dm-obsolete">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-archive me-2"></i>已廢止文件查詢</div>
-    <div class="screen-meta">dm/obsolete.jsp (DM06)</div>
+    <div class="screen-meta">dm/obsolete.jsp (DM03)</div>
   </div>
 
   <!-- 搜尋列 -->
@@ -1783,21 +1783,21 @@
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
     <strong>本畫面用途：</strong>已廢止文件查詢（僅 DM_ADMIN），供稽核、醫療糾紛追溯、法規查核使用<br>
     <strong>清單欄位：</strong>文件名稱（含末版版號）/ 分類 / 原作者 / 廢止時間 / 廢止申請人 / 核准者 / 廢止原因（含廢止附件下載，如有）<br>
-    <strong>點擊任一列：</strong>進入 DM02 文件詳細頁的 <strong>read-only 模式</strong>：<br>
+    <strong>點擊任一列：</strong>進入 DM07 文件詳細頁的 <strong>read-only 模式</strong>：<br>
     <span style="margin-left:1rem;">• 顯示「已廢止」banner，標題狀態 pill 改為已廢止</span><br>
     <span style="margin-left:1rem;">• 隱藏「廢止此文件 / 編輯新版本」按鈕（廢止文件不再產生新版本）</span><br>
     <span style="margin-left:1rem;">• 保留「下載 / 版本歷程」供稽核審視</span><br>
-    <strong>跟 DM08 的關係：</strong>DM08 是事件日誌（記錄誰在何時做了什麼），本畫面是文件目錄（列出所有已廢止文件本體與版本歷程）— 兩者互補，事件追溯與文件追溯各有用途<br>
+    <strong>跟 DM05 的關係：</strong>DM05 是事件日誌（記錄誰在何時做了什麼），本畫面是文件目錄（列出所有已廢止文件本體與版本歷程）— 兩者互補，事件追溯與文件追溯各有用途<br>
     <strong>權限：</strong>僅 DM_ADMIN（一般使用者與撰寫者於主清單看不到已廢止文件，避免誤用）<br>
     <strong>匯出：</strong>支援 CSV 匯出（供稽核資料封存）
   </details>
 </div>
 
-<!-- ==================== DM08 文件變更歷程查詢 ==================== -->
+<!-- ==================== DM05 文件變更歷程查詢 ==================== -->
 <div class="screen" id="dm-audit">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-search me-2"></i>文件變更歷程查詢</div>
-    <div class="screen-meta">dm/audit.jsp (DM08)</div>
+    <div class="screen-meta">dm/audit.jsp (DM05)</div>
   </div>
 
   <div class="wf-card">
@@ -1886,11 +1886,11 @@
   </details>
 </div>
 
-<!-- ==================== DM10 閱讀統計 KPI ==================== -->
+<!-- ==================== DM06 閱讀統計 KPI ==================== -->
 <div class="screen" id="dm-kpi">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-bar-chart-line me-2"></i>閱讀統計 KPI</div>
-    <div class="screen-meta">dm/kpi.jsp (DM10)</div>
+    <div class="screen-meta">dm/kpi.jsp (DM06)</div>
   </div>
 
   <div class="wf-status-msg wf-status-info">
@@ -1991,9 +1991,9 @@
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0; border-color:#cfd8dc;">
-    <strong>本畫面用途：</strong>管理者專屬閱讀 KPI 儀表板（DM10）；逐文件呈現 應看 / 已看 / 未看 / 閱讀率，可依關鍵字 / 分類查詢、匯出 CSV<br>
+    <strong>本畫面用途：</strong>管理者專屬閱讀 KPI 儀表板（DM06）；逐文件呈現 應看 / 已看 / 未看 / 閱讀率，可依關鍵字 / 分類查詢、匯出 CSV<br>
     <strong>應看＝0：</strong>文件掛了可見對象但無任何閱覽者被授予該對象時，閱讀率顯示「—（無對應閱覽者）」，且不列入整體平均閱讀率<br>
-    <strong>空資料：</strong>查詢無符合文件時顯示「查無符合條件之文件統計」（DM-MSG-DM10-001）<br>
+    <strong>空資料：</strong>查詢無符合文件時顯示「查無符合條件之文件統計」（DM-MSG-DM06-001）<br>
     <strong>已看認定：</strong>使用者<strong>下載目前發布版</strong>即計為已看（預覽不計）；同人同版本以一次計；發布新版本後該文件已看歸零（需重新下載新版）<br>
     <strong>應看（分母）：</strong>該文件可見對象相符之閱覽者（掛「全體」→所有閱覽者）；<strong>不排除</strong>兼具編輯 / 審核 / 管理者者（與發布通知一致）<br>
     <strong>每週排程（SCHDM001，每週執行；星期＋時間可於 平台 DP 後台通知範本設定，預設週一 10:00，共用；於平台 <code>DP_SCHEDULE</code> 註冊、平台引擎執行、job handler 由 DM 提供）：</strong>寄 KPI 週報予管理者（Email：內文摘要 + CSV 附件）、寄未讀提醒予未看之閱覽者（Email：一人一信彙整，<strong>涵蓋全部已發布文件</strong>；是否寄送由管理者於 平台 DP 後台通知範本「未讀提醒」啟用/停用統一控制）；大量寄信經平台發信服務 + outbox <code>DP_EMAIL_LOG</code> 非同步<br>
@@ -2024,7 +2024,7 @@
 </div>
 
 
-<!-- ===== DM03 不支援預覽格式上傳提醒 Modal（編輯者上傳 Office 檔時觸發） ===== -->
+<!-- ===== DM08 不支援預覽格式上傳提醒 Modal（編輯者上傳 Office 檔時觸發） ===== -->
 <div class="modal fade" id="nonPdfWarnModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -2033,9 +2033,9 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p>您上傳的檔案 <strong id="nonpdf-filename">—</strong>（<span id="nonpdf-ext">—</span> 格式）<strong>不支援 DM02 線上預覽</strong>。</p>
+        <p>您上傳的檔案 <strong id="nonpdf-filename">—</strong>（<span id="nonpdf-ext">—</span> 格式）<strong>不支援 DM07 線上預覽</strong>。</p>
         <ul class="small mb-2">
-          <li>閱讀者在 DM02 文件詳細頁<strong>無法直接預覽內容</strong>，僅會看到「不支援預覽」訊息</li>
+          <li>閱讀者在 DM07 文件詳細頁<strong>無法直接預覽內容</strong>，僅會看到「不支援預覽」訊息</li>
           <li>閱讀者仍可下載原檔，並以本機對應軟體（Word / Excel / PPT 等）開啟</li>
           <li>若希望提供線上預覽，建議改上傳<strong> PDF 版本</strong>（同一份文件兩種格式須分開上傳；目前每文件僅保留一份檔案）</li>
         </ul>
@@ -2049,7 +2049,7 @@
   </div>
 </div>
 
-<!-- ===== 申請廢止 Modal（DM02 申請廢止按鈕觸發，DM_EDITOR 可發起；送 DM_REVIEWER 簽核） ===== -->
+<!-- ===== 申請廢止 Modal（DM07 申請廢止按鈕觸發，DM_EDITOR 可發起；送 DM_REVIEWER 簽核） ===== -->
 <div class="modal fade" id="obsoleteModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -2133,7 +2133,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // DM03 表單 dirty 追蹤：任一 input/change 事件即標記為已修改
+  // DM08 表單 dirty 追蹤：任一 input/change 事件即標記為已修改
   var dmUpload = document.getElementById('dm-upload');
   if (dmUpload) {
     dmUpload.addEventListener('input', _markUploadDirty);
@@ -2194,7 +2194,7 @@ function goHome() {
 }
 
 function goScreen(id) {
-  // 進入 DM02 預設為一般模式（goObsoleteDetail 會在之後 override 為 read-only）
+  // 進入 DM07 預設為一般模式（goObsoleteDetail 會在之後 override 為 read-only）
   if (id === 'dm-detail') setDetailReadOnly(false);
   var link = document.querySelector('.sidebar [data-screen="' + id + '"]');
   if (link) {
@@ -2206,7 +2206,7 @@ function goScreen(id) {
   }
 }
 
-/* ===== DM02 read-only 模式（從 DM06 已廢止文件查詢進入） ===== */
+/* ===== DM07 read-only 模式（從 DM03 已廢止文件查詢進入） ===== */
 var _detailReadOnly = false;
 function setDetailReadOnly(isReadOnly) {
   _detailReadOnly = !!isReadOnly;
@@ -2299,7 +2299,7 @@ function toggleHistory() {
   if (panel.style.display === '') panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/* ===== DM03 上傳檔案 demo 切換（含不支援預覽格式提醒） ===== */
+/* ===== DM08 上傳檔案 demo 切換（含不支援預覽格式提醒） ===== */
 var UPLOAD_FILE_SAMPLES = {
   'pdf':  { name: 'SOP-領血確認-2026 v2.2.pdf', size: '2.3 MB', icon: 'bi-file-earmark-pdf', iconCls: 'text-danger' },
   'docx': { name: 'SOP-領血確認-2026 v2.2.docx', size: '1.4 MB', icon: 'bi-file-earmark-word', iconCls: 'text-primary' },
@@ -2353,7 +2353,7 @@ function clearUploadFile() {
   document.getElementById('upload-nonpdf-warn').style.display = 'none';
 }
 
-/* ===== 進入 DM03 並設定模式（新增 / 編輯） ===== */
+/* ===== 進入 DM08 並設定模式（新增 / 編輯） ===== */
 function enterCreateMode() {
   goScreen('dm-upload');
   setTimeout(function() {
@@ -2373,7 +2373,7 @@ function enterEditMode(docId) {
   }, 50);
 }
 
-/* ===== DM02 申請廢止 modal（DM_EDITOR 發起；送 DM_REVIEWER 簽核） ===== */
+/* ===== DM07 申請廢止 modal（DM_EDITOR 發起；送 DM_REVIEWER 簽核） ===== */
 function openObsoleteModal() {
   document.getElementById('obsolete-reason').value = '';
   var of = document.getElementById('obsolete-file'); if (of) of.value = '';
@@ -2396,7 +2396,7 @@ function updateNextVersion(type) {
   input.value = type === 'major' ? '2026 v3.0' : '2026 v2.2';
 }
 
-/* ===== DM03 上傳/編輯：模式切換（新增 / 編輯） ===== */
+/* ===== DM08 上傳/編輯：模式切換（新增 / 編輯） ===== */
 var _uploadMode = 'edit'; // 預設為編輯模式（demo 用）
 function switchUploadMode(mode) {
   _uploadMode = mode;
@@ -2433,11 +2433,11 @@ function switchUploadMode(mode) {
   if (nameInput) nameInput.value = isEdit ? (nameInput.getAttribute('data-default-edit') || '') : '';
 }
 
-/* ===== DM03 表單 dirty 追蹤 + 儲存草稿 + 取消編輯 ===== */
+/* ===== DM08 表單 dirty 追蹤 + 儲存草稿 + 取消編輯 ===== */
 var _uploadFormDirty = false;
 function _markUploadDirty() { _uploadFormDirty = true; }
 function _doUploadCancel() {
-  // 編輯模式 → 返回 DM02；新增模式 → 返回 DM01
+  // 編輯模式 → 返回 DM07；新增模式 → 返回 DM01
   if (_uploadMode === 'edit') {
     goScreen('dm-detail');
   } else {
@@ -2482,7 +2482,7 @@ function cancelEdit() {
   modal.show();
 }
 
-/* ===== DM04 簽核中心：展開/收合簽核明細、核准、退回 ===== */
+/* ===== DM02 簽核中心：展開/收合簽核明細、核准、退回 ===== */
 var _reviewDocs = {
   1: { type: 'version', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '領血確認標準作業程序 2026 v2.2', summary: '補充第 5 點異常通報流程；新增 30 分鐘時效規定；對齊新版供應模組 BS04 流程。' },
   2: { type: 'version', category: 'SOP', categoryClass: 'cat-sop', categoryLabel: 'SOP', title: '入庫作業 SOP 2026 v1.4', summary: '補充戰時模式入庫規則，含異常掃碼處理與雙人覆核時機。' },
@@ -2706,7 +2706,7 @@ function confirmReject() {
   _currentReviewId = null;
 }
 
-/* ===== DM03 分類切換 → 關聯欄位 toggle ===== */
+/* ===== DM08 分類切換 → 關聯欄位 toggle ===== */
 // 僅「系統操作手冊」分類顯示「關聯作業項目」；其他分類無關聯欄位
 function switchCategoryRelation(categoryCode) {
   var funcBlock = document.getElementById('relation-func-block');
@@ -2728,7 +2728,7 @@ function dm01ToggleFuncFilter(categoryText) {
   }
 }
 
-/* ===== DM03 關聯作業項目下拉（Bootstrap dropdown）— 選擇後更新按鈕標籤與 active 樣式 ===== */
+/* ===== DM08 關聯作業項目下拉（Bootstrap dropdown）— 選擇後更新按鈕標籤與 active 樣式 ===== */
 function selectFunc(value, label) {
   var btn = document.getElementById('relation-func-btn');
   var labelEl = document.getElementById('relation-func-label');

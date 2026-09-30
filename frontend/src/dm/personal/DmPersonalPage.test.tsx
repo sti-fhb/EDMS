@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { DmPersonalPage } from "./DmPersonalPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
-describe("DmPersonalPage 個人專區（DM07）", () => {
+describe("DmPersonalPage 個人專區（DM04）", () => {
   it("我的文件動態：撰寫者 / 審核者視角事件；送審中可撤回；逾門檻顯催辦中（AC5）", async () => {
     renderWithProviders(<DmPersonalPage />)
     expect(await screen.findByText("待審文件 A")).toBeInTheDocument() // 撰寫者視角（送審中）
@@ -30,7 +30,7 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     expect(screen.queryByText("收到送審")).not.toBeInTheDocument()
   })
 
-  it("撤回送審 → 二次確認 → 成功 toast（DM-MSG-DM07-005）", async () => {
+  it("撤回送審 → 二次確認 → 成功 toast（DM-MSG-DM04-005）", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmPersonalPage />)
     await user.click(await screen.findByRole("button", { name: "撤回送審" }))
@@ -56,7 +56,7 @@ describe("DmPersonalPage 個人專區（DM07）", () => {
     expect(screen.getAllByRole("button", { name: "刪除" })).toHaveLength(3)
   })
 
-  it("刪除草稿 → 確認（DM-MSG-DM07-004）→ 成功 toast", async () => {
+  it("刪除草稿 → 確認（DM-MSG-DM04-004）→ 成功 toast", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmPersonalPage />)
     await user.click(await screen.findByRole("tab", { name: "草稿匣" }))

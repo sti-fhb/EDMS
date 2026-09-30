@@ -49,7 +49,7 @@ function isPendingOpen(openStartAt: string | null): boolean {
 }
 
 /**
- * ET04 加入新課程（AC 5～AC 10）。
+ * ET03 加入新課程（AC 5～AC 10）。
  *
  * 三態：**輸入** → **預覽** → 加入。預覽是 AC 8 明訂的一步（「顯示課程資訊，學員
  * 確認後加入」），不是可省略的中間頁——學員拿到的是一串數字，加入前沒有任何線索

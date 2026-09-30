@@ -1,5 +1,5 @@
 /**
- * ET02 章節項目、教材與測驗型別（對齊後端 `app/et/course/schemas.py`、
+ * ET05 章節項目、教材與測驗型別（對齊後端 `app/et/course/schemas.py`、
  * `app/et/material/schemas.py`、`app/et/quiz/schemas.py`）。
  */
 
@@ -69,7 +69,7 @@ export interface DocRow {
   /** DM 端即時查得；`unavailable` 時為 null。 */
   doc_name: string | null
   version_no: string | null
-  /** 已廢止——顯示警告（ET-MSG-ET02-002），僅可逐筆刪除。 */
+  /** 已廢止——顯示警告（ET-MSG-ET05-002），僅可逐筆刪除。 */
   obsolete: boolean
   /** DM 端取不到（文件被刪、無發布版）。與「已廢止」不同：廢止仍讀得到最後版。 */
   unavailable: boolean

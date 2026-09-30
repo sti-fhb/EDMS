@@ -1,4 +1,4 @@
-"""ET05 學習進度 API（US5 / #274）——區段上報、normalize、項目檢視。
+"""ET06 學習進度 API（US5 / #274）——區段上報、normalize、項目檢視。
 
 router-level 掛 `get_et_context`（任一 ET 角色）與兩個維度的限流；真正的授權在 service
 的四道守門（在籍 OR 擁有者 → 預覽靜默 → 關閉擋寫 → 未解鎖擋下），見 `service` 模組

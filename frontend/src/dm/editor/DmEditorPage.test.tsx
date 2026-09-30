@@ -70,7 +70,7 @@ beforeEach(() => {
   navigateSpy.mockClear()
 })
 
-describe("DmEditorPage 文件新增與編輯（DM03）", () => {
+describe("DmEditorPage 文件新增與編輯（DM08）", () => {
   it("新增模式：可編輯名稱；選『系統操作手冊』條件式顯示關聯作業項目", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
@@ -92,7 +92,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(screen.getByRole("button", { name: "仍使用此檔案" })).toBeInTheDocument()
   })
 
-  it("送簽缺可見對象 → 顯示可見對象錯誤、不送出（DM-MSG-DM03-008）", async () => {
+  it("送簽缺可見對象 → 顯示可見對象錯誤、不送出（DM-MSG-DM08-008）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
@@ -197,12 +197,12 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
 
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
 
-    // 不出現 DM-MSG-DM03-008 的可見對象錯誤，直接送出成功
+    // 不出現 DM-MSG-DM08-008 的可見對象錯誤，直接送出成功
     expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
     expect(screen.queryByText("請至少指定 1 組可見對象")).not.toBeInTheDocument()
   }, 20000)
 
-  it("送簽成功 → toast 已送交簽核並導向詳細（DM-MSG-DM03-006）", async () => {
+  it("送簽成功 → toast 已送交簽核並導向詳細（DM-MSG-DM08-006）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
@@ -245,7 +245,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(createCalls).toBe(1) // 關鍵：改審核者不清草稿快取、不重複建立文件
   }, 20000)
 
-  it("存草稿成功（可見對象非必填）→ toast 已儲存為草稿（DM-MSG-DM03-007）", async () => {
+  it("存草稿成功（可見對象非必填）→ toast 已儲存為草稿（DM-MSG-DM08-007）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
@@ -285,7 +285,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(navigateSpy).not.toHaveBeenCalled()
   }, 20000)
 
-  it("版號重複（後端 DM_DOC_006）→ inline 標於版本號欄（DM-MSG-DM03-009）", async () => {
+  it("版號重複（後端 DM_DOC_006）→ inline 標於版本號欄（DM-MSG-DM08-009）", async () => {
     server.use(
       http.post("/api/dm/documents", () =>
         HttpResponse.json(
@@ -422,7 +422,7 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     expect(screen.getByRole("button", { name: "儲存為草稿" })).toBeDisabled()
   })
 
-  it("取消且有未存變更 → 二次確認（DM-MSG-DM03-005）", async () => {
+  it("取消且有未存變更 → 二次確認（DM-MSG-DM08-005）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")

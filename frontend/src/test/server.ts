@@ -5,7 +5,7 @@ import { setupServer } from "msw/node"
  * MSW mock server：於網路層攔截 API（axios 真實發出 request）。
  * 各測試可用 server.use(...) 覆寫單一情境（如錯誤 / must_change）；預設為 happy path。
  */
-/** ET06 作答中狀態——**選項刻意不含 `is_correct`**，與後端 schema 一致。 */
+/** ET07 作答中狀態——**選項刻意不含 `is_correct`**，與後端 schema 一致。 */
 const ATTEMPT_STATE = {
   attempt_id: 800,
   quiz_id: 700,
@@ -43,7 +43,7 @@ const ATTEMPT_STATE = {
 }
 
 /**
- * ET06 閱卷結果——`POST submit` 與 `GET result` **共用同一份**。
+ * ET07 閱卷結果——`POST submit` 與 `GET result` **共用同一份**。
  *
  * 兩個端點回的是同一次作答的同一份成績，差別只在取得時機；分開寫遲早會有人只改一邊，
  * 而那正好是「剛提交看到的分數」跟「回頭複習看到的分數」對不上的情境。
@@ -1121,11 +1121,11 @@ export const handlers = [
   http.get("/api/dp/schedules/SCHET001/logs", () =>
     HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
   ),
-  // ET02 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
+  // ET05 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
   http.get("/api/et/courses/capabilities", () =>
     HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
   ),
-  // ── ET10 核可查詢（US17 / #385）────────────────────────────────────────
+  // ── ET04 核可查詢（US17 / #385）────────────────────────────────────────
   // 課程篩選下拉（#439）：母體是**有核可紀錄的課程**，不是 ET01 的課程清單。
   // ⚠️ 只有 `course_id` / `course_name` 兩個欄位——那是規格的一部分（見後端
   // `ApprovalCourseOption`），不要為了「方便」補齊成課程卡片。
@@ -1212,7 +1212,7 @@ export const handlers = [
       { tag_id: 2, tag_name: "已裁撤單位", is_active: false },
     ]),
   ),
-  // ET03 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
+  // ET02 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
   // （`/students`、`/attempt-overview`…），與上面的純 `:courseId` 不會互相吃掉；仍放在
   // 它之前，維持「路徑愈具體愈前面」的一致排法。
   // 兩支 CSV 匯出。放在 `/students` 之前（「路徑愈具體愈前面」），雖然 `students` 與
@@ -1315,7 +1315,7 @@ export const handlers = [
               used_attempts: 0,
               is_passed: false,
               can_reset: false,
-              // 空陣列＝尚未作答；該測驗仍要列出（ET-MSG-ET03-005）
+              // 空陣列＝尚未作答；該測驗仍要列出（ET-MSG-ET02-005）
               attempts: [],
             },
           ],
@@ -1475,7 +1475,7 @@ export const handlers = [
       chapter_count: 1,
       student_count: 0,
     }
-    // #359 第 4 項：ET03 的課程下拉要排除草稿、**保留已關閉**（ET-11 AC 10）。
+    // #359 第 4 項：ET02 的課程下拉要排除草稿、**保留已關閉**（ET-11 AC 10）。
     // 少了這一筆，「已關閉仍在下拉裡」那條斷言會因為母體裡根本沒有已關閉課程而假綠。
     const closed = {
       ...mine,
@@ -1505,7 +1505,7 @@ export const handlers = [
   http.put("/api/et/courses/:courseId/chapters/order", () => new HttpResponse(null, { status: 204 })),
   http.put("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
   http.delete("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
-  // ET02 課後問卷與發布（#204）：預設「尚未建立問卷」——**回 null 而非 404**，
+  // ET05 課後問卷與發布（#204）：預設「尚未建立問卷」——**回 null 而非 404**，
   // 問卷為選配（AC 23），「沒有」是正常狀態。個別測試以 server.use 覆蓋。
   http.get("/api/et/courses/:courseId/survey", () => HttpResponse.json(null)),
   http.post("/api/et/courses/:courseId/survey", ({ params }) =>
@@ -1564,7 +1564,7 @@ export const handlers = [
       version: 1,
     }),
   ),
-  // ET02 關閉與再開課（US11 / #288）。`closed_at` 於再開課後**仍帶值**（FR-ET-US11-10
+  // ET05 關閉與再開課（US11 / #288）。`closed_at` 於再開課後**仍帶值**（FR-ET-US11-10
   // 保留供追溯），fixture 照實反映——若回 null，任何誤用「有沒有值」判斷關閉狀態的
   // 程式碼都會在測試裡剛好通過，而正式環境會錯。
   http.post("/api/et/courses/:courseId/close", ({ params }) =>
@@ -1588,7 +1588,7 @@ export const handlers = [
     }),
   ),
 
-  // ── ET04 我的課程與加入新課程（US4 / #247）────────────────────────────────
+  // ── ET03 我的課程與加入新課程（US4 / #247）────────────────────────────────
   http.get("/api/et/my-courses", () =>
     HttpResponse.json({
       summary: { joined: 3, in_progress: 1, not_started: 1, completed: 0, pending_open: 1 },
@@ -1655,7 +1655,7 @@ export const handlers = [
     HttpResponse.json({ course_id: 1, completion_status: "NOT_STARTED", pending_open: false }, { status: 201 }),
   ),
 
-  // ── ET05 章節學習（US5 / #255）──────────────────────────────────────────
+  // ── ET06 章節學習（US5 / #255）──────────────────────────────────────────
   http.get("/api/et/materials/:materialId/content", ({ params }) =>
     HttpResponse.json({
       material_id: Number(params.materialId),
@@ -1688,7 +1688,7 @@ export const handlers = [
   ),
   http.post("/api/et/videos/:videoId/ticket", () => HttpResponse.json({ ticket: "test-ticket", expires_in: 60 })),
 
-  // ── ET05 學習進度（US5 / #274）──────────────────────────────────────────
+  // ── ET06 學習進度（US5 / #274）──────────────────────────────────────────
   http.post("/api/et/videos/:videoId/intervals", ({ params }) =>
     HttpResponse.json({
       video_id: Number(params.videoId),
@@ -1709,7 +1709,7 @@ export const handlers = [
     HttpResponse.json({ item_id: Number(params.itemId), completed: false }),
   ),
 
-  // ── ET02 邀請學員（US8 / #273、#362）────────────────────────────────────
+  // ── ET05 邀請學員（US8 / #273、#362）────────────────────────────────────
   // 預覽由**後端**以統一範本渲染後回傳（非前端拼字串），故 handler 也回完整字串。
   // 預覽內容**與收件人無關**（姓名為佔位字樣），故 handler 不看 emails。
   http.post("/api/et/courses/:courseId/invitations/preview", () =>
@@ -1733,7 +1733,7 @@ export const handlers = [
     return HttpResponse.json({ joined: list.length, mail_failed: [] })
   }),
 
-  // ── ET06 測驗作答（US6 / #279）──────────────────────────────────────────
+  // ── ET07 測驗作答（US6 / #279）──────────────────────────────────────────
   http.get("/api/et/quizzes/:quizId/intro", ({ params }) =>
     HttpResponse.json({
       quiz_id: Number(params.quizId),

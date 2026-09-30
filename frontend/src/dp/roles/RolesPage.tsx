@@ -54,7 +54,7 @@ export function RolesPage() {
   if (!modules || modules.length === 0) {
     return (
       <Box>
-        <ScreenHeader code="DP06" />
+        <ScreenHeader code="DP02" />
         <Alert severity="info">您目前無可管理的模組權限。</Alert>
       </Box>
     )
@@ -62,7 +62,7 @@ export function RolesPage() {
 
   return (
     <Box>
-      <ScreenHeader code="DP06" />
+      <ScreenHeader code="DP02" />
       <Tabs value={active ?? modules[0]} onChange={(_, v) => setSelected(v)} sx={{ mb: 2 }}>
         {modules.map((m) => (
           <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />

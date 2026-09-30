@@ -1,4 +1,4 @@
-/** ET02 課後問卷型別與表單驗證（對齊後端 `app/et/survey/schemas.py`）。 */
+/** ET05 課後問卷型別與表單驗證（對齊後端 `app/et/survey/schemas.py`）。 */
 
 import { z } from "zod"
 

@@ -5,9 +5,9 @@ ET 教材引用 DM「訓練教材」分類之文件，經平台唯一跨模組�
 
 | 方法 | 對應 | 用於 |
 |------|------|------|
-| `list_training_documents(db, category=..., keyword=..., func_code=...)` | SRVDM002 | ET02 教材下拉 |
-| `get_current_by_doc_id(db, doc_id)` | SRVDM001 | ET02 發布檢核（`obsolete`）/ ET05 學員閱讀 |
-| `read_file_for_reference(db, doc_id=..., version_id=...)` | 取檔 | ET05 學員取教材檔案 |
+| `list_training_documents(db, category=..., keyword=..., func_code=...)` | SRVDM002 | ET05 教材下拉 |
+| `get_current_by_doc_id(db, doc_id)` | SRVDM001 | ET05 發布檢核（`obsolete`）/ ET06 學員閱讀 |
+| `read_file_for_reference(db, doc_id=..., version_id=...)` | 取檔 | ET06 學員取教材檔案 |
 
 ## 為何不自行定義型別與 Protocol
 

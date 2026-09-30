@@ -30,13 +30,13 @@ import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
 
 /**
- * ET04 我的課程（US4 / #247）——學員預設首頁。
+ * ET03 我的課程（US4 / #247）——學員預設首頁。
  *
  * ## 三項 spec 條目本 issue（#247）到不了，後續已補齊
  *
  * | spec | 當時為何到不了 | 現況 |
  * |---|---|---|
- * | AC 6 點卡片進 ET05、定位上次進度 | `ET-5` 未實作 | ✅ #255 / #274 交付 |
+ * | AC 6 點卡片進 ET06、定位上次進度 | `ET-5` 未實作 | ✅ #255 / #274 交付 |
  * | AC 5 / 13 已關閉課程唯讀回看 | `ET-11` 未實作，課程無法變 CLOSED | ✅ #288 交付關閉端點 |
  * | 卡片「當前進度」 | 依賴 `ET_PROGRESS`（`ET-5`）| ✅ #274 填實 `progress_pct` |
  *
@@ -75,7 +75,7 @@ export function EtMyCoursesPage() {
   const summary = data?.summary
   const courses = data?.courses ?? []
 
-  /** 點擊課程卡片 → ET05 章節學習（AC 6；#255 接上，在此之前只給提示）。 */
+  /** 點擊課程卡片 → ET06 章節學習（AC 6；#255 接上，在此之前只給提示）。 */
   function openCourse(courseId: number) {
     navigate(`/et/courses/${courseId}/learn`)
   }
@@ -93,7 +93,7 @@ export function EtMyCoursesPage() {
 
   return (
     <Box>
-      <ScreenHeader code="ET04" />
+      <ScreenHeader code="ET03" />
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <StatCard label="已加入課程" value={summary?.joined ?? 0} icon={<BookIcon />} />
@@ -202,7 +202,7 @@ function StatCard({
 function CourseCard({ course, onOpen }: { course: MyCourseRow; onOpen: () => void }) {
   // #288：看後端算好的 `is_closed`，**不要**自己判 `status === "CLOSED"`。期間已過的
   // 課程 `status` 仍是 `PUBLISHED`（到期自動轉 CLOSED 屬 ET-16、未實作），只看 status
-  // 會讓卡片標「已發布」而點進去 ET05 卻是唯讀的——兩個畫面在使用者眼前互相矛盾。
+  // 會讓卡片標「已發布」而點進去 ET06 卻是唯讀的——兩個畫面在使用者眼前互相矛盾。
   const closed = course.is_closed
   // #363：同理看後端算好的 `is_pending_open`，不自己比時間（瀏覽器時鐘可被改）。
   const pendingOpen = course.is_pending_open

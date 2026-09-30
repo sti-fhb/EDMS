@@ -189,7 +189,7 @@ class DmFileContent:         # read_file_for_reference
 
 ## 檔案內容取用（ET 學員取教材檔）
 
-SRVDM001 只回 metadata，**不回檔案內容**。ET 學員端 ET05 呈現預覽 / 下載時，經 `read_file_for_reference(db, doc_id, version_id)` 取檔：
+SRVDM001 只回 metadata，**不回檔案內容**。ET 學員端 ET06 呈現預覽 / 下載時，經 `read_file_for_reference(db, doc_id, version_id)` 取檔：
 
 - **不掛 DM 角色閘**：此方法不做 DM 角色 / DM 可見性檢查（與 DM 自身 HTTP 取檔端點不同）。**授權由 ET 端自行判定後才呼叫**（學員須為該課程已加入且未移除、章節已解鎖）；DM 端信任 ET 已把關，只負責交檔。
 - **僅限目前發布版**（決策 D-1）：`version_id` 必須等於該文件 `CURRENT_VERSION_ID`，否則 `AppError(403, DM_DOC_002)`。ET 教材恆取當前發布版，不需舊版。

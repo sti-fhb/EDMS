@@ -35,7 +35,7 @@ function asRole(role: "teacher" | "admin" | "student") {
 
 const EMPTY = { data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }
 
-describe("ET10 核可查詢：教師 / 管理者視角", () => {
+describe("ET04 核可查詢：教師 / 管理者視角", () => {
   it("輸入姓名查詢後列出核可紀錄，含課程、結果、核可人", async () => {
     asRole("teacher")
     const user = userEvent.setup()
@@ -78,7 +78,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     expect(hint).toHaveTextContent("考核備註")
   })
 
-  it("查無資料顯示空狀態提示（ET-MSG-ET10-001）", async () => {
+  it("查無資料顯示空狀態提示（ET-MSG-ET04-001）", async () => {
     asRole("teacher")
     server.use(http.post("/api/et/approvals/search", () => HttpResponse.json(EMPTY)))
     const user = userEvent.setup()
@@ -274,7 +274,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
 
   it("🔴 課程清單載入失敗時說「載入失敗」，**不得**說「尚無核可紀錄」（#439）", async () => {
     // 後者是一句**假話**，而且比缺陷本身更糟——教師會據此以為系統裡真的沒有核可紀錄，
-    // 而不是「剛才沒載到，重整一下」。ET03 的課程下拉踩過同一個坑（#390 的回歸）。
+    // 而不是「剛才沒載到，重整一下」。ET02 的課程下拉踩過同一個坑（#390 的回歸）。
     asRole("teacher")
     server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json({}, { status: 500 })))
     renderWithProviders(<EtApprovalQueryPage />)
@@ -322,7 +322,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
   })
 })
 
-describe("ET10 核可查詢：學員視角", () => {
+describe("ET04 核可查詢：學員視角", () => {
   it("🔴 載入失敗顯示錯誤，**不得**渲染成「尚無已通過核可的課程」", async () => {
     asRole("student")
     server.use(
@@ -353,7 +353,7 @@ describe("ET10 核可查詢：學員視角", () => {
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
   })
 
-  it("無已通過課程時顯示空狀態（ET-MSG-ET10-002）", async () => {
+  it("無已通過課程時顯示空狀態（ET-MSG-ET04-002）", async () => {
     asRole("student")
     server.use(http.get("/api/et/approvals/mine", () => HttpResponse.json(EMPTY)))
     renderWithProviders(<EtApprovalQueryPage />)
@@ -362,7 +362,7 @@ describe("ET10 核可查詢：學員視角", () => {
   })
 })
 
-describe("ET10 核可查詢：共通", () => {
+describe("ET04 核可查詢：共通", () => {
   it("🔴 任一視角都不得提供下載或列印（FR-ET-US17-05）", async () => {
     // 客戶 2026-07-17 明確確認**不需要**核可證明 / 結業證書。
     for (const role of ["teacher", "student"] as const) {
@@ -412,7 +412,7 @@ describe("ET10 核可查詢：共通", () => {
   })
 
   it("兼具教師與學員角色時顯示教師視角", async () => {
-    // 他自己的已通過課程在 ET04「我的課程」看得到；兩張表塞同一頁只會讓畫面變長。
+    // 他自己的已通過課程在 ET03「我的課程」看得到；兩張表塞同一頁只會讓畫面變長。
     asRole("teacher")
     renderWithProviders(<EtApprovalQueryPage />)
 

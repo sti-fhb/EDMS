@@ -331,7 +331,7 @@ async def test_學員從註冊到填完問卷的完整流程(client, db) -> None
     #
     # 下面那條反向斷言是刻意的：它把「這個欄位是死的」釘成測試。哪天有人補上寫入路徑，
     # 它會紅，而那正是該重新確認「即時導出仍是單一事實來源」的時點——兩個來源並存而
-    # 不一致，畫面上看不出資料是死的（ET04 於 #284 踩過同一個坑）。
+    # 不一致，畫面上看不出資料是死的（ET03 於 #284 踩過同一個坑）。
     enrolled_row = await db.scalar(
         select(EtEnrollment).where(
             EtEnrollment.course_id == course["course_id"], EtEnrollment.user_id == student, EtEnrollment.deleted == 0
@@ -378,7 +378,7 @@ async def test_學員從註冊到填完問卷的完整流程(client, db) -> None
     after = await client.get(f"{_COURSES}/{course['course_id']}/survey/form", headers=headers)
     assert after.json()["state"] == ENTRY_SUBMITTED
 
-    # ── 階段 9：教師端看得到這位學員的成果（跨到 ET03 追蹤）────────────────────
+    # ── 階段 9：教師端看得到這位學員的成果（跨到 ET02 追蹤）────────────────────
     students = await client.get(f"{_COURSES}/{course['course_id']}/students", headers=_bearer(teacher))
     assert students.status_code == 200, students.text
     rows = [r for r in students.json()["data"] if r["user_id"] == student]

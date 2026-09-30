@@ -13,7 +13,7 @@ import StarterKit from "@tiptap/starter-kit"
 import { useEffect } from "react"
 
 /**
- * 教材說明文字之 WYSIWYG 編輯器（ET02）。
+ * 教材說明文字之 WYSIWYG 編輯器（ET05）。
  *
  * ## 白名單須與後端一致
  *

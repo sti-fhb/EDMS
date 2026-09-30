@@ -22,7 +22,7 @@ import { QUERY_KEYS } from "../../constants/queryKeys"
 type View = "stats" | "details"
 
 /**
- * ET03 區塊 3：問卷結果（`FR-ET-US9-07` / `-08`）。
+ * ET02 區塊 3：問卷結果（`FR-ET-US9-07` / `-08`）。
  *
  * ## 課程無問卷時**整個區塊不渲染**
  *
@@ -77,7 +77,7 @@ export function SurveyResultBlock({ courseId, onExport }: { courseId: number; on
       </Typography>
 
       {data.filled_count === 0 && (
-        /* ET-MSG-ET03-006；題目仍列出，只是統計為 0 */
+        /* ET-MSG-ET02-006；題目仍列出，只是統計為 0 */
         <Typography color="text.secondary" sx={{ mb: 2 }}>
           尚無學員填答問卷
         </Typography>

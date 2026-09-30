@@ -94,7 +94,7 @@ class EtStatsService:
         """學員卡：四個數字**取自 `my_courses()` 的 `summary`，不另算一份**。
 
         ⚠️ 看起來只為了四個數字就跑了整支 `my_courses`（含標籤、章節數、逐課進度），
-        那是刻意的：ET04 頁面與本卡顯示同一組數字，各算一次的話會在課程剛開放 / 剛
+        那是刻意的：ET03 頁面與本卡顯示同一組數字，各算一次的話會在課程剛開放 / 剛
         關閉的瞬間分歧，而**兩個數字都看起來合理**，沒有人會知道哪個錯。同源是靠
         「呼叫同一支」保證，不是靠兩邊小心。
         """
@@ -113,7 +113,7 @@ class EtStatsService:
         `urgent_days` 取自 `ET_URGENT_REMIND_DAYS`（`DP_PARAM`）——與加急提醒信同一個
         門檻，理由見 `EtStatsRepository.courses_ending_soon`。
 
-        **未完課人數以 `course_stat()` 即時算**，與週報、ET03 頁面同一支。⛔ 不可改讀
+        **未完課人數以 `course_stat()` 即時算**，與週報、ET02 頁面同一支。⛔ 不可改讀
         `ET_ENROLLMENT.COMPLETION_STATUS`：該欄只在建立選課列時寫一次 `NOT_STARTED`、
         **之後永不更新**（全專案無任何 update 寫它），讀它會讓「未完課人數」恆等於
         在籍人數，而畫面上看不出異常。

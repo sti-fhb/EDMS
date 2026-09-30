@@ -38,7 +38,7 @@ function optionText(options: QuestionResult["options"], predicate: (o: QuestionR
 }
 
 /**
- * ET06 結果頁（AC 7 / AC 11）——剛提交的成績單，也是「查看上次作答明細」的複習頁。
+ * ET07 結果頁（AC 7 / AC 11）——剛提交的成績單，也是「查看上次作答明細」的複習頁。
  *
  * ## 兩種進入方式
  *
@@ -129,7 +129,7 @@ export function EtQuizResultPage() {
       )}
 
       {/*
-        ET-MSG-ET06-005（#280 裁示 Q3 = B）。原 spec 要在**作答中**告知，但作答頁刻意
+        ET-MSG-ET07-005（#280 裁示 Q3 = B）。原 spec 要在**作答中**告知，但作答頁刻意
         不重抓（重抓會把尚未暫存的答案蓋回畫面），而場景 27 保證作答中的 attempt 照常
         完成並計分——學員不會因為不知情而損失任何東西，故改於此處告知。
       */}
@@ -151,7 +151,7 @@ export function EtQuizResultPage() {
           {result.remaining_attempts} 次
         </Typography>
 
-        {/* ET-MSG-ET06-004 */}
+        {/* ET-MSG-ET07-004 */}
         {canRetry && (
           <Alert severity="warning" sx={{ mt: 2, textAlign: "left" }}>
             未達及格分數，您仍有重考機會

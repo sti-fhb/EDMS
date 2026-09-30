@@ -1,4 +1,4 @@
-/** 個人專區（US9 / UCDM09 / DM07）型別（對齊後端 app/dm/personal/schemas.py）。 */
+/** 個人專區（US9 / UCDM09 / DM04）型別（對齊後端 app/dm/personal/schemas.py）。 */
 
 /** 草稿分類（依該版本之 DM_REVIEW 歷史）。 */
 export type DraftKind = "unsubmitted" | "rejected" | "withdrawn"

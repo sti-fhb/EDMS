@@ -1,4 +1,4 @@
-/** 已廢止文件查詢（US10 / UCDM08 / DM06）型別（對齊後端 app/dm/obsolete_archive/schemas.py）。 */
+/** 已廢止文件查詢（US10 / UCDM08 / DM03）型別（對齊後端 app/dm/obsolete_archive/schemas.py）。 */
 
 /** 已廢止文件清單列（含末版版號 + 廢止脈絡）。原作者採末版〔在架版〕作者（SA 裁示 Q2=B）。 */
 export interface ObsoleteDocItem {

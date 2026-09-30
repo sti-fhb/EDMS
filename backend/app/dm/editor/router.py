@@ -1,4 +1,4 @@
-"""文件新增與編輯 API（US5 / DM03，寫入）。
+"""文件新增與編輯 API（US5 / DM08，寫入）。
 
 掛 DM 存取閘 `get_dm_context`（需任一 DM 角色）+ 寫入注入 `get_operator`；寫入型端點（新增 / 加版 /
 送簽）另要求 **DM_EDITOR** 角色（`_ensure_editor`）。新增 / 加版以 multipart 收表單欄位 + 單一上傳檔。
@@ -181,7 +181,7 @@ async def get_draft_meta(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """續編模式 author-scoped meta（供 DRAFT-status 文件亦可載，取代編輯模式對 DM02 詳細端點之依賴，#222）。"""
+    """續編模式 author-scoped meta（供 DRAFT-status 文件亦可載，取代編輯模式對 DM07 詳細端點之依賴，#222）。"""
     _ensure_editor(ctx)
     return await _service.get_draft_meta(db, doc_id=doc_id, user_id=ctx.user_id)
 
@@ -214,5 +214,5 @@ async def editor_options(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """DM03 表單受控下拉：分類 / func / 可見對象 / 檢索標籤（皆啟用中）。"""
+    """DM08 表單受控下拉：分類 / func / 可見對象 / 檢索標籤（皆啟用中）。"""
     return await _service.get_options(db)

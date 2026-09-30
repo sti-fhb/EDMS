@@ -8,7 +8,7 @@ import type {
   SurveyTemplateRow,
 } from "./surveySchemas"
 
-/** ET02 課後問卷 API（US3 / #204）。 */
+/** ET05 課後問卷 API（US3 / #204）。 */
 export const surveyApi = {
   /**
    * 課程之問卷；**尚未建立時後端回 `null`（200）而非 404**。
@@ -84,7 +84,7 @@ export const surveyApi = {
   },
 }
 
-/** ET02 課程發布 API（US3 / #204）。 */
+/** ET05 課程發布 API（US3 / #204）。 */
 export const publishApi = {
   /** 預檢：回缺漏清單、不改狀態。發布端點自身仍會重驗，這裡只是體驗。 */
   check: async (courseId: number): Promise<PublishCheckResult> => {

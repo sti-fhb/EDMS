@@ -60,7 +60,7 @@ MODULE_DIRS = ("dm", "dp", "et")
 # 交付文件之檔名格式。模組資料夾下不符此式者視為他人自行撰寫、非本流程產出，
 # 四支工具一律略過。⚠️ 新專案之作業編碼未必為「兩碼英文＋兩位數字」。
 
-MANUAL_NAME_RE = re.compile(r"^[A-Z]{2}\d{2}-.+$")        # 如 ET02-課程建立與編輯
+MANUAL_NAME_RE = re.compile(r"^[A-Z]{2}\d{2}-.+$")        # 如 ET05-課程建立與編輯
 OPERATION_CODE_RE = re.compile(r"^(?P<code>[A-Z]{2}\d{2})-(?P<name>.+)$")
 
 # ---- 四、禁用字樣 --------------------------------------------------------
@@ -74,8 +74,8 @@ OPERATION_CODE_RE = re.compile(r"^(?P<code>[A-Z]{2}\d{2})-(?P<name>.+)$")
 # 落空。兩式已實測互斥——表名（ET_ENROLLMENT / ET_QUIZ_ATTEMPT_M）只中 TABLE_NAME_RE，
 # 錯誤碼只中本式。
 MSG_CODE_RE = re.compile(
-    r"[A-Z]{2}-MSG-[A-Z]{2}\d{2}-\d{3}"         # 如 ET-MSG-ET03-003
-    r"|\b[A-Z]{2}\d{2}-\d{3}\b"                 # 如 ET03-003
+    r"[A-Z]{2}-MSG-[A-Z]{2}\d{2}-\d{3}"         # 如 ET-MSG-ET02-003
+    r"|\b[A-Z]{2}\d{2}-\d{3}\b"                 # 如 ET02-003
     r"|\b[A-Z]{2}_[A-Z]+(?:_[A-Z]+)*_\d{3}\b"   # 如 ET_COURSE_009、DP_MAIL_009
 )
 
