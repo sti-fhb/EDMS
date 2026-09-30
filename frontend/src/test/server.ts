@@ -852,6 +852,7 @@ export const handlers = [
             description: null,
             sort_order: null,
             is_enabled: true,
+            edit_scope: "ADMIN",
           },
           {
             param_key: "RENEW_MAX_HOURS",
@@ -860,6 +861,19 @@ export const handlers = [
             description: null,
             sort_order: null,
             is_enabled: true,
+            edit_scope: "ADMIN",
+          },
+          // 同一主檔內混層級（#171）——本欄位放在 DP_PARAM_D 而非 DP_PARAM_M 的原因。
+          // 注意：本 fixture 為示意而非正式資料之鏡像（ET_TRAINING_UNIT / DM_DOC_CATEGORY
+          // 於 #182 已移出 DP_PARAM），正式環境之 JWT 兩項皆為 READONLY。
+          {
+            param_key: "VERIFY_SEND_COOLDOWN_SEC",
+            param_name: "驗證信重寄冷卻（秒）",
+            param_value: "600",
+            description: null,
+            sort_order: null,
+            is_enabled: true,
+            edit_scope: "READONLY",
           },
         ],
       },
@@ -871,7 +885,15 @@ export const handlers = [
         description: null,
         scope: "ET",
         details: [
-          { param_key: "NURSE", param_name: "護理師", param_value: null, description: null, sort_order: 1, is_enabled: true },
+          {
+            param_key: "NURSE",
+            param_name: "護理師",
+            param_value: null,
+            description: null,
+            sort_order: 1,
+            is_enabled: true,
+            edit_scope: "ADMIN",
+          },
         ],
       },
       {
@@ -882,7 +904,15 @@ export const handlers = [
         description: null,
         scope: "DM",
         details: [
-          { param_key: "SOP", param_name: "標準作業程序", param_value: null, description: null, sort_order: 1, is_enabled: true },
+          {
+            param_key: "SOP",
+            param_name: "標準作業程序",
+            param_value: null,
+            description: null,
+            sort_order: 1,
+            is_enabled: true,
+            edit_scope: "ADMIN",
+          },
         ],
       },
     ]),
@@ -895,11 +925,20 @@ export const handlers = [
       description: null,
       sort_order: null,
       is_enabled: true,
+      edit_scope: "ADMIN",
     }),
   ),
   http.post("/api/dp/params/:id/details", () =>
     HttpResponse.json(
-      { param_key: "DOCTOR", param_name: "醫師", param_value: null, description: null, sort_order: null, is_enabled: true },
+      {
+        param_key: "DOCTOR",
+        param_name: "醫師",
+        param_value: null,
+        description: null,
+        sort_order: null,
+        is_enabled: true,
+        edit_scope: "ADMIN",
+      },
       { status: 201 },
     ),
   ),
@@ -1028,10 +1067,16 @@ export const handlers = [
     ]),
   ),
   http.put("/api/dp/schedules/:jobId", async ({ params, request }) => {
-    const body = (await request.json()) as { job_name: string; cron_expr: string; is_enabled: boolean }
+    const body = (await request.json()) as {
+      job_name: string
+      description: string | null
+      cron_expr: string
+      is_enabled: boolean
+    }
     return HttpResponse.json({
       job_id: params.jobId,
       job_name: body.job_name,
+      description: body.description,
       module: "DP",
       cron_expr: body.cron_expr,
       is_enabled: body.is_enabled,

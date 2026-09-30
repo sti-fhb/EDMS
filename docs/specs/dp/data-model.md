@@ -95,6 +95,7 @@ erDiagram
         VARCHAR DESCRIPTION
         INT SORT_ORDER
         BOOLEAN IS_ENABLED
+        VARCHAR EDIT_SCOPE "維護層級ADMIN/READONLY/HIDDEN"
     }
     DP_NOTIFY_TEMPLATE {
         VARCHAR MODULE PK "複合PK:DP/ET/DM"
@@ -251,6 +252,21 @@ erDiagram
 | DESCRIPTION | VARCHAR(500) | N | — | 明細補充說明 |
 | SORT_ORDER | INT | N | — | 清單顯示排序 |
 | IS_ENABLED | BOOLEAN | Y | true | 清單項啟用 / 停用（不開放刪除，淘汰改停用）|
+| EDIT_SCOPE | VARCHAR(20) | Y | ADMIN | 維護層級（`ADMIN` / `READONLY` / `HIDDEN`，CHECK 約束 `CK_DP_PARAM_D_EDIT_SCOPE`）；見下〈維護層級〉|
+
+#### 維護層級（EDIT_SCOPE）
+
+| 值 | 管理者於 DP07 看到 | 可否編輯 |
+|----|-------------------|---------|
+| `ADMIN` | 正常列出 | ✅ 可改值 / 名稱 / 說明 / 啟停 |
+| `READONLY` | 列出現值 + 「IT 設定」標記 | ❌ **整列**唯讀（四個欄位皆不可改）|
+| `HIDDEN` | 完全不出現 | ❌ |
+
+- 欄位置於**明細**而非主檔：同一群組內會混層級（`LOGIN` 底下 `FAIL_LOCK_COUNT` 為 `ADMIN`、`VERIFY_SEND_COOLDOWN_SEC` 為 `READONLY`）。
+- 與 `DP_PARAM_M.DETAIL_LOCK` **正交**：後者鎖的是明細碼值（`PARAM_KEY`）建立後不可改，本欄管的是誰能改這一列的內容。兩者各自回自己的錯誤碼（`DP_PARAM_002` / `DP_PARAM_007`）。
+- `READONLY` / `HIDDEN` 之值由 IT 直接操作 DB 變更（見 `spec_us5` FR-DP-US5-11），系統不提供介面。
+- 本欄**只作用於維護面**；跨模組唯讀查詢（SRVDP001）不受影響——否則 `HIDDEN` 參數會讀不到而使呼叫端 fallback 到程式碼預設值。
+- 種子分佈（30 列）：`ADMIN` 13 / `READONLY` 9 / `HIDDEN` 8（`MAIL` 三項 + `ACTION_TYPE` 五項）。
 
 ### DP_NOTIFY_TEMPLATE — 通知範本
 
@@ -291,7 +307,7 @@ erDiagram
 |------|------|------|------|------|
 | JOB_ID | VARCHAR(20) | Y | — | PK；`SCH{模組}{3 碼}`（SCHDP001 / SCHET001 / SCHET002 / SCHDM001）|
 | JOB_NAME | VARCHAR(100) | Y | — | 作業名稱（短名詞；工作內容細節寫 `DESCRIPTION`）|
-| DESCRIPTION | VARCHAR(200) | N | — | 這支 job 在做什麼（格式：「{頻率}執行，{動作與受影響的資料}」）。**唯讀、不開放 UI 編輯**——描述的是程式行為，管理者改了不會改變行為、只會讓說明與實作不符（#311）|
+| DESCRIPTION | VARCHAR(200) | N | — | 這支 job 在做什麼（格式：「{頻率}執行，{動作與受影響的資料}」）。可於排程總覽編輯卡片修改（2026-09-29 起；原為唯讀，見 spec_us11 FR-DP-US11-08）|
 | MODULE | VARCHAR(5) | Y | — | job 所屬模組（handler 提供方）|
 | CRON_EXPR | VARCHAR(50) | Y | — | cron 表達式（模組排程時間參數異動時由模組同步更新）|
 | HANDLER_REF | VARCHAR(200) | Y | — | 執行程式參照（Python dotted path，引擎動態 import）|

@@ -24,6 +24,7 @@ import { JoinCourseDialog } from "./JoinCourseDialog"
 import { COMPLETION_STATUS_LABEL } from "./myCoursesSchemas"
 import type { MyCourseRow } from "./myCoursesSchemas"
 import { myCoursesApi } from "./myCoursesService"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
@@ -92,9 +93,7 @@ export function EtMyCoursesPage() {
 
   return (
     <Box>
-      <Typography variant="h5" sx={{ mb: 2 }}>
-        我的課程
-      </Typography>
+      <ScreenHeader code="ET04" />
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <StatCard label="已加入課程" value={summary?.joined ?? 0} icon={<BookIcon />} />

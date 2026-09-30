@@ -7,9 +7,8 @@ import DialogContent from "@mui/material/DialogContent"
 import DialogContentText from "@mui/material/DialogContentText"
 import DialogTitle from "@mui/material/DialogTitle"
 import MenuItem from "@mui/material/MenuItem"
-import Stack from "@mui/material/Stack"
+import Paper from "@mui/material/Paper"
 import TextField from "@mui/material/TextField"
-import Typography from "@mui/material/Typography"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
@@ -19,6 +18,7 @@ import { SurveyResultBlock } from "./SurveyResultBlock"
 import { TeacherAttemptDialog } from "./TeacherAttemptDialog"
 import { downloadStudentsCsv, downloadSurveyCsv, studentsApi } from "./studentsService"
 import type { ApprovalResult, ApproveResult, SkipReason, StudentRow, TeacherQuizRow } from "./schemas"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -297,8 +297,12 @@ export function EtStudentsPage() {
 
   return (
     <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Typography variant="h5">學員</Typography>
+      <ScreenHeader code="ET03" />
+
+      {/* 課程選擇列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
+          ⚠️ 下方三個區塊（已加入學員 / 作答明細 / 問卷結果）**本來就各自有 `Paper`**，
+          缺的只有這一條：下拉裸放在灰底上，看起來像懸空。標題則統一由 ScreenHeader 呈現。 */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
         <TextField
           select
           size="small"
@@ -322,10 +326,10 @@ export function EtStudentsPage() {
             </MenuItem>
           ))}
         </TextField>
-      </Stack>
+      </Paper>
 
       {courseId === "" ? (
-        <Alert severity="info">請先於右上選擇要檢視的課程。</Alert>
+        <Alert severity="info">請先於上方選擇要檢視的課程。</Alert>
       ) : (
         <>
           {readOnly && (

@@ -1,6 +1,5 @@
 import EditIcon from "@mui/icons-material/Edit"
 import HistoryIcon from "@mui/icons-material/History"
-import ScheduleIcon from "@mui/icons-material/Schedule"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import Dialog from "@mui/material/Dialog"
@@ -98,8 +97,7 @@ export function SchedulePage() {
   return (
     <>
       <CrudPageLayout
-        icon={<ScheduleIcon color="primary" />}
-        title="排程作業總覽"
+        code="DP10"
         table={
           <AppTable columns={columns} data={s.jobs} rowKey="job_id" loading={s.jobsLoading} emptyText="尚無排程作業" />
         }

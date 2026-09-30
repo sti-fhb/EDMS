@@ -57,10 +57,20 @@ describe("SurveySection：尚未建立", () => {
     expect(screen.getByRole("button", { name: "新增問卷" })).toBeDisabled()
   })
 
-  it("新增模式（課程尚未建立）時停用並說明原因", () => {
-    render(<SurveySection {...BASE_PROPS} survey={null} disabled />)
-    expect(screen.getByRole("button", { name: "新增問卷" })).toBeDisabled()
-    expect(screen.getByText("請先儲存草稿後再新增問卷")).toBeInTheDocument()
+  /**
+   * #435 推翻了本元件原本的「新增模式時停用並說明原因」。
+   *
+   * 原設計要教師先自己按一次「儲存草稿」才能建問卷——但章節是本地暫存、項目會自動
+   * 存草稿（#335），只有問卷把存檔推給使用者。停用的理由（課程尚未建立於後端）是
+   * 真的，但那是呼叫端該處理的事：`CourseEditorPage` 現在按下去就自動存草稿再接手。
+   *
+   * ⚠️ 本元件已無從得知「課程存不存在」，故這裡釘的是**它不再自行停用**——
+   * 唯一會停用的情形是載入中（上一條）。
+   */
+  it("不再因為課程尚未建立而停用（#435）", () => {
+    render(<SurveySection {...BASE_PROPS} survey={null} />)
+    expect(screen.getByRole("button", { name: "新增問卷" })).toBeEnabled()
+    expect(screen.queryByText("請先儲存草稿後再新增問卷")).not.toBeInTheDocument()
   })
 
   it("點「新增問卷」直接開視窗，不再 inline 收名稱（#359 第 1 項）", async () => {

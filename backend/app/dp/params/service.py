@@ -94,8 +94,36 @@ _LOCKED_MSG = "此代碼已鎖定，不可修改代碼值"
 _DUP_MSG = "清單項代碼已存在"
 _TYPE_MSG = "此參數不支援清單項維護"
 _NO_FIELD_MSG = "未提供任何更新欄位"
+_IT_MANAGED_MSG = "此參數由 IT 設定，不可於畫面修改"
 # 系統寫死的 enum 清單（後端稽核直接寫碼、非管理者維護對象），一律排除於維護面（見 /sti-plan #68 §9）
+#
+# 與 EDIT_SCOPE（#171）分層並存，兩者**作用層不同**，勿收斂為單一機制：
+#
+#   | | _SYSTEM_PARAM_IDS | EDIT_SCOPE |
+#   |---|---|---|
+#   | 作用層 | 主檔（PARAM_ID）| 明細（PARAM_ID + PARAM_KEY）|
+#   | 語意 | 這個參數整組不屬於維護面 | 這一列誰可以改 |
+#   | 錯誤碼 | 404 DP_PARAM_004 | 403 DP_PARAM_007 |
+#
+# ACTION_TYPE 的 5 列明細亦回填 EDIT_SCOPE='HIDDEN'（分類表在資料層完整），但實際擋人的是
+# 主檔層這道——它先執行（list_visible 於迴圈開頭 continue、_require_visible_master 於載入前拋）。
+# 移除本集合改由 EDIT_SCOPE 統一處理會讓 test_action_type_excluded_from_maintenance 變紅：
+# 該測試刻意鎖定 404 行為，動它等於推翻當初的決定（#171 D1）。
 _SYSTEM_PARAM_IDS = frozenset({"ACTION_TYPE"})
+
+EDIT_SCOPE_ADMIN = "ADMIN"
+EDIT_SCOPE_HIDDEN = "HIDDEN"
+
+
+def is_editable_scope(edit_scope: str) -> bool:
+    """該明細是否開放管理者於維護頁編輯（#171）。
+
+    刻意寫成「只有 ADMIN 可編輯」而非「READONLY / HIDDEN 要擋」——對三個已知值兩者等價，
+    對**未知值**方向相反。READONLY / HIDDEN 之值由 IT 直接操作 DB 變更（spec_us5 FR-DP-US5-11），
+    人手寫入就有打成 'readonly' 的可能：本寫法讓它維持不可編輯，反向寫法會讓它悄悄變成可編輯。
+    DB 端另有 CK_DP_PARAM_D_EDIT_SCOPE 擋住非三值之寫入，此處是不依賴該約束的第二道。
+    """
+    return edit_scope == EDIT_SCOPE_ADMIN
 
 
 def _scope(param_id: str) -> str:
@@ -266,7 +294,21 @@ class ParamAdminService:
             scope = _scope(m.param_id)
             if not self._visible(scope, is_et, is_dm):
                 continue
-            details = await self._repo.list_details(db, m.param_id, enabled_only=False)
+            all_details = await self._repo.list_details(db, m.param_id, enabled_only=False)
+            # HIDDEN 明細不進維護面。濾在 service 而非 repository——後者同時供 ParamService
+            # （SRVDP001）執行期讀取，那條路徑不得受維護層級影響，否則 MAIL.RATE_PER_MIN
+            # 會讀不到而 fallback 到程式碼預設值：行為變了卻沒有任何錯誤訊息。
+            #
+            # 未知 EDIT_SCOPE 在這條路徑上**不會**變成「列得出來但不可編輯」——
+            # ParamDetailResponse.edit_scope 是 Literal，未知值會在序列化時拋 ValidationError，
+            # 使整頁 500。此情形由 CK_DP_PARAM_D_EDIT_SCOPE 擋在資料層而不會發生；
+            # 真正需要 fail-closed 的是寫入路徑，那由 is_editable_scope() 負責（見其 docstring）。
+            details = [d for d in all_details if d.edit_scope != EDIT_SCOPE_HIDDEN]
+            # 整組皆 HIDDEN（如 MAIL）→ 連主檔一併不回傳，避免畫面出現 0 項的空群組。
+            # 限定「本來就有明細」才跳過：本來就沒有明細的 LIST 主檔須留著，否則新建的清單
+            # 連第一個項目都加不進去（維護頁的新增入口在主檔列上）。
+            if all_details and not details:
+                continue
             result.append(
                 ParamMasterResponse(
                     param_id=m.param_id,
@@ -309,6 +351,15 @@ class ParamAdminService:
         detail = await self._repo.get_detail(db, param_id, param_key)
         if detail is None:
             raise AppError(status_code=404, detail=_NOT_FOUND_MSG, error_code="DP_PARAM_004")
+        # 維護層級檢核（#171）。位置有意義：
+        # - 在模組過濾（_require_visible_master）之**後**——ET 管理者碰 DM 參數要回越權碼
+        #   DP_PARAM_003，回 007 會讓前端分不出「你不是這模組的管理者」與「這參數誰都不能改」。
+        # - 在值域驗證之**前**——這一列根本不開放編輯時，值合不合法無關緊要，也不必洩露
+        #   一個改不動的參數的值域規則。
+        # D2：READONLY ＝整列唯讀，四個欄位一律擋。不只擋 param_value——能停用就能讓
+        # get_param_value() 回 None 使呼叫端 fallback 到預設值，等於繞過唯讀改了實際行為。
+        if not is_editable_scope(detail.edit_scope):
+            raise AppError(status_code=403, detail=_IT_MANAGED_MSG, error_code="DP_PARAM_007")
 
         new_value = fields.get("param_value")
         if new_value is not None and master.param_type == "VALUE":
@@ -334,6 +385,12 @@ class ParamAdminService:
         self, db: AsyncSession, *, param_id: str, data: ParamDetailCreate, operator: OperatorInfo
     ) -> ParamDetailResponse:
         """新增 LIST 型清單項。
+
+        **本方法刻意不看 `EDIT_SCOPE`**：該欄管的是「既有列誰能改」，不管「清單能不能被加列」。
+        要讓整組清單不可變動請設 `DETAIL_LOCK=true`（下方那道檢核），兩者分工見 spec_us5
+        〈三個相鄰機制的分工〉。把 LIST 的幾個明細標成 READONLY 而未設 DETAIL_LOCK 時，
+        管理者仍能新增項目改變 get_param_list() 的結果——今日無可觸發對象（唯一的 LIST 主檔
+        ACTION_TYPE 在 _require_visible_master 就被擋掉），日後新增 LIST 主檔時 MUST 一併確認。
 
         Raises:
             AppError: 主檔不存在 / 越權、非 LIST 型（400 DP_PARAM_006）、

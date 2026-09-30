@@ -5,6 +5,7 @@
 """
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,13 +68,15 @@ class ScheduleRepository:
         *,
         job: DpSchedule,
         job_name: str,
+        description: Optional[str],
         cron_expr: str,
         is_enabled: bool,
         operator_id: str,
         now: datetime,
     ) -> None:
-        """編輯排程定義（僅 JOB_NAME / CRON_EXPR / IS_ENABLED；其餘不可改）+ 稽核欄位並 flush。"""
+        """編輯排程定義（僅 JOB_NAME / DESCRIPTION / CRON_EXPR / IS_ENABLED；其餘不可改）+ 稽核欄位並 flush。"""
         job.job_name = job_name
+        job.description = description
         job.cron_expr = cron_expr
         job.is_enabled = is_enabled
         job.updated_user = operator_id

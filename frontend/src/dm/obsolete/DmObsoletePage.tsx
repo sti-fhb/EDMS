@@ -21,6 +21,7 @@ import type { ObsoleteFilters } from "./schemas"
 import { useObsoleteSearch } from "./useObsolete"
 import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { Pagination } from "../../components/Pagination"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
 import { DM_CATEGORIES } from "../library/schemas"
@@ -81,10 +82,8 @@ export function DmObsoletePage() {
   // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM06-002）
   if (denied) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          已廢止文件查詢
-        </Typography>
+      <Box>
+        <ScreenHeader code="DM06" />
         <Alert severity="error">您無權限存取此頁面</Alert>
       </Box>
     )
@@ -93,10 +92,8 @@ export function DmObsoletePage() {
   // 權限確認中：僅顯示標題 + spinner，不先閃搜尋列（避免非管理者看到搜尋 UI 後才跳無權限）
   if (accessPending) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          已廢止文件查詢
-        </Typography>
+      <Box>
+        <ScreenHeader code="DM06" />
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress size={28} />
         </Box>
@@ -105,10 +102,8 @@ export function DmObsoletePage() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        已廢止文件查詢
-      </Typography>
+    <Box>
+      <ScreenHeader code="DM06" />
 
       {/* 搜尋列（即時篩選，無搜尋按鈕）*/}
       <Paper sx={{ p: 2, mb: 2 }}>

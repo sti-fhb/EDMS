@@ -19,7 +19,7 @@
 
 from typing import NamedTuple
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -45,16 +45,24 @@ class CourseBrief(NamedTuple):
 class EtApprovalQueryRepository:
     """核可紀錄之查詢（教師 / 管理者依姓名查、學員查自己已通過）。"""
 
-    def teacher_query_stmt(self, *, user_name: str, visible: ColumnElement[bool], result: str | None = None) -> Select:
-        """教師 / 管理者依學員姓名查詢的語句（未套 offset/limit，供 `paginate()`）。
+    def teacher_query_stmt(self, *, keyword: str, visible: ColumnElement[bool], result: str | None = None) -> Select:
+        """教師 / 管理者依學員**姓名或 Email** 查詢的語句（未套 offset/limit，供 `paginate()`）。
 
-        🔴 **姓名比對必須跳脫 LIKE 萬用字元**：未跳脫時使用者輸入 `%` 會變成「查全部」，
-        讓「姓名必填」（SA Q2 裁示 A）形同虛設，**而且沒有任何錯誤訊息**。`escape=` 要給
-        具名字元，不能省——省略時 PostgreSQL 用預設的 `\\`，與 `like_contains()` 跳脫時
-        用的字元不一致，跳脫就失效了。前例見 `course/repository.py:277`。
+        🔴 **兩邊的比對都必須跳脫 LIKE 萬用字元**：未跳脫時使用者輸入 `%` 會變成「查全部」，
+        讓「關鍵字必填」（SA Q2 裁示 A）形同虛設，**而且沒有任何錯誤訊息**。真正在做事的是
+        `like_contains()`——它把 `%` / `_` / 反斜線轉成字面。前例見 `course/repository.py:277`。
+
+        ⚠️ **`escape=LIKE_ESCAPE_CHAR` 今天省略不會壞，別誤以為它是那道防線。**
+        `core/like_escape.py` 的 `LIKE_ESCAPE_CHAR` 恰好**就是** PostgreSQL 的預設值
+        （該檔註解自己寫著「PostgreSQL LIKE 之 ESCAPE 預設即反斜線，此處明確指定」），
+        故拿掉它是語意上的 no-op——2026-09-29 以變異檢查實測：兩邊各拿掉一次，34 條全綠。
+
+        ⭐ 明寫它的理由是**日後** `LIKE_ESCAPE_CHAR` 若改成別的字元（例如 `!`），沒寫的
+        那一邊會安靜失效。⛔ 但別把「測試綠」讀成「這個參數有在守什麼」——它守的是未來，
+        不是現在。本 docstring 的前一版把這件事寫反了（宣稱省略會立刻失效）。
 
         Args:
-            user_name: 學員姓名關鍵字（呼叫端已確認非空白）。
+            keyword: 學員姓名或 Email 關鍵字，擇一命中即可（呼叫端已確認非空白）。
             visible: `query_rules.visible_clause()` 的結果。
             result: 選填的結果篩選（`PASS` / `FAIL`）；`None` 表不篩。
 
@@ -76,7 +84,16 @@ class EtApprovalQueryRepository:
                 # 一旦有人啟用該欄位，該學員的**所有核可紀錄會從連管理者的合規查詢裡一起
                 # 消失，且無任何訊號**。要改成不濾之前請先確認那是想要的結果。
                 DpUser.deleted == 0,
-                DpUser.user_name.ilike(like_contains(user_name), escape=LIKE_ESCAPE_CHAR),
+                # 姓名或 Email 擇一命中（#436）——同名同姓時姓名不足以定位，而 Email
+                # 是帳號的唯一鍵。
+                #
+                # 🔴 **`or_` 的每一邊都要各自跳脫**：任一邊漏了，整條 `or_` 就恆真，
+                # 於是 `%` 變成「查全部」而**沒有任何錯誤訊息**——「姓名必填」（SA Q2
+                # 裁示 A）也跟著形同虛設。多一個比對欄位就多一個會漏的地方。
+                or_(
+                    DpUser.user_name.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
+                    DpUser.email.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
+                ),
                 visible,
             )
             .order_by(EtApproval.approved_at.desc(), EtApproval.approval_id.desc())

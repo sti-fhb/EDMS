@@ -20,6 +20,7 @@ import type { ChangeLogFilters } from "./schemas"
 import { useChangeLogSearch } from "./useChangeLog"
 import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { Pagination } from "../../components/Pagination"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
 
@@ -74,10 +75,8 @@ export function DmChangeLogPage() {
   // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM08-002）
   if (denied) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          文件變更歷程查詢
-        </Typography>
+      <Box>
+        <ScreenHeader code="DM08" />
         <Alert severity="error">您無權限存取此頁面</Alert>
       </Box>
     )
@@ -86,10 +85,8 @@ export function DmChangeLogPage() {
   // 權限確認中：僅顯示標題 + spinner，不先閃搜尋列
   if (accessPending) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          文件變更歷程查詢
-        </Typography>
+      <Box>
+        <ScreenHeader code="DM08" />
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress size={28} />
         </Box>
@@ -98,10 +95,8 @@ export function DmChangeLogPage() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        文件變更歷程查詢
-      </Typography>
+    <Box>
+      <ScreenHeader code="DM08" />
 
       {/* 搜尋列（即時篩選，無查詢按鈕）*/}
       <Paper sx={{ p: 2, mb: 2 }}>

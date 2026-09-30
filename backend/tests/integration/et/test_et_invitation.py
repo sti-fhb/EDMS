@@ -62,9 +62,15 @@ async def _user(db, user_id: str, role: str = ROLE_STUDENT, *, email: str | None
 
 async def _published_course(client, db, teacher: str, *, name: str = "採血作業新進人員訓練") -> int:
     """建立並發布一門課程（掛一個沒有人員的標籤，避免產生非預期的收件人）。"""
+    # 起訖一律相對現在：寫死日期的課程會在那天之後變成「關閉中」，整批測試同時變紅
+    now = utcnow().replace(microsecond=0)
     created = await client.post(
         _COURSES,
-        json={"course_name": name, "open_start_at": "2026-09-01T00:00:00Z", "open_end_at": "2026-09-30T00:00:00Z"},
+        json={
+            "course_name": name,
+            "open_start_at": (now - timedelta(days=1)).isoformat(),
+            "open_end_at": (now + timedelta(days=30)).isoformat(),
+        },
         headers=_bearer(teacher),
     )
     assert created.status_code == 201, created.text

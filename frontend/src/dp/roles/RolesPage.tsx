@@ -29,6 +29,7 @@ import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rol
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { isAccountUsable, isDisabled, isLocked } from "../users/accountStatus"
@@ -52,20 +53,16 @@ export function RolesPage() {
   if (isPending) return null
   if (!modules || modules.length === 0) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          權限管理
-        </Typography>
+      <Box>
+        <ScreenHeader code="DP06" />
         <Alert severity="info">您目前無可管理的模組權限。</Alert>
       </Box>
     )
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        權限管理（角色指派）
-      </Typography>
+    <Box>
+      <ScreenHeader code="DP06" />
       <Tabs value={active ?? modules[0]} onChange={(_, v) => setSelected(v)} sx={{ mb: 2 }}>
         {modules.map((m) => (
           <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />

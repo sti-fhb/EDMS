@@ -5,6 +5,7 @@ import Divider from "@mui/material/Divider"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
+import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
@@ -98,7 +99,7 @@ function ValueEditBody({
   }
 
   return (
-    <FormCard title={detail.param_name} onSave={handleSave} onCancel={onClose} cancelLabel="關閉">
+    <FormCard title={`編輯系統參數 — ${detail.param_name}`} onSave={handleSave} onCancel={onClose} cancelLabel="關閉">
       <Stack spacing={2}>
         <TextField
           autoFocus
@@ -202,67 +203,83 @@ function ListEdit({ row, onSaveDetail, onToggle, onAdd, onClose }: ParamEditPane
   return (
     <Paper variant="outlined" sx={{ p: 3, mt: 2, maxWidth: 600, border: 2, borderColor: "primary.main" }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <Typography variant="h6">{master.param_name}</Typography>
+        <Typography variant="h6">編輯系統參數 — {master.param_name}</Typography>
         {master.detail_lock && <Chip size="small" icon={<LockIcon />} label="代碼鎖定" />}
       </Stack>
 
       {/* 每筆兩行（碼＋名稱 / 說明＋操作），讓新增的「說明」欄不必撐寬面板，維持 max-width 600（sti-ui-design §5）。 */}
       <Stack divider={<Divider flexItem />} spacing={1.5}>
-        {master.details.map((d) => (
-          <Stack key={d.param_key} spacing={1}>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 120 }}>
-                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                  {d.param_key}
-                </Typography>
-                {master.detail_lock && <LockIcon fontSize="inherit" color="disabled" titleAccess="碼值唯讀" />}
+        {master.details.map((d) => {
+          // EDIT_SCOPE 掛在明細層，對 VALUE / LIST 兩種型別一樣生效（#171）。方向與
+          // ParamsPage 的清單列相同：判「不是 ADMIN」，未知層級不給入口。伺服器端一律擋，
+          // 此處只是不讓人白按一次再吃 403。
+          const locked = d.edit_scope !== "ADMIN"
+          return (
+            <Stack key={d.param_key} spacing={1}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 120 }}>
+                  <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                    {d.param_key}
+                  </Typography>
+                  {master.detail_lock && <LockIcon fontSize="inherit" color="disabled" titleAccess="碼值唯讀" />}
+                </Stack>
+                <TextField
+                  size="small"
+                  label={`${d.param_key} 名稱`}
+                  value={editedOf(d.param_key, d.param_name)}
+                  onChange={(e) => setEdit(d.param_key, e.target.value)}
+                  disabled={locked}
+                  sx={{ flexGrow: 1 }}
+                />
               </Stack>
-              <TextField
-                size="small"
-                label={`${d.param_key} 名稱`}
-                value={editedOf(d.param_key, d.param_name)}
-                onChange={(e) => setEdit(d.param_key, e.target.value)}
-                sx={{ flexGrow: 1 }}
-              />
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "flex-start" }}>
+                <TextField
+                  size="small"
+                  label={`${d.param_key} 說明`}
+                  value={descOf(d.param_key, d.description)}
+                  onChange={(e) => setDesc(d.param_key, e.target.value)}
+                  error={Boolean(descErrors[d.param_key])}
+                  helperText={descErrors[d.param_key]}
+                  disabled={locked}
+                  sx={{ flexGrow: 1 }}
+                />
+                {locked ? (
+                  <Tooltip title="此參數由 IT 於資料庫設定，管理者僅供查看">
+                    <Chip size="small" variant="outlined" icon={<LockIcon />} label="IT 設定" />
+                  </Tooltip>
+                ) : (
+                  <>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() =>
+                        handleSaveItem(
+                          d.param_key,
+                          editedOf(d.param_key, d.param_name),
+                          descOf(d.param_key, d.description),
+                        )
+                      }
+                    >
+                      儲存
+                    </Button>
+                    {d.is_enabled ? (
+                      <Button size="small" color="warning" onClick={() => onToggle(master, d.param_key, false)}>
+                        停用
+                      </Button>
+                    ) : (
+                      <>
+                        <Chip size="small" label="已停用" />
+                        <Button size="small" color="success" onClick={() => onToggle(master, d.param_key, true)}>
+                          啟用
+                        </Button>
+                      </>
+                    )}
+                  </>
+                )}
+              </Stack>
             </Stack>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "flex-start" }}>
-              <TextField
-                size="small"
-                label={`${d.param_key} 說明`}
-                value={descOf(d.param_key, d.description)}
-                onChange={(e) => setDesc(d.param_key, e.target.value)}
-                error={Boolean(descErrors[d.param_key])}
-                helperText={descErrors[d.param_key]}
-                sx={{ flexGrow: 1 }}
-              />
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() =>
-                  handleSaveItem(
-                    d.param_key,
-                    editedOf(d.param_key, d.param_name),
-                    descOf(d.param_key, d.description),
-                  )
-                }
-              >
-                儲存
-              </Button>
-              {d.is_enabled ? (
-                <Button size="small" color="warning" onClick={() => onToggle(master, d.param_key, false)}>
-                  停用
-                </Button>
-              ) : (
-                <>
-                  <Chip size="small" label="已停用" />
-                  <Button size="small" color="success" onClick={() => onToggle(master, d.param_key, true)}>
-                    啟用
-                  </Button>
-                </>
-              )}
-            </Stack>
-          </Stack>
-        ))}
+          )
+        })}
       </Stack>
 
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>

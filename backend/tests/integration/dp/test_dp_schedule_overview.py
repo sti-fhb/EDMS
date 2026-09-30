@@ -3,6 +3,7 @@
 涵蓋 AC7：唯讀 job 清單 + 執行歷程分頁 + 無啟停 / 補跑端點（405）+ 未登入 401。
 """
 
+import json
 import re
 
 import pytest
@@ -192,6 +193,35 @@ async def test_update_schedule_edits_name_cron_enabled(client, db):
 
     audits = (await db.execute(select(DpAuditLog).where(DpAuditLog.func_name == "DP-SCHEDULE"))).scalars().all()
     assert any(a.target_id == "SCHDP001" and a.action_type == "UPDATE" for a in audits)
+
+
+async def test_update_schedule_edits_description(client, db):
+    """說明可經 UI 編輯：寫入後讀回 + 稽核 before / after 帶說明；未帶此欄則維持原值。"""
+    from sqlalchemy import select
+
+    from app.dp.audit.models import DpAuditLog
+    from app.dp.schedules.repository import ScheduleRepository
+
+    await _seed_user(db)
+    original = (await ScheduleRepository().get(db, "SCHDP001")).description
+    base = {"job_name": "平台每日作業", "cron_expr": "0 8 * * *", "is_enabled": True}
+
+    r = await client.put("/api/dp/schedules/SCHDP001", json={**base, "description": "  改過的說明  "}, headers=_auth())
+    assert r.status_code == 200
+    assert r.json()["description"] == "改過的說明"  # 去頭尾空白
+    assert (await ScheduleRepository().get(db, "SCHDP001")).description == "改過的說明"
+
+    audits = (await db.execute(select(DpAuditLog).where(DpAuditLog.func_name == "DP-SCHEDULE"))).scalars().all()
+    assert any(
+        json.loads(a.before_value)["description"] == original
+        and json.loads(a.after_value)["description"] == "改過的說明"
+        for a in audits
+    )
+
+    # 未帶 description（如舊版前端）→ 不得把說明清掉
+    r = await client.put("/api/dp/schedules/SCHDP001", json=base, headers=_auth())
+    assert r.status_code == 200
+    assert r.json()["description"] == "改過的說明"
 
 
 async def test_update_invalid_cron_422(client, db):

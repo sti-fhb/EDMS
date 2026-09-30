@@ -65,6 +65,7 @@ import {
   type CoursePayload,
 } from "./schemas"
 import { ownerLabel } from "./schemas"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -99,6 +100,18 @@ interface PendingAddItem {
    * 頁再跳視窗，而且重新整理就遺失。名稱隨 navigate state 一起過去。
    */
   title: string
+}
+
+/**
+ * 自動存草稿後要接著建立的問卷（#435）——與 `PendingAddItem` 同一個機制、不同的 key。
+ *
+ * ⚠️ 刻意不與 `pendingAddItem` 合併成一個帶 `kind` 的聯合型別：兩者到達後要做的事
+ * 不同（項目要依索引反查 `chapter_id`、問卷直接掛 `course_id`），合併只會讓接手的
+ * effect 變成一個對兩種形狀分岔的函式，而它們之間沒有共用邏輯。
+ */
+interface PendingAddSurvey {
+  /** 問卷名稱。理由同 `PendingAddItem.title`：在導向之前就問完。 */
+  surveyName: string
 }
 
 export function EtCourseEditorPage() {
@@ -779,6 +792,15 @@ export function EtCourseEditorPage() {
    * | 新項目、填了東西 | 確認後刪掉 |
    * | 既有項目、沒改過 | 直接關 |
    * | 既有項目、改過 | 確認後關（項目本身保留） |
+   *
+   * ## 🔴 既有教材的已上傳影片**不在「放棄」的範圍內**（#442）
+   *
+   * 影片是選檔即上傳（`MaterialDialog` 模組 docstring 記著理由：檔案傳輸沒辦法暫存在
+   * 請求裡），所以按取消它仍在伺服器上。原本兩種情境共用「尚未儲存的變更將不會保留」
+   * 一句，對既有教材是**不成立**的宣稱——教師據此以為自己取消掉了。
+   *
+   * 兩種情境不可合併成一句更含糊的話：新項目那邊取消是連項目帶空殼一起刪，影片跟著
+   * 消失，原句成立且該保持；含糊化等於把一句正確的話也弄成不精確的。
    */
   const requestCloseItem = (dirty: boolean) => {
     const isUnsavedNew = unsavedNewItemId !== null
@@ -787,11 +809,15 @@ export function EtCourseEditorPage() {
       else closeItemDialog()
       return
     }
+    // 只在「既有教材且真的有影片」時才提——沒有影片還講一句影片，對他同樣不成立。
+    const keepsUploadedVideos = !isUnsavedNew && (material?.videos.length ?? 0) > 0
     confirm({
       title: "放棄變更",
       content: isUnsavedNew
         ? "變更內容不會儲存，此項目也不會建立。確定取消？"
-        : "尚未儲存的變更將不會保留，確定關閉？",
+        : keepsUploadedVideos
+          ? "尚未儲存的變更將不會保留。已上傳的影片不在此列——它在選擇檔案時就已保存，取消不會移除。確定關閉？"
+          : "尚未儲存的變更將不會保留，確定關閉？",
       okText: "確定",
       onOk: isUnsavedNew ? discardUnsavedItem : closeItemDialog,
     })
@@ -824,6 +850,27 @@ export function EtCourseEditorPage() {
     // 會隨 render 重跑——但 `pendingHandled` ref 在首次真正執行時就設旗標，重入被擋在
     // 最前面，故不需要 eslint-disable 來掩蓋依賴。
   }, [pendingAddItem, course?.chapters, isNew, handleError, invalidate, location.pathname, navigate])
+
+  // 同上，問卷版（#435）。問卷掛課程層級，不需要等章節載入——拿到 `courseId` 即可建立。
+  const pendingAddSurvey = (location.state as { pendingAddSurvey?: PendingAddSurvey } | null)?.pendingAddSurvey
+  const pendingSurveyHandled = useRef(false)
+
+  useEffect(() => {
+    if (!pendingAddSurvey || pendingSurveyHandled.current || isNew || courseId === undefined) return
+    pendingSurveyHandled.current = true
+    navigate(location.pathname, { replace: true, state: null })
+    void (async () => {
+      try {
+        await surveyApi.create(courseId, pendingAddSurvey.surveyName)
+        qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.survey(courseId) })
+        // 建完直接開視窗接續編輯題目——與編輯模式下按「建立」之後的樣子一致，
+        // 使用者不該因為中間插了一次自動存草稿就得再點一次。
+        setSurveyOpen(true)
+      } catch (err) {
+        handleError(err)
+      }
+    })()
+  }, [pendingAddSurvey, isNew, courseId, handleError, location.pathname, navigate, qc])
 
   /**
    * 按下「新增項目」→ **先問名稱**（#414），確認後才真的建立。
@@ -888,13 +935,19 @@ export function EtCourseEditorPage() {
     // 表單驗證已於 `handleAddItem` 做過（要在開啟命名視窗**之前**擋），此處不重複——
     // 兩處各驗一次會讓規則有兩個版本，而命名視窗開啟期間表單是碰不到的。
     const chapterIndex = stagedChapters.findIndex((c) => c.id === chapter.chapter_id)
+    await autoSaveThenNavigate({ pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType, title } })
+  }
+
+  /**
+   * 存草稿 → 導向 `/et/courses/{id}`，把「接下來要做的事」放進 navigate state（#335 / #435）。
+   *
+   * 失敗時**不導向**：錯誤顯示在原處，使用者留在新增頁、剛輸入的內容還在。
+   */
+  const autoSaveThenNavigate = async (state: { pendingAddItem: PendingAddItem } | { pendingAddSurvey: PendingAddSurvey }) => {
     try {
       const created = await coursesApi.create({ ...toPayload(), chapters: stagedChapters.map((c) => c.name) })
       message.success("已自動儲存草稿")
-      navigate(`/et/courses/${created.course_id}`, {
-        replace: true,
-        state: { pendingAddItem: { chapterIndex: chapterIndex < 0 ? 0 : chapterIndex, itemType, title } },
-      })
+      navigate(`/et/courses/${created.course_id}`, { replace: true, state })
     } catch (err) {
       handleError(err)
     }
@@ -981,13 +1034,16 @@ export function EtCourseEditorPage() {
     const { status, errorMessage } = toApiError(courseError)
     const forbidden = status === 403
     return (
-      <Box sx={{ p: 3 }}>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-          <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h5">課程編輯</Typography>
-        </Stack>
+      <Box>
+        <ScreenHeader
+          code="ET02"
+          title="課程編輯"
+          leading={
+            <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
+              <ArrowBackIcon />
+            </IconButton>
+          }
+        />
         <Alert severity={forbidden ? "warning" : "error"}>
           {forbidden ? "您沒有檢視此課程的權限。課程編輯僅開放教師與管理者。" : errorMessage}
         </Alert>
@@ -997,55 +1053,52 @@ export function EtCourseEditorPage() {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h5">{courseId === undefined ? "新增課程" : "課程編輯"}</Typography>
-        <Chip size="small" label={COURSE_STATUS_LABEL[status] ?? status} />
-        {/*
-          「邀請學員」僅**已發布**課程顯示（AC 1）——草稿尚無邀請碼、學員端也看不到課程；
-          已關閉課程的學習頁為唯讀，把人邀請進去只會讓他點開後什麼都不能做。再開課後
-          `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。
-          非擁有者（檢視模式）一律不顯示。
-        */}
-        {status === "PUBLISHED" && !readOnly && course !== undefined && (
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<PersonAddIcon />}
-            sx={{ ml: "auto" }}
-            onClick={() => setInviteOpen(true)}
-          >
-            邀請學員
-          </Button>
-        )}
-        {/*
-          關閉 / 再開課（US11 AC 1 / AC 8、#288）。兩者互斥且各只在對應狀態出現——
-          草稿沒有學員也沒有邀請碼，關閉它沒有語意（要移除草稿走既有的刪除）。
-
-          `ml: "auto"` 只掛在該列的**第一顆**按鈕上：已發布時第一顆是「邀請學員」，
-          已關閉時第一顆是「再開課」。兩顆都掛會讓它們被推到兩端、中間空一大段。
-        */}
-        {status === "PUBLISHED" && !readOnly && course !== undefined && (
-          <Button variant="outlined" size="small" color="warning" startIcon={<LockIcon />} onClick={requestClose}>
-            關閉課程
-          </Button>
-        )}
-        {status === "CLOSED" && !readOnly && course !== undefined && (
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<LockOpenIcon />}
-            sx={{ ml: "auto" }}
-            disabled={reopening}
-            onClick={enterReopen}
-          >
-            再開課
-          </Button>
-        )}
-      </Stack>
+    <Box>
+      <ScreenHeader
+        code="ET02"
+        title={courseId === undefined ? "新增課程" : "課程編輯"}
+        leading={
+          <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
+            <ArrowBackIcon />
+          </IconButton>
+        }
+        adornment={<Chip size="small" label={COURSE_STATUS_LABEL[status] ?? status} />}
+        actions={
+          <Stack direction="row" spacing={1}>
+            {/*
+              「邀請學員」僅**已發布**課程顯示（AC 1）——草稿尚無邀請碼、學員端也看不到課程；
+              已關閉課程的學習頁為唯讀，把人邀請進去只會讓他點開後什麼都不能做。再開課後
+              `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。
+              非擁有者（檢視模式）一律不顯示。
+            */}
+            {status === "PUBLISHED" && !readOnly && course !== undefined && (
+              <Button variant="contained" size="small" startIcon={<PersonAddIcon />} onClick={() => setInviteOpen(true)}>
+                邀請學員
+              </Button>
+            )}
+            {/*
+              關閉 / 再開課（US11 AC 1 / AC 8、#288）。兩者互斥且各只在對應狀態出現——
+              草稿沒有學員也沒有邀請碼，關閉它沒有語意（要移除草稿走既有的刪除）。
+            */}
+            {status === "PUBLISHED" && !readOnly && course !== undefined && (
+              <Button variant="outlined" size="small" color="warning" startIcon={<LockIcon />} onClick={requestClose}>
+                關閉課程
+              </Button>
+            )}
+            {status === "CLOSED" && !readOnly && course !== undefined && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<LockOpenIcon />}
+                disabled={reopening}
+                onClick={enterReopen}
+              >
+                再開課
+              </Button>
+            )}
+          </Stack>
+        }
+      />
 
       {course !== undefined && (
         <InviteStudentsDialog
@@ -1099,15 +1152,24 @@ export function EtCourseEditorPage() {
         發布嘗試殘留的缺漏在此顯示，而那與這次再開課無關（見 `reopenBlockers` 的宣告）。
       */}
       {reopening && reopenBlockers.length > 0 && (
-        <Stack spacing={1} sx={{ mb: 2 }}>
-          <Alert severity="error">
-            課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
-          </Alert>
-          <BlockerList
-            blockers={reopenBlockers}
-            names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
-          />
-        </Stack>
+        // ⚠️ **這個 `Paper` 是必要的，不是裝飾**（#449）。`BlockerList` 原本只出現在
+        // `PublishDialog` 裡，靠 `DialogContent` 提供邊界與內距；#428 把它搬上頁面時
+        // 沿用了對話框內的 markup，於是項目直接貼在頁面背景上、撐滿整個頁寬，讀起來
+        // 像散落的頁面內容而不是一則待處理的清單。
+        //
+        // ⛔ 不要改成在 `BlockerList` 內部加邊界——那會連帶改變 `PublishDialog` 的呈現。
+        // 表面屬於呼叫端的版面責任，樣式沿用本頁其他區塊（基本資料等）的 `Paper`。
+        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+          <Stack spacing={1}>
+            <Alert severity="error">
+              課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
+            </Alert>
+            <BlockerList
+              blockers={reopenBlockers}
+              names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+            />
+          </Stack>
+        </Paper>
       )}
 
       {/*
@@ -1451,12 +1513,15 @@ export function EtCourseEditorPage() {
       <SurveySection
         survey={isNew ? null : survey}
         readOnly={readOnly}
-        disabled={isNew}
         isDraftCourse={status === "DRAFT"}
         saving={surveyMut.isPending}
         error={surveyError}
         // #359 第 1 項：直接開視窗，名稱於視窗內填。**不預建空殼**——取消時什麼都沒發生。
         onCreate={() => {
+          // 🔴 理由與 `handleAddItem` 逐字相同（#435）：新增模式下課程本身的必填要先擋，
+          // 否則使用者會先打完問卷名稱、按下「建立」才被告知「課程名稱未填」——那個錯誤
+          // 與他剛做的事無關，而他剛輸入的名稱也白打了。
+          if (isNew && !validateForm()) return
           setSurveyError(null)
           setSurveyOpen(true)
         }}
@@ -1496,7 +1561,16 @@ export function EtCourseEditorPage() {
         templates={surveyTemplates}
         saving={surveyMut.isPending}
         error={surveyError}
-        onCreate={(name) => surveyMut.mutate(() => surveyApi.create(courseId as number, name))}
+        onCreate={(name) => {
+          // 新增模式：課程還不存在，問卷掛不上去（`ET_SURVEY` 需要真的 `COURSE_ID`）。
+          // ⚠️ 自動存草稿發生在**按下建立之後**，不是開視窗的時候——否則教師開了視窗
+          // 又改變主意，課程草稿已經被建出來了，而 #359 的承諾是「取消時什麼都沒發生」。
+          if (isNew) {
+            void autoSaveThenNavigate({ pendingAddSurvey: { surveyName: name } })
+            return
+          }
+          surveyMut.mutate(() => surveyApi.create(courseId as number, name))
+        }}
         onClose={(dirty) => {
           // 題目編輯器展開中代表有還沒存的內容，直接關掉會讓它無聲消失
           // （#203 實測回饋：「有填入值按取消跳出提示」）

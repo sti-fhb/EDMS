@@ -31,7 +31,8 @@ export interface MyApprovalRow {
 }
 
 export interface ApprovalQueryParams {
-  user_name: string
+  /** 學員**姓名或 Email**（皆為部分比對，擇一命中即可，#436）。 */
+  keyword: string
   result?: "PASS" | "FAIL"
   page?: number
   limit?: number

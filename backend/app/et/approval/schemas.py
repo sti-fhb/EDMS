@@ -163,8 +163,8 @@ class ApprovalSearchReq(BaseModel):
 
     ## 🔴 為何走 request body 而不是 query string（#391）
 
-    `user_name` **必定是一個人的姓名**——這個參數沒有別的用法。而 URL 會被沿路的東西
-    記下來、body 不會：
+    `keyword` **必定是一個人的姓名或 Email**——這個參數沒有別的用法，而且兩者都是個資。
+    而 URL 會被沿路的東西記下來、body 不會：
 
     | 記錄點 | 狀態 |
     |---|---|
@@ -187,9 +187,15 @@ class ApprovalSearchReq(BaseModel):
     > 見 #391 的收尾摘要。
     """
 
-    #: 學員姓名（部分比對）。必填——SA Q2 裁示 A：留白查全部沒有對應需求，且會傾印員工名冊。
+    #: 學員**姓名或 Email**（皆為部分比對，擇一命中即可，#436）。
+    #:
+    #: 必填——SA Q2 裁示 A：留白查全部沒有對應需求，且會傾印員工名冊。
     #: `min_length=1` 擋空字串，全空白由 service 的 `strip()` 擋下回 `ET_APPROVAL_006`。
-    user_name: Annotated[str, Field(min_length=1, max_length=50)]
+    #:
+    #: ⚠️ 上限 100 而非姓名的 50：`DP_USER.EMAIL` 是 `VARCHAR(255)`，用 50 會讓長一點的
+    #: 帳號永遠查不到，而使用者只會看到「查無資料」。100 足以涵蓋實務帳號長度，同時
+    #: 仍遠低於 255，不讓它變成可任意灌長度的欄位。
+    keyword: Annotated[str, Field(min_length=1, max_length=100)]
     #: `PASS` / `FAIL`；`None` 為不限。
     result: Annotated[Literal["PASS", "FAIL"] | None, Field(default=None)] = None
     page: Annotated[int, Field(default=1, ge=1)] = 1

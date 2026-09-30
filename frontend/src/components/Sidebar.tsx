@@ -1,4 +1,3 @@
-import ArticleIcon from "@mui/icons-material/Article"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import FolderIcon from "@mui/icons-material/Folder"
 import Box from "@mui/material/Box"
@@ -93,7 +92,8 @@ function NavGroupSection({ group }: { group: NavGroup }) {
                 },
               }}
             >
-              <ArticleIcon sx={{ width: 20, mr: 1, fontSize: "0.95rem", flexShrink: 0 }} />
+              {/* icon 與該頁左上 ScreenHeader 同源（navItems），兩處必然一致 */}
+              <item.icon sx={{ width: 20, mr: 1, fontSize: "0.95rem", flexShrink: 0 }} />
               {/*
                 畫面編號與名稱刻意拆成兩個相鄰 span（視覺上仍是連續一行「ET01 課程列表」）。
                 如此既有的可見性測試（`getByText("課程列表")` 等，驗 #247 / #250 的角色分流）
@@ -105,7 +105,8 @@ function NavGroupSection({ group }: { group: NavGroup }) {
                     <Box component="span">{item.code}</Box> <Box component="span">{item.label}</Box>
                   </>
                 }
-                primaryTypographyProps={{ fontSize: "0.85rem" }}
+                // 不換行（對齊 TBMS）：名稱斷成兩行既難看、也讓各列高低不一；極端長度以省略號收尾
+                primaryTypographyProps={{ fontSize: "0.8rem", noWrap: true }}
               />
             </ListItemButton>
           ))}

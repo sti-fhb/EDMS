@@ -1,10 +1,12 @@
-import TuneIcon from "@mui/icons-material/Tune"
+import LockIcon from "@mui/icons-material/Lock"
 import Alert from "@mui/material/Alert"
 import Button from "@mui/material/Button"
+import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
 import Tabs from "@mui/material/Tabs"
+import Tooltip from "@mui/material/Tooltip"
 import { useMemo, useState } from "react"
 
 import { AppTable } from "../../components/AppTable"
@@ -132,11 +134,18 @@ export function ParamsPage() {
       {
         key: "actions",
         title: "操作",
-        render: (_v, r) => (
-          <Button size="small" onClick={() => openEdit(r)}>
-            編輯
-          </Button>
-        ),
+        // 判「不是 ADMIN」而非「是 READONLY / HIDDEN」——與後端 is_editable_scope 同方向：
+        // 未知層級不給編輯入口（真正擋寫仍在伺服器端，此處只是不讓人白按）。
+        render: (_v, r) =>
+          r.kind === "value" && r.detail.edit_scope !== "ADMIN" ? (
+            <Tooltip title="此參數由 IT 於資料庫設定，管理者僅供查看">
+              <Chip size="small" variant="outlined" icon={<LockIcon />} label="IT 設定" />
+            </Tooltip>
+          ) : (
+            <Button size="small" onClick={() => openEdit(r)}>
+              編輯
+            </Button>
+          ),
       },
     ],
     [openEdit],
@@ -144,8 +153,7 @@ export function ParamsPage() {
 
   return (
     <CrudPageLayout
-      icon={<TuneIcon color="primary" />}
-      title="系統參數與清單維護"
+      code="DP07"
       filterContent={
         !loading &&
         visibleTabs.length > 0 && (
