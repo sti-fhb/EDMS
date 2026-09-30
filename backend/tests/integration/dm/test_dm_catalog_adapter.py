@@ -11,9 +11,9 @@ from sqlalchemy import select
 
 from app.core.exceptions import AppError
 from app.core.module_assign import module_assign_registry
+from app.core.utils import utcnow
 from app.dm.bootstrap import register_dm_module
 from app.dm.catalog.adapter import CatalogAdapter
-from app.core.utils import utcnow
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument
 from app.dp.audit.models import DpAuditLog
