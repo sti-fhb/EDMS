@@ -23,7 +23,7 @@ import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 
 import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rolesService"
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
@@ -296,7 +296,9 @@ function GroupEditDialog({
   const [selected, setSelected] = useState<string[]>(row.groups)
   // 開啟當下的既有授權：其中「單位未指定」者為導入配對前之過渡狀態，儲存時須原樣保留，
   // 不可與「使用者新加但沒選完」的列一起被丟掉——那會讓既有授權在按下儲存時靜默消失。
-  const initialGroups = useRef(new Set(row.groups))
+  // 用 lazy useState 而非 useRef：下方 `hasIncompleteNewPair` 於 render 期間讀取，
+  // 而 render 期間存取 ref 被 react-hooks 規則擋下（CI 的 ESLint 會紅）。
+  const [initialGroups] = useState(() => new Set(row.groups))
   const paired = isPairedModule(options)
   const unitOptions = options.filter((o) => o.kind === "UNIT")
   const roleOptions = options.filter((o) => o.kind !== "UNIT")
@@ -319,11 +321,11 @@ function GroupEditDialog({
   const completePairs = () =>
     selected.filter((v) => {
       const [unitCode, roleCode] = decodeAudiencePair(v)
-      return roleCode !== "" && (unitCode !== "" || initialGroups.current.has(v))
+      return roleCode !== "" && (unitCode !== "" || initialGroups.has(v))
     })
   const hasIncompleteNewPair = selected.some((v) => {
     const [unitCode, roleCode] = decodeAudiencePair(v)
-    return (roleCode === "" || unitCode === "") && !initialGroups.current.has(v)
+    return (roleCode === "" || unitCode === "") && !initialGroups.has(v)
   })
 
   return (
