@@ -32,6 +32,7 @@ import type { ReviewDetail, VersionMeta } from "./schemas"
 import { downloadObsoleteFile, downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
 import { Pagination } from "../../components/Pagination"
+import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError, toBlobApiError } from "../../services/http"
@@ -336,17 +337,18 @@ export function DmReviewPage() {
     <Box>
       <ScreenHeader code="DM02" />
 
-      <Tabs
-        value={tab}
-        onChange={(_, v) => {
-          setTab(v)
-          setSelectedId(null)
-        }}
-        sx={{ mb: 2 }}
-      >
-        <Tab value="pending" label={`待簽核${pending ? `（${pending.length}）` : ""}`} />
-        <Tab value="completed" label={`已完成${completed ? `（${completed.meta.total}）` : ""}`} />
-      </Tabs>
+      <FilterCard>
+        <Tabs
+          value={tab}
+          onChange={(_, v) => {
+            setTab(v)
+            setSelectedId(null)
+          }}
+        >
+          <Tab value="pending" label={`待簽核${pending ? `（${pending.length}）` : ""}`} />
+          <Tab value="completed" label={`已完成${completed ? `（${completed.meta.total}）` : ""}`} />
+        </Tabs>
+      </FilterCard>
 
       {tab === "pending" ? (
         <Paper sx={{ p: 2 }}>

@@ -5,6 +5,8 @@ import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings"
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn"
 import AutoStoriesIcon from "@mui/icons-material/AutoStories"
 import BarChartIcon from "@mui/icons-material/BarChart"
+import DescriptionIcon from "@mui/icons-material/Description"
+import EditDocumentIcon from "@mui/icons-material/EditDocument"
 import EditNoteIcon from "@mui/icons-material/EditNote"
 import EmailIcon from "@mui/icons-material/Email"
 import FactCheckIcon from "@mui/icons-material/FactCheck"
@@ -14,6 +16,7 @@ import LibraryBooksIcon from "@mui/icons-material/LibraryBooks"
 import ManageAccountsIcon from "@mui/icons-material/ManageAccounts"
 import ManageSearchIcon from "@mui/icons-material/ManageSearch"
 import MenuBookIcon from "@mui/icons-material/MenuBook"
+import PlayLessonIcon from "@mui/icons-material/PlayLesson"
 import ScheduleIcon from "@mui/icons-material/Schedule"
 import SchoolIcon from "@mui/icons-material/School"
 import TuneIcon from "@mui/icons-material/Tune"
@@ -124,8 +127,16 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
 ]
 
-/** 無側欄入口、但有自己頁面標題的畫面（子頁）。ET05 頁面依模式以 `title` 覆寫為「新增課程」/「課程編輯」，此 label 僅為後備。 */
-const SUBPAGE_SCREENS: readonly Screen[] = [{ code: "ET05", label: "課程建立", icon: EditNoteIcon }]
+/**
+ * 無側欄入口、但有自己頁面標題的畫面（子頁 / 詳細頁）。這些頁面多以 `title` 帶入資料名稱
+ * （課程名稱、文件名稱等），此處 label 僅為後備；icon 則固定，讓同一畫面的每一筆詳細頁長得一樣。
+ */
+const SUBPAGE_SCREENS: readonly Screen[] = [
+  { code: "ET05", label: "課程建立", icon: EditNoteIcon },
+  { code: "ET06", label: "課程學習", icon: PlayLessonIcon },
+  { code: "DM07", label: "文件詳細頁", icon: DescriptionIcon },
+  { code: "DM08", label: "文件新增與編輯", icon: EditDocumentIcon },
+]
 
 const SCREENS: ReadonlyMap<string, Screen> = new Map(
   [...NAV_GROUPS.flatMap((group) => group.items), ...SUBPAGE_SCREENS].map((screen) => [screen.code, screen]),

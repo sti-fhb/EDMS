@@ -16,7 +16,6 @@ import Radio from "@mui/material/Radio"
 import RadioGroup from "@mui/material/RadioGroup"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
-import Typography from "@mui/material/Typography"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import type { ReactNode } from "react"
@@ -31,6 +30,7 @@ import {
 } from "./surveyFillSchemas"
 import type { AnswerDraft, SurveyForm, SurveyQuestionRow } from "./surveyFillSchemas"
 import { surveyFillApi } from "./surveyFillService"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -308,14 +308,18 @@ function PageFrame({
 }) {
   return (
     <Box>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        {/* 目的地寫進 label：底部另有一顆「返回課程」按鈕，同名會讓螢幕閱讀器與
-            測試都分不出兩者。比照 `LearnPage` 的 `返回我的課程`。 */}
-        <IconButton size="small" aria-label="返回章節學習" onClick={onBack}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h5">{title ?? "課後問卷"}</Typography>
-      </Stack>
+      {/* 課後問卷填寫屬 ET06 課程學習（US13），故沿用 ET06 的 icon */}
+      <ScreenHeader
+        code="ET06"
+        title={title ?? "課後問卷"}
+        leading={
+          // 目的地寫進 label：底部另有一顆「返回課程」按鈕，同名會讓螢幕閱讀器與
+          // 測試都分不出兩者。比照 `LearnPage` 的 `返回我的課程`。
+          <IconButton size="small" aria-label="返回章節學習" onClick={onBack}>
+            <ArrowBackIcon />
+          </IconButton>
+        }
+      />
       {children}
     </Box>
   )

@@ -6,7 +6,6 @@ import CircularProgress from "@mui/material/CircularProgress"
 import Grid from "@mui/material/Grid"
 import IconButton from "@mui/material/IconButton"
 import Stack from "@mui/material/Stack"
-import Typography from "@mui/material/Typography"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
@@ -16,6 +15,7 @@ import { ContentPane } from "./ContentPane"
 import type { ItemNode } from "./learnSchemas"
 import { learnApi } from "./learnService"
 import { progressApi } from "./progressService"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -187,10 +187,8 @@ export function EtLearnPage() {
   if (!courseIdValid) {
     return (
       <Box>
-        <BackButton onBack={() => navigate("/et/my-courses")} />
-        <Alert severity="error" sx={{ mt: 2 }}>
-          課程代碼無效
-        </Alert>
+        <ScreenHeader code="ET06" leading={<BackButton onBack={() => navigate("/et/my-courses")} />} />
+        <Alert severity="error">課程代碼無效</Alert>
       </Box>
     )
   }
@@ -204,20 +202,19 @@ export function EtLearnPage() {
   if (error) {
     return (
       <Box>
-        <BackButton onBack={() => navigate("/et/my-courses")} />
-        <Alert severity="error" sx={{ mt: 2 }}>
-          {toApiError(error).errorMessage}
-        </Alert>
+        <ScreenHeader code="ET06" leading={<BackButton onBack={() => navigate("/et/my-courses")} />} />
+        <Alert severity="error">{toApiError(error).errorMessage}</Alert>
       </Box>
     )
   }
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <BackButton onBack={() => navigate("/et/my-courses")} />
-        <Typography variant="h5">{data.course_name}</Typography>
-      </Stack>
+      <ScreenHeader
+        code="ET06"
+        title={data.course_name}
+        leading={<BackButton onBack={() => navigate("/et/my-courses")} />}
+      />
 
       {/* ET-MSG-ET06-005；非阻擋進入之訊息頁，內容照常可看 */}
       {data.is_closed && (

@@ -28,6 +28,7 @@ import {
 } from "./schemas"
 import { personalApi } from "./personalService"
 import { useActivity, useDrafts } from "./usePersonal"
+import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTime } from "../../utils/date"
@@ -45,10 +46,12 @@ export function DmPersonalPage() {
   return (
     <Box>
       <ScreenHeader code="DM04" />
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab value="activity" label="我的文件動態" />
-        <Tab value="drafts" label="草稿匣" />
-      </Tabs>
+      <FilterCard>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+          <Tab value="activity" label="我的文件動態" />
+          <Tab value="drafts" label="草稿匣" />
+        </Tabs>
+      </FilterCard>
       {tab === "activity" ? <ActivityTab /> : <DraftsTab />}
     </Box>
   )
