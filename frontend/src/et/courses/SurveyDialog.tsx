@@ -258,10 +258,13 @@ export function SurveyDialog({
     <Dialog
       open={open}
       onClose={handleClose}
-      maxWidth="md"
+      // 建立步驟只有一個名稱欄位，用編輯步驟的尺寸會是「一個輸入框配一大片空白」
+      // （2026-09-30 手測回報）。比照教材 / 測驗的 `NewItemDialog`（`xs`）。
+      maxWidth={creating ? "xs" : "md"}
       fullWidth
-      // 固定整個對話框高度，比照 `QuizDialog`——內容多寡不同時視窗不會忽大忽小
-      slotProps={{ paper: { sx: { height: "min(680px, 90vh)" } } }}
+      // 固定整個對話框高度，比照 `QuizDialog`——內容多寡不同時視窗不會忽大忽小。
+      // ⚠️ 建立步驟不套：那是「把小視窗撐成 680px」，正是要修掉的東西。
+      slotProps={creating ? undefined : { paper: { sx: { height: "min(680px, 90vh)" } } }}
     >
       <DialogTitle sx={{ pr: 6 }}>
         {creating ? "新增課後問卷" : readOnly ? "檢視課後問卷" : "編輯課後問卷"}
@@ -296,7 +299,6 @@ export function SurveyDialog({
               label="問卷名稱"
               required
               fullWidth
-              sx={{ maxWidth: 380 }}
               value={createName}
               error={Boolean(createError)}
               helperText={createError}
@@ -306,7 +308,12 @@ export function SurveyDialog({
                 if (e.key === "Enter") submitCreate()
               }}
             />
-            <Stack direction="row" spacing={1}>
+            {/* 取消靠左、建立靠右，比照 `NewItemDialog` 的動作列。原本只有右上角的 ✕，
+                在小視窗裡不夠明顯——教師要的是一顆寫著「取消」的按鈕。
+                ⚠️ 取消走 `handleClose`（與 ✕ 同一支）：#359 的「取消時什麼都沒發生」
+                靠的是**還沒建立**，不是靠某一顆按鈕，兩個入口不可以有不同行為。 */}
+            <Stack direction="row" spacing={1} justifyContent="flex-end">
+              <Button onClick={handleClose}>取消</Button>
               <Button variant="contained" disabled={saving} onClick={submitCreate}>
                 建立
               </Button>

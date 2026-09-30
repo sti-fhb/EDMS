@@ -42,7 +42,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     // fixture 三列同屬林佳蓉，故鎖定其中一列而非全頁比對
     const row = (await screen.findByText("採血作業新進人員訓練")).closest("tr")!
@@ -57,7 +56,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     const row = (await screen.findByText("血品安全與品保概論")).closest("tr")!
     expect(within(row).getByText("已撤銷")).toBeInTheDocument()
@@ -85,7 +83,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     expect(await screen.findByText(/查無符合條件的核可紀錄/)).toBeInTheDocument()
     // 🔴 教師必須被告知「可能不在您的可見範圍內」：本頁用於「排班前確認某人受訓完整
@@ -103,7 +100,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     expect(await screen.findByText(/查無符合條件的核可紀錄/)).toBeInTheDocument()
     expect(screen.queryByText(/可見範圍/)).not.toBeInTheDocument()
@@ -128,7 +124,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "lin@edms.local")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     await waitFor(() => expect(seen.body?.keyword).toBe("lin@edms.local"))
     expect(seen.url).not.toContain("lin@edms.local")
@@ -156,7 +151,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "林佳蓉")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     await waitFor(() => expect(seen.body?.keyword).toBe("林佳蓉"))
     expect(seen.url).not.toContain("林佳蓉")
@@ -165,7 +159,43 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     expect(seen.url).not.toContain(encodeURIComponent("林佳蓉"))
   })
 
+  /**
+   * 🔴 這條守的是 #439（原 SA Q2 裁示 A）的「至少給一個條件」，**不是那顆按鈕**。
+   *
+   * #468 拿掉搜尋按鈕、改為輸入即查之後，原本的建構路徑（按下查詢）消失了——但它要驗
+   * 的規則一個字都沒變。故改寫觸發方式、保留兩半斷言：
+   *
+   * | 斷言 | 擋的是 |
+   * |---|---|
+   * | `called === false` | 送了不該送的（後端會回 422 `ET_APPROVAL_006`，但前端不該去撞） |
+   * | 提示文字仍在 | 使用者不知道為什麼沒有結果 |
+   *
+   * ⛔ 刪掉任何一半，那件事從此沒有測試。
+   */
   it("關鍵字與課程皆未給時不送出請求（#439，原 SA Q2 裁示 A）", async () => {
+    asRole("teacher")
+    let called = false
+    server.use(
+      http.post("/api/et/approvals/search", () => {
+        called = true
+        return HttpResponse.json(EMPTY)
+      }),
+    )
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    // 等頁面真的掛好（否則「沒發請求」可能只是還沒渲染）
+    await screen.findByLabelText("學員姓名或 Email")
+    expect(screen.getByText("輸入學員姓名或 Email，或選擇課程即可查詢。")).toBeInTheDocument()
+    expect(called).toBe(false)
+  })
+
+  /**
+   * 🔴 `"   "` 等同未填——這條擋的是「去抖動後把原字串直接送出去」。
+   *
+   * 少了 `.trim()`，空白字串會被當成有效關鍵字，前端每打一個空格就發一次**必定 422**
+   * 的請求，而畫面上只會看到結果沒出來，沒有任何東西會紅。
+   */
+  it("只打空白且未選課程也視為未給", async () => {
     asRole("teacher")
     let called = false
     server.use(
@@ -177,21 +207,12 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
 
-    await user.click(await screen.findByRole("button", { name: "查詢" }))
-
-    expect(await screen.findByText("請輸入姓名或 Email，或選擇課程")).toBeInTheDocument()
-    expect(called).toBe(false)
-  })
-
-  it("只打空白且未選課程也視為未給", async () => {
-    asRole("teacher")
-    const user = userEvent.setup()
-    renderWithProviders(<EtApprovalQueryPage />)
-
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "   ")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    expect(await screen.findByText("請輸入姓名或 Email，或選擇課程")).toBeInTheDocument()
+    // 等超過去抖動（350ms）才斷言——太早問等於還沒到送出的時機，那是假綠
+    await new Promise((r) => setTimeout(r, 600))
+    expect(called).toBe(false)
+    expect(screen.getByText("輸入學員姓名或 Email，或選擇課程即可查詢。")).toBeInTheDocument()
   })
 
   it("查詢前不顯示空狀態——那會讓人以為已經查過且查無資料", async () => {
@@ -219,7 +240,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
 
     await user.click(await screen.findByLabelText("課程"))
     await user.click(await screen.findByRole("option", { name: "採血作業新進人員訓練" }))
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     await waitFor(() => expect(seen.body?.course_id).toBe(11))
     expect(seen.body?.keyword).toBeUndefined()
@@ -242,10 +262,14 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "林佳蓉")
     await user.click(await screen.findByLabelText("課程"))
     await user.click(await screen.findByRole("option", { name: "採血作業新進人員訓練" }))
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    await waitFor(() => expect(seen.body?.course_id).toBe(11))
-    expect(seen.body?.keyword).toBe("林佳蓉")
+    // ⚠️ 必須在**同一個** `waitFor` 裡等到兩者都在（#468）：改為輸入即查之後，姓名走
+    // 去抖動而課程是即時的，「先打字、再選課」會先送出一次**只有課程**的請求。分開
+    // 斷言的話第一句在那次請求就通過了，第二句拿到的仍是那一次的 body，於是恆紅。
+    await waitFor(() => {
+      expect(seen.body?.course_id).toBe(11)
+      expect(seen.body?.keyword).toBe("林佳蓉")
+    })
   })
 
   it("課程下拉的選項來自 filter-courses，不是 ET01 的課程清單（#439）", async () => {
@@ -315,7 +339,6 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
-    await user.click(screen.getByRole("button", { name: "查詢" }))
 
     expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
     expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
@@ -341,8 +364,12 @@ describe("ET04 核可查詢：學員視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     expect(await screen.findByText("採血作業新進人員訓練")).toBeInTheDocument()
-    expect(screen.queryByLabelText("學員姓名")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "查詢" })).not.toBeInTheDocument()
+    // ⚠️ 用 regex 而非字串：欄位標籤是「學員姓名或 Email」，以 `"學員姓名"` 精確比對
+    // **永遠找不到**——這條斷言在 #468 改到它之前是恆真的假證據。
+    //
+    // 原本還有一條「沒有查詢按鈕」，#468 拿掉按鈕後那條對誰都成立、分不出學員與教師，
+    // 故移除而非留著（留著會看起來像有兩道防線）。
+    expect(screen.queryByLabelText(/學員姓名/)).not.toBeInTheDocument()
   })
 
   it("不顯示教師視角的範圍提示", async () => {
