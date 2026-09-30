@@ -41,6 +41,7 @@ function useStatefulValueParam() {
               description,
               sort_order: null,
               is_enabled: true,
+              edit_scope: "ADMIN",
             },
           ],
         },
@@ -57,6 +58,7 @@ function useStatefulValueParam() {
         description,
         sort_order: null,
         is_enabled: true,
+        edit_scope: "ADMIN",
       })
     }),
   )
@@ -496,5 +498,87 @@ describe("ParamsPage 模組受控清單（#182）", () => {
 
     expect(await screen.findByText("代碼僅允許英文與數字")).toBeInTheDocument()
     expect(posted).toHaveLength(0)
+  })
+})
+
+describe("ParamsPage 維護層級（#171）", () => {
+  /** 取含指定文字之列的 <tr>；找不到即拋（避免 within(null) 的無聲通過）。 */
+  function rowOf(rowText: string): HTMLElement {
+    const row = screen.getByText(rowText).closest("tr")
+    if (!row) throw new Error(`找不到含「${rowText}」的列`)
+    return row
+  }
+
+  it("READONLY 明細仍顯示現值並標示「IT 設定」，但沒有編輯入口", async () => {
+    renderWithProviders(<ParamsPage />)
+    // 先等該列渲染出來再做否定斷言——否則「找不到編輯鈕」可能只是資料還沒到，
+    // 守衛拿掉也一樣會通過（#421 踩過這個坑）。
+    expect(await screen.findByText("驗證信重寄冷卻（秒）")).toBeInTheDocument()
+
+    const row = rowOf("驗證信重寄冷卻（秒）")
+    expect(within(row).getByText("600")).toBeInTheDocument() // READONLY 的用意：現值看得到
+    expect(within(row).getByText("IT 設定")).toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "編輯" })).toBeNull()
+  })
+
+  it("同一主檔的 ADMIN 明細照常可編輯（證明上一條的否定斷言分辨得出差異）", async () => {
+    renderWithProviders(<ParamsPage />)
+    expect(await screen.findByText("閒置自動登出（分鐘）")).toBeInTheDocument()
+
+    const row = rowOf("閒置自動登出（分鐘）")
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeInTheDocument()
+    expect(within(row).queryByText("IT 設定")).toBeNull()
+  })
+
+  it("LIST 型清單項同樣套用層級——同一面板內可改項有儲存鈕、IT 管控項沒有", async () => {
+    // EDIT_SCOPE 掛在明細層，對 VALUE / LIST 兩種型別皆生效。清單列的編輯面板
+    // （ParamEditPanel 之 ListEdit）與清單頁是兩條不同的渲染路徑，各自要驗。
+    server.use(
+      http.get("/api/dp/params", () =>
+        HttpResponse.json([
+          {
+            param_id: "MIXED_LIST",
+            param_name: "混合層級清單",
+            param_type: "LIST",
+            detail_lock: false,
+            description: null,
+            scope: "platform",
+            details: [
+              {
+                param_key: "FREE",
+                param_name: "可改項",
+                param_value: null,
+                description: null,
+                sort_order: 1,
+                is_enabled: true,
+                edit_scope: "ADMIN",
+              },
+              {
+                param_key: "LOCKED",
+                param_name: "IT 管控項",
+                param_value: null,
+                description: null,
+                sort_order: 2,
+                is_enabled: true,
+                edit_scope: "READONLY",
+              },
+            ],
+          },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("混合層級清單")
+    await openEditByRow(user, "混合層級清單")
+
+    // 兩項都渲染出來了，否則下方的「只有一顆儲存鈕」會因為根本沒渲染而假性通過
+    expect(await screen.findByLabelText("FREE 名稱")).toBeEnabled()
+    expect(screen.getByLabelText("LOCKED 名稱")).toBeDisabled()
+    expect(screen.getByLabelText("LOCKED 說明")).toBeDisabled()
+    // 兩項共用同一面板：儲存 / 停用各只剩可改項那一顆
+    expect(screen.getAllByRole("button", { name: "儲存" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "停用" })).toHaveLength(1)
+    expect(screen.getByText("IT 設定")).toBeInTheDocument()
   })
 })

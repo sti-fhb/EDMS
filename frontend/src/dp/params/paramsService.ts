@@ -1,5 +1,13 @@
 import { http } from "../../services/http"
 
+/**
+ * 維護層級（#171，對齊後端 EditScope）。
+ *
+ * `HIDDEN` 之明細後端不回傳，故實際不會出現在回應中；列於此是因為本型別描述的是
+ * `DP_PARAM_D.EDIT_SCOPE` 的值域。**擋寫由伺服器端負責**，前端據此決定入口僅為 UX。
+ */
+export type EditScope = "ADMIN" | "READONLY" | "HIDDEN"
+
 /** 參數明細（對齊後端 ParamDetailResponse）。param_name＝中文顯示名稱；param_value＝實際值（可空）。 */
 export interface ParamDetail {
   param_key: string
@@ -8,6 +16,7 @@ export interface ParamDetail {
   description: string | null
   sort_order: number | null
   is_enabled: boolean
+  edit_scope: EditScope
 }
 
 /** 參數主檔 + 明細（對齊後端 ParamMasterResponse）。scope 依 PARAM_ID 前綴衍生。 */
