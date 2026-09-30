@@ -1,5 +1,5 @@
 import { http } from "../../services/http"
-import type { ApprovalQueryParams, ApprovalQueryRow, MyApprovalRow } from "./schemas"
+import type { ApprovalCourseOption, ApprovalQueryParams, ApprovalQueryRow, MyApprovalRow } from "./schemas"
 import type { PagedResult } from "../../hooks/usePagedQuery"
 
 /**
@@ -24,6 +24,18 @@ export const approvalsApi = {
    */
   search: async (params: ApprovalQueryParams): Promise<PagedResult<ApprovalQueryRow>> => {
     const { data } = await http.post<PagedResult<ApprovalQueryRow>>("/et/approvals/search", params)
+    return data
+  },
+
+  /**
+   * ET10 課程篩選下拉的選項——**有核可紀錄的**課程（#439）。教師只取得自己開設的課。
+   *
+   * ⛔ 不要改用 `coursesApi.list()`：那支的 `scope=all` 只給「已發布且期間未過」，
+   * 而核可紀錄絕大多數落在**已結束**的課程上——管理者會發現最相關的課全部不在下拉裡，
+   * 且畫面不會說明任何事；`scope=mine` 則對管理者是空的。
+   */
+  listFilterCourses: async (): Promise<ApprovalCourseOption[]> => {
+    const { data } = await http.get<ApprovalCourseOption[]>("/et/approvals/filter-courses")
     return data
   },
 

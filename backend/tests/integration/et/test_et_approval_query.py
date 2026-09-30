@@ -46,6 +46,7 @@ pytestmark = pytest.mark.integration
 
 _QUERY = "/api/et/approvals/search"
 _MINE = "/api/et/approvals/mine"
+_FILTER_COURSES = "/api/et/approvals/filter-courses"
 
 
 def _bearer(user_id: str) -> dict[str, str]:
@@ -333,16 +334,23 @@ class TestQueryBehaviour:
         assert row["approved_by_name"] == "王主任"
         assert row["approved_at"] is not None
 
-    async def test_姓名未填回422(self, client, db) -> None:
-        """SA Q2 裁示 A：姓名必填——留白查全部沒有對應需求，且會傾印員工名冊。"""
-        f = await _fixture(db)
-        r = await client.post(_QUERY, headers=_bearer(f["admin"]))
-        assert r.status_code == 422
+    async def test_關鍵字與課程皆未給回422(self, client, db) -> None:
+        """#439 取代 SA Q2 裁示 A 的「姓名必填」——**目的未變**：留白仍不可查全部。
 
-    async def test_姓名只有空白視為未填(self, client, db) -> None:
+        ⚠️ 送 `json={}` 而非完全不帶 body。不帶 body 時 FastAPI 自己就會回 422
+        （`COMMON_422`，因為 body 是必要參數），那條路徑根本到不了本規則——只斷言
+        「status 是 422」會變成一條**驗什麼都會通過**的測試。故一併斷言 `error_code`。
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={}, headers=_bearer(f["admin"]))
+        assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_APPROVAL_006"
+
+    async def test_關鍵字只有空白且未選課程視為未給(self, client, db) -> None:
         f = await _fixture(db)
         r = await client.post(_QUERY, json={"keyword": "   "}, headers=_bearer(f["admin"]))
         assert r.status_code == 422
+        assert r.json()["error_code"] == "ET_APPROVAL_006"
 
     async def test_姓名走query_string不被接受(self, client, db) -> None:
         """🔴 #391：查詢條件**只走 body**，query string 不是可接受的通道。
@@ -512,3 +520,190 @@ class TestKeywordMatchesNameOrEmail:
         r = await client.post(_QUERY, json={"keyword": "%"}, headers=_bearer(f["own"]))
         assert r.status_code == 200, r.text
         assert r.json()["data"] == [], "`%` 必須被當成字面字元，不得變成查全部"
+
+
+class TestCourseFilter:
+    """#439：關鍵字與課程「至少給一個」，課程單獨即可查。
+
+    ## 為何這組非得是 integration
+
+    「只給課程」這條路徑的正確性同時取決於三件只有真 DB 看得出來的事：`course_id`
+    條件真的下推到 `WHERE`、`visible_clause` 仍與它 `AND` 相接、以及 `paginate()` 的
+    `meta.total` 與資料用的是同一個 `stmt`。純函式那層（`test_approval_query_rules.py`）
+    擋不住其中任何一件。
+    """
+
+    async def test_只給課程不給關鍵字可查出該課程的核可紀錄(self, client, db) -> None:
+        """AC 1：解決「不知道有誰可以查」——教師常常正是不知道名單。
+
+        ⭐ **課程名稱那條斷言是變異檢查逼出來的，不要拿掉。** 原本只斷言 `user_name`
+        的集合，而拿掉 `course_id` 條件之後多出來的那筆是**林佳蓉在課 B**——收斂成 set
+        之後與課 A 的兩人**一模一樣**，於是這條（AC 1 的主測試）在該變異下照樣通過。
+
+        教訓不是「斷言寫得不夠多」，而是：**斷言的是結果，而結果可以由不只一個原因
+        達成**。可操作的檢查法是問「如果課程條件從來沒被套用，這條斷言還會成立嗎？」
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["a"]}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        rows = r.json()["data"]
+        assert {row["user_name"] for row in rows} == {"林佳蓉", "王大明"}, "課 A 的兩筆都要在"
+        assert {row["course_name"] for row in rows} == {"採血作業新進人員訓練"}, "不得混入其他課程"
+        assert len(rows) == 2, "課 A 恰好兩筆——多一筆代表課程條件沒生效"
+
+    async def test_只給關鍵字的行為與加入課程篩選前完全一致(self, client, db) -> None:
+        """🔴 AC 2 的回歸護欄。
+
+        #439 動到的是同一支查詢，而「以姓名跨課程查一個人」是這個功能**原本唯一**的
+        用法。它一旦被改壞，畫面不會有任何異常——只是少幾列。此處釘死裁示 C 的預期集合。
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert _names(r.json()) == {"採血作業新進人員訓練", "成分製備標準作業教學"}
+
+    async def test_兩者皆給時取交集(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "林", "course_id": f["a"]}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        rows = r.json()["data"]
+        assert [row["user_name"] for row in rows] == ["林佳蓉"], "課 A 裡叫『林』的只有一位"
+
+    async def test_課程篩選的總筆數也只算得到的那些(self, client, db) -> None:
+        """與既有的「範圍判定進 WHERE」同一條理由：`meta.total` 必須與資料同源。"""
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["a"]}, headers=_bearer(f["own"]))
+        body = r.json()
+        assert body["meta"]["total"] == len(body["data"]) == 2
+
+    async def test_課程與結果篩選可疊加(self, client, db) -> None:
+        """⭐ **用 `PASS` 而不是 `FAIL`，而且那不是隨便選的。**
+
+        原本寫成「課 A + `FAIL`」，預期 `["王大明"]`。但 `t_own` 只 owner 課 A，而裁示 C
+        讓他**本來就只看得到自己課的 `FAIL`**——所以少了課程條件、答案仍是 `["王大明"]`。
+        這條（名字宣稱驗「疊加」的測試）在「拿掉課程條件」的變異下**照樣通過**，只驗到
+        結果那一半。
+
+        改用 `PASS` 後兩側都有鑑別力，判準是**各拿掉一個條件都會改變筆數**：
+
+        | 情形 | 結果 |
+        |---|---|
+        | 課 A + `PASS` | 林佳蓉 1 筆 |
+        | 少了課程條件 | 再加上林佳蓉在課 B 的 `PASS` → 2 筆 |
+        | 少了結果條件 | 再加上王大明在課 A 的 `FAIL` → 2 筆 |
+
+        ⚠️ 姓名的集合在第二種情形下**不會變**（同一個人在兩門課）——所以筆數那條斷言
+        不可省，它才是撐住這條測試的那一個。
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["a"], "result": APPROVAL_PASS}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        rows = r.json()["data"]
+        assert len(rows) == 1, "少了任一個條件都會多出一筆"
+        assert rows[0]["user_name"] == "林佳蓉"
+        assert rows[0]["course_name"] == "採血作業新進人員訓練"
+
+
+class TestCourseFilterOwnership:
+    """🔴 非管理者只能依**自己開設的課程**篩選（#439 實作時收斂，見 PR 說明）。
+
+    #439 的「不構成傾印名冊」論證建立在「下拉只列自己的課」，但下拉是 UI。少了這道閘，
+    教師可以用 `{course_id: 別人的課}` 一次撈出該課全部通過者的名單而不需要知道任何名字
+    ——裁示 A 要擋的東西以課程為單位重演，而且會正常運作、不會有任何東西變紅。
+
+    ⚠️ 一條測試只安排**一次**預期失敗的呼叫：失敗的請求會回滾整個 transaction，
+    連前置資料一起沒掉，第二次呼叫會變成 401。
+    """
+
+    async def test_教師以他人課程篩選回403(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["b"]}, headers=_bearer(f["own"]))
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_APPROVAL_007"
+
+    async def test_教師帶關鍵字也不能借他人課程篩選(self, client, db) -> None:
+        """⚠️ 擋的是課程條件本身，不是「沒給關鍵字」——兩者是獨立的閘。"""
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "林", "course_id": f["b"]}, headers=_bearer(f["own"]))
+        assert r.status_code == 403
+
+    async def test_查無課程時對教師_fail_closed(self, client, db) -> None:
+        """放行的話，不存在的 `course_id` 會退化成「沒有課程條件」的查詢。"""
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": 99_999_999}, headers=_bearer(f["own"]))
+        assert r.status_code == 403
+
+    async def test_管理者可依任一課程篩選(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["c"]}, headers=_bearer(f["admin"]))
+        assert r.status_code == 200, r.text
+        assert _names(r.json()) == {"捐血人健康評估標準教學"}
+
+    async def test_管理者依他人課程篩選時可見範圍未被收窄(self, client, db) -> None:
+        """🔴 AC 5 的替代斷言。
+
+        原 AC 寫「教師選了他人課程時，不通過／已撤銷仍不可見」——但那條路徑現在是 403，
+        斷言會落空。裁示 C 真正要守的是「分流未被本次改動影響」，在管理者這一側同樣
+        驗得到：他選一門**他人**的課，仍應看得到不通過與撤銷原因（`true()` 未被課程
+        條件擠掉）。
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["d"]}, headers=_bearer(f["admin"]))
+        rows = r.json()["data"]
+        assert [row["is_revoked"] for row in rows] == [True]
+        assert rows[0]["revoke_reason"] == "核可對象誤植"
+
+    async def test_教師以自己課程篩選時分流未被收窄(self, client, db) -> None:
+        """🔴 AC 5 的另一半：教師在**自己**的課裡仍看得到不通過。
+
+        課程條件是 `AND` 疊加上去的，若有人誤把它寫成取代 `visible_clause`，本條會紅。
+        """
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["a"], "keyword": "王大明"}, headers=_bearer(f["own"]))
+        rows = r.json()["data"]
+        assert [row["result"] for row in rows] == [APPROVAL_FAIL]
+
+
+class TestFilterCourseOptions:
+    """#439：課程下拉的選項來自**有核可紀錄的**課程，不是 ET01 的課程清單。"""
+
+    async def test_教師只取得自己開設的課(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.get(_FILTER_COURSES, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert [o["course_name"] for o in r.json()] == ["採血作業新進人員訓練"]
+
+    async def test_管理者取得全部有核可紀錄的課(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.get(_FILTER_COURSES, headers=_bearer(f["admin"]))
+        assert r.status_code == 200, r.text
+        assert len(r.json()) == 4, "四門課各有核可紀錄"
+
+    async def test_同一課程多筆核可只出現一次(self, client, db) -> None:
+        """課 A 有兩筆核可（林佳蓉 / 王大明）——下拉不得出現兩個「採血作業新進人員訓練」。"""
+        f = await _fixture(db)
+        r = await client.get(_FILTER_COURSES, headers=_bearer(f["own"]))
+        options = r.json()
+        assert len({o["course_id"] for o in options}) == len(options)
+
+    async def test_沒有核可紀錄的課程不出現(self, client, db) -> None:
+        """🔴 死選項的反面：下拉裡的每一項都必須選得出東西來。
+
+        另一半理由是**已關閉課程**——核可紀錄絕大多數落在那些課上，而 ET01 的
+        `scope=all` 恰好把它們排除。以核可紀錄為母體同時解掉這兩件事。
+        """
+        f = await _fixture(db)
+        empty_course = await _course(db, owner=f["own"], name="尚無人核可的課")
+        r = await client.get(_FILTER_COURSES, headers=_bearer(f["own"]))
+        assert empty_course not in {o["course_id"] for o in r.json()}
+
+    async def test_下拉只有課程代碼與名稱(self, client, db) -> None:
+        """這是下拉不是課程清單——多回欄位等於邀請前端拿它當 ET01 用。"""
+        f = await _fixture(db)
+        r = await client.get(_FILTER_COURSES, headers=_bearer(f["own"]))
+        assert set(r.json()[0]) == {"course_id", "course_name"}
+
+    async def test_學員不可取得課程下拉(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.get(_FILTER_COURSES, headers=_bearer(f["lin"]))
+        assert r.status_code == 403

@@ -20,6 +20,9 @@ export const QUERY_KEYS = {
     list: () => ["schedule", "list"] as const,
     logs: (params: Record<string, unknown>) => ["schedule", "logs", params] as const,
   },
+  etDashboard: {
+    get: () => ["et", "dashboard"] as const,
+  },
   etCourses: {
     capabilities: () => ["et", "courses", "capabilities"] as const,
     list: (params: CourseListParams) => ["et", "courses", "list", params] as const,
@@ -49,6 +52,8 @@ export const QUERY_KEYS = {
   etApprovals: {
     search: (params: Record<string, unknown>) => ["et", "approvals", "search", params] as const,
     mine: (page: number) => ["et", "approvals", "mine", page] as const,
+    /** ET10 課程篩選下拉（#439）——不帶參數：範圍由後端依身分決定。 */
+    filterCourses: () => ["et", "approvals", "filter-courses"] as const,
   },
   etLearn: {
     structure: (courseId: number) => ["et", "learn", courseId] as const,

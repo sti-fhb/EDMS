@@ -115,6 +115,24 @@ export const handlers = [
       dm: { has_role: true, is_admin: true },
     }),
   ),
+  // ET 首頁儀表板（#453）：預設三張卡皆有資料；個別測試以 server.use 覆蓋
+  http.get("/api/et/dashboard", () =>
+    HttpResponse.json({
+      student: { joined: 3, in_progress: 1, not_started: 1, completed: 1, pending_open: 0 },
+      teacher: {
+        ending_soon: [{ course_id: 11, course_name: "採血作業新進人員訓練", days_left: 2, not_completed: 5 }],
+        draft_count: 1,
+      },
+      admin: {
+        overdue_incomplete: 4,
+        completion_rate: "62.50",
+        by_unit: [
+          { tag_name: "行政人員", enrolled: 4, completed: 1, completion_rate: "25.00" },
+          { tag_name: "護理師", enrolled: 4, completed: 3, completion_rate: "75.00" },
+        ],
+      },
+    }),
+  ),
   // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
   http.get("/api/dm/dashboard/stats", () =>
     HttpResponse.json({
@@ -1108,6 +1126,15 @@ export const handlers = [
     HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
   ),
   // ── ET10 核可查詢（US17 / #385）────────────────────────────────────────
+  // 課程篩選下拉（#439）：母體是**有核可紀錄的課程**，不是 ET01 的課程清單。
+  // ⚠️ 只有 `course_id` / `course_name` 兩個欄位——那是規格的一部分（見後端
+  // `ApprovalCourseOption`），不要為了「方便」補齊成課程卡片。
+  http.get("/api/et/approvals/filter-courses", () =>
+    HttpResponse.json([
+      { course_id: 11, course_name: "採血作業新進人員訓練" },
+      { course_id: 12, course_name: "成分製備標準作業教學" },
+    ]),
+  ),
   // 教師 / 管理者視角：四筆涵蓋通過、不通過、已撤銷三種狀態。
   // ⚠️ **POST + body**（#391）——姓名不進 query string，見 `approvalsService.search`。
   http.post("/api/et/approvals/search", () =>
