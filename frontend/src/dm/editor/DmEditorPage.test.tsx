@@ -155,15 +155,18 @@ describe("DmEditorPage 文件新增與編輯（DM03）", () => {
     renderWithProviders(<DmEditorPage />, undefined, undefined, qc)
 
     const user = userEvent.setup({ delay: null })
-    // 預帶的那一列（(全單位, 全體)）把職位改成護理師——驗 refetch 落定後不會蓋掉使用者的修改
-    const roles = await screen.findAllByRole("combobox", { name: /職位/ })
-    await user.click(roles[roles.length - 1])
-    await user.click(await screen.findByRole("option", { name: "護理師" }))
+    // 配對列由資料驅動渲染（#437），refetch 落定前尚無列——使用者能做的是**自己新增一組**。
+    // 驗的仍是同一件事：動手之後 guard 即鎖定，落定時不得用伺服器值覆蓋使用者的輸入。
+    await screen.findByText("編輯文件 — 領血確認標準作業程序")
+    await addAudiencePair(user, { unit: "國防部軍醫局", role: "護理師" })
     expect(screen.getByDisplayValue("護理師")).toBeInTheDocument()
 
     // 等 refetch 確定落定（超過上面的 400ms）後再斷言，確保驗到的是「落定後」的狀態
     await new Promise((r) => setTimeout(r, 700))
     expect(screen.getByDisplayValue("護理師")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("國防部軍醫局")).toBeInTheDocument()
+    // 伺服器回的是 (全單位, 全體)；若 guard 失效會把使用者那列蓋掉
+    expect(screen.queryByDisplayValue("全體")).not.toBeInTheDocument()
   }, 20000)
 
   it("分類選『訓練教材』→ 隱藏可見對象欄並說明不需設定（#377）", async () => {
