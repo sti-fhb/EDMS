@@ -7,6 +7,7 @@
 指定審核者清單為 `DM_USER_ROLE`（DM 自持）join `DP_USER` 之唯讀查詢。
 """
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -20,6 +21,8 @@ from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersion
 from app.dm.review.models import DmReview
 from app.dm.roles.reviewer_query import assignable_reviewers_stmt
 from app.dp.users.models import DpUser
+
+logger = logging.getLogger(__name__)
 
 _DRAFT = "DRAFT"
 _PENDING_REVIEW = "PENDING_REVIEW"
@@ -43,7 +46,11 @@ def _split_by_group(rows) -> dict[str, list]:
     for tag_id, group_type, unit_tag_id in rows:
         if group_type != _AUDIENCE:
             retrieval.append(str(tag_id))
-        elif unit_tag_id is not None:
+        elif unit_tag_id is None:
+            # 扣下任何一列都要留痕：正常情況不會發生（migration 已回填、service 兩欄必填），
+            # 若出現代表資料層有殘留，而使用者只會看到「可見對象少了一列」且無從追查。
+            logger.warning("可見對象配對缺單位，已於表單預帶時略過 tag_id=%s", tag_id)
+        else:
             audience_pairs.append({"unit_id": str(unit_tag_id), "audience_id": str(tag_id)})
     return {"audience_pairs": audience_pairs, "retrieval_ids": retrieval}
 

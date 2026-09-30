@@ -23,7 +23,7 @@ import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 
 import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rolesService"
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
@@ -297,6 +297,9 @@ function GroupEditDialog({
   onSave: (groups: string[]) => void
 }) {
   const [selected, setSelected] = useState<string[]>(row.groups)
+  // 開啟當下的既有授權：其中「單位未指定」者為導入配對前之過渡狀態，儲存時須原樣保留，
+  // 不可與「使用者新加但沒選完」的列一起被丟掉——那會讓既有授權在按下儲存時靜默消失。
+  const initialGroups = useRef(new Set(row.groups))
   const paired = isPairedModule(options)
   const unitOptions = options.filter((o) => o.kind === "UNIT")
   const roleOptions = options.filter((o) => o.kind !== "UNIT")
@@ -309,8 +312,22 @@ function GroupEditDialog({
   const updatePair = (idx: number, unitCode: string, roleCode: string) =>
     setSelected((prev) => prev.map((v, i) => (i === idx ? encodeAudiencePair(unitCode, roleCode) : v)))
   const removePair = (idx: number) => setSelected((prev) => prev.filter((_, i) => i !== idx))
-  // 未選職位者不送出：半組配對在後端不生效，且會讓「已指派」看起來多一筆
-  const completePairs = () => selected.filter((v) => decodeAudiencePair(v)[1] !== "")
+  /**
+   * 送出前濾掉不完整的**新增**列。
+   *
+   * 兩種「不完整」要分開處理：使用者新加卻沒選完的列不送出（半組配對在後端不生效，送出只會
+   * 讓「已指派」多一筆看似有效的資料）；而既有的「單位未指定」列必須原樣保留——那是導入配對前
+   * 的授權，UI 不該在使用者只是改別列時把它清掉。
+   */
+  const completePairs = () =>
+    selected.filter((v) => {
+      const [unitCode, roleCode] = decodeAudiencePair(v)
+      return roleCode !== "" && (unitCode !== "" || initialGroups.current.has(v))
+    })
+  const hasIncompleteNewPair = selected.some((v) => {
+    const [unitCode, roleCode] = decodeAudiencePair(v)
+    return (roleCode === "" || unitCode === "") && !initialGroups.current.has(v)
+  })
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
@@ -368,6 +385,11 @@ function GroupEditDialog({
                 新增可見對象
               </Button>
             </Box>
+            {hasIncompleteNewPair && (
+              <Typography variant="caption" color="warning.main">
+                有未選完的列（單位與職位皆須選取），儲存時將略過。
+              </Typography>
+            )}
           </Stack>
         ) : (
           <Stack>
