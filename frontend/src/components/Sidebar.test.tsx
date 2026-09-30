@@ -119,10 +119,57 @@ describe("Sidebar", () => {
     expect(screen.queryByText("學員")).not.toBeInTheDocument()
   })
 
-  it("學員角色被停用者看不到「我的課程」（#247）", async () => {
+  it("純管理者看不到「學員」，但看得到課程列表與核可查詢（#463）", async () => {
+    // 建課需教師角色，故管理者沒有自己的課；而 ET02 學員頁的課程下拉是 `scope=mine`
+    // ——側欄看得到、點進去是一個空下拉。
     server.use(
       http.get("/api/et/courses/capabilities", () =>
-        HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: false }),
+        HttpResponse.json({
+          can_create_course: false,
+          can_manage_courses: true,
+          can_track_students: false,
+          can_learn: false,
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+
+    expect(await screen.findByText("課程列表")).toBeInTheDocument()
+    expect(screen.getByText("核可查詢")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText("學員")).not.toBeInTheDocument())
+  })
+
+  it("🔴 兼具教師與管理者者仍看得到「學員」（#463）", async () => {
+    // 判定必須是「**具教師角色**」而不是「非管理者」。寫成後者會把兼任者一起擋掉，
+    // 而他有自己的課要追蹤——這種錯只用純角色帳號測試**不會浮現**。
+    server.use(
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({
+          can_create_course: true,
+          can_manage_courses: true,
+          can_track_students: true,
+          can_learn: false,
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />)
+
+    expect(await screen.findByText("學員")).toBeInTheDocument()
+  })
+
+  it("學員角色被停用者看不到「我的課程」（#247）", async () => {
+    // ⚠️ `can_track_students` 必須跟著 `can_create_course` 一起給（#463）——省略時它是
+    // `undefined ?? false`，這份 fixture 就描述了一個**不可能存在的人**：有教師角色、
+    // 卻不能追蹤學員。本條不斷言「學員」故不會紅，但日後有人在這裡加一條相關斷言時，
+    // 會得到一個與 fixture 宣稱不符的答案。
+    server.use(
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({
+          can_create_course: true,
+          can_manage_courses: true,
+          can_track_students: true,
+          can_learn: false,
+        }),
       ),
     )
     renderWithProviders(<Sidebar />)

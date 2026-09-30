@@ -49,6 +49,13 @@ export interface NavItem extends Screen {
   requiresDmReviewerAccess?: boolean
   /** ET 教學管理項：需具教師或管理者角色（`Capabilities.can_manage_courses`）。 */
   requiresEtManage?: boolean
+  /**
+   * ET 學員追蹤項：需具**教師**角色（`Capabilities.can_track_students`，#463）。
+   *
+   * ⚠️ 與 `requiresEtManage` 的差別只在管理者，而那正是重點：ET02 學員頁的課程下拉是
+   * `scope=mine`，對**從未具教師角色**的管理者是空的——側欄看得到、點進去是空下拉。
+   */
+  requiresEtTrackStudents?: boolean
   /** ET 學習項（我的課程）：需具學員角色（`Capabilities.can_learn`）。 */
   requiresEtLearn?: boolean
 }
@@ -82,7 +89,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // （#247）——ET 三種角色可任意組合，純學員看到「課程列表 / 學員」等於看到
       // 點進去只會 403 的項目，純教師看到「我的課程」則是一個空清單。
       { code: "ET01", icon: MenuBookIcon, label: "課程列表", path: "/et/courses", requiresEtManage: true },
-      { code: "ET02", icon: SchoolIcon, label: "學員", path: "/et/students", requiresEtManage: true },
+      // 學員頁限**教師**（#463）：課程下拉為 `scope=mine`，純管理者進去只有空下拉。
+      // ⛔ 不要改回 `requiresEtManage`——後端讀取端點確實開放給管理者（US16 核可所需），
+      // 但那不代表他該有這個入口，詳見 `app/et/tracking/service.py` 的模組 docstring。
+      { code: "ET02", icon: SchoolIcon, label: "學員", path: "/et/students", requiresEtTrackStudents: true },
       { code: "ET03", icon: AutoStoriesIcon, label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
       // 核可查詢**兩種角色都要**，但看到的內容不同：學員查自己已通過核可的課程；
       // 教師依姓名查——**已通過**的涵蓋全部課程，**不通過 / 已撤銷 / 考核備註**僅限

@@ -1123,7 +1123,14 @@ export const handlers = [
   ),
   // ET05 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
   http.get("/api/et/courses/capabilities", () =>
-    HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
+    HttpResponse.json({
+      can_create_course: true,
+      can_manage_courses: true,
+      // #463：與 `can_create_course` 同值只是**這個 fixture 的**巧合（預設是教師）。
+      // 覆寫成純管理者時兩者會分開——`can_manage_courses: true` 但這兩個 false。
+      can_track_students: true,
+      can_learn: true,
+    }),
   ),
   // ── ET04 核可查詢（US17 / #385）────────────────────────────────────────
   // 課程篩選下拉（#439）：母體是**有核可紀錄的課程**，不是 ET01 的課程清單。

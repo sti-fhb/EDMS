@@ -159,6 +159,7 @@ export function Sidebar() {
     enabled: summary?.et.has_role ?? false,
   })
   const canEtManage = etCaps?.can_manage_courses ?? false
+  const canEtTrackStudents = etCaps?.can_track_students ?? false
   const canEtLearn = etCaps?.can_learn ?? false
   // isGroupVisible 傳整個 group（#250 起）：群組門檻除 requiresModule 外，另有 requiresAnyModuleAdmin
   const visibleGroups = NAV_GROUPS.filter((group) => isGroupVisible(group, summary)).map((group) => ({
@@ -169,6 +170,7 @@ export function Sidebar() {
         (!item.requiresDmAdminAccess || canAdmin) &&
         (!item.requiresDmReviewerAccess || canReview) &&
         (!item.requiresEtManage || canEtManage) &&
+        (!item.requiresEtTrackStudents || canEtTrackStudents) &&
         (!item.requiresEtLearn || canEtLearn),
     ),
   }))

@@ -560,6 +560,10 @@ class EtCourseService:
         return Capabilities(
             can_create_course=ET_TEACHER in roles,
             can_manage_courses=bool(roles & {ET_TEACHER, ET_ADMIN}),
+            # ⚠️ 與上一行的 `ET_TEACHER in roles` **刻意重複**，不要合併成同一個變數：
+            # 兩者今天同值，但問的是不同的事（能不能開課 vs 有沒有學員可追蹤），
+            # 合併會讓其中一條規則日後改動時靜默拖著另一條走。理由見 `Capabilities`。
+            can_track_students=ET_TEACHER in roles,
             can_learn=ET_STUDENT in roles,
         )
 

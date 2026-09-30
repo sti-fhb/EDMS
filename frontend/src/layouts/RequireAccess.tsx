@@ -118,3 +118,23 @@ export function RequireEtCourseManager({ children }: { children?: ReactNode }) {
   if (!hasEtRole) return <AccessDenied />
   return <Gate allowed={caps?.can_manage_courses ?? false} pending={isPending || !caps}>{children}</Gate>
 }
+
+/**
+ * 需具 ET **教師**角色（ET02 學員學習狀況追蹤，#463）。
+ *
+ * ## 🔴 為何不是 `can_manage_courses`（它原本就是這條路由的守衛）
+ *
+ * 那個涵蓋管理者，而 ET02 的課程下拉是 `scope=mine`——純管理者沒有自有課程，進去只有
+ * 一個空下拉。**側欄藏起來不夠**：直接輸入網址仍會進得去，所以守衛要一起換。
+ *
+ * ⚠️ 後端的讀取端點**確實**開放給管理者（`ensure_owner_or_admin`，US16 核可所需），
+ * 本守衛比後端嚴——那是刻意的，見 `app/et/tracking/service.py` 的模組 docstring。
+ */
+export function RequireEtStudentTracking({ children }: { children?: ReactNode }) {
+  const { data: summary } = useModuleSummary()
+  const hasEtRole = summary?.et.has_role ?? false
+  const { data: caps, isPending } = useEtCourseCapabilities(hasEtRole)
+  if (!summary) return null
+  if (!hasEtRole) return <AccessDenied />
+  return <Gate allowed={caps?.can_track_students ?? false} pending={isPending || !caps}>{children}</Gate>
+}

@@ -9,6 +9,7 @@ import {
   RequireDmReviewer,
   RequireEtCourseCreator,
   RequireEtCourseManager,
+  RequireEtStudentTracking,
   RequireModule,
   RequireModuleAdmin,
 } from "./RequireAccess"
@@ -188,6 +189,48 @@ describe("RequireEtCourseCreator", () => {
     server.use(etSummaryHandler(true)) // 預設 handler：can_create_course=true
     renderWithProviders(<RequireEtCourseCreator>{CHILD}</RequireEtCourseCreator>)
     expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+})
+
+describe("RequireEtStudentTracking（#463）", () => {
+  it("教師 → 可進學員頁", async () => {
+    server.use(
+      etSummaryHandler(true),
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({
+          can_create_course: true,
+          can_manage_courses: true,
+          can_track_students: true,
+          can_learn: false,
+        }),
+      ),
+    )
+    renderWithProviders(<RequireEtStudentTracking>{CHILD}</RequireEtStudentTracking>)
+    expect(await screen.findByText("受保護內容")).toBeInTheDocument()
+  })
+
+  it("🔴 純管理者 → 無權限畫面（`can_manage_courses` 仍為 true 也一樣）", async () => {
+    // 側欄藏起來不夠——直接輸入網址仍會進得去，而那一頁對他是一個空下拉。
+    // ⚠️ 本條刻意讓 `can_manage_courses` 保持 true：若守衛誤用它，這條會綠而缺陷還在。
+    server.use(
+      etSummaryHandler(true),
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({
+          can_create_course: false,
+          can_manage_courses: true,
+          can_track_students: false,
+          can_learn: false,
+        }),
+      ),
+    )
+    renderWithProviders(<RequireEtStudentTracking>{CHILD}</RequireEtStudentTracking>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
+  })
+
+  it("無任何 ET 角色 → 無權限畫面", async () => {
+    server.use(etSummaryHandler(false))
+    renderWithProviders(<RequireEtStudentTracking>{CHILD}</RequireEtStudentTracking>)
+    expect(await screen.findByText("無權限存取此功能")).toBeInTheDocument()
   })
 })
 
