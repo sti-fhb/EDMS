@@ -11,6 +11,8 @@
 或「呼叫沒拋錯」，一封空信也會讓測試變綠。`PENDING` 才代表**渲染成功、排進 outbox**。
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select, update
 
@@ -87,12 +89,14 @@ async def _publishable_course(client, db, teacher: str, *, name: str = "採血�
     這裡掛的是一個**沒有任何人員**的標籤，讓各測試自行掛上帶人的標籤——否則基準資料
     本身就會產生收件人，寄了幾封信便說不清是哪個標籤造成的。
     """
+    # 起訖一律相對現在：寫死日期的課程會在那天之後變成「關閉中」，整批測試同時變紅
+    now = utcnow().replace(microsecond=0)
     created = await client.post(
         _COURSES,
         json={
             "course_name": name,
-            "open_start_at": "2026-09-01T00:00:00Z",
-            "open_end_at": "2026-09-30T00:00:00Z",
+            "open_start_at": (now - timedelta(days=1)).isoformat(),
+            "open_end_at": (now + timedelta(days=30)).isoformat(),
         },
         headers=_bearer(teacher),
     )

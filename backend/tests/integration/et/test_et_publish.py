@@ -10,6 +10,8 @@
 4. 狀態機：非草稿不可發布
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select, update
 
@@ -83,12 +85,14 @@ async def _publishable_course(client, db, uid: str, *, with_quiz: bool = False) 
 
     各測試只弄壞想驗的那一項，失敗原因才不會是基準資料本身有第二個問題。
     """
+    # 起訖一律相對現在：寫死日期的課程會在那天之後變成「關閉中」
+    now = utcnow().replace(microsecond=0)
     created = await client.post(
         _COURSES,
         json={
             "course_name": "可發布課程",
-            "open_start_at": "2026-09-01T00:00:00Z",
-            "open_end_at": "2026-09-30T00:00:00Z",
+            "open_start_at": (now - timedelta(days=1)).isoformat(),
+            "open_end_at": (now + timedelta(days=30)).isoformat(),
         },
         headers=_bearer(uid),
     )
