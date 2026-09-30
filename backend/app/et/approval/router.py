@@ -42,6 +42,7 @@ from app.core.pagination import PagedResponse, PaginatedResult
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.approval.query_service import EtApprovalQueryService
 from app.et.approval.schemas import (
+    ApprovalCourseOption,
     ApprovalQueryRow,
     ApprovalSearchReq,
     ApproveReq,
@@ -174,7 +175,20 @@ async def search_approvals(
 
     ⚠️ **這是一個不寫入的 POST。** 專案規則要求「寫入型 API 一律注入 `OperatorInfo`
     填寫 `CREATED_*`」，本端點**刻意不注入**——它不寫任何資料，用 POST 的唯一理由是
-    上述的日誌問題，語意仍是讀取。同理不寫稽核日誌。
+    上述的日誌問題，語意仍是讀取。
+
+    🔴 **不寫稽核日誌這件事，#439 之後理由已經不夠了。** 原本的理由是「它不寫任何資料」，
+    而當時一次查詢 ≈ 一個已知姓名、讀取量小。現在「不給關鍵字、一次取回整門課的通過
+    名單」是**被鼓勵的主要用法**，單筆讀取的個資體積上升一到兩個數量級，而稽核軌跡仍是
+    零——事後無法回答「是誰、在什麼時候、整批取走了哪一門課的名單」。對照 DM：下載有稽核。
+
+    ⛔ 所以「它不寫資料所以不用稽核」現在只說明了**為什麼不用 `OperatorInfo`**，不足以
+    單獨支撐「不記讀取事件」。
+
+    ⚠️ **目前沒有 issue 在追這件事**（2026-09-30 使用者裁示：只記在此，不另開 follow-up）。
+    要補的話形狀是：對「未給關鍵字的 course-only 查詢」記一筆讀取事件
+    （`actor_id` + `course_id` + 回傳筆數，**不記任何姓名 / Email**）。寫在這裡是因為
+    下一個讀這段 docstring 的人，正是有理由重新考慮它的人。
 
     ⛔ 路徑用 `/approvals/search` 而非 `POST /approvals`：後者在語意上是「建立一筆
     核可」，而建立核可已經是 `POST /courses/{course_id}/approvals`。不讓兩個 POST
@@ -188,21 +202,65 @@ async def search_approvals(
     ——那是本裁示的配套。少了它，教師看到某門課沒出現時會分不清是「還沒考」還是
     「考了沒過」。
 
-    `keyword` **必填**（SA Q2 裁示 A）：`min_length=1` 擋空字串，全空白由 service
-    的 `strip()` 擋下回 422。
+    ## 關鍵字與課程「至少給一個」（#439，取代 SA Q2 裁示 A 的關鍵字必填）
+
+    | 給的條件 | 結果 |
+    |---|---|
+    | 只給課程 | 該課程的核可紀錄——解決「不知道有誰可以查」 |
+    | 只給關鍵字 | 跨課程查那個人（**#439 之前的行為，未改變**）|
+    | 兩者皆給 | 交集 |
+    | 兩者皆不給 | 422 `ET_APPROVAL_006` |
+
+    🔴 **非管理者只能給自己開設的課程**，否則 403 `ET_APPROVAL_007`。前端下拉只列得出
+    自己的課，這道閘是**防繞過**：少了它，教師可以用 `{course_id: 別人的課}` 一次撈出
+    該課全部通過者的名單而不需要知道任何名字——那是裁示 A 要擋的東西以課程為單位重演。
 
     Raises:
-        AppError: 422 `ET_APPROVAL_006` 關鍵字為空白；403 `ET_AUTH_001` 非教師 / 管理者。
+        AppError: 422 `ET_APPROVAL_006` 關鍵字與課程皆未給；403 `ET_APPROVAL_007`
+            非管理者以他人課程篩選；403 `ET_AUTH_001` 非教師 / 管理者。
     """
     return await _query.search(
         db,
         actor_id=ctx.user_id,
         roles=ctx.roles,
         keyword=req.keyword,
+        course_id=req.course_id,
         result=req.result,
         page=req.page,
         limit=req.limit,
     )
+
+
+@router.get(
+    "/approvals/filter-courses",
+    response_model=list[ApprovalCourseOption],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def approval_filter_courses(
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> list[ApprovalCourseOption]:
+    """ET10 課程篩選下拉的選項——**有核可紀錄的**課程（#439）。
+
+    教師只取得自己開設的課，管理者不限。⚠️ 這與 `search` 的擁有權閘是**一組的**：
+    下拉決定使用者選得到什麼，那道閘決定 API 收不收——只做前者等於沒做。
+
+    ## ⛔ 不要改成沿用 ET01 的課程清單（`GET /et/courses`）
+
+    看起來是同一件事，但兩支的母體都不對：
+
+    | `scope` | 為何不能用 |
+    |---|---|
+    | `all` | 只給「已發布**且期間未過**」，而核可紀錄絕大多數落在**已結束**的課程上 |
+    | `mine` | 對管理者毫無意義（他多半沒有自己的課），下拉會是空的 |
+
+    `all` 的後果尤其安靜：管理者會發現最相關的課全部不在下拉裡，而畫面不會說明任何事。
+
+    ⚠️ **不分頁**：這是下拉，母體是核可紀錄（不隨課程總數成長），與
+    `GET /et/tags`、`/et/courses/filter-tags` 同一形狀。日後若真的長到需要分頁，
+    該做的是改成可搜尋的自動完成，不是給下拉加 `page`。
+    """
+    return await _query.filter_courses(db, actor_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.get("/approvals/mine", response_model=PagedResponse[MyApprovalRow])

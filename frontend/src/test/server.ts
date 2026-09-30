@@ -1097,6 +1097,15 @@ export const handlers = [
     HttpResponse.json({ can_create_course: true, can_manage_courses: true, can_learn: true }),
   ),
   // ── ET10 核可查詢（US17 / #385）────────────────────────────────────────
+  // 課程篩選下拉（#439）：母體是**有核可紀錄的課程**，不是 ET01 的課程清單。
+  // ⚠️ 只有 `course_id` / `course_name` 兩個欄位——那是規格的一部分（見後端
+  // `ApprovalCourseOption`），不要為了「方便」補齊成課程卡片。
+  http.get("/api/et/approvals/filter-courses", () =>
+    HttpResponse.json([
+      { course_id: 11, course_name: "採血作業新進人員訓練" },
+      { course_id: 12, course_name: "成分製備標準作業教學" },
+    ]),
+  ),
   // 教師 / 管理者視角：四筆涵蓋通過、不通過、已撤銷三種狀態。
   // ⚠️ **POST + body**（#391）——姓名不進 query string，見 `approvalsService.search`。
   http.post("/api/et/approvals/search", () =>

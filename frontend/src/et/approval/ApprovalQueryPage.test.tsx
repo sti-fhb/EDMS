@@ -165,7 +165,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     expect(seen.url).not.toContain(encodeURIComponent("林佳蓉"))
   })
 
-  it("關鍵字未填時不送出請求（SA Q2 裁示 A）", async () => {
+  it("關鍵字與課程皆未給時不送出請求（#439，原 SA Q2 裁示 A）", async () => {
     asRole("teacher")
     let called = false
     server.use(
@@ -179,11 +179,11 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
 
     await user.click(await screen.findByRole("button", { name: "查詢" }))
 
-    expect(await screen.findByText("請輸入學員姓名或 Email")).toBeInTheDocument()
+    expect(await screen.findByText("請輸入姓名或 Email，或選擇課程")).toBeInTheDocument()
     expect(called).toBe(false)
   })
 
-  it("只打空白也視為未填", async () => {
+  it("只打空白且未選課程也視為未給", async () => {
     asRole("teacher")
     const user = userEvent.setup()
     renderWithProviders(<EtApprovalQueryPage />)
@@ -191,7 +191,7 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "   ")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    expect(await screen.findByText("請輸入學員姓名或 Email")).toBeInTheDocument()
+    expect(await screen.findByText("請輸入姓名或 Email，或選擇課程")).toBeInTheDocument()
   })
 
   it("查詢前不顯示空狀態——那會讓人以為已經查過且查無資料", async () => {
@@ -200,6 +200,106 @@ describe("ET10 核可查詢：教師 / 管理者視角", () => {
 
     await screen.findByLabelText("學員姓名或 Email")
     expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
+  })
+
+  it("只選課程、不填關鍵字即可查詢，且 course_id 進 body（#439）", async () => {
+    // 🔴 這是 #439 的本體：使用者常常**正是不知道有誰可以查**。
+    // 一併釘住「keyword 不得變成空字串送出去」——後端以 `if keyword:` 判斷，空字串
+    // 雖然也 falsy，但送一個空字串代表前端沒有真的把「未填」表達出來。
+    asRole("teacher")
+    const seen: { body?: { keyword?: string; course_id?: number } } = {}
+    server.use(
+      http.post("/api/et/approvals/search", async ({ request }) => {
+        seen.body = (await request.json()) as NonNullable<typeof seen.body>
+        return HttpResponse.json(EMPTY)
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.click(await screen.findByLabelText("課程"))
+    await user.click(await screen.findByRole("option", { name: "採血作業新進人員訓練" }))
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    await waitFor(() => expect(seen.body?.course_id).toBe(11))
+    expect(seen.body?.keyword).toBeUndefined()
+  })
+
+  it("關鍵字與課程同時給時，兩者都進 body（#439）", async () => {
+    // ⚠️ 兩個欄位各自有一段 `|| undefined` / `=== "" ? undefined` 的轉換，而「只給一個」
+    // 的測試各自只走過其中一段——**同時給**才驗得到兩段併存時都正確。
+    asRole("teacher")
+    const seen: { body?: { keyword?: string; course_id?: number } } = {}
+    server.use(
+      http.post("/api/et/approvals/search", async ({ request }) => {
+        seen.body = (await request.json()) as NonNullable<typeof seen.body>
+        return HttpResponse.json(EMPTY)
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "林佳蓉")
+    await user.click(await screen.findByLabelText("課程"))
+    await user.click(await screen.findByRole("option", { name: "採血作業新進人員訓練" }))
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+
+    await waitFor(() => expect(seen.body?.course_id).toBe(11))
+    expect(seen.body?.keyword).toBe("林佳蓉")
+  })
+
+  it("課程下拉的選項來自 filter-courses，不是 ET01 的課程清單（#439）", async () => {
+    // ⛔ 走 `GET /et/courses` 會壞在管理者身上：`scope=all` 排除已結束的課程，而核可
+    // 紀錄絕大多數正落在那些課上——最相關的課會全部不在下拉裡，且畫面不會說明任何事。
+    //
+    // 本條以「那支端點沒被呼叫」+「下拉內容來自 filter-courses」兩面釘住。
+    asRole("teacher")
+    let listCalled = false
+    server.use(
+      http.get("/api/et/courses", () => {
+        listCalled = true
+        return HttpResponse.json(EMPTY)
+      }),
+      http.get("/api/et/approvals/filter-courses", () =>
+        HttpResponse.json([{ course_id: 77, course_name: "已結束的舊課程" }]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.click(await screen.findByLabelText("課程"))
+    expect(await screen.findByRole("option", { name: "已結束的舊課程" })).toBeInTheDocument()
+    expect(listCalled).toBe(false)
+  })
+
+  it("🔴 課程清單載入失敗時說「載入失敗」，**不得**說「尚無核可紀錄」（#439）", async () => {
+    // 後者是一句**假話**，而且比缺陷本身更糟——教師會據此以為系統裡真的沒有核可紀錄，
+    // 而不是「剛才沒載到，重整一下」。ET03 的課程下拉踩過同一個坑（#390 的回歸）。
+    asRole("teacher")
+    server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json({}, { status: 500 })))
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    expect(await screen.findByText("課程清單載入失敗，請重新整理後再試")).toBeInTheDocument()
+    expect(screen.queryByText(/尚無核可紀錄/)).not.toBeInTheDocument()
+  })
+
+  it("教師沒有任何可選課程時說明原因，而不是給一個打得開卻空的下拉（#439）", async () => {
+    asRole("teacher")
+    server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json([])))
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    expect(await screen.findByText("您開設的課程尚無核可紀錄")).toBeInTheDocument()
+  })
+
+  it("管理者的空下拉不提「您開設的課程」——他沒有自己的課，那句話對他是錯的（#439）", async () => {
+    // 與 #436 的空狀態同一條理由：對管理者說一個不適用於他的原因，會讓他去找一個
+    // 不存在的問題。
+    asRole("admin")
+    server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json([])))
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    expect(await screen.findByText("系統中尚無核可紀錄")).toBeInTheDocument()
+    expect(screen.queryByText(/您開設的課程/)).not.toBeInTheDocument()
   })
 
   it("🔴 查詢失敗顯示錯誤，**不得**渲染成「查無符合條件」", async () => {
