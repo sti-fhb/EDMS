@@ -92,7 +92,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // 學員頁限**教師**（#463）：課程下拉為 `scope=mine`，純管理者進去只有空下拉。
       // ⛔ 不要改回 `requiresEtManage`——後端讀取端點確實開放給管理者（US16 核可所需），
       // 但那不代表他該有這個入口，詳見 `app/et/tracking/service.py` 的模組 docstring。
-      { code: "ET02", icon: SchoolIcon, label: "學員", path: "/et/students", requiresEtTrackStudents: true },
+      { code: "ET02", icon: SchoolIcon, label: "學員學習表現", path: "/et/students", requiresEtTrackStudents: true },
       { code: "ET03", icon: AutoStoriesIcon, label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
       // 核可查詢**兩種角色都要**，但看到的內容不同：學員查自己已通過核可的課程；
       // 教師依姓名查——**已通過**的涵蓋全部課程，**不通過 / 已撤銷 / 考核備註**僅限

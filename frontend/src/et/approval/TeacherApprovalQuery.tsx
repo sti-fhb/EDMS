@@ -1,7 +1,6 @@
 import SearchIcon from "@mui/icons-material/Search"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
-import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import InputAdornment from "@mui/material/InputAdornment"
 import MenuItem from "@mui/material/MenuItem"
@@ -18,6 +17,8 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
+
+import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
@@ -77,10 +78,6 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   const [courseId, setCourseId] = useState<number | "">("")
   const [result, setResult] = useState("")
   const [page, setPage] = useState(1)
-  /** 已送出的查詢條件。`null` = 尚未查詢過（與「查過但沒資料」是兩回事）。 */
-  const [submitted, setSubmitted] = useState<{ keyword: string; courseId: number | ""; result: string } | null>(null)
-  /** 條件不足的本地驗證訊息。與下方查詢本身的 `queryError` 是兩回事，刻意分開命名。 */
-  const [criteriaError, setCriteriaError] = useState<string | null>(null)
 
   // 課程下拉（#439）。⚠️ 走 `approvalsApi.listFilterCourses` 而**不是** ET01 的課程清單
   // ——後者的兩個 scope 都不對（`all` 排除已結束課程、`mine` 對管理者是空的），
@@ -112,38 +109,51 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   // 這裡**刻意不分**：兩者的下一步相同（去 ET02 核可學員），而要分得出來得多一次查詢。
   const emptyReason = courseOptionsEmptyReason(coursesQuery, options.length)
 
-  const params = submitted === null ? null : { ...submitted, page }
+  // 姓名去抖動（#468）：本頁改為輸入即查，逐字元送出會是每個按鍵一次 POST。
+  // ⚠️ 該端點為 **POST**（#391 把它從 GET 改過來，避免姓名進 query string / nginx
+  // log / Referer），使用者維度限流 60 req/min——350ms 去抖動下正常打字約 1～2 次。
+  const debouncedName = useDebouncedValue(nameInput, 350)
+  const keyword = debouncedName.trim()
+
+  // 🔴 **兩者皆空時不發請求**（#468；規則來自 #439，原 SA Q2 裁示 A）。
+  //
+  // ⛔ 不可以靠後端的 422 `ET_APPROVAL_006` 來擋：那道守門是刻意留著的
+  // （`query_rules.normalize_search_criteria` 的 docstring：「換手段、保目的」——
+  // 放寬的是「用什麼條件」，不是「可不可以不給條件」），但它是**後端**的最後一道。
+  // 前端若照送，使用者每清空一次輸入框就打一次必定失敗的 API，而且錯誤訊息會在
+  // 打字途中閃爍。
+  //
+  // ⚠️ 空白字串要先 `.trim()` 才判——`"   "` 等同未填。
+  const hasCriteria = keyword !== "" || courseId !== ""
+
   const {
     data,
     isPending,
     isError,
     error: queryError,
   } = usePagedQuery<ApprovalQueryRow>(
-    QUERY_KEYS.etApprovals.search(params ?? {}),
+    QUERY_KEYS.etApprovals.search({ keyword, courseId, result, page }),
     () =>
       approvalsApi.search({
-        keyword: submitted!.keyword || undefined,
-        course_id: submitted!.courseId === "" ? undefined : submitted!.courseId,
-        result: (submitted!.result || undefined) as "PASS" | "FAIL" | undefined,
+        keyword: keyword || undefined,
+        course_id: courseId === "" ? undefined : courseId,
+        result: (result || undefined) as "PASS" | "FAIL" | undefined,
         page,
       }),
-    { enabled: params !== null },
+    { enabled: hasCriteria },
   )
 
-  const submit = () => {
-    // #439：關鍵字與課程「至少給一個」（取代 SA Q2 裁示 A 的關鍵字必填）。
-    // 前端先擋是為了讓教師當場看到，後端仍會回 422 `ET_APPROVAL_006`。
-    //
-    // ⚠️ 兩者皆不給仍要擋——那正是裁示 A 原本要防的「留白查全部」。放寬的是「用什麼
-    // 條件」，不是「可不可以不給條件」。
-    const keyword = nameInput.trim()
-    if (keyword === "" && courseId === "") {
-      setCriteriaError("請輸入姓名或 Email，或選擇課程")
-      return
-    }
-    setCriteriaError(null)
+  // 條件變動時回第 1 頁——留在第 3 頁會讓新條件的結果看起來是空的（而使用者剛改完
+  // 條件，最可能的解讀是「查不到」）。
+  //
+  // ⚠️ **於 render 期間同步，不放 `useEffect`**：比照 `CourseEditorPage` 的表單初值。
+  // 放 effect 會被 ESLint 的 `setState in effect` 擋下，而且會多渲染一次——中間那一幀
+  // 是「新條件 + 舊頁碼」，正是要避免的狀態。
+  const criteriaKey = `${keyword}|${courseId}|${result}`
+  const [lastCriteria, setLastCriteria] = useState(criteriaKey)
+  if (lastCriteria !== criteriaKey) {
+    setLastCriteria(criteriaKey)
     setPage(1)
-    setSubmitted({ keyword, courseId, result })
   }
 
   const rows = data?.data ?? []
@@ -168,14 +178,9 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
             size="small"
             sx={{ minWidth: 260 }}
             value={nameInput}
-            error={criteriaError !== null}
-            helperText={criteriaError ?? "可輸入部分姓名或 Email"}
+            helperText="可輸入部分姓名或 Email"
             onChange={(e) => {
               setNameInput(e.target.value)
-              setCriteriaError(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit()
             }}
             slotProps={{
               input: {
@@ -195,7 +200,6 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
             size="small"
             sx={{ minWidth: 220 }}
             value={courseId}
-            error={criteriaError !== null}
             disabled={emptyReason !== null}
             helperText={
               emptyReason === "failed"
@@ -208,7 +212,6 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
             }
             onChange={(e) => {
               setCourseId(e.target.value === "" ? "" : Number(e.target.value))
-              setCriteriaError(null)
             }}
           >
             <MenuItem value="">全部課程</MenuItem>
@@ -232,15 +235,16 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
               </MenuItem>
             ))}
           </TextField>
-          <Button variant="contained" size="medium" startIcon={<SearchIcon />} onClick={submit} sx={{ mt: 0.25 }}>
-            查詢
-          </Button>
         </Stack>
       </Paper>
 
-      {submitted === null ? (
+      {!hasCriteria ? (
+        // 🔴 條件全空時**保持空白**，不列出全部（#468 裁示；理由見 #392）。
+        // 教師本來就倒得出全部紀錄（一分鐘約 40 次請求），所以這不是能力控制——
+        // 它控制的是「會不會**不小心**看到全院人員的通過紀錄」。
+        // ⛔ 日後若覺得「空白畫面沒東西看」而想改成預設列全部，先回讀 #392。
         <Typography variant="body2" color="text.secondary">
-          輸入學員姓名或 Email，或選擇課程後按「查詢」。
+          輸入學員姓名或 Email，或選擇課程即可查詢。
         </Typography>
       ) : isPending ? (
         <Typography variant="body2" color="text.secondary">
