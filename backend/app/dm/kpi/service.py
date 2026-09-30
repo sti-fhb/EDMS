@@ -54,6 +54,32 @@ class WeeklyRunResult:
     unread_notified: int  # 收到未讀提醒之閱覽者數（實際排入者）
 
 
+def _pair_visible(doc_pairs: set[tuple[int | None, int | None]], user_pairs: set[tuple[int | None, int]]) -> bool:
+    """此文件之可見對象配對是否涵蓋該使用者（#437）。
+
+    Python 版之判定，語意須與 SQL 版 `visibility.audience_pair_match` **完全一致**：
+    文件端之通用值已由 `doc_audience` 正規化為 `None`（「全單位」/「全體」）。
+
+        可見 ⟺ ∃ 文件配對 (du, dp)：
+                (du is None AND dp is None)                      -- 全系統，不需任何授權
+                OR ∃ 使用者配對 (uu, up)：
+                     (du is None OR du == uu) AND (dp is None OR dp == up)
+
+    人側 `uu is None`（單位未指定）時 `du == uu` 恆為 False，故僅能匹配 `du is None`
+    ——與 SQL 端 NULL 比較的行為相同。
+
+    ⚠️ 兩份實作各自存在是因為 KPI 需在 Python 層對「文件 × 閱覽者」做交叉統計；改動判定規則時
+    **兩邊都要改**。`test_dm_kpi.py` 之配對案例即為此而設。
+    """
+    for du, dp in doc_pairs:
+        if du is None and dp is None:
+            return True
+        for uu, up in user_pairs:
+            if (du is None or du == uu) and (dp is None or dp == up):
+                return True
+    return False
+
+
 def _pct(rate: float | None) -> str:
     """閱讀率轉顯示字串（None → 「—」）。"""
     return "—" if rate is None else f"{rate * 100:.1f}%"
@@ -83,11 +109,8 @@ class KpiService:
 
         stats: list[_DocKpi] = []
         for d in docs:
-            tags, has_all = doc_aud.get(d.doc_id, (set(), False))
-            if has_all:
-                members = set(viewer_ids)
-            else:
-                members = {u for u in viewer_ids if viewer_tags.get(u, frozenset()) & tags}
+            doc_pairs = doc_aud.get(d.doc_id, set())
+            members = {u for u in viewer_ids if _pair_visible(doc_pairs, viewer_tags.get(u, frozenset()))}
             readers = reads.get(d.doc_id, set())
             seen_members = members & readers
             should_see = len(members)

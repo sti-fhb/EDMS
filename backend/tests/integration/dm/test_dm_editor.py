@@ -71,6 +71,12 @@ async def _all_units_id(db):
 
 
 async def _make_retrieval_tag(db, name, group="NATURE"):
+    """取指定檢索標籤；seed 已有同名者沿用——`DM_TAG` 組內名稱唯一（`UQ_DM_TAG_GROUP_NAME`，
+    #437），重建同名會撞唯一鍵。本 helper 要的是「一個該組的標籤」，不是「一個新標籤」。
+    """
+    existing = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == group, DmTag.tag_name == name))
+    if existing is not None:
+        return existing
     t = DmTag(tag_group_code=group, tag_name=name, created_user="seed", created_date=utcnow())
     db.add(t)
     await db.flush()

@@ -141,13 +141,20 @@ def upgrade() -> None:
             {"name_val": tag_name, "name_chk": tag_name, "u": _SEED_USER, "d": now},
         )
 
-    # ── 3. AUDIENCE 組更名（單位已分出為獨立組）──
+    # ── 3. 組內標籤名稱唯一（#437 安全前提）──
+    # `visibility.audience_pair_match` 以 TAG_NAME 辨識「全單位」/「全體」兩個通用值。組內若可
+    # 出現同名標籤，把某個具體單位改名為「全單位」即等於讓所有掛該單位的文件對全體閱覽者開放，
+    # 而稽核只會留下一筆「改名」。DM 尚未上線正式環境（現有 DB 皆由 migration 從頭建），seed 之
+    # 各組名稱本即唯一，故不需先清重複。
+    op.create_unique_constraint("UQ_DM_TAG_GROUP_NAME", "DM_TAG", ["TAG_GROUP_CODE", "TAG_NAME"])
+
+    # ── 4. AUDIENCE 組更名（單位已分出為獨立組）──
     conn.execute(
         text('UPDATE "DM_TAG_GROUP" SET "TAG_GROUP_NAME" = :name WHERE "TAG_GROUP_CODE" = \'AUDIENCE\''),
         {"name": "可見對象"},
     )
 
-    # ── 4. 回填：既有文件 / 版本之職位標籤補「全單位」，可見範圍不變 ──
+    # ── 5. 回填：既有文件 / 版本之職位標籤補「全單位」，可見範圍不變 ──
     all_units_id = conn.execute(
         text('SELECT "TAG_ID" FROM "DM_TAG" WHERE "TAG_GROUP_CODE" = \'UNIT\' AND "TAG_NAME" = :name'),
         {"name": ALL_UNITS_TAG},
@@ -163,9 +170,11 @@ def downgrade() -> None:
         text('UPDATE "DM_TAG_GROUP" SET "TAG_GROUP_NAME" = :name WHERE "TAG_GROUP_CODE" = \'AUDIENCE\''),
         {"name": "可見對象/單位"},
     )
-    # UNIT_TAG_ID 欄位隨後即 drop，單位標籤之引用一併消失，故可直接刪除 seed。
-    conn.execute(text('DELETE FROM "DM_TAG" WHERE "TAG_GROUP_CODE" = \'UNIT\''))
-    conn.execute(text('DELETE FROM "DM_TAG_GROUP" WHERE "TAG_GROUP_CODE" = \'UNIT\''))
+    # ⚠️ 刪 seed 必須排在三張表之 UNIT_TAG_ID 欄位 drop **之後**（見本函式末）：upgrade 的回填讓
+    # 每一筆 AUDIENCE 文件標籤列都指向「全單位」，此時刪標籤會撞 FK_DM_*_UNIT。順序寫反會讓任何
+    # 有資料的 DB 無法 rollback，而空 DB（測試環境）完全測不出來。
+
+    op.drop_constraint("UQ_DM_TAG_GROUP_NAME", "DM_TAG", type_="unique")
 
     op.drop_constraint("FK_DM_VERSION_TAG_UNIT", "DM_VERSION_TAG", type_="foreignkey")
     op.drop_constraint("UQ_DM_VERSION_TAG_VERSION_TAG", "DM_VERSION_TAG", type_="unique")
@@ -196,3 +205,8 @@ def downgrade() -> None:
         postgresql_nulls_not_distinct=False,
     )
     op.drop_column("DM_DOC_TAG", "UNIT_TAG_ID")
+
+    # 三張表之 UNIT_TAG_ID 皆已移除、FK 不復存在，此時才能刪 seed（見上方順序說明）。
+    # 硬刪除為 seed 清理之例外（非業務資料，且本組於 downgrade 後不應殘留）。
+    conn.execute(text('DELETE FROM "DM_TAG" WHERE "TAG_GROUP_CODE" = \'UNIT\''))
+    conn.execute(text('DELETE FROM "DM_TAG_GROUP" WHERE "TAG_GROUP_CODE" = \'UNIT\''))

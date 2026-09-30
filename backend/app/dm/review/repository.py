@@ -12,9 +12,9 @@ from sqlalchemy.orm import aliased
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow
-from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmCategory, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
+from app.dm.document.visibility import audience_pair_match
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_VIEWER
 from app.dm.roles.models import DmUserRole
@@ -339,47 +339,23 @@ class ReviewCenterRepository:
         """發布通知收件名單（FR-008）：撰寫者 + 具閱覽者角色且可見對象相符（或文件掛「全體」）之使用者 Email。
 
         反向於 `visibility.visible_docs_condition`（該函式為「使用者能看哪些文件」）：此處為「此文件能被誰看見」。
+        兩者**共用 `audience_pair_match`**，只是把文件端 / 使用者端哪一邊當定值對調——#437 曾因兩邊各寫
+        一份而漏改：可見性改為 (單位, 職位) 配對後，本查詢仍只比職位，文件開給「三總的護理師」時
+        **所有單位的護理師**都會收到含文件名稱的通知，且無任何測試會紅。
+
         發布當下組出快照、不追溯後續授權；不排除兼具編輯 / 審核者；Email 去重。
         """
-        doc_has_all = await db.scalar(
-            select(
-                exists(
-                    select(1)
-                    .select_from(DmDocTag)
-                    .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
-                    .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
-                    .where(
-                        DmDocTag.doc_id == doc_id,
-                        DmDocTag.deleted == 0,
-                        DmTagGroup.group_type == _AUDIENCE,
-                        DmTag.tag_name == _ALL_AUDIENCE_TAG,
-                    )
-                )
-            )
-        )
-        # 文件之可見對象 AUDIENCE 標籤集（有效）
-        doc_audience_tags = (
-            select(DmDocTag.tag_id)
-            .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
-            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
-            .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0, DmTagGroup.group_type == _AUDIENCE)
-        )
-        viewer_match = exists(
-            select(1)
-            .select_from(DmUserTag)
-            .where(
-                DmUserTag.user_id == DpUser.user_id,
-                DmUserTag.deleted == 0,
-                DmUserTag.tag_id.in_(doc_audience_tags),
-            )
-        )
         stmt = (
             select(DpUser.email)
             .join(DmUserRole, and_(DmUserRole.user_id == DpUser.user_id, DmUserRole.role_code == DM_VIEWER))
-            .where(DpUser.deleted == 0, DmUserRole.deleted == 0, DpUser.email.isnot(None))
+            .where(
+                DpUser.deleted == 0,
+                DmUserRole.deleted == 0,
+                DpUser.email.isnot(None),
+                # 撰寫者由下方獨立查詢補上（其可能非閱覽者角色），此處僅列可見性相符之閱覽者
+                audience_pair_match(doc_id=doc_id, user_id=DpUser.user_id),
+            )
         )
-        if not doc_has_all:
-            stmt = stmt.where(viewer_match)  # 撰寫者由下方獨立查詢補上（其可能非閱覽者角色），此處僅列相符閱覽者
         emails = {e for e in (await db.scalars(stmt)).all() if e}
         # 撰寫者一定收（可能非閱覽者角色）
         author_email = await db.scalar(select(DpUser.email).where(DpUser.user_id == author_id, DpUser.deleted == 0))

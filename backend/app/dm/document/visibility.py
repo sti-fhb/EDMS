@@ -42,6 +42,61 @@ def is_privileged(roles: Iterable[str]) -> bool:
     return bool(set(roles) & _UNFILTERED_ROLES)
 
 
+def audience_pair_match(*, doc_id, user_id) -> ColumnElement[bool]:
+    """(單位, 職位) 配對匹配條件——**文件端與使用者端皆以參數傳入，故可雙向使用**。
+
+    兩個呼叫方向共用本條件，不各寫一份：
+
+    - 「這個人能看哪些文件」：`doc_id=DmDocument.doc_id`（欄位）、`user_id="U1"`（定值）
+    - 「這份文件能被誰看見」：`doc_id="DM-SOP-000001"`（定值）、`user_id=DpUser.user_id`（欄位）
+
+    ⚠️ **為何必須共用**：#437 之前兩邊各寫一份，發布通知的收件名單（`review/repository.py`
+    之 `recipient_emails`）雖於 docstring 自稱「反向於 `visible_docs_condition`」，卻在可見性
+    改為配對後沒跟著改——文件開給「三總的護理師」時，**所有單位的護理師**都會收到含文件名稱的
+    通知，且不會有任何測試變紅。兩個方向只要還是兩份程式碼，這種 drift 就會再發生。
+
+    判定規則見 `visible_docs_condition` 之 docstring。
+
+    Args:
+        doc_id: 文件識別——欄位（如 `DmDocument.doc_id`）或定值字串。
+        user_id: 使用者識別——欄位（如 `DpUser.user_id`）或定值字串。
+
+    Returns:
+        可 AND 進查詢之布林條件。
+    """
+    unit_tag = aliased(DmTag, name="dm_unit_tag")
+    # 僅計有效授權 / 有效文件標籤（DELETED=0）：撤銷之授權、移除之文件標籤皆不再賦予可見性。
+    matching_user_pair = exists(
+        select(1)
+        .select_from(DmUserTag)
+        .where(
+            DmUserTag.user_id == user_id,
+            DmUserTag.deleted == 0,
+            or_(DmTag.tag_name == _ALL_AUDIENCE_TAG, DmUserTag.tag_id == DmDocTag.tag_id),
+            or_(unit_tag.tag_name == _ALL_UNITS_TAG, DmUserTag.unit_tag_id == DmDocTag.unit_tag_id),
+        )
+        # ⚠️ 必須明示關聯：`user_id` 為外層欄位時（「此文件能被誰看見」方向），SQLAlchemy 會把該
+        # 外層表也拉進本子查詢的 FROM，條件退化為「只要**存在任何人**有相符授權即為真」——所有
+        # 閱覽者都會通過。`user_id` 為定值時不會發生，故單測另一個方向驗不出來。
+        .correlate_except(DmUserTag)
+    )
+    return exists(
+        select(1)
+        .select_from(DmDocTag)
+        .join(DmTag, and_(DmDocTag.tag_id == DmTag.tag_id, DmTag.tag_group_code == _AUDIENCE_GROUP))
+        .join(unit_tag, and_(DmDocTag.unit_tag_id == unit_tag.tag_id, unit_tag.tag_group_code == _UNIT_GROUP))
+        .where(
+            DmDocTag.doc_id == doc_id,
+            DmDocTag.deleted == 0,
+            or_(
+                and_(unit_tag.tag_name == _ALL_UNITS_TAG, DmTag.tag_name == _ALL_AUDIENCE_TAG),
+                matching_user_pair,
+            ),
+        )
+        .correlate_except(DmDocTag, DmTag, unit_tag)  # 同上：`doc_id` 為外層欄位時亦須明示
+    )
+
+
 def visible_docs_condition(user_id: str, roles: Iterable[str]) -> ColumnElement[bool] | None:
     """回傳套用於 DM_DOCUMENT 之可見性條件。
 
@@ -69,30 +124,4 @@ def visible_docs_condition(user_id: str, roles: Iterable[str]) -> ColumnElement[
     """
     if set(roles) & _UNFILTERED_ROLES:
         return None
-
-    unit_tag = aliased(DmTag, name="dm_unit_tag")
-    # 僅計有效授權 / 有效文件標籤（DELETED=0）：撤銷之授權、移除之文件標籤皆不再賦予可見性。
-    matching_user_pair = exists(
-        select(1)
-        .select_from(DmUserTag)
-        .where(
-            DmUserTag.user_id == user_id,
-            DmUserTag.deleted == 0,
-            or_(DmTag.tag_name == _ALL_AUDIENCE_TAG, DmUserTag.tag_id == DmDocTag.tag_id),
-            or_(unit_tag.tag_name == _ALL_UNITS_TAG, DmUserTag.unit_tag_id == DmDocTag.unit_tag_id),
-        )
-    )
-    return exists(
-        select(1)
-        .select_from(DmDocTag)
-        .join(DmTag, and_(DmDocTag.tag_id == DmTag.tag_id, DmTag.tag_group_code == _AUDIENCE_GROUP))
-        .join(unit_tag, and_(DmDocTag.unit_tag_id == unit_tag.tag_id, unit_tag.tag_group_code == _UNIT_GROUP))
-        .where(
-            DmDocTag.doc_id == DmDocument.doc_id,
-            DmDocTag.deleted == 0,
-            or_(
-                and_(unit_tag.tag_name == _ALL_UNITS_TAG, DmTag.tag_name == _ALL_AUDIENCE_TAG),
-                matching_user_pair,
-            ),
-        )
-    )
+    return audience_pair_match(doc_id=DmDocument.doc_id, user_id=user_id)

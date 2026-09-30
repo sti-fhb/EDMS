@@ -27,6 +27,7 @@ from app.services import AuditLogService
 
 _AUDIENCE_GROUP_TYPE = "AUDIENCE"
 _UNIT_GROUP_TYPE = "UNIT"  # 單位標籤組（#437）
+_MAX_BIGINT = 2**63 - 1
 _GRANT = "GRANT"
 _REVOKE = "REVOKE"
 
@@ -229,6 +230,16 @@ def _ensure_valid_roles(roles: set[str]) -> None:
         raise AppError(status_code=422, detail="指定之角色代碼無效", error_code="DM_ROLE_003")
 
 
+def _is_valid_tag_id(value: str) -> bool:
+    """字串可安全轉為 BIGINT 範圍內之正整數 TAG_ID。
+
+    用 `isdecimal()` 而非 `isdigit()`——後者對 Unicode 數字字元（`²` / `①`）回 True 但 `int()`
+    會拋 ValueError；另加 BIGINT 界限，否則超長數字會在 asyncpg 綁參數時拋 DataError。兩者皆為
+    未攔截的 500。比照 `app/dm/catalog/adapter.py` 之 `_tag_id`。
+    """
+    return value.isdecimal() and len(value) <= 19 and 0 < int(value) <= _MAX_BIGINT
+
+
 def _ensure_valid_pairs(pairs: set[str]) -> None:
     """可見對象值 MUST 為 `"{unit}:{role}"` 格式（單位可空）；否則 DM_ROLE_002。
 
@@ -236,7 +247,7 @@ def _ensure_valid_pairs(pairs: set[str]) -> None:
     """
     for p in pairs:
         unit_str, sep, role_str = p.partition(":")
-        if not sep or not role_str.isdigit() or (unit_str and not unit_str.isdigit()):
+        if not sep or not _is_valid_tag_id(role_str) or (unit_str and not _is_valid_tag_id(unit_str)):
             raise AppError(status_code=422, detail="指定之可見對象無效或未啟用", error_code="DM_ROLE_002")
 
 

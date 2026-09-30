@@ -173,3 +173,39 @@ async def test_無任何授權者_僅見全單位加全體(db):
 
     assert "DM-SOP-000050" in visible
     assert "DM-SOP-000051" not in visible
+
+
+async def test_文件側單位缺漏_對所有人皆不可見(db):
+    """文件配對缺單位（`UNIT_TAG_ID IS NULL`）→ 不賦予任何可見性，連無授權者也看不到。
+
+    `audience_pair_match` 以 INNER JOIN 單位標籤達成此 fail-closed，是隱含行為而非顯式條件；
+    若哪天有人把它改成 outerjoin，缺單位的列會變成「不限單位」而對所有人開放，且不會有其他
+    測試變紅（其餘案例的文件都有完整配對）。故此處單獨釘住。
+    """
+    now = utcnow()
+    db.add(
+        DmDocument(
+            doc_id="DM-SOP-000060",
+            doc_name="DM-SOP-000060",
+            category_code="SOP",
+            status="PUBLISHED",
+            created_user="e",
+            created_date=now,
+        )
+    )
+    await db.flush()
+    # 直接寫入不完整配對（service 會擋，此處繞過以模擬資料層殘留）
+    db.add(
+        DmDocTag(
+            doc_id="DM-SOP-000060",
+            tag_id=await _role_id(db, _ALL_ROLES),
+            unit_tag_id=None,
+            created_user="e",
+            created_date=now,
+        )
+    )
+    await db.flush()
+    await _grant(db, "v_has_role", [(_SONGSHAN_STATION, "護理師")])
+
+    assert "DM-SOP-000060" not in await _visible(db, "v_nobody_at_all")
+    assert "DM-SOP-000060" not in await _visible(db, "v_has_role")

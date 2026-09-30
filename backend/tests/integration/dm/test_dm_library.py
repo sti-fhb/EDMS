@@ -30,7 +30,13 @@ async def _audience_tag_id(db, name: str) -> int:
 
 
 async def _make_retrieval_tag(db, name: str) -> int:
-    """於 NATURE（RETRIEVAL 組）建一檢索標籤，回 TAG_ID。"""
+    """取 NATURE（RETRIEVAL 組）之檢索標籤，回 TAG_ID；seed 已有同名者沿用。
+
+    `DM_TAG` 組內名稱唯一（`UQ_DM_TAG_GROUP_NAME`，#437），重建同名會撞唯一鍵。
+    """
+    existing = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "NATURE", DmTag.tag_name == name))
+    if existing is not None:
+        return existing
     tag = DmTag(tag_group_code="NATURE", tag_name=name, created_user="seed", created_date=utcnow())
     db.add(tag)
     await db.flush()

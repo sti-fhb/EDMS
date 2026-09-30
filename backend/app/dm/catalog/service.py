@@ -101,9 +101,7 @@ class CatalogService:
         doc_col = DmDocTag.unit_tag_id if is_unit else DmDocTag.tag_id
         user_col = DmUserTag.unit_tag_id if is_unit else DmUserTag.tag_id
         affected_docs = (
-            await db.scalar(
-                select(func.count()).select_from(DmDocTag).where(doc_col == tag_id, DmDocTag.deleted == 0)
-            )
+            await db.scalar(select(func.count()).select_from(DmDocTag).where(doc_col == tag_id, DmDocTag.deleted == 0))
             or 0
         )
         affected_viewers = (

@@ -84,7 +84,12 @@ async def _add_version(db, doc_id, version_no, *, status, author="ed", summary="
     return v
 
 
-async def _doc(db, doc_id, *, status, current_version_id=None, author="ed", category="SOP", audience=()):
+async def _unit_id(db, name="全單位"):
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == name))
+
+
+async def _doc(db, doc_id, *, status, current_version_id=None, author="ed", category="SOP", audience=(), unit="全單位"):
+    """建文件；`audience` 為職位名稱、`unit` 為單位名稱——一起構成 (單位, 職位) 配對（#437）。"""
     doc = DmDocument(
         doc_id=doc_id,
         doc_name=f"文件{doc_id}",
@@ -97,7 +102,15 @@ async def _doc(db, doc_id, *, status, current_version_id=None, author="ed", cate
     db.add(doc)
     await db.flush()
     for n in audience:
-        db.add(DmDocTag(doc_id=doc_id, tag_id=await _audience_id(db, n), created_user=author, created_date=utcnow()))
+        db.add(
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=await _audience_id(db, n),
+                unit_tag_id=await _unit_id(db, unit),
+                created_user=author,
+                created_date=utcnow(),
+            )
+        )
     await db.flush()
     return doc
 
@@ -579,3 +592,31 @@ async def test_http_pending_and_approve_flow(db, client):
     assert resp.status_code == 200 and any(i["review_id"] == r.review_id for i in resp.json())
     resp2 = await client.post(f"/api/dm/reviews/{r.review_id}/approve", headers=h)
     assert resp2.status_code == 200 and resp2.json()["published_version_id"] == v.version_id
+
+
+async def test_recipients_pair_excludes_other_unit_same_role(db):
+    """文件開給「某單位的護理師」→ **其他單位的護理師不得收到發布通知**（#437）。
+
+    收件名單是可見性的反向，兩者共用 `audience_pair_match`。此條專釘該共用關係：若本查詢退回
+    只比職位（配對化前的寫法），所有單位的護理師都會收到含 `doc_name` / `change_summary` 的信——
+    對看不到該文件的人洩漏其存在與摘要，且兩條既有收件測試（文件皆掛「全單位」）完全抓不到。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "mab_nurse", "軍醫局護理", email="mab_nurse@e.com")
+    await _seed_user(db, "tsgh_nurse", "三總護理", email="tsgh_nurse@e.com")
+    await _grant(db, "mab_nurse", DM_VIEWER)
+    await _grant(db, "tsgh_nurse", DM_VIEWER)
+    nurse_tag = await _audience_id(db, "護理師")
+    mab = await _unit_id(db, "國防部軍醫局")
+    tsgh = await _unit_id(db, "國防醫學院三軍總醫院")
+    now = utcnow()
+    db.add(DmUserTag(user_id="mab_nurse", tag_id=nurse_tag, unit_tag_id=mab, created_user="seed", created_date=now))
+    db.add(DmUserTag(user_id="tsgh_nurse", tag_id=nurse_tag, unit_tag_id=tsgh, created_user="seed", created_date=now))
+    await db.flush()
+    await _doc(db, "DM-SOP-000352", status="PUBLISHED", author="ed", audience=("護理師",), unit="國防部軍醫局")
+
+    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000352", "ed")
+
+    assert "mab_nurse@e.com" in emails  # 單位 + 職位皆相符
+    assert "tsgh_nurse@e.com" not in emails  # 同職位但單位不符 → 不得收到
+    assert "ed@e.com" in emails  # 撰寫者一定收
