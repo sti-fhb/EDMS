@@ -30,6 +30,8 @@ _AUDIENCE = "AUDIENCE"
 # 通用值「全體」為**文件端**語意（文件掛上即所有閱覽者可見），非「指派給某使用者」的可見對象，
 # 故不列入權限管理可見對象核取清單。與 app.dm.document.visibility._ALL_AUDIENCE_TAG 同一語意。
 _ALL_AUDIENCE_TAG = "全體"
+_UNIT = "UNIT"  # 單位標籤組（#437）；其 GROUP_TYPE 與 TAG_GROUP_CODE 同值
+_ALL_UNITS_TAG = "全單位"
 
 
 class CatalogAdapter:
@@ -84,20 +86,38 @@ class CatalogAdapter:
         ]
 
     async def list_audiences(self, db: AsyncSession, *, enabled_only: bool = True) -> list[ControlledItemView]:
-        """列出 AUDIENCE 組標籤（供權限管理可見對象核取清單）。
+        """列出可指派之可見對象項（供權限管理配對清單）。
 
-        排除通用值「全體」——它是文件端「所有閱覽者可見」的語意，不是可指派給個別使用者的可見對象。
+        回**兩個維度**（#437）：職位（`group_type='AUDIENCE'`）與單位（`group_type='UNIT'`），
+        由呼叫端依 `group_type` 分成兩個下拉組成 (單位, 職位) 配對。契約簽名不變——`group_type`
+        本就是為了區分項目類別而存在，故不需擴充 `ModuleAssignProvider`（ET 僅回單一類別、
+        行為不受影響）。
+
+        兩個通用值皆排除：「全體」與「全單位」是**文件端**「不限」之語意，人不會屬於它們。
+        人側之單位可為未指定（`DM_USER_TAG.UNIT_TAG_ID IS NULL`），那是過渡狀態而非「全單位」。
         """
         stmt = (
             select(DmTag)
             .join(DmTagGroup)
-            .where(DmTagGroup.group_type == _AUDIENCE, DmTag.tag_name != _ALL_AUDIENCE_TAG)
+            .where(
+                DmTagGroup.group_type.in_((_AUDIENCE, _UNIT)),
+                DmTag.tag_name.not_in((_ALL_AUDIENCE_TAG, _ALL_UNITS_TAG)),
+            )
+            .order_by(DmTagGroup.group_type, DmTag.tag_id)
         )
         if enabled_only:
             stmt = stmt.where(DmTag.is_enabled.is_(True))
         rows = (await db.execute(stmt)).scalars()
         return [
-            ControlledItemView("TAG", str(t.tag_id), t.tag_name, False, t.is_enabled, _AUDIENCE, t.tag_group_code)
+            ControlledItemView(
+                "TAG",
+                str(t.tag_id),
+                t.tag_name,
+                False,
+                t.is_enabled,
+                _UNIT if t.tag_group_code == _UNIT else _AUDIENCE,
+                t.tag_group_code,
+            )
             for t in rows
         ]
 
@@ -161,8 +181,11 @@ class CatalogAdapter:
         before = {"kind": kind, "enabled": obj.is_enabled}  # 同上：須在改值前取
         if kind == "TAG" and not enabled:
             group = await db.scalar(select(DmTagGroup).where(DmTagGroup.tag_group_code == obj.tag_group_code))
-            if group is not None and group.group_type == _AUDIENCE:
-                r = await self._catalog.soft_retire_audience_tag(db, tag_id=_tag_id(code), operator=operator_id)
+            # 可見對象之兩個維度（職位 AUDIENCE / 單位 UNIT）皆採 soft-retire 並回報受影響數（#437）
+            if group is not None and group.group_type in (_AUDIENCE, _UNIT):
+                r = await self._catalog.soft_retire_audience_tag(
+                    db, tag_id=_tag_id(code), operator=operator_id, is_unit=group.group_type == _UNIT
+                )
                 await self._log(
                     db, "UPDATE", operator_id, target=code, before=before, after={**after, "soft_retire": True}
                 )

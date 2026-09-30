@@ -4,7 +4,16 @@
 分類碼供 DOC_ID 嵌入、建立後鎖定。標籤組分權限（AUDIENCE）與檢索（RETRIEVAL）兩用途。
 """
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Identity, Index, PrimaryKeyConstraint, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    ForeignKey,
+    Identity,
+    Index,
+    PrimaryKeyConstraint,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.base_model import BaseModel
@@ -59,13 +68,18 @@ class DmTagGroup(BaseModel):
 class DmTag(BaseModel):
     """標籤（DM_TAG）。
 
-    受控標籤庫；撰寫者只能挑選不可自由輸入；不刪除只停用。AUDIENCE 組之停用採 soft-retire
-    （不收回既有可見性）；AUDIENCE 組含通用值「全體」（文件掛上即所有閱覽者可見）。
+    受控標籤庫；撰寫者只能挑選不可自由輸入；不刪除只停用。AUDIENCE / UNIT 組之停用採 soft-retire
+    （不收回既有可見性）；AUDIENCE 組含通用值「全體」、UNIT 組含「全單位」（文件掛上即不限該維度）。
+
+    **組內名稱唯一**（`UQ_DM_TAG_GROUP_NAME`，#437）：`visibility.audience_pair_match` 以
+    `TAG_NAME` 字串辨識兩個通用值，若組內可出現同名標籤，把某個具體單位改名為「全單位」即等於
+    讓所有掛該單位的文件對全體閱覽者開放——稽核只會留下一筆「改名」，不會記可見範圍擴大。
     """
 
     __tablename__ = "DM_TAG"
     __table_args__ = (
         PrimaryKeyConstraint("TAG_ID", name="PK_DM_TAG"),
+        UniqueConstraint("TAG_GROUP_CODE", "TAG_NAME", name="UQ_DM_TAG_GROUP_NAME"),
         Index("IX_DM_TAG_GROUP", "TAG_GROUP_CODE"),
     )
 

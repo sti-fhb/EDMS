@@ -65,7 +65,18 @@ async def _audience_id(db, name):
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == name))
 
 
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位；本檔驗的是職位維度，單位一律用它（#437）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 async def _make_retrieval_tag(db, name, group="NATURE"):
+    """取指定檢索標籤；seed 已有同名者沿用——`DM_TAG` 組內名稱唯一（`UQ_DM_TAG_GROUP_NAME`，
+    #437），重建同名會撞唯一鍵。本 helper 要的是「一個該組的標籤」，不是「一個新標籤」。
+    """
+    existing = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == group, DmTag.tag_name == name))
+    if existing is not None:
+        return existing
     t = DmTag(tag_group_code=group, tag_name=name, created_user="seed", created_date=utcnow())
     db.add(t)
     await db.flush()
@@ -93,12 +104,14 @@ async def _create(
 ):
     """呼叫 service.create_document 之精簡包裝（audience 以名稱轉 id）；with_file=False 為無檔案草稿。"""
     aud_ids = [await _audience_id(db, n) for n in audience]
+    unit_ids = [await _all_units_id(db)] * len(aud_ids)  # 配對之單位一律「全單位」（#437）
     return await _svc.create_document(
         db,
         doc_name=name,
         category_code=category,
         func_code=func_code,
-        audience_ids=aud_ids,
+        audience_unit_ids=unit_ids,
+        audience_role_ids=aud_ids,
         retrieval_ids=list(retrieval),
         version_no=version_no,
         change_summary=summary,
@@ -209,7 +222,8 @@ async def test_create_wrong_group_tag_blocked(db):
             doc_name="d",
             category_code="SOP",
             func_code=None,
-            audience_ids=[rid],
+            audience_unit_ids=[await _all_units_id(db)],
+            audience_role_ids=[rid],
             retrieval_ids=[aud_all],  # 兩者群組相反
             version_no="1.0",
             change_summary="s",
@@ -255,17 +269,27 @@ async def _publish_doc(db, doc_id, *, category="SOP", func_code=None, author="ed
     await db.flush()
     doc.current_version_id = v.version_id
     for n in audience:
-        db.add(DmDocTag(doc_id=doc_id, tag_id=await _audience_id(db, n), created_user=author, created_date=utcnow()))
+        db.add(
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=await _audience_id(db, n),
+                unit_tag_id=await _all_units_id(db),
+                created_user=author,
+                created_date=utcnow(),
+            )
+        )
     await db.flush()
     return doc
 
 
 async def _add_version(db, doc_id, *, version_no="2.0", audience=("全體",), retrieval=(), op=None, mime=_PDF):
     aud_ids = [await _audience_id(db, n) for n in audience]
+    unit_ids = [await _all_units_id(db)] * len(aud_ids)  # 配對之單位一律「全單位」（#437）
     return await _svc.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=aud_ids,
+        audience_unit_ids=unit_ids,
+        audience_role_ids=aud_ids,
         retrieval_ids=list(retrieval),
         version_no=version_no,
         change_summary="改版",
@@ -313,7 +337,9 @@ async def test_get_doc_tags_for_edit_prefill(db):
     await db.flush()
     tags = await _svc.get_doc_tags(db, "DM-SOP-000105", user_id="ed")
     all_aud = str(await _audience_id(db, "全體"))
-    assert tags.audience_ids == [all_aud] and tags.retrieval_ids == [str(rid)]
+    all_units = str(await _all_units_id(db))
+    assert [(p.unit_id, p.audience_id) for p in tags.audience_pairs] == [(all_units, all_aud)]
+    assert tags.retrieval_ids == [str(rid)]
 
 
 async def test_get_doc_tags_prefers_own_draft_snapshot(db):
@@ -323,7 +349,7 @@ async def test_get_doc_tags_prefers_own_draft_snapshot(db):
 
     tags = await _svc.get_doc_tags(db, "DM-SOP-000106", user_id="ed")
 
-    assert tags.audience_ids == [str(await _audience_id(db, "護理師"))]  # 非文件層的「全體」
+    assert [p.audience_id for p in tags.audience_pairs] == [str(await _audience_id(db, "護理師"))]  # 非文件層的「全體」
 
 
 async def test_add_version_integrity_race_maps_to_single_draft(db, monkeypatch):
@@ -606,6 +632,7 @@ async def test_http_create_forbidden_without_editor_role(db, client):
     await _grant(db, "viewer1", DM_VIEWER)  # 有 DM 角色但非編輯者
     token = create_access_token(sub="viewer1", ttl_minutes=15)
     aud = await _audience_id(db, "全體")
+    all_units = await _all_units_id(db)
     resp = await client.post(
         "/api/dm/documents",
         headers={"Authorization": f"Bearer {token}"},
@@ -614,7 +641,8 @@ async def test_http_create_forbidden_without_editor_role(db, client):
             "category_code": "SOP",
             "version_no": "1.0",
             "change_summary": "s",
-            "audience_ids": [aud],
+            "audience_unit_ids": [all_units],
+            "audience_role_ids": [aud],
         },
         files={"file": ("a.pdf", b"%PDF-1.4 x", _PDF)},
     )
@@ -626,6 +654,7 @@ async def test_http_create_multipart_success(db, client):
     await _grant(db, "editor1", DM_EDITOR)
     token = create_access_token(sub="editor1", ttl_minutes=15)
     aud = await _audience_id(db, "全體")
+    all_units = await _all_units_id(db)
     resp = await client.post(
         "/api/dm/documents",
         headers={"Authorization": f"Bearer {token}"},
@@ -634,7 +663,8 @@ async def test_http_create_multipart_success(db, client):
             "category_code": "SOP",
             "version_no": "1.0",
             "change_summary": "首版",
-            "audience_ids": [aud],
+            "audience_unit_ids": [all_units],
+            "audience_role_ids": [aud],
         },
         files={"file": ("a.pdf", b"%PDF-1.4 realbytes", _PDF)},
     )
@@ -652,10 +682,16 @@ async def test_http_edit_add_version_then_submit_happy(db, client):
     await _publish_doc(db, "DM-SOP-000700", author="editor2", audience=("全體",))
     token = create_access_token(sub="editor2", ttl_minutes=15)
     aud = await _audience_id(db, "全體")
+    all_units = await _all_units_id(db)
     resp = await client.post(
         "/api/dm/documents/DM-SOP-000700/versions",
         headers={"Authorization": f"Bearer {token}"},
-        data={"version_no": "2.0", "change_summary": "改版", "audience_ids": [aud]},
+        data={
+            "version_no": "2.0",
+            "change_summary": "改版",
+            "audience_unit_ids": [all_units],
+            "audience_role_ids": [aud],
+        },
         files={"file": ("v2.pdf", b"%PDF-1.4 v2", _PDF)},
     )
     assert resp.status_code == 201, resp.text
@@ -670,7 +706,8 @@ async def test_http_edit_add_version_then_submit_happy(db, client):
     resp3 = await client.get(
         "/api/dm/editor/documents/DM-SOP-000700/tags", headers={"Authorization": f"Bearer {token}"}
     )
-    assert resp3.status_code == 200 and str(aud) in resp3.json()["audience_ids"]
+    assert resp3.status_code == 200
+    assert {"unit_id": str(all_units), "audience_id": str(aud)} in resp3.json()["audience_pairs"]
 
 
 async def test_http_add_version_requires_auth(db, client):

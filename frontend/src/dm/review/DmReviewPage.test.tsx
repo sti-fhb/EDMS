@@ -37,7 +37,7 @@ function useObsoleteReview() {
         doc_name: "待廢止 SOP",
         category_code: "SOP",
         category_name: "標準作業程序",
-        audience_tags: ["全體"],
+        audience_tags: ["全單位 + 全體"],
         retrieval_tags: [],
         review_type: "OBSOLETE",
         change_summary: null,
@@ -87,7 +87,7 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument()
   })
 
-  it("明細顯示本次送審之可見對象 / 檢索標籤；分類不重複顯示（#377）", async () => {
+  it("明細顯示本次送審之可見對象 / 檢索標籤；分類不重複顯示（#377、#437）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmReviewPage />)
     await user.click(await screen.findByText("領血確認標準作業程序"))
@@ -95,9 +95,10 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
 
     expect(screen.getByText("可見對象")).toBeInTheDocument()
     expect(screen.getByText("檢索標籤")).toBeInTheDocument()
-    // 標籤值以 chip 呈現（僅明細區塊有這些字串，清單無）
-    expect(screen.getByText("全體")).toBeInTheDocument()
-    expect(screen.getByText("護理師")).toBeInTheDocument()
+    // 可見對象以「單位 + 職位」成對呈現（#437）——審核者要核對的是「哪種人看得到」，
+    // 兩端拆開後多組配對無從對應，故此處刻意斷言整組字串而非兩端各自存在
+    expect(screen.getByText("全單位 + 全體")).toBeInTheDocument()
+    expect(screen.getByText("國防部軍醫局 + 護理師")).toBeInTheDocument()
     expect(screen.getByText("採血")).toBeInTheDocument()
     // 分類只在清單各列出現（mock 兩列皆 SOP），明細不再重複顯示 → 恰為 2 個、且為中文名
     expect(screen.getAllByText("標準作業程序")).toHaveLength(2)

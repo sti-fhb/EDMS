@@ -1,3 +1,5 @@
+import AddIcon from "@mui/icons-material/Add"
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -8,6 +10,8 @@ import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
 import FormControlLabel from "@mui/material/FormControlLabel"
+import IconButton from "@mui/material/IconButton"
+import MenuItem from "@mui/material/MenuItem"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
 import Table from "@mui/material/Table"
@@ -22,6 +26,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
 import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rolesService"
+import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
@@ -215,7 +220,7 @@ function AssignmentsTab({ module }: { module: string }) {
                       </Typography>
                     ) : (
                       row.groups.map((g) => (
-                        <Chip key={g} size="small" label={groupOptions?.find((o) => o.code === g)?.name ?? g} />
+                        <Chip key={g} size="small" label={groupLabel(g, groupOptions)} />
                       ))
                     )}
                     {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
@@ -256,7 +261,27 @@ function AssignmentsTab({ module }: { module: string }) {
   )
 }
 
-/** 群組多選 dialog（可見對象 / 標籤指派）。停用 / 鎖定帳號之編輯鈕為 disabled，不會開到本 dialog。 */
+/** 模組是否以 (單位, 職位) 配對表達群組——由 provider 自報的 `kind` 判定，DP 不硬編碼模組語彙。 */
+function isPairedModule(options: GroupOption[]): boolean {
+  return options.some((o) => o.kind === "UNIT")
+}
+
+/**
+ * 群組值 → 畫面標籤。
+ *
+ * 配對模組（DM）顯示「單位 + 職位」；**單位未指定者顯示灰字提示**而非留白——空白無從區分
+ * 「尚未設定」與「設定為不限」，而前者會讓該使用者安靜地看不到一整批有單位限制的文件（#437）。
+ */
+function groupLabel(value: string, options: GroupOption[] | undefined): string {
+  const opts = options ?? []
+  if (!isPairedModule(opts)) return opts.find((o) => o.code === value)?.name ?? value
+  const [unitCode, roleCode] = decodeAudiencePair(value)
+  const roleName = opts.find((o) => o.code === roleCode)?.name ?? roleCode
+  if (!unitCode) return `（單位未指定）+ ${roleName}`
+  return `${opts.find((o) => o.code === unitCode)?.name ?? unitCode} + ${roleName}`
+}
+
+/** 群組指派 dialog（可見對象 / 標籤）。停用 / 鎖定帳號之編輯鈕為 disabled，不會開到本 dialog。 */
 function GroupEditDialog({
   row,
   options,
@@ -269,8 +294,39 @@ function GroupEditDialog({
   onSave: (groups: string[]) => void
 }) {
   const [selected, setSelected] = useState<string[]>(row.groups)
+  // 開啟當下的既有授權：其中「單位未指定」者為導入配對前之過渡狀態，儲存時須原樣保留，
+  // 不可與「使用者新加但沒選完」的列一起被丟掉——那會讓既有授權在按下儲存時靜默消失。
+  // 用 lazy useState 而非 useRef：下方 `hasIncompleteNewPair` 於 render 期間讀取，
+  // 而 render 期間存取 ref 被 react-hooks 規則擋下（CI 的 ESLint 會紅）。
+  const [initialGroups] = useState(() => new Set(row.groups))
+  const paired = isPairedModule(options)
+  const unitOptions = options.filter((o) => o.kind === "UNIT")
+  const roleOptions = options.filter((o) => o.kind !== "UNIT")
+
   const toggle = (code: string) =>
     setSelected((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]))
+
+  // 配對模式：一列一組，兩欄以下拉選；一律建新陣列，不就地修改。
+  const addPair = () => setSelected((prev) => [...prev, encodeAudiencePair("", "")])
+  const updatePair = (idx: number, unitCode: string, roleCode: string) =>
+    setSelected((prev) => prev.map((v, i) => (i === idx ? encodeAudiencePair(unitCode, roleCode) : v)))
+  const removePair = (idx: number) => setSelected((prev) => prev.filter((_, i) => i !== idx))
+  /**
+   * 送出前濾掉不完整的**新增**列。
+   *
+   * 兩種「不完整」要分開處理：使用者新加卻沒選完的列不送出（半組配對在後端不生效，送出只會
+   * 讓「已指派」多一筆看似有效的資料）；而既有的「單位未指定」列必須原樣保留——那是導入配對前
+   * 的授權，UI 不該在使用者只是改別列時把它清掉。
+   */
+  const completePairs = () =>
+    selected.filter((v) => {
+      const [unitCode, roleCode] = decodeAudiencePair(v)
+      return roleCode !== "" && (unitCode !== "" || initialGroups.has(v))
+    })
+  const hasIncompleteNewPair = selected.some((v) => {
+    const [unitCode, roleCode] = decodeAudiencePair(v)
+    return (roleCode === "" || unitCode === "") && !initialGroups.has(v)
+  })
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
@@ -280,6 +336,60 @@ function GroupEditDialog({
           <Typography variant="body2" color="text.secondary">
             尚無可選群組。
           </Typography>
+        ) : paired ? (
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              一列為一組「單位 + 職位」。此人可見的文件，須有一組配對與文件所掛者相符。
+            </Typography>
+            {selected.map((value, idx) => {
+              const [unitCode, roleCode] = decodeAudiencePair(value)
+              return (
+                <Stack key={`${value}-${idx}`} direction="row" spacing={1} alignItems="center">
+                  <TextField
+                    select
+                    size="small"
+                    label="單位"
+                    sx={{ flex: 1 }}
+                    value={unitCode}
+                    onChange={(e) => updatePair(idx, e.target.value, roleCode)}
+                  >
+                    {unitOptions.map((o) => (
+                      <MenuItem key={o.code} value={o.code}>
+                        {o.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    select
+                    size="small"
+                    label="職位"
+                    sx={{ flex: 1 }}
+                    value={roleCode}
+                    onChange={(e) => updatePair(idx, unitCode, e.target.value)}
+                  >
+                    {roleOptions.map((o) => (
+                      <MenuItem key={o.code} value={o.code}>
+                        {o.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <IconButton size="small" aria-label={`移除第 ${idx + 1} 組`} onClick={() => removePair(idx)}>
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
+              )
+            })}
+            <Box>
+              <Button size="small" startIcon={<AddIcon />} onClick={addPair}>
+                新增可見對象
+              </Button>
+            </Box>
+            {hasIncompleteNewPair && (
+              <Typography variant="caption" color="warning.main">
+                有未選完的列（單位與職位皆須選取），儲存時將略過。
+              </Typography>
+            )}
+          </Stack>
         ) : (
           <Stack>
             {options.map((o) => (
@@ -294,7 +404,7 @@ function GroupEditDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>取消</Button>
-        <Button variant="contained" onClick={() => onSave(selected)}>
+        <Button variant="contained" onClick={() => onSave(paired ? completePairs() : selected)}>
           儲存
         </Button>
       </DialogActions>

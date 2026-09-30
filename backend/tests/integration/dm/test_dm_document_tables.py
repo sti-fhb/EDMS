@@ -1,7 +1,7 @@
 """DM 文件核心表整合測試（DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG / DM_DOC_READ）。
 
 重點驗：文件↔版本 FK + 循環指標、**手冊唯一部分索引**（同 func 至多一份已發布手冊）、
-DM_DOC_READ 同人同版去重（唯一約束）。
+DM_DOC_READ 同人同版去重（唯一約束）、DM_DOC_TAG 之唯一約束於 NULL 單位下仍生效（#437）。
 """
 
 import pytest
@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.utils import utcnow
-from app.dm.catalog.models import DmFunc
-from app.dm.document.models import DmDocRead, DmDocument, DmDocVersion
+from app.dm.catalog.models import DmFunc, DmTag
+from app.dm.document.models import DmDocRead, DmDocTag, DmDocument, DmDocVersion
 
 pytestmark = pytest.mark.integration
 
@@ -153,5 +153,32 @@ async def test_doc_read_dedup_unique(db):
     db.add(DmDocRead(doc_id="DM-MANUAL-000001", version_id=ver.version_id, created_user="reader1", created_date=now))
     await db.flush()
     db.add(DmDocRead(doc_id="DM-MANUAL-000001", version_id=ver.version_id, created_user="reader1", created_date=now))
+    with pytest.raises(IntegrityError):
+        await db.flush()
+
+
+async def test_doc_tag_唯一約束於_null_單位下仍生效(db):
+    """UQ(DOC_ID, TAG_ID, UNIT_TAG_ID) 必須為 NULLS NOT DISTINCT（#437）。
+
+    PostgreSQL 預設 NULL ≠ NULL：唯一鍵加入可為 NULL 的 `UNIT_TAG_ID` 後，若未宣告
+    `NULLS NOT DISTINCT`，檢索標籤列（該欄恆為 NULL）會**完全不受唯一約束保護**，同一筆
+    可重複寫入且不報錯。此處驗的是「重複被擋」之行為，非 schema 形狀驗收。
+    """
+    now = utcnow()
+    db.add(
+        DmDocument(
+            doc_id="DM-SOP-000900",
+            doc_name="配對唯一鍵",
+            category_code="SOP",
+            status="DRAFT",
+            created_user="e",
+            created_date=now,
+        )
+    )
+    await db.flush()
+    tag_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "MODULE").limit(1))
+    db.add(DmDocTag(doc_id="DM-SOP-000900", tag_id=tag_id, created_user="e", created_date=now))
+    await db.flush()
+    db.add(DmDocTag(doc_id="DM-SOP-000900", tag_id=tag_id, created_user="e", created_date=now))
     with pytest.raises(IntegrityError):
         await db.flush()

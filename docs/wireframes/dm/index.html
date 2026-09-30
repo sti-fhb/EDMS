@@ -144,7 +144,7 @@
       display: inline-block; padding: 2px 8px; border-radius: 4px;
       font-size: 0.72rem; font-weight: 600;
     }
-    /* 可見對象/單位 badge（對齊 ET 受訓單位標籤樣式） */
+    /* 可見對象 badge（對齊 ET 受訓單位標籤樣式） */
     .tag-badge {
       display: inline-block; padding: 2px 8px; border-radius: 10px;
       font-size: 0.72rem; font-weight: 600;
@@ -696,8 +696,8 @@
     <span style="margin-left:1rem;">• <strong>舊版本（已被取代）</strong> — 進入文件詳細頁的「版本歷程」抽屜查閱（同一個 DOC_ID 下的歷史版本）</span><br>
     <span style="margin-left:1rem;">• <strong>已廢止文件</strong> — DM01 完全查不到；僅 DM_ADMIN 可至 sidebar「已廢止文件查詢」（DM03）read-only 查看，含完整版本歷程</span><br>
     <strong>列表欄位：</strong>文件名稱 / 分類 / 狀態 / 發布日期 / 作者（系統操作手冊額外顯示對應 func_name）；下方另顯示已掛標籤 pills，可一眼識別文件適用情境<br>
-    <strong>標籤搜尋：</strong>下拉 multi-select checkbox（僅列<strong>檢索標籤</strong>：適用模組／文件性質／法規關聯）；按鈕顯示已選個數，選取後於按鈕下方以 pill 列出，點 pill 的 × 可移除。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM 管理者於平台 DP 後台維護。「可見對象/單位」為權限標籤、不列入此檢索下拉<br>
-    <strong>可見範圍（標籤式可見性）：</strong><strong>閱覽者</strong>只看得到「全體」或與自己被授予之「可見對象/單位」相符（OR 比對）之文件；<strong>編輯者／審核者／管理者不受此限，可見全部</strong>。可見對象授權由 DM_ADMIN 於 平台 DP 後台權限管理維護<br>
+    <strong>標籤搜尋：</strong>下拉 multi-select checkbox（僅列<strong>檢索標籤</strong>：適用模組／文件性質／法規關聯）；按鈕顯示已選個數，選取後於按鈕下方以 pill 列出，點 pill 的 × 可移除。<strong>多標籤為 AND 條件</strong>；標籤庫由 DM 管理者於平台 DP 後台維護。「可見對象」（單位 + 職位）為權限標籤、不列入此檢索下拉<br>
+    <strong>可見範圍（標籤式可見性）：</strong><strong>閱覽者</strong>只看得到 (全單位, 全體) 之文件，或其被授予之「單位 + 職位」配對與文件所掛者相符之文件（<strong>整組比對</strong>，非兩維各自比對）；<strong>編輯者／審核者／管理者不受此限，可見全部</strong>。單位不展開下層。可見對象授權由 DM_ADMIN 於 平台 DP 後台權限管理維護<br>
     <strong>顯示原則：</strong>列表預設僅顯示目前發布版本（CURRENT），不混雜歷史版本；歷史版本可進入文件詳細頁透過「版本歷程」抽屜查閱<br>
     <strong>點擊單筆文件：</strong>進入文件詳細頁（DM07）<br>
     <strong>權限說明：</strong>登入使用者依可見範圍閱讀（見上）；新增/編輯按鈕僅 DM_EDITOR 角色顯示；已廢止文件本畫面一律不顯示，DM_ADMIN 須另從 sidebar「已廢止文件查詢」（DM03）進入
@@ -974,32 +974,41 @@
         </div>
       </div>
 
-      <!-- 可見對象/單位（權限，必填至少 1；決定哪些閱覽者看得到） -->
+      <!-- 可見對象（權限，必填至少 1 組；一列＝一組「單位 + 職位」配對，#437） -->
       <div class="wf-card">
-        <h6 class="fw-bold mb-3"><i class="bi bi-people-fill me-1"></i>可見對象/單位 <span class="text-danger">*</span> <small class="text-muted fw-normal">（必填至少 1 項；決定哪些閱覽者看得到此文件，受控詞彙由 DM 管理者於平台 DP 後台維護）</small></h6>
-        <div class="tag-picker" data-tag-scope="dm03aud">
-          <div class="dropdown">
-            <button class="form-select form-select-sm text-start" type="button"
-                    data-bs-toggle="dropdown" data-bs-display="static"
-                    data-bs-auto-close="outside" aria-expanded="false">
-              <span class="tag-picker-summary text-muted">選擇可見對象...</span>
-            </button>
-            <div class="dropdown-menu p-2 w-100" style="max-height:320px; overflow-y:auto;">
-              <div class="small fw-bold mb-1" style="color:#1565c0;"><i class="bi bi-people me-1"></i>可見對象/單位</div>
-              <div class="ms-1 mb-1">
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-all" data-group="audience" data-name="全體"><label class="form-check-label small" for="dm03-aud-all">全體</label></div>
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-nu" data-group="audience" data-name="護理師"><label class="form-check-label small" for="dm03-aud-nu">護理師</label></div>
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-mil" data-group="audience" data-name="軍人"><label class="form-check-label small" for="dm03-aud-mil">軍人</label></div>
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-mt" data-group="audience" data-name="醫檢師" checked><label class="form-check-label small" for="dm03-aud-mt">醫檢師</label></div>
-                <div class="form-check form-check-inline me-3"><input class="form-check-input js-tag-checkbox" type="checkbox" id="dm03-aud-adm" data-group="audience" data-name="行政人員"><label class="form-check-label small" for="dm03-aud-adm">行政人員</label></div>
-              </div>
-            </div>
-          </div>
-          <div class="tag-picker-selected mt-2 d-flex flex-wrap align-items-center" style="min-height:1.6rem;">
-            <span class="tag-picker-empty text-muted small" style="display:none;">尚未選擇任何可見對象</span>
-          </div>
+        <h6 class="fw-bold mb-3"><i class="bi bi-people-fill me-1"></i>可見對象 <span class="text-danger">*</span> <small class="text-muted fw-normal">（必填至少 1 組；一組為「單位 + 職位」，兩欄皆必選。受控詞彙由 DM 管理者於平台 DP 後台維護）</small></h6>
+        <div class="d-flex gap-2 align-items-center mb-2">
+          <select class="form-select form-select-sm" style="flex:1;">
+            <option>全單位</option>
+            <option selected>國防部軍醫局</option>
+            <option>國防醫學院三軍總醫院</option>
+            <option>國防醫學院三軍總醫院松山分院</option>
+            <option>國防醫學院三軍總醫院松山分院捐血站</option>
+          </select>
+          <select class="form-select form-select-sm" style="flex:1;">
+            <option>全體</option>
+            <option selected>護理師</option>
+            <option>軍人</option>
+            <option>醫檢師</option>
+            <option>行政人員</option>
+          </select>
+          <button class="btn btn-sm btn-link text-danger px-1" type="button" title="移除此組"><i class="bi bi-trash"></i></button>
         </div>
-        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>可見對象決定文件的可見範圍：閱覽者僅能看到「全體」或與自己被授予之可見對象相符的文件；編輯者／審核者／管理者不受此限。掛「全體」則所有閱覽者可見。</div>
+        <div class="d-flex gap-2 align-items-center mb-2">
+          <select class="form-select form-select-sm" style="flex:1;">
+            <option>全單位</option>
+            <option>國防部軍醫局</option>
+            <option selected>國防醫學院三軍總醫院</option>
+          </select>
+          <select class="form-select form-select-sm" style="flex:1;">
+            <option>全體</option>
+            <option>護理師</option>
+            <option selected>行政人員</option>
+          </select>
+          <button class="btn btn-sm btn-link text-danger px-1" type="button" title="移除此組"><i class="bi bi-trash"></i></button>
+        </div>
+        <button class="btn btn-sm btn-link px-0" type="button"><i class="bi bi-plus-lg me-1"></i>新增可見對象</button>
+        <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>每組為「單位 + 職位」，兩者同時成立才看得到。上例＝「軍醫局的護理師」與「三總的行政人員」兩種人，<strong>不含</strong>「軍醫局的行政人員」或「三總的護理師」。「全單位」＝不限單位、「全體」＝不限職位；單位<strong>不展開下層</strong>（掛「三軍總醫院」不涵蓋其分院），需個別列出。編輯者／審核者／管理者不受此限。</div>
       </div>
 
       <!-- 檢索標籤（多選下拉；選完於下方顯示已選） -->
@@ -1163,7 +1172,7 @@
     <strong>關聯欄位：</strong><br>
     <span style="margin-left:1rem;">• <strong>SOP / 訓練教材 / 其他</strong>三類無關聯欄位</span><br>
     <span style="margin-left:1rem;">• <strong>系統操作手冊</strong>分類額外顯示「關聯作業項目（func_name）」單選下拉，對應主系統作業功能</span><br>
-    <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（可見對象/單位〔權限・必填〕＋適用模組／文件性質／法規關聯〔檢索〕）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM 管理者於平台 DP 後台維護，供 DM01 搜尋使用<br>
+    <strong>標籤：</strong>下拉 multi-select checkbox；下拉內容依標籤組（適用模組／文件性質／法規關聯〔檢索〕）分群列出 checkbox，可多選。選完於下拉按鈕下方以 pill 列出已選標籤，點 pill 的 × 可移除（同步 uncheck）。受控詞彙由 DM 管理者於平台 DP 後台維護，供 DM01 搜尋使用<br>
     <strong>權限：</strong>本畫面僅 DM_EDITOR 角色可進入；角色由管理者於 平台 DP 後台權限管理指派<br>
     <strong>內容輸入：</strong>僅支援上傳檔案（PDF/Word/Excel/PPT/圖片，單檔最大 50 MB）；不提供線上編輯功能<br>
     <span style="margin-left:1rem;">• <strong>不支援預覽格式提醒</strong>：上傳 Office 格式（Word/Excel/PPT）檔案時，系統跳出提醒視窗告知「閱讀者於 DM07 將無法線上預覽，僅能下載原檔」；撰寫者可選「重新選擇」改傳 PDF，或選「仍要使用此檔案」繼續送審。確認後檔案下方顯示橘色警示條（持續提示）。PDF 與圖片可線上預覽，不觸發提醒</span><br>
@@ -1268,7 +1277,7 @@
           <button class="btn btn-sm btn-outline-secondary" onclick="hideReviewDetail()" title="收合"><i class="bi bi-x"></i></button>
         </div>
 
-        <!-- 文件資訊：分類 + 本次送審之可見對象 / 檢索標籤（#377） -->
+        <!-- 文件資訊：分類 + 本次送審之可見對象（單位 + 職位配對，#437）/ 檢索標籤（#377） -->
         <h6 class="small fw-bold mb-2"><i class="bi bi-info-circle me-1"></i>文件資訊</h6>
         <div class="border rounded px-3 py-2 mb-2" style="font-size:0.9rem;">
           <div class="mb-1">
@@ -1278,8 +1287,9 @@
           <div class="mb-1">
             <span class="text-muted me-2" style="display:inline-block; min-width:72px;">可見對象</span>
             <span id="review-detail-audience">
-              <span class="badge rounded-pill text-bg-light border">全體</span>
-              <span class="badge rounded-pill text-bg-light border">護理師</span>
+              <!-- 以「單位 + 職位」成對呈現（#437）：拆成兩排標籤時，多組配對將無從對應 -->
+              <span class="badge rounded-pill text-bg-light border">國防部軍醫局 + 護理師</span>
+              <span class="badge rounded-pill text-bg-light border">國防醫學院三軍總醫院 + 行政人員</span>
             </span>
           </div>
           <div>

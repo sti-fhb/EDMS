@@ -1,7 +1,7 @@
 """DM 受控主檔維護轉接層整合測試（§3.1，真實 DB）。
 
 驗證：三類受控項（CATEGORY / FUNC / TAG）之列出 / 新增 / 改名 / 啟停、不刪除、碼鎖定、
-停用保留既有引用、AUDIENCE 標籤停用 soft-retire 回受影響數、list_audiences，以及 provider 註冊。
+停用保留既有引用、AUDIENCE / UNIT 標籤停用 soft-retire 回受影響數、list_audiences，以及 provider 註冊。
 """
 
 import json
@@ -11,9 +11,11 @@ from sqlalchemy import select
 
 from app.core.exceptions import AppError
 from app.core.module_assign import module_assign_registry
+from app.core.utils import utcnow
 from app.dm.bootstrap import register_dm_module
 from app.dm.catalog.adapter import CatalogAdapter
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
+from app.dm.document.models import DmDocTag, DmDocument
 from app.dp.audit.models import DpAuditLog
 
 pytestmark = pytest.mark.integration
@@ -23,6 +25,43 @@ _svc = CatalogAdapter()
 
 async def _audience_group(db) -> str:
     return await db.scalar(select(DmTagGroup.tag_group_code).where(DmTagGroup.group_type == "AUDIENCE").limit(1))
+
+
+async def _unit_group(db) -> str:
+    return await db.scalar(select(DmTagGroup.tag_group_code).where(DmTagGroup.group_type == "UNIT").limit(1))
+
+
+async def test_disable_unit_tag_counts_by_unit_column(db):
+    """停用單位標籤 → soft-retire 之受影響數須依 `UNIT_TAG_ID` 計（#437）。
+
+    可見對象為 (單位, 職位) 配對：單位存 `UNIT_TAG_ID`、職位存 `TAG_ID`。若計數沿用 `TAG_ID`
+    比對，停用單位時兩個數字**恆為 0**——管理者會看到「不影響任何文件」而停掉一個實際綁著大量
+    文件的單位，全程無錯誤。故此處斷言確切數字而非僅 `is not None`。
+    """
+    grp = await _unit_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="待退單位", operator_id="admin")
+    unit_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_name == "待退單位"))
+    role_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE").limit(1))
+    now = utcnow()
+    db.add(
+        DmDocument(
+            doc_id="DM-SOP-000800",
+            doc_name="掛待退單位之文件",
+            category_code="SOP",
+            status="PUBLISHED",
+            created_user="e",
+            created_date=now,
+        )
+    )
+    await db.flush()
+    db.add(DmDocTag(doc_id="DM-SOP-000800", tag_id=role_id, unit_tag_id=unit_id, created_user="e", created_date=now))
+    await db.flush()
+
+    result = await _svc.set_controlled_enabled(db, "TAG", code=str(unit_id), enabled=False, operator_id="admin")
+
+    assert result.affected_docs == 1
+    tag = await db.scalar(select(DmTag).where(DmTag.tag_id == unit_id))
+    assert tag.is_enabled is False  # soft-retire：停用但既有引用保留
 
 
 async def test_list_controlled_covers_seeded(db):
@@ -137,16 +176,30 @@ async def test_disable_audience_tag_soft_retire_returns_affected(db):
     assert tag.is_enabled is False
 
 
-async def test_list_audiences_only_audience_group(db):
-    """list_audiences 僅回 AUDIENCE 組（供權限管理核取清單）。"""
+async def test_list_audiences_returns_both_dimensions(db):
+    """list_audiences 回職位與單位兩個維度，供權限管理組成 (單位, 職位) 配對（#437）。"""
     auds = await _svc.list_audiences(db)
-    assert len(auds) >= 1 and all(a.group_type == "AUDIENCE" for a in auds)
+    kinds = {a.group_type for a in auds}
+    assert kinds == {"AUDIENCE", "UNIT"}
+    assert all(a.kind == "TAG" for a in auds)
+
+
+async def test_list_controlled_kinds_includes_unit_group(db):
+    """UNIT 組自動出現在可維護之標籤分組（#437）。
+
+    `list_controlled_kinds` 由 `DM_TAG_GROUP` 動態讀取，故新增標籤組不需改程式即可於 DP 後台維護——
+    這是客戶日後補單位（例如三總院內捐血站）的路徑，值得釘住，否則被改成硬編碼清單也不會有人發現。
+    """
+    kinds = await _svc.list_controlled_kinds(db)
+    tag_kind = next(k for k in kinds if k.kind == "TAG")
+    assert "UNIT" in {g.code for g in tag_kind.groups}
 
 
 async def test_list_audiences_excludes_all_universal_tag(db):
-    """list_audiences 排除通用值「全體」——它是文件端「所有閱覽者可見」，非可指派給個別使用者之可見對象。"""
+    """排除兩個通用值——「全體」/「全單位」是**文件端**「不限」之語意，非可指派給個人者。"""
     auds = await _svc.list_audiences(db)
-    assert "全體" not in {a.name for a in auds}
+    names = {a.name for a in auds}
+    assert "全體" not in names and "全單位" not in names
 
 
 async def test_maintenance_writes_audit(db):

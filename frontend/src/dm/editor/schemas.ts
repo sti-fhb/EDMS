@@ -13,8 +13,20 @@ export interface OptionItem {
 export interface EditorOptions {
   categories: OptionItem[]
   funcs: OptionItem[]
-  audiences: OptionItem[]
+  audiences: OptionItem[] // 可見對象之職位（含通用值「全體」）
+  units: OptionItem[] // 可見對象之單位（含通用值「全單位」＝不限單位，#437）
   retrieval_tags: OptionItem[]
+}
+
+/**
+ * 可見對象之 (單位, 職位) 配對（#437）。
+ *
+ * 文件掛 [(軍醫局, 護理師), (三總, 行政人員)] 意為「僅此兩種人」——不含「軍醫局的行政人員」
+ * 與「三總的護理師」。故兩欄必須成對設定，不可拆成兩個獨立多選。
+ */
+export interface AudiencePair {
+  unit_id: string
+  audience_id: string
 }
 
 /** 指定審核者下拉項（具 DM_REVIEWER 角色、排除自己）。 */
@@ -23,9 +35,9 @@ export interface ReviewerItem {
   user_name: string
 }
 
-/** 文件現有標籤（TAG_ID 字串），供編輯模式預帶可改。 */
+/** 文件現有標籤，供編輯模式預帶可改。 */
 export interface EditorDocTags {
-  audience_ids: string[]
+  audience_pairs: AudiencePair[]
   retrieval_ids: string[]
 }
 
@@ -75,6 +87,12 @@ export const MANUAL_CATEGORY = "MANUAL"
 /** 訓練教材：由教育訓練模組引用，不設定可見對象（#377，spec_us5 FR-009 之例外）。 */
 export const TRAINING_CATEGORY = "TRAINING"
 
+/** 單一 (單位, 職位) 配對之驗證；兩欄皆必選。 */
+const AudiencePairSchema = z.object({
+  unit_id: z.string().min(1, { message: "請選擇單位" }),
+  audience_id: z.string().min(1, { message: "請選擇職位" }),
+})
+
 /** 可內嵌預覽之 MIME（其餘如 Office 上傳時出橘色警示條 DM-MSG-DM08-002）。 */
 const PREVIEWABLE_MIMES = new Set(["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/gif"])
 
@@ -88,7 +106,7 @@ export interface EditorForm {
   doc_name: string
   category_code: string
   func_code: string
-  audience_ids: string[] // AUDIENCE 標籤 TAG_ID 字串（僅新增模式使用）
+  audience_pairs: AudiencePair[] // 可見對象 (單位, 職位) 配對
   retrieval_ids: string[] // 檢索標籤 TAG_ID 字串（僅新增模式使用）
   version_no: string
   change_summary: string
@@ -99,7 +117,7 @@ export const EMPTY_EDITOR_FORM: EditorForm = {
   doc_name: "",
   category_code: "",
   func_code: "",
-  audience_ids: [],
+  audience_pairs: [],
   retrieval_ids: [],
   version_no: "",
   change_summary: "",
@@ -131,10 +149,11 @@ export function makeEditorSchema(opts: {
       func_code: z.string(),
       version_no: forSubmit ? z.string().trim().min(1, { message: "請輸入版本號" }) : z.string(),
       change_summary: forSubmit ? z.string().trim().min(1, { message: "請輸入變更摘要" }) : z.string(),
-      audience_ids:
+      // 配對兩欄皆必填：漏填單位不會變成「不限」，而是一組不生效的配對（後端 visibility 亦然）
+      audience_pairs:
         forSubmit && !isTraining
-          ? z.array(z.string()).min(1, { message: "請至少指定 1 個可見對象" })
-          : z.array(z.string()),
+          ? z.array(AudiencePairSchema).min(1, { message: "請至少指定 1 組可見對象" })
+          : z.array(AudiencePairSchema),
       retrieval_ids: z.array(z.string()),
       reviewer_id: forSubmit ? z.string().min(1, { message: "請指定審核者" }) : z.string(),
     })

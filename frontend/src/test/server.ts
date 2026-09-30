@@ -288,6 +288,10 @@ export const handlers = [
         { code: "1", name: "全體", group_code: null },
         { code: "2", name: "護理師", group_code: null },
       ],
+      units: [
+        { code: "100", name: "全單位", group_code: null },
+        { code: "101", name: "國防部軍醫局", group_code: null },
+      ],
       retrieval_tags: [
         { code: "10", name: "供應", group_code: "MODULE" },
         { code: "20", name: "平時", group_code: "NATURE" },
@@ -312,7 +316,7 @@ export const handlers = [
   ),
   http.post("/api/dm/documents/:docId/submit", () => HttpResponse.json({ review_id: 500, notified: 1 })),
   http.get("/api/dm/editor/documents/:docId/tags", () =>
-    HttpResponse.json({ audience_ids: ["1"], retrieval_ids: ["20"] }),
+    HttpResponse.json({ audience_pairs: [{ unit_id: "100", audience_id: "1" }], retrieval_ids: ["20"] }),
   ),
   // 續編 meta（#222）：預設回 404＝無本人草稿（→ 走「加新版」）；續編測試以 server.use 覆寫回 200
   http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
@@ -372,7 +376,8 @@ export const handlers = [
       doc_name: "領血確認標準作業程序",
       category_code: "SOP",
       category_name: "標準作業程序",
-      audience_tags: ["全體", "護理師"],
+      // 後端以「單位 + 職位」成對回傳（#437）；前端直接呈現，不在畫面端組字串
+      audience_tags: ["全單位 + 全體", "國防部軍醫局 + 護理師"],
       retrieval_tags: ["採血"],
       review_type: "NEW_VERSION",
       change_summary: "補充第 5 點異常通報流程",
@@ -690,8 +695,14 @@ export const handlers = [
       meta: { total: 3, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
+  // DM 之可見對象為 (單位, 職位) 配對，故回兩類；kind 由模組自報、DP 原樣傳遞（#437）
   http.get("/api/dp/roles/:module/group-options", () =>
-    HttpResponse.json([{ code: "5", name: "護理師" }]),
+    HttpResponse.json([
+      { code: "5", name: "護理師", kind: "AUDIENCE" },
+      { code: "6", name: "行政人員", kind: "AUDIENCE" },
+      { code: "101", name: "國防部軍醫局", kind: "UNIT" },
+      { code: "102", name: "國防醫學院三軍總醫院", kind: "UNIT" },
+    ]),
   ),
   http.put("/api/dp/roles/:module/assignments/:userId", () => new HttpResponse(null, { status: 204 })),
   // US8 個人資料維護（預設 happy path）

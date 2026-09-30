@@ -593,9 +593,9 @@
     </div>
 
     <div class="wf-card">
-      <div class="wf-card-title"><i class="bi bi-people me-1"></i>DM 可見對象清單 <code>DM_AUDIENCE</code>（清單定義）</div>
+      <div class="wf-card-title"><i class="bi bi-people me-1"></i>DM 可見對象・職位清單 <code>DM_AUDIENCE</code>（清單定義）</div>
       <table class="table table-sm wf-table mb-2 align-middle">
-        <thead><tr><th>可見對象 / 單位</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
+        <thead><tr><th>職位</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
         <tbody>
           <tr><td>全體 <span class="text-muted small">（通用值）</span></td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="通用值不可停用"><i class="bi bi-lock"></i> 停用</button></td></tr>
           <tr><td>護理師</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger" onclick="showToast('已停用可見對象「護理師」（soft-retire，既有可見性不收回）')"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
@@ -606,6 +606,22 @@
       </table>
       <div class="field-helper mb-2"><i class="bi bi-info-circle"></i>只存「有哪些對象」；「某閱覽者被授權哪些對象」之關聯留 DM 業務表。</div>
       <button class="btn btn-sm btn-tsbms"><i class="bi bi-plus-lg me-1"></i>新增對象</button>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-card-title"><i class="bi bi-hospital me-1"></i>DM 可見對象・單位清單 <code>DM_UNIT</code>（清單定義，#437）</div>
+      <div class="wf-status-msg wf-status-info mb-2"><i class="bi bi-info-circle me-1"></i>可見對象為<strong>「單位 + 職位」配對</strong>，兩份清單各自維護、於指派與文件設定時成對選取。單位<strong>無階層</strong>（掛「三軍總醫院」不涵蓋其分院），新增單位於此即可，不需改程式。</div>
+      <table class="table table-sm wf-table mb-2 align-middle">
+        <thead><tr><th>單位</th><th style="width:7rem;">啟用狀態</th><th style="width:11rem;">動作</th></tr></thead>
+        <tbody>
+          <tr><td>全單位 <span class="text-muted small">（通用值＝不限單位）</span></td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-secondary" disabled title="通用值不可停用"><i class="bi bi-lock"></i> 停用</button></td></tr>
+          <tr><td>國防部軍醫局</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>國防醫學院三軍總醫院</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td>國防醫學院三軍總醫院松山分院</td><td><span class="badge bg-success">啟用</span></td><td><button class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> 修改</button> <button class="btn btn-sm btn-outline-danger"><i class="bi bi-pause-circle"></i> 停用</button></td></tr>
+          <tr><td class="text-muted" colspan="3">…共 21 筆（20 個單位 + 通用值「全單位」）</td></tr>
+        </tbody>
+      </table>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>停用同樣採 soft-retire（不收回既有可見性）；通用值「全單位」不可停用。</div>
     </div>
 
     <div class="wf-card">
@@ -932,13 +948,13 @@
     </div>
     <!-- ===== DM 權限管理（角色 + 可見對象/單位）===== -->
     <div class="tab-pane fade" id="role-dm" role="tabpanel">
-      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>DM 管理者於此指派 DM 角色與<strong>可見對象/單位授權</strong>；可見對象主要對「閱覽者」有意義（決定其於 DM01 可見範圍）。ET 管理者看不到本頁籤。指派寫入 <code>DM_USER_ROLE</code> / DM 可見對象授權。</div>
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>DM 管理者於此指派 DM 角色與<strong>可見對象授權</strong>；可見對象為<strong>「單位 + 職位」配對</strong>（#437），一人可有多組。主要對「閱覽者」有意義（決定其於 DM01 可見範圍）。<strong>單位未指定者以灰字標示</strong>——空白無從區分「尚未設定」與「設定為不限」，而未設定者會看不到所有指定單位之文件。ET 管理者看不到本頁籤。指派寫入 <code>DM_USER_ROLE</code> / DM 可見對象授權。</div>
       <div class="wf-card p-0">
         <table class="table table-hover wf-table mb-0 align-middle">
           <thead><tr>
             <th style="width:8rem;">帳號</th><th style="width:7rem;">姓名</th>
             <th class="text-center" style="width:4.5rem;">管理者</th><th class="text-center" style="width:4.5rem;">編輯者</th><th class="text-center" style="width:4.5rem;">審核者</th><th class="text-center" style="width:4.5rem;">閱覽者</th>
-            <th style="width:16rem;">可見對象 / 單位</th><th style="width:10rem;">最後異動</th>
+            <th style="width:20rem;">可見對象（單位 + 職位）</th><th style="width:10rem;">最後異動</th>
           </tr></thead>
           <tbody>
             <tr>
@@ -947,7 +963,7 @@
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 陳大華 編輯者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 審核者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 陳大華 閱覽者角色')"></td>
-              <td><span class="badge bg-light text-dark border me-1">軍人</span><span class="badge bg-light text-dark border me-1">醫檢師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 可見對象/單位')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td><span class="badge bg-light text-dark border me-1">國防部軍醫局 + 軍人</span><span class="badge bg-light text-dark border me-1">國防部軍醫局 + 醫檢師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 可見對象')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
               <td class="small text-muted">李主任 ｜ 2026-04-15</td>
             </tr>
             <tr>
@@ -956,7 +972,7 @@
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 編輯者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 審核者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 李主任 閱覽者角色')"></td>
-              <td><span class="badge bg-light text-dark border me-1">護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 李主任 可見對象/單位')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td><span class="badge bg-light text-dark border me-1">國防醫學院三軍總醫院 + 護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 李主任 可見對象')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
               <td class="small text-muted">系統 ｜ 2026-03-08</td>
             </tr>
             <tr>
@@ -965,7 +981,7 @@
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 編輯者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 審核者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 王曉明 閱覽者角色')"></td>
-              <td><span class="badge bg-light text-dark border me-1">護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 王曉明 可見對象/單位')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td><span class="badge bg-secondary-subtle text-secondary border me-1">（單位未指定）+ 護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 王曉明 可見對象')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
               <td class="small text-muted">李主任 ｜ 2026-06-20</td>
             </tr>
           </tbody>

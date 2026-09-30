@@ -8,12 +8,13 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import Row, and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import utcnow
-from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmCategory, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
+from app.dm.document.visibility import audience_pair_match
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_VIEWER
 from app.dm.roles.models import DmUserRole
@@ -231,31 +232,42 @@ class ReviewCenterRepository:
             doc_id: 文件編號（廢止類之來源）。
             version_id: 送審版本（新增 / 新版本之來源）；為 None 時退回文件層。
 
+        可見對象以 (單位, 職位) 配對呈現（#437），值為「單位 + 職位」之組合字串，例如
+        「國防部軍醫局 + 護理師」——審核者需看到的是**哪種人看得到**，拆成兩排標籤會讓
+        多筆配對無從對應（見 issue #437「為何不採單位集 ∧ 職位集」）。
+
         Returns:
-            {"audience": [...], "retrieval": [...]}，值為標籤名稱（中文）。
+            {"audience": [...], "retrieval": [...]}，值為中文字串。
         """
+        unit_tag = aliased(DmTag, name="dm_unit_tag")
         if review_type == _OBSOLETE or version_id is None:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type)
+                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
                 .select_from(DmDocTag)
                 .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .outerjoin(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
                 .order_by(DmTag.tag_id)
             )
         else:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type)
+                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
                 .select_from(DmVersionTag)
                 .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+                .outerjoin(unit_tag, DmVersionTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
                 .order_by(DmTag.tag_id)
             )
         audience: list[str] = []
         retrieval: list[str] = []
-        for tag_name, group_type in (await db.execute(stmt)).all():
-            (audience if group_type == _AUDIENCE else retrieval).append(tag_name)
+        for tag_name, group_type, unit_name in (await db.execute(stmt)).all():
+            if group_type != _AUDIENCE:
+                retrieval.append(tag_name)
+            else:
+                # 單位缺漏者（導入配對前之殘留）仍列出職位，讓審核者看得到它、而非默默消失
+                audience.append(f"{unit_name} + {tag_name}" if unit_name else tag_name)
         return {"audience": audience, "retrieval": retrieval}
 
     async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:
@@ -263,7 +275,8 @@ class ReviewCenterRepository:
 
         標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
         差異式覆寫（手法同 editor 之 `set_version_tags`）：目標集內既有列復活 / 新列插入、目標集外之有效列
-        軟刪除，以避開 UQ(DOC_ID, TAG_ID)。
+        軟刪除，以避開 UQ(DOC_ID, TAG_ID, UNIT_TAG_ID)。**比對鍵為 `(TAG_ID, UNIT_TAG_ID)` 整組**
+        （#437）——可見對象為 (單位, 職位) 配對，僅以 `TAG_ID` 比對會把不同單位的同一職位視為同一列。
 
         ⚠️ **呼叫端不變式（新增呼叫點前必讀）**：本方法是 `DM_DOC_TAG`（權限判定依據）的**唯一寫入點**，
         且**不自我驗證 `version_id` 是否屬於 `doc_id`**。目前安全性由呼叫端保證——`DmReview` 僅由
@@ -280,24 +293,37 @@ class ReviewCenterRepository:
         now = utcnow()
         wanted = list(
             (
-                await db.scalars(
-                    select(DmVersionTag.tag_id).where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
+                await db.execute(
+                    select(DmVersionTag.tag_id, DmVersionTag.unit_tag_id).where(
+                        DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0
+                    )
                 )
             ).all()
         )
+        wanted = [(r[0], r[1]) for r in wanted]
         wanted_set = set(wanted)
         existing = {
-            row.tag_id: row for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
+            (row.tag_id, row.unit_tag_id): row
+            for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
         }
-        for tid in wanted:
-            row = existing.get(tid)
+        for key in wanted:
+            row = existing.get(key)
             if row is None:
-                db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=user_id, created_date=now))
+                tag_id, unit_tag_id = key
+                db.add(
+                    DmDocTag(
+                        doc_id=doc_id,
+                        tag_id=tag_id,
+                        unit_tag_id=unit_tag_id,
+                        created_user=user_id,
+                        created_date=now,
+                    )
+                )
             elif row.deleted != 0:
                 row.deleted = 0
                 row.updated_user, row.updated_date = user_id, now
-        for tid, row in existing.items():
-            if tid not in wanted_set and row.deleted == 0:
+        for key, row in existing.items():
+            if key not in wanted_set and row.deleted == 0:
                 row.deleted = 1
                 row.updated_user, row.updated_date = user_id, now
         await db.flush()
@@ -313,47 +339,23 @@ class ReviewCenterRepository:
         """發布通知收件名單（FR-008）：撰寫者 + 具閱覽者角色且可見對象相符（或文件掛「全體」）之使用者 Email。
 
         反向於 `visibility.visible_docs_condition`（該函式為「使用者能看哪些文件」）：此處為「此文件能被誰看見」。
+        兩者**共用 `audience_pair_match`**，只是把文件端 / 使用者端哪一邊當定值對調——#437 曾因兩邊各寫
+        一份而漏改：可見性改為 (單位, 職位) 配對後，本查詢仍只比職位，文件開給「三總的護理師」時
+        **所有單位的護理師**都會收到含文件名稱的通知，且無任何測試會紅。
+
         發布當下組出快照、不追溯後續授權；不排除兼具編輯 / 審核者；Email 去重。
         """
-        doc_has_all = await db.scalar(
-            select(
-                exists(
-                    select(1)
-                    .select_from(DmDocTag)
-                    .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
-                    .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
-                    .where(
-                        DmDocTag.doc_id == doc_id,
-                        DmDocTag.deleted == 0,
-                        DmTagGroup.group_type == _AUDIENCE,
-                        DmTag.tag_name == _ALL_AUDIENCE_TAG,
-                    )
-                )
-            )
-        )
-        # 文件之可見對象 AUDIENCE 標籤集（有效）
-        doc_audience_tags = (
-            select(DmDocTag.tag_id)
-            .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
-            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
-            .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0, DmTagGroup.group_type == _AUDIENCE)
-        )
-        viewer_match = exists(
-            select(1)
-            .select_from(DmUserTag)
-            .where(
-                DmUserTag.user_id == DpUser.user_id,
-                DmUserTag.deleted == 0,
-                DmUserTag.tag_id.in_(doc_audience_tags),
-            )
-        )
         stmt = (
             select(DpUser.email)
             .join(DmUserRole, and_(DmUserRole.user_id == DpUser.user_id, DmUserRole.role_code == DM_VIEWER))
-            .where(DpUser.deleted == 0, DmUserRole.deleted == 0, DpUser.email.isnot(None))
+            .where(
+                DpUser.deleted == 0,
+                DmUserRole.deleted == 0,
+                DpUser.email.isnot(None),
+                # 撰寫者由下方獨立查詢補上（其可能非閱覽者角色），此處僅列可見性相符之閱覽者
+                audience_pair_match(doc_id=doc_id, user_id=DpUser.user_id),
+            )
         )
-        if not doc_has_all:
-            stmt = stmt.where(viewer_match)  # 撰寫者由下方獨立查詢補上（其可能非閱覽者角色），此處僅列相符閱覽者
         emails = {e for e in (await db.scalars(stmt)).all() if e}
         # 撰寫者一定收（可能非閱覽者角色）
         author_email = await db.scalar(select(DpUser.email).where(DpUser.user_id == author_id, DpUser.deleted == 0))

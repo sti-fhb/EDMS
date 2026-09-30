@@ -17,10 +17,27 @@ export interface AssignmentRow {
   last_modified_date: string | null
 }
 
-/** 群組可選項（DM 可見對象 / ET 受訓單位標籤）。 */
+/**
+ * 群組可選項（DM 可見對象 / ET 受訓單位標籤）。
+ *
+ * `kind` 為模組自報之項目類別，DP 原樣傳遞、不解讀。DM 回兩類——`"UNIT"`（單位）與
+ * `"AUDIENCE"`（職位）——畫面據此組成 (單位, 職位) 配對；僅回單一類別者退化為單維多選。
+ */
 export interface GroupOption {
   code: string
   name: string
+  kind?: string | null
+}
+
+/** DM 可見對象之群組值編碼：`"{單位 TAG_ID}:{職位 TAG_ID}"`；單位未指定時前段為空（#437）。 */
+export function encodeAudiencePair(unitCode: string, roleCode: string): string {
+  return `${unitCode}:${roleCode}`
+}
+
+/** 解回 `[單位代碼, 職位代碼]`；單位未指定時前者為空字串。 */
+export function decodeAudiencePair(value: string): [string, string] {
+  const idx = value.indexOf(":")
+  return idx < 0 ? ["", value] : [value.slice(0, idx), value.slice(idx + 1)]
 }
 
 export interface ListAssignmentsParams {

@@ -20,6 +20,11 @@ from app.dp.users.models import DpUser
 pytestmark = pytest.mark.integration
 
 
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 def _headers(sub):
     return {"Authorization": f"Bearer {create_access_token(sub=sub, ttl_minutes=15)}"}
 
@@ -51,8 +56,37 @@ async def _grant(db, user_id, role):
     await db.flush()
 
 
-async def _grant_audience(db, user_id, tag_name):
-    db.add(DmUserTag(user_id=user_id, tag_id=await _tag_id(db, tag_name), created_user="seed", created_date=utcnow()))
+async def _grant_audience(db, user_id, tag_name, unit_name=None):
+    """授予 (單位, 職位) 配對；`unit_name=None` 代表單位未指定（#437 導入前之既有授權形狀）。"""
+    unit_id = None
+    if unit_name is not None:
+        unit_id = await db.scalar(
+            select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == unit_name)
+        )
+    db.add(
+        DmUserTag(
+            user_id=user_id,
+            tag_id=await _tag_id(db, tag_name),
+            unit_tag_id=unit_id,
+            created_user="seed",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+
+
+async def _tag_doc_with_unit(db, doc_id, unit_name, tag_name):
+    """文件掛指定 (單位, 職位) 配對（非通用值）。"""
+    unit_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == unit_name))
+    db.add(
+        DmDocTag(
+            doc_id=doc_id,
+            tag_id=await _tag_id(db, tag_name),
+            unit_tag_id=unit_id,
+            created_user="seed",
+            created_date=utcnow(),
+        )
+    )
     await db.flush()
 
 
@@ -90,7 +124,15 @@ async def _doc(db, doc_id, *, doc_name="文件", category="SOP", version_no="1.0
 
 
 async def _tag_doc(db, doc_id, tag_name):
-    db.add(DmDocTag(doc_id=doc_id, tag_id=await _tag_id(db, tag_name), created_user="seed", created_date=utcnow()))
+    db.add(
+        DmDocTag(
+            doc_id=doc_id,
+            tag_id=await _tag_id(db, tag_name),
+            unit_tag_id=await _all_units_id(db),  # 「全單位」＝不限單位（#437 配對語意）
+            created_user="seed",
+            created_date=utcnow(),
+        )
+    )
     await db.flush()
 
 
@@ -348,3 +390,26 @@ async def test_export_forbidden_for_non_admin(db, client):
     await _grant(db, "ed", DM_EDITOR)
     resp = await client.get("/api/dm/kpi/documents/export", headers=_headers("ed"))
     assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_003"
+
+
+async def test_should_see_母體依配對計算_不含其他單位同職位(db, client):
+    """應看母體須依 (單位, 職位) 整組判定（#437）。
+
+    若沿用配對化前的「只比職位」，掛「軍醫局 + 護理師」的文件會把**所有單位的護理師**算進母體：
+    KPI 閱讀率被稀釋成假的低分，而每週的未讀提醒（含 doc_name）會寄給看不到該文件的人。
+    """
+    await _seed_admin(db)
+    await _seed_user(db, "kpi_mab_nurse", "軍醫局護理")
+    await _seed_user(db, "kpi_tsgh_nurse", "三總護理")
+    await _grant(db, "kpi_mab_nurse", DM_VIEWER)
+    await _grant(db, "kpi_tsgh_nurse", DM_VIEWER)
+    await _grant_audience(db, "kpi_mab_nurse", "護理師", "國防部軍醫局")
+    await _grant_audience(db, "kpi_tsgh_nurse", "護理師", "國防醫學院三軍總醫院")
+    await _doc(db, "DM-SOP-000600")
+    await _tag_doc_with_unit(db, "DM-SOP-000600", "國防部軍醫局", "護理師")
+
+    resp = await client.get("/api/dm/kpi/documents", headers=_headers("adm"))
+
+    assert resp.status_code == 200
+    item = next(d for d in resp.json()["data"] if d["doc_id"] == "DM-SOP-000600")
+    assert item["should_see"] == 1  # 只有軍醫局的護理師；三總的護理師不算
