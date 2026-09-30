@@ -883,7 +883,7 @@ export const handlers = [
           },
           // 同一主檔內混層級（#171）——本欄位放在 DP_PARAM_D 而非 DP_PARAM_M 的原因。
           // 注意：本 fixture 為示意而非正式資料之鏡像（ET_TRAINING_UNIT / DM_DOC_CATEGORY
-          // 於 #182 已移出 DP_PARAM），正式環境之 JWT 兩項皆為 READONLY。
+          // 於 #182 已移出 DP_PARAM），正式環境之 JWT 兩項自 #459 起皆為 HIDDEN、整個主檔不回傳。
           {
             param_key: "VERIFY_SEND_COOLDOWN_SEC",
             param_name: "驗證信重寄冷卻（秒）",

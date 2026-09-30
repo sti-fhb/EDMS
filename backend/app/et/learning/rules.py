@@ -61,7 +61,7 @@ def playback_rates(*, max_rate: float) -> tuple[float, ...]:
     """依 `DP_PARAM.ET_VIDEO_PLAYBACK_MAX_RATE` 限縮可選倍速（FR-ET-US5-03）。
 
     **參數只能往下限縮、不能往上新增選項**——選項清單為固定五段，設 3 不會多出 3x。
-    這是 DP #171 將該參數判為 `READONLY` 的理由。
+    這是 DP #171 將該參數列為不可編輯的理由；#459 起進一步改為 `HIDDEN`、不出現於 DP03。
 
     ⚠️ 不要改成動態產生（`range` / 等差數列）：那樣參數設 3 就會冒出一個播放器根本
     沒有的選項，而且沒有任何測試會自然抓到——寫測試的人會用預設值 2。

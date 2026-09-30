@@ -119,7 +119,7 @@ def is_editable_scope(edit_scope: str) -> bool:
     """該明細是否開放管理者於維護頁編輯（#171）。
 
     刻意寫成「只有 ADMIN 可編輯」而非「READONLY / HIDDEN 要擋」——對三個已知值兩者等價，
-    對**未知值**方向相反。READONLY / HIDDEN 之值由 IT 直接操作 DB 變更（spec_us5 FR-DP-US5-11），
+    對**未知值**方向相反。READONLY / HIDDEN 之值由 IT 於 DB 端變更（spec_us5 FR-DP-US5-11），
     人手寫入就有打成 'readonly' 的可能：本寫法讓它維持不可編輯，反向寫法會讓它悄悄變成可編輯。
     DB 端另有 CK_DP_PARAM_D_EDIT_SCOPE 擋住非三值之寫入，此處是不依賴該約束的第二道。
     """
