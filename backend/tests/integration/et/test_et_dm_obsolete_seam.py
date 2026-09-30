@@ -24,6 +24,7 @@ AC 5 有兩個半句，各自對應一個當時無人覆蓋的接縫：
 """
 
 import os
+from datetime import timedelta
 
 import pytest
 
@@ -121,12 +122,14 @@ async def _course_with_doc(client, db, uid: str, *, doc_id: str) -> tuple[int, i
     「其餘全部滿足」是刻意的：這樣 `publish-check` 若回 `can_publish=False`，唯一可能的
     原因就是廢止文件那一項，不會與其他缺漏混淆。
     """
+    # 起訖一律相對現在：寫死日期的課程會在那天之後變成「關閉中」
+    now = utcnow().replace(microsecond=0)
     created = await client.post(
         _COURSES,
         json={
             "course_name": "引用文件的課程",
-            "open_start_at": "2026-09-01T00:00:00Z",
-            "open_end_at": "2026-12-31T00:00:00Z",
+            "open_start_at": (now - timedelta(days=1)).isoformat(),
+            "open_end_at": (now + timedelta(days=30)).isoformat(),
         },
         headers=_bearer(uid),
     )
