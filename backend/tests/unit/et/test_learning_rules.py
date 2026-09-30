@@ -86,8 +86,8 @@ class TestPlaybackRates:
 
         `ET_VIDEO_PLAYBACK_MAX_RATE` 看起來像一個「設定倍速上限」的參數，很容易被
         實作成 `range(...)` 之類的動態產生——那樣設 3 就會多出 3x。FR-ET-US5-03 明訂
-        選項清單為前端寫死、參數**只能往下限縮**（DP #171 將此參數判為 `READONLY`
-        正是這個理由）。
+        選項清單為前端寫死、參數**只能往下限縮**（DP #171 將此參數列為不可編輯、
+        #459 起改為 `HIDDEN` 正是這個理由）。
         """
         assert playback_rates(max_rate=3) == PLAYBACK_RATE_OPTIONS
         assert playback_rates(max_rate=10) == PLAYBACK_RATE_OPTIONS
