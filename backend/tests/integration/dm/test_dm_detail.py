@@ -1,4 +1,4 @@
-"""文件詳細頁瀏覽（US4 / DM02）整合測試（真實 DB）。
+"""文件詳細頁瀏覽（US4 / DM07）整合測試（真實 DB）。
 
 驗證：詳細（標題/資訊面板）、存取控制（閱覽者未授權擋、編輯者見全部）、檔案存取（PDF 預覽/下載、
 Office 僅下載、舊版擋下載）、下載寫 DM_DOC_READ + 去重 + 預覽不寫、版本歷程、can_edit（PENDING 失效）、
@@ -50,6 +50,12 @@ async def _audience_tag_id(db, name):
 
 
 async def _make_retrieval_tag(db, name):
+    """取指定檢索標籤；seed 已有同名者沿用——`DM_TAG` 組內名稱唯一（`UQ_DM_TAG_GROUP_NAME`，
+    #437），重建同名會撞唯一鍵。本 helper 要的是「一個該組的標籤」，不是「一個新標籤」。
+    """
+    existing = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "NATURE", DmTag.tag_name == name))
+    if existing is not None:
+        return existing
     t = DmTag(tag_group_code="NATURE", tag_name=name, created_user="seed", created_date=utcnow())
     db.add(t)
     await db.flush()
@@ -119,9 +125,19 @@ async def _seed_doc(
     vid = await _add_version(db, doc_id, "1.0", author=author)
     doc.current_version_id = vid
     await db.flush()
+    # 可見對象為 (單位, 職位) 配對；單位一律「全單位」＝不限單位（#437）。檢索標籤無單位維度。
+    all_units_id = await db.scalar(
+        select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位")
+    )
     for tn in audience_tags:
         db.add(
-            DmDocTag(doc_id=doc_id, tag_id=await _audience_tag_id(db, tn), created_user=author, created_date=utcnow())
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=await _audience_tag_id(db, tn),
+                unit_tag_id=all_units_id,
+                created_user=author,
+                created_date=utcnow(),
+            )
         )
     for tid in retrieval_tag_ids:
         db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=author, created_date=utcnow()))
@@ -199,7 +215,7 @@ async def test_editor_sees_any(db):
 
 @pytest.mark.parametrize("doc_status", ["DRAFT", "PENDING_REVIEW"])
 async def test_unpublished_doc_not_browsable_any_role(db, doc_status):
-    """未發布文件（草稿 / 送審中）不在 DM02 瀏覽——不分角色（閱覽者 / 編輯者 / 管理者）皆 404。
+    """未發布文件（草稿 / 送審中）不在 DM07 瀏覽——不分角色（閱覽者 / 編輯者 / 管理者）皆 404。
 
     草稿 / 送審中屬作者個人專區（US9）/ 審核者簽核中心（US6），不由詳細頁呈現。
     """

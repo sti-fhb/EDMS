@@ -4,7 +4,7 @@ Revision ID: 381f643aefb4
 Revises: 71ca59c07bd1
 Create Date: 2026-09-30 11:24:00.000000
 
-9 項 READONLY 參數改為 HIDDEN，不再出現於 DP07（#459）。
+9 項 READONLY 參數改為 HIDDEN，不再出現於 DP03（#459）。
 
 異動說明：
 - 影響 Table：`DP_PARAM_D`（僅更新 `EDIT_SCOPE`，不新增 / 刪除列、不改 schema）
@@ -90,7 +90,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """還原為 READONLY。
 
-    ⚠️ 還原後這 9 項會重新出現於 DP07（顯示現值、無編輯入口）。
+    ⚠️ 還原後這 9 項會重新出現於 DP03（顯示現值、無編輯入口）。
 
     範圍由 `_TARGETS` 界定，`MAIL` 三項與 `ACTION_TYPE` 五項本來就不在其中，降版不會碰到
     ——**這與 `from_scope` 條件無關**，別把兩件事混為一談（那個條件擋的是下面那種情形）。

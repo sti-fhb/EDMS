@@ -19,7 +19,7 @@
     .bg-tsbms-green { background-color: var(--tsbms-green) !important; color: #fff !important; }
     .text-tsbms-green { color: var(--tsbms-green) !important; }
 
-    /* ET02 檢視模式（唯讀） — 所有編輯控制項禁用 */
+    /* ET05 檢視模式（唯讀） — 所有編輯控制項禁用 */
     .et02-readonly input,
     .et02-readonly select,
     .et02-readonly textarea {
@@ -169,7 +169,7 @@
     .tag-badge.tag-all { background: #e3f2fd; color: #0d47a1; border-color: #90caf9; }
     .tag-badge.tag-disabled { background: #f5f5f5; color: #9e9e9e; border-color: #e0e0e0; text-decoration: line-through; }
 
-    /* ET03 問卷結果統計長條 */
+    /* ET02 問卷結果統計長條 */
     .survey-bar { height: 14px; background: #eeeeee; border-radius: 3px; overflow: hidden; }
     .survey-bar-fill { height: 100%; background: var(--tsbms-green-light); }
 
@@ -199,7 +199,7 @@
       display: flex; justify-content: space-between;
     }
 
-    /* Chapter editor (ET02) */
+    /* Chapter editor (ET05) */
     .chapter-card {
       background: #fff; border: 1px solid #dee2e6; border-radius: 6px;
       margin-bottom: 0.75rem;
@@ -248,7 +248,7 @@
     .video-progress { height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; margin-bottom: 0.4rem; }
     .video-progress-bar { height: 100%; background: #f44336; width: 65%; }
 
-    /* Learning sidebar (ET05) */
+    /* Learning sidebar (ET06) */
     .learn-sidebar {
       background: #fff; border: 1px solid #dee2e6; border-radius: 8px;
       max-height: calc(100vh - 9rem); overflow-y: auto;
@@ -273,7 +273,7 @@
     .learn-item.locked { color: #bbb; cursor: not-allowed; }
     .learn-item-icon { width: 1.2rem; text-align: center; flex-shrink: 0; }
 
-    /* Quiz (ET06) */
+    /* Quiz (ET07) */
     .quiz-question {
       background: #fff; border: 1px solid #dee2e6; border-radius: 8px;
       padding: 1.5rem; margin-bottom: 1rem;
@@ -294,7 +294,7 @@
     .quiz-option.correct { background: #e8f5e9; border-color: #4caf50; }
     .quiz-option.incorrect { background: #ffebee; border-color: #ef5350; }
 
-    /* Quiz navigator (ET06) — 左側題號導覽 */
+    /* Quiz navigator (ET07) — 左側題號導覽 */
     .quiz-nav-btn {
       width: 2.4rem; height: 2.4rem; border-radius: 6px;
       border: 1px solid #dee2e6; background: #fff;
@@ -657,20 +657,20 @@
     <strong>受訓單位標籤為單選（2026-09-14 澄清）：</strong>`FR-ET-US7-02` 的「任一命中即列出（一課程多標籤 OR）」指的是<strong>一門課掛了多個標籤時任一命中</strong>，不是使用者可複選多個標籤；畫面為單一下拉即為正解。下拉來源為 <code>ET_TAG</code> <strong>全部標籤（含已停用者）</strong>——停用僅影響新課程掛載，既有課程仍須查得到，故停用者標示「（已停用）」但保留可選<br>
     <strong>點擊課程卡片之行為依擁有權判定：</strong>
     <ul style="margin:0.25rem 0 0.5rem 1.2rem;">
-      <li><strong>自己建立</strong> → 進入 ET02 <strong>編輯模式</strong>（全功能）</li>
-      <li><strong>他人建立</strong> → 進入 ET02 <strong>檢視模式</strong>（唯讀，僅可閱覽不可編輯）</li>
-      <li><strong>已關閉課程</strong>（2026-07-02 變更）→ 教師進入 ET02 <strong>仍可編輯內容</strong>（非唯讀），並可執行「<strong>再開課</strong>」（重設起訖時間後恢復開放）</li>
+      <li><strong>自己建立</strong> → 進入 ET05 <strong>編輯模式</strong>（全功能）</li>
+      <li><strong>他人建立</strong> → 進入 ET05 <strong>檢視模式</strong>（唯讀，僅可閱覽不可編輯）</li>
+      <li><strong>已關閉課程</strong>（2026-07-02 變更）→ 教師進入 ET05 <strong>仍可編輯內容</strong>（非唯讀），並可執行「<strong>再開課</strong>」（重設起訖時間後恢復開放）</li>
     </ul>
     <strong>新增課程：</strong>右上「+ 新增課程」進入課程新增頁，所有欄位空白；填完基本資料後可繼續新增章節<br>
     <strong>對應需求：</strong>RQET001（課程建立）、RQET007（教師視角）；2026-07-02 客戶變更 #1（受訓單位標籤）、#3（起訖時間 / 已關閉可再開課）
   </details>
 </div>
 
-<!-- ==================== ET04 我的課程（學員） ==================== -->
+<!-- ==================== ET03 我的課程（學員） ==================== -->
 <div class="screen" id="et-courses-student">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-collection me-2"></i>我的課程</div>
-    <div class="screen-meta">et/myCourses.jsp (ET04)</div>
+    <div class="screen-meta">et/myCourses.jsp (ET03)</div>
   </div>
 
   <!-- 統計 + 加入課程 -->
@@ -783,13 +783,13 @@
     &nbsp;&nbsp;&nbsp;&nbsp;⚠️ 原行為（2026-07-02～2026-09-17）是「清單不顯示」，與「起始時間未到<strong>仍可加入</strong>」相乘＝加得進去但看不到，且統計連「已加入課程」都算 0 —— 學員看到的是「你沒有加入任何課程」<br>
     &nbsp;&nbsp;&nbsp;&nbsp;⚠️ 「尚未開放」與「未開始」<strong>是兩件事</strong>：後者指已開放、還沒開始學。兩者分開計數<br>
     <strong>已關閉課程（2026-07-02 變更）：</strong>顯示「已關閉」badge；點擊可<strong>唯讀回看</strong>已學過內容，不能再累積進度、作答測驗、解鎖新章節或填寫問卷；教師再開課後恢復學習（進度接續保留）<br>
-    <strong>加入新課程例外：</strong>邀請碼無效顯示「邀請碼無效，請確認後重試」；已加入者直接跳 ET05；課程已關閉顯示「<strong>此課程目前關閉中</strong>」<br>
-    <strong>點擊課程卡：</strong>進入 ET05 課程學習頁（從上次進度繼續）<br>
+    <strong>加入新課程例外：</strong>邀請碼無效顯示「邀請碼無效，請確認後重試」；已加入者直接跳 ET06；課程已關閉顯示「<strong>此課程目前關閉中</strong>」<br>
+    <strong>點擊課程卡：</strong>進入 ET06 課程學習頁（從上次進度繼續）<br>
     <strong>對應需求：</strong>RQET007（學員視角）；2026-07-02 客戶變更 #1（標籤）、#3（起訖時間 / 關閉可再開）
   </details>
 </div>
 
-<!-- ==================== ET02-N 課程新增（空白） ==================== -->
+<!-- ==================== ET05-N 課程新增（空白） ==================== -->
 <div class="screen" id="et-course-create">
   <div class="screen-header">
     <div>
@@ -798,7 +798,7 @@
         <i class="bi bi-plus-circle me-2"></i>新增課程
       </div>
     </div>
-    <div class="screen-meta">et/courseCreate.jsp (ET02-N)</div>
+    <div class="screen-meta">et/courseCreate.jsp (ET05-N)</div>
   </div>
 
   <div class="wf-status-msg wf-status-info">
@@ -850,7 +850,7 @@
         </div>
       </div>
       <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>課程起訖時間即「<strong>閱課期間</strong>」（2026-07-02 新增）：起始時間前學員看不到課程；到達訖止時間系統<strong>自動關閉</strong>閱課（關閉後可再開課）。草稿可留空，發布時必填。</div>
-      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i><strong>是否需線下核可（2026-07-17 新增）</strong>：開啟後，學員<strong>線上完課</strong>仍須由教師 / 管理者於 ET03 手動核可（實機 / 口頭考核）。核可為<strong>獨立維度</strong>——<strong>不併入完課定義</strong>，不影響完課率 / 課後問卷 / 週報 / 提醒；核可通過寄通知信。<strong>草稿 / 已發布 / 已關閉任一狀態皆可調整。</strong></div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i><strong>是否需線下核可（2026-07-17 新增）</strong>：開啟後，學員<strong>線上完課</strong>仍須由教師 / 管理者於 ET02 手動核可（實機 / 口頭考核）。核可為<strong>獨立維度</strong>——<strong>不併入完課定義</strong>，不影響完課率 / 課後問卷 / 週報 / 提醒；核可通過寄通知信。<strong>草稿 / 已發布 / 已關閉任一狀態皆可調整。</strong></div>
     </details>
   </div>
 
@@ -902,18 +902,18 @@
     <strong>受訓單位標籤（2026-07-02 變更）：</strong>原「關聯模組」單選改為標籤<strong>多選</strong>（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師…，標籤庫由管理者於平台 DP 後台維護）；發布時系統自動邀請標籤對應人員並寄通知信<br>
     <strong>課程起訖時間（2026-07-02 新增）：</strong>閱課期間；起始前學員不可見、到期系統自動關閉（可再開課）<br>
     <strong>課後問卷（2026-07-02 新增）：</strong>選配，一門課程至多 1 份；題目單選、選項自訂；學員完課後填寫（具名、一人一次）<br>
-    <strong>是否需線下核可（2026-07-17 新增）：</strong>開關，預設關閉；開啟後學員線上完課仍須教師 / 管理者於 ET03 手動核可（實機 / 口頭考核）。<strong>不併入完課定義</strong>、不影響完課率與統計；草稿 / 已發布 / 已關閉皆可調整<br>
+    <strong>是否需線下核可（2026-07-17 新增）：</strong>開關，預設關閉；開啟後學員線上完課仍須教師 / 管理者於 ET02 手動核可（實機 / 口頭考核）。<strong>不併入完課定義</strong>、不影響完課率與統計；草稿 / 已發布 / 已關閉皆可調整<br>
     <strong>狀態：</strong>儲存草稿後為「草稿」狀態；「儲存並發布」時系統檢核（至少 1 章節 + 至少 1 教材 + 至少 1 標籤 + 起訖時間已填），通過即上架並觸發標籤自動邀請<br>
     <strong>章節編排空白狀態：</strong>顯示「尚未新增章節」提示與引導按鈕；點「新增章節」後可<strong>連續新增多個章節</strong>（modal 中按「儲存並繼續新增」會留在 modal 重設欄位）<br>
-    <strong>儲存後：</strong>回到課程列表卡片網格；再次點擊進入 ET02 編輯頁可繼續調整內容或發布
+    <strong>儲存後：</strong>回到課程列表卡片網格；再次點擊進入 ET05 編輯頁可繼續調整內容或發布
   </details>
 </div>
 
-<!-- ==================== ET02-S 課程建立完成 ==================== -->
+<!-- ==================== ET05-S 課程建立完成 ==================== -->
 <div class="screen" id="et-course-create-success">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-check-circle-fill text-success me-2"></i>課程已建立</div>
-    <div class="screen-meta">et/courseCreated.jsp (ET02-S)</div>
+    <div class="screen-meta">et/courseCreated.jsp (ET05-S)</div>
   </div>
 
   <div class="wf-card text-center" style="padding:2.5rem 1rem;">
@@ -952,16 +952,16 @@
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
     <strong>本畫面用途：</strong>新增課程儲存成功後的確認畫面，提供使用者三個後續動作選項<br>
-    <strong>進入時機：</strong>從 ET02-N 點「儲存草稿」或「儲存並發布」後自動進入；狀態 pill 依當下選擇顯示「草稿」或「已發布」<br>
+    <strong>進入時機：</strong>從 ET05-N 點「儲存草稿」或「儲存並發布」後自動進入；狀態 pill 依當下選擇顯示「草稿」或「已發布」<br>
     <strong>課程摘要（2026-07-02 變更）：</strong>列出剛建立的課程關鍵資訊（<strong>受訓單位標籤、課程起訖時間</strong>、章節數、教材項目數、狀態），讓使用者確認資料正確；發布時系統依標籤自動邀請對應人員並寄通知信<br>
     <strong>三個下一步選項：</strong><br>
     <span style="margin-left:1rem;">• <strong>回到課程列表</strong>：返回 ET01-A，看到新建課程已出現在卡片網格中</span><br>
-    <span style="margin-left:1rem;">• <strong>繼續編輯此課程</strong>：進入 ET02 編輯頁，可繼續調整內容或變更狀態</span><br>
-    <span style="margin-left:1rem;">• <strong>新增另一門課程</strong>：清空 ET02-N 表單、返回新增頁，方便連續建立多門課程</span>
+    <span style="margin-left:1rem;">• <strong>繼續編輯此課程</strong>：進入 ET05 編輯頁，可繼續調整內容或變更狀態</span><br>
+    <span style="margin-left:1rem;">• <strong>新增另一門課程</strong>：清空 ET05-N 表單、返回新增頁，方便連續建立多門課程</span>
   </details>
 </div>
 
-<!-- ==================== ET02 課程編輯 ==================== -->
+<!-- ==================== ET05 課程編輯 ==================== -->
 <div class="screen" id="et-course-edit">
   <div class="screen-header">
     <div>
@@ -981,7 +981,7 @@
       <button class="btn btn-tsbms btn-sm" id="et02-reopen-btn" onclick="openReopenCourseModal()" style="display:none;" title="僅已關閉課程顯示；須重設一組新的起訖時間">
         <i class="bi bi-arrow-clockwise me-1"></i>再開課
       </button>
-      <div class="screen-meta ms-2">et/courseEdit.jsp (ET02)</div>
+      <div class="screen-meta ms-2">et/courseEdit.jsp (ET05)</div>
     </div>
   </div>
 
@@ -1045,7 +1045,7 @@
         </div>
       </div>
       <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>課程起訖時間即「閱課期間」（2026-07-02 新增，發布時必填）：起始前學員不可見；到訖止時間系統<strong>自動關閉</strong>（狀態轉「已關閉」，可再開課）。</div>
-      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i><strong>是否需線下核可（2026-07-17 新增）</strong>：開啟後，學員<strong>線上完課</strong>仍須由教師 / 管理者於 ET03 手動核可（實機 / 口頭考核）。核可為<strong>獨立維度</strong>——<strong>不併入完課定義</strong>，不影響完課率 / 課後問卷 / 週報 / 提醒；核可通過寄通知信。<strong>草稿 / 已發布 / 已關閉任一狀態皆可調整。</strong></div>
+      <div class="field-helper mt-2"><i class="bi bi-info-circle"></i><strong>是否需線下核可（2026-07-17 新增）</strong>：開啟後，學員<strong>線上完課</strong>仍須由教師 / 管理者於 ET02 手動核可（實機 / 口頭考核）。核可為<strong>獨立維度</strong>——<strong>不併入完課定義</strong>，不影響完課率 / 課後問卷 / 週報 / 提醒；核可通過寄通知信。<strong>草稿 / 已發布 / 已關閉任一狀態皆可調整。</strong></div>
     </details>
   </div>
 
@@ -1250,7 +1250,7 @@
   </details>
 </div>
 
-<!-- ==================== ET03 學員 ==================== -->
+<!-- ==================== ET02 學員 ==================== -->
 <div class="screen" id="et-students">
   <div class="screen-header">
     <div>
@@ -1259,7 +1259,7 @@
         <i class="bi bi-people me-2"></i>學員 — <span class="text-tsbms-green">採血作業新進人員訓練 v2.0</span>
       </div>
     </div>
-    <div class="screen-meta">et/students.jsp (ET03)</div>
+    <div class="screen-meta">et/students.jsp (ET02)</div>
   </div>
 
   <!-- 學員清單 -->
@@ -1537,7 +1537,7 @@
             </div>
 
           </div>
-          <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>僅列出曾作答測驗之學員；成績於各處顯示以<strong>最高分</strong>為準；學員端 ET06 亦可回看自己每次作答之成績與逐題明細。</div>
+          <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>僅列出曾作答測驗之學員；成績於各處顯示以<strong>最高分</strong>為準；學員端 ET07 亦可回看自己每次作答之成績與逐題明細。</div>
         </div>
 
         <!-- 區塊 3：問卷結果（課程無問卷時本區塊隱藏） -->
@@ -1638,7 +1638,7 @@
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
-    <strong>本畫面用途：</strong>學員管理介面，為一個課程之完整資料視圖，內含三區塊（2026-07-02 變更：問卷結果由獨立 tab 併入；<strong>2026-09-18 #362 變更：原有的「待加入」tab 隨 US12 廢止，分頁列整個移除</strong>）。<strong>本頁涵蓋 RFP 2.9.4 完課率統計（RQET008）</strong>；邀請學員（RQET006）入口在 ET02 課程編輯頁<br>
+    <strong>本畫面用途：</strong>學員管理介面，為一個課程之完整資料視圖，內含三區塊（2026-07-02 變更：問卷結果由獨立 tab 併入；<strong>2026-09-18 #362 變更：原有的「待加入」tab 隨 US12 廢止，分頁列整個移除</strong>）。<strong>本頁涵蓋 RFP 2.9.4 完課率統計（RQET008）</strong>；邀請學員（RQET006）入口在 ET05 課程編輯頁<br>
     <strong>區塊 1 已加入學員：</strong>顯示每位學員的完課狀態（已完成 / 進行中 / 未開始）、學習進度 %、平均成績、最後活動時間 — 即「哪些學員已完成、哪些尚未通過測驗」之呈現<br>
     <span style="margin-left:1rem;">• <strong>移除學員</strong>（✕）：將學員自本課程移除，保留學習歷史紀錄；移除後不計入完課率統計</span><br>
     <strong>區塊 2 作答明細（2026-07-02 新增）：</strong><strong>一次列出所有已作答學員</strong>（可展開清單），點學員展開其<strong>歷次（每一次）作答</strong>（作答時間、總分、是否及格）；點任一次可看逐題明細（題目、學員作答、正確答案、對錯、該題得分）<br>
@@ -1652,23 +1652,28 @@
 </div>
 
 
-<!-- ==================== ET10 核可查詢（教師 / 管理者 + 學員自查；2026-07-17 新增 US17） ==================== -->
+<!-- ==================== ET04 核可查詢（教師 / 管理者 + 學員自查；2026-07-17 新增 US17） ==================== -->
 <div class="screen" id="et-approval-query">
   <div class="screen-header">
     <div class="screen-title"><i class="bi bi-patch-check me-2"></i>核可查詢</div>
-    <div class="screen-meta">et/approvalQuery.jsp (ET10)</div>
+    <div class="screen-meta">et/approvalQuery.jsp (ET04)</div>
   </div>
 
-  <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> 本畫面依登入角色顯示不同視角：<strong>教師 / 管理者</strong>可依姓名查全部學員之核可課程（含通過 / 不通過 / 已撤銷）；<strong>學員</strong>僅見自己「已通過」的課程（不顯示不通過 / 撤銷、不得查他人）。此處同時呈現兩視角供 review；正式畫面依角色擇一。查詢範圍由後端依身分控管（不以前端隱藏為唯一防線）。不提供核可證明 / 結業證書輸出。</div>
+  <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> 本畫面依登入角色顯示不同視角：<strong>教師 / 管理者</strong>可依姓名 / Email 或課程查學員之核可課程（含通過 / 不通過 / 已撤銷）；<strong>學員</strong>僅見自己「已通過」的課程（不顯示不通過 / 撤銷、不得查他人）。此處同時呈現兩視角供 review；正式畫面依角色擇一。查詢範圍由後端依身分控管（不以前端隱藏為唯一防線）。不提供核可證明 / 結業證書輸出。</div>
 
   <!-- 視角 A：教師 / 管理者 -->
   <div class="wf-card mb-3">
-    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-1"></i>教師 / 管理者視角 — 依姓名查全部學員</h6>
-    <div class="d-flex gap-2 mb-3">
-      <div class="input-group input-group-sm" style="width: 20rem;">
+    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-1"></i>教師 / 管理者視角 — 依姓名 / Email 或課程查</h6>
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <div class="input-group input-group-sm" style="width: 18rem;">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" placeholder="輸入學員姓名（可模糊）" value="林">
+        <input type="text" class="form-control" placeholder="姓名或 Email（可模糊）" value="林">
       </div>
+      <select class="form-select form-select-sm" style="width: 13rem;">
+        <option selected>全部課程</option>
+        <option>採血作業新進人員訓練</option>
+        <option>成分製備標準作業教學</option>
+      </select>
       <select class="form-select form-select-sm" style="width: 10rem;">
         <option selected>全部結果</option>
         <option>僅通過</option>
@@ -1677,6 +1682,7 @@
       </select>
       <button class="btn btn-tsbms btn-sm" onclick="showToast('查詢核可紀錄（demo）')"><i class="bi bi-search me-1"></i>查詢</button>
     </div>
+    <div class="internal-note mb-3"><i class="bi bi-lightbulb"></i> <strong>關鍵字與課程至少給一個</strong>（2026-09-29 #439 改訂 <code>FR-ET-US17-07</code>；原為「姓名必填」）：只選課程即可列出該課程的核可紀錄——使用者常常<strong>正是不知道有誰可以查</strong>。兩者皆不給仍拒絕，那才是原條文要防的「留白查全部」。<br>⚠️ 課程下拉<strong>只列已有核可紀錄的課程</strong>（不是課程清單：核可多落在已結束的課程上，而 ET01 的「全部課程」恰好排除那些）；教師僅列其自有課程，管理者不限。非管理者以他人課程篩選一律拒絕（<code>FR-ET-US17-08</code>）——下拉是呈現，擋在後端才算數。<br>⚠️ 下拉為空時須說明成因（載入失敗／尚無核可紀錄），不得給一個打得開卻空的選單；且管理者版不得說「您開設的課程」——他沒有自有課程。</div>
     <table class="table table-sm wf-table mb-0">
       <thead>
         <tr>
@@ -1750,14 +1756,14 @@
   </div>
 </div>
 
-<!-- ==================== ET05 課程學習頁（學員） ==================== -->
+<!-- ==================== ET06 課程學習頁（學員） ==================== -->
 <div class="screen" id="et-learn">
   <div class="screen-header">
     <div class="screen-title">
       <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-courses-student')"><i class="bi bi-arrow-left"></i></button>
       <i class="bi bi-book me-2"></i>採血作業新進人員訓練 v2.0
     </div>
-    <div class="screen-meta">et/learn.jsp (ET05)</div>
+    <div class="screen-meta">et/learn.jsp (ET06)</div>
   </div>
 
   <div class="row g-3">
@@ -1894,20 +1900,20 @@
     <span style="margin-left:1rem;">• 強制觀看判定（2026-07-02 明文化）：採<strong>累計覆蓋率</strong> — 實際播放區段聯集 ÷ 影片總長 ≥ 80% 即完成；直接拉到結尾不算看過；倍速照算；重複觀看不加成（非「結束時間−開始時間」之牆鐘時間）— RQET004</span><br>
     <span style="margin-left:1rem;">• 文件項目：嵌入 PDF 預覽（非 PDF 顯示「下載原檔以本機應用程式開啟」）；若引用自 DM，自動帶最新版</span><br>
     <span style="margin-left:1rem;">• 圖文項目：渲染 HTML 內容（含文字、圖片、內嵌影片）— RQET003</span><br>
-    <span style="margin-left:1rem;">• 測驗項目：顯示「開始測驗」按鈕 → 進入 ET06-A 引導頁（顯示題數/時長/及格分數/注意事項）→ 按「開始作答」進 ET06 正式作答</span><br>
+    <span style="margin-left:1rem;">• 測驗項目：顯示「開始測驗」按鈕 → 進入 ET07-A 引導頁（顯示題數/時長/及格分數/注意事項）→ 按「開始作答」進 ET07 正式作答</span><br>
     <strong>課程已關閉時（2026-07-02 變更）：</strong>內容<strong>唯讀回看</strong>（可重看已看過的教材），不再累積進度、不可作答、不可填問卷<br>
     <strong>對應需求：</strong>RQET001、RQET003、RQET004；2026-07-02 客戶變更 #5（問卷）、#6（倍速與覆蓋率明文化）
   </details>
 </div>
 
-<!-- ==================== ET05-Q 課後問卷填寫（學員；2026-07-02 新增 US13） ==================== -->
+<!-- ==================== ET06-Q 課後問卷填寫（學員；2026-07-02 新增 US13） ==================== -->
 <div class="screen" id="et-survey">
   <div class="screen-header">
     <div class="screen-title">
       <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-learn')"><i class="bi bi-arrow-left"></i></button>
       <i class="bi bi-clipboard-heart me-2"></i>課後問卷 — <span class="text-tsbms-green">採血作業新進人員訓練</span>
     </div>
-    <div class="screen-meta">et/survey.jsp (ET05-Q)</div>
+    <div class="screen-meta">et/survey.jsp (ET06-Q)</div>
   </div>
 
   <!-- 課程關閉未填之提示（唯讀情境；預設隱藏） -->
@@ -1959,25 +1965,25 @@
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
-    <strong>本畫面用途（2026-07-02 新增，US13 / UCET013）：</strong>學員<strong>完課後</strong>於 ET05 章節導覽列點「填寫課後問卷」入口進入本頁填寫課後回饋問卷<br>
+    <strong>本畫面用途（2026-07-02 新增，US13 / UCET013）：</strong>學員<strong>完課後</strong>於 ET06 章節導覽列點「填寫課後問卷」入口進入本頁填寫課後回饋問卷<br>
     <strong>入口顯示條件：</strong>學員<strong>已完課</strong> AND 課程<strong>建有啟用中問卷</strong>方顯示；未完課 / 無問卷 / 問卷已停用皆不顯示入口<br>
-    <strong>題型：</strong>每題<strong>單選</strong>（radio；選項由教師於 ET02 自訂，如 滿意 / 普通 / 不滿意）；全部題目作答後方可送出（未答題標示，見「未作答提示」）<br>
-    <strong>送出規則：</strong>填答<strong>具名</strong>（教師於 ET03「問卷結果」可看每位學員選項）；<strong>一人一次</strong>（以 (SURVEY_ID, USER_ID) 唯一約束防重複），送出後<strong>不可修改</strong><br>
+    <strong>題型：</strong>每題<strong>單選</strong>（radio；選項由教師於 ET05 自訂，如 滿意 / 普通 / 不滿意）；全部題目作答後方可送出（未答題標示，見「未作答提示」）<br>
+    <strong>送出規則：</strong>填答<strong>具名</strong>（教師於 ET02「問卷結果」可看每位學員選項）；<strong>一人一次</strong>（以 (SURVEY_ID, USER_ID) 唯一約束防重複），送出後<strong>不可修改</strong><br>
     <strong>已填寫者：</strong>入口改顯示「查看我的填答」，點擊進入本頁之<strong>唯讀回看</strong>模式（選項鎖定、無送出鈕）<br>
     <strong>課程關閉之影響：</strong>關閉後<strong>未填</strong>者無法填寫（顯示上方「此課程已關閉」提示）；<strong>已填</strong>者仍可唯讀回看；再開課後未填之已完課學員恢復可填<br>
     <strong>與完課關係：</strong>填寫問卷<strong>不是</strong>完課條件、不計入學習進度 %；完課狀態回退（教師新增章節）不影響已填問卷（一人一次維持，不重填）<br>
-    <strong>對應需求：</strong>2026-07-02 客戶變更 #5（課後滿意度 / 回饋問卷）；教師端統計與具名明細見 ET03「已加入」頁籤之「問卷結果」區塊
+    <strong>對應需求：</strong>2026-07-02 客戶變更 #5（課後滿意度 / 回饋問卷）；教師端統計與具名明細見 ET02「已加入」頁籤之「問卷結果」區塊
   </details>
 </div>
 
-<!-- ==================== ET06-A 測驗開始前引導頁（學員） ==================== -->
+<!-- ==================== ET07-A 測驗開始前引導頁（學員） ==================== -->
 <div class="screen" id="et-quiz-intro">
   <div class="screen-header">
     <div class="screen-title">
       <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-learn')"><i class="bi bi-arrow-left"></i></button>
       <i class="bi bi-check-square me-2"></i>線上測驗 — <span class="text-tsbms-green">基本概念測驗</span>
     </div>
-    <div class="screen-meta">et/quizIntro.jsp (ET06-A)</div>
+    <div class="screen-meta">et/quizIntro.jsp (ET07-A)</div>
   </div>
 
   <div class="wf-card" style="max-width: 720px; margin: 0 auto; padding: 2rem;">
@@ -2069,32 +2075,32 @@
         </tr>
       </tbody>
     </table>
-    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>學員可回看自己<strong>每一次</strong>作答之成績與逐題明細（不限最近一次；各次依其題目 / 選項順序快照顯示）；教師端亦可於 ET03「作答明細」查看。</div>
+    <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>學員可回看自己<strong>每一次</strong>作答之成績與逐題明細（不限最近一次；各次依其題目 / 選項順序快照顯示）；教師端亦可於 ET02「作答明細」查看。</div>
 
   </div>
 
   <details class="wf-screen-note" open>
     <summary><i class="bi bi-info-circle me-1"></i>畫面操作說明（僅供需求確認，正式系統不顯示）</summary>
     <hr style="margin:0.5rem 0;">
-    <strong>本畫面用途：</strong>學員按下「開始測驗」後的引導頁；說明測驗規則與計時邏輯，按確認後正式開始計時並進入 ET06 作答頁<br>
-    <strong>⚠️ 實作差異（2026-09-09 / #279）：</strong>本畫面已<strong>不是獨立頁面</strong>，內容改為在 ET05 章節學習頁的內容區<strong>就地渲染為測驗面板</strong>。影片與文件都是點了就看得到內容，測驗沒有理由先給一顆按鈕、按了才跳頁看題數與及格分數。本稿保留為版面參考<br>
+    <strong>本畫面用途：</strong>學員按下「開始測驗」後的引導頁；說明測驗規則與計時邏輯，按確認後正式開始計時並進入 ET07 作答頁<br>
+    <strong>⚠️ 實作差異（2026-09-09 / #279）：</strong>本畫面已<strong>不是獨立頁面</strong>，內容改為在 ET06 章節學習頁的內容區<strong>就地渲染為測驗面板</strong>。影片與文件都是點了就看得到內容，測驗沒有理由先給一顆按鈕、按了才跳頁看題數與及格分數。本稿保留為版面參考<br>
     <strong>歷次作答紀錄（2026-09-09 / #280 裁示 Q2 = B 由成績頁移入本面板）：</strong>列出<strong>每一次 attempt</strong>（作答時間 / 分數 / 是否及格），點任一列可回看該次逐題明細。原 spec 場景 22 寫「自引導頁點」而 wireframe 畫在成績頁，兩者矛盾；裁示置於測驗面板——學員想回看的往往正是第 1 次，而「先進到最近一次的成績頁再從那裡找清單」把最有價值的那筆藏在兩層之後<br>
-    <strong>進入時機：</strong>從 ET05 課程學習頁的測驗項目「開始測驗」按鈕觸發<br>
-    <strong>測驗資訊區（grid）：</strong>視覺化呈現題數、作答時間、及格分數、可重考次數 — 來自管理者於 ET02 測驗 modal 之設定<br>
+    <strong>進入時機：</strong>從 ET06 課程學習頁的測驗項目「開始測驗」按鈕觸發<br>
+    <strong>測驗資訊區（grid）：</strong>視覺化呈現題數、作答時間、及格分數、可重考次數 — 來自管理者於 ET05 測驗 modal 之設定<br>
     <strong>注意事項：</strong>明確告知作答規則（計時、不可中斷、提交後即時閱卷）— 避免學員誤觸<br>
-    <strong>動作：</strong>取消（回 ET05）/ 開始作答（進 ET06，從此刻開始倒數計時）<br>
+    <strong>動作：</strong>取消（回 ET06）/ 開始作答（進 ET07，從此刻開始倒數計時）<br>
     <strong>對應需求：</strong>RQET005（線上測驗）
   </details>
 </div>
 
-<!-- ==================== ET06 測驗作答 ==================== -->
+<!-- ==================== ET07 測驗作答 ==================== -->
 <div class="screen" id="et-quiz">
   <div class="screen-header">
     <div class="screen-title">
       <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-learn')"><i class="bi bi-arrow-left"></i></button>
       <i class="bi bi-check-square me-2"></i>線上測驗 — <span class="text-tsbms-green">基本概念測驗</span>
     </div>
-    <div class="screen-meta">et/quiz.jsp (ET06)</div>
+    <div class="screen-meta">et/quiz.jsp (ET07)</div>
   </div>
 
   <!-- 上方狀態列：題號進度 + 倒數計時 + 提交 -->
@@ -2215,7 +2221,7 @@
     <strong>離開作答視窗：</strong>2026-09-09 起<strong>自動提交</strong>本次作答（#279）；瀏覽器確認對話框<strong>不實作</strong>（#280 裁示 Q1 = B——離開不會遺失作答，它會被提交）<br>
     <strong>作答結果（提交後）：</strong>即時閱卷、顯示成績與通過/未通過、答題明細<br>
     <strong>答題明細可點選複習：</strong>點任一列開啟「題目檢討」modal，顯示題目原文 + 所有選項，並依狀態以不同視覺標示區分四種情境：你選對、你漏選正確答案、你選錯、未選錯誤；modal 一次看一題（#279：上一題／下一題已移除——一次看一題就是檢討的單位）<br>
-    <strong>歷次作答紀錄（2026-07-02 新增；2026-09-09 / #280 裁示 Q2 = B 移至<strong>測驗資訊面板</strong>，不在成績頁）：</strong>列出<strong>每一次 attempt</strong>（作答時間 / 分數 / 是否及格），點任一列可回看該次之逐題明細（依該次題目與選項順序快照渲染，不限最近一次）；教師端於 ET03「作答明細」同步可查
+    <strong>歷次作答紀錄（2026-07-02 新增；2026-09-09 / #280 裁示 Q2 = B 移至<strong>測驗資訊面板</strong>，不在成績頁）：</strong>列出<strong>每一次 attempt</strong>（作答時間 / 分數 / 是否及格），點任一列可回看該次之逐題明細（依該次題目與選項順序快照渲染，不限最近一次）；教師端於 ET02「作答明細」同步可查
   </details>
 </div>
 
@@ -2495,7 +2501,7 @@
   </div>
 </div>
 
-<!-- 邀請學員 Modal（每門課程獨立邀請碼，ET02 觸發；Email / 邀請碼 兩分頁切換）-->
+<!-- 邀請學員 Modal（每門課程獨立邀請碼，ET05 觸發；Email / 邀請碼 兩分頁切換）-->
 <div class="modal fade" id="inviteModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
@@ -2556,7 +2562,7 @@ zhangsm@military.gov.tw</textarea>
 
 — EDMS 教育訓練文件管理系統（本信件由系統自動發送，請勿直接回覆）</textarea>
             </div>
-            <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>收件人於寄出當下<strong>即加入課程</strong>，不需要點信中連結；信內連結為課程學習頁（2026-09-18 #362 變更，原為一次性邀請連結）。通知信寄送失敗時該收件人<strong>仍已加入</strong>，畫面列出是哪幾筆供教師另行通知——<strong>無重寄功能</strong>。<br><i class="bi bi-info-circle"></i>收件對象<strong>限既有 EDMS 使用者</strong>；清單中有查無帳號者將整批擋下並列出是哪幾筆（ET-MSG-ET02-106）。
+            <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>收件人於寄出當下<strong>即加入課程</strong>，不需要點信中連結；信內連結為課程學習頁（2026-09-18 #362 變更，原為一次性邀請連結）。通知信寄送失敗時該收件人<strong>仍已加入</strong>，畫面列出是哪幾筆供教師另行通知——<strong>無重寄功能</strong>。<br><i class="bi bi-info-circle"></i>收件對象<strong>限既有 EDMS 使用者</strong>；清單中有查無帳號者將整批擋下並列出是哪幾筆（ET-MSG-ET05-106）。
               <div class="internal-note">💡 一次性語意為「先到先得」：受邀者若於點擊前轉寄，先點者會加入成功、原受邀者取得失效連結（US8 場景 13～15；2026-09-07 裁示已接受此殘留風險）。</div>
             </div>
 
@@ -2583,7 +2589,7 @@ zhangsm@military.gov.tw</textarea>
                   </button>
                 </div>
               </div>
-              <!-- QR Code（US8 場景 17）：內容為帶邀請碼之加入連結，掃描後落到 ET04 加入流程 -->
+              <!-- QR Code（US8 場景 17）：內容為帶邀請碼之加入連結，掃描後落到 ET03 加入流程 -->
               <div class="text-center">
                 <div class="border rounded d-flex align-items-center justify-content-center" style="width:160px; height:160px; background:#fff;">
                   <i class="bi bi-qr-code" style="font-size:6rem; color:#212529;"></i>
@@ -2591,7 +2597,7 @@ zhangsm@military.gov.tw</textarea>
                 <div class="text-muted mt-1" style="font-size:0.75rem;">掃描加入課程</div>
               </div>
             </div>
-            <div class="internal-note mb-2">💡 QR Code 與「複製邀請連結」指向同一網址（帶邀請碼之 ET04 加入頁），故<strong>可多人重複掃描</strong>——與 Email 邀請之一次性 token 是兩種不同機制。邀請碼流出即等同任何人可加入，且不提供重新產生。</div>
+            <div class="internal-note mb-2">💡 QR Code 與「複製邀請連結」指向同一網址（帶邀請碼之 ET03 加入頁），故<strong>可多人重複掃描</strong>——與 Email 邀請之一次性 token 是兩種不同機制。邀請碼流出即等同任何人可加入，且不提供重新產生。</div>
             <div class="field-helper mt-2"><i class="bi bi-info-circle"></i>每門課程的邀請碼皆不同；學員可至「我的課程 → 加入新課程」輸入此邀請碼自行加入課程。邀請碼於課程<strong>關閉期間失效、再開課後恢復</strong>；不可手動指定、<strong>不提供重新產生</strong>。</div>
           </div>
 
@@ -2605,7 +2611,7 @@ zhangsm@military.gov.tw</textarea>
   </div>
 </div>
 
-<!-- 題目檢討 Modal（ET06 答題明細點選後開啟） -->
+<!-- 題目檢討 Modal（ET07 答題明細點選後開啟） -->
 <div class="modal fade" id="quizReviewModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
@@ -2722,7 +2728,7 @@ zhangsm@military.gov.tw</textarea>
   </div>
 </div>
 
-<!-- ET03 作答明細已改為「已加入」頁籤內之區塊 2（inline），原 Modal 於 2026-07-02 移除 -->
+<!-- ET02 作答明細已改為「已加入」頁籤內之區塊 2（inline），原 Modal 於 2026-07-02 移除 -->
 
 <!-- 重置重考次數 確認 Modal -->
 <div class="modal fade" id="resetQuizModal" tabindex="-1" aria-hidden="true">
@@ -2822,7 +2828,7 @@ zhangsm@military.gov.tw</textarea>
           <label class="form-label small mb-1">撤銷原因 <span class="text-danger">*</span>（必填）</label>
           <textarea class="form-control form-control-sm" rows="2" placeholder="例：核可對象誤植、需重新考核"></textarea>
         </div>
-        <div class="internal-note"><i class="bi bi-lightbulb"></i> 撤銷原因為必填；空白時系統阻擋（ET-MSG-ET03-305）。撤銷不寄信；學員端「已通過」清單即時移除。</div>
+        <div class="internal-note"><i class="bi bi-lightbulb"></i> 撤銷原因為必填；空白時系統阻擋（ET-MSG-ET02-305）。撤銷不寄信；學員端「已通過」清單即時移除。</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
@@ -2870,7 +2876,7 @@ function goScreen(id) {
   var quizResult = document.getElementById('quiz-result');
   if (quizResult) quizResult.style.display = 'none';
 
-  // ET02 視角切換（檢視 / 編輯）
+  // ET05 視角切換（檢視 / 編輯）
   if (id === 'et-course-edit') applyEt02Mode();
 
   window.scrollTo(0, 0);
@@ -2904,7 +2910,7 @@ function filterCourses(filter) {
   // 2026-07-02 變更：課程卡片不再依模組分組，無分組標題需處理
 }
 
-/* ET02：依 sessionStorage 切換編輯 / 檢視模式 */
+/* ET05：依 sessionStorage 切換編輯 / 檢視模式 */
 function applyEt02Mode() {
   var isOwner = sessionStorage.getItem('et02IsOwner') !== '0';
   var isClosed = sessionStorage.getItem('et02IsClosed') === '1';
@@ -2979,9 +2985,9 @@ function openMaterialModal() {
   new bootstrap.Modal(document.getElementById('materialModal')).show();
 }
 
-/* ET02-N 儲存成功 → 進入確認畫面 */
+/* ET05-N 儲存成功 → 進入確認畫面 */
 function showCourseCreatedSuccess(status) {
-  // 從 ET02-N 表單抓欄位（簡化：直接抓第一個 input 與下拉選單）
+  // 從 ET05-N 表單抓欄位（簡化：直接抓第一個 input 與下拉選單）
   var inputs = document.querySelectorAll('#et-course-create .form-control');
   var courseName = (inputs[0] && inputs[0].value.trim()) || '採血作業新進人員訓練 v2.0';
   document.getElementById('created-course-name').textContent = courseName;
@@ -3000,7 +3006,7 @@ function showCourseCreatedSuccess(status) {
   goScreen('et-course-create-success');
 }
 
-/* 「新增另一門課程」— 清空 ET02-N 表單並返回 */
+/* 「新增另一門課程」— 清空 ET05-N 表單並返回 */
 function resetAndCreateAnotherCourse() {
   // 清空課程名稱、描述、日期
   var screen = document.getElementById('et-course-create');
@@ -3044,7 +3050,7 @@ function saveChapter(action) {
   }
 }
 
-/* 邀請學員 modal — ET02 觸發；Email 預覽為唯讀（FR-ET-US8-07：範本由管理者統一維護，教師不可編輯） */
+/* 邀請學員 modal — ET05 觸發；Email 預覽為唯讀（FR-ET-US8-07：範本由管理者統一維護，教師不可編輯） */
 function openInviteModal() {
   new bootstrap.Modal(document.getElementById('inviteModal')).show();
 }
@@ -3081,7 +3087,7 @@ function openJoinCourseModal() {
   new bootstrap.Modal(document.getElementById('joinCourseModal')).show();
 }
 
-/* ET06 題目檢討 — 答題明細點選後開啟 modal，呈現題目、選項、對錯狀態 */
+/* ET07 題目檢討 — 答題明細點選後開啟 modal，呈現題目、選項、對錯狀態 */
 var _quizReviewData = {
   Q1: {
     type: '單選題', typeBadge: 'bg-primary',
@@ -3206,7 +3212,7 @@ function showToast(text) {
   toast._timer = setTimeout(function() { toast.classList.remove('show'); }, 2200);
 }
 
-/* ET02 關閉課程（2026-07-02 變更：原「停課」不可逆 → 關閉可再開課） */
+/* ET05 關閉課程（2026-07-02 變更：原「停課」不可逆 → 關閉可再開課） */
 function openCloseCourseModal() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('closeCourseModal')).show();
 }
@@ -3218,7 +3224,7 @@ function confirmCloseCourse() {
   applyEt02Mode();
 }
 
-/* ET02 再開課（2026-07-02 新增：重設起訖時間後恢復開放） */
+/* ET05 再開課（2026-07-02 新增：重設起訖時間後恢復開放） */
 function openReopenCourseModal() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('reopenCourseModal')).show();
 }
@@ -3230,7 +3236,7 @@ function confirmReopenCourse() {
   applyEt02Mode();
 }
 
-/* ET06 答題介面 */
+/* ET07 答題介面 */
 function jumpQuestion(n) {
   showToast('已跳至第 ' + n + ' 題（demo：實際系統會切換題目卡）');
 }
@@ -3240,7 +3246,7 @@ function openQuizSubmitModal() {
   }
 }
 
-/* ET03 學員：重置重考次數 / 移除學員 */
+/* ET02 學員：重置重考次數 / 移除學員 */
 var _studentActionUser = '';
 var _studentActionQuiz = '';
 function openResetQuizModal(userName, quizName) {

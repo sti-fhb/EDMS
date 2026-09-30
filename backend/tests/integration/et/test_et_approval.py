@@ -1,4 +1,4 @@
-"""ET03 線下考核核可整合測試（US16 / #352）。
+"""ET02 線下考核核可整合測試（US16 / #352）。
 
 此處只驗**需要真 DB 才驗得了**的事：條件式寫入的原子性、唯一鍵、樂觀鎖、跨表的完課
 前提、稽核與寄信的實際落地、以及「核可不影響完課統計」這類只有真資料才看得出來的
@@ -232,7 +232,7 @@ class TestApprovalGate:
         """SA 裁示 2026-09-17 Q1 = C：後端放寬為 owner ∪ 管理者。
 
         `spec.md` §角色表與 `FR-ET-US16-07` 都寫「教師（owner）**或管理者**」，而在本
-        issue 之前 ET03 全線 owner-only——管理者連別人的課都進不去。
+        issue 之前 ET02 全線 owner-only——管理者連別人的課都進不去。
         """
         owner = await _user(db, "t_ap03")
         admin = await _user(db, "a_ap03", roles=(ROLE_ADMIN,))
@@ -252,7 +252,7 @@ class TestApprovalGate:
         row = await _approval_of(db, course_id, student)
         assert row is not None and row.approved_by == admin
 
-    async def test_管理者可讀他人課程的ET03學員清單(self, client, db) -> None:
+    async def test_管理者可讀他人課程的ET02學員清單(self, client, db) -> None:
         """Q1 = C 的另一半：核可端點放寬了，讀取端點也得放寬，否則管理者看不到那張表。
 
         ⚠️ 前端課程下拉仍為 `scope=mine`（裁示明訂留到 US17），所以管理者目前**沒有
@@ -270,7 +270,7 @@ class TestApprovalGate:
         assert r.status_code == 200, r.text
         assert [row["user_name"] for row in r.json()["data"]] == ["王小明"]
 
-    async def test_他人課程之教師仍不可讀ET03學員清單(self, client, db) -> None:
+    async def test_他人課程之教師仍不可讀ET02學員清單(self, client, db) -> None:
         """放寬的只有管理者——US9 對「別的教師」的守門必須原封不動。"""
         owner = await _user(db, "t_ap05")
         other = await _user(db, "t_ap05b")
@@ -447,7 +447,7 @@ class TestApproveWrite:
         assert row.result_note == "實機操作未達標準"
 
     async def test_未完課者被跳過(self, client, db) -> None:
-        """`FR-ET-US16-03`。回 200 + `skipped`，前端單筆顯示 `ET-MSG-ET03-304`。"""
+        """`FR-ET-US16-03`。回 200 + `skipped`，前端單筆顯示 `ET-MSG-ET02-304`。"""
         teacher = await _user(db, "t_ap12")
         course_id = await _course(db, owner=teacher)
         await _item(db, course_id, title="教材")  # 有項目但學員沒完成
@@ -745,7 +745,7 @@ class TestRevokeAndReapprove:
         assert r.json()["error_code"] == "ET_APPROVAL_003"
 
     async def test_版本不符回409(self, client, db) -> None:
-        """AC 9 / `ET-MSG-ET03-308`：畫面過期了，請重新整理。"""
+        """AC 9 / `ET-MSG-ET02-308`：畫面過期了，請重新整理。"""
         teacher = await _user(db, "t_ap36")
         course_id = await _course(db, owner=teacher)
         item_id = await _item(db, course_id, title="教材")
@@ -968,7 +968,7 @@ class TestIsolationFromCompletion:
 
     async def test_核可不寫ET_ENROLLMENT的完課欄位(self, client, db) -> None:
         """那兩個欄位是死的——核可若「順手」推進它們，會讓 ET-14 的反向斷言測試變紅，
-        也讓 ET04 / ET03 的即時計算與 DB 值開始不一致。
+        也讓 ET03 / ET02 的即時計算與 DB 值開始不一致。
         """
         teacher = await _user(db, "t_ap51")
         course_id = await _course(db, owner=teacher)
@@ -1022,7 +1022,7 @@ class TestIsolationFromCompletion:
 
 
 class TestApprovalInStudentList:
-    """核可狀態併入 ET03 學員清單（AC 1 / `FR-ET-US16-02`）。"""
+    """核可狀態併入 ET02 學員清單（AC 1 / `FR-ET-US16-02`）。"""
 
     async def test_未啟用核可時清單不帶核可狀態(self, client, db) -> None:
         teacher = await _user(db, "t_ap60")

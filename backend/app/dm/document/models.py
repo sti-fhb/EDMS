@@ -117,13 +117,20 @@ class DmDocVersion(BaseModel):
 class DmDocTag(BaseModel):
     """文件標籤關聯（DM_DOC_TAG，明細）。
 
-    文件 × 標籤多對多；含權限（AUDIENCE，必填≥1）與檢索（多選 AND）兩類。唯一約束 (DOC_ID, TAG_ID)。
+    文件 × 標籤多對多；含權限（AUDIENCE，必填≥1）與檢索（多選 AND）兩類。
+
+    **可見對象為 (單位, 職位) 配對**（#437）：`TAG_ID` 存職位（AUDIENCE 組）、`UNIT_TAG_ID` 存單位
+    （UNIT 組），一列即一組配對。檢索標籤（RETRIEVAL 組）無單位維度，`UNIT_TAG_ID` 為 NULL。
+    唯一約束 (DOC_ID, TAG_ID, UNIT_TAG_ID)，且**必須 NULLS NOT DISTINCT**——否則檢索標籤列
+    （UNIT_TAG_ID IS NULL）因 NULL ≠ NULL 而不受約束，可重複寫入同一筆且不報錯。
     """
 
     __tablename__ = "DM_DOC_TAG"
     __table_args__ = (
         PrimaryKeyConstraint("DOC_TAG_ID", name="PK_DM_DOC_TAG"),
-        UniqueConstraint("DOC_ID", "TAG_ID", name="UQ_DM_DOC_TAG_DOC_TAG"),
+        UniqueConstraint(
+            "DOC_ID", "TAG_ID", "UNIT_TAG_ID", name="UQ_DM_DOC_TAG_DOC_TAG", postgresql_nulls_not_distinct=True
+        ),
         Index("IX_DM_DOC_TAG_DOC", "DOC_ID"),
         Index("IX_DM_DOC_TAG_TAG", "TAG_ID"),
     )
@@ -135,6 +142,9 @@ class DmDocTag(BaseModel):
     tag_id: Mapped[int] = mapped_column(
         "TAG_ID", BigInteger, ForeignKey("DM_TAG.TAG_ID", name="FK_DM_DOC_TAG_TAG"), nullable=False
     )
+    unit_tag_id: Mapped[Optional[int]] = mapped_column(
+        "UNIT_TAG_ID", BigInteger, ForeignKey("DM_TAG.TAG_ID", name="FK_DM_DOC_TAG_UNIT"), nullable=True
+    )
 
 
 class DmVersionTag(BaseModel):
@@ -143,13 +153,21 @@ class DmVersionTag(BaseModel):
     該**版本提議**之標籤（可見對象 / 檢索），於存草稿當下寫入；核准發布時才套用至文件層
     `DM_DOC_TAG`（生效值），退回 / 撤回不套用。兩層語意切割見 #377：可見對象為權限控制，
     不得於草稿階段即改變已發布文件之可見範圍（推翻 spec_us5 FR-003 原「存檔當下即生效」）。
-    唯一約束 (VERSION_ID, TAG_ID)。
+
+    可見對象之 (單位, 職位) 配對語意與 `DM_DOC_TAG` 相同（#437）。唯一約束
+    (VERSION_ID, TAG_ID, UNIT_TAG_ID)，NULLS NOT DISTINCT。
     """
 
     __tablename__ = "DM_VERSION_TAG"
     __table_args__ = (
         PrimaryKeyConstraint("VERSION_TAG_ID", name="PK_DM_VERSION_TAG"),
-        UniqueConstraint("VERSION_ID", "TAG_ID", name="UQ_DM_VERSION_TAG_VERSION_TAG"),
+        UniqueConstraint(
+            "VERSION_ID",
+            "TAG_ID",
+            "UNIT_TAG_ID",
+            name="UQ_DM_VERSION_TAG_VERSION_TAG",
+            postgresql_nulls_not_distinct=True,
+        ),
         Index("IX_DM_VERSION_TAG_VERSION", "VERSION_ID"),
         Index("IX_DM_VERSION_TAG_TAG", "TAG_ID"),
     )
@@ -163,6 +181,9 @@ class DmVersionTag(BaseModel):
     )
     tag_id: Mapped[int] = mapped_column(
         "TAG_ID", BigInteger, ForeignKey("DM_TAG.TAG_ID", name="FK_DM_VERSION_TAG_TAG"), nullable=False
+    )
+    unit_tag_id: Mapped[Optional[int]] = mapped_column(
+        "UNIT_TAG_ID", BigInteger, ForeignKey("DM_TAG.TAG_ID", name="FK_DM_VERSION_TAG_UNIT"), nullable=True
     )
 
 

@@ -23,6 +23,12 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 _editor = EditorService()
 _review = ReviewCenterService()
 _PDF = "application/pdf"
@@ -78,6 +84,24 @@ async def _doc_tag_ids(db, doc_id) -> set[int]:
     return set(rows.all())
 
 
+async def _specific_unit_id(db) -> int:
+    """取一個具體單位（非通用值「全單位」）。"""
+    return await db.scalar(
+        select(DmTag.tag_id)
+        .where(DmTag.tag_group_code == "UNIT", DmTag.tag_name != "全單位")
+        .order_by(DmTag.tag_id)
+        .limit(1)
+    )
+
+
+async def _doc_tag_pairs(db, doc_id) -> set[tuple[int, int | None]]:
+    """文件層（生效中）之 (TAG_ID, UNIT_TAG_ID) 配對集合。"""
+    rows = await db.execute(
+        select(DmDocTag.tag_id, DmDocTag.unit_tag_id).where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
+    )
+    return {(r[0], r[1]) for r in rows.all()}
+
+
 async def _version_tag_ids(db, version_id) -> set[int]:
     """版本層（該版本提議）之標籤集合。"""
     rows = await db.scalars(
@@ -93,7 +117,8 @@ async def _publish_first_version(db, *, audience_id: int) -> tuple[str, int]:
         doc_name="標籤快照測試文件",
         category_code="SOP",
         func_code=None,
-        audience_ids=[audience_id],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[audience_id],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版",
@@ -126,7 +151,8 @@ async def test_draft_tag_change_does_not_touch_doc_tag(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],  # 改成另一組可見對象
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],  # 改成另一組可見對象
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -150,7 +176,8 @@ async def test_approve_applies_version_tags_to_doc(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -181,7 +208,8 @@ async def test_training_audience_ids_discarded_server_side(db):
         doc_name="用血回報訓練教材",
         category_code="TRAINING",
         func_code=None,
-        audience_ids=[aud_a],  # 繞過前端直接帶入
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_a],  # 繞過前端直接帶入
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版",
@@ -210,7 +238,8 @@ async def test_withdraw_does_not_apply_version_tags(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -237,7 +266,8 @@ async def test_review_detail_shows_version_snapshot_tags(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -252,8 +282,9 @@ async def test_review_detail_shows_version_snapshot_tags(db):
 
     detail = await _review.get_detail(db, review_id=submitted.review_id, op=_op("rev1"))
 
-    # 審核者看到的是「本次送審提議、核准後會生效」的可見對象，而非文件層目前值（aud_a）
-    assert detail.audience_tags == [await _tag_name(db, aud_b)]
+    # 審核者看到的是「本次送審提議、核准後會生效」的可見對象，而非文件層目前值（aud_a）。
+    # 呈現為 (單位, 職位) 配對字串（#437）——多筆配對時拆成兩排標籤會無從對應。
+    assert detail.audience_tags == [f"全單位 + {await _tag_name(db, aud_b)}"]
     assert detail.category_name == await db.scalar(
         select(DmCategory.category_name).where(DmCategory.category_code == "SOP")
     )
@@ -273,7 +304,8 @@ async def test_submit_blocked_when_version_snapshot_empty(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_a],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_a],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -300,7 +332,8 @@ async def test_reject_keeps_doc_tags_unchanged(db):
     ver2 = await _editor.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=[aud_b],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_b],
         retrieval_ids=[],
         version_no="2.0",
         change_summary="改版",
@@ -317,3 +350,69 @@ async def test_reject_keeps_doc_tags_unchanged(db):
     # 退回不套用：文件層維持原值；草稿保留自己的快照供續編
     assert await _doc_tag_ids(db, doc_id) == {aud_a}
     assert await _version_tag_ids(db, ver2.version_id) == {aud_b}
+
+
+async def test_同職位換單位_核准後文件層改為新單位(db):
+    """AC5（#437）：只換單位、職位不變 → 核准後文件層必須更新為新單位。
+
+    這條專釘**比對鍵**：`set_version_tags` 與 `apply_version_tags_to_doc` 若仍以 `TAG_ID`
+    單欄比對，會把「全單位 + 護理師」與「某單位 + 護理師」視為同一列而判定「已存在、不需
+    異動」——文件層的單位就停在舊值，且全程不報錯。可見範圍因此與審核者核准的內容不符。
+    """
+    await _seed_editor_and_reviewer(db)
+    role_id, _ = await _two_audience_ids(db)
+    all_units = await _all_units_id(db)
+    unit_id = await _specific_unit_id(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=role_id)
+    assert await _doc_tag_pairs(db, doc_id) == {(role_id, all_units)}
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[unit_id],  # 同職位，只換單位
+        audience_role_ids=[role_id],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="限縮至特定單位",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    assert await _doc_tag_pairs(db, doc_id) == {(role_id, all_units)}  # 核准前不動
+
+    await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    assert await _doc_tag_pairs(db, doc_id) == {(role_id, unit_id)}
+
+
+async def test_同職位多單位_並存為兩列(db):
+    """AC5（#437）：同一職位掛兩個單位 → 文件層兩列並存，不互相覆蓋。"""
+    await _seed_editor_and_reviewer(db)
+    role_id, _ = await _two_audience_ids(db)
+    all_units = await _all_units_id(db)
+    unit_id = await _specific_unit_id(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=role_id)
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units, unit_id],
+        audience_role_ids=[role_id, role_id],  # 同職位、兩個單位
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="兩個單位",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    assert await _doc_tag_pairs(db, doc_id) == {(role_id, all_units), (role_id, unit_id)}

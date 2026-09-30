@@ -1,4 +1,4 @@
-"""個人專區 API（US9 / UCDM09 / DM07）。
+"""個人專區 API（US9 / UCDM09 / DM04）。
 
 掛 DM 存取閘 `get_dm_context`；寫入型（刪除草稿 / 撤回）另注入 `get_operator` + service 層本人校驗 + 稽核。
 個資維護（姓名 / Email / 密碼）不在本模組——由平台 DP UCDP004 提供。

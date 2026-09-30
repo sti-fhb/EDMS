@@ -55,6 +55,6 @@ class TestBuildParams:
         assert params["COURSE_NAME"] == "血品保存與冷鏈管理"
         assert params["QUIZ_NAME"] == "冷鏈概念測驗"
 
-    def test_課程連結指向ET05學習頁(self) -> None:
+    def test_課程連結指向ET06學習頁(self) -> None:
         # 學員收到信要能直接點進去重考，連結指向學習頁而非課程列表。
         assert _params()["COURSE_URL"].endswith("/et/courses/7/learn")

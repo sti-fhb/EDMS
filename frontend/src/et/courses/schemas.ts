@@ -1,4 +1,4 @@
-/** ET02 課程骨架與章節編排型別（對齊後端 app/et/course/schemas.py）。 */
+/** ET05 課程骨架與章節編排型別（對齊後端 app/et/course/schemas.py）。 */
 
 import type { ItemRow } from "./itemSchemas"
 
@@ -112,7 +112,7 @@ export interface CourseStatusResult {
 import { z } from "zod"
 
 /**
- * ET02 基本資料表單驗證，命名對齊後端 Pydantic `CourseCreateReq` / `CourseUpdateReq`。
+ * ET05 基本資料表單驗證，命名對齊後端 Pydantic `CourseCreateReq` / `CourseUpdateReq`。
  *
  * **僅課程名稱必填**——受訓單位標籤與起訖時間為「發布時」必填（FR-ET-US3-01），
  * 發布檢核屬 #204，本表單不檢核。

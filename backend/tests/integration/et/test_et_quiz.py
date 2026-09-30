@@ -1,4 +1,4 @@
-"""ET02 測驗設定與題目整合測試（US3 / #203）。
+"""ET05 測驗設定與題目整合測試（US3 / #203）。
 
 重點在需要真 DB 才驗得了的事：
 
@@ -389,7 +389,7 @@ class TestQuestions:
         assert r.json()["points_total"] == 90, "總和 90 應如實回報，不阻擋儲存"
 
     async def test_多選題無正確選項被擋(self, client, db) -> None:
-        """ET-MSG-ET02-004；data-model：避免部分計分公式分母為 0。"""
+        """ET-MSG-ET05-004；data-model：避免部分計分公式分母為 0。"""
         uid = await _user(db, "ETQ_Q3")
         _, qid = await _quiz(client, uid)
         r = await client.post(

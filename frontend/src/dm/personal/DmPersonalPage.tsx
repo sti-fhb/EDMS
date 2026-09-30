@@ -34,7 +34,7 @@ import { formatDateTime } from "../../utils/date"
 import { toApiError } from "../../services/http"
 
 /**
- * 個人專區（US9 / DM07）：我的文件動態（狀態變動歷程）+ 草稿匣（編輯者 / 審核者）。
+ * 個人專區（US9 / DM04）：我的文件動態（狀態變動歷程）+ 草稿匣（編輯者 / 審核者）。
  * 動態呈現每次送審週期的每個狀態轉換（送審 → 退回 / 核准發布 / 撤回 / 廢止），時間新→舊；撰寫者對送審中項目可撤回。
  * 個人資料維護（姓名 / Email / 密碼）為另一入口，由平台 DP 提供（右上使用者選單），不在此頁。
  */
@@ -44,7 +44,7 @@ export function DmPersonalPage() {
   const [tab, setTab] = useState<"activity" | "drafts">(searchParams.get("tab") === "drafts" ? "drafts" : "activity")
   return (
     <Box>
-      <ScreenHeader code="DM07" />
+      <ScreenHeader code="DM04" />
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="activity" label="我的文件動態" />
         <Tab value="drafts" label="草稿匣" />
@@ -64,7 +64,7 @@ function ActivityTab() {
   const withdrawMut = useMutation({
     mutationFn: (reviewId: number) => personalApi.withdraw(reviewId),
     onSuccess: () => {
-      message.success("已撤回送審，已通知原指派審核者") // DM-MSG-DM07-005
+      message.success("已撤回送審，已通知原指派審核者") // DM-MSG-DM04-005
       qc.invalidateQueries({ queryKey: ["dm-personal"] })
     },
     onError: (e) => message.error(toApiError(e).errorMessage),
@@ -250,7 +250,7 @@ function DraftsTab() {
 
   const onDelete = (d: DraftItem) =>
     confirm({
-      title: "確定刪除此草稿？刪除後不可復原", // DM-MSG-DM07-004
+      title: "確定刪除此草稿？刪除後不可復原", // DM-MSG-DM04-004
       content: "僅刪除此草稿版本，不影響已發布版本。",
       okText: "確認刪除",
       onOk: () => deleteMut.mutate(d),

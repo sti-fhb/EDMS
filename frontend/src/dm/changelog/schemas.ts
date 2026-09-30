@@ -1,4 +1,4 @@
-/** 文件變更歷程查詢（US11 / UCDM10 / DM08）型別（對齊後端 app/dm/change_log/schemas.py）。 */
+/** 文件變更歷程查詢（US11 / UCDM10 / DM05）型別（對齊後端 app/dm/change_log/schemas.py）。 */
 
 export type ChangeLogOperation = "PUBLISH" | "OBSOLETE"
 

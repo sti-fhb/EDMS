@@ -95,10 +95,13 @@ class RolesService:
             raise
 
     async def group_options(self, db: AsyncSession, *, module: str, user_id: str) -> list[GroupOption]:
-        """該模組之群組可選清單（DM＝可見對象；僅列啟用中）。"""
+        """該模組之群組可選清單（DM＝可見對象；僅列啟用中）。
+
+        `kind` 帶模組自報之項目類別原樣傳給畫面（DM 以此區分單位 / 職位兩維度）。
+        """
         provider = await self._require_manageable(db, module, user_id)
         audiences = await provider.list_audiences(db)
-        return [GroupOption(code=a.code, name=a.name) for a in audiences]
+        return [GroupOption(code=a.code, name=a.name, kind=a.group_type) for a in audiences]
 
     async def _require_usable_target(self, db: AsyncSession, user_id: str) -> None:
         """停用 / 鎖定中的帳號不可指派權限——加權與降權皆擋（#250，SA 裁示）。

@@ -56,7 +56,7 @@ class DpParamDetail(BaseModel):
     description: Mapped[Optional[str]] = mapped_column("DESCRIPTION", String(500), nullable=True)
     sort_order: Mapped[Optional[int]] = mapped_column("SORT_ORDER", Integer, nullable=True)
     is_enabled: Mapped[bool] = mapped_column("IS_ENABLED", Boolean, nullable=False, default=True)
-    # 維護層級（#171）：ADMIN＝管理者可於 DP07 編輯；READONLY＝顯示現值但整列唯讀；
+    # 維護層級（#171）：ADMIN＝管理者可於 DP03 編輯；READONLY＝顯示現值但整列唯讀；
     # HIDDEN＝不出現於維護頁。READONLY / HIDDEN 之值由 IT 於 DB 端變更，且 MUST 經 migration
     # 而非手動 UPDATE——維護頁那條會寫稽核的路徑已不存在，migration 檔是唯一的紀錄
     # （spec_us5 FR-DP-US5-11）。

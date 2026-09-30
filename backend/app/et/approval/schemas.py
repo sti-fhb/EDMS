@@ -5,6 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from app.et.course.schemas import MAX_BIGINT
+
 #: 批次核可時「這一筆沒有寫入」的理由。
 #:
 #: | 值 | 來源 |
@@ -23,7 +25,7 @@ from pydantic import BaseModel, Field
 #: 而他在 US17 核可查詢裡看得到。正常 UI 走不到（清單本來就不列已移除者），這是防繞過
 #: 與「載入後才被移除」的競態。
 #:
-#: 對應訊息 `ET-MSG-ET03-310`（2026-09-17 隨本 issue 增列於 `spec_us16.md` §訊息類型）。
+#: 對應訊息 `ET-MSG-ET02-310`（2026-09-17 隨本 issue 增列於 `spec_us16.md` §訊息類型）。
 SkipReason = Literal["NOT_COMPLETED", "ALREADY_APPROVED", "NOT_ENROLLED"]
 
 
@@ -32,7 +34,7 @@ class SkippedItem(BaseModel):
 
     帶 `reason` 而非只回總數——兩種跳過對教師的**下一步不同**（未完課要等他完課，
     已核可要先撤銷並填原因），壓成同一句「已跳過 N 筆」會讓他不知道該做什麼。
-    前端據此分別顯示 `ET-MSG-ET03-303` 與 `ET-MSG-ET03-309`。
+    前端據此分別顯示 `ET-MSG-ET02-303` 與 `ET-MSG-ET02-309`。
     """
 
     user_id: str
@@ -71,7 +73,7 @@ class RevokeReq(BaseModel):
 
     `reason` 的必填由 `rules.ensure_revoke_reason` 檢核而非 Pydantic `min_length=1`
     ——後者放行 `"   "`，且驗證失敗回 `COMMON_422` 不帶欄位名，前端無從把
-    `ET-MSG-ET03-305` 掛回那個輸入框。此處只擋長度上限。
+    `ET-MSG-ET02-305` 掛回那個輸入框。此處只擋長度上限。
     """
 
     reason: str = Field(max_length=1000)
@@ -159,7 +161,7 @@ class ApprovalQueryRow(BaseModel):
 
 
 class ApprovalSearchReq(BaseModel):
-    """ET10 核可查詢的查詢條件（`FR-ET-US17-01`）。
+    """ET04 核可查詢的查詢條件（`FR-ET-US17-01`）。
 
     ## 🔴 為何走 request body 而不是 query string（#391）
 
@@ -189,17 +191,49 @@ class ApprovalSearchReq(BaseModel):
 
     #: 學員**姓名或 Email**（皆為部分比對，擇一命中即可，#436）。
     #:
-    #: 必填——SA Q2 裁示 A：留白查全部沒有對應需求，且會傾印員工名冊。
-    #: `min_length=1` 擋空字串，全空白由 service 的 `strip()` 擋下回 `ET_APPROVAL_006`。
+    #: **選填**（#439）——原為必填（SA Q2 裁示 A），改為與 `course_id`「至少給一個」。
+    #: 兩者皆不給仍回 `ET_APPROVAL_006`，由 `query_rules.normalize_search_criteria`
+    #: 判定（全空白等同未填，否則送一個空格就繞過了）。**換的是手段不是目的**，完整
+    #: 理由見該函式的 docstring。
+    #:
+    #: ⚠️ 此處不能再用 `min_length=1`：那會讓「明確送 `keyword: ""`」變成 422
+    #: `COMMON_422`（不帶欄位名），而正確答案要看有沒有給課程。長度下限的判定必須與
+    #: 課程條件一起做，故整段交給 service 前的純函式。
     #:
     #: ⚠️ 上限 100 而非姓名的 50：`DP_USER.EMAIL` 是 `VARCHAR(255)`，用 50 會讓長一點的
     #: 帳號永遠查不到，而使用者只會看到「查無資料」。100 足以涵蓋實務帳號長度，同時
     #: 仍遠低於 255，不讓它變成可任意灌長度的欄位。
-    keyword: Annotated[str, Field(min_length=1, max_length=100)]
+    keyword: Annotated[str | None, Field(default=None, max_length=100)] = None
+    #: 課程篩選（#439）；`None` 為不限。
+    #:
+    #: 🔴 非管理者**只能給自己開設的課程**，否則 403 `ET_APPROVAL_007`
+    #: （`query_rules.ensure_course_filter_allowed`）。前端下拉本來就只列得出自己的課，
+    #: 那道閘是防繞過——少了它，教師可以不指名地撈出任一門課的全部通過者名單。
+    course_id: Annotated[int | None, Field(default=None, ge=1, le=MAX_BIGINT)] = None
     #: `PASS` / `FAIL`；`None` 為不限。
     result: Annotated[Literal["PASS", "FAIL"] | None, Field(default=None)] = None
     page: Annotated[int, Field(default=1, ge=1)] = 1
     limit: Annotated[int, Field(default=20, ge=1, le=100)] = 20
+
+
+class ApprovalCourseOption(BaseModel):
+    """ET04 課程篩選下拉的一個選項（#439）。
+
+    🔴 **只列「已有核可紀錄」的課程**，不是全部課程。三個理由：
+
+    1. **管理者需要已關閉的課程**，而 ET01 清單的 `scope=all` 恰好把它們排除
+       （`course/repository.build_list_stmt`：`all` 僅「已發布且期間未過」）。核可紀錄
+       絕大多數正落在已結束的課程上——沿用那支清單，管理者會發現最相關的課全部不見，
+       而畫面不會說明任何事。
+    2. **沒有死選項**：選了就必定有資料可看，不會出現「選了課程卻查無紀錄」的困惑。
+    3. **天然有界**：以核可紀錄為母體，不隨課程總數無限成長。
+
+    ⚠️ 只有 `course_id` 與 `course_name` ——這是下拉，不是課程清單。要顯示狀態 /
+    期間 / 學員數請走 ET01（`GET /et/courses`），不要往這裡加欄位。
+    """
+
+    course_id: int
+    course_name: str
 
 
 class MyApprovalRow(BaseModel):

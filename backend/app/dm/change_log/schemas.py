@@ -1,4 +1,4 @@
-"""文件變更歷程查詢 schema（US11 / UCDM10 / DM08）。"""
+"""文件變更歷程查詢 schema（US11 / UCDM10 / DM05）。"""
 
 from datetime import date, datetime
 from typing import Literal

@@ -37,7 +37,7 @@ describe("DmObsoletePage 已廢止文件查詢", () => {
     expect(screen.getByText("部門裁撤")).toBeInTheDocument() // 廢止原因
   })
 
-  it("空結果 → 顯示 DM-MSG-DM06-001", async () => {
+  it("空結果 → 顯示 DM-MSG-DM03-001", async () => {
     server.use(
       http.get("/api/dm/obsolete-archive/documents", () =>
         HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
@@ -62,7 +62,7 @@ describe("DmObsoletePage 已廢止文件查詢", () => {
     expect(downloadObsoleteCsv).toHaveBeenCalled()
   })
 
-  it("非管理者（access can_access=false）→ 直接顯示無權限、不渲染搜尋 UI（DM-MSG-DM06-002）", async () => {
+  it("非管理者（access can_access=false）→ 直接顯示無權限、不渲染搜尋 UI（DM-MSG-DM03-002）", async () => {
     server.use(http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<DmObsoletePage />)
     expect(await screen.findByText("您無權限存取此頁面")).toBeInTheDocument()

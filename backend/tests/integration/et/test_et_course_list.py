@@ -387,7 +387,7 @@ class TestAuthorization:
 
 
 class TestFilterTags:
-    """`GET /courses/filter-tags`：篩選下拉的來源，語意與 ET02 編輯用的 `/tags` **相反**。"""
+    """`GET /courses/filter-tags`：篩選下拉的來源，語意與 ET05 編輯用的 `/tags` **相反**。"""
 
     async def test_下拉含已停用標籤(self, client, db) -> None:
         """**這是本端點存在的唯一理由**（`FR-ET-US7-02`）。

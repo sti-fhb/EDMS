@@ -45,7 +45,7 @@ beforeEach(() => {
   locationRef.current = { pathname: "/et/courses/new", state: null }
 })
 
-describe("ET02 課程編輯頁", () => {
+describe("ET05 課程編輯頁", () => {
   it("編輯模式載入既有課程資料與章節", async () => {
     renderEditor()
     expect(await screen.findByDisplayValue("採血作業訓練")).toBeInTheDocument()
@@ -875,7 +875,7 @@ describe("ET02 課程編輯頁", () => {
   })
 })
 
-// ── ET02 關閉與再開課（US11 / #288）──────────────────────────────────────────
+// ── ET05 關閉與再開課（US11 / #288）──────────────────────────────────────────
 
 /** 以指定狀態與擁有權覆蓋課程詳細——關閉 / 再開課按鈕全由這兩者決定。 */
 function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {}) {
@@ -935,14 +935,103 @@ async function fillDateTime(label: RegExp, keys: string) {
   await typist.keyboard(keys)
 }
 
-describe("ET02 課程關閉與再開課", () => {
+// ── ET05 刪除草稿（#457）──────────────────────────────────────────────────────
+
+describe("ET05 刪除草稿", () => {
+  it("草稿顯示「刪除草稿」，且與「儲存並發布」不相鄰（#457）", async () => {
+    // ⚠️ 相鄰性也要驗：本專案的 confirm 確認鈕一律主色、不提供危險色，誤點的防線
+    // 只剩版面距離——而「刪掉整門課」與「發布」的誤點代價完全不對稱。
+    useCourse("DRAFT")
+    renderEditor()
+
+    const del = await screen.findByRole("button", { name: "刪除草稿" })
+    const publish = screen.getByRole("button", { name: "儲存並發布" })
+    expect(del).toBeInTheDocument()
+    // DOM 順序：刪除草稿 → 取消 → 儲存草稿 → 儲存並發布，中間隔著兩顆
+    const buttons = screen.getAllByRole("button")
+    const gap = buttons.indexOf(publish) - buttons.indexOf(del)
+    expect(gap).toBeGreaterThanOrEqual(3)
+  })
+
+  it.each([
+    ["PUBLISHED", "已發布課程的正解是關閉，不是刪除"],
+    ["CLOSED", "已關閉課程的正解是再開課，不是刪除"],
+  ])("%s 不顯示「刪除草稿」——%s（#457）", async (status) => {
+    useCourse(status)
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+    expect(screen.queryByRole("button", { name: "刪除草稿" })).not.toBeInTheDocument()
+  })
+
+  it("新增模式不顯示「刪除草稿」——課程還沒寫進 DB（#457）", async () => {
+    renderNewEditor()
+    await screen.findByRole("heading", { name: "新增課程" })
+    expect(screen.queryByRole("button", { name: "刪除草稿" })).not.toBeInTheDocument()
+  })
+
+  it("非擁有者不顯示「刪除草稿」（#457）", async () => {
+    useCourse("DRAFT", { isOwner: false })
+    renderEditor()
+    await screen.findByText(/檢視模式/)
+    expect(screen.queryByRole("button", { name: "刪除草稿" })).not.toBeInTheDocument()
+  })
+
+  it("確認後送出 DELETE、提示成功並導回列表（#457）", async () => {
+    const user = userEvent.setup()
+    let deleted: string | undefined
+    server.use(
+      http.delete("/api/et/courses/:courseId", ({ params }) => {
+        deleted = String(params.courseId)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    useCourse("DRAFT")
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "刪除草稿" }))
+
+    // 確認視窗說明連帶範圍與不可逆
+    expect(await screen.findByText(/章節、教材、測驗與課後問卷會一併移除/)).toBeInTheDocument()
+    expect(screen.getByText(/無法復原/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "確認刪除" }))
+
+    await waitFor(() => expect(deleted).toBe("1"))
+    expect(await screen.findByText("草稿已刪除")).toBeInTheDocument()
+    expect(navigateSpy).toHaveBeenCalledWith("/et/courses")
+  })
+
+  it("在確認視窗按取消，一次請求都不發出（#457）", async () => {
+    // 🔴 二次確認的重點不是「有沒有跳窗」，是**取消時真的什麼都沒發生**。
+    const user = userEvent.setup()
+    let calls = 0
+    server.use(
+      http.delete("/api/et/courses/:courseId", () => {
+        calls += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    useCourse("DRAFT")
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "刪除草稿" }))
+    await screen.findByRole("button", { name: "確認刪除" })
+
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "確認刪除" })).not.toBeInTheDocument(),
+    )
+    expect(calls).toBe(0)
+    expect(navigateSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("ET05 課程關閉與再開課", () => {
   it("編輯頁的邀請碼不帶「發布後永久不可變更」的括號說明（#359 第 2 項）", async () => {
     useCourse("PUBLISHED")
     renderEditor()
 
     // 邀請碼本身與複製鈕行為不變（AC）
     expect(await screen.findByText("01234567")).toBeInTheDocument()
-    // 規則改由 ET02 手冊承載（「邀請碼於發布當下產生，之後沿用同一組」）——畫面不寫、
+    // 規則改由 ET05 手冊承載（「邀請碼於發布當下產生，之後沿用同一組」）——畫面不寫、
     // 手冊寫「看不出來的規則」是刻意的分工。
     expect(screen.queryByText(/永久不可變更/)).not.toBeInTheDocument()
   })

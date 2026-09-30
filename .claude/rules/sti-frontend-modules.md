@@ -20,7 +20,7 @@ CRUD 列表頁骨架（標題列 + 篩選 / 操作 + 表格 + 分頁 + 表單 sl
 
 ```tsx
 <CrudPageLayout
-  code="DP05"                  // 畫面代號：標題列 icon + 名稱取自 navItems，與側欄同源
+  code="DP01"                  // 畫面代號：標題列 icon + 名稱取自 navItems，與側欄同源
   filterContent={...}          // 篩選列（TextField / Tabs 等）
   actions={<CrudActions .../>} // 右上操作區
   table={<AppTable columns={columns} data={items} rowKey="id" loading={isPending} />}
@@ -203,8 +203,8 @@ icon 與名稱依畫面代號取自 `navItems`（`getScreen`），與側欄必�
 
 ```tsx
 <ScreenHeader code="DM01" />
-<ScreenHeader code="ET03" actions={<TextField select ... />} />          // 靠右元素
-<ScreenHeader code="ET02" title="課程編輯" leading={<BackButton />} adornment={<Chip ... />} />
+<ScreenHeader code="ET02" actions={<TextField select ... />} />          // 靠右元素
+<ScreenHeader code="ET05" title="課程編輯" leading={<BackButton />} adornment={<Chip ... />} />
 ```
 
 ---
@@ -255,7 +255,7 @@ export const XxxListPage = () => {
 
   return (
     <CrudPageLayout
-      code="DP05"
+      code="DP01"
       actions={<CrudActions onRefresh={refresh} onAdd={openCreate} />}
       table={<AppTable columns={columns} data={items} rowKey="id" loading={loading} />}
       pagination={<Pagination page={page} total={total} onPageChange={setPage} />}

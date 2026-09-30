@@ -35,14 +35,14 @@ ET 模組寄送課程 / 學習 / 帳號相關 Email 一律**呼叫平台唯一�
 | 每週未看提醒 | US14 | `WEEKLY_REMIND` | SCHET001 每週對進度 0%（完全未開始）學員（一人一信彙整，列出所有未開始課程）| 進度 0% 之學員 |
 | 截止前加急提醒 | US14 | `URGENT_REMIND` | SCHET002 每日檢查，訖止前 N 天（`DP_PARAM.ET_URGENT_REMIND_DAYS`）對所有未完課學員（每課只寄一次）| 未完課學員 |
 | 週報 | US14 | `WEEKLY_REPORT` | SCHET001 每週；教師收自己建立之開放中課程、管理者收全域（內文摘要＋逐學員明細 CSV **下載連結**，非附件）| 教師 / 管理者 |
-| 核可通過通知 | US16 | `APPROVAL_PASSED` | 教師 / 管理者於 ET03 對學員線下核可「通過」時（不通過 / 撤銷**不寄**）| 該學員個人 Email |
+| 核可通過通知 | US16 | `APPROVAL_PASSED` | 教師 / 管理者於 ET02 對學員線下核可「通過」時（不通過 / 撤銷**不寄**）| 該學員個人 Email |
 
 ### 平台系統信（2 類；平台 `DP_NOTIFY_TEMPLATE`，`MODULE=DP`；由平台維護、ET 不可編輯 / 停用）
 
 | 類型 | 對應 US | 範本代碼 | 觸發時機 | 收件者 |
 |------|---------|-------------|---------|--------|
 | 密碼重設信 | US2 | `PASSWORD_RESET`（`MODULE=DP`）| 使用者點「忘記密碼」並輸入 Email | 使用者 Email |
-| 帳號變更驗證信 | US10 | `EMAIL_CHANGE`（`MODULE=DP`）| 使用者於 ET08 變更 Email | **新 Email**（變更目標）|
+| 帳號變更驗證信 | US10 | `EMAIL_CHANGE`（`MODULE=DP`）| 使用者於 ET09 變更 Email | **新 Email**（變更目標）|
 
 > **停用（IS_ACTIVE=false）行為**：僅適用 ET 可維護 7 類。停用後該類信件**不寄送**，但對應觸發事件**照常運作**（如停用 `COURSE_INVITE` 則發布仍自動加入學員、僅不寄邀請信；停用 `WEEKLY_REMIND` 則 SCHET001 仍統計 / 寄週報、僅不寄未看提醒）。平台系統信 2 類無此開關。
 

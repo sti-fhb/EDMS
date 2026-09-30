@@ -12,7 +12,7 @@
 ## 四個階段
 
 ```
-①  規格 + 畫面      ─→  操作手冊 md       et/ET02-課程建立與編輯.md
+①  規格 + 畫面      ─→  操作手冊 md       et/ET05-課程建立與編輯.md
 ②  依手冊所述行為   ─→  測試項目 md       _tests/ET-教育訓練文件管理模組.md
 ③  缺圖             ─→  待拍清單 ─→ 拍攝 ─→ 接圖回 md
 ④  內容定案後       ─→  兩份 Word         gen_manual.py／gen_acceptance_form.py
@@ -33,9 +33,9 @@ docx 有納入版控，沒有 Python 環境的人可以直接從 repo 取用；�
 ## 最快的做法：用指令
 
 ```
-/sti-manual et02          產生該作業之手冊與測試項目
-/sti-manual et02 test     只補測試項目
-/sti-manual et02 image    圖拍好後接圖並重新產出（中斷後續行用）
+/sti-manual et05          產生該作業之手冊與測試項目
+/sti-manual et05 test     只補測試項目
+/sti-manual et05 image    圖拍好後接圖並重新產出（中斷後續行用）
 ```
 
 一般情況**只需下第一行**：指令寫完手冊與測試項目、跑過格式檢查後會開出待拍清單，
@@ -88,13 +88,13 @@ pip install python-docx
 | 系統訊息原文 | 同上，檔末〈系統訊息〉表 |
 | 畫面實際字樣 | **截圖或實機**，不可憑規格推測 |
 
-> 重要：規格**不會**告訴你按鈕叫什麼，也不會寫按鈕在什麼條件下才能按。ET02 新增課程
+> 重要：規格**不會**告訴你按鈕叫什麼，也不會寫按鈕在什麼條件下才能按。ET05 新增課程
 > 時「新增教材」／「新增測驗」按下去會先自動存草稿再開視窗，只有看畫面才知道；寫錯會
 > 讓使用者以為操作失敗。
 
 ### 步驟 2：建立 md
 
-路徑 `docs/manuals/{模組}/{作業碼}-{作業名}.md`，例如 `et/ET02-課程建立與編輯.md`。
+路徑 `docs/manuals/{模組}/{作業碼}-{作業名}.md`，例如 `et/ET05-課程建立與編輯.md`。
 作業名取自〈手冊撰寫規範〉第七節的對照表，不要自己取。
 
 ### 步驟 3：依骨架寫內容
@@ -102,7 +102,7 @@ pip install python-docx
 固定三章，**編號由程式產生，md 裡不要自己寫**：
 
 ```markdown
-# ET02 課程建立與編輯    ← 封面用，每檔一個
+# ET05 課程建立與編輯    ← 封面用，每檔一個
 
 ## 作業說明              → 產出為「壹、作業說明」
 ### 使用情境             → 產出為「一、使用情境」
@@ -128,10 +128,10 @@ pip install python-docx
 ### 步驟 5：放圖
 
 圖片放 `docs/manuals/_images/{模組}/`，命名 `{作業碼小寫}-{兩位序號}.png`，
-例如 `et02-01.png`。引用時**圖說必填**：
+例如 `et05-01.png`。引用時**圖說必填**：
 
 ```markdown
-![新增章節後，該章節下出現「新增教材」與「新增測驗」兩個入口](../_images/et/et02-01.png)
+![新增章節後，該章節下出現「新增教材」與「新增測驗」兩個入口](../_images/et/et05-01.png)
 ```
 
 **缺圖就另行截圖**：於 `docs/manuals/_shots/{作業碼}-待拍清單.md` 開出待拍清單。
@@ -166,7 +166,7 @@ python docs/manuals/tools/gen_manual.py docs/manuals
 測試項目**一個模組一個檔**，新增作業時在同一檔追加一節，不要另開新檔：
 
 ```markdown
-## ET02 課程建立與編輯     ← 追加在 _tests/ET-教育訓練文件管理模組.md
+## ET05 課程建立與編輯     ← 追加在 _tests/ET-教育訓練文件管理模組.md
 
 ### 測試前準備
 | 項目 | 說明 |
@@ -200,7 +200,7 @@ python docs/manuals/tools/gen_acceptance_form.py
 | 測試項目 → 手冊 | 每一項所述行為，手冊有沒有講到 |
 | **手冊 → 測試項目** | **手冊寫的重要行為，有沒有漏測** |
 
-> 重要：**反向那一邊最容易漏**。ET02 的〈已發布課程不可清空閱課結束時間〉手冊寫了一
+> 重要：**反向那一邊最容易漏**。ET05 的〈已發布課程不可清空閱課結束時間〉手冊寫了一
 > 整段，測試項目卻完全沒驗到——那是會擋掉儲存的行為。寫完測試項目後，一定要回頭把
 > 手冊讀一遍。
 
@@ -232,7 +232,7 @@ python docs/manuals/tools/gen_acceptance_form.py
 
 ```bash
 python docs/manuals/tools/check_manual.py                        # 單檔格式
-python docs/manuals/tools/gen_manual.py "docs/manuals/et/ET02-課程建立與編輯.md"
+python docs/manuals/tools/gen_manual.py "docs/manuals/et/ET05-課程建立與編輯.md"
 python docs/manuals/tools/gen_acceptance_form.py "docs/manuals/_tests/ET-教育訓練文件管理模組.md"
 python docs/manuals/tools/check_consistency.py                   # 跨檔一致性（交付前）
 ```

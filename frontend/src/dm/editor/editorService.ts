@@ -1,4 +1,5 @@
 import type {
+  AudiencePair,
   CreateResult,
   DraftMeta,
   EditorDocTags,
@@ -10,7 +11,7 @@ import type {
 import { http } from "../../services/http"
 
 /**
- * 文件新增與編輯 API（US5 / DM03，寫入）。
+ * 文件新增與編輯 API（US5 / DM08，寫入）。
  * 新增 / 加版以 multipart（FormData）送表單欄位 + 單一上傳檔；送簽以 JSON。
  */
 
@@ -19,7 +20,7 @@ export interface CreateDocPayload {
   doc_name: string
   category_code: string
   func_code: string // 空字串＝不指定（非手冊類）
-  audience_ids: string[]
+  audience_pairs: AudiencePair[]
   retrieval_ids: string[]
   version_no: string
   change_summary: string
@@ -32,7 +33,7 @@ export interface AddVersionPayload {
   version_no: string
   change_summary: string
   assigned_reviewer: string
-  audience_ids: string[]
+  audience_pairs: AudiencePair[]
   retrieval_ids: string[]
   file: File | null
 }
@@ -44,9 +45,25 @@ export interface UpdateDraftPayload {
   assigned_reviewer: string
   version_no: string
   change_summary: string
-  audience_ids: string[]
+  audience_pairs: AudiencePair[]
   retrieval_ids: string[]
   file: File | null
+}
+
+/**
+ * 把 (單位, 職位) 配對展成兩個平行的 multipart 欄位——form 無法表達物件陣列。
+ *
+ * ⚠️ 後端以**同索引**成對解讀（`audience_unit_ids[i]` ↔ `audience_role_ids[i]`），故兩邊
+ * 必須等長且順序一致；`FormData.append` 對同名欄位保序，逐筆同時 append 即可保證。
+ * 未選滿兩欄者直接略過：送出半組配對會讓後端因長度不符而 422，且那組本來就不生效。
+ */
+function appendAudiencePairs(fd: FormData, pairs: AudiencePair[]): void {
+  pairs
+    .filter((pair) => pair.unit_id && pair.audience_id)
+    .forEach((pair) => {
+      fd.append("audience_unit_ids", pair.unit_id)
+      fd.append("audience_role_ids", pair.audience_id)
+    })
 }
 
 function buildCreateForm(p: CreateDocPayload): FormData {
@@ -54,7 +71,7 @@ function buildCreateForm(p: CreateDocPayload): FormData {
   fd.append("doc_name", p.doc_name)
   fd.append("category_code", p.category_code)
   if (p.func_code) fd.append("func_code", p.func_code)
-  p.audience_ids.forEach((id) => fd.append("audience_ids", id))
+  appendAudiencePairs(fd, p.audience_pairs)
   p.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
   fd.append("version_no", p.version_no)
   fd.append("change_summary", p.change_summary)
@@ -84,7 +101,7 @@ export const editorApi = {
     fd.append("version_no", payload.version_no)
     fd.append("change_summary", payload.change_summary)
     if (payload.assigned_reviewer) fd.append("assigned_reviewer", payload.assigned_reviewer)
-    payload.audience_ids.forEach((id) => fd.append("audience_ids", id))
+    appendAudiencePairs(fd, payload.audience_pairs)
     payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
     if (payload.file) fd.append("file", payload.file)
     const { data } = await http.post<VersionResult>(`/dm/documents/${docId}/versions`, fd)
@@ -118,7 +135,7 @@ export const editorApi = {
     fd.append("assigned_reviewer", payload.assigned_reviewer)
     fd.append("version_no", payload.version_no)
     fd.append("change_summary", payload.change_summary)
-    payload.audience_ids.forEach((id) => fd.append("audience_ids", id))
+    appendAudiencePairs(fd, payload.audience_pairs)
     payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
     if (payload.file) fd.append("file", payload.file)
     const { data } = await http.put<VersionResult>(`/dm/documents/${docId}/versions/${versionId}`, fd)

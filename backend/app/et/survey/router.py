@@ -1,7 +1,7 @@
-"""ET02 課後問卷 API（US3 / #204）。
+"""ET05 課後問卷 API（US3 / #204）。
 
 router-level 掛 `get_et_context` + `require_et_roles(ET_TEACHER, ET_ADMIN)`——本 router
-服務的是 ET02 教師編輯畫面。
+服務的是 ET05 教師編輯畫面。
 
 > 學員端的問卷填寫有自己的端點與回應形狀（不含 `frozen` / `responded_count` 等教師
 > 端統計），屬 `ET-15`。兩者共用 model、但**不共用 schema**。

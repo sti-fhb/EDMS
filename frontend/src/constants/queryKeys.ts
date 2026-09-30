@@ -20,6 +20,9 @@ export const QUERY_KEYS = {
     list: () => ["schedule", "list"] as const,
     logs: (params: Record<string, unknown>) => ["schedule", "logs", params] as const,
   },
+  etDashboard: {
+    get: () => ["et", "dashboard"] as const,
+  },
   etCourses: {
     capabilities: () => ["et", "courses", "capabilities"] as const,
     list: (params: CourseListParams) => ["et", "courses", "list", params] as const,
@@ -35,7 +38,7 @@ export const QUERY_KEYS = {
   etMyCourses: {
     list: () => ["et", "my-courses"] as const,
   },
-  /** ET03 學員學習狀況追蹤（US9 / #322）——三個區塊各自的 key，切課程時一起失效。 */
+  /** ET02 學員學習狀況追蹤（US9 / #322）——三個區塊各自的 key，切課程時一起失效。 */
   etStudents: {
     /** 整個課程的追蹤資料前綴——切換課程或寫入後以此一次失效三個區塊。 */
     all: (courseId: number) => ["et", "tracking", courseId] as const,
@@ -45,10 +48,12 @@ export const QUERY_KEYS = {
     attemptDetail: (attemptId: number) => ["et", "tracking", "attempts", attemptId] as const,
     surveyResult: (courseId: number) => ["et", "tracking", courseId, "survey-result"] as const,
   },
-  /** ET10 核可查詢（US17 / #385）。兩視角分開——它們的參數與回應欄位都不同。 */
+  /** ET04 核可查詢（US17 / #385）。兩視角分開——它們的參數與回應欄位都不同。 */
   etApprovals: {
     search: (params: Record<string, unknown>) => ["et", "approvals", "search", params] as const,
     mine: (page: number) => ["et", "approvals", "mine", page] as const,
+    /** ET04 課程篩選下拉（#439）——不帶參數：範圍由後端依身分決定。 */
+    filterCourses: () => ["et", "approvals", "filter-courses"] as const,
   },
   etLearn: {
     structure: (courseId: number) => ["et", "learn", courseId] as const,

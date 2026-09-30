@@ -9,7 +9,7 @@ import type {
   TeacherAttemptDetail,
 } from "./schemas"
 
-/** ET03 學員學習狀況追蹤 API（US9 / #322）。教師端，全部需課程擁有權。 */
+/** ET02 學員學習狀況追蹤 API（US9 / #322）。教師端，全部需課程擁有權。 */
 export const studentsApi = {
   /** 區塊 1：已加入學員清單（分頁）。 */
   listStudents: async (courseId: number, params: { page?: number; limit?: number }): Promise<PagedResult<StudentRow>> => {
@@ -89,7 +89,7 @@ export const studentsApi = {
    * US16：撤銷核可（`FR-ET-US16-06`）——**原因必填**。
    *
    * `version` 是樂觀鎖，原樣帶回 `StudentRow.approval_version`；不符回 409
-   * `ET_APPROVAL_004`（`ET-MSG-ET03-308`「請重新整理後再試」）。
+   * `ET_APPROVAL_004`（`ET-MSG-ET02-308`「請重新整理後再試」）。
    *
    * ⚠️ **是 POST 不是 DELETE**：那一列仍在，只是 `IS_REVOKED` 翻成 true 並記下原因，
    * 之後還能重新核可（同一列 update）。

@@ -16,6 +16,7 @@ import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
+import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -23,6 +24,7 @@ import { usePagedQuery } from "../../hooks/usePagedQuery"
 import { toApiError } from "../../services/http"
 import { formatDateTime } from "../../utils/date"
 import { approvalsApi } from "./approvalsService"
+import { courseOptionsEmptyReason } from "./courseOptionsState"
 import type { ApprovalQueryRow } from "./schemas"
 
 /** 結果篩選的值域。`""` 代表不篩（wireframe 的「全部結果」）。 */
@@ -33,10 +35,24 @@ const RESULT_OPTIONS = [
 ] as const
 
 /**
- * 教師 / 管理者視角——依學員**姓名或 Email** 查核可紀錄（`FR-ET-US17-01`、#436）。
+ * 教師 / 管理者視角——依學員**姓名或 Email** 與 / 或**課程**查核可紀錄
+ * （`FR-ET-US17-01`、#436、#439）。
  *
- * ⚠️ 兩者共用同一個輸入框、擇一命中即可：同名同姓時姓名不足以定位，而 Email 是帳號的
- * 唯一鍵。分兩欄會讓「隨便給個識別資訊找到人」這個實際用法變成要先想「我手上這個是哪種」。
+ * ⚠️ 姓名與 Email 共用同一個輸入框、擇一命中即可：同名同姓時姓名不足以定位，而 Email
+ * 是帳號的唯一鍵。分兩欄會讓「隨便給個識別資訊找到人」這個實際用法變成要先想「我手上
+ * 這個是哪種」。
+ *
+ * ## 關鍵字與課程「至少給一個」（#439）
+ *
+ * 原本關鍵字必填（SA Q2 裁示 A），但使用者常常**正是不知道有誰可以查**。改為兩者
+ * 擇一之後，選課程即可列出該課的核可紀錄。
+ *
+ * ⚠️ 兩者皆不給仍會被擋——那才是裁示 A 原本要防的「留白查全部」。**換的是手段不是
+ * 目的**：課程之所以能取代關鍵字，是因為教師的下拉只有自己開設的課，而看自己課的學員
+ * 是他本來就有的資訊（ET02 整頁就是做這件事）。
+ *
+ * ⛔ 下拉只是 UI——後端另有一道「非管理者只能依自己課程篩選」的閘（403
+ * `ET_APPROVAL_007`）。**兩者是一組的**，只做前者等於沒做。
  *
  * ## 🔴 範圍提示是 SA 裁示 C 的配套，不是可選的 UX 潤飾
  *
@@ -58,19 +74,56 @@ const RESULT_OPTIONS = [
  */
 export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   const [nameInput, setNameInput] = useState("")
+  const [courseId, setCourseId] = useState<number | "">("")
   const [result, setResult] = useState("")
   const [page, setPage] = useState(1)
   /** 已送出的查詢條件。`null` = 尚未查詢過（與「查過但沒資料」是兩回事）。 */
-  const [submitted, setSubmitted] = useState<{ keyword: string; result: string } | null>(null)
-  /** 姓名欄位的本地驗證訊息。與下方查詢本身的 `queryError` 是兩回事，刻意分開命名。 */
-  const [nameError, setNameError] = useState<string | null>(null)
+  const [submitted, setSubmitted] = useState<{ keyword: string; courseId: number | ""; result: string } | null>(null)
+  /** 條件不足的本地驗證訊息。與下方查詢本身的 `queryError` 是兩回事，刻意分開命名。 */
+  const [criteriaError, setCriteriaError] = useState<string | null>(null)
+
+  // 課程下拉（#439）。⚠️ 走 `approvalsApi.listFilterCourses` 而**不是** ET01 的課程清單
+  // ——後者的兩個 scope 都不對（`all` 排除已結束課程、`mine` 對管理者是空的），
+  // 完整理由見該函式的註解。
+  const coursesQuery = useQuery({
+    queryKey: QUERY_KEYS.etApprovals.filterCourses(),
+    queryFn: () => approvalsApi.listFilterCourses(),
+    // 🔴 **必須設 `staleTime`**，這不是效能微調。專案的 QueryClient 是裸的
+    // `new QueryClient()`（`main.tsx`），預設 `staleTime: 0` + `refetchOnWindowFocus: true`
+    // ——教師每次切回分頁都會重打一次，而本端點與**核可寫入**共用同一個 60/分分桶
+    //（見 `approval/router.py` 模組 docstring）。那正是當初把核可從 `et-tracking`
+    // 分桶出去要防的事：教師只是多看幾次畫面，就把他真正需要能送出的動作的配額吃掉。
+    //
+    // 下拉的母體是核可紀錄，不需要即時——新核可一筆之後晚五分鐘才出現在篩選選單裡，
+    // 對「查核可紀錄」這件事沒有影響。
+    staleTime: 5 * 60 * 1000,
+  })
+  const options = coursesQuery.data ?? []
+
+  // 🔴 空的下拉有**三種**成因，畫面必須分得出來——說錯比不說更糟（與 ET02 同一條）。
+  // 判定抽在 `courseOptionsState.ts`：其中一種情形（先成功、之後背景刷新失敗）在元件
+  // 測試裡要真的觸發一次刷新才驗得到，而那個區別正是最容易寫錯的地方。
+  //
+  // ⚠️ **整包 `coursesQuery` 交出去、不自己挑旗標**——`isError` 在背景刷新失敗時也是
+  // true，餵它會讓一個還有可用選項的下拉被停用並宣稱「載入失敗」。那個選擇交給呼叫端
+  // 就會變成沒有測試守得住的自由度，故由該函式自己決定看哪一個。
+  //
+  // ⚠️ `"none"` 底下其實還混著兩件事（「沒開過課」與「開的課還沒有人被核可」），
+  // 這裡**刻意不分**：兩者的下一步相同（去 ET02 核可學員），而要分得出來得多一次查詢。
+  const emptyReason = courseOptionsEmptyReason(coursesQuery, options.length)
 
   const params = submitted === null ? null : { ...submitted, page }
-  const { data, isPending, isError, error: queryError } = usePagedQuery<ApprovalQueryRow>(
+  const {
+    data,
+    isPending,
+    isError,
+    error: queryError,
+  } = usePagedQuery<ApprovalQueryRow>(
     QUERY_KEYS.etApprovals.search(params ?? {}),
     () =>
       approvalsApi.search({
-        keyword: submitted!.keyword,
+        keyword: submitted!.keyword || undefined,
+        course_id: submitted!.courseId === "" ? undefined : submitted!.courseId,
         result: (submitted!.result || undefined) as "PASS" | "FAIL" | undefined,
         page,
       }),
@@ -78,15 +131,19 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   )
 
   const submit = () => {
-    // SA Q2 裁示 A：姓名必填。前端先擋是為了讓教師當場看到，後端仍會回 422。
+    // #439：關鍵字與課程「至少給一個」（取代 SA Q2 裁示 A 的關鍵字必填）。
+    // 前端先擋是為了讓教師當場看到，後端仍會回 422 `ET_APPROVAL_006`。
+    //
+    // ⚠️ 兩者皆不給仍要擋——那正是裁示 A 原本要防的「留白查全部」。放寬的是「用什麼
+    // 條件」，不是「可不可以不給條件」。
     const keyword = nameInput.trim()
-    if (keyword === "") {
-      setNameError("請輸入學員姓名或 Email")
+    if (keyword === "" && courseId === "") {
+      setCriteriaError("請輸入姓名或 Email，或選擇課程")
       return
     }
-    setNameError(null)
+    setCriteriaError(null)
     setPage(1)
-    setSubmitted({ keyword, result })
+    setSubmitted({ keyword, courseId, result })
   }
 
   const rows = data?.data ?? []
@@ -101,7 +158,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         </Alert>
       )}
 
-      {/* 搜尋列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
+      {/* 搜尋列——白底區塊，與 DM03「已廢止文件查詢」一致（#436）。
           裸放在灰底上時欄位看起來像懸空的，而下方結果表格有 Paper 框，上下半部
           視覺不一致會讓人以為畫面還沒載完。 */}
       <Paper sx={{ p: 2 }}>
@@ -111,11 +168,11 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
             size="small"
             sx={{ minWidth: 260 }}
             value={nameInput}
-            error={nameError !== null}
-            helperText={nameError ?? "可輸入部分姓名或 Email"}
+            error={criteriaError !== null}
+            helperText={criteriaError ?? "可輸入部分姓名或 Email"}
             onChange={(e) => {
               setNameInput(e.target.value)
-              setNameError(null)
+              setCriteriaError(null)
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit()
@@ -130,6 +187,37 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
               },
             }}
           />
+          {/* 課程下拉（#439）——解決「不知道有誰可以查」：選課程就列得出該課的核可紀錄。
+              ⚠️ 教師的選項只有自己開設的課（後端限定），管理者不限。 */}
+          <TextField
+            select
+            label="課程"
+            size="small"
+            sx={{ minWidth: 220 }}
+            value={courseId}
+            error={criteriaError !== null}
+            disabled={emptyReason !== null}
+            helperText={
+              emptyReason === "failed"
+                ? "課程清單載入失敗，請重新整理後再試"
+                : emptyReason === "none"
+                  ? isAdmin
+                    ? "系統中尚無核可紀錄"
+                    : "您開設的課程尚無核可紀錄"
+                  : "不指定學員時可只選課程"
+            }
+            onChange={(e) => {
+              setCourseId(e.target.value === "" ? "" : Number(e.target.value))
+              setCriteriaError(null)
+            }}
+          >
+            <MenuItem value="">全部課程</MenuItem>
+            {options.map((c) => (
+              <MenuItem key={c.course_id} value={c.course_id}>
+                {c.course_name}
+              </MenuItem>
+            ))}
+          </TextField>
           <TextField
             select
             label="核可結果"
@@ -152,7 +240,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
 
       {submitted === null ? (
         <Typography variant="body2" color="text.secondary">
-          輸入學員姓名或 Email 後按「查詢」。
+          輸入學員姓名或 Email，或選擇課程後按「查詢」。
         </Typography>
       ) : isPending ? (
         <Typography variant="body2" color="text.secondary">
@@ -170,7 +258,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         //
         // | 真相 | 該做什麼 |
         // |---|---|
-        // | 全系統還沒有任何核可紀錄 | 去 ET03 核可學員 |
+        // | 全系統還沒有任何核可紀錄 | 去 ET02 核可學員 |
         // | 有紀錄，但這個人沒有 | 確認姓名 / 改用 Email 查 |
         // | 有紀錄，但被**可見範圍**擋掉 | 找管理者查 |
         //

@@ -18,7 +18,7 @@ function codeInput() {
   return screen.getByLabelText(/邀請碼/)
 }
 
-describe("ET04 加入新課程視窗", () => {
+describe("ET03 加入新課程視窗", () => {
   it("查詢鈕在未滿 8 碼前為停用（AC 5）", async () => {
     const user = userEvent.setup()
     renderDialog()

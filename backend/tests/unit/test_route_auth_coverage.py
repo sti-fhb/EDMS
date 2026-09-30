@@ -41,7 +41,7 @@ _NO_AUTH_ALLOWLIST: dict[tuple[str, str], str] = {
     (
         "GET",
         "/api/et/videos/{video_id}/file",
-    ): "ET05 影片串流：`<video src>` 送不出 Authorization header，改以短效播放票（?t=）認證（#255）",
+    ): "ET06 影片串流：`<video src>` 送不出 Authorization header，改以短效播放票（?t=）認證（#255）",
 }
 
 

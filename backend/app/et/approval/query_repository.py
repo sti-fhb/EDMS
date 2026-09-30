@@ -45,8 +45,15 @@ class CourseBrief(NamedTuple):
 class EtApprovalQueryRepository:
     """核可紀錄之查詢（教師 / 管理者依姓名查、學員查自己已通過）。"""
 
-    def teacher_query_stmt(self, *, keyword: str, visible: ColumnElement[bool], result: str | None = None) -> Select:
-        """教師 / 管理者依學員**姓名或 Email** 查詢的語句（未套 offset/limit，供 `paginate()`）。
+    def teacher_query_stmt(
+        self,
+        *,
+        keyword: str | None,
+        visible: ColumnElement[bool],
+        course_id: int | None = None,
+        result: str | None = None,
+    ) -> Select:
+        """教師 / 管理者依學員**姓名或 Email** 與 / 或**課程**查詢的語句（未套 offset/limit）。
 
         🔴 **兩邊的比對都必須跳脫 LIKE 萬用字元**：未跳脫時使用者輸入 `%` 會變成「查全部」，
         讓「關鍵字必填」（SA Q2 裁示 A）形同虛設，**而且沒有任何錯誤訊息**。真正在做事的是
@@ -61,9 +68,17 @@ class EtApprovalQueryRepository:
         那一邊會安靜失效。⛔ 但別把「測試綠」讀成「這個參數有在守什麼」——它守的是未來，
         不是現在。本 docstring 的前一版把這件事寫反了（宣稱省略會立刻失效）。
 
+        ⚠️ **`keyword` 與 `course_id` 可以只給一個**（#439），但**不可兩個都不給**——
+        那就是 SA Q2 裁示 A 要擋的「留白查全部」。本層不檢核，由
+        `query_rules.normalize_search_criteria` 在 service 進來之前擋下；這裡只負責
+        「有給就加條件」。⛔ 不要在此補一道「都沒給就回空」的防禦——那會把 422 變成
+        一個看起來正常的空清單。
+
         Args:
-            keyword: 學員姓名或 Email 關鍵字，擇一命中即可（呼叫端已確認非空白）。
+            keyword: 學員姓名或 Email 關鍵字，擇一命中即可；`None` 表不以關鍵字篩。
             visible: `query_rules.visible_clause()` 的結果。
+            course_id: 選填的課程篩選；`None` 表不篩。非管理者的擁有權已由
+                `query_rules.ensure_course_filter_allowed` 在 service 擋下。
             result: 選填的結果篩選（`PASS` / `FAIL`）；`None` 表不篩。
 
         Returns:
@@ -84,23 +99,67 @@ class EtApprovalQueryRepository:
                 # 一旦有人啟用該欄位，該學員的**所有核可紀錄會從連管理者的合規查詢裡一起
                 # 消失，且無任何訊號**。要改成不濾之前請先確認那是想要的結果。
                 DpUser.deleted == 0,
-                # 姓名或 Email 擇一命中（#436）——同名同姓時姓名不足以定位，而 Email
-                # 是帳號的唯一鍵。
-                #
-                # 🔴 **`or_` 的每一邊都要各自跳脫**：任一邊漏了，整條 `or_` 就恆真，
-                # 於是 `%` 變成「查全部」而**沒有任何錯誤訊息**——「姓名必填」（SA Q2
-                # 裁示 A）也跟著形同虛設。多一個比對欄位就多一個會漏的地方。
-                or_(
-                    DpUser.user_name.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
-                    DpUser.email.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
-                ),
                 visible,
             )
             .order_by(EtApproval.approved_at.desc(), EtApproval.approval_id.desc())
         )
+        if keyword:
+            # 姓名或 Email 擇一命中（#436）——同名同姓時姓名不足以定位，而 Email
+            # 是帳號的唯一鍵。
+            #
+            # 🔴 **`or_` 的每一邊都要各自跳脫**：任一邊漏了，整條 `or_` 就恆真，
+            # 於是 `%` 變成「查全部」而**沒有任何錯誤訊息**——「至少給一個條件」
+            # （#439，原 SA Q2 裁示 A）也跟著形同虛設。多一個比對欄位就多一個會漏的地方。
+            #
+            # ⚠️ 用 `if keyword:` 而非 `if keyword is not None:`——空字串必須等同未給。
+            # 後者會讓 `%` + `%` 組成 `%%`，命中全部且不報錯。上游已把全空白正規化為
+            # `None`，這裡是第二層。
+            stmt = stmt.where(
+                or_(
+                    DpUser.user_name.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
+                    DpUser.email.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
+                )
+            )
+        if course_id is not None:
+            stmt = stmt.where(EtApproval.course_id == course_id)
         if result is not None:
             stmt = stmt.where(EtApproval.result == result)
         return stmt
+
+    async def filter_course_options(self, db: AsyncSession, *, owner_id: str | None) -> list[tuple[int, str]]:
+        """ET04 課程下拉的選項：**有核可紀錄的**課程（#439）。
+
+        Args:
+            owner_id: 限定課程擁有者；`None`（管理者）表不限。
+
+        Returns:
+            `(course_id, course_name)` 依課程名稱排序。
+
+        ## 🔴 母體是核可紀錄，不是課程清單
+
+        沿用 ET01 的課程清單會壞在管理者身上：`scope=all` 只給「已發布**且期間未過**」
+        （`course/repository.build_list_stmt`），而核可紀錄絕大多數落在**已結束**的課程上
+        ——管理者會發現最相關的課全部不在下拉裡，且畫面不會說明任何事。`scope=mine`
+        則對管理者毫無意義（他多半沒有自己的課）。
+
+        以 `ET_APPROVAL` 為母體同時解掉三件事：涵蓋已關閉課程、沒有「選了卻查無」的
+        死選項、不隨課程總數無限成長。
+
+        ⚠️ **不套 `visible_clause`**。教師側已由 `owner_id` 限成自己的課（比那道條件更嚴），
+        管理者側本來就是 `true()`。硬套只會讓「通過且未撤銷」那一側把**他人**課程也拉進
+        教師的下拉——而那正是本功能不打算開放的東西。
+        """
+        stmt = (
+            select(EtApproval.course_id, EtCourse.course_name)
+            .join(EtCourse, EtCourse.course_id == EtApproval.course_id)
+            .where(EtApproval.deleted == 0, EtCourse.deleted == 0)
+            .group_by(EtApproval.course_id, EtCourse.course_name)
+            .order_by(EtCourse.course_name)
+        )
+        if owner_id is not None:
+            stmt = stmt.where(EtCourse.owner_id == owner_id)
+        rows = await db.execute(stmt)
+        return [(cid, name) for cid, name in rows]
 
     def mine_stmt(self, *, user_id: str) -> Select:
         """學員自查：**自己**、`RESULT = PASS`、**未撤銷**（`FR-ET-US17-03`）。
@@ -126,6 +185,22 @@ class EtApprovalQueryRepository:
 
         `owner_id` 是為了 `RESULT_NOTE` 的遮蔽判定而一併取回——這支查詢本來就要讀
         `ET_COURSE`，多一個欄位不增加往返。
+
+        ## ⚠️ 本方法**不濾 `DELETED`**，而兩個呼叫端餵進來的東西來源不同
+
+        | 呼叫端 | 餵的 `course_ids` | 為何可以不濾 |
+        |---|---|---|
+        | `_enrich` / `mine` | 分頁結果的課程（語句已含 `EtCourse.deleted == 0`）| 已經篩過了 |
+        | `search` 的擁有權判定（#439）| **使用者直接給的 `course_id`，未經任何篩選** | 見下 |
+
+        第二種情形下「已軟刪除的課程」仍會回傳 `owner_id`，於是
+        `ensure_course_filter_allowed` 對「自己名下但已刪除的課程」放行。**那不是漏洞**
+        ——放行之後 `teacher_query_stmt` 的 `EtCourse.deleted == 0` 仍會把它濾成空結果；
+        而他人的已刪除課程照樣 403（`owner_id` 不符），不洩漏存在性。
+
+        ⛔ 不要為了「對稱」就在這裡加 `deleted == 0`：那會讓自己已刪除課程的擁有權判定
+        變成 fail-closed 的 403，而使用者看到的是「僅能依您所開設的課程篩選」——一句
+        **對他而言是假的**話。正常 UI 也走不到（下拉已濾掉已刪除課程）。
         """
         if not course_ids:
             return {}

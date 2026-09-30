@@ -1,4 +1,4 @@
-"""文件新增與編輯服務（US5 / DM03，寫入編排）。
+"""文件新增與編輯服務（US5 / DM08，寫入編排）。
 
 編排三張表寫入（DM_DOCUMENT / DM_DOC_VERSION / DM_VERSION_TAG）與跨模組送審 / 通知：
 
@@ -54,6 +54,7 @@ _MANUAL = "MANUAL"
 _TRAINING = "TRAINING"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
+_UNIT = "UNIT"  # 單位標籤組之 GROUP_TYPE（#437）；獨立於 AUDIENCE 以免既有依 GROUP_TYPE 分流者誤收
 _NEW = "NEW"
 _NEW_VERSION = "NEW_VERSION"
 _MAX_DOCID_RETRY = 3
@@ -123,7 +124,8 @@ class EditorService:
         doc_name: str,
         category_code: str,
         func_code: str | None,
-        audience_ids: Sequence[int],
+        audience_unit_ids: Sequence[int],
+        audience_role_ids: Sequence[int],
         retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
@@ -143,7 +145,13 @@ class EditorService:
         change_summary = (change_summary or "").strip()
         await self._ensure_category(db, category_code)
         func_code = await self._resolve_func(db, category_code, func_code)
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids, category_code)
+        tag_pairs = await self._validate_tags(
+            db,
+            audience_unit_ids=audience_unit_ids,
+            audience_role_ids=audience_role_ids,
+            retrieval_ids=retrieval_ids,
+            category_code=category_code,
+        )
 
         doc = await self._create_doc_with_retry(
             db, category_code=category_code, doc_name=doc_name, func_code=func_code, op=op
@@ -163,7 +171,7 @@ class EditorService:
         )
         # 首版同樣只寫版本層快照：首版未發布前文件層為空，文件庫本就查不到（狀態非 PUBLISHED），
         # 核准發布時一併套用至文件層（#377）。
-        await self._repo.set_version_tags(db, version_id=ver.version_id, tag_ids=tag_ids, op=op)
+        await self._repo.set_version_tags(db, version_id=ver.version_id, tag_pairs=tag_pairs, op=op)
         await self._log(
             db,
             action_type="CREATE",
@@ -217,7 +225,8 @@ class EditorService:
         db: AsyncSession,
         *,
         doc_id: str,
-        audience_ids: Sequence[int],
+        audience_unit_ids: Sequence[int],
+        audience_role_ids: Sequence[int],
         retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
@@ -239,7 +248,7 @@ class EditorService:
         if doc is None:
             raise _NOT_FOUND
         self._ensure_not_obsolete(doc)  # 已廢止文件不得再加版
-        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
+        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM08-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
         # 每人每文件一份進行中版本（他人不擋）：已有草稿 → 請續編（DM_DOC_009）；已有審核中版本 → 擋，
@@ -255,7 +264,13 @@ class EditorService:
             raise AppError(
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             )
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids, doc.category_code)
+        tag_pairs = await self._validate_tags(
+            db,
+            audience_unit_ids=audience_unit_ids,
+            audience_role_ids=audience_role_ids,
+            retrieval_ids=retrieval_ids,
+            category_code=doc.category_code,
+        )
         fmeta = await self._store_file(db, doc_id=doc_id, file_name=file_name, file_bytes=file_bytes)
         try:
             async with db.begin_nested():  # SAVEPOINT：並發撞單一草稿（同人）只回退本次 INSERT
@@ -277,7 +292,7 @@ class EditorService:
                 status_code=409, detail="您已有此文件之未送簽草稿版本，請續編既有草稿", error_code="DM_DOC_009"
             ) from exc
         # 版本層快照（不碰文件層）：核准發布時才套用，退回 / 撤回不套用（#377）
-        await self._repo.set_version_tags(db, version_id=ver.version_id, tag_ids=tag_ids, op=op)
+        await self._repo.set_version_tags(db, version_id=ver.version_id, tag_pairs=tag_pairs, op=op)
         await self._log(
             db,
             action_type="CREATE",
@@ -290,7 +305,7 @@ class EditorService:
     # ── 續編草稿（#222）──────────────────────────────
 
     async def get_draft_meta(self, db: AsyncSession, *, doc_id: str, user_id: str) -> DraftMeta:
-        """續編模式 author-scoped 之編輯器 meta（供 DRAFT-status 文件亦可載，不經 DM02 詳細端點）。
+        """續編模式 author-scoped 之編輯器 meta（供 DRAFT-status 文件亦可載，不經 DM07 詳細端點）。
 
         回文件名稱 / 分類 / func / 父文件狀態 + 本人現有 DRAFT 版本內容（版號 / 摘要 / 檔案）+
         （退回 / 撤回草稿之）前次指定審核者。名稱可編輯性依父文件狀態（DRAFT 可改、PUBLISHED 唯讀，Q1=A）。
@@ -339,7 +354,8 @@ class EditorService:
         doc_name: str | None,
         func_code: str | None = None,
         assigned_reviewer: str | None = None,
-        audience_ids: Sequence[int],
+        audience_unit_ids: Sequence[int],
+        audience_role_ids: Sequence[int],
         retrieval_ids: Sequence[int],
         version_no: str,
         change_summary: str,
@@ -371,10 +387,16 @@ class EditorService:
         if ver.status != _DRAFT:
             raise AppError(status_code=409, detail="僅草稿版本可續編", error_code="DM_DRAFT_004")
         self._ensure_not_obsolete(doc)  # 已廢止文件之孤兒草稿不得續編（僅可刪除）
-        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM03-004）
+        # 廢止待簽核 → 不得上傳新版本（DM-MSG-DM08-004）
         if await self._repo.has_pending_obsolete(db, doc_id):
             raise AppError(status_code=409, detail="此文件廢止待簽核，無法上傳新版本", error_code="DM_DOC_008")
-        tag_ids = await self._validate_tags(db, audience_ids, retrieval_ids, doc.category_code)
+        tag_pairs = await self._validate_tags(
+            db,
+            audience_unit_ids=audience_unit_ids,
+            audience_role_ids=audience_role_ids,
+            retrieval_ids=retrieval_ids,
+            category_code=doc.category_code,
+        )
 
         now = utcnow()
         previewable = is_previewable(ver.file_mime or "") if ver.file_mime else False
@@ -393,7 +415,7 @@ class EditorService:
                 doc.doc_name = doc_name.strip()
             doc.func_code = await self._resolve_func(db, doc.category_code, func_code)  # 非手冊類清為 None
             doc.updated_user, doc.updated_date = op.user_id, now
-        await self._repo.set_version_tags(db, version_id=version_id, tag_ids=tag_ids, op=op)  # 版本層快照（#377）
+        await self._repo.set_version_tags(db, version_id=version_id, tag_pairs=tag_pairs, op=op)  # 版本層快照（#377）
         await db.flush()
         await self._log(
             db,
@@ -405,7 +427,7 @@ class EditorService:
         return VersionResult(version_id=version_id, previewable=previewable)
 
     async def get_doc_tags(self, db: AsyncSession, doc_id: str, *, user_id: str) -> EditorDocTags:
-        """取編輯模式表單預帶之標籤（可見對象 / 檢索之 TAG_ID）。查無文件 → 404。
+        """取編輯模式表單預帶之標籤（可見對象 (單位, 職位) 配對 + 檢索標籤）。查無文件 → 404。
 
         本人已有進行中版本 → 取其**版本層快照**（該版本提議中的值，續編時才看得到自己上次的修改）；
         否則以文件層現值初始化（新開版本時預帶目前生效之標籤供修改，避免誤清）。#377
@@ -418,7 +440,7 @@ class EditorService:
             if open_ver is not None
             else await self._repo.get_doc_tags(db, doc_id)
         )
-        return EditorDocTags(audience_ids=tags["audience_ids"], retrieval_ids=tags["retrieval_ids"])
+        return EditorDocTags(audience_pairs=tags["audience_pairs"], retrieval_ids=tags["retrieval_ids"])
 
     # ── 送簽 ──────────────────────────────────────────
 
@@ -543,15 +565,17 @@ class EditorService:
         return [ReviewerItem(user_id=r.user_id, user_name=r.user_name) for r in rows]
 
     async def get_options(self, db: AsyncSession) -> EditorOptions:
-        """DM03 表單一次載入之受控下拉（分類 / func / 可見對象 / 檢索標籤，皆啟用中）。"""
+        """DM08 表單一次載入之受控下拉（分類 / func / 可見對象 / 檢索標籤，皆啟用中）。"""
         cats = await self._repo.list_categories(db)
         funcs = await self._repo.list_funcs(db)
         auds = await self._repo.list_audience_tags(db)
+        units = await self._repo.list_unit_tags(db)
         rtags = await self._repo.list_retrieval_tags(db)
         return EditorOptions(
             categories=[OptionItem(code=c.category_code, name=c.category_name) for c in cats],
             funcs=[OptionItem(code=f.func_code, name=f.func_name) for f in funcs],
             audiences=[OptionItem(code=str(t.tag_id), name=t.tag_name) for t in auds],
+            units=[OptionItem(code=str(t.tag_id), name=t.tag_name) for t in units],
             retrieval_tags=[
                 OptionItem(code=str(t.tag_id), name=t.tag_name, group_code=t.tag_group_code) for t in rtags
             ],
@@ -577,32 +601,66 @@ class EditorService:
         return func_code
 
     async def _validate_tags(
-        self, db: AsyncSession, audience_ids: Sequence[int], retrieval_ids: Sequence[int], category_code: str
-    ) -> list[int]:
-        """驗證可見對象須屬 AUDIENCE 組、檢索標籤須屬 RETRIEVAL 型（皆啟用中）；回合併後之 tag_id 清單。
+        self,
+        db: AsyncSession,
+        *,
+        audience_unit_ids: Sequence[int],
+        audience_role_ids: Sequence[int],
+        retrieval_ids: Sequence[int],
+        category_code: str,
+    ) -> list[tuple[int, int | None]]:
+        """驗證可見對象配對與檢索標籤；回 `(TAG_ID, UNIT_TAG_ID)` 清單，可直接寫入標籤表。
 
-        TRAINING 分類之 `audience_ids` 一律**靜默丟棄**（spec_us5 FR-009：該分類 MUST NOT 寫入可見對象）。
+        可見對象為 (單位, 職位) 配對（#437），經 multipart form 以**兩個平行陣列**傳入（form 無法
+        表達物件陣列），同索引成對。故必須檢核兩陣列等長——錯位的配對不會報錯，只會把可見範圍指給
+        另一組人。檢索標籤無單位維度，其 `UNIT_TAG_ID` 為 None。
+
+        TRAINING 分類之可見對象配對一律**靜默丟棄**（spec_us5 FR-009：該分類 MUST NOT 寫入可見對象）。
         前端雖已隱藏該欄位，仍須於伺服端把關——否則直接呼叫 API 可讓教材掛上可見對象，核准發布後經
         `apply_version_tags_to_doc` 套用至文件層，使教材出現在純閱覽者的文件庫檢索結果（`visibility.py`
-        純依標籤判定、無分類例外）。採靜默丟棄而非 422：此欄於該分類本就不該存在，擋下只會讓合法呼叫失敗。
+        純依標籤判定、無分類例外）。採靜默丟棄而非 422：此欄於該分類本就不該存在，擋下只會讓合法呼叫失敗；
+        長度檢核亦置於丟棄之後，否則教材會因為一個本就不該送的欄位而送不出去。
+
+        Args:
+            audience_unit_ids: 各配對之單位 TAG_ID（UNIT 組）。
+            audience_role_ids: 各配對之職位 TAG_ID（AUDIENCE 組），與前者同索引成對。
+            retrieval_ids: 檢索標籤 TAG_ID（RETRIEVAL 型）。
+            category_code: 文件分類；TRAINING 時丟棄整份配對。
+
+        Returns:
+            `(TAG_ID, UNIT_TAG_ID)` 清單（去重保序）；檢索標籤之 `UNIT_TAG_ID` 為 None。
+
+        Raises:
+            AppError: 兩陣列長度不等、或任一標籤不存在 / 已停用 / 組別不符（DM_DOC_010）。
         """
         if category_code == _TRAINING:
-            audience_ids = []
-        all_ids = list(dict.fromkeys([*audience_ids, *retrieval_ids]))
+            audience_unit_ids, audience_role_ids = [], []
+        if len(audience_unit_ids) != len(audience_role_ids):
+            raise AppError(status_code=422, detail="可見對象之單位與職位數量不符", error_code="DM_DOC_010")
+
+        all_ids = list(dict.fromkeys([*audience_unit_ids, *audience_role_ids, *retrieval_ids]))
         if not all_ids:
             return []
         kinds = await self._repo.classify_tags(db, all_ids)  # 僅啟用中者回傳
-        for tid in audience_ids:
+        for tid in audience_unit_ids:
+            if kinds.get(tid) != _UNIT:
+                raise AppError(status_code=422, detail="可見對象之單位無效或已停用", error_code="DM_DOC_010")
+        for tid in audience_role_ids:
             if kinds.get(tid) != _AUDIENCE:
                 raise AppError(status_code=422, detail="可見對象無效或已停用", error_code="DM_DOC_010")
         for tid in retrieval_ids:
             if kinds.get(tid) != _RETRIEVAL:
                 raise AppError(status_code=422, detail="檢索標籤無效或已停用", error_code="DM_DOC_010")
-        return all_ids
+
+        pairs: list[tuple[int, int | None]] = [
+            (role_id, unit_id) for unit_id, role_id in zip(audience_unit_ids, audience_role_ids, strict=True)
+        ]
+        pairs.extend((tid, None) for tid in retrieval_ids)
+        return list(dict.fromkeys(pairs))  # 去重、保序
 
 
 def _require(**fields: str) -> None:
-    """必填欄位非空檢核（strip 後為空即失敗）；缺任一 → 422 DM_DOC_004（DM-MSG-DM03-001）。"""
+    """必填欄位非空檢核（strip 後為空即失敗）；缺任一 → 422 DM_DOC_004（DM-MSG-DM08-001）。"""
     for name, value in fields.items():
         if not value:
             raise AppError(status_code=422, detail=f"必填欄位未填寫：{name}", error_code="DM_DOC_004")

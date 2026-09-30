@@ -25,7 +25,7 @@ import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 
 /**
- * ET06 答題頁（AC 4 / AC 5 / AC 6）。
+ * ET07 答題頁（AC 4 / AC 5 / AC 6）。
  *
  * ## 作答狀態是本地的，暫存是背景的
  *

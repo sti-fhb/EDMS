@@ -1,4 +1,4 @@
-"""ET04 我的課程與加入新課程 API（US4 / #247）。
+"""ET03 我的課程與加入新課程 API（US4 / #247）。
 
 router-level 只掛 `get_et_context`，**不掛 `require_et_roles(ET_STUDENT)`**——ET 學員
 角色於帳號建立當下即自動授予、存量帳號亦由 bootstrap seed 回填（`deps.py` 已載明），
@@ -89,7 +89,7 @@ async def my_courses(
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> MyCoursesResult:
-    """ET04 我的課程：四項統計 + 課程卡片清單。
+    """ET03 我的課程：四項統計 + 課程卡片清單。
 
     起始時間未到之課程不出現（AC 4）；已關閉課程仍出現並帶 `status=CLOSED`（AC 5）。
     """

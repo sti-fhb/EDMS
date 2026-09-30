@@ -1,4 +1,4 @@
-"""DM10 閱讀統計 KPI schema（US13 / UCDM13）。"""
+"""DM06 閱讀統計 KPI schema（US13 / UCDM13）。"""
 
 from pydantic import BaseModel
 

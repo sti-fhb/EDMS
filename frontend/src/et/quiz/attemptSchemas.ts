@@ -1,4 +1,4 @@
-/** ET06 測驗作答型別（對齊後端 `app/et/attempt/schemas.py`）。 */
+/** ET07 測驗作答型別（對齊後端 `app/et/attempt/schemas.py`）。 */
 
 /**
  * 作答中的選項——**沒有 `is_correct`**。
@@ -75,7 +75,7 @@ export interface AttemptResult {
   is_pass: boolean
   submitted_at: string
   remaining_attempts: number
-  /** 課程是否已關閉——成績頁據以顯示 ET-MSG-ET06-005（#280 裁示 Q3 = B：事後告知）。 */
+  /** 課程是否已關閉——成績頁據以顯示 ET-MSG-ET07-005（#280 裁示 Q3 = B：事後告知）。 */
   course_closed: boolean
   questions: QuestionResult[]
 }

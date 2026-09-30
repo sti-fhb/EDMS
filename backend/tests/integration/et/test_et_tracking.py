@@ -1,4 +1,4 @@
-"""ET03 學員學習狀況追蹤整合測試（US9 / #322）。
+"""ET02 學員學習狀況追蹤整合測試（US9 / #322）。
 
 此處只驗**需要真 DB 才驗得了**的事：跨表聚合（完課數 / 總項目數 / 最高分平均）、
 軟刪除過濾、以及「死欄位不可讀」這類只有真資料才會暴露的問題。
@@ -227,7 +227,7 @@ async def _attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int, s
 async def _in_progress_attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int = 1) -> int:
     """建一筆**作答中**（未提交）的 attempt。
 
-    與 `_attempt` 的差別只在 `status` 與 `submitted_at`，但這兩欄正是 `ET-MSG-ET03-003`
+    與 `_attempt` 的差別只在 `status` 與 `submitted_at`，但這兩欄正是 `ET-MSG-ET02-003`
     要分辨的東西——合用一個 helper 加參數會讓「這條在驗作答中」從測試名稱裡消失。
     """
     now = utcnow()
@@ -376,7 +376,7 @@ class TestStudentList:
 
     async def test_完課狀態不讀死欄位而是即時計算(self, client, db) -> None:
         """🔴 `ET_ENROLLMENT.COMPLETION_STATUS` **只在加入時寫入 `NOT_STARTED`**，
-        沒有任何路徑推進它（ET04 於 #284 已踩過並註明「不讀它」）。
+        沒有任何路徑推進它（ET03 於 #284 已踩過並註明「不讀它」）。
 
         本測試刻意把該欄位留在 `NOT_STARTED`，但讓學員實際完成所有項目——讀死欄位的
         實作會回 `NOT_STARTED`，即時計算才會回 `COMPLETED`。
@@ -575,7 +575,7 @@ class TestAttemptOverview:
         assert attempts[2]["is_pass"] is True
 
     async def test_未作答之測驗標示尚未作答(self, client, db) -> None:
-        """AC 8 / ET-MSG-ET03-005：該學員對某測驗無 attempt 時仍要列出那個測驗。
+        """AC 8 / ET-MSG-ET02-005：該學員對某測驗無 attempt 時仍要列出那個測驗。
 
         整個測驗不出現的話，教師分不出「他沒考」與「這門課沒這個測驗」。
         """
@@ -832,7 +832,7 @@ class TestRemoveStudent:
     async def test_移除作答中學員其attempt仍保留(self, client, db) -> None:
         """AC 7：有 `IN_PROGRESS` attempt 時仍允許移除，**該 attempt 保留並計入歷史**。
 
-        警告文案（ET-MSG-ET03-003）由前端顯示；後端不擋——擋下來會讓教師沒辦法移除一個
+        警告文案（ET-MSG-ET02-003）由前端顯示；後端不擋——擋下來會讓教師沒辦法移除一個
         正在作答的人，而那正是最需要移除的情境。
         """
         teacher = await _user(db, "t_tr24")
@@ -1061,7 +1061,7 @@ class TestSurveyResult:
         assert body["not_filled_count"] == 1, "已移除的學員不計入母體"
 
     async def test_尚無填答時統計為零而非空區塊(self, client, db) -> None:
-        """AC 12 / ET-MSG-ET03-006：各選項 0 人、已填 0 / 未填 N；明細為空清單。
+        """AC 12 / ET-MSG-ET02-006：各選項 0 人、已填 0 / 未填 N；明細為空清單。
 
         整個 `questions` 回空陣列會讓教師以為問卷沒有題目。
         """
@@ -1399,7 +1399,7 @@ class TestExportAudit:
 
 
 class TestInProgressAttemptFlag:
-    """`has_in_progress_attempt`——`ET-MSG-ET03-003` 的前提（#322 收尾盤點補）。
+    """`has_in_progress_attempt`——`ET-MSG-ET02-003` 的前提（#322 收尾盤點補）。
 
     AC 7 要求「若該學員有 `IN_PROGRESS` attempt **跳警告**」。前端要能分辨，後端就得
     回這個事實；原先 `StudentRow` 沒有這個欄位，前端只能無條件顯示「若正在作答」的

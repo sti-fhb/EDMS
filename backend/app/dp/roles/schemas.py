@@ -36,7 +36,13 @@ class AssignPayload(BaseModel):
 
 
 class GroupOption(BaseModel):
-    """群組可選項（DM 可見對象 / ET 受訓單位標籤）。"""
+    """群組可選項（DM 可見對象 / ET 受訓單位標籤）。
+
+    `kind` 為模組自報之項目類別，DP **原樣傳遞、不解讀其語意**（`sti-backend-boundaries`）。
+    DM 之可見對象為 (單位, 職位) 配對，故回兩類（`AUDIENCE` / `UNIT`）供畫面組成配對；
+    僅回單一類別之模組（如 ET）畫面即退化為單維多選。
+    """
 
     code: str
     name: str
+    kind: str | None = None

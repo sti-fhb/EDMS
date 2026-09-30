@@ -104,7 +104,7 @@ class DocRow(BaseModel):
     """教材引用之 DM 文件列（回應）。
 
     `doc_name` / `version_no` / `obsolete` 皆為**即時查得**（SRVDM001），非 ET 落地值。
-    `obsolete=True` 時前端顯示「此文件已廢止」警告（ET-MSG-ET02-002）並僅可逐筆刪除。
+    `obsolete=True` 時前端顯示「此文件已廢止」警告（ET-MSG-ET05-002）並僅可逐筆刪除。
 
     `unavailable` 表示該文件目前取不到（於 DM 被刪、或無發布版）——與「已廢止」不同：
     廢止文件學員仍讀得到廢止前最後版，取不到的則是真的沒東西。兩者都要讓教師看見，

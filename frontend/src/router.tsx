@@ -179,11 +179,11 @@ export const router = createBrowserRouter([
             path: "et",
             element: <RequireModule module="ET" />,
             children: [
-              // 依能力分流（#247 AC 1）：純學員 → ET04 我的課程；具建課能力者 → 課程列表
+              // 依能力分流（#247 AC 1）：純學員 → ET03 我的課程；具建課能力者 → 課程列表
               { index: true, element: <EtHomeRedirect /> },
               { path: "courses", element: <EtCourseListPage /> },
               {
-                // 週報明細下載之中繼頁（#325）：輸出含學員姓名 / Email，個資密度與 ET03
+                // 週報明細下載之中繼頁（#325）：輸出含學員姓名 / Email，個資密度與 ET02
                 // 同級，故守衛比照——權限邊界仍在後端（會 403），前端只是不給空殼入口。
                 path: "reports/weekly",
                 element: (
@@ -192,7 +192,7 @@ export const router = createBrowserRouter([
                   </RequireEtCourseManager>
                 ),
               },
-              // ET02 為課程列表之子頁、非側欄項目；靜態 new 置於動態 :courseId 前避免被誤捕
+              // ET05 為課程列表之子頁、非側欄項目；靜態 new 置於動態 :courseId 前避免被誤捕
               // #306：建立限教師（can_create_course）；編輯既有課程用 can_manage_courses——
               // 管理者不建課程但要能管理，兩者角色集不同（見 et/course/schemas.py）。
               {
@@ -212,7 +212,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                // ET03 含學員個別成績與**具名**問卷填答（`FR-ET-US9-08`），是 ET 個資
+                // ET02 含學員個別成績與**具名**問卷填答（`FR-ET-US9-08`），是 ET 個資
                 // 密度最高的一頁——守衛與 `courses/:courseId` 同為 `can_manage_courses`
                 // （教師或管理者），與後端 `require_et_roles(ET_TEACHER, ET_ADMIN)` 一致。
                 path: "students",
@@ -224,14 +224,14 @@ export const router = createBrowserRouter([
               },
               { path: "approvals", element: <EtApprovalQueryPage /> },
               { path: "my-courses", element: <EtMyCoursesPage /> },
-              // ET05 章節學習（#255）：學員自我的課程卡片進入，非側欄項目
+              // ET06 章節學習（#255）：學員自我的課程卡片進入，非側欄項目
               { path: "courses/:courseId/learn", element: <EtLearnPage /> },
-              // ET05 課後問卷填寫（#284）：自 ET05 側欄底部入口進入，非側欄項目
+              // ET06 課後問卷填寫（#284）：自 ET06 側欄底部入口進入，非側欄項目
               { path: "courses/:courseId/survey", element: <EtSurveyFillPage /> },
               // ⚠️ `/et/invite?token=…`（Email 邀請落點，#273）已於 #362 移除：邀請即加入，
               // 沒有要「接受」的東西。**已寄出的舊信裡那條連結會 404**——裁示明示接受
               // （受邀者是既有帳號，在「我的課程」就看得到課程，死連結不擋任何人進課程）。
-              // 測驗資訊沒有自己的頁——它就地渲染在 ET05 學習頁的內容區（`ContentPane`），
+              // 測驗資訊沒有自己的頁——它就地渲染在 ET06 學習頁的內容區（`ContentPane`），
               // 與影片 / 文件一致。作答與成績才是獨立畫面。
               { path: "attempts/:attemptId", element: <EtQuizAnswerPage /> },
               { path: "attempts/:attemptId/result", element: <EtQuizResultPage /> },

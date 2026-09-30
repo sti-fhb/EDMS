@@ -7,6 +7,7 @@
 指定審核者清單為 `DM_USER_ROLE`（DM 自持）join `DP_USER` 之唯讀查詢。
 """
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -21,6 +22,8 @@ from app.dm.review.models import DmReview
 from app.dm.roles.reviewer_query import assignable_reviewers_stmt
 from app.dp.users.models import DpUser
 
+logger = logging.getLogger(__name__)
+
 _DRAFT = "DRAFT"
 _PENDING_REVIEW = "PENDING_REVIEW"
 _PENDING = "PENDING"
@@ -29,15 +32,27 @@ _PUBLISHED = "PUBLISHED"
 _MANUAL = "MANUAL"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
+_UNIT = "UNIT"  # 單位標籤組之 GROUP_TYPE（#437）
 
 
-def _split_by_group(rows) -> dict[str, list[str]]:
-    """把 (TAG_ID, GROUP_TYPE) 列依組型分為可見對象 / 檢索兩組（TAG_ID 轉字串供前端表單用）。"""
-    audience: list[str] = []
+def _split_by_group(rows) -> dict[str, list]:
+    """把 (TAG_ID, GROUP_TYPE, UNIT_TAG_ID) 列分為可見對象配對 / 檢索標籤（ID 轉字串供前端表單用）。
+
+    可見對象為 (單位, 職位) 配對（#437）。AUDIENCE 組但 `UNIT_TAG_ID` 為 NULL 者**略過**——該列
+    配對不完整、於 `visibility.py` 不賦予任何可見性，若回給表單會讓撰寫者以為它生效。
+    """
+    audience_pairs: list[dict[str, str]] = []
     retrieval: list[str] = []
-    for tag_id, group_type in rows:
-        (audience if group_type == _AUDIENCE else retrieval).append(str(tag_id))
-    return {"audience_ids": audience, "retrieval_ids": retrieval}
+    for tag_id, group_type, unit_tag_id in rows:
+        if group_type != _AUDIENCE:
+            retrieval.append(str(tag_id))
+        elif unit_tag_id is None:
+            # 扣下任何一列都要留痕：正常情況不會發生（migration 已回填、service 兩欄必填），
+            # 若出現代表資料層有殘留，而使用者只會看到「可見對象少了一列」且無從追查。
+            logger.warning("可見對象配對缺單位，已於表單預帶時略過 tag_id=%s", tag_id)
+        else:
+            audience_pairs.append({"unit_id": str(unit_tag_id), "audience_id": str(tag_id)})
+    return {"audience_pairs": audience_pairs, "retrieval_ids": retrieval}
 
 
 class EditorRepository:
@@ -106,46 +121,72 @@ class EditorRepository:
         return ver
 
     async def set_version_tags(
-        self, db: AsyncSession, *, version_id: int, tag_ids: Sequence[int], op: OperatorInfo
+        self, db: AsyncSession, *, version_id: int, tag_pairs: Sequence[tuple[int, int | None]], op: OperatorInfo
     ) -> None:
         """設定**版本層**標籤快照為指定集合——差異式覆寫。
 
         草稿階段之標籤提議值存於此；核准發布時由簽核端套用至文件層 `DM_DOC_TAG`（#377）。
-        採軟刪除復用避開 UQ(VERSION_ID, TAG_ID)：目標集內既有列復活 / 新列插入、目標集外之有效列軟刪除。
+        採軟刪除復用避開 UQ(VERSION_ID, TAG_ID, UNIT_TAG_ID)：目標集內既有列復活 / 新列插入、
+        目標集外之有效列軟刪除。
+
+        **比對鍵為 `(TAG_ID, UNIT_TAG_ID)` 整組**（#437）：可見對象為 (單位, 職位) 配對，同一職位
+        可對應多個單位，僅以 `TAG_ID` 比對會把「松山的護理師」與「三總的護理師」視為同一列。
+
+        Args:
+            version_id: 目標版本。
+            tag_pairs: `(TAG_ID, UNIT_TAG_ID)` 清單；檢索標籤之 `UNIT_TAG_ID` 為 None。
+            op: 操作者（寫入稽核欄位）。
         """
         now = utcnow()
-        wanted = list(dict.fromkeys(tag_ids))  # 去重、保序
+        wanted = list(dict.fromkeys(tag_pairs))  # 去重、保序
         wanted_set = set(wanted)
         existing = {
-            row.tag_id: row
+            (row.tag_id, row.unit_tag_id): row
             for row in (await db.scalars(select(DmVersionTag).where(DmVersionTag.version_id == version_id))).all()
         }
-        for tid in wanted:
-            row = existing.get(tid)
+        for key in wanted:
+            row = existing.get(key)
             if row is None:
-                db.add(DmVersionTag(version_id=version_id, tag_id=tid, created_user=op.user_id, created_date=now))
+                tag_id, unit_tag_id = key
+                db.add(
+                    DmVersionTag(
+                        version_id=version_id,
+                        tag_id=tag_id,
+                        unit_tag_id=unit_tag_id,
+                        created_user=op.user_id,
+                        created_date=now,
+                    )
+                )
             elif row.deleted != 0:
                 row.deleted = 0
                 row.updated_user, row.updated_date = op.user_id, now
-        for tid, row in existing.items():
-            if tid not in wanted_set and row.deleted == 0:
+        for key, row in existing.items():
+            if key not in wanted_set and row.deleted == 0:
                 row.deleted = 1
                 row.updated_user, row.updated_date = op.user_id, now
         await db.flush()
 
     async def has_audience_tag(self, db: AsyncSession, version_id: int) -> bool:
-        """該**版本**是否至少掛 1 個有效之可見對象（AUDIENCE 組）標籤（送簽檢核 DM_DOC_005）。
+        """該**版本**是否至少掛 1 組**完整**之可見對象配對（送簽檢核 DM_DOC_005）。
 
         查版本層快照而非文件層：標籤於核准發布時才套用至文件層，送簽當下文件層仍為舊值（#377）。
+
+        兩個判定細節（#437）：
+
+        - 以 `TAG_GROUP_CODE = 'AUDIENCE'`（職位組）判定，**不可**改用 `GROUP_TYPE`——單位組之
+          `GROUP_TYPE` 雖獨立為 `'UNIT'`，但用組型判定會讓本檢核的語意繫於一個「用途分類」欄位，
+          日後新增任何權限類標籤組即誤收。此處要問的是「有沒有職位」，就查職位組。
+        - 要求 `UNIT_TAG_ID IS NOT NULL`：配對缺單位者於 `visibility.py` 不賦予任何可見性，
+          放行等於讓文件在「沒人看得到」的狀態下發布。
         """
         got = await db.scalar(
             select(DmVersionTag.version_tag_id)
             .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
-            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
             .where(
                 DmVersionTag.version_id == version_id,
                 DmVersionTag.deleted == 0,
-                DmTagGroup.group_type == _AUDIENCE,
+                DmTag.tag_group_code == _AUDIENCE,
+                DmVersionTag.unit_tag_id.is_not(None),
             )
         )
         return got is not None
@@ -201,9 +242,9 @@ class EditorRepository:
         )
 
     async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> dict[str, list[str]]:
-        """取文件現有有效標籤，依組型分為可見對象 / 檢索（TAG_ID 字串），供編輯模式預帶。"""
+        """取文件現有有效標籤：可見對象 (單位, 職位) 配對 + 檢索標籤（ID 字串），供編輯模式預帶。"""
         rows = await db.execute(
-            select(DmTag.tag_id, DmTagGroup.group_type)
+            select(DmTag.tag_id, DmTagGroup.group_type, DmDocTag.unit_tag_id)
             .select_from(DmDocTag)
             .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
@@ -213,9 +254,9 @@ class EditorRepository:
         return _split_by_group(rows.all())
 
     async def get_version_tags(self, db: AsyncSession, version_id: int) -> dict[str, list[str]]:
-        """取該版本快照之標籤，依組型分為可見對象 / 檢索（TAG_ID 字串），供續編既有草稿時預帶。"""
+        """取該版本快照之標籤：可見對象配對 + 檢索標籤（ID 字串），供續編既有草稿時預帶。"""
         rows = await db.execute(
-            select(DmTag.tag_id, DmTagGroup.group_type)
+            select(DmTag.tag_id, DmTagGroup.group_type, DmVersionTag.unit_tag_id)
             .select_from(DmVersionTag)
             .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
@@ -228,7 +269,7 @@ class EditorRepository:
         """版本號是否已被本文件之「已發布」版本使用（PUBLISHED / SUPERSEDED）。
 
         僅卡與已發布版本重複——草稿 / 送審中 / 退回不計，故多人可各自草稿填同版號；送簽時據此檢核
-        （DM-MSG-DM03-009）。DB partial unique index（UX_DM_DOC_VERSION_RELEASED_NO）為並發後盾。
+        （DM-MSG-DM08-009）。DB partial unique index（UX_DM_DOC_VERSION_RELEASED_NO）為並發後盾。
         """
         got = await db.scalar(
             select(DmDocVersion.version_id).where(
@@ -241,7 +282,7 @@ class EditorRepository:
         return got is not None
 
     async def has_pending_obsolete(self, db: AsyncSession, doc_id: str) -> bool:
-        """該文件是否有進行中（PENDING）之廢止送審（→ 擋上傳新版本 DM-MSG-DM03-004）。"""
+        """該文件是否有進行中（PENDING）之廢止送審（→ 擋上傳新版本 DM-MSG-DM08-004）。"""
         got = await db.scalar(
             select(DmReview.review_id).where(
                 DmReview.doc_id == doc_id, DmReview.review_type == _OBSOLETE, DmReview.status == _PENDING
@@ -250,7 +291,7 @@ class EditorRepository:
         return got is not None
 
     async def manual_func_published_elsewhere(self, db: AsyncSession, func_code: str, exclude_doc_id: str) -> bool:
-        """同 func_code 是否已有其他「已發布」系統操作手冊（手冊唯一 DM-MSG-DM03-003；DB 部分唯一索引為後盾）。"""
+        """同 func_code 是否已有其他「已發布」系統操作手冊（手冊唯一 DM-MSG-DM08-003；DB 部分唯一索引為後盾）。"""
         got = await db.scalar(
             select(DmDocument.doc_id).where(
                 DmDocument.func_code == func_code,
@@ -344,6 +385,20 @@ class EditorRepository:
             select(DmTag.tag_id, DmTag.tag_name)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
             .where(DmTagGroup.group_type == _AUDIENCE, DmTag.is_enabled.is_(True))
+            .order_by(DmTag.tag_id)
+        )
+        return list((await db.execute(stmt)).all())
+
+    async def list_unit_tags(self, db: AsyncSession) -> list[Row]:
+        """單位下拉（UNIT 組、啟用中；**含通用值「全單位」**＝不限單位）。
+
+        單位為可見對象配對之一端（#437）。其 `GROUP_TYPE` 獨立為 `'UNIT'`，故不會被
+        `list_audience_tags`（查 `GROUP_TYPE='AUDIENCE'`）收進職位下拉。
+        """
+        stmt = (
+            select(DmTag.tag_id, DmTag.tag_name)
+            .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .where(DmTagGroup.group_type == _UNIT, DmTag.is_enabled.is_(True))
             .order_by(DmTag.tag_id)
         )
         return list((await db.execute(stmt)).all())

@@ -339,13 +339,13 @@ class TestEnrollmentBlocked:
         assert got.json()["error_code"] == "ET_ENROLL_002"
 
     async def test_已關閉課程仍留在我的課程清單並標示已關閉(self, client, db, source: str) -> None:
-        """AC 9 / US11 FR-05：已關閉課程 MUST 仍顯示於 ET04 並標示「已關閉」。
+        """AC 9 / US11 FR-05：已關閉課程 MUST 仍顯示於 ET03 並標示「已關閉」。
 
         過濾掉會讓學員的歷史紀錄從眼前消失；卡片仍要能點進去唯讀回看。
 
         `is_closed` 是本 issue 新增的欄位（#288）：**期間已過時 `status` 仍是
         `PUBLISHED`**，卡片若自己判 `status == "CLOSED"` 會標成「已發布」，而學員點進去
-        ET05 是唯讀的——兩個畫面互相矛盾。這條測試在 `expired` 那一輪就是釘住這件事。
+        ET06 是唯讀的——兩個畫面互相矛盾。這條測試在 `expired` 那一輪就是釘住這件事。
         """
         ctx = await _ready(client, db, f"en2{source[:3]}")
         await _apply_close(client, db, ctx, source)

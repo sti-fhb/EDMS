@@ -1,6 +1,6 @@
 """閱讀統計 KPI 服務（US13）。
 
-兩塊：① DM10 儀表板唯讀查詢（DM_ADMIN，逐文件應看/已看/未看/閱讀率 + 統計卡 + CSV）
+兩塊：① DM06 儀表板唯讀查詢（DM_ADMIN，逐文件應看/已看/未看/閱讀率 + 統計卡 + CSV）
 ② SCHDM001 每週排程之核心（KPI 週報予全 DM_ADMIN、未讀提醒逐位未看閱覽者一信）。
 
 「應看」母體＝具 DM_VIEWER 角色且可見對象相符者（掛「全體」→ 全部 DM_VIEWER；否則 audience 交集）；
@@ -54,13 +54,39 @@ class WeeklyRunResult:
     unread_notified: int  # 收到未讀提醒之閱覽者數（實際排入者）
 
 
+def _pair_visible(doc_pairs: set[tuple[int | None, int | None]], user_pairs: set[tuple[int | None, int]]) -> bool:
+    """此文件之可見對象配對是否涵蓋該使用者（#437）。
+
+    Python 版之判定，語意須與 SQL 版 `visibility.audience_pair_match` **完全一致**：
+    文件端之通用值已由 `doc_audience` 正規化為 `None`（「全單位」/「全體」）。
+
+        可見 ⟺ ∃ 文件配對 (du, dp)：
+                (du is None AND dp is None)                      -- 全系統，不需任何授權
+                OR ∃ 使用者配對 (uu, up)：
+                     (du is None OR du == uu) AND (dp is None OR dp == up)
+
+    人側 `uu is None`（單位未指定）時 `du == uu` 恆為 False，故僅能匹配 `du is None`
+    ——與 SQL 端 NULL 比較的行為相同。
+
+    ⚠️ 兩份實作各自存在是因為 KPI 需在 Python 層對「文件 × 閱覽者」做交叉統計；改動判定規則時
+    **兩邊都要改**。`test_dm_kpi.py` 之配對案例即為此而設。
+    """
+    for du, dp in doc_pairs:
+        if du is None and dp is None:
+            return True
+        for uu, up in user_pairs:
+            if (du is None or du == uu) and (dp is None or dp == up):
+                return True
+    return False
+
+
 def _pct(rate: float | None) -> str:
     """閱讀率轉顯示字串（None → 「—」）。"""
     return "—" if rate is None else f"{rate * 100:.1f}%"
 
 
 class KpiService:
-    """DM10 閱讀統計 KPI（查詢 / 匯出 / 每週排程）。"""
+    """DM06 閱讀統計 KPI（查詢 / 匯出 / 每週排程）。"""
 
     def __init__(self, repository: KpiRepository | None = None, notifier: DmNotifier | None = None) -> None:
         self._repo = repository or KpiRepository()
@@ -68,7 +94,7 @@ class KpiService:
 
     @staticmethod
     def _ensure_admin(roles: Iterable[str]) -> None:
-        """FR-002 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM10-002，擋直連）。"""
+        """FR-002 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM06-002，擋直連）。"""
         if not has_role(roles, DM_ADMIN):
             raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
 
@@ -83,11 +109,8 @@ class KpiService:
 
         stats: list[_DocKpi] = []
         for d in docs:
-            tags, has_all = doc_aud.get(d.doc_id, (set(), False))
-            if has_all:
-                members = set(viewer_ids)
-            else:
-                members = {u for u in viewer_ids if viewer_tags.get(u, frozenset()) & tags}
+            doc_pairs = doc_aud.get(d.doc_id, set())
+            members = {u for u in viewer_ids if _pair_visible(doc_pairs, viewer_tags.get(u, frozenset()))}
             readers = reads.get(d.doc_id, set())
             seen_members = members & readers
             should_see = len(members)
@@ -126,7 +149,7 @@ class KpiService:
         page: int,
         limit: int,
     ) -> KpiListResponse:
-        """DM10 儀表板（FR-002，DM_ADMIN）：逐文件 KPI（後端分頁）+ 統計卡摘要。"""
+        """DM06 儀表板（FR-002，DM_ADMIN）：逐文件 KPI（後端分頁）+ 統計卡摘要。"""
         self._ensure_admin(roles)
         stats = await self._compute(db, keyword=keyword, category=category)
         summary = self._summary(stats)

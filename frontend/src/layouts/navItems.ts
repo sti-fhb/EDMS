@@ -31,9 +31,9 @@ export interface NavItem extends Screen {
    * 畫面代號（#421）：**取自各模組 spec 之〈畫面代號對照表〉，不得自訂**
    * （`docs/specs/{dp,et,dm}/spec.md`）。格式為模組碼 + 兩位數字。
    *
-   * 編號在側欄中不連續是正常的——部分畫面沒有側欄入口：`DP00` 為登入後主頁（中性歡迎頁、
-   * index route）、`DP01`~`DP04` 為登入 / 註冊 / 忘記密碼 / 個資頁、`ET02` 課程建立為課程列表
-   * 之子頁、`DM02` 文件詳細頁由清單進入。
+   * 2026-09-30 起各模組側欄項目依側欄順序連號（ET01–ET04、DM01–DM06、DP01–DP06）；
+   * 無側欄入口的畫面接續其後（如 `ET05` 課程建立為課程列表之子頁、`DM07` 文件詳細頁由清單進入、
+   * `DP07`~`DP10` 為登入 / 註冊 / 忘記密碼 / 個資頁）。新增側欄項目須同步改 spec 對照表。
    * 交付甲方的文件以此編號標示作業，畫面上必須對得起來。
    */
   code: string
@@ -70,7 +70,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     // 教育訓練（#202）：對齊 wireframe ET 側欄 4 項；課程列表以外各頁目前為骨架佔位。
     // requiresModule=ET：無任一 ET 角色者整個群組不顯示（module-summary 判定；
     // 該端點之 ET 判定已於 #201 由寫死 true 改為實查 et_has_any_role）。
-    // ⚠️ ET02 課程建立 / 編輯**不是**側欄項目——它是課程列表的子頁
+    // ⚠️ ET05 課程建立 / 編輯**不是**側欄項目——它是課程列表的子頁
     //（/et/courses/new、/et/courses/:courseId）。
     title: "教育訓練",
     requiresModule: "ET",
@@ -79,13 +79,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // （#247）——ET 三種角色可任意組合，純學員看到「課程列表 / 學員」等於看到
       // 點進去只會 403 的項目，純教師看到「我的課程」則是一個空清單。
       { code: "ET01", icon: MenuBookIcon, label: "課程列表", path: "/et/courses", requiresEtManage: true },
-      { code: "ET03", icon: SchoolIcon, label: "學員", path: "/et/students", requiresEtManage: true },
-      { code: "ET04", icon: AutoStoriesIcon, label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
+      { code: "ET02", icon: SchoolIcon, label: "學員", path: "/et/students", requiresEtManage: true },
+      { code: "ET03", icon: AutoStoriesIcon, label: "我的課程", path: "/et/my-courses", requiresEtLearn: true },
       // 核可查詢**兩種角色都要**，但看到的內容不同：學員查自己已通過核可的課程；
       // 教師依姓名查——**已通過**的涵蓋全部課程，**不通過 / 已撤銷 / 考核備註**僅限
       // 自己所開設的課程（US17 SA 裁示 C，見 `app/et/approval/query_rules.py`）。
       // 不掛任何角色旗標＝具任一 ET 角色即顯示；資料邊界完全由後端負責。
-      { code: "ET10", icon: FactCheckIcon, label: "核可查詢", path: "/et/approvals" },
+      { code: "ET04", icon: FactCheckIcon, label: "核可查詢", path: "/et/approvals" },
     ],
   },
   {
@@ -97,12 +97,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { code: "DM01", icon: LibraryBooksIcon, label: "文件庫", path: "/dm/library" },
       // 簽核中心（#250）：限 DM_REVIEWER——原本管理者 / 編輯者也看得到，但清單依
       // assigned_reviewer=登入者 過濾，點進去永遠空白（SA Q3=A 裁示嚴格只認審核者）
-      { code: "DM04", icon: AssignmentTurnedInIcon, label: "簽核中心", path: "/dm/review", requiresDmReviewerAccess: true },
-      { code: "DM06", icon: FolderOffIcon, label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
-      { code: "DM07", icon: AccountBoxIcon, label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
-      { code: "DM08", icon: HistoryIcon, label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
+      { code: "DM02", icon: AssignmentTurnedInIcon, label: "簽核中心", path: "/dm/review", requiresDmReviewerAccess: true },
+      { code: "DM03", icon: FolderOffIcon, label: "已廢止文件查詢", path: "/dm/obsolete", requiresDmAdminAccess: true },
+      { code: "DM04", icon: AccountBoxIcon, label: "個人專區", path: "/dm/me", requiresDmPersonalAccess: true },
+      { code: "DM05", icon: HistoryIcon, label: "文件變更歷程查詢", path: "/dm/change-log", requiresDmAdminAccess: true },
       // US13 KPI 為管理者功能，與路由守衛 RequireDmAdmin 一致（#250 / main 同時補上此 flag）
-      { code: "DM10", icon: BarChartIcon, label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
+      { code: "DM06", icon: BarChartIcon, label: "閱讀統計 KPI", path: "/dm/kpi", requiresDmAdminAccess: true },
     ],
   },
   {
@@ -113,19 +113,19 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     requiresAnyModuleAdmin: true,
     items: [
       // 標籤一律採用 spec 對照表之畫面名稱（#421）：交付文件以畫面碼 + 名稱標示作業，
-      // 側欄若用簡稱（如「稽核日誌」對 DP09「操作記錄查詢」），甲方對不起來。
-      { code: "DP05", icon: ManageAccountsIcon, label: "使用者管理", path: "/dp/users" },
-      { code: "DP06", icon: AdminPanelSettingsIcon, label: "權限管理", path: "/dp/roles" },
-      { code: "DP07", icon: TuneIcon, label: "系統參數與清單維護", path: "/dp/params" },
-      { code: "DP08", icon: EmailIcon, label: "通知範本維護", path: "/dp/templates" },
-      { code: "DP09", icon: ManageSearchIcon, label: "操作記錄查詢", path: "/dp/audit" },
-      { code: "DP10", icon: ScheduleIcon, label: "排程作業總覽", path: "/dp/schedule" },
+      // 側欄若用簡稱（如「稽核日誌」對 DP05「操作記錄查詢」），甲方對不起來。
+      { code: "DP01", icon: ManageAccountsIcon, label: "使用者管理", path: "/dp/users" },
+      { code: "DP02", icon: AdminPanelSettingsIcon, label: "權限管理", path: "/dp/roles" },
+      { code: "DP03", icon: TuneIcon, label: "系統參數與清單維護", path: "/dp/params" },
+      { code: "DP04", icon: EmailIcon, label: "通知範本維護", path: "/dp/templates" },
+      { code: "DP05", icon: ManageSearchIcon, label: "操作記錄查詢", path: "/dp/audit" },
+      { code: "DP06", icon: ScheduleIcon, label: "排程作業總覽", path: "/dp/schedule" },
     ],
   },
 ]
 
-/** 無側欄入口、但有自己頁面標題的畫面（子頁）。ET02 頁面依模式以 `title` 覆寫為「新增課程」/「課程編輯」，此 label 僅為後備。 */
-const SUBPAGE_SCREENS: readonly Screen[] = [{ code: "ET02", label: "課程建立", icon: EditNoteIcon }]
+/** 無側欄入口、但有自己頁面標題的畫面（子頁）。ET05 頁面依模式以 `title` 覆寫為「新增課程」/「課程編輯」，此 label 僅為後備。 */
+const SUBPAGE_SCREENS: readonly Screen[] = [{ code: "ET05", label: "課程建立", icon: EditNoteIcon }]
 
 const SCREENS: ReadonlyMap<string, Screen> = new Map(
   [...NAV_GROUPS.flatMap((group) => group.items), ...SUBPAGE_SCREENS].map((screen) => [screen.code, screen]),

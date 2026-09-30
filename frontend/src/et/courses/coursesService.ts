@@ -14,7 +14,7 @@ import type {
   TagOption,
 } from "./schemas"
 
-/** ET02 課程骨架與章節編排 API（US3 / #202）。 */
+/** ET05 課程骨架與章節編排 API（US3 / #202）。 */
 export const coursesApi = {
   /** 當前使用者之課程操作能力（回「能力」而非「角色」，比照 DM `Capabilities`）。 */
   getCapabilities: async (): Promise<Capabilities> => {
@@ -36,7 +36,7 @@ export const coursesApi = {
   /**
    * ET01 篩選用的標籤下拉：**全部含停用者**。
    *
-   * ⚠️ 與 `listTags()` 語意相反、不可互換——那支是 ET02 編輯時掛標籤用的（停用者不得
+   * ⚠️ 與 `listTags()` 語意相反、不可互換——那支是 ET05 編輯時掛標籤用的（停用者不得
    * 新掛故排除）。用錯會讓掛著已停用標籤的歷史課程搜不到，而畫面上沒有任何異常。
    */
   listFilterTags: async (): Promise<TagOption[]> => {

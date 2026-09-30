@@ -164,7 +164,7 @@ export function UsersPage() {
     // 待啟用邀請頁籤
     return (
       <CrudPageLayout
-        code="DP05"
+        code="DP01"
         actions={<CrudActions onRefresh={refreshInvites} onAdd={accounts.openCreate} addLabel="建立帳號" />}
         filterContent={
           <>
@@ -209,7 +209,7 @@ export function UsersPage() {
   // 帳號頁籤
   return (
     <CrudPageLayout
-      code="DP05"
+      code="DP01"
       actions={<CrudActions onRefresh={refreshAccounts} onAdd={accounts.openCreate} addLabel="建立帳號" />}
       filterContent={
         <>

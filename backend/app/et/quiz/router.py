@@ -1,7 +1,7 @@
 """ET 測驗設定與題目 API（US3 / #203）。
 
 router-level 掛 `get_et_context` + `require_et_roles(ET_TEACHER, ET_ADMIN)`——本
-router 服務的是 ET02 教師編輯畫面，且回應含 `OptionRow.is_correct`（正確答案）。
+router 服務的是 ET05 教師編輯畫面，且回應含 `OptionRow.is_correct`（正確答案）。
 若只掛 `get_et_context`，等同任何登入者（人人皆有學員角色）都能把答案撈出來。
 
 ⚠️ **答案只對該課程擁有者可見（#358 第 2 項）**：`GET /quizzes/{id}` 對非擁有者把

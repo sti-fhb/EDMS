@@ -1,9 +1,9 @@
 import { http } from "../../services/http"
-import type { ApprovalQueryParams, ApprovalQueryRow, MyApprovalRow } from "./schemas"
+import type { ApprovalCourseOption, ApprovalQueryParams, ApprovalQueryRow, MyApprovalRow } from "./schemas"
 import type { PagedResult } from "../../hooks/usePagedQuery"
 
 /**
- * ET10 核可查詢 API（US17 / #385）——**唯讀**，不含任何核可 / 撤銷動作（那些在 US16）。
+ * ET04 核可查詢 API（US17 / #385）——**唯讀**，不含任何核可 / 撤銷動作（那些在 US16）。
  *
  * 兩支端點**刻意分開**而非同一支加參數：授權模型、回應欄位與資料範圍三者都不同。
  * `mine` 不帶任何識別參數——對象由後端從 token 取得，前端沒有可傳錯的東西。
@@ -24,6 +24,18 @@ export const approvalsApi = {
    */
   search: async (params: ApprovalQueryParams): Promise<PagedResult<ApprovalQueryRow>> => {
     const { data } = await http.post<PagedResult<ApprovalQueryRow>>("/et/approvals/search", params)
+    return data
+  },
+
+  /**
+   * ET04 課程篩選下拉的選項——**有核可紀錄的**課程（#439）。教師只取得自己開設的課。
+   *
+   * ⛔ 不要改用 `coursesApi.list()`：那支的 `scope=all` 只給「已發布且期間未過」，
+   * 而核可紀錄絕大多數落在**已結束**的課程上——管理者會發現最相關的課全部不在下拉裡，
+   * 且畫面不會說明任何事；`scope=mine` 則對管理者是空的。
+   */
+  listFilterCourses: async (): Promise<ApprovalCourseOption[]> => {
+    const { data } = await http.get<ApprovalCourseOption[]>("/et/approvals/filter-courses")
     return data
   },
 

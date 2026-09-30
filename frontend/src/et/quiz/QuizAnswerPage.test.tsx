@@ -28,7 +28,7 @@ beforeEach(() => {
   setHidden(false)
 })
 
-describe("ET06 答題頁", () => {
+describe("ET07 答題頁", () => {
   it("依快照順序呈現題目，且**不含正確答案**", async () => {
     // 正確答案存在於快照，但作答中送出去等於印在網頁原始碼上——洗牌設計會完全失效
     const { container } = renderWithProviders(<EtQuizAnswerPage />)

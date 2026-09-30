@@ -1,4 +1,4 @@
-"""ET03 學員學習狀況追蹤之請求 / 回應 schema（US9 / #322）。"""
+"""ET02 學員學習狀況追蹤之請求 / 回應 schema（US9 / #322）。"""
 
 from datetime import datetime
 from decimal import Decimal
@@ -35,7 +35,7 @@ class StudentRow(BaseModel):
 
     `ET_ENROLLMENT.COMPLETION_STATUS` 只在加入課程時寫入 `NOT_STARTED`，**沒有任何路徑
     推進它**；`COMPLETED_AT` 則全無寫入點。讀它們會讓每位學員永遠顯示「未開始」，而
-    畫面上看不出資料是死的。ET04「我的課程」於 #284 踩過同一個坑並已改為即時導出
+    畫面上看不出資料是死的。ET03「我的課程」於 #284 踩過同一個坑並已改為即時導出
     （`enrollment/service.my_courses` 有對應註解），本頁沿用該做法。
     """
 
@@ -53,7 +53,7 @@ class StudentRow(BaseModel):
     #: 最近一次學習動作**或測驗提交**時間（取兩者較晚者，見 service）。
     last_activity_at: datetime | None
     #: 是否有**作答中（未提交）**的 attempt——供前端決定移除時是否顯示
-    #: `ET-MSG-ET03-003` 的警告版文案（AC 7）。
+    #: `ET-MSG-ET02-003` 的警告版文案（AC 7）。
     #:
     #: ⚠️ 與上方 `completion_status` 的 `IN_PROGRESS` **無關**：那是課程學習進行中
     #: （由完成項目數導出），這是「手上有一份還沒交的考卷」。
@@ -100,7 +100,7 @@ class TeacherAttemptRow(BaseModel):
 class TeacherQuizRow(BaseModel):
     """區塊 2：某學員於某測驗的作答概況。
 
-    `attempts` 為空代表**尚未作答**（ET-MSG-ET03-005）——該測驗仍要列出，否則教師
+    `attempts` 為空代表**尚未作答**（ET-MSG-ET02-005）——該測驗仍要列出，否則教師
     分不出「他沒考」與「這門課沒這個測驗」。
     """
 

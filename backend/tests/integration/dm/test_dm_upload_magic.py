@@ -15,6 +15,12 @@ from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
 
+
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 _svc = EditorService()
 
 
@@ -47,7 +53,8 @@ async def _create(db, *, filename, data, mime):
         doc_name="測試",
         category_code="SOP",
         func_code=None,
-        audience_ids=[aud],
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud],
         retrieval_ids=[],
         version_no="1.0",
         change_summary="首版",

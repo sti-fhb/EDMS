@@ -23,7 +23,7 @@ class AssignmentView:
     """單一使用者於某模組之現況（§3 批次載入用）。"""
 
     roles: frozenset[str]
-    groups: frozenset[str]  # DM＝AUDIENCE 標籤 TAG_ID；ET＝受訓單位標籤
+    groups: frozenset[str]  # 模組自定語意；DM＝"{單位}:{職位}" 配對編碼（#437）、ET＝受訓單位標籤
     last_modified_by: str | None
     last_modified_date: datetime | None
 
@@ -37,7 +37,7 @@ class ControlledItemView:
     name: str
     is_builtin: bool
     is_enabled: bool
-    group_type: str | None = None  # 僅 TAG：'AUDIENCE' | 'RETRIEVAL'
+    group_type: str | None = None  # 僅 TAG：'AUDIENCE' | 'RETRIEVAL' | 'UNIT'（DM 可見對象之單位維度）
     tag_group_code: str | None = None  # 僅 TAG
 
 

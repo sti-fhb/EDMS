@@ -1,4 +1,4 @@
-"""ET05 學習進度整合測試（US5 / #274）。
+"""ET06 學習進度整合測試（US5 / #274）。
 
 覆蓋率的四條核心規則（聯集去重、倍速、跳躍、normalize 不改變結果）已於
 `tests/unit/et/test_progress_rules.py` 以**純函式**驗完。此處只驗**需要真 DB 才驗得了**
@@ -364,7 +364,7 @@ class TestMyCoursesProgress:
     """「我的課程」卡片的 `progress_pct`（#274 填實 #247 留下的接點）。"""
 
     async def test_完成一半項目時卡片顯示五十(self, client, db) -> None:
-        """完成項目數 ÷ 總項目數，與 ET05 側欄的課程進度條同一定義。"""
+        """完成項目數 ÷ 總項目數，與 ET06 側欄的課程進度條同一定義。"""
         teacher = await _user(db, "t_prog20", ROLE_TEACHER)
         student = await _user(db, "s_prog20")
         course = await _published_course(client, db, teacher, chapters=[False, False], code="31000020")

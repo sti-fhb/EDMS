@@ -1,4 +1,4 @@
-/** ET10 核可查詢（US17 / #385）之 API 型別。 */
+/** ET04 核可查詢（US17 / #385）之 API 型別。 */
 
 /** 教師 / 管理者視角的一列（`FR-ET-US17-01`）。 */
 export interface ApprovalQueryRow {
@@ -31,9 +31,32 @@ export interface MyApprovalRow {
 }
 
 export interface ApprovalQueryParams {
-  /** 學員**姓名或 Email**（皆為部分比對，擇一命中即可，#436）。 */
-  keyword: string
+  /**
+   * 學員**姓名或 Email**（皆為部分比對，擇一命中即可，#436）。
+   *
+   * **選填**（#439）——與 `course_id`「至少給一個」，兩者皆不給後端回 422
+   * `ET_APPROVAL_006`。⛔ 不要為了型別方便改回必填：只給課程的查詢正是本次要加的用法。
+   */
+  keyword?: string
+  /**
+   * 課程篩選（#439）。
+   *
+   * 🔴 非管理者**只能給自己開設的課程**，否則後端回 403 `ET_APPROVAL_007`。
+   * 下拉本來就只列得出自己的課，那道閘擋的是直接送出的請求。
+   */
+  course_id?: number
   result?: "PASS" | "FAIL"
   page?: number
   limit?: number
+}
+
+/**
+ * ET04 課程篩選下拉的一個選項（#439）。
+ *
+ * ⚠️ 母體是**有核可紀錄的課程**，不是 ET01 的課程清單——後者的 `scope=all` 排除了
+ * 已結束的課程，而核可紀錄絕大多數正落在那些課上。細節見後端 `ApprovalCourseOption`。
+ */
+export interface ApprovalCourseOption {
+  course_id: number
+  course_name: string
 }

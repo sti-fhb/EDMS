@@ -13,7 +13,7 @@
    `test_et_tag_invite.py` 驗的是 `target_user_ids()` 這支查詢，`test_et_tag_invite_notify.py`
    驗寄信，但「發布這個動作是否真的把兩者都觸發了」在既有測試裡是分開的
 2. **Email 邀請 → 信中 token → accept → 在籍**：`test_et_invitation.py` 驗發信與 token 雜湊，
-   但 accept 之後那個人能不能真的被 ET03 追蹤到，跨過了 invitation 與 tracking 兩個模組
+   但 accept 之後那個人能不能真的被 ET02 追蹤到，跨過了 invitation 與 tracking 兩個模組
 3. **追蹤三區塊對「真的有作答 / 真的填過問卷」的資料**：`test_et_tracking.py` 55 條的作答與
    填答紀錄多由 `db.add(...)` 造出，本檔的是學員真的打 API 產生的
 
@@ -220,7 +220,7 @@ async def test_教師從建立課程到看見學員成果的完整流程(client,
     assert invited.json() == {"joined": 1, "mail_failed": []}
 
     # 🔴 這裡**沒有**第二次呼叫。#362 之前是「取出信中 token → POST accept」，那兩步
-    # 一起消失了——本檔要釘的接縫因此變成「教師一個動作就讓那個人出現在 ET03」。
+    # 一起消失了——本檔要釘的接縫因此變成「教師一個動作就讓那個人出現在 ET02」。
     invite_mail = await db.scalar(
         select(DpEmailLog).where(
             DpEmailLog.recipient == "invited-flow@x.gov.tw",
@@ -257,7 +257,7 @@ async def test_教師從建立課程到看見學員成果的完整流程(client,
     )
     assert survey_sent.status_code == 201, survey_sent.text
 
-    # ── 階段 9：ET03 三區塊都看得到真實資料 ──────────────────────────────────
+    # ── 階段 9：ET02 三區塊都看得到真實資料 ──────────────────────────────────
     students = await client.get(f"{_COURSES}/{course_id}/students", headers=_bearer(teacher))
     assert students.status_code == 200, students.text
     listed = {r["user_id"] for r in students.json()["data"]}

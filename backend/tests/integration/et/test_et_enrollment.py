@@ -1,4 +1,4 @@
-"""ET04 我的課程與加入新課程整合測試（US4 / #247）。
+"""ET03 我的課程與加入新課程整合測試（US4 / #247）。
 
 規則判定（邀請碼格式、加入資格、清單可見性）已在 `tests/unit/et/test_enrollment_rules.py`
 以純函式涵蓋。此處只驗**需要真 DB 才驗得了**的事：
@@ -202,7 +202,7 @@ class TestPreview:
 
 class TestJoin:
     async def test_加入寫入邀請碼來源(self, client, db) -> None:
-        """AC 7 / ET-MSG-ET04-004。"""
+        """AC 7 / ET-MSG-ET03-004。"""
         teacher = await _user(db, "t_enr03", ROLE_TEACHER)
         student = await _user(db, "s_enr03")
         cid = await _course(client, db, teacher, code="10000003")
@@ -220,7 +220,7 @@ class TestJoin:
         assert row.last_activity_at is None, "加入不是學習動作，不應寫入最後活動時間"
 
     async def test_查無邀請碼回404(self, client, db) -> None:
-        """AC 8 / ET-MSG-ET04-001。"""
+        """AC 8 / ET-MSG-ET03-001。"""
         student = await _user(db, "s_enr04")
 
         r = await _join(client, student, "99999999")
@@ -238,7 +238,7 @@ class TestJoin:
         assert r.json()["error_code"] == "ET_ENROLL_001"
 
     async def test_已關閉課程之邀請碼失效(self, client, db) -> None:
-        """AC 9 / ET-MSG-ET04-002：碼沒變，變的是課程狀態。"""
+        """AC 9 / ET-MSG-ET03-002：碼沒變，變的是課程狀態。"""
         teacher = await _user(db, "t_enr06", ROLE_TEACHER)
         student = await _user(db, "s_enr06")
         await _course(client, db, teacher, code="10000006", status=COURSE_CLOSED)

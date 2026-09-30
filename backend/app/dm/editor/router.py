@@ -1,4 +1,4 @@
-"""文件新增與編輯 API（US5 / DM03，寫入）。
+"""文件新增與編輯 API（US5 / DM08，寫入）。
 
 掛 DM 存取閘 `get_dm_context`（需任一 DM 角色）+ 寫入注入 `get_operator`；寫入型端點（新增 / 加版 /
 送簽）另要求 **DM_EDITOR** 角色（`_ensure_editor`）。新增 / 加版以 multipart 收表單欄位 + 單一上傳檔。
@@ -58,7 +58,9 @@ async def create_document(
     change_summary: Annotated[str, Form()] = "",
     func_code: Annotated[str | None, Form()] = None,
     assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
-    audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
+    # 可見對象為 (單位, 職位) 配對，以兩個平行陣列傳入（同索引成對）——multipart form 無法表達物件陣列。
+    audience_unit_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
+    audience_role_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
     ctx: DmContext = Depends(get_dm_context),
@@ -73,7 +75,8 @@ async def create_document(
         doc_name=doc_name,
         category_code=category_code,
         func_code=func_code,
-        audience_ids=audience_ids,
+        audience_unit_ids=audience_unit_ids,
+        audience_role_ids=audience_role_ids,
         retrieval_ids=retrieval_ids,
         version_no=version_no,
         change_summary=change_summary,
@@ -91,7 +94,8 @@ async def add_version(
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
     assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
-    audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    audience_unit_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (單位，與下方同索引成對)
+    audience_role_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
     ctx: DmContext = Depends(get_dm_context),
@@ -104,7 +108,8 @@ async def add_version(
     return await _service.add_version(
         db,
         doc_id=doc_id,
-        audience_ids=audience_ids,
+        audience_unit_ids=audience_unit_ids,
+        audience_role_ids=audience_role_ids,
         retrieval_ids=retrieval_ids,
         version_no=version_no,
         change_summary=change_summary,
@@ -125,7 +130,8 @@ async def update_draft_version(
     assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
     version_no: Annotated[str, Form()] = "",
     change_summary: Annotated[str, Form()] = "",
-    audience_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    audience_unit_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (單位，與下方同索引成對)
+    audience_role_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 未附檔則保留既有檔案
     ctx: DmContext = Depends(get_dm_context),
@@ -142,7 +148,8 @@ async def update_draft_version(
         doc_name=doc_name,
         func_code=func_code,
         assigned_reviewer=assigned_reviewer,
-        audience_ids=audience_ids,
+        audience_unit_ids=audience_unit_ids,
+        audience_role_ids=audience_role_ids,
         retrieval_ids=retrieval_ids,
         version_no=version_no,
         change_summary=change_summary,
@@ -174,7 +181,7 @@ async def get_draft_meta(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """續編模式 author-scoped meta（供 DRAFT-status 文件亦可載，取代編輯模式對 DM02 詳細端點之依賴，#222）。"""
+    """續編模式 author-scoped meta（供 DRAFT-status 文件亦可載，取代編輯模式對 DM07 詳細端點之依賴，#222）。"""
     _ensure_editor(ctx)
     return await _service.get_draft_meta(db, doc_id=doc_id, user_id=ctx.user_id)
 
@@ -207,5 +214,5 @@ async def editor_options(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """DM03 表單受控下拉：分類 / func / 可見對象 / 檢索標籤（皆啟用中）。"""
+    """DM08 表單受控下拉：分類 / func / 可見對象 / 檢索標籤（皆啟用中）。"""
     return await _service.get_options(db)

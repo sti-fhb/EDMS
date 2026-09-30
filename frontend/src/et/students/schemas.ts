@@ -1,7 +1,7 @@
 import type { TagOption } from "../courses/schemas"
 
 /**
- * ET03 學員學習狀況追蹤（US9 / #322）之型別——對齊後端 `app/et/tracking/schemas.py`。
+ * ET02 學員學習狀況追蹤（US9 / #322）之型別——對齊後端 `app/et/tracking/schemas.py`。
  *
  * ⚠️ 這是與後端共用的契約。後端有對應的 integration 測試以同一組欄位驗 schema，改這裡
  * 要一起改（同 #299 的 `CourseListParams` 慣例）。
@@ -26,9 +26,9 @@ export type ApprovalResult = "PASS" | "FAIL"
  *
  * | 值 | 前端訊息 |
  * |---|---|
- * | `NOT_COMPLETED` | 單筆 `ET-MSG-ET03-304`（錯誤）/ 批次 `ET-MSG-ET03-303`（提示）|
- * | `ALREADY_APPROVED` | `ET-MSG-ET03-309` |
- * | `NOT_ENROLLED` | `ET-MSG-ET03-309` 的同形句（`ET-MSG-ET03-310`）|
+ * | `NOT_COMPLETED` | 單筆 `ET-MSG-ET02-304`（錯誤）/ 批次 `ET-MSG-ET02-303`（提示）|
+ * | `ALREADY_APPROVED` | `ET-MSG-ET02-309` |
+ * | `NOT_ENROLLED` | `ET-MSG-ET02-309` 的同形句（`ET-MSG-ET02-310`）|
  */
 export type SkipReason = "NOT_COMPLETED" | "ALREADY_APPROVED" | "NOT_ENROLLED"
 
@@ -69,7 +69,7 @@ export interface StudentRow {
   last_activity_at: string | null
   /**
    * 是否有**作答中（未提交）**的 attempt——決定移除確認框是否用警告版文案
-   * （`ET-MSG-ET03-003`）。
+   * （`ET-MSG-ET02-003`）。
    *
    * ⚠️ 與上面的 `completion_status === "IN_PROGRESS"` **無關**：那是課程學習進行中
    * （由完成項目數導出），這是「手上有一份還沒交的考卷」。兩者同名不同義。
@@ -121,7 +121,7 @@ export interface TeacherQuizRow {
    * `max_retry + 1`）。在前端複製一份遲早與後端分岔。
    */
   can_reset: boolean
-  /** 空陣列代表**尚未作答**（ET-MSG-ET03-005）——該測驗仍要列出。 */
+  /** 空陣列代表**尚未作答**（ET-MSG-ET02-005）——該測驗仍要列出。 */
   attempts: TeacherAttemptRow[]
 }
 

@@ -2,7 +2,7 @@ import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
 /**
- * ET03 三個區塊共用的標題列（wireframe 的 `badge bg-secondary` + 標題 + 說明）。
+ * ET02 三個區塊共用的標題列（wireframe 的 `badge bg-secondary` + 標題 + 說明）。
  *
  * ## 區塊編號已移除（#359 第 3 項，2026-09-17 使用者裁示）
  *

@@ -20,6 +20,11 @@ from app.dp.users.models import DpUser
 pytestmark = pytest.mark.integration
 
 
+async def _all_units_id(db):
+    """單位組通用值「全單位」＝不限單位（#437 可見對象配對）。"""
+    return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+
+
 async def _tag_id(db, tag_name: str) -> int:
     return await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == tag_name))
 
@@ -79,7 +84,15 @@ async def _doc(db, doc_id, tag_name):
     doc = await db.get(DmDocument, doc_id)
     doc.current_version_id = v.version_id
     await db.flush()
-    db.add(DmDocTag(doc_id=doc_id, tag_id=await _tag_id(db, tag_name), created_user="seed", created_date=utcnow()))
+    db.add(
+        DmDocTag(
+            doc_id=doc_id,
+            tag_id=await _tag_id(db, tag_name),
+            unit_tag_id=await _all_units_id(db),  # 「全單位」＝不限單位（#437 配對語意）
+            created_user="seed",
+            created_date=utcnow(),
+        )
+    )
     await db.flush()
     return v.version_id
 

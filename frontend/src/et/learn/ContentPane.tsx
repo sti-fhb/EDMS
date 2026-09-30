@@ -24,7 +24,7 @@ interface Props {
   onProgress: () => void
 }
 
-/** ET05 中間內容區——依項目型別切換（AC 1 / 3 / 9 / 10 / 15–17）。 */
+/** ET06 中間內容區——依項目型別切換（AC 1 / 3 / 9 / 10 / 15–17）。 */
 export function ContentPane({ item, playbackRates, readOnly, onProgress }: Props) {
   if (item === null) {
     return (
@@ -100,7 +100,7 @@ function MaterialPane({
   }
   if (error) {
     const api = toApiError(error)
-    // AC 22 / ET-MSG-ET05-004：教師刪除學員正在檢視之章節
+    // AC 22 / ET-MSG-ET06-004：教師刪除學員正在檢視之章節
     const deleted = api.errorCode === "ET_LEARN_003"
     return (
       <Paper variant="outlined" sx={{ p: 3 }}>

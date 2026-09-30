@@ -21,7 +21,7 @@ DP 端之掛鉤**已全部就緒並在等待 ET 註冊**（平台 core 之四個
 | 管理者判定 | `app/core/module_admin.py` | 已備，ET 未註冊 → 恆回 `False` |
 | 預設角色授予 | `app/core/module_provisioning.py` | 已備，**`app/dp/user/activation.py` 已在呼叫**；ET 未註冊 → no-op |
 | 角色 / 群組指派 | `app/core/module_assign.py` | 已備，ET 未註冊 → DP 後台回 404 `DP_ROLE_003` |
-| 受控主檔維護 | `app/core/module_assign.py`（§3.1）| **DP07 已接上消費端（#182）**；ET 未註冊 → 該模組清單不顯示、寫入 403 `DP_PARAM_003` |
+| 受控主檔維護 | `app/core/module_assign.py`（§3.1）| **DP03 已接上消費端（#182）**；ET 未註冊 → 該模組清單不顯示、寫入 403 `DP_PARAM_003` |
 | 角色摘要 | `app/core/module_roles.py` | 已備，ET 未註冊 → 恆回 `False` |
 | 排程 handler | `app/dp/schedules/scheduler.py` | 白名單已含 `app.et.`；`DP_SCHEDULE` 已預留 SCHET001 / SCHET002 兩列（`IS_ENABLED=false`） |
 
@@ -80,7 +80,7 @@ async def assign(db, *, user_id: str, roles: set[str], groups: set[str], operato
 | `groups` | `ET_TAG.TAG_ID`（字串化）集合；須屬啟用中（`IS_ACTIVE=true`）標籤，否則 `ET_ROLE_002`。**停用標籤不可新增指派，既有指派保留** |
 | 批次讀取 | `get_users_assignments` 一次回一頁使用者之現況（避免 N+1）；查無指派者回**空集合 View**（非缺 key） |
 | 最後異動 | View 帶 `last_modified_by` / `last_modified_date`，來源為 `ET_USER_ROLE` / `ET_USER_TAG` 之 `UPDATED_*` |
-| 自我保護 | operator 取消自己之管理者角色 → raise `AppError`（`ET_ROLE_001`）；DP 端統一映射為 `DP-MSG-DP06-001` 呈現。**不檢核**「至少 1 名管理者」（per spec.md 設計取捨） |
+| 自我保護 | operator 取消自己之管理者角色 → raise `AppError`（`ET_ROLE_001`）；DP 端統一映射為 `DP-MSG-DP02-001` 呈現。**不檢核**「至少 1 名管理者」（per spec.md 設計取捨） |
 | 稽核 | 指派異動由 **ET** 於同交易內經 `AuditLogService` 寫入 `DP_AUDIT_LOG`（`MODULE=ET`、`FUNC_NAME=ET-ROLES`） |
 | 貼標追溯 | **新增**標籤指派時觸發補加入該標籤所有「已發布且未關閉」課程並寄彙整信；**移除**時既有 `ET_ENROLLMENT` 不變動（見 [spec_us1.md](../spec_us1.md) / [spec_us8.md](../spec_us8.md)）。此為 ET 業務判定，DP 不介入 |
 
@@ -110,7 +110,7 @@ ET 之受控主檔僅一類：**受訓單位標籤庫 `ET_TAG`**（`kind='TAG'`�
 
 > ✅ **DP 側已對齊（#182，2026-09-22）**：`module-callbacks.md` §3 / §3.1 原寫「ET 之受訓單位標籤存 `DP_PARAM`、由 DP 直接維護、**不走本轉接層**」並稱此為「ET 與 DM 之刻意差異」，該敘述已移除。ET 與 DM 同走轉接層。
 >
-> ✅ **DP 端已接上受控主檔維護（#182）**：DP07「系統參數與清單」經 `module_assign_registry` 呼叫 `list_controlled_kinds` / `list_controlled` / `create_controlled` / `rename_controlled` / `set_controlled_enabled`，受訓單位標籤已可自後台維護。
+> ✅ **DP 端已接上受控主檔維護（#182）**：DP03「系統參數與清單」經 `module_assign_registry` 呼叫 `list_controlled_kinds` / `list_controlled` / `create_controlled` / `rename_controlled` / `set_controlled_enabled`，受訓單位標籤已可自後台維護。
 
 ## SRVET005 — 使用者模組角色摘要（DP §4）
 
@@ -149,7 +149,7 @@ async def daily_window_job() -> None   # SCHET002：每日到期關閉 + 截止�
 | error_code | HTTP | error_message | 觸發 |
 |------------|------|---------------|------|
 | `ET_AUTH_001` | 403 | 需要教育訓練模組權限 | ET 模組存取閘：已登入但無任何 ET 角色 |
-| `ET_ROLE_001` | 403 | 無法停用自己之管理者角色 | SRVET003 自我保護；DP 映射為 `DP-MSG-DP06-001` |
+| `ET_ROLE_001` | 403 | 無法停用自己之管理者角色 | SRVET003 自我保護；DP 映射為 `DP-MSG-DP02-001` |
 | `ET_ROLE_002` | 422 | 指定之受訓單位標籤無效或未啟用 | SRVET003 指派值檢核 |
 | `ET_ROLE_003` | 422 | 指定之角色代碼無效 | SRVET003 角色代碼檢核 |
 | `ET_TAG_001` | 422 | 「全體」標籤不可停用或改名 | SRVET004「全體」（`IS_ALL`）保護；**內建但非「全體」之標籤可改名**（#182 D2）|

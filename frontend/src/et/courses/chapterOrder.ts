@@ -1,5 +1,5 @@
 /**
- * 章節順序計算（ET02 拖拉重排）。
+ * 章節順序計算（ET05 拖拉重排）。
  *
  * 獨立成模組而非留在 `ChapterSection.tsx`：一來元件檔匯出非元件會破壞 Fast Refresh
  * （`react-refresh/only-export-components`），二來 `@dnd-kit` 的拖曳與鍵盤感測都需要

@@ -13,6 +13,7 @@ from collections.abc import Iterable
 
 from sqlalchemy import Row, Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dm.audience.models import DmUserTag
@@ -24,6 +25,8 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外）
 
 _AUDIENCE_GROUP = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
+_UNIT_GROUP = "UNIT"  # 可見對象之單位維度（#437）
+_ALL_UNITS_TAG = "全單位"
 _ACTIVE = "ACTIVE"  # DP_USER.STATUS：ACTIVE / DISABLED（停用）；停用者無法登入閱讀（auth 擋），不列入 KPI
 _PUBLISHED = "PUBLISHED"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
@@ -85,13 +88,20 @@ class KpiRepository:
         )
         return set(rows.all())
 
-    async def viewer_audience_tags(self, db: AsyncSession, viewer_ids: Iterable[str]) -> dict[str, set[int]]:
-        """各閱覽者之有效 AUDIENCE 授權標籤集（DELETED=0）；無授權者不出現於回傳（視為空集）。"""
+    async def viewer_audience_tags(
+        self, db: AsyncSession, viewer_ids: Iterable[str]
+    ) -> dict[str, set[tuple[int | None, int]]]:
+        """各閱覽者之有效 (單位, 職位) 授權配對（DELETED=0）；無授權者不出現於回傳（視為空集）。
+
+        單位為 `None` 代表**未指定**（#437 導入配對前之既有授權），僅能匹配文件側之「全單位」——
+        與 `visibility.audience_pair_match` 之 NULL 語意一致。人側不會持有通用值（`list_audiences`
+        已排除「全體」/「全單位」，那是文件端語意）。
+        """
         ids = list(viewer_ids)
         if not ids:
             return {}
         rows = await db.execute(
-            select(DmUserTag.user_id, DmUserTag.tag_id)
+            select(DmUserTag.user_id, DmUserTag.tag_id, DmUserTag.unit_tag_id)
             .join(DmTag, DmUserTag.tag_id == DmTag.tag_id)
             .where(
                 DmUserTag.user_id.in_(ids),
@@ -99,9 +109,9 @@ class KpiRepository:
                 DmTag.tag_group_code == _AUDIENCE_GROUP,
             )
         )
-        result: dict[str, set[int]] = {}
-        for user_id, tag_id in rows.all():
-            result.setdefault(user_id, set()).add(tag_id)
+        result: dict[str, set[tuple[int | None, int]]] = {}
+        for user_id, tag_id, unit_tag_id in rows.all():
+            result.setdefault(user_id, set()).add((unit_tag_id, tag_id))
         return result
 
     async def viewer_profiles(self, db: AsyncSession, viewer_ids: Iterable[str]) -> dict[str, Row]:
@@ -116,25 +126,35 @@ class KpiRepository:
         )
         return {r.user_id: r for r in rows.all()}
 
-    async def doc_audience(self, db: AsyncSession, doc_ids: Iterable[str]) -> dict[str, tuple[set[int], bool]]:
-        """各文件之有效 AUDIENCE 標籤集 + 是否掛「全體」。"""
+    async def doc_audience(
+        self, db: AsyncSession, doc_ids: Iterable[str]
+    ) -> dict[str, set[tuple[int | None, int | None]]]:
+        """各文件之有效可見對象 (單位, 職位) 配對集。
+
+        **通用值一律正規化為 `None`**（單位「全單位」／職位「全體」），使比對端只需判斷 `is None`
+        而不必再查那兩個標籤的 ID：`(None, None)` 即全系統可見。配對不完整者（`UNIT_TAG_ID IS NULL`）
+        **略過**——其於 `visibility.audience_pair_match` 不賦予任何可見性，計入會灌大應看母體。
+        """
         ids = list(doc_ids)
         if not ids:
             return {}
+        unit_tag = aliased(DmTag, name="dm_unit_tag")
         rows = await db.execute(
-            select(DmDocTag.doc_id, DmDocTag.tag_id, DmTag.tag_name)
+            select(DmDocTag.doc_id, DmDocTag.tag_id, DmTag.tag_name, DmDocTag.unit_tag_id, unit_tag.tag_name)
             .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
+            .join(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
             .where(
                 DmDocTag.doc_id.in_(ids),
                 DmDocTag.deleted == 0,
                 DmTag.tag_group_code == _AUDIENCE_GROUP,
+                unit_tag.tag_group_code == _UNIT_GROUP,
             )
         )
-        result: dict[str, tuple[set[int], bool]] = {}
-        for doc_id, tag_id, tag_name in rows.all():
-            tags, has_all = result.get(doc_id, (set(), False))
-            tags.add(tag_id)
-            result[doc_id] = (tags, has_all or tag_name == _ALL_AUDIENCE_TAG)
+        result: dict[str, set[tuple[int | None, int | None]]] = {}
+        for doc_id, tag_id, tag_name, unit_tag_id, unit_name in rows.all():
+            unit = None if unit_name == _ALL_UNITS_TAG else unit_tag_id
+            role = None if tag_name == _ALL_AUDIENCE_TAG else tag_id
+            result.setdefault(doc_id, set()).add((unit, role))
         return result
 
     async def reads_current(self, db: AsyncSession, doc_ids: Iterable[str]) -> dict[str, set[str]]:

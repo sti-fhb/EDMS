@@ -220,16 +220,16 @@ erDiagram
 
 ## DD — DM_TAG_GROUP（標籤組）
 
-4 內建組；受控標籤庫之分組，分**權限**（可見對象/單位）與**檢索**兩用途。
+5 內建組；受控標籤庫之分組，分**權限**（可見對象之職位 + 單位）與**檢索**兩用途。
 
 | 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
 |----------|----------|----------|------|------|------|
-| TAG_GROUP_CODE | 標籤組代碼 | VARCHAR(20) | Y | | PK（AUDIENCE / MODULE / NATURE / LEGAL；原 ROLE 移除）|
-| TAG_GROUP_NAME | 標籤組名稱 | VARCHAR(50) | Y | | 可見對象/單位 / 適用模組 / 文件性質 / 法規關聯 |
-| GROUP_TYPE | 用途 | VARCHAR(10) | Y | RETRIEVAL | AUDIENCE（權限，僅 `AUDIENCE` 組）/ RETRIEVAL（檢索）|
+| TAG_GROUP_CODE | 標籤組代碼 | VARCHAR(20) | Y | | PK（AUDIENCE / **UNIT** / MODULE / NATURE / LEGAL；原 ROLE 移除）|
+| TAG_GROUP_NAME | 標籤組名稱 | VARCHAR(50) | Y | | 可見對象 / 單位 / 適用模組 / 文件性質 / 法規關聯 |
+| GROUP_TYPE | 用途 | VARCHAR(10) | Y | RETRIEVAL | AUDIENCE（可見對象之職位）/ **UNIT（可見對象之單位）** / RETRIEVAL（檢索）。單位獨立為 `UNIT` 而非併入 `AUDIENCE`：既有多處依 `GROUP_TYPE` 分流之查詢因此自然排除單位，漏改之後果為「單位不出現」而非「單位被當成職位」（#437）|
 | IS_BUILTIN | 是否內建 | BOOLEAN | Y | true | 4 內建組 |
 
-> 含標準欄位。`AUDIENCE` 組為權限依據（見〈標籤式可見性〉），文件端必填≥1、閱覽者端由 `DM_USER_TAG` 授權。
+> 含標準欄位。`AUDIENCE` + `UNIT` 兩組合為權限依據（見〈標籤式可見性〉），成對使用：文件端必填 ≥1 組完整配對、閱覽者端由 `DM_USER_TAG` 授權。
 
 ## DD — DM_TAG（標籤）
 
@@ -278,7 +278,7 @@ erDiagram
 | APPROVER_USER_ID | 核准者 | VARCHAR(20) | N | | FK→ DP_USER；核准發布時寫入（自 Session）|
 | PUBLISHED_DATE | 發布時間 | TIMESTAMP | N | | 即核准時間 |
 
-> 含標準欄位（CREATED_USER = 該版本撰寫者 / 作者）。**版本號唯一只對已發布版本**：partial unique index `UX_DM_DOC_VERSION_RELEASED_NO (DOC_ID, VERSION_NO) WHERE STATUS IN ('PUBLISHED','SUPERSEDED')`；草稿可留空 / 重複，送簽時應用層檢核不與已發布重複（DM-MSG-DM03-009）。**每人每文件一份草稿**：partial unique index `UX_DM_DOC_VERSION_ONE_DRAFT (DOC_ID, CREATED_USER) WHERE STATUS='DRAFT'`（不同撰寫者可各自開草稿、互不阻擋；應用層另給 DM_DOC_009）。
+> 含標準欄位（CREATED_USER = 該版本撰寫者 / 作者）。**版本號唯一只對已發布版本**：partial unique index `UX_DM_DOC_VERSION_RELEASED_NO (DOC_ID, VERSION_NO) WHERE STATUS IN ('PUBLISHED','SUPERSEDED')`；草稿可留空 / 重複，送簽時應用層檢核不與已發布重複（DM-MSG-DM08-009）。**每人每文件一份草稿**：partial unique index `UX_DM_DOC_VERSION_ONE_DRAFT (DOC_ID, CREATED_USER) WHERE STATUS='DRAFT'`（不同撰寫者可各自開草稿、互不阻擋；應用層另給 DM_DOC_009）。
 
 ## DD — DM_DOC_TAG（文件標籤關聯，明細）
 
@@ -292,7 +292,7 @@ erDiagram
 | DOC_ID | 文件編號 | VARCHAR(20) | Y | | FK→ DM_DOCUMENT.DOC_ID |
 | TAG_ID | 標籤 ID | BIGINT | Y | | FK→ DM_TAG.TAG_ID |
 
-> 含標準欄位。唯一約束 (DOC_ID, TAG_ID)。送簽之可見對象檢核查 `DM_VERSION_TAG`（該送審版本）而非本表，見下節。
+> 含標準欄位。新增 `UNIT_TAG_ID`（BIGINT，可空，FK→ DM_TAG.TAG_ID）：可見對象為 (單位, 職位) 配對，`TAG_ID` 存職位、`UNIT_TAG_ID` 存單位，一列即一組配對；檢索標籤無單位維度，該欄為 NULL。唯一約束 (DOC_ID, TAG_ID, UNIT_TAG_ID)，**NULLS NOT DISTINCT**（PG 15+）——預設語意下 NULL ≠ NULL，檢索標籤列將完全不受約束保護。送簽之可見對象檢核查 `DM_VERSION_TAG`（該送審版本）而非本表，見下節。
 
 ## DD — DM_VERSION_TAG（版本標籤快照，明細）
 
@@ -304,7 +304,7 @@ erDiagram
 | VERSION_ID | 版本 ID | BIGINT | Y | | FK→ DM_DOC_VERSION.VERSION_ID |
 | TAG_ID | 標籤 ID | BIGINT | Y | | FK→ DM_TAG.TAG_ID |
 
-> 含標準欄位。唯一約束 (VERSION_ID, TAG_ID)。導入時（migration `2bf2384687c8`）以所屬文件當下之有效 `DM_DOC_TAG` 回填 `STATUS IN ('DRAFT','PENDING_REVIEW')` 之在途版本，避免既有草稿送簽被誤擋；已發布 / 已退回版本不回填。
+> 含標準欄位。`UNIT_TAG_ID` 與配對語意同 `DM_DOC_TAG`。唯一約束 (VERSION_ID, TAG_ID, UNIT_TAG_ID)，NULLS NOT DISTINCT。導入時（migration `2bf2384687c8`）以所屬文件當下之有效 `DM_DOC_TAG` 回填 `STATUS IN ('DRAFT','PENDING_REVIEW')` 之在途版本，避免既有草稿送簽被誤擋；已發布 / 已退回版本不回填。
 
 ## DD — DM_USER_TAG（閱覽者可見對象授權，明細）
 
@@ -314,9 +314,10 @@ erDiagram
 |----------|----------|----------|------|------|------|
 | USER_TAG_ID | 授權 ID | BIGINT | Y | 序號 | PK |
 | USER_ID | 使用者 | VARCHAR(20) | Y | | FK→ DP_USER.USER_ID |
-| TAG_ID | 可見對象標籤 | BIGINT | Y | | FK→ DM_TAG.TAG_ID；**限 `AUDIENCE` 組**（應用層檢核）|
+| TAG_ID | 可見對象之職位 | BIGINT | Y | | FK→ DM_TAG.TAG_ID；**限 `AUDIENCE` 組**（應用層檢核）|
+| UNIT_TAG_ID | 可見對象之單位 | BIGINT | N | | FK→ DM_TAG.TAG_ID；**限 `UNIT` 組**（應用層檢核）。**NULL ＝單位未指定**（#437 導入前之既有授權），非「不限單位」——判定上僅能匹配文件側之「全單位」|
 
-> 含標準欄位（UPDATED_USER / UPDATED_DATE 即「最後異動」欄之來源）。唯一約束 (USER_ID, TAG_ID)。未授予任何列之閱覽者僅能看到掛「全體」之文件。可見性比對：閱覽者可見某文件 ⇔ 文件掛「全體」 OR（文件 `DM_DOC_TAG` 之 AUDIENCE 標籤 ∩ 該使用者 `DM_USER_TAG` ≠ 空）。
+> 含標準欄位（UPDATED_USER / UPDATED_DATE 即「最後異動」欄之來源）。唯一約束 (USER_ID, TAG_ID, UNIT_TAG_ID)，NULLS NOT DISTINCT。一列即一組 (單位, 職位) 配對；未授予任何列之閱覽者僅能看到掛 (全單位, 全體) 之文件。**可見性比對見 [spec_us3.md](spec_us3.md) FR-008**（配對匹配，不可拆成兩維集合各自比對）。
 
 ## DD — DM_REVIEW（送審紀錄）
 
@@ -339,11 +340,11 @@ erDiagram
 | OBSOLETE_FILE_SIZE | 廢止附件大小 | BIGINT | N | | 位元組；上限比照文件上傳（`DP_PARAM` 之 `DM_FILE_MAX_MB`）|
 | OBSOLETE_FILE_MIME | 廢止附件 MIME | VARCHAR(100) | N | | 格式比照文件上傳（PDF / Office / 圖片）|
 
-> 含標準欄位。應用層約束：同一 DOC_ID 不可同時存在兩筆 STATUS=PENDING（單一送審週期，research.md §4）。廢止附件為選填單檔，格式 / 大小比照 `DM_DOC_VERSION` 之檔案規範（沿用檔案儲存服務）；於 DM04 簽核明細與 US10 已廢止查詢可下載。
+> 含標準欄位。應用層約束：同一 DOC_ID 不可同時存在兩筆 STATUS=PENDING（單一送審週期，research.md §4）。廢止附件為選填單檔，格式 / 大小比照 `DM_DOC_VERSION` 之檔案規範（沿用檔案儲存服務）；於 DM02 簽核明細與 US10 已廢止查詢可下載。
 
 ## DD — DM_CHANGE_LOG（公開變更歷程，append-only）
 
-僅記錄對外發布版本之發布 / 廢止事件；**append-only、永久保留、不可竄改 / 刪除**；供 DM08 跨文件查詢與 CSV 匯出。
+僅記錄對外發布版本之發布 / 廢止事件；**append-only、永久保留、不可竄改 / 刪除**；供 DM05 跨文件查詢與 CSV 匯出。
 
 | 欄位代碼 | 欄位名稱 | 資料型別 | 必填 | 預設 | 說明 |
 |----------|----------|----------|------|------|------|
@@ -392,7 +393,7 @@ erDiagram
 | SUPERSEDED | 版本 | 已被新版取代（僅預覽不可下載）|
 | REJECTED | **版本** | 送審被退回（文件層不使用；退回後文件回 DRAFT）|
 | PENDING_OBSOLETE | 文件 | 廢止待簽核（仍對外有效、仍在架）|
-| OBSOLETE | 文件 | 已廢止（自文件庫下架；僅 DM06 read-only 查）|
+| OBSOLETE | 文件 | 已廢止（自文件庫下架；僅 DM03 read-only 查）|
 
 ### 角色代碼（DM_USER_ROLE.ROLE_CODE）
 
@@ -428,9 +429,12 @@ erDiagram
 
 ### 內建標籤組（DM_TAG_GROUP）
 
+可見對象由 `AUDIENCE`（職位）與 `UNIT`（單位）**成對**組成，見 [spec_us3.md](spec_us3.md) FR-008。
+
 | 代碼 | 名稱 | 用途 | 範例標籤 |
 |------|------|------|---------|
-| AUDIENCE | 可見對象/單位 | 權限 | 全體 / 護理師 / 軍人 / 醫檢師 / 行政人員 |
+| AUDIENCE | 可見對象（職位）| 權限 | 全體 / 護理師 / 軍人 / 醫檢師 / 行政人員 |
+| UNIT | 單位 | 權限 | 全單位 / 國防部軍醫局 / 國防醫學院三軍總醫院 / …（21 筆，#437）|
 | MODULE | 適用模組 | 檢索 | 採血 / 成分 / 檢驗 / 供應 / 醫務 |
 | NATURE | 文件性質 | 檢索 | 戰時 / 緊急 / 平時 / 訓練 |
 | LEGAL | 法規關聯 | 檢索 | 衛福部 |
@@ -449,7 +453,7 @@ erDiagram
 
 | 項目 | 原因 |
 |------|------|
-| 站點 / 院區主檔（DP_SITE / DP_HOSPITAL）| 對齊平台模組 DP，平台無站點 / 院區概念（research.md §1）|
+| 站點 / 院區主檔（DP_SITE / DP_HOSPITAL）| 對齊平台模組 DP，平台無站點 / 院區概念（research.md §1）。⚠️ #437 導入之「單位」雖對應院區 / 站點之實體，但**不建主檔**——它是 `DM_TAG` 的一個受控標籤組，無代碼欄、無階層、不與 TBMS 對接，僅供 DM 可見對象判定 |
 | ET 角色與課程資料 | 屬 ET 模組；DM 僅共用平台 `DP_USER` 主檔 |
 | 檔案二進位內容（BLOB）| 存檔案系統 / 物件儲存，DB 僅存 metadata（research.md §3）|
 | 統計報表資料 | 已對齊交付確認書排除（spec Assumptions）|

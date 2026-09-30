@@ -28,10 +28,12 @@ _PRIV = {"user_id": "adm", "roles": frozenset({DM_ADMIN})}
 
 
 async def _tag_doc(db, doc_id, audience_name, *, user="seed"):
+    """掛可見對象配對；單位一律「全單位」＝不限單位（#437 導入配對後既有文件回填後之狀態）。"""
     tag_id = await db.scalar(
         select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE", DmTag.tag_name == audience_name)
     )
-    db.add(DmDocTag(doc_id=doc_id, tag_id=tag_id, created_user=user, created_date=utcnow()))
+    unit_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位"))
+    db.add(DmDocTag(doc_id=doc_id, tag_id=tag_id, unit_tag_id=unit_id, created_user=user, created_date=utcnow()))
     await db.flush()
 
 

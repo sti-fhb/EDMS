@@ -1,4 +1,4 @@
-/** 閱讀統計 KPI（US13 / UCDM13 / DM10）型別（對齊後端 app/dm/kpi/schemas.py）。 */
+/** 閱讀統計 KPI（US13 / UCDM13 / DM06）型別（對齊後端 app/dm/kpi/schemas.py）。 */
 
 import type { PagedResult } from "../../hooks/usePagedQuery"
 

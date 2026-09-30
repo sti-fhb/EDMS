@@ -33,7 +33,7 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     expect(screen.getByText("—（無對應閱覽者）")).toBeInTheDocument()
   })
 
-  it("空結果 → 顯示 DM-MSG-DM10-001", async () => {
+  it("空結果 → 顯示 DM-MSG-DM06-001", async () => {
     server.use(
       http.get("/api/dm/kpi/documents", () =>
         HttpResponse.json({
@@ -55,7 +55,7 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     expect(downloadKpiCsv).toHaveBeenCalled()
   })
 
-  it("非管理者（admin-access can_access=false）→ 直接顯示無權限、不渲染查詢 UI（DM-MSG-DM10-002）", async () => {
+  it("非管理者（admin-access can_access=false）→ 直接顯示無權限、不渲染查詢 UI（DM-MSG-DM06-002）", async () => {
     server.use(http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: false })))
     renderWithProviders(<DmKpiPage />)
     expect(await screen.findByText("您無權限存取此頁面")).toBeInTheDocument()

@@ -36,7 +36,7 @@ function renderPlayer(rates = [0.75, 1, 1.25, 1.5, 2], video: MaterialVideoRow =
   return renderWithProviders(<VideoPlayer video={video} playbackRates={rates} readOnly={readOnly} />)
 }
 
-describe("ET05 影片播放器", () => {
+describe("ET06 影片播放器", () => {
   it("取票後才設 src（AC 3）", async () => {
     const { container } = renderPlayer()
 

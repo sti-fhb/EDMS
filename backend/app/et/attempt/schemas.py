@@ -1,4 +1,4 @@
-"""ET06 測驗作答（US6 / #279）schema。
+"""ET07 測驗作答（US6 / #279）schema。
 
 ## 作答中**絕不**回傳 `is_correct`
 
@@ -148,7 +148,7 @@ class AttemptResult(BaseModel):
     submitted_at: datetime
     #: 提交後剩餘的可作答次數；> 0 且未及格時前端顯示「重新作答」。
     remaining_attempts: int
-    #: 課程是否已關閉——成績頁據以顯示 ET-MSG-ET06-005。
+    #: 課程是否已關閉——成績頁據以顯示 ET-MSG-ET07-005。
     #:
     #: `spec_us6` 場景 27 的訊息原本要在**作答中**告知，但作答頁刻意不重抓（重抓會把
     #: 尚未暫存的答案蓋回畫面），而場景 27 本身保證作答中的 attempt 照樣完成並計分——
@@ -180,7 +180,7 @@ class QuizIntro(BaseModel):
 
     Attributes:
         time_limit_min: `None` = 不限時。前端須顯示「不限時」而**不是「0 分」**。
-        can_start: 是否可開始作答；`False` 時前端禁用按鈕並顯示 ET-MSG-ET06-001。
+        can_start: 是否可開始作答；`False` 時前端禁用按鈕並顯示 ET-MSG-ET07-001。
         last_score: **最近一次**的成績。與 `best_score` 一起給——結業成績取最高分，
             只顯示其一都會誤導（只給最近一次會讓學員以為自己退步了）。
         in_progress_attempt_id: 有未完成的作答時帶其 id，前端把按鈕改為「繼續作答」。

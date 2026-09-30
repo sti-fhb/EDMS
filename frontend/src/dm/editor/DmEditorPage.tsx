@@ -1,10 +1,14 @@
+import AddIcon from "@mui/icons-material/Add"
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined"
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import Alert from "@mui/material/Alert"
 import Autocomplete from "@mui/material/Autocomplete"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import CircularProgress from "@mui/material/CircularProgress"
 import Divider from "@mui/material/Divider"
+import FormHelperText from "@mui/material/FormHelperText"
+import IconButton from "@mui/material/IconButton"
 import MenuItem from "@mui/material/MenuItem"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
@@ -21,7 +25,7 @@ import {
   MANUAL_CATEGORY,
   TRAINING_CATEGORY,
 } from "./schemas"
-import type { EditorForm, OptionItem } from "./schemas"
+import type { AudiencePair, EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
 import { useDocTags, useDraftMeta, useEditorOptions, useReviewers } from "./useEditor"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -38,14 +42,14 @@ const DRAFT_PREFILL_HINT = "此為上次草稿內容，送審前請確認反映�
 
 /** 後端 error_code → 對應表單欄位（用於 inline 標紅）；未列者以 Snackbar 呈現。 */
 const ERROR_FIELD: Record<string, keyof EditorForm> = {
-  DM_DOC_005: "audience_ids", // 無可見對象（DM-MSG-DM03-008）
-  DM_DOC_006: "version_no", // 版號空 / 重複（DM-MSG-DM03-009）
-  DM_DOC_007: "func_code", // 手冊 func 重複（DM-MSG-DM03-003）
+  DM_DOC_005: "audience_pairs", // 無可見對象（DM-MSG-DM08-008）
+  DM_DOC_006: "version_no", // 版號空 / 重複（DM-MSG-DM08-009）
+  DM_DOC_007: "func_code", // 手冊 func 重複（DM-MSG-DM08-003）
   DM_REVIEW_001: "reviewer_id", // 審核者為撰寫者本人
 }
 
 /**
- * 文件新增與編輯（US5 / DM03）雙模式表單。
+ * 文件新增與編輯（US5 / DM08）雙模式表單。
  *
  * - **新增模式**（`/dm/documents/new`）：填 名稱 / 分類 /（MANUAL）func / 可見對象 / 檢索標籤 /
  *   首版版號 / 摘要 + 上傳單檔 → 存草稿 或 送簽（指定審核者）。
@@ -69,14 +73,14 @@ export function DmEditorPage() {
   const { data: options } = useEditorOptions()
   const { data: reviewers } = useReviewers()
   // 續編模式 meta（草稿匣「繼續編輯」）：有本人草稿 → 續編（draftMeta + PUT 更新既有版本）；
-  // 無（後端 404 → null）→ 從 DM02 詳細載已發布文件 meta、走「加新版」（addVersion）。
+  // 無（後端 404 → null）→ 從 DM07 詳細載已發布文件 meta、走「加新版」（addVersion）。
   const {
     data: draftMeta,
     isPending: draftMetaPending,
     isFetching: draftMetaFetching,
   } = useDraftMeta(docId ?? "", !isNew)
   const isContinueDraft = !isNew && !!draftMeta
-  // 續編首版草稿（父文件 DRAFT）不打 DM02 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
+  // 續編首版草稿（父文件 DRAFT）不打 DM07 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
   const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
@@ -112,17 +116,19 @@ export function DmEditorPage() {
   const draftObsolete = isContinueDraft && draftMeta?.doc_status === "OBSOLETE"
   // 續編時版號 / 摘要帶的是上次草稿值（#308），於欄位下方提示；新增文件無此情形。
   const draftPrefillHint = isContinueDraft && draftMeta ? DRAFT_PREFILL_HINT : ""
-  // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM02 詳細。
+  // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM07 詳細。
   const editName = isContinueDraft ? (draftMeta?.doc_name ?? "") : (detail?.doc_name ?? "")
   const editCategoryName = isContinueDraft ? (draftMeta?.category_name ?? "") : (detail?.category_name ?? "")
   const editFuncCode = isContinueDraft ? draftMeta?.func_code : detail?.func_code
   const editFuncName = isContinueDraft ? draftMeta?.func_name : detail?.func_name
 
   const audienceOptions = options?.audiences ?? []
+  const unitOptions = options?.units ?? []
   const retrievalOptions = options?.retrieval_tags ?? []
-  const selectedAudiences = useMemo(
-    () => (options?.audiences ?? []).filter((o) => form.audience_ids.includes(o.code)),
-    [options?.audiences, form.audience_ids],
+  /** 可見對象之錯誤可能落在陣列層（未設任何配對）或某列（單位 / 職位未選），一併取第一則顯示。 */
+  const audienceError = useMemo(
+    () => Object.entries(errors).find(([k]) => k.startsWith("audience_pairs"))?.[1],
+    [errors],
   )
   const selectedRetrieval = useMemo(
     () => (options?.retrieval_tags ?? []).filter((o) => form.retrieval_ids.includes(o.code)),
@@ -139,7 +145,7 @@ export function DmEditorPage() {
    * 鎖定，refetch 落定時 prefill effect 會把伺服器值蓋掉使用者剛選的標籤或剛打的版號，且無任何提示。
    */
   const lockPrefillFor = (key: keyof EditorForm) => {
-    if (key === "audience_ids" || key === "retrieval_ids") tagsPrefilled.current = true
+    if (key === "audience_pairs" || key === "retrieval_ids") tagsPrefilled.current = true
     else metaPrefilled.current = true
   }
 
@@ -150,6 +156,27 @@ export function DmEditorPage() {
     lockPrefillFor(key)
     setErrors((prev) => ({ ...prev, [key as string]: "" }))
   }
+
+  /**
+   * 可見對象配對之增 / 改 / 刪——一律建新陣列，不就地修改（immutability）。
+   *
+   * 改任一列都會清掉**所有** `audience_pairs.*` 錯誤：Zod 的錯誤 key 帶列索引
+   * （`audience_pairs.0.unit_id`），刪列後索引會位移，只清單一 key 會讓舊訊息掛在錯的列上。
+   */
+  const clearAudienceErrors = () =>
+    setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith("audience_pairs"))))
+
+  const setAudiencePairs = (pairs: AudiencePair[]) => {
+    setField("audience_pairs", pairs)
+    clearAudienceErrors()
+  }
+
+  const addAudiencePair = () => setAudiencePairs([...form.audience_pairs, { unit_id: "", audience_id: "" }])
+
+  const updateAudiencePair = (idx: number, patch: Partial<AudiencePair>) =>
+    setAudiencePairs(form.audience_pairs.map((pair, i) => (i === idx ? { ...pair, ...patch } : pair)))
+
+  const removeAudiencePair = (idx: number) => setAudiencePairs(form.audience_pairs.filter((_, i) => i !== idx))
 
   // 審核者僅為 submit 參數、不屬草稿內容：變更**不可**清草稿快取，否則送簽失敗後改審核者重試
   // 會重複建立文件（新增模式）或誤觸單一草稿擋（編輯模式）。
@@ -172,7 +199,7 @@ export function DmEditorPage() {
     persisted.current = null
     setErrors((prev) => ({ ...prev, file: "" }))
     if (f && !isPreviewableMime(f.type)) {
-      // Office 等非可預覽格式：警示 + 二次確認（DM-MSG-DM03-002）
+      // Office 等非可預覽格式：警示 + 二次確認（DM-MSG-DM08-002）
       confirm({
         title: "此檔案無法線上預覽",
         content: "所選檔案（如 Word / Excel）閱覽者將只能下載、無法線上預覽。是否仍使用此檔案？",
@@ -206,7 +233,7 @@ export function DmEditorPage() {
         doc_name: form.doc_name.trim(),
         category_code: form.category_code,
         func_code: isManual ? form.func_code : "",
-        audience_ids: isTraining ? [] : form.audience_ids, // TRAINING 不掛可見對象（切換分類後亦不殘留）
+        audience_pairs: isTraining ? [] : form.audience_pairs, // TRAINING 不掛可見對象（切換分類後亦不殘留）
         retrieval_ids: form.retrieval_ids,
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
@@ -222,7 +249,7 @@ export function DmEditorPage() {
         assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
-        audience_ids: isTraining ? [] : form.audience_ids, // TRAINING 不掛可見對象（切換分類後亦不殘留）
+        audience_pairs: isTraining ? [] : form.audience_pairs, // TRAINING 不掛可見對象（切換分類後亦不殘留）
         retrieval_ids: form.retrieval_ids,
         file,
       })
@@ -232,7 +259,7 @@ export function DmEditorPage() {
         version_no: form.version_no.trim(),
         change_summary: form.change_summary.trim(),
         assigned_reviewer: form.reviewer_id, // 存草稿記住指定審核者（供續編預帶）
-        audience_ids: isTraining ? [] : form.audience_ids, // TRAINING 不掛可見對象（切換分類後亦不殘留）
+        audience_pairs: isTraining ? [] : form.audience_pairs, // TRAINING 不掛可見對象（切換分類後亦不殘留）
         retrieval_ids: form.retrieval_ids,
         file,
       })
@@ -279,7 +306,7 @@ export function DmEditorPage() {
     try {
       await persistDraft()
       invalidateAfterWrite()
-      message.success("已儲存為草稿") // DM-MSG-DM03-007
+      message.success("已儲存為草稿") // DM-MSG-DM08-007
       setDirty(false)
       go(destAfter())
     } catch (e) {
@@ -296,7 +323,7 @@ export function DmEditorPage() {
       const ids = await persistDraft()
       await editorApi.submit(ids.doc_id, { version_id: ids.version_id, assigned_reviewer: form.reviewer_id })
       invalidateAfterWrite()
-      message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM03-006
+      message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM08-006
       setDirty(false)
       go(destAfter())
     } catch (e) {
@@ -308,7 +335,7 @@ export function DmEditorPage() {
 
   function handleCancel() {
     // 取消鈕：回來源頁（新增→文件庫、續編草稿→草稿匣、加新版→原詳細頁）。有未存變更先二次確認
-    //（DM-MSG-DM03-005），確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
+    //（DM-MSG-DM08-005），確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
     const leave = () => go(destAfter())
     if (!dirty) {
       leave()
@@ -323,7 +350,7 @@ export function DmEditorPage() {
     })
   }
 
-  // 離開攔截（DM-MSG-DM03-005）：表單有未存變更且非我方主動導向（go）時，攔下其他 in-app 導向
+  // 離開攔截（DM-MSG-DM08-005）：表單有未存變更且非我方主動導向（go）時，攔下其他 in-app 導向
   //（左側功能列切換、瀏覽器返回等），彈同款二次確認。取消鈕自帶確認、走 go() 不重複攔問。
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -350,7 +377,7 @@ export function DmEditorPage() {
   useEffect(() => {
     if (isNew || tagsPrefilled.current || !docTags || docTagsFetching) return
     tagsPrefilled.current = true
-    setForm((prev) => ({ ...prev, audience_ids: docTags.audience_ids, retrieval_ids: docTags.retrieval_ids }))
+    setForm((prev) => ({ ...prev, audience_pairs: docTags.audience_pairs, retrieval_ids: docTags.retrieval_ids }))
   }, [isNew, docTags, docTagsFetching])
 
   // 續編模式：一次性預帶既有草稿內容——名稱 / func / 版號 / 摘要 / 前次審核者，四種情況
@@ -374,7 +401,7 @@ export function DmEditorPage() {
     }))
   }, [isNew, draftMeta, draftMetaFetching])
 
-  // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM02 詳細載入。
+  // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM07 詳細載入。
   if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
@@ -510,24 +537,62 @@ export function DmEditorPage() {
                   訓練教材由教育訓練模組引用，不需設定可見對象
                 </Alert>
               ) : (
-                <Autocomplete
-                  multiple
-                  size="small"
-                  options={audienceOptions}
-                  value={selectedAudiences}
-                  onChange={(_, v: OptionItem[]) => setField("audience_ids", v.map((o) => o.code))}
-                  getOptionLabel={(o) => o.name}
-                  isOptionEqualToValue={(a, b) => a.code === b.code}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="可見對象"
-                      required
-                      error={!!errors.audience_ids}
-                      helperText={errors.audience_ids || "至少指定 1 個；核准發布後生效"}
-                    />
-                  )}
-                />
+                <Box>
+                  {/* 一列＝一組 (單位, 職位) 配對。兩欄必須成對設定：掛 [(軍醫局, 護理師), (三總, 行政人員)]
+                      意為「僅此兩種人」，若拆成兩個獨立多選會連「軍醫局的行政人員」也一併看得到（#437）。 */}
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    可見對象 *
+                  </Typography>
+                  <Stack spacing={1}>
+                    {form.audience_pairs.map((pair, idx) => (
+                      <Stack
+                        key={`${pair.unit_id}-${pair.audience_id}-${idx}`}
+                        direction="row"
+                        spacing={1}
+                        alignItems="center"
+                      >
+                        <Autocomplete
+                          size="small"
+                          sx={{ flex: 1 }}
+                          options={unitOptions}
+                          value={unitOptions.find((o) => o.code === pair.unit_id) ?? null}
+                          onChange={(_, v: OptionItem | null) =>
+                            updateAudiencePair(idx, { unit_id: v?.code ?? "" })
+                          }
+                          getOptionLabel={(o) => o.name}
+                          isOptionEqualToValue={(a, b) => a.code === b.code}
+                          renderInput={(params) => <TextField {...params} label="單位" />}
+                        />
+                        <Autocomplete
+                          size="small"
+                          sx={{ flex: 1 }}
+                          options={audienceOptions}
+                          value={audienceOptions.find((o) => o.code === pair.audience_id) ?? null}
+                          onChange={(_, v: OptionItem | null) =>
+                            updateAudiencePair(idx, { audience_id: v?.code ?? "" })
+                          }
+                          getOptionLabel={(o) => o.name}
+                          isOptionEqualToValue={(a, b) => a.code === b.code}
+                          renderInput={(params) => <TextField {...params} label="職位" />}
+                        />
+                        <IconButton
+                          size="small"
+                          aria-label={`移除第 ${idx + 1} 組可見對象`}
+                          onClick={() => removeAudiencePair(idx)}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    ))}
+                  </Stack>
+                  <Button size="small" startIcon={<AddIcon />} onClick={addAudiencePair} sx={{ mt: 1 }}>
+                    新增可見對象
+                  </Button>
+                  <FormHelperText error={!!audienceError}>
+                    {audienceError ||
+                      "每組為「單位 + 職位」；「全單位」＝不限單位、「全體」＝不限職位。核准發布後生效"}
+                  </FormHelperText>
+                </Box>
               )}
               <Autocomplete
                 multiple

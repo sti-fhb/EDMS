@@ -280,7 +280,7 @@ class EtInvitationService:
 
         #362 之前這個缺口的後果有限：停用者收到信也登不進來（`core/auth.py` 每請求查
         `STATUS`，非 `ACTIVE` 回 403），他只會停在「待加入」清單上讓教師看見。**取消待
-        加入之後後果變嚴重**——他會被直接寫進 `ET_ENROLLMENT`，而 ET03 清單與週報只濾
+        加入之後後果變嚴重**——他會被直接寫進 `ET_ENROLLMENT`，而 ET02 清單與週報只濾
         `IS_REMOVED` / `DELETED`，於是一個永遠不可能完課的帳號會**永久坐在完訓率的分母
         裡**，還會出現在具名 CSV 中。
 

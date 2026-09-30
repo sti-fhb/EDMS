@@ -21,7 +21,7 @@ from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外）
 _RETRIEVAL = "RETRIEVAL"
 _PENDING = "PENDING"
 _OBSOLETE = "OBSOLETE"
-# DM02 詳細頁可瀏覽之文件狀態（**不分角色**）：已發布 + 廢止待簽核（皆外顯「已發布」）+ 已廢止
+# DM07 詳細頁可瀏覽之文件狀態（**不分角色**）：已發布 + 廢止待簽核（皆外顯「已發布」）+ 已廢止
 # （僅 US10 read-only 進入）。DRAFT / PENDING_REVIEW（首版未發布）不在此瀏覽，改於作者個人專區（US9）/
 # 審核者簽核中心（US6）呈現，故此處對所有角色一律排除（spec.md 狀態三維度 L190-192、spec_us4 進入來源）。
 _BROWSABLE_STATUSES = ("PUBLISHED", "PENDING_OBSOLETE", "OBSOLETE")
@@ -34,7 +34,7 @@ class DetailRepository:
     """文件詳細 / 版本 / 送審狀態 / 廢止資訊 / 檔案 / 閱讀紀錄。"""
 
     def _access_conditions(self, doc_id: str, user_id: str, roles: Iterable[str]) -> list[ColumnElement[bool]]:
-        # 文件狀態限制對所有角色一律套用（DM02 僅瀏覽已發布生命週期文件）。
+        # 文件狀態限制對所有角色一律套用（DM07 僅瀏覽已發布生命週期文件）。
         conds: list[ColumnElement[bool]] = [
             DmDocument.doc_id == doc_id,
             DmDocument.deleted == 0,

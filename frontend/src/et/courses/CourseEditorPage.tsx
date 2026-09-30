@@ -81,7 +81,7 @@ const EMPTY_FORM = {
 }
 
 /**
- * ET02 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
+ * ET05 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
  *
  * 動作列：取消 / 儲存草稿 / **儲存並發布**（僅草稿狀態顯示——已發布課程的編輯即時
  * 生效、不需重新發布，見 AC 28）。
@@ -470,6 +470,37 @@ export function EtCourseEditorPage() {
           await coursesApi.close(courseId as number, course?.version ?? 0)
           message.success("課程已關閉")
           invalidate()
+        } catch (err) {
+          handleError(err)
+        }
+      },
+    })
+  }
+
+  /**
+   * 刪除草稿（#457）。
+   *
+   * ⚠️ 措辭寫「**無法復原**」是誠實的：後端確實是軟刪（`DELETED=1`，#202 SA 裁示 Q1），
+   * 但**沒有任何還原入口**——對教師而言就是不可逆。寫「可還原」會是假承諾。
+   *
+   * ⚠️ 錯誤在 `onOk` 內就地 catch（比照 `requestClose` 與 `handleDeleteChapter`）——
+   * 讓 rejection 逃出去會使 `NotificationContext` 刻意保留確認視窗，與其他錯誤 Dialog
+   * 疊在一起。
+   *
+   * 導回列表而非留在原頁：課程已經不存在，留下來只會是一個查詢失敗的空殼。
+   */
+  const requestDeleteDraft = () => {
+    confirm({
+      title: "刪除草稿",
+      content:
+        "確定刪除這門草稿課程？其下的章節、教材、測驗與課後問卷會一併移除，且無法復原。" +
+        "草稿尚未發布，沒有學員受影響。",
+      okText: "確認刪除",
+      onOk: async () => {
+        try {
+          await coursesApi.remove(courseId as number)
+          message.success("草稿已刪除")
+          navigate("/et/courses")
         } catch (err) {
           handleError(err)
         }
@@ -1036,7 +1067,7 @@ export function EtCourseEditorPage() {
     return (
       <Box>
         <ScreenHeader
-          code="ET02"
+          code="ET05"
           title="課程編輯"
           leading={
             <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
@@ -1055,7 +1086,7 @@ export function EtCourseEditorPage() {
     <LocalizationProvider dateAdapter={AdapterDayjs}>
     <Box>
       <ScreenHeader
-        code="ET02"
+        code="ET05"
         title={courseId === undefined ? "新增課程" : "課程編輯"}
         leading={
           <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
@@ -1665,6 +1696,21 @@ export function EtCourseEditorPage() {
                 </>
               ) : (
                 <>
+                  {/*
+                    刪除草稿（#457）。後端與 `coursesApi.remove` 早就有了，缺的一直是這顆。
+
+                    ⚠️ **刻意排在最左、與「儲存並發布」隔著兩顆按鈕。** 本專案的 `confirm`
+                    確認鈕一律主色、不提供危險色（見 `NotificationContext`），所以誤點的
+                    防線只剩版面距離——而這兩個動作的誤點代價完全不對稱。
+
+                    `!isNew`：新增模式下課程還沒寫進 DB，沒有 `course_id` 可刪；此時該做的
+                    是直接離開（「取消」），不是刪除一個不存在的東西。
+                  */}
+                  {status === "DRAFT" && !isNew && (
+                    <Button size="small" color="error" onClick={requestDeleteDraft}>
+                      刪除草稿
+                    </Button>
+                  )}
                   <Button size="small" onClick={() => navigate("/et/courses")}>
                     取消
                   </Button>

@@ -30,7 +30,13 @@ async def _audience_tag_id(db, name: str) -> int:
 
 
 async def _make_retrieval_tag(db, name: str) -> int:
-    """於 NATURE（RETRIEVAL 組）建一檢索標籤，回 TAG_ID。"""
+    """取 NATURE（RETRIEVAL 組）之檢索標籤，回 TAG_ID；seed 已有同名者沿用。
+
+    `DM_TAG` 組內名稱唯一（`UQ_DM_TAG_GROUP_NAME`，#437），重建同名會撞唯一鍵。
+    """
+    existing = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_group_code == "NATURE", DmTag.tag_name == name))
+    if existing is not None:
+        return existing
     tag = DmTag(tag_group_code="NATURE", tag_name=name, created_user="seed", created_date=utcnow())
     db.add(tag)
     await db.flush()
@@ -106,8 +112,20 @@ async def _seed_doc(
     await db.flush()
     doc.current_version_id = ver.version_id
     await db.flush()
+    # 可見對象為 (單位, 職位) 配對；單位一律「全單位」＝不限單位（#437）。檢索標籤無單位維度。
+    all_units_id = await db.scalar(
+        select(DmTag.tag_id).where(DmTag.tag_group_code == "UNIT", DmTag.tag_name == "全單位")
+    )
     for tname in audience_tags:
-        db.add(DmDocTag(doc_id=doc_id, tag_id=await _audience_tag_id(db, tname), created_user=author, created_date=now))
+        db.add(
+            DmDocTag(
+                doc_id=doc_id,
+                tag_id=await _audience_tag_id(db, tname),
+                unit_tag_id=all_units_id,
+                created_user=author,
+                created_date=now,
+            )
+        )
     for tid in retrieval_tag_ids:
         db.add(DmDocTag(doc_id=doc_id, tag_id=tid, created_user=author, created_date=now))
     await db.flush()
