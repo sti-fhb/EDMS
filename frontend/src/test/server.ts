@@ -115,6 +115,24 @@ export const handlers = [
       dm: { has_role: true, is_admin: true },
     }),
   ),
+  // ET 首頁儀表板（#453）：預設三張卡皆有資料；個別測試以 server.use 覆蓋
+  http.get("/api/et/dashboard", () =>
+    HttpResponse.json({
+      student: { joined: 3, in_progress: 1, not_started: 1, completed: 1, pending_open: 0 },
+      teacher: {
+        ending_soon: [{ course_id: 11, course_name: "採血作業新進人員訓練", days_left: 2, not_completed: 5 }],
+        draft_count: 1,
+      },
+      admin: {
+        overdue_incomplete: 4,
+        completion_rate: "62.50",
+        by_unit: [
+          { tag_name: "行政人員", enrolled: 4, completed: 1, completion_rate: "25.00" },
+          { tag_name: "護理師", enrolled: 4, completed: 3, completion_rate: "75.00" },
+        ],
+      },
+    }),
+  ),
   // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
   http.get("/api/dm/dashboard/stats", () =>
     HttpResponse.json({
