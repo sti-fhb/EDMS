@@ -32,7 +32,7 @@ function today(): string {
 }
 
 /**
- * 文件變更歷程查詢（US11 / DM08，管理者）：跨文件查公開變更歷程（發布 / 廢止事件），依日期區間 /
+ * 文件變更歷程查詢（US11 / DM05，管理者）：跨文件查公開變更歷程（發布 / 廢止事件），依日期區間 /
  * 申請人or核准人（帳號或姓名）/ 操作類型**即時**搜尋；可匯出 CSV 供資安稽核。入口與後端皆限 DM_ADMIN。
  */
 export function DmChangeLogPage() {
@@ -72,11 +72,11 @@ export function DmChangeLogPage() {
 
   const rows = data?.data ?? []
 
-  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM08-002）
+  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM05-002）
   if (denied) {
     return (
       <Box>
-        <ScreenHeader code="DM08" />
+        <ScreenHeader code="DM05" />
         <Alert severity="error">您無權限存取此頁面</Alert>
       </Box>
     )
@@ -86,7 +86,7 @@ export function DmChangeLogPage() {
   if (accessPending) {
     return (
       <Box>
-        <ScreenHeader code="DM08" />
+        <ScreenHeader code="DM05" />
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress size={28} />
         </Box>
@@ -96,7 +96,7 @@ export function DmChangeLogPage() {
 
   return (
     <Box>
-      <ScreenHeader code="DM08" />
+      <ScreenHeader code="DM05" />
 
       {/* 搜尋列（即時篩選，無查詢按鈕）*/}
       <Paper sx={{ p: 2, mb: 2 }}>

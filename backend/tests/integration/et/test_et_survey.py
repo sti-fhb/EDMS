@@ -1,4 +1,4 @@
-"""ET02 課後問卷整合測試（US3 / #204）。
+"""ET05 課後問卷整合測試（US3 / #204）。
 
 重點在需要真 DB 才驗得了的事：
 
@@ -123,7 +123,7 @@ class TestSurveyLifecycle:
         assert body["questions"] == []
 
     async def test_重複建立被擋(self, client, db) -> None:
-        """AC 22 / ET-MSG-ET02-010：一門課程 0～1 份。"""
+        """AC 22 / ET-MSG-ET05-010：一門課程 0～1 份。"""
         uid = await _user(db, "t_srv02")
         cid = await _course(client, uid)
         await _survey(client, uid, cid)
@@ -185,7 +185,7 @@ class TestSurveyQuestions:
         assert [o["sort_order"] for o in row["options"]] == [1, 2, 3]
 
     async def test_選項不足兩個被擋(self, client, db) -> None:
-        """AC 19 / ET-MSG-ET02-008。"""
+        """AC 19 / ET-MSG-ET05-008。"""
         uid = await _user(db, "t_sq02")
         cid = await _course(client, uid)
         survey = await _survey(client, uid, cid)

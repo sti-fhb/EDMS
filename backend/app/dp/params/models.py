@@ -56,7 +56,7 @@ class DpParamDetail(BaseModel):
     description: Mapped[Optional[str]] = mapped_column("DESCRIPTION", String(500), nullable=True)
     sort_order: Mapped[Optional[int]] = mapped_column("SORT_ORDER", Integer, nullable=True)
     is_enabled: Mapped[bool] = mapped_column("IS_ENABLED", Boolean, nullable=False, default=True)
-    # 維護層級（#171）：ADMIN＝管理者可於 DP07 編輯；READONLY＝顯示現值但整列唯讀；
+    # 維護層級（#171）：ADMIN＝管理者可於 DP03 編輯；READONLY＝顯示現值但整列唯讀；
     # HIDDEN＝不出現於維護頁。READONLY / HIDDEN 之值由 IT 直接操作 DB 變更（spec_us5 FR-DP-US5-11）。
     # 與 DP_PARAM_M.DETAIL_LOCK 正交：後者鎖的是 PARAM_KEY 碼值，本欄管的是誰能改這一列。
     # Python-side default 而非 server_default——見 migration 71ca59c07bd1 的 docstring。

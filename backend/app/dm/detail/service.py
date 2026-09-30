@@ -163,6 +163,6 @@ class DetailService:
             return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=False)
 
         # disposition == "preview"
-        if not is_previewable(vfile.file_mime):  # Office 等無法線上預覽（FR-002 / DM-MSG-DM02-001）
+        if not is_previewable(vfile.file_mime):  # Office 等無法線上預覽（FR-002 / DM-MSG-DM07-001）
             raise AppError(status_code=422, detail="此檔案格式無法線上預覽，請下載原檔", error_code="DM_DOC_003")
         return FileServe(path=safe_path, mime=vfile.file_mime, name=vfile.file_name, inline=True)

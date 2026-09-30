@@ -1,4 +1,4 @@
-/** 文件新增與編輯（US5 / DM03）型別與表單驗證（對齊後端 app/dm/editor/schemas.py）。 */
+/** 文件新增與編輯（US5 / DM08）型別與表單驗證（對齊後端 app/dm/editor/schemas.py）。 */
 
 import { z } from "zod"
 
@@ -9,7 +9,7 @@ export interface OptionItem {
   group_code?: string | null // 檢索標籤所屬組（MODULE / NATURE / LEGAL）
 }
 
-/** DM03 表單一次載入之受控下拉集合。 */
+/** DM08 表單一次載入之受控下拉集合。 */
 export interface EditorOptions {
   categories: OptionItem[]
   funcs: OptionItem[]
@@ -75,7 +75,7 @@ export const MANUAL_CATEGORY = "MANUAL"
 /** 訓練教材：由教育訓練模組引用，不設定可見對象（#377，spec_us5 FR-009 之例外）。 */
 export const TRAINING_CATEGORY = "TRAINING"
 
-/** 可內嵌預覽之 MIME（其餘如 Office 上傳時出橘色警示條 DM-MSG-DM03-002）。 */
+/** 可內嵌預覽之 MIME（其餘如 Office 上傳時出橘色警示條 DM-MSG-DM08-002）。 */
 const PREVIEWABLE_MIMES = new Set(["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/gif"])
 
 /** 檔案是否可線上預覽（PDF / 圖片）；Office 等回 false。 */

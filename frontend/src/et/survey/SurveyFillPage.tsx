@@ -37,7 +37,7 @@ import { toApiError } from "../../services/http"
 import { formatDateTime } from "../../utils/date"
 
 /**
- * ET05 課後問卷填寫頁（US13 / #284）。
+ * ET06 課後問卷填寫頁（US13 / #284）。
  *
  * 填寫、唯讀回看、課程已關閉三態共用同一個版面，由後端的 `state` 分支——三者要顯示的
  * **題目是同一份**，差別只在能不能改與有沒有送出鈕。
@@ -53,7 +53,7 @@ import { formatDateTime } from "../../utils/date"
  *
  * wireframe 與 issue 都寫「未全答時送出鈕禁用」，但 `disabled` 的按鈕點下去毫無反應，
  * 學員不會知道是哪一題沒填——問卷有十幾題時他得自己一題一題找。故一律可點，由
- * `handleSubmit` 判定後以頂部 Alert + 逐題紅框標出未答題（ET-MSG-ET05-101），與
+ * `handleSubmit` 判定後以頂部 Alert + 逐題紅框標出未答題（ET-MSG-ET06-101），與
  * `ChapterNav` 對鎖定項目的處理同一個立場（#255：阻擋**並提示**）。
  */
 export function EtSurveyFillPage() {
@@ -163,7 +163,7 @@ export function EtSurveyFillPage() {
       <Paper variant="outlined" sx={{ maxWidth: 760, mx: "auto", p: { xs: 2, sm: 4 } }}>
         <StateBanner data={data} />
 
-        {/* 未答提示（ET-MSG-ET05-101）。inline 而非 Snackbar——與欄位並存才看得出是哪一次送出。 */}
+        {/* 未答提示（ET-MSG-ET06-101）。inline 而非 Snackbar——與欄位並存才看得出是哪一次送出。 */}
         {showErrors && unanswered.size > 0 && (
           <Alert severity="error" sx={{ mb: 3 }}>
             尚有題目未作答，請完成後再送出

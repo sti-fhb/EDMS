@@ -1,4 +1,4 @@
-"""文件廢止申請（US8 / UCDM05 / DM02）整合測試（真實 DB）。
+"""文件廢止申請（US8 / UCDM05 / DM07）整合測試（真實 DB）。
 
 涵蓋：發起廢止（→ PENDING_OBSOLETE + OBSOLETE review + OBS_SUBMIT 通知、附件落地 OBSOLETE_FILE_*）、
 發起檢核（缺原因 DM_DOC_014 / 缺審核者 DM_DOC_015 / 選自己 DM_REVIEW_001 / 文件非已發布 DM_DOC_016 /
@@ -196,7 +196,7 @@ async def test_initiate_missing_reason_blocked(db):
             file_mime=None,
             op=_op("ed"),
         )
-    assert e.value.error_code == "DM_DOC_014"  # DM-MSG-DM02-011
+    assert e.value.error_code == "DM_DOC_014"  # DM-MSG-DM07-011
 
 
 async def test_initiate_missing_reviewer_blocked(db):
@@ -212,7 +212,7 @@ async def test_initiate_missing_reviewer_blocked(db):
             file_mime=None,
             op=_op("ed"),
         )
-    assert e.value.error_code == "DM_DOC_015"  # DM-MSG-DM02-014
+    assert e.value.error_code == "DM_DOC_015"  # DM-MSG-DM07-014
 
 
 async def test_initiate_reviewer_is_self_blocked(db):
@@ -249,7 +249,7 @@ async def test_initiate_non_published_doc_blocked(db):
 
 
 async def test_initiate_blocked_when_new_version_in_review(db):
-    # 文件已發布且另有進行中之新版本送審（一文件一 PENDING）→ 無法同時發起廢止（FR-004 / DM-MSG-DM02-012）
+    # 文件已發布且另有進行中之新版本送審（一文件一 PENDING）→ 無法同時發起廢止（FR-004 / DM-MSG-DM07-012）
     doc, _ = await _published_doc(db, "DM-SOP-000407")
     nv = await _add_version(db, "DM-SOP-000407", "2.0", status="PENDING_REVIEW")
     db.add(
@@ -443,7 +443,7 @@ async def test_http_download_published_version_during_pending_obsolete(db, clien
 
 
 async def test_http_upload_then_download_obsolete_attachment(db, client):
-    """item 六：完整前端路徑——編輯者以 multipart 上傳廢止附件 → 指定審核者於 DM04 下載（HTTP 全鏈路）。"""
+    """item 六：完整前端路徑——編輯者以 multipart 上傳廢止附件 → 指定審核者於 DM02 下載（HTTP 全鏈路）。"""
     await _seed_user(db, "ed3", "編輯", email="ed3@e.com")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
     await _grant(db, "ed3", DM_EDITOR)

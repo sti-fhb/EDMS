@@ -49,7 +49,7 @@ const RESULT_OPTIONS = [
  *
  * ⚠️ 兩者皆不給仍會被擋——那才是裁示 A 原本要防的「留白查全部」。**換的是手段不是
  * 目的**：課程之所以能取代關鍵字，是因為教師的下拉只有自己開設的課，而看自己課的學員
- * 是他本來就有的資訊（ET03 整頁就是做這件事）。
+ * 是他本來就有的資訊（ET02 整頁就是做這件事）。
  *
  * ⛔ 下拉只是 UI——後端另有一道「非管理者只能依自己課程篩選」的閘（403
  * `ET_APPROVAL_007`）。**兩者是一組的**，只做前者等於沒做。
@@ -100,7 +100,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   })
   const options = coursesQuery.data ?? []
 
-  // 🔴 空的下拉有**三種**成因，畫面必須分得出來——說錯比不說更糟（與 ET03 同一條）。
+  // 🔴 空的下拉有**三種**成因，畫面必須分得出來——說錯比不說更糟（與 ET02 同一條）。
   // 判定抽在 `courseOptionsState.ts`：其中一種情形（先成功、之後背景刷新失敗）在元件
   // 測試裡要真的觸發一次刷新才驗得到，而那個區別正是最容易寫錯的地方。
   //
@@ -109,7 +109,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   // 就會變成沒有測試守得住的自由度，故由該函式自己決定看哪一個。
   //
   // ⚠️ `"none"` 底下其實還混著兩件事（「沒開過課」與「開的課還沒有人被核可」），
-  // 這裡**刻意不分**：兩者的下一步相同（去 ET03 核可學員），而要分得出來得多一次查詢。
+  // 這裡**刻意不分**：兩者的下一步相同（去 ET02 核可學員），而要分得出來得多一次查詢。
   const emptyReason = courseOptionsEmptyReason(coursesQuery, options.length)
 
   const params = submitted === null ? null : { ...submitted, page }
@@ -158,7 +158,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         </Alert>
       )}
 
-      {/* 搜尋列——白底區塊，與 DM06「已廢止文件查詢」一致（#436）。
+      {/* 搜尋列——白底區塊，與 DM03「已廢止文件查詢」一致（#436）。
           裸放在灰底上時欄位看起來像懸空的，而下方結果表格有 Paper 框，上下半部
           視覺不一致會讓人以為畫面還沒載完。 */}
       <Paper sx={{ p: 2 }}>
@@ -258,7 +258,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         //
         // | 真相 | 該做什麼 |
         // |---|---|
-        // | 全系統還沒有任何核可紀錄 | 去 ET03 核可學員 |
+        // | 全系統還沒有任何核可紀錄 | 去 ET02 核可學員 |
         // | 有紀錄，但這個人沒有 | 確認姓名 / 改用 Email 查 |
         // | 有紀錄，但被**可見範圍**擋掉 | 找管理者查 |
         //

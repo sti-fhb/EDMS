@@ -64,7 +64,7 @@ describe("ET01 課程列表", () => {
     expect(screen.getAllByText("檢視")).toHaveLength(1)
   })
 
-  it("點卡片導向該課程（自己的進編輯、他人的進唯讀由 ET02 判定）", async () => {
+  it("點卡片導向該課程（自己的進編輯、他人的進唯讀由 ET05 判定）", async () => {
     const user = userEvent.setup()
     renderWithProviders(<EtCourseListPage />)
 

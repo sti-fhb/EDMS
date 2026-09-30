@@ -42,7 +42,7 @@ def ensure_survey_absent(*, exists: bool) -> None:
         exists: 該課程是否已有未刪除之問卷。
 
     Raises:
-        AppError: 409 `ET_SURVEY_002`（ET-MSG-ET02-010）。
+        AppError: 409 `ET_SURVEY_002`（ET-MSG-ET05-010）。
     """
     if exists:
         raise AppError(status_code=409, detail="一門課程僅可建立 1 份課後問卷", error_code="ET_SURVEY_002")
@@ -54,7 +54,7 @@ def ensure_option_count_valid(count: int) -> None:
     只有一個選項的題目沒有選擇可言；0 個則連題目都不成立。
 
     Raises:
-        AppError: 422 `ET_SURVEY_004`（ET-MSG-ET02-008）。
+        AppError: 422 `ET_SURVEY_004`（ET-MSG-ET05-008）。
     """
     if count < MIN_OPTIONS:
         raise AppError(status_code=422, detail=f"每題至少需 {MIN_OPTIONS} 個選項", error_code="ET_SURVEY_004")
@@ -73,7 +73,7 @@ def ensure_editable(*, has_responses: bool) -> None:
     把停用也擋掉等於整張卡片變成死的。
 
     Raises:
-        AppError: 422 `ET_SURVEY_003`（ET-MSG-ET02-009）。
+        AppError: 422 `ET_SURVEY_003`（ET-MSG-ET05-009）。
     """
     if has_responses:
         raise AppError(status_code=422, detail="已有學員填答，題目與選項不可修改", error_code="ET_SURVEY_003")

@@ -1,4 +1,4 @@
-"""已廢止文件查詢 API（US10 / UCDM08 / DM06）。
+"""已廢止文件查詢 API（US10 / UCDM08 / DM03）。
 
 掛 DM 存取閘 `get_dm_context`；清單 / 匯出於 service 層再過 DM_ADMIN 硬閘（FR-001 擋直連）。
 唯讀查詢，無寫入、不寫稽核。read-only 詳細頁重用 US4（前端導向 /dm/documents/{docId}），本模組不含。

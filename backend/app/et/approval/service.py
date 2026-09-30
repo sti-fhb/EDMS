@@ -49,7 +49,7 @@ _VERSION_CONFLICT = AppError(
 
 # ⚠️ **沒有「學員尚未完課」的錯誤碼**，這是刻意的。
 #
-# `ET-MSG-ET03-304`「學員尚未完課，無法核可」在 spec 裡歸類為**錯誤**、觸發情境是
+# `ET-MSG-ET02-304`「學員尚未完課，無法核可」在 spec 裡歸類為**錯誤**、觸發情境是
 # 「場景 3：對未完課學員核可」——但同一個場景 3 又明訂那顆按鈕根本不顯示。也就是說
 # 它是防繞過用的訊息，正常 UI 產生不出來。
 #
@@ -246,7 +246,7 @@ class EtApprovalService:
         reason = ensure_revoke_reason(payload.reason)
 
         current = await self._repo.get_one(db, course_id=course_id, user_id=user_id)
-        # 查無列 → 404；查得到但已撤銷 → 交給條件式 UPDATE 回 409（`ET-MSG-ET03-308`
+        # 查無列 → 404；查得到但已撤銷 → 交給條件式 UPDATE 回 409（`ET-MSG-ET02-308`
         # 「已被其他人變更，請重新整理」正是這個情境的文案）。兩者分流，因為前者是
         # 「這個人從來沒被核可過」、後者是「你看到的畫面過期了」。
         if current is None:
@@ -335,7 +335,7 @@ class EtApprovalService:
 
         ## 撤銷也受 `REQUIRE_APPROVAL` 管
 
-        教師若把「需線下核可」關掉，ET03 的整個核可欄會消失，此時不該還能從 API 撤銷
+        教師若把「需線下核可」關掉，ET02 的整個核可欄會消失，此時不該還能從 API 撤銷
         ——畫面上看不到的東西不該能操作。重新勾選即恢復，既有核可列不受影響。
         """
         course = await self._tracking.get_course(db, course_id)

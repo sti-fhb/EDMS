@@ -32,7 +32,7 @@ function renderAt(capabilities?: { can_create_course: boolean; can_manage_course
 }
 
 describe("ET 首頁角色導向（AC 1）", () => {
-  it("純學員導向 ET04 我的課程", async () => {
+  it("純學員導向 ET03 我的課程", async () => {
     renderAt({ can_create_course: false, can_manage_courses: false, can_learn: true })
 
     expect(await screen.findByText("我的課程")).toBeInTheDocument()
@@ -41,11 +41,11 @@ describe("ET 首頁角色導向（AC 1）", () => {
   it("具建課能力者導向課程列表", async () => {
     renderAt({ can_create_course: true, can_manage_courses: true, can_learn: true })
 
-    // 教師同時也是學員（學員角色人人有）；一律送到 ET04 會讓他每次進 ET 都要多點一次。
+    // 教師同時也是學員（學員角色人人有）；一律送到 ET03 會讓他每次進 ET 都要多點一次。
     expect(await screen.findByText("課程列表")).toBeInTheDocument()
   })
 
-  it("能力查詢失敗時導向 ET04（每個 ET 使用者都進得去）", async () => {
+  it("能力查詢失敗時導向 ET03（每個 ET 使用者都進得去）", async () => {
     server.use(http.get("/api/et/courses/capabilities", () => new HttpResponse(null, { status: 500 })))
     renderAt()
 

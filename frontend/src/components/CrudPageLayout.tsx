@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
 import { ScreenHeader } from "./ScreenHeader"
 
 interface CrudPageLayoutProps {
-  /** 畫面代號（如 `DP05`）：標題列 icon 與名稱取自 `navItems`，與側欄同源。 */
+  /** 畫面代號（如 `DP01`）：標題列 icon 與名稱取自 `navItems`，與側欄同源。 */
   code: string
   /** 篩選列內容（搜尋欄、下拉等）。 */
   filterContent?: ReactNode

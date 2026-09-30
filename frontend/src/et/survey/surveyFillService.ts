@@ -1,7 +1,7 @@
 import type { SurveyAnswerRow, SurveyForm, SurveySubmitResult } from "./surveyFillSchemas"
 import { http } from "../../services/http"
 
-/** ET05 課後問卷填寫 API（US13 / #284）。 */
+/** ET06 課後問卷填寫 API（US13 / #284）。 */
 export const surveyFillApi = {
   form: async (courseId: number): Promise<SurveyForm> => {
     const { data } = await http.get<SurveyForm>(`/et/courses/${courseId}/survey/form`)

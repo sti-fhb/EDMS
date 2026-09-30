@@ -1,4 +1,4 @@
-/** ET10 核可查詢（US17 / #385）之 API 型別。 */
+/** ET04 核可查詢（US17 / #385）之 API 型別。 */
 
 /** 教師 / 管理者視角的一列（`FR-ET-US17-01`）。 */
 export interface ApprovalQueryRow {
@@ -51,7 +51,7 @@ export interface ApprovalQueryParams {
 }
 
 /**
- * ET10 課程篩選下拉的一個選項（#439）。
+ * ET04 課程篩選下拉的一個選項（#439）。
  *
  * ⚠️ 母體是**有核可紀錄的課程**，不是 ET01 的課程清單——後者的 `scope=all` 排除了
  * 已結束的課程，而核可紀錄絕大多數正落在那些課上。細節見後端 `ApprovalCourseOption`。

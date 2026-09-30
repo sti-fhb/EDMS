@@ -105,7 +105,7 @@ function DocItem({ doc, readOnly, onRemove }: { doc: DocRow; readOnly: boolean; 
 }
 
 /**
- * 教材編輯視窗（ET02）。
+ * 教材編輯視窗（ET05）。
  *
  * ## 除了影片上傳，一切都等到按「儲存」才生效
  *

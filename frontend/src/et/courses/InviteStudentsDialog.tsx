@@ -35,13 +35,13 @@ interface InviteStudentsDialogProps {
   onClose: () => void
 }
 
-/** 加入課程頁（ET04）之網址——邀請碼連結與 QR Code 皆導向此處的加入流程。 */
+/** 加入課程頁（ET03）之網址——邀請碼連結與 QR Code 皆導向此處的加入流程。 */
 function joinUrlFor(code: string): string {
   return `${window.location.origin}/et/my-courses?code=${code}`
 }
 
 /**
- * ET02 邀請學員視窗（US8 / #273、#362）。
+ * ET05 邀請學員視窗（US8 / #273、#362）。
  *
  * ## 這個視窗是「補件」用的
  *

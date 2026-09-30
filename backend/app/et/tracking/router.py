@@ -1,4 +1,4 @@
-"""ET03 學員學習狀況追蹤 API（US9 / #322）——教師端。
+"""ET02 學員學習狀況追蹤 API（US9 / #322）——教師端。
 
 router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 service 的
 `ensure_owner` 判定。兩層都要：角色閘擋掉學員，擁有權閘擋掉「別的教師」。
@@ -162,7 +162,7 @@ async def remove_student(
     """移除課程學員（`FR-ET-US9-10`）——軟刪，**學習歷史完整保留供稽核**。
 
     有 `IN_PROGRESS` attempt 時**仍允許移除**，該 attempt 保留並可完成（AC 7）；警告
-    文案 ET-MSG-ET03-003 由前端顯示。
+    文案 ET-MSG-ET02-003 由前端顯示。
 
     已移除者回 404 `ET_TRACK_001`：重複移除代表教師的清單已過期，靜默成功會誤導他。
 

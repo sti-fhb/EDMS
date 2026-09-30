@@ -1,4 +1,4 @@
-"""文件變更歷程查詢 API（US11 / UCDM10 / DM08）。
+"""文件變更歷程查詢 API（US11 / UCDM10 / DM05）。
 
 掛 DM 存取閘 `get_dm_context`；清單 / 匯出於 service 層再過 DM_ADMIN 硬閘（FR-001 擋直連）。
 唯讀查詢，無寫入、不寫稽核；資料來源 DM_CHANGE_LOG 由 US6/US8 核准時寫入。

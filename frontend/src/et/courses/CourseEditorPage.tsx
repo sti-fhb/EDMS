@@ -81,7 +81,7 @@ const EMPTY_FORM = {
 }
 
 /**
- * ET02 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
+ * ET05 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
  *
  * 動作列：取消 / 儲存草稿 / **儲存並發布**（僅草稿狀態顯示——已發布課程的編輯即時
  * 生效、不需重新發布，見 AC 28）。
@@ -1067,7 +1067,7 @@ export function EtCourseEditorPage() {
     return (
       <Box>
         <ScreenHeader
-          code="ET02"
+          code="ET05"
           title="課程編輯"
           leading={
             <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
@@ -1086,7 +1086,7 @@ export function EtCourseEditorPage() {
     <LocalizationProvider dateAdapter={AdapterDayjs}>
     <Box>
       <ScreenHeader
-        code="ET02"
+        code="ET05"
         title={courseId === undefined ? "新增課程" : "課程編輯"}
         leading={
           <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>

@@ -131,7 +131,7 @@ interface ChapterSectionProps extends ItemHandlers {
 }
 
 /**
- * 章節編排區（ET02）。
+ * 章節編排區（ET05）。
  *
  * 拖拉採 `@dnd-kit`（內建鍵盤操作與 a11y）；重排一律送**完整順序陣列**而非相對移動，
  * 避免並行編輯下的順序漂移——與後端 `ensure_reorder_complete` 的契約一致。

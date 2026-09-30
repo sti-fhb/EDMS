@@ -45,7 +45,7 @@ paths:
 ```tsx
 // ✅ 正確：使用 CrudPageLayout
 <CrudPageLayout
-  code="DP07"
+  code="DP03"
   filterContent={<TextField size="small" placeholder="搜尋..." />}
   actions={<Button variant="contained" size="small">新增</Button>}
   table={<AppTable columns={columns} data={items} rowKey="id" loading={loading} />}

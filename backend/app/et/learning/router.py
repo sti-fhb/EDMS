@@ -1,4 +1,4 @@
-"""ET05 章節學習 API（US5 / #255）——學員端內容取用。
+"""ET06 章節學習 API（US5 / #255）——學員端內容取用。
 
 router-level 只掛 `get_et_context`（任一 ET 角色）。真正的授權在**每個端點各自**的
 「在籍 OR 擁有者」判定——見 `rules.ensure_can_access`。
@@ -72,7 +72,7 @@ async def learn_structure(
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> LearnStructure:
-    """ET05 左側導覽結構（章節 → 項目）+ 課程狀態 + 可選倍速。
+    """ET06 左側導覽結構（章節 → 項目）+ 課程狀態 + 可選倍速。
 
     非在籍且非擁有者回 **403 `ET_LEARN_002`**——課程的存在對學員不是秘密（他可能正要
     加入），而「你尚未加入此課程」是可行動的訊息。**以 id 定址的資源端點則一律 404**

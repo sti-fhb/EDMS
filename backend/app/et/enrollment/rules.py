@@ -1,4 +1,4 @@
-"""ET04 加入課程與我的課程清單之純業務規則（US4 / #247）。
+"""ET03 加入課程與我的課程清單之純業務規則（US4 / #247）。
 
 **完全不碰 DB**：邀請碼格式、加入資格、清單可見性三件事都能以純函式表達，故全部
 以 unit test 涵蓋，integration 只驗接線與 DB 寫入。
@@ -50,7 +50,7 @@ def normalize_invitation_code(raw: str) -> str | None:
 
 
 def ensure_course_joinable(*, course_status: str, open_end_at: datetime | None, now: datetime) -> None:
-    """課程當前狀態是否允許加入（AC 9 / ET-MSG-ET04-002）。
+    """課程當前狀態是否允許加入（AC 9 / ET-MSG-ET03-002）。
 
     判定依據是**課程當前狀態**而非碼是否存在——邀請碼於課程關閉期間失效、
     再開課後恢復有效（`spec_us4` Clarifications），碼本身自始至終不變。

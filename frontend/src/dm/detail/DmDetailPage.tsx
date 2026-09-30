@@ -38,7 +38,7 @@ function fileErrorMessage(err: unknown, action: string): string {
 }
 
 /**
- * 文件詳細頁瀏覽（US4 / DM02）：標題列 + 右側資訊面板 + 檔案區（PDF/圖片預覽、Office 僅下載）+
+ * 文件詳細頁瀏覽（US4 / DM07）：標題列 + 右側資訊面板 + 檔案區（PDF/圖片預覽、Office 僅下載）+
  * 版本歷程抽屜（目前版可下載、舊版僅預覽）+（編輯者）編輯/廢止入口 + 已廢止 read-only 模式。
  */
 export function DmDetailPage() {
@@ -141,7 +141,7 @@ export function DmDetailPage() {
       <Paper sx={{ p: 1.5, mb: 2 }}>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
           {readOnly ? (
-            // 已廢止（自 US10 DM06 進入）：返回已廢止文件查詢；版本歷程本就自動展開、不再提供 toggle
+            // 已廢止（自 US10 DM03 進入）：返回已廢止文件查詢；版本歷程本就自動展開、不再提供 toggle
             <Button
               size="small"
               variant="outlined"

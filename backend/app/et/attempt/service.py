@@ -1,4 +1,4 @@
-"""ET06 測驗作答 Service（US6 / #279）。
+"""ET07 測驗作答 Service（US6 / #279）。
 
 ## 存取的四道守門
 
@@ -477,7 +477,7 @@ class EtAttemptService:
     # ── 內部 ────────────────────────────────────────────────────────────────
 
     async def _is_course_closed(self, db: AsyncSession, course_id: int, *, now: datetime | None = None) -> bool:
-        """課程是否**視同關閉**，供成績頁顯示 ET-MSG-ET06-005。
+        """課程是否**視同關閉**，供成績頁顯示 ET-MSG-ET07-005。
 
         含「已發布但閱課期間已過」（#313）——與 `intro()` / `start()` 用同一支
         `is_effectively_closed`，否則成績頁會說課程還開著、而學員其實已經不能再作答。

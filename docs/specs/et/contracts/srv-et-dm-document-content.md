@@ -14,8 +14,8 @@
 
 ET 於兩個時點依已引用之 `docId` 向 DM 取文件**當前發布版本**：
 
-- **學員端 ET05**：開啟引用 DM 文件之教材時，取得當前發布版之 metadata 與檔案，呈現預覽 / 下載；文件已廢止時仍可閱讀廢止前最後發布版本，並顯示「此文件已廢止」標籤
-- **教師端 ET02**：判定引用文件之廢止狀態，顯示警告並於發布前阻擋
+- **學員端 ET06**：開啟引用 DM 文件之教材時，取得當前發布版之 metadata 與檔案，呈現預覽 / 下載；文件已廢止時仍可閱讀廢止前最後發布版本，並顯示「此文件已廢止」標籤
+- **教師端 ET05**：判定引用文件之廢止狀態，顯示警告並於發布前阻擋
 
 DM 發布新版後 ET 下次呼叫即取得最新版（無快取延遲）。
 
@@ -79,7 +79,7 @@ DM 契約所列之 HTTP 路徑 `GET /api/dm/documents/{docId}/current` 為 DM �
 
 ## 檔案內容之取得
 
-本服務**只回 metadata，不回檔案內容**。ET 學員端 ET05 呈現 PDF 預覽 / 下載時：
+本服務**只回 metadata，不回檔案內容**。ET 學員端 ET06 呈現 PDF 預覽 / 下載時：
 
 - **不得**以回應之 `filePath` 直接讀檔——違反模組邊界（`.claude/rules/sti-backend-boundaries.md`），且 DM 正在強化 storage-root 路徑穿越圍籬（DM Issue #160）
 - 應以 `docId` + `currentVersionId` 經 DM 提供之檔案存取能力取檔；DM 現有端點為 `GET /api/dm/documents/{docId}/versions/{versionId}/file?disposition=preview|download`
@@ -92,7 +92,7 @@ DM 契約所列之 HTTP 路徑 `GET /api/dm/documents/{docId}/current` 為 DM �
 
 - 恆取 `DM_DOCUMENT.CURRENT_VERSION_ID` 指向之版本；DM 發布新版後 ET 下次呼叫即取得最新版（ET 不快取）
 - 文件廢止屬**文件層**，其版本仍維持 `PUBLISHED`：`obsolete=true` 時仍回傳該版位置，學員仍可閱讀
-- 教師端 ET02 於 `obsolete=true` 時顯示警告，並於課程發布檢核時阻擋（per spec.md 發布檢核「無引用之廢止 DM 文件」）
+- 教師端 ET05 於 `obsolete=true` 時顯示警告，並於課程發布檢核時阻擋（per spec.md 發布檢核「無引用之廢止 DM 文件」）
 
 ---
 

@@ -1,8 +1,8 @@
-"""ET03 學員學習狀況追蹤之純業務規則（US9 / #322）。
+"""ET02 學員學習狀況追蹤之純業務規則（US9 / #322）。
 
 集中於此而非散在 service：這些判定不需 DB、可獨立以 unit test 驗證。
 
-**完課三態不在本檔**——沿用 `enrollment/rules.derive_completion_status`。US9 與 ET04
+**完課三態不在本檔**——沿用 `enrollment/rules.derive_completion_status`。US9 與 ET03
 「我的課程」看的是同一件事，兩份實作遲早分岔，而分岔的表現是「同一位學員在教師頁顯示
 進行中、在自己頁顯示已完成」。
 """

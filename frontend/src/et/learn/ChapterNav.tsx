@@ -42,7 +42,7 @@ interface Props {
    * ⚠️ 型別含 `undefined`：後端契約是 `SurveyEntry | null`，但 `/learn` 的回應**沒有經過
    * Zod 驗證**（`learnSchemas.ts` 只是 TS interface），所以「後端還沒有這個欄位」時它在
    * 執行期就是 `undefined`。前端先部署、或本機打到還沒更新的後端時就會遇到——2026-09-08
-   * 手動測試時真的踩到（前端是本分支、後端是另一個 worktree 的），整個 ET05 頁被
+   * 手動測試時真的踩到（前端是本分支、後端是另一個 worktree 的），整個 ET06 頁被
    * router 的 error boundary 換成錯誤畫面。**少一個選配欄位不該讓整頁消失。**
    */
   survey: SurveyEntry | null | undefined
@@ -51,7 +51,7 @@ interface Props {
 }
 
 /**
- * ET05 左側章節導覽（AC 1 / AC 6）。
+ * ET06 左側章節導覽（AC 1 / AC 6）。
  *
  * 狀態 icon 三態（已完成 ✓ / 進行中 → / 鎖定 🔒）；`locked` / `completed` 自 #274 起
  * 為真值。
@@ -59,7 +59,7 @@ interface Props {
  * ## 鎖定項目**可點但不放行**，不是 `disabled`
  *
  * `disabled` 的 `ListItemButton` 不會觸發 `onClick`，於是點下去毫無反應——而 AC 6 要的
- * 是「阻擋**並提示**」（ET-MSG-ET05-001「請先完成本章節之影片學習」）。學員需要知道
+ * 是「阻擋**並提示**」（ET-MSG-ET06-001「請先完成本章節之影片學習」）。學員需要知道
  * 為什麼點不動，否則只會以為系統壞了。
  *
  * 故一律可點、由 `onSelect` 那端判斷 `locked` 決定提示或切換；視覺上仍以 `aria-disabled`
@@ -144,7 +144,7 @@ function SurveyEntryBlock({
   onClick: () => void
 }) {
   // `!survey` 而非 `survey === null`：後端沒有這個欄位時是 `undefined`（見 `Props.survey`），
-  // 寫成嚴格比對會在 `survey.state` 上拋 TypeError，把整個 ET05 頁換成錯誤畫面。
+  // 寫成嚴格比對會在 `survey.state` 上拋 TypeError，把整個 ET06 頁換成錯誤畫面。
   if (!survey || survey.state === "HIDDEN") return null
 
   const submitted = survey.state === "SUBMITTED"

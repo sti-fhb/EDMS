@@ -95,7 +95,7 @@ export function TemplatesPage() {
 
   return (
     <CrudPageLayout
-      code="DP08"
+      code="DP04"
       actions={<CrudActions onRefresh={refresh} />}
       filterContent={
         visibleTabs.length > 0 && (

@@ -32,7 +32,7 @@ function ratePct(rate: number | null): string {
 }
 
 /**
- * 閱讀統計 KPI（US13 / DM10，管理者）：逐文件應看/已看/未看/閱讀率，依關鍵字（文件名）/ 分類**即時**
+ * 閱讀統計 KPI（US13 / DM06，管理者）：逐文件應看/已看/未看/閱讀率，依關鍵字（文件名）/ 分類**即時**
  * 查詢；頂部統計卡（整體平均閱讀率 / 閱讀率<50% 文件數）；可匯出 CSV。入口與後端皆限 DM_ADMIN。
  */
 export function DmKpiPage() {
@@ -73,11 +73,11 @@ export function DmKpiPage() {
   const rows = data?.data ?? []
   const summary = data?.summary
 
-  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染查詢 UI（DM-MSG-DM10-002）
+  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染查詢 UI（DM-MSG-DM06-002）
   if (denied) {
     return (
       <Box>
-        <ScreenHeader code="DM10" />
+        <ScreenHeader code="DM06" />
         <Alert severity="error">您無權限存取此頁面</Alert>
       </Box>
     )
@@ -87,7 +87,7 @@ export function DmKpiPage() {
   if (accessPending) {
     return (
       <Box>
-        <ScreenHeader code="DM10" />
+        <ScreenHeader code="DM06" />
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress size={28} />
         </Box>
@@ -97,7 +97,7 @@ export function DmKpiPage() {
 
   return (
     <Box>
-      <ScreenHeader code="DM10" />
+      <ScreenHeader code="DM06" />
 
       {/* 統計卡 */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2, mb: 2 }}>

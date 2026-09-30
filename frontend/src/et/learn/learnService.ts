@@ -1,7 +1,7 @@
 import { http } from "../../services/http"
 import type { LearnStructure, MaterialContent, VideoTicket } from "./learnSchemas"
 
-/** ET05 章節學習 API（US5 / #255）。 */
+/** ET06 章節學習 API（US5 / #255）。 */
 export const learnApi = {
   structure: async (courseId: number): Promise<LearnStructure> => {
     const { data } = await http.get<LearnStructure>(`/et/courses/${courseId}/learn`)

@@ -38,14 +38,14 @@ const DRAFT_PREFILL_HINT = "此為上次草稿內容，送審前請確認反映�
 
 /** 後端 error_code → 對應表單欄位（用於 inline 標紅）；未列者以 Snackbar 呈現。 */
 const ERROR_FIELD: Record<string, keyof EditorForm> = {
-  DM_DOC_005: "audience_ids", // 無可見對象（DM-MSG-DM03-008）
-  DM_DOC_006: "version_no", // 版號空 / 重複（DM-MSG-DM03-009）
-  DM_DOC_007: "func_code", // 手冊 func 重複（DM-MSG-DM03-003）
+  DM_DOC_005: "audience_ids", // 無可見對象（DM-MSG-DM08-008）
+  DM_DOC_006: "version_no", // 版號空 / 重複（DM-MSG-DM08-009）
+  DM_DOC_007: "func_code", // 手冊 func 重複（DM-MSG-DM08-003）
   DM_REVIEW_001: "reviewer_id", // 審核者為撰寫者本人
 }
 
 /**
- * 文件新增與編輯（US5 / DM03）雙模式表單。
+ * 文件新增與編輯（US5 / DM08）雙模式表單。
  *
  * - **新增模式**（`/dm/documents/new`）：填 名稱 / 分類 /（MANUAL）func / 可見對象 / 檢索標籤 /
  *   首版版號 / 摘要 + 上傳單檔 → 存草稿 或 送簽（指定審核者）。
@@ -69,14 +69,14 @@ export function DmEditorPage() {
   const { data: options } = useEditorOptions()
   const { data: reviewers } = useReviewers()
   // 續編模式 meta（草稿匣「繼續編輯」）：有本人草稿 → 續編（draftMeta + PUT 更新既有版本）；
-  // 無（後端 404 → null）→ 從 DM02 詳細載已發布文件 meta、走「加新版」（addVersion）。
+  // 無（後端 404 → null）→ 從 DM07 詳細載已發布文件 meta、走「加新版」（addVersion）。
   const {
     data: draftMeta,
     isPending: draftMetaPending,
     isFetching: draftMetaFetching,
   } = useDraftMeta(docId ?? "", !isNew)
   const isContinueDraft = !isNew && !!draftMeta
-  // 續編首版草稿（父文件 DRAFT）不打 DM02 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
+  // 續編首版草稿（父文件 DRAFT）不打 DM07 詳細 / 版本（DRAFT 不對外瀏覽會 404）；加新版 / 續編新版本才需。
   const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
@@ -112,7 +112,7 @@ export function DmEditorPage() {
   const draftObsolete = isContinueDraft && draftMeta?.doc_status === "OBSOLETE"
   // 續編時版號 / 摘要帶的是上次草稿值（#308），於欄位下方提示；新增文件無此情形。
   const draftPrefillHint = isContinueDraft && draftMeta ? DRAFT_PREFILL_HINT : ""
-  // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM02 詳細。
+  // 編輯模式身份欄顯示值：續編取 draftMeta、加新版取 DM07 詳細。
   const editName = isContinueDraft ? (draftMeta?.doc_name ?? "") : (detail?.doc_name ?? "")
   const editCategoryName = isContinueDraft ? (draftMeta?.category_name ?? "") : (detail?.category_name ?? "")
   const editFuncCode = isContinueDraft ? draftMeta?.func_code : detail?.func_code
@@ -172,7 +172,7 @@ export function DmEditorPage() {
     persisted.current = null
     setErrors((prev) => ({ ...prev, file: "" }))
     if (f && !isPreviewableMime(f.type)) {
-      // Office 等非可預覽格式：警示 + 二次確認（DM-MSG-DM03-002）
+      // Office 等非可預覽格式：警示 + 二次確認（DM-MSG-DM08-002）
       confirm({
         title: "此檔案無法線上預覽",
         content: "所選檔案（如 Word / Excel）閱覽者將只能下載、無法線上預覽。是否仍使用此檔案？",
@@ -279,7 +279,7 @@ export function DmEditorPage() {
     try {
       await persistDraft()
       invalidateAfterWrite()
-      message.success("已儲存為草稿") // DM-MSG-DM03-007
+      message.success("已儲存為草稿") // DM-MSG-DM08-007
       setDirty(false)
       go(destAfter())
     } catch (e) {
@@ -296,7 +296,7 @@ export function DmEditorPage() {
       const ids = await persistDraft()
       await editorApi.submit(ids.doc_id, { version_id: ids.version_id, assigned_reviewer: form.reviewer_id })
       invalidateAfterWrite()
-      message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM03-006
+      message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM08-006
       setDirty(false)
       go(destAfter())
     } catch (e) {
@@ -308,7 +308,7 @@ export function DmEditorPage() {
 
   function handleCancel() {
     // 取消鈕：回來源頁（新增→文件庫、續編草稿→草稿匣、加新版→原詳細頁）。有未存變更先二次確認
-    //（DM-MSG-DM03-005），確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
+    //（DM-MSG-DM08-005），確認後以 go() 略過離開攔截，避免與 useBlocker 重複彈窗。
     const leave = () => go(destAfter())
     if (!dirty) {
       leave()
@@ -323,7 +323,7 @@ export function DmEditorPage() {
     })
   }
 
-  // 離開攔截（DM-MSG-DM03-005）：表單有未存變更且非我方主動導向（go）時，攔下其他 in-app 導向
+  // 離開攔截（DM-MSG-DM08-005）：表單有未存變更且非我方主動導向（go）時，攔下其他 in-app 導向
   //（左側功能列切換、瀏覽器返回等），彈同款二次確認。取消鈕自帶確認、走 go() 不重複攔問。
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -374,7 +374,7 @@ export function DmEditorPage() {
     }))
   }, [isNew, draftMeta, draftMetaFetching])
 
-  // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM02 詳細載入。
+  // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM07 詳細載入。
   if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>

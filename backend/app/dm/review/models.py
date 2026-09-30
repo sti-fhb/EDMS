@@ -56,7 +56,7 @@ class DmChangeLog(AuditLogBaseModel):
     """公開變更歷程（DM_CHANGE_LOG，append-only）。
 
     僅記錄對外發布版本之發布 / 廢止事件（OPERATION：PUBLISH / OBSOLETE）；永久保留不可竄改；
-    供 DM08 跨文件查詢與 CSV 匯出。
+    供 DM05 跨文件查詢與 CSV 匯出。
     """
 
     __tablename__ = "DM_CHANGE_LOG"

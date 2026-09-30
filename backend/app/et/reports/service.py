@@ -134,7 +134,7 @@ class EtReportsService:
         """一門課的逐學員列。
 
         全部即時計算：進度與完課狀態經 `completion_pct` / `derive_completion_status`，
-        與 ET03 頁面、週報摘要**同一組函式**。讀 `ET_ENROLLMENT.COMPLETION_STATUS` 會
+        與 ET02 頁面、週報摘要**同一組函式**。讀 `ET_ENROLLMENT.COMPLETION_STATUS` 會
         讓整份 CSV 的完課狀態全部變成「未開始」。
         """
         user_ids = await self._enrollments.enrolled_user_ids(db, course.course_id)

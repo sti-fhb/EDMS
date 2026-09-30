@@ -55,7 +55,7 @@ class EtInvitationRepository:
         亦計入）。
 
         少了這個 `WHERE`，那 50 位裡原本由標籤帶入、兩個月前就加入的人，`JOINED_AT` 會被
-        改成今天、`JOIN_SOURCE` 被改寫成 `EMAIL_INVITE`——ET03 清單以 `JOINED_AT` 排序、
+        改成今天、`JOIN_SOURCE` 被改寫成 `EMAIL_INVITE`——ET02 清單以 `JOINED_AT` 排序、
         「加入日」欄位、以及任何以加入時點判讀的報表全部失真，**而且沒有任何訊號**：
         回應照樣說「已加入 50 位」，稽核也照樣記 50。
 

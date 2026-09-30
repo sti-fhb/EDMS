@@ -1,4 +1,4 @@
-"""ET04 我的課程與加入新課程（US4 / #247）schema。
+"""ET03 我的課程與加入新課程（US4 / #247）schema。
 
 ## 學員端與教師端不共用 schema
 
@@ -29,7 +29,7 @@ class JoinPreview(BaseModel):
 
     Attributes:
         already_joined: 學員已在此課程。**刻意不以 4xx 表達**——那是正常導航
-            （ET-MSG-ET04-003 為「提示」類型），用錯誤路徑做正常導航會讓前端得從
+            （ET-MSG-ET03-003 為「提示」類型），用錯誤路徑做正常導航會讓前端得從
             `catch` 裡呼叫 `navigate`。
         open_start_at: 課程開放學習之時間。**未到時仍允許加入**（#247 SA Q2 裁示 A），
             前端據此顯示「本課程將於 {時間} 開放學習」。不告知的話學員會加入成功卻
@@ -45,7 +45,7 @@ class JoinPreview(BaseModel):
 
 
 class JoinResult(BaseModel):
-    """加入課程之結果（AC 7 / ET-MSG-ET04-004）。"""
+    """加入課程之結果（AC 7 / ET-MSG-ET03-004）。"""
 
     course_id: int
     completion_status: str
@@ -59,7 +59,7 @@ class MyCourseRow(BaseModel):
 
     Attributes:
         progress_pct: 當前學習進度百分比＝**完成項目數 ÷ 總項目數**（#274 填實，
-            原為恆 0 的接點）。與 ET05 側欄的課程進度條同一定義——同一門課在兩個
+            原為恆 0 的接點）。與 ET06 側欄的課程進度條同一定義——同一門課在兩個
             畫面顯示不同的數字，使用者只會當成其中一個壞了。
         is_closed: 對學員而言**視同關閉**（#288）：`status == "CLOSED"` **或**
             「已發布但閱課期間已過」皆為 `True`。
@@ -71,9 +71,9 @@ class MyCourseRow(BaseModel):
     #: 卡片的「已關閉」標示一律看本欄，**不要自己判 `status == "CLOSED"`**。
     #:
     #: 少了這一欄，期間已過的課程會以 `status: "PUBLISHED"` 出現在清單、卡片標「已發布」，
-    #: 但學員點進去 ET05 立刻看到「此課程已關閉」的唯讀提示，累積進度 / 填問卷全部 409
+    #: 但學員點進去 ET06 立刻看到「此課程已關閉」的唯讀提示，累積進度 / 填問卷全部 409
     #: ——**卡片與詳細頁在使用者眼前互相矛盾**。到期自動轉 `CLOSED` 屬 `ET-16`（未實作），
-    #: 那個矛盾不會自己消失，得由後端把「視同關閉」一起回出來。與 ET05 的
+    #: 那個矛盾不會自己消失，得由後端把「視同關閉」一起回出來。與 ET06 的
     #: `LearnStructure.is_closed` 同名同義，兩個畫面用同一個判定。
     is_closed: bool
     #: 已加入但**閱課起始時間未到**（#363）。卡片據此改為不可點擊並標開放時點。
@@ -114,7 +114,7 @@ class MyCoursesSummary(BaseModel):
 
 
 class MyCoursesResult(BaseModel):
-    """ET04 頁面之完整資料。
+    """ET03 頁面之完整資料。
 
     統計與清單**同一個端點**：兩者必須來自同一次查詢，否則卡片有 3 門而統計寫 2 門
     這種不一致會在課程剛被關閉 / 剛到開放時間的瞬間出現。

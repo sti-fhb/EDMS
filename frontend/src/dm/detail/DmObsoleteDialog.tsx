@@ -27,7 +27,7 @@ interface Props {
   onSuccess: () => void
 }
 
-/** 後端 error_code → 對應欄位 / 訊息（DM02-012 需以廢止情境文案覆寫後端泛用送審訊息）。 */
+/** 後端 error_code → 對應欄位 / 訊息（DM07-012 需以廢止情境文案覆寫後端泛用送審訊息）。 */
 const SERVER_FIELD: Record<string, "reason" | "reviewer_id" | "file"> = {
   DM_DOC_014: "reason",
   DM_DOC_015: "reviewer_id",
@@ -37,7 +37,7 @@ const SERVER_FIELD: Record<string, "reason" | "reviewer_id" | "file"> = {
 }
 
 /**
- * 廢止申請對話框（US8 / DM02）：必填廢止原因 + 選填單檔附件 + 選指定審核者（排除自己）。
+ * 廢止申請對話框（US8 / DM07）：必填廢止原因 + 選填單檔附件 + 選指定審核者（排除自己）。
  * 送出後文件轉「廢止待簽核」並通知審核者；核准 / 退回於簽核中心處理。
  */
 export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: Props) {
@@ -74,13 +74,13 @@ export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: P
     setSubmitting(true)
     try {
       await detailApi.initiateObsolete(docId, { reason: reason.trim(), reviewer_id: reviewerId, file })
-      message.success("已送出廢止申請，已通知指定審核者") // DM-MSG-DM02-013
+      message.success("已送出廢止申請，已通知指定審核者") // DM-MSG-DM07-013
       reset()
       onSuccess()
       onClose()
     } catch (err) {
       const api = toApiError(err)
-      // 併發新版本送審：以廢止情境文案呈現（DM-MSG-DM02-012），非後端泛用送審訊息
+      // 併發新版本送審：以廢止情境文案呈現（DM-MSG-DM07-012），非後端泛用送審訊息
       const msg = api.errorCode === "DM_REVIEW_002" ? "此文件正進行新版本送審，無法同時發起廢止" : api.errorMessage
       const field = api.errorCode ? SERVER_FIELD[api.errorCode] : undefined
       if (field) setErrors((prev) => ({ ...prev, [field]: msg }))

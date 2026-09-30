@@ -31,7 +31,7 @@ function resetDisabledReason(quiz: TeacherQuizRow, readOnly: boolean): string {
 }
 
 /**
- * ET03 區塊 2：作答明細（`FR-ET-US9-04` / `-05`）。
+ * ET02 區塊 2：作答明細（`FR-ET-US9-04` / `-05`）。
  *
  * ## 三層展開：學員 → 各測驗之歷次 attempt → 單次逐題明細
  *
@@ -39,7 +39,7 @@ function resetDisabledReason(quiz: TeacherQuizRow, readOnly: boolean): string {
  *
  * ## 未作答的測驗**仍要列出**
  *
- * `attempts` 為空時顯示「尚未作答」（ET-MSG-ET03-005）。整個測驗不出現的話，教師分不出
+ * `attempts` 為空時顯示「尚未作答」（ET-MSG-ET02-005）。整個測驗不出現的話，教師分不出
  * 「他沒考」與「這門課沒這個測驗」。
  *
  * ## `can_reset` 由後端給，前端不自行推導
@@ -114,7 +114,7 @@ export function AttemptOverviewBlock({
                   </Stack>
 
                   {quiz.attempts.length === 0 ? (
-                    /* ET-MSG-ET03-005：該測驗仍要列出，只是標示尚未作答 */
+                    /* ET-MSG-ET02-005：該測驗仍要列出，只是標示尚未作答 */
                     <Typography variant="body2" color="text.secondary">
                       尚未作答
                     </Typography>

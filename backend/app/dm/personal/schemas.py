@@ -1,4 +1,4 @@
-"""個人專區（US9 / UCDM09 / DM07）schema。"""
+"""個人專區（US9 / UCDM09 / DM04）schema。"""
 
 from datetime import datetime
 

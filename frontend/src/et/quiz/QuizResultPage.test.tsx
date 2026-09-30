@@ -62,7 +62,7 @@ const RESULT: AttemptResult = {
   ],
 }
 
-describe("ET06 結果頁", () => {
+describe("ET07 結果頁", () => {
   it("表格本身不顯示題幹——題目在點開之後才出現", () => {
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
@@ -162,7 +162,7 @@ describe("ET06 結果頁", () => {
     expect(screen.getByRole("row", { name: /Q2/ })).toHaveTextContent("視力")
   })
 
-  it("未及格且有剩餘次數時提示可重考（ET-MSG-ET06-004）", () => {
+  it("未及格且有剩餘次數時提示可重考（ET-MSG-ET07-004）", () => {
     state = RESULT
     renderWithProviders(<EtQuizResultPage />)
 
@@ -249,7 +249,7 @@ describe("ET06 結果頁", () => {
     expect(await screen.findByText("查無此測驗")).toBeInTheDocument()
   })
 
-  it("課程關閉時顯示 ET-MSG-ET06-005 且不給重考鈕", async () => {
+  it("課程關閉時顯示 ET-MSG-ET07-005 且不給重考鈕", async () => {
     // 後端已擋關閉後開新作答；前端不該給一顆按了必失敗的鈕
     state = { ...RESULT, course_closed: true }
     renderWithProviders(<EtQuizResultPage />)

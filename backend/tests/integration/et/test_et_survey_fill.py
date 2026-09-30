@@ -1,4 +1,4 @@
-"""ET05 課後問卷填寫整合測試（US13 / #284）——學員端。
+"""ET06 課後問卷填寫整合測試（US13 / #284）——學員端。
 
 入口四態導出與作答驗證已在 `tests/unit/et/test_survey_fill_rules.py` 以純函式涵蓋。
 此處只驗**需要真 DB 才驗得了**的事：
@@ -722,7 +722,7 @@ class TestSurveyTouchesLastActivity:
 
     ⚠️ 與上面的 `TestNoProgressSideEffect` **不衝突**：`FR-ET-US13-07` 說的是問卷不計入
     **學習進度**、不是完課條件——那管的是 `ET_PROGRESS` 與完課判定。最後活動時間是
-    「這個人還在不在動」，與「他學了多少」是兩回事，ET03 也分成兩欄呈現。
+    「這個人還在不在動」，與「他學了多少」是兩回事，ET02 也分成兩欄呈現。
     """
 
     async def test_送出問卷後最後活動時間前進(self, client, db) -> None:

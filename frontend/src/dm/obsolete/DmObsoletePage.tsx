@@ -34,7 +34,7 @@ function today(): string {
 }
 
 /**
- * 已廢止文件查詢（US10 / DM06，管理者）：以關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間**即時**
+ * 已廢止文件查詢（US10 / DM03，管理者）：以關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間**即時**
  * 搜尋已廢止文件 → 點列進 US4 read-only 詳細頁；可匯出 CSV 供稽核封存。入口與後端皆限 DM_ADMIN。
  * 原作者欄採末版〔在架版〕作者（SA 裁示 Q2=B）。
  */
@@ -79,11 +79,11 @@ export function DmObsoletePage() {
 
   const rows = data?.data ?? []
 
-  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM06-002）
+  // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染搜尋列 / 清單（DM-MSG-DM03-002）
   if (denied) {
     return (
       <Box>
-        <ScreenHeader code="DM06" />
+        <ScreenHeader code="DM03" />
         <Alert severity="error">您無權限存取此頁面</Alert>
       </Box>
     )
@@ -93,7 +93,7 @@ export function DmObsoletePage() {
   if (accessPending) {
     return (
       <Box>
-        <ScreenHeader code="DM06" />
+        <ScreenHeader code="DM03" />
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress size={28} />
         </Box>
@@ -103,7 +103,7 @@ export function DmObsoletePage() {
 
   return (
     <Box>
-      <ScreenHeader code="DM06" />
+      <ScreenHeader code="DM03" />
 
       {/* 搜尋列（即時篩選，無搜尋按鈕）*/}
       <Paper sx={{ p: 2, mb: 2 }}>

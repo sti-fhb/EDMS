@@ -374,7 +374,7 @@ describe("DmDetailPage 文件詳細頁", () => {
     expect(await screen.findByText("已送出廢止申請，已通知指定審核者")).toBeInTheDocument()
   })
 
-  it("廢止對話框：未填原因即送出 → 顯示必填錯誤（US8 / DM-MSG-DM02-011）", async () => {
+  it("廢止對話框：未填原因即送出 → 顯示必填錯誤（US8 / DM-MSG-DM07-011）", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmDetailPage />)
     await user.click(await screen.findByRole("button", { name: "廢止此文件" }))

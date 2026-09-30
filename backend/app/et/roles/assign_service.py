@@ -65,7 +65,7 @@ def ensure_not_self_admin_removal(operator_id: str, user_id: str, roles: set[str
     """自我保護：操作者不得取消自己之管理者角色。
 
     DP 端以 error_code 尾碼 `_ROLE_001` 判別後，統一映射為 `DP_ROLE_002` /
-    `DP-MSG-DP06-001` 呈現（見 dp/spec_us7 FR-06）。
+    `DP-MSG-DP02-001` 呈現（見 dp/spec_us7 FR-06）。
 
     **不檢核「至少 1 名管理者」**——per et/spec.md 設計取捨，該情境極少，
     由 IT 透過 DB 恢復即可。

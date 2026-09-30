@@ -1,4 +1,4 @@
-"""個人專區（US9 / UCDM09 / DM07）整合測試（真實 DB）。
+"""個人專區（US9 / UCDM09 / DM04）整合測試（真實 DB）。
 
 涵蓋：草稿匣三類分類（未送審 / 被退回 / 已撤回）、刪除草稿（軟刪 / 非本人 403 / 非草稿 409）、
 撤回送審（NEW→文件+版本 DRAFT、NEW_VERSION→版本 DRAFT 文件維持 PUBLISHED、OBSOLETE→文件 PUBLISHED；

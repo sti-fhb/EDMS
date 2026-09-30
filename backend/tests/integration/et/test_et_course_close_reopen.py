@@ -1,4 +1,4 @@
-"""ET02 課程關閉與再開課整合測試（US11 / #288）。
+"""ET05 課程關閉與再開課整合測試（US11 / #288）。
 
 狀態前提（`ensure_closable` / `ensure_reopenable` / `ensure_reopen_schedule`）與「視同關閉」
 判定（`is_effectively_closed`）已在 `tests/unit/et/test_course_rules.py` 以純函式涵蓋。

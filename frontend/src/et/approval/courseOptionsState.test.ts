@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { courseOptionsEmptyReason } from "./courseOptionsState"
 
 /**
- * ET10 課程下拉的空狀態判定（#439）。
+ * ET04 課程下拉的空狀態判定（#439）。
  *
  * ## 為何這組是純函式測試而不是頁面測試
  *

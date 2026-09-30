@@ -1,8 +1,8 @@
-"""ET03 線下核可之純業務規則（US16 / #352）。
+"""ET02 線下核可之純業務規則（US16 / #352）。
 
 本檔驗兩件事：**綜合狀態的四態衍生**與**撤銷原因的必填判定**。兩者都不需 DB，故
 一律以 unit 驗證——而綜合狀態尤其值得在這一層釘死：它是 `FR-ET-US16-02` 明訂
-「MUST NOT 另存狀態欄位」的即時衍生值，整個 ET03 核可欄的呈現都靠它。
+「MUST NOT 另存狀態欄位」的即時衍生值，整個 ET02 核可欄的呈現都靠它。
 """
 
 import pytest
@@ -87,7 +87,7 @@ class TestDeriveApprovalStatus:
 
 
 class TestEnsureRevokeReason:
-    """撤銷原因必填（`FR-ET-US16-06` / `ET-MSG-ET03-305`）。
+    """撤銷原因必填（`FR-ET-US16-06` / `ET-MSG-ET02-305`）。
 
     ## 為何不交給 Pydantic 的 `min_length=1`
 

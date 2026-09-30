@@ -1,7 +1,7 @@
 import { http } from "../../services/http"
 import type { AttemptResult, AttemptState, AttemptSummary, QuizIntro } from "./attemptSchemas"
 
-/** ET06 測驗作答 API（US6 / #279、#280）。 */
+/** ET07 測驗作答 API（US6 / #279、#280）。 */
 export const attemptApi = {
   intro: async (quizId: number): Promise<QuizIntro> => {
     const { data } = await http.get<QuizIntro>(`/et/quizzes/${quizId}/intro`)

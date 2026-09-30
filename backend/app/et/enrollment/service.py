@@ -1,4 +1,4 @@
-"""ET04 我的課程與加入新課程 Service（US4 / #247）。
+"""ET03 我的課程與加入新課程 Service（US4 / #247）。
 
 ## `preview` 不是把關
 
@@ -86,7 +86,7 @@ class EtEnrollmentService:
         course_ids = [course.course_id for _, course in visible]
         tags = await self._enrollments.tags_by_course(db, course_ids)
         chapters = await self._enrollments.chapter_counts(db, course_ids)
-        # #274 起為真值（原為恆 0 的接點）——完成項目數 ÷ 總項目數，與 ET05 側欄的
+        # #274 起為真值（原為恆 0 的接點）——完成項目數 ÷ 總項目數，與 ET06 側欄的
         # 課程進度條同一定義，兩處顯示的數字必須一致。
         #
         # #284 起取**原始計數**而非百分比：進度條要四捨五入後的顯示值、完課三態要精確
@@ -149,7 +149,7 @@ class EtEnrollmentService:
         )
 
     async def join(self, db: AsyncSession, *, code: str, operator: OperatorInfo) -> JoinResult:
-        """確認加入課程（AC 7 / ET-MSG-ET04-004）。
+        """確認加入課程（AC 7 / ET-MSG-ET03-004）。
 
         起始時間未到之課程**仍可加入**（#247 SA Q2 裁示 A）；`pending_open` 讓前端
         把提示換成「已加入，課程開放後將出現於清單」，否則學員會加入成功卻在清單

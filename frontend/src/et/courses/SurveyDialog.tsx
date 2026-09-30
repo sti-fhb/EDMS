@@ -143,7 +143,7 @@ interface SurveyDialogProps {
 }
 
 /**
- * 課後問卷編輯視窗（ET02 / #238）。
+ * 課後問卷編輯視窗（ET05 / #238）。
  *
  * 由 #204 的 inline 展開改為 Dialog，與教材 / 測驗的操作形狀一致（2026-08-28 實測回饋）。
  * ⚠️ 這**刻意偏離 wireframe**——wireframe 的問卷區塊是 inline `wf-card`。

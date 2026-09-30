@@ -97,7 +97,7 @@ export function SchedulePage() {
   return (
     <>
       <CrudPageLayout
-        code="DP10"
+        code="DP06"
         table={
           <AppTable columns={columns} data={s.jobs} rowKey="job_id" loading={s.jobsLoading} emptyText="尚無排程作業" />
         }

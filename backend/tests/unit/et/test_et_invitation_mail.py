@@ -84,7 +84,7 @@ class TestParamKeys:
 
 
 class TestFormatOpenAt:
-    """信件時間必須與教師在 ET02 看到的一致（台北時間）。"""
+    """信件時間必須與教師在 ET05 看到的一致（台北時間）。"""
 
     def test_轉為台北時間而非直接印_utc(self) -> None:
         """前端送 `toISOString()`（UTC）、UI 以本地時區顯示。

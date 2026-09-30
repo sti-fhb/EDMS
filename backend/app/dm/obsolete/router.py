@@ -1,7 +1,7 @@
-"""文件廢止申請 API（US8 / UCDM05 / DM02）。
+"""文件廢止申請 API（US8 / UCDM05 / DM07）。
 
 掛 DM 存取閘 `get_dm_context`（需任一 DM 角色）+ 寫入注入 `get_operator`；發起廢止另要求 DM_EDITOR。
-以 multipart 收廢止原因 / 指定審核者 / 選填單檔附件。核准 / 退回於簽核中心（US6 / DM04）處理。
+以 multipart 收廢止原因 / 指定審核者 / 選填單檔附件。核准 / 退回於簽核中心（US6 / DM02）處理。
 """
 
 from typing import Annotated

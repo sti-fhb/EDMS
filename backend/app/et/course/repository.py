@@ -1,4 +1,4 @@
-"""ET02 課程 / 章節 / 課程標籤 Repository（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
+"""ET05 課程 / 章節 / 課程標籤 Repository（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 依 `sti-backend-modules`：Repository 只 `flush()`、不 `commit()`；查詢一律帶
 `DELETED = 0`；時間一律 `utcnow()`。
@@ -293,7 +293,7 @@ class EtCourseRepository:
                 .exists()
             )
 
-        # 新的在前，與 ET04「我的課程」一致
+        # 新的在前，與 ET03「我的課程」一致
         return stmt.order_by(EtCourse.created_date.desc(), EtCourse.course_id.desc())
 
     async def counts_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, tuple[int, int]]:
@@ -366,7 +366,7 @@ class EtCourseRepository:
 
         | 用途 | 來源 | 為何 |
         |---|---|---|
-        | ET02 編輯時掛標籤 | 啟用中 + 該課程已掛之停用者 | 停用標籤不得**新掛**（FR-ET-US3-03）|
+        | ET05 編輯時掛標籤 | 啟用中 + 該課程已掛之停用者 | 停用標籤不得**新掛**（FR-ET-US3-03）|
         | ET01 清單篩選（本函式）| **全部含停用** | 要查得到掛著已停用標籤的**歷史課程** |
 
         用錯會讓舊課程從此搜不到，而畫面上不會有任何異常。

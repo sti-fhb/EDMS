@@ -41,7 +41,7 @@ def summarize(counts: Mapping[str, tuple[int, int]]) -> CourseStat:
 
     ## 平均進度取「逐學員百分比之平均」，而非「總完成數 ÷ 總項目數」
 
-    也不是精確比值的平均——用的是 `progress.completion_pct`，**與 ET03 頁面顯示每位
+    也不是精確比值的平均——用的是 `progress.completion_pct`，**與 ET02 頁面顯示每位
     學員進度時同一支**。兩邊各算一份的話，教師把畫面上的數字自己平均會對不上週報，
     而兩個數字都「看起來合理」，沒有人會知道哪個錯。
 

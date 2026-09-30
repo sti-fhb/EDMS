@@ -1,11 +1,11 @@
-"""ET02 課程骨架與章節編排 API（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
+"""ET05 課程骨架與章節編排 API（US3 / #202）；亦含 ET01 課程清單（US7 / #299）。
 
 router-level 掛 `get_et_context`（需任一 ET 角色，無則 403 `ET_AUTH_001`）。
 
 **建立課程另掛 `require_et_roles(ET_TEACHER)`**（SA 裁示 Q2，#202）：僅具教師角色者
 可建立；管理者若需建課程，於 DP 後台自行加掛教師角色即可（三角色可複選）。
 
-**讀取端亦限教師 / 管理者**：本 router 服務的是 ET02 教師編輯畫面。若只掛
+**讀取端亦限教師 / 管理者**：本 router 服務的是 ET05 教師編輯畫面。若只掛
 `get_et_context`，等同任何登入者（人人皆有學員角色）都能讀到他人的**草稿**課程，
 違反 spec_us3 AC 8「儲存草稿⋯⋯學員端不顯示」。學員端的課程讀取有自己的可見性規則
 （`STATUS=PUBLISHED` 且 `now >= OPEN_START_AT`），屬 ET Issue #4 / #5 之端點。
@@ -165,7 +165,7 @@ async def list_courses(
 async def list_filter_tags(db: AsyncSession = Depends(get_db)) -> list[TagOption]:
     """ET01 篩選用的標籤下拉：**`ET_TAG` 全部，含停用者**。
 
-    ⚠️ 與 `GET /tags` **語意相反、不可互換**：那支是 ET02 編輯時掛標籤用的（停用者不得
+    ⚠️ 與 `GET /tags` **語意相反、不可互換**：那支是 ET05 編輯時掛標籤用的（停用者不得
     新掛，故排除），本支是查詢用的（要查得到掛著已停用標籤的**歷史課程**）。用錯會讓
     舊課程從此搜不到，而畫面上不會有任何異常。
     """

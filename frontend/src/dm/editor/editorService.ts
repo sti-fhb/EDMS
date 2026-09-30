@@ -10,7 +10,7 @@ import type {
 import { http } from "../../services/http"
 
 /**
- * 文件新增與編輯 API（US5 / DM03，寫入）。
+ * 文件新增與編輯 API（US5 / DM08，寫入）。
  * 新增 / 加版以 multipart（FormData）送表單欄位 + 單一上傳檔；送簽以 JSON。
  */
 

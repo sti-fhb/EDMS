@@ -1,4 +1,4 @@
-"""ET05 學習進度之純業務規則（US5 / #274）。
+"""ET06 學習進度之純業務規則（US5 / #274）。
 
 本檔是這張 issue 的重心——覆蓋率的三條規則、normalize、解鎖判定全部是純函式，
 **完全不需要 DB 就能驗完**。
@@ -190,7 +190,7 @@ class TestBuildItemState:
         """🔴 **0 題的測驗沒有任何逃生門**，故不得拿它當閘門。
 
         `attempt/service` 對 0 題測驗直接回 404（建一個零題 attempt 會白吃一次次數），
-        學員因此**連考都考不了**、永遠拿不到 `IS_COMPLETED`。而 ET03 的重置鈕也不會
+        學員因此**連考都考不了**、永遠拿不到 `IS_COMPLETED`。而 ET02 的重置鈕也不會
         出現——`can_reset_retry` 要求 `used > max_retry`，他連一次都用不掉。
 
         形狀與 `locked_item_ids` 對「空章節」的處理完全相同：不擋路，改由發布檢核
@@ -277,7 +277,7 @@ class TestLockedItemIds:
 
 
 class TestFirstBlockingItem:
-    """學習前緣——供 ET05 對鎖定項目給出**正確**的提示（`spec_us5` AC 12）。
+    """學習前緣——供 ET06 對鎖定項目給出**正確**的提示（`spec_us5` AC 12）。
 
     AC 12 啟用後，鎖定多了「測驗未通過」這個成因；前端寫死的「請先完成本章節之影片
     學習」會把考不過的學員指向錯的動作。
