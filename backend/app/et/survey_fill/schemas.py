@@ -1,4 +1,4 @@
-"""ET05 課後問卷填寫（US13 / #284）schema——學員端。
+"""ET06 課後問卷填寫（US13 / #284）schema——學員端。
 
 ## 不與教師端 `survey/schemas.py` 共用
 
@@ -40,7 +40,7 @@ ANSWER_TEXT_INPUT_MAX_LEN = 1000
 
 
 class SurveyEntry(BaseModel):
-    """ET05 側欄之課後問卷入口狀態（AC 1 / AC 2 / AC 10 / AC 11）。
+    """ET06 側欄之課後問卷入口狀態（AC 1 / AC 2 / AC 10 / AC 11）。
 
     隨 `GET /courses/{id}/learn` 一併回傳，**不另開端點**：側欄必須在第一次繪製就決定
     「渲染入口 / 不渲染」，二次請求會造成可見的跳動，而「未完課 → 不顯示」是最常見的
@@ -134,7 +134,7 @@ class SurveySubmitReq(BaseModel):
 
 
 class SurveySubmitResult(BaseModel):
-    """送出結果（ET-MSG-ET05-102）。"""
+    """送出結果（ET-MSG-ET06-102）。"""
 
     response_id: int
     submitted_at: datetime

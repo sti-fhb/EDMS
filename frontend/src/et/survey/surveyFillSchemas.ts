@@ -1,4 +1,4 @@
-/** ET05 課後問卷填寫型別與純函式（US13 / #284；對齊後端 `app/et/survey_fill/schemas.py`）。 */
+/** ET06 課後問卷填寫型別與純函式（US13 / #284；對齊後端 `app/et/survey_fill/schemas.py`）。 */
 
 /** 問卷題型（對齊後端 `ET_SURVEY_QUESTION_TYPE`）。 */
 export type SurveyQuestionType = "SINGLE" | "TEXT"

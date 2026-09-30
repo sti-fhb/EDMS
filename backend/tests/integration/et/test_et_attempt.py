@@ -1,4 +1,4 @@
-"""ET06 測驗作答整合測試（US6 / #279）。
+"""ET07 測驗作答整合測試（US6 / #279）。
 
 計分公式、剩餘次數、逾時判定已於 `tests/unit/et/test_attempt_rules.py` 以**純函式**
 驗完。此處只驗**需要真 DB 才驗得了**的事：
@@ -1022,7 +1022,7 @@ class TestClosedAndRemovedBoundaries:
         assert blocked.status_code == 404, blocked.text
 
     async def test_被移除者看到的是被移除而非尚未加入(self, client, db) -> None:
-        """AC 9 後半 / ET-MSG-ET06-006：next navigation 的訊息要說對原因。
+        """AC 9 後半 / ET-MSG-ET07-006：next navigation 的訊息要說對原因。
 
         「您尚未加入此課程」會讓被移除的學員以為自己走錯課程、再去找一次邀請碼——
         而依 #247 裁示 C 他也不能自行加回，那是白費力氣。

@@ -234,7 +234,7 @@ function DetailPanel({
 }
 
 /**
- * 簽核中心（US6 / DM04）：審核者處理指派給自己之送審——待簽核（核准並發布 / 退回）與已完成兩頁籤。
+ * 簽核中心（US6 / DM02）：審核者處理指派給自己之送審——待簽核（核准並發布 / 退回）與已完成兩頁籤。
  * 核准為原子發布（版本切換 + 通知）；退回必填原因；停留 ≥ 門檻天數之項目標紅警示。
  */
 export function DmReviewPage() {
@@ -267,7 +267,7 @@ export function DmReviewPage() {
   const approveMut = useMutation({
     mutationFn: ({ reviewId }: { reviewId: number; isObsolete: boolean }) => reviewApi.approve(reviewId),
     onSuccess: (_data, vars) => {
-      // 廢止核准 → 文件下架；一般 → 發布（DM-MSG-DM04-001）
+      // 廢止核准 → 文件下架；一般 → 發布（DM-MSG-DM02-001）
       message.success(vars.isObsolete ? "已核准廢止，文件已下架並通知撰寫者" : "已核准並發布，已通知撰寫者")
       afterAction()
     },
@@ -277,7 +277,7 @@ export function DmReviewPage() {
   const rejectMut = useMutation({
     mutationFn: ({ reviewId, reason }: { reviewId: number; reason: string }) => reviewApi.reject(reviewId, reason),
     onSuccess: () => {
-      message.success("已退回並通知撰寫者") // DM-MSG-DM04-005
+      message.success("已退回並通知撰寫者") // DM-MSG-DM02-005
       setRejectOpen(false)
       setRejectReason("")
       afterAction()
@@ -288,7 +288,7 @@ export function DmReviewPage() {
   const onApprove = () => {
     if (selectedId == null) return
     const isObsolete = detail?.review_type === "OBSOLETE"
-    // 二次確認（DM-MSG-DM04-003）
+    // 二次確認（DM-MSG-DM02-003）
     confirm({
       title: isObsolete ? "確定核准廢止此文件？" : "確定核准此項目？",
       content: isObsolete
@@ -321,7 +321,7 @@ export function DmReviewPage() {
 
   const submitReject = () => {
     if (selectedId == null) return
-    const result = RejectReqSchema.safeParse({ reason: rejectReason }) // DM-MSG-DM04-004
+    const result = RejectReqSchema.safeParse({ reason: rejectReason }) // DM-MSG-DM02-004
     const errs = getFieldErrors(result.success ? null : result.error)
     setRejectError(errs.reason ?? "")
     if (!result.success) return
@@ -334,7 +334,7 @@ export function DmReviewPage() {
 
   return (
     <Box>
-      <ScreenHeader code="DM04" />
+      <ScreenHeader code="DM02" />
 
       <Tabs
         value={tab}

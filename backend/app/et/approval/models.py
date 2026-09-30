@@ -62,7 +62,7 @@ class EtApproval(BaseModel):
     # 索引，排除的都是 `DELETED`，與本表無關。
     #
     # 🚨 不要改成 `postgresql_where=text('"IS_REVOKED" = false')`。改了會讓同一人同一
-    # 課出現多列，直接推翻 `data-model` 的「0～1 筆 / 學員 / 課程」，而症狀是 ET03 的
+    # 課出現多列，直接推翻 `data-model` 的「0～1 筆 / 學員 / 課程」，而症狀是 ET02 的
     # 核可欄開始出現重複列、且撤銷後重核會靜默新建一列（`REVOKE_*` 永遠留在舊列上）。
     #
     # 🚨 **也不要替本表加軟刪除路徑**（把 `DELETED` 設為 1），除非同時把這個唯一鍵改成

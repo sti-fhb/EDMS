@@ -1,4 +1,4 @@
-"""個人專區服務（US9 / UCDM09 / DM07）。
+"""個人專區服務（US9 / UCDM09 / DM04）。
 
 三塊 DM 業務：草稿匣（三類 + 刪除）、撤回送審（狀態回復）、我的文件動態（近 30 天、角色視角）。撤回
 orchestration 重用 `ReviewService.withdraw`（僅翻 DM_REVIEW 狀態）+ `ReviewCenterRepository` 之版本 /

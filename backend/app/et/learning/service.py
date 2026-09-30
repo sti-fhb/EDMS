@@ -1,9 +1,9 @@
-"""ET05 章節學習 Service（US5 / #255）。
+"""ET06 章節學習 Service（US5 / #255）。
 
 ## 課程關閉不過濾內容
 
 #255 SA Q2 裁示 A：關閉 = **讀照舊、寫全停**。`is_closed` 只驅動前端的提示標示
-（ET-MSG-ET05-005），**不影響任何一個端點回傳的內容**。
+（ET-MSG-ET06-005），**不影響任何一個端點回傳的內容**。
 
 裁示依據為三個平台的實際做法：Canvas 的結課唯讀是「課程教材、討論、成績皆可看，
 不可繳交 / 參與」；Moodle 的課程結束日期**預設完全不限制存取**（要擋須另外隱藏整門
@@ -134,7 +134,7 @@ class EtLearningService:
             raise _FILE_NOT_FOUND
 
     async def structure(self, db: AsyncSession, course_id: int, *, user_id: str) -> LearnStructure:
-        """ET05 左側導覽之完整結構（AC 1 / AC 2）。
+        """ET06 左側導覽之完整結構（AC 1 / AC 2）。
 
         Raises:
             AppError: 404 `ET_LEARN_001` 查無課程；403 `ET_LEARN_002` 非在籍且非擁有者。

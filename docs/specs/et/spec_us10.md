@@ -1,10 +1,10 @@
-# User Story 10 — UCET011 個人資料維護（ET08）
+# User Story 10 — UCET011 個人資料維護（ET09）
 
-> 對應 UC：UCET011 ｜ 功能選項：ET08（個人資料維護；由平台 DP 提供）｜ Priority：P2 ｜ Wireframe：[個人資料維護（平台 DP）](../../wireframes/dp/index.html) ｜ 返回總檔：[spec.md](spec.md)
+> 對應 UC：UCET011 ｜ 功能選項：ET09（個人資料維護；由平台 DP 提供）｜ Priority：P2 ｜ Wireframe：[個人資料維護（平台 DP）](../../wireframes/dp/index.html) ｜ 返回總檔：[spec.md](spec.md)
 
 > **平台對齊（DP）**：**個人資料維護（姓名 / 帳號 Email 變更 / 密碼）由平台模組 DP 提供（UCDP004），ET 不自設個資維護畫面**——操作共用 `DP_USER`，畫面見平台 DP（[DP wireframe](../../wireframes/dp/index.html)），ET 端僅由右上使用者選單導向平台。本 US 保留為情境描述（含 Email 雙信箱驗證等規則），係**引用平台 DP 之行為**，實作以平台為準。
 
-所有登入使用者於 ET08 個人資料維護頁可編輯自己之姓名、帳號（Email）、密碼。變更同步寫入共用 `DP_USER`，DM 端同步生效。帳號（Email）變更採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制：使用者提交新 Email 後系統寄出驗證信至**新 Email**（30 分鐘有效），**舊 Email 變更期間仍可正常登入**；學員 30 分鐘內點驗證連結後 DP_USER.EMAIL 更新為新值並強制登出，須以新 Email 重新登入；未點驗證連結則變更請求視為作廢、舊 Email 永遠維持有效；變更期間再次提交新請求取代前次。密碼變更須填舊密碼 + 新密碼 + 確認新密碼，系統檢核舊密碼正確、新密碼兩次一致後儲存。忘記密碼改走 [spec_us2.md](spec_us2.md) US2 登入頁之「忘記密碼」連結。
+所有登入使用者於 ET09 個人資料維護頁可編輯自己之姓名、帳號（Email）、密碼。變更同步寫入共用 `DP_USER`，DM 端同步生效。帳號（Email）變更採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制：使用者提交新 Email 後系統寄出驗證信至**新 Email**（30 分鐘有效），**舊 Email 變更期間仍可正常登入**；學員 30 分鐘內點驗證連結後 DP_USER.EMAIL 更新為新值並強制登出，須以新 Email 重新登入；未點驗證連結則變更請求視為作廢、舊 Email 永遠維持有效；變更期間再次提交新請求取代前次。密碼變更須填舊密碼 + 新密碼 + 確認新密碼，系統檢核舊密碼正確、新密碼兩次一致後儲存。忘記密碼改走 [spec_us2.md](spec_us2.md) US2 登入頁之「忘記密碼」連結。
 
 **Priority**: P2
 
@@ -16,11 +16,11 @@
 
 ### 編輯姓名
 
-1. **Given** 使用者於 ET08 編輯姓名為新值並儲存，**When** 系統處理，**Then** 共用 DP_USER.NAME 更新；DM 端同步生效（共用平台 DP 之 DP_USER）
+1. **Given** 使用者於 ET09 編輯姓名為新值並儲存，**When** 系統處理，**Then** 共用 DP_USER.NAME 更新；DM 端同步生效（共用平台 DP 之 DP_USER）
 
 ### 變更帳號（Email）— 提交與驗證
 
-2. **Given** 使用者於 ET08 輸入新 Email 並點「儲存」，**When** 系統處理，**Then** 寫入 DP_USER.EMAIL_PENDING_CHANGE = 新 Email、產生 EMAIL_PENDING_TOKEN、EMAIL_PENDING_EXPIRES_AT = 當下 + 30 分鐘；DP_USER.EMAIL（舊值）**不變**
+2. **Given** 使用者於 ET09 輸入新 Email 並點「儲存」，**When** 系統處理，**Then** 寫入 DP_USER.EMAIL_PENDING_CHANGE = 新 Email、產生 EMAIL_PENDING_TOKEN、EMAIL_PENDING_EXPIRES_AT = 當下 + 30 分鐘；DP_USER.EMAIL（舊值）**不變**
 3. **Given** 系統寄發驗證信至**新 Email**，**When** 學員 30 分鐘內點驗證連結，**Then** DP_USER.EMAIL 更新為新值；清除 PENDING 欄位；學員**須以新 Email 重新登入**（既有 JWT 之失效方式由平台 DP 定義；平台不採伺服器端 session，無「強制登出」動作）
 4. **Given** 學員於 PENDING 期間未點驗證連結，**When** 30 分鐘逾期，**Then** PENDING 欄位於下次與該帳號相關之認證 / 變更動作時即時檢核並清理；變更請求視為作廢；舊 Email 永遠維持有效
 5. **Given** 學員於 PENDING 期間再次提交新變更請求，**When** 系統處理，**Then** 舊 PENDING 紀錄被**取代**；新驗證連結重新計時 30 分鐘
@@ -37,7 +37,7 @@
 
 ## Functional Requirements
 
-- **FR-ET-US10-01**: 系統 MUST 提供使用者於 ET08 編輯自己之姓名，儲存後更新共用 DP_USER.NAME 並同步生效於 ET / DM 兩系統（共用平台 DP 之 DP_USER）
+- **FR-ET-US10-01**: 系統 MUST 提供使用者於 ET09 編輯自己之姓名，儲存後更新共用 DP_USER.NAME 並同步生效於 ET / DM 兩系統（共用平台 DP 之 DP_USER）
 - **FR-ET-US10-02**: 帳號（Email）變更 MUST 採「雙信箱共存 + 新 Email 驗證後切換」之延遲生效機制；提交新 Email 時系統 MUST 寫入 DP_USER.EMAIL_PENDING_CHANGE、產生 EMAIL_PENDING_TOKEN 與 EMAIL_PENDING_EXPIRES_AT（當下 + 30 分鐘，TTL 由**平台參數（DP 提供之認證 TTL，`DP_PARAM.DP_PASSWORD_RESET_TTL_MIN`，平台級）**控制），且 DP_USER.EMAIL（舊值）MUST 維持不變
 - **FR-ET-US10-03**: 平台 DP MUST 將驗證信寄至新 Email；使用者於期限內點驗證連結後，MUST 將 DP_USER.EMAIL 更新為新值、清除 PENDING 欄位，使用者 MUST 以新 Email 重新登入（既有 JWT 之失效方式由平台 DP 定義；**本 FR 為平台 DP 行為之引用，非 ET 實作項**——2026-08-19 更正，原寫「強制登出當前 session」，平台不採伺服器端 session）
 - **FR-ET-US10-04**: PENDING 期間（驗證未完成）系統 MUST 允許使用者以舊 Email 正常登入（變更尚未生效）
@@ -53,11 +53,11 @@
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發情境 |
 |---------|------|---------|---------|
-| ET-MSG-ET08-001 | 成功 | 姓名已更新 | 場景 1：編輯姓名 |
-| ET-MSG-ET08-002 | 提示 | 驗證信已寄至新 Email，請於 30 分鐘內點擊完成變更；舊 Email 於此期間仍可登入 | 場景 2/3：提交帳號（Email）變更 |
-| ET-MSG-ET08-003 | 成功 | 密碼已變更 | 場景 8：變更密碼成功 |
-| ET-MSG-ET08-004 | 錯誤 | 舊密碼不正確 | 場景 9：舊密碼錯誤 |
-| ET-MSG-ET08-005 | 錯誤 | 兩次新密碼不一致 | 場景 10：新密碼兩次不符 |
+| ET-MSG-ET09-001 | 成功 | 姓名已更新 | 場景 1：編輯姓名 |
+| ET-MSG-ET09-002 | 提示 | 驗證信已寄至新 Email，請於 30 分鐘內點擊完成變更；舊 Email 於此期間仍可登入 | 場景 2/3：提交帳號（Email）變更 |
+| ET-MSG-ET09-003 | 成功 | 密碼已變更 | 場景 8：變更密碼成功 |
+| ET-MSG-ET09-004 | 錯誤 | 舊密碼不正確 | 場景 9：舊密碼錯誤 |
+| ET-MSG-ET09-005 | 錯誤 | 兩次新密碼不一致 | 場景 10：新密碼兩次不符 |
 
 ---
 

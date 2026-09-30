@@ -98,7 +98,7 @@ describe("EtSurveyFillPage", () => {
   })
 
   it("未答單選題就送出時擋下並逐題標示", async () => {
-    // ET-MSG-ET05-101。送出鈕**不 disable**：disabled 的按鈕點下去毫無反應，學員不會
+    // ET-MSG-ET06-101。送出鈕**不 disable**：disabled 的按鈕點下去毫無反應，學員不會
     // 知道是哪一題沒填。故一律可點、擋下並提示（同 #255 對鎖定項目的立場）。
     const user = userEvent.setup()
     mockForm()
@@ -344,7 +344,7 @@ describe("EtSurveyFillPage", () => {
       expect(await screen.findByText("您尚未加入此課程")).toBeInTheDocument()
     })
 
-    it("返回課程鈕導回 ET05", async () => {
+    it("返回課程鈕導回 ET06", async () => {
       const user = userEvent.setup()
       mockForm()
       renderWithProviders(<EtSurveyFillPage />)

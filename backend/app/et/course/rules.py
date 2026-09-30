@@ -60,11 +60,11 @@ def ensure_owner_or_admin(*, owner_id: str, actor_id: str, actor_roles: frozense
 
     `reports/service.py` 的週報早有同樣的旁路（`if ET_ADMIN not in ctx.roles and
     course.owner_id != ctx.user_id`），管理者看全域、教師看自己的班。本函式只是把那段
-    行內判斷收斂成具名規則，讓 ET03 的三支讀取端點與核可端點共用同一個定義。
+    行內判斷收斂成具名規則，讓 ET02 的三支讀取端點與核可端點共用同一個定義。
 
     ## ⚠️ 後端放寬了，前端進入路徑還沒有
 
-    SA 裁示 2026-09-17 Q1 = C：本層放寬，但 ET03 的課程下拉維持 `scope=mine`
+    SA 裁示 2026-09-17 Q1 = C：本層放寬，但 ET02 的課程下拉維持 `scope=mine`
     （`frontend/src/et/students/StudentsPage.tsx`），管理者的進入路徑併入 US17（ET-19）。
     這是**刻意的中間狀態**，不是漏做——別看到前端沒開就把這裡的旁路拿掉。
     """
@@ -243,7 +243,7 @@ def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: dat
     ## 呼叫端一律以「與 `CLOSED` 相同」處理
 
     回 `True` 時各處的行為與 `STATUS = CLOSED` 完全一致——邀請碼失效、進度寫入 409、
-    問卷不可填、ET05 唯讀回看、**不可開新作答**。**不可**改成「視同不存在」：已關閉課程
+    問卷不可填、ET06 唯讀回看、**不可開新作答**。**不可**改成「視同不存在」：已關閉課程
     仍要留在我的課程清單、仍可唯讀回看（AC 9 / 10），把它當成不可見會讓學員的歷史紀錄
     從眼前消失。
 
@@ -310,7 +310,7 @@ def ensure_reopen_schedule(*, open_end_at: datetime, now: datetime) -> None:
     操作（教師想讓學員從上週就能看），與 2026-08-24 裁示的方向一致。
 
     Raises:
-        AppError: 422 `ET_COURSE_008`（訊息即 `ET-MSG-ET02-204`）。
+        AppError: 422 `ET_COURSE_008`（訊息即 `ET-MSG-ET05-204`）。
     """
     if open_end_at <= now:
         raise AppError(

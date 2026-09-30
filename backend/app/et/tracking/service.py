@@ -1,4 +1,4 @@
-"""ET03 學員學習狀況追蹤 Service（US9 / #322）。
+"""ET02 學員學習狀況追蹤 Service（US9 / #322）。
 
 **授權兩層**：router 層 `require_et_roles(ET_TEACHER, ET_ADMIN)`，service 層
 `ensure_owner_or_admin`——`FR-ET-US9-08` 明訂問卷填答為具名資料，其統計與明細僅本課程
@@ -17,7 +17,7 @@
 **重置重考與移除學員刻意不放寬**：那兩支是 US9 的課程管理動作，不在 US16 的裁示範圍，
 擅自一起放寬等於替另一張 US 做決定。
 
-⚠️ 前端 ET03 的課程下拉仍為 `scope=mine`，管理者目前沒有進入路徑——裁示明訂留到 US17
+⚠️ 前端 ET02 的課程下拉仍為 `scope=mine`，管理者目前沒有進入路徑——裁示明訂留到 US17
 （ET-19）。這是**刻意的中間狀態**，不是漏做。
 """
 
@@ -134,7 +134,7 @@ class EtTrackingService:
 
         `ET_APPROVAL` 是第三個一對多關聯，同樣**絕不可**併進上述 `GROUP BY`。而
         `REQUIRE_APPROVAL = false` 的課程根本不顯示核可欄，此時多查一次是純粹的浪費
-        ——ET03 是教師頻繁切換課程的頁面。
+        ——ET02 是教師頻繁切換課程的頁面。
         """
         course = await self._require_owner(db, course_id, actor_id, actor_roles)
 
@@ -182,7 +182,7 @@ class EtTrackingService:
         連那張表都看不到，功能等於沒有。
 
         判定改用 `ensure_owner_or_admin` 而非在此處寫 `if ET_ADMIN in roles`：
-        `ensure_owner` 本身**維持原樣**，它還被 ET01 / ET02 的課程編輯端點使用，
+        `ensure_owner` 本身**維持原樣**，它還被 ET01 / ET05 的課程編輯端點使用，
         在那支加旁路會讓管理者連別人的課程內容都能改。
 
         ⚠️ 前端課程下拉仍為 `scope=mine`，管理者目前沒有進入路徑——裁示明訂留到 US17。
@@ -206,7 +206,7 @@ class EtTrackingService:
         ## 只列**曾作答**的學員
 
         未作答者不進本區塊——他在區塊 1 仍然看得到。但**已作答學員的未作答測驗要列出**
-        （`attempts` 為空 + `ET-MSG-ET03-005`「尚未作答」），否則教師分不出「他沒考」
+        （`attempts` 為空 + `ET-MSG-ET02-005`「尚未作答」），否則教師分不出「他沒考」
         與「這門課沒這個測驗」。
         """
         await self._require_owner(db, course_id, actor_id, actor_roles)
@@ -336,7 +336,7 @@ class EtTrackingService:
         ## 作答中的 attempt **不擋、不中止**
 
         AC 7 明訂有 `IN_PROGRESS` attempt 時仍允許移除、該 attempt 保留並計入歷史。
-        警告文案（ET-MSG-ET03-003）由前端顯示；後端擋下來會讓教師沒辦法移除一個正在
+        警告文案（ET-MSG-ET02-003）由前端顯示；後端擋下來會讓教師沒辦法移除一個正在
         作答的人，而那正是最需要移除的情境。
 
         ## 已移除者回 404 而非靜默成功
@@ -617,7 +617,7 @@ def _to_student_row(
         user_name=user_name,
         joined_at=enrollment.joined_at,
         # 即時導出——**不讀** `enrollment.completion_status`，那個欄位只有加入時寫入的
-        # `NOT_STARTED`，沒有任何路徑推進它（同 ET04 於 #284 的處理）
+        # `NOT_STARTED`，沒有任何路徑推進它（同 ET03 於 #284 的處理）
         completion_status=derive_completion_status(done=done, total=total),
         progress_pct=_pct(done, total),
         avg_score=_round2(avg_score),

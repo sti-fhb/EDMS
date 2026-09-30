@@ -1,4 +1,4 @@
-"""ET05 章節學習（US5 / #255）schema。
+"""ET06 章節學習（US5 / #255）schema。
 
 ## 學員端與教師端不共用 schema
 
@@ -48,12 +48,12 @@ class ChapterNode(BaseModel):
 
 
 class LearnStructure(BaseModel):
-    """ET05 左側導覽所需之完整結構。
+    """ET06 左側導覽所需之完整結構。
 
     Attributes:
         is_owner: 當前使用者為課程擁有者（教師預覽，#255 裁示 Q1=A）。前端據此顯示
             「預覽模式」提示，避免教師誤以為自己是以學員身分在累積進度。
-        is_closed: 課程已關閉 → 前端顯示唯讀提示（ET-MSG-ET05-005）。
+        is_closed: 課程已關閉 → 前端顯示唯讀提示（ET-MSG-ET06-005）。
             **不過濾任何內容**（#255 裁示 Q2=A）——關閉限制的是寫入，不是讀取。
         playback_rates: 可選倍速，已依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮。
         last_item_id: 上次檢視之項目（#274 SA Q1 裁示 B）。`None` = 還沒看過任何項目
@@ -117,7 +117,7 @@ class MaterialDocRow(BaseModel):
     Attributes:
         version_id: 當前發布版之 ID。取檔端點需要它——`read_file_for_reference` 只放行
             當前版（D-1），舊版一律拒絕。
-        obsolete: 已廢止（AC 17 / ET-MSG-ET05-003）。**仍可閱讀**廢止前最後版本——
+        obsolete: 已廢止（AC 17 / ET-MSG-ET06-003）。**仍可閱讀**廢止前最後版本——
             `CURRENT_VERSION_ID` 此時指向的就是那一版。
         previewable: 可否頁內嵌入（PDF → true；其餘走下載，AC 15 / 16）。
         available: 文件可否取得。DM 端查無 / 非可引用分類時為 `false`——此時前端顯示

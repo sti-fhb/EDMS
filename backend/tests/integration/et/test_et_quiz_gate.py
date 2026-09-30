@@ -1,4 +1,4 @@
-"""ET05 測驗未及格阻擋解鎖（`spec_us5` AC 12 / #361 AC 7、8）。
+"""ET06 測驗未及格阻擋解鎖（`spec_us5` AC 12 / #361 AC 7、8）。
 
 解鎖判定本身是純函式，已於 `tests/unit/et/test_progress_rules.py` 驗完。此處只驗
 **需要真 DB 與真端點才驗得了**的三件事：
@@ -6,7 +6,7 @@
 1. **側欄旗標與後端守門給出同一個答案**——issue 特別點名的風險。兩邊各算一份時，
    分岔的表現是「側欄顯示解鎖但後端擋下」，一個學員完全無法理解的狀態，而純函式
    測試永遠抓不到（它們餵的是同一個輸入）。
-2. **ET03 重置逃生門實際走得通**（AC 8）——這是 AC 12 得以啟用的唯一前提。#279 當年
+2. **ET02 重置逃生門實際走得通**（AC 8）——這是 AC 12 得以啟用的唯一前提。#279 當年
    不啟用的理由就是「沒有任何補救途徑」，而該途徑從未被端到端走過一次。
 3. **0 題的測驗不當閘門**——重置救不了的那種死路，見 `build_item_state` 之 docstring。
 """
@@ -282,7 +282,7 @@ class TestZeroQuestionQuizDoesNotGate:
     async def test_題目被刪光的測驗不擋住後續(self, client, db) -> None:
         """既有的 0 題測驗（#410 守門上線前就存在的資料）不得擋住後續項目。
 
-        此時學員**連考都考不了**（`attempt/service` 對 0 題測驗回 404），ET03 也不會
+        此時學員**連考都考不了**（`attempt/service` 對 0 題測驗回 404），ET02 也不會
         給重置鈕（`can_reset_retry` 要求 `used > max_retry`，而他一次都用不掉）。
         擋住它等於整門課後半段永久鎖死且無從補救。
 
@@ -357,7 +357,7 @@ class TestZeroQuestionQuizDoesNotGate:
 
 
 class TestBlockingItemType:
-    """`spec_us5` AC 12 的後半：阻擋**並提示**（ET-MSG-ET05-002）。
+    """`spec_us5` AC 12 的後半：阻擋**並提示**（ET-MSG-ET06-002）。
 
     🔴 前端原本對任何鎖定項目都提示「請先完成本章節之影片學習」。AC 12 啟用前那句
     永遠是對的（鎖定的唯一成因就是教材沒看完），啟用後會**把考不過的學員指向錯的
@@ -416,7 +416,7 @@ class TestBlockingItemType:
 
 
 class TestResetEscapeHatch:
-    """AC 8：次數用盡且未及格者，教師可由 ET03 重置後續行。
+    """AC 8：次數用盡且未及格者，教師可由 ET02 重置後續行。
 
     🔴 **這是 AC 12 得以啟用的前提**。#279 當年不啟用的唯一理由就是「沒有任何補救
     途徑」，而 ET-9（#329）交付重置後，這條路徑從未被端到端走過一次。
@@ -440,7 +440,7 @@ class TestResetEscapeHatch:
         items = await _sidebar(client, student, course["course_id"])
         assert items[course["second_item_id"]]["locked"] is True
 
-        # ③ 教師由 ET03 重置
+        # ③ 教師由 ET02 重置
         reset = await client.post(
             f"{_COURSES}/{course['course_id']}/students/{student}/quizzes/{course['first_quiz_id']}/retry-reset",
             headers=_bearer(teacher),

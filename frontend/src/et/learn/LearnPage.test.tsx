@@ -74,7 +74,7 @@ function mockStructure(overrides: Partial<LearnStructure>) {
   )
 }
 
-describe("ET05 章節學習頁", () => {
+describe("ET06 章節學習頁", () => {
   it("顯示課程名稱、章節與項目（AC 1）", async () => {
     mockStructure({})
     renderWithProviders(<EtLearnPage />)
@@ -165,7 +165,7 @@ describe("ET05 章節學習頁", () => {
       expect(await screen.findByRole("button", { name: /開始作答/ })).toBeInTheDocument()
     })
 
-    it("鎖定項目點擊時擋下並提示（AC 6 / ET-MSG-ET05-001）", async () => {
+    it("鎖定項目點擊時擋下並提示（AC 6 / ET-MSG-ET06-001）", async () => {
       mockStructure({ chapters: lockedChapters(), blocking_item_type: "MATERIAL" })
       const user = userEvent.setup()
       renderWithProviders(<EtLearnPage />)
@@ -178,7 +178,7 @@ describe("ET05 章節學習頁", () => {
       expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
 
-    it("前緣是測驗時改提示重考，不再叫他去看影片（AC 12 / ET-MSG-ET05-002）", async () => {
+    it("前緣是測驗時改提示重考，不再叫他去看影片（AC 12 / ET-MSG-ET06-002）", async () => {
       // 🔴 #361：AC 12 啟用後鎖定多了「測驗未通過」這個成因。沿用原本那句會叫一個
       // 影片早就看完的學員再去看一次影片，而他真正該做的是重考——他照著提示做完全
       // 沒有用，且畫面不會有任何其他線索。
@@ -254,7 +254,7 @@ describe("ET05 章節學習頁", () => {
       // `locked_item_ids` 的「已完成永不鎖定」使考不及格不會讓它自己變鎖定。
       // 成立情境是教師在這中間調整了章節順序、或要求已通過學員重測（#361）。
       //
-      // ⛔ 處置刻意**沿用既有的 ET-MSG-ET05-001/002**，而不是把鎖定項目顯示出來——
+      // ⛔ 處置刻意**沿用既有的 ET-MSG-ET06-001/002**，而不是把鎖定項目顯示出來——
       // 後者會變成一個通用的「顯示未解鎖項目」能力，而未解鎖**教材**的內容端點
       // 後端並不擋（見 `learning/service.py` 的註解），那會直接開一個洞。
       search.current = "?quiz=2000"
@@ -331,7 +331,7 @@ describe("ET05 章節學習頁", () => {
       // （前後端分開部署，或本機打到另一個 worktree 的後端）→ `survey` 是 `undefined`。
       //
       // 原本寫 `survey === null` 的嚴格比對會在 `survey.state` 上拋 TypeError，讓 router
-      // 的 error boundary 把**整個 ET05 頁**換成「Unexpected Application Error!」——
+      // 的 error boundary 把**整個 ET06 頁**換成「Unexpected Application Error!」——
       // 章節、教材、進度全部消失，只因為少一個選配欄位。
       //
       // 上面那條 `survey: null` 的測試抓不到這個：mock 一律帶了該欄位。這裡刻意送出

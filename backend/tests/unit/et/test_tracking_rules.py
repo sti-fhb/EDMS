@@ -1,4 +1,4 @@
-"""ET03 學員學習狀況追蹤之純業務規則（US9 / #322）。
+"""ET02 學員學習狀況追蹤之純業務規則（US9 / #322）。
 
 完課三態沿用 `enrollment/rules.derive_completion_status`（已有測試於
 `test_enrollment_rules.py`），本檔只驗本 issue 新增的判定。

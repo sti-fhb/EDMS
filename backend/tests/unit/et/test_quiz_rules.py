@@ -48,7 +48,7 @@ class TestEnsureCorrectOptionsValid:
         ensure_correct_options_valid(QUESTION_MULTIPLE, correct_count=count)
 
     def test_多選題零個正確被擋(self) -> None:
-        """data-model 明訂：避免部分計分公式分母為 0（ET-MSG-ET02-004）。"""
+        """data-model 明訂：避免部分計分公式分母為 0（ET-MSG-ET05-004）。"""
         with pytest.raises(AppError) as exc:
             ensure_correct_options_valid(QUESTION_MULTIPLE, correct_count=0)
         assert exc.value.status_code == 422

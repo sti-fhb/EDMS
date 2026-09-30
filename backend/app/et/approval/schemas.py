@@ -25,7 +25,7 @@ from app.et.course.schemas import MAX_BIGINT
 #: 而他在 US17 核可查詢裡看得到。正常 UI 走不到（清單本來就不列已移除者），這是防繞過
 #: 與「載入後才被移除」的競態。
 #:
-#: 對應訊息 `ET-MSG-ET03-310`（2026-09-17 隨本 issue 增列於 `spec_us16.md` §訊息類型）。
+#: 對應訊息 `ET-MSG-ET02-310`（2026-09-17 隨本 issue 增列於 `spec_us16.md` §訊息類型）。
 SkipReason = Literal["NOT_COMPLETED", "ALREADY_APPROVED", "NOT_ENROLLED"]
 
 
@@ -34,7 +34,7 @@ class SkippedItem(BaseModel):
 
     帶 `reason` 而非只回總數——兩種跳過對教師的**下一步不同**（未完課要等他完課，
     已核可要先撤銷並填原因），壓成同一句「已跳過 N 筆」會讓他不知道該做什麼。
-    前端據此分別顯示 `ET-MSG-ET03-303` 與 `ET-MSG-ET03-309`。
+    前端據此分別顯示 `ET-MSG-ET02-303` 與 `ET-MSG-ET02-309`。
     """
 
     user_id: str
@@ -73,7 +73,7 @@ class RevokeReq(BaseModel):
 
     `reason` 的必填由 `rules.ensure_revoke_reason` 檢核而非 Pydantic `min_length=1`
     ——後者放行 `"   "`，且驗證失敗回 `COMMON_422` 不帶欄位名，前端無從把
-    `ET-MSG-ET03-305` 掛回那個輸入框。此處只擋長度上限。
+    `ET-MSG-ET02-305` 掛回那個輸入框。此處只擋長度上限。
     """
 
     reason: str = Field(max_length=1000)
@@ -161,7 +161,7 @@ class ApprovalQueryRow(BaseModel):
 
 
 class ApprovalSearchReq(BaseModel):
-    """ET10 核可查詢的查詢條件（`FR-ET-US17-01`）。
+    """ET04 核可查詢的查詢條件（`FR-ET-US17-01`）。
 
     ## 🔴 為何走 request body 而不是 query string（#391）
 
@@ -217,7 +217,7 @@ class ApprovalSearchReq(BaseModel):
 
 
 class ApprovalCourseOption(BaseModel):
-    """ET10 課程篩選下拉的一個選項（#439）。
+    """ET04 課程篩選下拉的一個選項（#439）。
 
     🔴 **只列「已有核可紀錄」的課程**，不是全部課程。三個理由：
 

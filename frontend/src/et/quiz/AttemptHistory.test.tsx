@@ -28,7 +28,7 @@ async function settled(spy: ReturnType<typeof vi.spyOn>) {
 
 beforeEach(() => navigate.mockReset())
 
-describe("ET06 歷次作答紀錄", () => {
+describe("ET07 歷次作答紀錄", () => {
   it("依 ATTEMPT_NO 遞增列出每一次", async () => {
     // 學員想回看的往往正是第 1 次；倒序會把它推到最下面
     renderWithProviders(<AttemptHistory quizId={700} />)

@@ -10,7 +10,7 @@ import { StudentApprovalList } from "./StudentApprovalList"
 import { TeacherApprovalQuery } from "./TeacherApprovalQuery"
 
 /**
- * ET10 核可查詢（US17 / #385）——依角色分流的單一畫面。
+ * ET04 核可查詢（US17 / #385）——依角色分流的單一畫面。
  *
  * ## 為何側欄項目不掛角色旗標
  *
@@ -24,7 +24,7 @@ import { TeacherApprovalQuery } from "./TeacherApprovalQuery"
  *
  * ## 兼具兩種角色時顯示教師視角
  *
- * 他自己的已通過課程在 ET04「我的課程」看得到；兩張表塞同一頁只會讓畫面變長，而他
+ * 他自己的已通過課程在 ET03「我的課程」看得到；兩張表塞同一頁只會讓畫面變長，而他
  * 來這一頁的目的是查學員。
  *
  * ⛔ **本畫面不提供核可證明 / 結業證書的下載或列印**（`FR-ET-US17-05`，2026-07-17
@@ -49,7 +49,7 @@ export function EtApprovalQueryPage() {
 
   return (
     <Box>
-      <ScreenHeader code="ET10" />
+      <ScreenHeader code="ET04" />
       {isPending || summaryPending ? (
         <Typography variant="body2" color="text.secondary">
           載入中…

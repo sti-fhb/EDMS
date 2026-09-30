@@ -1,4 +1,4 @@
-"""ET05 章節學習整合測試（US5 / #255）。
+"""ET06 章節學習整合測試（US5 / #255）。
 
 規則判定（授權、倍速限縮）已於 `tests/unit/et/test_learning_rules.py` 以純函式涵蓋。
 此處只驗**需要真 DB 才驗得了**的事：
@@ -237,7 +237,7 @@ class TestAuthorization:
     async def test_擁有者可進入自己的課程(self, client, db) -> None:
         """#255 SA Q1 裁示 A。
 
-        教師在 ET02 看到的是編輯視角，不進 ET05 無從確認學員實際看到什麼；而自己加入
+        教師在 ET05 看到的是編輯視角，不進 ET06 無從確認學員實際看到什麼；而自己加入
         自己的課會被計入完課率分母。
         """
         teacher = await _user(db, "t_learn03", ROLE_TEACHER)
@@ -332,7 +332,7 @@ class TestStructure:
 
         body = (await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(student))).json()
 
-        assert body["is_closed"] is True, "前端據此顯示唯讀提示（ET-MSG-ET05-005）"
+        assert body["is_closed"] is True, "前端據此顯示唯讀提示（ET-MSG-ET06-005）"
         assert len(body["chapters"][0]["items"]) == 1, "關閉不得過濾內容"
 
 
@@ -353,7 +353,7 @@ class TestMaterialContent:
         assert "file_path" not in video
 
     async def test_項目被刪除後對有權者回內容已刪除(self, client, db) -> None:
-        """AC 22 / ET-MSG-ET05-004。"""
+        """AC 22 / ET-MSG-ET06-004。"""
         teacher = await _user(db, "t_learn10", ROLE_TEACHER)
         ids = await _course_with_material(client, db, teacher)
         await db.execute(update(EtItem).where(EtItem.item_id == ids["item_id"]).values(deleted=1))

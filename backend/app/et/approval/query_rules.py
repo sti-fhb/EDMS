@@ -62,7 +62,7 @@ _COURSE_NOT_OWNED = AppError(
 
 
 def normalize_search_criteria(*, keyword: str | None, course_id: int | None) -> str | None:
-    """正規化 ET10 的查詢條件，並確保**至少給一個**（#439）。
+    """正規化 ET04 的查詢條件，並確保**至少給一個**（#439）。
 
     Args:
         keyword: 學員姓名或 Email 關鍵字，未填為 `None`。
@@ -81,7 +81,7 @@ def normalize_search_criteria(*, keyword: str | None, course_id: int | None) -> 
     路徑上仍然成立**——所以兩者皆不給依舊回 422，那才是原本的「留白查全部」。
 
     課程之所以能取代關鍵字，是因為 `ensure_course_filter_allowed` 把非管理者限制在
-    自己開設的課；選自己的課看到自己課的學員，是他本來就有的資訊（ET03 整頁就是做
+    自己開設的課；選自己的課看到自己課的學員，是他本來就有的資訊（ET02 整頁就是做
     這件事）。**兩者是一組的**——少了那道閘，本函式就等於單純開放留白查詢。
 
     ## 🔴 ⛔ 別把本函式讀成防列舉的防線——關鍵字那一側有一個已知缺口
@@ -133,7 +133,7 @@ def ensure_course_filter_allowed(*, owner_id: str | None, actor_id: str, is_admi
     ## ⚠️ 這是 `course/rules.ensure_owner_or_admin` 的**第二份**「owner ∪ 管理者」判定
 
     那一份吃 `actor_roles` 自己算 `is_admin`、拋 `ET_COURSE_002`，是**寫入**路徑用的
-    （ET03 核可、課程編輯）。本函式吃已算好的 `is_admin`、拋 `ET_APPROVAL_007`，且**查無
+    （ET02 核可、課程編輯）。本函式吃已算好的 `is_admin`、拋 `ET_APPROVAL_007`，且**查無
     課程時擋下**而不是回「課程不存在」——因為本情境的 `course_id` 直接來自使用者、未經
     任何篩選，回 404 等於一支課程存在性的 oracle。
 

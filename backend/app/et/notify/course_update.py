@@ -22,7 +22,7 @@ params 組法抽出去共用。
 ## 通知量
 
 `contracts` 明寫「每次新增即寄」且 `{{NEW_CHAPTER_NAME}}` 為單數——一個章節一封信。
-ET02 的新增章節視窗有「儲存並繼續新增」（#203），教師一次建 5 個章節會呼叫 5 次
+ET05 的新增章節視窗有「儲存並繼續新增」（#203），教師一次建 5 個章節會呼叫 5 次
 `add_chapter`；50 位學員的課程即 250 封。規格已如此規定，故不自行改成彙整；若日後
 成為問題，`COURSE_INVITE_DIGEST` 是可沿用的前例（已記於 #303 規劃 §12）。
 """
@@ -67,7 +67,7 @@ def build_course_update_params(*, user_name: str, course: EtCourse, new_chapter_
         "USER_NAME": user_name,
         "COURSE_NAME": course.course_name,
         "NEW_CHAPTER_NAME": new_chapter_name,
-        # 收件人**已在課程中**（只寄給在籍學員），故連結是 ET05 學習頁而非邀請頁
+        # 收件人**已在課程中**（只寄給在籍學員），故連結是 ET06 學習頁而非邀請頁
         "COURSE_URL": learn_link(course.course_id),
     }
 

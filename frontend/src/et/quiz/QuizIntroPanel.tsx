@@ -38,7 +38,7 @@ function InfoTile({ value, unit, label }: { value: string; unit?: string; label:
 }
 
 /**
- * ET06 測驗資訊與作答入口（AC 1 / AC 2）。
+ * ET07 測驗資訊與作答入口（AC 1 / AC 2）。
  *
  * ## 為何是面板而不是獨立頁
  *
@@ -151,10 +151,10 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
       */}
       {!data.can_start &&
         (data.course_closed ? (
-          /* ET-MSG-ET06-005（#280 裁示 Q3 = B：不輪詢，於此與成績頁事後告知）*/
+          /* ET-MSG-ET07-005（#280 裁示 Q3 = B：不輪詢，於此與成績頁事後告知）*/
           <Alert severity="warning">此課程已關閉，無法再開新作答</Alert>
         ) : (
-          /* ET-MSG-ET06-001 */
+          /* ET-MSG-ET07-001 */
           <Alert severity="info">重考次數已用完，請聯繫教師重置</Alert>
         ))}
 

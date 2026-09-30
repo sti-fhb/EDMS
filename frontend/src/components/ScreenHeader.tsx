@@ -5,9 +5,9 @@ import type { ReactNode } from "react"
 import { getScreen } from "../layouts/navItems"
 
 interface ScreenHeaderProps {
-  /** 畫面代號（如 `DP09`）：icon 與預設標題取自 `navItems`，與側欄同源。 */
+  /** 畫面代號（如 `DP05`）：icon 與預設標題取自 `navItems`，與側欄同源。 */
   code: string
-  /** 覆寫標題（僅限同一畫面有不同狀態時，如 ET02 的「新增課程」/「課程編輯」）。 */
+  /** 覆寫標題（僅限同一畫面有不同狀態時，如 ET05 的「新增課程」/「課程編輯」）。 */
   title?: string
   /** 標題前的元素（如返回鈕）。 */
   leading?: ReactNode

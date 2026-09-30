@@ -68,7 +68,7 @@ export function EtCourseListPage() {
 
   const { data: filterTags } = useQuery({
     queryKey: QUERY_KEYS.etCourses.filterTags(),
-    // ⚠️ 是 `listFilterTags`（全部含停用者）而**不是** `listTags`（ET02 編輯用、排除停用者）。
+    // ⚠️ 是 `listFilterTags`（全部含停用者）而**不是** `listTags`（ET05 編輯用、排除停用者）。
     // 用錯會讓掛著已停用標籤的歷史課程搜不到，而畫面上沒有任何異常。
     queryFn: coursesApi.listFilterTags,
   })

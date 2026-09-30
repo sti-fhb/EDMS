@@ -45,7 +45,7 @@ beforeEach(() => {
   locationRef.current = { pathname: "/et/courses/new", state: null }
 })
 
-describe("ET02 課程編輯頁", () => {
+describe("ET05 課程編輯頁", () => {
   it("編輯模式載入既有課程資料與章節", async () => {
     renderEditor()
     expect(await screen.findByDisplayValue("採血作業訓練")).toBeInTheDocument()
@@ -875,7 +875,7 @@ describe("ET02 課程編輯頁", () => {
   })
 })
 
-// ── ET02 關閉與再開課（US11 / #288）──────────────────────────────────────────
+// ── ET05 關閉與再開課（US11 / #288）──────────────────────────────────────────
 
 /** 以指定狀態與擁有權覆蓋課程詳細——關閉 / 再開課按鈕全由這兩者決定。 */
 function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {}) {
@@ -935,9 +935,9 @@ async function fillDateTime(label: RegExp, keys: string) {
   await typist.keyboard(keys)
 }
 
-// ── ET02 刪除草稿（#457）──────────────────────────────────────────────────────
+// ── ET05 刪除草稿（#457）──────────────────────────────────────────────────────
 
-describe("ET02 刪除草稿", () => {
+describe("ET05 刪除草稿", () => {
   it("草稿顯示「刪除草稿」，且與「儲存並發布」不相鄰（#457）", async () => {
     // ⚠️ 相鄰性也要驗：本專案的 confirm 確認鈕一律主色、不提供危險色，誤點的防線
     // 只剩版面距離——而「刪掉整門課」與「發布」的誤點代價完全不對稱。
@@ -1024,14 +1024,14 @@ describe("ET02 刪除草稿", () => {
   })
 })
 
-describe("ET02 課程關閉與再開課", () => {
+describe("ET05 課程關閉與再開課", () => {
   it("編輯頁的邀請碼不帶「發布後永久不可變更」的括號說明（#359 第 2 項）", async () => {
     useCourse("PUBLISHED")
     renderEditor()
 
     // 邀請碼本身與複製鈕行為不變（AC）
     expect(await screen.findByText("01234567")).toBeInTheDocument()
-    // 規則改由 ET02 手冊承載（「邀請碼於發布當下產生，之後沿用同一組」）——畫面不寫、
+    // 規則改由 ET05 手冊承載（「邀請碼於發布當下產生，之後沿用同一組」）——畫面不寫、
     // 手冊寫「看不出來的規則」是刻意的分工。
     expect(screen.queryByText(/永久不可變更/)).not.toBeInTheDocument()
   })

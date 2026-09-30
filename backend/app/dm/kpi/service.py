@@ -1,6 +1,6 @@
 """閱讀統計 KPI 服務（US13）。
 
-兩塊：① DM10 儀表板唯讀查詢（DM_ADMIN，逐文件應看/已看/未看/閱讀率 + 統計卡 + CSV）
+兩塊：① DM06 儀表板唯讀查詢（DM_ADMIN，逐文件應看/已看/未看/閱讀率 + 統計卡 + CSV）
 ② SCHDM001 每週排程之核心（KPI 週報予全 DM_ADMIN、未讀提醒逐位未看閱覽者一信）。
 
 「應看」母體＝具 DM_VIEWER 角色且可見對象相符者（掛「全體」→ 全部 DM_VIEWER；否則 audience 交集）；
@@ -60,7 +60,7 @@ def _pct(rate: float | None) -> str:
 
 
 class KpiService:
-    """DM10 閱讀統計 KPI（查詢 / 匯出 / 每週排程）。"""
+    """DM06 閱讀統計 KPI（查詢 / 匯出 / 每週排程）。"""
 
     def __init__(self, repository: KpiRepository | None = None, notifier: DmNotifier | None = None) -> None:
         self._repo = repository or KpiRepository()
@@ -68,7 +68,7 @@ class KpiService:
 
     @staticmethod
     def _ensure_admin(roles: Iterable[str]) -> None:
-        """FR-002 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM10-002，擋直連）。"""
+        """FR-002 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM06-002，擋直連）。"""
         if not has_role(roles, DM_ADMIN):
             raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
 
@@ -126,7 +126,7 @@ class KpiService:
         page: int,
         limit: int,
     ) -> KpiListResponse:
-        """DM10 儀表板（FR-002，DM_ADMIN）：逐文件 KPI（後端分頁）+ 統計卡摘要。"""
+        """DM06 儀表板（FR-002，DM_ADMIN）：逐文件 KPI（後端分頁）+ 統計卡摘要。"""
         self._ensure_admin(roles)
         stats = await self._compute(db, keyword=keyword, category=category)
         summary = self._summary(stats)

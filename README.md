@@ -33,7 +33,7 @@
 ```text
 EDMS/
 ├── frontend/src/
-│   ├── pages/          # 各畫面（ET01~ET08 + 登入頁）
+│   ├── pages/          # 各畫面（ET01~ET10 + 登入頁）
 │   ├── components/     # 共用元件（MUI）
 │   ├── contexts/       # React Context（AuthContext 等）
 │   ├── hooks/          # 共用 custom hooks

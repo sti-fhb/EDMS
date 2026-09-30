@@ -198,7 +198,7 @@ class ReviewCenterRepository:
     ) -> None:
         """寫入公開變更歷程（append-only、發布 / 廢止事件）。
 
-        note：發布＝變更摘要（目前不填）、廢止＝廢止原因（US8）；供 DM08 跨文件查詢（US11）。
+        note：發布＝變更摘要（目前不填）、廢止＝廢止原因（US8）；供 DM05 跨文件查詢（US11）。
         """
         now = utcnow()
         db.add(

@@ -1,4 +1,4 @@
-"""ET04 加入課程與我的課程清單之純業務規則（US4 / #247）。"""
+"""ET03 加入課程與我的課程清單之純業務規則（US4 / #247）。"""
 
 from datetime import datetime, timedelta, timezone
 
@@ -73,7 +73,7 @@ class TestEnsureCourseJoinable:
         ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=_NOW + timedelta(days=1), now=_NOW)
 
     def test_已關閉課程被擋(self) -> None:
-        """AC 9 / ET-MSG-ET04-002：邀請碼於關閉期間失效、再開課後恢復有效。
+        """AC 9 / ET-MSG-ET03-002：邀請碼於關閉期間失效、再開課後恢復有效。
 
         故判定依據是**課程當前狀態**，不是碼本身存不存在。
         """

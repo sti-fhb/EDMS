@@ -1,4 +1,4 @@
-"""ET02 課程 CRUD 與授權整合測試（US3 / #202）。
+"""ET05 課程 CRUD 與授權整合測試（US3 / #202）。
 
 只驗需要真 DB 的「接線」——標籤啟用狀態查詢、樂觀鎖 rowcount、擁有權判定串到端點、
 稽核寫入。純集合／字串規則已於 `tests/unit/et/test_course_rules.py` 覆蓋，此處不重複。
@@ -386,7 +386,7 @@ class TestReadAndOwnership:
         assert r.json()["error_code"] == "ET_COURSE_002"
 
     async def test_學員不可讀取課程詳細(self, client, db) -> None:
-        """ET02 為教師畫面。若只掛 ET 存取閘，人人皆有學員角色 → 任何登入者都能讀到
+        """ET05 為教師畫面。若只掛 ET 存取閘，人人皆有學員角色 → 任何登入者都能讀到
         他人**草稿**課程，違反 spec_us3 AC 8「儲存草稿⋯⋯學員端不顯示」。
         學員端之課程讀取有自己的可見性規則（PUBLISHED 且 now >= OPEN_START_AT），
         屬 ET Issue #4 / #5 之端點。

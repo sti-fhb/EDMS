@@ -16,7 +16,7 @@ export interface ItemViewedResult {
 }
 
 /**
- * ET05 學習進度 API（US5 / #274）。
+ * ET06 學習進度 API（US5 / #274）。
  *
  * ## 三支都可能在「離開頁面」的路徑上被呼叫
  *

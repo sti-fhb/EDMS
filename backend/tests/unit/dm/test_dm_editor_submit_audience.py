@@ -2,7 +2,7 @@
 
 可見對象改查版本層快照（文件層於核准發布時才更新）；TRAINING 分類免填——訓練教材由 ET 引用，
 ET 取教材不套可見性條件（`dm/integration/service.py`），可見對象對教師 / 學員零作用。
-非 TRAINING 未掛可見對象仍須擋下（DM_DOC_005 / DM-MSG-DM03-008）。
+非 TRAINING 未掛可見對象仍須擋下（DM_DOC_005 / DM-MSG-DM08-008）。
 """
 
 from types import SimpleNamespace

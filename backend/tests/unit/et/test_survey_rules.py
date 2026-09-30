@@ -23,7 +23,7 @@ class TestEnsureSurveyAbsent:
         ensure_survey_absent(exists=False)
 
     def test_已有問卷被擋(self) -> None:
-        """AC 22 / ET-MSG-ET02-010：一門課程 0～1 份。"""
+        """AC 22 / ET-MSG-ET05-010：一門課程 0～1 份。"""
         with pytest.raises(AppError) as exc:
             ensure_survey_absent(exists=True)
         assert exc.value.status_code == 409
@@ -37,7 +37,7 @@ class TestEnsureOptionCountValid:
 
     @pytest.mark.parametrize("count", [0, 1])
     def test_不足兩個被擋(self, count: int) -> None:
-        """AC 19 / ET-MSG-ET02-008：每題至少需 2 個選項。
+        """AC 19 / ET-MSG-ET05-008：每題至少需 2 個選項。
 
         只有一個選項的題目沒有選擇可言；0 個則連題目都不成立。
         """
@@ -130,7 +130,7 @@ class TestEnsureEditable:
         ensure_editable(has_responses=False)
 
     def test_有填答即凍結(self) -> None:
-        """AC 21 / ET-MSG-ET02-009：已有任何填答即凍結題目與選項。
+        """AC 21 / ET-MSG-ET05-009：已有任何填答即凍結題目與選項。
 
         凍結的判定是「**是否存在**任何未刪除之填答」，不是「幾筆」——一個人填了，
         題目就不能再改，否則他填的答案會對應到不存在的題目。

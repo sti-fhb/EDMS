@@ -1,4 +1,4 @@
-/** 簽核處理（US6 / DM04）型別與表單驗證（對齊後端 app/dm/review/schemas.py）。 */
+/** 簽核處理（US6 / DM02）型別與表單驗證（對齊後端 app/dm/review/schemas.py）。 */
 
 import { z } from "zod"
 

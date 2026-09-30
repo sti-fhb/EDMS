@@ -228,7 +228,7 @@ class EditorRepository:
         """版本號是否已被本文件之「已發布」版本使用（PUBLISHED / SUPERSEDED）。
 
         僅卡與已發布版本重複——草稿 / 送審中 / 退回不計，故多人可各自草稿填同版號；送簽時據此檢核
-        （DM-MSG-DM03-009）。DB partial unique index（UX_DM_DOC_VERSION_RELEASED_NO）為並發後盾。
+        （DM-MSG-DM08-009）。DB partial unique index（UX_DM_DOC_VERSION_RELEASED_NO）為並發後盾。
         """
         got = await db.scalar(
             select(DmDocVersion.version_id).where(
@@ -241,7 +241,7 @@ class EditorRepository:
         return got is not None
 
     async def has_pending_obsolete(self, db: AsyncSession, doc_id: str) -> bool:
-        """該文件是否有進行中（PENDING）之廢止送審（→ 擋上傳新版本 DM-MSG-DM03-004）。"""
+        """該文件是否有進行中（PENDING）之廢止送審（→ 擋上傳新版本 DM-MSG-DM08-004）。"""
         got = await db.scalar(
             select(DmReview.review_id).where(
                 DmReview.doc_id == doc_id, DmReview.review_type == _OBSOLETE, DmReview.status == _PENDING
@@ -250,7 +250,7 @@ class EditorRepository:
         return got is not None
 
     async def manual_func_published_elsewhere(self, db: AsyncSession, func_code: str, exclude_doc_id: str) -> bool:
-        """同 func_code 是否已有其他「已發布」系統操作手冊（手冊唯一 DM-MSG-DM03-003；DB 部分唯一索引為後盾）。"""
+        """同 func_code 是否已有其他「已發布」系統操作手冊（手冊唯一 DM-MSG-DM08-003；DB 部分唯一索引為後盾）。"""
         got = await db.scalar(
             select(DmDocument.doc_id).where(
                 DmDocument.func_code == func_code,

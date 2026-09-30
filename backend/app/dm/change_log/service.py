@@ -30,7 +30,7 @@ class ChangeLogService:
 
     @staticmethod
     def _ensure_admin(roles: Iterable[str]) -> None:
-        """FR-001 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM08-002）。"""
+        """FR-001 後端硬閘：非 DM_ADMIN 一律 403（對應 DM-MSG-DM05-002）。"""
         if not has_role(roles, DM_ADMIN):
             raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
 

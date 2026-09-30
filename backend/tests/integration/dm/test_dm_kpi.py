@@ -1,4 +1,4 @@
-"""閱讀統計 KPI 儀表板（US13 / UCDM13 / DM10）整合測試（真實 DB）。
+"""閱讀統計 KPI 儀表板（US13 / UCDM13 / DM06）整合測試（真實 DB）。
 
 涵蓋：DM_ADMIN 查逐文件 KPI（應看/已看/未看/率、目前版本、分類）、應看母體＝DM_VIEWER（純 EDITOR/ADMIN
 不計）、audience「全體」vs 交集、已看∩應看、發新版重置、應看=0→rate None 且不計整體平均、統計卡

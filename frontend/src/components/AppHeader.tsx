@@ -19,7 +19,7 @@ import { PROFILE_ME_QUERY_KEY, profileApi } from "../dp/user/profileService"
  * `onMenuClick` 有值時於左上顯示三條線 icon，供收合 / 展開側欄（對齊 TBMS）。
  *
  * 使用者區對齊 TBMS（#421）：姓名與登出並排，不收在下拉選單裡。兩處刻意與 TBMS 不同——
- * TBMS 顯示的是**帳號**且不可點擊，EDMS 顯示**姓名**且點擊導向個人資料維護（DP04）。
+ * TBMS 顯示的是**帳號**且不可點擊，EDMS 顯示**姓名**且點擊導向個人資料維護（DP10）。
  */
 export function AppHeader({
   title = "教育訓練文件管理系統",

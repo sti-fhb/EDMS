@@ -1,11 +1,11 @@
-"""ET03 學員學習狀況追蹤之查詢（US9 / #322）。
+"""ET02 學員學習狀況追蹤之查詢（US9 / #322）。
 
 依 `sti-backend-modules`：Repository 只 `flush()`、不 `commit()`；查詢一律帶 `DELETED = 0`。
 
 ## 本檔的聚合全部是「一門課程 × 多位學員」
 
 `progress/repository.completion_counts_by_course()` 是**相反的形狀**（一位學員 × 多門
-課程，ET04「我的課程」用）。兩者不能互相取代，但**防禦必須一致**——見
+課程，ET03「我的課程」用）。兩者不能互相取代，但**防禦必須一致**——見
 `completion_counts_by_student()` 的 docstring。
 """
 
@@ -140,7 +140,7 @@ class EtTrackingRepository:
         return {user_id: float(avg) for user_id, avg in rows.all()}
 
     async def in_progress_attempt_user_ids(self, db: AsyncSession, *, course_id: int, user_ids: list[str]) -> set[str]:
-        """本課程中**有作答中（未提交）attempt** 的學員集合（`ET-MSG-ET03-003`）。
+        """本課程中**有作答中（未提交）attempt** 的學員集合（`ET-MSG-ET02-003`）。
 
         ## 為何逐人判定，不做課程層級的存在性判斷
 

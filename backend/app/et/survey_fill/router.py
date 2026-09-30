@@ -1,4 +1,4 @@
-"""ET05 課後問卷填寫 API（US13 / #284）——學員端。
+"""ET06 課後問卷填寫 API（US13 / #284）——學員端。
 
 router-level 只掛 `get_et_context`（任一 ET 角色）。**不掛 `require_et_roles`**——
 填寫者是學員，而 `survey/router.py` 那支限 `ET_TEACHER` / `ET_ADMIN`。這是兩支 router

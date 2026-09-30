@@ -58,7 +58,7 @@ class TestBuildParams:
         assert params["APPROVED_BY_NAME"] == "王主任"
 
     def test_核可時間換算台北時區(self) -> None:
-        """🔴 直接輸出 UTC 會讓信裡的核可時間比教師在 ET03 看到的**早 8 小時**。
+        """🔴 直接輸出 UTC 會讓信裡的核可時間比教師在 ET02 看到的**早 8 小時**。
 
         沿用 `course_invite.format_open_at` 的同一支換算與同一個格式
         （`YYYY/MM/DD HH:mm`，對齊前端 `utils/date.ts`），使教師在畫面上看到的與學員

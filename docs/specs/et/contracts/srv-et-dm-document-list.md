@@ -12,7 +12,7 @@
 
 ## 說明
 
-ET 教師於 ET02 教材編輯視窗，從 DM「訓練教材」分類下拉選取既有文件建立引用。本 Service 由 DM 提供，回傳該分類下**有當前發布版本**之文件清單。
+ET 教師於 ET05 教材編輯視窗，從 DM「訓練教材」分類下拉選取既有文件建立引用。本 Service 由 DM 提供，回傳該分類下**有當前發布版本**之文件清單。
 
 > **編碼對調注意**：本服務於 DM 端定稿契約為 **SRVDM002**；ET 側 2026-06-09 初稿曾誤標為 SRVDM001（與「依 DOC_ID 取當前發布版」對調）。2026-08-19 已對齊，SRVDM001 請見 [srv-et-dm-document-content.md](srv-et-dm-document-content.md)。
 
@@ -38,7 +38,7 @@ ET 與 DM 同屬單一 backend，跨模組呼叫**一律經 `app/services/__init
 | keyword | VARCHAR(100) | N | | 文件名稱關鍵字（模糊）|
 | funcCode | VARCHAR(10) | N | | （選用）依關聯作業項目過濾 |
 
-> **無分頁**：DM 端本服務不提供 page / page_size。ET02 教材下拉如需分頁 / 捲動載入，於 ET 前端就回傳結果處理。
+> **無分頁**：DM 端本服務不提供 page / page_size。ET05 教材下拉如需分頁 / 捲動載入，於 ET 前端就回傳結果處理。
 
 ---
 
@@ -63,7 +63,7 @@ ET 與 DM 同屬單一 backend，跨模組呼叫**一律經 `app/services/__init
 | items[].versionNo | VARCHAR(20) | 當前發布版本號（撰寫者自由文字，如 `v2.0`）|
 | items[].publishedDate | TIMESTAMP | 當前版本發布時間 |
 
-> **本服務不回傳** `file_type` / `file_size_bytes`。ET02 下拉如需顯示副檔名 / 檔案大小，須於教師選定後另呼叫 [SRVDM001](srv-et-dm-document-content.md) 逐筆取得（或省略該顯示欄位）。
+> **本服務不回傳** `file_type` / `file_size_bytes`。ET05 下拉如需顯示副檔名 / 檔案大小，須於教師選定後另呼叫 [SRVDM001](srv-et-dm-document-content.md) 逐筆取得（或省略該顯示欄位）。
 
 ---
 

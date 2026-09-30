@@ -256,7 +256,7 @@ erDiagram
 
 #### 維護層級（EDIT_SCOPE）
 
-| 值 | 管理者於 DP07 看到 | 可否編輯 |
+| 值 | 管理者於 DP03 看到 | 可否編輯 |
 |----|-------------------|---------|
 | `ADMIN` | 正常列出 | ✅ 可改值 / 名稱 / 說明 / 啟停 |
 | `READONLY` | 列出現值 + 「IT 設定」標記 | ❌ **整列**唯讀（四個欄位皆不可改）|
@@ -386,7 +386,7 @@ erDiagram
 > | `DM_FUNC_NAME` | `DM_FUNC` |
 > | `DM_AUDIENCE`、`DM_TAG_*` | `DM_TAG_GROUP` + `DM_TAG`（以 `GROUP_TYPE` 分 AUDIENCE / RETRIEVAL）|
 >
-> DM 六項於 2026-08-06（#127）改為自持表、ET 一項自始即為 `ET_TAG`；DP07 經 `module_assign_registry` 之受控主檔轉接層維護（見 [module-callbacks.md](contracts/module-callbacks.md) §3.1），DP 不自持這些清單。
+> DM 六項於 2026-08-06（#127）改為自持表、ET 一項自始即為 `ET_TAG`；DP03 經 `module_assign_registry` 之受控主檔轉接層維護（見 [module-callbacks.md](contracts/module-callbacks.md) §3.1），DP 不自持這些清單。
 
 > ⚠️ **`DP_PARAM` 不存排程執行時點**（FR-DP-US11-07，2026-09-17 由 #332 改訂）。`ET_WEEKLY_STAT_DAY_TIME`（#325）與 `DM_WEEKLY_SCHED_DAY_TIME`（#332）已移除——引擎只讀 `DP_SCHEDULE.CRON_EXPR`，留著會讓管理者改了沒效果且無錯誤訊息。`DM_REMIND_THRESHOLD` / `ET_URGENT_REMIND_DAYS` 是**業務門檻**不是時點，留著且有效。
 

@@ -1,9 +1,9 @@
 """ET 教材內容 API（US3 / #203）。
 
 router-level 掛 `get_et_context`（需任一 ET 角色），各端點另掛
-`require_et_roles(ET_TEACHER, ET_ADMIN)`——本 router 服務的是 ET02 教師編輯畫面。
+`require_et_roles(ET_TEACHER, ET_ADMIN)`——本 router 服務的是 ET05 教師編輯畫面。
 若只掛 `get_et_context`，等同任何登入者（人人皆有學員角色）都能讀到他人**草稿**
-課程的教材內容，違反 spec_us3 AC 8。學員端的教材閱讀屬 #5（ET05 章節學習），
+課程的教材內容，違反 spec_us3 AC 8。學員端的教材閱讀屬 #5（ET06 章節學習），
 有自己的可見性規則（課程已發布、已加入、章節已解鎖）。
 
 擁有權判定在 service（回溯至所屬課程），無法以 dependency 表達。

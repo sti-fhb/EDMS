@@ -153,7 +153,7 @@ export function ParamsPage() {
 
   return (
     <CrudPageLayout
-      code="DP07"
+      code="DP03"
       filterContent={
         !loading &&
         visibleTabs.length > 0 && (

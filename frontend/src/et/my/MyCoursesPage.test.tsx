@@ -19,7 +19,7 @@ function mockMyCourses(body: MyCoursesResult) {
   server.use(http.get("/api/et/my-courses", () => HttpResponse.json(body)))
 }
 
-describe("ET04 我的課程", () => {
+describe("ET03 我的課程", () => {
   it("統計卡顯示五項數字（AC 2 + #363）", async () => {
     renderWithProviders(<EtMyCoursesPage />)
 
@@ -49,7 +49,7 @@ describe("ET04 我的課程", () => {
   it("期間已過者即使 status 仍是 PUBLISHED 也顯示「已關閉」（#288）", async () => {
     // 卡片看後端算好的 `is_closed`，不自己判 `status === "CLOSED"`。到期自動轉 CLOSED
     // 屬 ET-16（未實作），所以「status=PUBLISHED 但 is_closed=true」是常態而非過渡狀態。
-    // 若前端改回判 status，這張卡會標成「已發布」，而學員點進去 ET05 是唯讀的——
+    // 若前端改回判 status，這張卡會標成「已發布」，而學員點進去 ET06 是唯讀的——
     // 兩個畫面在使用者眼前互相矛盾。
     mockMyCourses({
       summary: { joined: 1, in_progress: 0, not_started: 1, completed: 0, pending_open: 0 },
@@ -163,7 +163,7 @@ describe("ET04 我的課程", () => {
     await user.type(screen.getByLabelText(/邀請碼/), "12345678")
     await user.click(screen.getByRole("button", { name: "查詢" }))
 
-    // AC 10：#255 起 ET05 已存在，「已加入」改為**直接導向該課程**而非給訊息。
+    // AC 10：#255 起 ET06 已存在，「已加入」改為**直接導向該課程**而非給訊息。
     // （在此之前是兩則 message.info 互相覆蓋，實測時顯示成「章節學習頁尚未開放」。）
     await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses/1/learn"))
     expect(screen.queryByText("章節學習頁尚未開放")).not.toBeInTheDocument()
@@ -201,7 +201,7 @@ describe("ET04 我的課程", () => {
   })
 })
 
-describe("ET04 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
+describe("ET03 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
   it("網址帶 ?code= 時自動開啟加入視窗並預填該碼", async () => {
     mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     renderWithProviders(<EtMyCoursesPage />, undefined, ["/et/my-courses?code=83052617"])

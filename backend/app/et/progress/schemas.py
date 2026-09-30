@@ -1,4 +1,4 @@
-"""ET05 學習進度（US5 / #274）schema。"""
+"""ET06 學習進度（US5 / #274）schema。"""
 
 from pydantic import BaseModel, Field, model_validator
 

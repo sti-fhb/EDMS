@@ -1,4 +1,4 @@
-"""文件變更歷程查詢（US11 / UCDM10 / DM08）整合測試（真實 DB）。
+"""文件變更歷程查詢（US11 / UCDM10 / DM05）整合測試（真實 DB）。
 
 涵蓋：DM_ADMIN 查 DM_CHANGE_LOG 發布 / 廢止事件（欄位：時間 / 申請人 / 核准人 / 操作 / 文件 / 版本 / 備註）、
 日期區間 / 申請人or核准人（帳號或姓名）/ 操作類型過濾、CSV 匯出（BOM + 公式注入防護）、
@@ -330,4 +330,4 @@ async def test_writing_and_reading_actions_not_logged(db, client):
     cnt = await db.scalar(select(func.count()).select_from(DmChangeLog).where(DmChangeLog.doc_id == "DM-SOP-001110"))
     assert cnt == 0  # 送審/退回未寫 DM_CHANGE_LOG
     resp = await client.get("/api/dm/change-log/entries", headers=_headers("adm"))
-    assert all(e["doc_id"] != "DM-SOP-001110" for e in resp.json()["data"])  # DM08 清單不含該文件
+    assert all(e["doc_id"] != "DM-SOP-001110" for e in resp.json()["data"])  # DM05 清單不含該文件

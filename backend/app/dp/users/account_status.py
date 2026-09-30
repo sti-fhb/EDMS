@@ -56,7 +56,7 @@ def is_account_disabled(status: str) -> bool:
 
     ## 為何放在 DP
 
-    本模組 docstring 明訂「`STATUS` 值域屬 DP 語意，其他模組不得自行解讀」。ET02 課程
+    本模組 docstring 明訂「`STATUS` 值域屬 DP 語意，其他模組不得自行解讀」。ET05 課程
     清單需要判定擁有者是否停用（#330），若在 ET 那側寫 `status == "DISABLED"`，DP 日後
     新增第三種狀態時 ET 會靜默地把它算成「未停用」。
 

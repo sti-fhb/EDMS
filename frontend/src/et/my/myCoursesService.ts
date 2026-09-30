@@ -1,7 +1,7 @@
 import { http } from "../../services/http"
 import type { JoinPreview, JoinResult, MyCoursesResult } from "./myCoursesSchemas"
 
-/** ET04 我的課程與加入新課程 API（US4 / #247）。 */
+/** ET03 我的課程與加入新課程 API（US4 / #247）。 */
 export const myCoursesApi = {
   list: async (): Promise<MyCoursesResult> => {
     const { data } = await http.get<MyCoursesResult>("/et/my-courses")
