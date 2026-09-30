@@ -62,8 +62,17 @@ _TARGETS: tuple[tuple[str, str], ...] = (
 def _apply(from_scope: str, to_scope: str) -> None:
     """把 `_TARGETS` 各列由 from_scope 改為 to_scope（SQL 靜態、值具名綁定）。
 
-    以 `EDIT_SCOPE = :from_scope` 為條件而非無條件覆寫——若某列已被人為改成別的值，
-    本 migration 不該把它一併蓋掉；升降版皆同此原則。
+    帶 `EDIT_SCOPE = :from_scope` 條件而非無條件覆寫，擋的是**這 9 列之一已被人為改成
+    別的值**的情形：決策 2 指定變更途徑為「IT 直接操作 DB」，若 IT 把某列改成 `ADMIN`，
+    無條件覆寫會在升／降版時把那個決定默默蓋掉。有條件時該列原樣保留。
+
+    ⚠️ 這個條件**不負責**界定影響範圍——範圍由 `_TARGETS` 決定。`MAIL` / `ACTION_TYPE`
+    不會被碰到是因為它們不在 `_TARGETS` 裡，不是因為這個條件。
+    （2026-09-30 變異檢查發現原註解把兩者混為一談：移除條件後行為不變，說明先前
+    「降版不會誤翻 MAIL」的驗證並未驗到宣稱的那個機制。）
+
+    ⚠️ 依 `sti-alembic-rules` 不為 migration 寫一次性驗收測試，故本條件**沒有自動測試**
+    覆蓋——改動時請手動跑一次升／降版並比對分佈。
     """
     conn = op.get_bind()
     stmt = text(
@@ -81,8 +90,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     """還原為 READONLY。
 
-    ⚠️ 還原後這 9 項會重新出現於 DP07（顯示現值、無編輯入口）。降版只還原本 migration
-    改動的列——條件帶 `EDIT_SCOPE = 'HIDDEN'`，不會把 `MAIL` 三項（本來就 HIDDEN、
-    不在 `_TARGETS` 內）誤翻成 READONLY。
+    ⚠️ 還原後這 9 項會重新出現於 DP07（顯示現值、無編輯入口）。
+
+    範圍由 `_TARGETS` 界定，`MAIL` 三項與 `ACTION_TYPE` 五項本來就不在其中，降版不會碰到
+    ——**這與 `from_scope` 條件無關**，別把兩件事混為一談（那個條件擋的是下面那種情形）。
     """
     _apply(from_scope="HIDDEN", to_scope="READONLY")
