@@ -522,6 +522,35 @@ async def test_dm_admin_sees_readonly_param_but_cannot_edit(db, admin_gate):
     assert exc.value.error_code == "DP_PARAM_007"  # 層級擋下 → 改不動
 
 
+async def test_seeded_module_params_are_hidden_from_their_admins(db, admin_gate):
+    """模組管理者只看得到該模組唯一可調的那一項，其餘種子參數已隱藏（#459）。
+
+    這條補的是 `sti-alembic-rules` 要求的「migration 由對應 service / API 測試間接覆蓋」。
+    沒有它，回填若漏掉這 6 列**不會有任何測試變紅**——漏掉的列會停在 `READONLY`
+    （可見但不可編輯），而其餘測試驗的不是自建資料就是平台級參數，都碰不到它們。
+    （2026-09-30 security review 以變異實測：拿掉這 6 列後 593 條測試全綠。）
+
+    每個模組都留一個「該可見」的對照組，否則 `list_visible` 回空清單也會讓 `not in` 全數通過。
+    """
+    admin_gate(et_admins=("etadmin",), dm_admins=("dmadmin",))
+    svc = ParamAdminService()
+
+    dm_ids = {m.param_id for m in await svc.list_visible(db, "dmadmin")}
+    assert "DM_REMIND_THRESHOLD" in dm_ids  # 對照組：DM 唯一仍可維護的參數
+    assert "DM_FILE_MAX_MB" not in dm_ids
+    assert "DM_FILE_TYPES" not in dm_ids
+
+    et_ids = {m.param_id for m in await svc.list_visible(db, "etadmin")}
+    assert "ET_URGENT_REMIND_DAYS" in et_ids  # 對照組：ET 唯一仍可維護的參數
+    for param_id in (
+        "ET_VIDEO_ALLOWED_FORMATS",
+        "ET_VIDEO_MAX_SIZE_MB",
+        "ET_VIDEO_PLAYBACK_MAX_RATE",
+        "ET_INVITATION_CODE_LENGTH",
+    ):
+        assert param_id not in et_ids
+
+
 async def test_detail_lock_and_edit_scope_report_distinct_codes(db, admin_gate):
     """AC10：兩機制正交，各自回自己的碼——DETAIL_LOCK 管碼值、EDIT_SCOPE 管誰能改這一列。"""
     admin_gate()
