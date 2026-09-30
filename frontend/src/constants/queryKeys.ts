@@ -20,6 +20,9 @@ export const QUERY_KEYS = {
     list: () => ["schedule", "list"] as const,
     logs: (params: Record<string, unknown>) => ["schedule", "logs", params] as const,
   },
+  etDashboard: {
+    get: () => ["et", "dashboard"] as const,
+  },
   etCourses: {
     capabilities: () => ["et", "courses", "capabilities"] as const,
     list: (params: CourseListParams) => ["et", "courses", "list", params] as const,

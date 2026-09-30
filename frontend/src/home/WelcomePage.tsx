@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { authApi } from "../auth/authService"
 import { useAuth } from "../auth/useAuth"
 import { DmOverviewWidget } from "../dm/dashboard/DmOverviewWidget"
+import { EtOverviewWidget } from "../et/dashboard/EtOverviewWidget"
 import { PROFILE_ME_QUERY_KEY, profileApi } from "../dp/user/profileService"
 import { useModuleSummary } from "../layouts/useModuleSummary"
 
@@ -40,6 +41,13 @@ export function WelcomePage() {
           版本 {version}
         </Typography>
       )}
+      {/* #453 / #89 的 P3：教育訓練概況。
+          ⚠️ 這裡只把「有沒有 ET 角色」當成**要不要發查詢**的條件（無角色者端點回 403，
+          先打再被擋等於每位純 DM 使用者的首頁固定吃一個 403）。**渲染與否由 widget
+          內部依「有無資料」決定**——#89 明訂人人具 ET 學員預設角色，照角色顯示會讓
+          主管看到一張空的「我的課程」。⛔ 不要在這裡加 `&& <EtOverviewWidget/>` 的
+          角色判斷，那正是 #89 警告的寫法。*/}
+      <EtOverviewWidget enabled={Boolean(enabled && modules?.et.has_role)} />
       {/* US7 / #89：具任一 DM 角色者才疊加「DM 文件概況」；無 DM 角色者不顯示（最小知悉）*/}
       {enabled && modules?.dm.has_role && <DmOverviewWidget />}
     </Box>

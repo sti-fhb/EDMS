@@ -27,7 +27,7 @@ try/except——後者仍會讓兩件事共用同一個交易邊界。
 
 import logging
 from datetime import datetime
-from typing import Final, NamedTuple
+from typing import NamedTuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,12 +47,11 @@ from app.et.notify.service import EtNotifier
 from app.et.reports.links import weekly_report_link
 from app.et.schedules.repository import EtScheduleRepository
 from app.et.stats.repository import EtStatsRepository, OpenCourse
-from app.et.stats.rules import progress_delta, summarize
+from app.et.stats.rules import days_left, progress_delta, summarize
 from app.et.tracking.repository import EtTrackingRepository
 
 logger = logging.getLogger(__name__)
 
-_SECONDS_PER_DAY: Final = 86400
 
 
 class _CourseFacts(NamedTuple):
@@ -116,7 +115,7 @@ class EtWeeklyReportService:
                         course_name=course.course_name,
                         stat=stat,
                         delta=progress_delta(stat.avg_progress_pct, previous),
-                        days_left=_days_left(course.open_end_at, now),
+                        days_left=days_left(course.open_end_at, now),
                     ),
                     not_started_user_ids=not_started,
                 )
@@ -207,10 +206,3 @@ class EtWeeklyReportService:
         )
         return result.queued_count > 0
 
-
-def _days_left(open_end_at: datetime, now: datetime) -> int:
-    """距訖止天數（無條件捨去，最小 0）。
-
-    捨去而非四捨五入：剩 1.9 天顯示「1 天」比「2 天」保守，而這是一個催促用的數字。
-    """
-    return max(0, int((open_end_at - now).total_seconds() // _SECONDS_PER_DAY))
