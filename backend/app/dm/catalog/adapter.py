@@ -181,8 +181,11 @@ class CatalogAdapter:
         before = {"kind": kind, "enabled": obj.is_enabled}  # 同上：須在改值前取
         if kind == "TAG" and not enabled:
             group = await db.scalar(select(DmTagGroup).where(DmTagGroup.tag_group_code == obj.tag_group_code))
-            if group is not None and group.group_type == _AUDIENCE:
-                r = await self._catalog.soft_retire_audience_tag(db, tag_id=_tag_id(code), operator=operator_id)
+            # 可見對象之兩個維度（職位 AUDIENCE / 單位 UNIT）皆採 soft-retire 並回報受影響數（#437）
+            if group is not None and group.group_type in (_AUDIENCE, _UNIT):
+                r = await self._catalog.soft_retire_audience_tag(
+                    db, tag_id=_tag_id(code), operator=operator_id, is_unit=group.group_type == _UNIT
+                )
                 await self._log(
                     db, "UPDATE", operator_id, target=code, before=before, after={**after, "soft_retire": True}
                 )

@@ -72,10 +72,16 @@ class CatalogService:
         await db.flush()
         return cat
 
-    async def soft_retire_audience_tag(self, db: AsyncSession, *, tag_id: int, operator: str) -> SoftRetireResult:
-        """停用 AUDIENCE 可見對象（soft-retire）：is_enabled=False + 回傳受影響文件 / 閱覽者數。
+    async def soft_retire_audience_tag(
+        self, db: AsyncSession, *, tag_id: int, operator: str, is_unit: bool = False
+    ) -> SoftRetireResult:
+        """停用可見對象標籤（soft-retire）：is_enabled=False + 回傳受影響文件 / 閱覽者數。
 
         既有 DM_DOC_TAG / DM_USER_TAG 列保留（不收回可見性），僅擋後續指派。
+
+        `is_unit` 決定計數比對哪一欄（#437）：可見對象為 (單位, 職位) 配對，職位存 `TAG_ID`、
+        單位存 `UNIT_TAG_ID`。停用單位若仍以 `TAG_ID` 比對，兩個計數恆為 0——管理者會看到
+        「不影響任何文件」而停掉一個實際上綁著大量文件的單位，且不會有任何錯誤。
 
         兩個計數皆須濾 `DELETED = 0`：標籤關聯採**軟刪除復用**（移除＝`deleted=1` 不刪列，
         以避開唯一約束），不濾會把已移除的文件關聯與已撤銷的閱覽者授權算進去。本數字自 #182
@@ -83,19 +89,26 @@ class CatalogService:
 
         ⚠️ **已知限制**：在途草稿的 `DM_VERSION_TAG` 快照未計入，故本數字為**下限**
         （DP 端據此標示「至少 N 份」）。該低估待 #388 處理。
+
+        Args:
+            tag_id: 要停用之標籤。
+            operator: 操作者（寫入稽核欄位）。
+            is_unit: True 時依 `UNIT_TAG_ID` 計數（單位組），否則依 `TAG_ID`（職位組）。
         """
         tag = await db.scalar(select(DmTag).where(DmTag.tag_id == tag_id))
         if tag is None:
             raise AppError(status_code=404, detail="查無此可見對象", error_code="DM_CATALOG_002")
+        doc_col = DmDocTag.unit_tag_id if is_unit else DmDocTag.tag_id
+        user_col = DmUserTag.unit_tag_id if is_unit else DmUserTag.tag_id
         affected_docs = (
             await db.scalar(
-                select(func.count()).select_from(DmDocTag).where(DmDocTag.tag_id == tag_id, DmDocTag.deleted == 0)
+                select(func.count()).select_from(DmDocTag).where(doc_col == tag_id, DmDocTag.deleted == 0)
             )
             or 0
         )
         affected_viewers = (
             await db.scalar(
-                select(func.count()).select_from(DmUserTag).where(DmUserTag.tag_id == tag_id, DmUserTag.deleted == 0)
+                select(func.count()).select_from(DmUserTag).where(user_col == tag_id, DmUserTag.deleted == 0)
             )
             or 0
         )
