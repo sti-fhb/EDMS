@@ -1,4 +1,3 @@
-import JournalIcon from "@mui/icons-material/Article"
 import ClearIcon from "@mui/icons-material/FilterAltOff"
 import DownloadIcon from "@mui/icons-material/Download"
 import VisibilityIcon from "@mui/icons-material/Visibility"
@@ -104,8 +103,7 @@ export function AuditPage() {
   return (
     <>
       <CrudPageLayout
-        icon={<JournalIcon color="primary" />}
-        title="操作記錄（稽核）"
+        code="DP09"
         filterContent={
           <Stack
             direction={{ xs: "column", md: "row" }}

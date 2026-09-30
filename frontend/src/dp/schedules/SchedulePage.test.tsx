@@ -115,6 +115,44 @@ describe("SchedulePage 排程作業總覽（可編輯）", () => {
     expect(await screen.findByText("排程已更新")).toBeInTheDocument()
   })
 
+  it("編輯卡片可改說明：帶出原說明、送出新值；清空則送 null", async () => {
+    const bodies: Record<string, unknown>[] = []
+    server.use(
+      http.put("/api/dp/schedules/SCHDP001", async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        bodies.push(body)
+        return HttpResponse.json({ job_id: "SCHDP001", module: "DP", last_run_date: null, last_run_status: null, next_run_date: null, ...body })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<SchedulePage />)
+    await screen.findByText(/SCHDP001/)
+
+    const save = async () => {
+      await user.click(screen.getByRole("button", { name: "儲存" }))
+      const confirmDialog = await screen.findByRole("dialog", { name: "儲存排程變更" })
+      await user.click(within(confirmDialog).getByRole("button", { name: "確定儲存" }))
+      await waitFor(() => expect(bodies.length).toBeGreaterThan(0))
+      // 等確認對話框關完：關閉動畫期間背景仍 aria-hidden，下一輪查不到「編輯」鈕
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    }
+
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    const desc = await screen.findByLabelText<HTMLTextAreaElement>("說明")
+    expect(desc.value).toMatch(/停用連續閒置超過/)
+
+    await user.clear(desc)
+    await user.type(desc, "新的說明")
+    await save()
+    expect(bodies[0]).toMatchObject({ description: "新的說明" })
+
+    bodies.length = 0
+    await user.click(screen.getAllByRole("button", { name: "編輯" })[0])
+    await user.clear(await screen.findByLabelText("說明"))
+    await save()
+    expect(bodies[0]).toMatchObject({ description: null })
+  })
+
   it("排程按儲存 → 先跳二次確認；取消則不送出、卡片保留", async () => {
     const user = userEvent.setup()
     renderWithProviders(<SchedulePage />)

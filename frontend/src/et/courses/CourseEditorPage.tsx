@@ -65,6 +65,7 @@ import {
   type CoursePayload,
 } from "./schemas"
 import { ownerLabel } from "./schemas"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -1033,13 +1034,16 @@ export function EtCourseEditorPage() {
     const { status, errorMessage } = toApiError(courseError)
     const forbidden = status === 403
     return (
-      <Box sx={{ p: 3 }}>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-          <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h5">課程編輯</Typography>
-        </Stack>
+      <Box>
+        <ScreenHeader
+          code="ET02"
+          title="課程編輯"
+          leading={
+            <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
+              <ArrowBackIcon />
+            </IconButton>
+          }
+        />
         <Alert severity={forbidden ? "warning" : "error"}>
           {forbidden ? "您沒有檢視此課程的權限。課程編輯僅開放教師與管理者。" : errorMessage}
         </Alert>
@@ -1049,55 +1053,52 @@ export function EtCourseEditorPage() {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h5">{courseId === undefined ? "新增課程" : "課程編輯"}</Typography>
-        <Chip size="small" label={COURSE_STATUS_LABEL[status] ?? status} />
-        {/*
-          「邀請學員」僅**已發布**課程顯示（AC 1）——草稿尚無邀請碼、學員端也看不到課程；
-          已關閉課程的學習頁為唯讀，把人邀請進去只會讓他點開後什麼都不能做。再開課後
-          `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。
-          非擁有者（檢視模式）一律不顯示。
-        */}
-        {status === "PUBLISHED" && !readOnly && course !== undefined && (
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<PersonAddIcon />}
-            sx={{ ml: "auto" }}
-            onClick={() => setInviteOpen(true)}
-          >
-            邀請學員
-          </Button>
-        )}
-        {/*
-          關閉 / 再開課（US11 AC 1 / AC 8、#288）。兩者互斥且各只在對應狀態出現——
-          草稿沒有學員也沒有邀請碼，關閉它沒有語意（要移除草稿走既有的刪除）。
-
-          `ml: "auto"` 只掛在該列的**第一顆**按鈕上：已發布時第一顆是「邀請學員」，
-          已關閉時第一顆是「再開課」。兩顆都掛會讓它們被推到兩端、中間空一大段。
-        */}
-        {status === "PUBLISHED" && !readOnly && course !== undefined && (
-          <Button variant="outlined" size="small" color="warning" startIcon={<LockIcon />} onClick={requestClose}>
-            關閉課程
-          </Button>
-        )}
-        {status === "CLOSED" && !readOnly && course !== undefined && (
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<LockOpenIcon />}
-            sx={{ ml: "auto" }}
-            disabled={reopening}
-            onClick={enterReopen}
-          >
-            再開課
-          </Button>
-        )}
-      </Stack>
+    <Box>
+      <ScreenHeader
+        code="ET02"
+        title={courseId === undefined ? "新增課程" : "課程編輯"}
+        leading={
+          <IconButton size="small" aria-label="返回課程列表" onClick={() => navigate("/et/courses")}>
+            <ArrowBackIcon />
+          </IconButton>
+        }
+        adornment={<Chip size="small" label={COURSE_STATUS_LABEL[status] ?? status} />}
+        actions={
+          <Stack direction="row" spacing={1}>
+            {/*
+              「邀請學員」僅**已發布**課程顯示（AC 1）——草稿尚無邀請碼、學員端也看不到課程；
+              已關閉課程的學習頁為唯讀，把人邀請進去只會讓他點開後什麼都不能做。再開課後
+              `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。
+              非擁有者（檢視模式）一律不顯示。
+            */}
+            {status === "PUBLISHED" && !readOnly && course !== undefined && (
+              <Button variant="contained" size="small" startIcon={<PersonAddIcon />} onClick={() => setInviteOpen(true)}>
+                邀請學員
+              </Button>
+            )}
+            {/*
+              關閉 / 再開課（US11 AC 1 / AC 8、#288）。兩者互斥且各只在對應狀態出現——
+              草稿沒有學員也沒有邀請碼，關閉它沒有語意（要移除草稿走既有的刪除）。
+            */}
+            {status === "PUBLISHED" && !readOnly && course !== undefined && (
+              <Button variant="outlined" size="small" color="warning" startIcon={<LockIcon />} onClick={requestClose}>
+                關閉課程
+              </Button>
+            )}
+            {status === "CLOSED" && !readOnly && course !== undefined && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<LockOpenIcon />}
+                disabled={reopening}
+                onClick={enterReopen}
+              >
+                再開課
+              </Button>
+            )}
+          </Stack>
+        }
+      />
 
       {course !== undefined && (
         <InviteStudentsDialog

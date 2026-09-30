@@ -32,6 +32,7 @@ import type { ReviewDetail, VersionMeta } from "./schemas"
 import { downloadObsoleteFile, downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
 import { Pagination } from "../../components/Pagination"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError, toBlobApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
@@ -332,10 +333,8 @@ export function DmReviewPage() {
   const completedRows = completed?.data ?? []
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        簽核中心
-      </Typography>
+    <Box>
+      <ScreenHeader code="DM04" />
 
       <Tabs
         value={tab}

@@ -1056,10 +1056,16 @@ export const handlers = [
     ]),
   ),
   http.put("/api/dp/schedules/:jobId", async ({ params, request }) => {
-    const body = (await request.json()) as { job_name: string; cron_expr: string; is_enabled: boolean }
+    const body = (await request.json()) as {
+      job_name: string
+      description: string | null
+      cron_expr: string
+      is_enabled: boolean
+    }
     return HttpResponse.json({
       job_id: params.jobId,
       job_name: body.job_name,
+      description: body.description,
       module: "DP",
       cron_expr: body.cron_expr,
       is_enabled: body.is_enabled,

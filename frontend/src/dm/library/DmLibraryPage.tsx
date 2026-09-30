@@ -20,6 +20,7 @@ import { DM_CATEGORIES, EMPTY_LIBRARY_FILTERS, MANUAL_CATEGORY } from "./schemas
 import type { ControlledOption, LibraryFilters } from "./schemas"
 import { useFuncOptions, useLibraryCapabilities, useLibrarySearch, useRetrievalTags } from "./useLibrary"
 import { Pagination } from "../../components/Pagination"
+import { ScreenHeader } from "../../components/ScreenHeader"
 
 const PAGE_SIZE = 20
 // 檢索標籤組代碼 → 分組標題（Autocomplete groupBy）
@@ -66,10 +67,8 @@ export function DmLibraryPage() {
   const rows = data?.data ?? []
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        文件庫
-      </Typography>
+    <Box>
+      <ScreenHeader code="DM01" />
 
       {/* 搜尋列（即時篩選，無搜尋按鈕）*/}
       <Paper sx={{ p: 2, mb: 2 }}>

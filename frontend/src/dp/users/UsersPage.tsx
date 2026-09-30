@@ -1,4 +1,3 @@
-import PeopleIcon from "@mui/icons-material/People"
 import Badge from "@mui/material/Badge"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
@@ -165,8 +164,7 @@ export function UsersPage() {
     // 待啟用邀請頁籤
     return (
       <CrudPageLayout
-        icon={<PeopleIcon color="primary" />}
-        title="使用者管理"
+        code="DP05"
         actions={<CrudActions onRefresh={refreshInvites} onAdd={accounts.openCreate} addLabel="建立帳號" />}
         filterContent={
           <>
@@ -211,8 +209,7 @@ export function UsersPage() {
   // 帳號頁籤
   return (
     <CrudPageLayout
-      icon={<PeopleIcon color="primary" />}
-      title="使用者管理"
+      code="DP05"
       actions={<CrudActions onRefresh={refreshAccounts} onAdd={accounts.openCreate} addLabel="建立帳號" />}
       filterContent={
         <>

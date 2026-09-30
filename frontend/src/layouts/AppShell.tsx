@@ -7,7 +7,8 @@ import { Outlet } from "react-router-dom"
 import { AppHeader } from "../components/AppHeader"
 import { Sidebar } from "../components/Sidebar"
 
-const DRAWER_WIDTH = 220
+// 對齊 TBMS SIDEBAR_WIDTH；220 時最長的「DP07 系統參數與清單維護」塞不下一行
+const DRAWER_WIDTH = 260
 
 /**
  * 統一 App Shell（#89 導覽重構）：全域頂列 + 常駐側欄 + 主內容。

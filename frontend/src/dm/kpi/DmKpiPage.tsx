@@ -21,10 +21,10 @@ import { useKpiSearch } from "./useKpi"
 import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { DM_CATEGORIES } from "../library/schemas"
 import { Pagination } from "../../components/Pagination"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 
 const PAGE_SIZE = 20
-const TITLE = "閱讀統計 KPI"
 
 /** 閱讀率顯示（0~1 → 百分比字串；null＝應看=0）。 */
 function ratePct(rate: number | null): string {
@@ -76,10 +76,8 @@ export function DmKpiPage() {
   // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染查詢 UI（DM-MSG-DM10-002）
   if (denied) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          {TITLE}
-        </Typography>
+      <Box>
+        <ScreenHeader code="DM10" />
         <Alert severity="error">您無權限存取此頁面</Alert>
       </Box>
     )
@@ -88,10 +86,8 @@ export function DmKpiPage() {
   // 權限確認中：僅顯示標題 + spinner，不先閃查詢 UI
   if (accessPending) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          {TITLE}
-        </Typography>
+      <Box>
+        <ScreenHeader code="DM10" />
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
           <CircularProgress size={28} />
         </Box>
@@ -100,10 +96,8 @@ export function DmKpiPage() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        {TITLE}
-      </Typography>
+    <Box>
+      <ScreenHeader code="DM10" />
 
       {/* 統計卡 */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2, mb: 2 }}>

@@ -16,12 +16,11 @@ paths:
 
 ### `CrudPageLayout` · `src/components/CrudPageLayout.tsx`
 CRUD 列表頁骨架（標題列 + 篩選 / 操作 + 表格 + 分頁 + 表單 slot）。**禁止手動拼裝 `<Box>` + `<Paper>`。**
-目前僅 **props 版 API**（無 compound 子元件、無 `editMode` prop、無 `usePageTitle`；`title` 傳純字串直接顯示）。
+目前僅 **props 版 API**（無 compound 子元件、無 `editMode` prop、無 `usePageTitle`）。標題列由 `ScreenHeader` 渲染，傳 `code` 而非 icon / title。
 
 ```tsx
 <CrudPageLayout
-  icon={<Settings />}
-  title="頁面標題"
+  code="DP05"                  // 畫面代號：標題列 icon + 名稱取自 navItems，與側欄同源
   filterContent={...}          // 篩選列（TextField / Tabs 等）
   actions={<CrudActions .../>} // 右上操作區
   table={<AppTable columns={columns} data={items} rowKey="id" loading={isPending} />}
@@ -194,7 +193,19 @@ localStorage.setItem("last_category", id)        // ❌ 無前綴
 ---
 
 ### `Sidebar` · `src/components/Sidebar.tsx`
-統一 shell 左側導覽，於 `src/layouts/AppShell.tsx` 使用。導覽項目來自 **`src/layouts/navItems.ts` 的 `NAV_GROUPS`**（模組群組可收合），非 API 選單樹、無 icon 映射檔。新增後台功能項在 `navItems.ts` 的對應群組補上即可。
+統一 shell 左側導覽，於 `src/layouts/AppShell.tsx` 使用。導覽項目來自 **`src/layouts/navItems.ts` 的 `NAV_GROUPS`**（模組群組可收合），非 API 選單樹。每項帶 `icon`（各功能不得重複，`Sidebar.test` 守門）。新增功能項在 `navItems.ts` 的對應群組補上即可；無側欄入口的子頁補在 `SUBPAGE_SCREENS`。
+
+---
+
+### `ScreenHeader` · `src/components/ScreenHeader.tsx`
+所有功能頁左上標題一律使用（對齊 TBMS）：icon + 功能名稱（粗體 1.3rem）＋綠色 2px 底線。**禁止各頁自拼 `Typography variant="h5"` 當標題。**
+icon 與名稱依畫面代號取自 `navItems`（`getScreen`），與側欄必然一致；代號未定義直接拋錯。頁面外層不要再包 `p: 3`（`AppShell` 的 main 已有）。
+
+```tsx
+<ScreenHeader code="DM01" />
+<ScreenHeader code="ET03" actions={<TextField select ... />} />          // 靠右元素
+<ScreenHeader code="ET02" title="課程編輯" leading={<BackButton />} adornment={<Chip ... />} />
+```
 
 ---
 
@@ -244,7 +255,7 @@ export const XxxListPage = () => {
 
   return (
     <CrudPageLayout
-      icon={<Settings />} title="XXX 管理"
+      code="DP05"
       actions={<CrudActions onRefresh={refresh} onAdd={openCreate} />}
       table={<AppTable columns={columns} data={items} rowKey="id" loading={loading} />}
       pagination={<Pagination page={page} total={total} onPageChange={setPage} />}

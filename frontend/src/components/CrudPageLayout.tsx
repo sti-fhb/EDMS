@@ -1,12 +1,12 @@
 import Box from "@mui/material/Box"
 import Paper from "@mui/material/Paper"
-import Stack from "@mui/material/Stack"
-import Typography from "@mui/material/Typography"
 import type { ReactNode } from "react"
 
+import { ScreenHeader } from "./ScreenHeader"
+
 interface CrudPageLayoutProps {
-  icon?: ReactNode
-  title: string
+  /** 畫面代號（如 `DP05`）：標題列 icon 與名稱取自 `navItems`，與側欄同源。 */
+  code: string
   /** 篩選列內容（搜尋欄、下拉等）。 */
   filterContent?: ReactNode
   /** 右上操作區（通常放 <CrudActions />）。 */
@@ -25,18 +25,11 @@ interface CrudPageLayoutProps {
  *
  * 目前提供 props 版 API（涵蓋標準用法）；compound 子元件（Header/Filter…）待有客製需求時再擴充。
  */
-export function CrudPageLayout({ icon, title, filterContent, actions, table, pagination, form }: CrudPageLayoutProps) {
+export function CrudPageLayout({ code, filterContent, actions, table, pagination, form }: CrudPageLayoutProps) {
+  // 不另加 padding：AppShell 的 main 已有 p: 3，再包一層會讓標題比其他模組頁面低一截
   return (
-    <Box sx={{ p: 3 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          {icon}
-          <Typography variant="h5" component="h1">
-            {title}
-          </Typography>
-        </Stack>
-        {actions}
-      </Stack>
+    <Box>
+      <ScreenHeader code={code} actions={actions} />
 
       {filterContent && (
         <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
