@@ -505,7 +505,9 @@ async def test_dm_admin_sees_readonly_param_but_cannot_edit(db, admin_gate):
     """
     admin_gate(dm_admins=("dmadmin",))
     svc = ParamAdminService()
-    await _make_master(db, "DM_ZT_RO", name="DM 唯讀測試參數", details=[("VALUE", "abc", 1, True)], edit_scope="READONLY")
+    await _make_master(
+        db, "DM_ZT_RO", name="DM 唯讀測試參數", details=[("VALUE", "abc", 1, True)], edit_scope="READONLY"
+    )
 
     result = await svc.list_visible(db, "dmadmin")
     dm = next(m for m in result if m.param_id == "DM_ZT_RO")

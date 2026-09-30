@@ -703,7 +703,7 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 | `ET_INVITATION_CODE_LENGTH` | `8` | `HIDDEN` | 邀請碼長度（純數字）。`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)` 硬編，填 9 以上要到課程發布當下才拋錯 |
 | `ET_URGENT_REMIND_DAYS` | `3` | `ADMIN` | SCHET002 截止前加急提醒天數（訖止前 N 天）。純業務門檻，由 ET 管理者自行調整 |
 
-> **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171 建立、#459 調整）：上列四項為 `HIDDEN`——**不出現於 DP07**，ET 管理者在系統內查不到現值，變更途徑為 IT 直接操作資料庫。`ET_URGENT_REMIND_DAYS` 為 `ADMIN`，是 ET 唯一可於 DP07 維護的參數。
+> **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171 建立、#459 調整）：上列四項為 `HIDDEN`——**不出現於 DP07**，ET 管理者在系統內查不到現值，變更由 IT 於資料庫端進行且 **MUST 經 migration**（見 [dp/spec_us5.md](../dp/spec_us5.md) FR-DP-US5-11）。`ET_URGENT_REMIND_DAYS` 為 `ADMIN`，是 ET 唯一可於 DP07 維護的參數。
 >
 > ⚠️ 隱藏**只作用於維護面**：`material/service.py` 等執行期讀取完全不受影響，格式與大小上限照常生效。
 >

@@ -264,7 +264,7 @@ erDiagram
 
 - 欄位置於**明細**而非主檔：同一群組內會混層級（`LOGIN` 底下 `FAIL_LOCK_COUNT` 為 `ADMIN`、`VERIFY_SEND_COOLDOWN_SEC` 為 `HIDDEN`——該主檔 6 列中 5 列可見）。
 - 與 `DP_PARAM_M.DETAIL_LOCK` **正交**：後者鎖的是明細碼值（`PARAM_KEY`）建立後不可改，本欄管的是誰能改這一列的內容。兩者各自回自己的錯誤碼（`DP_PARAM_002` / `DP_PARAM_007`）。
-- `READONLY` / `HIDDEN` 之值由 IT 直接操作 DB 變更（見 `spec_us5` FR-DP-US5-11），系統不提供介面。
+- `READONLY` / `HIDDEN` 之值由 IT 於資料庫端變更，系統不提供介面；**變更 MUST 經 migration、不得手動 `UPDATE`**（見 `spec_us5` FR-DP-US5-11 及其〈IT 變更這些參數 MUST 經 migration〉）。
 - 本欄**只作用於維護面**；跨模組唯讀查詢（SRVDP001）不受影響——否則 `HIDDEN` 參數會讀不到而使呼叫端 fallback 到程式碼預設值。
 - 種子分佈（30 列，2026-09-30 #459 後）：**`ADMIN` 13 / `READONLY` 0 / `HIDDEN` 17**。
   `READONLY` 原有 9 項，#459 全部改為 `HIDDEN`；該層級保留供日後使用，目前無成員（理由與代價見 `spec_us5`〈現行分佈〉）。
