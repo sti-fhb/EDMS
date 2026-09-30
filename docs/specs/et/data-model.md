@@ -697,13 +697,19 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 
 | PARAM_ID | PARAM_VALUE | 維護層級 | 說明 |
 |-----------|-------------|---------|------|
-| `ET_VIDEO_ALLOWED_FORMATS` | `mp4,webm` | `READONLY` | 教材影片允許之上傳格式。受瀏覽器 HTML5 `<video>` 支援限制——填 `.mov` 會靜默故障（傳得上去、播不出來），此即 #170 之案例 |
-| `ET_VIDEO_MAX_SIZE_MB` | `500` | `READONLY` | 教材影片單檔大小上限。受主機儲存空間與上傳逾時限制 |
-| `ET_VIDEO_PLAYBACK_MAX_RATE` | `2` | `READONLY` | 影片播放倍速上限（播放器提供 0.75 / 1 / 1.25 / 1.5 / 2）；**只能往下限縮、不能往上新增選項**——選項清單為前端寫死（2026-08-19 #181）|
-| `ET_INVITATION_CODE_LENGTH` | `8` | `READONLY` | 邀請碼長度（純數字）。`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)` 硬編，填 9 以上要到課程發布當下才拋錯 |
+| `ET_VIDEO_ALLOWED_FORMATS` | `mp4,webm` | `HIDDEN` | 教材影片允許之上傳格式。受瀏覽器 HTML5 `<video>` 支援限制——填 `.mov` 會靜默故障（傳得上去、播不出來），此即 #170 之案例 |
+| `ET_VIDEO_MAX_SIZE_MB` | `500` | `HIDDEN` | 教材影片單檔大小上限。受主機儲存空間與上傳逾時限制 |
+| `ET_VIDEO_PLAYBACK_MAX_RATE` | `2` | `HIDDEN` | 影片播放倍速上限（播放器提供 0.75 / 1 / 1.25 / 1.5 / 2）；**只能往下限縮、不能往上新增選項**——選項清單為前端寫死（2026-08-19 #181）|
+| `ET_INVITATION_CODE_LENGTH` | `8` | `HIDDEN` | 邀請碼長度（純數字）。`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)` 硬編，填 9 以上要到課程發布當下才拋錯 |
 | `ET_URGENT_REMIND_DAYS` | `3` | `ADMIN` | SCHET002 截止前加急提醒天數（訖止前 N 天）。純業務門檻，由 ET 管理者自行調整 |
 
-> **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171）：`READONLY` 者 ET 管理者於 DP07 **看得到現值**（以回答教師「能傳什麼格式、上限多少」）但**不可修改**，變更途徑為 IT 直接操作資料庫。定義見 [dp/spec_us5.md](../dp/spec_us5.md) FR-DP-US5-11。
+> **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171 建立、#459 調整）：上列四項為 `HIDDEN`——**不出現於 DP07**，ET 管理者在系統內查不到現值，變更途徑為 IT 直接操作資料庫。`ET_URGENT_REMIND_DAYS` 為 `ADMIN`，是 ET 唯一可於 DP07 維護的參數。
+>
+> ⚠️ 隱藏**只作用於維護面**：`material/service.py` 等執行期讀取完全不受影響，格式與大小上限照常生效。
+>
+> ⚠️ 教材上傳畫面的文案與 `accept` 目前寫死、不跟參數走（#455）。這四項隱藏後，那行文案成為系統內唯一顯示上限的地方。
+>
+> 定義見 [dp/spec_us5.md](../dp/spec_us5.md) FR-DP-US5-11。
 
 > **密碼重設 / Email 變更驗證連結有效時間**改為**平台級 `DP_` 參數**（認證 TTL 由平台 DP 提供，見 [spec_us2.md](spec_us2.md)、[spec_us10.md](spec_us10.md)），不再掛 ET 參數。
 > 通知範本改存 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）；原 `EMAIL_NOTIFY_*` 參數廢除。

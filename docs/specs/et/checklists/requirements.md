@@ -55,7 +55,7 @@
 - **2026-08-19 第二輪補正（#181，比對規格與已上線程式碼）**：
   - ~~**標籤歸屬 spec 與 data-model 自相矛盾**~~ ✅ **已修**：`spec.md` 原寫「受訓單位標籤庫清單存平台 `DP_PARAM`」，與 `data-model.md` 之 `ET_TAG` 自持表互斥。經三項佐證確認自持表為正（DP #171 附帶發現、DP `roles/service.py` `group_options()` 模組無關且不讀 `DP_PARAM`、DM 2026-08-06 #127 先例），已修 `spec.md` §跨模組共用規則與 `spec_us1.md`。DP 側文件對齊見 #182。
   - ~~**DM 契約依賴陳述 stale**~~ ✅ **已修**：兩份契約原引用「DM #169 仍為 OPEN」，該 issue 已於 2026-08-19 07:07 關閉且屬 DM US5（非本服務所屬之 US12）。改指 **#183**（DM US12），並註明其前置為 #178。
-  - ~~**倍速參數語意誤導**~~ ✅ **已修**：`ET_VIDEO_PLAYBACK_MAX_RATE` 原讀起來像可自由調整，實際上前端選項清單寫死、只能往下限縮（此即 DP #171 判其為 `READONLY` 之理由）。已於 `data-model.md` / `plan.md` / `spec_us5.md` / `research.md` 補註。
+  - ~~**倍速參數語意誤導**~~ ✅ **已修**：`ET_VIDEO_PLAYBACK_MAX_RATE` 原讀起來像可自由調整，實際上前端選項清單寫死、只能往下限縮（此即 DP #171 判其為不可編輯之理由；#459 起改為 `HIDDEN`）。已於 `data-model.md` / `plan.md` / `spec_us5.md` / `research.md` 補註。
   - ~~**缺 ET → DP 回呼契約**~~ ✅ **已補**：新增 `contracts/srv-et-dp-module-callbacks.md`，回填 **SRVET001 ~ SRVET006** 編碼、定案 ET 端簽章與 `ET_TAG` 受控主檔語意、「全體」保護落點；並於 `docs/ref/error-codes.md` §ET 登記 5 個 error code（`ET_AUTH_001` / `ET_ROLE_001~003` / `ET_TAG_001`）。
 
 - **2026-08-20 開工前裁決**：
