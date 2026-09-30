@@ -8,18 +8,20 @@
 `CompileError: Unconsumed column names`，查詢加 `deleted == 0` 則是 `AttributeError`。
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.constants import COURSE_PUBLISHED
-from app.et.course.models import EtCourse
+from app.et.catalog.models import EtTag, EtUserTag
+from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.course.models import EtChapter, EtCourse, EtItem
+from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.stats.models import EtWeeklyStat
 from app.et.stats.rules import CourseStat
 
@@ -85,6 +87,185 @@ class EtStatsRepository:
             .order_by(EtCourse.course_id)
         )
         return [OpenCourse(*row) for row in rows.all()]
+
+    # ── 首頁儀表板（#453 / #89 的 P3）────────────────────────────────────────
+
+    async def courses_ending_soon(
+        self, db: AsyncSession, *, owner_id: str, now: datetime, urgent_days: int
+    ) -> list[OpenCourse]:
+        """**該教師自己**開放中且即將截止的課程，訖止近者在前。
+
+        母體與 `open_courses` 相同（已發布、`now` 落在起訖之間、兩個時間皆非 `NULL`），
+        多兩個條件：
+
+        - `OWNER_ID == owner_id`——教師卡只呈現他自己的課。非擁有者的課出現在這裡等於
+          把別人班級的落後狀況攤給他看，而他對那門課什麼都做不了。
+        - 訖止落在 `now + urgent_days` 之內。
+
+        ⚠️ **`urgent_days` 由呼叫端傳入且必須是 `ET_URGENT_REMIND_DAYS`**（`DP_PARAM`），
+        不可在此寫死：首頁與加急提醒信若用不同門檻，會出現「首頁說要注意了、信還沒寄」
+        或反過來，而兩者都宣稱依據同一條規則。
+        """
+        deadline = now + timedelta(days=urgent_days)
+        rows = await db.execute(
+            select(EtCourse.course_id, EtCourse.course_name, EtCourse.owner_id, EtCourse.open_end_at)
+            .where(
+                EtCourse.owner_id == owner_id,
+                EtCourse.status == COURSE_PUBLISHED,
+                EtCourse.open_start_at.is_not(None),
+                EtCourse.open_start_at <= now,
+                EtCourse.open_end_at.is_not(None),
+                EtCourse.open_end_at >= now,
+                EtCourse.open_end_at <= deadline,
+                EtCourse.deleted == 0,
+            )
+            .order_by(EtCourse.open_end_at)
+        )
+        return [OpenCourse(*row) for row in rows.all()]
+
+    async def draft_count(self, db: AsyncSession, owner_id: str) -> int:
+        """該教師建立但**尚未發布**的課程數（學員完全看不到它們）。
+
+        不含已關閉：那些發布過、學員看得到過，不屬於「卡在我這」。
+        """
+        return (
+            await db.scalar(
+                select(func.count())
+                .select_from(EtCourse)
+                .where(
+                    EtCourse.owner_id == owner_id,
+                    EtCourse.status == COURSE_DRAFT,
+                    EtCourse.deleted == 0,
+                )
+            )
+        ) or 0
+
+    def _completion_base(self, now: datetime):
+        """全站「每一筆在籍 × 是否完課」的基底查詢（管理者卡專用）。
+
+        ## 🔴 完課**必須即時推導**，不可讀 `ET_ENROLLMENT.COMPLETION_STATUS`
+
+        那一欄只在建立選課列時寫一次 `NOT_STARTED`，**全專案沒有任何 update 寫它**
+        （`enrollment/service` 自己的註解也載明「由 counts 即時導出，不讀
+        `enrollment.completion_status`」）。拿它彙總會讓完成率**恆為 0%**，而畫面上
+        完全看不出異常——欄位存在、型別正確、數字合理。
+
+        故完課 = 該課未刪項目數 `total > 0` 且該學員已完成項目數 `done >= total`，
+        與 `progress.completion_counts_by_course` / `enrollment.rules.is_course_completed`
+        同一個定義。
+
+        ## ⚠️ 三個 join 全是「多對一」，不會灌大計數
+
+        `enrollment → course`、`→ 項目總數`、`→ 已完成數` 對一筆在籍而言各自至多一列
+        （後兩者已先 `GROUP BY` 收斂）。**這裡刻意不 join 任何一對多**——依單位分組時
+        才會出現唯一的一個（見 `unit_rates`），兩個放在同一個 `GROUP BY` 就是笛卡兒積，
+        算出偏大但看起來合理的數字。
+
+        母體排除草稿：學員根本看不到，計入會讓完成率被永遠學不了的課稀釋。
+        """
+        totals = (
+            select(EtChapter.course_id.label("course_id"), func.count(EtItem.item_id).label("total"))
+            .select_from(EtItem)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(EtItem.deleted == 0, EtChapter.deleted == 0)
+            .group_by(EtChapter.course_id)
+            .subquery()
+        )
+        dones = (
+            select(
+                EtProgress.course_id.label("course_id"),
+                EtProgress.user_id.label("user_id"),
+                func.count().label("done"),
+            )
+            .where(EtProgress.is_completed.is_(True), EtProgress.deleted == 0)
+            .group_by(EtProgress.course_id, EtProgress.user_id)
+            .subquery()
+        )
+        done_col = func.coalesce(dones.c.done, 0)
+        return (
+            select(
+                EtEnrollment.user_id.label("user_id"),
+                EtCourse.open_end_at.label("open_end_at"),
+                case((and_(totals.c.total > 0, done_col >= totals.c.total), 1), else_=0).label("is_completed"),
+            )
+            .select_from(EtEnrollment)
+            .join(EtCourse, EtCourse.course_id == EtEnrollment.course_id)
+            .join(totals, totals.c.course_id == EtEnrollment.course_id)
+            .outerjoin(
+                dones,
+                and_(dones.c.course_id == EtEnrollment.course_id, dones.c.user_id == EtEnrollment.user_id),
+            )
+            .where(
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+                EtCourse.deleted == 0,
+                EtCourse.status != COURSE_DRAFT,
+            )
+        )
+
+    async def overall_completion(self, db: AsyncSession, now: datetime) -> tuple[int, int, int]:
+        """全站 `(在籍人次, 已完課人次, 逾期未完課人次)`。
+
+        「逾期」＝課程訖止已過（`OPEN_END_AT < now`）且該學員未完課。`OPEN_END_AT` 為
+        `NULL` 者不算逾期——沒有期限就無從逾期，計入會把「永遠開放的課」全數打成逾期。
+        """
+        base = self._completion_base(now).subquery()
+        row = (
+            await db.execute(
+                select(
+                    func.count().label("enrolled"),
+                    func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (
+                                    and_(
+                                        base.c.open_end_at.is_not(None),
+                                        base.c.open_end_at < now,
+                                        base.c.is_completed == 0,
+                                    ),
+                                    1,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ).label("overdue"),
+                ).select_from(base)
+            )
+        ).one()
+        return int(row.enrolled), int(row.completed), int(row.overdue)
+
+    async def unit_rates(self, db: AsyncSession, now: datetime) -> list[tuple[str, int, int]]:
+        """依受訓單位標籤分組之 `(標籤名, 在籍人次, 已完課人次)`。
+
+        ## ⚠️ 刻意排除 `IS_ALL`（「全體」標籤）
+
+        它**不逐人建立 `ET_USER_TAG` 列**（模型 docstring：「不需逐人對應，查詢時展開
+        為全部具學員角色者」）。直接 join 會讓它顯示 **0 人**——一個看起來像「全體都
+        沒加入」的數字。而即使正確展開，它的達成率也等同全站完成率，與管理者卡上方
+        那個數字重複。
+
+        ## ⚠️ 這裡有本查詢唯一的一個一對多
+
+        一人可屬多個單位，故同一筆在籍會計入他的每一個單位——那是「單位達成率」要的
+        語意（各單位各自看自己的人）。正因為它是唯一的一個，`_completion_base` 才必須
+        維持全多對一；再多一個就是笛卡兒積。
+        """
+        base = self._completion_base(now).subquery()
+        rows = await db.execute(
+            select(
+                EtTag.tag_name,
+                func.count().label("enrolled"),
+                func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
+            )
+            .select_from(base)
+            .join(EtUserTag, EtUserTag.user_id == base.c.user_id)
+            .join(EtTag, EtTag.tag_id == EtUserTag.tag_id)
+            .where(EtUserTag.deleted == 0, EtTag.deleted == 0, EtTag.is_all.is_(False))
+            .group_by(EtTag.tag_name)
+        )
+        return [(r.tag_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
 
     async def previous_avg_progress(self, db: AsyncSession, *, course_id: int, before: date) -> Decimal | None:
         """該課程**在 `before` 之前**最近一次快照的平均進度；沒有則 `None`（AC 5 的「—」）。
