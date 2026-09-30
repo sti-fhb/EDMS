@@ -2,6 +2,7 @@ import Box from "@mui/material/Box"
 import Paper from "@mui/material/Paper"
 import type { ReactNode } from "react"
 
+import { FilterCard } from "./FilterCard"
 import { ScreenHeader } from "./ScreenHeader"
 
 interface CrudPageLayoutProps {
@@ -31,11 +32,7 @@ export function CrudPageLayout({ code, filterContent, actions, table, pagination
     <Box>
       <ScreenHeader code={code} actions={actions} />
 
-      {filterContent && (
-        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-          {filterContent}
-        </Paper>
-      )}
+      {filterContent && <FilterCard>{filterContent}</FilterCard>}
 
       <Paper variant="outlined">{table}</Paper>
 

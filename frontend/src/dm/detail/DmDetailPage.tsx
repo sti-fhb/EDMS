@@ -11,6 +11,7 @@ import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
 import Collapse from "@mui/material/Collapse"
 import Divider from "@mui/material/Divider"
+import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Table from "@mui/material/Table"
@@ -28,6 +29,7 @@ import { DmObsoleteDialog } from "./DmObsoleteDialog"
 import { downloadObsoleteAttachment, downloadVersionFile, previewVersionFile } from "./detailService"
 import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 
 /** 檔案存取失敗訊息：缺檔（404）明確提示「查無檔案」，避免誤導為系統故障。 */
@@ -86,26 +88,38 @@ export function DmDetailPage() {
   }
   if (isError || !detail) {
     return (
-      <Box sx={{ p: 3 }}>
+      <Box>
+        <ScreenHeader code="DM07" leading={<BackButton to="/dm/library" label="返回文件庫" />} />
         <Alert severity="error">查無此文件或無權存取。</Alert>
       </Box>
     )
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      {/* 標題列（僅識別 + 狀態） */}
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="h5">{detail.doc_name}</Typography>
-        <Stack direction="row" spacing={2} sx={{ mt: 0.5 }} alignItems="center">
-          <Typography variant="caption" color="text.secondary">
-            DOC_ID: {detail.doc_id}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            目前版本：{detail.current_version_no ?? "—"}
-          </Typography>
-        </Stack>
-      </Box>
+    <Box>
+      {/* 標題列：返回鍵 + icon + 文件名稱；DOC_ID / 版本置右側（對齊 TBMS ScreenHeader 之 meta 欄）。
+          已廢止（自 US10 DM03 進入）返回已廢止文件查詢，其餘返回文件庫。 */}
+      <ScreenHeader
+        code="DM07"
+        title={detail.doc_name}
+        leading={
+          readOnly ? (
+            <BackButton to="/dm/obsolete" label="返回已廢止文件查詢" />
+          ) : (
+            <BackButton to="/dm/library" label="返回文件庫" />
+          )
+        }
+        actions={
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Typography variant="caption" color="text.secondary">
+              DOC_ID: {detail.doc_id}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              目前版本：{detail.current_version_no ?? "—"}
+            </Typography>
+          </Stack>
+        }
+      />
 
       {/* 已廢止 read-only banner */}
       {readOnly && (
@@ -137,63 +151,43 @@ export function DmDetailPage() {
         </Alert>
       )}
 
-      {/* 操作列 */}
-      <Paper sx={{ p: 1.5, mb: 2 }}>
-        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-          {readOnly ? (
-            // 已廢止（自 US10 DM03 進入）：返回已廢止文件查詢；版本歷程本就自動展開、不再提供 toggle
+      {/* 操作列（返回鍵已移至標題列）。已廢止時版本歷程自動展開、無其他操作，故整列不顯示 */}
+      {!readOnly && (
+        <Paper sx={{ p: 1.5, mb: 2 }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
             <Button
               size="small"
               variant="outlined"
-              startIcon={<ArrowBackIcon />}
-              onClick={() => navigate("/dm/obsolete")}
+              startIcon={<HistoryIcon />}
+              onClick={() => setHistoryOpen((v) => !v)}
             >
-              返回已廢止文件查詢
+              版本歷程
             </Button>
-          ) : (
-            <>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<ArrowBackIcon />}
-                onClick={() => navigate("/dm/library")}
-              >
-                返回文件庫
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<HistoryIcon />}
-                onClick={() => setHistoryOpen((v) => !v)}
-              >
-                版本歷程
-              </Button>
-            </>
-          )}
-          {/* 編輯者入口：送審中 / 廢止待簽核時灰階 + 提示原因（非隱藏，FR-005）；已廢止則整段不顯示 */}
-          {detail.is_editor && !readOnly && (
-            <>
-              <LockableButton
-                label="編輯新版本"
-                icon={<EditIcon />}
-                disabled={!detail.can_edit}
-                reason={detail.edit_lock_reason}
-                onClick={() => navigate(`/dm/documents/${docId}/edit`)}
-              />
-              {/* 彈性間隔：把「廢止此文件」推到橫幅最右邊（比 ml:auto 更不受 Stack spacing 影響） */}
-              <Box sx={{ flexGrow: 1 }} />
-              <LockableButton
-                label="廢止此文件"
-                icon={<ArchiveIcon />}
-                color="error"
-                disabled={!detail.can_edit}
-                reason={detail.edit_lock_reason}
-                onClick={() => setObsoleteOpen(true)}
-              />
-            </>
-          )}
-        </Stack>
-      </Paper>
+            {/* 編輯者入口：送審中 / 廢止待簽核時灰階 + 提示原因（非隱藏，FR-005） */}
+            {detail.is_editor && (
+              <>
+                <LockableButton
+                  label="編輯新版本"
+                  icon={<EditIcon />}
+                  disabled={!detail.can_edit}
+                  reason={detail.edit_lock_reason}
+                  onClick={() => navigate(`/dm/documents/${docId}/edit`)}
+                />
+                {/* 彈性間隔：把「廢止此文件」推到橫幅最右邊（比 ml:auto 更不受 Stack spacing 影響） */}
+                <Box sx={{ flexGrow: 1 }} />
+                <LockableButton
+                  label="廢止此文件"
+                  icon={<ArchiveIcon />}
+                  color="error"
+                  disabled={!detail.can_edit}
+                  reason={detail.edit_lock_reason}
+                  onClick={() => setObsoleteOpen(true)}
+                />
+              </>
+            )}
+          </Stack>
+        </Paper>
+      )}
 
       {/* 文件檔案 + 文件資訊（read-only 隱藏整段） */}
       {!readOnly && (
@@ -437,5 +431,15 @@ function LockableButton({
         </Button>
       </Box>
     </Tooltip>
+  )
+}
+
+/** 標題列左側返回鍵（圖示鈕；無障礙名稱標明目的地，已廢止與一般文件回到不同清單）。 */
+function BackButton({ to, label }: { to: string; label: string }) {
+  const navigate = useNavigate()
+  return (
+    <IconButton size="small" aria-label={label} onClick={() => navigate(to)}>
+      <ArrowBackIcon />
+    </IconButton>
   )
 }

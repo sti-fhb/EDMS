@@ -28,6 +28,7 @@ import {
 import type { AudiencePair, EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
 import { useDocTags, useDraftMeta, useEditorOptions, useReviewers } from "./useEditor"
+import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
@@ -411,10 +412,9 @@ export function DmEditorPage() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        {isNew ? "新增文件" : `編輯文件 — ${editName}`}
-      </Typography>
+    <Box>
+      {/* 不加返回鍵：離開一律走底部「取消」，它帶有未儲存變更的二次確認 */}
+      <ScreenHeader code="DM08" title={isNew ? "新增文件" : `編輯文件 — ${editName}`} />
 
       {draftObsolete && (
         <Alert severity="warning" sx={{ mb: 2 }}>

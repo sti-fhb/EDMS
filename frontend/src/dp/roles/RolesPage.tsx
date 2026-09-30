@@ -12,6 +12,7 @@ import DialogTitle from "@mui/material/DialogTitle"
 import FormControlLabel from "@mui/material/FormControlLabel"
 import IconButton from "@mui/material/IconButton"
 import MenuItem from "@mui/material/MenuItem"
+import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
 import Table from "@mui/material/Table"
@@ -29,6 +30,7 @@ import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rol
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
+import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -63,11 +65,13 @@ export function RolesPage() {
   return (
     <Box>
       <ScreenHeader code="DP02" />
-      <Tabs value={active ?? modules[0]} onChange={(_, v) => setSelected(v)} sx={{ mb: 2 }}>
-        {modules.map((m) => (
-          <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />
-        ))}
-      </Tabs>
+      <FilterCard>
+        <Tabs value={active ?? modules[0]} onChange={(_, v) => setSelected(v)}>
+          {modules.map((m) => (
+            <Tab key={m} value={m} label={MODULE_LABELS[m] ?? m} />
+          ))}
+        </Tabs>
+      </FilterCard>
       {active && <AssignmentsTab module={active} />}
     </Box>
   )
@@ -132,115 +136,120 @@ function AssignmentsTab({ module }: { module: string }) {
   const roleDefs = MODULE_ROLES[module] ?? []
   const rows = data?.data ?? []
 
+  // 版面比照 CrudPageLayout：篩選列一張白底卡、表格一張白底卡（DP01 使用者管理同樣結構）
   return (
-    <Stack spacing={2}>
-      <Box sx={{ display: "flex", gap: 1 }}>
-        <TextField
-          size="small"
-          label="關鍵字（姓名 / Email）"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
+    <>
+      <FilterCard>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <TextField
+            size="small"
+            label="關鍵字（姓名 / Email）"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setSearch(keyword)
+                setPage(1)
+              }
+            }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
               setSearch(keyword)
               setPage(1)
-            }
-          }}
-        />
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={() => {
-            setSearch(keyword)
-            setPage(1)
-          }}
-        >
-          查詢
-        </Button>
-      </Box>
+            }}
+          >
+            查詢
+          </Button>
+        </Box>
+      </FilterCard>
 
       {/* 固定表格版面：欄寬由表頭決定、不隨儲存格內容（可見對象標籤數）變動，避免加標籤時其他欄位位移 */}
-      <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ width: "20%" }}>帳號</TableCell>
-            <TableCell sx={{ width: "10%" }}>姓名</TableCell>
-            {roleDefs.map((r) => (
-              <TableCell key={r.code} align="center" sx={{ width: "7%" }}>
-                {r.label}
-              </TableCell>
-            ))}
-            <TableCell sx={{ width: "26%" }}>可見對象</TableCell>
-            <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.map((row) => {
-            // 停用 / 鎖定中的帳號登不進系統 → 整列唯讀，兩維度皆不可操作（加權與降權都不行，SA 裁示）。
-            // 需要降權時的路徑是：先於使用者管理頁啟用帳號 → 撤權 → 再停用。
-            // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
-            const editable = isAccountUsable(row)
-            return (
-              <TableRow key={row.user_id} sx={editable ? undefined : { opacity: 0.5 }}>
-                <TableCell>{row.email}</TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={0.5} alignItems="center">
-                    <span>{row.user_name}</span>
-                    {/* 兩種狀態都用預設灰：本頁的語意是「此列不可操作」，非警示 */}
-                    {isDisabled(row) && <Chip size="small" label="已停用" />}
-                    {isLocked(row) && (
-                      <Chip size="small" label="已鎖定" title={`鎖定至 ${formatDateTime(row.locked_until)}`} />
-                    )}
-                  </Stack>
+      <Paper variant="outlined">
+        <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ width: "20%" }}>帳號</TableCell>
+              <TableCell sx={{ width: "10%" }}>姓名</TableCell>
+              {roleDefs.map((r) => (
+                <TableCell key={r.code} align="center" sx={{ width: "7%" }}>
+                  {r.label}
                 </TableCell>
-                {roleDefs.map((r) => (
-                  <TableCell key={r.code} align="center">
-                    <Checkbox
-                      size="small"
-                      checked={row.roles.includes(r.code)}
-                      // 帳號不可用 → 整列唯讀；否則只在「正對本列做角色操作」時 disable
-                      //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
-                      disabled={
-                        !editable ||
-                        (assignMut.isPending &&
-                          assignMut.variables?.userId === row.user_id &&
-                          assignMut.variables?.source === "role")
-                      }
-                      onChange={() => toggleRole(row, r.code)}
-                      slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
-                    />
+              ))}
+              <TableCell sx={{ width: "26%" }}>可見對象</TableCell>
+              <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((row) => {
+              // 停用 / 鎖定中的帳號登不進系統 → 整列唯讀，兩維度皆不可操作（加權與降權都不行，SA 裁示）。
+              // 需要降權時的路徑是：先於使用者管理頁啟用帳號 → 撤權 → 再停用。
+              // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
+              const editable = isAccountUsable(row)
+              return (
+                <TableRow key={row.user_id} sx={editable ? undefined : { opacity: 0.5 }}>
+                  <TableCell>{row.email}</TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <span>{row.user_name}</span>
+                      {/* 兩種狀態都用預設灰：本頁的語意是「此列不可操作」，非警示 */}
+                      {isDisabled(row) && <Chip size="small" label="已停用" />}
+                      {isLocked(row) && (
+                        <Chip size="small" label="已鎖定" title={`鎖定至 ${formatDateTime(row.locked_until)}`} />
+                      )}
+                    </Stack>
                   </TableCell>
-                ))}
-                <TableCell sx={{ verticalAlign: "top" }}>
-                  {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
-                  <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
-                    {row.groups.length === 0 ? (
-                      <Typography variant="caption" color="text.secondary">
-                        未指派
-                      </Typography>
-                    ) : (
-                      row.groups.map((g) => (
-                        <Chip key={g} size="small" label={groupLabel(g, groupOptions)} />
-                      ))
-                    )}
-                    {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
-                    <Button size="small" disabled={!editable} onClick={() => setEditing(row)}>
-                      編輯
-                    </Button>
-                  </Box>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="caption" color="text.secondary">
-                    {row.last_modified_by
-                      ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
-                      : "—"}
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
+                  {roleDefs.map((r) => (
+                    <TableCell key={r.code} align="center">
+                      <Checkbox
+                        size="small"
+                        checked={row.roles.includes(r.code)}
+                        // 帳號不可用 → 整列唯讀；否則只在「正對本列做角色操作」時 disable
+                        //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
+                        disabled={
+                          !editable ||
+                          (assignMut.isPending &&
+                            assignMut.variables?.userId === row.user_id &&
+                            assignMut.variables?.source === "role")
+                        }
+                        onChange={() => toggleRole(row, r.code)}
+                        slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
+                      />
+                    </TableCell>
+                  ))}
+                  <TableCell sx={{ verticalAlign: "top" }}>
+                    {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
+                    <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
+                      {row.groups.length === 0 ? (
+                        <Typography variant="caption" color="text.secondary">
+                          未指派
+                        </Typography>
+                      ) : (
+                        row.groups.map((g) => (
+                          <Chip key={g} size="small" label={groupLabel(g, groupOptions)} />
+                        ))
+                      )}
+                      {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
+                      <Button size="small" disabled={!editable} onClick={() => setEditing(row)}>
+                        編輯
+                      </Button>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="caption" color="text.secondary">
+                      {row.last_modified_by
+                        ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
+                        : "—"}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </Paper>
 
       {data && (
         <Pagination page={data.meta.page} total={data.meta.total} pageSize={data.meta.limit} onPageChange={setPage} />
@@ -257,7 +266,7 @@ function AssignmentsTab({ module }: { module: string }) {
           }}
         />
       )}
-    </Stack>
+    </>
   )
 }
 

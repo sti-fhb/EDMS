@@ -21,6 +21,7 @@ import { CourseCard } from "./CourseCard"
 import { coursesApi } from "./coursesService"
 import { KEYWORD_MAX_LENGTH, ownerLabel } from "./schemas"
 import type { CourseListParams } from "./schemas"
+import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
@@ -133,10 +134,12 @@ export function EtCourseListPage() {
     <Box>
       <ScreenHeader code="ET01" />
 
-      <Tabs value={scope} onChange={(_, v: Scope) => changeScope(v)} sx={{ mb: 1 }}>
-        <Tab value="mine" label="我建立的" />
-        <Tab value="all" label="全部課程" />
-      </Tabs>
+      <FilterCard>
+        <Tabs value={scope} onChange={(_, v: Scope) => changeScope(v)}>
+          <Tab value="mine" label="我建立的" />
+          <Tab value="all" label="全部課程" />
+        </Tabs>
+      </FilterCard>
 
       {/* 常駐說明，非 Snackbar——它是頁面的持續規則，不是一次性事件 */}
       <Alert severity="info" sx={{ mb: 2 }}>
