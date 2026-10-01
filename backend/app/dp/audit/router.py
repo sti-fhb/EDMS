@@ -32,7 +32,8 @@ _service = AuditQueryService()
 _Module = Literal["DP", "ET", "DM"]
 # ⚠️ 必須涵蓋所有**寫得進去**的 action_type，否則該值在下拉選得到、查詢卻被擋成 422。
 # `EXPORT` 於 #322 導入時只補了兩處 label、漏了此處與種子清單，直到 #477 才發現。
-# 新增值時一併檢查：query_service._ACTION_LABELS、前端 auditLabels.ts、DP_PARAM.ACTION_TYPE 種子。
+# 新增值時一併檢查：query_service._ACTION_LABELS 與 DP_PARAM.ACTION_TYPE 種子
+# （前端自 #477 起經 /options 取得，無需另行維護）。
 _Action = Literal["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE", "EXPORT"]
 _Result = Literal["SUCCESS", "FAIL"]
 
@@ -45,10 +46,10 @@ async def get_audit_options() -> AuditOptionsResponse:
     承擔——選項本身雖不含業務資料，但會洩露系統有哪些功能模組，與查詢端點同級保護。
     """
     return AuditOptionsResponse(
-        func_options=FUNC_OPTIONS,  # type: ignore[arg-type]
-        action_options=ACTION_OPTIONS,  # type: ignore[arg-type]
-        result_options=RESULT_OPTIONS,  # type: ignore[arg-type]
-        module_options=MODULE_OPTIONS,  # type: ignore[arg-type]
+        func_options=FUNC_OPTIONS,
+        action_options=ACTION_OPTIONS,
+        result_options=RESULT_OPTIONS,
+        module_options=MODULE_OPTIONS,
     )
 
 

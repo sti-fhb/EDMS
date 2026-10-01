@@ -33,10 +33,15 @@ async def test_get_param_value_disabled_returns_none(db):
 
 
 async def test_get_param_list_sorted(db):
-    """清單型參數依 SORT_ORDER 排序回傳（ACTION_TYPE 5 筆）。"""
+    """清單型參數依 SORT_ORDER 排序回傳（ACTION_TYPE 6 筆）。
+
+    本條**刻意**寫死完整種子內容：`ACTION_TYPE` 是程式碼寫死的 enum、不開放維護，
+    內容變動必定伴隨程式碼變動（如 #477 補 `EXPORT` 時同步補了 router 的 `_Action` 值域）。
+    種子改了而本條變紅，是提醒「確認兩邊都改了」，不是誤報。
+    """
     items = await ParamService().get_param_list(db, "ACTION_TYPE")
-    assert [i.key for i in items] == ["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE"]
-    assert [i.sort_order for i in items] == [1, 2, 3, 4, 5]
+    assert [i.key for i in items] == ["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE", "EXPORT"]
+    assert [i.sort_order for i in items] == [1, 2, 3, 4, 5, 6]
     assert items[0].name == "登入"
     assert all(i.is_enabled for i in items)
 
@@ -49,8 +54,10 @@ async def test_get_param_list_filters_disabled(db):
         .values(is_enabled=False)
     )
     keys = [i.key for i in await ParamService().get_param_list(db, "ACTION_TYPE")]
+    all_keys = [i.key for i in await ParamService().get_param_list(db, "ACTION_TYPE", enabled_only=False)]
     assert "DELETE" not in keys
-    assert len(keys) == 4
+    # 以「比完整清單少一項」表述，不寫死母體大小——驗的是過濾行為，日後種子增減不該咬到這條
+    assert len(keys) == len(all_keys) - 1
 
 
 async def test_get_param_list_include_disabled(db):
@@ -61,7 +68,9 @@ async def test_get_param_list_include_disabled(db):
         .values(is_enabled=False)
     )
     items = await ParamService().get_param_list(db, "ACTION_TYPE", enabled_only=False)
-    assert len(items) == 5
+    enabled_only = await ParamService().get_param_list(db, "ACTION_TYPE")
+    # 同上：驗「含停用項時多了一筆」，不寫死母體大小
+    assert len(items) == len(enabled_only) + 1
     disabled = next(i for i in items if i.key == "DELETE")
     assert disabled.is_enabled is False
 

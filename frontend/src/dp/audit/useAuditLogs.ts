@@ -6,9 +6,12 @@ import { useNotification } from "../../contexts/NotificationContext"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
 import { toApiError } from "../../services/http"
 import { auditApi } from "./auditService"
-import type { AuditFilterParams, AuditLogRow } from "./auditService"
+import type { AuditFilterParams, AuditLogRow, AuditOption } from "./auditService"
 
 const DEFAULT_LIMIT = 20
+
+/** 選項未載入時的共用空陣列（見 useAuditOptions 的說明）。 */
+const NO_OPTIONS: AuditOption[] = []
 
 /** 查詢列輸入值（空字串＝未指定）。 */
 export interface AuditFilters {
@@ -58,10 +61,12 @@ export function useAuditOptions() {
     staleTime: 60 * 60 * 1000,
   })
   return {
-    funcOptions: data?.func_options ?? [],
-    actionOptions: data?.action_options ?? [],
-    resultOptions: data?.result_options ?? [],
-    moduleOptions: data?.module_options ?? [],
+    // 用模組層常數而非字面 []：後者每次 render 都是新陣列，會讓 AuditPage 的 columns
+    // useMemo 在選項載入前每次重算（依賴比對失敗）。
+    funcOptions: data?.func_options ?? NO_OPTIONS,
+    actionOptions: data?.action_options ?? NO_OPTIONS,
+    resultOptions: data?.result_options ?? NO_OPTIONS,
+    moduleOptions: data?.module_options ?? NO_OPTIONS,
   }
 }
 

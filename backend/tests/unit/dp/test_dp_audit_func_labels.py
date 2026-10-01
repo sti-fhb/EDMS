@@ -7,9 +7,16 @@ CSV 匯出的功能欄中文。漏補一個 `func_name` 的後果是**靜默的*
 
 本檔掃描 `app/` 下所有 `func_name` 的字面值，斷言皆已登錄。
 
-⚠️ **能力界線**：掃描只認得「字面字串」的寫法（常數定義或 `func_name="..."` 直接傳入）。
-若日後有人用變數拼接或由設定帶入 `func_name`，本測試**抓不到**——那種寫法本身也會讓
-查詢端無從列舉，屆時應先回頭要求改回字面值，而不是放寬這裡。
+⚠️ **能力界線**（三項，不要只記得第一項）：
+
+1. 只認「字面字串」——變數拼接或由設定帶入的 `func_name` 抓不到。那種寫法本身也會讓
+   查詢端無從列舉，屆時應回頭要求改回字面值，而不是放寬這裡。
+2. 常數須在**行首**且以 `_FUNC` 開頭。縮排的 class 層常數、或命名為 `FUNC_NAME` /
+   `_AUDIT_FUNC` 之類都掃不到。
+3. 只認**雙引號**。單引號字串掃不到（專案由 ruff format 統一為雙引號，故現況無影響）。
+
+第 2、3 項同樣會讓反向的 orphan 測試誤報——掃不到的寫入端會讓它以為該碼無人使用。
+2026-10-01 實測 `app/` 內無漏網；新增寫入點若不符上述形狀，請改寫入點而非改這裡。
 """
 
 import re
@@ -17,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from app.dp.audit.query_service import FUNC_OPTIONS, _FUNC_LABELS
+from app.dp.audit.query_service import _FUNC_LABELS, FUNC_OPTIONS
 
 pytestmark = pytest.mark.unit
 
@@ -43,9 +50,7 @@ def _scan_func_names() -> set[str]:
 def test_每個寫入端的功能碼都有對應中文():
     """漏補時本條變紅——這是 #477 唯一會自動發現「新模組寫了稽核卻沒補清單」的機制。"""
     missing = sorted(_scan_func_names() - set(_FUNC_LABELS))
-    assert not missing, (
-        f"以下 func_name 有寫入端但不在 _FUNC_LABELS，查詢端會少選項、列表與 CSV 會顯示原碼：{missing}"
-    )
+    assert not missing, f"以下 func_name 有寫入端但不在 _FUNC_LABELS，查詢端會少選項、列表與 CSV 會顯示原碼：{missing}"
 
 
 def test_清單沒有多出不存在的功能碼():
@@ -70,5 +75,5 @@ def test_每個模組前綴都有功能碼():
 
 def test_func_options_與_labels_同步():
     """`FUNC_OPTIONS` 是前端下拉的唯一來源，必須完整反映 `_FUNC_LABELS`。"""
-    assert [o["value"] for o in FUNC_OPTIONS] == list(_FUNC_LABELS)
-    assert all(o["label"] == _FUNC_LABELS[o["value"]] for o in FUNC_OPTIONS)
+    assert [o.value for o in FUNC_OPTIONS] == list(_FUNC_LABELS)
+    assert all(o.label == _FUNC_LABELS[o.value] for o in FUNC_OPTIONS)

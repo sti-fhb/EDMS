@@ -53,7 +53,7 @@ def upgrade() -> None:
         ).bindparams(
             param_id=_PARAM_ID,
             param_key=_PARAM_KEY,
-            param_name="匯出",  # 與 query_service._ACTION_LABELS / 前端 auditLabels.ts 一致
+            param_name="匯出",  # 與 query_service._ACTION_LABELS 一致（前端經 /options 取得，不另維護）
             description="具名個資或大量資料之匯出（ET 週報明細、ET02 學員清單與問卷結果）",
             sort_order=6,  # 接在既有五列（1~5）之後
             edit_scope="HIDDEN",  # 見 docstring：與同組其餘五列一致

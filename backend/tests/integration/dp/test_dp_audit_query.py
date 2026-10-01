@@ -506,6 +506,11 @@ async def test_options_endpoint_returns_all_dropdowns(client, db):
 
 
 async def test_options_endpoint_requires_auth(client):
-    """選項端點與查詢端點同一個授權閘，不得因為「只是選項」而裸奔。"""
+    """選項端點與查詢端點同一個授權閘，不得因為「只是選項」而裸奔。
+
+    斷言確切的 401（未帶 token）而非 `in (401, 403)`——後者在授權行為改變時仍會通過，
+    等於不驗。「已登入但非管理者 → 403」由 `test_dp_backoffice_gate.py` 的參數化清單覆蓋
+    （本端點已登記於其中）。
+    """
     r = await client.get("/api/dp/audit/options")
-    assert r.status_code in (401, 403)
+    assert r.status_code == 401
