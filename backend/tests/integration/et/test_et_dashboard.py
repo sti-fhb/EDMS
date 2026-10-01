@@ -1,7 +1,7 @@
 """首頁教育訓練儀表板整合測試（#453 / #89 的 P3）。
 
-此處只驗**需要真 DB 才驗得了**的事：跨表聚合、依角色分流、以及三個「只有真資料才會
-暴露」的陷阱——死欄位、`IS_ALL` 標籤、一人多標籤的計數灌大。
+此處只驗**需要真 DB 才驗得了**的事：跨表聚合、依角色分流、以及「只有真資料才會
+暴露」的陷阱——最關鍵的是 `ET_ENROLLMENT.COMPLETION_STATUS` 這個死欄位。
 
 純推導（`percent` 的空母體、`days_left` 的捨去）於 `tests/unit/et/test_stats_rules.py`。
 """
@@ -17,7 +17,6 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
-from app.et.catalog.models import EtTag, EtUserTag
 from app.et.constants import (
     COMPLETION_NOT_STARTED,
     COURSE_DRAFT,
@@ -163,28 +162,6 @@ async def _complete(db, user_id: str, course_id: int, item_id: int) -> None:
             deleted=0,
         )
     )
-    await db.flush()
-
-
-async def _tag(db, name: str, *, is_all: bool = False) -> int:
-    now = utcnow()
-    tag = EtTag(
-        tag_name=name,
-        is_active=True,
-        is_all=is_all,
-        is_builtin=False,
-        display_order=0,
-        created_user="admin01",
-        created_date=now,
-        deleted=0,
-    )
-    db.add(tag)
-    await db.flush()
-    return tag.tag_id
-
-
-async def _assign_tag(db, user_id: str, tag_id: int) -> None:
-    db.add(EtUserTag(user_id=user_id, tag_id=tag_id, created_user="admin01", created_date=utcnow(), deleted=0))
     await db.flush()
 
 
@@ -335,47 +312,16 @@ class TestAdminCardTraps:
 
         assert Decimal(card["completion_rate"]) == Decimal("100.00")
 
-    async def test_全體標籤不出現在各單位(self, client, db) -> None:
-        """⚠️ `IS_ALL` 不逐人建 `ET_USER_TAG` 列，直接 join 會顯示 0 人。
-
-        而且它的達成率等同全站完成率，與卡片上方那個數字重複。
-        """
-        admin = await _user(db, "d_adm02", roles=(ROLE_ADMIN,))
-        teacher = await _user(db, "d_tea11", roles=(ROLE_TEACHER,))
-        student = await _user(db, "d_stu07", roles=(ROLE_STUDENT,))
-        course_id, _ = await _one_item_course(db, owner=teacher, name="標籤測試")
-        await _enroll(db, student, course_id)
-        all_tag = await _tag(db, "ZT全體", is_all=True)
-        unit_tag = await _tag(db, "ZT護理師")
-        # 即使有人被手動掛上「全體」，它仍不該出現
-        await _assign_tag(db, student, all_tag)
-        await _assign_tag(db, student, unit_tag)
-
-        card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
-
-        names = [u["tag_name"] for u in card["by_unit"]]
-        assert "ZT全體" not in names
-        assert "ZT護理師" in names
-
-    async def test_一人多標籤不灌大整體人次(self, client, db) -> None:
-        """⚠️ 依單位分組是本查詢唯一的一對多。整體那支若也 join 標籤就是笛卡兒積。
-
-        一位學員掛三個標籤：`by_unit` 三列各 1 人（正確，各單位各自看自己的人），
-        但 `completion_rate` 的母體仍只有 1 人次。
-        """
-        admin = await _user(db, "d_adm03", roles=(ROLE_ADMIN,))
-        teacher = await _user(db, "d_tea12", roles=(ROLE_TEACHER,))
-        student = await _user(db, "d_stu08", roles=(ROLE_STUDENT,))
-        course_id, item_id = await _one_item_course(db, owner=teacher, name="多標籤測試")
-        await _enroll(db, student, course_id)
-        await _complete(db, student, course_id, item_id)
-        for name in ("ZT甲單位", "ZT乙單位", "ZT丙單位"):
-            await _assign_tag(db, student, await _tag(db, name))
-
-        card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
-
-        assert len([u for u in card["by_unit"] if u["tag_name"].startswith("ZT")]) == 3
-        assert Decimal(card["completion_rate"]) == Decimal("100.00"), "整體不得因為標籤數而被灌大或稀釋"
+    # 📌 #453 原有兩條標籤分組專屬的測試，已隨 #475 改為各課程完成率而移除：
+    #
+    # - `test_全體標籤不出現在各單位`：`IS_ALL` 不逐人建 `ET_USER_TAG` 列，直接 join
+    #   會顯示 0 人。改為課程分組後**完全沒有標籤參與**，該陷阱不存在。
+    # - `test_一人多標籤不灌大整體人次`：依單位分組是 #453 查詢唯一的一對多，故要擋
+    #   笛卡兒積。一筆在籍只屬一門課，改為課程分組後也沒有這個面。
+    #
+    # ⛔ 這兩條是**真的不適用了**，不是「換個斷言就能留」——它們驗的機制已經不在
+    # 程式裡。但下方「完成率不讀死欄位」與「無訖止的課不算逾期」**不受分組方式影響**，
+    # 一字未改地保留（前者是整個管理者卡正確性的地基）。
 
     async def test_無訖止的課不算逾期(self, client, db) -> None:
         """沒有期限就無從逾期；計入會把「永遠開放的課」全數打成逾期。"""
@@ -389,20 +335,22 @@ class TestAdminCardTraps:
 
         assert card["overdue_incomplete"] == 0
 
-    async def test_各單位依達成率由低到高(self, client, db) -> None:
-        """管理者要找的是落後的那一個，最好的排最前面等於要他從尾巴讀起。"""
+    async def test_各課程依完成率由低到高(self, client, db) -> None:
+        """管理者要找的是落後的那一門，最好的排最前面等於要他從尾巴讀起。
+
+        📌 #453 時本條是「各單位依達成率」，#475 改為各課程——**驗的規則一字未變**
+        （排序方向），只是分組的維度換了，故改寫而非新增。
+        """
         admin = await _user(db, "d_adm05", roles=(ROLE_ADMIN,))
         teacher = await _user(db, "d_tea14", roles=(ROLE_TEACHER,))
-        done = await _user(db, "d_stu10", roles=(ROLE_STUDENT,))
-        undone = await _user(db, "d_stu11", roles=(ROLE_STUDENT,))
-        course_id, item_id = await _one_item_course(db, owner=teacher, name="排序測試")
-        await _enroll(db, done, course_id)
-        await _enroll(db, undone, course_id)
-        await _complete(db, done, course_id, item_id)
-        await _assign_tag(db, done, await _tag(db, "ZT高分單位"))
-        await _assign_tag(db, undone, await _tag(db, "ZT低分單位"))
+        student = await _user(db, "d_stu10", roles=(ROLE_STUDENT,))
+        low, low_item = await _one_item_course(db, owner=teacher, name="ZT低分課程")
+        high, high_item = await _one_item_course(db, owner=teacher, name="ZT高分課程")
+        await _enroll(db, student, low)
+        await _enroll(db, student, high)
+        await _complete(db, student, high, high_item)
 
         card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
 
-        ordered = [u["tag_name"] for u in card["by_unit"] if u["tag_name"].startswith("ZT")]
-        assert ordered == ["ZT低分單位", "ZT高分單位"]
+        ordered = [c["course_name"] for c in card["by_course"] if c["course_name"].startswith("ZT")]
+        assert ordered == ["ZT低分課程", "ZT高分課程"]

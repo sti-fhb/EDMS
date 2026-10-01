@@ -21,7 +21,7 @@ describe("首頁教育訓練概況", () => {
   it("三張卡皆有資料時依「管理者 → 教師 → 學員」順序呈現（#89 決策 3）", async () => {
     renderWithProviders(<EtOverviewWidget enabled />)
 
-    await screen.findByText("教育訓練概況")
+    await screen.findByText("ET 教育訓練概況")
     const titles = screen.getAllByText(/全體訓練概況|我的課程待辦|我的學習概況/).map((el) => el.textContent)
     expect(titles).toEqual(["全體訓練概況", "我的課程待辦", "我的學習概況"])
   })
@@ -39,7 +39,7 @@ describe("首頁教育訓練概況", () => {
     renderWithProviders(<EtOverviewWidget enabled />)
 
     await waitFor(() => expect(screen.queryByText("我的學習概況")).not.toBeInTheDocument())
-    expect(screen.queryByText("教育訓練概況")).not.toBeInTheDocument()
+    expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument()
   })
 
   it("教師沒有待辦時不渲染教師卡", async () => {
@@ -61,7 +61,7 @@ describe("首頁教育訓練概況", () => {
     mockDashboard({ student: EMPTY_STUDENT, teacher: { ending_soon: [], draft_count: 0 } })
     renderWithProviders(<EtOverviewWidget enabled />)
 
-    await waitFor(() => expect(screen.queryByText("教育訓練概況")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument())
   })
 
   it("未啟用時完全不發查詢——端點對無 ET 角色者回 403", async () => {
@@ -74,7 +74,7 @@ describe("首頁教育訓練概況", () => {
     )
     renderWithProviders(<EtOverviewWidget enabled={false} />)
 
-    await waitFor(() => expect(screen.queryByText("教育訓練概況")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument())
     expect(called).toBe(0)
   })
 
@@ -94,14 +94,14 @@ describe("首頁教育訓練概況", () => {
     expect(screen.getByText("剩 2 天")).toBeInTheDocument()
   })
 
-  it("管理者卡的各單位依後端給的順序呈現，前端不重排", async () => {
+  it("管理者卡的各課程依後端給的順序呈現，前端不重排", async () => {
     mockDashboard({
       admin: {
         overdue_incomplete: 0,
         completion_rate: "50.00",
-        by_unit: [
-          { tag_name: "低分單位", enrolled: 2, completed: 0, completion_rate: "0.00" },
-          { tag_name: "高分單位", enrolled: 2, completed: 2, completion_rate: "100.00" },
+        by_course: [
+          { course_name: "低分課程", enrolled: 2, completed: 0, completion_rate: "0.00" },
+          { course_name: "高分課程", enrolled: 2, completed: 2, completion_rate: "100.00" },
         ],
       },
     })
@@ -109,10 +109,11 @@ describe("首頁教育訓練概況", () => {
 
     await screen.findByText("全體訓練概況")
     // ⚠️ 不可用 /單位/ 查——那會先抓到區塊標題「各單位達成率（低者在前）」。
-    const units = screen.getAllByText(/分單位/).map((el) => el.textContent ?? "")
-    expect(units.map((t) => t.replace(/[^一-鿿]/g, ""))).toEqual([
-      "低分單位人",
-      "高分單位人",
+    // ⚠️ 不可用 /課程/ 查——那會先抓到區塊標題「各課程完成率（低者在前）」。
+    const rows = screen.getAllByText(/分課程/).map((el) => el.textContent ?? "")
+    expect(rows.map((t) => t.replace(/[^一-鿿]/g, ""))).toEqual([
+      "低分課程人",
+      "高分課程人",
     ])
   })
 })
