@@ -35,11 +35,11 @@ docx 有納入版控，沒有 Python 環境的人可以直接從 repo 取用；�
 ```
 /sti-manual et05          產生該作業之手冊與測試項目
 /sti-manual et05 test     只補測試項目
-/sti-manual et05 image    圖拍好後接圖並重新產出（中斷後續行用）
+/sti-manual et05 image    圖拍好後接圖（中斷後續行用）
 ```
 
 一般情況**只需下第一行**：指令寫完手冊與測試項目、跑過格式檢查後會開出待拍清單，
-並詢問圖片是否已備妥；於同一對話回覆拍好即接著插圖、再產出 Word，不必再下指令。
+並詢問圖片是否已備妥；於同一對話回覆拍好即接著插圖，不必再下指令。Word 於全部定版後產出。
 `image` 供中斷後另起對話續行時使用。
 
 指令會自動依本檔與〈手冊撰寫規範〉的流程執行，並在完成後回報未經畫面核對之處與
@@ -153,7 +153,7 @@ python docs/manuals/tools/check_manual.py
 ### 步驟 7：產出並確認
 
 ```bash
-python docs/manuals/tools/gen_manual.py docs/manuals
+python docs/manuals/tools/gen_manual.py "docs/manuals/{模組}/{作業碼}-{作業名}.md"
 ```
 
 印出「內容核對通過」才表示 md 的每一段都進了 Word。之後開 Word 看排版：封面、目錄
@@ -184,7 +184,7 @@ python docs/manuals/tools/gen_manual.py docs/manuals
 
 - 每項寫成「**做什麼 → 系統應如何反應**」，一句 30～60 字
 - 項次於**各作業內自 1 起算**，不跨作業連號
-- 涵蓋主流程、權限擋下、各類檢核與結果呈現
+- 涵蓋主流程、各類檢核與結果呈現（權限擋板等共通行為不列，見規範〈共通行為不列〉）
 - 需要特殊條件才測得到的（兩個以上帳號配合、閱課期間已過之課程、重考次數已用盡之學員），一定要寫進「測試前準備」
 
 產出：
