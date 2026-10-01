@@ -21,10 +21,12 @@ CSV 匯出的功能欄中文。漏補一個 `func_name` 的後果是**靜默的*
 
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
-from app.dp.audit.query_service import _FUNC_LABELS, FUNC_OPTIONS
+from app.dp.audit.query_service import _ACTION_LABELS, _FUNC_LABELS, _MODULE_LABELS, _RESULT_LABELS, FUNC_OPTIONS
+from app.dp.audit.router import _Action, _Module, _Result
 
 pytestmark = pytest.mark.unit
 
@@ -77,3 +79,22 @@ def test_func_options_與_labels_同步():
     """`FUNC_OPTIONS` 是前端下拉的唯一來源，必須完整反映 `_FUNC_LABELS`。"""
     assert [o.value for o in FUNC_OPTIONS] == list(_FUNC_LABELS)
     assert all(o.label == _FUNC_LABELS[o.value] for o in FUNC_OPTIONS)
+
+
+def test_查詢值域與下拉選項是同一組值():
+    """router 的 `Literal` 值域與送給前端的選項必須逐值相同（#477 缺陷 2 的根因守門）。
+
+    這兩份清單各自手寫、彼此無連結，不同步的後果**兩個方向都是靜默的**：
+
+    - 多了 label、少了 `Literal` → 下拉選得到，選了回 **422**。這正是 `EXPORT` 於 #322
+      發生過的事；而且 #477 把下拉改為自動反映後端之後，新 label 會**自動出現在畫面上**，
+      復發時比當初更無聲。
+    - 多了 `Literal`、少了 label → 查得到但沒人選得出來。
+
+    ⚠️ 只釘單一值（如既有的 `test_action_type_export_is_queryable` 只釘 `EXPORT`）擋不住
+    下一個值；這裡釘的是**整組**。`_Module` / `_MODULE_LABELS` 是 #477 新增的同形狀配對，
+    一併納入——新開的雙寫要在開的當下就配守門，不要等它出事。
+    """
+    assert set(get_args(_Action)) == set(_ACTION_LABELS)
+    assert set(get_args(_Module)) == set(_MODULE_LABELS)
+    assert set(get_args(_Result)) == set(_RESULT_LABELS)

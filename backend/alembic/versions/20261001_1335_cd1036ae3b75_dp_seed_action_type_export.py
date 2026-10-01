@@ -15,8 +15,9 @@ ACTION_TYPE 清單補 EXPORT（#477）。
 導致「操作類別」下拉選得到「匯出」、查詢卻被擋成 422（#477 缺陷 2）。
 
 ⚠️ **`EDIT_SCOPE` 必填**：#450 起該欄為 NOT NULL 且刻意不設 `server_default`，裸 SQL INSERT
-不帶此欄會直接違反約束。值取 `HIDDEN`——`ACTION_TYPE` 五列已於 #459 全數為 `HIDDEN`，
-新列若不一致，維護頁會冒出一個其餘同組成員都看不到的孤兒列。
+不帶此欄會直接違反約束。值取 `HIDDEN`——`ACTION_TYPE` 五列由 **#171（`71ca59c07bd1`）的 `_HIDDEN_MASTERS`** 整組填入；
+⚠️ **不是 #459**，那支只處理 9 列 READONLY，其 `_TARGETS` 不含 `ACTION_TYPE`（該檔註解有特別
+澄清這點）。新列若不一致，維護頁會冒出一個其餘同組成員都看不到的孤兒列。
 
 ⚠️ **不能從 DP03 畫面新增**：`ACTION_TYPE` 同時被 `service._SYSTEM_PARAM_IDS` 擋在維護面外
 （主檔層 404）且全列 `HIDDEN`，所以只能走 migration。
@@ -41,7 +42,8 @@ _PARAM_KEY = "EXPORT"
 def upgrade() -> None:
     conn = op.get_bind()
     # 既存則跳過：本 migration 可能在已手動補過的環境重跑（sti-alembic-rules §Seed Data）。
-    # SQL 本體靜態、值一律具名綁定。
+    # SQL 本體靜態；**會變動的值**一律具名綁定，`SYSTEM` / `now()` / 旗標為靜態字面量。
+    # （不寫成「值一律具名綁定」——那比實際做到的強，照抄的人會以為內嵌字面量也被涵蓋。）
     conn.execute(
         text(
             'INSERT INTO "DP_PARAM_D" '

@@ -55,9 +55,9 @@ async def test_get_param_list_filters_disabled(db):
     )
     keys = [i.key for i in await ParamService().get_param_list(db, "ACTION_TYPE")]
     all_keys = [i.key for i in await ParamService().get_param_list(db, "ACTION_TYPE", enabled_only=False)]
-    assert "DELETE" not in keys
-    # 以「比完整清單少一項」表述，不寫死母體大小——驗的是過濾行為，日後種子增減不該咬到這條
-    assert len(keys) == len(all_keys) - 1
+    # 釘住「被濾掉的**正是**那一列」而非只是「數量少一」——後者在過濾砍錯列時仍會通過。
+    # 同樣不依賴母體大小，日後種子增減不會咬到這條。
+    assert set(all_keys) - set(keys) == {"DELETE"}
 
 
 async def test_get_param_list_include_disabled(db):
