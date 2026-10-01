@@ -19,6 +19,7 @@ from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.constants import (
     COURSE_CLOSED,
+    COURSE_DRAFT,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ROLE_STUDENT,
@@ -630,6 +631,90 @@ class TestLockedItemStillReadableWhenItShouldBe:
         r = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=_bearer(student))
 
         assert r.status_code == 200, r.text
+
+
+class TestCourseManagerPreview:
+    """課程管理者預覽**他人已發布**課程（#481）。
+
+    母體刻意與編輯頁的路由守衛（`RequireEtCourseManager` ＝ 教師或管理者）一致——那正是
+    「現在就能透過唯讀編輯頁讀到別人課程教材」的那組人，故本路徑不擴大授權面。
+    """
+
+    async def test_教師可預覽他人已發布課程(self, client, db) -> None:
+        owner = await _user(db, "p_own01", ROLE_TEACHER)
+        other = await _user(db, "p_tea01", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, owner)
+
+        r = await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(other))
+
+        assert r.status_code == 200, r.text
+
+    async def test_教師預覽他人課程時所有項目解鎖(self, client, db) -> None:
+        """🔴 **本 issue 最容易做壞的一條。**
+
+        `is_preview` 若仍以 `is_owner and not enrolled` 判定，觀摩者會落到
+        `is_preview=False` → 用他（空的）進度去算 `locked_item_ids` → 第二章以後全部
+        顯示鎖定。畫面上看起來像「這門課真的鎖住了」，而不像權限判定寫錯。
+        """
+        owner = await _user(db, "p_own02", ROLE_TEACHER)
+        other = await _user(db, "p_tea02", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, owner)
+        await _second_chapter_material(client, db, owner, ids["course_id"])
+
+        body = (await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(other))).json()
+
+        assert body["is_preview"] is True, "不在籍即為預覽——不論是不是擁有者"
+        assert body["is_owner"] is False, "他不是擁有者；兩個欄位的語意刻意不同"
+        locked = [item["locked"] for chapter in body["chapters"] for item in chapter["items"]]
+        assert locked == [False, False], f"預覽不套用鎖定，實際 {locked}"
+
+    async def test_教師可取得他人課程的教材內容(self, client, db) -> None:
+        """只放行結構、不放行內容的話，預覽頁每一項都會是「查無此課程內容」。"""
+        owner = await _user(db, "p_own03", ROLE_TEACHER)
+        other = await _user(db, "p_tea03", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, owner)
+
+        r = await client.get(f"/api/et/materials/{ids['material_id']}/content", headers=_bearer(other))
+
+        assert r.status_code == 200, r.text
+
+    async def test_純學員不得預覽他人課程(self, client, db) -> None:
+        """⛔ 放寬到「任一 ET 角色」等於全體登入者——學員角色於帳號建立時自動授予。"""
+        owner = await _user(db, "p_own04", ROLE_TEACHER)
+        student = await _user(db, "p_stu01")
+        ids = await _course_with_material(client, db, owner)
+
+        r = await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(student))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_LEARN_002"
+
+    async def test_他人的草稿課程仍不得預覽(self, client, db) -> None:
+        """草稿的**存在本身**是秘密——回 404 而非 403，與「查無此課程」無法區分。"""
+        owner = await _user(db, "p_own05", ROLE_TEACHER)
+        other = await _user(db, "p_tea05", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, owner)
+        await db.execute(update(EtCourse).where(EtCourse.course_id == ids["course_id"]).values(status=COURSE_DRAFT))
+        await db.flush()
+
+        r = await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(other))
+
+        assert r.status_code == 404
+
+    async def test_擁有者預覽自己的草稿仍可進入(self, client, db) -> None:
+        """與上一條成對：#255 明訂「草稿階段正是最需要預覽的時候」。
+
+        少了這一條，把上一條的 404 改成對所有人一律擋下也會綠。
+        """
+        owner = await _user(db, "p_own06", ROLE_TEACHER)
+        ids = await _course_with_material(client, db, owner)
+        await db.execute(update(EtCourse).where(EtCourse.course_id == ids["course_id"]).values(status=COURSE_DRAFT))
+        await db.flush()
+
+        r = await client.get(f"{_COURSES}/{ids['course_id']}/learn", headers=_bearer(owner))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["is_preview"] is True
 
 
 class TestVideoTicketFlow:
