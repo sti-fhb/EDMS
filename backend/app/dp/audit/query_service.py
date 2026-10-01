@@ -32,6 +32,23 @@ _FUNC_LABELS: dict[str, str] = {
     "DP-SCHEDULE": "DP-排程管理",
     "DM-ROLES": "DM-角色/權限",
     "DM-CATALOG": "DM-受控清單",
+    # DM（#477 補）：spec 僅定義 DM-ROLES / DM-CATALOG，以下四碼依寫入端語意命名
+    "DM-EDITOR": "DM-文件編輯",  # create_document / add_version / update_draft_version
+    "DM-REVIEW": "DM-簽核",  # approve / 廢止核准
+    "DM-OBSOLETE": "DM-廢止申請",  # initiate
+    "DM-PERSONAL": "DM-個人專區",  # delete_draft / withdraw
+    # ET（#477 補）：名稱取自 docs/specs/et/spec.md §稽核來源功能碼之「涵蓋動作」，非自行發明
+    "ET-ROLES": "ET-角色/標籤指派",
+    "ET-CATALOG": "ET-受控清單",
+    "ET-COURSE": "ET-課程維護",
+    "ET-ENROLLMENT": "ET-學員異動",
+    "ET-QUIZ-RESET": "ET-重置作答次數",
+    # ⚠️ 只涵蓋「SCHET002 系統代替學員交卷」。學員自己按提交**不寫稽核**（spec 明定），
+    # 故不可命名為「測驗作答」——那會讓人以為每次作答都有紀錄。
+    "ET-ATTEMPT": "ET-逾期自動交卷",
+    "ET-REPORT": "ET-週報匯出",
+    "ET-APPROVAL": "ET-線下核可",
+    "ET-EXPORT": "ET-個資匯出",
 }
 
 # 供前端「功能」查詢下拉（value=func_name、label=中文）。
@@ -53,6 +70,14 @@ _ACTION_LABELS: dict[str, str] = {
     "EXPORT": "匯出",
 }
 _RESULT_LABELS: dict[str, str] = {"SUCCESS": "成功", "FAIL": "失敗"}
+_MODULE_LABELS: dict[str, str] = {"DP": "平台", "ET": "教育訓練", "DM": "文件管理"}
+
+# 供前端「操作類別」/「執行結果」/「模組」查詢下拉。與 FUNC_OPTIONS 一同由 /options 端點送出，
+# 前端不再自行維護清單——#477 之前前端 auditLabels.ts 與此處各有一份，靠註解要求「手動同步」，
+# 結果兩邊同步了但同步的是同一份過時清單。
+ACTION_OPTIONS: list[dict[str, str]] = [{"value": c, "label": label} for c, label in _ACTION_LABELS.items()]
+RESULT_OPTIONS: list[dict[str, str]] = [{"value": c, "label": label} for c, label in _RESULT_LABELS.items()]
+MODULE_OPTIONS: list[dict[str, str]] = [{"value": c, "label": label} for c, label in _MODULE_LABELS.items()]
 
 # CSV 欄位 → 中文對照表（_csv_cell 依此決定是否轉換）。
 _CSV_CODE_LABELS: dict[str, dict[str, str]] = {"action_type": _ACTION_LABELS, "result": _RESULT_LABELS}
