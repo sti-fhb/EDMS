@@ -11,6 +11,12 @@ import { server } from "../../test/server"
 const navigate = vi.fn()
 /** 目前網址的 query string（`?quiz=` 落點用，#416）。各測試自行覆寫。 */
 const search = { current: "" }
+/**
+ * 目前 location 的 `key`。React Router 給**工作階段第一筆** location 的 key 固定是
+ * `"default"`，`useGoBack` 用它分辨「有沒有上一頁」。預設給非 `"default"` 的值，因為
+ * 真實情況下使用者是從某個清單頁點進來的。
+ */
+const locationKey = { current: "pushed-from-course-list" }
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
   return {
@@ -18,12 +24,20 @@ vi.mock("react-router-dom", async (orig) => {
     useNavigate: () => navigate,
     useParams: () => ({ courseId: "1" }),
     useSearchParams: () => [new URLSearchParams(search.current), vi.fn()],
+    useLocation: () => ({
+      pathname: "/et/courses/1/learn",
+      search: search.current,
+      hash: "",
+      state: null,
+      key: locationKey.current,
+    }),
   }
 })
 
 beforeEach(() => {
   navigate.mockReset()
   search.current = ""
+  locationKey.current = "pushed-from-course-list"
 })
 
 function mockStructure(overrides: Partial<LearnStructure>) {
@@ -416,6 +430,38 @@ describe("ET06 章節學習頁", () => {
       expect(await screen.findByText("第一章 採血基本流程")).toBeInTheDocument()
       expect(screen.getByText("採血流程概論")).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: /課後問卷|我的填答/ })).not.toBeInTheDocument()
+    })
+  })
+
+  /*
+    返回鍵原本寫死 `/et/my-courses`（ET03）。#481 讓教師會從課程列表（ET01）的
+    「全部課程」點進來預覽，他按返回被丟到「我的課程」——一頁與他無關、多半還是空的清單。
+
+    ⚠️ 兩條成對：只留第一條的話，把實作改成無條件 `navigate(-1)` 也會綠，而那會讓
+    直接貼網址進來的人按返回時**離開本站**。
+  */
+  describe("返回鍵（#481 後的多入口）", () => {
+    it("有上一頁時退回歷程，不跳回「我的課程」", async () => {
+      const user = userEvent.setup()
+      mockStructure({})
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByRole("button", { name: "返回上一頁" }))
+
+      expect(navigate).toHaveBeenCalledWith(-1)
+      expect(navigate).not.toHaveBeenCalledWith("/et/my-courses")
+    })
+
+    it("無上一頁（直接貼網址 / 邀請信連結）時導向我的課程，不退出本站", async () => {
+      const user = userEvent.setup()
+      locationKey.current = "default"
+      mockStructure({})
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByRole("button", { name: "返回上一頁" }))
+
+      expect(navigate).toHaveBeenCalledWith("/et/my-courses")
+      expect(navigate).not.toHaveBeenCalledWith(-1)
     })
   })
 })
