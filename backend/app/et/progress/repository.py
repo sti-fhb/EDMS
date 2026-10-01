@@ -13,7 +13,7 @@
 
 from decimal import Decimal
 
-from sqlalchemy import Integer, delete, func, literal, select
+from sqlalchemy import Integer, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.course.models import EtChapter, EtItem
 from app.et.material.models import EtMaterialVideo
+from app.et.progress.completion_sql import completed_pairs
 from app.et.progress.models import EtEnrollment, EtProgress, EtProgressInterval, EtProgressVideo
 from app.et.progress.rules import Segment
 
@@ -233,6 +234,8 @@ class EtProgressRepository:
             )
         )
         await db.flush()
+        if completed:
+            await self.stamp_completed_at(db, course_id=course_id, user_ids=[user_id], operator=operator)
 
     async def set_item_completed_bulk(
         self,
@@ -277,6 +280,82 @@ class EtProgressRepository:
             )
         )
         await db.flush()
+        if completed:
+            await self.stamp_completed_at(db, course_id=course_id, user_ids=user_ids, operator=operator)
+
+    async def stamp_completed_at(
+        self, db: AsyncSession, *, course_id: int, user_ids: list[str] | None = None, operator: OperatorInfo
+    ) -> None:
+        """若學員此刻剛好完課、且 `COMPLETED_AT` 仍為空，寫入當下時間（#464）。
+
+        Args:
+            course_id: 受影響的課程。
+            user_ids: 受影響的學員；`None` 表該課程全體（項目刪除時用）。
+            operator: 觸發者（寫入 `UPDATED_USER`）。
+
+        ## 🔴 掛在 repository 層是刻意的
+
+        三個進度寫入點中，`quiz/service.py` 直接持有本 repository、**繞過 progress
+        service**——掛在 service 層要三處各叫一次，第四個寫入點出現時就會漏。本方法由
+        `set_item_completed` / `set_item_completed_bulk` 自己呼叫，寫入路徑經過這裡就一定
+        會被處理。
+
+        ⚠️ 完課**不只**由進度寫入觸發（學員 2/3、教師刪掉剩下那一項 → 2/2）。那條路由
+        `course/repository.EtItemRepository.soft_delete_with_cascade` 另行呼叫本方法。
+
+        ## 只寫一次、回退不清除
+
+        `WHERE COMPLETED_AT IS NULL` 讓本方法冪等——同一學員重複完成同一項（每次開教材、
+        每個影片進度 ping）只會在第一次寫入。語意是「**第一次**達成完課的時間」，完課回退
+        時不清除：查詢端以即時判定決定列要不要出現，殘留的值不會被讀到。
+
+        ⛔ **不要改成取 `MAX(ET_PROGRESS.UPDATED_DATE)` 推導**：上方兩支 upsert 的
+        `on_conflict_do_update` **無條件**寫 `UPDATED_DATE = now`，那個時間會往後漂。
+
+        ⚠️ 判定**不看在籍**（`IS_REMOVED`）：ET04 查詢對已移除學員照列（完課是歷史事實，
+        與核可紀錄一致），寫入端跟著一致，否則同一位已移除學員在畫面上會沒有時間。
+        """
+        # ── 第一步：鎖住「尚未有完課時間」的選課列；查無即返回 ──────────────────────
+        #
+        # 🔴 這一步同時擋兩件事（#464 code review MEDIUM 1 / 2）：
+        #
+        # 1. **並發完成最後兩項會兩邊都不寫入。** 預設 READ COMMITTED 下，同一學員在兩個
+        #    分頁同時完成最後兩項，兩個 transaction 各自 upsert 自己那一列再算完課——都
+        #    看不到對方尚未 commit 的列，各自算出 `N-1`，於是**誰都不寫**。`FOR UPDATE`
+        #    讓後到者等前者 commit；READ COMMITTED 的下一個語句拿到新快照，重算就看得到
+        #    前者那一列，得到 `N`。
+        # 2. **已完課者每次影片 ping 都在白算子查詢。** 覆蓋率達標後，`progress/service`
+        #    的影片進度每一次 ping 都以 `completed=True` 呼叫進來。已有完課時間的列在這裡
+        #    就被濾掉、不加鎖、直接返回——成本降為一次走唯一鍵的單列查詢。
+        #
+        # ⚠️ `ORDER BY ENROLLMENT_ID`：批次寫入一次鎖多列，若兩個批次以不同順序取鎖會互相
+        # 死鎖。固定順序即可避免。
+        #
+        # ⚠️ 本鎖**沒有並發測試覆蓋**——integration fixture 是單一 session + rollback，造不出
+        # 兩個同時 commit 的 transaction。序列路徑的行為由 `test_et_completed_at.py` 驗證。
+        pending = select(EtEnrollment.enrollment_id).where(
+            EtEnrollment.course_id == course_id,
+            EtEnrollment.deleted == 0,
+            EtEnrollment.completed_at.is_(None),
+        )
+        if user_ids is not None:
+            pending = pending.where(EtEnrollment.user_id.in_(user_ids))
+        locked = list(await db.scalars(pending.order_by(EtEnrollment.enrollment_id).with_for_update()))
+        if not locked:
+            return
+
+        # ── 第二步：只對鎖住的列判定並寫入 ────────────────────────────────────────
+        pairs = completed_pairs(course_id=course_id, user_ids=user_ids)
+        now = utcnow()
+        await db.execute(
+            update(EtEnrollment)
+            .where(
+                EtEnrollment.enrollment_id.in_(locked),
+                EtEnrollment.user_id.in_(select(pairs.c.user_id)),
+            )
+            .values(completed_at=now, updated_user=operator.user_id, updated_date=now)
+        )
+        await db.flush()
 
     async def completed_item_ids(self, db: AsyncSession, *, user_id: str, course_id: int) -> set[int]:
         """該學員在此課程已完成的項目 id。
@@ -314,8 +393,13 @@ class EtProgressRepository:
         門課，N+1 會讓那一頁隨選課數線性變慢。
 
         ⚠️ **完成數必須 JOIN 回 `ET_ITEM` / `ET_CHAPTER` 過濾軟刪除**。`ET_PROGRESS` 的
-        列在項目被刪除後仍然留著（那是學習歷史，刻意不連帶刪），若直接 `count(*)` 會拿
-        分母已縮小、分子沒縮小的兩個數字相除——教師刪掉一章就會讓學員看到 150%。
+        列在項目被刪除後若仍留著，直接 `count(*)` 會拿分母已縮小、分子沒縮小的兩個數字
+        相除——教師刪掉一章就會讓學員看到 150%。
+        ⚠️ 2026-09-30 #464 更正：**進度列其實會被連帶軟刪除**——
+        `course/repository.EtItemRepository.soft_delete_with_cascade` 以 `.values(**audit)`
+        一併設 `DELETED=1`（`data-model.md:192` 亦記載 2026-08-24 已改為連帶軟刪）。本防禦
+        仍然正確，但承重的理由是「cascade 若被改壞時結果是少算而非多算」，不是「進度列會
+        殘留」。⚠️ 該 cascade 用 dict 展開，grep `EtProgress` 附近的 `deleted` 找不到它。
 
         課程層以 `ET_CHAPTER.COURSE_ID` 推導而非 `ET_PROGRESS.COURSE_ID`：後者是寫入當下
         存下的冗餘欄位，前者才是當前的結構事實。

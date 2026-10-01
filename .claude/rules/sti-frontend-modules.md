@@ -188,7 +188,13 @@ localStorage.setItem("last_category", id)        // ❌ 無前綴
 
 ### `date.ts` · `src/utils/date.ts`
 時間顯示用此模組，禁止 `new Date(...).toLocaleString(...)` 或自行時區換算。
-目前僅提供 **`formatDateTime(value)`**（`YYYY/MM/DD HH:mm` 本地，null/undefined 回空字串）。其餘格式化函式尚未建，需要時於此新增。
+目前提供三支（2026-09-30 更正，本段原文寫「僅提供 `formatDateTime`、null/undefined 回空字串」，**兩處皆與程式碼不符**——自 #64 起即回 `—`）：
+
+- **`formatDateTime(value)`**：`YYYY/MM/DD HH:mm` 本地時區；**null / 空 / 非法值回 `—`**（不是空字串）。⚠️ 呼叫端**不需要**再自己判斷 null 補「—」
+- `toDateTimeLocalInput(value)`：ISO → `<input type="datetime-local">` 所需的本地牆上時間
+- `fromDateTimeLocalInput(value)`：反向，本地牆上時間 → ISO UTC
+
+其餘格式化函式尚未建，需要時於此新增。
 
 ---
 

@@ -59,9 +59,13 @@ class EtTrackingRepository:
         不能互相取代，但**兩個防禦必須一致**：
 
         1. ⚠️ **完成數必須 JOIN 回 `ET_ITEM` / `ET_CHAPTER` 過濾軟刪除**。`ET_PROGRESS`
-           的列在項目被刪除後仍然留著（那是學習歷史，刻意不連帶刪），若直接 `count(*)`
-           會拿分母已縮小、分子沒縮小的兩個數字相除——**教師刪掉一個項目就會讓學員的
-           進度變成 200%**。
+           的列在項目被刪除後若仍留著，直接 `count(*)` 會拿分母已縮小、分子沒縮小的
+           兩個數字相除——**教師刪掉一個項目就會讓學員的進度變成 200%**。
+           ⚠️ 2026-09-30 #464 更正：**進度列其實會被連帶軟刪除**——
+           `course/repository.EtItemRepository.soft_delete_with_cascade` 以 `.values(**audit)`
+           一併設 `DELETED=1`（`data-model.md:192` 亦記載 2026-08-24 已改為連帶軟刪）。本防禦
+           仍然正確，但承重的理由是「cascade 若被改壞時結果是少算而非多算」，不是「進度列會
+           殘留」。⚠️ 該 cascade 用 dict 展開，grep `EtProgress` 附近的 `deleted` 找不到它。
         2. 課程層以 `ET_CHAPTER.COURSE_ID` 推導而非 `ET_PROGRESS.COURSE_ID`：後者是寫入
            當下存下的冗餘欄位，前者才是當前的結構事實。
 

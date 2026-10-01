@@ -340,7 +340,7 @@
 | 4 | 加入來源 | JOIN_SOURCE | VARCHAR(30) | Y | 參見 Lookup `ET_ENROLLMENT_SOURCE`（EMAIL_INVITE / INVITATION_CODE / TAG_DEFAULT）|
 | 5 | 加入時間 | JOINED_AT | TIMESTAMP | Y | |
 | 6 | 完課狀態 | COMPLETION_STATUS | VARCHAR(20) | Y | 參見 Lookup `ET_COMPLETION_STATUS`（NOT_STARTED / IN_PROGRESS / COMPLETED），即時計算 |
-| 7 | 完課時間 | COMPLETED_AT | TIMESTAMP | N | 達成完課之時間戳 |
+| 7 | 完課時間 | COMPLETED_AT | TIMESTAMP | N | **第一次**達成完課之時間戳（2026-09-30 #464 起寫入；見下方業務規則）|
 | 8 | 是否已移除 | IS_REMOVED | BOOLEAN | Y | 預設 false |
 | 9 | 移除時間 | REMOVED_AT | TIMESTAMP | N | |
 | 10 | 最後活動時間 | LAST_ACTIVITY_AT | TIMESTAMP | N | 最近一次學習動作 / 測驗提交時間 |
@@ -350,6 +350,15 @@
 - (USER_ID, COURSE_ID) 邏輯唯一（同學員同課程不重複加入）
 - IS_REMOVED = true 之紀錄前台不顯示，但學習歷史紀錄完整保留
 - 移除學員後不計入完課率分母
+- 🔴 **`COMPLETED_AT` 於 #464 之前從未被寫入**（與 `COMPLETION_STATUS` 同為死欄位）。自 #464 起：
+  - 寫入時機：**第一次**完課的當下，且**只寫一次**（`COMPLETED_AT IS NULL` 時才寫）
+  - 觸發點有**兩處**：項目完成旗標被設起時（`progress/repository.set_item_completed` / `_bulk`），
+    以及**項目被刪除時**（學員 2/3、教師刪掉剩下那一項 → 2/2，該路徑不經過任何進度寫入）
+  - 完課回退時**不清除**——語意是「第一次」；查詢端以即時判定決定列要不要出現，殘留值不會被讀到
+  - 判定**不看在籍**（`IS_REMOVED`），與 ET04 查詢對已移除者照列一致
+  - ⚠️ 活化前即已完課之既有資料該欄為空；正式機由 migration 從頭建立，不受影響
+  - ⛔ **不可改用 `MAX(ET_PROGRESS.UPDATED_DATE)` 推導**：進度 upsert 的 `on_conflict_do_update`
+    無條件寫 `UPDATED_DATE = now`，學員完課後再開一次教材那個時間就往後漂移
 - 標籤自動邀請（2026-07-02）：課程發布時依 ET_COURSE_TAG × ET_USER_TAG 取聯集去重（限具學員角色者；「全體」展開為全部學員角色者）批次 INSERT（JOIN_SOURCE = TAG_DEFAULT），每人寄一封通知信；事後貼標補加入寄彙整一封
 
 ---

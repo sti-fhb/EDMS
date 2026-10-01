@@ -1,6 +1,7 @@
 import ChevronRightIcon from "@mui/icons-material/ChevronRight"
 import Box from "@mui/material/Box"
 import Chip from "@mui/material/Chip"
+import Divider from "@mui/material/Divider"
 import Link from "@mui/material/Link"
 import List from "@mui/material/List"
 import ListItemButton from "@mui/material/ListItemButton"
@@ -14,16 +15,10 @@ import type { AdminCard, StudentCard, TeacherCard } from "./dashboardSchemas"
 import { hasAdminData, hasStudentData, hasTeacherData } from "./dashboardSchemas"
 import { useEtDashboard } from "./useEtDashboard"
 
-/**
- * 單一數字格（數字 + 名稱）。**與 DM 概況的 `StatCard` 逐項一致**：外框、內距、置中、
- * `h4` 粗體數字、`Chip` 標籤。
- *
- * ⚠️ 刻意不設 `minWidth`（#475）——寬度一律交給外層 grid。原本設了 `minWidth: 110`
- * 並用 `Stack` 排，結果是四張小卡擠在左邊、右半邊整片空白，而 DM 那側是撐滿的。
- */
+/** 單一數字格（數字 + 名稱）。比照 DM 概況的 `StatCard`。 */
 function StatCell({ label, count }: { label: string; count: number }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2, textAlign: "center" }}>
+    <Paper variant="outlined" sx={{ p: 2, textAlign: "center", minWidth: 110 }}>
       <Typography variant="h4" sx={{ fontWeight: 700 }}>
         {count}
       </Typography>
@@ -45,20 +40,12 @@ function StudentBlock({ card }: { card: StudentCard }) {
   return (
     <Box sx={{ mb: 3 }}>
       <SectionTitle>我的學習概況</SectionTitle>
-      {/* 與 DM「各類型文件總數」同一組斷點：窄螢幕兩欄、md 以上四欄平均分配整個寬度 */}
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
-          mb: 1,
-        }}
-      >
+      <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <StatCell label="進行中" count={card.in_progress} />
         <StatCell label="未開始" count={card.not_started} />
         <StatCell label="已完成" count={card.completed} />
         <StatCell label="未開放" count={card.pending_open} />
-      </Box>
+      </Stack>
       <Link component="button" variant="body2" onClick={() => navigate("/et/my-courses")}>
         前往我的課程
       </Link>
@@ -73,7 +60,7 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
       <SectionTitle>我的課程待辦</SectionTitle>
       {card.draft_count > 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          有 <strong>{card.draft_count}</strong> 門課程尚未發布。
+          有 <strong>{card.draft_count}</strong> 門課程尚未發布——學員目前看不到它們。
         </Typography>
       )}
       {card.ending_soon.length > 0 && (
@@ -113,27 +100,20 @@ function AdminBlock({ card }: { card: AdminCard }) {
   return (
     <Box sx={{ mb: 3 }}>
       <SectionTitle>全體訓練概況</SectionTitle>
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
-          mb: 1,
-        }}
-      >
+      <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <StatCell label="逾期未完成" count={card.overdue_incomplete} />
-      </Box>
-      {card.by_course.length > 0 && (
+      </Stack>
+      {card.by_unit.length > 0 && (
         <>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
-            各課程完成率（低者在前）
+            各單位達成率（低者在前）
           </Typography>
           <Stack spacing={0.5} sx={{ mb: 1 }}>
-            {card.by_course.map((course) => (
-              <Typography key={course.course_name} variant="body2">
-                {course.course_name} {course.completion_rate}%
+            {card.by_unit.map((unit) => (
+              <Typography key={unit.tag_name} variant="body2">
+                {unit.tag_name} {unit.completion_rate}%
                 <Typography component="span" variant="caption" color="text.secondary">
-                  （{course.completed} / {course.enrolled} 人）
+                  （{unit.completed} / {unit.enrolled} 人）
                 </Typography>
               </Typography>
             ))}
@@ -171,19 +151,15 @@ export function EtOverviewWidget({ enabled }: { enabled: boolean }) {
   const admin = hasAdminData(data.admin) ? data.admin : null
   if (!student && !teacher && !admin) return null
 
-  // 結構與 `DmOverviewWidget` 一致（#475）：**標題在白底卡之外、之上**，
-  // 卡片用 `<Paper>`（非 `variant="outlined"`，與 DM 的陰影卡同款）。
-  // 原本標題在 Paper 內、外層又是 outlined，兩個模組的區塊長得不一樣。
   return (
-    <Box sx={{ mt: 4 }}>
+    <Paper variant="outlined" sx={{ p: 2, mt: 3 }}>
       <Typography variant="h6" gutterBottom>
-        ET 教育訓練概況
+        教育訓練概況
       </Typography>
-      <Paper sx={{ p: 2, mb: 3 }}>
-        {admin && <AdminBlock card={admin} />}
-        {teacher && <TeacherBlock card={teacher} />}
-        {student && <StudentBlock card={student} />}
-      </Paper>
-    </Box>
+      <Divider sx={{ mb: 2 }} />
+      {admin && <AdminBlock card={admin} />}
+      {teacher && <TeacherBlock card={teacher} />}
+      {student && <StudentBlock card={student} />}
+    </Paper>
   )
 }

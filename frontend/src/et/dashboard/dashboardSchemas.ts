@@ -23,9 +23,9 @@ export interface TeacherCard {
   draft_count: number
 }
 
-/** 管理者卡的一列：一門課程的完成狀況（#475，原為受訓單位）。 */
-export interface CourseRate {
-  course_name: string
+/** 管理者卡的一列：一個受訓單位的達成狀況。 */
+export interface UnitRate {
+  tag_name: string
   enrolled: number
   completed: number
   /** `DECIMAL(5,2)` 經 JSON 後為字串。 */
@@ -36,7 +36,7 @@ export interface CourseRate {
 export interface AdminCard {
   overdue_incomplete: number
   completion_rate: string
-  by_course: CourseRate[]
+  by_unit: UnitRate[]
 }
 
 /**
@@ -70,12 +70,12 @@ export function hasTeacherData(card: TeacherCard | null): card is TeacherCard {
 }
 
 /**
- * 管理者卡：全站連一門有人的課程都沒有時不渲染。
+ * 管理者卡：全站連一筆在籍都沒有時不渲染。
  *
- * ⚠️ 單看 `overdue_incomplete` 不對——它在「一切正常」時為 0，而那時管理者仍該看到
- * 完成率。改為課程分組後 `by_course` 的空集合意義也更明確了（#453 時是「有人但都
- * 沒貼單位標籤」也會空，課程不會有那個狀態）。兩者聯集皆空才是真的無事可看。
+ * ⚠️ 判準用 `by_unit` 或 `overdue_incomplete` 都不對——前者在「有人但都沒貼單位標籤」
+ * 時為空、後者在「一切正常」時為 0，而那兩種情況管理者都該看到完成率。故以「有沒有
+ * 任何一個單位有人」加上「有沒有逾期」聯集，兩者皆空才是真的無事可看。
  */
 export function hasAdminData(card: AdminCard | null): card is AdminCard {
-  return card !== null && (card.by_course.length > 0 || card.overdue_incomplete > 0)
+  return card !== null && (card.by_unit.length > 0 || card.overdue_incomplete > 0)
 }

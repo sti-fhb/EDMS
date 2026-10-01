@@ -42,14 +42,15 @@ export function StudentApprovalList() {
     )
   }
 
-  // 🔴 錯誤不可被渲染成「尚無已通過核可的課程」——那會讓學員以為自己的核可不見了。
+  // 🔴 錯誤不可被渲染成「尚無已通過的課程」——那會讓學員以為自己的紀錄不見了。
   if (isError) {
     return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
   }
 
   const rows = data?.data ?? []
   if (rows.length === 0) {
-    return <Alert severity="info">您目前尚無已通過核可的課程</Alert>
+    // #464：文案拿掉「核可」——不需線下核可的課程完課即通過，那些課從來沒有核可這一步。
+    return <Alert severity="info">您目前尚無已通過的課程</Alert>
   }
 
   const totalPages = data?.meta.total_pages ?? 0
@@ -60,8 +61,8 @@ export function StudentApprovalList() {
           <TableHead>
             <TableRow>
               <TableCell>課程</TableCell>
-              <TableCell>核可結果</TableCell>
-              <TableCell>核可時間</TableCell>
+              <TableCell>結果</TableCell>
+              <TableCell>通過時間</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -72,6 +73,7 @@ export function StudentApprovalList() {
                   {/* 本清單恆為已通過，故為靜態標籤而非依欄位渲染——後端不回 `result`。 */}
                   <Chip size="small" color="success" label="已通過" />
                 </TableCell>
+                {/* 活化前就已完課的既有資料通過時間為空——`formatDateTime(null)` 本身回「—」。 */}
                 <TableCell>{formatDateTime(row.approved_at)}</TableCell>
               </TableRow>
             ))}
