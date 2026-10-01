@@ -1004,6 +1004,37 @@ export const handlers = [
       version: body.version + 1,
     })
   }),
+  // US10 篩選下拉選項（#477：清單唯一來源在後端，前端不再自行維護）。
+  // 置於 /api/dp/audit/logs 之前：MSW 靜態陣列先寫先贏，避免日後有人把 logs 改成萬用路徑時被吃掉。
+  // ET 與 DM 各留一項、DP 留一項——#477 之前 ET 整組缺席，fixture 若只放 DP 會讓「ET 出得來」驗不到。
+  http.get("/api/dp/audit/options", () =>
+    HttpResponse.json({
+      func_options: [
+        { value: "DP-AUTH", label: "DP-登入登出" },
+        { value: "DM-EDITOR", label: "DM-文件編輯" },
+        { value: "ET-COURSE", label: "ET-課程維護" },
+      ],
+      // 六個 action 全列（含 #477 補上的 EXPORT）——既有測試以「刪除」驗中文選項，
+      // fixture 若只放代表性幾個，那些測試會因為選項不存在而紅，失去原本的鑑別力。
+      action_options: [
+        { value: "LOGIN", label: "登入" },
+        { value: "LOGOUT", label: "登出" },
+        { value: "CREATE", label: "新增" },
+        { value: "UPDATE", label: "修改" },
+        { value: "DELETE", label: "刪除" },
+        { value: "EXPORT", label: "匯出" },
+      ],
+      result_options: [
+        { value: "SUCCESS", label: "成功" },
+        { value: "FAIL", label: "失敗" },
+      ],
+      module_options: [
+        { value: "DP", label: "平台" },
+        { value: "ET", label: "教育訓練" },
+        { value: "DM", label: "文件管理" },
+      ],
+    }),
+  ),
   // US10 操作記錄查詢（預設 happy path：一筆 SUCCESS + 一筆 FAIL 供 UI 驗證）
   http.get("/api/dp/audit/logs", () =>
     HttpResponse.json({

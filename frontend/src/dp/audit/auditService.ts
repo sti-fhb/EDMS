@@ -24,11 +24,31 @@ export interface AuditLogRow {
 /** 查詢條件（空字串欄位於送出前轉為 undefined，不帶入 query string）。 */
 export interface AuditFilterParams {
   operator?: string
+  module?: string
   func_name?: string
   action_type?: string
   result?: string
   date_from?: string
   date_to?: string
+}
+
+/** 篩選下拉的單一選項（對齊後端 AuditOptionItem）。 */
+export interface AuditOption {
+  value: string
+  label: string
+}
+
+/**
+ * 四組篩選下拉（對齊後端 AuditOptionsResponse）。
+ *
+ * ⚠️ 這些清單**只能**來自後端——#477 之前前端自行維護一份，與後端靠註解要求「手動同步」，
+ * 結果兩邊同步了但同步的是同一份過時清單（少 13 個功能碼，ET 整組缺席）。
+ */
+export interface AuditOptions {
+  func_options: AuditOption[]
+  action_options: AuditOption[]
+  result_options: AuditOption[]
+  module_options: AuditOption[]
 }
 
 export interface AuditQueryParams extends AuditFilterParams {
@@ -46,5 +66,10 @@ export const auditApi = {
   async exportCsv(params: AuditFilterParams): Promise<Blob> {
     const { data } = await http.get("/dp/audit/logs/export", { params, responseType: "blob" })
     return data as Blob
+  },
+  /** 取四組篩選下拉選項。純靜態對照、與資料無關，故可長時間快取（見 useAuditOptions）。 */
+  async options(): Promise<AuditOptions> {
+    const { data } = await http.get<AuditOptions>("/dp/audit/options")
+    return data
   },
 }

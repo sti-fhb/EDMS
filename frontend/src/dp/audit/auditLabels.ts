@@ -1,47 +1,27 @@
 /**
- * 稽核代碼 → 中文對照（US10）。
+ * 稽核代碼 → 中文的查表工具（US10 / #477）。
  *
- * 代碼為後端寫死之 enum（`ACTION_TYPE` 種子清單不納參數維護頁，見 #68），故於前端硬編碼；
+ * **對照表本身不在前端**——改由 `GET /dp/audit/options` 取得（`useAuditOptions`），本檔只提供
+ * 從那份選項查 label 的小工具。
+ *
+ * #477 之前這裡硬編碼了 `ACTION_LABELS` / `RESULT_LABELS`，另有一份 `FUNC_OPTIONS` 寫在
+ * `AuditPage.tsx`，三者都靠註解要求與後端「手動同步」。結果是：兩邊確實同步了，但同步的是
+ * **同一份過時清單**——少了 13 個功能碼（ET 整組缺席，其中 `ET-COURSE` 是全表第二大），
+ * 而且下拉提供的「匯出」在後端值域裡根本不存在、選了就 422。雙寫的失效是靜默的，
+ * 沒有任何測試會因為「新模組寫了稽核卻沒人補清單」而變紅。
+ *
  * 送給 API 的值一律維持英文碼，中文僅用於畫面呈現。
- * 注意：稽核之失敗碼為 `FAIL`，與排程的 `FAILED` 不同，兩處對照表不共用。
- *
- * ⚠️ 同一份對照另存於後端 `app/dp/audit/query_service.py` 的 `_ACTION_LABELS` / `_RESULT_LABELS`
- * （供 CSV 匯出）。新增或修改 `action_type` / `result` 列舉值時，兩邊必須同步，
- * 否則畫面與匯出檔會出現一邊中文、一邊原碼的不一致（未知碼 fallback 不會報錯，只會靜默不一致）。
+ * 注意：稽核之失敗碼為 `FAIL`，與排程的 `FAILED` 不同。
  */
 
-const ACTION_LABELS: Record<string, string> = {
-  LOGIN: "登入",
-  LOGOUT: "登出",
-  CREATE: "新增",
-  UPDATE: "修改",
-  DELETE: "刪除",
-  // ET02 具名個資匯出（#322 / SA 裁示 2026-09-14）
-  EXPORT: "匯出",
-}
+import type { AuditOption } from "./auditService"
 
-const RESULT_LABELS: Record<string, string> = {
-  SUCCESS: "成功",
-  FAIL: "失敗",
-}
-
-/** 下拉選項（value=英文碼、label=中文）；「全部」以 sentinel 呈現，同 FUNC_OPTIONS。 */
-export const ACTION_OPTIONS: { value: string; label: string }[] = [
-  { value: "全部", label: "全部" },
-  ...Object.entries(ACTION_LABELS).map(([value, label]) => ({ value, label })),
-]
-
-export const RESULT_OPTIONS: { value: string; label: string }[] = [
-  { value: "全部", label: "全部" },
-  ...Object.entries(RESULT_LABELS).map(([value, label]) => ({ value, label })),
-]
-
-/** 操作類別代碼 → 中文；未知碼原樣回傳。 */
-export function actionLabel(code: string): string {
-  return ACTION_LABELS[code] ?? code
-}
-
-/** 執行結果代碼 → 中文；未知碼原樣回傳。 */
-export function resultLabel(code: string): string {
-  return RESULT_LABELS[code] ?? code
+/**
+ * 從選項清單查中文；查不到（含選項尚未載入）回原碼。
+ *
+ * 回原碼而非空字串是刻意的——使用者至少看得到 `ET-COURSE` 這種可辨識的值並能回報，
+ * 空白則會讓人以為那一欄沒有資料。
+ */
+export function labelOf(options: AuditOption[], code: string): string {
+  return options.find((o) => o.value === code)?.label ?? code
 }
