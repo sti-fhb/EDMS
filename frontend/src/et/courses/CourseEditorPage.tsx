@@ -1097,6 +1097,26 @@ export function EtCourseEditorPage() {
         actions={
           <Stack direction="row" spacing={1}>
             {/*
+              「以學員身分預覽」（#481）。**草稿與已關閉課程只有這個入口**——課程列表的
+              「全部課程」只含已發布且期間未過者，而 `structure` 有一段專為草稿而寫的
+              程式碼（#255：「教師需要在發布**之前**確認學員視角，草稿階段正是最需要
+              預覽的時候」），少了這顆按鈕那段永遠到不了。
+
+              ⚠️ 新增模式不顯示：課程還不存在，沒有東西可以預覽。
+              ⚠️ 唯讀者（他人課程）不顯示：他是從「全部課程」點進預覽頁、再退回來才會
+              看到編輯頁，再給一顆按鈕只是繞回去。
+            */}
+            {courseId !== undefined && !readOnly && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<VisibilityIcon />}
+                onClick={() => navigate(`/et/courses/${courseId}/learn`)}
+              >
+                以學員身分預覽
+              </Button>
+            )}
+            {/*
               「邀請學員」僅**已發布**課程顯示（AC 1）——草稿尚無邀請碼、學員端也看不到課程；
               已關閉課程的學習頁為唯讀，把人邀請進去只會讓他點開後什麼都不能做。再開課後
               `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。

@@ -78,7 +78,7 @@ async def learn_structure(
     加入），而「你尚未加入此課程」是可行動的訊息。**以 id 定址的資源端點則一律 404**
     （見 service 之 `_FILE_NOT_FOUND`）。
     """
-    return await _service.structure(db, course_id, user_id=ctx.user_id)
+    return await _service.structure(db, course_id, user_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.get("/materials/{material_id}/content", response_model=MaterialContent)
@@ -88,7 +88,7 @@ async def material_content(
     db: AsyncSession = Depends(get_db),
 ) -> MaterialContent:
     """教材內容：說明文字 + 影片清單 + DM 文件清單（含廢止旗標與可否內嵌預覽）。"""
-    return await _service.material_content(db, material_id, user_id=ctx.user_id)
+    return await _service.material_content(db, material_id, user_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.post("/videos/{video_id}/ticket", response_model=VideoTicket)
@@ -101,7 +101,7 @@ async def video_ticket(
 
     **授權在此完成**：走與其他端點相同的「在籍 OR 擁有者」判定；取檔端點只驗票。
     """
-    await _service.ensure_video_accessible(db, video_id, user_id=ctx.user_id)
+    await _service.ensure_video_accessible(db, video_id, user_id=ctx.user_id, roles=ctx.roles)
     return VideoTicket(ticket=issue_video_ticket(user_id=ctx.user_id, video_id=video_id), expires_in=TICKET_TTL_SECONDS)
 
 
@@ -117,7 +117,7 @@ async def material_doc_file(
     授權由 `material_id` 那側判定，另驗證 `doc_id` **確實被此教材引用**——否則在籍
     任一課程者即可用自己有權的 `material_id` 搭配任意 `doc_id` 取走全站被引用的文件。
     """
-    content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id)
+    content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id, roles=ctx.roles)
     _ensure_file_present(content.path)
     return FileResponse(content.path, media_type=content.mime, filename=content.name)
 

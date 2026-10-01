@@ -38,8 +38,16 @@ export interface LearnStructure {
   course_id: number
   course_name: string
   status: string
-  /** 課程擁有者（教師預覽模式，#255 裁示 Q1=A）。 */
+  /** 課程擁有者（建立者本人）。 */
   is_owner: boolean
+  /**
+   * **以預覽身分檢視**（通過授權但不在籍，#481）：擁有者、或觀摩他人已發布課程的
+   * 教師／管理者。
+   *
+   * 🔴 預覽橫幅與「不顯示進度條」一律看這一欄，**不是 `is_owner`**。兩者在 #481
+   * 之前恰好等價，之後不再——觀摩者 `is_owner=false` 但確實在預覽。
+   */
+  is_preview: boolean
   /** 課程已關閉 → 顯示唯讀提示。**不過濾內容**（#255 裁示 Q2=A）。 */
   is_closed: boolean
   /** 已依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮之可選倍速。 */
