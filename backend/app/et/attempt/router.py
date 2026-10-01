@@ -86,7 +86,7 @@ async def quiz_preview(
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> QuizPreview:
-    """教師預覽用的**唯讀**題目清單（#483）。
+    """教師預覽用的**唯讀**題目清單（#486）。
 
     **在籍學員一律 404**——他要看題目只有「開始作答」一條路。授權細節見
     `service.preview` 的 docstring。
@@ -132,7 +132,7 @@ async def start_attempt(
     Raises:
         AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / 項目尚未解鎖；
             409 `ET_ATTEMPT_002` 重考次數已用完；409 `ET_ATTEMPT_006` 課程已關閉；
-            409 `ET_ATTEMPT_008` 預覽模式唯讀（#483）。
+            409 `ET_ATTEMPT_008` 預覽模式唯讀（#486）。
     """
     return await _service.start(db, quiz_id, operator=operator, roles=ctx.roles)
 

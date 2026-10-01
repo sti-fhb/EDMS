@@ -140,11 +140,11 @@ export interface QuizIntro {
    * 前者聯繫教師重置有用，後者重置一點用也沒有。少了這個欄位就只能寫死一句「重考次數
    * 已用完，請聯繫教師重置」，而那會叫課程關閉的學員去做一件沒有用的事。
    *
-   * ⚠️ #483 起 `can_start === false` 有**三種**成因——先看 `is_preview`。
+   * ⚠️ #486 起 `can_start === false` 有**三種**成因——先看 `is_preview`。
    */
   course_closed: boolean
   /**
-   * 本次請求是否為預覽（**不在籍**者，#483）。與 `LearnStructure.is_preview` 同一判定。
+   * 本次請求是否為預覽（**不在籍**者，#486）。與 `LearnStructure.is_preview` 同一判定。
    *
    * ⚠️ 為真時 `can_start` 恆為 `false`，但**不可顯示另外兩句訊息**——對預覽的教師說
    * 「重考次數已用完，請聯繫教師重置」是一句不成立的話（他沒有作答次數可言）。
@@ -167,7 +167,7 @@ export interface QuizPreviewQuestion {
 }
 
 /**
- * 教師預覽用的唯讀題目清單（#483）。
+ * 教師預覽用的唯讀題目清單（#486）。
  *
  * ⚠️ **順序是建立順序，不是學員會看到的順序**——學員每次作答都依該次 attempt 的快照
  * 洗牌（題目與選項皆然）。

@@ -210,7 +210,7 @@ class QuizIntro(BaseModel):
     #: 前者聯繫教師重置有用，後者重置一點用也沒有。少了這個欄位前端只能寫死一句
     #: 「重考次數已用完，請聯繫教師重置」，而那會叫課程關閉的學員去做一件沒有用的事。
     course_closed: bool
-    #: 本次請求是否為預覽（**不在籍**者，#483）。與 `LearnStructure.is_preview` 同一個判定。
+    #: 本次請求是否為預覽（**不在籍**者，#486）。與 `LearnStructure.is_preview` 同一個判定。
     #:
     #: ⚠️ 預覽時 `can_start` 恆為 `False`，於是 `can_start=False` 多了**第三種**成因。
     #: 前端必須先看 `is_preview` 再決定要不要顯示上述兩句訊息——對教師說「重考次數已用完」
@@ -233,7 +233,7 @@ class QuizPreviewQuestion(BaseModel):
 
 
 class QuizPreview(BaseModel):
-    """教師預覽用的唯讀題目清單（#483）。
+    """教師預覽用的唯讀題目清單（#486）。
 
     ⚠️ **順序是建立順序，不是學員會看到的順序**——學員每次作答都依該次 attempt 的快照
     洗牌（題目與選項皆然）。預覽呈現得出「題目寫了什麼」，呈現不出「他會以什麼順序看到」。

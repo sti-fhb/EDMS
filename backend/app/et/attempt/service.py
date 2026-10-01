@@ -104,7 +104,7 @@ class QuizAccess:
     回寫，而那裡是以該 `attempt` 重算（`_is_preview(attempt=...)`）而非沿用開始當下的
     值。放進來會是一個沒有讀取端的欄位，隨時間與真實判定漂移而不會有測試抓到。
 
-    > ⚠️ `enrolled` 則**必須**帶（#483）：它決定本次請求是不是預覽，而預覽的三個分支
+    > ⚠️ `enrolled` 則**必須**帶（#486）：它決定本次請求是不是預覽，而預覽的三個分支
     > （引導頁的 `is_preview`、唯讀題目、拒絕開始作答）都在 `_require_access` 之後、
     > 都要問同一件事。各自再查一次 `is_enrolled` 等於同一個判定有三份實作。
 
@@ -121,7 +121,7 @@ class QuizAccess:
     open_end_at: datetime | None
     #: #374：閱課起始時間。判定「尚未開放」用，與 `open_end_at` 成對。
     open_start_at: datetime | None
-    #: 是否在籍。**不在籍 = 預覽**（#483，與 `learning/service.is_preview` 同一判定）。
+    #: 是否在籍。**不在籍 = 預覽**（#486，與 `learning/service.is_preview` 同一判定）。
     enrolled: bool
 
     def is_closed(self, *, now: datetime) -> bool:
@@ -160,7 +160,7 @@ class EtAttemptService:
     ) -> QuizIntro:
         """引導頁資訊（AC 1 / AC 2）。
 
-        ## 預覽者（不在籍）拿到的是同一份資訊，但 `can_start=False`（#483）
+        ## 預覽者（不在籍）拿到的是同一份資訊，但 `can_start=False`（#486）
 
         題數 / 及格分 / 時限是**考試規則**，教師本來就該看得到——他在 ET05 設定的就是
         這些。差別只在他不能開始作答：預覽唯讀，不建立 attempt。題目本體另由
@@ -231,7 +231,7 @@ class EtAttemptService:
     async def preview(
         self, db: AsyncSession, quiz_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
     ) -> QuizPreview:
-        """教師預覽用的**唯讀**題目清單（#483）。
+        """教師預覽用的**唯讀**題目清單（#486）。
 
         ## 為何另開端點而不是把題目塞進 `intro`
 
@@ -317,11 +317,11 @@ class EtAttemptService:
 
         Raises:
             AppError: 404 查無 / 無權 / 項目未解鎖；409 `ET_ATTEMPT_002` 次數用完；
-                409 `ET_ATTEMPT_008` 預覽模式（#483）。
+                409 `ET_ATTEMPT_008` 預覽模式（#486）。
         """
         user_id = operator.user_id
         access = await self._require_access(db, quiz_id, user_id, roles=roles)
-        # 2026-10-01 裁示：**預覽唯讀**，不建立 attempt（#483）。題目由 `preview()` 取。
+        # 2026-10-01 裁示：**預覽唯讀**，不建立 attempt（#486）。題目由 `preview()` 取。
         #
         # ⚠️ 這道守門排在**續作分支之前**，與下方三道（未開放 / 已關閉 / 未解鎖）不同。
         # 那三道刻意放在續作之後是為了保住「寫到一半的考卷不被教師的調整中斷」那條窄縫；
@@ -594,7 +594,7 @@ class EtAttemptService:
         預設 `frozenset()` 退化成 #481 之前的「在籍 OR 擁有者」——**fail-closed**，漏傳
         的後果是教師少看到東西，不是學員多看到東西。但那個退化本身是缺陷：#481 把學習頁
         放行給課程管理者時沒同步改本模組，於是非擁有者教師預覽課程、點到測驗項目就拿到
-        「查無此測驗」（#483 修）。
+        「查無此測驗」（#486 修）。
 
         Returns:
             `QuizAccess`。**不回 `is_closed` 布林而回 `course_status` + `open_end_at`**：
@@ -649,7 +649,7 @@ class EtAttemptService:
     async def _is_preview(self, db: AsyncSession, *, attempt) -> bool:
         """該 attempt 是否為擁有者預覽（是擁有者且**不在籍**）。
 
-        ## ⚠️ 自 #483 起不會再有新的預覽 attempt——本函式只服務**既有資料**
+        ## ⚠️ 自 #486 起不會再有新的預覽 attempt——本函式只服務**既有資料**
 
         2026-10-01 裁示預覽唯讀：`start` 現在以 `ET_ATTEMPT_008` 擋下所有不在籍者，故
         不可能再建立預覽 attempt。本函式保留是為了**本次改動之前**已經產生的那些列——

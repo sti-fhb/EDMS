@@ -465,7 +465,7 @@ class TestWriteGuards:
         assert await _interval_count(db, teacher, video_id) == 0
 
     async def test_非擁有者教師預覽他人課程同樣是靜默而非四零四(self, client, db) -> None:
-        """#483：#481 放行了學習頁，但 `_guard_write` 沒跟上。
+        """#486：#481 放行了學習頁，但 `_guard_write` 沒跟上。
 
         補之前，觀摩他人課程的教師**每一次進度上報都拿到 404**——前端的上報是背景行為，
         於是症狀是「看起來好像沒事，但控制台一直在噴」，沒有人會回報它。

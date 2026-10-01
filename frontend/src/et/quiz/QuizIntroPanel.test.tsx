@@ -181,7 +181,7 @@ describe("ET07 測驗資訊面板", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  describe("預覽模式（#483）", () => {
+  describe("預覽模式（#486）", () => {
     it("顯示唯讀題目與選項，且選項不可點選", async () => {
       mockIntro({ is_preview: true, can_start: false })
       mockPreviewQuestions([SINGLE_Q])
@@ -205,7 +205,7 @@ describe("ET07 測驗資訊面板", () => {
     })
 
     it("不顯示「重考次數已用完」——那對預覽的教師是一句不成立的話", async () => {
-      // `can_start=false` 的第三種成因（#483）。少了這條，前端沿用舊的兩分支判斷也會
+      // `can_start=false` 的第三種成因（#486）。少了這條，前端沿用舊的兩分支判斷也會
       // 通過上面兩條，而教師會看到一句叫他去聯繫自己的訊息。
       mockIntro({ is_preview: true, can_start: false, course_closed: false })
       mockPreviewQuestions([SINGLE_Q])
