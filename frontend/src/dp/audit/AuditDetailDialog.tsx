@@ -12,7 +12,8 @@ import TableRow from "@mui/material/TableRow"
 import Typography from "@mui/material/Typography"
 
 import { formatDateTime } from "../../utils/date"
-import { actionLabel, resultLabel } from "./auditLabels"
+import { labelOf } from "./auditLabels"
+import { useAuditOptions } from "./useAuditLogs"
 import type { AuditLogRow } from "./auditService"
 
 /** JSON 字串格式化呈現；parse 失敗則原樣顯示（none → 「—」）。 */
@@ -38,6 +39,8 @@ const PRE_SX = {
 
 /** 操作記錄明細（唯讀 modal）：完整欄位 + 執行結果 / 事件描述 + 異動前後值。 */
 export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; onClose: () => void }) {
+  // 與列表共用同一份後端選項（query 已快取，不會多打一次請求）
+  const { actionOptions, resultOptions } = useAuditOptions()
   return (
     <Dialog open={log !== null} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>操作記錄明細</DialogTitle>
@@ -61,7 +64,7 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>操作類別</TableCell>
                   <TableCell>
-                    <Chip size="small" label={actionLabel(log.action_type)} />
+                    <Chip size="small" label={labelOf(actionOptions, log.action_type)} />
                   </TableCell>
                 </TableRow>
                 <TableRow>
@@ -70,7 +73,7 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
                     <Chip
                       size="small"
                       color={log.result === "FAIL" ? "error" : "success"}
-                      label={resultLabel(log.result)}
+                      label={labelOf(resultOptions, log.result)}
                     />
                   </TableCell>
                 </TableRow>

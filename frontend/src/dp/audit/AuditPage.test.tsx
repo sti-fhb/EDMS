@@ -159,3 +159,70 @@ describe("AuditPage 操作記錄查詢（唯讀）", () => {
     vi.restoreAllMocks()
   })
 })
+describe("AuditPage 篩選選項來自後端（#477）", () => {
+  beforeEach(() => {
+    localStorage.setItem("authToken", "test-token")
+  })
+
+  it("功能下拉列出三個模組的功能，ET 不再缺席", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("成功")
+
+    await user.click(screen.getByRole("combobox", { name: "功能" }))
+
+    // #477 之前前端硬編碼清單只有 DP / DM，ET 整組缺席
+    expect(await screen.findByRole("option", { name: "ET-課程維護" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "DM-文件編輯" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "DP-登入登出" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "ET-COURSE" })).not.toBeInTheDocument() // 不顯示原碼
+  })
+
+  it("操作類別含「匯出」——#322 導入後下拉有、後端值域沒有，選了會 422", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("成功")
+
+    await user.click(screen.getByRole("combobox", { name: "操作類別" }))
+
+    expect(await screen.findByRole("option", { name: "匯出" })).toBeInTheDocument()
+  })
+
+  it("選模組 → 送出 API 帶英文碼 module", async () => {
+    const seen: (string | null)[] = []
+    server.use(
+      http.get("/api/dp/audit/logs", ({ request }) => {
+        seen.push(new URL(request.url).searchParams.get("module"))
+        return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("查無符合條件之紀錄")
+
+    await user.click(screen.getByRole("combobox", { name: "模組" }))
+    await user.click(await screen.findByRole("option", { name: "教育訓練" }))
+
+    // 送的是 ET 而非「教育訓練」——下拉顯示中文、API 收英文碼
+    await waitFor(() => expect(seen).toContain("ET"))
+  })
+
+  it("選項端點失敗時下拉為空、列表降級為原碼，不退回任何硬編碼清單", async () => {
+    server.use(http.get("/api/dp/audit/options", () => new HttpResponse(null, { status: 500 })))
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    // 等待錨點不可用「成功」——那是 options 轉出來的中文，正是本情境下會消失的東西。
+    // 改用 func_label（由列表回應自帶、與 options 無關）。
+    await screen.findByText("DP-使用者管理")
+
+    // 降級為原碼而非空白：使用者看得到可辨識的值並能回報，空白會讓人以為該欄沒資料
+    expect(screen.getByText("SUCCESS")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("combobox", { name: "功能" }))
+
+    // 只剩「全部」sentinel。若哪天有人「為了保險」在前端留一份 fallback 清單，本條會紅——
+    // 那份 fallback 正是 #477 的病灶（看起來有選項、實際與後端不同步）。
+    expect(await screen.findByRole("option", { name: "全部" })).toBeInTheDocument()
+    expect(screen.getAllByRole("option")).toHaveLength(1)
+  })
+})

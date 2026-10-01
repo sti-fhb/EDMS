@@ -15,6 +15,7 @@ export const QUERY_KEYS = {
   },
   audit: {
     list: (params: Record<string, unknown>) => ["audit", "list", params] as const,
+    options: () => ["audit", "options"] as const,
   },
   schedule: {
     list: () => ["schedule", "list"] as const,
