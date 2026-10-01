@@ -464,6 +464,44 @@ class TestWriteGuards:
         assert r.json()["coverage_pct"] == 0
         assert await _interval_count(db, teacher, video_id) == 0
 
+    async def test_非擁有者教師預覽他人課程同樣是靜默而非四零四(self, client, db) -> None:
+        """#483：#481 放行了學習頁，但 `_guard_write` 沒跟上。
+
+        補之前，觀摩他人課程的教師**每一次進度上報都拿到 404**——前端的上報是背景行為，
+        於是症狀是「看起來好像沒事，但控制台一直在噴」，沒有人會回報它。
+
+        ⚠️ 與上一條（擁有者）成對：`_guard_write` 的預覽判定若退回
+        `is_owner and not enrolled`，只有這一條會紅。
+        """
+        owner = await _user(db, "t_prog20", ROLE_TEACHER)
+        viewer = await _user(db, "t_prog21", ROLE_TEACHER)
+        course = await _published_course(client, db, owner, chapters=[True], code="31000020")
+        video_id = course["chapters"][0]["video_id"]
+
+        r = await client.post(
+            _report(video_id), json={"segments": [{"start_sec": 0, "end_sec": 600}]}, headers=_bearer(viewer)
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["coverage_pct"] == 0
+        assert await _interval_count(db, viewer, video_id) == 0
+
+    async def test_非在籍且非課程管理者仍被擋在進度上報之外(self, client, db) -> None:
+        """與上一條成對——**把放行寫成 `not enrolled` 就會通過上一條**。
+
+        那等於全體登入者（ET 學員角色於帳號建立時自動授予）都能對任何影片上報進度。
+        """
+        owner = await _user(db, "t_prog22", ROLE_TEACHER)
+        outsider = await _user(db, "s_prog22")
+        course = await _published_course(client, db, owner, chapters=[True], code="31000022")
+        video_id = course["chapters"][0]["video_id"]
+
+        r = await client.post(
+            _report(video_id), json={"segments": [{"start_sec": 0, "end_sec": 600}]}, headers=_bearer(outsider)
+        )
+
+        assert r.status_code == 404, r.text
+
     async def test_擁有者預覽已關閉的課程仍是靜默而非四零九(self, client, db) -> None:
         """**守門 2 必須排在守門 3 之前**——這條釘住那個順序。
 

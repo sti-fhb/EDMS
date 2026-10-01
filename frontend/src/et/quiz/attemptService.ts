@@ -1,10 +1,21 @@
 import { http } from "../../services/http"
-import type { AttemptResult, AttemptState, AttemptSummary, QuizIntro } from "./attemptSchemas"
+import type { AttemptResult, AttemptState, AttemptSummary, QuizIntro, QuizPreview } from "./attemptSchemas"
 
 /** ET07 測驗作答 API（US6 / #279、#280）。 */
 export const attemptApi = {
   intro: async (quizId: number): Promise<QuizIntro> => {
     const { data } = await http.get<QuizIntro>(`/et/quizzes/${quizId}/intro`)
+    return data
+  },
+
+  /**
+   * 教師預覽用的**唯讀**題目清單（#483）。
+   *
+   * ⚠️ **在籍學員呼叫會 404**——他要看題目只有「開始作答」一條路。故呼叫端必須先確認
+   * `intro.is_preview`，不可無條件查。
+   */
+  preview: async (quizId: number): Promise<QuizPreview> => {
+    const { data } = await http.get<QuizPreview>(`/et/quizzes/${quizId}/preview`)
     return data
   },
 

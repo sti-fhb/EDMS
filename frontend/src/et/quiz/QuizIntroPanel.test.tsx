@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { QuizIntro } from "./attemptSchemas"
+import type { QuizIntro, QuizPreviewQuestion } from "./attemptSchemas"
 import { QuizIntroPanel } from "./QuizIntroPanel"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
@@ -30,10 +30,30 @@ const BASE: QuizIntro = {
   in_progress_attempt_id: null,
   last_attempt_id: null,
   course_closed: false,
+  is_preview: false,
 }
 
 function mockIntro(overrides: Partial<QuizIntro>) {
   server.use(http.get("/api/et/quizzes/:quizId/intro", () => HttpResponse.json({ ...BASE, ...overrides })))
+}
+
+function mockPreviewQuestions(questions: QuizPreviewQuestion[]) {
+  server.use(
+    http.get("/api/et/quizzes/:quizId/preview", () =>
+      HttpResponse.json({ quiz_id: 700, quiz_name: "基本概念測驗", questions }),
+    ),
+  )
+}
+
+const SINGLE_Q: QuizPreviewQuestion = {
+  question_id: 1,
+  question_type: "SINGLE",
+  stem: "採血前應先確認下列哪一項？",
+  points: 50,
+  options: [
+    { option_id: 11, text: "病人身分" },
+    { option_id: 12, text: "採血管顏色" },
+  ],
 }
 
 beforeEach(() => navigate.mockReset())
@@ -159,5 +179,75 @@ describe("ET07 測驗資訊面板", () => {
 
     expect(await screen.findByText("重考次數已用完，請聯繫教師重置")).toBeInTheDocument()
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  describe("預覽模式（#483）", () => {
+    it("顯示唯讀題目與選項，且選項不可點選", async () => {
+      mockIntro({ is_preview: true, can_start: false })
+      mockPreviewQuestions([SINGLE_Q])
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByText("採血前應先確認下列哪一項？")).toBeInTheDocument()
+      expect(screen.getByText("病人身分")).toBeInTheDocument()
+      expect(screen.getByRole("radio", { name: "病人身分" })).toBeDisabled()
+    })
+
+    it("不顯示開始作答鈕、剩餘次數與作答注意事項", async () => {
+      mockIntro({ is_preview: true, can_start: false })
+      mockPreviewQuestions([SINGLE_Q])
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      // ⚠️ 正向錨點必須先到位：`queryBy*` 在資料還沒回來時一律找不到，恆真。
+      expect(await screen.findByText("採血前應先確認下列哪一項？")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /開始作答|繼續作答/ })).not.toBeInTheDocument()
+      expect(screen.queryByText("剩餘可作答")).not.toBeInTheDocument()
+      expect(screen.queryByText("作答注意事項")).not.toBeInTheDocument()
+    })
+
+    it("不顯示「重考次數已用完」——那對預覽的教師是一句不成立的話", async () => {
+      // `can_start=false` 的第三種成因（#483）。少了這條，前端沿用舊的兩分支判斷也會
+      // 通過上面兩條，而教師會看到一句叫他去聯繫自己的訊息。
+      mockIntro({ is_preview: true, can_start: false, course_closed: false })
+      mockPreviewQuestions([SINGLE_Q])
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByText("採血前應先確認下列哪一項？")).toBeInTheDocument()
+      expect(screen.queryByText("重考次數已用完，請聯繫教師重置")).not.toBeInTheDocument()
+      expect(screen.queryByText("此課程已關閉，無法再開新作答")).not.toBeInTheDocument()
+    })
+
+    it("多選題呈現為核取方塊", async () => {
+      mockIntro({ is_preview: true, can_start: false })
+      mockPreviewQuestions([{ ...SINGLE_Q, question_type: "MULTIPLE" }])
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByRole("checkbox", { name: "病人身分" })).toBeDisabled()
+      expect(screen.getByText("多選題")).toBeInTheDocument()
+    })
+
+    it("尚未出題時明說學員看不到內容，而不是留白", async () => {
+      mockIntro({ is_preview: true, can_start: false, question_count: 0 })
+      mockPreviewQuestions([])
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByText(/此測驗尚未新增任何題目/)).toBeInTheDocument()
+    })
+
+    it("非預覽時不打預覽端點，照舊顯示開始作答", async () => {
+      // 與本組其餘成對：少了它，把 `is_preview` 的判斷寫反也會讓上面五條全綠。
+      // 在籍學員打預覽端點會拿到 404，症狀是測驗面板下方多一塊紅色錯誤。
+      let previewCalled = false
+      mockIntro({})
+      server.use(
+        http.get("/api/et/quizzes/:quizId/preview", () => {
+          previewCalled = true
+          return HttpResponse.json({ quiz_id: 700, quiz_name: "基本概念測驗", questions: [] })
+        }),
+      )
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByRole("button", { name: /開始作答/ })).toBeInTheDocument()
+      expect(previewCalled).toBe(false)
+    })
   })
 })

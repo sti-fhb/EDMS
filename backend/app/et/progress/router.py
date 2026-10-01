@@ -42,7 +42,7 @@ from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.schemas import MAX_BIGINT
-from app.et.deps import get_et_context, rate_limit_by_et_user
+from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
 from app.et.progress.schemas import IntervalReportReq, ItemViewedResult, VideoProgress
 from app.et.progress.service import EtProgressService
 
@@ -84,6 +84,7 @@ async def report_intervals(
     video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     req: IntervalReportReq,
     operator: OperatorInfo = Depends(get_operator),
+    ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> VideoProgress:
     """上報播放區段並回傳重算後的覆蓋率（AC 1）。
@@ -95,13 +96,14 @@ async def report_intervals(
         AppError: 404 `ET_LEARN_001` 查無影片或無權；409 `ET_PROGRESS_001` 課程已關閉；
             422 `ET_PROGRESS_002` 全部區段都落在影片長度之外。
     """
-    return await _service.report_intervals(db, video_id, req, operator=operator)
+    return await _service.report_intervals(db, video_id, req, operator=operator, roles=ctx.roles)
 
 
 @router.post("/videos/{video_id}/normalize", response_model=VideoProgress)
 async def normalize_intervals(
     video_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
+    ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> VideoProgress:
     """離開頁面時合併重疊 / 相接區段並回寫覆蓋率（AC 2）。
@@ -109,13 +111,14 @@ async def normalize_intervals(
     ⚠️ 這是**儲存壓縮**，不是正確性前提：覆蓋率一律先聯集再算，沒跑成功只是列數變多
     （AC 3 / AC 4 因此自然成立）。
     """
-    return await _service.normalize(db, video_id, operator=operator)
+    return await _service.normalize(db, video_id, operator=operator, roles=ctx.roles)
 
 
 @router.post("/items/{item_id}/viewed", response_model=ItemViewedResult)
 async def mark_item_viewed(
     item_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
+    ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> ItemViewedResult:
     """記錄「正在看這一項」，並對純文件 / 說明文字項目標記完成（AC 10 / AC 11）。
@@ -125,4 +128,4 @@ async def mark_item_viewed(
 
     **含影片的教材不會因此被標記完成**——那類由覆蓋率決定（80%），否則點一下就能跳過。
     """
-    return await _service.mark_item_viewed(db, item_id, operator=operator)
+    return await _service.mark_item_viewed(db, item_id, operator=operator, roles=ctx.roles)

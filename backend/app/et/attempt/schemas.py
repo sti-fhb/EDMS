@@ -210,3 +210,35 @@ class QuizIntro(BaseModel):
     #: 前者聯繫教師重置有用，後者重置一點用也沒有。少了這個欄位前端只能寫死一句
     #: 「重考次數已用完，請聯繫教師重置」，而那會叫課程關閉的學員去做一件沒有用的事。
     course_closed: bool
+    #: 本次請求是否為預覽（**不在籍**者，#483）。與 `LearnStructure.is_preview` 同一個判定。
+    #:
+    #: ⚠️ 預覽時 `can_start` 恆為 `False`，於是 `can_start=False` 多了**第三種**成因。
+    #: 前端必須先看 `is_preview` 再決定要不要顯示上述兩句訊息——對教師說「重考次數已用完」
+    #: 是一句不成立的話。
+    is_preview: bool
+
+
+class QuizPreviewQuestion(BaseModel):
+    """預覽中呈現的題目。**沒有 `is_correct`，也沒有 `selected_options`**。
+
+    與 `QuestionForAnswering` 刻意分開而非共用（理由見模組 docstring）：預覽沒有「這次
+    作答」可言，帶一個恆為空的 `selected_options` 只會讓讀的人以為預覽也能暫存。
+    """
+
+    question_id: int
+    question_type: str
+    stem: str
+    points: int
+    options: list[OptionForAnswering]
+
+
+class QuizPreview(BaseModel):
+    """教師預覽用的唯讀題目清單（#483）。
+
+    ⚠️ **順序是建立順序，不是學員會看到的順序**——學員每次作答都依該次 attempt 的快照
+    洗牌（題目與選項皆然）。預覽呈現得出「題目寫了什麼」，呈現不出「他會以什麼順序看到」。
+    """
+
+    quiz_id: int
+    quiz_name: str
+    questions: list[QuizPreviewQuestion]
