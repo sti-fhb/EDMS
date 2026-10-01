@@ -6,13 +6,26 @@ import { EtOverviewWidget } from "./EtOverviewWidget"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
-/** 只回指定的卡，其餘為 `null`（＝沒有該角色）。 */
+/**
+ * 只回指定的卡，其餘為 `null`（＝沒有該角色）。回傳一個**已回應**的旗標。
+ *
+ * 🔴 **negative 斷言一定要先等這個旗標**。`waitFor(() => expect(queryByText(X))
+ * .not.toBeInTheDocument())` 會在**第一次輪詢就通過**——而那時查詢還沒回來，畫面
+ * 本來就什麼都沒有。少了錨點，那種斷言驗的是「資料還沒到」而不是「空卡不渲染」，
+ * 對任何實作都通過。
+ *
+ * 2026-10-01 以變異證實：把 `if (!student && !teacher && !admin) return null`
+ * 改成 `if (false)`（空卡規則整個失效），三條 negative 斷言**全部照樣綠**。
+ */
 function mockDashboard(body: Record<string, unknown>) {
+  const state = { responded: false }
   server.use(
-    http.get("/api/et/dashboard", () =>
-      HttpResponse.json({ student: null, teacher: null, admin: null, ...body }),
-    ),
+    http.get("/api/et/dashboard", () => {
+      state.responded = true
+      return HttpResponse.json({ student: null, teacher: null, admin: null, ...body })
+    }),
   )
+  return state
 }
 
 const EMPTY_STUDENT = { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }
@@ -35,18 +48,21 @@ describe("首頁教育訓練概況", () => {
    * 也就是說：`student` 不是 `null`（他確實有學員角色），但 `joined === 0`，不可渲染。
    */
   it("有學員角色但沒選課時不渲染學員卡（#89 空卡規則）", async () => {
-    mockDashboard({ student: EMPTY_STUDENT })
+    const served = mockDashboard({ student: EMPTY_STUDENT })
     renderWithProviders(<EtOverviewWidget enabled />)
 
-    await waitFor(() => expect(screen.queryByText("我的學習概況")).not.toBeInTheDocument())
+    // 正向錨點：先確認資料真的回來了，否則下方的「不存在」在 t=0 就成立
+    await waitFor(() => expect(served.responded).toBe(true))
+    expect(screen.queryByText("我的學習概況")).not.toBeInTheDocument()
     expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument()
   })
 
   it("教師沒有待辦時不渲染教師卡", async () => {
-    mockDashboard({ teacher: { ending_soon: [], draft_count: 0 } })
+    const served = mockDashboard({ teacher: { ending_soon: [], draft_count: 0 } })
     renderWithProviders(<EtOverviewWidget enabled />)
 
-    await waitFor(() => expect(screen.queryByText("我的課程待辦")).not.toBeInTheDocument())
+    await waitFor(() => expect(served.responded).toBe(true))
+    expect(screen.queryByText("我的課程待辦")).not.toBeInTheDocument()
   })
 
   it("只有草稿沒有即將截止也算有待辦——那是「卡在我這」的訊號", async () => {
@@ -58,10 +74,11 @@ describe("首頁教育訓練概況", () => {
   })
 
   it("三張卡皆無資料時整個 widget 不渲染，不留空標題", async () => {
-    mockDashboard({ student: EMPTY_STUDENT, teacher: { ending_soon: [], draft_count: 0 } })
+    const served = mockDashboard({ student: EMPTY_STUDENT, teacher: { ending_soon: [], draft_count: 0 } })
     renderWithProviders(<EtOverviewWidget enabled />)
 
-    await waitFor(() => expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument())
+    await waitFor(() => expect(served.responded).toBe(true))
+    expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument()
   })
 
   it("未啟用時完全不發查詢——端點對無 ET 角色者回 403", async () => {
