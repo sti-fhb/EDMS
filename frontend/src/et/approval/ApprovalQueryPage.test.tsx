@@ -54,6 +54,95 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     expect(within(row).getByText("通過")).toBeInTheDocument()
   })
 
+  it("不需線下核可的通過列：核可人顯示「—」，不是空白（#464）", async () => {
+    // 不需核可的課程**事實上沒有核可者**。留空白格會被讀成「核可人忘了填」或「資料沒載到」。
+    asRole("teacher")
+    server.use(
+      http.post("/api/et/approvals/search", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "s_auto",
+              user_name: "陳自學",
+              course_id: 21,
+              course_name: "線上自學課程",
+              result: "PASS",
+              result_note: null,
+              approved_at: "2026-09-30T02:00:00Z",
+              approved_by_name: null,
+              is_revoked: false,
+              revoke_reason: null,
+              revoked_by_name: null,
+              revoked_at: null,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "陳")
+
+    const row = (await screen.findByText("線上自學課程")).closest("tr")!
+    // 兩種通過畫面上不區分（#464 裁示）——結果欄一律是「通過」
+    expect(within(row).getByText("通過")).toBeInTheDocument()
+    expect(within(row).getByText("—")).toBeInTheDocument()
+  })
+
+  it("通過時間為空時顯示「—」（活化前就已完課的既有資料，#464）", async () => {
+    // ⚠️ 本條驗的是**結果**（兩格都是「—」）。通過時間那格的「—」來自 `formatDateTime(null)`
+    // 本身，核可人那格的「—」來自元件的 `?? "—"`——兩者來源不同。2026-09-30 變異檢查實測：
+    // 拿掉元件對通過時間的額外判斷，本條照樣綠（因為那段判斷本來就是多餘的，已移除）。
+    asRole("teacher")
+    server.use(
+      http.post("/api/et/approvals/search", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "s_old",
+              user_name: "舊資料",
+              course_id: 22,
+              course_name: "既有完課課程",
+              result: "PASS",
+              result_note: null,
+              approved_at: null,
+              approved_by_name: null,
+              is_revoked: false,
+              revoke_reason: null,
+              revoked_by_name: null,
+              revoked_at: null,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "舊")
+
+    const row = (await screen.findByText("既有完課課程")).closest("tr")!
+    // 通過時間與核可人兩格都是「—」
+    expect(within(row).getAllByText("—")).toHaveLength(2)
+  })
+
+  it("欄名為「通過時間」而非「核可時間」（#464）", async () => {
+    // 不需核可的課程以完課時間計，那個時間不是任何人「核可」的時間。
+    asRole("teacher")
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
+
+    expect(await screen.findByRole("columnheader", { name: "通過時間" })).toBeInTheDocument()
+    // ⚠️ 正向對照組在上一行——同一個查詢方式（`columnheader` + name）確認找得到，
+    // 下面這條「不存在」才有意義，不會因為查詢方式失效而恆真。
+    expect(screen.queryByRole("columnheader", { name: "核可時間" })).not.toBeInTheDocument()
+  })
+
   it("已撤銷的紀錄標示已撤銷並列出原因與撤銷人", async () => {
     asRole("teacher")
     const user = userEvent.setup()
@@ -88,7 +177,7 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
 
-    expect(await screen.findByText(/查無符合條件的核可紀錄/)).toBeInTheDocument()
+    expect(await screen.findByText(/查無符合條件的紀錄/)).toBeInTheDocument()
     // 🔴 教師必須被告知「可能不在您的可見範圍內」：本頁用於「排班前確認某人受訓完整
     // 與否」，而「查無」會被讀成「這個人沒受過訓」——那是方向最危險的假陰性，且
     // 可見範圍分流（SA Q1 裁示 C）讓它在正式使用時一定會發生。
@@ -105,7 +194,7 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
 
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
 
-    expect(await screen.findByText(/查無符合條件的核可紀錄/)).toBeInTheDocument()
+    expect(await screen.findByText(/查無符合條件的紀錄/)).toBeInTheDocument()
     expect(screen.queryByText(/可見範圍/)).not.toBeInTheDocument()
   })
 
@@ -224,7 +313,11 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     await screen.findByLabelText("學員姓名或 Email")
-    expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
+    // ⚠️ **必須用正則**，與正向對照組（`findByText(/查無符合條件的紀錄/)`）同一個查詢方式。
+    // 畫面上實際是「查無符合條件的紀錄。」＋可見範圍提示，精確比對**永遠比對不到**——本條
+    // 原本寫成 `queryByText("查無符合條件的紀錄")`，自 #436 加上句號起即恆真，直到 #464 的
+    // 變異檢查才被發現。
+    expect(screen.queryByText(/查無符合條件的紀錄/)).not.toBeInTheDocument()
   })
 
   it("只選課程、不填關鍵字即可查詢，且 course_id 進 body（#439）", async () => {
@@ -300,7 +393,7 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     expect(listCalled).toBe(false)
   })
 
-  it("🔴 課程清單載入失敗時說「載入失敗」，**不得**說「尚無核可紀錄」（#439）", async () => {
+  it("🔴 課程清單載入失敗時說「載入失敗」，**不得**說「尚無通過紀錄」（#439）", async () => {
     // 後者是一句**假話**，而且比缺陷本身更糟——教師會據此以為系統裡真的沒有核可紀錄，
     // 而不是「剛才沒載到，重整一下」。ET02 的課程下拉踩過同一個坑（#390 的回歸）。
     asRole("teacher")
@@ -308,7 +401,7 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     expect(await screen.findByText("課程清單載入失敗，請重新整理後再試")).toBeInTheDocument()
-    expect(screen.queryByText(/尚無核可紀錄/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/尚無通過紀錄/)).not.toBeInTheDocument()
   })
 
   it("教師沒有任何可選課程時說明原因，而不是給一個打得開卻空的下拉（#439）", async () => {
@@ -316,7 +409,7 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json([])))
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByText("您開設的課程尚無核可紀錄")).toBeInTheDocument()
+    expect(await screen.findByText("您開設的課程尚無通過紀錄")).toBeInTheDocument()
   })
 
   it("管理者的空下拉不提「您開設的課程」——他沒有自己的課，那句話對他是錯的（#439）", async () => {
@@ -326,7 +419,7 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json([])))
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByText("系統中尚無核可紀錄")).toBeInTheDocument()
+    expect(await screen.findByText("系統中尚無通過紀錄")).toBeInTheDocument()
     expect(screen.queryByText(/您開設的課程/)).not.toBeInTheDocument()
   })
 
@@ -345,12 +438,33 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "林")
 
     expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
-    expect(screen.queryByText("查無符合條件的核可紀錄")).not.toBeInTheDocument()
+    // ⚠️ **必須用正則**，與正向對照組（`findByText(/查無符合條件的紀錄/)`）同一個查詢方式。
+    // 畫面上實際是「查無符合條件的紀錄。」＋可見範圍提示，精確比對**永遠比對不到**——本條
+    // 原本寫成 `queryByText("查無符合條件的紀錄")`，自 #436 加上句號起即恆真，直到 #464 的
+    // 變異檢查才被發現。
+    expect(screen.queryByText(/查無符合條件的紀錄/)).not.toBeInTheDocument()
   })
 })
 
 describe("ET04 核可查詢：學員視角", () => {
-  it("🔴 載入失敗顯示錯誤，**不得**渲染成「尚無已通過核可的課程」", async () => {
+  it("學員側：不需核可課程的通過也列出，通過時間為空時顯示「—」（#464）", async () => {
+    asRole("student")
+    server.use(
+      http.get("/api/et/approvals/mine", () =>
+        HttpResponse.json({
+          data: [{ course_id: 31, course_name: "我的自學課", approved_at: null }],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    const row = (await screen.findByText("我的自學課")).closest("tr")!
+    expect(within(row).getByText("已通過")).toBeInTheDocument()
+    expect(within(row).getByText("—")).toBeInTheDocument()
+  })
+
+  it("🔴 載入失敗顯示錯誤，**不得**渲染成「尚無已通過的課程」", async () => {
     asRole("student")
     server.use(
       http.get("/api/et/approvals/mine", () =>
@@ -360,7 +474,7 @@ describe("ET04 核可查詢：學員視角", () => {
     renderWithProviders(<EtApprovalQueryPage />)
 
     expect(await screen.findByText("系統發生錯誤")).toBeInTheDocument()
-    expect(screen.queryByText("您目前尚無已通過核可的課程")).not.toBeInTheDocument()
+    expect(screen.queryByText("您目前尚無已通過的課程")).not.toBeInTheDocument()
   })
 
   it("僅顯示自己已通過的課程，且不出現查詢框", async () => {
@@ -389,7 +503,7 @@ describe("ET04 核可查詢：學員視角", () => {
     server.use(http.get("/api/et/approvals/mine", () => HttpResponse.json(EMPTY)))
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByText("您目前尚無已通過核可的課程")).toBeInTheDocument()
+    expect(await screen.findByText("您目前尚無已通過的課程")).toBeInTheDocument()
   })
 })
 
