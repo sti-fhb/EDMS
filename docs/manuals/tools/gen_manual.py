@@ -534,6 +534,7 @@ def convert_body(doc: Document, md_path: Path) -> str:
                 picture.paragraph_format.left_indent = Cm(0)
                 picture.paragraph_format.first_line_indent = Cm(0)
                 if caption := match.group("alt"):
+                    picture.paragraph_format.keep_with_next = True   # 圖說與圖片同頁，不被分頁拆開
                     para = doc.add_paragraph()
                     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     para.paragraph_format.space_after = Pt(8)

@@ -5,6 +5,7 @@
 
 **一個模組一個來源檔、一份 Word**：封面、修訂履歷與目錄同操作手冊（共用樣式範本），
 其後各作業獨立一節、各成一張測試報告表，項次於各表內自 1 起算。
+項目表中「項次空白」之列視為分段標題（如依角色分「一、教師」），產出時合併為整列。
 
 用法：
     python gen_acceptance_form.py            # 產出 _tests/ 下全部模組
@@ -120,8 +121,11 @@ def parse_module(md_path: Path) -> tuple[str, list[tuple[str, list[tuple[str, st
             if len(cells) < 2:
                 continue
             no, content = cells[0], cells[1]
-            if no == "項次" or set(no) <= set("-: "):   # 表頭與分隔列
+            if no == "項次" or (no and set(no) <= set("-: ")):   # 表頭與分隔列
                 continue
+            if not no and not content:
+                continue
+            # 項次空白之列為分段標題（如「一、教師」），產出時合併整列
             operations[-1][1].append((no, BOLD_RE.sub(lambda m: m.group(1), content)))
 
     operations = [(name, items) for name, items in operations if items]
@@ -177,6 +181,10 @@ def _add_item_table(doc, items: list[tuple[str, str]]) -> None:
     for no, content in items:
         row = table.add_row()
         _apply_widths(row, ITEM_WIDTHS)
+        if not no:   # 分段標題列
+            _set_cell(row.cells[0].merge(row.cells[3]), content, size=11, bold=True,
+                      align=WD_ALIGN_PARAGRAPH.LEFT)
+            continue
         _set_cell(row.cells[0], no, size=11)
         _set_cell(row.cells[1], content, size=11, align=WD_ALIGN_PARAGRAPH.LEFT)
         _set_cell(row.cells[2], "")
@@ -201,7 +209,7 @@ def build_report(module: str, operations: list[tuple[str, list[tuple[str, str]]]
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out_path))
-    detail = "、".join(f"{name} {len(items)} 項" for name, items in operations)
+    detail = "、".join(f"{name} {sum(1 for no, _ in items if no)} 項" for name, items in operations)
     print(f"已產出：{out_path}（{len(operations)} 支作業：{detail}）")
 
 
