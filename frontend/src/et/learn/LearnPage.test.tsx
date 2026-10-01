@@ -34,6 +34,7 @@ function mockStructure(overrides: Partial<LearnStructure>) {
         course_name: "採血作業新進人員訓練",
         status: "PUBLISHED",
         is_owner: false,
+        is_preview: false,
         is_closed: false,
         playback_rates: [0.75, 1.0, 1.25, 1.5, 2.0],
         last_item_id: null,
@@ -121,12 +122,53 @@ describe("ET06 章節學習頁", () => {
   })
 
   it("擁有者進入時顯示預覽模式提示（裁示 Q1=A）", async () => {
-    mockStructure({ is_owner: true })
+    mockStructure({ is_owner: true, is_preview: true })
     renderWithProviders(<EtLearnPage />)
 
     // 明示身分，避免教師以為自己正在累積進度
     expect(await screen.findByText(/預覽模式/)).toBeInTheDocument()
     expect(screen.getByText(/不會累積學習進度/)).toBeInTheDocument()
+  })
+
+  /**
+   * 🔴 #481：判準是 `is_preview`，**不是 `is_owner`**。
+   *
+   * 觀摩他人已發布課程的教師 `is_owner=false` 但確實在預覽。照 `is_owner` 判定，他會
+   * 看到一條恆為 0% 的進度條，而且沒有任何提示說明為什麼——看起來像「這門課我一項都
+   * 沒完成」，而他根本不是這門課的學員。
+   */
+  it("觀摩他人課程者（非擁有者）同樣顯示預覽模式，且文案不同（#481）", async () => {
+    mockStructure({ is_owner: false, is_preview: true })
+    renderWithProviders(<EtLearnPage />)
+
+    expect(await screen.findByText(/預覽模式/)).toBeInTheDocument()
+    expect(screen.getByText(/觀摩其他教師建立的課程/)).toBeInTheDocument()
+    // ⛔ 對他說「您是本課程的建立者」是一句不成立的話
+    expect(screen.queryByText(/您是本課程的建立者/)).not.toBeInTheDocument()
+  })
+
+  /**
+   * ⚠️ 預覽把 `locked` 清成空集合——必要（沒有進度的人否則會看到全鎖），代價是**看不出
+   * 依序解鎖的實際效果**。不寫明的話教師會以為自己的解鎖設定沒生效，然後去改一個本來
+   * 就是對的設定。Moodle 官方文件承認同樣的限制。
+   */
+  it("預覽橫幅寫明「所有項目均顯示為已解鎖」（#481）", async () => {
+    mockStructure({ is_owner: true, is_preview: true })
+    renderWithProviders(<EtLearnPage />)
+
+    expect(await screen.findByText(/所有項目均顯示為已解鎖/)).toBeInTheDocument()
+  })
+
+  /**
+   * 與上面成對：擁有者若真的用邀請碼加入自己的課，他**是學員**——進度照常累積，
+   * 不該出現預覽橫幅。`is_owner` 分不出這兩種情形，`is_preview` 分得出。
+   */
+  it("在籍的擁有者不是預覽，不顯示橫幅（#481 連帶修掉的舊缺漏）", async () => {
+    mockStructure({ is_owner: true, is_preview: false })
+    renderWithProviders(<EtLearnPage />)
+
+    await screen.findByText("採血流程概論")
+    expect(screen.queryByText(/預覽模式/)).not.toBeInTheDocument()
   })
 
   it("課程尚未開放時顯示後端訊息，而非通用錯誤（#374）", async () => {
@@ -202,7 +244,7 @@ describe("ET06 章節學習頁", () => {
 
     it("教師預覽不顯示課程進度條", async () => {
       // 恆為 0% 的進度條只會讓教師以為自己「什麼都沒完成」
-      mockStructure({ is_owner: true })
+      mockStructure({ is_owner: true, is_preview: true })
       renderWithProviders(<EtLearnPage />)
       await screen.findByText("第一章 採血基本流程")
 
@@ -343,6 +385,7 @@ describe("ET06 章節學習頁", () => {
             course_name: "採血作業新進人員訓練",
             status: "PUBLISHED",
             is_owner: false,
+            is_preview: false,
             is_closed: false,
             playback_rates: [1.0],
             last_item_id: null,

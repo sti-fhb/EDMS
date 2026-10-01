@@ -331,7 +331,19 @@ export function EtCourseListPage() {
           <Grid container spacing={3}>
             {courses.map((course) => (
               <Grid key={course.course_id} size={{ xs: 12, sm: 6, md: 4 }}>
-                <CourseCard course={course} onOpen={(id) => navigate(`/et/courses/${id}`)} />
+                <CourseCard
+                  course={course}
+                  // #481：兩個分頁的用途不同，落點也不同。
+                  //
+                  // 「全部課程」＝`spec_us7` 明訂的**供跨教師瀏覽觀摩**——觀摩要看的是
+                  // 「這門課上起來像什麼」，不是編輯欄位長怎樣，故導向學員視角的預覽頁。
+                  // 「我建立的」＝管理自己的課，導向編輯頁。
+                  //
+                  // ⚠️ 判定用 `scope` 而非 `course.is_owner`：自己的已發布課程也會出現在
+                  // 「全部課程」，而教師在那裡點它要的同樣是預覽（那正是他預覽自己課程的
+                  // 入口）。照 `is_owner` 判會讓他在「全部課程」點自己的課卻跳進編輯頁。
+                  onOpen={(id) => navigate(scope === "all" ? `/et/courses/${id}/learn` : `/et/courses/${id}`)}
+                />
               </Grid>
             ))}
           </Grid>

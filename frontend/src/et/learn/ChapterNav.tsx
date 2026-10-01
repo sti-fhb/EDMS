@@ -28,11 +28,12 @@ interface Props {
   activeItemId: number | null
   onSelect: (item: ItemNode) => void
   /**
-   * 是否顯示課程進度條。擁有者不顯示——預覽不累積進度，一條恆為 0% 的進度條只會讓
+   * 是否顯示課程進度條。**預覽時不顯示**——預覽不累積進度，一條恆為 0% 的進度條只會讓
    * 教師以為自己「什麼都沒完成」。
    *
-   * ⚠️ 教師若真的用邀請碼加入自己的課，他是學員、進度照常累積，但這裡仍會少一條進度條
-   * （前端拿到的 `is_owner` 分不出這兩種情形）。純屬顯示上的缺漏，完成 / 解鎖判定不受影響。
+   * ✅ 呼叫端自 #481 起傳 `!data.is_preview` 而非 `!data.is_owner`，連帶修掉一個舊缺漏：
+   * 教師若真的用邀請碼加入自己的課，他是學員（`is_preview=false`），進度條現在會正常
+   * 顯示。`is_owner` 分不出那兩種情形，`is_preview` 分得出。
    */
   showProgress: boolean
   /**

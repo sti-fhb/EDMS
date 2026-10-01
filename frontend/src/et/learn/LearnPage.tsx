@@ -224,9 +224,17 @@ export function EtLearnPage() {
       )}
 
       {/* 教師預覽（#255 裁示 Q1=A）——明示身分，避免他以為自己正在累積進度 */}
-      {data.is_owner && (
+      {/* #481：判定用 `is_preview` 而非 `is_owner`——觀摩他人課程的教師同樣在預覽，
+          但他不是建立者。文案也因此要分流，否則會對他說一句不成立的話。 */}
+      {data.is_preview && (
         <Alert severity="warning" icon={<VisibilityIcon />} sx={{ mb: 2 }}>
-          <strong>預覽模式</strong> — 您是本課程的建立者，此頁呈現學員實際看到的內容；預覽不會累積學習進度。
+          <strong>預覽模式</strong> —{" "}
+          {data.is_owner ? "您是本課程的建立者，" : "您正在觀摩其他教師建立的課程，"}
+          此頁呈現學員實際看到的內容；預覽不會累積學習進度。
+          {/* ⚠️ 必須寫明（#481）：預覽把 locked 清成空集合——必要，否則沒有進度的人
+              會看到全鎖——代價是看不出依序解鎖的實際效果。不講的話教師會以為自己的
+              解鎖設定沒生效，然後去改一個本來就是對的設定。 */}
+          <strong>所有項目均顯示為已解鎖</strong>，看不出依序解鎖對學員的實際效果。
         </Alert>
       )}
 
@@ -236,7 +244,7 @@ export function EtLearnPage() {
             chapters={data.chapters}
             activeItemId={active?.item_id ?? null}
             onSelect={handleSelect}
-            showProgress={!data.is_owner}
+            showProgress={!data.is_preview}
             survey={data.survey}
             onSurveyClick={() => navigate(`/et/courses/${courseId}/survey`)}
           />
