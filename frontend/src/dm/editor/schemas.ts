@@ -87,11 +87,25 @@ export const MANUAL_CATEGORY = "MANUAL"
 /** 訓練教材：由教育訓練模組引用，不設定可見對象（#377，spec_us5 FR-009 之例外）。 */
 export const TRAINING_CATEGORY = "TRAINING"
 
-/** 單一 (單位, 職位) 配對之驗證；兩欄皆必選。 */
+/** 單一 (單位, 職位) 配對之驗證；兩欄皆必選（送簽時用）。 */
 const AudiencePairSchema = z.object({
   unit_id: z.string().min(1, { message: "請選擇單位" }),
   audience_id: z.string().min(1, { message: "請選擇職位" }),
 })
+
+/**
+ * 存草稿用之寬鬆配對 schema——不檢核兩欄是否已選。
+ *
+ * 表單預設即帶一列空白配對（#476），若存草稿沿用 `AudiencePairSchema`，
+ * 那列會讓「存草稿」被「請選擇單位」擋下，違反 spec_us5 FR-001 之「存草稿不卡必填」。
+ */
+const LooseAudiencePairSchema = z.object({
+  unit_id: z.string(),
+  audience_id: z.string(),
+})
+
+/** 表單預設帶的空白配對列（#476：一進頁面就看得到要填什麼，不必先按「新增」）。 */
+export const EMPTY_AUDIENCE_PAIR: AudiencePair = { unit_id: "", audience_id: "" }
 
 /** 可內嵌預覽之 MIME（其餘如 Office 上傳時出橘色警示條 DM-MSG-DM08-002）。 */
 const PREVIEWABLE_MIMES = new Set(["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/gif"])
@@ -117,7 +131,7 @@ export const EMPTY_EDITOR_FORM: EditorForm = {
   doc_name: "",
   category_code: "",
   func_code: "",
-  audience_pairs: [],
+  audience_pairs: [{ unit_id: "", audience_id: "" }], // 預設一列空白，使用者一進頁面即看得到欄位（#476）
   retrieval_ids: [],
   version_no: "",
   change_summary: "",
@@ -149,11 +163,13 @@ export function makeEditorSchema(opts: {
       func_code: z.string(),
       version_no: forSubmit ? z.string().trim().min(1, { message: "請輸入版本號" }) : z.string(),
       change_summary: forSubmit ? z.string().trim().min(1, { message: "請輸入變更摘要" }) : z.string(),
-      // 配對兩欄皆必填：漏填單位不會變成「不限」，而是一組不生效的配對（後端 visibility 亦然）
+      // 送簽：配對兩欄皆必填——漏填單位不會變成「不限」，而是一組不生效的配對（後端 visibility 亦然）；
+      // 全空白的列同樣擋下（錯誤落在該列欄位上），使用者需填完或刪除該列。
+      // 存草稿：放行空白列，否則預設帶的那列會卡住存草稿。
       audience_pairs:
         forSubmit && !isTraining
           ? z.array(AudiencePairSchema).min(1, { message: "請至少指定 1 組可見對象" })
-          : z.array(AudiencePairSchema),
+          : z.array(LooseAudiencePairSchema),
       retrieval_ids: z.array(z.string()),
       reviewer_id: forSubmit ? z.string().min(1, { message: "請指定審核者" }) : z.string(),
     })

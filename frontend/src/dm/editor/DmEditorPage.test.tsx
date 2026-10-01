@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query"
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { delay, http, HttpResponse } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -39,16 +39,25 @@ function fileInput(): HTMLInputElement {
  * 新增一組可見對象 (單位, 職位) 配對（#437）：先按「新增可見對象」長出一列，再各選一端。
  * 兩個 combobox 以 label「單位」/「職位」定位；多列時取最後一組（新長出的那列）。
  */
+/**
+ * 填入一組可見對象 (單位, 職位) 配對。
+ *
+ * 表單**預設已帶一列空白**（#476），故先找有沒有還沒選單位的列可用；都填滿了才按「新增可見對象」。
+ * 若無條件先按「新增」，預設那列會留白——送簽時它會被擋下（兩欄皆必填），測試就紅在不相干的地方。
+ */
 async function addAudiencePair(
   user: ReturnType<typeof userEvent.setup>,
   { unit, role }: { unit: string; role: string },
 ) {
-  await user.click(screen.getByRole("button", { name: "新增可見對象" }))
-  const units = screen.getAllByRole("combobox", { name: /單位/ })
-  await user.click(units[units.length - 1])
+  const blankIdx = screen
+    .getAllByRole("combobox", { name: /單位/ })
+    .findIndex((el) => (el as HTMLInputElement).value === "")
+  if (blankIdx < 0) await user.click(screen.getByRole("button", { name: "新增可見對象" }))
+  const idx = blankIdx < 0 ? screen.getAllByRole("combobox", { name: /單位/ }).length - 1 : blankIdx
+
+  await user.click(screen.getAllByRole("combobox", { name: /單位/ })[idx])
   await user.click(await screen.findByRole("option", { name: unit }))
-  const roles = screen.getAllByRole("combobox", { name: /職位/ })
-  await user.click(roles[roles.length - 1])
+  await user.click(screen.getAllByRole("combobox", { name: /職位/ })[idx])
   await user.click(await screen.findByRole("option", { name: role }))
 }
 
@@ -83,6 +92,22 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(await screen.findByRole("combobox", { name: /關聯作業項目/ })).toBeInTheDocument()
   })
 
+  it("新增模式：可見對象預設帶一列配對，兩欄皆標示必填（#476）", async () => {
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+
+    // 一進頁面就看得到要填什麼，不必先按「新增可見對象」
+    const unit = screen.getByRole("combobox", { name: /單位/ })
+    const role = screen.getByRole("combobox", { name: /職位/ })
+    expect(unit).toBeInTheDocument()
+    expect(role).toBeInTheDocument()
+    // 與「文件名稱」等必填欄位一致：label 帶 * 且標記為必填
+    expect(unit).toBeRequired()
+    expect(role).toBeRequired()
+    // 尚未送簽 → 不應預先標紅
+    expect(unit).toHaveAttribute("aria-invalid", "false")
+  }, 20000)
+
   it("上傳 Office 檔 → 橘色無法預覽警示 + 二次確認", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
@@ -92,13 +117,20 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(screen.getByRole("button", { name: "仍使用此檔案" })).toBeInTheDocument()
   })
 
-  it("送簽缺可見對象 → 顯示可見對象錯誤、不送出（DM-MSG-DM08-008）", async () => {
+  it("送簽缺可見對象 → 該列單位 / 職位欄位標紅、不送出（DM-MSG-DM08-008）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
     await fillNewForm(user, { withAudience: false })
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
-    expect(await screen.findByText("請至少指定 1 組可見對象")).toBeInTheDocument()
+
+    // 錯誤由欄位自身呈現（#476）：MUI 的 error 會把 aria-invalid 設為 true，與其他必填欄位一致。
+    // 不再於區塊下方另列紅字，故這裡刻意不找文字訊息——找得到反而表示又變回兩個地方各講一次。
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /單位/ })).toHaveAttribute("aria-invalid", "true")
+    })
+    expect(screen.getByRole("combobox", { name: /職位/ })).toHaveAttribute("aria-invalid", "true")
+    expect(screen.queryByText("請選擇單位")).not.toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
   }, 20000)
 
@@ -246,6 +278,9 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
   }, 20000)
 
   it("存草稿成功（可見對象非必填）→ toast 已儲存為草稿（DM-MSG-DM08-007）", async () => {
+    // 本條同時守著 #476 的連動變更：表單預設帶一列空白配對，存草稿時那列**不得**被
+    // 「請選擇單位」擋下（spec_us5 FR-001「存草稿不卡必填」）。若 Zod 在 forSubmit=false
+    // 時又套回嚴格的 AudiencePairSchema，這裡會紅。
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmEditorPage />)
     await screen.findByText("新增文件")
