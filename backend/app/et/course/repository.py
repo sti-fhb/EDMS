@@ -24,6 +24,7 @@ from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.material.repository import EtMaterialRepository
 from app.et.progress.models import EtEnrollment, EtProgress
+from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.models import EtQuestion, EtQuiz
 from app.et.quiz.repository import EtQuizRepository
 
@@ -779,6 +780,16 @@ class EtItemRepository:
         material_ids = [row.material_id for row in items if row.item_type == ITEM_MATERIAL and row.material_id]
         quiz_ids = [row.quiz_id for row in items if row.item_type == ITEM_QUIZ and row.quiz_id]
 
+        # 受影響課程在刪除**之前**取，不依賴「已刪除的列仍可反查」這個隱含前提。
+        course_ids = list(
+            await db.scalars(
+                select(EtChapter.course_id)
+                .join(EtItem, EtItem.chapter_id == EtChapter.chapter_id)
+                .where(EtItem.item_id.in_(live_ids))
+                .distinct()
+            )
+        )
+
         await db.execute(
             update(EtProgress).where(EtProgress.item_id.in_(live_ids), EtProgress.deleted == 0).values(**audit)
         )
@@ -786,6 +797,14 @@ class EtItemRepository:
         await self._quizzes.soft_delete_cascade(db, quiz_ids, operator)
         await db.execute(update(EtItem).where(EtItem.item_id.in_(live_ids)).values(**audit))
         await db.flush()
+
+        # 🔴 **完課不只由進度寫入觸發**（#464）：學員 2/3、教師刪掉剩下那一項 → 2/2 即完課，
+        # 而這條路沒經過任何 `set_item_completed`。少了這裡，那些人的 `COMPLETED_AT` 會一直
+        # 是空的——ET04 照樣把他們列為通過（判定是即時的），但通過時間顯示「—」且排到最後。
+        # 那是看得見的降級而非錯誤資訊，但不該發生。
+        progress = EtProgressRepository()
+        for course_id in course_ids:
+            await progress.stamp_completed_at(db, course_id=course_id, operator=operator)
 
     async def resequence_remaining(self, db: AsyncSession, chapter_id: int, operator: OperatorInfo) -> None:
         """刪除後把剩餘項目之 `SORT_ORDER` 重編為 1..N。"""

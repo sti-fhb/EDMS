@@ -9,8 +9,16 @@ export interface ApprovalQueryRow {
   /** `PASS` / `FAIL`。 */
   result: string
   result_note: string | null
-  approved_at: string
-  approved_by_name: string
+  /**
+   * 通過時間——核可列為核可時間，完課列為第一次完課的時間（#464）。
+   *
+   * ⚠️ 可為 `null`：活化前就已完課的既有資料。後端以 `NULLS LAST` 排在最後。
+   */
+  approved_at: string | null
+  /**
+   * ⚠️ 可為 `null`：不需線下核可的課程**事實上沒有核可者**（#464）——不是遮蔽、也不是忘了填。
+   */
+  approved_by_name: string | null
   is_revoked: boolean
   revoke_reason: string | null
   revoked_by_name: string | null
@@ -27,7 +35,8 @@ export interface ApprovalQueryRow {
 export interface MyApprovalRow {
   course_id: number
   course_name: string
-  approved_at: string
+  /** 通過時間（#464 起含不需核可課程的完課時間）；活化前的既有完課可為 `null`。 */
+  approved_at: string | null
 }
 
 export interface ApprovalQueryParams {

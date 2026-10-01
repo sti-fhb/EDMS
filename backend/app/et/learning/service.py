@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
-from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
+from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ROLE_ADMIN, ROLE_TEACHER
 from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository, LearnItemRow, zero_question_quiz_item_ids
@@ -66,6 +66,13 @@ _NOT_YET_OPEN = AppError(status_code=403, detail="此課程尚未開放，請於
 #: 不能看」，可被用來枚舉全站有多少教材、哪些 id 有效。取檔端點對「不存在」與「無權」
 #: 回同一個 404，外部觀察不到差異。比照 #247 `ET_ENROLL_001`（格式不符與查無共用同碼）。
 _FILE_NOT_FOUND = AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
+
+#: 可預覽他人已發布課程的角色（#481）。
+#:
+#: ⚠️ 與**編輯頁的路由守衛** `RequireEtCourseManager` 同一組人——那正是「現在就能
+#: 透過唯讀編輯頁讀到別人課程教材」的母體，故本路徑不擴大授權面。
+#: ⛔ 不可放寬為「任一 ET 角色」：學員角色於帳號建立時自動授予，那等同全體登入者。
+_COURSE_MANAGER_ROLES: frozenset[str] = frozenset({ROLE_TEACHER, ROLE_ADMIN})
 
 
 class EtLearningService:
@@ -133,7 +140,9 @@ class EtLearningService:
         if await self._progress_service.is_item_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
             raise _FILE_NOT_FOUND
 
-    async def structure(self, db: AsyncSession, course_id: int, *, user_id: str) -> LearnStructure:
+    async def structure(
+        self, db: AsyncSession, course_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
+    ) -> LearnStructure:
         """ET06 左側導覽之完整結構（AC 1 / AC 2）。
 
         Raises:
@@ -158,23 +167,39 @@ class EtLearningService:
         removed = (
             not enrolled and not is_owner and await self._repo.was_removed(db, user_id=user_id, course_id=course_id)
         )
-        ensure_can_access(enrolled=enrolled, is_owner=is_owner, removed=removed)
-        # #374：起始時間未到者不得進入——擁有者（教師預覽）豁免。
+        is_course_manager = bool(roles & _COURSE_MANAGER_ROLES)
+        ensure_can_access(
+            enrolled=enrolled,
+            is_owner=is_owner,
+            is_course_manager=is_course_manager,
+            course_published=course.status == COURSE_PUBLISHED,
+            removed=removed,
+        )
+        # #374：起始時間未到者不得進入——預覽者豁免。
         #
         # ⚠️ 與「已關閉」的處置**相反**：關閉後仍可唯讀回看（#288 AC 9／10），因為那是
         # 學員曾經學過的歷史；尚未開放的課程他從未學過，讀得到只是提前取得內容。
         #
         # 在 #374 之前擋住學員的只有「我的課程清單上沒有那張卡、沒有連結可點」——
         # `open_start_at` 在 learning/ 與 progress/ 一次都沒出現，深連結因此暢通。
-        if not is_owner and is_pending_open(status=course.status, open_start_at=course.open_start_at, now=utcnow()):
+        # ⚠️ 豁免的是**預覽者**而非僅擁有者（#481）：觀摩他人課程的教師同樣不是學員，
+        # 「尚未開放」對他沒有意義——他要看的就是這門課將來長什麼樣。
+        # 判準與下方 `is_preview` 保持同一形狀（`not enrolled`），兩者不可分岔。
+        if enrolled and is_pending_open(status=course.status, open_start_at=course.open_start_at, now=utcnow()):
             raise _NOT_YET_OPEN
 
         chapters = await self._repo.chapters(db, course_id)
         chapter_ids = [c.chapter_id for c in chapters]
         rows = await self._repo.items_with_titles(db, chapter_ids)
-        # 擁有者預覽（是擁有者且**不在籍**）不累積進度，故完成集合為空、也不套用鎖定。
+        # 預覽（通過授權但**不在籍**）不累積進度，故完成集合為空、也不套用鎖定。
         # 教師若真的用邀請碼加入自己的課，他就是學員，一切照學員規則走。
-        is_preview = is_owner and not enrolled
+        #
+        # 🔴 **判準是 `not enrolled`，不是 `is_owner and not enrolled`**（#481）。
+        # 自 #481 起不在籍者有兩種：擁有者、以及觀摩他人已發布課程的課程管理者。
+        # 若仍以 `is_owner` 判定，後者會落到 `is_preview=False` → 用他（空的）進度去算
+        # `locked_item_ids` → **第二章以後全部顯示鎖定**。那正是擁有者分流當初要避開的
+        # 症狀，只是換了一種人撞到，而且畫面上看起來像「這門課真的鎖住了」。
+        is_preview = not enrolled
         completed_ids: set[int] = (
             set() if is_preview else await self._progress.completed_item_ids(db, user_id=user_id, course_id=course_id)
         )
@@ -205,6 +230,7 @@ class EtLearningService:
             course_name=course.course_name,
             status=course.status,
             is_owner=is_owner,
+            is_preview=is_preview,
             # #288：期間已過亦視同關閉（`spec_us11` 場景 7 / FR-ET-US11-03）。與
             # `STATUS = CLOSED` 走完全相同的路徑——只多一條頂部唯讀提示，**不過濾任何
             # 內容**（#255 裁示 Q2=A）。
@@ -309,7 +335,9 @@ class EtLearningService:
             for chapter_id, items in by_chapter.items()
         }, blocking_item_type
 
-    async def material_content(self, db: AsyncSession, material_id: int, *, user_id: str) -> MaterialContent:
+    async def material_content(
+        self, db: AsyncSession, material_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
+    ) -> MaterialContent:
         """教材內容：說明文字 + 影片清單 + DM 文件清單（含廢止旗標）。"""
         # ⚠️ 順序要緊：**先授權、後回報刪除**。
         #
@@ -319,7 +347,7 @@ class EtLearningService:
         owning_course = await self._repo.course_id_of_material_any(db, material_id)
         if owning_course is None:
             raise _FILE_NOT_FOUND
-        enrolled = await self._require_access_by_course(db, course_id=owning_course, user_id=user_id)
+        enrolled = await self._require_access_by_course(db, course_id=owning_course, user_id=user_id, roles=roles)
 
         material = await self._repo.get_material(db, material_id)
         course_id = await self._repo.course_id_of_material(db, material_id)
@@ -373,7 +401,9 @@ class EtLearningService:
             docs=docs,
         )
 
-    async def ensure_video_accessible(self, db: AsyncSession, video_id: int, *, user_id: str) -> None:
+    async def ensure_video_accessible(
+        self, db: AsyncSession, video_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
+    ) -> None:
         """發票前之授權：影片存在且該使用者有權（在籍 OR 擁有者）。
 
         **授權只在這裡做一次**——取檔端點憑票放行、不重跑（見 `video_ticket` 模組之
@@ -386,7 +416,7 @@ class EtLearningService:
         course_id = await self._repo.course_id_of_video(db, video_id)
         if video is None or course_id is None:
             raise _FILE_NOT_FOUND
-        enrolled = await self._require_access_by_course(db, course_id=course_id, user_id=user_id)
+        enrolled = await self._require_access_by_course(db, course_id=course_id, user_id=user_id, roles=roles)
         # 判定掛在**發票端**：取檔端點憑票放行、不重跑授權（見本方法 docstring）。
         # 影片掛在教材下，故以 `video.material_id` 走同一支判定（#424）。
         await self._ensure_item_unlocked(
@@ -406,7 +436,9 @@ class EtLearningService:
             raise _FILE_NOT_FOUND
         return resolve_within_root(video.file_path, not_found=_FILE_NOT_FOUND), video.file_name
 
-    async def doc_file(self, db: AsyncSession, material_id: int, doc_id: str, *, user_id: str):
+    async def doc_file(
+        self, db: AsyncSession, material_id: int, doc_id: str, *, user_id: str, roles: frozenset[str] = frozenset()
+    ):
         """DM 文件實體檔（經 `app/services` 之唯一跨模組出口）。
 
         `read_file_for_reference` 自帶 DM 側的 storage-root 圍籬與「僅當前版」限制
@@ -415,7 +447,7 @@ class EtLearningService:
         course_id = await self._repo.course_id_of_material(db, material_id)
         if course_id is None:
             raise _FILE_NOT_FOUND
-        enrolled = await self._require_access_by_course(db, course_id=course_id, user_id=user_id)
+        enrolled = await self._require_access_by_course(db, course_id=course_id, user_id=user_id, roles=roles)
         await self._ensure_item_unlocked(
             db, course_id=course_id, user_id=user_id, material_id=material_id, enrolled=enrolled
         )
@@ -469,19 +501,44 @@ class EtLearningService:
             sort_order=sort_order,
         )
 
-    async def _require_access(self, db: AsyncSession, *, course_id: int, user_id: str, course_owner: str) -> bool:
+    async def _require_access(
+        self,
+        db: AsyncSession,
+        *,
+        course_id: int,
+        user_id: str,
+        course_owner: str,
+        roles: frozenset[str] = frozenset(),
+        course_status: str | None = None,
+    ) -> bool:
         """判定存取權，並回傳 `enrolled`。
 
         回傳 `enrolled` 而非 `is_owner`：呼叫端要分流的是「這個人有沒有進度可言」——
         教材內容的 `video_progress` 與 `_ensure_item_unlocked` 都問這一題。通過
-        `ensure_can_access` 之後，`enrolled=False` 即代表擁有者預覽。
+        `ensure_can_access` 之後，**`enrolled=False` 即代表在預覽**（擁有者或觀摩的
+        課程管理者，#481 起兩者皆有可能）。
+
+        ⚠️ `roles` / `course_status` 不傳即退回 #481 之前的行為（只放行在籍與擁有者）
+        ——fail-closed：漏傳的後果是「該看得到的人看不到」，而不是反過來。
         """
         enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
-        ensure_can_access(enrolled=enrolled, is_owner=course_owner == user_id)
+        ensure_can_access(
+            enrolled=enrolled,
+            is_owner=course_owner == user_id,
+            # 母體與編輯頁的路由守衛（`RequireEtCourseManager`）一致——見 `ensure_can_access`
+            is_course_manager=bool(roles & _COURSE_MANAGER_ROLES),
+            course_published=course_status == COURSE_PUBLISHED,
+        )
         return enrolled
 
     async def _require_access_by_course(
-        self, db: AsyncSession, *, course_id: int, user_id: str, not_found: AppError = _FILE_NOT_FOUND
+        self,
+        db: AsyncSession,
+        *,
+        course_id: int,
+        user_id: str,
+        roles: frozenset[str] = frozenset(),
+        not_found: AppError = _FILE_NOT_FOUND,
     ) -> bool:
         """同上，但由 `course_id` 反查擁有者；**無權一律收斂成 404**。回傳 `enrolled`。
 
@@ -496,6 +553,13 @@ class EtLearningService:
         if course is None:
             raise not_found
         try:
-            return await self._require_access(db, course_id=course_id, user_id=user_id, course_owner=course.owner_id)
+            return await self._require_access(
+                db,
+                course_id=course_id,
+                user_id=user_id,
+                course_owner=course.owner_id,
+                roles=roles,
+                course_status=course.status,
+            )
         except AppError:
             raise not_found from None

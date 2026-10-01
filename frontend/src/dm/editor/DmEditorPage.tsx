@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
 import {
+  EMPTY_AUDIENCE_PAIR,
   EMPTY_EDITOR_FORM,
   isPreviewableMime,
   makeEditorSchema,
@@ -126,11 +127,13 @@ export function DmEditorPage() {
   const audienceOptions = options?.audiences ?? []
   const unitOptions = options?.units ?? []
   const retrievalOptions = options?.retrieval_tags ?? []
-  /** 可見對象之錯誤可能落在陣列層（未設任何配對）或某列（單位 / 職位未選），一併取第一則顯示。 */
-  const audienceError = useMemo(
-    () => Object.entries(errors).find(([k]) => k.startsWith("audience_pairs"))?.[1],
-    [errors],
-  )
+  /**
+   * 陣列層錯誤（未設任何配對，例如把列全刪光）——顯示於區塊下方。
+   *
+   * 列內的「請選擇單位 / 職位」**不走這裡**：那些由各該欄位自身以紅框 + 紅字 label 呈現（#476），
+   * 與頁面其他必填欄位一致；若同時在下方再列一次紅字會變成同一件事講兩遍。
+   */
+  const audienceError = errors["audience_pairs"]
   const selectedRetrieval = useMemo(
     () => (options?.retrieval_tags ?? []).filter((o) => form.retrieval_ids.includes(o.code)),
     [options?.retrieval_tags, form.retrieval_ids],
@@ -167,17 +170,26 @@ export function DmEditorPage() {
   const clearAudienceErrors = () =>
     setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith("audience_pairs"))))
 
-  const setAudiencePairs = (pairs: AudiencePair[]) => {
-    setField("audience_pairs", pairs)
+  /**
+   * 以 updater 更新配對清單——**必須是函式式的**，不可讀 render 閉包裡的 `form.audience_pairs`。
+   *
+   * 選完單位會立刻引發 re-render，使用者接著選職位時，若 updater 讀的是上一輪閉包的陣列，
+   * 第二次更新會把剛選好的單位蓋回空字串；畫面上看起來就是「單位選了又不見」。
+   */
+  const setAudiencePairs = (updater: (prev: AudiencePair[]) => AudiencePair[]) => {
+    setForm((prev) => ({ ...prev, audience_pairs: updater(prev.audience_pairs) }))
+    setDirty(true)
+    persisted.current = null
+    lockPrefillFor("audience_pairs")
     clearAudienceErrors()
   }
 
-  const addAudiencePair = () => setAudiencePairs([...form.audience_pairs, { unit_id: "", audience_id: "" }])
+  const addAudiencePair = () => setAudiencePairs((prev) => [...prev, EMPTY_AUDIENCE_PAIR])
 
   const updateAudiencePair = (idx: number, patch: Partial<AudiencePair>) =>
-    setAudiencePairs(form.audience_pairs.map((pair, i) => (i === idx ? { ...pair, ...patch } : pair)))
+    setAudiencePairs((prev) => prev.map((pair, i) => (i === idx ? { ...pair, ...patch } : pair)))
 
-  const removeAudiencePair = (idx: number) => setAudiencePairs(form.audience_pairs.filter((_, i) => i !== idx))
+  const removeAudiencePair = (idx: number) => setAudiencePairs((prev) => prev.filter((_, i) => i !== idx))
 
   // 審核者僅為 submit 參數、不屬草稿內容：變更**不可**清草稿快取，否則送簽失敗後改審核者重試
   // 會重複建立文件（新增模式）或誤觸單一草稿擋（編輯模式）。
@@ -378,7 +390,12 @@ export function DmEditorPage() {
   useEffect(() => {
     if (isNew || tagsPrefilled.current || !docTags || docTagsFetching) return
     tagsPrefilled.current = true
-    setForm((prev) => ({ ...prev, audience_pairs: docTags.audience_pairs, retrieval_ids: docTags.retrieval_ids }))
+    setForm((prev) => ({
+      ...prev,
+      // 文件原本沒有配對（或全被略過）時仍保留一列空白，否則畫面只剩一顆「新增」按鈕（#476）
+      audience_pairs: docTags.audience_pairs.length > 0 ? docTags.audience_pairs : [EMPTY_AUDIENCE_PAIR],
+      retrieval_ids: docTags.retrieval_ids,
+    }))
   }, [isNew, docTags, docTagsFetching])
 
   // 續編模式：一次性預帶既有草稿內容——名稱 / func / 版號 / 摘要 / 前次審核者，四種情況
@@ -541,15 +558,17 @@ export function DmEditorPage() {
                   {/* 一列＝一組 (單位, 職位) 配對。兩欄必須成對設定：掛 [(軍醫局, 護理師), (三總, 行政人員)]
                       意為「僅此兩種人」，若拆成兩個獨立多選會連「軍醫局的行政人員」也一併看得到（#437）。 */}
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    可見對象 *
+                    可見對象
                   </Typography>
                   <Stack spacing={1}>
                     {form.audience_pairs.map((pair, idx) => (
                       <Stack
-                        key={`${pair.unit_id}-${pair.audience_id}-${idx}`}
+                        // 完全受控（值皆來自 state），用索引不會有狀態殘留；把值寫進 key 會讓
+                        // 「選完單位」當下整列卸載重建，徒增時序風險。
+                        key={idx}
                         direction="row"
                         spacing={1}
-                        alignItems="center"
+                        alignItems="flex-start"
                       >
                         <Autocomplete
                           size="small"
@@ -561,7 +580,14 @@ export function DmEditorPage() {
                           }
                           getOptionLabel={(o) => o.name}
                           isOptionEqualToValue={(a, b) => a.code === b.code}
-                          renderInput={(params) => <TextField {...params} label="單位" />}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label="單位"
+                              required
+                              error={!!errors[`audience_pairs.${idx}.unit_id`]}
+                            />
+                          )}
                         />
                         <Autocomplete
                           size="small"
@@ -573,7 +599,14 @@ export function DmEditorPage() {
                           }
                           getOptionLabel={(o) => o.name}
                           isOptionEqualToValue={(a, b) => a.code === b.code}
-                          renderInput={(params) => <TextField {...params} label="職位" />}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label="職位"
+                              required
+                              error={!!errors[`audience_pairs.${idx}.audience_id`]}
+                            />
+                          )}
                         />
                         <IconButton
                           size="small"

@@ -51,8 +51,18 @@ class LearnStructure(BaseModel):
     """ET06 左側導覽所需之完整結構。
 
     Attributes:
-        is_owner: 當前使用者為課程擁有者（教師預覽，#255 裁示 Q1=A）。前端據此顯示
-            「預覽模式」提示，避免教師誤以為自己是以學員身分在累積進度。
+        is_owner: 當前使用者為課程擁有者。
+        is_preview: **以預覽身分檢視**（通過授權但不在籍，#481）。兩種人會是 `True`：
+            課程擁有者、以及觀摩他人已發布課程的教師／管理者。
+
+            🔴 **前端的「預覽模式」提示與「不顯示進度條」一律看這一欄，不是 `is_owner`**。
+            兩者在 #481 之前恰好等價，之後不再——觀摩者 `is_owner=False` 但確實在預覽，
+            照 `is_owner` 判定會讓他看到一條恆為 0% 的進度條、而且沒有任何提示說明
+            為什麼。
+
+            ⚠️ 反過來也成立：擁有者若真的用邀請碼加入自己的課，他是學員
+            （`is_preview=False`），進度照常累積、進度條照常顯示。`ChapterNav` 的
+            docstring 曾載明「前端拿到的 `is_owner` 分不出這兩種情形」——改用本欄即可。
         is_closed: 課程已關閉 → 前端顯示唯讀提示（ET-MSG-ET06-005）。
             **不過濾任何內容**（#255 裁示 Q2=A）——關閉限制的是寫入，不是讀取。
         playback_rates: 可選倍速，已依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮。
@@ -86,6 +96,7 @@ class LearnStructure(BaseModel):
     course_name: str
     status: str
     is_owner: bool
+    is_preview: bool
     is_closed: bool
     playback_rates: list[float]
     last_item_id: int | None

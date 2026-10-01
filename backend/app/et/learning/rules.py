@@ -22,8 +22,15 @@ _NO_ACCESS = AppError(status_code=403, detail="您尚未加入此課程", error_
 _REMOVED = AppError(status_code=403, detail="您已被該課程移除", error_code="ET_LEARN_004")
 
 
-def ensure_can_access(*, enrolled: bool, is_owner: bool, removed: bool = False) -> None:
-    """學員端內容之存取判定：**在籍 OR 擁有者**（#255 SA Q1 裁示 A）。
+def ensure_can_access(
+    *,
+    enrolled: bool,
+    is_owner: bool,
+    is_course_manager: bool = False,
+    course_published: bool = False,
+    removed: bool = False,
+) -> None:
+    """學員端內容之存取判定：**在籍 OR 擁有者 OR 課程管理者預覽已發布課程**。
 
     影片與 DM 文件是**實體檔案**。少了這道判定，任何登入者（ET 學員角色人人都有）
     知道 `material_id` / `video_id` 就能抓走全站教材——包含他沒有權限看的課程。
@@ -35,6 +42,24 @@ def ensure_can_access(*, enrolled: bool, is_owner: bool, removed: bool = False) 
 
     授權面並未因此擴大——擁有者本來就能在 ET05 看到該課程的全部教材，ET06 對他不多
     給任何一筆資料，只是換一種呈現。
+
+    ## 課程管理者預覽**他人已發布**課程亦放行（#481）
+
+    `spec_us7` 明訂「全部課程」分頁的用途是**供跨教師瀏覽觀摩**，而觀摩要看的是「這門
+    課上起來像什麼」，不是編輯欄位長怎樣。
+
+    **授權面同樣不擴大**，理由與上一段完全相同：`material/service.get_detail` 的
+    docstring 已載明讀取端**不套擁有者判定**（#358 第 2 項，依 `FR-ET-US7-04` 與 US7
+    場景 8「他人建立之課程可唯讀瀏覽」）。教師現在就看得到別人課程的全部教材內容，
+    只是透過唯讀編輯頁。本路徑是換一種呈現，不多給任何一筆資料。
+
+    放行的母體刻意與**編輯頁的路由守衛**（`RequireEtCourseManager` ＝ 教師或管理者）
+    一致——那正是「現在就讀得到」的那組人。放寬到任一 ET 角色會真的擴大：ET 學員
+    角色於帳號建立時自動授予，等同全體登入者。
+
+    ⚠️ **`course_published` 必填**：草稿不在此列。草稿只有擁有者看得到，而那是由
+    `structure` 的 `COURSE_DRAFT and owner_id != user_id → 404` 把關（「草稿的存在
+    本身是秘密」）。本處是第二道，兩者不可互相取代。
 
     ⚠️ **給 `ET-5b`**：教師預覽**不得寫入** `ET_PROGRESS` / `_VIDEO` / `_INTERVAL`
     （#255 裁示 Q1 一併載明）。否則教師預覽完就出現在自己課程的完課統計裡，正好是
@@ -53,6 +78,11 @@ def ensure_can_access(*, enrolled: bool, is_owner: bool, removed: bool = False) 
         AppError: 被移除者 403 `ET_LEARN_004`；其餘兩者皆非 403 `ET_LEARN_002`。
     """
     if enrolled or is_owner:
+        return
+    # #481：具教師 / 管理者角色者可預覽**已發布**課程（「全部課程」分頁的觀摩入口）。
+    # ⚠️ `course_published` 不可省——草稿只有擁有者看得到（`structure` 另有一道 404，
+    # 那是「草稿的存在是秘密」；此處是第二道，兩者不可互相取代）。
+    if is_course_manager and course_published:
         return
     raise _REMOVED if removed else _NO_ACCESS
 

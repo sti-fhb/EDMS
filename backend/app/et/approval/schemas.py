@@ -133,8 +133,11 @@ class _ApprovalCore(BaseModel):
     result_note: str | None
     is_revoked: bool
     revoke_reason: str | None
-    approved_by: str
-    approved_at: datetime
+    #: ⚠️ #464 起可為 `None`：完課側（不需核可課程）**事實上沒有核可者**。
+    approved_by: str | None
+    #: ⚠️ #464 起可為 `None`：完課側取 `ET_ENROLLMENT.COMPLETED_AT`，而**活化之前**就已完課的
+    #: 既有資料該欄為空。正式機從頭建不會有這種資料，測試環境會。
+    approved_at: datetime | None
     revoked_by: str | None
     revoked_at: datetime | None
 
@@ -152,8 +155,11 @@ class ApprovalQueryRow(BaseModel):
     course_name: str
     result: str
     result_note: str | None
-    approved_at: datetime
-    approved_by_name: str
+    #: 通過時間——核可列為 `APPROVED_AT`，完課列為第一次完課的時間（#464）。
+    #: ⚠️ 可為 `None`：活化前就已完課的既有資料。前端顯示「—」並排在最後（`NULLS LAST`）。
+    approved_at: datetime | None
+    #: ⚠️ 可為 `None`：不需核可的課程**事實上沒有核可者**——不是遮蔽、也不是忘了填。
+    approved_by_name: str | None
     is_revoked: bool
     revoke_reason: str | None
     revoked_by_name: str | None
@@ -253,4 +259,5 @@ class MyApprovalRow(BaseModel):
 
     course_id: int
     course_name: str
-    approved_at: datetime
+    #: 通過時間（#464 起含不需核可課程的完課時間）；活化前的既有完課可為 `None`。
+    approved_at: datetime | None

@@ -36,7 +36,8 @@ const RESULT_OPTIONS = [
 ] as const
 
 /**
- * 教師 / 管理者視角——依學員**姓名或 Email** 與 / 或**課程**查核可紀錄
+ * 教師 / 管理者視角——依學員**姓名或 Email** 與 / 或**課程**查**受訓完成狀況**（#464 起含
+ * 不需線下核可之課程的完課；兩種「通過」畫面上不分辨）
  * （`FR-ET-US17-01`、#436、#439）。
  *
  * ⚠️ 姓名與 Email 共用同一個輸入框、擇一命中即可：同名同姓時姓名不足以定位，而 Email
@@ -70,7 +71,7 @@ const RESULT_OPTIONS = [
  *
  * ## 查詢前不顯示空狀態
  *
- * 「查無符合條件的核可紀錄」只在**查過之後**出現。一進畫面就顯示它，會讓教師以為
+ * 「查無符合條件的紀錄」只在**查過之後**出現。一進畫面就顯示它，會讓教師以為
  * 系統已經查過而且真的沒有資料。
  */
 export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
@@ -91,8 +92,8 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
     //（見 `approval/router.py` 模組 docstring）。那正是當初把核可從 `et-tracking`
     // 分桶出去要防的事：教師只是多看幾次畫面，就把他真正需要能送出的動作的配額吃掉。
     //
-    // 下拉的母體是核可紀錄，不需要即時——新核可一筆之後晚五分鐘才出現在篩選選單裡，
-    // 對「查核可紀錄」這件事沒有影響。
+    // 下拉的母體是「核可紀錄 ∪ 不需核可課程的完課」（#464），不需要即時——新通過一筆之後
+    // 晚五分鐘才出現在篩選選單裡，對「查受訓完成狀況」這件事沒有影響。
     staleTime: 5 * 60 * 1000,
   })
   const options = coursesQuery.data ?? []
@@ -206,8 +207,8 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
                 ? "課程清單載入失敗，請重新整理後再試"
                 : emptyReason === "none"
                   ? isAdmin
-                    ? "系統中尚無核可紀錄"
-                    : "您開設的課程尚無核可紀錄"
+                    ? "系統中尚無通過紀錄"
+                    : "您開設的課程尚無通過紀錄"
                   : "不指定學員時可只選課程"
             }
             onChange={(e) => {
@@ -262,7 +263,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         //
         // | 真相 | 該做什麼 |
         // |---|---|
-        // | 全系統還沒有任何核可紀錄 | 去 ET02 核可學員 |
+        // | 全系統還沒有任何通過紀錄 | 需核可課程：去 ET02 核可學員；不需核可課程：等學員完課 |
         // | 有紀錄，但這個人沒有 | 確認姓名 / 改用 Email 查 |
         // | 有紀錄，但被**可見範圍**擋掉 | 找管理者查 |
         //
@@ -274,7 +275,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         // 完整與否」，教師看到「查無」會讀成「這個人沒受過訓」。那是方向最危險的假陰性，
         // 而可見範圍分流（SA Q1 裁示 C）讓它在正式使用時一定會發生。
         <Alert severity="info">
-          查無符合條件的核可紀錄。
+          查無符合條件的紀錄。
           {!isAdmin && "若確定該學員已受訓，可能是該紀錄不在您的可見範圍內——請洽管理者查詢。"}
         </Alert>
       ) : (
@@ -286,7 +287,10 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
                   <TableCell>學員</TableCell>
                   <TableCell>課程</TableCell>
                   <TableCell>核可結果</TableCell>
-                  <TableCell>核可時間</TableCell>
+                  {/* #464：欄名由「核可時間」改為「通過時間」——不需核可的課程以完課時間計，
+                      兩種通過畫面上不區分（裁示）。「核可人」維持原名：需核可課程確實有人核可，
+                      不需核可者顯示「—」。 */}
+                  <TableCell>通過時間</TableCell>
                   <TableCell>核可人</TableCell>
                   <TableCell>狀態</TableCell>
                 </TableRow>
@@ -313,8 +317,11 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
                         </Typography>
                       )}
                     </TableCell>
+                    {/* 通過時間為空＝活化前就已完課的既有資料：`formatDateTime(null)` 本身就回「—」，
+                        不需另外判斷。核可人為空＝該課程不需線下核可——這一格**沒有**經過任何
+                        格式化函式，所以要自己補「—」，否則是一格空白。 */}
                     <TableCell>{formatDateTime(row.approved_at)}</TableCell>
-                    <TableCell>{row.approved_by_name}</TableCell>
+                    <TableCell>{row.approved_by_name ?? "—"}</TableCell>
                     <TableCell>
                       {row.is_revoked ? (
                         <Box>

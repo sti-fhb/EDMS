@@ -21,7 +21,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.pagination import PaginatedResult, paginate
+from app.core.pagination import PaginatedResult, paginate_rows
 from app.et.approval.query_repository import EtApprovalQueryRepository
 from app.et.approval.query_rules import (
     ensure_course_filter_allowed,
@@ -93,8 +93,11 @@ class EtApprovalQueryService:
             course_id=course_id,
             result=result,
         )
-        paged = await paginate(db, stmt, page, limit, _ApprovalCore)
-        rows = await self._enrich(db, paged["data"], actor_id=actor_id, is_admin=admin)
+        # ⚠️ `paginate_rows` 而非 `paginate`：#464 起語句是兩側的 `UNION ALL`，結果是多欄
+        # Row——`paginate()` 的 `scalars()` 會**靜默只取第一欄**。
+        paged = await paginate_rows(db, stmt, page, limit)
+        core = [_ApprovalCore.model_validate(dict(row._mapping)) for row in paged["data"]]
+        rows = await self._enrich(db, core, actor_id=actor_id, is_admin=admin)
         return {"data": rows, "meta": paged["meta"]}
 
     async def filter_courses(
@@ -119,15 +122,16 @@ class EtApprovalQueryService:
         不收 `user_id` 參數——對象恆為 `actor_id`。
         """
         stmt = self._repo.mine_stmt(user_id=actor_id)
-        paged = await paginate(db, stmt, page, limit, _ApprovalCore)
-        courses = await self._repo.courses(db, [r.course_id for r in paged["data"]])
+        paged = await paginate_rows(db, stmt, page, limit)
+        core = [_ApprovalCore.model_validate(dict(row._mapping)) for row in paged["data"]]
+        courses = await self._repo.courses(db, [r.course_id for r in core])
         rows = [
             MyApprovalRow(
                 course_id=r.course_id,
                 course_name=courses[r.course_id].name if r.course_id in courses else "",
                 approved_at=r.approved_at,
             )
-            for r in paged["data"]
+            for r in core
         ]
         return {"data": rows, "meta": paged["meta"]}
 
@@ -156,7 +160,8 @@ class EtApprovalQueryService:
         if not core:
             return []
         courses = await self._repo.courses(db, [r.course_id for r in core])
-        wanted = {r.user_id for r in core} | {r.approved_by for r in core}
+        # ⚠️ 完課列的 `approved_by` 為 `None`（不需核可的課程沒有核可者），不可放進查詢集合。
+        wanted = {r.user_id for r in core} | {r.approved_by for r in core if r.approved_by}
         wanted |= {r.revoked_by for r in core if r.revoked_by}
         people = await self._repo.user_names(db, list(wanted))
 
@@ -176,7 +181,8 @@ class EtApprovalQueryService:
                 result=r.result,
                 result_note=note_of(r),
                 approved_at=r.approved_at,
-                approved_by_name=people.get(r.approved_by, ""),
+                # ⚠️ 完課列回 `None` 而非 `""`：空字串會被前端讀成「有核可人但姓名是空的」。
+                approved_by_name=people.get(r.approved_by, "") if r.approved_by else None,
                 is_revoked=r.is_revoked,
                 revoke_reason=r.revoke_reason,
                 revoked_by_name=people.get(r.revoked_by) if r.revoked_by else None,
