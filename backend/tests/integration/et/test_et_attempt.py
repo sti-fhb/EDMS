@@ -1204,6 +1204,11 @@ class TestPreviewReadOnly:
 
         r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(viewer))
 
+        # ⚠️ 正向錨點不可省：只斷言「沒有 is_correct」的話，端點回 404 時錯誤 JSON 裡
+        # 當然也沒有——那條斷言會在**功能整個壞掉**的情況下照樣通過。
+        # （2026-10-01 的變異檢查實際撞到：拿掉課程管理者放行後，本條是唯一沒紅的。）
+        assert r.status_code == 200, r.text
+        assert r.json()["questions"][0]["options"], "沒有選項可檢查，這條斷言就沒有意義"
         assert "is_correct" not in r.text, f"預覽回應外洩正確答案：{r.text}"
 
     async def test_在籍學員取不到預覽題目(self, client, db) -> None:
