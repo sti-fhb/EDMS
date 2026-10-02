@@ -108,13 +108,22 @@ export const MODULE_LABELS: Record<string, string> = { DM: "文件管理（DM）
  * （平的一層）。此處只管**怎麼稱呼**；配對或平鋪的呈現由 `isPairedModule(options)` 依選項
  * 內容決定，與本表無關。
  *
- * 未列入的模組回退為中性的「群組」——寧可用通稱，也不要把某個模組的詞套到別的模組身上。
+ * 未列入的模組**回退為模組代碼本身**，對齊上方 `MODULE_LABELS[m] ?? m` 的頁籤慣例。
  */
 export const MODULE_GROUP_LABELS: Record<string, string> = { DM: "可見對象", ET: "受訓單位標籤" }
 
-/** 取模組之群組維度稱呼；未知模組回退「群組」。 */
+/**
+ * 取模組之群組維度稱呼；未知模組回退模組代碼本身。
+ *
+ * 回退值刻意用代碼而非「群組」之類的通稱：那是程式內部的字（API 欄位 `groups`、
+ * 端點 `group-options`），使用者看不懂，而且長得像一個正常的欄位名——真的漏設定時
+ * 沒有人看得出來。顯示 `XX` 很醜，但一眼就知道是少掛了對照，與頁籤的行為也一致。
+ *
+ * ⚠️ 不可省略回退：`Record<string, string>` 取不存在的 key 於執行期為 `undefined`，
+ * 標題會變成空白——那比顯示代碼更難追。
+ */
 export function groupDimensionLabel(module: string): string {
-  return MODULE_GROUP_LABELS[module] ?? "群組"
+  return MODULE_GROUP_LABELS[module] ?? module
 }
 
 /**

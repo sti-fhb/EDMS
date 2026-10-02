@@ -149,6 +149,15 @@ describe("RolesPage 權限管理", () => {
     expect(screen.queryByRole("columnheader", { name: "可見對象" })).not.toBeInTheDocument()
   })
 
+  it("未知模組之群組欄位標題回退為模組代碼（與頁籤同慣例），不顯示內部通稱", async () => {
+    server.use(http.get("/api/dp/roles/modules", () => HttpResponse.json(["XX"])))
+    renderWithProviders(<RolesPage />)
+    await screen.findByText("王曉明")
+    // 顯示代碼而非「群組」：漏掛對照時要一眼看得出來，而不是長得像正常欄位名
+    expect(screen.getByRole("columnheader", { name: "XX" })).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "群組" })).not.toBeInTheDocument()
+  })
+
   it("ET 之群組編輯視窗標題為「編輯受訓單位標籤」", async () => {
     server.use(
       http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])),
