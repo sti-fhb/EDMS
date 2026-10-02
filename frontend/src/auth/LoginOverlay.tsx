@@ -22,7 +22,8 @@ import { toApiError } from "../services/http"
 
 /**
  * 登入 overlay（全畫面遮罩）：登入 / 註冊分頁。
- * 登入：帳密 + 錯誤提示（後端 error_message）；`DP_AUTH_007` 同時給出「前往註冊」與「重寄驗證信」兩條出路。
+ * 登入：帳密 + 錯誤提示（後端 error_message）；`DP_AUTH_007` 同時給出三條出路——「前往註冊」與
+ * 「重寄驗證信」兩個連結，加上「請至信箱點選驗證連結」一行小字（#484 起主訊息不再帶這些指引）。
  * 註冊（US2 #56）：RegisterForm，送出後於分頁內顯示「驗證信已寄」（不跳登入，需驗證後才能登入）。
  */
 export function LoginOverlay() {
@@ -41,10 +42,22 @@ export function LoginOverlay() {
   // 冷卻僅對「起算時的那個 Email」生效——換 Email 後不被前一個 Email 的冷卻誤擋
   const resendCoolingDown = resendCooldown.active && resendCooldown.key === email
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
+  /**
+   * 碼與訊息必須**同進退**。
+   *
+   * 下方 `DP_AUTH_007` 區塊的外層閘是 `errorMessage !== null`、內層條件是 `errorCode`，
+   * 兩者分開清會讓不變量（區塊出現 ⟺ 碼是 007）破掉：日後若有人只設訊息而沒碰碼
+   * （例如前端加一條「請輸入 Email」的驗證錯誤），三條出路就會掛在一個毫不相干的訊息底下。
+   * 一律走這個函式，不要再分開呼叫兩個 setter。
+   */
+  const clearError = () => {
     setErrorCode(null)
     setErrorMessage(null)
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    clearError()
     setResendNote(null)
     setSubmitting(true)
     try {
@@ -107,7 +120,7 @@ export function LoginOverlay() {
               value={tab}
               onChange={(_e, v) => {
                 setTab(v as "login" | "register")
-                setErrorMessage(null)
+                clearError()
                 setResendNote(null)
               }}
               variant="fullWidth"
@@ -134,28 +147,47 @@ export function LoginOverlay() {
                     {errorMessage}
                     {/*
                       #208：後端已不再區分「查無帳號」與「尚未驗證」（否則匿名者密碼隨便填即可
-                      列舉待驗證列，含「誰被邀請了」）。前端因此也**不能**靠 error code 決定顯示
-                      哪一條出路——只有使用者自己知道是哪一種，所以兩條並列，由本人選。
-                      兩者缺一即讓某一類使用者走進死路：缺註冊 → 逾期者被指向靜默不寄的重寄；
-                      缺重寄 → 剛註冊未收到信者只能重註冊。
+                      列舉待驗證列，含「誰被邀請了」）。前端因此也**不能**靠 error code 以外的
+                      條件決定顯示哪一條出路——只有使用者自己知道是哪一種，所以三條並列，由本人選。
+
+                      ⚠️ 三條缺一即讓某一類使用者走進死路：
+                        缺註冊     → 逾期者被指向靜默不寄的重寄
+                        缺重寄     → 剛註冊未收到信者只能重註冊
+                        缺下方小字 → 信已寄到但沒點的人不會想到去收信，只會一直按重寄而卡在冷卻
+
+                      #484 把後端主訊息縮為「帳號或密碼錯誤」後，**三條出路全部由這個區塊承擔**
+                      （後端 `_NO_ACCOUNT_MESSAGE` 的註解有對應說明）。小字必須與兩個連結同進退、
+                      不可另加顯示條件——那會重新開啟 #208 要擋的列舉面。
                     */}
                     {errorCode === "DP_AUTH_007" && (
-                      <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 2 }}>
-                        <Link component="button" type="button" underline="hover" onClick={() => setTab("register")}>
-                          前往註冊
-                        </Link>
-                        <Link
-                          component="button"
-                          type="button"
-                          underline="hover"
-                          disabled={resendCoolingDown}
-                          sx={{ opacity: resendCoolingDown ? 0.5 : 1, pointerEvents: resendCoolingDown ? "none" : "auto" }}
-                          onClick={handleResendVerification}
-                        >
-                          {resendCoolingDown
-                            ? `重寄驗證信（${formatCountdown(resendCooldown.remaining)} 後）`
-                            : "重寄驗證信"}
-                        </Link>
+                      <Box sx={{ mt: 1 }}>
+                        {/*
+                          出路 3。⚠️ 字級與顏色不可再調淡：另外兩條有按鈕外觀撐著，這條**只有文字**，
+                          視覺上失效時測試照樣全綠（它們只驗文字在 DOM 裡，驗不到看不看得見）。
+                        */}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                          尚未完成驗證？請至信箱點選驗證連結。
+                        </Typography>
+                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                          <Link component="button" type="button" underline="hover" onClick={() => setTab("register")}>
+                            前往註冊
+                          </Link>
+                          <Link
+                            component="button"
+                            type="button"
+                            underline="hover"
+                            disabled={resendCoolingDown}
+                            sx={{
+                              opacity: resendCoolingDown ? 0.5 : 1,
+                              pointerEvents: resendCoolingDown ? "none" : "auto",
+                            }}
+                            onClick={handleResendVerification}
+                          >
+                            {resendCoolingDown
+                              ? `重寄驗證信（${formatCountdown(resendCooldown.remaining)} 後）`
+                              : "重寄驗證信"}
+                          </Link>
+                        </Box>
                       </Box>
                     )}
                   </Alert>
@@ -188,7 +220,7 @@ export function LoginOverlay() {
                       variant="body2"
                       onClick={() => {
                         setForgotMode(true)
-                        setErrorMessage(null)
+                        clearError()
                         setResendNote(null)
                       }}
                     >
