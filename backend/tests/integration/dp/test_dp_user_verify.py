@@ -127,8 +127,12 @@ async def test_verify_idempotent_when_already_verified(db, et_stub):
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_001"
 
 
-async def test_login_unverified_gets_generic_message_with_guidance(db):
+async def test_login_unverified_shares_no_account_message(db):
     """未驗證帳號（僅 pending、不在 DP_USER）登入 → 401 DP_AUTH_007 + 中性訊息（#208）。
+
+    ⚠️ 名字原為 `..._gets_generic_message_with_guidance`，#484 後 guidance 已不在本檔驗證，
+    留著會讓人以為這支守著指引。名字只宣稱驗得到的事，承重落點寫在下面。
+
 
     此處原本斷言 DP_AUTH_010（#56 為避免未驗證者看到誤導的「查無此帳號」而設）。#208 移除了
     該專屬回應——它讓匿名者可列舉待驗證列——但 #56 的顧慮仍然成立，所以改由統一訊息承接。
@@ -193,8 +197,13 @@ async def test_resend_expired_pending_is_noop(db):
     assert mails == []
 
 
-async def test_login_with_expired_pending_offers_registration_path(db):
-    """逾期待驗證列 → 登入的訊息必須含「註冊」這條路（#212 的死路防線）。
+async def test_login_with_expired_pending_still_returns_dp_auth_007(db):
+    """逾期待驗證列 → 必須走到會鋪出「註冊」那條路的碼（#212 的死路防線）。
+
+    ⚠️ 名字原為 `..._offers_registration_path`，#484 後註冊入口已不在本檔驗證——grep
+    `registration_path` 找「誰在守註冊入口」的人會找到這支、看到它綠、就收手。名字只宣稱
+    驗得到的事（走到哪個碼），註冊入口的承重落點寫在下面。
+
 
     #212 的原始情境：逾期列讓登入永久回 DP_AUTH_010「請重新寄送」→ 前端據此渲染重寄鈕 →
     重寄對逾期列靜默不寄卻仍蓋 Email 冷卻章 → 使用者每按一次就把自己「重新註冊」的路徑再鎖

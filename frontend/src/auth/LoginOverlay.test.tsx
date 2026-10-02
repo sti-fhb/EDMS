@@ -19,6 +19,19 @@ import { muiTheme } from "../styles/muiTheme"
  */
 const NEUTRAL_MESSAGE = "帳號或密碼錯誤"
 
+/**
+ * `DP_AUTH_007` 的三條自助出路，各自的字面值。
+ *
+ * ⚠️ **正向與否定斷言必須共用同一個常數。** 否定斷言用的 `queryByText` / `queryByRole`
+ * 在找不到元素時回傳 `null`，`not.toBeInTheDocument()` 因此**恆真**——若有人改了文案
+ * （例如把「請至信箱」改成「請到信箱」）而斷言各自寫死字面值，只有正向那條會紅、他去修
+ * 正向那條，否定那條從此永遠通過且什麼都沒驗。而否定那條守的正是「`DP_AUTH_008` 時不得
+ * 出現驗證引導」——#208 的列舉面本身。
+ */
+const REGISTER_PATH = "前往註冊"
+const RESEND_PATH = "重寄驗證信"
+const VERIFY_HINT = "請至信箱點選驗證連結"
+
 function Harness() {
   const { isAuthenticated, mustChangePwd } = useAuth()
   const status = !isAuthenticated ? "anon" : mustChangePwd ? "must-change" : "authed"
@@ -83,9 +96,9 @@ describe("LoginOverlay", () => {
     // 已驗證帳號打錯密碼時給出這些路只會誤導；同時確認 DP_AUTH_007 那組不是「永遠都顯示」。
     // ⚠️ **三條都要驗**：小字若被搬到 errorCode 判斷之外，只驗兩個按鈕不會有任何測試變紅，
     // 而「對所有登入失敗都顯示驗證引導」正是 #208 要擋的列舉面（它暗示該 Email 有待驗證列）。
-    expect(screen.queryByRole("button", { name: "前往註冊" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "重寄驗證信" })).not.toBeInTheDocument()
-    expect(screen.queryByText(/請至信箱點選驗證連結/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: REGISTER_PATH })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: RESEND_PATH })).not.toBeInTheDocument()
+    expect(screen.queryByText(new RegExp(VERIFY_HINT))).not.toBeInTheDocument()
   })
 
   it("查無有效帳號（DP_AUTH_007）→ 註冊與重寄兩個連結可點（第三條小字由下一條驗）", async () => {
@@ -100,8 +113,8 @@ describe("LoginOverlay", () => {
     await submitLogin()
     expect(await screen.findByText(NEUTRAL_MESSAGE)).toBeInTheDocument()
     // 兩者皆為 in-page 動作的按鈕（非導航連結）
-    expect(screen.getByRole("button", { name: "前往註冊" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: REGISTER_PATH })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: RESEND_PATH })).toBeInTheDocument()
   })
 
   it("DP_AUTH_007 仍同時給出三條自助出路（#484 縮短主訊息後，承重轉移到連結與小字）", async () => {
@@ -118,12 +131,12 @@ describe("LoginOverlay", () => {
     await submitLogin()
     const alert = await screen.findByRole("alert")
 
-    expect(alert).toHaveTextContent("帳號或密碼錯誤")
+    expect(alert).toHaveTextContent(NEUTRAL_MESSAGE)
     // 出路 1 / 2：兩個可點的入口
-    expect(within(alert).getByRole("button", { name: "前往註冊" })).toBeInTheDocument()
-    expect(within(alert).getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
+    expect(within(alert).getByRole("button", { name: REGISTER_PATH })).toBeInTheDocument()
+    expect(within(alert).getByRole("button", { name: RESEND_PATH })).toBeInTheDocument()
     // 出路 3：唯一沒有連結承接的一條，只能靠文字（#484 新增的小字）
-    expect(alert).toHaveTextContent("請至信箱點選驗證連結")
+    expect(alert).toHaveTextContent(VERIFY_HINT)
 
     // 主訊息不應再夾帶另外兩條的說明文字（那是 #484 要移除的冗長部分）
     expect(alert).not.toHaveTextContent("若尚未註冊請先註冊")
@@ -155,7 +168,7 @@ describe("LoginOverlay", () => {
     await fillRegister(user, { email: "grad@edms.local" })
     // 顯示已寄至該 Email（不再跳登入分頁）
     expect(await screen.findByText("grad@edms.local")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: RESEND_PATH })).toBeInTheDocument()
   })
 
   it("註冊 Email 重複 → 顯示錯誤訊息（DP_USER_001）", async () => {
@@ -215,7 +228,7 @@ describe("LoginOverlay", () => {
     renderLogin()
     const user = userEvent.setup()
     await submitLogin()
-    await user.click(await screen.findByRole("button", { name: "重寄驗證信" }))
+    await user.click(await screen.findByRole("button", { name: RESEND_PATH }))
     // 冷卻中：連結 disabled 且顯示倒數（不斷言確切秒數，避免 tick flaky）
     await waitFor(() => expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled())
   })
@@ -238,7 +251,7 @@ describe("LoginOverlay", () => {
     renderLogin()
     const user = userEvent.setup()
     await submitLogin()
-    await user.click(await screen.findByRole("button", { name: "重寄驗證信" }))
+    await user.click(await screen.findByRole("button", { name: RESEND_PATH }))
     expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled())
   })
