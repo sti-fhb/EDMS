@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -5,13 +6,17 @@ import { useNotification } from "../../contexts/NotificationContext"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
 import { toApiError } from "../../services/http"
 import { auditApi } from "./auditService"
-import type { AuditFilterParams, AuditLogRow } from "./auditService"
+import type { AuditFilterParams, AuditLogRow, AuditOption } from "./auditService"
 
 const DEFAULT_LIMIT = 20
+
+/** 選項未載入時的共用空陣列（見 useAuditOptions 的說明）。 */
+const NO_OPTIONS: AuditOption[] = []
 
 /** 查詢列輸入值（空字串＝未指定）。 */
 export interface AuditFilters {
   operator: string
+  module: string
   func: string
   action_type: string
   result: string
@@ -21,6 +26,7 @@ export interface AuditFilters {
 
 export const EMPTY_AUDIT_FILTERS: AuditFilters = {
   operator: "",
+  module: "",
   func: "",
   action_type: "",
   result: "",
@@ -32,11 +38,35 @@ export const EMPTY_AUDIT_FILTERS: AuditFilters = {
 function toParams(f: AuditFilters): AuditFilterParams {
   return {
     operator: f.operator || undefined,
+    module: f.module || undefined,
     func_name: f.func || undefined,
     action_type: f.action_type || undefined,
     result: f.result || undefined,
     date_from: f.date_from || undefined,
     date_to: f.date_to || undefined,
+  }
+}
+
+/**
+ * 篩選下拉選項（來自後端，#477）。
+ *
+ * 選項是純靜態對照、與稽核資料無關，故設長 `staleTime` 避免每次進頁都重抓；但仍走 query
+ * 而非在模組載入時取，因為端點需要授權 header。載入失敗 / 未完成時回空陣列——
+ * 下拉會是空的（看得出異常），而非悄悄退回一份可能過期的硬編碼清單。
+ */
+export function useAuditOptions() {
+  const { data } = useQuery({
+    queryKey: QUERY_KEYS.audit.options(),
+    queryFn: () => auditApi.options(),
+    staleTime: 60 * 60 * 1000,
+  })
+  return {
+    // 用模組層常數而非字面 []：後者每次 render 都是新陣列，會讓 AuditPage 的 columns
+    // useMemo 在選項載入前每次重算（依賴比對失敗）。
+    funcOptions: data?.func_options ?? NO_OPTIONS,
+    actionOptions: data?.action_options ?? NO_OPTIONS,
+    resultOptions: data?.result_options ?? NO_OPTIONS,
+    moduleOptions: data?.module_options ?? NO_OPTIONS,
   }
 }
 

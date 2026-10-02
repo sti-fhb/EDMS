@@ -228,7 +228,7 @@ ET 之資安稽核統一寫入平台 `DP_AUDIT_LOG`（經 `AuditLogService`）�
 
 > **`ET-EXPORT` 之增設**（2026-09-14 裁示，#322）：專案現行慣例是匯出端點**不寫稽核**（DM 之 KPI / 變更紀錄 / 廢止匯出、DP 稽核匯出皆然），ET02 因**個資密度最高**而例外——問卷結果 CSV 帶走的是「誰說了什麼」的具名全文，檔案落地後即脫離存取控制，事後只能靠稽核回答「是誰帶走的」。
 >
-> `ACTION_TYPE` 用 `EXPORT`（同步加入 `dp/audit/query_service._ACTION_LABELS` 與前端 `auditLabels.ts`，兩處明文要求一致）。`DESCRIPTION` 只記**筆數**不記內容——把姓名或答案文字寫進 `DP_AUDIT_LOG` 等於把個資複製到第二個地方，而稽核表的保存期限與存取控制與業務表不同。
+> `ACTION_TYPE` 用 `EXPORT`（登記於 `dp/audit/query_service._ACTION_LABELS`；前端自 #477 起經 `/dp/audit/options` 取得，不另維護清單。⚠️ 當時漏補 router 的 `_Action` 值域與 `DP_PARAM.ACTION_TYPE` 種子，導致下拉選得到卻回 422，已於 #477 補齊）。`DESCRIPTION` 只記**筆數**不記內容——把姓名或答案文字寫進 `DP_AUDIT_LOG` 等於把個資複製到第二個地方，而稽核表的保存期限與存取控制與業務表不同。
 
 > **`ET-ENROLLMENT` 之命名**（2026-09-07 對齊）：原定 `ET-ENROLL`，但自 US4 交付起程式實際寫入的即為 `ET-ENROLLMENT`。改以實作值為準——同一語意類別若在 `DP_AUDIT_LOG` 內分裂成兩個碼，查詢須同時涵蓋兩者，比對不上文件更難追查。
 >

@@ -25,6 +25,9 @@ _BACKOFFICE_ENDPOINTS = [
     "/api/dp/params",
     "/api/dp/notify/templates",
     "/api/dp/audit/logs",
+    # 例外於「一 router 一條」：/options 是後台集合中唯一**不吃 `db`** 的端點（純靜態對照），
+    # 列在此確認 router-level 的閘對它同樣生效，而非只對有 db 相依的路由生效（#477）。
+    "/api/dp/audit/options",
     "/api/dp/schedules",
     "/api/dp/roles/modules",
 ]

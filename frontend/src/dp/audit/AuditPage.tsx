@@ -15,35 +15,24 @@ import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { formatDateTime } from "../../utils/date"
 import { AuditDetailDialog } from "./AuditDetailDialog"
-import { ACTION_OPTIONS, RESULT_OPTIONS, actionLabel, resultLabel } from "./auditLabels"
-import type { AuditLogRow } from "./auditService"
-import { EMPTY_AUDIT_FILTERS, useAuditLogs } from "./useAuditLogs"
+import { labelOf } from "./auditLabels"
+import type { AuditLogRow, AuditOption } from "./auditService"
+import { EMPTY_AUDIT_FILTERS, useAuditLogs, useAuditOptions } from "./useAuditLogs"
 import type { AuditFilters } from "./useAuditLogs"
 
-// 功能查詢選項（value=func_name、label=中文，含模組前綴）；「全部」以 sentinel 呈現（同操作類別，避免空值不顯示 label）
-// ⚠️ 與後端 app/dp/audit/query_service.py 的 _FUNC_LABELS **手動同步**——新模組上線寫稽核時兩邊都要補，
-//    否則下拉少選項或 label 一邊中文一邊原碼。ET 待其模組寫稽核再補。
-// TODO(#140-followup): 由後端 _FUNC_LABELS 出一個端點供前端抓，消除此雙寫（ET 落地即自動出現）。
-const FUNC_OPTIONS: { value: string; label: string }[] = [
-  { value: "全部", label: "全部" },
-  { value: "DP-USERS", label: "DP-使用者管理" },
-  { value: "DP-PARAMS", label: "DP-系統參數" },
-  { value: "DP-TEMPLATES", label: "DP-通知範本" },
-  { value: "DP-PROFILE", label: "DP-個人資料" },
-  { value: "DP-FORGOT", label: "DP-忘記密碼" },
-  { value: "DP-REGISTER", label: "DP-自助註冊" },
-  { value: "DP-AUTH", label: "DP-登入登出" },
-  { value: "DP-SCHEDULE", label: "DP-排程管理" },
-  { value: "DM-ROLES", label: "DM-角色/權限" },
-  { value: "DM-CATALOG", label: "DM-受控清單" },
-]
+const ALL = "全部"
+
+/** 在後端選項前面補一個「全部」sentinel（空值不顯示 label，故不用空字串當 value）。 */
+function withAll(options: AuditOption[]): AuditOption[] {
+  return [{ value: ALL, label: ALL }, ...options]
+}
 
 /** 「全部」對應空字串（不帶入查詢）。 */
 function selectValue(v: string): string {
-  return v === "全部" ? "" : v
+  return v === ALL ? "" : v
 }
 function displayValue(v: string): string {
-  return v === "" ? "全部" : v
+  return v === "" ? ALL : v
 }
 
 /** 操作者顯示：姓名 → email →（皆無，如 SYSTEM）原 ID。 */
@@ -59,6 +48,7 @@ function today(): string {
 export function AuditPage() {
   const audit = useAuditLogs()
   const { setSelected, search } = audit
+  const { funcOptions, actionOptions, resultOptions, moduleOptions } = useAuditOptions()
   const [filters, setFilters] = useState<AuditFilters>(EMPTY_AUDIT_FILTERS)
 
   const setField = (key: keyof AuditFilters, value: string) => setFilters((prev) => ({ ...prev, [key]: value }))
@@ -75,13 +65,21 @@ export function AuditPage() {
       { key: "created_date", title: "時間", render: (_v, r) => formatDateTime(r.created_date) },
       { key: "operator", title: "操作者", render: (_v, r) => operatorText(r) },
       { key: "func_label", title: "功能", dataIndex: "func_label" },
-      { key: "action_type", title: "類別", render: (_v, r) => <Chip size="small" label={actionLabel(r.action_type)} /> },
+      {
+        key: "action_type",
+        title: "類別",
+        render: (_v, r) => <Chip size="small" label={labelOf(actionOptions, r.action_type)} />,
+      },
       {
         key: "result",
         title: "結果",
         // 配色仍依原英文碼判定，label 才轉中文
         render: (_v, r) => (
-          <Chip size="small" color={r.result === "FAIL" ? "error" : "success"} label={resultLabel(r.result)} />
+          <Chip
+            size="small"
+            color={r.result === "FAIL" ? "error" : "success"}
+            label={labelOf(resultOptions, r.result)}
+          />
         ),
       },
       { key: "target", title: "對象", render: (_v, r) => r.target_display ?? "—" },
@@ -97,7 +95,7 @@ export function AuditPage() {
         ),
       },
     ],
-    [setSelected],
+    [setSelected, actionOptions, resultOptions],
   )
 
   return (
@@ -122,12 +120,26 @@ export function AuditPage() {
             <TextField
               select
               size="small"
-              label="功能"
-              value={filters.func === "" ? "全部" : filters.func}
-              onChange={(e) => setField("func", e.target.value === "全部" ? "" : e.target.value)}
-              sx={{ minWidth: 160 }}
+              label="模組"
+              value={displayValue(filters.module)}
+              onChange={(e) => setField("module", selectValue(e.target.value))}
+              sx={{ minWidth: 130 }}
             >
-              {FUNC_OPTIONS.map((o) => (
+              {withAll(moduleOptions).map((o) => (
+                <MenuItem key={o.value} value={o.value}>
+                  {o.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label="功能"
+              value={displayValue(filters.func)}
+              onChange={(e) => setField("func", selectValue(e.target.value))}
+              sx={{ minWidth: 190 }}
+            >
+              {withAll(funcOptions).map((o) => (
                 <MenuItem key={o.value} value={o.value}>
                   {o.label}
                 </MenuItem>
@@ -141,7 +153,7 @@ export function AuditPage() {
               onChange={(e) => setField("action_type", selectValue(e.target.value))}
               sx={{ minWidth: 130 }}
             >
-              {ACTION_OPTIONS.map((o) => (
+              {withAll(actionOptions).map((o) => (
                 <MenuItem key={o.value} value={o.value}>
                   {o.label}
                 </MenuItem>
@@ -155,7 +167,7 @@ export function AuditPage() {
               onChange={(e) => setField("result", selectValue(e.target.value))}
               sx={{ minWidth: 120 }}
             >
-              {RESULT_OPTIONS.map((o) => (
+              {withAll(resultOptions).map((o) => (
                 <MenuItem key={o.value} value={o.value}>
                   {o.label}
                 </MenuItem>

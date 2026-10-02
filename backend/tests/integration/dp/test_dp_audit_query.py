@@ -432,3 +432,85 @@ async def test_no_mutation_endpoints(client, db):
     assert r_post.status_code == 405
     assert r_put.status_code == 405
     assert r_delete.status_code == 405
+
+
+# ---- 篩選選項與查詢參數值域（#477）----
+
+
+async def test_action_type_export_is_queryable(client, db):
+    """「操作類別」選「匯出」不得回 422（#477 缺陷 2）。
+
+    `EXPORT` 由 ET 的兩個匯出端點實際寫入（`et/reports` 週報、`et/tracking` 具名個資），
+    且前端下拉與後端 `_ACTION_LABELS` 都有它——唯獨 router 的 `_Action` 漏了，於是使用者
+    在下拉選「匯出」就被 FastAPI 擋成 422。**與有無資料無關**，是請求驗證階段就擋下，
+    故本條不需要先塞一筆 EXPORT 資料。
+    """
+    await _seed_user(db, user_id="auditor", user_name="稽核員", email="auditor@edms.local")
+    headers = {"Authorization": f"Bearer {create_access_token(sub='auditor', ttl_minutes=15)}"}
+
+    r = await client.get("/api/dp/audit/logs", params={"action_type": "EXPORT"}, headers=headers)
+
+    assert r.status_code == 200, r.text
+
+
+async def test_action_type_export_is_queryable_on_export_endpoint(client, db):
+    """同上，CSV 匯出端點用的是同一個 `_Action`，兩支都要驗——只改一支的話另一支仍 422。"""
+    await _seed_user(db, user_id="auditor", user_name="稽核員", email="auditor@edms.local")
+    headers = {"Authorization": f"Bearer {create_access_token(sub='auditor', ttl_minutes=15)}"}
+
+    r = await client.get("/api/dp/audit/logs/export", params={"action_type": "EXPORT"}, headers=headers)
+
+    assert r.status_code == 200, r.text
+
+
+async def test_unknown_action_type_still_rejected(client, db):
+    """對照組：值域仍然封閉，亂填不會被放行——否則上面兩條改用 `str` 也會通過。"""
+    await _seed_user(db, user_id="auditor", user_name="稽核員", email="auditor@edms.local")
+    headers = {"Authorization": f"Bearer {create_access_token(sub='auditor', ttl_minutes=15)}"}
+
+    r = await client.get("/api/dp/audit/logs", params={"action_type": "NOPE"}, headers=headers)
+
+    assert r.status_code == 422
+
+
+async def test_module_filter_narrows_result(client, db):
+    """AC：可依模組篩選（後端本就支援，#477 補前端入口；此處鎖住後端行為不被改掉）。"""
+    await _seed_user(db, user_id="auditor", user_name="稽核員", email="auditor@edms.local")
+    await _insert_log(db, module="DP", func_name="DP-AUTH")
+    await _insert_log(db, module="ET", func_name="ET-COURSE")
+    headers = {"Authorization": f"Bearer {create_access_token(sub='auditor', ttl_minutes=15)}"}
+
+    r = await client.get("/api/dp/audit/logs", params={"module": "ET"}, headers=headers)
+
+    assert r.status_code == 200
+    modules = {row["module"] for row in r.json()["data"]}
+    assert modules == {"ET"}  # 不是「有包含 ET」——要確認 DP 那筆真的被濾掉
+
+
+async def test_options_endpoint_returns_all_dropdowns(client, db):
+    """選項端點回四組下拉，供前端取代硬編碼清單（消除雙寫）。"""
+    await _seed_user(db, user_id="auditor", user_name="稽核員", email="auditor@edms.local")
+    headers = {"Authorization": f"Bearer {create_access_token(sub='auditor', ttl_minutes=15)}"}
+
+    r = await client.get("/api/dp/audit/options", headers=headers)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert {"func_options", "action_options", "result_options", "module_options"} <= set(body)
+    funcs = {o["value"] for o in body["func_options"]}
+    # ET 整組曾經缺席（#477），故逐模組確認而非只看總數
+    assert "ET-COURSE" in funcs and "DM-EDITOR" in funcs and "DP-AUTH" in funcs
+    assert "EXPORT" in {o["value"] for o in body["action_options"]}
+    assert {o["value"] for o in body["module_options"]} == {"DP", "ET", "DM"}
+    assert all(o["label"] for o in body["func_options"])  # 不得有空 label
+
+
+async def test_options_endpoint_requires_auth(client):
+    """選項端點與查詢端點同一個授權閘，不得因為「只是選項」而裸奔。
+
+    斷言確切的 401（未帶 token）而非 `in (401, 403)`——後者在授權行為改變時仍會通過，
+    等於不驗。「已登入但非管理者 → 403」由 `test_dp_backoffice_gate.py` 的參數化清單覆蓋
+    （本端點已登記於其中）。
+    """
+    r = await client.get("/api/dp/audit/options")
+    assert r.status_code == 401
