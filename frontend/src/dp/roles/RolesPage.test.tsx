@@ -134,6 +134,40 @@ describe("RolesPage 權限管理", () => {
     expect(within(row).getByRole("checkbox", { name: "已解鎖 編輯者" })).toBeEnabled()
   })
 
+  it("群組欄位標題依模組切換：DM 為「可見對象」", async () => {
+    renderWithProviders(<RolesPage />)
+    await screen.findByText("王曉明")
+    expect(screen.getByRole("columnheader", { name: "可見對象" })).toBeInTheDocument()
+  })
+
+  it("ET 分頁之群組欄位標題為「受訓單位標籤」，不沿用 DM 的用詞", async () => {
+    server.use(http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])))
+    renderWithProviders(<RolesPage />)
+    await screen.findByText("王曉明")
+    // 正反各一條、同一種查詢方式：只斷言「不該出現」時，改掉用詞之外的任何事都驗不到
+    expect(screen.getByRole("columnheader", { name: "受訓單位標籤" })).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "可見對象" })).not.toBeInTheDocument()
+  })
+
+  it("ET 之群組編輯視窗標題為「編輯受訓單位標籤」", async () => {
+    server.use(
+      http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])),
+      // ET 的受訓單位標籤是平的一層（無 UNIT 類），不進配對模式
+      http.get("/api/dp/roles/:module/group-options", () =>
+        HttpResponse.json([
+          { code: "5", name: "護理師", kind: "AUDIENCE" },
+          { code: "6", name: "行政人員", kind: "AUDIENCE" },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<RolesPage />)
+    const row = (await screen.findByText("王曉明")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "編輯" }))
+    expect(await screen.findByText("編輯受訓單位標籤")).toBeInTheDocument()
+    expect(screen.queryByText("編輯可見對象")).not.toBeInTheDocument()
+  })
+
   it("無新增角色入口（角色為固定 enum）", async () => {
     renderWithProviders(<RolesPage />)
     await screen.findByText("王曉明")

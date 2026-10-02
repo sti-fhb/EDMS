@@ -102,6 +102,22 @@ export const MODULE_ROLES: Record<string, { code: string; label: string }[]> = {
 export const MODULE_LABELS: Record<string, string> = { DM: "文件管理（DM）", ET: "教育訓練（ET）" }
 
 /**
+ * 群組維度在各模組的稱呼（欄位標題與編輯視窗共用）。
+ *
+ * 兩個模組的 `groups` 語意不同——DM 是「可見對象」（單位 + 職位配對），ET 是「受訓單位標籤」
+ * （平的一層）。此處只管**怎麼稱呼**；配對或平鋪的呈現由 `isPairedModule(options)` 依選項
+ * 內容決定，與本表無關。
+ *
+ * 未列入的模組回退為中性的「群組」——寧可用通稱，也不要把某個模組的詞套到別的模組身上。
+ */
+export const MODULE_GROUP_LABELS: Record<string, string> = { DM: "可見對象", ET: "受訓單位標籤" }
+
+/** 取模組之群組維度稱呼；未知模組回退「群組」。 */
+export function groupDimensionLabel(module: string): string {
+  return MODULE_GROUP_LABELS[module] ?? "群組"
+}
+
+/**
  * 頁籤顯示順序（ET 左、DM 右）。
  *
  * 後端 `GET /dp/roles/modules` 的順序來自 `module_assign_registry` 的註冊順序，也就是 `main.py`
