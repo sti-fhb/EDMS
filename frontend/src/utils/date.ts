@@ -7,13 +7,32 @@
 
 const pad = (n: number): string => String(n).padStart(2, "0")
 
-/** `YYYY-MM-DD` 格式化器，固定台灣時區（`en-CA` 的日期格式即為 `YYYY-MM-DD`）。 */
-const taipeiDateFormat = new Intl.DateTimeFormat("en-CA", {
+/**
+ * 台灣時區的年月日時分，**取 parts 而非組好的字串**。
+ *
+ * ⚠️ 不可改用 `.format()` 的輸出直接當結果：各段之間的分隔字元由 ICU 的 locale 資料決定，
+ * **同一段程式在不同 Node / 瀏覽器的 ICU 版本下會給出不同的空白字元**。本機（Node 22）在日期與
+ * 時間之間給 ASCII 空格，GitHub CI 的 Node 給的卻不是，於是 `toBe("2026/10/01 07:30")` 兩邊字串
+ * 「看起來一模一樣」卻不相等——本機全綠、CI 紅（#483）。自行以字面量拼接後就不受環境影響。
+ *
+ * `hourCycle: "h23"` 而非 `hour12: false`：後者在部分 locale 的午夜會給 `24`。
+ */
+const taipeiPartsFormat = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Taipei",
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
 })
+
+/** 取台灣時間的各段數值（`year` / `month` / `day` / `hour` / `minute`，皆為補零字串）。 */
+function taipeiParts(date: Date): Record<string, string> {
+  const parts: Record<string, string> = {}
+  for (const { type, value } of taipeiPartsFormat.formatToParts(date)) parts[type] = value
+  return parts
+}
 
 /**
  * 今天的日期（`YYYY-MM-DD`，**台灣時間**）；供 `<input type="date">` 的 min / max 使用。
@@ -26,19 +45,9 @@ const taipeiDateFormat = new Intl.DateTimeFormat("en-CA", {
  * （`app/core/db.py::create_app_engine`），兩端用同一個基準才不會在使用者機器時區不同時錯開。
  */
 export function todayTaipei(): string {
-  return taipeiDateFormat.format(new Date())
+  const p = taipeiParts(new Date())
+  return `${p.year}-${p.month}-${p.day}`
 }
-
-/** `YYYY/MM/DD HH:mm` 格式化器，固定台灣時區。 */
-const taipeiDateTimeFormat = new Intl.DateTimeFormat("zh-TW", {
-  timeZone: "Asia/Taipei",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-})
 
 /**
  * 格式化為 `YYYY/MM/DD HH:mm`（**台灣時間**）；null / 空 / 非法值回 `—`。
@@ -54,7 +63,8 @@ export function formatDateTimeTaipei(value: string | null | undefined): string {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return "—"
-  return taipeiDateTimeFormat.format(d)
+  const p = taipeiParts(d)
+  return `${p.year}/${p.month}/${p.day} ${p.hour}:${p.minute}`
 }
 
 /** 格式化為 `YYYY/MM/DD HH:mm`（本地時區）；null / 空 / 非法值回 `—`。 */

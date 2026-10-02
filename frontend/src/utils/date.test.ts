@@ -51,6 +51,16 @@ describe("formatDateTimeTaipei（稽核導向畫面）", () => {
     expect(formatDateTimeTaipei("2026-10-01T04:05:00Z")).toMatch(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/)
   })
 
+  it("分隔符為純 ASCII，不含 ICU 版本相依的特殊空白", () => {
+    // 用 `Intl.DateTimeFormat.format()` 組好的字串時，日期與時間之間的空白由 locale 資料決定：
+    // 本機 Node 給 ASCII 空格、GitHub CI 的 Node 給窄不斷行空格（U+202F），兩個字串肉眼一模一樣
+    // 卻不相等，於是本機全綠、CI 紅。改以 formatToParts 自行拼接後此事不再發生——這條守住它。
+    const out = formatDateTimeTaipei("2026-10-01T04:05:00Z")
+
+    expect([...out].every((c) => c.codePointAt(0)! < 128)).toBe(true)
+    expect(out).toBe("2026/10/01 12:05") // 字面量中的空白為 U+0020
+  })
+
   it("空值與非法值回安全預設", () => {
     expect(formatDateTimeTaipei(null)).toBe("—")
     expect(formatDateTimeTaipei("")).toBe("—")
