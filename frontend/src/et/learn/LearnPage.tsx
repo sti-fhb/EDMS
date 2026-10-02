@@ -18,6 +18,7 @@ import { progressApi } from "./progressService"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
+import { useGoBack } from "../../hooks/useGoBack"
 import { toApiError } from "../../services/http"
 
 /**
@@ -42,6 +43,13 @@ export function EtLearnPage() {
   const { courseId: courseIdParam } = useParams<{ courseId: string }>()
   const courseId = Number(courseIdParam)
   const navigate = useNavigate()
+  /*
+    返回鍵退回**上一頁**，不是寫死的「我的課程」（ET03）。#481 讓教師會從課程列表
+    （ET01）的「全部課程」點進來預覽，寫死目的地等於把他丟到一頁與他無關、多半還是
+    空的清單。退回歷程也順帶帶回 `?scope=all` 與查詢條件。
+    ⚠️ fallback 仍是 ET03——沒有上一頁的人（貼網址 / 重新整理 / 邀請信連結）以學員居多。
+  */
+  const goBack = useGoBack("/et/my-courses")
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const { message } = useNotification()
@@ -187,7 +195,7 @@ export function EtLearnPage() {
   if (!courseIdValid) {
     return (
       <Box>
-        <ScreenHeader code="ET06" leading={<BackButton onBack={() => navigate("/et/my-courses")} />} />
+        <ScreenHeader code="ET06" leading={<BackButton onBack={goBack} />} />
         <Alert severity="error">課程代碼無效</Alert>
       </Box>
     )
@@ -202,7 +210,7 @@ export function EtLearnPage() {
   if (error) {
     return (
       <Box>
-        <ScreenHeader code="ET06" leading={<BackButton onBack={() => navigate("/et/my-courses")} />} />
+        <ScreenHeader code="ET06" leading={<BackButton onBack={goBack} />} />
         <Alert severity="error">{toApiError(error).errorMessage}</Alert>
       </Box>
     )
@@ -213,7 +221,7 @@ export function EtLearnPage() {
       <ScreenHeader
         code="ET06"
         title={data.course_name}
-        leading={<BackButton onBack={() => navigate("/et/my-courses")} />}
+        leading={<BackButton onBack={goBack} />}
       />
 
       {/* ET-MSG-ET06-005；非阻擋進入之訊息頁，內容照常可看 */}
@@ -235,6 +243,9 @@ export function EtLearnPage() {
               會看到全鎖——代價是看不出依序解鎖的實際效果。不講的話教師會以為自己的
               解鎖設定沒生效，然後去改一個本來就是對的設定。 */}
           <strong>所有項目均顯示為已解鎖</strong>，看不出依序解鎖對學員的實際效果。
+          {/* ⚠️ 一併寫在這裡而不只寫在測驗面板裡（#486）：教師是先看到橫幅、再逐項點
+              下去的。等他點進測驗才說「不能作答」，他已經先花了時間找那顆按鈕。 */}
+          測驗<strong>僅可檢視題目</strong>，不會留下作答紀錄。
         </Alert>
       )}
 
@@ -262,9 +273,13 @@ export function EtLearnPage() {
   )
 }
 
+/**
+ * ⚠️ 標籤是「返回上一頁」而非「返回我的課程」——目的地已不固定（`useGoBack`），
+ * 對從「全部課程」進來預覽的教師說「我的課程」是一句不成立的話。
+ */
 function BackButton({ onBack }: { onBack: () => void }) {
   return (
-    <IconButton size="small" aria-label="返回我的課程" onClick={onBack}>
+    <IconButton size="small" aria-label="返回上一頁" onClick={onBack}>
       <ArrowBackIcon />
     </IconButton>
   )

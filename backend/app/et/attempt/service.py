@@ -58,17 +58,20 @@ from app.et.attempt.schemas import (
     QuestionForAnswering,
     QuestionResult,
     QuizIntro,
+    QuizPreview,
+    QuizPreviewQuestion,
 )
 from app.et.constants import (
     ATTEMPT_IN_PROGRESS,
     ATTEMPT_SUBMITTED,
     ATTEMPT_TIMEOUT,
+    COURSE_PUBLISHED,
     GRADED_STATUSES,
     QUESTION_MULTIPLE,
 )
 from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.learning.repository import EtLearningRepository
-from app.et.learning.rules import ensure_can_access
+from app.et.learning.rules import COURSE_MANAGER_ROLES, ensure_can_access
 from app.et.progress.repository import EtProgressRepository
 from app.et.progress.service import EtProgressService
 from app.et.quiz.models import EtQuiz
@@ -80,6 +83,7 @@ _BAD_ANSWER = AppError(status_code=422, detail="作答資料無效", error_code=
 _EXPIRED = AppError(status_code=409, detail="作答時間已到，請提交本次作答", error_code="ET_ATTEMPT_005")
 _CLOSED = AppError(status_code=409, detail="此課程目前關閉中，無法開始新的作答", error_code="ET_ATTEMPT_006")
 _NOT_YET_OPEN = AppError(status_code=409, detail="此課程尚未開放，無法開始作答", error_code="ET_ATTEMPT_007")
+_PREVIEW_READONLY = AppError(status_code=409, detail="預覽模式僅供檢視題目，無法作答", error_code="ET_ATTEMPT_008")
 
 #: 明細的結果三態（前端據此上色；**由後端判定**）。
 OUTCOME_CORRECT = "CORRECT"
@@ -100,6 +104,10 @@ class QuizAccess:
     回寫，而那裡是以該 `attempt` 重算（`_is_preview(attempt=...)`）而非沿用開始當下的
     值。放進來會是一個沒有讀取端的欄位，隨時間與真實判定漂移而不會有測試抓到。
 
+    > ⚠️ `enrolled` 則**必須**帶（#486）：它決定本次請求是不是預覽，而預覽的三個分支
+    > （引導頁的 `is_preview`、唯讀題目、拒絕開始作答）都在 `_require_access` 之後、
+    > 都要問同一件事。各自再查一次 `is_enrolled` 等於同一個判定有三份實作。
+
     Attributes:
         open_end_at: 閱課訖止。與 `course_status` **一起**交給
             `course.rules.is_effectively_closed`——`course_status` 單獨不足以表達
@@ -113,6 +121,8 @@ class QuizAccess:
     open_end_at: datetime | None
     #: #374：閱課起始時間。判定「尚未開放」用，與 `open_end_at` 成對。
     open_start_at: datetime | None
+    #: 是否在籍。**不在籍 = 預覽**（#486，與 `learning/service.is_preview` 同一判定）。
+    enrolled: bool
 
     def is_closed(self, *, now: datetime) -> bool:
         """課程對學員是否視同關閉（`CLOSED` 或已發布但期間已過）。"""
@@ -145,8 +155,16 @@ class EtAttemptService:
 
     # ── 引導頁 ──────────────────────────────────────────────────────────────
 
-    async def intro(self, db: AsyncSession, quiz_id: int, *, user_id: str) -> QuizIntro:
+    async def intro(
+        self, db: AsyncSession, quiz_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
+    ) -> QuizIntro:
         """引導頁資訊（AC 1 / AC 2）。
+
+        ## 預覽者（不在籍）拿到的是同一份資訊，但 `can_start=False`（#486）
+
+        題數 / 及格分 / 時限是**考試規則**，教師本來就該看得到——他在 ET05 設定的就是
+        這些。差別只在他不能開始作答：預覽唯讀，不建立 attempt。題目本體另由
+        `preview()` 提供。
 
         ## 🔴 本端點**刻意沒有解鎖判定**——SA 於 2026-09-24 裁示不修（#424 收尾時提出）
 
@@ -168,8 +186,9 @@ class EtAttemptService:
         📌 對照組在 `learning/service._item_nodes` 的註解：讀取側三支吐教材內容的端點
         已於 #424 掛上判定，本端點不在其內。
         """
-        access = await self._require_access(db, quiz_id, user_id)
+        access = await self._require_access(db, quiz_id, user_id, roles=roles)
         quiz = access.quiz
+        is_preview = not access.enrolled
         # 過濾與回應欄位以**同一個時點**判定——各自取 `utcnow()` 會在跨越 `OPEN_END_AT`
         # 的那一瞬間回出 `can_start=true` 卻 `course_closed=true` 的自相矛盾組合
         closed = access.is_closed(now=utcnow())
@@ -191,14 +210,71 @@ class EtAttemptService:
             # 關閉課程不可開新作答，但**已在作答者仍可繼續**（`spec_us6` 場景 27）
             #
             # ⚠️ `not closed` 是**取反**：這一行是「可以開始」的條件，不是「被擋住」的條件
-            can_start=in_progress is not None
-            or (not closed and can_start_attempt(total=total, reset_base=base, max_retry=quiz.max_retry)),
+            #
+            # ⚠️ `not is_preview` 排在最前面：預覽者沒有 attempt，`can_start_attempt`
+            # 會算出「還有 max_retry+1 次」而回 True——擋不住的話按鈕可按、按下去被
+            # `start` 的 `ET_ATTEMPT_008` 擋，那正是使用者看得見的矛盾。
+            can_start=not is_preview
+            and (
+                in_progress is not None
+                or (not closed and can_start_attempt(total=total, reset_base=base, max_retry=quiz.max_retry))
+            ),
             last_score=last,
             best_score=best,
             is_passed=passed,
             in_progress_attempt_id=in_progress.attempt_id if in_progress else None,
             last_attempt_id=await self._repo.last_submitted_attempt_id(db, user_id=user_id, quiz_id=quiz_id),
             course_closed=closed,
+            is_preview=is_preview,
+        )
+
+    async def preview(
+        self, db: AsyncSession, quiz_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
+    ) -> QuizPreview:
+        """教師預覽用的**唯讀**題目清單（#486）。
+
+        ## 為何另開端點而不是把題目塞進 `intro`
+
+        `intro` 是**學員**的引導頁，一題都不該帶。塞進去再靠一個布林決定要不要填，等於
+        讓「作答中絕不回傳題目」這條規則多一個分支——而那個分支寫錯時，畫面上完全看不
+        出來（學員的引導頁本來就不顯示題目，題目只是躺在回應的 JSON 裡）。
+
+        ## ⚠️ 只有**不在籍**者能呼叫
+
+        在籍學員一律回 404——他要看題目只有一條路：開始作答。這道判定讓本端點的洩漏面
+        等於零：能通過 `_require_access` 又不在籍的人，就是擁有者與課程管理者，而他們
+        現在就能在 ET05 的測驗編輯對話框看到同一批題目（連正確答案都看得到）。
+
+        > 📌 回 404 而非 403：與 `ET_ATTEMPT_001` 同一個理由——403 等於確認「這支端點
+        > 對某些人有東西」，而學員不需要知道有這回事。
+
+        Returns:
+            `QuizPreview`。**不含 `is_correct`**——預覽呈現的是學員視角，正確答案在
+            ET05 的測驗編輯對話框確認（那裡才是權威）。
+
+        Raises:
+            AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / **在籍者**。
+        """
+        access = await self._require_access(db, quiz_id, user_id, roles=roles)
+        if access.enrolled:
+            raise _NOT_FOUND
+        questions = await self._repo.list_questions(db, quiz_id)
+        options = await self._repo.options_by_question(db, [q.question_id for q in questions])
+        return QuizPreview(
+            quiz_id=access.quiz.quiz_id,
+            quiz_name=access.quiz.quiz_name,
+            questions=[
+                QuizPreviewQuestion(
+                    question_id=q.question_id,
+                    question_type=q.question_type,
+                    stem=q.stem,
+                    points=q.points,
+                    options=[
+                        OptionForAnswering(option_id=o.option_id, text=o.option_text) for o in options[q.question_id]
+                    ],
+                )
+                for q in questions
+            ],
         )
 
     # ── 歷次作答 ────────────────────────────────────────────────────────────
@@ -231,17 +307,31 @@ class EtAttemptService:
 
     # ── 開始 / 續作 ─────────────────────────────────────────────────────────
 
-    async def start(self, db: AsyncSession, quiz_id: int, *, operator: OperatorInfo) -> AttemptState:
+    async def start(
+        self, db: AsyncSession, quiz_id: int, *, operator: OperatorInfo, roles: frozenset[str] = frozenset()
+    ) -> AttemptState:
         """開始作答；已有未完成者**回既有那一筆**（SA 裁示 Q1 = A）。
 
         續作不消耗次數、不重新洗牌、不重設計時——`ATTEMPT_NO` 早在第一次點「開始作答」
         時就配發，而剩餘時間一律由 `STARTED_AT` 推導。
 
         Raises:
-            AppError: 404 查無 / 無權 / 項目未解鎖；409 `ET_ATTEMPT_002` 次數用完。
+            AppError: 404 查無 / 無權 / 項目未解鎖；409 `ET_ATTEMPT_002` 次數用完；
+                409 `ET_ATTEMPT_008` 預覽模式（#486）。
         """
         user_id = operator.user_id
-        access = await self._require_access(db, quiz_id, user_id)
+        access = await self._require_access(db, quiz_id, user_id, roles=roles)
+        # 2026-10-01 裁示：**預覽唯讀**，不建立 attempt（#486）。題目由 `preview()` 取。
+        #
+        # ⚠️ 這道守門排在**續作分支之前**，與下方三道（未開放 / 已關閉 / 未解鎖）不同。
+        # 那三道刻意放在續作之後是為了保住「寫到一半的考卷不被教師的調整中斷」那條窄縫；
+        # 本條沒有對應的窄縫——預覽者不會有寫到一半的考卷，`ET_QUIZ_ATTEMPT` 裡若真有他
+        # 的未完成列，那是本次改動**之前**留下的，不該靠這裡復活。
+        #
+        # 📌 它同時是 `intro` 的 `can_start=False` 的伺服端對應。前端不顯示按鈕、後端
+        # 照樣擋——少了這一道，直接打 API 就能讓教師的作答混進 `ET_QUIZ_ATTEMPT`。
+        if not access.enrolled:
+            raise _PREVIEW_READONLY
         quiz, item_id, course_id = access.quiz, access.item_id, access.course_id
 
         # ⚠️ **進行中的 attempt 是一張存續的通行證，它會跨越「重新上鎖」。** 本分支在
@@ -494,8 +584,17 @@ class EtAttemptService:
             return False
         return is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now or utcnow())
 
-    async def _require_access(self, db: AsyncSession, quiz_id: int, user_id: str) -> QuizAccess:
-        """守門 1 + 2：反查鏈與「在籍 OR 擁有者」。
+    async def _require_access(
+        self, db: AsyncSession, quiz_id: int, user_id: str, *, roles: frozenset[str] = frozenset()
+    ) -> QuizAccess:
+        """守門 1 + 2：反查鏈與「在籍 OR 擁有者 OR 課程管理者預覽已發布課程」。
+
+        ## ⚠️ `roles` 有預設值，但讀寫端點都必須傳
+
+        預設 `frozenset()` 退化成 #481 之前的「在籍 OR 擁有者」——**fail-closed**，漏傳
+        的後果是教師少看到東西，不是學員多看到東西。但那個退化本身是缺陷：#481 把學習頁
+        放行給課程管理者時沒同步改本模組，於是非擁有者教師預覽課程、點到測驗項目就拿到
+        「查無此測驗」（#486 修）。
 
         Returns:
             `QuizAccess`。**不回 `is_closed` 布林而回 `course_status` + `open_end_at`**：
@@ -513,7 +612,12 @@ class EtAttemptService:
         enrolled = await self._learning.is_enrolled(db, user_id=user_id, course_id=course_id)
         is_owner = course.owner_id == user_id
         try:
-            ensure_can_access(enrolled=enrolled, is_owner=is_owner)
+            ensure_can_access(
+                enrolled=enrolled,
+                is_owner=is_owner,
+                is_course_manager=bool(roles & COURSE_MANAGER_ROLES),
+                course_published=course.status == COURSE_PUBLISHED,
+            )
         except AppError:
             raise _NOT_FOUND from None
         return QuizAccess(
@@ -523,6 +627,7 @@ class EtAttemptService:
             course_status=course.status,
             open_end_at=course.open_end_at,
             open_start_at=course.open_start_at,
+            enrolled=enrolled,
         )
 
     async def _require_own_attempt(self, db: AsyncSession, attempt_id: int, user_id: str):
@@ -543,6 +648,17 @@ class EtAttemptService:
 
     async def _is_preview(self, db: AsyncSession, *, attempt) -> bool:
         """該 attempt 是否為擁有者預覽（是擁有者且**不在籍**）。
+
+        ## ⚠️ 自 #486 起不會再有新的預覽 attempt——本函式只服務**既有資料**
+
+        2026-10-01 裁示預覽唯讀：`start` 現在以 `ET_ATTEMPT_008` 擋下所有不在籍者，故
+        不可能再建立預覽 attempt。本函式保留是為了**本次改動之前**已經產生的那些列——
+        教師當時開了卻沒提交的考卷，日後若被續作並提交，仍須走「不寫進度」那條路。
+
+        ⛔ 不要因為「新路徑建不出來」就刪掉它或改成 `return False`：那會讓既有的預覽
+        attempt 在提交時寫進 `ET_PROGRESS`，而那正是 #255 裁示 Q1 要避開的後果。
+        ⚠️ 判定維持「擁有者且不在籍」而**不是**跟著 #481 擴成 `not enrolled`——它問的是
+        「這筆**舊資料**當初是誰建的」，而當初建得出來的只有擁有者。
 
         #255 裁示 Q1 明訂教師預覽**不得寫入** `ET_PROGRESS`（`learning/rules.py` 的
         `ensure_can_access` docstring 特別標了「給 ET-5b」的警告）——否則教師預覽完就

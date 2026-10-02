@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.catalog.models import EtTag, EtUserTag
 from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
@@ -184,7 +183,8 @@ class EtStatsRepository:
         done_col = func.coalesce(dones.c.done, 0)
         return (
             select(
-                EtEnrollment.user_id.label("user_id"),
+                EtCourse.course_id.label("course_id"),
+                EtCourse.course_name.label("course_name"),
                 EtCourse.open_end_at.label("open_end_at"),
                 case((and_(totals.c.total > 0, done_col >= totals.c.total), 1), else_=0).label("is_completed"),
             )
@@ -236,36 +236,40 @@ class EtStatsRepository:
         ).one()
         return int(row.enrolled), int(row.completed), int(row.overdue)
 
-    async def unit_rates(self, db: AsyncSession, now: datetime) -> list[tuple[str, int, int]]:
-        """依受訓單位標籤分組之 `(標籤名, 在籍人次, 已完課人次)`。
+    async def course_rates(self, db: AsyncSession, now: datetime) -> list[tuple[str, int, int]]:
+        """依**課程**分組之 `(課程名稱, 在籍人次, 已完課人次)`（#475）。
 
-        ## ⚠️ 刻意排除 `IS_ALL`（「全體」標籤）
+        ## 與 `_completion_base` 的關係：這裡沒有任何一對多
 
-        它**不逐人建立 `ET_USER_TAG` 列**（模型 docstring：「不需逐人對應，查詢時展開
-        為全部具學員角色者」）。直接 join 會讓它顯示 **0 人**——一個看起來像「全體都
-        沒加入」的數字。而即使正確展開，它的達成率也等同全站完成率，與管理者卡上方
-        那個數字重複。
+        一筆在籍只屬一門課程，故本查詢是純粹的分組聚合——**不像 #453 的各單位達成率
+        那樣引入 `ET_USER_TAG` 的一對多**。因此 `_completion_base` 依舊維持全多對一，
+        而本方法也不需要為笛卡兒積做任何防備。
 
-        ## ⚠️ 這裡有本查詢唯一的一個一對多
+        ⚠️ 正因如此，**不可照抄舊 `unit_rates` 的 join 形狀**：那裡的 `EtUserTag` join
+        是刻意的一對多（一人屬多單位，各單位各自算自己的人），搬過來會把同一筆在籍
+        算進多門課。
 
-        一人可屬多個單位，故同一筆在籍會計入他的每一個單位——那是「單位達成率」要的
-        語意（各單位各自看自己的人）。正因為它是唯一的一個，`_completion_base` 才必須
-        維持全多對一；再多一個就是笛卡兒積。
+        ## 排除 `IS_ALL` 的那段說明不再適用
+
+        #453 的各單位達成率要排除「全體」標籤（它不逐人建 `ET_USER_TAG` 列，直接 join
+        會顯示 0 人）。改為課程分組後完全沒有標籤參與，該段已隨之移除——留著會指向
+        一個不存在的 join。
+
+        母體仍由 `_completion_base` 排除草稿課程（學員看不到，計入會稀釋完成率）。
         """
         base = self._completion_base(now).subquery()
         rows = await db.execute(
             select(
-                EtTag.tag_name,
+                base.c.course_name,
                 func.count().label("enrolled"),
                 func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
             )
             .select_from(base)
-            .join(EtUserTag, EtUserTag.user_id == base.c.user_id)
-            .join(EtTag, EtTag.tag_id == EtUserTag.tag_id)
-            .where(EtUserTag.deleted == 0, EtTag.deleted == 0, EtTag.is_all.is_(False))
-            .group_by(EtTag.tag_name)
+            # 以 `course_id` 分組而非名稱——同名課程是可能的（不同年度的年度訓練），
+            # 用名稱分組會把它們合併成一列，數字偏大且看起來合理。
+            .group_by(base.c.course_id, base.c.course_name)
         )
-        return [(r.tag_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
+        return [(r.course_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
 
     async def previous_avg_progress(self, db: AsyncSession, *, course_id: int, before: date) -> Decimal | None:
         """該課程**在 `before` 之前**最近一次快照的平均進度；沒有則 `None`（AC 5 的「—」）。
