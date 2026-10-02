@@ -72,6 +72,39 @@ async def test_list_controlled_covers_seeded(db):
     assert any(t.group_type == "AUDIENCE" for t in tags)
 
 
+async def test_標籤清單依建立順序_改名後不移位(db):
+    """維護畫面的標籤順序要固定（依 TAG_ID，即建立順序）。
+
+    不加 ORDER BY 時順序取決於列的實體位置：PostgreSQL 的 UPDATE 會寫一份新列版本，
+    改名過的標籤就跑到最後——管理者每改一次名，清單就重排一次，看起來是亂的。
+    故先建三筆、改名第一筆，再斷言它仍排第一。
+    """
+    group = await _audience_group(db)
+    for name in ("ZT排序一", "ZT排序二", "ZT排序三"):
+        await _svc.create_controlled(db, "TAG", code=group, name=name, operator_id="admin")
+    first_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_name == "ZT排序一"))
+    await _svc.rename_controlled(db, "TAG", code=str(first_id), new_name="ZT排序一改", operator_id="admin")
+
+    names = [t.name for t in await _svc.list_controlled(db, "TAG") if t.name.startswith("ZT排序")]
+    assert names == ["ZT排序一改", "ZT排序二", "ZT排序三"]
+    tag_ids = [int(t.code) for t in await _svc.list_controlled(db, "TAG")]
+    assert tag_ids == sorted(tag_ids)
+
+
+async def test_分類與作業項目依代碼排序(db):
+    """分類 / 作業項目之代碼由管理者指定、具業務意義，依代碼排序。"""
+    for code in ("ZTCB", "ZTCA"):
+        await _svc.create_controlled(db, "CATEGORY", code=code, name=f"排序{code}", operator_id="admin")
+    await _svc.rename_controlled(db, "CATEGORY", code="ZTCA", new_name="排序改名", operator_id="admin")
+    cat_codes = [c.code for c in await _svc.list_controlled(db, "CATEGORY")]
+    assert cat_codes == sorted(cat_codes)
+
+    for code in ("ZTFB", "ZTFA"):
+        await _svc.create_controlled(db, "FUNC", code=code, name=f"排序{code}", operator_id="admin")
+    func_codes = [f.code for f in await _svc.list_controlled(db, "FUNC")]
+    assert func_codes == sorted(func_codes)
+
+
 async def test_改名稽核含異動前值(db):
     """FR-DP-US5-06 要求稽核含前後值。
 

@@ -117,17 +117,22 @@ class CatalogAdapter:
         """列出某類受控項（供 DP 後台清單 / 下拉）。"""
         _ensure_kind(kind)
         if kind == "CATEGORY":
-            rows = (await db.execute(_maybe_enabled(select(DmCategory), DmCategory, enabled_only))).scalars()
+            # 三類皆須明確排序：不加 ORDER BY 時順序取決於列的實體位置，改名 / 啟停後該列會移位，
+            # 維護畫面看起來就是亂的。標籤依建立順序（TAG_ID），分類 / 作業項目依代碼。
+            stmt = _maybe_enabled(select(DmCategory), DmCategory, enabled_only).order_by(DmCategory.category_code)
+            rows = (await db.execute(stmt)).scalars()
             return [
                 ControlledItemView("CATEGORY", c.category_code, c.category_name, c.is_builtin, c.is_enabled)
                 for c in rows
             ]
         if kind == "FUNC":
-            rows = (await db.execute(_maybe_enabled(select(DmFunc), DmFunc, enabled_only))).scalars()
+            stmt = _maybe_enabled(select(DmFunc), DmFunc, enabled_only).order_by(DmFunc.func_code)
+            rows = (await db.execute(stmt)).scalars()
             return [ControlledItemView("FUNC", f.func_code, f.func_name, False, f.is_enabled) for f in rows]
-        rows = (
-            await db.execute(_maybe_enabled(select(DmTag, DmTagGroup.group_type).join(DmTagGroup), DmTag, enabled_only))
-        ).all()
+        stmt = _maybe_enabled(select(DmTag, DmTagGroup.group_type).join(DmTagGroup), DmTag, enabled_only).order_by(
+            DmTag.tag_id
+        )
+        rows = (await db.execute(stmt)).all()
         return [
             ControlledItemView("TAG", str(t.tag_id), t.tag_name, False, t.is_enabled, gt, t.tag_group_code)
             for t, gt in rows
