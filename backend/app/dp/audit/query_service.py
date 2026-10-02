@@ -15,12 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PaginatedResult
 from app.dp.audit.repository import AuditLogRepository, build_audit_conditions
-from app.dp.audit.schemas import AuditLogResponse
+from app.dp.audit.schemas import AuditLogResponse, AuditOptionItem
 from app.dp.audit.target_resolver import resolve_target_displays
 
-# func_name → 中文顯示名（保留模組前綴，UI 不另列模組欄）；未知碼（未來 ET-）原樣回傳。
-# 各模組上線、開始寫稽核時，於此登記自己的功能標籤（同時進「功能」查詢下拉）；未寫稽核的模組不列，
-# 避免下拉出現篩不到資料的死選項。DM 已透過 US1（角色/受控清單）寫稽核，故列於此；ET 待其模組落地再加。
+# func_name → 中文顯示名（保留模組前綴，UI 不另列模組欄）；未知碼原樣回傳。
+#
+# **本表是功能碼的單一事實來源**：同時決定「功能」查詢下拉（經 /options 端點送給前端）、
+# 列表的功能欄中文、CSV 匯出的功能欄中文。各模組新增稽核寫入點時於此登記即可，前端會自動出現。
+#
+# ⚠️ 漏登記的後果是靜默的（`_func_label()` 查不到就回原碼、下拉少一個選項，都不報錯），
+# 故由 `tests/unit/dp/test_dp_audit_func_labels.py` 掃 `app/` 下所有 func_name 字面值守門。
 _FUNC_LABELS: dict[str, str] = {
     "DP-USERS": "DP-使用者管理",
     "DP-PARAMS": "DP-系統參數",
@@ -32,17 +36,35 @@ _FUNC_LABELS: dict[str, str] = {
     "DP-SCHEDULE": "DP-排程管理",
     "DM-ROLES": "DM-角色/權限",
     "DM-CATALOG": "DM-受控清單",
+    # DM（#477 補）：spec 僅定義 DM-ROLES / DM-CATALOG，以下四碼依寫入端語意命名
+    "DM-EDITOR": "DM-文件編輯",  # create_document / add_version / update_draft_version
+    "DM-REVIEW": "DM-簽核",  # approve / reject / 廢止核准
+    "DM-OBSOLETE": "DM-廢止申請",  # initiate
+    "DM-PERSONAL": "DM-個人專區",  # delete_draft / withdraw
+    # ET（#477 補）：名稱取自 docs/specs/et/spec.md §稽核來源功能碼之「涵蓋動作」，非自行發明
+    "ET-ROLES": "ET-角色/標籤指派",
+    "ET-CATALOG": "ET-受控清單",
+    "ET-COURSE": "ET-課程維護",
+    "ET-ENROLLMENT": "ET-學員異動",
+    "ET-QUIZ-RESET": "ET-重置作答次數",
+    # ⚠️ 只涵蓋「SCHET002 系統代替學員交卷」。學員自己按提交**不寫稽核**（spec 明定），
+    # 故不可命名為「測驗作答」——那會讓人以為每次作答都有紀錄。
+    "ET-ATTEMPT": "ET-逾期自動交卷",
+    "ET-REPORT": "ET-週報匯出",
+    "ET-APPROVAL": "ET-線下核可",
+    "ET-EXPORT": "ET-個資匯出",
 }
 
 # 供前端「功能」查詢下拉（value=func_name、label=中文）。
-FUNC_OPTIONS: list[dict[str, str]] = [{"value": code, "label": label} for code, label in _FUNC_LABELS.items()]
+FUNC_OPTIONS: list[AuditOptionItem] = [AuditOptionItem(value=c, label=label) for c, label in _FUNC_LABELS.items()]
 
 # 對象解析失敗時，從稽核列自身 before/after JSON 撈可讀名稱之鍵（優先序）。
 _TARGET_NAME_KEYS = ("user_name", "template_name", "param_name", "name", "email")
 
-# 操作類別 / 執行結果 → 中文，僅供 CSV 匯出呈現（與畫面一致）；API 收發一律維持英文碼。未知碼原樣輸出。
-# ⚠️ 同一份對照另存於前端 frontend/src/dp/audit/auditLabels.ts。新增或修改列舉值時兩邊必須同步，
-# 否則畫面與匯出檔會一邊中文、一邊原碼（未知碼 fallback 不報錯，只會靜默不一致）。
+# 操作類別 / 執行結果 → 中文（CSV 匯出與畫面共用）；API 收發一律維持英文碼。未知碼原樣輸出。
+# 前端經 /options 端點取得，不再自行維護一份（#477 取消雙寫）。
+# ⚠️ 新增 action_type 時，router 的 `_Action` 值域與 `DP_PARAM.ACTION_TYPE` 種子也要補，
+# 否則該值會「選得到但查不了」（422）——#322 的 EXPORT 就是只補了這裡而漏掉那兩處。
 _ACTION_LABELS: dict[str, str] = {
     "LOGIN": "登入",
     "LOGOUT": "登出",
@@ -53,6 +75,14 @@ _ACTION_LABELS: dict[str, str] = {
     "EXPORT": "匯出",
 }
 _RESULT_LABELS: dict[str, str] = {"SUCCESS": "成功", "FAIL": "失敗"}
+_MODULE_LABELS: dict[str, str] = {"DP": "平台", "ET": "教育訓練", "DM": "文件管理"}
+
+# 供前端「操作類別」/「執行結果」/「模組」查詢下拉。與 FUNC_OPTIONS 一同由 /options 端點送出，
+# 前端不再自行維護清單——#477 之前前端 auditLabels.ts 與此處各有一份，靠註解要求「手動同步」，
+# 結果兩邊同步了但同步的是同一份過時清單。
+ACTION_OPTIONS: list[AuditOptionItem] = [AuditOptionItem(value=c, label=label) for c, label in _ACTION_LABELS.items()]
+RESULT_OPTIONS: list[AuditOptionItem] = [AuditOptionItem(value=c, label=label) for c, label in _RESULT_LABELS.items()]
+MODULE_OPTIONS: list[AuditOptionItem] = [AuditOptionItem(value=c, label=label) for c, label in _MODULE_LABELS.items()]
 
 # CSV 欄位 → 中文對照表（_csv_cell 依此決定是否轉換）。
 _CSV_CODE_LABELS: dict[str, dict[str, str]] = {"action_type": _ACTION_LABELS, "result": _RESULT_LABELS}

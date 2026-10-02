@@ -13,7 +13,7 @@ import json
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -530,16 +530,35 @@ class TestWriteGuards:
         assert float(r.json()["score"]) == 100.0
         assert r.json()["is_pass"] is True
 
-    async def test_教師預覽不寫入學習進度(self, client, db) -> None:
+    async def test_既有的預覽作答提交時仍不寫入學習進度(self, client, db) -> None:
         """#255 裁示 Q1（`learning/rules.py` 特別標了「給 ET-5b」的警告）。
 
         教師預覽完就出現在自己課程的完課統計裡，正是該裁示要避開的後果。
+
+        ## ⚠️ 本測試的建構路徑是刻意繞路的，不要把它「簡化」回直接呼叫 API
+
+        #486 起預覽唯讀：`start` 以 `ET_ATTEMPT_008` 擋下所有不在籍者，所以**建不出**
+        新的預覽 attempt。但 `_is_preview` 仍須服務**那道守門上線之前**留下的列——教師
+        當時開了沒提交的考卷，日後被續作提交時仍不可寫進度。
+
+        那種資料不會經過新守門，測試也不該經過，故以「先加入、開完 attempt、再把選課列
+        刪掉」重建它。**硬刪僅限於此處的測試前置**（正式碼一律軟刪）——legacy 的形狀就是
+        「attempt 在、選課列從來不存在」，軟刪會留下一列 `is_enrolled` 看不到但形狀不同
+        的資料。
+
+        ⛔ 不要因為「新路徑建不出來」就刪掉這條測試：刪了之後 `_is_preview` 從此沒有任何
+        測試，而它仍然是有作用的程式碼。
         """
         teacher = await _user(db, "t_att19", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, teacher, code="32000019")
         q = await _add_question(client, teacher, course["quiz_id"], points=100)
         h = _bearer(teacher)
+        await _enroll(db, teacher, course["course_id"])
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await db.execute(
+            delete(EtEnrollment).where(EtEnrollment.user_id == teacher, EtEnrollment.course_id == course["course_id"])
+        )
+        await db.flush()
         correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
         await client.put(
             _answer_url(attempt["attempt_id"], q["question_id"]), json={"selected_options": [correct]}, headers=h
@@ -1143,3 +1162,143 @@ class TestSubmitTouchesLastActivity:
         )
         await db.refresh(row)
         assert row.last_item_id == course["next_item_id"], "提交測驗不該改變續讀位置"
+
+
+@pytest.mark.asyncio
+class TestPreviewReadOnly:
+    """預覽唯讀（#486，2026-10-01 裁示）。
+
+    #481 把學習頁放行給課程管理者預覽他人已發布課程，但**本模組沒跟上**：非擁有者教師
+    在側欄看得到測驗項目，點下去卻拿到「查無此測驗」。本組釘住補齊後的三件事——
+
+    1. 預覽者取得**唯讀題目**（不含正確答案）
+    2. 預覽者**不可開始作答**，且不留下任何 `ET_QUIZ_ATTEMPT` 列
+    3. **在籍學員走不進預覽端點**——他要看題目只有「開始作答」一條路
+    """
+
+    def _preview_url(self, quiz_id: int) -> str:
+        return f"/api/et/quizzes/{quiz_id}/preview"
+
+    async def test_教師可取得他人已發布課程的唯讀題目(self, client, db) -> None:
+        owner = await _user(db, "t_prv01", ROLE_TEACHER)
+        viewer = await _user(db, "t_prv02", ROLE_TEACHER)
+        course = await _course_with_quiz(client, db, owner, code="34000001")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+
+        r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(viewer))
+
+        assert r.status_code == 200, r.text
+        assert [q["stem"] for q in r.json()["questions"]] == ["題幹"]
+        assert [o["text"] for o in r.json()["questions"][0]["options"]] == ["A", "B"]
+
+    async def test_預覽題目不含正確答案(self, client, db) -> None:
+        """與上一條成對：少了它，把 `OPTIONS_SNAPSHOT` 整包吐出來也會通過上一條。
+
+        正確答案在 ET05 的測驗編輯對話框確認（那裡才是權威）；預覽呈現的是**學員視角**，
+        而學員在作答中永遠看不到 `is_correct`。
+        """
+        owner = await _user(db, "t_prv03", ROLE_TEACHER)
+        viewer = await _user(db, "t_prv04", ROLE_TEACHER)
+        course = await _course_with_quiz(client, db, owner, code="34000002")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+
+        r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(viewer))
+
+        # ⚠️ 正向錨點不可省：只斷言「沒有 is_correct」的話，端點回 404 時錯誤 JSON 裡
+        # 當然也沒有——那條斷言會在**功能整個壞掉**的情況下照樣通過。
+        # （2026-10-01 的變異檢查實際撞到：拿掉課程管理者放行後，本條是唯一沒紅的。）
+        assert r.status_code == 200, r.text
+        assert r.json()["questions"][0]["options"], "沒有選項可檢查，這條斷言就沒有意義"
+        assert "is_correct" not in r.text, f"預覽回應外洩正確答案：{r.text}"
+
+    async def test_在籍學員取不到預覽題目(self, client, db) -> None:
+        """他要看題目只有「開始作答」一條路——否則整套洗牌與時限形同虛設。"""
+        owner = await _user(db, "t_prv05", ROLE_TEACHER)
+        student = await _user(db, "s_prv05")
+        course = await _course_with_quiz(client, db, owner, code="34000003")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+
+        r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(student))
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_ATTEMPT_001"
+
+    async def test_純學員不得取得他人課程的預覽題目(self, client, db) -> None:
+        """⛔ 放行母體不可放寬為「任一 ET 角色」：學員角色於帳號建立時自動授予。
+
+        與上一條的差別：那條擋的是**在籍**學員（他有別的路），這條擋的是**不在籍**的
+        學員（他根本沒有路）。兩條都要有——只留一條的話，把判定寫成任一個單獨條件都會綠。
+        """
+        owner = await _user(db, "t_prv06", ROLE_TEACHER)
+        outsider = await _user(db, "s_prv06")
+        course = await _course_with_quiz(client, db, owner, code="34000004")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+
+        r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(outsider))
+
+        assert r.status_code == 404, r.text
+
+    async def test_預覽模式不可開始作答且不留下作答紀錄(self, client, db) -> None:
+        """⚠️ 兩個斷言缺一不可。
+
+        只斷言狀態碼的話，「先建 attempt 再回 409」也會通過——而那正是本裁示要避開的
+        後果（教師的作答混進 `ET_QUIZ_ATTEMPT`）。
+        """
+        owner = await _user(db, "t_prv07", ROLE_TEACHER)
+        viewer = await _user(db, "t_prv08", ROLE_TEACHER)
+        course = await _course_with_quiz(client, db, owner, code="34000005")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+
+        r = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(viewer))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_ATTEMPT_008"
+        rows = (await db.scalars(select(EtQuizAttemptM).where(EtQuizAttemptM.user_id == viewer))).all()
+        assert rows == [], "預覽不得留下任何 ET_QUIZ_ATTEMPT 列"
+
+    async def test_擁有者預覽自己的課程同樣唯讀(self, client, db) -> None:
+        """本次改動**移除**了一條原本可行的操作：擁有者過去可以在預覽時實際作答。
+
+        移除是裁示的結果，不是漏看——故在此釘住，避免日後有人看到 `_is_preview` 還在就
+        把 `start` 的守門拿掉「修好」它。
+        """
+        owner = await _user(db, "t_prv09", ROLE_TEACHER)
+        course = await _course_with_quiz(client, db, owner, code="34000006")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+        h = _bearer(owner)
+
+        preview = await client.get(self._preview_url(course["quiz_id"]), headers=h)
+        start = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
+
+        assert preview.status_code == 200, preview.text
+        assert start.status_code == 409, start.text
+        assert start.json()["error_code"] == "ET_ATTEMPT_008"
+
+    async def test_預覽的引導頁標記為預覽且不可開始(self, client, db) -> None:
+        owner = await _user(db, "t_prv10", ROLE_TEACHER)
+        viewer = await _user(db, "t_prv11", ROLE_TEACHER)
+        course = await _course_with_quiz(client, db, owner, code="34000007")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=_bearer(viewer))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["is_preview"] is True
+        assert r.json()["can_start"] is False, "預覽者沒有 attempt，剩餘次數算出來是滿的"
+
+    async def test_在籍學員的引導頁不是預覽且可開始(self, client, db) -> None:
+        """與上一條成對：少了它，把 `is_preview` 寫死成 `True`、`can_start` 寫死成
+        `False` 也會通過上一條——而那會讓**所有學員**都按不下「開始作答」。
+        """
+        owner = await _user(db, "t_prv12", ROLE_TEACHER)
+        student = await _user(db, "s_prv12")
+        course = await _course_with_quiz(client, db, owner, code="34000008")
+        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=_bearer(student))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["is_preview"] is False
+        assert r.json()["can_start"] is True

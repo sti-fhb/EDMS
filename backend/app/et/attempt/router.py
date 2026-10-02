@@ -32,7 +32,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
-from app.et.attempt.schemas import AnswerReq, AttemptResult, AttemptState, AttemptSummary, QuizIntro
+from app.et.attempt.schemas import (
+    AnswerReq,
+    AttemptResult,
+    AttemptState,
+    AttemptSummary,
+    QuizIntro,
+    QuizPreview,
+)
 from app.et.attempt.service import EtAttemptService
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
@@ -70,7 +77,24 @@ async def quiz_intro(
 
     `time_limit_min` 為 `null` 代表**不限時**——前端須顯示「不限時」而非「0 分」。
     """
-    return await _service.intro(db, quiz_id, user_id=ctx.user_id)
+    return await _service.intro(db, quiz_id, user_id=ctx.user_id, roles=ctx.roles)
+
+
+@router.get("/quizzes/{quiz_id}/preview", response_model=QuizPreview)
+async def quiz_preview(
+    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+) -> QuizPreview:
+    """教師預覽用的**唯讀**題目清單（#486）。
+
+    **在籍學員一律 404**——他要看題目只有「開始作答」一條路。授權細節見
+    `service.preview` 的 docstring。
+
+    Raises:
+        AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / 在籍者。
+    """
+    return await _service.preview(db, quiz_id, user_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.get("/quizzes/{quiz_id}/attempts", response_model=list[AttemptSummary])
@@ -93,6 +117,7 @@ async def attempt_history(
 async def start_attempt(
     quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
+    ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> AttemptState:
     """開始作答：建立 attempt、凍結快照、洗牌（AC 3 / AC 4）。
@@ -100,11 +125,16 @@ async def start_attempt(
     **已有未完成的作答時回既有那一筆**（`resumed=true`），不建新的、不吃次數
     （#279 SA 裁示 Q1 = A）。
 
+    ⚠️ 同時注入 `operator` 與 `ctx`：前者填稽核欄位、後者帶 ET 角色。角色在此**不是
+    用來放行**而是用來**拒絕得更精確**——沒有它，非擁有者教師會落回「查無此測驗」，
+    而他明明在預覽那門課、側欄上看得到這個測驗項目。
+
     Raises:
         AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / 項目尚未解鎖；
-            409 `ET_ATTEMPT_002` 重考次數已用完；409 `ET_ATTEMPT_006` 課程已關閉。
+            409 `ET_ATTEMPT_002` 重考次數已用完；409 `ET_ATTEMPT_006` 課程已關閉；
+            409 `ET_ATTEMPT_008` 預覽模式唯讀（#486）。
     """
-    return await _service.start(db, quiz_id, operator=operator)
+    return await _service.start(db, quiz_id, operator=operator, roles=ctx.roles)
 
 
 @router.get("/attempts/{attempt_id}", response_model=AttemptState)

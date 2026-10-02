@@ -102,6 +102,31 @@ export const MODULE_ROLES: Record<string, { code: string; label: string }[]> = {
 export const MODULE_LABELS: Record<string, string> = { DM: "文件管理（DM）", ET: "教育訓練（ET）" }
 
 /**
+ * 群組維度在各模組的稱呼（欄位標題與編輯視窗共用）。
+ *
+ * 兩個模組的 `groups` 語意不同——DM 是「可見對象」（單位 + 職位配對），ET 是「受訓單位標籤」
+ * （平的一層）。此處只管**怎麼稱呼**；配對或平鋪的呈現由 `isPairedModule(options)` 依選項
+ * 內容決定，與本表無關。
+ *
+ * 未列入的模組**回退為模組代碼本身**，對齊上方 `MODULE_LABELS[m] ?? m` 的頁籤慣例。
+ */
+export const MODULE_GROUP_LABELS: Record<string, string> = { DM: "可見對象", ET: "受訓單位標籤" }
+
+/**
+ * 取模組之群組維度稱呼；未知模組回退模組代碼本身。
+ *
+ * 回退值刻意用代碼而非「群組」之類的通稱：那是程式內部的字（API 欄位 `groups`、
+ * 端點 `group-options`），使用者看不懂，而且長得像一個正常的欄位名——真的漏設定時
+ * 沒有人看得出來。顯示 `XX` 很醜，但一眼就知道是少掛了對照，與頁籤的行為也一致。
+ *
+ * ⚠️ 不可省略回退：`Record<string, string>` 取不存在的 key 於執行期為 `undefined`，
+ * 標題會變成空白——那比顯示代碼更難追。
+ */
+export function groupDimensionLabel(module: string): string {
+  return MODULE_GROUP_LABELS[module] ?? module
+}
+
+/**
  * 頁籤顯示順序（ET 左、DM 右）。
  *
  * 後端 `GET /dp/roles/modules` 的順序來自 `module_assign_registry` 的註冊順序，也就是 `main.py`

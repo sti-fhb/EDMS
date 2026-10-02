@@ -30,3 +30,23 @@ class AuditLogResponse(BaseModel):
     description: Optional[str]
     before_value: Optional[str]
     after_value: Optional[str]
+
+
+class AuditOptionItem(BaseModel):
+    """查詢下拉的單一選項（value=英文碼、label=中文）。"""
+
+    value: str
+    label: str
+
+
+class AuditOptionsResponse(BaseModel):
+    """操作記錄查詢之四組篩選下拉（#477）。
+
+    前端據此渲染下拉並做代碼→中文對照，**不再自行維護清單**。此端點是這些列舉值的
+    單一事實來源：新模組寫稽核只需補後端 `_FUNC_LABELS`，畫面會自動出現。
+    """
+
+    func_options: list[AuditOptionItem]
+    action_options: list[AuditOptionItem]
+    result_options: list[AuditOptionItem]
+    module_options: list[AuditOptionItem]
