@@ -22,7 +22,8 @@ import { toApiError } from "../services/http"
 
 /**
  * 登入 overlay（全畫面遮罩）：登入 / 註冊分頁。
- * 登入：帳密 + 錯誤提示（後端 error_message）；`DP_AUTH_007` 同時給出「前往註冊」與「重寄驗證信」兩條出路。
+ * 登入：帳密 + 錯誤提示（後端 error_message）；`DP_AUTH_007` 同時給出三條出路——「前往註冊」與
+ * 「重寄驗證信」兩個連結，加上「請至信箱點選驗證連結」一行小字（#484 起主訊息不再帶這些指引）。
  * 註冊（US2 #56）：RegisterForm，送出後於分頁內顯示「驗證信已寄」（不跳登入，需驗證後才能登入）。
  */
 export function LoginOverlay() {

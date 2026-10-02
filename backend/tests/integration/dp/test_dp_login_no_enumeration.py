@@ -137,8 +137,8 @@ class TestPendingRowNotObservable:
         err = await _login_error(db, "nobody@edms.local")
 
         assert err.error_code == "DP_AUTH_007", "必須是會觸發前端三條出路的那個碼"
-        # 訊息本身不再帶路徑資訊——這是 #484 的刻意結果，不是遺漏。
-        # 斷言它「不含」那三個詞，可防有人日後把長句子加回後端而讓兩處各說一套。
+        # 以**字面值**（而非常數）斷言：若有人把長句子加回 `_NO_ACCOUNT_MESSAGE`，本條會紅。
+        # 用常數比對就比不出來——那等於拿常數跟自己比，改了照樣通過。
         assert err.detail == "帳號或密碼錯誤"
 
     async def test_稽核仍能區分未驗證與不存在(self, db) -> None:

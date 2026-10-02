@@ -68,7 +68,7 @@ describe("LoginOverlay", () => {
     expect(await screen.findByText("版本 1.0.0-test")).toBeInTheDocument()
   })
 
-  it("密碼錯誤 → 顯示錯誤訊息、維持未登入、不出現註冊 / 重寄入口", async () => {
+  it("密碼錯誤 → 顯示錯誤訊息、維持未登入、三條出路一條都不出現", async () => {
     server.use(
       http.post("/api/login", () =>
         HttpResponse.json({ error_code: "DP_AUTH_008", error_message: "密碼錯誤" }, { status: 401 }),
@@ -76,14 +76,19 @@ describe("LoginOverlay", () => {
     )
     renderLogin()
     await submitLogin()
+    // 正向對照：先確認錯誤區塊**有渲染出來**，否則下面三條否定斷言會因為整個 Alert 不存在而恆真
     expect(await screen.findByText("密碼錯誤")).toBeInTheDocument()
     expect(screen.getByTestId("status")).toHaveTextContent("anon")
-    // 已驗證帳號打錯密碼時給出這兩條路只會誤導；同時確認 DP_AUTH_007 那條不是「永遠都顯示」。
+
+    // 已驗證帳號打錯密碼時給出這些路只會誤導；同時確認 DP_AUTH_007 那組不是「永遠都顯示」。
+    // ⚠️ **三條都要驗**：小字若被搬到 errorCode 判斷之外，只驗兩個按鈕不會有任何測試變紅，
+    // 而「對所有登入失敗都顯示驗證引導」正是 #208 要擋的列舉面（它暗示該 Email 有待驗證列）。
     expect(screen.queryByRole("button", { name: "前往註冊" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "重寄驗證信" })).not.toBeInTheDocument()
+    expect(screen.queryByText(/請至信箱點選驗證連結/)).not.toBeInTheDocument()
   })
 
-  it("查無有效帳號（DP_AUTH_007）→ 同時提供註冊與重寄兩條出路", async () => {
+  it("查無有效帳號（DP_AUTH_007）→ 註冊與重寄兩個連結可點（第三條小字由下一條驗）", async () => {
     // #208：後端已不再區分「查無帳號」與「尚未驗證」，前端因此也無從得知該顯示哪一條。
     // 兩條並列由本人選；少任何一條都會讓某一類使用者走進死路。
     server.use(

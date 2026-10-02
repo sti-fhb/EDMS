@@ -144,7 +144,9 @@ async def test_login_unverified_gets_generic_message_with_guidance(db):
     with pytest.raises(AppError) as exc:
         await AuthService().login(db, email="pendinglogin@edms.local", password=_GOOD_PWD)
     assert exc.value.status_code == 401 and exc.value.error_code == "DP_AUTH_007"
-    # 與「帳號不存在」路徑完全相同的訊息——這是防列舉的核心斷言，不可改成「包含某關鍵字」
+    # 與「帳號不存在」路徑走同一個常數——驗的是「未驗證不另給專屬訊息」。
+    # ⚠️ 這**不是**防列舉的核心證據：拿常數跟自己比，常數改了照樣通過。真正逐一比對
+    # 四種狀態回應簽章的是 `test_dp_login_no_enumeration.py`，那支才是本機制的本體。
     assert exc.value.detail == _NO_ACCOUNT_MESSAGE
 
 
@@ -199,7 +201,7 @@ async def test_login_with_expired_pending_offers_registration_path(db):
     一個冷卻週期，而 UI 全程指向重寄。此時唯一走得通的動作是重新註冊。
 
     #208 統一回應後，這條死路的防線換了位置一次：不再靠「逾期時改回另一個 error code」，
-    而靠「統一訊息本身就寫著若尚未註冊請先註冊」。
+    而靠訊息本身鋪出註冊那條路（當時的長句子）。
 
     ⚠️ **#484 又換了一次**：主訊息縮為「帳號或密碼錯誤」，註冊路徑改由前端 `LoginOverlay`
     的 `DP_AUTH_007` 區塊以「前往註冊」連結承擔。所以本條現在只能保證**鏈的前半**——
