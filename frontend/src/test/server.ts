@@ -201,6 +201,17 @@ export const handlers = [
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
+  // 分類下拉（DM01 / DM03 / DM06 共用）。刻意包含一筆**非內建**的「院內公告」：分類可由 DP
+  // 後台新增，預設 fixture 若只放 4 筆內建的，就測不出前端是查 API 還是用寫死清單（#483）。
+  http.get("/api/dm/library/category-options", () =>
+    HttpResponse.json([
+      { code: "SOP", name: "標準作業程序", group_code: null },
+      { code: "MANUAL", name: "系統操作手冊", group_code: null },
+      { code: "TRAINING", name: "訓練教材", group_code: null },
+      { code: "OTHER", name: "其他", group_code: null },
+      { code: "NOTICE", name: "院內公告", group_code: null },
+    ]),
+  ),
   http.get("/api/dm/library/func-options", () =>
     HttpResponse.json([{ code: "BS04", name: "領血確認", group_code: null }]),
   ),

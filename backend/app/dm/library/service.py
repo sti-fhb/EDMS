@@ -57,6 +57,11 @@ class LibraryService:
         ]
         return {"data": data, "meta": {"total": total, "page": page, "limit": limit, "total_pages": total_pages}}
 
+    async def list_category_options(self, db) -> list[ControlledOption]:
+        """文件分類下拉（啟用中）；供 DM01 / DM03 / DM06 三個查詢頁共用。"""
+        rows = await self._repo.list_category_options(db)
+        return [ControlledOption(code=r.category_code, name=r.category_name) for r in rows]
+
     async def list_func_options(self, db) -> list[ControlledOption]:
         """系統操作手冊檢索用之 func_name 下拉（啟用中）。"""
         rows = await self._repo.list_func_options(db)
