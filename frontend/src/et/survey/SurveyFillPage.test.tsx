@@ -10,9 +10,30 @@ import { server } from "../../test/server"
 
 const navigate = vi.fn()
 
+/**
+ * 目前 location 的 `key`。React Router 給**工作階段第一筆** location 的 key 固定是
+ * `"default"`，`useGoBack` 用它分辨「有沒有上一頁」。
+ *
+ * ⚠️ 預設給非 `"default"` 的值——真實情況下學員是從學習頁點進問卷的，歷程裡一定有上一頁。
+ * 若讓它維持 `"default"`，下面所有「返回學習頁」的斷言都會改走 fallback 分支：**照樣會綠，
+ * 但驗的是另一件事**（fallback 能動），返回鍵真正的行為反而沒人守。
+ */
+const locationKey = { current: "pushed-from-learn-page" }
+
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigate, useParams: () => ({ courseId: "1" }) }
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+    useParams: () => ({ courseId: "1" }),
+    useLocation: () => ({
+      pathname: "/et/courses/1/survey",
+      search: "",
+      hash: "",
+      state: null,
+      key: locationKey.current,
+    }),
+  }
 })
 
 const QUESTIONS: SurveyForm["questions"] = [
@@ -75,7 +96,10 @@ async function confirmDialog(user: ReturnType<typeof userEvent.setup>) {
 describe("EtSurveyFillPage", () => {
   // `navigate` 是 module 層的共用 spy，且 vitest 沒有設 `clearMocks`——不清的話
   // `not.toHaveBeenCalledWith` 會被前面測試留下的呼叫記錄弄成假綠。
-  beforeEach(() => navigate.mockClear())
+  beforeEach(() => {
+    navigate.mockClear()
+    locationKey.current = "pushed-from-learn-page"
+  })
 
   it("渲染題目、選項與問卷名稱", async () => {
     mockForm()
@@ -177,7 +201,7 @@ describe("EtSurveyFillPage", () => {
     await user.click(screen.getByRole("button", { name: /送出問卷/ }))
     await confirmDialog(user)
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/courses/1/learn"))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(-1))
     expect(await screen.findByText("問卷已送出，感謝您的回饋")).toBeInTheDocument()
   })
 
@@ -307,7 +331,7 @@ describe("EtSurveyFillPage", () => {
       await user.click(screen.getByRole("button", { name: /送出問卷/ }))
       await confirmDialog(user)
 
-      await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/courses/1/learn"))
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith(-1))
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     })
 
@@ -328,7 +352,7 @@ describe("EtSurveyFillPage", () => {
       await confirmDialog(user)
 
       expect(await screen.findByText("課程已關閉，無法填寫問卷")).toBeInTheDocument()
-      expect(navigate).not.toHaveBeenCalledWith("/et/courses/1/learn")
+      expect(navigate).not.toHaveBeenCalledWith(-1)
     })
   })
 
@@ -344,14 +368,37 @@ describe("EtSurveyFillPage", () => {
       expect(await screen.findByText("您尚未加入此課程")).toBeInTheDocument()
     })
 
-    it("返回課程鈕導回 ET06", async () => {
+    /*
+      ⚠️ 本組兩條是**成對**的，不可只留一條。
+
+      問卷頁的返回必須是 **pop**（退回歷程），不能 push 一筆新的學習頁——學習頁的返回鍵
+      自己也是 pop，兩邊若混用，歷程會變成 `[列表, 學習, 問卷, 學習]`，學員從問卷返回
+      學習頁後再按返回會退回**問卷頁**，看起來像返回鍵壞掉。
+
+      但 pop 在「沒有上一頁」時會把人帶離本站，所以必須有 fallback。只留第一條的話，
+      把實作改成無條件 `navigate(-1)` 也會綠。
+    */
+    it("返回課程鈕退回歷程上一頁（來自學習頁的正常情況）", async () => {
       const user = userEvent.setup()
       mockForm()
       renderWithProviders(<EtSurveyFillPage />)
 
       await user.click(await screen.findByRole("button", { name: "返回課程" }))
 
+      expect(navigate).toHaveBeenCalledWith(-1)
+      expect(navigate).not.toHaveBeenCalledWith("/et/courses/1/learn")
+    })
+
+    it("深連結直接開問卷（歷程無上一頁）時返回導向學習頁，不退出本站", async () => {
+      const user = userEvent.setup()
+      locationKey.current = "default"
+      mockForm()
+      renderWithProviders(<EtSurveyFillPage />)
+
+      await user.click(await screen.findByRole("button", { name: "返回課程" }))
+
       expect(navigate).toHaveBeenCalledWith("/et/courses/1/learn")
+      expect(navigate).not.toHaveBeenCalledWith(-1)
     })
   })
 })

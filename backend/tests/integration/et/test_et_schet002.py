@@ -29,7 +29,7 @@
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -413,20 +413,48 @@ class TestSettleStaleAttempts:
 
         assert (await _attempt(db, attempt_id)).updated_user == "SYSTEM"
 
-    async def test_教師預覽之attempt結清後不寫入進度(self, client, db) -> None:
-        """教師可對自己課程開 attempt 而**不必在籍**（`ensure_can_access(enrolled, is_owner)`）。
-
-        #255 裁示 Q1 明訂教師預覽不得寫入 `ET_PROGRESS`——否則教師預覽完就出現在自己
+    async def test_既有的教師預覽attempt結清後不寫入進度(self, client, db) -> None:
+        """#255 裁示 Q1 明訂教師預覽不得寫入 `ET_PROGRESS`——否則教師預覽完就出現在自己
         課程的完課統計裡。`AttemptService.submit()` 以 `_is_preview` 擋下；結清路徑繞過了
         那支 Service，若不自行補上同一道判定，一筆被遺忘的預覽 attempt 就會在課程關閉後
         由排程悄悄寫進進度表，且沒有任何錯誤訊息。
+
+        ## ⚠️ 建構路徑是刻意繞路的，不要「簡化」回直接呼叫 API
+
+        #486 起預覽唯讀（`start` 以 `ET_ATTEMPT_008` 擋下不在籍者），**建不出**新的預覽
+        attempt。但本結清路徑正是為「被遺忘的那一筆」而寫的，而被遺忘的那些都是守門上線
+        **之前**留下的——那種資料不會經過新守門，測試也不該經過。
+
+        故以「先加入、開完 attempt、再把選課列刪掉」重建 legacy 形狀。硬刪僅限此處的測試
+        前置（正式碼一律軟刪）：legacy 的形狀就是「attempt 在、選課列從來不存在」。
+
+        ⛔ 不要因為「新路徑建不出來」就刪掉這條測試：刪了之後結清路徑的預覽判定從此沒有
+        任何測試，而那是一條**排程**路徑——壞掉時沒有人會在畫面上看到。
         """
-        # 測驗須為章節第一項：解鎖判定對擁有者一樣適用，而教師「看教材」走
-        # `_PreviewOnly` 分支不寫進度，故永遠解不開排在教材之後的測驗
+        # 測驗須為章節第一項：解鎖判定對在籍者適用，而本測試開 attempt 時教師是在籍的
         ctx = await _course(client, db, "stlp", quiz_first=True)
         teacher = ctx["teacher"]
+        now = utcnow()
+        db.add(
+            EtEnrollment(
+                user_id=teacher,
+                course_id=ctx["course_id"],
+                join_source=SOURCE_INVITATION_CODE,
+                joined_at=now,
+                completion_status="NOT_STARTED",
+                is_removed=False,
+                created_user=teacher,
+                created_date=now,
+                deleted=0,
+            )
+        )
+        await db.flush()
         started = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(teacher))
         assert started.status_code == 201, started.text
+        await db.execute(
+            delete(EtEnrollment).where(EtEnrollment.user_id == teacher, EtEnrollment.course_id == ctx["course_id"])
+        )
+        await db.flush()
         attempt_id = started.json()["attempt_id"]
         state = await client.get(f"/api/et/attempts/{attempt_id}", headers=_bearer(teacher))
         chosen = [o["option_id"] for o in state.json()["questions"][0]["options"] if o["text"] == "甲"][0]

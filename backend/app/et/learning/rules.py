@@ -14,9 +14,22 @@ router 遲早有人把 dependency 掛錯層——而那種錯誤的表現是「�
 from typing import Final
 
 from app.core.exceptions import AppError
+from app.et.constants import ROLE_ADMIN, ROLE_TEACHER
 
 #: 播放器之倍速選項（FR-ET-US5-03）。**固定五段、前端寫死**。
 PLAYBACK_RATE_OPTIONS: Final[tuple[float, ...]] = (0.75, 1.0, 1.25, 1.5, 2.0)
+
+#: 可預覽他人已發布課程的角色（#481）。
+#:
+#: ⚠️ 與**編輯頁的路由守衛**（前端 `RequireEtCourseManager` ＝ 教師或管理者）同一組人
+#: ——那正是「現在就能透過唯讀編輯頁讀到別人課程教材」的母體，故本路徑不擴大授權面。
+#: ⛔ 不可放寬為「任一 ET 角色」：學員角色於帳號建立時自動授予，那等同全體登入者。
+#:
+#: 📌 **放在 rules 而非某個 service**：它是 `ensure_can_access` 的參數來源，而該規則有
+#: 三個消費端（`learning` / `attempt` / `progress`）。各自留一份私有常數的話，日後有人
+#: 調整母體只會改到他當下在看的那一個，另外兩個靜默分岔——而分岔的表現是「教師在某一頁
+#: 看得到、換一頁看不到」，沒有任何測試會自然撞到。
+COURSE_MANAGER_ROLES: Final[frozenset[str]] = frozenset({ROLE_TEACHER, ROLE_ADMIN})
 
 _NO_ACCESS = AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_LEARN_002")
 _REMOVED = AppError(status_code=403, detail="您已被該課程移除", error_code="ET_LEARN_004")

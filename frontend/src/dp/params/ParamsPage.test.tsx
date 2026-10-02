@@ -375,9 +375,39 @@ describe("ParamsPage 模組受控清單（#182）", () => {
 
     await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
 
-    expect(await screen.findByText("模組受控清單")).toBeInTheDocument() // 受控清單（模組自持表）
-    expect(screen.getByText("可見對象／單位")).toBeInTheDocument() // 標籤依標籤組分區
+    // 說明欄顯示模組自報的用途，不是「模組受控清單」這類複述左欄的分類字樣
+    expect(await screen.findByText(/分類代碼會嵌入文件編號/)).toBeInTheDocument()
+    expect(screen.getByText("職位")).toBeInTheDocument() // 標籤依標籤組分區
     expect(screen.getByText("DM_DOC_CATEGORY")).toBeInTheDocument() // DP_PARAM 來源同表並存
+  })
+
+  it("模組未提供說明的分區，說明欄顯示「—」而非分類字樣", async () => {
+    // 管理者自建的標籤組查無說明對照（後端回 null）。此時只能留白——
+    // 補「模組受控清單」等於用一句廢話佔住位置，看的人會以為那就是說明。
+    server.use(
+      http.get("/api/dp/params/controlled", () =>
+        HttpResponse.json([
+          {
+            module: "DM",
+            kind: "TAG",
+            name: "標籤",
+            requires_code: false,
+            description: null,
+            group_code: "ZTCUSTOM",
+            group_name: "自訂組",
+            items: [{ code: "91", name: "自訂標籤", is_builtin: false, is_enabled: true }],
+          },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    const row = (await screen.findByText("自訂組")).closest("tr")
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).getByText("—")).toBeInTheDocument()
   })
 
   it("內建項代碼唯讀（僅可改名），自訂項無鎖定圖示", async () => {

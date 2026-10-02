@@ -33,6 +33,7 @@ import { surveyFillApi } from "./surveyFillService"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
+import { useGoBack } from "../../hooks/useGoBack"
 import { toApiError } from "../../services/http"
 import { formatDateTime } from "../../utils/date"
 
@@ -77,7 +78,17 @@ export function EtSurveyFillPage() {
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
-  const backToCourse = useCallback(() => navigate(`/et/courses/${courseId}/learn`), [courseId, navigate])
+  /*
+    ⚠️ **必須退回歷程**（`useGoBack`），不可 `navigate` 到學習頁。
+
+    學習頁的返回鍵自己也是退回歷程，若這裡改用 push，歷程會變成
+    `[列表, 學習, 問卷, 學習]`——學員從問卷返回學習頁後再按返回，會退回**問卷頁**，
+    看起來像返回鍵壞掉。一條路徑上的返回要嘛全部 pop、要嘛全部 push，不可混用。
+
+    連帶修掉一個舊的：送出問卷後（line ~108）原本是 push，於是送完按瀏覽器上一頁
+    會回到一份已送出的問卷表單。
+  */
+  const backToCourse = useGoBack(`/et/courses/${courseId}/learn`)
 
   const submitting = useMutation({
     /**

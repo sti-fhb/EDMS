@@ -152,7 +152,11 @@ def _to_item(item) -> ControlledItemResponse:
 
 
 def _split_sections(module: str, kind, items) -> list[ControlledSectionResponse]:
-    """把一個 kind 的項目攤成畫面分區：有子分組者每組一區，否則整個 kind 一區。"""
+    """把一個 kind 的項目攤成畫面分區：有子分組者每組一區，否則整個 kind 一區。
+
+    說明一律取模組自報者（DP 不得認識模組語彙）；分組未給說明時退回 kind 層的，
+    兩者皆空則回 `None` 由前端顯示 `—`——**不在此處編造文案**。
+    """
     if not kind.groups:
         return [
             ControlledSectionResponse(
@@ -160,6 +164,7 @@ def _split_sections(module: str, kind, items) -> list[ControlledSectionResponse]
                 kind=kind.kind,
                 name=kind.name,
                 requires_code=kind.requires_code,
+                description=kind.description or None,
                 items=[_to_item(i) for i in items],
             )
         ]
@@ -169,6 +174,7 @@ def _split_sections(module: str, kind, items) -> list[ControlledSectionResponse]
             kind=kind.kind,
             name=kind.name,
             requires_code=kind.requires_code,
+            description=group.description or kind.description or None,
             group_code=group.code,
             group_name=group.name,
             items=[_to_item(i) for i in items if i.tag_group_code == group.code],

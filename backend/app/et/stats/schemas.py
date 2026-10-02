@@ -59,10 +59,15 @@ class TeacherCard(BaseModel):
     draft_count: int
 
 
-class UnitRate(BaseModel):
-    """管理者卡之一列：一個受訓單位的達成狀況。"""
+class CourseRate(BaseModel):
+    """管理者卡之一列：一門課程的完成狀況（#475）。
 
-    tag_name: str
+    2026-10-01 由「各受訓單位達成率」改為「各課程完成率」。前者依賴受訓單位標籤
+    維護得好，而手測資料每單位僅 1～2 人、分母太小使比率跳動；後者只依賴課程本身，
+    且落後時找得到可行動的對象（該課程的開課教師）。
+    """
+
+    course_name: str
     enrolled: int
     completed: int
     completion_rate: Decimal
@@ -76,12 +81,12 @@ class AdminCard(BaseModel):
             ——看到就要處理（催辦 / 延期 / 認列）。
         completion_rate: 全體完成率。不可行動，保留的理由是「上面會問這個數字」
             （評鑑、報告），故前端放小字、不當主角。
-        by_unit: 各受訓單位達成率，**達成率由低到高**——要找的是落後的那一個。
+        by_course: 各課程完成率，**完成率由低到高**——要找的是落後的那一門。
     """
 
     overdue_incomplete: int
     completion_rate: Decimal
-    by_unit: list[UnitRate]
+    by_course: list[CourseRate]
 
 
 class EtDashboard(BaseModel):

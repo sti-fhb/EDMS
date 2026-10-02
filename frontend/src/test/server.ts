@@ -126,9 +126,9 @@ export const handlers = [
       admin: {
         overdue_incomplete: 4,
         completion_rate: "62.50",
-        by_unit: [
-          { tag_name: "行政人員", enrolled: 4, completed: 1, completion_rate: "25.00" },
-          { tag_name: "護理師", enrolled: 4, completed: 3, completion_rate: "75.00" },
+        by_course: [
+          { course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
+          { course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },
         ],
       },
     }),
@@ -829,6 +829,7 @@ export const handlers = [
         kind: "CATEGORY",
         name: "文件分類",
         requires_code: true,
+        description: "文件建檔時必選。分類代碼會嵌入文件編號，故建立後鎖定、淘汰改停用。",
         group_code: null,
         group_name: null,
         items: [
@@ -841,8 +842,10 @@ export const handlers = [
         kind: "TAG",
         name: "標籤",
         requires_code: false,
+        // 分組有自己的說明時覆蓋 kind 層（後端 _split_sections 已決定好，前端直接顯示）
+        description: "可見對象的另一半。閱覽者只看得到配對相符、或掛「全體」的文件。",
         group_code: "AUDIENCE",
-        group_name: "可見對象／單位",
+        group_name: "職位",
         items: [{ code: "11", name: "護理師", is_builtin: false, is_enabled: true }],
       },
     ]),

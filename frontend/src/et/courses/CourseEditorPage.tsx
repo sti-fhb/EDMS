@@ -1097,7 +1097,7 @@ export function EtCourseEditorPage() {
         actions={
           <Stack direction="row" spacing={1}>
             {/*
-              「以學員身分預覽」（#481）。**草稿與已關閉課程只有這個入口**——課程列表的
+              「預覽課程」（#481）。**草稿與已關閉課程只有這個入口**——課程列表的
               「全部課程」只含已發布且期間未過者，而 `structure` 有一段專為草稿而寫的
               程式碼（#255：「教師需要在發布**之前**確認學員視角，草稿階段正是最需要
               預覽的時候」），少了這顆按鈕那段永遠到不了。
@@ -1113,7 +1113,7 @@ export function EtCourseEditorPage() {
                 startIcon={<VisibilityIcon />}
                 onClick={() => navigate(`/et/courses/${courseId}/learn`)}
               >
-                以學員身分預覽
+                預覽課程
               </Button>
             )}
             {/*

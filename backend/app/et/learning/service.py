@@ -29,11 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
-from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ROLE_ADMIN, ROLE_TEACHER
+from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL
 from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository, LearnItemRow, zero_question_quiz_item_ids
-from app.et.learning.rules import ensure_can_access, playback_rates
+from app.et.learning.rules import COURSE_MANAGER_ROLES, ensure_can_access, playback_rates
 from app.et.learning.schemas import (
     PREVIEWABLE_MIMES,
     ChapterNode,
@@ -66,13 +66,6 @@ _NOT_YET_OPEN = AppError(status_code=403, detail="此課程尚未開放，請於
 #: 不能看」，可被用來枚舉全站有多少教材、哪些 id 有效。取檔端點對「不存在」與「無權」
 #: 回同一個 404，外部觀察不到差異。比照 #247 `ET_ENROLL_001`（格式不符與查無共用同碼）。
 _FILE_NOT_FOUND = AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
-
-#: 可預覽他人已發布課程的角色（#481）。
-#:
-#: ⚠️ 與**編輯頁的路由守衛** `RequireEtCourseManager` 同一組人——那正是「現在就能
-#: 透過唯讀編輯頁讀到別人課程教材」的母體，故本路徑不擴大授權面。
-#: ⛔ 不可放寬為「任一 ET 角色」：學員角色於帳號建立時自動授予，那等同全體登入者。
-_COURSE_MANAGER_ROLES: frozenset[str] = frozenset({ROLE_TEACHER, ROLE_ADMIN})
 
 
 class EtLearningService:
@@ -167,7 +160,7 @@ class EtLearningService:
         removed = (
             not enrolled and not is_owner and await self._repo.was_removed(db, user_id=user_id, course_id=course_id)
         )
-        is_course_manager = bool(roles & _COURSE_MANAGER_ROLES)
+        is_course_manager = bool(roles & COURSE_MANAGER_ROLES)
         ensure_can_access(
             enrolled=enrolled,
             is_owner=is_owner,
@@ -526,7 +519,7 @@ class EtLearningService:
             enrolled=enrolled,
             is_owner=course_owner == user_id,
             # 母體與編輯頁的路由守衛（`RequireEtCourseManager`）一致——見 `ensure_can_access`
-            is_course_manager=bool(roles & _COURSE_MANAGER_ROLES),
+            is_course_manager=bool(roles & COURSE_MANAGER_ROLES),
             course_published=course_status == COURSE_PUBLISHED,
         )
         return enrolled

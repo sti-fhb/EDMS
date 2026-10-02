@@ -27,7 +27,7 @@ from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.service import EtEnrollmentService
 from app.et.stats.repository import EtStatsRepository
 from app.et.stats.rules import days_left, percent, summarize
-from app.et.stats.schemas import AdminCard, StudentCard, TeacherCard, TeacherCourseLine, UnitRate
+from app.et.stats.schemas import AdminCard, CourseRate, StudentCard, TeacherCard, TeacherCourseLine
 from app.et.tracking.repository import EtTrackingRepository
 
 logger = logging.getLogger(__name__)
@@ -138,30 +138,30 @@ class EtStatsService:
         return TeacherCard(ending_soon=lines, draft_count=await self._repo.draft_count(db, owner_id))
 
     async def admin_card(self, db: AsyncSession, *, now: datetime | None = None) -> AdminCard:
-        """管理者卡：全站逾期未完課、整體完成率、各單位達成率。
+        """管理者卡：全站逾期未完課、整體完成率、**各課程**完成率。
 
-        兩支查詢共用 `_completion_base`（全站「每筆在籍 × 是否完課」），故整體與分單位
+        兩支查詢共用 `_completion_base`（全站「每筆在籍 × 是否完課」），故整體與分課程
         的完課定義**不可能分歧**——分開寫兩份推導才是分歧的來源。
 
-        各單位依達成率**由低到高**排序：管理者要找的是落後的那一個，把最好的排在最前
+        各課程依完成率**由低到高**排序：管理者要找的是落後的那一門，把最好的排在最前
         面等於要他自己從尾巴讀起。
         """
         now = now or utcnow()
         enrolled, completed, overdue = await self._repo.overall_completion(db, now)
-        units = [
-            UnitRate(
-                tag_name=name,
-                enrolled=unit_enrolled,
-                completed=unit_completed,
-                completion_rate=percent(unit_completed, unit_enrolled),
+        courses = [
+            CourseRate(
+                course_name=name,
+                enrolled=course_enrolled,
+                completed=course_completed,
+                completion_rate=percent(course_completed, course_enrolled),
             )
-            for name, unit_enrolled, unit_completed in await self._repo.unit_rates(db, now)
+            for name, course_enrolled, course_completed in await self._repo.course_rates(db, now)
         ]
-        units.sort(key=lambda u: (u.completion_rate, u.tag_name))
+        courses.sort(key=lambda c: (c.completion_rate, c.course_name))
         return AdminCard(
             overdue_incomplete=overdue,
             completion_rate=percent(completed, enrolled),
-            by_unit=units,
+            by_course=courses,
         )
 
     async def course_stat(self, db: AsyncSession, course_id: int):

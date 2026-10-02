@@ -75,6 +75,8 @@ class ControlledSectionResponse(BaseModel):
     kind: str
     name: str
     requires_code: bool
+    #: 用途說明（維護頁「說明」欄）。由模組自報；分組有自己的說明時取分組的，否則取 kind 的。
+    description: Optional[str] = None
     group_code: Optional[str] = None
     group_name: Optional[str] = None
     items: list[ControlledItemResponse]

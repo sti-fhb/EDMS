@@ -56,10 +56,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.constants import COURSE_DRAFT, ITEM_MATERIAL
+from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL
 from app.et.course.rules import is_effectively_closed, is_pending_open
 from app.et.learning.repository import EtLearningRepository, zero_question_quiz_item_ids
-from app.et.learning.rules import ensure_can_access
+from app.et.learning.rules import COURSE_MANAGER_ROLES, ensure_can_access
 from app.et.progress.repository import EtProgressRepository
 from app.et.progress.rules import (
     Segment,
@@ -110,7 +110,13 @@ class EtProgressService:
         self._learning = learning or EtLearningRepository()
 
     async def report_intervals(
-        self, db: AsyncSession, video_id: int, req: IntervalReportReq, *, operator: OperatorInfo
+        self,
+        db: AsyncSession,
+        video_id: int,
+        req: IntervalReportReq,
+        *,
+        operator: OperatorInfo,
+        roles: frozenset[str] = frozenset(),
     ) -> VideoProgress:
         """上報播放區段並重算覆蓋率。"""
         context = await self._repo.video_context(db, video_id)
@@ -118,7 +124,7 @@ class EtProgressService:
             raise _NOT_FOUND
         video, item_id, course_id = context
         try:
-            await self._guard_write(db, course_id=course_id, user_id=operator.user_id, item_id=item_id)
+            await self._guard_write(db, course_id=course_id, user_id=operator.user_id, item_id=item_id, roles=roles)
         except _PreviewOnly:
             return await self._preview_result(db, video_id=video_id, user_id=operator.user_id)
 
@@ -158,7 +164,9 @@ class EtProgressService:
             operator=operator,
         )
 
-    async def normalize(self, db: AsyncSession, video_id: int, *, operator: OperatorInfo) -> VideoProgress:
+    async def normalize(
+        self, db: AsyncSession, video_id: int, *, operator: OperatorInfo, roles: frozenset[str] = frozenset()
+    ) -> VideoProgress:
         """合併重疊 / 相接區段並回寫覆蓋率（離開頁面時觸發）。
 
         ⚠️ **normalize 是儲存壓縮，不是正確性前提**——覆蓋率一律先聯集再算，所以
@@ -172,7 +180,7 @@ class EtProgressService:
             raise _NOT_FOUND
         video, item_id, course_id = context
         try:
-            await self._guard_write(db, course_id=course_id, user_id=operator.user_id)
+            await self._guard_write(db, course_id=course_id, user_id=operator.user_id, roles=roles)
         except _PreviewOnly:
             return await self._preview_result(db, video_id=video_id, user_id=operator.user_id)
 
@@ -200,7 +208,9 @@ class EtProgressService:
             operator=operator,
         )
 
-    async def mark_item_viewed(self, db: AsyncSession, item_id: int, *, operator: OperatorInfo) -> ItemViewedResult:
+    async def mark_item_viewed(
+        self, db: AsyncSession, item_id: int, *, operator: OperatorInfo, roles: frozenset[str] = frozenset()
+    ) -> ItemViewedResult:
         """文件 / 說明文字項目「開啟即完成」（AC 13 / FR-08）。
 
         **含影片的教材不走這裡**——那類的完成由覆蓋率決定。若對含影片的教材呼叫本
@@ -214,7 +224,7 @@ class EtProgressService:
             raise _NOT_FOUND
         item, course_id = context
         try:
-            await self._guard_write(db, course_id=course_id, user_id=operator.user_id, item_id=item_id)
+            await self._guard_write(db, course_id=course_id, user_id=operator.user_id, item_id=item_id, roles=roles)
         except _PreviewOnly:
             return ItemViewedResult(item_id=item_id, completed=False)
 
@@ -241,17 +251,28 @@ class EtProgressService:
 
     # ── 內部 ────────────────────────────────────────────────────────────────
 
-    async def _guard_write(self, db: AsyncSession, *, course_id: int, user_id: str, item_id: int | None = None) -> None:
+    async def _guard_write(
+        self,
+        db: AsyncSession,
+        *,
+        course_id: int,
+        user_id: str,
+        item_id: int | None = None,
+        roles: frozenset[str] = frozenset(),
+    ) -> None:
         """四道守門（順序見模組 docstring）。
 
         Args:
             item_id: 給定時一併檢查解鎖狀態（守門 4）。`normalize` 傳 `None`——它加不出
                 進度，掛上去只會讓收尾補送在項目被鎖回去後整批失敗。
+            roles: 操作者的 ET 角色集（#486）。漏傳會退化成 #481 之前的母體——
+                fail-closed，但非擁有者教師會因此在預覽他人課程時**每一次上報都拿到
+                404**。那正是 #486 修的缺陷之一。
 
         Raises:
             AppError: 404 兩者皆非 / 課程未發布 / 項目尚未解鎖；409 `ET_PROGRESS_001`
                 課程已關閉。
-            _PreviewOnly: 擁有者預覽——呼叫端據此回「什麼都沒發生」。
+            _PreviewOnly: 預覽——呼叫端據此回「什麼都沒發生」。
         """
         course = await self._learning.get_course(db, course_id)
         if course is None:
@@ -259,13 +280,24 @@ class EtProgressService:
         enrolled = await self._learning.is_enrolled(db, user_id=user_id, course_id=course_id)
         is_owner = course.owner_id == user_id
         try:
-            ensure_can_access(enrolled=enrolled, is_owner=is_owner)
+            ensure_can_access(
+                enrolled=enrolled,
+                is_owner=is_owner,
+                is_course_manager=bool(roles & COURSE_MANAGER_ROLES),
+                course_published=course.status == COURSE_PUBLISHED,
+            )
         except AppError:
             raise _NOT_FOUND from None
 
-        if is_owner and not enrolled:
-            # 擁有者預覽（#255 裁示 Q1）——**在關閉判定之前**：教師預覽已關閉的課程，
-            # 該給他「什麼都沒發生」而不是「此課程已關閉」。
+        if not enrolled:
+            # 預覽（#255 裁示 Q1；#481 起含課程管理者預覽他人已發布課程）
+            # ——**在關閉判定之前**：教師預覽已關閉的課程，該給他「什麼都沒發生」
+            # 而不是「此課程已關閉」。
+            #
+            # ⚠️ 判定是 `not enrolled` 而非 `is_owner and not enrolled`：通過上面那道
+            # 授權後，「不在籍」就是在預覽，不論他是擁有者還是觀摩的教師。與
+            # `learning/service.is_preview` 保持同一形狀——兩者分岔的話，會出現
+            # 「學習頁說你在預覽、進度端點卻把你當學員」這種只在特定角色組合下現形的矛盾。
             raise _PreviewOnly
         if course.status == COURSE_DRAFT:
             # 目前不可達（已發布課程無退回草稿之路徑，且草稿沒有邀請碼可加入），
