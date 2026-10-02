@@ -347,13 +347,11 @@
       <div class="screen-meta">UCDP001 ｜ 登入後落點（無來源模組時）｜ 所有登入使用者</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時被攔到登入頁者</strong>（通知信連結、書籤、逾時重登）登入後<strong>返回原目標頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊）顯示本頁。登入後採<strong>統一 shell</strong>（頂列 + 依權限側欄 + 內容區），主頁為<strong>中性歡迎頁</strong>（問候 + 系統定位 + 版本），不綁任何模組權限、永遠存在。<strong>側欄依權限顯示</strong>：無某模組角色者<strong>完全看不到該模組群組</strong>（最小知悉，不呈鎖定卡）；「系統管理者後台」群組僅管理者可見（過渡期先對所有登入者顯示）。（導覽重構 #89，取代原卡片入口頁）</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時被攔到登入頁者</strong>（通知信連結、書籤、逾時重登）登入後<strong>返回原目標頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊）顯示本頁。登入後採<strong>統一 shell</strong>（頂列 + 依權限側欄 + 內容區），主頁為<strong>中性歡迎頁</strong>（問候 + 依權限疊加的模組概況 widget），不綁任何模組權限、永遠存在。<strong>2026-10-02 裁示移除系統定位文案與版本號</strong>——前者原為 #89 決策 D3，屬刻意推翻；版本號仍顯示於登入畫面。<strong>側欄依權限顯示</strong>：無某模組角色者<strong>完全看不到該模組群組</strong>（最小知悉，不呈鎖定卡）；「系統管理者後台」群組僅管理者可見（過渡期先對所有登入者顯示）。（導覽重構 #89，取代原卡片入口頁）</div>
 
     <!-- 中性歡迎頁內容（顯示於統一 shell 內容區；左側常駐側欄見本 wireframe 左欄） -->
     <div class="wf-card p-4" style="max-width:640px;">
       <div class="h4 mb-1">歡迎，王小明</div>
-      <div class="text-muted">教育訓練與文件管理系統</div>
-      <div class="text-muted small mt-3">版本 1.0.0</div>
     </div>
     <div class="text-muted small mt-2"><em>💡 P2+ 再於此依權限疊加「管理者概況」「ET / DM 儀表板」widget（空卡不顯示）。</em></div>
 

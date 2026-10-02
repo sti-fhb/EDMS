@@ -59,9 +59,13 @@ describe("AppShell 統一導覽殼", () => {
     await login(user)
     // 全域頂列品牌
     expect(await screen.findByText(HEADER_TITLE)).toBeInTheDocument()
-    // 中性歡迎頁：問候帶姓名（MSW /me = 測試員）+ 系統定位
+    // 中性歡迎頁：問候帶姓名（MSW /me = 測試員）
+    //
+    // ⚠️ 原本這裡還斷言「教育訓練與文件管理系統」（系統定位文案），2026-10-02 裁示
+    // 拿掉該文案後一併移除。問候本身就足以證明歡迎頁有渲染——它是歡迎頁自己的內容，
+    // 比系統定位更貼近本測試要驗的事（shell 內容區掛的是歡迎頁）。
+    // 📌 「文案不該再出現」由 `WelcomePage.test.tsx` 專責釘住，不在本檔重複。
     expect(await screen.findByText("歡迎，測試員")).toBeInTheDocument()
-    expect(screen.getByText("教育訓練與文件管理系統")).toBeInTheDocument()
     // 側欄常駐（與舊入口頁「無側欄」相反）：後台群組 + Drawer 存在
     expect(screen.getByText("系統管理者後台")).toBeInTheDocument()
     expect(document.querySelector(".MuiDrawer-root")).not.toBeNull()

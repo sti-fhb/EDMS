@@ -49,7 +49,15 @@ function StatCell({ label, count }: { label: string; count: number }) {
  * `textContent` 是「標題 + 註記」，`getByText("全體訓練概況")` 這種精確查詢會落空。
  * 包起來之後標題本身有自己的節點，測試與螢幕閱讀器都抓得到。
  */
-function SectionTitle({ children, note }: { children: React.ReactNode; note?: string }) {
+function SectionTitle({
+  children,
+  note,
+  divider = true,
+}: {
+  children: React.ReactNode
+  note?: string
+  divider?: boolean
+}) {
   return (
     <>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
@@ -61,7 +69,7 @@ function SectionTitle({ children, note }: { children: React.ReactNode; note?: st
           </Typography>
         )}
       </Typography>
-      <Divider sx={{ mb: 1.5 }} />
+      {divider && <Divider sx={{ mb: 1.5 }} />}
     </>
   )
 }
@@ -91,7 +99,9 @@ function StudentBlock({ card }: { card: StudentCard }) {
   const navigate = useNavigate()
   return (
     <Paper sx={{ p: 2, mb: 3 }}>
-      <SectionTitle>我的學習概況</SectionTitle>
+      {/* ⚠️ 本塊**不畫分隔線**（2026-10-02 裁示）：下方緊接著四張外框數字卡，
+          線與卡框疊在一起只是多一道橫線。另外兩塊底下是表格 / 清單，線有分隔作用。 */}
+      <SectionTitle divider={false}>我的學習概況</SectionTitle>
       {/* 與 DM「各類型文件總數」同一組斷點：窄螢幕兩欄、md 以上四欄平均分配整個寬度 */}
       <Box
         sx={{
@@ -116,7 +126,7 @@ function StudentBlock({ card }: { card: StudentCard }) {
 function TeacherBlock({ card }: { card: TeacherCard }) {
   const navigate = useNavigate()
   return (
-    <Paper sx={{ p: 2, mb: 3 }}>
+    <Box>
       <SectionTitle>我的課程待辦</SectionTitle>
       {card.draft_count > 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -148,7 +158,10 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
           ))}
         </List>
       )}
-    </Paper>
+      <Link component="button" variant="body2" onClick={() => navigate("/et/courses")} sx={{ mt: 1 }}>
+        前往課程列表
+      </Link>
+    </Box>
   )
 }
 
@@ -168,26 +181,29 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
  */
 function AdminBlock({ card }: { card: AdminCard }) {
   return (
-    <Paper sx={{ p: 2, mb: 3 }}>
-      <SectionTitle note="各課程完成率">全體訓練概況</SectionTitle>
+    <Box sx={{ mb: 3 }}>
+      <SectionTitle note="（各課程完成率）">全體訓練概況</SectionTitle>
       <TableContainer>
         <Table size="small" aria-label="各課程完成率">
           <TableHead>
+            {/* 表頭加粗、內容不加粗——改版前是課程名加粗而表頭不加粗，等於反過來了 */}
             <TableRow>
-              <TableCell>課程</TableCell>
-              <TableCell align="right">完成</TableCell>
-              <TableCell align="right">完成率</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>課程</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>
+                完成人數
+              </TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>
+                完成率
+              </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {/* key 用 `course_id`：同名課程（不同年度的年度訓練）後端刻意不合併 */}
             {card.by_course.map((course) => (
               <TableRow key={course.course_id}>
-                <TableCell>
-                  <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                    {course.course_name}
-                  </Typography>
-                </TableCell>
+                {/* 直接放文字、不包 Typography：包了就會帶自己的 variant，與同列其他
+                    儲存格的字級不一致（2026-10-02 手測回報） */}
+                <TableCell>{course.course_name}</TableCell>
                 <TableCell align="right">
                   {course.completed} / {course.enrolled} 人
                 </TableCell>
@@ -203,7 +219,7 @@ function AdminBlock({ card }: { card: AdminCard }) {
       <Typography variant="body2" color="text.secondary" sx={{ textAlign: "right", mt: 2 }}>
         全體訓練完成率 <PercentText rate={card.completion_rate} />
       </Typography>
-    </Paper>
+    </Box>
   )
 }
 
@@ -217,17 +233,23 @@ function AdminBlock({ card }: { card: AdminCard }) {
  * ⛔ 不可改成 `modules.et.has_role && …`——DM 那側是那樣寫的，但它沒有「人人都有預設
  * 角色」這個前提。
  *
- * 排版順序 **管理者 → 教師 → 學員**（由廣到窄），對齊 #89 決策 3 的建議。
+ * ## 版面：兩張白底卡、順序 **學員 → 管理者 → 教師**（2026-10-02 手測裁示）
  *
- * ## 三塊各自一張白底卡（2026-10-02 手測裁示）
+ * | 卡 | 內容 |
+ * |---|---|
+ * | 第一張 | 我的學習概況 |
+ * | 第二張 | 全體訓練概況 ＋ 我的課程待辦 |
  *
- * 比照 DM 的「各類型文件總數」與「最新更新公告」——一個區塊一張 `Paper`。三塊共用一張
- * 時，`我的學習概況` 的四格數字與 `全體訓練概況` 的表格之間沒有任何視覺分界，讀起來
- * 像同一組資料的續篇。
+ * ⚠️ **順序刻意與 #89 決策 3 的建議（管理者 → 教師 → 學員，由廣到窄）相反。** 裁示把
+ * 「自己要學什麼」放到最前面。日後若有人依 #89 的留言想調回來，請先確認那是新的決定，
+ * 不是在修一個 bug。
  *
- * ⚠️ 每張都帶 `mb: 3`（含最後一張），不做「最後一張不留下邊距」的處理：**哪一張是
- * 最後一張隨角色而變**，條件式邊距會在某些角色組合下漏掉。多出來的下邊距也剛好隔開
- * 緊接在後的 DM widget。
+ * ⚠️ 管理者與教師**同卡**，兩者都沒有資料時第二張卡**整張不渲染**——否則會留下一張
+ * 空白的白底方塊（`<Paper>` 有陰影，空的也看得見）。
+ *
+ * 每張卡帶 `mb: 3`（含最後一張），不做「最後一張不留下邊距」的處理：**哪一張是最後
+ * 一張隨角色而變**，條件式邊距會在某些角色組合下漏掉。多出來的下邊距也剛好隔開緊接
+ * 在後的 DM widget。
  *
  * 三張卡皆無資料時整個 widget 不渲染（不留一個空標題）。
  */
@@ -245,9 +267,13 @@ export function EtOverviewWidget({ enabled }: { enabled: boolean }) {
       <Typography variant="h6" gutterBottom>
         ET 教育訓練概況
       </Typography>
-      {admin && <AdminBlock card={admin} />}
-      {teacher && <TeacherBlock card={teacher} />}
       {student && <StudentBlock card={student} />}
+      {(admin || teacher) && (
+        <Paper sx={{ p: 2, mb: 3 }}>
+          {admin && <AdminBlock card={admin} />}
+          {teacher && <TeacherBlock card={teacher} />}
+        </Paper>
+      )}
     </Box>
   )
 }
