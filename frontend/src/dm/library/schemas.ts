@@ -42,13 +42,10 @@ export const EMPTY_LIBRARY_FILTERS: LibraryFilters = {
   dateTo: "",
 }
 
-/** 分類固定選項（4 內建分類；MANUAL 觸發 func_name 下拉）。code 對齊 DM 種子。 */
-export const DM_CATEGORIES: { code: string; label: string }[] = [
-  { code: "SOP", label: "SOP（標準作業程序）" },
-  { code: "MANUAL", label: "系統操作手冊" },
-  { code: "TRAINING", label: "訓練教材" },
-  { code: "OTHER", label: "其他" },
-]
-
-/** 系統操作手冊分類代碼（選此分類才顯示關聯作業項目 func_name 下拉）。 */
+/**
+ * 系統操作手冊分類代碼（選此分類才顯示關聯作業項目 func_name 下拉）。
+ *
+ * ⚠️ 這是**行為分支的 key**，不是清單資料。分類清單本身請用 `useCategoryOptions()` 向後端取
+ * （`DM_CATEGORY` 可由 DP 後台新增 / 改名 / 停用，寫死會與後台脫鉤——#483 第 1 項）。
+ */
 export const MANUAL_CATEGORY = "MANUAL"

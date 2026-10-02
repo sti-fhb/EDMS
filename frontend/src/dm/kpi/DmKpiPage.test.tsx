@@ -33,6 +33,19 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     expect(screen.getByText("—（無對應閱覽者）")).toBeInTheDocument()
   })
 
+  it("分類下拉取自後端：後台新增的分類也列得出來", async () => {
+    // 「院內公告」只存在於 API fixture，不在任何前端常數裡——此前本頁的分類下拉是寫死的
+    // 4 筆，後台新增的分類在這裡篩不到（#483 第 1 項）。
+    const user = userEvent.setup()
+    renderWithProviders(<DmKpiPage />)
+    await screen.findByText("領血確認標準作業程序")
+
+    await user.click(screen.getByRole("combobox", { name: "分類" }))
+
+    expect(await screen.findByRole("option", { name: "院內公告" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "標準作業程序" })).toBeInTheDocument()
+  })
+
   it("空結果 → 顯示 DM-MSG-DM06-001", async () => {
     server.use(
       http.get("/api/dm/kpi/documents", () =>

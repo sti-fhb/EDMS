@@ -30,6 +30,12 @@ export const libraryApi = {
     return data
   },
 
+  /** 文件分類下拉（啟用中）；DM01 / DM03 / DM06 共用。 */
+  categoryOptions: async (): Promise<ControlledOption[]> => {
+    const { data } = await http.get<ControlledOption[]>("/dm/library/category-options")
+    return data
+  },
+
   /** 系統操作手冊檢索之 func_name 下拉（啟用中）。 */
   funcOptions: async (): Promise<ControlledOption[]> => {
     const { data } = await http.get<ControlledOption[]>("/dm/library/func-options")

@@ -3,9 +3,9 @@
 // 開銷（#376）。⚠️ 日後若在本檔加入會發送請求的測試，請把這兩行拿掉：`http` 的
 // baseURL 是相對路徑 `/api`，node 環境沒有 document origin，axios 會改走 http
 // adapter 並以 `TypeError: Invalid URL` 失敗。
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { fromDateTimeLocalInput, toDateTimeLocalInput } from "./date"
+import { formatDateTimeTaipei, fromDateTimeLocalInput, toDateTimeLocalInput, todayTaipei } from "./date"
 
 describe("datetime-local 與 ISO 8601 轉換", () => {
   it("往返後回到原本的本地牆上時間", () => {
@@ -32,5 +32,69 @@ describe("datetime-local 與 ISO 8601 轉換", () => {
     expect(toDateTimeLocalInput("not-a-date")).toBe("")
     expect(fromDateTimeLocalInput("")).toBeNull()
     expect(fromDateTimeLocalInput("not-a-date")).toBeNull()
+  })
+})
+
+describe("formatDateTimeTaipei（稽核導向畫面）", () => {
+  it("不論執行環境時區，一律呈現台灣時間", () => {
+    // UTC 仍是 09/30、台灣已跨到 10/01。瀏覽器時區走 formatDateTime 時這裡會因機器而異，
+    // 稽核畫面必須與後端的台灣時間日界一致（#483）。
+    expect(formatDateTimeTaipei("2026-09-30T23:30:00Z")).toBe("2026/10/01 07:30")
+  })
+
+  it("台灣日界兩側", () => {
+    expect(formatDateTimeTaipei("2026-09-30T15:59:00Z")).toBe("2026/09/30 23:59")
+    expect(formatDateTimeTaipei("2026-09-30T16:00:00Z")).toBe("2026/10/01 00:00") // 非 24:00
+  })
+
+  it("與 formatDateTime 的格式一致（YYYY/MM/DD HH:mm）", () => {
+    expect(formatDateTimeTaipei("2026-10-01T04:05:00Z")).toMatch(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/)
+  })
+
+  it("分隔符為純 ASCII，不含 ICU 版本相依的特殊空白", () => {
+    // 用 `Intl.DateTimeFormat.format()` 組好的字串時，日期與時間之間的空白由 locale 資料決定：
+    // 本機 Node 給 ASCII 空格、GitHub CI 的 Node 給窄不斷行空格（U+202F），兩個字串肉眼一模一樣
+    // 卻不相等，於是本機全綠、CI 紅。改以 formatToParts 自行拼接後此事不再發生——這條守住它。
+    const out = formatDateTimeTaipei("2026-10-01T04:05:00Z")
+
+    expect([...out].every((c) => c.codePointAt(0)! < 128)).toBe(true)
+    expect(out).toBe("2026/10/01 12:05") // 字面量中的空白為 U+0020
+  })
+
+  it("空值與非法值回安全預設", () => {
+    expect(formatDateTimeTaipei(null)).toBe("—")
+    expect(formatDateTimeTaipei("")).toBe("—")
+    expect(formatDateTimeTaipei("not-a-date")).toBe("—")
+  })
+})
+
+describe("todayTaipei（日期選擇器上限）", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const at = (iso: string): string => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(iso))
+    return todayTaipei()
+  }
+
+  it("UTC 仍是前一天、台灣已跨日時回台灣的日期", () => {
+    // 原本的寫法 `new Date().toISOString().slice(0, 10)` 在此時點回 2026-09-30，
+    // 使日期選擇器的 max 停在昨天——台灣時間早上 8 點前選不到今天（#483 第 2 項）。
+    expect(at("2026-09-30T23:30:00Z")).toBe("2026-10-01")
+  })
+
+  it("台灣當日稍晚仍是同一天", () => {
+    expect(at("2026-10-01T15:30:00Z")).toBe("2026-10-01")
+  })
+
+  it("台灣日界剛過的瞬間即換日", () => {
+    expect(at("2026-10-01T15:59:59Z")).toBe("2026-10-01") // 台灣 23:59:59
+    expect(at("2026-10-01T16:00:00Z")).toBe("2026-10-02") // 台灣 00:00:00
+  })
+
+  it("格式為 YYYY-MM-DD（<input type=\"date\"> 可直接吃）", () => {
+    expect(at("2026-02-03T04:05:06Z")).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })

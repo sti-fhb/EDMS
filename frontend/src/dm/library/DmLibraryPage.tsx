@@ -16,20 +16,22 @@ import Typography from "@mui/material/Typography"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-import { DM_CATEGORIES, EMPTY_LIBRARY_FILTERS, MANUAL_CATEGORY } from "./schemas"
+import { EMPTY_LIBRARY_FILTERS, MANUAL_CATEGORY } from "./schemas"
 import type { ControlledOption, LibraryFilters } from "./schemas"
-import { useFuncOptions, useLibraryCapabilities, useLibrarySearch, useRetrievalTags } from "./useLibrary"
+import {
+  useCategoryOptions,
+  useFuncOptions,
+  useLibraryCapabilities,
+  useLibrarySearch,
+  useRetrievalTags,
+} from "./useLibrary"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
+import { todayTaipei } from "../../utils/date"
 
 const PAGE_SIZE = 20
 // 檢索標籤組代碼 → 分組標題（Autocomplete groupBy）
 const TAG_GROUP_LABELS: Record<string, string> = { MODULE: "適用模組", NATURE: "文件性質", LEGAL: "法規關聯" }
-
-/** 今日 yyyy-mm-dd（日期上限；發布日期不會是未來）。 */
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 /**
  * 文件庫與檢索（US3 / DM01）：多條件**即時**搜尋已發布目前版本（含廢止待簽核）→ 點列進詳細頁。
@@ -44,6 +46,7 @@ export function DmLibraryPage() {
   const [page, setPage] = useState(1)
 
   const { data: capabilities } = useLibraryCapabilities()
+  const { data: categoryOptions } = useCategoryOptions()
   const { data: tagOptions } = useRetrievalTags()
   const { data: funcOptions } = useFuncOptions(filters.category === MANUAL_CATEGORY)
   const { data, isPending, isError } = useLibrarySearch({ ...applied, page, limit: PAGE_SIZE })
@@ -87,9 +90,9 @@ export function DmLibraryPage() {
             onChange={(e) => onCategoryChange(e.target.value)}
           >
             <MenuItem value="">全部</MenuItem>
-            {DM_CATEGORIES.map((c) => (
+            {(categoryOptions ?? []).map((c) => (
               <MenuItem key={c.code} value={c.code}>
-                {c.label}
+                {c.name}
               </MenuItem>
             ))}
           </TextField>
@@ -141,7 +144,7 @@ export function DmLibraryPage() {
             size="small"
             type="date"
             label="發布日期 起"
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.dateTo || today() } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.dateTo || todayTaipei() } }}
             value={filters.dateFrom}
             onChange={(e) => setField("dateFrom", e.target.value)}
           />
@@ -149,7 +152,7 @@ export function DmLibraryPage() {
             size="small"
             type="date"
             label="發布日期 迄"
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.dateFrom || undefined, max: today() } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.dateFrom || undefined, max: todayTaipei() } }}
             value={filters.dateTo}
             onChange={(e) => setField("dateTo", e.target.value)}
           />

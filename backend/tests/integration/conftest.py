@@ -17,10 +17,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
+from app.core.db import create_app_engine
 
 # alembic.ini 位於 backend/ 目錄，使用絕對路徑避免工作目錄假設
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
@@ -180,8 +181,13 @@ def app_imported():
 
 @pytest.fixture(scope="session")
 async def test_engine(apply_migrations):
-    """Session 級別測試 engine（NullPool，不維持連線池）。"""
-    engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    """Session 級別測試 engine（NullPool，不維持連線池）。
+
+    ⚠️ 必須走 `create_app_engine`——自行呼叫 `create_async_engine` 會少掉全系統連線設定
+    （session timezone），使整合測試跑在**與正式環境不同的連線設定**上：日期相關的缺陷
+    因此在測試裡恆不可見（#483）。
+    """
+    engine = create_app_engine(settings.DATABASE_URL, poolclass=NullPool)
     yield engine
     await engine.dispose()
 

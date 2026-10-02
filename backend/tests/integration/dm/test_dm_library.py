@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
-from app.dm.catalog.models import DmFunc, DmTag
+from app.dm.catalog.models import DmCategory, DmFunc, DmTag
 from app.dm.deps import DmContext
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.library.schemas import DocumentQuery
@@ -323,6 +323,32 @@ async def test_audience_tag_id_not_usable_as_search_filter(db):
     await _seed_doc(db, doc_id="DM-SOP-000130", name="nurse-doc", audience_tags=["護理師"])
     nurse = await _audience_tag_id(db, "護理師")
     assert await _ids(db, tag_ids=[nurse]) == set()
+
+
+async def test_category_options_includes_admin_added_category(db):
+    """分類下拉取自 `DM_CATEGORY`，故管理者於 DP 後台新增的分類也會出現（#483 第 1 項）。
+
+    此前三個查詢頁（DM01 / DM03 / DM06）的下拉是前端寫死的 4 筆，新增分類後可用它建文件
+    卻篩不到——本條釘住「下拉來源是資料表而非常數」。
+    """
+    db.add(DmCategory(category_code="ZTNEW", category_name="測試新增分類", created_user="seed", created_date=utcnow()))
+    await db.flush()
+
+    opts = await _svc.list_category_options(db)
+
+    by_code = {o.code: o.name for o in opts}
+    assert by_code["ZTNEW"] == "測試新增分類"
+    assert {"SOP", "MANUAL", "TRAINING", "OTHER"} <= by_code.keys()  # 4 內建仍在
+    assert by_code["SOP"] == "標準作業程序"  # 名稱取自 DB，非前端常數的「SOP（標準作業程序）」
+
+
+async def test_category_options_exclude_disabled(db):
+    """停用的分類不入下拉（與 func / 檢索標籤一致：停用只影響後續搜尋，不動既有標記）。"""
+    category = await db.scalar(select(DmCategory).where(DmCategory.category_code == "OTHER"))
+    category.is_enabled = False
+    await db.flush()
+
+    assert "OTHER" not in {o.code for o in await _svc.list_category_options(db)}
 
 
 # ── 操作能力（新增文件入口）───────────────────────────────

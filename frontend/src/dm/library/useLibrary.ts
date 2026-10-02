@@ -9,6 +9,20 @@ export function useLibrarySearch(params: SearchParams) {
   return usePagedQuery(["dm-library", "documents", params], () => libraryApi.search(params))
 }
 
+/**
+ * 文件分類下拉（啟用中）。
+ *
+ * 分類是 DP 後台可新增 / 改名 / 停用的受控主檔，故必須向後端取；此前三個查詢頁各自用前端
+ * 寫死的 4 筆常數，後台新增的分類在查詢頁篩不到、改名後下拉與清單欄位顯示不一致（#483）。
+ * DM01 / DM03 / DM06 共用同一個 queryKey，三頁不會重複發 request。
+ *
+ * `enabled` 供僅限管理者的 DM03 / DM06 在無權限時關閉——那兩頁不渲染搜尋 UI，此時發請求只會
+ * 讓無任何 DM 角色者多收一個 403（比照同頁其他查詢的 `enabled: canAccess`）。
+ */
+export function useCategoryOptions(enabled = true) {
+  return useQuery({ queryKey: ["dm-library", "category-options"], queryFn: libraryApi.categoryOptions, enabled })
+}
+
 /** func_name 下拉（僅「系統操作手冊」分類需要時才啟用）。 */
 export function useFuncOptions(enabled: boolean) {
   return useQuery({ queryKey: ["dm-library", "func-options"], queryFn: libraryApi.funcOptions, enabled })
