@@ -124,9 +124,11 @@ export function ParamsPage() {
         key: "desc",
         title: "說明",
         // 用 || 而非 ??：說明清空後為空字串，也應回顯「—」
+        // 受控清單的說明由模組自報（見 ControlledKindView.description）——這裡不補
+        // 「模組受控清單」「標籤」這類字樣，那只是在複述左邊兩欄、對維護者沒有資訊。
         render: (_v, r) =>
           r.kind === "controlled"
-            ? (r.section.group_name ? r.section.name : "模組受控清單")
+            ? r.section.description || "—"
             : r.kind === "value"
               ? r.detail.description || "—"
               : r.master.description || "—",
