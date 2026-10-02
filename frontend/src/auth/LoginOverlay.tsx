@@ -134,13 +134,24 @@ export function LoginOverlay() {
                     {errorMessage}
                     {/*
                       #208：後端已不再區分「查無帳號」與「尚未驗證」（否則匿名者密碼隨便填即可
-                      列舉待驗證列，含「誰被邀請了」）。前端因此也**不能**靠 error code 決定顯示
-                      哪一條出路——只有使用者自己知道是哪一種，所以兩條並列，由本人選。
-                      兩者缺一即讓某一類使用者走進死路：缺註冊 → 逾期者被指向靜默不寄的重寄；
-                      缺重寄 → 剛註冊未收到信者只能重註冊。
+                      列舉待驗證列，含「誰被邀請了」）。前端因此也**不能**靠 error code 以外的
+                      條件決定顯示哪一條出路——只有使用者自己知道是哪一種，所以三條並列，由本人選。
+
+                      ⚠️ 三條缺一即讓某一類使用者走進死路：
+                        缺註冊     → 逾期者被指向靜默不寄的重寄
+                        缺重寄     → 剛註冊未收到信者只能重註冊
+                        缺下方小字 → 信已寄到但沒點的人不會想到去收信，只會一直按重寄而卡在冷卻
+
+                      #484 把後端主訊息縮為「帳號或密碼錯誤」後，**三條出路全部由這個區塊承擔**
+                      （後端 `_NO_ACCOUNT_MESSAGE` 的註解有對應說明）。小字必須與兩個連結同進退、
+                      不可另加顯示條件——那會重新開啟 #208 要擋的列舉面。
                     */}
                     {errorCode === "DP_AUTH_007" && (
-                      <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 2 }}>
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                          尚未完成驗證？請至信箱點選驗證連結。
+                        </Typography>
+                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
                         <Link component="button" type="button" underline="hover" onClick={() => setTab("register")}>
                           前往註冊
                         </Link>
@@ -155,7 +166,8 @@ export function LoginOverlay() {
                           {resendCoolingDown
                             ? `重寄驗證信（${formatCountdown(resendCooldown.remaining)} 後）`
                             : "重寄驗證信"}
-                        </Link>
+                          </Link>
+                        </Box>
                       </Box>
                     )}
                   </Alert>

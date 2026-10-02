@@ -1386,7 +1386,7 @@ function loginShowError(type) {
   if (!box || !txt) return;
   if (!type) { box.style.display = 'none'; txt.textContent = ''; return; }
   // no_account 涵蓋「未註冊 / 未驗證 / 已受邀 / 待驗證列逾期」四種狀態，文案刻意一致（#208）
-  var msgs = { 'no_account': '帳號或密碼錯誤。若尚未註冊請先註冊；若剛完成註冊，請至信箱點選驗證連結，未收到信可重新寄送', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請洽管理者或稍後再試', 'disabled': '帳號已停用，請洽管理者', 'rate_limited': '嘗試次數過多，請稍後再試' };
+  var msgs = { 'no_account': '帳號或密碼錯誤', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請洽管理者或稍後再試', 'disabled': '帳號已停用，請洽管理者', 'rate_limited': '嘗試次數過多，請稍後再試' };
   txt.textContent = msgs[type] || '登入失敗'; box.style.display = '';
 }
 function loginForgotPw()     { _loginShow('login-forgot-1'); }

@@ -1,6 +1,6 @@
 import { ThemeProvider } from "@mui/material/styles"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -17,7 +17,7 @@ import { muiTheme } from "../styles/muiTheme"
  * 四種帳號狀態（不存在 / 自助註冊未驗證 / 管理者已邀請 / 待驗證列逾期）共用它，
  * 所以測試裡也只該有這一個字串——若哪天出現第二個，就是後端又把回應分岔回去了。
  */
-const NEUTRAL_MESSAGE = "帳號或密碼錯誤。若尚未註冊請先註冊；若剛完成註冊，請至信箱點選驗證連結，未收到信可重新寄送"
+const NEUTRAL_MESSAGE = "帳號或密碼錯誤"
 
 function Harness() {
   const { isAuthenticated, mustChangePwd } = useAuth()
@@ -99,8 +99,11 @@ describe("LoginOverlay", () => {
     expect(screen.getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
   })
 
-  it("長訊息完整顯示、不被截斷（DP_AUTH_007 的中性訊息含三條指引）", async () => {
-    // 統一訊息比原本的「查無此帳號，請先註冊」長得多，Alert 內需完整呈現（#208 AC 5）。
+  it("DP_AUTH_007 仍同時給出三條自助出路（#484 縮短主訊息後，承重轉移到連結與小字）", async () => {
+    // #208 的要求是「三條出路同時在」，不是「寫在同一句話裡」——說話的人不知道對方是
+    // 哪一種帳號狀態（不存在 / 未驗證 / 已邀請 / 逾期），少任一條就有人走進死路。
+    // #484 把主訊息縮為「帳號或密碼錯誤」後，三條改由不同 UI 元素承擔，故改驗**出路存在**
+    // 而非比對單一字串——後者在承重轉移時只會逼人改字串，驗不到目的有沒有達成。
     server.use(
       http.post("/api/login", () =>
         HttpResponse.json({ error_code: "DP_AUTH_007", error_message: NEUTRAL_MESSAGE }, { status: 401 }),
@@ -109,9 +112,17 @@ describe("LoginOverlay", () => {
     renderLogin()
     await submitLogin()
     const alert = await screen.findByRole("alert")
-    expect(alert).toHaveTextContent("尚未註冊請先註冊")
+
+    expect(alert).toHaveTextContent("帳號或密碼錯誤")
+    // 出路 1 / 2：兩個可點的入口
+    expect(within(alert).getByRole("button", { name: "前往註冊" })).toBeInTheDocument()
+    expect(within(alert).getByRole("button", { name: "重寄驗證信" })).toBeInTheDocument()
+    // 出路 3：唯一沒有連結承接的一條，只能靠文字（#484 新增的小字）
     expect(alert).toHaveTextContent("請至信箱點選驗證連結")
-    expect(alert).toHaveTextContent("未收到信可重新寄送")
+
+    // 主訊息不應再夾帶另外兩條的說明文字（那是 #484 要移除的冗長部分）
+    expect(alert).not.toHaveTextContent("若尚未註冊請先註冊")
+    expect(alert).not.toHaveTextContent("未收到信可重新寄送")
   })
 
   it("須變更密碼 → 登入成功但進強制變更頁殼", async () => {
