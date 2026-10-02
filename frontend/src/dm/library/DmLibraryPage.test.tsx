@@ -34,6 +34,21 @@ describe("DmLibraryPage 文件庫", () => {
     expect(await screen.findByRole("combobox", { name: /關聯作業項目/ })).toBeInTheDocument()
   })
 
+  it("分類下拉取自後端：後台新增的分類也列得出來、名稱用 DB 值", async () => {
+    // 「院內公告」只存在於 API fixture，不在任何前端常數裡——此前下拉寫死 4 筆，後台新增的
+    // 分類可以拿來建文件卻在查詢頁篩不到（#483 第 1 項）。
+    const user = userEvent.setup()
+    renderWithProviders(<DmLibraryPage />)
+    await screen.findByText("領血確認標準作業程序")
+
+    await user.click(screen.getByRole("combobox", { name: "分類" }))
+
+    expect(await screen.findByRole("option", { name: "院內公告" })).toBeInTheDocument()
+    // 名稱取自 DB，不再是前端常數的「SOP（標準作業程序）」
+    expect(screen.getByRole("option", { name: "標準作業程序" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "SOP（標準作業程序）" })).not.toBeInTheDocument()
+  })
+
   it("檢索標籤下拉列出檢索標籤（供應 / 平時）", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmLibraryPage />)

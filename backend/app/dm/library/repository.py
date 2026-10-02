@@ -149,6 +149,33 @@ class LibraryRepository:
             result.setdefault(doc_id, []).append(tag_name)
         return result
 
+    async def list_category_options(self, db: AsyncSession) -> list[Row]:
+        """啟用中文件分類清單（三個查詢頁的分類下拉）。
+
+        分類為 DP 後台可新增 / 改名 / 停用之受控主檔，故下拉**必須查表**；前端寫死會讓後台
+        新增的分類篩不到、改名後與清單欄位顯示不一致（#483）。
+
+        **只列啟用中者是規格明訂的產品決策**，非疏漏：spec_us1 FR-001「停用後既有文件引用
+        100% 保留、僅影響後續新增 / 編輯**與搜尋之下拉選項**」、Acceptance Scenario 4 點名
+        「DM01 搜尋之下拉不再顯示該項」、訊息 `DM-MSG-DM09-003` 同義。代價是停用某分類後，
+        該分類既有文件無法再用分類篩選（清單欄位仍顯示其名稱）——與 `list_func_options` /
+        `list_retrieval_tags` 的既有行為一致。要改需先改 spec。
+
+        排序：內建 4 類在前（使用頻率最高、順序穩定），管理者自建者依代碼接在後面。
+
+        Args:
+            db: 資料庫 session。
+
+        Returns:
+            `(category_code, category_name)` 的 Row 清單。
+        """
+        stmt = (
+            select(DmCategory.category_code, DmCategory.category_name)
+            .where(DmCategory.is_enabled.is_(True))
+            .order_by(DmCategory.is_builtin.desc(), DmCategory.category_code)
+        )
+        return list((await db.execute(stmt)).all())
+
     async def list_func_options(self, db: AsyncSession) -> list[Row]:
         """啟用中 func_name 清單（系統操作手冊檢索下拉）。"""
         stmt = select(DmFunc.func_code, DmFunc.func_name).where(DmFunc.is_enabled.is_(True)).order_by(DmFunc.func_code)

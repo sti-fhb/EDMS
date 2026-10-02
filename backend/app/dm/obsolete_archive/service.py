@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResult
+from app.core.utils import format_taipei
 from app.dm.obsolete_archive.repository import ObsoleteArchiveRepository
 from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
 from app.dm.roles.authz import DM_ADMIN, has_role
@@ -84,7 +85,7 @@ class ObsoleteArchiveService:
 
     @staticmethod
     def _to_csv_row(r: Row) -> Sequence[str]:
-        obsolete_at = r.obsolete_date.strftime("%Y-%m-%d %H:%M") if r.obsolete_date else ""
+        obsolete_at = format_taipei(r.obsolete_date)
         # 含使用者自由輸入欄位（文件名 / 版號 / 廢止原因 / 姓名）→ 一律過公式注入防護（CWE-1236）
         return [
             sanitize_csv_cell(r.doc_id),

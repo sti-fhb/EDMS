@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResult
+from app.core.utils import format_taipei
 from app.dm.change_log.repository import ChangeLogRepository
 from app.dm.change_log.schemas import ChangeLogEntry, ChangeLogQuery
 from app.dm.roles.authz import DM_ADMIN, has_role
@@ -82,7 +83,7 @@ class ChangeLogService:
 
     @staticmethod
     def _to_csv_row(r: Row) -> Sequence[str]:
-        op_at = r.operation_time.strftime("%Y-%m-%d %H:%M") if r.operation_time else ""
+        op_at = format_taipei(r.operation_time)
         # 含使用者自由輸入欄位（姓名 / 文件名 / 版號 / 備註）→ 一律過公式注入防護（CWE-1236）
         return [
             op_at,

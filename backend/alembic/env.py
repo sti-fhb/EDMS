@@ -1,11 +1,9 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from alembic import context
 from app.core.config import settings
-from app.core.db import Base
+from app.core.db import Base, create_app_engine
 from app.dm.audience.models import DmUserTag  # noqa: F401
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup  # noqa: F401
 from app.dm.document.models import DmDocRead, DmDocTag, DmDocument, DmDocVersion  # noqa: F401
@@ -83,7 +81,9 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    engine = create_async_engine(settings.DATABASE_URL)
+    # 走與正式 / 測試同一個工廠：migration 的回填若用到 `date()` 等伺服端日期運算，
+    # 日界才會與應用層一致（#483）。
+    engine = create_app_engine(settings.DATABASE_URL)
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()
