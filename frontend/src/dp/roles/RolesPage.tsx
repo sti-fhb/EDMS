@@ -28,7 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import { MODULE_LABELS, MODULE_ROLES, rolesApi, sortModulesForTabs } from "./rolesService"
+import { MODULE_LABELS, MODULE_ROLES, groupDimensionLabel, rolesApi, sortModulesForTabs } from "./rolesService"
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
@@ -94,6 +94,8 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
   const [search, setSearch] = useState("")
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<AssignmentRow | null>(null)
+  // 群組維度的稱呼隨模組不同（DM 可見對象 / ET 受訓單位標籤），欄位標題與編輯視窗共用同一個值
+  const dimensionLabel = groupDimensionLabel(module)
 
   const { data } = useQuery({
     queryKey: ["roles", module, "assignments", { keyword: search, page }],
@@ -189,7 +191,7 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
                   {r.label}
                 </TableCell>
               ))}
-              <TableCell sx={{ width: "26%" }}>可見對象</TableCell>
+              <TableCell sx={{ width: "26%" }}>{dimensionLabel}</TableCell>
               <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
             </TableRow>
           </TableHead>
@@ -270,6 +272,7 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
         <GroupEditDialog
           row={editing}
           options={groupOptions ?? []}
+          dimensionLabel={dimensionLabel}
           onClose={() => setEditing(null)}
           onSave={(groups) => {
             assignMut.mutate({ userId: editing.user_id, roles: editing.roles, groups, source: "group" })
@@ -305,11 +308,14 @@ function groupLabel(value: string, options: GroupOption[] | undefined): string {
 function GroupEditDialog({
   row,
   options,
+  dimensionLabel,
   onClose,
   onSave,
 }: {
   row: AssignmentRow
   options: GroupOption[]
+  /** 群組維度之稱呼（DM 可見對象 / ET 受訓單位標籤），由呼叫端依模組傳入。 */
+  dimensionLabel: string
   onClose: () => void
   onSave: (groups: string[]) => void
 }) {
@@ -350,7 +356,7 @@ function GroupEditDialog({
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>編輯可見對象</DialogTitle>
+      <DialogTitle>編輯{dimensionLabel}</DialogTitle>
       <DialogContent>
         {options.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
@@ -401,7 +407,7 @@ function GroupEditDialog({
             })}
             <Box>
               <Button size="small" startIcon={<AddIcon />} onClick={addPair}>
-                新增可見對象
+                新增{dimensionLabel}
               </Button>
             </Box>
             {hasIncompleteNewPair && (
