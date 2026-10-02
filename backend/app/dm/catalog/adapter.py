@@ -33,6 +33,31 @@ _ALL_AUDIENCE_TAG = "全體"
 _UNIT = "UNIT"  # 單位標籤組（#437）；其 GROUP_TYPE 與 TAG_GROUP_CODE 同值
 _ALL_UNITS_TAG = "全單位"
 
+# 各受控清單於 DP 維護頁「說明」欄之內容。**只有 DM 寫得出這些句子**——它們講的是
+# 掛上之後文件會怎麼被看見 / 被檢索，屬 DM 業務語意（見 `ControlledKindView.description`）。
+_KIND_DESCRIPTIONS = {
+    "CATEGORY": "文件建檔時必選。",
+    "FUNC": "主系統作業功能代號。僅「系統操作手冊」類文件可標記，供文件庫依作業項目反查該作業的手冊。",
+    "TAG": "文件標籤庫。撰寫者只能從此挑選、不可自由輸入；不刪除，淘汰改停用。",
+}
+
+# 標籤組各自的說明。組由 `DM_TAG_GROUP` 資料決定，故以組代碼對照；
+# 管理者自建的組查不到對照，由 DP 退回 `TAG` 的 kind 層說明。
+_TAG_GROUP_DESCRIPTIONS = {
+    _UNIT: "可見對象的一半。與「職位」組成（單位, 職位）配對；文件掛「全單位」表示不限單位。",
+    _AUDIENCE: (
+        "可見對象的另一半。文件與閱覽者皆以（單位, 職位）配對授權，閱覽者只看得到配對相符、或掛「全體」的文件。"
+    ),
+    "LEGAL": "檢索用標籤，標示文件依據的法規來源。僅供文件庫篩選，不影響誰看得到。",
+    "MODULE": "檢索用標籤，標示文件適用的主系統模組。僅供文件庫篩選，不影響誰看得到。",
+    "NATURE": "檢索用標籤，標示文件的適用情境（平時 / 緊急 / 戰時）。僅供文件庫篩選，不影響誰看得到。",
+}
+
+# 分區順序：可見對象的兩維度排在最前且**單位在職位之前**——與（單位, 職位）的配對書寫順序
+# 一致，維護者由上往下讀才對得起來。其餘（檢索標籤）按代碼排，加入新組時位置可預期。
+_GROUP_ORDER = {_UNIT: 0, _AUDIENCE: 1}
+_GROUP_ORDER_DEFAULT = 9
+
 
 class CatalogAdapter:
     """受控主檔維護轉接層（§3.1）；分類委派 CatalogService，func / tag 於此落地。
@@ -52,15 +77,38 @@ class CatalogAdapter:
         `DM_TAG_GROUP.TAG_GROUP_NAME`**——標籤組可由資料異動，DP 硬編碼會與實際不符。
         `requires_code`：分類 / 作業項目之代碼由管理者指定且建立後鎖定，故新增表單需代碼欄；
         標籤之 `code` 為「所屬標籤組」、由 DP 自當前分區帶入，非使用者輸入。
+
+        `description` 取自本模組的 `_KIND_DESCRIPTIONS` / `_TAG_GROUP_DESCRIPTIONS`——
+        組名（「職位」「法規關聯」）說不出「掛了會怎樣」，而那正是維護者要知道的事。
+        自建標籤組查無對照時留空，由 DP 退回 kind 層說明。
+
+        分區順序見 `_GROUP_ORDER`：排序在**應用層**而非 SQL，因為它表達的是畫面上的閱讀
+        順序（可見對象兩維度優先、單位在職位之前），不是資料的自然順序。
         """
         rows = (
             await db.execute(select(DmTagGroup).where(DmTagGroup.deleted == 0).order_by(DmTagGroup.tag_group_code))
         ).scalars()
-        groups = tuple(ControlledGroupView(code=g.tag_group_code, name=g.tag_group_name) for g in rows)
+        ordered = sorted(
+            rows, key=lambda g: (_GROUP_ORDER.get(g.tag_group_code, _GROUP_ORDER_DEFAULT), g.tag_group_code)
+        )
+        groups = tuple(
+            ControlledGroupView(
+                code=g.tag_group_code,
+                name=g.tag_group_name,
+                description=_TAG_GROUP_DESCRIPTIONS.get(g.tag_group_code, ""),
+            )
+            for g in ordered
+        )
         return [
-            ControlledKindView(kind="CATEGORY", name="文件分類", requires_code=True),
-            ControlledKindView(kind="FUNC", name="關聯作業項目", requires_code=True),
-            ControlledKindView(kind="TAG", name="標籤", requires_code=False, groups=groups),
+            ControlledKindView(
+                kind="CATEGORY", name="文件分類", requires_code=True, description=_KIND_DESCRIPTIONS["CATEGORY"]
+            ),
+            ControlledKindView(
+                kind="FUNC", name="關聯作業項目", requires_code=True, description=_KIND_DESCRIPTIONS["FUNC"]
+            ),
+            ControlledKindView(
+                kind="TAG", name="標籤", requires_code=False, description=_KIND_DESCRIPTIONS["TAG"], groups=groups
+            ),
         ]
 
     async def list_controlled(

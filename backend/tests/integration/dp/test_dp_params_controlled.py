@@ -88,6 +88,38 @@ async def test_dm管理者可見三類受控清單且標籤依組分區(db, admi
     assert all(s.group_code is None for s in sections if s.module == "DM" and s.kind != "TAG")
 
 
+async def test_標籤分區順序_單位與職位在最前且單位在前(db, admin_gate):
+    """分區順序即畫面由上往下的順序，由模組決定、DP 不重排。
+
+    單位在職位之前，與（單位, 職位）的配對書寫順序一致——兩者相鄰且同序，維護者才對得起來。
+    """
+    admin_gate(dm_admins=("dmadmin",))
+
+    sections = await ControlledAdminService().list_visible(db, "dmadmin")
+
+    tag_codes = [s.group_code for s in sections if s.module == "DM" and s.kind == "TAG"]
+    assert tag_codes[:2] == ["UNIT", "AUDIENCE"], f"可見對象兩維度未排在最前或順序相反：{tag_codes}"
+
+
+async def test_各分區帶模組自報之用途說明且分組覆蓋kind層(db, admin_gate):
+    """說明由模組自報並原樣帶到回應；標籤組有自己的說明時覆蓋 kind 層的。
+
+    只驗接線與覆蓋關係，**不斷言文案內容**——那是模組可自行修訂的文字，寫死在這裡
+    等於每改一次措辭就紅一條，而它並不保護任何行為。
+    """
+    admin_gate(et_admins=("both",), dm_admins=("both",))
+
+    sections = await ControlledAdminService().list_visible(db, "both")
+
+    assert all(s.description for s in sections), "每個分區都要有說明，否則維護頁該欄留白"
+
+    tag_sections = {s.group_code: s for s in sections if s.module == "DM" and s.kind == "TAG"}
+    audience, legal = tag_sections["AUDIENCE"], tag_sections["LEGAL"]
+    assert audience.description != legal.description, (
+        "同屬 TAG 的兩組說明相同，表示退回了 kind 層——分組說明沒有被帶出來"
+    )
+
+
 async def test_模組過濾_et管理者看不到dm受控清單(db, admin_gate):
     """A-strict：模組級項僅該模組管理者可見（伺服器端 enforce，非僅前端過濾）。"""
     admin_gate(et_admins=("etadmin",))
