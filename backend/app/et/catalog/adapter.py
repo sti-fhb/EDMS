@@ -33,6 +33,11 @@ _MODULE = "ET"
 _KIND_TAG = "TAG"
 # DP 後台之區塊顯示名——名稱權威在模組，DP 不硬編碼模組語彙
 _KIND_TAG_LABEL = "受訓單位標籤"
+# 維護頁「說明」欄：講掛上之後會發生什麼，不複述名稱
+_KIND_TAG_DESCRIPTION = (
+    "課程的受訓對象。課程發布時依此標籤自動把對應學員加入課程並寄發通知；"
+    "學員身上的標籤於「權限管理」指派。停用後不可再掛至新課程，已掛的課程不受影響。"
+)
 _MAX_BIGINT = 9_223_372_036_854_775_807
 # 對應 ET_TAG.TAG_NAME 之 VARCHAR(50)
 _MAX_TAG_NAME_LEN = 50
@@ -69,7 +74,11 @@ class EtCatalogAdapter:
         靜態宣告、**不查 DB**（`db` 僅為符合 Protocol 簽章）。`requires_code=False`——
         `TAG_ID` 由 Identity 配號，新增時 `code` 由 ET 忽略、不需使用者輸入。
         """
-        return [ControlledKindView(kind=_KIND_TAG, name=_KIND_TAG_LABEL, requires_code=False)]
+        return [
+            ControlledKindView(
+                kind=_KIND_TAG, name=_KIND_TAG_LABEL, requires_code=False, description=_KIND_TAG_DESCRIPTION
+            )
+        ]
 
     async def list_controlled(
         self, db: AsyncSession, kind: str, *, enabled_only: bool = False

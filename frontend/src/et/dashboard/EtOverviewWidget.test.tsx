@@ -125,8 +125,8 @@ describe("首頁教育訓練概況", () => {
     renderWithProviders(<EtOverviewWidget enabled />)
 
     await screen.findByText("全體訓練概況")
-    // ⚠️ 不可用 /單位/ 查——那會先抓到區塊標題「各單位達成率（低者在前）」。
     // ⚠️ 不可用 /課程/ 查——那會先抓到區塊標題「各課程完成率（低者在前）」。
+    // 改查 /分課程/：那兩個字只出現在 fixture 的課程名（低分課程 / 高分課程）裡，標題沒有。
     const rows = screen.getAllByText(/分課程/).map((el) => el.textContent ?? "")
     expect(rows.map((t) => t.replace(/[^一-鿿]/g, ""))).toEqual([
       "低分課程人",

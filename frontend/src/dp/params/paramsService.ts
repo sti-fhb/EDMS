@@ -61,6 +61,8 @@ export interface ControlledSection {
   name: string
   /** true＝新增時需使用者輸入代碼（DM 分類 / 作業項目）；false＝模組自行配號或由分區帶入。 */
   requires_code: boolean
+  /** 用途說明（由模組自報）。管理者自建的分組可能為 null。 */
+  description: string | null
   group_code: string | null
   group_name: string | null
   items: ControlledItem[]
