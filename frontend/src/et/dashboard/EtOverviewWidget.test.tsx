@@ -41,12 +41,13 @@ const ADMIN = {
 }
 
 describe("首頁教育訓練概況", () => {
-  it("三張卡皆有資料時依「管理者 → 教師 → 學員」順序呈現（#89 決策 3）", async () => {
+  it("三張卡皆有資料時依「學員 → 管理者 → 教師」順序呈現（2026-10-02 裁示）", async () => {
+    // ⚠️ 與 #89 決策 3 的建議（由廣到窄）**刻意相反**：裁示把「自己要學什麼」放最前面。
     renderWithProviders(<EtOverviewWidget enabled />)
 
     await screen.findByText("ET 教育訓練概況")
     const titles = screen.getAllByText(/全體訓練概況|我的課程待辦|我的學習概況/).map((el) => el.textContent)
-    expect(titles).toEqual(["全體訓練概況", "我的課程待辦", "我的學習概況"])
+    expect(titles).toEqual(["我的學習概況", "全體訓練概況", "我的課程待辦"])
   })
 
   /**
@@ -132,30 +133,64 @@ describe("首頁教育訓練概況", () => {
   })
 
   describe("版面與數字呈現（2026-10-02 手測裁示）", () => {
-    it("三塊各自在不同的白底卡上，不共用一張", async () => {
+    it("學員卡自己一張，管理者與教師同一張（2026-10-02 裁示）", async () => {
       renderWithProviders(<EtOverviewWidget enabled />)
 
       await screen.findByText("全體訓練概況")
-      const papers = ["全體訓練概況", "我的課程待辦", "我的學習概況"].map((title) =>
+      const [studentCard, adminCard, teacherCard] = ["我的學習概況", "全體訓練概況", "我的課程待辦"].map((title) =>
         screen.getByText(title).closest(".MuiPaper-root"),
       )
-      expect(papers.every((p) => p !== null)).toBe(true)
-      // 三個不同的節點＝三張卡。共用一張時這裡會是 1。
-      expect(new Set(papers).size).toBe(3)
+      expect(studentCard).not.toBeNull()
+      // 兩個斷言成對：缺前者則三塊同卡也通過，缺後者則三塊各自一卡也通過。
+      expect(adminCard).toBe(teacherCard)
+      expect(studentCard).not.toBe(adminCard)
     })
 
-    it("區塊標題下方有分隔線", async () => {
+    it("管理者與教師都沒有資料時不留一張空白卡", async () => {
+      // 🔴 第二張卡是 `(admin || teacher) &&` 渲染的。少了那個條件，只有學員資料的人
+      // 會在下方多一塊有陰影、卻什麼都沒有的白色方塊。
+      const served = mockDashboard({
+        student: { joined: 1, in_progress: 1, not_started: 0, completed: 0, pending_open: 0 },
+      })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await waitFor(() => expect(served.responded).toBe(true))
+      await screen.findByText("我的學習概況")
+      const cards = document.querySelectorAll(".MuiPaper-root:not(.MuiPaper-outlined)")
+      expect(cards.length).toBe(1)
+    })
+
+    it("學員卡標題下方不畫分隔線，另外兩塊畫", async () => {
       renderWithProviders(<EtOverviewWidget enabled />)
 
       await screen.findByText("全體訓練概況")
-      const paper = screen.getByText("全體訓練概況").closest(".MuiPaper-root")
-      expect(paper?.querySelector(".MuiDivider-root")).not.toBeNull()
+      const studentCard = screen.getByText("我的學習概況").closest(".MuiPaper-root")
+      expect(studentCard?.querySelector(".MuiDivider-root")).toBeNull()
+      // 成對：少了這條，把分隔線整個拿掉也會通過上一句。
+      const sharedCard = screen.getByText("全體訓練概況").closest(".MuiPaper-root")
+      expect(sharedCard?.querySelector(".MuiDivider-root")).not.toBeNull()
     })
 
-    it("「全體訓練概況」後面帶灰色小字註記", async () => {
+    it("教師卡有「前往課程列表」連結", async () => {
       renderWithProviders(<EtOverviewWidget enabled />)
 
-      expect(await screen.findByText("各課程完成率")).toBeInTheDocument()
+      expect(await screen.findByRole("button", { name: "前往課程列表" })).toBeInTheDocument()
+    })
+
+    it("表格欄位名為「課程 / 完成人數 / 完成率」", async () => {
+      mockDashboard({ admin: ADMIN })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await screen.findByText("全體訓練概況")
+      expect(screen.getByRole("columnheader", { name: "課程" })).toBeInTheDocument()
+      expect(screen.getByRole("columnheader", { name: "完成人數" })).toBeInTheDocument()
+      expect(screen.getByRole("columnheader", { name: "完成率" })).toBeInTheDocument()
+    })
+
+    it("「全體訓練概況」後面帶灰色小字註記（帶全形括號）", async () => {
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      expect(await screen.findByText("（各課程完成率）")).toBeInTheDocument()
     })
 
     it("完成率顯示為整數，不帶小數", async () => {
