@@ -439,6 +439,27 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     expect(screen.getByLabelText("新增名稱")).toBeInTheDocument()
   })
 
+  it("標籤類（不需代碼）不顯示系統配號，欄位標籤只寫「名稱」", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    // 標籤類：流水 ID「11」對使用者無意義，不出現；欄位以名稱定位、標籤只寫「名稱」
+    await openControlledRow(user, "AUDIENCE")
+    const field = screen.getByLabelText("護理師 名稱")
+    expect(field).toHaveValue("護理師")
+    expect(screen.queryByText("11")).not.toBeInTheDocument()
+    expect(screen.queryByText("11 名稱")).not.toBeInTheDocument()
+    expect(screen.getAllByText("名稱").length).toBeGreaterThan(0)
+
+    // 對照組（同一查詢方式）：需代碼之分區仍顯示代碼——否則上面的「不出現」可能只是根本沒渲染
+    await user.click(screen.getByRole("button", { name: "關閉" }))
+    await openControlledRow(user, "CATEGORY")
+    expect(screen.getByText("SOP")).toBeInTheDocument()
+    expect(screen.getByLabelText("SOP 名稱")).toBeInTheDocument()
+  })
+
   it("停用受控項需先確認，成功後提示受影響數以「至少」表述", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
