@@ -30,6 +30,16 @@ function mockDashboard(body: Record<string, unknown>) {
 
 const EMPTY_STUDENT = { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }
 
+/** 兩門課、完成率一低一高；含 `course_id`（同名課程不合併，前端以它當 key）。 */
+const ADMIN = {
+  overdue_incomplete: 0,
+  completion_rate: "50.00",
+  by_course: [
+    { course_id: 101, course_name: "低分課程", enrolled: 2, completed: 0, completion_rate: "0.00" },
+    { course_id: 102, course_name: "高分課程", enrolled: 2, completed: 2, completion_rate: "100.00" },
+  ],
+}
+
 describe("首頁教育訓練概況", () => {
   it("三張卡皆有資料時依「管理者 → 教師 → 學員」順序呈現（#89 決策 3）", async () => {
     renderWithProviders(<EtOverviewWidget enabled />)
@@ -112,25 +122,101 @@ describe("首頁教育訓練概況", () => {
   })
 
   it("管理者卡的各課程依後端給的順序呈現，前端不重排", async () => {
-    mockDashboard({
-      admin: {
-        overdue_incomplete: 0,
-        completion_rate: "50.00",
-        by_course: [
-          { course_name: "低分課程", enrolled: 2, completed: 0, completion_rate: "0.00" },
-          { course_name: "高分課程", enrolled: 2, completed: 2, completion_rate: "100.00" },
-        ],
-      },
-    })
+    mockDashboard({ admin: ADMIN })
     renderWithProviders(<EtOverviewWidget enabled />)
 
     await screen.findByText("全體訓練概況")
-    // ⚠️ 不可用 /課程/ 查——那會先抓到區塊標題「各課程完成率（低者在前）」。
-    // 改查 /分課程/：那兩個字只出現在 fixture 的課程名（低分課程 / 高分課程）裡，標題沒有。
-    const rows = screen.getAllByText(/分課程/).map((el) => el.textContent ?? "")
-    expect(rows.map((t) => t.replace(/[^一-鿿]/g, ""))).toEqual([
-      "低分課程人",
-      "高分課程人",
-    ])
+    // ⚠️ 不可用 /課程/ 查——那會先抓到區塊標題的註記「各課程完成率」。
+    // 改查 /分課程/：那兩個字只出現在 fixture 的課程名（低分課程 / 高分課程）裡。
+    expect(screen.getAllByText(/分課程/).map((el) => el.textContent)).toEqual(["低分課程", "高分課程"])
+  })
+
+  describe("版面與數字呈現（2026-10-02 手測裁示）", () => {
+    it("三塊各自在不同的白底卡上，不共用一張", async () => {
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await screen.findByText("全體訓練概況")
+      const papers = ["全體訓練概況", "我的課程待辦", "我的學習概況"].map((title) =>
+        screen.getByText(title).closest(".MuiPaper-root"),
+      )
+      expect(papers.every((p) => p !== null)).toBe(true)
+      // 三個不同的節點＝三張卡。共用一張時這裡會是 1。
+      expect(new Set(papers).size).toBe(3)
+    })
+
+    it("區塊標題下方有分隔線", async () => {
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await screen.findByText("全體訓練概況")
+      const paper = screen.getByText("全體訓練概況").closest(".MuiPaper-root")
+      expect(paper?.querySelector(".MuiDivider-root")).not.toBeNull()
+    })
+
+    it("「全體訓練概況」後面帶灰色小字註記", async () => {
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      expect(await screen.findByText("各課程完成率")).toBeInTheDocument()
+    })
+
+    it("完成率顯示為整數，不帶小數", async () => {
+      mockDashboard({ admin: ADMIN })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await screen.findByText("全體訓練概況")
+      expect(screen.getByText("0%")).toBeInTheDocument()
+      expect(screen.getByText("100%")).toBeInTheDocument()
+      expect(screen.queryByText(/\d\.\d/)).not.toBeInTheDocument()
+    })
+
+    it("🔴 取整數是無條件捨去——99.6% 不可顯示成 100%", async () => {
+      // 四捨五入會讓管理者以為那門課全部完訓、停止催辦。與下一條成對：
+      // 只有這條的話，把實作寫成「一律捨去到 0」也會通過。
+      mockDashboard({
+        admin: {
+          overdue_incomplete: 0,
+          completion_rate: "99.60",
+          by_course: [{ course_id: 1, course_name: "快完成的課", enrolled: 250, completed: 249, completion_rate: "99.60" }],
+        },
+      })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await screen.findByText("全體訓練概況")
+      expect(screen.getAllByText("99%").length).toBeGreaterThan(0)
+      expect(screen.queryByText("100%")).not.toBeInTheDocument()
+    })
+
+    it("真正的 100% 仍顯示 100%", async () => {
+      mockDashboard({
+        admin: {
+          overdue_incomplete: 0,
+          completion_rate: "100.00",
+          by_course: [{ course_id: 1, course_name: "全員完訓", enrolled: 3, completed: 3, completion_rate: "100.00" }],
+        },
+      })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await screen.findByText("全體訓練概況")
+      expect(screen.getAllByText("100%").length).toBeGreaterThan(0)
+    })
+
+    it("不再顯示「逾期未完成」", async () => {
+      const served = mockDashboard({ admin: { ...ADMIN, overdue_incomplete: 7 } })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await waitFor(() => expect(served.responded).toBe(true))
+      await screen.findByText("全體訓練概況") // 正向錨點：卡片確實渲染了
+      expect(screen.queryByText("逾期未完成")).not.toBeInTheDocument()
+    })
+
+    it("只有逾期、一門課都沒有時不渲染管理者卡（不留空表格）", async () => {
+      // 🔴 與上一條成對。拿掉畫面上的「逾期未完成」之後，`hasAdminData` 若仍保留
+      // `|| overdue_incomplete > 0`，這種資料會渲染出一張只有表頭、沒有任何列的表格。
+      const served = mockDashboard({ admin: { overdue_incomplete: 7, completion_rate: "0.00", by_course: [] } })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await waitFor(() => expect(served.responded).toBe(true))
+      expect(screen.queryByText("全體訓練概況")).not.toBeInTheDocument()
+      expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument()
+    })
   })
 })
