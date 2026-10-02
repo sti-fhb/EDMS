@@ -25,6 +25,12 @@ export interface TeacherCard {
 
 /** 管理者卡的一列：一門課程的完成狀況（#475，原為受訓單位）。 */
 export interface CourseRate {
+  /**
+   * ⚠️ **必須有**：後端以 `(course_id, course_name)` 分組，同名課程刻意不合併（不同
+   * 年度的年度訓練）。以 `course_name` 當 React key 會撞號——症狀是改動一列時另一列
+   * 跟著變，且不會有任何錯誤訊息。
+   */
+  course_id: number
   course_name: string
   enrolled: number
   completed: number
@@ -72,10 +78,16 @@ export function hasTeacherData(card: TeacherCard | null): card is TeacherCard {
 /**
  * 管理者卡：全站連一門有人的課程都沒有時不渲染。
  *
- * ⚠️ 單看 `overdue_incomplete` 不對——它在「一切正常」時為 0，而那時管理者仍該看到
- * 完成率。改為課程分組後 `by_course` 的空集合意義也更明確了（#453 時是「有人但都
- * 沒貼單位標籤」也會空，課程不會有那個狀態）。兩者聯集皆空才是真的無事可看。
+ * ## 🔴 判定只看 `by_course`——**因為畫面只畫 `by_course`**
+ *
+ * 2026-10-02 起「逾期未完成」不再顯示（手測裁示）。若這裡仍保留
+ * `|| card.overdue_incomplete > 0`，「有逾期但一門課都沒有」會渲染出一張**空表格**
+ * ——標題與表頭都在、底下一列都沒有。
+ *
+ * ⛔ **渲染條件必須只看實際會被畫出來的欄位。** 判定與畫面各自演進是空卡的來源，
+ * 而空卡不會報錯，只是看起來像壞了。`AdminCard.overdue_incomplete` 的 docstring
+ * 有對應的提醒，改動任一側時兩邊要一起看。
  */
 export function hasAdminData(card: AdminCard | null): card is AdminCard {
-  return card !== null && (card.by_course.length > 0 || card.overdue_incomplete > 0)
+  return card !== null && card.by_course.length > 0
 }

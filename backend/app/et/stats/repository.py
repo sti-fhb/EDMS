@@ -239,8 +239,14 @@ class EtStatsRepository:
         ).one()
         return int(row.enrolled), int(row.completed), int(row.overdue)
 
-    async def course_rates(self, db: AsyncSession, now: datetime) -> list[tuple[str, int, int]]:
-        """依**課程**分組之 `(課程名稱, 在籍人次, 已完課人次)`（#475）。
+    async def course_rates(self, db: AsyncSession, now: datetime) -> list[tuple[int, str, int, int]]:
+        """依**課程**分組之 `(課程 ID, 課程名稱, 在籍人次, 已完課人次)`（#475）。
+
+        ## ⚠️ `course_id` 必須回出去，即使呼叫端只想顯示名稱
+
+        分組鍵是 `(course_id, course_name)`——**同名課程刻意不合併**（見下方）。只回名稱
+        的話，那兩列在呼叫端就無法區分：前端以名稱當 React key 會撞號，而撞號的症狀是
+        改動一列時另一列跟著變，不會有任何錯誤訊息。
 
         ## 與 `_completion_base` 的關係：這裡沒有任何一對多
 
@@ -263,6 +269,7 @@ class EtStatsRepository:
         base = self._completion_base(now).subquery()
         rows = await db.execute(
             select(
+                base.c.course_id,
                 base.c.course_name,
                 func.count().label("enrolled"),
                 func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
@@ -272,7 +279,7 @@ class EtStatsRepository:
             # 用名稱分組會把它們合併成一列，數字偏大且看起來合理。
             .group_by(base.c.course_id, base.c.course_name)
         )
-        return [(r.course_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
+        return [(int(r.course_id), r.course_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
 
     async def previous_avg_progress(self, db: AsyncSession, *, course_id: int, before: date) -> Decimal | None:
         """該課程**在 `before` 之前**最近一次快照的平均進度；沒有則 `None`（AC 5 的「—」）。

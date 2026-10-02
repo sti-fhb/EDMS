@@ -150,14 +150,17 @@ class EtStatsService:
         enrolled, completed, overdue = await self._repo.overall_completion(db, now)
         courses = [
             CourseRate(
+                course_id=course_id,
                 course_name=name,
                 enrolled=course_enrolled,
                 completed=course_completed,
                 completion_rate=percent(course_completed, course_enrolled),
             )
-            for name, course_enrolled, course_completed in await self._repo.course_rates(db, now)
+            for course_id, name, course_enrolled, course_completed in await self._repo.course_rates(db, now)
         ]
-        courses.sort(key=lambda c: (c.completion_rate, c.course_name))
+        # 第三鍵 `course_id`：同名且同完成率的兩門課（不同年度的年度訓練都 0%）否則
+        # 順序由 DB 決定，每次查詢可能不同——畫面會「自己動」而沒有人改過任何資料。
+        courses.sort(key=lambda c: (c.completion_rate, c.course_name, c.course_id))
         return AdminCard(
             overdue_incomplete=overdue,
             completion_rate=percent(completed, enrolled),

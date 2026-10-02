@@ -127,8 +127,8 @@ export const handlers = [
         overdue_incomplete: 4,
         completion_rate: "62.50",
         by_course: [
-          { course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
-          { course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },
+          { course_id: 21, course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
+          { course_id: 11, course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },
         ],
       },
     }),
