@@ -138,7 +138,7 @@ class EtStatsService:
         return TeacherCard(ending_soon=lines, draft_count=await self._repo.draft_count(db, owner_id))
 
     async def admin_card(self, db: AsyncSession, *, now: datetime | None = None) -> AdminCard:
-        """管理者卡：全站逾期未完課、整體完成率、各單位達成率。
+        """管理者卡：全站逾期未完課、整體完成率、**各課程**完成率。
 
         兩支查詢共用 `_completion_base`（全站「每筆在籍 × 是否完課」），故整體與分課程
         的完課定義**不可能分歧**——分開寫兩份推導才是分歧的來源。
