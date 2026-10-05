@@ -60,10 +60,10 @@ describe("SchedulePage 排程作業總覽（可編輯）", () => {
 
     await screen.findByText(/SCHDP001/)
     expect(screen.getByRole("columnheader", { name: "執行時點" })).toBeInTheDocument()
-    expect(screen.getByText("每日 08:00 UTC")).toBeInTheDocument()
+    expect(screen.getByText("每日 08:00")).toBeInTheDocument()
     // `0 10 * * 0` 是**週一**——APScheduler 的 from_crontab 以週一為 0。照標準 crontab
     // 讀成週日的話這裡會紅，而那正是畫面與實際觸發日差一天的形狀。
-    expect(screen.getByText("每週一 10:00 UTC")).toBeInTheDocument()
+    expect(screen.getByText("每週一 10:00")).toBeInTheDocument()
 
     // 說明欄只剩職責：整列文字裡不得再出現時鐘時間
     const descriptions = screen.getAllByText(/停用連續閒置超過|寫入開放中課程/)
