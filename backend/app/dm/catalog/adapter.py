@@ -36,6 +36,9 @@ _ALL_UNITS_TAG = "全單位"
 # 標籤名稱在組內重複（`UQ_DM_TAG_GROUP_NAME`）。沿用 `DM_CATALOG_001`——它是 DM 的 409「已存在」
 # 碼，與 ET 的 `ET_TAG_002` 對應；但登記訊息寫的是「代碼」，故此處另給貼合名稱情境的文字。
 _DUP_TAG_NAME_MSG = "此標籤名稱在該組已存在"
+# 組內名稱唯一約束之名稱（`models.py` 的 `UniqueConstraint`）。`_flush_catching_duplicate`
+# 以它辨識「這個 IntegrityError 是不是名稱重複」，不是就原樣往外，不冒名頂替。
+_TAG_NAME_CONSTRAINT = "UQ_DM_TAG_GROUP_NAME"
 
 # 各受控清單於 DP 維護頁「說明」欄之內容。**只有 DM 寫得出這些句子**——它們講的是
 # 掛上之後文件會怎麼被看見 / 被檢索，屬 DM 業務語意（見 `ControlledKindView.description`）。
@@ -338,18 +341,27 @@ async def _ensure_tag_name_free(
 
 
 async def _flush_catching_duplicate(db: AsyncSession) -> None:
-    """flush，並把撞唯一鍵的 `IntegrityError` 轉成乾淨的 409。
+    """flush，並**只**把撞 `UQ_DM_TAG_GROUP_NAME` 的 `IntegrityError` 轉成乾淨的 409。
 
     `_ensure_tag_name_free` 與本次 flush 之間有 TOCTOU 空窗：兩位管理者同時送出同名標籤時，
     兩邊的檢核都會通過，後寫入的那邊撞唯一鍵。比照 `dp/params/service.py` 的 `create_detail`
-    兜底（否則落全域 500），交由 `get_db` rollback。
+    兜底（否則落全域 500），交由 `get_db` rollback（它對任何例外都 rollback 後 re-raise）。
 
-    ⚠️ **這道無法以測試覆蓋**——需要真實並發才觸發。留著是因為少了它，本 issue 要修的那個
-    500 只是從「必然」縮成「偶發」，而偶發的 500 更難被發現。
+    ⚠️ **只認那一個約束，其餘原樣往外拋**：`except IntegrityError` 全收會把 FK / NOT NULL /
+    長度超限等**未預期的缺陷**一律標成「名稱重複」——使用者看到的 409 訊息是錯的，真正的
+    原因被吞掉。未預期的錯誤本來就該以 500 現形，那是它被發現的唯一途徑。
+    （`create_detail` 的情境是單一 PK，全收不會誤判，故「比照」只成立一半。）
+
+    ⚠️ 併發那條路**無法以測試覆蓋**（需要真實並發）；但「只認這個約束」這件事可以，
+    見 `tests/unit/dm/test_dm_catalog_flush_guard.py`。
     """
     try:
         await db.flush()
     except IntegrityError as exc:
+        # asyncpg 的錯誤經 SQLAlchemy 包裝後不保留 `constraint_name` 屬性，只能比對訊息字串；
+        # 約束名是 DDL 寫死的常數（見 `models.py` 的 `UniqueConstraint`），不隨資料變動。
+        if _TAG_NAME_CONSTRAINT not in str(exc.orig):
+            raise
         raise AppError(status_code=409, detail=_DUP_TAG_NAME_MSG, error_code="DM_CATALOG_001") from exc
 
 
