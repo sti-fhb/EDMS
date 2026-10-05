@@ -5,6 +5,7 @@ import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { paramsApi } from "./paramsService"
+import { TOGGLE_OFF_CONTENT, TOGGLE_OFF_OK, TOGGLE_OFF_TITLE } from "./toggleMessages"
 import type { DetailCreatePayload, DetailUpdatePayload, ParamMaster } from "./paramsService"
 
 const _SAVED_MSG = "已儲存並即時生效"
@@ -63,18 +64,31 @@ export function useParams() {
     [message, confirm, invalidate],
   )
 
-  /** 啟用 / 停用清單項（不走警告，直接生效）。 */
+  /**
+   * 啟用 / 停用清單項。**停用先確認**（#506）。
+   *
+   * 與受控清單（`useControlled.toggleControlled`）一致：DP03 同時擺著兩個外觀幾乎相同的
+   * 編輯面板，一邊問、一邊不問，學會「停用會先問」的人在另一邊會直接改掉東西。
+   * 啟用不確認——它是把東西放回可用狀態，沒有需要勸阻的後果。
+   */
   const toggleItem = useCallback(
     async (master: ParamMaster, paramKey: string, isEnabled: boolean) => {
-      try {
-        await paramsApi.updateDetail(master.param_id, paramKey, { is_enabled: isEnabled })
-        message.success(_SAVED_MSG)
-        invalidate()
-      } catch (err) {
-        message.error(toApiError(err).errorMessage)
+      const apply = async () => {
+        try {
+          await paramsApi.updateDetail(master.param_id, paramKey, { is_enabled: isEnabled })
+          message.success(_SAVED_MSG)
+          invalidate()
+        } catch (err) {
+          message.error(toApiError(err).errorMessage)
+        }
       }
+      if (!isEnabled) {
+        confirm({ title: TOGGLE_OFF_TITLE, content: TOGGLE_OFF_CONTENT, okText: TOGGLE_OFF_OK, onOk: apply })
+        return
+      }
+      await apply()
     },
-    [message, invalidate],
+    [message, confirm, invalidate],
   )
 
   /** 新增清單項（僅 LIST 型、非鎖定）。 */

@@ -231,9 +231,7 @@ async def test_跨組同名標籤可新增(db):
     await _svc.create_controlled(db, "TAG", code=grp_a, name="ZT跨組同名", operator_id="admin")
     await _svc.create_controlled(db, "TAG", code=grp_b, name="ZT跨組同名", operator_id="admin")
 
-    groups = (
-        await db.execute(select(DmTag.tag_group_code).where(DmTag.tag_name == "ZT跨組同名"))
-    ).scalars().all()
+    groups = (await db.execute(select(DmTag.tag_group_code).where(DmTag.tag_name == "ZT跨組同名"))).scalars().all()
     assert set(groups) == {grp_a, grp_b}
 
 

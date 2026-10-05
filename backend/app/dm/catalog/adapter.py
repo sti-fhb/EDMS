@@ -219,9 +219,7 @@ class CatalogAdapter:
                 obj.func_name = new_name
             else:
                 # 排除自己：少了 `exclude_tag_id`，「改名成原值」這個無害操作會被自己擋下
-                await _ensure_tag_name_free(
-                    db, group_code=obj.tag_group_code, name=new_name, exclude_tag_id=obj.tag_id
-                )
+                await _ensure_tag_name_free(db, group_code=obj.tag_group_code, name=new_name, exclude_tag_id=obj.tag_id)
                 obj.tag_name = new_name
             obj.updated_user, obj.updated_date = operator_id, utcnow()
             await _flush_catching_duplicate(db)

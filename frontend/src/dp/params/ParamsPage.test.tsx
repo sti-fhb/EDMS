@@ -410,7 +410,13 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     expect(within(row as HTMLElement).getByText("—")).toBeInTheDocument()
   })
 
-  it("內建項代碼唯讀（僅可改名），自訂項無鎖定圖示", async () => {
+  it("代碼對所有項目一律唯讀，不以鎖頭區分內建與自訂（#506）", async () => {
+    // #506：代碼欄對**每一列**都是純文字、無編輯路徑，但鎖頭只畫在 `is_builtin` 的列上，
+    // 等於暗示自訂項的代碼可以改——它也不能。一個在每列都成立的性質標在部分列上，
+    // 傳達的是錯的資訊，故整個拿掉。
+    //
+    // 更廣的理由：`list_controlled` 對 FUNC / TAG 硬寫 `is_builtin=false`，所以鎖頭
+    // 只可能出現在「文件分類」一個分區，其他分區永遠沒有——不一致不只在列之間，在分區之間。
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
     await screen.findByText("閒置自動登出（分鐘）")
@@ -418,10 +424,34 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
     await openControlledRow(user, "CATEGORY")
 
-    // 內建項：代碼旁有唯讀鎖；名稱欄仍可編輯（#182 D2：is_builtin＝代碼鎖定、僅可改名）
-    expect(screen.getByTitle("代碼唯讀")).toBeInTheDocument()
+    // 正向錨點：面板確實開著且兩列都在（內建 SOP / 自訂 ZTX），下面的「不出現」才有東西可驗
+    expect(screen.getByText("SOP")).toBeInTheDocument()
+    expect(screen.getByText("ZTX")).toBeInTheDocument()
+
+    expect(screen.queryByTitle("代碼唯讀")).not.toBeInTheDocument()
+    // 名稱仍可改（拿掉的是鎖頭，不是編輯能力）
     expect(screen.getByLabelText("SOP 名稱")).toBeEnabled()
     expect(screen.getByLabelText("ZTX 名稱")).toBeEnabled()
+  })
+
+  it("DP_PARAM 清單項停用同樣需先確認，與受控清單一致（#506）", async () => {
+    // #506：同一畫面兩個外觀幾乎相同的面板，受控清單的「停用」會跳確認、DP_PARAM 的不會。
+    // 學會「停用會先問」的人在另一個面板會直接改掉東西。
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+
+    await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
+    await openEditByRow(user, "受訓單位標籤")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+
+    // 必須先出現確認框；直接生效就是本條要擋的行為
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/既有引用保留/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "確定停用" }))
+    expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
   })
 
   it("需代碼之分區才顯示代碼欄；不需代碼者只填名稱", async () => {
