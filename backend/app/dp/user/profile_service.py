@@ -2,7 +2,8 @@
 
 所有登入者維護**自己的**資料。姓名直接存（ET / DM 共用 DP_USER）；密碼變更驗舊 + 複雜度
 （特權 12）+ 重複性 + 追加歷程 + 清 MUST_CHANGE_PWD + 稽核。門檻值讀平台級 PWD_POLICY（SRVDP001）；
-特權門檻依 is_module_admin（T017，過渡期 fail-closed → 一律套一般 8，特權 12 待 T049）。
+特權門檻依 is_module_admin **實查**（ET / DM 已於各自 bootstrap 註冊 checker）——ET 或 DM
+任一模組管理者套 `ADMIN_MIN_LEN`（預設 12），其餘套 `MIN_LEN`（預設 8）。
 
 強制變更密碼（US1 逾效期 / 初始密碼）沿用 change_password 同一路徑——仍需舊密碼。
 """
@@ -130,7 +131,10 @@ class ProfileService:
     async def _resolve_min_len(self, db: AsyncSession, user_id: str) -> int:
         """決定密碼最小長度：特權帳號（ET / DM 任一管理者）套 ADMIN_MIN_LEN，否則 MIN_LEN。
 
-        is_module_admin 過渡期 fail-closed（未接線回 False）→ 一律套一般門檻，特權 12 待 T049。
+        ⚠️ `is_module_admin` 為 **fail-closed**：checker 未註冊 / 拋例外一律回 False，
+        於是該帳號套**一般**門檻。這個方向是刻意的——密碼長度要求降低會被使用者接受而不
+        抱怨，所以它不會以「有人反應」的形式被發現。ET / DM 的 checker 現已註冊（見各自
+        `bootstrap.py`），特權 12 實際生效；若日後有人拔掉註冊，這裡會靜默退回 8。
         """
         is_privileged = await module_admin_gate.is_module_admin(
             "ET", user_id, db
