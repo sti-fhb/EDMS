@@ -66,12 +66,18 @@ def test_cron以台灣時間解讀(cron_expr: str, taipei_desc: str, expected_ut
 
 
 def test_跨UTC日界的cron不會被算錯日期() -> None:
-    """台灣時間週一 02:00 ＝ UTC **週日** 18:00——日界確實會位移，本條釘住這件事。
+    """台灣時間週一 07:00 ＝ UTC **週日** 23:00——日界確實會位移，本條釘住這件事。
 
-    沒有這條，上一條的「UTC 也是週一」可能被誤讀成「UTC 永遠跟台灣同一天」。
+    ⚠️ **刻意用 `0 7 * * 0` 而非更極端的 `0 2 * * 0`**：後者沒有人會設，證明了機制卻沒釘住
+    任何人真的會踩到的東西。07:00 是「排在上班前，一來就看到」的真實動機所在，而且它距
+    SCHET001 現行的 `0 10 * * 0` 只有 3 小時——管理者往前挪一下就到了。
+
+    搭配 `tests/integration/et/test_et_schet001_stats.py::TestSnapshotDateIsTaipei`：那邊驗
+    這個時刻寫出的 `STAT_DATE` 仍是台灣日期；這邊驗時刻本身確實落在 UTC 的前一天。
+    兩條合起來才完整——只有這條的話，看得到日界位移卻看不出它會造成什麼。
     """
-    fire = next_run("0 2 * * 0")
+    fire = next_run("0 7 * * 0")
 
     assert fire is not None
     assert fire.weekday() == 0, "台灣時間應為週一"
-    assert fire.astimezone(timezone.utc).weekday() == 6, "台灣週一 02:00 在 UTC 是週日"
+    assert fire.astimezone(timezone.utc).weekday() == 6, "台灣週一 07:00 在 UTC 是週日"

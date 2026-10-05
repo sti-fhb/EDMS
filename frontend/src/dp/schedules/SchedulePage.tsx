@@ -53,7 +53,12 @@ export function SchedulePage() {
       // 而沒有同步機制，實際歪過一次。判讀不出來的運算式顯示 —，原始值仍在右邊 Cron 欄。
       {
         key: "schedule_time",
-        title: "執行時點",
+        // ⚠️ 標題帶「台灣時間」是**必要的**（#517）：此欄在改制前顯示「每日 08:00 UTC」，
+        // 那個「UTC」會讓維運人員停下來換算。拿掉標籤後若標題也不說，讀過舊版 infra 文件
+        // 「請自行換算」那節的人會繼續 +8、把每日作業設回 `0 16 * * *`（台灣下午 4 點），
+        // 而畫面不會給他任何矛盾訊號。標在**標題**而非值裡：值由 formatCronSchedule 產出，
+        // 那支刻意不換算也不標時區（見其 docstring）。
+        title: "執行時點（台灣時間）",
         render: (_v, r) => formatCronSchedule(r.cron_expr) ?? "—",
       },
       { key: "cron_expr", title: "Cron", dataIndex: "cron_expr" },

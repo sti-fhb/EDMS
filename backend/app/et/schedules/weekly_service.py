@@ -31,7 +31,7 @@ from typing import NamedTuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.utils import utcnow
+from app.core.utils import taipei_date, utcnow
 from app.et.constants import ROLE_ADMIN, ROLE_TEACHER
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.notify.repository import EtNotifyRepository
@@ -103,7 +103,9 @@ class EtWeeklyReportService:
                 db, course_id=course.course_id, user_ids=user_ids
             )
             stat = summarize(counts)
-            previous = await self._stats.previous_avg_progress(db, course_id=course.course_id, before=now.date())
+            # 與 `EtStatsService.take_snapshots` 的 `stat_date` **必須同一個日界**，否則
+            # 「前一筆」會以另一條日界去比對剛寫下的那筆（見 core/utils.taipei_date）。
+            previous = await self._stats.previous_avg_progress(db, course_id=course.course_id, before=taipei_date(now))
             # 未開始者的 id 只用於「寄未看提醒給誰」，**不進週報內文**——姓名不得出現在
             # 可轉寄的信件裡（見 `schedule_mail.CourseReportLine`）
             not_started = [uid for uid, (done, _total) in counts.items() if done == 0]

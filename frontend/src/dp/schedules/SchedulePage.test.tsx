@@ -59,8 +59,13 @@ describe("SchedulePage 排程作業總覽（可編輯）", () => {
     renderWithProviders(<SchedulePage />)
 
     await screen.findByText(/SCHDP001/)
-    expect(screen.getByRole("columnheader", { name: "執行時點" })).toBeInTheDocument()
+    // 標題 MUST 帶時區（#517 / FR-DP-US11-07a）：值本身不標（formatCronSchedule 刻意不標），
+    // 所以標題是畫面上**唯一**說明這些數字是台灣時間的地方。改制前此欄顯示「每日 08:00 UTC」，
+    // 那兩個字母會讓維運人員停下來換算；拿掉標籤又不在標題說，他會繼續 +8。
+    expect(screen.getByRole("columnheader", { name: "執行時點（台灣時間）" })).toBeInTheDocument()
     expect(screen.getByText("每日 08:00")).toBeInTheDocument()
+    // 值本身不得再帶 UTC 字樣（#517 前為「每日 08:00 UTC」）
+    expect(screen.queryByText(/UTC/)).not.toBeInTheDocument()
     // `0 10 * * 0` 是**週一**——APScheduler 的 from_crontab 以週一為 0。照標準 crontab
     // 讀成週日的話這裡會紅，而那正是畫面與實際觸發日差一天的形狀。
     expect(screen.getByText("每週一 10:00")).toBeInTheDocument()

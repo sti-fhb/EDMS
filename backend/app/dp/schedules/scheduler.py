@@ -39,6 +39,11 @@ _STATUS_SKIPPED = "SKIPPED"
 #
 # ⚠️ 本常數是**解讀 cron 的時區**，與寫入 DB 的時間無關：`DP_SCHEDULE_LOG` 的起訖、
 # `LAST_RUN_DATE` 一律走 `utcnow()`（UTC aware），不受此值影響。
+#
+# ⛔ **改成有 DST 的時區前，先想清楚兩種壞法。** `Asia/Taipei` 恆為 `+08:00`（實測 2026–2046
+# 每 6 小時取樣，只有一種 offset），所以不存在「本地時刻不存在」與「本地時刻出現兩次」。
+# 換成有日光節約的時區後，`0 2 30 * *` 這類設定會在切換日**不觸發**或**觸發兩次**，而
+# APScheduler 不會報錯。日後若要把時區做成可設定，這是第一個該撞的牆。
 _SCHEDULE_TIMEZONE = "Asia/Taipei"
 
 # 動態 import 之縱深防禦：HANDLER_REF 僅允許平台 / 模組命名空間（縱使 DB 註冊表遭竄改亦無法載入

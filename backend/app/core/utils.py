@@ -1,6 +1,6 @@
 """核心工具函式。"""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -21,6 +21,25 @@ def utcnow() -> datetime:
     不依賴 OS / DB server / Docker 的 timezone 設定。
     """
     return datetime.now(timezone.utc)
+
+
+def taipei_date(value: datetime) -> date:
+    """aware datetime → **台灣日期**（業務上的「那一天」）。
+
+    ⚠️ **不可直接用 `.date()`**：`utcnow()` 回的是 UTC aware，`.date()` 取的是 **UTC 日期**。
+    兩者在台灣時間 **00:00–07:59** 會差一天（台灣 10/05 07:30 的 UTC 日期是 10/04）。
+
+    全系統以台灣時間切日——`core/db.py::_SESSION_TIMEZONE` 讓伺服端的 `func.date()` 走這個
+    基準、`frontend/src/utils/date.ts::todayTaipei` 讓日期選擇器走這個基準（#483）。本函式
+    補上 **Python 端**的那一塊：以 `utcnow()` 算業務日期的地方一律經此，不要各自 `.date()`。
+
+    Args:
+        value: aware datetime（通常來自 `utcnow()` 或 TIMESTAMPTZ 欄位）。
+
+    Returns:
+        該時刻在台灣的日期。
+    """
+    return value.astimezone(_DISPLAY_TZ).date()
 
 
 def format_taipei(value: datetime | None) -> str:
