@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
-from app.core.pagination import PaginatedResult
+from app.core.pagination import PaginatedResult, paginate_rows
 from app.core.utils import utcnow
 from app.dm.document.file_paths import resolve_within_root
 from app.dm.document.file_store import is_previewable
@@ -39,7 +39,7 @@ from app.dm.review.schemas import (
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_ADMIN, has_role
 from app.dp.users.account_status import is_account_disabled
-from app.services import AuditLogService
+from app.services import AuditLogService, ParamService
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,14 @@ _PUBLISHED = "PUBLISHED"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
 _SUPERSEDED = "SUPERSEDED"
 _REJECTED = "REJECTED"
+
+#: 自動催辦門檻（`DP_PARAM`，spec_us1 FR-004：值域 1–30、預設 7）。此為**唯一定義處**——
+#: `review/reminder.py`（每日催辦 job）與本檔的 `list_pending`（清單標紅）皆由此 import，
+#: 避免「寄信用一個門檻、畫面用另一個」（#503 第 1 項的成因就是前端另外寫死了 7）。
+#: ⚠️ `dm/personal/service.py` 另有一份同義常數（DM04 的「待處理 / 催辦中」標籤），
+#: 它有正確讀取 `DP_PARAM`、非缺陷，故未納入本次整併；日後若要統一，三處一起改。
+REMIND_THRESHOLD_PARAM = "DM_REMIND_THRESHOLD"
+REMIND_THRESHOLD_DEFAULT = 7
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
 
@@ -73,11 +81,13 @@ class ReviewCenterService:
         reviews: ReviewService | None = None,
         notifier: DmNotifier | None = None,
         audit: AuditLogService | None = None,
+        params: ParamService | None = None,
     ) -> None:
         self._repo = repository or ReviewCenterRepository()
         self._reviews = reviews or ReviewService()
         self._notifier = notifier or DmNotifier()
         self._audit = audit or AuditLogService()
+        self._params = params or ParamService()
 
     async def _log(self, db, *, action_type: str, operator_id: str, target: str, after: dict) -> None:
         await self._audit.log_action(
@@ -93,10 +103,17 @@ class ReviewCenterService:
 
     # ── 讀取 ──────────────────────────────────────────
 
-    async def list_pending(self, db, *, op: OperatorInfo) -> list[PendingItem]:
-        """待簽核清單（指派給自己之 PENDING、停留最久在前）。"""
-        rows = await self._repo.list_pending(db, op.user_id)
-        return [
+    async def list_pending(self, db, *, op: OperatorInfo, page: int, limit: int) -> PaginatedResult[PendingItem]:
+        """待簽核清單（指派給自己之 PENDING、停留最久在前、後端分頁）。
+
+        `overdue` **由本層判定**而非把門檻送給前端（#503 第 1 項）：門檻是 `DP_PARAM` 可調的，
+        前端若自行比對就會與實際催辦行為脫鉤——改門檻後「畫面標紅的那條線」和「系統開始寄信的
+        那一天」會分家。判定留在讀得到 `DP_PARAM` 的這一側，門檻就不必過線。
+        （`dm/personal/service.py` 的「待處理 / 催辦中」標籤同一做法。）
+        """
+        threshold = await self._params.get_int_param(db, REMIND_THRESHOLD_PARAM, "VALUE", REMIND_THRESHOLD_DEFAULT)
+        paged = await paginate_rows(db, self._repo.pending_stmt(op.user_id), page, limit)
+        data = [
             PendingItem(
                 review_id=r.review_id,
                 doc_id=r.doc_id,
@@ -108,10 +125,12 @@ class ReviewCenterService:
                 submitter_id=r.submitter_id,
                 submitter_name=r.submitter_name,
                 submit_date=r.submit_date,
-                waiting_days=self._repo.waiting_days(r.submit_date),
+                waiting_days=(waited := self._repo.waiting_days(r.submit_date)),
+                overdue=waited >= threshold,
             )
-            for r in rows
+            for r in paged["data"]
         ]
+        return {"data": data, "meta": paged["meta"]}
 
     async def get_detail(self, db, *, review_id: int, op: OperatorInfo) -> ReviewDetail:
         """簽核明細（僅指定審核者本人可看；新版本附目前發布版供比對）。"""
@@ -224,11 +243,7 @@ class ReviewCenterService:
     ) -> PaginatedResult[CompletedItem]:
         """已完成清單（自己過往核准 / 退回、完成時間 DESC、後端分頁、選填文件名搜尋）。"""
         keyword = (keyword or "").strip()
-        total = await self._repo.count_completed(db, op.user_id, keyword=keyword)
-        total_pages = (total + limit - 1) // limit if total > 0 else 0
-        if total == 0 or page > total_pages:
-            return {"data": [], "meta": {"total": total, "page": page, "limit": limit, "total_pages": total_pages}}
-        rows = await self._repo.list_completed(db, op.user_id, offset=(page - 1) * limit, limit=limit, keyword=keyword)
+        paged = await paginate_rows(db, self._repo.completed_stmt(op.user_id, keyword=keyword), page, limit)
         data = [
             CompletedItem(
                 review_id=r.review_id,
@@ -239,9 +254,9 @@ class ReviewCenterService:
                 version_no=r.version_no,
                 complete_date=r.complete_date,
             )
-            for r in rows
+            for r in paged["data"]
         ]
-        return {"data": data, "meta": {"total": total, "page": page, "limit": limit, "total_pages": total_pages}}
+        return {"data": data, "meta": paged["meta"]}
 
     # ── 核准並發布 ────────────────────────────────────
 

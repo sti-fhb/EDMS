@@ -53,7 +53,8 @@ async def test_reviewer_can_list_pending(db, client):
     await _grant(db, "rv1", DM_REVIEWER)
     r = await client.get(_PENDING, headers=_headers("rv1"))
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    # #503 起為 {data, meta} 分頁形狀（比照已完成頁籤）
+    assert isinstance(r.json()["data"], list)
 
 
 @pytest.mark.parametrize("role", [DM_ADMIN, DM_EDITOR, DM_VIEWER])

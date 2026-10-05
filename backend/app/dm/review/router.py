@@ -48,13 +48,15 @@ shared_router = APIRouter(prefix="/api/dm/reviews", tags=["dm-review"], dependen
 _service = ReviewCenterService()
 
 
-@router.get("/pending", response_model=list[PendingItem])
+@router.get("/pending", response_model=PagedResponse[PendingItem])
 async def list_pending(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
-    """待簽核清單：指派給自己之 PENDING（停留最久在前）。"""
-    return await _service.list_pending(db, op=op)
+    """待簽核清單：指派給自己之 PENDING（停留最久在前、後端分頁，#503 起比照已完成頁籤）。"""
+    return await _service.list_pending(db, op=op, page=page, limit=limit)
 
 
 @router.get("/completed", response_model=PagedResponse[CompletedItem])

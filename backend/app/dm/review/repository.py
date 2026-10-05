@@ -6,7 +6,7 @@
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import Row, and_, exists, func, select
+from sqlalchemy import Row, Select, and_, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -32,9 +32,13 @@ _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
 class ReviewCenterRepository:
     """簽核中心查詢 + 發布切換寫入。"""
 
-    async def list_pending(self, db: AsyncSession, reviewer_id: str) -> list[Row]:
-        """列指派給該審核者之 PENDING 送審（含文件 / 版本 / 送審者姓名），停留最久者在前。"""
-        stmt = (
+    def pending_stmt(self, reviewer_id: str) -> Select:
+        """待簽核查詢語句：指派給該審核者之 PENDING，停留最久者在前；供 `paginate_rows()` 分頁。
+
+        回語句而非結果（#503）：分頁的 count 與 offset/limit 交給 `paginate_rows()`，
+        不在此處自行計算——比照 `et/approval/query_repository.py` 的既有範式。
+        """
+        return (
             select(
                 DmReview.review_id,
                 DmReview.doc_id,
@@ -56,9 +60,11 @@ class ReviewCenterRepository:
                 DmReview.assigned_reviewer == reviewer_id,
                 DmReview.status == _PENDING,
             )
-            .order_by(DmReview.submit_date.asc())
+            # tiebreak 為 `paginate_rows()` 的明文前提（見其 docstring）：時間戳相同的列若無唯一
+            # 次要鍵，翻頁時同一筆可能重複出現或被漏看。待簽核此前不分頁、沒有這個風險，是 #503
+            # 加上分頁才帶進來的。
+            .order_by(DmReview.submit_date.asc(), DmReview.review_id.asc())
         )
-        return list((await db.execute(stmt)).all())
 
     async def get_review(self, db: AsyncSession, review_id: int, *, for_update: bool = False) -> DmReview | None:
         """取送審紀錄；for_update=True 時 SELECT ... FOR UPDATE 對列上鎖。
@@ -130,20 +136,13 @@ class ReviewCenterRepository:
             conds.append(DmDocument.doc_name.ilike(contains(keyword), escape=LIKE_ESCAPE_CHAR))
         return conds
 
-    async def count_completed(self, db: AsyncSession, reviewer_id: str, *, keyword: str = "") -> int:
-        """該審核者已完成（核准 / 退回）之總數（選填文件名關鍵字）。"""
-        return await db.scalar(
-            select(func.count())
-            .select_from(DmReview)
-            .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
-            .where(*self._completed_where(reviewer_id, keyword))
-        )
+    def completed_stmt(self, reviewer_id: str, *, keyword: str = "") -> Select:
+        """已完成查詢語句：該審核者過往核准 / 退回，完成時間 DESC；供 `paginate_rows()` 分頁。
 
-    async def list_completed(
-        self, db: AsyncSession, reviewer_id: str, *, offset: int, limit: int, keyword: str = ""
-    ) -> list[Row]:
-        """該審核者已完成清單（完成時間 DESC、後端分頁、選填文件名關鍵字搜尋）。"""
-        stmt = (
+        #503 起與 `pending_stmt()` 一致改回語句——原本在 service 層手寫 count + offset/limit，
+        那是 `paginate_rows()`（#464）出現之前的寫法。
+        """
+        return (
             select(
                 DmReview.review_id,
                 DmReview.doc_id,
@@ -156,11 +155,8 @@ class ReviewCenterRepository:
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
             .where(*self._completed_where(reviewer_id, keyword))
-            .order_by(DmReview.complete_date.desc())
-            .offset(offset)
-            .limit(limit)
+            .order_by(DmReview.complete_date.desc(), DmReview.review_id.desc())  # tiebreak 同 pending_stmt
         )
-        return list((await db.execute(stmt)).all())
 
     async def get_document(self, db: AsyncSession, doc_id: str) -> DmDocument | None:
         return await db.scalar(select(DmDocument).where(DmDocument.doc_id == doc_id, DmDocument.deleted == 0))

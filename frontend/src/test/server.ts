@@ -334,35 +334,44 @@ export const handlers = [
     HttpResponse.json({ error_code: "DM_DOC_017", error_message: "查無可續編之草稿或無權存取" }, { status: 404 }),
   ),
   // US6 簽核中心（dm-review）
+  // 待簽核（#503 起為 {data, meta} 分頁形狀）。
+  // ⚠️ `overdue` 刻意與「waiting_days >= 7」**不一致**：502 只停留 4 天卻 overdue=true
+  //（＝管理者把門檻調成 3 的情境）。前端若退回自己比對寫死的 7，這筆就不會標紅而測試轉紅——
+  // fixture 若設成 12 天 + overdue=true，兩種實作都會過，就測不出差別了。
   http.get("/api/dm/reviews/pending", () =>
-    HttpResponse.json([
-      {
-        review_id: 501,
-        doc_id: "DM-SOP-000001",
-        doc_name: "領血確認標準作業程序",
-        category_code: "SOP",
-        category_name: "標準作業程序",
-        review_type: "NEW_VERSION",
-        version_no: "2.2",
-        submitter_id: "u1",
-        submitter_name: "陳大華",
-        submit_date: "2026-08-18T16:42:00Z",
-        waiting_days: 1,
-      },
-      {
-        review_id: 502,
-        doc_id: "DM-SOP-000002",
-        doc_name: "入庫作業 SOP",
-        category_code: "SOP",
-        category_name: "標準作業程序",
-        review_type: "NEW_VERSION",
-        version_no: "1.4",
-        submitter_id: "u2",
-        submitter_name: "品保室",
-        submit_date: "2026-08-01T09:20:00Z",
-        waiting_days: 12,
-      },
-    ]),
+    HttpResponse.json({
+      data: [
+        {
+          review_id: 501,
+          doc_id: "DM-SOP-000001",
+          doc_name: "領血確認標準作業程序",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          review_type: "NEW_VERSION",
+          version_no: "2.2",
+          submitter_id: "u1",
+          submitter_name: "陳大華",
+          submit_date: "2026-08-18T16:42:00Z",
+          waiting_days: 1,
+          overdue: false,
+        },
+        {
+          review_id: 502,
+          doc_id: "DM-SOP-000002",
+          doc_name: "入庫作業 SOP",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          review_type: "NEW_VERSION",
+          version_no: "1.4",
+          submitter_id: "u2",
+          submitter_name: "品保室",
+          submit_date: "2026-08-01T09:20:00Z",
+          waiting_days: 4,
+          overdue: true,
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
   ),
   http.get("/api/dm/reviews/completed", () =>
     HttpResponse.json({

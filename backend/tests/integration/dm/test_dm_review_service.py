@@ -122,10 +122,24 @@ async def test_reject_requires_reason_and_completes(db):
 
 
 async def test_complete_non_pending_rejected(db):
-    """已處理之送審再核准 → DM_REVIEW_003。"""
+    """已處理之送審再核准 → DM_REVIEW_003。
+
+    #503 起「撤回」另有 `DM_REVIEW_009`，故此條改以**已核准**製造終態——原本用 withdraw，
+    只改預期字串的話這一層就不再有 DM_REVIEW_003 的覆蓋了。
+    """
+    doc_id = await _doc(db)
+    r = await _svc.submit(db, doc_id=doc_id, review_type="NEW", assigned_reviewer="rev1", author_id="author")
+    await _svc.approve(db, r, approver="rev1")
+    with pytest.raises(AppError) as e:
+        await _svc.approve(db, r, approver="rev1")
+    assert e.value.error_code == "DM_REVIEW_003"
+
+
+async def test_complete_withdrawn_rejected(db):
+    """已撤回之送審再核准 → DM_REVIEW_009（與上一條成對，兩種終態給不同訊息，#503 第 2 項）。"""
     doc_id = await _doc(db)
     r = await _svc.submit(db, doc_id=doc_id, review_type="NEW", assigned_reviewer="rev1", author_id="author")
     await _svc.withdraw(db, r, operator="author")
     with pytest.raises(AppError) as e:
         await _svc.approve(db, r, approver="rev1")
-    assert e.value.error_code == "DM_REVIEW_003"
+    assert e.value.error_code == "DM_REVIEW_009"
