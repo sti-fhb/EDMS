@@ -45,6 +45,7 @@ from sqlalchemy import (
     cast,
     exists,
     false,
+    func,
     literal,
     null,
     or_,
@@ -54,7 +55,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.like_escape import LIKE_ESCAPE_CHAR
+from app.core.like_escape import LIKE_ESCAPE_CHAR, escape_like
 from app.core.like_escape import contains as like_contains
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
 from app.et.approval.models import EtApproval
@@ -249,9 +250,43 @@ class EtApprovalQueryRepository:
             #
             # 兩側都 JOIN 了 `DpUser`，所以同一個條件套兩次即可——**必須兩側都套**，否則
             # 關鍵字查詢會把另一側的全部列帶出來。
+            #
+            # 🔴 **Email 只比對 `@` 之前（local part），不比對網域**（#456）
+            #
+            # `DP_USER.EMAIL` 為 `NOT NULL`，而全體使用者的網域是同一串字。對整個
+            # Email 做 contains 比對時，`@`、`.`、`com`、`tw` 這類字串**單獨一個就命中
+            # 全體**——一次請求加翻頁即可取走可見範圍內的全部核可／完課紀錄。
+            #
+            # 判準是「**這個字元能不能識別一個人**」：網域對每個人都一樣，拿它比對的
+            # 結果只可能是「全部人」或「沒有人」，對「找某位學員」毫無幫助。把它排除在
+            # 比對範圍外**不損失任何正當用途**——contains 語意在 local part 上保留，
+            # 教師記得帳號中段（`chiang`）照樣查得到。
+            #
+            # ⚠️ **這不是安全邊界**，別把它當成防列舉的控制。它擋掉的是「打一個字就
+            # 全撈」，擋不住有心人逐字掃。真正在收斂的仍是**母體限制與角色受控**
+            # （#392 裁示 C 已接受教師可查全部課程），見 `router` 的模組 docstring。
+            #
+            # ⛔ 不要為此改用前綴比對（`startswith`）：那會讓「記得帳號中段」的查法失效，
+            # 而它擋掉的東西與本寫法相同。
+            #
+            # ## 第三條：**完整 Email 走精準比對**
+            #
+            # 只比 local part 會讓「貼上一整串 Email」查不到（`s_lin` 不 contains
+            # `s_lin@edms.local`）——那是正當且常見的用法（從別處複製帳號來查）。
+            #
+            # 補一條**相等**比對即可兩全：相等最多命中一個人，不具列舉價值，所以把網域
+            # 放回來是安全的。⚠️ 關鍵在於 **contains 與相等的風險完全不同**——前者的命中
+            # 數隨關鍵字變短而暴增，後者恆為 0 或 1。
+            #
+            # ⛔ 不可改回 `email.ilike(contains(keyword))`「順便涵蓋」這條：那正是本 issue。
+            email_local_part = func.split_part(DpUser.email, "@", 1)
             matches = or_(
                 DpUser.user_name.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
-                DpUser.email.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
+                email_local_part.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR),
+                # `ilike` 而非 `==`：Email 大小寫不敏感（既有查詢亦以 ilike 處理）。
+                # 模式中不含 `%`，故此處是相等比對而非 contains；跳脫仍要做——否則
+                # 關鍵字裡的 `%` / `_` 會變成萬用字元，把這條也變成範圍比對。
+                DpUser.email.ilike(escape_like(keyword), escape=LIKE_ESCAPE_CHAR),
             )
             approval_side = approval_side.where(matches)
             completion_side = completion_side.where(matches)

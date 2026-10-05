@@ -522,6 +522,56 @@ class TestKeywordMatchesNameOrEmail:
         assert r.json()["data"] == [], "`%` 必須被當成字面字元，不得變成查全部"
 
 
+class TestEmailDomainIsNotSearchable:
+    """#456：**單一常見字串不得命中全體**。
+
+    `DP_USER.EMAIL` 為 `NOT NULL`，而全體使用者的網域是同一串字。改版前對整個 Email
+    做 contains 比對，於是 `@` / `edms.local` / `local` 這類字串**單獨一個就命中全體**
+    ——一次請求加翻頁即可取走可見範圍內的全部核可／完課紀錄。
+
+    收斂後的語意是「**local part 做 contains，或完整 Email 做相等**」：
+    相等最多命中一個人、不具列舉價值，所以把網域放回那一條是安全的。
+
+    ⚠️ 本組與 `TestKeywordMatchesNameOrEmail` **成對**——那邊釘住「以完整 Email 查得到」
+    與「local part 部分比對也命中」，少了那邊，把 Email 整條比對拿掉也會讓本組全綠。
+
+    ⚠️ **這不是安全邊界**。它擋掉「打一個字就全撈」，擋不住有心人逐字掃；真正在收斂的
+    是母體限制與角色受控（#392 裁示 C）。測試釘的是「成本不得退回一個請求」。
+    """
+
+    @pytest.mark.parametrize(
+        "keyword",
+        ["@", "edms.local", "local", "@edms", ".local"],
+        ids=["at", "full_domain", "domain_word", "at_domain", "dot_domain"],
+    )
+    async def test_網域相關字串不得命中任何人(self, client, db, keyword: str) -> None:
+        f = await _fixture(db)
+        # 🔴 正向錨點不可省：同一組 fixture 以正常關鍵字查得到資料，否則下面的「空清單」
+        # 可能只是因為根本沒有任何紀錄——那樣的斷言對任何實作都會通過。
+        baseline = await client.post(_QUERY, json={"keyword": "s_lin"}, headers=_bearer(f["own"]))
+        assert _names(baseline.json()), "錨點失敗：fixture 查不到資料，本測試沒有鑑別力"
+
+        r = await client.post(_QUERY, json={"keyword": keyword}, headers=_bearer(f["own"]))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["data"] == [], f"{keyword!r} 命中了紀錄——Email 比對又涵蓋了網域"
+
+    async def test_管理者側同樣收斂(self, client, db) -> None:
+        """⚠️ 母體最大的是管理者——教師側通過不代表管理者側也通過。
+
+        關鍵字條件套在 `approval_side` 與 `completion_side` 兩側，而角色只影響課程範圍；
+        但「兩側都套」這件事本身曾是 review 抓到的缺口，故對母體最大的角色另驗一次。
+        """
+        f = await _fixture(db)
+        baseline = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["admin"]))
+        assert _names(baseline.json()), "錨點失敗：管理者查不到資料"
+
+        r = await client.post(_QUERY, json={"keyword": "edms.local"}, headers=_bearer(f["admin"]))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["data"] == []
+
+
 class TestCourseFilter:
     """#439：關鍵字與課程「至少給一個」，課程單獨即可查。
 
