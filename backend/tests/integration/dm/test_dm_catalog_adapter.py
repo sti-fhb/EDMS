@@ -249,6 +249,51 @@ async def test_改名為同組既有名稱回409(db):
     assert exc.value.error_code == "DM_CATALOG_001"
 
 
+async def test_通用值標籤不可改名以阻斷兩步擴權(db):
+    """🔴 `全體` / `全單位` 是可見性的保留字，不可改名（#506 security review HIGH-1）。
+
+    可見性判定比對的是 **`TAG_NAME` 字串**（`document/visibility.py:75-76`），不是 ID。
+    通用值若可改名，兩步就能讓某個具體單位變成「不限」：
+
+      1. 把 `全單位` 改名為別的 → 名稱空出
+      2. 把 `ZZ醫院` 改名為 `全單位` → 掛該單位的文件全部變成不限單位
+
+    稽核只會留下兩筆「改名」，**不會記「可見範圍擴大」**。組內名稱唯一約束
+    （`UQ_DM_TAG_GROUP_NAME`）只擋得住一步版本——第 1 步把名稱空出後，第 2 步就通過了。
+    故守門必須擋在**第 1 步**。
+
+    ET 早有這道守門（`et/catalog/adapter.py` 的 `is_all` → `ET_TAG_001`）；DM 沒有 `IS_ALL`
+    欄位，改以「組內保留字」辨識。
+    """
+    unit_grp = await _unit_group(db)
+    reserved = await db.scalar(select(DmTag).where(DmTag.tag_group_code == unit_grp, DmTag.tag_name == "全單位"))
+    assert reserved is not None, "前提：UNIT 組應有種子通用值「全單位」"
+
+    with pytest.raises(AppError) as exc:
+        await _svc.rename_controlled(db, "TAG", code=str(reserved.tag_id), new_name="全單位(舊)", operator_id="admin")
+
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DM_CATALOG_004"
+    refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == reserved.tag_id))
+    assert refreshed.tag_name == "全單位", "被擋下時不得已經改掉"
+
+
+async def test_同組的一般標籤仍可改名(db):
+    """對照組：守門只保護保留字，不得把整組標籤都鎖住。
+
+    沒有這條，把守門寫成「UNIT 組一律不可改名」也會讓上一條通過——而那會逾越契約
+    （ET 的註解特別說明過：以 `is_builtin` 把關會使全部內建標籤不能改名，是錯的）。
+    """
+    unit_grp = await _unit_group(db)
+    await _svc.create_controlled(db, "TAG", code=unit_grp, name="ZT普通單位", operator_id="admin")
+    tag = await db.scalar(select(DmTag).where(DmTag.tag_name == "ZT普通單位"))
+
+    await _svc.rename_controlled(db, "TAG", code=str(tag.tag_id), new_name="ZT普通單位改", operator_id="admin")
+
+    refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == tag.tag_id))
+    assert refreshed.tag_name == "ZT普通單位改"
+
+
 async def test_守門比對的約束名與資料庫實際回報一致(db):
     """`_TAG_NAME_CONSTRAINT` 必須與 PostgreSQL 實際回報的 `conname` 逐字相符（#506）。
 

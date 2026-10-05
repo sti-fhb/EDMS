@@ -39,6 +39,18 @@ _DUP_TAG_NAME_MSG = "此標籤名稱在該組已存在"
 # 組內名稱唯一約束之名稱（`models.py` 的 `UniqueConstraint`）。`_flush_catching_duplicate`
 # 以它辨識「這個 IntegrityError 是不是名稱重複」，不是就原樣往外，不冒名頂替。
 _TAG_NAME_CONSTRAINT = "UQ_DM_TAG_GROUP_NAME"
+# 🔴 可見性的**保留字**（組代碼 → 該組的通用值名稱）。
+#
+# `document/visibility.py` 判定「不限單位 / 不限職位」是比對 **`TAG_NAME` 字串**而非 ID，
+# 所以誰叫這個名字，誰就是通用值。通用值若可改名，兩步即可擴權：
+#   1. 把「全單位」改名 → 名稱空出（唯一約束不再擋）
+#   2. 把某個具體單位改名為「全單位」→ 掛該單位的文件全部變成不限單位
+# 稽核只留兩筆「改名」，不會記可見範圍擴大。故守門擋在第 1 步（見 `_ensure_not_reserved_tag`）。
+#
+# ⚠️ 用「組內保留字」而非 `is_builtin` 辨識：種子標籤多半 `IS_BUILTIN=true`，以它把關會連
+# 一般內建標籤都鎖住，逾越契約——ET 的對應註解（`et/catalog/adapter.py`）踩過同一個坑。
+_RESERVED_TAG_NAMES = {_AUDIENCE: _ALL_AUDIENCE_TAG, _UNIT: _ALL_UNITS_TAG}
+_RESERVED_TAG_MSG = "可見性通用值標籤不可改名"
 _UNIQUE_VIOLATION_SQLSTATE = "23505"  # PostgreSQL unique_violation
 
 # 各受控清單於 DP 維護頁「說明」欄之內容。**只有 DM 寫得出這些句子**——它們講的是
@@ -222,6 +234,9 @@ class CatalogAdapter:
             if kind == "FUNC":
                 obj.func_name = new_name
             else:
+                # 順序有意義：保留字守門在重複檢核**之前**——通用值改名要回 422（業務保護），
+                # 不能因為新名稱恰好撞到別人而先回 409，那會把「這個不准改」說成「名稱重複」。
+                _ensure_not_reserved_tag(obj)
                 # 排除自己：少了 `exclude_tag_id`，「改名成原值」這個無害操作會被自己擋下
                 await _ensure_tag_name_free(db, group_code=obj.tag_group_code, name=new_name, exclude_tag_id=obj.tag_id)
                 obj.tag_name = new_name
@@ -316,6 +331,22 @@ def _tag_id(code: str) -> int:
 def _ensure_kind(kind: str) -> None:
     if kind not in _KINDS:
         raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+
+
+def _ensure_not_reserved_tag(tag: DmTag) -> None:
+    """保留字標籤（`全體` / `全單位`）不可改名（#506）。
+
+    擋的是**兩步擴權的第 1 步**：名稱一旦空出，第 2 步把具體單位改名成通用值就不再撞唯一鍵，
+    而可見性是比對 `TAG_NAME` 字串，等於讓掛該單位的文件全部變成「不限」。詳見
+    `_RESERVED_TAG_NAMES` 的註解。
+
+    ⛔ 只保護保留字本身，不是整組——其餘標籤（含內建）仍可改名，那是契約允許的。
+
+    對應 ET 的 `ET_TAG_001`（`「全體」標籤不可停用或改名`）。DM 這邊目前**只擋改名**：
+    停用通用值不會擴大可見範圍（可見性不看 `IS_ENABLED`），只會讓它從新文件的下拉消失。
+    """
+    if _RESERVED_TAG_NAMES.get(tag.tag_group_code) == tag.tag_name:
+        raise AppError(status_code=422, detail=_RESERVED_TAG_MSG, error_code="DM_CATALOG_004")
 
 
 async def _ensure_tag_name_free(
