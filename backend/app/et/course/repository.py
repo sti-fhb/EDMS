@@ -231,10 +231,10 @@ class EtCourseRepository:
 
         ## 兩種 scope 的狀態過濾**相反**
 
-        | scope | 擁有者 | 狀態 |
-        |---|---|---|
-        | `mine` | 限本人 | **全部**（草稿 / 已發布 / 已關閉）——教師要管理自己的課 |
-        | `all` | 不限 | **僅已發布且期間未過**——見下 |
+        | scope | 擁有者 | 狀態 | 在籍 |
+        |---|---|---|---|
+        | `mine` | 限本人 | **全部**（草稿 / 已發布 / 已關閉）——教師要管理自己的課 | 不限 |
+        | `all` | 不限 | **僅已發布且期間未過**——見下 | **排除 viewer 已在籍者**（#521）|
 
         ## `all` 的「已發布」是 `is_effectively_closed` 的否定，不是 `STATUS` 比對
 
@@ -268,6 +268,31 @@ class EtCourseRepository:
             )
             if owner_id:
                 stmt = stmt.where(EtCourse.owner_id == owner_id)
+            # #521：排除 viewer **已在籍**的課程——那門課只能從「我的課程」進入。
+            #
+            # 🔴 這讓「從本分頁進去的人必然不在籍」成立，`learning/service` 的
+            # `is_preview = not enrolled` 因此自動為真，**不需要任何預覽旗標**。
+            # ⛔ 不要改成「前端帶 `?preview=1`、後端依角色採信」：那會造成畫面顯示解鎖、
+            # 點下去卻 404（`_ensure_item_unlocked` 吃的是 `enrolled` 不是 `is_preview`），
+            # 日後有人「修」掉那個矛盾就成了真的漏洞。理由全文見 #521。
+            #
+            # ⚠️ 條件必須與 `learning/repository.is_enrolled` **同義**（`IS_REMOVED` 與
+            # `DELETED` 兩者都要）。兩處若要改，必須一起改——分岔的表徵是「有些課程消失
+            # 了，但點進去仍是學員視角」。已被移除者不在籍，照常列出。
+            #
+            # 用 NOT EXISTS 而非 LEFT JOIN：與下方標籤篩選同一理由，JOIN 在一課多列時產生
+            # 重複列。
+            stmt = stmt.where(
+                ~select(EtEnrollment.enrollment_id)
+                .where(
+                    EtEnrollment.course_id == EtCourse.course_id,
+                    EtEnrollment.user_id == actor_id,
+                    EtEnrollment.is_removed.is_(False),
+                    EtEnrollment.deleted == 0,
+                )
+                .correlate(EtCourse)
+                .exists()
+            )
 
         if keyword:
             # ⚠️ 必須跳脫——不跳脫時使用者輸入 `%` 會變成「列出全部」、`_` 變單字元萬用，
