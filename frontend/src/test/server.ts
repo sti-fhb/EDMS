@@ -1115,8 +1115,8 @@ export const handlers = [
         job_name: "平台每日作業",
         // #332：說明欄不再承載執行時點（時點由 CRON_EXPR 現算）
         description:
-          "停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、" +
-          "對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列",
+          "停用連續閒置超過閒置停用天數未登入之帳號、" +
+          "對密碼即將到期者寄提醒信，並清理逾期未完成之註冊驗證資料",
         module: "DP",
         cron_expr: "0 8 * * *",
         is_enabled: true,
