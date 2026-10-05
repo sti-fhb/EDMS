@@ -133,6 +133,19 @@ export const handlers = [
       },
     }),
   ),
+  // 上傳限制（#455）——DM 與 ET 各一支。值對齊 seed，與後端上傳驗證同源。
+  //
+  // ⚠️ 預設給「有值」是刻意的：載入失敗時畫面會**停用上傳輸入**，若 fixture 不給值，
+  // 所有碰到上傳區的既有測試都會變成在驗停用態。驗「未載入」的測試請自行 server.use 覆寫。
+  http.get("/api/dm/editor/upload-limits", () =>
+    HttpResponse.json({
+      max_mb: 50,
+      allowed_extensions: ["doc", "docx", "jpeg", "jpg", "pdf", "png", "ppt", "pptx", "xls", "xlsx"],
+    }),
+  ),
+  http.get("/api/et/materials/video-upload-limits", () =>
+    HttpResponse.json({ max_size_mb: 500, allowed_formats: ["mp4", "webm"] }),
+  ),
   // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
   http.get("/api/dm/dashboard/stats", () =>
     HttpResponse.json({

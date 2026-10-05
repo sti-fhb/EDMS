@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 
 import { editorApi } from "./editorService"
+import { QUERY_KEYS } from "../../constants/queryKeys"
 
 /** DM08 表單受控下拉（分類 / func / 可見對象 / 檢索標籤）。 */
 export function useEditorOptions() {
@@ -28,4 +29,14 @@ export function useDraftMeta(docId: string, enabled: boolean) {
     queryFn: () => editorApi.getDraftMeta(docId),
     enabled: enabled && !!docId,
   })
+}
+/**
+ * 上傳限制（#455）。供上傳說明與 `accept` 使用。
+ *
+ * ⚠️ **載入中與失敗時呼叫端必須停用上傳輸入**，不可退回「不設 `accept`」——那是
+ * 放寬（從受限清單變成全部檔案）。寧可暫時不能選，也不要讓使用者選到一個必定被
+ * 後端退回的檔案。
+ */
+export function useUploadLimits() {
+  return useQuery({ queryKey: QUERY_KEYS.dmEditor.uploadLimits(), queryFn: editorApi.getUploadLimits })
 }

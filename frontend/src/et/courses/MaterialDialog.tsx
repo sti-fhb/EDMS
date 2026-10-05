@@ -21,8 +21,15 @@ import Typography from "@mui/material/Typography"
 import { useRef, useState } from "react"
 
 import { RichTextEditor } from "./RichTextEditor"
-import { MATERIAL_NAME_MAX_LEN, formatDuration, formatFileSize, isBlankHtml } from "./itemSchemas"
-import type { DmDocOption, DocRow, MaterialDetail, VideoRow } from "./itemSchemas"
+import {
+  MATERIAL_NAME_MAX_LEN,
+  describeVideoLimits,
+  formatDuration,
+  formatFileSize,
+  isBlankHtml,
+  toVideoAcceptAttr,
+} from "./itemSchemas"
+import type { DmDocOption, DocRow, MaterialDetail, VideoRow, VideoUploadLimits } from "./itemSchemas"
 
 export interface MaterialSavePayload {
   material_name: string
@@ -39,6 +46,16 @@ interface MaterialDialogProps {
   readOnly: boolean
   material: MaterialDetail | null
   dmOptions: DmDocOption[]
+  /**
+   * 目前生效的影片上傳限制（#455）；`undefined` = 尚未載入 / 載入失敗。
+   *
+   * ⚠️ **由呼叫端傳入，本元件不自行查詢**——它是純呈現元件，既有測試直接以 props
+   * 渲染它。在這裡加 `useQuery` 會讓每一條測試都得準備 MSW handler。
+   *
+   * ⚠️ `undefined` 時呼叫端看到的是**停用的上傳輸入**，不是「不限格式」。不設
+   * `accept` 等於放寬（從受限清單變成全部檔案），寧可暫時不能選。
+   */
+  videoLimits: VideoUploadLimits | undefined
   /** 儲存相關的錯誤（顯示於視窗頂端）。 */
   error: string | null
   /**
@@ -127,6 +144,7 @@ export function MaterialDialog({
   readOnly,
   material,
   dmOptions,
+  videoLimits,
   error,
   uploadError,
   uploading,
@@ -354,17 +372,24 @@ export function MaterialDialog({
                       <Typography variant="body2" color="text.secondary">
                         拖拉上傳影片檔或點擊選擇
                       </Typography>
+                      {/* #455：文案改讀 `DP_PARAM`。⚠️ 寫死時 IT 改完 DB 之後這行仍說
+                          舊話，而 #469 把唯讀參數改為 HIDDEN 之後，**這行是系統內唯一
+                          顯示上限的地方**——它若說謊就沒有第二處可以對照。 */}
                       <Typography variant="caption" color="text.disabled">
-                        支援 mp4 / webm，單檔最大 500 MB
+                        {videoLimits ? describeVideoLimits(videoLimits) : "上傳限制載入中…"}
                       </Typography>
                     </Stack>
                   )}
                 </Box>
               )}
+              {/* ⚠️ 限制未載入時 `disabled`，不可退回「不設 accept」——那是放寬
+                  （從受限清單變成全部檔案）。寧可暫時不能選，也不要讓教師選到一個
+                  必定被後端退回的檔案。 */}
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="video/mp4,video/webm,.mp4,.webm"
+                accept={videoLimits ? toVideoAcceptAttr(videoLimits.allowed_formats) : undefined}
+                disabled={videoLimits === undefined}
                 hidden
                 aria-label="選擇影片檔"
                 onChange={(e) => {

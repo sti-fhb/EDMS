@@ -142,3 +142,19 @@ class DmDocOption(BaseModel):
     doc_name: str
     version_no: str
     published_date: datetime | None
+
+
+class VideoUploadLimits(BaseModel):
+    """目前生效的教材影片上傳限制（#455）。
+
+    ⚠️ **值一律由 `EtMaterialService.resolve_video_limits` 解析**，與上傳驗證同源。
+
+    Attributes:
+        max_size_mb: 單檔上限（MB）。
+        allowed_formats: 允許的容器格式，**不含點**、全小寫、已排序。
+            排序讓回應穩定——未排序時同一組設定在不同查詢可能給出不同順序，而前端的
+            文案會跟著變，看起來像設定被改過。
+    """
+
+    max_size_mb: int
+    allowed_formats: list[str]

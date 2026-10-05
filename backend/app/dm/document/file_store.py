@@ -81,6 +81,30 @@ def resolve_upload_mime(file_bytes: bytes, filename: str) -> str:
     return mime
 
 
+async def resolve_upload_limits(
+    db: AsyncSession, *, params: ParamService | None = None
+) -> tuple[int, frozenset[str]]:
+    """目前生效的 `(單檔上限 MB, 允許副檔名集合)`。
+
+    ## 🔴 這是**唯一**的解析處——驗證與「告訴使用者能傳什麼」都走它（#455）
+
+    改版前上傳畫面的文案與 `accept` 是**寫死**的，於是 IT 依既定途徑改了 `DP_PARAM`
+    之後，DP07 顯示新值、上傳畫面仍說舊話，而 `accept` 還會把新允許的格式擋在選檔器
+    外——使用者看到的是「這個格式不能選」，**不會有任何錯誤訊息告訴他為什麼**。
+
+    ⛔ **不要為前端另寫一支「取得限制」的函式。** 兩支各自解析參數、各自決定 fallback，
+    遲早分岔——而分岔的表徵正是本 issue 要修的那個病：**選得到卻傳不上去**（或相反）。
+
+    ⚠️ fail-closed 的語意必須保留：`DM_FILE_TYPES` 缺值 / 清空時退回**安全預設白名單**，
+    而不是「全部放行」。管理者誤清參數不該等於開放任意副檔名（T066 L2）。
+    """
+    svc = params or ParamService()
+    max_mb = await svc.get_int_param(db, "DM_FILE_MAX_MB", "VALUE", _DEFAULT_MAX_MB)
+    allowed = await svc.get_param_value(db, "DM_FILE_TYPES", "VALUE")
+    allowed_set = frozenset(t.strip().lower() for t in (allowed or "").split(",") if t.strip())
+    return max_mb, (allowed_set or _DEFAULT_FILE_TYPES)
+
+
 async def enforce_size_limit(db: AsyncSession, *, size_bytes: int, params: ParamService | None = None) -> None:
     """僅檢核大小不逾 `DM_FILE_MAX_MB`（供 router 於 `read()` 前以 `UploadFile.size` 先擋，避免整包載入記憶體）。
 
@@ -105,8 +129,10 @@ async def validate_upload(
     await enforce_size_limit(db, size_bytes=size_bytes, params=svc)
 
     # fail-closed：DM_FILE_TYPES 缺值 / 清空 → 退回安全預設白名單，格式檢核恆執行（T066 L2）
-    allowed = await svc.get_param_value(db, "DM_FILE_TYPES", "VALUE")
-    allowed_set = {t.strip().lower() for t in (allowed or "").split(",") if t.strip()} or _DEFAULT_FILE_TYPES
+    #
+    # ⚠️ 允許集合由 `resolve_upload_limits` 解析——**前端的 `accept` 走的是同一支**，
+    # 兩邊因此不可能分岔（#455）。
+    _, allowed_set = await resolve_upload_limits(db, params=svc)
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in allowed_set:
         raise AppError(status_code=422, detail="不支援的檔案格式", error_code="DM_FILE_002")

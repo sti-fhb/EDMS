@@ -40,6 +40,9 @@ function renderDialog(overrides: Partial<Parameters<typeof MaterialDialog>[0]> =
       readOnly={false}
       material={material}
       dmOptions={[]}
+      // #455：預設給一組值，讓既有測試維持「上傳輸入可用」的前提。
+      // ⚠️ 驗「限制未載入時停用」的測試請明確覆寫為 undefined。
+      videoLimits={{ max_size_mb: 500, allowed_formats: ["mp4", "webm"] }}
       error={null}
       uploadError={null}
       uploading={false}
@@ -278,5 +281,26 @@ describe("教材編輯視窗", () => {
     expect(screen.queryByRole("button", { name: /移除影片/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /移除文件引用/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "拖拉或點擊選擇影片檔" })).not.toBeInTheDocument()
+  })
+})
+
+
+describe("上傳限制改讀參數（#455）", () => {
+  it("說明文字與 accept 都取自傳入的限制，而非寫死", () => {
+    renderDialog({ videoLimits: { max_size_mb: 123, allowed_formats: ["mkv", "mp4"] } })
+
+    expect(screen.getByText("支援 mkv / mp4，單檔最大 123 MB")).toBeInTheDocument()
+    expect(screen.getByLabelText("選擇影片檔")).toHaveAttribute("accept", ".mkv,.mp4")
+  })
+
+  it("🔴 限制未載入時停用上傳輸入，而不是不設 accept", () => {
+    // 不設 `accept` 等於放寬（從受限清單變成全部檔案）——那是本 issue 的反面。
+    // ⚠️ 與上一條成對：少了上一條，把實作寫成「一律停用」也會通過本條。
+    renderDialog({ videoLimits: undefined })
+
+    const input = screen.getByLabelText("選擇影片檔")
+    expect(input).toBeDisabled()
+    expect(input).not.toHaveAttribute("accept")
+    expect(screen.getByText("上傳限制載入中…")).toBeInTheDocument()
   })
 })

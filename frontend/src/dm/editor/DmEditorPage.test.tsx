@@ -466,4 +466,28 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(await screen.findByText(/編輯項目將不會保留/)).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
   })
+
+  describe("上傳限制改讀參數（#455）", () => {
+    it("上傳說明文字取自端點，而非寫死", async () => {
+      // 🔴 本條是 AC「IT 改 DB 後重新載入，上傳畫面的文案隨之改變」的佐證：
+      // 覆寫端點回一組與種子不同的值，畫面必須跟著變。
+      server.use(
+        http.get("/api/dm/editor/upload-limits", () =>
+          HttpResponse.json({ max_mb: 7, allowed_extensions: ["pdf", "txt"] }),
+        ),
+      )
+      renderWithProviders(<DmEditorPage />)
+
+      expect(await screen.findByText("支援 pdf / txt，單檔最大 7 MB")).toBeInTheDocument()
+    })
+
+    it("限制未載入時顯示載入中，不顯示任何寫死的數字", async () => {
+      // ⚠️ 與上一條成對：少了上一條，把文字寫死成「載入中」也會通過本條。
+      server.use(http.get("/api/dm/editor/upload-limits", () => HttpResponse.error()))
+      renderWithProviders(<DmEditorPage />)
+
+      expect(await screen.findByText("上傳限制載入中…")).toBeInTheDocument()
+      expect(screen.queryByText(/單檔最大 \d+ MB/)).not.toBeInTheDocument()
+    })
+  })
 })

@@ -8,6 +8,7 @@ import type {
   QuestionType,
   QuizDetail,
   VideoRow,
+  VideoUploadLimits,
 } from "./itemSchemas"
 
 /** 章節項目 API（US3 / #203）。 */
@@ -33,6 +34,17 @@ export const itemsApi = {
 
 /** 教材內容 API（US3 / #203）。 */
 export const materialsApi = {
+  /**
+   * 目前生效的影片上傳限制（#455）。
+   *
+   * 供教材視窗的說明文字與選檔器的 `accept` 使用——⚠️ 兩者都不可再寫死，
+   * `ET_VIDEO_*` 由 IT 於 DB 變更（`EDIT_SCOPE=READONLY`，#171）。
+   */
+  getVideoUploadLimits: async (): Promise<VideoUploadLimits> => {
+    const { data } = await http.get<VideoUploadLimits>("/et/materials/video-upload-limits")
+    return data
+  },
+
   getDetail: async (materialId: number): Promise<MaterialDetail> => {
     const { data } = await http.get<MaterialDetail>(`/et/materials/${materialId}`)
     return data
