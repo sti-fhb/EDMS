@@ -46,7 +46,14 @@ export interface DetailCreatePayload {
   sort_order?: number
 }
 
-/** 受控清單之單一項（模組自持表，非 DP_PARAM）。鎖定語意在**項目層**（is_builtin），與 DP_PARAM 的 detail_lock 不同。 */
+/**
+ * 受控清單之單一項（模組自持表，非 DP_PARAM）。
+ *
+ * ⚠️ `is_builtin` 自 #506 起**前端不呈現**：代碼對所有項目一律唯讀（無編輯路徑），
+ * 把它標在部分列上反而暗示沒標的可以改。欄位仍由後端回傳、型別保留。
+ * ⛔ 它**不是**「代碼鎖定」的旗標——後端 `list_controlled` 對 FUNC / TAG 一律硬寫 false，
+ * 只有 CATEGORY 傳真值；真正用它的是 DM 自己（儀表板依內建分類決定要畫哪些卡）。
+ */
 export interface ControlledItem {
   code: string
   name: string

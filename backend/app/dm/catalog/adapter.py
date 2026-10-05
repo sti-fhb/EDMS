@@ -39,6 +39,7 @@ _DUP_TAG_NAME_MSG = "此標籤名稱在該組已存在"
 # 組內名稱唯一約束之名稱（`models.py` 的 `UniqueConstraint`）。`_flush_catching_duplicate`
 # 以它辨識「這個 IntegrityError 是不是名稱重複」，不是就原樣往外，不冒名頂替。
 _TAG_NAME_CONSTRAINT = "UQ_DM_TAG_GROUP_NAME"
+_UNIQUE_VIOLATION_SQLSTATE = "23505"  # PostgreSQL unique_violation
 
 # 各受控清單於 DP 維護頁「說明」欄之內容。**只有 DM 寫得出這些句子**——它們講的是
 # 掛上之後文件會怎麼被看見 / 被檢索，屬 DM 業務語意（見 `ControlledKindView.description`）。
@@ -353,16 +354,34 @@ async def _flush_catching_duplicate(db: AsyncSession) -> None:
     （`create_detail` 的情境是單一 PK，全收不會誤判，故「比照」只成立一半。）
 
     ⚠️ 併發那條路**無法以測試覆蓋**（需要真實並發）；但「只認這個約束」這件事可以，
-    見 `tests/unit/dm/test_dm_catalog_flush_guard.py`。
+    見 `tests/unit/dm/test_dm_catalog_flush_guard.py` 與
+    `test_dm_catalog_adapter.py::test_守門比對的約束名與資料庫實際回報一致`。
     """
     try:
         await db.flush()
     except IntegrityError as exc:
-        # asyncpg 的錯誤經 SQLAlchemy 包裝後不保留 `constraint_name` 屬性，只能比對訊息字串；
-        # 約束名是 DDL 寫死的常數（見 `models.py` 的 `UniqueConstraint`），不隨資料變動。
-        if _TAG_NAME_CONSTRAINT not in str(exc.orig):
+        if not _is_tag_name_violation(exc):
             raise
         raise AppError(status_code=409, detail=_DUP_TAG_NAME_MSG, error_code="DM_CATALOG_001") from exc
+
+
+def _is_tag_name_violation(exc: IntegrityError) -> bool:
+    """此 `IntegrityError` 是否來自 `UQ_DM_TAG_GROUP_NAME`。
+
+    兩道條件都要成立：
+
+    1. `sqlstate == 23505`（unique_violation）。asyncpg 的例外經 SQLAlchemy 包裝後雖然不保留
+       `constraint_name`，但 `sqlstate` / `pgcode` **有**被代理過來，先用它排掉 FK / NOT NULL /
+       CHECK 等整個家族，比字串可靠。
+    2. 約束名出現在**主訊息**裡。只比對 `DETAIL:` 之前的部分——`DETAIL:` 那段會把整列欄位值
+       印出來（`Failing row contains (…)`），而欄位值**是使用者輸入的**：一個名為
+       `UQ_DM_TAG_GROUP_NAME` 的標籤就能讓不相干的錯誤被誤判成名稱重複，正是本函式要防的事。
+       今天打不到（`DM_TAG` 無 CHECK、FK 違反的 DETAIL 不含 `TAG_NAME`），但這是
+       「使用者可控資料流入分支判斷式」的形狀，加欄位或加 CHECK 的那天就會活過來。
+    """
+    if getattr(exc.orig, "sqlstate", None) != _UNIQUE_VIOLATION_SQLSTATE:
+        return False
+    return _TAG_NAME_CONSTRAINT in str(exc.orig).partition("\nDETAIL:")[0]
 
 
 def _ensure_code(code: str) -> None:

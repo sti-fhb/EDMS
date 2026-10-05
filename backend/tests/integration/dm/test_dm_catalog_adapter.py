@@ -13,7 +13,7 @@ from app.core.exceptions import AppError
 from app.core.module_assign import module_assign_registry
 from app.core.utils import utcnow
 from app.dm.bootstrap import register_dm_module
-from app.dm.catalog.adapter import CatalogAdapter
+from app.dm.catalog.adapter import CatalogAdapter, _flush_catching_duplicate
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument
 from app.dp.audit.models import DpAuditLog
@@ -246,6 +246,29 @@ async def test_改名為同組既有名稱回409(db):
         await _svc.rename_controlled(db, "TAG", code=str(tag_b.tag_id), new_name="ZT原名A", operator_id="admin")
 
     assert exc.value.status_code == 409
+    assert exc.value.error_code == "DM_CATALOG_001"
+
+
+async def test_守門比對的約束名與資料庫實際回報一致(db):
+    """`_TAG_NAME_CONSTRAINT` 必須與 PostgreSQL 實際回報的 `conname` 逐字相符（#506）。
+
+    🔴 **為什麼需要這條**：`_ensure_tag_name_free` 會先把同名擋下，所以**上面那些測試
+    一條都走不到 `_flush_catching_duplicate`**——那道守門比對的常數與真實約束名是否一致，
+    在此之前只有推論（migration 的 DDL 寫法 + SQLAlchemy quoting 規則），沒有證據。
+    常數打錯一個字，TOCTOU 那條就會悄悄退回 500，而全部測試照樣綠。
+
+    故本條**繞過前置檢核**、直接讓 DB 拋，驗守門真的認得出來。
+    """
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT約束名對帳", operator_id="admin")
+
+    # 繞過 `_ensure_tag_name_free`：直接塞第二列同名，讓唯一鍵在 flush 時爆
+    db.add(DmTag(tag_group_code=grp, tag_name="ZT約束名對帳", created_user="admin", created_date=utcnow()))
+
+    with pytest.raises(AppError) as exc:
+        await _flush_catching_duplicate(db)
+
+    assert exc.value.status_code == 409, "守門沒認出這個約束 → 常數與實際 conname 不符"
     assert exc.value.error_code == "DM_CATALOG_001"
 
 

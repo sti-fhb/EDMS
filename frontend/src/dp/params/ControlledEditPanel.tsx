@@ -87,8 +87,7 @@ export function ControlledEditPanel({ section, onAdd, onRename, onToggle, onClos
         {section.items.map((item) => (
           <Stack key={item.code} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
             {/* 代碼只在「需代碼」之分區顯示（分類 / 作業項目，代碼由管理者指定、具業務意義）。
-                其餘（標籤類）的 code 是系統配號的流水 ID，對使用者沒有意義，不顯示——
-                連同「代碼唯讀」鎖頭一起，代碼不出現在畫面上，鎖它也就無從說起。 */}
+                其餘（標籤類）的 code 是系統配號的流水 ID，對使用者沒有意義，故不顯示。 */}
             {section.requires_code && (
               <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 96 }}>
                 {/*
