@@ -20,7 +20,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
 from app.core.request_context import get_client_ip
-from app.core.utils import utcnow
+from app.core.utils import format_taipei_date, utcnow
 from app.dp.user.ids import generate_user_id
 from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.repository import AuthRepository
@@ -511,7 +511,9 @@ class UsersService:
                     module="DP",
                     params={
                         "user_name": user_name,
-                        "expiry_date": expiry_date.strftime("%Y-%m-%d"),
+                        # 台灣時間的日期（#513）：直接 strftime 取到的是 UTC 日期，密碼在台灣時間
+                        # 00:00–08:00 變更的使用者會收到早一天的到期日
+                        "expiry_date": format_taipei_date(expiry_date),
                         "days_left": str(days_left),
                     },
                     caller_module="DP",

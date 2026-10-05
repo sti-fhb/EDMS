@@ -15,6 +15,9 @@ from app.dm.deps import DmContext, get_dm_context
 from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
 from app.dm.obsolete_archive.service import ObsoleteArchiveService
 
+# 對應 DM_CATEGORY.CATEGORY_CODE 之 VARCHAR(10)（與 dm/library/router.py 一致）
+_CODE_MAX_LEN = 10
+
 router = APIRouter(prefix="/api/dm", tags=["dm-obsolete-archive"])
 _service = ObsoleteArchiveService()
 
@@ -26,7 +29,7 @@ async def list_obsolete(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
     keyword: str | None = Query(None, max_length=200),  # 上限防過長 ILIKE（對齊 library/review，Security LOW）
-    category: str | None = Query(None),
+    category: str | None = Query(None, max_length=_CODE_MAX_LEN),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     page: int = Query(1, ge=1),
@@ -42,7 +45,7 @@ async def export_obsolete(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
     keyword: str | None = Query(None, max_length=200),  # 上限防過長 ILIKE（對齊 library/review，Security LOW）
-    category: str | None = Query(None),
+    category: str | None = Query(None, max_length=_CODE_MAX_LEN),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
 ) -> Response:
