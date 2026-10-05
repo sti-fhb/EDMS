@@ -133,13 +133,18 @@ ET_USER_ROLE 初始為空
 
 | Job | `CRON_EXPR` | 台北時間 | Handler | 做什麼 |
 |---|---|---|---|---|
-| **SCHET001** | `0 10 * * 0` | 每週一 18:00 | `app.et.schedules.handlers.weekly_job` | 週統計快照 + 週報（管理者）+ 未完課提醒（學員）|
-| **SCHET002** | `0 8 * * *` | 每日 16:00 | `app.et.schedules.handlers.daily_job` | 到期自動關閉 + 結清逾期未提交的作答 + 截止前加急提醒 |
+| **SCHET001** | `0 10 * * 0` | 每週一 10:00 | `app.et.schedules.handlers.weekly_job` | 週統計快照 + 週報（管理者）+ 未完課提醒（學員）|
+| **SCHET002** | `0 8 * * *` | 每日 08:00 | `app.et.schedules.handlers.daily_job` | 到期自動關閉 + 結清逾期未提交的作答 + 截止前加急提醒 |
 
-### ⚠️ `CRON_EXPR` 是 **UTC**
+### `CRON_EXPR` 即 **台灣時間**，不需換算
 
-`CronTrigger.from_crontab(cron_expr, timezone="UTC")`。`0 8 * * *` 是台北 **16:00**，
-不是早上八點。排定「上班時間寄信」時請自行換算。
+`CronTrigger.from_crontab(cron_expr, timezone="Asia/Taipei")`。`0 8 * * *` 就是早上八點。
+規範見 [`specs/dp/spec_us11.md`](../specs/dp/spec_us11.md) FR-DP-US11-07b。
+
+> **⚠️ 2026-10-05（#517）之前不是這樣。** 引擎原以 `timezone="UTC"` 解讀，`0 8 * * *` 實際落在
+> 台北 16:00、`0 10 * * 0` 落在週一 18:00——5 支排程全部晚 8 小時，催辦信在下班時間寄、
+> 週報在週一傍晚才發。本文件原本把它記成「請自行換算」的注意事項；#517 裁定排程一律以
+> 台灣時間解讀後，換算不再需要。**若你讀到的舊版文件或舊 PR 說要換算，那是 #517 之前的事。**
 
 ### ⚠️ day-of-week 是 **週一為 0**，不是標準 crontab 的週日為 0
 
