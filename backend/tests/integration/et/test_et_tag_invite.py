@@ -195,3 +195,91 @@ class TestBulkEnroll:
         cid = await _course(client, teacher)
 
         assert await _repo.bulk_enroll(db, cid, [], operator=OperatorInfo(user_id=teacher)) == 0
+
+
+class TestOwnerIsNeverEnrolledIntoOwnCourse:
+    """#520：課程擁有者不得被標籤帶入**自己的**課程。
+
+    ## 排除做在 `bulk_enroll_returning`——三條路徑的唯一匯流點
+
+    | 路徑 | 呼叫端 | 本檔是否涵蓋 |
+    |---|---|---|
+    | 發布時依課程標籤帶入 | `course/publish_service` | ✅ 本組 |
+    | 已發布課程新增標籤（`FR-ET-US8-04`）| `course/service.add_tags` | ✅ 本組 |
+    | 貼標追溯（`FR-ET-US8-05`）| `roles/assign_service` | `test_et_tag_backfill.py` |
+
+    ⚠️ **`target_user_ids` 仍然會回出擁有者**——這是刻意的。那支的語意是「掛這些標籤
+    的學員有誰」，擁有者確實掛著；排除是**帶入時**的規則，不是解析時的。兩者混在一起
+    會讓「他掛了這個標籤嗎」這個問題在不同呼叫端得到不同答案。
+    """
+
+    async def test_擁有者不會被帶入自己的課程(self, client, db) -> None:
+        """🔴 擁有者身上有 `ET_STUDENT` 角色（建立帳號時自動授予，#89），所以他本來就在
+        標籤帶入的母體裡——那正是 #520 的成因。"""
+        teacher = await _user(db, "t_own10", ROLE_TEACHER)
+        db.add(
+            EtUserRole(
+                user_id=teacher,
+                role=ROLE_STUDENT,
+                is_active=True,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        cid = await _course(client, teacher)
+        tag_id = await _new_tag(db, "護理師_own10")
+        await _tag_course(db, cid, tag_id)
+        await _tag_user(db, teacher, tag_id)
+
+        created = await _repo.bulk_enroll_returning(db, cid, [teacher], operator=OperatorInfo(user_id=teacher))
+
+        assert created == [], "擁有者被帶入了自己的課程（#520）"
+        assert await _enrolled(db, cid) == []
+
+    async def test_同一次帶入仍把其他學員加進去(self, client, db) -> None:
+        """🔴 與上一條**成對**：少了它，把 `bulk_enroll_returning` 改成「一律不加入」
+        也會通過上一條，而那會讓整個標籤帶入功能靜默失效。"""
+        teacher = await _user(db, "t_own11", ROLE_TEACHER)
+        student = await _user(db, "s_own11")
+        db.add(
+            EtUserRole(
+                user_id=teacher,
+                role=ROLE_STUDENT,
+                is_active=True,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        cid = await _course(client, teacher)
+
+        created = await _repo.bulk_enroll_returning(db, cid, [teacher, student], operator=OperatorInfo(user_id=teacher))
+
+        assert created == [student], "擁有者應被濾掉、其他學員應照常加入"
+
+    async def test_擁有者在他人課程仍可被帶入(self, client, db) -> None:
+        """🔴 第三條成對斷言：排除的判準是「他是**這門課**的擁有者」，不是「他是教師」。
+
+        教師修別人開的課是合法的。
+        """
+        owner = await _user(db, "t_own12", ROLE_TEACHER)
+        other_teacher = await _user(db, "t_oth12", ROLE_TEACHER)
+        db.add(
+            EtUserRole(
+                user_id=other_teacher,
+                role=ROLE_STUDENT,
+                is_active=True,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        cid = await _course(client, owner)
+
+        created = await _repo.bulk_enroll_returning(db, cid, [other_teacher], operator=OperatorInfo(user_id=owner))
+
+        assert created == [other_teacher], "他人課程的帶入被誤擋了"
