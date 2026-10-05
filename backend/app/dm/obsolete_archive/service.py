@@ -19,7 +19,10 @@ from app.dm.obsolete_archive.repository import ObsoleteArchiveRepository
 from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
 from app.dm.roles.authz import DM_ADMIN, has_role
 
-# CSV 表頭（欄位對齊清單 FR-003）；廢止時間以 UTC 呈現供稽核封存。
+# CSV 表頭（欄位對齊清單 FR-003）。
+# 廢止時間以**台灣時間**呈現（`format_taipei`，#483 起）——此註解原本寫「以 UTC 呈現」，
+# 在行為改掉後未同步更新（#513）。這份 CSV 是稽核封存用，時區標錯會讓判讀差 8 小時，
+# 故一併記下：改動 `_to_csv_row` 的時間輸出時，這行也要跟著改。
 _CSV_HEADERS = ["文件編號", "文件名稱", "末版版號", "分類", "原作者", "廢止時間", "廢止申請人", "核准者", "廢止原因"]
 
 

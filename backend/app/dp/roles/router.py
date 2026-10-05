@@ -18,6 +18,7 @@ from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.dp.roles.schemas import AssignmentItem, AssignPayload, GroupOption
 from app.dp.roles.service import RolesService
+from app.dp.users.schemas import USER_KEYWORD_MAX_LEN
 
 router = APIRouter(prefix="/api/dp/roles", tags=["dp-roles"], dependencies=[Depends(require_any_module_admin())])
 
@@ -35,7 +36,9 @@ async def manageable_modules(
 @router.get("/{module}/assignments", response_model=PagedResponse[AssignmentItem])
 async def list_assignments(
     module: str,
-    keyword: str | None = Query(default=None),
+    # 本參數原封不動交給 `UsersService.list_users`，與人員管理頁是**同一個查詢**，故共用其上限
+    # 常數而非沿用 DM 各查詢的 200（#513）。完整理由見該常數註解。
+    keyword: str | None = Query(default=None, max_length=USER_KEYWORD_MAX_LEN),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
     operator: OperatorInfo = Depends(get_operator),

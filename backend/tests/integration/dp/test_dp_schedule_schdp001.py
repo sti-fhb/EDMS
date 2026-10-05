@@ -5,6 +5,7 @@
 """
 
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -173,6 +174,30 @@ async def _reminder_logs(db):
     return list(
         (await db.execute(select(DpEmailLog).where(DpEmailLog.template_code == "PWD_EXPIRY_REMIND"))).scalars().all()
     )
+
+
+async def test_到期日以台灣時間呈現(db):
+    """信裡的到期日須為**台灣時間**的日期，不是 asyncpg 回傳物件的 UTC 日期（#513 第 1 項）。
+
+    ⚠️ **時點刻意取「UTC 23:00 ＝ 台灣隔天 07:00」**：兩者日期不同，修法有沒有生效才分得出來。
+    若取中午的時點，UTC 與台灣同日，`strftime` 與 `format_taipei_date` 都會給出同一個字串——
+    改與不改都會過，這條測試就白寫了。
+
+    此欄位在本 issue 之前**無任何測試覆蓋**（既有測試只斷言信有寄出），所以錯了一直是綠的。
+    """
+    # 到期日落在提醒窗內（3 天後），且 UTC 時刻為 23:00
+    expiry_at = (utcnow() + timedelta(days=3)).replace(hour=23, minute=0, second=0, microsecond=0)
+    await _seed_user(db, user_id="exptz", email="exptz@x.com", pwd_changed=expiry_at - timedelta(days=90))
+
+    sent = await _service.send_pwd_expiry_reminders(db)
+
+    assert sent == 1
+    body = (await _reminder_logs(db))[0].body
+    taipei_date = expiry_at.astimezone(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d")
+    utc_date = expiry_at.strftime("%Y-%m-%d")
+    assert taipei_date != utc_date, "時點設計失誤：兩者同日則本測試無鑑別力"
+    assert taipei_date in body
+    assert utc_date not in body  # 修正前出現的是這個（早一天）
 
 
 async def test_sends_reminder_in_window(db):

@@ -8,6 +8,13 @@ from app.core.schema_types import NormalizedEmailStr, SafeNameStr
 # 姓名一律走共用型別（strip + 長度 + 拒控制字元，理由見 core/schema_types.py，#225）
 _NameStr = SafeNameStr
 
+#: 使用者搜尋關鍵字（姓名 / Email 模糊比對）之長度上限 = 比對欄位中較長者 `DP_USER.EMAIL` 的
+#: VARCHAR(255)。**凡是把關鍵字交給 `UsersService.list_users` / `list_invites` 的端點都必須用它**，
+#: 目前有 `dp/users`（清單、邀請清單）與 `dp/roles`（權限指派清單）三處——它們是同一個查詢，
+#: 上限各寫各的會讓同一組關鍵字在一頁搜得到、另一頁 422（#513 Security LOW-1 即為此）。
+#: ⚠️ 此上限只防過長字串，**不含 LIKE 萬用字元跳脫**（`%` / `_` 仍為樣式字元），見 #275。
+USER_KEYWORD_MAX_LEN = 255
+
 
 class UserResponse(BaseModel):
     """使用者清單 / 單筆回應（管理者檢視）。
