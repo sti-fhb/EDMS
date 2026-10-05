@@ -429,7 +429,7 @@ class EtTrackingService:
 
         questions = await self._repo.survey_questions(db, survey.survey_id)
         options = await self._repo.survey_options(db, [q.sq_id for q in questions])
-        responses = await self._repo.survey_responses(db, survey.survey_id)
+        responses = await self._repo.survey_responses(db, survey.survey_id, course_id=course_id)
         answers = await self._repo.survey_answers(db, [r.response_id for r in responses])
         enrolled = await self._repo.enrolled_count(db, course_id)
         names = await self._repo.user_names(db, {r.user_id for r in responses})
