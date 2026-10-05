@@ -126,6 +126,28 @@ _DEFAULT_CHAR_TYPES = 3
 _DEFAULT_HISTORY_COUNT = 3
 _DEFAULT_EXPIRY_DAYS = 90
 
+# ⚠️ 這三句裡的「30 分鐘」是**寫死的字面值**，而連結的實際效期讀自
+# `DP_PARAM.LOGIN.RESET_TOKEN_TTL_MIN`（`EDIT_SCOPE='ADMIN'`，管理者改得動；
+# 落地於 `forgot_service.py` / `register_service.py` / `verify_service.py`）。
+# **改那個參數時要一併改這三句**，否則畫面會告訴使用者一個錯的期限——調短尤其糟：
+# 使用者以為還有時間，點開卻是「連結已失效」。
+#
+# 前端另有兩份同樣寫死的副本（`auth/ForgotPasswordForm.tsx:11`、`auth/RegisterForm.tsx:87`），
+# 且前端顯示的是它自己的常數、不是這裡回的 message。
+#
+# 所以正式碼要改的是 **3 個檔、共 5 句**：本檔三句 + 前端兩句。
+# 另有 4 處測試夾具寫死同一字串（`test/server.ts` ×3、`auth/LoginOverlay.test.tsx` ×1），
+# 那些**會自己變紅**，不必事先找——照著紅的改即可，它們反而是「你還沒改完」的提醒。
+#
+# 核對用（刻意不用 `30 分鐘` 當樣式：那會連 ET 排程 docstring 裡無關的用語一起撈進來，
+# 14 筆裡只有 5 筆是真的，雜訊反而讓人以為漏改）：
+#     git grep -n "請於 30 分鐘內" -- backend/app frontend/src
+#
+# 應為 10 筆：5 正式 + 4 測試 + **本行指令自己**（樣式字串就寫在本註解裡，會把自己撈進來）。
+#
+# 未改成動態插值是刻意的取捨（2026-10-05 橫向檢查）：該參數是安全衛生旋鈕、實務上幾乎不會
+# 被調整，而後果僅是使用者多申請一次連結。若日後真的要調整效期（如資安稽核要求縮短），
+# 正確作法是讓這三句用讀到的 `ttl_min` 組出來，並讓前端改用後端回的 message。
 _FORGOT_MESSAGE = "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設"
 _REGISTER_MESSAGE = "驗證信已寄至您的信箱，請於 30 分鐘內點連結設定密碼以完成註冊"
 _RESEND_MESSAGE = "若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證"
