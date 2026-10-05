@@ -4,8 +4,16 @@
 於 `main.py` module-level 呼叫一次（比照 `app/dm/bootstrap.py`；未註冊模組閘一律
 fail-closed）。
 
-**本函式是 DP #113（真授權閘）的解鎖條件**——DP 各後台端點目前採暫行案
-（任何登入者可存取），正是因為 fail-closed 閘在無模組註冊時會 403 鎖死整個後台。
+⛔ **拔掉本函式的註冊會讓 DP 後台對所有人 403**（#113 / #250）。
+
+它曾是 DP 真授權閘的**解鎖條件**：DP 各後台端點一度採暫行案（任何登入者可存取），
+正是因為 fail-closed 閘在無模組註冊時會鎖死整個後台。ET / DM 註冊後 #250 掛上真閘，
+現在 7 個 DP router 皆為 `require_any_module_admin()`——方向因此反轉，**少了註冊不再是
+「閘沒生效」而是「所有人都進不去」**。
+
+⚠️ 同時影響的還有兩個**不會以 403 現形**的判定：個資頁的特權密碼長度
+（`dp/user/profile_service.py` 的 `ADMIN_MIN_LEN` 12 → 退回 8）與通知範本的模組可見範圍
+（`dp/notify/admin_service.py` → 只剩 DP 系統信）。兩者都是**安靜地降級**，不會有人抱怨。
 """
 
 from app.core.module_admin import module_admin_gate
