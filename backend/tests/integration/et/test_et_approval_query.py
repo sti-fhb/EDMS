@@ -548,7 +548,12 @@ class TestEmailDomainIsNotSearchable:
         f = await _fixture(db)
         # 🔴 正向錨點不可省：同一組 fixture 以正常關鍵字查得到資料，否則下面的「空清單」
         # 可能只是因為根本沒有任何紀錄——那樣的斷言對任何實作都會通過。
-        baseline = await client.post(_QUERY, json={"keyword": "s_lin"}, headers=_bearer(f["own"]))
+        #
+        # ⚠️ 錨點刻意走**姓名**路徑（`林`）而非 Email：錨點必須獨立於被測的東西。
+        # 初版用 `s_lin`（只經 Email local part 命中），於是變異掉 local part 比對時
+        # 本組全部因**錨點失敗**而紅——紅的理由不是「網域又查得到了」，那樣的紅會讓人
+        # 以為本組守住了它其實沒守的事。
+        baseline = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
         assert _names(baseline.json()), "錨點失敗：fixture 查不到資料，本測試沒有鑑別力"
 
         r = await client.post(_QUERY, json={"keyword": keyword}, headers=_bearer(f["own"]))
