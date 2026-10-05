@@ -13,7 +13,7 @@ from app.core.exceptions import AppError
 from app.core.module_assign import module_assign_registry
 from app.core.utils import utcnow
 from app.dm.bootstrap import register_dm_module
-from app.dm.catalog.adapter import CatalogAdapter
+from app.dm.catalog.adapter import CatalogAdapter, _flush_catching_duplicate
 from app.dm.catalog.models import DmCategory, DmFunc, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument
 from app.dp.audit.models import DpAuditLog
@@ -196,6 +196,140 @@ async def test_create_tag_in_group_and_rename(db):
     await _svc.rename_controlled(db, "TAG", code=str(tag.tag_id), new_name="對象改名", operator_id="admin")
     refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == tag.tag_id))
     assert refreshed.tag_name == "對象改名"
+
+
+async def test_同組同名標籤新增回409不是500(db):
+    """組內同名標籤之新增須回乾淨的 409，不得讓唯一鍵把例外打成 500（#506）。
+
+    `DM_TAG` 有 `UQ_DM_TAG_GROUP_NAME`（#437）。在本修正之前，`create_controlled` 只檢查
+    「標籤組存在」就直接 `flush()`，於是撞唯一鍵 → `IntegrityError` → `main.py` 無對應
+    handler → 落到泛用 `Exception` handler → **500**。DP03 的標籤分區新增一按就中。
+
+    ⚠️ 斷言 `error_code` 而非只看狀態碼：500 也可能恰巧被某個中介層轉成 4xx，
+    只驗狀態碼會讓「換一種方式壞掉」看起來像修好了。
+    """
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT重複名", operator_id="admin")
+
+    with pytest.raises(AppError) as exc:
+        await _svc.create_controlled(db, "TAG", code=grp, name="ZT重複名", operator_id="admin")
+
+    assert exc.value.status_code == 409
+    assert exc.value.error_code == "DM_CATALOG_001"
+
+
+async def test_跨組同名標籤可新增(db):
+    """對照組：唯一鍵是 (組, 名稱) 而非 (名稱)——跨組同名合法，不得被上一條的檢核誤擋。
+
+    沒有這條對照，把檢核寫成「只比名稱」也會讓上一條通過，而那會擋掉合法操作
+    （例如「護理師」同時存在於職位組與某檢索組）。
+    """
+    grp_a = await _audience_group(db)
+    grp_b = await _unit_group(db)
+    assert grp_a != grp_b, "前提：測試需要兩個不同的標籤組"
+
+    await _svc.create_controlled(db, "TAG", code=grp_a, name="ZT跨組同名", operator_id="admin")
+    await _svc.create_controlled(db, "TAG", code=grp_b, name="ZT跨組同名", operator_id="admin")
+
+    groups = (await db.execute(select(DmTag.tag_group_code).where(DmTag.tag_name == "ZT跨組同名"))).scalars().all()
+    assert set(groups) == {grp_a, grp_b}
+
+
+async def test_改名為同組既有名稱回409(db):
+    """改名撞到同組既有名稱同樣須回 409——與新增是同一個唯一鍵、同一種 500。"""
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT原名A", operator_id="admin")
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT原名B", operator_id="admin")
+    tag_b = await db.scalar(select(DmTag).where(DmTag.tag_name == "ZT原名B"))
+
+    with pytest.raises(AppError) as exc:
+        await _svc.rename_controlled(db, "TAG", code=str(tag_b.tag_id), new_name="ZT原名A", operator_id="admin")
+
+    assert exc.value.status_code == 409
+    assert exc.value.error_code == "DM_CATALOG_001"
+
+
+async def test_通用值標籤不可改名以阻斷兩步擴權(db):
+    """🔴 `全體` / `全單位` 是可見性的保留字，不可改名（#506 security review HIGH-1）。
+
+    可見性判定比對的是 **`TAG_NAME` 字串**（`document/visibility.py:75-76`），不是 ID。
+    通用值若可改名，兩步就能讓某個具體單位變成「不限」：
+
+      1. 把 `全單位` 改名為別的 → 名稱空出
+      2. 把 `ZZ醫院` 改名為 `全單位` → 掛該單位的文件全部變成不限單位
+
+    稽核只會留下兩筆「改名」，**不會記「可見範圍擴大」**。組內名稱唯一約束
+    （`UQ_DM_TAG_GROUP_NAME`）只擋得住一步版本——第 1 步把名稱空出後，第 2 步就通過了。
+    故守門必須擋在**第 1 步**。
+
+    ET 早有這道守門（`et/catalog/adapter.py` 的 `is_all` → `ET_TAG_001`）；DM 沒有 `IS_ALL`
+    欄位，改以「組內保留字」辨識。
+    """
+    unit_grp = await _unit_group(db)
+    reserved = await db.scalar(select(DmTag).where(DmTag.tag_group_code == unit_grp, DmTag.tag_name == "全單位"))
+    assert reserved is not None, "前提：UNIT 組應有種子通用值「全單位」"
+
+    with pytest.raises(AppError) as exc:
+        await _svc.rename_controlled(db, "TAG", code=str(reserved.tag_id), new_name="全單位(舊)", operator_id="admin")
+
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DM_CATALOG_004"
+    refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == reserved.tag_id))
+    assert refreshed.tag_name == "全單位", "被擋下時不得已經改掉"
+
+
+async def test_同組的一般標籤仍可改名(db):
+    """對照組：守門只保護保留字，不得把整組標籤都鎖住。
+
+    沒有這條，把守門寫成「UNIT 組一律不可改名」也會讓上一條通過——而那會逾越契約
+    （ET 的註解特別說明過：以 `is_builtin` 把關會使全部內建標籤不能改名，是錯的）。
+    """
+    unit_grp = await _unit_group(db)
+    await _svc.create_controlled(db, "TAG", code=unit_grp, name="ZT普通單位", operator_id="admin")
+    tag = await db.scalar(select(DmTag).where(DmTag.tag_name == "ZT普通單位"))
+
+    await _svc.rename_controlled(db, "TAG", code=str(tag.tag_id), new_name="ZT普通單位改", operator_id="admin")
+
+    refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == tag.tag_id))
+    assert refreshed.tag_name == "ZT普通單位改"
+
+
+async def test_守門比對的約束名與資料庫實際回報一致(db):
+    """`_TAG_NAME_CONSTRAINT` 必須與 PostgreSQL 實際回報的 `conname` 逐字相符（#506）。
+
+    🔴 **為什麼需要這條**：`_ensure_tag_name_free` 會先把同名擋下，所以**上面那些測試
+    一條都走不到 `_flush_catching_duplicate`**——那道守門比對的常數與真實約束名是否一致，
+    在此之前只有推論（migration 的 DDL 寫法 + SQLAlchemy quoting 規則），沒有證據。
+    常數打錯一個字，TOCTOU 那條就會悄悄退回 500，而全部測試照樣綠。
+
+    故本條**繞過前置檢核**、直接讓 DB 拋，驗守門真的認得出來。
+    """
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT約束名對帳", operator_id="admin")
+
+    # 繞過 `_ensure_tag_name_free`：直接塞第二列同名，讓唯一鍵在 flush 時爆
+    db.add(DmTag(tag_group_code=grp, tag_name="ZT約束名對帳", created_user="admin", created_date=utcnow()))
+
+    with pytest.raises(AppError) as exc:
+        await _flush_catching_duplicate(db)
+
+    assert exc.value.status_code == 409, "守門沒認出這個約束 → 常數與實際 conname 不符"
+    assert exc.value.error_code == "DM_CATALOG_001"
+
+
+async def test_改名為自己原本的名稱不被誤擋(db):
+    """邊界：同名檢核必須排除自己，否則「改名成原值」這個無害操作會被擋下。
+
+    這是自我排除條件（`tag_id != 自己`）唯一會變紅的情境——少了它，上面三條照樣全過。
+    """
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT不變名", operator_id="admin")
+    tag = await db.scalar(select(DmTag).where(DmTag.tag_name == "ZT不變名"))
+
+    await _svc.rename_controlled(db, "TAG", code=str(tag.tag_id), new_name="ZT不變名", operator_id="admin")
+
+    refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == tag.tag_id))
+    assert refreshed.tag_name == "ZT不變名"
 
 
 async def test_disable_audience_tag_soft_retire_returns_affected(db):

@@ -11,6 +11,7 @@ CATEGORY 委派既有 `CatalogService`（重用碼格式 / 重複檢核）；FUN
 import re
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -32,6 +33,25 @@ _AUDIENCE = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
 _UNIT = "UNIT"  # 單位標籤組（#437）；其 GROUP_TYPE 與 TAG_GROUP_CODE 同值
 _ALL_UNITS_TAG = "全單位"
+# 標籤名稱在組內重複（`UQ_DM_TAG_GROUP_NAME`）。沿用 `DM_CATALOG_001`——它是 DM 的 409「已存在」
+# 碼，與 ET 的 `ET_TAG_002` 對應；但登記訊息寫的是「代碼」，故此處另給貼合名稱情境的文字。
+_DUP_TAG_NAME_MSG = "此標籤名稱在該組已存在"
+# 組內名稱唯一約束之名稱（`models.py` 的 `UniqueConstraint`）。`_flush_catching_duplicate`
+# 以它辨識「這個 IntegrityError 是不是名稱重複」，不是就原樣往外，不冒名頂替。
+_TAG_NAME_CONSTRAINT = "UQ_DM_TAG_GROUP_NAME"
+# 🔴 可見性的**保留字**（組代碼 → 該組的通用值名稱）。
+#
+# `document/visibility.py` 判定「不限單位 / 不限職位」是比對 **`TAG_NAME` 字串**而非 ID，
+# 所以誰叫這個名字，誰就是通用值。通用值若可改名，兩步即可擴權：
+#   1. 把「全單位」改名 → 名稱空出（唯一約束不再擋）
+#   2. 把某個具體單位改名為「全單位」→ 掛該單位的文件全部變成不限單位
+# 稽核只留兩筆「改名」，不會記可見範圍擴大。故守門擋在第 1 步（見 `_ensure_not_reserved_tag`）。
+#
+# ⚠️ 用「組內保留字」而非 `is_builtin` 辨識：種子標籤多半 `IS_BUILTIN=true`，以它把關會連
+# 一般內建標籤都鎖住，逾越契約——ET 的對應註解（`et/catalog/adapter.py`）踩過同一個坑。
+_RESERVED_TAG_NAMES = {_AUDIENCE: _ALL_AUDIENCE_TAG, _UNIT: _ALL_UNITS_TAG}
+_RESERVED_TAG_MSG = "可見性通用值標籤不可改名"
+_UNIQUE_VIOLATION_SQLSTATE = "23505"  # PostgreSQL unique_violation
 
 # 各受控清單於 DP 維護頁「說明」欄之內容。**只有 DM 寫得出這些句子**——它們講的是
 # 掛上之後文件會怎麼被看見 / 被檢索，屬 DM 業務語意（見 `ControlledKindView.description`）。
@@ -189,9 +209,10 @@ class CatalogAdapter:
         if kind == "TAG":  # code 為所屬標籤組
             if await db.scalar(select(DmTagGroup.tag_group_code).where(DmTagGroup.tag_group_code == code)) is None:
                 raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+            await _ensure_tag_name_free(db, group_code=code, name=name)
             tag = DmTag(tag_group_code=code, tag_name=name, created_user=operator_id, created_date=utcnow())
             db.add(tag)
-            await db.flush()
+            await _flush_catching_duplicate(db)
             # 稽核 target 用新建之 TAG_ID——`code` 是所屬標籤組，無法定位被建立的是哪個標籤
             target = str(tag.tag_id)
         await self._log(db, "CREATE", operator_id, target=target, after={"kind": kind, "name": name})
@@ -213,9 +234,14 @@ class CatalogAdapter:
             if kind == "FUNC":
                 obj.func_name = new_name
             else:
+                # 順序有意義：保留字守門在重複檢核**之前**——通用值改名要回 422（業務保護），
+                # 不能因為新名稱恰好撞到別人而先回 409，那會把「這個不准改」說成「名稱重複」。
+                _ensure_not_reserved_tag(obj)
+                # 排除自己：少了 `exclude_tag_id`，「改名成原值」這個無害操作會被自己擋下
+                await _ensure_tag_name_free(db, group_code=obj.tag_group_code, name=new_name, exclude_tag_id=obj.tag_id)
                 obj.tag_name = new_name
             obj.updated_user, obj.updated_date = operator_id, utcnow()
-            await db.flush()
+            await _flush_catching_duplicate(db)
         await self._log(db, "UPDATE", operator_id, target=code, before=before, after={"kind": kind, "name": new_name})
 
     async def set_controlled_enabled(
@@ -305,6 +331,88 @@ def _tag_id(code: str) -> int:
 def _ensure_kind(kind: str) -> None:
     if kind not in _KINDS:
         raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+
+
+def _ensure_not_reserved_tag(tag: DmTag) -> None:
+    """保留字標籤（`全體` / `全單位`）不可改名（#506）。
+
+    擋的是**兩步擴權的第 1 步**：名稱一旦空出，第 2 步把具體單位改名成通用值就不再撞唯一鍵，
+    而可見性是比對 `TAG_NAME` 字串，等於讓掛該單位的文件全部變成「不限」。詳見
+    `_RESERVED_TAG_NAMES` 的註解。
+
+    ⛔ 只保護保留字本身，不是整組——其餘標籤（含內建）仍可改名，那是契約允許的。
+
+    對應 ET 的 `ET_TAG_001`（`「全體」標籤不可停用或改名`）。DM 這邊目前**只擋改名**：
+    停用通用值不會擴大可見範圍（可見性不看 `IS_ENABLED`），只會讓它從新文件的下拉消失。
+    """
+    if _RESERVED_TAG_NAMES.get(tag.tag_group_code) == tag.tag_name:
+        raise AppError(status_code=422, detail=_RESERVED_TAG_MSG, error_code="DM_CATALOG_004")
+
+
+async def _ensure_tag_name_free(
+    db: AsyncSession, *, group_code: str, name: str, exclude_tag_id: int | None = None
+) -> None:
+    """確認該標籤組內尚無同名標籤，否則回 409（#506）。
+
+    `DM_TAG` 有 `UQ_DM_TAG_GROUP_NAME`（組 + 名稱，#437）。在本檢核之前，新增 / 改名撞到
+    既有名稱會直接讓 `IntegrityError` 逸出——`main.py` 無對應 handler，落到泛用 `Exception`
+    handler 變成 **500**，而 DP03 的標籤分區一按就中。
+
+    唯一鍵是 **(組, 名稱)** 不是 (名稱)：查詢必須帶 `group_code`，否則會擋掉合法的跨組同名
+    （例如「護理師」可同時存在於職位組與某檢索組）。
+
+    `exclude_tag_id` 供改名排除自己，否則「改名成原值」會被自己擋下。
+
+    寫法比照同契約的 ET 實作（`et/catalog/adapter.py` 的 `create_controlled` / `rename_controlled`）。
+    """
+    stmt = select(DmTag.tag_id).where(DmTag.tag_group_code == group_code, DmTag.tag_name == name)
+    if exclude_tag_id is not None:
+        stmt = stmt.where(DmTag.tag_id != exclude_tag_id)
+    if await db.scalar(stmt) is not None:
+        raise AppError(status_code=409, detail=_DUP_TAG_NAME_MSG, error_code="DM_CATALOG_001")
+
+
+async def _flush_catching_duplicate(db: AsyncSession) -> None:
+    """flush，並**只**把撞 `UQ_DM_TAG_GROUP_NAME` 的 `IntegrityError` 轉成乾淨的 409。
+
+    `_ensure_tag_name_free` 與本次 flush 之間有 TOCTOU 空窗：兩位管理者同時送出同名標籤時，
+    兩邊的檢核都會通過，後寫入的那邊撞唯一鍵。比照 `dp/params/service.py` 的 `create_detail`
+    兜底（否則落全域 500），交由 `get_db` rollback（它對任何例外都 rollback 後 re-raise）。
+
+    ⚠️ **只認那一個約束，其餘原樣往外拋**：`except IntegrityError` 全收會把 FK / NOT NULL /
+    長度超限等**未預期的缺陷**一律標成「名稱重複」——使用者看到的 409 訊息是錯的，真正的
+    原因被吞掉。未預期的錯誤本來就該以 500 現形，那是它被發現的唯一途徑。
+    （`create_detail` 的情境是單一 PK，全收不會誤判，故「比照」只成立一半。）
+
+    ⚠️ 併發那條路**無法以測試覆蓋**（需要真實並發）；但「只認這個約束」這件事可以，
+    見 `tests/unit/dm/test_dm_catalog_flush_guard.py` 與
+    `test_dm_catalog_adapter.py::test_守門比對的約束名與資料庫實際回報一致`。
+    """
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        if not _is_tag_name_violation(exc):
+            raise
+        raise AppError(status_code=409, detail=_DUP_TAG_NAME_MSG, error_code="DM_CATALOG_001") from exc
+
+
+def _is_tag_name_violation(exc: IntegrityError) -> bool:
+    """此 `IntegrityError` 是否來自 `UQ_DM_TAG_GROUP_NAME`。
+
+    兩道條件都要成立：
+
+    1. `sqlstate == 23505`（unique_violation）。asyncpg 的例外經 SQLAlchemy 包裝後雖然不保留
+       `constraint_name`，但 `sqlstate` / `pgcode` **有**被代理過來，先用它排掉 FK / NOT NULL /
+       CHECK 等整個家族，比字串可靠。
+    2. 約束名出現在**主訊息**裡。只比對 `DETAIL:` 之前的部分——`DETAIL:` 那段會把整列欄位值
+       印出來（`Failing row contains (…)`），而欄位值**是使用者輸入的**：一個名為
+       `UQ_DM_TAG_GROUP_NAME` 的標籤就能讓不相干的錯誤被誤判成名稱重複，正是本函式要防的事。
+       今天打不到（`DM_TAG` 無 CHECK、FK 違反的 DETAIL 不含 `TAG_NAME`），但這是
+       「使用者可控資料流入分支判斷式」的形狀，加欄位或加 CHECK 的那天就會活過來。
+    """
+    if getattr(exc.orig, "sqlstate", None) != _UNIQUE_VIOLATION_SQLSTATE:
+        return False
+    return _TAG_NAME_CONSTRAINT in str(exc.orig).partition("\nDETAIL:")[0]
 
 
 def _ensure_code(code: str) -> None:

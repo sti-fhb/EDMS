@@ -5,6 +5,7 @@ import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { controlledApi } from "./paramsService"
+import { TOGGLE_OFF_CONTENT, TOGGLE_OFF_OK, TOGGLE_OFF_TITLE } from "./toggleMessages"
 import type { ControlledSection } from "./paramsService"
 
 const _SAVED_MSG = "已儲存並即時生效"
@@ -87,12 +88,7 @@ export function useControlled() {
         }
       }
       if (!enabled) {
-        confirm({
-          title: "停用項目",
-          content: "停用後不可再用於新資料，既有引用保留不受影響。確定停用？",
-          okText: "確定停用",
-          onOk: apply,
-        })
+        confirm({ title: TOGGLE_OFF_TITLE, content: TOGGLE_OFF_CONTENT, okText: TOGGLE_OFF_OK, onOk: apply })
         return
       }
       await apply()
