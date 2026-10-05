@@ -17,7 +17,14 @@ from app.core.db import get_db
 from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse
-from app.dp.users.schemas import InviteResponse, UserCreate, UserResponse, UserStatusUpdate, UserUpdate
+from app.dp.users.schemas import (
+    USER_KEYWORD_MAX_LEN,
+    InviteResponse,
+    UserCreate,
+    UserResponse,
+    UserStatusUpdate,
+    UserUpdate,
+)
 from app.dp.users.service import UsersService
 
 router = APIRouter(prefix="/api/dp/users", tags=["dp-users"], dependencies=[Depends(require_any_module_admin())])
@@ -39,7 +46,7 @@ _service = UsersService(invite_cooldown=_invite_send_cooldown)
 @router.get("", response_model=PagedResponse[UserResponse])
 async def list_users(
     db: AsyncSession = Depends(get_db),
-    q: Optional[str] = Query(default=None, max_length=255),
+    q: Optional[str] = Query(default=None, max_length=USER_KEYWORD_MAX_LEN),
     account_status: Optional[Literal["active", "disabled", "locked"]] = Query(default=None, alias="status"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=MAX_LIMIT),
@@ -67,7 +74,7 @@ async def create_user(
 @router.get("/invites", response_model=PagedResponse[InviteResponse])
 async def list_invites(
     db: AsyncSession = Depends(get_db),
-    q: Optional[str] = Query(default=None, max_length=255),
+    q: Optional[str] = Query(default=None, max_length=USER_KEYWORD_MAX_LEN),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=MAX_LIMIT),
 ):
