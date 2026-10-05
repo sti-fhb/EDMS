@@ -11,6 +11,7 @@ CATEGORY 委派既有 `CatalogService`（重用碼格式 / 重複檢核）；FUN
 import re
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -32,6 +33,9 @@ _AUDIENCE = "AUDIENCE"
 _ALL_AUDIENCE_TAG = "全體"
 _UNIT = "UNIT"  # 單位標籤組（#437）；其 GROUP_TYPE 與 TAG_GROUP_CODE 同值
 _ALL_UNITS_TAG = "全單位"
+# 標籤名稱在組內重複（`UQ_DM_TAG_GROUP_NAME`）。沿用 `DM_CATALOG_001`——它是 DM 的 409「已存在」
+# 碼，與 ET 的 `ET_TAG_002` 對應；但登記訊息寫的是「代碼」，故此處另給貼合名稱情境的文字。
+_DUP_TAG_NAME_MSG = "此標籤名稱在該組已存在"
 
 # 各受控清單於 DP 維護頁「說明」欄之內容。**只有 DM 寫得出這些句子**——它們講的是
 # 掛上之後文件會怎麼被看見 / 被檢索，屬 DM 業務語意（見 `ControlledKindView.description`）。
@@ -189,9 +193,10 @@ class CatalogAdapter:
         if kind == "TAG":  # code 為所屬標籤組
             if await db.scalar(select(DmTagGroup.tag_group_code).where(DmTagGroup.tag_group_code == code)) is None:
                 raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+            await _ensure_tag_name_free(db, group_code=code, name=name)
             tag = DmTag(tag_group_code=code, tag_name=name, created_user=operator_id, created_date=utcnow())
             db.add(tag)
-            await db.flush()
+            await _flush_catching_duplicate(db)
             # 稽核 target 用新建之 TAG_ID——`code` 是所屬標籤組，無法定位被建立的是哪個標籤
             target = str(tag.tag_id)
         await self._log(db, "CREATE", operator_id, target=target, after={"kind": kind, "name": name})
@@ -213,9 +218,13 @@ class CatalogAdapter:
             if kind == "FUNC":
                 obj.func_name = new_name
             else:
+                # 排除自己：少了 `exclude_tag_id`，「改名成原值」這個無害操作會被自己擋下
+                await _ensure_tag_name_free(
+                    db, group_code=obj.tag_group_code, name=new_name, exclude_tag_id=obj.tag_id
+                )
                 obj.tag_name = new_name
             obj.updated_user, obj.updated_date = operator_id, utcnow()
-            await db.flush()
+            await _flush_catching_duplicate(db)
         await self._log(db, "UPDATE", operator_id, target=code, before=before, after={"kind": kind, "name": new_name})
 
     async def set_controlled_enabled(
@@ -305,6 +314,45 @@ def _tag_id(code: str) -> int:
 def _ensure_kind(kind: str) -> None:
     if kind not in _KINDS:
         raise AppError(status_code=404, detail="查無此受控項目", error_code="DM_CATALOG_002")
+
+
+async def _ensure_tag_name_free(
+    db: AsyncSession, *, group_code: str, name: str, exclude_tag_id: int | None = None
+) -> None:
+    """確認該標籤組內尚無同名標籤，否則回 409（#506）。
+
+    `DM_TAG` 有 `UQ_DM_TAG_GROUP_NAME`（組 + 名稱，#437）。在本檢核之前，新增 / 改名撞到
+    既有名稱會直接讓 `IntegrityError` 逸出——`main.py` 無對應 handler，落到泛用 `Exception`
+    handler 變成 **500**，而 DP03 的標籤分區一按就中。
+
+    唯一鍵是 **(組, 名稱)** 不是 (名稱)：查詢必須帶 `group_code`，否則會擋掉合法的跨組同名
+    （例如「護理師」可同時存在於職位組與某檢索組）。
+
+    `exclude_tag_id` 供改名排除自己，否則「改名成原值」會被自己擋下。
+
+    寫法比照同契約的 ET 實作（`et/catalog/adapter.py` 的 `create_controlled` / `rename_controlled`）。
+    """
+    stmt = select(DmTag.tag_id).where(DmTag.tag_group_code == group_code, DmTag.tag_name == name)
+    if exclude_tag_id is not None:
+        stmt = stmt.where(DmTag.tag_id != exclude_tag_id)
+    if await db.scalar(stmt) is not None:
+        raise AppError(status_code=409, detail=_DUP_TAG_NAME_MSG, error_code="DM_CATALOG_001")
+
+
+async def _flush_catching_duplicate(db: AsyncSession) -> None:
+    """flush，並把撞唯一鍵的 `IntegrityError` 轉成乾淨的 409。
+
+    `_ensure_tag_name_free` 與本次 flush 之間有 TOCTOU 空窗：兩位管理者同時送出同名標籤時，
+    兩邊的檢核都會通過，後寫入的那邊撞唯一鍵。比照 `dp/params/service.py` 的 `create_detail`
+    兜底（否則落全域 500），交由 `get_db` rollback。
+
+    ⚠️ **這道無法以測試覆蓋**——需要真實並發才觸發。留著是因為少了它，本 issue 要修的那個
+    500 只是從「必然」縮成「偶發」，而偶發的 500 更難被發現。
+    """
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise AppError(status_code=409, detail=_DUP_TAG_NAME_MSG, error_code="DM_CATALOG_001") from exc
 
 
 def _ensure_code(code: str) -> None:

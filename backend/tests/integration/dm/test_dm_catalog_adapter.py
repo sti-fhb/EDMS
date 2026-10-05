@@ -198,6 +198,74 @@ async def test_create_tag_in_group_and_rename(db):
     assert refreshed.tag_name == "對象改名"
 
 
+async def test_同組同名標籤新增回409不是500(db):
+    """組內同名標籤之新增須回乾淨的 409，不得讓唯一鍵把例外打成 500（#506）。
+
+    `DM_TAG` 有 `UQ_DM_TAG_GROUP_NAME`（#437）。在本修正之前，`create_controlled` 只檢查
+    「標籤組存在」就直接 `flush()`，於是撞唯一鍵 → `IntegrityError` → `main.py` 無對應
+    handler → 落到泛用 `Exception` handler → **500**。DP03 的標籤分區新增一按就中。
+
+    ⚠️ 斷言 `error_code` 而非只看狀態碼：500 也可能恰巧被某個中介層轉成 4xx，
+    只驗狀態碼會讓「換一種方式壞掉」看起來像修好了。
+    """
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT重複名", operator_id="admin")
+
+    with pytest.raises(AppError) as exc:
+        await _svc.create_controlled(db, "TAG", code=grp, name="ZT重複名", operator_id="admin")
+
+    assert exc.value.status_code == 409
+    assert exc.value.error_code == "DM_CATALOG_001"
+
+
+async def test_跨組同名標籤可新增(db):
+    """對照組：唯一鍵是 (組, 名稱) 而非 (名稱)——跨組同名合法，不得被上一條的檢核誤擋。
+
+    沒有這條對照，把檢核寫成「只比名稱」也會讓上一條通過，而那會擋掉合法操作
+    （例如「護理師」同時存在於職位組與某檢索組）。
+    """
+    grp_a = await _audience_group(db)
+    grp_b = await _unit_group(db)
+    assert grp_a != grp_b, "前提：測試需要兩個不同的標籤組"
+
+    await _svc.create_controlled(db, "TAG", code=grp_a, name="ZT跨組同名", operator_id="admin")
+    await _svc.create_controlled(db, "TAG", code=grp_b, name="ZT跨組同名", operator_id="admin")
+
+    groups = (
+        await db.execute(select(DmTag.tag_group_code).where(DmTag.tag_name == "ZT跨組同名"))
+    ).scalars().all()
+    assert set(groups) == {grp_a, grp_b}
+
+
+async def test_改名為同組既有名稱回409(db):
+    """改名撞到同組既有名稱同樣須回 409——與新增是同一個唯一鍵、同一種 500。"""
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT原名A", operator_id="admin")
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT原名B", operator_id="admin")
+    tag_b = await db.scalar(select(DmTag).where(DmTag.tag_name == "ZT原名B"))
+
+    with pytest.raises(AppError) as exc:
+        await _svc.rename_controlled(db, "TAG", code=str(tag_b.tag_id), new_name="ZT原名A", operator_id="admin")
+
+    assert exc.value.status_code == 409
+    assert exc.value.error_code == "DM_CATALOG_001"
+
+
+async def test_改名為自己原本的名稱不被誤擋(db):
+    """邊界：同名檢核必須排除自己，否則「改名成原值」這個無害操作會被擋下。
+
+    這是自我排除條件（`tag_id != 自己`）唯一會變紅的情境——少了它，上面三條照樣全過。
+    """
+    grp = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=grp, name="ZT不變名", operator_id="admin")
+    tag = await db.scalar(select(DmTag).where(DmTag.tag_name == "ZT不變名"))
+
+    await _svc.rename_controlled(db, "TAG", code=str(tag.tag_id), new_name="ZT不變名", operator_id="admin")
+
+    refreshed = await db.scalar(select(DmTag).where(DmTag.tag_id == tag.tag_id))
+    assert refreshed.tag_name == "ZT不變名"
+
+
 async def test_disable_audience_tag_soft_retire_returns_affected(db):
     """停用 AUDIENCE 標籤 → soft-retire，回傳受影響文件 / 閱覽者數（既有可見性不收回）。"""
     grp = await _audience_group(db)
