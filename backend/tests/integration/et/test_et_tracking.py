@@ -1527,3 +1527,136 @@ class TestLastActivityColumn:
 
         assert r.status_code == 200, r.text
         assert r.json()["data"][0]["last_activity_at"] is None
+
+
+class TestRemovedStudentsExcludedFromAllBlocks:
+    """#523：已移除學員不得出現在區塊 2、區塊 3 與問卷 CSV。
+
+    ## 本組在守的是「三個區塊對同一群人給同一個答案」
+
+    區塊 1「已加入學員」早已依 AC 5 排除已移除者（`test_已移除學員不列入但歷史保留`），
+    但區塊 2 與 3 原本直接以 `COURSE_ID` / `SURVEY_ID` 查、**不經選課表**，於是同一個人
+    消失在區塊 1、卻仍留在區塊 2、3——**同一群人、同一個頁面、兩種答案**。
+
+    ⛔ **排除是顯示層的事，資料一列不動。** `ET_QUIZ_ATTEMPT_M` / `_D` 明訂 append-only、
+    永不刪除，且 ET 不逐筆寫 `DP_AUDIT_LOG`、學員作答的稽核就靠那兩張表。本組另有一條
+    斷言釘住「資料還在」，避免日後有人改用刪除來達成同一個畫面效果。
+
+    ⚠️ 每條排除都配一條「**未被移除者照常列出**」。少了它，把查詢改成「一律回空」
+    也會通過排除那條，而那會讓整個區塊靜默失效。
+    """
+
+    async def test_區塊2_已移除學員的作答明細不列出(self, client, db) -> None:
+        teacher = await _user(db, "t_rm01")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, name="小考")
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        kept = await _user(db, "s_rm01a", roles=(ROLE_STUDENT,), name="留下的")
+        gone = await _user(db, "s_rm01b", roles=(ROLE_STUDENT,), name="被移除的")
+        await _enroll(db, kept, course_id)
+        await _enroll(db, gone, course_id, removed=True)
+        for who in (kept, gone):
+            await _attempt(
+                db, user_id=who, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("90"), is_pass=True
+            )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        names = [s["user_name"] for s in r.json()["students"]]
+        # 成對：前者是本 issue 要修的，後者保證不是「一律回空」
+        assert "被移除的" not in names
+        assert names == ["留下的"], "未被移除者必須照常列出"
+
+    async def test_區塊2_排除後_attempt_資料仍在(self, client, db) -> None:
+        """🔴 ⛔ 不可改用刪除 attempt 列來達成同一個畫面效果。
+
+        `ET_QUIZ_ATTEMPT_M` / `_D` 是 ET 的稽核來源（本模組不逐筆寫 `DP_AUDIT_LOG`）。
+        而且 `attempt/repository` 讀取時**刻意不濾 `DELETED`**——改成軟刪是一個看起來
+        做了、實際沒效果的改動。
+        """
+        teacher = await _user(db, "t_rm02")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db, name="小考")
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        gone = await _user(db, "s_rm02", roles=(ROLE_STUDENT,), name="被移除的")
+        await _enroll(db, gone, course_id, removed=True)
+        attempt_id = await _attempt(
+            db, user_id=gone, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("90"), is_pass=True
+        )
+        await db.commit()
+
+        await client.get(f"{_URL}/{course_id}/attempt-overview", headers=_bearer(teacher))
+
+        row = await db.scalar(select(EtQuizAttemptM).where(EtQuizAttemptM.attempt_id == attempt_id))
+        assert row is not None, "attempt 列被刪掉了——稽核來源不可刪"
+        assert row.deleted == 0, "attempt 列被軟刪了（而讀取端不濾 DELETED，等於白做）"
+
+    async def test_區塊3_已移除學員的問卷填答不列出(self, client, db) -> None:
+        teacher = await _user(db, "t_rm03")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        good = await _so(db, sq, text="滿意", order=1)
+        kept = await _user(db, "s_rm03a", roles=(ROLE_STUDENT,), name="留下的")
+        gone = await _user(db, "s_rm03b", roles=(ROLE_STUDENT,), name="被移除的")
+        await _enroll(db, kept, course_id)
+        await _enroll(db, gone, course_id, removed=True)
+        for who in (kept, gone):
+            await _respond(db, survey_id, who, [(sq, good, None)])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))
+
+        body = r.json()
+        names = [d["user_name"] for d in body["details"]]
+        assert "被移除的" not in names
+        assert names == ["留下的"], "未被移除者必須照常列出"
+
+    async def test_區塊3_統計與明細同步排除(self, client, db) -> None:
+        """🔴 統計與明細是**同一份資料的兩種呈現**（`survey_answers` 的 docstring）。
+
+        若排除只做在其中一邊，統計的人數與明細的筆數會對不起來——**而那種分岔看起來
+        像是有人填到一半**，不像是過濾寫錯。
+        """
+        teacher = await _user(db, "t_rm04")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        good = await _so(db, sq, text="滿意", order=1)
+        kept = await _user(db, "s_rm04a", roles=(ROLE_STUDENT,), name="留下的")
+        gone = await _user(db, "s_rm04b", roles=(ROLE_STUDENT,), name="被移除的")
+        await _enroll(db, kept, course_id)
+        await _enroll(db, gone, course_id, removed=True)
+        for who in (kept, gone):
+            await _respond(db, survey_id, who, [(sq, good, None)])
+        await db.commit()
+
+        body = (await client.get(f"{_URL}/{course_id}/survey-result", headers=_bearer(teacher))).json()
+
+        counts = [o["count"] for q in body["questions"] for o in q["options"] if o["option_text"] == "滿意"]
+        assert counts == [1], "統計仍把已移除者算進去"
+        assert len(body["details"]) == 1, "明細與統計的人數對不起來"
+
+    async def test_問卷CSV不含已移除學員(self, client, db) -> None:
+        teacher = await _user(db, "t_rm05")
+        course_id = await _course(db, owner=teacher)
+        survey_id = await _survey(db, course_id)
+        sq = await _sq(db, survey_id, stem="滿意嗎？", order=1)
+        good = await _so(db, sq, text="滿意", order=1)
+        kept = await _user(db, "s_rm05a", roles=(ROLE_STUDENT,), name="留下的")
+        gone = await _user(db, "s_rm05b", roles=(ROLE_STUDENT,), name="被移除的")
+        await _enroll(db, kept, course_id)
+        await _enroll(db, gone, course_id, removed=True)
+        for who in (kept, gone):
+            await _respond(db, survey_id, who, [(sq, good, None)])
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/survey-result.csv", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        body = r.content.decode("utf-8-sig")
+        assert "被移除的" not in body
+        assert "留下的" in body, "未被移除者必須照常匯出"
