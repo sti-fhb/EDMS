@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -11,7 +11,8 @@ import { server } from "../../test/server"
 function useObsoleteReview() {
   server.use(
     http.get("/api/dm/reviews/pending", () =>
-      HttpResponse.json([
+      HttpResponse.json({
+      data: [
         {
           review_id: 601,
           doc_id: "DM-SOP-000009",
@@ -23,8 +24,11 @@ function useObsoleteReview() {
           submitter_name: "王曉明",
           submit_date: "2026-08-18T10:00:00Z",
           waiting_days: 2,
+          overdue: false,
         },
-      ]),
+      ],
+      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+    }),
     ),
     // completed 為單一路徑段，會被下方 :reviewId 覆寫攔截 → 需先明確保留（回空清單）
     http.get("/api/dm/reviews/completed", () =>
@@ -62,12 +66,15 @@ function useObsoleteReview() {
 }
 
 describe("DmReviewPage 簽核中心（DM02）", () => {
-  it("待簽核清單：列出指派項目、停留逾門檻標紅警示", async () => {
+  it("待簽核清單：列出指派項目、標紅依後端 overdue 而非前端寫死門檻", async () => {
     renderWithProviders(<DmReviewPage />)
     expect(await screen.findByText("領血確認標準作業程序")).toBeInTheDocument()
-    // 停留 12 天（≥ 7）→ 標紅 ⚠
-    expect(screen.getByText(/12 天 ⚠/)).toBeInTheDocument()
-    expect(screen.getByText(/1 天/)).toBeInTheDocument()
+
+    // fixture 的這筆只停留 **4 天**（低於舊的寫死值 7）卻 overdue=true——管理者把門檻調成 3 的情境。
+    // 前端若退回自己比對 7，這裡就不會有 ⚠（#503 第 1 項）。
+    expect(screen.getByText(/4 天 ⚠/)).toBeInTheDocument()
+    // 對照：overdue=false 的那筆不得有 ⚠
+    expect(screen.getByText(/^1 天$/)).toBeInTheDocument()
   })
 
   it("點列展開明細：版本對照表（狀態 pill + 下載）+ 核准/退回 + X 收合", async () => {
@@ -123,6 +130,43 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     expect(await screen.findByText("已核准並發布，已通知撰寫者")).toBeInTheDocument()
   }, 20000)
 
+  it("撰寫者已撤回 → 顯示 DM-MSG-DM02-006、明細收起、該列自清單消失", async () => {
+    const user = userEvent.setup({ delay: null })
+    // 核准回 409 DM_REVIEW_009；同時讓重新查詢的清單不再含那一筆（＝伺服器端已撤回）
+    server.use(
+      http.post("/api/dm/reviews/501/approve", () =>
+        HttpResponse.json({ error_code: "DM_REVIEW_009", error_message: "此項目已被撰寫者撤回" }, { status: 409 }),
+      ),
+    )
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await user.click(await screen.findByRole("button", { name: "核准並發布" }))
+    await user.click(await screen.findByRole("button", { name: "確認核准" }))
+
+    expect(await screen.findByText("此項目已被撰寫者撤回，已自清單移除")).toBeInTheDocument()
+    // 「已自清單移除」在實作上＝重新查詢 + 收起明細。此前只有成功才刷新，明細會一直開著（#503 第 2 項）
+    await waitFor(() => expect(screen.queryByText(/簽核明細 —/)).not.toBeInTheDocument())
+  }, 20000)
+
+  it("其他終態（已處理過）維持原訊息，不誤報為撤回", async () => {
+    const user = userEvent.setup({ delay: null })
+    server.use(
+      http.post("/api/dm/reviews/501/approve", () =>
+        HttpResponse.json(
+          { error_code: "DM_REVIEW_003", error_message: "此送審已非待審核狀態，無法處理" },
+          { status: 409 },
+        ),
+      ),
+    )
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await user.click(await screen.findByRole("button", { name: "核准並發布" }))
+    await user.click(await screen.findByRole("button", { name: "確認核准" }))
+
+    expect(await screen.findByText("此送審已非待審核狀態，無法處理")).toBeInTheDocument()
+    expect(screen.queryByText("此項目已被撰寫者撤回，已自清單移除")).not.toBeInTheDocument()
+  }, 20000)
+
   it("退回：空原因擋（-004）、填原因後成功 toast（-005）", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmReviewPage />)
@@ -159,6 +203,109 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     expect(await screen.findByText("確定核准廢止此文件？")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認廢止" }))
     expect(await screen.findByText("已核准廢止，文件已下架並通知撰寫者")).toBeInTheDocument()
+  }, 20000)
+
+  it("處理完當頁最後一筆後不會停在空白頁，也不會謊稱沒有待簽核項目", async () => {
+    // 共 21 筆 → 第 2 頁僅 1 筆。核准它之後 total 變 20、第 2 頁不復存在，後端回空 data。
+    // 修正前：畫面顯示「目前沒有待簽核項目。」而頁籤寫「待簽核（20）」，且分頁列隨該分支一起
+    // 消失 → 使用者沒有任何入口回第 1 頁（#503 code review MEDIUM-2 / security M-1）。
+    let processed = false
+    server.use(
+      http.get("/api/dm/reviews/pending", ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get("page") ?? 1)
+        const total = processed ? 20 : 21
+        const totalPages = Math.ceil(total / 20)
+        const onThisPage = page > totalPages ? 0 : page === 1 ? 20 : total - 20
+        return HttpResponse.json({
+          data: Array.from({ length: onThisPage }, (_, i) => ({
+            review_id: 900 + (page - 1) * 20 + i,
+            doc_id: `DM-SOP-0009${String(i).padStart(2, "0")}`,
+            doc_name: `第 ${page} 頁第 ${i + 1} 筆`,
+            category_code: "SOP",
+            category_name: "標準作業程序",
+            review_type: "NEW",
+            version_no: "1.0",
+            submitter_id: "u1",
+            submitter_name: "送審者",
+            submit_date: "2026-08-18T10:00:00Z",
+            waiting_days: 1,
+            overdue: false,
+          })),
+          meta: { total, page, limit: 20, total_pages: totalPages },
+        })
+      }),
+      http.post("/api/dm/reviews/:reviewId/approve", () => {
+        processed = true
+        return HttpResponse.json({ published_version_id: 1, notified: 0 })
+      }),
+    )
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await screen.findByText("第 1 頁第 1 筆")
+
+    await user.click(screen.getByRole("button", { name: "Go to page 2" }))
+    await user.click(await screen.findByText("第 2 頁第 1 筆"))
+    await user.click(await screen.findByRole("button", { name: "核准並發布" }))
+    await user.click(await screen.findByRole("button", { name: "確認核准" }))
+
+    // 夾回第 1 頁並顯示內容；不得出現「沒有待簽核項目」的假空狀態
+    await waitFor(() => expect(screen.getByText("第 1 頁第 1 筆")).toBeInTheDocument())
+    expect(screen.queryByText("目前沒有待簽核項目。")).not.toBeInTheDocument()
+  }, 20000)
+
+  it("安全網：清單縮短幅度大於自己處理的那筆時，給真實訊息並保留分頁列", async () => {
+    // 退頁邏輯只在「當頁剩最後一筆」時觸發。若清單同時因其他原因縮短（撰寫者一次撤回多筆），
+    // 仍可能落在越界頁。此時畫面不得說「目前沒有待簽核項目。」——頁籤同時寫著「待簽核（20）」——
+    // 且分頁列必須留著，否則使用者沒有入口回前一頁（#503 security review M-1）。
+    let total = 22 // 第 1 頁 20 筆、第 2 頁 2 筆
+    server.use(
+      http.get("/api/dm/reviews/pending", ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get("page") ?? 1)
+        const totalPages = Math.ceil(total / 20)
+        const onThisPage = page > totalPages ? 0 : page === 1 ? Math.min(20, total) : total - 20
+        return HttpResponse.json({
+          data: Array.from({ length: onThisPage }, (_, i) => ({
+            review_id: 950 + (page - 1) * 20 + i,
+            doc_id: `DM-SOP-0009${String(i).padStart(2, "0")}`,
+            doc_name: `第 ${page} 頁第 ${i + 1} 筆`,
+            category_code: "SOP",
+            category_name: "標準作業程序",
+            review_type: "NEW",
+            version_no: "1.0",
+            submitter_id: "u1",
+            submitter_name: "送審者",
+            submit_date: "2026-08-18T10:00:00Z",
+            waiting_days: 1,
+            overdue: false,
+          })),
+          meta: { total, page, limit: 20, total_pages: totalPages },
+        })
+      }),
+      // 核准我這一筆的同時，撰寫者也撤回了另一筆 → 總數少 2，第 2 頁整個消失
+      http.post("/api/dm/reviews/:reviewId/approve", () => {
+        total = 20
+        return HttpResponse.json({ published_version_id: 1, notified: 0 })
+      }),
+    )
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await screen.findByText("第 1 頁第 1 筆")
+    await user.click(screen.getByRole("button", { name: "Go to page 2" }))
+    await screen.findByText("第 2 頁第 1 筆")
+
+    // 當頁有 2 筆 → 退頁邏輯（只在剩 1 筆時）不觸發，必定落在越界頁
+    await user.click(screen.getByText("第 2 頁第 1 筆"))
+    await user.click(await screen.findByRole("button", { name: "核准並發布" }))
+    await user.click(await screen.findByRole("button", { name: "確認核准" }))
+
+    expect(await screen.findByText("此頁已無待簽核項目，請返回前一頁。")).toBeInTheDocument()
+    expect(screen.queryByText("目前沒有待簽核項目。")).not.toBeInTheDocument()
+    // 斷言分頁列本身還在（不綁 MUI 在越界狀態下的個別頁碼 aria-label）——
+    // 「使用者有入口回前一頁」正是這條要守的東西。
+    // ⚠️ 用 findByRole 而非 getByRole：核准確認框關閉的過渡期間，MUI Dialog 會把背景設為
+    // aria-hidden，而 role 查詢預設會過濾掉 aria-hidden 的元素（getByText 不會，所以上面
+    // 那條 Alert 斷言先過了）。同步查詢會在那個瞬間落空。
+    expect(await screen.findByRole("navigation")).toBeInTheDocument()
   }, 20000)
 
   it("已完成頁籤：呈現過往處理結果（唯讀）", async () => {
