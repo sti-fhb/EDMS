@@ -12,7 +12,7 @@
 當時的快照。
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -259,6 +259,67 @@ class TestSnapshotAppendOnly:
         rows = (await db.scalars(select(EtWeeklyStat).where(EtWeeklyStat.course_id == ctx["course_id"]))).all()
         assert len(rows) == 1
         assert rows[0].avg_progress_pct == Decimal("0.00"), "既有快照不得被重跑覆寫"
+
+
+class TestSnapshotDateIsTaipei:
+    """`STAT_DATE` 以**台灣日期**記錄（#517）。
+
+    ## 為什麼這在 #517 之後才變成現實風險
+
+    原本 `stat_date = utcnow().date()` 取的是 **UTC 日期**。UTC 與台灣日期不同的時機是
+    台灣時間 **00:00–07:59**，所以危險的 cron 小時：
+
+    | | cron 的時區語意 | 危險小時 | SCHET001（`0 10 * * 0`）離窗口 |
+    |---|---|---|---|
+    | #517 前 | UTC | `16`–`23` | 往早 10h |
+    | **#517 後** | **台灣** | **`0`–`7`** | **往早只剩 2h** |
+
+    窗口移到了人們寫「上班前跑批次」的位置：管理者把週報往前挪**超過 2 小時**
+    （「台灣時間週一 08:00，上班就看到」）就會踩到。#517 沒有引入這個缺陷，
+    但把安全餘裕從 10 小時縮到 2 小時。
+
+    ## 而且錯了不可逆
+
+    `ET_WEEKLY_STAT` 是 append-only，`insert_snapshot` 用
+    `ON CONFLICT DO NOTHING`（唯一鍵 `(COURSE_ID, STAT_DATE)`）——標錯日期的那筆
+    沒有覆寫路徑，也沒有手動重跑端點。
+    """
+
+    async def test_台灣清晨觸發的快照記台灣日期而非UTC日期(self, client, db) -> None:
+        """UTC 2026-10-04 23:30 ＝ **台灣 2026-10-05 07:30（週一）**。
+
+        取 UTC 日期會記成 10-04（**週日**）——週報標籤差一天，且不可修正。
+        選 07:30 而非更極端的時刻，是因為它正是「排在上班前」的真實動機所在。
+        """
+        ctx = await _course(client, db, "tz1", items=1)
+        student = await _user(db, "st_tz1", ROLE_STUDENT)
+        await _enroll(db, user_id=student, course_id=ctx["course_id"])
+        taiwan_early_morning = datetime(2026, 10, 4, 23, 30, tzinfo=timezone.utc)
+
+        written = await EtStatsService().take_snapshots(db, now=taiwan_early_morning)
+
+        assert written == 1
+        row = await _snapshot(db, ctx["course_id"])
+        assert row is not None
+        assert row.stat_date == date(2026, 10, 5), (
+            f"快照記為 {row.stat_date}，應為台灣日期 2026-10-05（週一）；取 UTC 日期會得到 2026-10-04（週日）"
+        )
+
+    async def test_台灣日間觸發時兩種時區同日_不因修正而改變(self, client, db) -> None:
+        """對照組：窗口外的時刻，台灣與 UTC 日期本就相同，修正不得改變它。
+
+        沒有這條，把 `stat_date` 寫成「永遠減一天」之類的錯誤修法也會讓上一條通過。
+        """
+        ctx = await _course(client, db, "tz2", items=1)
+        student = await _user(db, "st_tz2", ROLE_STUDENT)
+        await _enroll(db, user_id=student, course_id=ctx["course_id"])
+        taiwan_morning = datetime(2026, 10, 5, 2, 0, tzinfo=timezone.utc)  # 台灣 10-05 10:00
+
+        written = await EtStatsService().take_snapshots(db, now=taiwan_morning)
+
+        assert written == 1
+        row = await _snapshot(db, ctx["course_id"])
+        assert row is not None and row.stat_date == date(2026, 10, 5)
 
 
 class TestPreviousSnapshot:

@@ -31,7 +31,7 @@ _FOOTER = "\n\n— EDMS 教育訓練文件管理系統（本信件由系統自�
 
 # ── SCHDM001 接線值（US13）──
 _SCHDM001_HANDLER = "app.dm.kpi.scheduler.run"
-_SCHDM001_CRON = "0 10 * * 1"  # 週一 10:00（對齊 DM_WEEKLY_SCHED_DAY_TIME 預設）
+_SCHDM001_CRON = "0 10 * * 1"  # 10:00（時區見 #517：自 2026-10-05 起 cron 以台灣時間解讀）
 
 # 預留（回滾用）：DP #0 之 SCHDM001 種子值
 _SCHDM001_HANDLER_OLD = "app.dm.schedules.handlers.pending"

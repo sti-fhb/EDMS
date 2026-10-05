@@ -23,12 +23,17 @@ function parseField(raw: string, min: number, max: number): number | null {
 
 const pad = (n: number) => String(n).padStart(2, "0")
 
-/** 回傳如「每日 08:00 UTC」「每週一 10:00 UTC」「每月 1 日 09:00 UTC」；無法判讀回 `null`。
+/** 回傳如「每日 08:00」「每週一 10:00」「每月 1 日 09:00」；無法判讀回 `null`。
  *
- * ⚠️ **時刻一律標 UTC，不換算本地時間。** 引擎以 `CronTrigger.from_crontab(..., timezone="UTC")`
- * 註冊，管理者在同一頁編輯的 `CRON_EXPR` 也是 UTC 運算式——顯示 UTC 才與他手上的欄位對得起來。
- * 若在此偷偷換成本地時間，畫面會出現「編輯框寫 10，旁邊顯示 18:00」的矛盾。本地時刻由
- * 同列的「下次執行」欄承擔（`formatDateTime` 走本地時區）。
+ * ⚠️ **時刻即台灣時間，不加時區標籤、也不做換算。** 引擎自 #517 起以
+ * `CronTrigger.from_crontab(..., timezone="Asia/Taipei")` 註冊，管理者在同一頁編輯的
+ * `CRON_EXPR` 也是台灣時間運算式——兩者同基準，直接顯示數字即可。
+ *
+ * （#517 之前引擎跑 UTC，此處會加上「UTC」標籤：那時標它是必要的，否則會出現
+ * 「編輯框寫 10，實際台灣時間 18:00」的落差。基準統一後標籤反而多餘。）
+ *
+ * ⛔ 不要在此換算成瀏覽器本地時區：使用者全在 UTC+8，換算是 no-op，但會讓顯示值與
+ * 編輯框脫鉤——有人把機器時區設錯時，畫面會說一個與 cron 欄位不符的時間。
  *
  * 只處理單值的每日 / 每週 / 每月三種常見形狀——涵蓋目前全部種子 job。其餘（間隔、
  * 範圍、清單、指定月份、dom 與 dow 同時指定）一律回 `null`，由呼叫端退回顯示原始運算式，
@@ -44,7 +49,7 @@ export function formatCronSchedule(expr: string | null | undefined): string | nu
   const hour = parseField(rawHour, 0, 23)
   if (minute === null || hour === null || month !== "*") return null
 
-  const time = `${pad(hour)}:${pad(minute)} UTC`
+  const time = `${pad(hour)}:${pad(minute)}`
 
   if (dom === "*" && dow === "*") return `每日 ${time}`
   if (dom === "*") {

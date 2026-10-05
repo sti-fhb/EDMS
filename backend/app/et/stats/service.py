@@ -21,7 +21,7 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
-from app.core.utils import utcnow
+from app.core.utils import taipei_date, utcnow
 from app.dp.params.service import ParamService
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.service import EtEnrollmentService
@@ -67,7 +67,11 @@ class EtStatsService:
             實際寫入的快照數（同日重跑已存在者不計）。
         """
         now = now or utcnow()
-        stat_date = now.date()
+        # ⚠️ `taipei_date` 而非 `.date()`：後者取 UTC 日期，在台灣時間 00:00–07:59 會差一天。
+        # 自 #517 起 cron 以台灣時間解讀，把週報排在「上班前」（台灣 07:00 等）只差兩小時就
+        # 踩進那個窗口，而 `ET_WEEKLY_STAT` 是 append-only + ON CONFLICT DO NOTHING，
+        # 標錯的日期**沒有覆寫路徑**。
+        stat_date = taipei_date(now)
         written = 0
         for course_id in await self._repo.open_course_ids(db, now):
             try:
