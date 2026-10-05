@@ -1,8 +1,9 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 
 from sqlalchemy import ColumnElement, Row, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils import taipei_day_start
 from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
 
@@ -25,7 +26,8 @@ def build_audit_conditions(
 
     operator：對 操作者 USER_ID / 姓名 / Email 不分大小寫模糊比對——`created_user` 直接 ilike
     （相容 SYSTEM 與已不存在之 USER_ID），並 OR 上「姓名 / Email 命中之 USER_ID 子查詢」。
-    date_to：以「< 隔日 00:00 UTC」表達含當日全天（`created_date` 為 timezone-aware UTC）。
+    date_from / date_to：以**台灣日界**切（#519），`date_to` 以「< 隔日台灣 00:00」表達含當日全天。
+    邊界一律經 `core/utils.taipei_day_start`，不要在此自組 `tzinfo`。
     """
     conditions: list[ColumnElement[bool]] = []
 
@@ -47,13 +49,14 @@ def build_audit_conditions(
         conditions.append(DpAuditLog.action_type == action_type)
     if result:
         conditions.append(DpAuditLog.result == result)
+    # 日界以**台灣時間**切（#519）。原本用 UTC 午夜當邊界，而畫面與 CSV 都以台灣時間呈現，
+    # 於是選 10/01 會漏掉台灣 10/01 00:00–07:59 的紀錄（它們落在 UTC 09/30），
+    # 同時多撈進台灣 10/02 00:00–07:59 的紀錄——**兩種錯都不會報錯，只是列數不對**。
+    # 對稽核查詢而言「少了幾列卻看不出來」比多幾列更危險，故此處與顯示端統一為台灣日界。
     if date_from:
-        conditions.append(
-            DpAuditLog.created_date >= datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
-        )
+        conditions.append(DpAuditLog.created_date >= taipei_day_start(date_from))
     if date_to:
-        upper = datetime(date_to.year, date_to.month, date_to.day, tzinfo=timezone.utc) + timedelta(days=1)
-        conditions.append(DpAuditLog.created_date < upper)
+        conditions.append(DpAuditLog.created_date < taipei_day_start(date_to, plus_days=1))
 
     return conditions
 

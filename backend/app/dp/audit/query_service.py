@@ -14,6 +14,7 @@ from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PaginatedResult
+from app.core.utils import format_taipei
 from app.dp.audit.repository import AuditLogRepository, build_audit_conditions
 from app.dp.audit.schemas import AuditLogResponse, AuditOptionItem
 from app.dp.audit.target_resolver import resolve_target_displays
@@ -114,7 +115,10 @@ def _display_from_values(before_value: str | None, after_value: str | None) -> s
 
 # CSV 欄位（欄位名 → 標頭）：操作時間 / 操作者帳號(email) / 功能 / 操作類別 / 執行結果 / 對象 / 來源 IP / 前後值。
 _CSV_COLUMNS: list[tuple[str, str]] = [
-    ("created_date", "操作時間"),
+    # 標頭標明時區（#519）：這份檔案是調查證據，而 2026-10-05 之前匯出的版本內容是 UTC、
+    # 之後是台灣時間，兩份檔案長得一模一樣。沒有標示的話，日後把新舊匯出並排比對的人
+    # 會看到「同一筆 LOG 的時間被改過」卻找不到任何線索。
+    ("created_date", "操作時間（台灣時間 UTC+8）"),
     ("operator_account", "操作者帳號"),
     ("func_label", "功能"),
     ("action_type", "操作類別"),
@@ -130,11 +134,24 @@ _CSV_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _format_value(field: str, value: object) -> str:
-    """欄位值 → CSV 字串（時間格式化至秒；None → 空字串）。"""
+    """欄位值 → CSV 字串（操作時間以**台灣時間**格式化至秒；None → 空字串）。
+
+    ⚠️ 原本直接 `strftime`，取到的是 UTC 牆上時間（asyncpg 解碼 `timestamptz` 回的恆為
+    UTC aware），而同一頁的畫面列表走瀏覽器本地時間（台灣）——**同一筆事件，畫面與匯出檔
+    差 8 小時**。這份 CSV 是稽核調查用的證據，不該有這種歧義（#519）。
+
+    同一次（#519）把 `repository.build_audit_conditions` 的日期篩選也改成台灣日界，
+    故**篩選、畫面、匯出三者現在同一基準**。
+    ⚠️ 先前的版本曾把這裡的理由寫成「日期篩選已於 #483 改以台灣時間切日」——那是錯的：
+    #483 改的是 `func.date()` 的 session timezone，只對 DM 那三支生效，DP 稽核當時仍自組
+    UTC 午夜邊界。若日後有人要再動時區，請直接讀 `repository.py`，不要相信這類轉述。
+
+    秒不可省：同一分鐘內的多筆事件若降精度到分，先後順序就消失了。
+    """
     if value is None:
         return ""
     if field == "created_date" and isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d %H:%M:%S")
+        return format_taipei(value, with_seconds=True)
     return str(value)
 
 
