@@ -2,9 +2,12 @@ import { useQuery } from "@tanstack/react-query"
 
 import { reviewApi } from "./reviewService"
 
-/** 待簽核清單（指派給自己之 PENDING）。 */
-export function usePending() {
-  return useQuery({ queryKey: ["dm-review", "pending"], queryFn: reviewApi.listPending })
+/** 待簽核清單（指派給自己之 PENDING、後端分頁；#503 起比照已完成頁籤）。 */
+export function usePending(page: number, limit: number) {
+  return useQuery({
+    queryKey: ["dm-review", "pending", page, limit],
+    queryFn: () => reviewApi.listPending(page, limit),
+  })
 }
 
 /** 簽核明細（展開某列時才載入）。 */

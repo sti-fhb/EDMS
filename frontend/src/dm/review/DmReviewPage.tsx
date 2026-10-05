@@ -27,7 +27,7 @@ import { useState } from "react"
 import { TRAINING_CATEGORY } from "../editor/schemas"
 import { useSearchParams } from "react-router-dom"
 
-import { REMIND_THRESHOLD_DAYS, RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
+import { RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
 import type { ReviewDetail, VersionMeta } from "./schemas"
 import { downloadObsoleteFile, downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
@@ -252,17 +252,57 @@ export function DmReviewPage() {
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectReason, setRejectReason] = useState("")
   const [rejectError, setRejectError] = useState("")
-  const [page, setPage] = useState(1)
+  // 兩個頁籤各自一份頁碼：共用一份的話，在已完成翻到第 3 頁再切回待簽核，會停在一個可能不存在的頁
+  const [pendingPage, setPendingPage] = useState(1)
+  const [completedPage, setCompletedPage] = useState(1)
   const [completedKeyword, setCompletedKeyword] = useState("")
 
-  const { data: pending, isPending: pendingLoading } = usePending()
+  const { data: pending, isPending: pendingLoading } = usePending(pendingPage, PAGE_SIZE)
   const { data: detail } = useReviewDetail(tab === "pending" ? selectedId : null)
-  const { data: completed } = useCompleted(page, PAGE_SIZE, completedKeyword)
+  const { data: completed } = useCompleted(completedPage, PAGE_SIZE, completedKeyword)
+
+  const pendingRows = pending?.data ?? []
+
+  /**
+   * 越界頁：目前這一頁已無項目、但整體還有待簽核（後端對「page 超出且 total > 0」回空 data）。
+   *
+   * 主要由 `afterAction` 的退頁處理掉；此旗標是**安全網**，涵蓋「清單因其他原因縮短」
+   * （如撰寫者一次撤回多筆）。不特別處理的話會走到一般空清單分支——畫面說「目前沒有待簽核
+   * 項目」而頁籤同時顯示「待簽核（20）」自相矛盾，且**分頁列也在那個分支裡一起消失**，
+   * 使用者沒有任何入口回前一頁，只能重新整理（#503 review）。
+   */
+  const pendingPageOverflow = pending != null && pending.data.length === 0 && pending.meta.total > 0
 
   const afterAction = () => {
     setSelectedId(null)
+    // 當頁只剩這一筆 → 處理後該頁就空了。在這裡退頁而不是用 effect 修正：
+    // effect 內同步 setState 會觸發連鎖 render（ESLint react-hooks 擋），而此處是事件當下、
+    // 我們本來就知道清單會少一筆，資訊更充分也更可預測。
+    if (pendingRows.length === 1 && pendingPage > 1) setPendingPage(pendingPage - 1)
     qc.invalidateQueries({ queryKey: ["dm-review", "pending"] })
     qc.invalidateQueries({ queryKey: ["dm-review", "completed"] })
+  }
+
+  /**
+   * 核准 / 退回失敗後的共用處理。
+   *
+   * **失敗時也要刷新清單**——此前只有成功才刷新，於是撰寫者撤回後那一列會留在畫面上，
+   * 審核者可以一直點、一直收到同一個錯誤，spec 要求的「已自清單移除」從未發生（#503 第 2 項）。
+   *
+   * 但**只有「該項目已不可處理」才收起明細與退回對話框**：暫時性錯誤（如網路中斷）若也一併
+   * 清掉，使用者剛打完的退回原因會白白消失，而那筆項目其實還在、重試即可。
+   */
+  const onActionError = (e: unknown) => {
+    const { errorCode, errorMessage } = toApiError(e)
+    // DM_REVIEW_009＝撰寫者已撤回（DM-MSG-DM02-006）；DM_REVIEW_003＝自己已處理過。兩者訊息不同
+    const withdrawn = errorCode === "DM_REVIEW_009"
+    message.error(withdrawn ? "此項目已被撰寫者撤回，已自清單移除" : errorMessage)
+    qc.invalidateQueries({ queryKey: ["dm-review", "pending"] })
+    if (withdrawn || errorCode === "DM_REVIEW_003") {
+      setSelectedId(null)
+      setRejectOpen(false)
+      if (pendingRows.length === 1 && pendingPage > 1) setPendingPage(pendingPage - 1)
+    }
   }
 
   const approveMut = useMutation({
@@ -272,7 +312,7 @@ export function DmReviewPage() {
       message.success(vars.isObsolete ? "已核准廢止，文件已下架並通知撰寫者" : "已核准並發布，已通知撰寫者")
       afterAction()
     },
-    onError: (e) => message.error(toApiError(e).errorMessage),
+    onError: onActionError,
   })
 
   const rejectMut = useMutation({
@@ -283,7 +323,7 @@ export function DmReviewPage() {
       setRejectReason("")
       afterAction()
     },
-    onError: (e) => message.error(toApiError(e).errorMessage),
+    onError: onActionError,
   })
 
   const onApprove = () => {
@@ -330,7 +370,6 @@ export function DmReviewPage() {
   }
 
   const busy = approveMut.isPending || rejectMut.isPending
-  const pendingRows = pending ?? []
   const completedRows = completed?.data ?? []
 
   return (
@@ -345,7 +384,7 @@ export function DmReviewPage() {
             setSelectedId(null)
           }}
         >
-          <Tab value="pending" label={`待簽核${pending ? `（${pending.length}）` : ""}`} />
+          <Tab value="pending" label={`待簽核${pending ? `（${pending.meta.total}）` : ""}`} />
           <Tab value="completed" label={`已完成${completed ? `（${completed.meta.total}）` : ""}`} />
         </Tabs>
       </FilterCard>
@@ -356,6 +395,20 @@ export function DmReviewPage() {
             <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
               <CircularProgress size={28} />
             </Box>
+          ) : pendingPageOverflow ? (
+            // 安全網：此頁空了但整體還有項目。訊息必須與頁籤的「待簽核（N）」一致，
+            // 且**分頁列要留著**——否則使用者沒有入口回前一頁。
+            <>
+              <Alert severity="info">此頁已無待簽核項目，請返回前一頁。</Alert>
+              <Box sx={{ mt: 2 }}>
+                <Pagination
+                  page={pending.meta.page}
+                  total={pending.meta.total}
+                  pageSize={pending.meta.limit}
+                  onPageChange={setPendingPage}
+                />
+              </Box>
+            </>
           ) : pendingRows.length === 0 ? (
             <Alert severity="info">目前沒有待簽核項目。</Alert>
           ) : (
@@ -376,7 +429,7 @@ export function DmReviewPage() {
                 </TableHead>
                 <TableBody>
                   {pendingRows.map((row) => {
-                    const overdue = row.waiting_days >= REMIND_THRESHOLD_DAYS
+                    const overdue = row.overdue // 由後端依 DM_REMIND_THRESHOLD 判定（#503）
                     return (
                       <TableRow
                         key={row.review_id}
@@ -407,6 +460,16 @@ export function DmReviewPage() {
                   })}
                 </TableBody>
               </Table>
+              {pending && (
+                <Box sx={{ mt: 2 }}>
+                  <Pagination
+                    page={pending.meta.page}
+                    total={pending.meta.total}
+                    pageSize={pending.meta.limit}
+                    onPageChange={setPendingPage}
+                  />
+                </Box>
+              )}
               {selectedId != null && detail && (
                 <DetailPanel
                   detail={detail}
@@ -429,7 +492,7 @@ export function DmReviewPage() {
             value={completedKeyword}
             onChange={(e) => {
               setCompletedKeyword(e.target.value)
-              setPage(1)
+              setCompletedPage(1)
             }}
             sx={{ mb: 2, width: { xs: "100%", sm: 320 } }}
           />
@@ -471,7 +534,7 @@ export function DmReviewPage() {
                     page={completed.meta.page}
                     total={completed.meta.total}
                     pageSize={completed.meta.limit}
-                    onPageChange={setPage}
+                    onPageChange={setCompletedPage}
                   />
                 </Box>
               )}

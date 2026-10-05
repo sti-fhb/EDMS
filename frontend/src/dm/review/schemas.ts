@@ -19,6 +19,8 @@ export interface PendingItem {
   submitter_name: string | null
   submit_date: string
   waiting_days: number
+  /** 是否逾催辦門檻 → 清單標紅（FR-006）。**由後端判定**，見下方刪除常數的理由。 */
+  overdue: boolean
 }
 
 export interface VersionMeta {
@@ -77,8 +79,10 @@ export const REVIEW_TYPE_LABELS: Record<string, string> = {
   OBSOLETE: "廢止",
 }
 
-/** 停留天數標紅門檻（與後端 DM_REMIND_THRESHOLD 預設一致；逾此於清單標紅警示）。 */
-export const REMIND_THRESHOLD_DAYS = 7
+// ⚠️ 原本此處有 `REMIND_THRESHOLD_DAYS = 7`，已於 #503 移除。
+// 催辦門檻是管理者可在 DP 後台調整的 `DP_PARAM.DM_REMIND_THRESHOLD`（值域 1–30），
+// 前端寫死會與實際催辦行為脫鉤——門檻調成 3 時系統每天寄信、畫面卻要第 7 天才標紅。
+// 改由後端在 `PendingItem.overdue` 給答案，門檻不過線就不會再分家。
 
 /** 送審狀態顯示名（一律中文；#8 詞彙統一）。 */
 export const REVIEW_STATUS_LABELS: Record<string, string> = {

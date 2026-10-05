@@ -159,14 +159,16 @@ class PersonalService:
         PUBLISHED）；OBSOLETE → 文件回 PUBLISHED。原 ASSIGNED_REVIEWER 保留不改寫。
 
         Raises:
-            AppError: 查無（404 DM_DOC_001）、非撰寫者本人（403 DM_REVIEW_007）、非 PENDING（409 DM_REVIEW_003）。
+            AppError: 查無（404 DM_DOC_001）、非撰寫者本人（403 DM_REVIEW_007）、
+                已撤回（409 DM_REVIEW_009，如重複點擊）、其餘非 PENDING（409 DM_REVIEW_003）。
         """
         review = await self._review_repo.get_review(db, review_id, for_update=True)
         if review is None:
             raise _REVIEW_NOT_FOUND
         if review.created_user != op.user_id:
             raise AppError(status_code=403, detail="僅送審撰寫者本人可撤回", error_code="DM_REVIEW_007")
-        # 撤回（PENDING→WITHDRAWN；非 PENDING 由 ReviewService 擋 DM_REVIEW_003）
+        # 撤回（PENDING→WITHDRAWN；非 PENDING 由 ReviewService 擋下——已撤回者為 DM_REVIEW_009、
+        # 其餘終態為 DM_REVIEW_003，#503 起分流）
         await self._reviews.withdraw(db, review, operator=op.user_id)
 
         now = utcnow()

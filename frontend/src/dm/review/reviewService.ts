@@ -4,8 +4,10 @@ import { http } from "../../services/http"
 
 /** 簽核中心 API（US6 / DM02）。 */
 export const reviewApi = {
-  listPending: async (): Promise<PendingItem[]> => {
-    const { data } = await http.get<PendingItem[]>("/dm/reviews/pending")
+  listPending: async (page: number, limit: number): Promise<PagedResult<PendingItem>> => {
+    const { data } = await http.get<PagedResult<PendingItem>>("/dm/reviews/pending", {
+      params: { page, limit },
+    })
     return data
   },
 
