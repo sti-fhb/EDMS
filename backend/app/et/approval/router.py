@@ -29,6 +29,11 @@ router-level 掛 `require_et_roles(ET_TEACHER, ET_ADMIN)`；擁有權另由 serv
    `/api/dp/users`，掛 `require_any_module_admin()`，教師拿不到）
 2. **角色受控**：`ET_TEACHER` 由管理者指派，非自助取得
 
+📌 **#456（2026-10-05）收斂的是成本，不是能力。** 改版前 Email 做整條 contains 比對，
+而全體共享同一網域，於是 `@` 這類**單一字串一個請求就命中全體**；現已改為「local part
+做 contains、完整 Email 做相等」（`FR-ET-US17-01b`）。⛔ **不要據此認為列舉已被擋住**
+——以常見字逐一查詢仍掃得完，上面兩條才是真正在收斂的東西。
+
 ⚠️ 另需知道的事實：`POST /approvals/search` 是 ET **第一支讓非管理者教師讀到無關課程學員資料**
 的端點（既有的 `tracking` / `reports` 全部走 owner 過濾）。SA 裁示 C 已接受這個暴露面，
 但它是新的，不是沿用。
