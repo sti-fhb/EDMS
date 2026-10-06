@@ -491,3 +491,29 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     })
   })
 })
+describe("DmEditorPage 最近版本日期（#539）", () => {
+  it("以台灣時間呈現：UTC 前一天 17:30 顯示為台灣隔日", async () => {
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    server.use(
+      http.get("/api/dm/documents/:docId/versions", () =>
+        HttpResponse.json([
+          {
+            version_id: 21,
+            version_no: "2.1",
+            change_summary: "補充異常通報流程",
+            file_name: "SOP-v2.1.pdf",
+            author_id: "u1",
+            author_name: "陳大華",
+            approver_name: "李主任",
+            published_date: "2026-10-05T17:30:00Z",
+            is_current: true,
+            previewable: true,
+          },
+        ]),
+      ),
+    )
+    renderWithProviders(<DmEditorPage />)
+    expect(await screen.findByText("2026-10-06")).toBeInTheDocument()
+    expect(screen.queryByText("2026-10-05")).not.toBeInTheDocument()
+  }, 20000)
+})

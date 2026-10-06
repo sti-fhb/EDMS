@@ -31,6 +31,7 @@ import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
+import { formatDateTaipei, formatDateTimeTaipei } from "../../utils/date"
 
 /** 檔案存取失敗訊息：缺檔（404）明確提示「查無檔案」，避免誤導為系統故障。 */
 function fileErrorMessage(err: unknown, action: string): string {
@@ -128,7 +129,7 @@ export function DmDetailPage() {
           {detail.obsolete_info && (
             <>
               <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
-                廢止時間：{detail.obsolete_info.obsolete_time?.slice(0, 10) ?? "—"} ｜ 申請人：
+                廢止時間：{formatDateTaipei(detail.obsolete_info.obsolete_time)} ｜ 申請人：
                 {detail.obsolete_info.applicant_name ?? detail.obsolete_info.applicant_id} ｜ 核准者：
                 {detail.obsolete_info.approver_name ?? "—"} ｜ 廢止原因：{detail.obsolete_info.reason ?? "—"}
               </Typography>
@@ -268,7 +269,7 @@ function FileArea({
             {f.file_name}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
-            {(f.file_size / 1024).toFixed(0)} KB ｜ {f.uploaded_at?.slice(0, 10) ?? ""}
+            {(f.file_size / 1024).toFixed(0)} KB ｜ {formatDateTaipei(f.uploaded_at)}
           </Typography>
           <Stack direction="row" spacing={1} justifyContent="center">
             {f.previewable ? (
@@ -306,7 +307,7 @@ function InfoPanel({ detail }: { detail: DetailResponse }) {
           <InfoRow label="分類" value={<Chip size="small" label={detail.category_name} />} />
           <InfoRow label="作者" value={detail.author_name ?? detail.author_id} />
           <InfoRow label="核准者" value={detail.approver_name ?? "—"} />
-          <InfoRow label="發布時間" value={detail.published_date?.slice(0, 16).replace("T", " ") ?? "—"} />
+          <InfoRow label="發布時間" value={formatDateTimeTaipei(detail.published_date)} />
           <InfoRow
             label="標籤"
             value={
@@ -394,7 +395,7 @@ function VersionRow({
         </Stack>
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-        {v.author_name ?? v.author_id} | {v.published_date?.slice(0, 10) ?? "—"} 發布
+        {v.author_name ?? v.author_id} | {formatDateTaipei(v.published_date)} 發布
         {v.approver_name && ` | 核准者：${v.approver_name}`}
       </Typography>
       <Typography variant="caption" sx={{ display: "block" }}>

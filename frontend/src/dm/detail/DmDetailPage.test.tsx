@@ -383,3 +383,112 @@ describe("DmDetailPage 文件詳細頁", () => {
     expect(await screen.findByText("請填寫廢止原因")).toBeInTheDocument()
   })
 })
+describe("DmDetailPage 日期欄（#539）", () => {
+  const B = "2026-10-05T17:30:00Z" // 台灣 10/06 01:30
+
+  it("已發布文件：發布時間與檔案上傳日期以台灣時間呈現", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "領血確認標準作業程序",
+          status: "PUBLISHED",
+          current_version_no: "2.1",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: B,
+          approver_id: "u2",
+          approver_name: "李主任",
+          approve_time: B,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: {
+            version_id: 21,
+            file_name: "SOP-v2.1.pdf",
+            file_mime: "application/pdf",
+            file_size: 2048,
+            uploaded_at: B,
+            previewable: true,
+          },
+          is_editor: false,
+          is_admin: false,
+          can_edit: false,
+          edit_lock_reason: null,
+          is_obsolete: false,
+          obsolete_info: null,
+        }),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    // 發布時間：原本 slice(0, 16) 把 UTC 的 17:30 原樣當成時刻顯示（任何時段都差 8 小時）
+    expect(await screen.findByText("2026/10/06 01:30")).toBeInTheDocument()
+    expect(screen.queryByText("2026-10-05 17:30")).not.toBeInTheDocument()
+    expect(screen.getByText("2 KB ｜ 2026-10-06")).toBeInTheDocument()
+    expect(screen.queryByText("2 KB ｜ 2026-10-05")).not.toBeInTheDocument()
+  })
+
+  it("已廢止文件：廢止時間與版本發布日期以台灣時間呈現", async () => {
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "領血確認標準作業程序",
+          status: "OBSOLETE",
+          current_version_no: "2.1",
+          category_code: "SOP",
+          category_name: "SOP",
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: "2026-04-15T04:00:00Z",
+          approver_id: "u2",
+          approver_name: "李主任",
+          approve_time: "2026-04-15T04:00:00Z",
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: null,
+          is_editor: false,
+          is_admin: true,
+          can_edit: false,
+          edit_lock_reason: null,
+          is_obsolete: true,
+          obsolete_info: {
+            review_id: 77,
+            obsolete_time: B,
+            applicant_id: "u1",
+            applicant_name: "王曉明",
+            approver_name: "李主任",
+            reason: "院內停用",
+            has_attachment: false,
+            attachment_name: null,
+          },
+        }),
+      ),
+      http.get("/api/dm/documents/:docId/versions", () =>
+        HttpResponse.json([
+          {
+            version_id: 21,
+            version_no: "2.1",
+            change_summary: "補充異常通報流程",
+            file_name: "SOP-v2.1.pdf",
+            author_id: "u1",
+            author_name: "陳大華",
+            approver_name: "李主任",
+            published_date: B,
+            is_current: true,
+            previewable: true,
+          },
+        ]),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    expect(await screen.findByText(/廢止時間：2026-10-06/)).toBeInTheDocument()
+    expect(screen.queryByText(/廢止時間：2026-10-05/)).not.toBeInTheDocument()
+    // 該行後面還接「| 核准者：…」，以前綴比對；正反兩條用同一種比對方式，避免否定斷言恆真
+    expect(await screen.findByText(/^陳大華 \| 2026-10-06 發布/)).toBeInTheDocument()
+    expect(screen.queryByText(/^陳大華 \| 2026-10-05 發布/)).not.toBeInTheDocument()
+  })
+})

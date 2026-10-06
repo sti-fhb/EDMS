@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom"
 import { KIND_LABELS } from "./schemas"
 import type { AnnouncementItem } from "./schemas"
 import { useAnnouncements, useDashboardStats } from "./useDashboard"
+import { formatDateTaipei } from "../../utils/date"
 
 /** 單一統計卡（分類名 + 已發布目前版本數）。純資訊、不可點（FR-002）。 */
 function StatCard({ name, count }: { name: string; count: number }) {
@@ -52,7 +53,7 @@ function AnnouncementRow({ item, onOpen }: { item: AnnouncementItem; onOpen: (do
               {item.change_summary || "（無摘要）"}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {item.published_date.slice(0, 10)} ｜ {item.author_name ?? "—"} ｜ {item.category_code}
+              {formatDateTaipei(item.published_date)} ｜ {item.author_name ?? "—"} ｜ {item.category_code}
             </Typography>
           </>
         }

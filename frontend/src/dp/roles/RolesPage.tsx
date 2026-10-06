@@ -38,7 +38,7 @@ import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { isAccountUsable, isDisabled, isLocked } from "../users/accountStatus"
 import { toApiError } from "../../services/http"
-import { formatDateTime } from "../../utils/date"
+import { formatDateTaipei, formatDateTime } from "../../utils/date"
 
 /**
  * 權限管理（dp-roles，US7）：ET / DM 共用之角色 / 群組指派入口。
@@ -253,7 +253,7 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
                   <TableCell>
                     <Typography variant="caption" color="text.secondary">
                       {row.last_modified_by
-                        ? `${row.last_modified_by_name ?? row.last_modified_by}｜${row.last_modified_date?.slice(0, 10) ?? ""}`
+                        ? `${row.last_modified_by_name ?? row.last_modified_by}｜${formatDateTaipei(row.last_modified_date)}`
                         : "—"}
                     </Typography>
                   </TableCell>

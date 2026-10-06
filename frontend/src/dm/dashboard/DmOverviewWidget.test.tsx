@@ -93,3 +93,27 @@ describe("DmOverviewWidget 中性歡迎頁之 DM 文件概況（DM00）", () => 
     expect(within(totalLine).getByText("0")).toBeInTheDocument()
   })
 })
+
+describe("DmOverviewWidget 公告日期（#539）", () => {
+  it("以台灣時間呈現：UTC 前一天 17:30 顯示為台灣隔日", async () => {
+    server.use(
+      http.get("/api/dm/dashboard/announcements", () =>
+        HttpResponse.json([
+          {
+            doc_id: "DM-SOP-000010",
+            doc_name: "領血確認標準作業程序",
+            category_code: "SOP",
+            version_no: "2.1",
+            change_summary: "補充第 5 點異常通報流程",
+            published_date: "2026-10-05T17:30:00Z",
+            author_name: "陳大華",
+            kind: "NEW_VERSION",
+          },
+        ]),
+      ),
+    )
+    renderWithProviders(<DmOverviewWidget />)
+    expect(await screen.findByText(/2026-10-06 ｜ 陳大華/)).toBeInTheDocument()
+    expect(screen.queryByText(/2026-10-05 ｜ 陳大華/)).not.toBeInTheDocument()
+  })
+})

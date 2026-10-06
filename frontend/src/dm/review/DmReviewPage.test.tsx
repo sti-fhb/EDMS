@@ -318,3 +318,62 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     expect(screen.getByLabelText(/搜尋文件名稱/)).toBeInTheDocument()
   })
 })
+
+describe("DmReviewPage 日期欄（#539）", () => {
+  const pendingAt = (submit_date: string) =>
+    http.get("/api/dm/reviews/pending", () =>
+      HttpResponse.json({
+        data: [
+          {
+            review_id: 501,
+            doc_id: "DM-SOP-000001",
+            doc_name: "領血確認標準作業程序",
+            category_code: "SOP",
+            category_name: "標準作業程序",
+            review_type: "NEW",
+            version_no: "1.0",
+            submitter_id: "u1",
+            submitter_name: "陳大華",
+            submit_date,
+            waiting_days: 0,
+            overdue: false,
+          },
+        ],
+        meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+      }),
+    )
+
+  it("送審時間以台灣時間呈現：UTC 前一天 17:30 顯示為台灣隔日", async () => {
+    server.use(pendingAt("2026-10-05T17:30:00Z"))
+    renderWithProviders(<DmReviewPage />)
+    expect(await screen.findByText("2026-10-06")).toBeInTheDocument()
+    expect(screen.queryByText("2026-10-05")).not.toBeInTheDocument()
+  })
+
+  it("完成時間以台灣時間呈現：UTC 前一天 17:30 顯示為台灣隔日", async () => {
+    const user = userEvent.setup()
+    server.use(
+      pendingAt("2026-08-01T04:00:00Z"),
+      http.get("/api/dm/reviews/completed", () =>
+        HttpResponse.json({
+          data: [
+            {
+              review_id: 400,
+              doc_id: "DM-SOP-000009",
+              doc_name: "舊案 SOP",
+              review_type: "NEW",
+              status: "APPROVED",
+              version_no: "1.0",
+              complete_date: "2026-10-05T17:30:00Z",
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByRole("tab", { name: /已完成/ }))
+    expect(await screen.findByText("2026-10-06")).toBeInTheDocument()
+    expect(screen.queryByText("2026-10-05")).not.toBeInTheDocument()
+  })
+})
