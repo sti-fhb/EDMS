@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
 import {
+  describeUploadLimits,
   EMPTY_AUDIENCE_PAIR,
   EMPTY_EDITOR_FORM,
   isPreviewableMime,
@@ -28,7 +29,7 @@ import {
 } from "./schemas"
 import type { AudiencePair, EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
-import { useDocTags, useDraftMeta, useEditorOptions, useReviewers } from "./useEditor"
+import { useDocTags, useDraftMeta, useEditorOptions, useReviewers, useUploadLimits } from "./useEditor"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
@@ -73,6 +74,8 @@ export function DmEditorPage() {
   const { message, confirm } = useNotification()
 
   const { data: options } = useEditorOptions()
+  // #455：上傳說明與選檔器的 accept 一律讀參數，不再寫死
+  const { data: uploadLimits } = useUploadLimits()
   const { data: reviewers } = useReviewers()
   // 續編模式 meta（草稿匣「繼續編輯」）：有本人草稿 → 續編（draftMeta + PUT 更新既有版本）；
   // 無（後端 404 → null）→ 從 DM07 詳細載已發布文件 meta、走「加新版」（addVersion）。
@@ -746,8 +749,11 @@ export function DmEditorPage() {
                     <Typography variant="body2" color="text.secondary">
                       拖拉檔案至此或<Box component="span" sx={{ color: "primary.main" }}>點擊選擇</Box>
                     </Typography>
+                    {/* #455：文案改讀 `DP_PARAM`。⚠️ 寫死時 IT 改完 DB 之後這行仍說舊話，
+                        而 #469 把唯讀參數改為 HIDDEN 之後，**這行是系統內唯一顯示上限
+                        的地方**——它若說謊就沒有第二處可以對照。 */}
                     <Typography variant="caption" color="text.secondary">
-                      支援 PDF / Word / Excel / PPT / 圖片，單檔最大 50 MB
+                      {uploadLimits ? describeUploadLimits(uploadLimits) : "上傳限制載入中…"}
                     </Typography>
                   </>
                 )}

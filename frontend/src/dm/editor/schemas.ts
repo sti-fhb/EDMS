@@ -179,3 +179,30 @@ export function makeEditorSchema(opts: {
       }
     })
 }
+/**
+ * 目前生效的上傳限制（#455）——由 `GET /dm/editor/upload-limits` 取得。
+ *
+ * ⚠️ **值一律來自後端**，與上傳驗證同源（`file_store.resolve_upload_limits`）。
+ * ⛔ 不要在前端另寫一份預設清單當 fallback：那等於把本 issue 要消滅的寫死清單
+ * 換個地方留著，而且它看不出自己什麼時候過期了。
+ */
+export interface UploadLimits {
+  max_mb: number
+  /** 允許的副檔名，**不含點**、全小寫、已排序。 */
+  allowed_extensions: string[]
+}
+
+/**
+ * 把 `allowed_extensions` 組成選檔器的 `accept` 值（`.pdf,.doc,…`）。
+ *
+ * ⚠️ **回空字串代表「不限格式」**，所以呼叫端在限制尚未載入時 MUST NOT 傳空陣列
+ * 進來充數——那會讓選檔器全開，是放寬。載入中請停用輸入，見 `useUploadLimits`。
+ */
+export function toAcceptAttr(extensions: string[]): string {
+  return extensions.map((ext) => `.${ext}`).join(",")
+}
+
+/** 「支援 pdf / doc / …，單檔最大 50 MB」這類說明文字（#455）。 */
+export function describeUploadLimits(limits: UploadLimits): string {
+  return `支援 ${limits.allowed_extensions.join(" / ")}，單檔最大 ${limits.max_mb} MB`
+}

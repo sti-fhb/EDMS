@@ -120,6 +120,16 @@ export function EtCourseEditorPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const qc = useQueryClient()
+  /*
+    #455：教材視窗的上傳說明與 `accept` 改讀 `DP_PARAM`。
+
+    ⚠️ 查詢放在**頁面**而非 `MaterialDialog`——後者是純呈現元件，既有測試直接以
+    props 渲染它，在裡面加查詢會讓每一條測試都得準備 MSW handler。
+  */
+  const { data: videoLimits } = useQuery({
+    queryKey: QUERY_KEYS.etMaterial.videoUploadLimits(),
+    queryFn: materialsApi.getVideoUploadLimits,
+  })
   const { message, confirm } = useNotification()
 
   const [form, setForm] = useState(EMPTY_FORM)
@@ -1473,6 +1483,7 @@ export function EtCourseEditorPage() {
         readOnly={readOnly}
         material={material ?? null}
         dmOptions={dmOptions}
+        videoLimits={videoLimits}
         error={itemError}
         uploadError={uploadError}
         uploading={uploading}

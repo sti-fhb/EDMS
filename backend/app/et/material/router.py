@@ -24,6 +24,7 @@ from app.et.material.schemas import (
     MaterialDetail,
     MaterialUpdateReq,
     VideoRow,
+    VideoUploadLimits,
 )
 from app.et.material.service import EtMaterialService
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
@@ -34,6 +35,30 @@ router = APIRouter(
     dependencies=[Depends(get_et_context), Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
 )
 _service = EtMaterialService()
+
+
+@router.get("/materials/video-upload-limits", response_model=VideoUploadLimits)
+async def get_video_upload_limits(db: AsyncSession = Depends(get_db)) -> VideoUploadLimits:
+    """目前生效的影片上傳限制（#455）——供教材視窗的說明文字與選檔器的 `accept` 使用。
+
+    ## 為何需要這支
+
+    `ET_VIDEO_MAX_SIZE_MB` / `ET_VIDEO_ALLOWED_FORMATS` 屬 `EDIT_SCOPE=READONLY`（#171），
+    變更途徑是 IT 直接操作資料庫。但教材視窗原本把值寫死（「支援 mp4 / webm，單檔最大
+    500 MB」），於是 IT 改完之後畫面仍說舊話，而 `accept` 還會把新允許的格式擋在選檔器
+    外——**教師看到的是「這個格式不能選」，不會有任何錯誤訊息告訴他為什麼**。
+
+    ⚠️ #469 把 9 項唯讀參數改為 `HIDDEN` 之後，**上傳畫面那行文案成為系統內唯一顯示
+    上限的地方**，它若說謊就沒有第二處可以對照。
+
+    ⚠️ **路徑是 `/materials/video-upload-limits`，必須排在 `/materials/{material_id}`
+    之前**——同一 prefix 下若順序顛倒會先命中動態路由，並因「video-upload-limits 不是
+    整數」回 422。本檔既有的 `/dm-documents` 已載明同一條規則。
+
+    授權沿用 router-level 的 `ET_TEACHER` / `ET_ADMIN`——上傳本來就只有他們做得到。
+    """
+    max_size_mb, formats = await _service.resolve_video_limits(db)
+    return VideoUploadLimits(max_size_mb=max_size_mb, allowed_formats=sorted(formats))
 
 
 @router.get("/dm-documents", response_model=list[DmDocOption])
