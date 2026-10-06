@@ -20,6 +20,14 @@ pytestmark = pytest.mark.unit
         ("PWD_POLICY", "CHAR_TYPES", "4"),
         ("MAIL", "RETRY_MAX", "0"),  # 非負下限
         ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "600"),  # 冷卻秒數（60–3600）
+        # FAIL_LOCK_COUNT 值域 1–10（#454）。"1" 與 "2" 釘的是**下限留在 1**：spec 的
+        # 「建議 3–10」只供上限，下限以「值域」欄的 ≥ 1 為準（理由見 param_rules 該列註解）。
+        # 這兩條在本次修改前後都是綠的——它們防的是日後有人把規則「補齊」成 IntRule(3, 10)。
+        ("LOGIN", "FAIL_LOCK_COUNT", "1"),
+        ("LOGIN", "FAIL_LOCK_COUNT", "2"),
+        ("LOGIN", "FAIL_LOCK_COUNT", "3"),  # 建議區間下緣
+        ("LOGIN", "FAIL_LOCK_COUNT", "5"),  # 種子預設值
+        ("LOGIN", "FAIL_LOCK_COUNT", "10"),  # 上限邊界
     ],
 )
 def test_valid_values_pass(param_id, param_key, value):
@@ -39,6 +47,8 @@ def test_valid_values_pass(param_id, param_key, value):
         ("MAIL", "RETRY_MAX", "-1"),  # 負數
         ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "59"),  # 低於 60
         ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "3601"),  # 超過 3600
+        ("LOGIN", "FAIL_LOCK_COUNT", "11"),  # 超過 10（#454）
+        ("LOGIN", "FAIL_LOCK_COUNT", "1000000"),  # #454 原始情境：設大即實質關閉登入失敗鎖定
     ],
 )
 def test_invalid_values_raise(param_id, param_key, value):

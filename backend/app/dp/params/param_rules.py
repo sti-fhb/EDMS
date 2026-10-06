@@ -30,7 +30,12 @@ _RULES: dict[tuple[str, str], IntRule] = {
     ("PWD_POLICY", "HISTORY_COUNT"): IntRule(0, 24),
     ("PWD_POLICY", "EXPIRY_DAYS"): IntRule(1, 90),
     ("PWD_POLICY", "EXPIRY_REMIND_DAYS"): IntRule(1),
-    ("LOGIN", "FAIL_LOCK_COUNT"): IntRule(1),
+    # 上限擋的是「設大」：user/service.py 讀此值當鎖定門檻（遞增後計數達此值即鎖定），設成
+    # 1000000 等於登入失敗鎖定永遠觸發不到，而 DP03 畫面上只是一個數字變大、無任何警告。
+    # 上限 10 取自 spec_us5 平台級參數表該列的「建議 3–10」，下限則留在同列「值域」欄的 ≥ 1：
+    # 該表下註明訂「『建議』值域為 SD 實作之 sanity guard 上限；型別 / 下限 / 跨欄位規則為硬性
+    # 檢核」，故這個不對稱是 spec 規定的，不要「順手補齊」成 IntRule(3, 10)。
+    ("LOGIN", "FAIL_LOCK_COUNT"): IntRule(1, 10),
     ("LOGIN", "LOCK_MINUTES"): IntRule(1),
     ("LOGIN", "RESET_TOKEN_TTL_MIN"): IntRule(1),
     ("LOGIN", "EMAIL_CHANGE_TTL_MIN"): IntRule(1),
