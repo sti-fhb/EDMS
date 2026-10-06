@@ -383,6 +383,7 @@ describe("DmDetailPage 文件詳細頁", () => {
     expect(await screen.findByText("請填寫廢止原因")).toBeInTheDocument()
   })
 })
+
 describe("DmDetailPage 日期欄（#539）", () => {
   const B = "2026-10-05T17:30:00Z" // 台灣 10/06 01:30
 

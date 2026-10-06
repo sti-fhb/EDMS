@@ -1,8 +1,9 @@
 /**
- * 時間顯示工具。時間一律經此格式化，禁止各處自行 `new Date(...).toLocaleString(...)`。
+ * 時間顯示工具。時間一律經此格式化，禁止各處自行 `new Date(...).toLocaleString(...)`，
+ * 也禁止以 `.slice(0, 10)` 等字串截取取日期（後端回傳 UTC，見 `formatDateTaipei`）。
  *
- * 目前僅提供 US4 需要的 `formatDateTime`（日期 + 時分，本地時區）；其餘格式（僅日期 / 相對時間等）
- * 待實際消費者出現時再補（避免臆測擴充）。
+ * 各函式之用途與選用時機見其 JSDoc，以及 `.claude/rules/sti-frontend-modules.md`〈date.ts〉的對照表；
+ * 新增函式時兩處同步更新。
  */
 
 const pad = (n: number): string => String(n).padStart(2, "0")
