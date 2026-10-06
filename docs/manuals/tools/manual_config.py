@@ -18,6 +18,17 @@ ORGANISATION = "國防醫學大學三軍總醫院"
 PROJECT_NAME = "國軍醫院設立捐血站裝備整備案"
 MANUAL_DOC_NAME = "系統操作手冊"      # 操作手冊之文件名
 REPORT_DOC_NAME = "測試報告"          # 測試報告之文件名
+TRAINING_DOC_NAME = "教育訓練"        # 教育訓練教材之文件名
+
+# 教育訓練簡報封面與頁尾用（gen_training_deck.py）。⚠️ **案名與系統名是兩回事**：
+# PROJECT_NAME 為採購案名稱、SYSTEM_NAME 為交付之系統名稱，簡報封面與頁尾用後者。
+# SYSTEM_NAME 取自 EDMS 畫面頂列之系統名稱（2026-10-05 使用者確認）。
+# ⚠️ PROJECT_CASE_NO 與 VENDOR **刻意留佔位**（2026-10-05 裁示）：本 repo 為 public，
+# 案號與廠商名稱是第一次放上公開網路，產簡報前才由使用者決定是否填入正式值。
+# 佔位未補即產出者，封面與**每頁頁尾**都會印出「（待確認）」——頁尾取 VENDOR 前 4 字。
+PROJECT_CASE_NO = "（待確認）"
+SYSTEM_NAME = "教育訓練文件管理系統"
+VENDOR = "（待確認）"
 FORM_TITLE = f"{ORGANISATION}測試報告"  # 測試報告表首之標題
 DOC_VERSION = "1.0"
 
@@ -83,6 +94,30 @@ MSG_CODE_RE = re.compile(
 TABLE_NAME_RE = re.compile(
     rf"\b({'|'.join(d.upper() for d in MODULE_DIRS)})_[A-Z_]{{3,}}\b")
 
-# 內部工作文件之檔名，位於 manuals 下但非手冊
-NON_MANUAL_FILES = {"README.md", "手冊撰寫規範.md", "截圖作業指引.md", "搬遷指引.md"}
-NON_MANUAL_DIRS = {"測試報告"}        # 產出目錄，非手冊來源
+# ---- 五、教育訓練簡報 ----------------------------------------------------
+# 版面採**留白式**：不鋪色塊，靠字級層次、細分隔線與留白建立結構。
+# ⚠️ 字型取捨與 Word 文件不同：文件用標楷體（院方格式），投影片用黑體——襯線體
+# 在投影機上遠看會糊。⚠️ 字級一律取偶數，⛔ 不用小數——投影片放大後小數級距看不出差別，
+# 徒增維護時的判斷成本。
+
+DECK_FONT = "微軟正黑體"
+DECK_FONT_EN = "Arial"         # 英文小標：標準簡報字體，任何機器皆有
+
+DECK_COLORS = {
+    "primary": "1F3864",      # 英文小標、分隔線、流程圖：深藍
+    "on_primary": "FFFFFF",   # 深色底上的文字
+    "text": "1A1A1A",         # 中文主標與內文
+    "body": "404040",         # 說明文字：略淡於主標
+    "accent": "C00000",       # **粗體**強調：深紅
+    "muted": "8C8C8C",        # 頁尾與頁碼
+    "brand": "2E75B6",        # 裝飾色帶：中藍，較主色明亮，用於視覺識別
+    "rule": "D9D9D9",         # 分隔線：淺灰，⛔ 不用深色（會搶掉標題）
+    "surface": "EDF1F8",      # 流程圖中間節點：極淺藍
+}
+
+# 內部工作文件之檔名，位於 manuals 下但非手冊。
+# ⚠️ 於 docs/manuals 下新增非手冊之 md 時 MUST 一併登記於此（或 check_manual.py 之
+# INTERNAL_DIRS），否則格式檢查會把它當手冊掃，對全員噴出大量假錯誤。
+NON_MANUAL_FILES = {"README.md", "手冊撰寫規範.md", "截圖作業指引.md", "搬遷指引.md",
+                    "教育訓練教材規範.md"}
+NON_MANUAL_DIRS = {"測試報告", "教育訓練"}   # 產出目錄，非手冊來源

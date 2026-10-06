@@ -354,3 +354,27 @@ class TestAdminCardTraps:
 
         ordered = [c["course_name"] for c in card["by_course"] if c["course_name"].startswith("ZT")]
         assert ordered == ["ZT低分課程", "ZT高分課程"]
+
+    async def test_同名課程各自一列且帶得出課程id(self, client, db) -> None:
+        """🔴 分組鍵是 `(course_id, course_name)`，**同名刻意不合併**（不同年度的年度訓練）。
+
+        但 `course_rates` 原本只 SELECT 名稱，於是那兩列在前端完全無法區分——以名稱當
+        React key 會撞號，症狀是改動一列時另一列跟著變，且不會有任何錯誤訊息。
+
+        ⚠️ 兩個斷言缺一不可：
+        - 只驗「兩列」→ 把 `course_id` 從回應拿掉照樣通過
+        - 只驗「有 course_id」→ 改回用名稱分組（合併成一列）照樣通過
+        """
+        admin = await _user(db, "d_adm07", roles=(ROLE_ADMIN,))
+        teacher = await _user(db, "d_tea16", roles=(ROLE_TEACHER,))
+        student = await _user(db, "d_stu12", roles=(ROLE_STUDENT,))
+        first, _ = await _one_item_course(db, owner=teacher, name="ZT年度訓練")
+        second, _ = await _one_item_course(db, owner=teacher, name="ZT年度訓練")
+        await _enroll(db, student, first)
+        await _enroll(db, student, second)
+
+        card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
+
+        rows = [c for c in card["by_course"] if c["course_name"] == "ZT年度訓練"]
+        assert len(rows) == 2, "同名課程被合併了——分組鍵退回只用名稱"
+        assert {r["course_id"] for r in rows} == {first, second}

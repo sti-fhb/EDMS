@@ -23,8 +23,10 @@ from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmChangeLog, DmReview
+from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
+from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
 
 pytestmark = pytest.mark.integration
@@ -158,7 +160,7 @@ async def test_pending_lists_only_own(db):
     await _seed_user(db, "ed", "撰寫")
     await _new_submission(db, "DM-SOP-000301", reviewer="rev1")
     await _new_submission(db, "DM-SOP-000302", reviewer="rev2")  # 別人的
-    items = await _svc.list_pending(db, op=_op("rev1"))
+    items = (await _svc.list_pending(db, op=_op("rev1"), page=1, limit=20))["data"]
     assert {i.doc_id for i in items} == {"DM-SOP-000301"}
     assert items[0].review_type == "NEW" and items[0].waiting_days >= 0
 
@@ -170,7 +172,7 @@ async def test_pending_waiting_days(db):
     await _doc(db, "DM-SOP-000303", status="PENDING_REVIEW")
     v = await _add_version(db, "DM-SOP-000303", "1.0", status="PENDING_REVIEW")
     await _review(db, "DM-SOP-000303", v.version_id, review_type="NEW", submit=utcnow() - timedelta(days=5))
-    items = await _svc.list_pending(db, op=_op("rev1"))
+    items = (await _svc.list_pending(db, op=_op("rev1"), page=1, limit=20))["data"]
     assert items[0].waiting_days == 5
 
 
@@ -390,6 +392,117 @@ async def test_completed_keyword_search(db):
     assert page["meta"]["total"] == 1 and page["data"][0].doc_id == "DM-MANUAL-000343"
 
 
+# ── 催辦門檻（#503 第 1 項）─────────────────────────
+
+
+async def _set_remind_threshold(db, days: int) -> None:
+    """改寫 `DP_PARAM.DM_REMIND_THRESHOLD`（seed 預設 7）。"""
+    await db.execute(
+        update(DpParamDetail)
+        .where(DpParamDetail.param_id == "DM_REMIND_THRESHOLD", DpParamDetail.param_key == "VALUE")
+        .values(param_value=str(days))
+    )
+    await db.flush()
+
+
+@pytest.mark.parametrize(
+    ("threshold", "waited", "expected", "doc_id"),
+    [
+        (3, 5, True, "DM-SOP-000391"),  # 門檻調低：5 天就該標紅
+        (14, 10, False, "DM-SOP-000392"),  # 門檻調高：10 天還不該標紅
+    ],
+)
+async def test_pending_overdue_依催辦門檻判定(db, threshold, waited, expected, doc_id):
+    """`overdue` 由後端讀 `DM_REMIND_THRESHOLD` 判定，不是前端寫死的 7（#503 第 1 項）。
+
+    ⚠️ **兩筆刻意分居寫死值 7 的兩側**：5 天（< 7）期望標紅、10 天（> 7）期望不標紅。
+    任一側的實作若退回「`waiting_days >= 7`」，該側的期望就會反過來而轉紅；
+    只測其中一側的話，另一側的方向錯誤無人發現。
+    """
+    from datetime import timedelta
+
+    await _set_remind_threshold(db, threshold)
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, doc_id, status="PENDING_REVIEW")
+    v = await _add_version(db, doc_id, "1.0", status="PENDING_REVIEW")
+    await _review(db, doc_id, v.version_id, review_type="NEW", submit=utcnow() - timedelta(days=waited))
+
+    page = await _svc.list_pending(db, op=_op("rev1"), page=1, limit=20)
+
+    item = next(i for i in page["data"] if i.doc_id == doc_id)
+    assert item.waiting_days == waited
+    assert item.overdue is expected
+
+
+# ── 撰寫者撤回後的簽核（#503 第 2 項）────────────────
+
+
+async def test_approve_撤回後回_dm_review_009(db):
+    """撰寫者撤回後審核者再核准 → `DM_REVIEW_009`（供前端顯示 DM-MSG-DM02-006）。
+
+    與 `test_approve_non_pending_blocked`（已核准後再核准 → DM_REVIEW_003）成對：
+    兩種終態要給不同訊息——「別人撤回了」與「你已經處理過了」對審核者是不同的事。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, _, r = await _new_submission(db, "DM-SOP-000360")
+    await ReviewService().withdraw(db, r, operator="ed")
+
+    with pytest.raises(AppError) as e:
+        await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    assert e.value.error_code == "DM_REVIEW_009"
+    assert e.value.status_code == 409
+
+
+async def test_reject_撤回後回_dm_review_009(db):
+    """退回路徑同樣要區分撤回（兩個動作共用 `_complete`，但別只測其中一條）。"""
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, _, r = await _new_submission(db, "DM-SOP-000361")
+    await ReviewService().withdraw(db, r, operator="ed")
+
+    with pytest.raises(AppError) as e:
+        await _svc.reject(db, review_id=r.review_id, reason="理由", op=_op("rev1"))
+
+    assert e.value.error_code == "DM_REVIEW_009"
+
+
+# ── 待簽核分頁（#503 第 3 項）───────────────────────
+
+
+async def test_pending_分頁並維持停留最久在前(db):
+    """待簽核改後端分頁（比照已完成）；排序仍為 `submit_date ASC`，不得因分頁而改變。"""
+    from datetime import timedelta
+
+    await _seed_user(db, "ed", "撰寫")
+    now = utcnow()
+    for n, days_ago in enumerate([10, 8, 6, 4, 2], start=1):  # 愈早送審 → 停留愈久 → 愈前面
+        doc_id = f"DM-SOP-00037{n}"
+        await _doc(db, doc_id, status="PENDING_REVIEW")
+        v = await _add_version(db, doc_id, "1.0", status="PENDING_REVIEW")
+        await _review(db, doc_id, v.version_id, review_type="NEW", submit=now - timedelta(days=days_ago))
+
+    first = await _svc.list_pending(db, op=_op("rev1"), page=1, limit=2)
+    second = await _svc.list_pending(db, op=_op("rev1"), page=2, limit=2)
+
+    assert first["meta"] == {"total": 5, "page": 1, "limit": 2, "total_pages": 3}
+    assert [i.doc_id for i in first["data"]] == ["DM-SOP-000371", "DM-SOP-000372"]
+    assert [i.doc_id for i in second["data"]] == ["DM-SOP-000373", "DM-SOP-000374"]
+    # 停留天數隨之遞減 → 證明「停留最久在前」跨頁仍成立
+    assert first["data"][0].waiting_days > second["data"][-1].waiting_days
+
+
+async def test_pending_超出頁數回空清單(db):
+    """頁碼超出總頁數 → 空 data、meta 仍帶真實 total（與已完成一致）。"""
+    await _seed_user(db, "ed", "撰寫")
+    await _new_submission(db, "DM-SOP-000375")
+
+    page = await _svc.list_pending(db, op=_op("rev1"), page=99, limit=20)
+
+    assert page["data"] == [] and page["meta"]["total"] == 1
+
+
 # ── 收件名單 ──────────────────────────────────────
 
 
@@ -589,7 +702,8 @@ async def test_http_pending_and_approve_flow(db, client):
     token = create_access_token(sub="rev9", ttl_minutes=15)
     h = {"Authorization": f"Bearer {token}"}
     resp = await client.get("/api/dm/reviews/pending", headers=h)
-    assert resp.status_code == 200 and any(i["review_id"] == r.review_id for i in resp.json())
+    # #503 起 /pending 回 {data, meta}（比照已完成頁籤之分頁形狀）
+    assert resp.status_code == 200 and any(i["review_id"] == r.review_id for i in resp.json()["data"])
     resp2 = await client.post(f"/api/dm/reviews/{r.review_id}/approve", headers=h)
     assert resp2.status_code == 200 and resp2.json()["published_version_id"] == v.version_id
 

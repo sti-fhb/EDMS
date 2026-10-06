@@ -6,7 +6,7 @@
 is_module_admin 回歸」之真 admin 閘。**不提供任何刪改端點**（append-only）。
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.module_admin import require_any_module_admin
 from app.core.pagination import MAX_LIMIT, PagedResponse
+from app.core.utils import format_taipei_date, utcnow
 from app.dp.audit.query_service import (
     ACTION_OPTIONS,
     FUNC_OPTIONS,
@@ -81,6 +82,20 @@ async def query_audit_logs(
     )
 
 
+def _export_filename(now: datetime) -> str:
+    """匯出檔名 `audit_log_YYYYMMDD.csv`，日期取**台灣時間**。
+
+    抽成純函式**是為了讓它測得到**：原本內嵌在 handler 裡，要驗它得連真 DB 跑完整個匯出。
+
+    原寫法是 `datetime.now(timezone.utc).strftime('%Y%m%d')`，於台灣 00:00–08:00 匯出時
+    會命名成前一天——與檔案內容的時間欄、以及查詢頁以台灣時間切日的日期篩選都對不上（#519）。
+
+    Args:
+        now: 當下時間（aware）。由呼叫端傳入而非在函式內取系統時間，否則無法測。
+    """
+    return f"audit_log_{format_taipei_date(now).replace('-', '')}.csv"
+
+
 @router.get("/logs/export")
 async def export_audit_logs(
     db: AsyncSession = Depends(get_db),
@@ -103,7 +118,7 @@ async def export_audit_logs(
         date_from=date_from,
         date_to=date_to,
     )
-    filename = f"audit_log_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    filename = _export_filename(utcnow())
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",

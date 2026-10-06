@@ -175,6 +175,12 @@
       </div>
       <div class="alert alert-danger py-2 px-3 mb-3" id="login-error" style="display:none; font-size:0.875rem;">
         <i class="bi bi-exclamation-circle me-1"></i><span id="login-error-text"></span>
+        <!-- #484：三條自助出路不在訊息裡，改由此區塊承擔（僅 no_account / DP_AUTH_007 顯示）。
+             缺任一條即讓某類使用者走進死路，詳見 spec_us1 驗收情境 3 與 FR-DP-US2-04c。 -->
+        <div id="login-error-paths" style="display:none; margin-top:.5rem;">
+          <div style="color:#6c757d; font-size:0.8125rem; margin-bottom:.35rem;">尚未完成驗證？請至信箱點選驗證連結。</div>
+          <a href="#" onclick="return false;" style="margin-right:1rem;">前往註冊</a><a href="#" onclick="return false;">重寄驗證信</a>
+        </div>
       </div>
       <button class="btn btn-tsbms w-100" onclick="loginSubmit()"><i class="bi bi-box-arrow-in-right me-1"></i>登入</button>
       <div class="login-auth-hint">
@@ -253,7 +259,7 @@
       <div class="mb-3"><label class="form-label form-label-sm">確認密碼 <span class="text-danger">*</span></label><input type="password" class="form-control" placeholder="再次輸入密碼"></div>
       <button class="btn btn-tsbms w-100" onclick="loginVerifySubmit()"><i class="bi bi-shield-check me-1"></i>設定密碼並啟用</button>
       <div class="login-auth-hint"><i class="bi bi-info-circle me-1"></i>密碼複雜度讀平台參數（PWD_POLICY）；設定後即以此 Email 直接登入。<span class="text-danger">密碼不合規 / 兩次不一致改顯示 DP-MSG-DP08-002 / 003（token 仍有效，可原頁重試）；連結無效 / 逾時顯示 DP-MSG-DP08-006 / 007 + 重新註冊指引。</span></div>
-      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；成功後提示 DP-MSG-DP08-005 並導登入。與下方 US4「帳號啟用落點」為<strong>孿生頁</strong>——同一個殼、同一套密碼檢核，只差文案與呼叫的端點（`/verify-email` 收 <code>SELF_REGISTER</code>、`/activate-account` 收 <code>ADMIN_INVITE</code>）。啟用副作用僅在此步落地：建 <code>ACTIVE</code> DP_USER + 授 ET 學員 + 雙稽核 + 首筆 PWD_HIST + 刪 pending 列。未驗證帳號登入 → <strong>與「未註冊」完全相同</strong>之 DP-MSG-DP07-001（DP_AUTH_007），畫面同時提供「前往註冊」與「重寄驗證信」兩個入口（#208 防帳號列舉；DP-MSG-DP08-008 / DP_AUTH_010 已退役）。</div>
+      <div class="internal-note" style="color:#1b5e20;font-style:italic;margin-top:.5rem;">💡 此為信中連結之落點頁（前端獨立 route `/verify-email`，不套登入 overlay）；成功後提示 DP-MSG-DP08-005 並導登入。與下方 US4「帳號啟用落點」為<strong>孿生頁</strong>——同一個殼、同一套密碼檢核，只差文案與呼叫的端點（`/verify-email` 收 <code>SELF_REGISTER</code>、`/activate-account` 收 <code>ADMIN_INVITE</code>）。啟用副作用僅在此步落地：建 <code>ACTIVE</code> DP_USER + 授 ET 學員 + 雙稽核 + 首筆 PWD_HIST + 刪 pending 列。未驗證帳號登入 → <strong>與「未註冊」完全相同</strong>之 DP-MSG-DP07-001（DP_AUTH_007），畫面同時提供「前往註冊」「至信箱點驗證連結」（一行小字）「重寄驗證信」**三條出路**（#208 防帳號列舉；DP-MSG-DP08-008 / DP_AUTH_010 已退役）。⚠️ 三條自 #484 起不在訊息裡——主訊息縮為「帳號或密碼錯誤」，出路改由畫面元素承擔。</div>
     </div>
 
     <!-- 帳號啟用落點（管理者邀請信連結 /activate?token=... 之落點；US4 邀請流程，使用者自設密碼） -->
@@ -341,13 +347,11 @@
       <div class="screen-meta">UCDP001 ｜ 登入後落點（無來源模組時）｜ 所有登入使用者</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時被攔到登入頁者</strong>（通知信連結、書籤、逾時重登）登入後<strong>返回原目標頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊）顯示本頁。登入後採<strong>統一 shell</strong>（頂列 + 依權限側欄 + 內容區），主頁為<strong>中性歡迎頁</strong>（問候 + 系統定位 + 版本），不綁任何模組權限、永遠存在。<strong>側欄依權限顯示</strong>：無某模組角色者<strong>完全看不到該模組群組</strong>（最小知悉，不呈鎖定卡）；「系統管理者後台」群組僅管理者可見（過渡期先對所有登入者顯示）。（導覽重構 #89，取代原卡片入口頁）</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i><strong>因未登入 / 閒置逾時被攔到登入頁者</strong>（通知信連結、書籤、逾時重登）登入後<strong>返回原目標頁面</strong>（不經本頁）；直接開啟系統、無目標頁面者（含新註冊）顯示本頁。登入後採<strong>統一 shell</strong>（頂列 + 依權限側欄 + 內容區），主頁為<strong>中性歡迎頁</strong>（問候 + 依權限疊加的模組概況 widget），不綁任何模組權限、永遠存在。<strong>2026-10-02 裁示移除系統定位文案與版本號</strong>——前者原為 #89 決策 D3，屬刻意推翻；版本號仍顯示於登入畫面。<strong>側欄依權限顯示</strong>：無某模組角色者<strong>完全看不到該模組群組</strong>（最小知悉，不呈鎖定卡）；「系統管理者後台」群組僅管理者可見（過渡期先對所有登入者顯示）。（導覽重構 #89，取代原卡片入口頁）</div>
 
     <!-- 中性歡迎頁內容（顯示於統一 shell 內容區；左側常駐側欄見本 wireframe 左欄） -->
     <div class="wf-card p-4" style="max-width:640px;">
       <div class="h4 mb-1">歡迎，王小明</div>
-      <div class="text-muted">教育訓練與文件管理系統</div>
-      <div class="text-muted small mt-3">版本 1.0.0</div>
     </div>
     <div class="text-muted small mt-2"><em>💡 P2+ 再於此依權限疊加「管理者概況」「ET / DM 儀表板」widget（空卡不顯示）。</em></div>
 
@@ -1098,13 +1102,14 @@
         </tr></thead>
         <tbody>
           <!-- 說明欄（DESCRIPTION，#311）：JOB_NAME 為短名詞，工作內容細節寫於此欄、唯讀不可編輯 -->
-          <!-- 執行時點（#332）：由 CRON_EXPR 現算、標 UTC（cron 本身是 UTC，與右側編輯的值同一套）。
+          <!-- 執行時點（#332）：由 CRON_EXPR 現算，不加時區標籤——cron 即台灣時間（#517），
+               與右側編輯的值同一基準，標了反而多餘。#517 之前引擎跑 UTC，此欄會標「UTC」。
                說明欄不再寫時點——兩者無同步機制，曾出現說明欄 08:00 而 cron 為 10:00 的矛盾。
                dow 以「週一為 0」（APScheduler 語意），故週一是 0 而非 1。 -->
-          <tr><td>SCHDP001 平台每日作業</td><td>停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>每日 08:00 UTC</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHET001 ET 週統計與週報</td><td>寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒</td><td>ET</td><td>每週一 10:00 UTC</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>關閉已逾閱課期間之課程，並結清這些課程中逾期未提交之作答（標 TIMEOUT 並計分）</td><td>ET</td><td>每日 08:00 UTC</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>每週一 10:00 UTC</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHDP001 平台每日作業</td><td>停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>每日 08:00</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHET001 ET 週統計與週報</td><td>寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒</td><td>ET</td><td>每週一 10:00</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>關閉已逾閱課期間之課程，並結清這些課程中逾期未提交之作答（標 TIMEOUT 並計分）</td><td>ET</td><td>每日 08:00</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>每週一 10:00</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
         </tbody>
       </table>
     </div>
@@ -1386,8 +1391,12 @@ function loginShowError(type) {
   if (!box || !txt) return;
   if (!type) { box.style.display = 'none'; txt.textContent = ''; return; }
   // no_account 涵蓋「未註冊 / 未驗證 / 已受邀 / 待驗證列逾期」四種狀態，文案刻意一致（#208）
-  var msgs = { 'no_account': '帳號或密碼錯誤。若尚未註冊請先註冊；若剛完成註冊，請至信箱點選驗證連結，未收到信可重新寄送', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請洽管理者或稍後再試', 'disabled': '帳號已停用，請洽管理者', 'rate_limited': '嘗試次數過多，請稍後再試' };
+  var msgs = { 'no_account': '帳號或密碼錯誤', 'wrong_password': '密碼錯誤', 'locked': '帳號已鎖定，請洽管理者或稍後再試', 'disabled': '帳號已停用，請洽管理者', 'rate_limited': '嘗試次數過多，請稍後再試' };
   txt.textContent = msgs[type] || '登入失敗'; box.style.display = '';
+  // 三條出路只在 no_account（DP_AUTH_007）顯示——對其他失敗原因顯示驗證引導，
+  // 等於暗示該 Email 有待驗證列，正是 #208 要擋的列舉面。
+  var paths = document.getElementById('login-error-paths');
+  if (paths) paths.style.display = (type === 'no_account') ? '' : 'none';
 }
 function loginForgotPw()     { _loginShow('login-forgot-1'); }
 function loginForgotSubmit() { _loginShow('login-forgot-2'); }

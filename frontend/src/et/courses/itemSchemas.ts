@@ -303,3 +303,30 @@ export function formatFileSize(bytes: number): string {
   // 小於 10 時保留一位小數（1.5 MB 比 2 MB 有資訊量），其餘取整
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unitIndex]}`
 }
+
+/**
+ * 目前生效的教材影片上傳限制（#455）——由 `GET /et/materials/video-upload-limits` 取得。
+ *
+ * ⚠️ **值一律來自後端**，與上傳驗證同源（`EtMaterialService.resolve_video_limits`）。
+ * ⛔ 不要在前端另寫一份預設清單當 fallback：那等於把本 issue 要消滅的寫死清單換個
+ * 地方留著，而且它看不出自己什麼時候過期了。
+ */
+export interface VideoUploadLimits {
+  max_size_mb: number
+  /** 允許的容器格式，**不含點**、全小寫、已排序。 */
+  allowed_formats: string[]
+}
+
+/**
+ * 把 `allowed_formats` 組成選檔器的 `accept` 值（`.mp4,.webm`）。
+ *
+ * ⚠️ **回空字串代表「不限格式」**，呼叫端在限制尚未載入時 MUST NOT 傳空陣列充數。
+ */
+export function toVideoAcceptAttr(formats: string[]): string {
+  return formats.map((f) => `.${f}`).join(",")
+}
+
+/** 「支援 mp4 / webm，單檔最大 500 MB」這類說明文字（#455）。 */
+export function describeVideoLimits(limits: VideoUploadLimits): string {
+  return `支援 ${limits.allowed_formats.join(" / ")}，單檔最大 ${limits.max_size_mb} MB`
+}

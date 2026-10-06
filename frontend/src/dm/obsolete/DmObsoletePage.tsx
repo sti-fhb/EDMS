@@ -23,15 +23,10 @@ import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
-import { formatDateTime } from "../../utils/date"
-import { DM_CATEGORIES } from "../library/schemas"
+import { formatDateTimeTaipei, todayTaipei } from "../../utils/date"
+import { useCategoryOptions } from "../library/useLibrary"
 
 const PAGE_SIZE = 20
-
-/** 今日 yyyy-mm-dd（廢止日期上限；廢止時間不會是未來）。 */
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 /**
  * 已廢止文件查詢（US10 / DM03，管理者）：以關鍵字（文件名 / 廢止原因）/ 分類 / 廢止日期區間**即時**
@@ -49,6 +44,7 @@ export function DmObsoletePage() {
   // 先以 access 端點判權限：非管理者不渲染搜尋 UI、清單查詢僅在具管理者權限時才發（避免先閃搜尋列再跳無權限）。
   const { data: access, isPending: accessPending, isError: accessError } = useDmAdminAccess()
   const canAccess = access?.can_access ?? false
+  const { data: categoryOptions } = useCategoryOptions(canAccess)
   const denied = accessError || access?.can_access === false
   const { data, isPending, isError } = useObsoleteSearch(
     { ...applied, page, limit: PAGE_SIZE },
@@ -122,9 +118,9 @@ export function DmObsoletePage() {
             onChange={(e) => setField("category", e.target.value)}
           >
             <MenuItem value="">全部</MenuItem>
-            {DM_CATEGORIES.map((c) => (
+            {(categoryOptions ?? []).map((c) => (
               <MenuItem key={c.code} value={c.code}>
-                {c.label}
+                {c.name}
               </MenuItem>
             ))}
           </TextField>
@@ -132,7 +128,7 @@ export function DmObsoletePage() {
             size="small"
             type="date"
             label="廢止日期 起"
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.dateTo || today() } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.dateTo || todayTaipei() } }}
             value={filters.dateFrom}
             onChange={(e) => setField("dateFrom", e.target.value)}
           />
@@ -140,7 +136,7 @@ export function DmObsoletePage() {
             size="small"
             type="date"
             label="廢止日期 迄"
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.dateFrom || undefined, max: today() } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.dateFrom || undefined, max: todayTaipei() } }}
             value={filters.dateTo}
             onChange={(e) => setField("dateTo", e.target.value)}
           />
@@ -203,7 +199,7 @@ export function DmObsoletePage() {
                       <Chip size="small" label={row.category_name} />
                     </TableCell>
                     <TableCell>{row.author_name ?? row.author_id ?? "—"}</TableCell>
-                    <TableCell>{formatDateTime(row.obsolete_date)}</TableCell>
+                    <TableCell>{formatDateTimeTaipei(row.obsolete_date)}</TableCell>
                     <TableCell>{row.applicant_name ?? row.applicant_id ?? "—"}</TableCell>
                     <TableCell>{row.approver_name ?? row.approver_id ?? "—"}</TableCell>
                     <TableCell>

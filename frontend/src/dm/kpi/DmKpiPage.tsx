@@ -19,7 +19,7 @@ import { EMPTY_KPI_FILTERS } from "./schemas"
 import type { KpiFilters } from "./schemas"
 import { useKpiSearch } from "./useKpi"
 import { useDmAdminAccess } from "../access/useDmAdminAccess"
-import { DM_CATEGORIES } from "../library/schemas"
+import { useCategoryOptions } from "../library/useLibrary"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -45,6 +45,7 @@ export function DmKpiPage() {
   // 先以 admin-access 判權限：非管理者不渲染查詢 UI、清單查詢僅在具管理者權限時才發（避免先閃搜尋列再跳無權限）。
   const { data: access, isPending: accessPending, isError: accessError } = useDmAdminAccess()
   const canAccess = access?.can_access ?? false
+  const { data: categoryOptions } = useCategoryOptions(canAccess)
   const denied = accessError || access?.can_access === false
   const { data, isPending, isError } = useKpiSearch({ ...applied, page, limit: PAGE_SIZE }, { enabled: canAccess })
 
@@ -137,9 +138,9 @@ export function DmKpiPage() {
             onChange={(e) => setField("category", e.target.value)}
           >
             <MenuItem value="">全部</MenuItem>
-            {DM_CATEGORIES.map((c) => (
+            {(categoryOptions ?? []).map((c) => (
               <MenuItem key={c.code} value={c.code}>
-                {c.label}
+                {c.name}
               </MenuItem>
             ))}
           </TextField>

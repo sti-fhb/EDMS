@@ -6,6 +6,7 @@ import type {
   EditorOptions,
   ReviewerItem,
   SubmitResult,
+  UploadLimits,
   VersionResult,
 } from "./schemas"
 import { http } from "../../services/http"
@@ -81,6 +82,18 @@ function buildCreateForm(p: CreateDocPayload): FormData {
 }
 
 export const editorApi = {
+  /**
+   * 目前生效的上傳限制（#455）。
+   *
+   * 供上傳說明文字與選檔器的 `accept` 使用——⚠️ 兩者都不可再寫死，`DM_FILE_MAX_MB` /
+   * `DM_FILE_TYPES` 由 IT 於 DB 變更（`EDIT_SCOPE=READONLY`，#171），寫死會讓畫面
+   * 在改完之後仍說舊話。
+   */
+  getUploadLimits: async (): Promise<UploadLimits> => {
+    const { data } = await http.get<UploadLimits>("/dm/editor/upload-limits")
+    return data
+  },
+
   getOptions: async (): Promise<EditorOptions> => {
     const { data } = await http.get<EditorOptions>("/dm/editor/options")
     return data

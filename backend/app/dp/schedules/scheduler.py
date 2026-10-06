@@ -28,6 +28,24 @@ _STATUS_SUCCESS = "SUCCESS"
 _STATUS_FAILED = "FAILED"
 _STATUS_SKIPPED = "SKIPPED"
 
+# `CRON_EXPR` 的解讀時區（#517 裁示）。`0 8 * * *` 即**台灣時間** 08:00。
+#
+# 原為 `"UTC"`，於是 5 支排程全部晚 8 小時觸發——催辦信在下班時間寄、週報在週一傍晚才發。
+# 規格（`spec_us13` FR-004a、ET `spec_us14` FR-02）只寫「週一 10:00」而從未指定時區，
+# 實作選了 UTC，沒有人裁示過；2026-10-05 定案為台灣時間。
+#
+# 與 `core/db.py::_SESSION_TIMEZONE` 同一基準——該處 docstring 已明寫「全系統以台灣時間切日」，
+# 排程原本是唯一沒跟上的一塊。
+#
+# ⚠️ 本常數是**解讀 cron 的時區**，與寫入 DB 的時間無關：`DP_SCHEDULE_LOG` 的起訖、
+# `LAST_RUN_DATE` 一律走 `utcnow()`（UTC aware），不受此值影響。
+#
+# ⛔ **改成有 DST 的時區前，先想清楚兩種壞法。** `Asia/Taipei` 恆為 `+08:00`（實測 2026–2046
+# 每 6 小時取樣，只有一種 offset），所以不存在「本地時刻不存在」與「本地時刻出現兩次」。
+# 換成有日光節約的時區後，`0 2 30 * *` 這類設定會在切換日**不觸發**或**觸發兩次**，而
+# APScheduler 不會報錯。日後若要把時區做成可設定，這是第一個該撞的牆。
+_SCHEDULE_TIMEZONE = "Asia/Taipei"
+
 # 動態 import 之縱深防禦：HANDLER_REF 僅允許平台 / 模組命名空間（縱使 DB 註冊表遭竄改亦無法載入
 # os / subprocess 等任意模組。CWE-470 Unsafe Reflection）。
 _ALLOWED_HANDLER_PREFIXES = ("app.dp.", "app.et.", "app.dm.")
@@ -44,13 +62,13 @@ _scheduler: AsyncIOScheduler | None = None
 
 def validate_cron(cron_expr: str) -> None:
     """驗證 cron 表達式合法；非法拋 ValueError（呼叫端轉 422）。"""
-    CronTrigger.from_crontab(cron_expr, timezone="UTC")
+    CronTrigger.from_crontab(cron_expr, timezone=_SCHEDULE_TIMEZONE)
 
 
 def next_run(cron_expr: str) -> "datetime | None":
     """由 cron 算「現在起」之下次觸發時間（供總覽顯示）；非法 cron 回 None。"""
     try:
-        trigger = CronTrigger.from_crontab(cron_expr, timezone="UTC")
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=_SCHEDULE_TIMEZONE)
     except ValueError:
         return None
     return trigger.get_next_fire_time(None, utcnow())
@@ -65,7 +83,7 @@ def apply_job_change(job_id: str, *, cron_expr: str, is_enabled: bool, handler_r
         return
     existing = _scheduler.get_job(job_id)
     if is_enabled:
-        trigger = CronTrigger.from_crontab(cron_expr, timezone="UTC")
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=_SCHEDULE_TIMEZONE)
         if existing is not None:
             _scheduler.reschedule_job(job_id, trigger=trigger)
         else:
@@ -172,7 +190,7 @@ async def start_scheduler() -> AsyncIOScheduler | None:
         return None
 
     _loop = asyncio.get_running_loop()
-    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler = AsyncIOScheduler(timezone=_SCHEDULE_TIMEZONE)
     scheduler.add_listener(_on_max_instances, EVENT_JOB_MAX_INSTANCES)
 
     async with AsyncSessionLocal() as db:
@@ -181,7 +199,7 @@ async def start_scheduler() -> AsyncIOScheduler | None:
     for job in jobs:
         scheduler.add_job(
             _run_job,
-            trigger=CronTrigger.from_crontab(job.cron_expr, timezone="UTC"),
+            trigger=CronTrigger.from_crontab(job.cron_expr, timezone=_SCHEDULE_TIMEZONE),
             args=[job.job_id, job.handler_ref],
             id=job.job_id,
             max_instances=1,

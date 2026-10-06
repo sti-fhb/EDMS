@@ -2,20 +2,28 @@ import Box from "@mui/material/Box"
 import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 
-import { authApi } from "../auth/authService"
 import { useAuth } from "../auth/useAuth"
 import { DmOverviewWidget } from "../dm/dashboard/DmOverviewWidget"
 import { EtOverviewWidget } from "../et/dashboard/EtOverviewWidget"
 import { PROFILE_ME_QUERY_KEY, profileApi } from "../dp/user/profileService"
 import { useModuleSummary } from "../layouts/useModuleSummary"
 
-const TAGLINE = "教育訓練與文件管理系統"
-
 /**
  * 中性歡迎頁（#89 P1）：登入後主頁，不綁任何模組權限、永遠存在。
- * 顯示問候（帶姓名）+ 系統定位 + 版本號。姓名 / 版本載入失敗時靜默保底（問候退回「歡迎」、
- * 版本行隱藏），不阻斷頁面。**具任一 DM 角色者於此依權限疊加「DM 文件概況」widget（US7 / #89）**，
+ *
+ * 只顯示問候（帶姓名）＋各模組的概況 widget。姓名載入失敗時靜默保底（退回「歡迎」），
+ * 不阻斷頁面。**具任一 DM 角色者於此依權限疊加「DM 文件概況」widget（US7 / #89）**，
  * 無 DM 角色者不顯示（最小知悉）。
+ *
+ * ## 2026-10-02 手測裁示：拿掉「系統定位」與版本號
+ *
+ * ⚠️ 系統定位文案（「教育訓練與文件管理系統」）原是 **#89 的決策 D3**，由 PO 於
+ * 2026-07-28 定案。本次裁示移除，**屬刻意推翻**而非漏掉——日後若有人依 #89 的留言
+ * 想把它加回來，請先確認那是新的決定。
+ *
+ * 📌 版本號**並未消失**，登入畫面仍然顯示（`LoginOverlay`）。移除的是歡迎頁這一處，
+ * 故「請問你是哪個版本」這個支援問法不受影響；`/api/version` 的查詢也隨之移除，
+ * 不留一支沒有讀取端的請求。
  */
 export function WelcomePage() {
   const { isAuthenticated, mustChangePwd } = useAuth()
@@ -23,7 +31,6 @@ export function WelcomePage() {
   // 密碼時才發查詢，避免無謂 401（比照 #41 的取捨）。
   const enabled = isAuthenticated && !mustChangePwd
   const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe, enabled })
-  const { data: version } = useQuery({ queryKey: ["app", "version"], queryFn: authApi.version, enabled })
   const { data: modules } = useModuleSummary()
 
   const greeting = me?.user_name ? `歡迎，${me.user_name}` : "歡迎"
@@ -33,14 +40,6 @@ export function WelcomePage() {
       <Typography variant="h4" gutterBottom>
         {greeting}
       </Typography>
-      <Typography variant="body1" color="text.secondary">
-        {TAGLINE}
-      </Typography>
-      {version !== undefined && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 3 }}>
-          版本 {version}
-        </Typography>
-      )}
       {/* #453 / #89 的 P3：教育訓練概況。
           ⚠️ 這裡只把「有沒有 ET 角色」當成**要不要發查詢**的條件（無角色者端點回 403，
           先打再被擋等於每位純 DM 使用者的首頁固定吃一個 403）。**渲染與否由 widget

@@ -97,3 +97,20 @@ class EditorOptions(BaseModel):
     audiences: list[OptionItem]  # 可見對象之職位（含通用值「全體」）
     units: list[OptionItem]  # 可見對象之單位（含通用值「全單位」＝不限單位，#437）
     retrieval_tags: list[OptionItem]  # 檢索標籤（分組）
+
+
+class UploadLimits(BaseModel):
+    """目前生效的上傳限制（#455）。
+
+    ⚠️ **值一律由 `file_store.resolve_upload_limits` 解析**，與上傳驗證同源——另寫一支
+    就會分岔，而分岔的表徵是「選得到卻傳不上去」（或相反）。
+
+    Attributes:
+        max_mb: 單檔上限（MB）。
+        allowed_extensions: 允許的副檔名，**不含點**、全小寫、已排序。
+            排序是為了回應穩定——未排序時同一組設定在不同查詢可能給出不同順序，
+            而前端的文案會跟著變，看起來像設定被改過。
+    """
+
+    max_mb: int
+    allowed_extensions: list[str]

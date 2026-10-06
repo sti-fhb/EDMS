@@ -178,9 +178,46 @@ class EtTagInviteRepository:
         教師明確重新邀請可以。抽成共用 helper 之後，任何人把預設值一改就會靜默打開
         那條被否決的路徑，而兩邊各自的測試都還會過。
 
+        ## 🔴 課程擁有者一律排除（#520）
+
+        標籤帶入的母體是「具 `ET_STUDENT` 角色且掛該標籤者」，而**該角色於帳號建立時
+        自動授予**（#89）——教師也在母體裡。只要他身上掛著自己課程的標籤，發布的瞬間
+        就把自己加成了學員，造成兩件事：
+
+        | | 後果 |
+        |---|---|
+        | 1 | `is_enrolled` 為真 → `is_preview` 為假 → **預覽對自己的已發布課程失效** |
+        | 2 | **被計入自己課程的完課率分母**，自己沒完課就把該課程的完成率拉低 |
+
+        第 2 項正是 `learning/rules.ensure_can_access` 的 docstring 明文要避開的事。
+
+        ### ⚠️ 排除做在**這裡**而不是各呼叫端
+
+        本方法是三條標籤帶入路徑的**唯一匯流點**：
+
+        | 路徑 | 呼叫端 |
+        |---|---|
+        | 發布時依課程標籤帶入 | `course/publish_service` |
+        | 已發布課程新增標籤（`FR-ET-US8-04`）| `course/service.add_tags` |
+        | **貼標追溯**（給一個人、找他的課程，`FR-ET-US8-05`）| `roles/assign_service` |
+
+        第三條是反方向的（參數是「某個人」而非「某門課」），各自修的話最容易漏掉它，
+        而漏掉的表徵是「只有後來才被貼標的擁有者會中」——**沒有任何東西會變紅**。
+        擋在匯流點則第四條路徑出現時自動受保護。
+
+        ⛔ **不要把這道排除搬到呼叫端**。若日後有「擁有者也該被帶入」的需求，那是推翻
+        #520 的裁示（2026-10-05：沒有教師加入自己課程的情境），不是放寬一個實作細節。
+
+        📌 Email 邀請與邀請碼**不受影響**——它們走 `invitation/repository.upsert_enrollment`
+        與 `enrollment/service`，不經本方法。教師以邀請碼加入**他人**課程仍然合法。
+
         Returns:
             實際新增之 `USER_ID` 清單（已存在者不在其中）；`user_ids` 為空時回空清單。
         """
+        if not user_ids:
+            return []
+        owner_id = await db.scalar(select(EtCourse.owner_id).where(EtCourse.course_id == course_id))
+        user_ids = [uid for uid in user_ids if uid != owner_id]
         if not user_ids:
             return []
         now = utcnow()

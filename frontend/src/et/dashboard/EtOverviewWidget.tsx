@@ -1,12 +1,18 @@
 import ChevronRightIcon from "@mui/icons-material/ChevronRight"
 import Box from "@mui/material/Box"
 import Chip from "@mui/material/Chip"
+import Divider from "@mui/material/Divider"
 import Link from "@mui/material/Link"
 import List from "@mui/material/List"
 import ListItemButton from "@mui/material/ListItemButton"
 import ListItemText from "@mui/material/ListItemText"
 import Paper from "@mui/material/Paper"
-import Stack from "@mui/material/Stack"
+import Table from "@mui/material/Table"
+import TableBody from "@mui/material/TableBody"
+import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
+import TableHead from "@mui/material/TableHead"
+import TableRow from "@mui/material/TableRow"
 import Typography from "@mui/material/Typography"
 import { useNavigate } from "react-router-dom"
 
@@ -32,19 +38,70 @@ function StatCell({ label, count }: { label: string; count: number }) {
   )
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+/**
+ * 區塊標題。**與 DM 的「最新更新公告」同款**：`subtitle1` 粗體 + 行內 `caption` 註記
+ * + 下方分隔線（2026-10-02 手測裁示）。
+ *
+ * `note` 走 `component="span"` 掛在同一個 `Typography` 裡而不是另起一行——那正是 DM
+ * 「（近一個月發布）」的寫法，標題與註記共用基線才不會看起來像兩層標題。
+ *
+ * ⚠️ 標題文字另包一層 `<span>`（無任何樣式、不影響外觀）：外層 `Typography` 的
+ * `textContent` 是「標題 + 註記」，`getByText("全體訓練概況")` 這種精確查詢會落空。
+ * 包起來之後標題本身有自己的節點，測試與螢幕閱讀器都抓得到。
+ */
+function SectionTitle({
+  children,
+  note,
+  divider = true,
+}: {
+  children: React.ReactNode
+  note?: string
+  divider?: boolean
+}) {
   return (
-    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-      {children}
-    </Typography>
+    <>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+        <Box component="span">{children}</Box>
+        {note !== undefined && (
+          <Typography component="span" variant="caption" color="text.secondary">
+            {" "}
+            {note}
+          </Typography>
+        )}
+      </Typography>
+      {divider && <Divider sx={{ mb: 1.5 }} />}
+    </>
   )
+}
+
+/**
+ * 顯示用的整數百分比。**無條件捨去，不是四捨五入。**
+ *
+ * 🔴 `99.6%` 四捨五入成 `100%` 會讓管理者以為那門課全部完訓、停止催辦；捨去成 `99%`
+ * 不會往樂觀的方向騙人。真正到 100%（如 `100.00`）捨去後仍是 100，不受影響。
+ *
+ * 另一個方向（`0.4%` → `0%`）可接受：表格同列的「完成 1 / 250 人」本來就是精確值。
+ *
+ * 回 `null` 代表解析不出數字——此時畫 `—` 而非 `0%`。⚠️ **不可退化成 0**：那是一個
+ * 看起來完全合理、卻與事實無關的數字，沒有人會發現它壞了。
+ */
+function wholePercent(rate: string): number | null {
+  const parsed = Number(rate)
+  return Number.isFinite(parsed) ? Math.floor(parsed) : null
+}
+
+function PercentText({ rate }: { rate: string }) {
+  const whole = wholePercent(rate)
+  return <>{whole === null ? "—" : `${whole}%`}</>
 }
 
 function StudentBlock({ card }: { card: StudentCard }) {
   const navigate = useNavigate()
   return (
-    <Box sx={{ mb: 3 }}>
-      <SectionTitle>我的學習概況</SectionTitle>
+    <Paper sx={{ p: 2, mb: 3 }}>
+      {/* ⚠️ 本塊**不畫分隔線**（2026-10-02 裁示）：下方緊接著四張外框數字卡，
+          線與卡框疊在一起只是多一道橫線。另外兩塊底下是表格 / 清單，線有分隔作用。 */}
+      <SectionTitle divider={false}>我的學習概況</SectionTitle>
       {/* 與 DM「各類型文件總數」同一組斷點：窄螢幕兩欄、md 以上四欄平均分配整個寬度 */}
       <Box
         sx={{
@@ -62,14 +119,14 @@ function StudentBlock({ card }: { card: StudentCard }) {
       <Link component="button" variant="body2" onClick={() => navigate("/et/my-courses")}>
         前往我的課程
       </Link>
-    </Box>
+    </Paper>
   )
 }
 
 function TeacherBlock({ card }: { card: TeacherCard }) {
   const navigate = useNavigate()
   return (
-    <Box sx={{ mb: 3 }}>
+    <Box>
       <SectionTitle>我的課程待辦</SectionTitle>
       {card.draft_count > 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -79,11 +136,7 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
       {card.ending_soon.length > 0 && (
         <List dense disablePadding>
           {card.ending_soon.map((line) => (
-            <ListItemButton
-              key={line.course_id}
-              divider
-              onClick={() => navigate(`/et/courses/${line.course_id}`)}
-            >
+            <ListItemButton key={line.course_id} divider onClick={() => navigate(`/et/courses/${line.course_id}`)}>
               <ListItemText
                 primary={
                   <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
@@ -105,44 +158,66 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
           ))}
         </List>
       )}
+      <Link component="button" variant="body2" onClick={() => navigate("/et/courses")} sx={{ mt: 1 }}>
+        前往課程列表
+      </Link>
     </Box>
   )
 }
 
+/**
+ * 管理者卡「全體訓練概況」。
+ *
+ * ## 為什麼是表格（2026-10-02 手測裁示）
+ *
+ * 改版前每一列是一句跑完的文字（`採血教學 0.00%（0 / 1 人）`），眼睛沒辦法往下掃同一欄
+ * 比大小——而管理者看這張卡就是要找「哪一門落後」。表格把完成率對齊成一欄，順便解決
+ * 「資料全擠在左邊」：改版前上方是一個 `repeat(4, 1fr)` 的 grid 裡只放**一格**
+ * （逾期未完成），它佔 1/4、右邊 3/4 整片空白。
+ *
+ * ⚠️ **目前全列、不截斷。** 課程數成長後這張卡會愈來愈長，屆時若要只列前 N 門，
+ * **必須在畫面上寫明**（例如「完成率最低的 5 門」）——否則管理者會以為那就是全部課程，
+ * 而那是一個看起來完全正常的誤解。現階段課程少，全列沒問題。
+ */
 function AdminBlock({ card }: { card: AdminCard }) {
   return (
     <Box sx={{ mb: 3 }}>
-      <SectionTitle>全體訓練概況</SectionTitle>
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
-          mb: 1,
-        }}
-      >
-        <StatCell label="逾期未完成" count={card.overdue_incomplete} />
-      </Box>
-      {card.by_course.length > 0 && (
-        <>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
-            各課程完成率（低者在前）
-          </Typography>
-          <Stack spacing={0.5} sx={{ mb: 1 }}>
+      <SectionTitle note="（各課程完成率）">全體訓練概況</SectionTitle>
+      <TableContainer>
+        <Table size="small" aria-label="各課程完成率">
+          <TableHead>
+            {/* 表頭加粗、內容不加粗——改版前是課程名加粗而表頭不加粗，等於反過來了 */}
+            <TableRow>
+              <TableCell sx={{ fontWeight: 700 }}>課程</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>
+                完成人數
+              </TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>
+                完成率
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {/* key 用 `course_id`：同名課程（不同年度的年度訓練）後端刻意不合併 */}
             {card.by_course.map((course) => (
-              <Typography key={course.course_name} variant="body2">
-                {course.course_name} {course.completion_rate}%
-                <Typography component="span" variant="caption" color="text.secondary">
-                  （{course.completed} / {course.enrolled} 人）
-                </Typography>
-              </Typography>
+              <TableRow key={course.course_id}>
+                {/* 直接放文字、不包 Typography：包了就會帶自己的 variant，與同列其他
+                    儲存格的字級不一致（2026-10-02 手測回報） */}
+                <TableCell>{course.course_name}</TableCell>
+                <TableCell align="right">
+                  {course.completed} / {course.enrolled} 人
+                </TableCell>
+                <TableCell align="right">
+                  <PercentText rate={course.completion_rate} />
+                </TableCell>
+              </TableRow>
             ))}
-          </Stack>
-        </>
-      )}
-      {/* 全體完成率放小字：它不可行動，價值是「上面會問你這個數字」（評鑑、報告） */}
-      <Typography variant="caption" color="text.secondary">
-        全體訓練完成率 {card.completion_rate}%
+          </TableBody>
+        </Table>
+      </TableContainer>
+      {/* 比照 DM「總計 N 份」：聚合值放右下小字，不佔表格的一列 */}
+      <Typography variant="body2" color="text.secondary" sx={{ textAlign: "right", mt: 2 }}>
+        全體訓練完成率 <PercentText rate={card.completion_rate} />
       </Typography>
     </Box>
   )
@@ -158,7 +233,23 @@ function AdminBlock({ card }: { card: AdminCard }) {
  * ⛔ 不可改成 `modules.et.has_role && …`——DM 那側是那樣寫的，但它沒有「人人都有預設
  * 角色」這個前提。
  *
- * 排版順序 **管理者 → 教師 → 學員**（由廣到窄），對齊 #89 決策 3 的建議。
+ * ## 版面：兩張白底卡、順序 **學員 → 管理者 → 教師**（2026-10-02 手測裁示）
+ *
+ * | 卡 | 內容 |
+ * |---|---|
+ * | 第一張 | 我的學習概況 |
+ * | 第二張 | 全體訓練概況 ＋ 我的課程待辦 |
+ *
+ * ⚠️ **順序刻意與 #89 決策 3 的建議（管理者 → 教師 → 學員，由廣到窄）相反。** 裁示把
+ * 「自己要學什麼」放到最前面。日後若有人依 #89 的留言想調回來，請先確認那是新的決定，
+ * 不是在修一個 bug。
+ *
+ * ⚠️ 管理者與教師**同卡**，兩者都沒有資料時第二張卡**整張不渲染**——否則會留下一張
+ * 空白的白底方塊（`<Paper>` 有陰影，空的也看得見）。
+ *
+ * 每張卡帶 `mb: 3`（含最後一張），不做「最後一張不留下邊距」的處理：**哪一張是最後
+ * 一張隨角色而變**，條件式邊距會在某些角色組合下漏掉。多出來的下邊距也剛好隔開緊接
+ * 在後的 DM widget。
  *
  * 三張卡皆無資料時整個 widget 不渲染（不留一個空標題）。
  */
@@ -171,19 +262,18 @@ export function EtOverviewWidget({ enabled }: { enabled: boolean }) {
   const admin = hasAdminData(data.admin) ? data.admin : null
   if (!student && !teacher && !admin) return null
 
-  // 結構與 `DmOverviewWidget` 一致（#475）：**標題在白底卡之外、之上**，
-  // 卡片用 `<Paper>`（非 `variant="outlined"`，與 DM 的陰影卡同款）。
-  // 原本標題在 Paper 內、外層又是 outlined，兩個模組的區塊長得不一樣。
   return (
     <Box sx={{ mt: 4 }}>
       <Typography variant="h6" gutterBottom>
         ET 教育訓練概況
       </Typography>
-      <Paper sx={{ p: 2, mb: 3 }}>
-        {admin && <AdminBlock card={admin} />}
-        {teacher && <TeacherBlock card={teacher} />}
-        {student && <StudentBlock card={student} />}
-      </Paper>
+      {student && <StudentBlock card={student} />}
+      {(admin || teacher) && (
+        <Paper sx={{ p: 2, mb: 3 }}>
+          {admin && <AdminBlock card={admin} />}
+          {teacher && <TeacherBlock card={teacher} />}
+        </Paper>
+      )}
     </Box>
   )
 }

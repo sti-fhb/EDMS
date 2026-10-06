@@ -186,6 +186,26 @@ class EtMaterialService:
             await self._materials.soft_delete_video(db, video_id, operator)
         await self._materials.resequence_videos(db, material_id, operator)
 
+    async def resolve_video_limits(self, db: AsyncSession) -> tuple[int, frozenset[str]]:
+        """目前生效的 `(單檔上限 MB, 允許的影片格式集合)`。
+
+        ## 🔴 這是**唯一**的解析處——驗證與「告訴教師能傳什麼」都走它（#455）
+
+        改版前教材視窗的文案與 `accept` 是**寫死**的（「支援 mp4 / webm，單檔最大
+        500 MB」），於是 IT 依既定途徑改了 `DP_PARAM` 之後，DP07 顯示新值、上傳畫面
+        仍說舊話，而 `accept` 還會把新允許的格式擋在選檔器外——**教師看到的是「這個
+        格式不能選」，不會有任何錯誤訊息告訴他為什麼**。
+
+        ⛔ 不要為前端另寫一支「取得限制」的函式：兩支各自解析、各自 fallback，遲早
+        分岔，而分岔的表徵就是「選得到卻傳不上去」。
+
+        ⚠️ 參數缺值時退回種子預設（`mp4,webm` / 500 MB），**不是全部放行**。
+        """
+        formats_raw = await self._params.get_param_value(db, "ET_VIDEO_ALLOWED_FORMATS") or _DEFAULT_FORMATS
+        max_size_mb = await self._params.get_int_param(db, "ET_VIDEO_MAX_SIZE_MB", "VALUE", _DEFAULT_MAX_SIZE_MB)
+        formats = frozenset(f.strip().lower().lstrip(".") for f in formats_raw.split(",") if f.strip())
+        return max_size_mb, (formats or frozenset(_DEFAULT_FORMATS.split(",")))
+
     async def upload_video(self, db: AsyncSession, material_id: int, upload, *, operator: OperatorInfo) -> VideoRow:
         """上傳一支教材影片。
 
@@ -210,11 +230,12 @@ class EtMaterialService:
         """
         _, course_id = await self._require_owned(db, material_id, operator.user_id)
 
-        formats_raw = await self._params.get_param_value(db, "ET_VIDEO_ALLOWED_FORMATS") or _DEFAULT_FORMATS
-        max_size_mb = await self._params.get_int_param(db, "ET_VIDEO_MAX_SIZE_MB", "VALUE", _DEFAULT_MAX_SIZE_MB)
+        # ⚠️ 限制由 `resolve_video_limits` 解析——**前端的文案與 `accept` 走的是同一支**，
+        # 兩邊因此不可能分岔（#455）。
+        max_size_mb, formats = await self.resolve_video_limits(db)
         file_name = upload.filename or ""
         storage.ensure_file_name_acceptable(file_name)
-        ext = storage.ensure_format_allowed(file_name, formats_raw.split(","))
+        ext = storage.ensure_format_allowed(file_name, list(formats))
 
         # 在寫檔**之前**擋重複——等 500 MB 寫完才發現重複，I/O 與使用者的等待都白費
         existing = await self._materials.list_videos(db, material_id)

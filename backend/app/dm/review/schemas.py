@@ -22,6 +22,9 @@ class PendingItem(BaseModel):
     submitter_name: str | None
     submit_date: datetime
     waiting_days: int  # 停留天數（送審至今）
+    # 是否逾催辦門檻（`DP_PARAM.DM_REMIND_THRESHOLD`）→ 清單標紅（FR-006）。由後端判定，
+    # 不把門檻送給前端：前端自行比對會與實際催辦行為脫鉤（#503 第 1 項）。
+    overdue: bool
 
 
 class VersionMeta(BaseModel):

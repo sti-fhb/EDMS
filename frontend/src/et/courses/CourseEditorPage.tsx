@@ -41,7 +41,7 @@ import { QuizDialog } from "./QuizDialog"
 import { RequireRetestDialog } from "./RequireRetestDialog"
 import { SurveyDialog } from "./SurveyDialog"
 import { SurveySection } from "./SurveySection"
-import { BlockerList } from "./BlockerList"
+import { BlockerDialog } from "./BlockerDialog"
 import { coursesApi } from "./coursesService"
 import { validateReopenSchedule } from "./reopenSchedule"
 import type { ReopenScheduleErrors } from "./reopenSchedule"
@@ -120,6 +120,16 @@ export function EtCourseEditorPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const qc = useQueryClient()
+  /*
+    #455：教材視窗的上傳說明與 `accept` 改讀 `DP_PARAM`。
+
+    ⚠️ 查詢放在**頁面**而非 `MaterialDialog`——後者是純呈現元件，既有測試直接以
+    props 渲染它，在裡面加查詢會讓每一條測試都得準備 MSW handler。
+  */
+  const { data: videoLimits } = useQuery({
+    queryKey: QUERY_KEYS.etMaterial.videoUploadLimits(),
+    queryFn: materialsApi.getVideoUploadLimits,
+  })
   const { message, confirm } = useNotification()
 
   const [form, setForm] = useState(EMPTY_FORM)
@@ -534,7 +544,7 @@ export function EtCourseEditorPage() {
       }
     },
     onSuccess: (result, variables) => {
-      // `undefined` = 檢核未通過，缺漏已顯示在頁面上，模式要留著讓教師處理
+      // `undefined` = 檢核未通過，缺漏已以對話框顯示（#509），模式要留著讓教師處理
       if (result === undefined) return
       message.success("課程已再開課")
       setReopening(false)
@@ -1199,28 +1209,25 @@ export function EtCourseEditorPage() {
       )}
 
       {/*
-        再開課的發布檢核缺漏。⚠️ 與發布的 `blockers` **刻意分開**——共用一份會讓上一次
-        發布嘗試殘留的缺漏在此顯示，而那與這次再開課無關（見 `reopenBlockers` 的宣告）。
+        再開課的發布檢核缺漏改以**對話框**呈現（#509；取代 #449 / PR #452 在頁面上的白底區塊）。
+
+        ⚠️ 這不違反 #428：#428 移除的是「編輯起訖時間」的對話框（日曆比對話框還高），
+        缺漏清單沒有日曆。橙色的「請重新設定開放起訖時間」與時間欄位是一組，⛔ 不要
+        一起搬進來。
+
+        ⚠️ 傳的是 `reopenBlockers`，**不是**發布用的 `blockers`——共用一份會讓上一次發布
+        嘗試殘留的缺漏在此顯示（見 `reopenBlockers` 的宣告）。共用的只有呈現元件。
+
+        關閉只清掉缺漏、**不退出再開課模式**：教師接著要去補內容，補完再按一次確認。
       */}
       {reopening && reopenBlockers.length > 0 && (
-        // ⚠️ **這個 `Paper` 是必要的，不是裝飾**（#449）。`BlockerList` 原本只出現在
-        // `PublishDialog` 裡，靠 `DialogContent` 提供邊界與內距；#428 把它搬上頁面時
-        // 沿用了對話框內的 markup，於是項目直接貼在頁面背景上、撐滿整個頁寬，讀起來
-        // 像散落的頁面內容而不是一則待處理的清單。
-        //
-        // ⛔ 不要改成在 `BlockerList` 內部加邊界——那會連帶改變 `PublishDialog` 的呈現。
-        // 表面屬於呼叫端的版面責任，樣式沿用本頁其他區塊（基本資料等）的 `Paper`。
-        <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-          <Stack spacing={1}>
-            <Alert severity="error">
-              課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。
-            </Alert>
-            <BlockerList
-              blockers={reopenBlockers}
-              names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
-            />
-          </Stack>
-        </Paper>
+        <BlockerDialog
+          title="再開課"
+          message="課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。"
+          blockers={reopenBlockers}
+          names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+          onClose={() => setReopenBlockers([])}
+        />
       )}
 
       {/*
@@ -1473,6 +1480,7 @@ export function EtCourseEditorPage() {
         readOnly={readOnly}
         material={material ?? null}
         dmOptions={dmOptions}
+        videoLimits={videoLimits}
         error={itemError}
         uploadError={uploadError}
         uploading={uploading}

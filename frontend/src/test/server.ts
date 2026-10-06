@@ -127,11 +127,24 @@ export const handlers = [
         overdue_incomplete: 4,
         completion_rate: "62.50",
         by_course: [
-          { course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
-          { course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },
+          { course_id: 21, course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
+          { course_id: 11, course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },
         ],
       },
     }),
+  ),
+  // 上傳限制（#455）——DM 與 ET 各一支。值對齊 seed，與後端上傳驗證同源。
+  //
+  // ⚠️ 預設給「有值」是刻意的：載入失敗時畫面會**停用上傳輸入**，若 fixture 不給值，
+  // 所有碰到上傳區的既有測試都會變成在驗停用態。驗「未載入」的測試請自行 server.use 覆寫。
+  http.get("/api/dm/editor/upload-limits", () =>
+    HttpResponse.json({
+      max_mb: 50,
+      allowed_extensions: ["doc", "docx", "jpeg", "jpg", "pdf", "png", "ppt", "pptx", "xls", "xlsx"],
+    }),
+  ),
+  http.get("/api/et/materials/video-upload-limits", () =>
+    HttpResponse.json({ max_size_mb: 500, allowed_formats: ["mp4", "webm"] }),
   ),
   // US7 系統儀表板（dm-dashboard）：預設 4 卡 + 兩筆公告；個別測試以 server.use 覆蓋
   http.get("/api/dm/dashboard/stats", () =>
@@ -200,6 +213,17 @@ export const handlers = [
       ],
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
+  ),
+  // 分類下拉（DM01 / DM03 / DM06 共用）。刻意包含一筆**非內建**的「院內公告」：分類可由 DP
+  // 後台新增，預設 fixture 若只放 4 筆內建的，就測不出前端是查 API 還是用寫死清單（#483）。
+  http.get("/api/dm/library/category-options", () =>
+    HttpResponse.json([
+      { code: "SOP", name: "標準作業程序", group_code: null },
+      { code: "MANUAL", name: "系統操作手冊", group_code: null },
+      { code: "TRAINING", name: "訓練教材", group_code: null },
+      { code: "OTHER", name: "其他", group_code: null },
+      { code: "NOTICE", name: "院內公告", group_code: null },
+    ]),
   ),
   http.get("/api/dm/library/func-options", () =>
     HttpResponse.json([{ code: "BS04", name: "領血確認", group_code: null }]),
@@ -323,35 +347,44 @@ export const handlers = [
     HttpResponse.json({ error_code: "DM_DOC_017", error_message: "查無可續編之草稿或無權存取" }, { status: 404 }),
   ),
   // US6 簽核中心（dm-review）
+  // 待簽核（#503 起為 {data, meta} 分頁形狀）。
+  // ⚠️ `overdue` 刻意與「waiting_days >= 7」**不一致**：502 只停留 4 天卻 overdue=true
+  //（＝管理者把門檻調成 3 的情境）。前端若退回自己比對寫死的 7，這筆就不會標紅而測試轉紅——
+  // fixture 若設成 12 天 + overdue=true，兩種實作都會過，就測不出差別了。
   http.get("/api/dm/reviews/pending", () =>
-    HttpResponse.json([
-      {
-        review_id: 501,
-        doc_id: "DM-SOP-000001",
-        doc_name: "領血確認標準作業程序",
-        category_code: "SOP",
-        category_name: "標準作業程序",
-        review_type: "NEW_VERSION",
-        version_no: "2.2",
-        submitter_id: "u1",
-        submitter_name: "陳大華",
-        submit_date: "2026-08-18T16:42:00Z",
-        waiting_days: 1,
-      },
-      {
-        review_id: 502,
-        doc_id: "DM-SOP-000002",
-        doc_name: "入庫作業 SOP",
-        category_code: "SOP",
-        category_name: "標準作業程序",
-        review_type: "NEW_VERSION",
-        version_no: "1.4",
-        submitter_id: "u2",
-        submitter_name: "品保室",
-        submit_date: "2026-08-01T09:20:00Z",
-        waiting_days: 12,
-      },
-    ]),
+    HttpResponse.json({
+      data: [
+        {
+          review_id: 501,
+          doc_id: "DM-SOP-000001",
+          doc_name: "領血確認標準作業程序",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          review_type: "NEW_VERSION",
+          version_no: "2.2",
+          submitter_id: "u1",
+          submitter_name: "陳大華",
+          submit_date: "2026-08-18T16:42:00Z",
+          waiting_days: 1,
+          overdue: false,
+        },
+        {
+          review_id: 502,
+          doc_id: "DM-SOP-000002",
+          doc_name: "入庫作業 SOP",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          review_type: "NEW_VERSION",
+          version_no: "1.4",
+          submitter_id: "u2",
+          submitter_name: "品保室",
+          submit_date: "2026-08-01T09:20:00Z",
+          waiting_days: 4,
+          overdue: true,
+        },
+      ],
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+    }),
   ),
   http.get("/api/dm/reviews/completed", () =>
     HttpResponse.json({
@@ -829,6 +862,7 @@ export const handlers = [
         kind: "CATEGORY",
         name: "文件分類",
         requires_code: true,
+        description: "文件建檔時必選。分類代碼會嵌入文件編號，故建立後鎖定、淘汰改停用。",
         group_code: null,
         group_name: null,
         items: [
@@ -841,8 +875,10 @@ export const handlers = [
         kind: "TAG",
         name: "標籤",
         requires_code: false,
+        // 分組有自己的說明時覆蓋 kind 層（後端 _split_sections 已決定好，前端直接顯示）
+        description: "可見對象的另一半。閱覽者只看得到配對相符、或掛「全體」的文件。",
         group_code: "AUDIENCE",
-        group_name: "可見對象／單位",
+        group_name: "職位",
         items: [{ code: "11", name: "護理師", is_builtin: false, is_enabled: true }],
       },
     ]),
@@ -1092,8 +1128,8 @@ export const handlers = [
         job_name: "平台每日作業",
         // #332：說明欄不再承載執行時點（時點由 CRON_EXPR 現算）
         description:
-          "停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、" +
-          "對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列",
+          "停用連續閒置超過閒置停用天數未登入之帳號、" +
+          "對密碼即將到期者寄提醒信，並清理逾期未完成之註冊驗證資料",
         module: "DP",
         cron_expr: "0 8 * * *",
         is_enabled: true,

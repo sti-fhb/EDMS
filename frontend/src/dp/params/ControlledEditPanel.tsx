@@ -1,11 +1,9 @@
-import LockIcon from "@mui/icons-material/Lock"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import Divider from "@mui/material/Divider"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
-import Tooltip from "@mui/material/Tooltip"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
@@ -18,9 +16,11 @@ import type { ControlledSection } from "./paramsService"
  * 受控清單維護面板（#182）。
  *
  * **未複用 `ParamEditPanel` 的 `ListEdit`**：後者綁 `DP_PARAM` 的形狀（`param_key` / `description`
- * 與 master 層 `detail_lock`），而受控項是 `code` / `name`、鎖定語意在**項目層**（`is_builtin`），
- * 且停用需先確認並回報受影響數。把兩者併成通用元件需要 6 個以上的取值 / 判定 prop，
- * 為兩個呼叫端引入的間接成本高於重複的 MUI 標記。
+ * 與 master 層 `detail_lock`），而受控項是 `code` / `name`，且停用需回報受影響數。
+ * 把兩者併成通用元件需要 6 個以上的取值 / 判定 prop，為兩個呼叫端引入的間接成本高於重複的 MUI 標記。
+ *
+ * ⚠️ `is_builtin` 自 #506 起**前端不再使用**（代碼對所有項目一律唯讀，不以鎖頭區分）；
+ * 欄位仍由後端回傳，型別保留。
  */
 interface ControlledEditPanelProps {
   section: ControlledSection
@@ -86,21 +86,31 @@ export function ControlledEditPanel({ section, onAdd, onRename, onToggle, onClos
       <Stack divider={<Divider flexItem />} spacing={1.5}>
         {section.items.map((item) => (
           <Stack key={item.code} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
-            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 96 }}>
-              <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                {item.code}
-              </Typography>
-              {item.is_builtin && (
-                <Tooltip title="內建項：代碼建立後鎖定，僅可修改名稱">
-                  <LockIcon fontSize="inherit" color="disabled" titleAccess="代碼唯讀" />
-                </Tooltip>
-              )}
-            </Stack>
+            {/* 代碼只在「需代碼」之分區顯示（分類 / 作業項目，代碼由管理者指定、具業務意義）。
+                其餘（標籤類）的 code 是系統配號的流水 ID，對使用者沒有意義，故不顯示。 */}
+            {section.requires_code && (
+              <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 96 }}>
+                {/*
+                  ⛔ 不要在這裡加回鎖頭 icon（#506）。代碼欄對**每一列**都是純文字、沒有編輯
+                  路徑，所以「鎖定」是全體一致的性質；標在部分列上反而暗示沒標的那些可以改。
+                  而且 `list_controlled` 對 FUNC / TAG 硬寫 `is_builtin=false`，鎖頭只可能出現
+                  在「文件分類」一個分區——不一致不只在列之間，也在分區之間。
+                */}
+                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                  {item.code}
+                </Typography>
+              </Stack>
+            )}
             <TextField
               size="small"
-              label={`${item.code} 名稱`}
+              label="名稱"
               value={nameOf(item.code, item.name)}
               onChange={(e) => setEdited((prev) => ({ ...prev, [item.code]: e.target.value }))}
+              // 畫面標籤一律「名稱」，但每列的無障礙名稱要分得開（螢幕閱讀器與測試靠它定位）：
+              // 需代碼之分區帶代碼，標籤類帶原名稱（用存檔值而非輸入中的值，打字時才不會跟著變）
+              slotProps={{
+                htmlInput: { "aria-label": `${section.requires_code ? item.code : item.name} 名稱` },
+              }}
               sx={{ flexGrow: 1 }}
             />
             <Button size="small" variant="outlined" onClick={() => handleRename(item.code, nameOf(item.code, item.name))}>
@@ -123,7 +133,7 @@ export function ControlledEditPanel({ section, onAdd, onRename, onToggle, onClos
       </Stack>
 
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-        淘汰請改為停用（不提供刪除）；停用後既有引用保留，僅擋後續新增。
+        停用後既有引用保留，僅擋後續新增。
       </Typography>
 
       <Stack

@@ -36,6 +36,14 @@ export const QUERY_KEYS = {
     surveyTemplates: () => ["et", "survey-templates"] as const,
     dmDocuments: () => ["et", "dm-documents"] as const,
   },
+  /** DM08 編輯器。目前只有上傳限制需要共用 key（#455）——其餘仍用區域字面值。 */
+  dmEditor: {
+    uploadLimits: () => ["dm-editor", "upload-limits"] as const,
+  },
+  /** ET05 教材視窗的上傳限制（#455）。 */
+  etMaterial: {
+    videoUploadLimits: () => ["et", "materials", "video-upload-limits"] as const,
+  },
   etMyCourses: {
     list: () => ["et", "my-courses"] as const,
   },

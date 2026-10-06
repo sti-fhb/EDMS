@@ -67,6 +67,10 @@ class CourseRate(BaseModel):
     且落後時找得到可行動的對象（該課程的開課教師）。
     """
 
+    #: ⚠️ **必須有**：分組鍵是 `(course_id, course_name)`，同名課程刻意不合併（不同年度
+    #: 的年度訓練）。只給名稱的話，那兩列在前端無法區分——以名稱當 React key 會撞號，
+    #: 症狀是改動一列時另一列跟著變，且不會有任何錯誤訊息。
+    course_id: int
     course_name: str
     enrolled: int
     completed: int
@@ -77,11 +81,15 @@ class AdminCard(BaseModel):
     """管理者卡「全體訓練概況」。
 
     Attributes:
-        overdue_incomplete: 課程已過訖止、學員仍未完課的人次。**最可行動的一項**
-            ——看到就要處理（催辦 / 延期 / 認列）。
+        overdue_incomplete: 課程已過訖止、學員仍未完課的人次。
+            ⚠️ **2026-10-02 起前端不再顯示它**（手測裁示：版面上一格獨佔四欄 grid、
+            右邊三格全空）。欄位保留是因為指標本身正確且可能再上架；**但前端的
+            `hasAdminData` 已改為只看 `by_course`**——否則「只有逾期、沒有課程」時會
+            渲染出一張空表格。改動任一側時兩邊要一起看。
         completion_rate: 全體完成率。不可行動，保留的理由是「上面會問這個數字」
             （評鑑、報告），故前端放小字、不當主角。
-        by_course: 各課程完成率，**完成率由低到高**——要找的是落後的那一門。
+        by_course: 各課程完成率，**完成率由低到高**——要找的是落後的那一門。前端以表格
+            呈現，排序本身不再寫在畫面上（手測裁示拿掉「（低者在前）」）。
     """
 
     overdue_incomplete: int

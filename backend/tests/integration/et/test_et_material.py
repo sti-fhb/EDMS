@@ -12,7 +12,7 @@ import os
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -492,3 +492,78 @@ class TestDmDocumentOptions:
         uid = await _user(db, "ETM_L5")
         r = await client.get("/api/et/dm-documents", params={"keyword": "x" * 200}, headers=_bearer(uid))
         assert r.status_code == 422
+
+
+class TestVideoUploadLimitsEndpoint:
+    """#455：教材視窗的文案與 `accept` 改為讀參數，本端點是它們的來源。
+
+    ⚠️ 本組與 `test_et_video.py` 的上傳檢核**成對**——端點回什麼，上傳就該接受什麼。
+    兩邊若分岔，表徵是「選得到卻傳不上去」（或相反），而那正是本 issue 要修的病。
+    """
+
+    async def test_回出目前生效的上限與格式(self, client, db) -> None:
+        uid = await _user(db, "ETM_L1")
+
+        r = await client.get("/api/et/materials/video-upload-limits", headers=_bearer(uid))
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["max_size_mb"] == 500, "種子預設 ET_VIDEO_MAX_SIZE_MB=500"
+        assert body["allowed_formats"] == ["mp4", "webm"], "種子預設；且必須已排序"
+
+    async def test_格式不含點且為小寫(self, client, db) -> None:
+        """前端要用它組 `accept`——帶點或大小寫不一致會讓選檔器的比對出錯。"""
+        uid = await _user(db, "ETM_L2")
+
+        body = (await client.get("/api/et/materials/video-upload-limits", headers=_bearer(uid))).json()
+
+        for fmt in body["allowed_formats"]:
+            assert not fmt.startswith("."), f"{fmt} 不該帶點"
+            assert fmt == fmt.lower(), f"{fmt} 應為小寫"
+
+    async def test_跟著參數改變(self, client, db) -> None:
+        """🔴 本 issue 的核心：IT 改 DB 後，畫面的值要跟著變。
+
+        ⚠️ `DP_PARAM_D` 的主鍵是 (PARAM_ID, PARAM_KEY)，`PARAM_ID` 本身就是參數代碼
+        ——沒有 `PARAM_CODE` 欄位。
+        """
+        uid = await _user(db, "ETM_L3")
+        await db.execute(
+            text(
+                'UPDATE "DP_PARAM_D" SET "PARAM_VALUE" = \'mp4,webm,mov\' '
+                "WHERE \"PARAM_ID\" = 'ET_VIDEO_ALLOWED_FORMATS' AND \"PARAM_KEY\" = 'VALUE'"
+            )
+        )
+        await db.flush()
+
+        body = (await client.get("/api/et/materials/video-upload-limits", headers=_bearer(uid))).json()
+
+        assert body["allowed_formats"] == ["mov", "mp4", "webm"], "改了參數但端點仍回舊值"
+
+    async def test_參數清空時退回預設而非全部放行(self, client, db) -> None:
+        """fail-closed：清空不該等於開放任意格式——前端的 `accept` 現在也走這支。"""
+        uid = await _user(db, "ETM_L4")
+        await db.execute(
+            text(
+                'UPDATE "DP_PARAM_D" SET "PARAM_VALUE" = \'\' '
+                "WHERE \"PARAM_ID\" = 'ET_VIDEO_ALLOWED_FORMATS' AND \"PARAM_KEY\" = 'VALUE'"
+            )
+        )
+        await db.flush()
+
+        body = (await client.get("/api/et/materials/video-upload-limits", headers=_bearer(uid))).json()
+
+        assert body["allowed_formats"] == ["mp4", "webm"], "清空後應退回種子預設，不可變成空清單"
+
+    async def test_路徑不被動態路由吃掉(self, client, db) -> None:
+        """⚠️ `/materials/video-upload-limits` 與 `/materials/{material_id}` 同前綴。
+
+        宣告順序顛倒時，前者會先命中動態路由並因「不是整數」回 422——**而那是一個
+        看起來像參數驗證失敗的錯誤**，不會有人聯想到路由順序。
+        """
+        uid = await _user(db, "ETM_L5")
+
+        r = await client.get("/api/et/materials/video-upload-limits", headers=_bearer(uid))
+
+        assert r.status_code != 422, "被 /materials/{material_id} 吃掉了——路由順序顛倒"
+        assert r.status_code == 200, r.text

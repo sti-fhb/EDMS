@@ -22,14 +22,9 @@ import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
-import { formatDateTime } from "../../utils/date"
+import { formatDateTimeTaipei, todayTaipei } from "../../utils/date"
 
 const PAGE_SIZE = 20
-
-/** 今日 yyyy-mm-dd（操作時間不會是未來，用於日期上限）。 */
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 /**
  * 文件變更歷程查詢（US11 / DM05，管理者）：跨文件查公開變更歷程（發布 / 廢止事件），依日期區間 /
@@ -105,7 +100,7 @@ export function DmChangeLogPage() {
             size="small"
             type="date"
             label="日期 起"
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.dateTo || today() } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.dateTo || todayTaipei() } }}
             value={filters.dateFrom}
             onChange={(e) => setField("dateFrom", e.target.value)}
           />
@@ -113,7 +108,7 @@ export function DmChangeLogPage() {
             size="small"
             type="date"
             label="日期 迄"
-            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.dateFrom || undefined, max: today() } }}
+            slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.dateFrom || undefined, max: todayTaipei() } }}
             value={filters.dateTo}
             onChange={(e) => setField("dateTo", e.target.value)}
           />
@@ -176,7 +171,7 @@ export function DmChangeLogPage() {
               <TableBody>
                 {rows.map((row) => (
                   <TableRow key={row.change_log_id}>
-                    <TableCell>{formatDateTime(row.operation_time)}</TableCell>
+                    <TableCell>{formatDateTimeTaipei(row.operation_time)}</TableCell>
                     <TableCell>{row.applicant_name ?? row.applicant_id}</TableCell>
                     <TableCell>{row.approver_name ?? row.approver_id}</TableCell>
                     <TableCell>

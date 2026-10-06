@@ -375,12 +375,48 @@ describe("ParamsPage 模組受控清單（#182）", () => {
 
     await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
 
-    expect(await screen.findByText("模組受控清單")).toBeInTheDocument() // 受控清單（模組自持表）
-    expect(screen.getByText("可見對象／單位")).toBeInTheDocument() // 標籤依標籤組分區
+    // 說明欄顯示模組自報的用途，不是「模組受控清單」這類複述左欄的分類字樣
+    expect(await screen.findByText(/分類代碼會嵌入文件編號/)).toBeInTheDocument()
+    expect(screen.getByText("職位")).toBeInTheDocument() // 標籤依標籤組分區
     expect(screen.getByText("DM_DOC_CATEGORY")).toBeInTheDocument() // DP_PARAM 來源同表並存
   })
 
-  it("內建項代碼唯讀（僅可改名），自訂項無鎖定圖示", async () => {
+  it("模組未提供說明的分區，說明欄顯示「—」而非分類字樣", async () => {
+    // 管理者自建的標籤組查無說明對照（後端回 null）。此時只能留白——
+    // 補「模組受控清單」等於用一句廢話佔住位置，看的人會以為那就是說明。
+    server.use(
+      http.get("/api/dp/params/controlled", () =>
+        HttpResponse.json([
+          {
+            module: "DM",
+            kind: "TAG",
+            name: "標籤",
+            requires_code: false,
+            description: null,
+            group_code: "ZTCUSTOM",
+            group_name: "自訂組",
+            items: [{ code: "91", name: "自訂標籤", is_builtin: false, is_enabled: true }],
+          },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    const row = (await screen.findByText("自訂組")).closest("tr")
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLElement).getByText("—")).toBeInTheDocument()
+  })
+
+  it("代碼對所有項目一律唯讀，不以鎖頭區分內建與自訂（#506）", async () => {
+    // #506：代碼欄對**每一列**都是純文字、無編輯路徑，但鎖頭只畫在 `is_builtin` 的列上，
+    // 等於暗示自訂項的代碼可以改——它也不能。一個在每列都成立的性質標在部分列上，
+    // 傳達的是錯的資訊，故整個拿掉。
+    //
+    // 更廣的理由：`list_controlled` 對 FUNC / TAG 硬寫 `is_builtin=false`，所以鎖頭
+    // 只可能出現在「文件分類」一個分區，其他分區永遠沒有——不一致不只在列之間，在分區之間。
     const user = userEvent.setup()
     renderWithProviders(<ParamsPage />)
     await screen.findByText("閒置自動登出（分鐘）")
@@ -388,10 +424,34 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
     await openControlledRow(user, "CATEGORY")
 
-    // 內建項：代碼旁有唯讀鎖；名稱欄仍可編輯（#182 D2：is_builtin＝代碼鎖定、僅可改名）
-    expect(screen.getByTitle("代碼唯讀")).toBeInTheDocument()
+    // 正向錨點：面板確實開著且兩列都在（內建 SOP / 自訂 ZTX），下面的「不出現」才有東西可驗
+    expect(screen.getByText("SOP")).toBeInTheDocument()
+    expect(screen.getByText("ZTX")).toBeInTheDocument()
+
+    expect(screen.queryByTitle("代碼唯讀")).not.toBeInTheDocument()
+    // 名稱仍可改（拿掉的是鎖頭，不是編輯能力）
     expect(screen.getByLabelText("SOP 名稱")).toBeEnabled()
     expect(screen.getByLabelText("ZTX 名稱")).toBeEnabled()
+  })
+
+  it("DP_PARAM 清單項停用同樣需先確認，與受控清單一致（#506）", async () => {
+    // #506：同一畫面兩個外觀幾乎相同的面板，受控清單的「停用」會跳確認、DP_PARAM 的不會。
+    // 學會「停用會先問」的人在另一個面板會直接改掉東西。
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+
+    await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
+    await openEditByRow(user, "受訓單位標籤")
+
+    await user.click(screen.getByRole("button", { name: "停用" }))
+
+    // 必須先出現確認框；直接生效就是本條要擋的行為
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/既有引用保留/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "確定停用" }))
+    expect(await screen.findByText("已儲存並即時生效")).toBeInTheDocument()
   })
 
   it("需代碼之分區才顯示代碼欄；不需代碼者只填名稱", async () => {
@@ -407,6 +467,27 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await openControlledRow(user, "AUDIENCE") // requires_code: false
     expect(screen.queryByLabelText("新增代碼")).not.toBeInTheDocument()
     expect(screen.getByLabelText("新增名稱")).toBeInTheDocument()
+  })
+
+  it("標籤類（不需代碼）不顯示系統配號，欄位標籤只寫「名稱」", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<ParamsPage />)
+    await screen.findByText("閒置自動登出（分鐘）")
+    await user.click(screen.getByRole("tab", { name: "文件管理（DM）" }))
+
+    // 標籤類：流水 ID「11」對使用者無意義，不出現；欄位以名稱定位、標籤只寫「名稱」
+    await openControlledRow(user, "AUDIENCE")
+    const field = screen.getByLabelText("護理師 名稱")
+    expect(field).toHaveValue("護理師")
+    expect(screen.queryByText("11")).not.toBeInTheDocument()
+    expect(screen.queryByText("11 名稱")).not.toBeInTheDocument()
+    expect(screen.getAllByText("名稱").length).toBeGreaterThan(0)
+
+    // 對照組（同一查詢方式）：需代碼之分區仍顯示代碼——否則上面的「不出現」可能只是根本沒渲染
+    await user.click(screen.getByRole("button", { name: "關閉" }))
+    await openControlledRow(user, "CATEGORY")
+    expect(screen.getByText("SOP")).toBeInTheDocument()
+    expect(screen.getByLabelText("SOP 名稱")).toBeInTheDocument()
   })
 
   it("停用受控項需先確認，成功後提示受影響數以「至少」表述", async () => {

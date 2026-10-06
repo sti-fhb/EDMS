@@ -747,3 +747,60 @@ async def test_http_submit_forbidden_without_editor(db, client):
         json={"version_id": 1, "assigned_reviewer": "r"},
     )
     assert resp.status_code == 403 and resp.json()["error_code"] == "DM_AUTH_002"
+
+
+async def test_upload_limits_回出目前生效的值(db, client):
+    """#455：上傳畫面的文案與 `accept` 改為讀本端點。"""
+    await _seed_user(db, "lim1", "限制甲")
+    await _grant(db, "lim1", DM_EDITOR)
+    await db.commit()
+    token = create_access_token(sub="lim1", ttl_minutes=5)
+
+    r = await client.get("/api/dm/editor/upload-limits", headers={"Authorization": f"Bearer {token}"})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["max_mb"] == 50, "種子預設 DM_FILE_MAX_MB=50"
+    # 種子值；已排序且不含點、全小寫——前端要拿它組 `accept`
+    assert body["allowed_extensions"] == ["doc", "docx", "jpeg", "jpg", "pdf", "png", "ppt", "pptx", "xls", "xlsx"]
+
+
+async def test_upload_limits_跟著參數改變(db, client):
+    """🔴 本 issue 的核心：IT 改 DB 後，畫面的值要跟著變。"""
+    await _seed_user(db, "lim2", "限制乙")
+    await _grant(db, "lim2", DM_EDITOR)
+    await db.execute(
+        text(
+            'UPDATE "DP_PARAM_D" SET "PARAM_VALUE" = \'99\' '
+            "WHERE \"PARAM_ID\" = 'DM_FILE_MAX_MB' AND \"PARAM_KEY\" = 'VALUE'"
+        )
+    )
+    await db.commit()
+    token = create_access_token(sub="lim2", ttl_minutes=5)
+
+    body = (await client.get("/api/dm/editor/upload-limits", headers={"Authorization": f"Bearer {token}"})).json()
+
+    assert body["max_mb"] == 99, "改了參數但端點仍回舊值"
+
+
+async def test_upload_limits_非編輯者亦可取得(db, client):
+    """⚠️ 刻意不細分到 `DM_EDITOR`。
+
+    廢止附件（`DmObsoleteDialog`）也要用這組值，而發起廢止的人未必具編輯者角色；
+    細分會讓那個視窗拿不到值、只能退回寫死的預設——那正是本 issue 要消滅的東西。
+    """
+    await _seed_user(db, "lim3", "限制丙")
+    await _grant(db, "lim3", DM_VIEWER)
+    await db.commit()
+    token = create_access_token(sub="lim3", ttl_minutes=5)
+
+    r = await client.get("/api/dm/editor/upload-limits", headers={"Authorization": f"Bearer {token}"})
+
+    assert r.status_code == 200, r.text
+
+
+async def test_upload_limits_未登入被擋(db, client):
+    """與上一條成對：放寬到「任一 DM 角色」不等於不設防。"""
+    r = await client.get("/api/dm/editor/upload-limits")
+
+    assert r.status_code in (401, 403), r.text

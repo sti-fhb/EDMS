@@ -213,13 +213,31 @@ class EtTrackingRepository:
         return list(rows.scalars().all())
 
     async def attempts_of_course(self, db: AsyncSession, course_id: int) -> list[EtQuizAttemptM]:
-        """該課程之**所有已閱卷** attempt（全班、全測驗，一次取回）。
+        """該課程**在籍學員**之所有已閱卷 attempt（全班、全測驗，一次取回）。
 
         區塊 2 要「一次列出所有曾作答之學員」，逐學員查就是 N+1。一門課的 attempt
         量級是「學員數 × 測驗數 × 重考次數」，仍遠小於分頁的必要門檻。
 
         **只取已閱卷**（`GRADED_STATUSES`）：進行中的還沒有成績，列出來是一列空白。
         與學員端 `attempt/repository.list_attempts` 同一組白名單。
+
+        ## 🔴 已移除學員一律排除（#523）
+
+        本查詢原本直接以 `COURSE_ID` 查 `ET_QUIZ_ATTEMPT_M`、**不經選課表**，於是被移除
+        的學員消失在區塊 1「已加入學員」卻仍留在區塊 2——**同一群人、同一個頁面，兩個
+        區塊給不同答案**。2026-10-05 裁示統一為「跟著區塊 1」。
+
+        判定與 `build_student_list_stmt` 同義（`IS_REMOVED=false` 且 `DELETED=0`），
+        ⚠️ 兩者不可分岔——分岔的表徵是「某人在清單上、作答明細卻空著」，而那看起來
+        像是他沒作答過。
+
+        ⛔ **不可改用「刪除 attempt 列」來達成**：`ET_QUIZ_ATTEMPT_M` / `_D` 明訂
+        append-only、永不刪除（`data-model`），且 ET 不逐筆寫 `DP_AUDIT_LOG`，學員作答
+        的稽核就靠那兩張表。本層只決定**顯示什麼**，資料一列不動。
+
+        ⚠️ 用 `EXISTS` 而非 `JOIN`：選課表對同一 `(user, course)` 理應只有一列
+        （`UQ_ET_ENROLLMENT_USER_COURSE`），但 `JOIN` 會讓這個假設一旦被打破就默默
+        產生重複的 attempt 列，而重複的成績列在畫面上看起來像是他真的考了兩次。
         """
         rows = await db.execute(
             select(EtQuizAttemptM)
@@ -227,10 +245,32 @@ class EtTrackingRepository:
                 EtQuizAttemptM.course_id == course_id,
                 EtQuizAttemptM.status.in_(GRADED_STATUSES),
                 EtQuizAttemptM.deleted == 0,
+                self._still_enrolled(user_id_col=EtQuizAttemptM.user_id, course_id=course_id),
             )
             .order_by(EtQuizAttemptM.user_id.asc(), EtQuizAttemptM.quiz_id.asc(), EtQuizAttemptM.attempt_no.asc())
         )
         return list(rows.scalars().all())
+
+    @staticmethod
+    def _still_enrolled(*, user_id_col, course_id: int):
+        """「該使用者仍是本課程的在籍學員」之 `EXISTS` 條件（#523）。
+
+        抽成共用是刻意的：區塊 2（作答明細）與區塊 3（問卷結果）要套**同一個**判定，
+        各寫一份遲早只改到其中一個，而兩者分岔的表徵是「作答明細看不到他、問卷結果
+        還看得到」——兩個區塊都在同一頁上。
+
+        判定與 `build_student_list_stmt` 的 `IS_REMOVED=false` + `DELETED=0` 同義。
+        """
+        return (
+            select(EtEnrollment.enrollment_id)
+            .where(
+                EtEnrollment.user_id == user_id_col,
+                EtEnrollment.course_id == course_id,
+                EtEnrollment.is_removed.is_(False),
+                EtEnrollment.deleted == 0,
+            )
+            .exists()
+        )
 
     async def reset_bases_of_course(self, db: AsyncSession, course_id: int) -> dict[tuple[str, int], int]:
         """`{(user_id, quiz_id): 重置基準}`——一次取全班。
@@ -478,11 +518,29 @@ class EtTrackingRepository:
             grouped.setdefault(option.sq_id, []).append(option)
         return grouped
 
-    async def survey_responses(self, db: AsyncSession, survey_id: int) -> list[EtSurveyResponseM]:
-        """該問卷的所有填答主檔（依提交時間）。"""
+    async def survey_responses(self, db: AsyncSession, survey_id: int, *, course_id: int) -> list[EtSurveyResponseM]:
+        """該問卷**在籍學員**的填答主檔（依提交時間）。
+
+        ## 🔴 已移除學員一律排除（#523）
+
+        與 `attempts_of_course` 同一條裁示、同一個判定（`_still_enrolled`）。本查詢原本
+        直接以 `SURVEY_ID` 查、不經選課表，於是被移除的學員仍留在區塊 3。
+
+        ⚠️ **`course_id` 是必填的具名參數**，不從 `ET_SURVEY` 反查——呼叫端
+        （`survey_result` / `export_survey_csv`）本來就是先以 `course_id` 取得問卷才
+        來到這裡，反查會多一次查詢，且讓「要排除誰」依賴一條可以被改錯的關聯。
+
+        ⚠️ **統計與明細共用本結果**（見 `survey_answers` 的 docstring：「查兩次會讓
+        兩邊在併發填答時對不起來」）。排除因此只做在這一層——若改在呼叫端各自過濾，
+        統計的人數與明細的筆數會分岔，**而那種分岔看起來像是有人填到一半**。
+        """
         rows = await db.execute(
             select(EtSurveyResponseM)
-            .where(EtSurveyResponseM.survey_id == survey_id, EtSurveyResponseM.deleted == 0)
+            .where(
+                EtSurveyResponseM.survey_id == survey_id,
+                EtSurveyResponseM.deleted == 0,
+                self._still_enrolled(user_id_col=EtSurveyResponseM.user_id, course_id=course_id),
+            )
             .order_by(EtSurveyResponseM.submitted_at.asc())
         )
         return list(rows.scalars().all())

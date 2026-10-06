@@ -266,6 +266,29 @@ async def test_export_csv_content(db, client):
     assert '"改版,重寫"' in text  # 含逗號欄位被雙引號包覆
 
 
+async def test_export_csv_operation_time_是台灣時間(db, client):
+    """CSV 的操作時間須為台灣時間，不可是 asyncpg 回傳物件的 UTC 牆上時間（#483）。
+
+    取的時點刻意落在「UTC 仍是前一天、台灣已跨日」的區間：原本的 `strftime` 寫法會輸出
+    `2026-09-30 23:30`，而同一筆資料用台灣時間日界篩選時屬於 10/01——稽核證據與篩選條件互相
+    矛盾。此欄位先前**無任何測試覆蓋**，所以改錯了也不會紅。
+    """
+    await _seed_user(db, "adm_tz", "管理員TZ")
+    await _grant(db, "adm_tz", DM_ADMIN)
+    await _seed_publish(
+        db,
+        "DM-SOP-001107",
+        doc_name="時區驗證文件",
+        when=datetime(2026, 9, 30, 23, 30, tzinfo=timezone.utc),  # ＝台灣 2026-10-01 07:30
+    )
+
+    resp = await client.get("/api/dm/change-log/entries/export", headers=_headers("adm_tz"))
+
+    text = resp.content.decode("utf-8-sig")
+    assert "2026-10-01 07:30" in text
+    assert "2026-09-30 23:30" not in text  # 舊的 UTC 牆上時間不得出現
+
+
 async def test_export_csv_neutralizes_formula_injection(db, client):
     """CSV 公式注入防護（CWE-1236）：以 = / @ 開頭之自由輸入欄位匯出時前置單引號中和（比照 US10）。"""
     await _seed_user(db, "adm", "管理員")

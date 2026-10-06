@@ -61,6 +61,13 @@ describe("PublishDialog：有缺漏", () => {
     expect(screen.getByText("請於「基本資料」填寫課程起訖時間")).toBeInTheDocument()
   })
 
+  it("缺漏上方顯示發布用的說明文案（#509 抽共用元件後不得改變）", () => {
+    // 既有測試只驗缺漏項目本身，沒有一條看這句說明——#509 把這段抽成 `BlockerSummary`
+    // 之後，漏傳 `message` 會讓它整句消失而其餘測試全綠。
+    render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
+    expect(screen.getByText("發布條件未滿足，請先補齊以下項目。")).toBeInTheDocument()
+  })
+
   it("有缺漏時發布鈕停用", () => {
     render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
     expect(screen.getByRole("button", { name: "確認發布" })).toBeDisabled()

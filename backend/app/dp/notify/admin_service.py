@@ -3,7 +3,9 @@
 DP 後台自身維護（寫入），與 SRVDP002 發信服務（service.py）分開。按 MODULE 過濾
 （A-strict，比照 US5 ParamAdminService：DP 系統信共用恆見、ET / DM 需該模組管理者）；
 IS_SYSTEM 系統信擋停用 / 刪除；VERSION 樂觀鎖防並行覆寫；事件固定、無新增 / 刪除；異動稽核。
-特權判定依 module_admin_gate（T017 stub 過渡期一律 False → 僅見 DP 系統信，待 T049）。
+特權判定依 module_admin_gate 實查（ET / DM 已於各自 bootstrap 註冊 checker）。
+此前 T017 stub 過渡期一律回 False，任何人都只見得到 DP 系統信——那是「checker 未註冊」的
+fail-closed 結果，非設計意圖，已隨 #250 的真授權閘一併回歸。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession

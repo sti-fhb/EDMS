@@ -156,9 +156,12 @@ class EtStatsRepository:
         ## ⚠️ 三個 join 全是「多對一」，不會灌大計數
 
         `enrollment → course`、`→ 項目總數`、`→ 已完成數` 對一筆在籍而言各自至多一列
-        （後兩者已先 `GROUP BY` 收斂）。**這裡刻意不 join 任何一對多**——依單位分組時
-        才會出現唯一的一個（見 `unit_rates`），兩個放在同一個 `GROUP BY` 就是笛卡兒積，
-        算出偏大但看起來合理的數字。
+        （後兩者已先 `GROUP BY` 收斂）。**這裡刻意不 join 任何一對多**——兩個一對多放在
+        同一個 `GROUP BY` 就是笛卡兒積，算出偏大但看起來合理的數字。
+
+        ⚠️ 唯一出現過一對多的是 #453 的 `unit_rates`（依單位分組，須 join `ET_USER_TAG`），
+        它已於 #475 改為 `course_rates`，**本檔現在沒有任何一對多**。詳見 `course_rates`
+        的 docstring——那裡說明了為什麼不可照抄舊的 join 形狀。
 
         母體排除草稿：學員根本看不到，計入會讓完成率被永遠學不了的課稀釋。
         """
@@ -236,8 +239,14 @@ class EtStatsRepository:
         ).one()
         return int(row.enrolled), int(row.completed), int(row.overdue)
 
-    async def course_rates(self, db: AsyncSession, now: datetime) -> list[tuple[str, int, int]]:
-        """依**課程**分組之 `(課程名稱, 在籍人次, 已完課人次)`（#475）。
+    async def course_rates(self, db: AsyncSession, now: datetime) -> list[tuple[int, str, int, int]]:
+        """依**課程**分組之 `(課程 ID, 課程名稱, 在籍人次, 已完課人次)`（#475）。
+
+        ## ⚠️ `course_id` 必須回出去，即使呼叫端只想顯示名稱
+
+        分組鍵是 `(course_id, course_name)`——**同名課程刻意不合併**（見下方）。只回名稱
+        的話，那兩列在呼叫端就無法區分：前端以名稱當 React key 會撞號，而撞號的症狀是
+        改動一列時另一列跟著變，不會有任何錯誤訊息。
 
         ## 與 `_completion_base` 的關係：這裡沒有任何一對多
 
@@ -260,6 +269,7 @@ class EtStatsRepository:
         base = self._completion_base(now).subquery()
         rows = await db.execute(
             select(
+                base.c.course_id,
                 base.c.course_name,
                 func.count().label("enrolled"),
                 func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
@@ -269,7 +279,7 @@ class EtStatsRepository:
             # 用名稱分組會把它們合併成一列，數字偏大且看起來合理。
             .group_by(base.c.course_id, base.c.course_name)
         )
-        return [(r.course_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
+        return [(int(r.course_id), r.course_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
 
     async def previous_avg_progress(self, db: AsyncSession, *, course_id: int, before: date) -> Decimal | None:
         """該課程**在 `before` 之前**最近一次快照的平均進度；沒有則 `None`（AC 5 的「—」）。

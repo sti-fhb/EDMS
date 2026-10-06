@@ -119,7 +119,7 @@ async def _chapter(db, course_id: int, name: str, order: int) -> None:
     await db.flush()
 
 
-async def _enroll(db, user_id: str, course_id: int, *, removed: bool = False) -> None:
+async def _enroll(db, user_id: str, course_id: int, *, removed: bool = False, deleted: int = 0) -> None:
     now = utcnow()
     db.add(
         EtEnrollment(
@@ -131,7 +131,7 @@ async def _enroll(db, user_id: str, course_id: int, *, removed: bool = False) ->
             is_removed=removed,
             created_user=user_id,
             created_date=now,
-            deleted=0,
+            deleted=deleted,
         )
     )
     await db.flush()
@@ -576,3 +576,148 @@ class TestDeletedOwnerDisplay:
         card = next(c for c in r.json()["data"] if c["course_name"] == "孤兒課程")
         assert card["owner_name"] is None
         assert card["owner_is_disabled"] is False, "查無此人不是『已停用』"
+
+
+class TestExcludeEnrolled:
+    """#521：「全部課程」不列出 viewer **已在籍**的課程。
+
+    在籍者點進去拿到的是學員視角（`learning/service` 的 `is_preview = not enrolled`），
+    與該分頁「供跨教師瀏覽觀摩」（`spec_us7`）的用途不符——那門課只能從「我的課程」進入。
+
+    「已在籍」必須與 `learning/repository.is_enrolled` **同義**：`IS_REMOVED=false` 且
+    `DELETED=0`。只濾其中一個會讓排除範圍與學習頁的判定分岔，表徵是「有些課程消失了，
+    但點進去仍是學員視角」——下方兩條各釘一半。
+    """
+
+    async def test_全部課程不列出自己已在籍的課程(self, client, db) -> None:
+        owner = await _user(db, "t_ex01")
+        viewer = await _user(db, "t_ex02")
+        enrolled = await _course(db, owner=owner, name="我在籍的課")
+        await _course(db, owner=owner, name="我沒加入的課")
+        await _enroll(db, viewer, enrolled)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        assert r.status_code == 200, r.text
+        assert {c["course_name"] for c in r.json()["data"]} == {"我沒加入的課"}
+
+    async def test_已被移除的課程仍列出(self, client, db) -> None:
+        """被移除者已不在籍，觀摩用途照常成立。"""
+        owner = await _user(db, "t_ex03")
+        viewer = await _user(db, "t_ex04")
+        removed = await _course(db, owner=owner, name="被移除的課")
+        await _enroll(db, viewer, removed, removed=True)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        assert {c["course_name"] for c in r.json()["data"]} == {"被移除的課"}
+
+    async def test_在籍紀錄已軟刪的課程仍列出(self, client, db) -> None:
+        """`DELETED=1` 的選課紀錄不算在籍——與 `is_enrolled` 同義的另一半。"""
+        owner = await _user(db, "t_ex05")
+        viewer = await _user(db, "t_ex06")
+        course_id = await _course(db, owner=owner, name="紀錄已軟刪的課")
+        await _enroll(db, viewer, course_id, deleted=1)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        assert {c["course_name"] for c in r.json()["data"]} == {"紀錄已軟刪的課"}
+
+    async def test_別人在籍不影響我看到的清單(self, client, db) -> None:
+        """排除的是 **viewer 自己**的在籍，不是「有人在籍」的課程。
+
+        少了 `user_id` 條件，每一門有學員的課都會從所有人的「全部課程」消失——而測試
+        若只造 viewer 一個人的資料，這個錯寫法照樣會綠。
+        """
+        owner = await _user(db, "t_ex07")
+        viewer = await _user(db, "t_ex08")
+        student = await _user(db, "s_ex08", roles=(ROLE_STUDENT,))
+        course_id = await _course(db, owner=owner, name="有別人在上的課")
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))
+
+        assert {c["course_name"] for c in r.json()["data"]} == {"有別人在上的課"}
+
+    async def test_我建立的仍列出自己在籍的課程(self, client, db) -> None:
+        """「我建立的」不受影響——教師仍看得到自己的全部課程。"""
+        me = await _user(db, "t_ex09")
+        course_id = await _course(db, owner=me, name="我自己的課")
+        await _enroll(db, me, course_id)
+        await db.commit()
+
+        r = await client.get(_URL, params={"scope": "mine"}, headers=_bearer(me))
+
+        assert {c["course_name"] for c in r.json()["data"]} == {"我自己的課"}
+
+    async def test_排除後分頁_total_與筆數一致(self, client, db) -> None:
+        """排除必須做在查詢裡：在後端分頁之後才濾，`total` 會算到排除前的筆數。"""
+        owner = await _user(db, "t_ex10")
+        viewer = await _user(db, "t_ex11")
+        for i in range(3):
+            await _course(db, owner=owner, name=f"可見課{i}")
+        for i in range(2):
+            await _enroll(db, viewer, await _course(db, owner=owner, name=f"在籍課{i}"))
+        await db.commit()
+
+        async def fetch(page: int) -> dict:
+            params = {"scope": "all", "page": page, "limit": 1}
+            return (await client.get(_URL, params=params, headers=_bearer(viewer))).json()
+
+        first = await fetch(1)
+        assert first["meta"]["total"] == 3, first["meta"]
+        seen = [c["course_name"] for c in first["data"]]
+        for page in range(2, first["meta"]["total_pages"] + 1):
+            seen += [c["course_name"] for c in (await fetch(page))["data"]]
+
+        assert sorted(seen) == ["可見課0", "可見課1", "可見課2"]
+
+    async def test_排除條件與關鍵字標籤建立者並用(self, client, db) -> None:
+        """三種篩選各自命中一門已在籍的課——那門都不得出現，未在籍的照常命中。"""
+        owner = await _user(db, "t_ex12")
+        viewer = await _user(db, "t_ex13")
+        tag_id = await _tag(db, "護理師_ex13")
+        hit = await _course(db, owner=owner, name="採血課_未加入")
+        hidden = await _course(db, owner=owner, name="採血課_已加入")
+        for course_id in (hit, hidden):
+            await _attach_tag(db, course_id, tag_id)
+        await _enroll(db, viewer, hidden)
+        await db.commit()
+
+        for params in ({"q": "採血"}, {"tag_id": tag_id}, {"owner_id": owner}):
+            r = await client.get(_URL, params={"scope": "all", **params}, headers=_bearer(viewer))
+            assert {c["course_name"] for c in r.json()["data"]} == {"採血課_未加入"}, params
+
+    async def test_全部課程的每張卡點進去都是預覽(self, client, db) -> None:
+        """🔴 **本 issue 的核心**：課程清單的排除條件與學習頁的 `is_preview = not enrolled`
+        必須對齊——兩個模組的行為斷言，少了它，任一側改動都不會有東西變紅。
+
+        情境刻意混合三種「會列出」的課（自己的、他人的、曾被移除的）。另以一門已在籍的
+        課當反向探針：它點進去必須是 `is_preview=False`——否則「每張卡都是預覽」可能只是
+        因為 `/learn` 對誰都回 `True` 而空洞地成立。
+        """
+        viewer = await _user(db, "t_ex14")
+        other = await _user(db, "t_ex15")
+        await _course(db, owner=viewer, name="自己的課")
+        await _course(db, owner=other, name="他人的課")
+        removed = await _course(db, owner=other, name="曾被移除的課")
+        await _enroll(db, viewer, removed, removed=True)
+        enrolled = await _course(db, owner=other, name="已在籍的課")
+        await _enroll(db, viewer, enrolled)
+        await db.commit()
+
+        cards = (await client.get(_URL, params={"scope": "all"}, headers=_bearer(viewer))).json()["data"]
+
+        assert {c["course_name"] for c in cards} == {"自己的課", "他人的課", "曾被移除的課"}
+        for card in cards:
+            r = await client.get(f"{_URL}/{card['course_id']}/learn", headers=_bearer(viewer))
+            assert r.status_code == 200, (card["course_name"], r.text)
+            assert r.json()["is_preview"] is True, f"{card['course_name']} 點進去不是預覽"
+
+        probe = await client.get(f"{_URL}/{enrolled}/learn", headers=_bearer(viewer))
+        assert probe.status_code == 200, probe.text
+        assert probe.json()["is_preview"] is False, "反向探針：在籍者應為學員視角"

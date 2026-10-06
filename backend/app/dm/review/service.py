@@ -19,6 +19,7 @@ from app.dm.roles.models import DmUserRole
 from app.services import AccountQueryService
 
 _PENDING = "PENDING"
+_WITHDRAWN = "WITHDRAWN"
 
 
 class ReviewService:
@@ -122,7 +123,17 @@ class ReviewService:
     async def _complete(
         self, db: AsyncSession, review: DmReview, *, status: str, approver: str, reason: str | None
     ) -> DmReview:
-        """PENDING → 終態；非 PENDING 拒絕（409 DM_REVIEW_003）。"""
+        """PENDING → 終態；非 PENDING 拒絕。
+
+        **WITHDRAWN 另給 `DM_REVIEW_009`**：對審核者而言「撰寫者把案子收回去了」與「你自己
+        已經處理過了」是兩件事，前者要配 DM-MSG-DM02-006「此項目已被撰寫者撤回，已自清單移除」、
+        後者維持既有訊息。單一 `DM_REVIEW_003` 無法讓前端分辨（#503 第 2 項）。
+
+        Raises:
+            AppError: 已被撰寫者撤回（409 DM_REVIEW_009）、其餘非 PENDING 終態（409 DM_REVIEW_003）。
+        """
+        if review.status == _WITHDRAWN:
+            raise AppError(status_code=409, detail="此項目已被撰寫者撤回", error_code="DM_REVIEW_009")
         if review.status != _PENDING:
             raise AppError(status_code=409, detail="此送審已非待審核狀態，無法處理", error_code="DM_REVIEW_003")
         review.status = status

@@ -26,7 +26,9 @@ MANUAL_ROOT = Path("docs/manuals")
 # 底線開頭之資料夾中，_shots（待拍清單）與 _images 為內部工作文件，不進交付文件，
 # 不予檢查；⚠️ **_tests 例外**——測試項目會產出交付院方之測試報告，同受〈禁止事項〉
 # 與〈不使用人稱代詞〉拘束，故納入檢查，其與手冊相異之處由 is_test_file 分流。
-INTERNAL_DIRS = ("_shots", "_images")
+# ⚠️ _training 為教育訓練教材來源，其撰寫判準為〈教育訓練教材規範〉、與手冊不同
+# （講稿用口語、容許 ⚠️⛔ 等標記），⛔ MUST NOT 以手冊規範檢查。
+INTERNAL_DIRS = ("_shots", "_images", "_training")
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 IMAGE_RE = re.compile(r"!\[(?P<alt>.*?)\]\((?P<src>.+?)\)")

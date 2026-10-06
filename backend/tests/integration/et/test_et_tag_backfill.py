@@ -334,3 +334,83 @@ class TestTagRemovalDoesNothing:
 
         assert await _enrolled_course_ids(db, student) == [cid], "已加入者可繼續學習"
         assert await _mails(db, _DIGEST) == []
+
+
+class TestOwnerIsNeverBackfilledIntoOwnCourse:
+    """#520：課程擁有者不得被標籤帶入**自己的**課程。
+
+    ## 為何這條走貼標追溯而不是發布
+
+    三條標籤帶入路徑（發布、已發布課程新增標籤、**貼標追溯**）全部匯流到
+    `tag_invite.bulk_enroll_returning`，排除就做在那個匯流點。
+
+    貼標追溯是其中**最容易被漏掉**的一條：它的參數是「某個人」而非「某門課」，
+    各自修時不會想到它；而漏掉的表徵是「只有**後來**才被貼標的擁有者會中」——
+    發布當下沒事，直到管理者替他貼上標籤的那一刻才發生，**沒有任何東西會變紅**。
+    """
+
+    async def test_擁有者被貼上自己課程的標籤時不會被加進該課程(self, db) -> None:
+        """🔴 本組的核心。
+
+        擁有者身上有 `ET_STUDENT` 角色（建立帳號時自動授予，#89），所以他本來就在
+        標籤帶入的母體裡——這正是 #520 的成因。
+        """
+        owner = await _user(db, "o_own01", role=ROLE_TEACHER)
+        # ⚠️ 教師也要有學員角色才重現得了——那正是 #89 的「人人具預設學員角色」。
+        db.add(
+            EtUserRole(
+                user_id=owner,
+                role=ROLE_STUDENT,
+                is_active=True,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        tag_id = await _tag(db, "ZT擁有者標籤")
+        cid = await _course(db, owner, "ZT擁有者自己的課", tag_id)
+
+        await _service.assign(db, user_id=owner, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+
+        assert await _enrolled_course_ids(db, owner) == [], f"擁有者被加進了自己的課程 {cid}（#520）"
+
+    async def test_同一次貼標仍把他人課程補加入(self, db) -> None:
+        """🔴 與上一條**成對**：少了它，把 `bulk_enroll_returning` 改成「一律不加入」
+        也會通過上一條，而那會讓整個標籤帶入功能靜默失效。
+
+        同一個人、同一個標籤、同一次貼標——差別只在課程是誰的。
+        """
+        owner = await _user(db, "o_own02", role=ROLE_TEACHER)
+        other_teacher = await _user(db, "o_oth02", role=ROLE_TEACHER)
+        db.add(
+            EtUserRole(
+                user_id=owner,
+                role=ROLE_STUDENT,
+                is_active=True,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        tag_id = await _tag(db, "ZT共用標籤")
+        own_cid = await _course(db, owner, "ZT我自己的課", tag_id)
+        others_cid = await _course(db, other_teacher, "ZT別人的課", tag_id)
+
+        await _service.assign(db, user_id=owner, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+
+        enrolled = await _enrolled_course_ids(db, owner)
+        assert others_cid in enrolled, "他人課程應照常補加入——教師修別人的課是合法的"
+        assert own_cid not in enrolled, "自己的課程不得加入"
+
+    async def test_純學員不受影響(self, db) -> None:
+        """回歸護欄：本修正只排除擁有者，一般學員的帶入不得因此改變。"""
+        owner = await _user(db, "o_own03", role=ROLE_TEACHER)
+        student = await _user(db, "o_stu03")
+        tag_id = await _tag(db, "ZT一般標籤")
+        cid = await _course(db, owner, "ZT一般課程", tag_id)
+
+        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+
+        assert await _enrolled_course_ids(db, student) == [cid]

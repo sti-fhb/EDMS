@@ -37,6 +37,19 @@ describe("DmObsoletePage 已廢止文件查詢", () => {
     expect(screen.getByText("部門裁撤")).toBeInTheDocument() // 廢止原因
   })
 
+  it("分類下拉取自後端：後台新增的分類也列得出來", async () => {
+    // 「院內公告」只存在於 API fixture，不在任何前端常數裡——此前本頁的分類下拉是寫死的
+    // 4 筆，後台新增的分類在這裡篩不到（#483 第 1 項）。
+    const user = userEvent.setup()
+    renderWithProviders(<DmObsoletePage />)
+    await screen.findByText("停辦作業SOP")
+
+    await user.click(screen.getByRole("combobox", { name: "分類" }))
+
+    expect(await screen.findByRole("option", { name: "院內公告" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "標準作業程序" })).toBeInTheDocument()
+  })
+
   it("空結果 → 顯示 DM-MSG-DM03-001", async () => {
     server.use(
       http.get("/api/dm/obsolete-archive/documents", () =>

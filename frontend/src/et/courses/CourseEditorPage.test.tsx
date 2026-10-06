@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -911,6 +911,22 @@ const reopened = {
   version: 6,
 }
 
+/** 讓 `POST /reopen` 回 422 `ET_PUBLISH_001` 並帶一條缺漏。 */
+function useReopenBlocked(code: string, message: string) {
+  server.use(
+    http.post("/api/et/courses/:courseId/reopen", () =>
+      HttpResponse.json(
+        {
+          error_code: "ET_PUBLISH_001",
+          error_message: "課程不符發布條件",
+          blockers: [{ code, message, target_id: null }],
+        },
+        { status: 422 },
+      ),
+    ),
+  )
+}
+
 /**
  * 以鍵盤填 `DateTimePicker`。
  *
@@ -1317,23 +1333,14 @@ describe("ET05 課程關閉與再開課", () => {
     expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument()
   })
 
-  it("再開課遇發布檢核缺漏時就地列出，並停在再開課模式（#428）", async () => {
-    // 🔴 這條補的是刪掉 `ReopenCourseDialog.test.tsx` 一併失去的覆蓋（AC 5）。缺漏不是
+  it("再開課遇發布檢核缺漏時以對話框列出，關閉後停在再開課模式（#428 / #509）", async () => {
+    // 🔴 這條補的是刪掉 `ReopenCourseDialog.test.tsx` 一併失去的覆蓋（#428 AC 5）。缺漏不是
     // 一般的失敗：它要停在原地讓教師補內容，而非退出模式或跳 toast。
+    //
+    // #509：缺漏改以對話框呈現（原本是頁面最上方的紅色區塊）。
     const user = userEvent.setup()
     useCourse("CLOSED")
-    server.use(
-      http.post("/api/et/courses/:courseId/reopen", () =>
-        HttpResponse.json(
-          {
-            error_code: "ET_PUBLISH_001",
-            error_message: "課程不符發布條件",
-            blockers: [{ code: "NO_MATERIAL", message: "課程至少須有 1 份教材", target_id: null }],
-          },
-          { status: 422 },
-        ),
-      ),
-    )
+    useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "110120270900AM")
@@ -1341,12 +1348,32 @@ describe("ET05 課程關閉與再開課", () => {
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
-    expect(await screen.findByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
-    // 停在再開課模式，且不報成功。⚠️ 要驗**仍可按**——缺漏是「補完再送一次」而非終局失敗
-    expect(screen.getByRole("button", { name: "確認再開課" })).toBeEnabled()
+    // AC 1：缺漏在對話框裡
+    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    expect(within(dialog).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/課程目前不符發布條件，無法再開課/)).toBeInTheDocument()
+    // AC 4：只有一顆「關閉」——請求已經失敗，不是再問一次要不要送出
+    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["關閉"])
+    // AC 3：橙色的「請重新設定起訖時間」**不進**對話框（#428 的就地編輯提示）
+    expect(within(dialog).queryByText(/請重新設定開放起訖時間/)).not.toBeInTheDocument()
     expect(screen.queryByText("課程已再開課")).not.toBeInTheDocument()
-    // ⚠️ 缺漏走 422，但**不可**走成一般的錯誤 toast——視窗裡已逐條列出來了
+    // ⚠️ 缺漏走 422，但**不可**走成一般的錯誤 toast——對話框裡已逐條列出來了
     expect(screen.queryByText(/操作失敗/)).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+
+    // AC 7：關閉後仍停在再開課模式，教師可直接去補內容。⚠️ 要驗**仍可按**——缺漏是
+    // 「補完再送一次」而非終局失敗。關閉後背景要等 aria-hidden 解除，故用 `findByRole`。
+    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeEnabled()
+    expect(screen.getByText(/請重新設定開放起訖時間/)).toBeInTheDocument()
+    // 起訖時間保留剛填的值（不是被清空、也不是回到再開課前的舊值）
+    expect(screen.getByDisplayValue(/11\/01\/2027/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/12\/31\/2027/)).toBeInTheDocument()
+    // AC 2：頁面上**不再有**紅色缺漏區塊。與上方「對話框內查得到」用**同一種查法**——
+    // 只寫這條反向斷言的話，文案一改它就恆真。
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.queryByText(/課程目前不符發布條件，無法再開課/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
   })
 
   it("切換到另一門課程時會退出再開課模式（#428）", async () => {
@@ -1424,30 +1451,114 @@ describe("ET05 課程關閉與再開課", () => {
     // 變成「同一頁的前後兩次」——同一個問題換了形狀，故補這條。
     const user = userEvent.setup()
     useCourse("CLOSED")
-    server.use(
-      http.post("/api/et/courses/:courseId/reopen", () =>
-        HttpResponse.json(
-          {
-            error_code: "ET_PUBLISH_001",
-            error_message: "課程不符發布條件",
-            blockers: [{ code: "NO_MATERIAL", message: "課程至少須有 1 份教材", target_id: null }],
-          },
-          { status: 422 },
-        ),
-      ),
-    )
+    useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "110120270900AM")
     await fillDateTime(/課程訖止時間/, "123120270500PM")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
-    await screen.findByText(/課程至少須有 1 份教材/)
+    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    expect(within(dialog).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "取消再開課" }))
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+    await user.click(await screen.findByRole("button", { name: "取消再開課" }))
     await user.click(await screen.findByRole("button", { name: "再開課" }))
 
     expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(screen.queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
+  })
+
+  describe("發布與再開課的缺漏 state 分離（#509 AC 6）", () => {
+    // ⛔ #509 只共用**呈現元件**，不共用資料。兩份 state 的理由見 `reopenBlockers` 的宣告。
+    //
+    // ⚠️ 同一門課不可能同時是草稿（能發布）又是已關閉（能再開課），兩份 state 都有值的
+    // 情境只能靠**切換課程**造出：本路由沒有 `key={courseId}`，只換參數時不重新掛載元件
+    // （見「切換到另一門課程時會退出再開課模式」）。兩個方向各一條——它們是不同的路徑。
+    function useTwoCourses() {
+      server.use(
+        http.get("/api/et/courses/:courseId", ({ params }) => {
+          const id = Number(params.courseId)
+          return HttpResponse.json({
+            course_id: id,
+            course_name: `課程 ${id}`,
+            description: null,
+            status: id === 1 ? "DRAFT" : "CLOSED",
+            open_start_at: "2026-09-01T00:00:00Z",
+            open_end_at: "2027-09-30T00:00:00Z",
+            require_approval: false,
+            version: 5,
+            owner_id: "U1",
+            owner_name: "王教師",
+            is_owner: true,
+            tag_ids: [2],
+            chapters: [],
+            invitation_code: id === 1 ? null : "01234567",
+          })
+        }),
+        http.put("/api/et/courses/:courseId", ({ params }) =>
+          HttpResponse.json({ course_id: Number(params.courseId), version: 6 }),
+        ),
+        http.get("/api/et/courses/:courseId/publish-check", () =>
+          HttpResponse.json({
+            can_publish: false,
+            blockers: [{ code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null }],
+          }),
+        ),
+      )
+      useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
+    }
+
+    async function failReopen(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(await screen.findByRole("button", { name: "再開課" }))
+      await fillDateTime(/課程起始時間/, "110120270900AM")
+      await fillDateTime(/課程訖止時間/, "123120270500PM")
+      await user.click(screen.getByRole("button", { name: "確認再開課" }))
+      return screen.findByRole("dialog", { name: "再開課" })
+    }
+
+    it("發布視窗留下的缺漏不出現在再開課的對話框", async () => {
+      const user = userEvent.setup()
+      useTwoCourses()
+      const { rerender } = renderEditor("1")
+      await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
+      const publish = await screen.findByRole("dialog", { name: "發布課程" })
+      expect(await within(publish).findByText(/課程至少須掛 1 個受訓單位標籤/)).toBeInTheDocument()
+      await user.click(within(publish).getByRole("button", { name: "取消" }))
+
+      paramsRef.current = { courseId: "2" }
+      rerender(<EtCourseEditorPage />)
+      await screen.findByDisplayValue("課程 2")
+      const reopen = await failReopen(user)
+
+      expect(within(reopen).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
+      expect(within(reopen).queryByText(/課程至少須掛 1 個受訓單位標籤/)).not.toBeInTheDocument()
+    })
+
+    it("再開課留下的缺漏不出現在發布視窗", async () => {
+      // ⚠️ **這條守的是結果，不是「兩份 state 分開」**。2026-10-06 變異檢查：讓再開課
+      // 失敗時一併寫進發布用的 `blockers`（等同兩份 state 被污染），本條**照樣綠**——
+      // 發布視窗每次打開都會重跑預檢，預檢中顯示「檢核中」、回來就覆寫舊值，殘留的缺漏
+      // 在這個方向上結構性地看不到。真正承重的是「開視窗即重跑預檢」。
+      //
+      // ⛔ 別因為「變異不會紅」就刪掉本條：它釘住的是教師看得到的結果。若日後發布視窗
+      // 改成沿用上次的預檢結果（例如為了省一次請求），這條會變成唯一的防線。
+      const user = userEvent.setup()
+      useTwoCourses()
+      const { rerender } = renderEditor("2")
+      await screen.findByDisplayValue("課程 2")
+      const reopen = await failReopen(user)
+      await user.click(within(reopen).getByRole("button", { name: "關閉" }))
+
+      paramsRef.current = { courseId: "1" }
+      rerender(<EtCourseEditorPage />)
+      await screen.findByDisplayValue("課程 1")
+      await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
+      const publish = await screen.findByRole("dialog", { name: "發布課程" })
+
+      expect(await within(publish).findByText(/課程至少須掛 1 個受訓單位標籤/)).toBeInTheDocument()
+      expect(within(publish).queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
+    })
   })
 
   it("再開課成功後接著按儲存不會被「不可再往前調整」誤擋（#428 迴歸）", async () => {

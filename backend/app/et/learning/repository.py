@@ -75,6 +75,10 @@ class EtLearningRepository:
         `IS_REMOVED=false` 與 `DELETED=0` 兩個條件語意不同、都必要
         （見 `EtEnrollment` docstring）。被移除者不在籍——#247 SA Q1 裁示 C 的延伸：
         他不該還能取得課程教材。
+
+        ⚠️ `course/repository.build_list_stmt` 的「全部課程」以**同一組條件**排除 viewer
+        已在籍的課程（#521），讓從該分頁進來的人必然得到 `is_preview=True`。改這裡的判定
+        時必須一起改那裡。
         """
         found = await db.scalar(
             select(EtEnrollment.enrollment_id).where(

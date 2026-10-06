@@ -68,7 +68,10 @@ async def test_list_schedules_returns_description(client, db):
     assert dp001["job_name"] == "平台每日作業"  # 拆短：不再承載工作內容細節
     # 三批工作內容移入說明（原本全塞在 JOB_NAME 裡）
     desc = dp001["description"] or ""
-    assert "閒置" in desc and "密碼" in desc and "待驗證" in desc
+    assert "閒置" in desc and "密碼" in desc and "註冊驗證" in desc
+    # 說明是給管理者看的：不得出現參數代碼 / 欄位名這類內部識別字
+    assert "IDLE_DISABLE_DAYS" not in desc, "說明欄洩漏參數代碼，管理者查不到也不需要知道"
+    assert "待驗證列" not in desc, "「列」是資料列的開發者說法"
 
 
 @pytest.mark.parametrize("job_id", ["SCHDM001", "SCHET001"])

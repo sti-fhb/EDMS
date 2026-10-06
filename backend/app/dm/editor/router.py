@@ -13,7 +13,7 @@ from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
 from app.dm.deps import DmContext, get_dm_context
-from app.dm.document.file_store import enforce_size_limit
+from app.dm.document.file_store import enforce_size_limit, resolve_upload_limits
 from app.dm.editor.schemas import (
     CreateResult,
     DraftMeta,
@@ -22,6 +22,7 @@ from app.dm.editor.schemas import (
     ReviewerItem,
     SubmitReq,
     SubmitResult,
+    UploadLimits,
     VersionResult,
 )
 from app.dm.editor.service import EditorService
@@ -173,6 +174,38 @@ async def submit_document(
     return await _service.submit(
         db, doc_id=doc_id, version_id=body.version_id, assigned_reviewer=body.assigned_reviewer, op=op
     )
+
+
+@router.get("/editor/upload-limits", response_model=UploadLimits)
+async def get_upload_limits(
+    ctx: DmContext = Depends(get_dm_context),
+    db: AsyncSession = Depends(get_db),
+) -> UploadLimits:
+    """目前生效的上傳限制（#455）——供上傳畫面的說明文字與選檔器的 `accept` 使用。
+
+    ## 為何需要這支
+
+    `DM_FILE_MAX_MB` / `DM_FILE_TYPES` 屬 `EDIT_SCOPE=READONLY`（#171）：管理者於 DP07
+    **看得到現值但不可修改**，變更途徑是 IT 直接操作資料庫。那個設計的整個理由是
+    「管理者需要知道現值，才能回答使用者『上限多少、能傳什麼格式』」。
+
+    但使用者**實際操作的上傳畫面**原本把值寫死，於是 IT 改完 DB 之後 DP07 顯示新值、
+    上傳畫面仍說舊話，而 `accept` 還會把新允許的格式擋在選檔器外——使用者看到的是
+    「這個格式不能選」，**不會有任何錯誤訊息告訴他為什麼**。
+
+    ⚠️ #469 把 9 項唯讀參數改為 `HIDDEN` 之後，**上傳畫面那行文案成為系統內唯一顯示
+    上限的地方**，它若說謊就沒有第二處可以對照。
+
+    ## 不另開授權
+
+    本端點與上傳端點掛同一個 `DmContext`。限制值本身不是機密（使用者按下上傳就會從
+    錯誤訊息知道上限），但沒有理由讓非 DM 角色者也查得到。
+
+    ⚠️ **刻意不細分到 `DM_EDITOR`**：廢止附件（`DmObsoleteDialog`）也要用這組值，而
+    發起廢止的人未必具編輯者角色。細分會讓那個視窗拿不到值而退回寫死的預設。
+    """
+    max_mb, allowed = await resolve_upload_limits(db)
+    return UploadLimits(max_mb=max_mb, allowed_extensions=sorted(allowed))
 
 
 @router.get("/editor/documents/{doc_id}/draft-meta", response_model=DraftMeta)

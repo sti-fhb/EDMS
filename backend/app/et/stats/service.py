@@ -21,7 +21,7 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
-from app.core.utils import utcnow
+from app.core.utils import taipei_date, utcnow
 from app.dp.params.service import ParamService
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.service import EtEnrollmentService
@@ -67,7 +67,11 @@ class EtStatsService:
             實際寫入的快照數（同日重跑已存在者不計）。
         """
         now = now or utcnow()
-        stat_date = now.date()
+        # ⚠️ `taipei_date` 而非 `.date()`：後者取 UTC 日期，在台灣時間 00:00–07:59 會差一天。
+        # 自 #517 起 cron 以台灣時間解讀，把週報排在「上班前」（台灣 07:00 等）只差兩小時就
+        # 踩進那個窗口，而 `ET_WEEKLY_STAT` 是 append-only + ON CONFLICT DO NOTHING，
+        # 標錯的日期**沒有覆寫路徑**。
+        stat_date = taipei_date(now)
         written = 0
         for course_id in await self._repo.open_course_ids(db, now):
             try:
@@ -138,7 +142,7 @@ class EtStatsService:
         return TeacherCard(ending_soon=lines, draft_count=await self._repo.draft_count(db, owner_id))
 
     async def admin_card(self, db: AsyncSession, *, now: datetime | None = None) -> AdminCard:
-        """管理者卡：全站逾期未完課、整體完成率、各單位達成率。
+        """管理者卡：全站逾期未完課、整體完成率、**各課程**完成率。
 
         兩支查詢共用 `_completion_base`（全站「每筆在籍 × 是否完課」），故整體與分課程
         的完課定義**不可能分歧**——分開寫兩份推導才是分歧的來源。
@@ -150,14 +154,17 @@ class EtStatsService:
         enrolled, completed, overdue = await self._repo.overall_completion(db, now)
         courses = [
             CourseRate(
+                course_id=course_id,
                 course_name=name,
                 enrolled=course_enrolled,
                 completed=course_completed,
                 completion_rate=percent(course_completed, course_enrolled),
             )
-            for name, course_enrolled, course_completed in await self._repo.course_rates(db, now)
+            for course_id, name, course_enrolled, course_completed in await self._repo.course_rates(db, now)
         ]
-        courses.sort(key=lambda c: (c.completion_rate, c.course_name))
+        # 第三鍵 `course_id`：同名且同完成率的兩門課（不同年度的年度訓練都 0%）否則
+        # 順序由 DB 決定，每次查詢可能不同——畫面會「自己動」而沒有人改過任何資料。
+        courses.sort(key=lambda c: (c.completion_rate, c.course_name, c.course_id))
         return AdminCard(
             overdue_incomplete=overdue,
             completion_rate=percent(completed, enrolled),

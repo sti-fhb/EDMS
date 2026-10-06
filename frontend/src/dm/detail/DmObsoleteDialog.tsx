@@ -17,7 +17,8 @@ import { ObsoleteRequestSchema } from "./obsoleteSchema"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
-import { useReviewers } from "../editor/useEditor"
+import { toAcceptAttr } from "../editor/schemas"
+import { useReviewers, useUploadLimits } from "../editor/useEditor"
 
 interface Props {
   open: boolean
@@ -43,6 +44,8 @@ const SERVER_FIELD: Record<string, "reason" | "reviewer_id" | "file"> = {
 export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: Props) {
   const { message } = useNotification()
   const { data: reviewers } = useReviewers()
+  // #455：accept 讀參數；未載入時停用輸入（不設 accept 等於放寬）
+  const { data: uploadLimits } = useUploadLimits()
   const [reason, setReason] = useState("")
   const [reviewerId, setReviewerId] = useState("")
   const [file, setFile] = useState<File | null>(null)
@@ -118,12 +121,28 @@ export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: P
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
               廢止附件 <Typography component="span" variant="caption" color="text.secondary">（選填單檔）</Typography>
             </Typography>
-            <Button component="label" variant="outlined" size="small" startIcon={<AttachFileIcon />}>
-              選擇檔案
+            {/*
+              #455：`accept` 改讀 `DP_PARAM.DM_FILE_TYPES`，與後端上傳驗證同源。
+
+              ⚠️ 原本寫死的清單含 `.gif`，但 seed 與後端的安全預設白名單**都沒有
+              gif**——使用者選得到、傳上去必拿 422「不支援的檔案格式」。那是寫死清單
+              與實際規則分岔的具體後果，本次一併消失。
+
+              ⚠️ **限制未載入時停用按鈕**，不可退回「不設 accept」：那是放寬（從受限
+              清單變成全部檔案）。寧可暫時不能選，也不要讓使用者選到一個必定被退回的檔案。
+            */}
+            <Button
+              component="label"
+              variant="outlined"
+              size="small"
+              startIcon={<AttachFileIcon />}
+              disabled={uploadLimits === undefined}
+            >
+              {uploadLimits ? "選擇檔案" : "上傳限制載入中…"}
               <input
                 type="file"
                 hidden
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif"
+                accept={uploadLimits ? toAcceptAttr(uploadLimits.allowed_extensions) : undefined}
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </Button>

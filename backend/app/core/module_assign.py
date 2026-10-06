@@ -47,6 +47,8 @@ class ControlledGroupView:
 
     code: str
     name: str
+    #: 該分組的用途說明，顯示於維護頁「說明」欄。空字串時由 DP 退回 kind 層的說明。
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,9 @@ class ControlledKindView:
     kind: str  # 傳回 list_controlled 的值
     name: str  # 畫面區塊顯示名
     requires_code: bool  # 新增時是否需使用者輸入代碼
+    #: 這份清單是什麼、用在哪裡——維護頁「說明」欄之內容。同樣由模組自報：那是模組的
+    #: 業務語意，DP 寫不出「掛了這個標籤的文件誰看得到」這種句子，硬要寫也會與實作分岔。
+    description: str = ""
     groups: tuple[ControlledGroupView, ...] = ()  # 子分組；無則空
 
 
