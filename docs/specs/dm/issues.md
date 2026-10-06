@@ -211,7 +211,7 @@ DM 系統設定「無獨立 DM 畫面」——所有維護介面集中於平台 
   - ✅ **catalog 轉接層契約**：[module-callbacks.md](../dp/contracts/module-callbacks.md) **§3.1**（`list_controlled` / `create` / `rename` / `set_controlled_enabled` / `list_audiences`）已定義 DP 後台呼叫 DM 維護 `DM_CATEGORY` / `DM_FUNC` / `DM_TAG`
   - ✅ **AUDIENCE soft-retire 跨模組觸發落點**：DP 後台呼叫 DM `set_controlled_enabled(enabled=False)` → DM 端執行 soft-retire 回 `SetEnabledResult(affected_docs, affected_viewers)`、DP 呈現提示（§3.1）
   - ✅ **`DmRoleAudienceView.audiences` 來源**：`DM_TAG`（AUDIENCE 組）TAG_ID，非 DP_PARAM（module-callbacks §3 已更正）
-- **開工前 `/sti-plan` 尚待確認**：**參數值域校驗落點**（催辦門檻 1–30、每週時間格式）於 `DP_PARAM` 定義端（DP 通用參數編輯器）或 DM 端——參數為 `DP_PARAM`、由 DP dp-params 直接維護，值域屬 DM 業務規則，需確認 DP 參數定義是否承載值域 metadata
+- ~~**開工前 `/sti-plan` 尚待確認**：**參數值域校驗落點**（催辦門檻 1–30、每週時間格式）於 `DP_PARAM` 定義端（DP 通用參數編輯器）或 DM 端~~ → ✅ **已於 #528 裁示並落地：DM 端定義、經平台註冊表交付。** `backend/app/dm/params.py` 持有 `DM_REMIND_THRESHOLD` 的值域（1–30，即本檔與 `research.md` 明載者），由 `dm/bootstrap.py` 註冊進 `core/module_param_rules`，DP 於 DP03 編輯時查該註冊表——DP 參數定義**不**承載值域 metadata，DP 亦不認識模組語彙（`sti-backend-boundaries`）。（「每週時間格式」一項已不適用：`DM_WEEKLY_SCHED_DAY_TIME` 於 #332 移除，排程時點改由 `DP_SCHEDULE.CRON_EXPR` 控制。）
 - 自我保護 error_code `DM_ROLE_001` 已於 #126 定案（DP 統一映射 `DP-MSG-DP02-001`）
 - **省略 SITE / HOSPITAL 欄位**（對齊平台 DP，research §1）
 

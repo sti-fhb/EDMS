@@ -125,16 +125,16 @@
 | `JWT` | `ACCESS_TTL_MIN` | 閒置自動登出（分鐘） | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）| `HIDDEN` |
 | `JWT` | `RENEW_MAX_HOURS` | 單次登入時效上限（小時） | 正整數（時）| 1–24 | 建議（單日上限）| `HIDDEN` |
 | `PWD_POLICY` | `MIN_LEN` | 密碼最小長度（一般使用者） | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）| `ADMIN` |
-| `PWD_POLICY` | `ADMIN_MIN_LEN` | 密碼最小長度（特權帳號） | 正整數 | ≥ `MIN_LEN`（預設 12）| spec 明載（特權 12）| `ADMIN` |
+| `PWD_POLICY` | `ADMIN_MIN_LEN` | 密碼最小長度（特權帳號） | 正整數 | `MIN_LEN` ≤ 值 ≤ 72（預設 12）| spec 明載（特權 12）；上限 72 由 bcrypt 推得（#528）| `ADMIN` |
 | `PWD_POLICY` | `CHAR_TYPES` | 字元組合要求（種類數） | 正整數 | 1–4（大小寫 / 數字 / 符號 4 類）| spec 明載 | `ADMIN` |
 | `PWD_POLICY` | `HISTORY_COUNT` | 密碼歷史記憶次數 | 非負整數 | 0–24（預設 3）| 建議 | `ADMIN` |
 | `PWD_POLICY` | `EXPIRY_DAYS` | 密碼最長效期（天） | 正整數（天）| 1–90 | spec 明載（最短 1、最長 90）| `ADMIN` |
 | `PWD_POLICY` | `EXPIRY_REMIND_DAYS` | 密碼到期提醒天數（天） | 正整數（天）| 1 ≤ 值 < `EXPIRY_DAYS`（預設 7）| 建議（須早於到期）| `ADMIN` |
 | `LOGIN` | `FAIL_LOCK_COUNT` | 登入失敗鎖定次數 | 正整數 | ≥ 1（預設 5，建議 3–10）| spec 明載（預設 5）| `ADMIN` |
-| `LOGIN` | `LOCK_MINUTES` | 帳號鎖定時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 | `ADMIN` |
-| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 密碼重設連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 | `ADMIN` |
-| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| ≥ 1（預設 30）| spec 明載 | `ADMIN` |
-| `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| ≥ 1（預設 90）| spec 明載 | `ADMIN` |
+| `LOGIN` | `LOCK_MINUTES` | 帳號鎖定時間（分鐘） | 正整數（分）| 1–1440（預設 30）| spec 明載下限；上限為 #528 裁示 | `ADMIN` |
+| `LOGIN` | `RESET_TOKEN_TTL_MIN` | 密碼重設連結有效時間（分鐘） | 正整數（分）| 1–120（預設 30）| spec 明載下限；上限為 #528 裁示（與 #50 互鎖）| `ADMIN` |
+| `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| 1–120（預設 30）| 同上 | `ADMIN` |
+| `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| 1–365（預設 90）| spec 明載下限；上限為 #528 裁示 | `ADMIN` |
 | `LOGIN` | `VERIFY_SEND_COOLDOWN_SEC` | 驗證信重寄冷卻（秒） | 正整數（秒）| 60–3600（預設 600）| #74 / #76 | `HIDDEN` |
 | `MAIL` | `RATE_PER_MIN` | 每分鐘寄信上限（封） | 正整數 | ≥ 1（預設 60）| 建議 | `HIDDEN` |
 | `MAIL` | `RETRY_MAX` | 寄信重試上限次數 | 非負整數 | 0–10（預設 5）| 建議 | `HIDDEN` |
@@ -151,6 +151,30 @@
 
 > 「建議」值域為 SD 實作之 sanity guard 上限；型別 / 下限 / 跨欄位規則為硬性檢核。若業務需調整「建議」上限，實作時回報 SA 更新本表。
 
+#### 上限的依據（#528）
+
+本表的上限分三種來源，改動時請沿用同一分類：
+
+| 來源 | 參數 | 說明 |
+|------|------|------|
+| **spec 明載** | `ACCESS_TTL_MIN` `RENEW_MAX_HOURS` `CHAR_TYPES` `HISTORY_COUNT` `EXPIRY_DAYS` `VERIFY_SEND_COOLDOWN_SEC` `RETRY_MAX` `FAIL_LOCK_COUNT` | 直接取本表值域欄 |
+| **跨欄位推得** | `MIN_LEN`（≤ `ADMIN_MIN_LEN`）、`EXPIRY_REMIND_DAYS`（< `EXPIRY_DAYS`）| 由〈跨欄位一致性〉承擔，不另設絕對上限 |
+| **實作推得** | `ADMIN_MIN_LEN` ≤ **72** | bcrypt 截斷上限；設 73 時長度檢核（字元數）與 bcrypt 上限檢核（位元組數）互斥，**任何密碼都設不了**。連帶使 `MIN_LEN` 有界 |
+| **業務裁示** | `LOCK_MINUTES` `RESET_TOKEN_TTL_MIN` `EMAIL_CHANGE_TTL_MIN` `IDLE_DISABLE_DAYS` | 見下 |
+
+四個裁示上限擋的都是「設大即關掉這道控制」：鎖定時間過長使帳號解不開（管理者自己也可能被鎖）、TTL 過長使連結近乎永久有效（與 #50「outbox 永久保存明文重設連結」互鎖，其緩解正是短 TTL，故取 2 小時而非業界常見的 24 小時）、閒置天數過長使閒置停用形同不存在。
+
+#### 模組級參數之值域（#528）
+
+模組級（`ET_` / `DM_`）參數之值域由**各模組規格定義**，並由各模組於啟動期註冊至平台註冊表供本功能查詢——DP 不得認識模組語彙（`sti-backend-boundaries`）。目前 DP03 可維護的模組級參數有兩個，其值域**刻意不同**：
+
+| 參數 | 值域 | 依據 |
+|------|------|------|
+| `DM_REMIND_THRESHOLD` | 1–30（預設 7）| DM spec 明載 |
+| `ET_URGENT_REMIND_DAYS` | **0**–30（預設 3）| #528 裁示；**0 為「停用加急提醒」之既有語意**，故下限與 DM 不同 |
+
+> ⚠️ **查無值域規則時為 fail-closed**：平台 `_RULES` 與模組註冊表皆無該參數之規則者，一律拒絕編輯（403 `DP-MSG-DP03-008`）。新增可編輯的 VALUE 參數時 MUST 一併提供值域，否則它在 DP03 上為不可編輯。此方向刻意與「略過檢核」相反——略過是靜默的，正是 #528 修復的缺口。
+
 ## 系統訊息
 
 | 訊息代碼 | 類型 | 訊息內容 | 觸發 / 對應 FR |
@@ -162,6 +186,7 @@
 | DP-MSG-DP03-005 | 警告 | 此為平台級參數，變更將影響全平台（ET 與 DM）| FR-DP-US5-07 平台級編輯 |
 | DP-MSG-DP03-006 | 成功 | 已停用，至少影響 N 份文件、M 位閱覽者 | FR-DP-US5-10 可見對象 soft-retire；「至少」不可省略——數字為下限 |
 | DP-MSG-DP03-007 | 錯誤 | 此參數由 IT 設定，不可於畫面修改 | FR-DP-US5-11 `READONLY` / `HIDDEN` 明細之寫入。畫面本就無編輯入口，此訊息用於直接呼叫 API 之情形 |
+| DP-MSG-DP03-008 | 錯誤 | 此參數尚未定義值域規則，不可於畫面修改 | FR-DP-US5-03 之 fail-closed（#528）：平台與模組註冊表皆查無該參數之值域規則。正常情況不會出現——它代表新增了可編輯的 VALUE 參數卻未提供值域 |
 
 ## 前置依賴
 

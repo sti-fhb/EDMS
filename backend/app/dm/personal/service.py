@@ -18,6 +18,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dm.document.models import DmVersionTag
+from app.dm.params import REMIND_THRESHOLD_PARAM_ID
 from app.dm.personal.repository import PersonalRepository
 from app.dm.personal.schemas import ActivityEvent, ActivityResponse, DraftItem, WithdrawResult
 from app.dm.review.repository import ReviewCenterRepository
@@ -220,7 +221,7 @@ class PersonalService:
         """
         now = utcnow()
         since = now - timedelta(days=_ACTIVITY_DAYS)
-        threshold = await self._params.get_int_param(db, "DM_REMIND_THRESHOLD", "VALUE", _REMIND_THRESHOLD_DEFAULT)
+        threshold = await self._params.get_int_param(db, REMIND_THRESHOLD_PARAM_ID, "VALUE", _REMIND_THRESHOLD_DEFAULT)
         author: list[ActivityEvent] = []
         reviewer: list[ActivityEvent] = []
         if has_role(roles, DM_EDITOR):

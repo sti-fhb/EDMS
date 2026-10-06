@@ -392,10 +392,16 @@ async def test_edit_scope_check_precedes_value_validation(db, admin_gate):
     才能證明層級先跑（否則會先被 `DP_PARAM_001` 擋下）。
     順序若反過來，等於對一個改不動的參數洩露它的值域規則。
 
-    ⚠️ 這裡用 `JWT`（#459 起為 HIDDEN）而非自建的 READONLY 參數，因為**自建參數不在
-    `param_rules` registry 裡、根本不會觸發值域驗證**，送 9999 也照樣通過——那樣這條就
-    失去鑑別力。擋寫判的是 `is_editable_scope()`，READONLY / HIDDEN 走同一條路徑，
-    故以 HIDDEN 驗證順序同樣成立。
+    ⚠️ 這裡用 `JWT`（#459 起為 HIDDEN）而非自建的 READONLY 參數。**原本的理由**是「自建
+    參數不在 `param_rules` registry 裡、根本不會觸發值域驗證，送 9999 也照樣通過」——
+    **該理由已於 #528 失效**：值域查無規則時改為 fail-closed，自建參數現在會回 403
+    `DP_PARAM_008`，也有鑑別力了。
+
+    仍保留 `JWT` 的新理由：它讓「順序反了會得到什麼」是 `DP_PARAM_001`（值域不符），
+    正是本條要防的洩露；自建參數得到的會是 008（查無規則），那是另一回事。
+
+    擋寫判的是 `is_editable_scope()`，READONLY / HIDDEN 走同一條路徑，故以 HIDDEN 驗證
+    順序同樣成立。
     """
     admin_gate()
     with pytest.raises(AppError) as exc:

@@ -4,13 +4,16 @@
 於 `main.py` module-level 呼叫一次（比照既有 include_router 接線；未註冊模組閘一律 fail-closed）。
 
 ⛔ **拔掉註冊會讓 DP 後台對所有人 403**，並讓兩個不以 403 現形的判定安靜降級
-（特權密碼長度、通知範本可見範圍）。完整說明見 `app/et/bootstrap.py` 的同一段——
+（特權密碼長度、通知範本可見範圍）；#528 起還會讓 `DM_REMIND_THRESHOLD` 在 DP03 變成
+不可編輯（403 `DP_PARAM_008`）。完整說明見 `app/et/bootstrap.py` 的同一段——
 兩個模組的註冊承載同一件事，不在此重複。
 """
 
 from app.core.module_admin import module_admin_gate
 from app.core.module_assign import module_assign_registry
+from app.core.module_param_rules import module_param_rule_registry
 from app.core.module_roles import module_role_gate
+from app.dm.params import REMIND_THRESHOLD_PARAM_ID, REMIND_THRESHOLD_RULE
 from app.dm.provider import DmAssignProvider
 from app.dm.roles.gate import dm_has_any_role, dm_is_module_admin
 
@@ -18,10 +21,13 @@ _MODULE = "DM"
 
 
 def register_dm_module() -> None:
-    """註冊 DM 之模組判定閘 checker（§1 / §4）與指派轉接層 provider（§3 / §3.1）。
+    """註冊 DM 之模組判定閘 checker（§1 / §4）、指派轉接層 provider（§3 / §3.1）與參數值域（#528）。
 
     冪等：重複呼叫僅覆蓋同一 checker / provider（供測試重入）。供 DP 入口頁 / 後台呼叫。
     """
     module_role_gate.register(_MODULE, dm_has_any_role)
     module_admin_gate.register(_MODULE, dm_is_module_admin)
     module_assign_registry.register(_MODULE, DmAssignProvider())
+    module_param_rule_registry.register(  # #528：值域屬 DM 業務規則，DP 經註冊表查
+        REMIND_THRESHOLD_PARAM_ID, "VALUE", REMIND_THRESHOLD_RULE
+    )

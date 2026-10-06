@@ -2,30 +2,34 @@
 
 主檔為種子固定集、維護 UI 不新增主檔，故驗證規則以本模組 registry 按
 (PARAM_ID, PARAM_KEY) 維護（非存 DP_PARAM_M 欄位）。見 spec_us5 §參數型別 / 值域驗證規則。
-僅涵蓋平台級 VALUE 參數；模組級（ET_ / DM_）值域由各模組定義，本 registry 未列者不做值域檢核。
+本模組的 `_RULES` 僅涵蓋**平台級** VALUE 參數；模組級（`ET_` / `DM_`）值域由各模組定義，
+經 `core/module_param_rules` 的註冊表提供（#528 落地；在那之前「由各模組定義」是一張沒有
+兌現的支票——兩側都沒有實作，等於完全不檢核）。
+
+⚠️ **兩處皆查無規則時為 fail-closed（403 DP_PARAM_008），不是略過。** 新增可編輯的 VALUE
+參數時必須一併給值域，否則它在 DP03 上會是不可編輯的。
 """
 
-from dataclasses import dataclass
-
 from app.core.exceptions import AppError
+from app.core.module_param_rules import IntRule, module_param_rule_registry
 
 _INVALID_MSG = "參數值不合法，請確認格式與值域"
+_NO_RULE_MSG = "此參數尚未定義值域規則，不可於畫面修改"
 
 
-@dataclass(frozen=True)
-class IntRule:
-    """整數型參數值域規則；max_value 為 None 代表無上限（僅型別 + 下限）。"""
-
-    min_value: int
-    max_value: int | None = None
-
-
-# (PARAM_ID, PARAM_KEY) → 規則。僅平台級 VALUE 參數；未列者不做值域檢核（回 None）。
+# (PARAM_ID, PARAM_KEY) → 規則。僅平台級 VALUE 參數；模組級的在 module_param_rule_registry。
+# ⚠️ 未列於本表**也未由模組註冊**者，validate_param_value 會拒絕編輯（403 DP_PARAM_008），
+# 不是略過——新增可編輯的平台級 VALUE 參數時必須在此補一列。
 _RULES: dict[tuple[str, str], IntRule] = {
     ("JWT", "ACCESS_TTL_MIN"): IntRule(1, 15),
     ("JWT", "RENEW_MAX_HOURS"): IntRule(1, 24),
     ("PWD_POLICY", "MIN_LEN"): IntRule(8),
-    ("PWD_POLICY", "ADMIN_MIN_LEN"): IntRule(8),
+    # 上限 72 是**推導的、不是訂的**：password_policy 先查 len(password) < min_length（字元數，
+    # DP_PWD_001）再查 len(password.encode()) > _MAX_PASSWORD_BYTES（= 72，bcrypt 截斷上限，
+    # DP_PWD_004）。設 73 時 72 字元的被前者擋、73 字元的被後者擋，**沒有任何密碼能同時通過**，
+    # 管理者從此設不了密碼。非 ASCII 更早撞牆（一個中文字 3 bytes）。
+    # 因跨欄位 ADMIN_MIN_LEN >= MIN_LEN，封這條會連帶壓住 MIN_LEN，故 MIN_LEN 不另設上限。
+    ("PWD_POLICY", "ADMIN_MIN_LEN"): IntRule(8, 72),
     ("PWD_POLICY", "CHAR_TYPES"): IntRule(1, 4),
     ("PWD_POLICY", "HISTORY_COUNT"): IntRule(0, 24),
     ("PWD_POLICY", "EXPIRY_DAYS"): IntRule(1, 90),
@@ -37,10 +41,18 @@ _RULES: dict[tuple[str, str], IntRule] = {
     # 檢核」推得（註記指派兩端的來源，未直接訂下限值）。別「順手補齊」成 IntRule(3, 10)：
     # test_dp_param_rules 的 valid "1" / "2" 即為釘住此決定而設。
     ("LOGIN", "FAIL_LOCK_COUNT"): IntRule(1, 10),
-    ("LOGIN", "LOCK_MINUTES"): IntRule(1),
-    ("LOGIN", "RESET_TOKEN_TTL_MIN"): IntRule(1),
-    ("LOGIN", "EMAIL_CHANGE_TTL_MIN"): IntRule(1),
-    ("LOGIN", "IDLE_DISABLE_DAYS"): IntRule(1),
+    # 上限擋的是「設大即關掉這道控制」（#528 裁示值，已同步 spec_us5 值域欄）：
+    #   LOCK_MINUTES 設大 → 帳號鎖定後解不開，而管理者自己也可能被鎖（DM 側無 bootstrap
+    #     管理者機制），24 小時之後就只剩手動解鎖一條路。
+    #   RESET_TOKEN_TTL_MIN / EMAIL_CHANGE_TTL_MIN 設大 → 連結近乎永久有效。這兩條與 #50
+    #     互鎖：該 issue 指出 DP_EMAIL_LOG.BODY 永久保存含明文重設連結的信件內文，而目前
+    #     唯一的緩解就是「一次性 + 短 TTL」——上限放寬等於把那個緩解拆掉，故取 2 小時
+    #     （相對預設 30 分鐘仍有 4 倍餘裕）而非業界常見的 24 小時。
+    #   IDLE_DISABLE_DAYS 設大 → 閒置帳號永不停用；超過一年還不停用，這道控制等於不存在。
+    ("LOGIN", "LOCK_MINUTES"): IntRule(1, 1440),
+    ("LOGIN", "RESET_TOKEN_TTL_MIN"): IntRule(1, 120),
+    ("LOGIN", "EMAIL_CHANGE_TTL_MIN"): IntRule(1, 120),
+    ("LOGIN", "IDLE_DISABLE_DAYS"): IntRule(1, 365),
     ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC"): IntRule(60, 3600),
     ("MAIL", "RATE_PER_MIN"): IntRule(1),
     ("MAIL", "RETRY_MAX"): IntRule(0, 10),
@@ -63,14 +75,26 @@ def _to_int(raw: str | None) -> int | None:
 
 
 def validate_param_value(param_id: str, param_key: str, value: str) -> None:
-    """驗證單一 VALUE 參數值之型別 / 值域；未列於 registry 者略過。
+    """驗證單一 VALUE 參數值之型別 / 值域。
+
+    規則來源有二：平台級查本模組 `_RULES`；模組級（`ET_` / `DM_`）查
+    `module_param_rule_registry`——值域屬各模組的業務規則，由模組於 bootstrap 註冊，
+    DP 不認識模組語彙（`sti-backend-boundaries`）。
+
+    兩處皆查無時 **fail-closed 拒絕編輯**（#528 裁示 1），不是放行。放行是本 issue 要修的
+    缺口本身：日後新增一個可編輯的 VALUE 參數卻忘了給值域，沒有任何跡象；拒絕則立刻現形。
+    今日不會誤傷任何參數——17 個平台級全在 `_RULES`，2 個可編輯的模組級由各自 bootstrap
+    註冊，其餘模組級參數為 `HIDDEN`、早在 `is_editable_scope` 就被擋下（403 DP_PARAM_007），
+    根本進不到這裡。
 
     Raises:
-        AppError: 型別或值域不符（422 DP_PARAM_001）。
+        AppError: 型別或值域不符（422 DP_PARAM_001）、查無值域規則（403 DP_PARAM_008）。
     """
     rule = _RULES.get((param_id, param_key))
     if rule is None:
-        return
+        rule = module_param_rule_registry.get(param_id, param_key)
+    if rule is None:
+        raise AppError(status_code=403, detail=_NO_RULE_MSG, error_code="DP_PARAM_008")
     num = _to_int(value)
     if num is None:
         raise _invalid()
