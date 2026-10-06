@@ -12,7 +12,7 @@ import IconButton from "@mui/material/IconButton"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
-import { BlockerList } from "./BlockerList"
+import { BlockerSummary } from "./BlockerDialog"
 import type { PublishBlocker, PublishResult } from "./surveySchemas"
 
 interface PublishDialogProps {
@@ -110,13 +110,11 @@ export function PublishDialog({
             </Typography>
           </Stack>
         ) : (
-          <Stack spacing={1}>
-            <Alert severity="error">發布條件未滿足，請先補齊以下項目。</Alert>
-            <BlockerList
-              blockers={blockers}
-              names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
-            />
-          </Stack>
+          <BlockerSummary
+            message="發布條件未滿足，請先補齊以下項目。"
+            blockers={blockers}
+            names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+          />
         )}
       </DialogContent>
       <DialogActions>
