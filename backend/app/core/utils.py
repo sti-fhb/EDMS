@@ -1,6 +1,6 @@
 """核心工具函式。"""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -21,6 +21,29 @@ def utcnow() -> datetime:
     不依賴 OS / DB server / Docker 的 timezone 設定。
     """
     return datetime.now(timezone.utc)
+
+
+def taipei_date(value: datetime) -> date:
+    """aware datetime → **台灣日期**（業務上的「那一天」），回 `date` **物件**。
+
+    ⚠️ **要給人看的字串請用 `format_taipei_date`**（回 `"YYYY-MM-DD"`）。兩者同一次換算、
+    同一個 `_DISPLAY_TZ`，差別只在回傳型別：本函式的輸出要進**運算與 DB 欄位**
+    （如 `ET_WEEKLY_STAT.STAT_DATE`、日期區間比較），那不能是字串。
+
+    ⚠️ **不可直接用 `.date()`**：`utcnow()` 回的是 UTC aware，`.date()` 取的是 **UTC 日期**。
+    兩者在台灣時間 **00:00–07:59** 會差一天（台灣 10/05 07:30 的 UTC 日期是 10/04）。
+
+    全系統以台灣時間切日——`core/db.py::_SESSION_TIMEZONE` 讓伺服端的 `func.date()` 走這個
+    基準、`frontend/src/utils/date.ts::todayTaipei` 讓日期選擇器走這個基準（#483）。本函式
+    補上 **Python 端**的那一塊：以 `utcnow()` 算業務日期的地方一律經此，不要各自 `.date()`。
+
+    Args:
+        value: aware datetime（通常來自 `utcnow()` 或 TIMESTAMPTZ 欄位）。
+
+    Returns:
+        該時刻在台灣的日期。
+    """
+    return value.astimezone(_DISPLAY_TZ).date()
 
 
 def format_taipei(value: datetime | None) -> str:
@@ -47,6 +70,9 @@ def format_taipei(value: datetime | None) -> str:
 
 def format_taipei_date(value: datetime | None) -> str:
     """TIMESTAMPTZ 欄位 → 給人看的 `YYYY-MM-DD`（**台灣時間**，只要日期）；None 回空字串。
+
+    ⚠️ **要拿來運算或寫進 DB 的日期欄位請用 `taipei_date`**（回 `date` 物件）。本函式回字串，
+    只適合顯示（信件 / CSV / 畫面）。兩者同一次換算、同一個 `_DISPLAY_TZ`。
 
     與 `format_taipei` 同一次換算、只差輸出格式。**不要改用 `format_taipei(v)[:10]`**——那是對
     格式字串的位置假設，日後若在前面加了前綴或改了格式就會靜默切錯。

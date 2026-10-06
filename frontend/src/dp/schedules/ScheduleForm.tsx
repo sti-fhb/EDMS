@@ -71,7 +71,7 @@ export function ScheduleForm({
           size="small"
           fullWidth
           error={Boolean(fieldErrors.cron_expr)}
-          helperText={fieldErrors.cron_expr ?? "例：0 8 * * *（每日 08:00 UTC）。變更即時生效。"}
+          helperText={fieldErrors.cron_expr ?? "例：0 8 * * *（每日台灣時間 08:00）。變更即時生效。"}
         />
         <FormControlLabel
           control={<Switch checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />}

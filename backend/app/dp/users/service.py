@@ -4,7 +4,8 @@
 （`kind=ADMIN_INVITE`、`pwd_hash=NULL`）並寄邀請信；**不建 DP_USER、不授角色**——使用者點連結
 自設密碼後才由 `activate_pending_account` 落地啟用副作用。重寄 / 取消邀請亦為管理者動作。
 所有 CUD 於同交易內經 SRVDP003（AuditLogService）寫稽核（含 before / after value）。
-授權：依暫行規則僅認證、不掛 admin 閘（SA 裁示 Q1=A，待 T049 回歸）。
+授權：router-level 掛 `require_any_module_admin()`（需 ET 或 DM 任一模組管理者，#250 落地）。
+此前依暫行規則僅認證、不掛 admin 閘（SA 裁示 Q1=A，當時註記「待 T049 回歸」）。
 """
 
 import logging

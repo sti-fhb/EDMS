@@ -2,6 +2,10 @@
 
 把 DM 提供之各判定閘 / 轉接層 checker 於啟動期註冊進平台 core 之聚合閘，供 DP 呼叫。
 於 `main.py` module-level 呼叫一次（比照既有 include_router 接線；未註冊模組閘一律 fail-closed）。
+
+⛔ **拔掉註冊會讓 DP 後台對所有人 403**，並讓兩個不以 403 現形的判定安靜降級
+（特權密碼長度、通知範本可見範圍）。完整說明見 `app/et/bootstrap.py` 的同一段——
+兩個模組的註冊承載同一件事，不在此重複。
 """
 
 from app.core.module_admin import module_admin_gate
