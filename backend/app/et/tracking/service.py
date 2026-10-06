@@ -45,7 +45,7 @@ from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
-from app.core.utils import utcnow
+from app.core.utils import format_taipei, utcnow
 from app.et.approval.repository import EtApprovalRepository
 from app.et.approval.rules import derive_approval_status
 from app.et.approval.schemas import ApprovalRow
@@ -714,8 +714,18 @@ _COMPLETION_LABEL = {
 
 
 def _fmt_dt(value: datetime | None) -> str:
-    """`2026-04-15 09:00`；`None` 回破折號（與畫面一致）。"""
-    return value.strftime("%Y-%m-%d %H:%M") if value is not None else "—"
+    """匯出用時間字串 `2026-04-15 09:00`（**台灣時間**）；`None` 回破折號。
+
+    時區與破折號兩者都是為了對齊畫面：`StudentListBlock.tsx` 以 `formatDateTime`
+    （瀏覽器本地時間，使用者全在 UTC+8）呈現同一批 `joined_at` / `last_activity_at`，
+    空值顯示為 `—`。
+
+    ⚠️ 原本直接 `strftime`，取到的是 UTC 牆上時間——asyncpg 解碼 `timestamptz` 回的恆為
+    UTC aware datetime。於是**同一列資料在畫面上是台灣時間、在匯出的 CSV 裡是 UTC，差 8 小時**，
+    而當時這句 docstring 寫的正是「與畫面一致」（#519）。換算改走 `core/utils.format_taipei`，
+    不在本模組自行 `astimezone`。
+    """
+    return format_taipei(value) if value is not None else "—"
 
 
 def _write_csv(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> bytes:

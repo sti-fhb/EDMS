@@ -118,16 +118,36 @@ async def test_query_filters_by_module_action_result(db):
 
 
 async def test_query_filters_by_date_range_inclusive(db):
-    """AC1：date_to 含當日全天（以隔日 00:00 為上界）。"""
-    await _insert_log(db, created_date=datetime(2026, 6, 30, 23, 0, tzinfo=timezone.utc))
-    inside = await _insert_log(db, created_date=datetime(2026, 7, 5, 23, 59, tzinfo=timezone.utc))
-    await _insert_log(db, created_date=datetime(2026, 7, 6, 0, 30, tzinfo=timezone.utc))
+    """AC1：`date_to` 含當日全天，且日界以**台灣時間**切（#519）。
 
+    ⚠️ 本條原本以 UTC 日界撰寫（`date_from` 直接組 `datetime(..., tzinfo=utc)`），
+    樣本 UTC `2026-07-05 23:59` 被斷言為「在 7/1–7/5 內」——那個時點的台灣時間是
+    **7/06 07:59**，實際上不該在內。這不是測試寫錯，是它忠實反映了當時的實作；
+    #519 把實作改成台灣日界後，期望值跟著翻面。
+
+    四個樣本刻意涵蓋兩種錯的方向，因為 UTC 日界同時會**漏撈**與**多撈**：
+
+    | 樣本（台灣時間） | UTC | 台灣日界 | 舊的 UTC 日界 |
+    |---|---|---|---|
+    | 06/30 23:59 | 06/30 15:59 | ❌ 外 | ❌ 外 |
+    | **07/01 07:00** | 06/30 23:00 | ✅ 內 | ❌ **漏撈** |
+    | 07/05 23:59 | 07/05 15:59 | ✅ 內 | ✅ 內 |
+    | **07/06 07:59** | 07/05 23:59 | ❌ 外 | ✅ **多撈** |
+
+    其中「漏撈」那列是對稽核調查真正有害的一種——調查者按台灣日期切範圍，會相信
+    自己拿到了那一天的完整紀錄。
+    """
     from datetime import date
+
+    await _insert_log(db, created_date=datetime(2026, 6, 30, 15, 59, tzinfo=timezone.utc))
+    first_in_day = await _insert_log(db, created_date=datetime(2026, 6, 30, 23, 0, tzinfo=timezone.utc))
+    last_in_day = await _insert_log(db, created_date=datetime(2026, 7, 5, 15, 59, tzinfo=timezone.utc))
+    await _insert_log(db, created_date=datetime(2026, 7, 5, 23, 59, tzinfo=timezone.utc))
 
     res = await _service.query_logs(db, **_q(date_from=date(2026, 7, 1), date_to=date(2026, 7, 5)))
 
-    assert [r.log_id for r in res["data"]] == [inside.log_id]
+    # 排序為 created_date DESC，故晚的在前。
+    assert [r.log_id for r in res["data"]] == [last_in_day.log_id, first_in_day.log_id]
 
 
 async def test_query_pagination_meta(db):
@@ -220,7 +240,11 @@ async def test_export_csv_matches_query(db):
     assert csv_text.startswith("﻿")  # UTF-8 BOM
     lines = [ln for ln in csv_text.splitlines() if ln.strip()]
     # 指定欄位：操作時間 / 操作者帳號 / 功能 / 操作類別 / 執行結果 / 對象 / 來源 IP / 異動前值 / 異動後值
-    assert lines[0].lstrip("﻿") == "操作時間,操作者帳號,功能,操作類別,執行結果,對象,來源 IP,異動前值,異動後值"
+    # 「操作時間」標頭帶時區標示（#519）：匯出件是證據，沒有標示就無法與舊版匯出區分。
+    assert (
+        lines[0].lstrip("﻿")
+        == "操作時間（台灣時間 UTC+8）,操作者帳號,功能,操作類別,執行結果,對象,來源 IP,異動前值,異動後值"
+    )
     # 標頭 + 1 筆 ET（module=ET 過濾）
     assert len(lines) == 2
     # 執行結果以中文輸出（#112，與畫面一致）

@@ -1,6 +1,22 @@
-"""核心工具函式。"""
+"""核心工具函式。
 
-from datetime import date, datetime, timezone
+## 台灣時間相關函式的分工（選錯不會報錯，只會靜默差 8 小時或少了秒數，請對照後再用）
+
+四個函式只差兩個維度——**回字串還是物件**、**到分還是到秒**：
+
+| 函式 | 回傳 | 用途 |
+|---|---|---|
+| `format_taipei` | `str` `YYYY-MM-DD HH:MM`（`with_seconds=True` 則到秒）| **顯示**：CSV 儲存格、通知信內文 |
+| `format_taipei_date` | `str` `YYYY-MM-DD` | **顯示**：只要日期的場合 |
+| `taipei_date` | `date` 物件 | **運算 / 寫入**：業務日期、進 DB 日期欄位 |
+| `taipei_day_start` | `datetime`（台灣 00:00 的 aware 值）| **查詢邊界**：把使用者選的「日期」換成可比對的時點 |
+
+方向不同：前三者是把已有的時點**換算出來**（給人看或拿去算），`taipei_day_start` 相反，
+是把人選的**日期**換成時點去查 DB。四者共用同一個 `_DISPLAY_TZ`，
+不要在各模組自行 `astimezone` 或自組 `tzinfo`。
+"""
+
+from datetime import date, datetime, timedelta, timezone
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -46,7 +62,30 @@ def taipei_date(value: datetime) -> date:
     return value.astimezone(_DISPLAY_TZ).date()
 
 
-def format_taipei(value: datetime | None) -> str:
+def taipei_day_start(day: date, *, plus_days: int = 0) -> datetime:
+    """台灣日曆日的起點（`00:00:00+08:00`），供**查詢邊界**使用；非顯示用。
+
+    使用者在畫面上選的是「日期」，DB 存的是 `TIMESTAMPTZ`。要撈「台灣的 10/01 這一天」，
+    邊界必須是台灣的 00:00，不是 UTC 的 00:00——後者等於台灣 08:00，會讓那天凌晨到早上八點
+    的紀錄落到前一天去（DP 稽核查詢原本就是這樣寫的，見 #519）。
+
+    刻意回傳**時點**而非用 `func.date(col)` 轉欄位：前者 `col >= :t AND col < :t2` 吃得到
+    `created_date` 上的索引，後者對欄位套函式會讓索引失效。稽核表會長大，差別會顯現。
+    （DM 的三支查詢用 `func.date()`，靠 #483 的 session timezone 取得同樣語意；
+    兩種作法都正確，差在查詢計畫。）
+
+    Args:
+        day: 台灣日曆日。
+        plus_days: 往後推幾天，用來組上界。`taipei_day_start(d, plus_days=1)` 即「d 當日全天」
+            的排他上界。台灣無日光節約時間，整日位移恆為 24 小時，故直接加 `timedelta`。
+
+    Returns:
+        該日台灣 00:00 的 aware datetime。
+    """
+    return datetime(day.year, day.month, day.day, tzinfo=_DISPLAY_TZ) + timedelta(days=plus_days)
+
+
+def format_taipei(value: datetime | None, *, with_seconds: bool = False) -> str:
     """TIMESTAMPTZ 欄位 → 給人看的 `YYYY-MM-DD HH:MM`（**台灣時間**）；None 回空字串。
 
     ⚠️ **不可直接對 DB 取出的值做 `strftime`**：asyncpg 解碼 `timestamptz` 回的是 **UTC aware**
@@ -62,10 +101,19 @@ def format_taipei(value: datetime | None) -> str:
             會踩到的是自行 `datetime(...)` 構造後傳進來——那本身已違反 `sti-backend-modules.md`
             的時間處理規範（一律 `utcnow()`）。
 
+        with_seconds: 是否輸出到秒（`YYYY-MM-DD HH:MM:SS`）。預設 False。
+            **只有稽核匯出該開**：那份 CSV 是調查用的證據，降精度到分鐘會讓同一分鐘內的
+            多筆事件失去先後順序（#519）。一般畫面 / 通知信不需要秒，開了只是噪音。
+            設為 keyword-only：`format_taipei(v, True)` 在呼叫端讀不出 True 是什麼意思。
+
     Returns:
-        台灣時間的 `YYYY-MM-DD HH:MM`；`value` 為 None 時回空字串。
+        台灣時間的 `YYYY-MM-DD HH:MM`（`with_seconds=True` 時為 `YYYY-MM-DD HH:MM:SS`）；
+        `value` 為 None 時回空字串。
     """
-    return value.astimezone(_DISPLAY_TZ).strftime("%Y-%m-%d %H:%M") if value else ""
+    if not value:
+        return ""
+    fmt = "%Y-%m-%d %H:%M:%S" if with_seconds else "%Y-%m-%d %H:%M"
+    return value.astimezone(_DISPLAY_TZ).strftime(fmt)
 
 
 def format_taipei_date(value: datetime | None) -> str:
