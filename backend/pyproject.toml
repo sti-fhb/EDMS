@@ -17,6 +17,21 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.13.0",
     "sqlalchemy[asyncio]>=2.0.48",
+    # ⚠️ 本專案**沒有任何一行程式 import tzdata**，但它不是可以清掉的 unused 相依。
+    # `app/core/utils.py` 與 `app/et/notify/course_invite.py` 的 `ZoneInfo("Asia/Taipei")`
+    # 都在**模組層**——拿不到 IANA 時區資料不是某個功能壞掉，是 import 期就拋
+    # `ZoneInfoNotFoundError`、整個後端起不來。
+    #
+    # 此前它只是 `tzlocal` 的傳遞相依，而那個 marker 是 `sys_platform == 'win32'`
+    # ——**Linux 正式容器從來不會安裝它**，完全靠基底映像碰巧帶了系統時區檔（#501）。
+    # ⛔ 不要加回 `; sys_platform == "win32"`：那等於維持現狀、對正式環境零改善。
+    #
+    # 守門兩層：`tests/unit/test_core_timezone_data.py`（清空 TZPATH 逼它只能走套件，
+    # 在 Linux 上分得出改與不改）＋ `cd.yml` 的「驗證映像可解析時區」（驗實際映像）。
+    #
+    # `>=2026.2` 只是宣告當下的鎖定版本，非功能需求——本專案只用 Asia/Taipei，1979 年後
+    # 無 DST，任何近年版本等價。
+    "tzdata>=2026.2",
 ]
 
 # 說明：認證/寄信/排程依賴於 DP Foundation（#16 T001）引入——

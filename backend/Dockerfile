@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 
-# ffmpeg：本專案**唯一的系統層依賴**（其餘 11 個皆為純 Python 套件）。
+# ffmpeg：本專案**唯一的系統層依賴**，其餘相依皆為純 Python 套件。
+# （此處原本寫「其餘 11 個」，但那個數字隨 pyproject 增刪而漂移、沒人會記得改——
+#   2026-10-06 實際已是 13 個。改成不帶數字，以免下一個讀的人被誤導。）
 # ET 教材影片上傳時以其中的 `ffprobe` 解析長度，而 `ET_MATERIAL_VIDEO.DURATION_SEC`
 # 是 ET06 觀看覆蓋率的分母、data-model 訂為 NOT NULL，故**取不到不得存檔**。
 #
