@@ -253,9 +253,16 @@ pnpm test:coverage    # 含覆蓋率報告
 `Error: Test timed out in 5000ms.`，而那些檔案你一個都沒改——病因是 worker 互相搶資源
 （`vite.config.ts` 的 `maxWorkers` 註解有完整背景），不是測試壞了。
 
-#### 🔴 步驟 0：先看有沒有別人的 pytest 在跑（最便宜，常常連判定都免了）
+#### 🔴 步驟 0：先看有沒有 pytest worker 在跑（最便宜，常常連判定都免了）
 
-有的話**先等或先問對方**，不要開始分析——這省掉一輪 10 分鐘的全套重跑。
+查到就**先處理掉再分析**——這省掉一輪 10 分鐘的全套重跑。但處理方式有兩種，**先分辨是哪一種**：
+
+| 情況 | 怎麼確認 | 動作 |
+|------|---------|------|
+| **有主人**（某個 session 正在跑）| 追父行程的 cwd 問到是誰，或直接問 | 等它跑完，或請對方改 `-n 4` |
+| 🔴 **孤兒**（沒有人在跑，worker 卻還在）| 問過一輪沒有人認領；或父行程已不存在 | **直接收掉**（見下） |
+
+⚠️ **「等對方跑完」對孤兒是錯的建議**——沒有人會結束它，你會等到天荒地老。
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
@@ -270,6 +277,28 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 `uv run pytest -v -n auto --cov`，本機 12 核。**只要有人照專案文件跑標準的本機 CI，
 另一個 session 的前端 vitest 就會假紅**——是工具預設與多 session 共用機器的**結構衝突**，
 不是誰的疏忽。所以這件事會**反覆**發生，不是偶發。
+
+##### 🔴 孤兒 worker：中止背景測試**不會**收掉它們
+
+`TaskStop`（或任何中止背景 pytest 的方式）只停主行程，**xdist 的 worker 會留下來空轉**。
+實例：某日兩個 session 各停過一輪全量測試、其中一次沒手動清，累積 **36 個孤兒行程**在
+12 核機器上跑。撞上它的那輪 `pnpm ci:local` 兩邊同時爆：
+
+| | 症狀 |
+|---|---|
+| 前端 | `[vitest-pool]: Failed to start forks worker ... Timeout waiting for worker to respond` ×8 → **回報 59 檔 vs 磁碟 79 檔，20 檔根本沒跑** |
+| 後端 | 11 個 `TimeoutError`：連自己的 `test_edms_{slug}_gwNN` 連了 **60 秒**還連不上，**0 條斷言紅** |
+
+收掉之後同一份程式碼重跑：**9 項全綠、79/79 檔、後端 0 errors**，牆鐘 25:13 → **10:10**。
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+  Where-Object { $_.CommandLine -match 'pytest|stdin.readline' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+⭐ **自己 `TaskStop` 跑測試的背景任務後，要順手收 worker。** 別只記成「別人會留孤兒」——
+上述那批，兩個 session 都有份。
 
 #### 判定表
 
@@ -320,6 +349,13 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
   （前一刻沒人在跑、後一刻有 24 個 worker）。把瞬時值講成常態會害人**放棄一個其實能解的
   問題**——別人的 pytest 是可協調的（請他避開或改 `-n 4`），桌面環境的常態才是無解
 - 單次 A/B 只能證明「這兩次跑起來不一樣」，**不能**證明「因為程式碼不一樣」
+- 🔴 **下結論前先問：「我比較的兩邊，除了我想證明的那件事以外，還有什麼不同？」**
+  實例：有人依「`-n auto` 跑 25:13、分開跑 4:45 + 10:40」寫下「`-n auto` 會拖垮自己那一輪」，
+  兩處都錯——①當時機器上有 36 個孤兒 worker（外部負載未知）②**比較的母體不同**：
+  `-n auto` 那輪跑的是 **unit + 全部 integration**，拿來比的卻只有 **integration**。
+  乾淨機器上 `-n auto` 跑完整套只要 **10:10，比分開跑還快**，主張被自己的數據推翻。
+  ⚠️ 這條**不影響**「`-n auto` 害**別人**的 vitest 假紅」——那有獨立證據（`maxWorkers`
+  是每個 vitest 行程的上限、不是機器層級的）。**推翻一個主張不連帶推翻相鄰的另一個。**
 - `maxWorkers` 是**每個 vitest 行程**的上限，不是機器層級的——三個 session 各跑一次就是
   3 × 4 個並行 fork，又回到原點。此時的紅不代表設定失效
 - ⭐ 先問**可否性**再問實測：「我改的東西有沒有任何路徑到得了這個檔案？」答案是
