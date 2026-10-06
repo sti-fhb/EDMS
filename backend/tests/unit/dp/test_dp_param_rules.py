@@ -47,6 +47,7 @@ def test_valid_values_pass(param_id, param_key, value):
         ("MAIL", "RETRY_MAX", "-1"),  # 負數
         ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "59"),  # 低於 60
         ("LOGIN", "VERIFY_SEND_COOLDOWN_SEC", "3601"),  # 超過 3600
+        ("LOGIN", "FAIL_LOCK_COUNT", "0"),  # 低於下限 1；與 valid 的 "1" / "2" 一起把下限兩側都釘住
         ("LOGIN", "FAIL_LOCK_COUNT", "11"),  # 超過 10（#454）
         ("LOGIN", "FAIL_LOCK_COUNT", "1000000"),  # #454 原始情境：設大即實質關閉登入失敗鎖定
     ],
