@@ -226,3 +226,19 @@ describe("AuditPage 篩選選項來自後端（#477）", () => {
     expect(screen.getAllByRole("option")).toHaveLength(1)
   })
 })
+
+describe("AuditPage 日期上限（#539）", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("台灣時間凌晨（UTC 仍是前一天）時，起日與訖日的上限為台灣當日", async () => {
+    // 只假造 Date；計時器仍用真的，MSW 與 React 的非同步更新才不會卡住
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2026-10-05T17:30:00Z")) // 台灣 10/06 01:30
+    renderWithProviders(<AuditPage />)
+    // 原本以 `new Date().toISOString().slice(0, 10)` 取 UTC 當日，此時點上限停在 10/05，選不到今天
+    expect(await screen.findByLabelText("訖日")).toHaveAttribute("max", "2026-10-06")
+    expect(screen.getByLabelText("起日")).toHaveAttribute("max", "2026-10-06")
+  })
+})

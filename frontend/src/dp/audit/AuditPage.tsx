@@ -13,7 +13,7 @@ import { AppTable } from "../../components/AppTable"
 import type { AppColumn } from "../../components/AppTable"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
-import { formatDateTime } from "../../utils/date"
+import { formatDateTime, todayTaipei } from "../../utils/date"
 import { AuditDetailDialog } from "./AuditDetailDialog"
 import { labelOf } from "./auditLabels"
 import type { AuditLogRow, AuditOption } from "./auditService"
@@ -38,11 +38,6 @@ function displayValue(v: string): string {
 /** 操作者顯示：姓名 → email →（皆無，如 SYSTEM）原 ID。 */
 function operatorText(r: AuditLogRow): string {
   return r.operator_name ?? r.operator_email ?? r.operator_id
-}
-
-/** 今日（yyyy-mm-dd），供日期上限。 */
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
 }
 
 export function AuditPage() {
@@ -179,7 +174,7 @@ export function AuditPage() {
               label="起日"
               value={filters.date_from}
               onChange={(e) => setField("date_from", e.target.value)}
-              slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.date_to || today() } }}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.date_to || todayTaipei() } }}
             />
             <TextField
               type="date"
@@ -187,7 +182,7 @@ export function AuditPage() {
               label="訖日"
               value={filters.date_to}
               onChange={(e) => setField("date_to", e.target.value)}
-              slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.date_from || undefined, max: today() } }}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: filters.date_from || undefined, max: todayTaipei() } }}
             />
             <Button variant="outlined" size="small" startIcon={<ClearIcon />} onClick={clearFilters}>
               清除篩選
