@@ -8,6 +8,11 @@
 
 ⚠️ **兩處皆查無規則時為 fail-closed（403 DP_PARAM_008），不是略過。** 新增可編輯的 VALUE
 參數時必須一併給值域，否則它在 DP03 上會是不可編輯的。
+
+⚠️ **目前僅支援整數型 VALUE 參數**（兩側都只收 `IntRule`，`_to_int` 非整數即拒）。今日所有
+可編輯（`ADMIN`）的 VALUE 參數都是整數，故無影響；但日後若出現可編輯的字串 / CSV 型參數
+（如 `DM_FILE_TYPES` 之類若改為 `ADMIN`），它會因無法表達規則而**不可編輯**——屆時要擴充
+規則型別，不是把它排除在檢核外。
 """
 
 from app.core.exceptions import AppError
@@ -48,6 +53,14 @@ _RULES: dict[tuple[str, str], IntRule] = {
     #     互鎖：該 issue 指出 DP_EMAIL_LOG.BODY 永久保存含明文重設連結的信件內文，而目前
     #     唯一的緩解就是「一次性 + 短 TTL」——上限放寬等於把那個緩解拆掉，故取 2 小時
     #     （相對預設 30 分鐘仍有 4 倍餘裕）而非業界常見的 24 小時。
+    #
+    #     ⚠️ **RESET_TOKEN_TTL_MIN 不只管密碼重設**，有四個讀取端共用它：
+    #       user/forgot_service（密碼重設）、user/register_service（註冊啟用）、
+    #       user/verify_service（驗證信）、users/service._invite_ttl_min（管理者邀請 / 重寄）。
+    #     所以 120 這個上限**把四種連結一起封在 2 小時**。這是 #528 的明確裁示（四者皆為
+    #     明文連結且同樣落在 outbox，#50 的理由對四者一致成立），代價是管理者無法把邀請
+    #     連結調長——下班前發的邀請隔天就過期。
+    #     ⛔ 要放寬請先拆參數（邀請 / 啟用與密碼重設本就是兩種風險），不要只把這個數字改大。
     #   IDLE_DISABLE_DAYS 設大 → 閒置帳號永不停用；超過一年還不停用，這道控制等於不存在。
     ("LOGIN", "LOCK_MINUTES"): IntRule(1, 1440),
     ("LOGIN", "RESET_TOKEN_TTL_MIN"): IntRule(1, 120),
