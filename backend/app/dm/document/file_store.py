@@ -81,9 +81,7 @@ def resolve_upload_mime(file_bytes: bytes, filename: str) -> str:
     return mime
 
 
-async def resolve_upload_limits(
-    db: AsyncSession, *, params: ParamService | None = None
-) -> tuple[int, frozenset[str]]:
+async def resolve_upload_limits(db: AsyncSession, *, params: ParamService | None = None) -> tuple[int, frozenset[str]]:
     """目前生效的 `(單檔上限 MB, 允許副檔名集合)`。
 
     ## 🔴 這是**唯一**的解析處——驗證與「告訴使用者能傳什麼」都走它（#455）
