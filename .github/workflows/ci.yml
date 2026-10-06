@@ -14,7 +14,7 @@
 #   all-checks 仍回報成功、不卡 merge。
 #
 # 工作流程：
-#   changes ─┬─ backend  (ruff + alembic heads + unit/integration tests)
+#   changes ─┬─ backend  (uv.lock 一致性 + ruff + alembic heads + unit/integration tests)
 #            └─ frontend (ESLint + type-check + tests；frontend/ 建立後才觸發)
 #                                                          └─► all-checks
 #
@@ -61,8 +61,21 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              # 🔴 本檔自己也要列入，否則「只改 ci.yml」的 PR 會讓 backend job **skip**
+              # 而 all-checks 照樣綠——等於把改過的檢查流程在從未執行的狀態下合併進 main。
+              # #541 加 uv.lock 一致性檢查時就是這個情形：若不加這行，那道新守門在它自己的
+              # PR 上一次都不會跑。代價是日後改 ci.yml 都會跑完整 backend job（數分鐘），
+              # 相對於「合併一道沒驗過的檢查」這是划算的。
+              - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
+              # 同上，理由對稱：改到本檔的前端區塊時，若不讓 frontend job 跑起來，
+              # 一樣是「把改過的檢查在從未執行的狀態下合併」。
+              # ⚠️ 代價比後端大一些——前端測試是已知會因機器負載出現假紅的那一批
+              # （見 `.claude/rules/sti-testing.md`「前端『假紅』判定」）。若日後覺得
+              # 改 ci.yml 時頻繁撞到前端假紅，這一行是第一個可以拿掉的，但拿掉前請明白
+              # 換回來的是什麼。
+              - '.github/workflows/ci.yml'
 
   # ──────────────────────────────────────────────────────────
   # 後端：Lint + Tests（單一 job，依賴只安裝一次）
@@ -105,6 +118,26 @@ jobs:
 
       - name: 安裝 uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      # 🔴 必須排在 `uv sync` **之前**：`uv sync`（未帶 `--locked`）在偵測到 lock 與
+      # pyproject 不一致時會**自行重新解析並改寫 lock**，於是「改了 pyproject 卻忘了跑
+      # uv lock」在 CI 上恆綠——CI 幫你補了那一步，然後把改寫過的 lock 隨 runner 丟掉。
+      #
+      # 而正式映像用的是 `uv sync --frozen`（`backend/Dockerfile:33`），`--frozen` 的語意是
+      # 「不檢查、直接照 lock 裝」⇒ 會照著那份**過期的 lock** 安裝，新增的相依靜默缺席。
+      # 兩端對「lock 過期」的處理方向相反，而且都不出聲（#541）。
+      #
+      # 寫成獨立步驟而非 `uv sync --locked`：失敗時 CI 畫面上顯示的是**步驟名稱**。
+      # 走 `--locked` 的話失敗步驟叫「安裝 Python 依賴」，讀的人會先以為是安裝壞了。
+      #
+      # ⛔ **這是「一致性」檢查，不是「完整性」檢查——別把它當供應鏈守門。** 實測（#541）：
+      # 把 uv.lock 裡某套件的 sha256 改成全 0、或把 wheel URL 指向 evil.example.com，
+      # `uv lock --check` 一律 **exit 0 通過**；降版同理。原因是重解析會優先沿用既有 pin，
+      # 只要仍滿足 pyproject 的約束（本專案幾乎全是 `>=` 下界）就自洽。
+      #   - hash 比對發生在**安裝階段**（`uv sync` 會驗 lock 內的 sha256）
+      #   - 來源與降版只能靠**人工 review `uv.lock` 的 diff**
+      - name: 檢查 uv.lock 與 pyproject.toml 一致（改了相依必須重跑 uv lock）
+        run: uv lock --check
 
       - name: 安裝 Python 依賴（含 dev 套件）
         run: uv sync --dev

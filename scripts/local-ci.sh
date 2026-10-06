@@ -75,6 +75,29 @@ run_backend() {
 
     cd "$ROOT_DIR/backend"
 
+    # 🔴 讓底下每個 `uv run ...` 拒絕改寫 uv.lock（#541）。
+    # 沒有這行的話：下方「uv.lock 一致性」紅掉後本腳本仍會續跑，而 `uv run ruff ...` 會
+    # **重新解析整棵相依樹**並改寫工作區的 uv.lock——不只是補上你漏掉的那一個，而是可能把
+    # 任意傳遞相依拉到當下 PyPI 最新版（含幾小時前才發布、沒人看過的）。
+    # 接著彙總表洗版、`git status` 多出的 uv.lock 很容易連同功能變更一起 `git add -A`，
+    # 變成一次**未經 review 的相依樹更新**偽裝成「順手補上的 lock」。
+    # ⚠️ 本專案才剛為 github-actions 設了 7 天供應鏈冷卻（`.github/dependabot.yml`），
+    # 這條路徑會整個繞過那個考量。
+    # ⛔ 不要改用 `UV_FROZEN=1`：那是「完全不檢查、直接照 lock 裝」，會抵銷下面這道檢查。
+    export UV_LOCKED=1
+
+    # 0. uv.lock 與 pyproject.toml 一致性（#541）
+    # 本機原本完全沒有這道檢查，而遠端 CI 的 `uv sync --dev`（未帶 --locked）會在 lock
+    # 過期時自行重解並改寫——於是「改了 pyproject 忘了跑 uv lock」兩邊都不會出聲，
+    # 卻會讓正式映像（`uv sync --frozen`）照過期的 lock 裝、靜默少裝套件。
+    # 與 ci.yml 的「檢查 uv.lock 與 pyproject.toml 一致」對齊，避免本機綠、遠端紅。
+    #
+    # ⚠️ 這一步紅掉後本腳本仍會往下跑（`run_step` 的設計），但因上方 `UV_LOCKED=1`，
+    # 後續每個 `uv run` 都會明確報錯而非偷偷修好——你會看到一整排紅，那是正確的。
+    # 修法：`cd backend && uv lock`，然後**先看 `git diff uv.lock` 確認只有你預期的那幾個
+    # 套件變動**再 commit。⛔ 不要略過那一眼：`uv lock` 會重解整棵樹，差異未必只有你加的那個。
+    run_step "Backend: uv.lock 一致性" uv lock --check
+
     # 1. Ruff lint
     run_step "Backend: ruff lint" uv run ruff check .
 
