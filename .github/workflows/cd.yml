@@ -173,6 +173,36 @@ jobs:
           fi
           echo "映像內含 ffprobe：${OUT}"
 
+      # 🔴 與上一道同型，而且後果更大：ffprobe 缺了是單一功能失效，時區資料缺了是**整個後端
+      # 起不來**——`app/core/utils.py` 與 `app/et/notify/course_invite.py` 的
+      # `ZoneInfo("Asia/Taipei")` 都在**模組層**，拿不到資料就在 import 期拋
+      # `ZoneInfoNotFoundError`。全系統以台灣時間切日（#483 / #517 / #519），依賴面只會更廣。
+      #
+      # 此前 tzdata 只是 `tzlocal` 的傳遞相依，而那個 marker 是 `sys_platform == 'win32'`
+      # ——Linux 容器從來不會安裝它，完全靠基底映像碰巧帶了系統時區檔（#501）。
+      #
+      # ⚠️ 本步驟驗**兩件事**，缺一不可：
+      #   (1) `import tzdata` —— 宣告確實落到映像裡。
+      #   (2) `ZoneInfo("Asia/Taipei")` —— 實際解析得到。
+      # 只驗 (2) 擋不到「宣告被刪」：`zoneinfo` 先找系統 TZPATH、找不到才退到 tzdata 套件，
+      # 而目前的基底 python:3.12-slim 帶了 /usr/share/zoneinfo，所以刪掉宣告仍會通過——
+      # 要等到「宣告被刪」**且**「基底換成不帶時區檔的映像」兩件事同時發生才會紅，
+      # 那時已經太遲。只驗 (1) 則無法涵蓋「日後改用別的方式提供時區資料」。
+      #
+      # `uv run` 是為了走與正式啟動相同的 venv。
+      - name: 驗證映像可解析時區（全系統以台灣時間切日的硬性前提）
+        run: |
+          if ! OUT=$(docker run --rm --network none "${AR_BASE}/edms-backend:${SHORT_SHA}" \
+               uv run python -c "import tzdata, zoneinfo; print(tzdata.__version__, zoneinfo.ZoneInfo('Asia/Taipei'))" 2>&1); then
+            echo "::error::映像內無法 import tzdata 或解析 Asia/Taipei。"
+            echo "::error::後端會在 import 期就死（app/core/utils.py 的 ZoneInfo 在模組層），不是某個功能壞掉。"
+            echo "::error::請確認 backend/pyproject.toml 的 tzdata 宣告未被移除，且未被加上 sys_platform marker"
+            echo "::error::（加了 marker 等於只裝在 Windows，Linux 恢復成裸奔——#501 修的就是這個）。"
+            echo "::error::實際輸出：${OUT}"
+            exit 1
+          fi
+          echo "映像內含 tzdata 且可解析時區：${OUT}"
+
       # 雙 head 提前 fail-fast：在 image 還沒 push 前先擋下。
       # alembic heads 為離線指令（只讀 migration 版本檔、不連 DB）。
       - name: 檢查 Alembic heads（雙 head 提前 fail-fast）
