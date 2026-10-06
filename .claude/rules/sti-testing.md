@@ -253,25 +253,30 @@ pnpm test:coverage    # 含覆蓋率報告
 `Error: Test timed out in 5000ms.`，而那些檔案你一個都沒改——病因是 worker 互相搶資源
 （`vite.config.ts` 的 `maxWorkers` 註解有完整背景），不是測試壞了。
 
-#### 🔴 步驟 0：先看有沒有 pytest worker 在跑（最便宜，常常連判定都免了）
+#### 🔴 步驟 0：先看有沒有**吃 CPU 的測試**在跑（最便宜，常常連判定都免了）
 
 查到就**先處理掉再分析**——這省掉一輪 10 分鐘的全套重跑。但處理方式有兩種，**先分辨是哪一種**：
 
 | 情況 | 怎麼確認 | 動作 |
 |------|---------|------|
-| **有主人**（某個 session 正在跑）| 追父行程的 cwd 問到是誰，或直接問 | 等它跑完，或請對方改 `-n 4` |
+| **有主人**（某個 session 正在跑）| 追父行程的 cwd 問到是誰，或直接問 | 等它跑完，或請對方降併發度 |
 | 🔴 **孤兒**（沒有人在跑，worker 卻還在）| 問過一輪沒有人認領；或父行程已不存在 | **直接收掉**（見下） |
 
 ⚠️ **「等對方跑完」對孤兒是錯的建議**——沒有人會結束它，你會等到天荒地老。
 
 ```powershell
-Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-  Where-Object { $_.CommandLine -like '*stdin.readline*' } |
-  Measure-Object | Select-Object -ExpandProperty Count
+Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='python.exe'" |
+  Where-Object { $_.CommandLine -match 'vitest|playwright|pytest|stdin\.readline|tsc' } |
+  Select-Object ProcessId, CommandLine
 ```
 
-`stdin.readline` 是 **pytest-xdist / execnet worker 的指令列指紋**。往上追父行程，`pytest.exe`
-的 cwd 直接告訴你是哪個 worktree、哪個 session。
+⛔ **別把這一步寫窄成「查 pytest」。** 要擋的是「有人在跑吃 CPU 的測試」，不是某一個 runner。
+曾經有人照「查 execnet worker（`stdin.readline`）」的寫法查得 0、判定「沒人在跑測試」，
+**而實際的併發來源是另一個 worktree 的 `vitest run`**（4 個 worker）——指紋寫死成某個 runner，
+換一個工具同一個洞就再開一次。上面的指令刻意涵蓋多種 runner，新增工具時往 `-match` 裡加。
+
+> 兩個最常見的指紋：`stdin.readline` ＝ pytest-xdist / execnet worker；指令列含 `vitest` ＝
+> vitest 的 fork。追父行程的 cwd 就知道是哪個 worktree、哪個 session。
 
 ⚠️ **根因不是某個人亂跑測試。** `scripts/local-ci.sh` 的後端階段是
 `uv run pytest -v -n auto --cov`，本機 12 核。**只要有人照專案文件跑標準的本機 CI，
