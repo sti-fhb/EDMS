@@ -44,5 +44,5 @@ def register_et_module() -> None:
     module_provisioning_gate.register(_MODULE, grant_default_student_role)  # SRVET002 §2
     module_assign_registry.register(_MODULE, EtAssignProvider())  # SRVET003/004 §3/§3.1
     module_param_rule_registry.register(  # #528：值域屬 ET 業務規則，DP 經註冊表查
-        URGENT_REMIND_DAYS_PARAM_ID, "VALUE", URGENT_REMIND_DAYS_RULE
+        _MODULE, URGENT_REMIND_DAYS_PARAM_ID, "VALUE", URGENT_REMIND_DAYS_RULE
     )

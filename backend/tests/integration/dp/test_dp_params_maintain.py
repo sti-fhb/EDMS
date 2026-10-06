@@ -384,6 +384,37 @@ async def test_readonly_detail_rejects_every_field(db, admin_gate, payload):
     assert exc.value.error_code == "DP_PARAM_007"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        ParamDetailUpdate(param_value=None),
+        ParamDetailUpdate(is_enabled=False),
+    ],
+    ids=["param_value_null", "is_enabled_false"],
+)
+async def test_單值參數不可清空或停用(db, admin_gate, payload):
+    """#528：清空 / 停用是繞過值域守門改變系統實際採用的值的兩條路徑。
+
+    兩者在讀取端等效——`ParamService.get_param_value()` 對 `None` 與停用列都回 `None`，
+    呼叫端隨即 fallback 到程式碼裡的預設值。原本的條件是 `new_value is not None`，於是
+    顯式 `{"param_value": null}`（`exclude_unset` 留得住它）與 `{"is_enabled": false}`
+    都會整段跳過驗證。
+
+    這與上方 `test_readonly_detail_rejects_every_field`（#170）是**同一個形狀的不同層級**：
+    那條守的是「這一列唯讀」，本條守的是「這一列是單值參數，必須有一個通過值域的值」。
+
+    ⚠️ 對照組：**說明可以清空**（`test_update_description_cleared_to_null`），因為它不影響
+    任何讀取端的行為。兩個相鄰欄位的差異刻意釘住，避免日後被「統一處理」掉。
+    """
+    admin_gate()
+    with pytest.raises(AppError) as exc:
+        await ParamAdminService().update_detail(
+            db, param_id="LOGIN", param_key="FAIL_LOCK_COUNT", data=payload, operator=_OP
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DP_PARAM_009"
+
+
 async def test_edit_scope_check_precedes_value_validation(db, admin_gate):
     """層級檢核在值域驗證**之前**：改不動的列，值合不合法無關緊要。
 

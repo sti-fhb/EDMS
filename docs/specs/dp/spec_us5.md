@@ -189,6 +189,7 @@
 | DP-MSG-DP03-006 | 成功 | 已停用，至少影響 N 份文件、M 位閱覽者 | FR-DP-US5-10 可見對象 soft-retire；「至少」不可省略——數字為下限 |
 | DP-MSG-DP03-007 | 錯誤 | 此參數由 IT 設定，不可於畫面修改 | FR-DP-US5-11 `READONLY` / `HIDDEN` 明細之寫入。畫面本就無編輯入口，此訊息用於直接呼叫 API 之情形 |
 | DP-MSG-DP03-008 | 錯誤 | 此參數尚未定義值域規則，不可於畫面修改 | FR-DP-US5-03 之 fail-closed（#528）：平台與模組註冊表皆查無該參數之值域規則。正常情況不會出現——它代表新增了可編輯的 VALUE 參數卻未提供值域 |
+| DP-MSG-DP03-009 | 錯誤 | 單值參數必須有值，不可清空或停用 | FR-DP-US5-03（#528）：`PARAM_TYPE=VALUE` 之明細送 `param_value: null` 或 `is_enabled: false`。兩者皆使 `get_param_value()` 回 `None`、呼叫端 fallback 至程式碼預設值，**等於不經值域檢核改變系統實際採用的值**（與 FR-DP-US5-11 對 `READONLY` 的 D2 論證同形）。LIST 型不適用——清單項停用是正常的淘汰手段 |
 
 ## 前置依賴
 

@@ -95,6 +95,7 @@ _DUP_MSG = "清單項代碼已存在"
 _TYPE_MSG = "此參數不支援清單項維護"
 _NO_FIELD_MSG = "未提供任何更新欄位"
 _IT_MANAGED_MSG = "此參數由 IT 設定，不可於畫面修改"
+_VALUE_REQUIRED_MSG = "單值參數必須有值，不可清空或停用"
 # 系統寫死的 enum 清單（後端稽核直接寫碼、非管理者維護對象），一律排除於維護面（見 /sti-plan #68 §9）
 #
 # 與 EDIT_SCOPE（#171）分層並存，兩者**作用層不同**，勿收斂為單一機制：
@@ -367,10 +368,24 @@ class ParamAdminService:
         if not is_editable_scope(detail.edit_scope):
             raise AppError(status_code=403, detail=_IT_MANAGED_MSG, error_code="DP_PARAM_007")
 
-        new_value = fields.get("param_value")
-        if new_value is not None and master.param_type == "VALUE":
-            validate_param_value(param_id, param_key, new_value)
-            await self._validate_group(db, master, param_key, new_value)
+        if master.param_type == "VALUE":
+            # 單值參數不可清空 / 停用（#528）。兩者都讓 get_param_value() 回 None，使呼叫端
+            # fallback 到程式碼預設值——**等於不經值域檢核就改掉系統實際採用的值**。
+            # 這與上方 D2 對 READONLY 的論證是同一個形狀（見 test_readonly_detail_rejects_every_field
+            # 的 docstring 與 #170），#528 把它從「這一列唯讀」擴到「這一列是單值參數」：
+            # 值域守門宣告「值必須落在範圍內」，而清空是一條繞過該宣告的路徑。
+            # 原本只擋 `param_value is not None`，於是顯式 `{"param_value": null}` 與
+            # `{"is_enabled": false}` 都會整段跳過驗證（含 fail-closed 的 DP_PARAM_008，
+            # 那個 403 的訊息還宣告「不可於畫面修改」——不修掉這條，那句宣告是假的）。
+            # LIST 型不受此限：清單項的停用是正常的淘汰手段（spec_us5「淘汰改停用」）。
+            if "param_value" in fields and fields["param_value"] is None:
+                raise AppError(status_code=422, detail=_VALUE_REQUIRED_MSG, error_code="DP_PARAM_009")
+            if fields.get("is_enabled") is False:
+                raise AppError(status_code=422, detail=_VALUE_REQUIRED_MSG, error_code="DP_PARAM_009")
+            new_value = fields.get("param_value")
+            if new_value is not None:
+                validate_param_value(param_id, param_key, new_value)
+                await self._validate_group(db, master, param_key, new_value)
 
         before = _detail_snapshot(detail)
         now = utcnow()

@@ -115,6 +115,19 @@ def validate_param_value(param_id: str, param_key: str, value: str) -> None:
         raise _invalid()
 
 
+def has_rule(param_id: str, param_key: str) -> bool:
+    """是否查得到值域規則（平台 `_RULES` 或模組註冊表）。
+
+    供「每個可編輯的單值明細都必須有規則」的掃描測試使用——`validate_param_value` 的
+    docstring 宣告「今日不會誤傷任何參數」，但那是**會過期的狀態宣告**：有人用 migration
+    新增一列 `EDIT_SCOPE='ADMIN'` 的 VALUE 參數卻忘了補規則時，fail-closed 的「立刻現形」
+    要等到有人在 DP03 上踩到 403 才現形，不會在 CI 現形。本函式讓那句話變成可執行的斷言。
+    """
+    if _RULES.get((param_id, param_key)) is not None:
+        return True
+    return module_param_rule_registry.get(param_id, param_key) is not None
+
+
 def validate_group_invariants(param_id: str, values: dict[str, str]) -> None:
     """檢核同 PARAM_ID 群組之跨欄位一致性（values＝套用新值後的完整 key→value）。
 

@@ -101,7 +101,7 @@ def test_模組註冊的規則會被套用():
     用 `ZZ_` 前綴的專用 PARAM_ID 註冊：全域 registry 無 unregister（刻意，見
     `core/module_param_rules` 的 ⛔ 段），故測試不得碰真實模組那兩條。
     """
-    module_param_rule_registry.register("ZZ_MODULE_SCOPED", "VALUE", IntRule(1, 5))
+    module_param_rule_registry.register("ZZ", "ZZ_MODULE_SCOPED", "VALUE", IntRule(1, 5))
     validate_param_value("ZZ_MODULE_SCOPED", "VALUE", "5")  # 上限邊界，不拋
     for bad in ("0", "6"):
         with pytest.raises(AppError) as exc:

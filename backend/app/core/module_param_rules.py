@@ -30,6 +30,15 @@ class IntRule:
     min_value: int
     max_value: int | None = None
 
+    def __post_init__(self) -> None:
+        """擋下寫反的規則。
+
+        `IntRule(30, 1)` 會讓該參數**任何值都被拒**，而使用者看到的只是 422「值不合法」
+        ——看起來像自己填錯，不像規則設定錯。在建構時就炸掉，讓它變成啟動期的明顯失敗。
+        """
+        if self.max_value is not None and self.min_value > self.max_value:
+            raise ValueError(f"值域規則上下限寫反：min={self.min_value} > max={self.max_value}")
+
 
 class ModuleParamRuleRegistry:
     """聚合各模組提供之參數值域規則，以 (PARAM_ID, PARAM_KEY) 為鍵。"""
@@ -37,8 +46,20 @@ class ModuleParamRuleRegistry:
     def __init__(self) -> None:
         self._rules: dict[tuple[str, str], IntRule] = {}
 
-    def register(self, param_id: str, param_key: str, rule: IntRule) -> None:
-        """註冊 / 替換某模組級參數之值域規則（僅限啟動期與測試呼叫，禁置於請求 handler）。"""
+    def register(self, module: str, param_id: str, param_key: str, rule: IntRule) -> None:
+        """註冊 / 替換某模組級參數之值域規則（僅限啟動期與測試呼叫，禁置於請求 handler）。
+
+        `module` 不只是標籤：`param_id` 必須以 `{module}_` 起頭，否則拋 `ValueError`。
+        這讓「模組 A 為模組 B 的參數註冊規則」「模組搶先為尚未列入平台 `_RULES` 的平台級
+        參數註冊一條寬鬆規則」在結構上不可能，而不是靠呼叫順序與查詢順序的慣例。
+        違反時於啟動期（`main.py` 模組層）即崩，不會留下半可用狀態。
+
+        Raises:
+            ValueError: `param_id` 不屬於該模組。
+        """
+        prefix = f"{module}_"
+        if not param_id.startswith(prefix):
+            raise ValueError(f"模組 {module} 不得為 {param_id} 註冊值域規則（須以 {prefix} 起頭）")
         key = (param_id, param_key)
         if key in self._rules:
             # 啟動期非預期的重複註冊（如較寬鬆規則蓋掉正式版）應可被觀測

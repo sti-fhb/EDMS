@@ -29,5 +29,5 @@ def register_dm_module() -> None:
     module_admin_gate.register(_MODULE, dm_is_module_admin)
     module_assign_registry.register(_MODULE, DmAssignProvider())
     module_param_rule_registry.register(  # #528：值域屬 DM 業務規則，DP 經註冊表查
-        REMIND_THRESHOLD_PARAM_ID, "VALUE", REMIND_THRESHOLD_RULE
+        _MODULE, REMIND_THRESHOLD_PARAM_ID, "VALUE", REMIND_THRESHOLD_RULE
     )
