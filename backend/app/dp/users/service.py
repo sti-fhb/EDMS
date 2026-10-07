@@ -529,8 +529,13 @@ class UsersService:
     async def _invite_ttl_min(self, db: AsyncSession) -> int:
         """邀請 / 重寄連結效期（分鐘）。
 
-        值域下限由參數維護的寫入驗證把關（param_rules 之 `LOGIN.RESET_TOKEN_TTL_MIN` = IntRule(1)），
-        此處不再重複夾制——依 sti-coding-style「不為不存在的情境寫防禦碼」。
+        值域由參數維護的寫入驗證把關（param_rules 之 `LOGIN.RESET_TOKEN_TTL_MIN` =
+        `IntRule(1, 120)`），此處不再重複夾制——依 sti-coding-style「不為不存在的情境寫防禦碼」。
+
+        ⚠️ **此參數由四個功能共用**（密碼重設 / 註冊啟用 / 驗證信 / 本方法的邀請與重寄），
+        故 #528 為它訂的 2 小時上限**也是邀請連結的上限**——那個上限是依密碼重設的風險
+        （#50：outbox 永久保存明文連結）訂的，不是依邀請的使用情境。若日後要讓邀請連結
+        更長命，正解是把邀請 TTL 拆成獨立參數，而非放寬這個共用值。
         """
         return await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
 

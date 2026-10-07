@@ -710,7 +710,7 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 | `ET_VIDEO_MAX_SIZE_MB` | `500` | `HIDDEN` | 教材影片單檔大小上限。受主機儲存空間與上傳逾時限制 |
 | `ET_VIDEO_PLAYBACK_MAX_RATE` | `2` | `HIDDEN` | 影片播放倍速上限（播放器提供 0.75 / 1 / 1.25 / 1.5 / 2）；**只能往下限縮、不能往上新增選項**——選項清單為前端寫死（2026-08-19 #181）|
 | `ET_INVITATION_CODE_LENGTH` | `8` | `HIDDEN` | 邀請碼長度（純數字）。`ET_COURSE.INVITATION_CODE` 為 `VARCHAR(8)` 硬編，填 9 以上要到課程發布當下才拋錯 |
-| `ET_URGENT_REMIND_DAYS` | `3` | `ADMIN` | SCHET002 截止前加急提醒天數（訖止前 N 天）。純業務門檻，由 ET 管理者自行調整 |
+| `ET_URGENT_REMIND_DAYS` | `3` | `ADMIN` | SCHET002 截止前加急提醒天數（訖止前 N 天）。純業務門檻，由 ET 管理者自行調整。**值域 0–30**（#528）——**下限是 0 不是 1**：`0` 使窗口寬度為零，等於停用加急提醒，是既有且刻意的語意（見 `et/schedules/rules.py` 的 `needs_urgent_remind`）；負數同樣靜默停用但無任何規格依據，故擋掉。值域由 ET 於啟動期註冊至平台參數值域註冊表，供 DP03 編輯時檢核 |
 
 > **維護層級**（`DP_PARAM_D.EDIT_SCOPE`，#171 建立、#459 調整）：上列四項為 `HIDDEN`——**不出現於 DP03**，ET 管理者在系統內查不到現值，變更由 IT 於資料庫端進行且 **MUST 經 migration**（見 [dp/spec_us5.md](../dp/spec_us5.md) FR-DP-US5-11）。`ET_URGENT_REMIND_DAYS` 為 `ADMIN`，是 ET 唯一可於 DP03 維護的參數。
 >
