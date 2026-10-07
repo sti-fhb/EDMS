@@ -34,12 +34,14 @@ import type { ItemRow, ItemType } from "./itemSchemas"
 interface ItemRowViewProps {
   item: ItemRow
   readOnly: boolean
+  /** 發布／再開課缺漏（#558）：有值時本列標紅框並顯示此訊息。 */
+  blocker?: string
   onOpen: (item: ItemRow) => void
   onDelete: (item: ItemRow) => void
 }
 
 /** 單一項目列：拖拉手把 + 類型標記 + 名稱（點擊開視窗）+ 刪除。 */
-function ItemRowView({ item, readOnly, onOpen, onDelete }: ItemRowViewProps) {
+function ItemRowView({ item, readOnly, blocker, onOpen, onDelete }: ItemRowViewProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.item_id,
     disabled: readOnly,
@@ -57,6 +59,7 @@ function ItemRowView({ item, readOnly, onOpen, onDelete }: ItemRowViewProps) {
         transition,
         opacity: isDragging ? 0.5 : 1,
         bgcolor: "background.default",
+        ...(blocker && { borderColor: "error.main" }),
       }}
     >
       <Stack direction="row" alignItems="center" spacing={1}>
@@ -123,6 +126,12 @@ function ItemRowView({ item, readOnly, onOpen, onDelete }: ItemRowViewProps) {
           </IconButton>
         )}
       </Stack>
+      {/* 紅框之外另附文字：不靠顏色也看得出是哪一列、缺什麼 */}
+      {blocker && (
+        <Typography variant="caption" color="error" sx={{ display: "block", pl: 1, pt: 0.5 }}>
+          {blocker}
+        </Typography>
+      )}
     </Paper>
   )
 }
@@ -135,6 +144,8 @@ interface ItemListProps {
   onOpen: (item: ItemRow) => void
   onDelete: (item: ItemRow) => void
   onReorder: (orderedIds: number[]) => void
+  /** item_id → 缺漏訊息（#558）。 */
+  blockedItems?: Record<number, string>
 }
 
 /**
@@ -152,6 +163,7 @@ export function ItemList({
   onOpen,
   onDelete,
   onReorder,
+  blockedItems = {},
 }: ItemListProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const sensors = useSensors(
@@ -222,6 +234,7 @@ export function ItemList({
                 key={item.item_id}
                 item={item}
                 readOnly={readOnly}
+                blocker={blockedItems[item.item_id]}
                 onOpen={onOpen}
                 onDelete={onDelete}
               />

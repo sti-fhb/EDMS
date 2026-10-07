@@ -65,12 +65,16 @@ describe("PublishDialog：有缺漏", () => {
     // 既有測試只驗缺漏項目本身，沒有一條看這句說明——#509 把這段抽成 `BlockerSummary`
     // 之後，漏傳 `message` 會讓它整句消失而其餘測試全綠。
     render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
-    expect(screen.getByText("發布條件未滿足，請先補齊以下項目。")).toBeInTheDocument()
+    expect(screen.getByText(/^發布條件未滿足，請先補齊以下項目。/)).toBeInTheDocument()
   })
 
-  it("有缺漏時發布鈕停用", () => {
+  it("有缺漏時只有「關閉」，不顯示按不下去的「確認發布」（#558）", () => {
+    // #558 之前是停用的「確認發布」＋「取消」。視窗此時是告知、關閉後缺漏處會標紅框，
+    // 一顆按不下去的按鈕只會讓教師以為還差一步（比照再開課的 `BlockerDialog`）
     render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
-    expect(screen.getByRole("button", { name: "確認發布" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "關閉" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "確認發布" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument()
   })
 
   it("測驗類缺漏補上測驗名稱", () => {

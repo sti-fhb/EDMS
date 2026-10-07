@@ -40,6 +40,36 @@ function renderNewEditor() {
   return renderWithProviders(<EtCourseEditorPage />)
 }
 
+/**
+ * 預設 fixture 的課程起訖時間為 null；#558 起「儲存並發布」會先在前端擋下（起訖為發布必填），
+ * 測發布**之後**流程的測試要先把時間補上。值放在遠未來：起始時間不可早於當下。
+ */
+function mockScheduledDraft(overrides: Record<string, unknown> = {}) {
+  server.use(
+    http.get("/api/et/courses/:courseId", ({ params }) =>
+      HttpResponse.json({
+        course_id: Number(params.courseId),
+        course_name: "採血作業訓練",
+        description: "課程說明",
+        status: "DRAFT",
+        open_start_at: "2099-01-01T00:00:00Z",
+        open_end_at: "2099-12-31T00:00:00Z",
+        require_approval: false,
+        version: 0,
+        owner_id: "U1",
+        owner_name: "王教師",
+        is_owner: true,
+        audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+        chapters: [
+          { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] },
+          { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0, items: [] },
+        ],
+        ...overrides,
+      }),
+    ),
+  )
+}
+
 beforeEach(() => {
   navigateSpy.mockClear()
   locationRef.current = { pathname: "/et/courses/new", state: null }
@@ -276,6 +306,7 @@ describe("ET05 課程編輯頁", () => {
     it("發布時兩欄皆空的列也擋下，讓教師決定填或刪（手測回饋）", async () => {
       // 對照組是上方「儲存草稿」那條：同樣留一列空白，草稿照送、發布擋下
       const user = userEvent.setup()
+      mockScheduledDraft()
       const captured = capturePut()
       renderEditor()
       await screen.findByDisplayValue("採血作業訓練")
@@ -283,11 +314,15 @@ describe("ET05 課程編輯頁", () => {
 
       await user.click(screen.getByRole("button", { name: "儲存並發布" }))
 
+      // #558：先在視窗列出，關閉後該列才標出來
+      const dialog = await screen.findByRole("dialog", { name: "發布課程" })
+      expect(await within(dialog).findByText("受訓對象有未選完或重複的列")).toBeInTheDocument()
+      await user.click(within(dialog).getByRole("button", { name: "關閉" }))
       expect(await screen.findByText("請選擇單位與職位，或刪除此列")).toBeInTheDocument()
       expect(captured.body).toBeUndefined()
 
-      // 刪掉那列即可發布——錯誤的出路確實存在
-      await user.click(screen.getByRole("button", { name: "移除第 2 組受訓對象" }))
+      // 刪掉那列即可發布——錯誤的出路確實存在（視窗退場動畫期間背景仍 aria-hidden，故用 findBy）
+      await user.click(await screen.findByRole("button", { name: "移除第 2 組受訓對象" }))
       await user.click(screen.getByRole("button", { name: "儲存並發布" }))
 
       await waitFor(() => expect(captured.body).toBeDefined())
@@ -895,6 +930,7 @@ describe("ET05 課程編輯頁", () => {
     //
     // 對照組是「儲存草稿」：它 `onSuccess` 就導回（上方有測試），因為沒有結果要看。
     const user = userEvent.setup()
+    mockScheduledDraft()
     server.use(
       http.put("/api/et/courses/:courseId", () => HttpResponse.json({ course_id: 1, version: 1 })),
       http.get("/api/et/courses/:courseId/publish-check", () =>
@@ -927,6 +963,7 @@ describe("ET05 課程編輯頁", () => {
   it("發布失敗時留在編輯頁，不導回（#358 第 4 項）", async () => {
     // 失敗會改設 `blockers` 讓教師就地補缺漏；導回列表等於要他自己找回那門課。
     const user = userEvent.setup()
+    mockScheduledDraft()
     server.use(
       http.put("/api/et/courses/:courseId", () => HttpResponse.json({ course_id: 1, version: 1 })),
       http.get("/api/et/courses/:courseId/publish-check", () =>
@@ -947,7 +984,8 @@ describe("ET05 課程編輯頁", () => {
     expect(screen.getByText(/請於該章節新增教材或測驗/)).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole("button", { name: "取消" }))
+    // #558：有缺漏時只有「關閉」，沒有按不下去的「確認發布」
+    await user.click(screen.getByRole("button", { name: "關閉" }))
 
     expect(navigateSpy).not.toHaveBeenCalled()
   })
@@ -1360,7 +1398,12 @@ describe("ET05 課程關閉與再開課", () => {
 
     await user.click(await screen.findByRole("button", { name: "確認再開課" }))
 
-    expect(await screen.findByText("請重新設定課程起始時間")).toBeInTheDocument()
+    // #558：先在視窗列出，關閉後才逐欄出現訊息
+    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    expect(within(dialog).getByText("請重新設定課程起始時間")).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(screen.getByText("請重新設定課程起始時間")).toBeInTheDocument()
     expect(screen.getByText("請重新設定課程訖止時間")).toBeInTheDocument()
     // ⚠️ 顯式斷言而非靠「兩欄皆空時 `startAt!.toISOString()` 會自己拋例外」這個副作用——
     // 那是巧合式的保護（下一條測試的註解記著同一個教訓）。
@@ -1387,10 +1430,13 @@ describe("ET05 課程關閉與再開課", () => {
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
-    expect(await screen.findByText("課程訖止時間須晚於起始時間")).toBeInTheDocument()
+    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    expect(within(dialog).getByText("課程訖止時間須晚於起始時間")).toBeInTheDocument()
     expect(called).toBe(0)
-    // 仍停在再開課模式，教師可以就地改
-    expect(screen.getByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+    // 仍停在再開課模式，教師可以就地改；訊息改掛在欄位下
+    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    expect(screen.getByText("課程訖止時間須晚於起始時間")).toBeInTheDocument()
   })
 
   it("再開課模式全程不發出一般的課程更新（#428）", async () => {
@@ -1678,7 +1724,7 @@ describe("ET05 課程關閉與再開課", () => {
       await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
       const publish = await screen.findByRole("dialog", { name: "發布課程" })
       expect(await within(publish).findByText(/課程至少須設定 1 組受訓對象/)).toBeInTheDocument()
-      await user.click(within(publish).getByRole("button", { name: "取消" }))
+      await user.click(within(publish).getByRole("button", { name: "關閉" }))
 
       paramsRef.current = { courseId: "2" }
       rerender(<EtCourseEditorPage />)
@@ -1770,3 +1816,293 @@ describe("ET05 課程關閉與再開課", () => {
   })
 })
 
+
+// ── #558 發布／再開課缺漏：視窗列出全部 → 關閉後標紅框 → 補好即消失 ─────────────────
+
+describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
+  /**
+   * 一門什麼缺漏都有的草稿：第二章是空的、第一章有一個未命名教材與一個配分不足的測驗、
+   * 問卷 0 題。測驗的 quiz_id（31）刻意與另一個項目的 item_id 不同，撞號會框錯列。
+   */
+  const ITEMS = [
+    { item_id: 21, item_type: "MATERIAL", title: "", material_id: 501, quiz_id: null, sort_order: 1, version: 0, question_count: null },
+    { item_id: 22, item_type: "QUIZ", title: "小考", material_id: null, quiz_id: 31, sort_order: 2, version: 0, question_count: 2 },
+  ]
+
+  /** 後端預檢回傳的缺漏——可在測試中途改寫，模擬「補好之後再查」。 */
+  function setup(
+    backend: { code: string; message: string; target_id: number | null }[],
+    overrides: Record<string, unknown> = {},
+  ) {
+    const state = { backend, puts: 0, checks: 0 }
+    mockScheduledDraft({
+      chapters: [
+        { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: ITEMS },
+        { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0, items: [] },
+      ],
+      ...overrides,
+    })
+    server.use(
+      http.get("/api/et/courses/:courseId/publish-check", () => {
+        state.checks += 1
+        return HttpResponse.json({ can_publish: state.backend.length === 0, blockers: state.backend })
+      }),
+      http.put("/api/et/courses/:courseId", () => {
+        state.puts += 1
+        return HttpResponse.json({ course_id: 1, version: 1 })
+      }),
+      http.get("/api/et/courses/:courseId/survey", () =>
+        HttpResponse.json({
+          survey_id: 500,
+          course_id: 1,
+          survey_name: "課後滿意度問卷",
+          is_active: true,
+          version: 0,
+          frozen: false,
+          responded_count: 0,
+          pending_count: 0,
+          questions: [],
+        }),
+      ),
+    )
+    return state
+  }
+
+  const ALL_BACKEND = [
+    // 後端讀的是已存檔版本：已存檔的起訖是有值的，這條是「後端若回了也要被前端取代」的情境
+    { code: "NO_SCHEDULE", message: "課程起訖時間須填寫完整", target_id: null },
+    { code: "CHAPTER_EMPTY", message: "章節至少須有 1 份教材或測驗", target_id: 12 },
+    { code: "ITEM_NO_TITLE", message: "教材與測驗須填寫名稱", target_id: 21 },
+    { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 31 },
+    { code: "SURVEY_NO_QUESTION", message: "課後問卷至少須有 1 題，或請停用該問卷", target_id: null },
+    { code: "OBSOLETE_DOC", message: "請先移除已廢止文件之引用", target_id: null },
+  ]
+
+  /** 清掉課程名稱 → 按發布 → 回傳開著的缺漏視窗。 */
+  async function publishWithEmptyName(user: ReturnType<typeof userEvent.setup>) {
+    renderEditor()
+    await user.clear(await screen.findByDisplayValue("採血作業訓練"))
+    await user.click(screen.getByRole("button", { name: "儲存並發布" }))
+    const dialog = await screen.findByRole("dialog", { name: "發布課程" })
+    await within(dialog).findByText("請輸入課程名稱")
+    return dialog
+  }
+
+  async function closeDialog(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  }
+
+  it("前端錯誤與後端缺漏合併在同一個視窗，且表單有錯時不存檔（AC 1）", async () => {
+    const user = userEvent.setup()
+    const state = setup(ALL_BACKEND)
+    const dialog = await publishWithEmptyName(user)
+
+    // 前端那一條與後端那幾條同時在視窗裡
+    expect(within(dialog).getByText("請輸入課程名稱")).toBeInTheDocument()
+    expect(within(dialog).getByText(/章節至少須有 1 份教材或測驗（章節「第二章」）/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/請先移除已廢止文件之引用/)).toBeInTheDocument()
+    expect(state.puts).toBe(0)
+    expect(state.checks).toBe(1)
+  })
+
+  it("表單上已填好的起訖時間，不會因後端讀到舊值而被列為缺漏（AC 2）", async () => {
+    const user = userEvent.setup()
+    setup(ALL_BACKEND)
+    const dialog = await publishWithEmptyName(user)
+
+    // 正向錨點與反向斷言用同一種查法：同一個視窗內、文字比對
+    expect(within(dialog).getByText(/章節至少須有 1 份教材或測驗/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/課程起訖時間須填寫完整/)).not.toBeInTheDocument()
+  })
+
+  it("表單上真的沒填起訖時，「須填寫完整」只列一次（AC 2）", async () => {
+    const user = userEvent.setup()
+    setup(ALL_BACKEND, { open_start_at: null, open_end_at: null })
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+    await user.click(screen.getByRole("button", { name: "儲存並發布" }))
+    const dialog = await screen.findByRole("dialog", { name: "發布課程" })
+    await within(dialog).findByText(/章節至少須有 1 份教材或測驗/)
+
+    expect(within(dialog).getAllByText(/課程起訖時間須填寫完整/)).toHaveLength(1)
+  })
+
+  it("視窗開著時不標紅框，關閉後各類缺漏框在對應的元素上（AC 3）", async () => {
+    const user = userEvent.setup()
+    setup(ALL_BACKEND)
+    const dialog = await publishWithEmptyName(user)
+    // 視窗開著時背景為 aria-hidden，role 查詢要明示 `hidden: true`
+    const name = screen.getByRole("textbox", { name: "課程名稱", hidden: true })
+
+    // 視窗開著：背景不先紅一片（同一件事講兩次）
+    expect(name).not.toHaveAttribute("aria-invalid", "true")
+
+    await closeDialog(user, dialog)
+
+    expect(name).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByText("請輸入課程名稱")).toBeInTheDocument()
+    // 每個說明文字都要落在**它所指的那一列**裡，不只是「畫面上某處有」
+    const chapter = screen.getByText("章節至少須有 1 份教材或測驗").closest(".MuiPaper-root") as HTMLElement
+    expect(within(chapter).getByRole("button", { name: "刪除章節 第二章" })).toBeInTheDocument()
+    const untitled = screen.getByText("教材與測驗須填寫名稱").closest(".MuiPaper-root") as HTMLElement
+    expect(within(untitled).getByRole("button", { name: /^刪除項目 / })).toBeInTheDocument()
+    expect(within(untitled).queryByRole("button", { name: "刪除項目 小考" })).not.toBeInTheDocument()
+    // 測驗缺漏帶的是 quiz_id（31），要框到「小考」那一列
+    const quiz = screen.getByText("測驗各題配分總和須等於 100").closest(".MuiPaper-root") as HTMLElement
+    expect(within(quiz).getByRole("button", { name: "刪除項目 小考" })).toBeInTheDocument()
+    const survey = screen.getByText("課後問卷至少須有 1 題，或請停用該問卷").closest(".MuiPaper-root") as HTMLElement
+    expect(within(survey).getByText("課後滿意度問卷")).toBeInTheDocument()
+  })
+
+  it("無對應元素的缺漏只列在視窗，關閉後畫面上不出現（AC 4）", async () => {
+    const user = userEvent.setup()
+    setup(ALL_BACKEND)
+    const dialog = await publishWithEmptyName(user)
+    expect(within(dialog).getByText(/請先移除已廢止文件之引用/)).toBeInTheDocument()
+
+    await closeDialog(user, dialog)
+
+    // 正向錨點：同一時刻有其他缺漏確實框出來了——證明「沒出現」不是因為整個標示模式沒啟動
+    expect(screen.getByText("章節至少須有 1 份教材或測驗")).toBeInTheDocument()
+    expect(screen.queryByText(/請先移除已廢止文件之引用/)).not.toBeInTheDocument()
+  })
+
+  it("補好的項目紅框即時消失，沒補的留著（AC 5）", async () => {
+    const user = userEvent.setup()
+    const state = setup(ALL_BACKEND)
+    const dialog = await publishWithEmptyName(user)
+    await closeDialog(user, dialog)
+    const name = screen.getByRole("textbox", { name: "課程名稱" })
+    expect(name).toHaveAttribute("aria-invalid", "true")
+
+    // 表單欄位：一輸入就重算
+    await user.type(name, "新名稱")
+    expect(name).not.toHaveAttribute("aria-invalid", "true")
+    expect(screen.queryByText("請輸入課程名稱")).not.toBeInTheDocument()
+
+    // 章節以下：任何一筆寫入後重查預檢。後端此時只剩未命名教材
+    state.backend = [{ code: "ITEM_NO_TITLE", message: "教材與測驗須填寫名稱", target_id: 21 }]
+    const chapterName = screen.getByRole("textbox", { name: "章節名稱 2" })
+    await user.type(chapterName, "（新增教材）")
+    await user.tab() // 失焦即送出更名 → invalidate → 預檢重抓
+
+    await waitFor(() => expect(screen.queryByText("章節至少須有 1 份教材或測驗")).not.toBeInTheDocument())
+    expect(screen.getByText("教材與測驗須填寫名稱")).toBeInTheDocument()
+    // 互動步驟多（發布 → 關視窗 → 打字 → 更名 → 等重查），單跑約 2.4s；2026-10-07 變異檢查
+    // 期間在負載下兩度逼近 5s 而逾時。拉長 timeout 而非刪減步驟——每一步都是 AC 5 的一部分
+  }, 15000)
+
+  it("刪除測驗題目後，該測驗的紅框也跟著重算（題目不經課程詳細失效，code review MEDIUM）", async () => {
+    // 題目的增刪改走 `invalidateQuiz`，不經 `invalidate()`——預檢 key 雖掛在課程詳細下也
+    // 不會被連帶失效。拿掉 `invalidateQuiz` 裡那行，這條會紅、其餘全綠
+    const user = userEvent.setup()
+    const state = setup(ALL_BACKEND)
+    server.use(
+      http.get("/api/et/quizzes/:quizId", () =>
+        HttpResponse.json({
+          quiz_id: 31,
+          quiz_name: "小考",
+          description: null,
+          pass_score: 60,
+          time_limit_min: null,
+          max_retry: 3,
+          version: 0,
+          points_total: 40,
+          answers_visible: true,
+          passed_count: 0,
+          questions: [
+            { question_id: 91, question_type: "SINGLE", stem: "第一題", points: 40, sort_order: 1, version: 0, options: [] },
+          ],
+        }),
+      ),
+      http.delete("/api/et/questions/:questionId", () => new HttpResponse(null, { status: 204 })),
+    )
+    const dialog = await publishWithEmptyName(user)
+    await closeDialog(user, dialog)
+    expect(screen.getByText("測驗各題配分總和須等於 100")).toBeInTheDocument()
+
+    state.backend = ALL_BACKEND.filter((b) => b.code !== "QUIZ_POINTS")
+    await user.click(screen.getByRole("button", { name: "小考" }))
+    await user.click(await screen.findByRole("tab", { name: /題庫管理/ }))
+    await user.click(await screen.findByRole("button", { name: "刪除第 1 題" }))
+    await user.click(await screen.findByRole("button", { name: "刪除" }))
+
+    await waitFor(() => expect(screen.queryByText("測驗各題配分總和須等於 100")).not.toBeInTheDocument())
+    // 正向錨點：沒補的那幾條還在（同一種查法）
+    expect(screen.getByText("教材與測驗須填寫名稱")).toBeInTheDocument()
+  }, 15000)
+
+  it("刪除問卷後，問卷的紅框也跟著重算（問卷 key 與預檢是兄弟，code review MEDIUM）", async () => {
+    const user = userEvent.setup()
+    const state = setup(ALL_BACKEND)
+    const dialog = await publishWithEmptyName(user)
+    await closeDialog(user, dialog)
+    expect(screen.getByText("課後問卷至少須有 1 題，或請停用該問卷")).toBeInTheDocument()
+
+    state.backend = ALL_BACKEND.filter((b) => b.code !== "SURVEY_NO_QUESTION")
+    await user.click(screen.getByRole("button", { name: "刪除問卷" }))
+    await user.click(await screen.findByRole("button", { name: "刪除" }))
+
+    await waitFor(() =>
+      expect(screen.queryByText("課後問卷至少須有 1 題，或請停用該問卷")).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText("教材與測驗須填寫名稱")).toBeInTheDocument()
+  }, 15000)
+
+  it("儲存草稿不檢核發布必填、不跳視窗；課程名稱仍當場標紅（AC 6）", async () => {
+    const user = userEvent.setup()
+    const state = setup(ALL_BACKEND, { open_start_at: null, open_end_at: null, audiences: [] })
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+
+    await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+    await waitFor(() => expect(state.puts).toBe(1))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(state.checks).toBe(0)
+
+    await user.clear(screen.getByRole("textbox", { name: "課程名稱" }))
+    await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+    expect(await screen.findByText("請輸入課程名稱")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(state.puts).toBe(1)
+  })
+
+  it("再開課：時間錯誤與後端缺漏同一個視窗，關閉後時間欄位標示（AC 7）", async () => {
+    let reopens = 0
+    const user = userEvent.setup()
+    useCourse("CLOSED")
+    server.use(
+      http.get("/api/et/courses/:courseId/publish-check", () =>
+        HttpResponse.json({
+          can_publish: false,
+          blockers: [
+            { code: "NO_MATERIAL", message: "課程至少須有 1 份教材", target_id: null },
+            { code: "NO_TAG", message: "課程至少須設定 1 組受訓對象", target_id: null },
+          ],
+        }),
+      ),
+      http.post("/api/et/courses/:courseId/reopen", () => {
+        reopens += 1
+        return HttpResponse.json(reopened)
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "再開課" }))
+    await user.click(await screen.findByRole("button", { name: "確認再開課" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    expect(await within(dialog).findByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
+    expect(within(dialog).getByText("請重新設定課程起始時間")).toBeInTheDocument()
+    // 🔴 再開課的前端只判時間——後端回報的「沒有受訓對象」不可被當成「前端判過了」濾掉
+    //（code review MEDIUM；發布流程才會由前端自己判受訓對象）
+    expect(within(dialog).getByText(/課程至少須設定 1 組受訓對象/)).toBeInTheDocument()
+    expect(reopens).toBe(0)
+
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(screen.getByText("請重新設定課程起始時間")).toBeInTheDocument()
+    // 仍在再開課模式
+    expect(screen.getByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+  })
+})

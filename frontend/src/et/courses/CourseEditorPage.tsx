@@ -43,7 +43,14 @@ import { SurveySection } from "./SurveySection"
 import { BlockerDialog } from "./BlockerDialog"
 import { coursesApi } from "./coursesService"
 import { validateReopenSchedule } from "./reopenSchedule"
-import type { ReopenScheduleErrors } from "./reopenSchedule"
+import {
+  blockerHighlights,
+  checkCourseForm,
+  FORM_BLOCKER,
+  mergeBlockers,
+  PUBLISH_FORM_OWNED,
+  REOPEN_FORM_OWNED,
+} from "./publishCheck"
 import type { MaterialSavePayload } from "./MaterialDialog"
 import type { ItemRow, ItemType, QuestionFormValues, QuestionRow } from "./itemSchemas"
 import { itemsApi, materialsApi, quizzesApi } from "./itemsService"
@@ -57,7 +64,6 @@ import type {
 import {
   COURSE_STATUS_LABEL,
   ChapterNameSchema,
-  CourseFormSchema,
   DESCRIPTION_MAX_LEN,
   audienceKey,
   validateAudiences,
@@ -205,7 +211,6 @@ export function EtCourseEditorPage() {
    * 中途關掉瀏覽器就回不去了。
    */
   const [reopening, setReopening] = useState(false)
-  const [reopenErrors, setReopenErrors] = useState<ReopenScheduleErrors>({})
   /**
    * 再開課重跑發布檢核的缺漏——與 `blockers`（發布用）分開。
    *
@@ -213,6 +218,16 @@ export function EtCourseEditorPage() {
    * 而那可能是上一次發布嘗試留下的，跟這次再開課無關。
    */
   const [reopenBlockers, setReopenBlockers] = useState<PublishBlocker[]>([])
+  /**
+   * 標示模式（#558）：缺漏視窗關閉後，缺漏處以紅框標示，**補好即消失**。
+   *
+   * 值表示是哪一條流程的缺漏——兩者要框的欄位不同（再開課的起訖時間規則與發布**相反**，
+   * 見 `submitReopen`）。`null`＝不標示。
+   *
+   * ⚠️ 紅框一律依**目前的資料即時重算**，不是記住視窗開啟那一刻的清單：表單欄位每次
+   * render 重跑 `checkCourseForm`，章節以下的內容由 `publishCheckQuery` 隨每次寫入重抓。
+   */
+  const [highlight, setHighlight] = useState<null | "publish" | "reopen">(null)
 
   const {
     data: course,
@@ -253,6 +268,23 @@ export function EtCourseEditorPage() {
     enabled: surveyOpen,
     staleTime: Infinity,
   })
+  /**
+   * 標示模式下的發布預檢（#558）——章節以下的紅框依它即時更新。
+   *
+   * 重抓由 `refreshLiveCheck` 觸發（`invalidate` / `invalidateQuiz` / `invalidateSurvey` 都會
+   * 呼叫它），不靠 query 的自動重抓：預檢與發布 / 再開課共用後端每人每分鐘 20 次的限流
+   * （security review MEDIUM），故
+   * - 不在切回分頁時重抓、不自動重試（429 / 403 重試只會再吃掉配額）
+   * - 短時間內的多次寫入合併成一次重抓（見 `refreshLiveCheck`）
+   * - 非擁有者不啟用（縱深防禦：正常操作到不了這裡，後端也會 403）
+   */
+  const { data: liveCheck } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.publishCheck(courseId ?? 0),
+    queryFn: () => publishApi.check(courseId as number),
+    enabled: highlight !== null && courseId !== undefined && course?.is_owner === true,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
 
   // 由查詢結果衍生表單初值——**於 render 期間同步，不放 useEffect**。
   // 除了 effect 內 setState 會造成串聯 render 之外，更實際的問題是：每次 refetch
@@ -278,8 +310,8 @@ export function EtCourseEditorPage() {
     // 直接改網址都會走到）。結果是一門根本不是關閉中的課程顯示著再開課模式：一般儲存
     // 被擋死，而按下「確認再開課」是對**錯的課程**送出請求。
     setReopening(false)
-    setReopenErrors({})
     setReopenBlockers([])
+    setHighlight(null)
   }
 
   const isNew = courseId === undefined
@@ -309,10 +341,34 @@ export function EtCourseEditorPage() {
     message.error(errorMessage)
   }
 
+  /**
+   * 標示模式下，課程內容有寫入就重查預檢——**合併 400ms 內的多次呼叫**。
+   *
+   * 一個動作常會連續觸發兩次失效（例如儲存測驗設定同時呼叫 `invalidateQuiz` 與
+   * `invalidate`），而已送出的 HTTP 請求取消不了、後端照樣計入限流。不在標示模式時，
+   * 失效一個停用中的 query 不會發出請求。
+   */
+  const liveCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const refreshLiveCheck = () => {
+    if (courseId === undefined) return
+    if (liveCheckTimer.current !== null) clearTimeout(liveCheckTimer.current)
+    liveCheckTimer.current = setTimeout(() => {
+      liveCheckTimer.current = null
+      void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.publishCheck(courseId) })
+    }, 400)
+  }
+  useEffect(
+    () => () => {
+      if (liveCheckTimer.current !== null) clearTimeout(liveCheckTimer.current)
+    },
+    [],
+  )
+
   const invalidate = () => {
     if (courseId !== undefined) {
       void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.detail(courseId) })
     }
+    refreshLiveCheck()
   }
 
   /** 起始時間是否被使用者改動——決定送出前要不要驗「不得早於當下」。 */
@@ -339,6 +395,19 @@ export function EtCourseEditorPage() {
    */
   const reopenStartEmpty = reopening && startAt === null
   const reopenEndEmpty = reopening && endAt === null
+
+  const formInput = { form, startAt, endAt, startChanged, startFloor, startedInPast }
+  /**
+   * 畫面上實際顯示的欄位錯誤。
+   *
+   * 標示模式下**每次 render 依目前的值重算**（補好即消失，使用者裁示 4）；其餘時候沿用
+   * 「按下儲存草稿那一刻」記下的 `errors`（草稿的行為不變，裁示 3）。
+   */
+  const publishLive = highlight === "publish" ? checkCourseForm(formInput, { forPublish: true }) : null
+  const fieldErrors = publishLive?.fieldErrors ?? errors
+  const audienceRowErrors = publishLive?.audienceRowErrors ?? audienceErrors
+  // ⚠️ 再開課用自己的時間規則（起始可早於當下），不可套 `checkCourseForm`——見 `submitReopen`
+  const reopenFieldErrors = highlight === "reopen" ? validateReopenSchedule(startAt, endAt, dayjs()) : {}
 
   const toPayload = (): CoursePayload => ({
     course_name: form.course_name.trim(),
@@ -380,6 +449,8 @@ export function EtCourseEditorPage() {
     if (courseId !== undefined) {
       void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.survey(courseId) })
     }
+    // 問卷不經 `invalidate()`，要另外觸發，問卷的紅框才會補好即消失（#558）
+    refreshLiveCheck()
   }
 
   /**
@@ -406,14 +477,37 @@ export function EtCourseEditorPage() {
     },
   })
 
+  /**
+   * 問後端缺漏，與前端缺漏合併成同一份清單（#558，使用者裁示 1）。
+   *
+   * `formBlockers` 非空時表單**沒有存檔**——後端讀的是已存檔版本，`mergeBlockers` 會以前端
+   * 判定取代後端的起訖／受訓對象兩項，避免清單與畫面矛盾。
+   */
   const checkMut = useMutation({
-    mutationFn: () => publishApi.check(courseId as number),
-    onSuccess: (result) => setBlockers(result.blockers),
-    onError: (err) => {
+    mutationFn: async (formBlockers: PublishBlocker[]) => ({
+      result: await publishApi.check(courseId as number),
+      formBlockers,
+    }),
+    onSuccess: ({ result, formBlockers }) => {
+      seedLiveCheck(result.blockers)
+      setBlockers(mergeBlockers(formBlockers, result.blockers, PUBLISH_FORM_OWNED))
+    },
+    onError: (err, formBlockers) => {
       handleError(err)
-      setPublishOpen(false)
+      // 後端問不到時，前端那份仍要讓教師看到——否則按了發布什麼都沒發生
+      if (formBlockers.length > 0) setBlockers(formBlockers)
+      else setPublishOpen(false)
     },
   })
+
+  /** 把剛拿到的後端缺漏放進標示模式的快取——關掉視窗的當下紅框就在，不必等重抓。 */
+  const seedLiveCheck = (backend: PublishBlocker[]) => {
+    if (courseId === undefined) return
+    qc.setQueryData(QUERY_KEYS.etCourses.publishCheck(courseId), {
+      can_publish: backend.length === 0,
+      blockers: backend,
+    })
+  }
 
   const publishMut = useMutation({
     mutationFn: () => publishApi.publish(courseId as number),
@@ -427,6 +521,7 @@ export function EtCourseEditorPage() {
       const { errorCode, payload } = toApiError(err)
       const returned = (payload as { blockers?: PublishBlocker[] } | undefined)?.blockers
       if (errorCode === "ET_PUBLISH_001" && returned) {
+        seedLiveCheck(returned)
         setBlockers(returned)
         return
       }
@@ -452,13 +547,32 @@ export function EtCourseEditorPage() {
       setBlockers([])
       setPublishResult(null)
       setPublishOpen(true)
-      checkMut.mutate()
+      checkMut.mutate([])
     },
     onError: handleError,
   })
 
+  /**
+   * 「儲存並發布」（#558）：按下 → 視窗列出全部缺漏 → 關閉後缺漏處標紅框。
+   *
+   * - 表單沒問題：照舊先存檔再預檢（理由見 `saveThenCheckMut`）
+   * - 表單有問題：**不存檔**（存不進去），直接以已存檔版本預檢，兩邊合併成一份清單
+   *
+   * ⚠️ 此刻**不寫入 `errors`**：紅框在視窗關閉後才出現（標示模式），視窗開著的時候
+   * 背景先紅一片，等於同一件事講兩次。
+   */
   const openPublish = () => {
-    if (validateForm({ forPublish: true })) saveThenCheckMut.mutate()
+    const { blockers: formBlockers } = checkCourseForm(formInput, { forPublish: true })
+    if (formBlockers.length === 0) {
+      setErrors({})
+      setAudienceErrors({})
+      saveThenCheckMut.mutate()
+      return
+    }
+    setBlockers([])
+    setPublishResult(null)
+    setPublishOpen(true)
+    checkMut.mutate(formBlockers)
   }
 
   // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
@@ -544,6 +658,7 @@ export function EtCourseEditorPage() {
         const { errorCode, payload: body } = toApiError(err)
         const returned = (body as { blockers?: PublishBlocker[] } | undefined)?.blockers
         if (errorCode === "ET_PUBLISH_001" && returned) {
+          seedLiveCheck(returned)
           setReopenBlockers(returned)
           return undefined
         }
@@ -555,8 +670,8 @@ export function EtCourseEditorPage() {
       if (result === undefined) return
       message.success("課程已再開課")
       setReopening(false)
-      setReopenErrors({})
       setReopenBlockers([])
+      setHighlight(null)
       // 🔴 **起始時間的基準值要跟著走**（#428 順帶修掉的既有缺陷）。
       //
       // 表單初值的 guard 是 `loadedCourseId !== course.course_id`——只在載入到**另一門**
@@ -584,7 +699,7 @@ export function EtCourseEditorPage() {
   /** 進入再開課模式：**只清空畫面**，DB 不動（#428）。 */
   const enterReopen = () => {
     setReopenBlockers([])
-    setReopenErrors({})
+    setHighlight(null)
     setStartAt(null)
     setEndAt(null)
     setReopening(true)
@@ -593,8 +708,8 @@ export function EtCourseEditorPage() {
   /** 取消再開課：把欄位還原成伺服器上的值。 */
   const cancelReopen = () => {
     setReopening(false)
-    setReopenErrors({})
     setReopenBlockers([])
+    setHighlight(null)
     setStartAt(course?.open_start_at ? dayjs(course.open_start_at) : null)
     setEndAt(course?.open_end_at ? dayjs(course.open_end_at) : null)
   }
@@ -608,10 +723,33 @@ export function EtCourseEditorPage() {
    */
   const submitReopen = () => {
     const next = validateReopenSchedule(startAt, endAt, dayjs())
-    setReopenErrors(next)
-    if (Object.keys(next).length > 0) return
-    reopenMut.mutate({ openStartAt: startAt!.toISOString(), openEndAt: endAt!.toISOString() })
+    const formBlockers: PublishBlocker[] = []
+    if (next.start) formBlockers.push({ code: FORM_BLOCKER.start, message: next.start, target_id: null })
+    if (next.end) formBlockers.push({ code: FORM_BLOCKER.end, message: next.end, target_id: null })
+    if (formBlockers.length === 0) {
+      reopenMut.mutate({ openStartAt: startAt!.toISOString(), openEndAt: endAt!.toISOString() })
+      return
+    }
+    // 時間有錯就不送再開課，但仍問後端其餘缺漏，一次列完（#558，使用者裁示 1、5）
+    reopenCheckMut.mutate(formBlockers)
   }
+
+  /** 再開課版的「前端有錯時仍問後端」——結果放進 `reopenBlockers`，不與發布那份共用。 */
+  const reopenCheckMut = useMutation({
+    mutationFn: async (formBlockers: PublishBlocker[]) => ({
+      result: await publishApi.check(courseId as number),
+      formBlockers,
+    }),
+    onSuccess: ({ result, formBlockers }) => {
+      seedLiveCheck(result.blockers)
+      // 再開課只判過時間——受訓對象的缺漏要照後端的列（見 `REOPEN_FORM_OWNED`）
+      setReopenBlockers(mergeBlockers(formBlockers, result.blockers, REOPEN_FORM_OWNED))
+    },
+    onError: (err, formBlockers) => {
+      handleError(err)
+      setReopenBlockers(formBlockers)
+    },
+  })
 
   /**
    * 缺漏項目所指的測驗名稱——後端只回 `target_id`，名稱由前端自課程詳細對照。
@@ -647,50 +785,20 @@ export function EtCourseEditorPage() {
     }
   }
 
-  /**
-   * 基本資料驗證——「儲存草稿」與「儲存並發布」共用。
-   *
-   * 有錯時把訊息寫進 `errors`（逐欄標示）並回 `false`；通過則清空並回 `true`。
-   * `forPublish` 時受訓對象的空白列也算錯（見 `validateAudiences`）。
-   */
-  const validateForm = ({ forPublish = false }: { forPublish?: boolean } = {}): boolean => {
-    // 受訓對象的列錯誤另存一份（以列索引為鍵），與其他欄位的錯誤互不覆蓋。
-    // ⚠️ 兩邊都要檢查完才回傳——受訓對象有錯就提早 return 的話，課程名稱等欄位的錯誤要等
-    // 下一次送出才看得到，教師得來回改好幾次（code review LOW）
-    const { rowErrors } = validateAudiences(form.audiences, { forPublish })
-    setAudienceErrors(rowErrors)
-    const fieldsOk = validateBasicFields()
-    return fieldsOk && Object.keys(rowErrors).length === 0
-  }
+  /** 章節以下要框的元素（#558）；非標示模式一律不框。 */
+  const highlights = blockerHighlights(highlight !== null ? (liveCheck?.blockers ?? []) : [], chapters)
 
-  const validateBasicFields = (): boolean => {
-    const parsed = CourseFormSchema.safeParse(form)
-    if (!parsed.success) {
-      const next: Record<string, string> = {}
-      for (const issue of parsed.error.issues) {
-        const key = String(issue.path[0])
-        if (!next[key]) next[key] = issue.message
-      }
-      setErrors(next)
-      return false
-    }
-    // 時間規則（SA 裁示 2026-08-24）：起始須 ≥ 當下——但**只對改動過的值**成立；
-    // 迄止須晚於起始（後端亦強制，此處為即時回饋）。
-    const timeErrors: Record<string, string> = {}
-    if (startChanged && startAt && startAt.isBefore(startFloor)) {
-      timeErrors.open_start_at = startedInPast
-        ? "課程已開課，起始時間不可再往前調整"
-        : "課程起始時間不可早於目前時間"
-    }
-    if (startAt && endAt && !endAt.isAfter(startAt)) {
-      timeErrors.open_end_at = "課程訖止時間須晚於起始時間"
-    }
-    if (Object.keys(timeErrors).length > 0) {
-      setErrors(timeErrors)
-      return false
-    }
-    setErrors({})
-    return true
+  /**
+   * 儲存草稿前的基本資料驗證——有錯時寫進 `errors`（逐欄標示）並回 `false`。
+   *
+   * 不檢「發布才必填」的項目（使用者裁示 3）；發布走 `openPublish`。
+   * 規則本體在 `checkCourseForm`，與發布、標示模式共用同一份。
+   */
+  const validateForm = (): boolean => {
+    const { fieldErrors: next, audienceRowErrors: rows } = checkCourseForm(formInput, { forPublish: false })
+    setErrors(next)
+    setAudienceErrors(rows)
+    return Object.keys(next).length === 0 && Object.keys(rows).length === 0
   }
 
   const handleSave = () => {
@@ -794,6 +902,8 @@ export function EtCourseEditorPage() {
     if (openQuizId !== null) {
       void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.quiz(openQuizId) })
     }
+    // 題目增刪改不經 `invalidate()`，而「配分須等於 100」「至少 1 題」的紅框要跟著題目走（#558）
+    refreshLiveCheck()
   }
 
   /**
@@ -1243,7 +1353,11 @@ export function EtCourseEditorPage() {
           message="課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。"
           blockers={reopenBlockers}
           names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
-          onClose={() => setReopenBlockers([])}
+          onClose={() => {
+            // 關閉即進入標示模式：缺漏處標紅框，教師就地補（#558）。仍不退出再開課模式
+            setReopenBlockers([])
+            setHighlight("reopen")
+          }}
         />
       )}
 
@@ -1289,8 +1403,8 @@ export function EtCourseEditorPage() {
               fullWidth
               value={form.course_name}
               disabled={readOnly}
-              error={Boolean(errors.course_name)}
-              helperText={errors.course_name}
+              error={Boolean(fieldErrors.course_name)}
+              helperText={fieldErrors.course_name}
               onChange={(e) => setForm({ ...form, course_name: e.target.value })}
             />
           </Box>
@@ -1310,7 +1424,8 @@ export function EtCourseEditorPage() {
               lockedKeys={lockedAudiences}
               readOnly={readOnly}
               readOnlyPairs={course?.audiences ?? []}
-              rowErrors={audienceErrors}
+              rowErrors={audienceRowErrors}
+              error={fieldErrors.audiences}
               onChange={(next) => {
                 setForm((prev) => ({ ...prev, audiences: next }))
                 // 列錯誤以索引為鍵——增刪列後索引位移，舊訊息會掛在錯的列上，故整份清掉
@@ -1334,9 +1449,9 @@ export function EtCourseEditorPage() {
                   fullWidth: true,
                   required: reopening,
                   error: reopening
-                    ? Boolean(reopenErrors.start) || reopenStartEmpty
-                    : Boolean(errors.open_start_at),
-                  helperText: reopening ? reopenErrors.start : errors.open_start_at,
+                    ? Boolean(reopenFieldErrors.start) || reopenStartEmpty
+                    : Boolean(fieldErrors.open_start_at),
+                  helperText: reopening ? reopenFieldErrors.start : fieldErrors.open_start_at,
                 },
                 actionBar: { actions: ["cancel", "accept"] },
               }}
@@ -1361,9 +1476,9 @@ export function EtCourseEditorPage() {
                   fullWidth: true,
                   required: reopening,
                   error: reopening
-                    ? Boolean(reopenErrors.end) || reopenEndEmpty
-                    : Boolean(errors.open_end_at),
-                  helperText: reopening ? reopenErrors.end : errors.open_end_at,
+                    ? Boolean(reopenFieldErrors.end) || reopenEndEmpty
+                    : Boolean(fieldErrors.open_end_at),
+                  helperText: reopening ? reopenFieldErrors.end : fieldErrors.open_end_at,
                 },
                 actionBar: { actions: ["cancel", "accept"] },
               }}
@@ -1393,8 +1508,8 @@ export function EtCourseEditorPage() {
               rows={2}
               value={form.description}
               disabled={readOnly}
-              error={Boolean(errors.description)}
-              helperText={errors.description ?? `${form.description.length} / ${DESCRIPTION_MAX_LEN}`}
+              error={Boolean(fieldErrors.description)}
+              helperText={fieldErrors.description ?? `${form.description.length} / ${DESCRIPTION_MAX_LEN}`}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
           </Box>
@@ -1404,6 +1519,8 @@ export function EtCourseEditorPage() {
       <ChapterSection
         chapters={chapters}
         readOnly={readOnly}
+        blockedChapters={highlights.chapters}
+        blockedItems={highlights.items}
         disabled={false}
         onAdd={() => {
           setChapterDraft("")
@@ -1566,6 +1683,7 @@ export function EtCourseEditorPage() {
       <SurveySection
         survey={isNew ? null : survey}
         readOnly={readOnly}
+        blocker={highlights.survey}
         isDraftCourse={status === "DRAFT"}
         saving={surveyMut.isPending}
         error={surveyError}
@@ -1710,7 +1828,9 @@ export function EtCourseEditorPage() {
                   <Button
                     size="small"
                     variant="contained"
-                    disabled={reopenMut.isPending}
+                    // 時間有錯時走的是 `reopenCheckMut`——它進行中也要擋，否則連點會連送預檢
+                    // （與發布 / 再開課共用限流配額，security review LOW）
+                    disabled={reopenMut.isPending || reopenCheckMut.isPending}
                     onClick={submitReopen}
                   >
                     確認再開課
@@ -1786,9 +1906,12 @@ export function EtCourseEditorPage() {
           // 故導回時機綁在使用者**主動關閉**結果視窗。發布失敗時不會有 `publishResult`
           // （改設 `blockers` 留在原地讓他補缺漏），所以這裡不會誤導向。
           const published = publishResult !== null
+          // 有缺漏時關閉 → 進入標示模式（#558）。檢核中途就關掉的不算——那時還不知道缺什麼
+          const hadBlockers = !published && !checkMut.isPending && blockers.length > 0
           setPublishOpen(false)
           setPublishResult(null)
           if (published) navigate("/et/courses")
+          else if (hadBlockers) setHighlight("publish")
         }}
       />
 

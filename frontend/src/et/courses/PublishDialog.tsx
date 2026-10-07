@@ -60,6 +60,11 @@ export function PublishDialog({
   onClose,
 }: PublishDialogProps) {
   const canPublish = !checking && blockers.length === 0
+  /**
+   * 有缺漏時只留「關閉」（#558）：這個視窗此時是**告知**，關掉之後缺漏處會標紅框。
+   * 一顆按不下去的「確認發布」只會讓教師以為還差一步，比照再開課的 `BlockerDialog`。
+   */
+  const blocked = !result && !checking && blockers.length > 0
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -111,15 +116,15 @@ export function PublishDialog({
           </Stack>
         ) : (
           <BlockerSummary
-            message="發布條件未滿足，請先補齊以下項目。"
+            message="發布條件未滿足，請先補齊以下項目。關閉本視窗後，缺漏處會以紅框標示。"
             blockers={blockers}
             names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
           />
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>{result ? "關閉" : "取消"}</Button>
-        {!result && (
+        <Button onClick={onClose}>{result || blocked ? "關閉" : "取消"}</Button>
+        {!result && !blocked && (
           <Button variant="contained" disabled={!canPublish || publishing} onClick={onPublish}>
             確認發布
           </Button>
