@@ -8,6 +8,7 @@ export interface AuditLogRow {
   operator_id: string
   operator_name: string | null
   operator_email: string | null
+  /** ⚠️ 後端仍回傳，但**前端沒有任何讀取端**——明細對話框只畫「功能」(`func_label`)。保留為 API 回應的鏡像。 */
   module: string
   func_name: string
   func_label: string
@@ -24,6 +25,13 @@ export interface AuditLogRow {
 /** 查詢條件（空字串欄位於送出前轉為 undefined，不帶入 query string）。 */
 export interface AuditFilterParams {
   operator?: string
+  /**
+   * ⚠️ **本欄前端已無任何呼叫端會設**——DP05 的「模組」篩選於 #555 依裁示移除。
+   *
+   * 刻意保留而非刪除：後端 `/api/dp/audit/logs` 的 `module` 參數與 `/options` 的
+   * `module_options` **都還在**，本型別是 API 介面的鏡像，不是前端表單的鏡像。
+   * 日後要把篩選加回來，只需改畫面與 `AuditFilters`。
+   */
   module?: string
   func_name?: string
   action_type?: string

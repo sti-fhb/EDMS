@@ -16,7 +16,6 @@ const NO_OPTIONS: AuditOption[] = []
 /** 查詢列輸入值（空字串＝未指定）。 */
 export interface AuditFilters {
   operator: string
-  module: string
   func: string
   action_type: string
   result: string
@@ -26,7 +25,6 @@ export interface AuditFilters {
 
 export const EMPTY_AUDIT_FILTERS: AuditFilters = {
   operator: "",
-  module: "",
   func: "",
   action_type: "",
   result: "",
@@ -38,7 +36,6 @@ export const EMPTY_AUDIT_FILTERS: AuditFilters = {
 function toParams(f: AuditFilters): AuditFilterParams {
   return {
     operator: f.operator || undefined,
-    module: f.module || undefined,
     func_name: f.func || undefined,
     action_type: f.action_type || undefined,
     result: f.result || undefined,
@@ -66,7 +63,6 @@ export function useAuditOptions() {
     funcOptions: data?.func_options ?? NO_OPTIONS,
     actionOptions: data?.action_options ?? NO_OPTIONS,
     resultOptions: data?.result_options ?? NO_OPTIONS,
-    moduleOptions: data?.module_options ?? NO_OPTIONS,
   }
 }
 

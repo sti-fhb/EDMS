@@ -760,7 +760,7 @@ DP 後台通知範本維護頁（`dp-templates`）：ET / DM 管理者編輯本�
 
 ### 任務說明
 
-DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件**（操作者、期間**起訖**、模組、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE）查詢全平台 `DP_AUDIT_LOG`（後端分頁、時間倒序），展開單筆明細檢視**異動前後值**（JSON），並依當前查詢條件**匯出 CSV**。稽核為**共用項**——**兩管理者皆可查全部**（含登入等不分模組事件；資安監督需全視野），此與 US5（dp-params）/ US9（dp-templates）之 `MODULE` 過濾**不同**：`模組`在此僅為**查詢條件**、非存取控制。日誌 **append-only**：介面與 API **無任何刪除 / 修改功能**。填實既有 `AuditPage` stub。
+DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件**（操作者、期間**起訖**、功能、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE）查詢全平台 `DP_AUDIT_LOG`（後端分頁、時間倒序），展開單筆明細檢視**異動前後值**（JSON），並依當前查詢條件**匯出 CSV**。稽核為**共用項**——**兩管理者皆可查全部**（含登入等不分模組事件；資安監督需全視野），此與 US5（dp-params）/ US9（dp-templates）之 `MODULE` 過濾**不同**：`模組`在此僅為**查詢條件**、非存取控制（⚠️ 該篩選已於 #555 依裁示自畫面移除，改以「功能」——`module` 參數仍留在 API；此處的重點不變：模組在稽核查詢中從來不是存取控制）。日誌 **append-only**：介面與 API **無任何刪除 / 修改功能**。填實既有 `AuditPage` stub。
 
 > ℹ️ 全端 issue：後端 `dp/audit` 補**查詢 / 匯出端點**（既有模組僅 `AuditLogService` 寫入、無 query router）+ 前端填實 `AuditPage`。**無新表 / migration**（表 + 寫入於 #0 已建）。唯讀、不分模組、無刪改——業務邏輯較 US5 / US9 單純（無樂觀鎖、無 MODULE 過濾），新元素為 **CSV 匯出** 與 **明細前後值展開**。
 

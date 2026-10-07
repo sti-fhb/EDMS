@@ -43,7 +43,7 @@ function operatorText(r: AuditLogRow): string {
 export function AuditPage() {
   const audit = useAuditLogs()
   const { setSelected, search } = audit
-  const { funcOptions, actionOptions, resultOptions, moduleOptions } = useAuditOptions()
+  const { funcOptions, actionOptions, resultOptions } = useAuditOptions()
   const [filters, setFilters] = useState<AuditFilters>(EMPTY_AUDIT_FILTERS)
 
   const setField = (key: keyof AuditFilters, value: string) => setFilters((prev) => ({ ...prev, [key]: value }))
@@ -112,20 +112,6 @@ export function AuditPage() {
               onChange={(e) => setField("operator", e.target.value)}
               sx={{ minWidth: 200 }}
             />
-            <TextField
-              select
-              size="small"
-              label="模組"
-              value={displayValue(filters.module)}
-              onChange={(e) => setField("module", selectValue(e.target.value))}
-              sx={{ minWidth: 130 }}
-            >
-              {withAll(moduleOptions).map((o) => (
-                <MenuItem key={o.value} value={o.value}>
-                  {o.label}
-                </MenuItem>
-              ))}
-            </TextField>
             <TextField
               select
               size="small"
