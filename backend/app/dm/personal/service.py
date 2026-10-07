@@ -258,6 +258,7 @@ class PersonalService:
                         event_kind="submitted",
                         event_time=r.submit_date,
                         is_overdue=overdue,
+                        reason=None,  # #554：送審事件不帶原因（OBSOLETE 的 reason 是廢止申請原因）
                         party_name=r.party_name,
                         party_unreachable=unreachable,
                     )
@@ -273,6 +274,9 @@ class PersonalService:
                         event_kind="resolved",
                         event_time=r.complete_date,
                         is_overdue=False,
+                        # #554：僅退回帶原因。核准 / 撤回的 reason 欄位可能殘留廢止申請原因，
+                        # 掛上去會變成「核准卻顯示一段原因」。
+                        reason=r.reason if r.status == _REJECTED else None,
                         party_name=r.party_name,
                         party_unreachable=unreachable,
                     )

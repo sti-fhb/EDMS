@@ -1,5 +1,5 @@
-import { http, HttpResponse } from "msw"
-import { setupServer } from "msw/node"
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
 
 /**
  * MSW mock server：於網路層攔截 API（axios 真實發出 request）。
@@ -40,7 +40,7 @@ const ATTEMPT_STATE = {
       selected_options: [],
     },
   ],
-}
+};
 
 /**
  * ET07 閱卷結果——`POST submit` 與 `GET result` **共用同一份**。
@@ -70,7 +70,12 @@ const ATTEMPT_RESULT = {
       score: "50.00",
       outcome: "CORRECT",
       options: [
-        { option_id: 9011, text: "捐血人身分", is_correct: true, selected: true },
+        {
+          option_id: 9011,
+          text: "捐血人身分",
+          is_correct: true,
+          selected: true,
+        },
         { option_id: 9012, text: "天氣", is_correct: false, selected: false },
       ],
     },
@@ -87,25 +92,46 @@ const ATTEMPT_RESULT = {
       ],
     },
   ],
-}
+};
 
 export const handlers = [
   http.post("/api/login", () =>
-    HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false }),
+    HttpResponse.json({
+      access_token: "test-access-token",
+      must_change_pwd: false,
+    }),
   ),
   http.post("/api/register", () =>
-    HttpResponse.json({ message: "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證" }, { status: 202 }),
+    HttpResponse.json(
+      { message: "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證" },
+      { status: 202 },
+    ),
   ),
-  http.post("/api/verify-email", () => HttpResponse.json({ message: "帳號已啟用，請以新帳號登入" })),
+  http.post("/api/verify-email", () =>
+    HttpResponse.json({ message: "帳號已啟用，請以新帳號登入" }),
+  ),
   http.post("/api/resend-verification", () =>
-    HttpResponse.json({ message: "若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證" }),
+    HttpResponse.json({
+      message:
+        "若該 Email 有待驗證的註冊，驗證信將重新寄出，請於 30 分鐘內完成驗證",
+    }),
   ),
   http.post("/api/forgot-password", () =>
-    HttpResponse.json({ message: "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設" }),
+    HttpResponse.json({
+      message:
+        "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設",
+    }),
   ),
-  http.post("/api/reset-password", () => HttpResponse.json({ message: "密碼已更新，請以新密碼登入" })),
-  http.post("/api/dp/user/renew", () => HttpResponse.json({ access_token: "renewed-token" })),
-  http.post("/api/dp/user/logout", () => new HttpResponse(null, { status: 204 })),
+  http.post("/api/reset-password", () =>
+    HttpResponse.json({ message: "密碼已更新，請以新密碼登入" }),
+  ),
+  http.post("/api/dp/user/renew", () =>
+    HttpResponse.json({ access_token: "renewed-token" }),
+  ),
+  http.post(
+    "/api/dp/user/logout",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get("/api/version", () => HttpResponse.json({ version: "1.0.0-test" })),
   // 入口頁 / 側欄模組摘要（預設具 DM 權限；個別測試以 server.use 覆蓋）
   // 預設情境＝兼具兩模組角色與管理者身分（#250 起 is_admin 決定「系統管理者後台」群組可見性）
@@ -118,17 +144,42 @@ export const handlers = [
   // ET 首頁儀表板（#453）：預設三張卡皆有資料；個別測試以 server.use 覆蓋
   http.get("/api/et/dashboard", () =>
     HttpResponse.json({
-      student: { joined: 3, in_progress: 1, not_started: 1, completed: 1, pending_open: 0 },
+      student: {
+        joined: 3,
+        in_progress: 1,
+        not_started: 1,
+        completed: 1,
+        pending_open: 0,
+      },
       teacher: {
-        ending_soon: [{ course_id: 11, course_name: "採血作業新進人員訓練", days_left: 2, not_completed: 5 }],
+        ending_soon: [
+          {
+            course_id: 11,
+            course_name: "採血作業新進人員訓練",
+            days_left: 2,
+            not_completed: 5,
+          },
+        ],
         draft_count: 1,
       },
       admin: {
         overdue_incomplete: 4,
         completion_rate: "62.50",
         by_course: [
-          { course_id: 21, course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
-          { course_id: 11, course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },
+          {
+            course_id: 21,
+            course_name: "感染管制年度訓練",
+            enrolled: 4,
+            completed: 1,
+            completion_rate: "25.00",
+          },
+          {
+            course_id: 11,
+            course_name: "採血作業新進人員訓練",
+            enrolled: 4,
+            completed: 3,
+            completion_rate: "75.00",
+          },
         ],
       },
     }),
@@ -140,7 +191,18 @@ export const handlers = [
   http.get("/api/dm/editor/upload-limits", () =>
     HttpResponse.json({
       max_mb: 50,
-      allowed_extensions: ["doc", "docx", "jpeg", "jpg", "pdf", "png", "ppt", "pptx", "xls", "xlsx"],
+      allowed_extensions: [
+        "doc",
+        "docx",
+        "jpeg",
+        "jpg",
+        "pdf",
+        "png",
+        "ppt",
+        "pptx",
+        "xls",
+        "xlsx",
+      ],
     }),
   ),
   http.get("/api/et/materials/video-upload-limits", () =>
@@ -234,7 +296,9 @@ export const handlers = [
       { code: "20", name: "平時", group_code: "NATURE" },
     ]),
   ),
-  http.get("/api/dm/library/capabilities", () => HttpResponse.json({ can_create: true })),
+  http.get("/api/dm/library/capabilities", () =>
+    HttpResponse.json({ can_create: true }),
+  ),
   // US4 文件詳細頁（dm-detail）：預設 PDF 已發布、可編輯；個別測試以 server.use 覆蓋
   http.get("/api/dm/documents/:docId", ({ params }) =>
     HttpResponse.json({
@@ -329,22 +393,36 @@ export const handlers = [
     ]),
   ),
   http.post("/api/dm/documents", () =>
-    HttpResponse.json({ doc_id: "DM-SOP-000009", version_id: 900, previewable: true }, { status: 201 }),
+    HttpResponse.json(
+      { doc_id: "DM-SOP-000009", version_id: 900, previewable: true },
+      { status: 201 },
+    ),
   ),
   http.post("/api/dm/documents/:docId/versions", () =>
     HttpResponse.json({ version_id: 901, previewable: true }, { status: 201 }),
   ),
   // 續編更新既有草稿版本（#222）
   http.put("/api/dm/documents/:docId/versions/:versionId", ({ params }) =>
-    HttpResponse.json({ version_id: Number(params.versionId), previewable: true }),
+    HttpResponse.json({
+      version_id: Number(params.versionId),
+      previewable: true,
+    }),
   ),
-  http.post("/api/dm/documents/:docId/submit", () => HttpResponse.json({ review_id: 500, notified: 1 })),
+  http.post("/api/dm/documents/:docId/submit", () =>
+    HttpResponse.json({ review_id: 500, notified: 1 }),
+  ),
   http.get("/api/dm/editor/documents/:docId/tags", () =>
-    HttpResponse.json({ audience_pairs: [{ unit_id: "100", audience_id: "1" }], retrieval_ids: ["20"] }),
+    HttpResponse.json({
+      audience_pairs: [{ unit_id: "100", audience_id: "1" }],
+      retrieval_ids: ["20"],
+    }),
   ),
   // 續編 meta（#222）：預設回 404＝無本人草稿（→ 走「加新版」）；續編測試以 server.use 覆寫回 200
   http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
-    HttpResponse.json({ error_code: "DM_DOC_017", error_message: "查無可續編之草稿或無權存取" }, { status: 404 }),
+    HttpResponse.json(
+      { error_code: "DM_DOC_017", error_message: "查無可續編之草稿或無權存取" },
+      { status: 404 },
+    ),
   ),
   // US6 簽核中心（dm-review）
   // 待簽核（#503 起為 {data, meta} 分頁形狀）。
@@ -442,19 +520,31 @@ export const handlers = [
     HttpResponse.json({ review_id: Number(params.reviewId) }),
   ),
   http.get("/api/dm/reviews/:reviewId/versions/:versionId/file", () =>
-    HttpResponse.arrayBuffer(new ArrayBuffer(8), { headers: { "Content-Type": "application/pdf" } }),
+    HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+      headers: { "Content-Type": "application/pdf" },
+    }),
   ),
   http.get("/api/dm/reviews/:reviewId/obsolete-file", () =>
-    HttpResponse.arrayBuffer(new ArrayBuffer(8), { headers: { "Content-Type": "application/pdf" } }),
+    HttpResponse.arrayBuffer(new ArrayBuffer(8), {
+      headers: { "Content-Type": "application/pdf" },
+    }),
   ),
   // US8 發起廢止（dm-obsolete）
   http.post("/api/dm/documents/:docId/obsolete", () =>
-    HttpResponse.json({ review_id: 601, doc_status: "PENDING_OBSOLETE", notified: 1 }),
+    HttpResponse.json({
+      review_id: 601,
+      doc_status: "PENDING_OBSOLETE",
+      notified: 1,
+    }),
   ),
   // 共用 DM 管理者入口可見性（US11 A' 收斂；US10/11/13 admin 側欄項共用）
-  http.get("/api/dm/admin-access", () => HttpResponse.json({ can_access: true })),
+  http.get("/api/dm/admin-access", () =>
+    HttpResponse.json({ can_access: true }),
+  ),
   // #250 簽核中心入口可見性（具 DM_REVIEWER）
-  http.get("/api/dm/reviewer-access", () => HttpResponse.json({ can_access: true })),
+  http.get("/api/dm/reviewer-access", () =>
+    HttpResponse.json({ can_access: true }),
+  ),
   // US10 已廢止文件查詢（dm-obsolete-archive）
   http.get("/api/dm/obsolete-archive/documents", () =>
     HttpResponse.json({
@@ -479,9 +569,14 @@ export const handlers = [
     }),
   ),
   http.get("/api/dm/obsolete-archive/documents/export", () =>
-    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿文件編號,文件名稱\nDM-SOP-000901,停辦作業SOP\n").buffer, {
-      headers: { "Content-Type": "text/csv; charset=utf-8" },
-    }),
+    HttpResponse.arrayBuffer(
+      new TextEncoder().encode(
+        "﻿文件編號,文件名稱\nDM-SOP-000901,停辦作業SOP\n",
+      ).buffer,
+      {
+        headers: { "Content-Type": "text/csv; charset=utf-8" },
+      },
+    ),
   ),
   // US11 文件變更歷程查詢（dm-change-log）
   http.get("/api/dm/change-log/entries", () =>
@@ -518,9 +613,13 @@ export const handlers = [
     }),
   ),
   http.get("/api/dm/change-log/entries/export", () =>
-    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿時間,申請人\n2026-05-15 14:30,陳大華\n").buffer, {
-      headers: { "Content-Type": "text/csv; charset=utf-8" },
-    }),
+    HttpResponse.arrayBuffer(
+      new TextEncoder().encode("﻿時間,申請人\n2026-05-15 14:30,陳大華\n")
+        .buffer,
+      {
+        headers: { "Content-Type": "text/csv; charset=utf-8" },
+      },
+    ),
   ),
   // US13 閱讀統計 KPI（dm-kpi）
   http.get("/api/dm/kpi/documents", () =>
@@ -572,12 +671,19 @@ export const handlers = [
     }),
   ),
   http.get("/api/dm/kpi/documents/export", () =>
-    HttpResponse.arrayBuffer(new TextEncoder().encode("﻿文件編號,文件名稱\nDM-SOP-000001,領血確認標準作業程序\n").buffer, {
-      headers: { "Content-Type": "text/csv; charset=utf-8" },
-    }),
+    HttpResponse.arrayBuffer(
+      new TextEncoder().encode(
+        "﻿文件編號,文件名稱\nDM-SOP-000001,領血確認標準作業程序\n",
+      ).buffer,
+      {
+        headers: { "Content-Type": "text/csv; charset=utf-8" },
+      },
+    ),
   ),
   // US9 個人專區（dm-personal）
-  http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })),
+  http.get("/api/dm/personal/access", () =>
+    HttpResponse.json({ can_access: true }),
+  ),
   http.get("/api/dm/personal/drafts", () =>
     HttpResponse.json([
       {
@@ -615,7 +721,10 @@ export const handlers = [
       },
     ]),
   ),
-  http.delete("/api/dm/personal/drafts/:versionId", () => new HttpResponse(null, { status: 204 })),
+  http.delete(
+    "/api/dm/personal/drafts/:versionId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get("/api/dm/personal/activity", () =>
     HttpResponse.json({
       author: [
@@ -630,6 +739,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "王審核",
           party_unreachable: null,
+          reason: null,
         },
         // 已完成週期展開為兩事件（送審 + 退回），驗證狀態變動歷程
         {
@@ -643,6 +753,8 @@ export const handlers = [
           is_overdue: false,
           party_name: "王審核",
           party_unreachable: null,
+          reason:
+            "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程",
         },
         {
           review_id: 803,
@@ -655,6 +767,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "王審核",
           party_unreachable: null,
+          reason: null,
         },
       ],
       reviewer: [
@@ -669,6 +782,7 @@ export const handlers = [
           is_overdue: true,
           party_name: "陳送審",
           party_unreachable: null,
+          reason: null,
         },
         // 審核者視角已完成項也展開為 送審 + 結果 兩列（Round-4 item 2）
         {
@@ -682,6 +796,8 @@ export const handlers = [
           is_overdue: false,
           party_name: "陳送審",
           party_unreachable: null,
+          reason:
+            "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程",
         },
         {
           review_id: 804,
@@ -694,12 +810,16 @@ export const handlers = [
           is_overdue: false,
           party_name: "陳送審",
           party_unreachable: null,
+          reason: null,
         },
       ],
     }),
   ),
   http.post("/api/dm/reviews/:reviewId/withdraw", ({ params }) =>
-    HttpResponse.json({ review_id: Number(params.reviewId), doc_status: "PUBLISHED" }),
+    HttpResponse.json({
+      review_id: Number(params.reviewId),
+      doc_status: "PUBLISHED",
+    }),
   ),
   http.get("/api/dp/roles/modules", () => HttpResponse.json(["DM"])),
   http.get("/api/dp/roles/:module/assignments", () =>
@@ -755,22 +875,45 @@ export const handlers = [
       { code: "102", name: "國防醫學院三軍總醫院", kind: "UNIT" },
     ]),
   ),
-  http.put("/api/dp/roles/:module/assignments/:userId", () => new HttpResponse(null, { status: 204 })),
+  http.put(
+    "/api/dp/roles/:module/assignments/:userId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   // US8 個人資料維護（預設 happy path）
   http.get("/api/dp/user/me", () =>
-    HttpResponse.json({ user_id: "u1", email: "me@example.com", user_name: "測試員", pending_email: null }),
+    HttpResponse.json({
+      user_id: "u1",
+      email: "me@example.com",
+      user_name: "測試員",
+      pending_email: null,
+    }),
   ),
   http.put("/api/dp/user/me", () => new HttpResponse(null, { status: 204 })),
-  http.put("/api/dp/user/me/password", () => new HttpResponse(null, { status: 204 })),
+  http.put(
+    "/api/dp/user/me/password",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.put("/api/dp/user/me/email", () =>
     HttpResponse.json(
-      { message: "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入", retry_after: 600 },
+      {
+        message:
+          "驗證信已寄至新 Email，請於效期內完成驗證；驗證前原 Email 仍可登入",
+        retry_after: 600,
+      },
       { status: 202 },
     ),
   ),
-  http.post("/api/verify-email-change", () => HttpResponse.json({ message: "Email 已變更，請以新 Email 登入" })),
+  http.post("/api/verify-email-change", () =>
+    HttpResponse.json({ message: "Email 已變更，請以新 Email 登入" }),
+  ),
   http.get("/api/password-policy", () =>
-    HttpResponse.json({ min_len: 8, admin_min_len: 12, char_types: 3, history_count: 3, expiry_days: 90 }),
+    HttpResponse.json({
+      min_len: 8,
+      admin_min_len: 12,
+      char_types: 3,
+      history_count: 3,
+      expiry_days: 90,
+    }),
   ),
   // US4 使用者管理（預設 happy path；含啟用中 / 已鎖定 / 已停用三態供 UI 驗證）
   http.get("/api/dp/users", () =>
@@ -809,7 +952,10 @@ export const handlers = [
   ),
   // 建立帳號＝寄邀請（#67）：後端 202 + message，不回 UserRow
   http.post("/api/dp/users", () =>
-    HttpResponse.json({ message: "邀請信已寄出，使用者需經連結設定密碼後啟用" }, { status: 202 }),
+    HttpResponse.json(
+      { message: "邀請信已寄出，使用者需經連結設定密碼後啟用" },
+      { status: 202 },
+    ),
   ),
   // 待啟用邀請清單（ADMIN_INVITE）：含有效中 / 已逾期兩態供 UI 驗證
   http.get("/api/dp/users/invites", () =>
@@ -836,8 +982,13 @@ export const handlers = [
   http.post("/api/dp/users/invites/:id/resend", () =>
     HttpResponse.json({ message: "邀請信已重寄" }, { status: 202 }),
   ),
-  http.delete("/api/dp/users/invites/:id", () => new HttpResponse(null, { status: 204 })),
-  http.post("/api/activate-account", () => HttpResponse.json({ message: "帳號已啟用，請以新密碼登入" })),
+  http.delete(
+    "/api/dp/users/invites/:id",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.post("/api/activate-account", () =>
+    HttpResponse.json({ message: "帳號已啟用，請以新密碼登入" }),
+  ),
   http.patch("/api/dp/users/:id/status", () =>
     HttpResponse.json({
       user_id: "u-active",
@@ -880,11 +1031,17 @@ export const handlers = [
         kind: "CATEGORY",
         name: "文件分類",
         requires_code: true,
-        description: "文件建檔時必選。分類代碼會嵌入文件編號，故建立後鎖定、淘汰改停用。",
+        description:
+          "文件建檔時必選。分類代碼會嵌入文件編號，故建立後鎖定、淘汰改停用。",
         group_code: null,
         group_name: null,
         items: [
-          { code: "SOP", name: "標準作業程序", is_builtin: true, is_enabled: true },
+          {
+            code: "SOP",
+            name: "標準作業程序",
+            is_builtin: true,
+            is_enabled: true,
+          },
           { code: "ZTX", name: "自訂類", is_builtin: false, is_enabled: false },
         ],
       },
@@ -894,15 +1051,24 @@ export const handlers = [
         name: "標籤",
         requires_code: false,
         // 分組有自己的說明時覆蓋 kind 層（後端 _split_sections 已決定好，前端直接顯示）
-        description: "可見對象的另一半。閱覽者只看得到配對相符、或掛「全體」的文件。",
+        description:
+          "可見對象的另一半。閱覽者只看得到配對相符、或掛「全體」的文件。",
         group_code: "AUDIENCE",
         group_name: "職位",
-        items: [{ code: "11", name: "護理師", is_builtin: false, is_enabled: true }],
+        items: [
+          { code: "11", name: "護理師", is_builtin: false, is_enabled: true },
+        ],
       },
     ]),
   ),
-  http.post("/api/dp/params/controlled/:module/:kind", () => new HttpResponse(null, { status: 201 })),
-  http.put("/api/dp/params/controlled/:module/:kind/:code", () => new HttpResponse(null, { status: 204 })),
+  http.post(
+    "/api/dp/params/controlled/:module/:kind",
+    () => new HttpResponse(null, { status: 201 }),
+  ),
+  http.put(
+    "/api/dp/params/controlled/:module/:kind/:code",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.patch("/api/dp/params/controlled/:module/:kind/:code/enabled", () =>
     HttpResponse.json({ affected_docs: 3, affected_viewers: 2 }),
   ),
@@ -1043,21 +1209,29 @@ export const handlers = [
       },
     ]),
   ),
-  http.put("/api/dp/notify/templates/:module/:code", async ({ params, request }) => {
-    const body = (await request.json()) as { subject: string; body: string; channel: string; version: number }
-    return HttpResponse.json({
-      module: params.module,
-      template_code: params.code,
-      template_name: "範本",
-      subject: body.subject,
-      body: body.body,
-      variables: "user_name",
-      channel: body.channel,
-      is_enabled: true,
-      is_system: params.module === "DP",
-      version: body.version + 1,
-    })
-  }),
+  http.put(
+    "/api/dp/notify/templates/:module/:code",
+    async ({ params, request }) => {
+      const body = (await request.json()) as {
+        subject: string;
+        body: string;
+        channel: string;
+        version: number;
+      };
+      return HttpResponse.json({
+        module: params.module,
+        template_code: params.code,
+        template_name: "範本",
+        subject: body.subject,
+        body: body.body,
+        variables: "user_name",
+        channel: body.channel,
+        is_enabled: true,
+        is_system: params.module === "DP",
+        version: body.version + 1,
+      });
+    },
+  ),
   // US10 篩選下拉選項（#477：清單唯一來源在後端，前端不再自行維護）。
   // 置於 /api/dp/audit/logs 之前：MSW 靜態陣列先寫先贏，避免日後有人把 logs 改成萬用路徑時被吃掉。
   // ET 與 DM 各留一項、DP 留一項——#477 之前 ET 整組缺席，fixture 若只放 DP 會讓「ET 出得來」驗不到。
@@ -1158,7 +1332,8 @@ export const handlers = [
       {
         job_id: "SCHET001",
         job_name: "ET 週統計與週報",
-        description: "寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒",
+        description:
+          "寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒",
         module: "ET",
         // dow 0 = 週一（APScheduler from_crontab 語意，非標準 crontab）——見 ./cron.ts
         cron_expr: "0 10 * * 0",
@@ -1171,11 +1346,11 @@ export const handlers = [
   ),
   http.put("/api/dp/schedules/:jobId", async ({ params, request }) => {
     const body = (await request.json()) as {
-      job_name: string
-      description: string | null
-      cron_expr: string
-      is_enabled: boolean
-    }
+      job_name: string;
+      description: string | null;
+      cron_expr: string;
+      is_enabled: boolean;
+    };
     return HttpResponse.json({
       job_id: params.jobId,
       job_name: body.job_name,
@@ -1186,7 +1361,7 @@ export const handlers = [
       last_run_date: null,
       last_run_status: null,
       next_run_date: body.is_enabled ? "2026-08-02T02:30:00Z" : null,
-    })
+    });
   }),
   http.get("/api/dp/schedules/SCHDP001/logs", () =>
     HttpResponse.json({
@@ -1204,7 +1379,10 @@ export const handlers = [
     }),
   ),
   http.get("/api/dp/schedules/SCHET001/logs", () =>
-    HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
+    HttpResponse.json({
+      data: [],
+      meta: { total: 0, page: 1, limit: 20, total_pages: 0 },
+    }),
   ),
   // ET05 課程骨架與章節編排（#202）：預設為擁有者之草稿課程；個別測試以 server.use 覆蓋
   http.get("/api/et/courses/capabilities", () =>
@@ -1283,8 +1461,16 @@ export const handlers = [
   http.get("/api/et/approvals/mine", () =>
     HttpResponse.json({
       data: [
-        { course_id: 11, course_name: "採血作業新進人員訓練", approved_at: "2026-05-19T06:20:00Z" },
-        { course_id: 14, course_name: "血品安全與品保概論", approved_at: "2026-03-11T01:00:00Z" },
+        {
+          course_id: 11,
+          course_name: "採血作業新進人員訓練",
+          approved_at: "2026-05-19T06:20:00Z",
+        },
+        {
+          course_id: 14,
+          course_name: "血品安全與品保概論",
+          approved_at: "2026-03-11T01:00:00Z",
+        },
       ],
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
@@ -1292,12 +1478,48 @@ export const handlers = [
   // 受訓對象的選項：單位與職位兩類（#538）。`is_all` 為通用值「全單位」「全體」。
   http.get("/api/et/tags", () =>
     HttpResponse.json([
-      { tag_id: 101, tag_name: "全單位", is_active: true, tag_type: "UNIT", is_all: true },
-      { tag_id: 102, tag_name: "國防醫學院三軍總醫院", is_active: true, tag_type: "UNIT", is_all: false },
-      { tag_id: 103, tag_name: "國防部軍醫局", is_active: true, tag_type: "UNIT", is_all: false },
-      { tag_id: 1, tag_name: "全體", is_active: true, tag_type: "AUDIENCE", is_all: true },
-      { tag_id: 2, tag_name: "護理師", is_active: true, tag_type: "AUDIENCE", is_all: false },
-      { tag_id: 3, tag_name: "行政人員", is_active: true, tag_type: "AUDIENCE", is_all: false },
+      {
+        tag_id: 101,
+        tag_name: "全單位",
+        is_active: true,
+        tag_type: "UNIT",
+        is_all: true,
+      },
+      {
+        tag_id: 102,
+        tag_name: "國防醫學院三軍總醫院",
+        is_active: true,
+        tag_type: "UNIT",
+        is_all: false,
+      },
+      {
+        tag_id: 103,
+        tag_name: "國防部軍醫局",
+        is_active: true,
+        tag_type: "UNIT",
+        is_all: false,
+      },
+      {
+        tag_id: 1,
+        tag_name: "全體",
+        is_active: true,
+        tag_type: "AUDIENCE",
+        is_all: true,
+      },
+      {
+        tag_id: 2,
+        tag_name: "護理師",
+        is_active: true,
+        tag_type: "AUDIENCE",
+        is_all: false,
+      },
+      {
+        tag_id: 3,
+        tag_name: "行政人員",
+        is_active: true,
+        tag_type: "AUDIENCE",
+        is_all: false,
+      },
     ]),
   ),
   // ⚠️ 字面路徑（`capabilities` / `filter-tags`）必須排在 `:courseId` **之前**——MSW 依
@@ -1305,10 +1527,34 @@ export const handlers = [
   // 而非陣列。與 FastAPI 路由宣告順序是同一類坑，但這裡不會報錯、只在渲染時才爆。
   http.get("/api/et/courses/filter-tags", () =>
     HttpResponse.json([
-      { tag_id: 101, tag_name: "全單位", is_active: true, tag_type: "UNIT", is_all: true },
-      { tag_id: 104, tag_name: "已裁撤單位", is_active: false, tag_type: "UNIT", is_all: false },
-      { tag_id: 1, tag_name: "全體", is_active: true, tag_type: "AUDIENCE", is_all: true },
-      { tag_id: 2, tag_name: "護理師", is_active: true, tag_type: "AUDIENCE", is_all: false },
+      {
+        tag_id: 101,
+        tag_name: "全單位",
+        is_active: true,
+        tag_type: "UNIT",
+        is_all: true,
+      },
+      {
+        tag_id: 104,
+        tag_name: "已裁撤單位",
+        is_active: false,
+        tag_type: "UNIT",
+        is_all: false,
+      },
+      {
+        tag_id: 1,
+        tag_name: "全體",
+        is_active: true,
+        tag_type: "AUDIENCE",
+        is_all: true,
+      },
+      {
+        tag_id: 2,
+        tag_name: "護理師",
+        is_active: true,
+        tag_type: "AUDIENCE",
+        is_all: false,
+      },
     ]),
   ),
   // ET02 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
@@ -1485,7 +1731,12 @@ export const handlers = [
           // 不是 `option_text` / `is_selected`。#358 的根因正是前端型別抄錯了名字，而這份
           // fixture 當時跟著錯，於是假資料與 bug 互相印證、測試照樣綠。
           options: [
-            { option_id: 1, text: "捐血人身分", is_correct: true, selected: true },
+            {
+              option_id: 1,
+              text: "捐血人身分",
+              is_correct: true,
+              selected: true,
+            },
             { option_id: 2, text: "天氣", is_correct: false, selected: false },
           ],
         },
@@ -1497,18 +1748,32 @@ export const handlers = [
           score: "15.00",
           outcome: "PARTIAL",
           options: [
-            { option_id: 3, text: "核對資料", is_correct: true, selected: true },
+            {
+              option_id: 3,
+              text: "核對資料",
+              is_correct: true,
+              selected: true,
+            },
             { option_id: 4, text: "消毒", is_correct: true, selected: false },
-            { option_id: 5, text: "跳過確認", is_correct: false, selected: true },
+            {
+              option_id: 5,
+              text: "跳過確認",
+              is_correct: false,
+              selected: true,
+            },
           ],
         },
       ],
     }),
   ),
-  http.post("/api/et/courses/:courseId/students/:userId/quizzes/:quizId/retry-reset", () =>
-    HttpResponse.json({ user_id: "s01", quiz_id: 1, used_attempts: 0 }),
+  http.post(
+    "/api/et/courses/:courseId/students/:userId/quizzes/:quizId/retry-reset",
+    () => HttpResponse.json({ user_id: "s01", quiz_id: 1, used_attempts: 0 }),
   ),
-  http.delete("/api/et/courses/:courseId/students/:userId", () => new HttpResponse(null, { status: 204 })),
+  http.delete(
+    "/api/et/courses/:courseId/students/:userId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get("/api/et/courses/:courseId", ({ params }) =>
     HttpResponse.json({
       course_id: Number(params.courseId),
@@ -1526,15 +1791,27 @@ export const handlers = [
       chapters: [
         // `items` 為後端恆回之欄位（#203）——fixture 少了它，任何走訪項目的程式碼
         // 都會在測試裡炸掉，而正式環境不會，屬最難察覺的一種假象。
-        { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] },
-        { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0, items: [] },
+        {
+          chapter_id: 11,
+          chapter_name: "第一章",
+          sort_order: 1,
+          version: 0,
+          items: [],
+        },
+        {
+          chapter_id: 12,
+          chapter_name: "第二章",
+          sort_order: 2,
+          version: 0,
+          items: [],
+        },
       ],
     }),
   ),
   // ET01 課程清單（US7 / #299）
   http.get("/api/et/courses", ({ request }) => {
-    const query = new URL(request.url).searchParams
-    const scope = query.get("scope")
+    const query = new URL(request.url).searchParams;
+    const scope = query.get("scope");
     const mine = {
       course_id: 11,
       course_name: "採血作業新進人員訓練",
@@ -1548,7 +1825,7 @@ export const handlers = [
       student_count: 28,
       is_owner: true,
       is_closed: false,
-    }
+    };
     const others = {
       course_id: 12,
       course_name: "捐血人健康評估標準教學",
@@ -1562,7 +1839,7 @@ export const handlers = [
       student_count: 9,
       is_owner: false,
       is_closed: false,
-    }
+    };
     // 草稿課的聚合值刻意與 `mine` 不同——兩張卡片若數字一樣，`getByText("5 章節")` 會
     // 因找到兩個節點而失敗，而那是 fixture 的問題、不是頁面的問題
     const draft = {
@@ -1573,7 +1850,7 @@ export const handlers = [
       audiences: [],
       chapter_count: 1,
       student_count: 0,
-    }
+    };
     // #359 第 4 項：ET02 的課程下拉要排除草稿、**保留已關閉**（ET-11 AC 10）。
     // 少了這一筆，「已關閉仍在下拉裡」那條斷言會因為母體裡根本沒有已關閉課程而假綠。
     const closed = {
@@ -1585,25 +1862,43 @@ export const handlers = [
       chapter_count: 2,
       student_count: 4,
       is_closed: true,
-    }
+    };
     // `owner_id` 由 fixture 實際過濾——建立者選單的行為取決於「篩選後結果只剩一個人」
     // 這件事，handler 若忽略該參數就永遠測不到它
-    const ownerId = query.get("owner_id")
-    const all = scope === "all" ? [mine, others] : [mine, draft, closed]
-    const data = ownerId === null ? all : all.filter((c) => c.owner_id === ownerId)
+    const ownerId = query.get("owner_id");
+    const all = scope === "all" ? [mine, others] : [mine, draft, closed];
+    const data =
+      ownerId === null ? all : all.filter((c) => c.owner_id === ownerId);
     return HttpResponse.json({
       data,
       meta: { total: data.length, page: 1, limit: 12, total_pages: 1 },
-    })
+    });
   }),
-  http.post("/api/et/courses", () => HttpResponse.json({ course_id: 99, version: 0 }, { status: 201 })),
-  http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
-  http.post("/api/et/courses/:courseId/chapters", () =>
-    HttpResponse.json({ chapter_id: 13, chapter_name: "新章節", sort_order: 3, version: 0 }, { status: 201 }),
+  http.post("/api/et/courses", () =>
+    HttpResponse.json({ course_id: 99, version: 0 }, { status: 201 }),
   ),
-  http.put("/api/et/courses/:courseId/chapters/order", () => new HttpResponse(null, { status: 204 })),
-  http.put("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
-  http.delete("/api/et/chapters/:chapterId", () => new HttpResponse(null, { status: 204 })),
+  http.put(
+    "/api/et/courses/:courseId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.post("/api/et/courses/:courseId/chapters", () =>
+    HttpResponse.json(
+      { chapter_id: 13, chapter_name: "新章節", sort_order: 3, version: 0 },
+      { status: 201 },
+    ),
+  ),
+  http.put(
+    "/api/et/courses/:courseId/chapters/order",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.put(
+    "/api/et/chapters/:chapterId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.delete(
+    "/api/et/chapters/:chapterId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   // ET05 課後問卷與發布（#204）：預設「尚未建立問卷」——**回 null 而非 404**，
   // 問卷為選配（AC 23），「沒有」是正常狀態。個別測試以 server.use 覆蓋。
   http.get("/api/et/courses/:courseId/survey", () => HttpResponse.json(null)),
@@ -1623,17 +1918,35 @@ export const handlers = [
       { status: 201 },
     ),
   ),
-  http.put("/api/et/surveys/:surveyId", () => new HttpResponse(null, { status: 204 })),
+  http.put(
+    "/api/et/surveys/:surveyId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.post("/api/et/surveys/:surveyId/questions", () =>
     HttpResponse.json(
-      { sq_id: 600, question_type: "SINGLE", stem: "題幹", sort_order: 1, version: 0, options: [] },
+      {
+        sq_id: 600,
+        question_type: "SINGLE",
+        stem: "題幹",
+        sort_order: 1,
+        version: 0,
+        options: [],
+      },
       { status: 201 },
     ),
   ),
-  http.delete("/api/et/surveys/:surveyId", () => new HttpResponse(null, { status: 204 })),
+  http.delete(
+    "/api/et/surveys/:surveyId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get("/api/et/survey-templates", () =>
     HttpResponse.json([
-      { code: "DEFAULT", name: "課程回饋問卷", description: "滿意度與開放式建議", question_count: 6 },
+      {
+        code: "DEFAULT",
+        name: "課程回饋問卷",
+        description: "滿意度與開放式建議",
+        question_count: 6,
+      },
     ]),
   ),
   http.post("/api/et/surveys/:surveyId/apply-template", ({ params }) =>
@@ -1649,9 +1962,18 @@ export const handlers = [
       questions: [],
     }),
   ),
-  http.put("/api/et/surveys/:surveyId/questions/order", () => new HttpResponse(null, { status: 204 })),
-  http.put("/api/et/survey-questions/:sqId", () => new HttpResponse(null, { status: 204 })),
-  http.delete("/api/et/survey-questions/:sqId", () => new HttpResponse(null, { status: 204 })),
+  http.put(
+    "/api/et/surveys/:surveyId/questions/order",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.put(
+    "/api/et/survey-questions/:sqId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.delete(
+    "/api/et/survey-questions/:sqId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get("/api/et/courses/:courseId/publish-check", () =>
     HttpResponse.json({ can_publish: true, blockers: [] }),
   ),
@@ -1690,7 +2012,13 @@ export const handlers = [
   // ── ET03 我的課程與加入新課程（US4 / #247）────────────────────────────────
   http.get("/api/et/my-courses", () =>
     HttpResponse.json({
-      summary: { joined: 3, in_progress: 1, not_started: 1, completed: 0, pending_open: 1 },
+      summary: {
+        joined: 3,
+        in_progress: 1,
+        not_started: 1,
+        completed: 0,
+        pending_open: 1,
+      },
       courses: [
         {
           course_id: 1,
@@ -1751,7 +2079,10 @@ export const handlers = [
     }),
   ),
   http.post("/api/et/enrollments", () =>
-    HttpResponse.json({ course_id: 1, completion_status: "NOT_STARTED", pending_open: false }, { status: 201 }),
+    HttpResponse.json(
+      { course_id: 1, completion_status: "NOT_STARTED", pending_open: false },
+      { status: 201 },
+    ),
   ),
 
   // ── ET06 章節學習（US5 / #255）──────────────────────────────────────────
@@ -1785,7 +2116,9 @@ export const handlers = [
       ],
     }),
   ),
-  http.post("/api/et/videos/:videoId/ticket", () => HttpResponse.json({ ticket: "test-ticket", expires_in: 60 })),
+  http.post("/api/et/videos/:videoId/ticket", () =>
+    HttpResponse.json({ ticket: "test-ticket", expires_in: 60 }),
+  ),
 
   // ── ET06 學習進度（US5 / #274）──────────────────────────────────────────
   http.post("/api/et/videos/:videoId/intervals", ({ params }) =>
@@ -1827,9 +2160,9 @@ export const handlers = [
   // 舊名在 TS 端會被型別擋下，但**這份 fixture 不受型別檢查**——寫錯只會讓元件讀到
   // undefined 然後在 `.length` 上爆，所以這裡與 `invitationSchemas.ts` 必須人工對齊。
   http.post("/api/et/courses/:courseId/invitations", async ({ request }) => {
-    const { emails } = (await request.json()) as { emails: string }
-    const list = emails.split(/[\s,;，、；]+/).filter(Boolean)
-    return HttpResponse.json({ joined: list.length, mail_failed: [] })
+    const { emails } = (await request.json()) as { emails: string };
+    const list = emails.split(/[\s,;，、；]+/).filter(Boolean);
+    return HttpResponse.json({ joined: list.length, mail_failed: [] });
   }),
 
   // ── ET07 測驗作答（US6 / #279）──────────────────────────────────────────
@@ -1853,17 +2186,32 @@ export const handlers = [
     }),
   ),
   http.post("/api/et/quizzes/:quizId/attempts", ({ params }) =>
-    HttpResponse.json({ ...ATTEMPT_STATE, quiz_id: Number(params.quizId) }, { status: 201 }),
+    HttpResponse.json(
+      { ...ATTEMPT_STATE, quiz_id: Number(params.quizId) },
+      { status: 201 },
+    ),
   ),
   http.get("/api/et/attempts/:attemptId", ({ params }) =>
-    HttpResponse.json({ ...ATTEMPT_STATE, attempt_id: Number(params.attemptId) }),
+    HttpResponse.json({
+      ...ATTEMPT_STATE,
+      attempt_id: Number(params.attemptId),
+    }),
   ),
-  http.put("/api/et/attempts/:attemptId/answers/:questionId", () => new HttpResponse(null, { status: 204 })),
+  http.put(
+    "/api/et/attempts/:attemptId/answers/:questionId",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.post("/api/et/attempts/:attemptId/submit", ({ params }) =>
-    HttpResponse.json({ ...ATTEMPT_RESULT, attempt_id: Number(params.attemptId) }),
+    HttpResponse.json({
+      ...ATTEMPT_RESULT,
+      attempt_id: Number(params.attemptId),
+    }),
   ),
   http.get("/api/et/attempts/:attemptId/result", ({ params }) =>
-    HttpResponse.json({ ...ATTEMPT_RESULT, attempt_id: Number(params.attemptId) }),
+    HttpResponse.json({
+      ...ATTEMPT_RESULT,
+      attempt_id: Number(params.attemptId),
+    }),
   ),
   // ET-6b 歷次作答清單（#280）
   http.get("/api/et/quizzes/:quizId/attempts", () =>
@@ -1888,6 +2236,6 @@ export const handlers = [
       },
     ]),
   ),
-]
+];
 
-export const server = setupServer(...handlers)
+export const server = setupServer(...handlers);

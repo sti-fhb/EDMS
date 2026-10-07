@@ -600,3 +600,37 @@ async def test_審核者正常時不標示不可達(db):
     act = await _svc.list_activity(db, user_id="ed395d5", roles=[DM_EDITOR])
     row = next(a for a in act.author if a.doc_id == "DM-SOP-000564")
     assert row.party_unreachable is None
+
+
+# ── #554：退回原因的站內讀取端 ──────────────────────
+
+
+async def test_rejected_event_carries_reason(db):
+    """退回原因 MUST 隨 resolved 事件送到撰寫者與審核者兩側。
+
+    🔴 **本條守的是 #554 引入的一個回歸**：DOC_REJECT 範本內文原本帶
+    「退回原因：{reason}」，改為站內（MSG）後那封信不再寄出，而 `ActivityEvent`
+    當時**沒有 `reason` 欄位**——`DM_REVIEW.REASON` 照常寫入卻**沒有任何讀取端**。
+    撰寫者只知道「被退回」、不知道「為什麼」。
+
+    ⚠️ 只斷言 `status == "REJECTED"` 是不夠的（那是 #554 原本的寫法）：`submitted`
+    事件也帶同一個 status，而且**它的 reason 必須是 None**——同一個 `REASON` 欄位
+    在 OBSOLETE 的送審事件上是「廢止申請原因」（申請人自己寫的），混進來會誤導。
+    """
+    await _seed_user(db, "ed", "撰寫")
+    await _seed_user(db, "rev1", "審核")
+    await _doc(db, "DM-SOP-000560", status="DRAFT")
+    v = await _version(db, "DM-SOP-000560", "1.0", status="DRAFT")
+    r = await _review(db, "DM-SOP-000560", v.version_id, review_type="NEW", status="REJECTED")
+    r.reason = "版本號格式不符，請改為 1.0 並補上變更摘要"
+    r.complete_date = utcnow()
+    await db.flush()
+
+    for uid, roles, side in (("ed", [DM_EDITOR], "author"), ("rev1", [DM_REVIEWER], "reviewer")):
+        act = await _svc.list_activity(db, user_id=uid, roles=roles)
+        events = getattr(act, side)
+        resolved = [e for e in events if e.review_id == r.review_id and e.event_kind == "resolved"]
+        submitted = [e for e in events if e.review_id == r.review_id and e.event_kind == "submitted"]
+        assert len(resolved) == 1, f"{side}: 應有一個 resolved 事件"  # 母體錨點，避免下方恆真
+        assert resolved[0].reason == "版本號格式不符，請改為 1.0 並補上變更摘要", side
+        assert submitted and submitted[0].reason is None, f"{side}: submitted 事件不得帶 reason"
