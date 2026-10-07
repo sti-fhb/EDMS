@@ -536,6 +536,12 @@ export const handlers = [
           seen: 4,
           unseen: 6,
           rate: 0.4,
+          // 兩組刻意重疊：護理師 6 + 醫檢師 5 = 11 > 應看 10（有人身兼兩職），
+          // 用以驗畫面有把「分組加總 > 總計」講出來（#567 A）
+          groups: [
+            { label: "醫檢師", should_see: 5, seen: 1, unseen: 4, rate: 0.2 },
+            { label: "國防醫學院三軍總醫院松山分院．護理師", should_see: 6, seen: 3, unseen: 3, rate: 0.5 },
+          ],
         },
         {
           doc_id: "DM-OTHER-000009",
@@ -547,10 +553,22 @@ export const handlers = [
           seen: 0,
           unseen: 0,
           rate: null,
+          groups: [],
         },
       ],
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
-      summary: { total_docs: 2, overall_rate: 0.4, below_50_count: 1 },
+      // rated_docs=1：2 份文件中僅 1 份可計算閱讀率（另一份應看=0）——分子 below_50_count
+      // 的母體就是它，故統計卡分母用 rated_docs 而非 total_docs（#567 C）
+      summary: { total_docs: 2, rated_docs: 1, overall_rate: 0.4, below_50_count: 1 },
+      training_docs: [
+        {
+          doc_id: "DM-TRAINING-000001",
+          doc_name: "基礎輸血學",
+          category_name: "訓練教材",
+          current_version_no: "1.0",
+        },
+      ],
+      training_total: 1,
     }),
   ),
   http.get("/api/dm/kpi/documents/export", () =>
