@@ -11,7 +11,7 @@
 
 from collections.abc import Iterable
 
-from sqlalchemy import Row, Select, select
+from sqlalchemy import Row, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -98,10 +98,26 @@ class KpiRepository:
         )
 
     async def list_published_docs(
-        self, db: AsyncSession, *, keyword: str | None, category: str | None, only_training: bool = False
+        self,
+        db: AsyncSession,
+        *,
+        keyword: str | None,
+        category: str | None,
+        only_training: bool = False,
+        limit: int | None = None,
     ) -> list[Row]:
+        """符合條件之在架文件列；`limit` 落在 **SQL** 而非回傳後裁切。"""
         stmt = self.published_docs_select(keyword=keyword, category=category, only_training=only_training)
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return list((await db.execute(stmt)).all())
+
+    async def count_published_docs(
+        self, db: AsyncSession, *, keyword: str | None, category: str | None, only_training: bool = False
+    ) -> int:
+        """符合條件之在架文件數——**不取列**，供有上限的清單在不全撈的情況下報出真實總數。"""
+        stmt = self.published_docs_select(keyword=keyword, category=category, only_training=only_training)
+        return await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
 
     async def viewer_ids(self, db: AsyncSession) -> set[str]:
         """具 DM_VIEWER 角色且帳號有效（未刪除、未停用）之使用者集（應看母體）。
@@ -171,7 +187,7 @@ class KpiRepository:
         **略過**——其於 `visibility.audience_pair_match` 不賦予任何可見性，計入會灌大應看母體。
 
         回傳 `dict` 而非 `set`（#567 A）：值為顯示用組名，供 DM06 呈現逐組完成度。**迭代 dict
-        取得的即配對本身**，故既有的 `_pair_visible` 迴圈不受影響。名稱在原查詢中本就取出，
+        取得的即配對本身**，故 `service._pair_member_resolver` 的比對不受影響。名稱在原查詢中本就取出，
         先前只用來判斷是不是通用值、取完即丟。
         """
         ids = list(doc_ids)

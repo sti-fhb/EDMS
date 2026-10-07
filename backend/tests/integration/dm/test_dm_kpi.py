@@ -483,3 +483,20 @@ async def test_csv_不含訓練教材(db, client):
     text = (await client.get("/api/dm/kpi/documents/export", headers=_headers("adm"))).content.decode("utf-8-sig")
     assert "DM-SOP-000124" in text
     assert "DM-TRAINING-000903" not in text
+
+
+async def test_訓練教材超過上限時_清單被裁而總數仍為真實值(db, client, monkeypatch):
+    """上限只縮清單，`training_total` 必須仍是真實筆數（否則管理者不知道還有東西沒看到）。
+
+    ⚠️ 上限落在 SQL（`list_published_docs(limit=...)`），總數另走 `count_published_docs`。
+    若有人改回「全撈再切片」，本條仍會過——它守的是對外契約，不是查詢形狀；查詢形狀
+    由 `service._TRAINING_LIST_LIMIT` 的註解與 repository 的 docstring 說明。
+    """
+    monkeypatch.setattr("app.dm.kpi.service._TRAINING_LIST_LIMIT", 2)
+    await _seed_admin(db)
+    for n in range(3):
+        await _doc(db, f"DM-TRAINING-00091{n}", doc_name=f"教材{n}", category="TRAINING")
+
+    body = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()
+    assert len(body["training_docs"]) == 2
+    assert body["training_total"] == 3

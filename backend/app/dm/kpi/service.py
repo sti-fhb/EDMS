@@ -10,7 +10,7 @@
 
 import csv
 import io
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,8 @@ from app.dm.kpi.schemas import KpiAudienceGroup, KpiDocItem, KpiListResponse, Kp
 from app.dm.notify.service import DmNotifier
 from app.dm.roles.authz import DM_ADMIN, has_role
 
+# ⚠️ 新增任何取自 `DM_TAG.TAG_NAME` 的欄位（如逐組明細之組名）時**一律經 `sanitize_csv_cell`**：
+# 標籤名稱由 DP 後台自由輸入、無字元限制，一個叫 `=HYPERLINK(...)` 的單位標籤會直接成為公式。
 _CSV_HEADERS = ["文件編號", "文件名稱", "分類", "目前版本", "應看", "已看", "未看", "閱讀率"]
 _TPL_WEEKLY = "KPI_WEEKLY"
 _TPL_UNREAD = "UNREAD_REMIND"
@@ -31,9 +33,12 @@ _DASHBOARD_PATH = "/dm/kpi"
 #: 可見對象配對 `(單位 tag_id, 職位 tag_id)`；通用值（「全單位」/「全體」）已正規化為 `None`。
 _Pair = tuple[int | None, int | None]
 
-#: 訓練教材清單之回傳上限。該區不含統計、只是讓管理者看得到教材存在，故不另做一套分頁；
-#: 但仍設上限——無上限清單正是 #563 的形狀，不在同一個模組再造一個。超出時以
-#: `training_total` 告知實際筆數。
+#: 訓練教材清單之上限。該區不含統計、只是讓管理者看得到教材存在，故不另做一套分頁；
+#: 但仍設上限——無上限清單正是 #563 的形狀，不在同一個模組再造一個。
+#:
+#: ⚠️ 上限**落在 SQL**（`list_published_docs(limit=...)`），不是撈回來再切片——後者只縮小
+#: 回應、DB 仍是全量讀取，那個「形狀」就還在，而註解會讓下一個人以為已經擋住了。
+#: 真實總數另以 `count_published_docs` 取得，故 `training_total` 不受上限影響。
 _TRAINING_LIST_LIMIT = 200
 
 
@@ -88,25 +93,45 @@ def _single_pair_visible(du: int | None, dp: int | None, user_pairs: set[tuple[i
     return False
 
 
-def _pair_visible(doc_pairs: Mapping[_Pair, str], user_pairs: set[tuple[int | None, int]]) -> bool:
-    """此文件之**任一**可見對象配對是否涵蓋該使用者。
+def _pair_member_resolver(
+    viewer_ids: Collection[str], viewer_tags: Mapping[str, set[tuple[int | None, int]]]
+) -> Callable[[_Pair], frozenset[str]]:
+    """回傳「配對 → 符合該配對之閱覽者集」之記憶化查詢函式。
 
-    `doc_pairs` 為 `{配對: 組名}`——迭代 dict 取得的即配對本身，組名於此不參與判定。
+    同一批文件的可見對象配對高度重複（單位 × 職位 的相異組合遠少於文件數），而每次比對
+    的成本與閱覽者數成正比。逐文件各自比對是 `文件數 × 閱覽者數 × 每份組數`；跨文件共用
+    快取後降為 `相異配對數 × 閱覽者數`。
+
+    ⚠️ **快取只在單次 `_compute` 內有效**（隨本 closure 生滅）。授權隨時可能異動，跨請求
+    保留會讓 KPI 停在舊的應看名單上——而那種錯誤不會有任何徵兆。
+
+    `viewer_ids` 標 `Collection` 而非 `Iterable`：本函式會重複迭代它，傳 generator 會讓
+    第二個配對起拿到空集且**不報錯**。
     """
-    return any(_single_pair_visible(du, dp, user_pairs) for du, dp in doc_pairs)
+    cache: dict[_Pair, frozenset[str]] = {}
+
+    def members_of(pair: _Pair) -> frozenset[str]:
+        hit = cache.get(pair)
+        if hit is None:
+            hit = frozenset(
+                uid for uid in viewer_ids if _single_pair_visible(pair[0], pair[1], viewer_tags.get(uid, frozenset()))
+            )
+            cache[pair] = hit
+        return hit
+
+    return members_of
 
 
 def _audience_breakdown(
     doc_pairs: Mapping[_Pair, str],
     *,
-    viewer_ids: Iterable[str],
-    viewer_tags: Mapping[str, set[tuple[int | None, int]]],
+    members_of: Callable[[_Pair], frozenset[str]],
     readers: set[str],
 ) -> tuple[set[str], list[KpiAudienceGroup]]:
-    """單趟掃出「去重後的應看集」與「逐組統計」（#567 A）。
+    """由各組成員集組出「去重後的應看集」與「逐組統計」（#567 A）。
 
-    刻意一次掃完而非「總計掃一次、每組各掃一次」：後者是 O(閱覽者 × 組數) 次完整比對，
-    而本迴圈每位閱覽者只取一次授權集。
+    成員判定委派給 `members_of`（見 `_pair_member_resolver`），本函式只做集合運算，
+    故同一個配對在多份文件上只比對一次。
 
     ## 逐組加總會大於去重總計
 
@@ -116,32 +141,28 @@ def _audience_breakdown(
 
     Args:
         doc_pairs: 該文件之 `{(單位, 職位): 組名}`，通用值已正規化為 `None`。
-        viewer_ids: 應看母體（具 DM_VIEWER 且帳號有效者）。
-        viewer_tags: 各閱覽者之授權配對集；無授權者可不出現。
+        members_of: 配對 → 符合之閱覽者集。
         readers: 該文件目前發布版之 distinct 下載者。
 
     Returns:
         (去重後之應看集, 逐組統計依組名排序)。
     """
     members: set[str] = set()
-    per_pair: dict[_Pair, set[str]] = {pair: set() for pair in doc_pairs}
-    for user_id in viewer_ids:
-        user_pairs = viewer_tags.get(user_id, frozenset())
-        for pair in doc_pairs:
-            if _single_pair_visible(pair[0], pair[1], user_pairs):
-                per_pair[pair].add(user_id)
-                members.add(user_id)
-    groups = [
-        KpiAudienceGroup(
-            label=label,
-            should_see=len(group_members),
-            seen=len(group_members & readers),
-            unseen=len(group_members - readers),
-            # 該組無人 → None（「無對應閱覽者」），不是 0%——與文件層 AC3a 同語意
-            rate=(len(group_members & readers) / len(group_members)) if group_members else None,
+    groups: list[KpiAudienceGroup] = []
+    for pair, label in doc_pairs.items():
+        group_members = members_of(pair)
+        members |= group_members
+        seen = len(group_members & readers)
+        groups.append(
+            KpiAudienceGroup(
+                label=label,
+                should_see=len(group_members),
+                seen=seen,
+                unseen=len(group_members) - seen,
+                # 該組無人 → None（「無對應閱覽者」），不是 0%——與文件層 AC3a 同語意
+                rate=(seen / len(group_members)) if group_members else None,
+            )
         )
-        for label, group_members in ((doc_pairs[pair], per_pair[pair]) for pair in doc_pairs)
-    ]
     groups.sort(key=lambda g: g.label)  # 輸出穩定：同一份資料兩次請求順序一致
     return members, groups
 
@@ -165,7 +186,7 @@ class KpiService:
             raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
 
     async def _compute(self, db: AsyncSession, *, keyword: str | None, category: str | None) -> list[_DocKpi]:
-        """算出（符合條件之）全部已發布文件之逐文件 KPI。
+        """算出（符合條件之）統計母體文件之逐文件 KPI。
 
         **母體不含 TRAINING**（#567 B）——其閱讀由教育訓練模組追蹤，於此計算會固定低報。
         本方法是儀表板 / CSV / 週報總數 / 未讀提醒四個出口的共同來源，故排除只需做在這裡一處。
@@ -177,12 +198,12 @@ class KpiService:
         doc_aud = await self._repo.doc_audience(db, doc_ids)
         reads = await self._repo.reads_current(db, doc_ids)
 
+        # 跨文件共用：同一組可見對象配對只比對一次（見 `_pair_member_resolver`）
+        members_of = _pair_member_resolver(viewer_ids, viewer_tags)
         stats: list[_DocKpi] = []
         for d in docs:
             readers = reads.get(d.doc_id, set())
-            members, groups = _audience_breakdown(
-                doc_aud.get(d.doc_id, {}), viewer_ids=viewer_ids, viewer_tags=viewer_tags, readers=readers
-            )
+            members, groups = _audience_breakdown(doc_aud.get(d.doc_id, {}), members_of=members_of, readers=readers)
             should_see = len(members)
             seen = len(members & readers)
             rate = (seen / should_see) if should_see > 0 else None
@@ -248,7 +269,12 @@ class KpiService:
             )
             for s in page_stats
         ]
-        training_rows = await self._repo.list_published_docs(db, keyword=keyword, category=category, only_training=True)
+        training_rows = await self._repo.list_published_docs(
+            db, keyword=keyword, category=category, only_training=True, limit=_TRAINING_LIST_LIMIT
+        )
+        training_total = await self._repo.count_published_docs(
+            db, keyword=keyword, category=category, only_training=True
+        )
         return KpiListResponse(
             data=data,
             meta={"total": total, "page": page, "limit": limit, "total_pages": total_pages},
@@ -260,9 +286,9 @@ class KpiService:
                     category_name=r.category_name,
                     current_version_no=r.current_version_no,
                 )
-                for r in training_rows[:_TRAINING_LIST_LIMIT]
+                for r in training_rows
             ],
-            training_total=len(training_rows),
+            training_total=training_total,
         )
 
     async def export_csv(
@@ -290,7 +316,7 @@ class KpiService:
         return buf.getvalue().encode("utf-8-sig")
 
     async def run_weekly(self, db: AsyncSession) -> WeeklyRunResult:
-        """SCHDM001 每週核心（FR-004~006）：算全部已發布文件 KPI → 寄 KPI 週報 + 未讀提醒。
+        """SCHDM001 每週核心（FR-004~006）：算統計母體文件（不含訓練教材）KPI → 寄 KPI 週報 + 未讀提醒。
 
         逐位收件人於執行當下算好內容後逐一固定 params enqueue（平台不做寄送時組信）。範本停用時
         平台端 skip、不寄（本方法照常呼叫，queued 計數自然為 0）。
@@ -320,7 +346,7 @@ class KpiService:
         return result.queued_count
 
     async def _send_unread_reminders(self, db: AsyncSession, *, stats: Sequence[_DocKpi]) -> int:
-        """未讀提醒：對每位有未看文件之閱覽者寄一封彙整信（涵蓋全部已發布文件）。無未看者不寄。"""
+        """未讀提醒：對每位有未看文件之閱覽者寄一封彙整信（涵蓋統計母體之全部文件，不含訓練教材）。無未看者不寄。"""
         viewer_unseen: dict[str, list[str]] = {}
         for s in stats:
             for user_id in s.unseen_members:

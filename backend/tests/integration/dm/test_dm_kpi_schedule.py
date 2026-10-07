@@ -177,8 +177,9 @@ async def test_training_不計入週報總數_也不寄未讀提醒(db):
     於此統計會固定低報。而比「數字難看」要緊的是：不能拿它去催閱覽者——那等於把 ET 的
     教材透過 DM 的管道寄錯信。
 
-    ⚠️ 本測試是 TRAINING 排除的**唯一**守門（既有 17 條 KPI 測試全用 `category="SOP"`，
-    把排除邏輯整段拿掉它們照樣全綠）。
+    ⚠️ 本測試是 TRAINING 不進**未讀提醒**（四個出口中唯一會對外寄信者）的唯一守門。
+    清單與 CSV 另有 `test_dm_kpi.py` 的兩條，但**既有 17 條 KPI 測試全用 `category="SOP"`**，
+    把排除邏輯整段拿掉它們照樣全綠——守門只有本檔與那兩條。
     """
     await _user(db, "adm1", "管甲")
     await _grant(db, "adm1", DM_ADMIN)

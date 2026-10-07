@@ -68,8 +68,11 @@ function AudienceGroupRows({ doc }: { doc: KpiDocItem }) {
     `故分組「應看」加總（${groupSum}）可能大於本文件應看（${doc.should_see}，已去重）。`
   return (
     <>
-      {doc.groups.map((g) => (
-        <TableRow key={`${doc.doc_id}-${g.label}`} sx={{ backgroundColor: "action.hover" }}>
+      {doc.groups.map((g, idx) => (
+        // key 不用 label：標籤名由 DP 後台自由輸入、無字元限制，職位叫「松山．護理師」時
+        // 會與單位「松山」＋職位「護理師」的組名逐字相同而撞 key。本清單由後端依組名排序、
+        // 不可拖拉也不會插入，故索引是穩定鍵。
+        <TableRow key={`${doc.doc_id}-${idx}`} sx={{ backgroundColor: "action.hover" }}>
           <TableCell />
           <TableCell colSpan={3} sx={{ pl: 3 }}>
             <Typography variant="body2">{g.label}</Typography>
@@ -136,7 +139,7 @@ function TrainingSection({ docs, total }: { docs: KpiTrainingDoc[]; total: numbe
       </Table>
       {docs.length < total && (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-          僅顯示前 {docs.length} 份，請以關鍵字或分類縮小範圍。
+          僅顯示前 {docs.length} 份，請以關鍵字縮小範圍（本區僅訓練教材一種分類，改分類無法縮小）。
         </Typography>
       )}
     </Paper>
