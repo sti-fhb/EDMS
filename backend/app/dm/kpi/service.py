@@ -10,7 +10,7 @@
 
 import csv
 import io
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.dm.kpi.repository import KpiRepository
-from app.dm.kpi.schemas import KpiDocItem, KpiListResponse, KpiSummary
+from app.dm.kpi.schemas import KpiAudienceGroup, KpiDocItem, KpiListResponse, KpiSummary, KpiTrainingDoc
 from app.dm.notify.service import DmNotifier
 from app.dm.roles.authz import DM_ADMIN, has_role
 
@@ -27,6 +27,14 @@ _CSV_HEADERS = ["文件編號", "文件名稱", "分類", "目前版本", "應�
 _TPL_WEEKLY = "KPI_WEEKLY"
 _TPL_UNREAD = "UNREAD_REMIND"
 _DASHBOARD_PATH = "/dm/kpi"
+
+#: 可見對象配對 `(單位 tag_id, 職位 tag_id)`；通用值（「全單位」/「全體」）已正規化為 `None`。
+_Pair = tuple[int | None, int | None]
+
+#: 訓練教材清單之回傳上限。該區不含統計、只是讓管理者看得到教材存在，故不另做一套分頁；
+#: 但仍設上限——無上限清單正是 #563 的形狀，不在同一個模組再造一個。超出時以
+#: `training_total` 告知實際筆數。
+_TRAINING_LIST_LIMIT = 200
 
 
 @dataclass
@@ -43,6 +51,7 @@ class _DocKpi:
     unseen: int
     rate: float | None
     unseen_members: set[str] = field(default_factory=set)
+    groups: list[KpiAudienceGroup] = field(default_factory=list)  # 逐可見對象組（#567 A）
 
 
 @dataclass
@@ -54,14 +63,13 @@ class WeeklyRunResult:
     unread_notified: int  # 收到未讀提醒之閱覽者數（實際排入者）
 
 
-def _pair_visible(doc_pairs: set[tuple[int | None, int | None]], user_pairs: set[tuple[int | None, int]]) -> bool:
-    """此文件之可見對象配對是否涵蓋該使用者（#437）。
+def _single_pair_visible(du: int | None, dp: int | None, user_pairs: set[tuple[int | None, int]]) -> bool:
+    """**單一**文件配對 (du, dp) 是否涵蓋該使用者（#437）。
 
     Python 版之判定，語意須與 SQL 版 `visibility.audience_pair_match` **完全一致**：
     文件端之通用值已由 `doc_audience` 正規化為 `None`（「全單位」/「全體」）。
 
-        可見 ⟺ ∃ 文件配對 (du, dp)：
-                (du is None AND dp is None)                      -- 全系統，不需任何授權
+        可見 ⟺ (du is None AND dp is None)            -- 全系統，不需任何授權
                 OR ∃ 使用者配對 (uu, up)：
                      (du is None OR du == uu) AND (dp is None OR dp == up)
 
@@ -69,15 +77,73 @@ def _pair_visible(doc_pairs: set[tuple[int | None, int | None]], user_pairs: set
     ——與 SQL 端 NULL 比較的行為相同。
 
     ⚠️ 兩份實作各自存在是因為 KPI 需在 Python 層對「文件 × 閱覽者」做交叉統計；改動判定規則時
-    **兩邊都要改**。`test_dm_kpi.py` 之配對案例即為此而設。
+    **兩邊都要改**。`test_dm_kpi.py` 之配對案例與 `test_dm_kpi_audience_groups.py` 之逐案
+    參數化測試即為此而設。
     """
-    for du, dp in doc_pairs:
-        if du is None and dp is None:
+    if du is None and dp is None:
+        return True
+    for uu, up in user_pairs:
+        if (du is None or du == uu) and (dp is None or dp == up):
             return True
-        for uu, up in user_pairs:
-            if (du is None or du == uu) and (dp is None or dp == up):
-                return True
     return False
+
+
+def _pair_visible(doc_pairs: Mapping[_Pair, str], user_pairs: set[tuple[int | None, int]]) -> bool:
+    """此文件之**任一**可見對象配對是否涵蓋該使用者。
+
+    `doc_pairs` 為 `{配對: 組名}`——迭代 dict 取得的即配對本身，組名於此不參與判定。
+    """
+    return any(_single_pair_visible(du, dp, user_pairs) for du, dp in doc_pairs)
+
+
+def _audience_breakdown(
+    doc_pairs: Mapping[_Pair, str],
+    *,
+    viewer_ids: Iterable[str],
+    viewer_tags: Mapping[str, set[tuple[int | None, int]]],
+    readers: set[str],
+) -> tuple[set[str], list[KpiAudienceGroup]]:
+    """單趟掃出「去重後的應看集」與「逐組統計」（#567 A）。
+
+    刻意一次掃完而非「總計掃一次、每組各掃一次」：後者是 O(閱覽者 × 組數) 次完整比對，
+    而本迴圈每位閱覽者只取一次授權集。
+
+    ## 逐組加總會大於去重總計
+
+    一位閱覽者可同時符合同一份文件的多組配對（身兼兩職、而文件兩組都掛）。裁示
+    （2026-10-07）為**各組分母都含他、文件總計去重**——「這一組的完成度」對兩組而言
+    該員都確實是應讀者。⚠️ 呈現端必須標註兩者對不起來，否則讀者會判定成算錯。
+
+    Args:
+        doc_pairs: 該文件之 `{(單位, 職位): 組名}`，通用值已正規化為 `None`。
+        viewer_ids: 應看母體（具 DM_VIEWER 且帳號有效者）。
+        viewer_tags: 各閱覽者之授權配對集；無授權者可不出現。
+        readers: 該文件目前發布版之 distinct 下載者。
+
+    Returns:
+        (去重後之應看集, 逐組統計依組名排序)。
+    """
+    members: set[str] = set()
+    per_pair: dict[_Pair, set[str]] = {pair: set() for pair in doc_pairs}
+    for user_id in viewer_ids:
+        user_pairs = viewer_tags.get(user_id, frozenset())
+        for pair in doc_pairs:
+            if _single_pair_visible(pair[0], pair[1], user_pairs):
+                per_pair[pair].add(user_id)
+                members.add(user_id)
+    groups = [
+        KpiAudienceGroup(
+            label=label,
+            should_see=len(group_members),
+            seen=len(group_members & readers),
+            unseen=len(group_members - readers),
+            # 該組無人 → None（「無對應閱覽者」），不是 0%——與文件層 AC3a 同語意
+            rate=(len(group_members & readers) / len(group_members)) if group_members else None,
+        )
+        for label, group_members in ((doc_pairs[pair], per_pair[pair]) for pair in doc_pairs)
+    ]
+    groups.sort(key=lambda g: g.label)  # 輸出穩定：同一份資料兩次請求順序一致
+    return members, groups
 
 
 def _pct(rate: float | None) -> str:
@@ -99,7 +165,11 @@ class KpiService:
             raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
 
     async def _compute(self, db: AsyncSession, *, keyword: str | None, category: str | None) -> list[_DocKpi]:
-        """算出（符合條件之）全部已發布文件之逐文件 KPI。"""
+        """算出（符合條件之）全部已發布文件之逐文件 KPI。
+
+        **母體不含 TRAINING**（#567 B）——其閱讀由教育訓練模組追蹤，於此計算會固定低報。
+        本方法是儀表板 / CSV / 週報總數 / 未讀提醒四個出口的共同來源，故排除只需做在這裡一處。
+        """
         viewer_ids = await self._repo.viewer_ids(db)
         viewer_tags = await self._repo.viewer_audience_tags(db, viewer_ids)
         docs = await self._repo.list_published_docs(db, keyword=keyword, category=category)
@@ -109,12 +179,12 @@ class KpiService:
 
         stats: list[_DocKpi] = []
         for d in docs:
-            doc_pairs = doc_aud.get(d.doc_id, set())
-            members = {u for u in viewer_ids if _pair_visible(doc_pairs, viewer_tags.get(u, frozenset()))}
             readers = reads.get(d.doc_id, set())
-            seen_members = members & readers
+            members, groups = _audience_breakdown(
+                doc_aud.get(d.doc_id, {}), viewer_ids=viewer_ids, viewer_tags=viewer_tags, readers=readers
+            )
             should_see = len(members)
-            seen = len(seen_members)
+            seen = len(members & readers)
             rate = (seen / should_see) if should_see > 0 else None
             stats.append(
                 _DocKpi(
@@ -128,6 +198,7 @@ class KpiService:
                     unseen=should_see - seen,
                     rate=rate,
                     unseen_members=members - readers,
+                    groups=groups,
                 )
             )
         return stats
@@ -137,7 +208,9 @@ class KpiService:
         rated = [s.rate for s in stats if s.rate is not None]  # 排除應看=0（AC3a）
         overall = (sum(rated) / len(rated)) if rated else None
         below_50 = sum(1 for r in rated if r < 0.5)
-        return KpiSummary(total_docs=len(stats), overall_rate=overall, below_50_count=below_50)
+        # `rated_docs` 是 `below_50_count` 的分母：兩者同母體（排除應看=0），而 `total_docs`
+        # 含全部文件。並列顯示時若拿 total_docs 當分母，分子分母母體不同（#567 C）。
+        return KpiSummary(total_docs=len(stats), rated_docs=len(rated), overall_rate=overall, below_50_count=below_50)
 
     async def search(
         self,
@@ -149,7 +222,11 @@ class KpiService:
         page: int,
         limit: int,
     ) -> KpiListResponse:
-        """DM06 儀表板（FR-002，DM_ADMIN）：逐文件 KPI（後端分頁）+ 統計卡摘要。"""
+        """DM06 儀表板（FR-002，DM_ADMIN）：逐文件 KPI（後端分頁）+ 統計卡摘要 + 訓練教材清單。
+
+        訓練教材另成一區、**不計任何閱讀統計**（#567 B）；該區不分頁，但有上限，超出時
+        `training_total` 仍為實際筆數。
+        """
         self._ensure_admin(roles)
         stats = await self._compute(db, keyword=keyword, category=category)
         summary = self._summary(stats)
@@ -167,13 +244,25 @@ class KpiService:
                 seen=s.seen,
                 unseen=s.unseen,
                 rate=s.rate,
+                groups=s.groups,
             )
             for s in page_stats
         ]
+        training_rows = await self._repo.list_published_docs(db, keyword=keyword, category=category, only_training=True)
         return KpiListResponse(
             data=data,
             meta={"total": total, "page": page, "limit": limit, "total_pages": total_pages},
             summary=summary,
+            training_docs=[
+                KpiTrainingDoc(
+                    doc_id=r.doc_id,
+                    doc_name=r.doc_name,
+                    category_name=r.category_name,
+                    current_version_no=r.current_version_no,
+                )
+                for r in training_rows[:_TRAINING_LIST_LIMIT]
+            ],
+            training_total=len(training_rows),
         )
 
     async def export_csv(

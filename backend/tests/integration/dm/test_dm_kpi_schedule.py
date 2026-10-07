@@ -54,12 +54,12 @@ async def _audience(db, user_id, tag_name):
     await db.flush()
 
 
-async def _doc(db, doc_id, tag_name):
+async def _doc(db, doc_id, tag_name, category="SOP"):
     db.add(
         DmDocument(
             doc_id=doc_id,
             doc_name=doc_id,
-            category_code="SOP",
+            category_code=category,
             status="PUBLISHED",
             created_user="author",
             created_date=utcnow(),
@@ -168,3 +168,28 @@ async def test_no_viewers_no_unread(db):
     result = await KpiService().run_weekly(db)
     assert await _pending_recipients(db, "UNREAD_REMIND") == set()
     assert result.weekly_queued == 1  # 仍寄週報予管理者
+
+
+async def test_training_不計入週報總數_也不寄未讀提醒(db):
+    """訓練教材（TRAINING）不進 KPI 母體（#567 B）。
+
+    理由是 ET 代學員取檔**刻意不寫** `DM_DOC_READ`（`app/et/common/dm_client.py` D-2），
+    於此統計會固定低報。而比「數字難看」要緊的是：不能拿它去催閱覽者——那等於把 ET 的
+    教材透過 DM 的管道寄錯信。
+
+    ⚠️ 本測試是 TRAINING 排除的**唯一**守門（既有 17 條 KPI 測試全用 `category="SOP"`，
+    把排除邏輯整段拿掉它們照樣全綠）。
+    """
+    await _user(db, "adm1", "管甲")
+    await _grant(db, "adm1", DM_ADMIN)
+    await _user(db, "v1", "閱甲")
+    await _grant(db, "v1", DM_VIEWER)
+    await _audience(db, "v1", "護理師")
+    # 掛護理師且 v1 未看——若未排除，v1 必定收到一封催他讀這份教材的信
+    await _doc(db, "DM-TRAINING-000901", "護理師", category="TRAINING")
+
+    result = await KpiService().run_weekly(db)
+
+    assert result.total_docs == 0, "訓練教材不計入週報總文件數"
+    assert result.unread_notified == 0
+    assert await _pending_recipients(db, "UNREAD_REMIND") == set(), "不得以訓練教材催閱覽者"
