@@ -342,21 +342,29 @@ function GroupEditDialog({
     setSelected((prev) => prev.map((v, i) => (i === idx ? encodeAudiencePair(unitCode, roleCode) : v)))
   const removePair = (idx: number) => setSelected((prev) => prev.filter((_, i) => i !== idx))
   /**
-   * 送出前濾掉不完整的**新增**列。
-   *
-   * 兩種「不完整」要分開處理：使用者新加卻沒選完的列不送出（半組配對在後端不生效，送出只會
-   * 讓「已指派」多一筆看似有效的資料）；而既有的「單位未指定」列必須原樣保留——那是導入配對前
-   * 的授權，UI 不該在使用者只是改別列時把它清掉。
+   * 按過儲存後才標紅框——一開視窗、剛按「新增」就整片紅，等於在使用者還沒做錯前就責備他。
+   * 之後隨選隨更新：補選完的欄位紅框立即消失。
    */
-  const completePairs = () =>
-    selected.filter((v) => {
-      const [unitCode, roleCode] = decodeAudiencePair(v)
-      return roleCode !== "" && (unitCode !== "" || initialGroups.has(v))
-    })
-  const hasIncompleteNewPair = selected.some((v) => {
+  const [showErrors, setShowErrors] = useState(false)
+  /**
+   * **新增**的列兩欄沒選完（含兩欄皆空）。
+   *
+   * 兩種「不完整」要分開處理：使用者新加卻沒選完的列**擋下儲存**、以紅框標出，由使用者決定
+   * 補選或刪除（手測回饋：原本靜默略過，使用者以為存了其實沒存）；而既有的「單位未指定」列
+   * 必須原樣保留——那是導入配對前的授權，UI 不該在使用者只是改別列時把它清掉或擋住。
+   */
+  const isIncompleteNew = (v: string) => {
     const [unitCode, roleCode] = decodeAudiencePair(v)
     return (roleCode === "" || unitCode === "") && !initialGroups.has(v)
-  })
+  }
+  const hasIncompleteNewPair = selected.some(isIncompleteNew)
+  const handleSave = () => {
+    if (paired && hasIncompleteNewPair) {
+      setShowErrors(true)
+      return
+    }
+    onSave(selected)
+  }
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
@@ -373,6 +381,7 @@ function GroupEditDialog({
             </Typography>
             {selected.map((value, idx) => {
               const [unitCode, roleCode] = decodeAudiencePair(value)
+              const flag = showErrors && isIncompleteNew(value)
               return (
                 <Stack key={`${value}-${idx}`} direction="row" spacing={1} alignItems="center">
                   <TextField
@@ -380,6 +389,7 @@ function GroupEditDialog({
                     size="small"
                     label="單位"
                     sx={{ flex: 1 }}
+                    error={flag && unitCode === ""}
                     value={unitCode}
                     onChange={(e) => updatePair(idx, e.target.value, roleCode)}
                   >
@@ -394,6 +404,7 @@ function GroupEditDialog({
                     size="small"
                     label="職位"
                     sx={{ flex: 1 }}
+                    error={flag && roleCode === ""}
                     value={roleCode}
                     onChange={(e) => updatePair(idx, unitCode, e.target.value)}
                   >
@@ -414,9 +425,9 @@ function GroupEditDialog({
                 新增{dimensionLabel}
               </Button>
             </Box>
-            {hasIncompleteNewPair && (
-              <Typography variant="caption" color="warning.main">
-                有未選完的列（單位與職位皆須選取），儲存時將略過。
+            {showErrors && hasIncompleteNewPair && (
+              <Typography variant="caption" color="error" role="alert">
+                有未選完的列（紅框處）：請補選單位與職位，或按右側刪除鈕移除該列。
               </Typography>
             )}
           </Stack>
@@ -434,7 +445,7 @@ function GroupEditDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>取消</Button>
-        <Button variant="contained" onClick={() => onSave(paired ? completePairs() : selected)}>
+        <Button variant="contained" onClick={handleSave}>
           儲存
         </Button>
       </DialogActions>
