@@ -21,6 +21,7 @@ from app.dm.catalog.models import DmTag
 from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.obsolete.service import ObsoleteService
+from app.dm.personal.service import PersonalService
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, DM_REVIEWER, DM_VIEWER
@@ -31,6 +32,7 @@ pytestmark = pytest.mark.integration
 
 _svc = ObsoleteService()
 _rsvc = ReviewCenterService()
+_psvc = PersonalService()
 _PDF = "application/pdf"
 
 
@@ -153,6 +155,10 @@ async def test_initiate_transits_pending_obsolete_and_notifies(db):
     # #554：OBS_SUBMIT 改為 MSG → 不排入 Email。審核者改於簽核中心 / 我的文件動態看到。
     assert result.notified == 0
     assert await _email_count(db, "OBS_SUBMIT", "rev1@e.com") == 0
+
+    # ⭐ 那封信去哪了：審核者於**簽核中心待簽核清單**看得到此廢止送審項
+    pending = (await _rsvc.list_pending(db, op=_op("rev1"), page=1, limit=20))["data"]
+    assert any(p.review_id == result.review_id for p in pending), "廢止送審後審核者應於簽核中心看到"
 
     # 🔴 **本次改動損失的覆蓋，刻意記在這裡而非默默刪掉**
     #
@@ -348,6 +354,12 @@ async def test_approve_obsolete_transits_document_obsolete(db):
     # #554：OBS_APPROVE 改為 MSG → 不寄 Email；申請人改於「我的文件動態」看到（標籤「已廢止」）
     assert await _email_count(db, "OBS_APPROVE", "ed@e.com") == 0
 
+    # ⭐ 申請人於「我的文件動態」見此事件（前端把 OBSOLETE + APPROVED 標為「已廢止」）
+    act = await _psvc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    assert any(a.review_id == review_id and a.status == "APPROVED" for a in act.author), (
+        "廢止核准後申請人應於我的文件動態看到此事件"
+    )
+
 
 async def test_reject_obsolete_restores_published(db):
     await _seed_user(db, "ed", "撰寫", email="ed@e.com")
@@ -363,6 +375,12 @@ async def test_reject_obsolete_restores_published(db):
     assert review.status == "REJECTED"
     # #554：OBS_REJECT 改為 MSG → 不寄 Email；申請人改於「我的文件動態」看到（標籤「已退回」）
     assert await _email_count(db, "OBS_REJECT", "ed@e.com") == 0
+
+    # ⭐ 申請人於「我的文件動態」見此事件（OBSOLETE + REJECTED → 標籤「已退回」）
+    act = await _psvc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    assert any(a.review_id == review_id and a.status == "REJECTED" for a in act.author), (
+        "廢止退回後申請人應於我的文件動態看到此事件"
+    )
 
 
 # ── 廢止附件下載授權（SA 裁示 Q1=C）──────────────────────

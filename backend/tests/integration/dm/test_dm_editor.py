@@ -17,6 +17,7 @@ from app.core.utils import utcnow
 from app.dm.catalog.models import DmFunc, DmTag
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.editor.service import EditorService
+from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmReview
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
@@ -464,6 +465,13 @@ async def test_submit_new_creates_review_and_transitions_and_notifies(db):
         text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'DOC_SUBMIT\' AND "RECIPIENT"=\'rev@e.com\'')
     )
     assert n == 0
+
+    # ⭐ 那封信去哪了：審核者於**簽核中心待簽核清單**看得到——站內取代 Email 的那一半，
+    # 斷言放在原本 email 斷言的同一處，讀者找「信去哪了」時就會看到答案。
+    # ⚠️ 斷言的是畫面會拿到的資料，不是「有沒有寄信」——後者改完之後永遠是 false，
+    # 拿它當通過條件等於沒測。
+    pending = (await ReviewCenterService().list_pending(db, op=_op("rev1"), page=1, limit=20))["data"]
+    assert any(p.review_id == res.review_id for p in pending), "送審後審核者應於簽核中心看到此項"
 
 
 async def test_submit_new_version_keeps_doc_published(db):

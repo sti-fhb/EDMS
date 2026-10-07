@@ -21,10 +21,11 @@ from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag
 from app.dm.document.file_paths import storage_root
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.personal.service import PersonalService
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.review.service import ReviewService
-from app.dm.roles.authz import DM_REVIEWER, DM_VIEWER
+from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
@@ -335,6 +336,13 @@ async def test_reject_first_version_doc_to_draft(db):
         text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'DOC_REJECT\' AND "RECIPIENT"=\'ed@e.com\'')
     )
     assert n == 0
+
+    # ⭐ 那封信去哪了：撰寫者於「我的文件動態」（撰寫者視角）見此退回事件。
+    # 前端把 resolved + REJECTED 映射為標籤「已退回」（dm/personal/schemas.ts）。
+    act = await PersonalService().list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    assert any(a.review_id == r.review_id and a.status == "REJECTED" for a in act.author), (
+        "退回後撰寫者應於我的文件動態看到此事件"
+    )
 
 
 async def test_reject_new_version_keeps_doc_published(db):
