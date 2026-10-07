@@ -220,8 +220,18 @@ class ApprovalSearchReq(BaseModel):
     #: （`query_rules.ensure_course_filter_allowed`）。前端下拉本來就只列得出自己的課，
     #: 那道閘是防繞過——少了它，教師可以不指名地撈出任一門課的全部通過者名單。
     course_id: Annotated[int | None, Field(default=None, ge=1, le=MAX_BIGINT)] = None
-    #: `PASS` / `FAIL`；`None` 為不限。
+    #: `PASS` / `FAIL`；`None` 為不限。對應 `ET_APPROVAL.RESULT`。
     result: Annotated[Literal["PASS", "FAIL"] | None, Field(default=None)] = None
+    #: 撤銷狀態篩選；`None` 為不限。對應 `ET_APPROVAL.IS_REVOKED`。
+    #:
+    #: 🔴 **與 `result` 正交，⛔ 不可合併成一個參數**（#548 裁示 6）。被撤銷的紀錄其
+    #: `RESULT` 仍是 `PASS` 或 `FAIL`——兩者從來不是同一個欄位的不同值。把「已撤銷」
+    #: 塞進 `result` 的值域正是改制前那個缺陷的成因：「僅通過」只比對 `RESULT`，於是
+    #: 會列出已撤銷的通過。
+    #:
+    #: 前端的單一下拉映射成參數對：全部結果 `(None, None)`、僅通過 `(PASS, False)`、
+    #: 僅不通過 `(FAIL, False)`、僅已撤銷 `(None, True)`。
+    revoked: Annotated[bool | None, Field(default=None)] = None
     page: Annotated[int, Field(default=1, ge=1)] = 1
     limit: Annotated[int, Field(default=20, ge=1, le=100)] = 20
 

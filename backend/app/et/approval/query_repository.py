@@ -22,7 +22,7 @@
 
 | 側 | 來源 | 條件 |
 |---|---|---|
-| **核可側** | `ET_APPROVAL` | 與 #464 之前**完全相同**（`visible_clause` + 關鍵字 + 課程 + 結果）|
+| **核可側** | `ET_APPROVAL` | 關鍵字 + 課程 + 結果 + 撤銷狀態（#548 起**無任何可見範圍條件**）|
 | **完課側** | `ET_ENROLLMENT` × `completed_pairs()` | 不需核可課程 + 全部項目完成 + **沒有核可紀錄** |
 
 因為結果是多欄 Row、不是 ORM 實體，這兩支查詢改由 `paginate_rows()` 分頁
@@ -53,7 +53,6 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, escape_like
 from app.core.like_escape import contains as like_contains
@@ -181,9 +180,9 @@ class EtApprovalQueryRepository:
         self,
         *,
         keyword: str | None,
-        visible: ColumnElement[bool],
         course_id: int | None = None,
         result: str | None = None,
+        revoked: bool | None = None,
     ) -> Select:
         """教師 / 管理者依學員**姓名或 Email** 與 / 或**課程**查詢的語句（未套 offset/limit）。
 
@@ -208,10 +207,15 @@ class EtApprovalQueryRepository:
 
         Args:
             keyword: 學員姓名或 Email 關鍵字，擇一命中即可；`None` 表不以關鍵字篩。
-            visible: `query_rules.visible_clause()` 的結果。
-            course_id: 選填的課程篩選；`None` 表不篩。非管理者的擁有權已由
-                `query_rules.ensure_course_filter_allowed` 在 service 擋下。
+            course_id: 選填的課程篩選；`None` 表不篩。
             result: 選填的結果篩選（`PASS` / `FAIL`）；`None` 表不篩。
+            revoked: 選填的撤銷狀態篩選；`None` 表不篩。**與 `result` 正交**
+                ——被撤銷的紀錄其 `RESULT` 仍是 `PASS` 或 `FAIL`，見下方該段的 🔴。
+
+        ⚠️ **本語句不再有任何可見範圍條件**（#548 裁示 1）。原本的 `visible` 參數承載
+        裁示 C 的結果分流，已隨 `query_rules.visible_clause()` 一併退役；欄位層的遮蔽
+        （`RESULT_NOTE` / `REVOKE_REASON`）改由 `query_service._enrich` 在取出後處理
+        ——那是**欄位**維度，不影響列的進出，所以不需要進 `WHERE`。
 
         Returns:
             兩側 `UNION ALL` 後已排序的 `Select`（欄位見 `_approval_projection`），
@@ -232,7 +236,6 @@ class EtApprovalQueryRepository:
                 # 一旦有人啟用該欄位，該學員的**所有核可紀錄會從連管理者的合規查詢裡一起
                 # 消失，且無任何訊號**。要改成不濾之前請先確認那是想要的結果。
                 DpUser.deleted == 0,
-                visible,
             )
         )
         completion_side = _completion_side(course_id=course_id)
@@ -300,6 +303,19 @@ class EtApprovalQueryRepository:
             # 而且**不選篩選時完全正常**，很容易被當成偶發。
             if result != APPROVAL_PASS:
                 completion_side = completion_side.where(false())
+        if revoked is not None:
+            # 🔴 `IS_REVOKED` 與 `RESULT` 是**兩個正交的維度**（#548 裁示 6）。
+            #
+            # 改制前這裡只有上面那段 `RESULT` 條件，於是「僅通過」會列出**已撤銷的通過**
+            # ——撤銷只設 `IS_REVOKED`，`RESULT` 仍是 `PASS`。諷刺的是已退役的
+            # `visible_clause` docstring 早就警告過同一個陷阱（「『通過』那一側必須同時
+            # 要求未撤銷」），但那道警告只套用在可見範圍，沒人把它套到結果篩選。
+            approval_side = approval_side.where(EtApproval.is_revoked.is_(revoked))
+            # 完課側同樣沒有 `IS_REVOKED` 欄：完課是事實事件，**不存在被撤銷的完課**。
+            # 故「僅未撤銷」全收、「僅已撤銷」全排除——與上面 `RESULT` 的處理同一形狀。
+            # ⛔ 不可把 `IS_REVOKED = false` 直接套在聯集上，完課列會被全數濾掉。
+            if revoked:
+                completion_side = completion_side.where(false())
         return _ordered(approval_side, completion_side)
 
     async def filter_course_options(self, db: AsyncSession, *, owner_id: str | None) -> list[tuple[int, str]]:
@@ -321,9 +337,12 @@ class EtApprovalQueryRepository:
         以 `ET_APPROVAL` 為母體同時解掉三件事：涵蓋已關閉課程、沒有「選了卻查無」的
         死選項、不隨課程總數無限成長。
 
-        ⚠️ **不套 `visible_clause`**。教師側已由 `owner_id` 限成自己的課（比那道條件更嚴），
-        管理者側本來就是 `true()`。硬套只會讓「通過且未撤銷」那一側把**他人**課程也拉進
-        教師的下拉——而那正是本功能不打算開放的東西。
+        ⚠️ **#548 起 `owner_id` 恆為 `None`**（裁示 4）：下拉列出所有有核可紀錄的課程，
+        不分 owner。原本「非管理者僅列自有課程」擋的是「不指名地整批取回他人課程名單」，
+        而裁示 3 讓留白查詢本身成為合法操作後，那道限制已無承重對象——留著只會讓同一份
+        資料在「用姓名查」與「用課程篩」兩條路上有兩種規則。
+
+        ⛔ 參數本身**保留**：日後若要再收斂，改呼叫端傳值即可，不必重寫查詢。
 
         ⚠️ **#464 起母體是「核可紀錄 ∪ 完課側」**：只看 `ET_APPROVAL` 的話，不需核可的課程
         **永遠選不到**——而那正是 #464 要納入的那些。完課側沿用 `_completion_side()`，

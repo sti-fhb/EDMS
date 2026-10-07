@@ -12,7 +12,9 @@
 
 ## SA 裁示（2026-09-21）
 
-- **Q1 = C**：教師（非管理者）依結果分流，見 `query_rules.visible_clause`
+- **Q1 = C**：教師（非管理者）依結果分流 ——⚠️ **已於 #548 裁示 1 推翻**：教師 ≡ 管理者，
+  全部課程、全部結果。保留下來的是**欄位**維度（`RESULT_NOTE` / `REVOKE_REASON` 仍限
+  owner + 管理者），見 `query_rules.can_see_private_notes`
 - **Q2 = A**：`keyword` 必填，去空白後為空視為未填（#436 起可為姓名或 Email）
   ——⚠️ **已於 #439 換手段**：改為「關鍵字與課程至少給一個」，並新增
   「非管理者只能依自己開設的課程篩選」。裁示 A 擋的**目的**（不可傾印員工名冊）
@@ -24,9 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.pagination import PaginatedResult, paginate_rows
 from app.et.approval.query_repository import EtApprovalQueryRepository
 from app.et.approval.query_rules import (
+    can_see_private_notes,
     ensure_course_filter_allowed,
     normalize_search_criteria,
-    visible_clause,
 )
 from app.et.approval.schemas import (
     ApprovalCourseOption,
@@ -52,6 +54,7 @@ class EtApprovalQueryService:
         keyword: str | None,
         course_id: int | None,
         result: str | None,
+        revoked: bool | None,
         page: int,
         limit: int,
     ) -> PaginatedResult[ApprovalQueryRow]:
@@ -89,7 +92,7 @@ class EtApprovalQueryService:
 
         stmt = self._repo.teacher_query_stmt(
             keyword=keyword,
-            visible=visible_clause(actor_id=actor_id, is_admin=admin),
+            revoked=revoked,
             course_id=course_id,
             result=result,
         )
@@ -165,12 +168,18 @@ class EtApprovalQueryService:
         wanted |= {r.revoked_by for r in core if r.revoked_by}
         people = await self._repo.user_names(db, list(wanted))
 
-        def note_of(row: _ApprovalCore) -> str | None:
-            """他人課程的考核評語一律不回傳。查無課程時 fail-closed（遮蔽）。"""
-            if is_admin:
-                return row.result_note
+        def sees_notes(row: _ApprovalCore) -> bool:
+            """這一列的兩個自由文字欄位是否對本查詢者可見。
+
+            ⛔ `result_note` 與 `revoke_reason` **共用這一支**，不得各寫一份——理由見
+            `query_rules.can_see_private_notes` 的 docstring。
+            """
             course = courses.get(row.course_id)
-            return row.result_note if course is not None and course.owner_id == actor_id else None
+            return can_see_private_notes(
+                course_owner_id=course.owner_id if course is not None else None,
+                actor_id=actor_id,
+                is_admin=is_admin,
+            )
 
         return [
             ApprovalQueryRow(
@@ -179,12 +188,15 @@ class EtApprovalQueryService:
                 course_id=r.course_id,
                 course_name=courses[r.course_id].name if r.course_id in courses else "",
                 result=r.result,
-                result_note=note_of(r),
+                result_note=r.result_note if sees_notes(r) else None,
                 approved_at=r.approved_at,
                 # ⚠️ 完課列回 `None` 而非 `""`：空字串會被前端讀成「有核可人但姓名是空的」。
                 approved_by_name=people.get(r.approved_by, "") if r.approved_by else None,
+                # ⚠️ `is_revoked` / `revoked_by_name` / `revoked_at` **不遮蔽**——遮的只有
+                # 原因文字。把撤銷這個事實一起藏起來，教師會把被撤銷的紀錄讀成有效核可，
+                # 方向比洩漏原因更糟（#548 裁示 7）。
                 is_revoked=r.is_revoked,
-                revoke_reason=r.revoke_reason,
+                revoke_reason=r.revoke_reason if sees_notes(r) else None,
                 revoked_by_name=people.get(r.revoked_by) if r.revoked_by else None,
                 revoked_at=r.revoked_at,
             )

@@ -1,45 +1,27 @@
-"""核可查詢之純業務規則（US17 / #385、#439）——**不碰 DB**。
+"""核可查詢之純業務規則（US17 / #385、#439、#548）——**不碰 DB**。
 
-兩組規則：**可見範圍**（誰看得到哪些紀錄，裁示 C）與**查詢條件**（要給什麼才查得動，
-#439 取代裁示 A）。兩者刻意放同一檔——它們一起決定一次查詢的結果集，而且都是純函式，
-拆開只會讓「改了範圍卻忘了條件」更容易發生。
+## ⚠️ 本檔曾經承載「可見範圍」，#548 之後沒有了
 
-## SA Q1 裁示 C（2026-09-21）
+2026-09-21 的 SA Q1 裁示 C 要求教師依**結果**分流——「通過且未撤銷」看全部課程，
+「不通過 / 已撤銷」僅限自己 owner 的課程——由一支 `visible_clause()` 回傳 SQL 條件實作。
 
-教師（非管理者）查詢時依**結果**分流：
+**#548 裁示 1 推翻了分流**：只要具 `ET_TEACHER` 或 `ET_ADMIN` 其一，即可看到全部課程
+的全部結果。理由不是分流做錯了，而是它**作為保密邊界站不住**：教師本來就能用姓名查到
+他人課程的通過紀錄，課程篩選卻限制在自有課程，同一份資料兩條路兩種規則；而畫面完全
+沒有傳達「課程篩選是成本控制」這件事。
 
-| 紀錄 | 教師可見範圍 |
-|---|---|
-| `RESULT = PASS` 且 `IS_REVOKED = false` | **全部課程** |
-| `RESULT = FAIL` | 僅自己 owner 的課程 |
-| `IS_REVOKED = true`（不論原 `RESULT`）| 僅自己 owner 的課程 |
+於是 `visible_clause()` 整支退役——查詢不再有任何範圍條件，`teacher_query_stmt` 也
+不再收 `visible` 參數。
 
-管理者不受此分流（`FR-ET-US17-02`、場景 3）。
+🔴 **被保留的是欄位維度**：`RESULT_NOTE`（裁示 2）與 `REVOKE_REASON`（裁示 7）仍只對
+該課程 owner 與管理者顯示，實作在 `query_service._enrich`。⛔ 那不是分流的殘餘，是
+刻意留下的另一半——負面自由文字與「他通過了沒有」性質不同。
 
-**為何不是「教師只能查自己的課」（選項 A）或「教師可查全部」（選項 B）**：客戶原始需求
-是「用姓名查學員**通過**了哪些課程」——那天生跨課程（排班的人需要知道某人受訓完整
-與否）。但「不通過」與其 `RESULT_NOTE`（如「實機操作需再加強」）是考核評價，不該讓
-同儕教師隨意翻閱。C 讓兩者各歸各位。
-
-⚠️ C 的已知缺點：教師看到某門課「沒出現」時，分不清是「還沒考」還是「考了沒過」。
-故教師視角 MUST 常駐提示「不通過與已撤銷的紀錄僅顯示您所開設的課程」——**那句話是
-本裁示的配套，不是可選的 UX 潤飾**。少了它，C 比 A 更容易誤導：A 至少整份清單範圍
-一致，C 是兩種範圍混在同一張表裡。
-
-## 🔴 為何回傳「條件」而不是「布林」
-
-範圍判定必須進 SQL 的 `WHERE`。若改成「取出資料後在 Python 裡濾掉不該看的」，
-`paginate()` 的 `meta.total` 算的是**過濾前**的筆數（它以同一個 `stmt` 產生 count），
-每頁也會少於 `limit`——教師看到「共 40 筆」卻只翻得出 12 筆，而且不會有任何錯誤訊息。
+⛔ **要把範圍收回去就是推翻 #548，不是修 bug。** 反向斷言在
+`tests/integration/et/test_et_approval_query.py::TestTeacherScope`，每一條都標了 ↔️。
 """
 
-from sqlalchemy import and_, or_, true
-from sqlalchemy.sql.elements import ColumnElement
-
 from app.core.exceptions import AppError
-from app.et.approval.models import EtApproval
-from app.et.constants import APPROVAL_PASS
-from app.et.course.models import EtCourse
 
 #: 查詢條件不足（#439 取代 SA Q2 裁示 A 的「關鍵字必填」）。
 #:
@@ -147,24 +129,39 @@ def ensure_course_filter_allowed(*, owner_id: str | None, actor_id: str, is_admi
         raise _COURSE_NOT_OWNED
 
 
-def visible_clause(*, actor_id: str, is_admin: bool) -> ColumnElement[bool]:
-    """教師 / 管理者查詢核可紀錄時的可見範圍條件（SA Q1 裁示 C）。
+def can_see_private_notes(*, course_owner_id: str | None, actor_id: str, is_admin: bool) -> bool:
+    """該查詢者是否看得到這一列的**負面自由文字**欄位（#548 裁示 2 + 7）。
+
+    管的是兩個欄位，**而且只能有這一支判斷**：
+
+    | 欄位 | 內容 |
+    |---|---|
+    | `RESULT_NOTE` | 教師寫的考核備註（「第二次補考才通過，單採操作仍不穩」）|
+    | `REVOKE_REASON` | 撤銷原因（「核可對象誤植」「考核紀錄登記錯誤」）|
 
     Args:
-        actor_id: 查詢者的 `USER_ID`，用於比對 `ET_COURSE.OWNER_ID`。
-        is_admin: 是否具 ET 管理者角色。管理者不受任何範圍限制。
+        course_owner_id: 該列所屬課程的 `OWNER_ID`；**查無課程時為 `None`**。
+        actor_id: 查詢者的 `USER_ID`。
+        is_admin: 是否具 ET 管理者角色——管理者看得到全部。
 
     Returns:
-        可直接放進 `.where()` 的條件。**呼叫端的 SELECT 必須已 JOIN `ET_COURSE`**
-        ——本條件會比對 `EtCourse.owner_id`，未 JOIN 會產生笛卡兒積而不是錯誤。
+        看得到回 `True`；否則 `False`（呼叫端 MUST 把欄位換成 `None`）。
 
-    ⚠️ 「通過」那一側**必須同時要求未撤銷**。被撤銷的通過其 `RESULT` 仍是 `PASS`，
-    只依 `RESULT` 分流會讓它對全體教師可見**並顯示撤銷原因**——而撤銷原因正是負面判斷
-    （誤植、考核有問題），那是本裁示要擋的東西從側門漏出去。
+    ## ⛔ 兩個欄位不得各寫一份條件
+
+    `REVOKE_REASON` 原本**沒有**任何欄位層的遮蔽——它是靠已退役的 `visible_clause`
+    「已撤銷的列只有 owner 看得到」**間接**保護的。#548 拿掉那個條件時，若只記得改
+    `RESULT_NOTE` 那一支，撤銷原因就會對全體教師公開。
+
+    各寫一份的後果是：日後有人改其中一個的條件（例如放寬給協同教師），另一個會靜默
+    留在舊規則上，**而兩者各自的測試都還會過**。
+    `TestRevokeReasonRedaction::test_兩個欄位用同一個判斷` 釘住這件事。
+
+    ⚠️ **遮的只有原因文字**：「已撤銷」這個事實、撤銷時間與撤銷人仍對全體教師可見。
+    把 `is_revoked` 一起遮掉會讓教師把被撤銷的紀錄讀成有效核可——方向比洩漏原因更糟。
+
+    ⚠️ 查無課程時 **fail-closed**（遮蔽）。
     """
     if is_admin:
-        return true()
-    return or_(
-        and_(EtApproval.result == APPROVAL_PASS, EtApproval.is_revoked.is_(False)),
-        EtCourse.owner_id == actor_id,
-    )
+        return True
+    return course_owner_id is not None and course_owner_id == actor_id
