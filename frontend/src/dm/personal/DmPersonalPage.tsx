@@ -1,42 +1,42 @@
-import ExpandLessIcon from "@mui/icons-material/ExpandLess";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import Collapse from "@mui/material/Collapse";
-import CircularProgress from "@mui/material/CircularProgress";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Tab from "@mui/material/Tab";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Tabs from "@mui/material/Tabs";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess"
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
+import Alert from "@mui/material/Alert"
+import Box from "@mui/material/Box"
+import Button from "@mui/material/Button"
+import Chip from "@mui/material/Chip"
+import CircularProgress from "@mui/material/CircularProgress"
+import Collapse from "@mui/material/Collapse"
+import IconButton from "@mui/material/IconButton"
+import Paper from "@mui/material/Paper"
+import Stack from "@mui/material/Stack"
+import Tab from "@mui/material/Tab"
+import Table from "@mui/material/Table"
+import TableBody from "@mui/material/TableBody"
+import TableCell from "@mui/material/TableCell"
+import TableHead from "@mui/material/TableHead"
+import TableRow from "@mui/material/TableRow"
+import Tabs from "@mui/material/Tabs"
+import Tooltip from "@mui/material/Tooltip"
+import Typography from "@mui/material/Typography"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 
-import type { ActivityEvent, DraftItem } from "./schemas";
+import type { ActivityEvent, DraftItem } from "./schemas"
 import {
   DRAFT_KIND_LABELS,
   REVIEW_TYPE_LABELS,
   authorEventLabel,
   partyUnreachableText,
   reviewerEventLabel,
-} from "./schemas";
-import { personalApi } from "./personalService";
-import { useActivity, useDrafts } from "./usePersonal";
-import { FilterCard } from "../../components/FilterCard";
-import { ScreenHeader } from "../../components/ScreenHeader";
-import { useNotification } from "../../contexts/NotificationContext";
-import { formatDateTime } from "../../utils/date";
-import { toApiError } from "../../services/http";
+} from "./schemas"
+import { personalApi } from "./personalService"
+import { useActivity, useDrafts } from "./usePersonal"
+import { FilterCard } from "../../components/FilterCard"
+import { ScreenHeader } from "../../components/ScreenHeader"
+import { useNotification } from "../../contexts/NotificationContext"
+import { formatDateTime } from "../../utils/date"
+import { toApiError } from "../../services/http"
 
 /**
  * 個人專區（US9 / DM04）：我的文件動態（狀態變動歷程）+ 草稿匣（編輯者 / 審核者）。
@@ -44,11 +44,9 @@ import { toApiError } from "../../services/http";
  * 個人資料維護（姓名 / Email / 密碼）為另一入口，由平台 DP 提供（右上使用者選單），不在此頁。
  */
 export function DmPersonalPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams] = useSearchParams()
   // 支援 ?tab=drafts 深連結（如編輯器續編後導回草稿匣）；預設「我的文件動態」。
-  const [tab, setTab] = useState<"activity" | "drafts">(
-    searchParams.get("tab") === "drafts" ? "drafts" : "activity",
-  );
+  const [tab, setTab] = useState<"activity" | "drafts">(searchParams.get("tab") === "drafts" ? "drafts" : "activity")
   return (
     <Box>
       <ScreenHeader code="DM04" />
@@ -60,33 +58,31 @@ export function DmPersonalPage() {
       </FilterCard>
       {tab === "activity" ? <ActivityTab /> : <DraftsTab />}
     </Box>
-  );
+  )
 }
 
 // ── 我的文件動態（狀態變動歷程）──────────────────────────
 
 function ActivityTab() {
-  const { message } = useNotification();
-  const qc = useQueryClient();
-  const { data, isPending, isError } = useActivity();
+  const { message } = useNotification()
+  const qc = useQueryClient()
+  const { data, isPending, isError } = useActivity()
 
   const withdrawMut = useMutation({
     mutationFn: (reviewId: number) => personalApi.withdraw(reviewId),
     onSuccess: () => {
-      message.success("已撤回送審，已通知原指派審核者"); // DM-MSG-DM04-005
-      qc.invalidateQueries({ queryKey: ["dm-personal"] });
+      message.success("已撤回送審，已通知原指派審核者") // DM-MSG-DM04-005
+      qc.invalidateQueries({ queryKey: ["dm-personal"] })
     },
     onError: (e) => message.error(toApiError(e).errorMessage),
-  });
+  })
 
-  if (isPending) return <Loading />;
-  if (isError || !data)
-    return <Alert severity="error">載入動態失敗，請稍後再試。</Alert>;
+  if (isPending) return <Loading />
+  if (isError || !data) return <Alert severity="error">載入動態失敗，請稍後再試。</Alert>
 
-  const hasAuthor = data.author.length > 0;
-  const hasReviewer = data.reviewer.length > 0;
-  if (!hasAuthor && !hasReviewer)
-    return <Alert severity="info">近 30 天無文件動態。</Alert>;
+  const hasAuthor = data.author.length > 0
+  const hasReviewer = data.reviewer.length > 0
+  if (!hasAuthor && !hasReviewer) return <Alert severity="info">近 30 天無文件動態。</Alert>
 
   return (
     <Stack spacing={2}>
@@ -109,11 +105,11 @@ function ActivityTab() {
         />
       )}
     </Stack>
-  );
+  )
 }
 
 // 兩視角表格共用欄寬（fixed layout），確保撰寫者 / 審核者兩表欄位上下對齊
-const ACTIVITY_COLS = ["34%", "10%", "14%", "16%", "16%", "10%"];
+const ACTIVITY_COLS = ["34%", "10%", "14%", "16%", "16%", "10%"]
 
 function ActivitySection({
   title,
@@ -123,12 +119,12 @@ function ActivitySection({
   onWithdraw,
   busy,
 }: {
-  title: string;
-  partyHeader: string;
-  events: ActivityEvent[];
-  perspective: "author" | "reviewer";
-  onWithdraw?: (reviewId: number) => void;
-  busy?: boolean;
+  title: string
+  partyHeader: string
+  events: ActivityEvent[]
+  perspective: "author" | "reviewer"
+  onWithdraw?: (reviewId: number) => void
+  busy?: boolean
 }) {
   return (
     <Paper sx={{ p: 2 }}>
@@ -166,7 +162,7 @@ function ActivitySection({
         </Table>
       </Box>
     </Paper>
-  );
+  )
 }
 
 function ActivityRow({
@@ -175,25 +171,19 @@ function ActivityRow({
   onWithdraw,
   busy,
 }: {
-  event: ActivityEvent;
-  perspective: "author" | "reviewer";
-  onWithdraw?: (reviewId: number) => void;
-  busy?: boolean;
+  event: ActivityEvent
+  perspective: "author" | "reviewer"
+  onWithdraw?: (reviewId: number) => void
+  busy?: boolean
 }) {
-  const { confirm } = useNotification();
-  const navigate = useNavigate();
-  const [expanded, setExpanded] = useState(false);
+  const { confirm } = useNotification()
+  const navigate = useNavigate()
+  const [expanded, setExpanded] = useState(false)
   const label =
-    perspective === "author"
-      ? authorEventLabel(event)
-      : reviewerEventLabel(event);
-  const unreachable = partyUnreachableText(
-    event.party_unreachable,
-    perspective,
-  );
+    perspective === "author" ? authorEventLabel(event) : reviewerEventLabel(event)
+  const unreachable = partyUnreachableText(event.party_unreachable, perspective)
   // 操作只掛在「當前送審中」事件（submitted 且 PENDING）
-  const actionable =
-    event.event_kind === "submitted" && event.status === "PENDING";
+  const actionable = event.event_kind === "submitted" && event.status === "PENDING"
 
   const onWithdrawClick = () =>
     confirm({
@@ -201,21 +191,19 @@ function ActivityRow({
       content: "撤回後送審項目將回到草稿 / 已發布狀態，並通知原指派審核者。",
       okText: "確認撤回",
       onOk: () => onWithdraw?.(event.review_id),
-    });
+    })
 
   return (
     <>
       <TableRow>
         <TableCell>{event.doc_name}</TableCell>
-        <TableCell>
-          {REVIEW_TYPE_LABELS[event.review_type] ?? event.review_type}
-        </TableCell>
+        <TableCell>{REVIEW_TYPE_LABELS[event.review_type] ?? event.review_type}</TableCell>
         <TableCell>
           <Stack direction="row" spacing={0.5} alignItems="center">
             <Chip size="small" color={label.tone} label={label.text} />
-            {/* #554：退回原因的站內讀取端。DOC_REJECT / OBS_REJECT 改站內後那封含原因的信
-              不再寄出，不在此呈現的話 DM_REVIEW.REASON 就沒有任何讀取端。
-              展開為「多一列」而非撐高本列——列高因此維持一致（同 DmDetailPage 的版本歷程抽屜）。 */}
+            {/* #554：退回原因的站內讀取端。DOC_REJECT / OBS_REJECT 改站內後那封含原因的信不再
+                寄出，不在此呈現的話 DM_REVIEW.REASON 就沒有任何讀取端。
+                展開為「多一列」而非撐高本列 → 列高維持一致（同 DmDetailPage 的版本歷程抽屜）。 */}
             {event.reason && (
               <IconButton
                 size="small"
@@ -223,11 +211,7 @@ function ActivityRow({
                 aria-expanded={expanded}
                 onClick={() => setExpanded((v) => !v)}
               >
-                {expanded ? (
-                  <ExpandLessIcon fontSize="small" />
-                ) : (
-                  <ExpandMoreIcon fontSize="small" />
-                )}
+                {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
               </IconButton>
             )}
           </Stack>
@@ -251,7 +235,7 @@ function ActivityRow({
         <TableCell>
           {event.party_name ?? "—"}
           {/* #395 D-2：對造人帳號不可達時說明原因——讓「知道」與「能做」落在同一個人身上。
-            撰寫者本來就能撤回重送（撤回鈕就在同一列），缺的只是沒人告訴他該撤回。 */}
+              撰寫者本來就能撤回重送（撤回鈕就在同一列），缺的只是沒人告訴他該撤回。 */}
           {unreachable && (
             <Typography variant="caption" color="error" display="block">
               {unreachable}
@@ -261,13 +245,7 @@ function ActivityRow({
         <TableCell>{formatDateTime(event.event_time)}</TableCell>
         <TableCell>
           {actionable && perspective === "author" && (
-            <Button
-              size="small"
-              variant="outlined"
-              color="error"
-              onClick={onWithdrawClick}
-              disabled={busy}
-            >
+            <Button size="small" variant="outlined" color="error" onClick={onWithdrawClick} disabled={busy}>
               撤回送審
             </Button>
           )}
@@ -283,26 +261,16 @@ function ActivityRow({
           {!actionable && "—"}
         </TableCell>
       </TableRow>
-      {/* 展開子列：全文、可選取可複製。unmountOnExit 比照 DmDetailPage 的版本歷程抽屜。 */}
+      {/* 展開列：另起一列顯示全文，本列高度不變；colSpan 蓋滿 6 欄（文件 / 類型 / 狀態 / 對造人 / 時間 / 操作） */}
       {event.reason && (
         <TableRow>
-          <TableCell
-            colSpan={6}
-            sx={{ py: 0, borderBottom: expanded ? undefined : "none" }}
-          >
+          <TableCell sx={{ py: 0, borderBottom: 0 }} colSpan={6}>
             <Collapse in={expanded} unmountOnExit>
-              <Box sx={{ py: 1.5, pl: 2 }}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  display="block"
-                >
+              <Box sx={{ py: 1.5, px: 1 }}>
+                <Typography variant="caption" color="text.secondary" display="block">
                   退回原因
                 </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-                >
+                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
                   {event.reason}
                 </Typography>
               </Box>
@@ -311,33 +279,32 @@ function ActivityRow({
         </TableRow>
       )}
     </>
-  );
+  )
 }
 
 // ── 草稿匣 ────────────────────────────────────────────
 
 function DraftsTab() {
-  const { message, confirm } = useNotification();
-  const navigate = useNavigate();
-  const qc = useQueryClient();
-  const { data, isPending, isError } = useDrafts();
+  const { message, confirm } = useNotification()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const { data, isPending, isError } = useDrafts()
 
   const deleteMut = useMutation({
     mutationFn: (d: DraftItem) => personalApi.deleteDraft(d.version_id),
     onSuccess: (_res, d) => {
-      message.success("草稿已刪除");
-      qc.invalidateQueries({ queryKey: ["dm-personal", "drafts"] });
+      message.success("草稿已刪除")
+      qc.invalidateQueries({ queryKey: ["dm-personal", "drafts"] })
       // 失效該文件之續編 meta 與詳細快取，確保刪除後可立即再進編輯、不誤報「已有草稿」（#222）
-      qc.invalidateQueries({ queryKey: ["dm-editor", "draft-meta", d.doc_id] });
-      qc.invalidateQueries({ queryKey: ["dm-detail", d.doc_id] });
+      qc.invalidateQueries({ queryKey: ["dm-editor", "draft-meta", d.doc_id] })
+      qc.invalidateQueries({ queryKey: ["dm-detail", d.doc_id] })
     },
     onError: (e) => message.error(toApiError(e).errorMessage),
-  });
+  })
 
-  if (isPending) return <Loading />;
-  if (isError || !data)
-    return <Alert severity="error">載入草稿失敗，請稍後再試。</Alert>;
-  if (data.length === 0) return <Alert severity="info">目前沒有草稿。</Alert>;
+  if (isPending) return <Loading />
+  if (isError || !data) return <Alert severity="error">載入草稿失敗，請稍後再試。</Alert>
+  if (data.length === 0) return <Alert severity="info">目前沒有草稿。</Alert>
 
   const onDelete = (d: DraftItem) =>
     confirm({
@@ -345,7 +312,7 @@ function DraftsTab() {
       content: "僅刪除此草稿版本，不影響已發布版本。",
       okText: "確認刪除",
       onOk: () => deleteMut.mutate(d),
-    });
+    })
 
   return (
     <Paper sx={{ p: 2 }}>
@@ -366,11 +333,7 @@ function DraftsTab() {
                 <TableCell>
                   {d.doc_name}
                   {d.version_no && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ ml: 1 }}
-                    >
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                       {d.version_no}
                     </Typography>
                   )}
@@ -382,12 +345,7 @@ function DraftsTab() {
                 <TableCell>{formatDateTime(d.updated_date)}</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1}>
-                    <ContinueEditButton
-                      draft={d}
-                      onNavigate={() =>
-                        navigate(`/dm/documents/${d.doc_id}/edit`)
-                      }
-                    />
+                    <ContinueEditButton draft={d} onNavigate={() => navigate(`/dm/documents/${d.doc_id}/edit`)} />
                     <Button
                       size="small"
                       variant="outlined"
@@ -405,34 +363,23 @@ function DraftsTab() {
         </Table>
       </Box>
     </Paper>
-  );
+  )
 }
 
-function ContinueEditButton({
-  draft,
-  onNavigate,
-}: {
-  draft: DraftItem;
-  onNavigate: () => void;
-}) {
-  const obsolete = draft.doc_status === "OBSOLETE"; // 已廢止 → 不可續編，僅可刪除
+function ContinueEditButton({ draft, onNavigate }: { draft: DraftItem; onNavigate: () => void }) {
+  const obsolete = draft.doc_status === "OBSOLETE" // 已廢止 → 不可續編，僅可刪除
   const button = (
-    <Button
-      size="small"
-      variant="outlined"
-      onClick={onNavigate}
-      disabled={obsolete}
-    >
+    <Button size="small" variant="outlined" onClick={onNavigate} disabled={obsolete}>
       繼續編輯
     </Button>
-  );
-  if (!obsolete) return button;
+  )
+  if (!obsolete) return button
   // disabled Button 不觸發 hover 事件，需以 span 包裹讓 Tooltip 生效
   return (
     <Tooltip title="此文件已被廢止，無法繼續編輯，請刪除此草稿">
       <span>{button}</span>
     </Tooltip>
-  );
+  )
 }
 
 function Loading() {
@@ -440,5 +387,5 @@ function Loading() {
     <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
       <CircularProgress size={28} />
     </Box>
-  );
+  )
 }
