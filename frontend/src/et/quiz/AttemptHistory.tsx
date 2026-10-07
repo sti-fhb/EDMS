@@ -17,14 +17,7 @@ import { useNavigate } from "react-router-dom"
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { toApiError } from "../../services/http"
-
-/** `2026-05-22 14:05`——秒對回看沒有意義，只會讓欄位變寬。 */
-function formatSubmittedAt(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+import { formatDateTime } from "../../utils/date"
 
 /**
  * 歷次作答紀錄（#280 AC 1 / AC 2）。
@@ -94,7 +87,7 @@ export function AttemptHistory({ quizId }: { quizId: number }) {
                     {attempt.status === "TIMEOUT" && <Chip size="small" variant="outlined" label="逾時" />}
                   </Stack>
                 </TableCell>
-                <TableCell>{formatSubmittedAt(attempt.submitted_at)}</TableCell>
+                <TableCell>{formatDateTime(attempt.submitted_at)}</TableCell>
                 <TableCell align="right">
                   {attempt.score} / {attempt.points_total}
                 </TableCell>

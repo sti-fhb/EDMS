@@ -11,6 +11,7 @@ import Typography from "@mui/material/Typography"
 
 import type { CourseCard as CourseCardData } from "./schemas"
 import { ownerLabel } from "./schemas"
+import { formatDateTime } from "../../utils/date"
 
 const STATUS_LABEL: Record<CourseCardData["status"], { text: string; color: "default" | "success" | "warning" }> = {
   DRAFT: { text: "草稿", color: "default" },
@@ -31,19 +32,15 @@ function statusOf(course: CourseCardData) {
   return course.is_closed && course.status !== "DRAFT" ? STATUS_LABEL.CLOSED : STATUS_LABEL[course.status]
 }
 
-/** `2026-04-15 09:00`；兩端都沒有時回 `—`（起訖為選填，草稿階段常是空的）。 */
+/**
+ * `2026/04/15 09:00 ～ 2026/07/31 17:30`；缺的一端以 `—` 補位，兩端都沒有時只回 `—`
+ * （起訖為選填，草稿階段常是空的）。時間格式走 `date.ts`，缺值同樣回 `—`（#551）。
+ */
 function formatRange(start: string | null, end: string | null): string {
-  const fmt = (iso: string | null) => {
-    if (iso === null) return ""
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return ""
-    const pad = (n: number) => String(n).padStart(2, "0")
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
-  const from = fmt(start)
-  const to = fmt(end)
-  if (!from && !to) return "—"
-  return `${from || "—"} ～ ${to || "—"}`
+  const from = formatDateTime(start)
+  const to = formatDateTime(end)
+  if (from === "—" && to === "—") return "—"
+  return `${from} ～ ${to}`
 }
 
 /**
