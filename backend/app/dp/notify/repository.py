@@ -19,13 +19,17 @@ class NotifyRepository:
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_templates(self, db: AsyncSession, modules: list[str]) -> list[DpNotifyTemplate]:
-        """列指定 MODULE 之範本（US9 維護頁；依 MODULE / TEMPLATE_CODE 排序、排除軟刪除）。"""
-        stmt = (
-            select(DpNotifyTemplate)
-            .where(DpNotifyTemplate.module.in_(modules), DpNotifyTemplate.deleted == 0)
-            .order_by(DpNotifyTemplate.module, DpNotifyTemplate.template_code)
-        )
+    async def list_templates(
+        self, db: AsyncSession, modules: list[str], *, channels: tuple[str, ...] | None = None
+    ) -> list[DpNotifyTemplate]:
+        """列指定 MODULE 之範本（US9 維護頁；依 MODULE / TEMPLATE_CODE 排序、排除軟刪除）。
+
+        `channels` 非 None 時再以 CHANNEL 過濾（#554：DP04 只維護會寄 Email 的範本）。
+        """
+        stmt = select(DpNotifyTemplate).where(DpNotifyTemplate.module.in_(modules), DpNotifyTemplate.deleted == 0)
+        if channels is not None:
+            stmt = stmt.where(DpNotifyTemplate.channel.in_(channels))
+        stmt = stmt.order_by(DpNotifyTemplate.module, DpNotifyTemplate.template_code)
         return list((await db.execute(stmt)).scalars().all())
 
     async def update_template_versioned(
