@@ -9,7 +9,7 @@ import { formatDateTime } from "../../utils/date"
 describe("AttemptOverviewBlock 交卷時間（#551）", () => {
   it("經 date.ts 格式化，不再是 toLocaleString 的上午／下午與秒數", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<AttemptOverviewBlock courseId={1} readOnly={false} onOpenDetail={vi.fn()} />)
+    renderWithProviders(<AttemptOverviewBlock courseId={1} readOnly={false} onOpenDetail={vi.fn()} onReset={vi.fn()} />)
     // 預設 fixture：王小明「基本概念測驗」兩次作答，交卷於 2026-04-22T02:12Z、2026-05-02T06:05Z
     await user.click(await screen.findByRole("button", { name: /王小明/ }))
     // 期望值由 formatDateTime 現算，不寫死字面時刻（依執行環境時區換算）
