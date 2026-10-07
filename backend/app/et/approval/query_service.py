@@ -25,11 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PaginatedResult, paginate_rows
 from app.et.approval.query_repository import EtApprovalQueryRepository
-from app.et.approval.query_rules import (
-    can_see_private_notes,
-    ensure_course_filter_allowed,
-    normalize_search_criteria,
-)
+from app.et.approval.query_rules import can_see_private_notes, normalize_keyword
 from app.et.approval.schemas import (
     ApprovalCourseOption,
     ApprovalQueryRow,
@@ -80,16 +76,7 @@ class EtApprovalQueryService:
         擋成 403。那是一條只在「以關鍵字查詢」時才踩得到的假 403。
         """
         admin = is_admin(roles)
-        keyword = normalize_search_criteria(keyword=keyword, course_id=course_id)
-        if course_id is not None:
-            courses = await self._repo.courses(db, [course_id])
-            brief = courses.get(course_id)
-            ensure_course_filter_allowed(
-                owner_id=brief.owner_id if brief is not None else None,
-                actor_id=actor_id,
-                is_admin=admin,
-            )
-
+        keyword = normalize_keyword(keyword)
         stmt = self._repo.teacher_query_stmt(
             keyword=keyword,
             revoked=revoked,
@@ -106,17 +93,21 @@ class EtApprovalQueryService:
     async def filter_courses(
         self, db: AsyncSession, *, actor_id: str, roles: frozenset[str]
     ) -> list[ApprovalCourseOption]:
-        """ET04 課程下拉的選項——**有核可紀錄的**課程（#439）。
+        """ET04 課程下拉的選項——**有核可紀錄的**課程，不分 owner（#439、#548 裁示 4）。
 
-        教師只列自己開設的課，管理者不限。`ApprovalCourseOption` 的 docstring 說明為何
-        母體是核可紀錄而不是課程清單。
+        `ApprovalCourseOption` 的 docstring 說明為何母體是核可紀錄而不是課程清單。
 
-        ⚠️ 回傳空清單有兩種成因（「沒開過課」與「開的課還沒有人被核可」），本方法
-        **不區分**——兩者的下一步相同（去 ET02 核可學員），而要分得出來得多一次查詢。
-        前端據此顯示單一句說明，見 `TeacherApprovalQuery`。
+        ↔️ #548 之前非管理者只列自己開設的課，與 `search` 的擁有權閘是一組的。那道閘
+        退役後，下拉再限自己的課只會讓「選得到的」少於「查得到的」——出現「這門課查
+        得到卻選不到」這種無法解釋的狀態。
+
+        ⚠️ 回傳空清單現在只有一種成因（系統裡還沒有任何核可紀錄），前端的說明文字
+        因此不再需要分教師 / 管理者兩版，見 `TeacherApprovalQuery`。
+
+        ⛔ `roles` 參數**刻意保留**：本方法仍是模組內唯一知道「誰在查」的地方，日後
+        若要依身分調整母體，簽章不必再動一次呼叫端。
         """
-        owner_id = None if is_admin(roles) else actor_id
-        rows = await self._repo.filter_course_options(db, owner_id=owner_id)
+        rows = await self._repo.filter_course_options(db, owner_id=None)
         return [ApprovalCourseOption(course_id=cid, course_name=name) for cid, name in rows]
 
     async def mine(self, db: AsyncSession, *, actor_id: str, page: int, limit: int) -> PaginatedResult[MyApprovalRow]:

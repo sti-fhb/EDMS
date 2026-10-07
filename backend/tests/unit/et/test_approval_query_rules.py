@@ -22,12 +22,7 @@ owner），由 `visible_clause()` 回傳一段 SQL 條件實作，本檔以編�
 
 import pytest
 
-from app.core.exceptions import AppError
-from app.et.approval.query_rules import (
-    can_see_private_notes,
-    ensure_course_filter_allowed,
-    normalize_search_criteria,
-)
+from app.et.approval.query_rules import can_see_private_notes, normalize_keyword
 
 pytestmark = pytest.mark.unit
 
@@ -62,76 +57,44 @@ class TestPrivateNotesVisibility:
         assert can_see_private_notes(course_owner_id=None, actor_id="adm01", is_admin=True) is True
 
 
-class TestSearchCriteria:
-    """「關鍵字與課程至少給一個」（#439，取代 SA Q2 裁示 A 的關鍵字必填）。
+class TestKeywordNormalization:
+    """關鍵字的正規化。**#548 裁示 3 之後本函式不再有「至少給一個」的檢核。**
 
-    ⚠️ 換的是**手段**不是目的：裁示 A 擋的是「留白＝傾印員工名冊」，而課程下拉只列
-    教師自己開的課，選自己的課看到自己課的學員是他本來就有的資訊。兩者皆不給仍須擋下
-    ——那才是原本的「留白查全部」。
+    ↔️ 原名 `normalize_search_criteria`，還收 `course_id` 並在兩者皆未給時拋 422
+    `ET_APPROVAL_006`。它曾是母體限制的三道之一（另兩道：裁示 C 的結果分流、
+    `ET_APPROVAL_007` 的課程擁有權閘）——三道一起退役是刻意的，只留這一道會讓
+    「用姓名逐個查」與「一次列出」在能力上相同、在操作成本上差很多。
+
+    🔴 **剩下的唯一職責是型別正規化**：空白 → `None`（不是 `""`）。
     """
 
-    def test_只給關鍵字時回傳去空白後的值(self) -> None:
-        assert normalize_search_criteria(keyword="  林佳蓉 ", course_id=None) == "林佳蓉"
+    def test_回傳去空白後的值(self) -> None:
+        assert normalize_keyword("  林佳蓉 ") == "林佳蓉"
 
-    def test_只給課程時關鍵字為_none_而不是空字串(self) -> None:
-        """🔴 回 `None` 不回 `""`。
+    def test_未給時回_none(self) -> None:
+        """↔️ 原本在「課程也沒給」時會拋 422 `ET_APPROVAL_006`。"""
+        assert normalize_keyword(None) is None
 
-        repository 以 `if keyword:` 決定要不要加那段 `ilike`，空字串雖然也是 falsy，
-        但它會讓「沒給關鍵字」與「給了空白字串」在型別上長得一樣，下一個人很容易寫出
-        `keyword is not None` 而讓比對變成 `%%`（命中全部）。
+    def test_全空白回_none_而不是空字串(self) -> None:
+        """🔴 本函式現在唯一在守的東西。
+
+        repository 以 `if keyword:` 決定要不要加那段 `ilike`。空字串雖然同樣 falsy，
+        卻讓「沒給」與「給了空白」在型別上無從分辨，下一個人很容易改寫成
+        `keyword is not None`——那會讓比對變成 `%%`。
+
+        ⚠️ 留白本來就回全部，所以那個 bug 的**結果**看起來正常；但 `%%` 與「不加條件」
+        在 SQL 上不同（前者會排除 `EMAIL IS NULL` 的列），差異只在邊界現形。
+        ⛔ 故斷言用 `is None` 而非 `not normalize_keyword(...)`——後者對 `""` 也成立。
         """
-        assert normalize_search_criteria(keyword=None, course_id=11) is None
-        assert normalize_search_criteria(keyword="   ", course_id=11) is None
+        assert normalize_keyword("   ") is None
 
-    def test_兩者皆給時兩個條件都保留(self) -> None:
-        assert normalize_search_criteria(keyword="林", course_id=11) == "林"
-
-    def test_兩者皆不給回_422(self) -> None:
-        with pytest.raises(AppError) as exc:
-            normalize_search_criteria(keyword=None, course_id=None)
-        assert exc.value.status_code == 422
-        assert exc.value.error_code == "ET_APPROVAL_006"
-
-    def test_關鍵字全空白且未選課程同樣回_422(self) -> None:
-        """全空白必須與未填等價，否則前端送一個空格就繞過了「至少給一個」。"""
-        with pytest.raises(AppError) as exc:
-            normalize_search_criteria(keyword="   ", course_id=None)
-        assert exc.value.error_code == "ET_APPROVAL_006"
+    def test_中間的空白不被移除(self) -> None:
+        """只去頭尾：姓名中間可能有空格（外籍人士），全部拿掉會查不到。"""
+        assert normalize_keyword("  林 佳蓉  ") == "林 佳蓉"
 
 
-class TestCourseFilterOwnership:
-    """🔴 非管理者**只能依自己開設的課程**篩選（#439 實作時收斂，見 PR 說明）。
-
-    issue 的「不構成傾印名冊」論證整個建立在「下拉只列自己的課」之上——但下拉是 UI。
-    若 API 收任何 `course_id`，教師可以用 `{course_id: 別人的課}` 一次撈出**該課全部
-    通過者的名單**，不需要知道任何名字，而那正是 SA Q2 裁示 A 要擋的東西改以課程為單位
-    重演。可見範圍（裁示 C）未被放寬，本閘是**收斂**方向。
-
-    ⚠️ 正常 UI 走不到這裡（下拉只有自己的課）——這是防繞過，不是流程的一部分。
-    """
-
-    def test_管理者不受限(self) -> None:
-        ensure_course_filter_allowed(owner_id="t_other", actor_id="admin01", is_admin=True)
-
-    def test_管理者選一門查無的課程也不擋(self) -> None:
-        """管理者的可見範圍是 `true()`，查無課程只會得到空結果，不需要在此攔。"""
-        ensure_course_filter_allowed(owner_id=None, actor_id="admin01", is_admin=True)
-
-    def test_教師選自己的課通過(self) -> None:
-        ensure_course_filter_allowed(owner_id="t_own", actor_id="t_own", is_admin=False)
-
-    def test_教師選他人的課回_403(self) -> None:
-        with pytest.raises(AppError) as exc:
-            ensure_course_filter_allowed(owner_id="t_other", actor_id="t_own", is_admin=False)
-        assert exc.value.status_code == 403
-        assert exc.value.error_code == "ET_APPROVAL_007"
-
-    def test_查無課程時對教師_fail_closed(self) -> None:
-        """⚠️ 查無 → 擋下，不是放行。
-
-        放行的話，`course_id` 隨便給一個不存在的值就會退化成「沒有課程條件」的查詢
-        ——而那條路徑在關鍵字也沒給時本該是 422。
-        """
-        with pytest.raises(AppError) as exc:
-            ensure_course_filter_allowed(owner_id=None, actor_id="t_own", is_admin=False)
-        assert exc.value.error_code == "ET_APPROVAL_007"
+# ⚠️ `TestCourseFilterOwnership` 已於 #548 裁示 4 移除（`ensure_course_filter_allowed`
+# 整支退役）。它曾守著「非管理者只能依自己開設的課程篩選」，拋 403 `ET_APPROVAL_007`。
+#
+# 反向斷言在 `tests/integration/et/test_et_approval_query.py::TestCourseFilterAnyCourse`
+# ——那裡是現在唯一記得「曾經有過擁有權閘」的地方。
