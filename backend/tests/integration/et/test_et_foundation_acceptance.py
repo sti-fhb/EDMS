@@ -20,6 +20,7 @@ from app.et.constants import ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER
 from app.et.deps import load_et_roles
 from app.et.roles.models import EtUserRole
 from app.services import NotifyService
+from tests.integration.et._tag_pairs import new_tag, pair_user, tag_id
 
 pytestmark = pytest.mark.integration
 
@@ -73,16 +74,30 @@ class TestAc2LookupNotMaterialised:
 class TestAc3Seeds:
     """AC 3：ET_TAG 5 筆 + DP_PARAM 6 項 + DP_NOTIFY_TEMPLATE 7 類。"""
 
-    async def test_et_tag_五筆內建且全體為_is_all(self, db, et_registered) -> None:
+    async def test_et_tag_五筆內建職位且全體為_is_all(self, db, et_registered) -> None:
+        """職位維度的種子不變；#538 起同一張表另有單位維度，以 `TAG_TYPE` 區分。"""
         rows = await db.execute(
-            text('SELECT "TAG_NAME", "IS_ALL", "IS_BUILTIN" FROM "ET_TAG" ORDER BY "DISPLAY_ORDER"')
+            text(
+                'SELECT "TAG_NAME", "IS_ALL", "IS_BUILTIN" FROM "ET_TAG" '
+                'WHERE "TAG_TYPE" = \'AUDIENCE\' ORDER BY "DISPLAY_ORDER"'
+            )
         )
         tags = rows.all()
         assert len(tags) == 5
         assert [t[0] for t in tags] == ["全體", "護理師", "行政人員", "軍人", "醫檢師"]
         assert tags[0][1] is True, "「全體」須為 IS_ALL"
-        assert sum(1 for t in tags if t[1]) == 1, "全系統僅 1 筆 IS_ALL"
+        assert sum(1 for t in tags if t[1]) == 1, "職位維度僅 1 筆 IS_ALL"
         assert all(t[2] for t in tags), "種子皆為內建標籤"
+
+    async def test_et_tag_單位維度以全單位為唯一通用值(self, db, et_registered) -> None:
+        """#538：單位維度 seed 21 筆（「全單位」+ 20 個單位，複製自 DM）。"""
+        rows = await db.execute(
+            text('SELECT "TAG_NAME", "IS_ALL" FROM "ET_TAG" WHERE "TAG_TYPE" = \'UNIT\' ORDER BY "DISPLAY_ORDER"')
+        )
+        tags = rows.all()
+        assert len(tags) == 21
+        assert tags[0] == ("全單位", True)
+        assert sum(1 for t in tags if t[1]) == 1, "單位維度僅 1 筆 IS_ALL"
 
     async def test_et_參數五項種入平台表(self, db, et_registered) -> None:
         """ET 於 `DP_PARAM` 的參數清單。
@@ -161,13 +176,13 @@ class TestAc4AdminCanAssign:
             db,
             user_id="ET_AC4_TARGET",
             roles={ROLE_TEACHER, ROLE_STUDENT},
-            groups={str(tag_id)},
+            groups={f":{tag_id}"},
             operator_id="ET_AC4_ADMIN",
         )
         assert await load_et_roles(db, "ET_AC4_TARGET") == frozenset({ROLE_TEACHER, ROLE_STUDENT})
 
         view = (await provider.get_users_assignments(db, ["ET_AC4_TARGET"]))["ET_AC4_TARGET"]
-        assert view.groups == frozenset({str(tag_id)})
+        assert view.groups == frozenset({f":{tag_id}"})
 
     async def test_自我保護_不可取消自己的管理者角色(self, db, et_registered) -> None:
         await self._grant(db, "ET_AC4_SELF", ROLE_ADMIN)
@@ -190,7 +205,7 @@ class TestAc4AdminCanAssign:
         await db.execute(text('UPDATE "ET_TAG" SET "IS_ACTIVE" = false WHERE "TAG_ID" = :t'), {"t": tag_id})
         await db.flush()
         with pytest.raises(AppError) as e:
-            await provider.assign(db, user_id="ET_AC4_Y", roles=set(), groups={str(tag_id)}, operator_id="ET_AC4_OP")
+            await provider.assign(db, user_id="ET_AC4_Y", roles=set(), groups={f":{tag_id}"}, operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_ROLE_002"
 
     async def test_全體標籤不可停用(self, db, et_registered) -> None:
@@ -284,10 +299,13 @@ class TestInputValidationHardening:
     async def test_unicode_數字字元不得通過標籤_id_驗證(self, db, et_registered) -> None:
         """`'²'.isdigit()` 為 True 但 `int('²')` 會拋 ValueError → 原本會變成 500。"""
         provider = module_assign_registry.get("ET")
+        # #538 起群組為 "{單位}:{職位}"：壞值要放進**欄位裡**才走得到數字驗證——只送裸值的話，
+        # 會因為少了冒號就被擋下，`isdecimal` 那一層形同沒被測到
         for bad in ("²", "①", "9" * 25):
-            with pytest.raises(AppError) as e:
-                await provider.assign(db, user_id="ET_VAL_U1", roles=set(), groups={bad}, operator_id="ET_VAL_OP")
-            assert e.value.error_code == "ET_ROLE_002", f"未擋下 {bad!r}"
+            for group in (f":{bad}", f"{bad}:1"):
+                with pytest.raises(AppError) as e:
+                    await provider.assign(db, user_id="ET_VAL_U1", roles=set(), groups={group}, operator_id="ET_VAL_OP")
+                assert e.value.error_code == "ET_ROLE_002", f"未擋下 {group!r}"
 
     async def test_標籤名稱前後空白被正規化_不得建出視覺重複(self, db, et_registered) -> None:
         """`"軍人 "` 若不 strip 會繞過唯一約束、建出看起來一樣的標籤。"""
@@ -409,3 +427,34 @@ class TestAc8TemplatesConsumableViaNotifyService:
         assert error_msg is None
         assert caller_module == "ET", "CALLER_MODULE 須記為 ET，稽核才追得到是哪個模組發的"
         assert "{" not in subject, "SUBJECT 不應殘留未代入之佔位"
+
+
+class TestDisableAffectedCount:
+    """停用標籤時回報之受影響人數須涵蓋**單位欄與職位欄**（#538）。
+
+    單位放在 `ET_USER_TAG.UNIT_TAG_ID`；只比 `TAG_ID` 的話停用任何單位都恆回 0——
+    #437 的 code review 在 DM 抓到同一個問題。
+    """
+
+    async def test_停用單位計入掛該單位之人(self, db, et_registered) -> None:
+        provider = module_assign_registry.get("ET")
+        unit = await new_tag(db, "ZT將裁撤單位", tag_type="UNIT")
+        await pair_user(db, "ZT_DIS_U1", await tag_id(db, "護理師"), unit)
+        await pair_user(db, "ZT_DIS_U2", await tag_id(db, "護理師"))  # 單位未指定——不受影響
+
+        result = await provider.set_controlled_enabled(
+            db, "TAG", code=str(unit), enabled=False, operator_id="ET_DIS_OP"
+        )
+
+        assert result.affected_viewers == 1
+
+    async def test_停用職位照舊計入(self, db, et_registered) -> None:
+        provider = module_assign_registry.get("ET")
+        role = await new_tag(db, "ZT將裁撤職位")
+        await pair_user(db, "ZT_DIS_U3", role)
+
+        result = await provider.set_controlled_enabled(
+            db, "TAG", code=str(role), enabled=False, operator_id="ET_DIS_OP"
+        )
+
+        assert result.affected_viewers == 1

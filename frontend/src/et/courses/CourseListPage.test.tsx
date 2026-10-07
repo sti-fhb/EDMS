@@ -92,15 +92,43 @@ describe("ET01 課程列表", () => {
     expect(screen.queryByText("查無符合條件之課程")).not.toBeInTheDocument()
   })
 
-  it("標籤下拉含已停用者並標示出來", async () => {
+  it("單位下拉含已停用者並標示出來", async () => {
     // 停用標籤仍可用於篩選（要查得到歷史課程），但要讓教師知道它已經不能再掛
     const user = userEvent.setup()
     renderWithProviders(<EtCourseListPage />)
     await screen.findByText("採血作業新進人員訓練")
 
-    await user.click(screen.getByLabelText("受訓單位標籤"))
+    await user.click(screen.getByLabelText("單位"))
 
     expect(await screen.findByText("已裁撤單位（已停用）")).toBeInTheDocument()
+    // 兩欄各取一類：職位不得混進單位下拉
+    expect(screen.queryByRole("option", { name: "護理師" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "全單位" })).toBeInTheDocument()
+  })
+
+  it("單位與職位兩欄送出的參數名與後端契約一致（#538）", async () => {
+    // 上一條契約測試只驗「沒選任何篩選」時的參數集合——篩選欄位的參數名從來沒被驗過，
+    // 改名的話它照樣綠。對應的後端斷言同為 test_前端送出的完整參數集合可通過後端驗證
+    const seen: URLSearchParams[] = []
+    server.use(
+      http.get("/api/et/courses", ({ request }) => {
+        seen.push(new URL(request.url).searchParams)
+        return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 12, total_pages: 1 } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtCourseListPage />)
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+
+    await user.click(screen.getByLabelText("單位"))
+    await user.click(await screen.findByRole("option", { name: "全單位" }))
+    await user.click(screen.getByLabelText("職位"))
+    await user.click(await screen.findByRole("option", { name: "護理師" }))
+
+    await waitFor(() => expect(seen.at(-1)?.get("tag_id")).toBe("2"))
+    const last = seen.at(-1)!
+    expect(last.get("unit_tag_id")).toBe("101")
+    expect([...last.keys()].sort()).toEqual(["limit", "page", "scope", "tag_id", "unit_tag_id"])
   })
 
   it("「建立者」篩選只在「全部課程」出現，且不佔位", async () => {

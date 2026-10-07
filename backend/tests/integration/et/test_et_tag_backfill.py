@@ -13,13 +13,16 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.auth import create_access_token
+from app.core.exceptions import AppError
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.notify.models import DpEmailLog
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag
+from app.et.catalog.pair import encode_pair
 from app.et.constants import (
     COURSE_CLOSED,
     COURSE_DRAFT,
@@ -32,6 +35,8 @@ from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.roles.assign_service import EtAssignService
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_roles_id, all_units_id
+from tests.integration.et._tag_pairs import tag_id as seed_tag
 
 pytestmark = pytest.mark.integration
 
@@ -90,6 +95,7 @@ async def _course(
     *,
     status: str = COURSE_PUBLISHED,
     open_end_at: datetime | None = None,
+    unit_id: int | None = None,
 ) -> int:
     """直接落庫建課程——本檔驗的是貼標追溯，不需要走完整的發布檢核。
 
@@ -118,7 +124,17 @@ async def _course(
     )
     db.add(course)
     await db.flush()
-    db.add(EtCourseTag(course_id=course.course_id, tag_id=tag_id, created_user="SYSTEM", created_date=now, deleted=0))
+    db.add(
+        EtCourseTag(
+            # 省略單位＝全單位（#538 之前「課程只掛職位」的同義寫法）
+            unit_tag_id=unit_id if unit_id is not None else await all_units_id(db),
+            course_id=course.course_id,
+            tag_id=tag_id,
+            created_user="SYSTEM",
+            created_date=now,
+            deleted=0,
+        )
+    )
     await db.flush()
     return course.course_id
 
@@ -152,7 +168,9 @@ class TestTagBackfill:
         c1 = await _course(db, teacher, "採血作業新進人員訓練", tag_id)
         c2 = await _course(db, teacher, "感染管制年度訓練", tag_id)
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _enrolled_course_ids(db, student) == sorted([c1, c2])
         digests = await _mails(db, _DIGEST)
@@ -167,7 +185,9 @@ class TestTagBackfill:
         c1 = await _course(db, teacher, "採血作業新進人員訓練", tag_id)
         c2 = await _course(db, teacher, "感染管制年度訓練", tag_id)
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         (digest,) = await _mails(db, _DIGEST)
         assert "姓名bf_s02" in digest.body
@@ -183,7 +203,9 @@ class TestTagBackfill:
         tag_id = await _tag(db, "護理師_bf03")
         await _course(db, teacher, "採血作業", tag_id)
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         row = await db.scalar(select(EtEnrollment).where(EtEnrollment.user_id == student))
         assert row.join_source == SOURCE_TAG_DEFAULT
@@ -204,7 +226,9 @@ class TestTagBackfill:
         await _course(db, teacher, "期間已過課程", tag_id, open_end_at=utcnow() - timedelta(days=1))
         live = await _course(db, teacher, "期間內課程", tag_id)
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _enrolled_course_ids(db, student) == [live]
 
@@ -217,7 +241,9 @@ class TestTagBackfill:
         await _course(db, teacher, "已關閉課程", tag_id, status=COURSE_CLOSED)
         published = await _course(db, teacher, "已發布課程", tag_id)
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _enrolled_course_ids(db, student) == [published]
 
@@ -225,7 +251,9 @@ class TestTagBackfill:
         student = await _user(db, "bf_s05")
         tag_id = await _tag(db, "護理師_bf05")
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _mails(db, _DIGEST) == []
 
@@ -236,7 +264,9 @@ class TestTagBackfill:
         await _course(db, teacher, "採血作業", tag_id)
         other_teacher = await _user(db, "bf_t07", ROLE_TEACHER)
 
-        await _service.assign(db, user_id=other_teacher, roles={ROLE_TEACHER}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=other_teacher, roles={ROLE_TEACHER}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _enrolled_course_ids(db, other_teacher) == []
         assert await _mails(db, _DIGEST) == []
@@ -262,7 +292,9 @@ class TestTagBackfill:
         )
         await db.flush()
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         rows = (
             (await db.execute(select(EtEnrollment.enrollment_id).where(EtEnrollment.user_id == student)))
@@ -295,7 +327,9 @@ class TestTagBackfill:
         )
         await db.flush()
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         row = await db.scalar(
             select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == cid)
@@ -371,7 +405,9 @@ class TestOwnerIsNeverBackfilledIntoOwnCourse:
         tag_id = await _tag(db, "ZT擁有者標籤")
         cid = await _course(db, owner, "ZT擁有者自己的課", tag_id)
 
-        await _service.assign(db, user_id=owner, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=owner, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _enrolled_course_ids(db, owner) == [], f"擁有者被加進了自己的課程 {cid}（#520）"
 
@@ -398,7 +434,9 @@ class TestOwnerIsNeverBackfilledIntoOwnCourse:
         own_cid = await _course(db, owner, "ZT我自己的課", tag_id)
         others_cid = await _course(db, other_teacher, "ZT別人的課", tag_id)
 
-        await _service.assign(db, user_id=owner, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=owner, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         enrolled = await _enrolled_course_ids(db, owner)
         assert others_cid in enrolled, "他人課程應照常補加入——教師修別人的課是合法的"
@@ -411,6 +449,95 @@ class TestOwnerIsNeverBackfilledIntoOwnCourse:
         tag_id = await _tag(db, "ZT一般標籤")
         cid = await _course(db, owner, "ZT一般課程", tag_id)
 
-        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={str(tag_id)}, operator_id=_ADMIN)
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(None, tag_id)}, operator_id=_ADMIN
+        )
 
         assert await _enrolled_course_ids(db, student) == [cid]
+
+
+class TestPairBackfill:
+    """#538：貼標追溯改以配對判定——新增的配對涵蓋哪些課程，就補進哪些。"""
+
+    async def test_只補加入新配對涵蓋的課程(self, db) -> None:
+        teacher = await _user(db, "bf_t20", ROLE_TEACHER)
+        student = await _user(db, "bf_s20")
+        nurse = await seed_tag(db, "護理師")
+        tsgh = await seed_tag(db, "國防醫學院三軍總醫院")
+        songshan = await seed_tag(db, "國防醫學院三軍總醫院松山分院")
+        same_unit = await _course(db, teacher, "ZT三總護理師", nurse, unit_id=tsgh)
+        any_unit = await _course(db, teacher, "ZT全單位護理師", nurse)
+        await _course(db, teacher, "ZT松山護理師", nurse, unit_id=songshan)  # 不展開階層：不涵蓋
+
+        await _service.assign(
+            db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(tsgh, nurse)}, operator_id=_ADMIN
+        )
+
+        assert await _enrolled_course_ids(db, student) == sorted([same_unit, any_unit])
+
+    async def test_不補進全單位全體的課程(self, db) -> None:
+        """那種課程的成員是「全部學員」，於**發布當下**決定，不因某人新增配對而補進——
+        維持 #538 之前「貼護理師只補進掛護理師的課」的行為。"""
+        teacher = await _user(db, "bf_t21", ROLE_TEACHER)
+        student = await _user(db, "bf_s21")
+        await _course(db, teacher, "ZT全體課程", await all_roles_id(db))
+
+        await _service.assign(
+            db,
+            user_id=student,
+            roles={ROLE_STUDENT},
+            groups={encode_pair(None, await seed_tag(db, "護理師"))},
+            operator_id=_ADMIN,
+        )
+
+        assert await _enrolled_course_ids(db, student) == []
+
+    async def test_通用值不可指派給人(self, db) -> None:
+        """「全單位」「全體」是課程端「不限」的語意；`list_audiences` 不會回出它們，直接打 API
+        送進來也要擋——否則某人掛了 (全單位, 護理師)，語意上等於宣稱他屬於所有單位。"""
+        student = await _user(db, "bf_s22")
+        pair = encode_pair(await all_units_id(db), await seed_tag(db, "護理師"))
+
+        with pytest.raises(AppError) as exc:
+            await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups={pair}, operator_id=_ADMIN)
+
+        assert exc.value.error_code == "ET_ROLE_002"
+
+    async def test_單位欄放職位被擋(self, db) -> None:
+        student = await _user(db, "bf_s23")
+        nurse = await seed_tag(db, "護理師")
+
+        with pytest.raises(AppError) as exc:
+            await _service.assign(
+                db, user_id=student, roles={ROLE_STUDENT}, groups={encode_pair(nurse, nurse)}, operator_id=_ADMIN
+            )
+
+        assert exc.value.error_code == "ET_ROLE_002"
+
+    async def test_讀回的群組為配對編碼(self, db) -> None:
+        """DP02 前端以 `"{單位}:{職位}"` 解析；單位未指定為 `":{職位}"`。"""
+        student = await _user(db, "bf_s24")
+        nurse = await seed_tag(db, "護理師")
+        tsgh = await seed_tag(db, "國防醫學院三軍總醫院")
+        groups = {encode_pair(tsgh, nurse), encode_pair(None, nurse)}
+
+        await _service.assign(db, user_id=student, roles={ROLE_STUDENT}, groups=groups, operator_id=_ADMIN)
+
+        view = (await _service.get_users_assignments(db, [student]))[student]
+        assert view.groups == frozenset({f"{tsgh}:{nurse}", f":{nurse}"})
+
+
+class TestUserPairUniqueness:
+    async def test_單位未指定的配對唯一約束仍生效(self, db) -> None:
+        """UQ(USER_ID, TAG_ID, UNIT_TAG_ID) 必須為 NULLS NOT DISTINCT（#538 AC 5，比照 DM #437）。
+
+        PostgreSQL 預設 NULL ≠ NULL：單位未指定（NULL）的列若未宣告 `NULLS NOT DISTINCT`，
+        同一組可重複寫入且不報錯——`_set_tag` 以 `IS NULL` 查既有列時會撞到兩筆。
+        此處驗的是「重複被擋」之行為，非 schema 形狀驗收。
+        """
+        nurse = await seed_tag(db, "護理師")
+        db.add(EtUserTag(user_id="ZT_UQ", tag_id=nurse, unit_tag_id=None, created_user="t", created_date=utcnow()))
+        await db.flush()
+        db.add(EtUserTag(user_id="ZT_UQ", tag_id=nurse, unit_tag_id=None, created_user="t", created_date=utcnow()))
+        with pytest.raises(IntegrityError):
+            await db.flush()

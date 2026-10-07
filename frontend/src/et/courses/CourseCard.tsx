@@ -78,10 +78,19 @@ export function CourseCard({ course, onOpen }: { course: CourseCardData; onOpen:
             {course.course_name}
           </Typography>
 
-          {course.tags.length > 0 && (
+          {course.audiences.length > 0 && (
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-              {course.tags.map((tag) => (
-                <Chip key={tag.tag_id} size="small" variant="outlined" label={tag.tag_name} />
+              {/* `label` 由後端組好（「全單位」省略），ET01 與 ET03 共用同一份規則（#538）。
+                  單位名稱可長達十幾字，截斷並以 title 顯示全文，避免一張卡被一個 badge 撐寬 */}
+              {course.audiences.map((a) => (
+                <Chip
+                  key={`${a.unit_tag_id}:${a.tag_id}`}
+                  size="small"
+                  variant="outlined"
+                  label={a.label}
+                  title={a.label}
+                  sx={{ maxWidth: "100%" }}
+                />
               ))}
             </Stack>
           )}

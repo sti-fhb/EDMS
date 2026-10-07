@@ -33,6 +33,7 @@ from app.et.course.models import EtCourse
 from app.et.notify.course_update import TEMPLATE_COURSE_UPDATE
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -102,7 +103,12 @@ async def _course(client, db, slug: str, *, publish: bool = True) -> dict:
 
     db.add(
         EtCourseTag(
-            course_id=cid, tag_id=await _tag(db, f"標籤{cid}"), created_user="SYSTEM", created_date=utcnow(), deleted=0
+            unit_tag_id=await all_units_id(db),
+            course_id=cid,
+            tag_id=await _tag(db, f"標籤{cid}"),
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
         )
     )
     await db.flush()

@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
@@ -140,12 +140,12 @@ describe("RolesPage 權限管理", () => {
     expect(screen.getByRole("columnheader", { name: "可見對象" })).toBeInTheDocument()
   })
 
-  it("ET 分頁之群組欄位標題為「受訓單位標籤」，不沿用 DM 的用詞", async () => {
+  it("ET 分頁之群組欄位標題為「受訓對象」，不沿用 DM 的用詞（#538 改名）", async () => {
     server.use(http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])))
     renderWithProviders(<RolesPage />)
     await screen.findByText("王曉明")
     // 正反各一條、同一種查詢方式：只斷言「不該出現」時，改掉用詞之外的任何事都驗不到
-    expect(screen.getByRole("columnheader", { name: "受訓單位標籤" })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "受訓對象" })).toBeInTheDocument()
     expect(screen.queryByRole("columnheader", { name: "可見對象" })).not.toBeInTheDocument()
   })
 
@@ -158,12 +158,59 @@ describe("RolesPage 權限管理", () => {
     expect(screen.queryByRole("columnheader", { name: "群組" })).not.toBeInTheDocument()
   })
 
-  it("ET 之群組編輯視窗標題為「編輯受訓單位標籤」", async () => {
+  it("DM 之配對編輯視窗說明句講的是文件（與下一條 ET 成對）", async () => {
+    // 預設 handler 為 DM、選項含 UNIT → 配對模式。少了這條，下一條的「不出現『此人可見的
+    // 文件』」在 DM 那句被改掉時會恆真（#538 才把這句從寫死改成依模組）
+    const user = userEvent.setup()
+    renderWithProviders(<RolesPage />)
+    const row = (await screen.findByText("王曉明")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "編輯" }))
+    expect(await screen.findByText(/此人可見的文件/)).toBeInTheDocument()
+    expect(screen.queryByText(/此人會被帶入的課程/)).not.toBeInTheDocument()
+  })
+
+  it("ET 列表以「單位 + 職位」顯示配對，單位未指定者標示出來（#538 AC 13）", async () => {
+    // 空白無從區分「尚未設定單位」與「不限單位」，而前者會讓該學員安靜地漏掉所有指定單位的課程
     server.use(
       http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])),
-      // ET 的受訓單位標籤是平的一層（無 UNIT 類），不進配對模式
       http.get("/api/dp/roles/:module/group-options", () =>
         HttpResponse.json([
+          { code: "102", name: "國防醫學院三軍總醫院", kind: "UNIT" },
+          { code: "5", name: "護理師", kind: "AUDIENCE" },
+        ]),
+      ),
+      http.get("/api/dp/roles/:module/assignments", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "u1",
+              user_name: "王曉明",
+              email: "ming@example.com",
+              status: "ACTIVE",
+              locked_until: null,
+              roles: ["ET_STUDENT"],
+              groups: ["102:5", ":5"],
+              last_modified_by: null,
+              last_modified_by_name: null,
+              last_modified_date: null,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<RolesPage />)
+    expect(await screen.findByText("國防醫學院三軍總醫院 + 護理師")).toBeInTheDocument()
+    expect(screen.getByText("（單位未指定）+ 護理師")).toBeInTheDocument()
+  })
+
+  it("ET 之群組編輯視窗為配對模式，說明句講的是課程而非文件（#538）", async () => {
+    server.use(
+      http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])),
+      // #538 起 ET 也回單位（kind=UNIT）與職位兩類 → 自動進配對模式，DP 不寫死模組
+      http.get("/api/dp/roles/:module/group-options", () =>
+        HttpResponse.json([
+          { code: "102", name: "國防醫學院三軍總醫院", kind: "UNIT" },
           { code: "5", name: "護理師", kind: "AUDIENCE" },
           { code: "6", name: "行政人員", kind: "AUDIENCE" },
         ]),
@@ -173,8 +220,99 @@ describe("RolesPage 權限管理", () => {
     renderWithProviders(<RolesPage />)
     const row = (await screen.findByText("王曉明")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "編輯" }))
-    expect(await screen.findByText("編輯受訓單位標籤")).toBeInTheDocument()
+    expect(await screen.findByText("編輯受訓對象")).toBeInTheDocument()
     expect(screen.queryByText("編輯可見對象")).not.toBeInTheDocument()
+    // 說明句依模組：ET 講「帶入的課程」。正反同一種查法——只寫反向的話文案一改就恆真
+    expect(screen.queryByText(/此人會被帶入的課程/)).toBeInTheDocument()
+    expect(screen.queryByText(/此人可見的文件/)).not.toBeInTheDocument()
+  })
+
+  describe("配對視窗：沒選完的新列擋下儲存（手測回饋）", () => {
+    function setupEt() {
+      const captured: { body?: { roles: string[]; groups: string[] } } = {}
+      server.use(
+        http.get("/api/dp/roles/modules", () => HttpResponse.json(["ET"])),
+        http.get("/api/dp/roles/:module/group-options", () =>
+          HttpResponse.json([
+            { code: "102", name: "國防醫學院三軍總醫院", kind: "UNIT" },
+            { code: "5", name: "護理師", kind: "AUDIENCE" },
+          ]),
+        ),
+        http.get("/api/dp/roles/:module/assignments", () =>
+          HttpResponse.json({
+            data: [
+              {
+                user_id: "u1",
+                user_name: "王曉明",
+                email: "ming@example.com",
+                status: "ACTIVE",
+                locked_until: null,
+                roles: ["ET_STUDENT"],
+                groups: [":5"], // 改版前留下的「單位未指定」——不可被擋、不可被丟
+                last_modified_by: null,
+                last_modified_by_name: null,
+                last_modified_date: null,
+              },
+            ],
+            meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+          }),
+        ),
+        http.put("/api/dp/roles/:module/assignments/:userId", async ({ request }) => {
+          captured.body = (await request.json()) as NonNullable<typeof captured.body>
+          return new HttpResponse(null, { status: 204 })
+        }),
+      )
+      return captured
+    }
+
+    /** 依序為第 1 組單位、第 1 組職位、第 2 組單位、第 2 組職位（Select 的名稱取自標籤，各列同名）。 */
+    const combos = (dialog: HTMLElement) => within(dialog).getAllByRole("combobox")
+
+    async function openDialog(user: ReturnType<typeof userEvent.setup>) {
+      renderWithProviders(<RolesPage />)
+      const row = (await screen.findByText("王曉明")).closest("tr")!
+      await user.click(within(row).getByRole("button", { name: "編輯" }))
+      return screen.findByRole("dialog")
+    }
+
+    it("只選單位就儲存 → 不送出、職位欄標紅、出現提示；刪掉該列後可存且既有列保留", async () => {
+      const user = userEvent.setup()
+      const captured = setupEt()
+      const dialog = await openDialog(user)
+      // 尚未儲存前不標紅、不出現提示——還沒做錯就不責備
+      expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument()
+
+      await user.click(within(dialog).getByRole("button", { name: "新增受訓對象" }))
+      await user.click(combos(dialog)[2])
+      await user.click(await screen.findByRole("option", { name: "國防醫學院三軍總醫院" }))
+      await user.click(within(dialog).getByRole("button", { name: "儲存" }))
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("有未選完的列")
+      expect(captured.body).toBeUndefined()
+      // 紅框落在沒選的那一欄；已選的單位欄、既有的「單位未指定」列都不標
+      expect(combos(dialog)[3]).toHaveAttribute("aria-invalid", "true")
+      expect(combos(dialog)[2]).not.toHaveAttribute("aria-invalid", "true")
+      expect(combos(dialog)[0]).not.toHaveAttribute("aria-invalid", "true")
+
+      await user.click(within(dialog).getByRole("button", { name: "移除第 2 組" }))
+      await user.click(within(dialog).getByRole("button", { name: "儲存" }))
+
+      await waitFor(() => expect(captured.body).toBeDefined())
+      expect(captured.body?.groups).toEqual([":5"])
+    })
+
+    it("新增後兩欄皆空也擋下", async () => {
+      const user = userEvent.setup()
+      const captured = setupEt()
+      const dialog = await openDialog(user)
+      await user.click(within(dialog).getByRole("button", { name: "新增受訓對象" }))
+      await user.click(within(dialog).getByRole("button", { name: "儲存" }))
+
+      expect(await within(dialog).findByRole("alert")).toBeInTheDocument()
+      expect(combos(dialog)[2]).toHaveAttribute("aria-invalid", "true")
+      expect(combos(dialog)[3]).toHaveAttribute("aria-invalid", "true")
+      expect(captured.body).toBeUndefined()
+    })
   })
 
   it("無新增角色入口（角色為固定 enum）", async () => {

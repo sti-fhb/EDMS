@@ -1271,10 +1271,15 @@ export const handlers = [
       meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
+  // 受訓對象的選項：單位與職位兩類（#538）。`is_all` 為通用值「全單位」「全體」。
   http.get("/api/et/tags", () =>
     HttpResponse.json([
-      { tag_id: 1, tag_name: "全體", is_active: true },
-      { tag_id: 2, tag_name: "護理師", is_active: true },
+      { tag_id: 101, tag_name: "全單位", is_active: true, tag_type: "UNIT", is_all: true },
+      { tag_id: 102, tag_name: "國防醫學院三軍總醫院", is_active: true, tag_type: "UNIT", is_all: false },
+      { tag_id: 103, tag_name: "國防部軍醫局", is_active: true, tag_type: "UNIT", is_all: false },
+      { tag_id: 1, tag_name: "全體", is_active: true, tag_type: "AUDIENCE", is_all: true },
+      { tag_id: 2, tag_name: "護理師", is_active: true, tag_type: "AUDIENCE", is_all: false },
+      { tag_id: 3, tag_name: "行政人員", is_active: true, tag_type: "AUDIENCE", is_all: false },
     ]),
   ),
   // ⚠️ 字面路徑（`capabilities` / `filter-tags`）必須排在 `:courseId` **之前**——MSW 依
@@ -1282,8 +1287,10 @@ export const handlers = [
   // 而非陣列。與 FastAPI 路由宣告順序是同一類坑，但這裡不會報錯、只在渲染時才爆。
   http.get("/api/et/courses/filter-tags", () =>
     HttpResponse.json([
-      { tag_id: 1, tag_name: "護理師", is_active: true },
-      { tag_id: 2, tag_name: "已裁撤單位", is_active: false },
+      { tag_id: 101, tag_name: "全單位", is_active: true, tag_type: "UNIT", is_all: true },
+      { tag_id: 104, tag_name: "已裁撤單位", is_active: false, tag_type: "UNIT", is_all: false },
+      { tag_id: 1, tag_name: "全體", is_active: true, tag_type: "AUDIENCE", is_all: true },
+      { tag_id: 2, tag_name: "護理師", is_active: true, tag_type: "AUDIENCE", is_all: false },
     ]),
   ),
   // ET02 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
@@ -1497,7 +1504,7 @@ export const handlers = [
       owner_id: "U1",
       owner_name: "王教師",
       is_owner: true,
-      tag_ids: [2],
+      audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
       chapters: [
         // `items` 為後端恆回之欄位（#203）——fixture 少了它，任何走訪項目的程式碼
         // 都會在測試裡炸掉，而正式環境不會，屬最難察覺的一種假象。
@@ -1518,7 +1525,7 @@ export const handlers = [
       open_end_at: "2026-07-31T09:00:00Z",
       owner_id: "t01",
       owner_name: "陳大華",
-      tags: [{ tag_id: 1, tag_name: "護理師", is_active: true }],
+      audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
       chapter_count: 5,
       student_count: 28,
       is_owner: true,
@@ -1532,7 +1539,7 @@ export const handlers = [
       open_end_at: null,
       owner_id: "t02",
       owner_name: "林助教",
-      tags: [],
+      audiences: [],
       chapter_count: 3,
       student_count: 9,
       is_owner: false,
@@ -1545,7 +1552,7 @@ export const handlers = [
       course_id: 13,
       course_name: "草稿課",
       status: "DRAFT",
-      tags: [],
+      audiences: [],
       chapter_count: 1,
       student_count: 0,
     }
@@ -1556,7 +1563,7 @@ export const handlers = [
       course_id: 14,
       course_name: "已關閉的課",
       status: "CLOSED",
-      tags: [],
+      audiences: [],
       chapter_count: 2,
       student_count: 4,
       is_closed: true,

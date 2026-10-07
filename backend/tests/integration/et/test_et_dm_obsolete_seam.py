@@ -41,6 +41,7 @@ from app.et.constants import ITEM_MATERIAL, ROLE_STUDENT, ROLE_TEACHER, SOURCE_I
 from app.et.course.publish_rules import BLOCK_OBSOLETE_DOC
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -146,7 +147,16 @@ async def _course_with_doc(client, db, uid: str, *, doc_id: str) -> tuple[int, i
     )
     db.add(tag)
     await db.flush()
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag.tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=tag.tag_id,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     await db.flush()
 
     chapter = await client.post(

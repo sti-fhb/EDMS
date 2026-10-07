@@ -89,57 +89,63 @@
 
 ---
 
-### 受訓單位標籤（ET_TAG）（2026-07-02 新增）
+### 受訓對象標籤（ET_TAG）（2026-07-02 新增；2026-10-06 #538 加單位維度）
 
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 標籤 ID | TAG_ID | BIGINT | PK | 主鍵 |
 | 2 | 標籤名稱 | TAG_NAME | VARCHAR(50) | Y | 顯示名稱（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師…）；唯一 |
 | 3 | 是否啟用 | IS_ACTIVE | BOOLEAN | Y | 預設 true；停用後不可掛新課程，既有課程不受影響 |
-| 4 | 是否全體標籤 | IS_ALL | BOOLEAN | Y | 預設 false；true = 特殊標籤「全體」（所有具學員角色者），全系統僅 1 筆 |
+| 4 | 是否通用值 | IS_ALL | BOOLEAN | Y | 預設 false；true = 通用值（職位「全體」、單位「全單位」）。**每個 `TAG_TYPE` 僅 1 筆**（`UX_ET_TAG_TYPE_ALL`，#538；原為全系統 1 筆）|
 | 5 | 是否內建 | IS_BUILTIN | BOOLEAN | Y | 預設 false；內建種子標籤 |
-| 6 | 顯示順序 | DISPLAY_ORDER | INT | Y | 下拉 / 篩選顯示順序 |
+| 6 | 顯示順序 | DISPLAY_ORDER | INT | Y | 下拉 / 篩選顯示順序（同一 `TAG_TYPE` 內排序）|
+| 7 | 標籤類型 | TAG_TYPE | VARCHAR(10) | Y | `AUDIENCE`（職位）/ `UNIT`（單位）；預設 `AUDIENCE`（#538）。值刻意與 DM `GROUP_TYPE` 相同——DP02 以 `kind == "UNIT"` 判定配對模式 |
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
 - 管理者於 US1 維護（新增 / 修改 / 停用 / 啟用）；TAG_NAME 唯一
 - 部署時 seed 5 筆：全體（IS_ALL=true, IS_BUILTIN=true）/ 護理師 / 行政人員 / 軍人 / 醫檢師（IS_BUILTIN=true）
+- #538 seed 單位 21 筆（`TAG_TYPE='UNIT'`）：全單位（IS_ALL=true）+ 20 個單位，**逐字複製自 DM migration `a9a9b0d378c5` 之單位清單**，只對齊這一次
+- 通用值一律以 `IS_ALL` 判定，**不以 `TAG_NAME` 判定**（DM 以名稱判定，改名即擴權，#437 follow-up 1）
 - 「全體」標籤不可停用、不可刪除（應用層檢核）
 - 標籤不與 DM「可見對象/單位」（DM_TAG）共用；ET 自持（per 2026-07-02 設計決策）
 
 ---
 
-### 使用者標籤（ET_USER_TAG）（2026-07-02 新增，取代 ET_USER_MODULE）
+### 使用者受訓對象（ET_USER_TAG）（2026-07-02 新增，取代 ET_USER_MODULE；#538 改為配對）
 
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 對應 ID | USER_TAG_ID | BIGINT | PK | 主鍵 |
 | 2 | 使用者 ID | USER_ID | VARCHAR(20) | Y | FK → DP_USER.USER_ID |
-| 3 | 標籤 ID | TAG_ID | BIGINT | Y | FK → ET_TAG.TAG_ID |
+| 3 | 職位標籤 ID | TAG_ID | BIGINT | Y | FK → ET_TAG.TAG_ID（`TAG_TYPE='AUDIENCE'`）|
+| 4 | 單位標籤 ID | UNIT_TAG_ID | BIGINT | N | FK → ET_TAG.TAG_ID（`TAG_TYPE='UNIT'`）；**NULL＝單位未指定**（#538 導入前之既有指派，僅符合課程端「全單位」）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- (USER_ID, TAG_ID) 邏輯唯一；一人可屬多個標籤
-- 「全體」標籤不需逐人建立對應（IS_ALL 於查詢時展開為全部具學員角色者）
-- **新增**對應時系統自動將該使用者補加入該標籤所有「已發布且未關閉」課程，並寄彙整一封通知信
-- **移除**對應時既有課程之 ET_ENROLLMENT **不變動**；之後新發布之該標籤課程不會自動邀請該使用者
+- 一列＝一組 `(單位, 職位)` 配對（#538）；(USER_ID, TAG_ID, UNIT_TAG_ID) 唯一，**NULLS NOT DISTINCT**（否則單位未指定之列不受唯一約束保護）
+- 人身上**不掛通用值**（「全體」「全單位」）——應用層檢核（`ET_ROLE_002`）；欄位類型（單位欄須為單位）亦由應用層檢核，FK 只能保證指向 `ET_TAG`
+- 課程配對「全單位 + 全體」不需逐人建立對應（於查詢時展開為全部具學員角色者）
+- **新增**配對時系統自動將該使用者補加入該配對涵蓋之「已發布且未關閉」課程（「全單位 + 全體」課程除外），並寄彙整一封通知信
+- **移除**配對時既有課程之 ET_ENROLLMENT **不變動**
 
 ---
 
-### 課程標籤（ET_COURSE_TAG）（2026-07-02 新增）
+### 課程受訓對象（ET_COURSE_TAG）（2026-07-02 新增；#538 改為配對）
 
 | # | 欄位名稱 | 欄位代碼 | 資料型別 | 必填 | 說明 |
 |---|---------|---------|---------|------|------|
 | 1 | 對應 ID | COURSE_TAG_ID | BIGINT | PK | 主鍵 |
 | 2 | 課程 ID | COURSE_ID | BIGINT | Y | FK → ET_COURSE.COURSE_ID |
-| 3 | 標籤 ID | TAG_ID | BIGINT | Y | FK → ET_TAG.TAG_ID |
+| 3 | 職位標籤 ID | TAG_ID | BIGINT | Y | FK → ET_TAG.TAG_ID（`TAG_TYPE='AUDIENCE'`）|
+| 4 | 單位標籤 ID | UNIT_TAG_ID | BIGINT | Y | FK → ET_TAG.TAG_ID（`TAG_TYPE='UNIT'`）；**NOT NULL**——課程端兩欄必填，「不限單位」以「全單位」表達（#538；既有資料回填「全單位」）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
-- (COURSE_ID, TAG_ID) 邏輯唯一；一課程可掛多個標籤
-- 發布檢核：課程發布前至少 1 筆（應用層檢核）
-- 已發布課程可**新增**標籤（觸發該標籤人員補邀請＋寄信）、**不可移除**既有標籤；草稿可自由增刪
-- 僅可掛 IS_ACTIVE=true 之標籤（既有已掛之停用標籤保留）
+- 一列＝一組 `(單位, 職位)` 配對（#538）；(COURSE_ID, TAG_ID, UNIT_TAG_ID) 唯一
+- 發布檢核：課程發布前至少 1 組（應用層檢核）
+- 已發布課程可**新增**配對（觸發**該配對**人員補邀請＋寄信）、**不可移除**既有配對（同職位換單位視為移除）；草稿可自由增刪
+- 新配對兩欄皆須 IS_ACTIVE=true（既有配對中之停用標籤保留）；欄位類型由應用層檢核（`ET_COURSE_004`）
 
 ---
 

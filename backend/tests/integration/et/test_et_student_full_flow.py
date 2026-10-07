@@ -60,6 +60,7 @@ from app.et.constants import (
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
 from app.et.survey_fill.rules import ENTRY_FILLABLE, ENTRY_HIDDEN, ENTRY_SUBMITTED
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -156,7 +157,16 @@ async def _published_course(client, db, teacher: str) -> dict:
     )
     db.add(tag)
     await db.flush()
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag.tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=tag.tag_id,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     await db.flush()
 
     chapter = await client.post(

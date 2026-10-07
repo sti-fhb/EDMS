@@ -128,6 +128,7 @@ async def list_courses(
     db: AsyncSession = Depends(get_db),
     q: Annotated[str | None, Query(max_length=100)] = None,
     tag_id: Annotated[int | None, Query(ge=1, le=MAX_BIGINT)] = None,
+    unit_tag_id: Annotated[int | None, Query(ge=1, le=MAX_BIGINT)] = None,
     owner_id: Annotated[str | None, Query(max_length=20)] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 12,
@@ -143,7 +144,8 @@ async def list_courses(
     本分頁點進去因此必然是預覽。⛔ 若有人回報「我加入的課在全部課程不見了」，那不是
     bug——不要為了把它加回來而引進預覽旗標，理由見 `repository.build_list_stmt`。
 
-    `q` 依課程名稱模糊比對（萬用字元已跳脫）；`tag_id` 為該課程多標籤中任一命中即列出；
+    `q` 依課程名稱模糊比對（萬用字元已跳脫）；`tag_id`（職位）/ `unit_tag_id`（單位）比對課程配對的
+    **字面值**、不展開通用值，兩者並用時須同一組配對同時符合（#538 SA Q2）；
     `owner_id` 僅於 `scope=all` 有意義，`scope=mine` 時**忽略而不報錯**——那是前端切分頁
     時沒清乾淨，不是使用者做錯事。
 
@@ -155,6 +157,7 @@ async def list_courses(
         scope=scope,
         keyword=q,
         tag_id=tag_id,
+        unit_tag_id=unit_tag_id,
         owner_id=owner_id,
         page=page,
         limit=limit,
@@ -248,7 +251,7 @@ async def update_course(
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """更新基本資料與受訓單位標籤（全量覆寫，帶課程 `version` 檢核樂觀鎖）。"""
+    """更新基本資料與受訓對象（全量覆寫，帶課程 `version` 檢核樂觀鎖）。"""
     await _service.update_basic(db, course_id, req, operator=operator)
 
 

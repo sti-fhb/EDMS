@@ -195,7 +195,7 @@ export function InviteStudentsDialog({
 
       <DialogContent dividers>
         <Alert severity="info" sx={{ mb: 2 }}>
-          發布時系統已依<strong>受訓單位標籤</strong>自動邀請對應人員加入課程，並各寄一封通知信。
+          發布時系統已依<strong>受訓對象</strong>自動邀請對應人員加入課程，並各寄一封通知信。
           本功能供「補件」— 臨時追加不在標籤內的人（Email 邀請），或提供邀請碼。
         </Alert>
 

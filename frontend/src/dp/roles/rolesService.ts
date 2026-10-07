@@ -110,7 +110,7 @@ export const MODULE_LABELS: Record<string, string> = { DM: "文件管理（DM）
  *
  * 未列入的模組**回退為模組代碼本身**，對齊上方 `MODULE_LABELS[m] ?? m` 的頁籤慣例。
  */
-export const MODULE_GROUP_LABELS: Record<string, string> = { DM: "可見對象", ET: "受訓單位標籤" }
+export const MODULE_GROUP_LABELS: Record<string, string> = { DM: "可見對象", ET: "受訓對象" }
 
 /**
  * 取模組之群組維度稱呼；未知模組回退模組代碼本身。
@@ -124,6 +124,22 @@ export const MODULE_GROUP_LABELS: Record<string, string> = { DM: "可見對象",
  */
 export function groupDimensionLabel(module: string): string {
   return MODULE_GROUP_LABELS[module] ?? module
+}
+
+/**
+ * 配對模式下，編輯視窗那一句「配對是用來做什麼的」——**後果隨模組而異**：DM 決定看得到哪些
+ * 文件，ET 決定會被帶入哪些課程（#538）。寫死 DM 的句子會讓 ET 管理者以為自己在設文件權限。
+ *
+ * 與 `MODULE_GROUP_LABELS` 同一個慣例：這張表只管**怎麼說**；未列入的模組不說後果，只說格式。
+ */
+export const MODULE_PAIR_HINTS: Record<string, string> = {
+  DM: "此人可見的文件，須有一組配對與文件所掛者相符。",
+  ET: "此人會被帶入的課程，須有一組配對與課程所掛者相符。",
+}
+
+/** 配對模式的說明句；未知模組只回格式說明。 */
+export function pairHint(module: string): string {
+  return `一列為一組「單位 + 職位」。${MODULE_PAIR_HINTS[module] ?? ""}`
 }
 
 /**

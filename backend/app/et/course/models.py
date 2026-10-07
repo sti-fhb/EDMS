@@ -125,6 +125,9 @@ class EtItem(BaseModel):
             unique=True,
             postgresql_where=text('"DELETED" = 0'),
         ),
+        # #287：`attempt/repository.quiz_context()` 以 QUIZ_ID 反查所屬項目（學員端測驗授權鏈的
+        # 第一跳，每次進入測驗都會走到）。PostgreSQL 不會為 FK 自動建索引，少了它是全表掃描。
+        Index("IX_ET_ITEM_QUIZ", "QUIZ_ID"),
         CheckConstraint(
             '("ITEM_TYPE" = \'MATERIAL\' AND "MATERIAL_ID" IS NOT NULL AND "QUIZ_ID" IS NULL) '
             'OR ("ITEM_TYPE" = \'QUIZ\' AND "QUIZ_ID" IS NOT NULL AND "MATERIAL_ID" IS NULL)',

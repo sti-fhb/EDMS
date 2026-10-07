@@ -27,6 +27,7 @@ from app.et.constants import (
 from app.et.course.models import EtChapter, EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -99,7 +100,16 @@ async def _tag(db, name: str, *, is_active: bool = True) -> int:
 
 async def _attach_tag(db, course_id: int, tag_id: int) -> None:
     now = utcnow()
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag_id, created_user="admin01", created_date=now, deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=tag_id,
+            created_user="admin01",
+            created_date=now,
+            deleted=0,
+        )
+    )
     await db.flush()
 
 
@@ -297,7 +307,8 @@ class TestCardFields:
         r = await client.get(_URL, params={"scope": "mine"}, headers=_bearer(me))
 
         card = next(c for c in r.json()["data"] if c["course_name"] == "有標籤的課")
-        assert [t["tag_name"] for t in card["tags"]] == ["護理師_cl15"]
+        # #538：卡片改帶配對；「全單位」省略，故只掛職位的課程顯示文字就是職位名稱
+        assert [a["label"] for a in card["audiences"]] == ["護理師_cl15"]
 
 
 class TestPaginationShape:
@@ -342,7 +353,16 @@ class TestPaginationShape:
 
         r = await client.get(
             _URL,
-            params={"scope": "all", "q": "採血", "tag_id": tag_id, "owner_id": me, "page": 1, "limit": 12},
+            params={
+                "scope": "all",
+                "q": "採血",
+                "tag_id": tag_id,
+                # #538 SA Q2：篩選改為單位、職位兩欄
+                "unit_tag_id": await all_units_id(db),
+                "owner_id": me,
+                "page": 1,
+                "limit": 12,
+            },
             headers=_bearer(me),
         )
 

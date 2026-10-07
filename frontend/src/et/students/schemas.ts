@@ -1,4 +1,4 @@
-import type { TagOption } from "../courses/schemas"
+import type { AudiencePair } from "../courses/schemas"
 
 /**
  * ET02 學員學習狀況追蹤（US9 / #322）之型別——對齊後端 `app/et/tracking/schemas.py`。
@@ -237,7 +237,7 @@ export interface CourseOption {
   course_id: number
   course_name: string
   is_closed: boolean
-  tags: TagOption[]
+  audiences: AudiencePair[]
 }
 
 /**
