@@ -188,11 +188,27 @@ describe("AuditPage 篩選選項來自後端（#477）", () => {
     expect(await screen.findByRole("option", { name: "匯出" })).toBeInTheDocument()
   })
 
-  it("選模組 → 送出 API 帶英文碼 module", async () => {
-    const seen: (string | null)[] = []
+  it("沒有「模組」篩選，但其餘下拉都還在（#555）", async () => {
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("成功")
+
+    // ⚠️ 否定斷言必須配正向錨點、且用**同一種查詢方式**：單寫 queryByRole 為 null 的話，
+    // 整個篩選列壞掉（或 label 改字）時它也會通過——那時這條測試什麼都沒驗到。
+    expect(screen.getByRole("combobox", { name: "功能" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "操作類別" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "執行結果" })).toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "模組" })).not.toBeInTheDocument()
+  })
+
+  // ⚠️ 本條在移除篩選**之前就是綠的**（沒人去點模組下拉，`module` 本來就是空字串而不送出），
+  // 所以它**不是**「移除成功」的證據——那條是上面那個。它擋的是另一件事：UI 欄位拿掉、
+  // 但 `AuditFilters` / `EMPTY_AUDIT_FILTERS` 的殘留 state 被賦了非空預設值，導致畫面上
+  // 看不到卻一直帶著 module 查詢。那種狀態上面那條驗不出來。
+  it("殘留 state 不得讓查詢偷帶 module（#555 回歸護欄，非移除之證據）", async () => {
+    const seen: URLSearchParams[] = []
     server.use(
       http.get("/api/dp/audit/logs", ({ request }) => {
-        seen.push(new URL(request.url).searchParams.get("module"))
+        seen.push(new URL(request.url).searchParams)
         return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } })
       }),
     )
@@ -200,11 +216,11 @@ describe("AuditPage 篩選選項來自後端（#477）", () => {
     renderWithProviders(<AuditPage />)
     await screen.findByText("查無符合條件之紀錄")
 
-    await user.click(screen.getByRole("combobox", { name: "模組" }))
-    await user.click(await screen.findByRole("option", { name: "教育訓練" }))
+    // 動一個仍存在的篩選，確保查詢真的有送出（否則下方斷言會在空陣列上恆真）
+    await user.type(screen.getByLabelText("操作者（姓名 / Email）"), "alice")
 
-    // 送的是 ET 而非「教育訓練」——下拉顯示中文、API 收英文碼
-    await waitFor(() => expect(seen).toContain("ET"))
+    await waitFor(() => expect(seen.some((p) => p.get("operator") === "alice")).toBe(true))
+    expect(seen.every((p) => !p.has("module"))).toBe(true)
   })
 
   it("選項端點失敗時下拉為空、列表降級為原碼，不退回任何硬編碼清單", async () => {
