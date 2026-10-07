@@ -624,32 +624,19 @@ describe("ET04 核可查詢：共通", () => {
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
   })
 
-  it("🔴 `module-summary` 未回來前不渲染任何視角——避免管理者閃現不適用的提示", async () => {
-    // 只等 `capabilities` 的話，整頁重新載入時它可能先回來，此時 `summary` 還是
-    // undefined → `isAdmin` 退回 false → 管理者會**短暫看到**「僅顯示您所開設的課程」。
-    // 它會自我修正，但那句是裁示 C 的強制配套，閃現錯誤版本與顯示錯誤版本同樣不可接受。
-    server.use(
-      http.get("/api/et/courses/capabilities", () =>
-        HttpResponse.json({
-          can_create_course: false,
-          can_manage_courses: true,
-          can_track_students: false,
-          can_learn: false,
-        }),
-      ),
-      // 讓 module-summary 慢於 capabilities 回來
-      http.get("/api/dp/user/module-summary", async () => {
-        await new Promise((r) => setTimeout(r, 80))
-        return HttpResponse.json({ et: { has_role: true, is_admin: true }, dm: { has_role: false, is_admin: false } })
-      }),
-    )
-    renderWithProviders(<EtApprovalQueryPage />)
-
-    // capabilities 先回來的那個空窗期：不得已 isAdmin=false 渲染出教師視角
-    expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
-    expect(await screen.findByLabelText("學員姓名或 Email")).toBeInTheDocument()
-    expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
-  })
+  // ⚠️ 這裡原有一條「`module-summary` 未回來前不渲染任何視角」的測試，#548 之後**已刪除**。
+  //
+  // 它守的是一個雙查詢的 race：只等 `capabilities` 的話，`summary` 還沒回來時 `isAdmin`
+  // 退回 false，管理者會**短暫看到**「僅顯示您所開設的課程」這句不適用於他的提示。
+  //
+  // 🔴 刪除的理由不是「不重要」，而是**它守的東西結構上已不存在**：裁示 1 統一可見範圍後，
+  // 頁面不再查 `module-summary`（只剩 `capabilities` 一支），那句提示也整個移除了。
+  //
+  // ⚠️ 刪除前先確認它已經是**恆真**的：`僅顯示您所開設的課程` 在元件中 0 命中，
+  // 所以 `queryByText(...).not.toBeInTheDocument()` 不論元件怎麼寫都會通過
+  // ——一條守著已移除機制、卻仍是綠的測試，比沒有測試更容易讓人誤以為還有防護。
+  //
+  // 📌 接手的是上方「教師不得再看到任何可見範圍提示」那條（配了正向錨點）。
 
   it("兼具教師與學員角色時顯示教師視角", async () => {
     // 他自己的已通過課程在 ET03「我的課程」看得到；兩張表塞同一頁只會讓畫面變長。

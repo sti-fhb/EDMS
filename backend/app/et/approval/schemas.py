@@ -214,11 +214,14 @@ class ApprovalSearchReq(BaseModel):
     #: 帳號永遠查不到，而使用者只會看到「查無資料」。100 足以涵蓋實務帳號長度，同時
     #: 仍遠低於 255，不讓它變成可任意灌長度的欄位。
     keyword: Annotated[str | None, Field(default=None, max_length=100)] = None
-    #: 課程篩選（#439）；`None` 為不限。
+    #: 課程篩選（#439）；`None` 為不限。**不分 owner**（#548 裁示 4）。
     #:
-    #: 🔴 非管理者**只能給自己開設的課程**，否則 403 `ET_APPROVAL_007`
-    #: （`query_rules.ensure_course_filter_allowed`）。前端下拉本來就只列得出自己的課，
-    #: 那道閘是防繞過——少了它，教師可以不指名地撈出任一門課的全部通過者名單。
+    #: ↔️ 原本非管理者只能給自己開設的課程，否則 403 `ET_APPROVAL_007`
+    #: （`ensure_course_filter_allowed`）。那道閘擋的是**取得成本**而非可見資料
+    #: ——教師本來就能以姓名查到他人課程的紀錄，兩條路兩種規則而畫面不解釋。
+    #:
+    #: ⚠️ 指定不存在的課程回**空清單**，⛔ 不可回 404——`course_id` 直接來自使用者，
+    #: 回 404 會讓本端點成為課程存在性的 oracle。
     course_id: Annotated[int | None, Field(default=None, ge=1, le=MAX_BIGINT)] = None
     #: `PASS` / `FAIL`；`None` 為不限。對應 `ET_APPROVAL.RESULT`。
     result: Annotated[Literal["PASS", "FAIL"] | None, Field(default=None)] = None
