@@ -1,19 +1,29 @@
-"""發布課程時依受訓單位標籤自動帶入學員（US3 FR-ET-US3-12 前半 / #247 追加）。
+"""發布課程時依受訓對象配對自動帶入學員（US3 FR-ET-US3-12 前半 / #247 追加 / #538 配對）。
 
 ## 為何在 #247 補這一段
 
 `ET-8`（標籤帶入 / Email 邀請 / 寄通知信）尚未實作，#204 在 `publish_service` 留了
 接點但沒實作。實測時發現：課程發布並掛了「護理師」標籤，具該標籤的學員卻沒有被帶
-進課程——教師只能把 8 碼邀請碼一個一個發出去。**沒有這一段，「受訓單位標籤」在發布
-流程裡完全沒有作用**，`ET-4` 的我的課程對多數學員也永遠是空的。
+進課程——教師只能把 8 碼邀請碼一個一個發出去。**沒有這一段，受訓對象在發布流程裡
+完全沒有作用**，`ET-4` 的我的課程對多數學員也永遠是空的。
 
 本模組**只做標籤帶入**。仍屬 `ET-8` 而不在此的：Email 邀請（另一種 `JOIN_SOURCE`）、
 發布後寄通知信。（原本還有「`ET_INVITATION` 待加入清單」一項，已隨 #362 移除。）
 
-## 演算法（`EtEnrollment` docstring 已載明）
+## 演算法（#538 起為配對匹配）
 
-`ET_COURSE_TAG × ET_USER_TAG` 取聯集去重，限具**學員角色**者；掛有 `IS_ALL` 標籤
-（「全體」）時展開為全部具學員角色者。
+課程配對 × 使用者配對，依 `catalog/pair.py` 的規則取相符者，限具**學員角色**者、去重。
+課程掛 `(全單位, 全體)` 時展開為**全部**具學員角色者（含身上沒有任何配對的人）。
+
+三條路徑各有一支「找出哪些人 / 哪些課」的查詢，**寫入一律經過 `bulk_enroll_returning`**：
+
+| 路徑 | 解析 | 寫入 |
+|---|---|---|
+| 發布 | `target_user_ids` | `bulk_enroll_returning` |
+| 已發布課程新增配對（FR-ET-US8-04）| `target_user_ids_for_pairs` | 同上 |
+| 貼標追溯（FR-ET-US8-05）| `courses_for_user_pairs` | 同上 |
+
+⚠️ 擁有者排除與「不帶回被移除者」都在寫入那一支，**不在解析這三支**——見其 docstring。
 
 ## 為何整批 upsert 而非單純 INSERT
 
@@ -28,55 +38,66 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import or_, select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag
+from app.et.catalog.pair import Pair, is_universal, matched_course_users, not_universal, pair_in
 from app.et.constants import COMPLETION_NOT_STARTED, COURSE_PUBLISHED, ROLE_STUDENT, SOURCE_TAG_DEFAULT
 from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
 
 
+def _students():
+    """具**有效**學員角色者（停用之角色指派不算，`load_et_roles` 只取 `IS_ACTIVE=true`）。"""
+    return select(EtUserRole.user_id).where(
+        EtUserRole.role == ROLE_STUDENT,
+        EtUserRole.is_active.is_(True),
+        EtUserRole.deleted == 0,
+    )
+
+
 class EtTagInviteRepository:
-    """依課程標籤解析出應帶入的學員，並批次建立選課列。"""
+    """依課程配對解析出應帶入的學員，並批次建立選課列。"""
 
     async def target_user_ids(self, db: AsyncSession, course_id: int) -> list[str]:
-        """課程**全部**標籤對應之學員 `USER_ID`（去重、已排除非學員）。
+        """課程**全部**配對對應之學員 `USER_ID`（去重、排序、已排除非學員）。
 
-        用於發布當下——那時整門課的標籤一次生效。
+        用於發布當下——那時整門課的配對一次生效。
         """
-        tag_rows = await db.execute(
-            select(EtTag.tag_id, EtTag.is_all)
-            .join(EtCourseTag, EtCourseTag.tag_id == EtTag.tag_id)
-            .where(
-                EtCourseTag.course_id == course_id,
-                EtCourseTag.deleted == 0,
-                EtTag.deleted == 0,
-            )
-        )
-        return await self._resolve_students(db, tag_rows.all())
+        return await self._resolve_students(db, EtCourseTag.course_id == course_id)
 
-    async def target_user_ids_for_tags(self, db: AsyncSession, tag_ids: Sequence[int]) -> list[str]:
-        """**指定標籤**對應之學員 `USER_ID`（去重、已排除非學員）。
+    async def target_user_ids_for_pairs(self, db: AsyncSession, course_id: int, pairs: Sequence[Pair]) -> list[str]:
+        """該課程**指定配對**對應之學員 `USER_ID`（去重、排序、已排除非學員）。
 
-        已發布課程新增標籤時用（FR-ET-US8-04）：spec 要求對「**該標籤**對應人員」補邀請。
-        若改用 `target_user_ids`（全部課程標籤），那些在課程發布**之後**才被貼上舊標籤
-        的人也會被一併帶入——那是另一條規則（貼標追溯，由 `EtAssignService` 於貼標當下
-        觸發），在這裡順手做會讓同一個人被兩條路徑各邀請一次、且時機難以解釋。
+        已發布課程新增配對時用（FR-ET-US8-04）：spec 要求對「**該配對**對應人員」補邀請。
+        若改用 `target_user_ids`（全部配對），那些在課程發布**之後**才被貼上舊配對的人也會
+        被一併帶入——那是另一條規則（貼標追溯，由 `EtAssignService` 於貼標當下觸發），在這裡
+        順手做會讓同一個人被兩條路徑各邀請一次、且時機難以解釋。
+
+        Args:
+            pairs: `(單位 TAG_ID, 職位 TAG_ID)`；須為該課程**已寫入**之配對（以課程配對列比對）。
         """
-        if not tag_ids:
+        if not pairs:
             return []
-        rows = await db.execute(
-            select(EtTag.tag_id, EtTag.is_all).where(EtTag.tag_id.in_(list(tag_ids)), EtTag.deleted == 0)
+        return await self._resolve_students(
+            db, EtCourseTag.course_id == course_id, pair_in(EtCourseTag.unit_tag_id, EtCourseTag.tag_id, pairs)
         )
-        return await self._resolve_students(db, rows.all())
 
-    async def courses_for_tags(self, db: AsyncSession, tag_ids: Sequence[int]) -> list[EtCourse]:
-        """掛有指定標籤之**已發布且未視同關閉**課程（貼標追溯用，FR-ET-US8-05）。
+    async def courses_for_user_pairs(self, db: AsyncSession, user_id: str, pairs: Sequence[Pair]) -> list[EtCourse]:
+        """某人的**指定配對**所涵蓋之**已發布且未視同關閉**課程（貼標追溯用，FR-ET-US8-05）。
+
+        ## ⚠️ 排除 `(全單位, 全體)` 的課程
+
+        那種課程的成員是「全部學員」，於**發布當下**一次決定，與某人掛了哪組配對無關。
+        舊版（#538 之前）貼「護理師」只會補進掛「護理師」的課，不會補進「全體」課程；
+        此處維持同一行為——否則管理者幫任何人加任何一組配對，都會順帶把他塞進所有「全體」
+        課程，而那並不是這次指派的結果。
 
         ## 兩個條件，不是一個
 
@@ -87,61 +108,62 @@ class EtTagInviteRepository:
 
         少了期間條件，FR-ET-US11-07「關閉期間不可邀請學員」會被這條路徑整個繞過：
         教師對期間已過的課程送 Email 邀請會被擋（409 `ET_INVITE_002`），但只要改去
-        **幫課程加一個標籤**、或管理者在 DP 後台**幫某使用者貼標籤**，該標籤的學員就
+        **幫課程加一組配對**、或管理者在 DP 後台**幫某使用者加配對**，對應的學員就
         會被 `bulk_enroll` 進那門課並收到邀請信——而他進去什麼都不能做。
 
         ⚠️ 此處以 SQL 條件重述 `is_effectively_closed` 的語意（`OPEN_END_AT` 為空或
         仍在未來）。那支純函式吃的是單一課程的欄位值，無法下推成 WHERE；兩邊的判定
         必須一致，改動時請同步。
 
+        Args:
+            pairs: 該使用者**已寫入**之配對（以使用者配對列比對；單位可為 None）。
+
         Returns:
             依 `COURSE_ID` 排序、去重之課程列（排序使彙整信的課程順序可預期）。
         """
-        if not tag_ids:
+        if not pairs:
             return []
+        matched, unit_tag, role_tag = matched_course_users()
+        course_ids = matched.where(
+            EtUserTag.user_id == user_id,
+            pair_in(EtUserTag.unit_tag_id, EtUserTag.tag_id, pairs),
+            not_universal(unit_tag, role_tag),
+        ).with_only_columns(EtCourseTag.course_id)
         now = utcnow()
         rows = await db.scalars(
             select(EtCourse)
-            .join(EtCourseTag, EtCourseTag.course_id == EtCourse.course_id)
             .where(
-                EtCourseTag.tag_id.in_(list(tag_ids)),
-                EtCourseTag.deleted == 0,
+                EtCourse.course_id.in_(course_ids),
                 EtCourse.status == COURSE_PUBLISHED,
                 # 訖止為空＝沒有結束日，不因缺欄位排除一門教師沒要求關閉的課程
                 or_(EtCourse.open_end_at.is_(None), EtCourse.open_end_at > now),
                 EtCourse.deleted == 0,
             )
             .order_by(EtCourse.course_id)
-            .distinct()
         )
         return list(rows.all())
 
-    async def _resolve_students(self, db: AsyncSession, tags: Sequence[tuple[int, bool]]) -> list[str]:
-        """(TAG_ID, IS_ALL) 清單 → 具學員角色之 `USER_ID`（去重、排序）。
+    async def _resolve_students(self, db: AsyncSession, *course_conds: ColumnElement[bool]) -> list[str]:
+        """符合 `course_conds` 之課程配對所涵蓋的學員 `USER_ID`（去重、排序）。
 
-        `IS_ALL` 標籤（「全體」）展開為**全部具學員角色者**，不需該使用者實際掛上
-        那個標籤——否則「全體」就只是一個名字叫全體的普通標籤。
+        課程配對為 `(全單位, 全體)` 時展開為**全部具學員角色者**——不需該使用者身上有任何
+        配對，否則「全體」就只是一個名字叫全體的普通標籤。
         """
-        if not tags:
-            return []
-
-        students = select(EtUserRole.user_id).where(
-            EtUserRole.role == ROLE_STUDENT,
-            EtUserRole.is_active.is_(True),
-            EtUserRole.deleted == 0,
+        unit_tag = aliased(EtTag, name="et_unit_tag")
+        role_tag = aliased(EtTag, name="et_role_tag")
+        universal = await db.scalar(
+            select(EtCourseTag.course_tag_id)
+            .join(unit_tag, unit_tag.tag_id == EtCourseTag.unit_tag_id)
+            .join(role_tag, role_tag.tag_id == EtCourseTag.tag_id)
+            .where(EtCourseTag.deleted == 0, is_universal(unit_tag, role_tag), *course_conds)
+            .limit(1)
         )
+        if universal is not None:
+            return sorted(set(await db.scalars(_students())))
 
-        if any(is_all for _, is_all in tags):
-            rows = await db.scalars(students)
-            return sorted(set(rows))
-
-        tag_ids = [tag_id for tag_id, _ in tags]
+        matched, _, _ = matched_course_users()
         rows = await db.scalars(
-            select(EtUserTag.user_id).where(
-                EtUserTag.tag_id.in_(tag_ids),
-                EtUserTag.deleted == 0,
-                EtUserTag.user_id.in_(students),
-            )
+            matched.where(*course_conds, EtUserTag.user_id.in_(_students())).with_only_columns(EtUserTag.user_id)
         )
         return sorted(set(rows))
 

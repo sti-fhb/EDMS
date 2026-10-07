@@ -171,7 +171,7 @@ export const BLOCKER_HINT: Record<string, string> = {
   NO_CHAPTER: "請於「章節」區塊新增至少 1 個章節",
   NO_MATERIAL: "請於章節內新增至少 1 份教材",
   CHAPTER_EMPTY: "請於該章節新增教材或測驗，或刪除這個空章節",
-  NO_TAG: "請於「基本資料」選擇受訓單位標籤",
+  NO_TAG: "請於「基本資料」設定受訓對象",
   NO_SCHEDULE: "請於「基本資料」填寫課程起訖時間",
   QUIZ_POINTS: "請調整該測驗各題配分，使總和為 100",
   QUIZ_NO_QUESTION: "請為該測驗新增至少 1 題",

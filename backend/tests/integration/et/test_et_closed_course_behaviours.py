@@ -52,6 +52,7 @@ from app.et.constants import (
 from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -125,7 +126,16 @@ async def _ready(client, db, slug: str, *, with_quiz: bool = False, with_survey:
     cid = created.json()["course_id"]
 
     tag_id = await _tag(db, f"標籤{cid}")
-    db.add(EtCourseTag(course_id=cid, tag_id=tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=cid,
+            tag_id=tag_id,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     await db.flush()
 
     ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(teacher))

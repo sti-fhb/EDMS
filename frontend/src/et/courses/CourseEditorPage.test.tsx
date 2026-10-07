@@ -154,7 +154,7 @@ describe("ET05 課程編輯頁", () => {
           owner_id: "OTHER",
           owner_name: "林助教",
           is_owner: false,
-          tag_ids: [],
+          audiences: [],
           chapters: [{ chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] }],
         }),
       ),
@@ -182,7 +182,9 @@ describe("ET05 課程編輯頁", () => {
     expect(await screen.findByText("內容已被其他裝置變更，請重新整理後再儲存。")).toBeInTheDocument()
   })
 
-  it("已發布課程之標籤不可移除（chip 無刪除鈕）", async () => {
+  it("已發布課程的既有受訓對象不可移除、不可修改；新增的列照常可刪（#538）", async () => {
+    // FR-ET-US3-02：已發布只增不減。鎖的是**伺服器上已存在**的那幾組，不是整區
+    const user = userEvent.setup()
     server.use(
       http.get("/api/et/courses/:courseId", () =>
         HttpResponse.json({
@@ -197,16 +199,147 @@ describe("ET05 課程編輯頁", () => {
           owner_id: "U1",
           owner_name: "王教師",
           is_owner: true,
-          tag_ids: [2],
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
           chapters: [],
         }),
       ),
     )
     renderEditor()
-    expect(await screen.findByText("已發布課程可新增標籤、不可移除既有標籤")).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText("護理師")).toBeInTheDocument())
-    // MUI Chip 的刪除鈕 aria-label 預設為 "delete"；不可移除時不應出現
-    expect(screen.queryByTestId("CancelIcon")).not.toBeInTheDocument()
+    expect(await screen.findByText("已發布課程可新增受訓對象、不可移除既有者")).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "第 1 組的單位" })).toBeDisabled()
+    expect(screen.getByRole("combobox", { name: "第 1 組的職位" })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "移除第 1 組受訓對象" })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "新增受訓對象" }))
+
+    // 成對：新增的第 2 列有刪除鈕、下拉可用——少了這條，「整區鎖死」也會通過上面的斷言
+    expect(screen.getByRole("button", { name: "移除第 2 組受訓對象" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "第 2 組的單位" })).toBeEnabled()
+  })
+
+  describe("受訓對象配對列表（#538）", () => {
+    async function pick(user: ReturnType<typeof userEvent.setup>, field: string, option: string) {
+      await user.click(screen.getByRole("combobox", { name: field }))
+      await user.click(await screen.findByRole("option", { name: option }))
+    }
+
+    function capturePut() {
+      const captured: { body?: { audiences: { unit_tag_id: number; tag_id: number }[] } } = {}
+      server.use(
+        http.put("/api/et/courses/:courseId", async ({ request }) => {
+          captured.body = (await request.json()) as NonNullable<typeof captured.body>
+          return new HttpResponse(null, { status: 204 })
+        }),
+      )
+      return captured
+    }
+
+    it("新增模式預帶一列空白配對", async () => {
+      renderNewEditor()
+      expect(await screen.findByRole("combobox", { name: "第 1 組的單位" })).toHaveValue("")
+      expect(screen.getByRole("combobox", { name: "第 1 組的職位" })).toHaveValue("")
+    })
+
+    it("新增一組配對後送出的 body 帶完整配對；空白列不送", async () => {
+      const user = userEvent.setup()
+      const captured = capturePut()
+      renderEditor()
+      await screen.findByDisplayValue("採血作業訓練")
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" }))
+      await pick(user, "第 2 組的單位", "國防醫學院三軍總醫院")
+      await pick(user, "第 2 組的職位", "行政人員")
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" })) // 第 3 列留空
+
+      await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+
+      await waitFor(() => expect(captured.body).toBeDefined())
+      expect(captured.body?.audiences).toEqual([
+        { unit_tag_id: 101, tag_id: 2 },
+        { unit_tag_id: 102, tag_id: 3 },
+      ])
+    })
+
+    it("只選了一欄的配對擋在送出前", async () => {
+      const user = userEvent.setup()
+      const captured = capturePut()
+      renderEditor()
+      await screen.findByDisplayValue("採血作業訓練")
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" }))
+      await pick(user, "第 2 組的單位", "國防醫學院三軍總醫院")
+
+      await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+
+      expect(await screen.findByText("請選擇單位與職位")).toBeInTheDocument()
+      expect(captured.body).toBeUndefined()
+    })
+
+    it("受訓對象與其他欄位的錯誤一次全部顯示，不分兩次送出", async () => {
+      // code review LOW：受訓對象有錯就提早 return 的話，課程名稱的錯誤要下一次送出才看得到
+      const user = userEvent.setup()
+      const captured = capturePut()
+      renderEditor()
+      await user.clear(await screen.findByDisplayValue("採血作業訓練"))
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" }))
+      await pick(user, "第 2 組的單位", "國防醫學院三軍總醫院")
+
+      await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+
+      expect(await screen.findByText("請選擇單位與職位")).toBeInTheDocument()
+      expect(screen.getByText("請輸入課程名稱")).toBeInTheDocument()
+      expect(captured.body).toBeUndefined()
+    })
+
+    it("重複的配對擋在送出前", async () => {
+      const user = userEvent.setup()
+      const captured = capturePut()
+      renderEditor()
+      await screen.findByDisplayValue("採血作業訓練")
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" }))
+      await pick(user, "第 2 組的單位", "全單位")
+      await pick(user, "第 2 組的職位", "護理師") // 與第 1 組相同
+
+      await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+
+      expect(await screen.findByText("此組受訓對象已存在")).toBeInTheDocument()
+      expect(captured.body).toBeUndefined()
+    })
+
+    it("單位下拉只有單位、職位下拉只有職位", async () => {
+      const user = userEvent.setup()
+      renderEditor()
+      await screen.findByDisplayValue("採血作業訓練")
+
+      await user.click(screen.getByRole("combobox", { name: "第 1 組的單位" }))
+
+      expect(await screen.findByRole("option", { name: "國防醫學院三軍總醫院" })).toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: "行政人員" })).not.toBeInTheDocument()
+    })
+
+    it("唯讀模式以後端組好的文字呈現，不顯示下拉", async () => {
+      server.use(
+        http.get("/api/et/courses/:courseId", () =>
+          HttpResponse.json({
+            course_id: 1,
+            course_name: "他人的課",
+            description: null,
+            status: "PUBLISHED",
+            open_start_at: null,
+            open_end_at: null,
+            require_approval: false,
+            version: 3,
+            owner_id: "U9",
+            owner_name: "林教師",
+            is_owner: false,
+            audiences: [{ unit_tag_id: 102, tag_id: 3, label: "國防醫學院三軍總醫院 + 行政人員" }],
+            chapters: [],
+            invitation_code: null,
+          }),
+        ),
+      )
+      renderEditor()
+      expect(await screen.findByText("國防醫學院三軍總醫院 + 行政人員")).toBeInTheDocument()
+      expect(screen.queryByRole("combobox", { name: "第 1 組的單位" })).not.toBeInTheDocument()
+    })
   })
 
   it("新增章節對話框支援「儲存並繼續新增」", async () => {
@@ -506,7 +639,7 @@ describe("ET05 課程編輯頁", () => {
           course_name: "採血作業訓練",
           description: null,
           require_approval: false,
-          tag_ids: [],
+          audiences: [],
           status: "DRAFT",
           version: 0,
           is_owner: true,
@@ -761,7 +894,7 @@ describe("ET05 課程編輯頁", () => {
     await user.click(await screen.findByRole("button", { name: "確認發布" }))
 
     // 結果仍在畫面上，且**此時還沒導回**
-    expect(await screen.findByText(/已依受訓單位標籤帶入 7 位學員/)).toBeInTheDocument()
+    expect(await screen.findByText(/已依受訓對象帶入 7 位學員/)).toBeInTheDocument()
     expect(screen.getByText("ABC12345")).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalled()
 
@@ -818,7 +951,7 @@ describe("ET05 課程編輯頁", () => {
           owner_id: "U1",
           owner_name: "王教師",
           is_owner: true,
-          tag_ids: [2],
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
           chapters: [
             { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] },
             {
@@ -893,7 +1026,7 @@ function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {
         owner_id: "U1",
         owner_name: "王教師",
         is_owner: isOwner,
-        tag_ids: [2],
+        audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
         chapters: [],
         invitation_code: isOwner ? "01234567" : null,
       }),
@@ -1399,7 +1532,7 @@ describe("ET05 課程關閉與再開課", () => {
           owner_id: "U1",
           owner_name: "王教師",
           is_owner: true,
-          tag_ids: [2],
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
           chapters: [],
           invitation_code: "01234567",
         })
@@ -1491,7 +1624,7 @@ describe("ET05 課程關閉與再開課", () => {
             owner_id: "U1",
             owner_name: "王教師",
             is_owner: true,
-            tag_ids: [2],
+            audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
             chapters: [],
             invitation_code: id === 1 ? null : "01234567",
           })
@@ -1502,7 +1635,7 @@ describe("ET05 課程關閉與再開課", () => {
         http.get("/api/et/courses/:courseId/publish-check", () =>
           HttpResponse.json({
             can_publish: false,
-            blockers: [{ code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null }],
+            blockers: [{ code: "NO_TAG", message: "課程至少須設定 1 組受訓對象", target_id: null }],
           }),
         ),
       )
@@ -1523,7 +1656,7 @@ describe("ET05 課程關閉與再開課", () => {
       const { rerender } = renderEditor("1")
       await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
       const publish = await screen.findByRole("dialog", { name: "發布課程" })
-      expect(await within(publish).findByText(/課程至少須掛 1 個受訓單位標籤/)).toBeInTheDocument()
+      expect(await within(publish).findByText(/課程至少須設定 1 組受訓對象/)).toBeInTheDocument()
       await user.click(within(publish).getByRole("button", { name: "取消" }))
 
       paramsRef.current = { courseId: "2" }
@@ -1532,7 +1665,7 @@ describe("ET05 課程關閉與再開課", () => {
       const reopen = await failReopen(user)
 
       expect(within(reopen).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
-      expect(within(reopen).queryByText(/課程至少須掛 1 個受訓單位標籤/)).not.toBeInTheDocument()
+      expect(within(reopen).queryByText(/課程至少須設定 1 組受訓對象/)).not.toBeInTheDocument()
     })
 
     it("再開課留下的缺漏不出現在發布視窗", async () => {
@@ -1556,7 +1689,7 @@ describe("ET05 課程關閉與再開課", () => {
       await user.click(await screen.findByRole("button", { name: "儲存並發布" }))
       const publish = await screen.findByRole("dialog", { name: "發布課程" })
 
-      expect(await within(publish).findByText(/課程至少須掛 1 個受訓單位標籤/)).toBeInTheDocument()
+      expect(await within(publish).findByText(/課程至少須設定 1 組受訓對象/)).toBeInTheDocument()
       expect(within(publish).queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
     })
   })

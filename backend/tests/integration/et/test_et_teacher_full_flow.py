@@ -45,6 +45,7 @@ from app.et.constants import (
 )
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -108,7 +109,16 @@ async def test_教師從建立課程到看見學員成果的完整流程(client,
 
     # ── 階段 2：掛受訓單位標籤（發布時據此自動帶入學員）──────────────────────
     unit_tag = await _tag(db, f"檢驗科{course_id}")
-    db.add(EtCourseTag(course_id=course_id, tag_id=unit_tag, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=unit_tag,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     db.add(EtUserTag(user_id=tagged_student, tag_id=unit_tag, created_user="SYSTEM", created_date=utcnow(), deleted=0))
     await db.flush()
 

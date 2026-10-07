@@ -13,10 +13,11 @@ from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
-from app.et.catalog.models import EtTag
+from app.et.catalog.models import TAG_TYPE_AUDIENCE, EtTag
 from app.et.constants import COURSE_PUBLISHED, ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER
 from app.et.course.models import EtCourse
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_roles_id, all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -53,11 +54,27 @@ def _bearer(user_id: str) -> dict[str, str]:
 
 
 async def _tag_ids(db, limit: int = 2) -> list[int]:
-    """取啟用中之種子標籤 ID（migration 種了 5 筆；不寫死 ID，避免 identity 起始值假設）。"""
+    """取啟用中之種子**職位**標籤 ID（不寫死 ID，避免 identity 起始值假設）。
+
+    #538 起單位也在 `ET_TAG`，故限 `TAG_TYPE='AUDIENCE'`。
+    """
     rows = await db.scalars(
-        select(EtTag.tag_id).where(EtTag.deleted == 0, EtTag.is_active.is_(True)).order_by(EtTag.tag_id).limit(limit)
+        select(EtTag.tag_id)
+        .where(EtTag.deleted == 0, EtTag.is_active.is_(True), EtTag.tag_type == TAG_TYPE_AUDIENCE)
+        .order_by(EtTag.tag_id)
+        .limit(limit)
     )
     return list(rows)
+
+
+async def _aud(db, role_ids: list[int]) -> list[dict]:
+    """職位 ID → `(全單位, 職位)` 配對（#538 之前「只掛職位」的同義寫法）。"""
+    unit = await all_units_id(db)
+    return [{"unit_tag_id": unit, "tag_id": r} for r in role_ids]
+
+
+def _roles_of(detail: dict) -> list[int]:
+    return [a["tag_id"] for a in detail["audiences"]]
 
 
 class TestCreateDraft:
@@ -138,7 +155,9 @@ class TestCreateDraft:
         )
         await db.flush()
         disabled = await db.scalar(select(EtTag.tag_id).where(EtTag.tag_name == "已停用單位"))
-        r = await client.post(_URL, json={"course_name": "課程", "tag_ids": [disabled]}, headers=_bearer(uid))
+        r = await client.post(
+            _URL, json={"course_name": "課程", "audiences": await _aud(db, [disabled])}, headers=_bearer(uid)
+        )
         assert r.status_code == 422
         assert r.json()["error_code"] == "ET_COURSE_004"
 
@@ -362,18 +381,18 @@ class TestInputBounds:
         r = await client.get(f"{_URL}/99999999999999999999999", headers=_bearer(uid))
         assert r.status_code == 422
 
-    async def test_超長_tag_ids_被擋(self, client, db) -> None:
+    async def test_超長_audiences_被擋(self, client, db) -> None:
         """數萬筆的 `IN (...)` 會讓 SQLAlchemy / asyncpg 拋未處理例外。"""
         uid = await _user(db, "ETC_B2")
-        r = await client.post(
-            _URL, json={"course_name": "課程", "tag_ids": list(range(1, 50001))}, headers=_bearer(uid)
-        )
+        pairs = [{"unit_tag_id": i, "tag_id": i} for i in range(1, 50001)]
+        r = await client.post(_URL, json={"course_name": "課程", "audiences": pairs}, headers=_bearer(uid))
         assert r.status_code == 422
 
     async def test_非正數_tag_id_被擋(self, client, db) -> None:
         """`TAG_ID` 為 Identity 正整數；負數 / 零屬不合法輸入。"""
         uid = await _user(db, "ETC_B3")
-        r = await client.post(_URL, json={"course_name": "課程", "tag_ids": [-1]}, headers=_bearer(uid))
+        pairs = [{"unit_tag_id": 1, "tag_id": -1}]
+        r = await client.post(_URL, json={"course_name": "課程", "audiences": pairs}, headers=_bearer(uid))
         assert r.status_code == 422
 
     async def test_超長_chapter_ids_被擋(self, client, db) -> None:
@@ -446,23 +465,27 @@ class TestUpdateAndTags:
     async def test_草稿可自由增刪標籤(self, client, db) -> None:
         uid = await _user(db, "ETC_U1")
         tags = await _tag_ids(db, 2)
-        created = await client.post(_URL, json={"course_name": "課程", "tag_ids": tags}, headers=_bearer(uid))
+        created = await client.post(
+            _URL, json={"course_name": "課程", "audiences": await _aud(db, tags)}, headers=_bearer(uid)
+        )
         cid, ver = created.json()["course_id"], created.json()["version"]
 
         # 移除一個、換成另一個
         r = await client.put(
             f"{_URL}/{cid}",
-            json={"course_name": "課程", "tag_ids": [tags[1]], "version": ver},
+            json={"course_name": "課程", "audiences": await _aud(db, [tags[1]]), "version": ver},
             headers=_bearer(uid),
         )
         assert r.status_code == 204
         detail = await client.get(f"{_URL}/{cid}", headers=_bearer(uid))
-        assert detail.json()["tag_ids"] == [tags[1]]
+        assert _roles_of(detail.json()) == [tags[1]]
 
     async def test_已發布不可移除既有標籤(self, client, db) -> None:
         uid = await _user(db, "ETC_U2")
         tags = await _tag_ids(db, 2)
-        created = await client.post(_URL, json={"course_name": "課程", "tag_ids": tags}, headers=_bearer(uid))
+        created = await client.post(
+            _URL, json={"course_name": "課程", "audiences": await _aud(db, tags)}, headers=_bearer(uid)
+        )
         cid = created.json()["course_id"]
         course = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
         course.status = COURSE_PUBLISHED  # 發布屬 #204，此處直接改狀態以驗保護規則
@@ -470,7 +493,7 @@ class TestUpdateAndTags:
 
         r = await client.put(
             f"{_URL}/{cid}",
-            json={"course_name": "課程", "tag_ids": [tags[0]], "version": course.version},
+            json={"course_name": "課程", "audiences": await _aud(db, [tags[0]]), "version": course.version},
             headers=_bearer(uid),
         )
         assert r.status_code == 422
@@ -479,7 +502,9 @@ class TestUpdateAndTags:
     async def test_已發布可新增標籤(self, client, db) -> None:
         uid = await _user(db, "ETC_U3")
         tags = await _tag_ids(db, 2)
-        created = await client.post(_URL, json={"course_name": "課程", "tag_ids": [tags[0]]}, headers=_bearer(uid))
+        created = await client.post(
+            _URL, json={"course_name": "課程", "audiences": await _aud(db, [tags[0]])}, headers=_bearer(uid)
+        )
         cid = created.json()["course_id"]
         course = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
         course.status = COURSE_PUBLISHED
@@ -487,7 +512,7 @@ class TestUpdateAndTags:
 
         r = await client.put(
             f"{_URL}/{cid}",
-            json={"course_name": "課程", "tag_ids": tags, "version": course.version},
+            json={"course_name": "課程", "audiences": await _aud(db, tags), "version": course.version},
             headers=_bearer(uid),
         )
         assert r.status_code == 204
@@ -572,8 +597,12 @@ class TestTagOptions:
     async def test_帶_course_id_時保留該課程既有已掛之停用標籤(self, client, db) -> None:
         """FR-ET-US3-03：停用標籤排除於可選清單，但課程既有已掛者保留、不受影響。"""
         uid = await _user(db, "ETC_T2")
-        tags = await _tag_ids(db, 1)
-        created = await client.post(_URL, json={"course_name": "課程", "tag_ids": tags}, headers=_bearer(uid))
+        tags = await _tag_ids(db, 2)
+        # 取非「全體」的那一筆——通用值不可停用（seed 第一筆職位是「全體」）
+        tags = [t for t in tags if t != await all_roles_id(db)][:1]
+        created = await client.post(
+            _URL, json={"course_name": "課程", "audiences": await _aud(db, tags)}, headers=_bearer(uid)
+        )
         cid = created.json()["course_id"]
 
         # 掛上後才把該標籤停用——模擬管理者事後停用

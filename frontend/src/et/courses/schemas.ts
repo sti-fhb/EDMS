@@ -37,7 +37,8 @@ export interface CourseDetail {
   owner_is_disabled: boolean
   /** 當前使用者是否為擁有者；false 時全頁唯讀（spec.md §擁有權判定）。 */
   is_owner: boolean
-  tag_ids: number[]
+  /** 受訓對象 `(單位, 職位)` 配對（#538）。 */
+  audiences: AudiencePair[]
   chapters: ChapterItem[]
   /** 課程邀請碼；**僅 owner 可見**，非擁有者後端回 null（#247）。 */
   invitation_code: string | null
@@ -48,6 +49,69 @@ export interface TagOption {
   tag_name: string
   /** false 只會出現在「課程既有已掛之停用標籤」——不得再新掛（FR-ET-US3-03）。 */
   is_active: boolean
+  /** `UNIT`（單位）/ `AUDIENCE`（職位）——配對的兩個下拉各取一類（#538）。 */
+  tag_type: "UNIT" | "AUDIENCE"
+  /** 通用值（「全單位」/「全體」）。 */
+  is_all: boolean
+}
+
+/** 一組受訓對象配對（後端回應）。`label` 由後端組好，各頁直接顯示，不要自己拼（#538）。 */
+export interface AudiencePair {
+  unit_tag_id: number
+  tag_id: number
+  label: string
+}
+
+/** 送往後端的一組配對——兩欄皆必填。 */
+export interface AudiencePairPayload {
+  unit_tag_id: number
+  tag_id: number
+}
+
+/**
+ * 編輯中的一列配對。兩欄可暫時為 `null`（新增的空白列、只選了一欄）；送出前由
+ * `validateAudiences` 擋下不完整的列。
+ */
+export interface AudienceDraft {
+  unit_tag_id: number | null
+  tag_id: number | null
+}
+
+/** 配對的比對鍵——判斷重複、判斷是否為已發布課程的既有列。 */
+export const audienceKey = (p: { unit_tag_id: number | null; tag_id: number | null }) =>
+  `${p.unit_tag_id ?? ""}:${p.tag_id ?? ""}`
+
+/**
+ * 送出前的配對檢核。
+ *
+ * - 兩欄都空的列**忽略**（新增後沒選的空白列，不算錯）
+ * - 只選了一欄 → 該列錯誤：半組配對在後端不成立，存進去只會讓教師以為設好了
+ * - 重複 → 第二次出現的那列錯誤：後端會 422
+ *
+ * @returns `rowErrors` 以列索引為鍵；`payload` 為可送出的完整配對（`rowErrors` 為空時才有意義）。
+ */
+export function validateAudiences(rows: AudienceDraft[]): {
+  rowErrors: Record<number, string>
+  payload: AudiencePairPayload[]
+} {
+  const rowErrors: Record<number, string> = {}
+  const seen = new Set<string>()
+  const payload: AudiencePairPayload[] = []
+  rows.forEach((row, idx) => {
+    if (row.unit_tag_id === null && row.tag_id === null) return
+    if (row.unit_tag_id === null || row.tag_id === null) {
+      rowErrors[idx] = "請選擇單位與職位"
+      return
+    }
+    const key = audienceKey(row)
+    if (seen.has(key)) {
+      rowErrors[idx] = "此組受訓對象已存在"
+      return
+    }
+    seen.add(key)
+    payload.push({ unit_tag_id: row.unit_tag_id, tag_id: row.tag_id })
+  })
+  return { rowErrors, payload }
 }
 
 export interface CourseCreateResult {
@@ -85,7 +149,7 @@ export interface CoursePayload {
   open_start_at: string | null
   open_end_at: string | null
   require_approval: boolean
-  tag_ids: number[]
+  audiences: AudiencePairPayload[]
 }
 
 /** 建立課程可一併帶章節名稱——使新增流程不必「先存草稿才能加章節」（後端同一交易內建立）。 */
@@ -143,7 +207,6 @@ export const CourseFormSchema = z.object({
     .trim()
     .max(DESCRIPTION_MAX_LEN, { message: `課程描述不可超過 ${DESCRIPTION_MAX_LEN} 字` }),
   require_approval: z.boolean(),
-  tag_ids: z.array(z.number()),
 })
 
 export type CourseFormValues = z.infer<typeof CourseFormSchema>
@@ -173,7 +236,8 @@ export interface CourseCard {
    * 那個欄位恆為 0）。
    */
   owner_is_disabled: boolean
-  tags: TagOption[]
+  /** 卡片 badges；`label` 由後端組好（「全單位」省略）。 */
+  audiences: AudiencePair[]
   chapter_count: number
   /** **在籍**學員數——已移除者不計入。 */
   student_count: number
@@ -205,7 +269,10 @@ export interface CourseListParams {
   scope: "mine" | "all"
   /** 後端 `Query(max_length=100)`；輸入框以 `KEYWORD_MAX_LENGTH` 卡住同一個上限。 */
   q?: string
+  /** 職位；與 `unit_tag_id` 皆比對課程配對的**字面值**、不展開通用值（#538 SA Q2）。 */
   tag_id?: number
+  /** 單位；與 `tag_id` 並用時須同一組配對同時符合。 */
+  unit_tag_id?: number
   owner_id?: string
   page?: number
   limit?: number

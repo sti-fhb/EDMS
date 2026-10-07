@@ -145,7 +145,7 @@ class EtPublishService:
             db, course_id, await self._tag_invite.target_user_ids(db, course_id), operator=operator
         )
         if invited_ids:
-            await self._log(db, operator.user_id, course_id, f"依受訓單位標籤帶入 {len(invited_ids)} 位學員")
+            await self._log(db, operator.user_id, course_id, f"依受訓對象帶入 {len(invited_ids)} 位學員")
 
         # 寄通知信（FR-ET-US3-12 後半 / FR-ET-US8-03，#273 補上）。**只寄給本次真的被加
         # 進來的人**——重新發布時已在課程中者不該再收到一次「您已被加入」。

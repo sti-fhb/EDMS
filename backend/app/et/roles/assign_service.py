@@ -1,4 +1,4 @@
-"""ET 角色 / 受訓單位標籤指派服務（module-callbacks §3；SRVET003）。
+"""ET 角色 / 受訓對象配對指派服務（module-callbacks §3；SRVET003）。
 
 供平台 DP 後台「權限管理」經 `EtAssignProvider` 呼叫。比照
 `app/dm/roles/assign_service.py`：差異套用、即時生效、同交易寫稽核。
@@ -9,6 +9,12 @@
 **貼標追溯**（新增標籤時自動補加入該標籤所有「已發布且未關閉」課程並寄彙整信）於
 #273 落地，見 `_backfill_tagged_courses`；#185 交付時因依賴課程 / 選課 / 通知服務而
 只留 TODO。
+
+## 群組為 `(單位, 職位)` 配對（#538）
+
+DP 以字串 `"{單位 TAG_ID}:{職位 TAG_ID}"` 傳遞（`catalog/pair.encode_pair`，與 DM 同格式），
+單位可空（`":{職位}"`＝單位未指定，#538 導入前之既有指派）。DP02 前端以 `list_audiences`
+回報之 `kind == "UNIT"` 判定走配對模式，不寫死模組。
 """
 
 import logging
@@ -20,7 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.module_assign import AssignmentView
 from app.core.operator import OperatorInfo
-from app.et.catalog.models import EtTag, EtUserTag
+from app.et.catalog.models import TAG_TYPE_AUDIENCE, TAG_TYPE_UNIT, EtTag, EtUserTag
+from app.et.catalog.pair import Pair, decode_pair, encode_pair
 from app.et.constants import ALL_ROLES, ROLE_ADMIN, ROLE_STUDENT
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.notify.mailer import CourseInviteMailer
@@ -40,25 +47,25 @@ def _ensure_valid_roles(roles: set[str]) -> None:
         raise AppError(status_code=422, detail="指定之角色代碼無效", error_code="ET_ROLE_003")
 
 
-# BIGINT 上限；TAG_ID 為 Identity 正整數
-_MAX_BIGINT = 9_223_372_036_854_775_807
-# 一次指派之標籤數上限（防呆：實務上標籤庫僅個位數～數十筆）
+# 一次指派之配對數上限（防呆：實務上一人僅數組）
 _MAX_GROUPS = 100
 
 
-def _ensure_numeric_tag_ids(groups: set[str]) -> None:
-    """群組（受訓單位標籤）以 `ET_TAG.TAG_ID` 字串化傳遞，須為合法正整數。
+def _invalid_group() -> AppError:
+    return AppError(status_code=422, detail="指定之受訓對象無效或未啟用", error_code="ET_ROLE_002")
 
-    **用 `isdecimal()` 而非 `isdigit()`**：後者對 `²`（U+00B2）、`①`（U+2460）等
-    Unicode 數字字元亦回 True，但 `int()` 會拋 ValueError → 未攔截的 500。
-    另加位數與 BIGINT 界限——超出範圍之值 `int()` 雖可轉換，仍會在 asyncpg 比對
-    BIGINT 時溢位。
+
+def _decode_groups(groups: set[str]) -> set[Pair]:
+    """群組字串 → 配對集合；格式不合法或數量超過上限 → 422 `ET_ROLE_002`。
+
+    數字驗證（`isdecimal` 而非 `isdigit`、BIGINT 界限）在 `catalog/pair.decode_pair`。
     """
     if len(groups) > _MAX_GROUPS:
-        raise AppError(status_code=422, detail="指定之受訓單位標籤無效或未啟用", error_code="ET_ROLE_002")
-    for g in groups:
-        if not (g.isdecimal() and len(g) <= 19 and 0 < int(g) <= _MAX_BIGINT):
-            raise AppError(status_code=422, detail="指定之受訓單位標籤無效或未啟用", error_code="ET_ROLE_002")
+        raise _invalid_group()
+    pairs = {decode_pair(g) for g in groups}
+    if None in pairs:
+        raise _invalid_group()
+    return pairs  # type: ignore[return-value]
 
 
 def ensure_not_self_admin_removal(operator_id: str, user_id: str, roles: set[str]) -> None:
@@ -134,6 +141,7 @@ class EtAssignService:
         tag_rows = await db.execute(
             select(
                 EtUserTag.user_id,
+                EtUserTag.unit_tag_id,
                 EtUserTag.tag_id,
                 EtUserTag.updated_user,
                 EtUserTag.updated_date,
@@ -144,8 +152,8 @@ class EtAssignService:
                 EtUserTag.deleted == 0,
             )
         )
-        for uid, tag_id, upd_user, upd_date, crt_user, crt_date in tag_rows:
-            tags_by_user[uid].add(str(tag_id))
+        for uid, unit_tag_id, tag_id, upd_user, upd_date, crt_user, crt_date in tag_rows:
+            tags_by_user[uid].add(encode_pair(unit_tag_id, tag_id))
             _track(uid, upd_user or crt_user, upd_date or crt_date)
 
         for uid in user_ids:
@@ -168,30 +176,32 @@ class EtAssignService:
                 角色代碼無效（422 `ET_ROLE_003`）。
         """
         _ensure_valid_roles(roles)
-        _ensure_numeric_tag_ids(groups)
+        desired = _decode_groups(groups)
         # 自我保護先於任何寫入
         ensure_not_self_admin_removal(operator_id, user_id, roles)
 
         current = (await self.get_users_assignments(db, [user_id]))[user_id]
+        # 以**解碼後的配對**比較、不以字串比較——`"03:5"` 與 `"3:5"` 是同一組
+        existing = {decode_pair(g) for g in current.groups}
         roles_add, roles_remove = roles - current.roles, current.roles - roles
-        tags_add, tags_remove = groups - current.groups, current.groups - groups
+        tags_add, tags_remove = desired - existing, existing - desired
         if not (roles_add or roles_remove or tags_add or tags_remove):
             return  # 無實際異動：不寫入、不記稽核
 
-        await self._validate_tags_enabled(db, tags_add)
+        await self._validate_pairs(db, tags_add)
 
         for role in sorted(roles_remove):
             await self._set_role(db, user_id, role, active=False, operator_id=operator_id)
         for role in sorted(roles_add):
             await self._set_role(db, user_id, role, active=True, operator_id=operator_id)
-        for tag_id in sorted(tags_remove, key=int):
-            await self._set_tag(db, user_id, int(tag_id), attached=False, operator_id=operator_id)
-        for tag_id in sorted(tags_add, key=int):
-            await self._set_tag(db, user_id, int(tag_id), attached=True, operator_id=operator_id)
+        for pair in sorted(tags_remove, key=str):
+            await self._set_tag(db, user_id, pair, attached=False, operator_id=operator_id)
+        for pair in sorted(tags_add, key=str):
+            await self._set_tag(db, user_id, pair, attached=True, operator_id=operator_id)
 
         await db.flush()
 
-        # 貼標追溯（#273 落地，取代 #185 之 TODO）：**只在新增標籤時**觸發。
+        # 貼標追溯（#273 落地，取代 #185 之 TODO）：**只在新增配對時**觸發。
         # 移除標籤刻意什麼都不做——FR-ET-US8-06 明定既有課程之學員名單不變動
         # （已加入者可繼續學習），只影響「之後新發布之該標籤課程」。
         if tags_add and ROLE_STUDENT in roles:
@@ -205,14 +215,16 @@ class EtAssignService:
             result="SUCCESS",
             operator_id=operator_id,
             target_id=user_id,
-            description="變更 ET 角色 / 受訓單位標籤指派",
-            after_value={"roles": sorted(roles), "tags": sorted(groups, key=int)},
+            description="變更 ET 角色 / 受訓對象指派",
+            after_value={"roles": sorted(roles), "tags": sorted(encode_pair(*p) for p in desired)},
         )
 
     async def _backfill_tagged_courses(
-        self, db: AsyncSession, user_id: str, tag_ids: set[str], *, operator_id: str
+        self, db: AsyncSession, user_id: str, pairs: set[Pair], *, operator_id: str
     ) -> None:
-        """新增標籤 → 補加入該標籤所有「已發布且未關閉」課程 → 寄**彙整一封**。
+        """新增配對 → 補加入該配對涵蓋之「已發布且未關閉」課程 → 寄**彙整一封**。
+
+        涵蓋判定與排除 `(全單位, 全體)` 課程的理由見 `EtTagInviteRepository.courses_for_user_pairs`。
 
         FR-ET-US8-05。逐課一封會讓當事人在管理者按下儲存的那一刻同時收到十幾封信，
         故一次貼標只寄一封列出全部新加入課程的彙整信（`COURSE_INVITE_DIGEST`）。
@@ -228,7 +240,7 @@ class EtAssignService:
         寄信失敗不影響指派：`EtNotifier` 已吞掉 `AppError`（見其 docstring），
         故此處不需 try/except，管理者的角色 / 標籤異動不會因為信寄不出去而回滾。
         """
-        courses = await self._tag_invite.courses_for_tags(db, sorted(int(t) for t in tag_ids))
+        courses = await self._tag_invite.courses_for_user_pairs(db, user_id, sorted(pairs, key=str))
         if not courses:
             return
         operator = OperatorInfo(user_id=operator_id)
@@ -242,19 +254,30 @@ class EtAssignService:
         logger.info("貼標追溯補加入 user=%s courses=%d", user_id, len(joined))
         await self._invite_mailer.send_digest(db, user_id=user_id, courses=joined)
 
-    async def _validate_tags_enabled(self, db: AsyncSession, tag_ids: set[str]) -> None:
-        """新增之標籤須存在且為啟用中——停用標籤不可**新增**指派（既有指派保留）。"""
-        if not tag_ids:
+    async def _validate_pairs(self, db: AsyncSession, pairs: set[Pair]) -> None:
+        """新增之配對：職位須為啟用中的**職位**、單位（若有）須為啟用中的**單位**，且皆非通用值。
+
+        停用標籤不可**新增**指派（既有指派保留）。人身上不掛通用值——「全體」「全單位」是
+        課程端「不限」的語意，`list_audiences` 也不會回出它們；直接打 API 送進來一律擋下。
+        單位可為空（單位未指定）：DP02 對既有的過渡狀態原樣保留（比照 DM）。
+        """
+        if not pairs:
             return
-        rows = await db.scalars(
-            select(EtTag.tag_id).where(
-                EtTag.tag_id.in_([int(t) for t in tag_ids]),
+        ids = {tid for pair in pairs for tid in pair if tid is not None}
+        rows = await db.execute(
+            select(EtTag.tag_id, EtTag.tag_type).where(
+                EtTag.tag_id.in_(ids),
                 EtTag.is_active.is_(True),
+                EtTag.is_all.is_(False),
                 EtTag.deleted == 0,
             )
         )
-        if {str(t) for t in rows.all()} != tag_ids:
-            raise AppError(status_code=422, detail="指定之受訓單位標籤無效或未啟用", error_code="ET_ROLE_002")
+        types = dict(rows.all())
+        for unit_id, role_id in pairs:
+            if types.get(role_id) != TAG_TYPE_AUDIENCE:
+                raise _invalid_group()
+            if unit_id is not None and types.get(unit_id) != TAG_TYPE_UNIT:
+                raise _invalid_group()
 
     async def _set_role(self, db: AsyncSession, user_id: str, role: str, *, active: bool, operator_id: str) -> None:
         """角色指派 upsert——已有列改 `IS_ACTIVE`（保留稽核欄位），無列則新增。
@@ -282,10 +305,18 @@ class EtAssignService:
         existing.updated_user = operator_id
         existing.updated_date = now
 
-    async def _set_tag(self, db: AsyncSession, user_id: str, tag_id: int, *, attached: bool, operator_id: str) -> None:
-        """標籤指派 upsert——已有列改 `DELETED`（`ET_USER_TAG` 無 IS_ACTIVE 欄位），無列則新增。"""
+    async def _set_tag(self, db: AsyncSession, user_id: str, pair: Pair, *, attached: bool, operator_id: str) -> None:
+        """配對指派 upsert——已有列改 `DELETED`（`ET_USER_TAG` 無 IS_ACTIVE 欄位），無列則新增。
+
+        比對鍵為**整組配對**；單位為 None 時以 `IS NULL` 比對（`==` 對 NULL 永不成立，
+        會把同一組「單位未指定」反覆新增成多列）。
+        """
+        unit_tag_id, tag_id = pair
         now = datetime.now(timezone.utc)
-        existing = await db.scalar(select(EtUserTag).where(EtUserTag.user_id == user_id, EtUserTag.tag_id == tag_id))
+        unit_match = EtUserTag.unit_tag_id.is_(None) if unit_tag_id is None else EtUserTag.unit_tag_id == unit_tag_id
+        existing = await db.scalar(
+            select(EtUserTag).where(EtUserTag.user_id == user_id, EtUserTag.tag_id == tag_id, unit_match)
+        )
         if existing is None:
             if not attached:
                 return
@@ -293,6 +324,7 @@ class EtAssignService:
                 EtUserTag(
                     user_id=user_id,
                     tag_id=tag_id,
+                    unit_tag_id=unit_tag_id,
                     created_user=operator_id,
                     created_date=now,
                     deleted=0,

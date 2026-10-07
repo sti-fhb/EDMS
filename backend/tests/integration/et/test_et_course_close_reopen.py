@@ -35,6 +35,7 @@ from app.et.constants import (
 )
 from app.et.course.models import EtCourse
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id, role_pair
 
 pytestmark = pytest.mark.integration
 
@@ -103,7 +104,16 @@ async def _published_course(client, db, uid: str) -> dict:
     cid = created.json()["course_id"]
 
     tag_id = await _tag(db, f"標籤{cid}")
-    db.add(EtCourseTag(course_id=cid, tag_id=tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=cid,
+            tag_id=tag_id,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     await db.flush()
 
     ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(uid))
@@ -725,7 +735,7 @@ class TestEditableWhileClosed:
             f"{_COURSES}/{ctx['course_id']}",
             json={
                 "course_name": "關閉期間改過的名稱",
-                "tag_ids": [tag_id],
+                "audiences": [await role_pair(db, tag_id)],
                 "require_approval": False,
                 "open_start_at": "2026-09-01T00:00:00Z",
                 "open_end_at": "2027-09-30T00:00:00Z",

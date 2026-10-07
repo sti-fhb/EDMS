@@ -77,7 +77,7 @@ async def assign(db, *, user_id: str, roles: set[str], groups: set[str], operato
 | 項目 | 規則 |
 |------|------|
 | `roles` | 子集 `{ADMIN, TEACHER, STUDENT}`；非法代碼 → `ET_ROLE_003` |
-| `groups` | `ET_TAG.TAG_ID`（字串化）集合；須屬啟用中（`IS_ACTIVE=true`）標籤，否則 `ET_ROLE_002`。**停用標籤不可新增指派，既有指派保留** |
+| `groups` | **配對**字串集合 `"{單位 TAG_ID}:{職位 TAG_ID}"`（#538，與 DM 同格式）；單位可空（`":{職位}"`＝單位未指定）。新增之配對：職位須為啟用中之職位、單位（若有）須為啟用中之單位，且皆非通用值，否則 `ET_ROLE_002`。**停用標籤不可新增指派，既有指派保留** |
 | 批次讀取 | `get_users_assignments` 一次回一頁使用者之現況（避免 N+1）；查無指派者回**空集合 View**（非缺 key） |
 | 最後異動 | View 帶 `last_modified_by` / `last_modified_date`，來源為 `ET_USER_ROLE` / `ET_USER_TAG` 之 `UPDATED_*` |
 | 自我保護 | operator 取消自己之管理者角色 → raise `AppError`（`ET_ROLE_001`）；DP 端統一映射為 `DP-MSG-DP02-001` 呈現。**不檢核**「至少 1 名管理者」（per spec.md 設計取捨） |
@@ -95,17 +95,18 @@ async def set_controlled_enabled(db, kind: str, *, code: str, enabled: bool, ope
 async def list_audiences(db, *, enabled_only: bool = True) -> list[ControlledItemView]
 ```
 
-ET 之受控主檔僅一類：**受訓單位標籤庫 `ET_TAG`**（`kind='TAG'`）。
+ET 之受控主檔僅一類：**受訓對象標籤庫 `ET_TAG`**（`kind='TAG'`），分「單位」「職位」兩組（`TAG_TYPE`，#538）。
 
 | 項目 | 規則 |
 |------|------|
 | 儲存 | **ET 自持表 `ET_TAG`**（非 `DP_PARAM`）；`code` 為 `TAG_ID` 字串化、`name` 為 `TAG_NAME` |
-| kind 列舉 | `list_controlled_kinds()` 回單一 `TAG`（顯示名「受訓單位標籤」、`requires_code=false`、無子分組）。**由模組自報**——DP 不得硬編碼各模組的 kind 清單與中文名（#182 D1）|
+| kind 列舉 | `list_controlled_kinds()` 回單一 `TAG`（顯示名「受訓對象」、`requires_code=false`、**子分組 `UNIT`（單位）/ `AUDIENCE`（職位）**，#538）；`create_controlled` 之 `code` 為所屬分組，空白時為職位。**由模組自報**——DP 不得硬編碼各模組的 kind 清單與中文名（#182 D1）|
 | `is_builtin` | 內建種子（全體 / 護理師 / 行政人員 / 軍人 / 醫檢師）回 `true`。全平台統一語意＝**代碼鎖定、僅可改名**（#182 D2）；DP 據此把代碼欄設為唯讀，**不得據此禁止改名** |
-| 「全體」保護 | `IS_ALL=true` 之標籤**不可停用、不可改名**；ET 於 `set_controlled_enabled` / `rename_controlled` 伺服器端拒絕（`ET_TAG_001`）。**前端隱藏僅為 UX，保護必須在 ET**。⚠️ 保護條件為 `IS_ALL` 而非 `IS_BUILTIN`——種子 5 筆皆 `IS_BUILTIN=true`，以後者把關會使全部內建標籤都不能改名（#182 修正之偏差）|
+| 通用值保護 | `IS_ALL=true` 之標籤（「全體」「全單位」，每個 `TAG_TYPE` 一筆）**不可停用、不可改名**；ET 於 `set_controlled_enabled` / `rename_controlled` 伺服器端拒絕（`ET_TAG_001`）。**前端隱藏僅為 UX，保護必須在 ET**。⚠️ 保護條件為 `IS_ALL` 而非 `IS_BUILTIN`——種子 5 筆皆 `IS_BUILTIN=true`，以後者把關會使全部內建標籤都不能改名（#182 修正之偏差）|
 | 停用語意 | soft-retire：停用後不可再掛至新課程，已掛之既有課程與 `ET_COURSE_TAG` 不受影響（比照 DM AUDIENCE） |
 | 不刪除 | 僅停用，不提供刪除 |
 | 唯一性 | `TAG_NAME` 唯一 |
+| `list_audiences` | DP02 權限管理之可選清單：回**單位與職位兩類**，`group_type` 帶 `TAG_TYPE`——DP02 前端以 `kind == "UNIT"` 自動進配對模式（#538）。排除通用值（人身上不掛）|
 | 稽核 | 經 `AuditLogService` 寫 `DP_AUDIT_LOG`（`MODULE=ET`、`FUNC_NAME=ET-ROLES`） |
 
 > ✅ **DP 側已對齊（#182，2026-09-22）**：`module-callbacks.md` §3 / §3.1 原寫「ET 之受訓單位標籤存 `DP_PARAM`、由 DP 直接維護、**不走本轉接層**」並稱此為「ET 與 DM 之刻意差異」，該敘述已移除。ET 與 DM 同走轉接層。

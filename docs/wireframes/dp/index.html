@@ -911,15 +911,15 @@
     </ul>
 
     <div class="tab-content">
-    <!-- ===== ET 權限管理（角色 + 受訓單位標籤）===== -->
+    <!-- ===== ET 權限管理（角色 + 受訓對象；2026-10-06 #538 改為「單位 + 職位」配對，編輯視窗同 DM 可見對象）===== -->
     <div class="tab-pane fade show active" id="role-et" role="tabpanel">
-      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>ET 管理者於此指派 ET 角色與<strong>受訓單位標籤</strong>；標籤用於課程發布自動邀請。DM 管理者看不到本頁籤。指派寫入 <code>ET_USER_ROLE</code> / <code>ET_USER_TAG</code>。</div>
+      <div class="wf-status-msg wf-status-warn"><i class="bi bi-exclamation-triangle me-1"></i>ET 管理者於此指派 ET 角色與<strong>受訓對象</strong>（「單位 + 職位」配對，#538）；配對用於課程發布自動邀請。DM 管理者看不到本頁籤。指派寫入 <code>ET_USER_ROLE</code> / <code>ET_USER_TAG</code>。</div>
       <div class="wf-card p-0">
         <table class="table table-hover wf-table mb-0 align-middle">
           <thead><tr>
             <th style="width:8rem;">帳號</th><th style="width:7rem;">姓名</th>
             <th class="text-center" style="width:4.5rem;">管理者</th><th class="text-center" style="width:4.5rem;">教師</th><th class="text-center" style="width:4.5rem;">學員</th>
-            <th style="width:16rem;">受訓單位標籤</th><th style="width:10rem;">最後異動</th>
+            <th style="width:16rem;">受訓對象</th><th style="width:10rem;">最後異動</th>
           </tr></thead>
           <tbody>
             <tr>
@@ -927,7 +927,7 @@
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 王曉明 ET 管理者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 王曉明 教師角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 王曉明 學員角色')"></td>
-              <td><span class="badge bg-light text-dark border me-1">護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 王曉明 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td><span class="badge bg-light text-dark border me-1">國防醫學院三軍總醫院 + 護理師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 王曉明 受訓對象')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
               <td class="small text-muted">陳大華 ｜ 2026-06-30</td>
             </tr>
             <tr>
@@ -935,7 +935,7 @@
               <td class="text-center" title="自我保護：不可取消自己的管理者角色（DP-MSG-DP02-001）"><input type="checkbox" class="form-check-input" checked onchange="this.checked=true; showToast('無法取消自己的管理者角色（DP-MSG-DP02-001）')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 教師角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 陳大華 學員角色')"></td>
-              <td><span class="text-muted small">未指派</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td><span class="text-muted small">未指派</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 陳大華 受訓對象')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
               <td class="small text-muted">系統 ｜ 2026-05-01</td>
             </tr>
             <tr>
@@ -943,7 +943,7 @@
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 林學員 ET 管理者角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" onchange="showToast('已更新 林學員 教師角色')"></td>
               <td class="text-center"><input type="checkbox" class="form-check-input" checked onchange="showToast('已更新 林學員 學員角色')"></td>
-              <td><span class="badge bg-light text-dark border me-1">軍人</span><span class="badge bg-light text-dark border me-1">醫檢師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 林學員 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
+              <td><span class="badge bg-light text-dark border me-1">（單位未指定）+ 軍人</span><span class="badge bg-light text-dark border me-1">國防部軍醫局 + 醫檢師</span> <button class="btn btn-link btn-sm p-0 align-baseline" onclick="showToast('編輯 林學員 受訓單位標籤')"><i class="bi bi-pencil-square"></i> 編輯</button></td>
               <td class="small text-muted">陳大華 ｜ 2026-07-02</td>
             </tr>
           </tbody>

@@ -11,6 +11,7 @@
 from datetime import datetime
 
 from app.core.exceptions import AppError
+from app.et.catalog.pair import Pair
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ROLE_ADMIN
 
 
@@ -119,16 +120,20 @@ def is_browsable_by_non_owner(*, status: str, open_end_at: datetime | None, now:
     return not is_effectively_closed(status=status, open_end_at=open_end_at, now=now)
 
 
-def ensure_tag_change_allowed(status: str, *, current: set[int], desired: set[int]) -> None:
-    """草稿可自由增刪標籤；**非草稿僅可新增、不可移除**（FR-ET-US3-02）。
+def ensure_tag_change_allowed(status: str, *, current: set[Pair], desired: set[Pair]) -> None:
+    """草稿可自由增刪配對；**非草稿僅可新增、不可移除**（FR-ET-US3-02）。
 
     「不可移除」涵蓋 `PUBLISHED` 與 `CLOSED`——關閉只是暫時狀態（可再開課），
-    既有學員仍持有該課程，放寬移除會使「哪些標籤曾觸發自動邀請」失去可追溯性。
+    既有學員仍持有該課程，放寬移除會使「哪些配對曾觸發自動邀請」失去可追溯性。
+
+    ⚠️ 比較的是**整組配對**（#538）：同職位換單位（`(全單位, 護理師)` → `(三總, 護理師)`）
+    是「移除一組 + 新增一組」，非草稿擋下。只比職位 ID 的話它會被當成沒變而放行——
+    已被全單位帶入的護理師留在課程裡，配對卻顯示只開給三總。
 
     Args:
         status: 課程當前狀態（`ET_COURSE_STATUS`）。
-        current: 課程現有之 `TAG_ID` 集合。
-        desired: 本次欲設定之 `TAG_ID` 集合。
+        current: 課程現有之 `(單位 TAG_ID, 職位 TAG_ID)` 集合。
+        desired: 本次欲設定之 `(單位 TAG_ID, 職位 TAG_ID)` 集合。
 
     Raises:
         AppError: 422 `ET_COURSE_003`，非草稿課程嘗試移除既有標籤。

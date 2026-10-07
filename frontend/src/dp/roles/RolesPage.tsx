@@ -28,7 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import { MODULE_LABELS, MODULE_ROLES, groupDimensionLabel, rolesApi, sortModulesForTabs } from "./rolesService"
+import { MODULE_LABELS, MODULE_ROLES, groupDimensionLabel, pairHint, rolesApi, sortModulesForTabs } from "./rolesService"
 import { decodeAudiencePair, encodeAudiencePair } from "./rolesService"
 import type { AssignmentRow, GroupOption } from "./rolesService"
 import { Pagination } from "../../components/Pagination"
@@ -273,6 +273,7 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
           row={editing}
           options={groupOptions ?? []}
           dimensionLabel={dimensionLabel}
+          hintText={pairHint(module)}
           onClose={() => setEditing(null)}
           onSave={(groups) => {
             assignMut.mutate({ userId: editing.user_id, roles: editing.roles, groups, source: "group" })
@@ -309,13 +310,16 @@ function GroupEditDialog({
   row,
   options,
   dimensionLabel,
+  hintText,
   onClose,
   onSave,
 }: {
   row: AssignmentRow
   options: GroupOption[]
-  /** 群組維度之稱呼（DM 可見對象 / ET 受訓單位標籤），由呼叫端依模組傳入。 */
+  /** 群組維度之稱呼（DM 可見對象 / ET 受訓對象），由呼叫端依模組傳入。 */
   dimensionLabel: string
+  /** 配對模式的說明句（後果隨模組而異，見 `MODULE_PAIR_HINTS`）。 */
+  hintText: string
   onClose: () => void
   onSave: (groups: string[]) => void
 }) {
@@ -365,7 +369,7 @@ function GroupEditDialog({
         ) : paired ? (
           <Stack spacing={1} sx={{ mt: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              一列為一組「單位 + 職位」。此人可見的文件，須有一組配對與文件所掛者相符。
+              {hintText}
             </Typography>
             {selected.map((value, idx) => {
               const [unitCode, roleCode] = decodeAudiencePair(value)

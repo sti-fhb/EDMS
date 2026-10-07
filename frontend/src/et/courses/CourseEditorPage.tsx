@@ -5,7 +5,6 @@ import LockOpenIcon from "@mui/icons-material/LockOpen"
 import PersonAddIcon from "@mui/icons-material/PersonAdd"
 import VisibilityIcon from "@mui/icons-material/Visibility"
 import Alert from "@mui/material/Alert"
-import Autocomplete from "@mui/material/Autocomplete"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
@@ -60,10 +59,14 @@ import {
   ChapterNameSchema,
   CourseFormSchema,
   DESCRIPTION_MAX_LEN,
+  audienceKey,
+  validateAudiences,
+  type AudienceDraft,
   type ChapterItem,
   type CourseDetail,
   type CoursePayload,
 } from "./schemas"
+import { CourseAudiencePairs } from "./CourseAudiencePairs"
 import { ownerLabel } from "./schemas"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -77,7 +80,8 @@ const EMPTY_FORM = {
   course_name: "",
   description: "",
   require_approval: false,
-  tag_ids: [] as number[],
+  // 新增課程預帶一列空白配對（比照 #476 DM03）：一進畫面就看得到要成對設定，而非一顆「新增」鈕
+  audiences: [{ unit_tag_id: null, tag_id: null }] as AudienceDraft[],
 }
 
 /**
@@ -147,6 +151,7 @@ export function EtCourseEditorPage() {
   const [stagedChapters, setStagedChapters] = useState<{ id: number; name: string }[]>([])
   const nextStagedId = useRef(-1)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [audienceErrors, setAudienceErrors] = useState<Record<number, string>>({})
   const [conflictOpen, setConflictOpen] = useState(false)
   const [chapterDialogOpen, setChapterDialogOpen] = useState(false)
   const [chapterDraft, setChapterDraft] = useState("")
@@ -260,8 +265,9 @@ export function EtCourseEditorPage() {
       course_name: course.course_name,
       description: course.description ?? "",
       require_approval: course.require_approval,
-      tag_ids: course.tag_ids,
+      audiences: course.audiences.map(({ unit_tag_id, tag_id }) => ({ unit_tag_id, tag_id })),
     })
+    setAudienceErrors({})
     setStartAt(course.open_start_at ? dayjs(course.open_start_at) : null)
     setEndAt(course.open_end_at ? dayjs(course.open_end_at) : null)
     setOriginalStart(course.open_start_at)
@@ -342,7 +348,8 @@ export function EtCourseEditorPage() {
     open_start_at: startAt?.toISOString() ?? null,
     open_end_at: endAt?.toISOString() ?? null,
     require_approval: form.require_approval,
-    tag_ids: form.tag_ids,
+    // 只送完整配對；不完整 / 重複的列已由 `validateForm` 擋在送出前
+    audiences: validateAudiences(form.audiences).payload,
   })
 
   const saveMut = useMutation({
@@ -646,6 +653,16 @@ export function EtCourseEditorPage() {
    * 有錯時把訊息寫進 `errors`（逐欄標示）並回 `false`；通過則清空並回 `true`。
    */
   const validateForm = (): boolean => {
+    // 受訓對象的列錯誤另存一份（以列索引為鍵），與其他欄位的錯誤互不覆蓋。
+    // ⚠️ 兩邊都要檢查完才回傳——受訓對象有錯就提早 return 的話，課程名稱等欄位的錯誤要等
+    // 下一次送出才看得到，教師得來回改好幾次（code review LOW）
+    const { rowErrors } = validateAudiences(form.audiences)
+    setAudienceErrors(rowErrors)
+    const fieldsOk = validateBasicFields()
+    return fieldsOk && Object.keys(rowErrors).length === 0
+  }
+
+  const validateBasicFields = (): boolean => {
     const parsed = CourseFormSchema.safeParse(form)
     if (!parsed.success) {
       const next: Record<string, string> = {}
@@ -1054,10 +1071,9 @@ export function EtCourseEditorPage() {
     })
   }
 
-  const selectedTags = tagOptions.filter((t) => form.tag_ids.includes(t.tag_id))
-  // 已發布課程僅可新增標籤、不可移除（FR-ET-US3-02）；停用標籤不可再新掛（FR-ET-US3-03）
-  const tagsLocked = status !== "DRAFT"
-  const selectableTags = tagOptions.filter((t) => t.is_active)
+  // 已發布課程僅可新增配對、不可移除（FR-ET-US3-02）——鎖住的是**伺服器上已存在**的那幾組，
+  // 不是整區；以值比對（`audienceKey`），新增的列照常可改可刪
+  const lockedAudiences = new Set(status !== "DRAFT" && course ? course.audiences.map(audienceKey) : [])
 
   // ⚠️ 查詢失敗時**必須早退**。原本忽略 error，403 之後 `course` 為 undefined，
   // 而 `readOnly` 是由 `course` 推導的（undefined → false），結果學員直接看到一個
@@ -1287,41 +1303,18 @@ export function EtCourseEditorPage() {
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 12" } }}>
-            <Autocomplete
-              multiple
-              size="small"
-              disabled={readOnly}
-              options={selectableTags}
-              value={selectedTags}
-              getOptionLabel={(o) => o.tag_name}
-              isOptionEqualToValue={(a, b) => a.tag_id === b.tag_id}
-              onChange={(_, next) => setForm({ ...form, tag_ids: next.map((t) => t.tag_id) })}
-              renderValue={(value, getItemProps) =>
-                value.map((option, index) => {
-                  const { key, ...chipProps } = getItemProps({ index })
-                  return (
-                    <Chip
-                      key={key}
-                      {...chipProps}
-                      size="small"
-                      label={option.tag_name}
-                      // 已發布不可移除既有標籤 → 不給 onDelete（後端另以 ET_COURSE_003 把關）
-                      onDelete={tagsLocked || readOnly ? undefined : chipProps.onDelete}
-                    />
-                  )
-                })
-              }
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="受訓單位標籤"
-                  helperText={
-                    tagsLocked
-                      ? "已發布課程可新增標籤、不可移除既有標籤"
-                      : "多選；草稿可自由增刪，發布時至少 1 個（發布屬後續 issue）"
-                  }
-                />
-              )}
+            <CourseAudiencePairs
+              options={tagOptions}
+              value={form.audiences}
+              lockedKeys={lockedAudiences}
+              readOnly={readOnly}
+              readOnlyPairs={course?.audiences ?? []}
+              rowErrors={audienceErrors}
+              onChange={(next) => {
+                setForm((prev) => ({ ...prev, audiences: next }))
+                // 列錯誤以索引為鍵——增刪列後索引位移，舊訊息會掛在錯的列上，故整份清掉
+                setAudienceErrors({})
+              }}
             />
           </Box>
           <Box sx={{ gridColumn: { md: "span 4" } }}>
@@ -1700,7 +1693,7 @@ export function EtCourseEditorPage() {
               {reopening
                 ? "再開課會重跑發布檢核；關閉期間若移除了必要內容，會在上方列出缺漏。尚未變更任何資料。"
                 : status === "DRAFT"
-                  ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 個受訓單位標籤、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
+                  ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
                   : "已發布課程的編輯即時生效，不需重新發布。"}
             </Typography>
             <Stack direction="row" spacing={1}>
