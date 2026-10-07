@@ -269,8 +269,29 @@ describe("ET05 課程編輯頁", () => {
 
       await user.click(screen.getByRole("button", { name: "儲存草稿" }))
 
-      expect(await screen.findByText("請選擇單位與職位")).toBeInTheDocument()
+      expect(await screen.findByText("請選擇單位與職位，或刪除此列")).toBeInTheDocument()
       expect(captured.body).toBeUndefined()
+    })
+
+    it("發布時兩欄皆空的列也擋下，讓教師決定填或刪（手測回饋）", async () => {
+      // 對照組是上方「儲存草稿」那條：同樣留一列空白，草稿照送、發布擋下
+      const user = userEvent.setup()
+      const captured = capturePut()
+      renderEditor()
+      await screen.findByDisplayValue("採血作業訓練")
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" })) // 第 2 列留空
+
+      await user.click(screen.getByRole("button", { name: "儲存並發布" }))
+
+      expect(await screen.findByText("請選擇單位與職位，或刪除此列")).toBeInTheDocument()
+      expect(captured.body).toBeUndefined()
+
+      // 刪掉那列即可發布——錯誤的出路確實存在
+      await user.click(screen.getByRole("button", { name: "移除第 2 組受訓對象" }))
+      await user.click(screen.getByRole("button", { name: "儲存並發布" }))
+
+      await waitFor(() => expect(captured.body).toBeDefined())
+      expect(captured.body?.audiences).toEqual([{ unit_tag_id: 101, tag_id: 2 }])
     })
 
     it("受訓對象與其他欄位的錯誤一次全部顯示，不分兩次送出", async () => {
@@ -284,7 +305,7 @@ describe("ET05 課程編輯頁", () => {
 
       await user.click(screen.getByRole("button", { name: "儲存草稿" }))
 
-      expect(await screen.findByText("請選擇單位與職位")).toBeInTheDocument()
+      expect(await screen.findByText("請選擇單位與職位，或刪除此列")).toBeInTheDocument()
       expect(screen.getByText("請輸入課程名稱")).toBeInTheDocument()
       expect(captured.body).toBeUndefined()
     })

@@ -84,13 +84,18 @@ export const audienceKey = (p: { unit_tag_id: number | null; tag_id: number | nu
 /**
  * 送出前的配對檢核。
  *
- * - 兩欄都空的列**忽略**（新增後沒選的空白列，不算錯）
+ * - 兩欄都空的列：存草稿時**忽略**；**發布時視為錯誤**——發布即依配對帶入學員，教師
+ *   應明確決定那一列要填還是刪，而非由系統靜默略過（使用者手測回饋）。存草稿不擋：新增
+ *   課程預帶一列空白，擋了等於逼教師先刪列才能存草稿
  * - 只選了一欄 → 該列錯誤：半組配對在後端不成立，存進去只會讓教師以為設好了
  * - 重複 → 第二次出現的那列錯誤：後端會 422
  *
  * @returns `rowErrors` 以列索引為鍵；`payload` 為可送出的完整配對（`rowErrors` 為空時才有意義）。
  */
-export function validateAudiences(rows: AudienceDraft[]): {
+export function validateAudiences(
+  rows: AudienceDraft[],
+  { forPublish = false }: { forPublish?: boolean } = {},
+): {
   rowErrors: Record<number, string>
   payload: AudiencePairPayload[]
 } {
@@ -98,9 +103,9 @@ export function validateAudiences(rows: AudienceDraft[]): {
   const seen = new Set<string>()
   const payload: AudiencePairPayload[] = []
   rows.forEach((row, idx) => {
-    if (row.unit_tag_id === null && row.tag_id === null) return
+    if (row.unit_tag_id === null && row.tag_id === null && !forPublish) return
     if (row.unit_tag_id === null || row.tag_id === null) {
-      rowErrors[idx] = "請選擇單位與職位"
+      rowErrors[idx] = "請選擇單位與職位，或刪除此列"
       return
     }
     const key = audienceKey(row)

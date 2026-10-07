@@ -458,7 +458,7 @@ export function EtCourseEditorPage() {
   })
 
   const openPublish = () => {
-    if (validateForm()) saveThenCheckMut.mutate()
+    if (validateForm({ forPublish: true })) saveThenCheckMut.mutate()
   }
 
   // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
@@ -651,12 +651,13 @@ export function EtCourseEditorPage() {
    * 基本資料驗證——「儲存草稿」與「儲存並發布」共用。
    *
    * 有錯時把訊息寫進 `errors`（逐欄標示）並回 `false`；通過則清空並回 `true`。
+   * `forPublish` 時受訓對象的空白列也算錯（見 `validateAudiences`）。
    */
-  const validateForm = (): boolean => {
+  const validateForm = ({ forPublish = false }: { forPublish?: boolean } = {}): boolean => {
     // 受訓對象的列錯誤另存一份（以列索引為鍵），與其他欄位的錯誤互不覆蓋。
     // ⚠️ 兩邊都要檢查完才回傳——受訓對象有錯就提早 return 的話，課程名稱等欄位的錯誤要等
     // 下一次送出才看得到，教師得來回改好幾次（code review LOW）
-    const { rowErrors } = validateAudiences(form.audiences)
+    const { rowErrors } = validateAudiences(form.audiences, { forPublish })
     setAudienceErrors(rowErrors)
     const fieldsOk = validateBasicFields()
     return fieldsOk && Object.keys(rowErrors).length === 0
