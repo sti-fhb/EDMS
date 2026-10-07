@@ -451,17 +451,19 @@ async def _prep_submit(db, doc_id, *, reviewer="rev1", author="ed", audience=("�
 async def test_submit_new_creates_review_and_transitions_and_notifies(db):
     r = await _prep_submit(db, "x")
     res = await _svc.submit(db, doc_id=r.doc_id, version_id=r.version_id, assigned_reviewer="rev1", op=_op("ed"))
-    assert res.review_id is not None and res.notified == 1
+    # #554：DOC_SUBMIT 改為 MSG → 不排入 Email。審核者改於「簽核中心待簽核清單」與
+    # 「我的文件動態」（審核者視角）看到，站內可見性由 test_dm_review / test_dm_personal_flow 驗證。
+    assert res.review_id is not None and res.notified == 0
     review = await db.scalar(select(DmReview).where(DmReview.review_id == res.review_id))
     assert review.review_type == "NEW" and review.status == "PENDING" and review.assigned_reviewer == "rev1"
     ver = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == r.version_id))
     doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == r.doc_id))
     assert ver.status == "PENDING_REVIEW" and doc.status == "PENDING_REVIEW"
-    # 已排入 Email outbox
+    # #554：不再排入 Email outbox（⛔ 翻面而非刪除——刪了就沒有東西釘住「確實不再寄」）
     n = await db.scalar(
         text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'DOC_SUBMIT\' AND "RECIPIENT"=\'rev@e.com\'')
     )
-    assert n == 1
+    assert n == 0
 
 
 async def test_submit_new_version_keeps_doc_published(db):

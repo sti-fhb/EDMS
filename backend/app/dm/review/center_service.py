@@ -327,7 +327,7 @@ class ReviewCenterService:
             target=doc.doc_id,
             after={"review_id": review_id, "published_version_id": new_ver.version_id, "operation": "PUBLISH"},
         )
-        notified = await self._notify_publish(db, doc=doc, new_ver=new_ver, author_id=review.created_user)
+        notified = await self._notify_publish(db, doc=doc, new_ver=new_ver)
         return ApproveResult(published_version_id=new_ver.version_id, notified=notified)
 
     async def _approve_obsolete(self, db, review, *, op: OperatorInfo) -> ApproveResult:
@@ -384,9 +384,14 @@ class ReviewCenterService:
         )
         return result.queued_count
 
-    async def _notify_publish(self, db, *, doc, new_ver, author_id: str) -> int:
-        """DOC_PUBLISH 通知撰寫者 + 可見對象相符閱覽者（發布當下快照）。"""
-        recipients = await self._repo.recipient_emails(db, doc.doc_id, author_id)
+    async def _notify_publish(self, db, *, doc, new_ver) -> int:
+        """DOC_PUBLISH 通知可見對象相符之閱覽者（發布當下快照）。
+
+        #554 起**不再通知撰寫者**——撰寫者改由「我的文件動態」承接（核准事件顯示為
+        「核准發布」）；`author_id` 參數因而移除。閱覽者那半維持 Email，理由見
+        `review/repository.recipient_emails` 的 docstring。
+        """
+        recipients = await self._repo.recipient_emails(db, doc.doc_id)
         if not recipients:
             return 0
         result = await self._notifier.notify(

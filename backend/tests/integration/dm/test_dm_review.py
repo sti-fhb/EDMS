@@ -254,7 +254,10 @@ async def test_approve_first_version_publishes(db):
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
     doc, v, r = await _new_submission(db, "DM-SOP-000320", audience=("全體",))
     res = await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
-    assert res.published_version_id == v.version_id and res.notified >= 1
+    assert res.published_version_id == v.version_id
+    # #554：本 fixture 未種任何閱覽者，而撰寫者已不再被強制加入收件名單 → 0 封。
+    # 「閱覽者仍收得到」由下方 test_recipients_* 三條各自驗證（含單位 + 職位配對）。
+    assert res.notified == 0
     doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000320"))
     v = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == v.version_id))
     assert doc.status == "PUBLISHED" and doc.current_version_id == v.version_id
@@ -325,11 +328,13 @@ async def test_reject_first_version_doc_to_draft(db):
     review = await db.scalar(select(DmReview).where(DmReview.review_id == r.review_id))
     assert doc.status == "DRAFT" and v.status == "DRAFT"  # 退回 → 版本回草稿供續編（FR-004）
     assert review.status == "REJECTED" and review.reason == "需補充"
-    # DOC_REJECT 通知撰寫者
+    # #554：DOC_REJECT 改為 MSG（站內）→ **不寫 outbox**。撰寫者改於「我的文件動態」看到
+    # 該事件（前端標籤「已退回」），站內可見性由 test_dm_personal_flow 驗證。
+    # ⛔ 本條不刪而是翻面：刪掉就沒有東西釘住「改完之後確實不再寄信」。
     n = await db.scalar(
         text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'DOC_REJECT\' AND "RECIPIENT"=\'ed@e.com\'')
     )
-    assert n == 1
+    assert n == 0
 
 
 async def test_reject_new_version_keeps_doc_published(db):
@@ -511,8 +516,9 @@ async def test_recipients_all_audience_includes_viewers(db):
     await _seed_user(db, "viewer_a", "閱覽A", email="va@e.com")
     await _grant(db, "viewer_a", DM_VIEWER)
     await _doc(db, "DM-SOP-000350", status="PUBLISHED", author="ed", audience=("全體",))
-    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000350", "ed")
-    assert "ed@e.com" in emails and "va@e.com" in emails  # 全體 → 所有閱覽者 + 撰寫者
+    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000350")
+    assert "va@e.com" in emails  # 全體 → 所有閱覽者
+    assert "ed@e.com" not in emails  # #554：撰寫者不再收 Email（改由「我的文件動態」之「核准發布」）
 
 
 async def test_recipients_specific_audience_matches_only(db):
@@ -525,8 +531,9 @@ async def test_recipients_specific_audience_matches_only(db):
     db.add(DmUserTag(user_id="nurse", tag_id=nurse_tag, created_user="seed", created_date=utcnow()))
     await db.flush()
     await _doc(db, "DM-SOP-000351", status="PUBLISHED", author="ed", audience=("護理師",))
-    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000351", "ed")
-    assert "nurse@e.com" in emails and "ed@e.com" in emails and "soldier@e.com" not in emails
+    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000351")
+    assert "nurse@e.com" in emails and "soldier@e.com" not in emails
+    assert "ed@e.com" not in emails  # #554：撰寫者不再收
 
 
 # ── 催辦 ──────────────────────────────────────────
@@ -729,8 +736,8 @@ async def test_recipients_pair_excludes_other_unit_same_role(db):
     await db.flush()
     await _doc(db, "DM-SOP-000352", status="PUBLISHED", author="ed", audience=("護理師",), unit="國防部軍醫局")
 
-    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000352", "ed")
+    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000352")
 
     assert "mab_nurse@e.com" in emails  # 單位 + 職位皆相符
     assert "tsgh_nurse@e.com" not in emails  # 同職位但單位不符 → 不得收到
-    assert "ed@e.com" in emails  # 撰寫者一定收
+    assert "ed@e.com" not in emails  # #554：撰寫者改由站內動態承接，不再收 Email

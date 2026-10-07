@@ -331,8 +331,8 @@ class ReviewCenterRepository:
             )
         ).first()
 
-    async def recipient_emails(self, db: AsyncSession, doc_id: str, author_id: str) -> list[str]:
-        """發布通知收件名單（FR-008）：撰寫者 + 具閱覽者角色且可見對象相符（或文件掛「全體」）之使用者 Email。
+    async def recipient_emails(self, db: AsyncSession, doc_id: str) -> list[str]:
+        """發布通知收件名單（FR-008）：具閱覽者角色且可見對象相符（或文件掛「全體」）之使用者 Email。
 
         反向於 `visibility.visible_docs_condition`（該函式為「使用者能看哪些文件」）：此處為「此文件能被誰看見」。
         兩者**共用 `audience_pair_match`**，只是把文件端 / 使用者端哪一邊當定值對調——#437 曾因兩邊各寫
@@ -340,6 +340,18 @@ class ReviewCenterRepository:
         **所有單位的護理師**都會收到含文件名稱的通知，且無任何測試會紅。
 
         發布當下組出快照、不追溯後續授權；不排除兼具編輯 / 審核者；Email 去重。
+
+        ## #554：撰寫者不再被強制加入
+
+        本函式原本有一段獨立查詢「撰寫者一定收（可能非閱覽者角色）」，已移除——撰寫者改由
+        「我的文件動態」承接（`dm/personal`，核准事件於前端顯示為**「核准發布」**）。
+
+        ⚠️ **閱覽者那半維持 Email，刻意不一起改成站內**：閱覽者沒有 `DM_REVIEW` 列，動態對
+        他們是空的；DM01 文件庫也無「未讀 / 新發布」標示。整支改 MSG 會讓這一半整則消失。
+
+        ⚠️ **邊界（已考慮過，非疏漏）**：撰寫者若**本身就是可見對象相符的閱覽者**，仍會循上方
+        一般規則收到 Email。這是刻意的——他是以**閱覽者身分**落在收件範圍內，與他是不是作者
+        無關；若要排除，那是「作者不收自己發布的文件通知」這個另外的產品決定，本次未裁示。
         """
         stmt = (
             select(DpUser.email)
@@ -348,16 +360,10 @@ class ReviewCenterRepository:
                 DpUser.deleted == 0,
                 DmUserRole.deleted == 0,
                 DpUser.email.isnot(None),
-                # 撰寫者由下方獨立查詢補上（其可能非閱覽者角色），此處僅列可見性相符之閱覽者
                 audience_pair_match(doc_id=doc_id, user_id=DpUser.user_id),
             )
         )
-        emails = {e for e in (await db.scalars(stmt)).all() if e}
-        # 撰寫者一定收（可能非閱覽者角色）
-        author_email = await db.scalar(select(DpUser.email).where(DpUser.user_id == author_id, DpUser.deleted == 0))
-        if author_email:
-            emails.add(author_email)
-        return sorted(emails)
+        return sorted({e for e in (await db.scalars(stmt)).all() if e})
 
     async def list_overdue_pending(self, db: AsyncSession, threshold_days: int) -> list[Row]:
         """催辦掃描：停留 ≥ 門檻天數之 PENDING（含審核者 Email、狀態、文件名），供每日批次。

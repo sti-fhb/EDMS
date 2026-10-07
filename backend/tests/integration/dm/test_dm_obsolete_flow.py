@@ -150,13 +150,22 @@ async def test_initiate_transits_pending_obsolete_and_notifies(db):
     assert review.review_type == "OBSOLETE" and review.status == "PENDING"
     assert review.assigned_reviewer == "rev1" and review.reason == "流程已停辦"
     assert result.doc_status == "PENDING_OBSOLETE"
-    assert result.notified == 1  # 成功排入（渲染成功；渲染失敗 queued_count 會是 0）
-    assert await _email_count(db, "OBS_SUBMIT", "rev1@e.com") == 1  # 通知指定審核者（STATUS=PENDING）
-    # 內容驗證：確認 params key 對齊範本佔位（渲染成功、非空信）——堵住「author_name vs applicant_name」類回歸
-    body = await db.scalar(
-        text('SELECT "BODY" FROM "DP_EMAIL_LOG" WHERE "TEMPLATE_CODE"=\'OBS_SUBMIT\' AND "RECIPIENT"=\'rev1@e.com\'')
-    )
-    assert body and "流程已停辦" in body and "文件DM-SOP-000401" in body
+    # #554：OBS_SUBMIT 改為 MSG → 不排入 Email。審核者改於簽核中心 / 我的文件動態看到。
+    assert result.notified == 0
+    assert await _email_count(db, "OBS_SUBMIT", "rev1@e.com") == 0
+
+    # 🔴 **本次改動損失的覆蓋，刻意記在這裡而非默默刪掉**
+    #
+    # 原本此處還驗 outbox 的 BODY 內容（「確認 params key 對齊範本佔位——堵住
+    # `author_name` vs `applicant_name` 類回歸」）。CHANNEL 改 MSG 後 `send_email` 在
+    # 渲染**之前**就回 CHANNEL_NOT_EMAIL，outbox 無列可驗，那道守門**沒有東西接手**。
+    #
+    # 今日無實害：這 5 支的主旨 / 內文自 #554 起沒有任何讀取端（站內呈現的中文標籤由前端
+    # `dm/personal/schemas.ts` 自己映射，不讀範本）。但**站內訊息佇列一旦實作，params key
+    # 就會重新變成承重的**，屆時 MUST 一併恢復等價守門（可用 `NotifyService.render_preview`，
+    # 它渲染失敗會拋 422 而非靜默）。
+    #
+    # ⚠️ 不要因為「現在沒人讀」就把這段註解刪掉——沒有它，下一個人不會知道這裡曾經有守門。
 
 
 async def test_initiate_with_attachment_saves_obsolete_file(db):
@@ -336,7 +345,8 @@ async def test_approve_obsolete_transits_document_obsolete(db):
         select(DmChangeLog).where(DmChangeLog.doc_id == "DM-SOP-000411", DmChangeLog.operation == "OBSOLETE")
     )
     assert log is not None and log.note == "停辦"  # 變更歷程廢止事件、NOTE=廢止原因
-    assert await _email_count(db, "OBS_APPROVE", "ed@e.com") == 1  # 通知撰寫者
+    # #554：OBS_APPROVE 改為 MSG → 不寄 Email；申請人改於「我的文件動態」看到（標籤「已廢止」）
+    assert await _email_count(db, "OBS_APPROVE", "ed@e.com") == 0
 
 
 async def test_reject_obsolete_restores_published(db):
@@ -351,7 +361,8 @@ async def test_reject_obsolete_restores_published(db):
     review = await db.scalar(select(DmReview).where(DmReview.review_id == review_id))
     assert doc.status == "PUBLISHED"  # 退回 → 回已發布
     assert review.status == "REJECTED"
-    assert await _email_count(db, "OBS_REJECT", "ed@e.com") == 1
+    # #554：OBS_REJECT 改為 MSG → 不寄 Email；申請人改於「我的文件動態」看到（標籤「已退回」）
+    assert await _email_count(db, "OBS_REJECT", "ed@e.com") == 0
 
 
 # ── 廢止附件下載授權（SA 裁示 Q1=C）──────────────────────
