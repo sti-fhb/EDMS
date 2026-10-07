@@ -219,7 +219,7 @@ erDiagram
 | LOG_ID | BIGINT | Y | PK；序列 |
 | MODULE | VARCHAR(5) | Y | 事件歸屬：DP / ET / DM |
 | FUNC_NAME | VARCHAR(50) | Y | 功能 / 資源名稱（如 `DP-USERS`、`ET-COURSE`）|
-| ACTION_TYPE | VARCHAR(10) | Y | LOGIN / LOGOUT / CREATE / UPDATE / DELETE（代碼表見下）|
+| ACTION_TYPE | VARCHAR(10) | Y | LOGIN / LOGOUT / CREATE / UPDATE / DELETE / EXPORT / QUERY（代碼表見下）|
 | TARGET_ID | VARCHAR(100) | N | 異動對象識別（如 USER_ID、PARAM_ID）|
 | RESULT | VARCHAR(10) | Y | SUCCESS / FAIL（登入失敗、越權拒絕等記 FAIL）|
 | DESCRIPTION | VARCHAR(500) | N | 執行結果 / 事件描述 |
@@ -369,7 +369,11 @@ erDiagram
 | `PWD_POLICY` | VALUE 組 | `MIN_LEN`=8、`ADMIN_MIN_LEN`=12、`CHAR_TYPES`=3、`HISTORY_COUNT`=3、`EXPIRY_DAYS`=90、`EXPIRY_REMIND_DAYS`=7 |
 | `LOGIN` | VALUE 組 | `FAIL_LOCK_COUNT`=5、`LOCK_MINUTES`=30、`RESET_TOKEN_TTL_MIN`=30、`EMAIL_CHANGE_TTL_MIN`=30、`IDLE_DISABLE_DAYS`=90 |
 | `MAIL` | VALUE 組 | `RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2（分；部署可再調校）。無失敗告警參數——失敗率由 IT 監控負責（spec 釐清第 2 輪）|
-| `ACTION_TYPE` | LIST | LOGIN / LOGOUT / CREATE / UPDATE / DELETE（`PARAM_NAME`：登入 / 登出 / 新增 / 修改 / 刪除）|
+| `ACTION_TYPE` | LIST | LOGIN / LOGOUT / CREATE / UPDATE / DELETE / EXPORT / QUERY（`PARAM_NAME`：登入 / 登出 / 新增 / 修改 / 刪除 / 匯出 / 查詢）|
+
+> 🔴 **`ACTION_TYPE` 的權威清單是 `DP_PARAM_D` 的實際列**，本表只是摘錄。新增一個值要同時改**三處**：`dp/audit/query_service._ACTION_LABELS`、`dp/audit/router._Action` 的 `Literal` 值域、以及種子 migration——漏任一處都是靜默失效（`EXPORT` 於 #322 導入時只補了 label，下拉選得到卻查詢回 422，直到 #477 才發現）。
+>
+> 三者的一致性由 `tests/integration/dp/test_dp_audit_action_type_coverage.py` 以集合相等斷言守住（#548）。⚠️ **本文件不在那條測試的覆蓋範圍內**——它比對的是程式碼與 DB，散落在各份 spec 的文字列舉仍須人工同步。2026-10-07 盤點時 7 處列舉**全部**漏了 `EXPORT`。
 
 > 多鍵參數組以一個 PARAM_ID 下多筆 PARAM_KEY 表達（PARAM_TYPE=VALUE 之慣例延伸）。
 >

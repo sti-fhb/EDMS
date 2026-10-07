@@ -12,7 +12,7 @@
 
 ### Acceptance Scenarios
 
-1. **Given** ET 或 DM 管理者進入稽核查詢頁，**When** 以多條件（操作者、期間**起訖**、功能、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE、**執行結果 SUCCESS / FAIL**）查詢，**Then** 列出符合之 `DP_AUDIT_LOG` 紀錄（後端分頁、依時間倒序）；稽核為共用項，**兩管理者皆可查全部**（含登入等不分模組事件）
+1. **Given** ET 或 DM 管理者進入稽核查詢頁，**When** 以多條件（操作者、期間**起訖**、功能、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE / EXPORT / QUERY、**執行結果 SUCCESS / FAIL**）查詢，**Then** 列出符合之 `DP_AUDIT_LOG` 紀錄（後端分頁、依時間倒序）；稽核為共用項，**兩管理者皆可查全部**（含登入等不分模組事件）
 2. **Given** 查詢結果列表，**When** 展開單筆明細，**Then** 顯示完整欄位：操作者、時間（至秒）、功能 / 模組代碼、操作類別、**執行結果（SUCCESS / FAIL）**、**事件描述**、來源 IP、異動對象、異動前後值（JSON 字串）
 3. **Given** 查詢結果，**When** 點「匯出 CSV」，**Then** 依當前查詢條件匯出全部符合紀錄
 4. **Given** 查無符合紀錄，**When** 查詢完成，**Then** 顯示空狀態提示（DP-MSG-DP05-001）

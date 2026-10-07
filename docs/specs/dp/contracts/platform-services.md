@@ -58,7 +58,7 @@ async def send_email(
 def log_action(
     module: str,                  # 事件歸屬 DP / ET / DM
     func_name: str,               # 功能 / 資源名稱（如 ET-COURSE、DP-USERS）
-    action_type: str,             # LOGIN / LOGOUT / CREATE / UPDATE / DELETE
+    action_type: str,             # LOGIN / LOGOUT / CREATE / UPDATE / DELETE / EXPORT / QUERY
     result: str,                  # SUCCESS / FAIL
     operator_id: str,             # 操作者 USER_ID（系統作業用 SYSTEM）
     target_id: str | None = None,
