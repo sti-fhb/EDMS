@@ -192,16 +192,44 @@ localStorage.setItem("last_category", id)        // ❌ 無前綴
 
 | 函式 | 用途 |
 |---|---|
-| **`formatDateTaipei(value)`** | **只顯示日期**的欄位：`YYYY-MM-DD`，台灣時間（#539） |
-| **`formatDateTimeTaipei(value)`** | 日期 + 時分：`YYYY/MM/DD HH:mm`，台灣時間（稽核導向畫面、DM07 發布時間） |
-| `formatDateTime(value)` | 日期 + 時分：`YYYY/MM/DD HH:mm`，瀏覽器本地時區 |
+| **`formatDateTaipei(value)`** | **第 1 層**：只顯示日期的欄位，`YYYY-MM-DD`，一律台灣時間（#539） |
+| **`formatDateTimeTaipei(value)`** | **第 2 層**：日期 + 時分，`YYYY/MM/DD HH:mm`，台灣時間；所在畫面有台灣日界的日期篩選（成員見下） |
+| `formatDateTime(value)` | **第 3 層**：日期 + 時分，`YYYY/MM/DD HH:mm`，瀏覽器本地時區；其餘畫面 |
 | `todayTaipei()` | 台灣時間的今天 `YYYY-MM-DD`，供 `<input type="date">` 的 min / max |
 | `toDateTimeLocalInput(value)` | ISO → `<input type="datetime-local">` 所需的本地牆上時間 |
 | `fromDateTimeLocalInput(value)` | 反向，本地牆上時間 → ISO UTC |
 
 ⛔ **禁止以字串截取取日期或時刻**：`value.slice(0, 10)`、`value.slice(0, 16)`、`new Date().toISOString().slice(0, 10)`。後端回傳的是 UTC（`…Z`），截取得到的是 UTC 的日期——台灣時間 00:00–08:00 的事件會顯示成前一天、日期選擇器的上限會停在昨天（#483、#539 都是這個形狀，#539 一次清了 10 處）。
 
-需要新格式時於 `date.ts` 新增，並同步本表。
+#### 選哪一支：三層規則（#559）
+
+依序判斷，命中即停：
+
+1. **只顯示日期** → `formatDateTaipei`。與下面兩層無關，截取 UTC 字串在任何畫面都是錯的
+2. **日期＋時刻，且讀者會拿它對照「以台灣日界切日的日期篩選」結果** → `formatDateTimeTaipei`。否則電腦時區設錯時會出現「篩 10/01 撈出來的那筆，畫面顯示 09/30」。**以下三點即完整判法**，不另外推測讀者意圖：
+   - 欄位所在畫面有以台灣日界切日的日期篩選 → 算，**不論被篩的是不是這一欄**（讀者分不出哪一欄是被篩的）
+   - 欄位在可由上述畫面點進去的明細／詳細頁或對話框 → 也算，篩選在前一頁也一樣、多層點入亦同；共用元件**任一入口符合即算**
+   - **只有 CSV 匯出、沒有日期篩選 → 不算**，歸第 3 層
+3. **其餘日期＋時刻** → `formatDateTime`
+
+台灣時區的電腦上 2、3 層輸出一字不差，差別只在電腦時區設錯時顯現。
+
+第 2 層成員（須與實際使用 `formatDateTimeTaipei` 的檔案一致，驗法：`grep -rl formatDateTimeTaipei frontend/src --include=*.tsx | grep -v '\.test\.'`）：
+
+| 畫面 | 理由 |
+|---|---|
+| DM03 已廢止文件查詢 | 廢止日期篩選以台灣日界 |
+| DM05 文件變更歷程查詢 | 異動日期篩選以台灣日界 |
+| DP05 操作記錄查詢（列表與明細視窗） | 起訖日期篩選以台灣日界（#519） |
+| DM07 文件詳細頁 | 本身無篩選，但可由 DM03 點入（明細頁）；與文件庫進入的是同一條路由、同一個元件 `DmDetailPage`，任一入口符合即算 |
+
+看起來可疑、但判定正確的例子：
+
+- **ET02 學員學習表現**：有台灣時間 CSV 匯出、但沒有日期篩選 → 第 3 層（「匯出也算」於 2026-10-07 評估後未採用）
+- **DP02 權限管理**：「最後異動」第 1 層、「鎖定至」第 3 層，不是混用
+- **DP06 排程總覽**：「執行時點」是 cron 定義的語意、不屬本規則；⛔ 不要為了同列一致去改（見 `dp/schedules/cron.ts`、#517）
+
+完整理由寫在 `date.ts` 檔頭，與本節同步維護。需要新格式時於 `date.ts` 新增，並同步本表。
 
 ---
 

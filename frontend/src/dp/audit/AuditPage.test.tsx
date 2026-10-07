@@ -260,3 +260,60 @@ describe("AuditPage 日期上限（#539）", () => {
     expect(screen.getByLabelText("起日")).toHaveAttribute("max", "2026-10-06")
   })
 })
+
+describe("AuditPage 時刻欄以台灣時間呈現（#559）", () => {
+  // 本頁的日期篩選（#519）與 CSV（#519）皆以台灣日界——時刻欄若跟著瀏覽器時區走，
+  // 時區設錯的電腦上會出現「篩 10/01 撈出來的那筆，畫面顯示 09/30」。
+  //
+  // ⚠️ 必須在非 UTC+8 時區下斷言：台灣時區的機器上 formatDateTime 與 formatDateTimeTaipei
+  // 輸出一字不差，不切時區的話，改回 formatDateTime 這條測試照樣綠（本機驗不出變異）。
+  beforeEach(() => {
+    vi.stubEnv("TZ", "UTC")
+    server.use(
+      http.get("/api/dp/audit/logs", () =>
+        HttpResponse.json({
+          data: [
+            {
+              log_id: 9,
+              created_date: "2026-09-30T16:30:00Z", // 台灣 10/01 00:30
+              operator_id: "u001",
+              operator_name: "陳大華",
+              operator_email: "chen@edms.local",
+              module: "DP",
+              func_name: "DP-USERS",
+              func_label: "DP-使用者管理",
+              action_type: "UPDATE",
+              result: "SUCCESS",
+              target_id: "u1042",
+              target_display: "林小美",
+              source_ip: "10.1.2.33",
+              description: "手動解鎖帳號",
+              before_value: null,
+              after_value: null,
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("列表的時間欄為台灣時間，不隨瀏覽器時區", async () => {
+    renderWithProviders(<AuditPage />)
+    expect(await screen.findByText("2026/10/01 00:30")).toBeInTheDocument()
+    expect(screen.queryByText("2026/09/30 16:30")).not.toBeInTheDocument()
+  })
+
+  it("明細視窗的時間欄為台灣時間，不隨瀏覽器時區", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("2026/10/01 00:30")
+    await user.click(screen.getByRole("button", { name: "明細" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("2026/10/01 00:30")).toBeInTheDocument()
+    expect(within(dialog).queryByText("2026/09/30 16:30")).not.toBeInTheDocument()
+  })
+})

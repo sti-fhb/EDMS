@@ -11,7 +11,7 @@ import TableCell from "@mui/material/TableCell"
 import TableRow from "@mui/material/TableRow"
 import Typography from "@mui/material/Typography"
 
-import { formatDateTime } from "../../utils/date"
+import { formatDateTimeTaipei } from "../../utils/date"
 import { labelOf } from "./auditLabels"
 import { useAuditOptions } from "./useAuditLogs"
 import type { AuditLogRow } from "./auditService"
@@ -51,7 +51,7 @@ export function AuditDetailDialog({ log, onClose }: { log: AuditLogRow | null; o
               <TableBody>
                 <TableRow>
                   <TableCell sx={{ width: 130, fontWeight: 600 }}>時間</TableCell>
-                  <TableCell>{formatDateTime(log.created_date)}</TableCell>
+                  <TableCell>{formatDateTimeTaipei(log.created_date)}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600 }}>操作者</TableCell>

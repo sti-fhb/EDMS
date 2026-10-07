@@ -13,7 +13,7 @@ import { AppTable } from "../../components/AppTable"
 import type { AppColumn } from "../../components/AppTable"
 import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
-import { formatDateTime, todayTaipei } from "../../utils/date"
+import { formatDateTimeTaipei, todayTaipei } from "../../utils/date"
 import { AuditDetailDialog } from "./AuditDetailDialog"
 import { labelOf } from "./auditLabels"
 import type { AuditLogRow, AuditOption } from "./auditService"
@@ -57,7 +57,7 @@ export function AuditPage() {
 
   const columns = useMemo<AppColumn<AuditLogRow>[]>(
     () => [
-      { key: "created_date", title: "時間", render: (_v, r) => formatDateTime(r.created_date) },
+      { key: "created_date", title: "時間", render: (_v, r) => formatDateTimeTaipei(r.created_date) },
       { key: "operator", title: "操作者", render: (_v, r) => operatorText(r) },
       { key: "func_label", title: "功能", dataIndex: "func_label" },
       {
