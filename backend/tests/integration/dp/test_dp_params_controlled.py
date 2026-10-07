@@ -184,7 +184,8 @@ async def test_新增受控項時代碼可省略(db, admin_gate):
     await svc.create(db, module="ET", kind="TAG", data=ControlledCreate(name="ZT受訓單位"), operator=_OP_ET)
 
     sections = await svc.list_visible(db, "etadmin")
-    tags = next(s for s in sections if s.module == "ET" and s.kind == "TAG")
+    # #538 起 ET 的 TAG 分「單位」「職位」兩區；不帶代碼時歸職位（與改版前只有一類時的行為相同）
+    tags = next(s for s in sections if s.module == "ET" and s.kind == "TAG" and s.group_code == "AUDIENCE")
     assert "ZT受訓單位" in {i.name for i in tags.items}
 
 

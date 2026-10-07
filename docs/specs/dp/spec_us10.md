@@ -12,7 +12,7 @@
 
 ### Acceptance Scenarios
 
-1. **Given** ET 或 DM 管理者進入稽核查詢頁，**When** 以多條件（操作者、期間**起訖**、模組、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE、**執行結果 SUCCESS / FAIL**）查詢，**Then** 列出符合之 `DP_AUDIT_LOG` 紀錄（後端分頁、依時間倒序）；稽核為共用項，**兩管理者皆可查全部**（含登入等不分模組事件）
+1. **Given** ET 或 DM 管理者進入稽核查詢頁，**When** 以多條件（操作者、期間**起訖**、功能、操作類別 LOGIN / LOGOUT / CREATE / UPDATE / DELETE、**執行結果 SUCCESS / FAIL**）查詢，**Then** 列出符合之 `DP_AUDIT_LOG` 紀錄（後端分頁、依時間倒序）；稽核為共用項，**兩管理者皆可查全部**（含登入等不分模組事件）
 2. **Given** 查詢結果列表，**When** 展開單筆明細，**Then** 顯示完整欄位：操作者、時間（至秒）、功能 / 模組代碼、操作類別、**執行結果（SUCCESS / FAIL）**、**事件描述**、來源 IP、異動對象、異動前後值（JSON 字串）
 3. **Given** 查詢結果，**When** 點「匯出 CSV」，**Then** 依當前查詢條件匯出全部符合紀錄
 4. **Given** 查無符合紀錄，**When** 查詢完成，**Then** 顯示空狀態提示（DP-MSG-DP05-001）
@@ -23,7 +23,15 @@
 ## Functional Requirements
 
 - **FR-DP-US10-01**: 稽核查詢 MUST 為共用項——ET / DM 管理者皆可查全部；一般使用者 MUST NOT 可存取（僅授權使用者可存取單一日誌機制）
-- **FR-DP-US10-02**: 系統 MUST 提供多條件查詢（操作者、期間起訖、模組、操作類別、執行結果 SUCCESS / FAIL）與後端分頁列表；列表 MUST 含執行結果，明細 MUST 含執行結果、事件描述與異動前後值（JSON 字串，`TEXT` 欄）
+- **FR-DP-US10-02**: 系統 MUST 提供多條件查詢（操作者、期間起訖、功能、操作類別、執行結果 SUCCESS / FAIL）與後端分頁列表；列表 MUST 含執行結果，明細 MUST 含執行結果、事件描述與異動前後值（JSON 字串，`TEXT` 欄）
+
+> **「模組」已於 #555 自 DP05 畫面移除**（使用者裁示）。本條原列「模組」為查詢條件，現改列「功能」。
+>
+> ⚠️ **API 層仍支援**：`GET /api/dp/audit/logs` 的 `module` 參數與 `/options` 的 `module_options` **未移除**，僅不再由畫面使用。日後要把篩選加回來只需改前端。
+>
+> ⚠️ **「以功能可篩到同範圍」目前是慣例、不是被強制的約束**：`FUNC_NAME`（如 `DM-REVIEW` / `DP-TEMPLATES`）的前綴與 `MODULE` 一致，但**沒有任何測試或約束保證兩者不會分歧**——`query_service` 的守門只檢查 `FUNC_NAME` 字面值，不驗前綴等於 `MODULE`。新增寫入點時若前綴與模組不符，以功能篩就會漏。
+>
+> 📌 **Acceptance Scenario 2 的既有落差（非本次造成、本次不處理）**：AC-2 要求明細含「功能 / 模組代碼」，但 `AuditDetailDialog` 僅渲染「功能」（`func_label`），**從未顯示模組代碼**。`DP_AUDIT_LOG.MODULE` 欄位與 API 回應都有，只是畫面沒畫。
 - **FR-DP-US10-03**: 系統 MUST 提供依查詢條件之 CSV 匯出
 - **FR-DP-US10-04**: `DP_AUDIT_LOG` MUST 為 append-only——介面與 API MUST NOT 提供刪除 / 修改；日誌完整性以雜湊等方式確保；異動須特定授權人員（DB 層）並留軌跡
 - **FR-DP-US10-05**: 日誌 MUST 至少涵蓋：更改密碼、登入成功 / 失敗、系統存取成功 / 失敗、帳號建立 / 停用、角色 / 權限修改、密碼重置、參數 / 清單 / 範本異動；欄位含使用者 ID（非個資型）、時間至秒、功能 / 資源名稱、執行結果 / 事件描述、網路來源與目的位址

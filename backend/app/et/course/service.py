@@ -21,6 +21,8 @@ from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import utcnow
 from app.dp.users.account_status import is_account_disabled
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
+from app.et.catalog.models import TAG_TYPE_AUDIENCE, TAG_TYPE_UNIT
+from app.et.catalog.pair import Pair
 from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL
 from app.et.course.publish_service import EtPublishService
@@ -41,6 +43,7 @@ from app.et.course.rules import (
     resequence,
 )
 from app.et.course.schemas import (
+    AudiencePair,
     Capabilities,
     ChapterCreateReq,
     ChapterItem,
@@ -117,7 +120,8 @@ class EtCourseService:
         `OWNER_ID` 取自操作者，**不由請求帶入**——否則教師可代他人建立課程並繞過
         擁有權判定。呼叫端（router）須先以 `require_et_roles(ROLE_TEACHER)` 把關。
         """
-        await self._ensure_tags_selectable(db, set(req.tag_ids))
+        desired = _pairs_of(req)
+        await self._ensure_pairs_selectable(db, desired)
         course = await self._courses.create_draft(
             db,
             {
@@ -130,8 +134,8 @@ class EtCourseService:
             },
             operator,
         )
-        if req.tag_ids:
-            await self._tags.apply(db, course.course_id, to_add=set(req.tag_ids), to_remove=set(), operator=operator)
+        if desired:
+            await self._tags.apply(db, course.course_id, to_add=desired, to_remove=set(), operator=operator)
         # 章節於同一交易內一併建立——使新增流程不必「先存草稿才能加章節」
         for name in req.chapters:
             await self._chapters.append(db, course.course_id, name, operator)
@@ -146,6 +150,7 @@ class EtCourseService:
         scope: str,
         keyword: str | None,
         tag_id: int | None,
+        unit_tag_id: int | None = None,
         owner_id: str | None,
         page: int,
         limit: int,
@@ -168,14 +173,20 @@ class EtCourseService:
         """
         now = utcnow()
         stmt = self._courses.build_list_stmt(
-            actor_id=actor_id, scope=scope, keyword=keyword, tag_id=tag_id, owner_id=owner_id, now=now
+            actor_id=actor_id,
+            scope=scope,
+            keyword=keyword,
+            tag_id=tag_id,
+            unit_tag_id=unit_tag_id,
+            owner_id=owner_id,
+            now=now,
         )
         paged = await paginate(db, stmt, page=page, limit=limit, schema=CourseRow)
         rows: list[CourseRow] = paged["data"]
         course_ids = [r.course_id for r in rows]
 
         counts = await self._courses.counts_by_course(db, course_ids)
-        tags = await self._courses.tags_by_course(db, course_ids)
+        pairs = await self._courses.pairs_by_course(db, course_ids)
         owner_names = await self._owner_names(db, {r.owner_id for r in rows})
 
         cards = [
@@ -188,7 +199,7 @@ class EtCourseService:
                 owner_id=r.owner_id,
                 owner_name=owner_names.get(r.owner_id, (None, False))[0],
                 owner_is_disabled=owner_names.get(r.owner_id, (None, False))[1],
-                tags=[TagOption.model_validate(t) for t in tags.get(r.course_id, [])],
+                audiences=[AudiencePair(**p._asdict()) for p in pairs.get(r.course_id, [])],
                 chapter_count=counts.get(r.course_id, (0, 0))[0],
                 student_count=counts.get(r.course_id, (0, 0))[1],
                 # **由後端判定**——前端自行比對 owner_id 等於把授權語意複製一份到瀏覽器
@@ -265,7 +276,7 @@ class EtCourseService:
         owner_name, owner_is_disabled = (await self._owner_names(db, {course.owner_id})).get(
             course.owner_id, (None, False)
         )
-        tag_ids = await self._tags.list_tag_ids(db, course_id)
+        pairs = (await self._courses.pairs_by_course(db, [course_id]))[course_id]
         chapters = await self._chapters.list_by_course(db, course_id)
         items_by_chapter = await self._items_by_chapter(db, [c.chapter_id for c in chapters])
         is_owner = course.owner_id == actor_id
@@ -282,7 +293,7 @@ class EtCourseService:
             owner_name=owner_name,
             owner_is_disabled=owner_is_disabled,
             is_owner=is_owner,
-            tag_ids=sorted(tag_ids),
+            audiences=[AudiencePair(**p._asdict()) for p in pairs],
             # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者
             # 收集全站邀請碼、自行加入任意課程，繞過 ET-4 的邀請門檻與限流。
             invitation_code=course.invitation_code if is_owner else None,
@@ -309,13 +320,13 @@ class EtCourseService:
                 （#301，見 `EtPublishService.ensure_revival_publishable`）。
         """
         course = await self._require_owned(db, course_id, operator.user_id)
-        current = await self._tags.list_tag_ids(db, course_id)
-        desired = set(req.tag_ids)
+        current = await self._tags.list_pairs(db, course_id)
+        desired = _pairs_of(req)
         ensure_tag_change_allowed(course.status, current=current, desired=desired)
         # #301：擋「清空訖止」——全量覆寫表單少送一個欄位就會讓課程永久不再視同關閉。
         # 放在復活檢核之前：清空是要直接擋下的動作，不是「檢核通過就放行」的延期。
         ensure_schedule_not_cleared(course.status, current_end_at=course.open_end_at, desired_end_at=req.open_end_at)
-        await self._ensure_tags_selectable(db, desired - current)
+        await self._ensure_pairs_selectable(db, desired - current)
         # #301：期間延長若會讓一門已到期（視同關閉）的課程復活，重跑發布六項檢核——否則
         # 「再開課要檢核」形同虛設，繞過它只要改一個日期。只在復活時觸發，見該方法 docstring。
         await self._publish.ensure_revival_publishable(db, course, new_end_at=req.open_end_at, now=utcnow())
@@ -340,7 +351,7 @@ class EtCourseService:
 
         # 期間已過亦視同關閉（#288）——否則「關閉期間不可邀請學員」（FR-ET-US11-07）
         # 會被這條路徑整個繞過：Email 邀請已擋（409 `ET_INVITE_002`），但只要改成「幫
-        # 課程加一個標籤」，該標籤的學員就會被帶入並收到邀請信，而他進去什麼都不能做。
+        # 課程加一組配對」，對應的學員就會被帶入並收到邀請信，而他進去什麼都不能做。
         #
         # ⚠️ 判定用 `req.open_end_at`（**本次要寫入的新值**）而非 `course.open_end_at`
         # ——`course` 是更新前讀的，此刻已過期。教師若在同一次 PUT 裡把訖止延到未來
@@ -353,25 +364,25 @@ class EtCourseService:
             await self._backfill_new_tag_members(db, course, tags_add, operator=operator)
 
     async def _backfill_new_tag_members(
-        self, db: AsyncSession, course, tag_ids: set[int], *, operator: OperatorInfo
+        self, db: AsyncSession, course, pairs: set[Pair], *, operator: OperatorInfo
     ) -> None:
-        """已發布課程新增標籤 → 補帶入該標籤人員並寄通知信（FR-ET-US8-04 / #273）。
+        """已發布課程新增配對 → 補帶入該配對人員並寄通知信（FR-ET-US8-04 / #273 / #538）。
 
-        **只對新增的標籤解析人員**（`target_user_ids_for_tags`）：用全部課程標籤會把
-        「發布後才被貼上舊標籤的人」也一併帶入，而那條路徑另有出口（貼標追溯於貼標
+        **只對新增的配對解析人員**（`target_user_ids_for_pairs`）：用全部課程配對會把
+        「發布後才被貼上舊配對的人」也一併帶入，而那條路徑另有出口（貼標追溯於貼標
         當下觸發），在這裡順手做會讓同一人被兩條路徑各邀請一次。
 
-        草稿課程不走這裡——草稿的標籤可自由增刪，帶入與寄信一律等到發布當下
-        （FR-ET-US3-12）；否則教師編輯期間每加一個標籤就會寄出一批信。
+        草稿課程不走這裡——草稿的配對可自由增刪，帶入與寄信一律等到發布當下
+        （FR-ET-US3-12）；否則教師編輯期間每加一組配對就會寄出一批信。
 
         既有學員不重複加入由 `bulk_enroll_returning` 的 `ON CONFLICT DO NOTHING` 保證，
         且它只回傳真正新增者，故寄信對象自然也不含既有學員。
         """
-        user_ids = await self._tag_invite.target_user_ids_for_tags(db, sorted(tag_ids))
+        user_ids = await self._tag_invite.target_user_ids_for_pairs(db, course.course_id, list(pairs))
         invited = await self._tag_invite.bulk_enroll_returning(db, course.course_id, user_ids, operator=operator)
         if not invited:
             return
-        await self._log(db, "UPDATE", operator.user_id, course.course_id, f"新增標籤補帶入 {len(invited)} 位學員")
+        await self._log(db, "UPDATE", operator.user_id, course.course_id, f"新增受訓對象補帶入 {len(invited)} 位學員")
         # 重新載入課程：上面的更新走 Core UPDATE，手上的 ORM 物件仍是舊快照，
         # 直接拿去組信會寄出改名前的課程名稱與起訖時間。
         await db.refresh(course)
@@ -570,7 +581,7 @@ class EtCourseService:
     # ── 標籤下拉 ────────────────────────────────────────────────────────────
 
     async def list_tag_options(self, db: AsyncSession, *, course_id: int | None = None) -> list[TagOption]:
-        """受訓單位標籤下拉（啟用中，加上該課程既有已掛之停用標籤）。"""
+        """受訓對象下拉（單位與職位兩類；啟用中，加上該課程既有配對中的停用標籤）。"""
         return [TagOption.model_validate(t) for t in await self._tags.list_options(db, course_id)]
 
     # ── 內部 ────────────────────────────────────────────────────────────────
@@ -611,17 +622,21 @@ class EtCourseService:
             )
         return grouped
 
-    async def _ensure_tags_selectable(self, db: AsyncSession, tag_ids: set[int]) -> None:
-        """新掛之標籤須存在且啟用中（FR-ET-US3-03）。
+    async def _ensure_pairs_selectable(self, db: AsyncSession, pairs: set[Pair]) -> None:
+        """新掛之配對：單位欄須為**啟用中的單位**、職位欄須為**啟用中的職位**（FR-ET-US3-03 / #538）。
 
-        僅檢核**新增**的標籤——課程既有已掛之停用標籤保留、不受影響，若一併檢核會使
+        僅檢核**新增**的配對——課程既有配對中的停用標籤保留、不受影響，若一併檢核會使
         「標籤被停用後該課程再也存不了檔」。
+
+        欄位錯置（單位欄放職位）同樣擋下：那樣的配對在匹配時永遠不成立，靜默存進去只會讓
+        教師以為設好了，而沒有任何學員會被帶入。
         """
-        if not tag_ids:
+        if not pairs:
             return
-        active = await self._tags.list_active_tag_ids(db, tag_ids)
-        if active != tag_ids:
-            raise AppError(status_code=422, detail="指定之受訓單位標籤無效或未啟用", error_code="ET_COURSE_004")
+        states = await self._tags.tag_states(db, {tid for pair in pairs for tid in pair if tid is not None})
+        for unit_id, role_id in pairs:
+            if states.get(unit_id) != (TAG_TYPE_UNIT, True) or states.get(role_id) != (TAG_TYPE_AUDIENCE, True):
+                raise AppError(status_code=422, detail="指定之受訓對象無效或未啟用", error_code="ET_COURSE_004")
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
         await self._audit.log_action(
@@ -634,3 +649,8 @@ class EtCourseService:
             target_id=str(course_id),
             description=description,
         )
+
+
+def _pairs_of(req: CourseCreateReq | CourseUpdateReq) -> set[Pair]:
+    """請求中的配對 → `{(單位 TAG_ID, 職位 TAG_ID)}`（重複已由 schema 擋下）。"""
+    return {(p.unit_tag_id, p.tag_id) for p in req.audiences}

@@ -12,7 +12,7 @@ from app.et.catalog.adapter import EtCatalogAdapter
 pytestmark = pytest.mark.unit
 
 
-async def test_et_僅宣告一類受控主檔() -> None:
+async def test_et_僅宣告一類受控主檔且分單位與職位兩組() -> None:
     """DP 後台據此決定要對 ET 呼叫哪些 kind——DP 不得硬編碼模組的 kind 清單。"""
     # db 傳 None：ET 之列舉不查 DB，此處刻意驗證該性質（會查 DB 就會在此炸）
     kinds = await EtCatalogAdapter().list_controlled_kinds(None)
@@ -20,6 +20,8 @@ async def test_et_僅宣告一類受控主檔() -> None:
     assert len(kinds) == 1
     kind = kinds[0]
     assert kind.kind == "TAG"
-    assert kind.name, "顯示名不可為空——DP 端據此渲染區塊標題，不硬編碼模組語彙"
+    assert kind.name == "受訓對象", "#538 SA Q3 改名；DP 端據此渲染區塊標題，不硬編碼模組語彙"
     assert kind.requires_code is False, "TAG_ID 由 Identity 配號，新增時不需使用者輸入代碼"
-    assert kind.groups == (), "ET 受訓單位標籤為單層，無子分組"
+    # #538：受訓對象為 (單位, 職位) 配對，DP03 依子分組分成兩區；單位在前（與 DM 一致）
+    assert [g.code for g in kind.groups] == ["UNIT", "AUDIENCE"]
+    assert all(g.name and g.description for g in kind.groups), "分區名稱與說明由模組自報，不可為空"

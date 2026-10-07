@@ -45,19 +45,19 @@ describe("PublishDialog：條件已滿足", () => {
 
 describe("PublishDialog：有缺漏", () => {
   const blockers = [
-    { code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null },
+    { code: "NO_TAG", message: "課程至少須設定 1 組受訓對象", target_id: null },
     { code: "NO_SCHEDULE", message: "課程起訖時間須填寫完整", target_id: null },
   ]
 
   it("全部缺漏都列出——只報第一項會讓教師修一次再被擋一次", () => {
     render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
-    expect(screen.getByText("課程至少須掛 1 個受訓單位標籤")).toBeInTheDocument()
+    expect(screen.getByText("課程至少須設定 1 組受訓對象")).toBeInTheDocument()
     expect(screen.getByText("課程起訖時間須填寫完整")).toBeInTheDocument()
   })
 
   it("每條缺漏附上「去哪裡修」的導引", () => {
     render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
-    expect(screen.getByText("請於「基本資料」選擇受訓單位標籤")).toBeInTheDocument()
+    expect(screen.getByText("請於「基本資料」設定受訓對象")).toBeInTheDocument()
     expect(screen.getByText("請於「基本資料」填寫課程起訖時間")).toBeInTheDocument()
   })
 
@@ -150,7 +150,7 @@ describe("PublishDialog：有缺漏", () => {
       <PublishDialog
         {...BASE_PROPS}
         blockers={[
-          { code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null },
+          { code: "NO_TAG", message: "課程至少須設定 1 組受訓對象", target_id: null },
           { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 1 },
           { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 2 },
           { code: "OBSOLETE_DOC", message: "請先移除已廢止文件之引用", target_id: null },
@@ -160,7 +160,7 @@ describe("PublishDialog：有缺漏", () => {
     )
     const rows = screen.getAllByRole("listitem").map((li) => li.textContent ?? "")
     expect(rows).toHaveLength(3)
-    expect(rows[0]).toContain("受訓單位標籤")
+    expect(rows[0]).toContain("受訓對象")
     expect(rows[1]).toContain("測驗「小考A」、測驗「小考B」")
     expect(rows[2]).toContain("已廢止文件")
   })
@@ -195,9 +195,9 @@ describe("PublishDialog：發布成功", () => {
       <PublishDialog
         {...BASE_PROPS}
         result={result}
-        blockers={[{ code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null }]}
+        blockers={[{ code: "NO_TAG", message: "課程至少須設定 1 組受訓對象", target_id: null }]}
       />,
     )
-    expect(screen.queryByText("課程至少須掛 1 個受訓單位標籤")).not.toBeInTheDocument()
+    expect(screen.queryByText("課程至少須設定 1 組受訓對象")).not.toBeInTheDocument()
   })
 })

@@ -12,11 +12,12 @@ from app.core.operator import OperatorInfo
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
-from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag
+from app.et.catalog.models import EtTag
 from app.et.constants import ROLE_STUDENT, ROLE_TEACHER, SOURCE_TAG_DEFAULT
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_roles_id, all_units_id, new_tag, pair_course, pair_user, tag_id
 
 pytestmark = pytest.mark.integration
 
@@ -48,30 +49,18 @@ async def _user(db, user_id: str, role: str = ROLE_STUDENT) -> str:
     return user_id
 
 
-async def _new_tag(db, name: str, *, is_all: bool = False) -> int:
-    now = utcnow()
-    tag = EtTag(
-        tag_name=name,
-        is_active=True,
-        is_all=is_all,
-        is_builtin=False,
-        created_user="SYSTEM",
-        created_date=now,
-        deleted=0,
-    )
-    db.add(tag)
-    await db.flush()
-    return tag.tag_id
+async def _new_tag(db, name: str) -> int:
+    return await new_tag(db, name)
 
 
-async def _tag_course(db, course_id: int, tag_id: int) -> None:
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
-    await db.flush()
+async def _tag_course(db, course_id: int, role_id: int) -> None:
+    """#538 之前「課程只掛職位」＝現在的 `(全單位, 職位)`。"""
+    await pair_course(db, course_id, role_id)
 
 
-async def _tag_user(db, user_id: str, tag_id: int) -> None:
-    db.add(EtUserTag(user_id=user_id, tag_id=tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
-    await db.flush()
+async def _tag_user(db, user_id: str, role_id: int) -> None:
+    """#538 之前「使用者只掛職位」＝現在的 `(單位未指定, 職位)`。"""
+    await pair_user(db, user_id, role_id)
 
 
 async def _course(client, teacher: str, name: str = "採血作業教育") -> int:
@@ -108,7 +97,7 @@ class TestTargetResolution:
         a = await _user(db, "s_tag03")
         b = await _user(db, "s_tag04")
         cid = await _course(client, teacher)
-        await _tag_course(db, cid, await _new_tag(db, "全體_tag02", is_all=True))
+        await _tag_course(db, cid, await all_roles_id(db))
 
         targets = await _repo.target_user_ids(db, cid)
 
@@ -283,3 +272,172 @@ class TestOwnerIsNeverEnrolledIntoOwnCourse:
         created = await _repo.bulk_enroll_returning(db, cid, [other_teacher], operator=OperatorInfo(user_id=owner))
 
         assert created == [other_teacher], "他人課程的帶入被誤擋了"
+
+
+_SONGSHAN = "國防醫學院三軍總醫院松山分院"
+_TSGH = "國防醫學院三軍總醫院"
+_MSB = "國防部軍醫局"
+
+
+class TestPairMatching:
+    """#538：課程與使用者皆為 `(單位, 職位)` 配對，判定規則沿用 #437。
+
+    ```
+    帶入 ⟺ ∃ 課程配對 (cu, cp)、∃ 使用者配對 (uu, up)：
+            (cu 為全單位 OR cu = uu) AND (cp 為全體 OR cp = up)
+    ```
+
+    單位與職位一律用 migration seed 的資料——那正是正式機上會有的值，且「全單位」「全體」
+    以 `IS_ALL` 判定，不以名稱判定。
+    """
+
+    @pytest.mark.parametrize(
+        ("course_unit", "course_role", "expected"),
+        [
+            (_SONGSHAN, "護理師", True),  # 完全相符
+            (_SONGSHAN, "全體", True),  # 松山分院全員
+            ("全單位", "護理師", True),  # 所有單位的護理師
+            ("全單位", "全體", True),  # 全部學員
+            (_SONGSHAN, "行政人員", False),  # 職位不符
+            (_TSGH, "護理師", False),  # 單位不符——不展開階層：三總不涵蓋松山分院
+        ],
+    )
+    async def test_六組單筆配對之帶入(self, client, db, course_unit, course_role, expected) -> None:
+        """#437 的六組驗收範例，改以「是否被帶入課程」驗證。使用者為 `(松山分院, 護理師)`。"""
+        teacher = await _user(db, "t_pr01", ROLE_TEACHER)
+        nurse = await _user(db, "s_pr01")
+        cid = await _course(client, teacher)
+        await pair_user(db, nurse, await tag_id(db, "護理師"), await tag_id(db, _SONGSHAN))
+        await pair_course(db, cid, await tag_id(db, course_role), await tag_id(db, course_unit))
+
+        assert (nurse in await _repo.target_user_ids(db, cid)) is expected
+
+    async def test_多筆配對不帶入交叉組合(self, client, db) -> None:
+        """#437 否決「單位集 ∧ 職位集」的理由：課程開給「軍醫局的護理師」與「三總的行政人員」
+        時，**軍醫局的行政人員**與**三總的護理師**不得被帶入。"""
+        teacher = await _user(db, "t_pr02", ROLE_TEACHER)
+        cid = await _course(client, teacher)
+        nurse, clerk = await tag_id(db, "護理師"), await tag_id(db, "行政人員")
+        msb, tsgh = await tag_id(db, _MSB), await tag_id(db, _TSGH)
+        await pair_course(db, cid, nurse, msb)
+        await pair_course(db, cid, clerk, tsgh)
+        want_a = await _user(db, "s_pr02a")
+        want_b = await _user(db, "s_pr02b")
+        cross_a = await _user(db, "s_pr02c")
+        cross_b = await _user(db, "s_pr02d")
+        await pair_user(db, want_a, nurse, msb)
+        await pair_user(db, want_b, clerk, tsgh)
+        await pair_user(db, cross_a, clerk, msb)
+        await pair_user(db, cross_b, nurse, tsgh)
+
+        assert await _repo.target_user_ids(db, cid) == sorted([want_a, want_b])
+
+    async def test_帶入只包含相符者_不是任何人相符就全帶(self, client, db) -> None:
+        """🔴 反向探針：DM 的同類查詢曾因關聯失效退化成「只要**存在任何人**相符即為真」，
+        所有人都通過（#437 差異 3）。ET 的主路徑正是那個方向（由課程找人），而判錯的後果
+        是把人加進課程並寄出通知信。
+
+        造一個相符、一個不相符、一個身上沒有任何配對的學員——結果必須**恰好**是相符那一位。
+        """
+        teacher = await _user(db, "t_pr03", ROLE_TEACHER)
+        cid = await _course(client, teacher)
+        nurse, tsgh = await tag_id(db, "護理師"), await tag_id(db, _TSGH)
+        await pair_course(db, cid, nurse, tsgh)
+        match = await _user(db, "s_pr03a")
+        other = await _user(db, "s_pr03b")
+        await _user(db, "s_pr03c")  # 沒有任何配對
+        await pair_user(db, match, nurse, tsgh)
+        await pair_user(db, other, await tag_id(db, "行政人員"), await tag_id(db, _MSB))
+
+        assert await _repo.target_user_ids(db, cid) == [match]
+
+    async def test_單位未指定者只匹配全單位(self, client, db) -> None:
+        """#538 導入前的既有指派單位為 NULL：仍符合 `(全單位, 護理師)`，不符合 `(三總, 護理師)`。"""
+        teacher = await _user(db, "t_pr04", ROLE_TEACHER)
+        nurse_tag = await tag_id(db, "護理師")
+        legacy = await _user(db, "s_pr04")
+        await pair_user(db, legacy, nurse_tag)  # 單位未指定
+        any_unit = await _course(client, teacher, "全單位課")
+        tsgh_only = await _course(client, teacher, "三總課")
+        await pair_course(db, any_unit, nurse_tag)
+        await pair_course(db, tsgh_only, nurse_tag, await tag_id(db, _TSGH))
+
+        assert await _repo.target_user_ids(db, any_unit) == [legacy]
+        assert await _repo.target_user_ids(db, tsgh_only) == []
+
+    async def test_某單位全體只帶入該單位的人(self, client, db) -> None:
+        """`(三總, 全體)` 是 #538 的新語意：三總所有學員。⚠️ 與 `(全單位, 全體)` 不同——
+        **身上沒有任何配對的人不算**（他不屬於三總）。"""
+        teacher = await _user(db, "t_pr05", ROLE_TEACHER)
+        cid = await _course(client, teacher)
+        tsgh = await tag_id(db, _TSGH)
+        await pair_course(db, cid, await all_roles_id(db), tsgh)
+        inside = await _user(db, "s_pr05a")
+        outside = await _user(db, "s_pr05b")
+        await _user(db, "s_pr05c")  # 沒有任何配對
+        await pair_user(db, inside, await tag_id(db, "行政人員"), tsgh)
+        await pair_user(db, outside, await tag_id(db, "行政人員"), await tag_id(db, _MSB))
+
+        assert await _repo.target_user_ids(db, cid) == [inside]
+
+
+class TestNewPairsOnPublishedCourse:
+    """FR-ET-US8-04：已發布課程新增配對時，**只對新配對**的人補邀請。"""
+
+    async def test_只解析新配對的人(self, client, db) -> None:
+        teacher = await _user(db, "t_np01", ROLE_TEACHER)
+        cid = await _course(client, teacher)
+        nurse, clerk = await tag_id(db, "護理師"), await tag_id(db, "行政人員")
+        tsgh = await tag_id(db, _TSGH)
+        await pair_course(db, cid, nurse, tsgh)  # 既有配對
+        await pair_course(db, cid, clerk, tsgh)  # 本次新增
+        old_member = await _user(db, "s_np01a")
+        new_member = await _user(db, "s_np01b")
+        await pair_user(db, old_member, nurse, tsgh)
+        await pair_user(db, new_member, clerk, tsgh)
+
+        assert await _repo.target_user_ids_for_pairs(db, cid, [(tsgh, clerk)]) == [new_member]
+
+    async def test_新增全單位全體時展開為全部學員(self, client, db) -> None:
+        teacher = await _user(db, "t_np02", ROLE_TEACHER)
+        cid = await _course(client, teacher)
+        everyone = await _user(db, "s_np02")  # 沒有任何配對
+        await pair_course(db, cid, await all_roles_id(db))
+
+        pair = (await all_units_id(db), await all_roles_id(db))
+        assert everyone in await _repo.target_user_ids_for_pairs(db, cid, [pair])
+
+
+class TestGenericValueByFlag:
+    """⭐ 通用值（「全單位」「全體」）以 `IS_ALL` 判定，**不以名稱判定**（#538）。
+
+    DM 以 `TAG_NAME` 辨識「全單位」：把某個具體單位改名為「全單位」即等於擴權（#437 follow-up 1）。
+    ET 的 DP03 擋得住「改名成通用值的名字」（名稱全表唯一、通用值不可改名），但判定邏輯若改成比
+    名稱，**DB 層的任何改名**（直接 SQL、日後放寬改名規則）都會靜默改變帶入範圍。
+    """
+
+    async def test_全單位改了名字仍是通用值(self, client, db) -> None:
+        teacher = await _user(db, "t_gv01", ROLE_TEACHER)
+        nurse_tag = await tag_id(db, "護理師")
+        legacy = await _user(db, "s_gv01")
+        await pair_user(db, legacy, nurse_tag)  # 單位未指定——只會匹配課程端的通用單位
+        cid = await _course(client, teacher)
+        await pair_course(db, cid, nurse_tag)  # (全單位, 護理師)
+        await db.execute(update(EtTag).where(EtTag.tag_id == await all_units_id(db)).values(tag_name="不限單位"))
+        await db.flush()
+
+        assert await _repo.target_user_ids(db, cid) == [legacy], "判定依 IS_ALL，名稱改了不得影響"
+
+    async def test_具體單位取了像通用值的名字也不擴權(self, client, db) -> None:
+        """反方向：一個**非** `IS_ALL` 的單位，就算名字叫「全單位」也只是一個普通單位。"""
+        teacher = await _user(db, "t_gv02", ROLE_TEACHER)
+        nurse_tag = await tag_id(db, "護理師")
+        legacy = await _user(db, "s_gv02")
+        await pair_user(db, legacy, nurse_tag)
+        # 先把 seed 的「全單位」改名騰出名字，再讓一個具體單位頂替這個名字
+        await db.execute(update(EtTag).where(EtTag.tag_id == await all_units_id(db)).values(tag_name="不限單位"))
+        impostor = await new_tag(db, "全單位", tag_type="UNIT")
+        cid = await _course(client, teacher)
+        await pair_course(db, cid, nurse_tag, impostor)
+
+        assert await _repo.target_user_ids(db, cid) == []

@@ -32,6 +32,7 @@ from app.et.course.models import EtCourse
 from app.et.material.models import EtMaterial
 from app.et.quiz.models import EtQuiz
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id, audiences_req
 
 pytestmark = pytest.mark.integration
 
@@ -76,7 +77,16 @@ async def _tag(db, name: str) -> int:
 
 
 async def _attach_tag(db, course_id: int, tag_id: int) -> None:
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=tag_id,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     await db.flush()
 
 
@@ -531,7 +541,7 @@ class TestPublish:
                 "open_start_at": detail["open_start_at"],
                 "open_end_at": detail["open_end_at"],
                 "require_approval": False,
-                "tag_ids": detail["tag_ids"],
+                "audiences": audiences_req(detail),
                 "version": detail["version"],
             },
             headers=_bearer(uid),

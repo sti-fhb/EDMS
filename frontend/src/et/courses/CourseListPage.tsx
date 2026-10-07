@@ -56,6 +56,8 @@ export function EtCourseListPage() {
   const urlScope: Scope = searchParams.get("scope") === "all" ? "all" : "mine"
 
   const [keyword, setKeyword] = useState("")
+  // #538 SA Q2：篩選改為單位、職位兩欄，皆**只看字面**（不展開「全單位」「全體」）
+  const [unitId, setUnitId] = useState<number | "">("")
   const [tagId, setTagId] = useState<number | "">("")
   const [ownerId, setOwnerId] = useState<string | "">("")
   const [page, setPage] = useState(1)
@@ -113,11 +115,12 @@ export function EtCourseListPage() {
     () => ({
       scope,
       ...(debouncedKeyword ? { q: debouncedKeyword } : {}),
+      ...(unitId !== "" ? { unit_tag_id: unitId } : {}),
       ...(tagId !== "" ? { tag_id: tagId } : {}),
       page,
       limit: PAGE_SIZE,
     }),
-    [scope, debouncedKeyword, tagId, page],
+    [scope, debouncedKeyword, unitId, tagId, page],
   )
 
   const params: CourseListParams = useMemo(
@@ -156,7 +159,7 @@ export function EtCourseListPage() {
     setOwnerId("")
   }
 
-  const hasFilters = debouncedKeyword !== "" || tagId !== "" || ownerId !== ""
+  const hasFilters = debouncedKeyword !== "" || unitId !== "" || tagId !== "" || ownerId !== ""
   const courses = data?.data ?? []
   const totalPages = data?.meta.total_pages ?? 0
 
@@ -202,7 +205,7 @@ export function EtCourseListPage() {
         )}
         <Divider sx={{ mb: 2 }} />
         <Grid container spacing={2} alignItems="flex-end">
-          <Grid size={{ xs: 12, md: 5 }}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <TextField
               fullWidth
               size="small"
@@ -221,28 +224,37 @@ export function EtCourseListPage() {
               }}
             />
           </Grid>
-          <Grid size={{ xs: 12, md: 3 }}>
-            <TextField
-              select
-              fullWidth
-              size="small"
-              label="受訓單位標籤"
-              value={tagId}
-              onChange={(e) => {
-                setTagId(e.target.value === "" ? "" : Number(e.target.value))
-                setPage(1)
-              }}
-            >
-              <MenuItem value="">全部</MenuItem>
-              {(filterTags ?? []).map((tag) => (
-                <MenuItem key={tag.tag_id} value={tag.tag_id}>
-                  {tag.tag_name}
-                  {/* 停用標籤仍可篩選（要查得到歷史課程），但標示出來免得教師以為它還能掛 */}
-                  {!tag.is_active && "（已停用）"}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
+          {/* 兩欄各取一類；停用標籤仍可篩選（要查得到歷史課程），但標示出來免得教師以為它還能掛 */}
+          {(
+            [
+              { type: "UNIT", label: "單位", value: unitId, set: setUnitId, md: 3 },
+              { type: "AUDIENCE", label: "職位", value: tagId, set: setTagId, md: 2 },
+            ] as const
+          ).map((f) => (
+            <Grid key={f.type} size={{ xs: 12, md: f.md }}>
+              <TextField
+                select
+                fullWidth
+                size="small"
+                label={f.label}
+                value={f.value}
+                onChange={(e) => {
+                  f.set(e.target.value === "" ? "" : Number(e.target.value))
+                  setPage(1)
+                }}
+              >
+                <MenuItem value="">全部</MenuItem>
+                {(filterTags ?? [])
+                  .filter((tag) => tag.tag_type === f.type)
+                  .map((tag) => (
+                    <MenuItem key={tag.tag_id} value={tag.tag_id}>
+                      {tag.tag_name}
+                      {!tag.is_active && "（已停用）"}
+                    </MenuItem>
+                  ))}
+              </TextField>
+            </Grid>
+          ))}
           {/* 只在「全部課程」出現；隱藏時**不佔位**，否則搜尋列會空一格 */}
           {scope === "all" && (
             <Grid size={{ xs: 12, md: 2 }}>

@@ -70,10 +70,10 @@ export function PublishDialog({
             {/* 帶入人數要據實顯示（#247）：0 通常代表課程掛的標籤沒有任何人掛上，
                 那是設定問題——等學員反映「看不到課」才發現就太晚了。 */}
             {result.invited_count > 0 ? (
-              <Alert severity="success">課程已發布，已依受訓單位標籤帶入 {result.invited_count} 位學員。</Alert>
+              <Alert severity="success">課程已發布，已依受訓對象帶入 {result.invited_count} 位學員。</Alert>
             ) : (
               <Alert severity="warning">
-                課程已發布，但沒有任何學員符合本課程的受訓單位標籤。請確認標籤設定，或將下方邀請碼提供給學員。
+                課程已發布，但沒有任何學員符合本課程的受訓對象。請確認受訓對象設定，或將下方邀請碼提供給學員。
               </Alert>
             )}
             <Box>
@@ -105,7 +105,7 @@ export function PublishDialog({
               發布條件皆已滿足。
             </Alert>
             <Typography variant="body2" color="text.secondary">
-              發布後課程狀態轉為「已發布」，系統會產生 8 碼邀請碼並依受訓單位標籤自動邀請對應學員。
+              發布後課程狀態轉為「已發布」，系統會產生 8 碼邀請碼並依受訓對象自動邀請對應學員。
               起始時間未到前，學員端不會看到這門課程。
             </Typography>
           </Stack>

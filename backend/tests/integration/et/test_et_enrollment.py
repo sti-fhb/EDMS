@@ -33,6 +33,7 @@ from app.et.constants import (
 from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
 
@@ -80,7 +81,16 @@ async def _tag(db, course_id: int, name: str) -> None:
         db.add(tag)
         await db.flush()
         tag_id = tag.tag_id
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag_id, created_user="SYSTEM", created_date=now, deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=tag_id,
+            created_user="SYSTEM",
+            created_date=now,
+            deleted=0,
+        )
+    )
     await db.flush()
 
 

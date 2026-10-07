@@ -361,6 +361,7 @@
   </style>
 </head>
 <body>
+<!-- 2026-10-06 #538：「受訓單位標籤」改名為「受訓對象」並改為「單位 + 職位」配對。下方各畫面說明中仍寫「受訓單位標籤」之處皆指受訓對象；以 docs/specs/et/spec.md §受訓對象規則為準。 -->
 
 <!-- ===== Top Navbar ===== -->
 <nav class="navbar navbar-tsbms fixed-top d-flex align-items-center">
@@ -459,15 +460,17 @@
         </div>
       </div>
       <div class="col-md-3">
-        <label class="form-label small">受訓單位標籤</label>
+        <label class="form-label small">單位</label>
         <select class="form-select form-select-sm">
-          <option>全部</option>
-          <option>全體</option>
-          <option>護理師</option>
-          <option>行政人員</option>
-          <option>軍人</option>
-          <option>醫檢師</option>
+          <option>全部</option><option>全單位</option><option>國防醫學院三軍總醫院</option><option>國防醫學院三軍總醫院松山分院</option><option>國防部軍醫局</option>
         </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">職位</label>
+        <select class="form-select form-select-sm">
+          <option>全部</option><option>全體</option><option>護理師</option><option>行政人員</option><option>軍人</option><option>醫檢師</option>
+        </select>
+        <!-- 2026-10-06 #538 SA Q2：受訓對象篩選改為單位、職位兩欄，只比對字面、不展開通用值 -->
       </div>
       <div class="col-md-2" id="et-filter-creator" style="display:none;">
         <label class="form-label small">建立者</label>
@@ -819,15 +822,12 @@
           <input type="text" class="form-control form-control-sm" value="草稿" disabled>
         </div>
         <div class="col-md-12">
-          <label class="form-label small">受訓單位標籤 <span class="text-danger">*</span><small class="text-muted">（多選；發布時至少 1 個）</small></label>
-          <div class="d-flex flex-wrap gap-3 border rounded p-2 bg-light">
-            <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" id="new-tag-all"><label class="form-check-label small" for="new-tag-all"><span class="tag-badge tag-all">全體</span></label></div>
-            <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" id="new-tag-nurse"><label class="form-check-label small" for="new-tag-nurse"><span class="tag-badge">護理師</span></label></div>
-            <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" id="new-tag-adm"><label class="form-check-label small" for="new-tag-adm"><span class="tag-badge">行政人員</span></label></div>
-            <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" id="new-tag-sol"><label class="form-check-label small" for="new-tag-sol"><span class="tag-badge">軍人</span></label></div>
-            <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" id="new-tag-med"><label class="form-check-label small" for="new-tag-med"><span class="tag-badge">醫檢師</span></label></div>
+          <label class="form-label small">受訓對象 <span class="text-danger">*</span><small class="text-muted">（「單位 + 職位」配對，可多組；發布時至少 1 組）</small></label>
+          <div class="border rounded p-2 bg-light">
+            <div class="d-flex gap-2 align-items-center mb-1"><select class="form-select form-select-sm"><option value="">（請選擇單位）</option><option>全單位</option><option>國防醫學院三軍總醫院</option><option>國防醫學院三軍總醫院松山分院</option><option>國防部軍醫局</option></select><select class="form-select form-select-sm"><option value="">（請選擇職位）</option><option>全體</option><option>護理師</option><option>行政人員</option><option>軍人</option><option>醫檢師</option></select><button type="button" class="btn btn-link btn-sm text-danger p-0" title="移除此組"><i class="bi bi-trash"></i></button></div>
+            <button type="button" class="btn btn-link btn-sm p-0" onclick="showToast('已新增一列受訓對象')"><i class="bi bi-plus me-1"></i>新增受訓對象</button>
           </div>
-          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>2026-07-02 變更：原「關聯模組」單選改為「受訓單位標籤」<strong>多選</strong>；草稿可留空，<strong>發布前至少須掛 1 個</strong>；發布時系統依標籤<strong>自動邀請</strong>對應人員並寄通知信；已發布後標籤<strong>可新增、不可移除</strong>。「全體」= 所有具學員角色之使用者。</div>
+          <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>2026-10-06 #538：受訓單位標籤改為「<strong>受訓對象</strong>」——每組為「單位 + 職位」，兩欄必填；「全單位」＝不限單位、「全體」＝不限職位。開給「軍醫局的護理師」與「三總的行政人員」時，不會帶入軍醫局的行政人員與三總的護理師。草稿可留空，<strong>發布前至少 1 組</strong>；發布時依配對<strong>自動邀請</strong>對應人員並寄通知信；已發布後<strong>可新增、不可移除</strong>。</div>
         </div>
         <div class="col-md-4">
           <label class="form-label small">課程起始時間 <span class="text-danger">*</span><small class="text-muted">（發布時必填）</small></label>
@@ -1009,18 +1009,11 @@
           <input type="text" class="form-control form-control-sm" value="已發布" disabled>
         </div>
         <div class="col-md-12">
-          <label class="form-label small">受訓單位標籤 <span class="text-danger">*</span><small class="text-muted">（多選；已發布可新增、不可移除）</small></label>
-          <div class="d-flex flex-wrap align-items-center gap-2 border rounded p-2 bg-light">
-            <span class="tag-badge"><i class="bi bi-lock-fill me-1" style="font-size:0.65rem;"></i>護理師</span>
-            <span class="tag-badge"><i class="bi bi-lock-fill me-1" style="font-size:0.65rem;"></i>軍人</span>
-            <div class="dropdown">
-              <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-plus me-1"></i>加標籤</button>
-              <ul class="dropdown-menu">
-                <li><a class="dropdown-item small" href="#" onclick="showToast('已新增標籤「行政人員」，系統將補邀請該標籤人員並寄通知信'); return false;">行政人員</a></li>
-                <li><a class="dropdown-item small" href="#" onclick="showToast('已新增標籤「醫檢師」，系統將補邀請該標籤人員並寄通知信'); return false;">醫檢師</a></li>
-                <li><a class="dropdown-item small" href="#" onclick="showToast('已新增標籤「全體」，系統將補邀請該標籤人員並寄通知信'); return false;">全體</a></li>
-              </ul>
-            </div>
+          <label class="form-label small">受訓對象 <span class="text-danger">*</span><small class="text-muted">（已發布：既有配對不可移除、可新增）</small></label>
+          <div class="border rounded p-2 bg-light">
+            <div class="d-flex gap-2 align-items-center mb-1"><select class="form-select form-select-sm" disabled><option value="">（請選擇單位）</option><option selected>全單位</option><option>國防醫學院三軍總醫院</option><option>國防醫學院三軍總醫院松山分院</option><option>國防部軍醫局</option></select><select class="form-select form-select-sm" disabled><option value="">（請選擇職位）</option><option>全體</option><option selected>護理師</option><option>行政人員</option><option>軍人</option><option>醫檢師</option></select><i class="bi bi-lock-fill text-muted" title="已發布課程之既有受訓對象不可移除"></i></div>
+            <div class="d-flex gap-2 align-items-center mb-1"><select class="form-select form-select-sm" disabled><option value="">（請選擇單位）</option><option>全單位</option><option selected>國防醫學院三軍總醫院</option><option>國防醫學院三軍總醫院松山分院</option><option>國防部軍醫局</option></select><select class="form-select form-select-sm" disabled><option value="">（請選擇職位）</option><option>全體</option><option>護理師</option><option>行政人員</option><option selected>軍人</option><option>醫檢師</option></select><i class="bi bi-lock-fill text-muted" title="已發布課程之既有受訓對象不可移除"></i></div>
+            <button type="button" class="btn btn-link btn-sm p-0" onclick="showToast('新增並儲存後，系統將僅對新配對之人員補邀請並寄通知信')"><i class="bi bi-plus me-1"></i>新增受訓對象</button>
           </div>
           <div class="field-helper mt-1"><i class="bi bi-info-circle"></i>發布前至少 1 個標籤；<strong>已發布課程可「新增」標籤（觸發該標籤人員之補邀請＋寄信）、「不可移除」既有標籤</strong>（🔒 表示不可移除；已加入學員不受影響）；草稿狀態可自由增刪。</div>
         </div>
@@ -3013,7 +3006,7 @@ function resetAndCreateAnotherCourse() {
   screen.querySelectorAll('input[type=text], input[type=date], textarea').forEach(function(el) {
     el.value = '';
   });
-  // 受訓單位標籤 checkbox 重設
+  // checkbox 重設（受訓對象已改為下拉配對，#538；其餘 checkbox 照舊）
   screen.querySelectorAll('input[type=checkbox]').forEach(function(el) { el.checked = false; });
   goScreen('et-course-create');
 }

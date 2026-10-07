@@ -173,7 +173,7 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
     if snapshot.material_count < 1:
         blockers.append(PublishBlocker(BLOCK_NO_MATERIAL, "課程至少須有 1 份教材"))
     if snapshot.tag_count < 1:
-        blockers.append(PublishBlocker(BLOCK_NO_TAG, "課程至少須掛 1 個受訓單位標籤"))
+        blockers.append(PublishBlocker(BLOCK_NO_TAG, "課程至少須設定 1 組受訓對象"))
     if snapshot.open_start_at is None or snapshot.open_end_at is None:
         # 起、訖任一未填只回一條——教師要補的是「閱課期間」這件事，拆成兩條會讓
         # 缺漏清單看起來比實際嚴重。

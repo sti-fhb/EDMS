@@ -26,6 +26,7 @@ from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag
 from app.et.constants import ITEM_MATERIAL, ROLE_STUDENT, ROLE_TEACHER
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
+from tests.integration.et._tag_pairs import all_units_id, audiences_req, role_pair
 
 pytestmark = pytest.mark.integration
 
@@ -79,7 +80,16 @@ async def _tag_user(db, user_id: str, tag_id: int) -> None:
 
 
 async def _attach_tag(db, course_id: int, tag_id: int) -> None:
-    db.add(EtCourseTag(course_id=course_id, tag_id=tag_id, created_user="SYSTEM", created_date=utcnow(), deleted=0))
+    db.add(
+        EtCourseTag(
+            unit_tag_id=await all_units_id(db),
+            course_id=course_id,
+            tag_id=tag_id,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+            deleted=0,
+        )
+    )
     await db.flush()
 
 
@@ -252,7 +262,7 @@ class TestAddTagToPublishedCourse:
         return cid
 
     async def _detail(self, client, teacher: str, course_id: int) -> dict:
-        """讀課程詳細取當下 `tag_ids` 與 `version`。
+        """讀課程詳細取當下 `audiences` 與 `version`。
 
         `version` 一律現讀而非沿用發布回應——前端也是這樣（存檔前重新載入表單），
         且發布之外的路徑（如日後的關閉 / 再開課）同樣會推進版本。
@@ -280,7 +290,7 @@ class TestAddTagToPublishedCourse:
                 # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
                 "open_start_at": detail["open_start_at"],
                 "open_end_at": detail["open_end_at"],
-                "tag_ids": [*detail["tag_ids"], second_tag],
+                "audiences": [*audiences_req(detail), await role_pair(db, second_tag)],
                 "version": detail["version"],
             },
             headers=_bearer(teacher),
@@ -319,7 +329,7 @@ class TestAddTagToPublishedCourse:
                 # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
                 "open_start_at": detail["open_start_at"],
                 "open_end_at": detail["open_end_at"],
-                "tag_ids": [*detail["tag_ids"], second_tag],
+                "audiences": [*audiences_req(detail), await role_pair(db, second_tag)],
                 "version": detail["version"],
             },
             headers=_bearer(teacher),
@@ -355,7 +365,7 @@ class TestAddTagToPublishedCourse:
                 # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
                 "open_start_at": detail["open_start_at"],
                 "open_end_at": detail["open_end_at"],
-                "tag_ids": [*detail["tag_ids"], second_tag],
+                "audiences": [*audiences_req(detail), await role_pair(db, second_tag)],
                 "version": detail["version"],
             },
             headers=_bearer(teacher),
@@ -377,7 +387,7 @@ class TestAddTagToPublishedCourse:
         cid = created.json()["course_id"]
         r = await client.put(
             f"{_COURSES}/{cid}",
-            json={"course_name": "草稿課程", "tag_ids": [tag_id], "version": 0},
+            json={"course_name": "草稿課程", "audiences": [await role_pair(db, tag_id)], "version": 0},
             headers=_bearer(teacher),
         )
         assert r.status_code == 204, r.text
@@ -403,7 +413,7 @@ class TestAddTagToPublishedCourse:
                 # 全量覆寫表單：起訖須原值送回，否則等同清空（#301 之 ET_COURSE_009）
                 "open_start_at": detail["open_start_at"],
                 "open_end_at": detail["open_end_at"],
-                "tag_ids": detail["tag_ids"],
+                "audiences": audiences_req(detail),
                 "version": detail["version"],
             },
             headers=_bearer(teacher),

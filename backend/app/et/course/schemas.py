@@ -103,6 +103,27 @@ class _ScheduleFields(BaseModel):
         return self
 
 
+class AudiencePairReq(BaseModel):
+    """一組受訓對象配對（請求）：兩欄皆必填，「不限」以「全單位」/「全體」表達（#538）。
+
+    欄位類型（單位欄須為單位、職位欄須為職位）與啟用狀態需查 DB，由 service 檢核（`ET_COURSE_004`）。
+    """
+
+    model_config = {"extra": "forbid"}
+
+    #: `TAG_ID` 為 Identity 正整數；超出 BIGINT 者於 DB 比對會溢位成 500。
+    unit_tag_id: int = Field(gt=0, le=MAX_BIGINT)
+    tag_id: int = Field(gt=0, le=MAX_BIGINT)
+
+
+class AudiencePair(BaseModel):
+    """一組受訓對象配對（回應）。`label` 為顯示文字（見 `catalog/pair.pair_label`）。"""
+
+    unit_tag_id: int
+    tag_id: int
+    label: str
+
+
 class _CourseFields(_ScheduleFields):
     """課程基本資料之共用欄位與驗證（建立 / 更新皆適用）。
 
@@ -121,7 +142,8 @@ class _CourseFields(_ScheduleFields):
     ]
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LEN)
     require_approval: bool = False
-    tag_ids: list[int] = Field(default_factory=list, max_length=MAX_TAG_IDS)
+    #: 受訓對象 `(單位, 職位)` 配對（#538）。草稿可留空；發布時至少 1 組（發布檢核）。
+    audiences: list[AudiencePairReq] = Field(default_factory=list, max_length=MAX_TAG_IDS)
 
     @field_validator("course_name")
     @classmethod
@@ -137,12 +159,12 @@ class _CourseFields(_ScheduleFields):
     def _normalise_description(cls, v: str | None) -> str | None:
         return _strip_or_none(v)
 
-    @field_validator("tag_ids")
+    @field_validator("audiences")
     @classmethod
-    def _valid_tag_ids(cls, v: list[int]) -> list[int]:
-        """`TAG_ID` 為 Identity 正整數；非正數或超出 BIGINT 者於 DB 比對會溢位成 500。"""
-        if any(not (0 < tag_id <= MAX_BIGINT) for tag_id in v):
-            raise ValueError("受訓單位標籤 ID 不合法")
+    def _no_duplicate_pairs(cls, v: list["AudiencePairReq"]) -> list["AudiencePairReq"]:
+        """同一組配對送兩次：存進去會撞唯一鍵（500），去重又會讓前端以為兩列都存了。"""
+        if len({(p.unit_tag_id, p.tag_id) for p in v}) != len(v):
+            raise ValueError("受訓對象配對重複")
         return v
 
 
@@ -366,7 +388,7 @@ class CourseDetail(BaseModel):
     #: 本旗標則是「人還在、帳號停用了」。混為一談會讓真正的資料問題被當成正常狀態。
     owner_is_disabled: bool = False
     is_owner: bool
-    tag_ids: list[int]
+    audiences: list[AudiencePair]
     chapters: list[ChapterItem]
     #: 課程邀請碼（8 碼純數字）。**僅 owner 可見**——非擁有者一律為 `None`。
     #:
@@ -432,7 +454,7 @@ class Capabilities(BaseModel):
 
 
 class TagOption(BaseModel):
-    """受訓單位標籤下拉項。
+    """受訓對象下拉項（單位或職位，#538）。
 
     `is_active=False` 只會出現在「課程既有已掛之停用標籤」——新掛時不得選取
     （FR-ET-US3-03：停用標籤排除於可選清單、既有已掛保留）。
@@ -443,6 +465,10 @@ class TagOption(BaseModel):
     tag_id: int
     tag_name: str
     is_active: bool
+    #: `AUDIENCE`（職位）/ `UNIT`（單位）——前端依此分成兩個下拉（#538）。
+    tag_type: str
+    #: 通用值（「全體」/「全單位」）。
+    is_all: bool
 
 
 class PublishBlockerRow(BaseModel):
@@ -569,7 +595,7 @@ class CourseCard(BaseModel):
     #: ⚠️ 與 `owner_name is None` **不同**：後者代表 `DP_USER` 根本沒有該列（資料不一致），
     #: 本旗標則是「人還在、帳號停用了」。混為一談會讓真正的資料問題被當成正常狀態。
     owner_is_disabled: bool = False
-    tags: list[TagOption]
+    audiences: list[AudiencePair]
     #: 未刪除之章節數。
     chapter_count: int
     #: **在籍**學員數——已移除者（`IS_REMOVED`）不計入。卡片上的數字問的是「現在有幾個

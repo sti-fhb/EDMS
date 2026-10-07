@@ -19,7 +19,7 @@ function makeCourse(overrides: Partial<CourseCardData> = {}): CourseCardData {
     owner_id: "t01",
     owner_name: "陳大華",
     owner_is_disabled: false,
-    tags: [{ tag_id: 1, tag_name: "護理師", is_active: true }],
+    audiences: [{ unit_tag_id: 9, tag_id: 1, label: "護理師" }],
     chapter_count: 5,
     student_count: 28,
     is_owner: true,
@@ -118,8 +118,26 @@ describe("ET01 課程卡片", () => {
     expect(screen.getByText("28 位學員")).toBeInTheDocument()
   })
 
-  it("沒有標籤時不渲染空的標籤列", () => {
-    renderWithProviders(<CourseCard course={makeCourse({ tags: [] })} onOpen={vi.fn()} />)
+  it("顯示受訓對象 badge——文字由後端組好，前端原樣顯示（#538）", () => {
+    // 與下一條「不渲染」成對、用**同一種查法**：只有反向斷言的話，badge 整段被拿掉也照樣綠
+    renderWithProviders(
+      <CourseCard
+        course={makeCourse({
+          audiences: [
+            { unit_tag_id: 9, tag_id: 1, label: "護理師" },
+            { unit_tag_id: 12, tag_id: 2, label: "國防醫學院三軍總醫院 + 行政人員" },
+          ],
+        })}
+        onOpen={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText("護理師")).toBeInTheDocument()
+    expect(screen.queryByText("國防醫學院三軍總醫院 + 行政人員")).toBeInTheDocument()
+  })
+
+  it("沒有受訓對象時不渲染空的標籤列", () => {
+    renderWithProviders(<CourseCard course={makeCourse({ audiences: [] })} onOpen={vi.fn()} />)
 
     expect(screen.queryByText("護理師")).not.toBeInTheDocument()
   })

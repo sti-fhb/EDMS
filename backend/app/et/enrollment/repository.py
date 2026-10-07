@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
-from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.course.models import EtChapter, EtCourse
+from app.et.course.repository import EtCourseRepository
 from app.et.progress.models import EtEnrollment
 
 
@@ -47,28 +47,14 @@ class EtEnrollmentRepository:
         return [(enrollment, course) for enrollment, course in rows.all()]
 
     async def tags_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, list[str]]:
-        """各課程之受訓單位標籤名稱（AC 3）。
+        """各課程之受訓對象配對顯示文字（AC 3 / #538）。
 
-        一次查完再分組，避免每張卡片各發一次查詢。**不濾 `EtTag.is_active`**——
-        標籤被停用後，已掛在課程上的標籤仍應顯示，否則卡片會憑空少一個 badge
-        而學員無從得知原因。
+        **沿用 ET01 卡片的同一份查詢**（`EtCourseRepository.pairs_by_course`）——顯示規則
+        （「全單位」省略等）只有一份，ET01 與 ET03 的卡片才不會對同一門課顯示不同文字。
+        停用標籤照常顯示，理由見該方法。
         """
-        if not course_ids:
-            return {}
-        rows = await db.execute(
-            select(EtCourseTag.course_id, EtTag.tag_name)
-            .join(EtTag, EtTag.tag_id == EtCourseTag.tag_id)
-            .where(
-                EtCourseTag.course_id.in_(course_ids),
-                EtCourseTag.deleted == 0,
-                EtTag.deleted == 0,
-            )
-            .order_by(EtCourseTag.course_id, EtTag.tag_id)
-        )
-        grouped: dict[int, list[str]] = {}
-        for course_id, tag_name in rows.all():
-            grouped.setdefault(course_id, []).append(tag_name)
-        return grouped
+        pairs = await EtCourseRepository().pairs_by_course(db, course_ids)
+        return {cid: [p.label for p in rows] for cid, rows in pairs.items() if rows}
 
     async def chapter_counts(self, db: AsyncSession, course_ids: list[int]) -> dict[int, int]:
         """各課程之章節數（AC 3）。"""

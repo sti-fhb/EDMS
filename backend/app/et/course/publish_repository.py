@@ -131,7 +131,7 @@ class EtPublishRepository:
     async def _tag_count(self, db: AsyncSession, course_id: int) -> int:
         """課程已掛之受訓單位標籤數。
 
-        以 `ET_COURSE_TAG` 的原始 table 計數而非查 `EtCourseTagRepository.list_tag_ids`——
+        以 `ET_COURSE_TAG` 的原始 table 計數而非查 `EtCourseTagRepository.list_pairs`——
         後者回傳 set 供編輯用，這裡只要數量。
         """
         return (

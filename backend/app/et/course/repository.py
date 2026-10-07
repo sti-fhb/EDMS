@@ -13,12 +13,14 @@ from typing import NamedTuple
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR
 from app.core.like_escape import contains as like_contains
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.catalog.models import EtCourseTag, EtTag
+from app.et.catalog.pair import Pair, pair_in, pair_label
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ITEM_QUIZ
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
@@ -27,6 +29,14 @@ from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.models import EtQuestion, EtQuiz
 from app.et.quiz.repository import EtQuizRepository
+
+
+class CoursePairRow(NamedTuple):
+    """課程的一組配對與其顯示文字（見 `catalog/pair.pair_label`）。"""
+
+    unit_tag_id: int
+    tag_id: int
+    label: str
 
 
 class ResolvedCourse(NamedTuple):
@@ -224,6 +234,7 @@ class EtCourseRepository:
         scope: str,
         keyword: str | None = None,
         tag_id: int | None = None,
+        unit_tag_id: int | None = None,
         owner_id: str | None = None,
         now: datetime,
     ):
@@ -302,22 +313,23 @@ class EtCourseRepository:
             # 用 `ilike` 而非 `like`：這是搜尋框，使用者不該因為大小寫打錯而找不到課程。
             stmt = stmt.where(EtCourse.course_name.ilike(like_contains(keyword), escape=LIKE_ESCAPE_CHAR))
 
-        if tag_id is not None:
-            # 一課程多標籤，任一命中即列出（`FR-ET-US7-02`）。用 EXISTS 而非 JOIN——
-            # JOIN 會在課程掛多個標籤時產生重複列。
+        if tag_id is not None or unit_tag_id is not None:
+            # 一課程多組配對，任一組命中即列出（`FR-ET-US7-02`）。用 EXISTS 而非 JOIN——
+            # JOIN 會在課程掛多組配對時產生重複列。
+            #
+            # #538 SA Q2 裁示：**只看字面**。選「護理師」只列配對職位正好是護理師的課，
+            # `(松山分院, 全體)` 不列——**不展開通用值**。兩欄並用時須**同一組配對**同時
+            # 符合（條件放在同一個 EXISTS 裡）；拆成兩個 EXISTS 會讓「松山+行政」與
+            # 「全單位+護理師」兩組湊出一個「松山的護理師」。
             #
             # **不濾 `EtTag.is_active`**：停用標籤仍須可用於篩選，否則掛著已停用標籤的
-            # 歷史課程從此搜不到（`spec.md` §受訓單位標籤規則：停用僅影響新課程掛載）。
-            stmt = stmt.where(
-                select(EtCourseTag.course_tag_id)
-                .where(
-                    EtCourseTag.course_id == EtCourse.course_id,
-                    EtCourseTag.tag_id == tag_id,
-                    EtCourseTag.deleted == 0,
-                )
-                .correlate(EtCourse)
-                .exists()
-            )
+            # 歷史課程從此搜不到（`spec.md` §受訓對象規則：停用僅影響新課程掛載）。
+            conds = [EtCourseTag.course_id == EtCourse.course_id, EtCourseTag.deleted == 0]
+            if tag_id is not None:
+                conds.append(EtCourseTag.tag_id == tag_id)
+            if unit_tag_id is not None:
+                conds.append(EtCourseTag.unit_tag_id == unit_tag_id)
+            stmt = stmt.where(select(EtCourseTag.course_tag_id).where(*conds).correlate(EtCourse).exists())
 
         # 新的在前，與 ET03「我的課程」一致
         return stmt.order_by(EtCourse.created_date.desc(), EtCourse.course_id.desc())
@@ -360,29 +372,50 @@ class EtCourseRepository:
         )
         return {cid: (int(chapters.get(cid, 0)), int(students.get(cid, 0))) for cid in course_ids}
 
-    async def tags_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, list[EtTag]]:
-        """`{course_id: [EtTag, ...]}`——一次 JOIN 取回整頁的標籤。
+    async def pairs_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, list[CoursePairRow]]:
+        """`{course_id: [CoursePairRow, ...]}`——一次 JOIN 取回整頁的配對與顯示文字（#538）。
 
-        **不濾 `EtTag.is_active`**：課程既有已掛的停用標籤仍須顯示，否則卡片上的標籤
-        會憑空少一個（`spec.md` §受訓單位標籤規則：停用僅影響新課程掛載）。
+        **不濾 `EtTag.is_active`**：課程既有配對中的停用標籤仍須顯示，否則卡片上的配對
+        會憑空少一組（`spec.md` §受訓對象規則：停用僅影響新課程掛載）。
+
+        排序：通用值在前（「全體」「護理師」這類全單位配對先列），再依顯示順序——卡片上
+        最常見的配對排在前面。
         """
         if not course_ids:
             return {}
+        unit = aliased(EtTag, name="et_unit_tag")
+        role = aliased(EtTag, name="et_role_tag")
         rows = (
             await db.execute(
-                select(EtCourseTag.course_id, EtTag)
-                .join(EtTag, EtTag.tag_id == EtCourseTag.tag_id)
+                select(
+                    EtCourseTag.course_id,
+                    EtCourseTag.unit_tag_id,
+                    EtCourseTag.tag_id,
+                    unit.tag_name,
+                    unit.is_all,
+                    role.tag_name,
+                )
+                .join(unit, unit.tag_id == EtCourseTag.unit_tag_id)
+                .join(role, role.tag_id == EtCourseTag.tag_id)
                 .where(
                     EtCourseTag.course_id.in_(course_ids),
                     EtCourseTag.deleted == 0,
-                    EtTag.deleted == 0,
+                    unit.deleted == 0,
+                    role.deleted == 0,
                 )
-                .order_by(EtCourseTag.course_id, EtTag.tag_name)
+                .order_by(
+                    EtCourseTag.course_id,
+                    unit.is_all.desc(),
+                    unit.display_order,
+                    role.is_all.desc(),
+                    role.display_order,
+                )
             )
         ).all()
-        grouped: dict[int, list[EtTag]] = {cid: [] for cid in course_ids}
-        for course_id, tag in rows:
-            grouped[course_id].append(tag)
+        grouped: dict[int, list[CoursePairRow]] = {cid: [] for cid in course_ids}
+        for course_id, unit_id, role_id, unit_name, unit_is_all, role_name in rows:
+            label = pair_label(unit_name=unit_name, unit_is_all=unit_is_all, role_name=role_name)
+            grouped[course_id].append(CoursePairRow(unit_id, role_id, label))
         return grouped
 
     async def list_all_tags(self, db: AsyncSession) -> list[EtTag]:
@@ -397,7 +430,9 @@ class EtCourseRepository:
 
         用錯會讓舊課程從此搜不到，而畫面上不會有任何異常。
         """
-        rows = await db.scalars(select(EtTag).where(EtTag.deleted == 0).order_by(EtTag.tag_name))
+        rows = await db.scalars(
+            select(EtTag).where(EtTag.deleted == 0).order_by(EtTag.tag_type, EtTag.display_order, EtTag.tag_id)
+        )
         return list(rows)
 
     async def list_invitation_codes(self, db: AsyncSession) -> set[str]:
@@ -424,31 +459,37 @@ class EtCourseRepository:
 
 
 class EtCourseTagRepository:
-    """`ET_COURSE_TAG` 存取（課程×受訓單位標籤）。"""
+    """`ET_COURSE_TAG` 存取（課程 × 受訓對象 `(單位, 職位)` 配對，#538）。"""
 
-    async def list_tag_ids(self, db: AsyncSession, course_id: int) -> set[int]:
-        """課程現掛之 `TAG_ID` 集合。"""
-        rows = await db.scalars(
-            select(EtCourseTag.tag_id).where(EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0)
+    async def list_pairs(self, db: AsyncSession, course_id: int) -> set[Pair]:
+        """課程現掛之配對集合 `{(單位 TAG_ID, 職位 TAG_ID)}`。"""
+        rows = await db.execute(
+            select(EtCourseTag.unit_tag_id, EtCourseTag.tag_id).where(
+                EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0
+            )
         )
-        return set(rows)
+        return {(unit, role) for unit, role in rows.all()}
 
-    async def list_active_tag_ids(self, db: AsyncSession, tag_ids: set[int]) -> set[int]:
-        """給定集合中「啟用且未刪除」之 `TAG_ID`——供 service 擋下掛停用標籤。"""
+    async def tag_states(self, db: AsyncSession, tag_ids: set[int]) -> dict[int, tuple[str, bool]]:
+        """`{TAG_ID: (TAG_TYPE, IS_ACTIVE)}`——供 service 檢核新配對的欄位類型與啟用狀態。
+
+        查無者不在結果中（呼叫端以「缺席」判定為無效）。
+        """
         if not tag_ids:
-            return set()
-        rows = await db.scalars(
-            select(EtTag.tag_id).where(EtTag.tag_id.in_(tag_ids), EtTag.deleted == 0, EtTag.is_active.is_(True))
+            return {}
+        rows = await db.execute(
+            select(EtTag.tag_id, EtTag.tag_type, EtTag.is_active).where(EtTag.tag_id.in_(tag_ids), EtTag.deleted == 0)
         )
-        return set(rows)
+        return {tag_id: (tag_type, is_active) for tag_id, tag_type, is_active in rows.all()}
 
     async def apply(
-        self, db: AsyncSession, course_id: int, *, to_add: set[int], to_remove: set[int], operator: OperatorInfo
+        self, db: AsyncSession, course_id: int, *, to_add: set[Pair], to_remove: set[Pair], operator: OperatorInfo
     ) -> None:
         """差異套用：新增缺少者、軟刪除多餘者。
 
-        以「重新啟用既有軟刪除列」而非插入新列處理 add——同一 (COURSE_ID, TAG_ID)
-        反覆增刪時不會累積殭屍列，且保留最初的 `CREATED_DATE` 供追溯。
+        以「重新啟用既有軟刪除列」而非插入新列處理 add——同一組配對反覆增刪時不會累積
+        殭屍列，且保留最初的 `CREATED_DATE` 供追溯。比對鍵為**整組配對**（#538 之前為
+        `TAG_ID`）：同職位換單位是另一組配對，不得重新啟用到舊單位那一列。
         """
         now = utcnow()
         if to_remove:
@@ -456,7 +497,7 @@ class EtCourseTagRepository:
                 update(EtCourseTag)
                 .where(
                     EtCourseTag.course_id == course_id,
-                    EtCourseTag.tag_id.in_(to_remove),
+                    pair_in(EtCourseTag.unit_tag_id, EtCourseTag.tag_id, to_remove),
                     EtCourseTag.deleted == 0,
                 )
                 .values(deleted=1, updated_user=operator.user_id, updated_date=now)
@@ -464,18 +505,22 @@ class EtCourseTagRepository:
         if not to_add:
             await db.flush()
             return
-        # 一次撈出待新增者中「已存在（含已軟刪除）」之列，避免逐個 tag 各發一次 SELECT
+        # 一次撈出待新增者中「已存在（含已軟刪除）」之列，避免逐組各發一次 SELECT
         existing_rows = await db.scalars(
-            select(EtCourseTag).where(EtCourseTag.course_id == course_id, EtCourseTag.tag_id.in_(to_add))
+            select(EtCourseTag).where(
+                EtCourseTag.course_id == course_id,
+                pair_in(EtCourseTag.unit_tag_id, EtCourseTag.tag_id, to_add),
+            )
         )
-        existing_by_tag = {row.tag_id: row for row in existing_rows}
-        for tag_id in to_add:
-            existing = existing_by_tag.get(tag_id)
+        existing_by_pair = {(row.unit_tag_id, row.tag_id): row for row in existing_rows}
+        for unit_tag_id, tag_id in to_add:
+            existing = existing_by_pair.get((unit_tag_id, tag_id))
             if existing is None:
                 db.add(
                     EtCourseTag(
                         course_id=course_id,
                         tag_id=tag_id,
+                        unit_tag_id=unit_tag_id,
                         created_user=operator.user_id,
                         created_date=now,
                     )
@@ -487,20 +532,21 @@ class EtCourseTagRepository:
         await db.flush()
 
     async def list_options(self, db: AsyncSession, course_id: int | None = None) -> list[EtTag]:
-        """標籤下拉：啟用中之全部標籤，加上該課程既有已掛之停用標籤。
+        """配對下拉（單位與職位兩類）：啟用中之全部標籤，加上該課程既有配對中的停用標籤。
 
         FR-ET-US3-03：停用標籤排除於**可選**清單，但課程既有已掛者保留、不受影響
-        ——故編輯既有課程時仍須回傳那些停用標籤，否則前端無從顯示已掛的 chip。
+        ——故編輯既有課程時仍須回傳那些停用標籤，否則前端無從顯示既有的配對。
+        單位與職位兩欄都要納入（#538）。
         """
         conds = [EtTag.is_active.is_(True)]
         if course_id is not None:
-            conds.append(
-                EtTag.tag_id.in_(
-                    select(EtCourseTag.tag_id).where(EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0)
-                )
-            )
+            attached = select(EtCourseTag).where(EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0)
+            conds.append(EtTag.tag_id.in_(attached.with_only_columns(EtCourseTag.tag_id)))
+            conds.append(EtTag.tag_id.in_(attached.with_only_columns(EtCourseTag.unit_tag_id)))
         rows = await db.scalars(
-            select(EtTag).where(EtTag.deleted == 0, or_(*conds)).order_by(EtTag.display_order, EtTag.tag_id)
+            select(EtTag)
+            .where(EtTag.deleted == 0, or_(*conds))
+            .order_by(EtTag.tag_type, EtTag.display_order, EtTag.tag_id)
         )
         return list(rows)
 
