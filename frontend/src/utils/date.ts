@@ -2,8 +2,44 @@
  * 時間顯示工具。時間一律經此格式化，禁止各處自行 `new Date(...).toLocaleString(...)`，
  * 也禁止以 `.slice(0, 10)` 等字串截取取日期（後端回傳 UTC，見 `formatDateTaipei`）。
  *
- * 各函式之用途與選用時機見其 JSDoc，以及 `.claude/rules/sti-frontend-modules.md`〈date.ts〉的對照表；
- * 新增函式時兩處同步更新。
+ * ## 選哪一支：三層規則（#559）
+ *
+ * 依序判斷，命中即停：
+ *
+ * 1. **只顯示日期**（`YYYY-MM-DD`）→ `formatDateTaipei`。一律台灣時間，**與下面兩層無關**：
+ *    截取 UTC 字串在任何畫面都是錯的（#539）。
+ * 2. **日期＋時刻，且所在畫面有「以台灣日界切日的日期篩選」** → `formatDateTimeTaipei`。
+ *    後端篩選以台灣時間切日（`app/core/db.py::create_app_engine`），時刻欄若跟著瀏覽器時區走，
+ *    電腦時區設錯時會出現「篩 10/01 撈出來的那筆，畫面顯示 09/30」（#483）。
+ *    **一個元件被多個入口共用時，任一入口符合即算**——讀者看到的是同一個元件，不分從哪進來。
+ * 3. **其餘日期＋時刻** → `formatDateTime`（瀏覽器時區）。
+ *
+ * 在台灣時區的電腦上，2、3 兩層輸出一字不差；差別只在電腦時區設錯時才顯現。
+ *
+ * ### 第 2 層的成員與理由（盤點須與實際使用 `formatDateTimeTaipei` 的檔案一致）
+ *
+ * | 畫面 | 檔案 | 理由 |
+ * |---|---|---|
+ * | DM03 已廢止文件查詢 | `dm/obsolete/DmObsoletePage.tsx` | 廢止日期篩選以台灣日界 |
+ * | DM05 文件變更歷程查詢 | `dm/changelog/DmChangeLogPage.tsx` | 異動日期篩選以台灣日界 |
+ * | DP05 操作記錄查詢 | `dp/audit/AuditPage.tsx`、`AuditDetailDialog.tsx` | 起訖日期篩選以台灣日界（#519） |
+ * | DM07 文件詳細頁 | `dm/detail/DmDetailPage.tsx` | 本身無篩選，但同時是 DM03 的唯讀詳細頁：DM03 點列導向 `/dm/documents/:docId`（`DmObsoletePage.tsx`），與文件庫進入的是同一條路由、同一個元件（`router.tsx`） |
+ *
+ * 驗法：`grep -rl formatDateTimeTaipei frontend/src --include=*.tsx | grep -v '\.test\.'` 的每個檔案
+ * 都要出現在上表；新增成員時兩處同步。
+ *
+ * ### 看起來可疑、但判定正確的例子（照上述規則應推導出相同結論）
+ *
+ * - **ET02 學員學習表現**：有台灣時間的 CSV 匯出，但**沒有日期篩選** → 第 3 層。
+ *   「匯出也算」的寫法於 2026-10-07 評估後未採用（#559）：畫面與 CSV 的差異只在電腦時區設錯、
+ *   且有人逐筆比對時才會出現，不足以推翻 #551 的裁示。
+ * - **DP02 權限管理**：同頁「最後異動」用 `formatDateTaipei`、「鎖定至」用 `formatDateTime`。
+ *   前者只有日期（第 1 層）、後者是時刻且該頁無日期篩選（第 3 層），不是混用。
+ * - **DP06 排程總覽**：「執行時點」固定台灣時間是 cron 定義的語意（見 `dp/schedules/cron.ts`），
+ *   「最近執行／下次執行」走第 3 層。⛔ 不要為了「同列一致」去改，理由見 cron.ts（#517）。
+ *
+ * 各函式的細節見其 JSDoc；`.claude/rules/sti-frontend-modules.md`〈date.ts〉有同一份對照表，
+ * 規則或成員異動時兩處同步更新。
  */
 
 const pad = (n: number): string => String(n).padStart(2, "0")
@@ -53,12 +89,8 @@ export function todayTaipei(): string {
 /**
  * 格式化為 `YYYY/MM/DD HH:mm`（**台灣時間**）；null / 空 / 非法值回 `—`。
  *
- * 供**稽核導向**畫面使用（DM03 已廢止文件查詢、DM05 文件變更歷程）：這兩頁的日期篩選由後端以
- * 台灣時間切日（`app/core/db.py::create_app_engine`）、匯出的 CSV 也以台灣時間呈現
- * （`app/core/utils.py::format_taipei`），畫面若跟著瀏覽器時區走，對不在台灣時區的稽核人員
- * 就會「篩 10/01 撈出來的那筆，畫面顯示 09/30」（#483）。
- *
- * 其餘畫面仍用 `formatDateTime`（瀏覽器時區）。兩者在台灣境內結果相同。
+ * 三層規則的**第 2 層**：所在畫面有以台灣日界切日的日期篩選（含共用同一元件的延伸頁）。
+ * 適用畫面與理由見本檔檔頭的表格——那份表格是判斷依據，⛔ 不要只看這裡就決定。
  */
 export function formatDateTimeTaipei(value: string | null | undefined): string {
   if (!value) return "—"
@@ -84,7 +116,11 @@ export function formatDateTaipei(value: string | null | undefined): string {
   return `${p.year}-${p.month}-${p.day}`
 }
 
-/** 格式化為 `YYYY/MM/DD HH:mm`（本地時區）；null / 空 / 非法值回 `—`。 */
+/**
+ * 格式化為 `YYYY/MM/DD HH:mm`（**瀏覽器本地時區**）；null / 空 / 非法值回 `—`。
+ *
+ * 三層規則的**第 3 層**：日期＋時刻、且所在畫面沒有台灣日界的日期篩選（見本檔檔頭）。
+ */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—"
   const d = new Date(value)
