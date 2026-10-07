@@ -1,7 +1,7 @@
 """dp_seed_action_type_query
 
 Revision ID: c7d2e4f9a8b1
-Revises: b4e7c9a1d2f3
+Revises: 1e57d1db82b2
 Create Date: 2026-10-07 10:30:00.000000
 
 ACTION_TYPE 清單補 QUERY（#548）。
@@ -45,7 +45,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "c7d2e4f9a8b1"
-down_revision: Union[str, None] = "b4e7c9a1d2f3"
+down_revision: Union[str, None] = "1e57d1db82b2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
