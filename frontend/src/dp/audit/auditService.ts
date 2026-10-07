@@ -8,6 +8,7 @@ export interface AuditLogRow {
   operator_id: string
   operator_name: string | null
   operator_email: string | null
+  /** ⚠️ 後端仍回傳，但**前端沒有任何讀取端**——明細對話框只畫「功能」(`func_label`)。保留為 API 回應的鏡像。 */
   module: string
   func_name: string
   func_label: string

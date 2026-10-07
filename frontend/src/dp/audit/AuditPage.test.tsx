@@ -197,7 +197,9 @@ describe("AuditPage 篩選選項來自後端（#477）", () => {
     expect(screen.getByRole("combobox", { name: "功能" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "操作類別" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "執行結果" })).toBeInTheDocument()
-    expect(screen.queryByRole("combobox", { name: "模組" })).not.toBeInTheDocument()
+    // 用正則而非精確字串：精確比對只擋得住 label 恰為「模組」的那一個，
+    // 有人加回一個叫「所屬模組」的下拉就會溜過去。
+    expect(screen.queryByRole("combobox", { name: /模組/ })).not.toBeInTheDocument()
   })
 
   // ⚠️ 本條在移除篩選**之前就是綠的**（沒人去點模組下拉，`module` 本來就是空字串而不送出），

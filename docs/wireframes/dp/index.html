@@ -1023,7 +1023,7 @@
     <div class="wf-card">
       <div class="row g-2 align-items-end">
         <div class="col-md-3"><label class="form-label small mb-1">操作者</label><input type="text" class="form-control form-control-sm" placeholder="姓名 / Email"></div>
-        <!-- #555：「模組」篩選依裁示移除；改列「功能」（FUNC_NAME 本身帶模組前綴，篩得到同範圍）。API 的 module 參數仍保留、僅不由畫面使用。 -->
+        <!-- #555：「模組」篩選依裁示移除；改列「功能」（FUNC_NAME 前綴與 MODULE 目前慣例上一致，但無測試強制）。API 的 module 參數仍保留、僅不由畫面使用。 -->
         <div class="col-md-2"><label class="form-label small mb-1">功能</label><select class="form-select form-select-sm"><option>全部</option><option>DP-登入登出</option><option>ET-課程維護</option><option>DM-文件編輯</option></select></div>
         <div class="col-md-2"><label class="form-label small mb-1">操作類別</label><select class="form-select form-select-sm"><option>全部</option><option>登入</option><option>登出</option><option>新增</option><option>修改</option><option>刪除</option></select></div>
         <div class="col-md-2"><label class="form-label small mb-1">執行結果</label><select class="form-select form-select-sm"><option>全部</option><option>成功</option><option>失敗</option></select></div>
