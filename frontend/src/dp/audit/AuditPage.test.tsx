@@ -267,9 +267,8 @@ describe("AuditPage 時刻欄以台灣時間呈現（#559）", () => {
   //
   // ⚠️ 必須在非 UTC+8 時區下斷言：台灣時區的機器上 formatDateTime 與 formatDateTimeTaipei
   // 輸出一字不差，不切時區的話，改回 formatDateTime 這條測試照樣綠（本機驗不出變異）。
-  const originalTz = process.env.TZ
   beforeEach(() => {
-    process.env.TZ = "UTC"
+    vi.stubEnv("TZ", "UTC")
     server.use(
       http.get("/api/dp/audit/logs", () =>
         HttpResponse.json({
@@ -299,7 +298,7 @@ describe("AuditPage 時刻欄以台灣時間呈現（#559）", () => {
     )
   })
   afterEach(() => {
-    process.env.TZ = originalTz
+    vi.unstubAllEnvs()
   })
 
   it("列表的時間欄為台灣時間，不隨瀏覽器時區", async () => {
