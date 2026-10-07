@@ -36,6 +36,7 @@ import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError, toBlobApiError } from "../../services/http"
+import { formatDateTaipei } from "../../utils/date"
 import { getFieldErrors } from "../../utils/zodUtils"
 
 const PAGE_SIZE = 20
@@ -449,7 +450,7 @@ export function DmReviewPage() {
                         </TableCell>
                         <TableCell>{row.version_no ?? "—"}</TableCell>
                         <TableCell>{row.submitter_name ?? row.submitter_id}</TableCell>
-                        <TableCell>{row.submit_date.slice(0, 10)}</TableCell>
+                        <TableCell>{formatDateTaipei(row.submit_date)}</TableCell>
                         <TableCell
                           sx={{ color: overdue ? "error.main" : undefined, fontWeight: overdue ? 700 : undefined }}
                         >
@@ -523,7 +524,7 @@ export function DmReviewPage() {
                           label={reviewStatusLabel(row.status)}
                         />
                       </TableCell>
-                      <TableCell>{row.complete_date?.slice(0, 10) ?? "—"}</TableCell>
+                      <TableCell>{formatDateTaipei(row.complete_date)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

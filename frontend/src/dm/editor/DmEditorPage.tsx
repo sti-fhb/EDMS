@@ -33,6 +33,7 @@ import { useDocTags, useDraftMeta, useEditorOptions, useReviewers, useUploadLimi
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
+import { formatDateTaipei } from "../../utils/date"
 import { getFieldErrors } from "../../utils/zodUtils"
 import { useDetail, useVersions } from "../detail/useDetail"
 
@@ -821,7 +822,7 @@ export function DmEditorPage() {
                     <Box>
                       <Typography variant="body2">{v.version_no}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {v.published_date?.slice(0, 10) ?? "—"}
+                        {formatDateTaipei(v.published_date)}
                       </Typography>
                     </Box>
                     <Typography variant="caption" color={v.is_current ? "success.main" : "text.secondary"}>

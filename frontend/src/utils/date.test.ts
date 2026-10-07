@@ -5,7 +5,7 @@
 // adapter 並以 `TypeError: Invalid URL` 失敗。
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { formatDateTimeTaipei, fromDateTimeLocalInput, toDateTimeLocalInput, todayTaipei } from "./date"
+import { formatDateTaipei, formatDateTimeTaipei, fromDateTimeLocalInput, toDateTimeLocalInput, todayTaipei } from "./date"
 
 describe("datetime-local 與 ISO 8601 轉換", () => {
   it("往返後回到原本的本地牆上時間", () => {
@@ -65,6 +65,33 @@ describe("formatDateTimeTaipei（稽核導向畫面）", () => {
     expect(formatDateTimeTaipei(null)).toBe("—")
     expect(formatDateTimeTaipei("")).toBe("—")
     expect(formatDateTimeTaipei("not-a-date")).toBe("—")
+  })
+})
+
+describe("formatDateTaipei（只顯示日期的欄位）", () => {
+  it("UTC 仍是前一天、台灣已跨日時回台灣的日期", () => {
+    // 後端回傳 UTC；原本各頁以 `.slice(0, 10)` 截取，此時點會顯示 2026-10-05（#539）
+    expect(formatDateTaipei("2026-10-05T17:30:00Z")).toBe("2026-10-06")
+  })
+
+  it("台灣日界兩側", () => {
+    expect(formatDateTaipei("2026-10-05T15:59:59Z")).toBe("2026-10-05") // 台灣 23:59:59
+    expect(formatDateTaipei("2026-10-05T16:00:00Z")).toBe("2026-10-06") // 台灣 00:00:00
+  })
+
+  it("接受帶微秒的後端格式", () => {
+    expect(formatDateTaipei("2026-10-06T02:56:01.752820Z")).toBe("2026-10-06")
+  })
+
+  it("格式為 YYYY-MM-DD，與 todayTaipei 一致", () => {
+    expect(formatDateTaipei("2026-02-03T04:05:06Z")).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it("空值與非法值回安全預設", () => {
+    expect(formatDateTaipei(null)).toBe("—")
+    expect(formatDateTaipei(undefined)).toBe("—")
+    expect(formatDateTaipei("")).toBe("—")
+    expect(formatDateTaipei("not-a-date")).toBe("—")
   })
 })
 

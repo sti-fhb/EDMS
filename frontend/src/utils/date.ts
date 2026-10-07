@@ -1,8 +1,9 @@
 /**
- * 時間顯示工具。時間一律經此格式化，禁止各處自行 `new Date(...).toLocaleString(...)`。
+ * 時間顯示工具。時間一律經此格式化，禁止各處自行 `new Date(...).toLocaleString(...)`，
+ * 也禁止以 `.slice(0, 10)` 等字串截取取日期（後端回傳 UTC，見 `formatDateTaipei`）。
  *
- * 目前僅提供 US4 需要的 `formatDateTime`（日期 + 時分，本地時區）；其餘格式（僅日期 / 相對時間等）
- * 待實際消費者出現時再補（避免臆測擴充）。
+ * 各函式之用途與選用時機見其 JSDoc，以及 `.claude/rules/sti-frontend-modules.md`〈date.ts〉的對照表；
+ * 新增函式時兩處同步更新。
  */
 
 const pad = (n: number): string => String(n).padStart(2, "0")
@@ -65,6 +66,22 @@ export function formatDateTimeTaipei(value: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "—"
   const p = taipeiParts(d)
   return `${p.year}/${p.month}/${p.day} ${p.hour}:${p.minute}`
+}
+
+/**
+ * 只取日期 `YYYY-MM-DD`（**台灣時間**）；null / 空 / 非法值回 `—`。供清單與詳細頁中只顯示日期的欄位。
+ *
+ * ⚠️ 不可用 `value.slice(0, 10)`：後端回傳的是 UTC（`…Z`），截取得到的是 **UTC 的日期**，
+ * 台灣時間 00:00–08:00 發生的事會顯示成前一天（#539；原本 DP02 / DM00–DM08 共 9 處如此）。
+ *
+ * 分隔用 `-` 而非 `formatDateTimeTaipei` 的 `/`：沿用這些欄位改版前的呈現，並與 `todayTaipei` 同格式。
+ */
+export function formatDateTaipei(value: string | null | undefined): string {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  const p = taipeiParts(d)
+  return `${p.year}-${p.month}-${p.day}`
 }
 
 /** 格式化為 `YYYY/MM/DD HH:mm`（本地時區）；null / 空 / 非法值回 `—`。 */

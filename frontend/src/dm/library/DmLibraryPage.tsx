@@ -27,7 +27,7 @@ import {
 } from "./useLibrary"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
-import { todayTaipei } from "../../utils/date"
+import { formatDateTaipei, todayTaipei } from "../../utils/date"
 
 const PAGE_SIZE = 20
 // 檢索標籤組代碼 → 分組標題（Autocomplete groupBy）
@@ -215,7 +215,7 @@ export function DmLibraryPage() {
                     <TableCell>
                       <Chip size="small" label={row.category_name} />
                     </TableCell>
-                    <TableCell>{row.published_date?.slice(0, 10) ?? "—"}</TableCell>
+                    <TableCell>{formatDateTaipei(row.published_date)}</TableCell>
                     <TableCell>{row.author_name ?? row.author_id}</TableCell>
                     <TableCell>
                       {/* 標籤：灰色文字頓號分隔（非彩色 pill，FR-003）；僅檢索標籤 */}

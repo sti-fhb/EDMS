@@ -87,3 +87,32 @@ describe("DmLibraryPage 文件庫", () => {
     expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000001")
   })
 })
+
+describe("DmLibraryPage 發布日期（#539）", () => {
+  it("以台灣時間呈現：UTC 前一天 17:30 顯示為台灣隔日", async () => {
+    server.use(
+      http.get("/api/dm/library/documents", () =>
+        HttpResponse.json({
+          data: [
+            {
+              doc_id: "DM-SOP-000001",
+              doc_name: "領血確認標準作業程序",
+              category_code: "SOP",
+              category_name: "SOP",
+              published_date: "2026-10-05T17:30:00Z",
+              author_id: "u1",
+              author_name: "陳大華",
+              func_code: null,
+              func_name: null,
+              tags: [],
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<DmLibraryPage />)
+    expect(await screen.findByText("2026-10-06")).toBeInTheDocument()
+    expect(screen.queryByText("2026-10-05")).not.toBeInTheDocument()
+  })
+})

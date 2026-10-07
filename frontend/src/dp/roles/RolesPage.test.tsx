@@ -183,3 +183,32 @@ describe("RolesPage 權限管理", () => {
     expect(screen.queryByRole("button", { name: /新增角色/ })).not.toBeInTheDocument()
   })
 })
+
+describe("RolesPage 最後異動日期（#539）", () => {
+  it("以台灣時間呈現：UTC 前一天 17:30 顯示為台灣隔日", async () => {
+    server.use(
+      http.get("/api/dp/roles/:module/assignments", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "u1",
+              user_name: "王曉明",
+              email: "ming@example.com",
+              status: "ACTIVE",
+              locked_until: null,
+              roles: ["DM_EDITOR"],
+              groups: [],
+              last_modified_by: "admin",
+              last_modified_by_name: "系統管理員",
+              last_modified_date: "2026-10-05T17:30:00Z",
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<RolesPage />)
+    expect(await screen.findByText("系統管理員｜2026-10-06")).toBeInTheDocument()
+    expect(screen.queryByText("系統管理員｜2026-10-05")).not.toBeInTheDocument()
+  })
+})
