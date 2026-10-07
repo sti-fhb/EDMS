@@ -74,6 +74,8 @@ _ACTION_LABELS: dict[str, str] = {
     "DELETE": "刪除",
     # ET02 具名個資匯出（#322 / SA 裁示 2026-09-14）
     "EXPORT": "匯出",
+    # 不指名條件之大量讀取（#548 裁示 5：ET04 核可查詢未給關鍵字時）
+    "QUERY": "查詢",
 }
 _RESULT_LABELS: dict[str, str] = {"SUCCESS": "成功", "FAIL": "失敗"}
 _MODULE_LABELS: dict[str, str] = {"DP": "平台", "ET": "教育訓練", "DM": "文件管理"}

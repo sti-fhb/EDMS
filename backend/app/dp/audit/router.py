@@ -33,9 +33,11 @@ _service = AuditQueryService()
 _Module = Literal["DP", "ET", "DM"]
 # ⚠️ 必須涵蓋所有**寫得進去**的 action_type，否則該值在下拉選得到、查詢卻被擋成 422。
 # `EXPORT` 於 #322 導入時只補了兩處 label、漏了此處與種子清單，直到 #477 才發現。
+# `QUERY` 於 #548 導入時三處一併補齊（本處、_ACTION_LABELS、migration c7d2e4f9a8b1），
+# 並以 test_dp_audit_action_type_coverage 把這張清單變成會變紅的斷言。
 # 新增值時一併檢查：query_service._ACTION_LABELS 與 DP_PARAM.ACTION_TYPE 種子
 # （前端自 #477 起經 /options 取得，無需另行維護）。
-_Action = Literal["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE", "EXPORT"]
+_Action = Literal["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE", "EXPORT", "QUERY"]
 _Result = Literal["SUCCESS", "FAIL"]
 
 

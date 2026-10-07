@@ -21,6 +21,7 @@ JOIN `ET_COURSE`」這種只有真 DB 才看得出來的錯。
 以 `t_own` 的視角查「林」時，裁示 C 要求看得到 A、B，看不到 C、D。
 """
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -29,6 +30,7 @@ from sqlalchemy import select
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
 from app.et.approval.models import EtApproval
 from app.et.constants import (
@@ -602,6 +604,102 @@ class TestQueryBehaviour:
         r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["lin"]))
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_AUTH_001"
+
+
+class TestQueryAudit:
+    """🔴 不指名的大量讀取要留痕（#548 裁示 5）。
+
+    ## 為何這組存在
+
+    裁示 3 與 4 把母體限制（「至少給一個條件」與課程擁有權閘）拿掉之後，**防列舉只剩
+    角色受控**。事後追責因此成為必要——不能出現「能全量取回但零軌跡」的空窗期。
+    #392 問的「要不要為這類無法用權限收斂的查詢建立讀取稽核」由本 issue 回答為「要」。
+
+    ## ⚠️ 只記「沒有關鍵字」的查詢，不是每一次查詢
+
+    兩個理由：
+
+    1. **要擋的風險是整批取回**，而那正好等於不給關鍵字的查詢；給了關鍵字的查詢一次
+       只命中一個人，且使用者是在輸入框打字（前端有 debounce），頻率高得多
+    2. `AuditLogService.log_action` 的第一步是 `pg_advisory_xact_lock`，**全平台單一
+       固定 key、持有至外層交易 commit**——持鎖期間所有寫稽核的動作（**包含登入**）
+       都會排隊。讓一支高頻讀取端點去取那把鎖不划算
+
+    ⛔ **不記關鍵字也不記姓名**：關鍵字本身就是個資（姓名或 Email），寫進保存期更長的
+    稽核表等於把暴露從一處搬到另一處（#392 已點明）。
+    """
+
+    async def _query_logs(self, db) -> list[DpAuditLog]:
+        rows = await db.scalars(
+            select(DpAuditLog).where(DpAuditLog.func_name == "ET-APPROVAL", DpAuditLog.action_type == "QUERY")
+        )
+        return list(rows.all())
+
+    @staticmethod
+    def _after(log: DpAuditLog) -> dict:
+        """⚠️ `AFTER_VALUE` 是 `Text`（JSON 字串）不是 JSON 欄位——直接下標會拿到字元。"""
+        return json.loads(log.after_value or "{}")
+
+    async def test_無關鍵字的查詢寫一筆讀取稽核(self, client, db) -> None:
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"course_id": f["b"]}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+
+        logs = await self._query_logs(db)
+        assert len(logs) == 1
+        assert logs[0].created_user == f["own"], "操作者存在 CREATED_USER，本表無 operator_id 欄"
+        assert logs[0].result == "SUCCESS"
+
+    async def test_稽核內容不含關鍵字與姓名(self, client, db) -> None:
+        """🔴 ⛔ 這條擋的是「順手把查詢條件整包塞進 after_value」。
+
+        關鍵字是姓名或 Email，而稽核表的保存期比業務資料長——寫進去等於擴大暴露面，
+        而不是補上追蹤。本條以 fixture 裡**真實存在的姓名**做斷言，確保不是空比對。
+        """
+        f = await _fixture(db)
+        await client.post(_QUERY, json={"course_id": f["b"]}, headers=_bearer(f["own"]))
+
+        logs = await self._query_logs(db)
+        dumped = f"{logs[0].description}|{logs[0].after_value}|{logs[0].before_value}|{logs[0].target_id}"
+        for pii in ("林佳蓉", "王大明", "s_lin", "@edms.local"):
+            assert pii not in dumped, f"稽核不得含個資：{pii}"
+
+    async def test_稽核記得下查詢條件與回傳筆數(self, client, db) -> None:
+        """成對的正向錨點——少了它，「什麼都不記」也會讓上一條通過。"""
+        f = await _fixture(db)
+        await client.post(_QUERY, json={"course_id": f["b"]}, headers=_bearer(f["own"]))
+
+        after = self._after((await self._query_logs(db))[0])
+        assert after["course_id"] == f["b"]
+        assert after["row_count"] == 1
+        assert after["has_keyword"] is False
+
+    async def test_有關鍵字的查詢不寫稽核(self, client, db) -> None:
+        """⚠️ 與上面三條成對：少了這條，「每次查詢都寫」也會讓它們全部通過。"""
+        f = await _fixture(db)
+        r = await client.post(_QUERY, json={"keyword": "林"}, headers=_bearer(f["own"]))
+        assert r.status_code == 200, r.text
+        assert r.json()["meta"]["total"] == 4, "錨點：這次查詢確實有回東西"
+
+        assert await self._query_logs(db) == []
+
+    async def test_完全留白的查詢也寫稽核(self, client, db) -> None:
+        """留白是裁示 3 新開的路徑，也是最該留痕的一種。"""
+        f = await _fixture(db)
+        await client.post(_QUERY, json={}, headers=_bearer(f["admin"]))
+
+        logs = await self._query_logs(db)
+        assert len(logs) == 1
+        assert self._after(logs[0])["course_id"] is None
+        assert self._after(logs[0])["row_count"] == 5
+
+    async def test_只篩結果的查詢也寫稽核(self, client, db) -> None:
+        f = await _fixture(db)
+        await client.post(_QUERY, json={"result": "FAIL"}, headers=_bearer(f["admin"]))
+
+        logs = await self._query_logs(db)
+        assert len(logs) == 1
+        assert self._after(logs[0])["result"] == "FAIL"
 
 
 class TestStudentSelfView:
