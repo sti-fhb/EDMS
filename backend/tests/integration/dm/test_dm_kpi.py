@@ -413,3 +413,90 @@ async def test_should_see_母體依配對計算_不含其他單位同職位(db, 
     assert resp.status_code == 200
     item = next(d for d in resp.json()["data"] if d["doc_id"] == "DM-SOP-000600")
     assert item["should_see"] == 1  # 只有軍醫局的護理師；三總的護理師不算
+
+
+# ── #567：逐組明細 / 訓練教材分區 / 統計卡分母 ───────────
+
+
+async def test_逐組明細隨清單回傳(db, client):
+    """一份文件掛兩組 → `data[].groups` 逐組給完成度（#567 A）。
+
+    ⚠️ 文件總計去重、逐組各自計算，故此處 2 + 1 = 3 恰等於總計僅因無人身兼兩職；
+    身兼兩職之案例由 `tests/unit/dm/test_dm_kpi_audience_groups.py` 釘住。
+    """
+    await _seed_admin(db)
+    for uid, role in (("n1", "護理師"), ("n2", "護理師"), ("t1", "醫檢師")):
+        await _seed_user(db, uid, uid)
+        await _grant(db, uid, DM_VIEWER)
+        await _grant_audience(db, uid, role)
+    v = await _doc(db, "DM-SOP-000120")
+    await _tag_doc(db, "DM-SOP-000120", "護理師")
+    await _tag_doc(db, "DM-SOP-000120", "醫檢師")
+    await _read(db, "DM-SOP-000120", v, "n1")
+
+    body = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()
+    doc = next(d for d in body["data"] if d["doc_id"] == "DM-SOP-000120")
+    groups = {g["label"]: g for g in doc["groups"]}
+    assert (groups["護理師"]["should_see"], groups["護理師"]["seen"]) == (2, 1)
+    assert (groups["醫檢師"]["should_see"], groups["醫檢師"]["seen"]) == (1, 0)
+    assert groups["醫檢師"]["rate"] == 0.0
+    assert doc["should_see"] == 3
+
+
+async def test_rated_docs_只計可算閱讀率之文件(db, client):
+    """`below_50_count` 的分母是 `rated_docs` 而非 `total_docs`（#567 C）。"""
+    await _seed_admin(db)
+    await _seed_user(db, "n1", "n1")
+    await _grant(db, "n1", DM_VIEWER)
+    await _grant_audience(db, "n1", "護理師")
+    await _doc(db, "DM-SOP-000121")
+    await _tag_doc(db, "DM-SOP-000121", "護理師")  # 應看 1 → 可計算
+    await _doc(db, "DM-SOP-000122")
+    await _tag_doc(db, "DM-SOP-000122", "軍人")  # 無軍人閱覽者 → 應看 0、不可計算
+
+    s = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()["summary"]
+    assert s["total_docs"] == 2
+    assert s["rated_docs"] == 1
+
+
+async def test_training_不入統計清單_另成訓練教材區(db, client):
+    """訓練教材移出統計母體、另成一區且**不帶任何統計欄位**（#567 B）。"""
+    await _seed_admin(db)
+    await _doc(db, "DM-SOP-000123", doc_name="領血SOP", category="SOP")
+    await _doc(db, "DM-TRAINING-000902", doc_name="基礎輸血學", category="TRAINING")
+    await _tag_doc(db, "DM-TRAINING-000902", "護理師")  # 既有教材帶可見對象之形狀（#377 之前）
+
+    body = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()
+    assert [d["doc_id"] for d in body["data"]] == ["DM-SOP-000123"]
+    assert body["summary"]["total_docs"] == 1
+    assert [t["doc_id"] for t in body["training_docs"]] == ["DM-TRAINING-000902"]
+    assert body["training_total"] == 1
+    # 該區給了統計數字就是給出保證低報的值，故逐欄釘死
+    assert set(body["training_docs"][0]) == {"doc_id", "doc_name", "category_name", "current_version_no"}
+
+
+async def test_csv_不含訓練教材(db, client):
+    await _seed_admin(db)
+    await _doc(db, "DM-SOP-000124", doc_name="領血SOP", category="SOP")
+    await _doc(db, "DM-TRAINING-000903", doc_name="基礎輸血學", category="TRAINING")
+
+    text = (await client.get("/api/dm/kpi/documents/export", headers=_headers("adm"))).content.decode("utf-8-sig")
+    assert "DM-SOP-000124" in text
+    assert "DM-TRAINING-000903" not in text
+
+
+async def test_訓練教材超過上限時_清單被裁而總數仍為真實值(db, client, monkeypatch):
+    """上限只縮清單，`training_total` 必須仍是真實筆數（否則管理者不知道還有東西沒看到）。
+
+    ⚠️ 上限落在 SQL（`list_published_docs(limit=...)`），總數另走 `count_published_docs`。
+    若有人改回「全撈再切片」，本條仍會過——它守的是對外契約，不是查詢形狀；查詢形狀
+    由 `service._TRAINING_LIST_LIMIT` 的註解與 repository 的 docstring 說明。
+    """
+    monkeypatch.setattr("app.dm.kpi.service._TRAINING_LIST_LIMIT", 2)
+    await _seed_admin(db)
+    for n in range(3):
+        await _doc(db, f"DM-TRAINING-00091{n}", doc_name=f"教材{n}", category="TRAINING")
+
+    body = (await client.get("/api/dm/kpi/documents", headers=_headers("adm"))).json()
+    assert len(body["training_docs"]) == 2
+    assert body["training_total"] == 3

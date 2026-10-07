@@ -11,7 +11,7 @@
 
 from collections.abc import Iterable
 
-from sqlalchemy import Row, Select, select
+from sqlalchemy import Row, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -34,17 +34,49 @@ _PENDING_OBSOLETE = "PENDING_OBSOLETE"
 # PENDING_OBSOLETE 文件仍可被下載並寫入 DM_DOC_READ（見 detail.write_read），故其閱讀落實度應納入 KPI。
 # OBSOLETE（已下架）/ 送審 / 草稿 / SUPERSEDED（舊版）不計。
 _LIVE_STATUSES = (_PUBLISHED, _PENDING_OBSOLETE)
+_TRAINING = "TRAINING"
+
+
+def audience_label(unit_name: str, role_name: str) -> str:
+    """可見對象組名（#567 A）：通用值不入名稱。
+
+    「全體」（全系統）／職位名（不限單位）／「單位．職位」。分隔用全形句點以免與單位名
+    本身的連字號混淆——實測最長單位名 18 字（「國防醫學院三軍總醫院松山分院捐血站」）。
+    """
+    unit_general = unit_name == _ALL_UNITS_TAG
+    role_general = role_name == _ALL_AUDIENCE_TAG
+    if unit_general and role_general:
+        return _ALL_AUDIENCE_TAG
+    if unit_general:
+        return role_name
+    if role_general:
+        return f"{unit_name}．{_ALL_AUDIENCE_TAG}"
+    return f"{unit_name}．{role_name}"
 
 
 class KpiRepository:
     """KPI 計算所需之集合式唯讀查詢。"""
 
-    def published_docs_select(self, *, keyword: str | None, category: str | None) -> Select:
+    def published_docs_select(
+        self, *, keyword: str | None, category: str | None, only_training: bool = False
+    ) -> Select:
         """在架文件（母體：STATUS ∈ PUBLISHED / PENDING_OBSOLETE 且有目前發布版）+ 分類名 / 版本號。
 
         依文件名排序（穩定、可預期）；keyword 比對文件名、category 比對分類碼。
+
+        `only_training` 切出兩個互斥母體（#567 B）：預設排除 TRAINING（閱讀統計母體），
+        `True` 則只取 TRAINING（訓練教材區，不計閱讀率）。
+
+        ⚠️ **按分類切，不是按「有沒有可見對象」切。** 理由是 ET 代學員取檔刻意不寫
+        `DM_DOC_READ`（`app/et/common/dm_client.py` D-2），所以 TRAINING 的閱讀率在結構上
+        保證低報——這與該文件當下有沒有掛可見對象無關。用「無可見對象」當判準會把一個
+        結構性事實綁在可變的資料狀態上，且漏掉 #377 之前建立、仍帶著可見對象的既有教材。
         """
-        conds = [DmDocument.status.in_(_LIVE_STATUSES), DmDocument.current_version_id.isnot(None)]
+        conds = [
+            DmDocument.status.in_(_LIVE_STATUSES),
+            DmDocument.current_version_id.isnot(None),
+            DmDocument.category_code == _TRAINING if only_training else DmDocument.category_code != _TRAINING,
+        ]
         if keyword:
             conds.append(DmDocument.doc_name.ilike(contains(keyword), escape=LIKE_ESCAPE_CHAR))
         if category:
@@ -65,8 +97,27 @@ class KpiRepository:
             .order_by(DmDocument.doc_name.asc(), DmDocument.doc_id.asc())
         )
 
-    async def list_published_docs(self, db: AsyncSession, *, keyword: str | None, category: str | None) -> list[Row]:
-        return list((await db.execute(self.published_docs_select(keyword=keyword, category=category))).all())
+    async def list_published_docs(
+        self,
+        db: AsyncSession,
+        *,
+        keyword: str | None,
+        category: str | None,
+        only_training: bool = False,
+        limit: int | None = None,
+    ) -> list[Row]:
+        """符合條件之在架文件列；`limit` 落在 **SQL** 而非回傳後裁切。"""
+        stmt = self.published_docs_select(keyword=keyword, category=category, only_training=only_training)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list((await db.execute(stmt)).all())
+
+    async def count_published_docs(
+        self, db: AsyncSession, *, keyword: str | None, category: str | None, only_training: bool = False
+    ) -> int:
+        """符合條件之在架文件數——**不取列**，供有上限的清單在不全撈的情況下報出真實總數。"""
+        stmt = self.published_docs_select(keyword=keyword, category=category, only_training=only_training)
+        return await db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
 
     async def viewer_ids(self, db: AsyncSession) -> set[str]:
         """具 DM_VIEWER 角色且帳號有效（未刪除、未停用）之使用者集（應看母體）。
@@ -128,12 +179,16 @@ class KpiRepository:
 
     async def doc_audience(
         self, db: AsyncSession, doc_ids: Iterable[str]
-    ) -> dict[str, set[tuple[int | None, int | None]]]:
-        """各文件之有效可見對象 (單位, 職位) 配對集。
+    ) -> dict[str, dict[tuple[int | None, int | None], str]]:
+        """各文件之有效可見對象 (單位, 職位) 配對 → **組名**。
 
         **通用值一律正規化為 `None`**（單位「全單位」／職位「全體」），使比對端只需判斷 `is None`
         而不必再查那兩個標籤的 ID：`(None, None)` 即全系統可見。配對不完整者（`UNIT_TAG_ID IS NULL`）
         **略過**——其於 `visibility.audience_pair_match` 不賦予任何可見性，計入會灌大應看母體。
+
+        回傳 `dict` 而非 `set`（#567 A）：值為顯示用組名，供 DM06 呈現逐組完成度。**迭代 dict
+        取得的即配對本身**，故 `service._pair_member_resolver` 的比對不受影響。名稱在原查詢中本就取出，
+        先前只用來判斷是不是通用值、取完即丟。
         """
         ids = list(doc_ids)
         if not ids:
@@ -150,11 +205,11 @@ class KpiRepository:
                 unit_tag.tag_group_code == _UNIT_GROUP,
             )
         )
-        result: dict[str, set[tuple[int | None, int | None]]] = {}
+        result: dict[str, dict[tuple[int | None, int | None], str]] = {}
         for doc_id, tag_id, tag_name, unit_tag_id, unit_name in rows.all():
             unit = None if unit_name == _ALL_UNITS_TAG else unit_tag_id
             role = None if tag_name == _ALL_AUDIENCE_TAG else tag_id
-            result.setdefault(doc_id, set()).add((unit, role))
+            result.setdefault(doc_id, {})[(unit, role)] = audience_label(unit_name, tag_name)
         return result
 
     async def reads_current(self, db: AsyncSession, doc_ids: Iterable[str]) -> dict[str, set[str]]:

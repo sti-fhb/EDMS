@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -28,9 +28,47 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     // 統計卡：整體平均閱讀率 + 低於 50% 文件數（旁附總文件數）
     expect(screen.getByText("整體平均閱讀率")).toBeInTheDocument()
     expect(screen.getByText("閱讀率低於 50% 之文件數")).toBeInTheDocument()
-    expect(screen.getByText("／ 共 2 份文件")).toBeInTheDocument()
+    // 分母是 rated_docs（1）而非 total_docs（2）：分子只計可算閱讀率者，母體必須相同（#567 C）。
+    // 本行原本斷言「／ 共 2 份文件」——那個值把應看=0 的文件也放進分母，與分子母體不符。
+    expect(screen.getByText("／ 共 1 份可計算文件")).toBeInTheDocument()
     // 應看=0 文件 → 顯示「—（無對應閱覽者）」
     expect(screen.getByText("—（無對應閱覽者）")).toBeInTheDocument()
+  })
+
+  it("展開文件 → 逐可見對象組明細，且說明分組加總大於文件總計", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmKpiPage />)
+    await screen.findByText("領血確認標準作業程序")
+    // 收合時與加此功能之前完全相同：組名不出現
+    expect(screen.queryByText("醫檢師")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "展開 領血確認標準作業程序 的可見對象" }))
+
+    // 正向錨點：展開後兩組都在（與上面的否定式用同一種查詢，避免文案改動時只有正向會紅）
+    expect(await screen.findByText("醫檢師")).toBeInTheDocument()
+    expect(screen.getByText("國防醫學院三軍總醫院松山分院．護理師")).toBeInTheDocument()
+    // fixture 刻意讓兩組重疊（6 + 5 = 11 > 應看 10）。這句話不是裝飾：缺了它，
+    // 看的人會把對不起來的兩個數字判定成算錯。
+    expect(
+      screen.getByText(
+        "各組獨立計算：一人身兼多組時每組分母都含他，故分組「應看」加總（11）可能大於本文件應看（10，已去重）。",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("訓練教材另成一區，且該區不含任何閱讀統計欄位", async () => {
+    renderWithProviders(<DmKpiPage />)
+    expect(await screen.findByText("訓練教材（共 1 份）")).toBeInTheDocument()
+    expect(screen.getByText("基礎輸血學")).toBeInTheDocument()
+    expect(screen.getByText(/閱讀由教育訓練模組追蹤/)).toBeInTheDocument()
+
+    // 以「該區的欄位正好是這三個」正向證明沒有統計欄，而非斷言某個字串不存在
+    // （後者在主表也有「應看」欄的情況下無法區分，且找不到時恆真）
+    const section = screen.getByText("訓練教材（共 1 份）").closest(".MuiPaper-root") as HTMLElement
+    const headers = within(section)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent)
+    expect(headers).toEqual(["文件", "分類", "目前版本"])
   })
 
   it("分類下拉取自後端：後台新增的分類也列得出來", async () => {
