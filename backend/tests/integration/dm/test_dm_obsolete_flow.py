@@ -355,10 +355,14 @@ async def test_approve_obsolete_transits_document_obsolete(db):
     assert await _email_count(db, "OBS_APPROVE", "ed@e.com") == 0
 
     # ⭐ 申請人於「我的文件動態」見此事件（前端把 OBSOLETE + APPROVED 標為「已廢止」）
+    # ⚠️ **必須指定 event_kind=="resolved"**：submitted 與 resolved 兩種事件都帶
+    # `status=r.status`（送審紀錄的**目前**狀態），所以一筆已結案紀錄會產生兩個同 status 的
+    # 事件。只比對 status 的話，resolved 那半整個壞掉（complete_date 沒寫、_TERMINAL 漏列）
+    # 仍會通過——而被 Email 取代的正是「結果」這一半。
     act = await _psvc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
-    assert any(a.review_id == review_id and a.status == "APPROVED" for a in act.author), (
-        "廢止核准後申請人應於我的文件動態看到此事件"
-    )
+    assert any(
+        a.review_id == review_id and a.event_kind == "resolved" and a.status == "APPROVED" for a in act.author
+    ), "廢止核准後申請人應於我的文件動態看到此事件"
 
 
 async def test_reject_obsolete_restores_published(db):
@@ -377,10 +381,14 @@ async def test_reject_obsolete_restores_published(db):
     assert await _email_count(db, "OBS_REJECT", "ed@e.com") == 0
 
     # ⭐ 申請人於「我的文件動態」見此事件（OBSOLETE + REJECTED → 標籤「已退回」）
+    # ⚠️ **必須指定 event_kind=="resolved"**：submitted 與 resolved 兩種事件都帶
+    # `status=r.status`（送審紀錄的**目前**狀態），所以一筆已結案紀錄會產生兩個同 status 的
+    # 事件。只比對 status 的話，resolved 那半整個壞掉（complete_date 沒寫、_TERMINAL 漏列）
+    # 仍會通過——而被 Email 取代的正是「結果」這一半。
     act = await _psvc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
-    assert any(a.review_id == review_id and a.status == "REJECTED" for a in act.author), (
-        "廢止退回後申請人應於我的文件動態看到此事件"
-    )
+    assert any(
+        a.review_id == review_id and a.event_kind == "resolved" and a.status == "REJECTED" for a in act.author
+    ), "廢止退回後申請人應於我的文件動態看到此事件"
 
 
 # ── 廢止附件下載授權（SA 裁示 Q1=C）──────────────────────

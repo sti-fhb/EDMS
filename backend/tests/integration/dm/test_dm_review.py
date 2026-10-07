@@ -259,6 +259,14 @@ async def test_approve_first_version_publishes(db):
     # #554：本 fixture 未種任何閱覽者，而撰寫者已不再被強制加入收件名單 → 0 封。
     # 「閱覽者仍收得到」由下方 test_recipients_* 三條各自驗證（含單位 + 職位配對）。
     assert res.notified == 0
+
+    # ⭐ 撰寫者那封信去哪了：於「我的文件動態」（撰寫者視角）見**結果**事件，
+    # 前端把 resolved + APPROVED（非廢止）映射為標籤「核准發布」。
+    # 只斷言 notified == 0 的話，等於只驗了「拿掉了什麼」、沒驗「什麼接住了它」。
+    act = await PersonalService().list_activity(db, user_id="ed", roles=[DM_EDITOR])
+    assert any(
+        a.review_id == r.review_id and a.event_kind == "resolved" and a.status == "APPROVED" for a in act.author
+    ), "核准發布後撰寫者應於我的文件動態看到結果事件"
     doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000320"))
     v = await db.scalar(select(DmDocVersion).where(DmDocVersion.version_id == v.version_id))
     assert doc.status == "PUBLISHED" and doc.current_version_id == v.version_id
@@ -339,10 +347,14 @@ async def test_reject_first_version_doc_to_draft(db):
 
     # ⭐ 那封信去哪了：撰寫者於「我的文件動態」（撰寫者視角）見此退回事件。
     # 前端把 resolved + REJECTED 映射為標籤「已退回」（dm/personal/schemas.ts）。
+    # ⚠️ **必須指定 event_kind=="resolved"**：submitted 與 resolved 兩種事件都帶
+    # `status=r.status`（送審紀錄的**目前**狀態），所以一筆已結案紀錄會產生兩個同 status 的
+    # 事件。只比對 status 的話，resolved 那半整個壞掉（complete_date 沒寫、_TERMINAL 漏列）
+    # 仍會通過——而被 Email 取代的正是「結果」這一半。
     act = await PersonalService().list_activity(db, user_id="ed", roles=[DM_EDITOR])
-    assert any(a.review_id == r.review_id and a.status == "REJECTED" for a in act.author), (
-        "退回後撰寫者應於我的文件動態看到此事件"
-    )
+    assert any(
+        a.review_id == r.review_id and a.event_kind == "resolved" and a.status == "REJECTED" for a in act.author
+    ), "退回後撰寫者應於我的文件動態看到**結果**事件"
 
 
 async def test_reject_new_version_keeps_doc_published(db):
