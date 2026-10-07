@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query"
 
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
-import { useModuleSummary } from "../../layouts/useModuleSummary"
 import { coursesApi } from "../courses/coursesService"
 import { StudentApprovalList } from "./StudentApprovalList"
 import { TeacherApprovalQuery } from "./TeacherApprovalQuery"
@@ -35,27 +34,23 @@ export function EtApprovalQueryPage() {
     queryKey: QUERY_KEYS.etCourses.capabilities(),
     queryFn: coursesApi.getCapabilities,
   })
-  // ⚠️ 管理者身分**不能從 `capabilities` 推**：`can_create_course` 是「具教師角色」，
-  // 同時具教師與管理者身分的人它也是 true，`!can_create_course` 會把他誤判成非管理者
-  // 而顯示一句不適用的範圍提示。`module-summary` 的 `et.is_admin` 與後端
-  // `authz.is_admin()` 同源，是唯一正確的來源。
+
+  // ↔️ 這裡原本還查一支 `module-summary` 取 `et.is_admin`，傳給 `TeacherApprovalQuery`
+  // 決定要不要顯示範圍提示。**#548 裁示 1 統一可見範圍後，教師與管理者的畫面完全相同**，
+  // 那支查詢與整段「兩支都要等、否則管理者會閃現一句不適用的提示」的 race 一併消失。
   //
-  // 🔴 **兩支查詢都要等**：只等 `capabilities` 的話，整頁重新載入時它可能先回來，
-  // 此時 `summary` 仍是 undefined → `isAdmin` 退回 false → 管理者會**短暫看到**
-  // 「僅顯示您所開設的課程」這句對他不適用的提示。它會自我修正，但那句話是裁示 C 的
-  // 強制配套（見 `TeacherApprovalQuery` docstring）——一句被當成規格的提示，
-  // 閃現錯誤版本與顯示錯誤版本同樣不可接受。
-  const { data: summary, isPending: summaryPending } = useModuleSummary()
+  // ⛔ 剩下的 `capabilities` 查詢**不可一併拿掉**：它決定的是學員 vs 教師兩種**不同的
+  // 元件與端點**，不是同一畫面的細節。
 
   return (
     <Box>
       <ScreenHeader code="ET04" />
-      {isPending || summaryPending ? (
+      {isPending ? (
         <Typography variant="body2" color="text.secondary">
           載入中…
         </Typography>
       ) : capabilities?.can_manage_courses ? (
-        <TeacherApprovalQuery isAdmin={summary?.et.is_admin ?? false} />
+        <TeacherApprovalQuery />
       ) : (
         <StudentApprovalList />
       )}

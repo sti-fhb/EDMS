@@ -454,12 +454,12 @@ class TestVisibility:
         rows = _rows(await client.post(_QUERY, json={"keyword": "跨課"}, headers=_bearer(me)))
         assert _pairs(rows) == {("跨課", "別人的自學課")}
 
-    async def test_教師不能借他人的不需核可課程撈出完課名單(self, client, db) -> None:
-        """🔴 #439 的擁有權閘（`ensure_course_filter_allowed`）對**完課側**必須同樣成立。
+    async def test_教師可依他人的不需核可課程查出完課名單(self, client, db) -> None:
+        """↔️ #548 裁示 4 之前，這條斷言的是 403 `ET_APPROVAL_007`。
 
-        #439 的測試以需核可課程造資料，結構上涵蓋但沒有直接斷言這一側。而完課側正是
-        #464 新增的母體——少了這道閘，教師可用 `{course_id: 別人的自學課}` 一次取回該課
-        全部完成者的名單，不需要知道任何名字。
+        完課側是 #464 新增的母體，當時一併套了 #439 的擁有權閘。閘退役後，完課側
+        也要跟著開放——**兩側不得有不同的範圍規則**，否則同一次查詢會依課程是否需要
+        核可而給出不同的可見範圍，而畫面上看不出那條界線在哪。
         """
         me = await _user(db, "TC_TN1")
         other = await _user(db, "TC_TN2")
@@ -470,18 +470,23 @@ class TestVisibility:
         await _finish(db, s, cid, items)
 
         r = await client.post(_QUERY, json={"course_id": cid}, headers=_bearer(me))
-        assert r.status_code == 403, r.text
-        assert r.json()["error_code"] == "ET_APPROVAL_007"
+        assert r.status_code == 200, r.text
+        assert {row["course_name"] for row in r.json()["data"]} == {"別人的自學課"}
 
-    async def test_既有分流未被改動_他人課程的不通過仍不可見(self, client, db) -> None:
-        """回歸護欄：加了完課側之後，裁示 C 對核可列的分流必須照舊。"""
+    async def test_他人課程的不通過對教師可見(self, client, db) -> None:
+        """↔️ 原名「既有分流未被改動」，斷言的是空清單（裁示 C 的結果分流）。
+
+        #548 裁示 1 統一可見範圍後，同一筆應該查得到。⚠️ 它的**備註**仍被遮蔽，
+        那一半由 `test_et_approval_query.py::TestResultNoteRedaction` 守。
+        """
         me = await _user(db, "TC_TF1")
         other = await _user(db, "TC_TF2")
         s = await _user(db, "TC_SF", roles=(ROLE_STUDENT,), name="分流")
         cid = await _course(db, owner=other, name="別人的需核可課", require_approval=True)
         await _approve(db, course_id=cid, user_id=s, result=APPROVAL_FAIL, by=other)
 
-        assert _rows(await client.post(_QUERY, json={"keyword": "分流"}, headers=_bearer(me))) == []
+        rows = _rows(await client.post(_QUERY, json={"keyword": "分流"}, headers=_bearer(me)))
+        assert [row["course_name"] for row in rows] == ["別人的需核可課"]
 
 
 class TestStudentSelfView:
@@ -543,8 +548,12 @@ class TestFilterCourseOptions:
         r = await client.get(_FILTER, headers=_bearer(t))
         assert "沒人完課" not in {o["course_name"] for o in r.json()}
 
-    async def test_教師下拉仍只含自己的課(self, client, db) -> None:
-        """#439 的擁有權限制對完課側同樣成立。"""
+    async def test_教師下拉含他人的不需核可課(self, client, db) -> None:
+        """↔️ 原本斷言 `not in`（#439 的擁有權限制對完課側同樣成立）。
+
+        裁示 4 之後下拉不分 owner——⚠️ 下拉與查詢的母體必須一致，否則會出現
+        「這門課查得到卻選不到」這種無法解釋的狀態。
+        """
         me = await _user(db, "TC_TL1")
         other = await _user(db, "TC_TL2")
         s = await _user(db, "TC_SL", roles=(ROLE_STUDENT,))
@@ -554,7 +563,7 @@ class TestFilterCourseOptions:
         await _finish(db, s, cid, items)
 
         r = await client.get(_FILTER, headers=_bearer(me))
-        assert "別人自學" not in {o["course_name"] for o in r.json()}
+        assert "別人自學" in {o["course_name"] for o in r.json()}
 
     async def test_管理者下拉含全部(self, client, db) -> None:
         t = await _user(db, "TC_TM")

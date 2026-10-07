@@ -156,17 +156,19 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     expect(within(row).getByText(/李管理員/)).toBeInTheDocument()
   })
 
-  it("🔴 教師視角常駐範圍提示——那是 SA 裁示 C 的配套，不是可選的 UX 潤飾", async () => {
-    // 少了它，教師看到某門課沒出現時分不清是「還沒考」還是「考了沒過」。
-    // 裁示 C 讓同一張表裡混了兩種範圍，提示是唯一讓教師知道這件事的地方。
+  it("🔴 教師不得再看到任何可見範圍提示——裁示 C 已被推翻", async () => {
+    // ↔️ 原本斷言「必須常駐顯示『不通過與已撤銷…僅顯示您所開設的課程』」，那是裁示 C
+    // 的強制配套。#548 裁示 1 統一可見範圍後，那句話**變成錯的**：教師看得到的與管理者
+    // 完全相同，留著它會讓人以為自己漏看了什麼。
+    //
+    // ⚠️ 本條是「不該出現」的斷言，所以**必須配一個正向錨點**（下一行的 findByLabelText）
+    // 證明畫面真的渲染出來了——否則元件整個壞掉、什麼都沒有時它也會通過。
     asRole("teacher")
     renderWithProviders(<EtApprovalQueryPage />)
 
-    const hint = await screen.findByText(/僅顯示您所開設的課程/)
-    expect(hint).toBeInTheDocument()
-    // SA 2026-09-21 追加裁示：他人課程的考核備註也被遮蔽，提示必須一併涵蓋——
-    // 否則教師看到通過卻沒備註時會以為核可人沒寫，而不是被遮蔽了。
-    expect(hint).toHaveTextContent("考核備註")
+    await screen.findByLabelText("學員姓名或 Email")
+    expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/考核備註/)).not.toBeInTheDocument()
   })
 
   it("查無資料顯示空狀態提示（ET-MSG-ET04-001）", async () => {
@@ -178,10 +180,9 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     await user.type(await screen.findByLabelText("學員姓名或 Email"), "查無此人")
 
     expect(await screen.findByText(/查無符合條件的紀錄/)).toBeInTheDocument()
-    // 🔴 教師必須被告知「可能不在您的可見範圍內」：本頁用於「排班前確認某人受訓完整
-    // 與否」，而「查無」會被讀成「這個人沒受過訓」——那是方向最危險的假陰性，且
-    // 可見範圍分流（SA Q1 裁示 C）讓它在正式使用時一定會發生。
-    expect(screen.getByText(/可能是該紀錄不在您的可見範圍內/)).toBeInTheDocument()
+    // ↔️ 原本還斷言教師會看到「可能是該紀錄不在您的可見範圍內——請洽管理者查詢」。
+    // 可見範圍統一後那句不再成立，說它會把人引去做一件沒有用的事。
+    expect(screen.queryByText(/可能是該紀錄不在您的可見範圍內/)).not.toBeInTheDocument()
   })
 
   it("管理者的空狀態不提可見範圍（他沒有範圍限制，那句話對他是錯的）（#436）", async () => {
@@ -265,7 +266,87 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
    *
    * ⛔ 刪掉任何一半，那件事從此沒有測試。
    */
-  it("關鍵字與課程皆未給時不送出請求（#439，原 SA Q2 裁示 A）", async () => {
+  it("🔴 已撤銷的列在核可結果欄不得顯示綠色「通過」（#548 裁示 6）", async () => {
+    // 撤銷只設 `IS_REVOKED`，`RESULT` 仍是 `PASS`。改制前這一格只看 `result`，於是
+    // 一筆已撤銷的通過在「核可結果」欄是綠色的「通過」，只有最右的「狀態」欄才寫
+    // 已撤銷——整列雖有淡化，一眼掃過去讀到的就是通過。
+    asRole("teacher")
+    server.use(
+      http.post("/api/et/approvals/search", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "s_rv",
+              user_name: "林撤銷",
+              course_id: 31,
+              course_name: "已撤銷的課",
+              result: "PASS",
+              result_note: null,
+              approved_at: "2026-09-30T02:00:00Z",
+              approved_by_name: "王主任",
+              is_revoked: true,
+              revoke_reason: "核可對象誤植",
+              revoked_by_name: "李管理員",
+              revoked_at: "2026-10-01T02:00:00Z",
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    const row = (await screen.findByText("已撤銷的課")).closest("tr")!
+    // 🔴 **「不該出現」配一個用同一查詢方式的「該出現」**——少了正向那半，整列沒渲染
+    // 出來時這條也會通過。
+    expect(within(row).getByText("已撤銷（原通過）")).toBeInTheDocument()
+    expect(within(row).queryByText("通過")).not.toBeInTheDocument()
+  })
+
+  it("結果篩選的四態各自送出正確的參數對（#548 裁示 6）", async () => {
+    // ⛔ 釘住「`result` 與 `revoked` 是兩個參數」。把它們壓成一個正是改制前那個缺陷的
+    // 成因：「僅通過」只送 `result=PASS`、沒有撤銷條件，於是列出已撤銷的通過。
+    asRole("teacher")
+    const bodies: { result?: string; revoked?: boolean }[] = []
+    server.use(
+      http.post("/api/et/approvals/search", async ({ request }) => {
+        bodies.push((await request.json()) as { result?: string; revoked?: boolean })
+        return HttpResponse.json(EMPTY)
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    await screen.findByLabelText("學員姓名或 Email")
+    await waitFor(() => expect(bodies.length).toBe(1))
+
+    for (const label of ["僅通過", "僅不通過", "僅已撤銷"]) {
+      const before = bodies.length
+      await user.click(screen.getByLabelText("核可結果"))
+      await user.click(await screen.findByRole("option", { name: label }))
+      // ⚠️ 必須等**長度增加**而不是 `at(-1)` 有值——後者在第一次之後恆為 true，
+      // 等於沒等，而下一圈的點擊會在前一次請求還沒送出時就發生。
+      await waitFor(() => expect(bodies.length).toBeGreaterThan(before))
+    }
+
+    // 初次載入的「全部結果」在最前。
+    // ⚠️ 不可用 `toMatchObject({ result: undefined })`——JSON 序列化會把值為 undefined
+    // 的鍵整個丟掉，而 `toMatchObject` 要求鍵存在，於是那樣寫必定失敗（且看起來像
+    // 實作錯了）。「不篩」的正確表徵就是**鍵不存在**。
+    expect(bodies[0].result).toBeUndefined()
+    expect(bodies[0].revoked).toBeUndefined()
+    expect(bodies.some((b) => b.result === "PASS" && b.revoked === false)).toBe(true)
+    expect(bodies.some((b) => b.result === "FAIL" && b.revoked === false)).toBe(true)
+    expect(bodies.some((b) => b.result === undefined && b.revoked === true)).toBe(true)
+  })
+
+  it("↔️ 不給任何條件也會送出請求並列出全部（#548 裁示 3）", async () => {
+    // 原本這裡斷言「不送出」，空白畫面顯示「輸入學員姓名或 Email，或選擇課程即可查詢。」
+    //
+    // 那道閘（#468）擋的不是能力而是「不小心看到全院名單」，但它與使用者的需求直接
+    // 衝突——「全部課程」與「全部結果」都是**不篩這個維度**的意思，兩者都是下拉預設值，
+    // 分不出「刻意選了不篩」與「沒動過」。而它的理由（無法偵測誤用）已由裁示 5 的
+    // 讀取稽核補上：不指名的查詢會寫 `DP_AUDIT_LOG`（`ACTION_TYPE=QUERY`）。
     asRole("teacher")
     let called = false
     server.use(
@@ -276,10 +357,9 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     )
     renderWithProviders(<EtApprovalQueryPage />)
 
-    // 等頁面真的掛好（否則「沒發請求」可能只是還沒渲染）
     await screen.findByLabelText("學員姓名或 Email")
-    expect(screen.getByText("輸入學員姓名或 Email，或選擇課程即可查詢。")).toBeInTheDocument()
-    expect(called).toBe(false)
+    await waitFor(() => expect(called).toBe(true))
+    expect(screen.queryByText("輸入學員姓名或 Email，或選擇課程即可查詢。")).not.toBeInTheDocument()
   })
 
   /**
@@ -288,12 +368,17 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
    * 少了 `.trim()`，空白字串會被當成有效關鍵字，前端每打一個空格就發一次**必定 422**
    * 的請求，而畫面上只會看到結果沒出來，沒有任何東西會紅。
    */
-  it("只打空白且未選課程也視為未給", async () => {
+  it("只打空白仍視為未給關鍵字——送出的 keyword 必須是 undefined", async () => {
     asRole("teacher")
     let called = false
+    // ⚠️ 用物件包起來而不是裸 `let`：TS 看不穿 callback 內的賦值，會把 `lastBody`
+    // 收斂成 `never`，於是 `lastBody?.keyword` 在 `tsc -b` 下報 TS2339。
+    // 🔴 `pnpm tsc --noEmit` **不含測試檔**，只有 CI 用的 `tsc -b` 抓得到。
+    const captured: { body?: { keyword?: string } } = {}
     server.use(
-      http.post("/api/et/approvals/search", () => {
+      http.post("/api/et/approvals/search", async ({ request }) => {
         called = true
+        captured.body = (await request.json()) as { keyword?: string }
         return HttpResponse.json(EMPTY)
       }),
     )
@@ -304,8 +389,11 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
 
     // 等超過去抖動（350ms）才斷言——太早問等於還沒到送出的時機，那是假綠
     await new Promise((r) => setTimeout(r, 600))
-    expect(called).toBe(false)
-    expect(screen.getByText("輸入學員姓名或 Email，或選擇課程即可查詢。")).toBeInTheDocument()
+    // ↔️ 原本斷言 `called === false`。裁示 3 之後留白本來就會查，所以「有沒有送出」
+    // 已經分不出 trim 有沒有做。改為斷言**送出的內容**：`keyword` 必須是 undefined
+    // 而不是 `"   "`——後者會讓後端的比對變成 `%   %`，一筆都命中不到而畫面顯示查無。
+    expect(called).toBe(true)
+    expect(captured.body?.keyword).toBeUndefined()
   })
 
   it("查詢前不顯示空狀態——那會讓人以為已經查過且查無資料", async () => {
@@ -404,12 +492,14 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     expect(screen.queryByText(/尚無通過紀錄/)).not.toBeInTheDocument()
   })
 
-  it("教師沒有任何可選課程時說明原因，而不是給一個打得開卻空的下拉（#439）", async () => {
+  it("沒有任何可選課程時說明原因，而不是給一個打得開卻空的下拉（#439）", async () => {
     asRole("teacher")
     server.use(http.get("/api/et/approvals/filter-courses", () => HttpResponse.json([])))
     renderWithProviders(<EtApprovalQueryPage />)
 
-    expect(await screen.findByText("您開設的課程尚無通過紀錄")).toBeInTheDocument()
+    // ↔️ 原本是「您開設的課程尚無通過紀錄」。下拉不分 owner 之後（裁示 4），
+    // 對教師與管理者都只剩「系統中尚無通過紀錄」這一種成因。
+    expect(await screen.findByText("系統中尚無通過紀錄")).toBeInTheDocument()
   })
 
   it("管理者的空下拉不提「您開設的課程」——他沒有自己的課，那句話對他是錯的（#439）", async () => {

@@ -33,15 +33,22 @@ async def test_get_param_value_disabled_returns_none(db):
 
 
 async def test_get_param_list_sorted(db):
-    """清單型參數依 SORT_ORDER 排序回傳（ACTION_TYPE 6 筆）。
+    """清單型參數依 SORT_ORDER 排序回傳（ACTION_TYPE 7 筆）。
 
     本條**刻意**寫死完整種子內容：`ACTION_TYPE` 是程式碼寫死的 enum、不開放維護，
     內容變動必定伴隨程式碼變動（如 #477 補 `EXPORT` 時同步補了 router 的 `_Action` 值域）。
     種子改了而本條變紅，是提醒「確認兩邊都改了」，不是誤報。
+
+    ⭐ **它在 #548 又絆到一次並且做對了**：補 `QUERY` 時本條變紅，提醒回去確認
+    `_ACTION_LABELS` 與 `router._Action` 是否同步（是）。
+
+    ⚠️ 與 `test_dp_audit_action_type_coverage.py` **不重疊**，兩者守的方向相反：
+    那支比對「程式碼 vs DB 是否一致」（兩邊一起漏仍會綠），本條比對「DB vs 寫死的
+    期望值」（種子一動就紅）。缺任一支都會留下一個漏得掉的方向。
     """
     items = await ParamService().get_param_list(db, "ACTION_TYPE")
-    assert [i.key for i in items] == ["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE", "EXPORT"]
-    assert [i.sort_order for i in items] == [1, 2, 3, 4, 5, 6]
+    assert [i.key for i in items] == ["LOGIN", "LOGOUT", "CREATE", "UPDATE", "DELETE", "EXPORT", "QUERY"]
+    assert [i.sort_order for i in items] == [1, 2, 3, 4, 5, 6, 7]
     assert items[0].name == "登入"
     assert all(i.is_enabled for i in items)
 

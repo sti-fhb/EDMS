@@ -28,12 +28,30 @@ import { approvalsApi } from "./approvalsService"
 import { courseOptionsEmptyReason } from "./courseOptionsState"
 import type { ApprovalQueryRow } from "./schemas"
 
-/** 結果篩選的值域。`""` 代表不篩（wireframe 的「全部結果」）。 */
+/**
+ * 結果篩選的四態，以及各自對應的**兩個 API 參數**（#548 裁示 6）。
+ *
+ * 🔴 畫面是單一下拉，但 `result`（`ET_APPROVAL.RESULT`）與 `revoked`（`IS_REVOKED`）
+ * 是**正交的兩個維度**——被撤銷的紀錄其 `RESULT` 仍是 `PASS` 或 `FAIL`。
+ *
+ * ⛔ **不要把這張表壓成單一參數送給後端。** 改制前「僅通過」只送 `result=PASS`、
+ * 完全沒有撤銷條件，於是**選「僅通過」會列出已撤銷的通過**——那正是本次要修的缺陷，
+ * 成因就是兩個維度被當成一個。
+ *
+ * ⚠️「僅不通過」也帶 `revoked: false` 是刻意的：撤銷不檢查 `RESULT`，不通過的紀錄
+ * 也撤銷得了。既然「僅通過」排除已撤銷，這裡沒有理由不排除。
+ */
 const RESULT_OPTIONS = [
-  { value: "", label: "全部結果" },
-  { value: "PASS", label: "僅通過" },
-  { value: "FAIL", label: "僅不通過" },
-] as const
+  { value: "", label: "全部結果", result: undefined, revoked: undefined },
+  { value: "PASS", label: "僅通過", result: "PASS", revoked: false },
+  { value: "FAIL", label: "僅不通過", result: "FAIL", revoked: false },
+  { value: "REVOKED", label: "僅已撤銷", result: undefined, revoked: true },
+] as const satisfies readonly {
+  value: string
+  label: string
+  result?: "PASS" | "FAIL"
+  revoked?: boolean
+}[]
 
 /**
  * 教師 / 管理者視角——依學員**姓名或 Email** 與 / 或**課程**查**受訓完成狀況**（#464 起含
@@ -74,7 +92,7 @@ const RESULT_OPTIONS = [
  * 「查無符合條件的紀錄」只在**查過之後**出現。一進畫面就顯示它，會讓教師以為
  * 系統已經查過而且真的沒有資料。
  */
-export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
+export function TeacherApprovalQuery() {
   const [nameInput, setNameInput] = useState("")
   const [courseId, setCourseId] = useState<number | "">("")
   const [result, setResult] = useState("")
@@ -116,16 +134,22 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
   const debouncedName = useDebouncedValue(nameInput, 350)
   const keyword = debouncedName.trim()
 
-  // 🔴 **兩者皆空時不發請求**（#468；規則來自 #439，原 SA Q2 裁示 A）。
+  // 🔴 ↔️ **這裡原本有一道「兩者皆空就不發請求」的閘（#468），#548 裁示 3 拿掉了。**
   //
-  // ⛔ 不可以靠後端的 422 `ET_APPROVAL_006` 來擋：那道守門是刻意留著的
-  // （`query_rules.normalize_search_criteria` 的 docstring：「換手段、保目的」——
-  // 放寬的是「用什麼條件」，不是「可不可以不給條件」），但它是**後端**的最後一道。
-  // 前端若照送，使用者每清空一次輸入框就打一次必定失敗的 API，而且錯誤訊息會在
-  // 打字途中閃爍。
+  // 它擋的不是能力（教師本來就倒得出全部紀錄），而是「會不會**不小心**看到全院人員
+  // 的通過紀錄」；#468 拿掉搜尋按鈕改為輸入即查之後，它就是「你還沒按查詢」的替代品。
   //
-  // ⚠️ 空白字串要先 `.trim()` 才判——`"   "` 等同未填。
-  const hasCriteria = keyword !== "" || courseId !== ""
+  // 推翻它的理由有兩半：
+  //
+  // 1. **使用者的需求與它直接衝突**：「選了全部課程就該列出所有課程的核可結果」。
+  //    而「全部課程」與「全部結果」都是**不篩這個維度**的意思，兩者在下拉裡都是預設值
+  //    ——分不出「刻意選了不篩」與「沒動過」，所以保留這道閘等於那個需求做不到。
+  // 2. **它的理由（`見 #392`：這類查詢無法偵測誤用）已被補上**：裁示 5 讓不指名的
+  //    查詢寫入 `DP_AUDIT_LOG`（`ACTION_TYPE=QUERY`）。從「擋下」改為「留痕」。
+  //
+  // ⚠️ 代價誠實寫在這裡：**一進畫面就是全部名單**。可接受是因為可見範圍已由裁示 1
+  // 統一（沒有「看到不該看的」這回事了），而負面自由文字仍由欄位遮蔽擋著。
+  const selected = RESULT_OPTIONS.find((o) => o.value === result) ?? RESULT_OPTIONS[0]
 
   const {
     data,
@@ -138,10 +162,12 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
       approvalsApi.search({
         keyword: keyword || undefined,
         course_id: courseId === "" ? undefined : courseId,
-        result: (result || undefined) as "PASS" | "FAIL" | undefined,
+        // ⛔ 兩個參數都要送。只送 `result` 會讓「僅通過」列出已撤銷的通過——
+        // 見 `RESULT_OPTIONS` 的 🔴。
+        result: selected.result,
+        revoked: selected.revoked,
         page,
       }),
-    { enabled: hasCriteria },
   )
 
   // 條件變動時回第 1 頁——留在第 3 頁會讓新條件的結果看起來是空的（而使用者剛改完
@@ -162,13 +188,6 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <Stack spacing={2}>
-      {!isAdmin && (
-        <Alert severity="info">
-          已通過的紀錄涵蓋全部課程；<strong>不通過與已撤銷的紀錄、以及考核備註</strong>
-          僅顯示您所開設的課程。
-        </Alert>
-      )}
-
       {/* 搜尋列——白底區塊，與 DM03「已廢止文件查詢」一致（#436）。
           裸放在灰底上時欄位看起來像懸空的，而下方結果表格有 Paper 框，上下半部
           視覺不一致會讓人以為畫面還沒載完。 */}
@@ -206,9 +225,9 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
               emptyReason === "failed"
                 ? "課程清單載入失敗，請重新整理後再試"
                 : emptyReason === "none"
-                  ? isAdmin
-                    ? "系統中尚無通過紀錄"
-                    : "您開設的課程尚無通過紀錄"
+                  ? // ↔️ #548 裁示 4 之前這句依身分分岔（教師版說「您開設的課程」）。
+                    // 下拉不分 owner 之後，對教師與管理者都只剩這一種成因。
+                    "系統中尚無通過紀錄"
                   : "不指定學員時可只選課程"
             }
             onChange={(e) => {
@@ -239,15 +258,7 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         </Stack>
       </Paper>
 
-      {!hasCriteria ? (
-        // 🔴 條件全空時**保持空白**，不列出全部（#468 裁示；理由見 #392）。
-        // 教師本來就倒得出全部紀錄（一分鐘約 40 次請求），所以這不是能力控制——
-        // 它控制的是「會不會**不小心**看到全院人員的通過紀錄」。
-        // ⛔ 日後若覺得「空白畫面沒東西看」而想改成預設列全部，先回讀 #392。
-        <Typography variant="body2" color="text.secondary">
-          輸入學員姓名或 Email，或選擇課程即可查詢。
-        </Typography>
-      ) : isPending ? (
+      {isPending ? (
         <Typography variant="body2" color="text.secondary">
           載入中…
         </Typography>
@@ -276,7 +287,10 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
         // 而可見範圍分流（SA Q1 裁示 C）讓它在正式使用時一定會發生。
         <Alert severity="info">
           查無符合條件的紀錄。
-          {!isAdmin && "若確定該學員已受訓，可能是該紀錄不在您的可見範圍內——請洽管理者查詢。"}
+          {/* ↔️ 裁示 C 時代這裡對教師多一句「可能不在您的可見範圍內——請洽管理者查詢」。
+              可見範圍統一後那句話不再成立：教師看得到的與管理者完全相同，說它會把人
+              引去做一件沒有用的事。⚠️ 另外兩種成因（全系統尚無紀錄 / 這個人沒有）
+              仍刻意不分，理由見上方表格。 */}
         </Alert>
       ) : (
         <>
@@ -306,10 +320,27 @@ export function TeacherApprovalQuery({ isAdmin }: { isAdmin: boolean }) {
                     <TableCell>{row.user_name}</TableCell>
                     <TableCell>{row.course_name}</TableCell>
                     <TableCell>
+                      {/* 🔴 已撤銷的列**不得顯示綠色「通過」**（#548 裁示 6）。
+
+                          撤銷只設 `IS_REVOKED`，`RESULT` 仍是 `PASS`——改制前這一格
+                          只看 `result`，於是一筆已撤銷的通過在「核可結果」欄是綠色的
+                          「通過」，只有最右邊的「狀態」欄才寫已撤銷。整列雖有淡化，
+                          但一眼掃過去讀到的就是通過。
+
+                          ⚠️ 仍保留原 `RESULT` 的字樣（「原通過」/「原不通過」），不要
+                          只寫「已撤銷」——撤銷的是核可這個動作，當初判的是通過還是
+                          不通過仍是事實，而「這個人當初有沒有過」是教師會問的問題。 */}
                       <Chip
                         size="small"
-                        color={row.result === "PASS" ? "success" : "error"}
-                        label={row.result === "PASS" ? "通過" : "不通過"}
+                        color={row.is_revoked ? "default" : row.result === "PASS" ? "success" : "error"}
+                        variant={row.is_revoked ? "outlined" : "filled"}
+                        label={
+                          row.is_revoked
+                            ? `已撤銷（原${row.result === "PASS" ? "通過" : "不通過"}）`
+                            : row.result === "PASS"
+                              ? "通過"
+                              : "不通過"
+                        }
                       />
                       {row.result_note !== null && row.result_note !== "" && (
                         <Typography variant="caption" color="text.secondary" display="block">

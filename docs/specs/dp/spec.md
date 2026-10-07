@@ -185,7 +185,7 @@
 | 使用者主檔（DP_USER）| ET / DM 共用帳號；USER_ID（系統內穩定識別碼）、帳號（Email）、密碼雜湊、姓名、狀態（啟用 / 停用）、登入失敗計數、鎖定狀態、最後登入時間、Email 變更之待生效欄位。無平台管理員旗標 |
 | 驗證 Token（DP_PWD_RESET）| 一次性時效 token（TOKEN_TYPE：`PWD_RESET` 忘記密碼 / `EMAIL_CHANGE` 帳號變更驗證；plan 階段依 US8 需求擴充，見 research §5）|
 | 密碼歷程（DP_PWD_HIST）| 前 N 次密碼雜湊（append-only、精簡版），供密碼重複性檢核 |
-| 操作歷程（DP_AUDIT_LOG）| 平台共用資安稽核日誌（append-only、不可竄改刪除）；操作者、時間至秒、功能 / 模組代碼、操作類別（LOGIN / LOGOUT / CREATE / UPDATE / DELETE）、來源 IP、異動對象、異動前後值（TEXT 存 JSON，非 JSONB，見 [research.md](research.md) §6）；ET / DM 資安事件亦寫入本表 |
+| 操作歷程（DP_AUDIT_LOG）| 平台共用資安稽核日誌（append-only、不可竄改刪除）；操作者、時間至秒、功能 / 模組代碼、操作類別（LOGIN / LOGOUT / CREATE / UPDATE / DELETE / EXPORT / QUERY）、來源 IP、異動對象、異動前後值（TEXT 存 JSON，非 JSONB，見 [research.md](research.md) §6）；ET / DM 資安事件亦寫入本表 |
 | 功能參數主檔（DP_PARAM_M）| 全平台參數 / 清單定義之分類（`PARAM_ID` 前綴：無前綴 `DP_` 平台級 / `ET_` / `DM_` 模組級）；`DETAIL_LOCK` 標記鎖定碼（如文件分類碼建立後不可改）|
 | 功能參數明細（DP_PARAM_D）| 參數值與清單項（`PARAM_ID` + `PARAM_KEY`）；分類 / func_name / 標籤名稱 / 可見對象值 / DM 檢索標籤皆為此表之列 |
 | 通知範本（DP_NOTIFY_TEMPLATE）| 全平台通知範本（`MODULE`：`DP` / `ET` / `DM` + `TEMPLATE_CODE`）；主旨、內文、可用變數、管道（Email / 站內 / 兩者）、啟用停用、版本（樂觀鎖）；內容不同的通知＝同表不同列 |
