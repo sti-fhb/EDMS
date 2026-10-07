@@ -178,6 +178,12 @@ export const BLOCKER_HINT: Record<string, string> = {
   SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或停用該問卷",
   OBSOLETE_DOC: "請於教材中移除已廢止文件之引用",
   ITEM_NO_TITLE: "請開啟該項目並填寫名稱，或刪除這個未命名的項目",
+  // 前端檢核的缺漏（#558，見 `publishCheck.ts` 的 `FORM_BLOCKER`）——與後端代碼同一個命名空間
+  FORM_COURSE_NAME: "請於「基本資料」修正課程名稱",
+  FORM_DESCRIPTION: "請於「基本資料」修正課程描述",
+  FORM_START: "請於「基本資料」修正課程起始時間",
+  FORM_END: "請於「基本資料」修正課程訖止時間",
+  FORM_AUDIENCE: "請於「基本資料」補選該列的單位與職位，或刪除該列",
 }
 
 /**

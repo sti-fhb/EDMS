@@ -31,6 +31,8 @@ interface ItemHandlers {
   onOpenItem: (item: ItemRow) => void
   onDeleteItem: (item: ItemRow) => void
   onReorderItems: (chapter: ChapterItem, orderedIds: number[]) => void
+  /** item_id → 缺漏訊息（#558）。 */
+  blockedItems?: Record<number, string>
 }
 
 interface ChapterRowProps extends ItemHandlers {
@@ -39,6 +41,8 @@ interface ChapterRowProps extends ItemHandlers {
   readOnly: boolean
   onRename: (chapter: ChapterItem, name: string) => void
   onDelete: (chapter: ChapterItem) => void
+  /** 本章節的缺漏訊息（#558）：有值時整章標紅框。 */
+  blocker?: string
 }
 
 /** 單一章節列：拖拉手把 + 章節序 + inline 更名 + 刪除。 */
@@ -52,6 +56,8 @@ function ChapterRow({
   onOpenItem,
   onDeleteItem,
   onReorderItems,
+  blockedItems,
+  blocker,
 }: ChapterRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: chapter.chapter_id,
@@ -69,6 +75,7 @@ function ChapterRow({
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.5 : 1,
+        ...(blocker && { borderColor: "error.main" }),
       }}
     >
       <Stack direction="row" alignItems="center" spacing={1}>
@@ -107,9 +114,15 @@ function ChapterRow({
           </IconButton>
         )}
       </Stack>
+      {blocker && (
+        <Typography variant="caption" color="error" sx={{ display: "block", pt: 0.5 }}>
+          {blocker}
+        </Typography>
+      )}
       <ItemList
         items={chapter.items}
         readOnly={readOnly}
+        blockedItems={blockedItems}
         onAdd={(itemType) => onAddItem(chapter, itemType)}
         onOpen={onOpenItem}
         onDelete={onDeleteItem}
@@ -128,6 +141,8 @@ interface ChapterSectionProps extends ItemHandlers {
   onRename: (chapter: ChapterItem, name: string) => void
   onDelete: (chapter: ChapterItem) => void
   onReorder: (orderedIds: number[]) => void
+  /** chapter_id → 缺漏訊息（#558）。 */
+  blockedChapters?: Record<number, string>
 }
 
 /**
@@ -144,6 +159,7 @@ export function ChapterSection({
   onRename,
   onDelete,
   onReorder,
+  blockedChapters = {},
   ...itemHandlers
 }: ChapterSectionProps) {
   const sensors = useSensors(
@@ -208,6 +224,7 @@ export function ChapterSection({
                 chapter={chapter}
                 index={index}
                 readOnly={readOnly}
+                blocker={blockedChapters[chapter.chapter_id]}
                 onRename={onRename}
                 onDelete={onDelete}
                 {...itemHandlers}

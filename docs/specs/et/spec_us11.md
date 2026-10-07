@@ -62,6 +62,7 @@
 - **FR-ET-US11-07**: 課程關閉後教師（owner）端 MUST 保留課程內容可編輯（非唯讀）並可於 US9 查看學員歷史完課狀態 / 成績 / 作答明細 / 問卷結果，但 MUST NOT 再邀請新學員或重置重考次數；ET01 課程卡片 MUST 顯示「已關閉」狀態
 - **FR-ET-US11-08**: 課程關閉期間 SCHET001 / SCHET002 MUST NOT 將該課程納入每週統計、週報與各項提醒
 - **FR-ET-US11-09**: 教師執行「再開課」時系統 MUST 強制要求重新設定一組新的 OPEN_START_AT / OPEN_END_AT，未填妥 MUST NOT 送出；確認後 MUST 將狀態 CLOSED → PUBLISHED、學員進度接續保留（不歸零）、ET_COURSE.URGENT_REMIND_SENT 歸 false、邀請碼恢復有效、SCHET001 / SCHET002 排程恢復納入
+    > **缺漏的提示方式（2026-10-07 #558 補充）**：按「確認再開課」時，起訖時間之錯誤與發布檢核缺漏 MUST 合併於同一個視窗列出（時間有錯時不送出再開課，但仍以已存檔之課程內容檢核其餘項目）；視窗關閉後仍停留於再開課模式，缺漏處以紅框標示、補齊即消失，規則同 [spec_us3.md](spec_us3.md) FR-ET-US3-11。
 - **FR-ET-US11-10**: 關閉 / 再開課 MUST 可重複多次；CLOSED_AT MUST 記錄最近一次關閉時間，再開課後保留供追溯
 
 ---

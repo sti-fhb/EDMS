@@ -32,6 +32,8 @@ interface SurveySectionProps {
   onOpen: () => void
   onDeactivate: () => void
   onDelete: () => void
+  /** 發布／再開課缺漏（#558）：有值時問卷列標紅框並顯示此訊息。 */
+  blocker?: string | null
 }
 
 /**
@@ -78,6 +80,7 @@ export function SurveySection({
   isDraftCourse,
   saving = false,
   error = null,
+  blocker = null,
   onCreate,
   onOpen,
   onDeactivate,
@@ -144,7 +147,10 @@ export function SurveySection({
         + 右側操作）——問卷在教師眼中就是課程底下的另一種內容，長得不一樣只會讓他多學
         一套。2026-08-31 實測回饋。
       */}
-      <Paper variant="outlined" sx={{ p: 1, bgcolor: "background.default" }}>
+      <Paper
+        variant="outlined"
+        sx={{ p: 1, bgcolor: "background.default", ...(blocker && { borderColor: "error.main" }) }}
+      >
         <Stack direction="row" alignItems="center" spacing={1}>
           <Chip size="small" variant="outlined" color="secondary" icon={<PollOutlinedIcon />} label="問卷" />
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
@@ -209,6 +215,11 @@ export function SurveySection({
             </IconButton>
           )}
         </Stack>
+        {blocker && (
+          <Typography variant="caption" color="error" sx={{ display: "block", pl: 1, pt: 0.5 }}>
+            {blocker}
+          </Typography>
+        )}
       </Paper>
     </Paper>
   )

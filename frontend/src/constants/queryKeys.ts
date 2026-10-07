@@ -33,6 +33,15 @@ export const QUERY_KEYS = {
     material: (materialId: number) => ["et", "materials", materialId] as const,
     quiz: (quizId: number) => ["et", "quizzes", quizId] as const,
     survey: (courseId: number) => ["et", "courses", courseId, "survey"] as const,
+    /**
+     * 發布預檢（#558 標示模式用）。
+     *
+     * ⚠️ **刻意不掛在 `detail` 之下**。掛在下面的話，課程詳細每失效一次它就連帶重抓一次，
+     * 而預檢與發布 / 再開課共用後端每人每分鐘 20 次的限流分桶（`et/course/router.py`
+     * `_STATUS_RATE_MAX`）——教師補缺漏補到一半，按發布就會收到 429（security review
+     * MEDIUM）。重抓改由 `CourseEditorPage` 的 `refreshLiveCheck` 合併觸發。
+     */
+    publishCheck: (courseId: number) => ["et", "publish-check", courseId] as const,
     surveyTemplates: () => ["et", "survey-templates"] as const,
     dmDocuments: () => ["et", "dm-documents"] as const,
   },
