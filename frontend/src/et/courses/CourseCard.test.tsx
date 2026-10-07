@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import { CourseCard } from "./CourseCard"
 import type { CourseCard as CourseCardData } from "./schemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
+import { formatDateTime } from "../../utils/date"
 
 function makeCourse(overrides: Partial<CourseCardData> = {}): CourseCardData {
   return {
@@ -87,7 +88,9 @@ describe("ET01 課程卡片", () => {
   it("開課期間起訖齊全時兩端都顯示", () => {
     renderWithProviders(<CourseCard course={makeCourse()} onOpen={vi.fn()} />)
 
-    expect(screen.getByText("2026-04-15 09:00 ～ 2026-07-31 17:30")).toBeInTheDocument()
+    // 經 date.ts 格式化（#551）：fixture 為無時區字串、以本地時間解讀，故結果與執行環境時區無關
+    expect(screen.getByText("2026/04/15 09:00 ～ 2026/07/31 17:30")).toBeInTheDocument()
+    expect(screen.getByText(`${formatDateTime("2026-04-15T09:00:00")} ～ ${formatDateTime("2026-07-31T17:30:00")}`)).toBeInTheDocument()
   })
 
   it("草稿常見的「起訖都沒填」顯示破折號，不是 Invalid Date", () => {
@@ -105,7 +108,7 @@ describe("ET01 課程卡片", () => {
       <CourseCard course={makeCourse({ open_start_at: null })} onOpen={vi.fn()} />,
     )
 
-    expect(screen.getByText("— ～ 2026-07-31 17:30")).toBeInTheDocument()
+    expect(screen.getByText("— ～ 2026/07/31 17:30")).toBeInTheDocument()
   })
 
   it("兩個聚合值都標示單位，避免卡片上出現兩個裸數字", () => {

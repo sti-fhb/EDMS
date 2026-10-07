@@ -22,6 +22,7 @@ import { studentsApi } from "./studentsService"
 import type { ApprovalResult, ApprovalStatus, CompletionStatus, StudentRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
+import { formatDateTime } from "../../utils/date"
 import { BlockHeading } from "./BlockHeading"
 
 const PAGE_SIZE = 20
@@ -42,15 +43,6 @@ const APPROVAL_LABEL: Record<Exclude<ApprovalStatus, "NOT_ELIGIBLE">, { text: st
   PENDING: { text: "待核可", color: "warning" },
   PASSED: { text: "已通過", color: "success" },
   FAILED: { text: "未通過", color: "error" },
-}
-
-/** `2026-04-15 09:00`；`null` 回破折號（與 CSV 一致）。 */
-function formatDateTime(iso: string | null): string {
-  if (iso === null) return "—"
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return "—"
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /**

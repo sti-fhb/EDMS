@@ -18,6 +18,7 @@ import { useState } from "react"
 import { BlockHeading } from "./BlockHeading"
 import { studentsApi } from "./studentsService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
+import { formatDateTime } from "../../utils/date"
 
 type View = "stats" | "details"
 
@@ -134,7 +135,7 @@ export function SurveyResultBlock({ courseId, onExport }: { courseId: number; on
                 return (
                   <TableRow key={row.user_id} hover>
                     <TableCell>{row.user_name ?? "—"}</TableCell>
-                    <TableCell>{new Date(row.submitted_at).toLocaleString("zh-TW")}</TableCell>
+                    <TableCell>{formatDateTime(row.submitted_at)}</TableCell>
                     {data.questions.map((q) => {
                       const answer = byQuestion.get(q.sq_id)
                       return (

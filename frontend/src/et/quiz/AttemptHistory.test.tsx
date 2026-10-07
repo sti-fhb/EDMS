@@ -7,6 +7,7 @@ import { AttemptHistory } from "./AttemptHistory"
 import { attemptApi } from "./attemptService"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
+import { formatDateTime } from "../../utils/date"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (orig) => {
@@ -69,6 +70,10 @@ describe("ET07 歷次作答紀錄", () => {
     // 兩次都是 60 分但意義完全不同——沒有分母就分不出來
     expect(await screen.findByText("60.00 / 100")).toBeInTheDocument()
     expect(screen.getByText("60.00 / 300")).toBeInTheDocument()
+    // 交卷時間經 date.ts 格式化（#551）；期望值由 formatDateTime 現算，不寫死字面時刻
+    expect(screen.getByText(formatDateTime("2026-09-03T02:12:00Z"))).toBeInTheDocument()
+    expect(screen.getByText(formatDateTime("2026-09-04T10:00:00Z"))).toBeInTheDocument()
+    expect(screen.queryByText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)).not.toBeInTheDocument()
   })
 
   it("鍵盤使用者可經由列尾按鈕進入回看，且不重複導航", async () => {

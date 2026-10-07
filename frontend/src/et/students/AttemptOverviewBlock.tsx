@@ -21,6 +21,7 @@ import { BlockHeading } from "./BlockHeading"
 import { studentsApi } from "./studentsService"
 import type { TeacherQuizRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
+import { formatDateTime } from "../../utils/date"
 
 /** 停用「重置」時說明**為什麼**——三種原因對教師的意義完全不同。 */
 function resetDisabledReason(quiz: TeacherQuizRow, readOnly: boolean): string {
@@ -138,7 +139,7 @@ export function AttemptOverviewBlock({
                             onClick={() => onOpenDetail(attempt.attempt_id)}
                           >
                             <TableCell>第 {attempt.attempt_no} 次</TableCell>
-                            <TableCell>{new Date(attempt.submitted_at).toLocaleString("zh-TW")}</TableCell>
+                            <TableCell>{formatDateTime(attempt.submitted_at)}</TableCell>
                             {/* 分母用快照的 points_total，**不可寫死 100**——發布後教師仍可改配分 */}
                             <TableCell align="right">
                               {attempt.score} / {attempt.points_total}
