@@ -7,8 +7,14 @@ from app.dm.notify.service import DmNotifier
 
 pytestmark = pytest.mark.integration
 
-#: #554 的 5 支簽核流程通知與其範本佔位（key 須逐字對齊 VARIABLES，否則 _SafeFormatter
-#: 會拋 KeyError → 空信 FAILED 且 queued_count=0 而不外拋，看起來就像「管道對了」）。
+#: #554 的 5 支簽核流程通知。
+#:
+#: ⚠️ **這些 params 並不被任何斷言檢查**——`send_email` 在 `_channel_allows_email` 就 return 了，
+#: **根本不會進渲染**，改壞任何一個 key 都不會變紅。留著是為了日後站內訊息佇列實作、渲染守門
+#: 恢復時可直接沿用（屆時 key 須逐字對齊範本 VARIABLES，否則 `_SafeFormatter` 會拋 KeyError →
+#: 空信 FAILED 且不外拋）。
+#:
+#: 本檔真正的守門是 `skipped_reason == "CHANNEL_NOT_EMAIL"`：渲染失敗給的是 `None`，兩者分得開。
 _FLOW_CASES = (
     ("DOC_SUBMIT", {"reviewer_name": "王", "author_name": "陳", "doc_name": "D", "review_type": "發布審核"}),
     ("DOC_REJECT", {"author_name": "陳", "doc_name": "D", "reason": "格式不符"}),

@@ -63,9 +63,29 @@ def _set_channel(channel: str) -> None:
     )
 
 
+#: `CHANNEL` 的合法值域（平台詞彙）。比照既有的 `CK_DP_PARAM_D_EDIT_SCOPE`。
+_CK_CHANNEL = "CK_DP_NOTIFY_TEMPLATE_CHANNEL"
+_CHANNELS = ("EMAIL", "MSG", "BOTH")
+
+
 def upgrade() -> None:
     _set_channel(_NEW_CHANNEL)
 
+    # 補值域約束（#554 Security Review MEDIUM-4）。
+    #
+    # 建表時 `CHANNEL` 只有 String(10)、**沒有 CHECK**；值域唯一的把關是 schemas.py 的
+    # `Literal["EMAIL","MSG","BOTH"]`，而那只在 API 寫入路徑上。#307 讓 CHANNEL 唯讀、
+    # #554 進一步讓站內範本整列不可寫，於是這些列的 CHANNEL **只剩 IT 直接下 SQL 一條路**
+    # ——那條路沒有值域驗證、不寫稽核、不 bump VERSION。
+    #
+    # 具體風險：打成 `EMAIL_ONLY`（正是本次於 data-model.md 更正掉的舊寫法）會通過 DB，
+    # 而 `_channel_allows_email` 回 False → 該範本**靜默永不寄信**。這是 spec 註記自己
+    # 警告過的失敗模式，卻沒有東西擋它。加上 CHECK 把靜默失效換成當場報錯。
+    op.create_check_constraint(
+        _CK_CHANNEL, "DP_NOTIFY_TEMPLATE", f"\"CHANNEL\" IN ('{_CHANNELS[0]}', '{_CHANNELS[1]}', '{_CHANNELS[2]}')"
+    )
+
 
 def downgrade() -> None:
+    op.drop_constraint(_CK_CHANNEL, "DP_NOTIFY_TEMPLATE", type_="check")
     _set_channel(_OLD_CHANNEL)
