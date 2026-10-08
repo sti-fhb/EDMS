@@ -51,9 +51,48 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     // 看的人會把對不起來的兩個數字判定成算錯。
     expect(
       screen.getByText(
-        "各組獨立計算：一人身兼多組時每組分母都含他，故分組「應看」加總（11）可能大於本文件應看（10，已去重）。",
+        "分組「應看」加總為 11，大於本文件應看 10：有人同時符合多組，各組分母都計入他，文件總計則已去重。",
       ),
     ).toBeInTheDocument()
+  })
+
+  it("分組加總等於文件總計時 → 不顯示重疊說明", async () => {
+    // 身兼多組是少數例外。無條件顯示會讓常態多出一句說明一件沒發生的事，
+    // 甚至印出「加總（2）可能大於本文件應看（2）」這種自我矛盾的句子（裁示 2026-10-08）。
+    const user = userEvent.setup()
+    renderWithProviders(<DmKpiPage />)
+    await screen.findByText("無重疊文件")
+
+    await user.click(screen.getByRole("button", { name: "展開 無重疊文件 的可見對象" }))
+
+    // 正向錨點：展開確實生效（與下方否定式同為 text 查詢，避免「找不到」造成恆真）
+    expect(await screen.findByText("軍人")).toBeInTheDocument()
+    expect(screen.queryByText(/分組「應看」加總為/)).not.toBeInTheDocument()
+  })
+
+  it("命中的全是訓練教材時 → 不顯示統計卡與文件統計區塊", async () => {
+    server.use(
+      http.get("/api/dm/kpi/documents", () =>
+        HttpResponse.json({
+          data: [],
+          meta: { total: 0, page: 1, limit: 20, total_pages: 0 },
+          summary: { total_docs: 0, rated_docs: 0, overall_rate: null, below_50_count: 0 },
+          training_docs: [
+            { doc_id: "DM-TRAINING-000001", doc_name: "基礎輸血學", category_name: "訓練教材", current_version_no: "1.0" },
+          ],
+          training_total: 1,
+        }),
+      ),
+    )
+    renderWithProviders(<DmKpiPage />)
+
+    // 正向錨點：訓練教材區照常呈現（證明頁面有載入，否定式才有意義）
+    expect(await screen.findByText("訓練教材（共 1 份）")).toBeInTheDocument()
+    // 統計必然為空（訓練教材不進統計母體），再顯示「—／共 0 份」與「查無符合條件」只是噪音
+    expect(screen.queryByText("整體平均閱讀率")).not.toBeInTheDocument()
+    expect(screen.queryByText("閱讀率低於 50% 之文件數")).not.toBeInTheDocument()
+    expect(screen.queryByText("查無符合條件之文件統計")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "匯出 CSV" })).not.toBeInTheDocument()
   })
 
   it("訓練教材另成一區，且該區不含任何閱讀統計欄位", async () => {

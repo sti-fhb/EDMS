@@ -555,8 +555,24 @@ export const handlers = [
           rate: null,
           groups: [],
         },
+        {
+          doc_id: "DM-SOP-000002",
+          doc_name: "無重疊文件",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          current_version_no: "1.0",
+          should_see: 3,
+          seen: 1,
+          unseen: 2,
+          rate: 0.3333,
+          // 兩組無人重疊：2 + 1 = 3 = 應看 → 畫面**不應**出現重疊說明（#567 收尾調整）
+          groups: [
+            { label: "行政人員", should_see: 1, seen: 0, unseen: 1, rate: 0 },
+            { label: "軍人", should_see: 2, seen: 1, unseen: 1, rate: 0.5 },
+          ],
+        },
       ],
-      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
+      meta: { total: 3, page: 1, limit: 20, total_pages: 1 },
       // rated_docs=1：2 份文件中僅 1 份可計算閱讀率（另一份應看=0）——分子 below_50_count
       // 的母體就是它，故統計卡分母用 rated_docs 而非 total_docs（#567 C）
       summary: { total_docs: 2, rated_docs: 1, overall_rate: 0.4, below_50_count: 1 },

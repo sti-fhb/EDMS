@@ -56,16 +56,22 @@ function RateCell({ rate }: { rate: number | null }) {
 /**
  * 展開後的逐可見對象組明細（#567 A）。
  *
- * 末列的說明**不是可選的**：各組獨立計算完成度，身兼多組者每組分母都含他，而文件總計去重
- * ——兩個數字對不起來是刻意的。沒有這句話，看的人會判定成算錯。
+ * 末列的說明**只在分組加總真的大於文件總計時出現**。各組獨立計算完成度、身兼多組者每組
+ * 分母都含他，而文件總計去重——這兩個數字對不起來時必須解釋，否則看的人會判定成算錯；
+ * 但身兼多組是少數例外，**無條件顯示反而讓常態多出一句說明一件沒發生的事**，而且會印出
+ * 「加總（2）可能大於本文件應看（2）」這種自我矛盾的句子（裁示 2026-10-08）。
  */
 function AudienceGroupRows({ doc }: { doc: KpiDocItem }) {
   const groupSum = doc.groups.reduce((n, g) => n + g.should_see, 0)
+  // 只在**真的對不起來時**才解釋。原本無條件顯示，於是絕大多數情況下出現「加總（2）可能
+  // 大於本文件應看（2）」這種自己打臉的句子——兩個數字相同卻說「可能大於」，讀者只會更困惑。
+  // 身兼多組是少數例外（裁示 2026-10-08），常態不該為例外付出版面與雜訊。
+  const hasOverlap = groupSum > doc.should_see
   // 在 JS 組好單一字串，不在 JSX 跨行插值：後者會切成多個 text node，使 getByText
   // 永遠找不到它——而「找不到」在否定式斷言下是恆真的，守門會靜默失效。
   const overlapNote =
-    `各組獨立計算：一人身兼多組時每組分母都含他，` +
-    `故分組「應看」加總（${groupSum}）可能大於本文件應看（${doc.should_see}，已去重）。`
+    `分組「應看」加總為 ${groupSum}，大於本文件應看 ${doc.should_see}：` +
+    `有人同時符合多組，各組分母都計入他，文件總計則已去重。`
   return (
     <>
       {doc.groups.map((g, idx) => (
@@ -85,14 +91,16 @@ function AudienceGroupRows({ doc }: { doc: KpiDocItem }) {
           </TableCell>
         </TableRow>
       ))}
-      <TableRow sx={{ backgroundColor: "action.hover" }}>
-        <TableCell />
-        <TableCell colSpan={7} sx={{ pl: 3, pt: 0 }}>
-          <Typography variant="caption" color="text.secondary">
-            {overlapNote}
-          </Typography>
-        </TableCell>
-      </TableRow>
+      {hasOverlap && (
+        <TableRow sx={{ backgroundColor: "action.hover" }}>
+          <TableCell />
+          <TableCell colSpan={7} sx={{ pl: 3, pt: 0 }}>
+            <Typography variant="caption" color="text.secondary">
+              {overlapNote}
+            </Typography>
+          </TableCell>
+        </TableRow>
+      )}
     </>
   )
 }
@@ -199,6 +207,12 @@ export function DmKpiPage() {
   const summary = data?.summary
   const trainingDocs = data?.training_docs ?? []
   const trainingTotal = data?.training_total ?? 0
+  // 命中的全是訓練教材（主區空、下區有資料）→ 統計卡與文件統計整組不顯示。
+  // 此時統計必然是空的：訓練教材依設計不進統計母體（#567 B），再顯示「— ／共 0 份可計算文件」
+  // 與「查無符合條件之文件統計」只是噪音，還會讓人以為查詢壞了。
+  // 用資料推導而非比對 category === "TRAINING"：不必在前端複製後端的分類常數，
+  // 且關鍵字剛好只命中教材時同樣適用。
+  const onlyTraining = (data?.meta.total ?? 0) === 0 && trainingTotal > 0
 
   // 無權限（非管理者 / 非 DM 角色）：僅顯示標題 + 錯誤訊息，不渲染查詢 UI（DM-MSG-DM06-002）
   if (denied) {
@@ -226,28 +240,30 @@ export function DmKpiPage() {
     <Box>
       <ScreenHeader code="DM06" />
 
-      {/* 統計卡 */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2, mb: 2 }}>
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="caption" color="text.secondary">
-            整體平均閱讀率
-          </Typography>
-          <Typography variant="h4">{summary ? ratePct(summary.overall_rate) : "—"}</Typography>
-        </Paper>
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="caption" color="text.secondary">
-            閱讀率低於 50% 之文件數
-          </Typography>
-          <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
-            <Typography variant="h4">{summary?.below_50_count ?? 0}</Typography>
-            {/* 分母用 rated_docs 而非 total_docs：分子只計可算閱讀率者（排除應看=0），
-                兩者並列時母體必須相同，否則讀者會以為是「10 份裡有 2 份不及格」（#567 C）。*/}
-            <Typography variant="body2" color="text.secondary">
-              ／ 共 {summary?.rated_docs ?? 0} 份可計算文件
+      {/* 統計卡 + 文件統計：命中的全是訓練教材時整組不顯示（見 onlyTraining） */}
+      {!onlyTraining && (
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2, mb: 2 }}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              整體平均閱讀率
             </Typography>
-          </Box>
-        </Paper>
-      </Box>
+            <Typography variant="h4">{summary ? ratePct(summary.overall_rate) : "—"}</Typography>
+          </Paper>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              閱讀率低於 50% 之文件數
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
+              <Typography variant="h4">{summary?.below_50_count ?? 0}</Typography>
+              {/* 分母用 rated_docs 而非 total_docs：分子只計可算閱讀率者（排除應看=0），
+                  兩者並列時母體必須相同，否則讀者會以為是「10 份裡有 2 份不及格」（#567 C）。*/}
+              <Typography variant="body2" color="text.secondary">
+                ／ 共 {summary?.rated_docs ?? 0} 份可計算文件
+              </Typography>
+            </Box>
+          </Paper>
+        </Box>
+      )}
 
       {/* 搜尋列（即時篩選，無查詢按鈕）*/}
       <Paper sx={{ p: 2, mb: 2 }}>
@@ -276,103 +292,105 @@ export function DmKpiPage() {
       </Paper>
 
       {/* 結果 */}
-      <Paper sx={{ p: 2 }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-          <Typography variant="subtitle2">文件統計{data ? `（共 ${data.meta.total} 筆）` : ""}</Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            disabled={exporting || (data?.meta.total ?? 0) === 0}
-            onClick={onExport}
-          >
-            匯出 CSV
-          </Button>
-        </Box>
-
-        {isPending ? (
-          <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-            <CircularProgress size={28} />
+      {!onlyTraining && (
+        <Paper sx={{ p: 2 }}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+            <Typography variant="subtitle2">文件統計{data ? `（共 ${data.meta.total} 筆）` : ""}</Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={exporting || (data?.meta.total ?? 0) === 0}
+              onClick={onExport}
+            >
+              匯出 CSV
+            </Button>
           </Box>
-        ) : isError ? (
-          <Alert severity="error">載入失敗，請稍後再試。</Alert>
-        ) : rows.length === 0 ? (
-          <Alert severity="info">查無符合條件之文件統計</Alert>
-        ) : (
-          <>
-            <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: "4%" }} />
-                  <TableCell sx={{ width: "28%" }}>文件</TableCell>
-                  <TableCell sx={{ width: "11%" }}>分類</TableCell>
-                  <TableCell sx={{ width: "9%" }}>目前版本</TableCell>
-                  <TableCell sx={{ width: "8%" }} align="right">
-                    應看
-                  </TableCell>
-                  <TableCell sx={{ width: "8%" }} align="right">
-                    已看
-                  </TableCell>
-                  <TableCell sx={{ width: "8%" }} align="right">
-                    未看
-                  </TableCell>
-                  <TableCell sx={{ width: "24%" }}>閱讀率</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row) => {
-                  const isOpen = expanded.has(row.doc_id)
-                  return (
-                    <Fragment key={row.doc_id}>
-                      <TableRow>
-                        <TableCell sx={{ pr: 0 }}>
-                          {row.groups.length > 0 && (
-                            <IconButton
-                              size="small"
-                              aria-label={isOpen ? `收合 ${row.doc_name} 的可見對象` : `展開 ${row.doc_name} 的可見對象`}
-                              onClick={() => toggleExpanded(row.doc_id)}
-                            >
-                              {isOpen ? (
-                                <KeyboardArrowDownIcon fontSize="small" />
-                              ) : (
-                                <KeyboardArrowRightIcon fontSize="small" />
-                              )}
-                            </IconButton>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {row.doc_name}
-                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                            {row.doc_id}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{row.category_name ?? row.category_code}</TableCell>
-                        <TableCell>{row.current_version_no ?? "—"}</TableCell>
-                        <TableCell align="right">{row.should_see}</TableCell>
-                        <TableCell align="right">{row.seen}</TableCell>
-                        <TableCell align="right">{row.unseen}</TableCell>
-                        <TableCell>
-                          <RateCell rate={row.rate} />
-                        </TableCell>
-                      </TableRow>
-                      {isOpen && <AudienceGroupRows doc={row} />}
-                    </Fragment>
-                  )
-                })}
-              </TableBody>
-            </Table>
-            {data && (
-              <Box sx={{ mt: 2 }}>
-                <Pagination
-                  page={data.meta.page}
-                  total={data.meta.total}
-                  pageSize={data.meta.limit}
-                  onPageChange={setPage}
-                />
-              </Box>
-            )}
-          </>
-        )}
-      </Paper>
+
+          {isPending ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : isError ? (
+            <Alert severity="error">載入失敗，請稍後再試。</Alert>
+          ) : rows.length === 0 ? (
+            <Alert severity="info">查無符合條件之文件統計</Alert>
+          ) : (
+            <>
+              <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: "4%" }} />
+                    <TableCell sx={{ width: "28%" }}>文件</TableCell>
+                    <TableCell sx={{ width: "11%" }}>分類</TableCell>
+                    <TableCell sx={{ width: "9%" }}>目前版本</TableCell>
+                    <TableCell sx={{ width: "8%" }} align="right">
+                      應看
+                    </TableCell>
+                    <TableCell sx={{ width: "8%" }} align="right">
+                      已看
+                    </TableCell>
+                    <TableCell sx={{ width: "8%" }} align="right">
+                      未看
+                    </TableCell>
+                    <TableCell sx={{ width: "24%" }}>閱讀率</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => {
+                    const isOpen = expanded.has(row.doc_id)
+                    return (
+                      <Fragment key={row.doc_id}>
+                        <TableRow>
+                          <TableCell sx={{ pr: 0 }}>
+                            {row.groups.length > 0 && (
+                              <IconButton
+                                size="small"
+                                aria-label={isOpen ? `收合 ${row.doc_name} 的可見對象` : `展開 ${row.doc_name} 的可見對象`}
+                                onClick={() => toggleExpanded(row.doc_id)}
+                              >
+                                {isOpen ? (
+                                  <KeyboardArrowDownIcon fontSize="small" />
+                                ) : (
+                                  <KeyboardArrowRightIcon fontSize="small" />
+                                )}
+                              </IconButton>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {row.doc_name}
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                              {row.doc_id}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>{row.category_name ?? row.category_code}</TableCell>
+                          <TableCell>{row.current_version_no ?? "—"}</TableCell>
+                          <TableCell align="right">{row.should_see}</TableCell>
+                          <TableCell align="right">{row.seen}</TableCell>
+                          <TableCell align="right">{row.unseen}</TableCell>
+                          <TableCell>
+                            <RateCell rate={row.rate} />
+                          </TableCell>
+                        </TableRow>
+                        {isOpen && <AudienceGroupRows doc={row} />}
+                      </Fragment>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+              {data && (
+                <Box sx={{ mt: 2 }}>
+                  <Pagination
+                    page={data.meta.page}
+                    total={data.meta.total}
+                    pageSize={data.meta.limit}
+                    onPageChange={setPage}
+                  />
+                </Box>
+              )}
+            </>
+          )}
+        </Paper>
+      )}
 
       {/* 訓練教材另成一區：不計閱讀率，理由見 TrainingSection docstring */}
       <TrainingSection docs={trainingDocs} total={trainingTotal} />
