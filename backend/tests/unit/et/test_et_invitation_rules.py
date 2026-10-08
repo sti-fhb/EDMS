@@ -73,10 +73,14 @@ class TestParseEmails:
         assert len(parse_emails(raw)) == MAX_EMAILS_PER_REQUEST
 
     def test_上限與平台收件人上限一致(self) -> None:
-        """教師看到的上限與平台 `NotifyService._MAX_RECIPIENTS` 同值，避免兩套數字。"""
-        from app.dp.notify.service import _MAX_RECIPIENTS
+        """教師看到的上限與平台公告的 `MAX_RECIPIENTS` 同值，避免兩套數字。
 
-        assert MAX_EMAILS_PER_REQUEST == _MAX_RECIPIENTS
+        #563 起改由 `app.services` 取得：該常數是呼叫方必須遵守的平台不變量，原先直接
+        import DP 的私有名稱等於繞過唯一出口。
+        """
+        from app.services import MAX_RECIPIENTS
+
+        assert MAX_EMAILS_PER_REQUEST == MAX_RECIPIENTS
 
     def test_去重後才計算上限(self) -> None:
         """貼了 60 筆但其實只有 2 個不同的人，不該被擋。"""

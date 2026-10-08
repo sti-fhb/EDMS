@@ -20,8 +20,20 @@ logger = logging.getLogger(__name__)
 # 系統作業建立者（DP_EMAIL_LOG 標準欄位 CREATED_USER）；實際觸發模組記於 CALLER_MODULE。
 _SYSTEM_USER = "SYSTEM"
 
-# 收件人單次上限（防呼叫方 bug / 濫用一次寫入海量 outbox 拖垮 worker，對齊 TBMS 慣例）
-_MAX_RECIPIENTS = 50
+#: 單次 `send_email` 的收件人上限（對齊 TBMS 慣例）。**公開常數**：呼叫方需據此分批，
+#: 由 `app.services` 一併匯出，不得在各模組各寫一個 50（#563）。
+#:
+#: ⚠️ 這道上限擋的是**單次呼叫的形狀**，不是 outbox 的總量——原註解寫「防濫用一次寫入
+#: 海量 outbox 拖垮 worker」並不成立：100 人拆成 2×50 與 1×100 寫進 outbox 的列數完全
+#: 相同，而分批是呼叫方本來就做得到的事（DM 自 #563 起正是這樣做）。
+#:
+#: 真正的流量控制在寄送端而非寫入端：`worker.py` 依 `DP_PARAM` 的 `MAIL/RATE_PER_MIN`
+#: （保底 60）限制每輪取件量，輪距再搭配控制速率。那一道與本上限彼此獨立。
+#:
+#: 所以本上限的實際效用是：擋住呼叫方**誤把整張表當收件人清單**這類 bug，讓它當場 422
+#: 而不是安靜地寫出十萬列。保留它是刻意的——ET 11 處呼叫與 DP 自身都在其下運作，
+#: 移除屬跨模組語意變更。
+MAX_RECIPIENTS = 50
 
 
 # 代入值中須剝除的字元（#225）。**主旨與內文用不同嚴格度**，因為兩者對「換行」的容忍度不同。
@@ -195,7 +207,7 @@ class NotifyService:
         Raises:
             AppError: template_code 不存在（404 / DP_MAIL_001）。
         """
-        if len(recipients) > _MAX_RECIPIENTS:
+        if len(recipients) > MAX_RECIPIENTS:
             raise AppError(status_code=422, detail="收件人數超過單次上限", error_code="DP_MAIL_002")
         template = await self._repo.get_template(db, module, template_code)
         if template is None:

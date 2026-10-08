@@ -330,7 +330,14 @@ class KpiService:
         )
 
     async def _send_weekly_report(self, db: AsyncSession, *, stats: Sequence[_DocKpi], summary: KpiSummary) -> int:
-        """KPI 週報予所有 DM_ADMIN：內文摘要（總數 / 平均 / 最低前 5 份 / 儀表板連結），不走附件。"""
+        """KPI 週報予所有 DM_ADMIN：內文摘要（總數 / 平均 / 最低前 5 份 / 儀表板連結），不走附件。
+
+        收件人為「全部 DM_ADMIN」、**數量不設上限**；超過平台單次上限時由 `DmNotifier.notify`
+        自動分批（#563）。此處不分批是刻意的——同一段邏輯不在各呼叫點重寫。
+
+        ⚠️ 本方法與 `_send_unread_reminders` 共用同一個 session 且最後才 commit
+        （`scheduler.py`），故這裡若拋例外會把同批的未讀提醒一起 rollback。
+        """
         recipients = await self._repo.admin_emails(db)
         if not recipients:
             return 0

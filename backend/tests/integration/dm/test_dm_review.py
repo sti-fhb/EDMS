@@ -20,7 +20,7 @@ from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag
 from app.dm.document.file_paths import storage_root
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.personal.service import PersonalService
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmChangeLog, DmReview
@@ -29,6 +29,7 @@ from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
+from app.services import MAX_RECIPIENTS
 
 pytestmark = pytest.mark.integration
 
@@ -761,3 +762,71 @@ async def test_recipients_pair_excludes_other_unit_same_role(db):
     assert "mab_nurse@e.com" in emails  # 單位 + 職位皆相符
     assert "tsgh_nurse@e.com" not in emails  # 同職位但單位不符 → 不得收到
     assert "ed@e.com" not in emails  # #554：撰寫者改由站內動態承接，不再收 Email
+
+
+# ── 收件人超過平台單次上限（#563）────────────────────
+
+
+async def test_approve_publishes_when_recipients_exceed_platform_limit(db):
+    """可見對象相符者超過平台單次上限時，核准發布**成功**且每個人都收得到（#563）。
+
+    ## 為何這條測試非建 51 個使用者不可
+
+    平台 `send_email` 對單次收件人數設上限（`MAX_RECIPIENTS`），超過即拋
+    `AppError(422, DP_MAIL_002)`；該例外一路冒到 router，`get_db` 隨即 rollback 整個
+    交易——文件沒轉 `PUBLISHED`、版本沒切、`DM_CHANGE_LOG` 沒寫、稽核沒寫。
+
+    ⚠️ **這個缺陷的觸發條件被 fixture 的預設排除掉了**：其餘收件測試各建 2～3 位閱覽者，
+    永遠碰不到上限。所以在本條之前，「CI 全綠」對這個缺陷**完全沒有證據力**——不是漏寫
+    斷言，是情境從未被製造出來。故此處真的建到上限 + 1 人。
+
+    三個斷言缺一不可：核准**成功**（擋住 rollback）、文件狀態與變更歷程**落地**（證明
+    rollback 真的沒發生，不是 approve 回傳了但資料沒寫）、`DP_EMAIL_LOG` **一個都不少**
+    （擋住「只寄給前 50 人」這種修法——那會讓第 51 人之後靜默收不到）。
+    """
+    total = MAX_RECIPIENTS + 1
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    for i in range(total):
+        uid = f"zt_v{i:03d}"
+        await _seed_user(db, uid, f"ZT 閱覽{i:03d}", email=f"{uid}@e.com")
+        await _grant(db, uid, DM_VIEWER)
+    doc, v, r = await _new_submission(db, "DM-SOP-000363", audience=("全體",))
+    # ⚠️ 可見對象必須種在**版本層**：`approve` 會先跑 `apply_version_tags_to_doc`，以版本快照
+    # 覆寫文件層生效值（#377）。只種文件層的話會在核准當下被清空，收件名單變成 0 人——
+    # 那會讓本測試「通過」卻什麼都沒驗到。
+    db.add(
+        DmVersionTag(
+            version_id=v.version_id,
+            tag_id=await _audience_id(db, "全體"),
+            unit_tag_id=await _unit_id(db, "全單位"),
+            created_user="ed",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+
+    res = await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    # ① 核准成功，且通知數就是全體人數（不是被截到上限）
+    assert res.published_version_id == v.version_id
+    assert res.notified == total, f"應排入 {total} 封，實得 {res.notified}"
+
+    # ② 業務寫入確實落地——若交易被 rollback，上面的回傳值仍在記憶體裡、但這裡會抓到舊值
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000363"))
+    assert doc.status == "PUBLISHED" and doc.current_version_id == v.version_id
+    logs = await db.scalar(
+        select(func.count())
+        .select_from(DmChangeLog)
+        .where(DmChangeLog.doc_id == "DM-SOP-000363", DmChangeLog.operation == "PUBLISH")
+    )
+    assert logs == 1
+
+    # ③ outbox 逐人一列，一個都不少
+    queued = await db.scalar(
+        text(
+            'SELECT count(*) FROM "DP_EMAIL_LOG" '
+            "WHERE \"MODULE\" = 'DM' AND \"TEMPLATE_CODE\" = 'DOC_PUBLISH' AND \"STATUS\" = 'PENDING'"
+        )
+    )
+    assert queued == total, f"DP_EMAIL_LOG 應有 {total} 列 PENDING，實得 {queued}"

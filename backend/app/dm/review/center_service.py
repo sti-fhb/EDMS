@@ -390,6 +390,10 @@ class ReviewCenterService:
         #554 起**不再通知撰寫者**——撰寫者改由「我的文件動態」承接（核准事件顯示為
         「核准發布」）；`author_id` 參數因而移除。閱覽者那半維持 Email，理由見
         `review/repository.recipient_emails` 的 docstring。
+
+        收件人數**不設上限、也不在此分批**（#563）：平台對單次呼叫有 `MAX_RECIPIENTS`
+        上限，超過會拋 `AppError` 並讓**整個核准交易 rollback**（文件發布不了）。分批收在
+        `DmNotifier.notify` 這個唯一出口，本方法照樣整份清單傳下去即可。
         """
         recipients = await self._repo.recipient_emails(db, doc.doc_id)
         if not recipients:
