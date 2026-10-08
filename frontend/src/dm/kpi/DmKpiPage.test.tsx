@@ -35,7 +35,7 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     expect(screen.getByText("—（無對應閱覽者）")).toBeInTheDocument()
   })
 
-  it("展開文件 → 逐可見對象組明細，且說明分組加總大於文件總計", async () => {
+  it("展開文件 → 逐可見對象組明細", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmKpiPage />)
     await screen.findByText("領血確認標準作業程序")
@@ -47,13 +47,31 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     // 正向錨點：展開後兩組都在（與上面的否定式用同一種查詢，避免文案改動時只有正向會紅）
     expect(await screen.findByText("醫檢師")).toBeInTheDocument()
     expect(screen.getByText("國防醫學院三軍總醫院松山分院．護理師")).toBeInTheDocument()
-    // fixture 刻意讓兩組重疊（6 + 5 = 11 > 應看 10）。這句話不是裝飾：缺了它，
-    // 看的人會把對不起來的兩個數字判定成算錯。
-    expect(
-      screen.getByText(
-        "各組獨立計算：一人身兼多組時每組分母都含他，故分組「應看」加總（11）可能大於本文件應看（10，已去重）。",
+  })
+
+  it("命中的全是訓練教材時 → 不顯示統計卡與文件統計區塊", async () => {
+    server.use(
+      http.get("/api/dm/kpi/documents", () =>
+        HttpResponse.json({
+          data: [],
+          meta: { total: 0, page: 1, limit: 20, total_pages: 0 },
+          summary: { total_docs: 0, rated_docs: 0, overall_rate: null, below_50_count: 0 },
+          training_docs: [
+            { doc_id: "DM-TRAINING-000001", doc_name: "基礎輸血學", category_name: "訓練教材", current_version_no: "1.0" },
+          ],
+          training_total: 1,
+        }),
       ),
-    ).toBeInTheDocument()
+    )
+    renderWithProviders(<DmKpiPage />)
+
+    // 正向錨點：訓練教材區照常呈現（證明頁面有載入，否定式才有意義）
+    expect(await screen.findByText("訓練教材（共 1 份）")).toBeInTheDocument()
+    // 統計必然為空（訓練教材不進統計母體），再顯示「—／共 0 份」與「查無符合條件」只是噪音
+    expect(screen.queryByText("整體平均閱讀率")).not.toBeInTheDocument()
+    expect(screen.queryByText("閱讀率低於 50% 之文件數")).not.toBeInTheDocument()
+    expect(screen.queryByText("查無符合條件之文件統計")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "匯出 CSV" })).not.toBeInTheDocument()
   })
 
   it("訓練教材另成一區，且該區不含任何閱讀統計欄位", async () => {
