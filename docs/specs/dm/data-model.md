@@ -375,7 +375,7 @@ erDiagram
 
 > **2026-07-08 集中化**：以下三者由平台模組 DP 定義（非 DM 自持），DM 僅維護自己 `MODULE=DM` / `DM_` 前綴之列；完整欄位表見平台 DP data-model。
 
-- **通知範本 → `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）**：DM 10 項內建事件（`DOC_SUBMIT` / `DOC_REJECT` / `DOC_PUBLISH` / `OBS_SUBMIT` / `OBS_APPROVE` / `OBS_REJECT` / `SUBMIT_WITHDRAWN` / `KPI_WEEKLY` / `UNREAD_REMIND` / `AUTO_REMIND`）改存 `DP_NOTIFY_TEMPLATE`，欄位含 `EVENT_NAME` / `SUBJECT` / `BODY` / `CHANNEL`（EMAIL_MSG＝Email+站內 / MSG_ONLY＝僅站內，自動催辦用 / EMAIL_ONLY＝僅 Email，文件發布通知 / KPI 週報 / 未讀提醒用）/ `IS_ENABLED` 由 DP 表提供。編輯 UI 於平台 DP 系統管理後台「通知範本」畫面（DM 管理者按模組過濾、只編輯 `MODULE=DM` 的列）。`DOC_PUBLISH`（核准發布時觸發，發撰寫者 + 相符閱覽者）、`KPI_WEEKLY` / `UNREAD_REMIND`（排程 SCHDM001 觸發）皆 CHANNEL=EMAIL_ONLY、非同步批次寄送。原「文件發布(撰寫者,EMAIL_MSG)」與「發布通知閱覽者」已於 2026-06-29 合併為單一 `DOC_PUBLISH`。
+- **通知範本 → `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）**：DM 10 項內建事件（`DOC_SUBMIT` / `DOC_REJECT` / `DOC_PUBLISH` / `OBS_SUBMIT` / `OBS_APPROVE` / `OBS_REJECT` / `SUBMIT_WITHDRAWN` / `KPI_WEEKLY` / `UNREAD_REMIND` / `AUTO_REMIND`）改存 `DP_NOTIFY_TEMPLATE`，欄位含 `EVENT_NAME` / `SUBJECT` / `BODY` / `CHANNEL`（平台詞彙 `EMAIL` / `MSG` / `BOTH`；#554 起 DM 僅用 `EMAIL` 與 `MSG`，分界見下方通知事件表的註記）/ `IS_ENABLED` 由 DP 表提供。編輯 UI 於平台 DP 系統管理後台「通知範本」畫面（DM 管理者按模組過濾、只編輯 `MODULE=DM` 的列）。`DOC_PUBLISH`（核准發布時觸發，發**相符閱覽者**——#554 起不含撰寫者，撰寫者改由「我的文件動態」之「核准發布」承接）、`KPI_WEEKLY` / `UNREAD_REMIND`（排程 SCHDM001 觸發）皆 `CHANNEL=EMAIL`、非同步批次寄送。原「文件發布(撰寫者,EMAIL_MSG)」與「發布通知閱覽者」已於 2026-06-29 合併為單一 `DOC_PUBLISH`（此句之 `EMAIL_MSG` 為當時用語，保留以存歷程）。
 - **寄件佇列 → 平台 outbox `DP_EMAIL_LOG`**：DM 之非同步寄送（`DOC_PUBLISH` / `KPI_WEEKLY` / `UNREAD_REMIND`）改呼叫平台唯一發信服務（傳 `template_code`），由平台 outbox 非同步寄送並記錄狀態 / 重試 / `CALLER_MODULE=DM`。原 worker「寄送時即時組信」（未讀提醒即時算該收件人未看清單、KPI 週報即時算統計 + CSV）之行為改由平台發信服務承載；發布通知之收件名單仍於發布當下組出（快照）。
 - **系統參數 → 平台 `DP_PARAM_M/D`（`PARAM_ID` 前綴 `DM_`）**：DM 參數改存 `DP_PARAM`，平台提供唯讀查詢服務；維護介面於平台 DP 後台（DM 管理者只看 DM 參數，按模組過濾）。DM 參數 key：`DM_REMIND_THRESHOLD`（催辦門檻）、`DM_FILE_MAX_MB`、`DM_FILE_TYPES`。**排程執行時點不存 `DP_PARAM`**——`SCHDM001` 的執行時點唯一由 `DP_SCHEDULE.CRON_EXPR` 控制（於 DP 後台「排程管理」編輯、即時生效）；原 `DM_WEEKLY_SCHED_DAY_TIME` 從未被任何程式讀取，已於 #332 移除（ET 側 `ET_WEEKLY_STAT_DAY_TIME` 於 #325 同樣處置）。原發信引擎調校 `DM_MAIL_MAX_RETRY` / `DM_MAIL_RATE_PER_MIN` / `DM_MAIL_FAIL_ALERT_PCT` 屬發信引擎，因發信引擎集中於平台，已改為**平台級 `MAIL` 參數組**（`RETRY_MAX` / `RATE_PER_MIN` / `RETRY_INTERVAL_MIN`，不再掛 `DM_`；失敗告警作廢——由 IT 監控負責，2026-07-09 對齊平台），凡引用處改述為「平台發信引擎參數」。
 
@@ -416,16 +416,30 @@ erDiagram
 
 | 代碼 | 事件 | 對象 | 管道 |
 |------|------|------|------|
-| DOC_SUBMIT | 文件送審 | 指定審核者 | EMAIL_MSG |
-| DOC_REJECT | 文件退回 | 撰寫者 | EMAIL_MSG |
-| **DOC_PUBLISH** | **文件發布通知** | **撰寫者 + 相符閱覽者**（掛「全體」→ 全部）| **EMAIL_ONLY（非同步）** |
-| OBS_SUBMIT | 廢止申請送審 | 指定審核者 | EMAIL_MSG |
-| OBS_APPROVE | 廢止核准 | 撰寫者（廢止申請人）| EMAIL_MSG |
-| OBS_REJECT | 廢止退回 | 撰寫者（廢止申請人）| EMAIL_MSG |
-| SUBMIT_WITHDRAWN | 撰寫者撤回送審 / 廢止申請（US9）| 原指派審核者 | MSG_ONLY |
-| **KPI_WEEKLY** | **KPI 週報** | **管理者（DM_ADMIN）** | **EMAIL_ONLY（排程，內文摘要 + CSV）** |
-| **UNREAD_REMIND** | **未讀提醒** | 未看之**閱覽者** | **EMAIL_ONLY（排程，一人一信彙整；涵蓋全部已發布文件；由管理者以本範本啟用/停用統一控制）** |
-| AUTO_REMIND | 自動催辦信 | 指定審核者 | MSG_ONLY |
+| DOC_SUBMIT | 文件送審 | 指定審核者 | `MSG`（#554）|
+| DOC_REJECT | 文件退回 | 撰寫者 | `MSG`（#554）|
+| **DOC_PUBLISH** | **文件發布通知** | **相符閱覽者**（掛「全體」→ 全部；#554 起**不含撰寫者**）| **`EMAIL`（非同步）** |
+| OBS_SUBMIT | 廢止申請送審 | 指定審核者 | `MSG`（#554）|
+| OBS_APPROVE | 廢止核准 | 撰寫者（廢止申請人）| `MSG`（#554）|
+| OBS_REJECT | 廢止退回 | 撰寫者（廢止申請人）| `MSG`（#554）|
+| SUBMIT_WITHDRAWN | 撰寫者撤回送審 / 廢止申請（US9）| 原指派審核者 | `MSG` |
+| **KPI_WEEKLY** | **KPI 週報** | **管理者（DM_ADMIN）** | **`EMAIL`（排程，內文摘要 + 儀表板連結）** |
+| **UNREAD_REMIND** | **未讀提醒** | 未看之**閱覽者** | **`EMAIL`（排程，一人一信彙整；涵蓋全部已發布文件；由管理者以本範本啟用/停用統一控制）** |
+| AUTO_REMIND | 自動催辦信 | 指定審核者 | `MSG` |
+
+> ⚠️ **管道值為平台詞彙 `EMAIL` / `MSG` / `BOTH`**（`DP_NOTIFY_TEMPLATE.CHANNEL` 的實際值）。本表原先寫
+> `EMAIL_ONLY` / `MSG_ONLY` / `EMAIL_MSG`——那些**不是系統存在的值**，寫進 DB 會讓發信靜默跳過。已於 #554 更正。
+>
+> 🔴 **`MSG` 不是「換一個管道送」，是「不送了」。** 平台**沒有站內訊息佇列**，`send_email` 對 `MSG` 範本
+> 直接回 `CHANNEL_NOT_EMAIL`、`queued_count=0`、不寫 `DP_EMAIL_LOG`。使用者看得到是因為**各功能自己畫**：
+> 簽核中心待簽核清單、個人專區「我的文件動態」，而其中文標籤由前端 `dm/personal/schemas.ts` 映射
+> （核准發布 / 已退回 / 已撤回 / 廢止待簽核），**不讀本表的 SUBJECT / BODY**。
+>
+> 👉 因此 7 支 `MSG` 範本的主旨與內文**目前沒有任何讀取端**，留存是為未來的站內訊息佇列。DP04
+> （通知範本維護）亦自 #554 起只列出會寄 Email 的範本，站內範本不可於畫面維護（403 `DP_MAIL_010`）。
+>
+> ⚠️ **分界是「收件人是不是送審當事人」**：當事人（審核者 / 撰寫者 / 申請人）在上述畫面看得到 → `MSG`；
+> 非當事人（閱覽者 / 管理者週報）沒有對應畫面 → 維持 `EMAIL`。`DOC_PUBLISH` 因此**只拿掉撰寫者那半**。
 
 ### 內建標籤組（DM_TAG_GROUP）
 

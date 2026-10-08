@@ -290,3 +290,71 @@ async def test_no_delete_endpoint(client, db, admin_gate):
     headers = {"Authorization": f"Bearer {create_access_token(sub='tadmin3', ttl_minutes=15)}"}
     r = await client.delete("/api/dp/notify/templates/ET/ET_EP", headers=headers)
     assert r.status_code == 405
+
+
+# ── #554：DP04 只維護會寄 Email 的範本 ──────────────────
+
+
+async def test_list_excludes_in_app_templates(db, admin_gate):
+    """列表只出現會寄 Email 的範本；站內（MSG）不列出。
+
+    ⚠️ 否定斷言配正向錨點**且用同一組資料來源**：只斷言「MSG 不在」的話，列表整個壞掉
+    （例如模組過濾寫錯而回空）時它也會通過。
+    """
+    admin_gate(dm_admins=("admin01",))
+    codes = {t.template_code for t in await TemplateAdminService().list_visible(db, "admin01")}
+
+    # 正向：DM 仍寄 Email 的三支都在
+    assert {"DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND"} <= codes
+    # 否定：#554 改為站內的 5 支 + 原本就是 MSG 的 2 支，皆不在
+    assert codes.isdisjoint(
+        {"DOC_SUBMIT", "DOC_REJECT", "OBS_SUBMIT", "OBS_APPROVE", "OBS_REJECT", "AUTO_REMIND", "SUBMIT_WITHDRAWN"}
+    )
+
+
+async def test_update_in_app_template_forbidden(db, admin_gate):
+    """直呼 PUT 改站內範本 → 403 DP_MAIL_010。
+
+    列表與寫入是同一道過濾。只擋列表的話會留下「畫面看不到、直呼 API 仍改得動」的路徑——
+    那正是 #534 記下的 `GET` 有模組過濾、`PUT` 沒有的同一個形狀。
+    """
+    admin_gate(dm_admins=("admin01",))
+    tpl = await db.scalar(
+        select(DpNotifyTemplate).where(DpNotifyTemplate.module == "DM", DpNotifyTemplate.template_code == "DOC_SUBMIT")
+    )
+    assert tpl.channel == "MSG"  # 前提錨點：這支確實是站內範本，否則下方 403 可能來自別的原因
+
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module="DM",
+            template_code="DOC_SUBMIT",
+            data=TemplateUpdate(
+                subject=tpl.subject, body=tpl.body, channel=tpl.channel, is_enabled=True, version=tpl.version
+            ),
+            operator=_OP,
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.error_code == "DP_MAIL_010"
+
+
+async def test_in_app_block_follows_module_filter(db, admin_gate):
+    """站內阻擋在模組過濾**之後**：無該模組權限者仍先得 403 DP_MAIL_005。
+
+    順序反過來的話，等於對沒有權限的人洩漏「這支範本是站內的」。
+    """
+    admin_gate(et_admins=("admin01",))  # 只有 ET 權限，對 DM 範本越權
+    tpl = await db.scalar(
+        select(DpNotifyTemplate).where(DpNotifyTemplate.module == "DM", DpNotifyTemplate.template_code == "DOC_SUBMIT")
+    )
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module="DM",
+            template_code="DOC_SUBMIT",
+            data=TemplateUpdate(
+                subject=tpl.subject, body=tpl.body, channel=tpl.channel, is_enabled=True, version=tpl.version
+            ),
+            operator=_OP,
+        )
+    assert exc.value.error_code == "DP_MAIL_005"  # 不是 010

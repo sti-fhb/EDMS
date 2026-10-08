@@ -1,8 +1,12 @@
+import ExpandLessIcon from "@mui/icons-material/ExpandLess"
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
+import Collapse from "@mui/material/Collapse"
+import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
@@ -174,6 +178,7 @@ function ActivityRow({
 }) {
   const { confirm } = useNotification()
   const navigate = useNavigate()
+  const [expanded, setExpanded] = useState(false)
   const label =
     perspective === "author" ? authorEventLabel(event) : reviewerEventLabel(event)
   const unreachable = partyUnreachableText(event.party_unreachable, perspective)
@@ -189,41 +194,91 @@ function ActivityRow({
     })
 
   return (
-    <TableRow>
-      <TableCell>{event.doc_name}</TableCell>
-      <TableCell>{REVIEW_TYPE_LABELS[event.review_type] ?? event.review_type}</TableCell>
-      <TableCell>
-        <Chip size="small" color={label.tone} label={label.text} />
-      </TableCell>
-      <TableCell>
-        {event.party_name ?? "—"}
-        {/* #395 D-2：對造人帳號不可達時說明原因——讓「知道」與「能做」落在同一個人身上。
-            撰寫者本來就能撤回重送（撤回鈕就在同一列），缺的只是沒人告訴他該撤回。 */}
-        {unreachable && (
-          <Typography variant="caption" color="error" display="block">
-            {unreachable}
-          </Typography>
-        )}
-      </TableCell>
-      <TableCell>{formatDateTime(event.event_time)}</TableCell>
-      <TableCell>
-        {actionable && perspective === "author" && (
-          <Button size="small" variant="outlined" color="error" onClick={onWithdrawClick} disabled={busy}>
-            撤回送審
-          </Button>
-        )}
-        {actionable && perspective === "reviewer" && (
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => navigate(`/dm/review?reviewId=${event.review_id}`)}
-          >
-            前往簽核中心
-          </Button>
-        )}
-        {!actionable && "—"}
-      </TableCell>
-    </TableRow>
+    <>
+      <TableRow>
+        <TableCell>{event.doc_name}</TableCell>
+        <TableCell>{REVIEW_TYPE_LABELS[event.review_type] ?? event.review_type}</TableCell>
+        <TableCell>
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <Chip size="small" color={label.tone} label={label.text} />
+            {/* #554：退回原因的站內讀取端。DOC_REJECT / OBS_REJECT 改站內後那封含原因的信不再
+                寄出，不在此呈現的話 DM_REVIEW.REASON 就沒有任何讀取端。
+                展開為「多一列」而非撐高本列 → 列高維持一致（同 DmDetailPage 的版本歷程抽屜）。 */}
+            {event.reason && (
+              <IconButton
+                size="small"
+                aria-label={expanded ? "收合退回原因" : "展開退回原因"}
+                aria-expanded={expanded}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              </IconButton>
+            )}
+          </Stack>
+          {/* 未展開時先給一行大意：多數退回原因本就一句話，不必點就看得到 */}
+          {event.reason && !expanded && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                display: "-webkit-box",
+                WebkitLineClamp: 1,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "break-all",
+              }}
+            >
+              {event.reason}
+            </Typography>
+          )}
+        </TableCell>
+        <TableCell>
+          {event.party_name ?? "—"}
+          {/* #395 D-2：對造人帳號不可達時說明原因——讓「知道」與「能做」落在同一個人身上。
+              撰寫者本來就能撤回重送（撤回鈕就在同一列），缺的只是沒人告訴他該撤回。 */}
+          {unreachable && (
+            <Typography variant="caption" color="error" display="block">
+              {unreachable}
+            </Typography>
+          )}
+        </TableCell>
+        <TableCell>{formatDateTime(event.event_time)}</TableCell>
+        <TableCell>
+          {actionable && perspective === "author" && (
+            <Button size="small" variant="outlined" color="error" onClick={onWithdrawClick} disabled={busy}>
+              撤回送審
+            </Button>
+          )}
+          {actionable && perspective === "reviewer" && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => navigate(`/dm/review?reviewId=${event.review_id}`)}
+            >
+              前往簽核中心
+            </Button>
+          )}
+          {!actionable && "—"}
+        </TableCell>
+      </TableRow>
+      {/* 展開列：另起一列顯示全文，本列高度不變；colSpan 蓋滿 6 欄（文件 / 類型 / 狀態 / 對造人 / 時間 / 操作） */}
+      {event.reason && (
+        <TableRow>
+          <TableCell sx={{ py: 0, borderBottom: 0 }} colSpan={6}>
+            <Collapse in={expanded} unmountOnExit>
+              <Box sx={{ py: 1.5, px: 1 }}>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  退回原因
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  {event.reason}
+                </Typography>
+              </Box>
+            </Collapse>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   )
 }
 

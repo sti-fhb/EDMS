@@ -630,6 +630,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "王審核",
           party_unreachable: null,
+          reason: null,
         },
         // 已完成週期展開為兩事件（送審 + 退回），驗證狀態變動歷程
         {
@@ -643,6 +644,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "王審核",
           party_unreachable: null,
+          reason: "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程",
         },
         {
           review_id: 803,
@@ -655,6 +657,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "王審核",
           party_unreachable: null,
+          reason: null,
         },
       ],
       reviewer: [
@@ -669,6 +672,7 @@ export const handlers = [
           is_overdue: true,
           party_name: "陳送審",
           party_unreachable: null,
+          reason: null,
         },
         // 審核者視角已完成項也展開為 送審 + 結果 兩列（Round-4 item 2）
         {
@@ -682,6 +686,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "陳送審",
           party_unreachable: null,
+          reason: "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程",
         },
         {
           review_id: 804,
@@ -694,6 +699,7 @@ export const handlers = [
           is_overdue: false,
           party_name: "陳送審",
           party_unreachable: null,
+          reason: null,
         },
       ],
     }),

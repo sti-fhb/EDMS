@@ -45,6 +45,15 @@ class ActivityEvent(BaseModel):
     event_kind: str  # "submitted"（送審 / 發起廢止）| "resolved"（核准 / 退回 / 撤回 之結果）
     event_time: datetime  # 該事件發生時間（submitted＝送審時間、resolved＝完成時間）
     is_overdue: bool  # 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻（審核者視角顯「催辦中」，AC5）
+    #: 退回原因（#554）。**僅 `event_kind="resolved"` 且 `status="REJECTED"` 時有值**，其餘為 None。
+    #:
+    #: 背景：DOC_REJECT / OBS_REJECT 範本內文原帶「退回原因：{reason}」，改為站內（MSG）後
+    #: 那封信不再寄出。若不在此帶出，`DM_REVIEW.REASON` 會寫入卻**沒有任何讀取端**——
+    #: 撰寫者只知道「被退回」、不知道「為什麼」。
+    #:
+    #: ⚠️ `submitted` 事件一律給 None：同一個 `REASON` 欄位在 OBSOLETE 的送審事件上是
+    #: 「廢止申請原因」（申請人自己寫的），對他不是新資訊，混進來只會讓兩種語意糊在一起。
+    reason: str | None
     party_name: str | None  # 撰寫者視角＝指定審核者姓名；審核者視角＝送審者姓名
     #: 對造人帳號不可達之原因（#395 D-2）：`None` 可達／`"DISABLED"` 已停用／`"NOT_FOUND"` 查無帳號。
     #:

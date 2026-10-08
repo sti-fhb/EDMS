@@ -101,6 +101,9 @@ class PersonalRepository:
                 DmReview.status,
                 DmReview.submit_date,
                 DmReview.complete_date,
+                # 退回 / 廢止原因（#554）。同一欄位兩種語意，由 service 只掛在 resolved+REJECTED 的
+                # 事件上——OBSOLETE 的 submitted 事件帶的是「廢止申請原因」，混進去會誤導。
+                DmReview.reason,
                 DmDocument.doc_name,
                 party_user.user_name.label("party_name"),
                 # 對造人帳號狀態（#395 D-2）。**不在查詢層判定**——`STATUS` 值域屬 DP 語意，

@@ -34,6 +34,10 @@ export interface ActivityEvent {
   // 對造人帳號不可達之原因（#395 D-2）：null 可達 / "DISABLED" 已停用 / "NOT_FOUND" 查無帳號。
   // ⚠️ 兩類不可併成一句——補救動作不同（查無要修資料、停用要換審核者）。
   party_unreachable: string | null
+  // 退回原因（#554）。**僅 event_kind="resolved" 且 status="REJECTED" 時有值**。
+  // 背景：DOC_REJECT / OBS_REJECT 改站內後，那封含「退回原因」的信不再寄出；
+  // 不在此呈現的話 DM_REVIEW.REASON 就沒有任何讀取端，撰寫者只會知道「被退回」。
+  reason: string | null
 }
 
 export interface ActivityResponse {

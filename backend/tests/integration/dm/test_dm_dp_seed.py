@@ -26,16 +26,45 @@ async def test_dm_templates_seeded_in_dp_table(db):
 
 
 async def test_dm_template_channels(db):
-    """CHANNEL 沿用平台詞彙：AUTO_REMIND=MSG（僅站內）、發布/KPI/未讀=EMAIL、送審=BOTH（Email+站內）。"""
+    """CHANNEL 沿用平台詞彙。#554 起 DM 只剩三支會寄 Email，簽核流程通知一律站內。
+
+    分界是**收件人是不是送審當事人**：
+    - 當事人（審核者 / 撰寫者 / 申請人）→ MSG。他們在「我的文件動態」與「簽核中心」看得到。
+    - 非當事人 → EMAIL。`DOC_PUBLISH` 的收件人含可見對象相符的**閱覽者**，而閱覽者沒有
+      `DM_REVIEW` 列、動態對他們是空的，DM01 文件庫也無未讀標示——改 MSG 會整則消失。
+      `KPI_WEEKLY`（管理者週報）/ `UNREAD_REMIND`（催閱）同理，是推給人看而非當事人回來看。
+    """
     rows = {
         r.template_code: r
         for r in (await db.execute(select(DpNotifyTemplate).where(DpNotifyTemplate.module == "DM"))).scalars().all()
     }
-    assert rows["AUTO_REMIND"].channel == "MSG"
-    assert rows["SUBMIT_WITHDRAWN"].channel == "MSG"  # US9 撤回站內訊息（不寄 Email）
-    assert rows["DOC_PUBLISH"].channel == "EMAIL"
-    assert rows["KPI_WEEKLY"].channel == "EMAIL"
-    assert rows["DOC_SUBMIT"].channel == "BOTH"
+    # 站內（不寄 Email）——五支流程通知於 #554 由 BOTH 改入此列
+    for code in (
+        "AUTO_REMIND",
+        "SUBMIT_WITHDRAWN",
+        "DOC_SUBMIT",
+        "DOC_REJECT",
+        "OBS_SUBMIT",
+        "OBS_APPROVE",
+        "OBS_REJECT",
+    ):
+        assert rows[code].channel == "MSG", code
+    # 仍寄 Email
+    for code in ("DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND"):
+        assert rows[code].channel == "EMAIL", code
+    # 母體對帳：上面兩組必須窮盡 DM 的全部範本，否則新增一支而沒分類不會有人發現
+    assert set(rows) == {
+        "AUTO_REMIND",
+        "SUBMIT_WITHDRAWN",
+        "DOC_SUBMIT",
+        "DOC_REJECT",
+        "OBS_SUBMIT",
+        "OBS_APPROVE",
+        "OBS_REJECT",
+        "DOC_PUBLISH",
+        "KPI_WEEKLY",
+        "UNREAD_REMIND",
+    }
     assert all(not r.is_system for r in rows.values())  # DM 範本非系統信、可停用
 
 

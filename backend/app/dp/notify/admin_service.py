@@ -26,6 +26,17 @@ _FORBIDDEN_MSG = "無權限維護此模組之範本"
 _SYSTEM_MSG = "系統信不可停用或刪除（主旨與內文可編輯）"
 _CONFLICT_MSG = "內容已被他人修改，請重新載入後再儲存"
 _CHANNEL_READONLY_MSG = "通知管道不可修改，如需變更請洽系統管理人員"
+_MSG_ONLY_MSG = "站內通知範本不提供畫面維護"
+
+#: DP04 僅維護**會寄 Email** 的範本（#554）。
+#:
+#: ⚠️ 裁示的字面是「管道為 Email」，此處實作為「會寄 Email」——`BOTH` 一併納入。今日兩者
+#: 等價（#554 之後全庫無 `BOTH` 列），但日後若有人新增 `BOTH` 範本，只比對 `EMAIL` 會讓它
+#: **靜默變成不可維護**：列表看不到、直呼 PUT 回 403，而沒有任何跡象說明為什麼。
+#:
+#: 排除的是 `MSG`：那些範本的主旨 / 內文自 #554 起沒有任何讀取端——站內呈現由各功能自己畫，
+#: 中文標籤在前端 `dm/personal/schemas.ts` 映射、不讀本表。列出來只會讓人以為改了有用。
+_MAINTAINABLE_CHANNELS = ("EMAIL", "BOTH")
 
 
 def _snapshot(t: DpNotifyTemplate) -> dict:
@@ -56,9 +67,16 @@ class TemplateAdminService:
         return modules
 
     async def list_visible(self, db: AsyncSession, user_id: str) -> list[TemplateResponse]:
-        """列操作者可見之通知範本（DP 系統信 + 具管理者身分之模組級）。"""
+        """列操作者可見且**可維護**之通知範本（DP 系統信 + 具管理者身分之模組級，且會寄 Email）。
+
+        #554 起以 `_MAINTAINABLE_CHANNELS` 過濾——站內（`MSG`）範本不列出，因其主旨 / 內文
+        已無讀取端。`update_template` 有同一道過濾，兩者必須一致，否則會留下「列表看不到、
+        直呼 API 仍改得動」的路徑。
+        """
         is_et, is_dm = await self._admin_flags(db, user_id)
-        templates = await self._repo.list_templates(db, self._visible_modules(is_et, is_dm))
+        templates = await self._repo.list_templates(
+            db, self._visible_modules(is_et, is_dm), channels=_MAINTAINABLE_CHANNELS
+        )
         return [TemplateResponse.model_validate(t) for t in templates]
 
     async def update_template(
@@ -77,6 +95,15 @@ class TemplateAdminService:
         is_et, is_dm = await self._admin_flags(db, operator.user_id)
         if module not in self._visible_modules(is_et, is_dm):
             raise AppError(status_code=403, detail=_FORBIDDEN_MSG, error_code="DP_MAIL_005")
+
+        # 站內範本整列不可維護（#554）。位置有意義：
+        # - 在模組過濾**之後**——否則會對無該模組權限者洩漏「這支範本是站內的」。
+        # - 在下方所有欄位層檢核**之前**——整列都改不動時，個別欄位合不合法無關緊要
+        #   （比照 params 的 is_editable_scope 先於值域驗證）。
+        # ⚠️ 本檢核與 list_visible 的 _MAINTAINABLE_CHANNELS 是同一道，兩者必須一起改：
+        #   只擋列表會留下「畫面看不到、直呼 PUT 仍改得動」的路徑。
+        if template.channel not in _MAINTAINABLE_CHANNELS:
+            raise AppError(status_code=403, detail=_MSG_ONLY_MSG, error_code="DP_MAIL_010")
 
         # CHANNEL 唯讀（#307）：管道與「實際怎麼送 / 怎麼呈現」的對應寫在程式裡、不是資料驅動的，
         # 兩個方向的改動都會靜默失效——

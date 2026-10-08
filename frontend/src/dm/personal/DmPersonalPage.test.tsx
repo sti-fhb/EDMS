@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest"
 import { DmPersonalPage } from "./DmPersonalPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
+/** 與 `test/server.ts` 兩筆 resolved + REJECTED 事件的 `reason` 逐字相同（#554）。 */
+const REJECT_REASON = "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程"
+
 describe("DmPersonalPage 個人專區（DM04）", () => {
   it("我的文件動態：撰寫者 / 審核者視角事件；送審中可撤回；逾門檻顯催辦中（AC5）", async () => {
     renderWithProviders(<DmPersonalPage />)
@@ -170,5 +173,41 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(await screen.findByText("等很久的文件")).toBeInTheDocument()
     expect(screen.getByText("逾期未審")).toBeInTheDocument()
     expect(screen.queryByText("送審中")).not.toBeInTheDocument()
+  })
+
+  it("退回原因顯示於已退回事件，且可展開看全文（#554）", async () => {
+    // #554：DOC_REJECT / OBS_REJECT 改站內後，那封「退回原因：{reason}」的信不再寄出，
+    // 本頁成為 DM_REVIEW.REASON 唯一的讀取端——沒有這條測試，原因欄會靜默變成沒人看得到。
+    const user = userEvent.setup()
+    renderWithProviders(<DmPersonalPage />)
+    await screen.findByText("待審文件 A")
+
+    // 未展開時灰色摘要就帶著全文（只以 CSS 夾成一行），撰寫者 / 審核者視角各一列
+    expect(screen.getAllByText(REJECT_REASON)).toHaveLength(2)
+    // 「退回原因」小標只存在展開列內（unmountOnExit）
+    expect(screen.queryByText("退回原因")).not.toBeInTheDocument()
+
+    const toggles = screen.getAllByRole("button", { name: "展開退回原因" })
+    expect(toggles).toHaveLength(2)
+    await user.click(toggles[0])
+
+    // 與上面的否定斷言用同一種查詢方式，確保它查得到東西（改小標文案時兩條會一起紅）
+    expect(await screen.findByText("退回原因")).toBeInTheDocument()
+    // 兩列各自獨立展開：點開的那列變收合鈕，另一列仍是展開鈕
+    expect(await screen.findByRole("button", { name: "收合退回原因" })).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "展開退回原因" })).toHaveLength(1)
+  })
+
+  it("同一送審週期的「送審」事件不帶退回原因（#554）", async () => {
+    renderWithProviders(<DmPersonalPage />)
+    await screen.findByText("待審文件 A")
+
+    // 正向錨點：已退回週期的「送審」起點列確實有渲染（撰寫者 + 審核者各一）。
+    // ⚠️ 這兩列的 status 同樣是 REJECTED——只看 status 不看 event_kind 的話，
+    // 它們會被誤判成該顯示原因（後端 _build_events 正是以 event_kind 分流）。
+    expect(screen.getAllByText("送審")).toHaveLength(2)
+    expect(screen.getAllByText("已退回")).toHaveLength(2)
+    // 4 列 REJECTED 中只有 2 列（resolved）帶展開鈕
+    expect(screen.getAllByRole("button", { name: "展開退回原因" })).toHaveLength(2)
   })
 })
