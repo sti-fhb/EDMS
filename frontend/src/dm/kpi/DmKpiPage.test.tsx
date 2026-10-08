@@ -35,7 +35,7 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     expect(screen.getByText("—（無對應閱覽者）")).toBeInTheDocument()
   })
 
-  it("展開文件 → 逐可見對象組明細，且說明分組加總大於文件總計", async () => {
+  it("展開文件 → 逐可見對象組明細", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmKpiPage />)
     await screen.findByText("領血確認標準作業程序")
@@ -47,27 +47,6 @@ describe("DmKpiPage 閱讀統計 KPI", () => {
     // 正向錨點：展開後兩組都在（與上面的否定式用同一種查詢，避免文案改動時只有正向會紅）
     expect(await screen.findByText("醫檢師")).toBeInTheDocument()
     expect(screen.getByText("國防醫學院三軍總醫院松山分院．護理師")).toBeInTheDocument()
-    // fixture 刻意讓兩組重疊（6 + 5 = 11 > 應看 10）。這句話不是裝飾：缺了它，
-    // 看的人會把對不起來的兩個數字判定成算錯。
-    expect(
-      screen.getByText(
-        "分組「應看」加總為 11，大於本文件應看 10：有人同時符合多組，各組分母都計入他，文件總計則已去重。",
-      ),
-    ).toBeInTheDocument()
-  })
-
-  it("分組加總等於文件總計時 → 不顯示重疊說明", async () => {
-    // 身兼多組是少數例外。無條件顯示會讓常態多出一句說明一件沒發生的事，
-    // 甚至印出「加總（2）可能大於本文件應看（2）」這種自我矛盾的句子（裁示 2026-10-08）。
-    const user = userEvent.setup()
-    renderWithProviders(<DmKpiPage />)
-    await screen.findByText("無重疊文件")
-
-    await user.click(screen.getByRole("button", { name: "展開 無重疊文件 的可見對象" }))
-
-    // 正向錨點：展開確實生效（與下方否定式同為 text 查詢，避免「找不到」造成恆真）
-    expect(await screen.findByText("軍人")).toBeInTheDocument()
-    expect(screen.queryByText(/分組「應看」加總為/)).not.toBeInTheDocument()
   })
 
   it("命中的全是訓練教材時 → 不顯示統計卡與文件統計區塊", async () => {

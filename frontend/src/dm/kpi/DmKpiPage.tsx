@@ -56,22 +56,16 @@ function RateCell({ rate }: { rate: number | null }) {
 /**
  * 展開後的逐可見對象組明細（#567 A）。
  *
- * 末列的說明**只在分組加總真的大於文件總計時出現**。各組獨立計算完成度、身兼多組者每組
- * 分母都含他，而文件總計去重——這兩個數字對不起來時必須解釋，否則看的人會判定成算錯；
- * 但身兼多組是少數例外，**無條件顯示反而讓常態多出一句說明一件沒發生的事**，而且會印出
- * 「加總（2）可能大於本文件應看（2）」這種自我矛盾的句子（裁示 2026-10-08）。
+ * ## 這裡刻意**沒有**「分組加總可能大於文件總計」的說明
+ *
+ * 各組獨立計算完成度、身兼多組者每組分母都含他，而文件總計去重，所以兩者**可能**對不起來。
+ * #567 原本為此加了一句固定說明，但身兼多組是少數例外，常態因此多出一句在說一件沒發生的事，
+ * 且兩數相等時會印出「加總（2）可能大於本文件應看（2）」這種自我矛盾的句子。
+ *
+ * **裁示 2026-10-08：整句移除**，接受「真的重疊時讀者可能一時看不懂」這個殘餘風險
+ * （見 `spec_us13` FR-003a）。⚠️ 要加回來之前請先讀那條 FR——這不是沒人想過，是權衡後拿掉的。
  */
 function AudienceGroupRows({ doc }: { doc: KpiDocItem }) {
-  const groupSum = doc.groups.reduce((n, g) => n + g.should_see, 0)
-  // 只在**真的對不起來時**才解釋。原本無條件顯示，於是絕大多數情況下出現「加總（2）可能
-  // 大於本文件應看（2）」這種自己打臉的句子——兩個數字相同卻說「可能大於」，讀者只會更困惑。
-  // 身兼多組是少數例外（裁示 2026-10-08），常態不該為例外付出版面與雜訊。
-  const hasOverlap = groupSum > doc.should_see
-  // 在 JS 組好單一字串，不在 JSX 跨行插值：後者會切成多個 text node，使 getByText
-  // 永遠找不到它——而「找不到」在否定式斷言下是恆真的，守門會靜默失效。
-  const overlapNote =
-    `分組「應看」加總為 ${groupSum}，大於本文件應看 ${doc.should_see}：` +
-    `有人同時符合多組，各組分母都計入他，文件總計則已去重。`
   return (
     <>
       {doc.groups.map((g, idx) => (
@@ -91,16 +85,6 @@ function AudienceGroupRows({ doc }: { doc: KpiDocItem }) {
           </TableCell>
         </TableRow>
       ))}
-      {hasOverlap && (
-        <TableRow sx={{ backgroundColor: "action.hover" }}>
-          <TableCell />
-          <TableCell colSpan={7} sx={{ pl: 3, pt: 0 }}>
-            <Typography variant="caption" color="text.secondary">
-              {overlapNote}
-            </Typography>
-          </TableCell>
-        </TableRow>
-      )}
     </>
   )
 }
