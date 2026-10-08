@@ -830,3 +830,61 @@ async def test_approve_publishes_when_recipients_exceed_platform_limit(db):
         )
     )
     assert queued == total, f"DP_EMAIL_LOG 應有 {total} 列 PENDING，實得 {queued}"
+
+
+async def test_approve_succeeds_when_publish_template_missing(db):
+    """範本不存在時核准**仍成功**——通知失敗不得連坐業務交易（#563）。
+
+    `DmNotifier` 本次起比照 `EtNotifier` 攔下 `AppError`。這是 DM **全部 8 個通知呼叫點**
+    的行為變更，不只多人清單那一處：原本範本被刪 / 改 MODULE 會讓送審、廢止送審、核准、
+    退回整個 rollback，現在改為靜默回 `SEND_FAILED`、操作照常完成。
+
+    ⚠️ 本條釘的是**這個方向**（fail-open 而非 fail-closed）。單元測試只驗到 `DmNotifier`
+    回傳什麼，驗不到「呼叫方的交易真的沒被回滾」——那要走真 DB。
+
+    ⚠️ 代價寫在這裡供日後權衡：`DP_MAIL_001` 在**寫入任何列之前**發生，所以這條路徑連
+    `DP_EMAIL_LOG` 都不會留下痕跡（下方斷言 0 列即是在陳述這件事）。「沒有人收到通知」
+    目前只能從 `notified == 0` 看出來，而呼叫端沒有保留 `skipped_reason`。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _seed_user(db, "zt_vmiss", "ZT 閱覽", email="zt_vmiss@e.com")
+    await _grant(db, "zt_vmiss", DM_VIEWER)
+    doc, v, r = await _new_submission(db, "DM-SOP-000364", audience=("全體",))
+    db.add(
+        DmVersionTag(
+            version_id=v.version_id,
+            tag_id=await _audience_id(db, "全體"),
+            unit_tag_id=await _unit_id(db, "全單位"),
+            created_user="ed",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+    # 把範本改名＝模擬「被刪 / 改 MODULE」；send_email 將拋 404 DP_MAIL_001
+    await db.execute(
+        text(
+            'UPDATE "DP_NOTIFY_TEMPLATE" SET "TEMPLATE_CODE" = \'ZT_GONE\' '
+            "WHERE \"MODULE\" = 'DM' AND \"TEMPLATE_CODE\" = 'DOC_PUBLISH'"
+        )
+    )
+    await db.flush()
+
+    res = await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    # 正向錨點：業務寫入確實落地（若 AppError 冒出去，這裡會因 rollback 而拿到舊值）
+    assert res.published_version_id == v.version_id
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000364"))
+    assert doc.status == "PUBLISHED"
+    logs = await db.scalar(
+        select(func.count())
+        .select_from(DmChangeLog)
+        .where(DmChangeLog.doc_id == "DM-SOP-000364", DmChangeLog.operation == "PUBLISH")
+    )
+    assert logs == 1
+    # 通知那一側：一封都沒排入，且**連 FAILED 列都沒有**
+    assert res.notified == 0
+    queued = await db.scalar(
+        text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "MODULE" = \'DM\' AND "CALLER_MODULE" = \'DM\'')
+    )
+    assert queued == 0

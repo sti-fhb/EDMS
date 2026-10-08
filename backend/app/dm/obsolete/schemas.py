@@ -8,4 +8,4 @@ class InitiateObsoleteResult(BaseModel):
 
     review_id: int
     doc_status: str  # PENDING_OBSOLETE
-    notified: int  # 排入 Email 之收件數（0=範本停用 / 審核者無 Email）
+    notified: int  # 排入 Email 之收件數（0=範本停用 / 審核者無 Email / 排入失敗，見 DmNotifier）

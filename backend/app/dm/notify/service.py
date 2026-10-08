@@ -91,6 +91,13 @@ class DmNotifier:
             # 收件人不入 log：那是個資，且此處的失敗與「寄給誰」無關（範本層級的問題）。
             # ⚠️ 回報 `queued`（已累計）而非 0——前面幾批的人**已經**寫進 outbox 了，
             # 回 0 會讓呼叫方以為一封都沒排入。
+            #
+            # 實務上 `queued > 0` 幾乎不會發生：此處唯一可能的 `AppError` 是範本不存在
+            # （`DP_MAIL_001`），那是範本層級的條件，第 1 批就會失敗。要走到第 k>1 批才失敗，
+            # 得有人在迴圈進行中把範本刪掉。別把「部分成功」讀成常態。
+            #
+            # ⚠️ 也因為 `DP_MAIL_001` 發生在寫入任何列之前，這條路徑是**唯一一種連
+            # `DP_EMAIL_LOG` 都沒有留下痕跡**的失敗——渲染失敗至少還會寫 FAILED 列。
             logger.exception("DM 通知排入失敗，不影響呼叫方交易 template_code=%s 已排入=%s", template_code, queued)
             return SendResult(queued_count=queued, skipped_reason="SEND_FAILED")
         return SendResult(queued_count=queued, skipped_reason=skipped_reason)

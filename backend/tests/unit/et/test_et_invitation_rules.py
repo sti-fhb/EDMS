@@ -12,6 +12,7 @@ import pytest
 from app.core.exceptions import AppError
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.invitation.rules import MAX_EMAILS_PER_REQUEST, ensure_invitable, parse_emails
+from app.services import MAX_RECIPIENTS
 
 pytestmark = pytest.mark.unit
 
@@ -77,9 +78,10 @@ class TestParseEmails:
 
         #563 起改由 `app.services` 取得：該常數是呼叫方必須遵守的平台不變量，原先直接
         import DP 的私有名稱等於繞過唯一出口。
-        """
-        from app.services import MAX_RECIPIENTS
 
+        ⚠️ 本斷言是**單向**的：它守住後端 `rules.py` 那份硬寫值與平台同步，但
+        `frontend/src/et/courses/invitationSchemas.ts` 還有第三份硬寫的 50，沒有任何守門。
+        """
         assert MAX_EMAILS_PER_REQUEST == MAX_RECIPIENTS
 
     def test_去重後才計算上限(self) -> None:

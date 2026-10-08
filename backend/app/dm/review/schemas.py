@@ -73,7 +73,7 @@ class ApproveResult(BaseModel):
     """核准並發布結果。"""
 
     published_version_id: int
-    notified: int  # 排入 Email 之收件數（0=範本停用 / 無收件）
+    notified: int  # 排入 Email 之收件數（0=範本停用 / 無收件 / 排入失敗，見 DmNotifier）
 
 
 class RejectResult(BaseModel):
