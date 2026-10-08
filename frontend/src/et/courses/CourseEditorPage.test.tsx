@@ -1,3 +1,4 @@
+import { QueryClient } from "@tanstack/react-query"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import dayjs from "dayjs"
@@ -82,6 +83,70 @@ describe("ET05 課程編輯頁", () => {
     expect(await screen.findByDisplayValue("採血作業訓練")).toBeInTheDocument()
     expect(await screen.findByDisplayValue("第一章")).toBeInTheDocument()
     expect(screen.getByDisplayValue("第二章")).toBeInTheDocument()
+  })
+
+  it("存檔後重進編輯頁：三個欄位都預帶新值，不被快取舊值鎖住（#578 手測回報）", async () => {
+    // 重進時 TanStack Query（staleTime 0）會先**同步**吐出快取裡的舊課程再背景 refetch；
+    // 表單初值的一次性 guard（`loadedCourseId !== course.course_id`）若不等 refetch 落定，
+    // 就會被舊值填滿並從此鎖住，稍後回來的新值再也寫不進表單——表現為「列表已是新名稱，
+    // 點進編輯頁卻還是舊的」。同一個形狀在 DM 編輯頁是 #377。
+    //
+    // ⚠️ 必須**跨兩次 mount 共用同一個 QueryClient**，否則第二次的快取是空的、必然重抓，
+    // 舊值永遠不會出現——這條測試會在修好前後都通過。
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    paramsRef.current = { courseId: "1" }
+
+    const first = renderWithProviders(<EtCourseEditorPage />, undefined, undefined, qc)
+    expect(await screen.findByDisplayValue("採血作業訓練")).toBeInTheDocument()
+    first.unmount()
+
+    // 使用者已存檔並離開；後端自此回新值
+    server.use(
+      http.get("/api/et/courses/:courseId", ({ params }) =>
+        HttpResponse.json({
+          course_id: Number(params.courseId),
+          course_name: "採血作業訓練（已改名）",
+          description: "改過的課程說明",
+          status: "DRAFT",
+          open_start_at: null,
+          open_end_at: null,
+          require_approval: false,
+          version: 1,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          audiences: [{ unit_tag_id: 102, tag_id: 3, label: "國防醫學院三軍總醫院 + 行政人員" }],
+          chapters: [{ chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] }],
+        }),
+      ),
+    )
+
+    renderWithProviders(<EtCourseEditorPage />, undefined, undefined, qc)
+
+    // 三個欄位分開驗：手測回報的是課程名稱 / 受訓對象 / 課程描述三項都沒更新
+    expect(await screen.findByDisplayValue("採血作業訓練（已改名）")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("改過的課程說明")).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "第 1 組的單位" })).toHaveValue("國防醫學院三軍總醫院")
+    expect(screen.getByRole("combobox", { name: "第 1 組的職位" })).toHaveValue("行政人員")
+    // 反向錨點：舊值不得殘留（與上面的正向斷言用同一種查詢方式）
+    expect(screen.queryByDisplayValue("採血作業訓練")).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue("課程說明")).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue("護理師")).not.toBeInTheDocument()
+  })
+
+  it("查詢被 403 擋下時顯示權限提示，不會卡在轉圈", async () => {
+    // #578 把「表單尚未預帶」也納入轉圈條件。該條件若寫成 `courseId !== undefined`
+    // 而非 `course !== undefined`，403 / 404 時表單永遠不會預帶 → 轉圈轉到天荒地老，
+    // 把下方的錯誤畫面整個蓋掉。這條釘住錯誤畫面仍到得了。
+    server.use(
+      http.get("/api/et/courses/:courseId", () =>
+        HttpResponse.json({ error_code: "ET_COURSE_010", error_message: "無權存取" }, { status: 403 }),
+      ),
+    )
+    renderEditor()
+
+    expect(await screen.findByText("您沒有檢視此課程的權限。課程編輯僅開放教師與管理者。")).toBeInTheDocument()
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
   })
 
   it("新增模式即可直接新增章節（暫存於畫面，儲存時一次建立）", async () => {
