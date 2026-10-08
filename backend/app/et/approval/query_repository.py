@@ -397,10 +397,12 @@ class EtApprovalQueryRepository:
         | `_enrich` / `mine` | 分頁結果的課程（語句已含 `EtCourse.deleted == 0`）| 已經篩過了 |
         | `search` 的擁有權判定（#439）| **使用者直接給的 `course_id`，未經任何篩選** | 見下 |
 
-        第二種情形下「已軟刪除的課程」仍會回傳 `owner_id`，於是
-        `ensure_course_filter_allowed` 對「自己名下但已刪除的課程」放行。**那不是漏洞**
-        ——放行之後 `teacher_query_stmt` 的 `EtCourse.deleted == 0` 仍會把它濾成空結果；
-        而他人的已刪除課程照樣 403（`owner_id` 不符），不洩漏存在性。
+        ↔️ **第二種情形已於 #548 裁示 4 消失**：擁有權閘（`ensure_course_filter_allowed`）
+        整支退役，`search` 不再為了判定擁有權而查課程，`course_id` 直接進 `WHERE`。
+
+        於是「已軟刪除的課程」這件事由 `teacher_query_stmt` 的 `EtCourse.deleted == 0`
+        單獨承擔——指定一門已刪除的課程得到空結果，與指定不存在的課程**無從區分**，
+        而那正是我們要的：⛔ 本端點不得成為課程存在性的 oracle。
 
         ⛔ 不要為了「對稱」就在這裡加 `deleted == 0`：那會讓自己已刪除課程的擁有權判定
         變成 fail-closed 的 403，而使用者看到的是「僅能依您所開設的課程篩選」——一句
