@@ -233,6 +233,7 @@ export function EtCourseEditorPage() {
     data: course,
     error: courseError,
     isLoading: courseLoading,
+    isFetching: courseFetching,
   } = useQuery({
     queryKey: QUERY_KEYS.etCourses.detail(courseId ?? 0),
     queryFn: () => coursesApi.getDetail(courseId as number),
@@ -290,8 +291,14 @@ export function EtCourseEditorPage() {
   // 除了 effect 內 setState 會造成串聯 render 之外，更實際的問題是：每次 refetch
   // （新增章節後 invalidate 即會觸發）都重設表單，會把使用者正在輸入的內容蓋掉。
   // 只在「載入到另一門課程」時同步，重新整理既有課程不動使用者已改的欄位。
+  //
+  // 🔴 **必須等 `courseFetching` 落定才預帶**（#578 手測回報）。重進編輯頁時
+  // TanStack Query（staleTime 0）會先**同步**吐出快取裡的舊課程、同時在背景 refetch；
+  // 此時若就預帶，上面這個一次性 guard 會被舊值填滿並從此鎖住，稍後回來的新值再也
+  // 寫不進表單——使用者改完名稱存檔、列表已是新的，點進編輯頁卻仍是舊值。
+  // DM 編輯頁的 #377 是同一個形狀（見 `DmEditorPage.tsx` 的標籤預帶）。
   const [loadedCourseId, setLoadedCourseId] = useState<number | null>(null)
-  if (course && loadedCourseId !== course.course_id) {
+  if (course && !courseFetching && loadedCourseId !== course.course_id) {
     setLoadedCourseId(course.course_id)
     setForm({
       course_name: course.course_name,
@@ -1189,7 +1196,13 @@ export function EtCourseEditorPage() {
   // ⚠️ 查詢失敗時**必須早退**。原本忽略 error，403 之後 `course` 為 undefined，
   // 而 `readOnly` 是由 `course` 推導的（undefined → false），結果學員直接看到一個
   // 可編輯的課程編輯頁——雖然每個寫入都會被後端擋下，但畫面本身就不該出現。
-  if (courseLoading) {
+
+  // 重進頁面時快取讓 `courseLoading` 為 false，但表單要等 refetch 落定才預帶（#578，見上），
+  // 這段空窗期若直接渲染就會出現下面那行註解原本要避免的「空表單閃現」。
+  // ⚠️ 條件寫 `course &&` 而非 `courseId !== undefined`——403 / 404 時 `course` 為
+  // undefined、表單永遠不會預帶，寫成後者會轉圈轉到天荒地老、蓋掉下方的錯誤畫面。
+  const formPending = course !== undefined && loadedCourseId !== course.course_id
+  if (courseLoading || formPending) {
     // 載入中先顯示轉圈——否則會先閃出一張空表單，看起來像資料掉了
     return (
       <Stack alignItems="center" sx={{ py: 8 }}>
