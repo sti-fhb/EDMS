@@ -25,9 +25,11 @@ import Typography from "@mui/material/Typography"
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
+import { zhTW } from "@mui/x-date-pickers/locales"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import dayjs from "dayjs"
 import type { Dayjs } from "dayjs"
+import "dayjs/locale/zh-tw"
 import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 
@@ -123,6 +125,26 @@ interface PendingAddSurvey {
   /** 問卷名稱。理由同 `PendingAddItem.title`：在導向之前就問完。 */
   surveyName: string
 }
+
+/**
+ * 起訖時間選擇器的顯示格式（#564）——與 `utils/date.ts` 的 `formatDateTime` 相同：
+ * 年/月/日、24 小時制。
+ *
+ * MUI 預設是 `MM/DD/YYYY hh:mm A`：月日年順序與系統其他地方相反，而 `12:00 AM` 是**午夜**、
+ * 容易被看成中午。訖止時間決定課程何時自動關閉，看錯就設錯。
+ *
+ * ⚠️ 只改**顯示**：選擇器的值仍是 `Dayjs`，送出時照舊 `toISOString()`。
+ *
+ * ⚠️ **這個格式有兩條獨立的來源**：本常數，以及 `adapterLocale="zh-tw"`（dayjs 的 zh-tw
+ * 語系本身就是 `YYYY/MM/DD` + 24 小時制 `HH:mm`）。2026-10-08 變異檢查：單獨拿掉任一條，
+ * 畫面不變、測試全綠；兩條都拿掉才變回 `MM/DD/YYYY hh:mm A`。故顯示測試守的是「至少留一條」。
+ * 仍明寫本常數：格式是本系統的決定，不該依賴語系資料的預設值（語系若改了，這裡撐住）。
+ * `ampm={false}` 同理——zh-tw 下為 no-op，留給時間面板在語系換成 12 小時制時仍維持 24 小時。
+ */
+const PICKER_FORMAT = "YYYY/MM/DD HH:mm"
+
+/** 選擇器的介面文字（月曆的月份與星期、「取消／確認」按鈕等）用繁體中文（#564）。 */
+const PICKER_LOCALE_TEXT = zhTW.components.MuiLocalizationProvider.defaultProps.localeText
 
 export function EtCourseEditorPage() {
   const { courseId: courseIdParam } = useParams<{ courseId: string }>()
@@ -1220,7 +1242,7 @@ export function EtCourseEditorPage() {
   }
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDayjs}>
+    <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="zh-tw" localeText={PICKER_LOCALE_TEXT}>
     <Box>
       <ScreenHeader
         code="ET05"
@@ -1439,6 +1461,8 @@ export function EtCourseEditorPage() {
                 沿用 `startFloor` 會讓那些日期變成灰底不可選，擋掉後端允許的操作。 */}
             <DateTimePicker
               label="課程起始時間"
+              format={PICKER_FORMAT}
+              ampm={false}
               value={startAt}
               disabled={readOnly}
               minDateTime={reopening ? undefined : startFloor}
@@ -1462,6 +1486,8 @@ export function EtCourseEditorPage() {
                 （後端 `ensure_reopen_schedule` 只要求訖止晚於當下）。 */}
             <DateTimePicker
               label="課程訖止時間"
+              format={PICKER_FORMAT}
+              ampm={false}
               value={endAt}
               disabled={readOnly}
               minDateTime={

@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import dayjs from "dayjs"
 import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -1093,6 +1094,14 @@ function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {
   )
 }
 
+/**
+ * `useCourse` 起始時間（`2026-09-01T00:00:00Z`）在選擇器上的顯示值——**依本機時區計算**。
+ *
+ * 測試不固定時區（本機台灣、CI 為 UTC）；寫死 `2026/09/01` 在 UTC-5 以西會變成 `08/31`
+ * （#564 code review MEDIUM）。
+ */
+const FIXTURE_START_SHOWN = dayjs("2026-09-01T00:00:00Z").format("YYYY/MM/DD HH:mm")
+
 /** `POST /reopen` 的成功回應——內容與本頁無關（欄位由送出的 payload 決定），只需 200。 */
 const reopened = {
   course_id: 1,
@@ -1122,8 +1131,8 @@ function useReopenBlocked(code: string, message: string) {
 /**
  * 以鍵盤填 `DateTimePicker`。
  *
- * ⚠️ 不是點日曆——MUI 的欄位由六個 section 組成（MM/DD/YYYY hh:mm A），逐段接收按鍵並
- * **自動跳下一段**，故 `keys` 一路打完即可（`"110120270900AM"` = 2027-11-01 09:00）。
+ * ⚠️ 不是點日曆——MUI 的欄位由五個 section 組成（YYYY/MM/DD HH:mm，24 小時制，#564），逐段
+ * 接收按鍵並**自動跳下一段**，故 `keys` 一路打完即可（`"202711010900"` = 2027-11-01 09:00）。
  * ⛔ 不要插 `{ArrowRight}` 跳段，會多跳一格、時分錯位而仍組成一個合法日期（看起來只是
  * 「值不對」，很難連到跳段上）。
  *
@@ -1135,8 +1144,8 @@ async function fillDateTime(label: RegExp, keys: string) {
   if (!field) throw new Error(`找不到日期時間欄位：${label}`)
   const first = field.querySelector<HTMLElement>(".MuiPickersSectionList-section")
   if (!first) throw new Error(`欄位沒有可輸入的區段：${label}`)
-  // ⚠️ 自備 `delay: null` 的 typist，不沿用測試的 `user`。一次填值是 14 個按鍵、兩個
-  // 欄位就 28 個，照預設每鍵 await 一輪會讓單條測試逼近 5s 的預設 timeout——實測本檔
+  // ⚠️ 自備 `delay: null` 的 typist，不沿用測試的 `user`。一次填值是 12 個按鍵、兩個
+  // 欄位就 24 個，照預設每鍵 await 一輪會讓單條測試逼近 5s 的預設 timeout——實測本檔
   // 最慢的一條在**單檔**跑就已經 4.5s，全套件並行時必爆（2026-09-24）。
   const typist = userEvent.setup({ delay: null })
   await typist.click(first)
@@ -1349,13 +1358,13 @@ describe("ET05 課程關閉與再開課", () => {
     useCourse("CLOSED")
     renderEditor()
     // 進入前欄位有值
-    expect(await screen.findByDisplayValue(/09\/01\/2026/)).toBeInTheDocument()
+    expect(await screen.findByDisplayValue(FIXTURE_START_SHOWN)).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "再開課" }))
 
     expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
     // 🔴 本設計的核心：清空只發生在畫面上
-    expect(screen.queryByDisplayValue(/09\/01\/2026/)).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue(FIXTURE_START_SHOWN)).not.toBeInTheDocument()
     expect(screen.getByText(/按「取消再開課」即可還原/)).toBeInTheDocument()
 
     // 🔴 裁示原文是「清空…並用紅色框起來提醒使用者重新設定時間」——紅框本身就是提醒，
@@ -1379,7 +1388,7 @@ describe("ET05 課程關閉與再開課", () => {
 
     await user.click(screen.getByRole("button", { name: "取消再開課" }))
 
-    expect(await screen.findByDisplayValue(/09\/01\/2026/)).toBeInTheDocument()
+    expect(await screen.findByDisplayValue(FIXTURE_START_SHOWN)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "確認再開課" })).not.toBeInTheDocument()
   })
 
@@ -1425,8 +1434,8 @@ describe("ET05 課程關閉與再開課", () => {
     useCourse("CLOSED")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "110120270800AM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202711010800")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
@@ -1468,8 +1477,8 @@ describe("ET05 課程關閉與再開課", () => {
     // 進出一輪 + 真的送出一次，全程不得有任何一般更新
     await user.click(screen.getByRole("button", { name: "取消再開課" }))
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
     await screen.findByText("課程已再開課")
 
@@ -1502,14 +1511,18 @@ describe("ET05 課程關閉與再開課", () => {
     )
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
     await waitFor(() => expect(body).toBeDefined())
     expect(Object.keys(body ?? {}).sort()).toEqual(["open_end_at", "open_start_at", "version"])
     expect(body?.version).toBe(5)
+    // #564：只改顯示格式，送出的仍是同一個瞬間的 ISO 值。預期值以**本機時區**解讀——測試
+    // 不固定時區（本機台灣、CI 為 UTC），寫死字串會一邊綠一邊紅（#483）
+    expect(body?.open_start_at).toBe(dayjs("2027-11-01T09:00").toISOString())
+    expect(body?.open_end_at).toBe(dayjs("2027-12-31T17:00").toISOString())
   })
 
   it("再開課成功後畫面立即顯示新的起訖時間（#428 迴歸）", async () => {
@@ -1521,14 +1534,14 @@ describe("ET05 課程關閉與再開課", () => {
     server.use(http.post("/api/et/courses/:courseId/reopen", () => HttpResponse.json(reopened)))
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
     expect(await screen.findByText("課程已再開課")).toBeInTheDocument()
-    expect(screen.getByDisplayValue(/11\/01\/2027/)).toBeInTheDocument()
-    expect(screen.getByDisplayValue(/12\/31\/2027/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/2027\/11\/01/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/2027\/12\/31/)).toBeInTheDocument()
     // 退出再開課模式，一般的儲存回來
     expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument()
   })
@@ -1543,8 +1556,8 @@ describe("ET05 課程關閉與再開課", () => {
     useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
 
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
 
@@ -1567,8 +1580,8 @@ describe("ET05 課程關閉與再開課", () => {
     expect(await screen.findByRole("button", { name: "確認再開課" })).toBeEnabled()
     expect(screen.getByText(/請重新設定開放起訖時間/)).toBeInTheDocument()
     // 起訖時間保留剛填的值（不是被清空、也不是回到再開課前的舊值）
-    expect(screen.getByDisplayValue(/11\/01\/2027/)).toBeInTheDocument()
-    expect(screen.getByDisplayValue(/12\/31\/2027/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/2027\/11\/01/)).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/2027\/12\/31/)).toBeInTheDocument()
     // AC 2：頁面上**不再有**紅色缺漏區塊。與上方「對話框內查得到」用**同一種查法**——
     // 只寫這條反向斷言的話，文案一改它就恆真。
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
@@ -1633,8 +1646,8 @@ describe("ET05 課程關閉與再開課", () => {
     useCourse("CLOSED")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
 
     const submit = screen.getByRole("button", { name: "確認再開課" })
     await user.click(submit)
@@ -1654,8 +1667,8 @@ describe("ET05 課程關閉與再開課", () => {
     useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "110120270900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
     const dialog = await screen.findByRole("dialog", { name: "再開課" })
     expect(within(dialog).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
@@ -1711,8 +1724,8 @@ describe("ET05 課程關閉與再開課", () => {
 
     async function failReopen(user: ReturnType<typeof userEvent.setup>) {
       await user.click(await screen.findByRole("button", { name: "再開課" }))
-      await fillDateTime(/課程起始時間/, "110120270900AM")
-      await fillDateTime(/課程訖止時間/, "123120270500PM")
+      await fillDateTime(/課程起始時間/, "202711010900")
+      await fillDateTime(/課程訖止時間/, "202712311700")
       await user.click(screen.getByRole("button", { name: "確認再開課" }))
       return screen.findByRole("dialog", { name: "再開課" })
     }
@@ -1783,8 +1796,8 @@ describe("ET05 課程關閉與再開課", () => {
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "再開課" }))
     // 補開一段已經開始的期間：起始 2026-08-01，比再開課前的 2026-09-01 更早
-    await fillDateTime(/課程起始時間/, "080120260900AM")
-    await fillDateTime(/課程訖止時間/, "123120270500PM")
+    await fillDateTime(/課程起始時間/, "202608010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
     await user.click(screen.getByRole("button", { name: "確認再開課" }))
     await screen.findByText("課程已再開課")
 
@@ -2104,5 +2117,50 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     expect(screen.getByText("請重新設定課程起始時間")).toBeInTheDocument()
     // 仍在再開課模式
     expect(screen.getByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+  })
+})
+
+// ── #564 起訖時間選擇器：YYYY/MM/DD HH:mm、24 小時制、繁中 ───────────────────────
+
+/**
+ * ⚠️ 本組的顯示斷言**守的是「格式來源至少留一條」**，不是單獨守 `format` prop：
+ * `PICKER_FORMAT` 與 `adapterLocale="zh-tw"` 各自都能產生 `YYYY/MM/DD HH:mm`（2026-10-08
+ * 變異檢查：單獨拿掉任一條全綠、兩條都拿掉 14 條紅）。見 `CourseEditorPage.tsx` 的
+ * `PICKER_FORMAT` 註解。⛔ 別因「拿掉 format 測試沒紅」就判定 format 是多餘的而刪掉。
+ */
+describe("ET05 起訖時間選擇器格式（#564）", () => {
+  it("載入既有課程時兩個欄位顯示 YYYY/MM/DD HH:mm，不出現 AM／PM（AC 1）", async () => {
+    useCourse("DRAFT")
+    renderEditor()
+    // 預期值依本機時區格式化——fixture 是 UTC，畫面顯示的是瀏覽器時區
+    const start = dayjs("2026-09-01T00:00:00Z").format("YYYY/MM/DD HH:mm")
+    const end = dayjs("2027-09-30T00:00:00Z").format("YYYY/MM/DD HH:mm")
+
+    expect(await screen.findByDisplayValue(start)).toBeInTheDocument()
+    expect(screen.getByDisplayValue(end)).toBeInTheDocument()
+    // 反向斷言用同一種查法（display value）；上面兩條是它的正向錨點
+    expect(screen.queryByDisplayValue(/AM|PM/)).not.toBeInTheDocument()
+  })
+
+  it("下午的時間以 24 小時制輸入與顯示（17:00，不是 05:00 PM）（AC 1）", async () => {
+    // 只改 `format` 而漏了 `ampm={false}` 時，時段仍是 12 小時制：打「17」不會成立。
+    // 用下午的時間才驗得到——上午的時間在兩種制度下長得一樣
+    const user = userEvent.setup()
+    useCourse("CLOSED")
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "再開課" }))
+    await fillDateTime(/課程起始時間/, "202711011700")
+
+    expect(screen.getByDisplayValue("2027/11/01 17:00")).toBeInTheDocument()
+  })
+
+  it("選擇器的文字為繁體中文，不是英文（#564 範圍：adapterLocale）", async () => {
+    useCourse("DRAFT")
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+
+    // 開啟選擇器的按鈕名稱取自語系（zhTW：「選擇日期…」／enUS：「Choose date…」）
+    expect(screen.getAllByRole("button", { name: /^選擇日期/ })).toHaveLength(2)
+    expect(screen.queryAllByRole("button", { name: /^Choose date/ })).toHaveLength(0)
   })
 })
