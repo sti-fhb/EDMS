@@ -201,6 +201,13 @@ class TestSurveyCheck:
         blockers = evaluate_publish(_snapshot(survey_question_count=0), obsolete_doc_ids=frozenset())
         assert [b.code for b in blockers] == [BLOCK_SURVEY_NO_QUESTION]
 
+    def test_問卷缺漏訊息不指定處置(self) -> None:
+        """#592：同一條缺漏用於發布（草稿，只能刪問卷）與再開課（已關閉，只能停用），
+        處置寫死在後端訊息必有一邊是錯的——處置交給前端依情境補（`BLOCKER_HINT`）。
+        """
+        (blocker,) = evaluate_publish(_snapshot(survey_question_count=0), obsolete_doc_ids=frozenset())
+        assert blocker.message == "課後問卷至少須有 1 題"
+
     def test_沒有問卷不被擋(self) -> None:
         assert evaluate_publish(_snapshot(survey_question_count=None), obsolete_doc_ids=frozenset()) == ()
 

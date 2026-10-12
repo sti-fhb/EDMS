@@ -9,6 +9,7 @@ const PROPS = {
   message: "課程目前不符發布條件，無法再開課。",
   blockers: [{ code: "NO_MATERIAL", message: "課程至少須有 1 份教材", target_id: null }],
   names: { quiz: {}, chapter: {}, itemChapter: {} },
+  context: "reopen" as const,
   onClose: () => {},
 }
 
@@ -26,6 +27,13 @@ describe("BlockerDialog（#509）", () => {
 
     const buttons = within(screen.getByRole("dialog")).getAllByRole("button")
     expect(buttons.map((b) => b.textContent)).toEqual(["關閉"])
+  })
+
+  it("問卷無題目時，再開課情境的導引為停用問卷——已關閉課程的問卷不能刪（#592）", () => {
+    const survey = [{ code: "SURVEY_NO_QUESTION", message: "課後問卷至少須有 1 題", target_id: null }]
+    render(<BlockerDialog {...PROPS} blockers={survey} />)
+    expect(screen.getByText("請為課後問卷新增至少 1 題，或停用該問卷")).toBeInTheDocument()
+    expect(screen.queryByText(/刪除該問卷/)).not.toBeInTheDocument()
   })
 
   it("按「關閉」呼叫 onClose", async () => {

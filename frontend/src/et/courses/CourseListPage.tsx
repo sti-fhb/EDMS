@@ -303,12 +303,12 @@ export function EtCourseListPage() {
       <Alert severity="info" sx={{ mb: 2 }}>
         {canCreateCourse ? (
           <>
-            點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；點擊
-            <strong>他人建立</strong>之課程進入<strong>檢視模式（唯讀）</strong>，僅可閱覽不可編輯內容。
+            點擊<strong>自己建立</strong>之課程進入<strong>編輯模式</strong>；「全部課程」中的課程以
+            <strong>學員視角預覽</strong>開啟，不記錄學習進度、測驗僅供檢視。
           </>
         ) : (
           <>
-            課程一律以<strong>檢視模式（唯讀）</strong>開啟，僅可閱覽不可編輯內容——編輯限該課程建立者。
+            課程一律以<strong>學員視角預覽</strong>開啟，不記錄學習進度、測驗僅供檢視——編輯限該課程建立者。
           </>
         )}
       </Alert>

@@ -7,13 +7,15 @@ import DialogTitle from "@mui/material/DialogTitle"
 import Stack from "@mui/material/Stack"
 
 import { BlockerList } from "./BlockerList"
-import type { BlockerNames, PublishBlocker } from "./surveySchemas"
+import type { BlockerContext, BlockerNames, PublishBlocker } from "./surveySchemas"
 
 interface BlockerSummaryProps {
   /** 清單上方的紅色說明。發布與再開課的文案不同，由呼叫端給。 */
   message: string
   blockers: PublishBlocker[]
   names: BlockerNames
+  /** 發布（草稿）或再開課（已關閉）——部分缺漏的處置依此而異，見 `blockerHint`。 */
+  context: BlockerContext
 }
 
 /**
@@ -26,11 +28,11 @@ interface BlockerSummaryProps {
  * ⛔ 只共用**呈現**，不共用資料：兩個呼叫端各自傳入自己那份 `blockers`（見
  * `CourseEditorPage` 的 `reopenBlockers` 宣告——併成一份會讓兩個視窗互相污染）。
  */
-export function BlockerSummary({ message, blockers, names }: BlockerSummaryProps) {
+export function BlockerSummary({ message, blockers, names, context }: BlockerSummaryProps) {
   return (
     <Stack spacing={1}>
       <Alert severity="error">{message}</Alert>
-      <BlockerList blockers={blockers} names={names} />
+      <BlockerList blockers={blockers} names={names} context={context} />
     </Stack>
   )
 }

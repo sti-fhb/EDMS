@@ -183,7 +183,9 @@ def evaluate_publish(snapshot: CourseSnapshot, *, obsolete_doc_ids: frozenset[st
     # 有問卷才檢查——與 AC 23「未建立問卷不阻擋發布」不衝突。一份 0 題的問卷對學員
     # 而言是個打不開的空殼，與 0 題測驗同型。不需要 `target_id`：一門課程至多 1 份問卷。
     if snapshot.survey_question_count is not None and snapshot.survey_question_count < 1:
-        blockers.append(PublishBlocker(BLOCK_SURVEY_NO_QUESTION, "課後問卷至少須有 1 題，或請停用該問卷"))
+        # 只說缺什麼、不說怎麼補（#592）：這條同時用於發布（草稿，只能刪問卷）與再開課
+        # （已關閉，只能停用），處置由前端依情境補（`surveySchemas.blockerHint`）。
+        blockers.append(PublishBlocker(BLOCK_SURVEY_NO_QUESTION, "課後問卷至少須有 1 題"))
 
     if snapshot.doc_ids & obsolete_doc_ids:
         blockers.append(PublishBlocker(BLOCK_OBSOLETE_DOC, "請先移除已廢止文件之引用"))
