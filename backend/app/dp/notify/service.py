@@ -23,6 +23,9 @@ _SYSTEM_USER = "SYSTEM"
 #: `ensure_renderable` 的對外訊息（不得嵌入佔位名稱，見該函式註解）。
 _UNRENDERABLE_MSG = "範本內容含無法代入的變數，請確認僅使用「可用變數」所列的名稱"
 
+#: `ensure_renderable` 的主旨單行檢核訊息（#534）。
+_SUBJECT_MULTILINE_MSG = "主旨不得含換行，請改為單行"
+
 #: 單次 `send_email` 的收件人上限（對齊 TBMS 慣例）。**公開常數**：傳多人清單的呼叫方
 #: 需據此分批，故由 `app.services` 一併匯出（#563）。
 #:
@@ -77,6 +80,27 @@ _BODY_TRANS = str.maketrans({c: None for c in _SHARED_STRIP})
 _SUBJECT_TRANS = str.maketrans({c: None for c in [*_SHARED_STRIP, 0x0A]})
 
 
+def _safe_log(exc: Exception) -> str:
+    """把例外訊息整理成可安全寫進 log 的單行字串（#534）。
+
+    `_SafeFormatter.get_field` 的錯誤訊息把 `field_name` **原樣**嵌入，而 `field_name` 是
+    `{` 與第一個 `:` / `!` / `}` 之間的任意字元——**含換行**。`_BodyStr` 允許換行、長度上限
+    10000，於是一次被拒的儲存可以：
+
+    - **偽造 log 行**：在內文貼入一個以換行開頭的佔位名，輸出就會多出一行看起來像系統紀錄
+      的文字（例如偽造一筆 `CRITICAL ... 稽核已清除`），污染 log 聚合與事後鑑識。
+    - **灌量**：`{` 之後接上萬個換行再 `}`，單一請求即可產生近萬行 log。
+
+    ⚠️ 這是**被拒絕、從未落地**的內容——DB 裡查不到，只有 log 留下。`send_email` 對同一份
+    例外訊息本來就有 `[:500]` 截斷（寫進 `DP_EMAIL_LOG.ERROR_MSG`），log 路徑原本漏了這一刀。
+
+    Returns:
+        換行與歸位字元轉為可見跳脫、截斷至 200 字元的單行字串。
+    """
+    flattened = str(exc).replace("\r", "\\r").replace("\n", "\\n")
+    return flattened[:200]
+
+
 class _SafeFormatter(string.Formatter):
     """安全範本格式器：僅允許具名佔位 `{var}`，封鎖範本注入攻擊面。
 
@@ -96,12 +120,36 @@ class _SafeFormatter(string.Formatter):
         super().__init__()
         self._trans = _SUBJECT_TRANS if single_line else _BODY_TRANS
 
+    def parse(self, format_string):
+        """在**遞迴展開之前**擋下任何格式規格（#534）。
+
+        `format_field` 本來就會拒絕非空的 `format_spec`，但它拿到的是**已經遞迴渲染完**的
+        字串——於是巢狀寫法 `{a:{b}}` 的結果取決於值：`b` 代入空字串時 spec 變成 `""`、
+        放行；代入非空值時才被擋。
+
+        這讓「以空值探針實跑一次渲染」的檢核（`ensure_renderable`）與真正寄送時的渲染**對
+        同一份範本給出不同答案**：儲存時放行、寄送時 `RENDER_FAILED`——正是 #534 要消滅的
+        那種靜默失敗。
+
+        `Formatter.parse` 看得到**原始**的 `format_spec`（`{a:{b}}` 給的是 `"{b}"`），在此
+        擋下即與值無關，兩邊恆一致。
+
+        ⚠️ 安全面向不受影響：`{a:{b}}` 在舊行為下也到不了 padding / OOM（內層渲染完仍是
+        非空 spec，照樣被 `format_field` 擋）。本改動關的是**可用性**破口。
+        """
+        for literal_text, field_name, format_spec, conversion in super().parse(format_string):
+            if format_spec:
+                raise ValueError("範本佔位不得含格式規格")
+            yield literal_text, field_name, format_spec, conversion
+
     def get_field(self, field_name: str, args, kwargs):
         if not field_name.isidentifier():
             raise ValueError(f"範本佔位僅允許具名變數，禁屬性 / 索引 / 位置: {{{field_name}}}")
         return kwargs[field_name], field_name
 
     def format_field(self, value, format_spec: str) -> str:
+        # 保留此道（縱深防禦）：`parse` 已在上游擋掉所有非空 spec，正常情況下這裡恆為 `""`。
+        # 若日後有人改動 `parse`，這一道仍會攔住。
         if format_spec:
             raise ValueError("範本佔位不得含格式規格")
         return str(value).translate(self._trans)
@@ -125,6 +173,43 @@ def _render(text: str, params: dict[str, str], *, single_line: bool = False) -> 
     return formatter.vformat(text, (), params)
 
 
+def declared_variable_names(variables: str | None) -> set[str]:
+    """從 `VARIABLES` 欄取出變數名集合。
+
+    ## ⚠️ 本欄有**三種格式並存**（2026-10-12 對全部 23 支範本實測）
+
+    | 模組 | 格式 | 實例 |
+    |---|---|---|
+    | DM | 裸小寫識別字 | `reviewer_name,doc_name,days` |
+    | **DP** | 識別字 + **全形括號說明**，逗號後另有空格 | `user_name（使用者姓名）, activate_link（啟用連結）` |
+    | ET | 裸**大寫**識別字 | `USER_NAME,COURSE_NAME` |
+
+    所以**不能**直接把整段 token 當變數名——那會讓 DP 的 5 支範本算出
+    `user_name（使用者姓名）` 這種 key，與內文的 `{user_name}` 永遠對不上，於是管理者連只改
+    主旨都會被 422 擋死。這不是假設：#534 的檢核第一版正是這樣寫的，`ensure_renderable`
+    對 DP 全部 5 支可維護範本回 422，而**沒有任何既有測試會紅**。
+
+    DP 那種格式是刻意的——前端 `TemplateForm.tsx` 把本欄**原樣顯示**為「可用變數：…」，
+    中文說明對管理者有用。該改的是解析，不是資料。
+
+    取「第一個 `（` 或 `(` 之前的部分」即可涵蓋三種。說明文字中目前沒有全形逗號（已實測），
+    故以 `,` 切是安全的；日後若有人寫出帶逗號的說明，本函式會把它切碎成無效名稱 →
+    `ensure_renderable` 會把合法範本誤判為不合法。下方的全庫守門測試會在那時變紅。
+
+    Args:
+        variables: `DP_NOTIFY_TEMPLATE.VARIABLES` 原始值；可為 None。
+
+    Returns:
+        變數名集合；無宣告時回空集合。
+    """
+    names: set[str] = set()
+    for token in (variables or "").split(","):
+        name = token.split("（", 1)[0].split("(", 1)[0].strip()
+        if name:
+            names.add(name)
+    return names
+
+
 def ensure_renderable(*, subject: str, body: str, variables: str | None) -> None:
     """儲存前驗證範本的佔位皆可渲染；不符拋 `AppError(422, DP_MAIL_011)`（#534）。
 
@@ -137,7 +222,12 @@ def ensure_renderable(*, subject: str, body: str, variables: str | None) -> None
 
     ⚠️ **刻意不另寫正則**。兩份規則遲早分歧，而分歧的方向正好是最糟的那個：「檢核放行、
     渲染失敗」——那等於把檢核做成了裝飾品。此處以該範本宣告的 `VARIABLES` 組一個空值探針
-    dict，**直接呼叫 `_render`**，於是檢核與渲染在定義上不可能不一致。
+    dict，**直接呼叫 `_render`**，於是檢核與渲染共用同一份解析。
+
+    ⚠️ 「共用」不自動等於「結果相同」：探針值是空字串、真實值不是，而 stdlib 會先把巢狀的
+    `format_spec` 遞迴渲染完才交給 `format_field`。`{a:{b}}` 因此一度是「儲存放行、寄送
+    `RENDER_FAILED`」（#534 Security MEDIUM-1 實測）。已於 `_SafeFormatter.parse` 根治——
+    在遞迴**之前**擋下所有非空 spec，兩邊才真的與值無關。
 
     一次呼叫即涵蓋 `_SafeFormatter` 的全部拒絕路徑：
 
@@ -166,19 +256,34 @@ def ensure_renderable(*, subject: str, body: str, variables: str | None) -> None
     Args:
         subject: 待存的主旨。
         body: 待存的內文。
-        variables: 該範本的 `VARIABLES` 欄（逗號分隔的識別字；可為 None）。
+        variables: 該範本的 `VARIABLES` 欄原始值；解析見 `declared_variable_names`（**三種格式並存**）。
 
     Raises:
         AppError: 任一處無法渲染（422 `DP_MAIL_011`）。
     """
-    probe = {stripped: "" for name in (variables or "").split(",") if (stripped := name.strip())}
+    # 主旨的**範本文字本身**不得含換行 / CR（#534）。
+    #
+    # ⚠️ `_SUBJECT_TRANS` 的剝除只作用於**代入值**（`format_field` 內），不作用於範本文字；
+    # `_SubjectStr` 的 `strip_whitespace` 也只剝頭尾。於是管理者可以把多行主旨存進去，
+    # 渲染正常、`send_email` 回報 `queued_count=N` 看起來完全成功，**失敗發生在 worker**：
+    # stdlib 設 header 時拋「Header values may not contain linefeed or carriage return」，
+    # 而 `worker.py` 的 `except Exception` 吞掉後只把訊息寫進 `DP_EMAIL_LOG.ERROR_MSG`、
+    # **連一行 log 都沒有**。那比本 issue 要修的缺陷更隱形。
+    #
+    # ⚠️ **刻意只擋 `\n` / `\r`，不套用 `_SUBJECT_TRANS` 的完整字元集**：實測 `NUL` 與
+    # `U+2028` 在主旨裡照樣寄得出去（`EmailMessage.as_bytes()` 不拋錯），擋它們等於擋掉
+    # 本來能用的內容。守門只擋驗證過會死的那些。
+    if "\n" in subject or "\r" in subject:
+        raise AppError(status_code=422, detail=_SUBJECT_MULTILINE_MSG, error_code="DP_MAIL_012")
+
+    probe = {name: "" for name in declared_variable_names(variables)}
     try:
         _render(subject, probe, single_line=True)
         _render(body, probe)
     except (KeyError, ValueError, IndexError) as exc:
         # 例外訊息**不外流**：它含範本內部的佔位名稱，屬 schema 細節（sti-error-codes 明定
         # error_message 不得嵌入動態值）。詳情留在伺服器日誌——比照 `render_preview`。
-        logger.warning("通知範本佔位檢核失敗: %s", exc)
+        logger.warning("通知範本佔位檢核失敗: %s", _safe_log(exc))
         raise AppError(status_code=422, detail=_UNRENDERABLE_MSG, error_code="DP_MAIL_011") from exc
 
 
@@ -247,7 +352,7 @@ class NotifyService:
         except (KeyError, ValueError, IndexError) as exc:
             # 例外訊息**不外流**：它含範本內部的佔位名稱，屬 schema 細節（sti-error-codes
             # 明定 error_message 不得嵌入動態值）。詳情留在伺服器日誌。
-            logger.warning("通知範本預覽渲染失敗 module=%s template_code=%s: %s", module, template_code, exc)
+            logger.warning("通知範本預覽渲染失敗 module=%s template_code=%s: %s", module, template_code, _safe_log(exc))
             raise AppError(status_code=422, detail="通知範本內容無法產生預覽", error_code="DP_MAIL_007") from exc
         return RenderedMail(subject=subject, body=body)
 

@@ -5,7 +5,7 @@ MODULE 過濾以注入 module_admin_gate stub 驗證（ET/DM checker 正式版�
 """
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
@@ -18,6 +18,7 @@ from app.dp.audit.models import DpAuditLog
 from app.dp.notify.admin_service import TemplateAdminService
 from app.dp.notify.models import DpNotifyTemplate
 from app.dp.notify.schemas import TemplateUpdate
+from app.dp.notify.service import declared_variable_names, ensure_renderable
 from app.dp.users.models import DpUser
 from app.et.roles.gate import et_is_module_admin
 
@@ -435,3 +436,63 @@ async def test_佔位檢核失敗時不寫入也不留稽核(db, admin_gate):
     assert row.body == "{user_name} 更新後", "被擋下的內容不得寫入"
     assert row.version == 2, "版本不得被 bump"
     assert await _count_audit(db, "ET.ZT_PH2") == 1, "被擋下的請求不得留稽核"
+
+
+async def test_既有範本全數通過新檢核(db):
+    """**所有** seed 範本都必須過得了 `ensure_renderable`（#534）。
+
+    ## 這條測試擋的是什麼
+
+    新守門一上線，管理者編輯任何一支既有範本時都會被重新檢核**整份主旨與內文**。若某支
+    seed 範本本來就不合格，管理者從此連「只改主旨」都會被 422 擋死——而那是我引入的回歸，
+    不是它本來就壞。
+
+    ⚠️ **這不是假設**：本次檢核的第一版把整段 token 當變數名，於是 DP 全部 5 支可維護範本
+    算出 `user_name（使用者姓名）` 這種 key，與內文的 `{user_name}` 永遠對不上 → 全部 422。
+    當時**既有測試沒有一條會紅**（它們各自只建自己的合成範本，碰不到 seed 的真實資料）。
+    根因是 `VARIABLES` 有三種格式並存，見 `declared_variable_names` 的 docstring。
+
+    ## 母體是全部，不只可維護的那些
+
+    `CHANNEL=MSG` 的站內範本雖然 `update_template` 會先以 `DP_MAIL_010` 擋下、走不到本檢核，
+    仍一併驗——它們日後若隨站內訊息佇列上線而變回可維護，不該在那時才發現內容不合格。
+    """
+    rows = (
+        await db.execute(
+            text(
+                'SELECT "MODULE", "TEMPLATE_CODE", "SUBJECT", "BODY", COALESCE("VARIABLES", \'\') '
+                'FROM "DP_NOTIFY_TEMPLATE"'
+            )
+        )
+    ).all()
+    assert len(rows) >= 20, f"母體只有 {len(rows)} 支，seed 可能沒跑完——本測試會假性通過"
+
+    bad: list[str] = []
+    for module, code, subject, body, variables in rows:
+        try:
+            ensure_renderable(subject=subject, body=body, variables=variables)
+        except AppError:
+            bad.append(f"{module}/{code}（VARIABLES={variables!r}）")
+    assert bad == [], "下列既有範本過不了新檢核，管理者將無法編輯它們：\n  " + "\n  ".join(bad)
+
+
+async def test_三種_variables_格式都解析得出變數名(db):
+    """`declared_variable_names` 對全庫實際存在的三種格式都有效（#534）。
+
+    正向錨點：每支有宣告的範本都必須解析出**至少一個**名稱，且名稱全是合法識別字。
+    只驗「不拋例外」的話，一個永遠回空集合的實作也會通過——而空集合會讓所有帶佔位的
+    範本被誤判為不合法。
+    """
+    rows = (await db.execute(text('SELECT "MODULE", "TEMPLATE_CODE", "VARIABLES" FROM "DP_NOTIFY_TEMPLATE"'))).all()
+    seen_modules: set[str] = set()
+    for module, code, variables in rows:
+        if not variables:
+            continue
+        names = declared_variable_names(variables)
+        assert names, f"{module}/{code} 的 VARIABLES={variables!r} 解析不出任何名稱"
+        bad = [n for n in names if not n.isidentifier()]
+        assert bad == [], f"{module}/{code} 解析出非識別字：{bad}（VARIABLES={variables!r}）"
+        seen_modules.add(module)
+
+    # 母體錨點：三個模組都要驗到，否則「三種格式都支援」這句沒有證據
+    assert seen_modules == {"DP", "DM", "ET"}, f"只驗到 {sorted(seen_modules)}"

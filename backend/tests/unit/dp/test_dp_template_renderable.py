@@ -125,3 +125,64 @@ class Test與_render_的等價關係:
         ensure_renderable(subject="x", body=body, variables=_VARS)
         # 不拋例外即通過；此處用真實參數再跑一次，確認不是「檢核寬鬆、渲染嚴格」
         _render(body, {"author_name": "甲", "doc_name": "乙", "reason": "丙"})
+
+
+class Test主旨不得多行:
+    """主旨的**範本文字本身**含換行 → 422 `DP_MAIL_012`（#534 Security MEDIUM-3）。
+
+    ## 為何這條比「打錯變數名」更隱形
+
+    `_SUBJECT_TRANS` 的剝除只作用於**代入值**，不作用於範本文字；`_SubjectStr` 的
+    `strip_whitespace` 也只剝頭尾。於是多行主旨存得進去、渲染正常、`send_email` 回報
+    `queued_count=N` **看起來完全成功**——失敗發生在 worker（stdlib 設 header 時拋
+    「Header values may not contain linefeed or carriage return」），而 `worker.py` 的
+    `except Exception` 吞掉後只把訊息寫進 `DP_EMAIL_LOG.ERROR_MSG`、**連一行 log 都沒有**。
+
+    #534 新增的 `RENDER_FAILED` 訊號對這條路徑**不會觸發**，所以要在儲存時擋。
+    """
+
+    @pytest.mark.parametrize("bad", ["主旨\n第二行", "主旨\r", "主旨\r\nBcc: x@evil.com"])
+    async def test_換行與_cr_被擋下(self, bad: str) -> None:
+        e = _err(subject=bad)
+        assert e.status_code == 422
+        assert e.error_code == "DP_MAIL_012"
+
+    @pytest.mark.parametrize("ok", ["主旨\x00", "主旨 ", "主旨\x1f"])
+    async def test_其他控制字元仍放行(self, ok: str) -> None:
+        """⚠️ **刻意**只擋 `\n` / `\r`。
+
+        實測 `NUL` / `U+2028` / 其他控制字元在主旨裡照樣寄得出去
+        （`EmailMessage.as_bytes()` 不拋錯），擋它們等於擋掉本來能用的內容——
+        那會是「守門擋了它不該擋的」，與本 issue 要修的方向相反。
+
+        這條在日後有人想「順手把 `_SUBJECT_TRANS` 整套搬過來」時會紅，並指向此處理由。
+        """
+        ensure_renderable(subject=ok, body="內文", variables=_VARS)
+
+    async def test_內文含換行不受影響(self) -> None:
+        """正向錨點：內文本來就該允許換行，別讓主旨那道守門誤傷它。"""
+        ensure_renderable(subject="主旨", body="第一行\n第二行\n{reason}", variables=_VARS)
+
+
+class Test巢狀格式規格:
+    """`{a:{b}}` 在探針與實跑下必須得到**相同**答案（#534 Security MEDIUM-1）。
+
+    stdlib 會先把巢狀的 `format_spec` 遞迴渲染完才交給 `format_field`。修正前：探針代入空字串
+    → spec 變成 `""` → 放行；真實值非空 → `format_field` 擋下。於是**儲存時放行、寄送時
+    `RENDER_FAILED`**，正是本 issue 要消滅的那種靜默失敗——而我原本在 docstring 與
+    FR-DP-US9-10 都宣稱「定義上不可能不一致」。
+
+    修法是在 `_SafeFormatter.parse`（遞迴**之前**、看得到原始 spec）擋下，於是與值無關。
+    """
+
+    @pytest.mark.parametrize("bad", ["{doc_name:{reason}}", "{doc_name!r:{reason}}", "{doc_name:{doc_name}}"])
+    async def test_巢狀規格在儲存時就被擋(self, bad: str) -> None:
+        assert _err(body=bad).error_code == "DP_MAIL_011"
+
+    @pytest.mark.parametrize("bad", ["{doc_name:{reason}}", "{doc_name:>10}"])
+    async def test_實跑也一樣擋(self, bad: str) -> None:
+        """與上一條成對：只驗「儲存擋下」證明不了兩邊一致——也可能是檢核過嚴。"""
+        from app.dp.notify.service import _render
+
+        with pytest.raises(ValueError):
+            _render(bad, {"author_name": "甲", "doc_name": "乙", "reason": "丙"})

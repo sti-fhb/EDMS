@@ -46,7 +46,11 @@ _MODULE = "DM"
 
 #: 代表**缺陷**的 `skipped_reason`（#534）——會出 WARNING。
 #: 與之相對的 `TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL` 是管理者有意的設定，不算故障。
-_FAILURE_REASONS = frozenset({"RENDER_FAILED", "SEND_FAILED"})
+#:
+#: ⚠️ 本集合**刻意不含 `SEND_FAILED`**：那個值只在下方 `except AppError` 分支產生，而該分支
+#: 已先 `logger.exception` 並 `return`，走不到這道 WARNING；平台 `send_email` 本身也不會回它。
+#: 把它放進來會是死值，並讓人誤以為該路徑走的是這裡。
+_FAILURE_REASONS = frozenset({"RENDER_FAILED"})
 
 
 class DmNotifier:
