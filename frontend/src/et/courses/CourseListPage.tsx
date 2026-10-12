@@ -243,7 +243,10 @@ export function EtCourseListPage() {
                   setPage(1)
                 }}
               >
-                <MenuItem value="">全部</MenuItem>
+                {/* 「不限」而非「全部」（#576）：「全單位」「全體」是**標籤值**、篩選只比對字面
+                    （#538 SA Q2），叫「全部」會被讀成與它們同義，使用者便拿「全單位」當清除篩選。
+                    ⛔ 兩者都不可拿掉——少了「不限」清不掉篩選，少了「全單位」查不到字面掛它的課 */}
+                <MenuItem value="">不限</MenuItem>
                 {(filterTags ?? [])
                   .filter((tag) => tag.tag_type === f.type)
                   .map((tag) => (

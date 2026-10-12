@@ -462,15 +462,16 @@
       <div class="col-md-3">
         <label class="form-label small">單位</label>
         <select class="form-select form-select-sm">
-          <option>全部</option><option>全單位</option><option>國防醫學院三軍總醫院</option><option>國防醫學院三軍總醫院松山分院</option><option>國防部軍醫局</option>
+          <option>不限</option><option>全單位</option><option>國防醫學院三軍總醫院</option><option>國防醫學院三軍總醫院松山分院</option><option>國防部軍醫局</option>
         </select>
       </div>
       <div class="col-md-2">
         <label class="form-label small">職位</label>
         <select class="form-select form-select-sm">
-          <option>全部</option><option>全體</option><option>護理師</option><option>行政人員</option><option>軍人</option><option>醫檢師</option>
+          <option>不限</option><option>全體</option><option>護理師</option><option>行政人員</option><option>軍人</option><option>醫檢師</option>
         </select>
         <!-- 2026-10-06 #538 SA Q2：受訓對象篩選改為單位、職位兩欄，只比對字面、不展開通用值 -->
+        <!-- 2026-10-12 #576：不篩選項叫「不限」而非「全部」，避免與標籤值「全單位」「全體」混淆（選它們只列字面掛該標籤的課）；「建立者」下拉維持「全部」 -->
       </div>
       <div class="col-md-2" id="et-filter-creator" style="display:none;">
         <label class="form-label small">建立者</label>
