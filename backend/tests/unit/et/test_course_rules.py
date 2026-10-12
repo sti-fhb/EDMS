@@ -91,7 +91,7 @@ class TestEnsureOwnerOrAdmin:
 
 
 class TestEnsureTagChangeAllowed:
-    """FR-ET-US3-02：草稿自由增刪；已發布僅可新增、不可移除。"""
+    """FR-ET-US3-02：草稿與已關閉自由增刪；**僅已發布**不可移除（#586 裁示 A）。"""
 
     def test_草稿可自由增刪(self) -> None:
         ensure_tag_change_allowed(COURSE_DRAFT, current={1, 2}, desired={2, 3})
@@ -108,10 +108,20 @@ class TestEnsureTagChangeAllowed:
         assert exc.value.status_code == 422
         assert exc.value.error_code == "ET_COURSE_003"
 
-    def test_已關閉亦不可移除(self) -> None:
-        """狀態機為 PUBLISHED ⇄ CLOSED，關閉只是暫時；標籤保護不因關閉而放寬。"""
-        with pytest.raises(AppError):
-            ensure_tag_change_allowed(COURSE_CLOSED, current={1, 2}, desired={1})
+    def test_已關閉可移除(self) -> None:
+        """#586 裁示 A 推翻原本的「已關閉亦不可移除」。
+
+        原條文（本測試的前身）寫「狀態機為 PUBLISHED ⇄ CLOSED，關閉只是暫時；標籤保護
+        不因關閉而放寬」。但 FR-ET-US3-02 **只規範草稿與已發布**，`CLOSED` 從未被規格涵蓋
+        ——程式當初以 `status != DRAFT` 一併掃進來，屬補規格空白而非落實裁示。
+
+        SA 於 #586 裁定：關閉即視為「回到可整理狀態」，教師有權重新定義受訓對象。
+        已知且接受的後果是教師可藉「關閉 → 移除 → 再開課」繞過已發布的限制（裁示 A）。
+        """
+        ensure_tag_change_allowed(COURSE_CLOSED, current={1, 2}, desired={1})
+
+    def test_已關閉可清空(self) -> None:
+        ensure_tag_change_allowed(COURSE_CLOSED, current={1, 2}, desired=set())
 
     def test_已發布未變動不觸發(self) -> None:
         ensure_tag_change_allowed(COURSE_PUBLISHED, current={1, 2}, desired={1, 2})
