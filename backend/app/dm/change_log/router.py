@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.pagination import PagedResponse
 from app.dm.change_log.schemas import ChangeLogEntry, ChangeLogQuery, Operation
 from app.dm.change_log.service import ChangeLogService
@@ -50,5 +51,5 @@ async def export_entries(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="change-log.csv"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": 'attachment; filename="change-log.csv"'},
     )

@@ -14,6 +14,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.module_admin import require_any_module_admin
 from app.core.pagination import MAX_LIMIT, PagedResponse
 from app.core.utils import format_taipei_date, utcnow
@@ -124,5 +125,5 @@ async def export_audit_logs(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": f'attachment; filename="{filename}"'},
     )

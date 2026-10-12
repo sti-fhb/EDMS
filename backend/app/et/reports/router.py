@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.schemas import MAX_INT4
 from app.et.deps import EtContext, rate_limit_by_et_user, require_et_roles
@@ -63,5 +64,5 @@ async def download_weekly_students_csv(
     return Response(
         content=content.encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="et-weekly-students.csv"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": 'attachment; filename="et-weekly-students.csv"'},
     )

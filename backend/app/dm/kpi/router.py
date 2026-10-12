@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.http_cache import NO_STORE_HEADERS
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.kpi.schemas import KpiListResponse
 from app.dm.kpi.service import KpiService
@@ -41,5 +42,5 @@ async def export_kpi(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="kpi-reading-stats.csv"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": 'attachment; filename="kpi-reading-stats.csv"'},
     )

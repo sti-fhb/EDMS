@@ -20,8 +20,28 @@
 `no-cache` 仍允許**儲存**，只要求使用前重新驗證；而重新驗證可能回 `304` 且不帶 body。
 要確保每次都真的執行 handler（寫閱讀紀錄），必須 `no-store`。
 
-判準的覆蓋範圍由 `tests/unit/test_file_response_cache_coverage.py` 掃 AST 釘住：
-`app/` 下每個 `FileResponse(...)` / `StreamingResponse(...)` 呼叫都必須帶本常數。
+## 我們依賴的是什麼
+
+- **共享 / 中介快取**：RFC 9111 §3.5 本來就擋——帶 `Authorization` 的請求，回應沒有
+  `public` / `s-maxage` / `must-revalidate` 時**不得儲存**。
+- **瀏覽器私有快取**：§3.5 管不到。現行瀏覽器在沒有 validator 時實務上會重抓，但那是
+  **實作行為，不是規範保證**；`FileResponse` 又自動帶 `Last-Modified` / `ETag`，等於
+  親手把 validator 交出去。所以**不能賭**，一律 `no-store`。
+
+⚠️ 不要用「這個回應沒有 `Last-Modified`，所以不會被啟發式快取」當豁免理由。RFC 9111
+§4.2.2 把 `Last-Modified` 寫成 example（"such as"）而非 precondition——真正的門檻只有
+「無明確新鮮度」+「status code 可啟發式快取」，而 200 就在那份清單裡。
+
+## 範圍
+
+`tests/unit/test_file_response_cache_coverage.py` 掃 AST 釘住：`app/` 下每個
+`FileResponse` / `StreamingResponse`，**以及帶 `Content-Disposition` 或 CSV media_type
+的 `Response`**（七支匯出端點）都必須帶本常數。共 12 處。
+
+⛔ **本常數擋的是「請求不送達伺服器」這條路徑，不是「共用電腦上看不到別人的檔案」。**
+`Content-Disposition: attachment` 的終點是磁碟——下載資料夾裡的實體檔與瀏覽器下載歷程
+（含 URL）都不在 HTTP 快取的管轄內，後端無法處理。⚠️ 另：Service Worker 的
+`cache.put()` **完全不理會** `no-store`，日後若引入 PWA，這道防線會被整個繞過。
 
 > 實測經過、DevTools 證據與 #441（同類缺陷的第一次）的關聯見 issue #587——那些是**當時的
 > 狀態**，寫進程式碼會過期。

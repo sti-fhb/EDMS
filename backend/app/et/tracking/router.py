@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
@@ -212,7 +213,7 @@ async def export_students_csv(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="course-{course_id}-students.csv"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": f'attachment; filename="course-{course_id}-students.csv"'},
     )
 
 
@@ -237,5 +238,5 @@ async def export_survey_csv(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="course-{course_id}-survey.csv"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": f'attachment; filename="course-{course_id}-survey.csv"'},
     )
