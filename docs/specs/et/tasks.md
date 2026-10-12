@@ -269,7 +269,7 @@
 - [ ] T120 整合測試：DM 文件廢止後之 UI 行為（教師端阻擋發布、學員端「此文件已廢止」標籤）
 - [ ] T121 整合測試：帳號（Email）變更雙信箱共存模式（驗證後切換、未驗證舊 Email 仍可登入）
 - [ ] T122 效能驗證：大量學員加入課程之列表載入（US7 / US9 / US3 邀請學員）；影片觀看區段大量寫入與 normalize 效能
-- [ ] T123 安全性檢查：密碼雜湊強度、SMTP TLS、邀請 / 重設 / 變更 token 之 cryptographically secure random；avoid 帳號列舉攻擊（忘記密碼不存在之 Email 仍回應正常訊息）
+- [ ] T123 安全性檢查：密碼雜湊強度、SMTP TLS、邀請 / 重設 / 變更 token 之 cryptographically secure random；avoid 帳號列舉攻擊（忘記密碼不存在之 Email 仍回應正常訊息）。「SMTP TLS」已由 #585 撤銷強制，加密方式依郵件主機設定
 - [ ] T124 撰寫部署文件：第一個管理者寫入 DB 步驟、ET_TAG seed；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）與通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`）seed 由平台 DP 建立、SCHET001 / SCHET002 於平台 `DP_SCHEDULE` 註冊、發信走平台服務（`DP_EMAIL_LOG`）之整合說明、DM 整合說明（2026-07-08 集中化更新）
 
 ---

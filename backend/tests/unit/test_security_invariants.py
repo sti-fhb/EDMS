@@ -6,7 +6,7 @@ AC 9 列了四項上線門檻。前三項在程式碼裡**已經成立**，但**
 | AC 9 項目 | 現況 | 本檔 |
 |---|---|---|
 | 密碼雜湊 ≥ bcrypt cost 12 | ✅ 實測 `$2b$12$`，但**未明訂**——來自 passlib 預設 | 釘住 |
-| SMTP 採 TLS | ✅ `MAIL_STARTTLS` 預設 true + production 檢查 | 釘住兩者 |
+| SMTP 採 TLS | ⚠️ #585 撤銷強制：改為預設 STARTTLS、部署端可設明文 | 釘住預設與明文可啟動 |
 | token ≥ 32 bytes CSPRNG | ✅ `secrets.token_urlsafe(32)` | 釘住長度與熵來源 |
 | 防帳號列舉 | ⚠️ 見 `tests/integration/dp/test_dp_login_no_enumeration.py`（#208）與殘留 #345 / #346 | 不在本檔 |
 
@@ -16,8 +16,9 @@ AC 9 列了四項上線門檻。前三項在程式碼裡**已經成立**，但**
 
 - bcrypt 的 12 round 是 passlib 當前版本的預設。passlib 升級改預設值不會有任何警告，
   而 `pyproject.toml` 沒有釘 passlib 的次版本
-- `MAIL_STARTTLS: bool = True` 是欄位預設。任何人把 `.env` 寫成 `MAIL_STARTTLS=false`
-  在 `DEBUG=true` 的環境下完全合法，而那正是「測試環境的設定被複製到別處」的起點
+- `MAIL_STARTTLS: bool = True` 是欄位預設。#585 起 `MAIL_STARTTLS=false` 在任何環境都合法
+  （不再有 production 檢查），所以**預設值是唯一剩下的保護**——沒寫 MAIL 加密設定的環境
+  仍會走 STARTTLS
 - token 長度寫在呼叫端（`secrets.token_urlsafe(32)`），不是常數
 
 **這些不是「可能會壞」，是「壞了不會有人知道」**——沒有錯誤訊息、沒有紅燈，只有強度下降。
@@ -99,15 +100,22 @@ class TestTokenEntropy:
 
 
 class TestMailTransportSecurity:
-    """AC 9-2：SMTP 採 TLS。"""
+    """AC 9-2：SMTP 採 TLS——#585 撤銷「production 強制 TLS」，只保留預設值與互斥檢查。
+
+    撤銷理由：院內郵件主機只提供埠 25、不加密、以 IP 授權（與 TBMS 同組設定），強制 TLS 會讓
+    EDMS 在該環境起不來，現場只能以 `DEBUG=true` 繞過——而那會連帶關掉
+    FRONTEND_BASE_URL、TRUSTED_PROXY_COUNT、儲存路徑等 production 護欄，代價比明文寄信更大。
+    加密方式改由部署端依郵件主機決定。
+    """
 
     def _settings(self, **over) -> Settings:
         """建一份**除了待測項目外全部合法**的 production 設定。
 
         ⚠️ `Settings` 有多道 production 檢核（JWT 金鑰長度、`FRONTEND_BASE_URL` 不得為空或
-        指向 localhost、MAIL TLS…）。基準設定若漏掉任何一項，下面那些「應拋 ValidationError」
-        的測試會**因為錯的理由而通過**——撰寫初版時就是如此（漏了 `FRONTEND_BASE_URL`，
-        兩條 TLS 測試綠得毫無意義）。故各條另以 `_tls_error` 確認錯的是 TLS 那一項。
+        指向 localhost…）。基準設定若漏掉任何一項，下面「應拋 ValidationError」的測試會
+        **因為錯的理由而通過**——撰寫初版時就是如此（漏了 `FRONTEND_BASE_URL`，
+        當時的 TLS 測試綠得毫無意義）。故互斥那條另以 `_tls_error` 確認錯的是 TLS 那一項；
+        反過來「應可啟動」的測試也靠這份基準全部合法才有意義。
         """
         base = {
             "DATABASE_URL": "postgresql+asyncpg://u:p@localhost:5432/x",
@@ -146,28 +154,25 @@ class TestMailTransportSecurity:
         assert Settings.model_fields["MAIL_STARTTLS"].default is True
         assert Settings.model_fields["MAIL_SSL_TLS"].default is False, "兩者互斥，預設只能開一個"
 
-    def test_production_明文_smtp_被拒絕啟動(self) -> None:
-        """**啟動即失敗**，不是執行期才發現。
+    def test_production_明文_smtp_可啟動(self) -> None:
+        """埠 25 不加密在 `DEBUG=false` 下可正常啟動（#585）——不必再靠 `DEBUG=true` 繞過。
 
-        若只在寄信當下檢查，明文設定會一路上線到第一封信寄出——而那封信的帳密與內容
-        已經明文送出去了。
+        `MAIL_SUPPRESS_SEND=False`、`MAIL_SERVER` 已設由 `_settings` 基準保證：兩者任一不成立，
+        舊檢查本來就會放行，這條就驗不到「檢查已移除」。
         """
-        self._tls_error(MAIL_STARTTLS=False, MAIL_SSL_TLS=False)
+        s = self._settings(MAIL_STARTTLS=False, MAIL_SSL_TLS=False, MAIL_PORT=25)
+        assert (s.DEBUG, s.MAIL_SUPPRESS_SEND, bool(s.MAIL_SERVER)) == (False, False, True)
 
     def test_implicit_tls_亦為合法(self) -> None:
-        """埠 465 走 implicit TLS，同樣加密，不該被上一條的檢查誤擋。"""
+        """埠 465 走 implicit TLS，不該被下面的互斥檢查誤擋。"""
         assert self._settings(MAIL_STARTTLS=False, MAIL_SSL_TLS=True, MAIL_PORT=465).MAIL_SSL_TLS is True
 
     def test_兩種_tls_不可同時啟用(self) -> None:
         """STARTTLS 是明文連線後升級、SSL_TLS 是一開始就加密；同時開會連不上。
 
-        這條與上面兩條不同——它擋的不是弱設定，是**無效設定**，症狀是寄不出信而非不安全。
+        它擋的不是弱設定，是**無效設定**，症狀是寄不出信而非不安全——所以 #585 撤銷強制 TLS 時保留。
         """
         assert "不可同時" in self._tls_error(MAIL_STARTTLS=True, MAIL_SSL_TLS=True)
-
-    def test_未設定_mail_server_時不強制(self) -> None:
-        """尚未接上 SMTP 的環境（含本機開發）不該因此起不來。"""
-        assert self._settings(MAIL_SERVER="", MAIL_STARTTLS=False, MAIL_SSL_TLS=False).MAIL_SERVER == ""
 
 
 class TestProductionStartupGuards:
@@ -180,7 +185,7 @@ class TestProductionStartupGuards:
        所以護欄本身就是唯一的偵測手段
     2. 部署文件與程式碼不會分岔——文件若漏列一項，這裡的清單仍然是完整的
 
-    ⚠️ 撰寫本檔時逐一撞出了其中四項（原本只知道 MAIL TLS）。這說明**光讀 `config.py`
+    ⚠️ 撰寫本檔時逐一撞出了其中四項（原本只知道 MAIL TLS 那一道，該道已由 #585 撤銷）。這說明**光讀 `config.py`
     的欄位定義看不出有幾道護欄**，它們散在五個 `model_validator` 裡。
     """
 
@@ -212,7 +217,7 @@ class TestProductionStartupGuards:
             ("TRUSTED_PROXY_COUNT", None, "未明示則限流與稽核的來源 IP 可被偽造"),
             ("DM_FILE_STORAGE_ROOT", "./var/dm_files", "相對路徑依工作目錄解析，換啟動位置全部檔案讀不到"),
             ("ET_VIDEO_STORAGE_ROOT", "./var/et_videos", "同上"),
-            ("MAIL_STARTTLS", False, "明文 SMTP，帳密與信件內容明文上線"),
+            # MAIL_STARTTLS=false 已非護欄（#585 撤銷強制 TLS），見 TestMailTransportSecurity
         ],
     )
     def test_單項設錯即拒絕啟動(self, field: str, bad_value, why: str) -> None:

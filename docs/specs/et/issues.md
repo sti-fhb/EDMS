@@ -480,7 +480,7 @@
 - T120 整合測試：DM 文件廢止後之 UI 行為
 - T121 整合測試：帳號（Email）變更雙信箱共存模式
 - T122 效能驗證：大量學員加入課程之列表載入；影片觀看區段大量寫入與 normalize 效能
-- T123 安全性檢查（密碼雜湊強度、SMTP TLS、token 隨機性、防帳號列舉）
+- T123 安全性檢查（密碼雜湊強度、SMTP TLS、token 隨機性、防帳號列舉）——「SMTP TLS」已由 #585 撤銷，見下方 AC 9
 - T124 部署文件撰寫（管理者初始化 / ET_TAG seed；ET 系統參數與通知範本 seed 由平台 DP 建於 `DP_PARAM`（前綴 `ET_`）/ `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）/ 排程於平台 `DP_SCHEDULE` 註冊 / 發信走平台服務 / DM 整合說明）
 - T152 整合測試：標籤自動邀請與貼標追溯（2026-07-02 新增）
 - T153 整合測試：課程時窗與再開課（2026-07-02 新增）
@@ -497,6 +497,7 @@
 7. 大量學員（≥ 500 人）加入課程之列表載入時間 < 2 秒
 8. 影片觀看區段批次寫入與 normalize 效能達標
 9. 密碼雜湊強度 ≥ bcrypt cost 12 或 argon2 等效；SMTP 採 TLS；所有 token 使用 cryptographically secure random（≥ 32 bytes）
+   > 「SMTP 採 TLS」已由 #585 撤銷：院內郵件主機只提供埠 25 不加密，改為預設 STARTTLS、由部署端依郵件主機決定加密方式。
 10. 部署文件完整覆蓋第一個管理者寫入、ET_TAG seed；ET 系統參數（平台 `DP_PARAM` 前綴 `ET_`）與通知範本（平台 `DP_NOTIFY_TEMPLATE` `MODULE=ET`）seed 由平台 DP 初始化、排程於平台 `DP_SCHEDULE` 註冊、發信走平台服務、DM 整合步驟
 11. 標籤自動邀請 / 貼標追溯、課程時窗與再開課、問卷全流程、排程週報與提醒之整合測試（T152 ~ T155）全數通過
 

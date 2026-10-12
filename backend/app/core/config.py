@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     MAIL_PASSWORD: str = ""
     MAIL_FROM: str = "noreply@edms.local"
     MAIL_STARTTLS: bool = True
-    # implicit TLS（如埠 465）；與 STARTTLS 互斥，兩者不可同時 true
+    # implicit TLS（如埠 465）；與 STARTTLS 互斥，兩者不可同時 true；兩者皆 false 為埠 25 不加密（#585）
     MAIL_SSL_TLS: bool = False
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
@@ -114,23 +114,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_mail_tls(self) -> "Settings":
-        """MAIL 傳輸層 TLS 設定檢查：
+        """MAIL 傳輸層 TLS 設定檢查：STARTTLS 與 SSL_TLS 互斥（STARTTLS 為明文升級、SSL_TLS 為 implicit TLS）。
 
-        1. STARTTLS 與 SSL_TLS 互斥（STARTTLS 為明文升級、SSL_TLS 為 implicit TLS）。
-        2. production（非 DEBUG、非 SUPPRESS_SEND）且已設定 MAIL_SERVER 時，至少一種 TLS 需啟用，
-           禁止明文 SMTP 傳輸（帳密與信件內容明文上線）。
+        兩者皆 false（埠 25 不加密）為合法設定，production 亦然——#585 撤銷原「production 禁明文 SMTP」
+        檢查：院內郵件主機只開埠 25、不加密、以 IP 授權（與 TBMS 同組設定），強制 TLS 會讓後端起不來，
+        現場只能以 DEBUG=true 繞過，而那會連帶關掉其餘 production 護欄。加密方式由部署端依郵件主機決定。
         """
         if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
             raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
-        if (
-            self.MAIL_SERVER
-            and not self.DEBUG
-            and not self.MAIL_SUPPRESS_SEND
-            and not (self.MAIL_STARTTLS or self.MAIL_SSL_TLS)
-        ):
-            raise ValueError(
-                "production 已設定 MAIL_SERVER 時，MAIL_STARTTLS 或 MAIL_SSL_TLS 至少一為 true（禁明文 SMTP）"
-            )
         return self
 
     @model_validator(mode="after")
