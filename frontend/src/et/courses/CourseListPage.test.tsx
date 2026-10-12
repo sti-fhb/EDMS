@@ -131,6 +131,69 @@ describe("ET01 課程列表", () => {
     expect([...last.keys()].sort()).toEqual(["limit", "page", "scope", "tag_id", "unit_tag_id"])
   })
 
+  describe("單位／職位的「不篩」選項叫「不限」（#576）", () => {
+    // 「全單位」「全體」是**標籤值**、篩選只比對字面（#538 SA Q2）——選它只會列出字面掛
+    // 「全單位」的課。第一個選項若也叫「全部」，讀起來跟「全單位」是同一件事，使用者會把
+    // 「全單位」當成清除篩選，然後發現課程變少。⛔ 不可用「拿掉其中一個」解決：拿掉「不限」
+    // 就再也清不掉篩選，拿掉「全單位」就查不到字面掛它的課
+    it.each([
+      ["單位", "全單位"],
+      ["職位", "全體"],
+    ])("%s下拉第一個選項是「不限」，標籤值「%s」保留不改名", async (label, allTag) => {
+      const user = userEvent.setup()
+      renderWithProviders(<EtCourseListPage />)
+      await screen.findByText("採血作業新進人員訓練")
+
+      await user.click(screen.getByLabelText(label))
+
+      const options = await screen.findAllByRole("option")
+      expect(options[0]).toHaveTextContent(/^不限$/)
+      // 同一份選項清單、同一種查法：「全部」不在、標籤值在
+      expect(screen.queryByRole("option", { name: "全部" })).not.toBeInTheDocument()
+      expect(screen.getByRole("option", { name: allTag })).toBeInTheDocument()
+    })
+
+    it("選「不限」送出時不帶該欄參數——行為與改名前相同", async () => {
+      const seen: URLSearchParams[] = []
+      server.use(
+        http.get("/api/et/courses", ({ request }) => {
+          seen.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 12, total_pages: 1 } })
+        }),
+      )
+      const user = userEvent.setup()
+      renderWithProviders(<EtCourseListPage />)
+      await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+
+      // 先選一個值，確認參數真的送出——否則下面「沒有該參數」的斷言在篩選根本沒作用時也成立
+      await user.click(screen.getByLabelText("單位"))
+      await user.click(await screen.findByRole("option", { name: "全單位" }))
+      await waitFor(() => expect(seen.at(-1)?.get("unit_tag_id")).toBe("101"))
+
+      const before = seen.length
+      await user.click(screen.getByLabelText("單位"))
+      await user.click(await screen.findByRole("option", { name: "不限" }))
+
+      // 先等**新的一次**請求，再看它有沒有帶參數——分清「沒帶參數」與「根本沒重新請求」
+      await waitFor(() => expect(seen.length).toBeGreaterThan(before))
+      expect(seen.at(-1)?.has("unit_tag_id")).toBe(false)
+    })
+
+    it("「建立者」下拉與「全部課程」分頁的文字不受影響（只改單位、職位兩欄）", async () => {
+      searchParams = new URLSearchParams({ scope: "all" })
+      const user = userEvent.setup()
+      renderWithProviders(<EtCourseListPage />)
+      await screen.findByText("採血作業新進人員訓練")
+      expect(screen.getByRole("tab", { name: "全部課程" })).toBeInTheDocument()
+
+      await user.click(screen.getByLabelText("建立者"))
+
+      const options = await screen.findAllByRole("option")
+      expect(options[0]).toHaveTextContent(/^全部$/)
+      expect(screen.queryByRole("option", { name: "不限" })).not.toBeInTheDocument()
+    })
+  })
+
   it("「建立者」篩選只在「全部課程」出現，且不佔位", async () => {
     const { unmount } = renderWithProviders(<EtCourseListPage />)
     await screen.findByText("採血作業新進人員訓練")
