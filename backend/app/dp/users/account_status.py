@@ -85,3 +85,24 @@ def account_usable_clause(now: datetime) -> ColumnElement[bool]:
         DpUser.status == _STATUS_ACTIVE,
         or_(DpUser.locked_until.is_(None), DpUser.locked_until <= now),
     )
+
+
+def account_not_disabled_clause() -> ColumnElement[bool]:
+    """「帳號未停用」之 SQL 條件（**不看鎖定**），供 `select().where()` 掛載。
+
+    `is_account_disabled` 的 SQL 對應，補上本模組原本缺的那一半——Python 側有
+    `is_account_usable` / `is_account_disabled` 一對，SQL 側原本只有
+    `account_usable_clause`，於是需要「未停用但容許鎖定中」的查詢無處可取，只能自己
+    寫 `status == "ACTIVE"`，正是本模組 docstring 禁止的「其他模組自行解讀」。
+
+    ## 何時用這支、何時用 `account_usable_clause`
+
+    問「這個人現在要不要做什麼動作」——用 `account_usable_clause`（鎖定中的人此刻
+    進不來）。問「這個人還是不是這裡的人」——用本函式：鎖定是暫時的、會自動解除，
+    被鎖 15 分鐘的同仁明天照樣要收到文件發布通知（同
+    `review/center_service` 催辦跳過判定的推理）。
+
+    Returns:
+        可掛進 where 的布林條件；非 `ACTIVE` 一律視為停用（fail-closed）。
+    """
+    return DpUser.status == _STATUS_ACTIVE

@@ -20,8 +20,32 @@ logger = logging.getLogger(__name__)
 # 系統作業建立者（DP_EMAIL_LOG 標準欄位 CREATED_USER）；實際觸發模組記於 CALLER_MODULE。
 _SYSTEM_USER = "SYSTEM"
 
-# 收件人單次上限（防呼叫方 bug / 濫用一次寫入海量 outbox 拖垮 worker，對齊 TBMS 慣例）
-_MAX_RECIPIENTS = 50
+#: 單次 `send_email` 的收件人上限（對齊 TBMS 慣例）。**公開常數**：傳多人清單的呼叫方
+#: 需據此分批，故由 `app.services` 一併匯出（#563）。
+#:
+#: ⚠️ 原註解寫它「防濫用一次寫入海量 outbox 拖垮 worker」——**那個目的從來沒有達成**：
+#:
+#:   - 它沒有任何時間或累積維度，只看單次呼叫的 `len(recipients)`。呼叫方自己寫個迴圈
+#:     就能寫到同樣的量，而呼叫方全是第一方程式碼——「自己繞得過」的限制不是信任邊界。
+#:   - 超過上限時的結果不是「少寫一些」，而是**整個呼叫方交易 rollback**。也就是說它
+#:     從來不會把大量通知變小，只會把它變成硬失敗（#563 正是這個失敗：可見對象超過
+#:     50 人的文件因此發布不了）。
+#:   - 真正的流量控制在**寄送端**：`worker.py` 依 `DP_PARAM` 的 `MAIL/RATE_PER_MIN`
+#:     （保底 60）限制每輪取件量，輪距再搭配控制速率。那一道與本上限彼此獨立，outbox
+#:     多幾列不會讓 worker 多寄，只會讓佇列變長。
+#:
+#: 所以本上限的實際效用只剩：擋住呼叫方**誤把整張表當收件人清單**這類 bug，讓它當場 422
+#: 而不是安靜地寫出十萬列。保留它是刻意的——ET 與 DP 自身的呼叫都在其下運作（皆為單人），
+#: 移除屬跨模組語意變更。
+#:
+#: ⚠️ 連帶要知道：DM 自 #563 起會分批，於是**單一請求可達的 outbox 寫入量從 0（硬失敗）
+#: 變成 N**（N＝可見對象相符的閱覽者數）。那不是本上限放寬的結果，是它原本就擋不住、
+#: 只是以 rollback 掩蓋了。真正的上界是機構內 `DM_VIEWER` 人數。
+#:
+#: ⚠️ 本值必須 ≥ 1：呼叫方以它當 `range()` 步長分批，設為 0 會在分批處拋 `ValueError`
+#: （未處理例外、不是 `AppError`）。目前硬編碼故不可能發生；若日後改為 `DP_PARAM` 可設定，
+#: 需在讀取處補一道下界守門。
+MAX_RECIPIENTS = 50
 
 
 # 代入值中須剝除的字元（#225）。**主旨與內文用不同嚴格度**，因為兩者對「換行」的容忍度不同。
@@ -195,7 +219,7 @@ class NotifyService:
         Raises:
             AppError: template_code 不存在（404 / DP_MAIL_001）。
         """
-        if len(recipients) > _MAX_RECIPIENTS:
+        if len(recipients) > MAX_RECIPIENTS:
             raise AppError(status_code=422, detail="收件人數超過單次上限", error_code="DP_MAIL_002")
         template = await self._repo.get_template(db, module, template_code)
         if template is None:
@@ -231,11 +255,11 @@ class NotifyService:
         status: str,
         error_msg: str | None,
     ) -> None:
-        """逐收件人寫一列 DP_EMAIL_LOG（渲染快照 + 狀態）。"""
+        """逐收件人寫一列 DP_EMAIL_LOG（渲染快照 + 狀態），整批一次 flush（#563）。"""
         now = utcnow()
-        for recipient in recipients:
-            await self._repo.add_log(
-                db,
+        await self._repo.add_logs(
+            db,
+            [
                 {
                     "module": module,
                     "template_code": template_code,
@@ -247,5 +271,7 @@ class NotifyService:
                     "error_msg": error_msg,
                     "created_user": _SYSTEM_USER,
                     "created_date": now,
-                },
-            )
+                }
+                for recipient in recipients
+            ],
+        )

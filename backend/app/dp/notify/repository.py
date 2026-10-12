@@ -62,9 +62,20 @@ class NotifyRepository:
         )
         return (await db.execute(stmt)).scalar_one_or_none()
 
-    async def add_log(self, db: AsyncSession, values: dict) -> None:
-        """新增一列 outbox；只 flush（commit 由呼叫方交易負責）。"""
-        db.add(DpEmailLog(**values))
+    async def add_logs(self, db: AsyncSession, rows: list[dict]) -> None:
+        """新增多列 outbox；**整批只 flush 一次**（commit 由呼叫方交易負責）。
+
+        #563 前為逐列 `add()` + `flush()`，於是 N 位收件人就是 N 次 round-trip。當時單次
+        呼叫最多 50 人（`MAX_RECIPIENTS` 超過即拋），所以上界是固定的；DM 改為分批之後 N
+        由機構內閱覽者人數決定，而這整段跑在核准交易裡、且該交易已持有 review 列的
+        `FOR UPDATE` 鎖——逐列 flush 會讓鎖持有時間隨人口線性成長。
+
+        批尾單次 flush 讓 SQLAlchemy 合併成 executemany，round-trip 降到每批一次。語意不變：
+        仍只 flush 不 commit，失敗仍由呼叫方交易 rollback。
+        """
+        if not rows:
+            return
+        db.add_all([DpEmailLog(**values) for values in rows])
         await db.flush()
 
     async def list_pending_for_attempt(

@@ -33,7 +33,7 @@ class SubmitResult(BaseModel):
     """送簽結果。"""
 
     review_id: int
-    notified: int  # 排入 Email 通知數（0=範本停用 / 僅站內）
+    notified: int  # 排入 Email 通知數（0=範本停用 / 僅站內 / 排入失敗，見 DmNotifier）
 
 
 class ReviewerItem(BaseModel):

@@ -9,6 +9,7 @@
 
 import logging
 import os
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select, text, update
@@ -20,7 +21,7 @@ from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag
 from app.dm.document.file_paths import storage_root
-from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
+from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.personal.service import PersonalService
 from app.dm.review.center_service import ReviewCenterService
 from app.dm.review.models import DmChangeLog, DmReview
@@ -29,6 +30,7 @@ from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
+from app.services import MAX_RECIPIENTS
 
 pytestmark = pytest.mark.integration
 
@@ -761,3 +763,160 @@ async def test_recipients_pair_excludes_other_unit_same_role(db):
     assert "mab_nurse@e.com" in emails  # 單位 + 職位皆相符
     assert "tsgh_nurse@e.com" not in emails  # 同職位但單位不符 → 不得收到
     assert "ed@e.com" not in emails  # #554：撰寫者改由站內動態承接，不再收 Email
+
+
+# ── 收件人超過平台單次上限（#563）────────────────────
+
+
+async def test_approve_publishes_when_recipients_exceed_platform_limit(db):
+    """可見對象相符者超過平台單次上限時，核准發布**成功**且每個人都收得到（#563）。
+
+    ## 為何這條測試非建 51 個使用者不可
+
+    平台 `send_email` 對單次收件人數設上限（`MAX_RECIPIENTS`），超過即拋
+    `AppError(422, DP_MAIL_002)`；該例外一路冒到 router，`get_db` 隨即 rollback 整個
+    交易——文件沒轉 `PUBLISHED`、版本沒切、`DM_CHANGE_LOG` 沒寫、稽核沒寫。
+
+    ⚠️ **這個缺陷的觸發條件被 fixture 的預設排除掉了**：其餘收件測試各建 2～3 位閱覽者，
+    永遠碰不到上限。所以在本條之前，「CI 全綠」對這個缺陷**完全沒有證據力**——不是漏寫
+    斷言，是情境從未被製造出來。故此處真的建到上限 + 1 人。
+
+    三個斷言缺一不可：核准**成功**（擋住 rollback）、文件狀態與變更歷程**落地**（證明
+    rollback 真的沒發生，不是 approve 回傳了但資料沒寫）、`DP_EMAIL_LOG` **一個都不少**
+    （擋住「只寄給前 50 人」這種修法——那會讓第 51 人之後靜默收不到）。
+    """
+    total = MAX_RECIPIENTS + 1
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    for i in range(total):
+        uid = f"zt_v{i:03d}"
+        await _seed_user(db, uid, f"ZT 閱覽{i:03d}", email=f"{uid}@e.com")
+        await _grant(db, uid, DM_VIEWER)
+    doc, v, r = await _new_submission(db, "DM-SOP-000363", audience=("全體",))
+    # ⚠️ 可見對象必須種在**版本層**：`approve` 會先跑 `apply_version_tags_to_doc`，以版本快照
+    # 覆寫文件層生效值（#377）。只種文件層的話會在核准當下被清空，收件名單變成 0 人——
+    # 那會讓本測試「通過」卻什麼都沒驗到。
+    db.add(
+        DmVersionTag(
+            version_id=v.version_id,
+            tag_id=await _audience_id(db, "全體"),
+            unit_tag_id=await _unit_id(db, "全單位"),
+            created_user="ed",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+
+    res = await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    # ① 核准成功，且通知數就是全體人數（不是被截到上限）
+    assert res.published_version_id == v.version_id
+    assert res.notified == total, f"應排入 {total} 封，實得 {res.notified}"
+
+    # ② 業務寫入確實落地——若交易被 rollback，上面的回傳值仍在記憶體裡、但這裡會抓到舊值
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000363"))
+    assert doc.status == "PUBLISHED" and doc.current_version_id == v.version_id
+    logs = await db.scalar(
+        select(func.count())
+        .select_from(DmChangeLog)
+        .where(DmChangeLog.doc_id == "DM-SOP-000363", DmChangeLog.operation == "PUBLISH")
+    )
+    assert logs == 1
+
+    # ③ outbox 逐人一列，一個都不少
+    queued = await db.scalar(
+        text(
+            'SELECT count(*) FROM "DP_EMAIL_LOG" '
+            "WHERE \"MODULE\" = 'DM' AND \"TEMPLATE_CODE\" = 'DOC_PUBLISH' AND \"STATUS\" = 'PENDING'"
+        )
+    )
+    assert queued == total, f"DP_EMAIL_LOG 應有 {total} 列 PENDING，實得 {queued}"
+
+
+async def test_approve_succeeds_when_publish_template_missing(db):
+    """範本不存在時核准**仍成功**——通知失敗不得連坐業務交易（#563）。
+
+    `DmNotifier` 本次起比照 `EtNotifier` 攔下 `AppError`。這是 DM **全部 8 個通知呼叫點**
+    的行為變更，不只多人清單那一處：原本範本被刪 / 改 MODULE 會讓送審、廢止送審、核准、
+    退回整個 rollback，現在改為靜默回 `SEND_FAILED`、操作照常完成。
+
+    ⚠️ 本條釘的是**這個方向**（fail-open 而非 fail-closed）。單元測試只驗到 `DmNotifier`
+    回傳什麼，驗不到「呼叫方的交易真的沒被回滾」——那要走真 DB。
+
+    ⚠️ 代價寫在這裡供日後權衡：`DP_MAIL_001` 在**寫入任何列之前**發生，所以這條路徑連
+    `DP_EMAIL_LOG` 都不會留下痕跡（下方斷言 0 列即是在陳述這件事）。「沒有人收到通知」
+    目前只能從 `notified == 0` 看出來，而呼叫端沒有保留 `skipped_reason`。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _seed_user(db, "zt_vmiss", "ZT 閱覽", email="zt_vmiss@e.com")
+    await _grant(db, "zt_vmiss", DM_VIEWER)
+    doc, v, r = await _new_submission(db, "DM-SOP-000364", audience=("全體",))
+    db.add(
+        DmVersionTag(
+            version_id=v.version_id,
+            tag_id=await _audience_id(db, "全體"),
+            unit_tag_id=await _unit_id(db, "全單位"),
+            created_user="ed",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+    # 把範本改名＝模擬「被刪 / 改 MODULE」；send_email 將拋 404 DP_MAIL_001
+    await db.execute(
+        text(
+            'UPDATE "DP_NOTIFY_TEMPLATE" SET "TEMPLATE_CODE" = \'ZT_GONE\' '
+            "WHERE \"MODULE\" = 'DM' AND \"TEMPLATE_CODE\" = 'DOC_PUBLISH'"
+        )
+    )
+    await db.flush()
+
+    res = await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    # 正向錨點：業務寫入確實落地（若 AppError 冒出去，這裡會因 rollback 而拿到舊值）
+    assert res.published_version_id == v.version_id
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000364"))
+    assert doc.status == "PUBLISHED"
+    logs = await db.scalar(
+        select(func.count())
+        .select_from(DmChangeLog)
+        .where(DmChangeLog.doc_id == "DM-SOP-000364", DmChangeLog.operation == "PUBLISH")
+    )
+    assert logs == 1
+    # 通知那一側：一封都沒排入，且**連 FAILED 列都沒有**
+    assert res.notified == 0
+    queued = await db.scalar(
+        text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "MODULE" = \'DM\' AND "CALLER_MODULE" = \'DM\'')
+    )
+    assert queued == 0
+
+
+async def test_recipients_exclude_disabled_but_keep_locked(db):
+    """已停用帳號不列入發布通知；**暫時鎖定的仍列入**（#563）。
+
+    本查詢原本只濾 `DELETED == 0`，而 `DP_USER.DELETED` 在本系統從不被設定（停用一律是
+    `STATUS='DISABLED'`），等於沒有任何帳號狀態過濾——已停用 / 離職但角色未撤的人照樣收到
+    含文件名稱與變更摘要的受控文件通知。
+
+    ⚠️ 兩個方向都要釘：只斷言「停用者收不到」的話，改用 `account_usable_clause()`（連鎖定
+    一起排除）也會通過，而那會讓被鎖 15 分鐘的同仁**永久少收**這一封——鎖定會自動解除，
+    信不會重寄。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "zt_ok", "ZT 正常", email="zt_ok@e.com")
+    await _seed_user(db, "zt_off", "ZT 停用", email="zt_off@e.com")
+    await _seed_user(db, "zt_lock", "ZT 鎖定", email="zt_lock@e.com")
+    for uid in ("zt_ok", "zt_off", "zt_lock"):
+        await _grant(db, uid, DM_VIEWER)
+    await db.execute(update(DpUser).where(DpUser.user_id == "zt_off").values(status="DISABLED"))
+    await db.execute(
+        update(DpUser).where(DpUser.user_id == "zt_lock").values(locked_until=utcnow() + timedelta(minutes=15))
+    )
+    await db.flush()
+    await _doc(db, "DM-SOP-000365", status="PUBLISHED", author="ed", audience=("全體",))
+
+    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000365")
+
+    assert "zt_ok@e.com" in emails  # 正向錨點：這份名單真的有人，否則下面兩條恆真
+    assert "zt_off@e.com" not in emails  # 停用 → 不該收到受控文件的名稱與摘要
+    assert "zt_lock@e.com" in emails  # 鎖定是暫時的，明天就回來——不該少收

@@ -18,6 +18,7 @@ from app.dm.document.visibility import audience_pair_match
 from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.roles.authz import DM_VIEWER
 from app.dm.roles.models import DmUserRole
+from app.dp.users.account_status import account_not_disabled_clause
 from app.dp.users.models import DpUser
 
 _PENDING = "PENDING"
@@ -352,6 +353,18 @@ class ReviewCenterRepository:
         ⚠️ **邊界（已考慮過，非疏漏）**：撰寫者若**本身就是可見對象相符的閱覽者**，仍會循上方
         一般規則收到 Email。這是刻意的——他是以**閱覽者身分**落在收件範圍內，與他是不是作者
         無關；若要排除，那是「作者不收自己發布的文件通知」這個另外的產品決定，本次未裁示。
+
+        ## #563：排除已停用帳號
+
+        本查詢原本只濾 `DELETED == 0`，而 `DP_USER.DELETED` 在本系統**從不被設定**——系統沒有
+        刪除使用者的功能，停用一律是 `STATUS='DISABLED'`（全 codebase 無任何寫入 `DELETED=1`
+        之處）。也就是說那道條件在正式環境恆為真，等於**完全沒有帳號狀態過濾**：已停用 / 離職
+        但角色未撤的帳號，照樣收到含文件名稱、版號與變更摘要的受控文件通知。
+
+        ⚠️ 用 `account_not_disabled_clause()` 而**不是** `account_usable_clause()`：後者連
+        「密碼打錯三次被鎖 15 分鐘」都排除，而那位同仁明天就回來了、該收的通知不該少收
+        （同 `center_service` 催辦跳過判定的推理）。也不自己寫 `status == "ACTIVE"`——
+        `STATUS` 值域屬 DP 語意，其他模組不得自行解讀。
         """
         stmt = (
             select(DpUser.email)
@@ -359,6 +372,7 @@ class ReviewCenterRepository:
             .where(
                 DpUser.deleted == 0,
                 DmUserRole.deleted == 0,
+                account_not_disabled_clause(),
                 DpUser.email.isnot(None),
                 audience_pair_match(doc_id=doc_id, user_id=DpUser.user_id),
             )
