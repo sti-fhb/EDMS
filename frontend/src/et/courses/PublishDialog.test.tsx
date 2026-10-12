@@ -30,6 +30,13 @@ describe("PublishDialog：條件已滿足", () => {
     expect(screen.getByRole("button", { name: "確認發布" })).toBeEnabled()
   })
 
+  it("說明起始時間未到前學員看得到但尚未開放（#592）", () => {
+    // 學員端 ET03 會列出這門課並標「尚未開放」，舊文案說「不會看到」與實際相反
+    render(<PublishDialog {...BASE_PROPS} />)
+    expect(screen.getByText(/學員可在「我的課程」看到這門課程，但標示尚未開放/)).toBeInTheDocument()
+    expect(screen.queryByText(/學員端不會看到/)).not.toBeInTheDocument()
+  })
+
   it("按下發布會呼叫 onPublish", async () => {
     const onPublish = vi.fn()
     render(<PublishDialog {...BASE_PROPS} onPublish={onPublish} />)
@@ -53,6 +60,13 @@ describe("PublishDialog：有缺漏", () => {
     render(<PublishDialog {...BASE_PROPS} blockers={blockers} />)
     expect(screen.getByText("課程至少須設定 1 組受訓對象")).toBeInTheDocument()
     expect(screen.getByText("課程起訖時間須填寫完整")).toBeInTheDocument()
+  })
+
+  it("問卷無題目時，發布情境的導引為刪除問卷——草稿沒有停用可按（#592）", () => {
+    const survey = [{ code: "SURVEY_NO_QUESTION", message: "課後問卷至少須有 1 題", target_id: null }]
+    render(<PublishDialog {...BASE_PROPS} blockers={survey} />)
+    expect(screen.getByText("請為課後問卷新增至少 1 題，或刪除該問卷")).toBeInTheDocument()
+    expect(screen.queryByText(/停用該問卷/)).not.toBeInTheDocument()
   })
 
   it("每條缺漏附上「去哪裡修」的導引", () => {

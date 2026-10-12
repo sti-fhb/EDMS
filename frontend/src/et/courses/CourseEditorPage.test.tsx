@@ -1523,6 +1523,9 @@ describe("ET05 課程關閉與再開課", () => {
     }
     // ⚠️ 紅框歸紅框：還沒動手的人不該看到錯誤訊息
     expect(screen.queryByText("請重新設定課程起始時間")).not.toBeInTheDocument()
+    // #592：缺漏改以視窗列出（#509），底部說明不可再說「在上方列出」
+    expect(screen.getByText(/有缺漏時會以視窗列出/)).toBeInTheDocument()
+    expect(screen.queryByText(/會在上方列出缺漏/)).not.toBeInTheDocument()
   })
 
   it("取消再開課會把清掉的時間還原（#428）", async () => {
@@ -2035,7 +2038,7 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     { code: "CHAPTER_EMPTY", message: "章節至少須有 1 份教材或測驗", target_id: 12 },
     { code: "ITEM_NO_TITLE", message: "教材與測驗須填寫名稱", target_id: 21 },
     { code: "QUIZ_POINTS", message: "測驗各題配分總和須等於 100", target_id: 31 },
-    { code: "SURVEY_NO_QUESTION", message: "課後問卷至少須有 1 題，或請停用該問卷", target_id: null },
+    { code: "SURVEY_NO_QUESTION", message: "課後問卷至少須有 1 題", target_id: null },
     { code: "OBSOLETE_DOC", message: "請先移除已廢止文件之引用", target_id: null },
   ]
 
@@ -2063,6 +2066,9 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     expect(within(dialog).getByText("請輸入課程名稱")).toBeInTheDocument()
     expect(within(dialog).getByText(/章節至少須有 1 份教材或測驗（章節「第二章」）/)).toBeInTheDocument()
     expect(within(dialog).getByText(/請先移除已廢止文件之引用/)).toBeInTheDocument()
+    // #592：草稿沒有「停用問卷」可按，發布情境的提示必須指向刪除（正反同一種查法）
+    expect(within(dialog).getByText("請為課後問卷新增至少 1 題，或刪除該問卷")).toBeInTheDocument()
+    expect(within(dialog).queryByText(/停用該問卷/)).not.toBeInTheDocument()
     expect(state.puts).toBe(0)
     expect(state.checks).toBe(1)
   })
@@ -2112,7 +2118,7 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     // 測驗缺漏帶的是 quiz_id（31），要框到「小考」那一列
     const quiz = screen.getByText("測驗各題配分總和須等於 100").closest(".MuiPaper-root") as HTMLElement
     expect(within(quiz).getByRole("button", { name: "刪除項目 小考" })).toBeInTheDocument()
-    const survey = screen.getByText("課後問卷至少須有 1 題，或請停用該問卷").closest(".MuiPaper-root") as HTMLElement
+    const survey = screen.getByText("課後問卷至少須有 1 題").closest(".MuiPaper-root") as HTMLElement
     expect(within(survey).getByText("課後滿意度問卷")).toBeInTheDocument()
   })
 
@@ -2199,14 +2205,14 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     const state = setup(ALL_BACKEND)
     const dialog = await publishWithEmptyName(user)
     await closeDialog(user, dialog)
-    expect(screen.getByText("課後問卷至少須有 1 題，或請停用該問卷")).toBeInTheDocument()
+    expect(screen.getByText("課後問卷至少須有 1 題")).toBeInTheDocument()
 
     state.backend = ALL_BACKEND.filter((b) => b.code !== "SURVEY_NO_QUESTION")
     await user.click(screen.getByRole("button", { name: "刪除問卷" }))
     await user.click(await screen.findByRole("button", { name: "刪除" }))
 
     await waitFor(() =>
-      expect(screen.queryByText("課後問卷至少須有 1 題，或請停用該問卷")).not.toBeInTheDocument(),
+      expect(screen.queryByText("課後問卷至少須有 1 題")).not.toBeInTheDocument(),
     )
     expect(screen.getByText("教材與測驗須填寫名稱")).toBeInTheDocument()
   }, 15000)

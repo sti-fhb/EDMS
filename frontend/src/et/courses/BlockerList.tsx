@@ -4,12 +4,13 @@ import ListItem from "@mui/material/ListItem"
 import ListItemIcon from "@mui/material/ListItemIcon"
 import ListItemText from "@mui/material/ListItemText"
 
-import { BLOCKER_HINT, blockerGroupLabel, groupBlockers } from "./surveySchemas"
-import type { BlockerNames, PublishBlocker } from "./surveySchemas"
+import { blockerGroupLabel, blockerHint, groupBlockers } from "./surveySchemas"
+import type { BlockerContext, BlockerNames, PublishBlocker } from "./surveySchemas"
 
 interface BlockerListProps {
   blockers: PublishBlocker[]
   names: BlockerNames
+  context: BlockerContext
 }
 
 /**
@@ -34,7 +35,7 @@ interface BlockerListProps {
  * `target_id` 能定位到出問題的物件。⛔ 不要反過來要求後端回一個拼好的字串（訊息一律
  * 靜態、對象以 `target_id` 表達，見 `publish_rules.py` 檔頭）。
  */
-export function BlockerList({ blockers, names }: BlockerListProps) {
+export function BlockerList({ blockers, names, context }: BlockerListProps) {
   return (
     <List dense disablePadding>
       {groupBlockers(blockers).map((group) => (
@@ -43,7 +44,7 @@ export function BlockerList({ blockers, names }: BlockerListProps) {
           <ListItemIcon sx={{ minWidth: 32 }}>
             <ErrorOutlineIcon color="error" fontSize="small" />
           </ListItemIcon>
-          <ListItemText primary={blockerGroupLabel(group, names)} secondary={BLOCKER_HINT[group[0].code]} />
+          <ListItemText primary={blockerGroupLabel(group, names)} secondary={blockerHint(group[0].code, context)} />
         </ListItem>
       ))}
     </List>

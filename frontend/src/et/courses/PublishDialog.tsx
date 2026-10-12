@@ -111,11 +111,12 @@ export function PublishDialog({
             </Alert>
             <Typography variant="body2" color="text.secondary">
               發布後課程狀態轉為「已發布」，系統會產生 8 碼邀請碼並依受訓對象自動邀請對應學員。
-              起始時間未到前，學員端不會看到這門課程。
+              起始時間未到前，學員可在「我的課程」看到這門課程，但標示尚未開放、無法進入學習。
             </Typography>
           </Stack>
         ) : (
           <BlockerSummary
+            context="publish"
             message="發布條件未滿足，請先補齊以下項目。關閉本視窗後，缺漏處會以紅框標示。"
             blockers={blockers}
             names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}

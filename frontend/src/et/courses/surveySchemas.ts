@@ -175,7 +175,8 @@ export const BLOCKER_HINT: Record<string, string> = {
   NO_SCHEDULE: "請於「基本資料」填寫課程起訖時間",
   QUIZ_POINTS: "請調整該測驗各題配分，使總和為 100",
   QUIZ_NO_QUESTION: "請為該測驗新增至少 1 題",
-  SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或停用該問卷",
+  // 處置依情境而異，見下方 `blockerHint`——這裡放發布（草稿）情境的版本
+  SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或刪除該問卷",
   OBSOLETE_DOC: "請於教材中移除已廢止文件之引用",
   ITEM_NO_TITLE: "請開啟該項目並填寫名稱，或刪除這個未命名的項目",
   // 前端檢核的缺漏（#558，見 `publishCheck.ts` 的 `FORM_BLOCKER`）——與後端代碼同一個命名空間
@@ -184,6 +185,25 @@ export const BLOCKER_HINT: Record<string, string> = {
   FORM_START: "請於「基本資料」修正課程起始時間",
   FORM_END: "請於「基本資料」修正課程訖止時間",
   FORM_AUDIENCE: "請於「基本資料」補選該列的單位與職位，或刪除該列",
+}
+
+/** 缺漏清單出現的情境：發布＝課程為草稿；再開課＝課程已關閉。 */
+export type BlockerContext = "publish" | "reopen"
+
+/**
+ * 再開課情境下改寫的導引（#592）。
+ *
+ * 同一條缺漏在兩個情境的處置相反：草稿課程的問卷只有「刪除」、沒有「停用」；已關閉
+ * 課程的問卷只有「停用」、不能刪（`SurveySection` 依 `isDraftCourse` 二選一）。導引寫死
+ * 其中一種，另一個情境的教師就會去找一顆不存在的按鈕。
+ */
+const REOPEN_HINT_OVERRIDES: Record<string, string> = {
+  SURVEY_NO_QUESTION: "請為課後問卷新增至少 1 題，或停用該問卷",
+}
+
+/** 缺漏代碼 → 依情境的「去哪裡修」導引。 */
+export function blockerHint(code: string, context: BlockerContext): string | undefined {
+  return (context === "reopen" ? REOPEN_HINT_OVERRIDES[code] : undefined) ?? BLOCKER_HINT[code]
 }
 
 /**

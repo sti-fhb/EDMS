@@ -1390,6 +1390,7 @@ export function EtCourseEditorPage() {
       {reopening && reopenBlockers.length > 0 && (
         <BlockerDialog
           title="再開課"
+          context="reopen"
           message="課程目前不符發布條件，無法再開課。關閉期間的編輯可能移除了必要內容，請先補齊以下項目。"
           blockers={reopenBlockers}
           names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
@@ -1854,7 +1855,7 @@ export function EtCourseEditorPage() {
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Typography variant="caption" color="text.secondary">
               {reopening
-                ? "再開課會重跑發布檢核；關閉期間若移除了必要內容，會在上方列出缺漏。尚未變更任何資料。"
+                ? "再開課會重跑發布檢核；關閉期間若移除了必要內容，有缺漏時會以視窗列出，關閉後於缺漏處以紅框標示。尚未變更任何資料。"
                 : status === "DRAFT"
                   ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
                   : "已發布課程的編輯即時生效，不需重新發布。"}

@@ -382,11 +382,23 @@ describe("課程列表：純 ET 管理者（#463）", () => {
     expect(screen.queryByText("編輯模式")).not.toBeInTheDocument()
   })
 
+  it("純管理者的說明為學員視角預覽，不再說檢視模式（#592）", async () => {
+    // 卡片實際導向 `/learn` 預覽頁；比對單一 `<strong>` 的完整文字（理由見上方兩條）
+    asRole(false)
+    renderWithProviders(<EtCourseListPage />)
+
+    expect(await screen.findByText("學員視角預覽")).toBeInTheDocument()
+    expect(screen.queryByText("檢視模式（唯讀）")).not.toBeInTheDocument()
+  })
+
   it("教師仍看得到編輯／檢視模式的說明——上一條的對照組", async () => {
     // 少了這條，「不顯示」那條就算因為選擇器寫錯而永遠通過也沒人會發現。
     asRole(true)
     renderWithProviders(<EtCourseListPage />)
 
     expect(await screen.findByText("編輯模式")).toBeInTheDocument()
+    // #592：「全部課程」的卡片導向學員視角預覽，不是唯讀編輯頁
+    expect(screen.getByText("學員視角預覽")).toBeInTheDocument()
+    expect(screen.queryByText("檢視模式（唯讀）")).not.toBeInTheDocument()
   })
 })
