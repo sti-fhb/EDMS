@@ -88,7 +88,16 @@ export function CourseAudiencePairs({
       </Typography>
       <Stack spacing={1}>
         {value.map((row, idx) => {
-          const locked = lockedKeys.has(audienceKey(row))
+          // 🔴 **只鎖每個 key 的第一次出現**（#586）。鎖定以值比對，而使用者可能新增一列、
+          // 填成與既有組相同的值——那一列原本會連帶被鎖住：兩個下拉 disabled、刪除鈕不渲染，
+          // 而重複又讓 `validateAudiences` 擋下儲存 ⇒ 改不了、刪不了、也存不了，只能離開
+          // 頁面放棄其他編輯。
+          //
+          // 既有配對由表單初值依序預帶在最前、新增列一律追加在後、使用者無法調整順序，
+          // 故「第一次出現」必為伺服器上的那一組。後出現的重複列保持可改可刪，既有的
+          // 「此組受訓對象已存在」訊息正好告訴使用者為什麼要刪。
+          const key = audienceKey(row)
+          const locked = lockedKeys.has(key) && value.findIndex((r) => audienceKey(r) === key) === idx
           return (
             <Stack
               // 完全受控（值皆來自 state），用索引不會有狀態殘留；把值寫進 key 會讓「選完單位」

@@ -313,6 +313,39 @@ describe("ET05 課程編輯頁", () => {
     expect(screen.getByRole("combobox", { name: "第 2 組的單位" })).toBeEnabled()
   })
 
+  it("已關閉課程的既有受訓對象可修改、可移除（#586 裁示 A）", async () => {
+    // FR-ET-US3-02 只規範草稿與已發布；CLOSED 原本被 `status !== "DRAFT"` 一併掃進鎖定，
+    // #586 裁定關閉＝「回到可整理狀態」，教師有權重新定義受訓對象。
+    server.use(
+      http.get("/api/et/courses/:courseId", () =>
+        HttpResponse.json({
+          course_id: 1,
+          course_name: "已關閉課",
+          description: null,
+          status: "CLOSED",
+          open_start_at: null,
+          open_end_at: null,
+          require_approval: false,
+          version: 3,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+          chapters: [],
+        }),
+      ),
+    )
+    renderEditor()
+
+    expect(await screen.findByDisplayValue("已關閉課")).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "第 1 組的單位" })).toBeEnabled()
+    expect(screen.getByRole("combobox", { name: "第 1 組的職位" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "移除第 1 組受訓對象" })).toBeInTheDocument()
+    // 正反成對、同一種查詢方式：鎖定提示不該出現，而泛用提示該出現
+    expect(screen.getByText(/每組為「單位 \+ 職位」/)).toBeInTheDocument()
+    expect(screen.queryByText("已發布課程可新增受訓對象、不可移除既有者")).not.toBeInTheDocument()
+  })
+
   describe("受訓對象配對列表（#538）", () => {
     async function pick(user: ReturnType<typeof userEvent.setup>, field: string, option: string) {
       await user.click(screen.getByRole("combobox", { name: field }))
@@ -329,6 +362,56 @@ describe("ET05 課程編輯頁", () => {
       )
       return captured
     }
+
+    it("已發布課程新增一組與既有相同的配對：該列仍可改、可刪，並顯示重複訊息（#586）", async () => {
+      // 🔴 鎖定是**按值**比對（`lockedKeys.has(audienceKey(row))`），而新增的重複列與既有列
+      // 值相同——原本會連新列一起鎖住：兩個下拉 disabled、刪除鈕不渲染，而 `validateForm`
+      // 又因 rowErrors 非空擋下儲存 ⇒ 改不了、刪不了、也存不了，只能離開頁面放棄編輯。
+      const user = userEvent.setup()
+      server.use(
+        http.get("/api/et/courses/:courseId", () =>
+          HttpResponse.json({
+            course_id: 1,
+            course_name: "已發布課",
+            description: null,
+            status: "PUBLISHED",
+            open_start_at: null,
+            open_end_at: null,
+            require_approval: false,
+            version: 3,
+            owner_id: "U1",
+            owner_name: "王教師",
+            is_owner: true,
+            audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+            chapters: [],
+          }),
+        ),
+      )
+      renderEditor()
+      await screen.findByDisplayValue("已發布課")
+
+      // 第 1 組是伺服器上既有的 (全單位, 護理師) —— 仍須鎖住
+      expect(screen.getByRole("combobox", { name: "第 1 組的單位" })).toBeDisabled()
+      expect(screen.queryByRole("button", { name: "移除第 1 組受訓對象" })).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole("button", { name: "新增受訓對象" }))
+      await pick(user, "第 2 組的單位", "全單位")
+      await pick(user, "第 2 組的職位", "護理師") // 與第 1 組完全相同
+
+      // 重複列不得繼承鎖定：改得動、刪得掉
+      expect(screen.getByRole("combobox", { name: "第 2 組的單位" })).toBeEnabled()
+      expect(screen.getByRole("combobox", { name: "第 2 組的職位" })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "移除第 2 組受訓對象" })).toBeInTheDocument()
+
+      // 按儲存才會顯示逐列錯誤；訊息要讓使用者知道為什麼得刪掉這一列
+      await user.click(screen.getByRole("button", { name: "儲存" }))
+      expect(await screen.findByText("此組受訓對象已存在")).toBeInTheDocument()
+
+      // 使用者自己刪掉後，錯誤消失、第 1 組仍在且仍鎖定
+      await user.click(screen.getByRole("button", { name: "移除第 2 組受訓對象" }))
+      await waitFor(() => expect(screen.queryByText("此組受訓對象已存在")).not.toBeInTheDocument())
+      expect(screen.getByRole("combobox", { name: "第 1 組的單位" })).toBeDisabled()
+    })
 
     it("新增模式預帶一列空白配對", async () => {
       renderNewEditor()

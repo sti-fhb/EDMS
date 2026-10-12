@@ -121,10 +121,15 @@ def is_browsable_by_non_owner(*, status: str, open_end_at: datetime | None, now:
 
 
 def ensure_tag_change_allowed(status: str, *, current: set[Pair], desired: set[Pair]) -> None:
-    """草稿可自由增刪配對；**非草稿僅可新增、不可移除**（FR-ET-US3-02）。
+    """草稿與已關閉可自由增刪配對；**僅已發布不可移除**（FR-ET-US3-02）。
 
-    「不可移除」涵蓋 `PUBLISHED` 與 `CLOSED`——關閉只是暫時狀態（可再開課），
-    既有學員仍持有該課程，放寬移除會使「哪些配對曾觸發自動邀請」失去可追溯性。
+    「不可移除」**只涵蓋 `PUBLISHED`**。`CLOSED` 於 #586 裁示 A 放寬：關閉是教師的
+    手動動作（US11「關閉課程」），即視為「回到可整理狀態」，教師有權重新定義受訓對象。
+
+    ⚠️ 已知且接受的後果：教師可藉「關閉 → 移除 → 再開課」繞過本限制，使課程顯示的
+    受訓對象與實際在課學員的母體不一致（既有學員**不會**被移出課程）。#586 評估後接受
+    ——要擋下需保存「關閉前的配對」，而 `ET_COURSE_TAG` 就地增刪、無歷史表。
+    ⛔ 不要以「加嚴比較安全」為由改回 `!= COURSE_DRAFT`，那會推翻該裁示。
 
     ⚠️ 比較的是**整組配對**（#538）：同職位換單位（`(全單位, 護理師)` → `(三總, 護理師)`）
     是「移除一組 + 新增一組」，非草稿擋下。只比職位 ID 的話它會被當成沒變而放行——
@@ -136,9 +141,9 @@ def ensure_tag_change_allowed(status: str, *, current: set[Pair], desired: set[P
         desired: 本次欲設定之 `(單位 TAG_ID, 職位 TAG_ID)` 集合。
 
     Raises:
-        AppError: 422 `ET_COURSE_003`，非草稿課程嘗試移除既有標籤。
+        AppError: 422 `ET_COURSE_003`，已發布課程嘗試移除既有標籤。
     """
-    if status != COURSE_DRAFT and (current - desired):
+    if status == COURSE_PUBLISHED and (current - desired):
         raise AppError(status_code=422, detail="已發布課程不可移除既有標籤", error_code="ET_COURSE_003")
 
 

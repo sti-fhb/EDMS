@@ -1213,7 +1213,12 @@ export function EtCourseEditorPage() {
 
   // 已發布課程僅可新增配對、不可移除（FR-ET-US3-02）——鎖住的是**伺服器上已存在**的那幾組，
   // 不是整區；以值比對（`audienceKey`），新增的列照常可改可刪
-  const lockedAudiences = new Set(status !== "DRAFT" && course ? course.audiences.map(audienceKey) : [])
+  //
+  // ⚠️ 判定是 `=== "PUBLISHED"` 而非 `!== "DRAFT"`（#586）。FR-ET-US3-02 只規範草稿與
+  // 已發布，`CLOSED` 原本被一併掃進鎖定；裁示 A 定調關閉＝「回到可整理狀態」，教師有權
+  // 重新定義受訓對象。後端 `ensure_tag_change_allowed` 同步改為只擋 `PUBLISHED`——
+  // ⛔ 兩邊必須一致，只改單邊會變成「畫面給刪但送出被擋」或「後端放行但畫面沒有刪除鈕」。
+  const lockedAudiences = new Set(status === "PUBLISHED" && course ? course.audiences.map(audienceKey) : [])
 
   // ⚠️ 查詢失敗時**必須早退**。原本忽略 error，403 之後 `course` 為 undefined，
   // 而 `readOnly` 是由 `course` 推導的（undefined → false），結果學員直接看到一個
