@@ -6,6 +6,8 @@
 純推導（`can_reset_retry`、完課三態）於 `tests/unit/et/test_tracking_rules.py`。
 """
 
+import csv
+import io
 from datetime import timedelta
 from decimal import Decimal
 
@@ -17,6 +19,7 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
+from app.et.approval.models import EtApproval
 from app.et.constants import (
     ATTEMPT_IN_PROGRESS,
     ATTEMPT_SUBMITTED,
@@ -77,7 +80,7 @@ async def _user(db, user_id: str, *, roles: tuple[str, ...] = (ROLE_TEACHER,), n
     return user_id
 
 
-async def _course(db, *, owner: str, name: str = "追蹤測試課程") -> int:
+async def _course(db, *, owner: str, name: str = "追蹤測試課程", require_approval: bool = False) -> int:
     now = utcnow()
     course = EtCourse(
         course_name=name,
@@ -86,7 +89,7 @@ async def _course(db, *, owner: str, name: str = "追蹤測試課程") -> int:
         open_start_at=now - timedelta(days=1),
         open_end_at=now + timedelta(days=30),
         version=0,
-        require_approval=False,
+        require_approval=require_approval,
         urgent_remind_sent=False,
         created_user=owner,
         created_date=now,
@@ -181,6 +184,35 @@ async def _enroll(db, user_id: str, course_id: int, *, removed: bool = False, st
     db.add(row)
     await db.flush()
     return row
+
+
+async def _approve(db, *, course_id: int, user_id: str, result: str, by: str) -> None:
+    """建立一筆核可紀錄（比照 `test_et_training_completion._approve`）。"""
+    now = utcnow()
+    db.add(
+        EtApproval(
+            course_id=course_id,
+            user_id=user_id,
+            result=result,
+            result_note=None,
+            is_revoked=False,
+            revoke_reason=None,
+            approved_by=by,
+            approved_at=now,
+            revoked_by=None,
+            revoked_at=None,
+            version=0,
+            created_user=by,
+            created_date=now,
+            deleted=0,
+        )
+    )
+    await db.flush()
+
+
+def _csv_rows(content: bytes) -> list[dict[str, str]]:
+    """把匯出的 CSV 解析成「欄名 → 值」的列，以學員姓名查找。"""
+    return list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
 
 
 async def _complete_item(db, user_id: str, course_id: int, item_id: int) -> None:
@@ -1336,6 +1368,125 @@ class TestWriteEndpointAuthorization:
 
         assert r.status_code == 404, "測驗不屬於該課程，不可跨課程重置"
         assert r.json()["error_code"] == "ET_TRACK_004"
+
+
+class TestCsvApprovalColumn:
+    """學員清單 CSV 的「核可狀態」欄（#577，推翻 #352 的 SD 自決）。
+
+    裁示（#577 留言 2026-10-12）：Q1-A 一律有該欄、不需核可的課程填「—」；Q2-A 只加
+    「核可狀態」一欄，文字與 ET02 畫面相同。
+    """
+
+    #: 畫面（`StudentListBlock.tsx`）上四種狀態的文字——CSV 必須與它一致
+    _SCREEN_TEXT = {
+        "NOT_ELIGIBLE": "未達核可資格",
+        "PENDING": "待核可",
+        "PASSED": "已通過",
+        "FAILED": "未通過",
+    }
+
+    async def _approval_course(self, db) -> tuple[str, int]:
+        """一門需核可的課程，四位學員各落在一種狀態。"""
+        teacher = await _user(db, "t_tr70")
+        course_id = await _course(db, owner=teacher, require_approval=True)
+        chapter_id = await _chapter(db, course_id)
+        item_id = await _item(db, chapter_id, title="教材", order=1)
+        cases = [
+            ("s_tr70a", "未完課生", False, None),  # 未完課 → 未達核可資格
+            ("s_tr70b", "待核可生", True, None),  # 完課、無紀錄 → 待核可
+            ("s_tr70c", "通過生", True, "PASS"),
+            ("s_tr70d", "未通過生", True, "FAIL"),
+        ]
+        for uid, name, completed, result in cases:
+            await _user(db, uid, roles=(ROLE_STUDENT,), name=name)
+            await _enroll(db, uid, course_id)
+            if completed:
+                await _complete_item(db, uid, course_id, item_id)
+            if result:
+                await _approve(db, course_id=course_id, user_id=uid, result=result, by=teacher)
+        await db.commit()
+        return teacher, course_id
+
+    async def test_需核可課程的csv核可欄與畫面一致(self, client, db) -> None:
+        """AC 1：同一門課同時取畫面 API 與 CSV，逐人比對。
+
+        比對的是「CSV 文字 == 畫面狀態對應的文字」而不是寫死預期值——兩邊若各自算，這條
+        會在它們分岔的那一刻紅。
+        """
+        teacher, course_id = await self._approval_course(db)
+
+        screen = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+        exported = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        assert screen.status_code == 200, screen.text
+        assert exported.status_code == 200, exported.text
+        by_name = {row["學員"]: row for row in _csv_rows(exported.content)}
+        statuses = {row["user_name"]: row["approval_status"] for row in screen.json()["data"]}
+        # 正向錨點：四種狀態都真的出現了——否則逐人比對可能只比到同一種
+        assert set(statuses.values()) == set(self._SCREEN_TEXT)
+        for name, status in statuses.items():
+            assert by_name[name]["核可狀態"] == self._SCREEN_TEXT[status], name
+
+    async def test_不需核可課程的核可欄為破折號_不是空字串也不是任何核可狀態(self, client, db) -> None:
+        """AC 2 / AC 5：那門課**沒有核可這一步**，該欄是「不適用」，不是「未核可」。
+
+        空字串看起來像資料漏了；任何一種核可狀態的文字（例如「待核可」）都是錯的。
+        """
+        teacher = await _user(db, "t_tr71")
+        course_id = await _course(db, owner=teacher, require_approval=False)
+        chapter_id = await _chapter(db, course_id)
+        item_id = await _item(db, chapter_id, title="教材", order=1)
+        for uid, completed in (("s_tr71a", True), ("s_tr71b", False)):
+            await _user(db, uid, roles=(ROLE_STUDENT,), name=uid)
+            await _enroll(db, uid, course_id)
+            if completed:
+                await _complete_item(db, uid, course_id, item_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        rows = _csv_rows(r.content)
+        assert len(rows) == 2
+        for row in rows:
+            # 欄位存在（Q1-A：一律有該欄）——`row["核可狀態"]` 缺欄時直接 KeyError
+            value = row["核可狀態"]
+            assert value == "—"
+            assert value != ""
+            assert value not in self._SCREEN_TEXT.values()
+
+    async def test_只匯出核可狀態_不含核可人與備註(self, client, db) -> None:
+        """#577 Q2 裁示 A：只加「核可狀態」一欄。
+
+        核可人姓名與備註是對個人的評語，帶出系統即脫離存取控制（security review 建議）。
+        表頭那條測試只間接擋住——日後有人把備註加進匯出、同時改了表頭預期，它就不會紅。
+        """
+        teacher = await _user(db, "t_tr72", name="核可教師甲")
+        course_id = await _course(db, owner=teacher, require_approval=True)
+        chapter_id = await _chapter(db, course_id)
+        item_id = await _item(db, chapter_id, title="教材", order=1)
+        await _user(db, "s_tr72", roles=(ROLE_STUDENT,), name="學員乙")
+        await _enroll(db, "s_tr72", course_id)
+        await _complete_item(db, "s_tr72", course_id, item_id)
+        await _approve(db, course_id=course_id, user_id="s_tr72", result="PASS", by=teacher)
+        await db.execute(update(EtApproval).where(EtApproval.user_id == "s_tr72").values(result_note="實機操作備註丙"))
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        text = r.content.decode("utf-8-sig")
+        # 正向錨點：這一列確實匯出、且核可狀態正確——否則下面的「找不到」在匯出整個失敗時也成立
+        assert _csv_rows(r.content)[0]["核可狀態"] == "已通過"
+        assert "實機操作備註丙" not in text
+        assert "核可教師甲" not in text
+
+    async def test_核可欄在最後一欄_既有六欄位置不變(self, client, db) -> None:
+        """新欄加在**最後**：原有六欄的位置不動，依欄位位置處理的試算表不會錯位。"""
+        teacher, course_id = await self._approval_course(db)
+
+        r = await client.get(f"{_URL}/{course_id}/students.csv", headers=_bearer(teacher))
+
+        header = next(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
+        assert header == ["學員", "加入日期", "完課狀態", "學習進度", "平均成績", "最後活動", "核可狀態"]
 
 
 class TestExportAudit:

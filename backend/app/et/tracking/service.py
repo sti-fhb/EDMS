@@ -47,7 +47,13 @@ from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import format_taipei, utcnow
 from app.et.approval.repository import EtApprovalRepository
-from app.et.approval.rules import derive_approval_status
+from app.et.approval.rules import (
+    STATUS_FAILED,
+    STATUS_NOT_ELIGIBLE,
+    STATUS_PASSED,
+    STATUS_PENDING,
+    derive_approval_status,
+)
 from app.et.approval.schemas import ApprovalRow
 from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
@@ -137,50 +143,16 @@ class EtTrackingService:
         ## 先 `paginate()`，再以該頁的 `user_id` 批次補齊
 
         一頁十幾位學員，每人要算完課數、平均成績、最後活動——逐筆再查就是幾十次往返。
-        三次固定成本的查詢與頁面筆數無關。
-
-        ⚠️ 三個聚合**刻意分開查**：把它們併進同一個 `GROUP BY` 會讓兩個一對多關聯互相
-        灌大彼此的計數（2 項目 × 3 次作答 → 兩個數字都變 6）。
-
-        ## 核可狀態是第四個查詢，而且**只在需要時才查**
-
-        `ET_APPROVAL` 是第三個一對多關聯，同樣**絕不可**併進上述 `GROUP BY`。而
-        `REQUIRE_APPROVAL = false` 的課程根本不顯示核可欄，此時多查一次是純粹的浪費
-        ——ET02 是教師頻繁切換課程的頁面。
+        固定成本的查詢與頁面筆數無關。補齊與組裝在 `_assemble_student_rows`——與 CSV 匯出
+        共用同一份（#577），查詢的拆分理由也寫在那裡。
         """
         course = await self._require_owner(db, course_id, actor_id, actor_roles)
 
         stmt = self._repo.build_student_list_stmt(course_id=course_id)
         paged = await paginate(db, stmt, page=page, limit=limit, schema=EnrollmentRow)
         enrollments: list[EnrollmentRow] = paged["data"]
-        user_ids = [e.user_id for e in enrollments]
 
-        counts = await self._repo.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
-        avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
-        in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
-
-        approvals = (
-            await self._approvals.rows_by_course(db, course_id=course_id, user_ids=user_ids)
-            if course.require_approval
-            else {}
-        )
-        # 核可人的姓名與學員的姓名一起查——核可人多半是同一個人（教師本人），
-        # 分兩次查等於為了一兩個 id 多跑一趟。
-        names = await self._repo.user_names(db, set(user_ids) | {a.approved_by for a in approvals.values()})
-
-        rows = [
-            _to_student_row(
-                e,
-                counts=counts.get(e.user_id, (0, 0)),
-                avg_score=avg_scores.get(e.user_id),
-                user_name=names.get(e.user_id),
-                has_in_progress_attempt=e.user_id in in_progress,
-                require_approval=course.require_approval,
-                approval=approvals.get(e.user_id),
-                approver_names=names,
-            )
-            for e in enrollments
-        ]
+        rows = await self._assemble_student_rows(db, course, enrollments)
         return {"data": rows, "meta": paged["meta"]}
 
     async def _require_owner(
@@ -496,11 +468,13 @@ class EtTrackingService:
         AC 10 明訂課程關閉後「仍可閱覽三區塊全部內容（**含匯出 CSV**）」。套上
         `_require_writable` 會讓教師在課程結束後拿不走自己的教學紀錄。
         """
-        await self._require_owner(db, course_id, actor_id, actor_roles)
-        rows = await self._all_student_rows(db, course_id)
+        course = await self._require_owner(db, course_id, actor_id, actor_roles)
+        rows = await self._all_student_rows(db, course)
         await self._log_export(db, course_id, actor_id=actor_id, what="學員清單", count=len(rows))
         return _write_csv(
-            ("學員", "加入日期", "完課狀態", "學習進度", "平均成績", "最後活動"),
+            # 「核可狀態」加在**最後一欄**（#577）：原有六欄的位置不動，依欄位位置處理的
+            # 試算表不會錯位
+            ("學員", "加入日期", "完課狀態", "學習進度", "平均成績", "最後活動", "核可狀態"),
             [
                 (
                     row.user_name or "—",
@@ -509,6 +483,7 @@ class EtTrackingService:
                     f"{row.progress_pct}%",
                     str(row.avg_score) if row.avg_score is not None else "—",
                     _fmt_dt(row.last_activity_at),
+                    _approval_cell(row.approval_status),
                 )
                 for row in rows
             ],
@@ -568,28 +543,57 @@ class EtTrackingService:
             description=f"匯出{what} CSV（{count} 筆）",
         )
 
-    async def _all_student_rows(self, db: AsyncSession, course_id: int) -> list[StudentRow]:
+    async def _all_student_rows(self, db: AsyncSession, course: EtCourse) -> list[StudentRow]:
         """全班學員（**不分頁**）——匯出專用。
 
-        與 `list_students` 共用同一組聚合查詢與同一個組裝函式，讓畫面與 CSV 的數字不會
-        分岔（兩份實作遲早對不起來，而對不起來的表現是教師拿去核對時發現差一個人）。
+        與 `list_students` 走**同一個** `_assemble_student_rows`，差別只在學員從哪來（一頁 vs
+        全班），讓畫面與 CSV 的數字不會分岔（兩份實作遲早對不起來，而對不起來的表現是教師
+        拿去核對時發現差一個人）。
 
-        ## 📌 CSV **刻意不含核可欄**（SD 自決，#352 規劃 §15）
+        ## 📌 CSV 含核可欄（#577，推翻 #352 規劃 §15 的 SD 自決）
 
-        US16 未要求核可進匯出，而 CSV 是 US9 的輸出——加一欄會改變既有檔案格式，而
-        教師端可能已有依欄位位置處理的試算表。故此處固定傳 `require_approval=False`，
-        讓核可欄位全為 `None`、不進 `_CSV_HEADERS`。
-
-        需要「核可清單」時應走 US17（ET-19 核可查詢），那支本來就是為跨課程查詢設計的。
+        原本固定傳 `require_approval=False`、CSV 不含核可欄，理由是「教師端可能已有依欄位
+        位置處理的試算表」與「核可清單走 US17」。#577 重估：系統尚未上線，前者沒有對象；
+        US17 是**跨課程**查詢，「這門課誰核可了」在 ET02 畫面上看得到、卻匯不出來。
+        裁示（#577 留言）：一律有該欄、不需核可的課程填「—」；只加「核可狀態」一欄。
         """
-        rows = await db.execute(self._repo.build_student_list_stmt(course_id=course_id))
+        rows = await db.execute(self._repo.build_student_list_stmt(course_id=course.course_id))
         enrollments = [EnrollmentRow.model_validate(e) for e in rows.scalars().all()]
+        return await self._assemble_student_rows(db, course, enrollments)
+
+    async def _assemble_student_rows(
+        self, db: AsyncSession, course: EtCourse, enrollments: list[EnrollmentRow]
+    ) -> list[StudentRow]:
+        """一批學員 → 畫面 / CSV 的列。**畫面與匯出唯一的組裝路徑**（#577）。
+
+        ⛔ 不要為匯出另寫一份：#577 之前兩邊各自查「要不要查核可、查誰的姓名」，CSV 那份
+        寫死不含核可——同一門課畫面看得到、匯出卻沒有，而兩邊的測試各自都是綠的。
+
+        ⚠️ 三個聚合**刻意分開查**：把它們併進同一個 `GROUP BY` 會讓兩個一對多關聯互相
+        灌大彼此的計數（2 項目 × 3 次作答 → 兩個數字都變 6）。
+
+        ## 核可狀態是第四個查詢，而且**只在需要時才查**
+
+        `ET_APPROVAL` 是第三個一對多關聯，同樣**絕不可**併進上述 `GROUP BY`。而
+        `REQUIRE_APPROVAL = false` 的課程沒有核可這一步，此時多查一次是純粹的浪費
+        ——ET02 是教師頻繁切換課程的頁面。
+        """
+        course_id = course.course_id
         user_ids = [e.user_id for e in enrollments]
 
         counts = await self._repo.completion_counts_by_student(db, course_id=course_id, user_ids=user_ids)
         avg_scores = await self._repo.avg_best_score_by_student(db, course_id=course_id, user_ids=user_ids)
-        names = await self._repo.user_names(db, set(user_ids))
         in_progress = await self._repo.in_progress_attempt_user_ids(db, course_id=course_id, user_ids=user_ids)
+
+        approvals = (
+            await self._approvals.rows_by_course(db, course_id=course_id, user_ids=user_ids)
+            if course.require_approval
+            else {}
+        )
+        # 核可人的姓名與學員的姓名一起查——核可人多半是同一個人（教師本人），
+        # 分兩次查等於為了一兩個 id 多跑一趟。
+        names = await self._repo.user_names(db, set(user_ids) | {a.approved_by for a in approvals.values()})
+
         return [
             _to_student_row(
                 e,
@@ -597,12 +601,38 @@ class EtTrackingService:
                 avg_score=avg_scores.get(e.user_id),
                 user_name=names.get(e.user_id),
                 has_in_progress_attempt=e.user_id in in_progress,
-                require_approval=False,
-                approval=None,
-                approver_names={},
+                require_approval=course.require_approval,
+                approval=approvals.get(e.user_id),
+                approver_names=names,
             )
             for e in enrollments
         ]
+
+
+#: 核可綜合狀態 → CSV 文字，**與 ET02 畫面相同**（`StudentListBlock.tsx` 的 `APPROVAL_LABEL`
+#: 與 `NOT_ELIGIBLE` 的純文字）。⚠️ 新增狀態時兩邊同步；`tests/unit/et/` 有一條測試釘住
+#: 這張表涵蓋 `approval.rules` 的每一個狀態常數。
+APPROVAL_STATUS_LABEL: dict[str, str] = {
+    STATUS_NOT_ELIGIBLE: "未達核可資格",
+    STATUS_PENDING: "待核可",
+    STATUS_PASSED: "已通過",
+    STATUS_FAILED: "未通過",
+}
+
+
+def _approval_cell(status: str | None) -> str:
+    """CSV「核可狀態」格。
+
+    `None` ＝ 該課程**不需核可**（`_to_student_row` 對 `require_approval = False` 的課程整組留
+    `None`）。這時填「—」：那門課沒有核可這一步，⛔ 不可填空字串（看起來像資料漏了），也不可
+    填任何一種核可狀態（例如「待核可」是錯的）——#577 Q1 裁示 A。
+    """
+    if status is None:
+        return "—"
+    # 對照表漏列時印原碼而不拋例外：一份匯出因一格失敗整份拿不到，比格子裡出現英文代碼
+    # 更糟。正常走不到——`tests/unit/et/test_et_tracking_csv_approval.py` 釘住對照表涵蓋
+    # 每一個狀態常數
+    return APPROVAL_STATUS_LABEL.get(status, status)
 
 
 def _to_student_row(
