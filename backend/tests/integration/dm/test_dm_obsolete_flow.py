@@ -477,6 +477,9 @@ async def test_http_download_published_version_during_pending_obsolete(db, clien
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200 and resp.content == b"%PDF-1.4 doc"
+    # URL 全使用者相同、靠 Bearer 區分 → 不擋快取的話共用電腦上第二個人的請求
+    # 不會送達伺服器（#587）。`no-cache` 不夠：它允許儲存、只要求重新驗證。
+    assert "no-store" in resp.headers.get("cache-control", "")
 
 
 async def test_http_upload_then_download_obsolete_attachment(db, client):
@@ -503,6 +506,8 @@ async def test_http_upload_then_download_obsolete_attachment(db, client):
         headers={"Authorization": f"Bearer {rev_token}"},
     )
     assert resp.status_code == 200 and resp.content == b"%PDF-1.4 letter"
+    # 廢止附件：僅 DM_ADMIN 或指定審核者可取，同樣不得進共用快取（#587）
+    assert "no-store" in resp.headers.get("cache-control", "")
     # 發起人本人不可下載（Q1=C）
     forbidden = await client.get(
         f"/api/dm/reviews/{review_id}/obsolete-file",

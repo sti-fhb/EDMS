@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.dm.deps import DmContext, get_dm_context, get_dm_reviewer_context
@@ -94,7 +95,11 @@ async def download_review_file(
     if not Path(served.path).is_file():
         raise AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
     return FileResponse(
-        served.path, media_type=served.mime, filename=served.name, content_disposition_type="attachment"
+        served.path,
+        media_type=served.mime,
+        filename=served.name,
+        content_disposition_type="attachment",
+        headers=NO_STORE_HEADERS,  # 僅指定審核者可取，URL 全使用者相同（#587）
     )
 
 
@@ -110,7 +115,11 @@ async def download_obsolete_file(
     if not Path(served.path).is_file():
         raise AppError(status_code=404, detail="查無此送審項目或無權存取", error_code="DM_DOC_001")
     return FileResponse(
-        served.path, media_type=served.mime, filename=served.name, content_disposition_type="attachment"
+        served.path,
+        media_type=served.mime,
+        filename=served.name,
+        content_disposition_type="attachment",
+        headers=NO_STORE_HEADERS,  # 僅 DM_ADMIN 或指定審核者可取，URL 全使用者相同（#587）
     )
 
 

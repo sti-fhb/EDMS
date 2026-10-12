@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
@@ -119,7 +120,8 @@ async def material_doc_file(
     """
     content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id, roles=ctx.roles)
     _ensure_file_present(content.path)
-    return FileResponse(content.path, media_type=content.mime, filename=content.name)
+    # 授權由 material_id 那側判定，URL 全使用者相同 → 必須擋快取（#587）
+    return FileResponse(content.path, media_type=content.mime, filename=content.name, headers=NO_STORE_HEADERS)
 
 
 def _ensure_file_present(path: str) -> None:
@@ -180,5 +182,5 @@ async def video_file(
         path,
         filename=file_name,
         content_disposition_type="inline",
-        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        headers={**NO_STORE_HEADERS, "X-Content-Type-Options": "nosniff"},
     )
