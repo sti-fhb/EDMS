@@ -177,6 +177,8 @@ async def video_file(
     # - `nosniff`：回的是**使用者上傳的位元組**且以 inline 呈現，關掉 MIME 嗅探。
     #   （副檔名於上傳時已由 `ensure_format_allowed` 限制在影片格式內，此為縱深防禦）
     # - `no-store`：本端點是全站唯一**自帶憑證、不帶 cookie** 的 URL，中介 proxy
+    #   （⚠️ 此處說的「唯一」是指憑證形式，不是指唯一設 no-store 者——自 #587 起
+    #   全部送檔端點皆設，判準見 `core/http_cache`）
     #   會認為它可快取——那等於把授權過的內容留在共用快取裡。
     return FileResponse(
         path,

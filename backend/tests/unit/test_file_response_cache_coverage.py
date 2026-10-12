@@ -1,119 +1,124 @@
-"""全站送檔端點的快取指示覆蓋掃描（#587）。
+"""送檔回應的快取指示覆蓋掃描（#587）。
 
 ## 為什麼需要這支測試
 
 檔案回應若不帶 `Cache-Control`，瀏覽器會套用**啟發式快取**（RFC 9111 §4.2.2）並自行
-推測新鮮期。而 **HTTP 快取的鍵是 URL、不是使用者**——本專案的送檔端點除影片外都靠
-`Authorization` header 區分身分，URL 對所有人完全相同，於是：
+推測新鮮期——`FileResponse` 會自動帶 `Last-Modified` / `ETag`，正好餵給它推測。而
+**HTTP 快取的鍵是 URL、不是使用者**：本專案的送檔端點（影片除外）靠 `Authorization`
+header 區分身分，URL 對所有人完全相同，於是
 
-- 共用電腦上 A 下載過之後，B 按下載會**直接拿到 A 的快取**，請求不送達伺服器
-- `dm/detail` 那支因此**不寫 `DM_DOC_READ`** → DM06 閱讀率系統性低報
+- 共用電腦上 A 取過的檔會被快取，B 按下載**請求不送達伺服器**，拿到 A 的內容
+- `dm/detail` 那支因此**不執行 `write_read`** → DM06 閱讀率系統性低報
 
 2026-10-12 於部署環境實測：同一位使用者、同一個 URL、同一版本，瀏覽器下載不計入、
 API 下載計入；DevTools 顯示 `200 OK (from disk cache)`。
 
 這是 #441（`index.html` 缺 `Cache-Control`）**同一類缺陷的第二次**——那次只修了
-`index.html`，沒有盤點其他回應。本檔的目的是讓第三次不會發生：**新增送檔端點時，
-若沒在下方登記，CI 會紅**。
+`index.html`、沒有盤點其他回應。本檔的目的是讓第三次不會發生。
 
-⚠️ 本檔只保證「送檔端點的集合沒有在無人察覺下長大」。**實際標頭由 integration
-測試驗**（`tests/integration/dm/test_dm_detail.py`、`test_dm_obsolete_flow.py`、
-`tests/integration/et/test_et_learning.py`），兩者缺一不可：少了這支，新端點會悄悄
-漏掉；少了那些，標頭寫錯也不會有人發現。
+## 偵測方式：掃 AST 的呼叫，不看回傳型別標註
+
+早一版以 `-> FileResponse` 的回傳標註判定端點，**那是失敗時靜默放行的偵測**：
+`from __future__ import annotations` 會讓標註變成字串、標成 `-> Response` 而實際回
+`FileResponse` 也抓不到、Union / Annotated 包裝同樣失效，而「漏標註」與「漏設標頭」
+正是同一個人在同一刻會一起犯的疏忽。
+
+改為直接掃 `app/` 下每一個 `FileResponse(...)` 呼叫，斷言它帶 `NO_STORE_HEADERS`。
+這驗的是**我們真正在意的事**（標頭有沒有設），而非代理指標（端點有沒有登記）。
 """
 
-import pytest
-from fastapi.responses import FileResponse
-from fastapi.routing import APIRoute
+import ast
+from pathlib import Path
 
-from main import app
+import pytest
 
 pytestmark = pytest.mark.unit
 
-#: 回傳檔案實體的端點，與其快取指示之判定理由。**新增前請確認真的處理了快取。**
-#:
-#: 判準：**回應內容取決於「誰在問」，而 URL 對所有人相同者，一律 `private, no-store`。**
-#: 例外只有一種——URL 本身即憑證（如影片票 `?t=`），此時不同人就是不同 URL，
-#: URL 鍵的快取不會跨人洩漏；但那一支基於另一個理由（中介 proxy 會認為可快取）
-#: 同樣設了 `no-store`。
-_FILE_ENDPOINTS: dict[tuple[str, str], str] = {
-    ("GET", "/api/dm/documents/{doc_id}/versions/{version_id}/file"): (
-        "DM07 文件檔案：URL 全使用者相同、靠 Bearer 區分；且 download 會寫 DM_DOC_READ，"
-        "被快取攔下會讓閱讀率低報（#587 本體）"
-    ),
-    ("GET", "/api/dm/reviews/{review_id}/versions/{version_id}/file"): (
-        "簽核待審檔：僅該送審之指定審核者可取，URL 全使用者相同"
-    ),
-    ("GET", "/api/dm/reviews/{review_id}/obsolete-file"): (
-        "廢止附件：僅 DM_ADMIN 或該送審之指定審核者可取，URL 全使用者相同"
-    ),
-    ("GET", "/api/et/materials/{material_id}/docs/{doc_id}/file"): (
-        "ET 教材引用之 DM 文件：授權由 material_id 那側判定，URL 全使用者相同"
-    ),
-    ("GET", "/api/et/videos/{video_id}/file"): (
-        "ET06 影片串流：票在 query string，URL 因人而異；仍設 no-store 以免中介 proxy "
-        "把授權過的內容留在共用快取（#255 既有決定）"
-    ),
-}
+#: 掃描範圍：後端應用程式碼。
+_APP_ROOT = Path(__file__).resolve().parents[2] / "app"
+
+#: 判準常數名。送檔回應必須帶它——理由見 `app/core/http_cache.py` 的 docstring。
+_HEADERS_CONST = "NO_STORE_HEADERS"
+
+#: 會送出檔案實體的 response 類別。新增同類時請一併加入。
+_FILE_RESPONSE_NAMES = {"FileResponse", "StreamingResponse"}
+
+#: 現有送檔呼叫數的下限。偵測機制壞掉（掃不到任何呼叫）時，若只斷言「沒有違規」
+#: 會恆真——這條確保掃描器自身是活的。數量只增不減時調高即可。
+_MIN_EXPECTED_CALLS = 5
 
 
-def _iter_api_routes() -> list[APIRoute]:
-    """展開巢狀路由樹。
+def _file_response_calls() -> list[tuple[str, int, bool]]:
+    """掃出 `app/` 下所有送檔呼叫，回 `(相對路徑, 行號, 是否帶 NO_STORE_HEADERS)`。"""
+    results: list[tuple[str, int, bool]] = []
+    for py in sorted(_APP_ROOT.rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name not in _FILE_RESPONSE_NAMES:
+                continue
+            rel = py.relative_to(_APP_ROOT.parent).as_posix()
+            results.append((rel, node.lineno, _passes_no_store(node)))
+    return results
 
-    ⚠️ 本專案的 FastAPI 版本**不攤平路由**：`app.routes` 裡是 `_IncludedRouter` 包裝物件，
-    子路由在 `original_router.routes`（同 `test_route_auth_coverage.py`）。
+
+def _passes_no_store(call: ast.Call) -> bool:
+    """`headers=` 是否為 `NO_STORE_HEADERS`，或展開了它的 dict（`{**NO_STORE_HEADERS, ...}`）。"""
+    for kw in call.keywords:
+        if kw.arg != "headers":
+            continue
+        value = kw.value
+        if isinstance(value, ast.Name) and value.id == _HEADERS_CONST:
+            return True
+        if isinstance(value, ast.Dict):
+            # `{**X, ...}` 在 AST 中是 key=None 的項目
+            return any(
+                k is None and isinstance(v, ast.Name) and v.id == _HEADERS_CONST
+                for k, v in zip(value.keys, value.values, strict=True)
+            )
+    return False
+
+
+def test_每個送檔呼叫都必須帶_no_store_標頭():
+    """漏設標頭 → 紅，並指名檔案與行號。
+
+    ⚠️ 本條**不檢查**標頭的值字面，只檢查有沒有引用 `NO_STORE_HEADERS`；值本身由
+    `app/core/http_cache.py` 單一出處保證，並由 integration 測試實際斷言回應內容
+    （`test_dm_detail.py` / `test_dm_obsolete_flow.py`）。
     """
-    found: list[APIRoute] = []
+    calls = _file_response_calls()
 
-    def walk(route) -> None:
-        if isinstance(route, APIRoute):
-            found.append(route)
-            return
-        sub = getattr(route, "original_router", None)
-        if sub is None:
-            return
-        for child in sub.routes:
-            walk(child)
+    # 掃描器自身的健康檢查：抓不到呼叫 ⇒ AST 走訪或路徑壞了，而非真的沒有送檔端點
+    assert len(calls) >= _MIN_EXPECTED_CALLS, (
+        f"只掃到 {len(calls)} 個送檔呼叫（預期至少 {_MIN_EXPECTED_CALLS}）——"
+        "`_file_response_calls` 或 `_APP_ROOT` 可能已失效"
+    )
 
-    for route in app.routes:
-        walk(route)
-    return found
-
-
-def _serves_file(route: APIRoute) -> bool:
-    """以回傳型別標註判定是否送檔。
-
-    本專案所有送檔端點皆標註 `-> FileResponse`；漏標的話本檔抓不到，故
-    `sti-backend-modules.md` 要求送檔端點必須標註回傳型別。
-    """
-    return route.endpoint.__annotations__.get("return") is FileResponse
-
-
-def test_送檔端點的集合必須與登記表一致():
-    """新增送檔端點而未登記 → 紅。這是本檔存在的唯一理由。
-
-    ⚠️ `actual` 只由 `_serves_file` 產生，**刻意不混入登記表自身**：混入的話
-    「偵測不到任何端點」也會讓本條通過（missing 恆空），守門就成了恆真。
-    """
-    actual = {
-        (method, r.path) for r in _iter_api_routes() if _serves_file(r) for method in r.methods if method != "HEAD"
-    }
-    expected = set(_FILE_ENDPOINTS)
-
-    # 偵測機制自身的健康檢查：一個都抓不到 ⇒ 回傳型別標註或路由走訪壞了，而非真的沒有端點
-    assert actual, "未偵測到任何送檔端點——`_serves_file` 或 `_iter_api_routes` 可能已失效"
-
-    missing = expected - actual
-    extra = actual - expected
-    assert not missing, f"登記表有，實際卻偵測不到（路徑改了？或漏標 `-> FileResponse`）：{sorted(missing)}"
-    assert not extra, (
-        f"發現未登記的送檔端點：{sorted(extra)}。\n"
-        "請確認它是否需要 Cache-Control（判準見本檔 _FILE_ENDPOINTS 的註解），"
-        "處理後再登記於該表並寫明理由。"
+    offenders = [(path, line) for path, line, ok in calls if not ok]
+    assert not offenders, (
+        "以下送檔呼叫未帶 `NO_STORE_HEADERS`：\n"
+        + "\n".join(f"  {p}:{ln}" for p, ln in offenders)
+        + "\n判準見 `app/core/http_cache.py`：回應取決於「誰在問」而 URL 對所有人相同者，"
+        "不擋快取會讓第二個人的請求不送達伺服器。"
     )
 
 
-def test_每個登記項都要寫理由():
-    """理由欄留空等於沒登記——這張表是權威清單，不是待辦事項。"""
-    for key, reason in _FILE_ENDPOINTS.items():
-        assert reason.strip(), f"{key} 缺少登記理由"
+def test_掃描器抓得到展開寫法():
+    """`{**NO_STORE_HEADERS, ...}` 必須被視為合格——ET 影片端點就是這個寫法。
+
+    少了這條，有人把 `_passes_no_store` 簡化成「只認 Name」時，影片端點會被誤判為違規，
+    而修法很可能是把它從掃描範圍排除掉（等於開一個永久豁免）。
+    """
+    spread = ast.parse("FileResponse(p, headers={**NO_STORE_HEADERS, 'X': 'y'})").body[0].value
+    plain = ast.parse("FileResponse(p, headers=NO_STORE_HEADERS)").body[0].value
+    missing = ast.parse("FileResponse(p)").body[0].value
+    other = ast.parse("FileResponse(p, headers={'Cache-Control': 'private, no-store'})").body[0].value
+
+    assert _passes_no_store(spread)
+    assert _passes_no_store(plain)
+    assert not _passes_no_store(missing)
+    # 字面值不算：判準必須有單一出處，否則下一個人改 http_cache 時不會知道這裡也要改
+    assert not _passes_no_store(other)

@@ -20,23 +20,21 @@
 `no-cache` 仍允許**儲存**，只要求使用前重新驗證；而重新驗證可能回 `304` 且不帶 body。
 要確保每次都真的執行 handler（寫閱讀紀錄），必須 `no-store`。
 
-## 實測（2026-10-12，部署環境）
+判準的覆蓋範圍由 `tests/unit/test_file_response_cache_coverage.py` 掃 AST 釘住：
+`app/` 下每個 `FileResponse(...)` / `StreamingResponse(...)` 呼叫都必須帶本常數。
 
-同一位使用者、同一個 URL、同一版本：瀏覽器下載不計入、API 下載計入；DevTools 顯示
-`200 OK (from disk cache)`。
-
-## 歷史
-
-#441（`index.html` 缺 `Cache-Control`，使用者跑到快取的舊版前端）是同一類缺陷的第一次，
-當時只修了 `index.html`、沒有盤點其他回應，於是 #587 在送檔端點重演。本模組的存在是為了
-讓判準有單一出處；覆蓋範圍由 `tests/unit/test_file_response_cache_coverage.py` 釘住。
+> 實測經過、DevTools 證據與 #441（同類缺陷的第一次）的關聯見 issue #587——那些是**當時的
+> 狀態**，寫進程式碼會過期。
 """
 
-from typing import Final
+from types import MappingProxyType
+from typing import Final, Mapping
 
 #: 權限相依回應的快取指示。`private` 擋中介快取、`no-store` 擋瀏覽器自身儲存。
 #:
 #: ⚠️ 套用前先問：**這個 URL 對不同使用者是不是同一個？** 是 → 需要本標頭。
 #: 唯一的例外形狀是「URL 本身即憑證」（如 ET 影片票 `?t=`），此時不同人就是不同 URL；
 #: 但那一支仍設本標頭，因為中介 proxy 會認為它可快取。
-NO_STORE_HEADERS: Final[dict[str, str]] = {"Cache-Control": "private, no-store"}
+#: ⚠️ 以 `MappingProxyType` 包裝：`Final` 只鎖綁定、不鎖內容，而這是全站共用的單一物件——
+#: 任何一處 `NO_STORE_HEADERS["x"] = ...` 都會改到所有端點。
+NO_STORE_HEADERS: Final[Mapping[str, str]] = MappingProxyType({"Cache-Control": "private, no-store"})
