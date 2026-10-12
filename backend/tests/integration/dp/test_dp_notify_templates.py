@@ -358,3 +358,80 @@ async def test_in_app_block_follows_module_filter(db, admin_gate):
             operator=_OP,
         )
     assert exc.value.error_code == "DP_MAIL_005"  # 不是 010
+
+
+# ---- 佔位檢核與檢查順序（#534）----
+
+
+async def test_越權查不存在的範本回_403_而非_404(db, admin_gate):
+    """授權在查存在**之前**：回應碼不得洩漏他模組範本的存在與否（#534）。
+
+    ⚠️ 本條與 `test_update_not_found` 是一對，缺任一條都證明不了順序：
+    - 這條：**無** ET 權限 + 不存在的範本 → 403（順序反過來會是 404，等於可探測）
+    - 那條：**有** ET 權限 + 不存在的範本 → 404（否則會變成「有權限也查不出不存在」）
+    """
+    admin_gate(dm_admins=("dmadmin",))  # 只有 DM 權限，對 ET 範本越權
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db, module="ET", template_code="ZT_NOPE", data=_upd(version=1), operator=OperatorInfo(user_id="dmadmin")
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.error_code == "DP_MAIL_005"
+
+
+async def test_存入未宣告的佔位被擋下(db, admin_gate):
+    """主體：打錯一個變數名即永久靜默停掉該類通知（#534）。
+
+    `_make_template` 的 `VARIABLES` 是 `user_name`；存成 `{user_nam}` 應回 422。
+    """
+    admin_gate(et_admins=("etadmin",))
+    await _make_template(db, module="ET", code="ZT_PH", version=1, subject="{user_name} 您好", body="{user_name}")
+
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module="ET",
+            template_code="ZT_PH",
+            data=_upd(body="{user_nam} 您好", version=1),  # 少一個 e
+            operator=OperatorInfo(user_id="etadmin"),
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DP_MAIL_011"
+
+
+async def test_佔位檢核失敗時不寫入也不留稽核(db, admin_gate):
+    """檢核在寫入**之前**：擋下的請求不得留下任何痕跡（#534）。
+
+    ⚠️ 正向錨點不可省——若 `update_template` 根本沒跑到寫入階段（例如前面某道閘先擋），
+    「沒寫入」會恆真。故先驗一次合法更新確實寫得進去、也確實留稽核。
+    """
+    admin_gate(et_admins=("etadmin",))
+    await _make_template(db, module="ET", code="ZT_PH2", version=1, subject="主旨", body="{user_name}")
+
+    # 正向錨點：合法更新會寫入並留稽核
+    ok = await TemplateAdminService().update_template(
+        db,
+        module="ET",
+        template_code="ZT_PH2",
+        data=_upd(body="{user_name} 更新後", version=1),
+        operator=OperatorInfo(user_id="etadmin"),
+    )
+    assert ok.version == 2
+    assert await _count_audit(db, "ET.ZT_PH2") == 1
+
+    with pytest.raises(AppError):
+        await TemplateAdminService().update_template(
+            db,
+            module="ET",
+            template_code="ZT_PH2",
+            data=_upd(body="{nope}", version=2),
+            operator=OperatorInfo(user_id="etadmin"),
+        )
+
+    row = await db.scalar(
+        select(DpNotifyTemplate).where(DpNotifyTemplate.module == "ET", DpNotifyTemplate.template_code == "ZT_PH2")
+    )
+    assert row.body == "{user_name} 更新後", "被擋下的內容不得寫入"
+    assert row.version == 2, "版本不得被 bump"
+    assert await _count_audit(db, "ET.ZT_PH2") == 1, "被擋下的請求不得留稽核"

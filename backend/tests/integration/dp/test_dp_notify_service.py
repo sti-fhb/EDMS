@@ -118,6 +118,7 @@ async def test_missing_var_writes_failed(db):
         caller_module="DP",
     )
     assert result.queued_count == 0
+    assert result.skipped_reason == "RENDER_FAILED"  # #534：具名，與「刻意跳過」及「無事發生」分得開
     logs = await _fetch_logs(db)
     assert len(logs) == 1
     assert logs[0].status == "FAILED"
@@ -155,3 +156,45 @@ async def test_unbalanced_brace_writes_failed(db):
     assert result.queued_count == 0
     logs = await _fetch_logs(db)
     assert len(logs) == 1 and logs[0].status == "FAILED" and logs[0].error_msg is not None
+
+
+async def test_queued_count_為零的四種情況彼此可區分(db):
+    """`queued_count == 0` 有四種成因，`skipped_reason` 必須分得出來（#534 AC 4）。
+
+    ## 為何需要全集對帳而非逐條各測一次
+
+    這四種的**回傳形狀相同**（`queued_count=0`），只有 `skipped_reason` 不同。逐條各測一次
+    的話，少測一種不會有人發現；而少測的那一種若與別種撞值，呼叫端就分不出來——#534 之前
+    正是如此：「渲染失敗」與「收件人為空」都回 `None`，於是**唯一代表故障的情況，回報的
+    資訊最少**。寫 `if result.skipped_reason:` 的人會抓到停用與管道、唯獨漏掉真正的故障。
+
+    ⚠️ 下方 `set(...)` 的全集斷言是本條的核心：新增第五種成因而忘了給它具名時，這裡會紅。
+    """
+    await _make_template(db, code="T_OK")
+    await _make_template(db, code="T_OFF", enabled=False)
+    await _make_template(db, code="T_MSG", channel="MSG")
+    await _make_template(db, code="T_BAD", subject="嗨 {name}", body="{未宣告}")
+
+    async def _reason(code: str, recipients: list[str], params: dict[str, str]) -> str | None:
+        r = await NotifyService().send_email(
+            db, recipients=recipients, template_code=code, module="DP", params=params, caller_module="DP"
+        )
+        assert r.queued_count == 0, f"{code} 應為 0 才進得了本測試的母體"
+        return r.skipped_reason
+
+    full = {"name": "小明", "code": "X"}
+    reasons = {
+        "停用": await _reason("T_OFF", ["a@x.com"], full),
+        "非 Email 管道": await _reason("T_MSG", ["a@x.com"], full),
+        "渲染失敗": await _reason("T_BAD", ["a@x.com"], full),
+        "收件人為空": await _reason("T_OK", [], full),
+    }
+
+    assert reasons == {
+        "停用": "TEMPLATE_DISABLED",
+        "非 Email 管道": "CHANNEL_NOT_EMAIL",
+        "渲染失敗": "RENDER_FAILED",
+        "收件人為空": None,
+    }
+    # 四種成因 → 四個相異值（`None` 只能屬於「無事發生」那一種）
+    assert len(set(reasons.values())) == 4, f"有兩種成因撞值，呼叫端分不出來：{reasons}"

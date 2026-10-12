@@ -358,10 +358,14 @@ class TestAc8TemplatesConsumableViaNotifyService:
     也不驗欄位型別，而是驗**行為**——範本被平台消費時不會靜默失敗。
 
     **擋的是什麼**：`send_email` 於渲染失敗時**不拋錯**，而是整批寫 `FAILED` 後回
-    `SendResult(queued_count=0, skipped_reason=None)`。注意 `skipped_reason` 與成功時
-    同為 `None`，**只有 `queued_count` 分辨得出來**。因此若日後有人改了 `BODY` 的佔位
-    卻沒同步 `VARIABLES` 欄，照 `VARIABLES` 傳參的 ET 功能碼會讓整批信靜默進 `FAILED`：
-    收件人收不到、呼叫方也拿不到任何例外。本測試把該漂移變成 CI 失敗。
+    `SendResult(queued_count=0, skipped_reason="RENDER_FAILED")`（#534 起具名；此前與成功
+    同為 `None`、只有 `queued_count` 分辨得出來）。因此若日後有人改了 `BODY` 的佔位卻沒同步
+    `VARIABLES` 欄，照 `VARIABLES` 傳參的 ET 功能碼會讓整批信靜默進 `FAILED`：收件人收不到、
+    呼叫方也拿不到任何例外。本測試把該漂移變成 CI 失敗。
+
+    ⚠️ #534 起 DP04 於**儲存時**就會擋下未宣告的佔位（`ensure_renderable`），所以「改 BODY
+    沒同步 VARIABLES」這條路徑從畫面走不通了。本測試仍保留——它擋的是 **migration / 直接
+    下 SQL** 改出來的漂移，那條路徑沒有經過守門。
 
     `queued_count == 1` 這一個斷言即同時涵蓋範本啟用中、`CHANNEL` 允許寄 Email
     （否則回 `TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL`）與渲染成功三件事，故不另立測試。

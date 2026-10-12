@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # 系統作業建立者（DP_EMAIL_LOG 標準欄位 CREATED_USER）；實際觸發模組記於 CALLER_MODULE。
 _SYSTEM_USER = "SYSTEM"
 
+#: `ensure_renderable` 的對外訊息（不得嵌入佔位名稱，見該函式註解）。
+_UNRENDERABLE_MSG = "範本內容含無法代入的變數，請確認僅使用「可用變數」所列的名稱"
+
 #: 單次 `send_email` 的收件人上限（對齊 TBMS 慣例）。**公開常數**：傳多人清單的呼叫方
 #: 需據此分批，故由 `app.services` 一併匯出（#563）。
 #:
@@ -122,6 +125,57 @@ def _render(text: str, params: dict[str, str], *, single_line: bool = False) -> 
     return formatter.vformat(text, (), params)
 
 
+def ensure_renderable(*, subject: str, body: str, variables: str | None) -> None:
+    """儲存前驗證範本的佔位皆可渲染；不符拋 `AppError(422, DP_MAIL_011)`（#534）。
+
+    ## 為何是「跑一次 `_render`」而不是另寫一份檢核
+
+    DP04 可編輯的主旨 / 內文裡，`{變數}` 是一份**與呼叫端的契約**，而在 #534 之前沒有任何
+    一端在守它：管理者把 `{user_name}` 打成 `{user_nam}`，該範本從此每次寄送都失敗——
+    `send_email` 整批寫 `FAILED` 後回 `queued_count=0` 且**不外拋**，而 `DP_EMAIL_LOG`
+    沒有任何畫面在顯示。發生時沒人知道、發生後沒地方看。
+
+    ⚠️ **刻意不另寫正則**。兩份規則遲早分歧，而分歧的方向正好是最糟的那個：「檢核放行、
+    渲染失敗」——那等於把檢核做成了裝飾品。此處以該範本宣告的 `VARIABLES` 組一個空值探針
+    dict，**直接呼叫 `_render`**，於是檢核與渲染在定義上不可能不一致。
+
+    一次呼叫即涵蓋 `_SafeFormatter` 的全部拒絕路徑：
+
+    | 壞寫法 | 由哪一道攔下 |
+    |---|---|
+    | `{user_nam}`（未宣告）| `get_field` 的 `kwargs[field_name]` → `KeyError` |
+    | `{a.b}` / `{a[0]}` / `{0}` / `{}` | `get_field` 的 `isidentifier()` → `ValueError` |
+    | `{v:>200000000}` | `format_field` 的 `format_spec` → `ValueError` |
+    | 未閉合 `{`、HTML inline CSS 的 `{color:red}` | stdlib `Formatter.parse` → `ValueError` |
+
+    主旨與內文分別驗——兩者走不同的 formatter（主旨連 LF 一併剝），只驗一邊會漏。
+
+    ⚠️ **`VARIABLES` 是上界、不是必用清單**：少用宣告的變數不算錯（探針有值即可渲染），
+    多用沒宣告的才是錯。
+
+    ⚠️ **本檢核上線後，新增變數的流程被強制排序**：先改程式傳新 params、再改 migration 更新
+    `VARIABLES`，管理者才改得動內文。第三步會被第二步擋住——那是對的，但要寫進維運文件，
+    否則會變成「管理者改不了內文」的客訴。
+
+    Args:
+        subject: 待存的主旨。
+        body: 待存的內文。
+        variables: 該範本的 `VARIABLES` 欄（逗號分隔的識別字；可為 None）。
+
+    Raises:
+        AppError: 任一處無法渲染（422 `DP_MAIL_011`）。
+    """
+    probe = {stripped: "" for name in (variables or "").split(",") if (stripped := name.strip())}
+    try:
+        _render(subject, probe, single_line=True)
+        _render(body, probe)
+    except (KeyError, ValueError, IndexError) as exc:
+        # 例外訊息**不外流**：它含範本內部的佔位名稱，屬 schema 細節（sti-error-codes 明定
+        # error_message 不得嵌入動態值）。詳情留在伺服器日誌——比照 `render_preview`。
+        logger.warning("通知範本佔位檢核失敗: %s", exc)
+        raise AppError(status_code=422, detail=_UNRENDERABLE_MSG, error_code="DP_MAIL_011") from exc
+
+
 def _channel_allows_email(channel: str) -> bool:
     """僅 EMAIL / BOTH 寄 Email；MSG（純站內訊息、模組自理）不寄。"""
     return channel in ("EMAIL", "BOTH")
@@ -214,7 +268,10 @@ class NotifyService:
             caller_module: 呼叫方模組（記入 CALLER_MODULE）。
 
         Returns:
-            SendResult：queued_count（排入 PENDING 的收件人數）、skipped_reason（略過原因或 None）。
+            SendResult：queued_count（排入 PENDING 的收件人數）、skipped_reason。
+            後者四種值：`TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL`（管理者**有意**的設定，
+            不寫 outbox）、`RENDER_FAILED`（**缺陷**，整批寫 FAILED，#534）、`None`
+            （成功，或收件人清單本來就是空的）。
 
         Raises:
             AppError: template_code 不存在（404 / DP_MAIL_001）。
@@ -238,7 +295,11 @@ class NotifyService:
         except (KeyError, ValueError, IndexError) as exc:
             error_msg = f"範本渲染失敗: {exc}"[:500]
             await self._write_logs(db, recipients, module, template_code, caller_module, "", "", "FAILED", error_msg)
-            return SendResult(queued_count=0, skipped_reason=None)
+            # #534：原本回 `None`，而 `None` 同時也是「成功」與「收件人為空」的值——三種情況
+            # 回傳一模一樣，呼叫端即使想檢查也分不出哪個是故障。具名之後：兩個「刻意跳過」
+            # （TEMPLATE_DISABLED / CHANNEL_NOT_EMAIL）、一個「缺陷」（RENDER_FAILED）、
+            # 一個「無事發生」（None）彼此可區分。
+            return SendResult(queued_count=0, skipped_reason="RENDER_FAILED")
 
         await self._write_logs(db, recipients, module, template_code, caller_module, subject, body, "PENDING", None)
         return SendResult(queued_count=len(recipients), skipped_reason=None)
