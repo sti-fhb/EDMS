@@ -14,6 +14,8 @@ import Typography from "@mui/material/Typography"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 
+import { usePinQuizInUrl } from "./usePinQuizInUrl"
+
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { toApiError } from "../../services/http"
@@ -42,6 +44,12 @@ import { formatDateTime } from "../../utils/date"
  */
 export function AttemptHistory({ quizId }: { quizId: number }) {
   const navigate = useNavigate()
+  const pinQuizInUrl = usePinQuizInUrl(quizId)
+  /** 先釘住學習頁網址再進結果頁（#549）——結果頁的「返回課程」會退回這一筆。 */
+  const openResult = async (attemptId: number) => {
+    await pinQuizInUrl()
+    await navigate(`/et/attempts/${attemptId}/result`)
+  }
   const { data } = useQuery({
     queryKey: QUERY_KEYS.etQuiz.history(quizId),
     queryFn: () => attemptApi.history(quizId),
@@ -78,7 +86,7 @@ export function AttemptHistory({ quizId }: { quizId: number }) {
                 key={attempt.attempt_id}
                 hover
                 sx={{ cursor: "pointer" }}
-                onClick={() => navigate(`/et/attempts/${attempt.attempt_id}/result`)}
+                onClick={() => void openResult(attempt.attempt_id)}
               >
                 <TableCell>
                   <Stack direction="row" spacing={1} alignItems="center">
@@ -105,7 +113,7 @@ export function AttemptHistory({ quizId }: { quizId: number }) {
                     aria-label={`回看第 ${attempt.attempt_no} 次作答明細`}
                     onClick={(e) => {
                       e.stopPropagation()
-                      navigate(`/et/attempts/${attempt.attempt_id}/result`)
+                      void openResult(attempt.attempt_id)
                     }}
                   >
                     <ChevronRightIcon fontSize="small" />

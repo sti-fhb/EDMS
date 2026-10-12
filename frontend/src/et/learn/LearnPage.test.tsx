@@ -460,7 +460,8 @@ describe("ET06 章節學習頁", () => {
 
       await user.click(await screen.findByRole("button", { name: "返回上一頁" }))
 
-      expect(navigate).toHaveBeenCalledWith("/et/my-courses")
+      // #549：以 replace 進 fallback 並保留「第一筆」標記——到了我的課程不會再退回本頁
+      expect(navigate).toHaveBeenCalledWith("/et/my-courses", { replace: true, state: { __firstEntry: true } })
       expect(navigate).not.toHaveBeenCalledWith(-1)
     })
   })

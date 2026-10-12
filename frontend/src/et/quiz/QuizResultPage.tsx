@@ -19,6 +19,8 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 
+import { useGoBack } from "../../hooks/useGoBack"
+
 import { AnswerReviewDialog } from "./AnswerReviewDialog"
 import type { QuestionResult, ResultNavState } from "./attemptSchemas"
 import { attemptApi } from "./attemptService"
@@ -76,12 +78,27 @@ export function EtQuizResultPage() {
 
   const result = fromSubmit ?? data ?? null
 
+  /**
+   * 「回課程重新作答／返回課程」——**退回**歷程，不 push（#549）。
+   *
+   * push 一筆學習頁會讓整段測驗疊成 `[my-courses, learn, attempt, result, learn?quiz]`，學習頁的
+   * 返回鍵就退回結果頁。退回的那一筆學習頁已由進測驗前的 `usePinQuizInUrl` 釘成帶 `?quiz=`
+   * （#416 的落點不會遺失）。沒有上一頁（直接開啟 / 重新整理本頁）時才走 fallback。
+   *
+   * ⛔ 不可改回 `navigate(learn?quiz)`，也不可只改成 `replace`——後者會讓學習頁的返回鍵
+   * 退到作答頁（見 #549）。`useGoBack` 必須成對使用，配對的另兩處是 `usePinQuizInUrl` 與
+   * 作答頁提交時的 `replace`。
+   */
+  const backToCourse = useGoBack(
+    result !== null ? `/et/courses/${result.course_id}/learn?quiz=${result.quiz_id}` : "/et/my-courses",
+  )
+
   // 判斷「正在看的是不是最新一次」。沿用 `AttemptHistory` 的同一個 query key，故從測驗
   // 面板進來時走的是快取、不會多一趟往返。
   //
   // 尚未載入時預設 **true**（fail-open）：剛提交完的情境最常見，預設 false 會讓按鈕先消失
   // 再冒出來。查詢失敗時（`retry: false`）也會停在 true——代價是舊 attempt 的回看畫面可能
-  // 顯示重考文案。**刻意接受**：該按鈕只是 `navigate` 回學習頁，不會開新 attempt、不會消耗
+  // 顯示重考文案。**刻意接受**：該按鈕只是回到學習頁，不會開新 attempt、不會消耗
   // 次數（真正開 attempt 的唯一入口是測驗面板，且後端有三道守門），最壞情況是文案誤導。
   const { data: history } = useQuery({
     queryKey: QUERY_KEYS.etQuiz.history(result?.quiz_id ?? 0),
@@ -175,7 +192,7 @@ export function EtQuizResultPage() {
           <Button
             variant="contained"
             startIcon={canRetry ? <ReplayIcon /> : undefined}
-            onClick={() => navigate(`/et/courses/${result.course_id}/learn?quiz=${result.quiz_id}`)}
+            onClick={backToCourse}
           >
             {canRetry ? "回課程重新作答" : "返回課程"}
           </Button>

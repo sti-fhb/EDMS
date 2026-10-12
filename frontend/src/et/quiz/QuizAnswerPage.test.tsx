@@ -102,14 +102,41 @@ describe("ET07 答題頁", () => {
     expect(saved).toContain(901)
   })
 
-  it("提交後導向結果頁並帶上閱卷結果", async () => {
+  it("提交後導向結果頁並帶上閱卷結果；從學習頁進來時以 replace 進入（#549）", async () => {
+    // 前面還有一筆（學習頁）→ 本頁 key 不是 "default" → replace：作答完不該能用上一頁回到作答中
     const user = userEvent.setup()
-    renderWithProviders(<EtQuizAnswerPage />)
+    renderWithProviders(<EtQuizAnswerPage />, undefined, ["/et/courses/7/learn", "/et/attempts/800"])
     await screen.findByText("採血前應先確認什麼？")
 
     await user.click(screen.getByRole("button", { name: "提交" }))
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/attempts/800/result", expect.anything()))
+    expect(navigate).toHaveBeenCalledWith(
+      "/et/attempts/800/result",
+      expect.objectContaining({ replace: true, state: expect.objectContaining({ attempt_id: 800 }) }),
+    )
+    // 不是第一筆時不帶標記——否則結果頁會以為沒有上一頁而改走 fallback
+    const [, options] = navigate.mock.calls.find(([to]) => to === "/et/attempts/800/result")!
+    expect(options.state).not.toHaveProperty("__firstEntry")
+  })
+
+  it("本頁是工作階段第一筆（直接開網址）時，進結果頁的 state 帶上「第一筆」標記（#549）", async () => {
+    // 單一 initialEntry 的 key 為 "default"——等同直接貼網址進來。replace 會換掉這個 key，
+    // 不帶標記的話結果頁的返回會以為有上一頁而離站
+    const user = userEvent.setup()
+    renderWithProviders(<EtQuizAnswerPage />, undefined, ["/et/attempts/800"])
+    await screen.findByText("採血前應先確認什麼？")
+
+    await user.click(screen.getByRole("button", { name: "提交" }))
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/attempts/800/result", expect.anything()))
+    expect(navigate).toHaveBeenCalledWith(
+      "/et/attempts/800/result",
+      expect.objectContaining({
+        replace: true,
+        state: expect.objectContaining({ attempt_id: 800, __firstEntry: true }),
+      }),
+    )
   })
 
   it("有時限時顯示倒數", async () => {

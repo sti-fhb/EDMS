@@ -83,8 +83,12 @@ describe("ET07 歷次作答紀錄", () => {
 
     await user.click(await screen.findByRole("button", { name: "回看第 1 次作答明細" }))
 
-    expect(navigate).toHaveBeenCalledTimes(1) // stopPropagation 生效，沒有連整列一起觸發
-    expect(navigate).toHaveBeenCalledWith("/et/attempts/799/result")
+    // #549：先把學習頁網址釘成帶 ?quiz=（replace），再進結果頁——兩次呼叫、順序固定
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(2))
+    expect(navigate.mock.calls[0]).toEqual([{ pathname: "/", search: "?quiz=700", hash: "" }, { replace: true, state: { __firstEntry: true } }])
+    expect(navigate.mock.calls[1]).toEqual(["/et/attempts/799/result"])
+    // stopPropagation 生效：結果頁只導一次，沒有連整列一起觸發
+    expect(navigate.mock.calls.filter(([to]) => to === "/et/attempts/799/result")).toHaveLength(1)
   })
 
   it("逾時自動提交如實標示", async () => {

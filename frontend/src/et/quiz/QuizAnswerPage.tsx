@@ -13,7 +13,9 @@ import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
+
+import { carryFirstEntry } from "../../hooks/useGoBack"
 
 import type { AttemptState, QuestionForAnswering, ResultNavState } from "./attemptSchemas"
 import { attemptApi } from "./attemptService"
@@ -45,6 +47,16 @@ export function EtQuizAnswerPage() {
   const { attemptId: attemptIdParam } = useParams<{ attemptId: string }>()
   const attemptId = Number(attemptIdParam)
   const navigate = useNavigate()
+  /**
+   * 進結果頁一律 `replace`（#549）：作答頁不留在歷程裡，結果頁的上一頁就是學習頁。
+   *
+   * 🔴 本頁若是工作階段第一筆（直接貼網址 / 書籤），replace 會換掉 `"default"` key，結果頁的
+   * 返回便以為有上一頁而離站——state 經 `carryFirstEntry` 帶上「第一筆」標記（code review /
+   * security review）。
+   */
+  const location = useLocation()
+  const toResult = (state?: ResultNavState) =>
+    navigate(`/et/attempts/${attemptId}/result`, { replace: true, state: carryFirstEntry(location, state) })
   const { message } = useNotification()
   const attemptIdValid = Number.isFinite(attemptId) && attemptId > 0
 
@@ -113,7 +125,8 @@ export function EtQuizAnswerPage() {
       const left = leftWindowRef.current
       message.success(left ? "已離開作答視窗，本次作答已自動提交" : "已提交並完成閱卷")
       const state: ResultNavState = left ? { ...result, left_window: true } : result
-      navigate(`/et/attempts/${attemptId}/result`, { state })
+      // `replace`（#549）：作答完不該能用上一頁回到作答中；結果頁的上一頁是學習頁
+      void toResult(state)
     },
     onError: (err) => {
       submittingRef.current = false
@@ -155,7 +168,7 @@ export function EtQuizAnswerPage() {
       <Alert
         severity="info"
         action={
-          <Button size="small" onClick={() => navigate(`/et/attempts/${attemptId}/result`)}>
+          <Button size="small" onClick={() => void toResult()}>
             查看成績
           </Button>
         }
