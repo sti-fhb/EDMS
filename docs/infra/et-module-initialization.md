@@ -217,20 +217,23 @@ SCHET001 與 SCHDM001 原本都寫 `0 10 * * 1`，實際跑在**週二**，已�
 
 ## 七、production 啟動護欄（設錯就起不來）
 
-`DEBUG=false` 時 `Settings` 有**五道**啟動檢核。它們散在五個 `model_validator` 裡，
+`DEBUG=false` 時 `Settings` 有**四道**啟動檢核。它們散在多個 `model_validator` 裡，
 光讀欄位定義看不出來——以下為完整清單（由 `tests/unit/test_security_invariants.py::TestProductionStartupGuards` 釘住）：
 
 | 設定 | 要求 | 漏了會怎樣 |
 |---|---|---|
-| `JWT_SECRET_KEY` | 長度足夠（依演算法）| 簽章可被離線暴力破解 |
+| `JWT_SECRET_KEY` | 長度足夠（依演算法）；**不分 `DEBUG` 一律檢查** | 簽章可被離線暴力破解 |
 | `FRONTEND_BASE_URL` | 非空、不得指向 localhost / 127.0.0.1 | 信件連結組成空網域或指向開發機，使用者點不到 |
 | `TRUSTED_PROXY_COUNT` | 必須**明示**設定（直接對外設 0）| 限流與稽核的來源 IP 可被偽造 |
 | `DM_FILE_STORAGE_ROOT` / `ET_VIDEO_STORAGE_ROOT` | 絕對路徑（Windows 另需磁碟機）| 換啟動位置即全部檔案讀不到，回 404 不是 500 |
-| `MAIL_STARTTLS` / `MAIL_SSL_TLS` | 已設 `MAIL_SERVER` 時至少一為 true，且不可同時 true | 明文 SMTP：帳密與信件內容明文上線 |
 
-### ⚠️ `DEBUG=true` 會一次繞過全部五道
+> `MAIL_STARTTLS` / `MAIL_SSL_TLS` **不在此列**：原本「已設 `MAIL_SERVER` 時至少一為 true」的檢查已由 #585 撤銷
+> （院內郵件主機只開埠 25 不加密）。兩者仍**不可同時 true**，但那道檢查不分 `DEBUG`、任何環境都擋。
 
-這是唯一能讓上述任一項設錯而仍然啟動的方式。**正式環境的 `DEBUG` 必須是 `false`**，
+### ⚠️ `DEBUG=true` 會一次繞過其中三道
+
+除 `JWT_SECRET_KEY` 外的三道（`FRONTEND_BASE_URL`、`TRUSTED_PROXY_COUNT`、兩個儲存路徑）只在
+`DEBUG=false` 生效。這是唯一能讓那三項設錯而仍然啟動的方式。**正式環境的 `DEBUG` 必須是 `false`**，
 且這一項本身沒有護欄擋（護欄就是靠它判斷的）。
 
 ---

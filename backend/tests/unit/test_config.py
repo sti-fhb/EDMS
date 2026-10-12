@@ -76,23 +76,12 @@ def test_mail_starttls_and_ssl_tls_mutually_exclusive() -> None:
         )
 
 
-def test_mail_plaintext_rejected_in_production() -> None:
-    """production 已設 MAIL_SERVER 但兩種 TLS 皆關 → 拒絕（禁明文 SMTP）。"""
-    with pytest.raises(ValueError, match="至少一為 true"):
-        Settings(
-            _env_file=None,
-            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
-            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
-            DEBUG=False,
-            FRONTEND_BASE_URL="https://edms.example.com",  # 聚焦 MAIL 明文檢查，避開 prod frontend 護欄
-            MAIL_SERVER="smtp.example.com",
-            MAIL_STARTTLS=False,
-            MAIL_SSL_TLS=False,
-        )
+def test_mail_plaintext_allowed_in_production() -> None:
+    """production 已設 MAIL_SERVER、兩種 TLS 皆關（埠 25 不加密）→ 可正常啟動（#585）。
 
-
-def test_mail_plaintext_allowed_when_suppress_send() -> None:
-    """MAIL_SUPPRESS_SEND（測試 / E2E）時允許無 TLS（不實際連線）。"""
+    院內郵件主機只開埠 25、不加密、以 IP 授權，與 TBMS 同組設定；加密方式由部署端依郵件主機決定。
+    MAIL_SUPPRESS_SEND 刻意設 false——它為 true 時本來就放行，設了等於沒驗到。
+    """
     s = Settings(
         _env_file=None,
         DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
@@ -103,11 +92,13 @@ def test_mail_plaintext_allowed_when_suppress_send() -> None:
         DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,  # DEBUG=false 下須絕對路徑（見 _validate_storage_roots_absolute）
         ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
         MAIL_SERVER="smtp.example.com",
+        MAIL_PORT=25,
         MAIL_STARTTLS=False,
         MAIL_SSL_TLS=False,
-        MAIL_SUPPRESS_SEND=True,
+        MAIL_SUPPRESS_SEND=False,
     )
-    assert s.MAIL_SUPPRESS_SEND is True
+    assert s.DEBUG is False
+    assert (s.MAIL_STARTTLS, s.MAIL_SSL_TLS) == (False, False)
 
 
 def _settings_with_frontend(url: str, *, debug: bool) -> Settings:

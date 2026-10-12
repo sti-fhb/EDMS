@@ -73,7 +73,7 @@ ET 模組寄送課程 / 學習 / 帳號相關 Email 一律**呼叫平台唯一�
 | SMTP_PORT | 通訊埠（如 587）|
 | SMTP_USERNAME | SMTP 帳號 |
 | SMTP_PASSWORD | SMTP 密碼（由部署環境 secret manager / 環境變數提供）|
-| SMTP_TLS | 是否啟用 TLS（建議 true）|
+| SMTP_TLS | 是否啟用 TLS（依郵件主機設定，系統不強制；#585）|
 | SMTP_SENDER | 寄件者地址（如 `noreply@et.example.com`；固定值，避免假冒）|
 
 ---
@@ -186,7 +186,7 @@ ET 模組寄送課程 / 學習 / 帳號相關 Email 一律**呼叫平台唯一�
 
 ## 安全性
 
-- SMTP 連線必須採 TLS 加密（由平台發信引擎負責）。
+- SMTP 連線之加密方式由平台發信引擎依郵件主機設定（STARTTLS / SSL / 不加密），系統不強制 TLS——院內郵件主機只提供埠 25 不加密（#585 撤銷原「必須採 TLS」）。
 - 邀請 token、密碼重設 token、Email 變更驗證 token 採 cryptographically secure random 產生（建議 ≥ 32 bytes）。
 - 收件者 Email 之有效性檢核由 SMTP 伺服器執行；ET 端不驗證。
 - 寄件者地址（SMTP_SENDER）為固定值，避免假冒（由平台統一持有）。

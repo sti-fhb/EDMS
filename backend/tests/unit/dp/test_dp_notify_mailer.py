@@ -30,3 +30,30 @@ async def test_send_suppressed_skips_network(monkeypatch):
     monkeypatch.setattr("app.dp.notify.mailer.aiosmtplib.send", _fake_send)
     await SmtpMailer().send(recipient="a@x.com", subject="s", body="b")
     assert called is False
+
+
+async def test_send_plaintext_port25_no_tls_no_login(monkeypatch):
+    """埠 25 不加密、無帳號（#585 院內郵件主機設定）→ 不升級 TLS、不登入。
+
+    `start_tls` 必須是 `False` 而非 `None`：aiosmtplib 對 `None` 的語意是「伺服器有宣告 STARTTLS
+    就自動升級」，重構若把它變成 `None`，行為會靜默改變。
+    """
+    monkeypatch.setattr(settings, "MAIL_SUPPRESS_SEND", False)
+    monkeypatch.setattr(settings, "MAIL_PORT", 25)
+    monkeypatch.setattr(settings, "MAIL_STARTTLS", False)
+    monkeypatch.setattr(settings, "MAIL_SSL_TLS", False)
+    monkeypatch.setattr(settings, "MAIL_USERNAME", "")
+    monkeypatch.setattr(settings, "MAIL_PASSWORD", "")
+    captured: dict = {}
+
+    async def _fake_send(*args, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("app.dp.notify.mailer.aiosmtplib.send", _fake_send)
+    await SmtpMailer().send(recipient="a@x.com", subject="s", body="b")
+
+    assert captured["port"] == 25
+    assert captured["start_tls"] is False
+    assert captured["use_tls"] is False
+    assert captured["username"] is None
+    assert captured["password"] is None
