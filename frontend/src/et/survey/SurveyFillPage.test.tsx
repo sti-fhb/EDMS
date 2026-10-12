@@ -397,7 +397,8 @@ describe("EtSurveyFillPage", () => {
 
       await user.click(await screen.findByRole("button", { name: "返回課程" }))
 
-      expect(navigate).toHaveBeenCalledWith("/et/courses/1/learn")
+      // #549：以 replace 進 fallback 並保留「第一筆」標記——學習頁的返回不會繞回問卷頁
+      expect(navigate).toHaveBeenCalledWith("/et/courses/1/learn", { replace: true, state: { __firstEntry: true } })
       expect(navigate).not.toHaveBeenCalledWith(-1)
     })
   })

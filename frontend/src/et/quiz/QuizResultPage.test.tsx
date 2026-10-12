@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { AttemptResult } from "./attemptSchemas"
 import { EtQuizResultPage } from "./QuizResultPage"
@@ -10,13 +10,21 @@ import { server } from "../../test/server"
 
 const navigate = vi.fn()
 let state: AttemptResult | null = null
+/** `useGoBack` 以 `location.key === "default"` 判斷「沒有上一頁」（直接開啟 / 重新整理）。 */
+let locationKey = "abc123"
+
+// 呼叫紀錄跨測試累積的話，「沒有呼叫 navigate(-1)」這類反向斷言會被前一條測試污染
+beforeEach(() => {
+  navigate.mockReset()
+  locationKey = "abc123"
+})
 
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
   return {
     ...actual,
     useNavigate: () => navigate,
-    useLocation: () => ({ state }),
+    useLocation: () => ({ state, key: locationKey }),
     useParams: () => ({ attemptId: "800" }),
   }
 })
@@ -202,30 +210,50 @@ describe("ET07 結果頁", () => {
     expect(screen.getByText(/作答時間到，已自動提交/)).toBeInTheDocument()
   })
 
-  it("重考導回該課程的學習頁，並指定落在本測驗（#416）", () => {
+  it("重考：退回歷程上的學習頁，不 push 新的一筆（#549）", () => {
     // 從結果頁直接開新 attempt 會跳過作答注意事項，且誤觸就吃掉一次次數，故重考入口
     // 只有測驗面板一個。
     //
     // 🔴 但只導 `/learn` 不夠：落點會交給學習頁的三段 fallback 推導，而其中的
     // `last_item_id` 外面包了 `openable` 過濾——指到的項目一旦鎖定就被靜默丟棄、
     // 掉到第一章第一項。**同一顆按鈕兩次會落在不同地方。** 故帶上 `?quiz=`。
+    //
+    // #549：落點仍是帶 ?quiz= 的學習頁，但改由**退回歷程**抵達——那一筆已在進測驗前由
+    // `usePinQuizInUrl` 釘成帶 ?quiz=。push 一筆新的會讓學習頁的返回鍵退回結果頁。
+    // 整段歷程的形狀由 `quizHistoryFlow.test.tsx` 以真 router 驗證。
     state = RESULT
+    locationKey = "abc123"
     renderWithProviders(<EtQuizResultPage />)
 
     screen.getByRole("button", { name: /回課程重新作答/ }).click()
 
-    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn?quiz=700")
+    expect(navigate).toHaveBeenCalledWith(-1)
+    expect(navigate).not.toHaveBeenCalledWith("/et/courses/7/learn?quiz=700")
+  })
+
+  it("直接開啟或重新整理結果頁時，回課程走 fallback（帶 ?quiz= 的學習頁），不退出系統（#549 AC 4）", () => {
+    // 沒有上一頁時 `navigate(-1)` 會把人帶離本站
+    state = RESULT
+    locationKey = "default"
+    renderWithProviders(<EtQuizResultPage />)
+
+    screen.getByRole("button", { name: /回課程重新作答/ }).click()
+
+    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn?quiz=700", { replace: true, state: { __firstEntry: true } })
+    expect(navigate).not.toHaveBeenCalledWith(-1)
+    locationKey = "abc123"
   })
 
   it("未及格且無剩餘次數時的「返回課程」落點相同（AC 3）", () => {
     // AC 3 要求把這一顆的落點也明確定義。兩顆是同一個按鈕、只換文案，落點沒有理由不同
     // ——學員看完成績要回去的地方就是那個測驗。
     state = { ...RESULT, is_pass: false, remaining_attempts: 0 }
+    locationKey = "abc123"
     renderWithProviders(<EtQuizResultPage />)
 
     screen.getByRole("button", { name: "返回課程" }).click()
 
-    expect(navigate).toHaveBeenCalledWith("/et/courses/7/learn?quiz=700")
+    expect(navigate).toHaveBeenCalledWith(-1)
   })
 
   it("直接以網址進入（重新整理 / 複習）時改由 API 取回成績", async () => {

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -96,7 +96,7 @@ describe("ET07 測驗資訊面板", () => {
     expect(await screen.findByText("歷次作答紀錄")).toBeInTheDocument()
     await user.click(screen.getByRole("row", { name: /第 1 次/ }))
 
-    expect(navigate).toHaveBeenCalledWith("/et/attempts/799/result")
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/attempts/799/result"))
   })
 
   it("從未作答時整塊清單不顯示", async () => {
@@ -159,7 +159,10 @@ describe("ET07 測驗資訊面板", () => {
 
     await user.click(await screen.findByRole("button", { name: /開始作答/ }))
 
-    expect(navigate).toHaveBeenCalledWith("/et/attempts/800")
+    // #549：先把學習頁網址釘成帶 ?quiz=（replace），**之後**才進作答頁——結果頁會退回這一筆
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(2))
+    expect(navigate.mock.calls[0]).toEqual([{ pathname: "/", search: "?quiz=700", hash: "" }, { replace: true, state: { __firstEntry: true } }])
+    expect(navigate.mock.calls[1]).toEqual(["/et/attempts/800"])
   })
 
   it("次數用完時後端回 409，前端顯示錯誤而非白畫面", async () => {

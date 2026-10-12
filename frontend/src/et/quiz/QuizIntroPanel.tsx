@@ -17,6 +17,8 @@ import Typography from "@mui/material/Typography"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 
+import { usePinQuizInUrl } from "./usePinQuizInUrl"
+
 import { AttemptHistory } from "./AttemptHistory"
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -59,6 +61,7 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
   const navigate = useNavigate()
   const { message } = useNotification()
   const quizIdValid = Number.isFinite(quizId) && quizId > 0
+  const pinQuizInUrl = usePinQuizInUrl(quizId)
 
   const { data, isPending, error } = useQuery({
     queryKey: QUERY_KEYS.etQuiz.intro(quizId),
@@ -69,7 +72,12 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
 
   const start = useMutation({
     mutationFn: () => attemptApi.start(quizId),
-    onSuccess: (attempt) => navigate(`/et/attempts/${attempt.attempt_id}`),
+    // #549：先把學習頁網址釘成帶 `?quiz=`、等它完成再進作答頁——結果頁會退回這一筆
+    // （見 `usePinQuizInUrl`，含 `await` 為何保留）
+    onSuccess: async (attempt) => {
+      await pinQuizInUrl()
+      await navigate(`/et/attempts/${attempt.attempt_id}`)
+    },
     onError: (err) => message.error(toApiError(err).errorMessage),
   })
 
