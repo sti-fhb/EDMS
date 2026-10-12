@@ -111,6 +111,26 @@ class TestClassifyDocChange:
             is None
         )
 
+    def test_已通知過廢止_即使版本不同也不再寄(self) -> None:
+        """🔴 這條守的是「**不依賴 DM 把廢止文件的版本凍結**」。
+
+        目前 DM 廢止時會保留 `CURRENT_VERSION_ID`（`center_service.py` 檔頭明載），
+        所以上一條（版本相同）無論有沒有「已廢止就不再寄」這道判斷都會回 `None`
+        ——兩條路同一個結果，變異檢查因此抓不到。實測：拿掉該判斷後上一條**照樣通過**。
+
+        本條把版本改成不同，強迫結果只能由「已廢止就不再寄」那道判斷決定。
+        少了它，哪天 DM 改成廢止時也動版本號，已廢止文件就會天天寄一封「有新版」。
+        """
+        assert (
+            classify_doc_change(
+                last_notified_version_id=7,
+                last_notified_status="OBSOLETE",
+                current_version_id=9,
+                current_status="OBSOLETE",
+            )
+            is None
+        )
+
     def test_版本倒退也視為變動(self) -> None:
         """以「不相等」而非「變大」判定。
 
