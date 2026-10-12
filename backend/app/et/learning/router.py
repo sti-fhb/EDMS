@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user
@@ -119,7 +120,8 @@ async def material_doc_file(
     """
     content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id, roles=ctx.roles)
     _ensure_file_present(content.path)
-    return FileResponse(content.path, media_type=content.mime, filename=content.name)
+    # 授權由 material_id 那側判定，URL 全使用者相同 → 必須擋快取（#587）
+    return FileResponse(content.path, media_type=content.mime, filename=content.name, headers=NO_STORE_HEADERS)
 
 
 def _ensure_file_present(path: str) -> None:
@@ -175,10 +177,12 @@ async def video_file(
     # - `nosniff`：回的是**使用者上傳的位元組**且以 inline 呈現，關掉 MIME 嗅探。
     #   （副檔名於上傳時已由 `ensure_format_allowed` 限制在影片格式內，此為縱深防禦）
     # - `no-store`：本端點是全站唯一**自帶憑證、不帶 cookie** 的 URL，中介 proxy
+    #   （⚠️ 此處說的「唯一」是指憑證形式，不是指唯一設 no-store 者——自 #587 起
+    #   全部送檔端點皆設，判準見 `core/http_cache`）
     #   會認為它可快取——那等於把授權過的內容留在共用快取裡。
     return FileResponse(
         path,
         filename=file_name,
         content_disposition_type="inline",
-        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        headers={**NO_STORE_HEADERS, "X-Content-Type-Options": "nosniff"},
     )

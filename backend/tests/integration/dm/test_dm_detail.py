@@ -482,6 +482,9 @@ async def test_http_file_download_serves(db, client, tmp_path, monkeypatch):
     )
     assert resp.status_code == 200 and resp.content == b"%PDF-1.4 test"
     assert "attachment" in resp.headers.get("content-disposition", "")
+    # URL 全使用者相同、靠 Bearer 區分 → 不擋快取的話共用電腦上第二個人的請求
+    # 不會送達伺服器（#587）。`no-cache` 不夠：它允許儲存、只要求重新驗證。
+    assert "no-store" in resp.headers.get("cache-control", "")
 
 
 async def test_http_missing_physical_file_returns_404_not_500(db, client):

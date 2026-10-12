@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.http_cache import NO_STORE_HEADERS
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.detail.schemas import DetailResponse, VersionItem
 from app.dm.detail.service import DetailService
@@ -58,4 +59,8 @@ async def get_version_file(
         media_type=served.mime,
         filename=served.name,
         content_disposition_type="inline" if served.inline else "attachment",
+        # URL 全使用者相同、靠 Bearer 區分身分 → 不設此標頭，共用電腦上 A 取過的檔會被
+        # 快取，B 的請求不送達伺服器；download 的 `write_read` 因而不執行，DM06 閱讀率
+        # 系統性低報（#587，判準見 core/http_cache）。
+        headers=NO_STORE_HEADERS,
     )

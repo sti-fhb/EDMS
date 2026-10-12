@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.http_cache import NO_STORE_HEADERS
 from app.core.pagination import PagedResponse
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
@@ -55,5 +56,5 @@ async def export_obsolete(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="obsolete-documents.csv"'},
+        headers={**NO_STORE_HEADERS, "Content-Disposition": 'attachment; filename="obsolete-documents.csv"'},
     )
