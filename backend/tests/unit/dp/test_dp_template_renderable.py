@@ -90,7 +90,7 @@ class Test非具名佔位與格式規格:
             ("{}", "自動編號佔位"),
             ("{doc_name:>200000000}", "格式規格（可 OOM 常駐 worker）"),
             ("未閉合的 {doc_name", "未閉合大括號"),
-            ('<div style="{color:red}">x</div>', "HTML inline CSS 的未跳脫大括號"),
+            ('<div style="{color:red}">x</div>', "HTML inline CSS——大括號是閉合的，`:` 才是問題"),
         ],
     )
     async def test_內文(self, bad: str, 說明: str) -> None:

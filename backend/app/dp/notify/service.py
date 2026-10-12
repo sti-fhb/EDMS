@@ -146,7 +146,13 @@ def ensure_renderable(*, subject: str, body: str, variables: str | None) -> None
     | `{user_nam}`（未宣告）| `get_field` 的 `kwargs[field_name]` → `KeyError` |
     | `{a.b}` / `{a[0]}` / `{0}` / `{}` | `get_field` 的 `isidentifier()` → `ValueError` |
     | `{v:>200000000}` | `format_field` 的 `format_spec` → `ValueError` |
-    | 未閉合 `{`、HTML inline CSS 的 `{color:red}` | stdlib `Formatter.parse` → `ValueError` |
+    | 未閉合的 `{` | stdlib `Formatter.parse` → `ValueError` |
+
+    ⚠️ **HTML inline CSS 的 `{color:red}` 走哪一條取決於 `color` 有沒有被宣告**（實測）：
+    未宣告 → stdlib 先把它拆成 `field_name="color"` / `format_spec="red"`，`color` 是合法
+    識別字，於是卡在 `kwargs["color"]` → **`KeyError`**；已宣告 → 過了 `get_field`，才卡在
+    `format_field` 的 `format_spec` → `ValueError`。兩條都擋得住，但**別把它記成「未閉合
+    大括號」那一類**——它的大括號是閉合的，`:` 才是問題。
 
     主旨與內文分別驗——兩者走不同的 formatter（主旨連 LF 一併剝），只驗一邊會漏。
 
