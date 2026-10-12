@@ -9,6 +9,7 @@
 
 import logging
 import os
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select, text, update
@@ -888,3 +889,34 @@ async def test_approve_succeeds_when_publish_template_missing(db):
         text('SELECT count(*) FROM "DP_EMAIL_LOG" WHERE "MODULE" = \'DM\' AND "CALLER_MODULE" = \'DM\'')
     )
     assert queued == 0
+
+
+async def test_recipients_exclude_disabled_but_keep_locked(db):
+    """已停用帳號不列入發布通知；**暫時鎖定的仍列入**（#563）。
+
+    本查詢原本只濾 `DELETED == 0`，而 `DP_USER.DELETED` 在本系統從不被設定（停用一律是
+    `STATUS='DISABLED'`），等於沒有任何帳號狀態過濾——已停用 / 離職但角色未撤的人照樣收到
+    含文件名稱與變更摘要的受控文件通知。
+
+    ⚠️ 兩個方向都要釘：只斷言「停用者收不到」的話，改用 `account_usable_clause()`（連鎖定
+    一起排除）也會通過，而那會讓被鎖 15 分鐘的同仁**永久少收**這一封——鎖定會自動解除，
+    信不會重寄。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "zt_ok", "ZT 正常", email="zt_ok@e.com")
+    await _seed_user(db, "zt_off", "ZT 停用", email="zt_off@e.com")
+    await _seed_user(db, "zt_lock", "ZT 鎖定", email="zt_lock@e.com")
+    for uid in ("zt_ok", "zt_off", "zt_lock"):
+        await _grant(db, uid, DM_VIEWER)
+    await db.execute(update(DpUser).where(DpUser.user_id == "zt_off").values(status="DISABLED"))
+    await db.execute(
+        update(DpUser).where(DpUser.user_id == "zt_lock").values(locked_until=utcnow() + timedelta(minutes=15))
+    )
+    await db.flush()
+    await _doc(db, "DM-SOP-000365", status="PUBLISHED", author="ed", audience=("全體",))
+
+    emails = await _svc._repo.recipient_emails(db, "DM-SOP-000365")
+
+    assert "zt_ok@e.com" in emails  # 正向錨點：這份名單真的有人，否則下面兩條恆真
+    assert "zt_off@e.com" not in emails  # 停用 → 不該收到受控文件的名稱與摘要
+    assert "zt_lock@e.com" in emails  # 鎖定是暫時的，明天就回來——不該少收
