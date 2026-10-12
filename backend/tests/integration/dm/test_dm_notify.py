@@ -14,7 +14,8 @@ pytestmark = pytest.mark.integration
 #: 恢復時可直接沿用（屆時 key 須逐字對齊範本 VARIABLES，否則 `_SafeFormatter` 會拋 KeyError →
 #: 空信 FAILED 且不外拋）。
 #:
-#: 本檔真正的守門是 `skipped_reason == "CHANNEL_NOT_EMAIL"`：渲染失敗給的是 `None`，兩者分得開。
+#: 本檔真正的守門是 `skipped_reason == "CHANNEL_NOT_EMAIL"`：那是管理者**有意**的設定，
+#: 與渲染失敗的 `RENDER_FAILED`（缺陷，#534 起具名）彼此分得開。
 _FLOW_CASES = (
     ("DOC_SUBMIT", {"reviewer_name": "王", "author_name": "陳", "doc_name": "D", "review_type": "發布審核"}),
     ("DOC_REJECT", {"author_name": "陳", "doc_name": "D", "reason": "格式不符"}),

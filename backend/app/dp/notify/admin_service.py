@@ -19,6 +19,7 @@ from app.dp.audit.service import AuditLogService
 from app.dp.notify.models import DpNotifyTemplate
 from app.dp.notify.repository import NotifyRepository
 from app.dp.notify.schemas import TemplateResponse, TemplateUpdate
+from app.dp.notify.service import ensure_renderable
 
 _FUNC_NAME = "DP-TEMPLATES"
 _NOT_FOUND_MSG = "通知範本不存在"
@@ -85,16 +86,25 @@ class TemplateAdminService:
         """更新範本（主旨 / 內文 / 管道 / 啟停）；MODULE 過濾 + 系統信保護 + 樂觀鎖 + 稽核。
 
         Raises:
-            AppError: 範本不存在（404 DP_MAIL_001）、越權（403 DP_MAIL_005）、
-                系統信停用（403 DP_MAIL_003）、版本衝突（409 DP_MAIL_004）。
+            AppError: 越權（403 DP_MAIL_005）、範本不存在（404 DP_MAIL_001）、
+                站內範本（403 DP_MAIL_010）、管道唯讀（403 DP_MAIL_009）、
+                系統信停用（403 DP_MAIL_003）、佔位無法渲染（422 DP_MAIL_011）、
+                版本衝突（409 DP_MAIL_004）。
         """
-        template = await self._repo.get_template(db, module, template_code)
-        if template is None:
-            raise AppError(status_code=404, detail=_NOT_FOUND_MSG, error_code="DP_MAIL_001")
-
+        # 授權在**查存在之前**（#534）：順序反過來的話，DM-only 管理者對 `PUT /ET/XXX` 會由
+        # 404 / 403 的差別分辨出該模組的範本存在與否。資訊價值極低（範本集合固定且寫在 spec
+        # 與 migration 裡），但 `GET` 列表本來就按模組過濾、`PUT` 卻不，兩者不一致；對調即可，
+        # 零成本。
+        #
+        # ⚠️ `_visible_modules` 只吃 `module` 參數、不需要 template，所以搬得到最前面；下方
+        #   各道檢核都要 template，順序不可再動。
         is_et, is_dm = await self._admin_flags(db, operator.user_id)
         if module not in self._visible_modules(is_et, is_dm):
             raise AppError(status_code=403, detail=_FORBIDDEN_MSG, error_code="DP_MAIL_005")
+
+        template = await self._repo.get_template(db, module, template_code)
+        if template is None:
+            raise AppError(status_code=404, detail=_NOT_FOUND_MSG, error_code="DP_MAIL_001")
 
         # 站內範本整列不可維護（#554）。位置有意義：
         # - 在模組過濾**之後**——否則會對無該模組權限者洩漏「這支範本是站內的」。
@@ -119,6 +129,13 @@ class TemplateAdminService:
         # 內文仍可編。原本一併擋的「channel 改 MSG」已由上方通則涵蓋，故移除該分支。
         if template.is_system and not data.is_enabled:
             raise AppError(status_code=403, detail=_SYSTEM_MSG, error_code="DP_MAIL_003")
+
+        # 佔位檢核（#534）。位置在所有「整列能不能改」的閘**之後**、寫入之前——整列都改不動時，
+        # 個別欄位合不合法無關緊要（同上方 DP_MAIL_010 的理由）。
+        #
+        # ⚠️ 檢核的是 `data` 的新值、比對的是 `template.variables`（**現值**）——`VARIABLES`
+        #   不在 `TemplateUpdate` 裡、本來就改不動，所以不存在「用新宣告驗新內文」的情況。
+        ensure_renderable(subject=data.subject, body=data.body, variables=template.variables)
 
         before = _snapshot(template)
         now = utcnow()

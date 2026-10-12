@@ -62,12 +62,14 @@ class EtNotifier:
             params: 範本變數；key 須逐字對齊範本佔位（見 `course_invite.py`）。
 
         Returns:
-            平台 `SendResult`：`queued_count`（排入 PENDING 之收件人數）、`skipped_reason`
-            （`TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL` / None）。**寄送失敗時回
-            `queued_count=0`**，不拋例外——見模組 docstring。
+            平台 `SendResult`：`queued_count`（排入 PENDING 之收件人數）、`skipped_reason`。
+            後者五種值——`TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL`（管理者**有意**的設定）、
+            `RENDER_FAILED`（**缺陷**：範本佔位與傳入 params 對不上，#534 起具名）、
+            `SEND_FAILED`（本封裝攔下 `AppError` 時自填）、`None`（成功，或收件人清單為空）。
+            **寄送失敗時回 `queued_count=0`**，不拋例外——見模組 docstring。
         """
         try:
-            return await self._notify.send_email(
+            result = await self._notify.send_email(
                 db,
                 recipients=recipients,
                 template_code=template_code,
@@ -79,3 +81,10 @@ class EtNotifier:
             # 收件人不入 log：那是個資，且此處的失敗與「寄給誰」無關（範本層級的問題）。
             logger.exception("ET 通知排入失敗，不影響呼叫方交易 template_code=%s", template_code)
             return SendResult(queued_count=0, skipped_reason="SEND_FAILED")
+
+        # 與 `DmNotifier` 對稱（#534）：渲染失敗在 ET 側原本是全靜默——平台整批寫 FAILED 後
+        # 回 `queued_count=0` 不拋錯，而 `DP_EMAIL_LOG` 沒有任何畫面在顯示。
+        # ⚠️ 只對**缺陷**出警告：`TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL` 是管理者有意的設定。
+        if result.skipped_reason == "RENDER_FAILED":
+            logger.warning("ET 通知渲染失敗，一封都沒排入 template_code=%s 收件人數=%s", template_code, len(recipients))
+        return result

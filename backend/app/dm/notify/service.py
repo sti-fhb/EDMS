@@ -44,6 +44,14 @@ logger = logging.getLogger(__name__)
 
 _MODULE = "DM"
 
+#: 代表**缺陷**的 `skipped_reason`（#534）——會出 WARNING。
+#: 與之相對的 `TEMPLATE_DISABLED` / `CHANNEL_NOT_EMAIL` 是管理者有意的設定，不算故障。
+#:
+#: ⚠️ 本集合**刻意不含 `SEND_FAILED`**：那個值只在下方 `except AppError` 分支產生，而該分支
+#: 已先 `logger.exception` 並 `return`，走不到這道 WARNING；平台 `send_email` 本身也不會回它。
+#: 把它放進來會是死值，並讓人誤以為該路徑走的是這裡。
+_FAILURE_REASONS = frozenset({"RENDER_FAILED"})
+
 
 class DmNotifier:
     """DM 事件通知薄封裝：固定 MODULE / CALLER_MODULE 呼叫平台 SRVDP002，並負責分批。"""
@@ -100,4 +108,19 @@ class DmNotifier:
             # `DP_EMAIL_LOG` 都沒有留下痕跡**的失敗——渲染失敗至少還會寫 FAILED 列。
             logger.exception("DM 通知排入失敗，不影響呼叫方交易 template_code=%s 已排入=%s", template_code, queued)
             return SendResult(queued_count=queued, skipped_reason="SEND_FAILED")
+
+        # #534：呼叫端只取 `queued_count`（`ApproveResult.notified` 等），`skipped_reason`
+        # 到那裡就蒸發了。於是「一封都沒排入」在畫面與 API 上，與「本來就沒有收件人」長得
+        # 一模一樣。本模組是 DM 全部 8 個通知呼叫點的唯一出口，在這裡留一筆即全面涵蓋。
+        #
+        # ⚠️ 只對**缺陷**出警告，不對「刻意跳過」出：`TEMPLATE_DISABLED` /
+        # `CHANNEL_NOT_EMAIL` 是管理者的設定（DM 的 7 支站內範本每次都會回後者），
+        # 一併警告會讓這行 log 在正常運作時狂噴，於是沒有人會再看它。
+        if skipped_reason in _FAILURE_REASONS:
+            logger.warning(
+                "DM 通知未排入任何收件人 template_code=%s reason=%s 收件人數=%s",
+                template_code,
+                skipped_reason,
+                len(recipients),
+            )
         return SendResult(queued_count=queued, skipped_reason=skipped_reason)
