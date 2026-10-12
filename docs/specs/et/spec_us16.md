@@ -60,6 +60,7 @@
 
 - **FR-ET-US16-01**: 系統 MUST 於 ET05 課程基本資料提供「是否需線下核可」（`REQUIRE_APPROVAL`）設定，預設 false；此設定屬課程屬性，於 [spec_us3.md](spec_us3.md) US3 課程建立 / 編輯畫面維護
 - **FR-ET-US16-02**: 系統 MUST 僅於 `REQUIRE_APPROVAL = true` 之課程於 ET02「已加入」頁籤顯示核可欄與核可操作；學員綜合狀態 MUST 由完課狀態 + ET_APPROVAL 即時衍生（未達核可資格 / 待核可 / 已通過 / 未通過），MUST NOT 另存狀態欄位
+    > **CSV 匯出不受「僅於 `REQUIRE_APPROVAL = true` 顯示」之限（2026-10-12 #577 補充）**：本條規範的是 ET02 **畫面**。已加入學員清單 CSV 一律含「核可狀態」欄，不需核可之課程填「—」，見 [spec_us9.md](spec_us9.md) FR-ET-US9-09。
 - **FR-ET-US16-03**: 系統 MUST 以「線上完課」為核可前提；未完課學員 MUST NOT 顯示核可按鈕（不提供核可入口，狀態顯示「未達核可資格」）；批次核可時對名單中未完課者 MUST 跳過並提示
 
     > 🔴 **完課狀態 MUST 以即時計算取得，MUST NOT 讀 `ET_ENROLLMENT.COMPLETION_STATUS`**（2026-09-17 修訂）。本條原文寫「（`ET_ENROLLMENT.COMPLETION_STATUS = COMPLETED`）」，但該欄位全庫**只在加入課程時寫入一次 `NOT_STARTED`、沒有任何路徑推進它**（`COMPLETED_AT` 更連寫入點都沒有）。照原文實作，核可按鈕會對每一位學員都不出現，**而且不會報錯**。US9（#322）與 ET03（#284）已分別踩過同一個坑並改為即時導出。
