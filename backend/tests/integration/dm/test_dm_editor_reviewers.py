@@ -73,6 +73,23 @@ async def test_reviewers_excludes_disabled_and_locked(db, client):
     assert "rv_lock" not in ids, "鎖定中帳號登不進系統，不應可被指定為審核者"
 
 
+async def test_reviewers_requires_editor(db, client):
+    """非編輯者（具 DM 角色但無 DM_EDITOR）取審核者下拉 → 403 DM_AUTH_002（#600）。
+
+    此端點原本只掛 `get_dm_context`（任一 DM 角色即可），於是純閱覽者也拿得到審核者名冊。
+    細粒度授權對齊同檔 `get_doc_tags`（#377 security review MEDIUM-3 已補 `_ensure_editor`）。
+
+    ⚠️ 本測試只安排**一次**預期失敗的呼叫：失敗請求會回滾本測試 seed 的使用者列，
+    其後的呼叫會變成 401 而非預期狀態（見既有 integration 測試慣例）。
+    """
+    await _seed_user(db, "rv_reader")
+    await _grant(db, "rv_reader", DM_REVIEWER)  # 有 DM 角色、但非編輯者
+
+    r = await client.get(_URL, headers=_headers("rv_reader"))
+    assert r.status_code == 403, "非編輯者不應取得審核者名冊"
+    assert r.json()["error_code"] == "DM_AUTH_002"
+
+
 # ── 送簽時的伺服器端檢核（Code Review 發現：下拉過濾原為唯一落點，可被直接打 API 繞過）──
 
 

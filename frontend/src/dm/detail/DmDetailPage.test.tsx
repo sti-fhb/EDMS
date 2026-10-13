@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, it, vi } from "vitest"
@@ -12,6 +12,47 @@ vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
   return { ...actual, useNavigate: () => navigateSpy, useParams: () => ({ docId: "DM-SOP-000001" }) }
 })
+
+/**
+ * DM07 詳細頁回應（預設＝可編輯之已發布 PDF 文件），供後加入的測試覆寫個別欄位，
+ * 不必每條重抄整份 fixture。既有測試維持原本的 inline 寫法。
+ */
+function detailJson(overrides: Record<string, unknown> = {}) {
+  return {
+    doc_id: "DM-SOP-000001",
+    doc_name: "領血確認標準作業程序",
+    status: "PUBLISHED",
+    current_version_no: "2.1",
+    category_code: "SOP",
+    category_name: "SOP",
+    author_id: "u1",
+    author_name: "陳大華",
+    published_date: "2026-04-15T10:30:00Z",
+    approver_id: "u2",
+    approver_name: "李主任",
+    approve_time: "2026-04-15T10:30:00Z",
+    tags: ["平時"],
+    func_code: null,
+    func_name: null,
+    file: {
+      version_id: 21,
+      file_name: "SOP-v2.1.pdf",
+      file_mime: "application/pdf",
+      file_size: 2200000,
+      uploaded_at: "2026-04-15T10:30:00Z",
+      previewable: true,
+    },
+    is_editor: true,
+    is_admin: false,
+    can_edit: true,
+    edit_lock_reason: null,
+    can_obsolete: true,
+    obsolete_lock_reason: null,
+    is_obsolete: false,
+    obsolete_info: null,
+    ...overrides,
+  }
+}
 
 describe("DmDetailPage 文件詳細頁", () => {
   it("標題列（識別+狀態）+ 資訊面板（描述性 metadata）+ 檔案區（PDF 可預覽+下載）", async () => {
@@ -105,6 +146,9 @@ describe("DmDetailPage 文件詳細頁", () => {
           is_editor: true,
           can_edit: false,
           edit_lock_reason: "此文件新版本送審中，暫無法編輯或廢止",
+          // 送審中是 spec_us4 FR-005 所列的失效情境之一 → 兩個入口一致失效
+          can_obsolete: false,
+          obsolete_lock_reason: "此文件新版本送審中，暫無法編輯或廢止",
           is_obsolete: false,
           obsolete_info: null,
         }),
@@ -293,6 +337,10 @@ describe("DmDetailPage 文件詳細頁", () => {
     // Office（無法預覽）→ 無預覽鈕、有下載鈕
     expect(screen.queryByRole("button", { name: "預覽" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "下載" })).toBeInTheDocument()
+    // #600：畫面文字必須涵蓋上面這顆下載鈕，不可仍寫「不開放下載」
+    expect(screen.getByText(/無法線上預覽的版本（Office）可下載供稽核/)).toBeInTheDocument()
+    expect(screen.queryByText(/不開放下載/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Office 等無法預覽之版本可下載供稽核/)).toBeInTheDocument() // 版本歷程說明亦同步
   })
 
   it("已廢止 read-only：非管理者（is_admin=false）→ 無法預覽版本不顯示下載鈕（限管理者）", async () => {
@@ -491,5 +539,94 @@ describe("DmDetailPage 日期欄（#539）", () => {
     // 該行後面還接「| 核准者：…」，以前綴比對；正反兩條用同一種比對方式，避免否定斷言恆真
     expect(await screen.findByText(/^陳大華 \| 2026-10-06 發布/)).toBeInTheDocument()
     expect(screen.queryByText(/^陳大華 \| 2026-10-05 發布/)).not.toBeInTheDocument()
+  })
+})
+
+describe("DmDetailPage 動作入口與版本說明（#600）", () => {
+  it("本人已有未送簽草稿：只鎖「編輯新版本」，「廢止此文件」仍可用", async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get("/api/dm/documents/:docId", () =>
+        HttpResponse.json(
+          detailJson({
+            can_edit: false,
+            edit_lock_reason: "您已有此文件的未送簽草稿，請續編既有草稿",
+            can_obsolete: true,
+            obsolete_lock_reason: null,
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("領血確認標準作業程序")
+    expect(await screen.findByRole("button", { name: "編輯新版本" })).toBeDisabled()
+    // 廢止不受草稿影響：後端只被「已有進行中送審」擋，草稿版本不產生 review 列
+    const obsoleteBtn = screen.getByRole("button", { name: "廢止此文件" })
+    expect(obsoleteBtn).toBeEnabled()
+    await user.click(obsoleteBtn)
+    expect(await screen.findByText("申請廢止文件")).toBeInTheDocument()
+  })
+
+  it("一般文件的 Office 舊版：無預覽 / 下載鈕，改顯示聯絡管理者提示", async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get("/api/dm/documents/:docId/versions", () =>
+        HttpResponse.json([
+          {
+            version_id: 21,
+            version_no: "2.1",
+            change_summary: "現行版",
+            file_name: "SOP-v2.1.pdf",
+            author_id: "u1",
+            author_name: "陳大華",
+            approver_name: "李主任",
+            published_date: "2026-04-15T10:30:00Z",
+            is_current: true,
+            previewable: true,
+          },
+          {
+            version_id: 20,
+            version_no: "2.0",
+            change_summary: "舊的 Word 版",
+            file_name: "SOP-v2.0.docx",
+            author_id: "u1",
+            author_name: "陳大華",
+            approver_name: "李主任",
+            published_date: "2026-02-10T14:20:00Z",
+            is_current: false,
+            previewable: false,
+          },
+        ]),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("領血確認標準作業程序")
+    await user.click(screen.getByRole("button", { name: "版本歷程" }))
+    // 正向錨點：該列確實渲染了（否則下面的提示斷言無從歸因）
+    expect(await screen.findByText("2.0")).toBeInTheDocument()
+    expect(screen.getByText("已被取代")).toBeInTheDocument()
+    // 舊版 + 無法預覽 → 兩種動作皆不適用，顯示提示而非空白列（落地 DM-MSG-DM07-002）
+    expect(screen.getByText(/如需此版本原檔請聯絡管理者/)).toBeInTheDocument()
+    // 說明文字需涵蓋「Office 舊版兩者皆不可」，不可只寫「舊版本僅供預覽」
+    expect(screen.getByText(/Office 等無法線上預覽之舊版請聯絡管理者/)).toBeInTheDocument()
+  })
+
+  it("未開啟廢止對話框前不請求審核者名單，開啟後才請求", async () => {
+    const user = userEvent.setup()
+    let reviewerCalls = 0
+    server.use(
+      http.get("/api/dm/reviewers", () => {
+        reviewerCalls += 1
+        return HttpResponse.json([{ user_id: "rv1", user_name: "李主任" }])
+      }),
+    )
+    renderWithProviders(<DmDetailPage />)
+    await screen.findByText("領血確認標準作業程序")
+    const obsoleteBtn = await screen.findByRole("button", { name: "廢止此文件" })
+    expect(reviewerCalls).toBe(0)
+    // 正向配對：開啟對話框後才取名單（證明上一條不是因為 handler 從未生效而恆真）
+    await user.click(obsoleteBtn)
+    expect(await screen.findByText("申請廢止文件")).toBeInTheDocument()
+    await waitFor(() => expect(reviewerCalls).toBeGreaterThan(0))
   })
 })
