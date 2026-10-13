@@ -33,6 +33,23 @@ import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
 import { formatDateTaipei, formatDateTimeTaipei } from "../../utils/date"
 
+/**
+ * 版本歷程區的說明文字。
+ *
+ * 三種情況的差別都是**實際可按的鈕**不同，文字必須跟著分（#600）：
+ * - 已廢止 + 管理者：Office 等無法預覽之版本仍有下載鈕（US10 稽核用）
+ * - 已廢止 + 非管理者：確實全部只能預覽
+ * - 未廢止：Office 舊版既不能預覽（非可預覽格式）也不能下載（非目前版），只寫「舊版本僅供預覽」會誤導
+ */
+function versionHistoryHint(readOnly: boolean, isAdmin: boolean): string {
+  if (readOnly) {
+    return isAdmin
+      ? "（已廢止：所有版本僅供預覽；Office 等無法預覽之版本可下載供稽核）"
+      : "（已廢止：所有版本僅供預覽）"
+  }
+  return "（目前版本可下載；舊版本僅供預覽，Office 等無法線上預覽之舊版請聯絡管理者）"
+}
+
 /** 檔案存取失敗訊息：缺檔（404）明確提示「查無檔案」，避免誤導為系統故障。 */
 function fileErrorMessage(err: unknown, action: string): string {
   const status = (err as { response?: { status?: number } } | null)?.response?.status
@@ -125,7 +142,11 @@ export function DmDetailPage() {
       {/* 已廢止 read-only banner */}
       {readOnly && (
         <Alert severity="error" icon={<ArchiveIcon />} sx={{ mb: 2 }}>
-          本文件已<strong>廢止</strong>，僅供稽核查閱；所有版本僅可預覽、不開放下載。
+          {/* 管理者於此畫面確實會看到 Office 版本的下載鈕（US10 稽核用），文字須涵蓋該例外（#600） */}
+          本文件已<strong>廢止</strong>，僅供稽核查閱；
+          {detail.is_admin
+            ? "所有版本僅可預覽。無法線上預覽的版本（Office）可下載供稽核。"
+            : "所有版本僅可預覽、不開放下載。"}
           {detail.obsolete_info && (
             <>
               <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
@@ -176,12 +197,13 @@ export function DmDetailPage() {
                 />
                 {/* 彈性間隔：把「廢止此文件」推到橫幅最右邊（比 ml:auto 更不受 Stack spacing 影響） */}
                 <Box sx={{ flexGrow: 1 }} />
+                {/* 廢止入口用自己的旗標：本人有未送簽草稿只擋編輯（DM_DOC_009），不擋廢止（#600） */}
                 <LockableButton
                   label="廢止此文件"
                   icon={<ArchiveIcon />}
                   color="error"
-                  disabled={!detail.can_edit}
-                  reason={detail.edit_lock_reason}
+                  disabled={!detail.can_obsolete}
+                  reason={detail.obsolete_lock_reason}
                   onClick={() => setObsoleteOpen(true)}
                 />
               </>
@@ -205,7 +227,7 @@ export function DmDetailPage() {
             <HistoryIcon fontSize="small" sx={{ verticalAlign: "middle", mr: 0.5 }} />
             版本歷程
             <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              {readOnly ? "（已廢止：所有版本僅供預覽）" : "（目前版本可下載；舊版本僅供預覽）"}
+              {versionHistoryHint(readOnly, detail.is_admin)}
             </Typography>
           </Typography>
           <Stack divider={<Divider />} spacing={1.5}>
@@ -223,14 +245,19 @@ export function DmDetailPage() {
         </Paper>
       </Collapse>
 
-      {/* 廢止申請對話框（US8）：送出成功後刷新詳細頁為廢止待簽核 */}
-      <DmObsoleteDialog
-        open={obsoleteOpen}
-        docId={docId}
-        docName={detail.doc_name}
-        onClose={() => setObsoleteOpen(false)}
-        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["dm-detail", docId] })}
-      />
+      {/* 廢止申請對話框（US8）：送出成功後刷新詳細頁為廢止待簽核。
+          條件渲染而非常駐（#600）：常駐會讓每位使用者（含純閱覽者）一進頁面就去撈審核者名單與上傳限制，
+          且 MUI Dialog 即使 open={false} 仍參與 aria-hidden 簿記、是同檔其他測試逾時的已知來源。
+          代價是失去關閉動畫（開啟動畫不受影響）。 */}
+      {obsoleteOpen && (
+        <DmObsoleteDialog
+          open
+          docId={docId}
+          docName={detail.doc_name}
+          onClose={() => setObsoleteOpen(false)}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["dm-detail", docId] })}
+        />
+      )}
     </Box>
   )
 }
@@ -391,6 +418,12 @@ function VersionRow({
             >
               下載
             </Button>
+          )}
+          {/* 兩種動作皆不適用（Office 舊版 / 非管理者看已廢止的 Office 版）→ 說明why，不要留空白列（#600） */}
+          {!v.previewable && !canDownload && (
+            <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
+              無法線上預覽，如需此版本原檔請聯絡管理者
+            </Typography>
           )}
         </Stack>
       </Stack>

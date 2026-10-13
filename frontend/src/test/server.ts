@@ -265,6 +265,8 @@ export const handlers = [
       is_admin: false,
       can_edit: true,
       edit_lock_reason: null,
+      can_obsolete: true,
+      obsolete_lock_reason: null,
       is_obsolete: false,
       obsolete_info: null,
     }),

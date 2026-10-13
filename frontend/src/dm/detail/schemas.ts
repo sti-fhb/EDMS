@@ -41,6 +41,12 @@ export interface DetailResponse {
   is_admin: boolean
   can_edit: boolean
   edit_lock_reason: string | null
+  /**
+   * 廢止入口與編輯入口**分開**（#600）：草稿條件只屬編輯（`DM_DOC_009` 僅存在於加版路徑），
+   * 廢止僅被「已有進行中送審」擋。兩者共用一個旗標會讓前端比後端嚴、且提示理由與廢止無關。
+   */
+  can_obsolete: boolean
+  obsolete_lock_reason: string | null
   is_obsolete: boolean
   obsolete_info: ObsoleteInfo | null
 }
