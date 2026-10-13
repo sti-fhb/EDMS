@@ -12,12 +12,13 @@ import { muiTheme } from "../styles/muiTheme"
 
 const _NEW_PWD = "Xyz98765!"
 
-function renderReset(entry: string) {
+/** @param basename 部署 base path（如 "/edms"）；給了就模擬部署環境的 router（#607）。 */
+function renderReset(entry: string, basename?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={muiTheme}>
-        <MemoryRouter initialEntries={[entry]}>
+        <MemoryRouter basename={basename} initialEntries={[`${basename ?? ""}${entry}`]}>
           <Routes>
             <Route path="/reset-password" element={<ResetPasswordPage />} />
           </Routes>
@@ -67,6 +68,13 @@ describe("ResetPasswordPage", () => {
     await fillReset(user)
     expect(await screen.findByText("密碼已更新，請以新密碼登入")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "返回登入" })).toBeInTheDocument()
+  })
+
+  it("部署於子路徑（/edms）時，「返回登入」指向 /edms 而非網域根目錄（#607）", async () => {
+    renderReset("/reset-password?token=validtoken", "/edms")
+    const user = userEvent.setup()
+    await fillReset(user)
+    expect(await screen.findByRole("link", { name: "返回登入" })).toHaveAttribute("href", "/edms")
   })
 
   it("token 失效（後端 DP_PWD_005）→ 顯示錯誤訊息", async () => {

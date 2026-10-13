@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
@@ -205,6 +205,10 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
 })
 
 describe("InviteStudentsDialog：邀請碼頁籤", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it("顯示邀請碼、複製連結與 QR Code", async () => {
     const user = userEvent.setup()
     renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
@@ -215,7 +219,14 @@ describe("InviteStudentsDialog：邀請碼頁籤", () => {
     expect(screen.getByTitle("課程邀請 QR Code")).toBeInTheDocument()
   })
 
-  it("複製邀請連結會寫入剪貼簿", async () => {
+  // 斷言**整條網址相等**而非「含 `code=`」——後者在少了部署 base path 時照樣通過，
+  // #607 就是這樣在本機與 CI 都綠、只在部署環境壞掉（本機 base 為 "/"）。
+  // QR Code 與複製連結共用 `joinUrlFor`；`QRCodeSVG` 不把網址寫進 DOM，故只驗剪貼簿。
+  it.each([
+    { base: "/edms/", expected: `${window.location.origin}/edms/et/my-courses?code=83052617` },
+    { base: "/", expected: `${window.location.origin}/et/my-courses?code=83052617` },
+  ])("複製邀請連結會寫入剪貼簿，網址帶部署 base path（BASE_URL=$base）", async ({ base, expected }) => {
+    vi.stubEnv("BASE_URL", base)
     const user = userEvent.setup()
     // 順序要緊：`userEvent.setup()` 會自行接管 `navigator.clipboard`，先設會被它蓋掉。
     // 又：jsdom 的 `navigator.clipboard` 只有 getter，`Object.assign` 會拋 TypeError。
@@ -225,7 +236,7 @@ describe("InviteStudentsDialog：邀請碼頁籤", () => {
     await openCodeTab(user)
 
     await user.click(screen.getByRole("button", { name: "複製邀請連結" }))
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("code=83052617"))
+    expect(writeText).toHaveBeenCalledWith(expected)
   })
 
   it("尚無邀請碼時提示發布後才會產生，而非顯示空白", async () => {
