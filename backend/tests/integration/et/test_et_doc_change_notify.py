@@ -7,9 +7,7 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import update
-
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
