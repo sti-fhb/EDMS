@@ -342,3 +342,70 @@ class TestDocChangeNotifyEndToEnd:
 
         assert result.notified == 0
         assert await _notify_state(db, doc, owner) is None, "沒寄出就不得寫簿記"
+
+
+class TestArchitectureGuard:
+    """釘住「通知簿記表不得滲進內容解析路徑」。"""
+
+    def test_內容解析路徑不得引用通知簿記表(self) -> None:
+        """🔴 `data-model` §ET_MATERIAL_DOC 明訂「僅存編號、不存內容與版本號」。
+
+        理由是「不存版本號 →『恆取最新版』不可能出錯」。#231 的簿記表
+        （`ET_MATERIAL_DOC_NOTIFY`）**只供通知判斷**；一旦有人在取版 / 呈現路徑讀了它，
+        那條保證就失效——而且**失效時沒有任何症狀**：畫面照常顯示，只是顯示的是簿記上
+        的舊版，學員與教師都不會察覺。
+
+        以 AST 解析真正的 import（比照 `test_et_模組未直接_import_dm_內部`），
+        而非字串比對——否則在註解裡寫下這條規則本身就會觸發誤報。
+
+        ⛔ 白名單只有三個檔：簿記的 repository、比對規則、排程服務。要新增白名單前，
+        請先問「這個呼叫端是在決定『要不要通知』，還是在決定『給使用者看哪一版』」。
+        """
+        import ast
+        from pathlib import Path
+
+        et_root = Path(__file__).resolve().parents[3] / "app" / "et"
+        allowed = {
+            Path("material/doc_change_repository.py"),
+            Path("material/doc_change_service.py"),
+            Path("material/models.py"),
+        }
+        offenders: list[str] = []
+        for py in sorted(et_root.rglob("*.py")):
+            rel = py.relative_to(et_root)
+            if rel in allowed:
+                continue
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+            for node in ast.walk(tree):
+                names = []
+                if isinstance(node, ast.ImportFrom):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                if any("EtMaterialDocNotify" in n for n in names):
+                    offenders.append(str(rel))
+                    break
+
+        assert offenders == [], f"以下檔案引用了通知簿記表，但它們不在白名單內：{offenders}"
+
+    def test_白名單本身有東西_否則上一條恆真(self) -> None:
+        """正向錨點：確認簿記表**真的**有人在用。
+
+        少了這條，哪天簿記表被整個移除（或改名），上一條會因為全庫零命中而**恆真**
+        ——一條永遠綠的護欄比沒有護欄更危險，它會讓人以為還有防護。
+        """
+        import ast
+        from pathlib import Path
+
+        et_root = Path(__file__).resolve().parents[3] / "app" / "et"
+        users: list[str] = []
+        for py in sorted(et_root.rglob("*.py")):
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+            for node in ast.walk(tree):
+                names = []
+                if isinstance(node, (ast.ImportFrom, ast.Import)):
+                    names = [a.name for a in node.names]
+                if any("EtMaterialDocNotify" in n for n in names):
+                    users.append(str(py.relative_to(et_root)))
+                    break
+        assert users, "簿記表零命中——上一條護欄已恆真，請確認它是否還有意義"
