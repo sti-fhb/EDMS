@@ -113,7 +113,7 @@ _refs/10-教育訓練文件管理模組.md  # 來源分析資料（source of tru
 | ET → DM | 文件管理模組（DM） | **SRVDM002** | 內部服務（經 `app/services` in-process 呼叫） | 查詢「訓練教材」分類（`category=TRAINING`）之有效文件清單（教師建立教材時下拉選取使用）|
 | ET → DM | 文件管理模組（DM） | **SRVDM001** | 內部服務（經 `app/services` in-process 呼叫） | 依 `docId`（VARCHAR(20)）取當前發布版 metadata 與廢止狀態；檔案本體另經 DM 檔案存取能力取得（學員端 ET06 文件預覽 / 下載原檔）|
 | ET → DM | 文件管理模組（DM） | — | 內部事件 / 查詢 | 偵測 DM 文件廢止狀態（教師端 ET05 編輯頁顯示警告、學員端 ET06 顯示「此文件已廢止」標籤）|
-| ET → 平台 DP（發信）| 平台模組（DP）| — | 平台唯一發信服務（經 `DP_EMAIL_LOG` outbox → 外部 SMTP）| 課程邀請通知（US8）、章節更新通知（US3）、每週未看提醒 / 加急提醒 / 週報（US14）、核可通過通知（US16）採 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）可維護範本（US15，共 7 類）；密碼重設信（US2）、帳號（Email）變更驗證信（US10）為平台系統信（`MODULE=DP`，不可編輯）；ET 不自建寄件佇列 |
+| ET → 平台 DP（發信）| 平台模組（DP）| — | 平台唯一發信服務（經 `DP_EMAIL_LOG` outbox → 外部 SMTP）| 課程邀請通知（US8）、章節更新通知（US3）、每週未看提醒 / 加急提醒 / 週報（US14）、核可通過通知（US16）採 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）可維護範本（US15，共 10 類）；密碼重設信（US2）、帳號（Email）變更驗證信（US10）為平台系統信（`MODULE=DP`，不可編輯）；ET 不自建寄件佇列 |
 
 > **2026-08-19 編碼對齊**：ET 側原將 SRVDM001 標為「清單」、SRVDM002 標為「內容」，與提供方 DM 之定稿契約**恰好對調**。已依 [DM contracts/document-service.md](../dm/contracts/document-service.md) 更正——**SRVDM001 = 依 DOC_ID 取當前發布版、SRVDM002 = 取分類文件清單**。同時更正 `docId` 型別（BIGINT → VARCHAR(20)）、分類碼（`TRAINING_MATERIAL` → `TRAINING`），並改以 `app/services` in-process Service 呼叫（不打 DM HTTP 端點——DM 存取閘要求 DM 角色，ET 學員未必具備）。
 
@@ -153,7 +153,7 @@ _refs/10-教育訓練文件管理模組.md  # 來源分析資料（source of tru
 |------|----------------|---------|--------|------|
 | 課程關閉與再開課 | US11 | UCET003 | spec_us11.md | 到期自動關閉 / 手動關閉（唯讀、可逆）；作答中 attempt 允許完成計分；再開課重設起訖時間（2026-07-02 變更：原停課不可逆與 `PENDING_CLOSE` 廢除）|
 | ~~待加入邀請追蹤~~ | ~~US12~~ | UCET006 | spec_us12.md | **已於 2026-09-18（#362）廢止**：邀請即加入，無中間狀態可追蹤 |
-| 通知信範本維護 | US15 | UCET015 | spec_us15.md | 管理者維護 7 類統一信件範本與排程參數（2026-07-17 增列核可通過通知；密碼重設 / 帳號變更驗證採系統固定範本、不列入）（2026-07-02 新增）|
+| 通知信範本維護 | US15 | UCET015 | spec_us15.md | 管理者維護 10 類統一信件範本與排程參數（2026-07-17 增列核可通過通知；密碼重設 / 帳號變更驗證採系統固定範本、不列入）（2026-07-02 新增）|
 
 ---
 
@@ -178,7 +178,7 @@ ET 參數集中於平台 `DP_PARAM`（`PARAM_ID` 前綴 `ET_`；2026-07-08 集�
 - **第一個管理者**：首次部署時由 IT 透過 DB 直接寫入 `DP_USER` + `ET_USER_ROLE`（ROLE=管理者）
 - **受訓單位標籤種子**：全體（IS_ALL）/ 護理師 / 行政人員 / 軍人 / 醫檢師 5 筆 seed 至 `ET_TAG`；後續由管理者於 US1 維護（2026-07-02 變更，原 ET_MODULE 七類內定清單廢除）
 - **系統參數種子**：ET 參數（前綴 `ET_`）由平台 seed 至 `DP_PARAM`（ET 不自建參數表）
-- **通知信範本種子**：7 類可維護範本代碼由平台 seed 至 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`；含 2026-07-17 增列之 `APPROVAL_PASSED`；範本代碼固定，管理者僅可編輯主旨 / 內文）；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）、由平台維護、ET 不開放 UI 編輯
+- **通知信範本種子**：10 類可維護範本代碼由平台 seed 至 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`；含 2026-07-17 增列之 `APPROVAL_PASSED`；範本代碼固定，管理者僅可編輯主旨 / 內文）；密碼重設 / 帳號變更驗證為平台系統信（`MODULE=DP`）、由平台維護、ET 不開放 UI 編輯
 - **排程註冊**：SCHET001（每週）/ SCHET002（每日）於平台 `DP_SCHEDULE` 註冊、由平台單一排程引擎執行（`DP_SCHEDULE_LOG` 記錄）；job handler 由 ET 提供（ET 不自建排程引擎）
 
 ---

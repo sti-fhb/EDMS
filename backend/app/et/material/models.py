@@ -123,3 +123,54 @@ class EtMaterialDoc(BaseModel):
     )
     doc_id: Mapped[str] = mapped_column("DOC_ID", String(20), nullable=False)
     sort_order: Mapped[int] = mapped_column("SORT_ORDER", Integer, nullable=False)
+
+
+class EtMaterialDocNotify(BaseModel):
+    """引用之 DM 文件的**通知簿記**（ET_MATERIAL_DOC_NOTIFY，#231）。
+
+    記「上次通知這位課程擁有者時，這份文件是哪一版、什麼狀態」，供排程比對出
+    「有沒有需要通知的變動」（比對規則見 `material/doc_change_rules.py`）。
+
+    ## ⛔ 內容解析路徑**永不**讀本表
+
+    `ET_MATERIAL_DOC` 依 `data-model` 明訂「僅存編號、不存內容與版本號」，理由是
+    「不存版本號 →『恆取最新版』不可能出錯」。本表是**通知簿記**、不是內容來源：
+    學員端取版仍一律走 SRVDM001 取當前發布版，那條保證完全未被動到。
+
+    ⛔ **不得**在任何取版 / 呈現路徑引用本表——那會讓上述保證失效，且失效時沒有
+    任何症狀（畫面照常顯示，只是顯示的是簿記上的舊版）。本專案以一條架構護欄測試
+    釘住此事。
+
+    ## 為何鍵是 (DOC_ID, OWNER_ID) 而非只有 DOC_ID
+
+    一次掃描中同一份文件可能影響多位擁有者。若只記 `DOC_ID`，部分擁有者寄信失敗而
+    簿記已前進，那些人就**永久漏掉**該次變動。以擁有者為維度，失敗者次日自動重試、
+    成功者不重寄。
+
+    ## 本表之列只新增與更新，不刪除
+
+    教師移除引用後保留簿記列是刻意的：日後若再引用同一份文件，簿記仍記得上次通知到
+    哪一版，不會因為「查無列」而多寄一封。故 `DELETED` 恆為 0。
+    """
+
+    __tablename__ = "ET_MATERIAL_DOC_NOTIFY"
+    __table_args__ = (
+        PrimaryKeyConstraint("NOTIFY_ID", name="PK_ET_MATERIAL_DOC_NOTIFY"),
+        # 全表唯一（非部分索引）：本表不軟刪除，不會有「已刪除列佔住鍵」的問題。
+        Index(
+            "UX_ET_MATERIAL_DOC_NOTIFY_DOC_OWNER",
+            "DOC_ID",
+            "OWNER_ID",
+            unique=True,
+        ),
+    )
+
+    notify_id: Mapped[int] = mapped_column("NOTIFY_ID", BigInteger, Identity(), nullable=False)
+    #: 對齊 `ET_MATERIAL_DOC.DOC_ID`，**非 DB 外鍵**（跨模組不設實體外鍵）。
+    doc_id: Mapped[str] = mapped_column("DOC_ID", String(20), nullable=False)
+    #: 課程擁有者（`ET_COURSE.OWNER_ID`）；非 FK，與該表同為 DP 使用者識別碼。
+    owner_id: Mapped[str] = mapped_column("OWNER_ID", String(20), nullable=False)
+    #: 上次通知時 SRVDM001 回傳之 `current_version_id`。
+    last_notified_version_id: Mapped[int] = mapped_column("LAST_NOTIFIED_VERSION_ID", Integer, nullable=False)
+    #: 上次通知時之文件狀態（`PUBLISHED` / `OBSOLETE`）。
+    last_notified_status: Mapped[str] = mapped_column("LAST_NOTIFIED_STATUS", String(20), nullable=False)

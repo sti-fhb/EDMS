@@ -3,9 +3,11 @@
 > 對應 UC：UCET015 ｜ 功能選項：ET10（通知信範本維護；維護介面於平台 DP 後台）｜ Priority：P3 ｜ Wireframe：[DP 後台 - 通知範本](../../wireframes/dp/index.html)｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-02 新增（客戶需求變更 items 2/4 之配套：所有通知信採統一範本，由管理者維護）。
 > **2026-07-08 平台對齊（DP）**：**ET 通知範本維護移至平台 DP 後台「通知範本」畫面（`MODULE=ET`）**，ET 管理者於 DP 後台按模組過濾只編輯 `MODULE=ET` 之列；ET 不再自設「系統設定」畫面。本 US 之範本清單、變數、啟用 / 停用與觸發規則**全數保留**，僅維護入口改為 DP 後台。功能作業代碼 ET10 沿用。
+> **2026-10-12 變更（引用文件變動通知，#231）**：ET 可維護範本由 **8 類增為 10 類**，新增「引用文件改版通知」（`DOC_VERSION_CHANGED`）與「引用文件廢止通知」（`DOC_OBSOLETED`），由 SCHET002 每日掃描觸發、收件人為課程擁有者；同其他範本可編輯主旨 / 內文與啟用 / 停用。
+> ⚠️ 本次一併補回 **#361（2026-09-21，7 → 8 增列 `QUIZ_RETEST_REQUIRED`）**之落差——該次只更新了 `data-model.md`，本檔與 `spec.md` / `contracts` / `plan.md` 皆仍停在 7 類。
 > **2026-07-17 變更（線下核可）**：ET 可維護範本由 6 類增為 **7 類**，新增「核可通過通知」（`APPROVAL_PASSED`），觸發於 [spec_us16.md](spec_us16.md) US16 核可「通過」時；同其他範本可編輯主旨 / 內文與啟用 / 停用。
 
-ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課程 / 學習相關通知信之統一範本（存於平台 `DP_NOTIFY_TEMPLATE`，`MODULE=ET`，**7 類**內建範本代碼（2026-07-17 增列核可通過通知），seed 於部署時由平台寫入）：可編輯各範本之**主旨與內文**（支援變數如 `{{COURSE_NAME}}`、`{{OPEN_START_AT}}`、`{{OPEN_END_AT}}`、`{{COURSE_URL}}`、`{{USER_NAME}}`）並**啟用 / 停用**該範本（比照 DM；停用後該類信件不寄送），**不可新增 / 刪除範本代碼**；另可於 DP 後台「系統參數與清單」調整加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`）；排程**執行時點**於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`）。範本集中於平台 DP，ET 寄信呼叫平台唯一發信服務（傳 `template_code`）；ET 管理者僅編輯 `MODULE=ET` 之列。**教師不可逐課修改信件內容**——所有寄出信件一律依平台範本渲染，確保內容統一。**密碼重設（US2）與帳號變更驗證（US10）之信件不納入本畫面**，為平台系統信（`MODULE=DP`）採系統固定範本、由平台於 DP 後台維護、ET 不開放編輯（帳號安全信件，2026-07-08 集中化）。
+ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課程 / 學習相關通知信之統一範本（存於平台 `DP_NOTIFY_TEMPLATE`，`MODULE=ET`，**10 類**內建範本代碼（2026-07-17 增列核可通過通知、2026-09-21 增列測驗變更需重測通知、2026-10-12 增列引用文件改版 / 廢止通知），seed 於部署時由平台寫入）：可編輯各範本之**主旨與內文**（支援變數如 `{{COURSE_NAME}}`、`{{OPEN_START_AT}}`、`{{OPEN_END_AT}}`、`{{COURSE_URL}}`、`{{USER_NAME}}`）並**啟用 / 停用**該範本（比照 DM；停用後該類信件不寄送），**不可新增 / 刪除範本代碼**；另可於 DP 後台「系統參數與清單」調整加急提醒天數（`DP_PARAM.ET_URGENT_REMIND_DAYS`）；排程**執行時點**於 DP 後台「排程管理」調整（`DP_SCHEDULE.CRON_EXPR`）。範本集中於平台 DP，ET 寄信呼叫平台唯一發信服務（傳 `template_code`）；ET 管理者僅編輯 `MODULE=ET` 之列。**教師不可逐課修改信件內容**——所有寄出信件一律依平台範本渲染，確保內容統一。**密碼重設（US2）與帳號變更驗證（US10）之信件不納入本畫面**，為平台系統信（`MODULE=DP`）採系統固定範本、由平台於 DP 後台維護、ET 不開放編輯（帳號安全信件，2026-07-08 集中化）。
 
 **Priority**: P3
 
@@ -17,7 +19,7 @@ ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課�
 
 ### 範本清單與編輯
 
-1. **Given** ET 管理者於 DP 後台進入「通知範本」（`MODULE=ET`，即 ET10），**When** 系統載入，**Then** 列出 **7 類**內建範本：課程邀請通知（COURSE_INVITE）、課程邀請彙整通知（COURSE_INVITE_DIGEST）、課程內容更新通知（COURSE_UPDATE）、每週未看提醒（WEEKLY_REMIND）、截止前加急提醒（URGENT_REMIND）、週報（WEEKLY_REPORT）、核可通過通知（APPROVAL_PASSED）；**密碼重設與帳號變更驗證不在清單內**（系統預設固定範本，不可編輯）
+1. **Given** ET 管理者於 DP 後台進入「通知範本」（`MODULE=ET`，即 ET10），**When** 系統載入，**Then** 列出 **10 類**內建範本：課程邀請通知（COURSE_INVITE）、課程邀請彙整通知（COURSE_INVITE_DIGEST）、課程內容更新通知（COURSE_UPDATE）、每週未看提醒（WEEKLY_REMIND）、截止前加急提醒（URGENT_REMIND）、週報（WEEKLY_REPORT）、核可通過通知（APPROVAL_PASSED）、測驗變更需重測通知（QUIZ_RETEST_REQUIRED）、引用文件改版通知（DOC_VERSION_CHANGED）、引用文件廢止通知（DOC_OBSOLETED）；**密碼重設與帳號變更驗證不在清單內**（系統預設固定範本，不可編輯）
 2. **Given** 管理者點擊某範本「編輯」，**When** 系統載入編輯頁，**Then** 顯示主旨與內文編輯欄位，並列出該範本可用之變數清單（點擊可插入）
 3. **Given** 管理者修改主旨 / 內文後儲存，**When** 系統檢核通過（主旨與內文不可為空），**Then** 寫入平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）並更新版本號（樂觀鎖）；之後所有該類信件依新內容渲染
 4. **Given** 範本內文含未定義之變數（如 `{{UNDEFINED_VAR}}`），**When** 儲存，**Then** 系統警告提示未定義變數（可仍儲存，寄出時該變數以空字串帶入）
@@ -45,7 +47,7 @@ ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課�
 
 ## Functional Requirements
 
-- **FR-ET-US15-01**: 系統 MUST 於 **DP 後台「通知範本」**畫面（`MODULE=ET`，按模組過濾）列出 7 類內建範本（COURSE_INVITE、COURSE_INVITE_DIGEST、COURSE_UPDATE、WEEKLY_REMIND、URGENT_REMIND、WEEKLY_REPORT、APPROVAL_PASSED）並提供編輯各範本之主旨與內文；MUST NOT 提供新增或刪除範本代碼之功能（範本代碼固定）
+- **FR-ET-US15-01**: 系統 MUST 於 **DP 後台「通知範本」**畫面（`MODULE=ET`，按模組過濾）列出 10 類內建範本（COURSE_INVITE、COURSE_INVITE_DIGEST、COURSE_UPDATE、WEEKLY_REMIND、URGENT_REMIND、WEEKLY_REPORT、APPROVAL_PASSED、QUIZ_RETEST_REQUIRED、DOC_VERSION_CHANGED、DOC_OBSOLETED）並提供編輯各範本之主旨與內文；MUST NOT 提供新增或刪除範本代碼之功能（範本代碼固定）
 - **FR-ET-US15-02**: 系統 MUST 於範本編輯頁列出該範本可用之變數清單（如 `{{COURSE_NAME}}`、`{{OPEN_START_AT}}`、`{{OPEN_END_AT}}`、`{{COURSE_URL}}`、`{{USER_NAME}}`），並支援點擊插入
 - **FR-ET-US15-03**: 系統 MUST 於儲存範本時檢核主旨與內文皆不可為空，通過後寫入平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）並更新版本號；之後所有該類信件 MUST 依新內容渲染
 - **FR-ET-US15-04**: 內文含未定義變數時，系統 MUST 提示警告但仍允許儲存，並於寄出時將該變數以空字串帶入
@@ -85,7 +87,7 @@ ET 管理者於 **DP 後台「通知範本」**畫面（`MODULE=ET`）管理課�
 
 ## 前置依賴
 
-- 7 類可維護範本 seed 已於部署時寫入（per [plan.md](plan.md) §系統初始化；2026-07-17 增列 APPROVAL_PASSED）；密碼重設 / 帳號變更驗證採系統固定範本，不在本畫面
+- 10 類可維護範本 seed 已於部署時寫入（per [plan.md](plan.md) §系統初始化；2026-07-17 增列 APPROVAL_PASSED、2026-09-21 增列 QUIZ_RETEST_REQUIRED、2026-10-12 增列 DOC_VERSION_CHANGED / DOC_OBSOLETED）；密碼重設 / 帳號變更驗證採系統固定範本，不在本畫面
 - 排程 SCHET001 / SCHET002 已註冊（[spec_us14.md](spec_us14.md) US14）
 - 管理者角色由 [spec_us1.md](spec_us1.md) US1 指派
 
