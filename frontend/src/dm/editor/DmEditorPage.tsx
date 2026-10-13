@@ -442,9 +442,14 @@ export function DmEditorPage() {
     )
   }
 
-  // 標籤取不到就不開放編輯（#602）。⛔ 不可改成「顯示警告但仍放行」——使用者會照樣存檔，
+  // 標籤**從來沒取到**就不開放編輯（#602）。⛔ 不可改成「顯示警告但仍放行」——使用者會照樣存檔，
   // 而送出的空標籤會在核准發布時清掉文件既有的檢索標籤，全程沒有任何錯誤訊息。
-  if (!isNew && docTagsError) {
+  //
+  // ⚠️ `&& !docTags` 不可省：TanStack Query v5 在「先前成功過、背景 refetch 失敗」時 status 轉 error
+  // 但**舊 data 仍保留**，於是 isError 與 data 同時為真。那個情境標籤早已預帶、沒有送出空值的風險，
+  // 若一併擋掉，使用者填到一半切出去再切回來就會被換成錯誤頁、未存編輯全丟——比本 issue 要修的更糟。
+  // 這與上面載入閘選 `isPending` 是同一個對稱性：兩道閘都只針對「手上根本沒有資料」。
+  if (!isNew && docTagsError && !docTags) {
     return (
       <Box>
         <ScreenHeader code="DM08" />
@@ -454,7 +459,7 @@ export function DmEditorPage() {
             為避免送出時清空既有的可見對象與檢索標籤，本頁暫不開放編輯。
           </Typography>
         </Alert>
-        <Button variant="outlined" onClick={() => navigate(destAfter())}>
+        <Button variant="outlined" onClick={() => go(destAfter())}>
           返回
         </Button>
       </Box>

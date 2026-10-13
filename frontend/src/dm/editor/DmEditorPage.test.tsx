@@ -559,6 +559,32 @@ describe("DmEditorPage 標籤預帶守門與手冊 func 檢核（#602）", () =>
     expect(await screen.findByDisplayValue("全單位")).toBeInTheDocument()
   }, 20000)
 
+  it("標籤已預帶後，背景 refetch 失敗不得擋掉編輯中的表單", async () => {
+    // TanStack Query v5：先前成功過的查詢在背景 refetch 失敗時，status 轉 error 但**舊 data 仍保留**，
+    // 於是 isError 與 data 同時為真。此時標籤早已預帶完成、沒有送出空值的風險，若一律擋掉，
+    // 使用者填到一半切出去再切回來就會被換成錯誤頁、未存編輯全丟——那比本 issue 要修的問題更糟。
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    renderWithProviders(<DmEditorPage />, undefined, undefined, qc)
+
+    // 先讓預帶完成（正向錨點：標籤確實帶進來了）
+    expect(await screen.findByDisplayValue("全單位")).toBeInTheDocument()
+
+    // 之後的 refetch 一律失敗
+    server.use(
+      http.get(TAGS_URL, () =>
+        HttpResponse.json({ error_code: "UNKNOWN", error_message: "伺服器錯誤" }, { status: 500 }),
+      ),
+    )
+    await qc.refetchQueries({ queryKey: ["dm-editor", "doc-tags", "DM-SOP-000001"] })
+
+    // 表單必須還在；不可換成「無法載入此文件現有的標籤」
+    expect(await screen.findByRole("button", { name: "儲存為草稿" })).toBeInTheDocument()
+    expect(screen.queryByText(/無法載入此文件現有的標籤/)).not.toBeInTheDocument()
+    // 舊值仍在，不會被清空
+    expect(screen.getByDisplayValue("全單位")).toBeInTheDocument()
+  }, 20000)
+
   it("不動標籤存草稿：送出的 retrieval_ids 等於文件原有值，未被清空", async () => {
     let sent: FormData | null = null
     server.use(
