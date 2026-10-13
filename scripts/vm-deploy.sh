@@ -24,6 +24,7 @@
 #   /opt/edms/repo          此 repo 的 clone（public，不需認證）
 #   /opt/edms/.env.prod     機密設定，含 EDMS_BACKUP_BUCKET
 #   /opt/edms/data/postgres DB 資料
+#   /opt/edms/postgres/     DB 對外連線的憑證與 pg_hba.conf（見 TBMS repo 的 docs/infra/db-external-access.md §二）
 #   external network edms-proxy-net
 #   gcloud（VM Service Account 需具 edms-image 讀取與備份 bucket 寫入權限）
 # ============================================================
@@ -91,6 +92,17 @@ cp /opt/edms/.env.prod .env.prod
 # 不依賴先前殘留的登入狀態。
 log "登入 Artifact Registry..."
 gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin "$AR_HOST" >/dev/null
+
+# DB 對外連線（docker-compose.prod.yml 的 edms-db）依賴主機上的憑證與 pg_hba。
+# 缺任一個時 up -d edms-db 會把現行 DB 停掉、新容器卻起不來——等於整套 EDMS
+# 停擺。故在動到任何容器之前先擋下。產生方式見 TBMS repo 的 docs/infra/db-external-access.md §二。
+for f in /opt/edms/postgres/certs/server.crt /opt/edms/postgres/certs/server.key \
+         /opt/edms/postgres/certs/root.crt /opt/edms/postgres/pg_hba.conf; do
+  if [ ! -s "${f}" ]; then
+    log "❌ 缺少 ${f}（DB 對外連線前置未完成），中止；現行服務未受影響"
+    exit 1
+  fi
+done
 
 log "pull 映像..."
 "${COMPOSE[@]}" pull --quiet

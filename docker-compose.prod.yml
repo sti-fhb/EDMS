@@ -8,11 +8,15 @@
 #   - front-proxy 本身由 **TBMS repo** 管理（其 docker-compose.prod.yml 與 edge/），
 #     不在此定義；本檔只負責讓 edms-nginx 可被 proxy 抵達
 #   - edms-nginx 仍不映射任何 host port，對外只有 proxy 的 80
+#   - edms-db 對外開放 5433 供維護，強制「SSL + client 憑證」（5432 已被 tbms-db 佔用）
 #
 # 依賴主機前置（不進 git、CD 不會自動建立）：
 #   docker network create --driver bridge --subnet 172.28.241.0/24 edms-proxy-net
 #   /opt/edms/.env.prod
 #   /opt/edms/data/postgres
+#   /opt/edms/postgres/certs/{server.crt,server.key,root.crt}
+#   /opt/edms/postgres/pg_hba.conf
+# DB 憑證與 pg_hba 的產生方式見 TBMS repo 的 docs/infra/db-external-access.md §二
 # 網路為 external 的理由：任一套系統的部署都不該因對方未部署而失敗。
 # 詳見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §1.4 與 edge/README.md §1。
 # ============================================================
@@ -45,6 +49,42 @@ services:
     networks:
       - edms-net
       - edms-proxy-net
+
+  edms-db:
+    # 對外維護通道。容器內仍是 5432，主機側錯開用 5433（5432 為 tbms-db）。
+    # 白名單由兩層把關：GCP firewall 限來源 IP；pg_hba 對外強制
+    # hostssl + clientcert=verify-full。edms-backend 走 edms-net 內部網路、
+    # 用密碼連線，不受影響。
+    ports:
+      - "5433:5432"
+    # 憑證與 pg_hba 含白名單 IP 與私鑰，只放在 VM 上——本 repo 為 public。
+    # create_host_path: false —— 檔案未備妥時直接啟動失敗，而非讓 Docker
+    # 自動建出空目錄，使 postgres 以「找不到 ssl_cert_file」的較隱晦訊息失敗。
+    volumes:
+      - type: bind
+        source: /opt/edms/postgres/certs
+        target: /etc/postgres/certs
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/edms/postgres/pg_hba.conf
+        target: /etc/postgres/pg_hba.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgres/certs/server.crt
+      - -c
+      - ssl_key_file=/etc/postgres/certs/server.key
+      - -c
+      - ssl_ca_file=/etc/postgres/certs/root.crt
+      - -c
+      - hba_file=/etc/postgres/pg_hba.conf
 
 networks:
   edms-proxy-net:
