@@ -34,6 +34,7 @@ FR-ET-US14-09 明訂「寄送失敗 MUST NOT 影響已寫入之統計快照資�
 import logging
 
 from app.core.db import AsyncSessionLocal
+from app.et.material.doc_change_service import EtDocChangeNotifyService
 from app.et.schedules.service import EtScheduleService
 from app.et.schedules.weekly_service import EtWeeklyReportService
 from app.et.stats.service import EtStatsService
@@ -53,7 +54,7 @@ async def weekly_job() -> None:
 
 
 async def daily_job() -> None:
-    """SCHET002 每日作業：到期關閉 + 結清逾期未提交之作答。"""
+    """SCHET002 每日作業：到期關閉 + 結清逾期未提交之作答 + 加急提醒 + 引用文件變動通知。"""
     service = EtScheduleService()
 
     async with AsyncSessionLocal() as db:
@@ -65,4 +66,21 @@ async def daily_job() -> None:
     async with AsyncSessionLocal() as db:
         urgent = await service.send_urgent_reminds(db)
 
-    logger.info("SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆、加急提醒 %d 封", closed, settled, urgent)
+    # 第 4 批（#231）：引用之 DM 文件改版 / 廢止時通知課程擁有者。
+    # 掛在既有 job 而非新開 SCHET003——重用 DP_SCHEDULE seed、leader election、
+    # DP_SCHEDULE_LOG 與 DP06 總覽；新開 job 需多一筆 seed migration，而 seed 也會在
+    # 測試 DB 跑、可能撞上既有的母體斷言。
+    async with AsyncSessionLocal() as db:
+        doc_changes = await EtDocChangeNotifyService().run(db)
+        await db.commit()
+
+    logger.info(
+        "SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆、加急提醒 %d 封、"
+        "文件變動通知 %d 封（掃描 %d 份、跳過 %d 份）",
+        closed,
+        settled,
+        urgent,
+        doc_changes.notified,
+        doc_changes.scanned_docs,
+        doc_changes.skipped_docs,
+    )
