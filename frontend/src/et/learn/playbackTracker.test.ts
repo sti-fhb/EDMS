@@ -62,8 +62,9 @@ describe("playbackTracker", () => {
      * ⚠️ 不可寫成一次 `checkpoint(state, to)`——那個前進量會超過 `maxStepSec` 而被
      * 正確地判成跳躍。真瀏覽器播放 10 秒會發約 40 次 timeupdate。
      */
-    function play(state: TrackerState, from: number, to: number) {
+    function play(initial: TrackerState, from: number, to: number) {
       const segments: Segment[] = []
+      let state = initial
       for (let t = from + 0.25; t <= to + 1e-9; t += 0.25) {
         const r = checkpoint(state, t, OPTS)
         state = r.state
@@ -128,8 +129,7 @@ describe("playbackTracker", () => {
 
     it("倍速放寬門檻——2 倍速下 2 秒的前進不算跳躍", () => {
       const fast = { minSeconds: 15, maxStepSec: 3 }
-      let state = beginSegment(0)
-      const r = checkpoint(state, 2, fast)
+      const r = checkpoint(beginSegment(0), 2, fast)
       expect(r.segment).toBeNull()
       expect(r.state.anchor).toBe(0)
     })
@@ -183,8 +183,15 @@ describe("playbackTracker", () => {
   })
 
   describe("播放中定期打點", () => {
+    /**
+     * 本組一律傳 `maxStepSec: Infinity`——它們驗的是**15 秒打點門檻**，不是跳躍偵測。
+     *
+     * 這些測試刻意用大步長（一次 `checkpoint` 就跨 10～16 秒）來逼近門檻，而那種步長在
+     * 真實瀏覽器中只會出現在拖動進度條。關掉跳躍偵測才能讓本組繼續只驗它原本要驗的事；
+     * 跳躍本身由「依真實瀏覽器事件順序的跳躍（#609）」那一組負責。
+     */
     it("未達門檻不切段，只更新最後觀察位置", () => {
-      const { segment, state } = checkpoint(beginSegment(0), 10, { minSeconds: 15 })
+      const { segment, state } = checkpoint(beginSegment(0), 10, { minSeconds: 15, maxStepSec: Infinity })
 
       expect(segment).toBeNull()
       expect(state.anchor).toBe(0)
@@ -192,7 +199,7 @@ describe("playbackTracker", () => {
     })
 
     it("達門檻切出一段並從同一點續記", () => {
-      const { segment, state } = checkpoint(beginSegment(0), 15.8, { minSeconds: 15 })
+      const { segment, state } = checkpoint(beginSegment(0), 15.8, { minSeconds: 15, maxStepSec: Infinity })
 
       expect(segment).toEqual({ start_sec: 0, end_sec: 15 })
       expect(state.anchor).toBe(15)
@@ -204,7 +211,7 @@ describe("playbackTracker", () => {
       const collected: { start_sec: number; end_sec: number }[] = []
       let state = beginSegment(0)
       for (const t of [15, 30, 45, 60]) {
-        const step = checkpoint(state, t, { minSeconds: 15 })
+        const step = checkpoint(state, t, { minSeconds: 15, maxStepSec: Infinity })
         state = step.state
         if (step.segment) collected.push(step.segment)
       }
@@ -224,7 +231,7 @@ describe("playbackTracker", () => {
     })
 
     it("沒有在播放時不打點", () => {
-      const { segment } = checkpoint(IDLE_TRACKER, 999, { minSeconds: 15 })
+      const { segment } = checkpoint(IDLE_TRACKER, 999, { minSeconds: 15, maxStepSec: Infinity })
 
       expect(segment).toBeNull()
     })
