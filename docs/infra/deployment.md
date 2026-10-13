@@ -155,7 +155,7 @@ sudo touch /opt/edms/.env.prod && sudo chmod 600 /opt/edms/.env.prod
 sudo docker network create --driver bridge --subnet 172.28.241.0/24 edms-proxy-net
 
 # DB 對外連線的憑證與 pg_hba：/opt/edms/postgres/{certs/,pg_hba.conf}
-# 缺少時 vm-deploy.sh 會中止部署。步驟見 db-external-access.md §步驟 1～2
+# 缺少時 vm-deploy.sh 會中止部署。步驟見 TBMS repo 的 docs/infra/db-external-access.md §二 E1～E2
 
 # 部署排程
 sudo cp /opt/edms/repo/deploy/edms-deploy.{service,timer} /etc/systemd/system/
@@ -329,7 +329,7 @@ TBMS 曾因此誤報部署失敗（服務其實正常），詳見其 `docs/infra
 | 正式 | nginx／backend **不映射**；`edms-db` `5433`（SSL + client 憑證） | proxy `80`、`tbms-db` `5432` |
 | 本機 | nginx `8090`、db `5441` | nginx `80`、db `5440` |
 
-正式環境 EDMS 的 DB 對外開放 **5433**（5432 已被 `tbms-db` 佔），限白名單 IP 且強制 SSL + client 憑證，設定與連線方式見 [db-external-access.md](db-external-access.md)。在 VM 上仍可直接用 `sudo docker exec -it edms-db psql -U edms edms`。
+正式環境 EDMS 的 DB 對外開放 **5433**（5432 已被 `tbms-db` 佔），限白名單 IP 且強制 SSL + client 憑證，設定與連線方式見 TBMS repo 的 `docs/infra/db-external-access.md` §二（白名單 IP 與憑證只放在該檔與 VM 上——本 repo 為 public，不得寫入）。在 VM 上仍可直接用 `sudo docker exec -it edms-db psql -U edms edms`。
 
 ⚠️ 兩套系統沿用同一組 `DP_` 表名（`DP_USER`、`DP_SESSION`、`DP_AUDIT_LOG`），**連錯資料庫不會報錯**——表存在、欄位對得上、查得出資料，只是查到另一套系統的。動 `UPDATE` / `DELETE` 前先 `SELECT current_database();`。
 

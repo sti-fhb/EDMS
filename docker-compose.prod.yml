@@ -16,7 +16,7 @@
 #   /opt/edms/data/postgres
 #   /opt/edms/postgres/certs/{server.crt,server.key,root.crt}
 #   /opt/edms/postgres/pg_hba.conf
-# DB 憑證與 pg_hba 的產生方式見 docs/infra/db-external-access.md
+# DB 憑證與 pg_hba 的產生方式見 TBMS repo 的 docs/infra/db-external-access.md §二
 # 網路為 external 的理由：任一套系統的部署都不該因對方未部署而失敗。
 # 詳見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §1.4 與 edge/README.md §1。
 # ============================================================
