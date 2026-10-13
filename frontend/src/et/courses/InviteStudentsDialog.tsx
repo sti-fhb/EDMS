@@ -35,9 +35,19 @@ interface InviteStudentsDialogProps {
   onClose: () => void
 }
 
-/** 加入課程頁（ET03）之網址——邀請碼連結與 QR Code 皆導向此處的加入流程。 */
+/**
+ * 加入課程頁（ET03）之網址——邀請碼連結與 QR Code 皆導向此處的加入流程。
+ *
+ * 必須帶上部署 base path（`import.meta.env.BASE_URL`，院內交付包與 GCP 為 "/edms/"、
+ * 本機為 "/"），與 `router.tsx` 的 basename 同源。只用 `window.location.origin` 的話，
+ * 本機與 CI 都正確、部署環境的連結卻少了 `/edms` 而到不了 ET03（#607）。
+ * 去掉結尾斜線再接路徑：base 寫成 "/edms" 或 "/edms/" 都對，"/" 也不會變成 "//et"。
+ * 在呼叫時才讀 `BASE_URL`（不放模組層常數），測試才能以 `vi.stubEnv` 切換。
+ */
 function joinUrlFor(code: string): string {
-  return `${window.location.origin}/et/my-courses?code=${code}`
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "")
+  // 邀請碼目前是後端產生的純數字；仍編碼，日後碼型改變也不會把網址拆壞
+  return `${window.location.origin}${base}/et/my-courses?code=${encodeURIComponent(code)}`
 }
 
 /**

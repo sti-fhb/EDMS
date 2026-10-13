@@ -12,13 +12,14 @@ import { server } from "../test/server"
 import { muiTheme } from "../styles/muiTheme"
 
 // 以 StrictMode 包裝，對齊正式環境（main.tsx）
-function renderVerify(initialUrl: string) {
+/** @param basename 部署 base path（如 "/edms"）；給了就模擬部署環境的 router（#607）。 */
+function renderVerify(initialUrl: string, basename?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider theme={muiTheme}>
-          <MemoryRouter initialEntries={[initialUrl]}>
+          <MemoryRouter basename={basename} initialEntries={[`${basename ?? ""}${initialUrl}`]}>
             <Routes>
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/" element={<div>登入頁</div>} />
@@ -91,5 +92,18 @@ describe("VerifyEmailPage（設定密碼以完成註冊，#212）", () => {
     renderVerify("/verify-email")
     expect(await screen.findByText("驗證連結無效")).toBeInTheDocument()
     expect(screen.queryByLabelText("設定密碼")).not.toBeInTheDocument()
+  })
+
+  // 一般 `<a href="/">` 不經 router basename，部署時會跳到同 origin 的另一套系統（#607）
+  it("部署於子路徑（/edms）時，啟用成功的「前往登入」指向 /edms", async () => {
+    renderVerify("/verify-email?token=good-token", "/edms")
+    const user = userEvent.setup()
+    await setPassword(user)
+    expect(await screen.findByRole("link", { name: "前往登入" })).toHaveAttribute("href", "/edms")
+  })
+
+  it("部署於子路徑（/edms）時，連結無效的「回登入頁」指向 /edms", async () => {
+    renderVerify("/verify-email", "/edms")
+    expect(await screen.findByRole("link", { name: "回登入頁" })).toHaveAttribute("href", "/edms")
   })
 })

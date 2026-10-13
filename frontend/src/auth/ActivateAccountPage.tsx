@@ -8,7 +8,7 @@ import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
-import { useSearchParams } from "react-router-dom"
+import { Link as RouterLink, useSearchParams } from "react-router-dom"
 
 import { AUTH_BG_GRADIENT } from "./authBackground"
 import { authApi } from "./authService"
@@ -68,7 +68,8 @@ export function ActivateAccountPage() {
         {done ? (
           <Stack spacing={2}>
             <Alert severity="success">帳號已啟用，請以新密碼登入</Alert>
-            <Link href="/" underline="hover">
+            {/* 經 router 才會帶上部署 base path；`href="/"` 會跳到網域根目錄（同 origin 的另一套系統，#607） */}
+            <Link component={RouterLink} to="/" underline="hover">
               前往登入
             </Link>
           </Stack>

@@ -12,12 +12,13 @@ import { muiTheme } from "../styles/muiTheme"
 
 const _PWD = "Xyz98765!"
 
-function renderActivate(entry: string) {
+/** @param basename 部署 base path（如 "/edms"）；給了就模擬部署環境的 router（#607）。 */
+function renderActivate(entry: string, basename?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={muiTheme}>
-        <MemoryRouter initialEntries={[entry]}>
+        <MemoryRouter basename={basename} initialEntries={[`${basename ?? ""}${entry}`]}>
           <Routes>
             <Route path="/activate" element={<ActivateAccountPage />} />
           </Routes>
@@ -40,6 +41,14 @@ describe("ActivateAccountPage", () => {
     await fill(user)
     expect(await screen.findByText("帳號已啟用，請以新密碼登入")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "前往登入" })).toBeInTheDocument()
+  })
+
+  it("部署於子路徑（/edms）時，「前往登入」指向 /edms 而非網域根目錄（#607）", async () => {
+    // 一般 `<a href="/">` 不經 router basename，部署時會跳到同 origin 的另一套系統
+    renderActivate("/activate?token=invite-tok", "/edms")
+    const user = userEvent.setup()
+    await fill(user)
+    expect(await screen.findByRole("link", { name: "前往登入" })).toHaveAttribute("href", "/edms")
   })
 
   it("邀請 token 無效（後端 DP_USER_003）→ 顯示錯誤訊息", async () => {
