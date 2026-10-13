@@ -540,7 +540,6 @@ describe("DmDetailPage 日期欄（#539）", () => {
     expect(await screen.findByText(/^陳大華 \| 2026-10-06 發布/)).toBeInTheDocument()
     expect(screen.queryByText(/^陳大華 \| 2026-10-05 發布/)).not.toBeInTheDocument()
   })
-
 })
 
 describe("DmDetailPage 動作入口與版本說明（#600）", () => {
