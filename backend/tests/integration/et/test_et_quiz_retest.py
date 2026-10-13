@@ -610,6 +610,32 @@ class TestPassedDefinitionAfterRetest:
         assert r.status_code == 409, "基準後又通過者仍算目前通過，不可重置"
         assert r.json()["error_code"] == "ET_TRACK_002"
 
+    async def test_要求重測後_ET02_區塊2不再顯示已及格(self, client, db) -> None:
+        """🔴 issue 重現步驟第 5 步：教師在 ET02 看到「已及格」、重置鈕停用。
+
+        這一格由 `tracking/service._to_quiz_row` 的 `is_passed` 決定，而它**早就收到
+        `reset_base`**、只用在次數上。變異檢查實測：把該行改回 `any(bool(a.is_pass)
+        for a in attempts)`，上面那四條與 `test_et_tracking.py` 全組**都不會紅**
+        ——這一格原本完全沒有測試覆蓋。
+        """
+        teacher = await _user(db, "ZTT610F")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS610F", course_id=cid, item_id=item_id, quiz_id=qid)
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=2, score=10, is_pass=False)
+
+        r = await client.get(f"/api/et/courses/{cid}/attempt-overview", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        rows = [s_ for s_ in r.json()["students"] if s_["user_id"] == stu]
+        assert rows, "該學員應出現在區塊 2"
+        quiz_row = next(q for q in rows[0]["quizzes"] if q["quiz_id"] == qid)
+        assert quiz_row["is_passed"] is False, "要求重測後，ET02 不得再顯示已及格"
+        # 正向錨點：本輪已用次數確實從 0 起算（證明重置基準有被讀到、不是整欄恆 False）
+        assert quiz_row["used_attempts"] == 1
+
     async def test_要求重測後引導頁不再顯示已及格(self, client, db) -> None:
         """另一半症狀：ET07 引導頁的綠色橫幅仍顯示舊分數「— 已及格」。
 
