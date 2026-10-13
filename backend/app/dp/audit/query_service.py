@@ -43,7 +43,7 @@ _FUNC_LABELS: dict[str, str] = {
     "DM-OBSOLETE": "DM-廢止申請",  # initiate
     "DM-PERSONAL": "DM-個人專區",  # delete_draft / withdraw
     # ET（#477 補）：名稱取自 docs/specs/et/spec.md §稽核來源功能碼之「涵蓋動作」，非自行發明
-    "ET-ROLES": "ET-角色/標籤指派",
+    "ET-ROLES": "ET-角色/受訓對象指派",  # #605：隨 #538 改名；代碼 ET-ROLES 不變
     "ET-CATALOG": "ET-受控清單",
     "ET-COURSE": "ET-課程維護",
     "ET-ENROLLMENT": "ET-學員異動",

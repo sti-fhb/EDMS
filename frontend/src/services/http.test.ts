@@ -68,7 +68,7 @@ describe("toApiError", () => {
   it("業務錯誤帶回原始 body 供取用結構化細節", () => {
     // ET 發布檢核未通過（ET_PUBLISH_001）會在 body 帶 blockers 清單——
     // 沒有這個欄位，前端只能顯示「發布條件未滿足」，教師得自己猜哪裡不合格。
-    const blockers = [{ code: "NO_TAG", message: "課程至少須掛 1 個受訓單位標籤", target_id: null }]
+    const blockers = [{ code: "NO_TAG", message: "課程至少須設定 1 組受訓對象", target_id: null }]
     const got = toApiError(
       withResponse(422, { error_code: "ET_PUBLISH_001", error_message: "發布條件未滿足", blockers }),
     )

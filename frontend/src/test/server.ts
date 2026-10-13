@@ -957,7 +957,7 @@ export const handlers = [
       },
       {
         param_id: "ET_TRAINING_UNIT",
-        param_name: "受訓單位標籤",
+        param_name: "示範清單",
         param_type: "LIST",
         detail_lock: false,
         description: null,

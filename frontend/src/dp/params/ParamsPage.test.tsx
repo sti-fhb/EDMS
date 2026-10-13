@@ -256,7 +256,7 @@ describe("ParamsPage 系統參數維護流程", () => {
     await screen.findByText("閒置自動登出（分鐘）")
 
     await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
-    await openEditByRow(user, "受訓單位標籤")
+    await openEditByRow(user, "示範清單")
 
     await user.type(await screen.findByLabelText("NURSE 說明"), "臨床護理人員")
     await user.click(screen.getByRole("button", { name: "儲存" }))
@@ -287,7 +287,7 @@ describe("ParamsPage 系統參數維護流程", () => {
     await screen.findByText("閒置自動登出（分鐘）")
 
     await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
-    await openEditByRow(user, "受訓單位標籤")
+    await openEditByRow(user, "示範清單")
 
     // 種子說明為 null，先填再清，驗證清空送 null 而非空字串
     const desc = await screen.findByLabelText("NURSE 說明")
@@ -305,7 +305,7 @@ describe("ParamsPage 系統參數維護流程", () => {
     await screen.findByText("閒置自動登出（分鐘）")
 
     await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
-    await openEditByRow(user, "受訓單位標籤")
+    await openEditByRow(user, "示範清單")
 
     await user.type(screen.getByLabelText("新增代碼"), "DOCTOR")
     await user.type(screen.getByLabelText("新增名稱"), "醫師")
@@ -337,7 +337,7 @@ describe("ParamsPage 系統參數維護流程", () => {
     await screen.findByText("閒置自動登出（分鐘）")
 
     await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
-    await openEditByRow(user, "受訓單位標籤")
+    await openEditByRow(user, "示範清單")
 
     await user.type(screen.getByLabelText("新增代碼"), "DOCTOR")
     await user.type(screen.getByLabelText("新增名稱"), "醫師")
@@ -442,7 +442,7 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await screen.findByText("閒置自動登出（分鐘）")
 
     await user.click(screen.getByRole("tab", { name: "教育訓練（ET）" }))
-    await openEditByRow(user, "受訓單位標籤")
+    await openEditByRow(user, "示範清單")
 
     await user.click(screen.getByRole("button", { name: "停用" }))
 
@@ -513,7 +513,7 @@ describe("ParamsPage 模組受控清單（#182）", () => {
           {
             module: "ET",
             kind: "TAG",
-            name: "受訓單位標籤",
+            name: "受訓對象",
             requires_code: false,
             group_code: null,
             group_name: null,
