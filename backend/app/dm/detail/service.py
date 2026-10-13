@@ -1,7 +1,16 @@
 """文件詳細頁瀏覽服務（US4，唯讀 + 下載記錄）。
 
-存取控制套 `visibility`（閱覽者不可取未授權文件）；編輯 / 廢止入口能力 `can_edit`（編輯者且無進行中
-PENDING 送審週期）；檔案：舊版僅預覽、目前版可下載且下載寫 `DM_DOC_READ`（預覽不寫）。
+存取控制套 `visibility`（閱覽者不可取未授權文件）；檔案：舊版僅預覽、目前版可下載且下載寫
+`DM_DOC_READ`（預覽不寫）。
+
+兩個動作入口的能力**分開**計算（#600）：
+
+- `can_obsolete`（廢止）＝編輯者且無進行中 PENDING 送審週期
+- `can_edit`（編輯新版本）＝上述條件**再加**「本人無未送簽草稿」
+
+草稿條件只屬編輯入口——`DM_DOC_009`（每人每文件一份草稿）只存在於 `editor` 的加版路徑；廢止走
+`ReviewService.submit`，僅被「已有進行中送審」（`DM_REVIEW_002`）擋，草稿版本不產生 review 列。
+兩者共用一個旗標的話，前端會比後端嚴，且提示理由（請續編既有草稿）與廢止無關。
 """
 
 from dataclasses import dataclass
@@ -51,13 +60,17 @@ class DetailService:
         has_own_draft = (
             is_editor and not has_pending and await self._repo.author_has_open_draft(db, doc_id, ctx.user_id)
         )
-        can_edit = is_editor and not has_pending and not has_own_draft
-        # 入口失效原因（供前端灰階提示，非隱藏）：廢止待簽核 / 新版本送審中 / 本人已有草稿。
-        edit_lock_reason = None
+        # 送審中 / 廢止待簽核：兩個入口**一致**失效，原因相同（spec_us4 FR-005 所列的兩種情境）。
+        pending_lock_reason = None
         if is_editor and has_pending:
-            edit_lock_reason = _LOCK_OBSOLETE if row.status == _PENDING_OBSOLETE else _LOCK_REVIEW
-        elif has_own_draft:
-            edit_lock_reason = _LOCK_OWN_DRAFT
+            pending_lock_reason = _LOCK_OBSOLETE if row.status == _PENDING_OBSOLETE else _LOCK_REVIEW
+        # 廢止入口：只受送審週期影響。草稿條件**不適用**——DM_DOC_009 只存在於加版路徑，
+        # 廢止走 ReviewService.submit、只被 DM_REVIEW_002 擋，草稿版本不產生 review 列（#600）。
+        can_obsolete = is_editor and not has_pending
+        obsolete_lock_reason = pending_lock_reason
+        # 編輯入口：另外受「本人已有未送簽草稿」影響（has_own_draft 本身已含 not has_pending）。
+        can_edit = can_obsolete and not has_own_draft
+        edit_lock_reason = pending_lock_reason or (_LOCK_OWN_DRAFT if has_own_draft else None)
         is_obsolete = row.status == _OBSOLETE
 
         obsolete_info = None
@@ -107,6 +120,8 @@ class DetailService:
             is_admin=is_admin,
             can_edit=can_edit,
             edit_lock_reason=edit_lock_reason,
+            can_obsolete=can_obsolete,
+            obsolete_lock_reason=obsolete_lock_reason,
             is_obsolete=is_obsolete,
             obsolete_info=obsolete_info,
         )

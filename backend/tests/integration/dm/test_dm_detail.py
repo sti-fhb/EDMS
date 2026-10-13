@@ -360,22 +360,32 @@ async def test_can_edit_false_when_pending_review(db):
 
 
 async def test_edit_lock_reason_pending_obsolete(db):
-    """廢止待簽核：入口失效原因標示為廢止待簽核（非送審中）。"""
+    """廢止待簽核：兩個入口一致失效，原因標示為廢止待簽核（非送審中）。"""
     await _seed_doc(db, doc_id="DM-SOP-000042", status="PENDING_OBSOLETE")
     await _add_review(db, "DM-SOP-000042", review_type="OBSOLETE", status="PENDING")
     d = await _svc.get_detail(db, doc_id="DM-SOP-000042", ctx=_editor())
     assert d.can_edit is False and d.edit_lock_reason is not None and "廢止待簽核" in d.edit_lock_reason
+    # 廢止入口同步失效、原因相同（spec_us4 FR-005 列的兩種失效情境之一）
+    assert d.can_obsolete is False
+    assert d.obsolete_lock_reason is not None and "廢止待簽核" in d.obsolete_lock_reason
 
 
 async def test_can_edit_false_when_own_draft_exists(db):
-    """本人已有未送簽草稿：編輯 / 廢止入口提前失效並提示請續編既有草稿（免進編輯器填完才被 DM_DOC_009 擋）。"""
+    """本人已有未送簽草稿：**只有編輯入口**失效並提示請續編（免進編輯器填完才被 DM_DOC_009 擋）。
+
+    廢止入口不受草稿影響——`DM_DOC_009` 只存在於加版路徑（`editor/service.py`），廢止走
+    `ReviewService.submit`，僅被「已有進行中送審」擋（DM_REVIEW_002）。草稿版本不產生 review 列，
+    故後端允許在有自己草稿時發起廢止；前端若一併鎖住即比後端嚴，且提示理由與廢止無關（#600）。
+    """
     await _seed_doc(db, doc_id="DM-SOP-000043")
     await _add_version(db, "DM-SOP-000043", "2.0-draft", status="DRAFT", author="ed")
     d = await _svc.get_detail(db, doc_id="DM-SOP-000043", ctx=_editor("ed"))
     assert d.can_edit is False and d.edit_lock_reason is not None and "續編" in d.edit_lock_reason
+    assert d.can_obsolete is True and d.obsolete_lock_reason is None
     # 他人（無此草稿）不受影響、仍可編輯
     other = await _svc.get_detail(db, doc_id="DM-SOP-000043", ctx=_editor("ed2"))
     assert other.can_edit is True and other.edit_lock_reason is None
+    assert other.can_obsolete is True and other.obsolete_lock_reason is None
 
 
 # ── 廢止 read-only 資訊 ────────────────────────────

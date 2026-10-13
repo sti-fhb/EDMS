@@ -57,8 +57,12 @@ class DetailResponse(BaseModel):
     file: FileMeta | None
     is_editor: bool  # 具 DM_EDITOR → 呈現編輯/廢止入口（送審中時灰階、非隱藏）
     is_admin: bool  # 具 DM_ADMIN → 已廢止 read-only 下可下載無法預覽（Office）版本（US10 稽核）
-    can_edit: bool  # DM_EDITOR 且無進行中 PENDING 送審週期 → 入口可點
-    edit_lock_reason: str | None  # 入口失效原因（送審中 / 廢止待簽核）；可點時為 None
+    can_edit: bool  # DM_EDITOR、無進行中 PENDING 送審週期、且本人無未送簽草稿 → 編輯入口可點
+    edit_lock_reason: str | None  # 編輯入口失效原因（送審中 / 廢止待簽核 / 本人已有草稿）；可點時為 None
+    # 廢止入口與編輯入口**分開**：草稿條件只屬編輯（DM_DOC_009 僅存在於加版路徑），
+    # 廢止僅被「已有進行中送審」擋，與 spec_us4 FR-005 所列的兩種失效情境一致（#600）。
+    can_obsolete: bool  # DM_EDITOR 且無進行中 PENDING 送審週期 → 廢止入口可點
+    obsolete_lock_reason: str | None  # 廢止入口失效原因（送審中 / 廢止待簽核）；可點時為 None
     is_obsolete: bool  # STATUS=OBSOLETE → read-only 模式
     obsolete_info: ObsoleteInfo | None
 

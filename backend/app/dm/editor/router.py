@@ -238,7 +238,12 @@ async def list_reviewers(
     op: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ):
-    """指定審核者下拉：具 DM_REVIEWER 角色之使用者（排除自己）。"""
+    """指定審核者下拉：具 DM_REVIEWER 角色之使用者（排除自己）。
+
+    僅編輯者可取（#600）：此下拉只在「送簽」與「發起廢止」兩個編輯者動作使用，原本只掛
+    `get_dm_context` 會讓純閱覽者也拿得到審核者名冊。對齊同檔 `get_doc_tags`。
+    """
+    _ensure_editor(ctx)
     return await _service.list_reviewers(db, op=op)
 
 
