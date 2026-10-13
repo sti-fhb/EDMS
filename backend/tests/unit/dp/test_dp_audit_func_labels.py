@@ -98,3 +98,24 @@ def test_查詢值域與下拉選項是同一組值():
     assert set(get_args(_Action)) == set(_ACTION_LABELS)
     assert set(get_args(_Module)) == set(_MODULE_LABELS)
     assert set(get_args(_Result)) == set(_RESULT_LABELS)
+
+
+def test_ET_ROLES_顯示名為受訓對象指派_代碼不變() -> None:
+    """#605：#538 已將「受訓單位標籤」改名為「受訓對象」，DP05 的功能名稱需跟上。
+
+    只改顯示名、**不改代碼**：`FUNC_NAME` 是寫入 `DP_AUDIT_LOG` 的值，改了會讓改名前的記錄
+    以新代碼篩不到。選項的 value 仍是 `ET-ROLES`，篩選條件因此不變。
+    """
+    assert _FUNC_LABELS["ET-ROLES"] == "ET-角色/受訓對象指派"
+    option = next(o for o in FUNC_OPTIONS if o.value == "ET-ROLES")
+    assert option.label == "ET-角色/受訓對象指派"
+
+
+def test_功能名稱不再使用受訓單位標籤舊稱() -> None:
+    """#605：舊稱殘留在畫面與 CSV 上，與 DP02／ET05 的「受訓對象」不一致。
+
+    正向錨點：清單確實有 ET 的功能名稱可驗（否則「沒有舊稱」在空清單上恆真）。
+    """
+    et_labels = [label for code, label in _FUNC_LABELS.items() if code.startswith("ET-")]
+    assert et_labels
+    assert not [label for label in _FUNC_LABELS.values() if "受訓單位" in label or "標籤指派" in label]
