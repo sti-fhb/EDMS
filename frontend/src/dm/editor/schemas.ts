@@ -174,7 +174,11 @@ export function makeEditorSchema(opts: {
       reviewer_id: forSubmit ? z.string().min(1, { message: "請指定審核者" }) : z.string(),
     })
     .superRefine((val, ctx) => {
-      if (forSubmit && isNew && isManual && !val.func_code) {
+      // `isNew || requireName`：兩者都是「身份欄可編」的情境——新增模式，或續編首版草稿（父文件仍為
+      // DRAFT）。原本只判 isNew，於是「存草稿時 func 留空 → 回草稿匣續編 → 送簽」這條路線前端不檢核，
+      // 要等後端 422 DM_DOC_004 以 toast 呈現、欄位不標紅（#602）。同檔 doc_name 早已用 requireName
+      // 涵蓋這個情境，func 沒跟上。
+      if (forSubmit && (isNew || requireName) && isManual && !val.func_code) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["func_code"], message: "請選擇關聯作業項目" })
       }
     })

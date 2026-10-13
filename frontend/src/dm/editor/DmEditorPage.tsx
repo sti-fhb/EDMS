@@ -90,7 +90,12 @@ export function DmEditorPage() {
   const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
-  const { data: docTags, isFetching: docTagsFetching } = useDocTags(isNew ? "" : docId!, !isNew)
+  const {
+    data: docTags,
+    isFetching: docTagsFetching,
+    isPending: docTagsPending,
+    isError: docTagsError,
+  } = useDocTags(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
   const [file, setFile] = useState<File | null>(null)
@@ -424,10 +429,45 @@ export function DmEditorPage() {
   }, [isNew, draftMeta, draftMetaFetching])
 
   // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM07 詳細載入。
-  if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {
+  //
+  // 標籤也必須等（#602）：表單若在標籤未到位時就渲染，使用者會看到空的標籤欄、以為本來就是空的。
+  // 核准發布時 `apply_version_tags_to_doc` 是**差異式覆寫**（目標集外的有效列軟刪除），於是：
+  //
+  // - **檢索標籤**：送簽無任何檢核（FR-001 列為選填）→ 一路通到核准，文件的適用模組 / 文件性質 /
+  //   法規關聯被整組刪掉，該文件從此用這些條件篩不到，全程無錯誤訊息。
+  // - **可見對象**：送簽要求至少 1 組（DM_DOC_005），所以不會變成空的——但使用者會被迫**從頭猜一組**
+  //   填進去（最自然的反應是挑「全單位 + 全體」），核准後文件層可見對象就被那一組換掉。
+  //   這是**存取範圍被意外放寬或縮小**，而簽核頁只顯示該版本提議的標籤、無新舊對照，審核者看不出差異。
+  // ⚠️ 用 `isPending`（還沒有資料）而**不是** `isFetching`：後者在有快取的背景 refetch 期間也為真，
+  // 會推翻 #396 的刻意設計（refetch 期間表單本來就該可互動，競態由 `lockPrefillFor` 鎖住）。
+  if (!isNew && (draftMetaPending || docTagsPending || (!draftMeta && detailLoading))) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
         <CircularProgress />
+      </Box>
+    )
+  }
+
+  // 標籤**從來沒取到**就不開放編輯（#602）。⛔ 不可改成「顯示警告但仍放行」——使用者會照樣存檔，
+  // 而送出的空標籤會在核准發布時清掉文件既有的檢索標籤，全程沒有任何錯誤訊息。
+  //
+  // ⚠️ `&& !docTags` 不可省：TanStack Query v5 在「先前成功過、背景 refetch 失敗」時 status 轉 error
+  // 但**舊 data 仍保留**，於是 isError 與 data 同時為真。那個情境標籤早已預帶、沒有送出空值的風險，
+  // 若一併擋掉，使用者填到一半切出去再切回來就會被換成錯誤頁、未存編輯全丟——比本 issue 要修的更糟。
+  // 這與上面載入閘選 `isPending` 是同一個對稱性：兩道閘都只針對「手上根本沒有資料」。
+  if (!isNew && docTagsError && !docTags) {
+    return (
+      <Box>
+        <ScreenHeader code="DM08" />
+        <Alert severity="error" sx={{ mb: 2 }}>
+          無法載入此文件現有的標籤，請重新整理後再試。
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            為避免送出時清空既有的可見對象與檢索標籤，本頁暫不開放編輯。
+          </Typography>
+        </Alert>
+        <Button variant="outlined" onClick={() => go(destAfter())}>
+          返回
+        </Button>
       </Box>
     )
   }
