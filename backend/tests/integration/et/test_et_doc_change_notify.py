@@ -17,7 +17,7 @@ from app.dm.document.models import DmDocument, DmDocVersion
 from app.dp.notify.models import DpEmailLog
 from app.dp.users.models import DpUser
 from app.et.common.dm_client import TRAINING_CATEGORY
-from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ROLE_TEACHER
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, ITEM_MATERIAL, ROLE_TEACHER
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.doc_change_repository import list_doc_references
 from app.et.material.doc_change_service import EtDocChangeNotifyService
@@ -340,6 +340,105 @@ class TestDocChangeNotifyEndToEnd:
 
         assert result.notified == 0
         assert await _notify_state(db, doc, owner) is None, "沒寄出就不得寫簿記"
+
+
+class TestDraftScope:
+    """#231 裁示 Q2 = C：改版只通知已發布 / 已關閉，廢止連草稿一起通知。
+
+    ## 為何兩種觸發的範圍不同
+
+    判準是**信的內容對那個狀態成不成立**，不是為了分類而分類：
+
+    | 觸發 | 內文 | 對草稿 |
+    |---|---|---|
+    | 改版 | 「學員開啟章節時即會看到新內容」| **假的**——草稿沒有學員、沒有人開得了章節 |
+    | 廢止 | 「發布或再開課時會因引用已廢止文件而被擋下」| **成立**，而且更要緊：教師可能要到按下發布被擋才發現 |
+    """
+
+    async def test_改版不通知草稿課程的擁有者(self, db) -> None:
+        doc = "DM-TRAINING-920001"
+        owner = await _user(db, "ZT_D1")
+        await _published_doc(db, doc)
+        await _make_chain(db, owner=owner, course_name="草稿課", doc_id=doc, status=COURSE_DRAFT)
+
+        result = await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        assert result.notified == 0
+        assert [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")] == []
+        assert await _notify_state(db, doc, owner) is None, "沒寄出就不該寫簿記"
+
+    async def test_廢止照樣通知草稿課程的擁有者(self, db) -> None:
+        """🔴 與改版相反：草稿正是最需要提早知道的——教師可能要到按下發布被
+        `BLOCK_OBSOLETE_DOC` 擋下的那一刻才發現。"""
+        doc = "DM-TRAINING-920002"
+        owner = await _user(db, "ZT_D2")
+        await _published_doc(db, doc, obsolete=True)
+        await _make_chain(db, owner=owner, course_name="草稿課", doc_id=doc, status=COURSE_DRAFT)
+
+        result = await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        assert result.notified == 1
+        mails = [m for m in await _pending_mails(db, "DOC_OBSOLETED") if owner in (m.recipient or "")]
+        assert len(mails) == 1
+        assert "草稿課" in mails[0].body
+        # 文案要對草稿成立：從未發布過的課是「發布」，不是「再次發布」（a3f9c21e5d84）。
+        # ⚠️ 這條同時擋住「migration 的 WHERE 比對不到 seed 原文而靜默沒更新」——
+        # 那種失敗不會有任何錯誤訊息，只會留下一句對新收件人不精確的話。
+        assert "**發布或再開課**" in mails[0].body
+        assert "再次發布或再開課" not in mails[0].body
+
+    async def test_改版仍通知已發布與已關閉(self, db) -> None:
+        """正向錨點：少了這條，把改版通知整個關掉也會讓第一條通過。"""
+        doc = "DM-TRAINING-920003"
+        owner = await _user(db, "ZT_D3")
+        await _published_doc(db, doc)
+        await _make_chain(db, owner=owner, course_name="已發布課", doc_id=doc, status=COURSE_PUBLISHED)
+        await _make_chain(db, owner=owner, course_name="已關閉課", doc_id=doc, status=COURSE_CLOSED)
+
+        result = await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        assert result.notified == 1
+        mails = [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")]
+        assert len(mails) == 1
+        assert "已發布課" in mails[0].body and "已關閉課" in mails[0].body
+
+    async def test_改版信不列出同一擁有者的草稿課程(self, db) -> None:
+        """🔴 擁有者同時有草稿與已發布時，信要寄、但**草稿那門不得列進去**。
+
+        信裡寫著「學員開啟章節時即會看到新內容」——把一門沒有學員的草稿列在底下，
+        那句話對它就是假的。
+        """
+        doc = "DM-TRAINING-920004"
+        owner = await _user(db, "ZT_D4")
+        await _published_doc(db, doc)
+        await _make_chain(db, owner=owner, course_name="上線中的課", doc_id=doc, status=COURSE_PUBLISHED)
+        await _make_chain(db, owner=owner, course_name="還在寫的草稿", doc_id=doc, status=COURSE_DRAFT)
+
+        await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        mails = [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")]
+        assert len(mails) == 1
+        assert "上線中的課" in mails[0].body
+        assert "還在寫的草稿" not in mails[0].body
+
+    async def test_廢止信列出草稿與已發布兩門(self, db) -> None:
+        """廢止沒有上述限制——兩門都要列，教師兩門都要處理。"""
+        doc = "DM-TRAINING-920005"
+        owner = await _user(db, "ZT_D5")
+        await _published_doc(db, doc, obsolete=True)
+        await _make_chain(db, owner=owner, course_name="上線中的課", doc_id=doc, status=COURSE_PUBLISHED)
+        await _make_chain(db, owner=owner, course_name="還在寫的草稿", doc_id=doc, status=COURSE_DRAFT)
+
+        await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        mails = [m for m in await _pending_mails(db, "DOC_OBSOLETED") if owner in (m.recipient or "")]
+        assert len(mails) == 1
+        assert "上線中的課" in mails[0].body and "還在寫的草稿" in mails[0].body
 
 
 class TestArchitectureGuard:

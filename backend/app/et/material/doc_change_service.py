@@ -27,8 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.et.common.dm_client import get_dm_document_client
+from app.et.constants import COURSE_DRAFT
 from app.et.material.doc_change_repository import DocReferenceRow, list_doc_references, load_notify_state
-from app.et.material.doc_change_rules import DocChangeEvent, classify_doc_change
+from app.et.material.doc_change_rules import DOC_OBSOLETE, DocChangeEvent, classify_doc_change
 from app.et.material.models import EtMaterialDocNotify
 from app.et.notify.doc_changed import DocChangedMailer
 
@@ -108,10 +109,23 @@ class EtDocChangeNotifyService:
         state: dict[tuple[str, str], EtMaterialDocNotify],
     ) -> int:
         """對引用本文件的每位擁有者各判斷一次；回傳實際寄出的封數。"""
+        # 🔴 **改版與廢止的課程範圍不同**（#231 裁示 Q2 = C）。
+        #
+        # 判準是「信的內容對那個狀態成不成立」，不是為了分類而分類：
+        #
+        # | 觸發 | 內文 | 對草稿 |
+        # |---|---|---|
+        # | 改版 | 「學員開啟章節時即會看到新內容」| **假的**——草稿沒有學員 |
+        # | 廢止 | 「發布或再開課時會被擋下」| **成立**，且教師可能要到按下發布被擋才發現 |
+        #
+        # ⛔ 改版時草稿課程**連列都不列**——把一門沒有學員的草稿列在那句話底下，
+        # 那句話對它就是假的。濾在這裡（service）而非查詢層：母體一旦在 SQL 被縮小，
+        # 日後改裁示時沒有任何跡象提醒這裡曾經濾過。
+        is_obsoleted = current_status == DOC_OBSOLETE
         by_owner: dict[str, list[str]] = {}
         for ref in refs:
-            # ⚠️ Q2（草稿課程是否通知）尚未裁示，目前**不依狀態過濾**——母體一旦縮小，
-            # 日後改裁示時沒有任何跡象提醒這裡曾經濾過。裁示後在此加條件並補測試。
+            if not is_obsoleted and ref.course_status == COURSE_DRAFT:
+                continue
             by_owner.setdefault(ref.owner_id, []).append(ref.course_name)
 
         sent = 0
