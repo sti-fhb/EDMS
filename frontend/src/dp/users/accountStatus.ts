@@ -12,9 +12,19 @@ export interface AccountStatusFields {
   locked_until: string | null
 }
 
-/** 帳號是否已停用（需管理者手動啟用，不會自動恢復）。 */
+/**
+ * 帳號是否已停用（需管理者手動啟用，不會自動恢復）。
+ *
+ * ⚠️ **判定是 `!== "ACTIVE"` 而非 `=== "DISABLED"`，方向不可反**（#603）。理由可重新推導：
+ * `DP_USER.STATUS` 是 `String(10)`、**無 CHECK 約束**，日後新增第三種狀態時——
+ *
+ * - 後端 `account_status.py` 的 `is_account_disabled` 是 `status != "ACTIVE"`，會判定該帳號不可用
+ * - 前端若寫 `=== "DISABLED"`，會判定它正常，畫面把一個**登不進系統的帳號標成綠色「啟用中」**
+ *
+ * 兩邊對同一筆資料得出相反結論，而且沒有任何東西會紅。fail-closed（寧可誤標成停用）才與後端同邊。
+ */
 export function isDisabled(row: AccountStatusFields): boolean {
-  return row.status === "DISABLED"
+  return row.status !== "ACTIVE"
 }
 
 /** 帳號是否鎖定中（ACTIVE 且 locked_until 尚未逾時；逾時者已自動解鎖）。 */

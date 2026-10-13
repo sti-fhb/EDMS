@@ -1,4 +1,5 @@
 import Badge from "@mui/material/Badge"
+import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import Divider from "@mui/material/Divider"
@@ -7,7 +8,9 @@ import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
 import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
-import { useEffect, useMemo, useState } from "react"
+import Tooltip from "@mui/material/Tooltip"
+import { useQuery } from "@tanstack/react-query"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { AppTable } from "../../components/AppTable"
 import type { AppColumn } from "../../components/AppTable"
@@ -16,6 +19,7 @@ import { CrudPageLayout } from "../../components/CrudPageLayout"
 import { Pagination } from "../../components/Pagination"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { formatDateTime } from "../../utils/date"
+import { PROFILE_ME_QUERY_KEY, profileApi } from "../user/profileService"
 import { isDisabled, isLocked } from "./accountStatus"
 import { UsersForm } from "./UsersForm"
 import { useInvites } from "./useInvites"
@@ -28,6 +32,29 @@ const STATUS_OPTIONS = [
   { value: "disabled", label: "已停用" },
   { value: "locked", label: "已鎖定" },
 ]
+
+/**
+ * 「停用」按鈕：對自己那列灰階並以 tooltip 說明原因（#603）。
+ *
+ * 後端 `DP_USER_006` 本來就會擋，但那是**按下去、過完二次確認之後**才知道——而確認視窗寫著
+ * 「停用後 ET / DM 兩端將同步失效」，使用者會以為真的發生了；失敗後對話框還會留著邀請重試一個
+ * 永遠不會成功的動作。`spec_us4.md` FR-DP-US4-06 的用字是 MUST NOT **可**，所以畫面層也要擋。
+ *
+ * ⛔ 不用隱藏按鈕：專案既有模式（DM07 `LockableButton`）是灰階 + 提示，隱藏會讓人以為功能壞了。
+ * disabled 的 MUI Button 不觸發 tooltip 事件，故以 span 包裹作為事件載體（同 DM07）。
+ */
+function SelfAwareDisableButton({ isSelf, onDisable }: { isSelf: boolean; onDisable: () => void }) {
+  const reason = isSelf ? "無法停用自己的帳號" : ""
+  return (
+    <Tooltip title={reason}>
+      <Box component="span" sx={{ display: "inline-flex" }} aria-label={reason || undefined}>
+        <Button size="small" disabled={isSelf} onClick={onDisable}>
+          停用
+        </Button>
+      </Box>
+    </Tooltip>
+  )
+}
 
 function StatusChip({ row }: { row: UserRow }) {
   if (isDisabled(row)) return <Chip size="small" label="已停用" />
@@ -48,6 +75,18 @@ export function UsersPage() {
   const [keyword, setKeyword] = useState("")
   const [status, setStatus] = useState("")
   const [inviteKeyword, setInviteKeyword] = useState("")
+
+  /**
+   * 目前登入者——用來判斷哪一列是自己（#603）。與 `AppHeader` / `ProfilePage` 共用同一 query key。
+   *
+   * ⚠️ **刻意不為它加載入閘**：`AppHeader` 常駐於 `AppShell`、而本頁在 `AppShell` 之下，使用者走到
+   * DP01 時這筆必定已在快取、`useQuery` 同步回值。為「進得了本頁卻尚未取得 me」這個不存在的路徑
+   * 加防禦碼，違反 `sti-coding-style.md`「不為不存在的情境寫防禦碼」。
+   */
+  const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe })
+  const myUserId = me?.user_id
+  // useCallback：供下方 accountColumns 的 useMemo 正確列入依賴（me 晚到時要重算，否則自己那列仍可按）
+  const isSelf = useCallback((row: UserRow) => row.user_id === myUserId, [myUserId])
 
   // 即時查詢：關鍵字去抖（350ms）避免每字元一次 request；帳號狀態變動即時反映，免按「查詢」。
   // 篩選條件變動視為情境切換，一併收起可能開著的編輯 / 建立表單（避免停留在已被篩掉的列）。
@@ -91,7 +130,8 @@ export function UsersPage() {
         title: "操作",
         render: (_v, r) => (
           <Stack direction="row" spacing={1} justifyContent="flex-start">
-            {r.status === "DISABLED" ? (
+            {/* 走共用的 isDisabled()，不自己比對狀態字面值——那支判定存在的理由就是避免 DP01 / DP02 漂移 */}
+            {isDisabled(r) ? (
               <Button size="small" color="success" onClick={() => accounts.enableUser(r)}>
                 啟用
               </Button>
@@ -100,9 +140,7 @@ export function UsersPage() {
                 解鎖
               </Button>
             ) : (
-              <Button size="small" onClick={() => accounts.disableUser(r)}>
-                停用
-              </Button>
+              <SelfAwareDisableButton isSelf={isSelf(r)} onDisable={() => accounts.disableUser(r)} />
             )}
             <Button size="small" onClick={() => accounts.openEdit(r)}>
               編輯
@@ -111,7 +149,8 @@ export function UsersPage() {
         ),
       },
     ],
-    [accounts],
+    // isSelf 不可省：它閉包捕獲 myUserId，少了這項則 me 晚到時 memo 不重算、自己那列仍可按
+    [accounts, isSelf],
   )
 
   const inviteColumns = useMemo<AppColumn<InviteRow>[]>(
