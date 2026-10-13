@@ -80,9 +80,18 @@ describe("測驗流程只佔一個歷程格（#549）", () => {
     expect(router.state.location.pathname).toBe("/et/attempts/800/result")
 
     // AC 3：結果頁上一頁不是作答中的頁面，而是（已帶 ?quiz= 的）學習頁
+    //
+    // 🔴 每次 `router.navigate()` 之後都要等**畫面**換頁，不能只看 `router.state`。
+    // React Router 以 `startTransition` 渲染導覽：router 狀態已到新頁時，舊頁可能還沒卸載。
+    // 只等 router 狀態的話，下面的 `findByText("測驗完成")` 會找到**還沒卸載的舊結果頁**，
+    // 接著點「返回課程」的過程中延遲的那次渲染才 commit——按鈕被換成新節點，點擊落在
+    // 脫離 DOM 的舊節點上、不觸發任何導覽，網址停在結果頁（CI 約 1/20 偶發，實測導覽紀錄：
+    // 點擊前 `isConnected=true`、點擊後 `false`，其間沒有任何 POP）。
     await router.navigate(-1)
     await waitFor(() => expect(path(router)).toBe("/et/courses/7/learn?quiz=700"))
+    expect(await screen.findByTestId("learn-url")).toHaveTextContent("/et/courses/7/learn?quiz=700")
     await router.navigate(1)
+    await waitFor(() => expect(screen.queryByTestId("learn-url")).not.toBeInTheDocument())
     await screen.findByText("測驗完成")
 
     // AC 2：回課程落在帶 ?quiz= 的學習頁。
