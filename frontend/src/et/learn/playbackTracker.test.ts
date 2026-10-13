@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest"
 
 import { IDLE_TRACKER, beginSegment, checkpoint, endSegment, observeTime, seekTo } from "./playbackTracker"
+import type { Segment, TrackerState } from "./playbackTracker"
 
 /**
  * 播放區段追蹤（US5 / #274）。
@@ -39,6 +40,99 @@ describe("playbackTracker", () => {
     const { segment } = endSegment(IDLE_TRACKER, 100)
 
     expect(segment).toBeNull()
+  })
+
+  describe("依真實瀏覽器事件順序的跳躍（#609）", () => {
+    /**
+     * 🔴 瀏覽器完成 seek 時**先**發 `timeupdate`（`currentTime` 已是新位置、`seeking`
+     * 已為 false）**再**發 `seeked`。上面那組「跳躍」測試直接呼叫 `seekTo`，跳過了中間
+     * 那個 `timeupdate`——於是它們在真實順序下**恆綠**，抓不到本 issue 的缺陷。
+     *
+     * 這一組照真實順序走：`checkpoint`（timeupdate）→ `seekTo`（seeked）。
+     *
+     * ⭐ `maxStepSec` 的誤判方向是刻意選的：**誤判為跳躍只是把一段切成兩段**，
+     * 相接的兩段在後端聯集後完全相同；**漏判才是本 issue 的缺陷**（跳過的範圍被算成
+     * 看過）。故門檻寧可抓緊。
+     */
+    const OPTS = { minSeconds: 15, maxStepSec: 1.5 }
+
+    /**
+     * 逐步播放到 `to`，模擬瀏覽器每 0.25 秒一次的 `timeupdate`。
+     *
+     * ⚠️ 不可寫成一次 `checkpoint(state, to)`——那個前進量會超過 `maxStepSec` 而被
+     * 正確地判成跳躍。真瀏覽器播放 10 秒會發約 40 次 timeupdate。
+     */
+    function play(state: TrackerState, from: number, to: number) {
+      const segments: Segment[] = []
+      for (let t = from + 0.25; t <= to + 1e-9; t += 0.25) {
+        const r = checkpoint(state, t, OPTS)
+        state = r.state
+        if (r.segment !== null) segments.push(r.segment)
+      }
+      return { state, segments }
+    }
+
+    it("播放中由 10 秒拖到 600 秒，上報的區段不涵蓋 10～600", () => {
+      const played = play(beginSegment(0), 0, 10) // 正常播放 0～10 秒
+      let state = played.state
+
+      // 真實順序第 1 步：timeupdate 於新位置 600
+      const jump = checkpoint(state, 600, OPTS)
+      state = jump.state
+      // 真實順序第 2 步：seeked
+      const seeked = seekTo(state, 600, { paused: false })
+
+      const reported = [...played.segments, jump.segment, seeked.segment].filter((x) => x !== null)
+      for (const seg of reported) {
+        expect(seg!.end_sec - seg!.start_sec).toBeLessThan(600)
+      }
+      expect(reported.some((seg) => seg!.start_sec <= 10 && seg!.end_sec >= 600)).toBe(false)
+      expect(jump.segment).toEqual({ start_sec: 0, end_sec: 10 })
+    })
+
+    it("小跳距也不算看過——跳 5 秒同樣要切斷", () => {
+      // 原缺陷有兩條路徑：跳距 >= 15 秒時 checkpoint 直接切出橫跨的一段；
+      // 跳距 < 15 秒時 observeTime 把 last 改成新位置，之後由 seekTo 把跳過的算進去。
+      let state = play(beginSegment(0), 0, 10).state
+
+      const jump = checkpoint(state, 15, OPTS) // 拖 5 秒
+      state = jump.state
+      const seeked = seekTo(state, 15, { paused: false })
+
+      expect(jump.segment).toEqual({ start_sec: 0, end_sec: 10 })
+      expect(seeked.segment).toBeNull()
+      expect(state.anchor).toBe(15)
+    })
+
+    it("播放中往回拖：已看的區段仍上報", () => {
+      let state = play(beginSegment(100), 100, 110).state
+
+      const jump = checkpoint(state, 20, OPTS) // 往回拖
+      state = jump.state
+
+      expect(jump.segment).toEqual({ start_sec: 100, end_sec: 110 })
+      expect(state.anchor).toBe(20)
+    })
+
+    it("正常連續播放不受影響——門檻內的前進照舊累積", () => {
+      // 正向錨點：少了這條，把 maxStepSec 設成 0（每次 timeupdate 都當跳躍）也會通過上面幾條
+      let state = beginSegment(0)
+      const emitted = []
+      for (let t = 0.25; t <= 16; t += 0.25) {
+        const r = checkpoint(state, t, OPTS)
+        state = r.state
+        if (r.segment !== null) emitted.push(r.segment)
+      }
+      expect(emitted).toEqual([{ start_sec: 0, end_sec: 15 }])
+    })
+
+    it("倍速放寬門檻——2 倍速下 2 秒的前進不算跳躍", () => {
+      const fast = { minSeconds: 15, maxStepSec: 3 }
+      let state = beginSegment(0)
+      const r = checkpoint(state, 2, fast)
+      expect(r.segment).toBeNull()
+      expect(r.state.anchor).toBe(0)
+    })
   })
 
   describe("跳躍", () => {
