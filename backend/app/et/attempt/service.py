@@ -194,7 +194,7 @@ class EtAttemptService:
         closed = access.is_closed(now=utcnow())
         total = await self._repo.attempt_total(db, user_id=user_id, quiz_id=quiz_id)
         base = await self._repo.reset_base(db, user_id=user_id, quiz_id=quiz_id)
-        last, best, passed = await self._repo.score_summary(db, user_id=user_id, quiz_id=quiz_id)
+        last, best, passed = await self._repo.score_summary(db, user_id=user_id, quiz_id=quiz_id, reset_base=base)
         in_progress = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
         questions = await self._repo.list_questions(db, quiz_id)
         return QuizIntro(

@@ -297,8 +297,9 @@ class EtTrackingService:
         if await self._repo.get_enrollment(db, course_id=course_id, user_id=user_id) is None:
             raise _ENROLLMENT_NOT_FOUND
 
-        total, is_passed = await self._repo.attempt_facts(db, user_id=user_id, quiz_id=quiz_id)
+        # 先取基準——`attempt_facts` 的「是否已通過」要用它才算得出「**目前**算通過」（#610）。
         base = await self._repo.reset_base_of(db, user_id=user_id, quiz_id=quiz_id)
+        total, is_passed = await self._repo.attempt_facts(db, user_id=user_id, quiz_id=quiz_id, reset_base=base)
         used = round_used_attempts(total=total, reset_base=base)
         if not can_reset_retry(used=used, max_retry=quiz.max_retry, is_passed=is_passed, has_attempt=total > 0):
             raise _CANNOT_RESET
@@ -712,7 +713,9 @@ def _to_quiz_row(quiz, *, attempts: list, reset_base: int, points: dict[int, int
     會讓重置過的學員顯示「已用 5 次」而他的配額其實剛歸零。
     """
     used = round_used_attempts(total=len(attempts), reset_base=reset_base)
-    is_passed = any(bool(a.is_pass) for a in attempts)
+    # 「**目前**算通過」＝重置基準之後仍有及格紀錄（#610）。本函式早就收到 `reset_base`
+    # 卻只用在次數上——漏在這裡，ET02 的重置鈕就會對「被要求重測後考不過」的學員停用。
+    is_passed = any(bool(a.is_pass) for a in attempts if a.attempt_no > reset_base)
     return TeacherQuizRow(
         quiz_id=quiz.quiz_id,
         quiz_name=quiz.quiz_name,
