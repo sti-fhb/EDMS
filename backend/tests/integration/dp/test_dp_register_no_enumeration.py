@@ -15,35 +15,37 @@ login 收斂之後，攻擊者仍可從 `/api/register` 分辨出「這個 Email
 一封啟用信、還沒設過密碼」的人。對這批人發仿冒的啟用信成功率遠高於盲發——他們真的在等
 這封信，而且沒有既有密碼可比對、更難察覺異常。
 
-## 收斂到什麼程度（與**沒有**收斂到的程度）
+## 收斂到什麼程度（#345 / #346 之後）
 
-**單看本端點**，合併後只可分辨 `{已註冊 或 已受邀}` 與 `{其他}`（前者 409、後者 202），
-因為「已註冊」本來就是公開可探測的（同 login 的 `DP_AUTH_008`，#208 AC 2 明訂保留）。
+`register` 的 409 現在**恰好等於**「`DP_USER` 列存在」，與 login 的
+`DP_AUTH_004 / 005 / 008` 同一集合——交叉比對因此不再產生新資訊。
 
-⚠️ **但「誰被邀請了」並未真正關閉，探測成本只是從 1 個請求變成 2 個。** 交叉比對即可切開：
+未逾期的 `ADMIN_INVITE`（#345）與「他人冷卻中」（#346）都改回與全新 Email **同形的 202**，
+且**完全不寫入任何東西**（不寄信、不覆蓋、不換 token、不蓋 Email 冷卻章）。
 
 ```
 ① POST /api/login（密碼任意）→ DP_AUTH_007  ⇒ 無未刪除的 DP_USER 列
-② POST /api/register          → DP_USER_001 ⇒ DP_USER 列存在（含軟刪）或有未逾期邀請
-①∩② = {未逾期 ADMIN_INVITE} ∪ {軟刪除的 DP_USER}
+② POST /api/register          → 409         ⇒ DP_USER 列存在
+①∩② = ∅
 ```
 
-第二項在本專案是**空集合**（系統無刪除使用者功能，`DP_USER.DELETED` 從不被設定；
-`email_exists` 含軟刪、`get_by_email` 排除軟刪，本該構成雜訊的差集實際上為空），
-於是交集就是邀請名單本身。
+⚠️ **刻意保留、未關閉的一格**：`DP_AUTH_008` 與 `DP_AUTH_007` 仍可區分「某 Email 是否為
+已驗證帳號」——#208 AC 2 明訂保留（鎖定計數與既有 UX 掛在該路徑）。若日後要併掉它，
+**必須同時補 dummy password verify**，理由見 `dp/user/service.py::login()` 的 docstring。
 
-`TestCrossEndpointResidual` 把這個殘留**釘住**——不是因為它可接受，而是因為「被測試釘住的
-已知殘留」與「被誤以為已關閉的洞」是兩件事。根治要讓未逾期邀請離開 409 集合，會動到
-`spec_us2` AC 6a 的對外行為，**追蹤於 #345**。
+⚠️ **register 的 429 仍存在，但只對「自己」**：同一 IP × Email 的 `probe` 章會明說 429
+（防狂發），他人蓋的 Email 章則是靜默 202。兩層 key 的語意見
+`router.py::_verify_send_probe_key`（#213 建立、#346 擴及 register）。
 """
 
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.notify.models import DpEmailLog
 from app.dp.user import router as auth_router
 from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.models import DpPendingRegistration
@@ -98,6 +100,32 @@ async def _admin_invite(db, *, email: str, hours: int = 24) -> None:
     await db.flush()
 
 
+@pytest.fixture
+def as_ip(monkeypatch):
+    """切換 router 眼中的 client IP（`_verify_send_probe_key` 用它分桶）。
+
+    ⚠️ ASGI 測試傳輸沒有真實 peer 位址，且 `X-Forwarded-For` 預設**不受信**
+    （`TRUSTED_PROXY_COUNT=0`，#23）——送那個 header 不會改變 probe key。寫法比照
+    `test_dp_user_resend_cooldown.py` 的同名 fixture：直接替換 router 模組內的
+    `get_client_ip` 名稱，只影響本 key 函式、不動限流器自己的取值。
+    """
+
+    def _set(ip: str) -> None:
+        monkeypatch.setattr(auth_router, "get_client_ip", lambda: ip)
+
+    return _set
+
+
+async def _outbox_count(db, email: str) -> int:
+    """該 Email 的 outbox 列數（`DP_EMAIL_LOG`）。
+
+    ⚠️ 靜默路徑的「不寄信」必須**直接**斷言。只驗「pending 列沒變」是間接證明——一個
+    「照常寄信但不覆蓋」的實作會讓那些斷言全綠，而那正好把受害者的信箱變成探測回音板
+    （攻擊者打一次 register，受害者就收到一封他沒要求的信）。
+    """
+    return await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.recipient == email))
+
+
 def _payload(email: str) -> dict:
     return {"email": email, "user_name": "探測者"}
 
@@ -107,21 +135,39 @@ def _signature(resp) -> tuple[int, str | None, str | None]:
     return (resp.status_code, body.get("error_code"), body.get("error_message"))
 
 
-async def test_已受邀與已註冊的註冊回應完全一致(client, db) -> None:
-    """核心：兩者的 status / error_code / error_message 三者皆同。
+async def test_已受邀與全新_email_的註冊回應完全一致(client, db) -> None:
+    """#345 的核心：受邀者改與**全新 Email** 同形，而不是與「已註冊」同形。
 
-    分開斷言「各自回 409」也會全綠卻驗不到重點——必須在同一條裡比較，否則任何一方的碼或
-    訊息日後被改動，兩條各自的斷言都還會過。
+    ⚠️ 本條的前身是 `test_已受邀與已註冊的註冊回應完全一致`（#208）——那時的正確行為是
+    「受邀 ≡ 已註冊」。#345 把它**反轉**了：讓受邀者離開 409 集合，409 才會恰好等於
+    「`DP_USER` 列存在」，與 login 的 004/005/008 同一集合，交叉比對因此失效。
+
+    必須在同一條裡比對**整包回應**（status + body）：分開斷言「各自回 202」會全綠卻驗不到
+    重點——只要有人日後為了 UX 把其中一條的訊息岔開，列舉面就回來了，而兩條各自的斷言
+    都還會過。⭐ 文案維持原文（2026-10-13 裁示）之後，這條是唯一守住該性質的測試。
     """
-    await _verified_user(db, user_id="u_reg_enum", email="registered@edms.local")
     await _admin_invite(db, email="invited@edms.local")
     await db.commit()
 
-    registered = await client.post("/api/register", json=_payload("registered@edms.local"))
     invited = await client.post("/api/register", json=_payload("invited@edms.local"))
+    fresh = await client.post("/api/register", json=_payload("brand-new@edms.local"))
+
+    assert invited.status_code == 202, invited.text
+    assert invited.json() == fresh.json(), "『已受邀』不得與『全新 Email』區分開來"
+
+
+async def test_已註冊仍回_409_與_login_同一集合(client, db) -> None:
+    """#345 刻意**不**收斂的那一格：已驗證帳號本來就是公開可探測的（#208 AC 2 明訂保留）。
+
+    正向錨點——少了這條，把 409 整個拿掉也能讓上面那條全綠，而那會連「已註冊」的
+    既有 UX（直接登入 / 忘記密碼）一起拆掉。
+    """
+    await _verified_user(db, user_id="u_reg_enum", email="registered@edms.local")
+    await db.commit()
+
+    registered = await client.post("/api/register", json=_payload("registered@edms.local"))
 
     assert registered.status_code == 409, registered.text
-    assert _signature(registered) == _signature(invited), "『已受邀』不得與『已註冊』區分開來"
     assert registered.json()["error_code"] == "DP_USER_001"
 
 
@@ -130,8 +176,11 @@ async def test_統一訊息同時鋪出登入與收信兩條路(client, db) -> N
 
     舊的 `_EMAIL_TAKEN_MSG` 只寫「請直接登入或使用忘記密碼」，受邀者照著做會走進死路——
     所以合併之後訊息**必須**同時提到「收到的啟用 / 驗證信」這條路。
+
+    ⚠️ #345 之後受邀者已不走 409（改為靜默 202），本條改以**已註冊** Email 取樣。訊息本身
+    一字未改、三條出路的要求仍然成立——已註冊者也可能曾收過驗證信（註冊後、驗證前那段）。
     """
-    await _admin_invite(db, email="guide@edms.local")
+    await _verified_user(db, user_id="u_guide", email="guide@edms.local")
     await db.commit()
 
     message = (await client.post("/api/register", json=_payload("guide@edms.local"))).json()["error_message"]
@@ -142,8 +191,11 @@ async def test_統一訊息同時鋪出登入與收信兩條路(client, db) -> N
 
 
 @pytest.mark.parametrize("state", ["registered", "invited"])
-async def test_冷卻武裝時仍回終局狀態而非429(client, db, state: str) -> None:
+async def test_冷卻武裝時的回應不因位置差而改變(client, db, state: str) -> None:
     """位置差也是 oracle：若一個擋在冷卻前、一個擋在冷卻後，武裝時會變成 409 vs 429。
+
+    ⚠️ #345 之後**兩種 state 的期望值不同**（已註冊 409、已受邀 429），名稱因此由
+    「仍回終局狀態而非 429」改為現名——受邀者不再有終局狀態，理由見下方 else 分支。
 
     ⚠️ **冷卻 key 是 `verify-send:acct:{email}`，必須武裝到「被測的那個 Email」。**
     先前這條測試以另一個 Email 成功註冊來「武裝冷卻」，但那只蓋了那個 Email 的章，被測
@@ -167,26 +219,38 @@ async def test_冷卻武裝時仍回終局狀態而非429(client, db, state: str
 
     blocked = await client.post("/api/register", json=_payload(email))
 
-    assert blocked.status_code == 409, "終局狀態應優先於冷卻回應（#86）——回 429 代表檢核被移到冷卻之後"
-    assert blocked.json()["error_code"] == "DP_USER_001"
+    if state == "registered":
+        # #86 不變：終局狀態優先於冷卻回應，否則使用者白等一輪倒數。
+        assert blocked.status_code == 409, "回 429 代表可用性判定被移到冷卻之後（#86 的回歸）"
+        assert blocked.json()["error_code"] == "DP_USER_001"
+    else:
+        # ⚠️ #345 之後受邀者**不再有終局狀態**，所以不適用 #86 的優先權——它必須與
+        # 「全新 Email 在同一情境」給出相同答案，而那是 429（自己剛寄過、probe 章還在）。
+        #
+        # 這裡刻意**不是** 202：若讓受邀者在此回 202，同一 IP 連打兩次就會變成新的 oracle
+        # （受邀 -> 202, 202；全新 -> 202, 429）。本條釘住的正是「別為了讓受邀者好過而岔開」。
+        assert blocked.status_code == 429, "受邀者在自己的冷卻內須與全新 Email 同樣回 429"
 
 
-class TestCrossEndpointResidual:
-    """**已知未關閉**：login × register 交叉比對仍可取出「未逾期邀請」。
+class TestCrossEndpointClosed:
+    """**已關閉**（#345）：login × register 交叉比對不再切得出「未逾期邀請」。
 
-    釘住它的理由與 `test_dp_login_no_enumeration.py::TestVerifiedAccountUnchanged` 相同——
-    讓殘留成為「被寫下來且有守衛的事實」。若日後根治（讓未逾期邀請離開 409 集合），本 class
-    會轉紅，那時請連同這段說明一起刪除，而不是改斷言（#345 的驗收條件已寫明此事）。
+    ⚠️ 本 class 的前身是 `TestCrossEndpointResidual`——它正面**釘住**該殘留，理由是
+    「被測試釘住的已知殘留」與「被誤以為已關閉的洞」是兩件事。#345 根治之後改寫為驗證
+    已關閉（而非刪除）：殘留消失了，但**它不該復活**這件事需要有守衛。
 
-    另有一條互補的殘留——`/api/register` 的 429 洩漏「該 Email 有未逾期的自助註冊待驗證列」
-    （#213 引入，走共用冷卻 key）——追蹤於 **#346**，本 class 不涵蓋它。
+    > 原 class 的註解寫「那時請連同這段說明一起刪除」。#345 的驗收條件改訂為「轉為驗證
+    > 已關閉、連同說明一起改寫」——刪掉會讓這條回歸從此沒有測試，而它正是最容易在
+    > 「為了 UX 把某一格的回應岔開」時被無聲打開的。
+
+    `DP_AUTH_008` 仍與 `DP_AUTH_007` 可分辨——**刻意保留**（#208 AC 2），見下方測試。
     """
 
-    async def test_交叉比對仍可切出未逾期邀請(self, client, db) -> None:
-        """三種 Email 走同一組兩個請求，只有「已受邀」落在 (007, 409) 這一格。
+    async def test_三種_email_的交叉比對不再切得出受邀者(self, client, db) -> None:
+        """(login error_code, register status) 的三格對照：受邀者已與「不存在」同格。
 
-        這條測試的價值不在「驗證正確行為」，而在**量化殘留的精確度**：若日後有人以為
-        #208 已經關掉邀請列舉而據此做決策（例如放寬邀請信的內容），這裡寫著它沒有。
+        對照表式而非逐條斷言——重點是**哪些格子彼此相同**，分開驗三條會全綠卻驗不到
+        「它們之間的關係」，而關係才是列舉面的本體。
         """
         await _verified_user(db, user_id="u_x_reg", email="x-registered@edms.local")
         await _admin_invite(db, email="x-invited@edms.local")
@@ -197,26 +261,171 @@ class TestCrossEndpointResidual:
             register = await client.post("/api/register", json=_payload(email))
             return login.json().get("error_code"), register.status_code
 
-        assert await probe("x-registered@edms.local") == ("DP_AUTH_008", 409)
-        assert await probe("x-invited@edms.local") == ("DP_AUTH_007", 409), (
-            "（007, 409）這一格目前唯一對應「未逾期 ADMIN_INVITE」——這就是尚未關閉的殘留"
+        registered = await probe("x-registered@edms.local")
+        invited = await probe("x-invited@edms.local")
+        absent = await probe("x-absent@edms.local")
+
+        assert invited == absent, "『已受邀』與『不存在』必須落在同一格——這就是 #345 關掉的洞"
+        assert registered == ("DP_AUTH_008", 409), "已註冊仍可探測：#208 AC 2 明訂保留"
+        assert registered != invited, (
+            "正向錨點：三格若全部相同，代表 409 整個消失了——那會連『已註冊』的既有 UX 一起拆掉"
         )
-        assert await probe("x-absent@edms.local") == ("DP_AUTH_007", 202)
+
+
+async def test_他人冷卻中的回應與全新_email_相同(client, db, as_ip) -> None:
+    """#346：`register` 的 429 曾是「該 Email 有未逾期自助註冊待驗證列」的 oracle。
+
+    `verify-send:acct:{email}` 由**受害者自己**註冊時蓋上（真的寄出才蓋，#213）。攻擊者
+    隨後打 register 得 429 ⇒ 推得「600 秒內有人對此 Email 成功寄出驗證信」。改為靜默 202。
+    """
+    victim = "cooldown-victim@edms.local"
+
+    as_ip("198.51.100.7")  # 受害者自己註冊 -> 真的寄出 -> 蓋 acct 章
+    first = await client.post("/api/register", json=_payload(victim))
+    assert first.status_code == 202, first.text
+
+    as_ip("203.0.113.9")  # 攻擊者，不同 IP：acct 章在、但 probe 章是乾淨的
+    probe = await client.post("/api/register", json=_payload(victim))
+    fresh = await client.post("/api/register", json=_payload("cooldown-fresh@edms.local"))
+
+    assert probe.status_code == 202, "他人的冷卻對探測者必須是靜默的"
+    assert probe.json() == fresh.json(), "回應需與全新 Email 逐欄位相同"
+
+
+async def test_他人冷卻中不覆蓋既有_pending(client, db, as_ip) -> None:
+    """#346 的另一半：靜默**不得**實作成「照常覆蓋」。
+
+    ⚠️ 照常覆蓋等於讓任何匿名者每 600 秒作廢一次受害者的驗證連結——那會重開 #212。
+    """
+    victim = "cooldown-intact@edms.local"
+    as_ip("198.51.100.7")
+    assert (await client.post("/api/register", json=_payload(victim))).status_code == 202
+    before = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == victim))).scalar_one()
+    token_before, expires_before = before.token_hash, before.expires_date
+
+    as_ip("203.0.113.9")  # 攻擊者
+    await client.post("/api/register", json=_payload(victim))
+
+    after = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == victim))).scalar_one()
+    assert after.token_hash == token_before, "受害者的驗證連結不得被作廢"
+    assert after.expires_date == expires_before, "效期不得被延長或重設"
+    assert await _outbox_count(db, victim) == 1, "只有受害者自己那封；探測不得再寄一封"
+
+
+async def test_自己的冷卻仍明說_429(client, db, as_ip) -> None:
+    """#346 AC 3：別人的冷卻對你是靜默的，**自己的**冷卻才明說——否則防狂發退化。
+
+    ⚠️ 若成功路徑只蓋 `acct` 章而不蓋 `probe` 章，同一人重打會撞 acct 章 → 依新規則變成
+    靜默 202 → 他以為信一直在寄、實際一封都沒有。本條釘住「成功時兩個章都要蓋」。
+    """
+    email = "self-cooldown@edms.local"
+    as_ip("198.51.100.7")
+
+    first = await client.post("/api/register", json=_payload(email))
+    assert first.status_code == 202, first.text
+
+    again = await client.post("/api/register", json=_payload(email))
+
+    assert again.status_code == 429, "同一 IP x Email 重打應明說冷卻中，不得退化成靜默 202"
 
 
 async def test_受邀列未被探測動到(client, db) -> None:
-    """#125 的保護不得因合併而鬆動：被擋下的註冊不可覆蓋邀請列。
+    """#125 的保護不得鬆動：被靜默的註冊不可覆蓋邀請列。
 
-    合併改的是「回什麼」，不是「擋不擋」。少了這條，把檢核改成放行也能讓上面三條全綠。
+    ⚠️ #345 把回應從 409 改成 202 之後，本條**更重要**了——先前「擋不擋」由 409 本身昭告，
+    現在外觀與成功註冊完全相同，**唯一能分辨有沒有被覆蓋的就是這條測試**。少了它，把
+    判定改成放行也能讓上面幾條全綠，而那會讓任何匿名者抹掉管理者發出的邀請（#125）。
     """
     email = "intact@edms.local"
     await _admin_invite(db, email=email)
     await db.commit()
     original = hash_token(f"invite-{email}")
+    expires_before = (
+        await db.execute(select(DpPendingRegistration.expires_date).where(DpPendingRegistration.email == email))
+    ).scalar_one()
 
-    blocked = await client.post("/api/register", json=_payload(email))
-    assert blocked.status_code == 409
+    probed = await client.post("/api/register", json=_payload(email))
+    assert probed.status_code == 202, "#345：改為靜默 202；#125 的保護改由『什麼都不寫』達成"
+    assert await _outbox_count(db, email) == 0, "靜默路徑不得寄信——否則受害者信箱成了探測回音板"
 
     row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()
     assert row.token_hash == original, "原邀請信連結必須仍然有效"
     assert row.kind == KIND_ADMIN_INVITE and row.user_name == "受邀者"
+    assert row.expires_date == expires_before, "效期不得被延長（否則等於讓匿名者替邀請續命）"
+
+
+async def test_自己冷卻內受邀與全新_email_同形(client, db, as_ip) -> None:
+    """補完矩陣的最後一格（#345 + #346）。
+
+    三種「我自己剛打過」的情境必須給出相同回應，否則同一 IP 連打兩次就是新的 oracle：
+
+    | 第 1 次 | 第 2 次（同 IP）|
+    |---|---|
+    | 全新 -> 202（真的寄出）| 429 |
+    | 受邀 -> 202（靜默）| **429** |
+
+    ⚠️ 直覺會想讓受邀者第 2 次也回 202（「反正本來就沒寄」），但那正好把兩者分開。
+    靜默路徑蓋 `probe` 章就是為了讓這一格對齊。
+    """
+    as_ip("198.51.100.42")
+    await _admin_invite(db, email="pair-invited@edms.local")
+    await db.commit()
+
+    invited_1 = await client.post("/api/register", json=_payload("pair-invited@edms.local"))
+    invited_2 = await client.post("/api/register", json=_payload("pair-invited@edms.local"))
+    fresh_1 = await client.post("/api/register", json=_payload("pair-fresh@edms.local"))
+    fresh_2 = await client.post("/api/register", json=_payload("pair-fresh@edms.local"))
+
+    assert (invited_1.status_code, invited_2.status_code) == (202, 429)
+    assert (fresh_1.status_code, fresh_2.status_code) == (202, 429)
+    assert invited_1.json() == fresh_1.json(), "第 1 次的回應必須逐欄位相同"
+
+
+@pytest.mark.parametrize("kind", ["invite", "self"])
+async def test_逾期的_pending_仍走覆蓋路徑(client, db, kind: str) -> None:
+    """**逾期**的待驗證列必須回歸「覆蓋 + 寄信」，不得被誤歸入靜默分支（#212）。
+
+    ## 為什麼這條是最容易被改壞的邊界
+
+    判定靠 `pending.expires_date > utcnow()` 這一個比較。把 `>` 寫成 `>=`、或有人為了
+    「順手統一」而拿掉效期判斷，受邀者與逾期者就會**一起**變成靜默——而那時：
+
+    - 邏輯仍自洽（兩者都不寫入），
+    - 上面所有「受邀者靜默」的測試**全綠**，
+    - 使用者端的症狀是「這個 Email 永遠註冊不了，而且沒有任何錯誤訊息」。
+
+    #212 的原始裁示正是「逾期列視為不存在，不應讓該 Email 被永久佔住」。少了本條，
+    那句話在 router 層沒有任何守衛（既有的 `test_register_overwrites_expired_admin_invite`
+    直接呼叫 service，走不到本次新增的靜默分支）。
+    """
+    email = f"expired-{kind}@edms.local"
+    if kind == "invite":
+        await _admin_invite(db, email=email, hours=-1)
+    else:
+        now = utcnow()
+        db.add(
+            DpPendingRegistration(
+                token_hash=hash_token(f"stale-{email}"),
+                email=email,
+                user_name="舊的自己",
+                pwd_hash=None,
+                kind="SELF_REGISTER",
+                expires_date=now - timedelta(hours=1),
+                created_user="self",  # CREATED_USER 是 varchar(20)，不可放 Email
+                created_date=now - timedelta(hours=2),
+            )
+        )
+        await db.flush()
+    await db.commit()
+    stale_token = hash_token(f"invite-{email}") if kind == "invite" else hash_token(f"stale-{email}")
+
+    resp = await client.post("/api/register", json=_payload(email))
+    fresh = await client.post("/api/register", json=_payload(f"fresh-{kind}@edms.local"))
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == fresh.json(), "逾期者的回應須與全新 Email 逐欄位相同"
+
+    row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()
+    assert row.token_hash != stale_token, "逾期列必須被覆蓋（換新 token），否則該 Email 被永久佔住"
+    assert row.kind == "SELF_REGISTER", "覆蓋後成為自助註冊列"
+    assert await _outbox_count(db, email) == 1, "逾期者走的是真的寄信那條路，不是靜默"

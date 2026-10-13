@@ -27,7 +27,19 @@ class AuthRepository:
         return result.scalar_one_or_none()
 
     async def email_exists(self, db: AsyncSession, email: str) -> bool:
-        """該 Email 是否已被註冊（含軟刪除，避免與既有帳號 EMAIL UNIQUE 衝突）。"""
+        """該 Email 是否已被註冊（含軟刪除，避免與既有帳號 EMAIL UNIQUE 衝突）。
+
+        ⚠️ **本方法含軟刪、`get_by_email` 排除軟刪——這個差集是防列舉的一個隱含前提。**
+
+        #345 讓 `/api/register` 的 409 恰好等於「`DP_USER` 列存在」，與 login 的
+        `DP_AUTH_004/005/008` 同一集合，於是交叉比對切不出東西。但那個「恰好等於」**只因為
+        本專案目前沒有刪除使用者的功能**（`DP_USER.DELETED` 全 codebase 無寫入點），所以
+        「含軟刪」與「排除軟刪」實際回傳同一個集合。
+
+        ⛔ **日後若新增「刪除／軟刪使用者」功能，必須同時處理這個差集**——否則
+        `(DP_AUTH_007, 409)` 這一格會**無聲地**重新變成 oracle（對象從受邀者換成被軟刪者），
+        而現有的防列舉測試全部還會綠（它們建的使用者都沒有被軟刪）。
+        """
         stmt = select(func.count()).select_from(DpUser).where(DpUser.email == email)
         return (await db.execute(stmt)).scalar_one() > 0
 

@@ -30,7 +30,17 @@ _DEFAULT_MAX_KEYS = 100_000
 # 由 86,400（1 天）下調至 3,600（#213 review）：`_MAX_KEYS` 達上限時本類是 **fail-open**（不擋，
 # 交 IP 限流兜底），而穩態 key 數約等於「到達率 × 本保留期」。保留 1 天時只需約 1.16 key/秒
 # （≈7 個來源 IP 各以 resend 的 10 次/分持續一天）即可把表推到十萬上限；保留 1 小時則需約
-# 27.8 key/秒（≈167 個 IP），實質不可達。
+# 27.8 key/秒。
+#
+# ⚠️ **達到 27.8 key/秒所需的 IP 數，#345 之後減半**（原推導以 resend 的 10 次/分、每請求 1 把章
+# 計 ≈167 個 IP）。改動後 `/register` 每個請求最多蓋 **2 把章**（acct + probe，靜默路徑亦蓋
+# probe），且其門檻是 `REGISTER_RATE_MAX`＝**30 次/分** → 1 key/秒/IP → 約 **28 個 IP** 即可達標。
+# 那離「實質不可達」有距離，原註解的結論已不成立，故此處改記真實數字而非沿用舊結論。
+#
+# ⚠️ 觸頂目前是**完全無聲**的（不記錄、不擋、不 log）。真要打到這個速率，攻擊者必須同時對
+# 大量信箱送出真實驗證信並寫入 pending / outbox 列，噪音極大，故判定為「縱深防禦的餘裕被
+# 砍半」而非立即可打的洞；但**若要調整，應優先補觸頂 WARN log**，而不是再下調保留期
+# （保留期已只有冷卻的 6 倍）。追蹤見 #345 的 Security Review MEDIUM-1。
 #
 # 為何值得在意：fail-open 之後，任何尚未進表的 Email 其 `verify-send:acct:{email}` 永遠蓋不上章
 # → `/register` 對同一 Email 的 600 秒防狂發完全消失（只剩 30 次/分的帳號維度限流）→ 可對指定
@@ -77,14 +87,30 @@ class VerifySendCooldown:
         Raises:
             AppError: 仍在冷卻內（429 / COMMON_429，帶 retry_after 剩餘秒數，向上取整至少 1）。
         """
+        if retry_after := self.remaining(key, cooldown_sec, now=now):
+            raise AppError(status_code=429, detail=_COOLDOWN_MSG, error_code="COMMON_429", retry_after=retry_after)
+
+    def remaining(self, key: str, cooldown_sec: float, *, now: float | None = None) -> int:
+        """剩餘冷卻秒數（向上取整、至少 1）；未在冷卻中回 0。**不拋例外。**
+
+        `check` 的無副作用版本，供需要「知道在冷卻中、但不想回 429」的呼叫端使用——
+        register 對**他人**蓋的 Email 章必須靜默（#346），回 429 會洩漏「該 Email 有未逾期的
+        自助註冊待驗證列」。以例外當控制流可以達到同樣效果，但會讓那段讀起來像錯誤處理，
+        而它其實是正常分支。
+
+        `check` 改以本方法實作，兩者的時間比較因此只有一份。
+
+        ⛔ **回傳值不得直接回給匿名呼叫端。** 它是秒數，而「`verify-send:acct:` 還剩幾秒」
+        正是 #346 要隱藏的事實（該章只在真的寄出時蓋 ⇒ 剩餘秒數洩漏「有人剛對此 Email
+        寄出驗證信」）。需要回 `retry_after` 時只能用**自己的** probe 章——那與該 Email
+        的任何事實無關。目前唯一的呼叫端（register / resend）只取布林。
+        """
         current = time.monotonic() if now is None else now
         last = self._last.get(key)
         if last is None:
-            return
+            return 0
         elapsed = current - last
-        if elapsed < cooldown_sec:
-            retry_after = math.ceil(cooldown_sec - elapsed)
-            raise AppError(status_code=429, detail=_COOLDOWN_MSG, error_code="COMMON_429", retry_after=retry_after)
+        return math.ceil(cooldown_sec - elapsed) if elapsed < cooldown_sec else 0
 
     def record(self, key: str, *, now: float | None = None) -> None:
         """蓋上「剛成功送出驗證信」時間戳（送信成功後呼叫，刷新冷卻起點）。"""
