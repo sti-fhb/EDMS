@@ -8,9 +8,11 @@
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import func, select
 
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.notify.models import DpEmailLog
 from app.dp.user import router as auth_router
 from app.dp.user.models import DpPendingRegistration
 from app.dp.user.token import hash_token
@@ -255,6 +257,19 @@ async def test_real_resend_still_cooled_across_ips(client, db, as_ip):
 
     這條是候選 1（key 加 IP 維度）被否決的原因：那個做法會讓換 IP 就能對同一信箱無限發信，
     而 register 是匿名端點——把「封鎖某人註冊」換成「用組織自己的網域對某人信箱轟炸」。
+
+    ## ⚠️ #345 起改用**副作用**驗，不再驗狀態碼——性質沒放棄，是換了手段
+
+    原本斷言跨 IP 第二次回 **429**。但那個 429 把「有沒有 acct 章」跨 IP 洩漏了出去，而
+    acct 章只在真的寄出時蓋（#213）⇒ 它等同於「register 剛才是真寄還是靜默」⇒
+    「這個 Email 是不是受邀者」。兩個請求即可決定性取出邀請名單，與 #345 原本要修的殘留同級。
+
+    改為：仍然**不寄**（防轟炸的目的原封不動），但回 200 靜默。本測試因此改成斷言
+    **outbox 沒有新增列**——那才是「不得對同一信箱無限發信」的直接證據；狀態碼只是它
+    先前的代理指標，而那個代理指標本身是個 oracle。
+
+    ⛔ 日後若有人想把 429 加回來「讓使用者知道在冷卻中」，請先讀上面這段：使用者自己的
+    冷卻**仍然**回 429（走 probe 章），回 429 的只能是自己那一層。
     """
     email = "realresend@edms.local"
     now = utcnow()
@@ -276,6 +291,59 @@ async def test_real_resend_still_cooled_across_ips(client, db, as_ip):
     first = await client.post("/api/resend-verification", json={"email": email})
     assert first.status_code == 200  # 真的寄出 → 蓋 Email 章
 
-    as_ip("203.0.113.2")  # 換 IP 也擋得住
+    sent_after_first = await db.scalar(
+        select(func.count()).select_from(DpEmailLog).where(DpEmailLog.recipient == email)
+    )
+    assert sent_after_first == 1, "前提錨點：第一次確實寄出了，否則下面的『沒有第二封』恆真"
+
+    as_ip("203.0.113.2")  # 換 IP
     second = await client.post("/api/resend-verification", json={"email": email})
-    assert second.status_code == 429
+
+    assert second.status_code == 200, "#345：他人的 Email 章改為靜默，429 會洩漏該章的有無"
+    sent_after_second = await db.scalar(
+        select(func.count()).select_from(DpEmailLog).where(DpEmailLog.recipient == email)
+    )
+    assert sent_after_second == 1, "跨 IP **仍然不得真的再寄一封**——防轟炸的目的不變"
+
+
+async def test_resend_cross_ip_response_does_not_reveal_email_stamp(client, db, as_ip):
+    """#345 Security HIGH-1：register -> resend 的兩請求 oracle 已關閉。
+
+    攻擊路徑（改動前成立、實測過）：
+
+    | | register（IP1）| resend（IP2）| outbox |
+    |---|---|---|---|
+    | 受邀者 | 202 | **200** | 0 |
+    | 全新 | 202 | **429** | 1 |
+
+    兩個請求、決定性，且**命中時完全無聲**（兩步都不寄信，受害者與系統都沒有痕跡）——
+    噪音只出現在「猜錯」的那一半，正是攻擊者不在意的那一半。
+    """
+
+    async def probe(email: str) -> tuple[int, int]:
+        as_ip("203.0.113.1")
+        await client.post("/api/register", json=_reg_payload(email))
+        as_ip("203.0.113.2")
+        r = await client.post("/api/resend-verification", json={"email": email})
+        return r.status_code, r.json()["retry_after"]
+
+    now = utcnow()
+    db.add(
+        DpPendingRegistration(
+            token_hash=hash_token("h1-invite"),
+            email="h1-invited@edms.local",
+            user_name="受邀者",
+            pwd_hash=None,
+            kind="ADMIN_INVITE",
+            invite_id="INVH1000001",
+            expires_date=now + timedelta(hours=24),
+            created_user="admin01",
+            created_date=now,
+        )
+    )
+    await db.commit()
+
+    invited = await probe("h1-invited@edms.local")
+    fresh = await probe("h1-fresh@edms.local")
+
+    assert invited == fresh, f"受邀者與全新 Email 的 resend 回應必須相同；實得 {invited} vs {fresh}"

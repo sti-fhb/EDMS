@@ -132,7 +132,11 @@
 >
 > 關閉前的殘留長這樣（保留供追溯）：`/api/login` 回 `DP_AUTH_007` ⇒ 無未刪除的 `DP_USER` 列；`/api/register` 回 `DP_USER_001` ⇒ `DP_USER` 列存在（**含軟刪**）或有未逾期邀請。兩者交集 = `{未逾期 ADMIN_INVITE}` ∪ `{軟刪除的 DP_USER}`，而後者在本專案是**空集合**（系統無刪除使用者功能，`DP_USER.DELETED` 從不被設定），於是交集就是邀請名單本身。
 >
-> 關閉後 `register` 的 409 與 login 的 `DP_AUTH_004/005/008` 是**同一集合**，交集為 ∅。守衛為 `test_dp_register_no_enumeration.py::TestCrossEndpointClosed`——⚠️ 該 class 由原本「釘住殘留」改寫為「釘住已關閉」而**非刪除**：殘留消失了，但「它不該復活」需要有守衛（最容易在「為了 UX 把某一格的回應岔開」時被無聲打開）。
+> 關閉後 `register` 的 409 與 login 的 `DP_AUTH_004/005/008` 是**同一集合**，交集為 ∅。
+>
+> ⚠️ **這個等式有一個隱含前提，不是歷史而是現在式**：`email_exists()` 含軟刪、`get_by_email()` 排除軟刪，兩者相等**只因為本專案目前沒有刪除使用者的功能**（`DP_USER.DELETED` 無任何寫入點）。⛔ 日後新增刪除／軟刪功能時必須同時處理該差集，否則 `(DP_AUTH_007, 409)` 會無聲地重新變成 oracle（對象換成被軟刪者），而現有防列舉測試全部還會綠。見 `dp/user/repository.py::email_exists` 的 docstring。守衛為 `test_dp_register_no_enumeration.py::TestCrossEndpointClosed`——⚠️ 該 class 由原本「釘住殘留」改寫為「釘住已關閉」而**非刪除**：殘留消失了，但「它不該復活」需要有守衛（最容易在「為了 UX 把某一格的回應岔開」時被無聲打開）。
+>
+> ⚠️ **內容收斂不等於完全不可區分**：靜默 202 與「真的寄信」的 202 在**回應時間**上仍有差（前者只查 2 次就回，後者還要刪舊列、插新列、渲染並寫 outbox）。本次刻意未處理（固定延遲會讓端點對所有人變慢且數值難校準；攻擊面另受 IP 限流約束）。⛔ 勿把本節讀成「列舉面完全關閉」——詳見 `dp/user/router.py::register` 的 docstring。
 >
 > ⚠️ **刻意保留未關閉的一格**：`DP_AUTH_008` 與 `DP_AUTH_007` 仍可區分「某 Email 是否為已驗證帳號」——#208 AC 2 明訂（鎖定計數與既有 UX 掛在該路徑）。若日後要併掉，**必須同時補 dummy password verify**，見 `dp/user/service.py::login()` 的 docstring。
 >

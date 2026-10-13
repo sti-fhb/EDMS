@@ -41,10 +41,11 @@ login 收斂之後，攻擊者仍可從 `/api/register` 分辨出「這個 Email
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.notify.models import DpEmailLog
 from app.dp.user import router as auth_router
 from app.dp.user.kinds import KIND_ADMIN_INVITE
 from app.dp.user.models import DpPendingRegistration
@@ -115,6 +116,16 @@ def as_ip(monkeypatch):
     return _set
 
 
+async def _outbox_count(db, email: str) -> int:
+    """該 Email 的 outbox 列數（`DP_EMAIL_LOG`）。
+
+    ⚠️ 靜默路徑的「不寄信」必須**直接**斷言。只驗「pending 列沒變」是間接證明——一個
+    「照常寄信但不覆蓋」的實作會讓那些斷言全綠，而那正好把受害者的信箱變成探測回音板
+    （攻擊者打一次 register，受害者就收到一封他沒要求的信）。
+    """
+    return await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.recipient == email))
+
+
 def _payload(email: str) -> dict:
     return {"email": email, "user_name": "探測者"}
 
@@ -180,8 +191,11 @@ async def test_統一訊息同時鋪出登入與收信兩條路(client, db) -> N
 
 
 @pytest.mark.parametrize("state", ["registered", "invited"])
-async def test_冷卻武裝時仍回終局狀態而非429(client, db, state: str) -> None:
+async def test_冷卻武裝時的回應不因位置差而改變(client, db, state: str) -> None:
     """位置差也是 oracle：若一個擋在冷卻前、一個擋在冷卻後，武裝時會變成 409 vs 429。
+
+    ⚠️ #345 之後**兩種 state 的期望值不同**（已註冊 409、已受邀 429），名稱因此由
+    「仍回終局狀態而非 429」改為現名——受邀者不再有終局狀態，理由見下方 else 分支。
 
     ⚠️ **冷卻 key 是 `verify-send:acct:{email}`，必須武裝到「被測的那個 Email」。**
     先前這條測試以另一個 Email 成功註冊來「武裝冷卻」，但那只蓋了那個 Email 的章，被測
@@ -295,6 +309,7 @@ async def test_他人冷卻中不覆蓋既有_pending(client, db, as_ip) -> None
     after = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == victim))).scalar_one()
     assert after.token_hash == token_before, "受害者的驗證連結不得被作廢"
     assert after.expires_date == expires_before, "效期不得被延長或重設"
+    assert await _outbox_count(db, victim) == 1, "只有受害者自己那封；探測不得再寄一封"
 
 
 async def test_自己的冷卻仍明說_429(client, db, as_ip) -> None:
@@ -331,6 +346,7 @@ async def test_受邀列未被探測動到(client, db) -> None:
 
     probed = await client.post("/api/register", json=_payload(email))
     assert probed.status_code == 202, "#345：改為靜默 202；#125 的保護改由『什麼都不寫』達成"
+    assert await _outbox_count(db, email) == 0, "靜默路徑不得寄信——否則受害者信箱成了探測回音板"
 
     row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()
     assert row.token_hash == original, "原邀請信連結必須仍然有效"
@@ -363,3 +379,53 @@ async def test_自己冷卻內受邀與全新_email_同形(client, db, as_ip) ->
     assert (invited_1.status_code, invited_2.status_code) == (202, 429)
     assert (fresh_1.status_code, fresh_2.status_code) == (202, 429)
     assert invited_1.json() == fresh_1.json(), "第 1 次的回應必須逐欄位相同"
+
+
+@pytest.mark.parametrize("kind", ["invite", "self"])
+async def test_逾期的_pending_仍走覆蓋路徑(client, db, kind: str) -> None:
+    """**逾期**的待驗證列必須回歸「覆蓋 + 寄信」，不得被誤歸入靜默分支（#212）。
+
+    ## 為什麼這條是最容易被改壞的邊界
+
+    判定靠 `pending.expires_date > utcnow()` 這一個比較。把 `>` 寫成 `>=`、或有人為了
+    「順手統一」而拿掉效期判斷，受邀者與逾期者就會**一起**變成靜默——而那時：
+
+    - 邏輯仍自洽（兩者都不寫入），
+    - 上面所有「受邀者靜默」的測試**全綠**，
+    - 使用者端的症狀是「這個 Email 永遠註冊不了，而且沒有任何錯誤訊息」。
+
+    #212 的原始裁示正是「逾期列視為不存在，不應讓該 Email 被永久佔住」。少了本條，
+    那句話在 router 層沒有任何守衛（既有的 `test_register_overwrites_expired_admin_invite`
+    直接呼叫 service，走不到本次新增的靜默分支）。
+    """
+    email = f"expired-{kind}@edms.local"
+    if kind == "invite":
+        await _admin_invite(db, email=email, hours=-1)
+    else:
+        now = utcnow()
+        db.add(
+            DpPendingRegistration(
+                token_hash=hash_token(f"stale-{email}"),
+                email=email,
+                user_name="舊的自己",
+                pwd_hash=None,
+                kind="SELF_REGISTER",
+                expires_date=now - timedelta(hours=1),
+                created_user="self",  # CREATED_USER 是 varchar(20)，不可放 Email
+                created_date=now - timedelta(hours=2),
+            )
+        )
+        await db.flush()
+    await db.commit()
+    stale_token = hash_token(f"invite-{email}") if kind == "invite" else hash_token(f"stale-{email}")
+
+    resp = await client.post("/api/register", json=_payload(email))
+    fresh = await client.post("/api/register", json=_payload(f"fresh-{kind}@edms.local"))
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == fresh.json(), "逾期者的回應須與全新 Email 逐欄位相同"
+
+    row = (await db.execute(select(DpPendingRegistration).where(DpPendingRegistration.email == email))).scalar_one()
+    assert row.token_hash != stale_token, "逾期列必須被覆蓋（換新 token），否則該 Email 被永久佔住"
+    assert row.kind == "SELF_REGISTER", "覆蓋後成為自助註冊列"
+    assert await _outbox_count(db, email) == 1, "逾期者走的是真的寄信那條路，不是靜默"

@@ -30,7 +30,17 @@ _DEFAULT_MAX_KEYS = 100_000
 # 由 86,400（1 天）下調至 3,600（#213 review）：`_MAX_KEYS` 達上限時本類是 **fail-open**（不擋，
 # 交 IP 限流兜底），而穩態 key 數約等於「到達率 × 本保留期」。保留 1 天時只需約 1.16 key/秒
 # （≈7 個來源 IP 各以 resend 的 10 次/分持續一天）即可把表推到十萬上限；保留 1 小時則需約
-# 27.8 key/秒（≈167 個 IP），實質不可達。
+# 27.8 key/秒。
+#
+# ⚠️ **達到 27.8 key/秒所需的 IP 數，#345 之後減半**（原推導以 resend 的 10 次/分、每請求 1 把章
+# 計 ≈167 個 IP）。改動後 `/register` 每個請求最多蓋 **2 把章**（acct + probe，靜默路徑亦蓋
+# probe），且其門檻是 `REGISTER_RATE_MAX`＝**30 次/分** → 1 key/秒/IP → 約 **28 個 IP** 即可達標。
+# 那離「實質不可達」有距離，原註解的結論已不成立，故此處改記真實數字而非沿用舊結論。
+#
+# ⚠️ 觸頂目前是**完全無聲**的（不記錄、不擋、不 log）。真要打到這個速率，攻擊者必須同時對
+# 大量信箱送出真實驗證信並寫入 pending / outbox 列，噪音極大，故判定為「縱深防禦的餘裕被
+# 砍半」而非立即可打的洞；但**若要調整，應優先補觸頂 WARN log**，而不是再下調保留期
+# （保留期已只有冷卻的 6 倍）。追蹤見 #345 的 Security Review MEDIUM-1。
 #
 # 為何值得在意：fail-open 之後，任何尚未進表的 Email 其 `verify-send:acct:{email}` 永遠蓋不上章
 # → `/register` 對同一 Email 的 600 秒防狂發完全消失（只剩 30 次/分的帳號維度限流）→ 可對指定
@@ -89,6 +99,11 @@ class VerifySendCooldown:
         而它其實是正常分支。
 
         `check` 改以本方法實作，兩者的時間比較因此只有一份。
+
+        ⛔ **回傳值不得直接回給匿名呼叫端。** 它是秒數，而「`verify-send:acct:` 還剩幾秒」
+        正是 #346 要隱藏的事實（該章只在真的寄出時蓋 ⇒ 剩餘秒數洩漏「有人剛對此 Email
+        寄出驗證信」）。需要回 `retry_after` 時只能用**自己的** probe 章——那與該 Email
+        的任何事實無關。目前唯一的呼叫端（register / resend）只取布林。
         """
         current = time.monotonic() if now is None else now
         last = self._last.get(key)

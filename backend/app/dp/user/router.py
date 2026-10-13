@@ -1,11 +1,14 @@
 """認證端點（US1 / US2 / US3）：登入 / 註冊 / 忘記密碼 / 重設密碼（匿名）/ 換發 / 登出 / 入口頁模組摘要。"""
 
+import logging
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
+from app.core.log_redaction import mask_email
 from app.core.module_admin import module_admin_gate
 from app.core.module_roles import module_role_gate
 from app.core.operator import OperatorInfo, get_operator
@@ -109,6 +112,8 @@ def _verify_send_probe_key(email: str) -> str:
     return f"verify-send:probe:{get_client_ip() or 'unknown'}:{email}"
 
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["auth"])
 _service = AuthService()
 _register_service = RegisterService()
@@ -184,6 +189,35 @@ async def register(
     例外（#86）：**已驗證帳號**的存在性檢核置於冷卻之前。防列舉在此無實益——register 本來
     就以 409「已被註冊」對外洩露已驗證 Email 的存在（冷卻窗外即可分辨），冷卻期擋著只是讓
     使用者白等倒數。pending / 全新 Email 維持冷卻優先，防狂發語意不變。
+
+    ## 回應收斂（#345 / #346）與**未關閉的時間側通道**
+
+    回應只有三種：409（已驗證帳號）、429（**自己的** probe 冷卻）、202（其餘一切）。
+    未逾期 `ADMIN_INVITE` 與「他人蓋的 Email 章」都走靜默 202——不寄信、不覆蓋、不換 token、
+    不延長效期、不蓋 Email 章。於是 409 恰好等於「`DP_USER` 列存在」，與 login 的
+    `DP_AUTH_004/005/008` 同一集合，交叉比對不再產生新資訊。
+
+    ⚠️ **但內容收斂不等於完全不可區分——時間維度仍可區分，本次刻意未處理。**
+    靜默路徑只做 2 次查詢 + 蓋章就回；真實路徑還要再跑一次 `assert_email_available`
+    （2 次查詢）、刪舊列、插新列、渲染並寫 outbox。攻擊者量得出這個差。
+
+    `assert_email_available` 的 docstring 寫「round-trip 次數是**最後一道**可觀測差異」——
+    那句話在該方法**內部**仍成立（兩個分支都跑兩次查詢），但就**整個端點**而言已不再是
+    最後一道：差異從 status 退到了時間，不是消失。
+
+    ⚠️ **這個差距是「單一請求即可量測」，不是「要取夠樣本」。** 本機實測（同行程、同 DB、
+    且當時 CPU 正被別的測試佔用，屬不利條件）：靜默 202 中位數 9.2 ms、寄信 202 中位數
+    17.6 ms，**兩個區間完全不重疊**（11.2 < 16.5）。我原本寫「統計上取夠樣本並不便宜」
+    是錯的——理由寫錯比沒寫更危險，下一個人會據此放寬別的東西。
+
+    結構性原因（不是調校得掉的常數）：靜默路徑 3 次 SELECT 後即回；真實路徑另有
+    `register()` 內**重複的**可用性查詢、TTL 參數查詢、`DELETE`、`INSERT`、範本查詢、
+    outbox `INSERT`，以及有舊 pending 列時的稽核寫入（含交易級 advisory lock）。
+
+    不處理的理由改為：要真的關掉只能對整個端點設固定下限延遲（如一律 ≥120 ms），那會讓
+    所有使用者變慢且數值難校準；本次**接受此殘留**。⛔ **不要把這份 docstring 或
+    `error-codes.md` 讀成「列舉面完全關閉」**——那正是 #208 的 Security Review 抓到的
+    那種過度宣稱，而我在本次已經犯了一次（宣稱 register x resend 也關了，實測並沒有）。
     """
     _register_limiter.hit(f"register:acct:{data.email}")
 
@@ -218,6 +252,15 @@ async def register(
         # 唯一允許的寫入是 probe 章，它讓「同一 IP 連打」的回應與全新 Email 對齊（否則
         # 受邀 -> 202,202 而全新 -> 202,429，兩次請求就切得開）。
         _verify_send_cooldown.record(probe_key)
+        # 靜默路徑原本**一行 log 都沒有**（Security MEDIUM-2）：批量探測受邀名單時，命中的
+        # 那些（真正敏感的那半）在伺服器端完全不可見；客服也分不出「靜默擋下」與「信寄了
+        # 沒到」。log 不對外，記它不削弱防列舉。Email 比照既有寫法遮罩。
+        logger.info(
+            "自助註冊靜默受理 ip=%s email=%s reason=%s",
+            get_client_ip(),
+            mask_email(data.email),
+            "invited" if invited else "others_cooling",
+        )
         return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
     sent = await _register_service.register(
@@ -230,10 +273,16 @@ async def register(
     # 一封信都沒收到。register 不需要 probe 章——它沒有「靜默不寄」的防列舉需求（已驗證帳號直接
     # 回 409），且此路徑必然已寫入待驗證列，本身就受帳號維度限流約束。
     if sent:
+        # Email 章**只在真的寄出時蓋**（#213）：它跨 IP，誤蓋等於讓人封鎖他人 600 秒。
         _verify_send_cooldown.record(sent_key)
-        # probe 章也要蓋（#346）：只蓋 Email 章的話，同一人重打會撞上它而落入**靜默** 202，
-        # 於是他以為信一直在寄、實際一封都沒有——防狂發在改制後會從 429 退化成無聲。
-        _verify_send_cooldown.record(probe_key)
+    # probe 章**無條件蓋**（#346）。兩個理由：
+    # 1. 只蓋 Email 章的話，同一人重打會撞上它而落入**靜默** 202——他以為信一直在寄、
+    #    實際一封都沒有，防狂發在改制後會從 429 退化成無聲。
+    # 2. ⚠️ 若只在 `sent` 時蓋，範本被停用（`send_email` 回 queued_count=0）時全新 Email
+    #    兩個章都沒蓋 → 同 IP 第二次回 202；而受邀者走靜默路徑一律蓋 probe → 429。
+    #    **那會讓「範本誤設」變成一個新的列舉面。** 無條件蓋即與靜默路徑對齊。
+    # probe 是 IP x Email、只影響發起者自己，無條件蓋不會波及他人（與 Email 章的性質不同）。
+    _verify_send_cooldown.record(probe_key)
     return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
 
@@ -269,16 +318,46 @@ async def resend_verification(
     改動理由見 `_verify_send_probe_key` 的 docstring（#213）：原本無條件蓋 Email 章，使任何匿名者
     打一次 resend 就能無限期封鎖任意 Email 的自助註冊。
 
+    ⚠️ **#345 起 `check` 也分兩層**：只有**自己的** probe 章回 429；**他人**蓋的 Email 章改為
+    靜默（不寄、回 200）。原本無條件 `check(sent_key)` 讓「有沒有 acct 章」可跨 IP 讀出，
+    而那等同於「register 剛才是真寄還是靜默」＝「這個 Email 是不是受邀者」——兩個請求即可
+    決定性取出邀請名單。詳見下方實作處的註解。
+
     成功回應帶 retry_after（＝完整冷卻秒數）供前端起算倒數；兩條路徑的回應完全相同。
     """
     _resend_limiter.hit(f"resend:acct:{data.email}")
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
     sent_key = _verify_send_key(data.email)
     probe_key = _verify_send_probe_key(data.email)
-    _verify_send_cooldown.check(sent_key, cooldown_sec)
+
+    # **自己的**冷卻才明說（#345 Security HIGH-1，與 register 同一設計）
     _verify_send_cooldown.check(probe_key, cooldown_sec)
+
+    # ⚠️ **他人蓋的 Email 章必須靜默，不得回 429。** 這一段是 #345 關閉列舉面的另一半：
+    #
+    # acct 章只在「真的寄出」時蓋（#213），而 register 對未逾期邀請是靜默不寄、不蓋章。
+    # 於是「有沒有 acct 章」＝「register 剛才是真寄還是靜默」＝「這個 Email 是不是受邀者」。
+    # 本端點原本無條件 `check(sent_key)`，等於把那個事實跨 IP 讀出來：
+    #
+    #   ① register {V} 自 IP1 -> 一律 202（看不出東西）
+    #   ② resend   {V} 自 IP2 -> 429 ⇒ ① 真的寄了 ⇒ V 不是受邀者
+    #                            200 ⇒ ① 是靜默的 ⇒ V 是未逾期 ADMIN_INVITE
+    #
+    # 兩個請求、決定性，且**命中時完全無聲**（兩步都不寄信），與 #345 原本要修的殘留同級。
+    #
+    # ⛔ **防轟炸的目的不變、只換手段**：`test_real_resend_still_cooled_across_ips` 的
+    # docstring 寫「key 加 IP 維度會讓換 IP 就能對同一信箱無限發信」——那道保護由「仍然
+    # 不寄」承接（下方 early return 不呼叫 resend），改掉的只是「要不要用 429 昭告」。
+    # 該測試因此改為斷言「200 且 outbox 未新增」，性質沒放棄，只是改用副作用驗。
+    if _verify_send_cooldown.remaining(sent_key, cooldown_sec) > 0:
+        _verify_send_cooldown.record(probe_key)
+        return {"message": _RESEND_MESSAGE, "retry_after": cooldown_sec}
+
     sent = await _resend_service.resend(db, email=data.email)
-    _verify_send_cooldown.record(sent_key if sent else probe_key)
+    if sent:
+        _verify_send_cooldown.record(sent_key)
+    # probe 章無條件蓋（同 register）：否則「有沒有被蓋 probe」又會隨 sent 而異。
+    _verify_send_cooldown.record(probe_key)
     return {"message": _RESEND_MESSAGE, "retry_after": cooldown_sec}
 
 
