@@ -149,7 +149,10 @@ export function UsersPage() {
         ),
       },
     ],
-    // isSelf 不可省：它閉包捕獲 myUserId，少了這項則 me 晚到時 memo 不重算、自己那列仍可按
+    // isSelf 列入依賴是 `react-hooks/exhaustive-deps` 的要求，也確實是正確的依賴。
+    // ⚠️ 但它**目前不影響行為**：`accounts` 來自 `useUsers()`，那支每次 render 都回傳新物件，
+    // 所以這個 useMemo 本來就每次重算（變異驗證過：拿掉 isSelf，三條測試照樣全綠）。
+    // 別把它讀成「靠這項才正確」——實際撐住的是 accounts 的 identity 每次都變。
     [accounts, isSelf],
   )
 
