@@ -274,6 +274,36 @@ class TestPublishCheck:
         assert body["can_publish"] is False
         assert [(b["code"], b["target_id"]) for b in body["blockers"]] == [("SURVEY_NO_QUESTION", None)]
 
+    async def test_零題問卷停用後不擋(self, client, db) -> None:
+        """#611：停用的問卷學員看不到入口，有沒有題目都不影響學員——視同沒有問卷。
+
+        與 `test_有問卷但零題被擋` 成對：同一條建立路徑，差別只在停用與否。
+        """
+        uid = await _user(db, "t_pc12")
+        cid = await _publishable_course(client, db, uid)
+        created = await client.post(f"{_COURSES}/{cid}/survey", json={"survey_name": "off"}, headers=_bearer(uid))
+        assert created.status_code == 201, created.text
+        disabled = await client.put(
+            f"/api/et/surveys/{created.json()['survey_id']}",
+            json={"survey_name": "off", "is_active": False, "version": created.json()["version"]},
+            headers=_bearer(uid),
+        )
+        assert disabled.status_code == 204, disabled.text
+
+        body = await _check(client, uid, cid)
+        assert body["can_publish"] is True, body["blockers"]
+
+        # 豁免只在停用期間成立——重新啟用後 0 題照樣擋，不是一次停用就永久放行
+        survey = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
+        enabled = await client.put(
+            f"/api/et/surveys/{survey['survey_id']}",
+            json={"survey_name": "off", "is_active": True, "version": survey["version"]},
+            headers=_bearer(uid),
+        )
+        assert enabled.status_code == 204, enabled.text
+        body = await _check(client, uid, cid)
+        assert [b["code"] for b in body["blockers"]] == ["SURVEY_NO_QUESTION"]
+
     async def test_有問卷且有題目可發布(self, client, db) -> None:
         uid = await _user(db, "t_pc11")
         cid = await _publishable_course(client, db, uid)
