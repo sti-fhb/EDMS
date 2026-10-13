@@ -23,7 +23,7 @@ from app.dp.user.activate_service import ActivateAccountService
 from app.dp.user.email_change_service import EmailChangeService
 from app.dp.user.forgot_service import ForgotPasswordService, ResetPasswordService
 from app.dp.user.profile_service import ProfileService
-from app.dp.user.register_service import RegisterService
+from app.dp.user.register_service import RegisterService, email_unavailable_error
 from app.dp.user.schemas import (
     ActivateAccountRequest,
     EmailChangeRequest,
@@ -186,14 +186,40 @@ async def register(
     使用者白等倒數。pending / 全新 Email 維持冷卻優先，防狂發語意不變。
     """
     _register_limiter.hit(f"register:acct:{data.email}")
-    # Email 不可用（已驗證帳號 / 未逾期邀請）優先於冷卻回應（#86）：兩者皆為終局狀態，等倒數
-    # 結束也不會變，且都不送信、冷卻無防狂發價值——先擋可免使用者白等一輪。
-    # ⚠️ 兩種狀態必須在**同一步**被擋下（#208），否則冷卻武裝時一個回 409、一個回 429，
-    # 位置差本身就是 oracle。合併於 assert_email_available 內，見該方法 docstring。
-    await _register_service.assert_email_available(db, data.email)
+
+    # 可用性判定與「回什麼」分離（#345）。兩次查詢一律都跑，見 email_availability 的 docstring。
+    registered, invited, _ = await _register_service.email_availability(db, data.email)
+
+    # 已驗證帳號優先於冷卻回應（#86）：那是**終局狀態**，等倒數結束也不會變，且不送信、
+    # 冷卻無防狂發價值——先擋可免使用者白等一輪。它維持 409，與 login 的 DP_AUTH_004/005/008
+    # 同一集合，所以交叉比對不產生新資訊（#345 刻意保留的一格）。
+    if registered:
+        raise email_unavailable_error()
+
     cooldown_sec = await _params.get_int_param(db, "LOGIN", "VERIFY_SEND_COOLDOWN_SEC", _VERIFY_SEND_COOLDOWN_DEFAULT)
-    key = _verify_send_key(data.email)
-    _verify_send_cooldown.check(key, cooldown_sec)
+    sent_key = _verify_send_key(data.email)
+    probe_key = _verify_send_probe_key(data.email)
+
+    # **自己的**冷卻才明說（#346）。probe key 是 IP x Email，只有發起者自己蓋得到，
+    # 故 429 不洩漏任何關於該 Email 的事實——全新 Email 在同一情境同樣回 429。
+    _verify_send_cooldown.check(probe_key, cooldown_sec)
+
+    # **他人**蓋的 Email 章必須靜默（#346）：那把章只在「真的寄出」時蓋（#213），所以
+    # 回 429 等於宣告「600 秒內有人對此 Email 成功寄出驗證信」＝有未逾期的自助註冊待驗證列。
+    others_cooling = _verify_send_cooldown.remaining(sent_key, cooldown_sec) > 0
+
+    if invited or others_cooling:
+        # 靜默成功：回應與全新 Email 逐欄位相同，且**什麼都不寫**——不寄信、不覆蓋 pending
+        # 列、不換 token、不延長效期、不蓋 Email 章。
+        #
+        # ⚠️ 蓋 Email 章會變成 #213 的封鎖手段（任何匿名者替任意 Email 蓋 600 秒章）；
+        # ⚠️ 覆蓋 pending 列會重開 #212（每 600 秒作廢一次受害者的驗證連結）。
+        #
+        # 唯一允許的寫入是 probe 章，它讓「同一 IP 連打」的回應與全新 Email 對齊（否則
+        # 受邀 -> 202,202 而全新 -> 202,429，兩次請求就切得開）。
+        _verify_send_cooldown.record(probe_key)
+        return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
+
     sent = await _register_service.register(
         db,
         email=data.email,
@@ -204,7 +230,10 @@ async def register(
     # 一封信都沒收到。register 不需要 probe 章——它沒有「靜默不寄」的防列舉需求（已驗證帳號直接
     # 回 409），且此路徑必然已寫入待驗證列，本身就受帳號維度限流約束。
     if sent:
-        _verify_send_cooldown.record(key)
+        _verify_send_cooldown.record(sent_key)
+        # probe 章也要蓋（#346）：只蓋 Email 章的話，同一人重打會撞上它而落入**靜默** 202，
+        # 於是他以為信一直在寄、實際一封都沒有——防狂發在改制後會從 429 退化成無聲。
+        _verify_send_cooldown.record(probe_key)
     return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
 

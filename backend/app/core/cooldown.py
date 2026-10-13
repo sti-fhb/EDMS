@@ -77,14 +77,25 @@ class VerifySendCooldown:
         Raises:
             AppError: 仍在冷卻內（429 / COMMON_429，帶 retry_after 剩餘秒數，向上取整至少 1）。
         """
+        if retry_after := self.remaining(key, cooldown_sec, now=now):
+            raise AppError(status_code=429, detail=_COOLDOWN_MSG, error_code="COMMON_429", retry_after=retry_after)
+
+    def remaining(self, key: str, cooldown_sec: float, *, now: float | None = None) -> int:
+        """剩餘冷卻秒數（向上取整、至少 1）；未在冷卻中回 0。**不拋例外。**
+
+        `check` 的無副作用版本，供需要「知道在冷卻中、但不想回 429」的呼叫端使用——
+        register 對**他人**蓋的 Email 章必須靜默（#346），回 429 會洩漏「該 Email 有未逾期的
+        自助註冊待驗證列」。以例外當控制流可以達到同樣效果，但會讓那段讀起來像錯誤處理，
+        而它其實是正常分支。
+
+        `check` 改以本方法實作，兩者的時間比較因此只有一份。
+        """
         current = time.monotonic() if now is None else now
         last = self._last.get(key)
         if last is None:
-            return
+            return 0
         elapsed = current - last
-        if elapsed < cooldown_sec:
-            retry_after = math.ceil(cooldown_sec - elapsed)
-            raise AppError(status_code=429, detail=_COOLDOWN_MSG, error_code="COMMON_429", retry_after=retry_after)
+        return math.ceil(cooldown_sec - elapsed) if elapsed < cooldown_sec else 0
 
     def record(self, key: str, *, now: float | None = None) -> None:
         """蓋上「剛成功送出驗證信」時間戳（送信成功後呼叫，刷新冷卻起點）。"""

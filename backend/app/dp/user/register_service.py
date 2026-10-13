@@ -61,6 +61,17 @@ _EMAIL_UNAVAILABLE_MSG = (
     "此 Email 已有帳號或進行中的啟用程序。若已完成註冊請直接登入（忘記密碼可自助重設）；"
     "若曾收到啟用或驗證信，請至信箱點選連結完成設定"
 )
+
+
+def email_unavailable_error() -> AppError:
+    """「Email 不可用」的 409（`DP_USER_001`）。
+
+    由 `assert_email_available`（service 層守門）與 register router（#86：終局狀態優先於
+    冷卻回應，故 router 需自行擋下而非等 `register()` 拋）共用——訊息與碼只有一處。
+    """
+    return AppError(status_code=409, detail=_EMAIL_UNAVAILABLE_MSG, error_code="DP_USER_001")
+
+
 _TEMPLATE_CODE = "ACCOUNT_VERIFY"
 _DEFAULT_TTL_MIN = 30
 _FUNC_NAME = "DP-REGISTER"
@@ -156,12 +167,36 @@ class RegisterService:
         register() 內部亦呼叫本方法（單一 409 來源），故服務層獨立呼叫時語意不變；回傳的
         `pending` 供 register() 重用，免去第二次查詢。
         """
+        registered, invited, pending = await self.email_availability(db, email)
+        if registered or invited:
+            raise email_unavailable_error()
+        return pending
+
+    async def email_availability(self, db: AsyncSession, email: str) -> tuple[bool, bool, DpPendingRegistration | None]:
+        """回 `(registered, invited, pending)`；**不拋例外**。
+
+        ## 為何把判定與「回什麼」分開（#345）
+
+        `assert_email_available` 把兩種「不可用」綁在同一個 409 上。#345 要讓**未逾期邀請
+        離開 409 集合**（改回與全新 Email 同形的靜默 202），於是 router 需要「知道是哪一種」
+        而不是「拿到一個例外」。
+
+        ⚠️ **本方法只是判定；`assert_email_available` 的契約完全不變、仍拋 409。** 那道守門
+        是 #125 在 **service 層**的保護（`register()` 內部呼叫它），不得因 router 改了回應
+        形式而鬆動——否則任何直接呼叫 `register()` 的路徑都能覆蓋管理者發出的邀請。
+
+        ⚠️ **兩次查詢一律都跑**，理由見 `assert_email_available` 的 docstring（round-trip
+        次數是最後一道可觀測差異）。本方法是那段不變量的實作位置。
+
+        Returns:
+            `registered`：已被已驗證帳號佔用。
+            `invited`：有未逾期的 `ADMIN_INVITE`。
+            `pending`：該 Email 的待驗證列（無則 None），供呼叫端重用免去第二次查詢。
+        """
         registered = await self._repo.email_exists(db, email)
         pending = await self._repo.get_pending_by_email(db, email)
         invited = pending is not None and pending.kind == KIND_ADMIN_INVITE and pending.expires_date > utcnow()
-        if registered or invited:
-            raise AppError(status_code=409, detail=_EMAIL_UNAVAILABLE_MSG, error_code="DP_USER_001")
-        return pending
+        return registered, invited, pending
 
     async def register(self, db: AsyncSession, *, email: str, user_name: str) -> bool:
         """自助註冊：檢核 → 寫待驗證表 + 寄驗證信；**不建 DP_USER、不授角色、不收密碼**。

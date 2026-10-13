@@ -70,16 +70,20 @@ async def test_register_and_resend_share_cooldown_budget(client):
     assert resend.json()["error_code"] == "COMMON_429"
 
 
-async def test_register_check_failure_does_not_start_cooldown(client, db):
-    """註冊被擋（409）→ 未送信、不 record 冷卻；隨後對同 Email 仍可正常寄送。
+async def test_register_silent_path_does_not_stamp_email_cooldown(client, db, as_ip):
+    """未寄信的註冊**不得留下 Email 章**；隨後他人對同 Email 仍可正常寄送。
 
-    觸發條件換過兩次：原以「弱密碼 422」，#212 之後註冊不收密碼而改用「未逾期的管理者邀請」
-    （當時回 `DP_USER_011`，位置在冷卻 check **之後**）。#208 又把該檢核連同已驗證帳號一起
-    前移到冷卻 check **之前**——兩種「Email 不可用」的狀態必須在同一步被擋下，否則冷卻武裝時
-    一個 409、一個 429，位置差本身就是 oracle。
+    觸發條件換過三次：原以「弱密碼 422」，#212 之後註冊不收密碼而改用「未逾期的管理者邀請」
+    （當時回 `DP_USER_011`，位置在冷卻 check **之後**）；#208 把該檢核前移到冷卻 check 之前；
+    **#345 再把它從 409 改成靜默 202**——受邀者離開 409 集合才能關掉交叉比對的列舉面。
 
-    因此本條現在驗的是較弱但仍必要的性質：**被擋下的註冊不得留下冷卻章**。至於「真的寄出才
-    蓋章」（#213 的核心）由本檔 `test_probe_by_attacker_does_not_block_victim_registration` 覆蓋。
+    ⚠️ 性質也隨之精確化。舊版寫「不得留下冷卻章」，但靜默路徑**會**蓋 `probe` 章
+    （IP x Email，只影響發起者自己，用來讓「同一 IP 連打」的回應與全新 Email 對齊）。
+    真正不得留下的是 **Email 章**（`verify-send:acct:`）——那把章跨 IP，留下來就等於
+    任何匿名者打一次註冊就能封鎖他人 600 秒，正是 #213 修掉的那條路。
+
+    故驗法改為**換一個 IP 去 resend**：`probe` 章與新 IP 無關，若此時被擋，只可能是
+    Email 章被蓋了。
     """
     email = "cool-invite@edms.local"
     now = utcnow()
@@ -98,13 +102,14 @@ async def test_register_check_failure_does_not_start_cooldown(client, db):
     )
     await db.commit()
 
-    blocked = await client.post("/api/register", json=_reg_payload(email))
-    assert blocked.status_code == 409
-    assert blocked.json()["error_code"] == "DP_USER_001"  # #208：與「已被註冊」同碼
+    as_ip("203.0.113.9")
+    silent = await client.post("/api/register", json=_reg_payload(email))
+    assert silent.status_code == 202, "#345：未逾期邀請改為與全新 Email 同形的靜默 202"
 
-    # 因上一步未 record，冷卻未啟動 → resend 應放行（非 429）
+    # 換一個 IP：probe 章與它無關，若此時被擋就代表 Email 章被蓋了（#213 的封鎖向量）
+    as_ip("198.51.100.7")
     resend = await client.post("/api/resend-verification", json={"email": email})
-    assert resend.status_code == 200
+    assert resend.status_code == 200, "靜默路徑不得蓋 Email 章——否則匿名者可封鎖他人 600 秒"
 
 
 async def test_verified_email_returns_409_even_within_cooldown(client, db):
