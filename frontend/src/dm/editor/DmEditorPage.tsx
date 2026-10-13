@@ -90,7 +90,12 @@ export function DmEditorPage() {
   const wantPublishedMeta = !isNew && !draftMetaPending && draftMeta?.doc_status !== "DRAFT"
   const { data: detail, isPending: detailLoading } = useDetail(isNew ? "" : docId!, wantPublishedMeta)
   const { data: recentVersions } = useVersions(isNew ? "" : docId!, wantPublishedMeta)
-  const { data: docTags, isFetching: docTagsFetching } = useDocTags(isNew ? "" : docId!, !isNew)
+  const {
+    data: docTags,
+    isFetching: docTagsFetching,
+    isPending: docTagsPending,
+    isError: docTagsError,
+  } = useDocTags(isNew ? "" : docId!, !isNew)
 
   const [form, setForm] = useState<EditorForm>(EMPTY_EDITOR_FORM)
   const [file, setFile] = useState<File | null>(null)
@@ -424,10 +429,34 @@ export function DmEditorPage() {
   }, [isNew, draftMeta, draftMetaFetching])
 
   // 續編須等 draftMeta 解析（決定續編 / 加新版）；加新版情境再等 DM07 詳細載入。
-  if (!isNew && (draftMetaPending || (!draftMeta && detailLoading))) {
+  //
+  // 標籤也必須等（#602）：表單若在標籤未到位時就渲染，使用者會看到空的標籤欄、以為本來就是空的，
+  // 存檔後版本層快照為空 → 核准發布時 `apply_version_tags_to_doc` 的差異式覆寫會把文件層標籤軟刪除。
+  // ⚠️ 用 `isPending`（還沒有資料）而**不是** `isFetching`：後者在有快取的背景 refetch 期間也為真，
+  // 會推翻 #396 的刻意設計（refetch 期間表單本來就該可互動，競態由 `lockPrefillFor` 鎖住）。
+  if (!isNew && (draftMetaPending || docTagsPending || (!draftMeta && detailLoading))) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
         <CircularProgress />
+      </Box>
+    )
+  }
+
+  // 標籤取不到就不開放編輯（#602）。⛔ 不可改成「顯示警告但仍放行」——使用者會照樣存檔，
+  // 而送出的空標籤會在核准發布時清掉文件既有的檢索標籤，全程沒有任何錯誤訊息。
+  if (!isNew && docTagsError) {
+    return (
+      <Box>
+        <ScreenHeader code="DM08" />
+        <Alert severity="error" sx={{ mb: 2 }}>
+          無法載入此文件現有的標籤，請重新整理後再試。
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            為避免送出時清空既有的可見對象與檢索標籤，本頁暫不開放編輯。
+          </Typography>
+        </Alert>
+        <Button variant="outlined" onClick={() => navigate(destAfter())}>
+          返回
+        </Button>
       </Box>
     )
   }

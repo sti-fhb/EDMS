@@ -518,3 +518,108 @@ describe("DmEditorPage 最近版本日期（#539）", () => {
     expect(screen.queryByText("2026-10-05")).not.toBeInTheDocument()
   }, 20000)
 })
+
+describe("DmEditorPage 標籤預帶守門與手冊 func 檢核（#602）", () => {
+  const TAGS_URL = "/api/dm/editor/documents/:docId/tags"
+
+  it("標籤預帶失敗：不開放編輯，且說明原因", async () => {
+    server.use(
+      http.get(TAGS_URL, () =>
+        HttpResponse.json({ error_code: "UNKNOWN", error_message: "伺服器錯誤" }, { status: 500 }),
+      ),
+    )
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    renderWithProviders(<DmEditorPage />)
+
+    expect(await screen.findByText(/無法載入此文件現有的標籤/)).toBeInTheDocument()
+    // ⚠️ 關鍵：表單**不得**渲染。只顯示警告仍放行的話，使用者會看到空的標籤欄、以為本來就是空的，
+    // 存檔後版本層快照為空 → 核准發布時 `apply_version_tags_to_doc` 差異式覆寫會把文件層標籤軟刪除。
+    expect(screen.queryByLabelText(/變更摘要/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "儲存為草稿" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "送交簽核" })).not.toBeInTheDocument()
+  }, 20000)
+
+  it("標籤尚未載入完成前不渲染表單（不存在「空標籤可操作」的時間窗）", async () => {
+    server.use(
+      http.get(TAGS_URL, async () => {
+        await delay(400)
+        return HttpResponse.json({ audience_pairs: [{ unit_id: "100", audience_id: "1" }], retrieval_ids: ["20"] })
+      }),
+    )
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    renderWithProviders(<DmEditorPage />)
+
+    // 先等其他查詢（draft-meta / detail / options）落定，此時**唯一**未落定的是 doc-tags。
+    // 少了這段等待，下面的否定斷言會因為「其他查詢還在跑、本來就沒渲染」而恆真（拿掉閘門也會過）。
+    await new Promise((r) => setTimeout(r, 150))
+    expect(screen.queryByRole("button", { name: "儲存為草稿" })).not.toBeInTheDocument()
+
+    // 正向配對：落定後表單出現且標籤已預帶，證明上面的否定斷言不是因為頁面根本壞掉
+    expect(await screen.findByRole("button", { name: "儲存為草稿" })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue("全單位")).toBeInTheDocument()
+  }, 20000)
+
+  it("不動標籤存草稿：送出的 retrieval_ids 等於文件原有值，未被清空", async () => {
+    let sent: FormData | null = null
+    server.use(
+      http.post("/api/dm/documents/:docId/versions", async ({ request }) => {
+        sent = await request.formData()
+        return HttpResponse.json({ version_id: 99, previewable: true })
+      }),
+    )
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+
+    // 等預帶落定（doc-tags 預設回 retrieval_ids: ["20"]、配對 (全單位, 全體)）
+    expect(await screen.findByDisplayValue("全單位")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "儲存為草稿" }))
+
+    await waitFor(() => expect(sent).not.toBeNull())
+    // 正向斷言：送出的值等於文件原有值。清空是**沉默的**，只看畫面驗不到，必須攔截實際 payload。
+    expect(sent!.getAll("retrieval_ids")).toEqual(["20"])
+    expect(sent!.getAll("audience_unit_ids")).toEqual(["100"])
+    expect(sent!.getAll("audience_role_ids")).toEqual(["1"])
+  }, 20000)
+
+  it("續編首版手冊草稿：func 未選按送簽 → 前端擋下並標於欄位，不發出寫入請求", async () => {
+    let writeCalls = 0
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
+        HttpResponse.json({
+          doc_id: "DM-MANUAL-000009",
+          doc_name: "領血系統操作手冊草稿",
+          category_code: "MANUAL",
+          category_name: "系統操作手冊",
+          func_code: null, // 存草稿階段可留空（只有分類是結構必填）
+          func_name: null,
+          doc_status: "DRAFT",
+          name_editable: true, // 首版草稿 → 身份欄可改，func 亦可改
+          draft_version_id: 777,
+          version_no: "1.0",
+          change_summary: "首版",
+          file_name: "old.pdf",
+          file_size: 100,
+          previewable: true,
+          assigned_reviewer: "rev1",
+        }),
+      ),
+      http.put("/api/dm/documents/:docId/versions/:versionId", () => {
+        writeCalls += 1
+        return HttpResponse.json({ version_id: 777, previewable: true })
+      }),
+    )
+    paramsRef.current = { docId: "DM-MANUAL-000009" }
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+
+    // 正向錨點：確實進到「續編首版手冊」情境（func 欄可編才有意義）
+    expect(await screen.findByRole("combobox", { name: /關聯作業項目/ })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+
+    // 新增頁直接送簽會 inline 標紅；續編這條路線原本漏掉同一道檢核，改由後端 422 以 toast 呈現
+    expect(await screen.findByText("請選擇關聯作業項目")).toBeInTheDocument()
+    expect(writeCalls).toBe(0)
+    expect(navigateSpy).not.toHaveBeenCalled()
+  }, 20000)
+})
