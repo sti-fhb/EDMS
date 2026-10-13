@@ -511,3 +511,126 @@ class TestRequireRetestOnQuizChange:
 
         attempts, resets, _ = await _facts(db, uid=failed, quiz_id=qid, item_id=item_id)
         assert (attempts, resets) == (1, 0), "未通過者不應被寫入重置基準"
+
+
+class TestPassedDefinitionAfterRetest:
+    """#610：要求重測後，系統各處的「已通過」不得再以「**曾**及格」判定。
+
+    ## 這不是放寬 `can_reset_retry`
+
+    該規則的運算式未變（`has_attempt and not is_passed and used > max_retry`），
+    改的是呼叫端算出來的 `is_passed`——它原本數「所有輪次是否曾及格」，現在對齊
+    `quiz/repository.passed_student_attempt_counts` 已有的定義：
+    **在最近一次重置基準之後**是否仍有及格紀錄。
+
+    ⛔ 教師仍不可對「目前算通過」的學員按重置（見 `test_未經重置的及格者仍不可重置`
+    與 `test_重測又通過後恢復為不可重置` 兩條正向錨點）。
+    """
+
+    @staticmethod
+    def _reset_url(course_id: int, user_id: str, quiz_id: int) -> str:
+        return f"/api/et/courses/{course_id}/students/{user_id}/quizzes/{quiz_id}/retry-reset"
+
+    async def test_重測不及格且次數用盡時教師可重置(self, client, db) -> None:
+        """🔴 本 issue 的核心：少了這條，學員會**永久卡在課程裡**。
+
+        #361 起未及格的測驗會擋住後續項目，而教師又因「曾及格」而無法重置——
+        沒有任何補救管道。
+        """
+        teacher = await _user(db, "ZTT610A")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS610A", course_id=cid, item_id=item_id, quiz_id=qid)
+
+        # 教師改題並要求重測 → 寫入重置基準、清掉完成旗標
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        assert r.status_code == 204, r.text
+
+        # 學員重測三次（max_retry=2 → 本輪配額 3 次）全部不及格，次數用盡
+        for no in (2, 3, 4):
+            await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=no, score=10, is_pass=False)
+
+        r = await client.post(self._reset_url(cid, stu, qid), headers=_bearer(teacher))
+
+        assert r.status_code == 200, f"重測不及格且次數用盡者必須可重置，實得 {r.status_code} {r.text}"
+
+    async def test_剛要求重測尚未重考時仍不可重置(self, client, db) -> None:
+        """⚠️ 勾「要求重測」本身**不會**讓重置變可按。
+
+        此時本輪配額剛歸零、一次都還沒用，被 `used > max_retry` 擋下——擋的理由從
+        「已及格」換成「次數未用盡」，但結果相同。少了這條，看不出我只改了判定、
+        沒有放寬規則。
+        """
+        teacher = await _user(db, "ZTT610B")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS610B", course_id=cid, item_id=item_id, quiz_id=qid)
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+
+        r = await client.post(self._reset_url(cid, stu, qid), headers=_bearer(teacher))
+
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_TRACK_002"
+
+    async def test_未經重置的及格者仍不可重置(self, client, db) -> None:
+        """正向錨點：沒有要求重測時，行為完全不變。
+
+        少了這條，把 `is_passed` 一律算成 False 也會讓上面那條通過——而那正是擋牌
+        （`quiz/service.py`「不要放寬 can_reset_retry」）要防的事。
+        """
+        teacher = await _user(db, "ZTT610C")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS610C", course_id=cid, item_id=item_id, quiz_id=qid)
+        # 把配額用完，確保被擋下的理由只可能是「已及格」
+        for no in (2, 3):
+            await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=no, score=10, is_pass=False)
+
+        r = await client.post(self._reset_url(cid, stu, qid), headers=_bearer(teacher))
+
+        assert r.status_code == 409
+        assert r.json()["error_code"] == "ET_TRACK_002"
+
+    async def test_重測又通過後恢復為不可重置(self, client, db) -> None:
+        """正向錨點之二：基準**之後**有及格紀錄者，仍是「目前算通過」。"""
+        teacher = await _user(db, "ZTT610D")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS610D", course_id=cid, item_id=item_id, quiz_id=qid)
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+
+        # 重測：前兩次不及格、第三次通過 → 配額用盡但目前算通過
+        await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=2, score=10, is_pass=False)
+        await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=3, score=10, is_pass=False)
+        await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=4, score=95, is_pass=True)
+
+        r = await client.post(self._reset_url(cid, stu, qid), headers=_bearer(teacher))
+
+        assert r.status_code == 409, "基準後又通過者仍算目前通過，不可重置"
+        assert r.json()["error_code"] == "ET_TRACK_002"
+
+    async def test_要求重測後引導頁不再顯示已及格(self, client, db) -> None:
+        """另一半症狀：ET07 引導頁的綠色橫幅仍顯示舊分數「— 已及格」。
+
+        學員看到「已及格」卻被鎖在後面章節外，兩者互相矛盾。來源是
+        `attempt/repository.score_summary` 的第三個回傳值（其 docstring 自己寫著
+        「是否**曾**及格」）。
+
+        ⛔ 分數（`last` / `best`）維持取**所有輪次**——「重測後最高分要不要只算新一輪」
+        是規格疑義、另請 SA，不在本 issue 範圍。
+        """
+        teacher = await _user(db, "ZTT610E")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS610E", course_id=cid, item_id=item_id, quiz_id=qid)
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+
+        r = await client.get(f"/api/et/quizzes/{qid}/intro", headers=_bearer(stu))
+
+        assert r.status_code == 200, r.text
+        payload = r.json()
+        assert payload["is_passed"] is False, "要求重測後不得再顯示已及格"
+        # 正向錨點：分數本身仍在（本 issue 不動分數聚合）
+        assert payload["best_score"] is not None

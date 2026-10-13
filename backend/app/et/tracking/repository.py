@@ -370,11 +370,27 @@ class EtTrackingRepository:
             )
         )
 
-    async def attempt_facts(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> tuple[int, bool]:
+    async def attempt_facts(self, db: AsyncSession, *, user_id: str, quiz_id: int, reset_base: int) -> tuple[int, bool]:
         """`(已提交 attempt 總數, 是否曾及格)`——供 `can_reset_retry` 判定。
 
-        總數含**所有**已閱卷的 attempt（不扣重置基準），因為重置基準本身就要寫入這個
-        總數；扣掉基準的「本輪已用次數」由 `round_used_attempts` 在呼叫端算。
+            總數含**所有**已閱卷的 attempt（不扣重置基準），因為重置基準本身就要寫入這個
+            總數；扣掉基準的「本輪已用次數」由 `round_used_attempts` 在呼叫端算。
+
+        ## 🔴 「已通過」是「**目前**算通過」，不是「曾及格」（#610）
+
+        判定條件為「**在最近一次重置基準之後**仍有及格紀錄」，即
+        `IS_PASS AND ATTEMPT_NO > reset_base`——與
+        `quiz/repository.passed_student_attempt_counts` 同一個定義。
+
+        用「曾及格」會讓教師要求重測後，那位學員**永久**被當成已通過：重測不及格且次數
+        用盡時 `can_reset_retry` 仍拒絕，而 #361 起未及格的測驗會擋住後續項目——學員這門
+        課再也完不了，且沒有任何補救管道。
+
+        ⛔ 這**不是**放寬 `can_reset_retry`。該規則的運算式未變，改的是餵給它的
+        `is_passed` 怎麼算；對基準之後仍有及格紀錄者，它照樣拒絕。
+
+            Args:
+                reset_base: 最近一次重置基準（`reset_base_of` 的輸出）；無重置紀錄為 0。
         """
         total = await db.scalar(
             select(func.count(EtQuizAttemptM.attempt_id)).where(
@@ -389,6 +405,8 @@ class EtTrackingRepository:
                 EtQuizAttemptM.user_id == user_id,
                 EtQuizAttemptM.quiz_id == quiz_id,
                 EtQuizAttemptM.is_pass.is_(True),
+                # 只看重置基準**之後**的及格——見本方法 docstring 的「目前算通過」。
+                EtQuizAttemptM.attempt_no > reset_base,
                 EtQuizAttemptM.deleted == 0,
             )
         )

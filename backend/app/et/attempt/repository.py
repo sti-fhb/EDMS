@@ -70,12 +70,23 @@ class EtAttemptRepository:
         )
 
     async def score_summary(
-        self, db: AsyncSession, *, user_id: str, quiz_id: int
+        self, db: AsyncSession, *, user_id: str, quiz_id: int, reset_base: int
     ) -> tuple[Decimal | None, Decimal | None, bool]:
-        """`(最近一次分數, 最高分, 是否曾及格)`——引導頁用。
+        """`(最近一次分數, 最高分, 是否**目前**算通過)`——引導頁用。
 
         最高分即**結業成績**（FR-ET-US6-10）。兩者一起回：只顯示最近一次會讓重考後
         考差的學員以為自己退步了，只顯示最高分則看不出本次表現。
+
+        ## 🔴 第三個值是「目前算通過」，不是「曾及格」（#610）
+
+        教師要求重測後，舊的及格不再算數——否則引導頁的綠色橫幅會顯示「— 已及格」，
+        而同一畫面上該項目標示未完成、後面章節鎖著，兩者互相矛盾。
+
+        ⛔ **分數仍取所有輪次**（`last` / `best` 不受 `reset_base` 影響）。「重測後最高分
+        要不要只算新一輪」是規格疑義，#610 明列為不在範圍、另請 SA。
+
+        Args:
+            reset_base: 最近一次重置基準（`reset_base` 方法的輸出）；無重置紀錄為 0。
         """
         rows = (
             await db.execute(
@@ -91,7 +102,8 @@ class EtAttemptRepository:
         if not rows:
             return None, None, False
         scores = [r[0] for r in rows]
-        return scores[-1], max(scores), any(r[1] for r in rows)
+        # 分數取全部輪次、及格旗標只看基準之後——兩者刻意不同，見 docstring。
+        return scores[-1], max(scores), any(r[1] for r in rows if r[2] > reset_base)
 
     # ── Attempt 生命週期 ────────────────────────────────────────────────────
 
