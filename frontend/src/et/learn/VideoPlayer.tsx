@@ -43,6 +43,17 @@ const SEEK_FLUSH_DELAY_MS = 2000
  */
 const CHECKPOINT_SECONDS = 15
 
+/**
+ * 兩次 `timeupdate` 之間允許的最大前進量，以**牆鐘秒**計（實際門檻再乘上 `playbackRate`）。
+ *
+ * `timeupdate` 正常每秒觸發約 4 次，故 1.5 秒有六倍餘裕；即使某次事件被延遲到 1 秒
+ * 才送達也仍在門檻內。超過即視為使用者拖動了進度條（#609）。
+ *
+ * ⭐ 寧可抓緊：**誤判為跳躍只是把一段切成兩段**，相接的兩段經後端聯集後完全相同；
+ * **漏判才是缺陷**——跳過的範圍會被算成看過，而那正是 FR-ET-US5-06 要擋的。
+ */
+const MAX_STEP_WALL_SECONDS = 1.5
+
 interface Props {
   video: MaterialVideoRow
   /** 已由後端依 `ET_VIDEO_PLAYBACK_MAX_RATE` 往下限縮之可選倍速。 */
@@ -206,8 +217,18 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
     }
     const onVisibility = () => {
       if (document.visibilityState === "hidden") finish()
+      if (document.visibilityState !== "visible") return
       // 切回分頁 → 學員還要繼續看，解除旗標讓下次離開能再收尾一次
-      if (document.visibilityState === "visible") finishedRef.current = false
+      finishedRef.current = false
+      // 🔴 **還要重新起算區段**（#609）。`finish()` 把 tracker 設成 `IDLE_TRACKER`
+      // （`anchor: null`），而影片在背景分頁其實沒有停——切回來若不重記起點，之後的
+      // `checkpoint` / `endSegment` / `onEnded` 一律因 `anchor === null` 不產生任何
+      // 區段：學員看完整支影片也不會完成，要手動暫停再播放一次才恢復。
+      const el = videoRef.current
+      if (el && !el.paused && !el.ended) {
+        lastTimeRef.current = el.currentTime
+        trackerRef.current = beginSegment(el.currentTime)
+      }
     }
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pagehide", finish)
@@ -312,6 +333,10 @@ export function VideoPlayer({ video, playbackRates, readOnly, onProgress }: Prop
             // 未達門檻時 `checkpoint` 只更新「最後觀察位置」，行為與原本的 `observeTime` 相同。
             const result = checkpoint(trackerRef.current, e.currentTarget.currentTime, {
               minSeconds: CHECKPOINT_SECONDS,
+              // 依倍速放寬：2 倍速下同樣的牆鐘間隔會走兩倍的影片時間。
+              // 取 `e.currentTarget.playbackRate` 而非 state 的 `rate`——後者在使用者
+              // 剛切倍速、effect 尚未套用到元素上的那一瞬間會與實際值不符。
+              maxStepSec: e.currentTarget.playbackRate * MAX_STEP_WALL_SECONDS,
             })
             trackerRef.current = result.state
             // ⚠️ 只在真的切出一段時才呼叫 `enqueue`——`timeupdate` 每秒觸發約 4 次，

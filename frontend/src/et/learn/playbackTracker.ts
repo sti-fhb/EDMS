@@ -16,8 +16,22 @@
  * `timeupdate` 每秒觸發約 4 次。用它累加等於在前端做聯集，而前端手上沒有既有區段可
  * 比對——學員第二次看同一段時，前端無從得知那段已經看過。聯集必須在後端做。
  *
- * 本模組只用 `timeupdate` 記下「最後觀察到的播放位置」，那是 `seeked` 唯一能拿到的
- * **跳躍前**位置：`seeked` 事件觸發時 `currentTime` 已經是新位置了。
+ * 本模組用 `timeupdate` 記下「最後觀察到的播放位置」。
+ *
+ * ## 🔴 跳躍必須在 `timeupdate` 偵測，不能等 `seeked`（#609）
+ *
+ * 本模組原本假設「`seeked` 時 `state.last` 還是跳躍前的位置」。**那個前提是錯的**：
+ * 依 HTML 規格，瀏覽器完成 seek 時**先**發 `timeupdate`（`currentTime` 已是新位置、
+ * `seeking` 已為 false）**再**發 `seeked`。於是 `observeTime` 早就把 `last` 覆寫成新
+ * 位置，`seekTo` 拿它當終點等於把跳過的整段算成看過——0 秒播到 10 秒再拖到 600 秒，
+ * 上報 `[0,600]`、覆蓋率約 97%，項目直接完成。
+ *
+ * 故改為在 `checkpoint`（即 `timeupdate` 的進入點）比對位置是否連續：**不連續就以
+ * 跳躍前的位置收掉前一段、從新位置重新起算**。`seekTo` 保留，負責暫停中跳躍等
+ * `timeupdate` 不會發生的情形。
+ *
+ * ⭐ `maxStepSec` 的誤判方向是刻意選的：**誤判為跳躍只是把一段切成兩段**，相接的兩段
+ * 經後端聯集後完全相同；**漏判才是缺陷**（跳過的範圍被算成看過）。故門檻寧可抓緊。
  *
  * ## 為何是純函式而非 class
  *
@@ -99,14 +113,32 @@ export function endSegment(state: TrackerState, endAt: number): { state: Tracker
  * `[0,15]`、`[15,30]`、`[30,45]`⋯ 相接（gap = 0），後端聯集回 `[0,45]`，
  * 結果與一次送完全相同。
  *
+ * ## 它同時是跳躍的偵測點（#609）
+ *
+ * 見模組 docstring：`seeked` 來得太晚，`last` 那時已被覆寫。位置若與上次觀察不連續，
+ * 就在這裡以**跳躍前**的位置收段、從新位置重記。
+ *
  * @param minSeconds 距離目前起點至少要走過幾秒才切一段；未達則原樣返回。
+ * @param maxStepSec 兩次 `timeupdate` 之間允許的最大前進量（影片秒）。超過、或位置
+ *   倒退，即視為跳躍。應依 `playbackRate` 放寬——2 倍速下同樣的牆鐘間隔會走兩倍的
+ *   影片時間。
  */
 export function checkpoint(
   state: TrackerState,
   currentTime: number,
-  { minSeconds }: { minSeconds: number },
+  { minSeconds, maxStepSec }: { minSeconds: number; maxStepSec: number },
 ): { state: TrackerState; segment: Segment | null } {
-  if (state.anchor === null || floorSec(currentTime) - state.anchor < minSeconds) {
+  if (state.anchor === null) return { state, segment: null }
+
+  // 不連續 ⇒ 跳躍。終點取 `state.last`（跳躍前），新段自 `currentTime` 起算；
+  // 跳過的範圍夾在兩者之間、兩邊都不含它，故完全不產生區段（FR-06）。
+  const advance = currentTime - state.last
+  if (advance < 0 || advance > maxStepSec) {
+    const { segment } = endSegment(state, state.last)
+    return { state: beginSegment(currentTime), segment }
+  }
+
+  if (floorSec(currentTime) - state.anchor < minSeconds) {
     return { state: observeTime(state, currentTime), segment: null }
   }
   const { segment } = endSegment(state, currentTime)

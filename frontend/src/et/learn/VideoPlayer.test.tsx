@@ -137,12 +137,14 @@ describe("ET06 影片播放器", () => {
 
       setCurrentTime(video, 0)
       fireEvent.play(video)
-      setCurrentTime(video, 120)
-      fireEvent.timeUpdate(video)
+      // 播到 10 秒（< CHECKPOINT_SECONDS）→ 期間不打點，暫停時才送出唯一一段。
+      // #609 之前這裡播到 120 秒卻只發一次 timeupdate；改成真實節奏後 120 秒會
+      // 觸發 8 次 15 秒打點，不再是「一次呼叫」——縮短播放長度以保留本條的原意。
+      playTo(video, 0, 10)
       fireEvent.pause(video)
 
       await waitFor(() => expect(reportIntervals).toHaveBeenCalledTimes(1))
-      expect(reportIntervals).toHaveBeenCalledWith(500, [{ start_sec: 0, end_sec: 120 }], 120)
+      expect(reportIntervals).toHaveBeenCalledWith(500, [{ start_sec: 0, end_sec: 10 }], 10)
     })
 
     it("課程已關閉時完全不上報（AC 12）", async () => {
@@ -152,8 +154,7 @@ describe("ET06 影片播放器", () => {
 
       setCurrentTime(video, 0)
       fireEvent.play(video)
-      setCurrentTime(video, 120)
-      fireEvent.timeUpdate(video)
+      playTo(video, 0, 120)
       fireEvent.pause(video)
 
       await new Promise((resolve) => setTimeout(resolve, 20))
@@ -166,9 +167,11 @@ describe("ET06 影片播放器", () => {
       setCurrentTime(video, 0)
       setPaused(video, false) // jsdom 不實作播放，`paused` 需自行設定
       fireEvent.play(video)
-      setCurrentTime(video, 10)
-      fireEvent.timeUpdate(video)
+      playTo(video, 0, 10)
+      // 真實順序：瀏覽器完成 seek 時**先**在新位置發 timeupdate，**再**發 seeked。
+      // #609 之前本檔只發 seeked，等於跳過了真正會出錯的那一步。
       setCurrentTime(video, 600) // 拖到接近結尾
+      fireEvent.timeUpdate(video)
       fireEvent.seeked(video)
       setPaused(video, true)
       fireEvent.pause(video)
@@ -183,8 +186,7 @@ describe("ET06 影片播放器", () => {
 
       setCurrentTime(video, 0)
       fireEvent.play(video)
-      setCurrentTime(video, 120)
-      fireEvent.timeUpdate(video)
+      playTo(video, 0, 10)
       fireEvent.pause(video)
 
       expect(await screen.findByText(/完成 20%/)).toBeInTheDocument()
@@ -200,15 +202,14 @@ describe("ET06 影片播放器", () => {
       setPaused(video, false)
       fireEvent.play(video)
       // 全程只有 timeupdate，沒有任何 pause / seeked / ended
-      for (const t of [5, 10, 16, 20, 32]) {
-        setCurrentTime(video, t)
-        fireEvent.timeUpdate(video)
-      }
+      playTo(video, 0, 32)
 
       await waitFor(() => expect(reportIntervals).toHaveBeenCalledTimes(2))
-      // 相接而不重疊——後端聯集回 [0,32]，與「播完才送一次」等價
-      expect(reportIntervals.mock.calls[0][1]).toEqual([{ start_sec: 0, end_sec: 16 }])
-      expect(reportIntervals.mock.calls[1][1]).toEqual([{ start_sec: 16, end_sec: 32 }])
+      // 相接而不重疊——後端聯集回 [0,30]，與「播完才送一次」等價。
+      // ⚠️ #609 之前本條以 5 秒為步長，而那個跨距在真實瀏覽器中只會出現在拖動進度條；
+      // 改真實節奏後打點落在 15 / 30 秒整點上。
+      expect(reportIntervals.mock.calls[0][1]).toEqual([{ start_sec: 0, end_sec: 15 }])
+      expect(reportIntervals.mock.calls[1][1]).toEqual([{ start_sec: 15, end_sec: 30 }])
     })
 
     it("切換項目（unmount）時仍送出最後一段與正確的續看位置", async () => {
@@ -221,12 +222,45 @@ describe("ET06 影片播放器", () => {
 
       setCurrentTime(video, 100)
       fireEvent.play(video)
-      setCurrentTime(video, 250)
-      fireEvent.timeUpdate(video)
+      playTo(video, 100, 110) // < CHECKPOINT_SECONDS：期間不打點，最後一段留到 unmount 才送
       unmount()
 
       await waitFor(() => expect(reportIntervals).toHaveBeenCalled())
-      expect(reportIntervals).toHaveBeenCalledWith(500, [{ start_sec: 100, end_sec: 250 }], 250)
+      // 第三個參數是續看位置——本條真正要守的是它不會被 ref 已為 null 而寫成 0
+      expect(reportIntervals).toHaveBeenCalledWith(500, [{ start_sec: 100, end_sec: 110 }], 110)
+    })
+
+    it("切到別的分頁再切回、繼續播放的部分仍計入（#609）", async () => {
+      /**
+       * 🔴 切走時 `finish()` 把 tracker 設成 `IDLE_TRACKER`（`anchor: null`），但影片在
+       * 背景分頁其實沒有停。切回來若不重新起算，之後的 `checkpoint` / `endSegment` /
+       * `onEnded` 一律因 `anchor === null` 不產生任何區段——學員看完整支影片也不會完成，
+       * 要手動暫停再播放一次才恢復記錄。
+       */
+      const { video } = await mountedVideo()
+
+      setCurrentTime(video, 0)
+      setPaused(video, false)
+      fireEvent.play(video)
+      playTo(video, 0, 10)
+
+      // 切走（hidden）→ 收尾並清空 tracker
+      setVisibility("hidden")
+      fireEvent(document, new Event("visibilitychange"))
+      await waitFor(() => expect(reportIntervals).toHaveBeenCalled())
+      const callsAfterHidden = reportIntervals.mock.calls.length
+
+      // 切回來（visible），影片仍在播放
+      setVisibility("visible")
+      fireEvent(document, new Event("visibilitychange"))
+
+      // 之後繼續播放的部分必須被記錄
+      playTo(video, 10, 20)
+      fireEvent.pause(video)
+
+      await waitFor(() => expect(reportIntervals.mock.calls.length).toBeGreaterThan(callsAfterHidden))
+      const after = reportIntervals.mock.calls.slice(callsAfterHidden).flatMap((c) => c[1])
+      expect(after).toEqual([{ start_sec: 10, end_sec: 20 }])
     })
 
     it("有上次位置時載入後定位過去（AC 11）", async () => {
@@ -248,6 +282,33 @@ describe("ET06 影片播放器", () => {
 })
 
 /** jsdom 不實作播放，`currentTime` 需自行設定才會被事件處理器讀到。 */
+/**
+ * 模擬**連續播放**到 `to`：每步前進 1 影片秒並發一次 `timeupdate`。
+ *
+ * 🔴 **不可寫成「設 `currentTime = to` 後只發一次 `timeUpdate`」**（#609 之前本檔的
+ * 寫法）。真瀏覽器播放期間 `timeupdate` 每秒約觸發 4 次，一次跳 120 秒在真實情境中
+ * 只會發生在「使用者拖動了進度條」——而 #609 之後 `checkpoint` 正是以位置是否連續
+ * 來分辨這兩者。沿用舊寫法等於把每一次正常播放都偽裝成跳躍。
+ *
+ * 步長取 1 秒（門檻為 `playbackRate * 1.5`）：既在門檻內，事件數又只有 0.25 秒步長的
+ * 四分之一。
+ */
+function playTo(video: HTMLVideoElement, from: number, to: number) {
+  for (let t = from + 1; t <= to; t += 1) {
+    setCurrentTime(video, t)
+    fireEvent.timeUpdate(video)
+  }
+  if (video.currentTime !== to) {
+    setCurrentTime(video, to)
+    fireEvent.timeUpdate(video)
+  }
+}
+
+/** jsdom 的 `document.visibilityState` 唯讀，需自行覆寫才能模擬切分頁。 */
+function setVisibility(state: "hidden" | "visible") {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true })
+}
+
 function setCurrentTime(video: HTMLVideoElement, seconds: number) {
   Object.defineProperty(video, "currentTime", { value: seconds, configurable: true, writable: true })
 }
