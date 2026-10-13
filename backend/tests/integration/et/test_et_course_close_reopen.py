@@ -646,6 +646,45 @@ class TestReopenRerunsPublishChecks:
 
         assert r.status_code == 200, r.text
 
+    async def test_關閉期間的零題問卷停用後可再開課(self, client, db) -> None:
+        """#611：再開課的導引寫「新增至少 1 題，或**停用**該問卷」——照做之後不可再被同一條擋下。
+
+        停用前先以 publish-check 確認這門課**確實**被 `SURVEY_NO_QUESTION` 擋著：少了這一步，
+        後面的 200 也可能只是因為問卷根本沒建成功。錨點用 publish-check（回 200）而不是一次
+        失敗的再開課——同一條測試裡的失敗請求會連帶回滾前置建立的使用者列。
+        """
+        uid = await _user(db, "t_rc04")
+        ctx = await _published_course(client, db, uid)
+        cid = ctx["course_id"]
+        closed = await client.post(f"{_COURSES}/{cid}/close", json={"version": ctx["version"]}, headers=_bearer(uid))
+        assert closed.status_code == 200, closed.text
+        # 關閉中的課程不能刪問卷、只能停用（ET_SURVEY_007），正是本 issue 的情境
+        survey = await client.post(f"{_COURSES}/{cid}/survey", json={"survey_name": "s"}, headers=_bearer(uid))
+        assert survey.status_code == 201, survey.text
+
+        before = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+        assert [b["code"] for b in before.json()["blockers"]] == ["SURVEY_NO_QUESTION"]
+
+        disabled = await client.put(
+            f"/api/et/surveys/{survey.json()['survey_id']}",
+            json={"survey_name": "s", "is_active": False, "version": survey.json()["version"]},
+            headers=_bearer(uid),
+        )
+        assert disabled.status_code == 204, disabled.text
+
+        r = await client.post(
+            f"{_COURSES}/{cid}/reopen",
+            json={
+                "course_name": "x",
+                "open_start_at": _future(1),
+                "open_end_at": _future(400),
+                "version": closed.json()["version"],
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 200, r.text
+
     async def test_再開課不重複帶入標籤學員也不重寄信(self, client, db) -> None:
         """再開課不是一次新的招生——`publish` 的標籤帶入與寄信刻意不呼叫。
 

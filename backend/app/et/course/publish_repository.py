@@ -59,9 +59,18 @@ class EtPublishRepository:
 
         0 是「有問卷但一題都沒有」（要擋發布），`None` 是「沒有問卷」（選配，不擋）。
         兩者共用同一個值會讓 AC 23 失效——每一門沒建問卷的課程都會被擋住發布。
+
+        **已停用的問卷視同沒有問卷**（#611）：停用後學員端不顯示入口，有沒有題目都影響
+        不到學員。已發布 / 已關閉課程的問卷不能刪、只能停用（`ET_SURVEY_007`），再開課的
+        導引也寫「新增至少 1 題，或停用該問卷」——不排除停用者，照導引停用後仍會被同一條
+        擋下，關閉中的課程就只剩「對已停用的問卷補題目」這條路。
         """
         survey_id = await db.scalar(
-            select(EtSurvey.survey_id).where(EtSurvey.course_id == course_id, EtSurvey.deleted == 0)
+            select(EtSurvey.survey_id).where(
+                EtSurvey.course_id == course_id,
+                EtSurvey.deleted == 0,
+                EtSurvey.is_active.is_(True),
+            )
         )
         if survey_id is None:
             return None
