@@ -63,6 +63,9 @@ class DetailResponse(BaseModel):
     # 廢止僅被「已有進行中送審」擋，與 spec_us4 FR-005 所列的兩種失效情境一致（#600）。
     can_obsolete: bool  # DM_EDITOR 且無進行中 PENDING 送審週期 → 廢止入口可點
     obsolete_lock_reason: str | None  # 廢止入口失效原因（送審中 / 廢止待簽核）；可點時為 None
+    # ⚠️ 上面兩組旗標**只在 `is_obsolete` 為 False 時有意義**：已廢止文件的 read-only 模式整列動作
+    # 不渲染，且後端 `DM_DOC_016`（僅能對已發布文件發起廢止）為最終守門。刻意不在旗標裡加
+    # `not is_obsolete`——目前沒有任何呼叫端會在 read-only 下讀它，加了是為不存在的情境寫防禦碼。
     is_obsolete: bool  # STATUS=OBSOLETE → read-only 模式
     obsolete_info: ObsoleteInfo | None
 

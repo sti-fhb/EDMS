@@ -294,6 +294,38 @@ async def test_initiate_blocked_when_new_version_in_review(db):
     assert e.value.error_code == "DM_REVIEW_002"
 
 
+async def test_initiate_allowed_when_initiator_has_own_draft(db):
+    """發起人自己持有未送簽草稿時，廢止**仍可發起**——這是 #600 前端解鎖所依賴的後端契約。
+
+    ⚠️ 本條刻意寫在這裡而非 `test_dm_detail.py`：那邊斷言的是 `DetailService` 自己算出的
+    `can_obsolete` 旗標，對「後端真的收」而言是同義反覆——若日後有人在 `ObsoleteService.initiate`
+    加一道草稿檢核，前端會變成比後端寬（真正的回歸方向），而那邊的測試全綠。本條驗的是
+    `initiate` 的實際結果，變更 `initiate` 才會紅。
+
+    對照組是上一條 `test_initiate_blocked_when_new_version_in_review`：差別只在
+    「DRAFT 版本」vs「PENDING_REVIEW 版本 + PENDING review 列」——擋廢止的是後者，不是草稿本身。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    await _grant(db, "rev1", DM_REVIEWER)  # #250：送簽檢核審核者可指定性
+    doc, _ = await _published_doc(db, "DM-SOP-000408")
+    await _add_version(db, "DM-SOP-000408", "2.0-draft", status="DRAFT", author="ed")
+
+    result = await _svc.initiate(
+        db,
+        doc_id="DM-SOP-000408",
+        reason="流程停辦",
+        reviewer_id="rev1",
+        file_name=None,
+        file_bytes=None,
+        file_mime=None,
+        op=_op("ed"),
+    )
+    assert result.doc_status == "PENDING_OBSOLETE"
+    await db.refresh(doc)
+    assert doc.status == "PENDING_OBSOLETE"
+
+
 async def test_initiate_invalid_attachment_format_blocked(db):
     await _published_doc(db, "DM-SOP-000408")
     with pytest.raises(AppError) as e:

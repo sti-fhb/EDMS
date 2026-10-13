@@ -201,8 +201,11 @@ async def get_upload_limits(
     本端點與上傳端點掛同一個 `DmContext`。限制值本身不是機密（使用者按下上傳就會從
     錯誤訊息知道上限），但沒有理由讓非 DM 角色者也查得到。
 
-    ⚠️ **刻意不細分到 `DM_EDITOR`**：廢止附件（`DmObsoleteDialog`）也要用這組值，而
-    發起廢止的人未必具編輯者角色。細分會讓那個視窗拿不到值而退回寫死的預設。
+    **不細分到 `DM_EDITOR` 的理由（2026-10 更正）**：原文寫「廢止附件視窗也要用，而發起廢止的
+    人未必具編輯者角色」——**後半句不成立**，`obsolete/router.py` 的 `_ensure_editor` 一直都
+    要求 `DM_EDITOR`。真正還成立的理由只剩「這組值不是機密、細分沒有收益」，故維持現狀不動行為。
+    ⚠️ 本段與同檔 `list_reviewers`（#600 已細分到 `DM_EDITOR`）**不是矛盾**：那支回的是人員名冊，
+    這支回的是上限數字與副檔名清單。若日後要一併細分，是可行的、不會打斷任何呼叫端。
     """
     max_mb, allowed = await resolve_upload_limits(db)
     return UploadLimits(max_mb=max_mb, allowed_extensions=sorted(allowed))
