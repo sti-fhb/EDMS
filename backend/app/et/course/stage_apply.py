@@ -60,6 +60,7 @@ from app.et.course.stage_rules import (
     StageNode,
 )
 from app.et.material.repository import EtMaterialRepository
+from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.models import EtOption
 from app.et.quiz.repository import EtQuizRepository
 from app.et.survey.models import EtSurveyOption
@@ -92,6 +93,13 @@ async def apply_stage(
     await _delete_removed(db, course_id=course.course_id, staged_sources=staged_sources, operator=operator)
     await _park_sort_orders(db, nodes=nodes, operator=operator)
     await _upsert(db, course=course, nodes=nodes, operator=operator)
+
+    # 🔴 **完課戳記只在整批套用完成後蓋一次**（`_DELETERS` 一律帶 `stamp=False`）。
+    #
+    # 刪除階段蓋章會用中間狀態判定：學員 2/3、教師同一批刪掉未完成的那項**又新增一項**
+    # ⇒ 階段 1 結束時是 2/2 被蓋章，階段 3 之後其實是 2/3、沒完課。而 `COMPLETED_AT`
+    # 只寫一次、回退不清除，那個時間戳會一直停在一個他沒完課的時點。
+    await EtProgressRepository().stamp_completed_at(db, course_id=course.course_id, operator=operator)
 
 
 def _validate_tree(nodes: Sequence[StageNode]) -> None:
@@ -159,8 +167,8 @@ async def _delete_each(handler: Any, db: AsyncSession, ids: list[int], operator:
 #:
 #: `MATERIAL` / `QUIZ` 不在此表——它們隨所屬項目一起被刪（見模組 docstring）。
 _DELETERS: Final[dict[str, Any]] = {
-    ENTITY_CHAPTER: lambda db, ids, op: EtChapterRepository().soft_delete_with_cascade(db, ids, op),
-    ENTITY_ITEM: lambda db, ids, op: EtItemRepository().soft_delete_with_cascade(db, ids, op),
+    ENTITY_CHAPTER: lambda db, ids, op: EtChapterRepository().soft_delete_with_cascade(db, ids, op, stamp=False),
+    ENTITY_ITEM: lambda db, ids, op: EtItemRepository().soft_delete_with_cascade(db, ids, op, stamp=False),
     # 連其選項一起軟刪；**學員的作答明細不動**（`ET_QUIZ_ATTEMPT_D` 自給自足，
     # 見該函式 docstring 的 #279 裁示 Q2 = C）。
     ENTITY_QUESTION: lambda db, ids, op: EtQuizRepository().soft_delete_questions(db, ids, op),
@@ -213,7 +221,18 @@ async def _upsert(
 
     for spec in APPLY_ORDER:
         for node in [n for n in nodes if n.entity_type == spec.entity_type]:
-            values: dict[str, Any] = {f: node.payload.get(f) for f in payload_fields(spec)}
+            # 🔴 **只寫 payload 裡實際存在的 key**，缺的不碰。
+            #
+            # `payload_fields` 是推導的：日後內容表加欄位會自動納入，但**編輯到一半、
+            # 尚未更新的既有暫存列**沒有那個 key。用 `.get()` 會把 `None` 明確寫進去
+            # ——NOT NULL 欄位拋 IntegrityError、nullable 欄位（`TIME_LIMIT_MIN`、
+            # `DESCRIPTION_HTML` 等）則**靜默清成 NULL**，教師看到的是「我填過的說明
+            # 按更新就不見了」。缺 key 的正確語意是「這列產生時還沒有這個欄位」，
+            # 保留活表當前值才對。
+            #
+            # 新增的列缺 key 時維持 model 預設；NOT NULL 且無預設者會當場拋錯，那是
+            # 該響的警報——編輯端不可能產生那種列。
+            values: dict[str, Any] = {f: node.payload[f] for f in payload_fields(spec) if f in node.payload}
             if hasattr(spec.model, "sort_order"):
                 values["sort_order"] = node.sort_order
             if spec.link == LINK_CHILD_FK:
@@ -252,11 +271,18 @@ async def _write(
 ) -> int:
     """更新既有列或插入新列，回傳活表 id。"""
     if node.source_id is not None:
-        await db.execute(
+        result = await db.execute(
             update(spec.model)
             .where(getattr(spec.model, spec.pk) == node.source_id, spec.model.deleted == 0)
             .values(**values, updated_user=operator.user_id, updated_date=now)
         )
+        # 🔴 命中 0 列 ＝ 那個活表列已被別的路徑軟刪。不擋的話會**靜默**地把子節點
+        # 寫成指向一個已刪除的父層——活表出現到不了的資料，而且沒有任何錯誤。
+        if result.rowcount != 1:
+            raise ValueError(
+                f"暫存列指向的活表資料已不存在或已刪除："
+                f"{node.entity_type} SOURCE_ID={node.source_id}（命中 {result.rowcount} 列）"
+            )
         return node.source_id
 
     row = spec.model(**values, created_user=operator.user_id, created_date=now, deleted=0)

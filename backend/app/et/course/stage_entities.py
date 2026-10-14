@@ -107,9 +107,10 @@ def _parent_fk_fields_on(model: type[Any]) -> frozenset[str]:
 
     這些不是內容、是結構連結，套用時由子節點的 id 決定，故不搬。
     """
-    return frozenset(
-        s.fk for s in APPLY_ORDER if s.link == LINK_PARENT_FK and SPEC_BY_TYPE[s.parent_entity].model is model
-    )  # type: ignore[index]
+    # `LINK_PARENT_FK` 的 spec 必定有 `parent_entity`（`APPLY_ORDER` 裡只有教材與測驗，
+    # 兩者的父層都是項目），但型別上仍是 `str | None`——以區域變數收斂，不用 type: ignore。
+    reverse = [s for s in APPLY_ORDER if s.link == LINK_PARENT_FK and s.parent_entity is not None]
+    return frozenset(s.fk for s in reverse if SPEC_BY_TYPE[str(s.parent_entity)].model is model)
 
 
 def payload_fields(spec: EntitySpec) -> tuple[str, ...]:

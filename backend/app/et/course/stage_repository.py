@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.course.models import EtCourseContentStage
+from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, payload_fields
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
 from app.et.course.stage_rules import StageNode
@@ -87,15 +87,42 @@ class EtCourseStageRepository:
             for r in rows.all()
         )
 
-    async def clear(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
-        """清空暫存區。
+    async def lock_course(self, db: AsyncSession, course_id: int) -> None:
+        """對課程列取**行鎖**，序列化同一門課的「更新」。
 
-        ⛔ **軟刪除**（`DELETED = 1`），遵專案禁硬刪規範。唯一索引的條件帶
-        `DELETED = 0`，所以清空後再次編輯不會撞鍵。
+        🔴 沒有這把鎖，`load_tree → apply_stage → clear` 不是原子的。預設隔離等級是
+        READ COMMITTED，兩個並發請求（教師雙擊、或兩個分頁同時按）會**各自讀到完整
+        的暫存樹**，兩邊都跑新增 ⇒ `SOURCE_ID` 為 `None` 的節點被插入兩次，活表出現
+        重複的章節 / 項目 / 題目。唯一索引擋不住——重複的那幾列排序各自獨立。
+
+        ⚠️ 「第二次會看到空的暫存區而成為 no-op」只在兩次請求**先後**執行時成立。
+        2026-10-14 的 code review 推翻了那個判斷。
+
+        ⭐ 是悲觀鎖不是樂觀鎖：要序列化的是整段流程，不是偵測單一列的版本衝突。
         """
+        await db.execute(select(EtCourse.course_id).where(EtCourse.course_id == course_id).with_for_update())
+
+    async def clear(
+        self, db: AsyncSession, course_id: int, operator: OperatorInfo, *, stage_ids: Sequence[int]
+    ) -> None:
+        """清空暫存區——**只清指定的那批 `STAGE_ID`**。
+
+        ⛔ **不可改回 `WHERE COURSE_ID = ?`**：那會連「`load_tree` 之後才寫進來的編輯」
+        一起清掉，而那筆編輯從來沒有被套用過——教師的輸入靜默消失，沒有任何錯誤訊息。
+        呼叫端一律傳入自己實際載入並套用的那批 id。
+
+        ⛔ 軟刪除（`DELETED = 1`），遵專案禁硬刪規範。唯一索引的條件帶 `DELETED = 0`，
+        所以清空後再次編輯不會撞鍵。
+        """
+        if not stage_ids:
+            return
         await db.execute(
             update(EtCourseContentStage)
-            .where(EtCourseContentStage.course_id == course_id, EtCourseContentStage.deleted == 0)
+            .where(
+                EtCourseContentStage.course_id == course_id,
+                EtCourseContentStage.stage_id.in_(list(stage_ids)),
+                EtCourseContentStage.deleted == 0,
+            )
             .values(deleted=1, updated_user=operator.user_id, updated_date=utcnow())
         )
         await db.flush()

@@ -209,6 +209,10 @@ class EtPublishService:
                 error_code="ET_COURSE_010",
             )
 
+        # 🔴 **先取行鎖再讀暫存樹**：這整段（讀 → 套用 → 清空）必須對同一門課序列化。
+        # 教師雙擊或兩個分頁同時按下時，沒有鎖的話兩邊都會讀到完整的暫存樹並各自新增
+        # 一份，活表出現重複的章節與題目。見 `lock_course` 的說明。
+        await self._stage.lock_course(db, course_id)
         nodes = await self._stage.load_tree(db, course_id)
         if not nodes:
             # 自上次更新以來沒有任何編輯。**安全的 no-op**——不跑檢核也不寫稽核：
@@ -236,7 +240,7 @@ class EtPublishService:
             )
 
         await apply_stage(db, course=course, nodes=nodes, operator=operator)
-        await self._stage.clear(db, course_id, operator)
+        await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
         await self._log(db, operator.user_id, course_id, f"更新課程內容（{len(nodes)} 項）")
         return ContentUpdateResult(course_id=course_id, applied_count=len(nodes))
 

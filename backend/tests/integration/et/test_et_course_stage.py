@@ -44,7 +44,7 @@ from app.et.course.stage_rules import (
     to_course_snapshot,
 )
 from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
-from app.et.progress.models import EtProgress
+from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz
 from app.et.roles.models import EtUserRole
 from app.et.survey.models import EtSurvey, EtSurveyOption, EtSurveyQuestion
@@ -369,7 +369,7 @@ class TestClear:
         await repo.seed_from_live(db, cid, _operator(uid))
         before = len(await _stage_rows(db, cid))
 
-        await repo.clear(db, cid, _operator(uid))
+        await repo.clear(db, cid, _operator(uid), stage_ids=[n.stage_id for n in await repo.load_tree(db, cid)])
 
         assert before > 0
         assert len(await _stage_rows(db, cid)) == before, "列還在（軟刪），不是被硬刪"
@@ -386,7 +386,7 @@ class TestClear:
         cid = await _full_course(client, db, uid)
         repo = EtCourseStageRepository()
         await repo.seed_from_live(db, cid, _operator(uid))
-        await repo.clear(db, cid, _operator(uid))
+        await repo.clear(db, cid, _operator(uid), stage_ids=[n.stage_id for n in await repo.load_tree(db, cid)])
 
         await repo.seed_from_live(db, cid, _operator(uid))
 
@@ -913,3 +913,133 @@ class TestUpdateEndpoint:
 
         assert check_codes == {"QUIZ_NO_QUESTION"}, "前置要真的弄壞了活表那側"
         assert {b["code"] for b in r.json()["blockers"]} == check_codes
+
+
+# ── Code review（2026-10-14）指出的四個缺陷，各配一條測試 ──────────────────────
+
+
+class TestReviewFindings:
+    async def test_payload_缺欄位時不覆寫活表既有值(self, client, db) -> None:
+        """🔴 HIGH：`payload_fields` 是推導的，內容表日後加欄位會自動納入，但**編輯到
+        一半、尚未更新的既有暫存列**沒有那個 key。
+
+        原本用 `.get()`，缺 key 會把 `None` 明確寫進去——nullable 欄位於是被**靜默**
+        清成 NULL（教師：「我填過的說明按更新就不見了」），NOT NULL 欄位則拋
+        IntegrityError。正確語意是「這列產生時還沒有這個欄位」，保留活表當前值。
+
+        本條以「把既有 payload 的某個 key 拿掉」模擬那個情境。
+        """
+        uid = await _user(db, "ZT_R1")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        # 先給教材一段說明，才驗得出它有沒有被清掉
+        material = await db.scalar(select(EtMaterial).where(EtMaterial.deleted == 0))
+        material.description_html = "<p>原本的說明</p>"
+        await db.flush()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        node = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_MATERIAL)
+        # 模擬「這列是舊版程式寫的，還沒有 description_html 這個 key」
+        await _set_payload(db, node.stage_id, {"material_name": node.payload["material_name"]})
+
+        await _apply(db, cid, uid)
+
+        live = await db.scalar(select(EtMaterial).where(EtMaterial.material_id == node.source_id))
+        assert live.description_html == "<p>原本的說明</p>", "缺 key 不得被當成「清空」"
+        assert live.material_name == node.payload["material_name"], "有 key 的照樣寫入"
+
+    async def test_刪一項又增一項時不得蓋上完課戳記(self, client, db) -> None:
+        """🔴 MEDIUM：刪除階段（階段 1）蓋章會用**中間狀態**判定完課。
+
+        學員 2/3 完成，教師同一次更新刪掉未完成的那項**又新增一項**：階段 1 結束時
+        是 2/2 被蓋章，階段 3 之後其實是 2/3、沒完課。而 `COMPLETED_AT` 只寫一次、
+        回退不清除，那個時間戳會一直停在他沒完課的時點。
+
+        修法是 `_DELETERS` 一律 `stamp=False`，整批套用完成後才蓋一次。
+        """
+        uid = await _user(db, "ZT_R2")
+        cid = await _full_course(client, db, uid)
+        items = list(await db.scalars(select(EtItem).where(EtItem.deleted == 0).order_by(EtItem.item_id)))
+        assert len(items) == 2, "前置：教材項目與測驗項目各一"
+        # 學員完成第一項、未完成第二項 ⇒ 1/2
+        db.add(
+            EtProgress(
+                user_id=uid,
+                course_id=cid,
+                item_id=items[0].item_id,
+                is_completed=True,
+                created_user=uid,
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        enrollment = EtEnrollment(
+            user_id=uid,
+            course_id=cid,
+            join_source="MANUAL",
+            joined_at=utcnow(),
+            completion_status="IN_PROGRESS",
+            is_removed=False,
+            created_user=uid,
+            created_date=utcnow(),
+            deleted=0,
+        )
+        db.add(enrollment)
+        await db.flush()
+
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        # 刪掉未完成的那一項，同時新增一項 ⇒ 套用後仍是 1/2，沒完課
+        doomed = next(n for n in nodes if n.entity_type == ENTITY_ITEM and n.source_id == items[1].item_id)
+        await _drop_subtree(db, nodes, doomed.stage_id)
+        chapter = next(n for n in nodes if n.entity_type == ENTITY_CHAPTER)
+        new_item = await _stage_node(
+            db, cid, ENTITY_ITEM, uid, parent=chapter.stage_id, sort_order=5, item_type=ITEM_MATERIAL
+        )
+        await _stage_node(
+            db, cid, ENTITY_MATERIAL, uid, parent=new_item, sort_order=0, material_name="新教材", description_html=None
+        )
+
+        await _apply(db, cid, uid)
+
+        after = await db.scalar(select(EtEnrollment).where(EtEnrollment.enrollment_id == enrollment.enrollment_id))
+        assert after.completed_at is None, "套用後是 1/2，不該因為刪除階段的中間狀態被蓋章"
+
+    async def test_暫存指向的活表列已被刪時整批失敗(self, client, db) -> None:
+        """🔴 MEDIUM：更新既有列若命中 0 列，原本仍回傳 `source_id`。
+
+        子節點會以那個**已刪除**的 id 當父層寫入，活表出現到不了的資料，而且沒有
+        任何錯誤。改為命中數不為 1 就拋錯、整批回滾。
+        """
+        uid = await _user(db, "ZT_R3")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        node = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        # 模擬暫存期間該活表列被別的路徑軟刪
+        await db.execute(update(EtChapter).where(EtChapter.chapter_id == node.source_id).values(deleted=1))
+        await db.flush()
+
+        with pytest.raises(ValueError, match="已不存在或已刪除"):
+            await _apply(db, cid, uid)
+
+    async def test_清空只清載入過的那批(self, client, db) -> None:
+        """🔴 HIGH 的後半：`clear` 原本是 `WHERE COURSE_ID = ?`。
+
+        那會連「`load_tree` 之後才寫進來的編輯」一起清掉，而那筆編輯從來沒有被套用過
+        ——教師的輸入**靜默消失**。改為只清呼叫端實際載入並套用的那批 `STAGE_ID`。
+        """
+        uid = await _user(db, "ZT_R4")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        loaded = await repo.load_tree(db, cid)
+        chapter = next(n for n in loaded if n.entity_type == ENTITY_CHAPTER)
+        # 模擬「套用途中教師又加了一章」
+        latecomer = await _stage_node(db, cid, ENTITY_CHAPTER, uid, parent=None, sort_order=9, chapter_name="晚到的章")
+
+        await repo.clear(db, cid, _operator(uid), stage_ids=[n.stage_id for n in loaded])
+
+        remaining = {n.stage_id for n in await repo.load_tree(db, cid)}
+        assert latecomer in remaining, "⛔ 沒被套用過的編輯不得被清掉"
+        assert chapter.stage_id not in remaining, "載入過的那批照樣清掉"
