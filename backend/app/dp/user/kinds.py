@@ -1,4 +1,4 @@
-"""待驗證列（`DP_PENDING_REGISTRATION.KIND`）之值域——DP 模組內單一定義（#137）。
+r"""待驗證列（`DP_PENDING_REGISTRATION.KIND`）之值域——DP 模組內單一定義（#137）。
 
 ⚠️ **`KIND_ADMIN_INVITE` 是安全不變量，不是普通字串常數。**
 
@@ -50,7 +50,7 @@ grep -rn "KIND_ADMIN_INVITE\|KIND_SELF_REGISTER" backend/app --include=*.py
 |------|-----------|
 | **清單過濾**（`user/repository.build_invite_list_stmt` 等）| 新 kind 的列在 UI 上**完全看不見** |
 | **條件式刪除**（`user/repository.delete_pending_unless_active_invite`）| 新 kind 的列會被自助註冊**靜默覆蓋** |
-| **啟用端點的 `expected_kind`**（`user/activate_service` / `verify_service` 經 `activation.py`）| 新 kind 的連結一律被判為無效 |
+| **啟用端點的 `expected_kind`**（兩支共用 `activation.py`）| 新 kind 的連結一律被判無效 |
 | **Email 佔用判定**（`users/service.create_user`）| 管理者代建對該 Email 回誤導的 409 |
 
 另需同步 `docs/specs/dp/data-model.md` 的 `KIND` 欄位說明與 CHECK 約束名。

@@ -14,11 +14,11 @@ from app.core.module_roles import module_role_gate
 from app.core.operator import OperatorInfo, get_operator
 from app.core.password_gate import require_password_current
 from app.core.rate_limit import (
-    SlidingWindowCounter,
     LOGIN_RATE_MAX,
     RATE_WINDOW_SECONDS,
     REGISTER_RATE_MAX,
     SET_PASSWORD_RATE_MAX,
+    SlidingWindowCounter,
     SlidingWindowRateLimiter,
     rate_limit_by_ip,
 )

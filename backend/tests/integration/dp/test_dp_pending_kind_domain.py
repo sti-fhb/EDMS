@@ -78,6 +78,8 @@ async def test_兩個合法_kind_仍可寫入(db, good_kind: str) -> None:
     少了這條，把 `_INSERT` 寫壞（欄位名打錯之類）也會讓上面四條**全部通過**——
     那是「對錯誤回應做否定斷言」的同一種假證據。
     """
-    result = await _insert(db, kind=good_kind, email=f"zt-ok-{good_kind.lower()}@edms.local", token=f"zt1{good_kind:0>61}")
+    result = await _insert(
+        db, kind=good_kind, email=f"zt-ok-{good_kind.lower()}@edms.local", token=f"zt1{good_kind:0>61}"
+    )
     assert result.rowcount == 1
     await db.rollback()

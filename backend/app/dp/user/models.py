@@ -4,13 +4,13 @@ from typing import Optional
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
-    column,
     ForeignKey,
     Index,
     Integer,
     PrimaryKeyConstraint,
     String,
     UniqueConstraint,
+    column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

@@ -196,13 +196,13 @@ erDiagram
 | EMAIL | VARCHAR(255) | Y | UNIQUE；待驗證帳號 Email（驗證通過後成為 `DP_USER.EMAIL`）|
 | USER_NAME | VARCHAR(50) | Y | 姓名（驗證通過搬入 `DP_USER`）|
 | PWD_HASH | VARCHAR(100) | N | bcrypt 雜湊（驗證通過搬入 `DP_USER`）；`ADMIN_INVITE` 於建立時為 NULL、啟用設密碼時回填 |
-| KIND | VARCHAR(20) | Y | 來源：`SELF_REGISTER` / `ADMIN_INVITE`（決定啟用流程與清單過濾）|
+| KIND | VARCHAR(20) | Y | 來源：`SELF_REGISTER` / `ADMIN_INVITE`（決定啟用流程與清單過濾）；值域由 `CK_DP_PENDING_REGISTRATION_KIND` 於 DB 層封閉（#215）——`NOT NULL` 擋不住空字串或錯字，而一筆 KIND 錯字的列在所有 UI 上都看不見卻佔住 `EMAIL` 唯一鍵 |
 | EXPIRES_DATE | TIMESTAMP | Y | 驗證連結逾期即失效（TTL 平台級參數，沿用 30 分鐘）|
 | INVITE_ID | VARCHAR(30) | N | 邀請之對外識別碼；**僅 `KIND=ADMIN_INVITE` 有值**（自助註冊列維持 NULL）。待啟用邀請尚無 `USER_ID`，故另給一鍵供重寄 / 取消端點（`/invites/{invite_id}/…`）指認單筆邀請，亦為稽核 `TARGET_ID` 之來源。原名 `RES_ID`，2026-08-13 正名（#158）|
 
 > **`INVITE_ID` 與啟用後之 `USER_ID` 刻意不同號**：啟用時（`dp/user/activation.py`）重新產生新的 `USER_ID`，**不沿用** `INVITE_ID`。邀請可能永遠不會啟用（Email 打錯、逾時未點連結），沿用會讓未啟用帳號的 ID 提前佔用正式帳號號碼空間，違反 #56 方案 B「驗證通過前不寫 `DP_USER`、`DP_USER` 只存已驗證帳號」之設計。**邀請與帳號為兩個不同實體**，識別碼分開存放；稽核 `TARGET_ID` 於邀請階段用 `INVITE_ID`、啟用後用 `USER_ID`，兩段以 Email 關聯。此為刻意設計，勿「修正」為沿用（#158 Open Question 2 結論）。
 
-索引 / 約束：`PK(TOKEN_HASH)`、`UNIQUE(EMAIL)`。標準欄位含 `CREATED_* / UPDATED_*`（`BaseModelHardDelete`，**無 `DELETED`**）。
+索引 / 約束：`PK(TOKEN_HASH)`、`UNIQUE(EMAIL)`、`CHECK(KIND)`（見上）。標準欄位含 `CREATED_* / UPDATED_*`（`BaseModelHardDelete`，**無 `DELETED`**）。
 
 ### DP_PWD_HIST — 密碼歷程（append-only；僅 CREATED_*）
 

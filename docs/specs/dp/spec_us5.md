@@ -136,6 +136,7 @@
 | `LOGIN` | `EMAIL_CHANGE_TTL_MIN` | Email 變更驗證連結有效時間（分鐘） | 正整數（分）| 1–120（預設 30）| 同上 | `ADMIN` |
 | `LOGIN` | `IDLE_DISABLE_DAYS` | 閒置停用天數（天） | 正整數（天）| 1–365（預設 90）| spec 明載下限；上限為 #528 裁示 | `ADMIN` |
 | `LOGIN` | `VERIFY_SEND_COOLDOWN_SEC` | 驗證信重寄冷卻（秒） | 正整數（秒）| 60–3600（預設 600）| #74 / #76 | `HIDDEN` |
+| `LOGIN` | `REGISTER_OVERWRITE_MAX_PER_DAY` | 同一 Email 每日重建待驗證列上限（次） | 正整數 | 1–10（預設 5）| #234 裁示 | `HIDDEN` |
 | `MAIL` | `RATE_PER_MIN` | 每分鐘寄信上限（封） | 正整數 | ≥ 1（預設 60）| 建議 | `HIDDEN` |
 | `MAIL` | `RETRY_MAX` | 寄信重試上限次數 | 非負整數 | 0–10（預設 5）| 建議 | `HIDDEN` |
 | `MAIL` | `RETRY_INTERVAL_MIN` | 寄信重試間隔（分鐘） | 正整數（分）| ≥ 1（預設 2）| 建議 | `HIDDEN` |
@@ -160,7 +161,7 @@
 | **spec 明載** | `ACCESS_TTL_MIN` `RENEW_MAX_HOURS` `CHAR_TYPES` `HISTORY_COUNT` `EXPIRY_DAYS` `VERIFY_SEND_COOLDOWN_SEC` `RETRY_MAX` `FAIL_LOCK_COUNT` | 直接取本表值域欄 |
 | **跨欄位推得** | `MIN_LEN`（≤ `ADMIN_MIN_LEN`）、`EXPIRY_REMIND_DAYS`（< `EXPIRY_DAYS`）| 由〈跨欄位一致性〉承擔，不另設絕對上限 |
 | **實作推得** | `ADMIN_MIN_LEN` ≤ **72** | bcrypt 截斷上限；設 73 時長度檢核（字元數）與 bcrypt 上限檢核（位元組數）互斥，**任何密碼都設不了**。連帶使 `MIN_LEN` 有界 |
-| **業務裁示** | `LOCK_MINUTES` `RESET_TOKEN_TTL_MIN` `EMAIL_CHANGE_TTL_MIN` `IDLE_DISABLE_DAYS` | 見下 |
+| **業務裁示** | `LOCK_MINUTES` `RESET_TOKEN_TTL_MIN` `EMAIL_CHANGE_TTL_MIN` `IDLE_DISABLE_DAYS` `REGISTER_OVERWRITE_MAX_PER_DAY` | 見下 |
 
 四個裁示上限擋的都是「設大即關掉這道控制」：鎖定時間過長使帳號解不開（管理者自己也可能被鎖）、TTL 過長使連結近乎永久有效（與 #50「outbox 永久保存明文重設連結」互鎖，其緩解正是短 TTL，故取 2 小時而非業界常見的 24 小時）、閒置天數過長使閒置停用形同不存在。
 

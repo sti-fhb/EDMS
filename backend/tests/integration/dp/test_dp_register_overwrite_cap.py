@@ -89,9 +89,7 @@ async def _outbox(db, email: str) -> int:
 
 
 async def _expires(db, email: str):
-    return await db.scalar(
-        select(DpPendingRegistration.expires_date).where(DpPendingRegistration.email == email)
-    )
+    return await db.scalar(select(DpPendingRegistration.expires_date).where(DpPendingRegistration.email == email))
 
 
 async def test_達上限後不再寄信(client, db) -> None:
