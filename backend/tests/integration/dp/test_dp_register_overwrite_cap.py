@@ -59,6 +59,21 @@ async def _reset_and_shrink_cap(db):
     yield
 
 
+@pytest.fixture
+def as_ip(monkeypatch):
+    """切換 router 眼中的 client IP（`_verify_send_probe_key` 用它分桶）。
+
+    ⚠️ ASGI 測試傳輸沒有真實 peer 位址，且 `X-Forwarded-For` 預設**不受信**
+    （`TRUSTED_PROXY_COUNT=0`，#23），送 header 不會改變 probe key。寫法比照
+    `test_dp_register_no_enumeration.py` 的同名 fixture。
+    """
+
+    def _set(ip: str) -> None:
+        monkeypatch.setattr(auth_router, "get_client_ip", lambda: ip)
+
+    return _set
+
+
 def _payload(email: str) -> dict:
     return {"email": email, "user_name": "額度測試"}
 
@@ -187,7 +202,7 @@ async def test_達上限的回應與全新_email_完全相同(client, db) -> Non
     assert over.json() == fresh.json(), f"額度用罄 {over.json()} 與全新 {fresh.json()} 必須逐欄位相同"
 
 
-async def test_靜默路徑不消耗受害者額度(client, db) -> None:
+async def test_靜默路徑不消耗受害者額度(client, db, as_ip) -> None:
     """探測行為不得吃掉受害者的額度（2026-10-14 變異檢查 M6 補入）。
 
     額度以 Email 為 key、分不出誰在送，所以「哪些請求計入」是唯一能保護受害者的地方：
@@ -198,14 +213,25 @@ async def test_靜默路徑不消耗受害者額度(client, db) -> None:
     測試變紅**——也就是這個性質原本零覆蓋。
     """
     email = "cap-silent@edms.local"
-    # 第 1 次真的寄出（額度 1/2）
+    as_ip("203.0.113.1")
+    # 第 1 次真的寄出（額度 1/2），並蓋下 Email 章
     assert (await _register_later(client, email)).status_code == 202
     assert await _outbox(db, email) == 1
 
-    # 冷卻**不清**：同一 Email 立刻再打 → 落入靜默路徑（他人冷卻中），不建列不寄信
-    for _ in range(3):
-        assert (await client.post("/api/register", json=_payload(email))).status_code in (202, 429)
+    # 🔴 必須**換 IP**才走得到靜默路徑。同一 IP 會先撞自己的 probe 冷卻而回 429，
+    # 根本到不了 `others_cooling` 那條分支——2026-10-14 第一版就是這樣寫的，
+    # 結果變異 M6 重跑仍全綠（測試根本沒執行到被注入的那行），斷言寫 `in (202, 429)`
+    # 還把這件事藏了起來。
+    # ⚠️ **每次都要換 IP**：靜默路徑自己也會蓋 probe 章，同一 IP 第二次就撞上自己的章而回 429，
+    # 那時根本沒走到 `others_cooling` 分支。（2026-10-14 實際踩到：第一版用同一 IP 迴圈三次，
+    # 看起來像實作壞了，其實是測試沒到達目標分支。）
+    for ip in ("198.51.100.7", "198.51.100.8", "198.51.100.9"):
+        as_ip(ip)
+        silent = await client.post("/api/register", json=_payload(email))
+        assert silent.status_code == 202, f"前提錨點：須走到靜默路徑，實得 {silent.status_code} {silent.text}"
     assert await _outbox(db, email) == 1, "前提錨點：靜默路徑確實沒寄信"
+
+    as_ip("203.0.113.1")
 
     # 額度應仍剩 1 → 清冷卻後還能寄第 2 封
     assert (await _register_later(client, email)).status_code == 202
