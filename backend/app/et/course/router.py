@@ -32,6 +32,7 @@ from app.et.course.schemas import (
     ChapterRenameReq,
     ChapterReorderReq,
     CloseCourseReq,
+    ContentUpdateResult,
     CourseCard,
     CourseCreateReq,
     CourseCreateResult,
@@ -400,6 +401,33 @@ async def publish_course(
     > 與邀請碼產生。
     """
     return await _publish_service.publish(db, course_id, operator=operator)
+
+
+@router.post(
+    "/courses/{course_id}/content/apply",
+    response_model=ContentUpdateResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+)
+async def apply_course_content(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> ContentUpdateResult:
+    """ET05「更新」：把已發布課程的編輯整批生效給學員（#631）。
+
+    已發布課程的內容編輯先存進暫存區，學員看到的是上一次「更新」時的版本。本端點
+    **跑與發布完全相同的十項檢核**，通過才整批生效。
+
+    未通過回 422 `ET_PUBLISH_001` + `blockers`（形狀與 `publish` / `reopen` 共用，
+    前端沿用 #558 的缺漏清單與紅框），且**活表一行都不會動**——學員端維持上一版。
+
+    暫存區是空的時回 `applied_count = 0`，是安全的 no-op：那代表自上次更新以來沒有
+    任何編輯，對一門內容未變的課程回 422 會讓教師以為自己弄壞了什麼。
+
+    > ⚠️ 草稿課程不走這條路（409 `ET_COURSE_010`）——草稿沒有學員，內容不需版本化，
+    > 它的生效入口是「發布」。
+    """
+    return await _publish_service.update_published(db, course_id, operator=operator)
 
 
 @router.post(

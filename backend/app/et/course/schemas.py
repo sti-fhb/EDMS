@@ -512,6 +512,20 @@ class PublishResult(BaseModel):
     invited_count: int = 0
 
 
+class ContentUpdateResult(BaseModel):
+    """「更新」成功之結果（回應，#631）。
+
+    不回傳課程狀態——「更新」**不改變狀態**，它改變的是學員看到的內容版本。
+    """
+
+    course_id: int
+    #: 本次生效的暫存節點數。
+    #:
+    #: 回這個數字是為了讓教師知道「我按的這下有沒有東西生效」。`0` 代表暫存區是空的
+    #: ——也就是自上次更新以來沒有任何編輯，此時端點是安全的 no-op。
+    applied_count: int
+
+
 class CloseCourseReq(BaseModel):
     """關閉課程（US11 AC 1）。
 

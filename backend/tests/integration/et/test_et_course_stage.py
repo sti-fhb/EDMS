@@ -754,3 +754,162 @@ class TestDeleterCoverage:
     def test_每一種可刪除的型別都有刪除路徑(self) -> None:
         """少一個的症狀是套用時 `KeyError`——會爆，但要等到有人真的刪了那種東西。"""
         assert set(_DELETERS) | _DELETED_WITH_ITEM == _ALL_TYPES
+
+
+# ── 「更新」端點 ───────────────────────────────────────────────────────────────
+
+_APPLY = "/api/et/courses/{cid}/content/apply"
+
+
+async def _publish(client, db, uid: str, cid: int) -> None:
+    """把課程推到已發布——「更新」只對已發布 / 已關閉課程有意義。"""
+    r = await client.post(f"{_COURSES}/{cid}/publish", headers=_bearer(uid))
+    assert r.status_code == 200, r.text
+    await db.flush()
+
+
+class TestUpdateEndpoint:
+    async def test_暫存區為空時是安全的_no_op(self, client, db) -> None:
+        """教師沒做任何編輯就按「更新」——不該回 422，也不該寫稽核。
+
+        對一門內容未變的課程回錯誤，會讓教師以為自己弄壞了什麼。
+        """
+        uid = await _user(db, "ZT_U1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 200, r.text
+        assert r.json() == {"course_id": cid, "applied_count": 0}
+
+    async def test_檢核通過後暫存內容一次生效且暫存區清空(self, client, db) -> None:
+        """AC 1 / AC 3：按「更新」前學員端看不到變化，按下後一次看到全部。"""
+        uid = await _user(db, "ZT_U2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "更新後的章名"})
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "按下更新前活表不得變動"
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["applied_count"] > 0
+        assert (await _live_chapters(db, cid))[0].chapter_name == "更新後的章名"
+        assert await repo.has_stage(db, cid) is False, "生效後暫存區要清空"
+
+    async def test_檢核未通過時回_422_且活表一行都沒動(self, client, db) -> None:
+        """🥇 **AC 2 的核心**：不通過時學員端維持上一版。
+
+        ⚠️ **本條驗的是結果，不是順序。** 保證來自「檢核與套用在同一個交易」——而那表示
+        「檢核先跑、沒套用」與「套用了但隨 422 一起回滾」對外**不可區分**，兩者都滿足
+        AC 2。想把順序本身釘住，只能在 service 層以 unit 驗（`apply_stage` 未被呼叫），
+        那留給 PR 2 連同編輯端一起做。
+
+        這裡刻意同時改了章名：證明**不只是被擋下的那一項**，連同一批的其他變更也不生效。
+        """
+        uid = await _user(db, "ZT_U3")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        # 把測驗的題目全部刪掉 ⇒ 0 題測驗，應被 BLOCK_QUIZ_NO_QUESTION 擋下
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+        # 同時改章名，用來證明「不通過時連別的變更也不會生效」
+        ch = next(n for n in nodes if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "不該生效的章名"})
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 422, r.text
+        body = r.json()
+        assert body["error_code"] == "ET_PUBLISH_001"
+        assert "QUIZ_NO_QUESTION" in {b["code"] for b in body["blockers"]}
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "未通過時其他變更也不得生效"
+        live_q = await db.scalar(select(EtQuestion).where(EtQuestion.question_id == question.source_id))
+        assert live_q.deleted == 0, "未通過時題目不得被刪"
+
+    async def test_缺漏指向的是暫存節點(self, client, db) -> None:
+        """`target_id` 要能讓前端在編輯頁上標出紅框，而編輯頁讀的是暫存樹。
+
+        回活表 id 的話，新增的內容無從定位、既有內容則指向畫面上不存在的號碼——
+        兩個號碼空間會重疊，所以回錯了不會爆、只會標錯區塊。
+        """
+        uid = await _user(db, "ZT_U4")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        quiz = next(n for n in nodes if n.entity_type == ENTITY_QUIZ)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        blocker = next(b for b in r.json()["blockers"] if b["code"] == "QUIZ_NO_QUESTION")
+        assert blocker["target_id"] == quiz.stage_id
+        assert blocker["target_id"] != quiz.source_id, "⚠️ 兩個號碼空間會重疊，這條才分得出來"
+
+    async def test_草稿課程不走更新(self, client, db) -> None:
+        """草稿沒有學員、內容不需版本化，它的生效入口是「發布」。"""
+        uid = await _user(db, "ZT_U5")
+        cid = await _full_course(client, db, uid)
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_COURSE_010"
+
+    async def test_非擁有者不得更新(self, client, db) -> None:
+        uid = await _user(db, "ZT_U6")
+        other = await _user(db, "ZT_U7")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(other))
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+    async def test_查無課程回_404(self, client, db) -> None:
+        uid = await _user(db, "ZT_U8")
+
+        r = await client.post(_APPLY.format(cid=99999999), headers=_bearer(uid))
+
+        assert r.status_code == 404, r.text
+        assert r.json()["error_code"] == "ET_COURSE_001"
+
+    async def test_更新與發布跑的是同一組檢核(self, client, db) -> None:
+        """🥇 四個動作共用 `evaluate_publish` ——各自複製一份必然分岔，而分岔的症狀是
+        「更新擋下了發布會放行的課程」，沒有錯誤訊息。
+
+        做法：對同一份壞掉的內容，比對 `publish-check`（走活表）與「更新」（走暫存樹）
+        回的缺漏代碼集合。
+        """
+        uid = await _user(db, "ZT_U9")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+        # 活表那側也弄成同樣的狀態，兩邊才比得起來
+        await db.execute(update(EtQuestion).where(EtQuestion.question_id == question.source_id).values(deleted=1))
+        await db.flush()
+
+        # ⚠️ **會失敗的那一支一定要放最後**：422 會讓該請求所屬交易回滾，連上面以
+        # `db` 寫入但尚未 commit 的前置資料一起（見 `sti-testing` 的「失敗請求回滾前置
+        # 資料」）。順序寫反的症狀是 `publish-check` 看到一份已被還原的活表而回空集合。
+        check = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+        check_codes = {b["code"] for b in check.json()["blockers"]}
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert check_codes == {"QUIZ_NO_QUESTION"}, "前置要真的弄壞了活表那側"
+        assert {b["code"] for b in r.json()["blockers"]} == check_codes
