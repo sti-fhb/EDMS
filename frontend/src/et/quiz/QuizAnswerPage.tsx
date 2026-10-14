@@ -43,6 +43,19 @@ import { toApiError } from "../../services/http"
  * 逾時的真正判定在後端（提交當下比對 `STARTED_AT + 時限`）。倒數歸零時前端自動提交，
  * 但即使那個計時器被停掉、分頁被凍結，學員也拿不到額外時間。
  */
+/**
+ * 倒數剩下多少毫秒內，點選選項就立即暫存（#608）。與倒數轉為警示色的門檻同為 60 秒。
+ *
+ * ⚠️ 不能完全消除「最後一刻的作答被拒」：後端以 `int()` 捨去剩餘秒數，最後不到 1 秒內的
+ * 點選仍會被判逾時。要消除須改後端計時或給寬限——屬規格層級決定，未在此處理。
+ */
+const FINAL_SAVE_WINDOW_MS = 60_000
+
+/** 是否已進入「點選即存」的最後一分鐘；不限時（`null`）恆為 false。只在事件處理中呼叫。 */
+function isInFinalSaveWindow(deadlineMs: number | null): boolean {
+  return deadlineMs !== null && deadlineMs - Date.now() <= FINAL_SAVE_WINDOW_MS
+}
+
 export function EtQuizAnswerPage() {
   const { attemptId: attemptIdParam } = useParams<{ attemptId: string }>()
   const attemptId = Number(attemptIdParam)
@@ -65,9 +78,17 @@ export function EtQuizAnswerPage() {
   const [answers, setAnswers] = useState<Record<number, number[]>>({})
   /** 已送出暫存的題目——避免切題時重送沒有變動的答案。 */
   const savedRef = useRef<Record<number, string>>({})
+  /**
+   * 每題最後一個暫存請求；同一題的暫存一律接在它後面送出（#608）。
+   *
+   * 最後一分鐘點選即存會對同一題連發。並行送出的話落地順序不保證：伺服器可能留下較舊的
+   * 選擇，而較新那筆的回應較晚回來、`savedRef` 記成較新的值——提交時判定「已存」而不補送，
+   * 學員以畫面上沒有的答案計分，且無任何訊號。
+   */
+  const saveChainRef = useRef<Record<number, Promise<void>>>({})
   const submittingRef = useRef(false)
 
-  const { data, isPending, error } = useQuery({
+  const { data, isPending, isFetchedAfterMount, error, refetch } = useQuery({
     queryKey: QUERY_KEYS.etQuiz.attempt(attemptId),
     queryFn: async () => {
       const state = await attemptApi.state(attemptId)
@@ -85,6 +106,13 @@ export function EtQuizAnswerPage() {
     // 作答中不要背景重抓——重抓會把伺服器上「尚未暫存」的舊答案蓋回畫面
     refetchOnWindowFocus: false,
     staleTime: Number.POSITIVE_INFINITY,
+    // 🔴 **每次進入本頁都向伺服器重抓**（#608），且重抓完成前不渲染作答（見下方
+    // `isFetchedAfterMount`）。本地作答是在 `queryFn` 裡灌入的，而 `staleTime` 是無限大：
+    // 不這樣做的話，離開後 5 分鐘內「繼續作答」會直接吐出第一次載入時的舊快取、`queryFn`
+    // 不執行，本地作答與 `savedRef` 都是空的——畫面顯示舊答案，切題時再把看過沒動的題目
+    // 暫存成空白，覆蓋伺服器上已存的作答。
+    // ⛔ 不要改用 `gcTime: 0`：快取是卸載後**下一輪**才回收，立刻回到本頁仍會吃到舊快取。
+    refetchOnMount: "always",
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
@@ -96,19 +124,36 @@ export function EtQuizAnswerPage() {
    *   - `true`（**提交前**）：必須拋。學員在最後一題作答後直接按提交時，這是那一題唯一
    *     的落地機會；靜默吞掉會讓它從閱卷中消失，而學員看到的是「已提交並完成閱卷」。
    */
+  /** 把一筆暫存接在該題前一筆之後送出（前一筆失敗也照送）；成功才記入 `savedRef`。 */
+  const saveInOrder = useCallback(
+    (questionId: number, selected: number[]): Promise<void> => {
+      const previous = saveChainRef.current[questionId] ?? Promise.resolve()
+      const next = previous
+        .catch(() => undefined)
+        .then(async () => {
+          await attemptApi.saveAnswer(attemptId, questionId, selected)
+          savedRef.current[questionId] = JSON.stringify(selected)
+        })
+      saveChainRef.current[questionId] = next
+      return next
+    },
+    [attemptId],
+  )
+
   const flushAnswer = useCallback(
     async (questionId: number | null, { required = false }: { required?: boolean } = {}) => {
       if (questionId === null) return
+      // 先等該題排隊中的暫存落地，`savedRef` 才是伺服器上的實際值
+      await (saveChainRef.current[questionId] ?? Promise.resolve()).catch(() => undefined)
       const selected = answers[questionId] ?? []
       if (savedRef.current[questionId] === JSON.stringify(selected)) return
       try {
-        await attemptApi.saveAnswer(attemptId, questionId, selected)
-        savedRef.current[questionId] = JSON.stringify(selected)
+        await saveInOrder(questionId, selected)
       } catch (err) {
         if (required) throw err
       }
     },
-    [answers, attemptId],
+    [answers, saveInOrder],
   )
 
   /** 本次提交是不是「離開作答視窗」觸發的——結果頁要據此說明為什麼考卷被交出去。 */
@@ -116,9 +161,21 @@ export function EtQuizAnswerPage() {
 
   const submit = useMutation({
     mutationFn: async () => {
-      // ⚠️ 先把當前題送出去——否則最後一題作答後直接提交會漏掉那一題。
-      // `required` 讓這次失敗會中止提交並顯示錯誤，而不是送出一份缺一題的考卷。
-      await flushAnswer(currentId, { required: true })
+      // ⚠️ 先把**所有**尚未暫存成功的題目送出去，不只當前題（#608）——
+      // 最後一題作答後直接提交會漏掉那一題；切題時暫存失敗（靜默）的題目也只剩這次機會。
+      // `required` 讓失敗會中止提交並顯示錯誤，而不是送出一份缺題的考卷。
+      const pending = Object.keys(answers)
+        .map(Number)
+        .sort((a, b) => (a === currentId ? -1 : b === currentId ? 1 : 0))
+      try {
+        for (const questionId of pending) await flushAnswer(questionId, { required: true })
+      } catch (err) {
+        // 🔴 時間已到（`ET_ATTEMPT_005`）**照樣交卷**（#608）：後端剩餘秒數無條件捨去、前端倒數
+        // 進位，倒數歸零時後端必已逾時、暫存一定被拒；中止的話倒數只自動觸發一次、手動按提交
+        // 又走同一條暫存——學員永遠交不了卷。`submit` 本身不受時限限制（spec_us6），以已存的
+        // 作答閱卷；被拒的那一筆就是最後一刻的變動，由下方「最後一分鐘點選即存」盡量提早落地。
+        if (toApiError(err).errorCode !== "ET_ATTEMPT_005") throw err
+      }
       return attemptApi.submit(attemptId)
     },
     onSuccess: (result) => {
@@ -153,14 +210,30 @@ export function EtQuizAnswerPage() {
   useAutoSubmitOnLeave({ enabled: data?.status === "IN_PROGRESS", onLeave: submitOnLeave })
 
   if (!attemptIdValid) return <Alert severity="error">作答代碼無效</Alert>
-  if (isPending) {
+  // 快取裡的舊資料不可拿來作答（#608）：本次進入後的重抓回來、本地作答灌入之前一律等待
+  if (isPending || (!isFetchedAfterMount && !error)) {
     return (
       <Stack alignItems="center" sx={{ py: 6 }}>
         <CircularProgress />
       </Stack>
     )
   }
-  if (error) return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
+  if (error) {
+    // 每次進入都重抓（見上方 `refetchOnMount`），重抓失敗就沒有快取可退——給一顆重新載入，
+    // 學員在作答時限內不必整頁重新整理（重新整理在本系統等於重新登入）
+    return (
+      <Alert
+        severity="error"
+        action={
+          <Button size="small" onClick={() => void refetch()}>
+            重新載入
+          </Button>
+        }
+      >
+        {toApiError(error).errorMessage}
+      </Alert>
+    )
+  }
   if (data.status !== "IN_PROGRESS") {
     // 已提交後用上一頁回到本頁——不要讓學員對著一份已經交出去的考卷繼續作答，
     // 那會一路寫到按提交才收到 409。導向這次的成績，那才是他回來想找的東西。
@@ -191,14 +264,21 @@ export function EtQuizAnswerPage() {
   }
 
   const toggle = (question: QuestionForAnswering, optionId: number) => {
-    setAnswers((prev) => {
-      const currentSelection = prev[question.question_id] ?? question.selected_options
-      if (question.question_type === "SINGLE") return { ...prev, [question.question_id]: [optionId] }
-      const next = currentSelection.includes(optionId)
-        ? currentSelection.filter((id) => id !== optionId)
-        : [...currentSelection, optionId]
-      return { ...prev, [question.question_id]: next }
-    })
+    // `question.selected_options` 已是「本地優先、否則伺服器值」（見上方 `questions`）
+    const currentSelection = question.selected_options
+    const next =
+      question.question_type === "SINGLE"
+        ? [optionId]
+        : currentSelection.includes(optionId)
+          ? currentSelection.filter((id) => id !== optionId)
+          : [...currentSelection, optionId]
+    setAnswers((prev) => ({ ...prev, [question.question_id]: next }))
+    // 最後一分鐘點選即存（#608）：平時切題 / 提交才送（多選題勾四個不必四個請求），但倒數
+    // 將盡時「提交前的暫存」會撞上逾時被拒——點選當下就送，歸零前的作答才來得及落地。
+    // 失敗不擋操作：提交時會再補送一次。
+    if (isInFinalSaveWindow(data.deadlineMs)) {
+      void saveInOrder(question.question_id, next).catch(() => undefined)
+    }
   }
 
   return (
