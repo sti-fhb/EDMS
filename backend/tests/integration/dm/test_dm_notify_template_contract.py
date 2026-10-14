@@ -29,21 +29,30 @@
 少傳才會炸。例如 `OBS_APPROVE` 的呼叫端多傳了 `reason`，那是刻意共用同一個
 `_notify_obsolete`，不該被判為錯。
 
-⚠️ 本測試刻意是 **unit**：它只比對「seed 的宣告字串」與「程式碼的 params 字面值」，
-拿掉真 DB 一樣驗得了（見 `.claude/rules/sti-testing.md` 的分層閘門）。
+## ⚠️ 為何宣告端讀 DB 而不是讀 seed migration
+
+本測試初版是 unit，直接正則解析 seed migration `b7fa4b6e4fe7` 取 `VARIABLES`。**那是錯的**：
+migration 是 append-only，**現況是最後一次寫入、不是 seed**。`9eb4dd6e496b`（#332，週報改
+內文摘要 + 儀表板連結）就改寫過 `KPI_WEEKLY` 的 `VARIABLES`，於是初版守門拿兩個月前的舊宣告
+去比對，對該範本**靜默地少驗了一個變數**——正是本測試要消滅的那種失效，而且發生在守門自己身上。
+
+要在不讀 DB 的前提下算出現況，等於在測試裡重寫一遍 alembic 的套用順序。宣告端的現況**本來就是
+DB 狀態**，所以本測試是 integration；呼叫端（`app/dm` 的 AST）仍是純靜態解析。
+
+母體由 DB 查詢本身保證窮盡：`WHERE MODULE='DM'` 回幾列就驗幾列，新增範本不會漏出守門之外。
 """
 
 import ast
 import pathlib
-import re
 
 import pytest
+from sqlalchemy import select
 
-pytestmark = pytest.mark.unit
+from app.dp.notify.models import DpNotifyTemplate
 
-_BACKEND = pathlib.Path(__file__).resolve().parents[3]
-_SEED = _BACKEND / "alembic" / "versions" / "20260806_1118_b7fa4b6e4fe7_dm_seed_templates_params_into_dp.py"
-_DM_APP = _BACKEND / "app" / "dm"
+pytestmark = pytest.mark.integration
+
+_DM_APP = pathlib.Path(__file__).resolve().parents[3] / "app" / "dm"
 
 
 def _dict_keys(node: ast.AST | None) -> set[str] | None:
@@ -51,19 +60,6 @@ def _dict_keys(node: ast.AST | None) -> set[str] | None:
     if isinstance(node, ast.Dict):
         return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
     return None
-
-
-def _declared_variables() -> dict[str, set[str]]:
-    """自 seed migration 取各 DM 範本宣告的 `VARIABLES`（後續 migration 若改寫，由本測試的
-    `_assert_no_later_override` 擋下——見該函式說明）。"""
-    src = _SEED.read_text(encoding="utf-8")
-    out: dict[str, set[str]] = {}
-    for m in re.finditer(r'\(\s*"DM",\s*"([A-Z_]+)",(.*?)\n    \),', src, re.S):
-        code, rest = m.group(1), m.group(2)
-        vm = re.search(r'"([a-z_]+(?:,[a-z_]+)*)",\s*\n\s*"(?:EMAIL|MSG|BOTH)"', rest)
-        if vm:
-            out[code] = set(vm.group(1).split(","))
-    return out
 
 
 def _module_string_consts(tree: ast.Module) -> dict[str, str]:
@@ -149,22 +145,72 @@ def _passed_params() -> dict[str, set[str]]:
     return found
 
 
-def test_每支範本宣告的變數都有被程式傳入():
-    declared = _declared_variables()
+async def _declared_variables(db) -> dict[str, set[str]]:
+    """自 DB 取各 DM 範本**現行**宣告的 `VARIABLES`（空字串代表無變數）。"""
+    rows = (await db.execute(select(DpNotifyTemplate).where(DpNotifyTemplate.module == "DM"))).scalars().all()
+    return {r.template_code: {v for v in (r.variables or "").split(",") if v} for r in rows}
+
+
+#: 刻意沒有呼叫端的範本——**不是漏接線，是已 seed 待用**。
+#:
+#: `SUBMIT_WITHDRAWN`（US9 撤回送審）於 `6a96fd1016fd` 種入，供未來站內訊息佇列使用；
+#: 撤回的實際呈現走「我的文件動態」，不經通知服務（`app/dm/personal/service.py` 的 docstring
+#: 載明此事）。平台至今沒有站內訊息佇列，故它沒有、也不該有呼叫端。
+#:
+#: ⛔ 請勿為了讓測試變綠而把其他範本加進這張清單：清單裡的每一支都代表「這支範本不受本守門
+#: 保護」。下方 `test_豁免清單沒有多餘項目` 會在某支接上呼叫端時變紅，要求把它移出清單。
+_INTENTIONALLY_UNWIRED = {"SUBMIT_WITHDRAWN"}
+
+
+async def test_每支範本宣告的變數都有被程式傳入(db):
+    declared = await _declared_variables(db)
     passed = _passed_params()
-    assert declared, "解析不到任何範本宣告——解析器壞了，不是沒有範本"
+    assert declared, "DB 取不到任何 MODULE=DM 範本——查詢或 migration 壞了，不是沒有範本"
 
     missing = {
         code: sorted(vars_ - passed.get(code, set()))
         for code, vars_ in declared.items()
-        if vars_ - passed.get(code, set())
+        if code not in _INTENTIONALLY_UNWIRED and vars_ - passed.get(code, set())
     }
     assert not missing, f"下列範本宣告了程式沒有傳入的變數，渲染時會 KeyError → 整批寫 FAILED 且不外拋：{missing}"
 
 
-def test_每支範本都有找到對應的呼叫端():
-    """健康檢查：若解析器失效（如呼叫寫法改變），上面那條會因為「沒東西可比」而假性通過。"""
-    declared = _declared_variables()
+async def test_每支範本都有找到對應的呼叫端(db):
+    """健康檢查：若 AST 解析器失效（如呼叫寫法改變），上面那條會因為「沒東西可比」而假性通過。
+
+    ⚠️ 母體錨點是 DB 的範本列，不是解析結果——解析器整個壞掉時 `passed` 為空，本條會列出全部 9 支。
+    """
+    declared = await _declared_variables(db)
     passed = _passed_params()
-    orphan = sorted(set(declared) - set(passed))
+    orphan = sorted(set(declared) - set(passed) - _INTENTIONALLY_UNWIRED)
     assert not orphan, f"下列範本找不到呼叫端，本守門對它們形同虛設：{orphan}"
+
+
+async def test_豁免清單沒有多餘項目(db):
+    """反向探針：豁免清單裡的範本若**接上了**呼叫端，要求把它移出清單、納入守門。
+
+    沒有這條的話，`_INTENTIONALLY_UNWIRED` 會變成一張只進不出的名單——某支日後接線了卻
+    仍被豁免，它的 params key 從此不受檢查，而兩條正向測試都還是綠的。
+    """
+    declared = await _declared_variables(db)
+    passed = _passed_params()
+    assert _INTENTIONALLY_UNWIRED <= set(declared), (
+        f"豁免清單列了 DB 裡不存在的範本：{sorted(_INTENTIONALLY_UNWIRED - set(declared))}"
+    )
+    wired = sorted(_INTENTIONALLY_UNWIRED & set(passed))
+    assert not wired, f"下列範本已接上呼叫端，請自 `_INTENTIONALLY_UNWIRED` 移除以納入守門：{wired}"
+
+
+async def test_宣告端確實取到後續_migration_改寫過的值(db):
+    """釘住「現況是最後一次寫入、不是 seed」這件事本身。
+
+    `KPI_WEEKLY` 的 `VARIABLES` 於 `9eb4dd6e496b`（#332）被改寫過，seed `b7fa4b6e4fe7` 的舊值
+    **不含** `lowest_list`。本測試初版正是讀 seed，因而對這支少驗一個變數卻全綠。
+
+    這條在這裡的作用是：若日後有人為了「讓測試不依賴 DB」把宣告端改回解析 seed migration，
+    它會立刻變紅，而不是靜默地退回舊的漏洞。
+    """
+    declared = await _declared_variables(db)
+    assert "lowest_list" in declared["KPI_WEEKLY"], (
+        "KPI_WEEKLY 的宣告未含 `lowest_list`——宣告端可能被改回讀 seed migration（見本檔 docstring）"
+    )

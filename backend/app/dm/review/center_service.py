@@ -549,6 +549,14 @@ class ReviewCenterService:
                 # 全無寫入點。保留是為了值域日後改變時預設不寄（fail-closed），不是因為
                 # 現在會發生；讀者不應據此認為「已刪除」這條路徑已被實作。
                 unreachable = "審核者帳號已停用"
+            elif not r.reviewer_has_role:
+                # #627 補上 #395 少做的那一維：帳號 ACTIVE 但 `DM_REVIEWER` 角色已撤。
+                # 簽核中心 router 掛 router-level `get_dm_reviewer_context`，角色一撤他連這筆
+                # 送審都看不到——**催得到、做不了**，而這筆案件會永遠逾期、永遠寄下去。
+                #
+                # 與「已停用」分開具名的理由同上：補救動作不同。此類要**改指派審核者或補回角色**，
+                # 而不是去使用者管理找停用清單（那裡找不到這個人，他是 ACTIVE 的）。
+                unreachable = "審核者已無審核者角色"
             elif not r.reviewer_email:
                 # 分三類後這條只剩「`EMAIL` 為空字串」一途（`DP_USER.EMAIL` 是
                 # `nullable=False`，`None` 只會來自 outerjoin 落空，已由上面接走）。

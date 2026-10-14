@@ -32,7 +32,7 @@ async def run() -> None:
         count = await ReviewCenterService().scan_overdue_and_remind(db, threshold_days=threshold)
         await db.commit()
     # 文案刻意寫「已排入寄信」而非「催辦」：#627 之前 `count` 是**掃到的筆數**，範本不寄信
-    # 的那兩年這行每天照報「催辦 N 筆」。現在 `count` 只數真的進 outbox 的，文案要跟著說清楚
+    # 的那兩個月這行每天照報「催辦 N 筆」。現在 `count` 只數真的進 outbox 的，文案要跟著說清楚
     # 它數的是什麼，否則下一個人仍會把這個數字讀成「有 N 個人被催到」。
     # 掃到但沒排入者（帳號停用 / 範本停用 / 渲染失敗）各自在 `scan_overdue_and_remind` 留 warning。
     logger.info("DM 簽核催辦完成：已排入寄信 %d 筆（門檻 %d 天）", count, threshold)

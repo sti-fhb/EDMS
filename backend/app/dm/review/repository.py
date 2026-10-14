@@ -16,7 +16,7 @@ from app.dm.catalog.models import DmCategory, DmTag, DmTagGroup
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion, DmVersionTag
 from app.dm.document.visibility import audience_pair_match
 from app.dm.review.models import DmChangeLog, DmReview
-from app.dm.roles.authz import DM_VIEWER
+from app.dm.roles.authz import DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.users.account_status import account_not_disabled_clause
 from app.dp.users.models import DpUser
@@ -395,8 +395,30 @@ class ReviewCenterRepository:
         ⚠️ 審核者是 `outerjoin`，**`reviewer_status` 可能為 `None`**（該 `user_id` 查無
         使用者列；`ASSIGNED_REVIEWER` 無 FK）。呼叫端須把它與「已停用」分開判讀——兩者
         的補救動作不同：前者要修資料，後者要換審核者。
+
+        ## `reviewer_has_role`：#395 少做的那一維（#627 補上）
+
+        #395 只確認了**帳號狀態**。但「這個人現在還能不能處理這筆送審」另有一個維度：
+        `DM_REVIEWER` 角色。角色撤銷走 `roles/assign_service` 的 `DmUserRole.deleted = 1`，
+        **不碰 `DM_REVIEW.ASSIGNED_REVIEWER`**（歷史指派欄位），而簽核中心 router 掛的是
+        router-level `get_dm_reviewer_context` → 角色一撤，他連那筆送審都看不到。
+
+        於是「帳號 ACTIVE、角色已撤」的人處在最糟的組合：**催得到、做不了**。此缺口在
+        `AUTO_REMIND` 還是 `MSG` 的期間零後果（根本沒寄信），#627 改 `EMAIL` 後才真的成立。
+
+        同樣回出布林、不在查詢層濾——理由與上面那段相同：案件仍卡著，呼叫端要看得見。
         """
         cutoff: datetime = utcnow() - timedelta(days=threshold_days)
+        has_reviewer_role = exists(
+            select(1)
+            .select_from(DmUserRole)
+            .where(
+                DmUserRole.user_id == DmReview.assigned_reviewer,
+                DmUserRole.role_code == DM_REVIEWER,
+                DmUserRole.deleted == 0,
+            )
+            .correlate(DmReview)
+        )
         stmt = (
             select(
                 DmReview.review_id,
@@ -408,6 +430,7 @@ class ReviewCenterRepository:
                 DpUser.user_name.label("reviewer_name"),
                 DpUser.status.label("reviewer_status"),
                 DpUser.deleted.label("reviewer_deleted"),
+                has_reviewer_role.label("reviewer_has_role"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DpUser, DmReview.assigned_reviewer == DpUser.user_id)
