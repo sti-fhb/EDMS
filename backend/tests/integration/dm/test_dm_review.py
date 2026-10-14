@@ -50,6 +50,7 @@ async def _auto_remind_rows(db) -> int:
         )
     ) or 0
 
+
 _svc = ReviewCenterService()
 _PDF = "application/pdf"
 
@@ -595,9 +596,7 @@ async def test_scan_overdue_reminds(db):
     rows = (
         (
             await db.execute(
-                select(DpEmailLog).where(
-                    DpEmailLog.template_code == "AUTO_REMIND", DpEmailLog.status == "PENDING"
-                )
+                select(DpEmailLog).where(DpEmailLog.template_code == "AUTO_REMIND", DpEmailLog.status == "PENDING")
             )
         )
         .scalars()

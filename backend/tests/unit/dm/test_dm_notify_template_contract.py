@@ -42,13 +42,9 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _BACKEND = pathlib.Path(__file__).resolve().parents[3]
-_SEED = (
-    _BACKEND
-    / "alembic"
-    / "versions"
-    / "20260806_1118_b7fa4b6e4fe7_dm_seed_templates_params_into_dp.py"
-)
+_SEED = _BACKEND / "alembic" / "versions" / "20260806_1118_b7fa4b6e4fe7_dm_seed_templates_params_into_dp.py"
 _DM_APP = _BACKEND / "app" / "dm"
+
 
 def _dict_keys(node: ast.AST | None) -> set[str] | None:
     """dict literal → key 集合；非 dict literal 回 None。"""
@@ -68,6 +64,58 @@ def _declared_variables() -> dict[str, set[str]]:
         if vm:
             out[code] = set(vm.group(1).split(","))
     return out
+
+
+def _module_string_consts(tree: ast.Module) -> dict[str, str]:
+    """模組層字串常數（`_TPL_WEEKLY = "KPI_WEEKLY"`）。
+
+    `template_code` 常以常數傳入；不解析的話該呼叫會被誤判成「包裝層」，整支範本就漏出守門之外。
+    """
+    return {
+        t.id: n.value.value
+        for n in tree.body
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+
+
+def _local_dict_vars(fn: ast.AST) -> dict[str, set[str]]:
+    """函式內 `name = {...}` 的區域 dict 變數 → key 集合。"""
+    out: dict[str, set[str]] = {}
+    for stmt in ast.walk(fn):
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            tgt = stmt.targets[0]
+            keys = _dict_keys(stmt.value)
+            if isinstance(tgt, ast.Name) and keys is not None:
+                out[tgt.id] = keys
+    return out
+
+
+def _scan_function(fn, consts, found, wrappers, wrapper_calls) -> None:
+    """掃單一函式內的呼叫，把結果累加進三個收集器（就地修改）。"""
+    local = _local_dict_vars(fn)
+    for call in [n for n in ast.walk(fn) if isinstance(n, ast.Call)]:
+        kw = {k.arg: k.value for k in call.keywords if k.arg}
+        code_node, params_node = kw.get("template_code"), kw.get("params")
+        # Name 若為模組層字串常數，等同字面值
+        if isinstance(code_node, ast.Name) and code_node.id in consts:
+            code_node = ast.Constant(value=consts[code_node.id])
+        # 包裝層呼叫：有字面 template_code、但 params 不在這一層
+        fname = getattr(call.func, "attr", getattr(call.func, "id", None))
+        if isinstance(code_node, ast.Constant) and params_node is None and fname:
+            wrapper_calls.append((fname, code_node.value))
+        if params_node is None:
+            continue
+        keys = _dict_keys(params_node)
+        if keys is None and isinstance(params_node, ast.Name):
+            keys = local.get(params_node.id)
+        if keys is None:
+            continue
+        if isinstance(code_node, ast.Constant) and isinstance(code_node.value, str):
+            found.setdefault(code_node.value, set()).update(keys)
+        else:  # template_code 是變數 → 本函式為包裝層
+            wrappers.setdefault(fn.name, set()).update(keys)
 
 
 def _passed_params() -> dict[str, set[str]]:
@@ -91,44 +139,9 @@ def _passed_params() -> dict[str, set[str]]:
 
     for path in _DM_APP.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        # 模組層字串常數（`_TPL_WEEKLY = "KPI_WEEKLY"`）——`template_code` 常以常數傳入，
-        # 不解析的話會被誤判成「包裝層」而整支範本漏出守門之外。
-        consts: dict[str, str] = {
-            t.id: n.value.value
-            for n in tree.body
-            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
-            for t in n.targets
-            if isinstance(t, ast.Name)
-        }
+        consts = _module_string_consts(tree)
         for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            local: dict[str, set[str]] = {}
-            for stmt in ast.walk(fn):
-                if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
-                    tgt = stmt.targets[0]
-                    keys = _dict_keys(stmt.value)
-                    if isinstance(tgt, ast.Name) and keys is not None:
-                        local[tgt.id] = keys
-            for call in [n for n in ast.walk(fn) if isinstance(n, ast.Call)]:
-                kw = {k.arg: k.value for k in call.keywords if k.arg}
-                code_node, params_node = kw.get("template_code"), kw.get("params")
-                # Name 若為模組層字串常數，等同字面值
-                if isinstance(code_node, ast.Name) and code_node.id in consts:
-                    code_node = ast.Constant(value=consts[code_node.id])
-                # 包裝層呼叫：有字面 template_code、但 params 不在這一層
-                fname = getattr(call.func, "attr", getattr(call.func, "id", None))
-                if isinstance(code_node, ast.Constant) and params_node is None and fname:
-                    wrapper_calls.append((fname, code_node.value))
-                if params_node is None:
-                    continue
-                keys = _dict_keys(params_node)
-                if keys is None and isinstance(params_node, ast.Name):
-                    keys = local.get(params_node.id)
-                if keys is None:
-                    continue
-                if isinstance(code_node, ast.Constant) and isinstance(code_node.value, str):
-                    found.setdefault(code_node.value, set()).update(keys)
-                else:  # template_code 是變數 → 本函式為包裝層
-                    wrappers.setdefault(fn.name, set()).update(keys)
+            _scan_function(fn, consts, found, wrappers, wrapper_calls)
 
     for fname, code in wrapper_calls:
         if fname in wrappers:
@@ -146,9 +159,7 @@ def test_每支範本宣告的變數都有被程式傳入():
         for code, vars_ in declared.items()
         if vars_ - passed.get(code, set())
     }
-    assert not missing, (
-        f"下列範本宣告了程式沒有傳入的變數，渲染時會 KeyError → 整批寫 FAILED 且不外拋：{missing}"
-    )
+    assert not missing, f"下列範本宣告了程式沒有傳入的變數，渲染時會 KeyError → 整批寫 FAILED 且不外拋：{missing}"
 
 
 def test_每支範本都有找到對應的呼叫端():

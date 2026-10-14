@@ -309,9 +309,7 @@ async def test_list_excludes_in_app_templates(db, admin_gate):
     # 因而在 DP04 看不到；管理者「找不到催辦範本」正是本次改動的外部徵兆之一）
     assert {"DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND", "AUTO_REMIND"} <= codes
     # 否定：#554 改為站內的 5 支 + 原本就是 MSG 的 SUBMIT_WITHDRAWN，皆不在
-    assert codes.isdisjoint(
-        {"DOC_SUBMIT", "DOC_REJECT", "OBS_SUBMIT", "OBS_APPROVE", "OBS_REJECT", "SUBMIT_WITHDRAWN"}
-    )
+    assert codes.isdisjoint({"DOC_SUBMIT", "DOC_REJECT", "OBS_SUBMIT", "OBS_APPROVE", "OBS_REJECT", "SUBMIT_WITHDRAWN"})
 
 
 async def test_update_in_app_template_forbidden(db, admin_gate):
