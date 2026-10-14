@@ -30,6 +30,7 @@ from app.et.constants import (
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ITEM_QUIZ,
+    QUESTION_SINGLE,
     ROLE_STUDENT,
     ROLE_TEACHER,
     SOURCE_INVITATION_CODE,
@@ -39,7 +40,7 @@ from app.et.constants import (
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.material.models import EtMaterial
 from app.et.progress.models import EtEnrollment, EtProgress
-from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
+from app.et.quiz.models import EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
 from app.et.roles.models import EtUserRole
 from app.et.survey.models import (
     EtSurvey,
@@ -231,7 +232,22 @@ async def _complete_item(db, user_id: str, course_id: int, item_id: int) -> None
     await db.flush()
 
 
-async def _attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int, score: Decimal, is_pass: bool) -> int:
+async def _attempt(
+    db,
+    *,
+    user_id: str,
+    course_id: int,
+    quiz_id: int,
+    no: int,
+    score: Decimal,
+    is_pass: bool,
+    points: int | None = None,
+) -> int:
+    """建一筆已提交的 attempt。
+
+    `points` 有給時另建一題與一筆作答明細，使該次作答的配分總和（`SUM(POINTS_SNAPSHOT)`）
+    為 `points`——平均成績依它換算百分制（#642）。不給時沒有明細，配分總和視為 0。
+    """
     now = utcnow()
     row = EtQuizAttemptM(
         user_id=user_id,
@@ -253,6 +269,34 @@ async def _attempt(db, *, user_id: str, course_id: int, quiz_id: int, no: int, s
     )
     db.add(row)
     await db.flush()
+    if points is not None:
+        question = EtQuestion(
+            quiz_id=quiz_id,
+            question_type=QUESTION_SINGLE,
+            stem="題幹",
+            points=points,
+            sort_order=no,
+            created_user=user_id,
+            created_date=now,
+            deleted=0,
+        )
+        db.add(question)
+        await db.flush()
+        db.add(
+            EtQuizAttemptD(
+                attempt_id=row.attempt_id,
+                question_id=question.question_id,
+                stem_snapshot="題幹",
+                points_snapshot=points,
+                type_snapshot=QUESTION_SINGLE,
+                options_snapshot="[]",
+                score=score,
+                created_user=user_id,
+                created_date=now,
+                deleted=0,
+            )
+        )
+        await db.flush()
     return row.attempt_id
 
 
@@ -497,10 +541,24 @@ class TestAverageScore:
         await _enroll(db, student, course_id)
         # 同一測驗考兩次，取最高分 90（不是平均 75）
         await _attempt(
-            db, user_id=student, course_id=course_id, quiz_id=quiz_a, no=1, score=Decimal("60"), is_pass=False
+            db,
+            user_id=student,
+            course_id=course_id,
+            quiz_id=quiz_a,
+            no=1,
+            score=Decimal("60"),
+            is_pass=False,
+            points=100,
         )
         await _attempt(
-            db, user_id=student, course_id=course_id, quiz_id=quiz_a, no=2, score=Decimal("90"), is_pass=True
+            db,
+            user_id=student,
+            course_id=course_id,
+            quiz_id=quiz_a,
+            no=2,
+            score=Decimal("90"),
+            is_pass=True,
+            points=100,
         )
         await db.commit()
 
@@ -508,6 +566,75 @@ class TestAverageScore:
 
         row = r.json()["data"][0]
         assert row["avg_score"] == "90.00", "應為已作答測驗的最高分平均（90），非含未作答的 45"
+
+    async def test_配分總和非100時平均成績以換算後的最高分計算(self, client, db) -> None:
+        """#642：配分總和 10、得 8 分 → 最高分以 80 計，不是原始分數 8。
+
+        「總和 = 100」只在發布當下檢核，發布後教師仍可改配分；及格判定早已換算成百分制，
+        平均成績若取原始分數，教師會看到「平均 8 分」的學員其實已及格。
+        """
+        teacher = await _user(db, "t_tr06b")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr06b", roles=(ROLE_STUDENT,), name="配分十分")
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db,
+            user_id=student,
+            course_id=course_id,
+            quiz_id=quiz_id,
+            no=1,
+            score=Decimal("8"),
+            is_pass=True,
+            points=10,
+        )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.json()["data"][0]["avg_score"] == "80.00", "應依配分總和換算為百分制，不是原始分數 8"
+
+    async def test_各次作答依自己的配分總和換算後才取最高分(self, client, db) -> None:
+        """教師在兩次作答之間改了配分：第 1 次 60/100、第 2 次 9/10。
+
+        先換算再取最高 → 90；若先取原始分數最高（60）再換算，會得到 60——本條擋的就是這個順序。
+        """
+        teacher = await _user(db, "t_tr06c")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr06c", roles=(ROLE_STUDENT,), name="配分被改過")
+        await _enroll(db, student, course_id)
+        common = {"user_id": student, "course_id": course_id, "quiz_id": quiz_id}
+        await _attempt(db, **common, no=1, score=Decimal("60"), is_pass=False, points=100)
+        await _attempt(db, **common, no=2, score=Decimal("9"), is_pass=True, points=10)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.json()["data"][0]["avg_score"] == "90.00", "應先依各次配分總和換算再取最高分"
+
+    async def test_無作答明細的已提交作答以零分計(self, client, db) -> None:
+        """配分總和為 0（零題）時不除以零，以 0 計——與 `to_percent`、及格判定一致。"""
+        teacher = await _user(db, "t_tr06d")
+        course_id = await _course(db, owner=teacher)
+        chapter_id = await _chapter(db, course_id)
+        quiz_id = await _quiz(db)
+        await _item(db, chapter_id, title="小考", order=1, quiz_id=quiz_id)
+        student = await _user(db, "s_tr06d", roles=(ROLE_STUDENT,), name="零題測驗")
+        await _enroll(db, student, course_id)
+        await _attempt(
+            db, user_id=student, course_id=course_id, quiz_id=quiz_id, no=1, score=Decimal("0"), is_pass=False
+        )
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["data"][0]["avg_score"] == "0.00", "應以 0 計，不是 null（null 代表完全未作答）"
 
     async def test_完全未作答者平均成績為空(self, client, db) -> None:
         """AC 3：顯示「—」而非 0——0 分與未作答意義相反。"""

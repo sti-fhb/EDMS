@@ -117,6 +117,25 @@ def grade_details(answers: Sequence[AnswerSnapshot], *, pass_score: Decimal) -> 
     return GradeResult(per_question=per_question, total=total, points_total=points_total, is_pass=is_pass)
 
 
+def to_percent(score: Decimal, points_total: int) -> Decimal:
+    """原始分數依配分總和換算為百分制，取到小數兩位（#642）。
+
+    與 `grade_details` 的及格判定**同一條公式**（`實得 × 100 ÷ 配分總和`）——引導頁的最高分
+    與 ET02 的平均成績若取原始分數，配分總和不是 100 時就會與及格判定用不同尺度，學員
+    看到「最高分 8 分」卻已及格。總和為 100 時換算結果與原始分數相同。
+
+    Args:
+        score: 該次作答的原始總分（`ET_QUIZ_ATTEMPT_M.SCORE`）。
+        points_total: 該次作答的配分總和（`SUM(POINTS_SNAPSHOT)`）。
+
+    Returns:
+        百分制分數；配分總和為 0 時回 0（零題或配分全為零，得分必然也是 0，且避免除以零）。
+    """
+    if points_total <= 0:
+        return Decimal(0)
+    return (score * 100 / points_total).quantize(_CENTS, rounding=ROUND_HALF_UP)
+
+
 def round_used_attempts(*, total: int, reset_base: int) -> int:
     """本輪已用作答次數（`data-model` §ET_QUIZ_RETRY_RESET）。
 

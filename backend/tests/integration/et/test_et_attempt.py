@@ -692,6 +692,39 @@ class TestRetryLimit:
         assert body["time_limit_min"] is None, "未設時限應為 null（不限時），不是 0"
         assert body["last_score"] is None
 
+    async def test_配分總和非100時引導頁分數換算為百分制(self, client, db) -> None:
+        """#642：配分 8 + 2 共 10 分。第 1 次只答對 8 分題、第 2 次全錯。
+
+        引導頁應顯示最高分 80、最近一次 0——原本取原始分數會顯示 8 與 0，而及格判定
+        用的是百分制（8/10 = 80 ≥ 80 已及格），同一畫面出現「最高分 8 分、已及格」。
+        """
+        teacher = await _user(db, "t_att15", ROLE_TEACHER)
+        student = await _user(db, "s_att15")
+        course = await _course_with_quiz(client, db, teacher, code="32000015")
+        big = await _add_question(client, teacher, course["quiz_id"], points=8)
+        await _add_question(client, teacher, course["quiz_id"], points=2)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        correct = next(o["option_id"] for o in big["options"] if o["is_correct"])
+
+        first = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.put(
+            _answer_url(first["attempt_id"], big["question_id"]), json={"selected_options": [correct]}, headers=h
+        )
+        await client.post(f"/api/et/attempts/{first['attempt_id']}/submit", headers=h)
+        await db.commit()
+        second = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
+        await client.post(f"/api/et/attempts/{second['attempt_id']}/submit", headers=h)
+        await db.commit()
+
+        r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=h)
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["best_score"] == "80.00", "最高分應依配分總和換算，不是原始分數 8"
+        assert body["last_score"] == "0.00"
+        assert body["is_passed"] is True, "及格判定行為不變"
+
 
 class TestReviewLastAttempt:
     """「查看上次作答明細」——提交後回頭複習的路徑。"""
