@@ -63,18 +63,27 @@ _SWEEP_EVERY = 1000
 _DEFAULT_MAX_KEYS = 100_000
 
 
-class SlidingWindowRateLimiter:
-    """行程內滑動視窗限流器（單一實例、非分散式）。
+class SlidingWindowCounter:
+    """滑動視窗計數器：**只數，不判上限、不拋例外**。
 
-    以 key（如 `login:ip:1.2.3.4` / `login:acct:a@b.c`）分桶記錄請求時間戳，
-    視窗內請求數達上限即拒。`hit` 為同步、無 await（asyncio 單執行緒下對單一 key
-    的讀改寫不會被其他協程插斷），故不需鎖；前提為應用以單一 process 運行。
+    與下方 `SlidingWindowRateLimiter` 共用同一份視窗 / 回收邏輯（後者組合本類別），
+    分開是因為三個性質**刻意相反**，不是風格差異：
+
+    | | 本類別 | SlidingWindowRateLimiter |
+    |---|---|---|
+    | 上限 | 由呼叫端**於請求時**決定（如讀 DP_PARAM）| 建構時固定 |
+    | 達上限 | 呼叫端自理（註冊路徑需**靜默**）| 拋 429 |
+    | key 空間滿 | **fail-open**（不記、照常放行）| fail-closed（拒新 key）|
+
+    ⛔ **三者都不要「順手統一」。** 達上限拋 429 會讓 `/register` 多出一種回應，
+    等於把 #345 / #346 關掉的列舉面從另一個角度打開；key 空間滿時 fail-closed 則會
+    讓大量不同 Email 的嘗試把表塞滿、反而使正常註冊被拒（以 DoS 換 DoS）。
+    fail-open 的取捨比照 `core/cooldown.py`（該檔檔頭有同樣的既有裁示）。
     """
 
-    def __init__(self, max_requests: int, window_seconds: float, max_keys: int = _DEFAULT_MAX_KEYS) -> None:
-        if max_requests <= 0 or window_seconds <= 0 or max_keys <= 0:
-            raise ValueError("max_requests、window_seconds、max_keys 必須為正數")
-        self._max = max_requests
+    def __init__(self, window_seconds: float, max_keys: int = _DEFAULT_MAX_KEYS) -> None:
+        if window_seconds <= 0 or max_keys <= 0:
+            raise ValueError("window_seconds、max_keys 必須為正數")
         self._window = window_seconds
         self._max_keys = max_keys
         self._hits: dict[str, deque[float]] = defaultdict(deque)
@@ -92,6 +101,62 @@ class SlidingWindowRateLimiter:
         for key in empty:
             del self._hits[key]
 
+    def _tick(self, now: float) -> None:
+        self._since_sweep += 1
+        if self._since_sweep >= _SWEEP_EVERY:
+            self._sweep(now)
+            self._since_sweep = 0
+
+    def count(self, key: str, *, now: float | None = None) -> int:
+        """視窗內目前的請求數。**無副作用**：不新增 key、不記錄。
+
+        ⚠️ 刻意用 `self._hits.get(key)` 而非 `self._hits[key]`——後者是 defaultdict，
+        會在 `max_keys` 檢查**之前**憑空建桶，等於讓任何人以不重複的 key 繞過記憶體上界。
+        """
+        current = time.monotonic() if now is None else now
+        self._tick(current)
+        bucket = self._hits.get(key)
+        if bucket is None:
+            return 0
+        cutoff = current - self._window
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        return len(bucket)
+
+    def try_record(self, key: str, *, now: float | None = None) -> bool:
+        """記錄一次；成功回 True。key 空間已滿且為新 key 時回 **False 而不拋**。"""
+        current = time.monotonic() if now is None else now
+        self._tick(current)
+        if key not in self._hits and len(self._hits) >= self._max_keys:
+            self._sweep(current)
+            if len(self._hits) >= self._max_keys:
+                return False
+        bucket = self._hits[key]
+        cutoff = current - self._window
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        bucket.append(current)
+        return True
+
+
+class SlidingWindowRateLimiter:
+    """行程內滑動視窗限流器（單一實例、非分散式）。
+
+    以 key（如 `login:ip:1.2.3.4` / `login:acct:a@b.c`）分桶記錄請求時間戳，
+    視窗內請求數達上限即拒。`hit` 為同步、無 await（asyncio 單執行緒下對單一 key
+    的讀改寫不會被其他協程插斷），故不需鎖；前提為應用以單一 process 運行。
+
+    視窗與回收邏輯委派 `SlidingWindowCounter`；本類別只加「上限判定 + 拋 429」。
+    ⚠️ 委派後 sweep 觸發頻率約為原本的兩倍（`hit` 內 `count` 與 `try_record` 各 tick 一次）。
+    那是回收成本的變化、不是行為變化：sweep 只刪已過期的空桶。
+    """
+
+    def __init__(self, max_requests: int, window_seconds: float, max_keys: int = _DEFAULT_MAX_KEYS) -> None:
+        if max_requests <= 0 or window_seconds <= 0 or max_keys <= 0:
+            raise ValueError("max_requests、window_seconds、max_keys 必須為正數")
+        self._max = max_requests
+        self._counter = SlidingWindowCounter(window_seconds, max_keys)
+
     def hit(self, key: str, *, now: float | None = None) -> None:
         """記錄一次請求；視窗內達上限則拋 AppError(429)。
 
@@ -100,28 +165,14 @@ class SlidingWindowRateLimiter:
             now: 目前單調時間（秒）；預設 time.monotonic()，測試可注入以決定性驗證。
 
         Raises:
-            AppError: 視窗內請求數已達上限（429 / COMMON_429）。被拒的請求不佔配額。
+            AppError: 視窗內請求數已達上限，或 key 空間已滿（429 / COMMON_429）。
+                被拒的請求不佔配額。後者為 fail-closed，界定記憶體上界。
         """
         current = time.monotonic() if now is None else now
-
-        self._since_sweep += 1
-        if self._since_sweep >= _SWEEP_EVERY:
-            self._sweep(current)
-            self._since_sweep = 0
-
-        # 硬上限：新 key 會使字典超界時，先立即回收；仍滿則 fail-closed 拒絕，界定記憶體上界
-        if key not in self._hits and len(self._hits) >= self._max_keys:
-            self._sweep(current)
-            if len(self._hits) >= self._max_keys:
-                raise AppError(status_code=429, detail="操作過於頻繁，請稍後再試", error_code="COMMON_429")
-
-        bucket = self._hits[key]
-        cutoff = current - self._window
-        while bucket and bucket[0] <= cutoff:
-            bucket.popleft()
-        if len(bucket) >= self._max:
+        if self._counter.count(key, now=current) >= self._max:
             raise AppError(status_code=429, detail="操作過於頻繁，請稍後再試", error_code="COMMON_429")
-        bucket.append(current)
+        if not self._counter.try_record(key, now=current):
+            raise AppError(status_code=429, detail="操作過於頻繁，請稍後再試", error_code="COMMON_429")
 
 
 def rate_limit_by_ip(limiter: SlidingWindowRateLimiter, scope: str) -> Callable[[], Awaitable[None]]:
