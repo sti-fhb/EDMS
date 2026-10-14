@@ -76,11 +76,14 @@ async def daily_job() -> None:
 
     logger.info(
         "SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆、加急提醒 %d 封、"
-        "文件變動通知 %d 封（掃描 %d 份、跳過 %d 份）",
+        "文件變動通知 %d 封（掃描 %d 份、跳過 %d 份、新引用記下基準 %d 組）",
         closed,
         settled,
         urgent,
         doc_changes.notified,
         doc_changes.scanned_docs,
         doc_changes.skipped_docs,
+        # 新引用只記基準、不寄信（#636）。與通知封數分開印，否則看不出
+        # 「今天真的有文件改版」與「今天有教師新引用了文件」的差別。
+        doc_changes.baselined,
     )

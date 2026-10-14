@@ -14,17 +14,45 @@ pytestmark = pytest.mark.unit
 class TestClassifyDocChange:
     """FR：發布新版與廢止各寄一種信；無變動不寄。"""
 
-    def test_無簿記列且文件為已發布_視為新版(self) -> None:
-        """#231 裁示 Q1 = C：不回填，「查無簿記列」即視為有變動。
+    def test_無簿記列且文件為已發布_只記基準不寄信(self) -> None:
+        """🔴 #636 推翻 #231 當初的判斷。
 
-        正式環境由空的 migration 從頭建起，所有引用都在本功能上線後才產生，
-        故「查無簿記列」在正式環境只會發生在「這份引用剛被教師加進來」時。
+        原本回 `NEW_VERSION`，理由寫著「正式環境由空的 migration 從頭建起，所有引用都在
+        本功能上線後才產生，故『查無簿記列』只會發生在這份引用剛被教師加進來時」。
+
+        **前半對、結論錯。** 「剛被教師加進來」正是**不該寄信**的時候——信裡寫著
+        「您課程引用的訓練教材文件**已發布新版本**」，而那份文件根本沒改版，是教師自己
+        剛加的。2026-10-14 手測實證：`DM-TRAINING-000004` 版本歷程只有一筆、從未上傳新版，
+        教師卻收到「已發布新版本」。
+
+        而且它**不是一次性的**——簿記鍵為 `(文件, 擁有者)`，每位教師第一次引用每一份文件
+        都會再觸發一次，正式環境亦然。
+
+        ⚠️ 代價：寫入基準到下一次排程之間若文件真的改版，那一次會漏通知（窗口最多一天，
+        而教師剛剛才看過那份文件）。這是選擇，不是疏漏。
         """
         assert (
             classify_doc_change(
                 last_notified_version_id=None,
                 last_notified_status=None,
                 current_version_id=7,
+                current_status="PUBLISHED",
+            )
+            == DocChangeEvent.BASELINE_ONLY
+        )
+
+    def test_記下基準之後真的改版仍會通知(self) -> None:
+        """正向錨點：少了這條，把「查無簿記」改成永遠不通知也會讓上一條通過。
+
+        ⚠️ 上一條的修法**不可只讓規則回 None**——service 看到 None 會略過且不寫簿記，
+        該組合會永遠停在「查無簿記」，連真正的改版也再不會通知。本條釘住基準寫入後
+        仍然有效。
+        """
+        assert (
+            classify_doc_change(
+                last_notified_version_id=7,
+                last_notified_status="PUBLISHED",
+                current_version_id=8,
                 current_status="PUBLISHED",
             )
             == DocChangeEvent.NEW_VERSION

@@ -4,6 +4,7 @@
 `ET_MATERIAL_DOC` → `ET_MATERIAL` → `ET_ITEM` → `ET_CHAPTER` → `ET_COURSE`。
 """
 
+import os
 from datetime import datetime, timezone
 
 import pytest
@@ -186,8 +187,6 @@ async def _user(db, user_id: str, *, status: str = "ACTIVE") -> str:
 
 async def _published_doc(db, doc_id: str, *, name="訓練教材", version_no="v1.0", obsolete=False) -> int:
     """建一份已發布（或已廢止）之訓練教材。廢止保留 `current_version_id`，比照 DM 行為。"""
-    import os
-
     now = utcnow()
     db.add(
         DmDocument(
@@ -223,6 +222,44 @@ async def _published_doc(db, doc_id: str, *, name="訓練教材", version_no="v1
     return ver.version_id
 
 
+async def _publish_new_version(db, doc_id: str, *, version_no: str) -> int:
+    """對既有文件再發布一版，並把 `CURRENT_VERSION_ID` 指過去（比照 DM 發布行為）。
+
+    🔴 #636 之後「真的改版」只能長這樣。此前多數測試拿「第一次掃描到這份引用」
+    當改版的代理——那個代理正是本次要修掉的缺陷，不能再用它當前提。
+    """
+    now = utcnow()
+    ver = DmDocVersion(
+        doc_id=doc_id,
+        version_no=version_no,
+        change_summary="改版",
+        file_name="b.pdf",
+        file_path=os.path.join(storage_root(), doc_id, f"{version_no}.pdf"),
+        file_size=120,
+        file_mime="application/pdf",
+        status="PUBLISHED",
+        published_date=now,
+        created_user="ed",
+        created_date=now,
+    )
+    db.add(ver)
+    await db.flush()
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == doc_id))
+    doc.current_version_id = ver.version_id
+    await db.flush()
+    return ver.version_id
+
+
+async def _establish_baseline(db) -> None:
+    """跑一輪只為了寫入簿記基準（#636：第一次看到只記基準、不寄信）。
+
+    ⭐ 刻意**走真的 service** 而非直接 INSERT 簿記列：手工捏造的基準若與 service
+    實際寫入的形狀不同，測試會綠而正式環境會壞。
+    """
+    await EtDocChangeNotifyService().run(db)
+    await db.flush()
+
+
 async def _pending_mails(db, template_code: str) -> list[DpEmailLog]:
     """⚠️ 必須篩 `STATUS='PENDING'`。
 
@@ -244,8 +281,14 @@ async def _notify_state(db, doc_id: str, owner_id: str) -> EtMaterialDocNotify |
 
 
 class TestDocChangeNotifyEndToEnd:
-    async def test_首次掃描到引用即通知改版並寫簿記(self, db) -> None:
-        """裁示 Q1 = C：查無簿記列即視為有變動。"""
+    async def test_首次見到引用只記基準不寄信(self, db) -> None:
+        """🔴 #636：教師剛把文件加進課程，那份文件根本沒有改版。
+
+        原本此處視為「有變動」並寄出「已發布新版本」，信裡叫教師去核對一個**沒有發生
+        過的改版**。2026-10-14 手測實證：`DM-TRAINING-000004` 版本歷程只有一筆、從未
+        上傳新版，教師仍收到信。且它**不是一次性的**——簿記鍵為 `(文件, 擁有者)`，
+        每位教師第一次引用每一份文件都會再觸發一次。
+        """
         doc = "DM-TRAINING-910001"
         owner = await _user(db, "ZT_O1")
         ver_id = await _published_doc(db, doc, name="採血手冊", version_no="v2.0")
@@ -254,13 +297,54 @@ class TestDocChangeNotifyEndToEnd:
         result = await EtDocChangeNotifyService().run(db)
         await db.flush()
 
-        assert result.notified == 1
-        mails = [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")]
-        assert len(mails) == 1, "params key 對不上時平台會寫 FAILED 空信，本斷言已篩 PENDING"
+        assert result.notified == 0
+        assert [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")] == []
+        # 🔴 但基準**必須**寫入。少了這半，該組合會永遠停在「查無簿記」，連日後真正
+        # 的改版也不再通知——那是把吵雜的缺陷換成靜默的缺陷，更糟。
+        assert result.baselined == 1
         state = await _notify_state(db, doc, owner)
         assert state is not None
         assert state.last_notified_version_id == ver_id
         assert state.last_notified_status == "PUBLISHED"
+
+    async def test_記下基準後真的改版才通知(self, db) -> None:
+        """正向錨點：少了這條，把改版通知整個關掉也會讓上一條通過。"""
+        doc = "DM-TRAINING-910007"
+        owner = await _user(db, "ZT_O7")
+        await _published_doc(db, doc, name="採血手冊", version_no="v1.0")
+        await _make_chain(db, owner=owner, course_name="採血訓練", doc_id=doc)
+        await _establish_baseline(db)
+
+        new_ver = await _publish_new_version(db, doc, version_no="v2.0")
+        result = await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        assert result.notified == 1
+        mails = [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")]
+        assert len(mails) == 1, "params key 對不上時平台會寫 FAILED 空信，本斷言已篩 PENDING"
+        assert "v2.0" in mails[0].body, "信要寫出改版後的版本號"
+        state = await _notify_state(db, doc, owner)
+        assert state is not None and state.last_notified_version_id == new_ver
+
+    async def test_首次見到已廢止文件仍立刻通知(self, db) -> None:
+        """#636 的修法**不得**波及這條路徑——那封是真的該寄。
+
+        `classify_doc_change` 的廢止判斷在「查無簿記」之前，所以「教師引用一份已經
+        廢止的文件」照舊第一次就通知。教師可能不知道自己引用的文件已廢止，而該課程
+        發布時會被 `BLOCK_OBSOLETE_DOC` 擋下。
+        """
+        doc = "DM-TRAINING-910008"
+        owner = await _user(db, "ZT_O8")
+        await _published_doc(db, doc, obsolete=True)
+        await _make_chain(db, owner=owner, course_name="引用已廢止文件的課", doc_id=doc)
+
+        result = await EtDocChangeNotifyService().run(db)
+        await db.flush()
+
+        assert result.notified == 1, "廢止在首次見到時仍須立刻通知"
+        assert result.baselined == 0, "這封有寄出，不是只記基準"
+        mails = [m for m in await _pending_mails(db, "DOC_OBSOLETED") if owner in (m.recipient or "")]
+        assert len(mails) == 1
 
     async def test_廢止寄的是另一個範本(self, db) -> None:
         """兩種觸發的**處置不同**，故範本不共用——這條釘住它們沒有被合併。"""
@@ -284,7 +368,9 @@ class TestDocChangeNotifyEndToEnd:
         await _published_doc(db, doc)
         await _make_chain(db, owner=owner, course_name="課程甲", doc_id=doc)
         await _make_chain(db, owner=owner, course_name="課程乙", doc_id=doc)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, doc, version_no="v2.0")
         result = await EtDocChangeNotifyService().run(db)
         await db.flush()
 
@@ -299,7 +385,9 @@ class TestDocChangeNotifyEndToEnd:
         owner = await _user(db, "ZT_O4")
         await _published_doc(db, doc)
         await _make_chain(db, owner=owner, course_name="穩定課程", doc_id=doc)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, doc, version_no="v2.0")
         await EtDocChangeNotifyService().run(db)
         await db.flush()
         second = await EtDocChangeNotifyService().run(db)
@@ -317,7 +405,9 @@ class TestDocChangeNotifyEndToEnd:
         # `bad` 刻意不建 DmDocument —— SRVDM001 會回 404
         await _make_chain(db, owner=owner, course_name="正常課", doc_id=good)
         await _make_chain(db, owner=owner, course_name="壞引用課", doc_id=bad)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, good, version_no="v2.0")
         result = await EtDocChangeNotifyService().run(db)
         await db.flush()
 
@@ -329,17 +419,25 @@ class TestDocChangeNotifyEndToEnd:
 
         簿記若在寄不出去時仍前進，該帳號日後恢復時會**永遠錯過**這次變動。
         收件人用 `active_recipients`（週期性信件須濾帳號狀態，見其 docstring）。
+
+        ⚠️ #636 之後本條**必須**以「基準已存在 → 真的改版 → 寄不出去」來測。
+        若仍停留在第一輪，不寄信是 `BASELINE_ONLY` 造成的、與停用無關，
+        這條會變成在驗一件它名字沒宣稱的事。
         """
         doc = "DM-TRAINING-910006"
         owner = await _user(db, "ZT_O6", status="DISABLED")
-        await _published_doc(db, doc)
+        base_ver = await _published_doc(db, doc)
         await _make_chain(db, owner=owner, course_name="停用擁有者的課", doc_id=doc)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, doc, version_no="v2.0")
         result = await EtDocChangeNotifyService().run(db)
         await db.flush()
 
         assert result.notified == 0
-        assert await _notify_state(db, doc, owner) is None, "沒寄出就不得寫簿記"
+        state = await _notify_state(db, doc, owner)
+        assert state is not None, "基準是前一輪寫的，本輪不該把它刪掉"
+        assert state.last_notified_version_id == base_ver, "寄不出去就不得把簿記推進到新版"
 
 
 class TestDraftScope:
@@ -360,13 +458,16 @@ class TestDraftScope:
         owner = await _user(db, "ZT_D1")
         await _published_doc(db, doc)
         await _make_chain(db, owner=owner, course_name="草稿課", doc_id=doc, status=COURSE_DRAFT)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, doc, version_no="v2.0")
         result = await EtDocChangeNotifyService().run(db)
         await db.flush()
 
         assert result.notified == 0
         assert [m for m in await _pending_mails(db, "DOC_VERSION_CHANGED") if owner in (m.recipient or "")] == []
-        assert await _notify_state(db, doc, owner) is None, "沒寄出就不該寫簿記"
+        # 草稿擁有者在改版情境被濾在 `by_owner` 之外，連基準都不會寫。
+        assert await _notify_state(db, doc, owner) is None
 
     async def test_廢止照樣通知草稿課程的擁有者(self, db) -> None:
         """🔴 與改版相反：草稿正是最需要提早知道的——教師可能要到按下發布被
@@ -396,7 +497,9 @@ class TestDraftScope:
         await _published_doc(db, doc)
         await _make_chain(db, owner=owner, course_name="已發布課", doc_id=doc, status=COURSE_PUBLISHED)
         await _make_chain(db, owner=owner, course_name="已關閉課", doc_id=doc, status=COURSE_CLOSED)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, doc, version_no="v2.0")
         result = await EtDocChangeNotifyService().run(db)
         await db.flush()
 
@@ -416,7 +519,9 @@ class TestDraftScope:
         await _published_doc(db, doc)
         await _make_chain(db, owner=owner, course_name="上線中的課", doc_id=doc, status=COURSE_PUBLISHED)
         await _make_chain(db, owner=owner, course_name="還在寫的草稿", doc_id=doc, status=COURSE_DRAFT)
+        await _establish_baseline(db)
 
+        await _publish_new_version(db, doc, version_no="v2.0")
         await EtDocChangeNotifyService().run(db)
         await db.flush()
 
