@@ -157,6 +157,16 @@ class SlidingWindowRateLimiter:
         self._max = max_requests
         self._counter = SlidingWindowCounter(window_seconds, max_keys)
 
+    @property
+    def _hits(self) -> dict[str, deque[float]]:
+        """內部桶。**測試用的清理點**（13 處 `_hits.clear()` / `.pop()` 分散於 6 個測試檔）。
+
+        抽出 `SlidingWindowCounter` 後儲存下移一層，本屬性代理回去，使既有清理點不必跟著搬——
+        它們清的是同一份 dict。少了這個代理，一次內部重構就要改 6 個無關檔案，
+        而下一次重構再改一輪。
+        """
+        return self._counter._hits
+
     def hit(self, key: str, *, now: float | None = None) -> None:
         """記錄一次請求；視窗內達上限則拋 AppError(429)。
 

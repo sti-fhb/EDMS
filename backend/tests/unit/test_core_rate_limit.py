@@ -75,9 +75,8 @@ def test_sweep_reclaims_stale_keys():
     for i in range(1500):
         limiter.hit(f"acct:late{i}", now=100_000.0 + i * 0.001)
     # 早期一次性 key 應已被 sweep 回收（不再殘留），outer dict 有界（遠小於 3000 總 key）
-    # 內部狀態自 SlidingWindowCounter 抽出後下移一層（結構變更，驗的性質未變）
-    assert not any(k.startswith("acct:user") for k in limiter._counter._hits)
-    assert len(limiter._counter._hits) < 3000
+    assert not any(k.startswith("acct:user") for k in limiter._hits)
+    assert len(limiter._hits) < 3000
 
 
 def test_max_keys_hard_cap_fail_closed():
