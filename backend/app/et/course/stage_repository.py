@@ -11,11 +11,10 @@
 代價是第一次編輯時多一次整棵複製。課程內容樹的量級是「章節 × 項目 × 題目」，
 實務上數十到數百列，一次性成本可忽略。
 
-## ⚠️ seed 的遍歷是**手寫**的，不是由 `APPLY_ORDER` 泛型推導
+## 活表遍歷不在這裡
 
-父子關係有兩種方向（`ET_ITEM.MATERIAL_ID` 反向指著教材），泛型遍歷寫出來比手寫更難讀，
-而這段程式的正確性全靠人看得懂。代價是**新增內容型別時這裡會被漏掉**——
-`test_種出的樹涵蓋十一種實體` 就是為此存在：少搬一種會紅。
+在 `stage_live_tree.load_live_tree`，**與套用端的刪除偵測共用**——兩邊對「哪些列算
+課程內容」必須給出完全相同的答案，理由見該模組 docstring。
 """
 
 import json
@@ -28,26 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ
-from app.et.course.models import EtChapter, EtCourseContentStage, EtItem
+from app.et.course.models import EtCourseContentStage
 from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, payload_fields
-from app.et.course.stage_rules import (
-    ENTITY_CHAPTER,
-    ENTITY_ITEM,
-    ENTITY_MATERIAL,
-    ENTITY_MATERIAL_DOC,
-    ENTITY_MATERIAL_VIDEO,
-    ENTITY_OPTION,
-    ENTITY_QUESTION,
-    ENTITY_QUIZ,
-    ENTITY_SURVEY,
-    ENTITY_SURVEY_OPTION,
-    ENTITY_SURVEY_QUESTION,
-    StageNode,
-)
-from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
-from app.et.quiz.models import EtOption, EtQuestion, EtQuiz
-from app.et.survey.models import EtSurvey, EtSurveyOption, EtSurveyQuestion
+from app.et.course.stage_live_tree import LiveKey, load_live_tree
+from app.et.course.stage_rules import StageNode
 
 
 @dataclass(frozen=True)
@@ -120,111 +103,23 @@ class EtCourseStageRepository:
     async def seed_from_live(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
         """把活表的內容樹整棵複製進暫存區。
 
-        ⚠️ 呼叫端須先確認暫存區是空的——重複 seed 會被唯一索引擋下
-        （`(COURSE_ID, ENTITY_TYPE, SOURCE_ID)`），那是正確的 fail-closed，但訊息不好讀。
+        遍歷用 `stage_live_tree.load_live_tree`——**與套用端的刪除偵測共用同一支**。
+        各寫一份的話，只有 seed 漏搬某一種時，刪除偵測會把它判成「教師刪了它」而在按下
+        「更新」時連帶軟刪（見該模組 docstring）。
+
+        ⚠️ 呼叫端須先確認暫存區是空的——重複 seed 會被唯一索引
+        `(COURSE_ID, ENTITY_TYPE, SOURCE_ID)` 擋下。那是正確的 fail-closed，但訊息不好讀。
         """
         ctx = _SeedCtx(course_id=course_id, operator=operator, now=utcnow())
+        stage_id_by_key: dict[LiveKey, int] = {}
 
-        chapters = list(
-            await db.scalars(
-                select(EtChapter)
-                .where(EtChapter.course_id == course_id, EtChapter.deleted == 0)
-                .order_by(EtChapter.sort_order)
+        # `load_live_tree` 保證父節點排在子節點之前，所以查父層的 `STAGE_ID` 必定查得到。
+        for node in await load_live_tree(db, course_id):
+            parent_stage_id = None if node.parent_key is None else stage_id_by_key[node.parent_key]
+            stage_id_by_key[node.key] = await self._add(
+                db, ctx, node.entity_type, node.row, parent=parent_stage_id, sort_order=node.sort_order
             )
-        )
-        for chapter in chapters:
-            ch_stage = await self._add(db, ctx, ENTITY_CHAPTER, chapter, parent=None, sort_order=chapter.sort_order)
-            await self._seed_items(db, ctx, chapter, ch_stage)
-
-        await self._seed_survey(db, ctx)
         await db.flush()
-
-    # ── 以下為 seed 的逐層遍歷 ────────────────────────────────────────────────
-
-    async def _seed_items(self, db: AsyncSession, ctx: _SeedCtx, chapter: EtChapter, chapter_stage_id: int) -> None:
-        items = list(
-            await db.scalars(
-                select(EtItem)
-                .where(EtItem.chapter_id == chapter.chapter_id, EtItem.deleted == 0)
-                .order_by(EtItem.sort_order)
-            )
-        )
-        for item in items:
-            item_stage = await self._add(
-                db, ctx, ENTITY_ITEM, item, parent=chapter_stage_id, sort_order=item.sort_order
-            )
-            if item.item_type == ITEM_MATERIAL and item.material_id:
-                await self._seed_material(db, ctx, item.material_id, item_stage)
-            elif item.item_type == ITEM_QUIZ and item.quiz_id:
-                await self._seed_quiz(db, ctx, item.quiz_id, item_stage)
-
-    async def _seed_material(self, db: AsyncSession, ctx: _SeedCtx, material_id: int, item_stage_id: int) -> None:
-        material = await db.scalar(
-            select(EtMaterial).where(EtMaterial.material_id == material_id, EtMaterial.deleted == 0)
-        )
-        if material is None:
-            # 孤兒項目（教材已軟刪、項目還在）。唯一的刪除路徑會連項目一起刪，故今天不可達；
-            # 真的出現時**不中斷 seed**——那門課本來就不該通過檢核，`BLOCK_ITEM_NO_TITLE`
-            # 會以空名稱擋下（同 `publish_repository._item_titles` 的處理）。
-            return
-        mat_stage = await self._add(db, ctx, ENTITY_MATERIAL, material, parent=item_stage_id, sort_order=0)
-        for video in await db.scalars(
-            select(EtMaterialVideo)
-            .where(EtMaterialVideo.material_id == material_id, EtMaterialVideo.deleted == 0)
-            .order_by(EtMaterialVideo.sort_order)
-        ):
-            await self._add(db, ctx, ENTITY_MATERIAL_VIDEO, video, parent=mat_stage, sort_order=video.sort_order)
-        for doc in await db.scalars(
-            select(EtMaterialDoc)
-            .where(EtMaterialDoc.material_id == material_id, EtMaterialDoc.deleted == 0)
-            .order_by(EtMaterialDoc.sort_order)
-        ):
-            await self._add(db, ctx, ENTITY_MATERIAL_DOC, doc, parent=mat_stage, sort_order=doc.sort_order)
-
-    async def _seed_quiz(self, db: AsyncSession, ctx: _SeedCtx, quiz_id: int, item_stage_id: int) -> None:
-        quiz = await db.scalar(select(EtQuiz).where(EtQuiz.quiz_id == quiz_id, EtQuiz.deleted == 0))
-        if quiz is None:
-            return  # 同 `_seed_material` 的孤兒情形
-        quiz_stage = await self._add(db, ctx, ENTITY_QUIZ, quiz, parent=item_stage_id, sort_order=0)
-        for question in await db.scalars(
-            select(EtQuestion)
-            .where(EtQuestion.quiz_id == quiz_id, EtQuestion.deleted == 0)
-            .order_by(EtQuestion.sort_order)
-        ):
-            q_stage = await self._add(
-                db, ctx, ENTITY_QUESTION, question, parent=quiz_stage, sort_order=question.sort_order
-            )
-            for option in await db.scalars(
-                select(EtOption)
-                .where(EtOption.question_id == question.question_id, EtOption.deleted == 0)
-                .order_by(EtOption.sort_order)
-            ):
-                await self._add(db, ctx, ENTITY_OPTION, option, parent=q_stage, sort_order=option.sort_order)
-
-    async def _seed_survey(self, db: AsyncSession, ctx: _SeedCtx) -> None:
-        """問卷。
-
-        ⚠️ **不濾 `is_active`**——停用的問卷仍是課程內容的一部分，教師可以再啟用它。
-        「停用視同沒有問卷」是**檢核**那一層的判斷（`stage_rules._survey_question_count`
-        與活表那側的 `publish_repository._survey_question_count`），不是搬運這一層的。
-        漏搬會讓停用的問卷在按下「更新」時被當成「活表有而暫存沒有」而連帶刪掉。
-        """
-        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == ctx.course_id, EtSurvey.deleted == 0))
-        if survey is None:
-            return
-        s_stage = await self._add(db, ctx, ENTITY_SURVEY, survey, parent=None, sort_order=0)
-        for sq in await db.scalars(
-            select(EtSurveyQuestion)
-            .where(EtSurveyQuestion.survey_id == survey.survey_id, EtSurveyQuestion.deleted == 0)
-            .order_by(EtSurveyQuestion.sort_order)
-        ):
-            sq_stage = await self._add(db, ctx, ENTITY_SURVEY_QUESTION, sq, parent=s_stage, sort_order=sq.sort_order)
-            for so in await db.scalars(
-                select(EtSurveyOption)
-                .where(EtSurveyOption.sq_id == sq.sq_id, EtSurveyOption.deleted == 0)
-                .order_by(EtSurveyOption.sort_order)
-            ):
-                await self._add(db, ctx, ENTITY_SURVEY_OPTION, so, parent=sq_stage, sort_order=so.sort_order)
 
     async def _add(
         self, db: AsyncSession, ctx: _SeedCtx, entity_type: str, row: object, *, parent: int | None, sort_order: int

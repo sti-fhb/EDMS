@@ -14,7 +14,7 @@ import json
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.operator import OperatorInfo
@@ -23,9 +23,10 @@ from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEACHER, SURVEY_QUESTION_SINGLE
-from app.et.course.models import EtCourse, EtCourseContentStage, EtItem
+from app.et.course.models import EtChapter, EtCourse, EtCourseContentStage, EtItem
 from app.et.course.publish_repository import EtPublishRepository
 from app.et.course.publish_rules import evaluate_publish
+from app.et.course.stage_apply import _DELETED_WITH_ITEM, _DELETERS, apply_stage
 from app.et.course.stage_entities import SPEC_BY_TYPE, payload_fields
 from app.et.course.stage_repository import EtCourseStageRepository
 from app.et.course.stage_rules import (
@@ -42,7 +43,9 @@ from app.et.course.stage_rules import (
     ENTITY_SURVEY_QUESTION,
     to_course_snapshot,
 )
-from app.et.material.models import EtMaterialDoc, EtMaterialVideo
+from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
+from app.et.progress.models import EtProgress
+from app.et.quiz.models import EtOption, EtQuestion, EtQuiz
 from app.et.roles.models import EtUserRole
 from app.et.survey.models import EtSurvey, EtSurveyOption, EtSurveyQuestion
 from tests.integration.et._tag_pairs import all_units_id
@@ -395,3 +398,359 @@ class TestClear:
         cid = await _full_course(client, db, uid)
 
         assert await EtCourseStageRepository().has_stage(db, cid) is False
+
+
+# ── 套用：暫存樹 → 活表 ────────────────────────────────────────────────────────
+
+
+async def _stage_node(
+    db, course_id: int, entity_type: str, uid: str, *, parent: int | None, sort_order: int, **payload
+):
+    """直接建一列「新增的」暫存（`SOURCE_ID` 為 `None`）。
+
+    PR 1 還沒把編輯端的 28 個寫入端點導向暫存區（那是 PR 2），所以這裡自己造。
+    """
+    row = EtCourseContentStage(
+        course_id=course_id,
+        entity_type=entity_type,
+        source_id=None,
+        parent_stage_id=parent,
+        sort_order=sort_order,
+        payload=json.dumps(payload, ensure_ascii=False),
+        created_user=uid,
+        created_date=utcnow(),
+        deleted=0,
+    )
+    db.add(row)
+    await db.flush()
+    return row.stage_id
+
+
+async def _drop_stage(db, course_id: int, entity_type: str) -> None:
+    """把某型別的暫存列全部移除——模擬教師刪掉那些內容。"""
+    await db.execute(
+        update(EtCourseContentStage)
+        .where(
+            EtCourseContentStage.course_id == course_id,
+            EtCourseContentStage.entity_type == entity_type,
+            EtCourseContentStage.deleted == 0,
+        )
+        .values(deleted=1)
+    )
+    await db.flush()
+
+
+async def _drop_subtree(db, nodes, root_stage_id: int) -> None:
+    """把某節點與其整棵子樹移出暫存——模擬教師刪掉那一塊。
+
+    🔴 **必須連子樹一起刪**：只刪中間一層會讓子節點的 `PARENT_STAGE_ID` 落空，
+    那是編輯端不可能產生的畸形樹，`apply_stage` 的驗證會當場擋下
+    （見 `test_父參照斷鏈時明確報錯`）。
+    """
+    subtree = {root_stage_id}
+    for _ in range(5):  # 巢狀最深 5 層
+        subtree |= {n.stage_id for n in nodes if n.parent_stage_id in subtree}
+    await db.execute(update(EtCourseContentStage).where(EtCourseContentStage.stage_id.in_(subtree)).values(deleted=1))
+    await db.flush()
+
+
+async def _set_payload(db, stage_id: int, payload: dict) -> None:
+    await db.execute(
+        update(EtCourseContentStage)
+        .where(EtCourseContentStage.stage_id == stage_id)
+        .values(payload=json.dumps(payload, ensure_ascii=False))
+    )
+    await db.flush()
+
+
+async def _live_chapters(db, course_id: int) -> list[EtChapter]:
+    rows = await db.scalars(
+        select(EtChapter).where(EtChapter.course_id == course_id, EtChapter.deleted == 0).order_by(EtChapter.sort_order)
+    )
+    return list(rows.all())
+
+
+async def _apply(db, course_id: int, uid: str) -> None:
+    repo = EtCourseStageRepository()
+    course = await db.scalar(select(EtCourse).where(EtCourse.course_id == course_id))
+    await apply_stage(db, course=course, nodes=await repo.load_tree(db, course_id), operator=_operator(uid))
+
+
+class TestApplyInsertAndUpdate:
+    async def test_未編輯時套用不改變任何東西(self, client, db) -> None:
+        """seed 後立刻套用 ＝ 把活表寫回它自己。**這是整個機制的恆等律**。
+
+        不成立的話，教師只要進編輯頁再按「更新」就會動到內容——而那種漂移沒有任何
+        畫面會提示。
+        """
+        uid = await _user(db, "ZT_A1")
+        cid = await _full_course(client, db, uid)
+        before = [(c.chapter_id, c.chapter_name, c.sort_order) for c in await _live_chapters(db, cid)]
+        await EtCourseStageRepository().seed_from_live(db, cid, _operator(uid))
+
+        await _apply(db, cid, uid)
+
+        assert [(c.chapter_id, c.chapter_name, c.sort_order) for c in await _live_chapters(db, cid)] == before
+
+    async def test_暫存裡改的欄位套用後才生效(self, client, db) -> None:
+        uid = await _user(db, "ZT_A2")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        node = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, node.stage_id, {"chapter_name": "改過的章名"})
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "套用前活表不得變動"
+
+        await _apply(db, cid, uid)
+
+        assert (await _live_chapters(db, cid))[0].chapter_name == "改過的章名"
+
+    async def test_改配分套用後生效(self, client, db) -> None:
+        """issue 列的四個症狀之一：已發布後改配分，總分不再是 100。"""
+        uid = await _user(db, "ZT_A3")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        q = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_QUESTION)
+        await _set_payload(db, q.stage_id, {**q.payload, "points": 55})
+
+        await _apply(db, cid, uid)
+
+        live = await db.scalar(select(EtQuestion).where(EtQuestion.question_id == q.source_id))
+        assert live.points == 55
+
+    async def test_巢狀新增五層一次套用(self, client, db) -> None:
+        """🔴 新章節 → 新項目 → 新測驗 → 新題目 → 新選項，套用前**全部都沒有活表 id**。
+
+        `PARENT_STAGE_ID` 自參照讓它們用暫存列的 PK 互相指，套用時才一層層換成真 id。
+        """
+        uid = await _user(db, "ZT_A4")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+
+        ch = await _stage_node(db, cid, ENTITY_CHAPTER, uid, parent=None, sort_order=9, chapter_name="全新章節")
+        item = await _stage_node(db, cid, ENTITY_ITEM, uid, parent=ch, sort_order=1, item_type=ITEM_QUIZ)
+        quiz = await _stage_node(
+            db,
+            cid,
+            ENTITY_QUIZ,
+            uid,
+            parent=item,
+            sort_order=0,
+            quiz_name="全新測驗",
+            description=None,
+            pass_score=80,
+            time_limit_min=None,
+            max_retry=3,
+        )
+        question = await _stage_node(
+            db,
+            cid,
+            ENTITY_QUESTION,
+            uid,
+            parent=quiz,
+            sort_order=1,
+            question_type=QUESTION_SINGLE,
+            stem="新題",
+            points=100,
+        )
+        await _stage_node(db, cid, ENTITY_OPTION, uid, parent=question, sort_order=1, option_text="甲", is_correct=True)
+
+        await _apply(db, cid, uid)
+
+        chapters = await _live_chapters(db, cid)
+        assert [c.chapter_name for c in chapters] == ["第一章", "全新章節"]
+        new_item = await db.scalar(
+            select(EtItem).where(EtItem.chapter_id == chapters[1].chapter_id, EtItem.deleted == 0)
+        )
+        assert new_item is not None and new_item.quiz_id is not None, "項目的反向連結要指到新建的測驗"
+        assert new_item.material_id is None, "測驗型項目不得同時帶教材（CK_ET_ITEM_TYPE_TARGET）"
+        new_quiz = await db.scalar(select(EtQuiz).where(EtQuiz.quiz_id == new_item.quiz_id))
+        assert new_quiz.quiz_name == "全新測驗"
+        new_q = await db.scalar(select(EtQuestion).where(EtQuestion.quiz_id == new_quiz.quiz_id))
+        assert new_q.stem == "新題"
+        assert await db.scalar(select(EtOption).where(EtOption.question_id == new_q.question_id)) is not None
+
+
+class TestApplyOrdering:
+    async def test_對調兩個章節的順序不撞唯一鍵(self, client, db) -> None:
+        """🔴 部分唯一索引是**非 deferrable**、逐列即時檢核。
+
+        少了「先移到負數暫存區」那一階段，對調會在中途撞鍵——而對調順序是最常見的
+        編輯動作之一。
+        """
+        uid = await _user(db, "ZT_A5")
+        cid = await _full_course(client, db, uid)
+        await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(uid))
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        chapters = [n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER]
+        assert len(chapters) == 2
+        for node, new_order in zip(chapters, [2, 1], strict=True):
+            await db.execute(
+                update(EtCourseContentStage)
+                .where(EtCourseContentStage.stage_id == node.stage_id)
+                .values(sort_order=new_order)
+            )
+        await db.flush()
+
+        await _apply(db, cid, uid)
+
+        assert [c.chapter_name for c in await _live_chapters(db, cid)] == ["第二章", "第一章"]
+
+    async def test_刪掉第一章後第二章遞補成第一不撞鍵(self, client, db) -> None:
+        """🔴 這條釘住**刪除排在寫入之前**。
+
+        反過來的話，第二章要寫進 `SORT_ORDER = 1` 時，第一章還佔著那個槽。
+        """
+        uid = await _user(db, "ZT_A6")
+        cid = await _full_course(client, db, uid)
+        await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(uid))
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        first = next(n for n in nodes if n.entity_type == ENTITY_CHAPTER and n.payload["chapter_name"] == "第一章")
+        second = next(n for n in nodes if n.entity_type == ENTITY_CHAPTER and n.payload["chapter_name"] == "第二章")
+        await _drop_subtree(db, nodes, first.stage_id)
+        await db.execute(
+            update(EtCourseContentStage).where(EtCourseContentStage.stage_id == second.stage_id).values(sort_order=1)
+        )
+        await db.flush()
+
+        await _apply(db, cid, uid)
+
+        assert [(c.chapter_name, c.sort_order) for c in await _live_chapters(db, cid)] == [("第二章", 1)]
+
+
+class TestApplyDelete:
+    async def test_移除的內容是軟刪不是硬刪(self, client, db) -> None:
+        uid = await _user(db, "ZT_A7")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        doc_before = await db.scalar(select(EtMaterialDoc).where(EtMaterialDoc.deleted == 0))
+        await _drop_stage(db, cid, ENTITY_MATERIAL_DOC)
+
+        await _apply(db, cid, uid)
+
+        after = await db.scalar(select(EtMaterialDoc).where(EtMaterialDoc.mat_doc_id == doc_before.mat_doc_id))
+        assert after is not None, "⛔ 不得硬刪"
+        assert after.deleted == 1
+
+    async def test_刪掉整個項目時教材一起被刪(self, client, db) -> None:
+        """教材不在 `_DELETERS` 裡——它隨所屬項目一起被 cascade 刪掉。
+
+        ⚠️ 若日後支援「一個教材被多個項目重用」，這個前提就不再成立，本條會紅——
+        那時要做的是改刪除策略，不是刪掉這條測試。
+        """
+        uid = await _user(db, "ZT_A8")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        material = next(n for n in nodes if n.entity_type == ENTITY_MATERIAL)
+        await _drop_subtree(db, nodes, material.parent_stage_id)
+
+        await _apply(db, cid, uid)
+
+        live = await db.scalar(select(EtMaterial).where(EtMaterial.material_id == material.source_id))
+        assert live.deleted == 1, "教材隨項目一起被軟刪"
+        assert ENTITY_MATERIAL not in _DELETERS, "⛔ 不得為教材另設單獨的刪除路徑"
+
+    async def test_父參照斷鏈時明確報錯(self, client, db) -> None:
+        """🔴 少了驗證，斷鏈會在解析父層時變成 `KeyError: <某個數字>`。
+
+        那種樹編輯端不可能產生，出現就代表有人繞過編輯端直接動暫存表——此時要的是
+        一個說得出「哪個節點指向哪裡」的錯誤，而不是寫到一半才爆。
+        """
+        uid = await _user(db, "ZT_A11")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        material = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_MATERIAL)
+        # 只刪中間那一層，讓它的影片 / 文件子節點父參照落空
+        await db.execute(
+            update(EtCourseContentStage).where(EtCourseContentStage.stage_id == material.stage_id).values(deleted=1)
+        )
+        await db.flush()
+
+        with pytest.raises(ValueError, match="父參照斷鏈"):
+            await _apply(db, cid, uid)
+
+    async def test_刪除項目時委派既有_cascade(self, client, db) -> None:
+        """🔴 `EtItemRepository.soft_delete_with_cascade` 還處理學員進度與完課戳記。
+
+        自己在套用端寫一份軟刪會漏掉那些，而漏掉不會報錯。
+        """
+        uid = await _user(db, "ZT_A9")
+        cid = await _full_course(client, db, uid)
+        item = await db.scalar(select(EtItem).where(EtItem.quiz_id.is_not(None), EtItem.deleted == 0))
+        db.add(
+            EtProgress(
+                user_id=uid,
+                course_id=cid,
+                item_id=item.item_id,
+                is_completed=True,
+                created_user=uid,
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        quiz_item = next(n for n in nodes if n.entity_type == ENTITY_ITEM and n.source_id == item.item_id)
+        await _drop_subtree(db, nodes, quiz_item.stage_id)
+
+        await _apply(db, cid, uid)
+
+        progress = await db.scalar(select(EtProgress).where(EtProgress.item_id == item.item_id))
+        assert progress.deleted == 1, "學員進度要跟著軟刪——那是既有 cascade 做的事"
+
+
+class TestForeignKeysSurvive:
+    async def test_套用後學員進度仍指向同一個項目(self, client, db) -> None:
+        """🥇 **整個設計方向的立論基礎**。
+
+        學員資料對內容表有 7 條硬外鍵（`ET_PROGRESS.ITEM_ID`、
+        `ET_QUIZ_ATTEMPT_D.QUESTION_ID` 等）。「編輯中版本用新的列、生效時整組換掉」
+        做不到，正是因為換列等於換 id、那 7 條會全部斷線。
+
+        本方案不換 id：既有內容列**原地更新**，id 跨「更新」保持不變。這條測試是
+        那個主張唯一的執行點。
+        """
+        uid = await _user(db, "ZT_A10")
+        cid = await _full_course(client, db, uid)
+        item = await db.scalar(select(EtItem).where(EtItem.material_id.is_not(None), EtItem.deleted == 0))
+        db.add(
+            EtProgress(
+                user_id=uid,
+                course_id=cid,
+                item_id=item.item_id,
+                is_completed=True,
+                created_user=uid,
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        # 改點東西，確保套用真的有寫入（否則「id 沒變」可能只是因為什麼都沒做）
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "改名了"})
+
+        await _apply(db, cid, uid)
+
+        progress = await db.scalar(select(EtProgress).where(EtProgress.user_id == uid))
+        assert progress.item_id == item.item_id, "項目 id 不得因為「更新」而改變"
+        assert progress.deleted == 0 and progress.is_completed is True
+        assert (await _live_chapters(db, cid))[0].chapter_name == "改名了", "套用確實有寫入"
+
+
+class TestDeleterCoverage:
+    def test_每一種可刪除的型別都有刪除路徑(self) -> None:
+        """少一個的症狀是套用時 `KeyError`——會爆，但要等到有人真的刪了那種東西。"""
+        assert set(_DELETERS) | _DELETED_WITH_ITEM == _ALL_TYPES
