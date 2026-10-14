@@ -257,3 +257,26 @@ async def test_上限值超界時被夾回合理範圍(client, db) -> None:
 
     await _register_later(client, email)
     assert await _outbox(db, email) == 1, "夾回下界 1 ⇒ 第二封不得寄出"
+
+
+async def test_重寄本身也會消耗額度(client, db) -> None:
+    """LOW-1（2026-10-14 code review）：`resend` 側的 `try_record` 原本零覆蓋。
+
+    既有的 `test_重寄與註冊共用同一份額度` 只用 register 把額度填滿、再驗 resend 被擋——
+    它驗的是 resend 的 `over_cap` **判定**。若把 resend 的**記帳**刪掉，攻擊者改用
+    「register 一次 + resend 無限次」即可繼續刷新效期，而那條測試仍會全綠。
+    """
+    email = "cap-resend-spend@edms.local"
+    # 1/2：register 建列並寄信（resend 需要有列才會真的寄）
+    assert (await _register_later(client, email)).status_code == 202
+    assert await _outbox(db, email) == 1
+
+    # 2/2：改用 resend 耗掉最後一格
+    auth_router._verify_send_cooldown._last.clear()
+    assert (await client.post("/api/resend-verification", json={"email": email})).status_code == 200
+    assert await _outbox(db, email) == 2, "前提錨點：這一次 resend 確實寄出了（否則下面恆真）"
+
+    # 額度已滿 → 再 resend 不得寄出
+    auth_router._verify_send_cooldown._last.clear()
+    assert (await client.post("/api/resend-verification", json={"email": email})).status_code == 200
+    assert await _outbox(db, email) == 2, "resend 未記帳 ⇒ 可無限刷新效期"

@@ -315,12 +315,17 @@ async def register(
     # channel 非 EMAIL / 渲染失敗是正常回傳 0、不拋例外，那些情況下蓋章會把使用者鎖 600 秒卻連
     # 一封信都沒收到。register 不需要 probe 章——它沒有「靜默不寄」的防列舉需求（已驗證帳號直接
     # 回 409），且此路徑必然已寫入待驗證列，本身就受帳號維度限流約束。
+    # 每日額度記在「**列被重建**」而非「信寄出」：`register()` 一旦回傳（未拋 409），其步驟 2
+    # 就已經刪舊列、建新列並把 `expires_date` 推到 `now + TTL`——那正是本額度要界定的事。
+    # ⚠️ **不可改成 `if sent`**：`send_email` 對範本停用 / channel 非 EMAIL / 渲染失敗是
+    # **正常回傳 0**（不拋例外），那些情況下列仍然被重建了、只是信沒寄出。記在 `sent` 之下
+    # 會讓那段期間的刷新完全不受額度約束，#234 的攻擊在範本異常時原樣復活。
+    # （2026-10-14 code review MEDIUM-2 指出；原本記在 `if sent` 內，且註解宣稱「界定重建次數」
+    #  與實作不符。）
+    _overwrite_counter.try_record(_overwrite_key(data.email))
     if sent:
         # Email 章**只在真的寄出時蓋**（#213）：它跨 IP，誤蓋等於讓人封鎖他人 600 秒。
         _verify_send_cooldown.record(sent_key)
-        # 每日額度同理由只記真的寄出的那次：它界定的是「對這個信箱實際重建了幾次列」，
-        # 靜默路徑既沒建列也沒寄信，記了會讓受害者的額度被探測行為吃掉。
-        _overwrite_counter.try_record(_overwrite_key(data.email))
     # probe 章**無條件蓋**（#346）。兩個理由：
     # 1. 只蓋 Email 章的話，同一人重打會撞上它而落入**靜默** 202——他以為信一直在寄、
     #    實際一封都沒有，防狂發在改制後會從 429 退化成無聲。
@@ -409,6 +414,13 @@ async def resend_verification(
     sent = await _resend_service.resend(db, email=data.email)
     if sent:
         _verify_send_cooldown.record(sent_key)
+        # ⚠️ 與 register 側**刻意不對稱**：`resend` 的 False 有兩種來源，而 bool 分不出來——
+        # ①「沒有可重寄的列」（查無 / 非 SELF_REGISTER / 已逾期，早退，**未建列**）
+        # ②「建了列但 send_email 回 0」（範本異常）
+        # 若比照 register 無條件記帳，①會讓任何人拿不存在的 Email 打 resend 就耗掉他人額度，
+        # 那正是 #213 修掉的封鎖向量。故此處取保守側：只在確定寄出時記。
+        # **殘留**：②的情況下經 resend 的重建不計入額度（register 側無此問題）。要消除它得讓
+        # `resend` 回傳「是否重建」而非「是否寄出」，屬介面變更，不在本次範圍。
         _overwrite_counter.try_record(_overwrite_key(data.email))
     # probe 章無條件蓋（同 register）：否則「有沒有被蓋 probe」又會隨 sent 而異。
     _verify_send_cooldown.record(probe_key)

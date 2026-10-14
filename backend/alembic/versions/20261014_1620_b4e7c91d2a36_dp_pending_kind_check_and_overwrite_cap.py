@@ -40,7 +40,12 @@ Create Date: 2026-10-14 16:20:00.000000
 移出維護頁）。更實際的理由：**占用時間是 `N × TTL`，而該互鎖在 DP03 畫面上看不到**——
 管理者看到「每日上限 5」會覺得保守而調到 10，卻無從得知同頁的 `RESET_TOKEN_TTL_MIN`
 若也調到 120，占用就從 2.5 小時變成 20 小時／日，本修法形同失效。
-值域守門與互鎖說明寫在 `app/dp/params/param_rules.py`（`IntRule(1, 10)`）。
+值域守門在**讀取端**（`app/dp/user/router.py` 的 `_overwrite_max`，夾回 [1, 10] 並留 warning log）。
+⛔ **刻意不放 `param_rules.py` 的 `IntRule`**：`EDIT_SCOPE='HIDDEN'` 使 `is_editable_scope` 的 403
+擋在值域檢核**之前**，那條規則永遠走不到；而真正走得到的修改路徑是 IT 直接下 SQL，
+`get_int_param` 對整數不設界。理由與互鎖說明見該函式的 docstring。
+（本句原寫「守門寫在 param_rules.py」——那是 docstring 先於決定寫下、決定改變後未回頭更正，
+ 由 2026-10-14 的 code review 抓出。）
 """
 
 from collections.abc import Sequence
