@@ -29,6 +29,7 @@ from app.dp.user.profile_service import ProfileService
 from app.dp.user.register_service import RegisterService, email_unavailable_error
 from app.dp.user.schemas import (
     ActivateAccountRequest,
+    ApplicablePasswordPolicyResponse,
     EmailChangeRequest,
     EmailChangeVerify,
     ForgotPasswordRequest,
@@ -42,6 +43,7 @@ from app.dp.user.schemas import (
     PasswordPolicyResponse,
     RegisterRequest,
     ResendVerificationRequest,
+    ResetPasswordPolicyRequest,
     ResetPasswordRequest,
     TokenResponse,
     VerifyEmailRequest,
@@ -389,6 +391,20 @@ async def reset_password(
     return {"message": "密碼已更新，請以新密碼登入"}
 
 
+@router.post("/reset-password/policy", response_model=ApplicablePasswordPolicyResponse)
+async def reset_password_policy(
+    data: ResetPasswordPolicyRequest,
+    db: AsyncSession = Depends(get_db),
+    _ip_limit: None = Depends(rate_limit_by_ip(_reset_limiter, "reset-policy")),
+) -> ApplicablePasswordPolicyResponse:
+    """重設頁適用之密碼門檻（匿名，持信中連結 token，#623）：管理者 12、其餘 8。
+
+    token 無效回一般門檻、不報錯；連結失效仍由送出時的 `/reset-password` 告知。
+    """
+    rules = await _reset_service.password_rules_for_token(db, token=data.token)
+    return ApplicablePasswordPolicyResponse(min_len=rules.min_len, char_types=rules.char_types)
+
+
 @router.post("/activate-account")
 async def activate_account(
     data: ActivateAccountRequest,
@@ -463,6 +479,21 @@ async def get_me(
     """本人個人資料：姓名 / 帳號（Email）/ 待驗證新信箱。"""
     user = await _profile_service.get_me(db, user_id=payload.sub)
     return MeResponse.model_validate(user)
+
+
+@router.get("/dp/user/me/password-policy", response_model=ApplicablePasswordPolicyResponse)
+async def get_my_password_policy(
+    payload: JwtPayload = Depends(get_jwt_payload),
+    db: AsyncSession = Depends(get_db),
+) -> ApplicablePasswordPolicyResponse:
+    """本人設定新密碼時適用之門檻（#623）：管理者 12、其餘 8。
+
+    ⚠️ 刻意用 `get_jwt_payload` 而非 `require_password_current`：密碼逾期者被導到強制變更密碼頁，
+    該頁正需要本端點顯示正確門檻；掛密碼閘會讓它在最需要的時候拿不到。回應只有兩個門檻數字、
+    不含個資，與 `/dp/user/me` 不受密碼閘的理由不同但結論一致。
+    """
+    rules = await _profile_service.password_rules(db, user_id=payload.sub)
+    return ApplicablePasswordPolicyResponse(min_len=rules.min_len, char_types=rules.char_types)
 
 
 @router.put("/dp/user/me", status_code=status.HTTP_204_NO_CONTENT)

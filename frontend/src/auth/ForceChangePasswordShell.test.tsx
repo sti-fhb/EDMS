@@ -35,6 +35,29 @@ describe("ForceChangePasswordShell 強制變更密碼（US8 填實提交）", ()
     expect(screen.getByRole("button", { name: "變更密碼" })).toBeEnabled()
   })
 
+  it("管理者密碼到期（#623）：提示與前端檢核依本人適用門檻 12 字元，9 字元被擋下、不送出", async () => {
+    let submitted = false
+    server.use(
+      http.get("/api/dp/user/me/password-policy", () => HttpResponse.json({ min_len: 12, char_types: 3 })),
+      http.put("/api/dp/user/me/password", () => {
+        submitted = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderShell()
+
+    // 公開政策端點仍回一般門檻 8：提示若出現 12，代表確實改讀本人適用的門檻
+    expect(await screen.findByText(/至少 12 字元/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText("舊密碼"), "Abcd1234")
+    await user.type(screen.getByLabelText("新密碼"), "Abcd1234!")
+    await user.type(screen.getByLabelText("確認新密碼"), "Abcd1234!")
+    await user.click(screen.getByRole("button", { name: "變更密碼" }))
+
+    expect(await screen.findByText("密碼至少 12 字元")).toBeInTheDocument()
+    expect(submitted).toBe(false)
+  })
+
   it("合規密碼提交 → 呼叫端點成功、不顯示錯誤", async () => {
     const user = userEvent.setup()
     renderShell()

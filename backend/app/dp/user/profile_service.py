@@ -2,8 +2,8 @@
 
 所有登入者維護**自己的**資料。姓名直接存（ET / DM 共用 DP_USER）；密碼變更驗舊 + 複雜度
 （特權 12）+ 重複性 + 追加歷程 + 清 MUST_CHANGE_PWD + 稽核。門檻值讀平台級 PWD_POLICY（SRVDP001）；
-特權門檻依 is_module_admin **實查**（ET / DM 已於各自 bootstrap 註冊 checker）——ET 或 DM
-任一模組管理者套 `ADMIN_MIN_LEN`（預設 12），其餘套 `MIN_LEN`（預設 8）。
+特權門檻（ET 或 DM 任一模組管理者套 `ADMIN_MIN_LEN` 預設 12，其餘套 `MIN_LEN` 預設 8）之判定
+集中於 `password_rules.rules_for_user`（#623），與忘記密碼重設、提示端點共用同一支。
 
 強制變更密碼（US1 逾效期 / 初始密碼）沿用 change_password 同一路徑——仍需舊密碼。
 """
@@ -11,7 +11,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.module_admin import module_admin_gate
 from app.core.password_hashing import (
     hash_password_async,
     is_reused_async,
@@ -20,14 +19,12 @@ from app.core.password_hashing import (
 from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.dp.user.password_rules import PasswordRules, rules_for_user
 from app.dp.user.repository import AuthRepository
 from app.dp.users.models import DpUser
 from app.services import AuditLogService, ParamService
 
 _FUNC_NAME = "DP-PROFILE"
-_DEFAULT_MIN_LEN = 8
-_DEFAULT_ADMIN_MIN_LEN = 12
-_DEFAULT_CHAR_TYPES = 3
 _DEFAULT_HISTORY_COUNT = 3
 
 
@@ -54,6 +51,14 @@ class ProfileService:
         if user is None:
             raise AppError(status_code=404, detail="查無此帳號", error_code="DP_USER_008")
         return user
+
+    async def password_rules(self, db: AsyncSession, *, user_id: str) -> PasswordRules:
+        """本人設定新密碼時適用之門檻（#623），供變更密碼視窗與強制變更密碼頁渲染提示。
+
+        Returns:
+            與 `change_password` 檢核所用相同之門檻（同一支 `rules_for_user`）。
+        """
+        return await rules_for_user(db, user_id, params=self._params)
 
     async def update_name(self, db: AsyncSession, *, user_id: str, user_name: str) -> None:
         """更新姓名（直接生效，ET / DM 同步）並寫稽核（含前後值）。
@@ -102,9 +107,9 @@ class ProfileService:
         if new_password != confirm_password:
             raise AppError(status_code=422, detail="兩次輸入之密碼不一致", error_code="DP_USER_002")
 
-        min_len = await self._resolve_min_len(db, user_id)
-        char_types = await self._params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES)
-        validate_password_strength(new_password, min_length=min_len, required_char_types=char_types)
+        # 特權 12 / 一般 8 之判定集中於 password_rules（#623，忘記密碼重設與提示端點共用）
+        rules = await rules_for_user(db, user_id, params=self._params)
+        validate_password_strength(new_password, min_length=rules.min_len, required_char_types=rules.char_types)
         history_count = await self._params.get_int_param(db, "PWD_POLICY", "HISTORY_COUNT", _DEFAULT_HISTORY_COUNT)
         recent = await self._repo.recent_pwd_hashes(db, user_id, history_count)
         if await is_reused_async(new_password, recent):
@@ -127,18 +132,3 @@ class ProfileService:
             description="密碼變更",  # 稽核不記密碼前後值（sti-backend-logging）
             source_ip=get_client_ip(),
         )
-
-    async def _resolve_min_len(self, db: AsyncSession, user_id: str) -> int:
-        """決定密碼最小長度：特權帳號（ET / DM 任一管理者）套 ADMIN_MIN_LEN，否則 MIN_LEN。
-
-        ⚠️ `is_module_admin` 為 **fail-closed**：checker 未註冊 / 拋例外一律回 False，
-        於是該帳號套**一般**門檻。這個方向是刻意的——密碼長度要求降低會被使用者接受而不
-        抱怨，所以它不會以「有人反應」的形式被發現。ET / DM 的 checker 現已註冊（見各自
-        `bootstrap.py`），特權 12 實際生效；若日後有人拔掉註冊，這裡會靜默退回 8。
-        """
-        is_privileged = await module_admin_gate.is_module_admin(
-            "ET", user_id, db
-        ) or await module_admin_gate.is_module_admin("DM", user_id, db)
-        if is_privileged:
-            return await self._params.get_int_param(db, "PWD_POLICY", "ADMIN_MIN_LEN", _DEFAULT_ADMIN_MIN_LEN)
-        return await self._params.get_int_param(db, "PWD_POLICY", "MIN_LEN", _DEFAULT_MIN_LEN)

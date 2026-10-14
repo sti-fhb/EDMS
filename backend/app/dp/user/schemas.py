@@ -158,3 +158,20 @@ class PasswordPolicyResponse(BaseModel):
     char_types: int
     history_count: int
     expiry_days: int
+
+
+class ApplicablePasswordPolicyResponse(BaseModel):
+    """某帳號設定新密碼時**實際適用**之門檻（#623）：管理者 `min_len` 為 ADMIN_MIN_LEN，其餘為 MIN_LEN。
+
+    與 `PasswordPolicyResponse` 分開：後者是全站參數一覽（不知道是誰），前端拿它的 `min_len`
+    當提示會讓管理者看到 8 字元、送出卻被要求 12。
+    """
+
+    min_len: int
+    char_types: int
+
+
+class ResetPasswordPolicyRequest(BaseModel):
+    """重設頁取適用門檻（#623）。token 放 body 而非網址：查詢字串會被反向代理記進存取紀錄。"""
+
+    token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
