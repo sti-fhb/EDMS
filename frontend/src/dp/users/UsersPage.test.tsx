@@ -325,7 +325,7 @@ describe("UsersPage 自我保護與狀態判定（#603）", { timeout: 15_000 },
     expect(await screen.findByText(/確定停用「陳大華」的帳號/)).toBeInTheDocument()
   })
 
-  it("非預期的 status 值：不顯示「啟用中」，並提供「啟用」把它拉回已知狀態", async () => {
+  it("非預期的 status 值：顯示為「已停用」，且不提供任何狀態操作", async () => {
     server.use(
       http.get("/api/dp/users", () =>
         HttpResponse.json({
@@ -347,11 +347,17 @@ describe("UsersPage 自我保護與狀態判定（#603）", { timeout: 15_000 },
     renderWithProviders(<UsersPage />)
 
     const row = (await screen.findByText("未知狀態者")).closest("tr")!
-    // 後端 is_account_disabled 對非 ACTIVE 一律視為停用；前端若寫 === "DISABLED" 會標成綠色「啟用中」
+    // 顯示：後端 is_account_disabled 對非 ACTIVE 一律視為停用；寫 === "DISABLED" 會標成綠色「啟用中」
     expect(within(row).queryByText("啟用中")).not.toBeInTheDocument()
     expect(within(row).getByText("已停用")).toBeInTheDocument() // 正向配對，同一種查詢方式
-    // 操作鈕跟著走同一個判定：提供「啟用」（enable 會寫回 ACTIVE）而非「停用」
-    expect(within(row).getByRole("button", { name: "啟用" })).toBeInTheDocument()
+
+    // 操作：一個都不給。⚠️ 這裡**不是**跟著 isDisabled 走——若跟著走會顯示「啟用」，而
+    // 後端 set_status 不檢查舊狀態、照寫 ACTIVE，且「啟用」沒有二次確認 → 一個語意未知
+    // （可能是凍結 / 待調查）的帳號被一鍵解回正常。顯示 fail-closed、操作卻 fail-open（#603 裁示）。
+    expect(within(row).queryByRole("button", { name: "啟用" })).not.toBeInTheDocument()
     expect(within(row).queryByRole("button", { name: "停用" })).not.toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "解鎖" })).not.toBeInTheDocument()
+    // 正向錨點：該列確實渲染了（否則上面三條否定斷言恆真）——「編輯」不受狀態影響，仍在
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeInTheDocument()
   })
 })

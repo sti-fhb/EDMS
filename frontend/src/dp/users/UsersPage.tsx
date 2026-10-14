@@ -20,7 +20,7 @@ import { Pagination } from "../../components/Pagination"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { formatDateTime } from "../../utils/date"
 import { PROFILE_ME_QUERY_KEY, profileApi } from "../user/profileService"
-import { isDisabled, isLocked } from "./accountStatus"
+import { isDisabled, isLocked, isRecognisedStatus } from "./accountStatus"
 import { UsersForm } from "./UsersForm"
 import { useInvites } from "./useInvites"
 import { useUsers } from "./useUsers"
@@ -85,14 +85,21 @@ export function UsersPage() {
    * 2. `AppHeader` 的 `me` 帶 `enabled: isAuthenticated && !mustChangePwd`，而 `RootLayout` 在
    *    `mustChangePwd` 時仍同時掛 `<Outlet />`，所以那個情況下 AppHeader 根本不抓
    *
-   * 真正的理由是**這段空窗無害且會自行收斂**：期間 `isSelf` 回 false、自己那列的停用鈕可按，
-   * 但後端 `DP_USER_006` 仍會擋；`me` 一到 `isSelf` 就重算、按鈕隨即灰階。為此加載入閘會讓整頁
-   * 在每次重新整理時多卡一次 spinner，代價大於收益。
+   * 真正的理由是**這段空窗無害且會自行收斂**：
+   *
+   * - 期間 `isSelf` 回 false、自己那列的停用鈕可按，但後端 `DP_USER_006` 仍會擋
+   *   （＝空窗期的體驗恰好等於本次改動前的舊行為，不會更糟）；`me` 一到就重算、按鈕隨即灰階
+   * - ⭐ 更關鍵的是**不可能灰錯列**：query key 是靜態的 `["profile","me"]`，本來有「A 登出、
+   *   B 登入後讀到 A 的 me」的風險，但 `AuthProvider` 在 login 與 logout **兩側都 `queryClient.clear()`**，
+   *   所以空窗期只會是「沒有身分」，不會是「錯的身分」
+   *
+   * 為此加載入閘會讓整頁每次重新整理都多卡一次 spinner，代價大於收益。
    */
   const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe })
   const myUserId = me?.user_id
   // useCallback：供下方 accountColumns 的 useMemo 正確列入依賴（me 晚到時要重算，否則自己那列仍可按）
-  const isSelf = useCallback((row: UserRow) => row.user_id === myUserId, [myUserId])
+  // `!!myUserId` 不可省：少了它，me 尚未載入時會變成 `undefined === undefined`，**整欄**停用鈕全鎖死
+  const isSelf = useCallback((row: UserRow) => !!myUserId && row.user_id === myUserId, [myUserId])
 
   // 即時查詢：關鍵字去抖（350ms）避免每字元一次 request；帳號狀態變動即時反映，免按「查詢」。
   // 篩選條件變動視為情境切換，一併收起可能開著的編輯 / 建立表單（避免停留在已被篩掉的列）。
@@ -136,8 +143,9 @@ export function UsersPage() {
         title: "操作",
         render: (_v, r) => (
           <Stack direction="row" spacing={1} justifyContent="flex-start">
-            {/* 走共用的 isDisabled()，不自己比對狀態字面值——那支判定存在的理由就是避免 DP01 / DP02 漂移 */}
-            {isDisabled(r) ? (
+            {/* 走共用判定，不自己比對狀態字面值——那支判定存在的理由就是避免 DP01 / DP02 漂移。
+                未知狀態值不給任何狀態按鈕（只留 chip 與「編輯」）：見 isRecognisedStatus 的理由。 */}
+            {!isRecognisedStatus(r) ? null : isDisabled(r) ? (
               <Button size="small" color="success" onClick={() => accounts.enableUser(r)}>
                 啟用
               </Button>

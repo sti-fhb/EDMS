@@ -27,6 +27,22 @@ export function isDisabled(row: AccountStatusFields): boolean {
   return row.status !== "ACTIVE"
 }
 
+/**
+ * 這個 `status` 是不是前端認得的值（目前只有 `ACTIVE` / `DISABLED`）。
+ *
+ * 供**狀態操作**（停用 / 啟用 / 解鎖）判斷要不要提供入口，與 `isDisabled` 的用途不同：
+ *
+ * - `isDisabled` 回答「**顯示**上要不要當成停用」→ 未知值一律當停用（fail-closed）
+ * - 本函式回答「**操作**上我有沒有把握」→ 未知值一律回 false，不給任何狀態按鈕
+ *
+ * 兩者缺一不可。少了本函式，未知狀態的列會落進 `isDisabled` 那一支而顯示「啟用」，
+ * 而後端 `set_status` 不檢查舊狀態、照寫 `ACTIVE`——於是畫面標示 fail-closed、操作卻 fail-open：
+ * 一個語意未知（可能是凍結 / 待調查）的帳號被一鍵解回正常，且「啟用」沒有二次確認（#603 裁示）。
+ */
+export function isRecognisedStatus(row: AccountStatusFields): boolean {
+  return row.status === "ACTIVE" || row.status === "DISABLED"
+}
+
 /** 帳號是否鎖定中（ACTIVE 且 locked_until 尚未逾時；逾時者已自動解鎖）。 */
 export function isLocked(row: AccountStatusFields): boolean {
   return row.status === "ACTIVE" && row.locked_until !== null && new Date(row.locked_until) > new Date()
