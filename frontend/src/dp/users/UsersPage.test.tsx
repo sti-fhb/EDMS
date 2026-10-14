@@ -291,3 +291,73 @@ describe("UsersPage 使用者操作流程", { timeout: 15_000 }, () => {
     expect(await screen.findByText("已取消邀請")).toBeInTheDocument()
   })
 })
+
+describe("UsersPage 自我保護與狀態判定（#603）", { timeout: 15_000 }, () => {
+  /** 覆寫「目前登入者」為清單中的某一列，使該列成為「自己」。 */
+  function loginAs(userId: string) {
+    server.use(
+      http.get("/api/dp/user/me", () =>
+        HttpResponse.json({ user_id: userId, email: "me@edms.local", user_name: "我", pending_email: null }),
+      ),
+    )
+  }
+
+  it("自己那列的「停用」按不下去，且說明原因", async () => {
+    loginAs("u-active") // 陳大華那列變成自己
+    renderWithProviders(<UsersPage />)
+
+    const selfRow = (await screen.findByText("陳大華")).closest("tr")!
+    const selfDisableBtn = await within(selfRow).findByRole("button", { name: "停用" })
+    // 後端 DP_USER_006 本來就會擋，但那是按下去、過完二次確認才知道；FR-DP-US4-06 寫的是 MUST NOT「可」
+    await waitFor(() => expect(selfDisableBtn).toBeDisabled())
+    expect(within(selfRow).getByLabelText(/無法停用自己的帳號/)).toBeInTheDocument()
+  })
+
+  it("他人那列的「停用」仍可按並正常送出（證明不是整欄沒渲染）", async () => {
+    loginAs("u-disabled") // 自己是「已停用」那列 → 陳大華是別人
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+
+    const otherRow = (await screen.findByText("陳大華")).closest("tr")!
+    const btn = await within(otherRow).findByRole("button", { name: "停用" })
+    expect(btn).toBeEnabled()
+    await user.click(btn)
+    expect(await screen.findByText(/確定停用「陳大華」的帳號/)).toBeInTheDocument()
+  })
+
+  it("非預期的 status 值：顯示為「已停用」，且不提供任何狀態操作", async () => {
+    server.use(
+      http.get("/api/dp/users", () =>
+        HttpResponse.json({
+          data: [
+            {
+              user_id: "u-weird",
+              user_name: "未知狀態者",
+              email: "weird@edms.local",
+              status: "SUSPENDED", // 日後新增的第三種狀態；STATUS 為 String(10)、無 CHECK 約束
+              locked_until: null,
+              last_login_date: null,
+              created_date: "2026-06-20T00:00:00Z",
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<UsersPage />)
+
+    const row = (await screen.findByText("未知狀態者")).closest("tr")!
+    // 顯示：後端 is_account_disabled 對非 ACTIVE 一律視為停用；寫 === "DISABLED" 會標成綠色「啟用中」
+    expect(within(row).queryByText("啟用中")).not.toBeInTheDocument()
+    expect(within(row).getByText("已停用")).toBeInTheDocument() // 正向配對，同一種查詢方式
+
+    // 操作：一個都不給。⚠️ 這裡**不是**跟著 isDisabled 走——若跟著走會顯示「啟用」，而
+    // 後端 set_status 不檢查舊狀態、照寫 ACTIVE，且「啟用」沒有二次確認 → 一個語意未知
+    // （可能是凍結 / 待調查）的帳號被一鍵解回正常。顯示 fail-closed、操作卻 fail-open（#603 裁示）。
+    expect(within(row).queryByRole("button", { name: "啟用" })).not.toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "停用" })).not.toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "解鎖" })).not.toBeInTheDocument()
+    // 正向錨點：該列確實渲染了（否則上面三條否定斷言恆真）——「編輯」不受狀態影響，仍在
+    expect(within(row).getByRole("button", { name: "編輯" })).toBeInTheDocument()
+  })
+})
