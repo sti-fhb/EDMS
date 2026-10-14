@@ -280,3 +280,35 @@ async def test_重寄本身也會消耗額度(client, db) -> None:
     auth_router._verify_send_cooldown._last.clear()
     assert (await client.post("/api/resend-verification", json={"email": email})).status_code == 200
     assert await _outbox(db, email) == 2, "resend 未記帳 ⇒ 可無限刷新效期"
+
+
+async def test_信沒寄出但列已重建時仍計入額度(client, db, monkeypatch) -> None:
+    """額度界定的是「**列**被重建幾次」，不是「信寄出幾次」（code review MEDIUM-2）。
+
+    `register_service.register` 的步驟 2 先刪舊列、建新列並把 `expires_date` 推到 `now + TTL`，
+    **之後**才呼叫 `send_email`。而 `send_email` 對範本停用 / channel 非 EMAIL / 渲染失敗是
+    **正常回傳 queued_count=0**（不拋例外）⇒ `register()` 回 False。
+
+    若把記帳寫在 `if sent` 之下，那段期間列仍被不斷刷新、額度卻完全不累加——
+    #234 的攻擊在範本異常時原樣復活。
+
+    ⚠️ 本條是 MEDIUM-2 修法的**唯一**覆蓋：其餘測試裡 `sent` 恆為 True，
+    把 `try_record` 搬回 `if sent` 內不會讓任何一條變紅。
+    """
+
+    async def _never_sends(_db, *, recipients, template_code, module, params, caller_module):
+        return SendResult(queued_count=0, skipped_reason="TEMPLATE_DISABLED")
+
+    monkeypatch.setattr(auth_router._register_service._notify, "send_email", _never_sends)
+
+    email = "cap-nosend@edms.local"
+    for _ in range(_CAP):
+        assert (await _register_later(client, email)).status_code == 202
+    assert await _outbox(db, email) == 0, "前提錨點：這幾次確實一封都沒寄出"
+
+    frozen = await _expires(db, email)
+    assert frozen is not None, "前提錨點：沒寄信但**列有建起來**（否則本測試驗不到東西）"
+
+    for _ in range(2):
+        await _register_later(client, email)
+    assert await _expires(db, email) == frozen, "額度未計入 ⇒ 範本異常期間仍可無限刷新效期"
