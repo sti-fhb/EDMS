@@ -135,11 +135,59 @@ describe("ET07 測驗資訊面板", () => {
     expect(screen.queryByText("此課程已關閉，無法再開新作答")).not.toBeInTheDocument()
   })
 
-  it("有未完成的作答時按鈕改為「繼續作答」", async () => {
+  it("有未完成的作答時告知按下會結算，按鈕仍是「開始作答」而非「繼續作答」（#640）", async () => {
     mockIntro({ in_progress_attempt_id: 800 })
     renderWithProviders(<QuizIntroPanel quizId={700} />)
 
-    expect(await screen.findByRole("button", { name: /繼續作答/ })).toBeInTheDocument()
+    expect(await screen.findByText(/上次的作答尚未提交/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "開始作答" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /繼續作答/ })).not.toBeInTheDocument()
+  })
+
+  it("沒有未完成的作答時不顯示結算提示", async () => {
+    mockIntro({})
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    // 正向錨點：面板已渲染完成（同一個查詢方式找得到按鈕）
+    expect(await screen.findByRole("button", { name: "開始作答" })).toBeInTheDocument()
+    expect(screen.queryByText(/上次的作答尚未提交/)).not.toBeInTheDocument()
+  })
+
+  it("開始作答時後端結算了殘留作答 → 帶著成績進結果頁並註明是自動提交（#640）", async () => {
+    mockIntro({ in_progress_attempt_id: 800 })
+    server.use(
+      http.post("/api/et/quizzes/:quizId/attempts", () =>
+        HttpResponse.json(
+          {
+            attempt_id: 800,
+            quiz_id: 700,
+            course_id: 7,
+            attempt_no: 1,
+            status: "SUBMITTED",
+            score: "50.00",
+            points_total: 100,
+            pass_score: 80,
+            is_pass: false,
+            submitted_at: "2026-10-14T02:00:00Z",
+            remaining_attempts: 2,
+            course_closed: false,
+            questions: [],
+          },
+          { status: 200 },
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    await user.click(await screen.findByRole("button", { name: "開始作答" }))
+
+    // #549：一樣先釘 ?quiz=，結果頁的返回才會落在這個測驗
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(2))
+    expect(navigate.mock.calls[1]).toEqual([
+      "/et/attempts/800/result",
+      { state: expect.objectContaining({ attempt_id: 800, status: "SUBMITTED", auto_settled: true }) },
+    ])
   })
 
   it("同時顯示最近一次與最高分", async () => {

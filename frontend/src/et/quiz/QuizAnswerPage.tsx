@@ -5,6 +5,11 @@ import Button from "@mui/material/Button"
 import Checkbox from "@mui/material/Checkbox"
 import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
+import Dialog from "@mui/material/Dialog"
+import DialogActions from "@mui/material/DialogActions"
+import DialogContent from "@mui/material/DialogContent"
+import DialogContentText from "@mui/material/DialogContentText"
+import DialogTitle from "@mui/material/DialogTitle"
 import FormControlLabel from "@mui/material/FormControlLabel"
 import Grid from "@mui/material/Grid"
 import Paper from "@mui/material/Paper"
@@ -13,7 +18,7 @@ import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useRef, useState } from "react"
-import { useLocation, useNavigate, useParams } from "react-router-dom"
+import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { carryFirstEntry } from "../../hooks/useGoBack"
 
@@ -108,7 +113,7 @@ export function EtQuizAnswerPage() {
     staleTime: Number.POSITIVE_INFINITY,
     // 🔴 **每次進入本頁都向伺服器重抓**（#608），且重抓完成前不渲染作答（見下方
     // `isFetchedAfterMount`）。本地作答是在 `queryFn` 裡灌入的，而 `staleTime` 是無限大：
-    // 不這樣做的話，離開後 5 分鐘內「繼續作答」會直接吐出第一次載入時的舊快取、`queryFn`
+    // 不這樣做的話，離開後 5 分鐘內再次進入作答頁會直接吐出第一次載入時的舊快取、`queryFn`
     // 不執行，本地作答與 `savedRef` 都是空的——畫面顯示舊答案，切題時再把看過沒動的題目
     // 暫存成空白，覆蓋伺服器上已存的作答。
     // ⛔ 不要改用 `gcTime: 0`：快取是卸載後**下一輪**才回收，立刻回到本頁仍會吃到舊快取。
@@ -116,14 +121,6 @@ export function EtQuizAnswerPage() {
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
-  /**
-   * 送出單題暫存。
-   *
-   * @param required 失敗時是否往外拋。
-   *   - `false`（切換題目）：靜默——切題不該因為暫存失敗而卡住，提交前還會再送一次。
-   *   - `true`（**提交前**）：必須拋。學員在最後一題作答後直接按提交時，這是那一題唯一
-   *     的落地機會；靜默吞掉會讓它從閱卷中消失，而學員看到的是「已提交並完成閱卷」。
-   */
   /** 把一筆暫存接在該題前一筆之後送出（前一筆失敗也照送）；成功才記入 `savedRef`。 */
   const saveInOrder = useCallback(
     (questionId: number, selected: number[]): Promise<void> => {
@@ -140,6 +137,14 @@ export function EtQuizAnswerPage() {
     [attemptId],
   )
 
+  /**
+   * 送出單題暫存。
+   *
+   * @param required 失敗時是否往外拋。
+   *   - `false`（切換題目）：靜默——切題不該因為暫存失敗而卡住，提交前還會再送一次。
+   *   - `true`（**提交前**）：必須拋。學員在最後一題作答後直接按提交時，這是那一題唯一
+   *     的落地機會；靜默吞掉會讓它從閱卷中消失，而學員看到的是「已提交並完成閱卷」。
+   */
   const flushAnswer = useCallback(
     async (questionId: number | null, { required = false }: { required?: boolean } = {}) => {
       if (questionId === null) return
@@ -158,6 +163,8 @@ export function EtQuizAnswerPage() {
 
   /** 本次提交是不是「離開作答視窗」觸發的——結果頁要據此說明為什麼考卷被交出去。 */
   const leftWindowRef = useRef(false)
+  /** 本次提交是站內離開（經確認）觸發的——交完放行原本的導覽，不進結果頁（#640）。 */
+  const leavingViaNavRef = useRef(false)
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -179,6 +186,11 @@ export function EtQuizAnswerPage() {
       return attemptApi.submit(attemptId)
     },
     onSuccess: (result) => {
+      if (leavingViaNavRef.current) {
+        // 目的地由確認視窗的 `blocker.proceed()` 前往，這裡不導向結果頁
+        message.success("已提交本次作答")
+        return
+      }
       const left = leftWindowRef.current
       message.success(left ? "已離開作答視窗，本次作答已自動提交" : "已提交並完成閱卷")
       const state: ResultNavState = left ? { ...result, left_window: true } : result
@@ -188,6 +200,7 @@ export function EtQuizAnswerPage() {
     onError: (err) => {
       submittingRef.current = false
       leftWindowRef.current = false
+      leavingViaNavRef.current = false
       message.error(toApiError(err).errorMessage)
     },
   })
@@ -208,6 +221,36 @@ export function EtQuizAnswerPage() {
   // 作答中離開視窗 → 自動交卷。`enabled` 讓已提交的 attempt 與載入中都不掛監聽——
   // 否則「已提交後用上一頁回來」再切個分頁就會打一次注定 409 的提交。
   useAutoSubmitOnLeave({ enabled: data?.status === "IN_PROGRESS", onLeave: submitOnLeave })
+
+  /**
+   * 作答中由**站內**離開（左側選單、瀏覽器上一頁、頁內連結）→ 確認後交卷再放行（#640）。
+   *
+   * 切換視窗攔不住、只能直接交；站內導覽攔得住，故先確認——誤點側欄的代價是一次作答次數。
+   * 這推翻了 #280 裁示 Q1 = B（不實作防誤離確認）在**站內導覽**的部分：該裁示的前提是
+   * 「離開一定交卷」，而站內導覽在 #640 之前根本不交卷（才有續作）；關閉分頁仍直接交、
+   * 不確認，那部分的裁示照舊。
+   *
+   * ⚠️ **交卷成功才放行**：交卷失敗時學員要留在作答頁、看得到錯誤、可重試或改按「繼續作答」。
+   * 先放行的話他已經離開——錯誤訊息落在別頁、作答停在作答中，他不知道自己沒交成。
+   * （不是為了「請求被丟掉」：站內導覽不重新載入頁面、卸載也不取消已送出的請求。）
+   * 交卷中（含自己按提交後 `replace` 進結果頁）不攔——`submittingRef` 已為 true。
+   */
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      data?.status === "IN_PROGRESS" && !submittingRef.current && currentLocation.pathname !== nextLocation.pathname,
+  )
+  /** 確認「提交並離開」：交卷成功才放行原本的導覽；失敗時 `onError` 已提示，留在本頁。 */
+  const submitAndLeave = async () => {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    leavingViaNavRef.current = true
+    try {
+      await submit.mutateAsync()
+    } catch {
+      return
+    }
+    blocker.proceed?.()
+  }
 
   if (!attemptIdValid) return <Alert severity="error">作答代碼無效</Alert>
   // 快取裡的舊資料不可拿來作答（#608）：本次進入後的重抓回來、本地作答灌入之前一律等待
@@ -284,18 +327,34 @@ export function EtQuizAnswerPage() {
   return (
     <Box>
       {/*
+        站內離開的確認（#640）。**本頁自己渲染、不用全域 `confirm`**：確認視窗開著時若觸發
+        自動交卷（切視窗 / 倒數歸零），交完會 `replace` 進結果頁、本頁卸載——全域對話框不隨
+        本頁卸載，會留在結果頁上，按「提交並離開」對已交的考卷再送一次（409）。本頁的對話框
+        隨本頁一起消失。條件渲染而非 `open={false}` 常駐（見 MUI Dialog 的 aria-hidden 坑）。
+      */}
+      {blocker.state === "blocked" && (
+        <Dialog open onClose={() => !submit.isPending && blocker.reset?.()}>
+          <DialogTitle>離開作答</DialogTitle>
+          <DialogContent>
+            <DialogContentText>離開將立即提交本次作答，確定離開？</DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={submit.isPending} onClick={() => blocker.reset?.()}>
+              繼續作答
+            </Button>
+            <Button variant="contained" disabled={submit.isPending} onClick={() => void submitAndLeave()}>
+              提交並離開
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+      {/*
         常駐而非一次性 Snackbar：這是整段作答期間都成立的規則，而 Snackbar 幾秒後就消失，
         學員在第 8 分鐘切走分頁時早就看不到它了。
       */}
       <Alert severity="warning" sx={{ mb: 2 }}>
         <strong>請勿切換視窗或分頁</strong>——離開本畫面將立即自動提交本次作答。
       </Alert>
-
-      {data.resumed && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          已回到您未完成的作答（第 {data.attempt_no} 次）。剩餘時間自開始作答時起算。
-        </Alert>
-      )}
 
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>

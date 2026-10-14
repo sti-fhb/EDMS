@@ -48,13 +48,11 @@ class QuestionForAnswering(BaseModel):
 
 
 class AttemptState(BaseModel):
-    """作答中的完整狀態（開始作答與續作共用同一個形狀）。
+    """作答中的完整狀態（開始作答與進入作答頁共用同一個形狀）。
 
     Attributes:
         remaining_sec: 剩餘秒數，由後端自 `STARTED_AT` 推導。**`None` = 不限時**，
             前端據此不顯示倒數區塊——不可當成 0（那會渲染成「時間到」）。
-        resumed: 本次回傳的是既有的進行中作答，而非新建（#279 SA Q1 裁示 A）。
-            前端據此提示「已回到未完成的作答」，避免學員以為自己按了兩次。
     """
 
     attempt_id: int
@@ -67,7 +65,6 @@ class AttemptState(BaseModel):
     pass_score: int
     time_limit_min: int | None
     remaining_sec: int | None
-    resumed: bool
     questions: list[QuestionForAnswering]
 
 
@@ -161,7 +158,7 @@ class AttemptSummary(BaseModel):
     """歷次作答清單的一列（#280 AC 1）。
 
     **只列已閱卷的 attempt**（`GRADED_STATUSES`）——進行中的還沒有成績，列出來只會是
-    一列空白；「繼續作答」由 `QuizIntro.in_progress_attempt_id` 負責，不是這裡。
+    一列空白；殘留的作答中 attempt 由 `QuizIntro.in_progress_attempt_id` 告知，不是這裡。
     """
 
     attempt_id: int
@@ -183,7 +180,7 @@ class QuizIntro(BaseModel):
         can_start: 是否可開始作答；`False` 時前端禁用按鈕並顯示 ET-MSG-ET07-001。
         last_score: **最近一次**的成績。與 `best_score` 一起給——結業成績取最高分，
             只顯示其一都會誤導（只給最近一次會讓學員以為自己退步了）。
-        in_progress_attempt_id: 有未完成的作答時帶其 id，前端把按鈕改為「繼續作答」。
+        in_progress_attempt_id: 有未完成的作答時帶其 id——按「開始作答」會先結算它（#640），前端據此提示。
     """
 
     quiz_id: int

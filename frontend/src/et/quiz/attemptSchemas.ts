@@ -22,6 +22,15 @@ export interface QuestionForAnswering {
   selected_options: number[]
 }
 
+/**
+ * `start` 的回應是否為「結算了殘留作答」的成績（#640），而不是新開的作答狀態。
+ * 以 `status` 判別：新開的作答必為 `IN_PROGRESS`，成績必為已提交 / 逾時。不用「有沒有某個
+ * 欄位」——日後任一邊加欄位都可能讓判別靜默錯掉。
+ */
+export function isSettled(res: AttemptState | AttemptResult): res is AttemptResult {
+  return res.status !== "IN_PROGRESS"
+}
+
 export interface AttemptState {
   attempt_id: number
   quiz_id: number
@@ -36,8 +45,6 @@ export interface AttemptState {
    *（那會渲染成「時間到」並立刻自動提交）。
    */
   remaining_sec: number | null
-  /** 回傳的是既有的進行中作答而非新建（SA 裁示 Q1 = A）。 */
-  resumed: boolean
   questions: QuestionForAnswering[]
 }
 
@@ -83,8 +90,8 @@ export interface AttemptResult {
 /**
  * 歷次作答清單的一列（#280 AC 1）。
  *
- * **只含已閱卷的 attempt**——進行中的還沒有成績；「繼續作答」由
- * `QuizIntro.in_progress_attempt_id` 負責，不在這份清單裡。
+ * **只含已閱卷的 attempt**——進行中的還沒有成績；殘留的作答中 attempt 由
+ * `QuizIntro.in_progress_attempt_id` 告知，不在這份清單裡。
  */
 export interface AttemptSummary {
   attempt_id: number
@@ -107,6 +114,8 @@ export interface AttemptSummary {
 export interface ResultNavState extends AttemptResult {
   /** 本次提交由「離開作答視窗」觸發，非學員主動按提交。 */
   left_window?: boolean
+  /** 上次作答未提交，於再次按「開始作答」時被自動結算（#640）。 */
+  auto_settled?: boolean
 }
 
 export interface QuizIntro {
@@ -124,7 +133,7 @@ export interface QuizIntro {
   last_score: string | null
   best_score: string | null
   is_passed: boolean
-  /** 有未完成的作答時帶其 id，按鈕改為「繼續作答」。 */
+  /** 有未完成的作答時帶其 id——按「開始作答」會先結算它（#640），面板據此提示。 */
   in_progress_attempt_id: number | null
   /**
    * 最近一次**已提交**的 attempt；`null` = 從未作答完成。

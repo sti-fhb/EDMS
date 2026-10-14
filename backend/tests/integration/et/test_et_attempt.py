@@ -20,6 +20,7 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.constants import (
+    ATTEMPT_IN_PROGRESS,
     ATTEMPT_SUBMITTED,
     ATTEMPT_TIMEOUT,
     COURSE_CLOSED,
@@ -185,11 +186,14 @@ class TestStartAttempt:
 
         assert "is_correct" not in r.text, "作答中的回應含正確答案"
 
-    async def test_已有進行中的作答時續作而非開新(self, client, db) -> None:
-        """#279 SA 裁示 Q1 = A。
+    async def test_已有進行中的作答時再開始會以已暫存作答結算該筆(self, client, db) -> None:
+        """#640（推翻 #279 SA 裁示 Q1 = A「續作」）。
 
-        斷線 / 當機 / 誤觸上一頁都不是學員的選擇，而作廢的代價是一次作答次數
-        （`MAX_RETRY` 常只有 1~3 次）。時間照扣已經是對中斷的懲罰。
+        殘留的作答中 attempt 來自自動交卷沒送出去（關分頁 / 當機 / 斷網）——站內離開已改為
+        確認後交卷。回來時**以已暫存的作答結算**：已寫的不遺失、照常計分，只是不能接著答。
+
+        ⚠️ 結算以 **200 + 成績**回應，**不可**以錯誤碼回應：錯誤會使整筆交易回滾，
+        剛做完的結算跟著消失，學員下次進來又是同一筆作答中——永遠結算不掉。
         """
         teacher = await _user(db, "t_att03", ROLE_TEACHER)
         student = await _user(db, "s_att03")
@@ -198,25 +202,71 @@ class TestStartAttempt:
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         first = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
-        # 先答一題，確認續作時答案還在
-        await client.put(
+        assert first.status_code == 201, first.text
+        # 先暫存一題，確認結算讀的是已暫存的作答
+        saved = await client.put(
             _answer_url(first.json()["attempt_id"], q["question_id"]),
             json={"selected_options": [q["options"][0]["option_id"]]},
             headers=h,
         )
+        assert saved.status_code == 204, saved.text
 
         again = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
 
-        assert again.status_code == 201, again.text
-        assert again.json()["attempt_id"] == first.json()["attempt_id"], "開了新的 attempt"
-        assert again.json()["resumed"] is True
-        assert again.json()["questions"][0]["selected_options"] == [q["options"][0]["option_id"]]
-        assert (
-            await db.scalar(
-                select(EtQuizAttemptM.attempt_no).where(EtQuizAttemptM.attempt_id == first.json()["attempt_id"])
-            )
-            == 1
+        assert again.status_code == 200, again.text
+        body = again.json()
+        assert body["attempt_id"] == first.json()["attempt_id"], "應結算殘留的那一筆，不是開新的"
+        assert body["status"] == ATTEMPT_SUBMITTED
+        # 與正常交卷同一套閱卷：已暫存的選項有被計入（不是當成白卷）
+        options = body["questions"][0]["options"]
+        assert [o["option_id"] for o in options if o["selected"]] == [q["options"][0]["option_id"]]
+        row = await db.scalar(select(EtQuizAttemptM).where(EtQuizAttemptM.attempt_id == body["attempt_id"]))
+        await db.refresh(row)
+        assert row.status == ATTEMPT_SUBMITTED, "結算沒有落地（回應說交了，DB 仍是作答中）"
+
+    async def test_逾時的殘留作答結算為_TIMEOUT(self, client, db) -> None:
+        """#640：結算與正常交卷同一套判定——超過時限的殘留作答標 `TIMEOUT`、照常計分。"""
+        teacher = await _user(db, "t_att38", ROLE_TEACHER)
+        student = await _user(db, "s_att38")
+        course = await _course_with_quiz(client, db, teacher, code="32000038")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        url = f"/api/et/quizzes/{course['quiz_id']}/attempts"
+        first = await client.post(url, headers=h)
+        assert first.status_code == 201, first.text
+        # 學員關了分頁、過了時限才回來：時限 1 分鐘、開始於 5 分鐘前
+        await db.execute(
+            update(EtQuizAttemptM)
+            .where(EtQuizAttemptM.attempt_id == first.json()["attempt_id"])
+            .values(time_limit_snapshot=1, started_at=utcnow() - timedelta(minutes=5))
         )
+        await db.commit()
+
+        settled = await client.post(url, headers=h)
+
+        assert settled.status_code == 200, settled.text
+        assert settled.json()["status"] == ATTEMPT_TIMEOUT
+
+    async def test_結算殘留作答後仍有次數者可開始新的一次(self, client, db) -> None:
+        """#640：結算是「把上一份交掉」，不是「開新的」——開新的要學員再按一次。"""
+        teacher = await _user(db, "t_att37", ROLE_TEACHER)
+        student = await _user(db, "s_att37")
+        course = await _course_with_quiz(client, db, teacher, code="32000037")
+        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _enroll(db, student, course["course_id"])
+        h = _bearer(student)
+        url = f"/api/et/quizzes/{course['quiz_id']}/attempts"
+        first = await client.post(url, headers=h)
+        settled = await client.post(url, headers=h)
+        assert settled.status_code == 200, settled.text
+
+        fresh = await client.post(url, headers=h)
+
+        assert fresh.status_code == 201, fresh.text
+        assert fresh.json()["status"] == ATTEMPT_IN_PROGRESS
+        assert fresh.json()["attempt_id"] != first.json()["attempt_id"]
+        assert fresh.json()["attempt_no"] == 2
 
     async def test_未解鎖的測驗不可開始(self, client, db) -> None:
         """測驗在第 2 章，第 1 章未完成 → 404（比照 #274 的第 4 道守門）。"""

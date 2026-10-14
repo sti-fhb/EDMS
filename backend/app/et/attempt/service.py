@@ -19,7 +19,7 @@
 
 | 裁示 | 執行點 |
 |---|---|
-| Q1 = A：進行中的 attempt **續作**而非作廢 | `start()` 先找 `IN_PROGRESS` |
+| Q1 = A：進行中的 attempt **續作**而非作廢（⚠️ #640 改為**結算**，見 `start()`）| `start()` 先找 `IN_PROGRESS` |
 | Q2 = C：刪題不連帶軟刪明細 | 於 `quiz/repository` 移除連帶，本模組因此可正常讀回明細 |
 
 ## 閱卷只讀快照
@@ -206,8 +206,8 @@ class EtAttemptService:
             time_limit_min=quiz.time_limit_min,
             max_retry=quiz.max_retry,
             remaining_attempts=remaining_attempts(total=total, reset_base=base, max_retry=quiz.max_retry),
-            # 有未完成的作答時恆可進入——那是「繼續」而不是「開始」，不受次數限制
-            # 關閉課程不可開新作答，但**已在作答者仍可繼續**（`spec_us6` 場景 27）
+            # 有未完成的作答時恆可按——按下去是**結算那一份**而不是開新的（#640），不受次數限制
+            # 關閉課程不可開新作答，但**已在作答者仍可結算計分**（`spec_us6` 場景 27）
             #
             # ⚠️ `not closed` 是**取反**：這一行是「可以開始」的條件，不是「被擋住」的條件
             #
@@ -305,26 +305,32 @@ class EtAttemptService:
             for row in rows
         ]
 
-    # ── 開始 / 續作 ─────────────────────────────────────────────────────────
+    # ── 開始 / 結算殘留 ─────────────────────────────────────────────────────
 
     async def start(
         self, db: AsyncSession, quiz_id: int, *, operator: OperatorInfo, roles: frozenset[str] = frozenset()
-    ) -> AttemptState:
-        """開始作答；已有未完成者**回既有那一筆**（SA 裁示 Q1 = A）。
+    ) -> AttemptState | AttemptResult:
+        """開始作答；已有未完成者**以已暫存的作答結算那一筆**並回傳成績（#640）。
 
-        續作不消耗次數、不重新洗牌、不重設計時——`ATTEMPT_NO` 早在第一次點「開始作答」
-        時就配發，而剩餘時間一律由 `STARTED_AT` 推導。
+        #640 前為續作（#279 SA 裁示 Q1 = A）。站內離開改為確認後交卷之後，殘留的作答中
+        attempt 只剩「自動交卷沒送出去」一種來源（關分頁 / 當機 / 斷網）——回來時結算：
+        已寫的不遺失、與正常交卷同一套閱卷，只是不能接著答。結算**不**順帶開新的一份——
+        學員要先看到那一份的成績，仍有次數再自己開始。
+
+        ⚠️ 結算以**正常回應**回傳 `AttemptResult`，**不可**改成拋錯誤碼：錯誤會使整筆
+        交易回滾，剛寫入的結算跟著消失，學員下次進來又是同一筆作答中、永遠結算不掉。
 
         Raises:
             AppError: 404 查無 / 無權 / 項目未解鎖；409 `ET_ATTEMPT_002` 次數用完；
-                409 `ET_ATTEMPT_008` 預覽模式（#486）。
+                409 `ET_ATTEMPT_008` 預覽模式（#486）；409 `ET_ATTEMPT_003` 結算殘留作答時
+                恰好被 SCHET002 或另一個請求先一步結清（罕見；再按一次即正常開始）。
         """
         user_id = operator.user_id
         access = await self._require_access(db, quiz_id, user_id, roles=roles)
         # 2026-10-01 裁示：**預覽唯讀**，不建立 attempt（#486）。題目由 `preview()` 取。
         #
-        # ⚠️ 這道守門排在**續作分支之前**，與下方三道（未開放 / 已關閉 / 未解鎖）不同。
-        # 那三道刻意放在續作之後是為了保住「寫到一半的考卷不被教師的調整中斷」那條窄縫；
+        # ⚠️ 這道守門排在**殘留作答的結算分支之前**，與下方三道（未開放 / 已關閉 / 未解鎖）不同。
+        # 那三道刻意放在結算分支之後是為了保住「寫到一半的考卷仍能交出去計分」那條窄縫；
         # 本條沒有對應的窄縫——預覽者不會有寫到一半的考卷，`ET_QUIZ_ATTEMPT` 裡若真有他
         # 的未完成列，那是本次改動**之前**留下的，不該靠這裡復活。
         #
@@ -334,23 +340,20 @@ class EtAttemptService:
             raise _PREVIEW_READONLY
         quiz, item_id, course_id = access.quiz, access.item_id, access.course_id
 
-        # ⚠️ **進行中的 attempt 是一張存續的通行證，它會跨越「重新上鎖」。** 本分支在
-        # 下方三道守門（未開放 / 已關閉 / 項目未解鎖）之前返回，這是刻意的——不讓教師
-        # 的調整中斷一份已經寫到一半的考卷（場景 27 的窄縫）。
+        # ⚠️ **殘留的作答中 attempt 一律結算，不受下方三道守門（未開放 / 已關閉 / 項目未
+        # 解鎖）影響。** 本分支在它們之前返回是刻意的——場景 27 保的是「已在作答者可完成並
+        # 計分」，課程關閉後學員回來只會看到「關閉中」的話，寫了一半的考卷就永遠停在作答中。
+        # **這條分支不可往下移到守門之後。**
         #
-        # 自 #361 啟用 AC 12 後，這條窄縫多了一個組合：學員可在某個短暫的解鎖窗口
-        # （例如教師把前一份測驗的題目全刪掉的期間）先開一個 attempt 掛著不交，等閘門
-        # 恢復後再提交。這是**已知而非漏看**。
-        #
-        # ⛔ 要收緊的話，正確的位置是限制 attempt 的最長存活時間，**不是**在本分支加上
-        # 解鎖判定——後者會打到場景 27 要保的那條窄縫。
+        # 自 #361 啟用 AC 12 後的窄縫（短暫解鎖窗口先開一個 attempt 掛著）在 #640 後只剩
+        # 「掛著的那一份可被交出去計分」，不能再回去接著答。
         existing = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
         if existing is not None:
-            return await self._state(db, existing, quiz_name=quiz.quiz_name, resumed=True)
+            return await self._settle(db, existing, operator=operator)
 
         # ⚠️ 課程關閉後**不可開新作答**（`spec_us6` 場景 27 / #255 裁示 Q2「寫全停」）。
-        # 只擋「開新的」——上面的續作分支已先返回，故關閉當下已在作答的 attempt 仍可
-        # 完成並計分，那正是場景 27 要保的那條窄縫。**這道守門不可往上移到續作分支之前。**
+        # 只擋「開新的」——上面的結算分支已先返回，故關閉當下已在作答的 attempt 仍可
+        # 交出去計分，那正是場景 27 要保的那條窄縫。**這道守門不可往上移到結算分支之前。**
         #
         # 「視同關閉」含「已發布但閱課期間已過」（#313）：到期自動轉 `CLOSED` 屬未實作的
         # ET-16，故期間過了而 `STATUS` 仍是 `PUBLISHED` 在本系統是常態而非過渡狀態。
@@ -393,19 +396,23 @@ class EtAttemptService:
             # 後 commit 的一方撞 `UQ_ET_ATTEMPT_USER_QUIZ_NO`。
             #
             # **次數本身不會被繞過**（擋住的正是那個唯一鍵），但落敗方原本會變成一個使用者
-            # 可穩定重現的 500。改為重讀後以「續作」回應——那也正是使用者期待看到的結果。
+            # 可穩定重現的 500。改為重讀後回**勝出方剛建立的那一份**——同一個人連點兩下，
+            # 期待看到的就是那一份考卷。
+            #
+            # ⛔ 這裡**不可**比照上方殘留分支去結算：那一份是勝出方毫秒前才建立、學員正要
+            # 開始作答的考卷，結算等於替他交白卷、吃掉一次次數（#640）。
             await db.rollback()
             existing = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
             if existing is None:
                 raise _NO_ATTEMPTS from None
-            return await self._state(db, existing, quiz_name=quiz.quiz_name, resumed=True)
-        return await self._state(db, attempt, quiz_name=quiz.quiz_name, resumed=False)
+            return await self._state(db, existing, quiz_name=quiz.quiz_name)
+        return await self._state(db, attempt, quiz_name=quiz.quiz_name)
 
     async def state(self, db: AsyncSession, attempt_id: int, *, user_id: str) -> AttemptState:
-        """取作答狀態（跳題 / 重新整理後回來）。"""
+        """取作答狀態（進作答頁、跳題後回來）。"""
         attempt = await self._require_own_attempt(db, attempt_id, user_id)
         quiz = await self._repo.get_quiz(db, attempt.quiz_id)
-        return await self._state(db, attempt, quiz_name=quiz.quiz_name if quiz else "", resumed=True)
+        return await self._state(db, attempt, quiz_name=quiz.quiz_name if quiz else "")
 
     # ── 暫存 ────────────────────────────────────────────────────────────────
 
@@ -460,9 +467,19 @@ class EtAttemptService:
         """
         attempt = await self._require_own_attempt(db, attempt_id, operator.user_id)
         self._ensure_in_progress(attempt)
+        return await self._settle(db, attempt, operator=operator)
 
+    async def _settle(self, db: AsyncSession, attempt, *, operator: OperatorInfo) -> AttemptResult:
+        """閱卷並把作答中的 attempt 轉為已提交 / 逾時，回傳成績。
+
+        `submit` 與 `start` 結算殘留作答（#640）**共用本函式**——兩條路對計分、及格、
+        完課與最後活動時間不可能分岔。
+
+        Raises:
+            AppError: 409 `ET_ATTEMPT_003` 並行請求已先一步完成轉移。
+        """
         now = utcnow()
-        details = await self._repo.list_details(db, attempt_id)
+        details = await self._repo.list_details(db, attempt.attempt_id)
         # 閱卷（含「實得 ÷ 配分總和」之正規化）在 `rules.grade_details`——SCHET002 結清
         # 逾期未提交的 attempt 時走同一支，兩邊對及格與否不可能分岔（#317 / #325）。
         graded = grade_details(to_answers(details), pass_score=attempt.pass_score_snapshot)
@@ -653,7 +670,7 @@ class EtAttemptService:
 
         2026-10-01 裁示預覽唯讀：`start` 現在以 `ET_ATTEMPT_008` 擋下所有不在籍者，故
         不可能再建立預覽 attempt。本函式保留是為了**本次改動之前**已經產生的那些列——
-        教師當時開了卻沒提交的考卷，日後若被續作並提交，仍須走「不寫進度」那條路。
+        教師當時開了卻沒提交的考卷，日後若被提交或於再次進入時結算，仍須走「不寫進度」那條路。
 
         ⛔ 不要因為「新路徑建不出來」就刪掉它或改成 `return False`：那會讓既有的預覽
         attempt 在提交時寫進 `ET_PROGRESS`，而那正是 #255 裁示 Q1 要避開的後果。
@@ -710,7 +727,7 @@ class EtAttemptService:
             operator=operator,
         )
 
-    async def _state(self, db: AsyncSession, attempt, *, quiz_name: str, resumed: bool) -> AttemptState:
+    async def _state(self, db: AsyncSession, attempt, *, quiz_name: str) -> AttemptState:
         details = await self._repo.list_details(db, attempt.attempt_id)
         return AttemptState(
             attempt_id=attempt.attempt_id,
@@ -723,7 +740,6 @@ class EtAttemptService:
             remaining_sec=remaining_seconds(
                 started_at=attempt.started_at, time_limit_min=attempt.time_limit_snapshot, now=utcnow()
             ),
-            resumed=resumed,
             questions=[
                 QuestionForAnswering(
                     question_id=d.question_id,

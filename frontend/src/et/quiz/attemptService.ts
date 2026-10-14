@@ -30,13 +30,13 @@ export const attemptApi = {
   },
 
   /**
-   * 開始作答。**已有未完成的作答時回既有那一筆**（`resumed: true`），不建新的、不吃次數。
+   * 開始作答。**已有未完成的作答時，後端以已暫存的作答結算那一筆並回成績**（`AttemptResult`，
+   * #640；原為續作），不建新的。以 `isSettled` 分流：作答狀態 → 進作答頁；成績 → 進結果頁。
    *
-   * 故本呼叫是「開始或繼續」——前端不需要（也不該）自己判斷該建新的還是續作，
-   * 那個判定在後端，兩邊各判一次遲早會分岔。
+   * 該建新的還是結算由後端判定——前端不自己判斷，兩邊各判一次遲早會分岔。
    */
-  start: async (quizId: number): Promise<AttemptState> => {
-    const { data } = await http.post<AttemptState>(`/et/quizzes/${quizId}/attempts`)
+  start: async (quizId: number): Promise<AttemptState | AttemptResult> => {
+    const { data } = await http.post<AttemptState | AttemptResult>(`/et/quizzes/${quizId}/attempts`)
     return data
   },
 

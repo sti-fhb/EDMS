@@ -178,6 +178,23 @@ describe("ET07 結果頁", () => {
     expect(screen.getByRole("button", { name: /回課程重新作答/ })).toBeInTheDocument()
   })
 
+  it("上次作答於再次進入時被自動結算 → 說明原因（#640）", () => {
+    // 不說明的話，學員看到的是一個自己沒按過提交的成績頁，看起來像系統壞掉
+    state = { ...RESULT, auto_settled: true } as AttemptResult
+    renderWithProviders(<EtQuizResultPage />)
+
+    expect(screen.getByText(/上次的作答未提交，已以暫存的作答自動提交/)).toBeInTheDocument()
+  })
+
+  it("一般提交不顯示自動結算說明", () => {
+    state = RESULT
+    renderWithProviders(<EtQuizResultPage />)
+
+    // 正向錨點：同一個畫面確實渲染了
+    expect(screen.getByText("測驗完成")).toBeInTheDocument()
+    expect(screen.queryByText(/上次的作答未提交/)).not.toBeInTheDocument()
+  })
+
   it("未及格但次數用盡時不提重考", () => {
     state = { ...RESULT, remaining_attempts: 0 }
     renderWithProviders(<EtQuizResultPage />)

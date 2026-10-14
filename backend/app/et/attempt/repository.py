@@ -108,7 +108,7 @@ class EtAttemptRepository:
     # ── Attempt 生命週期 ────────────────────────────────────────────────────
 
     async def find_in_progress(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> EtQuizAttemptM | None:
-        """未完成的作答（#279 SA Q1 裁示 A：續作而非作廢）。"""
+        """未完成的作答——`start()` 據此結算殘留的那一份（#640；原為續作）。"""
         return await db.scalar(
             select(EtQuizAttemptM).where(
                 EtQuizAttemptM.user_id == user_id,
@@ -121,7 +121,7 @@ class EtAttemptRepository:
     async def last_submitted_attempt_id(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> int | None:
         """最近一次**已提交**的 attempt——引導頁的「查看上次作答明細」。
 
-        取 `ATTEMPT_NO` 最大者而非 `SUBMITTED_AT`：續作的 attempt 可能比後開的先提交，
+        取 `ATTEMPT_NO` 最大者而非 `SUBMITTED_AT`：早開的 attempt 不保證比後開的先提交，
         而「上次」對學員的意思是「上一次作答」，那是次序不是時間。
 
         狀態以**白名單**篩（與 `service.result` 同一組），不用 `!= IN_PROGRESS`——否則新增
