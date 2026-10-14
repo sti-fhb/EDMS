@@ -47,7 +47,7 @@ function SelfAwareDisableButton({ isSelf, onDisable }: { isSelf: boolean; onDisa
   const reason = isSelf ? "無法停用自己的帳號" : ""
   return (
     <Tooltip title={reason}>
-      <Box component="span" sx={{ display: "inline-flex" }} aria-label={reason || undefined}>
+      <Box component="span" sx={{ display: "inline-flex" }}>
         <Button size="small" disabled={isSelf} onClick={onDisable}>
           停用
         </Button>
@@ -79,9 +79,15 @@ export function UsersPage() {
   /**
    * 目前登入者——用來判斷哪一列是自己（#603）。與 `AppHeader` / `ProfilePage` 共用同一 query key。
    *
-   * ⚠️ **刻意不為它加載入閘**：`AppHeader` 常駐於 `AppShell`、而本頁在 `AppShell` 之下，使用者走到
-   * DP01 時這筆必定已在快取、`useQuery` 同步回值。為「進得了本頁卻尚未取得 me」這個不存在的路徑
-   * 加防禦碼，違反 `sti-coding-style.md`「不為不存在的情境寫防禦碼」。
+   * **刻意不為它加載入閘**，但理由不是「必定已在快取」——那句話不成立，有兩條路徑會讓 `me` 晚到：
+   *
+   * 1. 重新整理或直接開 `/dp/users` 時，本頁與 `AppHeader` 的兩個 query 同時發出，`me` 可能晚於列表
+   * 2. `AppHeader` 的 `me` 帶 `enabled: isAuthenticated && !mustChangePwd`，而 `RootLayout` 在
+   *    `mustChangePwd` 時仍同時掛 `<Outlet />`，所以那個情況下 AppHeader 根本不抓
+   *
+   * 真正的理由是**這段空窗無害且會自行收斂**：期間 `isSelf` 回 false、自己那列的停用鈕可按，
+   * 但後端 `DP_USER_006` 仍會擋；`me` 一到 `isSelf` 就重算、按鈕隨即灰階。為此加載入閘會讓整頁
+   * 在每次重新整理時多卡一次 spinner，代價大於收益。
    */
   const { data: me } = useQuery({ queryKey: PROFILE_ME_QUERY_KEY, queryFn: profileApi.getMe })
   const myUserId = me?.user_id
