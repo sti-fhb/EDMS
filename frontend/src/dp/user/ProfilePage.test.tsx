@@ -78,6 +78,30 @@ describe("ProfilePage 個人資料維護", () => {
     expect(await screen.findByText("密碼已更新")).toBeInTheDocument()
   })
 
+  it("管理者（#623）：提示與前端檢核依本人適用門檻 12 字元，9 字元被擋下、不送出", async () => {
+    let submitted = false
+    server.use(
+      http.get("/api/dp/user/me/password-policy", () => HttpResponse.json({ min_len: 12, char_types: 3 })),
+      http.put("/api/dp/user/me/password", () => {
+        submitted = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ProfilePage />)
+
+    await user.click(await screen.findByRole("button", { name: "變更密碼" }))
+    // 公開政策端點仍回一般門檻 8：提示若出現 12，代表確實改讀本人適用的門檻
+    expect(await screen.findByText(/至少 12 字元/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText("舊密碼"), "Abcd1234")
+    await user.type(screen.getByLabelText("新密碼"), "Abcd1234!")
+    await user.type(screen.getByLabelText("確認新密碼"), "Abcd1234!")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(await screen.findByText("密碼至少 12 字元")).toBeInTheDocument()
+    expect(submitted).toBe(false)
+  })
+
   it("變更密碼：兩次不一致 → 前端擋下顯示錯誤", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ProfilePage />)

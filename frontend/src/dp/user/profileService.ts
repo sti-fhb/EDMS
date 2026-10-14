@@ -24,6 +24,12 @@ export interface PasswordPolicy {
   expiry_days: number
 }
 
+/** 某帳號設定新密碼時**實際適用**之門檻（#623）：管理者 min_len 為 12、其餘為 8，由後端判定。 */
+export interface PasswordRules {
+  min_len: number
+  char_types: number
+}
+
 /** getMe 的共用 query key；WelcomePage / ProfilePage 共用同一快取（單一事實來源，避免字面值漂移）。 */
 export const PROFILE_ME_QUERY_KEY = ["profile", "me"] as const
 
@@ -49,6 +55,16 @@ export const profileApi = {
   },
   async getPasswordPolicy(): Promise<PasswordPolicy> {
     const { data } = await http.get<PasswordPolicy>("/password-policy")
+    return data
+  },
+  /** 登入者本人適用之門檻（#623）；密碼逾期、尚在強制變更頁時亦可取得。 */
+  async getMyPasswordRules(): Promise<PasswordRules> {
+    const { data } = await http.get<PasswordRules>("/dp/user/me/password-policy")
+    return data
+  },
+  /** 重設連結 token 對應帳號適用之門檻（#623）。token 放 body：放網址會被代理伺服器記進存取紀錄。 */
+  async getResetPasswordRules(token: string): Promise<PasswordRules> {
+    const { data } = await http.post<PasswordRules>("/reset-password/policy", { token })
     return data
   },
 }

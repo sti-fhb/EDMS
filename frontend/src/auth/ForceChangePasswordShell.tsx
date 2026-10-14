@@ -25,7 +25,7 @@ import { getFieldErrors } from "../utils/zodUtils"
 export function ForceChangePasswordShell() {
   const { logout, clearMustChangePwd } = useAuth()
   const navigate = useNavigate()
-  const { policy, hint } = usePasswordPolicy()
+  const { policy, hint } = usePasswordPolicy({ kind: "self" })
   const [oldPassword, setOldPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")

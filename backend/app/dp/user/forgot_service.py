@@ -3,7 +3,7 @@
 token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（USED_DATE）+ 時效（EXPIRES_DATE），
 同帳號重新申請作廢舊 token。防帳號列舉：申請一律成功語氣、帳號不存在不產 token / 不寄信。
 重設更新密碼 + 追加歷程 + 作廢 token + 稽核；**不解除鎖定 / 停用**（FR-07）。
-門檻值（RESET_TOKEN_TTL_MIN / MIN_LEN / CHAR_TYPES / HISTORY_COUNT）讀平台級 DP_PARAM（SRVDP001）。
+門檻值（RESET_TOKEN_TTL_MIN / MIN_LEN / ADMIN_MIN_LEN / CHAR_TYPES / HISTORY_COUNT）讀平台級 DP_PARAM（SRVDP001）。
 """
 
 from datetime import timedelta
@@ -16,6 +16,7 @@ from app.core.password_hashing import hash_password_async, is_reused_async
 from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.dp.user.password_rules import PasswordRules, general_rules, rules_for_user
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
@@ -24,8 +25,6 @@ _TOKEN_TYPE = "PWD_RESET"  # noqa: S105 — DP_PWD_RESET.TOKEN_TYPE 值，非密
 _TEMPLATE_CODE = "PWD_RESET"
 _FUNC_NAME = "DP-FORGOT"
 _DEFAULT_TTL_MIN = 30
-_DEFAULT_MIN_LEN = 8
-_DEFAULT_CHAR_TYPES = 3
 _DEFAULT_HISTORY_COUNT = 3
 _TOKEN_INVALID_MSG = "連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
 
@@ -90,6 +89,20 @@ class ResetPasswordService:
         self._params = params or ParamService()
         self._audit = audit or AuditLogService()
 
+    async def password_rules_for_token(self, db: AsyncSession, *, token: str) -> PasswordRules:
+        """重設頁適用之門檻（#623）：token 有效則依其帳號判定，否則回一般門檻。
+
+        token 無效**不在此報錯**——本方法只供渲染提示，連結失效由送出時的 `reset` 以
+        DP_PWD_005 告知，維持重設頁原有的提示時點。
+
+        Returns:
+            與 `reset` 檢核所用相同之門檻（同一支 `rules_for_user`）。
+        """
+        row = await self._repo.get_reset_token_by_hash(db, hash_token(token), _TOKEN_TYPE)
+        if row is None or row.used_date is not None or row.expires_date <= utcnow():
+            return await general_rules(db, params=self._params)
+        return await rules_for_user(db, row.user_id, params=self._params)
+
     async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> None:
         """重設密碼。
 
@@ -110,11 +123,11 @@ class ResetPasswordService:
         if user is None:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
-        # 複雜度（一般使用者）+ 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
+        # 複雜度 + 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
         # 使複雜度 / 重複失敗時不白白作廢 token（使用者可用同連結重試）。
-        min_len = await self._params.get_int_param(db, "PWD_POLICY", "MIN_LEN", _DEFAULT_MIN_LEN)
-        char_types = await self._params.get_int_param(db, "PWD_POLICY", "CHAR_TYPES", _DEFAULT_CHAR_TYPES)
-        validate_password_strength(new_password, min_length=min_len, required_char_types=char_types)
+        # 長度門檻比照變更密碼依帳號判定（#623）：原本只讀 MIN_LEN，管理者可經忘記密碼繞過 12 字元。
+        rules = await rules_for_user(db, user.user_id, params=self._params)
+        validate_password_strength(new_password, min_length=rules.min_len, required_char_types=rules.char_types)
         history_count = await self._params.get_int_param(db, "PWD_POLICY", "HISTORY_COUNT", _DEFAULT_HISTORY_COUNT)
         recent = await self._repo.recent_pwd_hashes(db, user.user_id, history_count)
         if await is_reused_async(new_password, recent):

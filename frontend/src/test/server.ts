@@ -780,6 +780,9 @@ export const handlers = [
   http.get("/api/password-policy", () =>
     HttpResponse.json({ min_len: 8, admin_min_len: 12, char_types: 3, history_count: 3, expiry_days: 90 }),
   ),
+  // 本人 / 重設 token 適用之門檻（#623）。預設一般使用者 8 字元；管理者情境由各測試覆寫為 12。
+  http.get("/api/dp/user/me/password-policy", () => HttpResponse.json({ min_len: 8, char_types: 3 })),
+  http.post("/api/reset-password/policy", () => HttpResponse.json({ min_len: 8, char_types: 3 })),
   // US4 使用者管理（預設 happy path；含啟用中 / 已鎖定 / 已停用三態供 UI 驗證）
   http.get("/api/dp/users", () =>
     HttpResponse.json({

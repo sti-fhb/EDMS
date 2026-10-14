@@ -36,21 +36,14 @@ async function fillReset(user: ReturnType<typeof userEvent.setup>, pwd = _NEW_PW
 
 describe("ResetPasswordPage", () => {
   it("密碼規則提示依 PWD_POLICY 動態（#77）：改回傳值 → 提示數字跟著變", async () => {
-    server.use(
-      http.get("/api/password-policy", () =>
-        HttpResponse.json({ min_len: 12, admin_min_len: 12, char_types: 4, history_count: 3, expiry_days: 90 }),
-      ),
-    )
+    // #623 起重設頁改讀「本 token 帳號適用之門檻」端點，不再讀公開政策
+    server.use(http.post("/api/reset-password/policy", () => HttpResponse.json({ min_len: 12, char_types: 4 })))
     renderReset("/reset-password?token=validtoken")
     expect(await screen.findByText(/至少 12 字元.*至少 4 種/)).toBeInTheDocument()
   })
 
   it("前端驗證依 PWD_POLICY 動態（#77）：policy 要求 12 字元時，舊規則合規的 8 字元密碼被 Zod 擋下、不呼叫 API", async () => {
-    server.use(
-      http.get("/api/password-policy", () =>
-        HttpResponse.json({ min_len: 12, admin_min_len: 12, char_types: 3, history_count: 3, expiry_days: 90 }),
-      ),
-    )
+    server.use(http.post("/api/reset-password/policy", () => HttpResponse.json({ min_len: 12, char_types: 3 })))
     const user = userEvent.setup()
     renderReset("/reset-password?token=validtoken")
     // 先等政策載入（提示顯示 12），確保送出時工廂用的是新門檻而非 fallback 8
@@ -60,6 +53,20 @@ describe("ResetPasswordPage", () => {
     expect(await screen.findByText("密碼至少 12 字元")).toBeInTheDocument()
     // 被前端擋下 → 不會出現成功訊息（未呼叫 API）
     expect(screen.queryByText("密碼已更新，請以新密碼登入")).not.toBeInTheDocument()
+  })
+
+  it("依信中 token 取該帳號適用門檻（#623）：管理者顯示 12 字元，送出的 token 與網址一致", async () => {
+    let sentToken: string | null = null
+    server.use(
+      http.post("/api/reset-password/policy", async ({ request }) => {
+        sentToken = ((await request.json()) as { token: string }).token
+        return HttpResponse.json({ min_len: 12, char_types: 3 })
+      }),
+    )
+    renderReset("/reset-password?token=admin-token")
+    // 公開政策端點仍回一般門檻 8：提示若出現 12，代表確實改讀 token 帳號適用的門檻
+    expect(await screen.findByText(/至少 12 字元/)).toBeInTheDocument()
+    expect(sentToken).toBe("admin-token")
   })
 
   it("有效 token + 合規新密碼 → 顯示成功、提供返回登入", async () => {

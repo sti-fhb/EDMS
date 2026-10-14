@@ -19,7 +19,7 @@ import { getFieldErrors } from "../../utils/zodUtils"
 /** 變更密碼對話框（US8）：舊 + 新 + 確認；提示依 PWD_POLICY 動態渲染；後端權威檢核複雜度 / 重複性。 */
 export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { message } = useNotification()
-  const { policy, hint } = usePasswordPolicy()
+  const { policy, hint } = usePasswordPolicy({ kind: "self" })
   const [oldPassword, setOldPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")

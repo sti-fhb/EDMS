@@ -36,7 +36,7 @@ export function ResetPasswordPage() {
   const [done, setDone] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）
-  const { policy, hint } = usePasswordPolicy()
+  const { policy, hint } = usePasswordPolicy({ kind: "reset", token })
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
