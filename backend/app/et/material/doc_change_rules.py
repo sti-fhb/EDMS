@@ -34,6 +34,12 @@ class DocChangeEvent(Enum):
     NEW_VERSION = "NEW_VERSION"
     #: 文件已廢止——教師要移除引用或換一份，否則該課程再發布時會被 `BLOCK_OBSOLETE_DOC` 擋下。
     OBSOLETED = "OBSOLETED"
+    #: 第一次看到這組 `(文件, 擁有者)`：**記下基準、不寄信**（#636）。
+    #:
+    #: 🔴 呼叫端收到此值時**必須寫入簿記**。若比照 `None` 一併略過，該組合會永遠
+    #: 停在「查無簿記」，連日後真正的改版也再不會通知——那是把一個吵雜的缺陷換成
+    #: 一個靜默的缺陷。`test_記下基準之後真的改版仍會通知` 釘住這件事。
+    BASELINE_ONLY = "BASELINE_ONLY"
 
 
 def classify_doc_change(
@@ -52,7 +58,9 @@ def classify_doc_change(
         current_status: SRVDM001 回傳之 `status`（`PUBLISHED` / `OBSOLETE`）。
 
     Returns:
-        `DocChangeEvent`，或 `None`（無變動）。
+        `DocChangeEvent`，或 `None`（無變動、不寄信也不寫簿記）。
+
+        ⚠️ `BASELINE_ONLY` 與 `None` **不可同路處理**：前者要求呼叫端寫入簿記。
     """
     now_obsolete = current_status == DOC_OBSOLETE
     was_obsolete = last_notified_status == DOC_OBSOLETE
@@ -62,9 +70,21 @@ def classify_doc_change(
     if now_obsolete:
         return None if was_obsolete else DocChangeEvent.OBSOLETED
 
-    # 查無簿記列一律視為有變動（裁示 Q1 = C：不回填）。
+    # 查無簿記列 = 這位擁有者第一次引用這份文件 ⇒ 只記基準、不寄信（#636）。
+    #
+    # 🔴 原本此處回 `NEW_VERSION`，理由是「裁示 Q1 = C 不回填，正式環境由空的 migration
+    # 從頭建起，查無簿記只會發生在引用剛被加進來時」。**前提對、結論錯**——「引用剛被
+    # 加進來」正是最不該寄「已發布新版本」的時候：那份文件一版都沒換過，是教師自己剛加的。
+    # 2026-10-14 手測實證：`DM-TRAINING-000004` 版本歷程只有一筆、從未上傳新版，教師仍收到信。
+    #
+    # 且它**不是一次性的**：簿記鍵為 `(文件, 擁有者)`，每位教師第一次引用每一份文件都會
+    # 再觸發一次，正式環境亦然。虛驚的通知會訓練教師忽略這一類信，連帶讓真正要緊的
+    # `OBSOLETED` 那封也被忽略——這正是 #231 裁定 `PENDING_OBSOLETE` 不通知時用的判準。
+    #
+    # ⚠️ 代價：記下基準到下一次排程（每日 08:00）之間，文件若真的改版，那一次會漏通知。
+    # 窗口最多一天，且教師剛剛才看過那份文件。**這是取捨，不是疏漏。**
     if last_notified_version_id is None:
-        return DocChangeEvent.NEW_VERSION
+        return DocChangeEvent.BASELINE_ONLY
 
     # 以「不相等」而非「變大」判定——這是**失敗方向**的選擇，不是防禦性程式碼：
     # 版本若因任何原因倒退，寄一封「有新版」雖不精確但教師會去看；用 `>` 判定

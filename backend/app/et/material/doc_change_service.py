@@ -16,6 +16,13 @@ A 需要一套跨模組事件登記，而本專案既有的 `module_assign_regis
 範本被管理者停用時 `queued_count` 亦為 0，故簿記同樣不前進——「沒有告訴他」就不該記成
 「已告訴他」。代價是停用期間每輪都會重算（成本極低），好處是重新啟用後收件人會收到
 反映**當前狀態**的那一封。
+
+🔴 **唯一的例外是「第一次看到這組 `(文件, 擁有者)`」**（`BASELINE_ONLY`，#636）：
+此時**不寄信、但照樣寫簿記**。那不是「寄失敗」，而是根本沒有變動可通知——教師才剛把
+文件加進課程。詳見 `doc_change_rules.classify_doc_change`。
+
+⚠️ 那一條**不可**比照 `None` 一併略過：該組合會永遠停在「查無簿記」，連日後真正的
+改版也不再通知——把一個吵雜的缺陷換成一個靜默的缺陷。
 """
 
 import logging
@@ -45,6 +52,11 @@ class DocChangeNotifyResult:
     scanned_docs: int
     notified: int
     skipped_docs: int
+    #: 本輪第一次看到、只記下基準而未寄信的 `(文件, 擁有者)` 組數（#636）。
+    #:
+    #: 與 `notified` 分開計數，排程 log 才分得出「今天真的有 N 份文件改版」與
+    #: 「今天有 N 位教師新引用了文件」——兩者混在同一個數字裡會讓 DP06 的數字騙人。
+    baselined: int = 0
 
 
 class EtDocChangeNotifyService:
@@ -64,13 +76,14 @@ class EtDocChangeNotifyService:
         """
         refs = await list_doc_references(db)
         if not refs:
-            return DocChangeNotifyResult(scanned_docs=0, notified=0, skipped_docs=0)
+            return DocChangeNotifyResult(scanned_docs=0, notified=0, skipped_docs=0, baselined=0)
 
         doc_ids = {r.doc_id for r in refs}
         state = await load_notify_state(db, doc_ids=doc_ids)
         client = get_dm_document_client()
 
         notified = 0
+        baselined = 0
         skipped = 0
         for doc_id in sorted(doc_ids):
             try:
@@ -83,7 +96,7 @@ class EtDocChangeNotifyService:
                 skipped += 1
                 continue
 
-            notified += await self._notify_owners_of(
+            doc_sent, doc_baselined = await self._notify_owners_of(
                 db,
                 doc_id=doc_id,
                 doc_name=current.doc_name,
@@ -93,8 +106,12 @@ class EtDocChangeNotifyService:
                 refs=[r for r in refs if r.doc_id == doc_id],
                 state=state,
             )
+            notified += doc_sent
+            baselined += doc_baselined
 
-        return DocChangeNotifyResult(scanned_docs=len(doc_ids), notified=notified, skipped_docs=skipped)
+        return DocChangeNotifyResult(
+            scanned_docs=len(doc_ids), notified=notified, skipped_docs=skipped, baselined=baselined
+        )
 
     async def _notify_owners_of(
         self,
@@ -107,8 +124,12 @@ class EtDocChangeNotifyService:
         current_status: str,
         refs: list[DocReferenceRow],
         state: dict[tuple[str, str], EtMaterialDocNotify],
-    ) -> int:
-        """對引用本文件的每位擁有者各判斷一次；回傳實際寄出的封數。"""
+    ) -> tuple[int, int]:
+        """對引用本文件的每位擁有者各判斷一次。
+
+        Returns:
+            `(實際寄出的封數, 只記下基準而未寄信的組數)`。
+        """
         # 🔴 **改版與廢止的課程範圍不同**（#231 裁示 Q2 = C）。
         #
         # 判準是「信的內容對那個狀態成不成立」，不是為了分類而分類：
@@ -129,6 +150,7 @@ class EtDocChangeNotifyService:
             by_owner.setdefault(ref.owner_id, []).append(ref.course_name)
 
         sent = 0
+        baselined = 0
         for owner_id, course_names in sorted(by_owner.items()):
             row = state.get((doc_id, owner_id))
             event = classify_doc_change(
@@ -138,6 +160,25 @@ class EtDocChangeNotifyService:
                 current_status=current_status,
             )
             if event is None:
+                continue
+
+            # 🔴 第一次看到這組 `(文件, 擁有者)`：**寫簿記、不寄信**（#636）。
+            #
+            # 這是「寄出才前進簿記」的唯一例外，理由不同：那條規則防的是「寄失敗卻
+            # 記成已通知」，而這裡根本沒有變動可寄——教師才剛把文件加進課程。
+            #
+            # ⛔ 不可改成 `continue`（比照 `None`）：該組合會永遠停在「查無簿記」，
+            # 連日後真正的改版也不再通知。`test_記下基準後真的改版才通知` 釘住這件事。
+            if event is DocChangeEvent.BASELINE_ONLY:
+                self._upsert_state(
+                    db,
+                    row=row,
+                    doc_id=doc_id,
+                    owner_id=owner_id,
+                    version_id=current_version_id,
+                    status=current_status,
+                )
+                baselined += 1
                 continue
 
             if event is DocChangeEvent.OBSOLETED:
@@ -166,7 +207,7 @@ class EtDocChangeNotifyService:
                 status=current_status,
             )
             sent += 1
-        return sent
+        return sent, baselined
 
     @staticmethod
     def _upsert_state(
