@@ -144,6 +144,10 @@ export function EtQuizResultPage() {
       {fromSubmit?.left_window === true && (
         <Alert severity="warning">因離開作答視窗，本次作答已自動提交。</Alert>
       )}
+      {/* #640：上次作答沒交出去（關分頁 / 當機 / 斷網），再按「開始作答」時被結算 */}
+      {fromSubmit?.auto_settled === true && (
+        <Alert severity="warning">您上次的作答未提交，已以暫存的作答自動提交。</Alert>
+      )}
 
       {/*
         ET-MSG-ET07-005（#280 裁示 Q3 = B）。原 spec 要在**作答中**告知，但作答頁刻意

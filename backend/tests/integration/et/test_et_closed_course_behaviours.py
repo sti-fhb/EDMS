@@ -514,26 +514,28 @@ class TestAttemptBlocked:
         assert submitted.status_code == 200, submitted.text
         assert submitted.json()["score"] is not None
 
-    async def test_關閉後重新進入仍取回未完成的作答(self, client, db, source: str) -> None:
-        """AC 3 的**續作路徑**——與「提交已開好的 attempt」是不同的一條。
+    async def test_關閉後重新進入會結算未完成的作答而非擋下(self, client, db, source: str) -> None:
+        """AC 3 經 `start()` 的那一條路——與「提交已開好的 attempt」是不同的一條。
 
         ⚠️ 這條在 #313 之前沒有任何測試涵蓋。既有的
         `test_關閉當下作答中的attempt仍可提交計分` 走 `PUT answers` / `POST submit`
         （經 `_require_own_attempt`），**完全不經過 `start()`**；把 `start()` 的關閉守門
-        往上挪到續作分支之前，那條測試照樣全綠，而學員一離開頁面就再也回不到自己寫到
-        一半的考卷。
+        往上挪到殘留作答的分支之前，那條測試照樣全綠，而學員離開後回來只會看到
+        「課程關閉中」、寫了一半的考卷永遠停在作答中。
 
-        `spec_us6` 場景 27 保的是「已在作答者可完成」，離開再回來仍屬同一件事。
+        #640 起殘留的作答於再次進入時**結算**（原為續作，#279 裁示 Q1 = A）。`spec_us6`
+        場景 27 保的「已在作答者可完成並計分」在此以結算達成——關閉不可擋住結算。
         """
         ctx, attempt = await self._started(client, db, f"at8{source[:3]}")
         await _apply_close(client, db, ctx, source)
 
-        # 關閉後重新呼叫「開始作答」——應回既有那一筆（resumed），而非 409
+        # 關閉後重新呼叫「開始作答」——應結算既有那一筆，而非 409 ET_ATTEMPT_006
         got = await client.post(f"/api/et/quizzes/{ctx['quiz_id']}/attempts", headers=_bearer(ctx["student"]))
 
-        assert got.status_code == 201, got.text
-        assert got.json()["attempt_id"] == attempt["attempt_id"], "應取回同一筆，不是開新的"
-        assert got.json()["resumed"] is True
+        assert got.status_code == 200, got.text
+        assert got.json()["attempt_id"] == attempt["attempt_id"], "應結算同一筆，不是開新的"
+        assert got.json()["status"] in {"SUBMITTED", "TIMEOUT"}
+        assert got.json()["course_closed"] is True
 
     async def test_關閉後仍可查看已提交的成績(self, client, db, source: str) -> None:
         """唯讀回看涵蓋成績——關閉只停寫入（#255 裁示 Q2=A）。"""

@@ -15,7 +15,6 @@ const ATTEMPT_STATE = {
   pass_score: 80,
   time_limit_min: 10,
   remaining_sec: 600,
-  resumed: false,
   questions: [
     {
       question_id: 901,

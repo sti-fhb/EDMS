@@ -11,7 +11,10 @@ import { server } from "../../test/server"
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => navigate, useParams: () => ({ attemptId: "800" }) }
+  // `useBlocker` 需要 data router，本檔用的是一般 router——站內離開的攔截在
+  // `quizHistoryFlow.test.tsx` 以真的 data router 驗（#640）
+  const useBlocker = () => ({ state: "unblocked", proceed: vi.fn(), reset: vi.fn() })
+  return { ...actual, useNavigate: () => navigate, useParams: () => ({ attemptId: "800" }), useBlocker }
 })
 
 /** jsdom 的 `document.hidden` 是唯讀 getter，只能覆寫屬性描述子。 */
@@ -43,7 +46,6 @@ function attemptState({
     pass_score: 80,
     time_limit_min: 10,
     remaining_sec: remainingSec,
-    resumed: false,
     questions: [
       {
         question_id: 901,
@@ -218,7 +220,6 @@ describe("ET07 答題頁", () => {
           pass_score: 80,
           time_limit_min: null,
           remaining_sec: null,
-          resumed: false,
           questions: [
             {
               question_id: 901,
@@ -236,37 +237,6 @@ describe("ET07 答題頁", () => {
     await screen.findByText("題目")
 
     expect(screen.queryByLabelText("剩餘作答時間")).not.toBeInTheDocument()
-  })
-
-  it("續作時提示已回到未完成的作答", async () => {
-    server.use(
-      http.get("/api/et/attempts/:attemptId", () =>
-        HttpResponse.json({
-          attempt_id: 800,
-          quiz_id: 700,
-          quiz_name: "測驗",
-          attempt_no: 2,
-          status: "IN_PROGRESS",
-          pass_score: 80,
-          time_limit_min: 10,
-          remaining_sec: 300,
-          resumed: true,
-          questions: [
-            {
-              question_id: 901,
-              question_type: "SINGLE",
-              stem: "題目",
-              points: 100,
-              options: [{ option_id: 9011, text: "A" }],
-              selected_options: [],
-            },
-          ],
-        }),
-      ),
-    )
-    renderWithProviders(<EtQuizAnswerPage />)
-
-    expect(await screen.findByText(/已回到您未完成的作答/)).toBeInTheDocument()
   })
 
   describe("離開作答視窗自動提交", () => {
@@ -327,7 +297,6 @@ describe("ET07 答題頁", () => {
             pass_score: 80,
             time_limit_min: 10,
             remaining_sec: 0,
-            resumed: false,
             questions: [],
           }),
         ),
@@ -407,7 +376,7 @@ describe("ET07 答題頁", () => {
       await waitFor(() => expect(saves).toEqual([{ questionId: 901, selected: [9011] }]))
     })
 
-    it("離開後回來「繼續作答」：顯示伺服器上的已存答案，切題不會把它覆蓋成空白", async () => {
+    it("離開後再次進入作答頁：顯示伺服器上的已存答案，切題不會把它覆蓋成空白", async () => {
       // 同一個 QueryClient 模擬「離開作答頁、5 分鐘內再回來」——快取仍在
       const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const first = renderWithProviders(<EtQuizAnswerPage />, undefined, undefined, queryClient)

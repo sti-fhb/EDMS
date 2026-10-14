@@ -26,7 +26,7 @@ router-level 掛 `get_et_context`（任一 ET 角色）；真正的授權在 ser
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -113,17 +113,23 @@ async def attempt_history(
     return await _service.history(db, quiz_id, user_id=ctx.user_id)
 
 
-@router.post("/quizzes/{quiz_id}/attempts", response_model=AttemptState, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/quizzes/{quiz_id}/attempts",
+    response_model=AttemptState | AttemptResult,
+    status_code=status.HTTP_201_CREATED,
+)
 async def start_attempt(
     quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    response: Response,
     operator: OperatorInfo = Depends(get_operator),
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
-) -> AttemptState:
-    """開始作答：建立 attempt、凍結快照、洗牌（AC 3 / AC 4）。
+) -> AttemptState | AttemptResult:
+    """開始作答：建立 attempt、凍結快照、洗牌（AC 3 / AC 4），回 201 + `AttemptState`。
 
-    **已有未完成的作答時回既有那一筆**（`resumed=true`），不建新的、不吃次數
-    （#279 SA 裁示 Q1 = A）。
+    **已有未完成的作答時以已暫存的作答結算那一筆**，回 **200 + `AttemptResult`**（成績），
+    不建新的（#640；原為續作，#279 SA 裁示 Q1 = A）。前端以 `status` 是否為
+    `IN_PROGRESS` 分流：是 → 進作答頁；否 → 帶著成績進結果頁。
 
     ⚠️ 同時注入 `operator` 與 `ctx`：前者填稽核欄位、後者帶 ET 角色。角色在此**不是
     用來放行**而是用來**拒絕得更精確**——沒有它，非擁有者教師會落回「查無此測驗」，
@@ -132,9 +138,14 @@ async def start_attempt(
     Raises:
         AppError: 404 `ET_ATTEMPT_001` 查無 / 無權 / 項目尚未解鎖；
             409 `ET_ATTEMPT_002` 重考次數已用完；409 `ET_ATTEMPT_006` 課程已關閉；
-            409 `ET_ATTEMPT_008` 預覽模式唯讀（#486）。
+            409 `ET_ATTEMPT_008` 預覽模式唯讀（#486）；409 `ET_ATTEMPT_003` 結算殘留作答時
+            恰好已被其他請求或 SCHET002 結清（#640）。
     """
-    return await _service.start(db, quiz_id, operator=operator, roles=ctx.roles)
+    result = await _service.start(db, quiz_id, operator=operator, roles=ctx.roles)
+    if isinstance(result, AttemptResult):
+        # 結算既有的那一筆，沒有建立新資源——不是 201
+        response.status_code = status.HTTP_200_OK
+    return result
 
 
 @router.get("/attempts/{attempt_id}", response_model=AttemptState)

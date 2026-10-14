@@ -12,9 +12,11 @@ import { ThemeProvider } from "@mui/material/styles"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { HttpResponse, http } from "msw"
 import { RouterProvider, createMemoryRouter, useLocation } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 
+import { server } from "../../test/server"
 import { QuizIntroPanel } from "./QuizIntroPanel"
 import { useGoBack } from "../../hooks/useGoBack"
 import { EtQuizAnswerPage } from "./QuizAnswerPage"
@@ -151,5 +153,112 @@ describe("測驗流程只佔一個歷程格（#549）", () => {
 
     await router.navigate(-1)
     expect(await screen.findByText("我的課程頁")).toBeInTheDocument()
+  })
+})
+
+/** 交卷回應（形狀同 `AttemptResult`）；本段只關心有沒有交、交了之後去哪。 */
+const ATTEMPT_RESULT_STUB = {
+  attempt_id: 800,
+  quiz_id: 700,
+  course_id: 7,
+  attempt_no: 1,
+  status: "SUBMITTED",
+  score: "100.00",
+  points_total: 100,
+  pass_score: 80,
+  is_pass: true,
+  submitted_at: "2026-10-14T02:00:00Z",
+  remaining_attempts: 2,
+  course_closed: false,
+  questions: [],
+}
+
+describe("作答中由站內離開：確認後交卷（#640）", () => {
+  /** 記下送出的交卷請求——斷言「取消不交卷 / 確定才交卷」。 */
+  function recordSubmits() {
+    const submitted: number[] = []
+    server.use(
+      http.post("/api/et/attempts/:attemptId/submit", ({ params }) => {
+        submitted.push(Number(params.attemptId))
+        return HttpResponse.json({ ...ATTEMPT_RESULT_STUB, attempt_id: Number(params.attemptId) })
+      }),
+    )
+    return submitted
+  }
+
+  async function intoAnswerPage() {
+    const user = userEvent.setup()
+    const router = renderFlow(["/et/my-courses", "/et/courses/7/learn"])
+    await user.click(await screen.findByRole("button", { name: "開始作答" }))
+    await screen.findByText("採血前應先確認什麼？")
+    return { user, router }
+  }
+
+  it("站內離開跳確認；取消留在作答頁、不交卷", async () => {
+    const submitted = recordSubmits()
+    const { user, router } = await intoAnswerPage()
+
+    // 等同點左側選單：站內導覽到別頁
+    void router.navigate("/et/my-courses")
+
+    expect(await screen.findByText(/離開將立即提交本次作答/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "繼續作答" }))
+
+    await waitFor(() => expect(screen.queryByText(/離開將立即提交本次作答/)).not.toBeInTheDocument())
+    expect(router.state.location.pathname).toBe("/et/attempts/800")
+    expect(screen.getByText("採血前應先確認什麼？")).toBeInTheDocument()
+    expect(submitted).toEqual([])
+  })
+
+  it("站內離開按確定 → 交卷完成後才前往原本要去的頁面", async () => {
+    const submitted = recordSubmits()
+    const { user, router } = await intoAnswerPage()
+
+    void router.navigate("/et/my-courses")
+    await user.click(await screen.findByRole("button", { name: "提交並離開" }))
+
+    expect(await screen.findByText("我的課程頁")).toBeInTheDocument()
+    expect(submitted).toEqual([800])
+    expect(router.state.location.pathname).toBe("/et/my-courses")
+  })
+
+  it("站內離開按確定但交卷失敗 → 留在作答頁、看得到錯誤，不放行", async () => {
+    server.use(
+      http.post("/api/et/attempts/:attemptId/submit", () =>
+        HttpResponse.json({ error_code: "COMMON_500", error_message: "交卷失敗測試" }, { status: 500 }),
+      ),
+    )
+    const { user, router } = await intoAnswerPage()
+
+    void router.navigate("/et/my-courses")
+    await user.click(await screen.findByRole("button", { name: "提交並離開" }))
+
+    expect(await screen.findByText(/伺服器處理失敗|交卷失敗測試/)).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/et/attempts/800")
+    expect(screen.queryByText("我的課程頁")).not.toBeInTheDocument()
+  })
+
+  it("確認視窗開著時觸發自動交卷（切換視窗）→ 進結果頁，確認視窗不殘留（code review HIGH）", async () => {
+    const submitted = recordSubmits()
+    const { router } = await intoAnswerPage()
+
+    void router.navigate("/et/my-courses")
+    expect(await screen.findByText(/離開將立即提交本次作答/)).toBeInTheDocument()
+    window.dispatchEvent(new Event("blur"))
+
+    expect(await screen.findByText("測驗完成")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/et/attempts/800/result")
+    expect(screen.queryByText(/離開將立即提交本次作答/)).not.toBeInTheDocument()
+    expect(submitted).toEqual([800])
+  })
+
+  it("自己按提交進結果頁不會被確認視窗攔住", async () => {
+    const { user, router } = await intoAnswerPage()
+
+    await user.click(screen.getByRole("button", { name: "提交" }))
+
+    expect(await screen.findByText("測驗完成")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/et/attempts/800/result")
+    expect(screen.queryByText(/離開將立即提交本次作答/)).not.toBeInTheDocument()
   })
 })

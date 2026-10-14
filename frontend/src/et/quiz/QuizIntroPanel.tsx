@@ -20,6 +20,8 @@ import { useNavigate } from "react-router-dom"
 import { usePinQuizInUrl } from "./usePinQuizInUrl"
 
 import { AttemptHistory } from "./AttemptHistory"
+import { isSettled } from "./attemptSchemas"
+import type { ResultNavState } from "./attemptSchemas"
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -53,9 +55,9 @@ function InfoTile({ value, unit, label }: { value: string; unit?: string; label:
  * 按了才跳到真正的資訊頁——多一次跳轉、多一個畫面，而那個畫面的內容本來就該直接出現
  * 在點下去的地方。影片與文件項目都是就地渲染，測驗沒有理由是例外。
  *
- * 「開始作答」實際呼叫的是「開始或繼續」——後端在有未完成 attempt 時回既有那一筆
- *（SA 裁示 Q1 = A）。前端只依 `in_progress_attempt_id` 換按鈕文案，**不自行判斷**該建新
- * 的還是續作：那個判定在後端，兩邊各判一次遲早會分岔。
+ * 「開始作答」在有未完成 attempt 時，後端會**以已暫存的作答結算那一筆**並回成績（#640；
+ * 原為續作，SA 裁示 Q1 = A）——依回應分流：作答狀態進作答頁、成績進結果頁。前端**不自行
+ * 判斷**該建新的還是結算：那個判定在後端，兩邊各判一次遲早會分岔。
  */
 export function QuizIntroPanel({ quizId }: { quizId: number }) {
   const navigate = useNavigate()
@@ -74,9 +76,16 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
     mutationFn: () => attemptApi.start(quizId),
     // #549：先把學習頁網址釘成帶 `?quiz=`、等它完成再進作答頁——結果頁會退回這一筆
     // （見 `usePinQuizInUrl`，含 `await` 為何保留）
-    onSuccess: async (attempt) => {
+    onSuccess: async (res) => {
       await pinQuizInUrl()
-      await navigate(`/et/attempts/${attempt.attempt_id}`)
+      if (isSettled(res)) {
+        // 殘留的作答被結算（#640）：帶著成績進結果頁，結果頁據 `auto_settled` 說明原因——
+        // 否則學員看到的是一個自己沒按過提交的成績頁
+        const state: ResultNavState = { ...res, auto_settled: true }
+        await navigate(`/et/attempts/${res.attempt_id}/result`, { state })
+        return
+      }
+      await navigate(`/et/attempts/${res.attempt_id}`)
     },
     onError: (err) => message.error(toApiError(err).errorMessage),
   })
@@ -95,7 +104,7 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
     return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
   }
 
-  const resuming = data.in_progress_attempt_id !== null
+  const hasLeftover = data.in_progress_attempt_id !== null
   /*
     ⚠️ 預覽與學員共用上半部（名稱、說明、三格考試規則），**下半部完全分流**。
 
@@ -185,6 +194,16 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
           <Alert severity="info">重考次數已用完，請聯繫教師重置</Alert>
         ))}
 
+      {/*
+        殘留的作答中 attempt（自動交卷沒送出去：關分頁 / 當機 / 斷網）不再續作（#640）——
+        按下去會先結算它。**事前講清楚**：不講的話學員按「開始作答」卻跳到一個成績頁。
+      */}
+      {hasLeftover && (
+        <Alert severity="info">
+          您上次的作答尚未提交。按「開始作答」將以已暫存的作答提交，並顯示該次成績。
+        </Alert>
+      )}
+
       <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
         <Button
           variant="contained"
@@ -193,7 +212,7 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
           disabled={!data.can_start || start.isPending}
           onClick={() => start.mutate()}
         >
-          {resuming ? "繼續作答" : "開始作答"}
+          開始作答
         </Button>
       </Stack>
 
