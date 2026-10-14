@@ -151,3 +151,81 @@ class EtItem(BaseModel):
         "QUIZ_ID", BigInteger, ForeignKey("ET_QUIZ.QUIZ_ID", name="FK_ET_ITEM_QUIZ"), nullable=True
     )
     version: Mapped[int] = mapped_column("VERSION", Integer, nullable=False, default=0)
+
+
+class EtCourseContentStage(BaseModel):
+    """已發布課程的**編輯暫存區**（ET_COURSE_CONTENT_STAGE，#631）。
+
+    ## 這張表承載的是「即將生效的內容」
+
+    已發布課程的內容編輯原本即時生效，學員會看到教師編到一半的東西（0 題問卷被填答後
+    永久凍結、0 題測驗讓項目永遠完成不了、改配分後總分不再是 100）。#631 改為：編輯先
+    進本表，按「更新」跑完整發布檢核、通過才整批套用到活表。
+
+    🔴 **活表（`ET_CHAPTER` / `ET_ITEM` / … 共 11 張）始終是「已生效版本」。** 學員端
+    約 308 處讀取與 7 條硬外鍵因此**一行都不用改**——這是本設計相對於「學員端改讀快照」
+    的全部價值。⛔ 任何人想把學員端改成讀本表前，請先讀 #631 的規劃留言。
+
+    ## 存的是完整的目標內容樹，不是差異
+
+    教師第一次編輯時整棵複製進來；之後只動本表。編輯端讀取因此是**直接讀本表**，不需要
+    把差異疊加回活表——疊加邏輯會散落在 12 個讀取端點，漏一處的症狀是教師看不到自己
+    剛做的編輯。
+
+    套用時以 `SOURCE_ID` 對帳：有值 ⇒ 更新該活表列；`NULL` ⇒ 新增；活表有而本表沒有
+    ⇒ 軟刪。
+
+    ## `PARENT_STAGE_ID` 自參照
+
+    巢狀新增（新章節 → 新項目 → 新測驗 → 新題目 → 新選項，5 層）在套用前都沒有活表
+    id。自參照讓暫存列**用自己的 PK 互相指**，不需要暫時鍵與事後映射。
+
+    ⚠️ `ET_MATERIAL` / `ET_QUIZ` 是被 `ET_ITEM.MATERIAL_ID` / `QUIZ_ID` **反向**參照的，
+    所以它們的 `PARENT_STAGE_ID` 指向項目，而套用順序必須先建它們、再建項目
+    （見 `stage_entities.APPLY_ORDER`）。
+
+    ## `PAYLOAD` 用 TEXT 存 JSON 字串，不用 JSONB
+
+    比照 `DP_AUDIT_LOG.BEFORE_VALUE`：專案型別限用集合不含 JSONB（`docs/specs/dp/research.md`
+    §6，DM 亦同此裁定）。本表也不需要 JSON 條件查詢——一律以 `COURSE_ID` 整棵載入後
+    在 Python 重建，TEXT 無效能損失。
+    """
+
+    __tablename__ = "ET_COURSE_CONTENT_STAGE"
+    __table_args__ = (
+        PrimaryKeyConstraint("STAGE_ID", name="PK_ET_COURSE_CONTENT_STAGE"),
+        # 部分唯一索引：一個活表列在同一課程的暫存區只能有一份對應。全表唯一會讓
+        # 「清空暫存 → 再次編輯」永久失敗（已軟刪的列仍佔住鍵），同 ET_MATERIAL_DOC。
+        Index(
+            "UX_ET_COURSE_CONTENT_STAGE_SOURCE",
+            "COURSE_ID",
+            "ENTITY_TYPE",
+            "SOURCE_ID",
+            unique=True,
+            postgresql_where=text('"DELETED" = 0 AND "SOURCE_ID" IS NOT NULL'),
+        ),
+        # 載入一律是「某課程的整棵樹」，這是唯一的查詢形狀。
+        Index("IX_ET_COURSE_CONTENT_STAGE_COURSE", "COURSE_ID", "DELETED"),
+    )
+
+    stage_id: Mapped[int] = mapped_column("STAGE_ID", BigInteger, Identity(), nullable=False)
+    course_id: Mapped[int] = mapped_column(
+        "COURSE_ID",
+        BigInteger,
+        ForeignKey("ET_COURSE.COURSE_ID", name="FK_ET_COURSE_CONTENT_STAGE_COURSE"),
+        nullable=False,
+    )
+    #: `stage_rules.ENTITY_*` 之一。
+    entity_type: Mapped[str] = mapped_column("ENTITY_TYPE", String(20), nullable=False)
+    #: 對應的活表 PK；`NULL` ＝ 新增的、活表還沒有。⛔ **不設 DB 外鍵**——它指向 11 張
+    #: 不同的表，型別由 `ENTITY_TYPE` 決定。
+    source_id: Mapped[Optional[int]] = mapped_column("SOURCE_ID", BigInteger, nullable=True)
+    parent_stage_id: Mapped[Optional[int]] = mapped_column(
+        "PARENT_STAGE_ID",
+        BigInteger,
+        ForeignKey("ET_COURSE_CONTENT_STAGE.STAGE_ID", name="FK_ET_COURSE_CONTENT_STAGE_PARENT"),
+        nullable=True,
+    )
+    sort_order: Mapped[int] = mapped_column("SORT_ORDER", Integer, nullable=False, default=0)
+    #: 該實體的欄位值，JSON 字串（非 JSONB，見 class docstring）。
+    payload: Mapped[str] = mapped_column("PAYLOAD", Text, nullable=False)

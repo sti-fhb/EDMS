@@ -26,7 +26,12 @@ from app.dp.users.models import DpUser  # noqa: F401
 # #362 移除 ET_INVITATION（邀請即加入，無待加入中間狀態）→ 28 表）
 from app.et.approval.models import EtApproval  # noqa: F401
 from app.et.catalog.models import EtCourseTag, EtTag, EtUserTag  # noqa: F401
-from app.et.course.models import EtChapter, EtCourse, EtItem  # noqa: F401
+from app.et.course.models import (  # noqa: F401
+    EtChapter,
+    EtCourse,
+    EtCourseContentStage,
+    EtItem,
+)
 from app.et.material.models import (  # noqa: F401
     EtMaterial,
     EtMaterialDoc,

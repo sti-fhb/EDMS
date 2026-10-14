@@ -223,9 +223,7 @@ class TestSurvey:
         assert snap.survey_question_count is None
 
     def test_有問卷但零題時為_0(self) -> None:
-        nodes = _chapter_with_material(1, 11, 111) + [
-            _node(5, ENTITY_SURVEY, survey_name="課後問卷", is_active=True)
-        ]
+        nodes = _chapter_with_material(1, 11, 111) + [_node(5, ENTITY_SURVEY, survey_name="課後問卷", is_active=True)]
 
         snap = _snapshot(nodes)
 
