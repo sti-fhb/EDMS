@@ -130,7 +130,7 @@
 - [ ] T042 [US6] 實作核准並發布 / 廢止：**單一交易**完成版本切換（新版 PUBLISHED、舊版 SUPERSEDED、更新 CURRENT_VERSION_ID）/ 廢止下架、寫 `DM_CHANGE_LOG`、通知撰寫者，對應 FR-003/005、research §6
 - [ ] T042a [US6] 實作文件發布通知：核准並發布（新增首版 / 新版本，廢止不含）時，於**發布當下**組出收件名單＝**撰寫者 + 可見性判定（T020a）之相符閱覽者**（掛「全體」→全部；不排除兼編輯/審核者），以單一 `DOC_PUBLISH`（`DP_NOTIFY_TEMPLATE` MODULE=DM）呼叫平台唯一發信服務（傳 `template_code` + 收件名單快照），經平台 outbox `DP_EMAIL_LOG` 背景寄送，對應 FR-008、research §9b
 - [ ] T043 [US6] 實作退回：必填退回原因、回對應狀態（草稿 / 已發布）、通知撰寫者，對應 FR-004
-- [ ] T044 [US6] 實作自動催辦排程 + 「已完成」頁籤：每日掃 DM_REVIEW 停留 ≥ 門檻發站內訊息並標紅、已完成項目唯讀，對應 FR-006/007、research §9
+- [ ] T044 [US6] 實作自動催辦排程 + 「已完成」頁籤：每日掃 DM_REVIEW 停留 ≥ 門檻寄 `AUTO_REMIND` **Email**（#627；原寫「發站內訊息」）並標紅、已完成項目唯讀，對應 FR-006/007、research §9
 
 ---
 

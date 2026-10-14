@@ -33,6 +33,24 @@ async def test_dm_template_channels(db):
     - 非當事人 → EMAIL。`DOC_PUBLISH` 的收件人含可見對象相符的**閱覽者**，而閱覽者沒有
       `DM_REVIEW` 列、動態對他們是空的，DM01 文件庫也無未讀標示——改 MSG 會整則消失。
       `KPI_WEEKLY`（管理者週報）/ `UNREAD_REMIND`（催閱）同理，是推給人看而非當事人回來看。
+
+    ## ⚠️ `AUTO_REMIND` 是上述分界的**明確例外**（#627，EMAIL 而非 MSG）
+
+    它的收件人是當事人（審核者），照字面應歸 MSG。不歸的理由在於上述分界的**立論前提**
+    ——「當事人在畫面上看得到」——對它剛好相反：
+
+    | | 那 5 支（`DOC_SUBMIT` / `DOC_REJECT` / `OBS_*`）| `AUTO_REMIND` |
+    |---|---|---|
+    | 觸發時機 | 事件**剛發生** | 事件發生後**已逾門檻天數沒有動作** |
+    | 隱含前提 | 收件人接下來本來就會進畫面處理 | 收件人**已經很久沒進畫面** |
+
+    那 5 支是「你等一下會來看，所以不必寄」；催辦是「你已經沒在看了」。同一條原則套到
+    催辦上會自我否定——而 `spec_us6` FR-006 是 MUST「每日自動催辦指定審核者」。
+
+    ⛔ **請勿因為「它也是當事人」而把它移回 MSG**：CHANNEL=MSG 期間（2026-08-06～2026-10-14）
+    該排程每天執行且三個出口全無產出，而 `count` 無條件遞增使 log 每天照報成功（#627）。
+
+    `SUBMIT_WITHDRAWN` 維持 MSG，它屬「事件剛發生」那一類，前提成立。
     """
     rows = {
         r.template_code: r
@@ -40,7 +58,6 @@ async def test_dm_template_channels(db):
     }
     # 站內（不寄 Email）——五支流程通知於 #554 由 BOTH 改入此列
     for code in (
-        "AUTO_REMIND",
         "SUBMIT_WITHDRAWN",
         "DOC_SUBMIT",
         "DOC_REJECT",
@@ -50,7 +67,7 @@ async def test_dm_template_channels(db):
     ):
         assert rows[code].channel == "MSG", code
     # 仍寄 Email
-    for code in ("DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND"):
+    for code in ("DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND", "AUTO_REMIND"):
         assert rows[code].channel == "EMAIL", code
     # 母體對帳：上面兩組必須窮盡 DM 的全部範本，否則新增一支而沒分類不會有人發現
     assert set(rows) == {

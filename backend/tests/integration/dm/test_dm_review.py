@@ -28,11 +28,27 @@ from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
+from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
 from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
 from app.services import MAX_RECIPIENTS
 
 pytestmark = pytest.mark.integration
+
+
+async def _auto_remind_rows(db) -> int:
+    """已排入 outbox 的催辦信數。
+
+    ⚠️ 篩 `STATUS='PENDING'`：worker 跑過後狀態會變，且渲染失敗會留下 `FAILED` 列——
+    不篩就會把「寄失敗的空信」也算成成功，正是本 issue 要防的那種假陽性。
+    """
+    return (
+        await db.scalar(
+            select(func.count())
+            .select_from(DpEmailLog)
+            .where(DpEmailLog.template_code == "AUTO_REMIND", DpEmailLog.status == "PENDING")
+        )
+    ) or 0
 
 _svc = ReviewCenterService()
 _PDF = "application/pdf"
@@ -572,7 +588,51 @@ async def test_scan_overdue_reminds(db):
         db, "DM-SOP-000360", v.version_id, review_type="NEW", reviewer="rev1", submit=utcnow() - timedelta(days=10)
     )
     count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    # ⭐ 斷言**可觀察的產出**而非回傳值（#627）：`count` 是本函式自己算的，無論有沒有真的寄出
+    # 都會遞增——在 CHANNEL=MSG 的那段期間（2026-08-06～），這條測試全綠而催辦其實什麼都沒產生。
+    # outbox 列才是「信真的排出去了」的證據。
+    rows = (
+        (
+            await db.execute(
+                select(DpEmailLog).where(
+                    DpEmailLog.template_code == "AUTO_REMIND", DpEmailLog.status == "PENDING"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1, "逾期之 PENDING 應排入一封催辦信"
+    assert rows[0].recipient == "rev1@e.com"
+    assert "10" in rows[0].subject or "10" in rows[0].body, "停留天數應渲染進信件（{days} 佔位）"
     assert count == 1
+
+
+async def test_範本停用時不排信且不計入催辦筆數(db):
+    """範本停用 → 沒有產出，`count` 也不得計入（#627 AC：log 的數字必須與實際產出一致）。
+
+    這條守的是 `count += 1` 無條件遞增那個缺陷的**一般形式**：不只 CHANNEL 不對會沒產出，
+    範本停用、渲染失敗同樣沒產出，而三者都曾被算成「已催辦 N 筆」。
+    """
+    await _seed_user(db, "ed_off", "撰寫")
+    await _seed_user(db, "rev_off", "審核", email="rev_off@e.com")
+    await _doc(db, "DM-SOP-000361", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000361", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000361", v.version_id, review_type="NEW", reviewer="rev_off", submit=utcnow() - timedelta(days=10)
+    )
+    await db.execute(
+        update(DpNotifyTemplate)
+        .where(DpNotifyTemplate.module == "DM", DpNotifyTemplate.template_code == "AUTO_REMIND")
+        .values(is_enabled=False)
+    )
+    await db.flush()
+
+    count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0, "沒有產出就不得計入催辦筆數"
+    assert await _auto_remind_rows(db) == 0
 
 
 async def test_停用的審核者不再收到催辦(db, caplog):
@@ -610,6 +670,9 @@ async def test_停用的審核者不再收到催辦(db, caplog):
         count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0, "停用的審核者不該再收到催辦"
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     # ⭐ 只停止寄信會把問題從吵鬧變成安靜——案件仍卡著、仍無人能處理，只是沒人被打擾。
     # 這條釘住「跳過要留下痕跡」，否則積壓變成隱形的。
     assert "rev395a" in caplog.text and "審核者帳號已停用" in caplog.text, (
@@ -640,6 +703,9 @@ async def test_已刪除的審核者不再收到催辦(db):
     )
 
     assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 0
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
 
 
 async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, caplog):
@@ -670,6 +736,9 @@ async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, capl
         count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     assert "查無審核者帳號" in caplog.text, "孤兒指派要有自己的分類，否則被誤標成已停用"
     assert "審核者帳號已停用" not in caplog.text
 
@@ -696,6 +765,9 @@ async def test_審核者_email_為空字串時跳過且留下_log(db, caplog):
         count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     assert "查無審核者 Email" in caplog.text
     assert "審核者帳號已停用" not in caplog.text, "帳號是 ACTIVE，不該被歸成停用"
 
