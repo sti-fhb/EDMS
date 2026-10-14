@@ -53,19 +53,21 @@ from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
 #: 狀態轉換與發布檢核之使用者維度上限（每分鐘）。
 #:
-#: 正常操作：發布一門課是 1 次 publish-check + 1 次 publish；關閉 / 再開課各 1 次。
-#: 一位教師一天按不到 5 次，20 遠高於任何真實使用。
+#: 正常操作：發布一門課是 1 次 publish-check + 1 次 publish；關閉 / 再開課各 1 次；
+#: 已發布課程的內容「更新」（#631）一次編輯一次。一位教師一天按不到 10 次，20 仍遠
+#: 高於任何真實使用。
 #:
 #: ## 為何**不**掛在 router 層
 #:
 #: 本 router 同時承載課程 / 章節 / 項目的全部編輯端點。掛在 router 層會把「教師連續
 #: 拖拉重排章節」也算進同一個桶——那是高頻的正常操作，會被誤擋。
 #:
-#: ## 為何四支端點**共用同一個分桶**
+#: ## 為何五支端點**共用同一個分桶**
 #:
-#: 貴的是 `_evaluate`（`snapshot` 的 7 個彙總查詢 + 逐份 DM 文件循序查詢），而
-#: `publish-check` / `publish` / `reopen` 三支都會跑它。只擋 `reopen` 的話，放大路徑
-#: 換一支端點就照樣開著。`close` 一併納入是因為它與 `reopen` 構成迴圈：每次成功都寫
+#: 貴的是**檢核**（彙總查詢 + 逐份 DM 文件循序查詢），而 `publish-check` / `publish` /
+#: `reopen` / `content/apply` 四支都會跑它（前三支走活表的 `snapshot`，`content/apply`
+#: 走暫存樹，但同樣要逐份問 DM 廢止狀態）。只擋其中一支的話，放大路徑換一支端點
+#: 就照樣開著。`close` 一併納入是因為它與 `reopen` 構成迴圈：每次成功都寫
 #: 一列 append-only 的 `DP_AUDIT_LOG`，而 `AuditLogService` 會取交易層級的
 #: `pg_advisory_xact_lock`——無上限的 close ⇄ reopen 迴圈會序列化**全平台**的稽核寫入。
 #:
