@@ -125,9 +125,19 @@ async def test_達上限且列逾期後_管理者代建成功(client, db) -> Non
     （`create_user` 對逾期 `SELF_REGISTER` 列的放行，#226），不是後台授權閘。
     """
     email = "cap-admin@edms.local"
-    for _ in range(_CAP + 2):
+    for _ in range(_CAP):
+        await _register_later(client, email)
+    frozen = await _expires(db, email)
+
+    for _ in range(2):
         await _register_later(client, email)
 
+    # 🔴 這條斷言是本測試與修法之間唯一的連結。少了它，下面手動把列改成逾期會讓測試
+    # **拿掉修法照樣通過**——那時驗的只剩 #226 既有的「逾期列可被代建覆蓋」。
+    # （2026-10-14 變異檢查 M4 實測：移除 over_cap 判定後本測試仍綠，故補入。）
+    assert await _expires(db, email) == frozen, "額度用罄後效期仍被推遲 ⇒ 該列永不逾期，代建仍會 409"
+
+    # 模擬時間走過 TTL。**能不能走到這一刻**正是修法的產出：修法前效期每 601 秒被推遲一次。
     await db.execute(
         update(DpPendingRegistration)
         .where(DpPendingRegistration.email == email)
@@ -175,3 +185,51 @@ async def test_達上限的回應與全新_email_完全相同(client, db) -> Non
 
     assert over.status_code == fresh.status_code
     assert over.json() == fresh.json(), f"額度用罄 {over.json()} 與全新 {fresh.json()} 必須逐欄位相同"
+
+
+async def test_靜默路徑不消耗受害者額度(client, db) -> None:
+    """探測行為不得吃掉受害者的額度（2026-10-14 變異檢查 M6 補入）。
+
+    額度以 Email 為 key、分不出誰在送，所以「哪些請求計入」是唯一能保護受害者的地方：
+    只有**真的重建列並寄信**那次才計入。靜默路徑（受邀者 / 他人冷卻中）既沒建列也沒寄信，
+    計入它等於讓任何匿名者打幾下就把受害者的當日額度耗光。
+
+    ⚠️ 本測試在修法當下是綠的，但變異檢查證明「把 try_record 移出 if sent」**不會讓任何
+    測試變紅**——也就是這個性質原本零覆蓋。
+    """
+    email = "cap-silent@edms.local"
+    # 第 1 次真的寄出（額度 1/2）
+    assert (await _register_later(client, email)).status_code == 202
+    assert await _outbox(db, email) == 1
+
+    # 冷卻**不清**：同一 Email 立刻再打 → 落入靜默路徑（他人冷卻中），不建列不寄信
+    for _ in range(3):
+        assert (await client.post("/api/register", json=_payload(email))).status_code in (202, 429)
+    assert await _outbox(db, email) == 1, "前提錨點：靜默路徑確實沒寄信"
+
+    # 額度應仍剩 1 → 清冷卻後還能寄第 2 封
+    assert (await _register_later(client, email)).status_code == 202
+    assert await _outbox(db, email) == 2, "靜默路徑吃掉了額度：受害者少了一次機會"
+
+
+async def test_上限值超界時被夾回合理範圍(client, db) -> None:
+    """IT 直接改 DB 把上限設成界外時，讀取端夾回（2026-10-14 變異檢查 M7 補入）。
+
+    `EDIT_SCOPE='HIDDEN'` ⇒ 唯一的修改路徑是直接下 SQL，而 `get_int_param` 對整數不設界。
+    設成 0 會讓任何人都註冊不了；設成 99999 則靜默關掉整道防護。兩端都要夾。
+
+    取下界測是因為它快：夾回 1 之後只准寄一封，兩次請求即可驗完。
+    """
+    await db.execute(
+        update(DpParamDetail)
+        .where(DpParamDetail.param_id == "LOGIN", DpParamDetail.param_key == "REGISTER_OVERWRITE_MAX_PER_DAY")
+        .values(param_value="0")
+    )
+    await db.commit()
+
+    email = "cap-clamp@edms.local"
+    assert (await _register_later(client, email)).status_code == 202
+    assert await _outbox(db, email) == 1, "夾回下界 1 ⇒ 第一封仍須寄出（設 0 不得讓所有人都註冊不了）"
+
+    await _register_later(client, email)
+    assert await _outbox(db, email) == 1, "夾回下界 1 ⇒ 第二封不得寄出"
