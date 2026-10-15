@@ -30,6 +30,7 @@ from app.et.attempt.rules import (
     round_used_attempts,
     score_question,
     shuffled,
+    to_percent,
 )
 from app.et.constants import QUESTION_MULTIPLE, QUESTION_SINGLE
 
@@ -262,3 +263,27 @@ class TestGradeDetails:
     def test_配分全為零不及格且不除以零(self) -> None:
         answers = [self._answer(101, points=0, correct=True)]
         assert grade_details(answers, pass_score=Decimal("80")).is_pass is False
+
+
+class TestToPercent:
+    """分數換算為百分制（#642）——引導頁最高分與 ET02 平均成績的尺度。"""
+
+    def test_配分總和非100時換算(self) -> None:
+        assert to_percent(Decimal("8"), 10) == Decimal("80.00")
+
+    def test_配分總和為100時與原始分數相同(self) -> None:
+        assert to_percent(Decimal("90"), 100) == Decimal("90.00")
+
+    def test_除不盡時四捨五入到兩位(self) -> None:
+        assert to_percent(Decimal("2"), 3) == Decimal("66.67")
+
+    def test_配分總和為零回零且不除以零(self) -> None:
+        assert to_percent(Decimal("0"), 0) == Decimal("0")
+
+    def test_與及格判定同尺度(self) -> None:
+        """換算後的分數 ≥ 及格分數，恰好等於 `grade_details` 判定及格。"""
+        answers = [TestGradeDetails._answer(101, points=8, correct=True)]
+        answers.append(TestGradeDetails._answer(102, points=2, correct=False))
+        graded = grade_details(answers, pass_score=Decimal("80"))
+        assert graded.is_pass is True
+        assert to_percent(graded.total, graded.points_total) >= Decimal("80")

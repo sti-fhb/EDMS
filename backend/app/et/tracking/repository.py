@@ -9,7 +9,7 @@
 `completion_counts_by_student()` 的 docstring。
 """
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
@@ -18,7 +18,7 @@ from app.dp.users.models import DpUser  # 唯讀 join（已列於 et/spec.md §�
 from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
-from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
+from app.et.quiz.models import EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
 from app.et.survey.models import (
     EtSurvey,
     EtSurveyOption,
@@ -120,15 +120,35 @@ class EtTrackingRepository:
 
         只計**已提交**（`SUBMITTED_AT` 非空且 `SCORE` 非空）的 attempt：作答中的那筆
         還沒有分數，計入會讓平均無故下降。
+
+        ## 最高分為換算後的百分制（#642）
+
+        每次作答先依**自己的**配分總和（`SUM(POINTS_SNAPSHOT)`）換算、四捨五入到兩位，再取
+        最高——與引導頁的最高分（`attempt.rules.to_percent`）及及格判定同尺度。配分總和為 0
+        時以 0 計（零題或配分全為零，得分必然也是 0）。
         """
         if not user_ids:
             return {}
+        points = (
+            select(
+                EtQuizAttemptD.attempt_id.label("attempt_id"),
+                func.sum(EtQuizAttemptD.points_snapshot).label("total"),
+            )
+            .where(EtQuizAttemptD.deleted == 0)
+            .group_by(EtQuizAttemptD.attempt_id)
+            .subquery()
+        )
+        percent = case(
+            (points.c.total > 0, func.round(EtQuizAttemptM.score * 100 / points.c.total, 2)),
+            else_=0,
+        )
         best_per_quiz = (
             select(
                 EtQuizAttemptM.user_id.label("user_id"),
                 EtQuizAttemptM.quiz_id.label("quiz_id"),
-                func.max(EtQuizAttemptM.score).label("best"),
+                func.max(percent).label("best"),
             )
+            .outerjoin(points, points.c.attempt_id == EtQuizAttemptM.attempt_id)
             .where(
                 EtQuizAttemptM.user_id.in_(user_ids),
                 EtQuizAttemptM.course_id == course_id,

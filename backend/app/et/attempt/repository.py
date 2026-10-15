@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.attempt.rules import AnswerSnapshot, OptionSnapshot
+from app.et.attempt.rules import AnswerSnapshot, OptionSnapshot, to_percent
 from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES
 from app.et.course.models import EtChapter, EtItem
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
@@ -85,12 +85,20 @@ class EtAttemptRepository:
         ⛔ **分數仍取所有輪次**（`last` / `best` 不受 `reset_base` 影響）。「重測後最高分
         要不要只算新一輪」是規格疑義，#610 明列為不在範圍、另請 SA。
 
+        ## 分數為換算後的百分制（#642）
+
+        `last` / `best` 依各次作答**自己的**配分總和（`SUM(POINTS_SNAPSHOT)`）換算，與及格
+        判定同尺度。讀取時換算、不回填 `SCORE`：那是閱卷當下的原始分數，作答明細與結果頁
+        都以它搭配 `points_total` 呈現。
+
         Args:
             reset_base: 最近一次重置基準（`reset_base` 方法的輸出）；無重置紀錄為 0。
         """
         rows = (
             await db.execute(
-                select(EtQuizAttemptM.score, EtQuizAttemptM.is_pass, EtQuizAttemptM.attempt_no)
+                select(
+                    EtQuizAttemptM.score, EtQuizAttemptM.is_pass, EtQuizAttemptM.attempt_no, EtQuizAttemptM.attempt_id
+                )
                 .where(
                     EtQuizAttemptM.user_id == user_id,
                     EtQuizAttemptM.quiz_id == quiz_id,
@@ -101,9 +109,10 @@ class EtAttemptRepository:
         ).all()
         if not rows:
             return None, None, False
-        scores = [r[0] for r in rows]
+        points = await self.points_total_by_attempt(db, [r.attempt_id for r in rows])
+        scores = [to_percent(r.score, points.get(r.attempt_id, 0)) for r in rows]
         # 分數取全部輪次、及格旗標只看基準之後——兩者刻意不同，見 docstring。
-        return scores[-1], max(scores), any(r[1] for r in rows if r[2] > reset_base)
+        return scores[-1], max(scores), any(r.is_pass for r in rows if r.attempt_no > reset_base)
 
     # ── Attempt 生命週期 ────────────────────────────────────────────────────
 
