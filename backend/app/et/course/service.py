@@ -61,7 +61,8 @@ from app.et.course.schemas import (
     OwnerOption,
     TagOption,
 )
-from app.et.course.stage_rules import ENTITY_CHAPTER, ENTITY_ITEM, ENTITY_MATERIAL, ENTITY_QUIZ
+from app.et.course.stage_repository import EtCourseStageRepository
+from app.et.course.stage_rules import ENTITY_CHAPTER, ENTITY_ITEM, ENTITY_MATERIAL, ENTITY_QUESTION, ENTITY_QUIZ
 from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
@@ -101,6 +102,7 @@ class EtCourseService:
         course_update_mailer: CourseUpdateMailer | None = None,
         publish: EtPublishService | None = None,
         stage_writer: EtCourseStageWriter | None = None,
+        stage: EtCourseStageRepository | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._tags = tags or EtCourseTagRepository()
@@ -114,6 +116,7 @@ class EtCourseService:
         self._enrollments = enrollments or EtEnrollmentRepository()
         self._course_update_mailer = course_update_mailer or CourseUpdateMailer()
         self._stage_writer = stage_writer or EtCourseStageWriter()
+        self._stage = stage or EtCourseStageRepository()
         # #301：`update_basic` 需要發布六項檢核（`_evaluate` 在 publish service——它要組快照
         # 並問 DM 廢止狀態）。單向依賴：publish service 不反向引用本類別。
         self._publish = publish or EtPublishService()
@@ -319,9 +322,21 @@ class EtCourseService:
             course.owner_id, (None, False)
         )
         pairs = (await self._courses.pairs_by_course(db, [course_id]))[course_id]
-        chapters = await self._chapters.list_by_course(db, course_id)
-        items_by_chapter = await self._items_by_chapter(db, [c.chapter_id for c in chapters])
         is_owner = course.owner_id == actor_id
+        # 🔴 **只有擁有者看得到暫存版本。**
+        #
+        # 他人閱覽（`is_owner=False`）與學員端一律看**已生效版本**——他們不是在編輯，
+        # 給他們看一份還沒生效的內容會讓「這門課有什麼」出現兩種答案。
+        #
+        # ⚠️ 還沒編輯過（`has_stage` 為假）時讀活表：此時兩者內容相同，但讀活表才能拿到
+        # 正確的 `VERSION`（暫存列還不存在，而前端要用它做樂觀鎖）。
+        staged_chapters = None
+        if is_owner and is_staged(course) and await self._stage.has_stage(db, course_id):
+            staged_chapters = await self._staged_chapter_items(db, course_id)
+
+        if staged_chapters is None:
+            chapters = await self._chapters.list_by_course(db, course_id)
+            items_by_chapter = await self._items_by_chapter(db, [c.chapter_id for c in chapters])
         return CourseDetail(
             course_id=course.course_id,
             course_name=course.course_name,
@@ -339,7 +354,9 @@ class EtCourseService:
             # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者
             # 收集全站邀請碼、自行加入任意課程，繞過 ET-4 的邀請門檻與限流。
             invitation_code=course.invitation_code if is_owner else None,
-            chapters=[
+            chapters=staged_chapters
+            if staged_chapters is not None
+            else [
                 ChapterItem(
                     chapter_id=c.chapter_id,
                     chapter_name=c.chapter_name,
@@ -350,6 +367,64 @@ class EtCourseService:
                 for c in chapters
             ],
         )
+
+    async def _staged_chapter_items(self, db: AsyncSession, course_id: int) -> list[ChapterItem]:
+        """把暫存樹組成編輯頁要的章節 / 項目清單。
+
+        ⚠️ **id 一律走 `exposed_id`**：既有內容回活表 id（與今天相同），本次編輯新增的回
+        負數。前端把哪個數字帶回 PUT，決定了後端會改到哪一邊——回錯了不會報錯，只會
+        改到別的東西（見 `stage_writer.exposed_id`）。
+
+        ⚠️ `version` 回的是**暫存列自己的**，不是活表那一列的。兩者的計數在 seed 之後
+        就分岔了。
+        """
+        nodes = await self._stage.load_tree(db, course_id)
+        by_parent: dict[int | None, list] = {}
+        for n in nodes:
+            by_parent.setdefault(n.parent_stage_id, []).append(n)
+
+        def children(parent: int | None, entity_type: str) -> list:
+            return sorted(
+                (n for n in by_parent.get(parent, []) if n.entity_type == entity_type),
+                key=lambda n: (n.sort_order, n.stage_id),
+            )
+
+        result: list[ChapterItem] = []
+        for chapter in children(None, ENTITY_CHAPTER):
+            items: list[ItemRow] = []
+            for item in children(chapter.stage_id, ENTITY_ITEM):
+                material = children(item.stage_id, ENTITY_MATERIAL)
+                quiz = children(item.stage_id, ENTITY_QUIZ)
+                content = (material or quiz or [None])[0]
+                title = ""
+                if content is not None:
+                    title = str(content.payload.get("material_name") or content.payload.get("quiz_name") or "")
+                items.append(
+                    ItemRow(
+                        item_id=exposed_id(source_id=item.source_id, stage_id=item.stage_id),
+                        item_type=str(item.payload.get("item_type") or ""),
+                        title=title,
+                        sort_order=item.sort_order,
+                        material_id=(
+                            exposed_id(source_id=material[0].source_id, stage_id=material[0].stage_id)
+                            if material
+                            else None
+                        ),
+                        quiz_id=(exposed_id(source_id=quiz[0].source_id, stage_id=quiz[0].stage_id) if quiz else None),
+                        version=item.version,
+                        question_count=len(children(quiz[0].stage_id, ENTITY_QUESTION)) if quiz else None,
+                    )
+                )
+            result.append(
+                ChapterItem(
+                    chapter_id=exposed_id(source_id=chapter.source_id, stage_id=chapter.stage_id),
+                    chapter_name=str(chapter.payload.get("chapter_name") or ""),
+                    sort_order=chapter.sort_order,
+                    version=chapter.version,
+                    items=items,
+                )
+            )
+        return result
 
     async def update_basic(
         self, db: AsyncSession, course_id: int, req: CourseUpdateReq, *, operator: OperatorInfo
@@ -490,7 +565,10 @@ class EtCourseService:
                 operator=operator,
             )
             await self._log(db, "CREATE", operator.user_id, course_id, "新增章節（暫存）")
-            return ChapterItem(chapter_id=stage_id, chapter_name=req.chapter_name, sort_order=0, version=0)
+            # 🔴 **負數**——它還不存在於活表（見 `stage_writer.exposed_id`）。
+            # 回正數的話前端下一步會拿它去打 `/chapters/{id}/items`，而那支會把它
+            # 當活表 id 查 `ET_CHAPTER` ⇒ 404，或更糟：撞上某個真實章節。
+            return ChapterItem(chapter_id=-stage_id, chapter_name=req.chapter_name, sort_order=0, version=0)
 
         chapter = await self._chapters.append(db, course_id, req.chapter_name, operator)
         if course.status == COURSE_PUBLISHED:

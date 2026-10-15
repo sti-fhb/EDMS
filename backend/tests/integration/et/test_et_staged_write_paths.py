@@ -425,3 +425,105 @@ async def test_草稿課程的內容編輯仍直接寫活表(label: str, call, c
 
     assert resp.status_code < 400, f"{label} 於草稿應成功，實際 {resp.status_code}：{resp.text}"
     assert after != before, f"{label} 於草稿課程應**立即**改動活表"
+
+
+async def test_暫存模式回傳的_id_可以接著用(client, db) -> None:
+    """🔴 **回傳的 id 必須能被下一個請求當作對象。**
+
+    這條補的是「活表沒變」那組守門看不到的另一面：`add_chapter` 的暫存分支曾經回傳
+    **正數**的 `STAGE_ID`（寫那段時還沒定下正負號規則，之後沒回去改）。活表確實沒變、
+    守門全綠，但前端拿那個 id 去打 `/chapters/{id}/items` 會 404——或更糟，撞上某個
+    真實章節而改到別的東西。
+
+    ⭐ 那個 bug 是**既有測試的前置**抓到的（53 條紅），不是我的守門抓到的。教訓：
+    「不該發生什麼」與「該發生什麼」要各有一條，前者單獨存在時會漏掉整個正向路徑。
+    """
+    uid = await _user(db, "ZT_RT1")
+    ids = await _course_with_content(client, db, uid)
+    await _publish(client, db, uid, ids["course_id"])
+
+    ch = await client.post(
+        f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+    )
+    assert ch.status_code == 201, ch.text
+    new_chapter_id = ch.json()["chapter_id"]
+    assert new_chapter_id < 0, "暫存新增的節點對外必須是負數 id"
+
+    # 拿它當對象再打一次——這是前端實際會做的事
+    item = await client.post(
+        f"/api/et/chapters/{new_chapter_id}/items",
+        json={"item_type": ITEM_MATERIAL, "title": "暫存新教材"},
+        headers=_bearer(uid),
+    )
+
+    assert item.status_code == 201, f"回傳的 id 必須能接著用：{item.text}"
+    assert item.json()["item_id"] < 0
+    assert item.json()["material_id"] < 0
+
+
+class TestStagedRead:
+    """編輯頁讀暫存、他人與學員讀已生效版本（#631 PR 2a）。
+
+    🔴 沒有這一半，教師**看不到自己剛做的編輯**——寫進暫存區但畫面還是舊的，
+    他會以為系統壞了而重複操作。
+    """
+
+    async def test_擁有者看到暫存版本(self, client, db) -> None:
+        uid = await _user(db, "ZT_SR1")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+        )
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
+
+        names = [c["chapter_name"] for c in detail.json()["chapters"]]
+        assert "暫存新章" in names, "教師必須看得到自己剛做的編輯"
+
+    async def test_他人看到的是已生效版本(self, client, db) -> None:
+        """🔴 他人閱覽與學員端一律看已生效版本。
+
+        給他們看還沒生效的內容，會讓「這門課有什麼」出現兩種答案。
+        """
+        uid = await _user(db, "ZT_SR2")
+        other = await _user(db, "ZT_SR3")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+        )
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(other))
+
+        names = [c["chapter_name"] for c in detail.json()["chapters"]]
+        assert "暫存新章" not in names, "他人不得看到尚未生效的內容"
+        assert "第一章" in names
+
+    async def test_既有內容回活表_id_新增的回負數(self, client, db) -> None:
+        """⚠️ 前端把哪個數字帶回 PUT，決定後端改到哪一邊——回錯了不報錯，只改到別的東西。"""
+        uid = await _user(db, "ZT_SR4")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+        )
+
+        chapters = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()["chapters"]
+        by_name = {c["chapter_name"]: c["chapter_id"] for c in chapters}
+
+        assert by_name["第一章"] == ids["chapter_id"], "既有章節回活表 id，與今天相同"
+        assert by_name["暫存新章"] < 0, "本次編輯新增的回負數"
+
+    async def test_還沒編輯過時讀活表(self, client, db) -> None:
+        """正向錨點：少了它，把 `has_stage` 判斷拿掉（一律讀暫存）也會讓上面幾條通過。
+
+        還沒編輯過時暫存區是空的，讀暫存會得到**一門沒有任何章節的課**。
+        """
+        uid = await _user(db, "ZT_SR5")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
+
+        assert [c["chapter_name"] for c in detail.json()["chapters"]] == ["第一章", "第二章"]
