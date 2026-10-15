@@ -229,3 +229,11 @@ class EtCourseContentStage(BaseModel):
     sort_order: Mapped[int] = mapped_column("SORT_ORDER", Integer, nullable=False, default=0)
     #: 該實體的欄位值，JSON 字串（非 JSONB，見 class docstring）。
     payload: Mapped[str] = mapped_column("PAYLOAD", Text, nullable=False)
+    #: **暫存列自己的**樂觀鎖（#631 PR 2）。
+    #:
+    #: 🔴 與活表列的 `VERSION` 是兩回事、不可互相對應：這一個保護「已發布課程的編輯
+    #: 期間」，活表那一個保護「草稿編輯與『更新』套用」。兩者的計數彼此獨立。
+    #:
+    #: ⛔ 所以 `stage_entities._NEVER_STAGED` 仍然排除 `version`——seed 時不得把活表的
+    #: `VERSION` 搬進 `PAYLOAD`。
+    version: Mapped[int] = mapped_column("VERSION", Integer, nullable=False, default=0)
