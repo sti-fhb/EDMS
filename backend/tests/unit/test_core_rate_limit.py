@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.exceptions import AppError
-from app.core.rate_limit import SlidingWindowRateLimiter, rate_limit_by_ip
+from app.core.rate_limit import SlidingWindowCounter, SlidingWindowRateLimiter, rate_limit_by_ip
 from app.core.request_context import set_client_ip
 
 pytestmark = pytest.mark.unit
@@ -150,3 +150,49 @@ async def test_dependency_resolves_in_fastapi_app():
         second = await client.get("/ping")
     assert first.status_code == 200  # 非 422：dependency 正確解析、未被當成 query 參數
     assert second.status_code == 429
+
+
+# ── SlidingWindowCounter（#234 抽出）────────────────────────────────────────
+# ⚠️ 本組刻意直接測 counter 而非只靠 limiter 間接帶到：三個性質與 limiter **方向相反**
+#   （不拋、fail-open、上限由呼叫端決定），靠 limiter 的測試一條都驗不到。
+#   2026-10-14 code review MEDIUM-4 指出此缺口。
+
+
+def test_counter_count_不新增_key():
+    """`count` 必須無副作用。
+
+    原本的 `_hits` 是 defaultdict——照抄 `self._hits[key]` 會在 `max_keys` 檢查**之前**
+    憑空建桶，等於讓任何人以不重複的 key 繞過記憶體上界。
+    """
+    counter = SlidingWindowCounter(window_seconds=60)
+    assert counter.count("nobody", now=100.0) == 0
+    assert "nobody" not in counter._hits, "count 不得建立 key"
+
+
+def test_counter_視窗過期後歸零():
+    """滾動視窗：時間推進超過 window 後，舊紀錄不再計入。
+
+    #234 的「每日上限」靠的就是這個性質，而整合測試從不推進時間
+    （`now` 無法自 router 注入），少了本條則「滾動」這個承諾零覆蓋。
+    """
+    counter = SlidingWindowCounter(window_seconds=60)
+    for i in range(3):
+        assert counter.try_record("k", now=100.0 + i)
+    assert counter.count("k", now=150.0) == 3
+    # 邊界：now=161 時 cutoff=101，第三筆（102）仍在視窗內 ⇒ 還剩 1。
+    # 這一條順便釘住「滑出是逐筆的、不是整桶丟掉」。
+    assert counter.count("k", now=161.0) == 1
+    assert counter.count("k", now=163.0) == 0, "全部滑出後歸零（額度於 24 小時後釋放）"
+
+
+def test_counter_key_空間滿時_fail_open():
+    """與 limiter **刻意相反**：滿時回 False 而不拋，呼叫端照常放行。
+
+    拋 429 會讓 `/register` 多出一種回應（新的列舉面）；fail-closed 則讓大量不同 Email
+    的嘗試把表塞滿、反而使正常註冊被拒（以 DoS 換 DoS）。
+    """
+    counter = SlidingWindowCounter(window_seconds=60, max_keys=2)
+    assert counter.try_record("a", now=100.0)
+    assert counter.try_record("b", now=100.0)
+    assert counter.try_record("c", now=100.0) is False, "滿時回 False"
+    assert counter.count("c", now=100.0) == 0, "未被記錄 ⇒ 不佔額度，呼叫端視為未達上限"

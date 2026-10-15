@@ -1,10 +1,21 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    UniqueConstraint,
+    column,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.base_model import AuditLogBaseModel, BaseModel, BaseModelHardDelete
+from app.dp.user.kinds import KIND_ADMIN_INVITE, KIND_SELF_REGISTER
 
 
 class DpPwdReset(BaseModel):
@@ -59,6 +70,16 @@ class DpPendingRegistration(BaseModelHardDelete):
     __table_args__ = (
         PrimaryKeyConstraint("TOKEN_HASH", name="PK_DP_PENDING_REGISTRATION"),
         UniqueConstraint("EMAIL", name="UQ_DP_PENDING_REGISTRATION_EMAIL"),
+        # 值域於 DB 層封閉（#215）。`NOT NULL` 擋不住空字串或打錯的值，而一筆 KIND 錯字的列
+        # 在**所有 UI 上都看不見**（清單濾 KIND、DP_USER 也查不到）卻佔住 EMAIL 唯一鍵。
+        # 以 `kinds.py` 的常數建構而非寫字面量：#137 的護欄禁止字面量出現於 kinds.py 以外，
+        # 而「ORM 會不會跟著常數漂移」這個疑慮由同組的 `test_kind_values_match_db_domain`
+        # 擋住——它把常數值釘死，常數改不動，ORM 也就不可能偏離 DB 的實際值域。
+        # （migration 側相反，刻意寫字面量：它是歷史快照，見該檔 docstring。）
+        CheckConstraint(
+            column("KIND").in_((KIND_SELF_REGISTER, KIND_ADMIN_INVITE)),
+            name="CK_DP_PENDING_REGISTRATION_KIND",
+        ),
     )
 
     token_hash: Mapped[str] = mapped_column("TOKEN_HASH", String(64), nullable=False)

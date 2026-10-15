@@ -23,6 +23,9 @@ _GOOD_PWD = "Abcd1234"
 def _reset_limits():
     auth_router._register_limiter._hits.clear()
     auth_router._verify_send_cooldown._last.clear()
+    # #234 新增的單例：它跨測試存活（24 小時視窗），不清會讓第 5 次起的同 Email
+    # 註冊落入靜默路徑——而那條路徑回 202、不報錯，測試可能**為了錯的理由通過**。
+    auth_router._overwrite_counter._hits.clear()
     yield
     auth_router._register_limiter._hits.clear()
     auth_router._verify_send_cooldown._last.clear()

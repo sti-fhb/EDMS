@@ -18,6 +18,7 @@ from app.core.rate_limit import (
     RATE_WINDOW_SECONDS,
     REGISTER_RATE_MAX,
     SET_PASSWORD_RATE_MAX,
+    SlidingWindowCounter,
     SlidingWindowRateLimiter,
     rate_limit_by_ip,
 )
@@ -78,6 +79,55 @@ _email_change_cooldown = VerifySendCooldown()
 _verify_send_cooldown = VerifySendCooldown()
 _params = ParamService()
 _VERIFY_SEND_COOLDOWN_DEFAULT = 600
+
+
+# 同一 Email 每日重建待驗證列的次數上限（#234）。window 固定 24 小時，**上限值於請求時**
+# 自 DP_PARAM 讀取，故用 SlidingWindowCounter（不在建構時固定上限、達上限不拋）而非 limiter。
+_OVERWRITE_WINDOW_SECONDS = 86_400
+_OVERWRITE_MAX_DEFAULT = 5
+# 讀取端的值域收斂。**不放 `param_rules.py` 的 IntRule**：該參數為 `EDIT_SCOPE='HIDDEN'`，
+# 而 `is_editable_scope` 的 403 擋在值域檢核**之前** —— IntRule 對它永遠走不到，等於為不存在
+# 的 code path 寫防禦（違反 sti-coding-style）。真正走得到的路徑是「IT 直接改 DB」，
+# 而 `get_int_param` 對整數不設界：設成 99999 會靜默關掉這道防護，故在此收斂。
+_OVERWRITE_MAX_RANGE = (1, 10)
+_overwrite_counter = SlidingWindowCounter(window_seconds=_OVERWRITE_WINDOW_SECONDS)
+
+
+def _overwrite_key(email: str) -> str:
+    """每日重建額度的分桶鍵：**Email 維度**。
+
+    ⚠️ 不加 IP 維度：加了就是換 IP 即繞過。代價是它分不出攻擊者與受害者——
+    攻擊者用罄額度後，受害者本人也寄不出信（#234 AC 2 只能部分達成，詳見該 issue 規劃留言）。
+
+    ⚠️ **「N 次」不是硬保證**（Security MEDIUM-2）：`count` 與 `try_record` 之間隔著
+    `_overwrite_max` 的 DB 查詢與整段發信 await，同一 IP 併發送出多個同 Email 請求時，
+    全部會在任何一次寫入發生前讀到 count=0。既有冷卻章本來就有同一個窗（見 `core/cooldown.py`
+    檔頭的已知取捨），差別在**後果的尺度**：原本是「可能多送幾封信」，接上額度後變成
+    「一次爆發就打掉受害者當日額度」。對 #234 的攻擊者無益（併發不會延長佔用、只會更快燒完
+    自己的額度），但對「指定目標阻斷」是實質加速。要處理的方向是「先占位、失敗再退還」而非加鎖。
+    """
+    # 上游 `NormalizedEmailStr` 已 strip + lower，此處 `lower()` 純為防禦；與同檔
+    # `_verify_send_key` 不做 lower 的不對稱是歷史差異，不代表其中一邊有大小寫問題。
+    return f"register-overwrite:{email.lower()}"
+
+
+async def _overwrite_max(db: AsyncSession) -> int:
+    """每日上限值，收斂至 `_OVERWRITE_MAX_RANGE`；超界留 log 後夾回。
+
+    ⚠️ 占用時間是 **本值 × RESET_TOKEN_TTL_MIN**，兩者互鎖。只收斂本值不足以界定占用：
+    上限 10 搭配 TTL 120 分鐘即為 20 小時／日，本修法形同失效。調整任一者時請一併評估另一者。
+
+    ⛔ **夾回綁在這個唯一的讀取端**（Security LOW-1）。今天只有 register / resend 兩個呼叫點
+    共用本函式，所以成立；**日後若排程或別的模組也要讀這個參數，不得自行呼叫 `get_int_param`**
+    ——那會靜默繞過夾回，而且不會有任何測試變紅。要新增讀取端就改走本函式，或把夾回下沉到
+    DP params 模組讓它與參數放在一起。
+    """
+    raw = await _params.get_int_param(db, "LOGIN", "REGISTER_OVERWRITE_MAX_PER_DAY", _OVERWRITE_MAX_DEFAULT)
+    low, high = _OVERWRITE_MAX_RANGE
+    if raw < low or raw > high:
+        # 扣下動作必留痕：靜默夾回會讓「我明明設了 99999」與「防護沒生效」對不起來。
+        logger.warning("每日重建上限 %s 超出 %s，已夾回", raw, _OVERWRITE_MAX_RANGE)
+    return max(low, min(high, raw))
 
 
 def _verify_send_key(email: str) -> str:
@@ -244,7 +294,12 @@ async def register(
     # 回 429 等於宣告「600 秒內有人對此 Email 成功寄出驗證信」＝有未逾期的自助註冊待驗證列。
     others_cooling = _verify_send_cooldown.remaining(sent_key, cooldown_sec) > 0
 
-    if invited or others_cooling:
+    # 每日重建額度（#234）：冷卻只有 600 秒 < TTL 1800 秒，匿名者每 601 秒送一次即可讓該列
+    # **永遠不逾期**，於是管理者代建恆 409、SCHDP001 也清不到。額度用罄後停止刷新效期，
+    # 該列終會逾期。`count` 無副作用——真的寄出才 `try_record`（同 Email 章的處理）。
+    over_cap = _overwrite_counter.count(_overwrite_key(data.email)) >= await _overwrite_max(db)
+
+    if invited or others_cooling or over_cap:
         # 靜默成功：回應與全新 Email 逐欄位相同，且**什麼都不寫**——不寄信、不覆蓋 pending
         # 列、不換 token、不延長效期、不蓋 Email 章。
         #
@@ -257,12 +312,27 @@ async def register(
         # 靜默路徑原本**一行 log 都沒有**（Security MEDIUM-2）：批量探測受邀名單時，命中的
         # 那些（真正敏感的那半）在伺服器端完全不可見；客服也分不出「靜默擋下」與「信寄了
         # 沒到」。log 不對外，記它不削弱防列舉。Email 比照既有寫法遮罩。
-        logger.info(
-            "自助註冊靜默受理 ip=%s email=%s reason=%s",
-            get_client_ip(),
-            mask_email(data.email),
-            "invited" if invited else "others_cooling",
-        )
+        if over_cap:
+            # 🔴 **WARNING 而非 INFO**（2026-10-14 Security HIGH-1）：本次修法把攻擊**變安靜了**。
+            # 修法前要讓該列永不逾期，攻擊者必須每 ≤1800 秒打一次 ⇒ 受害者每天收到 48～144 封
+            # 驗證信、必然察覺並通報；修法後每日約 5 個請求即可維持飽和，受害者只收到 5 封。
+            # 偵測責任因此從「受害者的信箱」移到**伺服器端這一行**——它若與 `reason=invited`
+            # 同級同句，就等於沒有任何訊號。
+            #
+            # 一般使用者誤觸機率低（上限預設 5 次／日，且只計「真的重建並寄信」那幾次），
+            # 故 WARNING 不會變成噪音。告警規則請抓 `event=` 字串而非整句。
+            logger.warning(
+                "自助註冊每日重建額度已滿 ip=%s email=%s event=register_overwrite_cap_reached",
+                get_client_ip(),
+                mask_email(data.email),
+            )
+        else:
+            logger.info(
+                "自助註冊靜默受理 ip=%s email=%s reason=%s",
+                get_client_ip(),
+                mask_email(data.email),
+                "invited" if invited else "others_cooling",
+            )
         return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
     sent = await _register_service.register(
@@ -274,6 +344,14 @@ async def register(
     # channel 非 EMAIL / 渲染失敗是正常回傳 0、不拋例外，那些情況下蓋章會把使用者鎖 600 秒卻連
     # 一封信都沒收到。register 不需要 probe 章——它沒有「靜默不寄」的防列舉需求（已驗證帳號直接
     # 回 409），且此路徑必然已寫入待驗證列，本身就受帳號維度限流約束。
+    # 每日額度記在「**列被重建**」而非「信寄出」：`register()` 一旦回傳（未拋 409），其步驟 2
+    # 就已經刪舊列、建新列並把 `expires_date` 推到 `now + TTL`——那正是本額度要界定的事。
+    # ⚠️ **不可改成 `if sent`**：`send_email` 對範本停用 / channel 非 EMAIL / 渲染失敗是
+    # **正常回傳 0**（不拋例外），那些情況下列仍然被重建了、只是信沒寄出。記在 `sent` 之下
+    # 會讓那段期間的刷新完全不受額度約束，#234 的攻擊在範本異常時原樣復活。
+    # （2026-10-14 code review MEDIUM-2 指出；原本記在 `if sent` 內，且註解宣稱「界定重建次數」
+    #  與實作不符。）
+    _overwrite_counter.try_record(_overwrite_key(data.email))
     if sent:
         # Email 章**只在真的寄出時蓋**（#213）：它跨 IP，誤蓋等於讓人封鎖他人 600 秒。
         _verify_send_cooldown.record(sent_key)
@@ -351,13 +429,28 @@ async def resend_verification(
     # docstring 寫「key 加 IP 維度會讓換 IP 就能對同一信箱無限發信」——那道保護由「仍然
     # 不寄」承接（下方 early return 不呼叫 resend），改掉的只是「要不要用 429 昭告」。
     # 該測試因此改為斷言「200 且 outbox 未新增」，性質沒放棄，只是改用副作用驗。
-    if _verify_send_cooldown.remaining(sent_key, cooldown_sec) > 0:
+    # 🔴 每日重建額度與 register **共用同一份**（#234）。`verify_service.resend` 與
+    # `register_service.register` 同形——都是 `delete_pending_unless_active_invite` +
+    # `create_pending_registration(expires_date=now + ttl)`，**重寄一樣會刷新效期**。
+    # 只擋 register 的話，攻擊者改打本端點即完全繞過，修法等於沒做。
+    # 既有的 600 秒冷卻早已為同一理由共用額度（`FR-DP-US2-04b`：「避免以重新註冊繞過重寄冷卻」）。
+    over_cap = _overwrite_counter.count(_overwrite_key(data.email)) >= await _overwrite_max(db)
+
+    if over_cap or _verify_send_cooldown.remaining(sent_key, cooldown_sec) > 0:
         _verify_send_cooldown.record(probe_key)
         return {"message": _RESEND_MESSAGE, "retry_after": cooldown_sec}
 
     sent = await _resend_service.resend(db, email=data.email)
     if sent:
         _verify_send_cooldown.record(sent_key)
+        # ⚠️ 與 register 側**刻意不對稱**：`resend` 的 False 有兩種來源，而 bool 分不出來——
+        # ①「沒有可重寄的列」（查無 / 非 SELF_REGISTER / 已逾期，早退，**未建列**）
+        # ②「建了列但 send_email 回 0」（範本異常）
+        # 若比照 register 無條件記帳，①會讓任何人拿不存在的 Email 打 resend 就耗掉他人額度，
+        # 那正是 #213 修掉的封鎖向量。故此處取保守側：只在確定寄出時記。
+        # **殘留**：②的情況下經 resend 的重建不計入額度（register 側無此問題）。要消除它得讓
+        # `resend` 回傳「是否重建」而非「是否寄出」，屬介面變更，不在本次範圍。
+        _overwrite_counter.try_record(_overwrite_key(data.email))
     # probe 章無條件蓋（同 register）：否則「有沒有被蓋 probe」又會隨 sent 而異。
     _verify_send_cooldown.record(probe_key)
     return {"message": _RESEND_MESSAGE, "retry_after": cooldown_sec}

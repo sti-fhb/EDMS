@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dp.user.kinds import KIND_ADMIN_INVITE, KIND_SELF_REGISTER
+from app.dp.user.kinds import KIND_ADMIN_INVITE, KIND_SELF_REGISTER, PendingKind
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
 from app.dp.users.models import DpUser
 
@@ -293,7 +293,7 @@ class AuthRepository:
         pwd_hash: str | None,
         expires_date: datetime,
         now: datetime,
-        kind: str = KIND_SELF_REGISTER,
+        kind: PendingKind = KIND_SELF_REGISTER,
         invite_id: str | None = None,
         operator_id: str = _SYSTEM_USER,
     ) -> None:
