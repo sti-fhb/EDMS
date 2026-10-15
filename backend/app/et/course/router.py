@@ -336,7 +336,7 @@ async def reorder_chapters(
 
 @router.put("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def rename_chapter(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ChapterRenameReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -347,7 +347,7 @@ async def rename_chapter(
 
 @router.delete("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chapter(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -361,7 +361,7 @@ async def delete_chapter(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_item(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ItemCreateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -372,7 +372,7 @@ async def add_item(
 
 @router.put("/chapters/{chapter_id}/items/order", status_code=status.HTTP_204_NO_CONTENT)
 async def reorder_items(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ItemReorderReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -383,7 +383,7 @@ async def reorder_items(
 
 @router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_item(
-    item_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    item_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:

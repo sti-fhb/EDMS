@@ -101,6 +101,7 @@ class EtCourseStageRepository:
                 parent_stage_id=r.parent_stage_id,
                 sort_order=r.sort_order,
                 payload=_payload(r.payload),
+                version=r.version,
             )
             for r in rows.all()
         )

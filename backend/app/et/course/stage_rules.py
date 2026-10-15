@@ -63,6 +63,8 @@ class StageNode:
         parent_stage_id: 父層暫存列；章節與問卷掛在課程下，故為 `None`。
         sort_order: 同層排序。
         payload: 該實體的欄位值。
+        version: **暫存列自己的**樂觀鎖（#631 PR 2）。與活表列的 `VERSION` 是兩回事
+            ——初值 seed 時承接自活表，此後各自遞增。編輯頁回傳給前端的是這一個。
     """
 
     stage_id: int
@@ -71,6 +73,7 @@ class StageNode:
     parent_stage_id: int | None
     sort_order: int
     payload: Mapping[str, Any]
+    version: int = 0
 
 
 def _children(nodes: Sequence[StageNode], parent_stage_id: int, entity_type: str) -> list[StageNode]:
