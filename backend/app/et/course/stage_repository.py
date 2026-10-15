@@ -25,6 +25,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.course.models import EtCourse, EtCourseContentStage
@@ -75,6 +76,23 @@ class EtCourseStageRepository:
             .where(EtCourseContentStage.course_id == course_id, EtCourseContentStage.deleted == 0)
             .order_by(EtCourseContentStage.stage_id)
         )
+
+        def _payload(raw: str) -> dict:
+            """⚠️ `PAYLOAD` 不是 JSON object 時**明確報錯**。
+
+            非 dict 的話，下游 `f in node.payload` 會退化成子字串 / 成員測試、
+            `payload[f]` 拋 TypeError——兩種都是難讀的 500。目前只有伺服端寫入故不可達，
+            但這張表是 PR 2 的編輯端要寫的，守門放在讀取這一側才涵蓋得到全部寫入者。
+            """
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise AppError(
+                    status_code=500,
+                    detail=f"暫存列的 PAYLOAD 不是 JSON object：{type(parsed).__name__}",
+                    error_code="ET_STAGE_001",
+                )
+            return parsed
+
         return tuple(
             StageNode(
                 stage_id=r.stage_id,
@@ -82,7 +100,7 @@ class EtCourseStageRepository:
                 source_id=r.source_id,
                 parent_stage_id=r.parent_stage_id,
                 sort_order=r.sort_order,
-                payload=json.loads(r.payload),
+                payload=_payload(r.payload),
             )
             for r in rows.all()
         )

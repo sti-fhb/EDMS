@@ -213,6 +213,9 @@ class EtPublishService:
         # 教師雙擊或兩個分頁同時按下時，沒有鎖的話兩邊都會讀到完整的暫存樹並各自新增
         # 一份，活表出現重複的章節與題目。見 `lock_course` 的說明。
         await self._stage.lock_course(db, course_id)
+        # ⚠️ 取鎖**之後**重讀課程列：上面的 `_require_owned` 讀的是鎖前快照。影響面小
+        # （擁有權不可移轉、狀態只擋 DRAFT），但「先鎖再讀」才是這類流程的標準寫法。
+        await db.refresh(course)
         nodes = await self._stage.load_tree(db, course_id)
         if not nodes:
             # 自上次更新以來沒有任何編輯。**安全的 no-op**——不跑檢核也不寫稽核：
@@ -239,9 +242,15 @@ class EtPublishService:
                 },
             )
 
-        await apply_stage(db, course=course, nodes=nodes, operator=operator)
+        stats = await apply_stage(db, course=course, nodes=nodes, operator=operator)
         await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
-        await self._log(db, operator.user_id, course_id, f"更新課程內容（{len(nodes)} 項）")
+        # 🔴 稽核描述要帶**刪除統計**，不能只有節點數。
+        #
+        # 這支端點沒有 request body，而它會經由 cascade 軟刪**學員的進度與作答紀錄**。
+        # 只記 `len(nodes)` 的話，事後無法從 `DP_AUDIT_LOG` 區分「改了一個標題」與
+        # 「刪掉五章連同全班進度」。只記型別與筆數，不記內容、不記學員識別。
+        removed = "".join(f"，刪除 {k} {v} 筆" for k, v in sorted(stats.removed.items()))
+        await self._log(db, operator.user_id, course_id, f"更新課程內容（{len(nodes)} 項）{removed}")
         return ContentUpdateResult(course_id=course_id, applied_count=len(nodes))
 
     async def close(

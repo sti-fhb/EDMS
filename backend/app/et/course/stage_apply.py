@@ -30,21 +30,47 @@
 它們隨所屬項目一起被 `EtItemRepository.soft_delete_with_cascade` 刪掉。項目型別不可變、
 一個項目恆對一份教材或一份測驗，所以「教材該刪但項目留著」不存在。
 `test_套用不單獨刪除教材與測驗` 釘住這個前提。
+
+## ⚠️ 兩項已知限制（2026-10-14 code review 提出，刻意未於本 PR 修）
+
+### 1. 問卷已有填答時，套用仍會改寫 / 刪除題目
+
+`EtSurveyRepository.soft_delete_survey` / `soft_delete_question` 的前提是呼叫端已跑過
+`ensure_editable`（有填答即不可改題），而本模組**繞過了那道守門**。情境：教師在暫存期間
+改了問卷題目，學員在同一期間送出填答，按下「更新」時填答會指向被改寫或已軟刪的題目。
+
+🔴 **這不是疏漏，是 #631 的 SA Q2 ② 尚未裁示**——「版本化之後『有填答』指的是對哪一版？
+學員對已生效版本填了答，教師能不能在編輯中版本改題？」兩個選項（仍凍結 / 編輯中可改、
+更新時才凍結）對報表的影響不同，不該由 SD 自決。裁示後於 PR 2 落位。
+
+⛔ 在那之前**不要**自己補一道守門：補了等於替 SA 做了決定，而且兩個選項的守門長得不一樣。
+
+### 2. 項目的教材 / 測驗被換成新的一份時，舊的那份會變成孤兒
+
+`_DELETED_WITH_ITEM` 讓教材與測驗不單獨刪——前提是「項目型別不可變、一項目恆對一份
+教材」，而那個前提由**編輯端**維持，本模組不保證。若有人造出「項目留著、但其教材子節點
+換成另一個 `SOURCE_ID`」的暫存樹，舊的教材列不會被任何人刪掉。
+
+後果是一列到不了的活表資料（不影響學員、不影響檢核），而編輯端不可能產生那種樹，故
+本 PR 不處理。⚠️ 若日後支援「一個教材被多個項目重用」，刪除策略要整個重想，屆時
+`test_刪掉整個項目時教材一起被刪` 會紅——那是該響的警報。
 """
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Final
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.course.models import EtCourse
 from app.et.course.repository import EtChapterRepository, EtItemRepository
 from app.et.course.stage_entities import APPLY_ORDER, LINK_CHILD_FK, LINK_PARENT_FK, SPEC_BY_TYPE, payload_fields
-from app.et.course.stage_live_tree import load_live_tree
+from app.et.course.stage_live_tree import LiveNode, load_live_tree
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
     ENTITY_ITEM,
@@ -72,9 +98,24 @@ logger = logging.getLogger(__name__)
 _DELETED_WITH_ITEM = frozenset({ENTITY_MATERIAL, ENTITY_QUIZ})
 
 
+@dataclass(frozen=True)
+class ApplyStats:
+    """一次套用的結果——供稽核描述與排程 log。
+
+    `removed` 只記**型別與筆數**，不記內容也不記學員識別（`sti-backend-logging` 禁寫清單）。
+    """
+
+    #: 各型別被軟刪的活表列數（只列有刪到的）。
+    removed: dict[str, int]
+
+    @property
+    def removed_total(self) -> int:
+        return sum(self.removed.values())
+
+
 async def apply_stage(
     db: AsyncSession, *, course: EtCourse, nodes: Sequence[StageNode], operator: OperatorInfo
-) -> None:
+) -> ApplyStats:
     """把暫存樹套用到活表。
 
     Args:
@@ -83,14 +124,27 @@ async def apply_stage(
         course: 目標課程（活表列）。
         nodes: 該課程的整棵暫存樹。
         operator: 稽核欄位用。
+
+    Returns:
+        刪除統計，供呼叫端寫進稽核描述。
+
+    Raises:
+        AppError: 500 `ET_STAGE_001` 暫存樹結構不合法；409 `ET_LOCK_001` 期間活表被
+            其他操作改動。
     """
-    _validate_tree(nodes)
+    # 🔴 **活表樹只載入一次**，驗證與刪除共用。
+    #
+    # 刪除階段的 cascade 會連帶刪掉教材 / 測驗，中途重讀會看到那些列而重複處理；
+    # 而驗證要用它確認「每個 `SOURCE_ID` 真的屬於本課程」——兩者必須看同一份快照。
+    live = await load_live_tree(db, course.course_id)
+    _validate_tree(nodes, live=live)
+
     staged_sources: dict[str, set[int]] = {}
     for node in nodes:
         if node.source_id is not None:
             staged_sources.setdefault(node.entity_type, set()).add(node.source_id)
 
-    await _delete_removed(db, course_id=course.course_id, staged_sources=staged_sources, operator=operator)
+    stats = await _delete_removed(db, live=live, staged_sources=staged_sources, operator=operator)
     await _park_sort_orders(db, nodes=nodes, operator=operator)
     await _upsert(db, course=course, nodes=nodes, operator=operator)
 
@@ -100,47 +154,103 @@ async def apply_stage(
     # ⇒ 階段 1 結束時是 2/2 被蓋章，階段 3 之後其實是 2/3、沒完課。而 `COMPLETED_AT`
     # 只寫一次、回退不清除，那個時間戳會一直停在一個他沒完課的時點。
     await EtProgressRepository().stamp_completed_at(db, course_id=course.course_id, operator=operator)
+    return stats
 
 
-def _validate_tree(nodes: Sequence[StageNode]) -> None:
-    """父參照必須指得到——斷鏈時**當場報錯，而不是寫一半**。
+def _validate_tree(nodes: Sequence[StageNode], *, live: Sequence[LiveNode]) -> None:
+    """套用前的結構守門——**動活表之前就擋下，而不是寫一半**。
 
-    少了這道，斷鏈會在 `_upsert` 解析父層時變成 `KeyError: <某個數字>`，看不出是哪棵樹、
-    哪個節點、為什麼。而這種樹編輯端不可能產生，出現就代表有人繞過編輯端直接動暫存表。
+    四道不變式，每一道漏掉的後果都是靜默的：
+
+    | # | 不變式 | 漏掉會怎樣 |
+    |---|---|---|
+    | 1 | `ENTITY_TYPE` 必須在對照表裡 | 該節點被三個階段全部略過 ⇒ 教師編了、按更新沒生效，**連錯誤都沒有** |
+    | 2 | `PARENT_STAGE_ID` 指得到 | `KeyError: <某個數字>`，看不出是哪棵樹、哪個節點 |
+    | 3 | 父層型別相符、且「該不該有父層」一致 | 🔴 項目若無父層會拿到
+      `chapter_id = course_id`——11 張表的 identity **號碼空間重疊**，那個 id 通常真的
+      存在，於是項目被靜默塞進**別門課**的章節 |
+    | 4 | `SOURCE_ID` 必須屬於**本課程**的活表樹 | 🔴 覆寫他人課程的章節 / 題目，且 `_upsert` 會把它們改掛到本課程底下 |
+
+    ⚠️ 第 3、4 道在本 PR 還不可達（暫存列目前只由 `seed_from_live` 從本課程活表推導），
+    它們是**為 PR 2 預留的**——編輯端一旦讓前端指定 `stage_id` / `source_id`，那兩條路
+    就活了。⛔ 不要因為「現在還到不了」而拿掉：補在這裡是一道結構守門，補在 12 個編輯
+    端點各一次則會漏。
 
     ⚠️ 本函式**不驗**「每個項目都有教材或測驗子節點」——孤兒項目（教材已軟刪、項目
     還在）在 `load_live_tree` 就會缺那個子節點，而那是今天可容忍的既有狀態
     （`BLOCK_ITEM_NO_TITLE` 會擋住它發布）。驗了會讓既有資料無法更新。
     """
-    known = {n.stage_id for n in nodes}
-    dangling = [n for n in nodes if n.parent_stage_id is not None and n.parent_stage_id not in known]
+    unknown = sorted({n.entity_type for n in nodes if n.entity_type not in SPEC_BY_TYPE})
+    if unknown:
+        _reject(f"暫存樹含未知的 ENTITY_TYPE：{unknown}")
+
+    by_id = {n.stage_id: n for n in nodes}
+    dangling = [n for n in nodes if n.parent_stage_id is not None and n.parent_stage_id not in by_id]
     if dangling:
         detail = ", ".join(f"STAGE_ID={n.stage_id}->{n.parent_stage_id}" for n in dangling[:5])
-        raise ValueError(f"暫存樹的父參照斷鏈（共 {len(dangling)} 筆）：{detail}")
+        _reject(f"暫存樹的父參照斷鏈（共 {len(dangling)} 筆）：{detail}")
+
+    for node in nodes:
+        expected = SPEC_BY_TYPE[node.entity_type].parent_entity
+        if (expected is None) != (node.parent_stage_id is None):
+            _reject(
+                f"STAGE_ID={node.stage_id}（{node.entity_type}）的父層有無與對照表不符：預期 {expected or '掛在課程下'}"
+            )
+        if node.parent_stage_id is not None:
+            actual = by_id[node.parent_stage_id].entity_type
+            if actual != expected:
+                _reject(f"STAGE_ID={node.stage_id}（{node.entity_type}）的父層型別為 {actual}，預期 {expected}")
+
+    live_ids: dict[str, set[int]] = {}
+    for node in live:
+        live_ids.setdefault(node.entity_type, set()).add(node.key[1])
+    foreign = [n for n in nodes if n.source_id is not None and n.source_id not in live_ids.get(n.entity_type, set())]
+    if foreign:
+        detail = ", ".join(f"{n.entity_type}#{n.source_id}" for n in foreign[:5])
+        _reject(f"暫存列指向不屬於本課程的活表資料（共 {len(foreign)} 筆）：{detail}")
+
+
+def _reject(detail: str) -> None:
+    """結構不合法一律 500 `ET_STAGE_001`。
+
+    是 500 不是 4xx：教師沒有做錯任何事，是暫存區的結構壞了。訊息只帶內部代理鍵
+    （`STAGE_ID` / `SOURCE_ID`），`app_error_handler` 不會把 detail 回給前端，
+    僅留在去識別化後的後端 log。
+    """
+    raise AppError(status_code=500, detail=detail, error_code="ET_STAGE_001")
 
 
 async def _delete_removed(
-    db: AsyncSession, *, course_id: int, staged_sources: dict[str, set[int]], operator: OperatorInfo
-) -> None:
+    db: AsyncSession, *, live: Sequence[LiveNode], staged_sources: dict[str, set[int]], operator: OperatorInfo
+) -> ApplyStats:
     """活表有而暫存沒有的 ⇒ 教師刪了它。
 
-    🔴 活表樹**在刪除開始前一次載入**，之後不重讀：`EtItemRepository.soft_delete_with_cascade`
-    會連帶刪掉教材 / 測驗，重讀會看到被連帶刪掉的列而重複處理。
+    🔴 活表樹由 `apply_stage` **一次載入後傳入，中途不重讀**：
+    `EtItemRepository.soft_delete_with_cascade` 會連帶刪掉教材 / 測驗，重讀會看到那些
+    被連帶刪掉的列而重複處理。同一份快照也供 `_validate_tree` 判斷歸屬。
 
     由葉往根刪（`APPLY_ORDER` 的反向），讓每一層的 cascade 都在其子層已處理完之後才跑。
     """
-    live = await load_live_tree(db, course_id)
     live_ids: dict[str, list[int]] = {}
     for node in live:
         live_ids.setdefault(node.entity_type, []).append(node.key[1])
 
+    removed: dict[str, int] = {}
     for spec in reversed(APPLY_ORDER):
         if spec.entity_type in _DELETED_WITH_ITEM:
             continue
         staged = staged_sources.get(spec.entity_type, set())
-        removed = [live_id for live_id in live_ids.get(spec.entity_type, []) if live_id not in staged]
-        if removed:
-            await _DELETERS[spec.entity_type](db, removed, operator)
+        gone = [live_id for live_id in live_ids.get(spec.entity_type, []) if live_id not in staged]
+        if gone:
+            await _DELETERS[spec.entity_type](db, gone, operator)
+            removed[spec.entity_type] = len(gone)
+
+    if removed:
+        # 🔴 這條路徑會連帶軟刪**學員的進度與作答紀錄**（見 `EtItemRepository` 的 cascade），
+        # 而端點本身沒有 request body——事後只能靠這行與稽核描述還原「那一次更新刪了什麼」。
+        # 只記型別與筆數，不記內容、不記學員識別（`sti-backend-logging` 禁寫清單）。
+        logger.info("ET 更新套用：軟刪 %s", dict(sorted(removed.items())))
+    return ApplyStats(removed=removed)
 
 
 async def _delete_options(db: AsyncSession, model: Any, pk: str, ids: list[int], operator: OperatorInfo) -> None:
@@ -278,10 +388,26 @@ async def _write(
         )
         # 🔴 命中 0 列 ＝ 那個活表列已被別的路徑軟刪。不擋的話會**靜默**地把子節點
         # 寫成指向一個已刪除的父層——活表出現到不了的資料，而且沒有任何錯誤。
-        if result.rowcount != 1:
-            raise ValueError(
-                f"暫存列指向的活表資料已不存在或已刪除："
-                f"{node.entity_type} SOURCE_ID={node.source_id}（命中 {result.rowcount} 列）"
+        if result.rowcount != 1:  # pragma: no cover - 由 `_validate_tree` 的歸屬守門保證不可達
+            # 🔴 **這條目前到不了，刻意留著。**
+            #
+            # `_validate_tree` 已確保每個 `SOURCE_ID` 都在 `apply_stage` 開頭載入的活表樹
+            # 裡（當時 `DELETED = 0`），而交易中途唯一的刪除是 `_delete_removed`，它只碰
+            # **沒有被暫存**的列。兩者合起來保證此處必定命中 1 列。
+            #
+            # ⚠️ 留著是因為那個保證**依賴三件事同時成立**（歸屬守門、課程行鎖、單一交易）。
+            # 任何一件日後被改掉，少了這道就會靜默地把子節點寫成指向已刪除的父層——
+            # 活表出現到不了的資料，而且沒有任何錯誤。
+            #
+            # 409 而非 500：若真的發生，那是**競態**、教師沒做錯事，`ET_LOCK_001` 的既有
+            # 語意（「資料已被其他使用者修改，請重新載入後再試」）正好就是要他做的事。
+            raise AppError(
+                status_code=409,
+                detail=(
+                    f"暫存列指向的活表資料已不存在或已刪除："
+                    f"{node.entity_type} SOURCE_ID={node.source_id}（命中 {result.rowcount} 列）"
+                ),
+                error_code="ET_LOCK_001",
             )
         return node.source_id
 

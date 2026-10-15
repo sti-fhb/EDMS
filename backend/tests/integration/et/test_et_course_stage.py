@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
+from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
@@ -675,7 +676,7 @@ class TestApplyDelete:
         )
         await db.flush()
 
-        with pytest.raises(ValueError, match="父參照斷鏈"):
+        with pytest.raises(AppError, match="父參照斷鏈"):
             await _apply(db, cid, uid)
 
     async def test_刪除項目時委派既有_cascade(self, client, db) -> None:
@@ -1006,10 +1007,15 @@ class TestReviewFindings:
         assert after.completed_at is None, "套用後是 1/2，不該因為刪除階段的中間狀態被蓋章"
 
     async def test_暫存指向的活表列已被刪時整批失敗(self, client, db) -> None:
-        """🔴 MEDIUM：更新既有列若命中 0 列，原本仍回傳 `source_id`。
+        """🔴 暫存期間活表列被別的路徑軟刪 ⇒ 整批失敗，不得部分寫入。
 
-        子節點會以那個**已刪除**的 id 當父層寫入，活表出現到不了的資料，而且沒有
-        任何錯誤。改為命中數不為 1 就拋錯、整批回滾。
+        ⭐ **擋下它的是歸屬守門，不是 rowcount 檢查。** code review 原本指出
+        `_write` 命中 0 列時仍回傳 `source_id`（子節點會寫成指向已刪除的父層）；補了
+        `_validate_tree` 的「`SOURCE_ID` 必須屬於本課程活表樹」之後，那一刀更早就落下
+        ——被軟刪的列不在 `load_live_tree` 的結果裡。
+
+        rowcount 檢查因此變成結構上不可達，但**刻意留著**（理由見 `_write` 的註解）。
+        本條驗的是真正會發生的那個錯誤。
         """
         uid = await _user(db, "ZT_R3")
         cid = await _full_course(client, db, uid)
@@ -1020,7 +1026,7 @@ class TestReviewFindings:
         await db.execute(update(EtChapter).where(EtChapter.chapter_id == node.source_id).values(deleted=1))
         await db.flush()
 
-        with pytest.raises(ValueError, match="已不存在或已刪除"):
+        with pytest.raises(AppError, match="不屬於本課程"):
             await _apply(db, cid, uid)
 
     async def test_清空只清載入過的那批(self, client, db) -> None:
@@ -1043,3 +1049,116 @@ class TestReviewFindings:
         remaining = {n.stage_id for n in await repo.load_tree(db, cid)}
         assert latecomer in remaining, "⛔ 沒被套用過的編輯不得被清掉"
         assert chapter.stage_id not in remaining, "載入過的那批照樣清掉"
+
+
+class TestStructuralGuards:
+    """`_validate_tree` 的四道結構不變式（2026-10-14 security review）。
+
+    ⚠️ 這四道在本 PR 都**還不可達**——暫存列目前只由 `seed_from_live` 從本課程活表推導。
+    它們是**為 PR 2 預留的**：編輯端一旦讓前端指定 `stage_id` / `source_id`，那幾條路就活了。
+
+    ⛔ 不要因為「現在還到不了」而拿掉。補在這裡是一道結構守門；補在 12 個編輯端點各一次
+    會漏，而漏掉的後果全都是靜默的。
+    """
+
+    async def test_指向別門課的活表資料時整批失敗(self, client, db) -> None:
+        """🔴 最嚴重的那一道：`SOURCE_ID` 只要指得到任何一張內容表的活列就會被更新。
+
+        沒有這道守門的話，一位教師可以覆寫**另一位教師**課程的章節 / 題目，而且
+        `_upsert` 會把那些列改掛到他自己的課程底下（因為連結欄位會被重設）。
+
+        本條以「把暫存列的 `SOURCE_ID` 改指向別門課的章節」重現。
+        """
+        uid = await _user(db, "ZT_G1")
+        victim_uid = await _user(db, "ZT_G2")
+        cid = await _full_course(client, db, uid)
+        victim_cid = await _full_course(client, db, victim_uid)
+        victim_chapter = await db.scalar(
+            select(EtChapter).where(EtChapter.course_id == victim_cid, EtChapter.deleted == 0)
+        )
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        mine = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await db.execute(
+            update(EtCourseContentStage)
+            .where(EtCourseContentStage.stage_id == mine.stage_id)
+            .values(source_id=victim_chapter.chapter_id)
+        )
+        await db.flush()
+
+        with pytest.raises(AppError, match="不屬於本課程"):
+            await _apply(db, cid, uid)
+
+        after = await db.scalar(select(EtChapter).where(EtChapter.chapter_id == victim_chapter.chapter_id))
+        assert after.course_id == victim_cid, "⛔ 別人的章節不得被改掛到本課程"
+        assert after.chapter_name == victim_chapter.chapter_name
+
+    async def test_未知的實體型別整批失敗(self, client, db) -> None:
+        """少了這道，那個節點會被三個階段**全部略過**——教師編了、按更新沒生效，
+        而且不會有任何錯誤訊息，最後還被 `clear` 當成已套用而清掉。"""
+        uid = await _user(db, "ZT_G3")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        node = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await db.execute(
+            update(EtCourseContentStage)
+            .where(EtCourseContentStage.stage_id == node.stage_id)
+            .values(entity_type="PODCAST")
+        )
+        await db.flush()
+
+        with pytest.raises(AppError, match="未知的 ENTITY_TYPE"):
+            await _apply(db, cid, uid)
+
+    async def test_該有父層卻沒有時整批失敗(self, client, db) -> None:
+        """🔴 項目若無父層會拿到 `chapter_id = course_id`。
+
+        11 張表的 identity **號碼空間重疊**，那個 id 通常真的存在某一列，而
+        `FK_ET_ITEM_CHAPTER` 只要求 `CHAPTER_ID` 存在、不要求它屬於本課程——
+        於是項目被靜默塞進**別門課**的章節。
+        """
+        uid = await _user(db, "ZT_G4")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        item = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_ITEM)
+        await db.execute(
+            update(EtCourseContentStage)
+            .where(EtCourseContentStage.stage_id == item.stage_id)
+            .values(parent_stage_id=None)
+        )
+        await db.flush()
+
+        with pytest.raises(AppError, match="父層有無與對照表不符"):
+            await _apply(db, cid, uid)
+
+    async def test_父層型別不符時整批失敗(self, client, db) -> None:
+        """題目掛在章節底下之類的錯配。多數情況會被 FK 擋成錯誤，但那是靠巧合不是靠設計。"""
+        uid = await _user(db, "ZT_G5")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        chapter = next(n for n in nodes if n.entity_type == ENTITY_CHAPTER)
+        await db.execute(
+            update(EtCourseContentStage)
+            .where(EtCourseContentStage.stage_id == question.stage_id)
+            .values(parent_stage_id=chapter.stage_id)
+        )
+        await db.flush()
+
+        with pytest.raises(AppError, match="父層型別為"):
+            await _apply(db, cid, uid)
+
+    async def test_正常的暫存樹不被守門擋下(self, client, db) -> None:
+        """正向錨點：少了這條，讓 `_validate_tree` 無條件拋錯也會讓上面四條通過。"""
+        uid = await _user(db, "ZT_G6")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+
+        await _apply(db, cid, uid)
+
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章"
