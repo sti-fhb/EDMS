@@ -1,6 +1,6 @@
 # User Story 16 — UCET016 學員線下考核核可（ET02）
 
-> 對應 UC：UCET016 ｜ 功能選項：ET02（學員線下考核核可）｜ Priority：P2 ｜ Wireframe：[學員頁－核可](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
+> 對應 UC：UCET016 ｜ 功能選項：ET02（學員線下考核核可）｜ Priority：P2 ｜ Wireframe：[學員學習表現頁－核可](../../wireframes/et/index.html) ｜ 返回總檔：[spec.md](spec.md)
 > 2026-07-17 新增（客戶需求：線下人工核可）。與 [spec_us9.md](spec_us9.md) US9 共用 ET02「已加入」頁籤畫面；核可動作長在該頁，核可查詢另見 [spec_us17.md](spec_us17.md) US17。
 
 部分課程於線上完課後仍有**實機操作 / 口頭考核**等系統無法自動判定之考核。教師（該課程 owner）或管理者於 ET02「已加入」頁籤，對**已線上完課**之學員執行**線下核可**：結果為**通過 / 不通過**二態（不記考核分數，不通過留紀錄並可附備註），支援**批次核可**（同一梯次一次核可多人）。已核可可**撤銷**，撤銷**必須填寫原因**；撤銷後學員回到「待核可」可重新核可。核可**通過**時寄「核可通過通知」給學員（[spec.md](spec.md) §通知信統一範本第 7 類）；不通過與撤銷不寄信。
@@ -69,7 +69,7 @@
 - **FR-ET-US16-04**: 核可結果 MUST 為二態（PASS 通過 / FAIL 不通過），MUST NOT 記考核分數；不通過（FAIL）MUST 留紀錄並得附備註（RESULT_NOTE）；寫入 MUST 記錄 APPROVED_BY / APPROVED_AT
 - **FR-ET-US16-05**: 系統 MUST 支援批次核可（對多名已完課學員一次核可通過 / 不通過），逐一寫入 ET_APPROVAL 並各自套用通知規則
 - **FR-ET-US16-06**: 撤銷核可時系統 MUST 要求填寫撤銷原因（必填），MUST 阻擋原因為空之撤銷；撤銷 MUST 寫入 IS_REVOKED = true、REVOKE_REASON、REVOKED_BY / REVOKED_AT，撤銷後綜合狀態 MUST 回「待核可」且可重新核可（以同一筆 (COURSE_ID, USER_ID) 更新）
-- **FR-ET-US16-07**（2026-09-30 由 #463 改訂）: 核可 / 撤銷操作之 **UI 執行者** MUST 限**該課程 owner（教師）**；非 owner 之其他教師 MUST NOT 顯示核可操作。**管理者 MUST NOT 具備核可操作之進入路徑**（ET02 學員頁不對其顯示）。⚠️ **後端授權仍為 owner ∪ 管理者**（`ensure_owner_or_admin`），刻意未隨之收窄——見下方改訂說明。
+- **FR-ET-US16-07**（2026-09-30 由 #463 改訂）: 核可 / 撤銷操作之 **UI 執行者** MUST 限**該課程 owner（教師）**；非 owner 之其他教師 MUST NOT 顯示核可操作。**管理者 MUST NOT 具備核可操作之進入路徑**（ET02 學員學習表現頁不對其顯示）。⚠️ **後端授權仍為 owner ∪ 管理者**（`ensure_owner_or_admin`），刻意未隨之收窄——見下方改訂說明。
 
     > **原條文**（SA 裁示 2026-09-17 Q1 = C）：「限該課程 owner（教師）**或管理者**」，並註記「管理者的部分於 ET-18 僅後端成立…實際進入路徑待 **US17（ET-19）**補齊。這是刻意的中間狀態，不是漏做。」
     >
