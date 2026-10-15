@@ -178,6 +178,15 @@ class EtCourseStageRepository:
             parent_stage_id=parent,
             sort_order=sort_order,
             payload=to_payload(spec, row),
+            # 🔴 **樂觀鎖的初值承接活表那一列**（#631 PR 2）。
+            #
+            # 教師開編輯頁時，第一次編輯之前還沒有暫存列，前端拿到的 `VERSION` 來自活表。
+            # 初值若設 0，那第一次編輯必然 409（`WHERE version = 3` 對上 `version = 0`）
+            # ——教師會看到「資料已被其他使用者修改」，而根本沒有別人。
+            #
+            # ⚠️ 承接的只是**初值**：此後暫存列自己遞增，活表那一列不動，兩者就分岔了。
+            # 下一次 seed（清空後再編輯）會再承接一次當時的活表值。
+            version=getattr(row, "version", 0),
             created_user=ctx.operator.user_id,
             created_date=ctx.now,
         )
