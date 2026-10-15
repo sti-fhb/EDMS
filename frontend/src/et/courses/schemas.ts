@@ -283,6 +283,20 @@ export interface CourseListParams {
   limit?: number
 }
 
+/**
+ * 「建立者」下拉選項的查詢條件（#648）：清單的篩選條件**去掉** `scope` / `owner_id` / `page` / `limit`。
+ *
+ * 選項取自「全部課程」整個母體、不分頁——翻頁或選定某位建立者都不該改變選項。
+ */
+export type OwnerFilterParams = Pick<CourseListParams, "q" | "tag_id" | "unit_tag_id">
+
+/** 「建立者」下拉的一個選項（後端 `OwnerOption`）。欄位與 `CourseCard` 的 `owner_*` 同名，直接交給 `ownerLabel()`。 */
+export interface OwnerOption {
+  owner_id: string
+  owner_name: string | null
+  owner_is_disabled: boolean
+}
+
 /** 關鍵字長度上限，對齊後端 `Query(max_length=100)`。兩邊必須一起改。 */
 export const KEYWORD_MAX_LENGTH = 100
 

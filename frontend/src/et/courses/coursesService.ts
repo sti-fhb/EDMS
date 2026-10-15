@@ -10,6 +10,8 @@ import type {
   CourseDetail,
   CoursePayload,
   CourseStatusResult,
+  OwnerFilterParams,
+  OwnerOption,
   ReopenPayload,
   TagOption,
 } from "./schemas"
@@ -41,6 +43,16 @@ export const coursesApi = {
    */
   listFilterTags: async (): Promise<TagOption[]> => {
     const { data } = await http.get<TagOption[]>("/et/courses/filter-tags")
+    return data
+  },
+
+  /**
+   * ET01「全部課程」的建立者下拉（#648）：整個母體的建立者，**不分頁**。
+   *
+   * ⚠️ 不可改回由清單結果推導——清單一頁只有 12 張卡片，課程全在後面幾頁的教師會消失。
+   */
+  listFilterOwners: async (params: OwnerFilterParams): Promise<OwnerOption[]> => {
+    const { data } = await http.get<OwnerOption[]>("/et/courses/filter-owners", { params })
     return data
   },
 

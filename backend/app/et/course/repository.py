@@ -334,6 +334,45 @@ class EtCourseRepository:
         # 新的在前，與 ET03「我的課程」一致
         return stmt.order_by(EtCourse.created_date.desc(), EtCourse.course_id.desc())
 
+    async def list_owner_ids(
+        self,
+        db: AsyncSession,
+        *,
+        actor_id: str,
+        keyword: str | None,
+        tag_id: int | None,
+        unit_tag_id: int | None,
+        now: datetime,
+    ) -> list[str]:
+        """「全部課程」清單中出現過的建立者（不重複、不分頁）——ET01「建立者」下拉用（#648）。
+
+        **直接以 `build_list_stmt(scope="all")` 為子查詢**，不另寫一份條件：下拉的母體必須
+        與清單完全一致（已發布、期間未過、排除 viewer 已在籍者，並套用關鍵字／標籤），
+        兩份條件分岔的表徵是「選得到某位建立者，選下去清單卻是空的」。
+
+        刻意不帶 `owner_id`：選項要列出所有建立者，否則選定某人後選單會塌成只剩他一個。
+
+        Args:
+            actor_id: 呼叫者（用於排除其已在籍之課程）。
+            now: 與 `build_list_stmt` 同一時點，判定期間是否已過。
+
+        Returns:
+            建立者 `USER_ID` 清單（順序不保證，由 service 依姓名排序）。
+        """
+        listed = (
+            self.build_list_stmt(
+                actor_id=actor_id,
+                scope="all",
+                keyword=keyword,
+                tag_id=tag_id,
+                unit_tag_id=unit_tag_id,
+                now=now,
+            )
+            .order_by(None)
+            .subquery()
+        )
+        return list(await db.scalars(select(listed.c.OWNER_ID).distinct()))
+
     async def counts_by_course(self, db: AsyncSession, course_ids: list[int]) -> dict[int, tuple[int, int]]:
         """`{course_id: (章節數, 在籍學員數)}`——**兩次 grouped query，不是逐筆**。
 

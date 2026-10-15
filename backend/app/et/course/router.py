@@ -42,6 +42,7 @@ from app.et.course.schemas import (
     ItemCreateReq,
     ItemReorderReq,
     ItemRow,
+    OwnerOption,
     PublishCheckResult,
     PublishResult,
     ReopenCourseReq,
@@ -180,6 +181,30 @@ async def list_filter_tags(db: AsyncSession = Depends(get_db)) -> list[TagOption
     舊課程從此搜不到，而畫面上不會有任何異常。
     """
     return await _service.list_filter_tags(db)
+
+
+@router.get(
+    "/courses/filter-owners",
+    response_model=list[OwnerOption],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+)
+async def list_filter_owners(
+    ctx: EtContext = Depends(get_et_context),
+    db: AsyncSession = Depends(get_db),
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    tag_id: Annotated[int | None, Query(ge=1, le=MAX_BIGINT)] = None,
+    unit_tag_id: Annotated[int | None, Query(ge=1, le=MAX_BIGINT)] = None,
+) -> list[OwnerOption]:
+    """ET01「全部課程」的建立者下拉（#648）：整個母體的建立者，**不分頁**。
+
+    篩選參數與 `GET /courses` 同名同上限，但**不收 `owner_id`、`page`、`limit`**——
+    選項要列出所有建立者，且不得隨翻頁改變。
+
+    ⚠️ 與 `/courses/filter-tags` 同樣是字面路徑，必須宣告在 `/courses/{course_id}` 之前。
+    """
+    return await _service.list_filter_owners(
+        db, actor_id=ctx.user_id, keyword=q, tag_id=tag_id, unit_tag_id=unit_tag_id
+    )
 
 
 @router.get(

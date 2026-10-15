@@ -402,3 +402,96 @@ describe("課程列表：純 ET 管理者（#463）", () => {
     expect(screen.queryByText("檢視模式（唯讀）")).not.toBeInTheDocument()
   })
 })
+
+/**
+ * 「建立者」下拉的選項來源（#648）。
+ *
+ * 原本由**當頁 12 張卡片**推導：課程全落在第 2 頁以後的教師不會出現，翻頁時選項也跟著變。
+ * 改讀後端 `GET /courses/filter-owners`（整個母體、不分頁）。
+ */
+describe("課程列表：建立者下拉的選項來源（#648）", () => {
+  beforeEach(() => {
+    searchParams = new URLSearchParams({ scope: "all" })
+  })
+
+  it("列出不在當頁卡片中的建立者", async () => {
+    // 當頁卡片只有陳大華、林助教；第三位的課在第 2 頁以後
+    server.use(
+      http.get("/api/et/courses/filter-owners", () =>
+        HttpResponse.json([
+          { owner_id: "t01", owner_name: "陳大華", owner_is_disabled: false },
+          { owner_id: "t02", owner_name: "林助教", owner_is_disabled: false },
+          { owner_id: "t09", owner_name: "王第二頁", owner_is_disabled: false },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtCourseListPage />)
+    await screen.findByText("採血作業新進人員訓練")
+    expect(screen.queryByText("王第二頁")).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText("建立者"))
+
+    expect(await screen.findByRole("option", { name: "王第二頁" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "陳大華" })).toBeInTheDocument()
+  })
+
+  it("停用帳號的建立者標示「（已停用帳號）」", async () => {
+    server.use(
+      http.get("/api/et/courses/filter-owners", () =>
+        HttpResponse.json([{ owner_id: "t08", owner_name: "王離職", owner_is_disabled: true }]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtCourseListPage />)
+    await screen.findByText("採血作業新進人員訓練")
+
+    await user.click(screen.getByLabelText("建立者"))
+
+    expect(await screen.findByRole("option", { name: "王離職（已停用帳號）" })).toBeInTheDocument()
+  })
+
+  it("選項查詢不帶頁碼、筆數與建立者——翻頁與選定建立者都不改變選項", async () => {
+    // 對應後端契約：`filter-owners` 只收 q / tag_id / unit_tag_id
+    const seen: URLSearchParams[] = []
+    server.use(
+      http.get("/api/et/courses/filter-owners", ({ request }) => {
+        seen.push(new URL(request.url).searchParams)
+        return HttpResponse.json([
+          { owner_id: "t01", owner_name: "陳大華", owner_is_disabled: false },
+          { owner_id: "t02", owner_name: "林助教", owner_is_disabled: false },
+        ])
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtCourseListPage />)
+    await screen.findByText("採血作業新進人員訓練")
+
+    await user.click(screen.getByLabelText("建立者"))
+    await user.click(await screen.findByRole("option", { name: "林助教" }))
+    await waitFor(() => expect(screen.queryByText("採血作業新進人員訓練")).not.toBeInTheDocument())
+
+    expect(seen.length).toBeGreaterThan(0)
+    for (const params of seen) {
+      expect(params.has("page")).toBe(false)
+      expect(params.has("limit")).toBe(false)
+      expect(params.has("owner_id")).toBe(false)
+      expect(params.has("scope")).toBe(false)
+    }
+  })
+
+  it("「我建立的」分頁不查建立者選項", async () => {
+    let called = 0
+    server.use(
+      http.get("/api/et/courses/filter-owners", () => {
+        called += 1
+        return HttpResponse.json([])
+      }),
+    )
+    searchParams = new URLSearchParams()
+    renderWithProviders(<EtCourseListPage />)
+    await screen.findByText("採血作業新進人員訓練")
+
+    expect(called).toBe(0)
+  })
+})
