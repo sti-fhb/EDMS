@@ -5,6 +5,7 @@
 行程內計數即足、不引入 Redis；帳號鎖定（5 次錯誤）為第二層防線（見 DP_USER）。
 """
 
+import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
@@ -61,6 +62,8 @@ _SWEEP_EVERY = 1000
 # outer dict 硬上限：達上限時先 sweep 回收，仍滿則 fail-closed 拒新 key，
 # 取得真正的記憶體上界（縱深防禦，即使上游 IP 來源被偽造亦不致無限成長）。
 _DEFAULT_MAX_KEYS = 100_000
+
+logger = logging.getLogger(__name__)
 
 
 class SlidingWindowCounter:
@@ -130,6 +133,19 @@ class SlidingWindowCounter:
         if key not in self._hits and len(self._hits) >= self._max_keys:
             self._sweep(current)
             if len(self._hits) >= self._max_keys:
+                # 🔴 觸頂必留痕（2026-10-14 Security MEDIUM-1）。fail-open 代表「這個 key 從此
+                # 記不進表 ⇒ count 恆 0 ⇒ 呼叫端的上限對它完全失效」，而那是**無聲**的：
+                # 功能看起來一切正常，只是某一批 key 的保護消失了。
+                #
+                # ⚠️ 本類別的飽和門檻比 `core/cooldown.py` 低約一個量級，因為視窗長得多：
+                # cooldown 保留 3,600 秒 → 填滿 100k 需 27.8 key/s（約 28 個 IP）；
+                # 本 counter 若以 86,400 秒視窗使用 → 僅需 1.16 key/s（**約 2～3 個 IP 持續一天**）。
+                # 記憶體上界約 104 MB（100k × deque+str+float 實測），部署估算時需納入。
+                logger.warning(
+                    "SlidingWindowCounter key 空間已滿（上限 %s），本次不記錄；"
+                    "該 key 的上限保護自此失效 event=counter_key_space_full",
+                    self._max_keys,
+                )
                 return False
         bucket = self._hits[key]
         cutoff = current - self._window

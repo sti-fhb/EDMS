@@ -98,7 +98,16 @@ def _overwrite_key(email: str) -> str:
 
     ⚠️ 不加 IP 維度：加了就是換 IP 即繞過。代價是它分不出攻擊者與受害者——
     攻擊者用罄額度後，受害者本人也寄不出信（#234 AC 2 只能部分達成，詳見該 issue 規劃留言）。
+
+    ⚠️ **「N 次」不是硬保證**（Security MEDIUM-2）：`count` 與 `try_record` 之間隔著
+    `_overwrite_max` 的 DB 查詢與整段發信 await，同一 IP 併發送出多個同 Email 請求時，
+    全部會在任何一次寫入發生前讀到 count=0。既有冷卻章本來就有同一個窗（見 `core/cooldown.py`
+    檔頭的已知取捨），差別在**後果的尺度**：原本是「可能多送幾封信」，接上額度後變成
+    「一次爆發就打掉受害者當日額度」。對 #234 的攻擊者無益（併發不會延長佔用、只會更快燒完
+    自己的額度），但對「指定目標阻斷」是實質加速。要處理的方向是「先占位、失敗再退還」而非加鎖。
     """
+    # 上游 `NormalizedEmailStr` 已 strip + lower，此處 `lower()` 純為防禦；與同檔
+    # `_verify_send_key` 不做 lower 的不對稱是歷史差異，不代表其中一邊有大小寫問題。
     return f"register-overwrite:{email.lower()}"
 
 
@@ -107,6 +116,11 @@ async def _overwrite_max(db: AsyncSession) -> int:
 
     ⚠️ 占用時間是 **本值 × RESET_TOKEN_TTL_MIN**，兩者互鎖。只收斂本值不足以界定占用：
     上限 10 搭配 TTL 120 分鐘即為 20 小時／日，本修法形同失效。調整任一者時請一併評估另一者。
+
+    ⛔ **夾回綁在這個唯一的讀取端**（Security LOW-1）。今天只有 register / resend 兩個呼叫點
+    共用本函式，所以成立；**日後若排程或別的模組也要讀這個參數，不得自行呼叫 `get_int_param`**
+    ——那會靜默繞過夾回，而且不會有任何測試變紅。要新增讀取端就改走本函式，或把夾回下沉到
+    DP params 模組讓它與參數放在一起。
     """
     raw = await _params.get_int_param(db, "LOGIN", "REGISTER_OVERWRITE_MAX_PER_DAY", _OVERWRITE_MAX_DEFAULT)
     low, high = _OVERWRITE_MAX_RANGE
@@ -298,12 +312,27 @@ async def register(
         # 靜默路徑原本**一行 log 都沒有**（Security MEDIUM-2）：批量探測受邀名單時，命中的
         # 那些（真正敏感的那半）在伺服器端完全不可見；客服也分不出「靜默擋下」與「信寄了
         # 沒到」。log 不對外，記它不削弱防列舉。Email 比照既有寫法遮罩。
-        logger.info(
-            "自助註冊靜默受理 ip=%s email=%s reason=%s",
-            get_client_ip(),
-            mask_email(data.email),
-            "invited" if invited else ("others_cooling" if others_cooling else "over_cap"),
-        )
+        if over_cap:
+            # 🔴 **WARNING 而非 INFO**（2026-10-14 Security HIGH-1）：本次修法把攻擊**變安靜了**。
+            # 修法前要讓該列永不逾期，攻擊者必須每 ≤1800 秒打一次 ⇒ 受害者每天收到 48～144 封
+            # 驗證信、必然察覺並通報；修法後每日約 5 個請求即可維持飽和，受害者只收到 5 封。
+            # 偵測責任因此從「受害者的信箱」移到**伺服器端這一行**——它若與 `reason=invited`
+            # 同級同句，就等於沒有任何訊號。
+            #
+            # 一般使用者誤觸機率低（上限預設 5 次／日，且只計「真的重建並寄信」那幾次），
+            # 故 WARNING 不會變成噪音。告警規則請抓 `event=` 字串而非整句。
+            logger.warning(
+                "自助註冊每日重建額度已滿 ip=%s email=%s event=register_overwrite_cap_reached",
+                get_client_ip(),
+                mask_email(data.email),
+            )
+        else:
+            logger.info(
+                "自助註冊靜默受理 ip=%s email=%s reason=%s",
+                get_client_ip(),
+                mask_email(data.email),
+                "invited" if invited else "others_cooling",
+            )
         return {"message": _REGISTER_MESSAGE, "retry_after": cooldown_sec}
 
     sent = await _register_service.register(

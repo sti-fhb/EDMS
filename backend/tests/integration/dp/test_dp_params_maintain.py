@@ -497,7 +497,9 @@ async def test_hiding_is_per_detail_not_per_master(db, admin_gate):
 
     assert "VERIFY_SEND_COOLDOWN_SEC" not in keys  # 這一列被藏
     assert "FAIL_LOCK_COUNT" in keys  # 同主檔的其他列照常可見
-    assert len(keys) == 5  # DB 有 6 列，回傳 5 列
+    # ⚠️ 右側數字會隨 seed 增減而過期，而本斷言**不會因此變紅**（新增的列若是 HIDDEN，
+    #    回傳數不變）。2026-10-14 已因 #234 的 REGISTER_OVERWRITE_MAX_PER_DAY 由 6 → 7。
+    assert len(keys) == 5  # LOGIN 主檔目前 7 列，其中 2 列 HIDDEN
     assert all(d.edit_scope == "ADMIN" for d in login.details)  # 回傳的都是可編輯的
 
 
