@@ -221,7 +221,7 @@ describe("ET06 章節學習頁", () => {
       expect(await screen.findByRole("button", { name: /開始作答/ })).toBeInTheDocument()
     })
 
-    it("鎖定項目點擊時擋下並提示，點名擋路的教材與所在章節（AC 6 / ET-MSG-ET06-001 / #649）", async () => {
+    it("鎖定項目點擊時擋下並提示，點名擋路的教材（AC 6 / ET-MSG-ET06-001 / #649）", async () => {
       // 擋路的是第 1 章第 1 項的教材（id 100）
       mockStructure({ chapters: lockedChapters(), blocking_item_id: 100 })
       const user = userEvent.setup()
@@ -230,7 +230,7 @@ describe("ET06 章節學習頁", () => {
       await user.click(await screen.findByText("基本概念測驗"))
 
       // **提示而非靜默無反應**——學員需要知道為什麼點不動
-      expect(await screen.findByText("請先完成「採血流程概論」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
+      expect(await screen.findByText("請先完成「採血流程概論」後解鎖")).toBeInTheDocument()
       // 內容區沒有切過去（測驗面板不該出現）
       expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
@@ -245,11 +245,11 @@ describe("ET06 章節學習頁", () => {
 
       await user.click(await screen.findByText("第二章教材"))
 
-      expect(await screen.findByText("請先通過測驗「基本概念測驗」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
+      expect(await screen.findByText("請先通過測驗「基本概念測驗」後解鎖")).toBeInTheDocument()
       expect(screen.queryByText(/影片/)).not.toBeInTheDocument()
     })
 
-    it("擋路的是前一章的文件教材：提示寫出章節名稱與教材名稱，不寫「影片」也不寫「本章節」（#649）", async () => {
+    it("擋路的是前一章的文件教材：提示點名教材名稱，不寫「影片」也不寫「本章節」（#649）", async () => {
       // 舊提示只依前緣型別二分：教材一律說「影片學習」、一律說「本章節」——擋路的若是
       // **文件**教材、又在**前一章**，兩個詞都錯，學員會去本章找一支不存在的影片
       mockStructure({ chapters: crossChapterChapters({ firstMaterialDone: false }), blocking_item_id: 100 })
@@ -258,7 +258,7 @@ describe("ET06 章節學習頁", () => {
 
       await user.click(await screen.findByText("第二章教材"))
 
-      expect(await screen.findByText("請先完成「採血流程概論」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
+      expect(await screen.findByText("請先完成「採血流程概論」後解鎖")).toBeInTheDocument()
       expect(screen.queryByText(/影片|本章節/)).not.toBeInTheDocument()
     })
 
@@ -331,7 +331,7 @@ describe("ET06 章節學習頁", () => {
       mockStructure({ chapters: lockedChapters(), blocking_item_id: 100, last_item_id: 100 })
       renderWithProviders(<EtLearnPage />)
 
-      expect(await screen.findByText("請先完成「採血流程概論」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
+      expect(await screen.findByText("請先完成「採血流程概論」後解鎖")).toBeInTheDocument()
       // 沒有把鎖定的測驗面板顯示出來
       expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
