@@ -450,6 +450,26 @@ async def test_access_true_for_editor_or_reviewer(db, client):
     token = create_access_token(sub="ed", ttl_minutes=15)
     resp = await client.get("/api/dm/personal/access", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200 and resp.json()["can_access"] is True
+    assert resp.json()["can_draft"] is True, "編輯者看得到草稿匣"
+
+
+async def test_access_純審核者可進個人專區但沒有草稿匣(db, client):
+    """#657：`spec_us9` FR-001 寫的是「草稿匣（**編輯者**）」。
+
+    建草稿的端點全掛 `_ensure_editor`（需 `DM_EDITOR`），所以純審核者**不可能有草稿**，
+    那個頁籤對他永遠是空的。`can_access` 與 `can_draft` 必須分開：前者決定側欄入口
+    （編輯者**或**審核者），後者決定頁內的草稿匣頁籤（僅編輯者）。
+
+    ⚠️ 這條是本案唯一能分辨兩個旗標的測試——若 `can_draft` 被寫成 `= can_access`，
+    只測編輯者的那條照樣全綠。
+    """
+    await _seed_user(db, "revonly", "純審核")
+    await _grant(db, "revonly", DM_REVIEWER)
+    token = create_access_token(sub="revonly", ttl_minutes=15)
+    resp = await client.get("/api/dm/personal/access", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    assert resp.json()["can_access"] is True, "審核者仍可進個人專區（看我的文件動態）"
+    assert resp.json()["can_draft"] is False, "純審核者不得出現草稿匣頁籤"
 
 
 async def test_access_false_for_viewer_or_admin_only(db, client):

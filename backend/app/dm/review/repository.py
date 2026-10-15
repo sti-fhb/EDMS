@@ -142,7 +142,18 @@ class ReviewCenterRepository:
 
         #503 起與 `pending_stmt()` 一致改回語句——原本在 service 層手寫 count + offset/limit，
         那是 `paginate_rows()`（#464）出現之前的寫法。
+
+        ⚠️ **送審者（#657）以 `outerjoin` 取 `DpUser.user_name`**：`DM_REVIEW` 沒有送審者欄位，
+        來源是稽核基底的 `CREATED_USER`（與 `personal/repository` 之審核者視角同一來源）。
+        該欄**無 FK**（同 `ASSIGNED_REVIEWER`），inner join 會讓查無帳號的整列從清單消失。
+
+        ⚠️ 此 join 不會灌大 `paginate_rows()` 的 count：`DpUser.user_id` 是 PK，至多配對一列。
+        （一對多 join 才會產生笛卡兒積而使總筆數偏大——此處不適用，但新增 join 時都要先問這句。）
+
+        `reason` 於此原樣帶出，**由 service 層依 `status` 決定是否呈現**——條件判斷放查詢裡會
+        讓「為什麼核准列沒有原因」這件事藏在 SQL 中，讀者在 service 看不到。
         """
+        submitter = aliased(DpUser, name="dm_review_submitter")
         return (
             select(
                 DmReview.review_id,
@@ -150,11 +161,14 @@ class ReviewCenterRepository:
                 DmReview.review_type,
                 DmReview.status,
                 DmReview.complete_date,
+                DmReview.reason,
                 DmDocument.doc_name,
                 DmDocVersion.version_no,
+                submitter.user_name.label("submitter_name"),
             )
             .join(DmDocument, DmReview.doc_id == DmDocument.doc_id)
             .outerjoin(DmDocVersion, DmReview.version_id == DmDocVersion.version_id)
+            .outerjoin(submitter, DmReview.created_user == submitter.user_id)
             .where(*self._completed_where(reviewer_id, keyword))
             .order_by(DmReview.complete_date.desc(), DmReview.review_id.desc())  # tiebreak 同 pending_stmt
         )

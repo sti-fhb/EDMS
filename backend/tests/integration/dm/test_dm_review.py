@@ -436,6 +436,73 @@ async def test_completed_keyword_search(db):
     assert page["meta"]["total"] == 1 and page["data"][0].doc_id == "DM-MANUAL-000343"
 
 
+async def test_completed_帶出送審者與退回原因(db):
+    """#657：已完成清單補「送審者」「退回原因」兩欄。
+
+    送審者來源是 `DM_REVIEW.CREATED_USER`——該表**沒有**送審者欄位（只有 `ASSIGNED_REVIEWER`
+    與 `APPROVER_USER_ID`），與我的文件動態的審核者視角同一來源（`personal/repository` 之
+    `party_col=DmReview.created_user`）。
+    """
+    await _seed_user(db, "ed", "撰寫者甲", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, _, r1 = await _new_submission(db, "DM-SOP-000657")
+    await _svc.reject(db, review_id=r1.review_id, reason="格式不符，請補附件", op=_op("rev1"))
+    _, _, r2 = await _new_submission(db, "DM-SOP-000658")
+    await _svc.approve(db, review_id=r2.review_id, op=_op("rev1"))
+
+    rows = {c.doc_id: c for c in (await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20))["data"]}
+
+    assert rows["DM-SOP-000657"].submitter_name == "撰寫者甲"
+    assert rows["DM-SOP-000657"].reason == "格式不符，請補附件"
+    # 正向錨點配對：核准列也要有送審者（證明 join 不是只在退回列生效），但原因留空
+    assert rows["DM-SOP-000658"].submitter_name == "撰寫者甲"
+    assert rows["DM-SOP-000658"].reason is None, "核准不是退回，不該有退回原因"
+
+
+async def test_completed_廢止核准不帶廢止申請原因(db):
+    """🔴 `DM_REVIEW.REASON` 一個欄位承載兩種語意，核准列不得把它當退回原因顯示。
+
+    | 情境 | REASON 的內容 | 誰寫的 |
+    |---|---|---|
+    | 退回（REJECTED）| 退回原因 | 審核者 |
+    | 廢止送審（OBSOLETE）| **廢止申請原因** | 申請人 |
+
+    已完成清單含 `APPROVED` 列。廢止核准那筆的 `REASON` 裡是申請人寫的廢止申請原因，
+    顯示在「退回原因」欄下是**錯的資訊**（不是缺漏）。規則與 #554 一致：僅 `REJECTED` 帶值
+    （`personal/service.py` 已有同一條規則與註解）。
+
+    ⚠️ 沒有這條測試的話，`reason=r.reason` 這種無條件帶出會全綠通過。
+    """
+    await _seed_user(db, "ed", "申請人乙", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    doc = await _doc(db, "DM-SOP-000659", status="PENDING_OBSOLETE", current_version_id=None)
+    v = await _add_version(db, "DM-SOP-000659", "1.0", status="PUBLISHED", published=utcnow())
+    doc.current_version_id = v.version_id
+    r = await _review(db, "DM-SOP-000659", v.version_id, review_type="OBSOLETE", reviewer="rev1")
+    r.reason = "此 SOP 已由新制取代"  # 申請人於發起廢止時填寫
+    await db.flush()
+    await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    row = next(c for c in (await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20))["data"])
+    assert row.status == "APPROVED", "前提錨點：這筆必須是核准，否則下面的斷言驗不到東西"
+    assert row.reason is None, "廢止核准列不得把申請人寫的廢止申請原因當成退回原因帶出"
+    assert row.submitter_name == "申請人乙"
+
+
+async def test_completed_查無送審者帳號時_submitter_name_為_None(db):
+    """`CREATED_USER` 無 FK（同 `ASSIGNED_REVIEWER`）→ 用 outerjoin，查無時回 None 由前端顯示「—」。
+
+    不用 inner join：那會讓整列**從清單消失**，審核者看不到自己處理過的案件，比顯示「—」更糟。
+    """
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, _, r = await _new_submission(db, "DM-SOP-000660", author="ghost657")  # DP_USER 查無此列
+    await _svc.approve(db, review_id=r.review_id, op=_op("rev1"))
+
+    page = await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20)
+    assert page["meta"]["total"] == 1, "送審者查無帳號不得讓整列消失（outerjoin 而非 join）"
+    assert page["data"][0].submitter_name is None
+
+
 # ── 催辦門檻（#503 第 1 項）─────────────────────────
 
 

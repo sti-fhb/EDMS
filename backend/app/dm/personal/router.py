@@ -20,8 +20,16 @@ _service = PersonalService()
 
 @router.get("/personal/access", response_model=PersonalAccess)
 async def personal_access(ctx: DmContext = Depends(get_dm_context)) -> PersonalAccess:
-    """個人專區入口可見性（FR-004）：具編輯者或審核者角色（供前端閘側欄單項；SA 裁示 Q1=C）。"""
-    return PersonalAccess(can_access=has_role(ctx.roles, DM_EDITOR) or has_role(ctx.roles, DM_REVIEWER))
+    """個人專區入口可見性（FR-004）：具編輯者或審核者角色（供前端閘側欄單項；SA 裁示 Q1=C）。
+
+    另回 `can_draft`（#657）供前端決定是否渲染**草稿匣頁籤**——僅編輯者（`spec_us9` FR-001）。
+    兩個旗標語意不同，見 `PersonalAccess` 之欄位說明。
+    """
+    is_editor = has_role(ctx.roles, DM_EDITOR)
+    return PersonalAccess(
+        can_access=is_editor or has_role(ctx.roles, DM_REVIEWER),
+        can_draft=is_editor,
+    )
 
 
 @router.get("/personal/drafts", response_model=list[DraftItem])

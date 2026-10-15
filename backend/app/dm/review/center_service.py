@@ -253,6 +253,12 @@ class ReviewCenterService:
                 status=r.status,
                 version_no=r.version_no,
                 complete_date=r.complete_date,
+                submitter_name=r.submitter_name,
+                # #657：`REASON` 在退回時是審核者寫的退回原因，但在 OBSOLETE 送審時是**申請人
+                # 自己寫的廢止申請原因**。本清單含 APPROVED 列，無條件帶出會讓廢止核准那筆把
+                # 申請原因顯示在「退回原因」欄下——錯的資訊，不是缺漏。同 #554 於
+                # `dm/personal/service.py` 的規則。
+                reason=r.reason if r.status == _REJECTED else None,
             )
             for r in paged["data"]
         ]
