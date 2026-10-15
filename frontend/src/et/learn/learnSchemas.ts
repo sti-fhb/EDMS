@@ -68,7 +68,7 @@ export interface LearnStructure {
   survey: SurveyEntry | null
   /**
    * 擋住學習前緣的那一項之 `item_id`；全部完成或教師預覽時為 `null`（#361 / #649）。
-   * 前端由 `chapters` 找出該項的名稱、型別與所在章節組提示文字。
+   * 前端由 `chapters` 找出該項的名稱與型別組提示文字。
    *
    * 🔴 **由後端給，前端只做「項目 → 文案」的對應。** 自行推導要用到解鎖規則
    * （依序 + 0 題測驗例外），那等於把同一條規則寫成兩個版本。
@@ -80,22 +80,20 @@ export interface LearnStructure {
 }
 
 /**
- * 鎖定項目的提示（ET-MSG-ET06-001 / 002）：**點名擋路的那一項與它所在的章節**（#649）。
+ * 鎖定項目的提示（ET-MSG-ET06-001 / 002）：**點名擋路的那一項**（#649）。
  *
  * #649 前只依前緣型別二分成兩句寫死的話（「請先完成本章節之影片學習」／「請通過本章節之
  * 測驗後解鎖」）：擋路的是**文件**教材時仍說「影片」、在**前一章**時仍說「本章節」——學員會
  * 去本章找一支不存在的影片。點名之後兩個詞都不需要了。
  *
- * 章節用**名稱**而非「第 N 章」：側欄只顯示名稱、不編號，名稱本身也常寫「第一章…」，
- * 另編一個號碼會讓學員自己去數、教師調過順序時還會與名稱對不上。
+ * 不附章節名稱（2026-10-15 手測回饋）：項目名稱已足以在側欄找到它，加上章節讓提示過長。
  */
 export function lockedHint(chapters: ChapterNode[], blockingItemId: number | null): string {
-  for (const chapter of chapters) {
-    const item = chapter.items.find((it) => it.item_id === blockingItemId)
-    if (item === undefined) continue
+  const item = chapters.flatMap((c) => c.items).find((it) => it.item_id === blockingItemId)
+  if (item !== undefined) {
     return item.item_type === "QUIZ"
-      ? `請先通過測驗「${item.title}」（${chapter.chapter_name}）後解鎖` // ET-MSG-ET06-002
-      : `請先完成「${item.title}」（${chapter.chapter_name}）後解鎖` // ET-MSG-ET06-001
+      ? `請先通過測驗「${item.title}」後解鎖` // ET-MSG-ET06-002
+      : `請先完成「${item.title}」後解鎖` // ET-MSG-ET06-001
   }
   // 有鎖定項目時後端必回前緣（見 `first_blocking_item`）；結構與前緣同一份回應，對不上只可能
   // 是資料異常——給一句不指錯方向的話，而不是空白
