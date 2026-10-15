@@ -645,8 +645,12 @@ class EtChapterRepository:
                 )
         await db.flush()
 
-    async def soft_delete_with_cascade(self, db: AsyncSession, chapter_ids: list[int], operator: OperatorInfo) -> None:
+    async def soft_delete_with_cascade(
+        self, db: AsyncSession, chapter_ids: list[int], operator: OperatorInfo, *, stamp: bool = True
+    ) -> None:
         """軟刪除章節，並連動其下**所有項目**（教材 / 測驗）與學員紀錄。
+
+        `stamp` 之語意見 `EtItemRepository.soft_delete_with_cascade`，此處原樣轉交。
 
         項目層的連帶處理已於 #203 抽至 `EtItemRepository.soft_delete_with_cascade`——
         #202 建立本方法時尚無項目端點，連帶範圍只到 `ET_PROGRESS` /
@@ -661,7 +665,7 @@ class EtChapterRepository:
         item_ids = list(
             await db.scalars(select(EtItem.item_id).where(EtItem.chapter_id.in_(chapter_ids), EtItem.deleted == 0))
         )
-        await EtItemRepository().soft_delete_with_cascade(db, item_ids, operator)
+        await EtItemRepository().soft_delete_with_cascade(db, item_ids, operator, stamp=stamp)
         await db.execute(
             update(EtChapter)
             .where(EtChapter.chapter_id.in_(chapter_ids), EtChapter.deleted == 0)
@@ -819,7 +823,9 @@ class EtItemRepository:
                 )
         await db.flush()
 
-    async def soft_delete_with_cascade(self, db: AsyncSession, item_ids: list[int], operator: OperatorInfo) -> None:
+    async def soft_delete_with_cascade(
+        self, db: AsyncSession, item_ids: list[int], operator: OperatorInfo, *, stamp: bool = True
+    ) -> None:
         """軟刪除項目，並連動其教材 / 測驗本體與學員紀錄——**全部軟刪除**。
 
         1. `ET_PROGRESS`（學員於該項目之完成進度）
@@ -873,9 +879,17 @@ class EtItemRepository:
         # 而這條路沒經過任何 `set_item_completed`。少了這裡，那些人的 `COMPLETED_AT` 會一直
         # 是空的——ET04 照樣把他們列為通過（判定是即時的），但通過時間顯示「—」且排到最後。
         # 那是看得見的降級而非錯誤資訊，但不該發生。
-        progress = EtProgressRepository()
-        for course_id in course_ids:
-            await progress.stamp_completed_at(db, course_id=course_id, operator=operator)
+        #
+        # 🔴 `stamp=False` 的唯一用途是 **#631 的「更新」**：那條路徑在同一個交易裡
+        # 先刪除、後新增，此刻蓋章會用「只剩兩項」的中間狀態判定完課——教師若同一批
+        # 又新增了一項，學員實際上沒完課，而 `COMPLETED_AT` 只寫一次、不會被清掉。
+        # 該路徑改為整批套用完成後自己呼叫一次 `stamp_completed_at`。
+        #
+        # ⚠️ 預設 `True`：所有既有呼叫端都是「刪完即為最終狀態」，行為不變。
+        if stamp:
+            progress = EtProgressRepository()
+            for course_id in course_ids:
+                await progress.stamp_completed_at(db, course_id=course_id, operator=operator)
 
     async def resequence_remaining(self, db: AsyncSession, chapter_id: int, operator: OperatorInfo) -> None:
         """刪除後把剩餘項目之 `SORT_ORDER` 重編為 1..N。"""

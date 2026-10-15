@@ -50,12 +50,16 @@ from app.et.course.rules import (
 )
 from app.et.course.schemas import (
     CloseCourseReq,
+    ContentUpdateResult,
     CourseStatusResult,
     PublishBlockerRow,
     PublishCheckResult,
     PublishResult,
     ReopenCourseReq,
 )
+from app.et.course.stage_apply import apply_stage
+from app.et.course.stage_repository import EtCourseStageRepository
+from app.et.course.stage_rules import to_course_snapshot
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.notify.mailer import CourseInviteMailer
 from app.services import AuditLogService, ParamService
@@ -81,6 +85,7 @@ class EtPublishService:
         audit: AuditLogService | None = None,
         tag_invite: EtTagInviteRepository | None = None,
         invite_mailer: CourseInviteMailer | None = None,
+        stage: EtCourseStageRepository | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._publish = publish_repo or EtPublishRepository()
@@ -88,6 +93,7 @@ class EtPublishService:
         self._audit = audit or AuditLogService()
         self._tag_invite = tag_invite or EtTagInviteRepository()
         self._invite_mailer = invite_mailer or CourseInviteMailer()
+        self._stage = stage or EtCourseStageRepository()
 
     async def check(self, db: AsyncSession, course_id: int, *, actor_id: str) -> PublishCheckResult:
         """發布預檢：回傳缺漏清單，**不改變任何狀態**。
@@ -163,6 +169,89 @@ class EtPublishService:
             version=new_version,
             invited_count=len(invited_ids),
         )
+
+    async def update_published(
+        self, db: AsyncSession, course_id: int, *, operator: OperatorInfo
+    ) -> ContentUpdateResult:
+        """「更新」已發布課程的內容：檢核暫存區 → 通過才整批生效（#631）。
+
+        已發布課程的內容編輯原本即時生效，學員會看到教師編到一半的東西（0 題問卷被填答
+        後永久凍結、0 題測驗讓項目永遠完成不了、改配分後總分不再是 100）。本端點是那些
+        編輯**唯一的**生效入口。
+
+        ## 檢核的是「即將生效的內容」
+
+        `_evaluate` 的快照來自活表，而活表是**已生效版本**；這裡改由暫存樹組出同形的
+        `CourseSnapshot`，再餵給**同一個** `evaluate_publish`。⛔ 不得另寫一份檢核——
+        發布 / 關閉 / 再開課 / 更新四個動作共用同一組規則，各自複製必然分岔，而分岔的
+        症狀是「更新擋下了發布會放行的課程」，沒有錯誤訊息。
+
+        ## 未通過時活表一行都不會動
+
+        檢核在 `apply_stage` 之前，且兩者同一個交易：未通過直接拋 `AppError`，連
+        `_park_sort_orders` 都還沒跑。**AC 2「未通過時學員端維持上一版」靠的就是這件事**，
+        不是靠補償或回滾。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001` 查無課程；403 `ET_COURSE_002` 非擁有者；
+                409 `ET_COURSE_010` 課程為草稿（草稿直接編輯後發布，不走暫存）；
+                422 `ET_PUBLISH_001` 檢核未通過（body 另帶 `blockers`）。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if course.status == COURSE_DRAFT:
+            # 草稿沒有學員，內容不需版本化——它的生效入口是「發布」。
+            # ⛔ 不共用 `ET_PUBLISH_002`：下一步不同（那是「這門課不能發布」，這是
+            # 「草稿不走這條路，請直接編輯後發布」），比照 `ET_COURSE_006` / `007`
+            # 刻意不共用的理由。
+            raise AppError(
+                status_code=409,
+                detail="草稿課程請直接編輯後發布，不需更新",
+                error_code="ET_COURSE_010",
+            )
+
+        # 🔴 **先取行鎖再讀暫存樹**：這整段（讀 → 套用 → 清空）必須對同一門課序列化。
+        # 教師雙擊或兩個分頁同時按下時，沒有鎖的話兩邊都會讀到完整的暫存樹並各自新增
+        # 一份，活表出現重複的章節與題目。見 `lock_course` 的說明。
+        await self._stage.lock_course(db, course_id)
+        # ⚠️ 取鎖**之後**重讀課程列：上面的 `_require_owned` 讀的是鎖前快照。影響面小
+        # （擁有權不可移轉、狀態只擋 DRAFT），但「先鎖再讀」才是這類流程的標準寫法。
+        await db.refresh(course)
+        nodes = await self._stage.load_tree(db, course_id)
+        if not nodes:
+            # 自上次更新以來沒有任何編輯。**安全的 no-op**——不跑檢核也不寫稽核：
+            # 對一門內容未變的課程回 422 會讓教師以為自己弄壞了什麼。
+            return ContentUpdateResult(course_id=course_id, applied_count=0)
+
+        snapshot = to_course_snapshot(
+            nodes,
+            status=course.status,
+            open_start_at=course.open_start_at,
+            open_end_at=course.open_end_at,
+            # 受訓對象與起訖時間**不在暫存區**：它們走右下角的「儲存」、不走「更新」，
+            # 故一律取活表的當前值。
+            tag_count=await self._publish.tag_count(db, course_id),
+        )
+        blockers = evaluate_publish(snapshot, obsolete_doc_ids=await self._obsolete_doc_ids(db, snapshot.doc_ids))
+        if blockers:
+            raise AppError(
+                status_code=422,
+                detail="更新條件未滿足",
+                error_code="ET_PUBLISH_001",
+                extra={
+                    "blockers": [{"code": b.code, "message": b.message, "target_id": b.target_id} for b in blockers]
+                },
+            )
+
+        stats = await apply_stage(db, course=course, nodes=nodes, operator=operator)
+        await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
+        # 🔴 稽核描述要帶**刪除統計**，不能只有節點數。
+        #
+        # 這支端點沒有 request body，而它會經由 cascade 軟刪**學員的進度與作答紀錄**。
+        # 只記 `len(nodes)` 的話，事後無法從 `DP_AUDIT_LOG` 區分「改了一個標題」與
+        # 「刪掉五章連同全班進度」。只記型別與筆數，不記內容、不記學員識別。
+        removed = "".join(f"，刪除 {k} {v} 筆" for k, v in sorted(stats.removed.items()))
+        await self._log(db, operator.user_id, course_id, f"更新課程內容（{len(nodes)} 項）{removed}")
+        return ContentUpdateResult(course_id=course_id, applied_count=len(nodes))
 
     async def close(
         self, db: AsyncSession, course_id: int, req: CloseCourseReq, *, operator: OperatorInfo

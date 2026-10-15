@@ -32,6 +32,7 @@ from app.et.course.schemas import (
     ChapterRenameReq,
     ChapterReorderReq,
     CloseCourseReq,
+    ContentUpdateResult,
     CourseCard,
     CourseCreateReq,
     CourseCreateResult,
@@ -52,19 +53,21 @@ from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
 #: 狀態轉換與發布檢核之使用者維度上限（每分鐘）。
 #:
-#: 正常操作：發布一門課是 1 次 publish-check + 1 次 publish；關閉 / 再開課各 1 次。
-#: 一位教師一天按不到 5 次，20 遠高於任何真實使用。
+#: 正常操作：發布一門課是 1 次 publish-check + 1 次 publish；關閉 / 再開課各 1 次；
+#: 已發布課程的內容「更新」（#631）一次編輯一次。一位教師一天按不到 10 次，20 仍遠
+#: 高於任何真實使用。
 #:
 #: ## 為何**不**掛在 router 層
 #:
 #: 本 router 同時承載課程 / 章節 / 項目的全部編輯端點。掛在 router 層會把「教師連續
 #: 拖拉重排章節」也算進同一個桶——那是高頻的正常操作，會被誤擋。
 #:
-#: ## 為何四支端點**共用同一個分桶**
+#: ## 為何五支端點**共用同一個分桶**
 #:
-#: 貴的是 `_evaluate`（`snapshot` 的 7 個彙總查詢 + 逐份 DM 文件循序查詢），而
-#: `publish-check` / `publish` / `reopen` 三支都會跑它。只擋 `reopen` 的話，放大路徑
-#: 換一支端點就照樣開著。`close` 一併納入是因為它與 `reopen` 構成迴圈：每次成功都寫
+#: 貴的是**檢核**（彙總查詢 + 逐份 DM 文件循序查詢），而 `publish-check` / `publish` /
+#: `reopen` / `content/apply` 四支都會跑它（前三支走活表的 `snapshot`，`content/apply`
+#: 走暫存樹，但同樣要逐份問 DM 廢止狀態）。只擋其中一支的話，放大路徑換一支端點
+#: 就照樣開著。`close` 一併納入是因為它與 `reopen` 構成迴圈：每次成功都寫
 #: 一列 append-only 的 `DP_AUDIT_LOG`，而 `AuditLogService` 會取交易層級的
 #: `pg_advisory_xact_lock`——無上限的 close ⇄ reopen 迴圈會序列化**全平台**的稽核寫入。
 #:
@@ -400,6 +403,33 @@ async def publish_course(
     > 與邀請碼產生。
     """
     return await _publish_service.publish(db, course_id, operator=operator)
+
+
+@router.post(
+    "/courses/{course_id}/content/apply",
+    response_model=ContentUpdateResult,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+)
+async def apply_course_content(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> ContentUpdateResult:
+    """ET05「更新」：把已發布課程的編輯整批生效給學員（#631）。
+
+    已發布課程的內容編輯先存進暫存區，學員看到的是上一次「更新」時的版本。本端點
+    **跑與發布完全相同的十項檢核**，通過才整批生效。
+
+    未通過回 422 `ET_PUBLISH_001` + `blockers`（形狀與 `publish` / `reopen` 共用，
+    前端沿用 #558 的缺漏清單與紅框），且**活表一行都不會動**——學員端維持上一版。
+
+    暫存區是空的時回 `applied_count = 0`，是安全的 no-op：那代表自上次更新以來沒有
+    任何編輯，對一門內容未變的課程回 422 會讓教師以為自己弄壞了什麼。
+
+    > ⚠️ 草稿課程不走這條路（409 `ET_COURSE_010`）——草稿沒有學員，內容不需版本化，
+    > 它的生效入口是「發布」。
+    """
+    return await _publish_service.update_published(db, course_id, operator=operator)
 
 
 @router.post(

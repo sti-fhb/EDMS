@@ -45,7 +45,7 @@ class EtPublishRepository:
             status=course.status,
             open_start_at=course.open_start_at,
             open_end_at=course.open_end_at,
-            tag_count=await self._tag_count(db, course.course_id),
+            tag_count=await self.tag_count(db, course.course_id),
             chapters=chapters,
             material_count=await self._item_count(db, chapter_ids, ITEM_MATERIAL),
             items=await self._item_titles(db, chapter_ids),
@@ -137,7 +137,7 @@ class EtPublishRepository:
         )
         return tuple(ItemSummary(item_id=item_id, title=title) for item_id, title in rows.all())
 
-    async def _tag_count(self, db: AsyncSession, course_id: int) -> int:
+    async def tag_count(self, db: AsyncSession, course_id: int) -> int:
         """課程已掛之受訓單位標籤數。
 
         以 `ET_COURSE_TAG` 的原始 table 計數而非查 `EtCourseTagRepository.list_pairs`——
