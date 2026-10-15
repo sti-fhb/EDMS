@@ -37,7 +37,16 @@ type View = "stats" | "details"
  *
  * 🔴 **具名資料**——明細列出「誰說了什麼」，是本頁個資密度最高的一處。
  */
-export function SurveyResultBlock({ courseId, onExport }: { courseId: number; onExport: () => void }) {
+export function SurveyResultBlock({
+  courseId,
+  exporting,
+  onExport,
+}: {
+  courseId: number
+  /** 任一支 CSV 匯出進行中（由 `StudentsPage` 持有）。 */
+  exporting: boolean
+  onExport: () => void
+}) {
   const [view, setView] = useState<View>("stats")
   const { data, isPending, isError } = useQuery({
     queryKey: QUERY_KEYS.etStudents.surveyResult(courseId),
@@ -66,8 +75,14 @@ export function SurveyResultBlock({ courseId, onExport }: { courseId: number; on
             <ToggleButton value="stats">統計</ToggleButton>
             <ToggleButton value="details">明細</ToggleButton>
           </ToggleButtonGroup>
-          {/* 走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header */}
-          <Button size="small" startIcon={<DownloadIcon />} onClick={() => onExport()}>
+          {/* 走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header。
+              無人填答時停用（#660，對齊 DM）：CSV 每列為一位填答者，0 人時只會有表頭 */}
+          <Button
+            size="small"
+            startIcon={<DownloadIcon />}
+            disabled={exporting || data.filled_count === 0}
+            onClick={() => onExport()}
+          >
             匯出 CSV
           </Button>
         </Stack>

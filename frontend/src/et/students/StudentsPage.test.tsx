@@ -351,8 +351,12 @@ describe("ET02 學員學習狀況追蹤", () => {
 
     const rows = await screen.findAllByText("王小明")
     expect(rows.length).toBeGreaterThan(0)
+    // 兩個區塊都載入後再看兩顆匯出鈕（#660 起停用條件含筆數，載入中也是停用）
+    await screen.findByText(/已填 .* 人/)
     const exports = screen.getAllByRole("button", { name: /匯出 CSV/ })
+    expect(exports).toHaveLength(2)
     expect(exports[0]).toBeEnabled()
+    expect(exports[1]).toBeEnabled()
   })
 
   it("匯出是按鈕而非連結——連結帶不出 Bearer token", async () => {
@@ -401,6 +405,121 @@ describe("ET02 學員學習狀況追蹤", () => {
 
     expect(await screen.findByText("CSV 已匯出")).toBeInTheDocument()
     expect(createObjectURL).toHaveBeenCalledOnce()
+  })
+
+  describe("匯出鈕停用條件，對齊 DM（#660）", () => {
+    // DM03 / DM05 / DM06 與 DP05 皆為 `exporting || total === 0`。查無資料仍可按，只會
+    // 下載一份只有表頭的 CSV，且每按一次都寫一筆具名個資匯出稽核。
+    //
+    // ⚠️ 兩顆鈕同名「匯出 CSV」，一律以區塊標題圈定範圍；每條「停用」都配同一區塊或另一
+    // 區塊的「可按」——停用在載入中也成立，沒有正向錨點的話，這條斷言在資料還沒回來時就會綠。
+    const block = (title: string) =>
+      within(screen.getByText(title).closest(".MuiPaper-root") as HTMLElement)
+
+    it("學員總數為 0 時「已加入學員」的匯出停用；問卷有人填，問卷匯出照常可按", async () => {
+      server.use(
+        http.get("/api/et/courses/:courseId/students", () =>
+          HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
+        ),
+      )
+      const user = userEvent.setup()
+      renderWithProviders(<EtStudentsPage />)
+      await selectCourse(user)
+
+      // 錨點：清單已載入且確實是空的（不是還在載入）
+      expect(await screen.findByText("此課程尚無學員加入")).toBeInTheDocument()
+      await screen.findByText(/已填 .* 人/)
+      expect(block("已加入學員").getByRole("button", { name: /匯出 CSV/ })).toBeDisabled()
+      expect(block("問卷結果").getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
+    })
+
+    it("判斷依據是後端總筆數而非本頁列數：本頁沒有列但總數不為 0 時仍可匯出", async () => {
+      // issue 明訂。本頁為空而總數 > 0 出現在第 2 頁以後（例如他人剛移除學員、頁數縮短）；
+      // 改成看本頁列數的話，這裡會誤判成「沒有學員」而擋掉一份其實有內容的匯出
+      server.use(
+        http.get("/api/et/courses/:courseId/students", () =>
+          HttpResponse.json({ data: [], meta: { total: 5, page: 1, limit: 20, total_pages: 1 } }),
+        ),
+      )
+      const user = userEvent.setup()
+      renderWithProviders(<EtStudentsPage />)
+      await selectCourse(user)
+
+      // 錨點：本頁確實已載入且沒有列
+      expect(await screen.findByText("此課程尚無學員加入")).toBeInTheDocument()
+      expect(block("已加入學員").getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
+    })
+
+    it("問卷無人填答時問卷匯出停用；有學員時學員匯出照常可按", async () => {
+      server.use(
+        http.get("/api/et/courses/:courseId/survey-result", () =>
+          HttpResponse.json({
+            has_survey: true,
+            survey_name: "課程滿意度回饋問卷",
+            filled_count: 0,
+            not_filled_count: 2,
+            questions: [],
+            details: [],
+          }),
+        ),
+      )
+      const user = userEvent.setup()
+      renderWithProviders(<EtStudentsPage />)
+      await selectCourse(user)
+
+      expect(await screen.findByText("尚無學員填答問卷")).toBeInTheDocument()
+      await screen.findAllByText("王小明")
+      expect(block("問卷結果").getByRole("button", { name: /匯出 CSV/ })).toBeDisabled()
+      expect(block("已加入學員").getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
+    })
+
+    it("匯出中停用，完成後恢復——避免等待時連按，多下載一份、多寫一筆稽核", async () => {
+      Object.assign(URL, { createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() })
+      server.use(
+        http.get("/api/et/courses/:courseId/students.csv", async () => {
+          await delay(150)
+          return HttpResponse.text("學員\n王小明\n", { headers: { "Content-Type": "text/csv; charset=utf-8" } })
+        }),
+      )
+      const user = userEvent.setup()
+      renderWithProviders(<EtStudentsPage />)
+      await selectCourse(user)
+      await screen.findAllByText("王小明")
+      await screen.findByText(/已填 .* 人/)
+
+      const studentsExport = block("已加入學員").getByRole("button", { name: /匯出 CSV/ })
+      expect(studentsExport).toBeEnabled()
+      await user.click(studentsExport)
+
+      await waitFor(() => expect(studentsExport).toBeDisabled())
+      // 同一時間只跑一支匯出：問卷那顆也停用
+      expect(block("問卷結果").getByRole("button", { name: /匯出 CSV/ })).toBeDisabled()
+
+      expect(await screen.findByText("CSV 已匯出")).toBeInTheDocument()
+      await waitFor(() => expect(studentsExport).toBeEnabled())
+      expect(block("問卷結果").getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
+    })
+
+    it("匯出失敗也要恢復可按，教師才能重試", async () => {
+      server.use(
+        http.get("/api/et/courses/:courseId/students.csv", async () => {
+          await delay(150)
+          return HttpResponse.json({ error_code: "ET_COURSE_001", error_message: "課程不存在" }, { status: 404 })
+        }),
+      )
+      const user = userEvent.setup()
+      renderWithProviders(<EtStudentsPage />)
+      await selectCourse(user)
+      await screen.findAllByText("王小明")
+
+      const studentsExport = block("已加入學員").getByRole("button", { name: /匯出 CSV/ })
+      await user.click(studentsExport)
+
+      // 先確認真的進入過匯出中，否則「恢復可按」可能只是從沒停用過
+      await waitFor(() => expect(studentsExport).toBeDisabled())
+      await waitFor(() => expect(studentsExport).toBeEnabled())
+      expect(screen.queryByText("CSV 已匯出")).not.toBeInTheDocument()
+    })
   })
 
   it("移除作答中的學員才跳警告，一般學員不跳", async () => {

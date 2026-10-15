@@ -178,7 +178,8 @@ export function AuditPage() {
               size="small"
               startIcon={<DownloadIcon />}
               onClick={audit.exportCsv}
-              disabled={audit.exporting}
+              // 查無資料時停用（#660，對齊 DM）。`total` 取自已送出的查詢，匯出也以它為準
+              disabled={audit.exporting || audit.total === 0}
             >
               匯出
             </Button>

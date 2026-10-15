@@ -156,6 +156,9 @@ export function EtStudentsPage() {
   const [attemptId, setAttemptId] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
+  // 匯出中兩顆匯出鈕一併停用（#660，對齊 DM / DP05）：等待時連按會多下載一份、多寫一筆
+  // 具名個資匯出稽核
+  const [exporting, setExporting] = useState(false)
   /** 核可備註（不通過用，選填）與撤銷原因（必填）共用——兩者不會同時出現。 */
   const [noteInput, setNoteInput] = useState("")
   /** 撤銷原因為空時的 inline 錯誤（`ET-MSG-ET02-305`）。 */
@@ -285,6 +288,7 @@ export function EtStudentsPage() {
   /** 兩支 CSV 共用——匯出走 axios blob，成功與失敗都要看得見。 */
   const exportCsv = async (kind: "students" | "survey") => {
     if (courseId === "") return
+    setExporting(true)
     try {
       await (kind === "students" ? downloadStudentsCsv(courseId) : downloadSurveyCsv(courseId))
       // ET-MSG-ET02-007。瀏覽器下載是**無聲**的：檔案落到下載資料夾、頁面完全沒變化。
@@ -292,6 +296,8 @@ export function EtStudentsPage() {
       notify.message.success("CSV 已匯出")
     } catch (err) {
       notify.message.error(toApiError(err).errorMessage)
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -342,6 +348,7 @@ export function EtStudentsPage() {
           <StudentListBlock
             courseId={courseId}
             readOnly={readOnly}
+            exporting={exporting}
             onRemove={(student) => openPending({ kind: "remove", student })}
             onExport={() => void exportCsv("students")}
             onApprove={(students, result) =>
@@ -358,7 +365,7 @@ export function EtStudentsPage() {
             onOpenDetail={setAttemptId}
             onReset={(userId, userName, quiz) => openPending({ kind: "reset", userId, userName, quiz })}
           />
-          <SurveyResultBlock courseId={courseId} onExport={() => void exportCsv("survey")} />
+          <SurveyResultBlock courseId={courseId} exporting={exporting} onExport={() => void exportCsv("survey")} />
         </>
       )}
 

@@ -61,6 +61,7 @@ const APPROVAL_LABEL: Record<Exclude<ApprovalStatus, "NOT_ELIGIBLE">, { text: st
 export function StudentListBlock({
   courseId,
   readOnly,
+  exporting,
   onRemove,
   onExport,
   onApprove,
@@ -68,6 +69,8 @@ export function StudentListBlock({
   courseId: number
   /** 課程視同關閉時為 `true`——**只停寫入**，清單與匯出照常（AC 10）。 */
   readOnly: boolean
+  /** 任一支 CSV 匯出進行中（由 `StudentsPage` 持有）。 */
+  exporting: boolean
   onRemove: (student: StudentRow) => void
   onExport: () => void
   /**
@@ -131,8 +134,15 @@ export function StudentListBlock({
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
         <BlockHeading title="已加入學員" note="本課程已加入之學員清單、完課狀態與進度" />
         {/* 匯出是**讀**，課程關閉時照常可用（AC 10 明訂含匯出 CSV）。
-            走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header */}
-        <Button size="small" startIcon={<DownloadIcon />} onClick={() => onExport()}>
+            走 blob 而非 href——token 是 memory-only Bearer，原生導覽不帶 header。
+            查無學員時停用（#660，對齊 DM）：判斷用後端 `meta.total` 而非本頁列數——第 2 頁
+            以後本頁可能為空而課程仍有學員；載入中 `data` 尚未回來，同樣視為 0 而停用 */}
+        <Button
+          size="small"
+          startIcon={<DownloadIcon />}
+          disabled={exporting || (data?.meta.total ?? 0) === 0}
+          onClick={() => onExport()}
+        >
           匯出 CSV
         </Button>
       </Stack>
