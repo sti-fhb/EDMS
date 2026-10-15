@@ -61,6 +61,8 @@ from app.et.course.schemas import (
     OwnerOption,
     TagOption,
 )
+from app.et.course.stage_rules import ENTITY_CHAPTER
+from app.et.course.stage_writer import EtCourseStageWriter, is_staged
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.material.repository import EtMaterialRepository
@@ -95,6 +97,7 @@ class EtCourseService:
         enrollments: EtEnrollmentRepository | None = None,
         course_update_mailer: CourseUpdateMailer | None = None,
         publish: EtPublishService | None = None,
+        stage_writer: EtCourseStageWriter | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._tags = tags or EtCourseTagRepository()
@@ -107,6 +110,7 @@ class EtCourseService:
         self._invite_mailer = invite_mailer or CourseInviteMailer()
         self._enrollments = enrollments or EtEnrollmentRepository()
         self._course_update_mailer = course_update_mailer or CourseUpdateMailer()
+        self._stage_writer = stage_writer or EtCourseStageWriter()
         # #301：`update_basic` 需要發布六項檢核（`_evaluate` 在 publish service——它要組快照
         # 並問 DM 廢止狀態）。單向依賴：publish service 不反向引用本類別。
         self._publish = publish or EtPublishService()
@@ -461,6 +465,22 @@ class EtCourseService:
         超上限時，章節仍然建立成功。本方法**不因寄信結果改變任何回傳值**。
         """
         course = await self._require_owned(db, course_id, operator.user_id)
+        if is_staged(course):
+            # 🔴 已發布 / 已關閉：寫進暫存區，學員看到的仍是上一次「更新」的版本（#631）。
+            #
+            # ⛔ **不在這裡寄 `COURSE_UPDATE` 通知**——信裡寫的是「課程內容有更新」，
+            # 而此刻學員看不到任何變化，那句話是假的。通知延到「更新」當下（PR 2c）。
+            stage_id = await self._stage_writer.append(
+                db,
+                course_id,
+                ENTITY_CHAPTER,
+                parent_stage_id=None,
+                payload={"chapter_name": req.chapter_name},
+                operator=operator,
+            )
+            await self._log(db, "CREATE", operator.user_id, course_id, "新增章節（暫存）")
+            return ChapterItem(chapter_id=stage_id, chapter_name=req.chapter_name, sort_order=0, version=0)
+
         chapter = await self._chapters.append(db, course_id, req.chapter_name, operator)
         if course.status == COURSE_PUBLISHED:
             await self._notify_chapter_added(db, course, req.chapter_name)
