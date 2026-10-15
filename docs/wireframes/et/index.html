@@ -392,7 +392,7 @@
     <button class="module-header" onclick="toggleModule('et')"><span><i class="bi bi-mortarboard module-icon"></i><span class="module-label">教育訓練</span></span><i class="bi bi-chevron-down caret"></i></button>
     <div class="module-items" id="mod-et">
       <a class="nav-link active" href="#" data-screen="et-courses-admin"><i class="bi bi-grid"></i><span>課程列表</span></a>
-      <a class="nav-link" href="#" data-screen="et-students"><i class="bi bi-people-fill"></i><span>學員</span></a>
+      <a class="nav-link" href="#" data-screen="et-students"><i class="bi bi-people-fill"></i><span>學員學習表現</span></a>
       <a class="nav-link" href="#" data-screen="et-approval-query"><i class="bi bi-patch-check"></i><span>核可查詢</span></a>
       <a class="nav-link" href="#" data-screen="et-courses-student"><i class="bi bi-collection"></i><span>我的課程</span></a>
     </div>
@@ -1245,13 +1245,13 @@
   </details>
 </div>
 
-<!-- ==================== ET02 學員 ==================== -->
+<!-- ==================== ET02 學員學習表現 ==================== -->
 <div class="screen" id="et-students">
   <div class="screen-header">
     <div>
       <div class="screen-title">
         <button class="btn btn-sm btn-outline-secondary me-2" onclick="goScreen('et-course-edit')"><i class="bi bi-arrow-left"></i></button>
-        <i class="bi bi-people me-2"></i>學員 — <span class="text-tsbms-green">採血作業新進人員訓練 v2.0</span>
+        <i class="bi bi-people me-2"></i>學員學習表現 — <span class="text-tsbms-green">採血作業新進人員訓練 v2.0</span>
       </div>
     </div>
     <div class="screen-meta">et/students.jsp (ET02)</div>
@@ -3241,7 +3241,7 @@ function openQuizSubmitModal() {
   }
 }
 
-/* ET02 學員：重置重考次數 / 移除學員 */
+/* ET02 學員學習表現：重置重考次數 / 移除學員 */
 var _studentActionUser = '';
 var _studentActionQuiz = '';
 function openResetQuizModal(userName, quizName) {

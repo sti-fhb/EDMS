@@ -94,7 +94,7 @@ frontend/src/et/{功能}/         # 頁面 / hooks / services / schemas（依功
 
 ```text
 use-cases/et/            # 使用案例（已完成，含 17 條 UCET001 ~ UCET017；UCET016 / UCET017 為 2026-07-17 線下核可新增）
-wireframes/et/index.html # 畫面原型（ET01 課程列表、ET05 課程建立與編輯、ET02 學員、ET03 我的課程、ET06 章節學習＋課後問卷、ET07 線上測驗、ET04 核可查詢）
+wireframes/et/index.html # 畫面原型（ET01 課程列表、ET05 課程建立與編輯、ET02 學員學習表現、ET03 我的課程、ET06 章節學習＋課後問卷、ET07 線上測驗、ET04 核可查詢）
                          # 註：原型以 Bootstrap 繪製（wireframe 慣例，per sti-spec-structure），實作為 React + MUI；
                          #     ET08 權限管理 / ET09 個資 / ET10 通知範本之維護畫面已於 2026-07-08 移至平台 DP 後台，ET 不自建
 requirements/RQET.md     # 需求清單（已完成）
