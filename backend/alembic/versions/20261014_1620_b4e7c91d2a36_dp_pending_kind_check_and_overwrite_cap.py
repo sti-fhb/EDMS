@@ -1,7 +1,7 @@
 """dp_pending_kind_check_and_overwrite_cap
 
 Revision ID: b4e7c91d2a36
-Revises: a3f9c21e5d84
+Revises: 0ac1b791c1a1
 Create Date: 2026-10-14 16:20:00.000000
 
 `DP_PENDING_REGISTRATION.KIND` 值域封閉（#215）＋ 註冊重建次數上限參數（#234）。
@@ -57,7 +57,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "b4e7c91d2a36"
-down_revision: Union[str, None] = "a3f9c21e5d84"
+down_revision: Union[str, None] = "0ac1b791c1a1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
