@@ -45,7 +45,8 @@ class ActivityEvent(BaseModel):
     event_kind: str  # "submitted"（送審 / 發起廢止）| "resolved"（核准 / 退回 / 撤回 之結果）
     event_time: datetime  # 該事件發生時間（submitted＝送審時間、resolved＝完成時間）
     is_overdue: bool  # 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻（審核者視角顯「催辦中」，AC5）
-    #: 退回原因（#554）。**僅 `event_kind="resolved"` 且 `status="REJECTED"` 時有值**，其餘為 None。
+    #: 退回原因（#554 / #657）。**僅 `event_kind="resolved"`、`status="REJECTED"` 且
+    #: `review_type != "OBSOLETE"` 時有值**，其餘為 None。
     #:
     #: 背景：DOC_REJECT / OBS_REJECT 範本內文原帶「退回原因：{reason}」，改為站內（MSG）後
     #: 那封信不再寄出。若不在此帶出，`DM_REVIEW.REASON` 會寫入卻**沒有任何讀取端**——
@@ -76,3 +77,13 @@ class PersonalAccess(BaseModel):
     """個人專區入口可見性（具編輯者或審核者角色）。"""
 
     can_access: bool
+    #: 是否顯示**草稿匣頁籤**（#657）。`spec_us9` FR-001 寫的是「草稿匣（**編輯者**）」。
+    #:
+    #: 與 `can_access` 刻意分開、不可合併：前者決定**側欄入口**（編輯者 **或** 審核者皆可進
+    #: 個人專區看我的文件動態），後者決定**頁內的草稿匣頁籤**（僅編輯者）。建草稿的端點全掛
+    #: `_ensure_editor`，純審核者不可能有草稿，那個頁籤對他永遠是空的。
+    #:
+    #: ⚠️ 依**當前角色**判定：角色被撤銷的前編輯者，其既有草稿仍在 DB 但介面上看不到。
+    #: 這是已裁示的取捨（2026-10-15），不是漏考慮——與 #627 的「角色撤了但歷史指派還在」
+    #: 同一形狀，此處選擇以當前角色為準。
+    can_draft: bool

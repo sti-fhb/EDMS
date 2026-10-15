@@ -61,6 +61,17 @@ export interface CompletedItem {
   status: string // APPROVED / REJECTED
   version_no: string | null
   complete_date: string | null
+  /** 送審者姓名（#657）。取自 `DM_REVIEW.CREATED_USER`，該欄無 FK → 查無帳號時為 null。 */
+  submitter_name: string | null
+  /**
+   * 退回原因（#657）。**後端僅在「新增 / 新版本之退回」帶值**——`status === "REJECTED"`
+   * 且 `review_type !== "OBSOLETE"`；核准與所有廢止類一律 null。
+   *
+   * ⚠️ `DM_REVIEW.REASON` 一欄兩義：退回時是審核者寫的退回原因，`OBSOLETE` 送審時是
+   * 申請人寫的**廢止申請原因**。前端不得自行依 status 再判一次或補值——單一事實來源在
+   * `center_service.list_completed`。
+   */
+  reason: string | null
 }
 
 export interface ApproveResult {

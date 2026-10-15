@@ -450,6 +450,26 @@ async def test_access_true_for_editor_or_reviewer(db, client):
     token = create_access_token(sub="ed", ttl_minutes=15)
     resp = await client.get("/api/dm/personal/access", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200 and resp.json()["can_access"] is True
+    assert resp.json()["can_draft"] is True, "編輯者看得到草稿匣"
+
+
+async def test_access_純審核者可進個人專區但沒有草稿匣(db, client):
+    """#657：`spec_us9` FR-001 寫的是「草稿匣（**編輯者**）」。
+
+    建草稿的端點全掛 `_ensure_editor`（需 `DM_EDITOR`），所以純審核者**不可能有草稿**，
+    那個頁籤對他永遠是空的。`can_access` 與 `can_draft` 必須分開：前者決定側欄入口
+    （編輯者**或**審核者），後者決定頁內的草稿匣頁籤（僅編輯者）。
+
+    ⚠️ 這條是本案唯一能分辨兩個旗標的測試——若 `can_draft` 被寫成 `= can_access`，
+    只測編輯者的那條照樣全綠。
+    """
+    await _seed_user(db, "revonly", "純審核")
+    await _grant(db, "revonly", DM_REVIEWER)
+    token = create_access_token(sub="revonly", ttl_minutes=15)
+    resp = await client.get("/api/dm/personal/access", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    assert resp.json()["can_access"] is True, "審核者仍可進個人專區（看我的文件動態）"
+    assert resp.json()["can_draft"] is False, "純審核者不得出現草稿匣頁籤"
 
 
 async def test_access_false_for_viewer_or_admin_only(db, client):
@@ -634,3 +654,35 @@ async def test_rejected_event_carries_reason(db):
         assert len(resolved) == 1, f"{side}: 應有一個 resolved 事件"  # 母體錨點，避免下方恆真
         assert resolved[0].reason == "版本號格式不符，請改為 1.0 並補上變更摘要", side
         assert submitted and submitted[0].reason is None, f"{side}: submitted 事件不得帶 reason"
+
+
+async def test_廢止退回的動態列不帶廢止申請原因(db):
+    """🔴 #554 起就存在的洞，#657 修（兩個 review 各自獨立抓到同一處）。
+
+    原本的判準只有 `status == REJECTED`，而那**不足以**推論「REASON 是審核者寫的」：
+    `review/center_service._reject_obsolete` 在呼叫 `reject()`（會覆寫 REASON）之後，
+    **刻意把申請人的原始廢止申請原因寫回** `review.reason`——那是 OBSOLETE 唯一存放申請
+    理由之處，覆寫將永久失去可追溯性；審核者對廢止申請寫的退回原因**只進稽核**
+    （`after_value.reject_reason`）與 OBS_REJECT 通知。
+
+    ⇒ `review_type == OBSOLETE` 時，REASON **不論 status** 都是申請原因，連退回列也是。
+    正確判準是 `status == REJECTED AND review_type != OBSOLETE`。
+
+    ⚠️ 這個洞先前沒有測試：既有的退回原因測試用的是 `review_type="NEW"`，走不到這條路。
+    「同一個欄位、同一個狀態」不代表同一個語意。
+    """
+    await _seed_user(db, "ed", "申請人")
+    await _seed_user(db, "rev1", "審核")
+    await _doc(db, "DM-SOP-000562", status="PUBLISHED")
+    v = await _version(db, "DM-SOP-000562", "1.0", status="PUBLISHED", published=utcnow())
+    r = await _review(db, "DM-SOP-000562", v.version_id, review_type="OBSOLETE", status="REJECTED")
+    r.reason = "此 SOP 已由新制取代"  # 申請人於發起廢止時填寫，退回後仍保留於此
+    r.complete_date = utcnow()
+    await db.flush()
+
+    for uid, roles, side in (("ed", [DM_EDITOR], "author"), ("rev1", [DM_REVIEWER], "reviewer")):
+        act = await _svc.list_activity(db, user_id=uid, roles=roles)
+        events = getattr(act, side)
+        resolved = [e for e in events if e.review_id == r.review_id and e.event_kind == "resolved"]
+        assert len(resolved) == 1, f"{side}: 應有一個 resolved 事件"  # 母體錨點，避免下方恆真
+        assert resolved[0].reason is None, f"{side}: 廢止退回列的 REASON 是申請原因，不得當退回原因呈現"

@@ -92,3 +92,16 @@ class CompletedItem(BaseModel):
     status: str  # APPROVED / REJECTED
     version_no: str | None
     complete_date: datetime | None
+    #: 送審者姓名（#657）。來源是 `DM_REVIEW.CREATED_USER`——該表**沒有**送審者欄位，
+    #: 只有 `ASSIGNED_REVIEWER` 與 `APPROVER_USER_ID`。`CREATED_USER` 無 FK，故以 outerjoin
+    #: 取姓名，查無使用者列時為 `None`（前端顯示「—」）。不用 inner join：那會讓整列從清單
+    #: 消失，審核者看不到自己處理過的案件，比顯示「—」更糟。
+    submitter_name: str | None
+    #: 退回原因（#657）。**僅「新增 / 新版本之退回」有值**——判準為
+    #: `status="REJECTED"` **且** `review_type != "OBSOLETE"`；核准與所有廢止類一律 `None`。
+    #:
+    #: ⚠️ `DM_REVIEW.REASON` 一個欄位承載兩種語意：退回時是審核者寫的退回原因，而
+    #: `OBSOLETE` 送審時是**申請人自己寫的廢止申請原因**。已完成清單含 `APPROVED` 列，
+    #: 若無條件帶出，廢止核准那筆會把申請原因顯示在「退回原因」欄下——那是**錯的資訊**，
+    #: 不是缺漏。規則與 #554 一致（`dm/personal/service.py` 有同一條規則與註解）。
+    reason: str | None

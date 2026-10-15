@@ -508,6 +508,8 @@ export function DmReviewPage() {
                     <TableCell>類型</TableCell>
                     <TableCell>版本</TableCell>
                     <TableCell>結果</TableCell>
+                    <TableCell>送審者</TableCell>
+                    <TableCell>退回原因</TableCell>
                     <TableCell>完成時間</TableCell>
                   </TableRow>
                 </TableHead>
@@ -523,6 +525,15 @@ export function DmReviewPage() {
                           color={row.status === "APPROVED" ? "success" : "warning"}
                           label={reviewStatusLabel(row.status)}
                         />
+                      </TableCell>
+                      {/* 送審者：後端取自 `DM_REVIEW.CREATED_USER`（該表無送審者欄位），
+                          無 FK 故以 outerjoin 取姓名，查無帳號時為 null → 顯示「—」。 */}
+                      <TableCell>{row.submitter_name ?? "—"}</TableCell>
+                      {/* 退回原因：後端**僅在 status=REJECTED 時帶值**。`REASON` 一欄兩義，
+                          OBSOLETE 送審時裝的是申請人寫的廢止申請原因，核准列帶出來會是錯資訊。
+                          前端不自行補值、也不依 status 再判一次——單一事實來源在 service 層。 */}
+                      <TableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                        {row.reason ?? "—"}
                       </TableCell>
                       <TableCell>{formatDateTaipei(row.complete_date)}</TableCell>
                     </TableRow>
