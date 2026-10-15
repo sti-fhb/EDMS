@@ -267,10 +267,14 @@ describe("LoginOverlay", () => {
     expect(screen.getByRole("button", { name: /重寄驗證信.*後/ })).toBeDisabled()
   })
 
-  it("註冊遇 429 → 訊息補「若您並未進行任何操作」的指引（#213）", async () => {
-    // 429 對「第一次註冊就被擋」的人完全無指引：他沒操作過任何東西，看不出這是別人觸發的冷卻。
-    // #213 已讓「沒寄出信的探測」不再波及他人，但本人在另一裝置註冊過、或有人真的觸發過一次
-    // 寄信，都還是會走到這裡。
+  it("註冊遇 429 → 只顯示原訊息，不再補「若您並未進行任何操作」（#234 盤點，#345 / #346 後）", async () => {
+    // 本條於 #213 時斷言的是**補一句指引**，前提是「429 可能不是本人造成的」。
+    // #345 / #346 之後該前提消失：register 的 429 只剩「同一 IP + 同一 Email 冷卻內重打」
+    // 一種成因（他人的 Email 章與本人換裝置都改走靜默 202），於是那句話變成對**剛剛自己
+    // 操作過的人**說「若您並未進行任何操作」——在說反話。
+    //
+    // ⚠️ 負向斷言配正向錨點、且用同一種查詢：只斷言「不該出現」的話，元件壞到完全不顯示
+    // 錯誤時這條也會通過。
     server.use(
       http.post("/api/register", () =>
         HttpResponse.json(
@@ -283,9 +287,10 @@ describe("LoginOverlay", () => {
     const user = userEvent.setup()
     await fillRegister(user, { email: "noidea@edms.local" })
 
-    expect(
-      await screen.findByText(/操作過於頻繁，請稍後再試（若您並未進行任何操作，請稍候再試或聯繫系統管理者）/),
-    ).toBeInTheDocument()
+    // 正向錨點：訊息本身必須出現（證明這條斷言有東西可驗）
+    expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
+    // 負向：不得再補那句指引
+    expect(screen.queryByText(/若您並未進行任何操作/)).not.toBeInTheDocument()
   })
 
   it("冷卻綁定 Email：換一個 Email 後「建立帳號」不被前一個 Email 的冷卻誤擋", async () => {
