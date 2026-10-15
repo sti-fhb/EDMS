@@ -613,14 +613,23 @@ async def test_scan_overdue_reminds(db):
     assert count == 1
 
 
-async def test_範本停用時不排信且不計入催辦筆數(db):
+async def test_範本停用時不排信且不計入催辦筆數(db, caplog):
     """範本停用 → 沒有產出，`count` 也不得計入（#627 AC：log 的數字必須與實際產出一致）。
 
     這條守的是 `count += 1` 無條件遞增那個缺陷的**一般形式**：不只 CHANNEL 不對會沒產出，
     範本停用、渲染失敗同樣沒產出，而三者都曾被算成「已催辦 N 筆」。
+
+    ⚠️ **必須 `_grant(DM_REVIEWER)`，而且必須斷言跳過理由**。本條一度只斷言 `count == 0`
+    與 outbox 零列，於是加上角色守門（#627）之後它**靜默地換了一條路**：`rev_off` 沒有角色
+    → 在 `notify()` 之前就被攔掉 → 從此根本沒走到「範本停用」。兩個斷言在新路徑下同樣成立，
+    所以**測試沒有變紅，卻已經不再測它宣稱在測的東西**（由 diff-cover 指出該分支零覆蓋才發現）。
+
+    教訓：斷言「結果」而結果有不只一條路時，上游多一道守門就會把測試掏空而不留痕跡。
+    故此處改為連「為什麼跳過」一起釘住。
     """
     await _seed_user(db, "ed_off", "撰寫")
     await _seed_user(db, "rev_off", "審核", email="rev_off@e.com")
+    await _grant(db, "rev_off", DM_REVIEWER)
     await _doc(db, "DM-SOP-000361", status="PENDING_REVIEW")
     v = await _add_version(db, "DM-SOP-000361", "1.0", status="PENDING_REVIEW")
     await _review(
@@ -633,10 +642,14 @@ async def test_範本停用時不排信且不計入催辦筆數(db):
     )
     await db.flush()
 
-    count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0, "沒有產出就不得計入催辦筆數"
     assert await _auto_remind_rows(db) == 0
+    # 錨點：證明真的走到「呼叫了 notify、但平台沒排入」這條路，而不是在更早的分支就被攔掉
+    assert "催辦未排入 outbox" in caplog.text, "未走到 notify 之後的分支——上游可能多了一道守門把本條掏空"
+    assert "TEMPLATE_DISABLED" in caplog.text, "跳過理由必須是範本停用，否則本條測的已不是它宣稱的情境"
 
 
 async def test_停用的審核者不再收到催辦(db, caplog):
@@ -807,9 +820,7 @@ async def test_角色已撤的審核者不再收到催辦(db, caplog):
     )
 
     # 產品路徑撤銷角色（帳號仍 ACTIVE、EMAIL 仍在、DM_REVIEW.ASSIGNED_REVIEWER 不動）
-    await AssignService().assign_roles_audiences(
-        db, user_id="rev627a", roles=set(), audiences=set(), operator_id="adm"
-    )
+    await AssignService().assign_roles_audiences(db, user_id="rev627a", roles=set(), audiences=set(), operator_id="adm")
     await db.flush()
     assert await db.scalar(select(DpUser.status).where(DpUser.user_id == "rev627a")) == "ACTIVE", (
         "前提錨點：帳號必須仍是 ACTIVE，否則下方跳過可能來自 #395 的停用分支"
