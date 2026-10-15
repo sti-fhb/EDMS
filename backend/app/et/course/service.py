@@ -58,6 +58,7 @@ from app.et.course.schemas import (
     ItemCreateReq,
     ItemReorderReq,
     ItemRow,
+    OwnerOption,
     TagOption,
 )
 from app.et.enrollment.repository import EtEnrollmentRepository
@@ -211,6 +212,40 @@ class EtCourseService:
             for r in rows
         ]
         return {"data": cards, "meta": paged["meta"]}
+
+    async def list_filter_owners(
+        self,
+        db: AsyncSession,
+        *,
+        actor_id: str,
+        keyword: str | None,
+        tag_id: int | None,
+        unit_tag_id: int | None,
+    ) -> list[OwnerOption]:
+        """ET01「全部課程」建立者下拉的選項（#648）。
+
+        原本前端由**當頁的 12 張卡片**推導選項：課程全落在第 2 頁以後的教師不會出現，
+        翻頁時選項也跟著變。改由本支取「全部課程」整個母體的建立者，不分頁。
+
+        母體條件見 `EtCourseRepository.list_owner_ids`（與清單共用同一個查詢）。依姓名
+        排序，查無姓名者（`DP_USER` 無此列）排最後。
+
+        Args:
+            actor_id: 呼叫者（排除其已在籍之課程，與清單一致）。
+            keyword: 課程名稱關鍵字；與 `tag_id`、`unit_tag_id` 同清單的篩選條件。
+
+        Returns:
+            建立者選項清單。
+        """
+        owner_ids = await self._courses.list_owner_ids(
+            db, actor_id=actor_id, keyword=keyword, tag_id=tag_id, unit_tag_id=unit_tag_id, now=utcnow()
+        )
+        names = await self._owner_names(db, set(owner_ids))
+        options = []
+        for owner_id in owner_ids:
+            name, disabled = names.get(owner_id, (None, False))
+            options.append(OwnerOption(owner_id=owner_id, owner_name=name, owner_is_disabled=disabled))
+        return sorted(options, key=lambda o: (o.owner_name is None, o.owner_name or "", o.owner_id))
 
     async def list_filter_tags(self, db: AsyncSession) -> list[TagOption]:
         """篩選下拉的標籤來源：**全部含停用者**（與 ET05 編輯用的 `list_tag_options` 相反）。

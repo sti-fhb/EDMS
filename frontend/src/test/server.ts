@@ -1338,6 +1338,14 @@ export const handlers = [
       { tag_id: 2, tag_name: "護理師", is_active: true, tag_type: "AUDIENCE", is_all: false },
     ]),
   ),
+  // #648：「建立者」下拉的選項來源（整個母體、不分頁）。與 `filter-tags` 同為字面路徑，
+  // 必須排在 `:courseId` 之前。內容與 `/api/et/courses` 的 `scope=all` 兩位建立者一致。
+  http.get("/api/et/courses/filter-owners", () =>
+    HttpResponse.json([
+      { owner_id: "t01", owner_name: "陳大華", owner_is_disabled: false },
+      { owner_id: "t02", owner_name: "林助教", owner_is_disabled: false },
+    ]),
+  ),
   // ET02 學員學習狀況追蹤（US9 / #322）。這幾支帶 `:courseId` 但**後面還有字面段**
   // （`/students`、`/attempt-overview`…），與上面的純 `:courseId` 不會互相吃掉；仍放在
   // 它之前，維持「路徑愈具體愈前面」的一致排法。

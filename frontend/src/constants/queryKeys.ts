@@ -1,4 +1,4 @@
-import type { CourseListParams } from "../et/courses/schemas"
+import type { CourseListParams, OwnerFilterParams } from "../et/courses/schemas"
 
 /** 所有 TanStack Query 的 query key 統一管理。新增模組時於此補對應群組。 */
 export const QUERY_KEYS = {
@@ -28,6 +28,7 @@ export const QUERY_KEYS = {
     capabilities: () => ["et", "courses", "capabilities"] as const,
     list: (params: CourseListParams) => ["et", "courses", "list", params] as const,
     filterTags: () => ["et", "courses", "filter-tags"] as const,
+    filterOwners: (params: OwnerFilterParams) => ["et", "courses", "filter-owners", params] as const,
     detail: (courseId: number) => ["et", "courses", courseId] as const,
     tags: (courseId?: number) => ["et", "tags", courseId ?? null] as const,
     material: (materialId: number) => ["et", "materials", materialId] as const,

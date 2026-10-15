@@ -585,6 +585,20 @@ class CourseStatusResult(BaseModel):
     version: int
 
 
+class OwnerOption(BaseModel):
+    """ET01「全部課程」建立者下拉的一個選項（#648）。
+
+    欄位名稱與 `CourseCard` 的 `owner_*` **刻意相同**：前端以同一支 `ownerLabel()` 組
+    顯示字串（停用者為「姓名（已停用帳號）」、查無為「—」），三個畫面才不會各說各話。
+    """
+
+    owner_id: str
+    #: 取自 `DP_USER.USER_NAME`；查無時為 `None`（語意同 `CourseCard.owner_name`）。
+    owner_name: str | None
+    #: 帳號是否已停用（讀 `DP_USER.STATUS`，語意同 `CourseCard.owner_is_disabled`）。
+    owner_is_disabled: bool = False
+
+
 class CourseCard(BaseModel):
     """ET01 課程列表的一張卡片（`FR-ET-US7-03`）。
 

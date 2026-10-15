@@ -5,6 +5,7 @@
 1. 兩種 `scope` 的狀態過濾（「我建立的」含草稿與已關閉；「全部課程」只有已發布）
 2. 三種篩選（關鍵字含萬用字元跳脫、標籤、建立者）
 3. 卡片的兩個聚合值（章節數、**在籍**學員數）
+4. 「建立者」下拉的選項母體（#648）
 """
 
 from datetime import timedelta
@@ -405,6 +406,15 @@ class TestAuthorization:
         assert r.status_code == 403
         assert r.json()["error_code"] == "ET_AUTH_001"
 
+    async def test_學員呼叫建立者選項回四零三(self, client, db) -> None:
+        me = await _user(db, "s_cl21b", roles=(ROLE_STUDENT,))
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-owners", headers=_bearer(me))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_AUTH_001"
+
 
 class TestFilterTags:
     """`GET /courses/filter-tags`：篩選下拉的來源，語意與 ET05 編輯用的 `/tags` **相反**。"""
@@ -741,3 +751,98 @@ class TestExcludeEnrolled:
         probe = await client.get(f"{_URL}/{enrolled}/learn", headers=_bearer(viewer))
         assert probe.status_code == 200, probe.text
         assert probe.json()["is_preview"] is False, "反向探針：在籍者應為學員視角"
+
+
+class TestFilterOwners:
+    """`GET /courses/filter-owners`：「全部課程」建立者下拉的選項來源（#648）。
+
+    原本前端由**當頁 12 張卡片**推導選項，課程全落在第 2 頁以後的教師不會出現在下拉中。
+    本端點與清單共用同一個 `build_list_stmt(scope="all")`，只是不分頁。
+
+    ⚠️ 斷言一律只看本測試自建的教師：測試 DB 可能留有其他測試的已發布課程。
+    """
+
+    async def test_課程全在第二頁以後的教師仍列出(self, client, db) -> None:
+        """AC 1：清單 `limit=12` 時教師 B 的課落在第 2 頁，下拉仍要有他。"""
+        viewer = await _user(db, "t_fo01v")
+        teacher_a = await _user(db, "t_fo01a", name="教師一")
+        teacher_b = await _user(db, "t_fo01b", name="教師二")
+        # 清單「新的在前」：教師二的課最先建立，才會被後建的 12 門擠到第 2 頁
+        await _course(db, owner=teacher_b, name="教師二的課_fo01")
+        for i in range(12):
+            await _course(db, owner=teacher_a, name=f"教師一的課_fo01_{i:02d}")
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-owners", params={"q": "_fo01"}, headers=_bearer(viewer))
+
+        assert r.status_code == 200, r.text
+        assert [o["owner_id"] for o in r.json()] == [teacher_a, teacher_b], "應依姓名（碼位）排序且不重複"
+        page1 = await client.get(_URL, params={"scope": "all", "q": "_fo01", "limit": 12}, headers=_bearer(viewer))
+        assert teacher_b not in {c["owner_id"] for c in page1.json()["data"]}, (
+            "前提：教師二的課不在第 1 頁——否則本條驗不到分頁問題"
+        )
+
+    async def test_母體與全部課程一致(self, client, db) -> None:
+        """AC 3：草稿、已關閉、期間已過、本人已在籍之課程的建立者都不列出。"""
+        viewer = await _user(db, "t_fo02v")
+        shown = await _user(db, "t_fo02s", name="列出者")
+        draft = await _user(db, "t_fo02d")
+        closed = await _user(db, "t_fo02c")
+        expired = await _user(db, "t_fo02e")
+        enrolled = await _user(db, "t_fo02n")
+        await _course(db, owner=shown, name="已發布_fo02")
+        await _course(db, owner=draft, name="草稿_fo02", status="DRAFT")
+        await _course(db, owner=closed, name="已關閉_fo02", status=COURSE_CLOSED)
+        await _course(db, owner=expired, name="期間已過_fo02", ends_in=-timedelta(days=1))
+        joined = await _course(db, owner=enrolled, name="已加入_fo02")
+        await _enroll(db, viewer, joined)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-owners", params={"q": "_fo02"}, headers=_bearer(viewer))
+
+        assert r.status_code == 200, r.text
+        assert [o["owner_id"] for o in r.json()] == [shown]
+
+    async def test_停用帳號的建立者仍列出並帶旗標(self, client, db) -> None:
+        """AC 4：前端據 `owner_is_disabled` 標「（已停用帳號）」。"""
+        viewer = await _user(db, "t_fo03v")
+        owner = await _user(db, "t_fo03o", name="王離職")
+        await _course(db, owner=owner, name="停用者的課_fo03")
+        await db.execute(update(DpUser).where(DpUser.user_id == owner).values(status="DISABLED"))
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-owners", params={"q": "_fo03"}, headers=_bearer(viewer))
+
+        assert r.json() == [{"owner_id": owner, "owner_name": "王離職", "owner_is_disabled": True}]
+
+    async def test_關鍵字與標籤條件縮小選項(self, client, db) -> None:
+        """選項隨其他篩選縮小——選得到的建立者，清單裡必然有他的課。"""
+        viewer = await _user(db, "t_fo04v")
+        teacher_a = await _user(db, "t_fo04a")
+        teacher_b = await _user(db, "t_fo04b")
+        tag_id = await _tag(db, "護理師_fo04")
+        tagged = await _course(db, owner=teacher_a, name="有標籤_fo04")
+        await _attach_tag(db, tagged, tag_id)
+        await _course(db, owner=teacher_b, name="無標籤_fo04")
+        await db.commit()
+
+        by_tag = await client.get(
+            f"{_URL}/filter-owners", params={"q": "_fo04", "tag_id": tag_id}, headers=_bearer(viewer)
+        )
+        by_keyword = await client.get(f"{_URL}/filter-owners", params={"q": "無標籤_fo04"}, headers=_bearer(viewer))
+
+        assert [o["owner_id"] for o in by_tag.json()] == [teacher_a]
+        assert [o["owner_id"] for o in by_keyword.json()] == [teacher_b]
+
+    async def test_關鍵字萬用字元已跳脫(self, client, db) -> None:
+        """`%` 是字面字元，不是「列出全部」——與清單共用 `build_list_stmt` 的跳脫。"""
+        viewer = await _user(db, "t_fo05v")
+        literal = await _user(db, "t_fo05a")
+        other = await _user(db, "t_fo05b")
+        await _course(db, owner=literal, name="達成率100%_fo05")
+        await _course(db, owner=other, name="一般課程_fo05")
+        await db.commit()
+
+        r = await client.get(f"{_URL}/filter-owners", params={"q": "%_fo05"}, headers=_bearer(viewer))
+
+        assert [o["owner_id"] for o in r.json()] == [literal], "未跳脫時 % 會匹配任意字元而列出兩位"

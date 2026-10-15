@@ -14,14 +14,14 @@ import Tab from "@mui/material/Tab"
 import Tabs from "@mui/material/Tabs"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { CourseCard } from "./CourseCard"
 import { coursesApi } from "./coursesService"
 import { KEYWORD_MAX_LENGTH, ownerLabel } from "./schemas"
-import type { CourseListParams } from "./schemas"
+import type { CourseListParams, OwnerFilterParams } from "./schemas"
 import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
@@ -163,27 +163,35 @@ export function EtCourseListPage() {
   const courses = data?.data ?? []
   const totalPages = data?.meta.total_pages ?? 0
 
-  // 建立者選項取自**未套用建立者篩選**的同一份查詢。
+  // 建立者選項取自後端 `filter-owners`：「全部課程」**整個母體**的建立者、不分頁（#648）。
   //
-  // ⚠️ 不可直接用 `courses`：選了某位建立者之後，結果就只剩他一個人，選單會塌成單一
-  // 選項——使用者想改選別人，得先切回「全部」再選一次。
+  // ⚠️ 不可改回由清單結果推導。清單一頁只有 12 張卡片，課程全在後面幾頁的教師不會出現，
+  // 翻頁時選項也跟著變；而直接用 `courses` 還會在選定某人後讓選單塌成只剩他一個。
   //
-  // 未選建立者時 `baseParams` 就是 `params` 本身，queryKey 完全相同、直接命中同一筆
-  // 快取；只有在套用建立者篩選期間才會有第二次請求。
-  const { data: ownerSource } = usePagedQuery(
-    QUERY_KEYS.etCourses.list(baseParams),
-    () => coursesApi.list(baseParams),
-    { enabled: scope === "all" },
+  // 查詢條件只帶關鍵字與標籤（不帶頁碼、筆數、建立者）：選項隨其他篩選縮小，選得到的
+  // 建立者清單裡必然有他的課。
+  const ownerFilter: OwnerFilterParams = useMemo(
+    () => ({
+      ...(debouncedKeyword ? { q: debouncedKeyword } : {}),
+      ...(unitId !== "" ? { unit_tag_id: unitId } : {}),
+      ...(tagId !== "" ? { tag_id: tagId } : {}),
+    }),
+    [debouncedKeyword, unitId, tagId],
   )
-  const ownerOptions = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const c of ownerSource?.data ?? []) {
-      // 不 fallback 到 `owner_id`（#330）：它是隨機代理鍵，顯示出來只是一串看不懂的字。
-      // 三個畫面共用 `ownerLabel`，停用者標成「姓名（已停用帳號）」。
-      if (!seen.has(c.owner_id)) seen.set(c.owner_id, ownerLabel(c))
-    }
-    return [...seen.entries()]
-  }, [ownerSource])
+  const { data: ownerSource } = useQuery({
+    queryKey: QUERY_KEYS.etCourses.filterOwners(ownerFilter),
+    queryFn: () => coursesApi.listFilterOwners(ownerFilter),
+    enabled: scope === "all",
+    // 關鍵字／標籤一變 queryKey 就換，載入期間保留舊選項——否則選單會先清空一次，
+    // 已選定的建立者在那一瞬間不在選項內，MUI Select 顯示空白並警告 out-of-range
+    placeholderData: keepPreviousData,
+  })
+  // 不 fallback 到 `owner_id`（#330）：它是隨機代理鍵，顯示出來只是一串看不懂的字。
+  // 三個畫面共用 `ownerLabel`，停用者標成「姓名（已停用帳號）」。
+  const ownerOptions = useMemo(
+    () => (ownerSource ?? []).map((o) => [o.owner_id, ownerLabel(o)] as const),
+    [ownerSource],
+  )
 
   return (
     <Box>
