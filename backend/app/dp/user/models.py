@@ -62,7 +62,7 @@ class DpPendingRegistration(BaseModelHardDelete):
     - SELF_REGISTER（US2 自助註冊）：PWD_HASH 恆為 NULL，使用者於驗證連結自設密碼。
     - ADMIN_INVITE（US4 管理者邀請）：PWD_HASH 恆為 NULL，使用者於啟用連結自設密碼。
 
-    ⚠️ `PWD_HASH` 因此已無任何寫入非 NULL 的路徑（欄位保留待另案評估移除）。本表匿名可寫，
+    ⚠️ `PWD_HASH` 因此已無任何寫入非 NULL 的路徑（欄位保留待 #668 評估移除）。本表匿名可寫，
     密碼素材不得存於此——這正是 #212 修掉的 pre-hijack 破口，勿把密碼加回本表。
     """
 
