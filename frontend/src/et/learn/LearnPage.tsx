@@ -12,6 +12,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { ChapterNav } from "./ChapterNav"
 import { ContentPane } from "./ContentPane"
+import { lockedHint } from "./learnSchemas"
 import type { ItemNode } from "./learnSchemas"
 import { learnApi } from "./learnService"
 import { progressApi } from "./progressService"
@@ -31,7 +32,7 @@ import { toApiError } from "../../services/http"
  * |---|---|
  * | AC 3 定位至上次觀看位置 | ✅ #274（`last_item_id` + 影片內 `last_position_sec`）|
  * | AC 8–11 解鎖阻擋 | ✅ #274 |
- * | AC 12 測驗未及格阻擋 | ✅ #361（提示依 `blocking_item_type` 分兩種；0 題測驗不當閘門）|
+ * | AC 12 測驗未及格阻擋 | ✅ #361（提示點名擋路項目與章節，#649；0 題測驗不當閘門）|
  * | AC 18–21 課後問卷入口 | ✅ #284（側欄底部，狀態由後端導出）|
  *
  * ## 課程關閉
@@ -143,27 +144,23 @@ export function EtLearnPage() {
    * 鎖定項目**擋下並提示**（ET-MSG-ET06-001），不是靜默無反應——學員需要知道為什麼
    * 點不動，否則只會以為系統壞了。
    *
-   * 🔴 **提示依前緣的型別分兩種**（#361）。AC 12 啟用前，鎖定的唯一成因是教材沒看完，
-   * 寫死「請先完成本章節之影片學習」永遠是對的；啟用後多了「測驗未通過」這個成因，
-   * 同一句話會把學員指向**錯的動作**——叫他去看早就看完的影片，而他該做的是重考。
+   * 🔴 **提示點名擋路的那一項**（#361 → #649）。AC 12 啟用後鎖定多了「測驗未通過」這個
+   * 成因，寫死一句話會把學員指向**錯的動作**；#361 改為依型別二分，但仍會把文件教材說成
+   * 「影片」、把前一章說成「本章節」——#649 改為由 `lockedHint` 寫出項目與章節名稱。
    *
    * ⛔ 不要在前端自行推導前緣（例如掃 `chapters` 找第一個 `!completed`）：那會漏掉
    * 「0 題測驗不當閘門」的例外而指向一個不是真兇的項目。後端已算好。
    */
-  const blockingItemType = data?.blocking_item_type ?? null
+  const lockHint = data ? lockedHint(data.chapters, data.blocking_item_id) : ""
   const handleSelect = useCallback(
     (item: ItemNode) => {
       if (item.locked) {
-        message.warning(
-          blockingItemType === "QUIZ"
-            ? "請通過本章節之測驗後解鎖" // ET-MSG-ET06-002
-            : "請先完成本章節之影片學習", // ET-MSG-ET06-001
-        )
+        message.warning(lockHint)
         return
       }
       setActiveItemId(item.item_id)
     },
-    [message, blockingItemType],
+    [message, lockHint],
   )
 
   /**
@@ -185,12 +182,8 @@ export function EtLearnPage() {
   useEffect(() => {
     if (requestedLockedQuizId === null || warnedQuizIdRef.current === requestedLockedQuizId) return
     warnedQuizIdRef.current = requestedLockedQuizId
-    message.warning(
-      blockingItemType === "QUIZ"
-        ? "請通過本章節之測驗後解鎖" // ET-MSG-ET06-002
-        : "請先完成本章節之影片學習", // ET-MSG-ET06-001
-    )
-  }, [requestedLockedQuizId, blockingItemType, message])
+    message.warning(lockHint)
+  }, [requestedLockedQuizId, lockHint, message])
 
   if (!courseIdValid) {
     return (

@@ -53,7 +53,7 @@ function mockStructure(overrides: Partial<LearnStructure>) {
         playback_rates: [0.75, 1.0, 1.25, 1.5, 2.0],
         last_item_id: null,
         survey: null,
-        blocking_item_type: null,
+        blocking_item_id: null,
         chapters: [
           {
             chapter_id: 10,
@@ -221,15 +221,16 @@ describe("ET06 章節學習頁", () => {
       expect(await screen.findByRole("button", { name: /開始作答/ })).toBeInTheDocument()
     })
 
-    it("鎖定項目點擊時擋下並提示（AC 6 / ET-MSG-ET06-001）", async () => {
-      mockStructure({ chapters: lockedChapters(), blocking_item_type: "MATERIAL" })
+    it("鎖定項目點擊時擋下並提示，點名擋路的教材與所在章節（AC 6 / ET-MSG-ET06-001 / #649）", async () => {
+      // 擋路的是第 1 章第 1 項的教材（id 100）
+      mockStructure({ chapters: lockedChapters(), blocking_item_id: 100 })
       const user = userEvent.setup()
       renderWithProviders(<EtLearnPage />)
 
       await user.click(await screen.findByText("基本概念測驗"))
 
       // **提示而非靜默無反應**——學員需要知道為什麼點不動
-      expect(await screen.findByText("請先完成本章節之影片學習")).toBeInTheDocument()
+      expect(await screen.findByText("請先完成「採血流程概論」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
       // 內容區沒有切過去（測驗面板不該出現）
       expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
@@ -238,14 +239,27 @@ describe("ET06 章節學習頁", () => {
       // 🔴 #361：AC 12 啟用後鎖定多了「測驗未通過」這個成因。沿用原本那句會叫一個
       // 影片早就看完的學員再去看一次影片，而他真正該做的是重考——他照著提示做完全
       // 沒有用，且畫面不會有任何其他線索。
-      mockStructure({ chapters: lockedChapters(), blocking_item_type: "QUIZ" })
+      mockStructure({ chapters: crossChapterChapters({ firstMaterialDone: true }), blocking_item_id: 101 })
       const user = userEvent.setup()
       renderWithProviders(<EtLearnPage />)
 
-      await user.click(await screen.findByText("基本概念測驗"))
+      await user.click(await screen.findByText("第二章教材"))
 
-      expect(await screen.findByText("請通過本章節之測驗後解鎖")).toBeInTheDocument()
-      expect(screen.queryByText("請先完成本章節之影片學習")).not.toBeInTheDocument()
+      expect(await screen.findByText("請先通過測驗「基本概念測驗」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
+      expect(screen.queryByText(/影片/)).not.toBeInTheDocument()
+    })
+
+    it("擋路的是前一章的文件教材：提示寫出章節名稱與教材名稱，不寫「影片」也不寫「本章節」（#649）", async () => {
+      // 舊提示只依前緣型別二分：教材一律說「影片學習」、一律說「本章節」——擋路的若是
+      // **文件**教材、又在**前一章**，兩個詞都錯，學員會去本章找一支不存在的影片
+      mockStructure({ chapters: crossChapterChapters({ firstMaterialDone: false }), blocking_item_id: 100 })
+      const user = userEvent.setup()
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByText("第二章教材"))
+
+      expect(await screen.findByText("請先完成「採血流程概論」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
+      expect(screen.queryByText(/影片|本章節/)).not.toBeInTheDocument()
     })
 
     it("側欄顯示課程進度（完成項目數 ÷ 總項目數）", async () => {
@@ -314,10 +328,10 @@ describe("ET06 章節學習頁", () => {
       // 後者會變成一個通用的「顯示未解鎖項目」能力，而未解鎖**教材**的內容端點
       // 後端並不擋（見 `learning/service.py` 的註解），那會直接開一個洞。
       search.current = "?quiz=2000"
-      mockStructure({ chapters: lockedChapters(), blocking_item_type: "MATERIAL", last_item_id: 100 })
+      mockStructure({ chapters: lockedChapters(), blocking_item_id: 100, last_item_id: 100 })
       renderWithProviders(<EtLearnPage />)
 
-      expect(await screen.findByText("請先完成本章節之影片學習")).toBeInTheDocument()
+      expect(await screen.findByText("請先完成「採血流程概論」（第一章 採血基本流程）後解鎖")).toBeInTheDocument()
       // 沒有把鎖定的測驗面板顯示出來
       expect(screen.queryByRole("button", { name: /開始作答/ })).not.toBeInTheDocument()
     })
@@ -485,6 +499,61 @@ function threeStateChapters() {
           material_id: 1002,
           quiz_id: null,
           locked: false,
+          completed: false,
+        },
+      ],
+    },
+  ]
+}
+
+/**
+ * 兩章、擋路項目在前一章：第 1 章「教材 → 測驗」，第 2 章教材鎖定。
+ *
+ * @param firstMaterialDone 第 1 章教材是否已完成——`true` 時前緣是測驗（101），`false` 時前緣是
+ *   教材（100）、測驗也一併鎖定。與後端「前緣＝第一個未完成項目」一致，fixture 不自相矛盾。
+ */
+function crossChapterChapters({ firstMaterialDone }: { firstMaterialDone: boolean }) {
+  return [
+    {
+      chapter_id: 10,
+      chapter_name: "第一章 採血基本流程",
+      sort_order: 1,
+      items: [
+        {
+          item_id: 100,
+          item_type: "MATERIAL" as const,
+          sort_order: 1,
+          title: "採血流程概論",
+          material_id: 1000,
+          quiz_id: null,
+          locked: false,
+          completed: firstMaterialDone,
+        },
+        {
+          item_id: 101,
+          item_type: "QUIZ" as const,
+          sort_order: 2,
+          title: "基本概念測驗",
+          material_id: null,
+          quiz_id: 2000,
+          locked: !firstMaterialDone,
+          completed: false,
+        },
+      ],
+    },
+    {
+      chapter_id: 20,
+      chapter_name: "第二章 進階",
+      sort_order: 2,
+      items: [
+        {
+          item_id: 200,
+          item_type: "MATERIAL" as const,
+          sort_order: 1,
+          title: "第二章教材",
+          material_id: 2001,
+          quiz_id: null,
+          locked: true,
           completed: false,
         },
       ],

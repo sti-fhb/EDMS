@@ -481,6 +481,15 @@ describe("ET04 核可查詢：教師 / 管理者視角", () => {
     expect(listCalled).toBe(false)
   })
 
+  it("課程下拉說明寫現行規則「不選則列出全部課程」，不再寫「不指定學員時可只選課程」（#649）", async () => {
+    // #548 起兩個條件皆可不給（不給即列出全部），舊說明會讓人以為一定要給某一個
+    asRole("teacher")
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    expect(await screen.findByText("不選則列出全部課程")).toBeInTheDocument()
+    expect(screen.queryByText("不指定學員時可只選課程")).not.toBeInTheDocument()
+  })
+
   it("🔴 課程清單載入失敗時說「載入失敗」，**不得**說「尚無通過紀錄」（#439）", async () => {
     // 後者是一句**假話**，而且比缺陷本身更糟——教師會據此以為系統裡真的沒有核可紀錄，
     // 而不是「剛才沒載到，重整一下」。ET02 的課程下拉踩過同一個坑（#390 的回歸）。
@@ -586,6 +595,14 @@ describe("ET04 核可查詢：學員視角", () => {
 
     await screen.findByText("採血作業新進人員訓練")
     expect(screen.queryByText(/僅顯示您所開設的課程/)).not.toBeInTheDocument()
+  })
+
+  it("筆數列寫「已通過的課程」，不寫「核可」——清單含不需核可的完課（#649）", async () => {
+    asRole("student")
+    renderWithProviders(<EtApprovalQueryPage />)
+
+    expect(await screen.findByText(/^您已通過的課程，共 \d+ 筆$/)).toBeInTheDocument()
+    expect(screen.queryByText(/已通過核可的課程/)).not.toBeInTheDocument()
   })
 
   it("無已通過課程時顯示空狀態（ET-MSG-ET04-002）", async () => {

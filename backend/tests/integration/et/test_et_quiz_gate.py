@@ -361,7 +361,8 @@ class TestBlockingItemType:
 
     🔴 前端原本對任何鎖定項目都提示「請先完成本章節之影片學習」。AC 12 啟用前那句
     永遠是對的（鎖定的唯一成因就是教材沒看完），啟用後會**把考不過的學員指向錯的
-    動作**——叫他去看早就看完的影片。故後端要說出前緣是哪一型。
+    動作**——叫他去看早就看完的影片。故後端要說出前緣是哪一項（#649 起回項目本身，前端
+    據以寫出名稱與所在章節——只回型別時，文件教材會被說成「影片」、前一章會被說成「本章節」）。
     """
 
     async def test_前緣是測驗時回_QUIZ(self, client, db) -> None:
@@ -373,7 +374,9 @@ class TestBlockingItemType:
 
         body = await _learn(client, student, course["course_id"])
 
-        assert body["blocking_item_type"] == ITEM_QUIZ
+        blocking = _node(body, body["blocking_item_id"])
+        assert blocking["item_type"] == ITEM_QUIZ
+        assert blocking["quiz_id"] == course["first_quiz_id"]
 
     async def test_前緣是教材時回_MATERIAL(self, client, db) -> None:
         """同一門課只換前緣的型別——確認它真的跟著前緣走，不是寫死。"""
@@ -399,7 +402,9 @@ class TestBlockingItemType:
 
         body = await _learn(client, student, course_id)
 
-        assert body["blocking_item_type"] == ITEM_MATERIAL
+        blocking = _node(body, body["blocking_item_id"])
+        assert blocking["item_type"] == ITEM_MATERIAL
+        assert blocking["title"] == "教材"
 
     async def test_教師預覽恆為_None(self, client, db) -> None:
         """教師不累積進度、也不套用鎖定，故沒有「前緣」可言。
@@ -412,7 +417,14 @@ class TestBlockingItemType:
         body = await _learn(client, teacher, course["course_id"])
 
         assert body["is_owner"] is True
-        assert body["blocking_item_type"] is None
+        assert body["blocking_item_id"] is None
+
+
+def _node(body: dict, item_id: int) -> dict:
+    """在學習結構回應裡找出指定的項目節點（找不到即測試失敗——前緣必須是結構裡的某一項）。"""
+    nodes = [item for chapter in body["chapters"] for item in chapter["items"] if item["item_id"] == item_id]
+    assert len(nodes) == 1, f"blocking_item_id={item_id} 不在結構裡"
+    return nodes[0]
 
 
 class TestResetEscapeHatch:

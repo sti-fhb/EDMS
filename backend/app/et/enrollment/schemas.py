@@ -50,7 +50,7 @@ class JoinResult(BaseModel):
     course_id: int
     completion_status: str
     #: 加入當下課程尚未開放（`open_start_at` 未到）——前端據此把成功提示換成
-    #: 「已加入，課程開放後將出現於清單」。
+    #: 「已加入，課程開放後即可開始學習」（課程已列在清單、標「尚未開放」，#363 / #649）。
     pending_open: bool
 
 

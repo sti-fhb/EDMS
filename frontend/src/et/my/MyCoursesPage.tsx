@@ -84,7 +84,7 @@ export function EtMyCoursesPage() {
     void refetch()
     if (pendingOpen) {
       // 課程尚未開放——導過去只會看到一個進不了的頁面，留在清單並說明原因（AC 4）。
-      message.success("已加入，課程開放後將出現於清單")
+      message.success("已加入，課程開放後即可開始學習")
       return
     }
     message.success("已加入課程")

@@ -202,6 +202,36 @@ describe("ET03 我的課程", () => {
 })
 
 describe("ET03 邀請連結 / QR Code 帶入邀請碼（#273）", () => {
+  it("新加入尚未開放的課程：提示說明開放後即可學習，不再說「將出現於清單」（#649）", async () => {
+    // 課程加入當下就已列在清單（標「尚未開放」），舊文案叫學員去等一件已經發生的事
+    server.use(
+      http.post("/api/et/enrollments/preview", () =>
+        HttpResponse.json({
+          course_id: 9,
+          course_name: "尚未開放的課",
+          owner_name: "王教師",
+          chapter_count: 2,
+          already_joined: false,
+          open_start_at: "2099-01-01T09:00:00Z",
+        }),
+      ),
+      http.post("/api/et/enrollments", () =>
+        HttpResponse.json({ course_id: 9, completion_status: "NOT_STARTED", pending_open: true }),
+      ),
+    )
+    mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
+    const user = userEvent.setup()
+    renderWithProviders(<EtMyCoursesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "加入新課程" }))
+    await user.type(screen.getByLabelText(/邀請碼/), "12345678")
+    await user.click(screen.getByRole("button", { name: "查詢" }))
+    await user.click(await screen.findByRole("button", { name: "確認加入" }))
+
+    expect(await screen.findByText("已加入，課程開放後即可開始學習")).toBeInTheDocument()
+    expect(screen.queryByText(/出現於清單/)).not.toBeInTheDocument()
+  })
+
   it("網址帶 ?code= 時自動開啟加入視窗並預填該碼", async () => {
     mockMyCourses({ summary: { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }, courses: [] })
     renderWithProviders(<EtMyCoursesPage />, undefined, ["/et/my-courses?code=83052617"])

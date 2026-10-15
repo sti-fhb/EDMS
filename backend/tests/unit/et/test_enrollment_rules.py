@@ -283,7 +283,7 @@ class TestOpenWindowExpired:
         """🔴 #247 SA Q2 裁示 A。
 
         本函式**不看起始時間**——那條裁示明訂起始前仍可加入（前端以 `pending_open`
-        提示「已加入，課程開放後將出現於清單」）。若 #288 的期間判定順手把起始也納入，
+        提示「已加入，課程開放後即可開始學習」，#649）。若 #288 的期間判定順手把起始也納入，
         會靜默推翻它，而 #247 的測試驗的是「可加入」、不會指出是哪一個判定擋的。
         """
         ensure_course_joinable(course_status=COURSE_PUBLISHED, open_end_at=_NOW + timedelta(days=30), now=_NOW)
