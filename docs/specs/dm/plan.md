@@ -85,8 +85,14 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 | DM → ET | 教育訓練模組（ET）| **SRVDM002** | 內部服務（ET 呼叫）| 取「訓練教材」分類之有效文件清單（ET 教材下拉用）| [contracts/document-service.md](contracts/document-service.md) |
 | DM → Email Server | 外部郵件系統 | — | SMTP | 文件發布通知（**相符閱覽者**）、KPI 週報、未讀提醒、密碼重設信、帳號變更驗證信 | 外部介接（部署設定）|
 
-> ⚠️ **#554**：送審 / 退回 / 廢止三類通知**已不再經 SMTP**（改為站內呈現，`CHANNEL=MSG`）；文件發布通知**不再含撰寫者**（撰寫者改由「我的文件動態」之「核准發布」承接）。詳見 [data-model.md](data-model.md) 通知事件表下方註記。
 | 平台排程引擎 → DM job | `DP_SCHEDULE` | **SCHDM001** | 每週觸發（時點由 `DP_SCHEDULE.CRON_EXPR` 控制，預設 `0 10 * * 0`；#332 移除 `DP_PARAM.DM_WEEKLY_SCHED_DAY_TIME`）；平台引擎執行、`DP_SCHEDULE_LOG` 記錄、job handler 由 DM 提供 | 計算閱讀 KPI、產生 KPI 週報與未讀提醒經平台發信服務 + outbox `DP_EMAIL_LOG` 寄送 | 平台排程集中 |
+| 平台排程引擎 → DM job | `DP_SCHEDULE` | **SCHDM002** | 每日觸發；同上 | 簽核催辦：掃停留 ≥ `DM_REMIND_THRESHOLD` 之 PENDING，以 `AUTO_REMIND` 寄 Email | 平台排程集中 |
+
+> ⚠️ **#554**：送審 / 退回 / 廢止三類通知**已不再經 SMTP**（改為站內呈現，`CHANNEL=MSG`）；文件發布通知**不再含撰寫者**（撰寫者改由「我的文件動態」之「核准發布」承接）。詳見 [data-model.md](data-model.md) 通知事件表下方註記。
+>
+> ⚠️ **#627**：自動催辦 `AUTO_REMIND` 自 `MSG` 改為 **`EMAIL`**，是上述 #554 分界的**明確例外**——該分界的前提是「當事人會進畫面看」，而催辦針對的正是已久未進畫面者。`MSG` 期間催辦每日執行卻零產出。理由與守門測試見 [data-model.md](data-model.md) 同一註記段。
+>
+> ℹ️ 上面兩段註記原本夾在表格列之間，使 `SCHDM001` 那一列脫離表格、在 Markdown 下被渲染成內文（#627 一併修正）。新增註記請加在整張表之後。
 
 > **2026-06-26 變更**：移除原「DM → 主系統各畫面 func_name 反查」介接列；DM 與主系統 TBMS 各業務模組無業務介接。func_name 僅供 DM01 內部檢索。
 > **2026-06-29 變更**：文件發布通知改發撰寫者+相符閱覽者（原兩範本合併）、新增 KPI 週報 / 未讀提醒（皆 Email、非同步）與排程 `SCHDM001`。
@@ -105,7 +111,7 @@ DM 與主系統 TBMS 各業務模組**帳號完全切開**，僅與 ET 共用帳
 | func_name 唯一性 | 部分唯一索引（MANUAL + PUBLISHED）+ 應用層檢核（research §5）|
 | 發布 / 廢止原子性 | 單一交易完成版本切換 + 變更歷程 + 通知（research §6）|
 | 永久保留 | 版本軟刪除永久保留；變更歷程 / 角色異動 append-only 永久保留（research §7）|
-| 自動催辦 | 每日排程掃 DM_REVIEW 停留 ≥ 門檻，僅站內訊息（research §9）|
+| 自動催辦 | 每日排程（`SCHDM002`）掃 DM_REVIEW 停留 ≥ 門檻，以 **Email** 寄 `AUTO_REMIND`（#627 推翻 research §9 原訂之「僅站內訊息」）|
 
 ---
 

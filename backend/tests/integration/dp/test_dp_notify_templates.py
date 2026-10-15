@@ -305,12 +305,11 @@ async def test_list_excludes_in_app_templates(db, admin_gate):
     admin_gate(dm_admins=("admin01",))
     codes = {t.template_code for t in await TemplateAdminService().list_visible(db, "admin01")}
 
-    # 正向：DM 仍寄 Email 的三支都在
-    assert {"DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND"} <= codes
-    # 否定：#554 改為站內的 5 支 + 原本就是 MSG 的 2 支，皆不在
-    assert codes.isdisjoint(
-        {"DOC_SUBMIT", "DOC_REJECT", "OBS_SUBMIT", "OBS_APPROVE", "OBS_REJECT", "AUTO_REMIND", "SUBMIT_WITHDRAWN"}
-    )
+    # 正向：DM 會寄 Email 的四支都在（`AUTO_REMIND` 自 #627 起加入——它原本是 MSG，
+    # 因而在 DP04 看不到；管理者「找不到催辦範本」正是本次改動的外部徵兆之一）
+    assert {"DOC_PUBLISH", "KPI_WEEKLY", "UNREAD_REMIND", "AUTO_REMIND"} <= codes
+    # 否定：#554 改為站內的 5 支 + 原本就是 MSG 的 SUBMIT_WITHDRAWN，皆不在
+    assert codes.isdisjoint({"DOC_SUBMIT", "DOC_REJECT", "OBS_SUBMIT", "OBS_APPROVE", "OBS_REJECT", "SUBMIT_WITHDRAWN"})
 
 
 async def test_update_in_app_template_forbidden(db, admin_gate):

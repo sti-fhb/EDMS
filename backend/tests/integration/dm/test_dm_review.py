@@ -28,11 +28,28 @@ from app.dm.review.models import DmChangeLog, DmReview
 from app.dm.review.service import ReviewService
 from app.dm.roles.authz import DM_EDITOR, DM_REVIEWER, DM_VIEWER
 from app.dm.roles.models import DmUserRole
+from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
 from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
 from app.services import MAX_RECIPIENTS
 
 pytestmark = pytest.mark.integration
+
+
+async def _auto_remind_rows(db) -> int:
+    """已排入 outbox 的催辦信數。
+
+    ⚠️ 篩 `STATUS='PENDING'`：worker 跑過後狀態會變，且渲染失敗會留下 `FAILED` 列——
+    不篩就會把「寄失敗的空信」也算成成功，正是本 issue 要防的那種假陽性。
+    """
+    return (
+        await db.scalar(
+            select(func.count())
+            .select_from(DpEmailLog)
+            .where(DpEmailLog.template_code == "AUTO_REMIND", DpEmailLog.status == "PENDING")
+        )
+    ) or 0
+
 
 _svc = ReviewCenterService()
 _PDF = "application/pdf"
@@ -566,13 +583,73 @@ async def test_scan_overdue_reminds(db):
 
     await _seed_user(db, "ed", "撰寫")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    # #627：催辦另驗 `DM_REVIEWER` 角色（詳見 `test_角色已撤的審核者不再收到催辦`）。
+    # `_seed_user` 不給角色，故正向案例要自己補——這不是遷就守門：送簽時
+    # `_ensure_assignable_reviewer`（#250）本就要求指定審核者具該角色，沒有角色的指派
+    # 不是產品路徑造得出來的狀態。
+    await _grant(db, "rev1", DM_REVIEWER)
     await _doc(db, "DM-SOP-000360", status="PENDING_REVIEW")
     v = await _add_version(db, "DM-SOP-000360", "1.0", status="PENDING_REVIEW")
     await _review(
         db, "DM-SOP-000360", v.version_id, review_type="NEW", reviewer="rev1", submit=utcnow() - timedelta(days=10)
     )
     count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    # ⭐ 斷言**可觀察的產出**而非回傳值（#627）：`count` 是本函式自己算的，無論有沒有真的寄出
+    # 都會遞增——在 CHANNEL=MSG 的那段期間（2026-08-06～），這條測試全綠而催辦其實什麼都沒產生。
+    # outbox 列才是「信真的排出去了」的證據。
+    rows = (
+        (
+            await db.execute(
+                select(DpEmailLog).where(DpEmailLog.template_code == "AUTO_REMIND", DpEmailLog.status == "PENDING")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1, "逾期之 PENDING 應排入一封催辦信"
+    assert rows[0].recipient == "rev1@e.com"
+    assert "10" in rows[0].subject or "10" in rows[0].body, "停留天數應渲染進信件（{days} 佔位）"
     assert count == 1
+
+
+async def test_範本停用時不排信且不計入催辦筆數(db, caplog):
+    """範本停用 → 沒有產出，`count` 也不得計入（#627 AC：log 的數字必須與實際產出一致）。
+
+    這條守的是 `count += 1` 無條件遞增那個缺陷的**一般形式**：不只 CHANNEL 不對會沒產出，
+    範本停用、渲染失敗同樣沒產出，而三者都曾被算成「已催辦 N 筆」。
+
+    ⚠️ **必須 `_grant(DM_REVIEWER)`，而且必須斷言跳過理由**。本條一度只斷言 `count == 0`
+    與 outbox 零列，於是加上角色守門（#627）之後它**靜默地換了一條路**：`rev_off` 沒有角色
+    → 在 `notify()` 之前就被攔掉 → 從此根本沒走到「範本停用」。兩個斷言在新路徑下同樣成立，
+    所以**測試沒有變紅，卻已經不再測它宣稱在測的東西**（由 diff-cover 指出該分支零覆蓋才發現）。
+
+    教訓：斷言「結果」而結果有不只一條路時，上游多一道守門就會把測試掏空而不留痕跡。
+    故此處改為連「為什麼跳過」一起釘住。
+    """
+    await _seed_user(db, "ed_off", "撰寫")
+    await _seed_user(db, "rev_off", "審核", email="rev_off@e.com")
+    await _grant(db, "rev_off", DM_REVIEWER)
+    await _doc(db, "DM-SOP-000361", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000361", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000361", v.version_id, review_type="NEW", reviewer="rev_off", submit=utcnow() - timedelta(days=10)
+    )
+    await db.execute(
+        update(DpNotifyTemplate)
+        .where(DpNotifyTemplate.module == "DM", DpNotifyTemplate.template_code == "AUTO_REMIND")
+        .values(is_enabled=False)
+    )
+    await db.flush()
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0, "沒有產出就不得計入催辦筆數"
+    assert await _auto_remind_rows(db) == 0
+    # 錨點：證明真的走到「呼叫了 notify、但平台沒排入」這條路，而不是在更早的分支就被攔掉
+    assert "催辦未排入 outbox" in caplog.text, "未走到 notify 之後的分支——上游可能多了一道守門把本條掏空"
+    assert "TEMPLATE_DISABLED" in caplog.text, "跳過理由必須是範本停用，否則本條測的已不是它宣稱的情境"
 
 
 async def test_停用的審核者不再收到催辦(db, caplog):
@@ -610,6 +687,9 @@ async def test_停用的審核者不再收到催辦(db, caplog):
         count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0, "停用的審核者不該再收到催辦"
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     # ⭐ 只停止寄信會把問題從吵鬧變成安靜——案件仍卡著、仍無人能處理，只是沒人被打擾。
     # 這條釘住「跳過要留下痕跡」，否則積壓變成隱形的。
     assert "rev395a" in caplog.text and "審核者帳號已停用" in caplog.text, (
@@ -640,6 +720,9 @@ async def test_已刪除的審核者不再收到催辦(db):
     )
 
     assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 0
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
 
 
 async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, caplog):
@@ -670,6 +753,9 @@ async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, capl
         count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     assert "查無審核者帳號" in caplog.text, "孤兒指派要有自己的分類，否則被誤標成已停用"
     assert "審核者帳號已停用" not in caplog.text
 
@@ -685,6 +771,7 @@ async def test_審核者_email_為空字串時跳過且留下_log(db, caplog):
 
     await _seed_user(db, "ed395e", "撰寫")
     await _seed_user(db, "rev395e", "無信箱審核者", email="rev395e@e.com")
+    await _grant(db, "rev395e", DM_REVIEWER)  # #627：不給角色會被前一個分支先攔下，驗不到本條
     await db.execute(update(DpUser).where(DpUser.user_id == "rev395e").values(email=""))
     await _doc(db, "DM-SOP-000399", status="PENDING_REVIEW")
     v = await _add_version(db, "DM-SOP-000399", "1.0", status="PENDING_REVIEW")
@@ -696,8 +783,56 @@ async def test_審核者_email_為空字串時跳過且留下_log(db, caplog):
         count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
     assert count == 0
+    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
+    assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     assert "查無審核者 Email" in caplog.text
     assert "審核者帳號已停用" not in caplog.text, "帳號是 ACTIVE，不該被歸成停用"
+
+
+async def test_角色已撤的審核者不再收到催辦(db, caplog):
+    """帳號 ACTIVE、但 `DM_REVIEWER` 角色已撤 → 不寄、留下自己那一類的 log（#627）。
+
+    ## 為何這是獨立的一類，而不是 #395 已經處理過的
+
+    #395 只確認了**帳號狀態**。「這個人現在還能不能處理這筆送審」另有角色這一維：
+    角色撤銷走 `roles/assign_service` 的 `DmUserRole.deleted = 1`，**不碰
+    `DM_REVIEW.ASSIGNED_REVIEWER`**；而簽核中心 router 掛 router-level
+    `get_dm_reviewer_context`，角色一撤他連這筆送審都看不到。
+
+    於是這個人處在最糟的組合——**催得到、做不了**，且案件永遠逾期、信永遠寄下去。
+    `AUTO_REMIND` 還是 `MSG` 的期間此缺口零後果（根本沒寄信），#627 改 `EMAIL` 後才成立。
+
+    ⚠️ 此處**走產品路徑撤角色**（`assign_roles_audiences`）而非直接 UPDATE：要驗的正是
+    「產品做得出這個狀態」。若改成直接 UPDATE，這條就退化成在驗一個假想狀態。
+    """
+    from datetime import timedelta
+
+    from app.dm.roles.assign_service import AssignService
+
+    await _seed_user(db, "ed627a", "撰寫")
+    await _seed_user(db, "rev627a", "已撤角色審核者", email="rev627a@e.com")
+    await _grant(db, "rev627a", DM_REVIEWER)
+    await _doc(db, "DM-SOP-000627", status="PENDING_REVIEW")
+    v = await _add_version(db, "DM-SOP-000627", "1.0", status="PENDING_REVIEW")
+    await _review(
+        db, "DM-SOP-000627", v.version_id, review_type="NEW", reviewer="rev627a", submit=utcnow() - timedelta(days=10)
+    )
+
+    # 產品路徑撤銷角色（帳號仍 ACTIVE、EMAIL 仍在、DM_REVIEW.ASSIGNED_REVIEWER 不動）
+    await AssignService().assign_roles_audiences(db, user_id="rev627a", roles=set(), audiences=set(), operator_id="adm")
+    await db.flush()
+    assert await db.scalar(select(DpUser.status).where(DpUser.user_id == "rev627a")) == "ACTIVE", (
+        "前提錨點：帳號必須仍是 ACTIVE，否則下方跳過可能來自 #395 的停用分支"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+
+    assert count == 0
+    assert await _auto_remind_rows(db) == 0, "角色已撤者不得排入 outbox"
+    assert "審核者已無審核者角色" in caplog.text, "此類要有自己的分類：補救動作是改指派或補回角色"
+    assert "審核者帳號已停用" not in caplog.text, "帳號是 ACTIVE，誤標成停用會讓人去翻停用清單而查無此人"
 
 
 async def test_啟用中的審核者照常收到催辦(db):
@@ -706,6 +841,7 @@ async def test_啟用中的審核者照常收到催辦(db):
 
     await _seed_user(db, "ed395c", "撰寫")
     await _seed_user(db, "rev395c", "正常審核者", email="rev395c@e.com")
+    await _grant(db, "rev395c", DM_REVIEWER)  # #627：正向案例須具角色，見 test_scan_overdue_reminds
     await _doc(db, "DM-SOP-000397", status="PENDING_REVIEW")
     v = await _add_version(db, "DM-SOP-000397", "1.0", status="PENDING_REVIEW")
     await _review(

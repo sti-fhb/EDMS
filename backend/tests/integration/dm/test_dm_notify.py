@@ -89,12 +89,48 @@ async def test_flow_templates_are_msg_and_not_emailed(db):
 
 
 async def test_msg_only_channel_not_emailed(db):
-    """CHANNEL=MSG 之 AUTO_REMIND（僅站內）→ 平台回 CHANNEL_NOT_EMAIL、不寄信。"""
+    """CHANNEL=MSG 之 SUBMIT_WITHDRAWN（僅站內）→ 平台回 CHANNEL_NOT_EMAIL、不寄信。
+
+    ⚠️ 本條原本用 `AUTO_REMIND`。#627 把催辦改為 `EMAIL` 後**換範本而非刪測試**（同
+    `test_email_channel_queues_outbox` 的理由）：這條驗的是「MSG 這個管道本身的行為」，
+    與哪一支範本無關。改用 `SUBMIT_WITHDRAWN` 而非 `_FLOW_CASES` 裡那 5 支，是為了讓
+    上方那條（驗「那 5 支確實落在 MSG」）與本條（驗「MSG 管道的行為」）母體仍然分開。
+    """
+    result = await DmNotifier().notify(
+        db,
+        template_code="SUBMIT_WITHDRAWN",
+        recipients=["reviewer@example.com"],
+        params={"reviewer_name": "王審核", "author_name": "陳撰寫", "doc_name": "SOP-001"},
+    )
+    assert result.queued_count == 0
+    assert result.skipped_reason == "CHANNEL_NOT_EMAIL"
+
+
+async def test_auto_remind_queues_outbox(db):
+    """#627：催辦改 `EMAIL` 後 → 真的排入 outbox，且 `{days}` 等佔位確實渲染出來。
+
+    ⚠️ 必須篩 `STATUS='PENDING'`：渲染失敗時 `send_email` 會把整批寫成 `FAILED` 空信**且不外拋**，
+    不篩狀態的話「params key 對不上範本 VARIABLES」這個原始缺陷（`waiting_days` vs `days`）
+    照樣通過——那正是本 issue 的成因。
+    """
     result = await DmNotifier().notify(
         db,
         template_code="AUTO_REMIND",
         recipients=["reviewer@example.com"],
         params={"reviewer_name": "王審核", "doc_name": "SOP-001", "days": "8"},
     )
-    assert result.queued_count == 0
-    assert result.skipped_reason == "CHANNEL_NOT_EMAIL"
+    assert result.queued_count == 1
+    assert result.skipped_reason is None
+
+    row = (
+        await db.execute(
+            text(
+                'SELECT "STATUS", "BODY" FROM "DP_EMAIL_LOG" '
+                "WHERE \"RECIPIENT\"='reviewer@example.com' AND \"TEMPLATE_CODE\"='AUTO_REMIND'"
+            )
+        )
+    ).one()
+    assert row[0] == "PENDING"
+    # 正向錨點：佔位真的被替換掉了（而非殘留 `{days}` 或整封空白）
+    assert "8" in row[1]
+    assert "{" not in row[1]

@@ -12,8 +12,19 @@
 後端 API 亦套此過濾（防繞過 UI），對應 spec_us3 FR-008 / research §5b。
 
 ⚠️ 契約：本條件**僅**處理可見對象配對，不含文件狀態（STATUS）。呼叫端對閱覽者（VIEWER）
-**必須另外 AND `DM_DOCUMENT.STATUS = 'PUBLISHED'`**，否則閱覽者將看見草稿 / 未發布文件
-（US3 查詢端點須含此過濾並附測試）。編輯者 / 審核者 / 管理者回 None 不過濾，其可見範圍由端點自訂。
+**必須另外限定 STATUS**，排除 `DRAFT` / `PENDING_REVIEW`（首版尚未發布過，不得外流）；
+未加狀態條件時閱覽者會看見他人草稿。編輯者 / 審核者 / 管理者回 None 不過濾，其可見範圍由端點自訂。
+
+本契約**不是「一律 AND `STATUS = 'PUBLISHED'`」**——各畫面的在架定義不同，現行三個呼叫端各取
+不同的超集，都正確::
+
+    dm/library/repository.py     PUBLISHED, PENDING_OBSOLETE              DM01 文件庫（廢止待簽核仍在架）
+    dm/dashboard/repository.py   PUBLISHED, PENDING_OBSOLETE              DM00 首頁 widget（同上）
+    dm/detail/repository.py      PUBLISHED, PENDING_OBSOLETE, OBSOLETE    DM07 詳細頁（已廢止仍可唯讀查閱）
+
+本段原寫「必須另外 AND `STATUS = 'PUBLISHED'`」，那是導入 `PENDING_OBSOLETE` / `OBSOLETE` 之前的
+說法：照字面執行會讓廢止待簽核的文件在 DM01 當場消失（它仍然有效、仍在架），也會讓 DM07 查不到
+已廢止文件。⛔ 請勿把上述三處「修正」成單一 `PUBLISHED`——那不是漏寫，是各畫面刻意的差異。
 """
 
 from collections.abc import Iterable

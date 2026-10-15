@@ -549,6 +549,14 @@ class ReviewCenterService:
                 # 全無寫入點。保留是為了值域日後改變時預設不寄（fail-closed），不是因為
                 # 現在會發生；讀者不應據此認為「已刪除」這條路徑已被實作。
                 unreachable = "審核者帳號已停用"
+            elif not r.reviewer_has_role:
+                # #627 補上 #395 少做的那一維：帳號 ACTIVE 但 `DM_REVIEWER` 角色已撤。
+                # 簽核中心 router 掛 router-level `get_dm_reviewer_context`，角色一撤他連這筆
+                # 送審都看不到——**催得到、做不了**，而這筆案件會永遠逾期、永遠寄下去。
+                #
+                # 與「已停用」分開具名的理由同上：補救動作不同。此類要**改指派審核者或補回角色**，
+                # 而不是去使用者管理找停用清單（那裡找不到這個人，他是 ACTIVE 的）。
+                unreachable = "審核者已無審核者角色"
             elif not r.reviewer_email:
                 # 分三類後這條只剩「`EMAIL` 為空字串」一途（`DP_USER.EMAIL` 是
                 # `nullable=False`，`None` 只會來自 outerjoin 落空，已由上面接走）。
@@ -567,15 +575,31 @@ class ReviewCenterService:
                     self._repo.waiting_days(r.submit_date),
                 )
                 continue
-            await self._notifier.notify(
+            result = await self._notifier.notify(
                 db,
                 template_code="AUTO_REMIND",
                 recipients=[r.reviewer_email],
                 params={
+                    # key 必須逐字對齊範本宣告的 `VARIABLES`（`reviewer_name,doc_name,days`）。
+                    # 此處原為 `waiting_days`，對不上 → `_SafeFormatter` KeyError → 整批寫 FAILED
+                    # 空信且**不外拋**。範本在 `CHANNEL='MSG'` 期間從不渲染，所以這個錯位一直沒現形
+                    # （#627）。契約方向：`VARIABLES` 是給 DP04 管理者看的宣告，程式配合它。
                     "reviewer_name": r.reviewer_name or r.assigned_reviewer,
                     "doc_name": r.doc_name,
-                    "waiting_days": str(self._repo.waiting_days(r.submit_date)),
+                    "days": str(self._repo.waiting_days(r.submit_date)),
                 },
             )
-            count += 1
+            # ⚠️ 只計**真的排進 outbox** 的。原本無條件 `count += 1`，於是「範本停用 / 管道不對 /
+            # 渲染失敗」三種沒有產出的情況都被算成「已催辦 N 筆」——排程 log 因此每天報成功
+            # 而實際零產出。沿用本函式既有的「跳過必須留下痕跡」原則，未排入者留 warning。
+            if result.queued_count:
+                count += 1
+            else:
+                logger.warning(
+                    "催辦未排入 outbox：review_id=%s doc_id=%s reviewer=%s reason=%s",
+                    r.review_id,
+                    r.doc_id,
+                    r.assigned_reviewer,
+                    result.skipped_reason,
+                )
         return count
