@@ -492,7 +492,8 @@ async def reset_password_policy(
 ) -> ApplicablePasswordPolicyResponse:
     """重設頁適用之密碼門檻（匿名，持信中連結 token，#623）：管理者 12、其餘 8。
 
-    token 無效回一般門檻、不報錯；連結失效仍由送出時的 `/reset-password` 告知。
+    token 查無 / 已用 / 逾期一律回 400 `DP_PWD_005`（#673）——`spec_us3` AC 3 要求失效連結
+    於**點連結時**即拒絕。⛔ 失效的回應不得依帳號分歧，否則會替已作廢的連結報出「這是管理者」。
     """
     rules = await _reset_service.password_rules_for_token(db, token=data.token)
     return ApplicablePasswordPolicyResponse(min_len=rules.min_len, char_types=rules.char_types)

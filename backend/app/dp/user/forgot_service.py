@@ -16,7 +16,7 @@ from app.core.password_hashing import hash_password_async, is_reused_async
 from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
-from app.dp.user.password_rules import PasswordRules, general_rules, rules_for_user
+from app.dp.user.password_rules import PasswordRules, rules_for_user
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
 from app.services import AuditLogService, NotifyService, ParamService
@@ -90,17 +90,29 @@ class ResetPasswordService:
         self._audit = audit or AuditLogService()
 
     async def password_rules_for_token(self, db: AsyncSession, *, token: str) -> PasswordRules:
-        """重設頁適用之門檻（#623）：token 有效則依其帳號判定，否則回一般門檻。
+        """重設頁適用之門檻（#623）：依 token 對應帳號判定；token 失效則拒絕（#673）。
 
-        token 無效**不在此報錯**——本方法只供渲染提示，連結失效由送出時的 `reset` 以
-        DP_PWD_005 告知，維持重設頁原有的提示時點。
+        ⛔ **失效一律回同一個錯誤，不得依其帳號分歧**——否則端點會替已作廢的連結報出
+        「這是管理者」。本方法對「查無 / 已用 / 逾期」三種失效回完全相同的 `DP_PWD_005`，
+        與帳號是否為管理者無關；`test_重設規則端點_失效token的回應不因是否為管理者而異`
+        以同一個字面量斷言四個組合來釘住它。
+
+        ### #673 之前：失效回一般門檻、不報錯
+
+        原設計讓失效 token 回一般門檻（8 字元）「維持重設頁原有的提示時點」，連結失效留到
+        送出時由 `reset` 告知。但 `spec_us3` AC 3 要求「token 已逾時或已被使用，**點連結**時
+        拒絕並提示（DP-MSG-DP09-002）」——推遲到送出與該 AC 衝突，且使用者會先照著
+        **錯的門檻**（管理者看到 8、實際要 12）打完一組密碼才被擋下。
+
+        Raises:
+            AppError: token 查無 / 已用 / 逾期（400 DP_PWD_005），訊息與 `reset` 同一常數。
 
         Returns:
             與 `reset` 檢核所用相同之門檻（同一支 `rules_for_user`）。
         """
         row = await self._repo.get_reset_token_by_hash(db, hash_token(token), _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= utcnow():
-            return await general_rules(db, params=self._params)
+            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         return await rules_for_user(db, row.user_id, params=self._params)
 
     async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> None:

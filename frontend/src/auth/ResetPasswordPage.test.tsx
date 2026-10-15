@@ -84,7 +84,9 @@ describe("ResetPasswordPage", () => {
     expect(await screen.findByRole("link", { name: "返回登入" })).toHaveAttribute("href", "/edms")
   })
 
-  it("token 失效（後端 DP_PWD_005）→ 顯示錯誤訊息", async () => {
+  // #673 之後這條仍然到得了：門檻端點放行（token 當下有效）、使用者打完密碼期間才逾期。
+  // 此處只 mock 送出端點，門檻端點走 server.ts 的預設 200，故表單照常渲染。
+  it("token 於填表期間失效（送出時後端回 DP_PWD_005）→ 顯示錯誤訊息", async () => {
     server.use(
       http.post("/api/reset-password", () =>
         HttpResponse.json({ error_code: "DP_PWD_005", error_message: "連結已失效，請重新申請" }, { status: 400 }),
@@ -94,6 +96,37 @@ describe("ResetPasswordPage", () => {
     const user = userEvent.setup()
     await fillReset(user)
     expect(await screen.findByText("連結已失效，請重新申請")).toBeInTheDocument()
+  })
+
+  it("連結已逾期（門檻端點回 DP_PWD_005）→ 點連結即提示失效，不渲染重設表單（#673）", async () => {
+    server.use(
+      http.post("/api/reset-password/policy", () =>
+        HttpResponse.json({ error_code: "DP_PWD_005", error_message: "連結已失效，請重新申請" }, { status: 400 }),
+      ),
+    )
+    renderReset("/reset-password?token=expiredtoken")
+    // 正向錨點：失效訊息必須出現——證明下面兩條否定斷言是在有東西可驗的情況下成立
+    expect(await screen.findByText("連結已失效，請重新申請")).toBeInTheDocument()
+    // 不得再讓使用者照著門檻打完一組密碼才被擋下（本 issue 的回報症狀）
+    expect(screen.queryByLabelText("新密碼")).not.toBeInTheDocument()
+    expect(screen.queryByText(/至少 \d+ 字元/)).not.toBeInTheDocument()
+  })
+
+  it("門檻端點被限流（429）→ 不報出任何字數、也不誤判成連結失效（#673）", async () => {
+    server.use(
+      http.post("/api/reset-password/policy", () =>
+        HttpResponse.json({ error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試" }, { status: 429 }),
+      ),
+    )
+    renderReset("/reset-password?token=validtoken")
+    // 正向錨點：確實走到「取不到門檻」這個狀態，而不是停在載入中
+    expect(await screen.findByText(/無法取得密碼規則/)).toBeInTheDocument()
+    // 連結可能是好的 → 表單仍須可用，不得擋人
+    expect(screen.getByLabelText("新密碼")).toBeInTheDocument()
+    // ⛔ 不得掉回寫死的「至少 8 字元」——管理者實際門檻是 12，那是 #623 修掉的矛盾
+    expect(screen.queryByText(/至少 \d+ 字元/)).not.toBeInTheDocument()
+    // 429 不代表連結壞了，說錯比不說更糟
+    expect(screen.queryByText("連結已失效，請重新申請")).not.toBeInTheDocument()
   })
 
   it("兩次不一致 → 前端 Zod 擋下（不送出）", async () => {

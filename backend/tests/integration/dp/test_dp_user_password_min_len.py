@@ -155,20 +155,37 @@ async def test_重設規則端點_依token帳號回門檻(client, db):
     assert user.status_code == 200 and user.json() == {"min_len": 8, "char_types": 3}
 
 
-async def test_重設規則端點_無效token回一般門檻(client, db):
-    """token 無效不在此報錯：連結失效由送出時的重設端點提示，本端點只供渲染提示。"""
+# 失效 token 的回應**逐欄位固定**為這一組。下面四條（無此列 / 逾期 / 已用 × 管理者 / 一般）
+# 全部斷言同一個字面量——相同的期望值即「失效 token 不依帳號判定」的斷言本身。
+#
+# ⛔ **不要改寫成「在同一條測試裡打管理者與一般兩次、比對兩個回應相等」**：失敗的請求會讓
+# integration 的前置資料回滾，第二次呼叫將查無該列而「因為另一個理由」回同樣的答案——
+# 那樣寫**拿掉修法也會通過**。一條測試只安排一次預期失敗的呼叫。
+_DEAD_LINK = {"error_code": "DP_PWD_005", "error_message": "連結已失效，請重新申請"}
+
+
+async def test_重設規則端點_查無token回連結已失效(client, db):
+    """#673：失效連結 MUST 於**點連結時**即拒絕（spec_us3 AC 3），不再回門檻讓表單渲染。"""
     r = await client.post("/api/reset-password/policy", json={"token": "no-such-token"})
-    assert r.status_code == 200 and r.json() == {"min_len": 8, "char_types": 3}
+    assert r.status_code == 400
+    assert r.json() == _DEAD_LINK
 
 
 @pytest.mark.parametrize(("minutes", "used"), [(-1, False), (30, True)], ids=["逾期", "已用過"])
-async def test_重設規則端點_管理者的失效token回一般門檻(client, db, minutes, used):
-    """失效 token 不得依其帳號判定——否則端點會替已作廢的連結報出「這是管理者」。"""
+@pytest.mark.parametrize("is_admin", [True, False], ids=["管理者", "一般使用者"])
+async def test_重設規則端點_失效token的回應不因是否為管理者而異(client, db, minutes, used, is_admin):
+    """⛔ 失效 token 不得依其帳號判定——否則端點會替已作廢的連結報出「這是管理者」。
+
+    #673 把失效的回應從「200 + 一般門檻」改為「400 DP_PWD_005」，**此不變量不變**：
+    四個組合都斷言同一個 `_DEAD_LINK` 字面量，管理者與一般使用者的失效連結逐欄位相同。
+    """
     await _make_user(db, "tkdead")
     await _make_reset_token(db, "tkdead", "tok-dead", minutes=minutes, used=used)
-    with _as_et_admin("tkdead"):
+    admins = ("tkdead",) if is_admin else ()
+    with _as_et_admin(*admins):
         r = await client.post("/api/reset-password/policy", json={"token": "tok-dead"})
-    assert r.status_code == 200 and r.json() == {"min_len": 8, "char_types": 3}
+    assert r.status_code == 400
+    assert r.json() == _DEAD_LINK
 
 
 # --- AC 5：參數調整後跟著變 ---
