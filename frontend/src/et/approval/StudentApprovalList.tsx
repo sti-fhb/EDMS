@@ -20,7 +20,7 @@ import { approvalsApi } from "./approvalsService"
 import type { MyApprovalRow } from "./schemas"
 
 /**
- * 學員視角——我已通過核可的課程（`FR-ET-US17-03`）。
+ * 學員視角——我已通過的課程（`FR-ET-US17-03`；含需核可者的核可通過與不需核可者的完課，#464）。
  *
  * 進畫面即載入，**沒有查詢框**：對象恆為自己，沒有什麼好查的。
  *
@@ -82,7 +82,8 @@ export function StudentApprovalList() {
       </TableContainer>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Typography variant="caption" color="text.secondary">
-          您已通過核可的課程，共 {data?.meta.total ?? 0} 筆
+          {/* 不寫「核可」：清單也含不需線下核可、已完課的課程（#464 / #649），與空狀態用語一致 */}
+          您已通過的課程，共 {data?.meta.total ?? 0} 筆
         </Typography>
         {totalPages > 1 && <Pagination count={totalPages} page={page} onChange={(_, p) => setPage(p)} />}
       </Stack>

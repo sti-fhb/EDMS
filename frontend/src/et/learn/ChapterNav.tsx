@@ -60,7 +60,7 @@ interface Props {
  * ## 鎖定項目**可點但不放行**，不是 `disabled`
  *
  * `disabled` 的 `ListItemButton` 不會觸發 `onClick`，於是點下去毫無反應——而 AC 6 要的
- * 是「阻擋**並提示**」（ET-MSG-ET06-001「請先完成本章節之影片學習」）。學員需要知道
+ * 是「阻擋**並提示**」（ET-MSG-ET06-001 / 002，文字見 `learnSchemas.lockedHint`）。學員需要知道
  * 為什麼點不動，否則只會以為系統壞了。
  *
  * 故一律可點、由 `onSelect` 那端判斷 `locked` 決定提示或切換；視覺上仍以 `aria-disabled`

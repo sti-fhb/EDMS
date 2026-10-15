@@ -98,6 +98,6 @@ export interface JoinPreview {
 export interface JoinResult {
   course_id: number
   completion_status: CompletionStatus
-  /** 加入當下課程尚未開放——提示改為「課程開放後將出現於清單」。 */
+  /** 加入當下課程尚未開放——提示改為「已加入，課程開放後即可開始學習」（課程已列在清單，#649）。 */
   pending_open: boolean
 }

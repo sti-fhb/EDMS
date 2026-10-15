@@ -199,7 +199,7 @@ class EtLearningService:
         # 預覽不套用鎖定，故與 `completed_ids` 同樣給空集合——兩者的取得條件刻意寫成
         # 同一形狀，避免日後有人只改其中一個。旗標隨 `rows` 一併取回，不另查一次。
         zero_question = frozenset() if is_preview else zero_question_quiz_item_ids(rows)
-        by_chapter, blocking_item_type = self._item_nodes(
+        by_chapter, blocking_item_id = self._item_nodes(
             chapters=chapter_ids,
             rows=rows,
             completed_ids=completed_ids,
@@ -233,7 +233,7 @@ class EtLearningService:
                 None if is_preview else await self._progress.get_last_item_id(db, user_id=user_id, course_id=course_id)
             ),
             survey=survey,
-            blocking_item_type=blocking_item_type,
+            blocking_item_id=blocking_item_id,
             chapters=[
                 ChapterNode(
                     chapter_id=c.chapter_id,
@@ -253,8 +253,8 @@ class EtLearningService:
         completed_ids: set[int],
         zero_question_quiz_item_ids: frozenset[int],
         is_preview: bool,
-    ) -> tuple[dict[int, list[ItemNode]], str | None]:
-        """組側欄項目並套用解鎖判定（#274），另回「擋住學習前緣的那一項是什麼型別」。
+    ) -> tuple[dict[int, list[ItemNode]], int | None]:
+        """組側欄項目並套用解鎖判定（#274），另回「擋住學習前緣的那一項」的 `ITEM_ID`（#649）。
 
         `rows` 已由 repository 依 `(CHAPTER_ID, SORT_ORDER, ITEM_ID)` 排序，
         `chapters` 依 `SORT_ORDER`——**順序即解鎖規則**，故此處按 `chapters` 的順序
@@ -308,8 +308,6 @@ class EtLearningService:
         # （#416 的 `?quiz=` 落點因此在鎖定時改為提示，不顯示內容）。
         locked = frozenset() if is_preview else locked_item_ids(states)
         blocking_id = None if is_preview else first_blocking_item(states)
-        item_types = {item.item_id: item.item_type for item, *_ in rows}
-        blocking_item_type = None if blocking_id is None else item_types[blocking_id]
         return {
             chapter_id: [
                 ItemNode(
@@ -326,7 +324,7 @@ class EtLearningService:
                 for item, material_name, quiz_name, _ in items
             ]
             for chapter_id, items in by_chapter.items()
-        }, blocking_item_type
+        }, blocking_id
 
     async def material_content(
         self, db: AsyncSession, material_id: int, *, user_id: str, roles: frozenset[str] = frozenset()

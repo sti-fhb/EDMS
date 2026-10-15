@@ -75,21 +75,19 @@ class LearnStructure(BaseModel):
             隨本回應一併回傳而非另開端點：側欄必須在第一次繪製就決定「渲染入口 /
             不渲染」，二次請求會造成可見的跳動，而「未完課 → 不顯示」是最常見的狀態，
             為它多打一趟請求不划算。
-        blocking_item_type: 擋住學習前緣的那一項之 `ITEM_TYPE`（`MATERIAL` / `QUIZ`），
-            全部完成或教師預覽時為 `None`。供前端對鎖定項目給出**正確**的提示
-            （`spec_us5` AC 12「阻擋並提示」）。
+        blocking_item_id: 擋住學習前緣的那一項之 `ITEM_ID`，全部完成或教師預覽時為 `None`。
+            供前端對鎖定項目給出**正確**的提示（`spec_us5` AC 12「阻擋並提示」）——前端由
+            `chapters` 找出該項的名稱、型別與所在章節，提示寫成「請先完成第 N 章的「X」」。
+
+            #649 前只回型別（`blocking_item_type`），前端只能二分成「影片學習 / 測驗」兩句寫死
+            的話：擋路的是**文件教材**時仍說「影片」、擋路的在**前一章**時仍說「本章節」。
 
             🔴 **由後端給而非前端自行推導**：推導要用到解鎖規則（依序 + 0 題測驗例外），
-            前端自己算一份就是把同一條規則寫成兩個版本。前端只做「型別 → 文案」的對應。
+            前端自己算一份就是把同一條規則寫成兩個版本。前端只做「項目 → 文案」的對應。
 
             ⚠️ 是**整份結構一個值**，不是逐項一個：解鎖規則嚴格依序，故所有鎖定都追溯
             到同一項（見 `progress/rules.first_blocking_item`）。
 
-            ℹ️ 型別為 `str` 而非 `Literal["MATERIAL", "QUIZ"]`——本專案的**請求** schema
-            用 `Literal`（如 `course/schemas.ItemCreateReq.item_type`），**回應** schema
-            一律用 `str`（本檔 `ItemNode.item_type`、`course/schemas.ItemRow.item_type`）。
-            只收斂這一個會讓它變成同一組回應裡的異類。值出自本系統自己的 DB，不是外部
-            輸入，故 `Literal` 的驗證價值也有限。
     """
 
     course_id: int
@@ -102,7 +100,7 @@ class LearnStructure(BaseModel):
     last_item_id: int | None
     survey: SurveyEntry | None
     chapters: list[ChapterNode]
-    blocking_item_type: str | None
+    blocking_item_id: int | None
 
 
 class MaterialVideoRow(BaseModel):
