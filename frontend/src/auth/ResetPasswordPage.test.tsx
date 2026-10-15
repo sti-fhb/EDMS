@@ -12,9 +12,16 @@ import { muiTheme } from "../styles/muiTheme"
 
 const _NEW_PWD = "Xyz98765!"
 
-/** @param basename 部署 base path（如 "/edms"）；給了就模擬部署環境的 router（#607）。 */
-function renderReset(entry: string, basename?: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+/**
+ * @param basename 部署 base path（如 "/edms"）；給了就模擬部署環境的 router（#607）。
+ * @param queryClient 預設用關掉重試的 client（與其他 auth 測試一致）。
+ *   ⚠️ 想驗**重試行為**的測試必須自己傳一個未關重試的 client——見下方「死連結不得重試」。
+ */
+function renderReset(
+  entry: string,
+  basename?: string,
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={muiTheme}>
@@ -110,6 +117,30 @@ describe("ResetPasswordPage", () => {
     // 不得再讓使用者照著門檻打完一組密碼才被擋下（本 issue 的回報症狀）
     expect(screen.queryByLabelText("新密碼")).not.toBeInTheDocument()
     expect(screen.queryByText(/至少 \d+ 字元/)).not.toBeInTheDocument()
+  })
+
+  it("死連結不得重試（#673）：以正式環境那種 QueryClient，門檻端點只被打一次", async () => {
+    // 🔴 本條**刻意不沿用** renderReset 預設的 `retry: false` client。
+    // 正式環境是 `main.tsx` 的 `new QueryClient()`（預設 retry 3），而所有測試 harness 都關掉重試
+    // ——於是「4xx 不重試」這條守門原本是**任何測試都觀察不到**的（2026-10-15 變異實測：刪掉
+    // retry 那行，10 條全過）。這裡用未關重試的 client，把那句文字要求變成可執行斷言。
+    //
+    // 為什麼要守：本端點與 `/reset-password` 共用同一個 IP 限流器（10 次 / 分）。一條死連結
+    // 重試 3 次就吃掉 4 次額度，使用者多點兩下信，真正要用的重設額度就沒了。
+    let hits = 0
+    server.use(
+      http.post("/api/reset-password/policy", () => {
+        hits += 1
+        return HttpResponse.json(
+          { error_code: "DP_PWD_005", error_message: "連結已失效，請重新申請" },
+          { status: 400 },
+        )
+      }),
+    )
+    renderReset("/reset-password?token=expiredtoken", undefined, new QueryClient())
+    // 正向錨點：確實走完一輪並顯示失效（守門失效時這裡會卡在重試退避而逾時）
+    expect(await screen.findByText("連結已失效，請重新申請")).toBeInTheDocument()
+    expect(hits).toBe(1)
   })
 
   it("門檻端點被限流（429）→ 不報出任何字數、也不誤判成連結失效（#673）", async () => {
