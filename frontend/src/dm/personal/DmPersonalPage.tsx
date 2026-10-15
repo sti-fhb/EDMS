@@ -46,6 +46,11 @@ export function DmPersonalPage() {
   const [searchParams] = useSearchParams()
   // 草稿匣僅編輯者可見（#657）。`can_access`（側欄入口：編輯者**或**審核者）與 `can_draft`
   // （頁內草稿匣頁籤：僅編輯者）是兩件事，後端分開回。
+  //
+  // 不會多一次請求、也不會有「頁籤閃一下才出現」：本頁的路由守門 `RequireDmPersonal`
+  // 已以**同一個 query key**（`["dm-personal","access"]`）取過，且它的 `<Gate pending>`
+  // 保證 `access` 載完才渲染本元件。`?? false` 只是型別上的預設值，正式環境走不到。
+  // （測試直接 render 本元件、不經守門，那時才會短暫為 undefined。）
   const { data: access } = usePersonalAccess()
   const canDraft = access?.can_draft ?? false
   // 支援 ?tab=drafts 深連結（如編輯器續編後導回草稿匣）；預設「我的文件動態」。

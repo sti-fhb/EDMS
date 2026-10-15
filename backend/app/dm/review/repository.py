@@ -27,6 +27,13 @@ _SUPERSEDED = "SUPERSEDED"
 _AUDIENCE = "AUDIENCE"
 _OBSOLETE = "OBSOLETE"
 _ALL_AUDIENCE_TAG = "全體"
+#: 「已完成」清單的狀態母體。
+#:
+#: ⛔ **請勿把 `WITHDRAWN` 加進來**：`review/service.withdraw()` 是以 `approver=operator` 呼叫
+#: `_complete`，而撤回的 operator 是**撰寫者本人**——`APPROVER_USER_ID` 那一欄在 WITHDRAWN 列
+#: 裝的不是審核者。已完成清單以 `approver_user_id == reviewer_id` 過濾，加進來會讓撰寫者以
+#: 「審核者」身分出現在別人的已完成清單，而且 #657 之後還會連帶顯示「送審者」欄。
+#: （2026-10-15 安全審查指出此陷阱；目前靠本常數排除，是正確的。）
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
 
 

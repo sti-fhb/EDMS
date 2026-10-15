@@ -208,10 +208,23 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
   it("非編輯者以 ?tab=drafts 深連結進入時落在我的文件動態（#657）", async () => {
     // 深連結來自編輯器續編後導回。非編輯者不該停在空白頁或壞掉的頁籤狀態。
     server.use(http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true, can_draft: false })))
-    renderWithProviders(<DmPersonalPage />, undefined, ["/dm/personal?tab=drafts"])
+    // 路徑用實際的 `/dm/me`（router.tsx 的 `path: "me"`，編輯器續編後導回的也是這個）——
+    // `useSearchParams` 只看 query string，寫錯路徑測試照樣過，但會誤導讀者
+    renderWithProviders(<DmPersonalPage />, undefined, ["/dm/me?tab=drafts"])
 
     expect(await screen.findByText("待審文件 A")).toBeInTheDocument() // 動態的內容
     expect(screen.queryByRole("tab", { name: "草稿匣" })).not.toBeInTheDocument()
+  })
+
+  it("編輯者以 ?tab=drafts 深連結進入時直接落在草稿匣（#657）", async () => {
+    // 正向路徑：編輯器「儲存為草稿」後會 navigate 到 `/dm/me?tab=drafts`（DmEditorPage.test.tsx:395）。
+    // 只測非編輯者 fallback 的話，把折回條件寫反（例如漏掉 `!canDraft`）不會有任何測試變紅。
+    // 預設 fixture 的 can_draft 為 true，即編輯者情境。
+    renderWithProviders(<DmPersonalPage />, undefined, ["/dm/me?tab=drafts"])
+
+    // 直接看到草稿匣內容，不必點頁籤
+    expect(await screen.findByText("領血 SOP 草稿")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "草稿匣" })).toBeInTheDocument()
   })
 
   it("同一送審週期的「送審」事件不帶退回原因（#554）", async () => {
@@ -224,8 +237,12 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(screen.getAllByText("送審")).toHaveLength(2)
     expect(screen.getAllByText("已退回")).toHaveLength(2)
     // 4 列 REJECTED 中只有 2 列（resolved）帶原因。
-    // #657 改版面後仍是同一個契約，只是從「2 顆展開鈕」改成「2 格有內容的欄位」——
-    // 關鍵在 2 < 4：若實作改成只看 status 不看 event_kind，這裡會變成 4 而變紅。
+    //
+    // ⚠️ 本條**守不住**「只看 status 不看 event_kind」那個缺陷：前端只是忠實渲染後端給的
+    // `reason`，自己不判斷 event_kind，所以後端改錯了這裡也不會變 4。真正的守門在後端
+    // `test_dm_personal_flow.py` 的 `submitted[0].reason is None`。
+    // （原本數展開鈕的寫法有同一個弱點，#657 只是改了呈現方式，不是退步。）
+    // 本條的價值是：確認前端把「有值 / 無值」如實反映到欄位上，沒有自行補值或吃掉。
     expect(screen.getAllByText(REJECT_REASON)).toHaveLength(2)
   })
 })

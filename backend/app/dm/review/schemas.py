@@ -97,7 +97,8 @@ class CompletedItem(BaseModel):
     #: 取姓名，查無使用者列時為 `None`（前端顯示「—」）。不用 inner join：那會讓整列從清單
     #: 消失，審核者看不到自己處理過的案件，比顯示「—」更糟。
     submitter_name: str | None
-    #: 退回原因（#657）。**僅 `status="REJECTED"` 時有值**，核准一律 `None`。
+    #: 退回原因（#657）。**僅「新增 / 新版本之退回」有值**——判準為
+    #: `status="REJECTED"` **且** `review_type != "OBSOLETE"`；核准與所有廢止類一律 `None`。
     #:
     #: ⚠️ `DM_REVIEW.REASON` 一個欄位承載兩種語意：退回時是審核者寫的退回原因，而
     #: `OBSOLETE` 送審時是**申請人自己寫的廢止申請原因**。已完成清單含 `APPROVED` 列，

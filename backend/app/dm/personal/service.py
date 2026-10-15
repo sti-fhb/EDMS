@@ -276,7 +276,13 @@ class PersonalService:
                         is_overdue=False,
                         # #554：僅退回帶原因。核准 / 撤回的 reason 欄位可能殘留廢止申請原因，
                         # 掛上去會變成「核准卻顯示一段原因」。
-                        reason=r.reason if r.status == _REJECTED else None,
+                        #
+                        # #657 補上 `review_type != _OBSOLETE`：原本只看 status **不足**。
+                        # `review/center_service._reject_obsolete` 在 `reject()`（會覆寫 REASON）
+                        # 之後**刻意把申請人的廢止申請原因寫回**（那是 OBSOLETE 唯一存放申請理由
+                        # 之處），而審核者對廢止申請寫的退回原因**只進稽核**與 OBS_REJECT 通知。
+                        # ⇒ OBSOLETE 的 REASON **不論 status** 都是申請原因，連退回列也是。
+                        reason=r.reason if r.status == _REJECTED and r.review_type != _OBSOLETE else None,
                         party_name=r.party_name,
                         party_unreachable=unreachable,
                     )
