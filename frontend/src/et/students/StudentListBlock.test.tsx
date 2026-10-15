@@ -11,7 +11,7 @@ import { formatDateTime } from "../../utils/date"
 // 寫死 `2026/04/01 10:00` 會讓非 UTC+8 的機器（含 CI）紅掉（#551）。
 const renderBlock = () =>
   renderWithProviders(
-    <StudentListBlock courseId={1} readOnly={false} onRemove={vi.fn()} onExport={vi.fn()} onApprove={vi.fn()} />,
+    <StudentListBlock courseId={1} readOnly={false} exporting={false} onRemove={vi.fn()} onExport={vi.fn()} onApprove={vi.fn()} />,
   )
 
 describe("StudentListBlock 時間欄（#551）", () => {

@@ -9,7 +9,7 @@ import { formatDateTime } from "../../utils/date"
 describe("SurveyResultBlock 提交時間（#551）", () => {
   it("經 date.ts 格式化，不再是 toLocaleString 的上午／下午與秒數", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<SurveyResultBlock courseId={1} onExport={vi.fn()} />)
+    renderWithProviders(<SurveyResultBlock courseId={1} exporting={false} onExport={vi.fn()} />)
     // 填答時間只在「明細」檢視出現，預設是「統計」——不切換的話表格根本不在畫面上，
     // 下面的否定斷言會因此恆真
     await user.click(await screen.findByRole("button", { name: "明細" }))
