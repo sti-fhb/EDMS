@@ -61,14 +61,14 @@ from app.et.course.schemas import (
     OwnerOption,
     TagOption,
 )
-from app.et.course.stage_rules import ENTITY_CHAPTER
+from app.et.course.stage_rules import ENTITY_CHAPTER, ENTITY_ITEM, ENTITY_MATERIAL, ENTITY_QUIZ
 from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.material.repository import EtMaterialRepository
 from app.et.notify.course_update import CourseUpdateMailer
 from app.et.notify.mailer import CourseInviteMailer
-from app.et.quiz.repository import EtQuizRepository
+from app.et.quiz.repository import DEFAULT_MAX_RETRY, DEFAULT_PASS_SCORE, EtQuizRepository
 from app.et.roles.authz import ET_ADMIN, ET_STUDENT, ET_TEACHER
 from app.services import AuditLogService
 
@@ -605,6 +605,57 @@ class EtCourseService:
         空殼當下三類媒材皆空，這**不違反**「教材至少擇一媒材」——該檢核在儲存教材
         內容時才套用（`ET_MATERIAL_002`），不在建立時。
         """
+        ref, course_id = await self._staged_chapter(db, chapter_id, operator.user_id, operator)
+        if ref is not None:
+            # 🔴 暫存模式下**項目與其教材 / 測驗是兩個節點**，後者掛在前者底下
+            # （`stage_entities` 的 `LINK_PARENT_FK`：活表是 `ET_ITEM.MATERIAL_ID`
+            # 反向指著教材，套用時才建立那個連結）。
+            item_stage = await self._stage_writer.append(
+                db,
+                course_id,
+                ENTITY_ITEM,
+                parent_stage_id=ref.stage_id,
+                payload={"item_type": req.item_type},
+                operator=operator,
+            )
+            if req.item_type == ITEM_MATERIAL:
+                child = await self._stage_writer.append(
+                    db,
+                    course_id,
+                    ENTITY_MATERIAL,
+                    parent_stage_id=item_stage,
+                    payload={"material_name": req.title, "description_html": None},
+                    operator=operator,
+                )
+                material_id, quiz_id = -child, None
+            else:
+                child = await self._stage_writer.append(
+                    db,
+                    course_id,
+                    ENTITY_QUIZ,
+                    parent_stage_id=item_stage,
+                    payload={
+                        "quiz_name": req.title,
+                        "description": None,
+                        "pass_score": DEFAULT_PASS_SCORE,
+                        "time_limit_min": None,
+                        "max_retry": DEFAULT_MAX_RETRY,
+                    },
+                    operator=operator,
+                )
+                material_id, quiz_id = None, -child
+            await self._log(db, "CREATE", operator.user_id, course_id, f"新增章節項目（{req.item_type}，暫存）")
+            return ItemRow(
+                item_id=-item_stage,
+                item_type=req.item_type,
+                title=req.title,
+                sort_order=0,
+                material_id=material_id,
+                quiz_id=quiz_id,
+                version=0,
+                question_count=0 if req.item_type != ITEM_MATERIAL else None,
+            )
+
         chapter = await self._require_owned_chapter(db, chapter_id, operator.user_id)
         # 名稱必填（#414）——前端 `NewItemDialog` 於建立**之前**取得，見 `ItemCreateReq` docstring
         if req.item_type == ITEM_MATERIAL:
@@ -639,6 +690,20 @@ class EtCourseService:
         以章節版本保護而非項目版本——理由同章節重排以課程版本保護：順序是上一層的
         結構，且遞增各項目版本會讓正在編輯該教材的另一裝置無故衝突。
         """
+        ref, course_id = await self._staged_chapter(db, chapter_id, operator.user_id, operator)
+        if ref is not None:
+            # ⚠️ 併發令牌是**章節**的 `VERSION`，而章節**是內容** ⇒ 必須用暫存列那一個。
+            # （對照 `reorder_chapters`：那裡的令牌是課程，課程不是內容，故用活表。
+            # 判準是「令牌所在的那一列是不是內容」，不是操作本身。）
+            nodes = await self._stage_writer.children_of(db, course_id, ENTITY_ITEM, ref.stage_id)
+            by_exposed = {exposed_id(source_id=n.source_id, stage_id=n.stage_id): n.stage_id for n in nodes}
+            ensure_item_reorder_complete(current_ids=set(by_exposed), requested=req.item_ids)
+            rowcount = await self._stage_writer.bump_version(db, ref.stage_id, req.version, operator)
+            ensure_version_matched(rowcount=rowcount, entity=_STAGE_ENTITY)
+            await self._stage_writer.apply_order(db, [by_exposed[i] for i in req.item_ids], operator)
+            await self._log(db, "UPDATE", operator.user_id, course_id, "調整章節項目順序（暫存）")
+            return
+
         chapter = await self._require_owned_chapter(db, chapter_id, operator.user_id)
         current = await self._items.list_by_chapter(db, chapter_id)
         ensure_item_reorder_complete(current_ids={i.item_id for i in current}, requested=req.item_ids)
@@ -648,10 +713,18 @@ class EtCourseService:
         await self._log(db, "UPDATE", operator.user_id, chapter.course_id, "調整章節項目順序")
 
     async def delete_item(self, db: AsyncSession, item_id: int, *, operator: OperatorInfo) -> None:
-        """刪除章節項目：本體、其教材 / 測驗內容與學員紀錄皆軟刪，剩餘項目順序遞補。"""
+        """刪除章節項目：本體、其教材 / 測驗內容與學員紀錄皆軟刪，剩餘項目順序遞補。
+
+        已發布 / 已關閉課程只移除**暫存**子樹（#631）——學員紀錄要到「更新」套用時才由
+        `stage_apply._DELETERS` 連帶處理，此刻一筆都不動。
+        """
+        ref, course_id = await self._staged_item(db, item_id, operator.user_id, operator)
+        if ref is not None:
+            await self._stage_writer.delete_subtree(db, ref.stage_id, operator)
+            await self._log(db, "DELETE", operator.user_id, course_id, "刪除章節項目（暫存）")
+            return
+
         item = await self._items.get(db, item_id)
-        if item is None:
-            raise _ITEM_NOT_FOUND
         chapter = await self._require_owned_chapter(db, item.chapter_id, operator.user_id)
         await self._items.soft_delete_with_cascade(db, [item_id], operator)
         await self._items.resequence_remaining(db, item.chapter_id, operator)
@@ -681,6 +754,22 @@ class EtCourseService:
         return [TagOption.model_validate(t) for t in await self._tags.list_options(db, course_id)]
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _staged_item(self, db: AsyncSession, item_id: int, actor_id: str, operator):
+        """項目 id → 暫存節點；回 `None` 代表該走活表路徑。形狀同 `_staged_chapter`。"""
+        ref = await self._stage_writer.resolve_new(db, item_id)
+        if ref is not None:
+            await self._require_owned(db, ref.course_id, actor_id)
+            return ref, ref.course_id
+        item = await self._items.get(db, item_id)
+        if item is None:
+            raise _ITEM_NOT_FOUND
+        chapter = await self._require_owned_chapter(db, item.chapter_id, actor_id)
+        course = await self._courses.get(db, chapter.course_id)
+        if not is_staged(course):
+            return None, chapter.course_id
+        ref = await self._stage_writer.ref_for_source(db, chapter.course_id, ENTITY_ITEM, item_id, operator)
+        return ref, chapter.course_id
 
     async def _staged_chapter(self, db: AsyncSession, chapter_id: int, actor_id: str, operator):
         """章節 id → 暫存節點；回 `None` 代表該走活表路徑。

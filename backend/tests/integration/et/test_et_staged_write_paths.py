@@ -293,7 +293,8 @@ _COURSE_MODULE = [
         True,
         lambda c, u, i: c.put(
             f"/api/et/chapters/{i['chapter_id']}/items/order",
-            json={"item_ids": [i["quiz_item_id"], i["material_item_id"]], "version": i["course_version"]},
+            # ⚠️ 項目重排的併發令牌是**章節**的 version，不是課程的
+            json={"item_ids": [i["quiz_item_id"], i["material_item_id"]], "version": i["chapter_version"]},
             headers=_bearer(u),
         ),
     ),
