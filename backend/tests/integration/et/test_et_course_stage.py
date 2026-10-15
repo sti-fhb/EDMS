@@ -48,7 +48,7 @@ from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz
 from app.et.roles.models import EtUserRole
-from app.et.survey.models import EtSurvey, EtSurveyOption, EtSurveyQuestion
+from app.et.survey.models import EtSurvey, EtSurveyOption, EtSurveyQuestion, EtSurveyResponseM
 from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
@@ -1162,3 +1162,113 @@ class TestStructuralGuards:
         await _apply(db, cid, uid)
 
         assert (await _live_chapters(db, cid))[0].chapter_name == "第一章"
+
+
+class TestSurveyFreeze:
+    """已有填答的問卷，題目與選項不得被「更新」改掉（#631 SA Q2 ② 裁示「仍凍結」）。
+
+    🔴 這是 TOCTOU：`survey/service._require_editable` 問的是「**現在**有沒有填答」，
+    今天那個「現在」等同寫入當下（同一個請求），#631 把兩者拉開成幾分鐘到幾天。
+    教師在 T1 編輯（合法，當時沒填答）、學員在 T2 填答、教師在 T3 按「更新」才寫活表。
+
+    ⭐ 測驗沒有這個問題——`ET_QUIZ_ATTEMPT_D` 在 `attempt.start` 當下就快照了題幹 /
+    選項 / 配分，不需要讀 `ET_QUESTION`。問卷只存了一個指標。
+    """
+
+    @staticmethod
+    async def _respond(db, survey_id: int, uid: str) -> None:
+        db.add(
+            EtSurveyResponseM(
+                survey_id=survey_id,
+                user_id=uid,
+                submitted_at=utcnow(),
+                created_user=uid,
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+
+    async def test_有填答時改題幹會被擋下(self, client, db) -> None:
+        uid = await _user(db, "ZT_F1")
+        cid = await _full_course(client, db, uid)
+        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == cid))
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        sq = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_SURVEY_QUESTION)
+        await _set_payload(db, sq.stage_id, {**sq.payload, "stem": "改過的題幹"})
+        await self._respond(db, survey.survey_id, uid)
+
+        with pytest.raises(AppError, match="已有學員填答"):
+            await _apply(db, cid, uid)
+
+        live = await db.scalar(select(EtSurveyQuestion).where(EtSurveyQuestion.sq_id == sq.source_id))
+        assert live.stem == "滿意度", "擋下之後活表的題幹不得被改"
+
+    async def test_有填答時刪題會被擋下(self, client, db) -> None:
+        uid = await _user(db, "ZT_F2")
+        cid = await _full_course(client, db, uid)
+        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == cid))
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        sq = next(n for n in nodes if n.entity_type == ENTITY_SURVEY_QUESTION)
+        await _drop_subtree(db, nodes, sq.stage_id)
+        await self._respond(db, survey.survey_id, uid)
+
+        with pytest.raises(AppError, match="已有學員填答"):
+            await _apply(db, cid, uid)
+
+    async def test_有填答時改問卷名稱與停用仍放行(self, client, db) -> None:
+        """🔴 凍結**不涵蓋**問卷名稱與 `IS_ACTIVE`。
+
+        AC 21 明訂凍結後教師僅可停用問卷——連停用都擋掉會使凍結後無路可走。
+        少了這條，把守門寫成「有填答就整個問卷不准動」也會讓上面兩條通過。
+        """
+        uid = await _user(db, "ZT_F3")
+        cid = await _full_course(client, db, uid)
+        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == cid))
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        node = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_SURVEY)
+        await _set_payload(db, node.stage_id, {"survey_name": "改名的問卷", "is_active": False})
+        await self._respond(db, survey.survey_id, uid)
+
+        await _apply(db, cid, uid)
+
+        after = await db.scalar(select(EtSurvey).where(EtSurvey.survey_id == survey.survey_id))
+        assert after.survey_name == "改名的問卷"
+        assert after.is_active is False
+
+    async def test_沒有填答時改題照常放行(self, client, db) -> None:
+        """正向錨點：少了這條，把守門寫成「有問卷就不准改題」也會讓前兩條通過。"""
+        uid = await _user(db, "ZT_F4")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        sq = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_SURVEY_QUESTION)
+        await _set_payload(db, sq.stage_id, {**sq.payload, "stem": "改過的題幹"})
+
+        await _apply(db, cid, uid)
+
+        live = await db.scalar(select(EtSurveyQuestion).where(EtSurveyQuestion.sq_id == sq.source_id))
+        assert live.stem == "改過的題幹"
+
+    async def test_有填答但問卷結構沒變時放行(self, client, db) -> None:
+        """第二條正向錨點：教師改的是**別的東西**（課程章節），問卷原封不動。
+
+        少了這條，把守門寫成「有填答就一律擋下更新」也會讓前面幾條通過——而那會讓
+        一門收過問卷的課**再也不能更新任何內容**。
+        """
+        uid = await _user(db, "ZT_F5")
+        cid = await _full_course(client, db, uid)
+        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == cid))
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        chapter = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, chapter.stage_id, {"chapter_name": "改過的章名"})
+        await self._respond(db, survey.survey_id, uid)
+
+        await _apply(db, cid, uid)
+
+        assert (await _live_chapters(db, cid))[0].chapter_name == "改過的章名"

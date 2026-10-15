@@ -138,6 +138,7 @@ async def apply_stage(
     # 而驗證要用它確認「每個 `SOURCE_ID` 真的屬於本課程」——兩者必須看同一份快照。
     live = await load_live_tree(db, course.course_id)
     _validate_tree(nodes, live=live)
+    await _ensure_survey_not_frozen(db, nodes=nodes, live=live)
 
     staged_sources: dict[str, set[int]] = {}
     for node in nodes:
@@ -208,6 +209,94 @@ def _validate_tree(nodes: Sequence[StageNode], *, live: Sequence[LiveNode]) -> N
     if foreign:
         detail = ", ".join(f"{n.entity_type}#{n.source_id}" for n in foreign[:5])
         _reject(f"暫存列指向不屬於本課程的活表資料（共 {len(foreign)} 筆）：{detail}")
+
+
+def _survey_structure(nodes: Sequence[Any], *, survey_key: Any, child_of: Any) -> tuple:
+    """問卷的**題目與選項結構**，供兩側比對。
+
+    刻意**不含**問卷名稱與 `IS_ACTIVE`——凍結不涵蓋它們（`ET_SURVEY_003` 的說明：
+    AC 21 明訂凍結後教師僅可停用問卷，連停用都擋掉會使凍結後無路可走）。
+    """
+    questions = sorted(child_of(nodes, survey_key, ENTITY_SURVEY_QUESTION), key=lambda n: (n[1], n[0]))
+    return tuple(
+        (
+            qid,
+            sort_order,
+            stem,
+            qtype,
+            tuple(sorted(child_of(nodes, qkey, ENTITY_SURVEY_OPTION), key=lambda n: (n[1], n[0]))),
+        )
+        for qid, sort_order, stem, qtype, qkey in questions
+    )
+
+
+async def _ensure_survey_not_frozen(db: AsyncSession, *, nodes: Sequence[StageNode], live: Sequence[LiveNode]) -> None:
+    """已有填答的問卷，其題目與選項不得被「更新」改掉（#631 SA Q2 ② 裁示「仍凍結」）。
+
+    ## 為何這道守門非補不可
+
+    `survey/service._require_editable` 是題目與選項**所有寫入路徑**的共用入口，它問的是
+    「**現在**有沒有填答」。今天那個「現在」等同於寫入當下，因為檢查與寫入在同一個請求裡。
+
+    #631 把兩者拉開了：教師在 T1 編輯（當時沒填答 ⇒ 合法放行、寫進暫存區），學員在 T2
+    填答，教師在 T3 按「更新」才真的寫活表。T1 那次檢查**完全合法**，但它授權的寫入延到
+    T3 才發生，而那時前提已不成立——`ET_SURVEY_RESPONSE_D.SQ_ID` 會指向一個題幹已被改寫、
+    或已被軟刪的題目。這就是 TOCTOU（檢查時點 ≠ 使用時點）。
+
+    ⭐ **測驗沒有這個問題**：它用的是相反的設計——`ET_QUIZ_ATTEMPT_D` 在 `attempt.start`
+    當下就把題幹 / 選項 / 配分快照起來，不需要讀 `ET_QUESTION`。問卷只存了一個指標。
+
+    ## 擋住的範圍
+
+    題目與選項的新增 / 修改 / 刪除 / 重排。**不擋**問卷名稱與 `IS_ACTIVE`——與
+    `survey/rules.ensure_editable` 同一條界線，兩邊要同時改。
+
+    ## 為何不放進 `evaluate_publish`
+
+    那組規則由發布 / 關閉 / 再開課 / 更新四個動作共用。本條只對「更新」成立：再開課的
+    課程可能早有填答，但再開課**不會改動題目**，放進共用規則會把它一併擋死。
+
+    Raises:
+        AppError: 422 `ET_SURVEY_003`（與教師在編輯頁看到的同一碼、同一句話）。
+    """
+    live_survey = next((n for n in live if n.entity_type == ENTITY_SURVEY), None)
+    if live_survey is None:
+        return
+    survey_id = live_survey.key[1]
+    if not await EtSurveyRepository().has_responses(db, survey_id):
+        return
+
+    def staged_children(_nodes, parent_stage_id, entity_type):
+        return [
+            (n.source_id, n.sort_order, n.payload.get("stem"), n.payload.get("question_type"), n.stage_id)
+            if entity_type == ENTITY_SURVEY_QUESTION
+            else (n.source_id, n.sort_order, n.payload.get("option_text"))
+            for n in _nodes
+            if n.parent_stage_id == parent_stage_id and n.entity_type == entity_type
+        ]
+
+    def live_children(_nodes, parent_key, entity_type):
+        return [
+            (n.key[1], n.sort_order, n.row.stem, n.row.question_type, n.key)
+            if entity_type == ENTITY_SURVEY_QUESTION
+            else (n.key[1], n.sort_order, n.row.option_text)
+            for n in _nodes
+            if n.parent_key == parent_key and n.entity_type == entity_type
+        ]
+
+    staged_survey = next((n for n in nodes if n.entity_type == ENTITY_SURVEY), None)
+    staged = (
+        ()
+        if staged_survey is None
+        else _survey_structure(nodes, survey_key=staged_survey.stage_id, child_of=staged_children)
+    )
+    current = _survey_structure(live, survey_key=live_survey.key, child_of=live_children)
+    if staged != current:
+        raise AppError(
+            status_code=422,
+            detail="已有學員填答，題目與選項不可修改",
+            error_code="ET_SURVEY_003",
+        )
 
 
 def _reject(detail: str) -> None:
