@@ -1,12 +1,8 @@
-import ExpandLessIcon from "@mui/icons-material/ExpandLess"
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import Chip from "@mui/material/Chip"
 import CircularProgress from "@mui/material/CircularProgress"
-import Collapse from "@mui/material/Collapse"
-import IconButton from "@mui/material/IconButton"
 import Paper from "@mui/material/Paper"
 import Stack from "@mui/material/Stack"
 import Tab from "@mui/material/Tab"
@@ -31,7 +27,7 @@ import {
   reviewerEventLabel,
 } from "./schemas"
 import { personalApi } from "./personalService"
-import { useActivity, useDrafts } from "./usePersonal"
+import { useActivity, useDrafts, usePersonalAccess } from "./usePersonal"
 import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -39,24 +35,35 @@ import { formatDateTime } from "../../utils/date"
 import { toApiError } from "../../services/http"
 
 /**
- * 個人專區（US9 / DM04）：我的文件動態（狀態變動歷程）+ 草稿匣（編輯者 / 審核者）。
+ * 個人專區（US9 / DM04）：我的文件動態（狀態變動歷程）+ 草稿匣（**編輯者**）。
  * 動態呈現每次送審週期的每個狀態轉換（送審 → 退回 / 核准發布 / 撤回 / 廢止），時間新→舊；撰寫者對送審中項目可撤回。
  * 個人資料維護（姓名 / Email / 密碼）為另一入口，由平台 DP 提供（右上使用者選單），不在此頁。
+ *
+ * ⚠️ 本段原寫「草稿匣（編輯者 / 審核者）」，與 `spec_us9` FR-001 的「草稿匣（編輯者）」相反，
+ * 已於 #657 更正。建草稿的端點全掛 `_ensure_editor`，純審核者不可能有草稿——頁籤對他恆空。
  */
 export function DmPersonalPage() {
   const [searchParams] = useSearchParams()
+  // 草稿匣僅編輯者可見（#657）。`can_access`（側欄入口：編輯者**或**審核者）與 `can_draft`
+  // （頁內草稿匣頁籤：僅編輯者）是兩件事，後端分開回。
+  const { data: access } = usePersonalAccess()
+  const canDraft = access?.can_draft ?? false
   // 支援 ?tab=drafts 深連結（如編輯器續編後導回草稿匣）；預設「我的文件動態」。
   const [tab, setTab] = useState<"activity" | "drafts">(searchParams.get("tab") === "drafts" ? "drafts" : "activity")
+  // 深連結 / 權限變動的收斂：非編輯者停在 drafts 會看到空白（MUI Tabs 找不到對應 value 亦會警告）。
+  // 取用時就地折回 activity，而不是 useEffect setState——後者多一次 render 且會閃一下空白。
+  const activeTab = tab === "drafts" && !canDraft ? "activity" : tab
   return (
     <Box>
       <ScreenHeader code="DM04" />
       <FilterCard>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+        <Tabs value={activeTab} onChange={(_, v) => setTab(v)}>
           <Tab value="activity" label="我的文件動態" />
-          <Tab value="drafts" label="草稿匣" />
+          {/* 條件渲染而非 disabled：對純審核者而言它不是「暫時不能按」，是不存在的功能 */}
+          {canDraft && <Tab value="drafts" label="草稿匣" />}
         </Tabs>
       </FilterCard>
-      {tab === "activity" ? <ActivityTab /> : <DraftsTab />}
+      {activeTab === "activity" ? <ActivityTab /> : <DraftsTab />}
     </Box>
   )
 }
@@ -143,6 +150,7 @@ function ActivitySection({
               <TableCell>文件名稱</TableCell>
               <TableCell>類型</TableCell>
               <TableCell>狀態</TableCell>
+              <TableCell>退回原因</TableCell>
               <TableCell>{partyHeader}</TableCell>
               <TableCell>時間</TableCell>
               <TableCell>操作</TableCell>
@@ -178,7 +186,6 @@ function ActivityRow({
 }) {
   const { confirm } = useNotification()
   const navigate = useNavigate()
-  const [expanded, setExpanded] = useState(false)
   const label =
     perspective === "author" ? authorEventLabel(event) : reviewerEventLabel(event)
   const unreachable = partyUnreachableText(event.party_unreachable, perspective)
@@ -199,39 +206,14 @@ function ActivityRow({
         <TableCell>{event.doc_name}</TableCell>
         <TableCell>{REVIEW_TYPE_LABELS[event.review_type] ?? event.review_type}</TableCell>
         <TableCell>
-          <Stack direction="row" spacing={0.5} alignItems="center">
-            <Chip size="small" color={label.tone} label={label.text} />
-            {/* #554：退回原因的站內讀取端。DOC_REJECT / OBS_REJECT 改站內後那封含原因的信不再
-                寄出，不在此呈現的話 DM_REVIEW.REASON 就沒有任何讀取端。
-                展開為「多一列」而非撐高本列 → 列高維持一致（同 DmDetailPage 的版本歷程抽屜）。 */}
-            {event.reason && (
-              <IconButton
-                size="small"
-                aria-label={expanded ? "收合退回原因" : "展開退回原因"}
-                aria-expanded={expanded}
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-              </IconButton>
-            )}
-          </Stack>
-          {/* 未展開時先給一行大意：多數退回原因本就一句話，不必點就看得到 */}
-          {event.reason && !expanded && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{
-                display: "-webkit-box",
-                WebkitLineClamp: 1,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                wordBreak: "break-all",
-              }}
-            >
-              {event.reason}
-            </Typography>
-          )}
+          <Chip size="small" color={label.tone} label={label.text} />
         </TableCell>
+        {/* #554：本欄是 DM_REVIEW.REASON 的站內讀取端——DOC_REJECT / OBS_REJECT 改站內後，
+            那封含原因的信不再寄出，不在此呈現的話該欄位就沒有任何讀取端。
+            #657：原為狀態欄內的展開鈕 + 另起一列的 Collapse，改為正式欄位直接顯示全文。
+            後端僅在 resolved + REJECTED 時給值，其餘為 null（送審事件的 REASON 在 OBSOLETE
+            是「廢止申請原因」，語意不同、刻意不帶）。 */}
+        <TableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{event.reason ?? "—"}</TableCell>
         <TableCell>
           {event.party_name ?? "—"}
           {/* #395 D-2：對造人帳號不可達時說明原因——讓「知道」與「能做」落在同一個人身上。
@@ -261,23 +243,6 @@ function ActivityRow({
           {!actionable && "—"}
         </TableCell>
       </TableRow>
-      {/* 展開列：另起一列顯示全文，本列高度不變；colSpan 蓋滿 6 欄（文件 / 類型 / 狀態 / 對造人 / 時間 / 操作） */}
-      {event.reason && (
-        <TableRow>
-          <TableCell sx={{ py: 0, borderBottom: 0 }} colSpan={6}>
-            <Collapse in={expanded} unmountOnExit>
-              <Box sx={{ py: 1.5, px: 1 }}>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  退回原因
-                </Typography>
-                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                  {event.reason}
-                </Typography>
-              </Box>
-            </Collapse>
-          </TableCell>
-        </TableRow>
-      )}
     </>
   )
 }

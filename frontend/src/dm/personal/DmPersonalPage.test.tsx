@@ -1,9 +1,11 @@
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { HttpResponse, http } from "msw"
 import { describe, expect, it } from "vitest"
 
 import { DmPersonalPage } from "./DmPersonalPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
+import { server } from "../../test/server"
 
 /** 與 `test/server.ts` 兩筆 resolved + REJECTED 事件的 `reason` 逐字相同（#554）。 */
 const REJECT_REASON = "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程"
@@ -175,27 +177,41 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(screen.queryByText("送審中")).not.toBeInTheDocument()
   })
 
-  it("退回原因顯示於已退回事件，且可展開看全文（#554）", async () => {
+  it("退回原因是「狀態」後的獨立欄位，不再需要展開（#554 讀取端、#657 改版面）", async () => {
     // #554：DOC_REJECT / OBS_REJECT 改站內後，那封「退回原因：{reason}」的信不再寄出，
     // 本頁成為 DM_REVIEW.REASON 唯一的讀取端——沒有這條測試，原因欄會靜默變成沒人看得到。
-    const user = userEvent.setup()
+    // #657：原本是狀態欄內的展開鈕 + 展開列，改為正式欄位。
     renderWithProviders(<DmPersonalPage />)
     await screen.findByText("待審文件 A")
 
-    // 未展開時灰色摘要就帶著全文（只以 CSS 夾成一行），撰寫者 / 審核者視角各一列
+    // 表頭存在（正向錨點：證明下面的否定斷言有東西可對照）
+    expect(screen.getAllByText("退回原因").length).toBeGreaterThanOrEqual(1)
+    // 原因全文直接在欄位裡，不必點任何東西；撰寫者 / 審核者視角各一列
     expect(screen.getAllByText(REJECT_REASON)).toHaveLength(2)
-    // 「退回原因」小標只存在展開列內（unmountOnExit）
-    expect(screen.queryByText("退回原因")).not.toBeInTheDocument()
 
-    const toggles = screen.getAllByRole("button", { name: "展開退回原因" })
-    expect(toggles).toHaveLength(2)
-    await user.click(toggles[0])
+    // #657：展開 / 收合的設計已移除——與上面的正向斷言用同一種查詢方式
+    expect(screen.queryByRole("button", { name: "展開退回原因" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "收合退回原因" })).not.toBeInTheDocument()
+  })
 
-    // 與上面的否定斷言用同一種查詢方式，確保它查得到東西（改小標文案時兩條會一起紅）
-    expect(await screen.findByText("退回原因")).toBeInTheDocument()
-    // 兩列各自獨立展開：點開的那列變收合鈕，另一列仍是展開鈕
-    expect(await screen.findByRole("button", { name: "收合退回原因" })).toBeInTheDocument()
-    expect(screen.getAllByRole("button", { name: "展開退回原因" })).toHaveLength(1)
+  it("草稿匣頁籤只對編輯者顯示（#657；spec_us9 FR-001）", async () => {
+    // 建草稿的端點全掛 `_ensure_editor`，純審核者不可能有草稿 → 那個頁籤對他永遠是空的。
+    server.use(http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true, can_draft: false })))
+    renderWithProviders(<DmPersonalPage />)
+    await screen.findByText("待審文件 A")
+
+    // 正向錨點：個人專區本身進得去（can_access 仍為 true），只是少了草稿匣那一個頁籤
+    expect(screen.getByRole("tab", { name: "我的文件動態" })).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "草稿匣" })).not.toBeInTheDocument()
+  })
+
+  it("非編輯者以 ?tab=drafts 深連結進入時落在我的文件動態（#657）", async () => {
+    // 深連結來自編輯器續編後導回。非編輯者不該停在空白頁或壞掉的頁籤狀態。
+    server.use(http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true, can_draft: false })))
+    renderWithProviders(<DmPersonalPage />, undefined, ["/dm/personal?tab=drafts"])
+
+    expect(await screen.findByText("待審文件 A")).toBeInTheDocument() // 動態的內容
+    expect(screen.queryByRole("tab", { name: "草稿匣" })).not.toBeInTheDocument()
   })
 
   it("同一送審週期的「送審」事件不帶退回原因（#554）", async () => {
@@ -207,7 +223,9 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     // 它們會被誤判成該顯示原因（後端 _build_events 正是以 event_kind 分流）。
     expect(screen.getAllByText("送審")).toHaveLength(2)
     expect(screen.getAllByText("已退回")).toHaveLength(2)
-    // 4 列 REJECTED 中只有 2 列（resolved）帶展開鈕
-    expect(screen.getAllByRole("button", { name: "展開退回原因" })).toHaveLength(2)
+    // 4 列 REJECTED 中只有 2 列（resolved）帶原因。
+    // #657 改版面後仍是同一個契約，只是從「2 顆展開鈕」改成「2 格有內容的欄位」——
+    // 關鍵在 2 < 4：若實作改成只看 status 不看 event_kind，這裡會變成 4 而變紅。
+    expect(screen.getAllByText(REJECT_REASON)).toHaveLength(2)
   })
 })

@@ -317,6 +317,56 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     // AC8 搜尋分頁：提供文件名搜尋框
     expect(screen.getByLabelText(/搜尋文件名稱/)).toBeInTheDocument()
   })
+
+  it("已完成：送審者與退回原因兩欄，核准列原因留空（#657）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByRole("tab", { name: /已完成/ }))
+    await screen.findByText("舊案 SOP")
+
+    // 表頭（放在「結果」之後）
+    expect(screen.getByText("送審者")).toBeInTheDocument()
+    expect(screen.getByText("退回原因")).toBeInTheDocument()
+
+    // 退回列：送審者 + 原因都有
+    expect(screen.getByText("林撰寫")).toBeInTheDocument()
+    expect(screen.getByText("變更摘要未說明影響範圍")).toBeInTheDocument()
+    // 核准列：送審者仍有（證明 join 不是只在退回列生效），但原因不顯示
+    expect(screen.getByText("陳送審")).toBeInTheDocument()
+  })
+
+  it("已完成：核准列不得顯示退回原因（#657）", async () => {
+    // 🔴 `DM_REVIEW.REASON` 一欄兩義：退回時是審核者寫的退回原因，OBSOLETE 送審時是
+    // **申請人寫的廢止申請原因**。後端僅於 REJECTED 帶值；此處釘住前端不自行補值。
+    const user = userEvent.setup({ delay: null })
+    server.use(
+      http.get("/api/dm/reviews/completed", () =>
+        HttpResponse.json({
+          data: [
+            {
+              review_id: 500,
+              doc_id: "DM-SOP-000099",
+              doc_name: "已核准廢止的 SOP",
+              review_type: "OBSOLETE",
+              status: "APPROVED",
+              version_no: "1.0",
+              complete_date: "2026-08-12T10:00:00Z",
+              submitter_name: "王申請",
+              reason: null, // 後端已濾掉「此 SOP 已由新制取代」這類廢止申請原因
+            },
+          ],
+          meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+        }),
+      ),
+    )
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByRole("tab", { name: /已完成/ }))
+
+    // 正向錨點：這一列確實渲染出來了，否則下面的否定斷言恆真
+    expect(await screen.findByText("已核准廢止的 SOP")).toBeInTheDocument()
+    expect(screen.getByText("王申請")).toBeInTheDocument()
+    expect(screen.queryByText("此 SOP 已由新制取代")).not.toBeInTheDocument()
+  })
 })
 
 describe("DmReviewPage 日期欄（#539）", () => {

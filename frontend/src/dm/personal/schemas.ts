@@ -46,7 +46,15 @@ export interface ActivityResponse {
 }
 
 export interface PersonalAccess {
+  /** 側欄「個人專區」入口：具編輯者**或**審核者角色。 */
   can_access: boolean
+  /**
+   * 頁內「草稿匣」頁籤：**僅編輯者**（`spec_us9` FR-001，#657）。
+   *
+   * 與 `can_access` 刻意分開：純審核者進得去個人專區（看我的文件動態），但建草稿的端點全掛
+   * `_ensure_editor`，他不可能有草稿——那個頁籤對他永遠是空的。
+   */
+  can_draft: boolean
 }
 
 /** 草稿分類顯示名。 */

@@ -398,9 +398,24 @@ export const handlers = [
           status: "APPROVED",
           version_no: "1.0",
           complete_date: "2026-08-10T10:00:00Z",
+          submitter_name: "陳送審",
+          // #657：核准列一律 null——`REASON` 在 OBSOLETE 送審時裝的是「廢止申請原因」，
+          // 後端僅於 REJECTED 帶值。這一列是該規則的 fixture 對照組。
+          reason: null,
+        },
+        {
+          review_id: 401,
+          doc_id: "DM-SOP-000010",
+          doc_name: "被我退回的 SOP",
+          review_type: "NEW_VERSION",
+          status: "REJECTED",
+          version_no: "2.0",
+          complete_date: "2026-08-11T10:00:00Z",
+          submitter_name: "林撰寫",
+          reason: "變更摘要未說明影響範圍",
         },
       ],
-      meta: { total: 1, page: 1, limit: 20, total_pages: 1 },
+      meta: { total: 2, page: 1, limit: 20, total_pages: 1 },
     }),
   ),
   http.get("/api/dm/reviews/:reviewId", ({ params }) =>
@@ -578,7 +593,9 @@ export const handlers = [
     }),
   ),
   // US9 個人專區（dm-personal）
-  http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true })),
+  // can_draft（#657）：草稿匣頁籤僅編輯者可見。預設給 true 讓既有草稿匣測試照常運作；
+  // 純審核者情境由該測試自己 server.use() 覆寫成 false。
+  http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true, can_draft: true })),
   http.get("/api/dm/personal/drafts", () =>
     HttpResponse.json([
       {
