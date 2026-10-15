@@ -156,9 +156,10 @@ export function EtStudentsPage() {
   const [attemptId, setAttemptId] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
-  // 匯出中兩顆匯出鈕一併停用（#660，對齊 DM / DP05）：等待時連按會多下載一份、多寫一筆
-  // 具名個資匯出稽核
-  const [exporting, setExporting] = useState(false)
+  // 匯出中停用**被按的那一顆**（#660，對齊 DM / DP05）：等待時連按會多下載一份、多寫一筆
+  // 具名個資匯出稽核。只停用那一顆而非兩顆一起——兩顆同時變灰，教師會以為兩份檔案都在
+  // 下載（2026-10-15 手測回饋）
+  const [exporting, setExporting] = useState<"students" | "survey" | null>(null)
   /** 核可備註（不通過用，選填）與撤銷原因（必填）共用——兩者不會同時出現。 */
   const [noteInput, setNoteInput] = useState("")
   /** 撤銷原因為空時的 inline 錯誤（`ET-MSG-ET02-305`）。 */
@@ -288,7 +289,7 @@ export function EtStudentsPage() {
   /** 兩支 CSV 共用——匯出走 axios blob，成功與失敗都要看得見。 */
   const exportCsv = async (kind: "students" | "survey") => {
     if (courseId === "") return
-    setExporting(true)
+    setExporting(kind)
     try {
       await (kind === "students" ? downloadStudentsCsv(courseId) : downloadSurveyCsv(courseId))
       // ET-MSG-ET02-007。瀏覽器下載是**無聲**的：檔案落到下載資料夾、頁面完全沒變化。
@@ -297,7 +298,7 @@ export function EtStudentsPage() {
     } catch (err) {
       notify.message.error(toApiError(err).errorMessage)
     } finally {
-      setExporting(false)
+      setExporting(null)
     }
   }
 
@@ -348,7 +349,7 @@ export function EtStudentsPage() {
           <StudentListBlock
             courseId={courseId}
             readOnly={readOnly}
-            exporting={exporting}
+            exporting={exporting === "students"}
             onRemove={(student) => openPending({ kind: "remove", student })}
             onExport={() => void exportCsv("students")}
             onApprove={(students, result) =>
@@ -365,7 +366,7 @@ export function EtStudentsPage() {
             onOpenDetail={setAttemptId}
             onReset={(userId, userName, quiz) => openPending({ kind: "reset", userId, userName, quiz })}
           />
-          <SurveyResultBlock courseId={courseId} exporting={exporting} onExport={() => void exportCsv("survey")} />
+          <SurveyResultBlock courseId={courseId} exporting={exporting === "survey"} onExport={() => void exportCsv("survey")} />
         </>
       )}
 

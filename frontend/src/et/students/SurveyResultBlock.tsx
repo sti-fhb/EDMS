@@ -43,7 +43,7 @@ export function SurveyResultBlock({
   onExport,
 }: {
   courseId: number
-  /** 任一支 CSV 匯出進行中（由 `StudentsPage` 持有）。 */
+  /** 本區塊的 CSV 匯出進行中（由 `StudentsPage` 持有）。 */
   exporting: boolean
   onExport: () => void
 }) {

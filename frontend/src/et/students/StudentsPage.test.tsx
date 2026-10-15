@@ -473,10 +473,15 @@ describe("ET02 學員學習狀況追蹤", () => {
       expect(block("已加入學員").getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
     })
 
-    it("匯出中停用，完成後恢復——避免等待時連按，多下載一份、多寫一筆稽核", async () => {
+    // 匯出中只停用**被按的那一顆**（2026-10-15 手測回饋）：兩顆一起變灰，教師會以為
+    // 兩份檔案同時在下載，實際只下載了其中一份
+    it.each([
+      ["已加入學員", "問卷結果", "students.csv"],
+      ["問卷結果", "已加入學員", "survey-result.csv"],
+    ])("按「%s」匯出：該顆停用至完成後恢復，「%s」照常可按", async (clicked, other, csv) => {
       Object.assign(URL, { createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() })
       server.use(
-        http.get("/api/et/courses/:courseId/students.csv", async () => {
+        http.get(`/api/et/courses/:courseId/${csv}`, async () => {
           await delay(150)
           return HttpResponse.text("學員\n王小明\n", { headers: { "Content-Type": "text/csv; charset=utf-8" } })
         }),
@@ -487,17 +492,16 @@ describe("ET02 學員學習狀況追蹤", () => {
       await screen.findAllByText("王小明")
       await screen.findByText(/已填 .* 人/)
 
-      const studentsExport = block("已加入學員").getByRole("button", { name: /匯出 CSV/ })
-      expect(studentsExport).toBeEnabled()
-      await user.click(studentsExport)
+      const target = block(clicked).getByRole("button", { name: /匯出 CSV/ })
+      expect(target).toBeEnabled()
+      await user.click(target)
 
-      await waitFor(() => expect(studentsExport).toBeDisabled())
-      // 同一時間只跑一支匯出：問卷那顆也停用
-      expect(block("問卷結果").getByRole("button", { name: /匯出 CSV/ })).toBeDisabled()
+      // 匯出中：被按的那顆停用（避免連按多下載一份、多寫一筆稽核），另一顆不受影響
+      await waitFor(() => expect(target).toBeDisabled())
+      expect(block(other).getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
 
       expect(await screen.findByText("CSV 已匯出")).toBeInTheDocument()
-      await waitFor(() => expect(studentsExport).toBeEnabled())
-      expect(block("問卷結果").getByRole("button", { name: /匯出 CSV/ })).toBeEnabled()
+      await waitFor(() => expect(target).toBeEnabled())
     })
 
     it("匯出失敗也要恢復可按，教師才能重試", async () => {
