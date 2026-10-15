@@ -69,7 +69,7 @@ export function StudentListBlock({
   courseId: number
   /** 課程視同關閉時為 `true`——**只停寫入**，清單與匯出照常（AC 10）。 */
   readOnly: boolean
-  /** 任一支 CSV 匯出進行中（由 `StudentsPage` 持有）。 */
+  /** 本區塊的 CSV 匯出進行中（由 `StudentsPage` 持有）。 */
   exporting: boolean
   onRemove: (student: StudentRow) => void
   onExport: () => void
