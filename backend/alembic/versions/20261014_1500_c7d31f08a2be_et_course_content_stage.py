@@ -1,7 +1,7 @@
 """et_course_content_stage
 
 Revision ID: c7d31f08a2be
-Revises: a3f9c21e5d84
+Revises: 0ac1b791c1a1
 Create Date: 2026-10-14 15:00:00.000000
 
 已發布課程的編輯改為暫存、按「更新」跑發布檢核後才一起生效（#631）。
@@ -55,7 +55,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c7d31f08a2be"
-down_revision: str | None = "a3f9c21e5d84"
+down_revision: str | None = "0ac1b791c1a1"
 branch_labels: str | None = None
 depends_on: str | None = None
 
