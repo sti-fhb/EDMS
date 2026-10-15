@@ -50,15 +50,16 @@ export function RegisterForm() {
       if (retryAfter) cooldown.start(retryAfter, email)
     } catch (err) {
       const apiError = toApiError(err)
-      // 429 在「非本人操作」時完全無指引（#213）：使用者第一次註冊就被擋，訊息只說「操作過於頻繁」
-      // ——他沒操作過任何東西，看不出這是別人（或另一台裝置 / 同一辦公室的同事）觸發的冷卻。
-      // #213 已讓「沒寄出信的探測」不再波及他人，但仍有兩種正常情況會走到這裡：本人在另一裝置剛
-      // 註冊過、或有人真的觸發過一次寄信。故補一句指引，讓使用者知道這不是他做錯了什麼。
-      setApiError(
-        apiError.retryAfter
-          ? `${apiError.errorMessage}（若您並未進行任何操作，請稍候再試或聯繫系統管理者）`
-          : apiError.errorMessage,
-      )
+      // #345 / #346 之後，register 的 429 **只剩一種成因**：同一 IP + 同一 Email 於冷卻內重打
+      // （probe 章）。他人蓋的 Email 章改為靜默 202，本人換裝置（＝換 IP）也走靜默。
+      //
+      // 因此 #213 時補的那句「若您並未進行任何操作，請稍候再試或聯繫系統管理者」**已經在說反話**：
+      // 唯一還看得到 429 的人，正是剛剛自己操作過的那個人。該句原本的兩個情境
+      // （本人在另一裝置剛註冊過、有人真的觸發過一次寄信）現在都不再產生 429。
+      //
+      // ⛔ 若日後有人想把那句話加回來，請先確認 429 的成因是否又變回「可能不是本人」——
+      // 那是 #345 / #346 刻意關掉的（跨 IP 的 429 會洩漏「該 Email 有未逾期的待驗證列」）。
+      setApiError(apiError.errorMessage)
       // 冷卻中重複註冊（429）→ 起算倒數（綁定此 Email）並暫時 disable 送出
       if (apiError.retryAfter) cooldown.start(apiError.retryAfter, email)
     } finally {
