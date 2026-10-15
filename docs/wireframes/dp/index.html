@@ -1087,32 +1087,42 @@
     </details>
   </div>
 
-  <!-- ============ dp-schedule 排程作業總覽（UCDP008，系統自動，唯讀檢視） ============ -->
+  <!-- ============ dp-schedule 排程作業總覽（UCDP008，系統自動執行；可編輯名稱 / 說明 / cron / 啟停） ============ -->
   <div id="dp-schedule" class="screen">
     <div class="screen-header">
       <div class="screen-title"><i class="bi bi-clock-history text-tsbms-green me-2"></i>DP06 排程作業總覽</div>
-      <div class="screen-meta">UCDP008 ｜ ET / DM 管理者（唯讀檢視，系統自動執行）</div>
+      <div class="screen-meta">UCDP008 ｜ ET / DM 管理者（檢視與編輯，系統自動執行）</div>
     </div>
 
-    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>排程<strong>引擎 + <code>DP_SCHEDULE</code> 註冊表由平台提供</strong>；各模組排程作業於註冊表登錄、job handler 由各模組提供（需要業務資料時反向 import 模組 service）。本頁供檢視已註冊排程與執行狀態（<code>DP_SCHEDULE_LOG</code>）。</div>
+    <div class="wf-status-msg wf-status-info"><i class="bi bi-info-circle me-1"></i>排程<strong>引擎 + <code>DP_SCHEDULE</code> 註冊表由平台提供</strong>；各模組排程作業於註冊表登錄、job handler 由各模組提供（需要業務資料時反向 import 模組 service）。本頁供檢視已註冊排程與執行狀態（<code>DP_SCHEDULE_LOG</code>），並可編輯名稱、說明、Cron 與啟停（FR-DP-US11-06 / 08）。</div>
 
     <div class="wf-card p-0">
       <table class="table wf-table mb-0 align-middle">
         <thead><tr>
-          <th>Job</th><th style="width:22rem;">說明</th><th>所屬模組</th><th>執行時點</th><th>Cron</th><th>最近執行</th>
+          <th>Job</th><th style="width:22rem;">說明</th><th>所屬模組</th><th>執行時點</th><th>Cron</th><th>最近執行</th><th class="text-end">操作</th>
         </tr></thead>
         <tbody>
-          <!-- 說明欄（DESCRIPTION，#311）：JOB_NAME 為短名詞，工作內容細節寫於此欄、唯讀不可編輯 -->
+          <!-- 說明欄（DESCRIPTION，#311）：JOB_NAME 為短名詞，工作內容細節寫於此欄；2026-09-29（#448）起可於編輯卡片修改 -->
           <!-- 執行時點（#332）：由 CRON_EXPR 現算，不加時區標籤——cron 即台灣時間（#517），
                與右側編輯的值同一基準，標了反而多餘。#517 之前引擎跑 UTC，此欄會標「UTC」。
                說明欄不再寫時點——兩者無同步機制，曾出現說明欄 08:00 而 cron 為 10:00 的矛盾。
                dow 以「週一為 0」（APScheduler 語意），故週一是 0 而非 1。 -->
-          <tr><td>SCHDP001 平台每日作業</td><td>停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>每日 08:00</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHET001 ET 週統計與週報</td><td>寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒</td><td>ET</td><td>每週一 10:00</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>關閉已逾閱課期間之課程，並結清這些課程中逾期未提交之作答（標 TIMEOUT 並計分）</td><td>ET</td><td>每日 08:00</td><td>0 8 * * *</td><td>2026-07-06 08:00</td></tr>
-          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>每週一 10:00</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td></tr>
+          <tr><td>SCHDP001 平台每日作業</td><td>停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</td><td>DP</td><td>每日 08:00</td><td>0 8 * * *</td><td>2026-07-06 08:00</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" title="執行歷程"><i class="bi bi-clock-history"></i></button> <button class="btn btn-sm btn-outline-primary" title="編輯"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>SCHET001 ET 週統計與週報</td><td>寫入開放中課程之週統計快照，並寄出學習進度週報與每週未看提醒</td><td>ET</td><td>每週一 10:00</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" title="執行歷程"><i class="bi bi-clock-history"></i></button> <button class="btn btn-sm btn-outline-primary" title="編輯"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>SCHET002 ET 到期關閉與加急提醒</td><td>關閉已逾閱課期間之課程，並結清這些課程中逾期未提交之作答（標 TIMEOUT 並計分）</td><td>ET</td><td>每日 08:00</td><td>0 8 * * *</td><td>2026-07-06 08:00</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" title="執行歷程"><i class="bi bi-clock-history"></i></button> <button class="btn btn-sm btn-outline-primary" title="編輯"><i class="bi bi-pencil"></i></button></td></tr>
+          <tr><td>SCHDM001 DM 週報與未讀提醒</td><td>寄出文件閱讀率 KPI 週報予 DM 管理者，並對應看未看者寄未讀提醒</td><td>DM</td><td>每週一 10:00</td><td>0 10 * * 0</td><td>2026-07-06 08:00</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" title="執行歷程"><i class="bi bi-clock-history"></i></button> <button class="btn btn-sm btn-outline-primary" title="編輯"><i class="bi bi-pencil"></i></button></td></tr>
         </tbody>
       </table>
+    </div>
+
+    <div class="wf-card">
+      <div class="small text-muted fw-bold mb-2">編輯排程（按列上 <i class="bi bi-pencil"></i> 展開示意）</div>
+      <div class="mb-2"><label class="form-label form-label-sm">Job ID <i class="bi bi-lock-fill text-muted ms-1" title="不可改"></i></label><input class="form-control form-control-sm" value="SCHDP001" disabled></div>
+      <div class="mb-2"><label class="form-label form-label-sm">作業名稱</label><input class="form-control form-control-sm" value="平台每日作業"></div>
+      <div class="mb-2"><label class="form-label form-label-sm">說明</label><textarea class="form-control form-control-sm" rows="2">停用連續閒置超過 LOGIN.IDLE_DISABLE_DAYS 天未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之待驗證列</textarea><div class="field-helper">描述這支作業做什麼；請勿寫執行時間（畫面已依 Cron 顯示）</div></div>
+      <div class="mb-2"><label class="form-label form-label-sm">Cron 表達式</label><input class="form-control form-control-sm" value="0 8 * * *"><div class="field-helper">例：0 8 * * *（每日台灣時間 08:00）。變更即時生效。</div></div>
+      <div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" checked><label class="form-check-label">啟用</label></div>
+      <button class="btn btn-sm btn-primary" onclick="showToast('排程已更新')">儲存</button> <button class="btn btn-sm btn-outline-secondary">取消</button>
     </div>
 
     <div class="wf-card p-0">
@@ -1135,7 +1145,7 @@
         <li>平台提供<strong>單一排程執行引擎</strong>（如 APScheduler）＋ <strong><code>DP_SCHEDULE</code> DB 註冊表</strong>（cron / 執行程式 / 啟停）；多實例部署時以 <strong>leader 選舉</strong>確保只有一個實例觸發（單一實例可簡化）。</li>
         <li>各模組排程 job（ET SCHET001/002、DM SCHDM001）於 <code>DP_SCHEDULE</code> 登錄；job handler 由各模組提供，需要業務資料時<strong>反向 import 模組 service</strong>（平台 job → 模組 service）。</li>
         <li>平台以 <code>DP_SCHEDULE_LOG</code> 記錄執行歷程（起訖 / 成功失敗 / 錯誤）。<strong>排程的執行時點只由本頁的 <code>CRON_EXPR</code> 控制</strong>（編輯後經 <code>apply_job_change</code> 即時生效）——<code>DP_PARAM</code> <strong>不存任何排程時點</strong>（FR-DP-US11-07，#332 改訂；原 <code>ET_WEEKLY_STAT_DAY_TIME</code> / <code>DM_WEEKLY_SCHED_DAY_TIME</code> 已分別於 #325 / #332 移除）。<code>DP_PARAM</code> 只存各模組的<strong>業務門檻</strong>（如 <code>ET_URGENT_REMIND_DAYS</code> / <code>DM_REMIND_THRESHOLD</code>），由各模組 handler 執行時自行讀取。</li>
-        <li>本頁為<strong>唯讀</strong>檢視（共用項，ET / DM 管理者皆可檢視）：<strong>不可於 UI 啟停或手動補跑</strong>——啟停由 DB / 部署管理（2026-07-08 釐清第 1 輪）。</li>
+        <li>本頁為共用項（ET / DM 管理者皆可使用）：<strong>可編輯作業名稱、說明、Cron 與啟停</strong>（Cron 與啟停經 <code>apply_job_change</code> 即時生效，異動寫稽核）；<strong>不可手動補跑</strong>，<code>HANDLER_REF</code> / <code>MODULE</code> / <code>JOB_ID</code> 不可改（FR-DP-US11-06 / 08）。2026-07-08 釐清第 1 輪原定「唯讀、啟停由 DB / 部署管理」，已於 #108 實作時改為可編輯。</li>
         <li>平台自身排程 <code>SCHDP001</code>（每日）：① 連續 90 日未登入之帳號自動禁用；② 密碼到期前提醒（預設 7 天前起，寄 <code>MODULE=DP</code>「密碼到期提醒」）。</li>
         <li>前次執行未完成而下次 cron 到期 → <strong>跳過本次並記 SKIPPED</strong>（不重複執行同一 job）；單一 job 失敗不影響其他 job。</li>
       </ul>

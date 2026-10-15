@@ -1,14 +1,14 @@
 # User Story 11 — 排程作業執行與總覽（UCDP008）
 
-> 返回總檔：[spec.md](spec.md) | 模組：平台（DP）| Priority：P2 | Wireframe：[dp/index.html](../../wireframes/dp/index.html)（dp-schedule，唯讀總覽）
+> 返回總檔：[spec.md](spec.md) | 模組：平台（DP）| Priority：P2 | Wireframe：[dp/index.html](../../wireframes/dp/index.html)（dp-schedule，總覽與編輯）
 
 ## User Story
 
-作為平台（系統自動），我要依 `DP_SCHEDULE` 註冊表以單一引擎觸發各模組與平台自身的排程 job 並記錄執行歷程；作為 ET / DM 管理者，我要於 DP 後台唯讀檢視排程總覽，以便掌握各 job 的執行狀態。
+作為平台（系統自動），我要依 `DP_SCHEDULE` 註冊表以單一引擎觸發各模組與平台自身的排程 job 並記錄執行歷程；作為 ET / DM 管理者，我要於 DP 後台檢視排程總覽並調整各 job 的名稱、說明、執行時點與啟停，以便掌握各 job 的執行狀態。
 
 **Priority**: P2 — 承載 ET 週報 / 提醒（SCHET001 / 002）、DM KPI 週報（SCHDM001）與平台自身 `SCHDP001`；各模組排程功能上線前完成即可。
 
-**Independent Test**: 註冊之 job 依 cron 準時觸發且 `DP_SCHEDULE_LOG` 留起訖與結果；單一 job 失敗不影響其他 job；前次未完成時本次跳過；管理者於總覽頁只能檢視、無啟停 / 補跑按鈕。
+**Independent Test**: 註冊之 job 依 cron 準時觸發且 `DP_SCHEDULE_LOG` 留起訖與結果；單一 job 失敗不影響其他 job；前次未完成時本次跳過；管理者於總覽頁可編輯名稱 / 說明 / cron / 啟停（cron 與啟停即時生效），無補跑操作、不可改 `HANDLER_REF` / `MODULE` / `JOB_ID`。
 
 ### Acceptance Scenarios
 
@@ -27,7 +27,7 @@
 - **FR-DP-US11-03**: 每次執行 MUST 於 `DP_SCHEDULE_LOG` 記錄起訖時間、成功 / 失敗、錯誤訊息（append-only）；單一 job 失敗 MUST NOT 影響其他 job；前次未完成時 MUST 跳過本次並記錄
 - **FR-DP-US11-04**: job handler 由所屬模組提供並向引擎註冊；需要業務資料時反向 import 模組 service（平台 job → 模組 service）
 - **FR-DP-US11-05**: 平台自身排程 `SCHDP001`（每日）MUST 執行：① 閒置帳號禁用（`ACTIVE` 帳號 `LAST_LOGIN_DATE` 逾 `IDLE_DISABLE_DAYS`，天數為平台級參數；**`LAST_LOGIN_DATE` 為 null〔從未登入〕時以 `CREATED_DATE` 為閒置起算基準**；禁用寫稽核 `func_name=DP-USERS`、operator=SYSTEM）；② 密碼效期到期前提醒（`PWD_CHANGED_DATE`+`EXPIRY_DAYS` 距今 ≤ `EXPIRY_REMIND_DAYS`，預設到期前 7 天起、**每日跑均寄出直至變更 / 到期**，經 US6 寄 `MODULE=DP`「密碼到期提醒」）；兩者結果寫入稽核 / outbox，各批次逐筆容錯（單一使用者失敗不擋其他）
-- **FR-DP-US11-06**: DP 後台 MUST 提供排程總覽畫面（共用項，ET / DM 管理者皆可檢視）：job 清單（含下次執行時間）與執行歷程；**MAY 編輯 `JOB_NAME` / `CRON_EXPR` / 啟停（`IS_ENABLED`）**，`CRON_EXPR` / `IS_ENABLED` 變更即時套到運行中的引擎；**MUST NOT 提供手動補跑**（補跑各模組自理，FR-03）；**`HANDLER_REF` / `MODULE` / `JOB_ID` MUST NOT 可經 UI 修改**（`HANDLER_REF` 改＝任意程式執行風險）
+- **FR-DP-US11-06**: DP 後台 MUST 提供排程總覽畫面（共用項，ET / DM 管理者皆可檢視）：job 清單（含下次執行時間）與執行歷程；**MAY 編輯 `JOB_NAME` / `DESCRIPTION`（細節見 FR-08）/ `CRON_EXPR` / 啟停（`IS_ENABLED`）**，`CRON_EXPR` / `IS_ENABLED` 變更即時套到運行中的引擎；**MUST NOT 提供手動補跑**（補跑各模組自理，FR-03）；**`HANDLER_REF` / `MODULE` / `JOB_ID` MUST NOT 可經 UI 修改**（`HANDLER_REF` 改＝任意程式執行風險）
 - **FR-DP-US11-08**: job 清單 MUST 顯示 `DESCRIPTION`（這支 job 在做什麼）；該欄 MAY 經編輯卡片修改（≤200 字，留白＝清空；請求未帶此欄則維持原值），修改記入稽核。`JOB_NAME` 為短名詞，工作內容細節一律寫入 `DESCRIPTION`（#311）
     > **2026-09-29 改訂**：原規定唯讀（理由：說明描述程式行為，改了不改變行為、只會與實作不符），變更途徑為 IT 直接操作 DB 或開 migration。改為可編輯——說明是給人讀的，與系統參數說明性質相同，修正文字不應需要後端介入。代價是 FR-DP-US11-07a「說明不寫執行時點」改由編輯欄位提示維持，不再只由開發端守住。
 - **FR-DP-US11-07**（2026-09-17 由 #332 改訂）: 排程之**執行時點**唯一由 `DP_SCHEDULE.CRON_EXPR` 控制（於 DP 後台「排程管理」編輯，經 `apply_job_change` **即時生效**，見 FR-06）；引擎 MUST NOT 自 `DP_PARAM` 讀取任何排程時點。`DP_PARAM`（前綴分模組）用於各模組的**業務門檻**參數（如 `DM_REMIND_THRESHOLD` 簽核停留天數、`ET_URGENT_REMIND_DAYS` 截止前天數），由各模組管理者於 US5 維護、**各模組 handler 於執行時自行讀取**
