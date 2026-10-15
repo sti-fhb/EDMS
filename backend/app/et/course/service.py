@@ -62,7 +62,7 @@ from app.et.course.schemas import (
     TagOption,
 )
 from app.et.course.stage_rules import ENTITY_CHAPTER
-from app.et.course.stage_writer import EtCourseStageWriter, is_staged
+from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.material.repository import EtMaterialRepository
@@ -76,6 +76,9 @@ _MODULE = "ET"
 _FUNC_NAME = "ET-COURSE"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此課程", error_code="ET_COURSE_001")
+#: `ensure_version_matched` 的實體標籤（僅供日誌辨識，不進錯誤訊息）。
+_STAGE_ENTITY = "ET_COURSE_CONTENT_STAGE"
+
 _CHAPTER_NOT_FOUND = AppError(status_code=404, detail="查無此章節", error_code="ET_CHAPTER_001")
 _ITEM_NOT_FOUND = AppError(status_code=404, detail="查無此章節項目", error_code="ET_ITEM_001")
 
@@ -522,11 +525,20 @@ class EtCourseService:
     async def rename_chapter(
         self, db: AsyncSession, chapter_id: int, req: ChapterRenameReq, *, operator: OperatorInfo
     ) -> None:
-        """更名章節（樂觀鎖檢核章節自身之 `VERSION`）。"""
+        """更名章節（樂觀鎖檢核章節自身之 `VERSION`）。
+
+        已發布 / 已關閉課程寫暫存區（#631）；樂觀鎖改檢核**暫存列自己的** `VERSION`。
+        """
+        ref, course_id = await self._staged_chapter(db, chapter_id, operator.user_id, operator)
+        if ref is not None:
+            rowcount = await self._stage_writer.update_payload(
+                db, ref.stage_id, version=req.version, payload={"chapter_name": req.chapter_name}, operator=operator
+            )
+            ensure_version_matched(rowcount=rowcount, entity=_STAGE_ENTITY)
+            await self._log(db, "UPDATE", operator.user_id, course_id, "更名章節（暫存）")
+            return
+
         chapter = await self._chapters.get(db, chapter_id)
-        if chapter is None:
-            raise _CHAPTER_NOT_FOUND
-        await self._require_owned(db, chapter.course_id, operator.user_id)
         rowcount = await self._chapters.rename(db, chapter_id, req.version, req.chapter_name, operator)
         ensure_version_matched(rowcount=rowcount, entity="ET_CHAPTER")
         await self._log(db, "UPDATE", operator.user_id, chapter.course_id, "更名章節")
@@ -540,7 +552,21 @@ class EtCourseService:
         且若遞增各章節之 `VERSION`，正在改章節名的另一裝置會無故衝突，違反
         FR-ET-US3-15「不同實體並行編輯互不衝突」。
         """
-        await self._require_owned(db, course_id, operator.user_id)
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if is_staged(course):
+            # ⚠️ 併發令牌仍是**課程**的 `VERSION`（活表）——課程列不是內容、不在
+            # `load_live_tree` 的範圍內，用它不會讓學員看到任何變化。重排改的是下一層
+            # 的順序，故與草稿路徑同一形狀。
+            await self._stage_writer.ensure_seeded(db, course_id, operator)
+            nodes = await self._stage_writer.children_of(db, course_id, ENTITY_CHAPTER, None)
+            by_exposed = {exposed_id(source_id=n.source_id, stage_id=n.stage_id): n.stage_id for n in nodes}
+            ensure_reorder_complete(current_ids=set(by_exposed), requested=req.chapter_ids)
+            rowcount = await self._courses.bump_version(db, course_id, req.version, operator)
+            ensure_version_matched(rowcount=rowcount, entity="ET_COURSE")
+            await self._stage_writer.apply_order(db, [by_exposed[i] for i in req.chapter_ids], operator)
+            await self._log(db, "UPDATE", operator.user_id, course_id, "調整章節順序（暫存）")
+            return
+
         current = await self._chapters.list_by_course(db, course_id)
         ensure_reorder_complete(current_ids={c.chapter_id for c in current}, requested=req.chapter_ids)
         rowcount = await self._courses.bump_version(db, course_id, req.version, operator)
@@ -549,11 +575,18 @@ class EtCourseService:
         await self._log(db, "UPDATE", operator.user_id, course_id, "調整章節順序")
 
     async def delete_chapter(self, db: AsyncSession, chapter_id: int, *, operator: OperatorInfo) -> None:
-        """刪除章節：本體、其下項目與教材 / 測驗內容、學員紀錄**皆軟刪**，剩餘章節順序遞補。"""
+        """刪除章節：本體、其下項目與教材 / 測驗內容、學員紀錄**皆軟刪**，剩餘章節順序遞補。
+
+        已發布 / 已關閉課程只移除**暫存**子樹（#631）——學員紀錄要到「更新」套用時才由
+        `stage_apply._DELETERS` 連帶處理，此刻一筆都不動。
+        """
+        ref, course_id = await self._staged_chapter(db, chapter_id, operator.user_id, operator)
+        if ref is not None:
+            await self._stage_writer.delete_subtree(db, ref.stage_id, operator)
+            await self._log(db, "DELETE", operator.user_id, course_id, "刪除章節（暫存）")
+            return
+
         chapter = await self._chapters.get(db, chapter_id)
-        if chapter is None:
-            raise _CHAPTER_NOT_FOUND
-        await self._require_owned(db, chapter.course_id, operator.user_id)
         await self._chapters.soft_delete_with_cascade(db, [chapter_id], operator)
         await self._chapters.resequence_remaining(db, chapter.course_id, operator)
         await self._log(db, "DELETE", operator.user_id, chapter.course_id, "刪除章節")
@@ -648,6 +681,25 @@ class EtCourseService:
         return [TagOption.model_validate(t) for t in await self._tags.list_options(db, course_id)]
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _staged_chapter(self, db: AsyncSession, chapter_id: int, actor_id: str, operator):
+        """章節 id → 暫存節點；回 `None` 代表該走活表路徑。
+
+        🔴 **負數先解析**：負數必定是「本次編輯新增、活表還沒有」的節點，而正數是活表 id
+        ——兩個號碼空間靠正負號隔開（見 `stage_writer.exposed_id`）。
+        """
+        ref = await self._stage_writer.resolve_new(db, chapter_id)
+        if ref is not None:
+            await self._require_owned(db, ref.course_id, actor_id)
+            return ref, ref.course_id
+        chapter = await self._chapters.get(db, chapter_id)
+        if chapter is None:
+            raise _CHAPTER_NOT_FOUND
+        course = await self._require_owned(db, chapter.course_id, actor_id)
+        if not is_staged(course):
+            return None, chapter.course_id
+        ref = await self._stage_writer.ref_for_source(db, course.course_id, ENTITY_CHAPTER, chapter_id, operator)
+        return ref, chapter.course_id
 
     async def _require_owned(self, db: AsyncSession, course_id: int, actor_id: str):
         """取課程並確認操作者為擁有者；查無 → 404、非擁有者 → 403。"""

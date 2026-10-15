@@ -175,6 +175,49 @@ class EtCourseStageWriter:
         await db.flush()
         return result.rowcount
 
+    async def bump_version(self, db: AsyncSession, stage_id: int, version: int, operator: OperatorInfo) -> int:
+        """只遞增暫存列的 `VERSION`，不動 payload——供「重排」這種改動下層順序的操作。
+
+        與草稿路徑同一形狀：重排改的是**下一層**的順序，所以用上一層的版本當併發令牌，
+        而不遞增下層各列的版本（否則正在編輯該教材的另一裝置會無故衝突，
+        違反 `FR-ET-US3-15`）。
+
+        Returns:
+            命中列數——呼叫端以 `ensure_version_matched` 判定衝突。
+        """
+        result = await db.execute(
+            update(EtCourseContentStage)
+            .where(
+                EtCourseContentStage.stage_id == stage_id,
+                EtCourseContentStage.version == version,
+                EtCourseContentStage.deleted == 0,
+            )
+            .values(
+                version=EtCourseContentStage.version + 1,
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+        return result.rowcount
+
+    async def children_of(
+        self, db: AsyncSession, course_id: int, entity_type: str, parent_stage_id: int | None
+    ) -> list[EtCourseContentStage]:
+        """某節點底下指定型別的子節點，依 `SORT_ORDER` 排序。"""
+        stmt = select(EtCourseContentStage).where(
+            EtCourseContentStage.course_id == course_id,
+            EtCourseContentStage.entity_type == entity_type,
+            EtCourseContentStage.deleted == 0,
+        )
+        stmt = stmt.where(
+            EtCourseContentStage.parent_stage_id.is_(None)
+            if parent_stage_id is None
+            else EtCourseContentStage.parent_stage_id == parent_stage_id
+        )
+        rows = await db.scalars(stmt.order_by(EtCourseContentStage.sort_order, EtCourseContentStage.stage_id))
+        return list(rows.all())
+
     async def apply_order(self, db: AsyncSession, stage_ids: Sequence[int], operator: OperatorInfo) -> None:
         """依給定順序重設 `SORT_ORDER`（1 起算）。
 
