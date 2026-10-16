@@ -31,6 +31,7 @@ from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
 from app.et.schedules.service import EtScheduleService
+from tests.integration.et._live_edit import editing_live
 from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
@@ -207,15 +208,18 @@ class TestUrgentAudience:
         的人在截止前完全收不到任何提醒，而那正是最需要被提醒的一群。"""
         teacher_ctx = await _course(client, db, "u5")
         cid = teacher_ctx["course_id"]
-        ch = await client.post(
-            f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher_ctx["teacher"])
-        )
-        second = await client.post(
-            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
-            json={"item_type": ITEM_MATERIAL, "title": "教材2"},
-            headers=_bearer(teacher_ctx["teacher"]),
-        )
-        assert second.status_code == 201, second.text
+        # 第二章只是為了造出「有進度但未完課」：`editing_live` 讓它直接進活表
+        # （#631；`_course` 造的課程過不了「更新」的發布檢核，見該工具的 docstring）
+        async with editing_live(db, cid):
+            ch = await client.post(
+                f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher_ctx["teacher"])
+            )
+            second = await client.post(
+                f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+                json={"item_type": ITEM_MATERIAL, "title": "教材2"},
+                headers=_bearer(teacher_ctx["teacher"]),
+            )
+            assert second.status_code == 201, second.text
         partial = await _user(db, "u5_partial", ROLE_STUDENT)
         await _enroll(db, user_id=partial, course_id=cid)
         viewed = await client.post(f"/api/et/items/{teacher_ctx['item_id']}/viewed", headers=_bearer(partial))
