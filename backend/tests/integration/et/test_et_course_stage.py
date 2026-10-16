@@ -11,6 +11,8 @@
 """
 
 import json
+import logging
+from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
@@ -441,6 +443,28 @@ async def _drop_stage(db, course_id: int, entity_type: str) -> None:
     await db.flush()
 
 
+@contextmanager
+def _rejected_by(caplog, invariant: str):
+    """暫存樹守門擋下的斷言：**回應是固定文案、診斷細節只進 log**。
+
+    ⚠️ ⛔ 不可改回 `pytest.raises(AppError, match="父參照斷鏈")` 那種寫法。
+    `AppError.detail` 會**原樣**成為回應的 `error_message`（`main.py` 的
+    `app_error_handler`，**含 500**），而那些訊息帶著 `SOURCE_ID`——正是使用者送進來的
+    path 參數（2026-10-16 security review M-2）。訊息因此改成固定文案，比對不到是哪一道。
+
+    改看 log 才分得出是哪一道不變式擋下的——而「分得出是哪一道」正是這組測試的價值：
+    少了它，六條會退化成同一條「有擋下就好」，任何一道壞掉都不會紅。
+    """
+    caplog.set_level(logging.ERROR, logger="app.et.course.stage_apply")
+    with pytest.raises(AppError) as exc:
+        yield
+    assert exc.value.error_code == "ET_STAGE_001"
+    assert exc.value.status_code == 500
+    detail = exc.value.detail or ""
+    assert "SOURCE_ID" not in detail and "STAGE_ID" not in detail, "⛔ 內部代理鍵不得回吐給前端"
+    assert invariant in caplog.text, f"擋下的不是預期的那一道不變式（log 未見「{invariant}」）"
+
+
 async def _drop_subtree(db, nodes, root_stage_id: int) -> None:
     """把某節點與其整棵子樹移出暫存——模擬教師刪掉那一塊。
 
@@ -659,7 +683,7 @@ class TestApplyDelete:
         assert live.deleted == 1, "教材隨項目一起被軟刪"
         assert ENTITY_MATERIAL not in _DELETERS, "⛔ 不得為教材另設單獨的刪除路徑"
 
-    async def test_父參照斷鏈時明確報錯(self, client, db) -> None:
+    async def test_父參照斷鏈時明確報錯(self, client, db, caplog) -> None:
         """🔴 少了驗證，斷鏈會在解析父層時變成 `KeyError: <某個數字>`。
 
         那種樹編輯端不可能產生，出現就代表有人繞過編輯端直接動暫存表——此時要的是
@@ -676,7 +700,7 @@ class TestApplyDelete:
         )
         await db.flush()
 
-        with pytest.raises(AppError, match="父參照斷鏈"):
+        with _rejected_by(caplog, "父參照斷鏈"):
             await _apply(db, cid, uid)
 
     async def test_刪除項目時委派既有_cascade(self, client, db) -> None:
@@ -1006,7 +1030,7 @@ class TestReviewFindings:
         after = await db.scalar(select(EtEnrollment).where(EtEnrollment.enrollment_id == enrollment.enrollment_id))
         assert after.completed_at is None, "套用後是 1/2，不該因為刪除階段的中間狀態被蓋章"
 
-    async def test_暫存指向的活表列已被刪時整批失敗(self, client, db) -> None:
+    async def test_暫存指向的活表列已被刪時整批失敗(self, client, db, caplog) -> None:
         """🔴 暫存期間活表列被別的路徑軟刪 ⇒ 整批失敗，不得部分寫入。
 
         ⭐ **擋下它的是歸屬守門，不是 rowcount 檢查。** code review 原本指出
@@ -1026,7 +1050,7 @@ class TestReviewFindings:
         await db.execute(update(EtChapter).where(EtChapter.chapter_id == node.source_id).values(deleted=1))
         await db.flush()
 
-        with pytest.raises(AppError, match="不屬於本課程"):
+        with _rejected_by(caplog, "不屬於本課程"):
             await _apply(db, cid, uid)
 
     async def test_清空只清載入過的那批(self, client, db) -> None:
@@ -1061,7 +1085,7 @@ class TestStructuralGuards:
     會漏，而漏掉的後果全都是靜默的。
     """
 
-    async def test_指向別門課的活表資料時整批失敗(self, client, db) -> None:
+    async def test_指向別門課的活表資料時整批失敗(self, client, db, caplog) -> None:
         """🔴 最嚴重的那一道：`SOURCE_ID` 只要指得到任何一張內容表的活列就會被更新。
 
         沒有這道守門的話，一位教師可以覆寫**另一位教師**課程的章節 / 題目，而且
@@ -1086,14 +1110,14 @@ class TestStructuralGuards:
         )
         await db.flush()
 
-        with pytest.raises(AppError, match="不屬於本課程"):
+        with _rejected_by(caplog, "不屬於本課程"):
             await _apply(db, cid, uid)
 
         after = await db.scalar(select(EtChapter).where(EtChapter.chapter_id == victim_chapter.chapter_id))
         assert after.course_id == victim_cid, "⛔ 別人的章節不得被改掛到本課程"
         assert after.chapter_name == victim_chapter.chapter_name
 
-    async def test_未知的實體型別整批失敗(self, client, db) -> None:
+    async def test_未知的實體型別整批失敗(self, client, db, caplog) -> None:
         """少了這道，那個節點會被三個階段**全部略過**——教師編了、按更新沒生效，
         而且不會有任何錯誤訊息，最後還被 `clear` 當成已套用而清掉。"""
         uid = await _user(db, "ZT_G3")
@@ -1108,10 +1132,10 @@ class TestStructuralGuards:
         )
         await db.flush()
 
-        with pytest.raises(AppError, match="未知的 ENTITY_TYPE"):
+        with _rejected_by(caplog, "未知的 ENTITY_TYPE"):
             await _apply(db, cid, uid)
 
-    async def test_該有父層卻沒有時整批失敗(self, client, db) -> None:
+    async def test_該有父層卻沒有時整批失敗(self, client, db, caplog) -> None:
         """🔴 項目若無父層會拿到 `chapter_id = course_id`。
 
         11 張表的 identity **號碼空間重疊**，那個 id 通常真的存在某一列，而
@@ -1130,10 +1154,10 @@ class TestStructuralGuards:
         )
         await db.flush()
 
-        with pytest.raises(AppError, match="父層有無與對照表不符"):
+        with _rejected_by(caplog, "父層有無與對照表不符"):
             await _apply(db, cid, uid)
 
-    async def test_父層型別不符時整批失敗(self, client, db) -> None:
+    async def test_父層型別不符時整批失敗(self, client, db, caplog) -> None:
         """題目掛在章節底下之類的錯配。多數情況會被 FK 擋成錯誤，但那是靠巧合不是靠設計。"""
         uid = await _user(db, "ZT_G5")
         cid = await _full_course(client, db, uid)
@@ -1149,7 +1173,7 @@ class TestStructuralGuards:
         )
         await db.flush()
 
-        with pytest.raises(AppError, match="父層型別為"):
+        with _rejected_by(caplog, "父層型別為"):
             await _apply(db, cid, uid)
 
     async def test_正常的暫存樹不被守門擋下(self, client, db) -> None:

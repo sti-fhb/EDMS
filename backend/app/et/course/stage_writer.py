@@ -29,6 +29,7 @@ if is_staged(course):
 """
 
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -42,6 +43,8 @@ from app.core.utils import utcnow
 from app.et.constants import COURSE_DRAFT
 from app.et.course.models import EtCourseContentStage
 from app.et.course.stage_repository import EtCourseStageRepository
+
+logger = logging.getLogger(__name__)
 
 
 def is_staged(course: Any) -> bool:
@@ -93,13 +96,49 @@ class EtCourseStageWriter:
 
     ⚠️ 每一支都會先 `ensure_seeded`——教師的第一次編輯必須先把活表的內容樹整棵複製
     進來，否則暫存區只有那一筆新編輯，「更新」時會把其餘內容全部當成「教師刪了它」。
+
+    🔴 **呼叫端必須先 `lock_course`**（見該方法）。本類別不自己取鎖：鎖必須涵蓋
+    「解析 id → 寫入」整段，而解析發生在呼叫端。
     """
 
     def __init__(self, stage: EtCourseStageRepository | None = None) -> None:
         self._stage = stage or EtCourseStageRepository()
 
+    async def lock_course(self, db: AsyncSession, course_id: int) -> None:
+        """取課程行鎖——**任何暫存寫入的第一步**，與「更新」互斥。
+
+        ## 不取會怎樣（2026-10-16 security review H-1 / code review HIGH 1）
+
+        編輯與「更新」是兩個獨立的交易，而 `update_published` 的流程是
+        `load_tree` → `apply_stage` → `clear(stage_ids=那一批)`。`clear` **刻意只清
+        載入的那一批**（見 `stage_repository.clear`），於是：
+
+        | | R1＝按「更新」 | R2＝新增章節 |
+        |---|---|---|
+        | T0 | `lock_course` → `load_tree` 取得 N 列 | |
+        | T1 | 檢核、寫活表 | `has_stage` 在自己的快照仍看得到那 N 列 ⇒ **不 reseed** ⇒ 插入 1 列 |
+        | T2 | `clear(那 N 列)` → COMMIT | COMMIT |
+
+        結果暫存區只剩 R2 那一列。教師看到「課程章節全不見了」，照缺漏提示補一個項目
+        再按一次更新 ⇒ `_delete_removed` 把**整棵活表內容樹**判為「教師刪了」⇒ 連帶
+        軟刪**全班學員的進度、作答明細與完課戳記**。
+
+        ⛔ 不可改成只在 `ensure_seeded` 內取鎖：那太晚了。父節點的 id 在呼叫端就解析
+        完了，鎖必須蓋住「解析 → 寫入」整段，否則仍可插出指向已被 `clear` 掉的父節點的
+        節點，而那種樹會讓此後**每一次**「更新」都 500，且 UI 看不到它、無法刪除。
+
+        ⚠️ 同課程的編輯請求因此互相排隊。可接受——只有擁有者能編輯，競爭者是「同一個人
+        的兩個分頁」。
+        """
+        await self._stage.lock_course(db, course_id)
+
     async def ensure_seeded(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
-        """暫存區是空的就先從活表種一棵樹。"""
+        """暫存區是空的就先從活表種一棵樹。
+
+        ⚠️ 呼叫端須已持有 `lock_course`——否則兩個分頁的「第一次編輯」會雙雙看到
+        `has_stage` 為假、各自 seed 一次，第二個撞唯一索引
+        `UX_ET_COURSE_CONTENT_STAGE_SOURCE` 而回 500。
+        """
         if not await self._stage.has_stage(db, course_id):
             await self._stage.seed_from_live(db, course_id, operator)
 
@@ -154,6 +193,14 @@ class EtCourseStageWriter:
         operator: OperatorInfo,
     ) -> int:
         """改一個節點的欄位值，**帶暫存列自己的樂觀鎖**。
+
+        🔴 **`payload` 是整份取代，不是合併。** 沒帶到的 key 會消失——而 `_upsert` 的
+        規則是「payload 裡沒有的欄位就不碰活表」，所以消失的欄位會**靜默保留活表舊值**，
+        看起來像「我改了沒生效」。章節只有 `chapter_name` 一個欄位所以目前無感，但
+        教材、測驗有多個欄位，呼叫端必須送完整的一份。
+
+        ⚠️ 型別也必須相符：拿項目節點的 id 來送章節 payload，`item_type` 會整個不見
+        （見 `resolve_new` 的 `entity_type` 守門）。
 
         Returns:
             命中列數——呼叫端以 `ensure_version_matched` 判定衝突，與草稿路徑同一形狀。
@@ -255,21 +302,65 @@ class EtCourseStageWriter:
         )
         await db.flush()
 
-    async def resolve_new(self, db: AsyncSession, exposed: int) -> StageRef | None:
-        """負數 id ⇒ 本次編輯新增的暫存節點。正數回 `None`（呼叫端走活表解析）。"""
+    async def resolve_new(self, db: AsyncSession, exposed: int, entity_type: str) -> StageRef | None:
+        """負數 id ⇒ 本次編輯新增的暫存節點。正數回 `None`（呼叫端走活表解析）。
+
+        🔴 **`entity_type` 必須比對**（2026-10-16 security review M-1 / code review MEDIUM）。
+        只用 `STAGE_ID` 撈會讓型別混淆成立——所有實體共用同一個 identity 序列，把某個
+        選項節點的 `-STAGE_ID` 當成 `chapter_id` 送進 `PUT /chapters/{id}` 一樣撈得到：
+
+        | 誤用 | 後果 |
+        |---|---|
+        | `POST /chapters/{-選項}/items` | ITEM 掛 OPTION 的樹 ⇒ 此後**每次**「更新」都 500 |
+        | `PUT /chapters/{-項目}` | payload 被整份覆寫成 `{"chapter_name": …}`，
+          `item_type` 消失 ⇒ 套用時 NOT NULL IntegrityError |
+        | `DELETE /items/{-章節}` | 刪掉一整棵章節子樹 |
+
+        ⚠️ 這些壞掉的節點**在編輯頁上看不到**（`_staged_chapter_items` 只走
+        CHAPTER → ITEM 這條路），而本 PR 沒有「放棄暫存」的入口 ⇒ 教師自己救不回來。
+        只有擁有者打得到，所以是自傷而非越權——但擋下來的成本只是多一個 WHERE 條件。
+
+        ⚠️ 正數那條由 `ref_for_source` 負責，它本來就帶 `entity_type` 查。
+        """
         if exposed >= 0:
             return None
         row = await db.scalar(
             select(EtCourseContentStage).where(
-                EtCourseContentStage.stage_id == -exposed, EtCourseContentStage.deleted == 0
+                EtCourseContentStage.stage_id == -exposed,
+                EtCourseContentStage.entity_type == entity_type,
+                EtCourseContentStage.deleted == 0,
             )
         )
         return None if row is None else StageRef(stage_id=row.stage_id, course_id=row.course_id)
 
     async def ref_for_source(
-        self, db: AsyncSession, course_id: int, entity_type: str, source_id: int, operator: OperatorInfo
+        self,
+        db: AsyncSession,
+        course_id: int,
+        entity_type: str,
+        source_id: int,
+        operator: OperatorInfo,
+        *,
+        gone_error: AppError,
     ) -> StageRef:
-        """既有內容（活表 id）在暫存區的對應節點；暫存區還沒種就先種。"""
+        """既有內容（活表 id）在暫存區的對應節點；暫存區還沒種就先種。
+
+        ## 「查不到」有兩種，後果完全不同
+
+        | 情況 | 回什麼 | 為何 |
+        |---|---|---|
+        | 暫存區有這一列、但已被本次編輯軟刪 | `gone_error`（404）| 教師自己剛刪掉它，
+          再對它操作就是「查無此物」。**正常操作可達**：雙擊刪除、另一個分頁、
+          樂觀 UI 還沒失效 |
+        | 真的沒有這一列 | 500 `ET_STAGE_001` | seed 漏搬了那一種實體，是程式缺陷 |
+
+        🔴 原本兩者都回 500，訊息還寫「seed 漏搬」——而最常見的成因是上面第一種、
+        教師沒做錯任何事（2026-10-16 security review M-3 / code review HIGH 2）。
+        草稿路徑對同一個操作回 404，兩條路徑的行為必須一致。
+
+        Args:
+            gone_error: 已被刪除時要拋的 404（由呼叫端給，才能指出是章節還是項目）。
+        """
         await self.ensure_seeded(db, course_id, operator)
         stage_id = await db.scalar(
             select(EtCourseContentStage.stage_id).where(
@@ -280,11 +371,31 @@ class EtCourseStageWriter:
             )
         )
         if stage_id is None:
-            # 活表有、暫存沒有 ⇒ seed 漏搬了那一種實體。靜默略過會讓教師「編了沒生效」，
-            # 故當場拋錯；`test_種出的樹涵蓋十一種實體` 是它的上游守門。
+            deleted_here = await db.scalar(
+                select(EtCourseContentStage.stage_id).where(
+                    EtCourseContentStage.course_id == course_id,
+                    EtCourseContentStage.entity_type == entity_type,
+                    EtCourseContentStage.source_id == source_id,
+                    EtCourseContentStage.deleted == 1,
+                )
+            )
+            if deleted_here is not None:
+                raise gone_error
+            # 真的沒有 ⇒ seed 漏搬了那一種實體。靜默略過會讓教師「編了沒生效」，故當場
+            # 拋錯；`test_種出的樹涵蓋十一種實體` 是它的上游守門。
+            #
+            # ⚠️ 訊息是**固定文案**：`AppError.detail` 會原樣成為回應的 `error_message`
+            # （`main.py` 的 `app_error_handler`，**含 500**），而 `source_id` 正是使用者
+            # 送進來的 path 參數——原樣回吐違反 `sti-error-codes`。細節只進 log。
+            logger.error(
+                "ET 暫存區缺少對應節點（seed 漏搬？）：course_id=%s entity_type=%s source_id=%s",
+                course_id,
+                entity_type,
+                source_id,
+            )
             raise AppError(
                 status_code=500,
-                detail=f"暫存區缺少對應節點：{entity_type} SOURCE_ID={source_id}",
+                detail="課程內容暫存資料異常，請重新載入後再試",
                 error_code="ET_STAGE_001",
             )
         return StageRef(stage_id=stage_id, course_id=course_id)

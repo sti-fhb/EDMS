@@ -547,6 +547,8 @@ class EtCourseService:
         """
         course = await self._require_owned(db, course_id, operator.user_id)
         if is_staged(course):
+            # 取課程行鎖後才碰暫存區（理由見 `stage_writer.lock_course`）
+            await self._stage_writer.lock_course(db, course_id)
             # 🔴 已發布 / 已關閉：寫進暫存區，學員看到的仍是上一次「更新」的版本（#631）。
             #
             # ⛔ **不在這裡寄 `COURSE_UPDATE` 通知**——信裡寫的是「課程內容有更新」，
@@ -618,6 +620,8 @@ class EtCourseService:
         """
         course = await self._require_owned(db, course_id, operator.user_id)
         if is_staged(course):
+            # 取課程行鎖後才碰暫存區（理由見 `stage_writer.lock_course`）
+            await self._stage_writer.lock_course(db, course_id)
             # ⚠️ 併發令牌仍是**課程**的 `VERSION`（活表）——課程列不是內容、不在
             # `load_live_tree` 的範圍內，用它不會讓學員看到任何變化。重排改的是下一層
             # 的順序，故與草稿路徑同一形狀。
@@ -821,9 +825,10 @@ class EtCourseService:
 
     async def _staged_item(self, db: AsyncSession, item_id: int, actor_id: str, operator):
         """項目 id → 暫存節點；回 `None` 代表該走活表路徑。形狀同 `_staged_chapter`。"""
-        ref = await self._stage_writer.resolve_new(db, item_id)
+        ref = await self._stage_writer.resolve_new(db, item_id, ENTITY_ITEM)
         if ref is not None:
             await self._require_owned(db, ref.course_id, actor_id)
+            await self._stage_writer.lock_course(db, ref.course_id)
             return ref, ref.course_id
         item = await self._items.get(db, item_id)
         if item is None:
@@ -832,7 +837,10 @@ class EtCourseService:
         course = await self._courses.get(db, chapter.course_id)
         if not is_staged(course):
             return None, chapter.course_id
-        ref = await self._stage_writer.ref_for_source(db, chapter.course_id, ENTITY_ITEM, item_id, operator)
+        await self._stage_writer.lock_course(db, chapter.course_id)
+        ref = await self._stage_writer.ref_for_source(
+            db, chapter.course_id, ENTITY_ITEM, item_id, operator, gone_error=_ITEM_NOT_FOUND
+        )
         return ref, chapter.course_id
 
     async def _staged_chapter(self, db: AsyncSession, chapter_id: int, actor_id: str, operator):
@@ -840,10 +848,18 @@ class EtCourseService:
 
         🔴 **負數先解析**：負數必定是「本次編輯新增、活表還沒有」的節點，而正數是活表 id
         ——兩個號碼空間靠正負號隔開（見 `stage_writer.exposed_id`）。
+
+        🔴 **解析完立刻取課程行鎖**，不是等到要寫入才取：呼叫端拿到 `ref` 之後才做
+        `append` / `update_payload`，而鎖必須蓋住「解析 → 寫入」整段。理由見
+        `stage_writer.lock_course`。
+
+        ⚠️ 鎖排在 `_require_owned` **之後**：先確認是自己的課再排隊，否則任何登入者都能
+        用一個不屬於他的 course_id 讓擁有者的編輯卡住。
         """
-        ref = await self._stage_writer.resolve_new(db, chapter_id)
+        ref = await self._stage_writer.resolve_new(db, chapter_id, ENTITY_CHAPTER)
         if ref is not None:
             await self._require_owned(db, ref.course_id, actor_id)
+            await self._stage_writer.lock_course(db, ref.course_id)
             return ref, ref.course_id
         chapter = await self._chapters.get(db, chapter_id)
         if chapter is None:
@@ -851,7 +867,10 @@ class EtCourseService:
         course = await self._require_owned(db, chapter.course_id, actor_id)
         if not is_staged(course):
             return None, chapter.course_id
-        ref = await self._stage_writer.ref_for_source(db, course.course_id, ENTITY_CHAPTER, chapter_id, operator)
+        await self._stage_writer.lock_course(db, course.course_id)
+        ref = await self._stage_writer.ref_for_source(
+            db, course.course_id, ENTITY_CHAPTER, chapter_id, operator, gone_error=_CHAPTER_NOT_FOUND
+        )
         return ref, chapter.course_id
 
     async def _require_owned(self, db: AsyncSession, course_id: int, actor_id: str):

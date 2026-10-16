@@ -61,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.common.html_sanitize import sanitize_material_html
 from app.et.course.models import EtCourse
 from app.et.course.repository import EtChapterRepository, EtItemRepository
 from app.et.course.stage_entities import APPLY_ORDER, LINK_CHILD_FK, LINK_PARENT_FK, SPEC_BY_TYPE, payload_fields
@@ -293,14 +294,51 @@ async def _ensure_survey_not_frozen(db: AsyncSession, *, nodes: Sequence[StageNo
         )
 
 
+#: payload 裡需要在寫入活表前重跑消毒的欄位 → 消毒函式。
+#:
+#: 🔴 **這是一道「不依賴下一個人記得」的防線**（2026-10-16 security review H-2）。
+#:
+#: 全專案唯一的 HTML 消毒長在 `material/service.update`（`sanitize_material_html`），而
+#: `_upsert` 把 payload **直接餵進 model**、完全不經過任何 service 層。今天不可利用：
+#: `description_html` 只有兩個入口，一是 `seed_from_live`（抄的是已消毒的活表值），二是
+#: `add_item` 的暫存分支寫死 `None`。
+#:
+#: ⚠️ 但只要有人照 `add_item` 的形狀寫出 `payload={"description_html": req.description_html}`，
+#: 未消毒的 HTML 就會一路進 `ET_MATERIAL.DESCRIPTION_HTML`，再由 `ContentPane.tsx` 以
+#: `dangerouslySetInnerHTML` 渲染給**每一位在籍學員**——而那行程式碼會長得跟現有的
+#: 一模一樣，review 時看不出差別。
+#:
+#: ⛔ 不要因為「呼叫端已經消毒過了」就拿掉：消毒是冪等的，重跑一次的成本遠低於漏掉一次。
+_RESANITIZE: Final[dict[str, Any]] = {"description_html": sanitize_material_html}
+
+
+def _resanitize(values: dict[str, Any]) -> None:
+    """對 payload 中需要消毒的欄位重跑一次消毒（就地改）。見 `_RESANITIZE`。"""
+    for field, sanitize in _RESANITIZE.items():
+        if values.get(field) is not None:
+            values[field] = sanitize(values[field])
+
+
 def _reject(detail: str) -> None:
     """結構不合法一律 500 `ET_STAGE_001`。
 
-    是 500 不是 4xx：教師沒有做錯任何事，是暫存區的結構壞了。訊息只帶內部代理鍵
-    （`STAGE_ID` / `SOURCE_ID`），`app_error_handler` 不會把 detail 回給前端，
-    僅留在去識別化後的後端 log。
+    是 500 不是 4xx：教師沒有做錯任何事，是暫存區的結構壞了。
+
+    🔴 **診斷細節只進 log，回應一律固定文案**。本函式原本的 docstring 寫著
+    「`app_error_handler` 不會把 detail 回給前端」——**那是假的**（2026-10-16 security
+    review M-2 查出）：`main.py` 的 `app_error_handler` 對**所有**狀態碼（含 500）都把
+    `exc.detail` 原樣放進回應的 `error_message`。而這幾處的 detail 帶著 `SOURCE_ID`
+    ——那正是使用者送進來的 path 參數，原樣回吐違反 `sti-error-codes`。
+
+    ⚠️ 真正危險的不是這次洩漏的那幾個代理鍵，是**那句假的 docstring**：它會讓下一個人
+    放心把更敏感的東西寫進 detail。
     """
-    raise AppError(status_code=500, detail=detail, error_code="ET_STAGE_001")
+    logger.error("ET 暫存樹結構不合法：%s", detail)
+    raise AppError(
+        status_code=500,
+        detail="課程內容暫存資料異常，請重新載入後再試",
+        error_code="ET_STAGE_001",
+    )
 
 
 async def _delete_removed(
@@ -426,6 +464,7 @@ async def _upsert(
             # 新增的列缺 key 時維持 model 預設；NOT NULL 且無預設者會當場拋錯，那是
             # 該響的警報——編輯端不可能產生那種列。
             values: dict[str, Any] = {f: node.payload[f] for f in payload_fields(spec) if f in node.payload}
+            _resanitize(values)
             if hasattr(spec.model, "sort_order"):
                 values["sort_order"] = node.sort_order
             if spec.link == LINK_CHILD_FK:
@@ -484,12 +523,18 @@ async def _write(
             #
             # 409 而非 500：若真的發生，那是**競態**、教師沒做錯事，`ET_LOCK_001` 的既有
             # 語意（「資料已被其他使用者修改，請重新載入後再試」）正好就是要他做的事。
+            #
+            # ⚠️ detail 是**固定文案**：它會原樣成為回應的 `error_message`，而前端
+            # `applyMut.onError` 會直接 toast 給教師看。代理鍵只進 log。
+            logger.error(
+                "ET 套用：暫存列指向的活表資料已不存在或已刪除 entity_type=%s source_id=%s rowcount=%s",
+                node.entity_type,
+                node.source_id,
+                result.rowcount,
+            )
             raise AppError(
                 status_code=409,
-                detail=(
-                    f"暫存列指向的活表資料已不存在或已刪除："
-                    f"{node.entity_type} SOURCE_ID={node.source_id}（命中 {result.rowcount} 列）"
-                ),
+                detail="內容已被其他裝置變更，請重新載入後再試",
                 error_code="ET_LOCK_001",
             )
         return node.source_id
