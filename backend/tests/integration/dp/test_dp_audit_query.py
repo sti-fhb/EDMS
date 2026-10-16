@@ -234,7 +234,15 @@ async def test_export_csv_matches_query(db):
     await _insert_log(db, module="ET", result="FAIL")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module="ET", func_name=None, action_type=None, result=None, date_from=None, date_to=None
+        db,
+        operator_id="auditor",
+        operator=None,
+        module="ET",
+        func_name=None,
+        action_type=None,
+        result=None,
+        date_from=None,
+        date_to=None,
     )
 
     assert csv_text.startswith("﻿")  # UTF-8 BOM
@@ -258,7 +266,15 @@ async def test_csv_operator_account_is_email(db):
     await _insert_log(db, operator_id="op01")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module=None, func_name=None, action_type=None, result=None, date_from=None, date_to=None
+        db,
+        operator_id="auditor",
+        operator=None,
+        module=None,
+        func_name=None,
+        action_type=None,
+        result=None,
+        date_from=None,
+        date_to=None,
     )
 
     assert "ming@edms.local" in csv_text
@@ -270,7 +286,15 @@ async def test_csv_target_uses_display_name(db):
     await _insert_log(db, func_name="DP-USERS", target_id="tgt01")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module=None, func_name=None, action_type=None, result=None, date_from=None, date_to=None
+        db,
+        operator_id="auditor",
+        operator=None,
+        module=None,
+        func_name=None,
+        action_type=None,
+        result=None,
+        date_from=None,
+        date_to=None,
     )
 
     assert "林小美" in csv_text
@@ -387,7 +411,15 @@ async def test_export_csv_formula_injection_sanitized(db):
     await _insert_log(db, before_value="=1+2", func_name="DP-X")
 
     csv_text = await _service.export_csv(
-        db, operator=None, module=None, func_name=None, action_type=None, result=None, date_from=None, date_to=None
+        db,
+        operator_id="auditor",
+        operator=None,
+        module=None,
+        func_name=None,
+        action_type=None,
+        result=None,
+        date_from=None,
+        date_to=None,
     )
 
     assert "'=1+2" in csv_text
