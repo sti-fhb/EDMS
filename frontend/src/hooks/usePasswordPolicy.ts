@@ -14,7 +14,10 @@ import { toApiError } from "../services/http"
 export type PasswordPolicySource = { kind: "public" } | { kind: "self" } | { kind: "reset"; token: string }
 
 /**
- * 門檻的三種狀態（#673）。呼叫端**必須分得出來**——說錯比不說更糟。
+ * 門檻的狀態（#673）。呼叫端**必須分得出來**——說錯比不說更糟。
+ *
+ * ⚠️ 此處刻意不寫「共 N 種」：數字與下方清單是兩份會各自漂移的東西，新增一種狀態時
+ * 最容易漏改的就是那個數字。以型別本身為準。
  *
  * - `loading`：還在取
  * - `ready`：取到了，`policy` 有值
@@ -69,21 +72,23 @@ export function usePasswordPolicy(source: PasswordPolicySource = PUBLIC): {
     // 與 `/reset-password` 共用同一個 IP 限流器（10 次 / 分）——預設 `retry: 3` 會讓一條死連結
     // 打掉 4 次額度，使用者多點兩次信就把真正要用的重設額度吃光。
     //
-    // ⚠️ **本行沒有測試守得住**：正式環境是 `main.tsx` 的 `new QueryClient()`（預設 retry 3），
-    // 而所有測試 harness 都設 `retry: false`（見 `test/renderWithProviders.tsx` 與各 auth 測試）
-    // ——測試環境永遠觀察不到重試。改動此處請直接讀上面這段理由，別指望跑測試會變紅。
+    // ⚠️ **本行的守門測試不在一般 harness 裡**：正式環境是 `main.tsx` 的 `new QueryClient()`
+    // （預設 retry 3），而所有測試 harness 都設 `retry: false`（見 `test/renderWithProviders.tsx`
+    // 與各 auth 測試）——沿用 harness 的測試**永遠觀察不到重試**（實測：刪掉本行，該檔 10 條全過）。
+    // 守它的是 `ResetPasswordPage.test.tsx` 的「死連結不得重試」，那條**自己傳一個未關重試的
+    // QueryClient**。⛔ 新增同類守門時要照做，否則又會寫出一行沒人驗得到的設定。
     retry: (failureCount, err) => toApiError(err).status >= 500 && failureCount < 2,
   })
 
-  const status = resolveStatus({ enabled, policy, error })
+  const status = resolveStatus({ policy, error })
   return { policy, hint: buildHint(status, policy), status }
 }
 
-function resolveStatus(args: {
-  enabled: boolean
-  policy: PasswordRules | undefined
-  error: unknown
-}): PasswordPolicyStatus {
+/**
+ * ⚠️ 查詢被 `enabled: false` 停用時（重設頁無 token）落在 `loading`——該頁在檢查 `status`
+ * 之前就先以 `token === ""` 顯示「連結無效」，故不另設狀態。
+ */
+function resolveStatus(args: { policy: PasswordRules | undefined; error: unknown }): PasswordPolicyStatus {
   if (args.policy !== undefined) return "ready"
   if (args.error === null || args.error === undefined) return "loading"
   // DP_PWD_005＝信中連結查無 / 已用 / 逾期（後端 `password_rules_for_token`）。
@@ -105,7 +110,7 @@ function fetchRules(source: PasswordPolicySource): Promise<PasswordRules> {
 }
 
 /**
- * 由密碼門檻組出提示字（純函式，供 hook 與測試共用）。
+ * 由密碼門檻組出提示字（純函式）。
  *
  * ⛔ **門檻未知時不要在這裡補預設值**（原為 `?? 8` / `?? 3`，#673 移除）：那會讓取不到門檻的
  * 畫面**自信地報出錯的數字**。未知該走 `PasswordPolicyStatus` 的 `unavailable`，由呼叫端
