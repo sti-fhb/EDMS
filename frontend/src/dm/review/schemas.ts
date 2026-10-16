@@ -64,8 +64,11 @@ export interface CompletedItem {
   /** 送審者姓名（#657）。取自 `DM_REVIEW.CREATED_USER`，該欄無 FK → 查無帳號時為 null。 */
   submitter_name: string | null
   /**
-   * 退回原因（#657）。**後端僅在「新增 / 新版本之退回」帶值**——`status === "REJECTED"`
-   * 且 `review_type !== "OBSOLETE"`；核准與所有廢止類一律 null。
+   * 退回原因（#657 / #679）。**後端僅在「退回」帶值**（含廢止退回），核准一律 null。
+   * 後端來源為 `DM_REVIEW.REJECT_REASON`（語意唯一＝審核者寫的退回原因）。
+   *
+   * ⚠️ #679 之前讀的是 `REASON`，該欄對 OBSOLETE 裝的是申請人的廢止申請原因，故當時
+   * 額外排除 `review_type === "OBSOLETE"`——代價是廢止退回的原因完全看不到。
    *
    * ⚠️ `DM_REVIEW.REASON` 一欄兩義：退回時是審核者寫的退回原因，`OBSOLETE` 送審時是
    * 申請人寫的**廢止申請原因**。前端不得自行依 status 再判一次或補值——單一事實來源在

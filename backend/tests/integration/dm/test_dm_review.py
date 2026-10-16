@@ -419,9 +419,17 @@ async def test_completed_lists_own_processed(db):
     await _svc.approve(db, review_id=r1.review_id, op=_op("rev1"))
     _, _, r2 = await _new_submission(db, "DM-SOP-000341")
     await _svc.reject(db, review_id=r2.review_id, reason="退", op=_op("rev1"))
+    # 他人處理的列：用來驗列層隔離（#679 起本清單帶「審核者寫的自由文字」，這條邊界更該釘住）
+    await _seed_user(db, "rev2", "另一位審核", email="rev2@e.com")
+    _, _, r3 = await _new_submission(db, "DM-SOP-000344", reviewer="rev2")
+    await _svc.reject(db, review_id=r3.review_id, reason="rev2 寫的，rev1 不該看到", op=_op("rev2"))
+
     page = await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20)
     statuses = {c.status for c in page["data"]}
     assert page["meta"]["total"] == 2 and statuses == {"APPROVED", "REJECTED"}
+    # 列層隔離：`approver_user_id == reviewer_id`。把那道過濾拿掉，total 會變 3 而本條變紅。
+    assert all(c.doc_id != "DM-SOP-000344" for c in page["data"]), "不得看到他人處理的列"
+    assert all(c.reason != "rev2 寫的，rev1 不該看到" for c in page["data"]), "更不得看到他人寫的退回原因"
 
 
 async def test_completed_keyword_search(db):
@@ -489,39 +497,123 @@ async def test_completed_廢止核准不帶廢止申請原因(db):
     assert row.submitter_name == "申請人乙"
 
 
-async def test_completed_廢止退回也不帶廢止申請原因(db):
-    """🔴 `status == REJECTED` **不足以**判定「`REASON` 是審核者寫的退回原因」。
+async def test_廢止退回帶出審核者的退回原因且不覆寫申請原因(db):
+    """#679：審核者對廢止申請寫的退回原因**先前無處可放**，申請人在任何畫面都看不到。
 
-    `_reject_obsolete` 的 docstring 明載：退回廢止申請時會**刻意把申請人的原始廢止原因寫回**
-    `review.reason`（那是 OBSOLETE 唯一存放申請理由之處，覆寫將永久失去可追溯性），而
-    **審核者的退回原因僅入稽核**（`after_value.reject_reason`）與 OBS_REJECT 通知::
+    `DM_REVIEW.REASON` 對 OBSOLETE 是**申請人寫的廢止申請原因**（`_reject_obsolete` 在
+    `reject()` 覆寫後刻意寫回，那是申請理由唯一的存放處），於是審核者的退回原因只進了
+    稽核與 `OBS_REJECT` 通知——而通知自 #554 起是 MSG、系統沒有站內訊息畫面。
 
-        obsolete_reason = review.reason          # 申請人寫的
-        await self._reviews.reject(..., reason=reason)   # 覆寫成審核者寫的
-        review.reason = obsolete_reason          # 還原
+    #679 新增 `REJECT_REASON` 欄位，`reject()` **不分 review_type 一律寫入**，語意唯一：
+    它永遠是審核者寫的退回原因。`REASON` 則回歸單一語意（OBSOLETE 的申請理由）。
 
-    ⇒ `review_type == OBSOLETE` 時，`REASON` **不論 status** 都是申請原因。
-    正確判準是 `status == REJECTED AND review_type != OBSOLETE`。
+    ⚠️ 兩個都要驗：新欄位有值 **且** 申請人的原始廢止原因沒有被覆寫——後者是
+    `_reject_obsolete` 那段「刻意寫回」的既有保證，不得因本次新增欄位而被改掉。
 
-    ⚠️ 本條是 `test_completed_廢止核准不帶廢止申請原因` 漏掉的另一半：那條只涵蓋
-    OBSOLETE + **APPROVED**，而只看 status 的實作在 APPROVED 那側會正確、REJECTED 這側會漏。
-    「兩個情境長得像」不代表同一個條件擋得住兩個。
+    ## 本情境的守門歷程（意圖一次都沒變，達成方式換過）
+
+    | 時點 | 斷言 | 當時的實作 |
+    |---|---|---|
+    | #657 | `row.reason is None` | 讀 `REASON`，而 OBSOLETE 的 `REASON` 是申請原因 ⇒ 只能整個不顯示 |
+    | #679（本條）| `== 審核者寫的` 且 `!= 申請人寫的` | 讀 `REJECT_REASON`，語意唯一 |
+
+    守的意圖始終是「**申請人的廢止申請原因不得出現在退回原因欄**」。#657 時達成它的唯一辦法
+    是整個不顯示；有了對的欄位之後，同一個意圖變成「顯示對的那個」。⛔ 若因斷言變紅就刪掉，
+    這個保護從此沒有測試。
+
+    （#679 合併了原本分成兩條的版本——另一條是本條的子集，setup 幾乎相同。）
     """
-    await _seed_user(db, "ed", "申請人丙", email="ed@e.com")
+    await _seed_user(db, "ed", "申請人丁", email="ed@e.com")
     await _seed_user(db, "rev1", "審核", email="rev1@e.com")
-    doc = await _doc(db, "DM-SOP-000661", status="PENDING_OBSOLETE", current_version_id=None)
-    v = await _add_version(db, "DM-SOP-000661", "1.0", status="PUBLISHED", published=utcnow())
+    doc = await _doc(db, "DM-SOP-000679", status="PENDING_OBSOLETE", current_version_id=None)
+    v = await _add_version(db, "DM-SOP-000679", "1.0", status="PUBLISHED", published=utcnow())
     doc.current_version_id = v.version_id
-    r = await _review(db, "DM-SOP-000661", v.version_id, review_type="OBSOLETE", reviewer="rev1")
+    r = await _review(db, "DM-SOP-000679", v.version_id, review_type="OBSOLETE", reviewer="rev1")
     r.reason = "此 SOP 已由新制取代"  # 申請人於發起廢止時填寫
     await db.flush()
-    await _svc.reject(db, review_id=r.review_id, reason="仍需沿用，暫不廢止", op=_op("rev1"))
+
+    await _svc.reject(db, review_id=r.review_id, reason="仍需沿用至年底，暫不廢止", op=_op("rev1"))
+
+    assert r.reject_reason == "仍需沿用至年底，暫不廢止", "審核者的退回原因要有自己的欄位"
+    assert r.reason == "此 SOP 已由新制取代", "申請人的廢止原因不得被覆寫（既有保證）"
 
     row = next(c for c in (await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20))["data"])
-    assert row.status == "REJECTED" and row.review_type == "OBSOLETE", "前提錨點：必須是廢止退回"
-    # 這一列的 DB 值確實是申請原因——證明本條不是在驗一個不存在的情境
-    assert r.reason == "此 SOP 已由新制取代"
-    assert row.reason is None, "廢止退回列的 REASON 是申請人寫的申請原因，不得當成退回原因帶出"
+    assert row.status == "REJECTED" and row.review_type == "OBSOLETE", "前提錨點"
+    assert row.reason == "仍需沿用至年底，暫不廢止", "DM02 已完成要顯示審核者的退回原因"
+    assert row.reason != "此 SOP 已由新制取代", "不得把申請人的廢止申請原因當成退回原因顯示"
+
+
+async def test_新增與新版本的退回原因改由新欄位帶出(db):
+    """`REJECT_REASON` 不分 review_type 一律寫入，故非廢止類也走同一條路。
+
+    ⚠️ 這條釘住「改讀新欄位後既有情境不退化」。沒有它的話，把讀取端改成只看
+    `reject_reason` 而忘了在 `reject()` 寫入，只有廢止那條測試會紅、這條情境會靜默變成「—」。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+    _, _, r = await _new_submission(db, "DM-SOP-000680")
+    await _svc.reject(db, review_id=r.review_id, reason="格式不符", op=_op("rev1"))
+
+    assert r.reject_reason == "格式不符"
+    row = next(c for c in (await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20))["data"])
+    assert row.reason == "格式不符"
+
+
+async def test_migration_之前的舊退回列仍看得到原因(db):
+    """🔴 #679 的回填守門：讀取端改讀 `REJECT_REASON` 後，**舊列不得變成「—」**。
+
+    ## 為什麼這條測試的 setup 看起來「不自然」
+
+    它直接造一列「只有 `REASON` 有值、`REJECT_REASON` 為 NULL」的退回列——那是
+    **migration 之前的資料長相**，正常流程（`reviews.reject()`）造不出來。
+
+    ⚠️ 這個情境在測試環境裡**結構性地不存在**：其餘測試不是走 `reject()`（必寫兩欄），
+    就是手動把 `reject_reason` 設好。沒有這一條，把 migration 的回填 UPDATE 整段刪掉，
+    全組測試照樣全綠——而正式環境上 DM02「已完成」的**全部歷史**退回紀錄會一次變「—」
+    （該清單沒有時間窗），且那些列的原因在 DP05 也查不到（一般退回的稽核不含 reason）。
+
+    ## 為什麼只回填非廢止
+
+    廢止列的 `REASON` 是**申請人**寫的申請理由，回填進來會被當成審核者的退回原因顯示
+    ——那是錯的資訊而非補齊。本條同時釘住這個排除。
+    """
+    await _seed_user(db, "ed", "撰寫", email="ed@e.com")
+    await _seed_user(db, "rev1", "審核", email="rev1@e.com")
+
+    # 舊的「新增」退回列：只有 REASON（migration 回填的目標）
+    _, _, old_new = await _new_submission(db, "DM-SOP-000690")
+    old_new.status = "REJECTED"
+    old_new.approver_user_id = "rev1"
+    old_new.complete_date = utcnow()
+    old_new.reason = "舊資料：版號重複"
+    old_new.reject_reason = None
+    # 舊的「廢止」退回列：REASON 是申請人寫的（不得被回填）
+    doc = await _doc(db, "DM-SOP-000691", status="PUBLISHED", current_version_id=None)
+    v = await _add_version(db, "DM-SOP-000691", "1.0", status="PUBLISHED", published=utcnow())
+    doc.current_version_id = v.version_id
+    old_obs = await _review(db, "DM-SOP-000691", v.version_id, review_type="OBSOLETE", reviewer="rev1")
+    old_obs.status = "REJECTED"
+    old_obs.approver_user_id = "rev1"
+    old_obs.complete_date = utcnow()
+    old_obs.reason = "舊資料：此 SOP 已由新制取代"
+    old_obs.reject_reason = None
+    await db.flush()
+
+    # 模擬 migration 的回填（與 `0d17180b7546` 的 UPDATE 同一條件）
+    await db.execute(
+        text(
+            'UPDATE "DM_REVIEW" SET "REJECT_REASON" = "REASON" '
+            'WHERE "STATUS" = \'REJECTED\' AND "REVIEW_TYPE" <> \'OBSOLETE\' AND "REASON" IS NOT NULL'
+        )
+    )
+    await db.flush()
+    await db.refresh(old_new)
+    await db.refresh(old_obs)
+
+    rows = {c.doc_id: c for c in (await _svc.list_completed(db, op=_op("rev1"), page=1, limit=20))["data"]}
+    assert rows["DM-SOP-000690"].reason == "舊資料：版號重複", "非廢止舊列回填後必須看得到原因"
+    assert old_obs.reject_reason is None, "廢止舊列不得回填（REASON 是申請人寫的）"
+    assert rows["DM-SOP-000691"].reason is None, "廢止舊列顯示「—」，不得把申請原因當退回原因"
 
 
 async def test_completed_查無送審者帳號時_submitter_name_為_None(db):

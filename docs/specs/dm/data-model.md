@@ -334,7 +334,8 @@ erDiagram
 | STATUS | 狀態 | VARCHAR(20) | Y | PENDING | PENDING / APPROVED / REJECTED / WITHDRAWN（已撤回）|
 | SUBMIT_DATE | 送審時間 | TIMESTAMP | Y | | 用於催辦停留天數計算 |
 | COMPLETE_DATE | 完成時間 | TIMESTAMP | N | | 核准 / 退回 / 撤回時間 |
-| REASON | 原因 | TEXT | N | | 退回原因 或 廢止原因 |
+| REASON | 原因 | TEXT | N | | **一欄兩義**：`OBSOLETE` → **申請人**寫的廢止申請原因（唯一存放處，退回時由 `_reject_obsolete` 寫回、不得覆寫）；`NEW` / `NEW_VERSION` → 審核者的退回原因（歷史欄位，#679 起新資料改讀 `REJECT_REASON`）|
+| REJECT_REASON | 退回原因 | TEXT | N | | **審核者**退回時填寫之原因，**語意唯一、不分 REVIEW_TYPE**（#679）。新增此欄是因為 `REASON` 對 `OBSOLETE` 已被申請理由佔用，審核者對廢止申請的退回原因先前無欄位可放（僅入稽核與 `OBS_REJECT` 通知，而該通知自 #554 起為 `MSG`、系統無站內訊息畫面）⇒ 申請人任何畫面皆看不到。#679 之前的既有列為 NULL（裁示不回填，舊列之原因仍可自 DP05 操作記錄查得）|
 | OBSOLETE_FILE_NAME | 廢止附件檔名 | VARCHAR(255) | N | | 僅廢止類（REVIEW_TYPE=OBSOLETE）之選填單檔；原始檔名 |
 | OBSOLETE_FILE_PATH | 廢止附件路徑 | VARCHAR(500) | N | | 檔案系統 / 物件儲存路徑（不存 BLOB）|
 | OBSOLETE_FILE_SIZE | 廢止附件大小 | BIGINT | N | | 位元組；上限比照文件上傳（`DP_PARAM` 之 `DM_FILE_MAX_MB`）|

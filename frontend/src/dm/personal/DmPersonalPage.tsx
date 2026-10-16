@@ -122,8 +122,19 @@ function ActivityTab() {
   )
 }
 
-// 兩視角表格共用欄寬（fixed layout），確保撰寫者 / 審核者兩表欄位上下對齊
-const ACTIVITY_COLS = ["34%", "10%", "14%", "16%", "16%", "10%"]
+/**
+ * 兩視角表格共用欄寬（fixed layout），確保撰寫者 / 審核者兩表欄位上下對齊。
+ *
+ * ⚠️ **數量必須等於表頭欄位數**，順序亦須一一對應：
+ * `文件名稱 / 類型 / 狀態 / 退回原因 / 對造人 / 時間 / 操作`
+ *
+ * #657 新增「退回原因」欄時（6→7 欄）漏了補這裡，第 7 欄「操作」因而分到寬度 0——
+ * 「撤回送審」與「前往簽核中心」兩顆鈕在正常畫面上看不到，表格還多出橫向捲動（#679）。
+ * 現已由 `DmPersonalPage.test.tsx` 的「colgroup 的欄寬數量必須等於表頭欄位數」守住。
+ *
+ * 「操作」留 12%（約 139px @1160px）：需容納「前往簽核中心」六個字不折行。
+ */
+const ACTIVITY_COLS = ["26%", "8%", "12%", "18%", "13%", "11%", "12%"]
 
 function ActivitySection({
   title,
@@ -218,8 +229,9 @@ function ActivityRow({
         <TableCell>
           <Chip size="small" color={label.tone} label={label.text} />
         </TableCell>
-        {/* #554：本欄是 DM_REVIEW.REASON 的站內讀取端——DOC_REJECT / OBS_REJECT 改站內後，
-            那封含原因的信不再寄出，不在此呈現的話該欄位就沒有任何讀取端。
+        {/* #554 / #679：本欄是審核者退回原因的站內讀取端——DOC_REJECT / OBS_REJECT 改站內後
+            那封含原因的信不再寄出，不在此呈現的話就沒有任何讀取端。
+            #679 起來源為 `DM_REVIEW.REJECT_REASON`（語意唯一），不再是 `REASON`。
             #657：原為狀態欄內的展開鈕 + 另起一列的 Collapse，改為正式欄位直接顯示全文。
             後端僅在 resolved + REJECTED 時給值，其餘為 null（送審事件的 REASON 在 OBSOLETE
             是「廢止申請原因」，語意不同、刻意不帶）。 */}

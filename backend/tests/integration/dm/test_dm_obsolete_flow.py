@@ -418,9 +418,17 @@ async def test_reject_obsolete_restores_published(db):
     # 事件。只比對 status 的話，resolved 那半整個壞掉（complete_date 沒寫、_TERMINAL 漏列）
     # 仍會通過——而被 Email 取代的正是「結果」這一半。
     act = await _psvc.list_activity(db, user_id="ed", roles=[DM_EDITOR])
-    assert any(
-        a.review_id == review_id and a.event_kind == "resolved" and a.status == "REJECTED" for a in act.author
-    ), "廢止退回後申請人應於我的文件動態看到此事件"
+    resolved = [a for a in act.author if a.review_id == review_id and a.event_kind == "resolved"]
+    assert len(resolved) == 1, "廢止退回後申請人應於我的文件動態看到此事件"  # 母體錨點
+    assert resolved[0].status == "REJECTED"
+    # #679：**走真實 `reject()` 的端到端覆蓋**——申請人看得到審核者寫的退回原因。
+    #
+    # 這條之所以重要：其餘相關測試都是直接造 `DmReview` 列（自己設 `reject_reason`），
+    # 驗不到「`reject()` 真的有寫入那一欄」。少了本條，把 `service._complete` 裡的寫入
+    # 整行刪掉，那些測試仍會全綠。
+    assert resolved[0].reason == "仍需沿用", "申請人要看得到審核者的退回原因（#679）"
+    # 申請人自己寫的廢止申請原因不得被當成退回原因（`_reject_obsolete` 會把它寫回 REASON）
+    assert review.reason != "仍需沿用", "REASON 應仍是申請人的廢止申請原因"
 
 
 # ── 廢止附件下載授權（SA 裁示 Q1=C）──────────────────────
