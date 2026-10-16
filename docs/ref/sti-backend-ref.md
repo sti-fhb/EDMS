@@ -35,6 +35,7 @@
 
 | Table | 模組 | 硬刪除路徑 | 理由 |
 |-------|------|-----------|------|
+| `ET_COURSE_CONTENT_STAGE` | ET | `course/stage_repository.clear`（套用成功後）<br>`course/stage_repository.discard`（教師按「取消」放棄）| 已發布課程的編輯暫存區（#631）。本表是**暫時性工作區**，一次編輯工作階段的生命週期只有兩個出口：按「更新」套用（內容在同一交易內整批複製進活表），或按「取消」放棄（從未進過活表）。兩者之後那些列都沒有保留價值——稽核軌跡落在活表與 `DP_AUDIT_LOG`。<br>🔴 **真正的理由不是「沒用」，是軟刪會讓一個判準失效**：教師自己刪章節也是 `DELETED = 1`（`delete_subtree`，**那條維持軟刪**），若工作階段結束也用軟刪，就分不出「這門課還有編輯工作階段開著嗎」。分不出來的後果是靜默的——教師把章節全刪光後，程式誤判成沒有暫存區而**從活表重新 seed**，剛刪掉的全部復活（2026-10-16 code review）。見 `has_stage` 的 docstring。<br>本表其餘路徑（教師的刪除、`load_tree`）仍照常過濾 `DELETED = 0`，故保留 `BaseModel` 而非改用 `BaseModelHardDelete`。<br>⚠️ `clear` **限定在套用時實際載入的那批 `STAGE_ID`**，不可用 `WHERE COURSE_ID = ?`——後者會連「`load_tree` 之後才寫進來的編輯」一起刪掉，那筆編輯從未被套用過。`discard` 則**刻意**是全課程範圍（教師要放棄的就是全部），且須先持有 `lock_course`。 |
 | `ET_PROGRESS_INTERVAL` | ET | `progress/repository.replace_intervals`（normalize 與累計列數超限時的就地壓縮）| 本表以「每段播放一列」記錄影片觀看區段，覆蓋率一律取**區段聯集**後計算。壓縮所刪除的是「**同一批資料的未壓縮表述**」——`[0,60]` 與 `[30,90]` 換成 `[0,90]`，資訊完全等價，不是使用者資料的作廢。留著軟刪除列會讓每次覆蓋率計算都要過濾一堆歷史雜訊（該路徑在每次暫停 / 跳轉都會執行），而那些列不帶任何 `DELETED=1` 才有的資訊。<br>本表其餘查詢仍照常過濾 `DELETED = 0`，故保留 `BaseModel` 而非改用 `BaseModelHardDelete`。<br>⚠️ **刪除範圍限定在 SELECT 快照讀到的 `INTERVAL_ID`**，不可用 `(USER_ID, VIDEO_ID)` 全量刪——後者會讓併發寫入的區段被掃掉而永久遺失（表現為學員的覆蓋率倒退、已完成的項目變回未完成）。 |
 
 ### 無 `DELETED` 但非硬刪除（`BaseModelNoDelete` / `AuditLogBaseModel`）

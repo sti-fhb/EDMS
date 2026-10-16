@@ -1711,6 +1711,8 @@ export const handlers = [
   http.post("/api/et/courses/:courseId/content/apply", ({ params }) =>
     HttpResponse.json({ course_id: Number(params.courseId), applied_count: 3 }),
   ),
+  // ET05「取消」：放棄尚未更新的編輯（#631）。活表一行都不會動。
+  http.delete("/api/et/courses/:courseId/content/stage", () => new HttpResponse(null, { status: 204 })),
   // ET05 關閉與再開課（US11 / #288）。`closed_at` 於再開課後**仍帶值**（FR-ET-US11-10
   // 保留供追溯），fixture 照實反映——若回 null，任何誤用「有沒有值」判斷關閉狀態的
   // 程式碼都會在測試裡剛好通過，而正式環境會錯。

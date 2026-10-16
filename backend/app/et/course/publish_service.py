@@ -298,6 +298,44 @@ class EtPublishService:
         await self._log(db, operator.user_id, course_id, f"更新課程內容（{len(nodes)} 項）{removed}")
         return ContentUpdateResult(course_id=course_id, applied_count=len(nodes))
 
+    async def discard_content(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
+        """放棄尚未更新的編輯——教師按「取消」時走這條（#631，2026-10-16 使用者裁示）。
+
+        ## 為什麼需要它
+
+        暫存模式把「編輯」與「生效」拆成兩個時點之後，編輯工作階段就有兩個出口：按
+        「更新」套用，或放棄。**原本只做了前者**——教師編到一半想整個丟掉、回到學員目前
+        看到的版本，沒有任何入口（2026-10-16 security review 亦獨立指出）。
+
+        ## 活表一行都不會動
+
+        本端點只刪暫存列。學員看到的內容在整個編輯期間從未改變過，所以「放棄」不需要
+        任何回滾——這正是暫存設計換來的性質。
+
+        ## 草稿不適用
+
+        草稿的章節與項目直接寫活表（沒有暫存表可清），按「取消」本來就不還原。回 409
+        而非靜默成功：前端若誤把草稿導到這裡，要看得見。
+
+        ⚠️ 取鎖後才刪：同時按下的「更新」可能正在套用，沒有鎖會把一半的內容送出去。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；409 `ET_COURSE_010` 草稿。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if course.status == COURSE_DRAFT:
+            raise AppError(
+                status_code=409,
+                detail="草稿課程的編輯直接生效，沒有可放棄的暫存內容",
+                error_code="ET_COURSE_010",
+            )
+        await self._stage.lock_course(db, course_id)
+        removed = await self._stage.discard(db, course_id)
+        if removed:
+            # 只記筆數：暫存列的內容從未對學員生效，記下來沒有稽核價值，且會把教師
+            # 編輯中的文字寫進稽核表。
+            await self._log(db, operator.user_id, course_id, f"放棄尚未更新的課程內容編輯（{removed} 項）")
+
     async def close(
         self, db: AsyncSession, course_id: int, req: CloseCourseReq, *, operator: OperatorInfo
     ) -> CourseStatusResult:
