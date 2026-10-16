@@ -59,8 +59,10 @@ from app.et.course.schemas import (
 )
 from app.et.course.stage_apply import apply_stage
 from app.et.course.stage_repository import EtCourseStageRepository
-from app.et.course.stage_rules import to_course_snapshot
+from app.et.course.stage_rules import ENTITY_CHAPTER, to_course_snapshot
+from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
+from app.et.notify.course_update import CourseUpdateMailer
 from app.et.notify.mailer import CourseInviteMailer
 from app.services import AuditLogService, ParamService
 
@@ -86,6 +88,8 @@ class EtPublishService:
         tag_invite: EtTagInviteRepository | None = None,
         invite_mailer: CourseInviteMailer | None = None,
         stage: EtCourseStageRepository | None = None,
+        enrollments: EtEnrollmentRepository | None = None,
+        course_update_mailer: CourseUpdateMailer | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._publish = publish_repo or EtPublishRepository()
@@ -94,6 +98,10 @@ class EtPublishService:
         self._tag_invite = tag_invite or EtTagInviteRepository()
         self._invite_mailer = invite_mailer or CourseInviteMailer()
         self._stage = stage or EtCourseStageRepository()
+        # #303 的通知從 `add_chapter` 移到「更新」當下（#631 PR 2a）——暫存模式下
+        # 在新增當下寄信，信裡那句「課程新增了章節」對學員是假的。
+        self._enrollments = enrollments or EtEnrollmentRepository()
+        self._course_update_mailer = course_update_mailer or CourseUpdateMailer()
 
     async def check(self, db: AsyncSession, course_id: int, *, actor_id: str) -> PublishCheckResult:
         """發布預檢：回傳缺漏清單，**不改變任何狀態**。
@@ -227,8 +235,45 @@ class EtPublishService:
                 },
             )
 
+        # 🔴 **新增的章節在套用前先記下來**（#303 的通知延到此刻，#631 PR 2a）。
+        #
+        # 原本 `add_chapter` 當下就寄 `COURSE_UPDATE`，但暫存模式下那封信的內容是假的
+        # ——信裡寫「課程新增了章節」，而學員此刻看不到任何變化。延到這裡才寄，信的
+        # 內容才成立。
+        #
+        # ⚠️ 必須在 `apply_stage` **之前**取：套用後 `source_id` 就被填上了，分不出
+        # 哪些是本次新增的。
+        new_chapters = [
+            str(n.payload.get("chapter_name") or "")
+            for n in nodes
+            if n.entity_type == ENTITY_CHAPTER and n.source_id is None
+        ]
+
         stats = await apply_stage(db, course=course, nodes=nodes, operator=operator)
         await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
+
+        # ⚠️ 完課狀態的「回退為進行中」**不在此寫入任何欄位**（#303 SA Q1 裁示 A，
+        # 原文隨 `add_chapter` 的通知一起搬來）：`ET_ENROLLMENT.COMPLETION_STATUS` 只在
+        # 加入課程時被寫過一次且**從未被讀**——所有讀取端自 #284 起一律以
+        # `derive_completion_status(done, total)` 即時導出。新增項目使總數變大，狀態
+        # 自動從「已完成」回到「進行中」；再寫一份欄位只會多一個會與導出值分歧的事實
+        # 來源，而分歧的表現（清單說已完成、追蹤說進行中）沒有任何地方會察覺。
+        #
+        # ⭐ 這也是為什麼「完課回退延到更新時發生」不需要任何程式碼——它是**算出來的**，
+        # 項目一進活表就自動成立。
+        #
+        # 一章一封，與原本「每次新增各寄一封」相同——只有**時機**改變。
+        # ⛔ 不改成彙整成一封：那要改範本（`new_chapter_name` 是單數佔位），屬另一件事。
+        # 📌 教師一次更新加了多章會收到多封，這是已知且接受的——若日後覺得吵，
+        # 做法是改範本與 params，不是在這裡只寄第一封。
+        #
+        # 寄信失敗不回滾套用：`EtNotifier` 於唯一出口吞掉 `AppError`（見其 docstring）。
+        if new_chapters:
+            user_ids = await self._enrollments.enrolled_user_ids(db, course_id)
+            for name in new_chapters:
+                await self._course_update_mailer.send_course_update(
+                    db, course=course, new_chapter_name=name, user_ids=user_ids
+                )
         # 🔴 稽核描述要帶**刪除統計**，不能只有節點數。
         #
         # 這支端點沒有 request body，而它會經由 cascade 軟刪**學員的進度與作答紀錄**。
