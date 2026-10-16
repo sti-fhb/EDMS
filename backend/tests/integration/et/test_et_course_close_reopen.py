@@ -33,7 +33,7 @@ from app.et.constants import (
     ROLE_STUDENT,
     ROLE_TEACHER,
 )
-from app.et.course.models import EtCourse
+from app.et.course.models import EtChapter, EtCourse
 from app.et.roles.models import EtUserRole
 from tests.integration.et._tag_pairs import all_units_id, role_pair
 
@@ -592,10 +592,24 @@ class TestReopen:
 
 
 class TestReopenRerunsPublishChecks:
-    """🔴 SA Q2 裁示 A：再開課重跑發布六項檢核。
+    """🔴 #288 SA Q2 裁示 A：再開課重跑發布檢核。不重跑等於把發布檢核變成一次性的。
 
-    這組測試需要「真的把課程弄壞」才驗得出來——關閉期間教師端可編輯（AC 6），所以
-    「刪光章節再開課」是使用者做得到的操作。不重跑檢核等於把發布檢核變成一次性的。
+    ## ⚠️ #631 之後「怎麼把課程弄壞」換了一條路
+
+    本組原本的理由是「關閉期間教師端可編輯（AC 6），所以**刪光章節**是使用者做得到的
+    操作」。**那句話現在不成立**：#631 把已發布 / 已關閉課程的**內容**編輯全部改走暫存區，
+    刪章節在按下「更新」之前碰不到活表，而「更新」自己會跑同一套檢核、先把它擋下來。
+
+    內容這條路已經封死，但**基本資料沒有**：起訖時間與受訓對象走右下角的「儲存」、
+    不經暫存區，所以「關閉期間把受訓對象清空」仍是使用者做得到、且會讓活表不合格的操作。
+    再開課重跑檢核因此**仍然必要**，只是它要擋的情境換了一種。
+
+    因此本組有**兩條，缺一不可**：
+
+    | 測試 | 怎麼把課程弄壞 | 補的是什麼 |
+    |---|---|---|
+    | `..刪光章節..` | 直接軟刪 DB 的章節列 | 章節規則在再開課路徑上仍有覆蓋（該情境已無使用者可達的路徑）|
+    | `..清空受訓對象..` | 全程走真實端點 | 證明**真實操作**會被接住，而不只是測試捷徑造的壞 |
     """
 
     async def test_關閉期間刪光章節後再開課被擋(self, client, db) -> None:
@@ -604,9 +618,15 @@ class TestReopenRerunsPublishChecks:
         closed = await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
-        # 關閉期間可編輯（AC 6）——刪掉唯一的章節，課程因此不再滿足「至少 1 章節 + 1 教材」
-        deleted = await client.delete(f"/api/et/chapters/{ctx['chapter_id']}", headers=_bearer(uid))
-        assert deleted.status_code == 204, deleted.text
+        # 直接把活表弄壞：軟刪唯一的章節，課程因此不再滿足「至少 1 章節 + 1 教材」。
+        #
+        # ⚠️ **刻意直接寫 DB，不走刪除端點、也不用 `editing_live`**：
+        # - 走端點：#631 之後刪除只進暫存區，活表一行都不會少 ⇒ 本條變成「沒弄壞也沒
+        #   擋下」的假綠
+        # - 用 `editing_live`：它會動 `STATUS`，而本條**最後一行正是在驗 STATUS 沒被動過**
+        #   ——弄壞的手段不可以碰被驗的對象
+        await db.execute(update(EtChapter).where(EtChapter.chapter_id == ctx["chapter_id"]).values(deleted=1))
+        await db.flush()
 
         r = await client.post(
             f"{_COURSES}/{ctx['course_id']}/reopen",
@@ -624,6 +644,61 @@ class TestReopenRerunsPublishChecks:
         codes = {b["code"] for b in r.json()["blockers"]}
         assert "NO_CHAPTER" in codes
         assert (await _course_row(db, ctx["course_id"])).status == COURSE_CLOSED, "被擋下時不得改變狀態"
+
+    async def test_關閉期間清空受訓對象後再開課被擋(self, client, db) -> None:
+        """#631 之後**仍由使用者端可達**的弄壞路徑，全程走真實端點。
+
+        上一條用直接寫 DB 造壞活表，因為它要觸發的 `NO_CHAPTER` 已經沒有使用者可達的路徑
+        了（內容編輯一律進暫存區）。本條補的正是那一半：**受訓對象屬基本資料、走
+        `PUT /courses/{id}` 直接生效、不經暫存區**，所以「關閉 → 清空受訓對象 → 再開課」
+        是教師真的做得出來的順序。
+
+        ⚠️ 清空不是繞過 `ensure_tag_change_allowed`：那條規則**刻意允許**已關閉課程移除
+        配對（#586 裁示 A），其 docstring 也寫明「教師可藉關閉 → 移除 → 再開課繞過本限制」。
+        本條驗的是這條路徑**會被再開課的檢核接住**。
+
+        ⛔ 兩條都要留：少了上一條，章節規則在再開課路徑上沒有任何覆蓋；少了本條，整組
+        測試就只證明得了「用測試捷徑弄壞會被擋」，而證明不了任何真實操作會被擋。
+        """
+        uid = await _user(db, "t_rc03")
+        ctx = await _published_course(client, db, uid)
+        closed = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
+        )
+        assert closed.status_code == 200, closed.text
+
+        cleared = await client.put(
+            f"{_COURSES}/{ctx['course_id']}",
+            json={
+                "course_name": "關閉測試課程",
+                # ⚠️ 訖止照原值送回：非草稿不得把 `OPEN_END_AT` 清空（#301
+                # `ensure_schedule_not_cleared`），全量覆寫少送一個欄位就會被擋在這裡，
+                # 本條就驗不到受訓對象那段。
+                "open_start_at": "2026-09-01T00:00:00Z",
+                "open_end_at": "2027-09-30T00:00:00Z",
+                "require_approval": False,
+                "audiences": [],
+                "version": closed.json()["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert cleared.status_code == 204, cleared.text
+
+        r = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/reopen",
+            json={
+                "course_name": "x",
+                "open_start_at": _future(1),
+                "open_end_at": _future(400),
+                # PUT 會把版本推進一號，不可沿用 `closed` 的那個（否則變成在驗樂觀鎖）
+                "version": (await _course_row(db, ctx["course_id"])).version,
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_PUBLISH_001"
+        assert "NO_TAG" in {b["code"] for b in r.json()["blockers"]}
 
     async def test_檢核通過則正常再開課(self, client, db) -> None:
         """對照組：沒弄壞任何東西時，重跑檢核不會誤擋。"""

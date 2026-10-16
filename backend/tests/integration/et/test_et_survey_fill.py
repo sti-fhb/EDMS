@@ -34,6 +34,7 @@ from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
 from app.et.survey.models import EtSurvey, EtSurveyResponseD, EtSurveyResponseM
+from tests.integration.et._live_edit import editing_live
 
 pytestmark = pytest.mark.integration
 
@@ -92,17 +93,24 @@ async def _course(client, db, teacher: str, *, status: str = COURSE_PUBLISHED) -
     return course_id
 
 
-async def _item(client, teacher: str, course_id: int, *, name: str = "第一章") -> int:
-    chapter = await client.post(
-        f"{_COURSES}/{course_id}/chapters", json={"chapter_name": name}, headers=_bearer(teacher)
-    )
-    assert chapter.status_code == 201, chapter.text
-    item = await client.post(
-        f"/api/et/chapters/{chapter.json()['chapter_id']}/items",
-        json={"item_type": ITEM_MATERIAL, "title": "教材"},
-        headers=_bearer(teacher),
-    )
-    assert item.status_code == 201, item.text
+async def _item(client, db, teacher: str, course_id: int, *, name: str = "第一章") -> int:
+    """加一章 + 一個教材項目，回 `item_id`。
+
+    ⚠️ 走 `editing_live`（#631）：`_course` 造出的課程刻意不備妥標籤 / 訖止時間 / 配分，
+    過不了「更新」要重跑的發布檢核。本檔要驗的是問卷填寫，不是內容的生效流程——
+    與 `_course` 刻意不走發布 API 是同一個理由。
+    """
+    async with editing_live(db, course_id):
+        chapter = await client.post(
+            f"{_COURSES}/{course_id}/chapters", json={"chapter_name": name}, headers=_bearer(teacher)
+        )
+        assert chapter.status_code == 201, chapter.text
+        item = await client.post(
+            f"/api/et/chapters/{chapter.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": "教材"},
+            headers=_bearer(teacher),
+        )
+        assert item.status_code == 201, item.text
     return item.json()["item_id"]
 
 
@@ -177,7 +185,7 @@ async def _ready(client, db, tag: str, *, with_text: bool = True, completed: boo
     teacher = await _user(db, f"t_{tag}", ROLE_TEACHER)
     student = await _user(db, f"s_{tag}")
     course_id = await _course(client, db, teacher)
-    item_id = await _item(client, teacher, course_id)
+    item_id = await _item(client, db, teacher, course_id)
     survey = await _survey(client, teacher, course_id, with_text=with_text)
     await _enroll(db, student, course_id)
     if completed:
@@ -225,7 +233,7 @@ class TestEntryState:
         teacher = await _user(db, "t_ent03", ROLE_TEACHER)
         student = await _user(db, "s_ent03")
         course_id = await _course(client, db, teacher)
-        item_id = await _item(client, teacher, course_id)
+        item_id = await _item(client, db, teacher, course_id)
         await _enroll(db, student, course_id)
         await _complete(db, student, course_id, item_id)
 
@@ -622,13 +630,19 @@ class TestReadBack:
         assert master is not None
 
     async def test_完課回退後仍為已送出且不可重填(self, client, db) -> None:
-        """AC 13 / FR-ET-US13-08：教師新增章節致完課回退，已填問卷**不失效**。"""
+        """AC 13 / FR-ET-US13-08：教師新增章節致完課回退，已填問卷**不失效**。
+
+        ⚠️ #631 之後「教師新增章節」與「學員看到」不再是同一個時點——新章節要等教師按
+        「更新」才進活表。本條驗的是**回退之後**的問卷狀態，與回退發生在哪一刻無關，
+        故以 `editing_live` 直接造出回退後的活表（見 `_item`）。
+        「回退只在更新時發生」另由 `test_et_course_stage.py` 守著。
+        """
         ctx = await _ready(client, db, "rdb04")
         payload = {"answers": _single_answers(ctx["questions"])}
         assert (
             await client.post(_submit_url(ctx["course_id"]), json=payload, headers=_bearer(ctx["student"]))
         ).status_code == 201
-        await _item(client, ctx["teacher"], ctx["course_id"], name="第二章")
+        await _item(client, db, ctx["teacher"], ctx["course_id"], name="第二章")
 
         form = (await client.get(_form_url(ctx["course_id"]), headers=_bearer(ctx["student"]))).json()
         again = await client.post(_submit_url(ctx["course_id"]), json=payload, headers=_bearer(ctx["student"]))
