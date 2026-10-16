@@ -35,8 +35,8 @@ export function ResetPasswordPage() {
   const [apiError, setApiError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）
-  const { policy, hint } = usePasswordPolicy({ kind: "reset", token })
+  // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）；`status` 讓失效連結於**點連結時**即可判定（#673）
+  const { policy, hint, status } = usePasswordPolicy({ kind: "reset", token })
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -74,7 +74,13 @@ export function ResetPasswordPage() {
             </Link>
           </Stack>
         ) : token === "" ? (
+          // 網址根本沒帶 token——與「連結失效」是不同情況，訊息分開
           <Alert severity="error">連結無效，請重新申請忘記密碼</Alert>
+        ) : status === "token-invalid" ? (
+          // 連結查無 / 已用 / 逾期（#673）。spec_us3 AC 3 要求於**點連結時**即拒絕——
+          // 原本會照常渲染表單，使用者得照著錯的門檻打完一組密碼、按下送出才被擋。
+          // ⚠️ 只有 `token-invalid` 走這裡；`unavailable`（限流 / 連線異常）**不得**說連結失效。
+          <Alert severity="error">連結已失效，請重新申請</Alert>
         ) : (
           <form onSubmit={handleSubmit}>
             <Stack spacing={2}>
