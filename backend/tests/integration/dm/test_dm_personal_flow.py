@@ -642,7 +642,10 @@ async def test_rejected_event_carries_reason(db):
     await _doc(db, "DM-SOP-000560", status="DRAFT")
     v = await _version(db, "DM-SOP-000560", "1.0", status="DRAFT")
     r = await _review(db, "DM-SOP-000560", v.version_id, review_type="NEW", status="REJECTED")
+    # #679 起讀取端改用 `REJECT_REASON`（語意唯一＝審核者寫的）。本測試直接造列而不走
+    # `reviews.reject()`，故兩欄都要設——`REASON` 保留是為了同時守住「舊欄位不再是讀取來源」。
     r.reason = "版本號格式不符，請改為 1.0 並補上變更摘要"
+    r.reject_reason = "版本號格式不符，請改為 1.0 並補上變更摘要"
     r.complete_date = utcnow()
     await db.flush()
 

@@ -20,6 +20,7 @@ from app.services import AccountQueryService
 
 _PENDING = "PENDING"
 _WITHDRAWN = "WITHDRAWN"
+_REJECTED = "REJECTED"
 
 
 class ReviewService:
@@ -141,6 +142,10 @@ class ReviewService:
         review.complete_date = utcnow()
         if reason is not None:
             review.reason = reason
+            # #679：`REJECT_REASON` **不分 review_type 一律寫入**，語意唯一＝審核者寫的原因。
+            # `REASON` 對 OBSOLETE 會被 `_reject_obsolete` 寫回申請理由，所以它不能當讀取來源。
+            if status == _REJECTED:
+                review.reject_reason = reason
         review.updated_user = approver
         review.updated_date = utcnow()
         await db.flush()

@@ -254,20 +254,16 @@ class ReviewCenterService:
                 version_no=r.version_no,
                 complete_date=r.complete_date,
                 submitter_name=r.submitter_name,
-                # #657：`REASON` 一欄兩義，**兩個條件都要**才濾得乾淨。
+                # #679：改讀 `REJECT_REASON`——該欄**語意唯一**（審核者寫的退回原因，不分
+                # review_type），故判準回到單純的「是不是退回」。
                 #
-                #   status != REJECTED        → 核准列的 REASON 可能殘留申請原因
-                #   review_type == OBSOLETE   → 連「退回」列也是申請原因（見下）
+                # #657 時這裡是 `r.reason if status == REJECTED and review_type != OBSOLETE`：
+                # 因為 `REASON` 一欄兩義，對 OBSOLETE 裝的是申請人的廢止申請原因，連退回列
+                # 也是。那個排除是對的，但代價是**廢止退回的原因完全看不到**（只在稽核裡）。
+                # #679 給審核者的退回原因自己的欄位，兩個問題一起消失。
                 #
-                # ⚠️ 第二個條件是 review 抓出來的，我原本只寫第一個：`_reject_obsolete` 在
-                # 呼叫 `reject()`（會覆寫 REASON）之後**刻意把申請人的廢止申請原因寫回**，
-                # 因為那是 OBSOLETE 唯一存放申請理由之處；審核者對廢止申請寫的退回原因**只進
-                # 稽核**（`after_value.reject_reason`）與 OBS_REJECT 通知，不在 REASON 裡。
-                # ⇒ `review_type == OBSOLETE` 時，REASON **不論 status** 都是申請原因。
-                #
-                # 故廢止退回列此欄留空（前端顯示「—」）。要顯示審核者的退回原因得另從稽核取，
-                # 那是獨立的產品決策，不在 #657 範圍。
-                reason=r.reason if r.status == _REJECTED and r.review_type != _OBSOLETE else None,
+                # 既有列的 `REJECT_REASON` 為 NULL（裁示不回填），自然顯示「—」。
+                reason=r.reject_reason if r.status == _REJECTED else None,
             )
             for r in paged["data"]
         ]

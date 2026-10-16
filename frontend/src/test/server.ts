@@ -670,6 +670,21 @@ export const handlers = [
           party_unreachable: null,
           reason: "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程",
         },
+        // #679：廢止申請被退回——`reason` 是**審核者**寫的退回原因（來自新的 `REJECT_REASON`），
+        // 不是申請人的廢止申請原因。#679 之前這一列恆為 null、申請人任何畫面都看不到。
+        {
+          review_id: 805,
+          doc_id: "DM-SOP-000013",
+          doc_name: "申請廢止被退回的文件 E",
+          review_type: "OBSOLETE",
+          status: "REJECTED",
+          event_kind: "resolved",
+          event_time: "2026-08-23T09:00:00Z",
+          is_overdue: false,
+          party_name: "王審核",
+          party_unreachable: null,
+          reason: "仍需沿用至年底，暫不廢止",
+        },
         {
           review_id: 803,
           doc_id: "DM-SOP-000012",

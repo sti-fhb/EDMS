@@ -45,7 +45,16 @@ class DmReview(BaseModel):
     status: Mapped[str] = mapped_column("STATUS", String(20), nullable=False, default="PENDING")
     submit_date: Mapped[datetime] = mapped_column("SUBMIT_DATE", DateTime(timezone=True), nullable=False)
     complete_date: Mapped[Optional[datetime]] = mapped_column("COMPLETE_DATE", DateTime(timezone=True), nullable=True)
+    #: OBSOLETE：**申請人**寫的廢止申請原因（`_reject_obsolete` 退回時會寫回，勿覆寫）；
+    #: NEW / NEW_VERSION：審核者的退回原因（歷史欄位，新資料改讀 `reject_reason`）。
     reason: Mapped[Optional[str]] = mapped_column("REASON", Text, nullable=True)
+    #: **審核者**退回時填寫的原因（#679）。語意唯一、不分 `review_type`。
+    #:
+    #: 新增此欄是因為 `REASON` 一欄兩義：對 OBSOLETE 它裝的是申請人的廢止申請原因（那是唯一
+    #: 存放處），於是審核者對廢止申請的退回原因先前無處可放，只進稽核與 OBS_REJECT 通知——
+    #: 而該通知自 #554 起是 MSG，系統沒有站內訊息畫面 ⇒ 申請人任何地方都看不到。
+    #: 既有列為 NULL（#679 裁示不回填），畫面顯示「—」。
+    reject_reason: Mapped[Optional[str]] = mapped_column("REJECT_REASON", Text, nullable=True)
     obsolete_file_name: Mapped[Optional[str]] = mapped_column("OBSOLETE_FILE_NAME", String(255), nullable=True)
     obsolete_file_path: Mapped[Optional[str]] = mapped_column("OBSOLETE_FILE_PATH", String(500), nullable=True)
     obsolete_file_size: Mapped[Optional[int]] = mapped_column("OBSOLETE_FILE_SIZE", BigInteger, nullable=True)

@@ -168,7 +168,7 @@ class ReviewCenterRepository:
                 DmReview.review_type,
                 DmReview.status,
                 DmReview.complete_date,
-                DmReview.reason,
+                DmReview.reject_reason,  # #679：審核者寫的退回原因（語意唯一，取代原本讀 REASON）
                 DmDocument.doc_name,
                 DmDocVersion.version_no,
                 submitter.user_name.label("submitter_name"),

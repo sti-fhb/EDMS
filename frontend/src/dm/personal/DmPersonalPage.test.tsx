@@ -194,6 +194,38 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(screen.queryByRole("button", { name: "收合退回原因" })).not.toBeInTheDocument()
   })
 
+  it("廢止申請被退回時顯示審核者的退回原因（#679）", async () => {
+    // #679 之前：`DM_REVIEW.REASON` 對 OBSOLETE 裝的是**申請人**寫的廢止申請原因，
+    // 審核者的退回原因只進稽核與 OBS_REJECT 通知（而該通知自 #554 起是 MSG、
+    // 系統沒有站內訊息畫面）⇒ 申請人在任何畫面都看不到自己為什麼被退回。
+    renderWithProviders(<DmPersonalPage />)
+
+    // 正向錨點：該列有渲染（否則下方斷言恆真）
+    expect(await screen.findByText("申請廢止被退回的文件 E")).toBeInTheDocument()
+    expect(screen.getByText("仍需沿用至年底，暫不廢止")).toBeInTheDocument()
+  })
+
+  it("colgroup 的欄寬數量必須等於表頭欄位數（#679 防重犯）", async () => {
+    // 🔴 這條守的是 #657 造成的回歸：當時新增「退回原因」欄（6→7 欄），但 `ACTIVITY_COLS`
+    // 仍只有 6 個值，第 7 欄「操作」分到的寬度為 0 ⇒ 撰寫者的「撤回送審」與審核者的
+    // 「前往簽核中心」在正常畫面上看不到，使用者無從得知這兩個操作存在。
+    //
+    // ⚠️ 不驗「實際像素寬」：jsdom 不做排版，`offsetWidth` 一律是 0，驗了等於恆真。
+    // 改驗**結構不變量**——`<col>` 數與 `<th>` 數必須相等。加欄時忘了補寬度就會紅，
+    // 而那正是 #657 當時沒有任何東西在對帳的那一點。
+    const { container } = renderWithProviders(<DmPersonalPage />)
+    await screen.findByText("待審文件 A")
+
+    const tables = container.querySelectorAll("table")
+    expect(tables.length).toBeGreaterThan(0) // 正向錨點：表格有渲染出來
+    tables.forEach((table, i) => {
+      const cols = table.querySelectorAll("colgroup col").length
+      const ths = table.querySelectorAll("thead th").length
+      expect(ths).toBeGreaterThan(0)
+      expect(cols, `第 ${i + 1} 個表格：colgroup ${cols} 個、表頭 ${ths} 欄，數量不符`).toBe(ths)
+    })
+  })
+
   it("草稿匣頁籤只對編輯者顯示（#657；spec_us9 FR-001）", async () => {
     // 建草稿的端點全掛 `_ensure_editor`，純審核者不可能有草稿 → 那個頁籤對他永遠是空的。
     server.use(http.get("/api/dm/personal/access", () => HttpResponse.json({ can_access: true, can_draft: false })))
@@ -235,7 +267,10 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     // ⚠️ 這兩列的 status 同樣是 REJECTED——只看 status 不看 event_kind 的話，
     // 它們會被誤判成該顯示原因（後端 _build_events 正是以 event_kind 分流）。
     expect(screen.getAllByText("送審")).toHaveLength(2)
-    expect(screen.getAllByText("已退回")).toHaveLength(2)
+    // 3 ＝ 被退回文件 B 的撰寫者 / 審核者各一 + #679 新增的廢止退回列（撰寫者視角）。
+    // ⚠️ 這個數字綁 fixture：動 `server.ts` 的 activity 列時要一起看，別只把它改成「跑出來的那個數」
+    //——要先確認多出來的那列**該不該**存在。
+    expect(screen.getAllByText("已退回")).toHaveLength(3)
     // 4 列 REJECTED 中只有 2 列（resolved）帶原因。
     //
     // ⚠️ 本條**守不住**「只看 status 不看 event_kind」那個缺陷：前端只是忠實渲染後端給的
