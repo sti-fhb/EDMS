@@ -83,7 +83,9 @@ function ActivityTab() {
   const withdrawMut = useMutation({
     mutationFn: (reviewId: number) => personalApi.withdraw(reviewId),
     onSuccess: () => {
-      message.success("已撤回送審，已通知原指派審核者") // DM-MSG-DM04-005
+      // ⛔ 不宣稱通知（#677）：`SUBMIT_WITHDRAWN` 自 seed 起 CHANNEL 即為 MSG（只站內、不寄信）；
+      // 原指派審核者改由 DM02 簽核中心看到該項目自待處理清單消失。
+      message.success("已撤回送審") // DM-MSG-DM04-005
       qc.invalidateQueries({ queryKey: ["dm-personal"] })
     },
     onError: (e) => message.error(toApiError(e).errorMessage),

@@ -230,7 +230,7 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
 
     // 不出現 DM-MSG-DM08-008 的可見對象錯誤，直接送出成功
-    expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
+    expect(await screen.findByText("已送交簽核")).toBeInTheDocument()
     expect(screen.queryByText("請至少指定 1 組可見對象")).not.toBeInTheDocument()
   }, 20000)
 
@@ -240,7 +240,7 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     await screen.findByText("新增文件")
     await fillNewForm(user, { withAudience: true })
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
-    expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
+    expect(await screen.findByText("已送交簽核")).toBeInTheDocument()
     expect(navigateSpy).toHaveBeenCalledWith("/dm/library") // 新增模式送出後回文件庫（草稿/送審中不在詳細頁）
   }, 20000)
 
@@ -273,7 +273,7 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     await user.click(screen.getByRole("combobox", { name: /指定審核者/ }))
     await user.click(await screen.findByRole("option", { name: "李審核" }))
     await user.click(screen.getByRole("button", { name: "送交簽核" }))
-    expect(await screen.findByText("已送交簽核，已通知指定審核者")).toBeInTheDocument()
+    expect(await screen.findByText("已送交簽核")).toBeInTheDocument()
     expect(createCalls).toBe(1) // 關鍵：改審核者不清草稿快取、不重複建立文件
   }, 20000)
 

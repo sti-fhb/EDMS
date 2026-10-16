@@ -41,7 +41,7 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     await user.click(await screen.findByRole("button", { name: "撤回送審" }))
     expect(await screen.findByText("確定撤回送審？")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認撤回" }))
-    expect(await screen.findByText("已撤回送審，已通知原指派審核者")).toBeInTheDocument()
+    expect(await screen.findByText("已撤回送審")).toBeInTheDocument()
   })
 
   it("草稿匣：三類標記 + 繼續編輯 / 刪除；已廢止孤兒草稿仍顯示但續編灰化", async () => {

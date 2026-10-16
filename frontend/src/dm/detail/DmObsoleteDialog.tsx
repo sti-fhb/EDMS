@@ -77,7 +77,9 @@ export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: P
     setSubmitting(true)
     try {
       await detailApi.initiateObsolete(docId, { reason: reason.trim(), reviewer_id: reviewerId, file })
-      message.success("已送出廢止申請，已通知指定審核者") // DM-MSG-DM07-013
+      // ⛔ 不宣稱通知（#677）：`OBS_SUBMIT` 的 CHANNEL 已由 BOTH 改為 MSG（#554），不寄信；
+      // 審核者改由 DM02 簽核中心的待處理清單看到。
+      message.success("已送出廢止申請") // DM-MSG-DM07-013
       reset()
       onSuccess()
       onClose()

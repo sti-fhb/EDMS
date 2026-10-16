@@ -384,7 +384,9 @@ export function DmEditorPage() {
       const ids = await persistDraft()
       await editorApi.submit(ids.doc_id, { version_id: ids.version_id, assigned_reviewer: form.reviewer_id })
       invalidateAfterWrite()
-      message.success("已送交簽核，已通知指定審核者") // DM-MSG-DM08-006
+      // ⛔ 不宣稱通知（#677）：`DOC_SUBMIT` 的 CHANNEL 已由 BOTH 改為 MSG（#554），不寄信；
+      // 審核者改由 DM02 簽核中心的待處理清單看到。
+      message.success("已送交簽核") // DM-MSG-DM08-006
       setDirty(false)
       go(destAfter())
     } catch (e) {
