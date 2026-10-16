@@ -10,6 +10,7 @@ import type {
   CourseDetail,
   CoursePayload,
   CourseStatusResult,
+  ContentUpdateResult,
   OwnerFilterParams,
   OwnerOption,
   ReopenPayload,
@@ -124,4 +125,16 @@ export const coursesApi = {
     return data
   },
 
+  /**
+   * 「更新」——把已發布課程的暫存編輯整批生效給學員（#631）。
+   *
+   * 跑**與發布完全相同**的十項檢核；不通過回 422 `ET_PUBLISH_001` + `blockers`
+   * （與 `publish` / `reopen` 同形狀，前端沿用 #558 的缺漏清單與紅框）。
+   *
+   * ⚠️ **無 request body**：要生效的內容在暫存區，不由前端重送。
+   */
+  applyContent: async (courseId: number): Promise<ContentUpdateResult> => {
+    const { data } = await http.post<ContentUpdateResult>(`/et/courses/${courseId}/content/apply`)
+    return data
+  },
 }

@@ -1570,6 +1570,9 @@ export const handlers = [
         { chapter_id: 11, chapter_name: "第一章", sort_order: 1, version: 0, items: [] },
         { chapter_id: 12, chapter_name: "第二章", sort_order: 2, version: 0, items: [] },
       ],
+      // 後端恆回此欄位（#631）；草稿恆為 false。同 `items`，少了它會讓「無暫存變更」
+      // 這條路徑在測試裡靠 `?? false` 兜底而非靠資料，改壞了也看不出來。
+      has_pending_changes: false,
     }),
   ),
   // ET01 課程清單（US7 / #299）
@@ -1703,6 +1706,10 @@ export const handlers = [
       invitation_code: "01234567",
       version: 1,
     }),
+  ),
+  // ET05「更新」：把暫存的內容編輯整批生效給學員（#631）。**無 request body**。
+  http.post("/api/et/courses/:courseId/content/apply", ({ params }) =>
+    HttpResponse.json({ course_id: Number(params.courseId), applied_count: 3 }),
   ),
   // ET05 關閉與再開課（US11 / #288）。`closed_at` 於再開課後**仍帶值**（FR-ET-US11-10
   // 保留供追溯），fixture 照實反映——若回 null，任何誤用「有沒有值」判斷關閉狀態的

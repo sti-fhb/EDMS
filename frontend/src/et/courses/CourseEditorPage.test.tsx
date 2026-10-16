@@ -26,6 +26,10 @@ vi.mock("react-router-dom", async (orig) => {
     useNavigate: () => navigateSpy,
     useParams: () => paramsRef.current,
     useLocation: () => locationRef.current,
+    // 離開攔截（#631）需要 data router，`renderWithProviders` 內建的是 MemoryRouter
+    // ——真的 `useBlocker` 在此會拋錯。以「永不攔截」取代，站內離開的攔截屬 e2e 行為
+    //（比照 DM `DmEditorPage.test.tsx` 與 `QuizAnswerPage.test.tsx`）。
+    useBlocker: () => ({ state: "unblocked", proceed: () => {}, reset: () => {} }),
   }
 })
 
@@ -1218,8 +1222,15 @@ describe("ET05 課程編輯頁", () => {
 
 // ── ET05 關閉與再開課（US11 / #288）──────────────────────────────────────────
 
-/** 以指定狀態與擁有權覆蓋課程詳細——關閉 / 再開課按鈕全由這兩者決定。 */
-function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {}) {
+/**
+ * 以指定狀態與擁有權覆蓋課程詳細——關閉 / 再開課按鈕全由這兩者決定。
+ *
+ * `pending` 對應後端的 `has_pending_changes`（#631）：有尚未按下「更新」的內容編輯。
+ */
+function useCourse(
+  status: string,
+  { isOwner = true, pending = false }: { isOwner?: boolean; pending?: boolean } = {},
+) {
   server.use(
     http.get("/api/et/courses/:courseId", () =>
       HttpResponse.json({
@@ -1237,6 +1248,7 @@ function useCourse(status: string, { isOwner = true }: { isOwner?: boolean } = {
         audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
         chapters: [],
         invitation_code: isOwner ? "01234567" : null,
+        has_pending_changes: pending,
       }),
     ),
   )
