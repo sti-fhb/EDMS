@@ -142,10 +142,14 @@ class ReviewService:
         review.complete_date = utcnow()
         if reason is not None:
             review.reason = reason
-            # #679：`REJECT_REASON` **不分 review_type 一律寫入**，語意唯一＝審核者寫的原因。
-            # `REASON` 對 OBSOLETE 會被 `_reject_obsolete` 寫回申請理由，所以它不能當讀取來源。
-            if status == _REJECTED:
-                review.reject_reason = reason
+        # #679：`REJECT_REASON` **不分 review_type 一律寫入**，語意唯一＝審核者寫的原因。
+        # `REASON` 對 OBSOLETE 會被 `_reject_obsolete` 寫回申請理由，所以它不能當讀取來源。
+        #
+        # 刻意**不巢狀在 `if reason is not None` 之內**：那會讓「REJECTED 必有退回原因」
+        # 這個保證依賴呼叫端不傳 None。`reject()` 的簽名是 `reason: str`、router 亦必填，
+        # 但保證寫在這裡比寫在呼叫端的型別上更難被繞過。
+        if status == _REJECTED:
+            review.reject_reason = reason
         review.updated_user = approver
         review.updated_date = utcnow()
         await db.flush()

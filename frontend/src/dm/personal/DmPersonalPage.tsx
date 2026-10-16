@@ -226,8 +226,9 @@ function ActivityRow({
         <TableCell>
           <Chip size="small" color={label.tone} label={label.text} />
         </TableCell>
-        {/* #554：本欄是 DM_REVIEW.REASON 的站內讀取端——DOC_REJECT / OBS_REJECT 改站內後，
-            那封含原因的信不再寄出，不在此呈現的話該欄位就沒有任何讀取端。
+        {/* #554 / #679：本欄是審核者退回原因的站內讀取端——DOC_REJECT / OBS_REJECT 改站內後
+            那封含原因的信不再寄出，不在此呈現的話就沒有任何讀取端。
+            #679 起來源為 `DM_REVIEW.REJECT_REASON`（語意唯一），不再是 `REASON`。
             #657：原為狀態欄內的展開鈕 + 另起一列的 Collapse，改為正式欄位直接顯示全文。
             後端僅在 resolved + REJECTED 時給值，其餘為 null（送審事件的 REASON 在 OBSOLETE
             是「廢止申請原因」，語意不同、刻意不帶）。 */}
