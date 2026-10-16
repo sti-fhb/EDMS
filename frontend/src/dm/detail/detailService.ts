@@ -67,7 +67,12 @@ export async function previewVersionFile(docId: string, versionId: number): Prom
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
-/** 下載廢止附件（US10 read-only banner）：打 US8 既有端點（DM_ADMIN 可下載）→ 觸發瀏覽器下載。 */
+/**
+ * 下載廢止附件（US10 read-only banner）：打 US8 既有端點（DM_ADMIN 可下載）→ 觸發瀏覽器下載。
+ *
+ * ⚠️ `reviewId` 是 `number`，**刻意未編碼**（#624）——同檔的 `docId` 是 `string` 故皆已編碼，
+ * 兩者並存不是漏做。數字內插後不可能含 `/`，對齊 ET `et/students/studentsService.ts` 的慣例。
+ */
 export async function downloadObsoleteAttachment(reviewId: number, filename: string): Promise<void> {
   const { data } = await http.get<Blob>(`/dm/reviews/${reviewId}/obsolete-file`, { responseType: "blob" })
   const url = URL.createObjectURL(data)

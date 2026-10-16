@@ -376,6 +376,28 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(screen.getByText("戰時（已停用）")).toBeInTheDocument()
   })
 
+  it("options 取不到時不得把每個標籤都謊報為「已停用」（#624）", async () => {
+    // 🔴 「不在 options 裡」有**兩個成因**：真的被停用、或 options 根本還沒 / 無法載入。
+    // 載入閘（`draftMetaPending || docTagsPending || ...`）**不等 options**，所以兩者會混淆。
+    //
+    // ⚠️ 本條刻意測「options **失敗**」而非「options 延遲」：延遲版我寫過，它**不會紅**——
+    // `findByDisplayValue` 會等，等到 options 到了標籤就正確了，那個短暫視窗抓不到。
+    // 失敗版是確定性的，而且危害更大（永久誤標而非閃一下）。
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    server.use(http.get("/api/dm/editor/options", () => new HttpResponse(null, { status: 500 })))
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText(/編輯文件 —/)
+
+    // 正向錨點：名稱仍顯示得出來（靠 docTags 的 tag_names），證明本條不是在驗一個空白畫面
+    expect(await screen.findByDisplayValue("全單位")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("全體")).toBeInTheDocument()
+    // 否定面用同一組值：取不到 options 時無從判斷是否停用，標成已停用是謊報
+    expect(screen.queryByDisplayValue("全單位（已停用）")).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue("全體（已停用）")).not.toBeInTheDocument()
+    // 整頁掃一次：逐值列舉會漏掉日後新增的欄位，而這個缺陷的本質是「全部都被誤標」
+    expect(screen.queryByText(/（已停用）/)).not.toBeInTheDocument()
+  })
+
   it("已停用的可見對象仍看得見並標示「已停用」（#624）", async () => {
     // 檢索標籤與可見對象是三個不同的欄位，只修一個會留下「另外兩格仍隱形」。
     paramsRef.current = { docId: "DM-SOP-000001" }

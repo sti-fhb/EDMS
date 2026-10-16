@@ -390,6 +390,10 @@ async def test_get_doc_tags_prefers_own_draft_snapshot(db):
     tags = await _svc.get_doc_tags(db, "DM-SOP-000106", user_id="ed")
 
     assert [p.audience_id for p in tags.audience_pairs] == [str(await _audience_id(db, "護理師"))]  # 非文件層的「全體」
+    # #624：本條走的是 `get_version_tags`（續編路徑），它與 `get_doc_tags` 是**兩支各自的查詢**。
+    # 只有前者帶 `tag_names` 的話，續編草稿時停用標籤仍然隱形——而那正是使用者最常遇到的情境
+    # （被退回後回來改）。此斷言釘住兩支都帶。
+    assert tags.tag_names[str(await _audience_id(db, "護理師"))] == "護理師"
 
 
 async def test_add_version_integrity_race_maps_to_single_draft(db, monkeypatch):

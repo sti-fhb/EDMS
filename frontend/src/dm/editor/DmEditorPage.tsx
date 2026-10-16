@@ -156,15 +156,30 @@ export function DmEditorPage() {
    *
    * 名稱來自預帶回應的 `tag_names`（含已停用者）。查不到名稱時退回顯示 id：那表示資料層
    * 有殘留，顯示 id 仍比整格空白好——使用者至少看得出那裡有東西、能把它移除。
+   *
+   * 🔴 **「不在 options 裡」有兩個成因**，只有其中一個是停用：
+   *
+   *   1. 該標籤真的被管理者停用了              → 標示「（已停用）」
+   *   2. `options` 還沒載入 / 載入失敗         → **無從判斷**，不得標示
+   *
+   * 載入閘（下方 `draftMetaPending || docTagsPending || ...`）**刻意不等 options**，所以第 2
+   * 種一定會發生：docTags 先到的那段視窗內每個值都不在 options 裡，而 options 請求失敗時更是
+   * 永久如此。若一律標成停用，使用者會看到整個表單的標籤都壞掉——那是比隱形更糟的假訊息。
    */
   const optionFor = useCallback(
     (id: string, from: OptionItem[]): OptionItem | null => {
       if (!id) return null
       const hit = from.find((o) => o.code === id)
       if (hit) return hit
-      return { code: id, name: `${docTags?.tag_names?.[id] ?? id}（已停用）` }
+      const name = docTags?.tag_names?.[id]
+      // 名稱也查不到＝資料層殘留（`DM_TAG` 無刪除功能，正常不會發生），不是「已停用」。
+      // 顯示 id 讓使用者至少看得出那裡有東西、能把它移除；但**不加後綴**，因為我們並不知道
+      // 它是不是停用——這與下一行是同一個判準：不確定就不要下判斷。
+      if (name === undefined) return { code: id, name: id }
+      // `options` 為 undefined＝尚未載入或載入失敗；此時同樣無從判斷，只顯示名稱
+      return { code: id, name: options ? `${name}（已停用）` : name }
     },
-    [docTags?.tag_names],
+    [docTags?.tag_names, options],
   )
 
   const selectedRetrieval = useMemo(
