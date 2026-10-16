@@ -1,6 +1,8 @@
-"""稽核查詢 / 匯出服務（US10 / dp-audit，唯讀）。
+"""稽核查詢 / 匯出服務（US10 / dp-audit）。
 
-與寫入服務（AuditLogService / SRVDP003）刻意分離：本服務僅 SELECT，不提供任何刪改。
+與寫入服務（AuditLogService / SRVDP003）刻意分離：查詢本身唯讀，**不提供任何刪改**
+（append-only，FR-DP-US10-04）。唯一的寫入是匯出時留痕的 `EXPORT` 稽核（#675），經
+`AuditLogService.log_action` 附加一列，與一般 CUD 寫稽核同一條路徑。
 稽核為**共用項**——不做 MODULE 過濾，`module` 僅為使用者選填之查詢條件（兩管理者皆查全部）。
 operator / target 皆解析為可讀名稱（姓名 / email / 中文），使用者不看原始 ID（見 target_resolver）。
 """
@@ -14,9 +16,11 @@ from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PaginatedResult
+from app.core.request_context import get_client_ip
 from app.core.utils import format_taipei
 from app.dp.audit.repository import AuditLogRepository, build_audit_conditions
 from app.dp.audit.schemas import AuditLogResponse, AuditOptionItem
+from app.dp.audit.service import AuditLogService
 from app.dp.audit.target_resolver import resolve_target_displays
 
 # func_name → 中文顯示名（保留模組前綴，UI 不另列模組欄）；未知碼原樣回傳。
@@ -28,6 +32,7 @@ from app.dp.audit.target_resolver import resolve_target_displays
 # 故由 `tests/unit/dp/test_dp_audit_func_labels.py` 掃 `app/` 下所有 func_name 字面值守門。
 _FUNC_LABELS: dict[str, str] = {
     "DP-USERS": "DP-使用者管理",
+    "DP-AUDIT": "DP-操作記錄查詢",
     "DP-PARAMS": "DP-系統參數",
     "DP-TEMPLATES": "DP-通知範本",
     "DP-PROFILE": "DP-個人資料",
@@ -177,10 +182,11 @@ def _csv_cell(resp: AuditLogResponse, field: str) -> str:
 
 
 class AuditQueryService:
-    """稽核多條件查詢 + CSV 匯出（唯讀）。"""
+    """稽核多條件查詢 + CSV 匯出（查詢唯讀；匯出另寫一筆 `EXPORT` 稽核，見 `export_csv`）。"""
 
-    def __init__(self, repository: AuditLogRepository | None = None) -> None:
+    def __init__(self, repository: AuditLogRepository | None = None, audit: AuditLogService | None = None) -> None:
         self._repo = repository or AuditLogRepository()
+        self._audit = audit or AuditLogService()
 
     async def query_logs(
         self,
@@ -224,6 +230,7 @@ class AuditQueryService:
         self,
         db: AsyncSession,
         *,
+        operator_id: str,
         operator: str | None,
         module: str | None,
         func_name: str | None,
@@ -232,7 +239,26 @@ class AuditQueryService:
         date_from: date | None,
         date_to: date | None,
     ) -> str:
-        """依查詢條件全量匯出 CSV（無分頁）；回含 UTF-8 BOM 的字串（Excel 中文相容）。"""
+        """依查詢條件全量匯出 CSV（無分頁）；回含 UTF-8 BOM 的字串（Excel 中文相容）。
+
+        ## 匯出本身寫一筆 `EXPORT` 稽核（#675）
+
+        判準是「匯出內容是否含個資」而非「是不是匯出」：本檔含操作者帳號、來源 IP 與
+        異動前後之完整值，且可不帶條件全量取回，屬應留痕的一類（同 ET02 名單匯出）。
+
+        - **先查後寫**：稽核列在產出 CSV 之後才寫，本次的紀錄不會出現在本次的檔案裡；
+          也縮短全平台單一 key 稽核鏈鎖（`log_action` 的 `pg_advisory_xact_lock`）的持有
+          時間——全量查詢與組 CSV 不在鎖內。⚠️ 別把寫稽核挪到查詢之前
+        - **同一交易**：稽核寫入（flush）失敗即拋錯，請求整個失敗、不回傳檔案——不讓檔案
+          在沒有軌跡的情況下被帶走。⚠️ 保證到 flush 為止：`get_db` 的 commit 在回應送出
+          之後才執行（全專案共用的交易時機，ET 匯出與各寫入端點皆同），commit 才失敗的
+          極端情形下檔案已送出而稽核列被回滾；鎖也因此持有到回應送完
+        - ⛔ **不記操作者關鍵字本身**，只記「有沒有給」：關鍵字是姓名或 Email，稽核表的
+          保存期比業務資料長，寫進去是把暴露搬到另一處（同 #548 核可查詢的做法）
+        - ⛔ 不記任何匯出內容，只記筆數與其餘篩選條件（皆為代碼與日期）。`func_name` 在
+          router 是自由字串（只限長度），直接打 API 可塞任意文字——只記已登記的功能碼，
+          其餘記 `<unknown>`，免得任意字串永久留在不可刪的稽核表
+        """
         conditions = build_audit_conditions(
             operator=operator,
             module=module,
@@ -250,6 +276,27 @@ class AuditQueryService:
         writer.writerow([header for _, header in _CSV_COLUMNS])
         for resp in responses:
             writer.writerow([_csv_cell(resp, field) for field, _ in _CSV_COLUMNS])
+
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name="DP-AUDIT",
+            action_type="EXPORT",
+            result="SUCCESS",
+            operator_id=operator_id,
+            description=f"匯出操作記錄 CSV（{len(responses)} 筆）",
+            after_value={
+                "module": module,
+                "func_name": func_name if func_name in _FUNC_LABELS else ("<unknown>" if func_name else None),
+                "action_type": action_type,
+                "result": result,
+                "date_from": date_from.isoformat() if date_from else None,
+                "date_to": date_to.isoformat() if date_to else None,
+                "has_operator": bool(operator),
+                "row_count": len(responses),
+            },
+            source_ip=get_client_ip(),
+        )
         # BOM 讓 Excel 正確辨識 UTF-8 中文
         return "﻿" + buffer.getvalue()
 

@@ -1,4 +1,4 @@
-"""操作記錄查詢端點（US10 / dp-audit，唯讀）。
+"""操作記錄查詢端點（US10 / dp-audit）。查詢唯讀；匯出另寫一筆 `EXPORT` 稽核（#675）。
 
 授權：router-level 掛 `require_any_module_admin()`——需 ET 或 DM 任一模組管理者，
 落地 spec_us10「作為 ET 或 DM 管理者」與稽核「僅管理者」（AUDIT-002）。#250 起生效：
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.http_cache import NO_STORE_HEADERS
 from app.core.module_admin import require_any_module_admin
+from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse
 from app.core.utils import format_taipei_date, utcnow
 from app.dp.audit.query_service import (
@@ -101,6 +102,7 @@ def _export_filename(now: datetime) -> str:
 
 @router.get("/logs/export")
 async def export_audit_logs(
+    operator_info: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
     operator: Optional[str] = Query(default=None, max_length=255),
     module: Optional[_Module] = Query(default=None),
@@ -110,9 +112,10 @@ async def export_audit_logs(
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
 ) -> Response:
-    """依當前查詢條件全量匯出 CSV（無分頁）。"""
+    """依當前查詢條件全量匯出 CSV（無分頁）；匯出本身寫一筆 `EXPORT` 稽核（#675）。"""
     content = await _service.export_csv(
         db,
+        operator_id=operator_info.user_id,
         operator=operator,
         module=module,
         func_name=func_name,
