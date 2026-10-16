@@ -19,7 +19,7 @@
 
 | 路徑 | 解析 | 寫入 |
 |---|---|---|
-| 發布 | `target_user_ids` | `bulk_enroll_returning` |
+| 發布、再開課、延長期間使視同關閉的課程復活（#678）| `target_user_ids` | `bulk_enroll_returning` |
 | 已發布課程新增配對（FR-ET-US8-04）| `target_user_ids_for_pairs` | 同上 |
 | 貼標追溯（FR-ET-US8-05）| `courses_for_user_pairs` | 同上 |
 
@@ -27,7 +27,7 @@
 
 ## 為何整批 upsert 而非單純 INSERT
 
-課程可重複編輯標籤後再次觸發（`ET-11` 再開課、日後的標籤異動）。已在課程中的人不
+課程會多次觸發帶入（再開課、復活、標籤異動）。已在課程中的人不
 可重複建列——`UQ_ET_ENROLLMENT_USER_COURSE` 是全表唯一（刻意，見 `progress/models.py`）。
 
 ⚠️ **被移除的學員（`IS_REMOVED=true`）不會被標籤帶回來**。#247 SA Q1 裁示 C 的語意是
@@ -68,7 +68,9 @@ class EtTagInviteRepository:
     async def target_user_ids(self, db: AsyncSession, course_id: int) -> list[str]:
         """課程**全部**配對對應之學員 `USER_ID`（去重、排序、已排除非學員）。
 
-        用於發布當下——那時整門課的配對一次生效。
+        用於課程**回到學員可見**的那一刻：發布、再開課、延長期間使視同關閉的課程復活
+        （#678，見 `EtPublishService.enroll_audiences`）。課程不可見期間新增的配對與新貼標的
+        人都沒被帶入過（本模組各路徑皆排除已關閉／視同關閉課程），故此刻依全部配對補齊。
         """
         return await self._resolve_students(db, EtCourseTag.course_id == course_id)
 
@@ -79,6 +81,9 @@ class EtTagInviteRepository:
         若改用 `target_user_ids`（全部配對），那些在課程發布**之後**才被貼上舊配對的人也會
         被一併帶入——那是另一條規則（貼標追溯，由 `EtAssignService` 於貼標當下觸發），在這裡
         順手做會讓同一個人被兩條路徑各邀請一次、且時機難以解釋。
+
+        ⚠️ 例外：課程再開課／復活時依**全部**配對帶入（`target_user_ids`，#678）——那時貼標
+        追溯在課程不可見期間並未觸發，不存在「兩條路徑各邀請一次」的問題。
 
         Args:
             pairs: `(單位 TAG_ID, 職位 TAG_ID)`；須為該課程**已寫入**之配對（以課程配對列比對）。
@@ -219,7 +224,7 @@ class EtTagInviteRepository:
 
         | 路徑 | 呼叫端 |
         |---|---|
-        | 發布時依課程標籤帶入 | `course/publish_service` |
+        | 發布、再開課、延長期間使課程復活時依課程標籤帶入（#678）| `course/publish_service.enroll_audiences` |
         | 已發布課程新增標籤（`FR-ET-US8-04`）| `course/service.add_tags` |
         | **貼標追溯**（給一個人、找他的課程，`FR-ET-US8-05`）| `roles/assign_service` |
 

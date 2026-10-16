@@ -145,22 +145,7 @@ class EtPublishService:
             )
         await self._log(db, operator.user_id, course_id, "發布課程")
 
-        # 依受訓單位標籤帶入學員（FR-ET-US3-12 前半，#247 追加）。已在課程中者略過、
-        # 已被移除者不會被帶回來（見 `tag_invite` docstring）。
-        invited_ids = await self._tag_invite.bulk_enroll_returning(
-            db, course_id, await self._tag_invite.target_user_ids(db, course_id), operator=operator
-        )
-        if invited_ids:
-            await self._log(db, operator.user_id, course_id, f"依受訓對象帶入 {len(invited_ids)} 位學員")
-
-        # 寄通知信（FR-ET-US3-12 後半 / FR-ET-US8-03，#273 補上）。**只寄給本次真的被加
-        # 進來的人**——重新發布時已在課程中者不該再收到一次「您已被加入」。
-        #
-        # `invitation_code` 傳新產生的 `code` 而非 `course.invitation_code`：`mark_published`
-        # 是一道 UPDATE，手上的 `course` 仍是更新前的快照（邀請碼當時還是 None）。
-        #
-        # 寄信失敗不回滾加入（AC 3）——由 `EtNotifier` 吞掉 `AppError`，此處不需 try/except。
-        await self._invite_mailer.send_course_invite(db, course=course, invitation_code=code, user_ids=invited_ids)
+        invited_ids = await self.enroll_audiences(db, course, operator=operator)
 
         return PublishResult(
             course_id=course_id,
@@ -352,9 +337,14 @@ class EtPublishService:
         ensure_version_matched(rowcount=0 if new_version is None else 1, entity="ET_COURSE")
         await self._log(db, operator.user_id, course_id, "再開課")
 
-        # **不重寄邀請信、不重產邀請碼**（Clarifications 明訂）——邀請碼恢復有效是各處
-        # 守門判 `STATUS` 自動達成的。`publish` 的標籤帶入與寄信在此刻意不呼叫：學員已在
-        # 課程中，再開課不是一次新的招生。
+        # **比照發布，依目前全部受訓對象帶入新符合者並寄邀請信**（#678，2026-10-16 裁示）。
+        # 原設計「再開課不是一次新的招生、刻意不帶入」的前提是關閉期間不能改受訓對象；
+        # #586 起可以了，而關閉期間不帶入（FR-ET-US11-07）、貼標追溯也排除已關閉課程，
+        # 不在此帶入的話，關閉期間新增的配對與新貼標的人**永遠不會被帶入**。
+        #
+        # **不重產邀請碼**（Clarifications 仍成立）——邀請碼恢復有效是各處守門判 `STATUS`
+        # 自動達成的。
+        await self.enroll_audiences(db, course, operator=operator)
         return CourseStatusResult(
             course_id=course_id,
             status=COURSE_PUBLISHED,
@@ -366,11 +356,45 @@ class EtPublishService:
             version=new_version,
         )
 
+    async def enroll_audiences(self, db: AsyncSession, course, *, operator: OperatorInfo) -> list[str]:
+        """依課程**目前全部**受訓對象配對帶入學員，並只寄信給本次真的被加入者。
+
+        發布（FR-ET-US3-12）、再開課（FR-ET-US11-09，#678）、延長期間使視同關閉的課程
+        復活（#678）三處共用——三者都是「課程從學員不可見回到可見」的那一刻，之前不帶入的
+        配對與貼標都要在此補上。
+
+        - 已在課程中者略過、**已被移除者不會被帶回**：`bulk_enroll_returning` 為
+          `ON CONFLICT DO NOTHING` 且只回傳真正新增者（⛔ 勿改成 DO UPDATE，見其 docstring）
+        - 寄信前 `refresh` 課程是**防禦性**的：信裡有起訖時間與邀請碼，而呼叫端剛改過它們。
+          現行 `mark_published` / `mark_reopened` / `update_basic` 皆為 ORM-enabled UPDATE，
+          SQLAlchemy 已同步 identity map（`synchronize_session="auto"`），信件用到的欄位
+          （名稱、起訖、邀請碼）**本來就是新值**（見 `mark_published` docstring）——故拿掉
+          這行**沒有任何測試會紅**（#678 變異檢查實測）。⚠️ 以 SQL 函式寫入的欄位（如
+          `FIRST_PUBLISHED_AT` 的 `COALESCE`）是被標為過期而非就地更新。保留 refresh 是為了
+          不讓「信的內容正確」相依於三支 repository 方法都維持同一種 UPDATE 寫法
+        - 寄信失敗不回滾加入（AC 3）——由 `EtNotifier` 吞掉 `AppError`，此處不需 try/except
+
+        Returns:
+            本次新加入者的 `USER_ID`。
+        """
+        course_id = course.course_id
+        invited_ids = await self._tag_invite.bulk_enroll_returning(
+            db, course_id, await self._tag_invite.target_user_ids(db, course_id), operator=operator
+        )
+        if not invited_ids:
+            return []
+        await self._log(db, operator.user_id, course_id, f"依受訓對象帶入 {len(invited_ids)} 位學員")
+        await db.refresh(course)
+        await self._invite_mailer.send_course_invite(
+            db, course=course, invitation_code=course.invitation_code, user_ids=invited_ids
+        )
+        return invited_ids
+
     # ── 內部 ────────────────────────────────────────────────────────────────
 
     async def ensure_revival_publishable(
         self, db: AsyncSession, course, *, new_end_at: datetime | None, now: datetime
-    ) -> None:
+    ) -> bool:
         """`PUT /courses/{id}` 延長期間若會讓一門**視同關閉**的課程復活，重跑發布六項檢核（#301）。
 
         ## 為何 `PUT` 也要檢核
@@ -396,15 +420,18 @@ class EtPublishService:
         與 `reopen` 共用同一組檢核與同一個錯誤碼 `ET_PUBLISH_001` + `blockers`，前端可直接
         複用缺漏清單的呈現。
 
+        Returns:
+            本次變更是否讓課程**復活**——呼叫端據以比照再開課執行 `enroll_audiences`（#678）。
+
         Raises:
             AppError: 422 `ET_PUBLISH_001` 六項檢核未通過（body 另帶 `blockers`）。
         """
         if course.status != COURSE_PUBLISHED:
-            return
+            return False
         was_closed = is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now)
         will_be_open = new_end_at is None or new_end_at > now
         if not (was_closed and will_be_open):
-            return
+            return False
 
         blockers = await self._evaluate(db, course)
         if blockers:
@@ -416,6 +443,7 @@ class EtPublishService:
                     "blockers": [{"code": b.code, "message": b.message, "target_id": b.target_id} for b in blockers]
                 },
             )
+        return True
 
     async def _evaluate(self, db: AsyncSession, course) -> tuple[PublishBlocker, ...]:
         """組快照 → 問 DM 廢止狀態 → 交給純函式判斷。"""

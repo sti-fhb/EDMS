@@ -59,8 +59,9 @@ class CourseInviteMailer:
 
         Args:
             course: 課程列（取名稱、起訖時間與擁有者）。
-            invitation_code: 課程邀請碼；發布當下由呼叫端傳入新產生的碼——`course` 物件
-                可能仍是更新前的快照。
+            invitation_code: 課程邀請碼。呼叫端（`EtPublishService.enroll_audiences`、
+                `EtCourseService._backfill_new_tag_members`）於 `refresh` 課程後傳入
+                `course.invitation_code`；保留為獨立參數，使本方法不假設 `course` 已是新值。
             user_ids: 本次真的被加進課程的人（`bulk_enroll_returning` 之結果）。
 
         Returns:

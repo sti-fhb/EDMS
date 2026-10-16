@@ -452,7 +452,10 @@ class TestReopen:
         assert (await _course_row(db, ctx["course_id"])).closed_at == closed_at_before
 
     async def test_再開課沿用原邀請碼且不動首次發布時間(self, client, db) -> None:
-        """Clarifications：再開課不重發邀請、不重產邀請碼（沿用原 8 碼，僅恢復有效）。
+        """Clarifications：再開課不重產邀請碼（沿用原 8 碼，僅恢復有效）。
+
+        > 原文含「不重發邀請」——#678 起再開課會依受訓對象對新符合者寄邀請信（見
+        > `TestReopenAutoEnrollsAudiences`），本條只守邀請碼不變。
 
         `FIRST_PUBLISHED_AT` 歷經再開課不變（`data-model` §ET_COURSE）——`mark_published`
         的 `COALESCE` 已為此預留，此處確認再開課真的沒有覆寫它。
@@ -685,12 +688,15 @@ class TestReopenRerunsPublishChecks:
 
         assert r.status_code == 200, r.text
 
-    async def test_再開課不重複帶入標籤學員也不重寄信(self, client, db) -> None:
-        """再開課不是一次新的招生——`publish` 的標籤帶入與寄信刻意不呼叫。
+    async def test_再開課無新符合者時不帶入也不寄信(self, client, db) -> None:
+        """再開課會依受訓對象帶入新符合者（#678）；**沒有新符合者時**不得產生任何選課列或信件。
 
-        以「沒有新增 `DP_EMAIL_LOG` 列」表達：課程掛的是專屬標籤（無人掛），故發布當下
-        本來就沒有帶入任何人；若再開課誤呼叫 `send_course_invite`，那支對空清單亦不寄，
-        故改以**選課列數不變**與**信件列數不變**兩者一起驗。
+        課程掛的是專屬標籤（無人掛），故沒有任何人符合。以**選課列數不變**與**信件列數
+        不變**兩者一起驗。有新符合者／既有學員／已移除者的情形見
+        `TestReopenAutoEnrollsAudiences`。
+
+        > 本條原名「再開課不重複帶入標籤學員也不重寄信」，斷言「標籤帶入刻意不呼叫」——
+        > #678 推翻該設計，故改為只斷言空集合的情形。
         """
         from app.dp.notify.models import DpEmailLog
         from app.et.progress.models import EtEnrollment
@@ -870,3 +876,279 @@ class TestReturnedVersionMatchesDb:
         assert closed.status_code == 200, closed.text
         assert reopened.status_code == 200, reopened.text
         assert again.status_code == 200, again.text
+
+
+class TestReopenAutoEnrollsAudiences:
+    """再開課比照發布：依**目前全部**受訓對象配對帶入新符合者並寄邀請信（#678）。
+
+    #586 起已關閉課程可增刪受訓對象，而關閉期間不帶入（FR-ET-US11-07）、貼標追溯也排除
+    已關閉課程——若再開課也不帶入，關閉期間新增的配對**永遠不會被帶入**，畫面上卻顯示
+    它已在課程裡。既有學員不重複加入、已移除者不帶回，靠 `bulk_enroll_returning` 的
+    `ON CONFLICT DO NOTHING`（⛔ 勿改成 DO UPDATE）。
+    """
+
+    @staticmethod
+    async def _pending_invites(db, recipient: str) -> list:
+        from app.dp.notify.models import DpEmailLog
+
+        # 篩 PENDING：範本參數對不上時信會以 FAILED 落庫，只數列數會假陽性
+        return list(
+            await db.scalars(
+                select(DpEmailLog).where(
+                    DpEmailLog.template_code == "COURSE_INVITE",
+                    DpEmailLog.recipient == recipient,
+                    DpEmailLog.status == "PENDING",
+                )
+            )
+        )
+
+    @staticmethod
+    async def _enrollment(db, user_id: str, course_id: int):
+        from app.et.progress.models import EtEnrollment
+
+        db.expire_all()
+        return await db.scalar(
+            select(EtEnrollment).where(EtEnrollment.user_id == user_id, EtEnrollment.course_id == course_id)
+        )
+
+    @staticmethod
+    async def _seed_enrollment(db, user_id: str, course_id: int, *, removed: bool) -> None:
+        from app.et.constants import COMPLETION_NOT_STARTED, SOURCE_TAG_DEFAULT
+        from app.et.progress.models import EtEnrollment
+
+        db.add(
+            EtEnrollment(
+                user_id=user_id,
+                course_id=course_id,
+                join_source=SOURCE_TAG_DEFAULT,
+                joined_at=utcnow(),
+                completion_status=COMPLETION_NOT_STARTED,
+                is_removed=removed,
+                removed_at=utcnow() if removed else None,
+                created_user="SYSTEM",
+                created_date=utcnow(),
+                deleted=0,
+            )
+        )
+        await db.flush()
+
+    @staticmethod
+    async def _close(client, uid: str, ctx: dict) -> int:
+        closed = await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
+        )
+        assert closed.status_code == 200, closed.text
+        return closed.json()["version"]
+
+    @staticmethod
+    async def _reopen(client, uid: str, course_id: int, version: int, start: str) -> None:
+        r = await client.post(
+            f"{_COURSES}/{course_id}/reopen",
+            json={"open_start_at": start, "open_end_at": _future(400), "version": version},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 200, r.text
+
+    async def test_關閉期間新增的受訓對象於再開課時帶入並寄信_信內為新起訖(self, client, db) -> None:
+        from datetime import datetime
+
+        from app.et.notify.course_invite import format_open_at
+        from tests.integration.et._tag_pairs import new_tag, pair_course, pair_user
+
+        uid = await _user(db, "t_ra01")
+        ctx = await _published_course(client, db, uid)
+        version = await self._close(client, uid, ctx)
+
+        # 關閉期間新增一組受訓對象，且有一位相符的學員
+        role = await new_tag(db, "職位_ra01")
+        await pair_course(db, ctx["course_id"], role)
+        student = await _user(db, "s_ra01", role=ROLE_STUDENT)
+        await pair_user(db, student, role)
+        assert await self._enrollment(db, student, ctx["course_id"]) is None
+
+        start = _future(3)
+        await self._reopen(client, uid, ctx["course_id"], version, start)
+
+        enrolled = await self._enrollment(db, student, ctx["course_id"])
+        assert enrolled is not None and enrolled.is_removed is False
+        invites = await self._pending_invites(db, f"{student}@edms.local")
+        assert len(invites) == 1
+        # 信內須為**新**起訖（再開課剛改過）。⚠️ 這條驗的是結果，不是 `enroll_audiences` 的
+        # `refresh`：ORM UPDATE 已同步 identity map，拿掉 refresh 這條照樣綠（見該方法 docstring）
+        assert format_open_at(datetime.fromisoformat(start)) in invites[0].body
+        # 不重產邀請碼：信中為關閉前那一組
+        assert ctx["invitation_code"] in invites[0].body
+
+    async def test_關閉期間被貼上既有配對標籤的學員也於再開課時帶入(self, client, db) -> None:
+        """貼標追溯排除已關閉課程，故這種人在關閉期間同樣沒被帶入——須依**全部**配對帶入。"""
+        from tests.integration.et._tag_pairs import pair_user
+
+        uid = await _user(db, "t_ra02")
+        ctx = await _published_course(client, db, uid)
+        version = await self._close(client, uid, ctx)
+
+        existing_role = await _tag(db, f"標籤{ctx['course_id']}")
+        student = await _user(db, "s_ra02", role=ROLE_STUDENT)
+        await pair_user(db, student, existing_role)
+
+        await self._reopen(client, uid, ctx["course_id"], version, _future(1))
+
+        assert await self._enrollment(db, student, ctx["course_id"]) is not None
+        assert len(await self._pending_invites(db, f"{student}@edms.local")) == 1
+
+    async def test_既有學員不重複加入也不收信(self, client, db) -> None:
+        from app.et.progress.models import EtEnrollment
+        from tests.integration.et._tag_pairs import pair_user
+
+        uid = await _user(db, "t_ra03")
+        ctx = await _published_course(client, db, uid)
+        existing_role = await _tag(db, f"標籤{ctx['course_id']}")
+        student = await _user(db, "s_ra03", role=ROLE_STUDENT)
+        await pair_user(db, student, existing_role)
+        await self._seed_enrollment(db, student, ctx["course_id"], removed=False)
+        # 正向錨點：同配對下另一位新符合者確實被帶入——證明帶入真的跑過
+        fresh = await _user(db, "s_ra03b", role=ROLE_STUDENT)
+        await pair_user(db, fresh, existing_role)
+        version = await self._close(client, uid, ctx)
+
+        await self._reopen(client, uid, ctx["course_id"], version, _future(1))
+
+        assert await self._enrollment(db, fresh, ctx["course_id"]) is not None
+        rows = list(
+            await db.scalars(
+                select(EtEnrollment).where(EtEnrollment.user_id == student, EtEnrollment.course_id == ctx["course_id"])
+            )
+        )
+        assert len(rows) == 1
+        assert await self._pending_invites(db, f"{student}@edms.local") == []
+
+    async def test_已移除的學員不被帶回也不收信(self, client, db) -> None:
+        from tests.integration.et._tag_pairs import pair_user
+
+        uid = await _user(db, "t_ra04")
+        ctx = await _published_course(client, db, uid)
+        existing_role = await _tag(db, f"標籤{ctx['course_id']}")
+        removed = await _user(db, "s_ra04", role=ROLE_STUDENT)
+        await pair_user(db, removed, existing_role)
+        await self._seed_enrollment(db, removed, ctx["course_id"], removed=True)
+        # 正向錨點：同配對下另一位新符合者確實被帶入——否則「沒被帶回」在帶入根本沒執行時也恆真
+        fresh = await _user(db, "s_ra04b", role=ROLE_STUDENT)
+        await pair_user(db, fresh, existing_role)
+        version = await self._close(client, uid, ctx)
+
+        await self._reopen(client, uid, ctx["course_id"], version, _future(1))
+
+        assert await self._enrollment(db, fresh, ctx["course_id"]) is not None
+        row = await self._enrollment(db, removed, ctx["course_id"])
+        assert row is not None and row.is_removed is True
+        assert await self._pending_invites(db, f"{removed}@edms.local") == []
+
+    async def test_延長期間讓視同關閉的課程復活時比照再開課帶入(self, client, db) -> None:
+        """`PUT` 延長期間讓「期間已過、狀態仍為 PUBLISHED」的課程復活——期間已過時加的配對同樣沒被帶入過。"""
+        from datetime import timedelta
+
+        from tests.integration.et._tag_pairs import audiences_req, new_tag, pair_course, pair_user
+
+        uid = await _user(db, "t_ra05")
+        ctx = await _published_course(client, db, uid)
+        # 讓課程視同關閉：期間已過、狀態仍為 PUBLISHED
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == ctx["course_id"])
+            .values(open_start_at=utcnow() - timedelta(days=30), open_end_at=utcnow() - timedelta(days=1))
+        )
+        role = await new_tag(db, "職位_ra05")
+        await pair_course(db, ctx["course_id"], role)
+        student = await _user(db, "s_ra05", role=ROLE_STUDENT)
+        await pair_user(db, student, role)
+        db.expire_all()
+
+        detail = (await client.get(f"{_COURSES}/{ctx['course_id']}", headers=_bearer(uid))).json()
+        r = await client.put(
+            f"{_COURSES}/{ctx['course_id']}",
+            json={
+                "course_name": detail["course_name"],
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": _future(200),
+                "audiences": audiences_req(detail),
+                "version": detail["version"],
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 204, r.text
+        assert await self._enrollment(db, student, ctx["course_id"]) is not None
+        assert len(await self._pending_invites(db, f"{student}@edms.local")) == 1
+
+    async def test_同一次PUT復活並新增配對_依全部配對帶入且各只寄一封(self, client, db) -> None:
+        """復活與新增配對同時發生——走「全部配對」那支，舊配對的人也要帶入。
+
+        ⚠️ 本條**驗不到**「`if revived` / `elif tags_add` 兩者擇一」：若兩支都執行，第二支的
+        `bulk_enroll_returning` 因 `ON CONFLICT DO NOTHING` 不會新增、也就不寄信，結果相同。
+        它守的是：此情形下若只走 `tags_add`（舊行為），只符合舊配對的人會被漏掉。
+        """
+        from datetime import timedelta
+
+        from tests.integration.et._tag_pairs import audiences_req, new_tag, pair_user, role_pair
+
+        uid = await _user(db, "t_ra07")
+        ctx = await _published_course(client, db, uid)
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == ctx["course_id"])
+            .values(open_start_at=utcnow() - timedelta(days=30), open_end_at=utcnow() - timedelta(days=1))
+        )
+        # 期間已過時被貼上**既有**配對的人（貼標追溯排除視同關閉課程，故沒被帶入）
+        old_role = await _tag(db, f"標籤{ctx['course_id']}")
+        old_match = await _user(db, "s_ra07a", role=ROLE_STUDENT)
+        await pair_user(db, old_match, old_role)
+        # 本次 PUT 才新增的配對與其相符者
+        new_role = await new_tag(db, "職位_ra07")
+        new_match = await _user(db, "s_ra07b", role=ROLE_STUDENT)
+        await pair_user(db, new_match, new_role)
+        db.expire_all()
+
+        detail = (await client.get(f"{_COURSES}/{ctx['course_id']}", headers=_bearer(uid))).json()
+        r = await client.put(
+            f"{_COURSES}/{ctx['course_id']}",
+            json={
+                "course_name": detail["course_name"],
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": _future(200),
+                "audiences": [*audiences_req(detail), await role_pair(db, new_role)],
+                "version": detail["version"],
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 204, r.text
+        for student in (old_match, new_match):
+            assert await self._enrollment(db, student, ctx["course_id"]) is not None, student
+            assert len(await self._pending_invites(db, f"{student}@edms.local")) == 1, student
+
+    async def test_未復活的一般編輯不依全部配對重新帶入(self, client, db) -> None:
+        """只有「復活」才依全部配對帶入；一般 PUT 維持只補本次新增的配對（FR-ET-US8-04）。"""
+        from tests.integration.et._tag_pairs import audiences_req, pair_user
+
+        uid = await _user(db, "t_ra06")
+        ctx = await _published_course(client, db, uid)
+        # 發布後才被貼上既有配對的人——這條路徑另有出口（貼標追溯），一般編輯不該順手帶入
+        existing_role = await _tag(db, f"標籤{ctx['course_id']}")
+        student = await _user(db, "s_ra06", role=ROLE_STUDENT)
+        await pair_user(db, student, existing_role)
+
+        detail = (await client.get(f"{_COURSES}/{ctx['course_id']}", headers=_bearer(uid))).json()
+        r = await client.put(
+            f"{_COURSES}/{ctx['course_id']}",
+            json={
+                "course_name": "改名",
+                "open_start_at": detail["open_start_at"],
+                "open_end_at": detail["open_end_at"],
+                "audiences": audiences_req(detail),
+                "version": detail["version"],
+            },
+            headers=_bearer(uid),
+        )
+
+        assert r.status_code == 204, r.text
+        assert await self._enrollment(db, student, ctx["course_id"]) is None

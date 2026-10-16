@@ -364,7 +364,7 @@ class EtCourseService:
         await self._ensure_pairs_selectable(db, desired - current)
         # #301：期間延長若會讓一門已到期（視同關閉）的課程復活，重跑發布六項檢核——否則
         # 「再開課要檢核」形同虛設，繞過它只要改一個日期。只在復活時觸發，見該方法 docstring。
-        await self._publish.ensure_revival_publishable(db, course, new_end_at=req.open_end_at, now=utcnow())
+        revived = await self._publish.ensure_revival_publishable(db, course, new_end_at=req.open_end_at, now=utcnow())
 
         rowcount = await self._courses.update_basic(
             db,
@@ -391,7 +391,14 @@ class EtCourseService:
         # ⚠️ 判定用 `req.open_end_at`（**本次要寫入的新值**）而非 `course.open_end_at`
         # ——`course` 是更新前讀的，此刻已過期。教師若在同一次 PUT 裡把訖止延到未來
         # 並加標籤，那門課已不再視同關閉，帶入是正確行為；用舊值會誤擋。
-        if (
+        #
+        # 🔴 **復活時改依全部配對帶入**（#678）：延長期間讓視同關閉的課程復活，與再開課是
+        # 同一件事——期間已過時新增的配對與新貼標的人都沒被帶入過（帶入與貼標追溯都排除
+        # 視同關閉的課程），只補 `tags_add` 會永久漏掉他們。全部配對已含本次新增者，故
+        # 兩者擇一，不重複執行。
+        if revived:
+            await self._publish.enroll_audiences(db, course, operator=operator)
+        elif (
             course.status == COURSE_PUBLISHED
             and tags_add
             and not is_effectively_closed(status=course.status, open_end_at=req.open_end_at, now=utcnow())
@@ -418,8 +425,9 @@ class EtCourseService:
         if not invited:
             return
         await self._log(db, "UPDATE", operator.user_id, course.course_id, f"新增受訓對象補帶入 {len(invited)} 位學員")
-        # 重新載入課程：上面的更新走 Core UPDATE，手上的 ORM 物件仍是舊快照，
-        # 直接拿去組信會寄出改名前的課程名稱與起訖時間。
+        # 重新載入課程（防禦性）：信裡有課程名稱與起訖，上面剛改過它們。`update_basic` 為
+        # ORM-enabled UPDATE、已同步 identity map，現況下手上的物件本來就是新值——保留 refresh
+        # 是不讓信的內容相依於該寫法（#678 查證，原註解稱「Core UPDATE、舊快照」不成立）。
         await db.refresh(course)
         await self._invite_mailer.send_course_invite(
             db, course=course, invitation_code=course.invitation_code, user_ids=invited
