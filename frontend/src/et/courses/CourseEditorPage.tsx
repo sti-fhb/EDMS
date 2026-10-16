@@ -386,6 +386,8 @@ export function EtCourseEditorPage() {
    * 寫活表，沒有「尚未更新」這種狀態）。
    */
   const pendingHint = hasPendingChanges && !reopening
+  /** 我方主動導走（放棄變更後）時略過離開攔截，避免同一件事問兩次。 */
+  const bypassGuard = useRef(false)
 
 
   /** 版本衝突以 Dialog 呈現而非 snackbar——使用者必須確實知道自己的編輯沒存進去。 */
@@ -693,6 +695,44 @@ export function EtCourseEditorPage() {
   }
 
   /**
+   * 「取消」：放棄尚未更新的編輯並離開（#631，2026-10-16 使用者裁示）。
+   *
+   * 🔴 暫存模式讓編輯工作階段有**兩個出口**——按「更新」套用，或按「取消」放棄。
+   * 原本只做了前者，教師編到一半想整個丟掉沒有任何入口。
+   *
+   * ⚠️ **草稿不適用**：草稿的章節與項目直接寫活表（沒有暫存可清），按「取消」本來
+   * 就只是離開、不還原。那是既有行為，本次不改（issue 原文：草稿維持現行、不需版本化）。
+   *
+   * ⚠️ 放棄之後要**略過離開攔截**：此刻 `course.has_pending_changes` 的快取還是舊值，
+   * 不略過會在導走的當下又問一次「有尚未更新的變更」。比照 DM 編輯頁的 `bypassGuard`。
+   */
+  const discardMut = useMutation({
+    mutationFn: () => coursesApi.discardContent(courseId as number),
+    onSuccess: () => {
+      bypassGuard.current = true
+      invalidate()
+      navigate("/et/courses")
+    },
+    onError: handleError,
+  })
+
+  const requestCancel = () => {
+    if (!hasPendingChanges) {
+      navigate("/et/courses")
+      return
+    }
+    confirm({
+      title: "放棄尚未更新的變更",
+      content:
+        "取消後，自上次更新以來的所有編輯會全部放棄，課程回到學員目前看到的版本。此動作無法復原。" +
+        "若只是想先離開、之後再繼續編輯，請直接點選其他頁面——那些編輯會保留著。",
+      okText: "放棄變更並離開",
+      cancelText: "繼續編輯",
+      onOk: () => discardMut.mutate(),
+    })
+  }
+
+  /**
    * 離開前攔截（#631）——比照 DM 編輯頁的 `useBlocker`。
    *
    * 🔴 擋的**不是**「資料會遺失」：暫存區存在資料庫裡，離開再回來編輯還在。擋的是
@@ -703,7 +743,8 @@ export function EtCourseEditorPage() {
    * ⚠️ 文案因此寫「學員仍看不到」，⛔ 不要寫成「變更將不會保留」——那是假的。
    */
   const leaveBlocker = useBlocker(
-    ({ currentLocation, nextLocation }) => hasPendingChanges && currentLocation.pathname !== nextLocation.pathname,
+    ({ currentLocation, nextLocation }) =>
+      hasPendingChanges && !bypassGuard.current && currentLocation.pathname !== nextLocation.pathname,
   )
   useEffect(() => {
     if (leaveBlocker.state !== "blocked") return
@@ -2030,7 +2071,9 @@ export function EtCourseEditorPage() {
                       刪除草稿
                     </Button>
                   )}
-                  <Button size="small" onClick={() => navigate("/et/courses")}>
+                  {/* 取消＝放棄尚未更新的編輯並離開（#631）。沒有暫存變更時就只是離開，
+                      不跳確認——包括全部的草稿課程（它沒有暫存可放棄）。 */}
+                  <Button size="small" disabled={discardMut.isPending} onClick={requestCancel}>
                     取消
                   </Button>
                   <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>

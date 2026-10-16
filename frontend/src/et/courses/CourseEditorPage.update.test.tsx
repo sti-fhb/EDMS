@@ -209,6 +209,71 @@ describe("ET05 更新（#631）", () => {
     expect(screen.queryByRole("dialog", { name: "更新未生效" })).not.toBeInTheDocument()
   })
 
+  it("🔴 按「取消」會放棄暫存的編輯——編輯工作階段的第二個出口", async () => {
+    // 暫存模式讓編輯有兩個出口：按「更新」套用，或按「取消」放棄。原本只做了前者，
+    // 教師編到一半想整個丟掉沒有任何入口（2026-10-16 使用者裁示補上）。
+    const user = userEvent.setup()
+    let discards = 0
+    useCourse("PUBLISHED", { pending: true })
+    server.use(
+      http.delete("/api/et/courses/:courseId/content/stage", () => {
+        discards += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "取消" }))
+
+    // 放棄是不可復原的，確認視窗要講清楚，並指出「只是想離開」該怎麼做
+    expect(await screen.findByText(/回到學員目前看到的版本/)).toBeInTheDocument()
+    expect(discards).toBe(0) // 確認前不送出
+
+    await user.click(screen.getByRole("button", { name: "放棄變更並離開" }))
+
+    await waitFor(() => expect(discards).toBe(1))
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+  })
+
+  it("沒有暫存變更時按「取消」直接離開，不跳確認也不打 API", async () => {
+    // 正向錨點：少了它，讓確認視窗無條件跳出也會讓上一條通過——而那會變成
+    // 「每次想離開編輯頁都被問一次要不要放棄」。
+    const user = userEvent.setup()
+    let discards = 0
+    useCourse("PUBLISHED", { pending: false })
+    server.use(
+      http.delete("/api/et/courses/:courseId/content/stage", () => {
+        discards += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+    expect(discards).toBe(0)
+    expect(screen.queryByText(/回到學員目前看到的版本/)).not.toBeInTheDocument()
+  })
+
+  it("草稿按「取消」只離開——草稿沒有暫存可放棄", async () => {
+    // ⚠️ 草稿的章節與項目直接寫活表，按「取消」本來就不還原（issue 原文：草稿維持
+    // 現行、不需版本化）。打了那支端點後端會回 409，所以前端這裡就不該打。
+    const user = userEvent.setup()
+    let discards = 0
+    useCourse("DRAFT")
+    server.use(
+      http.delete("/api/et/courses/:courseId/content/stage", () => {
+        discards += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+    expect(discards).toBe(0)
+  })
+
   it("非擁有者（檢視模式）看不到「更新」鈕", async () => {
     // ⚠️ 刻意餵 `pending: true`（後端對他人恆回 false）：要驗的是**前端自己那道
     // `readOnly` 閘**，不是「旗標剛好是 false 所以按鈕沒亮」。餵 false 的話，把

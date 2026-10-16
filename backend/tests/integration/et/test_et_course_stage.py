@@ -46,6 +46,7 @@ from app.et.course.stage_rules import (
     ENTITY_SURVEY_QUESTION,
     to_course_snapshot,
 )
+from app.et.course.stage_writer import EtCourseStageWriter
 from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz
@@ -364,8 +365,21 @@ class TestSeedFidelity:
 
 
 class TestClear:
-    async def test_清空是軟刪除(self, client, db) -> None:
-        """⛔ 專案禁硬刪除。暫存區是暫時資料，但仍照規範走 `DELETED = 1`。"""
+    async def test_清空是硬刪除(self, client, db) -> None:
+        """🔴 **本條在 2026-10-16 被使用者（SA）裁示反轉**，原為 `test_清空是軟刪除`。
+
+        舊版斷言「列還在（軟刪），不是被硬刪」，理由寫「⛔ 專案禁硬刪除」。那個理由
+        在暫存表上**會製造一個靜默的 bug**：教師自己刪章節也是 `DELETED = 1`
+        （`delete_subtree`，那條維持軟刪），兩種 `DELETED = 1` 分不出來，於是
+        「這門課還有編輯工作階段開著嗎」沒有判準——教師把章節全刪光後程式會誤判成
+        沒有暫存區而從活表重新 seed，剛刪掉的全部復活。
+
+        硬刪的對象是**內容已整批複製進活表的副本**，稽核軌跡落在活表與 `DP_AUDIT_LOG`。
+        例外已登記於 `docs/ref/sti-backend-ref.md#刪除策略例外表清單`（第三筆，與
+        `ET_PROGRESS_INTERVAL` 同屬「保留 DELETED 但特定路徑硬刪除」）。
+
+        ⛔ 不要因為「專案禁硬刪除」就改回軟刪——那正是被反轉掉的那個理由。
+        """
         uid = await _user(db, "ZT_S9")
         cid = await _full_course(client, db, uid)
         repo = EtCourseStageRepository()
@@ -375,9 +389,57 @@ class TestClear:
         await repo.clear(db, cid, _operator(uid), stage_ids=[n.stage_id for n in await repo.load_tree(db, cid)])
 
         assert before > 0
-        assert len(await _stage_rows(db, cid)) == before, "列還在（軟刪），不是被硬刪"
-        assert await repo.load_tree(db, cid) == (), "但讀不到了"
+        assert len(await _stage_rows(db, cid)) == 0, "列整個不見（硬刪）"
+        assert await repo.load_tree(db, cid) == ()
         assert await repo.has_stage(db, cid) is False
+
+    async def test_教師刪光章節後不得重新_seed(self, client, db) -> None:
+        """🔴 刪除不可以靜默復活（2026-10-16 code review MEDIUM）。
+
+        教師把章節全刪光 ⇒ 暫存樹變空。若「有沒有暫存區」用「暫存樹空不空」判定，
+        程式會以為沒有暫存區，下一次編輯就**從活表重新 seed**——剛刪掉的全部回來，
+        而教師沒有收到任何訊息。
+
+        判準必須是「這門課在暫存表裡有沒有列」：教師刪的是軟刪、列還在。
+        """
+        uid = await _user(db, "ZT_S12")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        writer = EtCourseStageWriter(repo)
+        await repo.seed_from_live(db, cid, _operator(uid))
+        # ⚠️ 要刪的是**全部根節點**，不是只有章節：問卷掛在課程底下、不在任何章節裡，
+        # 只刪章節的話樹不會空，本條的前置條件就不成立（而它會在第一個斷言就說出來）。
+        for node in [n for n in await repo.load_tree(db, cid) if n.parent_stage_id is None]:
+            await writer.delete_subtree(db, node.stage_id, _operator(uid))
+
+        assert await repo.load_tree(db, cid) == (), "前置條件：暫存樹確實空了"
+        assert await repo.has_stage(db, cid) is True, "🔴 空的暫存樹 ≠ 沒有暫存區"
+
+        # 再編輯一次（這裡以 ensure_seeded 代表任何一支寫入端點的入口）
+        await writer.ensure_seeded(db, cid, _operator(uid))
+
+        assert await repo.load_tree(db, cid) == (), "⛔ 不得把教師刪掉的內容重新 seed 回來"
+
+    async def test_放棄整個工作階段後可以重新開始(self, client, db) -> None:
+        """`discard` 之後 `has_stage` 回假——否則教師按過取消就再也開不了新的編輯。
+
+        這是上一條的對照組：上一條要的是「列還在 ⇒ 不要 seed」，本條要的是
+        「列沒了 ⇒ 要能重新 seed」。兩條一起才釘得住判準，只有其中一條的話，
+        讓 `has_stage` 恆真或恆假各能讓另一條通過。
+        """
+        uid = await _user(db, "ZT_S13")
+        cid = await _full_course(client, db, uid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+
+        removed = await repo.discard(db, cid)
+
+        assert removed > 0
+        assert await repo.has_stage(db, cid) is False
+        assert len(await _stage_rows(db, cid)) == 0, "放棄＝硬刪，列不留"
+
+        await repo.seed_from_live(db, cid, _operator(uid))
+        assert {n.entity_type for n in await repo.load_tree(db, cid)} == _ALL_TYPES
 
     async def test_清空後可以再次_seed(self, client, db) -> None:
         """🔴 唯一索引 `(COURSE_ID, ENTITY_TYPE, SOURCE_ID)` 的條件帶 `DELETED = 0`。
@@ -784,6 +846,7 @@ class TestDeleterCoverage:
 # ── 「更新」端點 ───────────────────────────────────────────────────────────────
 
 _APPLY = "/api/et/courses/{cid}/content/apply"
+_DISCARD = "/api/et/courses/{cid}/content/stage"
 
 
 async def _publish(client, db, uid: str, cid: int) -> None:
@@ -791,6 +854,76 @@ async def _publish(client, db, uid: str, cid: int) -> None:
     r = await client.post(f"{_COURSES}/{cid}/publish", headers=_bearer(uid))
     assert r.status_code == 200, r.text
     await db.flush()
+
+
+class TestDiscardEndpoint:
+    """「取消」＝放棄尚未更新的編輯（#631，2026-10-16 使用者裁示補上）。
+
+    暫存模式讓編輯工作階段有**兩個出口**：按「更新」套用，或按「取消」放棄。原本只做了
+    前者——教師編到一半想整個丟掉、回到學員目前看到的版本，沒有任何入口。
+    """
+
+    async def test_放棄後暫存清空而活表一行都沒動(self, client, db) -> None:
+        """🥇 本端點的核心：放棄**不需要回滾**，因為學員從頭到尾看的就是活表。"""
+        uid = await _user(db, "ZT_D1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "編到一半的章名"})
+
+        r = await client.delete(_DISCARD.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await repo.has_stage(db, cid) is False
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "活表維持學員看到的版本"
+
+    async def test_暫存區為空時仍回_204(self, client, db) -> None:
+        """冪等：教師什麼都沒改就按取消是正常操作，不該因此看到錯誤。"""
+        uid = await _user(db, "ZT_D2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.delete(_DISCARD.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+    async def test_草稿回_409(self, client, db) -> None:
+        """草稿的章節與項目直接寫活表，沒有暫存可放棄。
+
+        回 409 而非靜默成功：前端若誤把草稿導到這裡要看得見（前端另有一條測試釘住
+        「草稿按取消不打這支」）。
+        """
+        uid = await _user(db, "ZT_D3")
+        cid = await _full_course(client, db, uid)
+
+        r = await client.delete(_DISCARD.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_COURSE_010"
+
+    async def test_非擁有者回_403(self, client, db) -> None:
+        """放棄會丟掉擁有者的編輯——授權與其他寫入端點同一條線（`_require_owned` 第一行）。
+
+        ⚠️ **不在這裡斷言「暫存區還在」**，雖然那才是真正要保護的東西。本測試環境裡
+        一個失敗的請求會把整個交易回滾，連帶把前置資料（seed 出來的暫存列）一起清掉
+        ——斷言必然看到 `has_stage` 為假，而那是 harness 的性質、不是端點的行為。
+        實測過：寫了那條會紅，紅的理由卻與授權無關。
+
+        「他人不得清掉擁有者的編輯」由 `_require_owned` 排在任何寫入之前保證，那道閘
+        與其他六支寫入端點共用，各自再驗一次只是重複。
+        """
+        uid = await _user(db, "ZT_D4")
+        other = await _user(db, "ZT_D5")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await EtCourseStageRepository().seed_from_live(db, cid, _operator(uid))
+
+        r = await client.delete(_DISCARD.format(cid=cid), headers=_bearer(other))
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
 
 
 class TestUpdateEndpoint:
