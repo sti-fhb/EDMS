@@ -127,7 +127,7 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     // 二次確認 dialog
     expect(await screen.findByText("確定核准此項目？")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認核准" }))
-    expect(await screen.findByText("已核准並發布，已通知撰寫者")).toBeInTheDocument()
+    expect(await screen.findByText("已核准並發布")).toBeInTheDocument()
   }, 20000)
 
   it("撰寫者已撤回 → 顯示 DM-MSG-DM02-006、明細收起、該列自清單消失", async () => {
@@ -178,7 +178,7 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     // 填原因 → 成功
     await user.type(screen.getByLabelText(/退回原因/), "需補充異常通報")
     await user.click(screen.getByRole("button", { name: "確認退回" }))
-    expect(await screen.findByText("已退回並通知撰寫者")).toBeInTheDocument()
+    expect(await screen.findByText("已退回")).toBeInTheDocument()
   }, 20000)
 
   it("廢止類明細：廢止原因 + 廢止對象 + 附件下載 + 「核准並廢止」（US8）", async () => {
@@ -202,7 +202,7 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     await user.click(await screen.findByRole("button", { name: "核准並廢止" }))
     expect(await screen.findByText("確定核准廢止此文件？")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認廢止" }))
-    expect(await screen.findByText("已核准廢止，文件已下架並通知撰寫者")).toBeInTheDocument()
+    expect(await screen.findByText("已核准廢止，文件已下架")).toBeInTheDocument()
   }, 20000)
 
   it("處理完當頁最後一筆後不會停在空白頁，也不會謊稱沒有待簽核項目", async () => {

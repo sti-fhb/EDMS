@@ -309,8 +309,14 @@ export function DmReviewPage() {
   const approveMut = useMutation({
     mutationFn: ({ reviewId }: { reviewId: number; isObsolete: boolean }) => reviewApi.approve(reviewId),
     onSuccess: (_data, vars) => {
-      // 廢止核准 → 文件下架；一般 → 發布（DM-MSG-DM02-001）
-      message.success(vars.isObsolete ? "已核准廢止，文件已下架並通知撰寫者" : "已核准並發布，已通知撰寫者")
+      // 廢止核准 → 文件下架（DM-MSG-DM02-002）；一般 → 發布（DM-MSG-DM02-001）
+      //
+      // ⛔ 兩句都**不再宣稱「已通知撰寫者」**（#677）。#554 之後撰寫者不收這兩種通知：
+      //   - 核准發布：`DOC_PUBLISH` 仍寄 Email，但收件名單**已移除撰寫者**
+      //     （`review/repository.recipient_emails` 的 docstring 記了理由）
+      //   - 核准廢止：`OBS_APPROVE` 範本的 CHANNEL 已由 BOTH 改為 **MSG**（只站內、不寄信）
+      // 兩者撰寫者都改由 DM04「我的文件動態」承接。
+      message.success(vars.isObsolete ? "已核准廢止，文件已下架" : "已核准並發布")
       afterAction()
     },
     onError: onActionError,
@@ -319,7 +325,9 @@ export function DmReviewPage() {
   const rejectMut = useMutation({
     mutationFn: ({ reviewId, reason }: { reviewId: number; reason: string }) => reviewApi.reject(reviewId, reason),
     onSuccess: () => {
-      message.success("已退回並通知撰寫者") // DM-MSG-DM02-005
+      // ⛔ 不宣稱通知（#677）：`DOC_REJECT` / `OBS_REJECT` 的 CHANNEL 已由 BOTH 改為 MSG（#554），
+      // 一封信都不寄；撰寫者改由 DM04「我的文件動態」看到退回事件與原因。
+      message.success("已退回") // DM-MSG-DM02-005
       setRejectOpen(false)
       setRejectReason("")
       afterAction()
@@ -334,8 +342,11 @@ export function DmReviewPage() {
     confirm({
       title: isObsolete ? "確定核准廢止此文件？" : "確定核准此項目？",
       content: isObsolete
-        ? "核准後文件將立即廢止並自文件庫下架、通知撰寫者，此動作即時生效。"
-        : "核准後將立即發布並通知相關人員，此動作即時生效。",
+        ? // 廢止不觸發 DOC_PUBLISH（FR-008 明訂），而 OBS_APPROVE 是 MSG ⇒ 一封信都不寄（#677）
+          "核准後文件將立即廢止並自文件庫下架，此動作即時生效。"
+        : // ✅ 這句**維持**：發布確實會以 DOC_PUBLISH 寄信給可見對象相符的閱覽者（FR-008），
+          // 「相關人員」指的是他們，不是撰寫者——不要連這句一起拿掉。
+          "核准後將立即發布並通知相關人員，此動作即時生效。",
       okText: isObsolete ? "確認廢止" : "確認核准",
       cancelText: "取消",
       onOk: () => approveMut.mutate({ reviewId: selectedId, isObsolete }),

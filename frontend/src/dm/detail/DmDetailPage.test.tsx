@@ -419,7 +419,7 @@ describe("DmDetailPage 文件詳細頁", () => {
     await user.click(screen.getByRole("combobox", { name: /指定審核者/ }))
     await user.click(await screen.findByRole("option", { name: "王審核" }))
     await user.click(screen.getByRole("button", { name: "送出廢止申請" }))
-    expect(await screen.findByText("已送出廢止申請，已通知指定審核者")).toBeInTheDocument()
+    expect(await screen.findByText("已送出廢止申請")).toBeInTheDocument()
   })
 
   it("廢止對話框：未填原因即送出 → 顯示必填錯誤（US8 / DM-MSG-DM07-011）", async () => {
