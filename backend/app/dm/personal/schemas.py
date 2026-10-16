@@ -45,8 +45,11 @@ class ActivityEvent(BaseModel):
     event_kind: str  # "submitted"（送審 / 發起廢止）| "resolved"（核准 / 退回 / 撤回 之結果）
     event_time: datetime  # 該事件發生時間（submitted＝送審時間、resolved＝完成時間）
     is_overdue: bool  # 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻（審核者視角顯「催辦中」，AC5）
-    #: 退回原因（#554 / #657）。**僅 `event_kind="resolved"`、`status="REJECTED"` 且
-    #: `review_type != "OBSOLETE"` 時有值**，其餘為 None。
+    #: 退回原因（#554 / #657 / #679）。**僅 `event_kind="resolved"` 且 `status="REJECTED"`
+    #: 時有值**（**含廢止退回**），其餘為 None。來源為 `DM_REVIEW.REJECT_REASON`。
+    #:
+    #: ⚠️ #679 之前讀的是 `REASON`，而該欄對 OBSOLETE 是申請人寫的廢止申請原因，故當時必須
+    #: 多一個 `review_type != "OBSOLETE"` 的排除——代價是廢止退回的原因完全看不到。
     #:
     #: 背景：DOC_REJECT / OBS_REJECT 範本內文原帶「退回原因：{reason}」，改為站內（MSG）後
     #: 那封信不再寄出。若不在此帶出，`DM_REVIEW.REASON` 會寫入卻**沒有任何讀取端**——

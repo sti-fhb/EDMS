@@ -642,9 +642,13 @@ async def test_rejected_event_carries_reason(db):
     await _doc(db, "DM-SOP-000560", status="DRAFT")
     v = await _version(db, "DM-SOP-000560", "1.0", status="DRAFT")
     r = await _review(db, "DM-SOP-000560", v.version_id, review_type="NEW", status="REJECTED")
-    # #679 起讀取端改用 `REJECT_REASON`（語意唯一＝審核者寫的）。本測試直接造列而不走
-    # `reviews.reject()`，故兩欄都要設——`REASON` 保留是為了同時守住「舊欄位不再是讀取來源」。
-    r.reason = "版本號格式不符，請改為 1.0 並補上變更摘要"
+    # #679 起讀取端改用 `REJECT_REASON`（語意唯一＝審核者寫的）。本測試直接造列、不走
+    # `reviews.reject()`，故要自己設。
+    #
+    # ⚠️ **兩欄刻意給不同值**：若兩者相同，本條就無法分辨讀取端讀的是哪一欄——那正是
+    # review 指出我第一版註解的假宣稱（寫著「同時守住舊欄位不再是讀取來源」，但相同值
+    # 證明不了那件事）。下方斷言比對的是 `REJECT_REASON` 的值。
+    r.reason = "【舊欄位】此值不應出現在畫面上"
     r.reject_reason = "版本號格式不符，請改為 1.0 並補上變更摘要"
     r.complete_date = utcnow()
     await db.flush()
@@ -656,10 +660,12 @@ async def test_rejected_event_carries_reason(db):
         submitted = [e for e in events if e.review_id == r.review_id and e.event_kind == "submitted"]
         assert len(resolved) == 1, f"{side}: 應有一個 resolved 事件"  # 母體錨點，避免下方恆真
         assert resolved[0].reason == "版本號格式不符，請改為 1.0 並補上變更摘要", side
+        # 與正向同一欄位比對：證明讀的是 REJECT_REASON 而非舊的 REASON
+        assert resolved[0].reason != "【舊欄位】此值不應出現在畫面上", f"{side}: 讀錯欄位"
         assert submitted and submitted[0].reason is None, f"{side}: submitted 事件不得帶 reason"
 
 
-async def test_廢止退回的動態列不帶廢止申請原因(db):
+async def test_廢止退回的動態列顯示審核者原因而非申請人原因(db):
     """🔴 #554 起就存在的洞，#657 修（兩個 review 各自獨立抓到同一處）。
 
     原本的判準只有 `status == REJECTED`，而那**不足以**推論「REASON 是審核者寫的」：
@@ -680,6 +686,10 @@ async def test_廢止退回的動態列不帶廢止申請原因(db):
     v = await _version(db, "DM-SOP-000562", "1.0", status="PUBLISHED", published=utcnow())
     r = await _review(db, "DM-SOP-000562", v.version_id, review_type="OBSOLETE", status="REJECTED")
     r.reason = "此 SOP 已由新制取代"  # 申請人於發起廢止時填寫，退回後仍保留於此
+    # #679：審核者的退回原因改存 `REJECT_REASON`。本測試直接造列、不走 `reviews.reject()`，
+    # 故必須自己設——**不設的話本條會恆真**：`reject_reason` 為 NULL ⇒ 讀取端不論對錯都回 None，
+    # 連「讀錯欄位」都驗不出來。（這正是 #657 / #624 連續踩到的「上游改了、下游測試靜默失效」。）
+    r.reject_reason = "仍需沿用，暫不廢止"
     r.complete_date = utcnow()
     await db.flush()
 
@@ -688,4 +698,7 @@ async def test_廢止退回的動態列不帶廢止申請原因(db):
         events = getattr(act, side)
         resolved = [e for e in events if e.review_id == r.review_id and e.event_kind == "resolved"]
         assert len(resolved) == 1, f"{side}: 應有一個 resolved 事件"  # 母體錨點，避免下方恆真
-        assert resolved[0].reason is None, f"{side}: 廢止退回列的 REASON 是申請原因，不得當退回原因呈現"
+        # 正向：顯示的是審核者寫的（來自 REJECT_REASON）
+        assert resolved[0].reason == "仍需沿用，暫不廢止", side
+        # 否定：與正向同一個欄位比對，確保申請人那段沒有混進來（本條的原始意圖）
+        assert resolved[0].reason != "此 SOP 已由新制取代", f"{side}: 不得把申請人的廢止申請原因當退回原因"

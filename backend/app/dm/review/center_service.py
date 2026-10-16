@@ -484,8 +484,8 @@ class ReviewCenterService:
         """退回廢止申請（US8）：文件由 PENDING_OBSOLETE 回 PUBLISHED；OBS_REJECT 通知撰寫者。
 
         不動版本（廢止申請不含新版本，version 指向現行發布版、維持 PUBLISHED）。**保留申請人原始廢止原因**於
-        `review.reason`（OBSOLETE 唯一存放申請理由之處，覆寫將永久失去可追溯性）；審核者之退回原因僅入稽核
-        （after_value.reject_reason）與 OBS_REJECT 通知。退回後文件恢復對外，撰寫者可於個人專區續處理（US9）。
+        `review.reason`（OBSOLETE 唯一存放申請理由之處，覆寫將永久失去可追溯性）；審核者之退回原因自 #679 起
+        另存於 `REJECT_REASON`（由 `reviews.reject()` 寫入），並同步入稽核與 OBS_REJECT 通知。退回後文件恢復對外，撰寫者可於個人專區續處理（US9）。
         """
         obsolete_reason = review.reason  # reviews.reject 會以退回原因覆寫 review.reason，先擷取申請理由
         await self._reviews.reject(db, review, approver=op.user_id, reason=reason)

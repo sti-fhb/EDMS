@@ -10,6 +10,11 @@ import { server } from "../../test/server"
 /** 與 `test/server.ts` 兩筆 resolved + REJECTED 事件的 `reason` 逐字相同（#554）。 */
 const REJECT_REASON = "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程"
 
+/** 錯誤訊息用：印出該欄的原始寬度字串（空字串時 parseFloat 會是 NaN，看不出原值）。 */
+function c0(cols: HTMLTableColElement[], j: number) {
+  return cols[j].style.width || "(未設定)"
+}
+
 describe("DmPersonalPage 個人專區（DM04）", () => {
   it("我的文件動態：撰寫者 / 審核者視角事件；送審中可撤回；逾門檻顯催辦中（AC5）", async () => {
     renderWithProviders(<DmPersonalPage />)
@@ -219,10 +224,19 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     const tables = container.querySelectorAll("table")
     expect(tables.length).toBeGreaterThan(0) // 正向錨點：表格有渲染出來
     tables.forEach((table, i) => {
-      const cols = table.querySelectorAll("colgroup col").length
+      const cols = Array.from(table.querySelectorAll<HTMLTableColElement>("colgroup col"))
       const ths = table.querySelectorAll("thead th").length
       expect(ths).toBeGreaterThan(0)
-      expect(cols, `第 ${i + 1} 個表格：colgroup ${cols} 個、表頭 ${ths} 欄，數量不符`).toBe(ths)
+      expect(cols.length, `第 ${i + 1} 個表格：colgroup ${cols.length} 個、表頭 ${ths} 欄，數量不符`).toBe(ths)
+
+      // 數量相等還不夠：`["34%", …, "0%"]` 數量對、第 7 欄仍然不可見。inline style 在 jsdom
+      // 會保留（不需排版引擎），所以每一欄的寬度值驗得到。
+      const widths = cols.map((c) => parseFloat(c.style.width))
+      widths.forEach((w, j) => {
+        expect(w, `第 ${i + 1} 個表格第 ${j + 1} 欄寬度為 ${c0(cols, j)}`).toBeGreaterThan(0)
+      })
+      // 總和須為 100%，否則 fixed layout 下最後一欄會被擠壓或溢出
+      expect(Math.round(widths.reduce((a, b) => a + b, 0))).toBe(100)
     })
   })
 
