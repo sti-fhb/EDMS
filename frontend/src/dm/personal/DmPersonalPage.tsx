@@ -202,7 +202,10 @@ function ActivityRow({
   const onWithdrawClick = () =>
     confirm({
       title: "確定撤回送審？",
-      content: "撤回後送審項目將回到草稿 / 已發布狀態，並通知原指派審核者。",
+      // ⛔ 不宣稱通知（#677 的第 8 處，漏接於 PR #686）：`SUBMIT_WITHDRAWN` 的 CHANNEL 為 `MSG`，
+      // 而 `MSG` 不是「換一個管道送」而是「不送了」（平台無站內訊息佇列，見 data-model〈通知事件〉
+      // 註記）——原指派審核者是從 DM02 簽核中心看到該項目消失、以及自己的動態出現「已被撤回」。
+      content: "撤回後送審項目將回到草稿 / 已發布狀態。",
       okText: "確認撤回",
       onOk: () => onWithdraw?.(event.review_id),
     })
