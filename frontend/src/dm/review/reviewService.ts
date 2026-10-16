@@ -2,7 +2,14 @@ import type { ApproveResult, CompletedItem, PendingItem, RejectResult, ReviewDet
 import type { PagedResult } from "../../hooks/usePagedQuery"
 import { http } from "../../services/http"
 
-/** 簽核中心 API（US6 / DM02）。 */
+/**
+ * 簽核中心 API（US6 / DM02）。
+ *
+ * ⚠️ 本檔路徑參數**刻意未編碼**，不是漏做（#624）：`reviewId` / `versionId` 皆為 `number`，
+ * TypeScript 保證內插後不可能含 `/`，`encodeURIComponent` 是 no-op。對齊 ET 既有寫法
+ * （`et/students/studentsService.ts` 只編碼字串的 `userId`、不編碼數字的 `courseId`）。
+ * 日後若有參數改為 `string`，請一併加上編碼。
+ */
 export const reviewApi = {
   listPending: async (page: number, limit: number): Promise<PagedResult<PendingItem>> => {
     const { data } = await http.get<PagedResult<PendingItem>>("/dm/reviews/pending", {

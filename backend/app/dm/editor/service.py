@@ -440,7 +440,11 @@ class EditorService:
             if open_ver is not None
             else await self._repo.get_doc_tags(db, doc_id)
         )
-        return EditorDocTags(audience_pairs=tags["audience_pairs"], retrieval_ids=tags["retrieval_ids"])
+        return EditorDocTags(
+            audience_pairs=tags["audience_pairs"],
+            retrieval_ids=tags["retrieval_ids"],
+            tag_names=tags["tag_names"],  # #624：含已停用者之名稱，供前端標示而非讓它隱形
+        )
 
     # ── 送簽 ──────────────────────────────────────────
 

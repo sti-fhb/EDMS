@@ -15,7 +15,7 @@ import Stack from "@mui/material/Stack"
 import TextField from "@mui/material/TextField"
 import Typography from "@mui/material/Typography"
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
 import {
@@ -143,9 +143,48 @@ export function DmEditorPage() {
    * 與頁面其他必填欄位一致；若同時在下方再列一次紅字會變成同一件事講兩遍。
    */
   const audienceError = errors["audience_pairs"]
+
+  /**
+   * 以 id 取顯示用選項；**不在 options 內者（已被管理者停用）合成一個標示「（已停用）」的選項**（#624）。
+   *
+   * 為何需要：`get_editor_options` 只回**啟用中**的標籤，而預帶**刻意不濾** `is_enabled`
+   * （濾掉等於讓使用者不知情地把既有標籤送掉——#602 要消滅的形狀）。兩者相減的結果是
+   * 「id 在表單裡、卻不在選項裡」，原本 `options.find(...)` 直接落空 ⇒ **該值在畫面上隱形**，
+   * 而送出時後端回 `DM_DOC_010`（泛用碼，指不到欄位），使用者看不到要改哪一格。
+   *
+   * ⛔ 不可改用「預帶時濾掉停用標籤」來解——那只是把靜默清空換個地方留著。
+   *
+   * 名稱來自預帶回應的 `tag_names`（含已停用者）。查不到名稱時退回顯示 id：那表示資料層
+   * 有殘留，顯示 id 仍比整格空白好——使用者至少看得出那裡有東西、能把它移除。
+   *
+   * 🔴 **「不在 options 裡」有兩個成因**，只有其中一個是停用：
+   *
+   *   1. 該標籤真的被管理者停用了              → 標示「（已停用）」
+   *   2. `options` 還沒載入 / 載入失敗         → **無從判斷**，不得標示
+   *
+   * 載入閘（下方 `draftMetaPending || docTagsPending || ...`）**刻意不等 options**，所以第 2
+   * 種一定會發生：docTags 先到的那段視窗內每個值都不在 options 裡，而 options 請求失敗時更是
+   * 永久如此。若一律標成停用，使用者會看到整個表單的標籤都壞掉——那是比隱形更糟的假訊息。
+   */
+  const optionFor = useCallback(
+    (id: string, from: OptionItem[]): OptionItem | null => {
+      if (!id) return null
+      const hit = from.find((o) => o.code === id)
+      if (hit) return hit
+      const name = docTags?.tag_names?.[id]
+      // 名稱也查不到＝資料層殘留（`DM_TAG` 無刪除功能，正常不會發生），不是「已停用」。
+      // 顯示 id 讓使用者至少看得出那裡有東西、能把它移除；但**不加後綴**，因為我們並不知道
+      // 它是不是停用——這與下一行是同一個判準：不確定就不要下判斷。
+      if (name === undefined) return { code: id, name: id }
+      // `options` 為 undefined＝尚未載入或載入失敗；此時同樣無從判斷，只顯示名稱
+      return { code: id, name: options ? `${name}（已停用）` : name }
+    },
+    [docTags?.tag_names, options],
+  )
+
   const selectedRetrieval = useMemo(
-    () => (options?.retrieval_tags ?? []).filter((o) => form.retrieval_ids.includes(o.code)),
-    [options?.retrieval_tags, form.retrieval_ids],
+    () => form.retrieval_ids.map((id) => optionFor(id, options?.retrieval_tags ?? [])).filter((o) => o !== null),
+    [options?.retrieval_tags, form.retrieval_ids, optionFor],
   )
 
   // 草稿內容欄位（會寫入 DM_DOCUMENT / DM_DOC_VERSION / DM_DOC_TAG）：變更後清草稿快取，
@@ -618,7 +657,7 @@ export function DmEditorPage() {
                           size="small"
                           sx={{ flex: 1 }}
                           options={unitOptions}
-                          value={unitOptions.find((o) => o.code === pair.unit_id) ?? null}
+                          value={optionFor(pair.unit_id, unitOptions)}
                           onChange={(_, v: OptionItem | null) =>
                             updateAudiencePair(idx, { unit_id: v?.code ?? "" })
                           }
@@ -637,7 +676,7 @@ export function DmEditorPage() {
                           size="small"
                           sx={{ flex: 1 }}
                           options={audienceOptions}
-                          value={audienceOptions.find((o) => o.code === pair.audience_id) ?? null}
+                          value={optionFor(pair.audience_id, audienceOptions)}
                           onChange={(_, v: OptionItem | null) =>
                             updateAudiencePair(idx, { audience_id: v?.code ?? "" })
                           }

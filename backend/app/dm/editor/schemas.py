@@ -55,6 +55,19 @@ class EditorDocTags(BaseModel):
 
     audience_pairs: list[AudiencePair]
     retrieval_ids: list[str]
+    #: `tag_id`（字串）→ 標籤名稱，**涵蓋上述所有 id、含已被管理者停用者**（#624）。
+    #:
+    #: 為何需要：`get_editor_options` 只回**啟用中**的選項，而本預帶**刻意不濾**
+    #: `is_enabled`（濾掉等於讓使用者不知情地把既有標籤送掉——#602 要消滅的形狀）。
+    #: 兩者相減 ⇒ 停用標籤的 id 在表單裡、卻不在選項裡，前端 `options.find(...)` 落空，
+    #: **該值在畫面上是隱形的**；送出時後端回 `DM_DOC_010`，使用者卻看不到要改哪一格。
+    #:
+    #: 帶名稱（而非「是否停用」旗標）是因為前端要顯示的就是「哪個值」，而它連名字都沒有；
+    #: 一個欄位同時解決檢索標籤與可見對象（單位 / 職位）三處。
+    #: ⛔ **只涵蓋本回應已出現的 id，不得擴充為完整標籤目錄**：本端點掛 `_ensure_editor`，
+    #: 編輯者本來就看得到這些文件；但回出整份含停用的清單會從「這份文件用了什麼」變成
+    #: 「系統裡有哪些受控選項」，那是另一件事（啟用中的目錄另有 `/dm/editor/options`）。
+    tag_names: dict[str, str]
 
 
 class DraftMeta(BaseModel):
