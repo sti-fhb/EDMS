@@ -157,6 +157,11 @@ class TestPublishSendsInvites:
         logs = await _pending_invites(db)
         assert len(logs) == 3
         assert {log.recipient for log in logs} == {f"{s}@edms.local" for s in students}
+        # 信中邀請碼＝本次發布產生的碼（#678 起改取 refresh 後的 `course.invitation_code`，
+        # 不再直接傳新產生的 `code`——發布前它是 None，取錯就會寄出空白邀請碼）
+        code = r.json()["invitation_code"]
+        assert code
+        assert all(code in log.body for log in logs)
 
     async def test_信件內容確實代入該收件人的姓名與課程(self, client, db) -> None:
         """渲染是否真的發生——只看有沒有列，一封空信也會過。"""
