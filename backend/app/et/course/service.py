@@ -562,9 +562,15 @@ class EtCourseService:
             # 當活表 id 查 `ET_CHAPTER` ⇒ 404，或更糟：撞上某個真實章節。
             return ChapterItem(chapter_id=-stage_id, chapter_name=req.chapter_name, sort_order=0, version=0)
 
+        # 🔴 **到得了這裡的只有草稿課程**（`is_staged` 已於上方 return）。
+        #
+        # 原本這裡有一道 `if course.status == COURSE_PUBLISHED: 寄 COURSE_UPDATE`，
+        # #631 之後**永遠不成立**——已發布課程走的是暫存路徑。留著那個永遠為假的條件，
+        # 下一個人讀到會以為通知還掛在這裡，而實際上它已經移到
+        # `publish_service.update_published`（套用成功之後才寄，信的內容那時才成立）。
+        #
+        # ⛔ 不要把它加回來：在新增當下寄信，信裡那句「課程新增了章節」對學員是假的。
         chapter = await self._chapters.append(db, course_id, req.chapter_name, operator)
-        if course.status == COURSE_PUBLISHED:
-            await self._notify_chapter_added(db, course, req.chapter_name)
         # ⚠️ 稽核**刻意排在通知之後**：`AuditLogService.log_action` 會取
         # `pg_advisory_xact_lock`，而那是**交易層級**鎖——持有到整個外層交易 commit 為止
         # （見 `dp/audit/repository.acquire_chain_lock` 的 docstring）。若先寫稽核，接下來
@@ -576,21 +582,6 @@ class EtCourseService:
         # 剩 commit 本身。
         await self._log(db, "CREATE", operator.user_id, course_id, "新增章節")
         return ChapterItem.model_validate(chapter)
-
-    async def _notify_chapter_added(self, db: AsyncSession, course, chapter_name: str) -> None:
-        """對在籍學員寄課程內容更新通知（`COURSE_UPDATE`）。
-
-        完課狀態的「回退為進行中」**不在此寫入任何欄位**（#303 SA Q1 裁示 A）：
-        `ET_ENROLLMENT.COMPLETION_STATUS` 在現行程式碼中只被寫一次（加入課程時的
-        `NOT_STARTED`）且**從未被讀**——所有讀取端自 #284 起一律以
-        `derive_completion_status(done, total)` 即時導出。新增章節使項目總數變大，
-        狀態自動從「已完成」回到「進行中」；再寫一份欄位只會多一個會與導出值分歧的
-        事實來源，而分歧的表現（清單說已完成、追蹤說進行中）沒有任何地方會察覺。
-        """
-        user_ids = await self._enrollments.enrolled_user_ids(db, course.course_id)
-        await self._course_update_mailer.send_course_update(
-            db, course=course, new_chapter_name=chapter_name, user_ids=user_ids
-        )
 
     async def rename_chapter(
         self, db: AsyncSession, chapter_id: int, req: ChapterRenameReq, *, operator: OperatorInfo
