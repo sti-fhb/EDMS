@@ -340,8 +340,14 @@ export const handlers = [
     HttpResponse.json({ version_id: Number(params.versionId), previewable: true }),
   ),
   http.post("/api/dm/documents/:docId/submit", () => HttpResponse.json({ review_id: 500, notified: 1 })),
+  // #624：`tag_names` 涵蓋回出的每個 id、**含已停用者**——options 只回啟用中的，停用標籤
+  // 若只給 id 會在畫面上隱形。停用情境由該測試以 server.use() 覆寫。
   http.get("/api/dm/editor/documents/:docId/tags", () =>
-    HttpResponse.json({ audience_pairs: [{ unit_id: "100", audience_id: "1" }], retrieval_ids: ["20"] }),
+    HttpResponse.json({
+      audience_pairs: [{ unit_id: "100", audience_id: "1" }],
+      retrieval_ids: ["20"],
+      tag_names: { "100": "全單位", "1": "全體", "20": "平時" },
+    }),
   ),
   // 續編 meta（#222）：預設回 404＝無本人草稿（→ 走「加新版」）；續編測試以 server.use 覆寫回 200
   http.get("/api/dm/editor/documents/:docId/draft-meta", () =>

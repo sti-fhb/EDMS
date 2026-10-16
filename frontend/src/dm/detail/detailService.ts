@@ -14,12 +14,12 @@ export interface InitiateObsoleteResult {
  */
 export const detailApi = {
   getDetail: async (docId: string): Promise<DetailResponse> => {
-    const { data } = await http.get<DetailResponse>(`/dm/documents/${docId}`)
+    const { data } = await http.get<DetailResponse>(`/dm/documents/${encodeURIComponent(docId)}`)
     return data
   },
 
   getVersions: async (docId: string): Promise<VersionItem[]> => {
-    const { data } = await http.get<VersionItem[]>(`/dm/documents/${docId}/versions`)
+    const { data } = await http.get<VersionItem[]>(`/dm/documents/${encodeURIComponent(docId)}/versions`)
     return data
   },
 
@@ -32,12 +32,12 @@ export const detailApi = {
     fd.append("reason", payload.reason)
     fd.append("reviewer_id", payload.reviewer_id)
     if (payload.file) fd.append("file", payload.file)
-    const { data } = await http.post<InitiateObsoleteResult>(`/dm/documents/${docId}/obsolete`, fd)
+    const { data } = await http.post<InitiateObsoleteResult>(`/dm/documents/${encodeURIComponent(docId)}/obsolete`, fd)
     return data
   },
 
   fetchFileBlob: async (docId: string, versionId: number, disposition: "preview" | "download"): Promise<Blob> => {
-    const { data } = await http.get<Blob>(`/dm/documents/${docId}/versions/${versionId}/file`, {
+    const { data } = await http.get<Blob>(`/dm/documents/${encodeURIComponent(docId)}/versions/${versionId}/file`, {
       params: { disposition },
       responseType: "blob",
     })

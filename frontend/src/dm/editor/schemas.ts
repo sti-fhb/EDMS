@@ -39,6 +39,14 @@ export interface ReviewerItem {
 export interface EditorDocTags {
   audience_pairs: AudiencePair[]
   retrieval_ids: string[]
+  /**
+   * `tag_id` → 標籤名稱，**涵蓋上述所有 id、含已被管理者停用者**（#624）。
+   *
+   * 選項端（`useEditorOptions`）只回**啟用中**的，而預帶**刻意不濾**停用者（濾掉等於讓
+   * 使用者不知情地把既有標籤送掉——#602）。兩者相減 ⇒ 停用標籤的 id 在表單裡、卻不在
+   * 選項裡；少了名稱就只能顯示 id 或整格空白，使用者看不出要改哪一格。
+   */
+  tag_names: Record<string, string>
 }
 
 /** 新增草稿文件結果。 */

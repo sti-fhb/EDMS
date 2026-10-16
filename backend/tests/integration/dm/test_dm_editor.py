@@ -7,7 +7,7 @@
 """
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 
 from app.core.auth import create_access_token
 from app.core.config import settings
@@ -341,6 +341,45 @@ async def test_get_doc_tags_for_edit_prefill(db):
     all_units = str(await _all_units_id(db))
     assert [(p.unit_id, p.audience_id) for p in tags.audience_pairs] == [(all_units, all_aud)]
     assert tags.retrieval_ids == [str(rid)]
+
+
+async def test_get_doc_tags_帶回標籤名稱含已停用者(db):
+    """#624：預帶回傳必須帶**名稱**，否則停用標籤在畫面上是隱形的。
+
+    ## 為什麼只給 id 不夠
+
+    `get_editor_options` 只回**啟用中**的標籤（`list_retrieval_tags` 等已濾 `is_enabled`），
+    而預帶（本函式）**刻意不濾** `is_enabled`——不濾是對的，濾掉等於讓使用者不知情地
+    把既有標籤送掉（#602 要消滅的形狀）。
+
+    兩者相減的結果：停用標籤的 id 在表單裡，但不在 options 裡 ⇒ 前端
+    `options.find(o => o.code === id)` 落空 ⇒ **畫面上看不到它**，而送出後端會回
+    `DM_DOC_010`。使用者收到一個指不到任何欄位的錯誤，要改的那個值又是隱形的。
+
+    修法是讓它**看得見**：預帶一併帶回名稱（含已停用者），前端據此合成一個標示
+    「（已停用）」的選項。⛔ 不可改成「預帶時濾掉停用標籤」。
+
+    ⚠️ `tag_names` 必須涵蓋**可見對象的單位與職位**，不只檢索標籤——三個欄位都會遇到
+    同一個情境，只修一個會留下「另外兩格仍然隱形」。
+    """
+    rid = await _make_retrieval_tag(db, "已停用標籤")
+    await _publish_doc(db, "DM-SOP-000624", audience=("全體",))
+    db.add(DmDocTag(doc_id="DM-SOP-000624", tag_id=rid, created_user="ed", created_date=utcnow()))
+    await db.flush()
+    # 管理者事後停用該標籤
+    await db.execute(update(DmTag).where(DmTag.tag_id == rid).values(is_enabled=False))
+    await db.flush()
+
+    tags = await _svc.get_doc_tags(db, "DM-SOP-000624", user_id="ed")
+
+    # 預帶不得因停用而少帶（#602 的形狀不得重現）
+    assert str(rid) in tags.retrieval_ids, "停用標籤仍須預帶，否則使用者會不知情地把它送掉"
+    # 名稱帶得回來，前端才顯示得出「哪個值」
+    assert tags.tag_names[str(rid)] == "已停用標籤"
+    # 可見對象兩側（單位 / 職位）也要有名稱，否則那兩格停用時同樣隱形
+    pair = tags.audience_pairs[0]
+    assert tags.tag_names[pair.audience_id] == "全體"
+    assert tags.tag_names[pair.unit_id] == "全單位"
 
 
 async def test_get_doc_tags_prefers_own_draft_snapshot(db):

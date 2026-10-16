@@ -13,6 +13,7 @@ from datetime import datetime
 
 from sqlalchemy import Row, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
@@ -35,24 +36,34 @@ _RETRIEVAL = "RETRIEVAL"
 _UNIT = "UNIT"  # 單位標籤組之 GROUP_TYPE（#437）
 
 
-def _split_by_group(rows) -> dict[str, list]:
-    """把 (TAG_ID, GROUP_TYPE, UNIT_TAG_ID) 列分為可見對象配對 / 檢索標籤（ID 轉字串供前端表單用）。
+def _split_by_group(rows) -> dict[str, list | dict]:
+    """把 (TAG_ID, GROUP_TYPE, UNIT_TAG_ID, TAG_NAME, UNIT_NAME) 列分為可見對象配對 / 檢索標籤
+    （ID 轉字串供前端表單用），並一併回出 `tag_names`。
 
     可見對象為 (單位, 職位) 配對（#437）。AUDIENCE 組但 `UNIT_TAG_ID` 為 NULL 者**略過**——該列
     配對不完整、於 `visibility.py` 不賦予任何可見性，若回給表單會讓撰寫者以為它生效。
+
+    `tag_names`（#624）涵蓋回出的每一個 id、**含已停用者**：選項端只回啟用中的，停用標籤若只
+    給 id 會在畫面上隱形。理由詳見 `EditorDocTags.tag_names` 之欄位說明。
     """
     audience_pairs: list[dict[str, str]] = []
     retrieval: list[str] = []
-    for tag_id, group_type, unit_tag_id in rows:
+    tag_names: dict[str, str] = {}
+    for tag_id, group_type, unit_tag_id, tag_name, unit_name in rows:
         if group_type != _AUDIENCE:
             retrieval.append(str(tag_id))
+            tag_names[str(tag_id)] = tag_name
         elif unit_tag_id is None:
             # 扣下任何一列都要留痕：正常情況不會發生（migration 已回填、service 兩欄必填），
             # 若出現代表資料層有殘留，而使用者只會看到「可見對象少了一列」且無從追查。
             logger.warning("可見對象配對缺單位，已於表單預帶時略過 tag_id=%s", tag_id)
         else:
             audience_pairs.append({"unit_id": str(unit_tag_id), "audience_id": str(tag_id)})
-    return {"audience_pairs": audience_pairs, "retrieval_ids": retrieval}
+            tag_names[str(tag_id)] = tag_name
+            # 單位名稱可能為 None：`UNIT_TAG_ID` 指向的列被硬刪時 outerjoin 落空。正常不會發生
+            # （DM_TAG 無刪除功能），但若發生，前端顯示 id 總比整格空白好——使用者至少看得出有東西。
+            tag_names[str(unit_tag_id)] = unit_name if unit_name is not None else str(unit_tag_id)
+    return {"audience_pairs": audience_pairs, "retrieval_ids": retrieval, "tag_names": tag_names}
 
 
 class EditorRepository:
@@ -241,25 +252,37 @@ class EditorRepository:
             )
         )
 
-    async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> dict[str, list[str]]:
-        """取文件現有有效標籤：可見對象 (單位, 職位) 配對 + 檢索標籤（ID 字串），供編輯模式預帶。"""
+    async def get_doc_tags(self, db: AsyncSession, doc_id: str) -> dict[str, list[str] | dict[str, str]]:
+        """取文件現有有效標籤：可見對象 (單位, 職位) 配對 + 檢索標籤（ID 字串）+ 名稱，供編輯模式預帶。
+
+        ⚠️ **刻意不濾 `DmTag.is_enabled`**：濾掉等於讓使用者不知情地把既有標籤送掉（#602）。
+        停用者改以 `tag_names` 帶回名稱、由前端標示「（已停用）」（#624）。
+        """
+        unit_tag = aliased(DmTag, name="dm_doc_tag_unit")
         rows = await db.execute(
-            select(DmTag.tag_id, DmTagGroup.group_type, DmDocTag.unit_tag_id)
+            select(DmTag.tag_id, DmTagGroup.group_type, DmDocTag.unit_tag_id, DmTag.tag_name, unit_tag.tag_name)
             .select_from(DmDocTag)
             .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .outerjoin(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
             .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
             .order_by(DmTag.tag_id)
         )
         return _split_by_group(rows.all())
 
-    async def get_version_tags(self, db: AsyncSession, version_id: int) -> dict[str, list[str]]:
-        """取該版本快照之標籤：可見對象配對 + 檢索標籤（ID 字串），供續編既有草稿時預帶。"""
+    async def get_version_tags(self, db: AsyncSession, version_id: int) -> dict[str, list[str] | dict[str, str]]:
+        """取該版本快照之標籤：可見對象配對 + 檢索標籤（ID 字串）+ 名稱，供續編既有草稿時預帶。
+
+        與 `get_doc_tags` 同樣**刻意不濾 `is_enabled`**，停用者以 `tag_names` 帶回（#624）。
+        兩支必須一起改：續編草稿走的是本支，只改前者會讓「續編」那條路徑仍然隱形。
+        """
+        unit_tag = aliased(DmTag, name="dm_version_tag_unit")
         rows = await db.execute(
-            select(DmTag.tag_id, DmTagGroup.group_type, DmVersionTag.unit_tag_id)
+            select(DmTag.tag_id, DmTagGroup.group_type, DmVersionTag.unit_tag_id, DmTag.tag_name, unit_tag.tag_name)
             .select_from(DmVersionTag)
             .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
             .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
+            .outerjoin(unit_tag, DmVersionTag.unit_tag_id == unit_tag.tag_id)
             .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
             .order_by(DmTag.tag_id)
         )

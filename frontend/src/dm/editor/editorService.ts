@@ -117,19 +117,19 @@ export const editorApi = {
     appendAudiencePairs(fd, payload.audience_pairs)
     payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
     if (payload.file) fd.append("file", payload.file)
-    const { data } = await http.post<VersionResult>(`/dm/documents/${docId}/versions`, fd)
+    const { data } = await http.post<VersionResult>(`/dm/documents/${encodeURIComponent(docId)}/versions`, fd)
     return data
   },
 
   getDocTags: async (docId: string): Promise<EditorDocTags> => {
-    const { data } = await http.get<EditorDocTags>(`/dm/editor/documents/${docId}/tags`)
+    const { data } = await http.get<EditorDocTags>(`/dm/editor/documents/${encodeURIComponent(docId)}/tags`)
     return data
   },
 
   /** 續編模式 meta；無本人可續編之草稿（後端 404）回 null（＝改走「加新版」流程）。 */
   getDraftMeta: async (docId: string): Promise<DraftMeta | null> => {
     try {
-      const { data } = await http.get<DraftMeta>(`/dm/editor/documents/${docId}/draft-meta`)
+      const { data } = await http.get<DraftMeta>(`/dm/editor/documents/${encodeURIComponent(docId)}/draft-meta`)
       return data
     } catch (e) {
       if ((e as { response?: { status?: number } })?.response?.status === 404) return null
@@ -151,12 +151,12 @@ export const editorApi = {
     appendAudiencePairs(fd, payload.audience_pairs)
     payload.retrieval_ids.forEach((id) => fd.append("retrieval_ids", id))
     if (payload.file) fd.append("file", payload.file)
-    const { data } = await http.put<VersionResult>(`/dm/documents/${docId}/versions/${versionId}`, fd)
+    const { data } = await http.put<VersionResult>(`/dm/documents/${encodeURIComponent(docId)}/versions/${versionId}`, fd)
     return data
   },
 
   submit: async (docId: string, body: { version_id: number; assigned_reviewer: string }): Promise<SubmitResult> => {
-    const { data } = await http.post<SubmitResult>(`/dm/documents/${docId}/submit`, body)
+    const { data } = await http.post<SubmitResult>(`/dm/documents/${encodeURIComponent(docId)}/submit`, body)
     return data
   },
 }

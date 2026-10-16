@@ -353,6 +353,48 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(screen.getByText("目前發布版")).toBeInTheDocument()
   })
 
+  it("已停用的檢索標籤仍看得見並標示「已停用」（#624）", async () => {
+    // 管理者停用某標籤後：options 只回啟用中的（故不含 id=99），但預帶**刻意不濾**
+    // （濾掉等於讓使用者不知情地把它送掉，#602 要消滅的形狀）。兩者相減 ⇒ 若不特別處理，
+    // 該值在畫面上是隱形的，而送出時後端回 DM_DOC_010，使用者看不到要改哪一格。
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/tags", () =>
+        HttpResponse.json({
+          audience_pairs: [{ unit_id: "100", audience_id: "1" }],
+          retrieval_ids: ["20", "99"], // 99 已被停用，不在 options 內
+          tag_names: { "100": "全單位", "1": "全體", "20": "平時", "99": "戰時" },
+        }),
+      ),
+    )
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText(/編輯文件 —/)
+
+    // 正向錨點：啟用中的那個照常顯示（證明本條不是在驗一個整段壞掉的畫面）
+    expect(await screen.findByText("平時")).toBeInTheDocument()
+    // 停用的那個看得見，且看得出它為什麼有問題
+    expect(screen.getByText("戰時（已停用）")).toBeInTheDocument()
+  })
+
+  it("已停用的可見對象仍看得見並標示「已停用」（#624）", async () => {
+    // 檢索標籤與可見對象是三個不同的欄位，只修一個會留下「另外兩格仍隱形」。
+    paramsRef.current = { docId: "DM-SOP-000001" }
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/tags", () =>
+        HttpResponse.json({
+          audience_pairs: [{ unit_id: "888", audience_id: "999" }], // 兩端都已停用
+          retrieval_ids: [],
+          tag_names: { "888": "已裁撤單位", "999": "已廢職類" },
+        }),
+      ),
+    )
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText(/編輯文件 —/)
+
+    expect(await screen.findByDisplayValue("已裁撤單位（已停用）")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("已廢職類（已停用）")).toBeInTheDocument()
+  })
+
   it("續編首版草稿：名稱可編輯、帶出既有版號/摘要/檔名、儲存走更新既有版本（#222）", async () => {
     let putCalls = 0
     server.use(
