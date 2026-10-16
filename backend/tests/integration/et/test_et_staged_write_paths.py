@@ -527,3 +527,81 @@ class TestStagedRead:
         detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
 
         assert [c["chapter_name"] for c in detail.json()["chapters"]] == ["第一章", "第二章"]
+
+
+class TestHasPendingChanges:
+    """`CourseDetail.has_pending_changes`——前端據此啟用「更新」鈕與顯示提示（#631）。
+
+    🔴 少了這個旗標，教師編完直接離開會以為學員已經看到了——而那正是本功能把生效
+    延後所製造的**新**風險。
+    """
+
+    async def test_編輯後為真(self, client, db) -> None:
+        uid = await _user(db, "ZT_P1")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+        )
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
+
+        assert detail.json()["has_pending_changes"] is True
+
+    async def test_尚未編輯時為假(self, client, db) -> None:
+        """正向錨點：少了它，讓旗標恆為真也會讓上一條通過——而那會讓「更新」鈕
+        永遠亮著，教師按下去得到一個什麼都沒做的 no-op。"""
+        uid = await _user(db, "ZT_P2")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
+
+        assert detail.json()["has_pending_changes"] is False
+
+    async def test_草稿恆為假(self, client, db) -> None:
+        """草稿的編輯本來就直接生效，沒有「尚未更新」這種狀態。"""
+        uid = await _user(db, "ZT_P3")
+        ids = await _course_with_content(client, db, uid)
+        await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "草稿新章"}, headers=_bearer(uid)
+        )
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
+
+        assert detail.json()["has_pending_changes"] is False
+
+    async def test_他人看到的恆為假(self, client, db) -> None:
+        """⚠️ 他人不該知道「這門課有人正在改」——那是擁有者的編輯狀態。"""
+        uid = await _user(db, "ZT_P4")
+        other = await _user(db, "ZT_P5")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+        )
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(other))
+
+        assert detail.json()["has_pending_changes"] is False
+
+    async def test_更新成功後回到假(self, client, db) -> None:
+        """按下「更新」之後暫存區清空，提示應消失。"""
+        uid = await _user(db, "ZT_P6")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        ch = await client.post(
+            f"{_COURSES}/{ids['course_id']}/chapters", json={"chapter_name": "暫存新章"}, headers=_bearer(uid)
+        )
+        await client.post(
+            f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": "新教材"},
+            headers=_bearer(uid),
+        )
+        applied = await client.post(f"{_COURSES}/{ids['course_id']}/content/apply", headers=_bearer(uid))
+        assert applied.status_code == 200, applied.text
+
+        detail = await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))
+
+        assert detail.json()["has_pending_changes"] is False
+        assert "暫存新章" in [c["chapter_name"] for c in detail.json()["chapters"]], "更新後內容已在活表"
