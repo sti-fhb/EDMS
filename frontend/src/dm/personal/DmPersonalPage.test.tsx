@@ -40,6 +40,9 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     renderWithProviders(<DmPersonalPage />)
     await user.click(await screen.findByRole("button", { name: "撤回送審" }))
     expect(await screen.findByText("確定撤回送審？")).toBeInTheDocument()
+    // 原本只斷言標題，**對話框內文零覆蓋**——那正是 PR #686 漏掉第 8 處的原因之一。
+    // `SUBMIT_WITHDRAWN` 的 CHANNEL 為 `MSG` ⇒ 平台不推送任何通知，內文不得宣稱「並通知原指派審核者」。
+    expect(screen.getByText("撤回後送審項目將回到草稿 / 已發布狀態。")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認撤回" }))
     expect(await screen.findByText("已撤回送審")).toBeInTheDocument()
   })
