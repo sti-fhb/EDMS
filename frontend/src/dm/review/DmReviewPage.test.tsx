@@ -126,6 +126,10 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     await user.click(await screen.findByRole("button", { name: "核准並發布" }))
     // 二次確認 dialog
     expect(await screen.findByText("確定核准此項目？")).toBeInTheDocument()
+    // ⛔ 這句的「通知相關人員」**刻意保留**（#677）：發布確實會以 DOC_PUBLISH 寄 Email 給
+    // 可見對象相符的閱覽者（FR-008），「相關人員」指的是他們、不是撰寫者。#677 清掉了同畫面
+    // 其他 6 句不實的「已通知…」，這一句不在其列——釘起來，免得下一次同類清理把它一併帶走。
+    expect(screen.getByText("核准後將立即發布並通知相關人員，此動作即時生效。")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認核准" }))
     expect(await screen.findByText("已核准並發布")).toBeInTheDocument()
   }, 20000)
@@ -201,6 +205,10 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     await user.click(await screen.findByText("待廢止 SOP"))
     await user.click(await screen.findByRole("button", { name: "核准並廢止" }))
     expect(await screen.findByText("確定核准廢止此文件？")).toBeInTheDocument()
+    // 原本只斷言標題，**對話框內文沒有任何覆蓋**——2026-10-16 變異實測：把內文改回
+    // 「…下架、通知撰寫者，…」，本檔 17 條全過。廢止走 OBS_APPROVE（CHANNEL=MSG ⇒ 平台
+    // 不推送任何通知），那句話是假的，故補成可執行斷言（#677）。
+    expect(screen.getByText("核准後文件將立即廢止並自文件庫下架，此動作即時生效。")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "確認廢止" }))
     expect(await screen.findByText("已核准廢止，文件已下架")).toBeInTheDocument()
   }, 20000)
