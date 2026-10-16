@@ -354,6 +354,9 @@ class EtCourseService:
             # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者
             # 收集全站邀請碼、自行加入任意課程，繞過 ET-4 的邀請門檻與限流。
             invitation_code=course.invitation_code if is_owner else None,
+            # 暫存區有東西 ＝ 有尚未按下「更新」的編輯。`staged_chapters is not None`
+            # 正是那個條件（擁有者 + 已發布 + 有暫存），不另外再查一次。
+            has_pending_changes=staged_chapters is not None,
             chapters=staged_chapters
             if staged_chapters is not None
             else [

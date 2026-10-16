@@ -410,6 +410,13 @@ class CourseDetail(BaseModel):
     #: ⚠️ 不可對所有人回傳——學員角色人人都有，任何登入者打這支 API 就能收集全站
     #: 邀請碼並自行加入任意課程，等同繞過 `ET-4` 的邀請門檻與其限流。
     invitation_code: str | None
+    #: 有尚未按下「更新」的編輯（#631）。**僅對擁有者有意義**，他人一律 `False`。
+    #:
+    #: 🔴 前端據此做兩件事：啟用「更新」鈕、顯示「有尚未更新的變更」。少了它，教師
+    #: 編完直接離開會以為學員已經看到了——而那正是本功能把生效延後所製造的新風險。
+    #:
+    #: ⚠️ 草稿恆為 `False`：草稿的編輯本來就直接生效，沒有「尚未更新」這種狀態。
+    has_pending_changes: bool = False
 
 
 class CourseCreateResult(BaseModel):
