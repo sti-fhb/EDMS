@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.auth import create_access_token
+from app.core.operator import OperatorInfo
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.notify.models import DpEmailLog
@@ -31,6 +32,8 @@ from app.et.constants import (
     SOURCE_INVITATION_CODE,
 )
 from app.et.course.models import EtChapter, EtCourse, EtItem
+from app.et.course.stage_apply import apply_stage
+from app.et.course.stage_repository import EtCourseStageRepository
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
 from app.et.roles.models import EtUserRole
@@ -198,6 +201,41 @@ async def _passed_student(db, *, uid: str, course_id: int, item_id: int, quiz_id
     return uid
 
 
+async def _apply(db, course_id: int, uid: str) -> None:
+    """套用暫存區——**直接呼叫 `apply_stage`，繞過「更新」端點的發布檢核**。
+
+    🔴 #631 之後「要求重測」不在編輯當下執行，而是延到按「更新」（2026-10-17 使用者
+    裁示：在編輯當下執行的話，學員被退回的那一刻新題目還沒生效，他重考的是剛通過的
+    同一份舊題）。所以本檔的每條測試都要經過套用才驗得到結果。
+
+    ⚠️ 繞過端點是刻意的：本檔的課程以 DB 直寫建成，沒有標籤、沒有教材、配分也不是
+    100，過不了那十項發布檢核。本檔要驗的是**重測這個副作用**，不是檢核——檢核由
+    `test_et_course_stage.py::TestUpdateEndpoint` 守著。
+    """
+    repo = EtCourseStageRepository()
+    course = await db.scalar(select(EtCourse).where(EtCourse.course_id == course_id))
+    operator = OperatorInfo(user_id=uid)
+    nodes = await repo.load_tree(db, course_id)
+    await apply_stage(db, course=course, nodes=nodes, operator=operator)
+    # ⚠️ **`clear` 要自己補**：它是 `update_published` 的一步，不在 `apply_stage` 裡面。
+    # 少了它，暫存列會留著，下一輪編輯讀到的是上一輪推進過的版號，而送出的是活表版號
+    # ⇒ 409，紅的理由與測試要驗的事情無關（2026-10-17 實際踩到）。
+    await repo.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
+
+
+async def _save_and_apply(client, db, teacher: str, course_id: int, response) -> None:
+    """教師存檔之後按「更新」——#631 之後**兩步才完整**。
+
+    勾「要求重測」在編輯當下只是記下意圖（寄在測驗暫存節點的 payload 上），真正把學員
+    退回未通過延到套用當下。本檔多數測試驗的是「退回之後怎樣」，所以一律補上這一步。
+
+    「套用之前學員完全不動」由 `test_按更新之前學員狀態完全不動` 單獨釘住——放進本
+    helper 的話，每條測試都會順便驗它，而那會讓它在某天失效時**沒有任何一條專門紅**。
+    """
+    assert response.status_code in (200, 201, 204), response.text
+    await _apply(db, course_id, teacher)
+
+
 async def _settings_body(db, quiz_id: int, *, pass_score: int, require_retest: bool) -> dict:
     quiz = await db.get(EtQuiz, quiz_id)
     return {
@@ -263,6 +301,35 @@ class TestPassedCount:
 
 
 class TestRequireRetestOnQuizChange:
+    async def test_按更新之前學員狀態完全不動(self, client, db):
+        """🔴 #631 的核心保證（2026-10-17 使用者裁示）：勾選只是**記下意圖**。
+
+        在編輯當下就執行的話，學員被退回未通過的那一刻**新題目還沒生效**——他去重考，
+        考的是剛剛才通過的同一份舊題。副作用必須跟著「學員看得到了」一起發生，與 #303
+        的通知改到「更新」當下寄是同一個道理。
+
+        ⚠️ 本條是 `_save_and_apply` 的對照組：那個 helper 把「存檔 + 更新」併成一步，
+        所以其餘測試都跨過了這個中間狀態。少了這一條，把意圖改回「編輯當下就執行」
+        **不會有任何測試變紅**。
+        """
+        teacher = await _user(db, "ZTT000")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        stu = await _passed_student(db, uid="ZTS000", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+        before = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert before[2] is True, "前置條件：學員此刻是已完成"
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+
+        assert r.status_code == 204, r.text
+        assert await _facts(db, uid=stu, quiz_id=qid, item_id=item_id) == before, "按更新之前不得動到學員"
+
+        await _apply(db, cid, teacher)
+
+        after = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
+        assert after[1] == 1 and after[2] is False, "按更新之後才退回"
+
     async def test_選是時已通過學員次數歸零且完成狀態清除(self, client, db):
         teacher = await _user(db, "ZTT001")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
@@ -271,7 +338,7 @@ class TestRequireRetestOnQuizChange:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert resets == 1, "應寫入一列 ET_QUIZ_RETRY_RESET 作為次數歸零的基準"
@@ -288,7 +355,7 @@ class TestRequireRetestOnQuizChange:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         attempts, _, _ = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert attempts == 2, "兩次 attempt 都必須留著（軟刪除也不行）"
@@ -301,7 +368,7 @@ class TestRequireRetestOnQuizChange:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=False)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         facts = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert facts == (1, 0, True), "選否時不應寫入基準、不應清除完成狀態"
@@ -317,7 +384,7 @@ class TestRequireRetestOnQuizChange:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
         assert pending == 2, "兩位受影響的學員應各排入一封；逐人一封而非合批（範本含 {USER_NAME}）"
@@ -355,7 +422,7 @@ class TestRequireRetestOnQuizChange:
             "require_retest": True,
         }
         r = await client.post(f"/api/et/quizzes/{qid}/questions", json=body, headers=_bearer(teacher))
-        assert r.status_code == 201, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert (resets, done) == (1, False), "新增題目是題目內容變更，應能觸發重測"
@@ -391,7 +458,7 @@ class TestRequireRetestOnQuizChange:
         await db.commit()
 
         r = await client.delete(f"/api/et/questions/{question_id}?require_retest=true", headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         attempts, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert (resets, done) == (1, False), "刪除題目是題目內容變更，應能觸發重測"
@@ -428,7 +495,7 @@ class TestRequireRetestOnQuizChange:
             json={"question_ids": list(reversed(ids)), "version": detail.json()["version"]},
             headers=_bearer(teacher),
         )
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert (resets, done) == (0, True), "排序不是內容變更，不該把全班的通過紀錄清掉"
@@ -445,9 +512,13 @@ class TestRequireRetestOnQuizChange:
         await db.commit()
 
         for round_no in (1, 2):
+            # ⚠️ 每一輪都要「存檔 + 更新」才算一次完整的儲存（#631）。少了更新，第二輪
+            # 的 `_settings_body` 會讀到未被套用的活表版號而 409——紅的理由就與本條要驗的
+            # 「第二次不該重複重置」無關了。
             body = await _settings_body(db, qid, pass_score=80 + round_no, require_retest=True)
             r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
             assert r.status_code == 204, f"第 {round_no} 次儲存：{r.text}"
+            await _apply(db, cid, teacher)
 
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert resets == 1, "第二次儲存時該學員已不算通過，不應再寫一列基準"
@@ -473,7 +544,7 @@ class TestRequireRetestOnQuizChange:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         _, resets, done = await _facts(db, uid=gone, quiz_id=qid, item_id=item_id)
         assert (resets, done) == (0, True), "已移出課程者不應被寫入基準、不應被清除完成狀態"
@@ -507,7 +578,7 @@ class TestRequireRetestOnQuizChange:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         attempts, resets, _ = await _facts(db, uid=failed, quiz_id=qid, item_id=item_id)
         assert (attempts, resets) == (1, 0), "未通過者不應被寫入重置基準"
@@ -544,7 +615,7 @@ class TestPassedDefinitionAfterRetest:
         # 教師改題並要求重測 → 寫入重置基準、清掉完成旗標
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
-        assert r.status_code == 204, r.text
+        await _save_and_apply(client, db, teacher, cid, r)
 
         # 學員重測三次（max_retry=2 → 本輪配額 3 次）全部不及格，次數用盡
         for no in (2, 3, 4):
@@ -624,6 +695,7 @@ class TestPassedDefinitionAfterRetest:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        await _apply(db, cid, teacher)  # #631：按「更新」才真的退回
         await _attempt(db, user_id=stu, course_id=cid, quiz_id=qid, no=2, score=10, is_pass=False)
 
         r = await client.get(f"/api/et/courses/{cid}/attempt-overview", headers=_bearer(teacher))
@@ -652,6 +724,7 @@ class TestPassedDefinitionAfterRetest:
 
         body = await _settings_body(db, qid, pass_score=85, require_retest=True)
         await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        await _apply(db, cid, teacher)  # #631：按「更新」才真的退回
 
         r = await client.get(f"/api/et/quizzes/{qid}/intro", headers=_bearer(stu))
 

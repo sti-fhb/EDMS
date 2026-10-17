@@ -33,6 +33,7 @@ from app.et.course.models import EtCourse
 from app.et.notify.course_update import TEMPLATE_COURSE_UPDATE
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
@@ -402,21 +403,26 @@ class TestCompletionStatusRollback:
         await _enroll(db, student, ctx["course_id"])
         await _complete(db, student, ctx["course_id"], ctx["item_id"])
 
-        survey = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/survey", json={"survey_name": "課後問卷"}, headers=_bearer(ctx["teacher"])
-        )
-        assert survey.status_code == 201, survey.text
-        question = await client.post(
-            f"/api/et/surveys/{survey.json()['survey_id']}/questions",
-            # 單選題至少 2 個選項（`ET_SURVEY_004`）
-            json={
-                "question_type": "SINGLE",
-                "stem": "滿意嗎？",
-                "options": [{"option_text": "滿意"}, {"option_text": "普通"}],
-            },
-            headers=_bearer(ctx["teacher"]),
-        )
-        assert question.status_code == 201, question.text
+        # ⚠️ 經 `editing_live`（#631）：問卷的建立與題目在已發布課程會進暫存區，而本條
+        # 要驗的是**學員填答之後**的狀態——學員只讀活表，留在暫存區的話填答根本開始不了。
+        async with editing_live(db, ctx["course_id"]):
+            survey = await client.post(
+                f"{_COURSES}/{ctx['course_id']}/survey",
+                json={"survey_name": "課後問卷"},
+                headers=_bearer(ctx["teacher"]),
+            )
+            assert survey.status_code == 201, survey.text
+            question = await client.post(
+                f"/api/et/surveys/{survey.json()['survey_id']}/questions",
+                # 單選題至少 2 個選項（`ET_SURVEY_004`）
+                json={
+                    "question_type": "SINGLE",
+                    "stem": "滿意嗎？",
+                    "options": [{"option_text": "滿意"}, {"option_text": "普通"}],
+                },
+                headers=_bearer(ctx["teacher"]),
+            )
+            assert question.status_code == 201, question.text
         form = await client.get(f"{_COURSES}/{ctx['course_id']}/survey/form", headers=_bearer(student))
         submitted = await client.post(
             f"{_COURSES}/{ctx['course_id']}/survey/response",

@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -160,7 +160,23 @@ class EtCourseStageRepository:
         await db.execute(
             delete(EtCourseContentStage).where(
                 EtCourseContentStage.course_id == course_id,
-                EtCourseContentStage.stage_id.in_(list(stage_ids)),
+                or_(
+                    EtCourseContentStage.stage_id.in_(list(stage_ids)),
+                    # 🔴 **連教師在本次工作階段刪掉的（軟刪）那些一起清**。
+                    #
+                    # 本表的 `PARENT_STAGE_ID` 指向自己（`FK_..._PARENT`）。教師刪掉的節點
+                    # 是軟刪，`load_tree` 濾掉它 ⇒ 它不在 `stage_ids` 裡，但它的父節點在
+                    # ⇒ 刪父違反外鍵，整個「更新」500。**教師只要刪過任何東西再按更新就會
+                    # 中**（2026-10-17 由 `test_刪除題目也能要求重測` 抓到）。
+                    #
+                    # 軟刪的列**不可能**被未來任何一次套用用到（`load_tree` 永遠看不到
+                    # 它們），所以隨工作階段一起結束是正確的，不是順手清垃圾。
+                    #
+                    # ⛔ 仍然不可改成 `WHERE COURSE_ID = ?`：那會連「`load_tree` 之後才寫
+                    # 進來、還沒被套用」的編輯（`DELETED = 0`）一起刪掉。兩個條件的分界正
+                    # 好是 `DELETED`。
+                    EtCourseContentStage.deleted == 1,
+                ),
             )
         )
         await db.flush()
