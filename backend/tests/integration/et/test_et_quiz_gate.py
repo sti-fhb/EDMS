@@ -33,6 +33,7 @@ from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.quiz.models import EtQuestion
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 
 pytestmark = pytest.mark.integration
 
@@ -190,21 +191,27 @@ async def _attempt_quiz(client, student: str, quiz_id: int, *, correct: bool, qu
     return submitted.json()
 
 
-async def _set_max_retry(client, teacher: str, quiz_id: int, max_retry: int) -> None:
-    current = await client.get(f"/api/et/quizzes/{quiz_id}", headers=_bearer(teacher))
-    assert current.status_code == 200, current.text
-    quiz = current.json()
-    r = await client.put(
-        f"/api/et/quizzes/{quiz_id}",
-        json={
-            "quiz_name": quiz["quiz_name"],
-            "pass_score": quiz["pass_score"],
-            "max_retry": max_retry,
-            "version": quiz["version"],
-        },
-        headers=_bearer(teacher),
-    )
-    assert r.status_code == 204, r.text
+async def _set_max_retry(client, db, teacher: str, quiz_id: int, course_id: int, max_retry: int) -> None:
+    """設定重考次數上限。
+
+    ⚠️ 走 `editing_live`（#631）：測驗設定在已發布課程會進暫存區，而本檔驗的是**學員
+    能不能再考**——那條判斷讀的是活表的 `MAX_RETRY`（見該工具的 docstring）。
+    """
+    async with editing_live(db, course_id):
+        current = await client.get(f"/api/et/quizzes/{quiz_id}", headers=_bearer(teacher))
+        assert current.status_code == 200, current.text
+        quiz = current.json()
+        r = await client.put(
+            f"/api/et/quizzes/{quiz_id}",
+            json={
+                "quiz_name": quiz["quiz_name"],
+                "pass_score": quiz["pass_score"],
+                "max_retry": max_retry,
+                "version": quiz["version"],
+            },
+            headers=_bearer(teacher),
+        )
+        assert r.status_code == 204, r.text
 
 
 class TestQuizBlocksUnlock:
@@ -440,7 +447,7 @@ class TestResetEscapeHatch:
         student = await _user(db, "s_gate08")
         course = await _course(client, db, teacher, code="33000008")
         # `max_retry=0` 即「不允許重考」——一次考壞就用盡，不必打四次
-        await _set_max_retry(client, teacher, course["first_quiz_id"], 0)
+        await _set_max_retry(client, db, teacher, course["first_quiz_id"], course["course_id"], 0)
         await _enroll(db, student, course["course_id"])
         await _attempt_quiz(client, student, course["first_quiz_id"], correct=False, question=course["first_question"])
 
@@ -477,7 +484,7 @@ class TestResetEscapeHatch:
         teacher = await _user(db, "t_gate09", ROLE_TEACHER)
         student = await _user(db, "s_gate09")
         course = await _course(client, db, teacher, code="33000009")
-        await _set_max_retry(client, teacher, course["first_quiz_id"], 0)
+        await _set_max_retry(client, db, teacher, course["first_quiz_id"], course["course_id"], 0)
         await _enroll(db, student, course["course_id"])
         await _attempt_quiz(client, student, course["first_quiz_id"], correct=False, question=course["first_question"])
         await client.post(

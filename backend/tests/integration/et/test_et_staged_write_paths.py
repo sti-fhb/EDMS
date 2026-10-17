@@ -356,7 +356,7 @@ _OTHER_MODULES = [
     ),
     (
         "PUT /surveys/{id}",
-        False,
+        True,
         lambda c, u, i: c.put(
             f"/api/et/surveys/{i['survey_id']}",
             json={"survey_name": "改名問卷", "is_active": True, "version": i["survey_version"]},
@@ -365,7 +365,7 @@ _OTHER_MODULES = [
     ),
     (
         "PUT /survey-questions/{id}",
-        False,
+        True,
         lambda c, u, i: c.put(
             f"/api/et/survey-questions/{i['sq_id']}",
             json={
@@ -379,7 +379,7 @@ _OTHER_MODULES = [
     ),
     (
         "DELETE /survey-questions/{id}",
-        False,
+        True,
         lambda c, u, i: c.delete(f"/api/et/survey-questions/{i['sq_id']}", headers=_bearer(u)),
     ),
 ]

@@ -310,6 +310,10 @@ class EtCourseStageWriter:
         rows = await db.scalars(stmt.order_by(EtCourseContentStage.sort_order, EtCourseContentStage.stage_id))
         return [_view(r) for r in rows.all()]
 
+    async def has_stage(self, db: AsyncSession, course_id: int) -> bool:
+        """該課程是否有編輯工作階段開著。語意見 `stage_repository.has_stage`。"""
+        return await self._stage.has_stage(db, course_id)
+
     async def node_by_stage_id(self, db: AsyncSession, stage_id: int) -> StageNodeView | None:
         """以 `STAGE_ID` 直接取節點（已解析 payload）。供已經握有 ref 的呼叫端回讀。"""
         row = await db.scalar(

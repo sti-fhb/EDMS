@@ -959,6 +959,35 @@ class TestUpdateEndpoint:
         assert (await _live_chapters(db, cid))[0].chapter_name == "更新後的章名"
         assert await repo.has_stage(db, cid) is False, "生效後暫存區要清空"
 
+    async def test_刪過東西之後按更新不會因自我外鍵而爆(self, client, db) -> None:
+        """🔴 2026-10-17 的真 bug：**教師只要刪過任何東西再按更新就 500**。
+
+        `ET_COURSE_CONTENT_STAGE.PARENT_STAGE_ID` 指向自己。教師刪掉的節點是**軟刪**，
+        `load_tree` 濾掉它 ⇒ 它不在 `clear` 收到的 id 清單裡，但它的父節點在 ⇒ 刪父
+        違反外鍵，整批 500。
+
+        ⚠️ 這個洞是 `clear` 由軟刪改硬刪時**引進**的，而既有的套用測試全都沒有「先刪
+        再套用」——`_apply` 那組根本不呼叫 `clear`，端點那組沒刪過東西。缺的不是斷言，
+        是**情境**。
+
+        ⛔ 不要把 `clear` 改成 `WHERE COURSE_ID = ?` 來迴避：那會連「`load_tree` 之後才
+        寫進來、還沒被套用」的編輯一起刪掉（見該方法的 docstring）。
+        """
+        uid = await _user(db, "ZT_U9")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        writer = EtCourseStageWriter(repo)
+        await repo.seed_from_live(db, cid, _operator(uid))
+        # 刪掉一個**有父層**的節點（選項掛在題目下），正是會踩到自我外鍵的形狀
+        option = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_OPTION)
+        await writer.delete_subtree(db, option.stage_id, _operator(uid))
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 200, r.text
+        assert await repo.has_stage(db, cid) is False, "套用後暫存區要整個清掉，含被軟刪的那些"
+
     async def test_檢核未通過時回_422_且活表一行都沒動(self, client, db) -> None:
         """🥇 **AC 2 的核心**：不通過時學員端維持上一版。
 

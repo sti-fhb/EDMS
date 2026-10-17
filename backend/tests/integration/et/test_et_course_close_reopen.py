@@ -35,6 +35,7 @@ from app.et.constants import (
 )
 from app.et.course.models import EtChapter, EtCourse
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 from tests.integration.et._tag_pairs import all_units_id, role_pair
 
 pytestmark = pytest.mark.integration
@@ -736,19 +737,24 @@ class TestReopenRerunsPublishChecks:
         cid = ctx["course_id"]
         closed = await client.post(f"{_COURSES}/{cid}/close", json={"version": ctx["version"]}, headers=_bearer(uid))
         assert closed.status_code == 200, closed.text
-        # 關閉中的課程不能刪問卷、只能停用（ET_SURVEY_007），正是本 issue 的情境
-        survey = await client.post(f"{_COURSES}/{cid}/survey", json={"survey_name": "s"}, headers=_bearer(uid))
-        assert survey.status_code == 201, survey.text
+        # 關閉中的課程不能刪問卷、只能停用（ET_SURVEY_007），正是本 issue 的情境。
+        # ⚠️ 經 `editing_live`（#631）：關閉期間的內容編輯會進暫存區，而 `publish-check`
+        # 與 `reopen` 讀的都是**活表**——留在暫存區的話，本條的錨點（確認這門課確實被
+        # SURVEY_NO_QUESTION 擋著）根本不成立，而那會讓後面的 200 失去意義。
+        async with editing_live(db, cid):
+            survey = await client.post(f"{_COURSES}/{cid}/survey", json={"survey_name": "s"}, headers=_bearer(uid))
+            assert survey.status_code == 201, survey.text
 
         before = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
         assert [b["code"] for b in before.json()["blockers"]] == ["SURVEY_NO_QUESTION"]
 
-        disabled = await client.put(
-            f"/api/et/surveys/{survey.json()['survey_id']}",
-            json={"survey_name": "s", "is_active": False, "version": survey.json()["version"]},
-            headers=_bearer(uid),
-        )
-        assert disabled.status_code == 204, disabled.text
+        async with editing_live(db, cid):
+            disabled = await client.put(
+                f"/api/et/surveys/{survey.json()['survey_id']}",
+                json={"survey_name": "s", "is_active": False, "version": survey.json()["version"]},
+                headers=_bearer(uid),
+            )
+            assert disabled.status_code == 204, disabled.text
 
         r = await client.post(
             f"{_COURSES}/{cid}/reopen",

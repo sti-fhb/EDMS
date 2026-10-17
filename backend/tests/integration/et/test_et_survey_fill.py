@@ -148,34 +148,40 @@ async def _complete(db, user_id: str, course_id: int, item_id: int) -> None:
     await db.flush()
 
 
-async def _survey(client, teacher: str, course_id: int, *, with_text: bool = True) -> dict:
-    """建問卷：2 題單選 + （選配）1 題問答。回 `{survey_id, questions: [...]}`。"""
-    created = await client.post(
-        f"{_COURSES}/{course_id}/survey", json={"survey_name": "課後滿意度問卷"}, headers=_bearer(teacher)
-    )
-    assert created.status_code == 201, created.text
-    survey_id = created.json()["survey_id"]
-    for stem, options in (
-        ("整體而言，您對本課程的內容安排是否滿意？", ["滿意", "普通", "不滿意"]),
-        ("影片教材的清晰度與長度是否適當？", ["適當", "普通", "需改進"]),
-    ):
-        r = await client.post(
-            f"/api/et/surveys/{survey_id}/questions",
-            json={
-                "question_type": SURVEY_QUESTION_SINGLE,
-                "stem": stem,
-                "options": [{"option_text": o} for o in options],
-            },
-            headers=_bearer(teacher),
+async def _survey(client, db, teacher: str, course_id: int, *, with_text: bool = True) -> dict:
+    """建問卷：2 題單選 + （選配）1 題問答。回 `{survey_id, questions: [...]}`。
+
+    ⚠️ 走 `editing_live`（#631）：問卷的建立與題目編輯在已發布課程會進暫存區，而本檔
+    要驗的是**學員填答**——學員只讀活表，問卷留在暫存區的話整檔都測不到東西。
+    與 `_course` 刻意不走發布 API 是同一個理由（見該工具的 docstring）。
+    """
+    async with editing_live(db, course_id):
+        created = await client.post(
+            f"{_COURSES}/{course_id}/survey", json={"survey_name": "課後滿意度問卷"}, headers=_bearer(teacher)
         )
-        assert r.status_code == 201, r.text
-    if with_text:
-        r = await client.post(
-            f"/api/et/surveys/{survey_id}/questions",
-            json={"question_type": SURVEY_QUESTION_TEXT, "stem": "其他建議", "options": []},
-            headers=_bearer(teacher),
-        )
-        assert r.status_code == 201, r.text
+        assert created.status_code == 201, created.text
+        survey_id = created.json()["survey_id"]
+        for stem, options in (
+            ("整體而言，您對本課程的內容安排是否滿意？", ["滿意", "普通", "不滿意"]),
+            ("影片教材的清晰度與長度是否適當？", ["適當", "普通", "需改進"]),
+        ):
+            r = await client.post(
+                f"/api/et/surveys/{survey_id}/questions",
+                json={
+                    "question_type": SURVEY_QUESTION_SINGLE,
+                    "stem": stem,
+                    "options": [{"option_text": o} for o in options],
+                },
+                headers=_bearer(teacher),
+            )
+            assert r.status_code == 201, r.text
+        if with_text:
+            r = await client.post(
+                f"/api/et/surveys/{survey_id}/questions",
+                json={"question_type": SURVEY_QUESTION_TEXT, "stem": "其他建議", "options": []},
+                headers=_bearer(teacher),
+            )
+            assert r.status_code == 201, r.text
     detail = await client.get(f"{_COURSES}/{course_id}/survey", headers=_bearer(teacher))
     assert detail.status_code == 200, detail.text
     return detail.json()
@@ -187,7 +193,7 @@ async def _ready(client, db, tag: str, *, with_text: bool = True, completed: boo
     student = await _user(db, f"s_{tag}")
     course_id = await _course(client, db, teacher)
     item_id = await _item(client, db, teacher, course_id)
-    survey = await _survey(client, teacher, course_id, with_text=with_text)
+    survey = await _survey(client, db, teacher, course_id, with_text=with_text)
     await _enroll(db, student, course_id)
     if completed:
         await _complete(db, student, course_id, item_id)
