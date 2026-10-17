@@ -75,7 +75,7 @@ async def get_survey(
 
 @router.put("/surveys/{survey_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_survey(
-    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    survey_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: SurveyUpdateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -98,7 +98,7 @@ async def list_survey_templates() -> list[SurveyTemplateRow]:
 
 @router.delete("/surveys/{survey_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_survey(
-    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    survey_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -111,7 +111,7 @@ async def delete_survey(
 
 @router.post("/surveys/{survey_id}/apply-template", response_model=SurveyDetail)
 async def apply_survey_template(
-    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    survey_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ApplyTemplateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -130,7 +130,7 @@ async def apply_survey_template(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_survey_question(
-    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    survey_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: SurveyQuestionCreateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -141,7 +141,7 @@ async def add_survey_question(
 
 @router.put("/surveys/{survey_id}/questions/order", status_code=status.HTTP_204_NO_CONTENT)
 async def reorder_survey_questions(
-    survey_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    survey_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: SurveyQuestionReorderReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -152,7 +152,7 @@ async def reorder_survey_questions(
 
 @router.put("/survey-questions/{sq_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_survey_question(
-    sq_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    sq_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: SurveyQuestionUpdateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -163,7 +163,7 @@ async def update_survey_question(
 
 @router.delete("/survey-questions/{sq_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_survey_question(
-    sq_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    sq_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:

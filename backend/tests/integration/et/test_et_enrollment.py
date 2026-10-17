@@ -33,6 +33,7 @@ from app.et.constants import (
 from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
@@ -185,8 +186,10 @@ class TestPreview:
         teacher = await _user(db, "t_enr01", ROLE_TEACHER)
         student = await _user(db, "s_enr01")
         cid = await _course(client, db, teacher, code="10000001")
-        await _chapter(client, teacher, cid)
-        await _chapter(client, teacher, cid, "第二章")
+        # `editing_live`：`_course` 造的課程過不了「更新」的發布檢核（見該工具的 docstring）
+        async with editing_live(db, cid):
+            await _chapter(client, teacher, cid)
+            await _chapter(client, teacher, cid, "第二章")
 
         r = await _preview(client, student, "10000001")
 
@@ -470,7 +473,8 @@ class TestMyCourses:
         teacher = await _user(db, "t_enr13", ROLE_TEACHER)
         student = await _user(db, "s_enr13")
         cid = await _course(client, db, teacher, code="10000013")
-        await _chapter(client, teacher, cid)
+        async with editing_live(db, cid):
+            await _chapter(client, teacher, cid)
         await _tag(db, cid, "護理師")
         await _tag(db, cid, "軍人")
         assert (await _join(client, student, "10000013")).status_code == 201
@@ -496,7 +500,8 @@ class TestMyCourses:
         teacher = await _user(db, "t_enr14", ROLE_TEACHER)
         student = await _user(db, "s_enr14")
         cid = await _course(client, db, teacher, code="10000014")
-        item_id = await _item(client, teacher, await _chapter(client, teacher, cid))
+        async with editing_live(db, cid):
+            item_id = await _item(client, teacher, await _chapter(client, teacher, cid))
         assert (await _join(client, student, "10000014")).status_code == 201
         await _complete(db, student, cid, item_id)
 
@@ -515,9 +520,10 @@ class TestMyCourses:
         teacher = await _user(db, "t_enr20", ROLE_TEACHER)
         student = await _user(db, "s_enr20")
         cid = await _course(client, db, teacher, code="10000020")
-        chapter_id = await _chapter(client, teacher, cid)
-        first = await _item(client, teacher, chapter_id)
-        await _item(client, teacher, chapter_id)
+        async with editing_live(db, cid):
+            chapter_id = await _chapter(client, teacher, cid)
+            first = await _item(client, teacher, chapter_id)
+            await _item(client, teacher, chapter_id)
         assert (await _join(client, student, "10000020")).status_code == 201
         await _complete(db, student, cid, first)
 
@@ -536,13 +542,18 @@ class TestMyCourses:
         teacher = await _user(db, "t_enr21", ROLE_TEACHER)
         student = await _user(db, "s_enr21")
         cid = await _course(client, db, teacher, code="10000021")
-        chapter_id = await _chapter(client, teacher, cid)
-        item_id = await _item(client, teacher, chapter_id)
+        async with editing_live(db, cid):
+            chapter_id = await _chapter(client, teacher, cid)
+            item_id = await _item(client, teacher, chapter_id)
         assert (await _join(client, student, "10000021")).status_code == 201
         await _complete(db, student, cid, item_id)
         assert (await client.get(_MY_COURSES, headers=_bearer(student))).json()["summary"]["completed"] == 1
 
-        await _item(client, teacher, await _chapter(client, teacher, cid, name="第二章"))
+        # ⚠️ #631 之後教師新增的項目要按「更新」才進活表；本條驗的是**項目進了活表之後**
+        # 完課狀態自己會回退（因為它是算出來的、不是存的），與回退發生在哪一刻無關。
+        # 「只在更新時回退」另由 `test_et_course_stage.py` 守著。
+        async with editing_live(db, cid):
+            await _item(client, teacher, await _chapter(client, teacher, cid, name="第二章"))
 
         summary = (await client.get(_MY_COURSES, headers=_bearer(student))).json()["summary"]
         assert summary == {"joined": 1, "in_progress": 1, "not_started": 0, "completed": 0, "pending_open": 0}

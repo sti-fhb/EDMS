@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -61,11 +61,24 @@ class EtCourseStageRepository:
     """暫存區的讀寫。"""
 
     async def has_stage(self, db: AsyncSession, course_id: int) -> bool:
-        """該課程是否已有暫存區（＝教師已經開始編輯但還沒按「更新」）。"""
+        """該課程是否有**編輯工作階段開著**（教師開始編輯了、還沒按「更新」或「取消」）。
+
+        🔴 **刻意不帶 `DELETED = 0`。** 判準是「這門課在暫存表裡有沒有列」，不是「暫存樹
+        空不空」——兩者在教師**把章節全刪光**時會分岔，而分岔的後果是靜默的：
+
+        1. 暫存樹變空 ⇒ 編輯頁退回去讀活表 ⇒ **剛刪掉的章節全部復活在畫面上**
+        2. `has_pending_changes` 變假 ⇒ 「更新」鈕暗掉，教師沒有任何方式讓刪除生效
+        3. 他接著新增一章 ⇒ `ensure_seeded` 以為沒有暫存區 ⇒ **從活表重新 seed** ⇒
+           剛才刪掉的全部回來，再加上新的那一章
+
+        教師自己刪的列是軟刪（`delete_subtree`），列還在 ⇒ 本方法回真 ⇒ 不會重新 seed。
+        工作階段結束時（`clear` 套用後／`discard` 放棄）列是**硬刪**、整個不見 ⇒ 回假。
+
+        ⛔ 不要「順手」補回 `DELETED = 0`——那正是上面那個 bug
+        （2026-10-16 code review MEDIUM）。`test_刪光章節後不得重新_seed` 會紅。
+        """
         found = await db.scalar(
-            select(EtCourseContentStage.stage_id)
-            .where(EtCourseContentStage.course_id == course_id, EtCourseContentStage.deleted == 0)
-            .limit(1)
+            select(EtCourseContentStage.stage_id).where(EtCourseContentStage.course_id == course_id).limit(1)
         )
         return found is not None
 
@@ -101,6 +114,7 @@ class EtCourseStageRepository:
                 parent_stage_id=r.parent_stage_id,
                 sort_order=r.sort_order,
                 payload=_payload(r.payload),
+                version=r.version,
             )
             for r in rows.all()
         )
@@ -123,27 +137,65 @@ class EtCourseStageRepository:
     async def clear(
         self, db: AsyncSession, course_id: int, operator: OperatorInfo, *, stage_ids: Sequence[int]
     ) -> None:
-        """清空暫存區——**只清指定的那批 `STAGE_ID`**。
+        """套用成功後清掉暫存列——**只清指定的那批 `STAGE_ID`**。
 
         ⛔ **不可改回 `WHERE COURSE_ID = ?`**：那會連「`load_tree` 之後才寫進來的編輯」
         一起清掉，而那筆編輯從來沒有被套用過——教師的輸入靜默消失，沒有任何錯誤訊息。
         呼叫端一律傳入自己實際載入並套用的那批 id。
 
-        ⛔ 軟刪除（`DELETED = 1`），遵專案禁硬刪規範。唯一索引的條件帶 `DELETED = 0`，
-        所以清空後再次編輯不會撞鍵。
+        🔴 **硬刪除——這是專案「禁止硬刪除」規則的例外**（2026-10-16 使用者裁示，
+        見 `docs/ref/sti-backend-ref.md` 的例外表）。理由：
+
+        1. **本表是暫時性工作區，不是業務紀錄。** 被清掉的列，其內容在同一個交易裡
+           已經整批複製進活表；稽核軌跡落在活表與 `DP_AUDIT_LOG`，不在這裡。
+        2. **軟刪會讓「有沒有編輯工作階段開著」失去判準。** 教師自己刪章節也是軟刪，
+           兩種 `DELETED = 1` 分不出來——見 `has_stage` 的 docstring，那是個會讓刪除
+           靜默復活的 bug。
+
+        ⚠️ 連帶：`operator` 目前用不到（硬刪沒有 `UPDATED_USER` 可寫）。保留參數是為了
+        呼叫端形狀不變，且日後若改回軟刪不必再改簽名。
         """
         if not stage_ids:
             return
         await db.execute(
-            update(EtCourseContentStage)
-            .where(
+            delete(EtCourseContentStage).where(
                 EtCourseContentStage.course_id == course_id,
-                EtCourseContentStage.stage_id.in_(list(stage_ids)),
-                EtCourseContentStage.deleted == 0,
+                or_(
+                    EtCourseContentStage.stage_id.in_(list(stage_ids)),
+                    # 🔴 **連教師在本次工作階段刪掉的（軟刪）那些一起清**。
+                    #
+                    # 本表的 `PARENT_STAGE_ID` 指向自己（`FK_..._PARENT`）。教師刪掉的節點
+                    # 是軟刪，`load_tree` 濾掉它 ⇒ 它不在 `stage_ids` 裡，但它的父節點在
+                    # ⇒ 刪父違反外鍵，整個「更新」500。**教師只要刪過任何東西再按更新就會
+                    # 中**（2026-10-17 由 `test_刪除題目也能要求重測` 抓到）。
+                    #
+                    # 軟刪的列**不可能**被未來任何一次套用用到（`load_tree` 永遠看不到
+                    # 它們），所以隨工作階段一起結束是正確的，不是順手清垃圾。
+                    #
+                    # ⛔ 仍然不可改成 `WHERE COURSE_ID = ?`：那會連「`load_tree` 之後才寫
+                    # 進來、還沒被套用」的編輯（`DELETED = 0`）一起刪掉。兩個條件的分界正
+                    # 好是 `DELETED`。
+                    EtCourseContentStage.deleted == 1,
+                ),
             )
-            .values(deleted=1, updated_user=operator.user_id, updated_date=utcnow())
         )
         await db.flush()
+
+    async def discard(self, db: AsyncSession, course_id: int) -> int:
+        """放棄整個編輯工作階段——硬刪該課程**全部**暫存列，回傳刪掉幾列。
+
+        教師按「取消」時走這條：課程回到學員目前看到的版本（活表一行都不會動）。
+
+        ⛔ 與 `clear` 不同，這裡**刻意**是 `WHERE COURSE_ID = ?` 而非指定 id：教師要放棄
+        的是「我這次編輯的全部」，不是某一批。呼叫端須已持有 `lock_course`，否則同時
+        按下的「更新」可能把部分內容套用出去。
+
+        ⚠️ 硬刪的理由同 `clear`——這些列從未進過活表，放棄之後沒有任何保存價值，
+        而留著會讓 `has_stage` 永遠回真、教師再也開不了新的編輯工作階段。
+        """
+        result = await db.execute(delete(EtCourseContentStage).where(EtCourseContentStage.course_id == course_id))
+        await db.flush()
+        return result.rowcount or 0
 
     async def seed_from_live(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
         """把活表的內容樹整棵複製進暫存區。
@@ -178,6 +230,15 @@ class EtCourseStageRepository:
             parent_stage_id=parent,
             sort_order=sort_order,
             payload=to_payload(spec, row),
+            # 🔴 **樂觀鎖的初值承接活表那一列**（#631 PR 2）。
+            #
+            # 教師開編輯頁時，第一次編輯之前還沒有暫存列，前端拿到的 `VERSION` 來自活表。
+            # 初值若設 0，那第一次編輯必然 409（`WHERE version = 3` 對上 `version = 0`）
+            # ——教師會看到「資料已被其他使用者修改」，而根本沒有別人。
+            #
+            # ⚠️ 承接的只是**初值**：此後暫存列自己遞增，活表那一列不動，兩者就分岔了。
+            # 下一次 seed（清空後再編輯）會再承接一次當時的活表值。
+            version=getattr(row, "version", 0),
             created_user=ctx.operator.user_id,
             created_date=ctx.now,
         )

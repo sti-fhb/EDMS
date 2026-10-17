@@ -9,7 +9,7 @@
 """
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
@@ -684,14 +684,27 @@ class TestDeleteQuestion:
 # ── #410：已發布課程的測驗不得被刪到 0 題 ────────────────────
 
 
-async def test_已發布課程刪最後一題被擋(db, client):
-    """🔴 發布檢核是**一次性**的，`evaluate_publish` 全專案只有一個呼叫點（`publish_service._blockers`），
-    `publish` 與 `reopen` 共用——之後教師怎麼改都不會再被檢核到。#410 就是那個時間差。
+async def test_已發布課程刪最後一題進暫存且更新時被擋(db, client):
+    """🔴 **本條在 2026-10-17 被使用者裁示改寫**，原為 `test_已發布課程刪最後一題被擋`。
 
-    後果不是「發布出一個 0 題測驗」，是**發布後才被刪成 0 題**：
-    `attempt/service.start` 對 0 題測驗回 404（建零題 attempt 會白吃一次次數），該項目
-    因此永遠拿不到 `IS_COMPLETED`，而完課要求每一項皆完成 → **整門課永遠無法完課**，
-    連帶課後問卷入口（US13 AC 1）與線下核可（US16）都拿不到。教師端則完全沒有訊號。
+    ## #410 守的是什麼
+
+    後果不是「發布出一個 0 題測驗」，是**發布後才被刪成 0 題**：`attempt/service.start`
+    對 0 題測驗回 404，該項目因此永遠拿不到 `IS_COMPLETED`，而完課要求每一項皆完成
+    → **整門課永遠無法完課**，連帶課後問卷入口與線下核可都拿不到，教師端沒有任何訊號。
+
+    ## 為何守門的位置換了
+
+    #410 當初補的是一個**時間差**：`evaluate_publish` 全專案只有一個呼叫點，所以檢核
+    只在發布 / 再開課那一刻跑，之後教師怎麼刪都不會再被檢核。
+
+    #631 之後「更新」也跑同一套檢核，而且已發布課程的刪除**只進暫存區、碰不到學員**。
+    時間差沒了，於是編輯當下不再擋——擋的話只會擋住「先刪光再重建題庫」這個合法順序。
+
+    **要守的東西一點都沒少，只是改由「更新」那一關守。** 本條驗的正是這件事：
+    刪得掉（進暫存）、學員端不變、按「更新」被 `QUIZ_NO_QUESTION` 擋下。
+
+    ⛔ 不要因為「#410 說要擋」就把編輯當下的守門加回來——那條規則現在由下游承接。
     """
     uid = await _user(db, "q410a")
     cid, qid = await _quiz(client, uid)
@@ -700,11 +713,21 @@ async def test_已發布課程刪最後一題被擋(db, client):
 
     r = await client.delete(f"/api/et/questions/{q['question_id']}", headers=_bearer(uid))
 
-    assert r.status_code == 409, r.text
-    assert r.json()["error_code"] == "ET_QUESTION_005"
-    # 題目必須還在——擋下來卻已經刪掉等於沒擋
-    left = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
-    assert len(left.json()["questions"]) == 1
+    assert r.status_code == 204, r.text
+    # 教師看到的是暫存版：題目沒了
+    staged = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(uid))
+    assert staged.json()["questions"] == []
+    # 🔴 但**活表一行都沒動**——學員此刻看到的測驗仍有那一題
+    live = await db.scalar(
+        select(func.count()).select_from(EtQuestion).where(EtQuestion.quiz_id == qid, EtQuestion.deleted == 0)
+    )
+    assert live == 1, "按下更新之前，刪除不得碰到學員看到的版本"
+
+    applied = await client.post(f"/api/et/courses/{cid}/content/apply", headers=_bearer(uid))
+
+    assert applied.status_code == 422, applied.text
+    assert applied.json()["error_code"] == "ET_PUBLISH_001"
+    assert "QUIZ_NO_QUESTION" in {b["code"] for b in applied.json()["blockers"]}
 
 
 async def test_已發布課程刪非最後一題照常(db, client):

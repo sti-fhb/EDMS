@@ -336,7 +336,7 @@ async def reorder_chapters(
 
 @router.put("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def rename_chapter(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ChapterRenameReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -347,7 +347,7 @@ async def rename_chapter(
 
 @router.delete("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chapter(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -361,7 +361,7 @@ async def delete_chapter(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_item(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ItemCreateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -372,7 +372,7 @@ async def add_item(
 
 @router.put("/chapters/{chapter_id}/items/order", status_code=status.HTTP_204_NO_CONTENT)
 async def reorder_items(
-    chapter_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    chapter_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: ItemReorderReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -383,7 +383,7 @@ async def reorder_items(
 
 @router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_item(
-    item_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    item_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -455,6 +455,30 @@ async def apply_course_content(
     > 它的生效入口是「發布」。
     """
     return await _publish_service.update_published(db, course_id, operator=operator)
+
+
+@router.delete(
+    "/courses/{course_id}/content/stage",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+)
+async def discard_course_content(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """ET05「取消」：放棄尚未更新的編輯，回到學員目前看到的版本（#631）。
+
+    暫存模式讓編輯工作階段有兩個出口：按「更新」套用，或按「取消」放棄。**活表一行
+    都不會動**——學員在整個編輯期間看到的始終是上一次「更新」的版本，所以放棄不需要
+    任何回滾。
+
+    暫存區本來就是空的時一樣回 204（冪等）：教師沒改過任何東西就按取消是正常操作。
+
+    > ⚠️ 草稿課程不走這條路（409 `ET_COURSE_010`）——草稿的章節與項目直接寫活表，
+    > 沒有暫存表可清，按「取消」本來就不還原。
+    """
+    await _publish_service.discard_content(db, course_id, operator=operator)
 
 
 @router.post(

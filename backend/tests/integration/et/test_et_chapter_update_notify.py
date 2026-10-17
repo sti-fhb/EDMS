@@ -33,6 +33,7 @@ from app.et.course.models import EtCourse
 from app.et.notify.course_update import TEMPLATE_COURSE_UPDATE
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 from tests.integration.et._tag_pairs import all_units_id
 
 pytestmark = pytest.mark.integration
@@ -176,10 +177,40 @@ async def _update_mails(db) -> list[DpEmailLog]:
     return list(rows.scalars().all())
 
 
-async def _add_chapter(client, ctx: dict, name: str):
-    return await client.post(
+async def _apply(client, ctx: dict):
+    """按「更新」把暫存區的編輯整批生效（#631）。"""
+    r = await client.post(f"{_COURSES}/{ctx['course_id']}/content/apply", headers=_bearer(ctx["teacher"]))
+    assert r.status_code == 200, r.text
+    return r
+
+
+async def _add_chapter(client, ctx: dict, name: str, *, with_item: bool = True, apply: bool = True):
+    """新增章節，預設**連填充項目一起加並按下「更新」**。
+
+    🔴 #631 之後，已發布課程的新增只進暫存區——學員端與通知都要等「更新」才發生。
+    本檔驗的是「新增章節 → 通知在籍學員」，所以 helper 要把整條路走完，否則測試驗的
+    是一個不會寄信的中間狀態。
+
+    ⚠️ **填充項目是必要的**：空章節過不了 `BLOCK_CHAPTER_EMPTY`，「更新」會回 422。
+    自己要加項目的測試請傳 `with_item=False, apply=False`，加完再自行呼叫 `_apply`。
+
+    ⚠️ **草稿課程傳 `apply=False`**：草稿的編輯本來就直接生效，打「更新」會回 409
+    `ET_COURSE_010`（草稿請直接編輯後發布）。
+    """
+    created = await client.post(
         f"{_COURSES}/{ctx['course_id']}/chapters", json={"chapter_name": name}, headers=_bearer(ctx["teacher"])
     )
+    if with_item:
+        assert created.status_code == 201, created.text
+        item = await client.post(
+            f"/api/et/chapters/{created.json()['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": f"{name} 教材"},
+            headers=_bearer(ctx["teacher"]),
+        )
+        assert item.status_code == 201, item.text
+    if apply:
+        await _apply(client, ctx)
+    return created
 
 
 class TestNotifyOnChapterAdded:
@@ -216,7 +247,8 @@ class TestNotifyOnChapterAdded:
         # 草稿理論上不會有 enrollment；刻意塞一筆，驗「判定看課程狀態、不看有沒有人」
         await _enroll(db, await _user(db, "s_cu03", ROLE_STUDENT), ctx["course_id"])
 
-        r = await _add_chapter(client, ctx, "第二章")
+        # 草稿的編輯直接生效，不走「更新」（打了會回 409 `ET_COURSE_010`）
+        r = await _add_chapter(client, ctx, "第二章", apply=False)
 
         assert r.status_code == 201, r.text
         assert await _update_mails(db) == []
@@ -324,13 +356,19 @@ class TestCompletionStatusRollback:
         assert before.json()["courses"][0]["completion_status"] == "COMPLETED"
 
         # 新增章節本身不夠——完課率的分母是**項目**數，故新章節要掛一個項目
-        ch = await _add_chapter(client, ctx, "第二章")
+        ch = await _add_chapter(client, ctx, "第二章", with_item=False, apply=False)
         added = await client.post(
             f"/api/et/chapters/{ch.json()['chapter_id']}/items",
             json={"item_type": ITEM_MATERIAL, "title": "新教材"},
             headers=_bearer(ctx["teacher"]),
         )
         assert added.status_code == 201, added.text
+
+        # 🔴 #631：套用**之前**學員端一個位元都不該變——完課回退也還沒發生。
+        midway = await client.get("/api/et/my-courses", headers=_bearer(student))
+        assert midway.json()["courses"][0]["completion_status"] == "COMPLETED", "按下更新前不得回退"
+
+        await _apply(client, ctx)
 
         after = await client.get("/api/et/my-courses", headers=_bearer(student))
         assert after.json()["courses"][0]["completion_status"] == "IN_PROGRESS"
@@ -365,21 +403,26 @@ class TestCompletionStatusRollback:
         await _enroll(db, student, ctx["course_id"])
         await _complete(db, student, ctx["course_id"], ctx["item_id"])
 
-        survey = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/survey", json={"survey_name": "課後問卷"}, headers=_bearer(ctx["teacher"])
-        )
-        assert survey.status_code == 201, survey.text
-        question = await client.post(
-            f"/api/et/surveys/{survey.json()['survey_id']}/questions",
-            # 單選題至少 2 個選項（`ET_SURVEY_004`）
-            json={
-                "question_type": "SINGLE",
-                "stem": "滿意嗎？",
-                "options": [{"option_text": "滿意"}, {"option_text": "普通"}],
-            },
-            headers=_bearer(ctx["teacher"]),
-        )
-        assert question.status_code == 201, question.text
+        # ⚠️ 經 `editing_live`（#631）：問卷的建立與題目在已發布課程會進暫存區，而本條
+        # 要驗的是**學員填答之後**的狀態——學員只讀活表，留在暫存區的話填答根本開始不了。
+        async with editing_live(db, ctx["course_id"]):
+            survey = await client.post(
+                f"{_COURSES}/{ctx['course_id']}/survey",
+                json={"survey_name": "課後問卷"},
+                headers=_bearer(ctx["teacher"]),
+            )
+            assert survey.status_code == 201, survey.text
+            question = await client.post(
+                f"/api/et/surveys/{survey.json()['survey_id']}/questions",
+                # 單選題至少 2 個選項（`ET_SURVEY_004`）
+                json={
+                    "question_type": "SINGLE",
+                    "stem": "滿意嗎？",
+                    "options": [{"option_text": "滿意"}, {"option_text": "普通"}],
+                },
+                headers=_bearer(ctx["teacher"]),
+            )
+            assert question.status_code == 201, question.text
         form = await client.get(f"{_COURSES}/{ctx['course_id']}/survey/form", headers=_bearer(student))
         submitted = await client.post(
             f"{_COURSES}/{ctx['course_id']}/survey/response",
@@ -395,14 +438,15 @@ class TestCompletionStatusRollback:
         )
         assert submitted.status_code == 201, submitted.text
 
-        # 新增帶項目的章節 → 完課狀態回退為進行中
-        ch = await _add_chapter(client, ctx, "第二章")
+        # 新增帶項目的章節 → 按下「更新」後完課狀態回退為進行中（#631）
+        ch = await _add_chapter(client, ctx, "第二章", with_item=False, apply=False)
         added = await client.post(
             f"/api/et/chapters/{ch.json()['chapter_id']}/items",
             json={"item_type": ITEM_MATERIAL, "title": "新教材"},
             headers=_bearer(ctx["teacher"]),
         )
         assert added.status_code == 201, added.text
+        await _apply(client, ctx)
 
         mine = await client.get("/api/et/my-courses", headers=_bearer(student))
         assert mine.json()["courses"][0]["completion_status"] == "IN_PROGRESS", "前提：確實已回退"

@@ -42,6 +42,15 @@ export interface CourseDetail {
   chapters: ChapterItem[]
   /** 課程邀請碼；**僅 owner 可見**，非擁有者後端回 null（#247）。 */
   invitation_code: string | null
+  /**
+   * 有尚未按下「更新」的編輯（#631）。**僅對擁有者有意義**，他人一律 `false`。
+   *
+   * 🔴 據此啟用「更新」鈕與顯示「有尚未更新的變更」。少了這個提示，教師編完直接
+   * 離開會以為學員已經看到了——而那正是「生效延後」所製造的**新**風險。
+   *
+   * ⚠️ 草稿恆為 `false`：草稿的編輯本來就直接寫活表，沒有「尚未更新」這種狀態。
+   */
+  has_pending_changes: boolean
 }
 
 export interface TagOption {
@@ -189,6 +198,17 @@ export interface CourseStatusResult {
   open_end_at: string | null
   closed_at: string | null
   version: number
+}
+
+/**
+ * 「更新」成功之結果（對齊後端 `ContentUpdateResult`，#631）。
+ *
+ * 不含課程狀態——「更新」**不改變狀態**，它改變的是學員看到的內容版本。
+ */
+export interface ContentUpdateResult {
+  course_id: number
+  /** 本次生效的暫存節點數；`0` 代表暫存區是空的，端點為安全的 no-op。 */
+  applied_count: number
 }
 
 // ── 表單驗證（Zod）────────────────────────────────────────────────────────────
