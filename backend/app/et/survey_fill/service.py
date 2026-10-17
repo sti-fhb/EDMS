@@ -29,15 +29,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.constants import COURSE_CLOSED, SURVEY_QUESTION_SINGLE
+from app.et.constants import COURSE_CLOSED, COURSE_PUBLISHED, SURVEY_QUESTION_SINGLE
 from app.et.course.rules import is_effectively_closed
 from app.et.enrollment.rules import is_course_completed
 from app.et.learning.repository import EtLearningRepository
+from app.et.learning.rules import COURSE_MANAGER_ROLES, ensure_can_access
 from app.et.progress.repository import EtProgressRepository
 from app.et.survey.models import EtSurveyOption, EtSurveyQuestion
 from app.et.survey.repository import EtSurveyRepository
 from app.et.survey_fill.repository import EtSurveyFillRepository, SurveyEntryFacts
 from app.et.survey_fill.rules import (
+    ENTRY_HIDDEN,
+    ENTRY_PREVIEW,
     AnswerDraft,
     QuestionSpec,
     build_detail_rows,
@@ -107,7 +110,9 @@ class EtSurveyFillService:
         self._learning = learning or EtLearningRepository()
         self._progress = progress or EtProgressRepository()
 
-    async def entry(self, db: AsyncSession, *, course_id: int, user_id: str, completed: bool) -> SurveyEntry | None:
+    async def entry(
+        self, db: AsyncSession, *, course_id: int, user_id: str, completed: bool, preview: bool = False
+    ) -> SurveyEntry | None:
         """側欄入口狀態（AC 1 / AC 2）；課程無問卷時回 `None`。
 
         🔴 **呼叫端必須先完成在籍 / 擁有者判定——本函式不做任何授權檢核。**
@@ -121,10 +126,20 @@ class EtSurveyFillService:
 
         `completed` 由呼叫端傳入而非在此計算——`learning/service.structure()` 手上
         已經有項目清單與完成集合，再查一次進度只是白跑一趟。
+
+        `preview`（#698）：呼叫端判定為預覽者（通過授權但不在籍）時，問卷啟用即回
+        `PREVIEW`、停用回 `HIDDEN`，**不看完課**——預覽者沒有進度可言。
         """
         facts = await self._fill.entry_facts(db, course_id=course_id, user_id=user_id)
         if facts is None:
             return None
+        if preview:
+            return SurveyEntry(
+                survey_id=facts.survey_id,
+                survey_name=facts.survey_name,
+                state=ENTRY_PREVIEW if facts.survey_active else ENTRY_HIDDEN,
+                submitted_at=None,
+            )
         return SurveyEntry(
             survey_id=facts.survey_id,
             survey_name=facts.survey_name,
@@ -132,7 +147,9 @@ class EtSurveyFillService:
             submitted_at=facts.submitted_at,
         )
 
-    async def get_form(self, db: AsyncSession, *, course_id: int, user_id: str) -> SurveyForm:
+    async def get_form(
+        self, db: AsyncSession, *, course_id: int, user_id: str, roles: frozenset[str] = frozenset()
+    ) -> SurveyForm:
         """問卷填寫頁所需之題目與自己的作答（AC 3 / AC 9 / AC 10）。
 
         **`HIDDEN` 亦回 200**：這是讀取端點，而 `HIDDEN` 只表示側欄不顯示入口。回錯誤
@@ -140,9 +157,14 @@ class EtSurveyFillService:
         `SUBMITTED`，但若把 `HIDDEN` 當錯誤處理，前端很容易連帶把整頁做成錯誤畫面。
         前端依 `state` 決定能不能改與有沒有送出鈕。
 
+        **預覽者**（不在籍，但為擁有者、或課程管理者觀摩他人已發布課程）回 `PREVIEW`
+        與空作答，供唯讀檢視（#698）；送出仍由 `submit` 的在籍檢核擋下。
+
         Raises:
-            AppError: 403 `ET_SURVEY_011` 非在籍；404 `ET_SURVEY_001` 課程無問卷。
+            AppError: 403 `ET_SURVEY_011` 非在籍且非預覽者；404 `ET_SURVEY_001` 課程無問卷。
         """
+        if not await self._learning.is_enrolled(db, user_id=user_id, course_id=course_id):
+            return await self._preview_form(db, course_id=course_id, user_id=user_id, roles=roles)
         facts = await self._require_facts(db, course_id=course_id, user_id=user_id)
         questions = await self._questions(db, facts.survey_id)
         answers = (
@@ -236,6 +258,52 @@ class EtSurveyFillService:
         return SurveySubmitResult(response_id=response_id, submitted_at=submitted_at)
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def _preview_form(
+        self, db: AsyncSession, *, course_id: int, user_id: str, roles: frozenset[str]
+    ) -> SurveyForm:
+        """預覽者的唯讀表單（#698）；不是預覽者則與非在籍者回**同一個** 403。
+
+        授權直接呼叫學習頁的 `ensure_can_access`——⛔ 不另寫一份判定：預覽問卷的母體
+        必須與預覽學習頁完全相同，分岔的表現是「看得到課程、卻開不了問卷」（或反之）。
+        草稿只有擁有者（`course_published` 為 False 時課程管理者不放行）。
+
+        不通過時回 `ET_SURVEY_011` 而非 `ensure_can_access` 自己的 `ET_LEARN_002`：
+        本端點對非成員一律同一個回應，否則可用錯誤碼差異問出「哪些課程建了問卷」。
+
+        - **不看啟用旗標**：問卷停用時側欄入口為 `HIDDEN`（`entry`），但直接開本頁仍回
+          `PREVIEW` 與題目——刻意與入口不同。預覽者本來就能在教師端問卷 API 讀到停用的
+          問卷（`survey/service.get_by_course`），這裡多一道 `HIDDEN` 只會換來一句對他不成立
+          的「完課後即可填寫」說明
+        - **作答恆為空**：預覽不是學員視角。極少數「曾在籍填答、後被移除、再以課程管理者
+          預覽」者，在此看不到自己當時的填答——可接受
+        - 課程管理者對「已發布、無問卷」得 404、非成員得 403：前者原本即可由教師端 API
+          得知有無問卷，非新的暴露（#698 security review）
+        """
+        course = await self._learning.get_course(db, course_id)
+        try:
+            if course is None:
+                raise _not_enrolled()
+            ensure_can_access(
+                enrolled=False,
+                is_owner=course.owner_id == user_id,
+                is_course_manager=bool(roles & COURSE_MANAGER_ROLES),
+                course_published=course.status == COURSE_PUBLISHED,
+            )
+        except AppError:
+            logger.warning("非在籍者嘗試存取課後問卷 user=%s course_id=%s", user_id, course_id)
+            raise _not_enrolled() from None
+        facts = await self._fill.entry_facts(db, course_id=course_id, user_id=user_id)
+        if facts is None:
+            raise _no_survey()
+        return SurveyForm(
+            survey_id=facts.survey_id,
+            survey_name=facts.survey_name,
+            state=ENTRY_PREVIEW,
+            submitted_at=None,
+            questions=await self._questions(db, facts.survey_id),
+            my_answers=[],
+        )
 
     async def _require_facts(self, db: AsyncSession, *, course_id: int, user_id: str) -> SurveyEntryFacts:
         """在籍檢核 + 取問卷事實。

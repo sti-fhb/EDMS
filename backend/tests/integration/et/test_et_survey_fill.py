@@ -22,6 +22,7 @@ from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.constants import (
     COURSE_CLOSED,
+    COURSE_DRAFT,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ROLE_STUDENT,
@@ -282,19 +283,6 @@ class TestEntryState:
         r = await client.get(f"{_COURSES}/{ctx['course_id']}/learn", headers=_bearer(ctx["student"]))
 
         assert r.json()["survey"]["state"] == "SUBMITTED"
-
-    async def test_教師預覽不顯示入口(self, client, db) -> None:
-        """擁有者沒有進度可累積，導不出完課，入口自然不出現。
-
-        釘住這件事是因為它是**自然成立**而非明寫的判定——若日後有人為教師預覽補上
-        假的完成集合，這條會先紅。
-        """
-        ctx = await _ready(client, db, "ent08")
-
-        r = await client.get(f"{_COURSES}/{ctx['course_id']}/learn", headers=_bearer(ctx["teacher"]))
-
-        assert r.status_code == 200, r.text
-        assert r.json()["survey"]["state"] == "HIDDEN"
 
 
 class TestGetForm:
@@ -791,3 +779,182 @@ async def _detail_rows(db, survey_id: int) -> list[EtSurveyResponseD]:
             )
         ).all()
     )
+
+
+class TestPreview:
+    """預覽者（擁有者、或課程管理者觀摩他人已發布課程）可**唯讀**檢視問卷（#698）。
+
+    預覽者不在籍、沒有進度，原本恆判未完課而看不到入口。改以獨立狀態 `PREVIEW` 呈現——
+    ⛔ **不是**替預覽者偽造完成集合：那會讓「完課」的定義出現例外，且預覽者仍不得送出。
+    授權母體與學習頁（`learning.rules.ensure_can_access`）一致，不擴大。
+    """
+
+    async def test_擁有者預覽時入口為預覽態(self, client, db) -> None:
+        ctx = await _ready(client, db, "prv01")
+
+        r = await client.get(f"{_COURSES}/{ctx['course_id']}/learn", headers=_bearer(ctx["teacher"]))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["is_preview"] is True
+        assert r.json()["survey"]["state"] == "PREVIEW"
+        assert r.json()["survey"]["submitted_at"] is None
+
+    async def test_擁有者預覽草稿課程亦為預覽態(self, client, db) -> None:
+        teacher = await _user(db, "t_prv02", ROLE_TEACHER)
+        course_id = await _course(client, db, teacher, status=COURSE_DRAFT)
+        await _item(client, teacher, course_id)
+        await _survey(client, teacher, course_id)
+
+        r = await client.get(f"{_COURSES}/{course_id}/learn", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["survey"]["state"] == "PREVIEW"
+
+    async def test_教師觀摩他人已發布課程為預覽態(self, client, db) -> None:
+        ctx = await _ready(client, db, "prv03")
+        observer = await _user(db, "t_prv03b", ROLE_TEACHER)
+
+        r = await client.get(f"{_COURSES}/{ctx['course_id']}/learn", headers=_bearer(observer))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["survey"]["state"] == "PREVIEW"
+
+    async def test_問卷停用時預覽亦不顯示入口(self, client, db) -> None:
+        ctx = await _ready(client, db, "prv04")
+        await db.execute(
+            update(EtSurvey).where(EtSurvey.survey_id == ctx["survey"]["survey_id"]).values(is_active=False)
+        )
+        await db.flush()
+
+        r = await client.get(f"{_COURSES}/{ctx['course_id']}/learn", headers=_bearer(ctx["teacher"]))
+
+        assert r.json()["survey"]["state"] == "HIDDEN"
+
+    async def test_預覽不產生任何完成紀錄(self, client, db) -> None:
+        """原 `test_教師預覽不顯示入口` 守的目的：**不得替預覽者偽造完課**。入口改為預覽態
+        之後，改以「預覽者沒有任何進度列、也不在籍」直接釘住它。"""
+        ctx = await _ready(client, db, "prv05")
+
+        await client.get(f"{_COURSES}/{ctx['course_id']}/learn", headers=_bearer(ctx["teacher"]))
+        await client.get(_form_url(ctx["course_id"]), headers=_bearer(ctx["teacher"]))
+
+        progress = await db.scalar(
+            select(EtProgress.progress_id).where(
+                EtProgress.user_id == ctx["teacher"], EtProgress.course_id == ctx["course_id"]
+            )
+        )
+        enrolled = await db.scalar(
+            select(EtEnrollment.enrollment_id).where(
+                EtEnrollment.user_id == ctx["teacher"], EtEnrollment.course_id == ctx["course_id"]
+            )
+        )
+        assert progress is None
+        assert enrolled is None
+
+    async def test_預覽者取表單為預覽態且無作答(self, client, db) -> None:
+        ctx = await _ready(client, db, "prv06")
+
+        r = await client.get(_form_url(ctx["course_id"]), headers=_bearer(ctx["teacher"]))
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["state"] == "PREVIEW"
+        assert body["my_answers"] == []
+        assert len(body["questions"]) == 3
+
+    async def test_教師觀摩他人已發布課程可取表單(self, client, db) -> None:
+        ctx = await _ready(client, db, "prv07")
+        observer = await _user(db, "t_prv07b", ROLE_TEACHER)
+
+        r = await client.get(_form_url(ctx["course_id"]), headers=_bearer(observer))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["state"] == "PREVIEW"
+
+    async def test_他人草稿課程不可預覽問卷(self, client, db) -> None:
+        """草稿只有擁有者看得到——他人教師取表單仍為同一個 403，不洩漏「這門草稿建了問卷」。"""
+        teacher = await _user(db, "t_prv08", ROLE_TEACHER)
+        course_id = await _course(client, db, teacher, status=COURSE_DRAFT)
+        await _item(client, teacher, course_id)
+        await _survey(client, teacher, course_id)
+        observer = await _user(db, "t_prv08b", ROLE_TEACHER)
+
+        r = await client.get(_form_url(course_id), headers=_bearer(observer))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_SURVEY_011"
+
+    async def test_非在籍學員仍不可取表單(self, client, db) -> None:
+        """授權不擴大：只有學員角色的非成員維持 403（預覽放行的是課程管理者與擁有者）。"""
+        ctx = await _ready(client, db, "prv09")
+        outsider = await _user(db, "s_prv09b")
+
+        r = await client.get(_form_url(ctx["course_id"]), headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_SURVEY_011"
+
+    async def test_課程不存在時預覽者亦回同一個403(self, client, db) -> None:
+        """`course is None` 分支：與「非成員」同一個回應，不形成存在性 oracle。"""
+        observer = await _user(db, "t_prv11", ROLE_TEACHER)
+
+        r = await client.get(_form_url(999_999_999), headers=_bearer(observer))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_SURVEY_011"
+
+    async def test_已發布無問卷時教師得404(self, client, db) -> None:
+        """課程管理者可分辨「有沒有問卷」——他原本即可由教師端問卷 API 得知，非新的暴露。
+
+        ⚠️ 與下一條分開：一條整合測試只能安排一次預期失敗的請求（失敗會回滾前置資料）。
+        """
+        teacher = await _user(db, "t_prv12", ROLE_TEACHER)
+        course_id = await _course(client, db, teacher)
+        await _item(client, teacher, course_id)
+        observer = await _user(db, "t_prv12b", ROLE_TEACHER)
+
+        r = await client.get(_form_url(course_id), headers=_bearer(observer))
+
+        assert r.status_code == 404
+        assert r.json()["error_code"] == "ET_SURVEY_001"
+
+    async def test_已發布無問卷時學員得同一個403(self, client, db) -> None:
+        teacher = await _user(db, "t_prv14", ROLE_TEACHER)
+        course_id = await _course(client, db, teacher)
+        await _item(client, teacher, course_id)
+        outsider = await _user(db, "s_prv14")
+
+        r = await client.get(_form_url(course_id), headers=_bearer(outsider))
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_SURVEY_011"
+
+    async def test_問卷停用時直接開頁仍為預覽態(self, client, db) -> None:
+        """刻意與側欄入口（停用即 HIDDEN）不同——見 `_preview_form` docstring。"""
+        ctx = await _ready(client, db, "prv13")
+        await db.execute(
+            update(EtSurvey).where(EtSurvey.survey_id == ctx["survey"]["survey_id"]).values(is_active=False)
+        )
+        await db.flush()
+
+        r = await client.get(_form_url(ctx["course_id"]), headers=_bearer(ctx["teacher"]))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["state"] == "PREVIEW"
+
+    async def test_預覽者送出被擋且不留填答(self, client, db) -> None:
+        """預覽者送出會讓問卷凍結（已有填答即不可改題）——必須擋下且不留任何列。"""
+        ctx = await _ready(client, db, "prv10")
+
+        r = await client.post(
+            _submit_url(ctx["course_id"]),
+            json={"answers": _single_answers(ctx["questions"])},
+            headers=_bearer(ctx["teacher"]),
+        )
+
+        assert r.status_code == 403
+        assert r.json()["error_code"] == "ET_SURVEY_011"
+        left = await db.scalar(
+            select(EtSurveyResponseM.response_id).where(EtSurveyResponseM.survey_id == ctx["survey"]["survey_id"])
+        )
+        assert left is None

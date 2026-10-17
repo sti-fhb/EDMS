@@ -31,7 +31,7 @@ from app.et.constants import COURSE_CLOSED, COURSE_PUBLISHED, SURVEY_QUESTION_SI
 #: 明訂「至多 150 字，超過時 MUST 阻擋」）。
 ANSWER_TEXT_MAX_LEN: Final = 150
 
-# ── 入口四態 ──────────────────────────────────────────────────────────────────
+# ── 入口五態 ──────────────────────────────────────────────────────────────────
 #
 # 以**單一狀態值**表達，不用多個布林旗標的組合。旗標組合會產生不可能的狀態
 # （如「已送出且未完課且問卷已停用」該顯示什麼？），而前端得為每種組合各寫一條分支。
@@ -39,8 +39,12 @@ ENTRY_HIDDEN: Final = "HIDDEN"
 ENTRY_FILLABLE: Final = "FILLABLE"
 ENTRY_SUBMITTED: Final = "SUBMITTED"
 ENTRY_COURSE_CLOSED: Final = "COURSE_CLOSED"
+#: 預覽者（擁有者、或課程管理者觀摩他人已發布課程）唯讀檢視（#698）。**不經**
+#: `derive_entry_state`：預覽者不在籍、沒有進度，那組事實對他沒有意義——
+#: ⛔ 也不可改成替他偽造完成集合（那會讓「完課」出現例外，且他仍不得送出）。
+ENTRY_PREVIEW: Final = "PREVIEW"
 
-ALL_ENTRY_STATES: Final = frozenset({ENTRY_HIDDEN, ENTRY_FILLABLE, ENTRY_SUBMITTED, ENTRY_COURSE_CLOSED})
+ALL_ENTRY_STATES: Final = frozenset({ENTRY_HIDDEN, ENTRY_FILLABLE, ENTRY_SUBMITTED, ENTRY_COURSE_CLOSED, ENTRY_PREVIEW})
 
 
 @dataclass(frozen=True)

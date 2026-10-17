@@ -284,6 +284,18 @@ describe("EtSurveyFillPage", () => {
     })
   })
 
+  describe("預覽（#698）", () => {
+    it("顯示預覽說明、題目全部不可作答且無送出鈕", async () => {
+      // 預覽者（擁有者／觀摩教師）不在籍：送出必被後端 403，且送出會讓問卷凍結——前端不給鈕
+      mockForm({ state: "PREVIEW" })
+      renderWithProviders(<EtSurveyFillPage />)
+
+      expect(await screen.findByText(/預覽模式/)).toBeInTheDocument()
+      expect(screen.getByRole("radio", { name: "滿意" })).toBeDisabled()
+      expect(screen.queryByRole("button", { name: /送出問卷/ })).not.toBeInTheDocument()
+    })
+  })
+
   describe("未完課（完課回退後）", () => {
     it("說明尚未完課而非給一個點了會失敗的鈕", async () => {
       mockForm({ state: "HIDDEN" })

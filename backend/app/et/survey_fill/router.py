@@ -85,7 +85,7 @@ async def survey_form(
 
     `GET` 而非 `POST`：路徑上只有 `course_id`，沒有任何使用者輸入會進 query string。
     """
-    return await _service.get_form(db, course_id=course_id, user_id=ctx.user_id)
+    return await _service.get_form(db, course_id=course_id, user_id=ctx.user_id, roles=ctx.roles)
 
 
 @router.post(
