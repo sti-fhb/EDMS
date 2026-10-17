@@ -51,6 +51,16 @@ ENTITY_SURVEY: Final = "SURVEY"
 ENTITY_SURVEY_QUESTION: Final = "SURVEY_QUESTION"
 ENTITY_SURVEY_OPTION: Final = "SURVEY_OPTION"
 
+#: 「本次編輯要求已通過學員重測」的意圖，寄在 `QUIZ` 暫存節點的 payload 上（#361 × #631）。
+#:
+#: 🔴 **刻意不是 `ET_QUIZ` 的欄位名**——`stage_apply._upsert` 只寫
+#: `payload_fields(spec)` 列出的 key，非欄位的旗標因此會被自動忽略、不會進活表。
+#: ⛔ 不要把它改成與欄位同名，那會讓它被當成內容寫進 `ET_QUIZ`。
+#:
+#: 生命週期與暫存工作階段一致：放棄編輯（`discard`）一起消失、套用完隨 `clear` 清掉。
+#: 2026-10-17 使用者裁示「按更新時才生效」——理由見 `quiz/service._stage_require_retest`。
+RETEST_PAYLOAD_KEY: Final = "__require_retest"
+
 
 @dataclass(frozen=True)
 class StageNode:

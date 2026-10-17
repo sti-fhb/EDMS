@@ -327,7 +327,7 @@ _OTHER_MODULES = [
     ),
     (
         "PUT /quizzes/{id}",
-        False,
+        True,
         lambda c, u, i: c.put(
             f"/api/et/quizzes/{i['quiz_id']}",
             json={"quiz_name": "改名測驗", "pass_score": 80, "max_retry": 3, "version": i["quiz_version"]},
@@ -336,7 +336,7 @@ _OTHER_MODULES = [
     ),
     (
         "PUT /questions/{id}",
-        False,
+        True,
         lambda c, u, i: c.put(
             f"/api/et/questions/{i['question_id']}",
             json={
@@ -351,7 +351,7 @@ _OTHER_MODULES = [
     ),
     (
         "DELETE /questions/{id}",
-        False,
+        True,
         lambda c, u, i: c.delete(f"/api/et/questions/{i['question_id']}", headers=_bearer(u)),
     ),
     (
