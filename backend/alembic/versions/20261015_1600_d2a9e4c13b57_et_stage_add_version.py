@@ -1,7 +1,7 @@
 """et_stage_add_version
 
 Revision ID: d2a9e4c13b57
-Revises: 9c83bd25a9b2
+Revises: 0d17180b7546
 Create Date: 2026-10-15 16:00:00.000000
 
 暫存列加上樂觀鎖欄位（#631 PR 2/4）。
@@ -50,7 +50,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d2a9e4c13b57"
-down_revision: str | None = "9c83bd25a9b2"
+down_revision: str | None = "0d17180b7546"
 branch_labels: str | None = None
 depends_on: str | None = None
 
