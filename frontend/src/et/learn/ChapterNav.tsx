@@ -149,6 +149,7 @@ function SurveyEntryBlock({
   if (!survey || survey.state === "HIDDEN") return null
 
   const submitted = survey.state === "SUBMITTED"
+  const preview = survey.state === "PREVIEW"
   return (
     <>
       <Divider />
@@ -161,12 +162,14 @@ function SurveyEntryBlock({
           startIcon={submitted ? <AssignmentTurnedInIcon /> : <AssignmentIcon />}
           onClick={onClick}
         >
-          {submitted ? "查看我的填答" : "填寫課後問卷"}
+          {submitted ? "查看我的填答" : preview ? "預覽課後問卷" : "填寫課後問卷"}
         </Button>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
           {submitted
             ? `已於 ${formatDateTime(survey.submitted_at)} 送出`
-            : "具名、一人一次，送出後不可修改"}
+            : preview
+              ? "預覽模式，不可送出"
+              : "具名、一人一次，送出後不可修改"}
         </Typography>
       </Box>
     </>

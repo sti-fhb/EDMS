@@ -377,6 +377,22 @@ describe("ET06 章節學習頁", () => {
       expect(await screen.findByRole("button", { name: "填寫課後問卷" })).toBeInTheDocument()
     })
 
+    it("預覽時顯示「預覽課後問卷」並可進入問卷頁（#698）", async () => {
+      const user = userEvent.setup()
+      mockStructure({
+        is_preview: true,
+        survey: { survey_id: 5, survey_name: "課後滿意度問卷", state: "PREVIEW", submitted_at: null },
+      })
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByRole("button", { name: "預覽課後問卷" }))
+
+      expect(screen.getByText(/預覽模式，不可送出/)).toBeInTheDocument()
+      // 預覽不得沿用學員的「具名、一人一次」說明——那暗示他可以填
+      expect(screen.queryByText(/具名、一人一次/)).not.toBeInTheDocument()
+      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey")
+    })
+
     it("未完課（HIDDEN）時整塊不渲染", async () => {
       mockStructure({
         survey: { survey_id: 5, survey_name: "課後滿意度問卷", state: "HIDDEN", submitted_at: null },

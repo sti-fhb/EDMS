@@ -218,7 +218,9 @@ class EtLearningService:
         # 留著，那是學習歷史），故取交集而非直接比長度。
         all_item_ids = {item.item_id for item, *_ in rows}
         completed = is_course_completed(done=len(all_item_ids & completed_ids), total=len(all_item_ids))
-        survey = await self._survey_fill.entry(db, course_id=course_id, user_id=user_id, completed=completed)
+        survey = await self._survey_fill.entry(
+            db, course_id=course_id, user_id=user_id, completed=completed, preview=is_preview
+        )
 
         max_rate = await self._params.get_int_param(db, _MAX_RATE_PARAM, "VALUE", _DEFAULT_MAX_RATE)
         return LearnStructure(

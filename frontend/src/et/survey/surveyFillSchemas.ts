@@ -9,7 +9,8 @@ export type SurveyQuestionType = "SINGLE" | "TEXT"
  * 以**單一狀態值**分支，不用布林旗標的組合——那會產生不可能的狀態（如「已送出且未
  * 完課且問卷已停用」該顯示什麼？），且每種組合都得寫一條分支。
  */
-export type SurveyEntryState = "HIDDEN" | "FILLABLE" | "SUBMITTED" | "COURSE_CLOSED"
+/** `PREVIEW`（#698）：預覽者（擁有者／觀摩教師）唯讀檢視，`isReadOnly` 自然涵蓋。 */
+export type SurveyEntryState = "HIDDEN" | "FILLABLE" | "SUBMITTED" | "COURSE_CLOSED" | "PREVIEW"
 
 /** 文字答案上限（後端 `ANSWER_TEXT_MAX_LEN`，對應 `VARCHAR(150)`）。 */
 export const ANSWER_TEXT_MAX_LEN = 150

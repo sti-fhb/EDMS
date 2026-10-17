@@ -1,6 +1,7 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
 import LockIcon from "@mui/icons-material/Lock"
 import SendIcon from "@mui/icons-material/Send"
+import VisibilityIcon from "@mui/icons-material/Visibility"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -221,8 +222,16 @@ export function EtSurveyFillPage() {
   )
 }
 
-/** 三態各自的頂部說明。 */
+/** 各狀態的頂部說明。 */
 function StateBanner({ data }: { data: SurveyForm }) {
+  if (data.state === "PREVIEW") {
+    // #698：預覽者不在籍，送出必被後端擋下，且一筆填答就會讓問卷凍結（不可再改題）
+    return (
+      <Alert severity="info" icon={<VisibilityIcon />} sx={{ mb: 3 }}>
+        預覽模式：僅供檢視題目，無法送出。
+      </Alert>
+    )
+  }
   if (data.state === "COURSE_CLOSED") {
     return (
       <Alert severity="warning" icon={<LockIcon />} sx={{ mb: 3 }}>
