@@ -170,3 +170,30 @@ async def test_未排入_outbox_時不計入且留下該封涵蓋的_review_ids(
     assert result.items == 0, "沒寄出去就不算涵蓋"
     text = caplog.text
     assert "11" in text and "12" in text, "warning 必須列出該封涵蓋的全部 review_id"
+
+
+async def test_同批中可達與不可達者混在一起(caplog):
+    """混合情境：可達者照寄，不可達者的筆數不得混進 `items`。
+
+    上面每條測試各自只有一種人。`items` 若誤用 `len(rows)`（而非逐組的 `len(group)`）
+    算出來，單一情境的測試全都還會過——**停用者那兩筆會被算成已催辦**，於是排程 log
+    報的積壓規模比實際寄出的多，又回到 #627「唯一的對外訊號在說謊」那個形狀。
+    """
+    rows = [
+        _row(review_id=1, doc_id="D1", doc_name="停用者的A", reviewer="off", days=10, reviewer_status="DISABLED"),
+        _row(review_id=2, doc_id="D2", doc_name="正常者的A", reviewer="ok", days=11),
+        _row(review_id=3, doc_id="D3", doc_name="停用者的B", reviewer="off", days=12, reviewer_status="DISABLED"),
+        _row(review_id=4, doc_id="D4", doc_name="正常者的B", reviewer="ok", days=13),
+    ]
+    svc, notify = _svc(rows)
+
+    with caplog.at_level(logging.WARNING, logger="app.dm.review.center_service"):
+        result = await svc.scan_overdue_and_remind(MagicMock(), threshold_days=7)
+
+    assert notify.await_count == 1, "只有可達的那一位該收到信"
+    assert notify.await_args.kwargs["recipients"] == ["ok@e.com"]
+    assert result.emails == 1
+    assert result.items == 2, "不可達者的兩筆不得計入涵蓋筆數"
+    listing = notify.await_args.kwargs["params"]["pending_list"]
+    assert "停用者" not in listing, "不可達者的文件不得混進別人的清單"
+    assert len([r for r in caplog.records if "催辦未寄出" in r.getMessage()]) == 2

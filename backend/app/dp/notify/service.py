@@ -180,7 +180,7 @@ def declared_variable_names(variables: str | None) -> set[str]:
 
     | 模組 | 格式 | 實例 |
     |---|---|---|
-    | DM | 裸小寫識別字 | `reviewer_name,doc_name,days` |
+    | DM | 裸小寫識別字 | `reviewer_name,pending_count,pending_list` |
     | **DP** | 識別字 + **全形括號說明**，逗號後另有空格 | `user_name（使用者姓名）, activate_link（啟用連結）` |
     | ET | 裸**大寫**識別字 | `USER_NAME,COURSE_NAME` |
 

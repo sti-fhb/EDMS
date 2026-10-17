@@ -23,6 +23,10 @@
 從不寄信，錯位永遠沒機會現形；一改成 `EMAIL` 就會變成每天一批 `FAILED` 空信，
 而 `send_email` 整批寫 `FAILED` 後回 `queued_count=0` 且**不外拋**。
 
+⚠️ 上面那組 `doc_name` / `days` 是 **#627 當時**的 `AUTO_REMIND`，不是現況——#699 把它改成
+逐位審核者彙整，佔位已是 `reviewer_name,pending_count,pending_list`。此處保留舊值是因為
+那才是本測試要擋的那個真實案例；要看現況請查 DB 或 `7c4e19ab3f52`。
+
 ## 本測試的判準：`VARIABLES` ⊆ 程式實傳 key
 
 方向是單向包含，不是相等——多傳無害（`_SafeFormatter` 只對**缺** key 報錯），
