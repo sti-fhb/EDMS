@@ -80,6 +80,80 @@ function renderEditor() {
   return renderWithProviders(<EtCourseEditorPage />)
 }
 
+/**
+ * 項目列上「開啟」用的那顆按鈕。
+ *
+ * ⚠️ 不能直接 `getByRole("button", { name: /標題/ })`——同一列的**拖曳手把**也是
+ * `role="button"`，而它的 `aria-label` 是「拖曳調整「標題」順序」，同一個正則會中兩個。
+ * 症狀是 `Found multiple elements`，而不是找不到。
+ */
+async function _openItemButton(title: RegExp): Promise<HTMLElement> {
+  const all = await screen.findAllByRole("button", { name: title })
+  const opener = all.find((el) => !el.getAttribute("aria-label")?.startsWith("拖曳"))
+  if (!opener) throw new Error(`找不到開啟項目的按鈕：${title}`)
+  return opener
+}
+
+/**
+ * 已發布課程 + 一個**本次編輯新增**的項目（教材與測驗的 id 都是負數）。
+ *
+ * 🔴 `-12` / `-13` 這種負數正是後端暫存模式回給教師的 id（`exposed_id`）。整份 MSW 的
+ * 預設 fixture 全是正數，所以「教師建了東西 → 拿到負數 → 用它開視窗 → 存檔」這條路徑
+ * 在本檔之前**一次都沒有被執行過**。
+ */
+function useCourseWithStagedItems() {
+  server.use(
+    http.get("/api/et/courses/:courseId", () =>
+      HttpResponse.json({
+        course_id: 1,
+        course_name: "採血作業訓練",
+        description: null,
+        status: "PUBLISHED",
+        open_start_at: "2026-09-01T00:00:00Z",
+        open_end_at: "2027-09-30T00:00:00Z",
+        require_approval: false,
+        version: 5,
+        owner_id: "U1",
+        owner_name: "王教師",
+        is_owner: true,
+        audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+        invitation_code: "01234567",
+        has_pending_changes: true,
+        chapters: [
+          {
+            chapter_id: -10,
+            chapter_name: "暫存新章",
+            sort_order: 1,
+            version: 0,
+            items: [
+              {
+                item_id: -11,
+                item_type: "MATERIAL",
+                title: "暫存教材",
+                sort_order: 1,
+                material_id: -12,
+                quiz_id: null,
+                version: 0,
+                question_count: null,
+              },
+              {
+                item_id: -13,
+                item_type: "QUIZ",
+                title: "暫存測驗",
+                sort_order: 2,
+                material_id: null,
+                quiz_id: -14,
+                version: 0,
+                question_count: 0,
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  )
+}
+
 describe("ET05 更新（#631）", () => {
   it.each([["PUBLISHED"], ["CLOSED"]])(
     "%s 課程顯示「更新」鈕（關閉期間的編輯同樣要按更新才生效）",
@@ -274,7 +348,147 @@ describe("ET05 更新（#631）", () => {
     expect(discards).toBe(0)
   })
 
+  it("🔴 開啟本次新增的教材：以負數 id 取詳細、存檔也送負數", async () => {
+    // review 當初指出的缺陷就是這個形狀：後端對已發布課程回負數 `material_id`，而
+    // `/materials/{id}` 的 `Path(ge=1)` 把它擋成 422 ⇒ **教師打不開自己剛建的教材**。
+    // 後端那側已放寬，本條釘住前端真的會用那個負數去打（而不是自己過濾掉或取絕對值）。
+    const user = userEvent.setup()
+    const seen: string[] = []
+    useCourseWithStagedItems()
+    server.use(
+      // 🔴 **字面路徑必須排在動態路徑前面**：`server.use()` 是前插，`:materialId` 會把
+      // `/materials/video-upload-limits` 一起吃掉，`MaterialDialog` 就拿不到上傳限制而
+      // 整個元件崩潰（`describeVideoLimits` 對 undefined 呼叫 `.join`）。
+      // 症狀是「找不到那個 dialog」，很像元件寫錯。
+      http.get("/api/et/materials/video-upload-limits", () =>
+        HttpResponse.json({ allowed_formats: ["mp4", "webm"], max_size_mb: 500 }),
+      ),
+      http.get("/api/et/materials/:materialId", ({ params }) => {
+        seen.push(`GET ${params.materialId}`)
+        return HttpResponse.json({
+          material_id: Number(params.materialId),
+          material_name: "暫存教材",
+          description_html: "<p>說明</p>",
+          version: 0,
+          videos: [],
+          docs: [],
+        })
+      }),
+      http.put("/api/et/materials/:materialId", ({ params }) => {
+        seen.push(`PUT ${params.materialId}`)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderEditor()
+
+    await user.click(await _openItemButton(/暫存教材/))
+
+    await waitFor(() => expect(seen).toContain("GET -12"))
+    expect(await screen.findByRole("dialog", { name: /教材/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    await waitFor(() => expect(seen).toContain("PUT -12"))
+  })
+
+  it("🔴 開啟本次新增的測驗：以負數 id 取詳細", async () => {
+    const user = userEvent.setup()
+    const seen: string[] = []
+    useCourseWithStagedItems()
+    server.use(
+      http.get("/api/et/quizzes/:quizId", ({ params }) => {
+        seen.push(`GET ${params.quizId}`)
+        return HttpResponse.json({
+          quiz_id: Number(params.quizId),
+          quiz_name: "暫存測驗",
+          description: null,
+          pass_score: 60,
+          time_limit_min: null,
+          max_retry: 3,
+          version: 0,
+          points_total: 0,
+          answers_visible: true,
+          passed_count: 0,
+          questions: [],
+        })
+      }),
+    )
+    renderEditor()
+
+    await user.click(await _openItemButton(/暫存測驗/))
+
+    await waitFor(() => expect(seen).toContain("GET -14"))
+  })
+
+  it("正向錨點：既有內容仍以正數 id 取詳細", async () => {
+    // 少了這條，前端若把**所有** id 都加上負號（或都取絕對值）也會讓上面兩條通過。
+    const user = userEvent.setup()
+    const seen: string[] = []
+    useCourse("PUBLISHED", { pending: true })
+    server.use(
+      http.get("/api/et/courses/:courseId", () =>
+        HttpResponse.json({
+          course_id: 1,
+          course_name: "採血作業訓練",
+          description: null,
+          status: "PUBLISHED",
+          open_start_at: "2026-09-01T00:00:00Z",
+          open_end_at: "2027-09-30T00:00:00Z",
+          require_approval: false,
+          version: 5,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+          invitation_code: "01234567",
+          has_pending_changes: true,
+          chapters: [
+            {
+              chapter_id: 10,
+              chapter_name: "既有章節",
+              sort_order: 1,
+              version: 0,
+              items: [
+                {
+                  item_id: 11,
+                  item_type: "MATERIAL",
+                  title: "既有教材",
+                  sort_order: 1,
+                  material_id: 12,
+                  quiz_id: null,
+                  version: 0,
+                  question_count: null,
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+      // 字面路徑排在動態路徑前面（理由見上一條測試的註解）
+      http.get("/api/et/materials/video-upload-limits", () =>
+        HttpResponse.json({ allowed_formats: ["mp4", "webm"], max_size_mb: 500 }),
+      ),
+      http.get("/api/et/materials/:materialId", ({ params }) => {
+        seen.push(`GET ${params.materialId}`)
+        return HttpResponse.json({
+          material_id: Number(params.materialId),
+          material_name: "既有教材",
+          description_html: null,
+          version: 0,
+          videos: [],
+          docs: [],
+        })
+      }),
+    )
+    renderEditor()
+
+    await user.click(await _openItemButton(/既有教材/))
+
+    await waitFor(() => expect(seen).toContain("GET 12"))
+  })
+
   it("非擁有者（檢視模式）看不到「更新」鈕", async () => {
+
     // ⚠️ 刻意餵 `pending: true`（後端對他人恆回 false）：要驗的是**前端自己那道
     // `readOnly` 閘**，不是「旗標剛好是 false 所以按鈕沒亮」。餵 false 的話，把
     // `readOnly` 拿掉這條照樣通過。
