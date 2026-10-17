@@ -107,17 +107,25 @@ async def test_msg_only_channel_not_emailed(db):
 
 
 async def test_auto_remind_queues_outbox(db):
-    """#627：催辦改 `EMAIL` 後 → 真的排入 outbox，且 `{days}` 等佔位確實渲染出來。
+    """#627：催辦改 `EMAIL` 後 → 真的排入 outbox，且佔位確實渲染出來。
 
     ⚠️ 必須篩 `STATUS='PENDING'`：渲染失敗時 `send_email` 會把整批寫成 `FAILED` 空信**且不外拋**，
     不篩狀態的話「params key 對不上範本 VARIABLES」這個原始缺陷（`waiting_days` vs `days`）
-    照樣通過——那正是本 issue 的成因。
+    照樣通過——那正是 #627 的成因。
+
+    #699 把佔位詞彙由 `{doc_name}` / `{days}` 改為 `{pending_count}` / `{pending_list}`
+    （逐位審核者彙整），故本條**改 params 而非刪測試**：它驗的是「催辦這支範本渲染得出來」，
+    與佔位叫什麼無關。若沿用舊 params，缺的 key 會讓整批寫 FAILED 而 `queued_count` 為 0。
     """
     result = await DmNotifier().notify(
         db,
         template_code="AUTO_REMIND",
         recipients=["reviewer@example.com"],
-        params={"reviewer_name": "王審核", "doc_name": "SOP-001", "days": "8"},
+        params={
+            "reviewer_name": "王審核",
+            "pending_count": "2",
+            "pending_list": "- SOP-001（已停留 8 天）\n- SOP-002（已停留 9 天）",
+        },
     )
     assert result.queued_count == 1
     assert result.skipped_reason is None
@@ -131,6 +139,6 @@ async def test_auto_remind_queues_outbox(db):
         )
     ).one()
     assert row[0] == "PENDING"
-    # 正向錨點：佔位真的被替換掉了（而非殘留 `{days}` 或整封空白）
-    assert "8" in row[1]
+    # 正向錨點：佔位真的被替換掉了（而非殘留 `{pending_list}` 或整封空白）
+    assert "SOP-002（已停留 9 天）" in row[1]
     assert "{" not in row[1]
