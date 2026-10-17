@@ -782,14 +782,16 @@ async def test_scan_overdue_reminds(db):
     # `_ensure_assignable_reviewer`（#250）本就要求指定審核者具該角色，沒有角色的指派
     # 不是產品路徑造得出來的狀態。
     await _grant(db, "rev1", DM_REVIEWER)
-    await _doc(db, "DM-SOP-000360", status="PENDING_REVIEW")
-    v = await _add_version(db, "DM-SOP-000360", "1.0", status="PENDING_REVIEW")
-    await _review(
-        db, "DM-SOP-000360", v.version_id, review_type="NEW", reviewer="rev1", submit=utcnow() - timedelta(days=10)
-    )
-    count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+    # #699：**兩筆**逾期指派給同一人——彙整後 outbox 應只有一列，而非兩列。
+    for doc_id, waited in (("DM-SOP-000360", 10), ("DM-SOP-000362", 20)):
+        await _doc(db, doc_id, status="PENDING_REVIEW")
+        v = await _add_version(db, doc_id, "1.0", status="PENDING_REVIEW")
+        await _review(
+            db, doc_id, v.version_id, review_type="NEW", reviewer="rev1", submit=utcnow() - timedelta(days=waited)
+        )
+    result = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
-    # ⭐ 斷言**可觀察的產出**而非回傳值（#627）：`count` 是本函式自己算的，無論有沒有真的寄出
+    # ⭐ 斷言**可觀察的產出**而非回傳值（#627）：回傳值是本函式自己算的，無論有沒有真的寄出
     # 都會遞增——在 CHANNEL=MSG 的那段期間（2026-08-06～），這條測試全綠而催辦其實什麼都沒產生。
     # outbox 列才是「信真的排出去了」的證據。
     rows = (
@@ -801,19 +803,25 @@ async def test_scan_overdue_reminds(db):
         .scalars()
         .all()
     )
-    assert len(rows) == 1, "逾期之 PENDING 應排入一封催辦信"
+    assert len(rows) == 1, "同一位審核者的兩筆逾期必須彙整成一封，而不是兩封（#699）"
     assert rows[0].recipient == "rev1@e.com"
-    assert "10" in rows[0].subject or "10" in rows[0].body, "停留天數應渲染進信件（{days} 佔位）"
-    assert count == 1
+    assert "您有 2 件" in rows[0].subject, "主旨應呈現彙整件數"
+    # 兩份文件都在清單裡，且各自帶自己的停留天數（只驗其中一份的話，漏掉另一份不會變紅）
+    assert "文件DM-SOP-000362（已停留 20 天）" in rows[0].body
+    assert "文件DM-SOP-000360（已停留 10 天）" in rows[0].body
+    # 正向錨點：佔位真的被替換掉（而非殘留 `{pending_list}` 或整封空白）
+    assert "{" not in rows[0].body
+    assert result.emails == 1
+    assert result.items == 2, "一封涵蓋兩筆"
 
 
-async def test_範本停用時不排信且不計入催辦筆數(db, caplog):
-    """範本停用 → 沒有產出，`count` 也不得計入（#627 AC：log 的數字必須與實際產出一致）。
+async def test_範本停用時不排信且不計入催辦封數(db, caplog):
+    """範本停用 → 沒有產出，封數也不得計入（#627 AC：log 的數字必須與實際產出一致）。
 
-    這條守的是 `count += 1` 無條件遞增那個缺陷的**一般形式**：不只 CHANNEL 不對會沒產出，
+    這條守的是「無條件遞增」那個缺陷的**一般形式**：不只 CHANNEL 不對會沒產出，
     範本停用、渲染失敗同樣沒產出，而三者都曾被算成「已催辦 N 筆」。
 
-    ⚠️ **必須 `_grant(DM_REVIEWER)`，而且必須斷言跳過理由**。本條一度只斷言 `count == 0`
+    ⚠️ **必須 `_grant(DM_REVIEWER)`，而且必須斷言跳過理由**。本條一度只斷言「封數為 0」
     與 outbox 零列，於是加上角色守門（#627）之後它**靜默地換了一條路**：`rev_off` 沒有角色
     → 在 `notify()` 之前就被攔掉 → 從此根本沒走到「範本停用」。兩個斷言在新路徑下同樣成立，
     所以**測試沒有變紅，卻已經不再測它宣稱在測的東西**（由 diff-cover 指出該分支零覆蓋才發現）。
@@ -837,9 +845,9 @@ async def test_範本停用時不排信且不計入催辦筆數(db, caplog):
     await db.flush()
 
     with caplog.at_level(logging.WARNING):
-        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+        result = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
-    assert count == 0, "沒有產出就不得計入催辦筆數"
+    assert result.emails == 0, "沒有產出就不得計入催辦封數"
     assert await _auto_remind_rows(db) == 0
     # 錨點：證明真的走到「呼叫了 notify、但平台沒排入」這條路，而不是在更早的分支就被攔掉
     assert "催辦未排入 outbox" in caplog.text, "未走到 notify 之後的分支——上游可能多了一道守門把本條掏空"
@@ -878,10 +886,10 @@ async def test_停用的審核者不再收到催辦(db, caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+        result = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
-    assert count == 0, "停用的審核者不該再收到催辦"
-    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    assert result.emails == 0, "停用的審核者不該再收到催辦"
+    # #627：原本只驗「封數為 0」與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
     # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
     assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     # ⭐ 只停止寄信會把問題從吵鬧變成安靜——案件仍卡著、仍無人能處理，只是沒人被打擾。
@@ -913,8 +921,8 @@ async def test_已刪除的審核者不再收到催辦(db):
         db, "DM-SOP-000396", v.version_id, review_type="NEW", reviewer="rev395b", submit=utcnow() - timedelta(days=10)
     )
 
-    assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 0
-    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    assert (await _svc.scan_overdue_and_remind(db, threshold_days=7)).emails == 0
+    # #627：原本只驗「封數為 0」與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
     # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
     assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
 
@@ -944,10 +952,10 @@ async def test_查無審核者帳號與已停用在_log_中分屬兩類(db, capl
     )
 
     with caplog.at_level(logging.WARNING):
-        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+        result = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
-    assert count == 0
-    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    assert result.emails == 0
+    # #627：原本只驗「封數為 0」與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
     # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
     assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     assert "查無審核者帳號" in caplog.text, "孤兒指派要有自己的分類，否則被誤標成已停用"
@@ -974,10 +982,10 @@ async def test_審核者_email_為空字串時跳過且留下_log(db, caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+        result = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
-    assert count == 0
-    # #627：原本只驗 `count == 0` 與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
+    assert result.emails == 0
+    # #627：原本只驗「封數為 0」與 caplog——但在 CHANNEL=MSG 期間**任何**情況都是 0 封，
     # 所以「跳過」這件事從未被真正驗證過。改 EMAIL 後這條斷言才第一次有鑑別力。
     assert await _auto_remind_rows(db) == 0, "跳過的催辦不得排入 outbox"
     assert "查無審核者 Email" in caplog.text
@@ -1021,9 +1029,9 @@ async def test_角色已撤的審核者不再收到催辦(db, caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        count = await _svc.scan_overdue_and_remind(db, threshold_days=7)
+        result = await _svc.scan_overdue_and_remind(db, threshold_days=7)
 
-    assert count == 0
+    assert result.emails == 0
     assert await _auto_remind_rows(db) == 0, "角色已撤者不得排入 outbox"
     assert "審核者已無審核者角色" in caplog.text, "此類要有自己的分類：補救動作是改指派或補回角色"
     assert "審核者帳號已停用" not in caplog.text, "帳號是 ACTIVE，誤標成停用會讓人去翻停用清單而查無此人"
@@ -1042,7 +1050,7 @@ async def test_啟用中的審核者照常收到催辦(db):
         db, "DM-SOP-000397", v.version_id, review_type="NEW", reviewer="rev395c", submit=utcnow() - timedelta(days=10)
     )
 
-    assert await _svc.scan_overdue_and_remind(db, threshold_days=7) == 1
+    assert (await _svc.scan_overdue_and_remind(db, threshold_days=7)).emails == 1
 
 
 # ── HTTP 存取閘 ───────────────────────────────────

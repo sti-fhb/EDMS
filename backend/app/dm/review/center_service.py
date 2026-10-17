@@ -72,6 +72,18 @@ class ReviewFile:
     name: str
 
 
+@dataclass(slots=True)
+class RemindRunResult:
+    """催辦批次結果（#699）。
+
+    兩個數字都回是刻意的：彙整後一封涵蓋多筆，只回封數的話**積壓規模會從排程 log 消失**，
+    而那是運維實際在看的數字。比照 `KpiService.run_weekly` 的 `WeeklyRunResult`。
+    """
+
+    emails: int  # 真的排進 outbox 的封數（＝收到催辦的審核者人數）
+    items: int  # 上述那些信涵蓋的逾期送審筆數
+
+
 class ReviewCenterService:
     """簽核中心：待簽核 / 明細 / 核准並發布 / 退回 / 已完成 / 催辦掃描。"""
 
@@ -534,10 +546,21 @@ class ReviewCenterService:
 
     # ── 催辦（FR-006）──────────────────────────────────
 
-    async def scan_overdue_and_remind(self, db, *, threshold_days: int) -> int:
-        """催辦每日批次：停留 ≥ 門檻之 PENDING → AUTO_REMIND 通知指定審核者；回催辦筆數。"""
+    async def scan_overdue_and_remind(self, db, *, threshold_days: int) -> RemindRunResult:
+        """催辦每日批次：停留 ≥ 門檻之 PENDING → AUTO_REMIND 通知指定審核者。
+
+        **逐位審核者一封彙整信**（#699）。先前是逐筆寄，一位審核者手上有 N 筆逾期就是每天
+        收到 N 封各自只講一份文件的信；#627 把 `AUTO_REMIND` 由 `MSG` 改成 `EMAIL` 之後，
+        這個形狀才開始真的產生信件。彙整寫法照抄同模組的 `KpiService._send_unread_reminders`。
+
+        Returns:
+            `RemindRunResult`——`emails` 為真的排進 outbox 的封數，`items` 為那些信涵蓋的筆數。
+        """
         rows = await self._repo.list_overdue_pending(db, threshold_days)
-        count = 0
+        # 可達性是**逐筆**判定，分組在它之後：下方四類跳過的 warning 帶 review_id / doc_id，
+        # 是給人拿去追「哪幾件卡住」的。若先分組再判定，一位停用審核者卡著三件就只會留下
+        # 一條 log——而那三件仍各自是 PENDING。
+        by_reviewer: dict[tuple[str, str], list] = {}  # (審核者 user_id, 收件信箱) → 其逾期列
         for r in rows:
             # #395：`STATUS='DISABLED'` 只擋 API（`core/auth.py` 403），不碰 `DM_USER_ROLE`
             # 也不碰歷史指派欄位。所以被停用的審核者仍會留在這份清單上，而那筆 PENDING
@@ -589,31 +612,53 @@ class ReviewCenterService:
                     self._repo.waiting_days(r.submit_date),
                 )
                 continue
+            # 收件信箱放進**分組鍵**，而不是事後取 `group[0].reviewer_email`。今日兩者等價
+            # （`list_overdue_pending` 以 `DpUser.user_id` 這個 PK outerjoin，一位審核者至多
+            # 配對一列），但那是查詢的性質、不是這段程式保證的事：日後若該查詢多一個一對多
+            # join，`group[0]` 的信箱就不再代表整組，後果是**把某人的積壓清單寄給別人**。
+            # 綁進鍵之後，信箱分歧會自然裂成兩組各自寄出，而不是悄悄寄錯。
+            by_reviewer.setdefault((r.assigned_reviewer, r.reviewer_email), []).append(r)
+
+        emails = 0
+        items = 0
+        for (reviewer_id, reviewer_email), group in by_reviewer.items():
+            # 停留最久的排最前面。`list_overdue_pending` **沒有 ORDER BY**，不自己排的話
+            # 同一批案件每天的清單順序可能不同；一筆一封時這無所謂，彙整後就會被看見。
+            # KPI 那側以 `groups.sort(key=...)  # 輸出穩定` 解同一個問題。
+            group.sort(key=lambda x: x.submit_date)
+            head = group[0]
             result = await self._notifier.notify(
                 db,
                 template_code="AUTO_REMIND",
-                recipients=[r.reviewer_email],
+                recipients=[reviewer_email],
                 params={
-                    # key 必須逐字對齊範本宣告的 `VARIABLES`（`reviewer_name,doc_name,days`）。
-                    # 此處原為 `waiting_days`，對不上 → `_SafeFormatter` KeyError → 整批寫 FAILED
-                    # 空信且**不外拋**。範本在 `CHANNEL='MSG'` 期間從不渲染，所以這個錯位一直沒現形
-                    # （#627）。契約方向：`VARIABLES` 是給 DP04 管理者看的宣告，程式配合它。
-                    "reviewer_name": r.reviewer_name or r.assigned_reviewer,
-                    "doc_name": r.doc_name,
-                    "days": str(self._repo.waiting_days(r.submit_date)),
+                    # key 必須逐字對齊範本宣告的 `VARIABLES`
+                    # （`reviewer_name,pending_count,pending_list`）。對不上 → `_SafeFormatter`
+                    # KeyError → 整批寫 FAILED 空信且**不外拋**，這正是 #627 存活兩個月的形狀。
+                    # 本次改的是佔位詞彙本身，故 migration 與這組 key 必須同一支 PR 改；
+                    # 守門見 `tests/integration/dm/test_dm_notify_template_contract.py`。
+                    # 契約方向：`VARIABLES` 是給 DP04 管理者看的宣告，程式配合它。
+                    "reviewer_name": head.reviewer_name or reviewer_id,
+                    "pending_count": str(len(group)),
+                    "pending_list": "\n".join(
+                        f"- {x.doc_name}（已停留 {self._repo.waiting_days(x.submit_date)} 天）" for x in group
+                    ),
                 },
             )
-            # ⚠️ 只計**真的排進 outbox** 的。原本無條件 `count += 1`，於是「範本停用 / 管道不對 /
+            # ⚠️ 只計**真的排進 outbox** 的。原本無條件遞增，於是「範本停用 / 管道不對 /
             # 渲染失敗」三種沒有產出的情況都被算成「已催辦 N 筆」——排程 log 因此每天報成功
             # 而實際零產出。沿用本函式既有的「跳過必須留下痕跡」原則，未排入者留 warning。
             if result.queued_count:
-                count += 1
+                emails += 1
+                items += len(group)
             else:
+                # 彙整後一封涵蓋多筆，故列出**全部** review_id——只印其中一件的話，
+                # 追查者會以為只有那一件沒寄到。
                 logger.warning(
-                    "催辦未排入 outbox：review_id=%s doc_id=%s reviewer=%s reason=%s",
-                    r.review_id,
-                    r.doc_id,
-                    r.assigned_reviewer,
+                    "催辦未排入 outbox：reviewer=%s 涵蓋 %d 筆 review_ids=%s reason=%s",
+                    reviewer_id,
+                    len(group),
+                    ",".join(str(x.review_id) for x in group),
                     result.skipped_reason,
                 )
-        return count
+        return RemindRunResult(emails=emails, items=items)

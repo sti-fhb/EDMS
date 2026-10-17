@@ -29,6 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.dm.review import reminder
+from app.dm.review.center_service import RemindRunResult
 
 pytestmark = pytest.mark.unit
 
@@ -48,7 +49,7 @@ def db():
 
 async def test_讀出門檻參數並傳給_service(db):
     """門檻來自 `DP_PARAM`，不得寫死——管理者在 DP03 調整後必須當天生效。"""
-    scan = AsyncMock(return_value=3)
+    scan = AsyncMock(return_value=RemindRunResult(emails=3, items=3))
     with (
         patch.object(reminder, "AsyncSessionLocal", _fake_session_factory(db)),
         patch.object(reminder.ParamService, "get_int_param", AsyncMock(return_value=11)),
@@ -70,7 +71,7 @@ async def test_commit_在_scan_之後被呼叫(db):
 
     async def _scan(*_a, **_kw):
         calls.append("scan")
-        return 2
+        return RemindRunResult(emails=2, items=2)
 
     async def _commit():
         calls.append("commit")
@@ -86,20 +87,29 @@ async def test_commit_在_scan_之後被呼叫(db):
     assert calls == ["scan", "commit"], f"scan 與 commit 的順序不對：{calls}"
 
 
-async def test_log_印出的是實際排入寄信的筆數(db, caplog):
-    """#627：`count` 現在只數真的進 outbox 的，log 文案與數字都要跟著它。
+async def test_log_印出封數與涵蓋筆數(db, caplog):
+    """#627：數字只數真的進 outbox 的，log 文案與數字都要跟著它。
 
-    先前 `count` 是「掃到的筆數」，於是範本不寄信的那兩個月每天照報「催辦 N 筆」。
+    先前那個數字是「掃到的筆數」，於是範本不寄信的那兩個月每天照報「催辦 N 筆」。
     這條釘住「log 的數字＝`scan_overdue_and_remind` 的回傳值」這層對應關係。
+
+    #699 起一封涵蓋多筆，兩個數字都要印。⚠️ 刻意讓 `emails` 與 `items` **不相等**——
+    兩者都填 5 的話，`logger.info` 的參數順序寫反也照樣通過。
     """
     with (
         patch.object(reminder, "AsyncSessionLocal", _fake_session_factory(db)),
         patch.object(reminder.ParamService, "get_int_param", AsyncMock(return_value=7)),
-        patch.object(reminder.ReviewCenterService, "scan_overdue_and_remind", AsyncMock(return_value=5)),
+        patch.object(
+            reminder.ReviewCenterService,
+            "scan_overdue_and_remind",
+            AsyncMock(return_value=RemindRunResult(emails=2, items=5)),
+        ),
         caplog.at_level(logging.INFO, logger="app.dm.review.reminder"),
     ):
         await reminder.run()
 
-    assert "已排入寄信 5 筆" in caplog.text, "log 必須印出實際排入的筆數"
+    assert "已排入寄信 2 封、涵蓋 5 筆" in caplog.text, "log 必須同時印出封數與涵蓋筆數，且順序不得顛倒"
     # 反向錨點：舊文案把「掃到幾筆」說成「催辦幾筆」，那正是 #627 讓問題隱形兩個月的原因
-    assert "催辦 5 筆" not in caplog.text
+    assert "催辦 2 筆" not in caplog.text
+    # #699 的反向錨點：封數不得被當成筆數印出——那會讓積壓規模看起來只有實際的一小部分
+    assert "已排入寄信 2 筆" not in caplog.text
