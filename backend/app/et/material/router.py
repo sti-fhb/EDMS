@@ -76,7 +76,7 @@ async def list_dm_documents(
 
 @router.get("/materials/{material_id}", response_model=MaterialDetail)
 async def get_material(
-    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    material_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> MaterialDetail:
@@ -86,7 +86,7 @@ async def get_material(
 
 @router.put("/materials/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_material(
-    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    material_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: MaterialUpdateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -110,7 +110,7 @@ async def update_material(
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_material_video(
-    material_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    material_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     file: UploadFile = File(...),
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
