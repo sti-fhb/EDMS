@@ -151,6 +151,9 @@ class EtLearningService:
             #
             # 擁有者不受此限——教師需要在發布**之前**確認學員視角（#255 裁示 Q1 的
             # 同一個理由；草稿階段正是最需要預覽的時候）。
+            #
+            # ⚠️ #698 起 ET05 編輯頁不再提供「預覽課程」入口（使用者裁示），擁有者預覽
+            # 草稿／已關閉課程只剩直接輸入網址一途。**後端能力刻意保留**——不是死碼，勿刪。
             raise _NOT_FOUND
         enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
         is_owner = course.owner_id == user_id
