@@ -7,9 +7,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from pydantic import Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError

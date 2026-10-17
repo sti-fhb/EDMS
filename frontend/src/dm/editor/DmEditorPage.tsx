@@ -19,13 +19,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useBlocker, useNavigate, useParams } from "react-router-dom"
 
 import {
+  CHANGE_SUMMARY_MAX_LEN,
   describeUploadLimits,
+  DOC_NAME_MAX_LEN,
   EMPTY_AUDIENCE_PAIR,
   EMPTY_EDITOR_FORM,
   isPreviewableMime,
   makeEditorSchema,
   MANUAL_CATEGORY,
   TRAINING_CATEGORY,
+  VERSION_NO_MAX_LEN,
 } from "./schemas"
 import type { AudiencePair, EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
@@ -543,6 +546,7 @@ export function DmEditorPage() {
                     onChange={(e) => setField("doc_name", e.target.value)}
                     error={!!errors.doc_name}
                     helperText={errors.doc_name}
+                    slotProps={{ htmlInput: { maxLength: DOC_NAME_MAX_LEN } }}
                   />
                   <TextField
                     select
@@ -594,6 +598,7 @@ export function DmEditorPage() {
                       onChange={(e) => setField("doc_name", e.target.value)}
                       error={!!errors.doc_name}
                       helperText={errors.doc_name || "此文件尚未發布，續編期間可修改名稱"}
+                      slotProps={{ htmlInput: { maxLength: DOC_NAME_MAX_LEN } }}
                     />
                   ) : (
                     <TextField label="文件名稱" fullWidth size="small" value={editName} disabled />
@@ -749,6 +754,7 @@ export function DmEditorPage() {
                 onChange={(e) => setField("version_no", e.target.value)}
                 error={!!errors.version_no}
                 helperText={errors.version_no || [VERSION_NO_HINT, draftPrefillHint].filter(Boolean).join("；")}
+                slotProps={{ htmlInput: { maxLength: VERSION_NO_MAX_LEN } }}
               />
               <TextField
                 label={isNew ? "首版摘要" : "變更摘要"}
@@ -761,6 +767,7 @@ export function DmEditorPage() {
                 onChange={(e) => setField("change_summary", e.target.value)}
                 error={!!errors.change_summary}
                 helperText={errors.change_summary || draftPrefillHint}
+                slotProps={{ htmlInput: { maxLength: CHANGE_SUMMARY_MAX_LEN } }}
               />
             </Stack>
           </Paper>

@@ -6,11 +6,16 @@
 
 ## 三類缺陷，形狀不同
 
-| 類 | 欄位 | 不設限的後果 |
-|---|---|---|
-| **越界回 500** | `doc_name`(200) / `version_no`(20) / `assigned_reviewer`(20) | DB 欄位是 `String(N)`，應用層不檢核 ⇒ 超長值走到 INSERT 撞 asyncpg `StringDataRightTruncation`；`main.py` 沒有 `DataError` 的處理器，落到最後的 catch-all ⇒ **500**，使用者只看到「伺服器處理失敗」 |
-| **無上限 Text** | `change_summary`(1000) / 廢止 `reason`(500) | 欄位是 `Text`，存得下；但兩者都會原樣進入信件內文與永久記錄 |
-| **陣列無界**（#500） | `audience_unit_ids` / `audience_role_ids` / `retrieval_ids` | 長度擋查詢成本放大，值域擋超出 int64 在 asyncpg 編碼期的未攔截 500 |
+**① 越界回 500**：`doc_name`(200) / `version_no`(20) / `assigned_reviewer`(20)。
+DB 欄位是 `String(N)` 而應用層不檢核 ⇒ 超長值走到 INSERT 才撞 asyncpg
+`StringDataRightTruncation`；`main.py` 沒有 `DataError` 的處理器，落到最後的
+catch-all ⇒ **500**，使用者只看到「伺服器處理失敗」。
+
+**② 無上限 `Text`**：`change_summary`(1000) / 廢止 `reason`(500)。
+欄位存得下，但兩者都會原樣進入信件內文與永久記錄。
+
+**③ 陣列無界**（#500）：`audience_unit_ids` / `audience_role_ids` / `retrieval_ids`。
+長度擋查詢成本放大，值域擋「超出 int64 在 asyncpg 編碼期」的未攔截 500。
 
 ## 為何是 unit
 

@@ -5,6 +5,7 @@ import { delay, http, HttpResponse } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DmEditorPage } from "./DmEditorPage"
+import { CHANGE_SUMMARY_MAX_LEN, DOC_NAME_MAX_LEN, VERSION_NO_MAX_LEN } from "./schemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -77,6 +78,26 @@ async function fillNewForm(user: ReturnType<typeof userEvent.setup>, { withAudie
 beforeEach(() => {
   paramsRef.current = {}
   navigateSpy.mockClear()
+})
+
+describe("DmEditorPage 輸入長度上限（#697）", () => {
+  // 瀏覽器端擋住超長輸入，使用者當下就知道打不進去；後端 `editor/router.py` 的
+  // `_*_MAX` 才是權威檢核。三個欄位各一條——漏掉任一個不會有別的測試變紅。
+  it.each([
+    ["文件名稱", /文件名稱/, DOC_NAME_MAX_LEN],
+    ["首版版本號", /首版版本號/, VERSION_NO_MAX_LEN],
+    ["首版摘要", /首版摘要/, CHANGE_SUMMARY_MAX_LEN],
+  ])("%s 貼上超長內容時被截在上限", async (_label, matcher, max) => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    const field = await screen.findByLabelText(matcher)
+
+    await user.click(field)
+    await user.paste("字".repeat(max + 50))
+
+    // 斷言「剛好等於上限」而非「小於等於」：後者在 maxLength 完全沒接上時也會過
+    expect((field as HTMLInputElement).value).toHaveLength(max)
+  })
 })
 
 describe("DmEditorPage 文件新增與編輯（DM08）", () => {
