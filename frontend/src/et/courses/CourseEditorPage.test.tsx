@@ -1436,6 +1436,17 @@ describe("ET05 課程關閉與再開課", () => {
     expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
   })
 
+  // #698：編輯頁不提供預覽——預覽只從 ET01「全部課程」卡片進入。編輯頁的預覽以「已儲存」
+  // 資料呈現，教師改了基本資料未存就按下去，導離本頁後未儲存的內容直接遺失。
+  // ⚠️ 取捨（使用者裁示接受）：自己的草稿／已關閉／已過期課程因此沒有預覽入口。
+  it.each(["DRAFT", "PUBLISHED", "CLOSED"] as const)("%s 課程的編輯頁不顯示「預覽課程」（#698）", async (status) => {
+    useCourse(status)
+    renderEditor()
+    // 正向錨點：頁面已載入、動作列已出現——否則下面的否定斷言在載入中也成立
+    expect(await screen.findByRole("button", { name: "取消" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /預覽課程/ })).not.toBeInTheDocument()
+  })
+
   it("非擁有者（檢視模式）不顯示關閉 / 再開課", async () => {
     useCourse("PUBLISHED", { isOwner: false })
     renderEditor()
