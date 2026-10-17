@@ -76,7 +76,10 @@
   >
   > 「於通知範本設定頁編輯時間並反寫 CRON」這個未來增強**一併作廢**——它會重新製造兩個事實來源。要改時點就到「排程管理」改 `CRON_EXPR`。
 - **FR-005**: 未讀提醒 MUST **涵蓋統計母體之全部文件**（不含訓練教材，見 FR-002；不設文件層個別開關）；是否寄送由管理者於通知範本「未讀提醒」**啟用 / 停用**統一控制（停用則整批不寄，KPI 統計 / DM06 儀表板 / KPI 週報不受影響）
-- **FR-006**: 排程寄信 MUST 呼叫平台唯一發信服務（傳 `template_code`）、由 outbox `DP_EMAIL_LOG` 背景批次非同步寄送（沿用 [spec_us6.md](spec_us6.md) FR-008 之集中 outbox 機制）；平台發信為「呼叫方備妥 `params` → outbox 非同步寄送」、**不做寄送時動態組信**，故 **`SCHDM001` 之 `run` 於執行當下由 DM 逐位收件人算好內容**（未讀提醒逐人算未看清單、KPI 週報算統計摘要）後**逐一以固定 `params` 呼叫平台發信服務 enqueue**。「KPI 週報」「未讀提醒」為 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）之內建事件（CHANNEL=EMAIL_ONLY），可由管理者於平台 DP 系統管理後台「通知範本」（按模組過濾，見 [spec_us1.md](spec_us1.md)）啟用 / 停用、編輯主旨內文
+- **FR-006**: 排程寄信 MUST 呼叫平台唯一發信服務（傳 `template_code`）、由 outbox `DP_EMAIL_LOG` 背景批次非同步寄送（沿用 [spec_us6.md](spec_us6.md) FR-008 之集中 outbox 機制）；平台發信為「呼叫方備妥 `params` → outbox 非同步寄送」、**不做寄送時動態組信**，故 **`SCHDM001` 之 `run` 於執行當下由 DM 逐位收件人算好內容**（未讀提醒逐人算未看清單、KPI 週報算統計摘要）後**逐一以固定 `params` 呼叫平台發信服務 enqueue**。「KPI 週報」「未讀提醒」為 `DP_NOTIFY_TEMPLATE`（`MODULE=DM`）之內建事件（CHANNEL=`EMAIL`），可由管理者於平台 DP 系統管理後台「通知範本」（按模組過濾，見 [spec_us1.md](spec_us1.md)）啟用 / 停用、編輯主旨內文
+    > ⚠️ 本條原寫「（**CHANNEL=EMAIL_ONLY**）」——`EMAIL_ONLY` **不是系統存在的值**（平台正規詞彙只有 `EMAIL` / `MSG` / `BOTH`，已於 #554 更正，見 [data-model.md](data-model.md)〈通知事件〉註記）。**實作一向正確**：seed 寫的就是 `EMAIL`（migration `20261007_1403_15e30a8f8b6f` 自註「KPI_WEEKLY / UNREAD_REMIND 本就是 EMAIL」），故 KPI 週報與未讀提醒都正常寄得出去。
+    >
+    > 仍須更正的理由是**假值到得了 DB 的那條路**：從 DP04 通知範本維護的 UI 送 `EMAIL_ONLY` 會被 Pydantic 以 422 擋下（`channel` 型別為 `Literal["EMAIL", "MSG", "BOTH"]`），**唯一到得了的路徑是「照著本條寫 migration」**——migration 繞過 Pydantic 直接寫 DB，寫進去不報錯，只會讓該範本**靜默不寄信**。此類失效沒有任何測試或 CI 會紅（`CHANNEL` 是資料、不是程式），只能靠本條文字正確（#693）。
 - **FR-007**: outbox 寄送之**韌性**（最大重試、重試間隔、批次限流）由**平台發信引擎**負責，調校參數屬**平台級 `MAIL` 參數組**（`RETRY_MAX` 預設 5、`RATE_PER_MIN` 預設 60/分、`RETRY_INTERVAL_MIN` 預設 2 分），於平台 DP 系統管理後台維護（平台級參數為共用項，ET / DM 管理者皆可維護）；**FAILED 比率不做系統內告警，由 IT 監控機制負責**（2026-07-09 對齊平台，原失敗告警參數作廢）；DM 不自持此類發信引擎參數（詳見 research §9d 註記與平台 DP 規格）
 
 ## 系統訊息
