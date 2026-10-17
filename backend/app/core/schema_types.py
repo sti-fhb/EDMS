@@ -10,7 +10,7 @@ Unicode 特殊字元（如土耳其文 `İ`）之小寫規則可能與 Postgres 
 
 from typing import Annotated
 
-from pydantic import StringConstraints
+from pydantic import BeforeValidator, StringConstraints
 
 # 輕量 email 格式（同 US1/US2 既有 regex；大小寫無關，正規化前後皆適用）
 _EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -64,3 +64,29 @@ SafeNameStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=SAFE_SINGLE_LINE_PATTERN),
 ]
+
+# ── multipart（`Form()`）欄位專用：允許空值的單行 pattern 與「先 strip」的前置驗證 ──────────
+#
+# 為何需要第二個 pattern：上面的 `SAFE_SINGLE_LINE_PATTERN` 是 `+`（至少一字元）。DM 編輯器的
+# 存草稿路徑**刻意允許空值**——`dm/editor/service.create_document` 的 docstring 明載「存草稿不卡
+# 必填（US5）：名稱 / 版號 / 摘要 / 檔案皆可空，送簽時才完整檢核」。把 `+` 版直接掛上去，
+# 會讓「新增文件按存草稿」一律 422，而且只有實際點過才看得到。
+SAFE_SINGLE_LINE_OR_EMPTY_PATTERN = r"^[^\x00-\x1f\x7f-\x9f  ]*$"
+
+
+def _strip_if_str(value: object) -> object:
+    """字串先去頭尾空白，其餘型別原樣放行（供 `BeforeValidator` 使用）。"""
+    return value.strip() if isinstance(value, str) else value
+
+
+#: 先 strip 再驗的前置驗證器。
+#:
+#: `StringConstraints(strip_whitespace=True, ...)` 只適用於 Pydantic 模型欄位；FastAPI 的
+#: `Form()` 繼承自 `Param`，支援 `max_length` / `pattern` 但**沒有** `strip_whitespace`。
+#: 少了它，長度與 pattern 都會驗到「未 strip 的原值」：使用者在文字框尾端多打一個空白，
+#: 剛好滿長度的輸入就被判超限；尾端換行則由「今天被靜默 strip」變成 422。
+#:
+#: 已實測 `BeforeValidator` 先於 `Form()` 的約束執行，故
+#: `Annotated[str, STRIP_BEFORE_VALIDATE, Form(max_length=..., pattern=...)]` 的語意是
+#: 「strip 後再檢查長度與字元」。
+STRIP_BEFORE_VALIDATE = BeforeValidator(_strip_if_str)
