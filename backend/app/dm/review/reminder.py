@@ -42,6 +42,4 @@ async def run() -> None:
     # 會從這行消失——那是運維實際在看的數字，而自本次起它與收信人數不再相等。
     # 掃到但沒排入者（查無帳號 / 停用 / 無角色 / 範本停用 / 渲染失敗）各自在
     # `scan_overdue_and_remind` 留 warning。
-    logger.info(
-        "DM 簽核催辦完成：已排入寄信 %d 封、涵蓋 %d 筆（門檻 %d 天）", result.emails, result.items, threshold
-    )
+    logger.info("DM 簽核催辦完成：已排入寄信 %d 封、涵蓋 %d 筆（門檻 %d 天）", result.emails, result.items, threshold)

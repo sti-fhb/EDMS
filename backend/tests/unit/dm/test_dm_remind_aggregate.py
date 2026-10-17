@@ -112,9 +112,7 @@ async def test_兩位審核者的清單不交叉():
     await svc.scan_overdue_and_remind(MagicMock(), threshold_days=7)
 
     assert notify.await_count == 2
-    by_to = {
-        call.kwargs["recipients"][0]: call.kwargs["params"] for call in notify.await_args_list
-    }
+    by_to = {call.kwargs["recipients"][0]: call.kwargs["params"] for call in notify.await_args_list}
     assert by_to["rev1@e.com"]["pending_count"] == "2"
     assert "乙的文件" not in by_to["rev1@e.com"]["pending_list"]
     assert by_to["rev2@e.com"]["pending_count"] == "1"
