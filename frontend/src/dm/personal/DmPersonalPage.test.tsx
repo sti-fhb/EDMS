@@ -69,6 +69,48 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(screen.getAllByRole("button", { name: "刪除" })).toHaveLength(3)
   })
 
+  it("草稿匣：父文件在廢止待簽核時「繼續編輯」一併灰化，並說明原因（#615）", async () => {
+    // #615：PENDING_OBSOLETE 期間入口原本仍可點，使用者進編輯器填完按儲存才被 DM_DOC_008 擋，
+    // 而 `update_draft_version` 在 409 前不寫入 ⇒ 當次編輯內容直接遺失。
+    //
+    // ⚠️ 用 server.use() 局部覆寫、**不改共用夾具**——上一條測試斷言「3 顆、1 顆 disabled」，
+    // 動共用夾具會把它弄壞（而那與本 issue 無關）。
+    server.use(
+      http.get("/api/dm/personal/drafts", () =>
+        HttpResponse.json([
+          {
+            version_id: 711,
+            doc_id: "DM-SOP-000020",
+            doc_name: "廢止簽核中的草稿",
+            version_no: "3.0",
+            change_summary: "編到一半對方發起廢止",
+            category_code: "SOP",
+            kind: "unsubmitted",
+            updated_date: "2026-08-23T09:00:00Z",
+            doc_status: "PENDING_OBSOLETE",
+          },
+        ]),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<DmPersonalPage />)
+    await user.click(await screen.findByRole("tab", { name: "草稿匣" }))
+    // 正向錨點：該列確實渲染出來了（草稿不因廢止待簽核而消失）——
+    // 否則下面「鈕是 disabled」會在「整列都沒渲染」時取不到元素而以別的理由失敗。
+    expect(await screen.findByText("廢止簽核中的草稿")).toBeInTheDocument()
+
+    const editButton = screen.getByRole("button", { name: "繼續編輯" })
+    expect(editButton).toBeDisabled()
+
+    // 「有原因」：hover 後 tooltip 說明為何暫時不能編，且**不是**已廢止那句（兩者原因不同）
+    await user.hover(editButton.parentElement as HTMLElement)
+    expect(await screen.findByText(/此文件正在廢止簽核中/)).toBeInTheDocument()
+    expect(screen.queryByText(/此文件已被廢止/)).not.toBeInTheDocument()
+
+    // 草稿本身仍可刪除（與已廢止列一致，讓使用者自行清掉）
+    expect(screen.getByRole("button", { name: "刪除" })).toBeInTheDocument()
+  })
+
   it("刪除草稿 → 確認（DM-MSG-DM04-004）→ 成功 toast", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DmPersonalPage />)

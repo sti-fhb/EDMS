@@ -18,6 +18,13 @@ export interface ObsoleteInfo {
   reason: string | null
   has_attachment: boolean
   attachment_name: string | null
+  /**
+   * 目前使用者可否下載該附件（#615）。後端以「DM_ADMIN 或該送審之指定審核者」判定，
+   * 與下載端點的 403 同一支（`dm/roles/authz.can_download_obsolete_file`）。
+   *
+   * ⛔ 不要在前端自行以 `is_admin` 近似——那會誤擋**該送審的指定審核者**，後端是允許他下載的。
+   */
+  can_download_attachment: boolean
 }
 
 export interface DetailResponse {

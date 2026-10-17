@@ -31,6 +31,10 @@ class ObsoleteInfo(BaseModel):
     reason: str | None
     has_attachment: bool  # 廢止附件（OBSOLETE_FILE_*）是否存在
     attachment_name: str | None  # 廢止附件原始檔名（下載時之檔名；無附件為 None）
+    #: 目前使用者可否下載該附件（#615）。判定見 `dm/roles/authz.can_download_obsolete_file`，
+    #: 與下載端點的 403 **同一支**。⚠️ 這是給前端「不要顯示按不動的鈕」用的，
+    #: **後端 403 仍為唯一權威**——不可因為此欄為 True 就省略後端檢核。
+    can_download_attachment: bool
 
 
 class DetailResponse(BaseModel):

@@ -37,7 +37,7 @@ from app.dm.review.schemas import (
     VersionMeta,
 )
 from app.dm.review.service import ReviewService
-from app.dm.roles.authz import DM_ADMIN, has_role
+from app.dm.roles.authz import can_download_obsolete_file
 from app.dp.users.account_status import is_account_disabled
 from app.services import AuditLogService, ParamService
 
@@ -226,8 +226,10 @@ class ReviewCenterService:
         review = await self._repo.get_review(db, review_id)
         if review is None or review.review_type != _OBSOLETE:
             raise _NOT_FOUND
-        # 授權（SA 裁示 Q1=C）：僅 DM_ADMIN 或該送審之指定審核者；發起人本人亦不可
-        if not has_role(roles, DM_ADMIN) and review.assigned_reviewer != op.user_id:
+        # 授權（SA 裁示 Q1=C）：僅 DM_ADMIN 或該送審之指定審核者；發起人本人亦不可。
+        # 🔴 與 `detail/service` 回給前端的 `can_download_attachment` **呼叫同一支**（#615）——
+        # 兩邊各寫一份就會分岔成「顯示條件比後端寬」，而沒有任何測試會紅。
+        if not can_download_obsolete_file(roles, review.assigned_reviewer, op.user_id):
             raise AppError(status_code=403, detail="無權下載此廢止附件", error_code="DM_REVIEW_005")
         if not review.obsolete_file_path:
             raise _NOT_FOUND

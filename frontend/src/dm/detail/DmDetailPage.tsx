@@ -154,7 +154,14 @@ export function DmDetailPage() {
                 {detail.obsolete_info.applicant_name ?? detail.obsolete_info.applicant_id} ｜ 核准者：
                 {detail.obsolete_info.approver_name ?? "—"} ｜ 廢止原因：{detail.obsolete_info.reason ?? "—"}
               </Typography>
-              {detail.obsolete_info.has_attachment && (
+              {/*
+                ⛔ 兩個條件都要：有附件、**且**本人下載得了（#615）。
+                原本只看 `has_attachment`，比後端寬——後端限 DM_ADMIN 或該送審之指定審核者，
+                於是閱覽者會同時看到「所有版本僅可預覽、不開放下載」的 banner 和一顆按下去回 403 的鈕。
+                ⛔ 不要改用 `detail.is_admin` 近似：那會誤擋指定審核者（後端允許他下載）。
+                後端 403 仍為唯一權威，本條件只是不顯示按不動的鈕。
+              */}
+              {detail.obsolete_info.has_attachment && detail.obsolete_info.can_download_attachment && (
                 <Button
                   size="small"
                   variant="outlined"

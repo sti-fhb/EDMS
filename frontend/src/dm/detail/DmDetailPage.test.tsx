@@ -249,6 +249,7 @@ describe("DmDetailPage 文件詳細頁", () => {
             approver_name: "李主任",
             reason: "院內停用",
             has_attachment: true,
+            can_download_attachment: true,
             attachment_name: "函文.pdf",
           },
         }),
@@ -270,6 +271,55 @@ describe("DmDetailPage 文件詳細頁", () => {
     expect(screen.queryByRole("button", { name: "返回文件庫" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "版本歷程" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "下載廢止附件" })).toBeInTheDocument()
+  })
+
+  it("已廢止 read-only：下載不了的人看不到「下載廢止附件」鈕（#615）", async () => {
+    // #615：原本只看 has_attachment 就渲染，比後端寬（後端限 DM_ADMIN 或該送審之指定審核者）。
+    // 於是閱覽者會同時看到「所有版本僅可預覽、不開放下載」的 banner 和一顆按下去回 403 的鈕。
+    server.use(
+      http.get("/api/dm/documents/:docId", ({ params }) =>
+        HttpResponse.json({
+          doc_id: params.docId,
+          doc_name: "停辦作業",
+          status: "OBSOLETE",
+          current_version_no: "2.1",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          audience_tags: [],
+          description: null,
+          author_id: "u1",
+          author_name: "陳大華",
+          published_date: null,
+          approver_id: null,
+          approver_name: null,
+          approve_time: null,
+          tags: [],
+          func_code: null,
+          func_name: null,
+          file: null,
+          is_admin: false,
+          can_edit: false,
+          is_obsolete: true,
+          obsolete_info: {
+            review_id: 77,
+            obsolete_time: "2026-04-10T11:15:00Z",
+            applicant_id: "u1",
+            applicant_name: "王曉明",
+            approver_name: "李主任",
+            reason: "院內停用",
+            // 🔴 附件**存在**，但這個人下載不了——兩個欄位的組合正是本 issue 的情境
+            has_attachment: true,
+            can_download_attachment: false,
+            attachment_name: "函文.pdf",
+          },
+        }),
+      ),
+    )
+    renderWithProviders(<DmDetailPage />)
+    // 正向錨點：banner 確實渲染出來了（附件資訊所在的區塊沒有整段消失）——
+    // 否則下面那條否定斷言會在「整個 banner 都沒渲染」時恆真。
+    expect(await screen.findByText(/院內停用/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "下載廢止附件" })).not.toBeInTheDocument()
   })
 
   it("已廢止 read-only：管理者可下載無法預覽（Office）版本（SA 裁示：限管理者）", async () => {
@@ -310,6 +360,7 @@ describe("DmDetailPage 文件詳細頁", () => {
             approver_name: "李主任",
             reason: "停用",
             has_attachment: false,
+            can_download_attachment: false,
             attachment_name: null,
           },
         }),
@@ -381,6 +432,7 @@ describe("DmDetailPage 文件詳細頁", () => {
             approver_name: "李主任",
             reason: "停用",
             has_attachment: false,
+            can_download_attachment: false,
             attachment_name: null,
           },
         }),
@@ -512,6 +564,7 @@ describe("DmDetailPage 日期欄（#539）", () => {
             approver_name: "李主任",
             reason: "院內停用",
             has_attachment: false,
+            can_download_attachment: false,
             attachment_name: null,
           },
         }),
