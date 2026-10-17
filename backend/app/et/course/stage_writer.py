@@ -70,6 +70,51 @@ class StageRef:
     course_id: int
 
 
+@dataclass(frozen=True)
+class StageNodeView:
+    """一個暫存節點的完整內容（`payload` 已解析成 dict）。
+
+    供各模組的**讀取路徑**組出「教師編輯中的樣子」。與 `stage_rules.StageNode` 的差別
+    只有多一個 `course_id`——後者是整棵樹一起載入時用的，樹的擁有者已知，單獨取一個
+    節點時則需要它來做授權。
+    """
+
+    stage_id: int
+    course_id: int
+    entity_type: str
+    source_id: int | None
+    parent_stage_id: int | None
+    sort_order: int
+    version: int
+    payload: dict[str, Any]
+
+
+def _view(row: EtCourseContentStage) -> StageNodeView:
+    """ORM 列 → `StageNodeView`。`PAYLOAD` 不是 JSON object 時明確報錯。
+
+    ⚠️ 與 `stage_repository.load_tree` 的 `_payload` 同一道守門：非 dict 時下游
+    `payload.get(...)` 會拋難讀的 `AttributeError`，而那是 500。
+    """
+    parsed = json.loads(row.payload)
+    if not isinstance(parsed, dict):
+        logger.error("ET 暫存列的 PAYLOAD 不是 JSON object：stage_id=%s type=%s", row.stage_id, type(parsed).__name__)
+        raise AppError(
+            status_code=500,
+            detail="課程內容暫存資料異常，請重新載入後再試",
+            error_code="ET_STAGE_001",
+        )
+    return StageNodeView(
+        stage_id=row.stage_id,
+        course_id=row.course_id,
+        entity_type=row.entity_type,
+        source_id=row.source_id,
+        parent_stage_id=row.parent_stage_id,
+        sort_order=row.sort_order,
+        version=row.version,
+        payload=parsed,
+    )
+
+
 def exposed_id(*, source_id: int | None, stage_id: int) -> int:
     """暫存節點對外（前端 / API）呈現的 id。
 
@@ -250,7 +295,7 @@ class EtCourseStageWriter:
 
     async def children_of(
         self, db: AsyncSession, course_id: int, entity_type: str, parent_stage_id: int | None
-    ) -> list[EtCourseContentStage]:
+    ) -> list[StageNodeView]:
         """某節點底下指定型別的子節點，依 `SORT_ORDER` 排序。"""
         stmt = select(EtCourseContentStage).where(
             EtCourseContentStage.course_id == course_id,
@@ -263,7 +308,28 @@ class EtCourseStageWriter:
             else EtCourseContentStage.parent_stage_id == parent_stage_id
         )
         rows = await db.scalars(stmt.order_by(EtCourseContentStage.sort_order, EtCourseContentStage.stage_id))
-        return list(rows.all())
+        return [_view(r) for r in rows.all()]
+
+    async def node_of(self, db: AsyncSession, exposed: int, entity_type: str) -> StageNodeView | None:
+        """對外 id（正負皆可）→ 暫存節點；**查不到就回 `None`**（代表沒有暫存區）。
+
+        供**讀取路徑**使用：讀取不該因為「這門課還沒開始編輯」而報錯，回 `None` 讓
+        呼叫端退回去讀活表。寫入路徑要的是 `resolve_new` + `ref_for_source` 那一組
+        ——它們會在該有而沒有時拋錯，因為寫入靜默落空才是真正的問題。
+
+        ⚠️ 正數要先知道是哪門課才查得到（`SOURCE_ID` 只在同一課程內唯一），所以這裡
+        用 `(entity_type, source_id)` 全域查再回報 `course_id`——`SOURCE_ID` 指向的是
+        活表的代理鍵，同一型別的活表 id 本來就全域唯一，不會撞。
+        """
+        stmt = select(EtCourseContentStage).where(
+            EtCourseContentStage.entity_type == entity_type,
+            EtCourseContentStage.deleted == 0,
+        )
+        stmt = stmt.where(
+            EtCourseContentStage.stage_id == -exposed if exposed < 0 else EtCourseContentStage.source_id == exposed
+        )
+        row = await db.scalar(stmt)
+        return None if row is None else _view(row)
 
     async def apply_order(self, db: AsyncSession, stage_ids: Sequence[int], operator: OperatorInfo) -> None:
         """依給定順序重設 `SORT_ORDER`（1 起算）。

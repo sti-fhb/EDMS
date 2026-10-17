@@ -35,6 +35,7 @@ from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEACHER, SURVEY_QUESTION_SINGLE
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.stage_live_tree import load_live_tree
+from app.et.material.models import EtMaterial
 from app.et.quiz.models import EtQuestion, EtQuiz
 from app.et.roles.models import EtUserRole
 from app.et.survey.models import EtSurvey, EtSurveyQuestion
@@ -175,6 +176,7 @@ async def _course_with_content(client, db, uid: str) -> dict[str, Any]:
 
     item_rows = list(await db.scalars(select(EtItem).where(EtItem.chapter_id == chapter_id, EtItem.deleted == 0)))
     material_item = next(i for i in item_rows if i.material_id)
+    material_row = await db.scalar(select(EtMaterial).where(EtMaterial.material_id == material_item.material_id))
     quiz_item = next(i for i in item_rows if i.quiz_id)
     question = await db.scalar(select(EtQuestion).where(EtQuestion.quiz_id == quiz_id, EtQuestion.deleted == 0))
     sq_row = await db.scalar(
@@ -190,6 +192,9 @@ async def _course_with_content(client, db, uid: str) -> dict[str, Any]:
         "chapter_version": chapter.version,
         "material_item_id": material_item.item_id,
         "material_id": material_item.material_id,
+        # ⚠️ 取實際版本而非寫死 0：哪天建立流程多 bump 一次，寫死的那個會變成 409，
+        # 而 409 一樣讓 xfail 通過 ⇒ `strict=True` 的提醒不會響（security review L-6）
+        "material_version": material_row.version,
         "quiz_item_id": quiz_item.item_id,
         "quiz_id": quiz_id,
         "quiz_version": quiz_row.version,
@@ -308,10 +313,15 @@ _COURSE_MODULE = [
 _OTHER_MODULES = [
     (
         "PUT /materials/{id}",
-        False,
+        True,
         lambda c, u, i: c.put(
             f"/api/et/materials/{i['material_id']}",
-            json={"material_name": "改名教材", "description_html": None, "version": 0},
+            # ⚠️ **必須給說明文字**：fixture 的教材是空殼（無影片無文件），送 `None` 會先被
+            # `ET_MATERIAL_002`「至少提供一項媒材」擋成 422，本條就測不到它宣稱的事。
+            # 🔴 2026-10-17 發現這條一直是為了這個理由 xfail，不是為了「寫了活表」——
+            # 一個**為了錯的理由而通過**的 xfail，`strict=True` 想要的提醒永遠不會響
+            # （security review L-6 指出的形狀，實際成因比它推測的還早一步）。
+            json={"material_name": "改名教材", "description_html": "<p>說明</p>", "version": i["material_version"]},
             headers=_bearer(u),
         ),
     ),
