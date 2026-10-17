@@ -44,7 +44,15 @@ class ActivityEvent(BaseModel):
     status: str  # 該送審週期終態 / 現態：PENDING / APPROVED / REJECTED / WITHDRAWN
     event_kind: str  # "submitted"（送審 / 發起廢止）| "resolved"（核准 / 退回 / 撤回 之結果）
     event_time: datetime  # 該事件發生時間（submitted＝送審時間、resolved＝完成時間）
-    is_overdue: bool  # 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻（審核者視角顯「催辦中」，AC5）
+    #: 僅 PENDING 之 submitted 事件：停留 ≥ 催辦門檻。**兩個視角都吃這個欄位**，但字樣不同：
+    #: 撰寫者視角顯「逾期未審」/「廢止逾期未審」、審核者視角顯「催辦中」（AC5）。
+    #:
+    #: ⚠️ 撰寫者那半是 #395 D-2 才補上的（在那之前卡 1 天與卡 100 天字樣完全相同，撰寫者
+    #: 沒有任何訊號知道該撤回重送）。本註解原先只寫審核者視角，會讓要查撰寫者視角的人
+    #: 直接把這個欄位排除在考慮外——而「催辦」一詞**只存在於審核者端**，照它 grep 在
+    #: 撰寫者端一無所獲。兩處字樣見 `frontend/src/dm/personal/schemas.ts` 的
+    #: `authorEventLabel` 與 `reviewerEventLabel`。
+    is_overdue: bool
     #: 退回原因（#554 / #657 / #679）。**僅 `event_kind="resolved"` 且 `status="REJECTED"`
     #: 時有值**（**含廢止退回**），其餘為 None。來源為 `DM_REVIEW.REJECT_REASON`。
     #:

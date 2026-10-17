@@ -29,7 +29,10 @@ export interface ActivityEvent {
   status: string // PENDING / APPROVED / REJECTED / WITHDRAWN
   event_kind: "submitted" | "resolved" // 送審(發起廢止) / 結果(核准 退回 撤回)
   event_time: string
-  is_overdue: boolean // 僅 PENDING 之 submitted 事件；審核者視角逾門檻顯「催辦中」
+  // 僅 PENDING 之 submitted 事件（停留 ≥ 催辦門檻）。**兩個視角都吃這個欄位**，字樣不同：
+  // 撰寫者視角＝「逾期未審」/「廢止逾期未審」（#395 D-2 補上）；審核者視角＝「催辦中」。
+  // ⚠️ 「催辦」只存在於審核者端，照它 grep 找不到撰寫者端——見下方 authorEventLabel。
+  is_overdue: boolean
   party_name: string | null // 撰寫者視角＝指定審核者；審核者視角＝送審者
   // 對造人帳號不可達之原因（#395 D-2）：null 可達 / "DISABLED" 已停用 / "NOT_FOUND" 查無帳號。
   // ⚠️ 兩類不可併成一句——補救動作不同（查無要修資料、停用要換審核者）。
