@@ -353,17 +353,33 @@ function DraftsTab() {
   )
 }
 
+/**
+ * 「繼續編輯」入口。兩種父文件狀態會讓它失效，**原因不同**：
+ *
+ * - `OBSOLETE`：已廢止，續編無意義，只能刪草稿（終局）
+ * - `PENDING_OBSOLETE`：廢止待簽核（#615）。入口原本仍可點，使用者進編輯器填完按儲存才被
+ *   `DM_DOC_008` 擋下，而 `update_draft_version` 在 409 前不寫入 ⇒ **當次編輯內容直接遺失**。
+ *   這條路徑本來就存在（他人發起廢止時也會），但 #600 讓「廢止此文件」在持有自己草稿時
+ *   可按之後，變成**同一個人一鍵就能造成自己的資料遺失**。
+ *
+ * ⚠️ 這裡只擋入口；後端 `DM_DOC_008` 仍是最終守門，維持不動。
+ */
 function ContinueEditButton({ draft, onNavigate }: { draft: DraftItem; onNavigate: () => void }) {
-  const obsolete = draft.doc_status === "OBSOLETE" // 已廢止 → 不可續編，僅可刪除
+  const lockReason =
+    draft.doc_status === "OBSOLETE"
+      ? "此文件已被廢止，無法繼續編輯，請刪除此草稿"
+      : draft.doc_status === "PENDING_OBSOLETE"
+        ? "此文件正在廢止簽核中，暫時無法繼續編輯；待簽核結果出爐後再處理此草稿"
+        : null
   const button = (
-    <Button size="small" variant="outlined" onClick={onNavigate} disabled={obsolete}>
+    <Button size="small" variant="outlined" onClick={onNavigate} disabled={lockReason !== null}>
       繼續編輯
     </Button>
   )
-  if (!obsolete) return button
+  if (lockReason === null) return button
   // disabled Button 不觸發 hover 事件，需以 span 包裹讓 Tooltip 生效
   return (
-    <Tooltip title="此文件已被廢止，無法繼續編輯，請刪除此草稿">
+    <Tooltip title={lockReason}>
       <span>{button}</span>
     </Tooltip>
   )

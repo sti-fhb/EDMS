@@ -26,6 +26,37 @@ def has_role(roles: Iterable[str], role: str) -> bool:
     return role in set(roles)
 
 
+def can_download_obsolete_file(roles: Iterable[str], assigned_reviewer: str | None, user_id: str) -> bool:
+    """廢止附件下載權（US8，SA 裁示 Q1=C）：僅 **DM_ADMIN** 或**該送審之指定審核者**。
+
+    附件屬稽核佐證公文、非文件本體，採最小揭露——**發起人本人與一般閱覽者皆不可下載**。
+
+    ## 🔴 唯一真相：顯示條件與授權必須呼叫同一支
+
+    兩個呼叫端：
+
+    - `dm/review/center_service.prepare_obsolete_file` —— 決定要不要擋成 403（**權威**）
+    - `dm/detail/service.get_detail` —— 決定 `ObsoleteInfo.can_download_attachment`，
+      前端據以渲染「下載廢止附件」鈕
+
+    ⛔ **不要在任一端另寫一份判定。** #615 修的正是這個毛病：前端原本只看
+    `has_attachment` 就渲染按鈕，比後端寬，於是閱覽者會同時看到「所有版本僅可預覽、
+    不開放下載」的 banner 和一顆按下去回 403 的鈕。兩邊各寫一份的話，日後改其中一邊
+    就會再次分岔，而**沒有任何測試會紅**。
+
+    ⚠️ `assigned_reviewer` 可能為 `None`（未指派）——此時不得與任何 `user_id` 相等而意外放行。
+
+    Args:
+        roles:             使用者之 DM 角色集。
+        assigned_reviewer: **該筆**廢止送審的指定審核者 USER_ID；未指派為 None。
+        user_id:           目前使用者 USER_ID。
+
+    Returns:
+        可下載為 True。後端 403 仍為唯一權威，本函式只是讓前端**不要顯示按不動的鈕**。
+    """
+    return has_role(roles, DM_ADMIN) or (assigned_reviewer is not None and assigned_reviewer == user_id)
+
+
 def ensure_reviewer_not_author(reviewer_id: str, author_id: str) -> None:
     """指定審核者排除本人（US5 送簽）：審核者＝撰寫者時拒絕。
 

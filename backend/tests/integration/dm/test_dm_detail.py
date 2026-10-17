@@ -413,6 +413,55 @@ async def test_obsolete_info_banner(db):
     assert d.obsolete_info.review_id is not None and d.obsolete_info.attachment_name == "函文.pdf"
 
 
+# ── 廢止附件下載權（#615）────────────────────────────
+#
+# 🔴 這組驗的是**接線**，不是述詞本身——述詞由 `tests/unit/dm/test_dm_authz.py` 覆蓋。
+# 這裡要擋的是「`repository` 漏 select `assigned_reviewer`」「`service` 傳錯參數順序」
+# 這類 unit 測不到、但會讓欄位恆為錯值的失誤。
+
+
+async def _seed_obsolete_with_attachment(db, doc_id: str) -> None:
+    # 掛「全體」：重現 issue 的真實情境——閱覽者**看得到**這份已廢止文件的詳細頁
+    # （DM07 的 `_BROWSABLE_STATUSES` 含 OBSOLETE），於是也看得到那顆按鈕。
+    await _seed_doc(db, doc_id=doc_id, status="OBSOLETE", audience_tags=["全體"])
+    await _add_review(
+        db,
+        doc_id,
+        review_type="OBSOLETE",
+        status="APPROVED",
+        reviewer="rev_x",  # 該送審的指定審核者
+        applicant="u_author",
+        obsolete_file="函文.pdf",
+    )
+
+
+async def test_廢止附件_指定審核者可下載(db):
+    """⚠️ 正向錨點：不可為了擋閱覽者而把他一起誤擋——後端 403 是允許他的。"""
+    await _seed_obsolete_with_attachment(db, "DM-SOP-000051")
+    ctx = DmContext(user_id="rev_x", roles=frozenset({DM_VIEWER}))  # 角色只有閱覽者，靠「是該送審審核者」放行
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000051", ctx=ctx)
+    assert d.obsolete_info is not None
+    assert d.obsolete_info.has_attachment is True
+    assert d.obsolete_info.can_download_attachment is True
+
+
+async def test_廢止附件_無關閱覽者不可下載(db):
+    """#615：原本前端只看 has_attachment 就渲染按鈕，於是這種人看到一顆按下去回 403 的鈕。"""
+    await _seed_obsolete_with_attachment(db, "DM-SOP-000052")
+    ctx = DmContext(user_id="v_all", roles=frozenset({DM_VIEWER}))
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000052", ctx=ctx)
+    assert d.obsolete_info is not None
+    # 正向錨點：附件確實存在、banner 也確實渲染得出來——否定斷言才有東西可驗
+    assert d.obsolete_info.has_attachment is True
+    assert d.obsolete_info.can_download_attachment is False
+
+
+async def test_廢止附件_管理者可下載(db):
+    await _seed_obsolete_with_attachment(db, "DM-SOP-000053")
+    d = await _svc.get_detail(db, doc_id="DM-SOP-000053", ctx=_admin())
+    assert d.obsolete_info is not None and d.obsolete_info.can_download_attachment is True
+
+
 async def test_obsolete_office_old_version_download_admin_only_for_audit(db):
     """已廢止之無法預覽（Office）版本僅管理者可下載供稽核（US10 SA 裁示：限管理者）；可預覽舊版仍僅預覽。"""
     doc = DmDocument(

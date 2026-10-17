@@ -21,7 +21,7 @@ from app.dm.detail.repository import DetailRepository
 from app.dm.detail.schemas import DetailResponse, FileMeta, ObsoleteInfo, VersionItem
 from app.dm.document.file_paths import resolve_within_root
 from app.dm.document.file_store import is_previewable
-from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, has_role
+from app.dm.roles.authz import DM_ADMIN, DM_EDITOR, can_download_obsolete_file, has_role
 
 _OBSOLETE = "OBSOLETE"
 _PENDING_OBSOLETE = "PENDING_OBSOLETE"
@@ -86,6 +86,7 @@ class DetailService:
                     reason=orv.reason,
                     has_attachment=orv.obsolete_file_name is not None,
                     attachment_name=orv.obsolete_file_name,
+                    can_download_attachment=can_download_obsolete_file(ctx.roles, orv.assigned_reviewer, ctx.user_id),
                 )
 
         file_meta = None

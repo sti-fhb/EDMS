@@ -156,6 +156,7 @@ class DetailRepository:
                 DmReview.complete_date,
                 DmReview.reason,
                 DmReview.obsolete_file_name,
+                DmReview.assigned_reviewer,  # 供 can_download_attachment 判定（#615）
                 applicant.user_name.label("applicant_name"),
                 approver.user_name.label("approver_name"),
             )
