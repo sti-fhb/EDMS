@@ -109,8 +109,18 @@ async def paginate(
     # total=0 時明確回傳 0，不依賴除法隱含行為
     total_pages = (total + limit - 1) // limit if total > 0 else 0
 
-    # page 超出範圍時直接回空，避免傳送無意義的大 offset 至資料庫
-    if total > 0 and page > total_pages:
+    # page 超出範圍時直接回空，避免傳送無意義的大 offset 至資料庫。
+    #
+    # 🔴 `max(total_pages, 1)` 的 1 是為了 `total == 0`（#511）：此時 `total_pages` 為 0，
+    # 原條件寫 `total > 0 and page > total_pages`，整條被跳過 ⇒ 超大 page 會原封不動算成
+    # offset 送進 DB，超出 PostgreSQL `int8` 即拋例外 → 500。而 `page` 在 router 層只有
+    # `ge=1`、沒有上限，Python 的 int 又是任意精度。
+    #
+    # ⛔ 不要改成在各 router 的 `page` 加 `le=`：那要求**每個新端點的作者都記得加**，
+    # 漏加不會有任何訊號。守在這裡則是所有列表自動涵蓋。
+    #
+    # 空清單的**第一頁**仍照常查詢（`1 > max(0, 1)` 為假）——那是常態路徑，不能一起擋掉。
+    if page > max(total_pages, 1):
         return {
             "data": [],
             "meta": {"total": total, "page": page, "limit": limit, "total_pages": total_pages},
@@ -155,9 +165,13 @@ async def paginate_rows(
     ## 🔴 與 `paginate()` 的驗證與 count 邏輯是**刻意的重複**
 
     不把兩支抽成共用內部函式，是因為那等於改 `paginate()` 的實作——而它被全專案每一個
-    列表使用，且**沒有任何針對它的直接測試**。⛔ 兩支的門檻、錯誤碼、早退規則若要改，
-    **必須一起改**；`tests/unit/test_core_pagination_rows.py` 斷言兩支的錯誤碼一致，
+    列表使用。⛔ 兩支的門檻、錯誤碼、早退規則若要改，**必須一起改**；
+    `tests/unit/test_core_pagination_rows.py` 對**兩支**斷言同一組錯誤碼與早退行為，
     只改一支時會紅。
+
+    ⚠️ 本段原寫「`paginate()` **沒有任何針對它的直接測試**」——自 #511 起**只對其餘行為成立**：
+    越界早退與輸入驗證兩支都有直接的 unit test，其餘（真實 count、序列化、實際 offset 值）
+    仍只由各功能的 integration test 間接覆蓋。抽共用函式的門檻因此**降低但未消失**。
 
     Args:
         db:    AsyncSession
@@ -185,7 +199,9 @@ async def paginate_rows(
     total: int = raw if raw is not None else 0
     total_pages = (total + limit - 1) // limit if total > 0 else 0
 
-    if total > 0 and page > total_pages:
+    # 早退規則與 `paginate()` **逐字相同**（含 `max(total_pages, 1)` 的理由，見該處註解）。
+    # ⛔ 兩支必須一起改；`tests/unit/test_core_pagination_rows.py` 對兩支斷言同一組早退行為。
+    if page > max(total_pages, 1):
         return {"data": [], "meta": {"total": total, "page": page, "limit": limit, "total_pages": total_pages}}
 
     offset = (page - 1) * limit
