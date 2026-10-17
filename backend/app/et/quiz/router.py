@@ -48,7 +48,7 @@ _service = EtQuizService()
 
 @router.get("/quizzes/{quiz_id}", response_model=QuizDetail)
 async def get_quiz(
-    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    quiz_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     ctx: EtContext = Depends(get_et_context),
     db: AsyncSession = Depends(get_db),
 ) -> QuizDetail:
@@ -62,7 +62,7 @@ async def get_quiz(
 
 @router.put("/quizzes/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_quiz(
-    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    quiz_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: QuizUpdateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -77,7 +77,7 @@ async def update_quiz(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_question(
-    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    quiz_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: QuestionCreateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -88,7 +88,7 @@ async def add_question(
 
 @router.put("/quizzes/{quiz_id}/questions/order", status_code=status.HTTP_204_NO_CONTENT)
 async def reorder_questions(
-    quiz_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    quiz_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: QuestionReorderReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -99,7 +99,7 @@ async def reorder_questions(
 
 @router.put("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_question(
-    question_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    question_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     req: QuestionUpdateReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -110,7 +110,7 @@ async def update_question(
 
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_question(
-    question_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    question_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     # DELETE 沒有 body，故 `require_retest` 走 query（其餘三支寫在請求 body 內）。
     require_retest: bool = False,
     operator: OperatorInfo = Depends(get_operator),

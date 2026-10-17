@@ -310,6 +310,42 @@ class EtCourseStageWriter:
         rows = await db.scalars(stmt.order_by(EtCourseContentStage.sort_order, EtCourseContentStage.stage_id))
         return [_view(r) for r in rows.all()]
 
+    async def node_by_stage_id(self, db: AsyncSession, stage_id: int) -> StageNodeView | None:
+        """以 `STAGE_ID` 直接取節點（已解析 payload）。供已經握有 ref 的呼叫端回讀。"""
+        row = await db.scalar(
+            select(EtCourseContentStage).where(
+                EtCourseContentStage.stage_id == stage_id, EtCourseContentStage.deleted == 0
+            )
+        )
+        return None if row is None else _view(row)
+
+    async def set_payload_flag(
+        self, db: AsyncSession, stage_id: int, key: str, value: Any, operator: OperatorInfo
+    ) -> None:
+        """在 payload 裡設一個**非內容欄位**的旗標，**刻意不遞增 `VERSION`**。
+
+        🔴 不遞增是重點。`VERSION` 是教師那一端的樂觀鎖令牌，前端拿著載入當下的值。
+        旗標是「這次編輯工作階段的意圖」（例如 #361 的要求重測）、不是教師改的內容，
+        為它推進版本會讓他**下一次存檔無故 409**，而畫面上看不出為什麼。
+
+        ⚠️ 旗標的 key 必須**不是**該實體的欄位名——`stage_apply._upsert` 只寫
+        `payload_fields(spec)` 列出的 key，所以非欄位的旗標會被自動忽略、不會進活表。
+        ⛔ 不要用與欄位同名的 key。
+        """
+        node = await self.node_by_stage_id(db, stage_id)
+        if node is None:
+            return
+        await db.execute(
+            update(EtCourseContentStage)
+            .where(EtCourseContentStage.stage_id == stage_id, EtCourseContentStage.deleted == 0)
+            .values(
+                payload=json.dumps({**node.payload, key: value}, ensure_ascii=False),
+                updated_user=operator.user_id,
+                updated_date=utcnow(),
+            )
+        )
+        await db.flush()
+
     async def node_of(self, db: AsyncSession, exposed: int, entity_type: str) -> StageNodeView | None:
         """對外 id（正負皆可）→ 暫存節點；**查不到就回 `None`**（代表沒有暫存區）。
 

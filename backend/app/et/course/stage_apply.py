@@ -78,6 +78,7 @@ from app.et.course.stage_rules import (
     ENTITY_SURVEY,
     ENTITY_SURVEY_OPTION,
     ENTITY_SURVEY_QUESTION,
+    RETEST_PAYLOAD_KEY,
     StageNode,
 )
 from app.et.material.repository import EtMaterialRepository
@@ -142,7 +143,7 @@ async def apply_stage(
 
     stats = await _delete_removed(db, live=live, staged_sources=staged_sources, operator=operator)
     await _park_sort_orders(db, nodes=nodes, operator=operator)
-    await _upsert(db, course=course, nodes=nodes, operator=operator)
+    live_id_by_stage = await _upsert(db, course=course, nodes=nodes, operator=operator)
 
     # 🔴 **完課戳記只在整批套用完成後蓋一次**（`_DELETERS` 一律帶 `stamp=False`）。
     #
@@ -150,7 +151,43 @@ async def apply_stage(
     # ⇒ 階段 1 結束時是 2/2 被蓋章，階段 3 之後其實是 2/3、沒完課。而 `COMPLETED_AT`
     # 只寫一次、回退不清除，那個時間戳會一直停在一個他沒完課的時點。
     await EtProgressRepository().stamp_completed_at(db, course_id=course.course_id, operator=operator)
+    await _require_retest_for_flagged(
+        db, course=course, nodes=nodes, live_id_by_stage=live_id_by_stage, operator=operator
+    )
     return stats
+
+
+async def _require_retest_for_flagged(
+    db: AsyncSession, *, course: EtCourse, nodes: Sequence[StageNode], live_id_by_stage: dict[int, int], operator
+) -> None:
+    """把編輯期間勾選的「要求已通過學員重測」在**此刻**執行（#361 × #631）。
+
+    教師在編輯中勾選時只是**記下意圖**（`RETEST_PAYLOAD_KEY` 寄在 QUIZ 暫存節點上），
+    真正把學員退回未通過延到這裡——2026-10-17 使用者裁示。
+
+    🔴 理由：在編輯當下執行的話，學員被退回的那一刻**新題目還沒生效**，他去重考考的是
+    剛剛才通過的同一份舊題。副作用必須跟著「學員看得到了」一起發生，與 #303 的通知改到
+    「更新」當下寄是同一個道理。
+
+    ⚠️ 排在 `_upsert` **之後**：重測信裡帶測驗名稱，而那個名稱可能正是本次改的。
+    ⚠️ 也排在 `stamp_completed_at` 之後：重測會清掉完成旗標，順序顛倒會讓剛蓋的章又被清。
+    ⚠️ 新增的測驗（`source_id` 為 None）此刻才有活表 id，故一律由 `live_id_by_stage` 取。
+    """
+    flagged = [n for n in nodes if n.entity_type == ENTITY_QUIZ and n.payload.get(RETEST_PAYLOAD_KEY)]
+    if not flagged:
+        return
+    # 延後匯入：`quiz.service` 會回頭匯入 `course.stage_writer`，放在模組層雖然目前
+    # 不成環，但這條相依是「套用時才需要」的，留在函式內比較不會被下一個人動壞。
+    from app.et.quiz.service import EtQuizService
+
+    service = EtQuizService()
+    for node in flagged:
+        quiz_id = live_id_by_stage.get(node.stage_id)
+        if quiz_id is None:  # pragma: no cover - `_upsert` 必定已填
+            continue
+        affected = await service.require_retest_now(db, quiz_id=quiz_id, course_id=course.course_id, operator=operator)
+        if affected:
+            logger.info("ET 更新套用：要求重測 quiz_id=%s 影響 %s 位學員", quiz_id, affected)
 
 
 def _validate_tree(nodes: Sequence[StageNode], *, live: Sequence[LiveNode]) -> None:
@@ -443,7 +480,7 @@ async def _upsert(
     course: EtCourse,
     nodes: Sequence[StageNode],
     operator: OperatorInfo,
-) -> None:
+) -> dict[int, int]:
     """依 `APPLY_ORDER` 逐型別寫入；回填 `STAGE_ID → 活表 id` 供子層與反向連結使用。"""
     now = utcnow()
     live_id_by_stage: dict[int, int] = {}
@@ -490,6 +527,10 @@ async def _upsert(
             live_id_by_stage[node.stage_id] = live_id
             if spec.link == LINK_PARENT_FK and node.parent_stage_id is not None:
                 reverse_child[(node.parent_stage_id, spec.entity_type)] = live_id
+
+    # 回傳對照表：套用後才知道新增節點的活表 id，而 `_require_retest_for_flagged`
+    # 需要它才找得到「本次新增的測驗」對應到哪一列。
+    return live_id_by_stage
 
 
 async def _write(
