@@ -560,7 +560,7 @@ class ReviewCenterService:
         # 可達性是**逐筆**判定，分組在它之後：下方四類跳過的 warning 帶 review_id / doc_id，
         # 是給人拿去追「哪幾件卡住」的。若先分組再判定，一位停用審核者卡著三件就只會留下
         # 一條 log——而那三件仍各自是 PENDING。
-        by_reviewer: dict[str, list] = {}
+        by_reviewer: dict[tuple[str, str], list] = {}  # (審核者 user_id, 收件信箱) → 其逾期列
         for r in rows:
             # #395：`STATUS='DISABLED'` 只擋 API（`core/auth.py` 403），不碰 `DM_USER_ROLE`
             # 也不碰歷史指派欄位。所以被停用的審核者仍會留在這份清單上，而那筆 PENDING
@@ -612,11 +612,16 @@ class ReviewCenterService:
                     self._repo.waiting_days(r.submit_date),
                 )
                 continue
-            by_reviewer.setdefault(r.assigned_reviewer, []).append(r)
+            # 收件信箱放進**分組鍵**，而不是事後取 `group[0].reviewer_email`。今日兩者等價
+            # （`list_overdue_pending` 以 `DpUser.user_id` 這個 PK outerjoin，一位審核者至多
+            # 配對一列），但那是查詢的性質、不是這段程式保證的事：日後若該查詢多一個一對多
+            # join，`group[0]` 的信箱就不再代表整組，後果是**把某人的積壓清單寄給別人**。
+            # 綁進鍵之後，信箱分歧會自然裂成兩組各自寄出，而不是悄悄寄錯。
+            by_reviewer.setdefault((r.assigned_reviewer, r.reviewer_email), []).append(r)
 
         emails = 0
         items = 0
-        for reviewer_id, group in by_reviewer.items():
+        for (reviewer_id, reviewer_email), group in by_reviewer.items():
             # 停留最久的排最前面。`list_overdue_pending` **沒有 ORDER BY**，不自己排的話
             # 同一批案件每天的清單順序可能不同；一筆一封時這無所謂，彙整後就會被看見。
             # KPI 那側以 `groups.sort(key=...)  # 輸出穩定` 解同一個問題。
@@ -625,7 +630,7 @@ class ReviewCenterService:
             result = await self._notifier.notify(
                 db,
                 template_code="AUTO_REMIND",
-                recipients=[head.reviewer_email],
+                recipients=[reviewer_email],
                 params={
                     # key 必須逐字對齊範本宣告的 `VARIABLES`
                     # （`reviewer_name,pending_count,pending_list`）。對不上 → `_SafeFormatter`

@@ -34,8 +34,26 @@ Create Date: 2026-10-17 11:30:00.000000
 那正是 #627 讓催辦靜默停擺兩個月的同一個故障形狀。**「保留管理者用字」換來「催辦完全
 不寄且無訊號」，後者嚴重得多**，故本次無條件覆寫，並接受管理者的自訂文案被重設。
 
-📌 不動 `VERSION`：它記的是使用者編輯次數，本次是系統改版。
+## 🔴 為何要遞增 `VERSION`（與 `a3f9c21e5d84` 的 📌 相反）
+
+初版照抄了 `a3f9c21e5d84` 的「📌 不動 `VERSION`：它記的是使用者編輯次數」。**那句話描述的是
+欄位意圖，不是它實際承重的東西**——`dp/notify/repository.update_template_versioned` 的
+docstring 寫明它是**樂觀鎖**：「僅當 DB `VERSION` 等於傳入 version 才成功」。
+
+而那個 📌 在 `a3f9c21e5d84` 成立，是因為該 migration 用 `WHERE "BODY" = :old` **只動出廠列**
+——出廠列代表沒有管理者編輯過它，也就不可能有人手上握著該列的表單。本次是無條件 UPDATE，
+前提消失：在 migration 之前開著 DP04 編輯表單的管理者，其 `version` 仍與 DB 相符 →
+409 `DP_MAIL_004` 衝突檢核**不會觸發** → 他按儲存就把本次的新文案靜默覆寫回舊的。
+
+（今日這條另被 `ensure_renderable` 偶然擋住——它拿新 `VARIABLES` 去驗舊主旨內文，`{doc_name}`
+缺 key 而 422。但那只在「佔位名稱有改」時成立，不能當作防線。）
+
+⇒ `SET ... "VERSION" = "VERSION" + 1`，讓既有表單一律撞上版本衝突、看到明確錯誤。
+downgrade 同樣**再 +1** 而非還原原值：它是單調遞增的鎖計數，不是要復原的資料。
+
 📌 不動 `CHANNEL`：`EMAIL` 由 `0ac1b791c1a1`（#627）設定，維持不變。
+📌 `UPDATED_USER` / `UPDATED_DATE` 亦不動——與 `0ac1b791c1a1`、`a3f9c21e5d84` 一致（模組層級
+的既有慣例，非本次決定）。
 """
 
 from typing import Sequence, Union
@@ -64,7 +82,8 @@ _NEW_BODY = (
 _NEW_VARS = "reviewer_name,pending_count,pending_list"
 
 _SQL = text(
-    'UPDATE "DP_NOTIFY_TEMPLATE" SET "SUBJECT" = :subject, "BODY" = :body, "VARIABLES" = :variables '
+    'UPDATE "DP_NOTIFY_TEMPLATE" '
+    'SET "SUBJECT" = :subject, "BODY" = :body, "VARIABLES" = :variables, "VERSION" = "VERSION" + 1 '
     "WHERE \"MODULE\" = 'DM' AND \"TEMPLATE_CODE\" = 'AUTO_REMIND'"
 )
 
