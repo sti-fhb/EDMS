@@ -15,10 +15,16 @@ U+2028 / U+2029 的防線——而那正是 `SafeNameStr` docstring 花了一整
 """
 
 import re
+from pathlib import Path
 
 import pytest
+from pydantic import Field, ValidationError, create_model
 
-from app.core.schema_types import SAFE_SINGLE_LINE_OR_EMPTY_PATTERN, SAFE_SINGLE_LINE_PATTERN
+from app.core.schema_types import (
+    SAFE_MULTILINE_PATTERN,
+    SAFE_SINGLE_LINE_OR_EMPTY_PATTERN,
+    SAFE_SINGLE_LINE_PATTERN,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -36,8 +42,8 @@ _MUST_REJECT = [
     ("DEL", "\x7f"),
     ("NEL U+0085", "\x85"),
     ("C1 U+009F", "\x9f"),
-    ("LINE SEPARATOR U+2028", " "),
-    ("PARAGRAPH SEPARATOR U+2029", " "),
+    ("LINE SEPARATOR U+2028", "\u2028"),
+    ("PARAGRAPH SEPARATOR U+2029", "\u2029"),
 ]
 
 
@@ -49,6 +55,12 @@ def test_pattern_原始碼不得含隱形字元():
     """
     assert SAFE_SINGLE_LINE_PATTERN.isascii(), "pattern 含非 ASCII 字元（很可能是字面 U+2028 / U+2029）"
     assert SAFE_SINGLE_LINE_OR_EMPTY_PATTERN.isascii(), "pattern 含非 ASCII 字元（很可能是字面 U+2028 / U+2029）"
+    assert SAFE_MULTILINE_PATTERN.isascii(), "pattern 含非 ASCII 字元（很可能是字面 U+2028 / U+2029）"
+
+    # ⚠️ 本檔自己也曾犯同一個錯（`_MUST_REJECT` 裡寫成字面字元）——守門只盯 `schema_types.py`
+    # 的常數，盯不到測試檔，故這裡自檢一次。
+    src = Path(__file__).read_text(encoding="utf-8")
+    assert not [c for c in src if c in "\u2028\u2029"], "本測試檔含字面 U+2028 / U+2029——請改寫成跳脫序列"
 
 
 @pytest.mark.parametrize(("label", "char"), _MUST_REJECT)
@@ -66,3 +78,31 @@ def test_兩條_pattern_的唯一差異是空字串():
 
     assert re.match(SAFE_SINGLE_LINE_PATTERN, "") is None, "`+` 版應拒空字串（姓名等必填欄位）"
     assert re.match(SAFE_SINGLE_LINE_OR_EMPTY_PATTERN, "") is not None, "`*` 版應放行空字串（存草稿）"
+
+
+@pytest.mark.parametrize(("label", "char"), _MUST_REJECT)
+def test_production_引擎下也擋下同一組字元(label, char):
+    """🔴 上面那幾條走 Python 的 `re`，**production 走的是 Pydantic 的 rust-regex**。
+
+    兩者的 `$` 語意不同：Python 的 `$` 也匹配「結尾換行之前」，Rust 的只匹配 haystack 結尾
+    （分岔點見 `test_尾端換行是兩個引擎的已知分岔點`）。
+
+    目前不構成漏洞（rust-regex 是較嚴格的那邊，且探針把字元放在中間、碰不到分岔），
+    但「兩條 pattern 擋下同一組字元」這個結論若只由 `re` 背書，證據基礎就是錯的引擎。
+    本條讓守門與 production 走同一條路。
+    """
+    model = create_model("_Probe", v=(str, Field(pattern=SAFE_SINGLE_LINE_PATTERN)))
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        model(v=f"正常{char}文字")
+    # 正向錨點：證明這個 model 真的驗得過正常值（否則「每個字元都 raise」可能是 model 壞了）
+    assert model(v="正常的文件名稱").v == "正常的文件名稱", label
+
+
+def test_尾端換行是兩個引擎的已知分岔點():
+    """把分岔本身釘住——日後若 Pydantic 換引擎或改語意，這條會紅並指向上面那條的前提。"""
+    import re as _re
+
+    assert _re.match(SAFE_SINGLE_LINE_PATTERN, "abc\n") is not None, "Python re 的 $ 允許結尾換行"
+    model = create_model("_Probe2", v=(str, Field(pattern=SAFE_SINGLE_LINE_PATTERN)))
+    with pytest.raises(ValidationError):
+        model(v="abc\n")

@@ -59,9 +59,14 @@ def test_檔名上限同時容得下兩條上傳路徑的欄位():
 
 
 def test_送審與草稿的審核者欄位長度一致():
-    """`_REVIEWER_ID_MAX` 同時要容得下 `DM_REVIEW.ASSIGNED_REVIEWER`。
+    """兩個 `ASSIGNED_REVIEWER` 欄位必須同長。
 
-    草稿記住的審核者（`DM_DOC_VERSION`）之後會被送簽路徑帶進 `DM_REVIEW`；兩欄若不同長，
-    較寬的那邊就是下一個「越界回 500」。
+    ⚠️ **不要把這條讀成「送簽路徑已受保護」**。寫進 `DM_REVIEW.ASSIGNED_REVIEWER` 的值
+    並非來自被 `_REVIEWER_ID_MAX` 界住的草稿欄位，而是來自 `editor/schemas.SubmitReq`
+    與 `obsolete/router.py` 的 `reviewer_id`——**那兩處目前沒有套用本常數**。它們之所以
+    沒出事，是因為 `ReviewService._ensure_assignable_reviewer` 會先查 `DM_USER_ROLE`、
+    查不到就 422；那是**巧合的守門、不是設計的守門**（NUL 就穿得過去，見 #697 的 PR 說明）。
+
+    本條只守一件事：兩欄同長，所以 `_REVIEWER_ID_MAX` 這一個常數涵蓋得了兩邊。
     """
     assert _col_len(DmDocVersion, "ASSIGNED_REVIEWER") == _col_len(DmReview, "ASSIGNED_REVIEWER")

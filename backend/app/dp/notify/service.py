@@ -69,9 +69,13 @@ MAX_RECIPIENTS = 50
 # U+0085 都擋），該例外被 worker 的 except 吞掉、`retry_count` 累加到上限後標 FAILED。也就是說
 # 一個含換行的主旨參數會讓**該批通知信永久寄不出去**，而錯誤只留在 `DP_EMAIL_LOG.ERROR_MSG`。
 #
-# ⚠️ 這條路徑**現在就可觸發**：DM 的 9 支內建範本主旨含 `{doc_name}` 佔位（見
-# `alembic/versions/..._dm_seed_templates_params_into_dp.py`），而 `doc_name` 只做 strip、無 pattern，
-# 任何已認證的 DM 編輯者把文件命名為含換行即可。本層剝除是止血；`doc_name` 的輸入驗證屬 DM 範圍。
+# 📌 這條路徑原本**現在就可觸發**：DM 的 9 支內建範本主旨含 `{doc_name}` 佔位（見
+# `alembic/versions/..._dm_seed_templates_params_into_dp.py`），而當時 `doc_name` 只做 strip、無
+# pattern，任何已認證的 DM 編輯者把文件命名為含換行即可。**該缺口已於 #697 自輸入端補上**
+# （`dm/editor/router.py` 的 `_DocNameForm` 套 `SAFE_SINGLE_LINE_OR_EMPTY_PATTERN`）。
+#
+# ⛔ 不可因此移除本層剝除：DP 不該假設每個上游都做對了，而且本層同時服務 ET 與日後新模組的
+# 範本參數——那些參數各自的輸入端驗證不在 DP 的視野內。此處自「止血」轉為縱深防禦。
 #
 # 「內文被插入假訊息」則由**輸入端**擋（姓名見 `core/schema_types.py` 的 `SafeNameStr`）：姓名本質
 # 單行、理由本質多行，只有輸入端分得清這個差別；本層只做與信件結構有關的防護。

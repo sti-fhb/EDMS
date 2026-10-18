@@ -85,8 +85,11 @@ SAFE_SINGLE_LINE_OR_EMPTY_PATTERN = rf"^[^{_UNSAFE_LINE_CHARS}]*$"
 #
 # 為何非擋不可：PostgreSQL 的文字型別存不下 `\x00`——實測寫入會拋 asyncpg 的
 # `CharacterNotInRepertoireError`，而 `main.py` 沒有 `DataError` 系列的處理器，於是落到最後的
-# catch-all 冒成 **500**。這與「超過 `String(N)` 回 500」是同一類缺陷，只是觸發字元不同；
-# 無界 `Text` 欄位不會因長度越界，卻仍會因這一個字元越界。
+# catch-all 冒成 **500**。這與「超過 `String(N)` 回 500」是同一類缺陷，只是觸發的是單一字元。
+#
+# ⚠️ 範圍比「寫入」更廣：實測**純 `SELECT $1::text` 綁定 NUL 就會拋**，不必 INSERT。
+# 也就是任何未檢核的字串只要流進**任何一條查詢**（含「查不到就 422」那種存在性檢核）
+# 就是 500——所以「這個欄位不寫進 DB」不足以當作免檢核的理由。
 #
 # ⚠️ 刻意**不**沿用 `_UNSAFE_LINE_CHARS`：那一組連 LF 都擋，套到摘要 / 退回理由上會把
 # 多行輸入壓成不合法——`SafeNameStr` 的 docstring 已說明「DM 的退回 / 廢止理由就是真的多行

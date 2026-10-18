@@ -127,12 +127,15 @@ MAX_FILE_NAME_LEN = 255
 #:
 #: 截斷會**默默改掉使用者的檔案名稱**，而下載時回給瀏覽器的正是這個名稱；兩支不同的長檔名
 #: 截斷後還可能撞成同一個。明講「檔名過長，請縮短」是他當下就能處理的事。
-#: 作法比照 `et/material/storage.ensure_file_name_acceptable`（該處 docstring 有完整推導）。
-_NAME_TOO_LONG = AppError(
-    status_code=422,
-    detail=f"檔名過長（上限 {MAX_FILE_NAME_LEN} 字元），請縮短檔名後再上傳",
-    error_code="DM_FILE_003",
-)
+#: 推導比照 `et/material/storage.ensure_file_name_acceptable`。
+#:
+#: ⛔ 只抄訊息、**不抄 ET 的模組級 `AppError` 單例寫法**：同一個 exception 物件被重複 `raise`
+#: 時，Python 會把 `__traceback__` 掛在物件上並保留整條 frame 鏈（含各 frame 的 locals）。
+#: DM 的上傳是 `await file.read()` 整包進記憶體，被釘住的就是那份檔案位元組——一次被拒的
+#: 超長檔名上傳會讓最多 `DM_FILE_MAX_MB` 常駐到下一次拒絕為止，且殘留的 traceback 一旦被
+#: `logger.exception` 帶出來，印的是**別人那次請求**的堆疊。ET 那側是串流寫入、frame 裡只有
+#: file handle，後果較輕，故該寫法在 DM 不成立。同檔 `DM_FILE_001` / `DM_FILE_002` 亦為現場建構。
+_NAME_TOO_LONG_MSG = f"檔名過長（上限 {MAX_FILE_NAME_LEN} 字元），請縮短檔名後再上傳"
 
 
 async def validate_upload(
@@ -150,7 +153,7 @@ async def validate_upload(
     # 檔名長度先於副檔名檢核：兩者都不合時，「檔名過長」比「格式不支援」更接近使用者要做的事
     # （後者會讓他去找格式問題，而真正擋住的是長度）。
     if len(filename) > MAX_FILE_NAME_LEN:
-        raise _NAME_TOO_LONG
+        raise AppError(status_code=422, detail=_NAME_TOO_LONG_MSG, error_code="DM_FILE_003")
 
     # fail-closed：DM_FILE_TYPES 缺值 / 清空 → 退回安全預設白名單，格式檢核恆執行（T066 L2）
     #
