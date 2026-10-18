@@ -105,9 +105,10 @@ class CatalogAdapter:
         分區順序見 `_GROUP_ORDER`：排序在**應用層**而非 SQL，因為它表達的是畫面上的閱讀
         順序（可見對象兩維度優先、單位在職位之前），不是資料的自然順序。
         """
-        rows = (
-            await db.execute(select(DmTagGroup).where(DmTagGroup.deleted == 0).order_by(DmTagGroup.tag_group_code))
-        ).scalars()
+        # 不濾 DELETED：`DM_TAG_GROUP` 採「永不刪除、淘汰改停用」，自 #508 起已無該欄位。
+        # 此處原本是全檔唯一濾 `DELETED = 0` 的地方，而 list_controlled / list_audiences
+        # 都沒濾——那個不一致正是 #508 要消除的（修法是砍欄位，不是補齊過濾）。
+        rows = (await db.execute(select(DmTagGroup).order_by(DmTagGroup.tag_group_code))).scalars()
         ordered = sorted(
             rows, key=lambda g: (_GROUP_ORDER.get(g.tag_group_code, _GROUP_ORDER_DEFAULT), g.tag_group_code)
         )
