@@ -3,7 +3,13 @@
 import pytest
 
 from app.core.exceptions import AppError
-from app.dm.document.file_store import enforce_size_limit, is_previewable, resolve_upload_mime, validate_upload
+from app.dm.document.file_store import (
+    MAX_FILE_NAME_LEN,
+    enforce_size_limit,
+    is_previewable,
+    resolve_upload_mime,
+    validate_upload,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -104,3 +110,39 @@ def test_unknown_ext_falls_back_to_octet_stream():
     resolved = resolve_upload_mime(b"<html>evil</html>", "sneaky.bin")
     assert resolved == "application/octet-stream"
     assert is_previewable(resolved) is False
+
+
+# ── 檔名長度（#697）──────────────────────────────────────────────
+
+
+async def test_檔名超過欄位長度回_422_而非_500():
+    """`DM_DOC_VERSION.FILE_NAME` / `DM_REVIEW.OBSOLETE_FILE_NAME` 都是 `String(255)`。
+
+    先前只驗大小與副檔名，超長檔名會走到 INSERT 才撞 asyncpg 的
+    `StringDataRightTruncation`；`main.py` 沒有 `DataError` 系列的處理器 ⇒ 落到最後的
+    catch-all、冒成 500。兩條上傳路徑（編輯器 / 廢止附件）都經過 `validate_upload`，
+    故一處守門涵蓋四個端點。
+    """
+    too_long = "超" * (MAX_FILE_NAME_LEN - 3) + "x.pdf"  # 副檔名合法，只有長度違規
+    assert len(too_long) > MAX_FILE_NAME_LEN
+    with pytest.raises(AppError) as ei:
+        await validate_upload(None, size_bytes=10, filename=too_long, params=_StubParam())
+    assert ei.value.error_code == "DM_FILE_003"
+    assert ei.value.status_code == 422
+
+
+async def test_檔名剛好等於上限時放行():
+    """上限不可誤擋界內值——只測「超限」的話，把上限設成 1 也會過。"""
+    exact = "名" * (MAX_FILE_NAME_LEN - 4) + ".pdf"
+    assert len(exact) == MAX_FILE_NAME_LEN
+    await validate_upload(None, size_bytes=10, filename=exact, params=_StubParam())
+
+
+async def test_檔名長度先於副檔名檢核():
+    """兩者都違規時回「檔名過長」——使用者真正要做的是縮短檔名，而非去找格式問題。
+
+    若順序顛倒，他會收到「不支援的檔案格式」，改了副檔名仍然失敗。
+    """
+    with pytest.raises(AppError) as ei:
+        await validate_upload(None, size_bytes=10, filename="長" * 300 + ".exe", params=_StubParam())
+    assert ei.value.error_code == "DM_FILE_003", "長度應先於副檔名檢核"

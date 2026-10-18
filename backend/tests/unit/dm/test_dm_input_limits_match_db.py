@@ -19,6 +19,7 @@
 
 import pytest
 
+from app.dm.document.file_store import MAX_FILE_NAME_LEN
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.editor.router import _DOC_NAME_MAX, _REVIEWER_ID_MAX, _VERSION_NO_MAX
 from app.dm.review.models import DmReview
@@ -43,6 +44,18 @@ def test_router_上限等於_DB_欄位長度(const, model, column, label):
     assert const == _col_len(model, column), (
         f"{label}：router 的上限 {const} 與 {model.__tablename__}.{column} 的 String({_col_len(model, column)}) 不一致"
     )
+
+
+def test_檔名上限同時容得下兩條上傳路徑的欄位():
+    """`validate_upload` 是文件上傳與廢止附件**共用**的檢核點，一個常數要對上兩個欄位。
+
+    兩欄若不同長，較寬的那邊就會變成漏網的「越界回 500」——而因為檢核是共用的，
+    看程式不會察覺只有一邊被保護到。
+    """
+    doc_len = _col_len(DmDocVersion, "FILE_NAME")
+    obs_len = _col_len(DmReview, "OBSOLETE_FILE_NAME")
+    assert doc_len == obs_len, f"兩條上傳路徑的檔名欄位不同長（{doc_len} vs {obs_len}），共用上限已不成立"
+    assert MAX_FILE_NAME_LEN == doc_len
 
 
 def test_送審與草稿的審核者欄位長度一致():
