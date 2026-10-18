@@ -28,6 +28,7 @@ from app.et.course.stage_rules import (
     ENTITY_SURVEY,
     ENTITY_SURVEY_OPTION,
     ENTITY_SURVEY_QUESTION,
+    RETEST_PAYLOAD_KEY,
 )
 
 pytestmark = pytest.mark.unit
@@ -166,3 +167,42 @@ class TestPayloadFields:
         assert SPEC_BY_TYPE[ENTITY_CHAPTER].parent_entity is None
         assert SPEC_BY_TYPE[ENTITY_CHAPTER].model is EtChapter
         assert SPEC_BY_TYPE[ENTITY_SURVEY].parent_entity is None
+
+
+class TestNonFieldFlags:
+    """寄在 payload 上、但**不是內容欄位**的旗標（目前只有 #361 的要求重測）。
+
+    ## 這一層在守什麼
+
+    `stage_apply._upsert` 寫活表時只取 `payload_fields(spec)` 列出的 key
+    （`{f: node.payload[f] for f in payload_fields(spec) if f in node.payload}`），
+    所以非欄位的旗標會被自動忽略。**旗標一旦與某個內容欄位同名，就會被當成內容寫進活表。**
+
+    🔴 `stage_rules.RETEST_PAYLOAD_KEY` 的註解原本就宣稱「由本測試實際比對，不靠人記得」
+    ——而 2026-10-19 跑 #631 的 close 盤點時發現**那條測試從來沒有被寫出來**。註解在說謊，
+    而它的作用正是讓下一個人不去查。
+
+    ⚠️ 既有的 `test_payload_只含內容欄位`（integration）擋不到這件事：它的前置只跑
+    `seed_from_live`、從不勾重測，旗標在它的母體裡**永遠不出現**。那是觸發條件被 harness
+    預設排除，不是斷言寫錯。
+    """
+
+    def test_重測旗標不得與_ET_QUIZ_的欄位同名(self) -> None:
+        assert RETEST_PAYLOAD_KEY not in payload_fields(SPEC_BY_TYPE[ENTITY_QUIZ]), (
+            f"{RETEST_PAYLOAD_KEY} 與 ET_QUIZ 的內容欄位同名 ⇒ 按「更新」時會被當成內容寫進活表"
+        )
+
+    def test_重測旗標不得與任何型別的欄位同名(self) -> None:
+        """旗標今天只掛在 QUIZ 節點上，但哪天被移到別層（例如改掛 QUESTION）時，
+        上一條就看不到了。這一條把 11 種型別一次掃完，**移動旗標不需要記得回來改測試**。"""
+        collisions = [s.entity_type for s in APPLY_ORDER if RETEST_PAYLOAD_KEY in payload_fields(s)]
+
+        assert not collisions, f"{RETEST_PAYLOAD_KEY} 與這些型別的內容欄位同名：{collisions}"
+
+    def test_正向錨點_真的欄位查得到(self) -> None:
+        """🔴 少了它，`payload_fields` 哪天回空集合，上面兩條會**恆真**地全綠。
+
+        「不該出現」的斷言要配一條「該出現」且用**同一個查詢方式**——否則它驗的不是
+        「沒有撞名」，而是「這個函式還有沒有在回東西」。
+        """
+        assert "quiz_name" in payload_fields(SPEC_BY_TYPE[ENTITY_QUIZ])
