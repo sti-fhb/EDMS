@@ -191,8 +191,20 @@ class EtQuizService:
                 operator=operator,
             )
             ensure_version_matched(rowcount=rowcount, entity="ET_QUIZ")
-            if req.require_retest:
-                await self._stage_require_retest(db, quiz_stage_id=ref.stage_id, operator=operator)
+            # 🔴 **測驗設定這一支是旗標的開關，勾與不勾都要生效**
+            # （2026-10-18 security review M-1 後半）。
+            #
+            # 原本只在 `require_retest` 為真時設旗標，為假時什麼都不做 ⇒ 教師誤勾之後
+            # **沒有任何方式取消**：再存一次不勾也清不掉，只能 `discard` 整個工作階段、
+            # 連同其他編輯一起丟。而這個旗標的後果是「全班已通過的人被退回並收到信」，
+            # 不可逆。
+            #
+            # ⚠️ 只有本支這樣做。`add_question` / `update_question` / `delete_question`
+            # 的 `require_retest=false` **不清除**旗標——那是「這一次改題不另外要求重測」，
+            # 不是「取消先前的要求」。測驗設定頁才是那個勾選框的所在地。
+            await self._stage_require_retest(
+                db, quiz_stage_id=ref.stage_id, operator=operator, wanted=req.require_retest
+            )
             # 稽核不記受影響人數——此刻還沒有人被影響（重測延到「更新」當下才執行）
             await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗設定（暫存）")
             return
@@ -292,7 +304,7 @@ class EtQuizService:
                     operator=operator,
                 )
             if req.require_retest:
-                node = await self._stage_writer.node_by_stage_id(db, ref.stage_id)
+                node = await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_QUESTION)
                 if node is not None and node.parent_stage_id is not None:
                     await self._stage_require_retest(db, quiz_stage_id=node.parent_stage_id, operator=operator)
             await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗題目（暫存）")
@@ -347,7 +359,7 @@ class EtQuizService:
             # 合法的編輯順序，而規則本身仍由「更新」守著。
             #
             # ⚠️ 草稿與活表路徑的守門**照舊**（見 `_ensure_not_last_question_of_live_course`）。
-            node = await self._stage_writer.node_by_stage_id(db, ref.stage_id)
+            node = await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_QUESTION)
             quiz_stage_id = None if node is None else node.parent_stage_id
             await self._stage_writer.delete_subtree(db, ref.stage_id, operator)
             if require_retest and quiz_stage_id is not None:
@@ -499,7 +511,7 @@ class EtQuizService:
 
     async def _staged_question_row(self, db: AsyncSession, course_id: int, question_stage_id: int) -> QuestionRow:
         """暫存版的 `_question_row`——id 一律走 `exposed_id`（新增的回負數）。"""
-        node = await self._stage_writer.node_by_stage_id(db, question_stage_id)
+        node = await self._stage_writer.node_by_stage_id(db, question_stage_id, ENTITY_QUESTION)
         if node is None:  # pragma: no cover - 剛寫進去的節點必定讀得回來
             raise _QUESTION_NOT_FOUND
         options = await self._stage_writer.children_of(db, course_id, ENTITY_OPTION, question_stage_id)
@@ -555,6 +567,8 @@ class EtQuizService:
                     await self._quizzes.passed_student_attempt_counts(db, node.source_id, course_id=node.course_id)
                 )
             ),
+            # 🔴 回讀勾選狀態，否則前端只能預設未勾，而存檔會把它清掉。見 schema 的說明。
+            require_retest_pending=bool(node.payload.get(RETEST_PAYLOAD_KEY)),
         )
 
     async def _staged_quiz(self, db: AsyncSession, quiz_id: int, actor_id: str, operator):
@@ -609,7 +623,9 @@ class EtQuizService:
         await self._stage_writer.lock_course(db, ref.course_id)
         return ref, ref.course_id, None
 
-    async def _stage_require_retest(self, db: AsyncSession, *, quiz_stage_id: int, operator: OperatorInfo) -> None:
+    async def _stage_require_retest(
+        self, db: AsyncSession, *, quiz_stage_id: int, operator: OperatorInfo, wanted: bool = True
+    ) -> None:
         """把「要求重測」的意圖**記在測驗的暫存節點上，等按『更新』才執行**（#631）。
 
         ## 為何不在編輯當下執行（2026-10-17 使用者裁示）
@@ -630,8 +646,15 @@ class EtQuizService:
 
         ⚠️ 走 `set_payload_flag` 而非 `update_payload`：後者會遞增 `VERSION`，而那是教師
         那一端的樂觀鎖令牌。為一個他沒改的東西推進版本，會讓他**下一次存檔無故 409**。
+
+        Args:
+            wanted: `False` 時**清除**旗標。只有測驗設定那一支會傳 `False`——它是那個
+                勾選框的所在地，所以不勾就該取消。改題 / 刪題的 `require_retest=false`
+                意思是「這一次不另外要求」，不是「取消先前的要求」，故維持預設 `True`。
         """
-        await self._stage_writer.set_payload_flag(db, quiz_stage_id, RETEST_PAYLOAD_KEY, True, operator)
+        await self._stage_writer.set_payload_flag(
+            db, quiz_stage_id, RETEST_PAYLOAD_KEY, True if wanted else None, operator
+        )
 
     async def _question_row(self, db: AsyncSession, question) -> QuestionRow:
         options = await self._quizzes.list_options(db, [question.question_id])

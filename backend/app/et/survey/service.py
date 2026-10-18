@@ -167,7 +167,23 @@ class EtSurveyService:
         """刪除問卷（**僅草稿課程**，#238）：本體與其題目、選項一併軟刪。
 
         已發布 / 已關閉課程改用停用——`ensure_survey_deletable` 以 `ET_SURVEY_007` 擋下。
+
+        🔴 **負數 id 也走 `ET_SURVEY_007`，不是 404**（2026-10-18 security review L-6）。
+        負數只可能是「本次編輯在一門已發布 / 已關閉課程上新建的問卷」——那門課依定義
+        不可刪問卷，所以結論與正數路徑**完全相同**，只是查活表查不到而已。
+
+        ⚠️ 不補這一句的話，教師對著畫面上明明存在的問卷按刪除會看到「找不到問卷」，
+        而真正的理由是「這門課只能停用」。錯的不是行為、是**他據以下一步的資訊**。
         """
+        if survey_id < 0:
+            ref = await self._stage_writer.resolve_new(db, survey_id, ENTITY_SURVEY)
+            if ref is None:
+                raise _NOT_FOUND
+            course = await self._require_owned_course(db, ref.course_id, operator.user_id)
+            # ⚠️ 用**真的**課程狀態問規則，不要寫死一個狀態丟進去——規則與理由只有一份。
+            # 課程是草稿時這一行會放行，但那在結構上不可能發生（草稿直寫活表、不產生負數
+            # id），所以之後的 `_NOT_FOUND` 才是對的：真的查無此問卷。
+            ensure_survey_deletable(course.status)
         survey = await self._surveys.get(db, survey_id)
         if survey is None:
             raise _NOT_FOUND
@@ -274,7 +290,7 @@ class EtSurveyService:
                     operator=operator,
                 )
             await self._log(db, "CREATE", operator.user_id, course_id, "新增問卷題目（暫存）")
-            node = await self._stage_writer.node_by_stage_id(db, sq_stage)
+            node = await self._stage_writer.node_by_stage_id(db, sq_stage, ENTITY_SURVEY_QUESTION)
             if node is None:  # pragma: no cover - 剛寫進去必定讀得回來
                 raise _QUESTION_NOT_FOUND
             return await self._staged_question_row(db, ref.course_id, node)
@@ -424,7 +440,8 @@ class EtSurveyService:
                 raise _NOT_FOUND
             ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
             await self._stage_writer.lock_course(db, ref.course_id)
-            # 本次編輯新建的問卷還沒進活表 ⇒ 不可能有填答，不必問凍結
+            # 本次編輯新建的問卷還沒進活表 ⇒ 不可能有填答，不必問凍結。
+            # ⛔ 這個「不問凍結」是**承重的**，理由見 `_staged_sq` 同一處的擋牌。
             return ref, ref.course_id
 
         survey = await self._require_owned(db, survey_id, actor_id)
@@ -440,7 +457,27 @@ class EtSurveyService:
         return ref, survey.course_id
 
     async def _staged_sq(self, db: AsyncSession, sq_id: int, actor_id: str, operator):
-        """問卷題目 id → 暫存節點；回 `(None, course_id, survey_id)` 代表走活表路徑。"""
+        """問卷題目 id → 暫存節點；回 `(None, course_id, survey_id)` 代表走活表路徑。
+
+        ## ⛔ 負數分支的「不問凍結」是逃生門，不是漏檢（2026-10-18 security review M-2）
+
+        負數 id ＝ **本次編輯才新增、活表還沒有**的題目。學員不可能填答一個還沒生效的
+        題目，所以不問凍結在語意上正確——但它同時是教師唯一的脫身路徑：
+
+        教師在 T1 新增一題（此時無填答，合法）→ 學員在 T2 對**既有題目**填答 →
+        教師在 T3 按「更新」，`stage_apply._ensure_survey_not_frozen` 比對「暫存結構 ≠
+        活表結構」而 422。此時他要能把 T1 新增的那題**刪掉**，結構才會重新相等、更新
+        才過得去——走的正是這條分支。
+
+        若有人「順手把負數分支也補上凍結檢核」，那一題就永遠刪不掉，而
+        `_ensure_survey_not_frozen` 會讓**整門課**的更新從此 422：章節、教材、測驗的編輯
+        一起陪葬，唯一出路剩下「放棄編輯」丟掉全部。⚠️ 既有測試不會紅——沒有任何一條
+        測試走「新增題目 → 產生填答 → 刪掉新題 → 更新成功」這條路。
+
+        ⚠️ **這條逃生門只蓋得住「新增」**。教師若在 T1 改了**既有**題目的題幹，正數分支
+        的 `ensure_editable` 會讓他改不回去，而更新也過不去——那個死結本 PR 未解，列為
+        已知限制（見 PR 說明），須另開 issue。
+        """
         ref = await self._stage_writer.resolve_new(db, sq_id, ENTITY_SURVEY_QUESTION)
         if ref is not None:
             course = await self._courses.get(db, ref.course_id)

@@ -688,6 +688,9 @@ export function EtCourseEditorPage() {
       content:
         "更新後，自上次更新以來的所有編輯會同時對學員生效。" +
         "本次若刪除了章節或項目，學員在其中的學習進度與測驗作答會一併移除，完課狀態隨之重算。" +
+        // 重測延到此刻才執行（2026-10-17 裁示），而教師是在幾分鐘到幾天前的另一個對話框
+        // 裡決定的——不在這裡提一句，寄信與退回完課就成了他沒預期的副作用。
+        "本次若曾選擇「要求重測」，那些已通過的學員會在此刻被退回未完成並各收到一封通知信。" +
         "系統會重跑一次發布檢核，未通過時不會更新任何內容。",
       okText: "確認更新",
       onOk: () => applyMut.mutate(),
@@ -1885,6 +1888,9 @@ export function EtCourseEditorPage() {
         <RequireRetestDialog
           open
           passedCount={quiz?.passed_count ?? 0}
+          // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
+          staged={status !== "DRAFT"}
+          retestPending={quiz?.require_retest_pending ?? false}
           onCancel={() => setPendingRetestAction(null)}
           onDecide={(requireRetest) => {
             const run = pendingRetestAction

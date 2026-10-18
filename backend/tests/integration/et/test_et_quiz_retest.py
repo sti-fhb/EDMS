@@ -300,6 +300,48 @@ class TestPassedCount:
         assert r.json()["passed_count"] is None, "非擁有者應拿到 None 而非 0——0 是錯誤資訊"
 
 
+class TestRetestPendingVisibility:
+    """勾選之後、按「更新」之前，教師看得見那筆要求嗎（2026-10-18 security review M-1）。
+
+    🔴 看不見的後果不是「少一個提示」，而是**靜默撤銷**：旗標寄在測驗暫存節點的 payload
+    上，而 `update_settings` 會依本次送來的 `require_retest` 覆寫它（那一支刻意如此
+    ——測驗設定頁就是那個勾選框的所在地）。教師第二次進來只是改個錯字，畫面若顯示
+    未勾，他按「僅儲存」就把十分鐘前的決定一起撤了，全程沒有任何訊息。
+    """
+
+    async def test_勾選後詳細頁回報待生效(self, client, db):
+        teacher = await _user(db, "ZTT030")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS030", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+        before = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+        assert before.json()["require_retest_pending"] is False, "前置：還沒勾"
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        assert r.status_code == 204, r.text
+
+        after = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+        assert after.json()["require_retest_pending"] is True, "勾過就要讀得回來，否則下一次存檔會靜默清掉它"
+
+    async def test_套用之後不再是待生效(self, client, db):
+        """正向錨點：少了它，把那一欄寫死成 `True` 也會讓上一條通過。
+
+        套用時重測已經執行完畢，暫存區隨之清空——「待生效」這個狀態不該留下來。
+        """
+        teacher = await _user(db, "ZTT031")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS031", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        await _save_and_apply(client, db, teacher, cid, r)
+
+        after = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+
+        assert after.json()["require_retest_pending"] is False
+
+
 class TestRequireRetestOnQuizChange:
     async def test_按更新之前學員狀態完全不動(self, client, db):
         """🔴 #631 的核心保證（2026-10-17 使用者裁示）：勾選只是**記下意圖**。

@@ -61,6 +61,10 @@ ENTITY_SURVEY_OPTION: Final = "SURVEY_OPTION"
 #: 2026-10-17 使用者裁示「按更新時才生效」——理由見 `quiz/service._stage_require_retest`。
 RETEST_PAYLOAD_KEY: Final = "__require_retest"
 
+#: 🔴 旗標與欄位名相撞會讓它被當成內容寫進活表。由 `test_重測旗標不得與_ET_QUIZ_的欄位同名`
+#: 在測試裡實際比對 `payload_fields(SPEC_BY_TYPE[ENTITY_QUIZ])`，不靠人記得
+#: （2026-10-18 code review 建議）。
+
 
 @dataclass(frozen=True)
 class StageNode:

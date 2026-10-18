@@ -18,6 +18,7 @@
 """
 
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,6 +33,8 @@ from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, payload_fields
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
 from app.et.course.stage_rules import StageNode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -96,12 +99,20 @@ class EtCourseStageRepository:
             非 dict 的話，下游 `f in node.payload` 會退化成子字串 / 成員測試、
             `payload[f]` 拋 TypeError——兩種都是難讀的 500。目前只有伺服端寫入故不可達，
             但這張表是 PR 2 的編輯端要寫的，守門放在讀取這一側才涵蓋得到全部寫入者。
+
+            ⚠️ 訊息是**固定文案**、細節只進 log——與 `stage_writer._view` 這支手足一致
+            （2026-10-18 security review L-1：上一輪把 detail 收斂的修法漏了這一支，
+            兩支不一致的話，下一個人會照錯的那支抄）。`AppError.detail` 會原樣成為回應的
+            `error_message`，**含 500**。
             """
             parsed = json.loads(raw)
             if not isinstance(parsed, dict):
+                logger.error(
+                    "ET 暫存列的 PAYLOAD 不是 JSON object：course_id=%s type=%s", course_id, type(parsed).__name__
+                )
                 raise AppError(
                     status_code=500,
-                    detail=f"暫存列的 PAYLOAD 不是 JSON object：{type(parsed).__name__}",
+                    detail="課程內容暫存資料異常，請重新載入後再試",
                     error_code="ET_STAGE_001",
                 )
             return parsed
@@ -132,7 +143,23 @@ class EtCourseStageRepository:
 
         ⭐ 是悲觀鎖不是樂觀鎖：要序列化的是整段流程，不是偵測單一列的版本衝突。
         """
-        await db.execute(select(EtCourse.course_id).where(EtCourse.course_id == course_id).with_for_update())
+        # 🔴 **`FOR NO KEY UPDATE` 而非 `FOR UPDATE`**（2026-10-18 code review HIGH 2）。
+        #
+        # `FOR UPDATE` 與**外鍵檢查**取的 `FOR KEY SHARE` 互斥。而有 FK 指向 `ET_COURSE`
+        # 的表包括 `ET_ENROLLMENT` / `ET_PROGRESS` / `ET_QUIZ_ATTEMPT_M` /
+        # `ET_QUIZ_RETRY_RESET`——也就是**學員加入課程、寫學習進度、開始作答**那幾條路徑。
+        #
+        # 於是教師只要持有這把鎖，同課程的學員就會被擋住。上傳 500 MB 影片時那段可以長
+        # 達數分鐘（見 `material/service.upload_video` 的取鎖位置），而學員端沒有任何
+        # 訊息，只會卡住。
+        #
+        # `FOR NO KEY UPDATE` 不與 `FOR KEY SHARE` 衝突，但仍與自己互斥——編輯與「更新」
+        # 照樣序列化。本流程不改 `ET_COURSE` 的主鍵，語意上足夠。
+        #
+        # ⛔ 不要「為了保險」改回 `FOR UPDATE`：那會讓學員端的寫入排在教師的編輯後面。
+        await db.execute(
+            select(EtCourse.course_id).where(EtCourse.course_id == course_id).with_for_update(key_share=True)
+        )
 
     async def clear(
         self, db: AsyncSession, course_id: int, operator: OperatorInfo, *, stage_ids: Sequence[int]

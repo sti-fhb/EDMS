@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.et.course.schemas import MAX_INT4
+
 # `SURVEY_NAME` VARCHAR(100)、`STEM` VARCHAR(500)、`OPTION_TEXT` VARCHAR(200)。
 SURVEY_NAME_MAX_LEN = 100
 STEM_MAX_LEN = 500
@@ -58,7 +60,9 @@ class SurveyUpdateReq(SurveyCreateReq):
     """
 
     is_active: bool
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class SurveyOptionInput(BaseModel):
@@ -96,7 +100,9 @@ class SurveyQuestionCreateReq(BaseModel):
 class SurveyQuestionUpdateReq(SurveyQuestionCreateReq):
     """更新題目與其選項（全量覆寫；帶題目自身之 `version`）。"""
 
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class SurveyQuestionReorderReq(BaseModel):
@@ -106,7 +112,9 @@ class SurveyQuestionReorderReq(BaseModel):
     """
 
     question_ids: list[int] = Field(max_length=MAX_QUESTION_IDS)
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class SurveyOptionRow(BaseModel):
@@ -174,4 +182,6 @@ class ApplyTemplateReq(BaseModel):
     """
 
     template_code: str = Field(min_length=1, max_length=50)
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)

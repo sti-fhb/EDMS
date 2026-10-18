@@ -27,6 +27,7 @@
 加進去讓測試變綠，那等於把自動守門變回人工清單。
 """
 
+import hashlib
 from datetime import timedelta
 from typing import Any, Final
 
@@ -66,6 +67,19 @@ def _operator(user_id: str) -> OperatorInfo:
 
 def _bearer(user_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {create_access_token(sub=user_id, ttl_minutes=15)}"}
+
+
+def _tag(label: str) -> str:
+    """由端點 label 推出一段**跨執行穩定**的識別碼後綴。
+
+    ⛔ 不可用內建 `hash()`：它受 `PYTHONHASHSEED` 隨機化，同一條參數化測試每次執行
+    拿到不同的 `DpUser.user_id`。那不會讓測試變紅，但會在測試 DB 裡堆出一堆孤兒使用者；
+    更糟的是取模之後**不同 label 可能撞號**，兩條參數化同時命中就變成主鍵衝突的偶發紅
+    ——而偶發紅會被當成假紅略過（2026-10-18 security review L-5 點名）。
+    """
+    # sha256 而非 md5：這裡只要「穩定且不撞號」，但 ruff 的 S324 會對 md5 報警，
+    # 而為了測試資料去抑制一條安全規則不值得——兩者在這個用途上沒有差別。
+    return hashlib.sha256(label.encode()).hexdigest()[:6]
 
 
 async def _user(db, user_id: str) -> str:
@@ -503,6 +517,72 @@ _NOT_CONTENT_WRITES: Final[dict[str, str]] = {
 }
 
 
+@pytest.mark.parametrize(
+    ("label", "call"),
+    [pytest.param(label, call, id=label) for label, _staged, call in _ALL],
+)
+async def test_他人不得碰到我的課程內容(label: str, call, client, db) -> None:
+    """🔴 **授權的列舉式守門**（2026-10-18 security review M-4）。
+
+    七支 `_staged_*` 解析器各自手寫了「解析 id → 取課程 → `ensure_owner` → 取鎖」。
+    今天七份都對，但那是**七份手寫的三行**——而既有的列舉只驗「這支有沒有改走暫存」，
+    沒有任何一條驗「拿別人的 id 會不會被擋」。新增第 21 支端點時漏掉 `ensure_owner`，
+    CI 會全綠。
+
+    本條對**每一支**端點以教師乙的 token 打教師甲的課程，斷言回 403 或 404——
+    不得 2xx，也不得 500（500 是守門自己崩潰，不是擋下）。
+
+    ## ⛔ 不要在這裡加「甲的暫存區一列都沒變」
+
+    看起來該加，實際上**恆真**：`client` fixture 的 `get_db` override 對丟出例外的請求
+    呼叫 `db.rollback()`，而測試 session 走 savepoint 隔離，所以請求期間的任何寫入
+    都會隨著 403／404 一起被回滾。那條斷言無論實作怎麼寫都會過，屬於
+    「對錯誤回應做否定斷言」這一類的假證據。
+
+    ⭐ **正向錨點是 `test_已發布課程的內容編輯不得直接寫活表`**：同一份 `_ALL`、同一個
+    `call`，換成擁有者的 token 必須 `< 400`。少了它，把端點改成「一律 404」也會讓本條
+    全綠。兩條合起來才是「擁有者做得到、他人做不到」。
+    """
+    tag = _tag(label)
+    owner = await _user(db, f"ZT_O{tag}")
+    other = await _user(db, f"ZT_X{tag}")
+    ids = await _course_with_content(client, db, owner)
+    await _publish(client, db, owner, ids["course_id"])
+    # 版本號要是對的，否則可能先吃 409 `ET_LOCK_001`——那就不是授權擋下的了。
+    await _refresh_versions(db, ids)
+
+    r = await call(client, other, ids)
+
+    assert r.status_code in (403, 404), f"{label} 應以 403/404 擋下他人，實際 {r.status_code}：{r.text}"
+
+
+async def test_刪暫存新建的問卷回的是不可刪而不是查無(client, db) -> None:
+    """🔴 錯的不是行為、是教師據以下一步的資訊（2026-10-18 security review L-6）。
+
+    已發布課程不可刪問卷（`ET_SURVEY_007`，只能停用）。教師在編輯中新建了一份問卷、
+    再按刪除時，那份問卷只存在暫存區 ⇒ 查活表查不到 ⇒ 原本回 404「找不到問卷」。
+
+    他看得到那份問卷就在畫面上，卻被告知找不到；真正的理由是「這門課只能停用」。
+    """
+    uid = await _user(db, "ZT_SD1")
+    ids = await _course_with_content(client, db, uid)
+    await _publish(client, db, uid, ids["course_id"])
+    repo = EtCourseStageRepository()
+    writer = EtCourseStageWriter(repo)
+    await repo.seed_from_live(db, ids["course_id"], _operator(uid))
+    node = next(n for n in await repo.load_tree(db, ids["course_id"]) if n.entity_type == ENTITY_SURVEY)
+    await writer.delete_subtree(db, node.stage_id, _operator(uid))
+    created = await client.post(
+        f"{_COURSES}/{ids['course_id']}/survey", json={"survey_name": "新問卷"}, headers=_bearer(uid)
+    )
+    assert created.status_code == 201, created.text
+
+    r = await client.delete(f"/api/et/surveys/{created.json()['survey_id']}", headers=_bearer(uid))
+
+    assert r.status_code == 422, r.text
+    assert r.json()["error_code"] == "ET_SURVEY_007"
+
+
 class TestSurveyCreationPathsStaged:
     """`POST /courses/{id}/survey` 與 `POST /surveys/{id}/apply-template` 的守門。
 
@@ -627,7 +707,7 @@ def _listed_openapi_paths() -> set[str]:
 )
 async def test_已發布課程的內容編輯不得直接寫活表(label: str, call, client, db) -> None:
     """🥇 PR 2 的核心守門——逐端點列舉，缺一條就等於那條從此沒人檢查。"""
-    uid = await _user(db, f"ZT_W{abs(hash(label)) % 10000}")
+    uid = await _user(db, f"ZT_W{_tag(label)}")
     ids = await _course_with_content(client, db, uid)
     await _publish(client, db, uid, ids["course_id"])
 
@@ -650,7 +730,7 @@ async def test_草稿課程的內容編輯仍直接寫活表(label: str, call, c
 
     草稿沒有學員、不需版本化，行為必須完全不變。
     """
-    uid = await _user(db, f"ZT_D{abs(hash(label)) % 10000}")
+    uid = await _user(db, f"ZT_D{_tag(label)}")
     ids = await _course_with_content(client, db, uid)
 
     await _refresh_versions(db, ids)

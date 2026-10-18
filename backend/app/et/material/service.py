@@ -347,7 +347,16 @@ class EtMaterialService:
         （data-model：取不到不得存檔）。搬檔放在寫 DB 之前是刻意的——見
         `storage.promote` 對兩種失敗後果不對稱性的說明。
         """
-        ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator)
+        # 🔴 **解析與授權時不取鎖**（2026-10-18 code review HIGH 2）。
+        #
+        # 串流寫一個 500 MB 的檔加上 `ffprobe` 可以長達數分鐘。把課程行鎖持有那麼久，
+        # 同課程的**所有編輯與「更新」都排隊**——而那還不是最糟的，見 `lock_course`
+        # 對外鍵檢查的說明。鎖延到檔案落地之後、真正要寫暫存列之前才取。
+        #
+        # ⚠️ 代價：取鎖前的「同名影片」檢查是在無鎖狀態下做的，兩個分頁同時上傳同名檔
+        # 可能都通過。那是**可自行修復**的狀態（教師看得到兩列、可刪掉一列），而持鎖
+        # 數分鐘擋住全班學員不是。
+        ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator, lock=False)
 
         # ⚠️ 限制由 `resolve_video_limits` 解析——**前端的文案與 `accept` 走的是同一支**，
         # 兩邊因此不可能分岔（#455）。
@@ -385,6 +394,13 @@ class EtMaterialService:
                 # 列指向的檔。與既有的「上傳後按取消、影片仍在」同一性質，只是從「列還在、
                 # 看得到、可自行刪除」變成「列沒了、看不到」。檔案不影響正確性（學員端讀
                 # 不到沒有列的檔），清理待排 follow-up。
+                #
+                # 🔴 **鎖在這裡才取**（檔案已落地）：見本方法開頭對 HIGH 2 的說明。
+                # 取鎖後要**重新確認父節點仍在**——這段無鎖的期間，另一個分頁可能按了
+                # 「更新」並 `clear` 掉整個暫存區，那時 `ref.stage_id` 已不存在，直接
+                # `append` 會造出指向已刪父節點的孤兒（`_validate_tree` 之後恆 500）。
+                await self._stage_writer.lock_course(db, ref.course_id)
+                ref = await self._reconfirm_staged_material(db, ref, material_id, operator)
                 stage_id = await self._stage_writer.append(
                     db,
                     ref.course_id,
@@ -474,7 +490,7 @@ class EtMaterialService:
         ensure_owner(owner_id=resolved.owner_id, actor_id=actor_id)
         return material, resolved.course_id
 
-    async def _staged_material(self, db: AsyncSession, material_id: int, actor_id: str, operator):
+    async def _staged_material(self, db: AsyncSession, material_id: int, actor_id: str, operator, *, lock: bool = True):
         """教材 id → 暫存節點；回 `(None, course_id)` 代表該走活表路徑（#631 PR 2b）。
 
         形狀與 `course/service._staged_chapter` 完全相同，**刻意不抽成共用函式**：
@@ -484,6 +500,12 @@ class EtMaterialService:
 
         🔴 **負數先解析**：負數是本次編輯新增、活表還沒有的教材。
         🔴 **取鎖排在授權之後、解析之前**（理由見 `stage_writer.lock_course`）。
+
+        Args:
+            lock: 設 `False` 時**不取課程行鎖**。只給 `upload_video` 用——它在解析之後
+                還要串流寫一個最大 500 MB 的檔並跑 `ffprobe`，持鎖那麼久會讓同課程的
+                編輯與「更新」整批排隊。⛔ 其餘呼叫端一律維持 `True`：鎖必須蓋住
+                「解析 → 寫入」整段，否則可插出指向已被清掉的父節點的節點。
         """
         ref = await self._stage_writer.resolve_new(db, material_id, ENTITY_MATERIAL)
         if ref is not None:
@@ -491,7 +513,8 @@ class EtMaterialService:
             if course is None:
                 raise _NOT_FOUND
             ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
-            await self._stage_writer.lock_course(db, ref.course_id)
+            if lock:
+                await self._stage_writer.lock_course(db, ref.course_id)
             return ref, ref.course_id
 
         material, resolved = await self._resolve_material(db, material_id)
@@ -499,11 +522,33 @@ class EtMaterialService:
         course = await self._courses.get(db, resolved.course_id)
         if not is_staged(course):
             return None, resolved.course_id
-        await self._stage_writer.lock_course(db, resolved.course_id)
+        if lock:
+            await self._stage_writer.lock_course(db, resolved.course_id)
         ref = await self._stage_writer.ref_for_source(
             db, resolved.course_id, ENTITY_MATERIAL, material_id, operator, gone_error=_NOT_FOUND
         )
         return ref, resolved.course_id
+
+    async def _reconfirm_staged_material(self, db: AsyncSession, ref, material_id: int, operator):
+        """取鎖後重新確認教材的暫存節點仍然存在，回最新的 `ref`。
+
+        🔴 `upload_video` 在解析與寫入之間有一段**無鎖**的檔案上傳期（見該方法）。那段
+        期間另一個分頁可能按了「更新」：`clear` 會把整個暫存區刪光，`ref.stage_id` 隨之
+        失效。直接 `append` 會造出指向已刪父節點的孤兒，而那種樹會讓此後**每一次**
+        「更新」都 500，且 UI 看不到它、教師自己救不回來。
+
+        - 既有教材（正數 id）：重跑 `ref_for_source`。暫存區若已被清空它會重新 seed，
+          拿到的是**新一輪**工作階段裡的節點，語意正確。
+        - 本次新增的教材（負數 id）：活表根本沒有它，重新 seed 也變不出來——只能確認
+          那一列還在，不在就 404（教師的編輯已被自己的另一個分頁套用掉了）。
+        """
+        if material_id > 0:
+            return await self._stage_writer.ref_for_source(
+                db, ref.course_id, ENTITY_MATERIAL, material_id, operator, gone_error=_NOT_FOUND
+            )
+        if await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_MATERIAL) is None:
+            raise _NOT_FOUND
+        return ref
 
     async def _staged_doc_row(self, db: AsyncSession, node) -> DocRow:
         """暫存版的 `_doc_row`——名稱 / 版號 / 廢止狀態一樣即時查 DM，不落地。

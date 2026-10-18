@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from app.et.course.schemas import MAX_BIGINT
+from app.et.course.schemas import MAX_BIGINT, MAX_INT4
 
 #: 批次核可時「這一筆沒有寫入」的理由。
 #:
@@ -78,7 +78,9 @@ class RevokeReq(BaseModel):
 
     reason: str = Field(max_length=1000)
     #: 操作者在畫面上看到的那一版。不符即 409 `ET_APPROVAL_004`。
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class ApproveResult(BaseModel):

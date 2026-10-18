@@ -172,6 +172,19 @@ async def _require_retest_for_flagged(
     ⚠️ 排在 `_upsert` **之後**：重測信裡帶測驗名稱，而那個名稱可能正是本次改的。
     ⚠️ 也排在 `stamp_completed_at` 之後：重測會清掉完成旗標，順序顛倒會讓剛蓋的章又被清。
     ⚠️ 新增的測驗（`source_id` 為 None）此刻才有活表 id，故一律由 `live_id_by_stage` 取。
+
+    ## ⚠️ 已知限制：扇出沒有上界，且整批都在同一個交易裡
+
+    （2026-10-18 security review H-2，刻意不在本 PR 修。）
+
+    一次「更新」可能同時觸發 M 個測驗的重測，每個再對 N 位已通過的學員寫入重置基準、
+    清完成旗標、排一封信 ⇒ **N × M 列寫入**全部落在按下「更新」的那一個請求裡。
+
+    今天的母體擋得住：教師改測驗要逐支勾選，而一門課的在籍學員是以班為單位。但這裡
+    沒有任何上界，所以它是「**目前的資料量讓它看不出來**」，不是「設計上不會發生」。
+
+    ⛔ 若要處理，正解是把寄信那一段移出本交易（排程撿 `PENDING`），**不是**在這裡切批次
+    ——切批次會讓一半的學員被退回、另一半沒有，而「更新」對教師是一個原子動作。
     """
     flagged = [n for n in nodes if n.entity_type == ENTITY_QUIZ and n.payload.get(RETEST_PAYLOAD_KEY)]
     if not flagged:
@@ -243,20 +256,33 @@ def _validate_tree(nodes: Sequence[StageNode], *, live: Sequence[LiveNode]) -> N
         _reject(f"暫存列指向不屬於本課程的活表資料（共 {len(foreign)} 筆）：{detail}")
 
 
+def _structure_sort_key(node: Any) -> tuple:
+    """`(sort_order, 有沒有活表 id, 活表 id)`——⚠️ 不可直接寫 `(n[1], n[0])`。
+
+    每一項的第 0 格是 `SOURCE_ID`，而**本次編輯新增的節點那一格是 `None`**。兩筆
+    `sort_order` 相同時 `sorted` 才會去比第二格，屆時 `None < int` 直接 `TypeError`
+    ⇒ 整支「更新」回 500（2026-10-18 security review L-7）。
+
+    `sort_order` 本該同層唯一，但那由編輯端維持、本模組不保證；而這裡是**凍結守門**，
+    它崩潰的後果是教師看到 500 而非 422，既修不了也看不懂。
+    """
+    return (node[1], node[0] is not None, node[0] or 0)
+
+
 def _survey_structure(nodes: Sequence[Any], *, survey_key: Any, child_of: Any) -> tuple:
     """問卷的**題目與選項結構**，供兩側比對。
 
     刻意**不含**問卷名稱與 `IS_ACTIVE`——凍結不涵蓋它們（`ET_SURVEY_003` 的說明：
     AC 21 明訂凍結後教師僅可停用問卷，連停用都擋掉會使凍結後無路可走）。
     """
-    questions = sorted(child_of(nodes, survey_key, ENTITY_SURVEY_QUESTION), key=lambda n: (n[1], n[0]))
+    questions = sorted(child_of(nodes, survey_key, ENTITY_SURVEY_QUESTION), key=_structure_sort_key)
     return tuple(
         (
             qid,
             sort_order,
             stem,
             qtype,
-            tuple(sorted(child_of(nodes, qkey, ENTITY_SURVEY_OPTION), key=lambda n: (n[1], n[0]))),
+            tuple(sorted(child_of(nodes, qkey, ENTITY_SURVEY_OPTION), key=_structure_sort_key)),
         )
         for qid, sort_order, stem, qtype, qkey in questions
     )

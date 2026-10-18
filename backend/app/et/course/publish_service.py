@@ -210,9 +210,17 @@ class EtPublishService:
         # （擁有權不可移轉、狀態只擋 DRAFT），但「先鎖再讀」才是這類流程的標準寫法。
         await db.refresh(course)
         nodes = await self._stage.load_tree(db, course_id)
-        if not nodes:
-            # 自上次更新以來沒有任何編輯。**安全的 no-op**——不跑檢核也不寫稽核：
+        if not nodes and not await self._stage.has_stage(db, course_id):
+            # 自上次更新以來**沒有開過編輯工作階段**。安全的 no-op——不跑檢核也不寫稽核：
             # 對一門內容未變的課程回 422 會讓教師以為自己弄壞了什麼。
+            #
+            # 🔴 判準是 `has_stage`（有沒有暫存列）而**不是** `nodes` 為空
+            # （2026-10-18 code review MEDIUM 1）。兩者在「教師把內容全刪光」時分岔：
+            # 那時暫存列都還在、只是全被軟刪，`nodes` 空而 `has_stage` 真。
+            #
+            # 用 `nodes` 判的話，刪光之後按「更新」會變成 no-op：教師既拿不到
+            # `NO_CHAPTER` 的缺漏清單、刪除也永遠不會生效，而畫面上的課程是空的——
+            # 他只剩「取消」一條路，而那會連同刪除一起放棄。
             return ContentUpdateResult(course_id=course_id, applied_count=0)
 
         snapshot = to_course_snapshot(

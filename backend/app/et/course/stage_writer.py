@@ -42,6 +42,7 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.constants import COURSE_DRAFT
 from app.et.course.models import EtCourseContentStage
+from app.et.course.stage_entities import SPEC_BY_TYPE, payload_fields
 from app.et.course.stage_repository import EtCourseStageRepository
 
 logger = logging.getLogger(__name__)
@@ -250,6 +251,27 @@ class EtCourseStageWriter:
         Returns:
             命中列數——呼叫端以 `ensure_version_matched` 判定衝突，與草稿路徑同一形狀。
         """
+        # 🔴 **保留非欄位的旗標**（2026-10-18 code review HIGH 1）。
+        #
+        # 「整份取代」只該作用在**內容欄位**。payload 裡還寄著非欄位的工作階段旗標
+        # （目前是 #361 的 `__require_retest`），整份覆寫會把它洗掉：
+        #
+        #   教師在某題勾「要求重測」存檔 → 旗標寫進 QUIZ 節點
+        #   → 他接著改測驗名稱存檔（沒勾）→ `update_payload` 五個欄位整份覆寫
+        #   → **旗標消失** → 按「更新」時已通過的學員不會被退回，也不會收到信
+        #
+        # 全程沒有任何錯誤訊息。原本的測試只覆蓋「單次請求內勾選」，跨請求那條沒有。
+        #
+        # ⚠️ 判準是「不在 `payload_fields` 裡」而非「以 `__` 開頭」——前者由 model 推導、
+        # 不會因為命名慣例改變而失效。
+        existing = await self.node_by_stage_id(db, stage_id)
+        merged = dict(payload)
+        if existing is not None:
+            spec = SPEC_BY_TYPE.get(existing.entity_type)
+            if spec is not None:
+                fields = payload_fields(spec)
+                merged = {k: v for k, v in existing.payload.items() if k not in fields} | merged
+
         result = await db.execute(
             update(EtCourseContentStage)
             .where(
@@ -258,7 +280,7 @@ class EtCourseStageWriter:
                 EtCourseContentStage.deleted == 0,
             )
             .values(
-                payload=json.dumps(dict(payload), ensure_ascii=False),
+                payload=json.dumps(merged, ensure_ascii=False),
                 version=EtCourseContentStage.version + 1,
                 updated_user=operator.user_id,
                 updated_date=utcnow(),
@@ -314,14 +336,37 @@ class EtCourseStageWriter:
         """該課程是否有編輯工作階段開著。語意見 `stage_repository.has_stage`。"""
         return await self._stage.has_stage(db, course_id)
 
-    async def node_by_stage_id(self, db: AsyncSession, stage_id: int) -> StageNodeView | None:
-        """以 `STAGE_ID` 直接取節點（已解析 payload）。供已經握有 ref 的呼叫端回讀。"""
+    async def node_by_stage_id(
+        self, db: AsyncSession, stage_id: int, entity_type: str | None = None
+    ) -> StageNodeView | None:
+        """以 `STAGE_ID` 直接取節點（已解析 payload）。供已經握有 ref 的呼叫端回讀。
+
+        Args:
+            entity_type: 帶了就**核對型別**，不符視同查無（並留 log）。
+                ⚠️ `STAGE_ID` 是整張表共用的 identity，11 種實體同一個號碼空間；少了這道
+                核對，把測驗的 stage_id 誤傳進教材的回讀會拿到一份**型別不符的 payload**
+                而完全不報錯（2026-10-18 security review L-2）。今天五個呼叫端的 ref 都
+                來自型別化的解析器，所以是縱深防禦；⛔ 新呼叫端一律要帶。
+
+                `None` 只保留給 `update_payload`——它正是要問「這列是什麼型別」，
+                先知道型別才能查的話就成了循環。
+        """
         row = await db.scalar(
             select(EtCourseContentStage).where(
                 EtCourseContentStage.stage_id == stage_id, EtCourseContentStage.deleted == 0
             )
         )
-        return None if row is None else _view(row)
+        if row is None:
+            return None
+        if entity_type is not None and row.entity_type != entity_type:
+            logger.error(
+                "暫存節點型別不符：stage_id=%s 實際=%s 預期=%s",
+                stage_id,
+                row.entity_type,
+                entity_type,
+            )
+            return None
+        return _view(row)
 
     async def set_payload_flag(
         self, db: AsyncSession, stage_id: int, key: str, value: Any, operator: OperatorInfo
@@ -335,15 +380,23 @@ class EtCourseStageWriter:
         ⚠️ 旗標的 key 必須**不是**該實體的欄位名——`stage_apply._upsert` 只寫
         `payload_fields(spec)` 列出的 key，所以非欄位的旗標會被自動忽略、不會進活表。
         ⛔ 不要用與欄位同名的 key。
+
+        Args:
+            value: 傳 `None` 代表**清除**該旗標（而非寫入 null）。旗標必須可以取消——
+                #361 的重測後果是「全班已通過的人被退回並收到信」，教師誤勾卻只能放棄
+                整個工作階段的話，代價不成比例。
         """
         node = await self.node_by_stage_id(db, stage_id)
         if node is None:
             return
+        payload = {k: v for k, v in node.payload.items() if k != key}
+        if value is not None:
+            payload[key] = value
         await db.execute(
             update(EtCourseContentStage)
             .where(EtCourseContentStage.stage_id == stage_id, EtCourseContentStage.deleted == 0)
             .values(
-                payload=json.dumps({**node.payload, key: value}, ensure_ascii=False),
+                payload=json.dumps(payload, ensure_ascii=False),
                 updated_user=operator.user_id,
                 updated_date=utcnow(),
             )
@@ -395,6 +448,12 @@ class EtCourseStageWriter:
         教師看到的是「按更新就壞掉」，而壞的其實是刪除那一步。
 
         ⛔ 軟刪除（`DELETED = 1`），遵專案禁硬刪規範。
+
+        ⚠️ **每次呼叫重載整棵樹**（2026-10-18 security review L-4，已知、刻意不修）。
+        連續刪 N 個節點就是 N 次全樹查詢。母體是一門課的內容樹（章節→項目→教材／測驗
+        →題目→選項，實務上數百列），而刪除是教師的逐次互動、不是批次作業，所以今天
+        量不出來。改成遞迴 CTE 一次收完才是正解；⛔ 但不要順手改成「只刪這一層」——
+        子節點的 `PARENT_STAGE_ID` 落空會讓此後**每次**更新都 500。
         """
         nodes = await self._stage.load_tree(db, await self._course_of(db, stage_id))
         subtree = {stage_id}

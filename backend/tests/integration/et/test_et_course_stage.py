@@ -959,6 +959,49 @@ class TestUpdateEndpoint:
         assert (await _live_chapters(db, cid))[0].chapter_name == "更新後的章名"
         assert await repo.has_stage(db, cid) is False, "生效後暫存區要清空"
 
+    async def test_刪光內容後按更新回缺漏清單而不是_no_op(self, client, db) -> None:
+        """🔴 2026-10-18 code review MEDIUM 1：判準是 `has_stage`，不是 `nodes` 為空。
+
+        教師把內容全刪光之後，暫存列都還在、只是全被軟刪 ⇒ `load_tree` 回空。若以
+        「`nodes` 空 ⇒ 沒有編輯」判定，按「更新」會變成 no-op：
+
+        - 他拿不到 `NO_CHAPTER` 的缺漏清單（不知道為什麼沒生效）
+        - 刪除**永遠不會生效**（每次按更新都是 no-op）
+        - 畫面上的課程是空的，他只剩「取消」一條路——而那會連同刪除一起放棄
+
+        ⛔ 不要為了「讓空的暫存區安靜地通過」而改回 `if not nodes`。
+        """
+        uid = await _user(db, "ZT_U8")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        writer = EtCourseStageWriter(repo)
+        await repo.seed_from_live(db, cid, _operator(uid))
+        for node in [n for n in await repo.load_tree(db, cid) if n.parent_stage_id is None]:
+            await writer.delete_subtree(db, node.stage_id, _operator(uid))
+        assert await repo.load_tree(db, cid) == (), "前置條件：暫存樹確實空了"
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 422, r.text
+        assert r.json()["error_code"] == "ET_PUBLISH_001"
+        assert "NO_CHAPTER" in {b["code"] for b in r.json()["blockers"]}
+
+    async def test_沒開過編輯工作階段時仍是安全的_no_op(self, client, db) -> None:
+        """上一條的對照組：真的沒編輯過時不該回 422。
+
+        少了它，把判準寫成「一律跑檢核」也會讓上一條通過——而那會讓一門內容未變的
+        課程按「更新」就看到一堆缺漏，教師會以為自己弄壞了什麼。
+        """
+        uid = await _user(db, "ZT_U10")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 200, r.text
+        assert r.json()["applied_count"] == 0
+
     async def test_刪過東西之後按更新不會因自我外鍵而爆(self, client, db) -> None:
         """🔴 2026-10-17 的真 bug：**教師只要刪過任何東西再按更新就 500**。
 
@@ -1439,6 +1482,49 @@ class TestSurveyFreeze:
 
         live = await db.scalar(select(EtSurveyQuestion).where(EtSurveyQuestion.sq_id == sq.source_id))
         assert live.stem == "改過的題幹"
+
+    async def test_中途出現填答時教師仍刪得掉自己剛新增的題(self, client, db) -> None:
+        """🔴 **凍結後的唯一逃生門**（2026-10-18 security review M-2）。
+
+        教師在 T1 新增一題（當時無填答，合法）→ 學員在 T2 填答既有題目 → 教師在 T3
+        按「更新」被 `_ensure_survey_not_frozen` 以 422 擋下，因為暫存結構多了一題。
+
+        此時他**必須**能把 T1 那題刪掉，結構才會重新相等、更新才過得去。走的是
+        `survey/service._staged_sq` 的負數分支——那裡刻意不問凍結。
+
+        ⛔ 若有人「順手把負數分支也補上凍結檢核」，這一題就永遠刪不掉，而
+        `_ensure_survey_not_frozen` 會讓**整門課**的更新從此 422：章節、教材、測驗的編輯
+        一起陪葬。本條就是那道擋牌的牙齒——那樣改，這裡會紅。
+
+        ⚠️ 本條**不涵蓋**「改了既有題目的題幹之後才出現填答」：那條路由正數分支的
+        `ensure_editable` 擋住，教師改不回去、更新也過不去。那個死結是已知限制，另案處理。
+        """
+        uid = await _user(db, "ZT_F6")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == cid))
+
+        added = await client.post(
+            f"/api/et/surveys/{survey.survey_id}/questions",
+            json={
+                "question_type": "SINGLE",
+                "stem": "臨時加的題",
+                "options": [{"option_text": "好"}, {"option_text": "普通"}],
+            },
+            headers=_bearer(uid),
+        )
+        assert added.status_code == 201, added.text
+        new_sq_id = added.json()["sq_id"]
+        assert new_sq_id < 0, "新增的題目應落在暫存區（負數 id）"
+
+        await self._respond(db, survey.survey_id, uid)
+        with pytest.raises(AppError, match="已有學員填答"):
+            await _apply(db, cid, uid)
+
+        removed = await client.delete(f"/api/et/survey-questions/{new_sq_id}", headers=_bearer(uid))
+
+        assert removed.status_code == 204, f"凍結後仍須刪得掉自己剛新增的題，實際：{removed.text}"
+        await _apply(db, cid, uid)  # 結構回到與活表相同 ⇒ 更新過得去
 
     async def test_有填答但問卷結構沒變時放行(self, client, db) -> None:
         """第二條正向錨點：教師改的是**別的東西**（課程章節），問卷原封不動。
