@@ -522,15 +522,13 @@ _NOT_CONTENT_WRITES: Final[dict[str, str]] = {
     [pytest.param(label, call, id=label) for label, _staged, call in _ALL],
 )
 async def test_他人不得碰到我的課程內容(label: str, call, client, db) -> None:
-    """🔴 **授權的列舉式守門**（2026-10-18 security review M-4）。
+    """🔴 **授權的列舉式守門（活表 id 這一半）**（2026-10-18 security review M-4）。
 
-    七支 `_staged_*` 解析器各自手寫了「解析 id → 取課程 → `ensure_owner` → 取鎖」。
-    今天七份都對，但那是**七份手寫的三行**——而既有的列舉只驗「這支有沒有改走暫存」，
-    沒有任何一條驗「拿別人的 id 會不會被擋」。新增第 21 支端點時漏掉 `ensure_owner`，
-    CI 會全綠。
+    以教師乙的 token 打教師甲的課程，用的是**活表 id**，走各模組既有的 `_require_owned`。
 
-    本條對**每一支**端點以教師乙的 token 打教師甲的課程，斷言回 403 或 404——
-    不得 2xx，也不得 500（500 是守門自己崩潰，不是擋下）。
+    ⚠️ 它**不會**踏進 `_staged_*` 的負數分支——那一半由下一條測試守，兩條缺一不可。
+    （本條原本宣稱涵蓋負數分支，變異檢查當場推翻：把 `_staged_quiz` 的 `ensure_owner`
+    拿掉，18 條全綠。）
 
     ## ⛔ 不要在這裡加「甲的暫存區一列都沒變」
 
@@ -554,6 +552,107 @@ async def test_他人不得碰到我的課程內容(label: str, call, client, db
     r = await call(client, other, ids)
 
     assert r.status_code in (403, 404), f"{label} 應以 403/404 擋下他人，實際 {r.status_code}：{r.text}"
+
+
+async def _staged_negative_ids(client, db, uid: str, ids: dict[str, Any]) -> dict[str, Any]:
+    """在一門**已發布**課程的暫存區裡，由擁有者建出一整棵新內容樹，回傳全負數的 id。
+
+    🔴 負數 id 只有「本次編輯新增、活表還沒有」的節點才會有——seed 進來的節點對外
+    回的是 `SOURCE_ID`（正數）。所以要測到 `resolve_new` 之後那三行授權，只能**真的
+    建一棵新的**，不能靠 seed。
+
+    ⚠️ `course_id` 不在其中：課程列永遠在活表，沒有暫存版本。
+    """
+    cid = ids["course_id"]
+    h = _bearer(uid)
+
+    async def _post(url: str, payload: dict) -> dict:
+        r = await client.post(url, json=payload, headers=h)
+        assert r.status_code in (200, 201), f"前置失敗 {url}：{r.text}"
+        return r.json()
+
+    ch = await _post(f"{_COURSES}/{cid}/chapters", {"chapter_name": "暫存章甲"})
+    ch2 = await _post(f"{_COURSES}/{cid}/chapters", {"chapter_name": "暫存章乙"})
+    mat = await _post(f"/api/et/chapters/{ch['chapter_id']}/items", {"item_type": ITEM_MATERIAL, "title": "暫存教材"})
+    quiz = await _post(f"/api/et/chapters/{ch['chapter_id']}/items", {"item_type": ITEM_QUIZ, "title": "暫存測驗"})
+    question = await _post(
+        f"/api/et/quizzes/{quiz['quiz_id']}/questions",
+        {
+            "question_type": QUESTION_SINGLE,
+            "stem": "暫存題",
+            "points": 100,
+            "options": [{"option_text": "A", "is_correct": True}, {"option_text": "B", "is_correct": False}],
+        },
+    )
+    # 活表已有一份問卷 ⇒ 先把它從暫存樹移走，建立這支才能成功、才拿得到負數問卷 id。
+    repo = EtCourseStageRepository()
+    node = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_SURVEY)
+    await EtCourseStageWriter(repo).delete_subtree(db, node.stage_id, _operator(uid))
+    survey = await _post(f"{_COURSES}/{cid}/survey", {"survey_name": "暫存問卷"})
+    sq = await _post(
+        f"/api/et/surveys/{survey['survey_id']}/questions",
+        {
+            "question_type": SURVEY_QUESTION_SINGLE,
+            "stem": "暫存問卷題",
+            "options": [{"option_text": "好"}, {"option_text": "普通"}],
+        },
+    )
+
+    negative = {
+        "course_id": cid,  # 課程永遠是活表列
+        "course_version": ids["course_version"],
+        "chapter_id": ch["chapter_id"],
+        "chapter2_id": ch2["chapter_id"],
+        "chapter_version": ch.get("version", 0),
+        "material_item_id": mat["item_id"],
+        "material_id": mat["material_id"],
+        "material_version": mat.get("material_version", 0),
+        "quiz_item_id": quiz["item_id"],
+        "quiz_id": quiz["quiz_id"],
+        "quiz_version": quiz.get("quiz_version", 0),
+        "question_id": question["question_id"],
+        "question_version": question.get("version", 0),
+        "survey_id": survey["survey_id"],
+        "survey_version": survey.get("version", 0),
+        "sq_id": sq["sq_id"],
+        "sq_version": sq.get("version", 0),
+    }
+    wrong = {k: v for k, v in negative.items() if k.endswith("_id") and k != "course_id" and v >= 0}
+    assert not wrong, f"前置失敗：這些 id 不是負數，本測試就不會走到負數分支 {wrong}"
+    return negative
+
+
+@pytest.mark.parametrize(
+    ("label", "call"),
+    [pytest.param(label, call, id=label) for label, _staged, call in _ALL],
+)
+async def test_他人不得以負數_id_碰到我的暫存區(label: str, call, client, db) -> None:
+    """🔴 **授權的列舉式守門（負數 id 這一半）**（2026-10-18 security review M-4）。
+
+    七支 `_staged_*` 解析器的負數分支各自手寫了「`resolve_new` → 取課程 →
+    `ensure_owner` → 取鎖」。今天七份都對，但那是**七份手寫的三行**，而既有的列舉只驗
+    「這支有沒有改走暫存」。新增第 19 支端點時漏掉 `ensure_owner`，CI 會全綠。
+
+    ⭐ 這條是變異檢查逼出來的：原本只有活表 id 那一版，把 `_staged_quiz` 的
+    `ensure_owner` 拿掉之後 18 條**全綠**——因為活表 id 根本不走那條分支。
+
+    ## 為何斷言「恰好 403」而不是 403/404
+
+    負數 id 在甲的暫存區裡確實存在，`resolve_new` 一定撈得到，所以唯一正確的結局是
+    `ensure_owner` 的 403 `ET_COURSE_002`。放寬成 403/404 會讓「版本不符先爆」「節點
+    查不到」這些**與授權無關**的理由也算通過，而那正是假證據的形狀。
+    """
+    tag = _tag(f"neg:{label}")
+    owner = await _user(db, f"ZT_N{tag}")
+    other = await _user(db, f"ZT_M{tag}")
+    ids = await _course_with_content(client, db, owner)
+    await _publish(client, db, owner, ids["course_id"])
+    await _refresh_versions(db, ids)
+    staged = await _staged_negative_ids(client, db, owner, ids)
+
+    r = await call(client, other, staged)
+
+    assert r.status_code == 403, f"{label} 應以 403 擋下他人，實際 {r.status_code}：{r.text}"
 
 
 async def test_刪暫存新建的問卷回的是不可刪而不是查無(client, db) -> None:
