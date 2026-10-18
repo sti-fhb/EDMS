@@ -115,16 +115,42 @@ async def enforce_size_limit(db: AsyncSession, *, size_bytes: int, params: Param
         raise AppError(status_code=422, detail="檔案大小超過上限", error_code="DM_FILE_001")
 
 
+#: 原始檔名之長度上限，對齊 `DM_DOC_VERSION.FILE_NAME` 與 `DM_REVIEW.OBSOLETE_FILE_NAME`
+#: 的 `String(255)`（兩者同長，故一個常數涵蓋文件上傳與廢止附件兩條路徑；
+#: `test_dm_input_limits_match_db.py` 守住「兩欄同長」這個前提）。
+#:
+#: 不設限時，超長檔名會在 INSERT 才撞 asyncpg 的 `StringDataRightTruncation`，而 `main.py`
+#: 沒有 `DataError` 系列的處理器 ⇒ 落到最後的 catch-all、冒成 **500**（#697）。
+MAX_FILE_NAME_LEN = 255
+
+#: ## 為何是拒絕而非截斷
+#:
+#: 截斷會**默默改掉使用者的檔案名稱**，而下載時回給瀏覽器的正是這個名稱；兩支不同的長檔名
+#: 截斷後還可能撞成同一個。明講「檔名過長，請縮短」是他當下就能處理的事。
+#: 作法比照 `et/material/storage.ensure_file_name_acceptable`（該處 docstring 有完整推導）。
+_NAME_TOO_LONG = AppError(
+    status_code=422,
+    detail=f"檔名過長（上限 {MAX_FILE_NAME_LEN} 字元），請縮短檔名後再上傳",
+    error_code="DM_FILE_003",
+)
+
+
 async def validate_upload(
     db: AsyncSession, *, size_bytes: int, filename: str, params: ParamService | None = None
 ) -> None:
-    """上傳前檢核：大小不逾 `DM_FILE_MAX_MB`、副檔名屬 `DM_FILE_TYPES`。
+    """上傳前檢核：大小不逾 `DM_FILE_MAX_MB`、檔名長度、副檔名屬 `DM_FILE_TYPES`。
 
     Raises:
-        AppError: 超過大小上限（422 DM_FILE_001）、不支援格式（422 DM_FILE_002）。
+        AppError: 超過大小上限（422 DM_FILE_001）、不支援格式（422 DM_FILE_002）、
+            檔名過長（422 DM_FILE_003）。
     """
     svc = params or ParamService()
     await enforce_size_limit(db, size_bytes=size_bytes, params=svc)
+
+    # 檔名長度先於副檔名檢核：兩者都不合時，「檔名過長」比「格式不支援」更接近使用者要做的事
+    # （後者會讓他去找格式問題，而真正擋住的是長度）。
+    if len(filename) > MAX_FILE_NAME_LEN:
+        raise _NAME_TOO_LONG
 
     # fail-closed：DM_FILE_TYPES 缺值 / 清空 → 退回安全預設白名單，格式檢核恆執行（T066 L2）
     #
