@@ -324,3 +324,55 @@ async def test_合法標籤_id_放行(client, field):
         resp = await c.post(_CREATE, data={**_base(), field: ["1", str(2**63 - 1)]})
 
     assert resp.status_code == 500
+
+
+# ── 類 4：lookup 擋得住長度、擋不住 NUL（security review MEDIUM-1）──────
+#
+# `category_code` / `func_code` / `reviewer_id` / `SubmitReq.assigned_reviewer` /
+# `RejectReq.reason` 原本都沒有 pattern。它們的共同辯護是「service 會先查表、查不到就 422」
+# ——那擋得住超長值，但**含 NUL 的值會讓那個查詢本身**拋 `CharacterNotInRepertoireError`
+# （實測純 `SELECT $1::text` 綁定即可重現），於是在查到「不存在」之前就先 500 了。
+
+
+@pytest.mark.parametrize(
+    ("url", "data"),
+    [
+        (_CREATE, {"category_code": "S\x00OP"}),
+        (_CREATE, {"category_code": "SOP", "func_code": "F\x00C"}),
+        (_UPDATE_DRAFT, {"func_code": "F\x00C"}),
+        (_OBSOLETE, {"reason": "理由", "reviewer_id": "re\x00v1"}),
+    ],
+)
+async def test_代碼與審核者欄位含_NUL_回_422(client, url, data):
+    """「有 lookup 擋」只對長度成立——查詢本身就會先炸。"""
+    async with client as cl:
+        resp = await (cl.put(url, data=data) if url == _UPDATE_DRAFT else cl.post(url, data=data))
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("category_code", "X" * 11), ("func_code", "X" * 11)],
+)
+async def test_代碼欄位超過_String_10_回_422(client, field, value):
+    """`DM_CATEGORY.CATEGORY_CODE` / `DM_FUNC.FUNC_CODE` 皆 `String(10)`。"""
+    async with client as cl:
+        resp = await cl.post(_CREATE, data={**_base(), field: value})
+
+    assert resp.status_code == 422
+
+
+async def test_廢止的審核者_id_超過_String_20_回_422(client):
+    async with client as cl:
+        resp = await cl.post(_OBSOLETE, data={"reason": "理由", "reviewer_id": "r" * 21})
+
+    assert resp.status_code == 422
+
+
+async def test_代碼與審核者欄位在界內仍放行(client):
+    """上限不可誤擋正常值——`SOP` 與一般 user_id 都要過得去。"""
+    async with client as cl:
+        resp = await cl.post(_OBSOLETE, data={"reason": "理由", "reviewer_id": "rev1"})
+
+    assert resp.status_code == 500  # 走進 handler、在 stub DB 上炸開 ＝ 驗證放行

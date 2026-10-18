@@ -4,7 +4,11 @@
 故此處主要為回應 schema、送簽 JSON 請求與表單受控下拉；輸入之欄位級檢核於 service。
 """
 
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, StringConstraints
+
+from app.core.schema_types import SAFE_MULTILINE_PATTERN
 
 
 class CreateResult(BaseModel):
@@ -26,7 +30,14 @@ class SubmitReq(BaseModel):
     """送簽請求（JSON）。"""
 
     version_id: int
-    assigned_reviewer: str
+    # 對齊 `DM_REVIEW.ASSIGNED_REVIEWER` 的 `String(20)`。`_ensure_assignable_reviewer`
+    # 會先查人、查不到就 422——那擋得住長度，但含 NUL 的值會讓**那個查詢本身**拋
+    # `CharacterNotInRepertoireError`，在查到「不存在」之前就 500（#697 實測）。
+    # 此處用 `StringConstraints` 而非 `Form()`：本請求是 JSON body，不是 multipart。
+    assigned_reviewer: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, max_length=20, pattern=SAFE_MULTILINE_PATTERN),
+    ]
 
 
 class SubmitResult(BaseModel):

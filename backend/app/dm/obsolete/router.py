@@ -41,6 +41,15 @@ _ReasonForm = Annotated[
     Form(max_length=_REASON_MAX, pattern=SAFE_MULTILINE_PATTERN),
 ]
 
+#: 指定審核者 user_id，對齊 `DM_REVIEW.ASSIGNED_REVIEWER` 的 `String(20)`。
+#: service 的 `_ensure_assignable_reviewer` 會先查人、查不到就 422——那擋得住長度，
+#: 但含 NUL 的值在查到「不存在」之前就會讓該查詢拋 `CharacterNotInRepertoireError`。
+_ReviewerIdForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=20, pattern=SAFE_MULTILINE_PATTERN),
+]
+
 
 def _ensure_editor(ctx: DmContext) -> None:
     """發起廢止細粒度授權：須具文件編輯者角色（DM_EDITOR）。"""
@@ -64,7 +73,7 @@ async def _read_upload(db: AsyncSession, file: UploadFile | None) -> tuple[str |
 async def initiate_obsolete(
     doc_id: str,
     reason: _ReasonForm = "",
-    reviewer_id: Annotated[str, Form()] = "",
+    reviewer_id: _ReviewerIdForm = "",
     file: Annotated[UploadFile | None, File()] = None,  # 選填單檔廢止附件（如函文 / 公文）
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),

@@ -50,6 +50,7 @@ _VERSION_NO_MAX = 20  # DM_DOC_VERSION.VERSION_NO String(20)
 _REVIEWER_ID_MAX = 20  # DM_DOC_VERSION.ASSIGNED_REVIEWER String(20)（存草稿只記住、不查人，#222）
 _CHANGE_SUMMARY_MAX = 1000  # CHANGE_SUMMARY 為 Text，此上限是因為它整段進 DOC_PUBLISH 信件內文
 _TAG_IDS_MAX = 50  # 對齊 DM01（#483 / PR #494）；種子只有 9 個檢索標籤
+_CODE_MAX_LEN = 10  # DM_CATEGORY.CATEGORY_CODE / DM_FUNC.FUNC_CODE 皆 String(10)
 
 #: 單一 tag_id 之值域。`DM_TAG.TAG_ID` 為 BIGINT，而 Pydantic 的 `int` 是任意精度——不界住的話，
 #: 超出 int64 的值會通過驗證、到 asyncpg 編碼期才拋 `DataError`，無人攔截即 500（#483 / #500）。
@@ -90,6 +91,21 @@ _ReviewerIdForm = Annotated[
 #: 長度與值域都要界：長度擋查詢成本放大與一次寫入大量標籤關聯，值域擋 int64 越界（#500）。
 _TagIdsForm = Annotated[list[TagId], Form(max_length=_TAG_IDS_MAX)]
 
+#: 分類 / 作業項目代碼。兩者都由 service 先查表（`_ensure_category` / `_resolve_func`），
+#: 查不到就 422——所以「超長」這一維本來就擋得住。但那是**查詢**，而含 NUL 的值
+#: 連 `SELECT` 的綁定都會拋 `CharacterNotInRepertoireError`（#697 實測），於是在查到
+#: 「不存在」之前就先 500 了。lookup 擋得住長度，擋不住這一個字元。
+_CodeForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_CODE_MAX_LEN, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
+_OptCodeForm = Annotated[
+    str | None,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_CODE_MAX_LEN, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
+
 
 def _ensure_editor(ctx: DmContext) -> None:
     """寫入型端點細粒度授權：須具文件編輯者角色（DM_EDITOR）。"""
@@ -112,11 +128,11 @@ async def _read_upload(db: AsyncSession, file: UploadFile | None) -> tuple[str |
 
 @router.post("/documents", response_model=CreateResult, status_code=201)
 async def create_document(
-    category_code: Annotated[str, Form()],
+    category_code: _CodeForm,
     doc_name: _DocNameForm = "",
     version_no: _VersionNoForm = "",
     change_summary: _ChangeSummaryForm = "",
-    func_code: Annotated[str | None, Form()] = None,
+    func_code: _OptCodeForm = None,
     assigned_reviewer: _ReviewerIdForm = None,  # 存草稿記住指定審核者（供續編預帶）
     # 可見對象為 (單位, 職位) 配對，以兩個平行陣列傳入（同索引成對）——multipart form 無法表達物件陣列。
     audience_unit_ids: _TagIdsForm = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
@@ -186,7 +202,7 @@ async def update_draft_version(
     doc_id: str,
     version_id: int,
     doc_name: _OptDocNameForm = None,  # 僅父文件 DRAFT（首版草稿）時生效
-    func_code: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT + 手冊類時生效
+    func_code: _OptCodeForm = None,  # 僅父文件 DRAFT + 手冊類時生效
     assigned_reviewer: _ReviewerIdForm = None,  # 存草稿記住指定審核者（供續編預帶）
     version_no: _VersionNoForm = "",
     change_summary: _ChangeSummaryForm = "",
