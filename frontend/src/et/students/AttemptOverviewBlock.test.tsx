@@ -1,9 +1,11 @@
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { HttpResponse, http } from "msw"
 import { describe, expect, it, vi } from "vitest"
 
 import { AttemptOverviewBlock } from "./AttemptOverviewBlock"
 import { renderWithProviders } from "../../test/renderWithProviders"
+import { server } from "../../test/server"
 import { formatDateTime } from "../../utils/date"
 
 describe("AttemptOverviewBlock 交卷時間（#551）", () => {
@@ -16,5 +18,44 @@ describe("AttemptOverviewBlock 交卷時間（#551）", () => {
     expect(await screen.findByText(formatDateTime("2026-04-22T02:12:00Z"))).toBeInTheDocument()
     expect(screen.getByText(formatDateTime("2026-05-02T06:05:00Z"))).toBeInTheDocument()
     expect(screen.queryByText(/上午|下午/)).not.toBeInTheDocument()
+  })
+})
+
+describe("AttemptOverviewBlock 輪次分段（#709）", () => {
+  it("要求重測後於新一輪前插分隔列，舊輪標「前一輪」", async () => {
+    server.use(
+      http.get("/api/et/courses/:courseId/attempt-overview", () =>
+        HttpResponse.json({
+          students: [
+            {
+              user_id: "s01",
+              user_name: "王小明",
+              quizzes: [
+                {
+                  quiz_id: 1,
+                  quiz_name: "基本概念測驗",
+                  max_retry: 3,
+                  used_attempts: 1,
+                  is_passed: false,
+                  can_reset: false,
+                  attempts: [
+                    { attempt_id: 11, attempt_no: 1, submitted_at: "2026-09-30T02:41:00Z", score: "100.00", points_total: 100, is_pass: true },
+                    { attempt_id: 12, attempt_no: 2, submitted_at: "2026-10-14T09:04:00Z", score: "25.00", points_total: 100, is_pass: false },
+                  ],
+                  resets: [{ after_attempt_no: 1, kind: "RETEST", executed_at: "2026-10-14T09:00:00Z" }],
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<AttemptOverviewBlock courseId={1} readOnly={false} onOpenDetail={vi.fn()} onReset={vi.fn()} />)
+    await user.click(await screen.findByRole("button", { name: /王小明/ }))
+
+    expect(await screen.findByText(/教師要求重測（測驗內容已更新）/)).toBeInTheDocument()
+    expect(screen.getByRole("row", { name: /第 1 次/ })).toHaveTextContent("前一輪")
+    expect(screen.getByRole("row", { name: /第 2 次/ })).not.toHaveTextContent("前一輪")
   })
 })

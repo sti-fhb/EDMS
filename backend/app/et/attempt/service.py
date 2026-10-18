@@ -46,6 +46,7 @@ from app.et.attempt.rules import (
     is_timed_out,
     remaining_attempts,
     remaining_seconds,
+    retest_base,
     shuffled,
 )
 from app.et.attempt.schemas import (
@@ -60,6 +61,7 @@ from app.et.attempt.schemas import (
     QuizIntro,
     QuizPreview,
     QuizPreviewQuestion,
+    RoundBoundary,
 )
 from app.et.constants import (
     ATTEMPT_IN_PROGRESS,
@@ -194,7 +196,14 @@ class EtAttemptService:
         closed = access.is_closed(now=utcnow())
         total = await self._repo.attempt_total(db, user_id=user_id, quiz_id=quiz_id)
         base = await self._repo.reset_base(db, user_id=user_id, quiz_id=quiz_id)
-        last, best, passed = await self._repo.score_summary(db, user_id=user_id, quiz_id=quiz_id, reset_base=base)
+        resets = await self._repo.list_resets(db, user_id=user_id, quiz_id=quiz_id)
+        last, best, passed = await self._repo.score_summary(
+            db,
+            user_id=user_id,
+            quiz_id=quiz_id,
+            reset_base=base,
+            retest_base=retest_base([(r.attempt_count_at_reset, r.reset_kind) for r in resets]),
+        )
         in_progress = await self._repo.find_in_progress(db, user_id=user_id, quiz_id=quiz_id)
         questions = await self._repo.list_questions(db, quiz_id)
         return QuizIntro(
@@ -226,6 +235,10 @@ class EtAttemptService:
             last_attempt_id=await self._repo.last_submitted_attempt_id(db, user_id=user_id, quiz_id=quiz_id),
             course_closed=closed,
             is_preview=is_preview,
+            resets=[
+                RoundBoundary(after_attempt_no=r.attempt_count_at_reset, kind=r.reset_kind, executed_at=r.executed_at)
+                for r in resets
+            ],
         )
 
     async def preview(

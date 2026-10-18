@@ -30,7 +30,7 @@ const quiz: QuizDetail = {
   ],
   points_total: 60,
   answers_visible: true,
-  passed_count: 0,
+  affected_count: 0,
   require_retest_pending: false,
 }
 

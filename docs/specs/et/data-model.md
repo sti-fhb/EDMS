@@ -501,6 +501,7 @@
 | 5 | 重置時作答次數 | ATTEMPT_COUNT_AT_RESET | INT | Y | 重置當下該學員於該測驗之既有 attempt 總數；**作為已用次數之計算基準** |
 | 6 | 執行者 | EXECUTED_BY | VARCHAR(20) | Y | FK → DP_USER.USER_ID；執行重置之教師（owner）或管理者 |
 | 7 | 執行時間 | EXECUTED_AT | TIMESTAMP | Y | |
+| 8 | 重置種類 | RESET_KIND | VARCHAR(10) | N | `RETEST`（教師要求重測，#361）／`RETRY`（教師重置重考次數）；#709 之前之舊列為 NULL（原因未知，不回填）。CHECK `CK_ET_QUIZ_RETRY_RESET_KIND`（2026-10-18 #709 新增）|
 | - | 標準欄位 | — | — | — | （同上）|
 
 **業務規則**:
@@ -513,6 +514,7 @@
 - **可重置之條件**（per [FR-ET-US9-06](spec_us9.md)）：已用重考次數 = `MAX_RETRY` **且**該學員於該測驗尚未及格；已及格 / 未作答 / 次數未用盡時不可重置
 - 課程 CLOSED 期間不可重置（再開課後恢復）
 - 重置**不刪除任何 attempt**——歷次作答明細於 US6 / US9 永久可回看
+- **最高分（結業成績）之起點**（#709）：取 `RESET_KIND = 'RETEST'` 之 MAX(ATTEMPT_COUNT_AT_RESET)，只計其後之作答；`RETRY` 與 NULL 不移動此起點（與管次數的 `base` 不同）
 
 ---
 
@@ -693,7 +695,7 @@ Email 邀請不再有「待加入」中間狀態：教師按下寄出的當下�
 | URGENT_REMIND | 截止前加急提醒 | SCHET002（訖止前 3 天）|
 | WEEKLY_REPORT | 週報 | SCHET001（教師 / 管理者）|
 | APPROVAL_PASSED | 核可通過通知 | US16 核可「通過」時（不通過 / 撤銷不寄）|
-| QUIZ_RETEST_REQUIRED | 測驗變更需重新測驗通知 | US3 教師變更測驗內容並選擇「要求已通過學員重測」時（逐人一封）|
+| QUIZ_RETEST_REQUIRED | 測驗變更需重新測驗通知 | US3 教師變更測驗內容並選擇「要求重測」時（逐人一封；2026-10-19 #709 起對象為作答過之學員，不限已通過）|
 
 **業務規則**:
 - 教師不可逐課修改信件內容；寄出一律採平台 `DP_NOTIFY_TEMPLATE`（`MODULE=ET`）範本

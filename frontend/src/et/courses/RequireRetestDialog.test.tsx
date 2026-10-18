@@ -5,13 +5,13 @@ import { describe, expect, it, vi } from "vitest"
 import { RequireRetestDialog } from "./RequireRetestDialog"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
-function setup(passedCount = 3, extra: { staged?: boolean; retestPending?: boolean } = {}) {
+function setup(affectedCount = 3, extra: { staged?: boolean; retestPending?: boolean } = {}) {
   const onCancel = vi.fn()
   const onDecide = vi.fn()
   renderWithProviders(
     <RequireRetestDialog
       open
-      passedCount={passedCount}
+      affectedCount={affectedCount}
       onCancel={onCancel}
       onDecide={onDecide}
       {...extra}
@@ -25,7 +25,7 @@ describe("RequireRetestDialog", () => {
     setup(12)
     // 「要求 1 個人重考」與「要求 12 個人重考」是完全不同的決定。
     // 用 dialog 的整體文字斷言：人數在文案中出現兩次，getByText 會因多重命中而拋錯。
-    expect(screen.getByRole("dialog")).toHaveTextContent("12 位學員已通過")
+    expect(screen.getByRole("dialog")).toHaveTextContent("12 位學員已作答")
   })
 
   it("三顆按鈕各自對應一種結果", () => {
@@ -63,6 +63,12 @@ describe("RequireRetestDialog", () => {
     await userEvent.keyboard("{Escape}")
     expect(onCancel).toHaveBeenCalled()
     expect(onDecide).not.toHaveBeenCalled()
+  })
+
+  it("說明對象不限已通過者、且最高分只計重測後（#709）", () => {
+    setup()
+    expect(screen.getByRole("dialog")).toHaveTextContent("不論是否已通過")
+    expect(screen.getByRole("dialog")).toHaveTextContent("最高分只計重測後的作答")
   })
 
   it("說明兩種選擇都不會刪除作答紀錄", () => {

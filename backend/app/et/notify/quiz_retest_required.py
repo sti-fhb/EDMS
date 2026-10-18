@@ -1,6 +1,7 @@
 """測驗變更需重新測驗通知（`QUIZ_RETEST_REQUIRED`；US3 / US6 / #361）。
 
-教師變更測驗內容並選擇「要求已通過的學員重新測驗」時，對每位受影響的學員各寄一封。
+教師變更測驗內容並選擇「要求重新測驗」時，對每位受影響的學員各寄一封（#709 起不限已通過者，
+對象見 `quiz/repository.retest_target_attempt_counts`）。
 
 ⚠️ **逐人一封、不合批**：範本內文含 `{USER_NAME}`，而平台 `send_email` 對整批收件人
 **只渲染一次**——合批會讓所有人收到同一個名字的信。與 `ApprovalPassedMailer` /

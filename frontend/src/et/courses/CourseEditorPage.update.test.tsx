@@ -408,7 +408,7 @@ describe("ET05 更新（#631）", () => {
           version: 0,
           points_total: 0,
           answers_visible: true,
-          passed_count: 0,
+          affected_count: 0,
           questions: [],
         })
       }),

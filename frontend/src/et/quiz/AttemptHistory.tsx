@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom"
 
 import { usePinQuizInUrl } from "./usePinQuizInUrl"
 
+import { resetLabel, withRoundDividers, type RoundBoundary } from "./attemptRounds"
 import { attemptApi } from "./attemptService"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { toApiError } from "../../services/http"
@@ -41,8 +42,14 @@ import { formatDateTime } from "../../utils/date"
  * 任何「是否可見」的旗標——可見與否不是它該判斷的事，拿得到資料就顯示。
  *
  * 零筆時整塊不顯示：一張空表格會讓學員以為系統把他的紀錄弄丟了。
+ *
+ * ## 依輪次分段（#709）
+ *
+ * 教師要求重測或重置重考次數後，新一輪的第一筆之前插一列分隔（日期＋原因）；最近一次
+ * **要求重測**之前的作答標「前一輪」並轉灰（不計入成績），逐題明細**仍可點開**——舊輪是
+ * 學員的歷史，不是作廢。重置重考次數不影響成績，故只有分隔列、不轉灰。
  */
-export function AttemptHistory({ quizId }: { quizId: number }) {
+export function AttemptHistory({ quizId, resets = [] }: { quizId: number; resets?: readonly RoundBoundary[] }) {
   const navigate = useNavigate()
   const pinQuizInUrl = usePinQuizInUrl(quizId)
   /** 先釘住學習頁網址再進結果頁（#549）——結果頁的「返回課程」會退回這一筆。 */
@@ -81,49 +88,68 @@ export function AttemptHistory({ quizId }: { quizId: number }) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {data.map((attempt) => (
+            {withRoundDividers(data, resets).map((row) =>
+              row.type === "divider" ? (
+                <RoundDividerRow key={`reset-${row.reset.after_attempt_no}-${row.reset.executed_at}`} reset={row.reset} />
+              ) : (
               <TableRow
-                key={attempt.attempt_id}
+                key={row.attempt.attempt_id}
                 hover
-                sx={{ cursor: "pointer" }}
-                onClick={() => void openResult(attempt.attempt_id)}
+                sx={{ cursor: "pointer", ...(row.previous && { "& td": { color: "text.disabled" } }) }}
+                onClick={() => void openResult(row.attempt.attempt_id)}
               >
                 <TableCell>
                   <Stack direction="row" spacing={1} alignItems="center">
-                    <strong>第 {attempt.attempt_no} 次</strong>
+                    <strong>第 {row.attempt.attempt_no} 次</strong>
                     {/* 逾時自動提交如實標示，不假裝是正常提交 */}
-                    {attempt.status === "TIMEOUT" && <Chip size="small" variant="outlined" label="逾時" />}
+                    {row.attempt.status === "TIMEOUT" && <Chip size="small" variant="outlined" label="逾時" />}
+                    {row.previous && <Chip size="small" variant="outlined" label="前一輪" />}
                   </Stack>
                 </TableCell>
-                <TableCell>{formatDateTime(attempt.submitted_at)}</TableCell>
+                <TableCell>{formatDateTime(row.attempt.submitted_at)}</TableCell>
                 <TableCell align="right">
-                  {attempt.score} / {attempt.points_total}
+                  {row.attempt.score} / {row.attempt.points_total}
                 </TableCell>
                 <TableCell>
                   <Chip
                     size="small"
-                    color={attempt.is_pass ? "success" : "error"}
-                    label={attempt.is_pass ? "及格" : "未及格"}
+                    // 前一輪的及格／未及格不再代表現況——去色，避免綠色「及格」誤導
+                    color={row.previous ? "default" : row.attempt.is_pass ? "success" : "error"}
+                    label={row.attempt.is_pass ? "及格" : "未及格"}
                   />
                 </TableCell>
                 <TableCell>
                   {/* 整列可點是給滑鼠的；`<tr>` 不可聚焦，鍵盤使用者需要一顆真的按鈕 */}
                   <IconButton
                     size="small"
-                    aria-label={`回看第 ${attempt.attempt_no} 次作答明細`}
+                    aria-label={`回看第 ${row.attempt.attempt_no} 次作答明細`}
                     onClick={(e) => {
                       e.stopPropagation()
-                      void openResult(attempt.attempt_id)
+                      void openResult(row.attempt.attempt_id)
                     }}
                   >
                     <ChevronRightIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
               </TableRow>
-            ))}
+              ),
+            )}
           </TableBody>
         </Table>
       </TableContainer>
     </Paper>
+  )
+}
+
+/** 輪次分隔列（#709）——與 ET02 作答明細同一套文字。 */
+export function RoundDividerRow({ reset, colSpan = 5 }: { reset: RoundBoundary; colSpan?: number }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={colSpan} sx={{ bgcolor: "action.hover", py: 0.5 }}>
+        <Typography variant="caption" color="text.secondary">
+          {formatDateTime(reset.executed_at)} · {resetLabel(reset.kind)}
+        </Typography>
+      </TableCell>
+    </TableRow>
   )
 }

@@ -7,8 +7,8 @@ import DialogTitle from "@mui/material/DialogTitle"
 
 interface Props {
   open: boolean
-  /** 該測驗曾及格的學員人數；對話框只在 > 0 時由呼叫端開啟。 */
-  passedCount: number
+  /** 要求重測會影響的學員人數（作答過者，不限已通過）；對話框只在 > 0 時由呼叫端開啟。 */
+  affectedCount: number
   /**
    * 這門課的編輯是否進暫存區（已發布 / 已關閉課程，#631）。
    *
@@ -27,12 +27,15 @@ interface Props {
   retestPending?: boolean
   /** 關閉而不儲存（含 ESC 與點背景）。 */
   onCancel: () => void
-  /** `true` = 要求已通過的學員重新測驗；`false` = 僅儲存。 */
+  /** `true` = 要求學員重新測驗；`false` = 僅儲存。 */
   onDecide: (requireRetest: boolean) => void
 }
 
 /**
- * 測驗內容變更時，詢問是否要求已通過的學員重新測驗（#361，SA 裁示方案 C）。
+ * 測驗內容變更時，詢問是否要求學員重新測驗（#361，SA 裁示方案 C）。
+ *
+ * #709 起對象為**作答過的學員，不限已通過**：要求重測的情境是舊題目有問題（出題疏失），
+ * 所有人都拿到同樣的新一輪。
  *
  * ## 為何不用共用的 `confirm`
  *
@@ -51,7 +54,7 @@ interface Props {
  */
 export function RequireRetestDialog({
   open,
-  passedCount,
+  affectedCount,
   staged = false,
   retestPending = false,
   onCancel,
@@ -59,14 +62,14 @@ export function RequireRetestDialog({
 }: Props) {
   return (
     <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
-      <DialogTitle>是否要求已通過的學員重新測驗？</DialogTitle>
+      <DialogTitle>是否要求學員重新測驗？</DialogTitle>
       <DialogContent>
         <DialogContentText component="div">
-          本測驗目前有 <strong>{passedCount}</strong> 位學員已通過。
+          本測驗目前有 <strong>{affectedCount}</strong> 位學員已作答。
           <br />
           <br />
-          選「要求重測」：這 {passedCount} 位學員的作答次數將重新計算、測驗回到未完成，
-          完課狀態隨之回退，並各收到一封通知信。
+          選「要求重測」：這 {affectedCount} 位學員（不論是否已通過）的作答次數將重新計算、測驗回到未完成，
+          完課狀態隨之回退，最高分只計重測後的作答，並各收到一封通知信。
           {staged && (
             <>
               <br />

@@ -1,5 +1,7 @@
 /** ET07 測驗作答型別（對齊後端 `app/et/attempt/schemas.py`）。 */
 
+import type { RoundBoundary } from "./attemptRounds"
+
 /**
  * 作答中的選項——**沒有 `is_correct`**。
  *
@@ -159,6 +161,8 @@ export interface QuizIntro {
    * 「重考次數已用完，請聯繫教師重置」是一句不成立的話（他沒有作答次數可言）。
    */
   is_preview: boolean
+  /** 本人於此測驗的輪次分界，依時間遞增（#709）。 */
+  resets: RoundBoundary[]
 }
 
 /** 預覽中呈現的選項。**沒有 `is_correct`**——正確答案在 ET05 的測驗編輯對話框確認。 */

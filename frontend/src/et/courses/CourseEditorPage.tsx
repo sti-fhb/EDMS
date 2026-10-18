@@ -206,7 +206,7 @@ export function EtCourseEditorPage() {
    */
   const [unsavedNewItemId, setUnsavedNewItemId] = useState<number | null>(null)
   /**
-   * 等待教師決定「是否要求已通過學員重測」的動作（#361）。
+   * 等待教師決定「是否要求學員重測」的動作（#361）。
    *
    * ⚠️ `useState` 把函式參數當成 updater，存函式一定要包一層 `() => fn`，
    * 否則 React 會呼叫它、把回傳值存進 state。
@@ -690,7 +690,7 @@ export function EtCourseEditorPage() {
         "本次若刪除了章節或項目，學員在其中的學習進度與測驗作答會一併移除，完課狀態隨之重算。" +
         // 重測延到此刻才執行（2026-10-17 裁示），而教師是在幾分鐘到幾天前的另一個對話框
         // 裡決定的——不在這裡提一句，寄信與退回完課就成了他沒預期的副作用。
-        "本次若曾選擇「要求重測」，那些已通過的學員會在此刻被退回未完成並各收到一封通知信。" +
+        "本次若曾選擇「要求重測」，作答過的學員會在此刻重新計算作答次數、退回未完成並各收到一封通知信。" +
         "系統會重跑一次發布檢核，未通過時不會更新任何內容。",
       okText: "確認更新",
       onOk: () => applyMut.mutate(),
@@ -1341,12 +1341,12 @@ export function EtCourseEditorPage() {
   }
 
   /**
-   * 測驗內容有變更時，先問教師是否要求已通過的學員重測，再執行實際儲存（#361）。
+   * 測驗內容有變更時，先問教師是否要求學員重測，再執行實際儲存（#361）。
    *
-   * 沒有人通過過就不問——那是新建測驗的常態，多一個對話框只是噪音。
+   * 沒有人作答過（#709 前為「通過過」）就不問——那是新建測驗的常態，多一個對話框只是噪音。
    */
   const askRetestThen = (run: (requireRetest: boolean) => void) => {
-    if ((quiz?.passed_count ?? 0) > 0) {
+    if ((quiz?.affected_count ?? 0) > 0) {
       setPendingRetestAction(() => run)
       return
     }
@@ -1887,7 +1887,7 @@ export function EtCourseEditorPage() {
       {pendingRetestAction !== null && (
         <RequireRetestDialog
           open
-          passedCount={quiz?.passed_count ?? 0}
+          affectedCount={quiz?.affected_count ?? 0}
           // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
           staged={status !== "DRAFT"}
           retestPending={quiz?.require_retest_pending ?? false}

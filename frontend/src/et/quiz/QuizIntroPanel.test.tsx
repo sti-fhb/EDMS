@@ -31,6 +31,7 @@ const BASE: QuizIntro = {
   last_attempt_id: null,
   course_closed: false,
   is_preview: false,
+  resets: [],
 }
 
 function mockIntro(overrides: Partial<QuizIntro>) {
@@ -97,6 +98,44 @@ describe("ET07 測驗資訊面板", () => {
     await user.click(screen.getByRole("row", { name: /第 1 次/ }))
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/attempts/799/result"))
+  })
+
+  describe("輪次分段（#709）", () => {
+    it("要求重測後於新一輪前插分隔列，舊輪標「前一輪」且仍可回看", async () => {
+      mockIntro({ last_attempt_id: 800, last_score: "50.00", best_score: "50.00", resets: [{ after_attempt_no: 1, kind: "RETEST" as const, executed_at: "2026-10-14T09:00:00Z" }] })
+      const user = userEvent.setup()
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByText(/教師要求重測（測驗內容已更新）/)).toBeInTheDocument()
+      expect(screen.getByRole("row", { name: /第 1 次/ })).toHaveTextContent("前一輪")
+      // 正向對照：新一輪那一列不標前一輪（同一查詢方式）
+      expect(screen.getByRole("row", { name: /第 2 次/ })).not.toHaveTextContent("前一輪")
+      await user.click(screen.getByRole("row", { name: /第 1 次/ }))
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith("/et/attempts/799/result"))
+    })
+
+    it("重置重考次數只插分隔列、不標前一輪——舊輪成績仍計入最高分（#709 Q1）", async () => {
+      mockIntro({ last_attempt_id: 800, last_score: "50.00", best_score: "65.00", resets: [{ after_attempt_no: 1, kind: "RETRY" as const, executed_at: "2026-10-14T09:00:00Z" }] })
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      // 正向錨點：分隔列確實出現，下面「不標前一輪」才有意義
+      expect(await screen.findByText(/重考次數已重置/)).toBeInTheDocument()
+      expect(screen.getByRole("row", { name: /第 1 次/ })).not.toHaveTextContent("前一輪")
+    })
+
+    it("要求重測後尚未重考：說明結業成績待重新作答，不顯示舊的最高分", async () => {
+      mockIntro({
+        last_attempt_id: 800,
+        last_score: "90.00",
+        best_score: null,
+        resets: [{ after_attempt_no: 2, kind: "RETEST" as const, executed_at: "2026-10-14T09:00:00Z" }],
+      })
+      renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+      expect(await screen.findByText(/教師已要求重測，重新作答後才會計算結業成績/)).toBeInTheDocument()
+      // 成績橫幅（最近一次＋最高分）不出現——頁面其他處本來就有「最高分」字樣，不能以它為準
+      expect(screen.queryByText(/最近一次成績/)).not.toBeInTheDocument()
+    })
   })
 
   it("從未作答時整塊清單不顯示", async () => {

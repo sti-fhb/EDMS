@@ -51,7 +51,7 @@ ENTITY_SURVEY: Final = "SURVEY"
 ENTITY_SURVEY_QUESTION: Final = "SURVEY_QUESTION"
 ENTITY_SURVEY_OPTION: Final = "SURVEY_OPTION"
 
-#: 「本次編輯要求已通過學員重測」的意圖，寄在 `QUIZ` 暫存節點的 payload 上（#361 × #631）。
+#: 「本次編輯要求重測」的意圖，寄在 `QUIZ` 暫存節點的 payload 上（#361 × #631）。
 #:
 #: 🔴 **刻意不是 `ET_QUIZ` 的欄位名**——`stage_apply._upsert` 只寫
 #: `payload_fields(spec)` 列出的 key，非欄位的旗標因此會被自動忽略、不會進活表。

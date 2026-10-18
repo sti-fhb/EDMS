@@ -172,6 +172,23 @@ class AttemptSummary(BaseModel):
     status: Literal["SUBMITTED", "TIMEOUT"]
 
 
+class RoundBoundary(BaseModel):
+    """作答紀錄的輪次分界（#709）：一次重考次數重置。
+
+    前端於 `ATTEMPT_NO > after_attempt_no` 的第一筆之前插分隔列；最近一次分界之前的
+    作答為「前一輪」。分界之後尚無作答時仍要顯示——學員與教師才看得出「已要求重測、尚未重考」。
+
+    Attributes:
+        after_attempt_no: 重置當下的作答總數（`ATTEMPT_COUNT_AT_RESET`）。
+        kind: `RETEST`（要求重測）／`RETRY`（重置重考次數）／`None`（#709 之前的舊列，原因未知）。
+        executed_at: 執行時間。
+    """
+
+    after_attempt_no: int
+    kind: str | None
+    executed_at: datetime
+
+
 class QuizIntro(BaseModel):
     """引導頁（AC 1 / AC 2）。
 
@@ -213,6 +230,8 @@ class QuizIntro(BaseModel):
     #: 前端必須先看 `is_preview` 再決定要不要顯示上述兩句訊息——對教師說「重考次數已用完」
     #: 是一句不成立的話。
     is_preview: bool
+    #: 本人於此測驗的輪次分界，依時間遞增（#709）——供歷次作答紀錄分段顯示。
+    resets: list[RoundBoundary]
 
 
 class QuizPreviewQuestion(BaseModel):

@@ -57,6 +57,7 @@ from app.et.approval.rules import (
 from app.et.approval.schemas import ApprovalRow
 from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
+from app.et.attempt.schemas import RoundBoundary
 from app.et.attempt.service import in_snapshot_order, to_question_result
 from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
 from app.et.course.models import EtCourse
@@ -202,6 +203,7 @@ class EtTrackingService:
         quizzes = await self._repo.quizzes_of_course(db, course_id)
         attempts = await self._repo.attempts_of_course(db, course_id)
         reset_bases = await self._repo.reset_bases_of_course(db, course_id)
+        resets = await self._repo.resets_of_course(db, course_id)
         points = await self._attempts.points_total_by_attempt(db, [a.attempt_id for a in attempts])
 
         by_user: dict[str, dict[int, list]] = {}
@@ -218,6 +220,7 @@ class EtTrackingService:
                         quiz,
                         attempts=per_quiz.get(quiz.quiz_id, []),
                         reset_base=reset_bases.get((user_id, quiz.quiz_id), 0),
+                        resets=resets.get((user_id, quiz.quiz_id), []),
                         points=points,
                     )
                     for quiz in quizzes
@@ -706,7 +709,7 @@ def _round2(value: float | None) -> Decimal | None:
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _to_quiz_row(quiz, *, attempts: list, reset_base: int, points: dict[int, int]) -> TeacherQuizRow:
+def _to_quiz_row(quiz, *, attempts: list, reset_base: int, resets: list, points: dict[int, int]) -> TeacherQuizRow:
     """組某學員於某測驗的一列。`attempts` 為空即「尚未作答」。
 
     `used_attempts` 走 `round_used_attempts`（總數扣掉重置基準）——直接用 `len(attempts)`
@@ -734,6 +737,10 @@ def _to_quiz_row(quiz, *, attempts: list, reset_base: int, points: dict[int, int
                 is_pass=bool(a.is_pass),
             )
             for a in attempts
+        ],
+        resets=[
+            RoundBoundary(after_attempt_no=r.attempt_count_at_reset, kind=r.reset_kind, executed_at=r.executed_at)
+            for r in resets
         ],
     )
 

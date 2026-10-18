@@ -57,10 +57,10 @@ class QuizUpdateReq(BaseModel):
     #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
     #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
     version: int = Field(ge=0, le=MAX_INT4)
-    #: 是否要求**已通過**的學員重新測驗（#361）。
+    #: 是否要求學員重新測驗（#361；#709 起對象為作答過的學員，不限已通過）。
     #:
     #: 系統無法分辨「改錯字」與「改語意」，故不猜意圖——由教師在儲存時決定。
-    #: `True` 時該測驗的已通過學員：答題次數歸 0、測驗項目的完成旗標清除、各收一封
+    #: `True` 時受影響的學員：答題次數歸 0、測驗項目的完成旗標清除、各收一封
     #: 通知信；⛔ **任一情形下都不刪 attempt**（US6 AC 12 / US9 AC 6 / #279 Q2=C）。
     require_retest: bool = False
 
@@ -104,7 +104,7 @@ class QuestionCreateReq(BaseModel):
     #: 卻仍佔著學員的作答時間。2026-08-26 依實測回饋收緊。
     points: int = Field(ge=1, le=100)
     options: list[OptionInput] = Field(max_length=MAX_OPTIONS_PER_QUESTION)
-    #: 是否要求**已通過**的學員重新測驗（#361）。詳見 `QuizUpdateReq.require_retest`。
+    #: 是否要求學員重新測驗（#361；#709 起對象為作答過的學員，不限已通過）。詳見 `QuizUpdateReq.require_retest`。
     #:
     #: ⛔ 排序端點（`QuestionReorderReq`）刻意**沒有**這個欄位——只改呈現順序不是內容
     #: 變更，且 attempt 有 `question_order` 快照，舊紀錄本來就不受影響。為換順序要求
@@ -201,14 +201,15 @@ class QuizDetail(BaseModel):
     #: 明確給一個布林，而不是讓前端從 `OptionRow.is_correct is None` 反推——前端需要
     #: 的是「要不要顯示『N 個正解』這一欄」，而那是**整份測驗**的性質，不是逐選項的。
     answers_visible: bool
-    #: 曾及格的學員人數（#361）——儲存時的「是否要求重測」確認框要寫出受影響人數，
-    #: 否則教師無從判斷該選是或否。
+    #: 要求重測會影響的學員人數（#361；#709 起為「最近一次要求重測之後有作答」者，
+    #: 不限已通過）——儲存時的「是否要求重測」確認框要寫出受影響人數，否則教師無從
+    #: 判斷該選是或否。
     #:
-    #: ⚠️ **非擁有者為 `None` 而非 0**：0 是「沒有人通過」這個具體事實，而非擁有者
+    #: ⚠️ **非擁有者為 `None` 而非 0**：0 是「沒有人受影響」這個具體事實，而非擁有者
     #: 的實際狀態是「不該知道」。比照同一回應對 `is_correct` 的處理——遮成 `False`
     #: 會顯示「0 個正解」，那是錯誤資訊而不是隱藏。
-    passed_count: int | None
-    #: 本次編輯工作階段是否已勾選「要求已通過學員重測」，尚待「更新」才執行（#361 × #631）。
+    affected_count: int | None
+    #: 本次編輯工作階段是否已勾選「要求重測」，尚待「更新」才執行（#361 × #631）。
     #:
     #: 🔴 **不回這一欄會讓勾選被靜默清掉。** 旗標寄在 QUIZ 暫存節點的 payload 上；教師
     #: 勾完之後再開一次測驗設定對話框，前端沒有這個值就只能預設為未勾，而

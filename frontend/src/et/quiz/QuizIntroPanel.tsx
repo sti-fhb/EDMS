@@ -152,6 +152,10 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
           {data.is_passed && " — 已及格"}
         </Alert>
       )}
+      {/* #709：要求重測後最高分只計新一輪——還沒重考就沒有結業成績，說明原因而不是讓橫幅消失 */}
+      {data.best_score === null && data.last_score !== null && data.resets.some((r) => r.kind === "RETEST") && (
+        <Alert severity="info">教師已要求重測，重新作答後才會計算結業成績。</Alert>
+      )}
 
       <Alert severity="warning">
         <strong>作答注意事項</strong>
@@ -221,7 +225,7 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
         本來就是 `ET-6b` 未交付前的過渡——學員想回看的往往是第 1 次，只給最近一次等於
         把最有價值的那筆藏起來。**不受 `can_start` 影響**：次數用完的學員最需要複習。
       */}
-      <AttemptHistory quizId={quizId} />
+      <AttemptHistory quizId={quizId} resets={data.resets} />
         </>
       )}
     </Stack>

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser  # 唯讀 join（已列於 et/spec.md §外模組 table 引用清單）
-from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES
+from app.et.constants import ATTEMPT_IN_PROGRESS, GRADED_STATUSES, RESET_KIND_RETEST, RESET_KIND_RETRY
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
@@ -126,6 +126,12 @@ class EtTrackingRepository:
         每次作答先依**自己的**配分總和（`SUM(POINTS_SNAPSHOT)`）換算、四捨五入到兩位，再取
         最高——與引導頁的最高分（`attempt.rules.to_percent`）及及格判定同尺度。配分總和為 0
         時以 0 計（零題或配分全為零，得分必然也是 0）。
+
+        ## 最高分只計最近一次「要求重測」之後（#709）
+
+        與引導頁（`attempt/repository.score_summary`）同口徑：每個 `(學員, 測驗)` 取
+        `RESET_KIND = 'RETEST'` 的最大起點，只計 `ATTEMPT_NO` 大於它的作答。重測後尚未作答
+        ＝該測驗**視同未作答**、不進分母（不是 0 分）。`RETRY` 與舊列不影響。
         """
         if not user_ids:
             return {}
@@ -142,6 +148,17 @@ class EtTrackingRepository:
             (points.c.total > 0, func.round(EtQuizAttemptM.score * 100 / points.c.total, 2)),
             else_=0,
         )
+        retest = (
+            select(
+                EtQuizRetryReset.user_id.label("user_id"),
+                EtQuizRetryReset.quiz_id.label("quiz_id"),
+                func.max(EtQuizRetryReset.attempt_count_at_reset).label("base"),
+            )
+            # 只取本次要算的學員——否則每次查詢都對整張表的 RETEST 列 GROUP BY
+            .where(EtQuizRetryReset.reset_kind == RESET_KIND_RETEST, EtQuizRetryReset.user_id.in_(user_ids))
+            .group_by(EtQuizRetryReset.user_id, EtQuizRetryReset.quiz_id)
+            .subquery()
+        )
         best_per_quiz = (
             select(
                 EtQuizAttemptM.user_id.label("user_id"),
@@ -149,11 +166,16 @@ class EtTrackingRepository:
                 func.max(percent).label("best"),
             )
             .outerjoin(points, points.c.attempt_id == EtQuizAttemptM.attempt_id)
+            .outerjoin(
+                retest,
+                (retest.c.user_id == EtQuizAttemptM.user_id) & (retest.c.quiz_id == EtQuizAttemptM.quiz_id),
+            )
             .where(
                 EtQuizAttemptM.user_id.in_(user_ids),
                 EtQuizAttemptM.course_id == course_id,
                 EtQuizAttemptM.score.is_not(None),
                 EtQuizAttemptM.deleted == 0,
+                EtQuizAttemptM.attempt_no > func.coalesce(retest.c.base, 0),
             )
             .group_by(EtQuizAttemptM.user_id, EtQuizAttemptM.quiz_id)
             .subquery()
@@ -330,6 +352,31 @@ class EtTrackingRepository:
         )
         return {(user_id, quiz_id): base for user_id, quiz_id, base in rows.all()}
 
+    async def resets_of_course(self, db: AsyncSession, course_id: int) -> dict[tuple[str, int], list[EtQuizRetryReset]]:
+        """`{(user_id, quiz_id): [重置紀錄, ...]}`——一次取全班，依起點遞增（#709 輪次分界）。
+
+        過濾口徑與 `reset_bases_of_course` 相同（以本課程的 `QUIZ_ID`，不以 `COURSE_ID`）。
+        """
+        quiz_ids = (
+            select(EtItem.quiz_id)
+            .join(EtChapter, EtChapter.chapter_id == EtItem.chapter_id)
+            .where(
+                EtChapter.course_id == course_id,
+                EtItem.quiz_id.is_not(None),
+                EtItem.deleted == 0,
+                EtChapter.deleted == 0,
+            )
+        )
+        rows = await db.scalars(
+            select(EtQuizRetryReset)
+            .where(EtQuizRetryReset.quiz_id.in_(quiz_ids))
+            .order_by(EtQuizRetryReset.attempt_count_at_reset, EtQuizRetryReset.reset_id)
+        )
+        out: dict[tuple[str, int], list[EtQuizRetryReset]] = {}
+        for r in rows:
+            out.setdefault((r.user_id, r.quiz_id), []).append(r)
+        return out
+
     async def get_attempt_with_course(self, db: AsyncSession, attempt_id: int):
         """取 attempt 與其課程——**教師端授權以課程擁有者判定**。
 
@@ -399,8 +446,7 @@ class EtTrackingRepository:
         ## 🔴 「已通過」是「**目前**算通過」，不是「曾及格」（#610）
 
         判定條件為「**在最近一次重置基準之後**仍有及格紀錄」，即
-        `IS_PASS AND ATTEMPT_NO > reset_base`——與
-        `quiz/repository.passed_student_attempt_counts` 同一個定義。
+        `IS_PASS AND ATTEMPT_NO > reset_base`。
 
         用「曾及格」會讓教師要求重測後，那位學員**永久**被當成已通過：重測不及格且次數
         用盡時 `can_reset_retry` 仍拒絕，而 #361 起未及格的測驗會擋住後續項目——學員這門
@@ -467,6 +513,7 @@ class EtTrackingRepository:
                 user_id=user_id,
                 quiz_id=quiz_id,
                 attempt_count_at_reset=attempt_count,
+                reset_kind=RESET_KIND_RETRY,
                 # `EXECUTED_BY` / `EXECUTED_AT` 是**業務語意**的執行者與時點（供 UI 查詢
                 # 「誰在何時重置過」），與 `CREATED_*` 的資安稽核欄位並存、不互相取代
                 # ——同一條原則見 `spec.md`「語意碼 vs. 業務紀錄表」。
@@ -489,7 +536,7 @@ class EtTrackingRepository:
     ) -> None:
         """批次寫入重置紀錄——語意同 `add_retry_reset`，但**一次 flush**。
 
-        供 #361「測驗變更後要求全班已通過學員重測」使用：該批次的人數由系統決定、
+        供 #361「測驗變更後要求全班重測」使用：該批次的人數由系統決定、
         沒有上限（不像教師勾選的核可批次有 100 筆 schema 上限），逐筆呼叫等於 N 次
         往返。⚠️ 語意與單筆版完全一致，**不要**在此加任何單筆版沒有的判斷。
 
@@ -506,6 +553,7 @@ class EtTrackingRepository:
                     user_id=user_id,
                     quiz_id=quiz_id,
                     attempt_count_at_reset=attempt_count,
+                    reset_kind=RESET_KIND_RETEST,
                     executed_by=operator.user_id,
                     executed_at=now,
                     created_user=operator.user_id,

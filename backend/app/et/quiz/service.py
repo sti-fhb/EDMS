@@ -89,7 +89,7 @@ class EtQuizService:
         self._quizzes = quizzes or EtQuizRepository()
         self._items = items or EtItemRepository()
         self._audit = audit or AuditLogService()
-        # #361：要求已通過學員重測時要寫重置基準與清完成旗標，兩者的表分屬 tracking
+        # #361：要求學員重測時要寫重置基準與清完成旗標，兩者的表分屬 tracking
         # 與 progress。⚠️ 只用它們的 **repository**，不繞道各自的 service——後者帶有
         # 自己的守門（如 `can_reset_retry` 拒絕已通過者），與本路徑的前提相反。
         self._tracking = tracking or EtTrackingRepository()
@@ -159,8 +159,8 @@ class EtQuizService:
             points_total=sum(q.points for q in questions),
             answers_visible=answers_visible,
             # 只有擁有者拿得到人數：非擁有者給 `None`（不是 0），理由同 `is_correct` 的遮蔽。
-            passed_count=(
-                len(await self._quizzes.passed_student_attempt_counts(db, quiz_id, course_id=resolved.course_id))
+            affected_count=(
+                len(await self._quizzes.retest_target_attempt_counts(db, quiz_id, course_id=resolved.course_id))
                 if answers_visible
                 else None
             ),
@@ -346,7 +346,7 @@ class EtQuizService:
         「總分 75、明細只列 4 題加起來 60」這種自己對不起來的成績單。
 
         Args:
-            require_retest: 是否要求已通過的學員重新測驗（#361）。刪題是題目內容變更，
+            require_retest: 是否要求學員重新測驗（#361 / #709）。刪題是題目內容變更，
                 故提供此選項；實際行為見 `_require_retest_if_asked`。
         """
         ref, course_id, _live_quiz_id = await self._staged_question(db, question_id, operator.user_id, operator)
@@ -558,14 +558,12 @@ class EtQuizService:
             questions=rows,
             points_total=sum(r.points for r in rows),
             answers_visible=True,
-            # ⚠️ 已通過人數取的是**活表**的作答紀錄——那是事實，與編輯中的題目無關。
+            # ⚠️ 受影響人數取的是**活表**的作答紀錄——那是事實，與編輯中的題目無關。
             # 新增的測驗（`source_id` 為 None）還沒有人考過，回 0。
-            passed_count=(
+            affected_count=(
                 0
                 if node.source_id is None
-                else len(
-                    await self._quizzes.passed_student_attempt_counts(db, node.source_id, course_id=node.course_id)
-                )
+                else len(await self._quizzes.retest_target_attempt_counts(db, node.source_id, course_id=node.course_id))
             ),
             # 🔴 回讀勾選狀態，否則前端只能預設未勾，而存檔會把它清掉。見 schema 的說明。
             require_retest_pending=bool(node.payload.get(RETEST_PAYLOAD_KEY)),
@@ -671,7 +669,7 @@ class EtQuizService:
     async def require_retest_now(
         self, db: AsyncSession, *, quiz_id: int, course_id: int, operator: OperatorInfo
     ) -> int:
-        """立刻執行「要求已通過學員重測」——供 `stage_apply` 於套用當下呼叫（#631）。
+        """立刻執行「要求重測」——供 `stage_apply` 於套用當下呼叫（#631）。
 
         暫存模式下教師勾選時只記意圖（見 `_stage_require_retest`），真正執行延到按
         「更新」。本方法是那個執行點對外的入口。
@@ -686,9 +684,9 @@ class EtQuizService:
     async def _require_retest_if_asked(
         self, db: AsyncSession, *, quiz_id: int, course_id: int, asked: bool, operator: OperatorInfo
     ) -> int:
-        """教師選「要求重測」時，把該測驗的已通過學員退回未通過（#361）。
+        """教師選「要求重測」時，讓該測驗作答過的學員從新一輪開始（#361；#709 起不限已通過者）。
 
-        對每位已通過的學員做兩件事，**同一交易**：
+        對象見 `retest_target_attempt_counts`。對每位學員做兩件事，**同一交易**：
 
         1. 寫一列 `ET_QUIZ_RETRY_RESET` 基準 → 本輪已用次數歸 0
         2. 清除該測驗項目的 `ET_PROGRESS.IS_COMPLETED` → 完課狀態隨之回退
@@ -700,7 +698,7 @@ class EtQuizService:
 
         兩者**前提相反**。`can_reset_retry` 在 `is_passed=True` 時回 `False`，理由是
         「他已經通過了；再考只有機會把成績弄低」——那條守門保護的是**教師手動**重置
-        一位卡住的學員（US9 AC 6）。本功能的對象**正是已通過的人**，是測驗內容變了
+        一位卡住的學員（US9 AC 6）。本功能的對象**包含已通過的人**，是測驗內容變了
         才要他重考，不是他考壞了要救他。
 
         ⛔ **不要為了重用而放寬 `can_reset_retry`**，也不要把兩條路徑「統一」——那會讓
@@ -716,14 +714,14 @@ class EtQuizService:
         統一寫。⚠️ 本函式回傳受影響人數，由呼叫端在既有的 `_log` 裡一次記錄。
 
         Returns:
-            受影響的學員人數；`asked=False` 或無人通過時為 0。
+            受影響的學員人數；`asked=False` 或無人作答時為 0。
         """
         if not asked:
             return 0
         item_id = await self._quizzes.item_id_of_quiz(db, quiz_id, course_id=course_id)
         if item_id is None:
             return 0  # 孤兒測驗：沒有項目就沒有進度可清，也不會有學員作答
-        affected = await self._quizzes.passed_student_attempt_counts(db, quiz_id, course_id=course_id)
+        affected = await self._quizzes.retest_target_attempt_counts(db, quiz_id, course_id=course_id)
         if not affected:
             return 0
 
@@ -758,13 +756,13 @@ class EtQuizService:
 
     @staticmethod
     def _with_retest(description: str, affected: int) -> str:
-        """把「本次一併要求 N 位已通過學員重測」併進稽核描述。
+        """把「本次一併要求 N 位學員重測」併進稽核描述。
 
         ⚠️ 不併的話，`DP_AUDIT_LOG` 只會看到「更新測驗設定」，看不出這一下讓 N 位
         學員的通過紀錄被清掉——而那是本動作最重的後果。資訊雖然也在
         `ET_QUIZ_RETRY_RESET`，但追溯時不會有人先想到去查那張表。
         """
-        return description if affected == 0 else f"{description}，並要求 {affected} 位已通過學員重測"
+        return description if affected == 0 else f"{description}，並要求 {affected} 位學員重測"
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
         await self._audit.log_action(

@@ -22,6 +22,8 @@ import { studentsApi } from "./studentsService"
 import type { TeacherQuizRow } from "./schemas"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { formatDateTime } from "../../utils/date"
+import { RoundDividerRow } from "../quiz/AttemptHistory"
+import { withRoundDividers } from "../quiz/attemptRounds"
 
 /** 停用「重置」時說明**為什麼**——三種原因對教師的意義完全不同。 */
 function resetDisabledReason(quiz: TeacherQuizRow, readOnly: boolean): string {
@@ -131,24 +133,34 @@ export function AttemptOverviewBlock({
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {quiz.attempts.map((attempt) => (
+                        {/* #709：依輪次分段——與 ET07 歷次作答紀錄同一套規則與文字 */}
+                        {withRoundDividers(quiz.attempts, quiz.resets).map((row) =>
+                          row.type === "divider" ? (
+                            <RoundDividerRow
+                              key={`reset-${row.reset.after_attempt_no}-${row.reset.executed_at}`}
+                              reset={row.reset}
+                            />
+                          ) : (
                           <TableRow
-                            key={attempt.attempt_id}
+                            key={row.attempt.attempt_id}
                             hover
-                            sx={{ cursor: "pointer" }}
-                            onClick={() => onOpenDetail(attempt.attempt_id)}
+                            sx={{ cursor: "pointer", ...(row.previous && { "& td": { color: "text.disabled" } }) }}
+                            onClick={() => onOpenDetail(row.attempt.attempt_id)}
                           >
-                            <TableCell>第 {attempt.attempt_no} 次</TableCell>
-                            <TableCell>{formatDateTime(attempt.submitted_at)}</TableCell>
+                            <TableCell>
+                              第 {row.attempt.attempt_no} 次
+                              {row.previous && <Chip size="small" variant="outlined" label="前一輪" sx={{ ml: 1 }} />}
+                            </TableCell>
+                            <TableCell>{formatDateTime(row.attempt.submitted_at)}</TableCell>
                             {/* 分母用快照的 points_total，**不可寫死 100**——發布後教師仍可改配分 */}
                             <TableCell align="right">
-                              {attempt.score} / {attempt.points_total}
+                              {row.attempt.score} / {row.attempt.points_total}
                             </TableCell>
                             <TableCell>
                               <Chip
                                 size="small"
-                                color={attempt.is_pass ? "success" : "default"}
-                                label={attempt.is_pass ? "及格" : "未及格"}
+                                color={row.attempt.is_pass && !row.previous ? "success" : "default"}
+                                label={row.attempt.is_pass ? "及格" : "未及格"}
                               />
                             </TableCell>
                             <TableCell>
@@ -157,7 +169,8 @@ export function AttemptOverviewBlock({
                               </Typography>
                             </TableCell>
                           </TableRow>
-                        ))}
+                          ),
+                        )}
                       </TableBody>
                     </Table>
                   )}

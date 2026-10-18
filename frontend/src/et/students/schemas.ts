@@ -1,3 +1,4 @@
+import type { RoundBoundary } from "../quiz/attemptRounds"
 import type { AudiencePair } from "../courses/schemas"
 
 /**
@@ -109,6 +110,8 @@ export interface TeacherAttemptRow {
 /** 區塊 2：某學員於某測驗的概況。 */
 export interface TeacherQuizRow {
   quiz_id: number
+  /** 該學員於此測驗的輪次分界，依時間遞增（#709）。 */
+  resets: RoundBoundary[]
   quiz_name: string
   max_retry: number
   /** 本輪已用次數（已扣掉重置基準）。 */

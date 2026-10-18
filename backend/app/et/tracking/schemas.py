@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
-from app.et.attempt.schemas import QuestionResult
+from app.et.attempt.schemas import QuestionResult, RoundBoundary
 
 
 class EnrollmentRow(BaseModel):
@@ -114,6 +114,8 @@ class TeacherQuizRow(BaseModel):
     #: 是否可重置重考次數——**由後端判定**，前端不自行推導（規則會變，兩份遲早分岔）。
     can_reset: bool
     attempts: list[TeacherAttemptRow]
+    #: 該學員於此測驗的輪次分界，依時間遞增（#709）——供作答明細分段顯示。
+    resets: list[RoundBoundary]
 
 
 class TeacherStudentAttempts(BaseModel):
