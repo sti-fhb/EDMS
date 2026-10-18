@@ -398,3 +398,49 @@ async def test_provider_registered(db):
     assert provider is not None
     views = await provider.get_users_assignments(db, ["PV_NONE"])
     assert views["PV_NONE"].roles == frozenset()
+
+
+# --- 檢索標籤組「其他」（#711）---------------------------------------------------
+
+
+async def test_其他組為內建檢索組(db):
+    """#711：第四個檢索組 `OTHER`「其他」，與既有三組地位平等。
+
+    `GROUP_TYPE` 必須是 `RETRIEVAL`——DM01 檢索下拉以 `group_type == RETRIEVAL` 取組
+    （不列舉組代碼），填錯型別的症狀是**該組整個不出現在檢索下拉**，而 DP03 仍看得到它，
+    兩邊不一致且沒有例外。
+    """
+    row = await db.scalar(select(DmTagGroup).where(DmTagGroup.tag_group_code == "OTHER"))
+    assert row is not None, "seed migration 應建立 OTHER 標籤組"
+    assert row.group_type == "RETRIEVAL", "必須是檢索組，否則不會出現在 DM01 檢索下拉"
+    assert row.is_builtin is True, "內建組：依 #507 標籤組不開放管理者自建"
+    assert row.tag_group_name == "其他"
+
+
+async def test_其他組排在既有三個檢索組之後(db):
+    """排序靠代碼字母序（`_GROUP_ORDER_DEFAULT`），`LEGAL < MODULE < NATURE < OTHER`。
+
+    「其他」排在最後是刻意的——它收的是不屬於前三個面向的標籤，排在中間會讓維護者
+    誤以為它和前面幾組是並列的分類面向。本條釘住這個順序，避免日後有人改 `_GROUP_ORDER`
+    時順手把它移位。
+    """
+    kinds = {k.kind: k for k in await _svc.list_controlled_kinds(db)}
+    codes = [g.code for g in kinds["TAG"].groups]
+    retrieval = [c for c in codes if c in ("LEGAL", "MODULE", "NATURE", "OTHER")]
+    assert retrieval == ["LEGAL", "MODULE", "NATURE", "OTHER"], f"檢索組順序不符：{retrieval}"
+
+
+async def test_每個標籤組都有說明文字(db):
+    """漏加 `_TAG_GROUP_DESCRIPTIONS` 時 `description` 會**靜默** fallback 成空字串。
+
+    空字串在 DP 端會退回 kind 層的通用說明，畫面不會壞、也沒有任何錯誤——維護者只是
+    讀到一段說不出「掛了會怎樣」的通稱文字。既有的
+    `test_list_controlled_kinds_covers_three` 只檢查組**名**不為空（那取自 DB），
+    檢查不到這個應用層對照表。
+
+    ⚠️ 本條假設**所有組都是內建的**，依據是 #507 裁示標籤組不開放管理者自建。
+    若日後改為開放自建，本條會紅——那時該重新檢視的是那個前提，不是把斷言放寬。
+    """
+    kinds = {k.kind: k for k in await _svc.list_controlled_kinds(db)}
+    missing = [g.code for g in kinds["TAG"].groups if not g.description]
+    assert not missing, f"這些標籤組缺少說明，請補 _TAG_GROUP_DESCRIPTIONS：{missing}"

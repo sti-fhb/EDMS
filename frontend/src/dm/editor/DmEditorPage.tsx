@@ -31,13 +31,12 @@ import type { AudiencePair, EditorForm, OptionItem } from "./schemas"
 import { editorApi } from "./editorService"
 import { useDocTags, useDraftMeta, useEditorOptions, useReviewers, useUploadLimits } from "./useEditor"
 import { ScreenHeader } from "../../components/ScreenHeader"
+import { dmTagGroupLabel } from "../../constants/dmTagGroups"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { formatDateTaipei } from "../../utils/date"
 import { getFieldErrors } from "../../utils/zodUtils"
 import { useDetail, useVersions } from "../detail/useDetail"
-
-const TAG_GROUP_LABELS: Record<string, string> = { MODULE: "適用模組", NATURE: "文件性質", LEGAL: "法規關聯" }
 
 const VERSION_NO_HINT = "由撰寫者自行輸入（系統不建議版號）"
 
@@ -720,7 +719,7 @@ export function DmEditorPage() {
                 onChange={(_, v: OptionItem[]) => setField("retrieval_ids", v.map((o) => o.code))}
                 getOptionLabel={(o) => o.name}
                 isOptionEqualToValue={(a, b) => a.code === b.code}
-                groupBy={(o) => TAG_GROUP_LABELS[o.group_code ?? ""] ?? "標籤"}
+                groupBy={(o) => dmTagGroupLabel(o.group_code)}
                 renderInput={(params) => <TextField {...params} label="檢索標籤（選填）" />}
               />
             </Stack>

@@ -6,7 +6,7 @@ import { z } from "zod"
 export interface OptionItem {
   code: string // 分類碼 / func_code / 標籤 TAG_ID 字串
   name: string
-  group_code?: string | null // 檢索標籤所屬組（MODULE / NATURE / LEGAL）
+  group_code?: string | null // 檢索標籤所屬組；組代碼 → 顯示名見 constants/dmTagGroups
 }
 
 /** DM08 表單一次載入之受控下拉集合。 */
