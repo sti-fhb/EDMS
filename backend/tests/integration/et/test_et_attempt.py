@@ -37,6 +37,7 @@ from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.quiz.models import EtQuizAttemptD, EtQuizAttemptM
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 
 pytestmark = pytest.mark.integration
 
@@ -113,7 +114,14 @@ async def _course_with_quiz(client, db, teacher: str, *, code: str, extra_chapte
     return result
 
 
-async def _add_question(client, teacher: str, quiz_id: int, *, qtype=QUESTION_SINGLE, points=100, options=None) -> dict:
+async def _add_question(
+    client, db, teacher: str, quiz_id: int, *, course_id: int, qtype=QUESTION_SINGLE, points=100, options=None
+) -> dict:
+    """加一題。
+
+    ⚠️ 走 `editing_live`（#631）：題目在已發布課程會進暫存區，而本檔要驗的是**學員
+    作答**——學員只讀活表，題目留在暫存區的話整檔都測不到東西（見該工具的 docstring）。
+    """
     body = {
         "question_type": qtype,
         "stem": "題幹",
@@ -122,7 +130,8 @@ async def _add_question(client, teacher: str, quiz_id: int, *, qtype=QUESTION_SI
         if options is not None
         else [{"option_text": "A", "is_correct": True}, {"option_text": "B", "is_correct": False}],
     }
-    r = await client.post(f"/api/et/quizzes/{quiz_id}/questions", json=body, headers=_bearer(teacher))
+    async with editing_live(db, course_id):
+        r = await client.post(f"/api/et/quizzes/{quiz_id}/questions", json=body, headers=_bearer(teacher))
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -154,7 +163,7 @@ class TestStartAttempt:
         teacher = await _user(db, "t_att01", ROLE_TEACHER)
         student = await _user(db, "s_att01")
         course = await _course_with_quiz(client, db, teacher, code="32000001")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
 
         r = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(student))
@@ -179,7 +188,7 @@ class TestStartAttempt:
         teacher = await _user(db, "t_att02", ROLE_TEACHER)
         student = await _user(db, "s_att02")
         course = await _course_with_quiz(client, db, teacher, code="32000002")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
 
         r = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(student))
@@ -198,7 +207,7 @@ class TestStartAttempt:
         teacher = await _user(db, "t_att03", ROLE_TEACHER)
         student = await _user(db, "s_att03")
         course = await _course_with_quiz(client, db, teacher, code="32000003")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         first = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)
@@ -229,7 +238,7 @@ class TestStartAttempt:
         teacher = await _user(db, "t_att38", ROLE_TEACHER)
         student = await _user(db, "s_att38")
         course = await _course_with_quiz(client, db, teacher, code="32000038")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         url = f"/api/et/quizzes/{course['quiz_id']}/attempts"
@@ -253,7 +262,7 @@ class TestStartAttempt:
         teacher = await _user(db, "t_att37", ROLE_TEACHER)
         student = await _user(db, "s_att37")
         course = await _course_with_quiz(client, db, teacher, code="32000037")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         url = f"/api/et/quizzes/{course['quiz_id']}/attempts"
@@ -286,7 +295,7 @@ class TestStartAttempt:
             json={"item_type": ITEM_QUIZ, "title": "小考"},
             headers=_bearer(teacher),
         )
-        await _add_question(client, teacher, quiz_item.json()["quiz_id"], points=100)
+        await _add_question(client, db, teacher, quiz_item.json()["quiz_id"], course_id=cid, points=100)
         await db.execute(
             update(EtCourse)
             .where(EtCourse.course_id == cid)
@@ -304,7 +313,7 @@ class TestStartAttempt:
         teacher = await _user(db, "t_att05", ROLE_TEACHER)
         outsider = await _user(db, "s_att05")
         course = await _course_with_quiz(client, db, teacher, code="32000005")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await db.commit()
 
         r = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(outsider))
@@ -323,7 +332,7 @@ class TestGrading:
         teacher = await _user(db, "t_att06", ROLE_TEACHER)
         student = await _user(db, "s_att06")
         course = await _course_with_quiz(client, db, teacher, code="32000006", extra_chapter=True)
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
@@ -355,8 +364,10 @@ class TestGrading:
         course = await _course_with_quiz(client, db, teacher, code="32000007")
         q = await _add_question(
             client,
+            db,
             teacher,
             course["quiz_id"],
+            course_id=course["course_id"],
             qtype=QUESTION_MULTIPLE,
             points=100,
             options=[
@@ -387,7 +398,7 @@ class TestGrading:
         teacher = await _user(db, "t_att08", ROLE_TEACHER)
         student = await _user(db, "s_att08")
         course = await _course_with_quiz(client, db, teacher, code="32000008")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -403,12 +414,14 @@ class TestGrading:
         teacher = await _user(db, "t_att09", ROLE_TEACHER)
         student = await _user(db, "s_att09")
         course = await _course_with_quiz(client, db, teacher, code="32000009")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
-        await client.put(
-            f"/api/et/quizzes/{course['quiz_id']}",
-            json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": 10, "max_retry": 3, "version": 0},
-            headers=_bearer(teacher),
-        )
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
+        # editing_live：測驗設定在已發布課程會進暫存區，而本檔驗的是學員作答（#631）
+        async with editing_live(db, course["course_id"]):
+            await client.put(
+                f"/api/et/quizzes/{course['quiz_id']}",
+                json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": 10, "max_retry": 3, "version": 0},
+                headers=_bearer(teacher),
+            )
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
@@ -434,7 +447,7 @@ class TestGrading:
         teacher = await _user(db, "t_att10", ROLE_TEACHER)
         student = await _user(db, "s_att10")
         course = await _course_with_quiz(client, db, teacher, code="32000010")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -457,7 +470,7 @@ class TestSnapshotIsolation:
         teacher = await _user(db, "t_att11", ROLE_TEACHER)
         student = await _user(db, "s_att11")
         course = await _course_with_quiz(client, db, teacher, code="32000011")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
@@ -487,8 +500,8 @@ class TestSnapshotIsolation:
         teacher = await _user(db, "t_att12", ROLE_TEACHER)
         student = await _user(db, "s_att12")
         course = await _course_with_quiz(client, db, teacher, code="32000012")
-        q1 = await _add_question(client, teacher, course["quiz_id"], points=50)
-        await _add_question(client, teacher, course["quiz_id"], points=50)
+        q1 = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=50)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=50)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -517,12 +530,14 @@ class TestWriteGuards:
         teacher = await _user(db, "t_att16", ROLE_TEACHER)
         student = await _user(db, "s_att16")
         course = await _course_with_quiz(client, db, teacher, code="32000016")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
-        await client.put(
-            f"/api/et/quizzes/{course['quiz_id']}",
-            json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": 10, "max_retry": 3, "version": 0},
-            headers=_bearer(teacher),
-        )
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
+        # editing_live：測驗設定在已發布課程會進暫存區，而本檔驗的是學員作答（#631）
+        async with editing_live(db, course["course_id"]):
+            await client.put(
+                f"/api/et/quizzes/{course['quiz_id']}",
+                json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": 10, "max_retry": 3, "version": 0},
+                headers=_bearer(teacher),
+            )
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -547,7 +562,7 @@ class TestWriteGuards:
         teacher = await _user(db, "t_att17", ROLE_TEACHER)
         student = await _user(db, "s_att17")
         course = await _course_with_quiz(client, db, teacher, code="32000017")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
         await db.commit()
@@ -562,7 +577,7 @@ class TestWriteGuards:
         teacher = await _user(db, "t_att18", ROLE_TEACHER)
         student = await _user(db, "s_att18")
         course = await _course_with_quiz(client, db, teacher, code="32000018")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -601,7 +616,7 @@ class TestWriteGuards:
         """
         teacher = await _user(db, "t_att19", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, teacher, code="32000019")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         h = _bearer(teacher)
         await _enroll(db, teacher, course["course_id"])
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -633,8 +648,10 @@ class TestWriteGuards:
         teacher = await _user(db, "t_att20", ROLE_TEACHER)
         student = await _user(db, "s_att20")
         course = await _course_with_quiz(client, db, teacher, code="32000020")
-        q1 = await _add_question(client, teacher, course["quiz_id"], points=100)
-        await _add_question(client, teacher, course["quiz_id"], points=100)  # 總和 200
+        q1 = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
+        await _add_question(
+            client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100
+        )  # 總和 200
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         correct = next(o["option_id"] for o in q1["options"] if o["is_correct"])
@@ -655,12 +672,14 @@ class TestRetryLimit:
         teacher = await _user(db, "t_att13", ROLE_TEACHER)
         student = await _user(db, "s_att13")
         course = await _course_with_quiz(client, db, teacher, code="32000013")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
-        await client.put(
-            f"/api/et/quizzes/{course['quiz_id']}",
-            json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": None, "max_retry": 0, "version": 0},
-            headers=_bearer(teacher),
-        )
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
+        # editing_live：測驗設定在已發布課程會進暫存區，而本檔驗的是學員作答（#631）
+        async with editing_live(db, course["course_id"]):
+            await client.put(
+                f"/api/et/quizzes/{course['quiz_id']}",
+                json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": None, "max_retry": 0, "version": 0},
+                headers=_bearer(teacher),
+            )
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         # `MAX_RETRY = 0` → **只能作答 1 次**（不是不能作答）
@@ -678,8 +697,8 @@ class TestRetryLimit:
         teacher = await _user(db, "t_att14", ROLE_TEACHER)
         student = await _user(db, "s_att14")
         course = await _course_with_quiz(client, db, teacher, code="32000014")
-        await _add_question(client, teacher, course["quiz_id"], points=50)
-        await _add_question(client, teacher, course["quiz_id"], points=50)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=50)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=50)
         await _enroll(db, student, course["course_id"])
 
         r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=_bearer(student))
@@ -701,8 +720,8 @@ class TestRetryLimit:
         teacher = await _user(db, "t_att15", ROLE_TEACHER)
         student = await _user(db, "s_att15")
         course = await _course_with_quiz(client, db, teacher, code="32000015")
-        big = await _add_question(client, teacher, course["quiz_id"], points=8)
-        await _add_question(client, teacher, course["quiz_id"], points=2)
+        big = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=8)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=2)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         correct = next(o["option_id"] for o in big["options"] if o["is_correct"])
@@ -737,7 +756,7 @@ class TestReviewLastAttempt:
         teacher = await _user(db, "t_att22", ROLE_TEACHER)
         student = await _user(db, "s_att22")
         course = await _course_with_quiz(client, db, teacher, code="32000022")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -770,7 +789,7 @@ class TestReviewLastAttempt:
         teacher = await _user(db, "t_att21", ROLE_TEACHER)
         student = await _user(db, "s_att21")
         course = await _course_with_quiz(client, db, teacher, code="32000021")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         correct = next(o["option_id"] for o in q["options"] if o["is_correct"])
@@ -802,7 +821,7 @@ class TestReviewLastAttempt:
         teacher = await _user(db, "t_att23", ROLE_TEACHER)
         student = await _user(db, "s_att23")
         course = await _course_with_quiz(client, db, teacher, code="32000023")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -821,7 +840,7 @@ class TestReviewLastAttempt:
         teacher = await _user(db, "t_att26", ROLE_TEACHER)
         student = await _user(db, "s_att26")
         course = await _course_with_quiz(client, db, teacher, code="32000026")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -844,7 +863,7 @@ class TestReviewLastAttempt:
         teacher = await _user(db, "t_att27", ROLE_TEACHER)
         student = await _user(db, "s_att27")
         course = await _course_with_quiz(client, db, teacher, code="32000027")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -863,7 +882,7 @@ class TestReviewLastAttempt:
         owner = await _user(db, "s_att24a")
         other = await _user(db, "s_att24b")
         course = await _course_with_quiz(client, db, teacher, code="32000024")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, owner, course["course_id"])
         await _enroll(db, other, course["course_id"])
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(owner))).json()
@@ -879,12 +898,14 @@ class TestReviewLastAttempt:
         teacher = await _user(db, "t_att25", ROLE_TEACHER)
         student = await _user(db, "s_att25")
         course = await _course_with_quiz(client, db, teacher, code="32000025")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
-        await client.put(
-            f"/api/et/quizzes/{course['quiz_id']}",
-            json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": None, "max_retry": 0, "version": 0},
-            headers=_bearer(teacher),
-        )
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
+        # editing_live：測驗設定在已發布課程會進暫存區，而本檔驗的是學員作答（#631）
+        async with editing_live(db, course["course_id"]):
+            await client.put(
+                f"/api/et/quizzes/{course['quiz_id']}",
+                json={"quiz_name": "小考", "pass_score": 80, "time_limit_min": None, "max_retry": 0, "version": 0},
+                headers=_bearer(teacher),
+            )
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         before = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=h)
@@ -906,7 +927,7 @@ class TestAttemptOwnership:
         owner = await _user(db, "s_att15a")
         other = await _user(db, "s_att15b")
         course = await _course_with_quiz(client, db, teacher, code="32000015")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, owner, course["course_id"])
         await _enroll(db, other, course["course_id"])
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(owner))).json()
@@ -925,7 +946,7 @@ class TestAttemptHistory:
         teacher = await _user(db, "t_att28", ROLE_TEACHER)
         student = await _user(db, "s_att28")
         course = await _course_with_quiz(client, db, teacher, code="32000028")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         for _ in range(2):
@@ -946,7 +967,7 @@ class TestAttemptHistory:
         teacher = await _user(db, "t_att29", ROLE_TEACHER)
         student = await _user(db, "s_att29")
         course = await _course_with_quiz(client, db, teacher, code="32000029")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         first = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -969,7 +990,7 @@ class TestAttemptHistory:
         student = await _user(db, "s_att30")
         course = await _course_with_quiz(client, db, teacher, code="32000030")
         for _ in range(3):
-            await _add_question(client, teacher, course["quiz_id"], points=30)
+            await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=30)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         first = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -1013,7 +1034,7 @@ class TestAttemptHistory:
         owner = await _user(db, "s_att31a")
         other = await _user(db, "s_att31b")
         course = await _course_with_quiz(client, db, teacher, code="32000031")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, owner, course["course_id"])
         await _enroll(db, other, course["course_id"])
         started = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(owner))).json()
@@ -1038,7 +1059,7 @@ class TestClosedAndRemovedBoundaries:
         teacher = await _user(db, "t_att32", ROLE_TEACHER)
         student = await _user(db, "s_att32")
         course = await _course_with_quiz(client, db, teacher, code="32000032")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -1060,7 +1081,7 @@ class TestClosedAndRemovedBoundaries:
         teacher = await _user(db, "t_att33", ROLE_TEACHER)
         student = await _user(db, "s_att33")
         course = await _course_with_quiz(client, db, teacher, code="32000033")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -1083,7 +1104,7 @@ class TestClosedAndRemovedBoundaries:
         teacher = await _user(db, "t_att34", ROLE_TEACHER)
         student = await _user(db, "s_att34")
         course = await _course_with_quiz(client, db, teacher, code="32000034")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         await db.execute(update(EtCourse).where(EtCourse.course_id == course["course_id"]).values(status=COURSE_CLOSED))
         await db.commit()
@@ -1102,7 +1123,7 @@ class TestClosedAndRemovedBoundaries:
         teacher = await _user(db, "t_att35", ROLE_TEACHER)
         student = await _user(db, "s_att35")
         course = await _course_with_quiz(client, db, teacher, code="32000035")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         attempt = (await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=h)).json()
@@ -1159,7 +1180,7 @@ class TestSubmitTouchesLastActivity:
         teacher = await _user(db, "t_act01", ROLE_TEACHER)
         student = await _user(db, "s_act01")
         course = await _course_with_quiz(client, db, teacher, code="33000001")
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         # 先把最後活動時間壓到很早，才驗得出「有沒有前進」
@@ -1190,7 +1211,7 @@ class TestSubmitTouchesLastActivity:
         teacher = await _user(db, "t_act02", ROLE_TEACHER)
         student = await _user(db, "s_act02")
         course = await _course_with_quiz(client, db, teacher, code="33000002")
-        q = await _add_question(client, teacher, course["quiz_id"], points=100)
+        q = await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         old = utcnow() - timedelta(days=3)
@@ -1226,7 +1247,7 @@ class TestSubmitTouchesLastActivity:
         teacher = await _user(db, "t_act03", ROLE_TEACHER)
         student = await _user(db, "s_act03")
         course = await _course_with_quiz(client, db, teacher, code="33000003", extra_chapter=True)
-        await _add_question(client, teacher, course["quiz_id"], points=100)
+        await _add_question(client, db, teacher, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
         h = _bearer(student)
         # 學員上次讀到第二章的教材
@@ -1266,7 +1287,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv01", ROLE_TEACHER)
         viewer = await _user(db, "t_prv02", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, owner, code="34000001")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
 
         r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(viewer))
 
@@ -1283,7 +1304,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv03", ROLE_TEACHER)
         viewer = await _user(db, "t_prv04", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, owner, code="34000002")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
 
         r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(viewer))
 
@@ -1299,7 +1320,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv05", ROLE_TEACHER)
         student = await _user(db, "s_prv05")
         course = await _course_with_quiz(client, db, owner, code="34000003")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
 
         r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(student))
@@ -1316,7 +1337,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv06", ROLE_TEACHER)
         outsider = await _user(db, "s_prv06")
         course = await _course_with_quiz(client, db, owner, code="34000004")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
 
         r = await client.get(self._preview_url(course["quiz_id"]), headers=_bearer(outsider))
 
@@ -1331,7 +1352,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv07", ROLE_TEACHER)
         viewer = await _user(db, "t_prv08", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, owner, code="34000005")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
 
         r = await client.post(f"/api/et/quizzes/{course['quiz_id']}/attempts", headers=_bearer(viewer))
 
@@ -1348,7 +1369,7 @@ class TestPreviewReadOnly:
         """
         owner = await _user(db, "t_prv09", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, owner, code="34000006")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
         h = _bearer(owner)
 
         preview = await client.get(self._preview_url(course["quiz_id"]), headers=h)
@@ -1362,7 +1383,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv10", ROLE_TEACHER)
         viewer = await _user(db, "t_prv11", ROLE_TEACHER)
         course = await _course_with_quiz(client, db, owner, code="34000007")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
 
         r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=_bearer(viewer))
 
@@ -1377,7 +1398,7 @@ class TestPreviewReadOnly:
         owner = await _user(db, "t_prv12", ROLE_TEACHER)
         student = await _user(db, "s_prv12")
         course = await _course_with_quiz(client, db, owner, code="34000008")
-        await _add_question(client, owner, course["quiz_id"], points=100)
+        await _add_question(client, db, owner, course["quiz_id"], course_id=course["course_id"], points=100)
         await _enroll(db, student, course["course_id"])
 
         r = await client.get(f"/api/et/quizzes/{course['quiz_id']}/intro", headers=_bearer(student))

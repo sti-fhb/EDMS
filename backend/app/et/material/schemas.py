@@ -9,6 +9,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.et.course.schemas import MAX_INT4
+
 # `MATERIAL_NAME` 為 VARCHAR(100)。
 MATERIAL_NAME_MAX_LEN = 100
 # `DOC_ID` 為 VARCHAR(20)，格式 `DM-{分類碼}-{6位流水號}`。
@@ -48,7 +50,10 @@ class MaterialUpdateReq(BaseModel):
     doc_ids: list[str] = Field(default_factory=list, max_length=MAX_DOC_IDS)
     #: 本教材最終要保留的影片 ID。未列出之既有影片將被軟刪除。
     video_ids: list[int] = Field(default_factory=list, max_length=MAX_VIDEO_IDS)
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4` 不是冗餘：`VERSION` 於 DB 是 `Integer`，超界的值在 asyncpg
+    #: 綁定參數時就拋出，落到通用例外 handler 變成 500——而那是一個「版本不符」的請求，
+    #: 應該回 409（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
 
     @field_validator("doc_ids")
     @classmethod

@@ -51,6 +51,20 @@ ENTITY_SURVEY: Final = "SURVEY"
 ENTITY_SURVEY_QUESTION: Final = "SURVEY_QUESTION"
 ENTITY_SURVEY_OPTION: Final = "SURVEY_OPTION"
 
+#: 「本次編輯要求已通過學員重測」的意圖，寄在 `QUIZ` 暫存節點的 payload 上（#361 × #631）。
+#:
+#: 🔴 **刻意不是 `ET_QUIZ` 的欄位名**——`stage_apply._upsert` 只寫
+#: `payload_fields(spec)` 列出的 key，非欄位的旗標因此會被自動忽略、不會進活表。
+#: ⛔ 不要把它改成與欄位同名，那會讓它被當成內容寫進 `ET_QUIZ`。
+#:
+#: 生命週期與暫存工作階段一致：放棄編輯（`discard`）一起消失、套用完隨 `clear` 清掉。
+#: 2026-10-17 使用者裁示「按更新時才生效」——理由見 `quiz/service._stage_require_retest`。
+RETEST_PAYLOAD_KEY: Final = "__require_retest"
+
+#: 🔴 旗標與欄位名相撞會讓它被當成內容寫進活表。由 `test_重測旗標不得與_ET_QUIZ_的欄位同名`
+#: 在測試裡實際比對 `payload_fields(SPEC_BY_TYPE[ENTITY_QUIZ])`，不靠人記得
+#: （2026-10-18 code review 建議）。
+
 
 @dataclass(frozen=True)
 class StageNode:
@@ -63,6 +77,8 @@ class StageNode:
         parent_stage_id: 父層暫存列；章節與問卷掛在課程下，故為 `None`。
         sort_order: 同層排序。
         payload: 該實體的欄位值。
+        version: **暫存列自己的**樂觀鎖（#631 PR 2）。與活表列的 `VERSION` 是兩回事
+            ——初值 seed 時承接自活表，此後各自遞增。編輯頁回傳給前端的是這一個。
     """
 
     stage_id: int
@@ -71,6 +87,7 @@ class StageNode:
     parent_stage_id: int | None
     sort_order: int
     payload: Mapping[str, Any]
+    version: int = 0
 
 
 def _children(nodes: Sequence[StageNode], parent_stage_id: int, entity_type: str) -> list[StageNode]:

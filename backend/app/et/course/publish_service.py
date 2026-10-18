@@ -59,8 +59,10 @@ from app.et.course.schemas import (
 )
 from app.et.course.stage_apply import apply_stage
 from app.et.course.stage_repository import EtCourseStageRepository
-from app.et.course.stage_rules import to_course_snapshot
+from app.et.course.stage_rules import ENTITY_CHAPTER, to_course_snapshot
+from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
+from app.et.notify.course_update import CourseUpdateMailer
 from app.et.notify.mailer import CourseInviteMailer
 from app.services import AuditLogService, ParamService
 
@@ -86,6 +88,8 @@ class EtPublishService:
         tag_invite: EtTagInviteRepository | None = None,
         invite_mailer: CourseInviteMailer | None = None,
         stage: EtCourseStageRepository | None = None,
+        enrollments: EtEnrollmentRepository | None = None,
+        course_update_mailer: CourseUpdateMailer | None = None,
     ) -> None:
         self._courses = courses or EtCourseRepository()
         self._publish = publish_repo or EtPublishRepository()
@@ -94,6 +98,10 @@ class EtPublishService:
         self._tag_invite = tag_invite or EtTagInviteRepository()
         self._invite_mailer = invite_mailer or CourseInviteMailer()
         self._stage = stage or EtCourseStageRepository()
+        # #303 的通知從 `add_chapter` 移到「更新」當下（#631 PR 2a）——暫存模式下
+        # 在新增當下寄信，信裡那句「課程新增了章節」對學員是假的。
+        self._enrollments = enrollments or EtEnrollmentRepository()
+        self._course_update_mailer = course_update_mailer or CourseUpdateMailer()
 
     async def check(self, db: AsyncSession, course_id: int, *, actor_id: str) -> PublishCheckResult:
         """發布預檢：回傳缺漏清單，**不改變任何狀態**。
@@ -202,9 +210,17 @@ class EtPublishService:
         # （擁有權不可移轉、狀態只擋 DRAFT），但「先鎖再讀」才是這類流程的標準寫法。
         await db.refresh(course)
         nodes = await self._stage.load_tree(db, course_id)
-        if not nodes:
-            # 自上次更新以來沒有任何編輯。**安全的 no-op**——不跑檢核也不寫稽核：
+        if not nodes and not await self._stage.has_stage(db, course_id):
+            # 自上次更新以來**沒有開過編輯工作階段**。安全的 no-op——不跑檢核也不寫稽核：
             # 對一門內容未變的課程回 422 會讓教師以為自己弄壞了什麼。
+            #
+            # 🔴 判準是 `has_stage`（有沒有暫存列）而**不是** `nodes` 為空
+            # （2026-10-18 code review MEDIUM 1）。兩者在「教師把內容全刪光」時分岔：
+            # 那時暫存列都還在、只是全被軟刪，`nodes` 空而 `has_stage` 真。
+            #
+            # 用 `nodes` 判的話，刪光之後按「更新」會變成 no-op：教師既拿不到
+            # `NO_CHAPTER` 的缺漏清單、刪除也永遠不會生效，而畫面上的課程是空的——
+            # 他只剩「取消」一條路，而那會連同刪除一起放棄。
             return ContentUpdateResult(course_id=course_id, applied_count=0)
 
         snapshot = to_course_snapshot(
@@ -227,8 +243,45 @@ class EtPublishService:
                 },
             )
 
+        # 🔴 **新增的章節在套用前先記下來**（#303 的通知延到此刻，#631 PR 2a）。
+        #
+        # 原本 `add_chapter` 當下就寄 `COURSE_UPDATE`，但暫存模式下那封信的內容是假的
+        # ——信裡寫「課程新增了章節」，而學員此刻看不到任何變化。延到這裡才寄，信的
+        # 內容才成立。
+        #
+        # ⚠️ 必須在 `apply_stage` **之前**取：套用後 `source_id` 就被填上了，分不出
+        # 哪些是本次新增的。
+        new_chapters = [
+            str(n.payload.get("chapter_name") or "")
+            for n in nodes
+            if n.entity_type == ENTITY_CHAPTER and n.source_id is None
+        ]
+
         stats = await apply_stage(db, course=course, nodes=nodes, operator=operator)
         await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
+
+        # ⚠️ 完課狀態的「回退為進行中」**不在此寫入任何欄位**（#303 SA Q1 裁示 A，
+        # 原文隨 `add_chapter` 的通知一起搬來）：`ET_ENROLLMENT.COMPLETION_STATUS` 只在
+        # 加入課程時被寫過一次且**從未被讀**——所有讀取端自 #284 起一律以
+        # `derive_completion_status(done, total)` 即時導出。新增項目使總數變大，狀態
+        # 自動從「已完成」回到「進行中」；再寫一份欄位只會多一個會與導出值分歧的事實
+        # 來源，而分歧的表現（清單說已完成、追蹤說進行中）沒有任何地方會察覺。
+        #
+        # ⭐ 這也是為什麼「完課回退延到更新時發生」不需要任何程式碼——它是**算出來的**，
+        # 項目一進活表就自動成立。
+        #
+        # 一章一封，與原本「每次新增各寄一封」相同——只有**時機**改變。
+        # ⛔ 不改成彙整成一封：那要改範本（`new_chapter_name` 是單數佔位），屬另一件事。
+        # 📌 教師一次更新加了多章會收到多封，這是已知且接受的——若日後覺得吵，
+        # 做法是改範本與 params，不是在這裡只寄第一封。
+        #
+        # 寄信失敗不回滾套用：`EtNotifier` 於唯一出口吞掉 `AppError`（見其 docstring）。
+        if new_chapters:
+            user_ids = await self._enrollments.enrolled_user_ids(db, course_id)
+            for name in new_chapters:
+                await self._course_update_mailer.send_course_update(
+                    db, course=course, new_chapter_name=name, user_ids=user_ids
+                )
         # 🔴 稽核描述要帶**刪除統計**，不能只有節點數。
         #
         # 這支端點沒有 request body，而它會經由 cascade 軟刪**學員的進度與作答紀錄**。
@@ -237,6 +290,44 @@ class EtPublishService:
         removed = "".join(f"，刪除 {k} {v} 筆" for k, v in sorted(stats.removed.items()))
         await self._log(db, operator.user_id, course_id, f"更新課程內容（{len(nodes)} 項）{removed}")
         return ContentUpdateResult(course_id=course_id, applied_count=len(nodes))
+
+    async def discard_content(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
+        """放棄尚未更新的編輯——教師按「取消」時走這條（#631，2026-10-16 使用者裁示）。
+
+        ## 為什麼需要它
+
+        暫存模式把「編輯」與「生效」拆成兩個時點之後，編輯工作階段就有兩個出口：按
+        「更新」套用，或放棄。**原本只做了前者**——教師編到一半想整個丟掉、回到學員目前
+        看到的版本，沒有任何入口（2026-10-16 security review 亦獨立指出）。
+
+        ## 活表一行都不會動
+
+        本端點只刪暫存列。學員看到的內容在整個編輯期間從未改變過，所以「放棄」不需要
+        任何回滾——這正是暫存設計換來的性質。
+
+        ## 草稿不適用
+
+        草稿的章節與項目直接寫活表（沒有暫存表可清），按「取消」本來就不還原。回 409
+        而非靜默成功：前端若誤把草稿導到這裡，要看得見。
+
+        ⚠️ 取鎖後才刪：同時按下的「更新」可能正在套用，沒有鎖會把一半的內容送出去。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；409 `ET_COURSE_010` 草稿。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if course.status == COURSE_DRAFT:
+            raise AppError(
+                status_code=409,
+                detail="草稿課程的編輯直接生效，沒有可放棄的暫存內容",
+                error_code="ET_COURSE_010",
+            )
+        await self._stage.lock_course(db, course_id)
+        removed = await self._stage.discard(db, course_id)
+        if removed:
+            # 只記筆數：暫存列的內容從未對學員生效，記下來沒有稽核價值，且會把教師
+            # 編輯中的文字寫進稽核表。
+            await self._log(db, operator.user_id, course_id, f"放棄尚未更新的課程內容編輯（{removed} 項）")
 
     async def close(
         self, db: AsyncSession, course_id: int, req: CloseCourseReq, *, operator: OperatorInfo

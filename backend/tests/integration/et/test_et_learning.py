@@ -31,6 +31,7 @@ from app.et.learning.video_ticket import TICKET_TTL_SECONDS
 from app.et.material.models import EtMaterialVideo
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
+from tests.integration.et._live_edit import editing_live
 
 pytestmark = pytest.mark.integration
 
@@ -123,19 +124,23 @@ async def _second_chapter_material(client, db, teacher: str, course_id: int) -> 
     第二章對「剛加入、第一章還沒完成」的學員而言**是鎖定的**——依序解鎖的章節層規則
     （`spec_us5` AC 9：前一章所有項目完成才解鎖下一章）。本 helper 的存在就是為了造出
     那個狀態；用第一章驗不到任何東西，它對誰都是解鎖的。
-    """
-    ch = await client.post(
-        f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher)
-    )
-    assert ch.status_code == 201, ch.text
-    chapter_id = ch.json()["chapter_id"]
 
-    item = await client.post(
-        f"/api/et/chapters/{chapter_id}/items",
-        json={"item_type": ITEM_MATERIAL, "title": "第二章教材"},
-        headers=_bearer(teacher),
-    )
-    assert item.status_code == 201, item.text
+    ⚠️ 走 `editing_live`（#631）：`_course_with_material` 造的課程沒有標籤與訖止時間，
+    過不了「更新」要重跑的發布檢核。本檔要驗的是解鎖與授權，不是內容的生效流程。
+    """
+    async with editing_live(db, course_id):
+        ch = await client.post(
+            f"{_COURSES}/{course_id}/chapters", json={"chapter_name": "第二章"}, headers=_bearer(teacher)
+        )
+        assert ch.status_code == 201, ch.text
+        chapter_id = ch.json()["chapter_id"]
+
+        item = await client.post(
+            f"/api/et/chapters/{chapter_id}/items",
+            json={"item_type": ITEM_MATERIAL, "title": "第二章教材"},
+            headers=_bearer(teacher),
+        )
+        assert item.status_code == 201, item.text
 
     video = EtMaterialVideo(
         material_id=item.json()["material_id"],

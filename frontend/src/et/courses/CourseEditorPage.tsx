@@ -31,7 +31,7 @@ import dayjs from "dayjs"
 import type { Dayjs } from "dayjs"
 import "dayjs/locale/zh-tw"
 import { useEffect, useRef, useState } from "react"
-import { useLocation, useNavigate, useParams } from "react-router-dom"
+import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { ChapterSection } from "./ChapterSection"
 import { MaterialDialog } from "./MaterialDialog"
@@ -95,8 +95,12 @@ const EMPTY_FORM = {
 /**
  * ET05 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
  *
- * 動作列：取消 / 儲存草稿 / **儲存並發布**（僅草稿狀態顯示——已發布課程的編輯即時
- * 生效、不需重新發布，見 AC 28）。
+ * 動作列：取消 / 儲存（草稿為「儲存草稿」）/ **儲存並發布**（僅草稿）/ **更新**（僅
+ * 已發布或已關閉）。
+ *
+ * ⚠️ 「儲存」與「更新」管的不是同一件事（#631）：前者寫課程基本資料（名稱 / 說明 /
+ * 起訖 / 受訓對象），**不經暫存區、存了就生效**；後者才是把章節與項目等**內容**編輯
+ * 整批生效給學員。原本已發布課程的內容編輯是即時生效的（AC 28），#631 之後改為暫存。
  *
  * **非擁有者為唯讀**（`spec.md` §擁有權判定）：顯示檢視模式提示，所有輸入停用、
  * 操作按鈕不顯示。後端另以 `ET_COURSE_002` 把關，前端隱藏僅為 UX。
@@ -241,6 +245,13 @@ export function EtCourseEditorPage() {
    */
   const [reopenBlockers, setReopenBlockers] = useState<PublishBlocker[]>([])
   /**
+   * 「更新」重跑發布檢核的缺漏（#631）——**第三份**，同樣不與前兩份共用。
+   *
+   * 理由與 `reopenBlockers` 相同：殘留的缺漏會在另一個流程的視窗裡顯示，而那與這次的
+   * 動作無關。三個流程會同時存在於同一門課的生命週期裡（發布 → 更新 → 關閉 → 再開課）。
+   */
+  const [applyBlockers, setApplyBlockers] = useState<PublishBlocker[]>([])
+  /**
    * 標示模式（#558）：缺漏視窗關閉後，缺漏處以紅框標示，**補好即消失**。
    *
    * 值表示是哪一條流程的缺漏——兩者要框的欄位不同（再開課的起訖時間規則與發布**相反**，
@@ -358,6 +369,25 @@ export function EtCourseEditorPage() {
       }))
     : (course?.chapters ?? [])
   const status = course?.status ?? "DRAFT"
+  /**
+   * 有編輯尚未按下「更新」（#631）——後端算的，前端不自己推導。
+   *
+   * ⚠️ 不能用「畫面上的內容跟載入時不同」來推：已發布課程的內容讀取**本來就回暫存版**
+   * （教師看到的是自己編輯中的樣子），兩者恆相等。唯一知道暫存區有沒有東西的是後端。
+   */
+  const hasPendingChanges = course?.has_pending_changes ?? false
+  /**
+   * 是否要把底部那一列講成「待辦」（警示色 + 待更新文案）。
+   *
+   * 再開課模式下**不提**：那一列此時講的是再開課，混進第二件待辦只會讓教師不知道該先
+   * 按哪一顆。暫存區不會因此消失，再開課完成後這句話就回來了。
+   *
+   * ⚠️ 草稿不必在此排除——`has_pending_changes` 後端對草稿恆回 `false`（草稿的編輯直接
+   * 寫活表，沒有「尚未更新」這種狀態）。
+   */
+  const pendingHint = hasPendingChanges && !reopening
+  /** 我方主動導走（放棄變更後）時略過離開攔截，避免同一件事問兩次。 */
+  const bypassGuard = useRef(false)
 
 
   /** 版本衝突以 Dialog 呈現而非 snackbar——使用者必須確實知道自己的編輯沒存進去。 */
@@ -603,6 +633,133 @@ export function EtCourseEditorPage() {
     setPublishOpen(true)
     checkMut.mutate(formBlockers)
   }
+
+  // ── 「更新」：把暫存編輯整批生效給學員（#631）──────────────────────────────
+
+  /**
+   * 422 `ET_PUBLISH_001` 於 `mutationFn` 內就地轉成「顯示缺漏」，**不往外拋**——
+   * 理由與 `reopenMut` 相同（缺漏不是需要 toast 的失敗，視窗裡已逐條列出）。
+   *
+   * ⚠️ 其餘 422 **要往外拋**：`ET_SURVEY_003`（問卷已有填答、題目凍結，SA Q2 ② 裁示）
+   * 與 `ET_COURSE_010`（草稿不得按更新）都是缺漏清單裝不下的狀況，走 `handleError`
+   * 以訊息呈現。把它們一起吞掉會變成「按了更新、什麼都沒發生」。
+   */
+  const applyMut = useMutation({
+    mutationFn: async () => {
+      try {
+        return await coursesApi.applyContent(courseId as number)
+      } catch (err) {
+        const { errorCode, payload } = toApiError(err)
+        const returned = (payload as { blockers?: PublishBlocker[] } | undefined)?.blockers
+        if (errorCode === "ET_PUBLISH_001" && returned) {
+          seedLiveCheck(returned)
+          setApplyBlockers(returned)
+          return undefined
+        }
+        throw err
+      }
+    },
+    onSuccess: (result) => {
+      // `undefined` = 檢核未通過，缺漏已以對話框顯示
+      if (result === undefined) return
+      // ⚠️ `applied_count === 0` 是後端的安全 no-op（暫存區是空的）。按鈕平時由
+      // `has_pending_changes` 擋著按不到，但那個旗標會過期——另一個分頁剛按過更新時
+      // 就會走到這裡。此時報「已更新」是**說了一件沒發生的事**。
+      message.success(result.applied_count > 0 ? "課程內容已更新，學員已可看到" : "目前沒有需要更新的變更")
+      setHighlight(null)
+      invalidate()
+    },
+    onError: handleError,
+  })
+
+  /**
+   * 「更新」前的二次確認——這一下會同時影響**所有在籍學員**。
+   *
+   * 內容講的是「刪除」的代價而非「新增」：新增只是多出東西，而本次編輯中被刪掉的章節 /
+   * 項目，其學員進度與測驗作答會**一併移除**（`stage_apply._delete_removed` 委派既有
+   * cascade），且完課狀態會隨之重算。教師按下去之前就該知道自己要抹掉什麼。
+   *
+   * ⚠️ 錯誤在 `onOk` 內不另外接——`applyMut` 自己有 `onError`，而 `mutate`（非
+   * `mutateAsync`）不會產生未處理的 rejection，故不會卡住 `NotificationContext` 的視窗。
+   */
+  const requestApply = () => {
+    confirm({
+      title: "更新課程內容",
+      content:
+        "更新後，自上次更新以來的所有編輯會同時對學員生效。" +
+        "本次若刪除了章節或項目，學員在其中的學習進度與測驗作答會一併移除，完課狀態隨之重算。" +
+        // 重測延到此刻才執行（2026-10-17 裁示），而教師是在幾分鐘到幾天前的另一個對話框
+        // 裡決定的——不在這裡提一句，寄信與退回完課就成了他沒預期的副作用。
+        "本次若曾選擇「要求重測」，那些已通過的學員會在此刻被退回未完成並各收到一封通知信。" +
+        "系統會重跑一次發布檢核，未通過時不會更新任何內容。",
+      okText: "確認更新",
+      onOk: () => applyMut.mutate(),
+    })
+  }
+
+  /**
+   * 「取消」：放棄尚未更新的編輯並離開（#631，2026-10-16 使用者裁示）。
+   *
+   * 🔴 暫存模式讓編輯工作階段有**兩個出口**——按「更新」套用，或按「取消」放棄。
+   * 原本只做了前者，教師編到一半想整個丟掉沒有任何入口。
+   *
+   * ⚠️ **草稿不適用**：草稿的章節與項目直接寫活表（沒有暫存可清），按「取消」本來
+   * 就只是離開、不還原。那是既有行為，本次不改（issue 原文：草稿維持現行、不需版本化）。
+   *
+   * ⚠️ 放棄之後要**略過離開攔截**：此刻 `course.has_pending_changes` 的快取還是舊值，
+   * 不略過會在導走的當下又問一次「有尚未更新的變更」。比照 DM 編輯頁的 `bypassGuard`。
+   */
+  const discardMut = useMutation({
+    mutationFn: () => coursesApi.discardContent(courseId as number),
+    onSuccess: () => {
+      bypassGuard.current = true
+      invalidate()
+      navigate("/et/courses")
+    },
+    onError: handleError,
+  })
+
+  const requestCancel = () => {
+    if (!hasPendingChanges) {
+      navigate("/et/courses")
+      return
+    }
+    confirm({
+      title: "放棄尚未更新的變更",
+      content:
+        "取消後，自上次更新以來的所有編輯會全部放棄，課程回到學員目前看到的版本。此動作無法復原。" +
+        "若只是想先離開、之後再繼續編輯，請直接點選其他頁面——那些編輯會保留著。",
+      okText: "放棄變更並離開",
+      cancelText: "繼續編輯",
+      onOk: () => discardMut.mutate(),
+    })
+  }
+
+  /**
+   * 離開前攔截（#631）——比照 DM 編輯頁的 `useBlocker`。
+   *
+   * 🔴 擋的**不是**「資料會遺失」：暫存區存在資料庫裡，離開再回來編輯還在。擋的是
+   * **誤以為已經生效**——已發布課程的內容讀取回的是暫存版，教師在畫面上看得到自己剛加
+   * 的章節，與「學員也看得到」在視覺上毫無分別。沒有這道攔截，他會帶著錯誤的認知離開，
+   * 而下一次知道真相的時機是學員反映「課程沒有更新」。
+   *
+   * ⚠️ 文案因此寫「學員仍看不到」，⛔ 不要寫成「變更將不會保留」——那是假的。
+   */
+  const leaveBlocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hasPendingChanges && !bypassGuard.current && currentLocation.pathname !== nextLocation.pathname,
+  )
+  useEffect(() => {
+    if (leaveBlocker.state !== "blocked") return
+    confirm({
+      title: "有尚未更新的變更",
+      content: "這些編輯已保留，離開不會遺失；但在按下「更新」之前，學員仍看不到它們。確定要離開嗎？",
+      okText: "離開",
+      cancelText: "留下來更新",
+      onOk: () => leaveBlocker.proceed(),
+      onCancel: () => leaveBlocker.reset(),
+    })
+  }, [leaveBlocker, confirm])
 
   // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
 
@@ -1390,6 +1547,34 @@ export function EtCourseEditorPage() {
       )}
 
       {/*
+        「更新」檢核未通過（#631）。沿用再開課那個「請求已失敗」的形狀——按下更新時
+        請求**已經被擋下**，這是事後告知，不是再問一次要不要送出。
+
+        ⚠️ 傳 `applyBlockers`，**不是** `blockers` / `reopenBlockers`（見其宣告）。
+        `context="publish"` 是因為更新跑的就是發布那十項檢核，處置方式與發布相同。
+
+        🔴 **暫存區不會因為檢核未通過而清掉**：教師補好缺漏後再按一次「更新」即可，
+        這次的編輯不必重做。
+      */}
+      {applyBlockers.length > 0 && (
+        <BlockerDialog
+          // ⚠️ 標題**不可與二次確認視窗同名**（那個叫「更新課程內容」）：兩者都是
+          // `role="dialog"`，同名會讓「確認視窗沒有變成缺漏視窗」這類斷言查到錯的那個，
+          // 且確認視窗的關閉動畫期間仍在 DOM 裡——測試會時綠時紅。
+          title="更新未生效"
+          context="publish"
+          message="課程目前不符發布條件，本次更新未生效（編輯仍保留在暫存區）。請先補齊以下項目，再按一次「更新」。"
+          blockers={applyBlockers}
+          names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
+          onClose={() => {
+            // 關閉即進入標示模式：缺漏處標紅框，教師就地補（#558）
+            setApplyBlockers([])
+            setHighlight("publish")
+          }}
+        />
+      )}
+
+      {/*
         邀請碼（#247 補 #204 之缺口）。在此之前它只在發布當下的 `PublishDialog` 出現
         一次，而發布後**不提供重新產生**——教師關掉視窗就永久拿不回來，那門課再也發不
         出邀請碼。後端只對 owner 回傳本欄位（非擁有者恆為 null），故此處不必再判 readOnly。
@@ -1703,6 +1888,9 @@ export function EtCourseEditorPage() {
         <RequireRetestDialog
           open
           passedCount={quiz?.passed_count ?? 0}
+          // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
+          staged={status !== "DRAFT"}
+          retestPending={quiz?.require_retest_pending ?? false}
           onCancel={() => setPendingRetestAction(null)}
           onDecide={(requireRetest) => {
             const run = pendingRetestAction
@@ -1840,12 +2028,16 @@ export function EtCourseEditorPage() {
           sx={{ position: "sticky", bottom: 0, mt: 2, p: 1.5, zIndex: 1 }}
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography variant="caption" color="text.secondary">
+            {/* 有尚未更新的變更時改用警示色（#631）：這句不再只是說明，而是一個待辦。
+                它與「更新」鈕同處常駐於頁面底部的這一列，教師捲到哪裡都看得到。 */}
+            <Typography variant="caption" color={pendingHint ? "warning.main" : "text.secondary"}>
               {reopening
                 ? "再開課會重跑發布檢核；關閉期間若移除了必要內容，有缺漏時會以視窗列出，關閉後於缺漏處以紅框標示。尚未變更任何資料。"
                 : status === "DRAFT"
                   ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
-                  : "已發布課程的編輯即時生效，不需重新發布。"}
+                  : pendingHint
+                    ? "有尚未更新的變更：這些編輯目前只有你看得到，按「更新」後學員才會看到。"
+                    : "已發布課程的內容編輯會先暫存，按「更新」才整批對學員生效。"}
             </Typography>
             <Stack direction="row" spacing={1}>
               {/* 再開課模式換成專屬的兩顆（#428）。
@@ -1885,15 +2077,39 @@ export function EtCourseEditorPage() {
                       刪除草稿
                     </Button>
                   )}
-                  <Button size="small" onClick={() => navigate("/et/courses")}>
+                  {/* 取消＝放棄尚未更新的編輯並離開（#631）。沒有暫存變更時就只是離開，
+                      不跳確認——包括全部的草稿課程（它沒有暫存可放棄）。 */}
+                  <Button size="small" disabled={discardMut.isPending} onClick={requestCancel}>
                     取消
                   </Button>
                   <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
                     {status === "DRAFT" ? "儲存草稿" : "儲存"}
                   </Button>
                   {/*
-                    僅草稿可發布。已發布課程的後續編輯**即時生效、不需重新發布**（AC 28），
-                    故發布不是常駐動作——已發布時直接不顯示，而非顯示一顆按了會回
+                    「更新」（#631）——已發布 / 已關閉課程才有，它是「發布」在課程存活期
+                    的對應動作：把暫存的內容編輯整批生效給學員。
+
+                    ⚠️ 與左邊那顆「儲存」**管的不是同一件事**，兩顆並存不是重複：
+                    「儲存」寫的是課程基本資料（名稱 / 說明 / 起訖 / 受訓對象），那些**不經
+                    暫存區、存了就生效**；「更新」生效的是章節與項目等內容編輯。
+
+                    沒有暫存變更時**停用而非隱藏**：按鈕消失會讓教師以為這門課不能更新。
+                    停用的理由由左邊那句說明承擔（「按『更新』才整批對學員生效」），
+                    不另外包 `Tooltip`——本列在已發布 / 已關閉狀態下原本一個都沒有。
+                  */}
+                  {status !== "DRAFT" && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={!hasPendingChanges || applyMut.isPending}
+                      onClick={requestApply}
+                    >
+                      更新
+                    </Button>
+                  )}
+                  {/*
+                    僅草稿可發布——已發布之後要讓學員看到新內容走的是上面那顆「更新」，
+                    故發布不是常駐動作：已發布時直接不顯示，而非顯示一顆按了會回
                     `ET_PUBLISH_002` 的按鈕。
                   */}
                   {status === "DRAFT" && (

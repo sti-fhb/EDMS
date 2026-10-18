@@ -31,21 +31,15 @@
 一個項目恆對一份教材或一份測驗，所以「教材該刪但項目留著」不存在。
 `test_套用不單獨刪除教材與測驗` 釘住這個前提。
 
-## ⚠️ 兩項已知限制（2026-10-14 code review 提出，刻意未於本 PR 修）
+## 問卷凍結的 TOCTOU 由 `_ensure_survey_not_frozen` 擋下
 
-### 1. 問卷已有填答時，套用仍會改寫 / 刪除題目
+`survey/service._require_editable` 問的是「**現在**有沒有填答」，而暫存模式把「檢查」與
+「寫活表」拉開成兩個時點。SA 裁示 Q2 ②「**仍凍結**」：套用前重問一次。細節與範圍見該
+函式 docstring——⛔ 它與 `survey/rules.ensure_editable` 是同一條界線，兩邊要同時改。
 
-`EtSurveyRepository.soft_delete_survey` / `soft_delete_question` 的前提是呼叫端已跑過
-`ensure_editable`（有填答即不可改題），而本模組**繞過了那道守門**。情境：教師在暫存期間
-改了問卷題目，學員在同一期間送出填答，按下「更新」時填答會指向被改寫或已軟刪的題目。
+## ⚠️ 一項已知限制（2026-10-14 code review 提出，刻意未修）
 
-🔴 **這不是疏漏，是 #631 的 SA Q2 ② 尚未裁示**——「版本化之後『有填答』指的是對哪一版？
-學員對已生效版本填了答，教師能不能在編輯中版本改題？」兩個選項（仍凍結 / 編輯中可改、
-更新時才凍結）對報表的影響不同，不該由 SD 自決。裁示後於 PR 2 落位。
-
-⛔ 在那之前**不要**自己補一道守門：補了等於替 SA 做了決定，而且兩個選項的守門長得不一樣。
-
-### 2. 項目的教材 / 測驗被換成新的一份時，舊的那份會變成孤兒
+### 項目的教材 / 測驗被換成新的一份時，舊的那份會變成孤兒
 
 `_DELETED_WITH_ITEM` 讓教材與測驗不單獨刪——前提是「項目型別不可變、一項目恆對一份
 教材」，而那個前提由**編輯端**維持，本模組不保證。若有人造出「項目留著、但其教材子節點
@@ -67,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.common.html_sanitize import sanitize_material_html
 from app.et.course.models import EtCourse
 from app.et.course.repository import EtChapterRepository, EtItemRepository
 from app.et.course.stage_entities import APPLY_ORDER, LINK_CHILD_FK, LINK_PARENT_FK, SPEC_BY_TYPE, payload_fields
@@ -83,6 +78,7 @@ from app.et.course.stage_rules import (
     ENTITY_SURVEY,
     ENTITY_SURVEY_OPTION,
     ENTITY_SURVEY_QUESTION,
+    RETEST_PAYLOAD_KEY,
     StageNode,
 )
 from app.et.material.repository import EtMaterialRepository
@@ -147,7 +143,7 @@ async def apply_stage(
 
     stats = await _delete_removed(db, live=live, staged_sources=staged_sources, operator=operator)
     await _park_sort_orders(db, nodes=nodes, operator=operator)
-    await _upsert(db, course=course, nodes=nodes, operator=operator)
+    live_id_by_stage = await _upsert(db, course=course, nodes=nodes, operator=operator)
 
     # 🔴 **完課戳記只在整批套用完成後蓋一次**（`_DELETERS` 一律帶 `stamp=False`）。
     #
@@ -155,7 +151,56 @@ async def apply_stage(
     # ⇒ 階段 1 結束時是 2/2 被蓋章，階段 3 之後其實是 2/3、沒完課。而 `COMPLETED_AT`
     # 只寫一次、回退不清除，那個時間戳會一直停在一個他沒完課的時點。
     await EtProgressRepository().stamp_completed_at(db, course_id=course.course_id, operator=operator)
+    await _require_retest_for_flagged(
+        db, course=course, nodes=nodes, live_id_by_stage=live_id_by_stage, operator=operator
+    )
     return stats
+
+
+async def _require_retest_for_flagged(
+    db: AsyncSession, *, course: EtCourse, nodes: Sequence[StageNode], live_id_by_stage: dict[int, int], operator
+) -> None:
+    """把編輯期間勾選的「要求已通過學員重測」在**此刻**執行（#361 × #631）。
+
+    教師在編輯中勾選時只是**記下意圖**（`RETEST_PAYLOAD_KEY` 寄在 QUIZ 暫存節點上），
+    真正把學員退回未通過延到這裡——2026-10-17 使用者裁示。
+
+    🔴 理由：在編輯當下執行的話，學員被退回的那一刻**新題目還沒生效**，他去重考考的是
+    剛剛才通過的同一份舊題。副作用必須跟著「學員看得到了」一起發生，與 #303 的通知改到
+    「更新」當下寄是同一個道理。
+
+    ⚠️ 排在 `_upsert` **之後**：重測信裡帶測驗名稱，而那個名稱可能正是本次改的。
+    ⚠️ 也排在 `stamp_completed_at` 之後：重測會清掉完成旗標，順序顛倒會讓剛蓋的章又被清。
+    ⚠️ 新增的測驗（`source_id` 為 None）此刻才有活表 id，故一律由 `live_id_by_stage` 取。
+
+    ## ⚠️ 已知限制：扇出沒有上界，且整批都在同一個交易裡
+
+    （2026-10-18 security review H-2，刻意不在本 PR 修。）
+
+    一次「更新」可能同時觸發 M 個測驗的重測，每個再對 N 位已通過的學員寫入重置基準、
+    清完成旗標、排一封信 ⇒ **N × M 列寫入**全部落在按下「更新」的那一個請求裡。
+
+    今天的母體擋得住：教師改測驗要逐支勾選，而一門課的在籍學員是以班為單位。但這裡
+    沒有任何上界，所以它是「**目前的資料量讓它看不出來**」，不是「設計上不會發生」。
+
+    ⛔ 若要處理，正解是把寄信那一段移出本交易（排程撿 `PENDING`），**不是**在這裡切批次
+    ——切批次會讓一半的學員被退回、另一半沒有，而「更新」對教師是一個原子動作。
+    """
+    flagged = [n for n in nodes if n.entity_type == ENTITY_QUIZ and n.payload.get(RETEST_PAYLOAD_KEY)]
+    if not flagged:
+        return
+    # 延後匯入：`quiz.service` 會回頭匯入 `course.stage_writer`，放在模組層雖然目前
+    # 不成環，但這條相依是「套用時才需要」的，留在函式內比較不會被下一個人動壞。
+    from app.et.quiz.service import EtQuizService
+
+    service = EtQuizService()
+    for node in flagged:
+        quiz_id = live_id_by_stage.get(node.stage_id)
+        if quiz_id is None:  # pragma: no cover - `_upsert` 必定已填
+            continue
+        affected = await service.require_retest_now(db, quiz_id=quiz_id, course_id=course.course_id, operator=operator)
+        if affected:
+            logger.info("ET 更新套用：要求重測 quiz_id=%s 影響 %s 位學員", quiz_id, affected)
 
 
 def _validate_tree(nodes: Sequence[StageNode], *, live: Sequence[LiveNode]) -> None:
@@ -211,20 +256,33 @@ def _validate_tree(nodes: Sequence[StageNode], *, live: Sequence[LiveNode]) -> N
         _reject(f"暫存列指向不屬於本課程的活表資料（共 {len(foreign)} 筆）：{detail}")
 
 
+def _structure_sort_key(node: Any) -> tuple:
+    """`(sort_order, 有沒有活表 id, 活表 id)`——⚠️ 不可直接寫 `(n[1], n[0])`。
+
+    每一項的第 0 格是 `SOURCE_ID`，而**本次編輯新增的節點那一格是 `None`**。兩筆
+    `sort_order` 相同時 `sorted` 才會去比第二格，屆時 `None < int` 直接 `TypeError`
+    ⇒ 整支「更新」回 500（2026-10-18 security review L-7）。
+
+    `sort_order` 本該同層唯一，但那由編輯端維持、本模組不保證；而這裡是**凍結守門**，
+    它崩潰的後果是教師看到 500 而非 422，既修不了也看不懂。
+    """
+    return (node[1], node[0] is not None, node[0] or 0)
+
+
 def _survey_structure(nodes: Sequence[Any], *, survey_key: Any, child_of: Any) -> tuple:
     """問卷的**題目與選項結構**，供兩側比對。
 
     刻意**不含**問卷名稱與 `IS_ACTIVE`——凍結不涵蓋它們（`ET_SURVEY_003` 的說明：
     AC 21 明訂凍結後教師僅可停用問卷，連停用都擋掉會使凍結後無路可走）。
     """
-    questions = sorted(child_of(nodes, survey_key, ENTITY_SURVEY_QUESTION), key=lambda n: (n[1], n[0]))
+    questions = sorted(child_of(nodes, survey_key, ENTITY_SURVEY_QUESTION), key=_structure_sort_key)
     return tuple(
         (
             qid,
             sort_order,
             stem,
             qtype,
-            tuple(sorted(child_of(nodes, qkey, ENTITY_SURVEY_OPTION), key=lambda n: (n[1], n[0]))),
+            tuple(sorted(child_of(nodes, qkey, ENTITY_SURVEY_OPTION), key=_structure_sort_key)),
         )
         for qid, sort_order, stem, qtype, qkey in questions
     )
@@ -299,14 +357,51 @@ async def _ensure_survey_not_frozen(db: AsyncSession, *, nodes: Sequence[StageNo
         )
 
 
+#: payload 裡需要在寫入活表前重跑消毒的欄位 → 消毒函式。
+#:
+#: 🔴 **這是一道「不依賴下一個人記得」的防線**（2026-10-16 security review H-2）。
+#:
+#: 全專案唯一的 HTML 消毒長在 `material/service.update`（`sanitize_material_html`），而
+#: `_upsert` 把 payload **直接餵進 model**、完全不經過任何 service 層。今天不可利用：
+#: `description_html` 只有兩個入口，一是 `seed_from_live`（抄的是已消毒的活表值），二是
+#: `add_item` 的暫存分支寫死 `None`。
+#:
+#: ⚠️ 但只要有人照 `add_item` 的形狀寫出 `payload={"description_html": req.description_html}`，
+#: 未消毒的 HTML 就會一路進 `ET_MATERIAL.DESCRIPTION_HTML`，再由 `ContentPane.tsx` 以
+#: `dangerouslySetInnerHTML` 渲染給**每一位在籍學員**——而那行程式碼會長得跟現有的
+#: 一模一樣，review 時看不出差別。
+#:
+#: ⛔ 不要因為「呼叫端已經消毒過了」就拿掉：消毒是冪等的，重跑一次的成本遠低於漏掉一次。
+_RESANITIZE: Final[dict[str, Any]] = {"description_html": sanitize_material_html}
+
+
+def _resanitize(values: dict[str, Any]) -> None:
+    """對 payload 中需要消毒的欄位重跑一次消毒（就地改）。見 `_RESANITIZE`。"""
+    for field, sanitize in _RESANITIZE.items():
+        if values.get(field) is not None:
+            values[field] = sanitize(values[field])
+
+
 def _reject(detail: str) -> None:
     """結構不合法一律 500 `ET_STAGE_001`。
 
-    是 500 不是 4xx：教師沒有做錯任何事，是暫存區的結構壞了。訊息只帶內部代理鍵
-    （`STAGE_ID` / `SOURCE_ID`），`app_error_handler` 不會把 detail 回給前端，
-    僅留在去識別化後的後端 log。
+    是 500 不是 4xx：教師沒有做錯任何事，是暫存區的結構壞了。
+
+    🔴 **診斷細節只進 log，回應一律固定文案**。本函式原本的 docstring 寫著
+    「`app_error_handler` 不會把 detail 回給前端」——**那是假的**（2026-10-16 security
+    review M-2 查出）：`main.py` 的 `app_error_handler` 對**所有**狀態碼（含 500）都把
+    `exc.detail` 原樣放進回應的 `error_message`。而這幾處的 detail 帶著 `SOURCE_ID`
+    ——那正是使用者送進來的 path 參數，原樣回吐違反 `sti-error-codes`。
+
+    ⚠️ 真正危險的不是這次洩漏的那幾個代理鍵，是**那句假的 docstring**：它會讓下一個人
+    放心把更敏感的東西寫進 detail。
     """
-    raise AppError(status_code=500, detail=detail, error_code="ET_STAGE_001")
+    logger.error("ET 暫存樹結構不合法：%s", detail)
+    raise AppError(
+        status_code=500,
+        detail="課程內容暫存資料異常，請重新載入後再試",
+        error_code="ET_STAGE_001",
+    )
 
 
 async def _delete_removed(
@@ -411,7 +506,7 @@ async def _upsert(
     course: EtCourse,
     nodes: Sequence[StageNode],
     operator: OperatorInfo,
-) -> None:
+) -> dict[int, int]:
     """依 `APPLY_ORDER` 逐型別寫入；回填 `STAGE_ID → 活表 id` 供子層與反向連結使用。"""
     now = utcnow()
     live_id_by_stage: dict[int, int] = {}
@@ -432,6 +527,7 @@ async def _upsert(
             # 新增的列缺 key 時維持 model 預設；NOT NULL 且無預設者會當場拋錯，那是
             # 該響的警報——編輯端不可能產生那種列。
             values: dict[str, Any] = {f: node.payload[f] for f in payload_fields(spec) if f in node.payload}
+            _resanitize(values)
             if hasattr(spec.model, "sort_order"):
                 values["sort_order"] = node.sort_order
             if spec.link == LINK_CHILD_FK:
@@ -457,6 +553,10 @@ async def _upsert(
             live_id_by_stage[node.stage_id] = live_id
             if spec.link == LINK_PARENT_FK and node.parent_stage_id is not None:
                 reverse_child[(node.parent_stage_id, spec.entity_type)] = live_id
+
+    # 回傳對照表：套用後才知道新增節點的活表 id，而 `_require_retest_for_flagged`
+    # 需要它才找得到「本次新增的測驗」對應到哪一列。
+    return live_id_by_stage
 
 
 async def _write(
@@ -490,12 +590,18 @@ async def _write(
             #
             # 409 而非 500：若真的發生，那是**競態**、教師沒做錯事，`ET_LOCK_001` 的既有
             # 語意（「資料已被其他使用者修改，請重新載入後再試」）正好就是要他做的事。
+            #
+            # ⚠️ detail 是**固定文案**：它會原樣成為回應的 `error_message`，而前端
+            # `applyMut.onError` 會直接 toast 給教師看。代理鍵只進 log。
+            logger.error(
+                "ET 套用：暫存列指向的活表資料已不存在或已刪除 entity_type=%s source_id=%s rowcount=%s",
+                node.entity_type,
+                node.source_id,
+                result.rowcount,
+            )
             raise AppError(
                 status_code=409,
-                detail=(
-                    f"暫存列指向的活表資料已不存在或已刪除："
-                    f"{node.entity_type} SOURCE_ID={node.source_id}（命中 {result.rowcount} 列）"
-                ),
+                detail="內容已被其他裝置變更，請重新載入後再試",
                 error_code="ET_LOCK_001",
             )
         return node.source_id

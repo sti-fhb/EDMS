@@ -5,11 +5,17 @@ import { describe, expect, it, vi } from "vitest"
 import { RequireRetestDialog } from "./RequireRetestDialog"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
-function setup(passedCount = 3) {
+function setup(passedCount = 3, extra: { staged?: boolean; retestPending?: boolean } = {}) {
   const onCancel = vi.fn()
   const onDecide = vi.fn()
   renderWithProviders(
-    <RequireRetestDialog open passedCount={passedCount} onCancel={onCancel} onDecide={onDecide} />,
+    <RequireRetestDialog
+      open
+      passedCount={passedCount}
+      onCancel={onCancel}
+      onDecide={onDecide}
+      {...extra}
+    />,
   )
   return { onCancel, onDecide }
 }
@@ -63,5 +69,34 @@ describe("RequireRetestDialog", () => {
     // US6 AC 12 / US9 AC 6：教師最可能誤解的就是這一點，要寫在他做決定的當下。
     setup()
     expect(screen.getByText(/不會刪除任何作答紀錄/)).toBeInTheDocument()
+  })
+
+  describe("已發布課程（編輯進暫存區，#631）", () => {
+    it("寫明重測要等按「更新」才發生", () => {
+      // 🔴 2026-10-17 裁示把重測延到「更新」當下。文案不跟著改的話，教師在這裡按下
+      // 「儲存並要求重測」會以為信已經寄出去了。
+      setup(3, { staged: true })
+      expect(screen.getByRole("dialog")).toHaveTextContent(/不會立刻執行/)
+      expect(screen.getByRole("dialog")).toHaveTextContent(/按下「更新」/)
+    })
+
+    it("草稿不提生效時點——那裡本來就是即時的", () => {
+      // 🔴 反向探針。少了它，把那段文案寫成無條件顯示也會讓上一條通過，
+      // 而草稿課程根本沒有「更新」這顆按鈕，教師會去找一顆不存在的東西。
+      setup(3, { staged: false })
+      expect(screen.getByRole("dialog")).not.toHaveTextContent(/不會立刻執行/)
+    })
+
+    it("已有待生效的重測要求時，說明「僅儲存」會把它取消", () => {
+      // 🔴 不講這件事，「僅儲存，不要求重測」就是一顆會靜默撤銷十分鐘前決定的按鈕。
+      setup(3, { staged: true, retestPending: true })
+      expect(screen.getByRole("dialog")).toHaveTextContent(/已有一筆待生效的重測要求/)
+      expect(screen.getByRole("dialog")).toHaveTextContent(/會把它一併取消/)
+    })
+
+    it("沒有待生效要求時不提——否則每次都在講一件沒發生的事", () => {
+      setup(3, { staged: true, retestPending: false })
+      expect(screen.getByRole("dialog")).not.toHaveTextContent(/已有一筆待生效的重測要求/)
+    })
   })
 })

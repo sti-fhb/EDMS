@@ -9,6 +9,22 @@ interface Props {
   open: boolean
   /** 該測驗曾及格的學員人數；對話框只在 > 0 時由呼叫端開啟。 */
   passedCount: number
+  /**
+   * 這門課的編輯是否進暫存區（已發布 / 已關閉課程，#631）。
+   *
+   * 影響的是**生效時點**：暫存模式下重測不在按下去的當下執行，而是延到教師按「更新」
+   * ——那是 2026-10-17 的裁示（學員被退回的那一刻新題目必須已經生效，否則他重考的是
+   * 剛剛才通過的同一份舊題）。文案不跟著改的話，教師會以為信已經寄出去了。
+   */
+  staged?: boolean
+  /**
+   * 本次編輯工作階段是否**已有**一筆待生效的重測要求（`QuizDetail.require_retest_pending`）。
+   *
+   * 🔴 不顯示這件事，「僅儲存，不要求重測」就是一顆會**靜默取消**先前決定的按鈕：
+   * 旗標寄在暫存節點上，而測驗設定的儲存會依本次選擇覆寫它。教師第二次只是來改個錯字，
+   * 不會想到自己正在撤銷十分鐘前的決定。
+   */
+  retestPending?: boolean
   /** 關閉而不儲存（含 ESC 與點背景）。 */
   onCancel: () => void
   /** `true` = 要求已通過的學員重新測驗；`false` = 僅儲存。 */
@@ -33,7 +49,14 @@ interface Props {
  * 沒有人數，教師無從判斷這個決定的份量——「要求 1 個人重考」與「要求 80 個人重考」
  * 是完全不同的決定，而畫面上看不出差別。
  */
-export function RequireRetestDialog({ open, passedCount, onCancel, onDecide }: Props) {
+export function RequireRetestDialog({
+  open,
+  passedCount,
+  staged = false,
+  retestPending = false,
+  onCancel,
+  onDecide,
+}: Props) {
   return (
     <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
       <DialogTitle>是否要求已通過的學員重新測驗？</DialogTitle>
@@ -44,6 +67,21 @@ export function RequireRetestDialog({ open, passedCount, onCancel, onDecide }: P
           <br />
           選「要求重測」：這 {passedCount} 位學員的作答次數將重新計算、測驗回到未完成，
           完課狀態隨之回退，並各收到一封通知信。
+          {staged && (
+            <>
+              <br />
+              <br />
+              ⚠️ 本課程已發布，編輯會先存在暫存區：重測
+              <strong>不會立刻執行</strong>，而是在您按下「更新」、新內容對學員生效的那一刻才一起發生。
+            </>
+          )}
+          {retestPending && (
+            <>
+              <br />
+              <br />
+              ℹ️ 本次編輯<strong>已有一筆待生效的重測要求</strong>。選「僅儲存，不要求重測」會把它一併取消。
+            </>
+          )}
           <br />
           <br />
           ⚠️ 兩種選擇都<strong>不會刪除任何作答紀錄</strong>，學員與您都仍可回看歷次明細。

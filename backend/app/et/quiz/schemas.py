@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from app.core.schema_types import SAFE_SINGLE_LINE_PATTERN
+from app.et.course.schemas import MAX_INT4
 
 # `QUIZ_NAME` 為 VARCHAR(100)、`STEM` 為 VARCHAR(500)、`OPTION_TEXT` 為 VARCHAR(200)。
 QUIZ_NAME_MAX_LEN = 100
@@ -53,7 +54,9 @@ class QuizUpdateReq(BaseModel):
     #: `None` = 不限時；`>= 1` = 限時 N 分鐘（data-model 之兩態語意）。
     time_limit_min: int | None = Field(default=None, ge=1)
     max_retry: int = Field(ge=0, le=999)
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
     #: 是否要求**已通過**的學員重新測驗（#361）。
     #:
     #: 系統無法分辨「改錯字」與「改語意」，故不猜意圖——由教師在儲存時決定。
@@ -121,7 +124,9 @@ class QuestionUpdateReq(QuestionCreateReq):
     保存當時的選項內容，不以 `OPTION_ID` 外鍵關聯），逐項 diff 只是徒增複雜度。
     """
 
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
     # `require_retest` 由 `QuestionCreateReq` 繼承而來，不重複宣告。
 
 
@@ -132,7 +137,9 @@ class QuestionReorderReq(BaseModel):
     """
 
     question_ids: list[int] = Field(max_length=MAX_QUESTION_IDS)
-    version: int = Field(ge=0)
+    #: ⚠️ `le=MAX_INT4`：`VERSION` 於 DB 是 `Integer`，超界值在 asyncpg 綁定參數時拋出、
+    #: 變成 500，而那是一個「版本不符」的請求（2026-10-18 security review L-3）。
+    version: int = Field(ge=0, le=MAX_INT4)
 
 
 class OptionRow(BaseModel):
@@ -201,3 +208,13 @@ class QuizDetail(BaseModel):
     #: 的實際狀態是「不該知道」。比照同一回應對 `is_correct` 的處理——遮成 `False`
     #: 會顯示「0 個正解」，那是錯誤資訊而不是隱藏。
     passed_count: int | None
+    #: 本次編輯工作階段是否已勾選「要求已通過學員重測」，尚待「更新」才執行（#361 × #631）。
+    #:
+    #: 🔴 **不回這一欄會讓勾選被靜默清掉。** 旗標寄在 QUIZ 暫存節點的 payload 上；教師
+    #: 勾完之後再開一次測驗設定對話框，前端沒有這個值就只能預設為未勾，而
+    #: `update_settings` 的 `require_retest=false` **會清除旗標**（那一支刻意如此：測驗
+    #: 設定頁就是那個勾選框的所在地）。結果是他勾過、畫面顯示沒勾、存檔後真的沒勾，
+    #: 而全程沒有任何訊息。
+    #:
+    #: 活表路徑恆為 `False`——那裡的重測在請求當下就執行完了，沒有「待執行」這個狀態。
+    require_retest_pending: bool = False

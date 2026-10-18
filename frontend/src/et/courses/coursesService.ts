@@ -10,6 +10,7 @@ import type {
   CourseDetail,
   CoursePayload,
   CourseStatusResult,
+  ContentUpdateResult,
   OwnerFilterParams,
   OwnerOption,
   ReopenPayload,
@@ -124,4 +125,29 @@ export const coursesApi = {
     return data
   },
 
+  /**
+   * 「更新」——把已發布課程的暫存編輯整批生效給學員（#631）。
+   *
+   * 跑**與發布完全相同**的十項檢核；不通過回 422 `ET_PUBLISH_001` + `blockers`
+   * （與 `publish` / `reopen` 同形狀，前端沿用 #558 的缺漏清單與紅框）。
+   *
+   * ⚠️ **無 request body**：要生效的內容在暫存區，不由前端重送。
+   */
+  applyContent: async (courseId: number): Promise<ContentUpdateResult> => {
+    const { data } = await http.post<ContentUpdateResult>(`/et/courses/${courseId}/content/apply`)
+    return data
+  },
+
+  /**
+   * 「取消」——放棄尚未更新的編輯，回到學員目前看到的版本（#631）。
+   *
+   * **活表一行都不會動**：學員在整個編輯期間看到的始終是上一次「更新」的版本，
+   * 所以放棄不需要任何回滾。暫存區本來就是空的時一樣回 204（冪等）。
+   *
+   * ⚠️ 草稿不走這條（後端回 409 `ET_COURSE_010`）——草稿的章節與項目直接寫活表，
+   * 按「取消」本來就不還原。
+   */
+  discardContent: async (courseId: number): Promise<void> => {
+    await http.delete(`/et/courses/${courseId}/content/stage`)
+  },
 }

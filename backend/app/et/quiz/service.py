@@ -17,6 +17,8 @@ from app.et.common.optimistic_lock import ensure_version_matched
 from app.et.constants import COURSE_PUBLISHED
 from app.et.course.repository import EtCourseRepository, EtItemRepository
 from app.et.course.rules import ensure_owner, is_browsable_by_non_owner, is_effectively_closed
+from app.et.course.stage_rules import ENTITY_OPTION, ENTITY_QUESTION, ENTITY_QUIZ, RETEST_PAYLOAD_KEY
+from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
 from app.et.notify.course_invite import learn_link
 from app.et.notify.quiz_retest_required import QuizRetestRequiredMailer
 from app.et.progress.repository import EtProgressRepository
@@ -81,7 +83,9 @@ class EtQuizService:
         progress: EtProgressRepository | None = None,
         courses: EtCourseRepository | None = None,
         mailer: QuizRetestRequiredMailer | None = None,
+        stage_writer: EtCourseStageWriter | None = None,
     ) -> None:
+        self._stage_writer = stage_writer or EtCourseStageWriter()
         self._quizzes = quizzes or EtQuizRepository()
         self._items = items or EtItemRepository()
         self._audit = audit or AuditLogService()
@@ -109,6 +113,12 @@ class EtQuizService:
         `answers_visible=False` 明示（不是遮成 `False`——那會顯示「0 個正解」，是錯誤
         資訊而非隱藏）。
         """
+        # 擁有者 + 已開始編輯 ⇒ 讀暫存版（#631）。少了這段，教師開啟測驗看到的是學員
+        # 那一版，存檔時整份取代，他上一次的暫存編輯被自己的畫面蓋回去。
+        staged = await self._staged_detail(db, quiz_id, actor_id)
+        if staged is not None:
+            return staged
+
         quiz, resolved = await self._resolve_quiz(db, quiz_id)
         _ensure_browsable(
             owner_id=resolved.owner_id, actor_id=actor_id, status=resolved.status, open_end_at=resolved.open_end_at
@@ -164,6 +174,41 @@ class EtQuizService:
         `description` 為**純文字**（SA 裁示 #203 Q1），與教材說明文字分屬兩條路徑——
         **不經 HTML 消毒**，前端亦須以純文字渲染。
         """
+        ref, course_id = await self._staged_quiz(db, quiz_id, operator.user_id, operator)
+        if ref is not None:
+            # ⚠️ 整份取代，所有欄位都要送（見 `update_payload` 的 docstring）
+            rowcount = await self._stage_writer.update_payload(
+                db,
+                ref.stage_id,
+                version=req.version,
+                payload={
+                    "quiz_name": req.quiz_name,
+                    "description": req.description,
+                    "pass_score": req.pass_score,
+                    "time_limit_min": req.time_limit_min,
+                    "max_retry": req.max_retry,
+                },
+                operator=operator,
+            )
+            ensure_version_matched(rowcount=rowcount, entity="ET_QUIZ")
+            # 🔴 **測驗設定這一支是旗標的開關，勾與不勾都要生效**
+            # （2026-10-18 security review M-1 後半）。
+            #
+            # 原本只在 `require_retest` 為真時設旗標，為假時什麼都不做 ⇒ 教師誤勾之後
+            # **沒有任何方式取消**：再存一次不勾也清不掉，只能 `discard` 整個工作階段、
+            # 連同其他編輯一起丟。而這個旗標的後果是「全班已通過的人被退回並收到信」，
+            # 不可逆。
+            #
+            # ⚠️ 只有本支這樣做。`add_question` / `update_question` / `delete_question`
+            # 的 `require_retest=false` **不清除**旗標——那是「這一次改題不另外要求重測」，
+            # 不是「取消先前的要求」。測驗設定頁才是那個勾選框的所在地。
+            await self._stage_require_retest(
+                db, quiz_stage_id=ref.stage_id, operator=operator, wanted=req.require_retest
+            )
+            # 稽核不記受影響人數——此刻還沒有人被影響（重測延到「更新」當下才執行）
+            await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗設定（暫存）")
+            return
+
         _, resolved = await self._require_owned(db, quiz_id, operator.user_id)
         course_id = resolved.course_id
         rowcount = await self._quizzes.update_settings(
@@ -187,9 +232,33 @@ class EtQuizService:
         self, db: AsyncSession, quiz_id: int, req: QuestionCreateReq, *, operator: OperatorInfo
     ) -> QuestionRow:
         """新增題目（含其全部選項），追加至最末。"""
+        ref, course_id = await self._staged_quiz(db, quiz_id, operator.user_id, operator)
+        self._validate_options(req)
+        if ref is not None:
+            question_stage = await self._stage_writer.append(
+                db,
+                ref.course_id,
+                ENTITY_QUESTION,
+                parent_stage_id=ref.stage_id,
+                payload={"question_type": req.question_type, "stem": req.stem, "points": req.points},
+                operator=operator,
+            )
+            for option in req.options:
+                await self._stage_writer.append(
+                    db,
+                    ref.course_id,
+                    ENTITY_OPTION,
+                    parent_stage_id=question_stage,
+                    payload={"option_text": option.option_text, "is_correct": option.is_correct},
+                    operator=operator,
+                )
+            if req.require_retest:
+                await self._stage_require_retest(db, quiz_stage_id=ref.stage_id, operator=operator)
+            await self._log(db, "CREATE", operator.user_id, course_id, "新增測驗題目（暫存）")
+            return await self._staged_question_row(db, ref.course_id, question_stage)
+
         _, resolved = await self._require_owned(db, quiz_id, operator.user_id)
         course_id = resolved.course_id
-        self._validate_options(req)
         question = await self._quizzes.add_question(
             db,
             quiz_id,
@@ -209,12 +278,42 @@ class EtQuizService:
         self, db: AsyncSession, question_id: int, req: QuestionUpdateReq, *, operator: OperatorInfo
     ) -> None:
         """更新題目與其選項（選項全量覆寫；帶題目自身之 `version`）。"""
+        ref, course_id, live_quiz_id = await self._staged_question(db, question_id, operator.user_id, operator)
+        self._validate_options(req)
+        if ref is not None:
+            rowcount = await self._stage_writer.update_payload(
+                db,
+                ref.stage_id,
+                version=req.version,
+                payload={"question_type": req.question_type, "stem": req.stem, "points": req.points},
+                operator=operator,
+            )
+            ensure_version_matched(rowcount=rowcount, entity="ET_QUESTION")
+            # 選項**全量覆寫**：舊的整批移除再依送來的順序新增，與活表路徑的
+            # `replace_question` 同語意。⛔ 不要改成「比對差異」——選項沒有穩定的業務鍵
+            # （同一題可以有兩個同名選項），比對必然在某些情況下配錯。
+            for old in await self._stage_writer.children_of(db, ref.course_id, ENTITY_OPTION, ref.stage_id):
+                await self._stage_writer.delete_subtree(db, old.stage_id, operator)
+            for option in req.options:
+                await self._stage_writer.append(
+                    db,
+                    ref.course_id,
+                    ENTITY_OPTION,
+                    parent_stage_id=ref.stage_id,
+                    payload={"option_text": option.option_text, "is_correct": option.is_correct},
+                    operator=operator,
+                )
+            if req.require_retest:
+                node = await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_QUESTION)
+                if node is not None and node.parent_stage_id is not None:
+                    await self._stage_require_retest(db, quiz_stage_id=node.parent_stage_id, operator=operator)
+            await self._log(db, "UPDATE", operator.user_id, course_id, "更新測驗題目（暫存）")
+            return
+
         question = await self._quizzes.get_question(db, question_id)
         if question is None:
             raise _QUESTION_NOT_FOUND
-        _, resolved = await self._require_owned(db, question.quiz_id, operator.user_id)
-        course_id = resolved.course_id
-        self._validate_options(req)
+        _ = live_quiz_id
         rowcount = await self._quizzes.replace_question(
             db,
             question_id,
@@ -250,6 +349,24 @@ class EtQuizService:
             require_retest: 是否要求已通過的學員重新測驗（#361）。刪題是題目內容變更，
                 故提供此選項；實際行為見 `_require_retest_if_asked`。
         """
+        ref, course_id, _live_quiz_id = await self._staged_question(db, question_id, operator.user_id, operator)
+        if ref is not None:
+            # 🔴 **暫存模式不套 #410 的「不可刪最後一題」**（2026-10-17 使用者裁示）。
+            #
+            # 那道守門補的是一個**時間差**：`BLOCK_QUIZ_NO_QUESTION` 原本只在發布 / 再開課
+            # 跑，發布後把題刪光沒人再檢核。而「更新」現在也會跑同一套檢核——時間差沒了，
+            # 刪除也碰不到學員（只進暫存區）。再擋的話，擋住的是「先刪光再重建題庫」這個
+            # 合法的編輯順序，而規則本身仍由「更新」守著。
+            #
+            # ⚠️ 草稿與活表路徑的守門**照舊**（見 `_ensure_not_last_question_of_live_course`）。
+            node = await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_QUESTION)
+            quiz_stage_id = None if node is None else node.parent_stage_id
+            await self._stage_writer.delete_subtree(db, ref.stage_id, operator)
+            if require_retest and quiz_stage_id is not None:
+                await self._stage_require_retest(db, quiz_stage_id=quiz_stage_id, operator=operator)
+            await self._log(db, "DELETE", operator.user_id, course_id, "刪除測驗題目（暫存）")
+            return
+
         question = await self._quizzes.get_question(db, question_id)
         if question is None:
             raise _QUESTION_NOT_FOUND
@@ -271,6 +388,18 @@ class EtQuizService:
         這是教師端的呈現順序。學員作答時的順序由系統洗牌並凍結於 attempt 快照（#6），
         不依此欄位。
         """
+        ref, course_id = await self._staged_quiz(db, quiz_id, operator.user_id, operator)
+        if ref is not None:
+            nodes = await self._stage_writer.children_of(db, ref.course_id, ENTITY_QUESTION, ref.stage_id)
+            by_exposed = {exposed_id(source_id=n.source_id, stage_id=n.stage_id): n.stage_id for n in nodes}
+            ensure_question_reorder_complete(current_ids=set(by_exposed), requested=req.question_ids)
+            # 併發令牌仍是**測驗層**的 `VERSION`（暫存列自己的），與活表路徑同形狀
+            rowcount = await self._stage_writer.bump_version(db, ref.stage_id, req.version, operator)
+            ensure_version_matched(rowcount=rowcount, entity="ET_QUIZ")
+            await self._stage_writer.apply_order(db, [by_exposed[i] for i in req.question_ids], operator)
+            await self._log(db, "UPDATE", operator.user_id, course_id, "調整測驗題目順序（暫存）")
+            return
+
         _, resolved = await self._require_owned(db, quiz_id, operator.user_id)
         course_id = resolved.course_id
         current = await self._quizzes.list_questions(db, quiz_id)
@@ -312,6 +441,22 @@ class EtQuizService:
 
     async def _ensure_not_last_question_of_live_course(self, db: AsyncSession, *, quiz_id: int, resolved) -> None:
         """已發布且學員仍可作答的課程，其測驗不得被刪到 0 題（#410）。
+
+        ## 🔴 2026-10-17 起**這道守門已不可達**，留著是為了讓下一個人看得懂歷史
+
+        它只在活表路徑跑，而 #631 之後活表路徑只剩草稿課程（`is_staged` 的判準是
+        「非草稿」）；本函式第一個條件又是 `status == COURSE_PUBLISHED`——草稿永遠不符。
+        兩者相乘 ⇒ 恆不觸發。
+
+        ⚠️ **不可達不等於可以刪掉後就沒事**：它承接的規則沒有消失，只是改由「更新」
+        那一關（`BLOCK_QUIZ_NO_QUESTION`）守著，見
+        `test_已發布課程刪最後一題進暫存且更新時被擋`。刪掉本函式之前，請先確認那一關
+        還在——否則就是把一條規則從「兩道守門」降成「零道」。
+
+        ⚠️ 若日後有任何路徑讓已發布課程的刪除繞過暫存區（例如為了某個批次工具），
+        本函式會重新變成唯一的防線，那時它就不是死碼了。
+
+        ## 以下為原始說明（#410 當初要補的時間差）
 
         ## 這道守門補的是一個**時間差**，不是一條新規則
 
@@ -364,6 +509,153 @@ class EtQuizService:
         ensure_owner(owner_id=resolved.owner_id, actor_id=actor_id)
         return quiz, resolved
 
+    async def _staged_question_row(self, db: AsyncSession, course_id: int, question_stage_id: int) -> QuestionRow:
+        """暫存版的 `_question_row`——id 一律走 `exposed_id`（新增的回負數）。"""
+        node = await self._stage_writer.node_by_stage_id(db, question_stage_id, ENTITY_QUESTION)
+        if node is None:  # pragma: no cover - 剛寫進去的節點必定讀得回來
+            raise _QUESTION_NOT_FOUND
+        options = await self._stage_writer.children_of(db, course_id, ENTITY_OPTION, question_stage_id)
+        return QuestionRow(
+            question_id=exposed_id(source_id=node.source_id, stage_id=node.stage_id),
+            question_type=str(node.payload.get("question_type") or ""),
+            stem=str(node.payload.get("stem") or ""),
+            points=int(node.payload.get("points") or 0),
+            sort_order=node.sort_order,
+            version=node.version,
+            options=[
+                OptionRow(
+                    option_id=exposed_id(source_id=o.source_id, stage_id=o.stage_id),
+                    option_text=str(o.payload.get("option_text") or ""),
+                    is_correct=bool(o.payload.get("is_correct")),
+                    sort_order=o.sort_order,
+                )
+                for o in options
+            ],
+        )
+
+    async def _staged_detail(self, db: AsyncSession, quiz_id: int, actor_id: str) -> QuizDetail | None:
+        """暫存版的測驗詳細；回 `None` 代表沒有暫存區、該走活表。
+
+        ⚠️ **只對擁有者**：他人讀到的必須是學員看得到的那一版（同 `get_detail` 的理由）。
+        因此這裡的 `answers_visible` 恆為 `True`——非擁有者根本進不來這條路徑。
+        """
+        node = await self._stage_writer.node_of(db, quiz_id, ENTITY_QUIZ)
+        if node is None:
+            return None
+        course = await self._courses.get(db, node.course_id)
+        if course is None or course.owner_id != actor_id:
+            return None
+        questions = await self._stage_writer.children_of(db, node.course_id, ENTITY_QUESTION, node.stage_id)
+        rows = [await self._staged_question_row(db, node.course_id, q.stage_id) for q in questions]
+        return QuizDetail(
+            quiz_id=quiz_id,
+            quiz_name=str(node.payload.get("quiz_name") or ""),
+            description=node.payload.get("description"),
+            pass_score=int(node.payload.get("pass_score") or 0),
+            time_limit_min=node.payload.get("time_limit_min"),
+            max_retry=int(node.payload.get("max_retry") or 0),
+            version=node.version,
+            questions=rows,
+            points_total=sum(r.points for r in rows),
+            answers_visible=True,
+            # ⚠️ 已通過人數取的是**活表**的作答紀錄——那是事實，與編輯中的題目無關。
+            # 新增的測驗（`source_id` 為 None）還沒有人考過，回 0。
+            passed_count=(
+                0
+                if node.source_id is None
+                else len(
+                    await self._quizzes.passed_student_attempt_counts(db, node.source_id, course_id=node.course_id)
+                )
+            ),
+            # 🔴 回讀勾選狀態，否則前端只能預設未勾，而存檔會把它清掉。見 schema 的說明。
+            require_retest_pending=bool(node.payload.get(RETEST_PAYLOAD_KEY)),
+        )
+
+    async def _staged_quiz(self, db: AsyncSession, quiz_id: int, actor_id: str, operator):
+        """測驗 id → 暫存節點；回 `(None, course_id)` 代表該走活表路徑（#631 PR 2b）。
+
+        形狀同 `course/service._staged_chapter`：負數先解析 → 授權 → **取鎖** → 取節點。
+        """
+        ref = await self._stage_writer.resolve_new(db, quiz_id, ENTITY_QUIZ)
+        if ref is not None:
+            course = await self._courses.get(db, ref.course_id)
+            if course is None:
+                raise _NOT_FOUND
+            ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+            await self._stage_writer.lock_course(db, ref.course_id)
+            return ref, ref.course_id
+
+        _, resolved = await self._require_owned(db, quiz_id, actor_id)
+        course = await self._courses.get(db, resolved.course_id)
+        if not is_staged(course):
+            return None, resolved.course_id
+        await self._stage_writer.lock_course(db, resolved.course_id)
+        ref = await self._stage_writer.ref_for_source(
+            db, resolved.course_id, ENTITY_QUIZ, quiz_id, operator, gone_error=_NOT_FOUND
+        )
+        return ref, resolved.course_id
+
+    async def _staged_question(self, db: AsyncSession, question_id: int, actor_id: str, operator):
+        """題目 id → 暫存節點；回 `(None, course_id, quiz_id)` 代表該走活表路徑。
+
+        回傳也帶 `quiz_id`（活表路徑用）／`parent_stage_id`（暫存路徑用）——`require_retest`
+        的對象是**測驗**不是題目，兩條路徑都要知道是哪一個測驗。
+        """
+        ref = await self._stage_writer.resolve_new(db, question_id, ENTITY_QUESTION)
+        if ref is None:
+            question = await self._quizzes.get_question(db, question_id)
+            if question is None:
+                raise _QUESTION_NOT_FOUND
+            _, resolved = await self._require_owned(db, question.quiz_id, actor_id)
+            course = await self._courses.get(db, resolved.course_id)
+            if not is_staged(course):
+                return None, resolved.course_id, question.quiz_id
+            await self._stage_writer.lock_course(db, resolved.course_id)
+            ref = await self._stage_writer.ref_for_source(
+                db, resolved.course_id, ENTITY_QUESTION, question_id, operator, gone_error=_QUESTION_NOT_FOUND
+            )
+            return ref, resolved.course_id, question.quiz_id
+
+        course = await self._courses.get(db, ref.course_id)
+        if course is None:
+            raise _QUESTION_NOT_FOUND
+        ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+        await self._stage_writer.lock_course(db, ref.course_id)
+        return ref, ref.course_id, None
+
+    async def _stage_require_retest(
+        self, db: AsyncSession, *, quiz_stage_id: int, operator: OperatorInfo, wanted: bool = True
+    ) -> None:
+        """把「要求重測」的意圖**記在測驗的暫存節點上，等按『更新』才執行**（#631）。
+
+        ## 為何不在編輯當下執行（2026-10-17 使用者裁示）
+
+        暫存模式下，學員被退回未通過的那一刻**新題目還沒生效**。他去重考，考的是他剛剛
+        才通過的同一份舊題——副作用先發生、原因還看不到。與 #303 的通知改到「更新」當下
+        寄是同一個道理：副作用要跟著「學員看得到了」一起發生。
+
+        ## 為何寄在 payload 而不是另開欄位
+
+        這個意圖的生命週期**與暫存工作階段完全一致**：放棄編輯就該一起消失，套用完就該
+        清掉。暫存列本來就是這兩件事的載體，另開欄位反而要自己維護那兩個時點。
+
+        ⚠️ `_RETEST_KEY` **不是 `ET_QUIZ` 的欄位**，所以 `stage_apply._upsert` 會自動忽略
+        它（它只寫 `payload_fields(spec)` 列出的 key）。⛔ 不要把它改成與欄位同名。
+
+        ⚠️ 一次工作階段內勾選多次只記一次：重測是「做或不做」，不累加。
+
+        ⚠️ 走 `set_payload_flag` 而非 `update_payload`：後者會遞增 `VERSION`，而那是教師
+        那一端的樂觀鎖令牌。為一個他沒改的東西推進版本，會讓他**下一次存檔無故 409**。
+
+        Args:
+            wanted: `False` 時**清除**旗標。只有測驗設定那一支會傳 `False`——它是那個
+                勾選框的所在地，所以不勾就該取消。改題 / 刪題的 `require_retest=false`
+                意思是「這一次不另外要求」，不是「取消先前的要求」，故維持預設 `True`。
+        """
+        await self._stage_writer.set_payload_flag(
+            db, quiz_stage_id, RETEST_PAYLOAD_KEY, True if wanted else None, operator
+        )
+
     async def _question_row(self, db: AsyncSession, question) -> QuestionRow:
         options = await self._quizzes.list_options(db, [question.question_id])
         return QuestionRow(
@@ -374,6 +666,21 @@ class EtQuizService:
             sort_order=question.sort_order,
             version=question.version,
             options=[OptionRow.model_validate(o) for o in options],
+        )
+
+    async def require_retest_now(
+        self, db: AsyncSession, *, quiz_id: int, course_id: int, operator: OperatorInfo
+    ) -> int:
+        """立刻執行「要求已通過學員重測」——供 `stage_apply` 於套用當下呼叫（#631）。
+
+        暫存模式下教師勾選時只記意圖（見 `_stage_require_retest`），真正執行延到按
+        「更新」。本方法是那個執行點對外的入口。
+
+        ⛔ 不要把 `_require_retest_if_asked` 直接公開：它帶著 `asked` 參數，而呼叫端
+        在套用時已經過濾過旗標，再傳一次布林只會多一個可以傳錯的地方。
+        """
+        return await self._require_retest_if_asked(
+            db, quiz_id=quiz_id, course_id=course_id, asked=True, operator=operator
         )
 
     async def _require_retest_if_asked(
