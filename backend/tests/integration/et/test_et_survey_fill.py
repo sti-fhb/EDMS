@@ -822,8 +822,8 @@ class TestPreview:
     async def test_擁有者預覽草稿課程亦為預覽態(self, client, db) -> None:
         teacher = await _user(db, "t_prv02", ROLE_TEACHER)
         course_id = await _course(client, db, teacher, status=COURSE_DRAFT)
-        await _item(client, teacher, course_id)
-        await _survey(client, teacher, course_id)
+        await _item(client, db, teacher, course_id)
+        await _survey(client, db, teacher, course_id)
 
         r = await client.get(f"{_COURSES}/{course_id}/learn", headers=_bearer(teacher))
 
@@ -895,8 +895,8 @@ class TestPreview:
         """草稿只有擁有者看得到——他人教師取表單仍為同一個 403，不洩漏「這門草稿建了問卷」。"""
         teacher = await _user(db, "t_prv08", ROLE_TEACHER)
         course_id = await _course(client, db, teacher, status=COURSE_DRAFT)
-        await _item(client, teacher, course_id)
-        await _survey(client, teacher, course_id)
+        await _item(client, db, teacher, course_id)
+        await _survey(client, db, teacher, course_id)
         observer = await _user(db, "t_prv08b", ROLE_TEACHER)
 
         r = await client.get(_form_url(course_id), headers=_bearer(observer))
@@ -930,7 +930,7 @@ class TestPreview:
         """
         teacher = await _user(db, "t_prv12", ROLE_TEACHER)
         course_id = await _course(client, db, teacher)
-        await _item(client, teacher, course_id)
+        await _item(client, db, teacher, course_id)
         observer = await _user(db, "t_prv12b", ROLE_TEACHER)
 
         r = await client.get(_form_url(course_id), headers=_bearer(observer))
@@ -941,7 +941,7 @@ class TestPreview:
     async def test_已發布無問卷時學員得同一個403(self, client, db) -> None:
         teacher = await _user(db, "t_prv14", ROLE_TEACHER)
         course_id = await _course(client, db, teacher)
-        await _item(client, teacher, course_id)
+        await _item(client, db, teacher, course_id)
         outsider = await _user(db, "s_prv14")
 
         r = await client.get(_form_url(course_id), headers=_bearer(outsider))

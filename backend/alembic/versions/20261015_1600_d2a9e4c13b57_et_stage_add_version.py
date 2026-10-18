@@ -50,7 +50,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d2a9e4c13b57"
-down_revision: str | None = "0d17180b7546"
+down_revision: str | None = "7c4e19ab3f52"
 branch_labels: str | None = None
 depends_on: str | None = None
 
