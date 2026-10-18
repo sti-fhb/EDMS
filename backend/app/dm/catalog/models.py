@@ -12,8 +12,21 @@
 `list_controlled` / `list_audiences` 都沒濾。
 
 ⛔ 若日後發現某處「少濾了 DELETED」，**正解不是補上過濾**，而是確認這四張表根本
-沒有該欄位。`tests/unit/dm/test_dm_catalog_no_delete.py` 會在有人改回 `BaseModel`
-時變紅。
+沒有該欄位。
+
+### 什麼守得住、什麼守不住（2026-10-18 變異實測）
+
+| 注入 | 會不會被擋 |
+|---|---|
+| 四個 model 改回 `BaseModel` | ✅ unit 結構測試紅，且 integration 大面積紅（`UndefinedColumnError`）|
+| 只改 model、**migration 沒砍欄位** | ⚠️ **unit 全綠**，只有 integration 紅（INSERT 撞 `NotNullViolationError`）|
+| 補一道 `DELETED = 0` 過濾回來 | ✅ 立刻 `AttributeError`，**不會靜默生效** |
+
+⇒ **model 與 migration 兩半必須一起改**，而守住它們的是**不同層**的測試：
+model 那半 unit 擋得住，**migration 那半只有 integration 擋得住**。改這裡時別只跑 unit。
+
+> 第三列是本次重構真正的收穫：欄位不存在時，「順手補一道看似缺少的過濾」會當場炸掉，
+> 而不是悄悄多一個恆真條件。這正是 #508 想防的那條路。
 
 ⚠️ `DM_DOC_TAG`（`dm/document/models.py`）是**不同的表**，有真正的軟刪除復用機制，
 它繼承 `BaseModel` 是對的，不要一起改。
