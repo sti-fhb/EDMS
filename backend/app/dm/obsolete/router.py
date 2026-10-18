@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
-from app.core.schema_types import STRIP_BEFORE_VALIDATE
+from app.core.schema_types import SAFE_MULTILINE_PATTERN, STRIP_BEFORE_VALIDATE
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.document.file_store import enforce_size_limit
 from app.dm.obsolete.schemas import InitiateObsoleteResult
@@ -33,8 +33,13 @@ _service = ObsoleteService()
 #: 指定審核者可下載，發起人本人與一般閱覽者皆不可），所以**超過 500 字的內容，一般閱覽者永遠
 #: 讀不到**。日後若有人覺得 500 太短想放寬，要先推翻的是附件的最小揭露裁示，不是這個數字。
 _REASON_MAX = 500
-#: 不套單行約束：廢止原因前端為 multiline，本來就該能多行。
-_ReasonForm = Annotated[str, STRIP_BEFORE_VALIDATE, Form(max_length=_REASON_MAX)]
+#: 不套單行約束：廢止原因前端為 multiline，本來就該能多行；但仍要擋 NUL
+#: （`Text` 欄位存不下，實測拋 `CharacterNotInRepertoireError` → 未攔截的 500）。
+_ReasonForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_REASON_MAX, pattern=SAFE_MULTILINE_PATTERN),
+]
 
 
 def _ensure_editor(ctx: DmContext) -> None:

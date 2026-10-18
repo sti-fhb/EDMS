@@ -22,8 +22,11 @@ catch-all ⇒ **500**，使用者只看到「伺服器處理失敗」。
 `sti-testing.md` 明列「輸入驗證（422）一律寫 unit，禁止寫成 integration」。422 在 handler
 本體執行前就發生，不需要真 DB。手法照抄 `test_dm_library_query_limits.py`（#483）：存取閘、
 `get_operator`、DB session 全以 `dependency_overrides` 換掉，並以
-`raise_app_exceptions=False` 讓「合法輸入」那幾條能斷言 `!= 422`——**請求走進 handler 並在
-stub DB 上炸開，本身就證明驗證放行了**。少了這組，把上限設成 1 也會讓 422 那幾條全過。
+`raise_app_exceptions=False` 讓「合法輸入」那幾條能斷言 **`== 500`**——請求走進 handler 並在
+stub DB（`None`）上炸開，本身就證明驗證放行了。少了這組，把上限設成 1 也會讓 422 那幾條全過。
+
+⚠️ 斷言 `== 500` 而非 `!= 422` 是刻意的：後者連 401 / 403 / **404** 都會通過，於是 URL 打錯一個字
+就會讓所有「放行」測試假性全綠。`== 500` 同時釘住「請求確實抵達了 handler」。
 
 ## ⚠️ 兩個實作陷阱，各有一條測試盯著
 
@@ -105,7 +108,7 @@ async def test_新增_身份欄剛好等於上限時放行(client, field, limit)
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), field: "x" * limit})
 
-    assert resp.status_code != 422, f"{field} 剛好 {limit} 字不該被擋"
+    assert resp.status_code == 500, f"{field} 剛好 {limit} 字不該被擋"
 
 
 @pytest.mark.parametrize("field", ["doc_name", "version_no"])
@@ -125,7 +128,7 @@ async def test_變更摘要允許換行(client):
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), "change_summary": "第一行\n第二行"})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500
 
 
 # ── 陷阱 1：存草稿允許空值 ──────────────────────────────────────
@@ -144,7 +147,7 @@ async def test_存草稿_空名稱空版號空摘要仍放行(client):
             data={**_base(), "doc_name": "", "version_no": "", "change_summary": "", "assigned_reviewer": ""},
         )
 
-    assert resp.status_code != 422, "存草稿的空值被擋下了——陷阱 1"
+    assert resp.status_code == 500, "存草稿的空值被擋下了——陷阱 1"
 
 
 # ── 陷阱 2：Form() 不會先 strip ────────────────────────────────
@@ -159,7 +162,7 @@ async def test_尾端換行被_strip_後放行_不是_422(client):
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), "doc_name": "  正常名稱  \n"})
 
-    assert resp.status_code != 422, "尾端空白 / 換行應被 strip 掉而非判為不合法"
+    assert resp.status_code == 500, "尾端空白 / 換行應被 strip 掉而非判為不合法"
 
 
 async def test_strip_後剛好等於上限時放行(client):
@@ -167,7 +170,7 @@ async def test_strip_後剛好等於上限時放行(client):
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), "doc_name": "x" * 200 + "   "})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500
 
 
 # ── 類 2：無上限 Text ──────────────────────────────────────────
@@ -185,7 +188,7 @@ async def test_變更摘要剛好上限放行(client):
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), "change_summary": "摘" * 1000})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500
 
 
 async def test_廢止申請原因超過上限回_422(client):
@@ -203,7 +206,49 @@ async def test_廢止申請原因剛好上限放行(client):
     async with client as c:
         resp = await c.post(_OBSOLETE, data={"reason": "原" * 500, "reviewer_id": "rev1"})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500
+
+
+# ── 類 2b：`Text` 欄位不會因長度越界，但會因 NUL 越界 ───────────────
+
+
+@pytest.mark.parametrize(
+    ("url", "data"),
+    [
+        (_CREATE, {"category_code": "SOP", "change_summary": "摘要\x00注入"}),
+        (_CREATE, {"category_code": "SOP", "assigned_reviewer": "u\x001"}),
+        (_OBSOLETE, {"reason": "理由\x00注入", "reviewer_id": "rev1"}),
+    ],
+)
+async def test_多行欄位含_NUL_回_422(client, url, data):
+    """PostgreSQL 的文字型別存不下 `\\x00`。
+
+    實測（本分支隔離 test DB，`INSERT INTO ... (TEXT) VALUES ('a\\x00b')`）會拋 asyncpg 的
+    `CharacterNotInRepertoireError`；`main.py` 沒有 `DataError` 系列的處理器 ⇒ 落到最後的
+    catch-all、冒成 **500**。與「超過 `String(N)`」是同一類缺陷，只是觸發的是單一字元，
+    所以無界 `Text` 欄位同樣中招。
+    """
+    async with client as c:
+        resp = await c.post(url, data=data)
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("url", "data"),
+    [
+        (_CREATE, {"category_code": "SOP", "change_summary": "第一行\n第二行\t含TAB"}),
+        (_OBSOLETE, {"reason": "第一行\n第二行\t含TAB", "reviewer_id": "rev1"}),
+    ],
+)
+async def test_多行欄位的換行與_TAB_仍放行(client, url, data):
+    """⚠️ 擋 NUL 不可誤擋換行——`SafeNameStr` 的 docstring 已說明「DM 的退回 / 廢止理由就是
+    真的多行使用者輸入」。只測「NUL 回 422」的話，把 pattern 寫成單行版也會全過。
+    """
+    async with client as c:
+        resp = await c.post(url, data=data)
+
+    assert resp.status_code == 500
 
 
 # ── 其餘兩個編輯端點：同一組欄位，不可只改新增那支 ────────────────
@@ -248,7 +293,7 @@ async def test_標籤陣列在長度內放行(client, field):
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), field: [str(i) for i in range(1, 51)]})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500
 
 
 @pytest.mark.parametrize("field", _ARRAYS)
@@ -278,4 +323,4 @@ async def test_合法標籤_id_放行(client, field):
     async with client as c:
         resp = await c.post(_CREATE, data={**_base(), field: ["1", str(2**63 - 1)]})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500

@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
-from app.core.schema_types import SAFE_SINGLE_LINE_OR_EMPTY_PATTERN, STRIP_BEFORE_VALIDATE
+from app.core.schema_types import (
+    SAFE_MULTILINE_PATTERN,
+    SAFE_SINGLE_LINE_OR_EMPTY_PATTERN,
+    STRIP_BEFORE_VALIDATE,
+)
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.document.file_store import enforce_size_limit, resolve_upload_limits
 from app.dm.editor.schemas import (
@@ -70,9 +74,19 @@ _VersionNoForm = Annotated[
     Form(max_length=_VERSION_NO_MAX, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
 ]
 #: 摘要**刻意不套單行約束**：它本來就該能多行（前端為 multiline TextField）。
-_ChangeSummaryForm = Annotated[str, STRIP_BEFORE_VALIDATE, Form(max_length=_CHANGE_SUMMARY_MAX)]
-#: 指定審核者為 user_id，不進信件內文，故只界長度。
-_ReviewerIdForm = Annotated[str | None, STRIP_BEFORE_VALIDATE, Form(max_length=_REVIEWER_ID_MAX)]
+#: 但仍要擋 NUL——`Text` 欄位不會因長度越界，卻會因這一個字元越界（實測拋
+#: `CharacterNotInRepertoireError` → 未攔截的 500）。
+_ChangeSummaryForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_CHANGE_SUMMARY_MAX, pattern=SAFE_MULTILINE_PATTERN),
+]
+#: 指定審核者為 user_id，不進信件內文，故不套單行約束——但同樣要擋 NUL。
+_ReviewerIdForm = Annotated[
+    str | None,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_REVIEWER_ID_MAX, pattern=SAFE_MULTILINE_PATTERN),
+]
 #: 長度與值域都要界：長度擋查詢成本放大與一次寫入大量標籤關聯，值域擋 int64 越界（#500）。
 _TagIdsForm = Annotated[list[TagId], Form(max_length=_TAG_IDS_MAX)]
 
