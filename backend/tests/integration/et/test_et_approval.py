@@ -8,6 +8,7 @@
 範本參數 key 於 `tests/unit/et/test_et_approval_mail.py`。
 """
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -1105,6 +1106,67 @@ class TestAudit:
         assert logs[0].action_type == "CREATE"
         assert logs[0].target_id == f"{course_id}:{student}"
         assert logs[0].created_user == teacher, "log_action 把 operator_id 寫進 CREATED_USER"
+
+    async def test_稽核列自帶課程名供對象欄顯示(self, client, db) -> None:
+        """#717：`target_id` 只有 `{course_id}:{user_id}`，DP05 對象欄得靠這個鍵才顯示得出課程名。
+
+        ⚠️ 本條與 `test_dp_audit_query.py` 的顯示測試**驗不同層**：那邊驗「稽核列有這個鍵時
+        畫面怎麼顯示」，這邊驗「寫入端真的有寫進去」。只有前者時，寫入端漏寫不會紅。
+
+        課程名取**寫入當下**的值：課程日後改名，這筆舊紀錄仍應顯示當時的名字。
+        """
+        teacher = await _user(db, "t_ap80")
+        course_id = await _course(db, owner=teacher, name="ZT核可當時課名")
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap80a", item_id)
+        await db.commit()
+
+        await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+
+        logs = await self._logs(db)
+        assert json.loads(logs[0].after_value)["course_name"] == "ZT核可當時課名"
+
+    async def test_稽核列不得帶人名(self, client, db) -> None:
+        """🔴 反向探針：`before_value` / `after_value` 不得出現任何人名欄位（#717）。
+
+        人名由**查詢端查 `DP_USER` 活表**取現值，不複製進稽核列——個資只存一處
+        （見 `et/tracking/service.py` 的 `_log_export` docstring）。
+
+        ## 為什麼需要這條，而不是「註解寫清楚就好」
+
+        `approve()` 的 `before_value` 是 `ApprovalRow.model_dump()`——**整個物件序列化**。
+        該 model 目前只有 ID 欄位（`user_id` / `approved_by`），所以現況是乾淨的；
+        但日後若有人往它加一個 `user_name`（清單頁要顯示姓名，是很合理的需求），
+        姓名就會**自動流進稽核列**，而不會有任何東西變紅。
+
+        ⚠️ 本條檢查的是**值裡的鍵名**，不是整串 JSON 裡有沒有某個人的名字——
+        後者會在學員姓名剛好等於某個無關字串時誤報。
+        """
+        teacher = await _user(db, "t_ap81", name="陳老師")
+        course_id = await _course(db, owner=teacher)
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap81a", item_id, name="林學員")
+        await db.commit()
+
+        await client.post(
+            f"{_URL}/{course_id}/approvals",
+            headers=_bearer(teacher),
+            json={"user_ids": [student], "result": APPROVAL_PASS},
+        )
+
+        logs = await self._logs(db)
+        assert logs, "正向錨點：確實有稽核列可驗"
+        banned = {"user_name", "student_name", "operator_name", "approver_name", "recipient_name", "email"}
+        for log in logs:
+            for raw in (log.before_value, log.after_value):
+                if not raw:
+                    continue
+                keys = set(json.loads(raw))
+                assert not (keys & banned), f"稽核列不得帶人名 / Email 欄位，發現：{keys & banned}"
 
     async def test_撤銷後重核的稽核帶得回被覆寫的前次結果(self, client, db) -> None:
         """🔴 這是本表**唯一**能回答「上一次是什麼結果」的地方。
