@@ -83,6 +83,15 @@ beforeEach(() => {
 })
 
 describe("ET05 課程編輯頁", () => {
+  /**
+   * ⚠️ **本條設 15000ms**（#687）。成本來自編輯頁元件樹在本檔**第一次**被載入與編譯
+   * ——目前由本條（排在檔內最前面）承擔：單檔、機器閒置實測 2.2 秒，份量相近的後續測試只要
+   * 0.5～0.9 秒（2026-10-19）；整組並行時實測 5.2 秒逾時（#682 驗收）。
+   *
+   * 不靠調整順序解決——換誰排第一，誰就要付這筆成本；日後若有測試插到本條之前，該筆成本
+   * 會移到那一條上，屆時 timeout 也要跟著移。⛔ 不調全域 `testTimeout`，理由見
+   * 下方 #335 那條的說明；負載下仍紅屬 worker 餓死，不要再往上調。
+   */
   it("新增章節對話框支援「儲存並繼續新增」", async () => {
     const user = userEvent.setup()
     renderEditor()
@@ -96,7 +105,7 @@ describe("ET05 課程編輯頁", () => {
     // 對話框留著、欄位重設——教師可連續新增多個章節
     await waitFor(() => expect(screen.getByLabelText("章節名稱")).toHaveValue(""))
     expect(screen.getByRole("button", { name: "儲存並繼續新增" })).toBeInTheDocument()
-  })
+  }, 15000)
 
   it("新增模式顯示全部基本資料欄位且為空白 / 預設值", async () => {
     renderNewEditor()
