@@ -18,6 +18,8 @@
 不屬於本檔的「兩支端點」範圍）。
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import select, update
 
@@ -36,11 +38,16 @@ from app.et.constants import (
 from app.et.course.models import EtChapter, EtCourse
 from app.et.roles.models import EtUserRole
 from tests.integration.et._live_edit import editing_live
+from tests.integration.et._reopen import reopen_with_schedule, stage_schedule
 from tests.integration.et._tag_pairs import all_units_id, role_pair
 
 pytestmark = pytest.mark.integration
 
 _COURSES = "/api/et/courses"
+
+#: 已過去的訖止時間——用來造出「期間已過而關閉」的那門課。
+#: ⚠️ 寫死年份是刻意的（過去的時點不會隨時間失效），與 `_future` 的相對寫法互補。
+_PAST_END = datetime(2020, 12, 31, tzinfo=timezone.utc)
 
 
 def _bearer(user_id: str) -> dict[str, str]:
@@ -303,66 +310,62 @@ class TestClose:
 
 
 class TestReopen:
-    async def test_以前端實際送出的欄位再開課(self, client, db) -> None:
-        """🔴 迴歸測試：請求**只帶起訖時間與 version**，不帶 `course_name`。
+    async def test_不帶任何_body_即可再開課(self, client, db) -> None:
+        """🔴 #720：`POST /reopen` **沒有 request body**，新起訖改走暫存。
 
-        `ReopenCourseReq` 原本繼承 `_CourseFields`（為了沿用時區補正與「迄 > 起」兩個
-        驗證器），於是把 `course_name` 的**必填性**一起繼承了。前端的 `ReopenPayload`
-        只有三個欄位，所以真實操作每一次都被擋成 422 `COMMON_422`「以下欄位不符規定：
-        course_name」——而教師在再開課視窗從未見過那個欄位，AC 8 在真實環境完全不可用。
+        這條取代了原本的「前端實際送出的欄位能通過 schema」——那時 `ReopenCourseReq`
+        曾因繼承 `_CourseFields` 而把 `course_name` 的必填性一起繼承，真實呼叫每次都被
+        擋成 `COMMON_422`。schema 整個移除之後，同一類缺陷的形狀變成「後端又開始要求
+        body」，所以斷言也跟著變成「不送任何東西要能成功」。
 
-        本檔其餘案例都沒抓到，是因為它們在 JSON 裡**多塞了** `course_name`（那不是真實
-        呼叫端會送的內容）；前端測試的 MSW handler 又不驗 request body。三層測試各自
-        成立，卻沒有一層驗過「前端實際組出的 payload 能通過後端 schema」。
-
-        ⚠️ 這條測試的 payload 必須與 `frontend/src/et/courses/schemas.ts` 的
-        `ReopenPayload` **逐欄一致**。改動任一邊時請同步。
+        ⚠️ 前端 `coursesApi.reopen` 必須同樣不送 body。改動任一邊時請同步。
         """
         uid = await _user(db, "t_ro00")
         ctx = await _published_course(client, db, uid)
-        closed = await client.post(
+        await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
 
-        r = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/reopen",
-            json={
-                "open_start_at": _future(1),
-                "open_end_at": _future(400),
-                "version": closed.json()["version"],
-            },
-            headers=_bearer(uid),
-        )
+        r = await client.post(f"{_COURSES}/{ctx['course_id']}/reopen", headers=_bearer(uid))
 
         assert r.status_code == 200, r.text
         assert r.json()["status"] == COURSE_PUBLISHED
 
-    async def test_再開課不改動課程名稱(self, client, db) -> None:
-        """再開課只改起訖與狀態。夾帶 `course_name` 也不會被寫入（schema 已無此欄位）。
+    async def test_夾帶的起訖不得被採信(self, client, db) -> None:
+        """🥇 **#720 最重要的一條迴歸守門：檢核一組、套用另一組不得復活。**
 
-        基本資料的修改走 `PUT /courses/{id}`——兩支端點的職責不重疊，否則「再開課」會
-        變成一個可以順手改任何欄位的後門。
+        起訖自 #720 起只有一個來源（暫存區）。若有人為了「相容舊前端」而讓 reopen 重新
+        讀 body，就會出現 `ensure_reopen_schedule` 檢核 body 的日期、`apply_stage` 寫入
+        暫存的日期——兩者可以不同，而那正是 #720 要消滅的「檢核通過但生效後不合格」。
+
+        本條夾帶一組**與暫存完全不同**的起訖，斷言活表落的是暫存那一組。
+
+        ⛔ 這條紅掉時不要改斷言去遷就 body；要改的是重新讀 body 的那段程式碼。
         """
         uid = await _user(db, "t_ro00b")
         ctx = await _published_course(client, db, uid)
         original = (await _course_row(db, ctx["course_id"])).course_name
-        closed = await client.post(
+        await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
+        staged_end = _future(400)
+        await stage_schedule(client, _bearer(uid), ctx["course_id"], start=_future(1), end=staged_end)
 
         r = await client.post(
             f"{_COURSES}/{ctx['course_id']}/reopen",
             json={
                 "course_name": "被夾帶的新名稱",
-                "open_start_at": _future(1),
-                "open_end_at": _future(400),
-                "version": closed.json()["version"],
+                "open_start_at": "2020-01-01T00:00:00Z",
+                "open_end_at": _future(999),
+                "version": 0,
             },
             headers=_bearer(uid),
         )
 
         assert r.status_code == 200, r.text
-        assert (await _course_row(db, ctx["course_id"])).course_name == original
+        row = await _course_row(db, ctx["course_id"])
+        assert row.open_end_at == datetime.fromisoformat(staged_end), "活表的訖止必須是**暫存**那一組"
+        assert row.course_name == original, "再開課不是可以順手改任何欄位的後門"
 
     async def test_再開課寫入稽核紀錄(self, client, db) -> None:
         """與 `test_關閉寫入稽核紀錄` 對稱——US11 在 `spec.md` §稽核來源功能碼表內。
@@ -373,15 +376,11 @@ class TestReopen:
 
         uid = await _user(db, "t_ro08")
         ctx = await _published_course(client, db, uid)
-        closed = await client.post(
+        await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
 
-        await client.post(
-            f"{_COURSES}/{ctx['course_id']}/reopen",
-            json={"open_start_at": _future(1), "open_end_at": _future(400), "version": closed.json()["version"]},
-            headers=_bearer(uid),
-        )
+        await client.post(f"{_COURSES}/{ctx['course_id']}/reopen", headers=_bearer(uid))
 
         rows = (
             await db.scalars(
@@ -390,7 +389,7 @@ class TestReopen:
                 )
             )
         ).all()
-        assert any(r.description == "再開課" for r in rows)
+        assert any(r.description == "更新並重開課" for r in rows)
 
     async def test_再開課回PUBLISHED並歸零加急提醒旗標(self, client, db) -> None:
         """AC 8 / FR-ET-US11-09。
@@ -503,74 +502,77 @@ class TestReopen:
         assert r.status_code == 409
         assert r.json()["error_code"] == "ET_COURSE_007"
 
-    async def test_再開課缺起訖時間回422(self, client, db) -> None:
-        """AC 8：**強制**帶新起訖時間，未填妥不可送出（schema 層必填 → `COMMON_422`）。"""
-        uid = await _user(db, "t_ro05")
-        ctx = await _published_course(client, db, uid)
-        closed = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
-        )
+    async def test_期間已過的課程沒設新起訖就再開課被擋(self, client, db) -> None:
+        """🔴 **「強制重新設定」在後端僅存的那一半**（#720，2026-10-20 裁示）。
 
-        r = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/reopen",
-            json={"course_name": "x", "version": closed.json()["version"]},
-            headers=_bearer(uid),
-        )
+        原本的強制來自 `ReopenCourseReq` 把起訖設成必填；#720 拿掉 body 之後，沒開過
+        編輯工作階段時起訖會**沿用活表舊值**。裁示保留「真正要防的事」——不讓課程重開
+        成一個已經過期的期間——放棄「必須改過」。
 
-        assert r.status_code == 422
-        assert (await _course_row(db, ctx["course_id"])).status == COURSE_CLOSED
+        ⇒ 期間已過的課程不填新日期就按，照樣擋下；教師必須去基本資料卡填。
 
-    async def test_再開課之訖止時間已過回_ET_COURSE_008(self, client, db) -> None:
-        """🔴 SA Q3 裁示 A 的唯一驗證點（HTTP 層真的回得出這個碼）。
-
-        不檢核的話直呼 API 就能造出「已發布但期間已過」的課程：教師端看到已發布、
-        學員端卻被 `is_within_open_window` 判為視同關閉而進不去，狀態自相矛盾。
-
-        ⚠️ 也確認這個碼**沒有被 schema 層先攔掉**（#284 的 `ET_SURVEY_016` 曾經如此）
-        ——起訖仍滿足「迄 > 起」，只是兩者都在過去。
+        不擋的話直呼 API 就能造出「已發布但期間已過」的課程：教師端看到已發布、學員端
+        卻被 `is_within_open_window` 判為視同關閉而進不去，狀態自相矛盾。
         """
         uid = await _user(db, "t_ro06")
         ctx = await _published_course(client, db, uid)
-        closed = await client.post(
+        await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
-
-        r = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/reopen",
-            json={
-                "course_name": "x",
-                "open_start_at": "2020-01-01T00:00:00Z",
-                "open_end_at": "2020-12-31T00:00:00Z",
-                "version": closed.json()["version"],
-            },
-            headers=_bearer(uid),
+        # 直接改活表讓期間落在過去——這正是「期間已過而關閉」的那門課的樣子。
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == ctx["course_id"])
+            .values(open_start_at=datetime(2020, 1, 1, tzinfo=timezone.utc), open_end_at=_PAST_END)
         )
+        await db.flush()
+
+        r = await client.post(f"{_COURSES}/{ctx['course_id']}/reopen", headers=_bearer(uid))
 
         assert r.status_code == 422, r.text
         assert r.json()["error_code"] == "ET_COURSE_008"
         assert r.json()["error_message"] == "請重新設定一組新的起訖時間後方可再開課"
         assert (await _course_row(db, ctx["course_id"])).status == COURSE_CLOSED
 
-    async def test_再開課之起始時間可落在過去(self, client, db) -> None:
-        """裁示 A 只檢核訖止——「補開一段已經開始的期間」是合理操作。"""
-        uid = await _user(db, "t_ro07")
+    async def test_訖止仍在未來的課程不改日期也能再開課(self, client, db) -> None:
+        """🥇 2026-10-20 裁示的另一半：**提前手動關閉、反悔重開，不必亂改日期**。
+
+        少了這條，把守門寫成「起訖須與活表不同」也會讓上一條通過——而那會逼這位教師
+        隨便改一個日期才過得去，他只是反悔，原本那組日期本來就有效。
+
+        ⚠️ 本條與上一條**必須成對**：單獨看任一條都推不出判準是「訖止 > 當下」而非
+        「必須改過」。
+        """
+        uid = await _user(db, "t_ro05")
         ctx = await _published_course(client, db, uid)
-        closed = await client.post(
+        before = (await _course_row(db, ctx["course_id"])).open_end_at
+        await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
 
-        r = await client.post(
-            f"{_COURSES}/{ctx['course_id']}/reopen",
-            json={
-                "course_name": "x",
-                "open_start_at": "2020-01-01T00:00:00Z",
-                "open_end_at": _future(400),
-                "version": closed.json()["version"],
-            },
-            headers=_bearer(uid),
+        r = await client.post(f"{_COURSES}/{ctx['course_id']}/reopen", headers=_bearer(uid))
+
+        assert r.status_code == 200, r.text
+        assert (await _course_row(db, ctx["course_id"])).open_end_at == before, "沿用原本那組日期"
+
+    async def test_再開課之起始時間可落在過去(self, client, db) -> None:
+        """裁示 A 只檢核訖止——「補開一段已經開始的期間」是合理操作。
+
+        ⚠️ 起訖改由**暫存**帶（#720），所以這裡要先寫進基本資料；直接塞進 body 的話
+        它會被忽略，這條就變成在驗「活表原本的起始時間」而不是教師新填的那個。
+        """
+        uid = await _user(db, "t_ro07")
+        ctx = await _published_course(client, db, uid)
+        await client.post(
+            f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
+        )
+
+        r = await reopen_with_schedule(
+            client, _bearer(uid), ctx["course_id"], start="2020-01-01T00:00:00Z", end=_future(400)
         )
 
         assert r.status_code == 200, r.text
+        assert (await _course_row(db, ctx["course_id"])).open_start_at == datetime(2020, 1, 1, tzinfo=timezone.utc)
 
     async def test_非擁有者再開課回403(self, client, db) -> None:
         uid = await _user(db, "t_ro08")
@@ -846,16 +848,25 @@ class TestEditableWhileClosed:
     async def test_關閉期間仍可編輯課程內容(self, client, db) -> None:
         """AC 6 / FR-ET-US11-07（2026-07-02 變更：原「唯讀」改為可編輯，供準備下次開課）。
 
-        驗兩件事：改基本資料、新增章節。兩者都是 `PUT /courses/{id}` 與
-        `POST /courses/{id}/chapters`——**它們本來就沒有檢核狀態**，故本測試是釘住
-        「不要在日後為關閉加上唯讀限制」，而非驗證新寫的程式碼。
+        釘住「不要在日後為關閉加上唯讀限制」：改基本資料與新增章節都要過得去。
+
+        ## ⚠️ #720 改了「過得去」之後東西落在哪裡
+
+        本條原本斷言**活表**的 `COURSE_NAME` 變成新名稱。#720 之後已關閉課程的基本資料
+        改走暫存區——學員唯讀回看的仍是關閉前的內容，要到「更新並重開課」才生效。
+
+        ⇒ 斷言改成三件事：編輯**沒被擋下**（AC 6 的本意）、**教師看得到**（編輯是真的）、
+        **活表沒動**（#720 的本意）。少了最後一條，把實作改回即時寫活表也會讓本條通過，
+        而那正是 2026-10-19 手測回報的第一個 bug。
         """
         uid = await _user(db, "t_ed01")
         ctx = await _published_course(client, db, uid)
-        closed = await client.post(
+        await client.post(
             f"{_COURSES}/{ctx['course_id']}/close", json={"version": ctx["version"]}, headers=_bearer(uid)
         )
         tag_id = await _tag(db, f"標籤{ctx['course_id']}")
+        original_name = (await _course_row(db, ctx["course_id"])).course_name
+        detail = (await client.get(f"{_COURSES}/{ctx['course_id']}", headers=_bearer(uid))).json()
 
         updated = await client.put(
             f"{_COURSES}/{ctx['course_id']}",
@@ -863,9 +874,11 @@ class TestEditableWhileClosed:
                 "course_name": "關閉期間改過的名稱",
                 "audiences": [await role_pair(db, tag_id)],
                 "require_approval": False,
-                "open_start_at": "2026-09-01T00:00:00Z",
-                "open_end_at": "2027-09-30T00:00:00Z",
-                "version": closed.json()["version"],
+                # ⚠️ 不寫死日期：`2027-09-30` 這類固定年份是定時炸彈，到期後整條測試
+                # 會因為「訖止已過」而紅，而紅的理由與它要驗的事無關。
+                "open_start_at": _future(1),
+                "open_end_at": _future(400),
+                "version": detail["version"],
             },
             headers=_bearer(uid),
         )
@@ -876,8 +889,12 @@ class TestEditableWhileClosed:
         )
         assert added.status_code == 201, added.text
 
+        after = (await client.get(f"{_COURSES}/{ctx['course_id']}", headers=_bearer(uid))).json()
+        assert after["course_name"] == "關閉期間改過的名稱", "教師必須看得到自己剛做的編輯"
+        assert [c["chapter_name"] for c in after["chapters"]].count("關閉期間新增的章節") == 1
+
         row = await _course_row(db, ctx["course_id"])
-        assert row.course_name == "關閉期間改過的名稱"
+        assert row.course_name == original_name, "學員唯讀回看的仍是關閉前的內容（#720）"
         assert row.status == COURSE_CLOSED, "編輯內容不應改變課程狀態"
 
 
@@ -1022,12 +1039,20 @@ class TestReopenAutoEnrollsAudiences:
         return closed.json()["version"]
 
     @staticmethod
-    async def _reopen(client, uid: str, course_id: int, version: int, start: str) -> None:
-        r = await client.post(
-            f"{_COURSES}/{course_id}/reopen",
-            json={"open_start_at": start, "open_end_at": _future(400), "version": version},
-            headers=_bearer(uid),
-        )
+    async def _reopen(client, uid: str, course_id: int, start: str) -> None:
+        """#720：新起訖先寫進基本資料（暫存），reopen 本身沒有 body。"""
+        r = await reopen_with_schedule(client, _bearer(uid), course_id, start=start, end=_future(400))
+        assert r.status_code == 200, r.text
+
+    @staticmethod
+    async def _apply(client, uid: str, course_id: int) -> None:
+        """按「更新」——#720 之後基本資料的變更要到這一刻才對學員生效。
+
+        🔴 延長期間使課程復活時的帶入與邀請信因此也落在這裡，不在 `PUT` 當下：那時活表
+        一個欄位都沒動，課程**還沒有復活**，在那裡寄信是寄出一件還沒發生的事（教師接著
+        按「取消」的話，它從頭到尾不曾發生）。
+        """
+        r = await client.post(f"{_COURSES}/{course_id}/content/apply", headers=_bearer(uid))
         assert r.status_code == 200, r.text
 
     async def test_關閉期間新增的受訓對象於再開課時帶入並寄信_信內為新起訖(self, client, db) -> None:
@@ -1038,7 +1063,7 @@ class TestReopenAutoEnrollsAudiences:
 
         uid = await _user(db, "t_ra01")
         ctx = await _published_course(client, db, uid)
-        version = await self._close(client, uid, ctx)
+        await self._close(client, uid, ctx)
 
         # 關閉期間新增一組受訓對象，且有一位相符的學員
         role = await new_tag(db, "職位_ra01")
@@ -1048,7 +1073,7 @@ class TestReopenAutoEnrollsAudiences:
         assert await self._enrollment(db, student, ctx["course_id"]) is None
 
         start = _future(3)
-        await self._reopen(client, uid, ctx["course_id"], version, start)
+        await self._reopen(client, uid, ctx["course_id"], start)
 
         enrolled = await self._enrollment(db, student, ctx["course_id"])
         assert enrolled is not None and enrolled.is_removed is False
@@ -1066,13 +1091,13 @@ class TestReopenAutoEnrollsAudiences:
 
         uid = await _user(db, "t_ra02")
         ctx = await _published_course(client, db, uid)
-        version = await self._close(client, uid, ctx)
+        await self._close(client, uid, ctx)
 
         existing_role = await _tag(db, f"標籤{ctx['course_id']}")
         student = await _user(db, "s_ra02", role=ROLE_STUDENT)
         await pair_user(db, student, existing_role)
 
-        await self._reopen(client, uid, ctx["course_id"], version, _future(1))
+        await self._reopen(client, uid, ctx["course_id"], _future(1))
 
         assert await self._enrollment(db, student, ctx["course_id"]) is not None
         assert len(await self._pending_invites(db, f"{student}@edms.local")) == 1
@@ -1090,9 +1115,9 @@ class TestReopenAutoEnrollsAudiences:
         # 正向錨點：同配對下另一位新符合者確實被帶入——證明帶入真的跑過
         fresh = await _user(db, "s_ra03b", role=ROLE_STUDENT)
         await pair_user(db, fresh, existing_role)
-        version = await self._close(client, uid, ctx)
+        await self._close(client, uid, ctx)
 
-        await self._reopen(client, uid, ctx["course_id"], version, _future(1))
+        await self._reopen(client, uid, ctx["course_id"], _future(1))
 
         assert await self._enrollment(db, fresh, ctx["course_id"]) is not None
         rows = list(
@@ -1115,9 +1140,9 @@ class TestReopenAutoEnrollsAudiences:
         # 正向錨點：同配對下另一位新符合者確實被帶入——否則「沒被帶回」在帶入根本沒執行時也恆真
         fresh = await _user(db, "s_ra04b", role=ROLE_STUDENT)
         await pair_user(db, fresh, existing_role)
-        version = await self._close(client, uid, ctx)
+        await self._close(client, uid, ctx)
 
-        await self._reopen(client, uid, ctx["course_id"], version, _future(1))
+        await self._reopen(client, uid, ctx["course_id"], _future(1))
 
         assert await self._enrollment(db, fresh, ctx["course_id"]) is not None
         row = await self._enrollment(db, removed, ctx["course_id"])
@@ -1125,7 +1150,10 @@ class TestReopenAutoEnrollsAudiences:
         assert await self._pending_invites(db, f"{removed}@edms.local") == []
 
     async def test_延長期間讓視同關閉的課程復活時比照再開課帶入(self, client, db) -> None:
-        """`PUT` 延長期間讓「期間已過、狀態仍為 PUBLISHED」的課程復活——期間已過時加的配對同樣沒被帶入過。"""
+        """延長期間讓「期間已過、狀態仍為 PUBLISHED」的課程復活——期間已過時加的配對同樣沒被帶入過。
+
+        ⚠️ #720：延長寫進暫存，**復活發生在按「更新」的那一刻**，帶入與邀請信隨之。
+        """
         from datetime import timedelta
 
         from tests.integration.et._tag_pairs import audiences_req, new_tag, pair_course, pair_user
@@ -1158,15 +1186,23 @@ class TestReopenAutoEnrollsAudiences:
         )
 
         assert r.status_code == 204, r.text
+        assert await self._enrollment(db, student, ctx["course_id"]) is None, (
+            "🔴 `PUT` 當下活表還沒動、課程還沒復活——此刻帶入就是帶入一件還沒發生的事"
+        )
+
+        await self._apply(client, uid, ctx["course_id"])
+
         assert await self._enrollment(db, student, ctx["course_id"]) is not None
         assert len(await self._pending_invites(db, f"{student}@edms.local")) == 1
 
-    async def test_同一次PUT復活並新增配對_依全部配對帶入且各只寄一封(self, client, db) -> None:
+    async def test_復活並新增配對_依全部配對帶入且各只寄一封(self, client, db) -> None:
         """復活與新增配對同時發生——走「全部配對」那支，舊配對的人也要帶入。
 
-        ⚠️ 本條**驗不到**「`if revived` / `elif tags_add` 兩者擇一」：若兩支都執行，第二支的
+        ⚠️ 本條**驗不到**「`if revived` / `elif new_pairs` 兩者擇一」：若兩支都執行，第二支的
         `bulk_enroll_returning` 因 `ON CONFLICT DO NOTHING` 不會新增、也就不寄信，結果相同。
-        它守的是：此情形下若只走 `tags_add`（舊行為），只符合舊配對的人會被漏掉。
+        它守的是：此情形下若只走 `new_pairs`（舊行為），只符合舊配對的人會被漏掉。
+
+        ⚠️ #720：兩者現在都發生在按「更新」的那一刻（`update_published`），不在 `PUT`。
         """
         from datetime import timedelta
 
@@ -1203,6 +1239,8 @@ class TestReopenAutoEnrollsAudiences:
         )
 
         assert r.status_code == 204, r.text
+        await self._apply(client, uid, ctx["course_id"])
+
         for student in (old_match, new_match):
             assert await self._enrollment(db, student, ctx["course_id"]) is not None, student
             assert len(await self._pending_invites(db, f"{student}@edms.local")) == 1, student

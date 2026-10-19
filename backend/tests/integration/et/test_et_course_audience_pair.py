@@ -11,7 +11,7 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import TAG_TYPE_UNIT, EtTag
-from app.et.constants import COURSE_PUBLISHED, ROLE_STUDENT, ROLE_TEACHER
+from app.et.constants import COURSE_PUBLISHED, ITEM_MATERIAL, ROLE_STUDENT, ROLE_TEACHER
 from app.et.course.models import EtCourse
 from app.et.progress.models import EtEnrollment
 from app.et.roles.models import EtUserRole
@@ -89,6 +89,25 @@ async def _put_audiences(client, teacher: str, cid: int, audiences: list[dict]):
         },
         headers=_bearer(teacher),
     )
+
+
+async def _add_minimal_content(client, teacher: str, cid: int) -> None:
+    """補一章一教材，讓這門課過得了發布檢核。
+
+    ⚠️ #720 之後才需要：受訓對象的帶入與邀請信移到「更新」（`content/apply`），而更新
+    會重跑發布六項檢核。本檔其餘案例不打更新，故**只有需要驗帶入的那條**要備內容。
+
+    ⛔ 必須在 `_publish_directly` **之前**呼叫：課程一旦是已發布，新增章節就走暫存區，
+    這份內容會在這裡變成「本次編輯新增的東西」而混進被驗的那批差異裡。
+    """
+    ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(teacher))
+    assert ch.status_code == 201, ch.text
+    item = await client.post(
+        f"/api/et/chapters/{ch.json()['chapter_id']}/items",
+        json={"item_type": ITEM_MATERIAL, "title": "教材"},
+        headers=_bearer(teacher),
+    )
+    assert item.status_code == 201, item.text
 
 
 async def _publish_directly(db, cid: int) -> None:
@@ -191,6 +210,7 @@ class TestPublishedCourse:
         nurse, clerk, tsgh = await tag_id(db, "護理師"), await tag_id(db, "行政人員"), await tag_id(db, _TSGH)
         old_pair = _pair(tsgh, nurse)
         cid = await _create(client, teacher, [old_pair])
+        await _add_minimal_content(client, teacher, cid)
         await _publish_directly(db, cid)
         late_nurse = await _user(db, "s_cp07a")  # 發布後才掛上舊配對——不屬於這條路徑
         new_clerk = await _user(db, "s_cp07b")
@@ -200,6 +220,11 @@ class TestPublishedCourse:
         r = await _put_audiences(client, teacher, cid, [old_pair, _pair(tsgh, clerk)])
 
         assert r.status_code == 204, r.text
+        # ⚠️ #720：已發布課程的受訓對象改走暫存，帶入與寄信落在按「更新」那一刻。
+        # 在 `PUT` 當下帶入是帶入一件還沒發生的事（教師可以接著按「取消」）。
+        applied = await client.post(f"/api/et/courses/{cid}/content/apply", headers=_bearer(teacher))
+        assert applied.status_code == 200, applied.text
+
         enrolled = set(
             await db.scalars(
                 select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid, EtEnrollment.deleted == 0)
