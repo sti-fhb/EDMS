@@ -526,7 +526,7 @@ _NOT_CONTENT_WRITES: Final[dict[str, str]] = {
     "POST /api/et/courses/{course_id}/content/apply": "**這支就是生效入口**",
     "DELETE /api/et/courses/{course_id}/content/stage": "放棄暫存——只刪暫存列，活表不動",
     # #720：兩支都只動暫存列的**去留**，連暫存的內容都不改。
-    "POST /api/et/courses/{course_id}/content/draft": "「儲存草稿」只標記暫存樹要留著，活表不動",
+    "POST /api/et/courses/{course_id}/content/keep": "「保留編輯」只標記暫存樹要留著，活表不動",
     "DELETE /api/et/courses/{course_id}/content/stage/unkept": "丟棄未保留的殘留——只刪暫存列，活表不動",
     # ⚠️ 它**會**動暫存列（把問卷子樹從活表重抄一份），但不動活表——學員看到的內容
     # 在前後完全相同，這正是「放棄」的定義。與上一條同類（#712）。

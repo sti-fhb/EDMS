@@ -507,26 +507,30 @@ async def discard_survey_edits(
 
 
 @router.post(
-    "/courses/{course_id}/content/draft",
+    "/courses/{course_id}/content/keep",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
 )
-async def keep_course_draft(
+async def keep_course_edits(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """ET05「儲存草稿」（已關閉課程）：把這一輪的編輯留著，**不對學員生效**（#720）。
+    """ET05「保留編輯」（已關閉課程）：把這一輪的編輯留著，**不對學員生效**（#720）。
 
-    已關閉課程的動作列是「取消｜儲存草稿｜更新並重開課」。中間這顆是給「半成品先存著、
+    已關閉課程的動作列是「取消｜保留編輯｜更新並重開課」。中間這顆是給「半成品先留著、
     下次再弄」用的：**不跑發布檢核**（2026-10-19 裁示），學員唯讀回看的仍是關閉前的內容。
 
-    > 🔴 已發布課程**沒有**這顆鈕（同日裁示）。它的內容隨時對學員生效，多一個「存著不發」
-    > 的狀態會讓教師以為自己已經處理完了。回 409 `ET_COURSE_011`。
+    > 🔴 **它標記去留，不是還原點。** 設的是旗標、不複製暫存樹，所以按下當下的那一版在
+    > 下一次編輯後就回不去了。路徑與鈕名都刻意避開「draft / 草稿」（2026-10-20 裁示）
+    > ——那個字承諾一個回得去的版本。⛔ 不要改回 `content/draft`。
+
+    > 🔴 已發布課程**沒有**這顆鈕（2026-10-19 裁示）。它的內容隨時對學員生效，多一個
+    > 「留著不發」的狀態會讓教師以為自己已經處理完了。回 409 `ET_COURSE_011`。
 
     沒有這顆鈕按過的暫存樹，教師下次進編輯頁時會被 `content/stage/unkept` 丟掉。
     """
-    await _publish_service.keep_draft(db, course_id, operator=operator)
+    await _publish_service.keep_edits(db, course_id, operator=operator)
 
 
 @router.delete(
@@ -539,12 +543,12 @@ async def discard_unkept_stage(
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """ET05 進入編輯頁時呼叫：丟掉**沒按過「儲存草稿」**的暫存殘留（#720）。
+    """ET05 進入編輯頁時呼叫：丟掉**沒按過「保留編輯」**的暫存殘留（#720）。
 
     「沒按更新就離開 ＝ 放棄本次全部編輯」這個保證，光靠前端攔截離開是**假的**——
     關分頁、當機、斷線都繞得過去。殘留最糟的不是它存在，而是教師看不出那是殘留。
 
-    冪等：沒有暫存區、或暫存區已被標記保留時，一樣回 204 而不做任何事。
+    冪等：沒有暫存區、或暫存樹已被標記保留時，一樣回 204 而不做任何事。
     草稿課程**靜默略過**（不回 409）——前端對所有狀態一律呼叫本支，為草稿回錯誤只會
     逼前端去判斷狀態，而那個判斷遲早與後端分岔。
     """

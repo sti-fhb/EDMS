@@ -372,25 +372,36 @@ class EtPublishService:
             # 編輯中的文字寫進稽核表。
             await self._log(db, operator.user_id, course_id, f"放棄尚未更新的課程內容編輯（{removed} 項）")
 
-    async def keep_draft(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
-        """「儲存草稿」：把暫存樹標記為**要留著**，不碰活表、不跑檢核（#720）。
+    async def keep_edits(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
+        """「保留編輯」：把暫存樹標記為**要留著**，不碰活表、不跑檢核（#720）。
+
+        ## 🔴 它標記去留，不建立還原點
+
+        設的是旗標，**不複製、不快照**。之後每一次編輯都就地改同一批暫存列，所以按下這顆
+        鈕當下的那一版，在教師打下一個字的瞬間就沒了——沒有任何路徑回得去。
+
+        ⇒ 鈕名因此**刻意不叫「儲存草稿」**（2026-10-20 裁示）：那個名字承諾一個回得去的
+        版本，而這裡沒有。⛔ 不要改回去。若日後真要做成還原點，那是「按鈕時複製一份暫存
+        樹」＋一個「還原」動作，不是改這裡的字。
+
+        ⚠️ 與草稿狀態的「儲存草稿」是**兩回事**：那門課本身就是草稿，那顆鈕寫的是活表。
 
         ## 它不是「更新」的弱化版
 
         2026-10-19 裁示：已關閉課程的中間那顆鈕**不跑發布檢核**。理由是教師可能只是把
-        半成品存起來下次再弄——拿六項檢核擋他，等於逼他要嘛一次做完、要嘛整份丟掉。
+        半成品留著下次再弄——拿六項檢核擋他，等於逼他要嘛一次做完、要嘛整份丟掉。
         檢核留在「更新並重開課」那一顆，因為那顆才會讓學員看到。
 
         ⇒ 學員此刻唯讀回看的仍是**關閉前的內容**，一個字都沒變。
 
         ## 只有已關閉 / 視同關閉的課程有這顆鈕
 
-        已發布課程刻意不設（同日裁示）：它的內容隨時對學員生效，「存著不發」這個狀態
+        已發布課程刻意不設（同日裁示）：它的內容隨時對學員生效，「留著不發」這個狀態
         會讓教師以為自己已經處理完了。所以已發布的暫存樹恆無 `KEPT_PAYLOAD_KEY`、
         離開即丟（見 `discard_unkept`）。
 
         ⚠️ 旗標寫在課程節點上，經 `set_payload_flag`——它**刻意不遞增 `VERSION`**，
-        否則教師按完「儲存草稿」手上的樂觀鎖令牌就過期，下一個動作無故 409。
+        否則教師按完這顆鈕手上的樂觀鎖令牌就過期，下一個動作無故 409。
 
         Raises:
             AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；
@@ -402,7 +413,7 @@ class EtPublishService:
             # 「這門課還在運作中，編輯請按『更新』」——下一步不同，比照 `006` / `007` 的理由。
             raise AppError(
                 status_code=409,
-                detail="僅已關閉課程可儲存草稿，運作中的課程請改用「更新」",
+                detail="僅已關閉課程可保留編輯，運作中的課程請改用「更新」",
                 error_code="ET_COURSE_011",
             )
         await self._stage.lock_course(db, course_id)
@@ -412,7 +423,7 @@ class EtPublishService:
         if node is None:  # pragma: no cover - `ensure_seeded` 必定建出課程節點
             raise ValueError("暫存樹缺少課程節點（COURSE）")
         await writer.set_payload_flag(db, node.stage_id, KEPT_PAYLOAD_KEY, True, operator)
-        await self._log(db, operator.user_id, course_id, "儲存課程內容草稿（未對學員生效）")
+        await self._log(db, operator.user_id, course_id, "保留課程內容編輯（未對學員生效）")
 
     async def discard_unkept(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
         """進入編輯頁時丟棄**沒被明確保留**的暫存殘留（#720，2026-10-19 裁示 Q1 選項 1）。
@@ -426,7 +437,10 @@ class EtPublishService:
         ## 與「取消」的差別
 
         `discard_content` 無條件清空（教師明確要丟）；本支只清**沒有 `KEPT_PAYLOAD_KEY`**
-        的，已關閉課程按過「儲存草稿」的那一份留著。
+        的，已關閉課程按過「保留編輯」的那一份留著。
+
+        ⚠️ 判準是旗標、**不是**「暫存樹的內容有沒有變過」：後者分不出「教師存心留下的」
+        與「當機留下的」，而那正是本支要分的事。
 
         ## 草稿靜默略過
 

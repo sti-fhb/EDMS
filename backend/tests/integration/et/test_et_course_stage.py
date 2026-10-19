@@ -25,7 +25,14 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEACHER, SURVEY_QUESTION_SINGLE
+from app.et.constants import (
+    COURSE_CLOSED,
+    ITEM_MATERIAL,
+    ITEM_QUIZ,
+    QUESTION_SINGLE,
+    ROLE_TEACHER,
+    SURVEY_QUESTION_SINGLE,
+)
 from app.et.course.models import EtChapter, EtCourse, EtCourseContentStage, EtItem
 from app.et.course.publish_repository import EtPublishRepository
 from app.et.course.publish_rules import evaluate_publish
@@ -878,6 +885,9 @@ class TestDeleterCoverage:
 
 _APPLY = "/api/et/courses/{cid}/content/apply"
 _DISCARD = "/api/et/courses/{cid}/content/stage"
+#: #720：編輯工作階段的第三、第四個出口（保留 / 進頁丟棄）。
+_KEEP = "/api/et/courses/{cid}/content/keep"
+_DISCARD_UNKEPT = "/api/et/courses/{cid}/content/stage/unkept"
 
 
 async def _publish(client, db, uid: str, cid: int) -> None:
@@ -955,6 +965,241 @@ class TestDiscardEndpoint:
 
         assert r.status_code == 403, r.text
         assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+async def _close(db, course_id: int) -> None:
+    """把課程改成已關閉。
+
+    直接寫 DB 而非打 `/close`：那支會要 `CloseCourseReq`、寫關閉原因並寄通知，而本組
+    要驗的是**暫存樹的去留**，不是關閉流程。關閉流程另有 `test_et_course_close_reopen.py`。
+    """
+    await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_CLOSED))
+    await db.flush()
+
+
+async def _seed_with_edit(db, course_id: int, uid: str, chapter_name: str) -> None:
+    """種一棵暫存樹並改掉第一章的名字——「有尚未更新的編輯」的最小構造。"""
+    repo = EtCourseStageRepository()
+    await repo.seed_from_live(db, course_id, _operator(uid))
+    ch = next(n for n in await repo.load_tree(db, course_id) if n.entity_type == ENTITY_CHAPTER)
+    await _set_payload(db, ch.stage_id, {"chapter_name": chapter_name})
+
+
+class TestKeepEdits:
+    """「保留編輯」＝把這一輪的編輯留著、**不對學員生效**（#720，2026-10-19 裁示）。
+
+    ## 🔴 它標記去留，不是還原點
+
+    設的是 `KEPT_PAYLOAD_KEY` 旗標，**不複製暫存樹**。按下當下的那一版在下一次編輯後
+    就回不去了——鈕名與路徑因此刻意避開「草稿」二字（2026-10-20 裁示），本組的
+    `test_不是還原點` 把那件事釘成可觀察的行為，免得日後有人照字面把它當快照用。
+    """
+
+    async def test_已關閉課程保留後暫存樹還在而活表沒動(self, client, db) -> None:
+        """🥇 本端點的核心：留著編輯，學員唯讀回看的仍是關閉前的內容。"""
+        uid = await _user(db, "ZT_K1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "關閉後編到一半的章名")
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is True
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "活表維持關閉前的版本"
+
+    async def test_保留過的暫存樹進頁不會被丟掉(self, client, db) -> None:
+        """🥇 **「保留」唯一的可觀察效果就是這個。**
+
+        少了這條，把 `keep_edits` 寫成只寫稽核 log 的空殼也會讓上一條通過——上一條的
+        「暫存樹還在」是因為沒有人去丟它，不是因為旗標起了作用。
+        """
+        uid = await _user(db, "ZT_K2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "要留著的章名")
+        await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is True
+
+    async def test_不是還原點(self, client, db) -> None:
+        """🔴 **保留之後再編輯，留下的是改過的那一棵，不是按鈕當下的那一版。**
+
+        這條不是在驗一個 bug，是把「這顆鈕沒有快照」釘成白紙黑字的契約。2026-10-20
+        裁示據以把鈕名從「儲存草稿」改成「保留編輯」——那個名字承諾一個回得去的版本。
+
+        ⛔ 若日後有人把它做成真的還原點，這條會紅，而**那時候該改的是這條測試**（連同
+        鈕名），不是把斷言放寬。
+        """
+        uid = await _user(db, "ZT_K3")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "按鈕當下的章名")
+        await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        repo = EtCourseStageRepository()
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "按鈕之後又改的章名"})
+        await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        names = [n.payload["chapter_name"] for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER]
+        assert "按鈕之後又改的章名" in names
+        assert "按鈕當下的章名" not in names, "沒有任何地方留著按鈕當下的那一版——它不是快照"
+
+    async def test_保留不得遞增暫存課程節點的版本(self, client, db) -> None:
+        """🔴 遞增的話，教師按完這顆鈕手上的樂觀鎖令牌就過期，**下一個動作無故 409**。
+
+        而畫面上只會說「資料已被其他使用者修改」——他是唯一的使用者。
+        """
+        uid = await _user(db, "ZT_K4")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "章名")
+        before = await _course_node_version(db, cid)
+
+        await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert await _course_node_version(db, cid) == before
+
+    async def test_運作中的已發布課程回_409(self, client, db) -> None:
+        """已發布**刻意沒有**這顆鈕（2026-10-19 裁示）：它的內容隨時對學員生效，
+        多一個「留著不發」的狀態會讓教師以為自己已經處理完了。"""
+        uid = await _user(db, "ZT_K5")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_COURSE_011"
+
+    async def test_草稿回_409(self, client, db) -> None:
+        """草稿直接寫活表，沒有暫存樹可保留。⛔ 不共用 `ET_COURSE_010`：下一步不同
+        （那句是「請直接編輯後發布」，這句是「請改用更新」）。"""
+        uid = await _user(db, "ZT_K6")
+        cid = await _full_course(client, db, uid)
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_COURSE_011"
+
+    async def test_視同關閉的課程也可以保留(self, client, db) -> None:
+        """正向錨點：判準是 `is_effectively_closed` 而不是 `status == CLOSED`。
+
+        少了它，把守門寫成比對 `status` 也會讓上面兩條通過——而期間已過的課程狀態仍是
+        `PUBLISHED`（到期自動轉 `CLOSED` 屬 ET-16、未實作），那是**常態**不是邊角。
+        """
+        uid = await _user(db, "ZT_K7")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await db.execute(
+            update(EtCourse).where(EtCourse.course_id == cid).values(open_end_at=utcnow() - timedelta(days=1))
+        )
+        await db.flush()
+        await _seed_with_edit(db, cid, uid, "過期後編的章名")
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+
+class TestDiscardUnkept:
+    """進入編輯頁時丟掉**沒按過「保留編輯」**的暫存殘留（#720 裁示 Q1 選項 1）。
+
+    「沒按更新就離開 ＝ 放棄本次全部編輯」若只靠前端攔截離開，那個保證是**假的**——
+    關分頁、當機、斷線都繞得過去。殘留最糟的不是它存在，而是教師**看不出那是殘留**。
+    """
+
+    async def test_已發布的殘留進頁就丟掉(self, client, db) -> None:
+        """🥇 已發布恆無保留旗標（沒有那顆鈕），所以它的殘留一定是非預期的。"""
+        uid = await _user(db, "ZT_U1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _seed_with_edit(db, cid, uid, "關分頁留下的章名")
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is False
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "只刪暫存列，活表不動"
+
+    async def test_已關閉但沒按保留的殘留一樣丟掉(self, client, db) -> None:
+        """🔴 **判準是旗標，不是課程狀態。**
+
+        少了這條，把實作寫成「已關閉就不丟」也會讓本類其餘測試全綠——而那會讓已關閉
+        課程的「離開即放棄」整條失效，教師關分頁留下的半成品下次進來還在。
+        """
+        uid = await _user(db, "ZT_U2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "關閉後關分頁留下的章名")
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is False
+
+    async def test_沒有暫存區時回_204(self, client, db) -> None:
+        """冪等：前端進頁就打一次，絕大多數情況下本來就沒有殘留。"""
+        uid = await _user(db, "ZT_U3")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+    async def test_草稿靜默略過而非_409(self, client, db) -> None:
+        """⚠️ 與「取消」（`_DISCARD`，草稿回 409）**刻意相反**。
+
+        那支是教師按了鈕，誤導到草稿要看得見；這支是前端進頁的例行動作，為草稿回錯誤
+        只會逼前端去判斷課程狀態，而那個判斷遲早與後端分岔。
+        """
+        uid = await _user(db, "ZT_U4")
+        cid = await _full_course(client, db, uid)
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+    async def test_非擁有者回_403(self, client, db) -> None:
+        """他人不得丟掉擁有者的編輯。
+
+        ⚠️ 不斷言「暫存區還在」——失敗的請求會回滾整個交易、連前置的暫存列一起清掉，
+        那條斷言必然通過但驗的是 harness 的性質（理由全文見 `TestDiscardEndpoint`）。
+        """
+        uid = await _user(db, "ZT_U5")
+        other = await _user(db, "ZT_U6")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _seed_with_edit(db, cid, uid, "章名")
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(other))
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+async def _course_node_version(db, course_id: int) -> int:
+    """暫存樹裡課程節點的 `VERSION`——課程層的樂觀鎖令牌（#720）。"""
+    node = await db.scalar(
+        select(EtCourseContentStage).where(
+            EtCourseContentStage.course_id == course_id,
+            EtCourseContentStage.entity_type == ENTITY_COURSE,
+            EtCourseContentStage.deleted == 0,
+        )
+    )
+    assert node is not None, "前置失敗：暫存樹裡沒有課程節點"
+    return node.version
 
 
 class TestUpdateEndpoint:
