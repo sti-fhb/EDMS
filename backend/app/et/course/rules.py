@@ -219,18 +219,34 @@ def ensure_closable(status: str) -> None:
         raise AppError(status_code=409, detail="僅已發布課程可關閉", error_code="ET_COURSE_006")
 
 
-def ensure_reopenable(status: str) -> None:
-    """僅已關閉課程可再開課（US11 AC 8）。
+def ensure_reopenable(*, status: str, open_end_at: datetime | None, now: datetime) -> None:
+    """**視同關閉**的課程可重新開課（US11 AC 8；2026-10-19 由 #720 放寬）。
 
     與 `ensure_closable` **刻意分成兩個錯誤碼**：兩者的下一步不同（「這門課還沒發布」
     → 去發布；「這門課已經關了」→ 去再開課），共用單一碼會讓前端只能顯示一句模稜
     兩可的訊息。措辭比照 `ET_COURSE_005`（「僅草稿課程可刪除，已發布課程請改用關閉」）
     那種「這個狀態不給做，請改用另一個動作」的形狀。
 
+    ## 🔴 #720 放寬的理由——原本的 `status != COURSE_CLOSED` 造成死局
+
+    判準原本是 `status == COURSE_CLOSED`。而**期間已過的課程 `status` 仍是 `PUBLISHED`**
+    （到期自動轉 `CLOSED` 屬未實作的 ET-16，故此為**常態**）。#720 讓編輯頁依
+    `is_closed`（＝ `is_effectively_closed`）分流動作列之後，那種課程拿到的是
+    「取消｜保留編輯｜更新並重開課」——而「更新」鈕不顯示：
+
+    1. 教師按「更新並重開課」→ 基本資料寫進暫存（成功）
+    2. → `reopen` 回 409 `ET_COURSE_007`
+    3. 他沒有別的鈕可按 ⇒ **那門課的編輯永遠到不了學員**
+
+    ⇒ 判準改用 `is_effectively_closed`，與前端分流**同一個函式**。兩邊各自判定是這個
+    缺陷的成因，⛔ 不要再讓它們分開。
+
+    ⚠️ 真正要擋的（運作中的已發布課程不得走再開課）仍然成立——它的 `is_closed` 為假。
+
     Raises:
         AppError: 409 `ET_COURSE_007`。
     """
-    if status != COURSE_CLOSED:
+    if not is_effectively_closed(status=status, open_end_at=open_end_at, now=now):
         raise AppError(status_code=409, detail="僅已關閉課程可再開課", error_code="ET_COURSE_007")
 
 
@@ -312,7 +328,7 @@ def is_pending_open(*, status: str, open_start_at: datetime | None, now: datetim
     return status == COURSE_PUBLISHED and open_start_at is not None and now < open_start_at
 
 
-def ensure_reopen_schedule(*, open_end_at: datetime, now: datetime) -> None:
+def ensure_reopen_schedule(*, open_end_at: datetime | None, now: datetime) -> None:
     """再開課的新訖止時間須**嚴格晚於當下**（#288 SA Q3 裁示 A）。
 
     ## 為何這裡檢核「對比當下」，而 `schemas._end_after_start` 刻意不檢核
@@ -348,7 +364,14 @@ def ensure_reopen_schedule(*, open_end_at: datetime, now: datetime) -> None:
     Raises:
         AppError: 422 `ET_COURSE_008`（訊息即 `ET-MSG-ET05-204`）。
     """
-    if open_end_at <= now:
+    # 🔴 `None` 與「已過去」走同一個出口。
+    #
+    # #720 之前 `ReopenCourseReq._schedule_required` 保證它非 `None`；拿掉 request body
+    # 之後**沒有人接手那個保證**，而訖止為 `None` 的課程是真實存在的（見
+    # `ensure_schedule_not_cleared` 的說明：它只擋「非 NULL 改成 NULL」，擋不住既有的
+    # NULL）。少了這一半，`None <= now` 會 `TypeError` → 500，而教師看到的是一個沒有
+    # 任何線索的錯誤；正確的回應就是這句「請重新設定一組新的起訖時間」。
+    if open_end_at is None or open_end_at <= now:
         raise AppError(
             status_code=422,
             detail="請重新設定一組新的起訖時間後方可再開課",

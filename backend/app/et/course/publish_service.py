@@ -407,6 +407,17 @@ class EtPublishService:
                 409 `ET_COURSE_011` 課程不是已關閉 / 視同關閉（草稿與運作中的已發布皆擋）。
         """
         course = await self._require_owned(db, course_id, operator.user_id)
+        await self._stage.lock_course(db, course_id)
+        await db.refresh(course)
+        # 🔴 **狀態判定在鎖之後**（理由同 `reopen`，兩者是同一個形狀）。
+        #
+        # 排在鎖外的話：`keep_edits` 在鎖外讀到「視同關閉」→ 並行的 `reopen` 取鎖、把課程
+        # 轉成運作中的 `PUBLISHED` 並清空暫存 → `keep_edits` 取到鎖、`ensure_seeded` 種出
+        # **一棵新的樹**並插上 `__kept`。
+        #
+        # 後果不是壞資料，而是**保證失效**：那門課從此恆有保留旗標，`discard_unkept` 永遠
+        # 是 no-op，「沒按更新就離開 ＝ 放棄本次編輯」對它再也不成立——而那正是 #720 的
+        # 主旨。設計上的不變量是「運作中的已發布課程恆無 `__kept`」，這一行是它的守門。
         if not is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()):
             # ⛔ 不共用 `ET_COURSE_010`：那句話是「草稿請直接編輯後發布」，而這裡要說的是
             # 「這門課還在運作中，編輯請按『更新』」——下一步不同，比照 `006` / `007` 的理由。
@@ -415,7 +426,6 @@ class EtPublishService:
                 detail="僅已關閉課程可保留編輯，運作中的課程請改用「更新」",
                 error_code="ET_COURSE_011",
             )
-        await self._stage.lock_course(db, course_id)
         writer = EtCourseStageWriter(self._stage)
         await writer.ensure_seeded(db, course_id, operator)
         node = await writer.course_node(db, course_id)
@@ -598,11 +608,25 @@ class EtPublishService:
                 422 `ET_PUBLISH_001` 六項檢核未通過（body 另帶 `blockers`）。
         """
         course = await self._require_owned(db, course_id, operator.user_id)
-        ensure_reopenable(course.status)
         # 先取行鎖再讀暫存樹——同 `update_published`：這整段（讀 → 檢核 → 套用 → 轉狀態）
         # 必須對同一門課序列化，否則教師雙擊會套用兩次。
         await self._stage.lock_course(db, course_id)
         await db.refresh(course)
+        # 🔴 **狀態判定必須在鎖**之後**。**
+        #
+        # 原本它排在 `lock_course` 之前，而 #720 拿掉 request body 時連樂觀鎖一起拿掉了
+        # ——`mark_reopened` 的 `WHERE version = ?` 現在吃的是持鎖後重讀的值、恆真，
+        # 已不是第二道併發檢查。兩者相加的結果是：
+        #
+        #   兩個請求同時抵達 → 都在鎖外看到 `CLOSED` 而通過 → 甲取鎖、轉成 `PUBLISHED`
+        #   → 乙取鎖，`refresh` 看到 `PUBLISHED` **但沒有人再問一次** → 照樣重開一次
+        #
+        # 可觀察的後果：`URGENT_REMIND_SENT` 被再次歸零，於是 SCHET002 對**已經寄過**
+        # 加急提醒的課程全班重寄一次；稽核多一筆「更新並重開課」。
+        #
+        # ⚠️ 這是**退步**而非既有缺陷：#720 之前那第二個請求會吃 409 `ET_LOCK_001`。
+        # 把檢查搬進鎖內，等於用行鎖取代原本樂觀鎖承擔的那件事。
+        ensure_reopenable(status=course.status, open_end_at=course.open_end_at, now=utcnow())
         nodes = await self._stage.load_tree(db, course_id)
 
         if nodes:
@@ -658,7 +682,7 @@ class EtPublishService:
         #
         # **不重產邀請碼**（Clarifications 仍成立）——邀請碼恢復有效是各處守門判 `STATUS`
         # 自動達成的。
-        await self.enroll_audiences(db, course, operator=operator)
+        invited = await self.enroll_audiences(db, course, operator=operator)
         return CourseStatusResult(
             course_id=course_id,
             status=COURSE_PUBLISHED,
@@ -668,6 +692,11 @@ class EtPublishService:
             # 判斷是否已關閉，那要看 `status`。
             closed_at=closed_at,
             version=new_version,
+            # #720：供結果視窗顯示（比照發布）。**據實顯示 0**——0 代表課程掛的受訓對象
+            # 沒有任何人符合，那是教師需要知道的事實，不是可以隱藏的空狀態。
+            invited_count=len(invited),
+            # 沿用原碼、不重產。教師可能從未抄下來過（#247），重開課是再給他一次機會。
+            invitation_code=course.invitation_code,
         )
 
     async def enroll_audiences(self, db: AsyncSession, course, *, operator: OperatorInfo) -> list[str]:

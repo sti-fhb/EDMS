@@ -1,18 +1,16 @@
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline"
-import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import Alert from "@mui/material/Alert"
-import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
 import CircularProgress from "@mui/material/CircularProgress"
 import Dialog from "@mui/material/Dialog"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogTitle from "@mui/material/DialogTitle"
-import IconButton from "@mui/material/IconButton"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 
 import { BlockerSummary } from "./BlockerDialog"
+import { EnrolledResultSummary } from "./EnrolledResultSummary"
 import type { PublishBlocker, PublishResult } from "./surveySchemas"
 
 interface PublishDialogProps {
@@ -71,34 +69,12 @@ export function PublishDialog({
       <DialogTitle>{result ? "課程已發布" : "發布課程"}</DialogTitle>
       <DialogContent dividers>
         {result ? (
-          <Stack spacing={2}>
-            {/* 帶入人數要據實顯示（#247）：0 通常代表課程掛的標籤沒有任何人掛上，
-                那是設定問題——等學員反映「看不到課」才發現就太晚了。 */}
-            {result.invited_count > 0 ? (
-              <Alert severity="success">課程已發布，已依受訓對象帶入 {result.invited_count} 位學員。</Alert>
-            ) : (
-              <Alert severity="warning">
-                課程已發布，但沒有任何學員符合本課程的受訓對象。請確認受訓對象設定，或將下方邀請碼提供給學員。
-              </Alert>
-            )}
-            <Box>
-              <Typography variant="caption" color="text.secondary">
-                課程邀請碼
-              </Typography>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography variant="h5" fontFamily="monospace" letterSpacing={4}>
-                  {result.invitation_code}
-                </Typography>
-                <IconButton
-                  size="small"
-                  aria-label="複製邀請碼"
-                  onClick={() => void navigator.clipboard?.writeText(result.invitation_code)}
-                >
-                  <ContentCopyIcon fontSize="small" />
-                </IconButton>
-              </Stack>
-            </Box>
-          </Stack>
+          // #720：結果摘要抽成共用元件，與「更新並重開課」的結果視窗同一份（見該元件）
+          <EnrolledResultSummary
+            action="發布"
+            invitedCount={result.invited_count}
+            invitationCode={result.invitation_code}
+          />
         ) : checking ? (
           <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 2 }}>
             <CircularProgress size={20} />

@@ -55,7 +55,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -584,6 +584,56 @@ async def _upsert(
     return live_id_by_stage
 
 
+#: 有**自然鍵唯一索引**、且該索引不含 `DELETED` 的型別 → 新增前必須先找軟刪列復活。
+#:
+#: 🔴 `UQ_ET_COURSE_TAG_COURSE_TAG` 建在 `(COURSE_ID, TAG_ID, UNIT_TAG_ID)` 上、**不含
+#: `DELETED`**，所以「軟刪的那一列」仍然佔著那個鍵。直接 INSERT 會撞唯一鍵 → 500。
+#:
+#: 草稿路徑早就處理了這件事（`EtCourseTagRepository.apply` 的 docstring 明寫「以重新
+#: 啟用既有軟刪除列而非插入新列處理 add」），暫存路徑於 #720 才開始寫這張表，漏了同
+#: 一道。兩個必然會發生的情境：
+#:
+#: 1. 已關閉課程移除某配對（#586 允許）、更新生效後又把它加回來
+#: 2. 同一次編輯裡先移除再加回——`_delete_removed` 先軟刪活表那列，`_upsert` 再插同鍵
+#:
+#: ⚠️ 其餘 12 種型別都只有代理鍵（`Identity` PK），沒有這個問題；**⛔ 不要為了「一致」
+#: 而把它們也加進來**，那會讓每次新增都多一次查詢換取零保護。
+_NATURAL_KEY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    ENTITY_COURSE_TAG: ("course_id", "tag_id", "unit_tag_id"),
+}
+
+
+async def _revive_soft_deleted(
+    db: AsyncSession,
+    spec: Any,
+    values: dict[str, Any],
+    *,
+    operator: OperatorInfo,
+    now: Any,
+) -> int | None:
+    """同自然鍵的軟刪列存在就復活它，回傳其 id；沒有則回 `None` 交給呼叫端 INSERT。
+
+    理由見 `_NATURAL_KEY_FIELDS`。復活而非 INSERT 也讓同一組配對反覆增刪不會累積出
+    一堆軟刪列——與草稿路徑同一個行為。
+    """
+    fields = _NATURAL_KEY_FIELDS.get(spec.entity_type)
+    if fields is None:
+        return None
+    existing = await db.scalar(
+        select(spec.model).where(
+            *(getattr(spec.model, f) == values[f] for f in fields),
+            spec.model.deleted == 1,
+        )
+    )
+    if existing is None:
+        return None
+    existing.deleted = 0
+    existing.updated_user = operator.user_id
+    existing.updated_date = now
+    await db.flush()
+    return getattr(existing, spec.pk)
+
+
 async def _write(
     db: AsyncSession,
     spec: Any,
@@ -631,6 +681,9 @@ async def _write(
             )
         return node.source_id
 
+    revived = await _revive_soft_deleted(db, spec, values, operator=operator, now=now)
+    if revived is not None:
+        return revived
     row = spec.model(**values, created_user=operator.user_id, created_date=now, deleted=0)
     db.add(row)
     # 子層與反向連結要拿它的 id，而那是 Identity 欄位，不 flush 取不到。

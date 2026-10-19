@@ -74,7 +74,9 @@ import {
   type CoursePayload,
 } from "./schemas"
 import { CourseAudiencePairs } from "./CourseAudiencePairs"
+import { EnrolledResultSummary } from "./EnrolledResultSummary"
 import { ownerLabel } from "./schemas"
+import type { CourseStatusResult } from "./schemas"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
@@ -94,12 +96,20 @@ const EMPTY_FORM = {
 /**
  * ET05 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
  *
- * 動作列：取消 / 儲存（草稿為「儲存草稿」）/ **儲存並發布**（僅草稿）/ **更新**（僅
- * 已發布或已關閉）。
+ * 動作列**依課程狀態分流**（#720，詳見底部那一列的註解）：
  *
- * ⚠️ 「儲存」與「更新」管的不是同一件事（#631）：前者寫課程基本資料（名稱 / 說明 /
- * 起訖 / 受訓對象），**不經暫存區、存了就生效**；後者才是把章節與項目等**內容**編輯
- * 整批生效給學員。原本已發布課程的內容編輯是即時生效的（AC 28），#631 之後改為暫存。
+ * | 狀態 | 動作列 |
+ * |---|---|
+ * | 新增中 / 草稿 | （刪除草稿）｜取消｜儲存草稿｜儲存並發布 |
+ * | 已發布（開放期間內）| 取消｜更新 |
+ * | 已關閉 / 視同關閉 | 取消｜保留編輯｜更新並重開課 |
+ *
+ * 🔴 **已發布與已關閉沒有「儲存」鈕。** 本段原本寫著「『儲存』寫課程基本資料……**不經
+ * 暫存區、存了就生效**」——#631 把**內容**改成暫存時那句話還是真的，#720 把基本資料也
+ * 納入之後就不是了。那顆鈕連同那個行為一起移除：基本資料隨教師按的生效鈕一起送
+ * （見 `stageBasic`）。
+ *
+ * ⚠️ 已發布 / 已關閉課程的**所有**編輯都先進暫存區，按生效鈕才整批對學員生效。
  *
  * **非擁有者為唯讀**（`spec.md` §擁有權判定）：顯示檢視模式提示，所有輸入停用、
  * 操作按鈕不顯示。後端另以 `ET_COURSE_002` 把關，前端隱藏僅為 UX。
@@ -327,7 +337,23 @@ export function EtCourseEditorPage() {
   // 寫不進表單——使用者改完名稱存檔、列表已是新的，點進編輯頁卻仍是舊值。
   // DM 編輯頁的 #377 是同一個形狀（見 `DmEditorPage.tsx` 的標籤預帶）。
   const [loadedCourseId, setLoadedCourseId] = useState<number | null>(null)
-  if (course && !courseFetching && loadedCourseId !== course.course_id) {
+  // 🔴 **也必須等「丟棄未保留的殘留」落定**（#720 code review / security review 各自指出）。
+  //
+  // 進頁時兩個請求是並行的：`GET /courses/{id}`（暫存還在，回的是**殘留值**）與
+  // `DELETE /content/stage/unkept`（取行鎖 + 刪除 + 寫稽核，通常比 GET 慢）。
+  // GET 先回來的話，上面那個一次性 guard 會被殘留的課名 / 起訖 / 受訓對象填滿並鎖住；
+  // 丟棄完成後的 `invalidate()` 重抓也寫不進表單（那個 guard 正是要擋重抓覆蓋）。
+  //
+  // 後果不是「畫面顯示舊值」而已——教師按「更新」時 `stageBasic()` 會把那些**已經被
+  // 丟棄的值重新寫回暫存並推給學員**，受訓對象的殘留還會寄出邀請信。這正是這個丟棄
+  // 機制要防的事，等於整個機制自我瓦解。
+  //
+  // ⚠️ 後端測試**驗不到**這條：後端確實正確丟棄了，壞的是前端手上那份快照。
+  const [unkeptDiscarded, setUnkeptDiscarded] = useState(false)
+  //: 新增模式沒有 `courseId`、也沒有暫存區可丟——**推導**而非在 effect 裡同步 setState
+  //: （那會觸發連鎖 render，ESLint 也擋）。
+  const unkeptCleared = courseId === undefined || unkeptDiscarded
+  if (course && !courseFetching && unkeptCleared && loadedCourseId !== course.course_id) {
     setLoadedCourseId(course.course_id)
     setForm({
       course_name: course.course_name,
@@ -463,10 +489,14 @@ export function EtCourseEditorPage() {
   const startFloor = startedInPast ? dayjs(originalStart) : dayjs()
 
   /**
-   * 再開課模式下**一進入就是紅框**（欄位空著即為未完成），不等按下「確認再開課」。
+   * 已關閉 / 視同關閉的課程**起訖空著就是紅框**，不等按下「更新並重開課」。
    *
-   * 裁示原文是「清空課程開始和結束的時間，並用紅色框起來提醒使用者重新設定時間」——
-   * 紅框本身就是提醒，等送出才變紅等於少了一次提示。
+   * #428 的裁示原文是「清空課程開始和結束的時間，並用紅色框起來提醒使用者重新設定
+   * 時間」——紅框本身就是提醒，等送出才變紅等於少了一次提示。
+   *
+   * ⚠️ **#720 拿掉了「清空」那一半**（再開課模式整個移除，起訖帶著舊值進場），紅框
+   * 這一半留著：欄位空著仍是未完成。所以本段講的不再是「進入模式時」，而是「欄位
+   * 確實空著時」——兩者在 #720 之前恰好同時成立，現在只剩後者。
    *
    * ⚠️ 紅框歸紅框，**helperText 仍只在送出後才出現**：一進畫面就跳「請重新設定…」是對
    * 還沒動手的人報錯，看起來像自己做錯了什麼。
@@ -849,11 +879,25 @@ export function EtCourseEditorPage() {
    * 吃掉先開的編輯**。反方向的代價是「離開即放棄」這個保證從頭到尾是假的。
    */
   useEffect(() => {
+    // 新增模式不經這裡（`unkeptCleared` 已由推導放行，見其宣告）。
     if (courseId === undefined) return
     void coursesApi.discardUnkeptStage(courseId).then(
-      () => invalidate(),
-      // 失敗不擋編輯：殘留沒丟掉的後果是教師看到舊編輯，而把整頁打不開的後果更大。
-      () => undefined,
+      () => {
+        invalidate()
+        setUnkeptDiscarded(true)
+      },
+      () => {
+        // 🔴 **失敗要讓教師看見。**
+        //
+        // 原本這裡是 `() => undefined`，理由寫著「失敗不擋編輯」。擋不擋編輯是對的，
+        // 但**無聲**是錯的：這條路徑失敗的意思正是「殘留沒被丟掉」，而教師分不出畫面
+        // 上的東西是他上次的編輯還是已經放棄的內容——他按「更新」就把後者推給全班。
+        //
+        // ⚠️ 仍然放行表單（`setUnkeptCleared(true)`）：讓整頁打不開的代價更大，而且
+        // 他還有「取消」可以自己清掉。
+        message.warning("可能有上次未更新的編輯殘留，請先確認畫面內容再按「更新」")
+        setUnkeptDiscarded(true)
+      },
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟 courseId 走；帶上 invalidate 會每次 render 重跑
   }, [courseId])
@@ -904,13 +948,17 @@ export function EtCourseEditorPage() {
         "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
         "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。",
       // 「確認關閉」而非「關閉課程」：與標題列那顆同名會讓畫面上同時存在兩個同名
-      // 按鈕（無障礙名稱重複）。措辭亦與「確認發布」/「確認再開課」一致。
+      // 按鈕（無障礙名稱重複）。措辭亦與「確認發布」一致。
       okText: "確認關閉",
       onOk: async () => {
         try {
           await coursesApi.close(courseId as number, course?.version ?? 0)
           message.success("課程已關閉")
+          // #720（2026-10-19 裁示）：**所有成功動作一律回課程列表**，關閉也不例外。
+          // 留在原地會讓教師盯著一頁剛剛才關掉的課程，而他下一步要做的事都在列表上。
+          bypassGuard.current = true
           invalidate()
+          navigate("/et/courses")
         } catch (err) {
           handleError(err)
         }
@@ -949,6 +997,15 @@ export function EtCourseEditorPage() {
     })
   }
 
+  /**
+   * 「更新並重開課」成功後的結果視窗（#720 AC：顯示帶入人數與邀請碼，關閉後回列表）。
+   *
+   * ⚠️ 與發布的 `publishResult` **分成兩份**，理由同 `reopenBlockers`：共用一份會讓
+   * 上一次發布留下的結果在重開課完成時顯示。兩者共用的只有呈現元件
+   * （`EnrolledResultSummary`）。
+   */
+  const [reopenResult, setReopenResult] = useState<CourseStatusResult | null>(null)
+
   const reopenMut = useMutation({
     /**
      * 422 `ET_PUBLISH_001` 在 `mutationFn` 內就地轉成「顯示缺漏」，**不往外拋**。
@@ -980,9 +1037,12 @@ export function EtCourseEditorPage() {
     onSuccess: (result) => {
       // `undefined` = 檢核未通過，缺漏已以對話框顯示（#509），留在頁面上讓教師處理
       if (result === undefined) return
-      message.success("課程已更新並重新開課")
       setReopenBlockers([])
       setHighlight(null)
+      // 🔴 **結果視窗，不是一則 toast**（#720 AC）。這一下會讓一批學員進到課程裡，
+      // 而邀請碼是教師可能從未抄下來的東西（#247）——toast 幾秒就消失，抄不及。
+      // 導回列表延到教師關掉視窗（見 `reopenResult` 的 `onClose`）。
+      setReopenResult(result)
       // #720（2026-10-19 裁示）：成功後一律回課程列表。
       //
       // ⚠️ 這裡原本有一段「把 `originalStart` 寫回新值」（#428）：教師把課程補開在更早
@@ -991,9 +1051,12 @@ export function EtCourseEditorPage() {
       //
       // 成功後既然離開本頁、下次進來重新由 `course.open_start_at` 初始化，那個問題就
       // 不存在了。⛔ 若日後改回「留在原地」，那段必須一起加回來。
+      //
+      // ⚠️ `bypassGuard` 在**這裡**就要設起來，不等視窗關閉：暫存區已經套用完、
+      // `has_pending_changes` 會轉回 false，但前端的快取還是舊值；教師此刻若點了別的
+      // 地方，離開攔截會拿過期的旗標問他「要放棄編輯嗎」——而那些編輯早就生效了。
       bypassGuard.current = true
       invalidate()
-      navigate("/et/courses")
     },
     onError: handleError,
   })
@@ -1021,6 +1084,7 @@ export function EtCourseEditorPage() {
     },
     onError: handleError,
   })
+
 
   /**
    * 「更新並重開課」。
@@ -1065,6 +1129,26 @@ export function EtCourseEditorPage() {
       setReopenBlockers(formBlockers)
     },
   })
+
+  /**
+   * 底部動作列**任一**請求進行中（#720 code review）。
+   *
+   * 🔴 四顆鈕打的是同一份暫存區，所以互斥要看整列、不是各看各的。原本「取消」只看
+   * `discardMut`、三顆生效鈕也不看 `discardMut`——教師在「更新」送出途中按「取消」，
+   * 兩條請求會搶同一份暫存：後端有課程行鎖不會壞資料，但他看到的結果是矛盾的
+   * （訊息說已更新，畫面卻回到更新前）。
+   *
+   * ⚠️ 含 `saveMut`：它只在草稿顯示，但草稿與非草稿共用這一列，漏掉它等於讓「同一列
+   * 的互斥」依賴目前哪幾顆鈕剛好同時存在。
+   */
+  const actionPending =
+    applyMut.isPending ||
+    keepMut.isPending ||
+    reopenMut.isPending ||
+    reopenCheckMut.isPending ||
+    discardMut.isPending ||
+    saveMut.isPending
+
 
   /**
    * 缺漏項目所指的測驗名稱——後端只回 `target_id`，名稱由前端自課程詳細對照。
@@ -1670,6 +1754,38 @@ export function EtCourseEditorPage() {
 
         關閉只清掉缺漏、**不離開頁面**：教師接著要去補內容，補完再按一次。
       */}
+      {/*
+        「更新並重開課」的結果視窗（#720 AC：帶入人數 + 邀請碼，關閉後回列表）。
+
+        ⚠️ **條件渲染**，不是常駐後靠 `open` 切換：常駐的 MUI Dialog 會讓其他查詢
+        查不到該查到的東西（本專案既有教訓）。
+      */}
+      {reopenResult !== null && (
+        <Dialog open fullWidth maxWidth="sm" onClose={() => {}}>
+          <DialogTitle>課程已重新開課</DialogTitle>
+          <DialogContent dividers>
+            <EnrolledResultSummary
+              action="重新開課"
+              invitedCount={reopenResult.invited_count}
+              invitationCode={reopenResult.invitation_code}
+            />
+          </DialogContent>
+          <DialogActions>
+            {/* ⚠️ `onClose` 傳空函式、只留這顆「關閉」：點背景關掉視窗會讓教師來不及
+                抄邀請碼，而他沒有第二次機會看到這個數字。 */}
+            <Button
+              variant="contained"
+              onClick={() => {
+                setReopenResult(null)
+                navigate("/et/courses")
+              }}
+            >
+              關閉
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
       {reopening && reopenBlockers.length > 0 && (
         <BlockerDialog
           title="更新並重開課"
@@ -2251,11 +2367,11 @@ export function EtCourseEditorPage() {
               )}
               {/* 取消＝放棄本次的編輯並離開（#631 / #720）。沒有暫存變更時就只是離開，
                   不跳確認——包括全部的草稿課程（它沒有暫存可放棄）。 */}
-              <Button size="small" disabled={discardMut.isPending} onClick={requestCancel}>
+              <Button size="small" disabled={actionPending} onClick={requestCancel}>
                 取消
               </Button>
               {status === "DRAFT" && (
-                <Button size="small" variant="outlined" disabled={saveMut.isPending} onClick={handleSave}>
+                <Button size="small" variant="outlined" disabled={actionPending} onClick={handleSave}>
                   儲存草稿
                 </Button>
               )}
@@ -2274,7 +2390,7 @@ export function EtCourseEditorPage() {
                   variant="outlined"
                   // ⚠️ 重開課送出中也要停用：兩顆鈕都會先送一次 `PUT`（`stageBasic`），
                   // 同時按下去等於兩條路徑搶同一份暫存區。反向亦然（見下一顆）。
-                  disabled={keepMut.isPending || reopenMut.isPending || reopenCheckMut.isPending}
+                  disabled={actionPending}
                   // ⚠️ 「不跑發布檢核」（2026-10-19 裁示）指的是六項發布條件，**不是**
                   // 表單驗證：重複的受訓對象若不擋，會被 `toPayload()` 靜默濾掉。
                   onClick={() => validateBeforeSubmit(true) && keepMut.mutate()}
@@ -2299,13 +2415,13 @@ export function EtCourseEditorPage() {
                     variant="contained"
                     // 時間有錯時走的是 `reopenCheckMut`——它進行中也要擋，否則連點會連送預檢
                     // （與發布 / 再開課共用限流配額，security review LOW）
-                    disabled={reopenMut.isPending || reopenCheckMut.isPending || keepMut.isPending}
+                    disabled={actionPending}
                     onClick={submitReopen}
                   >
                     更新並重開課
                   </Button>
                 ) : (
-                  <Button size="small" variant="contained" disabled={applyMut.isPending} onClick={requestApply}>
+                  <Button size="small" variant="contained" disabled={actionPending} onClick={requestApply}>
                     更新
                   </Button>
                 ))}

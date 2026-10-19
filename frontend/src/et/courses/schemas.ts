@@ -210,6 +210,15 @@ export interface CourseStatusResult {
   open_end_at: string | null
   closed_at: string | null
   version: number
+  /**
+   * 本次帶入的學員人數（#720）。**關閉時恆為 0**，重開課時為實際新增的人數。
+   *
+   * ⚠️ 據實顯示 0，不隱藏——0 代表課程掛的受訓對象沒有任何人符合，那是教師需要
+   * 知道的事實（理由全文見 `EnrolledResultSummary`）。
+   */
+  invited_count: number
+  /** 課程邀請碼（#720）。重開課沿用原碼、不重產；教師可能從未抄下來過（#247）。 */
+  invitation_code: string | null
 }
 
 /**

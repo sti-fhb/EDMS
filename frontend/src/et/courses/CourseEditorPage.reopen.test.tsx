@@ -473,18 +473,26 @@ describe("ET05 課程關閉與再開課", () => {
     await waitFor(() => expect(reopenBody).toBe(""))
   }, REOPEN_FLOW_TIMEOUT)
 
-  it("更新並重開課成功後回到課程列表（#720）", async () => {
-    // 🔴 2026-10-19 裁示：**所有成功動作一律回列表**（推翻 #631 的「留原地 + Snackbar」）。
-    // 留在原地的問題是教師分不出「我按過了」與「我還沒按」——頁面長得一模一樣。
+  it("🥇 更新並重開課成功後先出結果視窗，關掉才回課程列表（#720）", async () => {
+    // ## 兩件事，缺一不可
+    //
+    // 1. **結果視窗**（AC：顯示帶入人數與邀請碼）。這一下會讓一批學員進到課程裡，而
+    //    邀請碼是教師可能從未抄下來過的東西（#247）——toast 幾秒就消失，抄不及。
+    // 2. **關掉才導走**（2026-10-19 裁示：所有成功動作一律回列表）。先導走就等於沒有
+    //    視窗；而留在原地會讓教師分不出「我按過了」與「我還沒按」。
+    //
+    // ⚠️ 先斷言「此刻還沒導走」是本條的承重點：少了它，把 `navigate` 寫在 `onSuccess`
+    // 裡（視窗一閃而過）也會讓後半段通過。
     //
     // ⚠️ 這條同時取代了舊的「再開課成功後畫面立即顯示新的起訖時間（#428 迴歸）」：
-    // 那條驗的是**留在原地時**欄位有沒有跟著更新，而現在不留在原地了。那個迴歸的成因
-    // （表單初值 guard 只在切換課程時重設）也因此不再有路徑到得了。
+    // 那條驗的是**留在原地時**欄位有沒有跟著更新，而現在不留在原地了。
     const user = userEvent.setup()
     useCourse("CLOSED")
     server.use(
       http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
-      http.post("/api/et/courses/:courseId/reopen", () => HttpResponse.json(reopened)),
+      http.post("/api/et/courses/:courseId/reopen", () =>
+        HttpResponse.json({ ...reopened, invited_count: 3, invitation_code: "01234567" }),
+      ),
     )
     renderEditor()
     await fillDateTime(/課程起始時間/, "202711010900")
@@ -492,8 +500,36 @@ describe("ET05 課程關閉與再開課", () => {
 
     await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
 
-    expect(await screen.findByText("課程已更新並重新開課")).toBeInTheDocument()
+    const dialog = await screen.findByRole("dialog", { name: "課程已重新開課" })
+    expect(within(dialog).getByText(/已依受訓對象帶入 3 位學員/)).toBeInTheDocument()
+    expect(within(dialog).getByText("01234567")).toBeInTheDocument()
+    expect(navigateSpy).not.toHaveBeenCalledWith("/et/courses")
+
+    await user.click(within(dialog).getByRole("button", { name: "關閉" }))
+
     await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+  }, REOPEN_FLOW_TIMEOUT)
+
+  it("帶入 0 人時據實顯示，不假裝成功（#247 同一條理由）", async () => {
+    // 🔴 0 通常代表課程掛的受訓對象沒有任何人符合——那是教師需要**現在**知道的事實。
+    // 等學員反映「看不到課」才發現就太晚了。少了這條，把 0 人寫成一般成功訊息也會讓
+    // 上一條通過（它用的是 3 人）。
+    const user = userEvent.setup()
+    useCourse("CLOSED")
+    server.use(
+      http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
+      http.post("/api/et/courses/:courseId/reopen", () =>
+        HttpResponse.json({ ...reopened, invited_count: 0, invitation_code: "01234567" }),
+      ),
+    )
+    renderEditor()
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
+
+    await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "課程已重新開課" })
+    expect(within(dialog).getByText(/沒有任何學員符合本課程的受訓對象/)).toBeInTheDocument()
   }, REOPEN_FLOW_TIMEOUT)
 
   it("再開課遇發布檢核缺漏時以對話框列出，關閉後停在再開課模式（#428 / #509）", async () => {
@@ -627,7 +663,8 @@ describe("ET05 課程關閉與再開課", () => {
     // 按下去會讓兩條路徑搶同一份暫存區（#720）。
     expect(screen.getByRole("button", { name: "保留編輯" })).toBeDisabled()
     release()
-    await screen.findByText("課程已更新並重新開課")
+    // 成功的證據改成結果視窗（#720：不再是 toast），`calls` 仍須維持 1
+    await screen.findByRole("dialog", { name: "課程已重新開課" })
     expect(calls).toBe(1)
   }, REOPEN_FLOW_TIMEOUT)
 

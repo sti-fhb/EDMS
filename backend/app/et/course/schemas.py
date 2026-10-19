@@ -63,7 +63,8 @@ class _ScheduleFields(BaseModel):
 
     ## 為何獨立於 `_CourseFields`
 
-    `ReopenCourseReq` 只需要這兩個欄位與它們的驗證器，**不需要 `course_name`**。
+    `ReopenCourseReq`（已於 #720 移除，見本檔下方）當初只需要這兩個欄位與它們的驗證器，
+    **不需要 `course_name`**——本類別留著是因為 `_CourseFields` 仍繼承它。
     原本它直接繼承 `_CourseFields` 來「沿用驗證器」，結果連 `course_name` 的必填性
     一起繼承了——前端再開課只送起訖與 `version`，每一次都被擋成 422 `COMMON_422`
     「以下欄位不符規定：course_name」，而教師在再開課視窗從未見過那個欄位。
@@ -584,6 +585,10 @@ class CourseStatusResult(BaseModel):
     Attributes:
         closed_at: 最近一次關閉時間。**再開課後仍會帶值**（FR-ET-US11-10：保留供
             追溯），故前端不可用「有沒有值」判斷是否已關閉——那要看 `status`。
+        invited_count: 本次帶入的學員人數。**關閉時恆為 0**（關閉不帶入任何人），
+            重開課時為 `enroll_audiences` 實際新增的人數。
+        invitation_code: 課程邀請碼。重開課**沿用原碼、不重產**（Clarifications 明訂），
+            此處回傳是為了讓結果視窗顯示給教師——他可能從未抄下來過（#247）。
     """
 
     course_id: int
@@ -592,6 +597,11 @@ class CourseStatusResult(BaseModel):
     open_end_at: datetime | None
     closed_at: datetime | None
     version: int
+    #: ⚠️ 這兩欄於 #720 新增，供「更新並重開課」的結果視窗顯示（比照 `PublishResult`）。
+    #: 帶入人數**據實顯示**，0 不隱藏——0 通常代表課程掛的受訓對象沒有任何人符合，
+    #: 那是教師需要知道的事實而不是錯誤（理由全文見 `PublishDialog`）。
+    invited_count: int = 0
+    invitation_code: str | None = None
 
 
 class OwnerOption(BaseModel):

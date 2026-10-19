@@ -197,15 +197,20 @@ def to_payload_dict(spec: EntitySpec, row: object) -> dict[str, Any]:
 def dumps_payload(entity_type: str, payload: Mapping[str, Any]) -> str:
     """payload（可含 `datetime`）→ 存進 `PAYLOAD` 欄位的 JSON 字串。**與 `parse_payload` 成對。**
 
-    🔴 **序列化只有這一道門。** 三條寫入路徑都走這裡：
+    🔴 **序列化只有這一道門。** 四條寫入路徑都走這裡：
 
     | 路徑 | 時機 |
     |---|---|
     | `stage_repository.to_payload` | 從活表 seed 一棵樹 |
     | `stage_writer.append` | 教師新增一個節點 |
     | `stage_writer.update_payload` | 教師改一個節點的欄位 |
+    | `stage_writer.set_payload_flag` | 設 / 清工作階段旗標（`__require_retest`、`__kept`）|
 
-    #720 之前三者各自裸呼叫 `json.dumps`，而那完全沒問題——當時 11 種內容型別的 payload
+    ⚠️ 最後一條最容易漏：它**讀出整份 payload、改一個 key、再寫回去**，而讀出來的值
+    已由 `parse_payload` 把 ISO 字串還原成 `datetime`。這張表就是給後人判斷「有沒有漏門」
+    用的，少列一條等於讓那道門隱形。
+
+    #720 之前四者各自裸呼叫 `json.dumps`，而那完全沒問題——當時 11 種內容型別的 payload
     全是 JSON 原生型別。課程本體帶進兩個 `datetime` 之後，**漏掉任何一道門的症狀都是
     教師編輯基本資料當場 500**，而 seed 那條路照樣會過，所以單測 seed 看不出來。
 
