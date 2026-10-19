@@ -610,6 +610,7 @@ def _verify_output(md_path: Path, out_path: Path) -> list[str]:
         for candidate in candidates:
             candidate = re.sub(r"\*\*(.+?)\*\*", r"\1", candidate)
             candidate = re.sub(r"`(.+?)`", r"\1", candidate).strip()
+            candidate = candidate.replace("<br>", "\n")  # 表格儲存格之 <br> 產出為段落，cell.text 以換行相接
             if candidate and candidate not in haystack:
                 missing.append(candidate)
     return missing
