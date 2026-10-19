@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
@@ -25,15 +25,24 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEACHER, SURVEY_QUESTION_SINGLE
+from app.et.constants import (
+    COURSE_CLOSED,
+    ITEM_MATERIAL,
+    ITEM_QUIZ,
+    QUESTION_SINGLE,
+    ROLE_TEACHER,
+    SURVEY_QUESTION_SINGLE,
+)
 from app.et.course.models import EtChapter, EtCourse, EtCourseContentStage, EtItem
 from app.et.course.publish_repository import EtPublishRepository
 from app.et.course.publish_rules import evaluate_publish
-from app.et.course.stage_apply import _DELETED_WITH_ITEM, _DELETERS, apply_stage
+from app.et.course.stage_apply import _DELETED_WITH_ITEM, _DELETERS, _NEVER_DELETED, apply_stage
 from app.et.course.stage_entities import SPEC_BY_TYPE, payload_fields
 from app.et.course.stage_repository import EtCourseStageRepository
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -57,7 +66,12 @@ from tests.integration.et._tag_pairs import all_units_id
 pytestmark = pytest.mark.integration
 
 _COURSES = "/api/et/courses"
-_ALL_TYPES = {
+#: 🔴 **兩群分開列**（#720）。`COURSE` / `COURSE_TAG` 是「課程本身」，其餘 11 種是
+#: 「課程的內容」——`stage_apply._delete_removed` 對兩群的處置相反（內容可被教師刪、
+#: 課程本體永遠不能），合成一群會讓那條差異在守門層看不見。
+_COURSE_LEVEL_TYPES = {ENTITY_COURSE, ENTITY_COURSE_TAG}
+
+_CONTENT_TYPES = {
     ENTITY_CHAPTER,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
@@ -70,6 +84,8 @@ _ALL_TYPES = {
     ENTITY_SURVEY_QUESTION,
     ENTITY_SURVEY_OPTION,
 }
+
+_ALL_TYPES = _CONTENT_TYPES | _COURSE_LEVEL_TYPES
 
 
 def _operator(user_id: str) -> OperatorInfo:
@@ -282,13 +298,14 @@ class TestSeedFidelity:
 
         course = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
         live = await EtPublishRepository().snapshot(db, course)
-        staged = to_course_snapshot(
-            await repo.load_tree(db, cid),
-            status=course.status,
-            open_start_at=course.open_start_at,
-            open_end_at=course.open_end_at,
-            tag_count=live.tag_count,
-        )
+        staged = to_course_snapshot(await repo.load_tree(db, cid), status=course.status)
+
+        # 🔴 #720 之後起訖時間與受訓對象組數**由暫存樹自己帶**，所以本條順勢多驗一件事：
+        # seed 有沒有忠實地把它們抄進暫存。抄錯的症狀是「剛進編輯頁什麼都沒改就按更新，
+        # 卻被檢核擋下」——而那會讓教師以為是自己弄壞了什麼。
+        assert staged.open_start_at == live.open_start_at
+        assert staged.open_end_at == live.open_end_at
+        assert staged.tag_count == live.tag_count
 
         assert staged.chapter_count == live.chapter_count
         assert [c.item_count for c in staged.chapters] == [c.item_count for c in live.chapters]
@@ -839,14 +856,38 @@ class TestForeignKeysSurvive:
 
 class TestDeleterCoverage:
     def test_每一種可刪除的型別都有刪除路徑(self) -> None:
-        """少一個的症狀是套用時 `KeyError`——會爆，但要等到有人真的刪了那種東西。"""
-        assert set(_DELETERS) | _DELETED_WITH_ITEM == _ALL_TYPES
+        """少一個的症狀是套用時 `KeyError`——會爆，但要等到有人真的刪了那種東西。
+
+        ⚠️ `_NEVER_DELETED` 不在母體內：那是**刻意不可刪**的，不是漏寫（見下一條）。
+        """
+        assert set(_DELETERS) | _DELETED_WITH_ITEM | _NEVER_DELETED == _ALL_TYPES
+
+    def test_課程本體永遠不可被刪(self) -> None:
+        """🔴 ⛔ **`_delete_removed` 以「活表有、暫存沒有」判定教師刪了它——而課程不行。**
+
+        刪課程是另一條路徑（`delete_draft`，草稿專用），不經暫存。若課程型別落進
+        `_DELETERS`，任何讓課程節點從暫存樹消失的情形（例如只放棄問卷那支若寫錯範圍）
+        都會把**整門課軟刪**，連帶它底下的一切。
+
+        本條把「不可刪」釘成結構性事實，而不是靠 `_delete_removed` 裡的一行 `continue`
+        ——那一行可能在重構時被順手移除，而這裡會紅。
+        """
+        assert ENTITY_COURSE in _NEVER_DELETED
+        assert ENTITY_COURSE not in _DELETERS
+
+    def test_受訓對象可以被刪(self) -> None:
+        """正向錨點：課程**本體**不可刪，但它底下的受訓對象可以——已關閉課程得自由增刪
+        配對（#586）。少了這條，把整個課程層都列為不可刪也會讓上一條通過。"""
+        assert ENTITY_COURSE_TAG in _DELETERS
 
 
 # ── 「更新」端點 ───────────────────────────────────────────────────────────────
 
 _APPLY = "/api/et/courses/{cid}/content/apply"
 _DISCARD = "/api/et/courses/{cid}/content/stage"
+#: #720：編輯工作階段的第三、第四個出口（保留 / 進頁丟棄）。
+_KEEP = "/api/et/courses/{cid}/content/keep"
+_DISCARD_UNKEPT = "/api/et/courses/{cid}/content/stage/unkept"
 
 
 async def _publish(client, db, uid: str, cid: int) -> None:
@@ -926,6 +967,303 @@ class TestDiscardEndpoint:
         assert r.json()["error_code"] == "ET_COURSE_002"
 
 
+async def _close(db, course_id: int) -> None:
+    """把課程改成已關閉。
+
+    直接寫 DB 而非打 `/close`：那支會要 `CloseCourseReq`、寫關閉原因並寄通知，而本組
+    要驗的是**暫存樹的去留**，不是關閉流程。關閉流程另有 `test_et_course_close_reopen.py`。
+    """
+    await db.execute(update(EtCourse).where(EtCourse.course_id == course_id).values(status=COURSE_CLOSED))
+    await db.flush()
+
+
+async def _seed_with_edit(db, course_id: int, uid: str, chapter_name: str) -> None:
+    """種一棵暫存樹並改掉第一章的名字——「有尚未更新的編輯」的最小構造。"""
+    repo = EtCourseStageRepository()
+    await repo.seed_from_live(db, course_id, _operator(uid))
+    ch = next(n for n in await repo.load_tree(db, course_id) if n.entity_type == ENTITY_CHAPTER)
+    await _set_payload(db, ch.stage_id, {"chapter_name": chapter_name})
+
+
+class TestLegacyStageSelfHeals:
+    """#720 之前種下的暫存樹（沒有 `COURSE` 節點）要能自己修好，而不是 500。
+
+    🔴 **判準是「漏做的後果」。** 寫進部署步驟要人手動 `DELETE FROM ET_COURSE_CONTENT_STAGE`
+    的話，漏做一次的後果是正式環境 500；讓 `ensure_seeded` 自己偵測重種，漏做這件事
+    本身就不存在。
+
+    ⚠️ 代價：部署當下正開著編輯頁的教師，這一輪未生效的編輯會消失。那是可接受的——
+    #720 的「離開即放棄」本來就會讓他失去它（`discard_unkept` 對無課程節點的樹同樣丟棄）。
+    """
+
+    async def test_缺課程節點的舊樹會被整棵重種而非報錯(self, client, db) -> None:
+        uid = await _user(db, "ZT_LG1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        # 造出 #720 之前的結構：把課程層的兩種節點硬刪掉
+        # ⚠️ **硬刪**（而非軟刪）才造得出「這棵樹從來沒有課程節點」——`ensure_seeded`
+        # 刻意不帶 `DELETED = 0` 去問，好把舊結構與「課程節點被軟刪」分開（見其 docstring）。
+        await db.execute(
+            delete(EtCourseContentStage).where(
+                EtCourseContentStage.course_id == cid,
+                EtCourseContentStage.entity_type.in_(list(_COURSE_LEVEL_TYPES)),
+            )
+        )
+        await db.flush()
+        assert await _course_node_or_none(db, cid) is None, "前置失敗：課程節點還在"
+
+        # 任何一個會 `ensure_seeded` 的編輯動作——這裡用新增章節
+        r = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "新章"}, headers=_bearer(uid))
+
+        assert r.status_code == 201, f"舊結構的暫存樹不得讓教師吃到 500：{r.text}"
+        assert await _course_node_or_none(db, cid) is not None, "重種之後必須有課程節點"
+
+    async def test_結構正常時不會白白重種(self, client, db) -> None:
+        """正向錨點：少了它，把 `ensure_seeded` 寫成「每次都重種」也會讓上一條通過
+        ——而那會把教師這一輪的編輯每次都丟掉。"""
+        uid = await _user(db, "ZT_LG2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "編輯中的章名"})
+
+        await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "再一章"}, headers=_bearer(uid))
+
+        names = [n.payload["chapter_name"] for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER]
+        assert "編輯中的章名" in names, "結構正常的樹不得被重種——那會丟掉教師正在編的東西"
+
+
+async def _course_node_or_none(db, course_id: int):
+    return await db.scalar(
+        select(EtCourseContentStage).where(
+            EtCourseContentStage.course_id == course_id,
+            EtCourseContentStage.entity_type == ENTITY_COURSE,
+            EtCourseContentStage.deleted == 0,
+        )
+    )
+
+
+class TestKeepEdits:
+    """「保留編輯」＝把這一輪的編輯留著、**不對學員生效**（#720，2026-10-19 裁示）。
+
+    ## 🔴 它標記去留，不是還原點
+
+    設的是 `KEPT_PAYLOAD_KEY` 旗標，**不複製暫存樹**。按下當下的那一版在下一次編輯後
+    就回不去了——鈕名與路徑因此刻意避開「草稿」二字（2026-10-20 裁示），本組的
+    `test_不是還原點` 把那件事釘成可觀察的行為，免得日後有人照字面把它當快照用。
+    """
+
+    async def test_已關閉課程保留後暫存樹還在而活表沒動(self, client, db) -> None:
+        """🥇 本端點的核心：留著編輯，學員唯讀回看的仍是關閉前的內容。"""
+        uid = await _user(db, "ZT_K1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "關閉後編到一半的章名")
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is True
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "活表維持關閉前的版本"
+
+    async def test_保留過的暫存樹進頁不會被丟掉(self, client, db) -> None:
+        """🥇 **「保留」唯一的可觀察效果就是這個。**
+
+        少了這條，把 `keep_edits` 寫成只寫稽核 log 的空殼也會讓上一條通過——上一條的
+        「暫存樹還在」是因為沒有人去丟它，不是因為旗標起了作用。
+        """
+        uid = await _user(db, "ZT_K2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "要留著的章名")
+        await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is True
+
+    async def test_不是還原點(self, client, db) -> None:
+        """🔴 **保留之後再編輯，留下的是改過的那一棵，不是按鈕當下的那一版。**
+
+        這條不是在驗一個 bug，是把「這顆鈕沒有快照」釘成白紙黑字的契約。2026-10-20
+        裁示據以把鈕名從「儲存草稿」改成「保留編輯」——那個名字承諾一個回得去的版本。
+
+        ⛔ 若日後有人把它做成真的還原點，這條會紅，而**那時候該改的是這條測試**（連同
+        鈕名），不是把斷言放寬。
+        """
+        uid = await _user(db, "ZT_K3")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "按鈕當下的章名")
+        await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        repo = EtCourseStageRepository()
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "按鈕之後又改的章名"})
+        await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        names = [n.payload["chapter_name"] for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER]
+        assert "按鈕之後又改的章名" in names
+        assert "按鈕當下的章名" not in names, "沒有任何地方留著按鈕當下的那一版——它不是快照"
+
+    async def test_保留不得遞增暫存課程節點的版本(self, client, db) -> None:
+        """🔴 遞增的話，教師按完這顆鈕手上的樂觀鎖令牌就過期，**下一個動作無故 409**。
+
+        而畫面上只會說「資料已被其他使用者修改」——他是唯一的使用者。
+        """
+        uid = await _user(db, "ZT_K4")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "章名")
+        before = await _course_node_version(db, cid)
+
+        await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert await _course_node_version(db, cid) == before
+
+    async def test_運作中的已發布課程回_409(self, client, db) -> None:
+        """已發布**刻意沒有**這顆鈕（2026-10-19 裁示）：它的內容隨時對學員生效，
+        多一個「留著不發」的狀態會讓教師以為自己已經處理完了。"""
+        uid = await _user(db, "ZT_K5")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_COURSE_011"
+
+    async def test_草稿回_409(self, client, db) -> None:
+        """草稿直接寫活表，沒有暫存樹可保留。⛔ 不共用 `ET_COURSE_010`：下一步不同
+        （那句是「請直接編輯後發布」，這句是「請改用更新」）。"""
+        uid = await _user(db, "ZT_K6")
+        cid = await _full_course(client, db, uid)
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 409, r.text
+        assert r.json()["error_code"] == "ET_COURSE_011"
+
+    async def test_視同關閉的課程也可以保留(self, client, db) -> None:
+        """正向錨點：判準是 `is_effectively_closed` 而不是 `status == CLOSED`。
+
+        少了它，把守門寫成比對 `status` 也會讓上面兩條通過——而期間已過的課程狀態仍是
+        `PUBLISHED`（到期自動轉 `CLOSED` 屬 ET-16、未實作），那是**常態**不是邊角。
+        """
+        uid = await _user(db, "ZT_K7")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await db.execute(
+            update(EtCourse).where(EtCourse.course_id == cid).values(open_end_at=utcnow() - timedelta(days=1))
+        )
+        await db.flush()
+        await _seed_with_edit(db, cid, uid, "過期後編的章名")
+
+        r = await client.post(_KEEP.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+
+class TestDiscardUnkept:
+    """進入編輯頁時丟掉**沒按過「保留編輯」**的暫存殘留（#720 裁示 Q1 選項 1）。
+
+    「沒按更新就離開 ＝ 放棄本次全部編輯」若只靠前端攔截離開，那個保證是**假的**——
+    關分頁、當機、斷線都繞得過去。殘留最糟的不是它存在，而是教師**看不出那是殘留**。
+    """
+
+    async def test_已發布的殘留進頁就丟掉(self, client, db) -> None:
+        """🥇 已發布恆無保留旗標（沒有那顆鈕），所以它的殘留一定是非預期的。"""
+        uid = await _user(db, "ZT_U1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _seed_with_edit(db, cid, uid, "關分頁留下的章名")
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is False
+        assert (await _live_chapters(db, cid))[0].chapter_name == "第一章", "只刪暫存列，活表不動"
+
+    async def test_已關閉但沒按保留的殘留一樣丟掉(self, client, db) -> None:
+        """🔴 **判準是旗標，不是課程狀態。**
+
+        少了這條，把實作寫成「已關閉就不丟」也會讓本類其餘測試全綠——而那會讓已關閉
+        課程的「離開即放棄」整條失效，教師關分頁留下的半成品下次進來還在。
+        """
+        uid = await _user(db, "ZT_U2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        await _seed_with_edit(db, cid, uid, "關閉後關分頁留下的章名")
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await EtCourseStageRepository().has_stage(db, cid) is False
+
+    async def test_沒有暫存區時回_204(self, client, db) -> None:
+        """冪等：前端進頁就打一次，絕大多數情況下本來就沒有殘留。"""
+        uid = await _user(db, "ZT_U3")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+    async def test_草稿靜默略過而非_409(self, client, db) -> None:
+        """⚠️ 與「取消」（`_DISCARD`，草稿回 409）**刻意相反**。
+
+        那支是教師按了鈕，誤導到草稿要看得見；這支是前端進頁的例行動作，為草稿回錯誤
+        只會逼前端去判斷課程狀態，而那個判斷遲早與後端分岔。
+        """
+        uid = await _user(db, "ZT_U4")
+        cid = await _full_course(client, db, uid)
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+
+    async def test_非擁有者回_403(self, client, db) -> None:
+        """他人不得丟掉擁有者的編輯。
+
+        ⚠️ 不斷言「暫存區還在」——失敗的請求會回滾整個交易、連前置的暫存列一起清掉，
+        那條斷言必然通過但驗的是 harness 的性質（理由全文見 `TestDiscardEndpoint`）。
+        """
+        uid = await _user(db, "ZT_U5")
+        other = await _user(db, "ZT_U6")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _seed_with_edit(db, cid, uid, "章名")
+
+        r = await client.delete(_DISCARD_UNKEPT.format(cid=cid), headers=_bearer(other))
+
+        assert r.status_code == 403, r.text
+        assert r.json()["error_code"] == "ET_COURSE_002"
+
+
+async def _course_node_version(db, course_id: int) -> int:
+    """暫存樹裡課程節點的 `VERSION`——課程層的樂觀鎖令牌（#720）。"""
+    node = await db.scalar(
+        select(EtCourseContentStage).where(
+            EtCourseContentStage.course_id == course_id,
+            EtCourseContentStage.entity_type == ENTITY_COURSE,
+            EtCourseContentStage.deleted == 0,
+        )
+    )
+    assert node is not None, "前置失敗：暫存樹裡沒有課程節點"
+    return node.version
+
+
 class TestUpdateEndpoint:
     async def test_暫存區為空時是安全的_no_op(self, client, db) -> None:
         """教師沒做任何編輯就按「更新」——不該回 422，也不該寫稽核。
@@ -977,9 +1315,20 @@ class TestUpdateEndpoint:
         repo = EtCourseStageRepository()
         writer = EtCourseStageWriter(repo)
         await repo.seed_from_live(db, cid, _operator(uid))
-        for node in [n for n in await repo.load_tree(db, cid) if n.parent_stage_id is None]:
+        # ⚠️ **只刪內容的根**（章節與問卷），不刪課程本體（#720）。
+        #
+        # 課程節點在暫存樹裡也是 root，但教師在產品上**沒有任何路徑**可以刪它——
+        # 刪課程是草稿專用的另一條路。前置若把它一起刪掉，等於造出一個產品生不出來的
+        # 狀態，而失敗訊息會是「暫存樹缺少課程節點」，與本條要驗的事情無關。
+        content_roots = [
+            n
+            for n in await repo.load_tree(db, cid)
+            if n.parent_stage_id is None and n.entity_type not in _COURSE_LEVEL_TYPES
+        ]
+        for node in content_roots:
             await writer.delete_subtree(db, node.stage_id, _operator(uid))
-        assert await repo.load_tree(db, cid) == (), "前置條件：暫存樹確實空了"
+        remaining = {n.entity_type for n in await repo.load_tree(db, cid)}
+        assert remaining <= _COURSE_LEVEL_TYPES, f"前置條件：內容確實刪光了，剩下的應只有課程層，實際 {remaining}"
 
         r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
 

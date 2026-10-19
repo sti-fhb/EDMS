@@ -63,7 +63,8 @@ class _ScheduleFields(BaseModel):
 
     ## 為何獨立於 `_CourseFields`
 
-    `ReopenCourseReq` 只需要這兩個欄位與它們的驗證器，**不需要 `course_name`**。
+    `ReopenCourseReq`（已於 #720 移除，見本檔下方）當初只需要這兩個欄位與它們的驗證器，
+    **不需要 `course_name`**——本類別留著是因為 `_CourseFields` 仍繼承它。
     原本它直接繼承 `_CourseFields` 來「沿用驗證器」，結果連 `course_name` 的必填性
     一起繼承了——前端再開課只送起訖與 `version`，每一次都被擋成 422 `COMMON_422`
     「以下欄位不符規定：course_name」，而教師在再開課視窗從未見過那個欄位。
@@ -399,6 +400,16 @@ class CourseDetail(BaseModel):
     #: 本旗標則是「人還在、帳號停用了」。混為一談會讓真正的資料問題被當成正常狀態。
     owner_is_disabled: bool = False
     is_owner: bool
+    #: 是否**視同關閉**——「已關閉」或「已發布但閱課期間已過」皆為 `True`（#720）。
+    #:
+    #: 🔴 編輯頁的底部動作列靠它分流：視同關閉的課程是「取消｜保留編輯｜更新並重開課」，
+    #: 運作中的已發布課程是「取消｜更新」。
+    #:
+    #: ⚠️ **前端不可自己判 `status`**：期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉
+    #: `CLOSED` 屬未實作的 ET-16，故此為常態），自行判定會給那門課一排錯的按鈕——教師
+    #: 按下「更新」，後端卻因為課程已視同關閉而走另一條路。`CourseCard.is_closed` 同一
+    #: 語意、同一理由，兩者一起看。
+    is_closed: bool
     audiences: list[AudiencePair]
     chapters: list[ChapterItem]
     #: 課程邀請碼（8 碼純數字）。**僅 owner 可見**——非擁有者一律為 `None`。
@@ -554,34 +565,15 @@ class CloseCourseReq(BaseModel):
     version: int = Field(ge=0, le=MAX_INT4)
 
 
-class ReopenCourseReq(_ScheduleFields):
-    """再開課（US11 AC 8）——**只有起訖時間與版本**，起訖皆必填。
-
-    繼承 `_ScheduleFields`（而**非** `_CourseFields`）：需要的是時區補正
-    （`_ensure_aware`）與「迄 > 起」（`_end_after_start`）兩個驗證器，而那兩個驗證器
-    只涵蓋這兩個欄位。基底欄位皆為選填（草稿允許留空），故此處以 `model_validator`
-    補上必填——FR-ET-US11-09 明訂「強制要求重新設定一組新的起訖時間，未填妥
-    MUST NOT 送出」。
-
-    ⚠️ **曾經繼承 `_CourseFields` 而壞掉**：那支的 `course_name` 是必填，於是再開課
-    也要求它。前端只送起訖與 `version`，每一次都被擋成 422 `COMMON_422`「以下欄位
-    不符規定：course_name」——而教師在再開課視窗從未見過那個欄位。詳見
-    `_ScheduleFields` 的 docstring。**本請求不改課程名稱等基本資料**（那走
-    `PUT /courses/{id}`），寫入欄位由 `mark_reopened` 明列。
-
-    > 「迄 > 當下」不在此檢核，而在 `rules.ensure_reopen_schedule`：那是業務規則，
-    > 需要回 `ET_COURSE_008` 與其專屬訊息；放在 schema 會被
-    > `validation_exception_handler` 轉成 `COMMON_422`，讓那個錯誤碼永遠到不了前端
-    > （#284 的 `ET_SURVEY_016` 就曾經如此）。
-    """
-
-    version: int = Field(ge=0, le=MAX_INT4)
-
-    @model_validator(mode="after")
-    def _schedule_required(self) -> "ReopenCourseReq":
-        if self.open_start_at is None or self.open_end_at is None:
-            raise ValueError("再開課須填妥開放起始與訖止時間")
-        return self
+# ⚠️ `ReopenCourseReq` 已於 #720 移除——`POST /courses/{id}/reopen` **沒有 request body**。
+#
+# 它原本帶新的起訖時間與 `version`。起訖自 #720 起是基本資料的一部分、寫在暫存區，由
+# reopen 連同其餘編輯一起套用；留在 body 裡會變成「檢核一組、套用另一組」。`version` 則
+# 因為教師手上的令牌改成暫存節點的版本而對不上活表，併發改由課程行鎖序列化。
+#
+# ⛔ 不要為了「再開課應該要有自己的表單」而加回來。FR-ET-US11-09 要的是「強制重新設定
+# 一組新的起訖時間」，那個強制現在由 `ensure_reopen_schedule` 讀暫存值達成（沒改就回
+# `ET_COURSE_008`），不是由必填欄位達成。
 
 
 class CourseStatusResult(BaseModel):
@@ -593,6 +585,10 @@ class CourseStatusResult(BaseModel):
     Attributes:
         closed_at: 最近一次關閉時間。**再開課後仍會帶值**（FR-ET-US11-10：保留供
             追溯），故前端不可用「有沒有值」判斷是否已關閉——那要看 `status`。
+        invited_count: 本次帶入的學員人數。**關閉時恆為 0**（關閉不帶入任何人），
+            重開課時為 `enroll_audiences` 實際新增的人數。
+        invitation_code: 課程邀請碼。重開課**沿用原碼、不重產**（Clarifications 明訂），
+            此處回傳是為了讓結果視窗顯示給教師——他可能從未抄下來過（#247）。
     """
 
     course_id: int
@@ -601,6 +597,11 @@ class CourseStatusResult(BaseModel):
     open_end_at: datetime | None
     closed_at: datetime | None
     version: int
+    #: ⚠️ 這兩欄於 #720 新增，供「更新並重開課」的結果視窗顯示（比照 `PublishResult`）。
+    #: 帶入人數**據實顯示**，0 不隱藏——0 通常代表課程掛的受訓對象沒有任何人符合，
+    #: 那是教師需要知道的事實而不是錯誤（理由全文見 `PublishDialog`）。
+    invited_count: int = 0
+    invitation_code: str | None = None
 
 
 class OwnerOption(BaseModel):

@@ -24,10 +24,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.et.catalog.models import EtCourseTag
 from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ
-from app.et.course.models import EtChapter, EtItem
+from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -74,6 +77,26 @@ async def load_live_tree(db: AsyncSession, course_id: int) -> tuple[LiveNode, ..
     不是遍歷這一層的。濾掉會讓它在按「更新」時被判成「教師刪了它」而連帶軟刪。
     """
     nodes: list[LiveNode] = []
+
+    # 🔴 課程本體與受訓對象（#720）。**暫存樹是森林、不是單一棵樹**：課程、章節、
+    # 問卷都是根（`parent_key is None`），`COURSE` 底下只掛受訓對象。
+    #
+    # 不把章節改掛到課程之下，是為了把改動面壓到最小——`stage_rules._roots()` 本來就
+    # 同時以 `entity_type` 過濾，重新掛親會動到那裡與 `stage_apply._validate_tree`，
+    # 而那兩處是 #631 的核心路徑。
+    #
+    # ⛔ `stage_apply._delete_removed` **必須永不刪課程節點**：它以「活表有、暫存沒有」
+    # 判定教師刪了它，而刪課程是另一條路徑（草稿專用），不經暫存。
+    course = await db.scalar(select(EtCourse).where(EtCourse.course_id == course_id, EtCourse.deleted == 0))
+    if course is not None:
+        course_key = (ENTITY_COURSE, course.course_id)
+        nodes.append(LiveNode(ENTITY_COURSE, course, course_key, None, 0))
+        for tag in await db.scalars(
+            select(EtCourseTag)
+            .where(EtCourseTag.course_id == course_id, EtCourseTag.deleted == 0)
+            .order_by(EtCourseTag.course_tag_id)
+        ):
+            nodes.append(LiveNode(ENTITY_COURSE_TAG, tag, (ENTITY_COURSE_TAG, tag.course_tag_id), course_key, 0))
 
     chapters = list(
         await db.scalars(

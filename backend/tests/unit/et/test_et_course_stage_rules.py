@@ -23,6 +23,8 @@ from app.et.course.publish_rules import (
 )
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -39,6 +41,10 @@ pytestmark = pytest.mark.unit
 
 _NOW = datetime(2026, 10, 14, tzinfo=timezone.utc)
 _END = datetime(2027, 10, 14, tzinfo=timezone.utc)
+
+
+#: 課程節點的 `STAGE_ID`——取一個遠大於本檔其他節點的值，避免與它們撞號。
+_COURSE_STAGE_ID = 9000
 
 
 def _node(
@@ -65,14 +71,33 @@ def _snapshot(nodes, *, tag_count: int = 1):
 
     少給任何一個都會多出 `BLOCK_NO_SCHEDULE` / `BLOCK_NO_TAG`，讓「完整的樹不產生
     任何缺漏」那條永遠紅，而紅的理由與本層無關。
+
+    ⚠️ #720 之後它們**來自暫存樹本身**（不再是參數），所以這裡要把課程節點與受訓對象
+    節點一起塞進去。`to_course_snapshot` 的來源換邊由
+    `test_et_course_stage_snapshot_source.py` 專門驗，本檔不重複。
     """
-    return to_course_snapshot(
-        nodes,
-        status=COURSE_PUBLISHED,
+    course = _node(
+        _COURSE_STAGE_ID,
+        ENTITY_COURSE,
+        source_id=1,
+        course_name="課程",
+        description=None,
         open_start_at=_NOW,
         open_end_at=_END,
-        tag_count=tag_count,
+        require_approval=False,
     )
+    tags = [
+        _node(
+            _COURSE_STAGE_ID + 1 + i,
+            ENTITY_COURSE_TAG,
+            parent=_COURSE_STAGE_ID,
+            source_id=900 + i,
+            tag_id=2,
+            unit_tag_id=101 + i,
+        )
+        for i in range(tag_count)
+    ]
+    return to_course_snapshot([course, *tags, *nodes], status=COURSE_PUBLISHED)
 
 
 def _chapter_with_material(ch_id: int, item_id: int, mat_id: int, *, name: str = "教材甲"):

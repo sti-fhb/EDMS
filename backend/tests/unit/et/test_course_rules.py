@@ -238,16 +238,50 @@ class TestEnsureClosable:
 
 
 class TestEnsureReopenable:
-    """僅已關閉課程可再開課（US11 AC 8）。"""
+    """**視同關閉**的課程可重新開課（US11 AC 8；2026-10-19 由 #720 放寬）。
 
-    def test_已關閉課程可再開課(self) -> None:
-        ensure_reopenable(COURSE_CLOSED)
+    判準自 #720 起是 `is_effectively_closed`，不是 `status == CLOSED`——與編輯頁動作列
+    分流用的**同一個函式**。兩邊各自判定正是下面 `test_期間已過的已發布課程可重開課`
+    要防的那個死局的成因。
+    """
 
-    @pytest.mark.parametrize("status", [COURSE_DRAFT, COURSE_PUBLISHED])
-    def test_非已關閉不可再開課(self, status: str) -> None:
-        """與 `ensure_closable` **分開兩個錯誤碼**：兩者的下一步不同（去發布 / 去再開課）。"""
+    _FUTURE = _NOW + timedelta(days=30)
+    _PAST = _NOW - timedelta(days=1)
+
+    def test_已關閉課程可重開課(self) -> None:
+        ensure_reopenable(status=COURSE_CLOSED, open_end_at=self._FUTURE, now=_NOW)
+
+    def test_期間已過的已發布課程可重開課(self) -> None:
+        """🥇 **#720 放寬的全部理由**。
+
+        到期自動轉 `CLOSED` 屬未實作的 ET-16，所以「`status` 仍是 `PUBLISHED` 而期間
+        已過」是**常態**。原本的 `status != COURSE_CLOSED` 會把這種課程擋下，而編輯頁
+        依 `is_closed` 給它的是「取消｜保留編輯｜更新並重開課」、沒有「更新」——
+
+        ⇒ 教師按下去吃 409，又沒有別的鈕可按，**那門課的編輯永遠到不了學員**。
+
+        ⛔ 這條紅掉時不要改判準去遷就 `status`，要改的是讓兩邊共用同一個判定。
+        """
+        ensure_reopenable(status=COURSE_PUBLISHED, open_end_at=self._PAST, now=_NOW)
+
+    def test_運作中的已發布課程不可重開課(self) -> None:
+        """正向錨點：放寬不等於全放行。期間內的已發布課程本來就開著，它的出口是「更新」。
+
+        少了這條，把守門整個拿掉也會讓上面兩條通過。
+        """
         with pytest.raises(AppError) as exc:
-            ensure_reopenable(status)
+            ensure_reopenable(status=COURSE_PUBLISHED, open_end_at=self._FUTURE, now=_NOW)
+        assert exc.value.status_code == 409
+        assert exc.value.error_code == "ET_COURSE_007"
+
+    def test_草稿不可重開課(self) -> None:
+        """與 `ensure_closable` **分開兩個錯誤碼**：兩者的下一步不同（去發布 / 去再開課）。
+
+        ⚠️ 草稿即使訖止已過也不算視同關閉（`is_effectively_closed` 只認 `CLOSED` 與
+        `PUBLISHED`），所以這裡用已過的訖止才驗得到「不是靠日期擋下的」。
+        """
+        with pytest.raises(AppError) as exc:
+            ensure_reopenable(status=COURSE_DRAFT, open_end_at=self._PAST, now=_NOW)
         assert exc.value.status_code == 409
         assert exc.value.error_code == "ET_COURSE_007"
 
@@ -269,6 +303,21 @@ class TestEnsureReopenSchedule:
         """邊界取「須嚴格晚於」——等於當下代表期間在這一瞬間結束，開了也沒有時間可用。"""
         with pytest.raises(AppError) as exc:
             ensure_reopen_schedule(open_end_at=_NOW, now=_NOW)
+        assert exc.value.error_code == "ET_COURSE_008"
+
+    def test_訖止為_None_走同一個出口而非_TypeError(self) -> None:
+        """🔴 **#720 之後 `None` 才進得來**，而它原本會 500。
+
+        `ReopenCourseReq._schedule_required` 曾保證非 `None`；#720 拿掉 request body 之後
+        沒有人接手那個保證，而訖止為 `None` 的課程是真實存在的（見
+        `ensure_schedule_not_cleared`：它只擋「非 NULL 改成 NULL」，擋不住既有的 NULL）。
+
+        `None <= now` 是 `TypeError` → 500，教師看到一個沒有任何線索的錯誤——而正確的
+        回應就是這句「請重新設定一組新的起訖時間」。
+        """
+        with pytest.raises(AppError) as exc:
+            ensure_reopen_schedule(open_end_at=None, now=_NOW)
+        assert exc.value.status_code == 422
         assert exc.value.error_code == "ET_COURSE_008"
 
     def test_不檢核起始時間(self) -> None:

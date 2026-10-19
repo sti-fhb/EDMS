@@ -409,8 +409,12 @@ describe("ET05 課程編輯頁", () => {
       expect(screen.getByRole("combobox", { name: "第 2 組的職位" })).toBeEnabled()
       expect(screen.getByRole("button", { name: "移除第 2 組受訓對象" })).toBeInTheDocument()
 
-      // 按儲存才會顯示逐列錯誤；訊息要讓使用者知道為什麼得刪掉這一列
-      await user.click(screen.getByRole("button", { name: "儲存" }))
+      // 按送出鈕才會顯示逐列錯誤；訊息要讓使用者知道為什麼得刪掉這一列
+      //
+      // ⚠️ #720：已發布課程的動作列沒有「儲存」了，基本資料隨「更新」一起送——所以
+      // 驗證也掛在那顆上（`requestApply` 的 `validateBeforeSubmit`）。少了那道驗證，
+      // 重複的列會被 `toPayload()` **靜默濾掉**：畫面上還在，按下去卻沒送出去。
+      await user.click(screen.getByRole("button", { name: "更新" }))
       expect(await screen.findByText("此組受訓對象已存在")).toBeInTheDocument()
 
       // 使用者自己刪掉後，錯誤消失、第 1 組仍在且仍鎖定

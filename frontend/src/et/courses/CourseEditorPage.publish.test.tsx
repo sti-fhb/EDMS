@@ -92,7 +92,13 @@ beforeEach(() => {
  */
 function useCourse(
   status: string,
-  { isOwner = true, pending = false }: { isOwner?: boolean; pending?: boolean } = {},
+  {
+    isOwner = true,
+    pending = false,
+    // ⚠️ #720 拿掉再開課模式之後沒有東西會清空起訖，所以「欄位空著」這個狀態只能由
+    // fixture 造（等同教師自己把兩欄都清掉）。
+    schedule = true,
+  }: { isOwner?: boolean; pending?: boolean; schedule?: boolean } = {},
 ) {
   server.use(
     http.get("/api/et/courses/:courseId", () =>
@@ -101,8 +107,8 @@ function useCourse(
         course_name: "採血作業訓練",
         description: null,
         status,
-        open_start_at: "2026-09-01T00:00:00Z",
-        open_end_at: "2027-09-30T00:00:00Z",
+        open_start_at: schedule ? "2026-09-01T00:00:00Z" : null,
+        open_end_at: schedule ? "2027-09-30T00:00:00Z" : null,
         require_approval: false,
         version: 5,
         owner_id: "U1",
@@ -112,6 +118,7 @@ function useCourse(
         chapters: [],
         invitation_code: isOwner ? "01234567" : null,
         has_pending_changes: pending,
+        is_closed: status === "CLOSED",
       }),
     ),
   )
@@ -139,7 +146,11 @@ const reopened = {
  * 落空而**測試照樣往下跑**。
  */
 async function fillDateTime(label: RegExp, keys: string) {
-  const field = screen.getAllByLabelText(label).find((el) => el.getAttribute("role") === "group")
+  // ⚠️ `findAll` 而非 `getAll`：#720 拿掉再開課模式之後，呼叫端不再需要先點一顆「再開課」
+  // ——而那一下順便扮演了「等課程載入」。少了它，`getAll` 會在資料回來前就落空，測試當場
+  // 炸掉、錯誤訊息指向「找不到欄位」而與它要驗的事無關。
+  const fields = await screen.findAllByLabelText(label)
+  const field = fields.find((el) => el.getAttribute("role") === "group")
   if (!field) throw new Error(`找不到日期時間欄位：${label}`)
   const first = field.querySelector<HTMLElement>(".MuiPickersSectionList-section")
   if (!first) throw new Error(`欄位沒有可輸入的區段：${label}`)
@@ -494,10 +505,12 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     expect(state.puts).toBe(1)
   })
 
-  it("再開課：時間錯誤與後端缺漏同一個視窗，關閉後時間欄位標示（AC 7）", async () => {
+  it("更新並重開課：時間錯誤與後端缺漏同一個視窗，關閉後時間欄位標示（AC 7）", async () => {
     let reopens = 0
     const user = userEvent.setup()
-    useCourse("CLOSED")
+    // ⚠️ `schedule: false` 造出「時間錯誤」。#720 之前是再開課模式把兩欄清空的，
+    // 拿掉模式之後只能由 fixture 造。
+    useCourse("CLOSED", { schedule: false })
     server.use(
       http.get("/api/et/courses/:courseId/publish-check", () =>
         HttpResponse.json({
@@ -514,10 +527,9 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
       }),
     )
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await user.click(await screen.findByRole("button", { name: "確認再開課" }))
+    await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
 
-    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    const dialog = await screen.findByRole("dialog", { name: "更新並重開課" })
     expect(await within(dialog).findByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
     expect(within(dialog).getByText("請重新設定課程起始時間")).toBeInTheDocument()
     // 🔴 再開課的前端只判時間——後端回報的「沒有受訓對象」不可被當成「前端判過了」濾掉
@@ -528,8 +540,8 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
     await user.click(within(dialog).getByRole("button", { name: "關閉" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     expect(screen.getByText("請重新設定課程起始時間")).toBeInTheDocument()
-    // 仍在再開課模式
-    expect(screen.getByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    // 仍停在本頁可以就地補（#720：只有成功才回列表）
+    expect(screen.getByRole("button", { name: "更新並重開課" })).toBeInTheDocument()
   })
 })
 
@@ -558,10 +570,11 @@ describe("ET05 起訖時間選擇器格式（#564）", () => {
   it("下午的時間以 24 小時制輸入與顯示（17:00，不是 05:00 PM）（AC 1）", async () => {
     // 只改 `format` 而漏了 `ampm={false}` 時，時段仍是 12 小時制：打「17」不會成立。
     // 用下午的時間才驗得到——上午的時間在兩種制度下長得一樣
-    const user = userEvent.setup()
+    //
+    // ℹ️ 不需要 `userEvent.setup()`：`fillDateTime` 自備 `delay: null` 的 typist
+    // （見其註解），而 #720 之後也不必先點一顆「再開課」進模式。
     useCourse("CLOSED")
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "202711011700")
 
     expect(screen.getByDisplayValue("2027/11/01 17:00")).toBeInTheDocument()

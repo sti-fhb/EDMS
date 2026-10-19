@@ -256,7 +256,18 @@ class TestPublishSendsInvites:
 
 
 class TestAddTagToPublishedCourse:
-    """AC 5：已發布課程新增標籤 → 對該標籤人員補加入 + 寄信；**既有學員不重複加入**。"""
+    """AC 5：已發布課程新增標籤 → 對該標籤人員補加入 + 寄信；**既有學員不重複加入**。
+
+    ## ⚠️ #720：帶入與寄信從「按儲存」移到「按更新」
+
+    已發布課程的受訓對象改走暫存區，所以本組三條都是 `PUT` → **`content/apply`** →
+    斷言。在 `PUT` 當下寄信是寄出一件還沒發生的事：信裡說「你被加入了某課程」，而那組
+    配對還在暫存區、他點進去什麼都看不到；教師若接著按「取消」，那組配對從頭到尾不曾
+    存在，而信已經寄出去了。
+
+    ⛔ 不要把 `_apply` 拿掉改成直接斷言——那會讓這三條變成在驗「暫存寫進去了沒」，
+    而它們要驗的是「對的人收到了信」。
+    """
 
     async def _published_course_with_tag(self, client, db, teacher: str, tag_id: int) -> int:
         """發布一門掛著 `tag_id` 的課程。"""
@@ -265,6 +276,11 @@ class TestAddTagToPublishedCourse:
         r = await client.post(f"{_COURSES}/{cid}/publish", headers=_bearer(teacher))
         assert r.status_code == 200, r.text
         return cid
+
+    async def _apply(self, client, teacher: str, course_id: int) -> None:
+        """按「更新」——#720 之後受訓對象的變更要到這一刻才對學員生效、才寄信。"""
+        r = await client.post(f"{_COURSES}/{course_id}/content/apply", headers=_bearer(teacher))
+        assert r.status_code == 200, r.text
 
     async def _detail(self, client, teacher: str, course_id: int) -> dict:
         """讀課程詳細取當下 `audiences` 與 `version`。
@@ -301,6 +317,7 @@ class TestAddTagToPublishedCourse:
             headers=_bearer(teacher),
         )
         assert r.status_code == 204, r.text
+        await self._apply(client, teacher, cid)
 
         enrolled = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
         assert set(enrolled) == set(newcomers)
@@ -340,6 +357,7 @@ class TestAddTagToPublishedCourse:
             headers=_bearer(teacher),
         )
         assert r.status_code == 204, r.text
+        await self._apply(client, teacher, cid)
 
         rows = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
         assert sorted(rows) == sorted([existing, newcomer])
@@ -376,6 +394,7 @@ class TestAddTagToPublishedCourse:
             headers=_bearer(teacher),
         )
         assert r.status_code == 204, r.text
+        await self._apply(client, teacher, cid)
 
         (log,) = await _pending_invites(db)
         assert "改名後的課程名稱" in log.body
@@ -396,6 +415,8 @@ class TestAddTagToPublishedCourse:
             headers=_bearer(teacher),
         )
         assert r.status_code == 204, r.text
+        # ⚠️ **草稿不打 `content/apply`**（回 409 `ET_COURSE_010`）：草稿的編輯直接寫活表，
+        # 沒有暫存可套用。本類其餘幾條的 `_apply` 在這裡是錯的。
 
         assert await _pending_invites(db) == []
         rows = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
@@ -424,6 +445,7 @@ class TestAddTagToPublishedCourse:
             headers=_bearer(teacher),
         )
         assert r.status_code == 204, r.text
+        await self._apply(client, teacher, cid)
 
         rows = (await db.execute(select(EtEnrollment.user_id).where(EtEnrollment.course_id == cid))).scalars().all()
         assert rows == []

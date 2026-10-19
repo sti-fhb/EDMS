@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtCourseEditorPage } from "./CourseEditorPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
@@ -43,6 +43,17 @@ vi.mock("react-router-dom", async (orig) => {
   }
 })
 
+// 🔴 `navigateSpy` 必須逐條清掉——它由 `vi.hoisted` 建立，整個檔案共用同一個實例。
+//
+// ⚠️ 本檔是五個 `CourseEditorPage.*.test.tsx` 裡**唯一漏掉這段**的（其餘四檔都有），
+// 而它一直沒出事：#720 之前本檔沒有任何測試會 `navigate`，所以「上一條留下的呼叫」
+// 根本不存在。#720 讓「更新」成功後回列表，殘留才第一次有東西可殘。
+//
+// ⇒ 這類缺口的性質：**不是被改壞的，是本來就缺、只是沒有路徑到得了**。
+beforeEach(() => {
+  navigateSpy.mockClear()
+})
+
 /**
  * 以指定狀態、擁有權與暫存狀態覆蓋課程詳細。
  *
@@ -70,6 +81,7 @@ function useCourse(
         chapters: [],
         invitation_code: isOwner ? "01234567" : null,
         has_pending_changes: pending,
+        is_closed: false,
       }),
     ),
   )
@@ -119,6 +131,7 @@ function useCourseWithStagedItems() {
         audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
         invitation_code: "01234567",
         has_pending_changes: true,
+        is_closed: false,
         chapters: [
           {
             chapter_id: -10,
@@ -174,20 +187,39 @@ describe("ET05 更新（#631）", () => {
     expect(screen.getByRole("button", { name: "儲存並發布" })).toBeInTheDocument()
   })
 
-  it("沒有暫存變更時「更新」鈕停用，且提示不說有變更", async () => {
+  it("🔴 沒有暫存變更時「更新」鈕**仍可按**，只是提示不說有變更（#720）", async () => {
+    // ## 這條與 #631 當時的斷言**方向相反**
+    //
+    // #631：沒有暫存變更時「更新」鈕停用（理由是「按了也沒事做」）。
+    //
+    // #720 之後基本資料也由這顆鈕送出，於是出現 2026-10-19 手測回報的第二個現象：
+    // **教師改了課名，暫存區還是空的，鈕卻按不下去**——他看得到自己的修改，卻沒有任何
+    // 方法讓它生效，而畫面上沒有一句話解釋為什麼。
+    //
+    // ⇒ 停用條件整個拿掉。暫存區真的沒東西時後端是安全的 no-op（`applied_count = 0`，
+    // 訊息為「目前沒有需要更新的變更」），不需要前端先擋。
+    //
+    // ⛔ 不要為了「按了沒事做很怪」而把 `disabled` 加回來：那會讓基本資料永遠送不出去。
     useCourse("PUBLISHED", { pending: false })
     renderEditor()
 
-    expect(await screen.findByRole("button", { name: "更新" })).toBeDisabled()
+    expect(await screen.findByRole("button", { name: "更新" })).toBeEnabled()
     expect(screen.getByText(/按「更新」才整批對學員生效/)).toBeInTheDocument()
     expect(screen.queryByText(/有尚未更新的變更/)).not.toBeInTheDocument()
   })
 
-  it("🔴 編輯問卷之後「更新」鈕立即由灰轉亮——不需離開頁面再進來", async () => {
+  it("🔴 編輯問卷之後「有尚未更新的變更」立即出現——不需離開頁面再進來", async () => {
     // 2026-10-19 手測回報：改了問卷，「更新」維持灰色按不下去，要先離開編輯頁再進來。
     //
     // 根因是 `invalidateSurvey` 只刷了問卷查詢、沒刷課程詳細，而 `has_pending_changes`
     // 住在課程詳細裡。後端其實已經翻成 true 了，前端讀的是過期快取。
+    //
+    // ⚠️ **#720 換了可觀察的症狀，根因與守的東西不變。** 「更新」鈕不再因為旗標而變灰
+    // （那個停用條件本身就是手測回報的第二個現象，已拿掉），所以改以提示文字斷言——
+    // 它由**同一個** `has_pending_changes` 驅動，過期快取一樣會讓它不出現。
+    //
+    // ⛔ 不要因為「鈕已經不會變灰了」就刪掉本條：那會讓 `invalidateSurvey` 的刷新範圍
+    // 失去唯一的守門，而那正是當初那個 bug 的所在。
     //
     // ⚠️ 本條的 fixture 必須讓旗標**真的會變**（`pending` 隨 POST 翻成 true），否則不論
     // 有沒有刷新都讀到同一個值，測試會恆綠——那就驗不到任何東西了。
@@ -210,6 +242,7 @@ describe("ET05 更新（#631）", () => {
           chapters: [],
           invitation_code: "01234567",
           has_pending_changes: pending,
+          is_closed: false,
         }),
       ),
       http.post("/api/et/courses/:courseId/survey", () => {
@@ -222,7 +255,9 @@ describe("ET05 更新（#631）", () => {
     )
     const user = userEvent.setup()
     renderEditor()
-    expect(await screen.findByRole("button", { name: "更新" })).toBeDisabled()
+    // 正向錨點：旗標翻轉**之前**提示不在，否則「之後它出現」無法歸因於刷新
+    expect(await screen.findByRole("button", { name: "更新" })).toBeEnabled()
+    expect(screen.queryByText(/有尚未更新的變更/)).not.toBeInTheDocument()
 
     await user.click(await screen.findByRole("button", { name: "新增問卷" }))
     await user.type(await screen.findByRole("textbox", { name: /問卷名稱/ }), "訓後滿意度")
@@ -236,7 +271,7 @@ describe("ET05 更新（#631）", () => {
     // `onClose(dirty)` 契約）。背景同樣被 `aria-hidden`，所以要先把它關掉。
     await user.click(await screen.findByRole("button", { name: "確定" }))
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "更新" })).toBeEnabled())
+    expect(await screen.findByText(/有尚未更新的變更/)).toBeInTheDocument()
   })
 
   it("🔴 有暫存變更時提示明寫「只有你看得到」——本功能的新風險就在這句話上", async () => {
@@ -419,7 +454,7 @@ describe("ET05 更新（#631）", () => {
     expect(await screen.findByText(/回到學員目前看到的版本/)).toBeInTheDocument()
     expect(discards).toBe(0) // 確認前不送出
 
-    await user.click(screen.getByRole("button", { name: "放棄變更並離開" }))
+    await user.click(screen.getByRole("button", { name: "放棄並離開" }))
 
     await waitFor(() => expect(discards).toBe(1))
     await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
@@ -559,6 +594,7 @@ describe("ET05 更新（#631）", () => {
           audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
           invitation_code: "01234567",
           has_pending_changes: true,
+          is_closed: false,
           chapters: [
             {
               chapter_id: 10,

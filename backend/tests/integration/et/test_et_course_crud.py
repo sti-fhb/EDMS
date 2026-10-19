@@ -518,7 +518,12 @@ class TestUpdateAndTags:
         assert r.status_code == 204
 
     async def test_require_approval_已發布仍可調整(self, client, db) -> None:
-        """FR-ET-US3-16：草稿 / 已發布 / 已關閉任一狀態皆可調整。"""
+        """FR-ET-US3-16：草稿 / 已發布 / 已關閉任一狀態皆可調整。
+
+        ⚠️ #720：已發布課程的基本資料改走暫存，所以「調整成功」要去**詳細頁**看，
+        不是去活表看——活表要到按「更新」才變。這條驗的是 FR-ET-US3-16 的「可調整」
+        （沒有被狀態擋下），生效時機由 `test_et_staged_write_paths.py` 守著。
+        """
         uid = await _user(db, "ETC_U4")
         created = await client.post(_URL, json={"course_name": "課程"}, headers=_bearer(uid))
         cid = created.json()["course_id"]
@@ -532,8 +537,9 @@ class TestUpdateAndTags:
             headers=_bearer(uid),
         )
         assert r.status_code == 204
-        await db.refresh(course)
-        assert course.require_approval is True
+
+        detail = (await client.get(f"{_URL}/{cid}", headers=_bearer(uid))).json()
+        assert detail["require_approval"] is True
 
     async def test_版本不符回_409(self, client, db) -> None:
         uid = await _user(db, "ETC_U5")
@@ -696,6 +702,16 @@ class TestExtendRevivesCourse:
     """
 
     async def test_復活且不符檢核被擋下(self, client, db) -> None:
+        """⚠️ #720：延長寫進暫存，**檢核落在按「更新」的那一刻**。
+
+        `PUT` 當下活表一個欄位都沒動、課程還沒復活，在那裡跑檢核是檢核一個還不存在的
+        狀態。保護沒有消失，只是換了時點——而換時點之後它變得**更強**：檢核讀的是暫存
+        快照，也就是真正會生效的那一份。
+
+        ⚠️ 不在 422 之後斷言 DB 狀態：本測試環境裡一個失敗的請求會回滾整個交易，連前置
+        的直寫一起回滾，那種斷言驗的是 harness 的性質。「未通過時活表一行都不會動」由
+        `test_et_course_stage.py` 的套用測試守著（它在成功路徑上比對前後）。
+        """
         uid = await _user(db, "ETC_R1")
         created = await client.post(
             _URL,
@@ -715,7 +731,7 @@ class TestExtendRevivesCourse:
         )
         await db.flush()
 
-        r = await client.put(
+        staged = await client.put(
             f"{_URL}/{cid}",
             json={
                 "course_name": "到期課程",
@@ -725,15 +741,14 @@ class TestExtendRevivesCourse:
             },
             headers=_bearer(uid),
         )
+        assert staged.status_code == 204, staged.text
+
+        r = await client.post(f"{_URL}/{cid}/content/apply", headers=_bearer(uid))
 
         assert r.status_code == 422, r.text
         assert r.json()["error_code"] == "ET_PUBLISH_001"
         codes = {b["code"] for b in r.json()["blockers"]}
         assert "NO_CHAPTER" in codes, f"應帶出缺漏清單，實得 {codes}"
-        row = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
-        db.expire(row)
-        row = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
-        assert row.open_end_at < utcnow(), "被擋下時不得寫入新的訖止時間"
 
     async def test_仍在開放中者延長期間不跑檢核(self, client, db) -> None:
         """收窄的證明：課程仍在開放中（非復活），即使不符發布條件也放行。

@@ -26,12 +26,20 @@ seed 不會搬它、套用時會把活表那一欄寫回預設值——教師看
 再建項目**（`APPLY_ORDER` 已排好）。
 """
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Final
 
-from app.et.course.models import EtChapter, EtItem
+from sqlalchemy import DateTime
+
+from app.et.catalog.models import EtCourseTag
+from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -79,13 +87,58 @@ class EntitySpec:
     parent_entity: str | None
     link: str
     fk: str
+    #: 明確白名單——**只有課程主檔用它**（#720）。`None` ＝ 照常推導。
+    #:
+    #: 🔴 推導的預設是「新欄位自動納入」，那對內容表是對的（新欄位多半是內容），
+    #: 但對 `ET_COURSE` 是**反的**：它 13 個欄位裡只有 5 個是教師編的基本資料，
+    #: 其餘是系統狀態（狀態、擁有者、邀請碼、首次發布、最近關閉、加急提醒旗標）。
+    #: 自動納入會讓新加的系統欄位被當成內容搬進暫存、再寫回活表——最危險的是
+    #: `status`，那等於讓「更新」繞過整條狀態機。
+    #:
+    #: ⚠️ 白名單會過期，所以 `test_課程主檔的每個欄位都要明確分類` 強制
+    #: 「`ET_COURSE` 加欄位時必須二選一」。⛔ 不要為了讓那條變綠而把新欄位
+    #: 隨手丟進 `COURSE_SYSTEM_FIELDS`。
+    only_fields: tuple[str, ...] | None = None
 
 
 #: 🔴 **順序即套用順序**：每一列被建立時，它依賴的對象都已經有活表 id。
 #:
 #: `MATERIAL` / `QUIZ` 排在 `ITEM` 之前，因為項目要填 `MATERIAL_ID` / `QUIZ_ID`
 #: （`LINK_PARENT_FK`）。其餘一律父先於子。
+#: 課程主檔中**不是**教師編輯之基本資料的欄位（#720）。
+#:
+#: 它與 `COURSE_PAYLOAD_FIELDS` 互補、合起來必須涵蓋 `ET_COURSE` 的全部欄位——由
+#: `test_課程主檔的每個欄位都要明確分類` 強制。⚠️ 新增欄位時**必須二選一**，
+#: 沒分類的症狀是教師改了卻不生效，而畫面上沒有任何訊息。
+COURSE_SYSTEM_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "course_id",  # PK
+        "status",  # 🔴 狀態機專屬——搬了會讓「更新」把狀態改回編輯開始那一刻的值
+        "owner_id",  # 建立當下記錄，永久不可變更
+        "invitation_code",  # 發布當下產生，之後沿用
+        "first_published_at",  # 稽核用時間戳
+        "closed_at",  # 最近一次關閉時間
+        "urgent_remind_sent",  # 加急提醒的簿記旗標
+        "version",  # 活表列的樂觀鎖
+        *_AUDIT_FIELDS,
+    }
+)
+
+#: 教師在基本資料區真正編輯的五個欄位。
+COURSE_PAYLOAD_FIELDS: Final[tuple[str, ...]] = (
+    "course_name",
+    "description",
+    "open_start_at",
+    "open_end_at",
+    "require_approval",
+)
+
 APPLY_ORDER: Final[tuple[EntitySpec, ...]] = (
+    # 🔴 課程本體排第一：章節與問卷的 `COURSE_ID` 指向它。今天課程列必然已存在
+    # （暫存只對已發布 / 已關閉開啟），所以這是「更新順序」而非「建立順序」；
+    # 但排錯了會在日後若支援草稿暫存時靜默壞掉。
+    EntitySpec(ENTITY_COURSE, EtCourse, "course_id", None, LINK_CHILD_FK, "course_id", COURSE_PAYLOAD_FIELDS),
+    EntitySpec(ENTITY_COURSE_TAG, EtCourseTag, "course_tag_id", ENTITY_COURSE, LINK_CHILD_FK, "course_id"),
     EntitySpec(ENTITY_CHAPTER, EtChapter, "chapter_id", None, LINK_CHILD_FK, "course_id"),
     EntitySpec(ENTITY_MATERIAL, EtMaterial, "material_id", ENTITY_ITEM, LINK_PARENT_FK, "material_id"),
     EntitySpec(ENTITY_QUIZ, EtQuiz, "quiz_id", ENTITY_ITEM, LINK_PARENT_FK, "quiz_id"),
@@ -113,12 +166,92 @@ def _parent_fk_fields_on(model: type[Any]) -> frozenset[str]:
     return frozenset(s.fk for s in reverse if SPEC_BY_TYPE[str(s.parent_entity)].model is model)
 
 
+def datetime_fields(spec: EntitySpec) -> frozenset[str]:
+    """該型別 payload 裡屬於 `datetime` 的欄位——**由 model 的欄位型別推導**。
+
+    ⚠️ 手寫清單漏掉一個的症狀：序列化時爆 `TypeError`（看得見，還好）；但若有人為了
+    讓它過而給 `json.dumps` 加上 `default=str`，就會變成**靜默寫入字串**——而那正是
+    `to_payload` 的擋牌要防的事。
+    """
+    return frozenset(f for f in payload_fields(spec) if isinstance(spec.model.__mapper__.columns[f].type, DateTime))
+
+
+def to_payload_dict(spec: EntitySpec, row: object) -> dict[str, Any]:
+    """活表列 → payload 的 dict（`datetime` 轉 ISO 8601 字串）。
+
+    🔴 **型別安全的來回**：`to_payload` 的 docstring 原本預言了「內容表日後加 `datetime`
+    會當場爆」，並明寫「靜默塞個字串進去才是真正的問題（套用時寫回活表會變成錯的型別）」。
+    #720 的課程本體帶來了兩個時間欄位，所以那個「日後」到了。
+
+    ⛔ 擋牌擋的是**目的**（套用時型別不能錯），不是手段。所以這裡成對提供 `parse_payload`
+    把它還原成 `datetime`——承重點從「`json.dumps` 會爆」轉移到「讀回來會還原」，
+    由 `test_et_course_stage_payload_datetime.py` 守住。
+    """
+    dt = datetime_fields(spec)
+    return {
+        f: (v.isoformat() if f in dt and (v := getattr(row, f)) is not None else getattr(row, f))
+        for f in payload_fields(spec)
+    }
+
+
+def dumps_payload(entity_type: str, payload: Mapping[str, Any]) -> str:
+    """payload（可含 `datetime`）→ 存進 `PAYLOAD` 欄位的 JSON 字串。**與 `parse_payload` 成對。**
+
+    🔴 **序列化只有這一道門。** 四條寫入路徑都走這裡：
+
+    | 路徑 | 時機 |
+    |---|---|
+    | `stage_repository.to_payload` | 從活表 seed 一棵樹 |
+    | `stage_writer.append` | 教師新增一個節點 |
+    | `stage_writer.update_payload` | 教師改一個節點的欄位 |
+    | `stage_writer.set_payload_flag` | 設 / 清工作階段旗標（`__require_retest`、`__kept`）|
+
+    ⚠️ 最後一條最容易漏：它**讀出整份 payload、改一個 key、再寫回去**，而讀出來的值
+    已由 `parse_payload` 把 ISO 字串還原成 `datetime`。這張表就是給後人判斷「有沒有漏門」
+    用的，少列一條等於讓那道門隱形。
+
+    #720 之前四者各自裸呼叫 `json.dumps`，而那完全沒問題——當時 11 種內容型別的 payload
+    全是 JSON 原生型別。課程本體帶進兩個 `datetime` 之後，**漏掉任何一道門的症狀都是
+    教師編輯基本資料當場 500**，而 seed 那條路照樣會過，所以單測 seed 看不出來。
+
+    ⛔ **不要加 `default=str`。** 未宣告成時間欄位的 `datetime` 要當場爆：靜默轉字串的話
+    `parse_payload` 不會還原它，套用時就把字串寫進活表——理由全文見 `to_payload_dict`。
+
+    ⚠️ 不在 `payload_fields` 裡的 key **原樣帶過**：`update_payload` 會把工作階段旗標
+    （`__require_retest`）併回同一份 payload 送進來，這裡不能把它濾掉。
+    """
+    spec = SPEC_BY_TYPE.get(entity_type)
+    dt = datetime_fields(spec) if spec is not None else frozenset()
+    encoded = {k: (v.isoformat() if k in dt and isinstance(v, datetime) else v) for k, v in payload.items()}
+    return json.dumps(encoded, ensure_ascii=False)
+
+
+def parse_payload(entity_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """payload → 可直接使用的值（ISO 8601 字串還原成 `datetime`）。
+
+    ⚠️ 少了這一步，`evaluate_publish` 會拿字串去跟 `datetime` 比較而 `TypeError`，
+    或更糟——`stage_apply._upsert` 把字串寫進 `TIMESTAMPTZ` 欄位。
+
+    ⚠️ 未知的 `entity_type` 原樣回傳：`stage_apply._validate_tree` 才是該報錯的地方，
+    這裡多擋一次只會讓錯誤出現在比較難讀的位置。
+    """
+    spec = SPEC_BY_TYPE.get(entity_type)
+    if spec is None:
+        return dict(payload)
+    dt = datetime_fields(spec)
+    if not dt:
+        return dict(payload)
+    return {k: (datetime.fromisoformat(v) if k in dt and isinstance(v, str) else v) for k, v in payload.items()}
+
+
 def payload_fields(spec: EntitySpec) -> tuple[str, ...]:
     """要搬進 / 搬出 `PAYLOAD` 的欄位（Python 屬性名，依 model 宣告順序）。
 
     ⚠️ **推導而非手寫**（理由見模組 docstring）。欄位集合＝全部欄位扣掉：
     PK、父子連結欄位、`SORT_ORDER`、`VERSION`、稽核欄位。
     """
+    if spec.only_fields is not None:
+        return spec.only_fields
     excluded = {spec.pk} | _AUDIT_FIELDS | _NEVER_STAGED | _parent_fk_fields_on(spec.model)
     if spec.link == LINK_CHILD_FK:
         excluded.add(spec.fk)

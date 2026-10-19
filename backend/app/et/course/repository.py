@@ -8,6 +8,7 @@
 使「版本不符」與「查無資料」的區辨留在 service。
 """
 
+from collections.abc import Iterable
 from datetime import datetime
 from typing import NamedTuple
 
@@ -456,6 +457,44 @@ class EtCourseRepository:
             label = pair_label(unit_name=unit_name, unit_is_all=unit_is_all, role_name=role_name)
             grouped[course_id].append(CoursePairRow(unit_id, role_id, label))
         return grouped
+
+    async def labels_for_pairs(self, db: AsyncSession, pairs: Iterable[Pair]) -> list[CoursePairRow]:
+        """任意 `(單位, 職位)` 配對集合 → 帶顯示文字、已排序的列（#720）。
+
+        🔴 **與 `pairs_by_course` 同一份顯示規則、同一個排序**，差別只在資料來源：那支從
+        `ET_COURSE_TAG` 取（活表的配對），本支吃呼叫端給的集合（暫存區的配對）。兩邊的
+        文字或順序若分岔，教師編輯中看到的受訓對象會與按「更新」之後長得不一樣，而那種
+        不一致沒有任何錯誤訊息。
+
+        ⚠️ 同樣**不濾 `IS_ACTIVE`**：既有配對中的停用標籤仍須顯示（理由見 `pairs_by_course`）。
+        ⚠️ 查不到的標籤**略過**——本系統不硬刪標籤，查不到代表資料真的壞了，而在詳細頁
+        丟 500 只會讓教師連別的欄位都看不到。
+        """
+        wanted = {p for p in pairs}
+        if not wanted:
+            return []
+        rows = (
+            await db.execute(
+                select(EtTag.tag_id, EtTag.tag_name, EtTag.is_all, EtTag.display_order).where(
+                    EtTag.tag_id.in_({t for pair in wanted for t in pair if t is not None}),
+                    EtTag.deleted == 0,
+                )
+            )
+        ).all()
+        by_id = {r.tag_id: r for r in rows}
+        resolved = [(by_id.get(unit_id), by_id.get(role_id)) for unit_id, role_id in wanted]
+        return [
+            CoursePairRow(
+                unit.tag_id,
+                role.tag_id,
+                pair_label(unit_name=unit.tag_name, unit_is_all=unit.is_all, role_name=role.tag_name),
+            )
+            # 通用值在前，再依顯示順序——與 `pairs_by_course` 的 `ORDER BY` 逐項對應。
+            for unit, role in sorted(
+                (p for p in resolved if p[0] is not None and p[1] is not None),
+                key=lambda p: (not p[0].is_all, p[0].display_order, not p[1].is_all, p[1].display_order),
+            )
+        ]
 
     async def list_all_tags(self, db: AsyncSession) -> list[EtTag]:
         """篩選下拉的標籤來源：**`ET_TAG` 全部（含停用者）**。

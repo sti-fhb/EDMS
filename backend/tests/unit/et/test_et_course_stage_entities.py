@@ -19,6 +19,8 @@ from app.et.course.stage_entities import (
 from app.et.course.stage_repository import _SURVEY_ENTITY_TYPES
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -34,7 +36,17 @@ from app.et.course.stage_rules import (
 
 pytestmark = pytest.mark.unit
 
-_ALL_ENTITY_TYPES = {
+#: 🔴 **兩群分開列**（#720）。原本只有「內容」一群，現在多了「課程層」。
+#:
+#: 分開不是為了好看——`stage_apply._delete_removed` 對兩群的處置相反：內容可以被教師
+#: 刪（活表有、暫存沒有 ⇒ 軟刪），**課程本體永遠不能**。合成一群會讓那條差異在這裡
+#: 看不見，而它是本次最容易寫錯的地方。
+_COURSE_LEVEL_TYPES = {
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
+}
+
+_CONTENT_ENTITY_TYPES = {
     ENTITY_CHAPTER,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
@@ -48,12 +60,23 @@ _ALL_ENTITY_TYPES = {
     ENTITY_SURVEY_OPTION,
 }
 
+_ALL_ENTITY_TYPES = _CONTENT_ENTITY_TYPES | _COURSE_LEVEL_TYPES
+
 
 class TestCoverage:
-    def test_十一種內容型別全部都有對照(self) -> None:
+    def test_每一種型別都有對照(self) -> None:
         """🔴 少一種的症狀是**靜默**的：該型別在 seed 與套用時被略過，教師編了、
         按更新沒生效，而且不會有任何錯誤訊息。"""
         assert {s.entity_type for s in APPLY_ORDER} == _ALL_ENTITY_TYPES
+
+    def test_十一種內容型別一種都不能少(self) -> None:
+        """⚠️ 與上一條分開：上一條驗「對照表與清單一致」，這條釘住**內容那一群的數量**。
+
+        #720 加了兩種課程層型別之後，單看總數已經分不出「少了一種內容型別、但多了一種
+        課程層型別」——兩群分開數才看得出來。
+        """
+        assert _CONTENT_ENTITY_TYPES <= {s.entity_type for s in APPLY_ORDER}
+        assert len(_CONTENT_ENTITY_TYPES) == 11
 
     def test_沒有重複的型別(self) -> None:
         assert len(APPLY_ORDER) == len(SPEC_BY_TYPE) == len(_ALL_ENTITY_TYPES)
