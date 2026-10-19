@@ -13,7 +13,7 @@ import Typography from "@mui/material/Typography"
 import { useState } from "react"
 
 import { detailApi } from "./detailService"
-import { ObsoleteRequestSchema } from "./obsoleteSchema"
+import { OBSOLETE_REASON_MAX_LEN, ObsoleteRequestSchema } from "./obsoleteSchema"
 import { useNotification } from "../../contexts/NotificationContext"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
@@ -116,8 +116,9 @@ export function DmObsoleteDialog({ open, docId, docName, onClose, onSuccess }: P
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             error={!!errors.reason}
-            helperText={errors.reason}
+            helperText={errors.reason || `${reason.length} / ${OBSOLETE_REASON_MAX_LEN}`}
             fullWidth
+            slotProps={{ htmlInput: { maxLength: OBSOLETE_REASON_MAX_LEN } }}
           />
           <Box sx={{ bgcolor: "action.hover", border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}>
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>

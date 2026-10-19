@@ -7,11 +7,17 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
+from app.core.schema_types import (
+    SAFE_MULTILINE_PATTERN,
+    SAFE_SINGLE_LINE_OR_EMPTY_PATTERN,
+    STRIP_BEFORE_VALIDATE,
+)
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.document.file_store import enforce_size_limit, resolve_upload_limits
 from app.dm.editor.schemas import (
@@ -30,6 +36,75 @@ from app.dm.roles.authz import DM_EDITOR, has_role
 
 router = APIRouter(prefix="/api/dm", tags=["dm-editor"])
 _service = EditorService()
+
+# ── 寫入欄位的邊界（#697 / #500）─────────────────────────────────────────────
+#
+# 三個端點（新增 / 加版 / 續編）共用同一組 multipart 欄位，故把型別集中在此，避免只改其中一支。
+#
+# 長度上限對齊 DB 欄位：`DOC_NAME` / `VERSION_NO` / `ASSIGNED_REVIEWER` 都是 `String(N)`，
+# 應用層不擋的話，超長值會走到 INSERT 才撞 asyncpg `StringDataRightTruncation`，而 `main.py`
+# 沒有 `DataError` 的處理器 ⇒ 落到最後的 catch-all、冒成 **500**，使用者只看到「伺服器處理失敗」。
+# 同一推理已寫在 `et/material/storage.ensure_file_name_acceptable`（#202 的三個「越界回 500」）。
+_DOC_NAME_MAX = 200  # DM_DOC.DOC_NAME String(200)
+_VERSION_NO_MAX = 20  # DM_DOC_VERSION.VERSION_NO String(20)
+_REVIEWER_ID_MAX = 20  # DM_DOC_VERSION.ASSIGNED_REVIEWER String(20)（存草稿只記住、不查人，#222）
+_CHANGE_SUMMARY_MAX = 1000  # CHANGE_SUMMARY 為 Text，此上限是因為它整段進 DOC_PUBLISH 信件內文
+_TAG_IDS_MAX = 50  # 對齊 DM01（#483 / PR #494）；種子只有 9 個檢索標籤
+_CODE_MAX_LEN = 10  # DM_CATEGORY.CATEGORY_CODE / DM_FUNC.FUNC_CODE 皆 String(10)
+
+#: 單一 tag_id 之值域。`DM_TAG.TAG_ID` 為 BIGINT，而 Pydantic 的 `int` 是任意精度——不界住的話，
+#: 超出 int64 的值會通過驗證、到 asyncpg 編碼期才拋 `DataError`，無人攔截即 500（#483 / #500）。
+TagId = Annotated[int, Field(ge=1, le=2**63 - 1)]
+
+#: 身份欄（會進信件內文）：strip → 長度 → 單行。
+#: ⚠️ 用 `*` 版 pattern 而非 `SAFE_SINGLE_LINE_PATTERN`（`+`）——存草稿允許空名稱 / 空版號。
+_DocNameForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_DOC_NAME_MAX, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
+#: 續編的 `doc_name` 是 `str | None`（未傳＝不改名），與新增的 `str = ""` 形態不同。
+_OptDocNameForm = Annotated[
+    str | None,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_DOC_NAME_MAX, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
+_VersionNoForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_VERSION_NO_MAX, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
+#: 摘要**刻意不套單行約束**：它本來就該能多行（前端為 multiline TextField）。
+#: 但仍要擋 NUL——`Text` 欄位不會因長度越界，卻會因這一個字元越界（實測拋
+#: `CharacterNotInRepertoireError` → 未攔截的 500）。
+_ChangeSummaryForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_CHANGE_SUMMARY_MAX, pattern=SAFE_MULTILINE_PATTERN),
+]
+#: 指定審核者為 user_id，不進信件內文，故不套單行約束——但同樣要擋 NUL。
+_ReviewerIdForm = Annotated[
+    str | None,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_REVIEWER_ID_MAX, pattern=SAFE_MULTILINE_PATTERN),
+]
+#: 長度與值域都要界：長度擋查詢成本放大與一次寫入大量標籤關聯，值域擋 int64 越界（#500）。
+_TagIdsForm = Annotated[list[TagId], Form(max_length=_TAG_IDS_MAX)]
+
+#: 分類 / 作業項目代碼。兩者都由 service 先查表（`_ensure_category` / `_resolve_func`），
+#: 查不到就 422——所以「超長」這一維本來就擋得住。但那是**查詢**，而含 NUL 的值
+#: 連 `SELECT` 的綁定都會拋 `CharacterNotInRepertoireError`（#697 實測），於是在查到
+#: 「不存在」之前就先 500 了。lookup 擋得住長度，擋不住這一個字元。
+_CodeForm = Annotated[
+    str,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_CODE_MAX_LEN, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
+_OptCodeForm = Annotated[
+    str | None,
+    STRIP_BEFORE_VALIDATE,
+    Form(max_length=_CODE_MAX_LEN, pattern=SAFE_SINGLE_LINE_OR_EMPTY_PATTERN),
+]
 
 
 def _ensure_editor(ctx: DmContext) -> None:
@@ -53,16 +128,16 @@ async def _read_upload(db: AsyncSession, file: UploadFile | None) -> tuple[str |
 
 @router.post("/documents", response_model=CreateResult, status_code=201)
 async def create_document(
-    category_code: Annotated[str, Form()],
-    doc_name: Annotated[str, Form()] = "",
-    version_no: Annotated[str, Form()] = "",
-    change_summary: Annotated[str, Form()] = "",
-    func_code: Annotated[str | None, Form()] = None,
-    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
+    category_code: _CodeForm,
+    doc_name: _DocNameForm = "",
+    version_no: _VersionNoForm = "",
+    change_summary: _ChangeSummaryForm = "",
+    func_code: _OptCodeForm = None,
+    assigned_reviewer: _ReviewerIdForm = None,  # 存草稿記住指定審核者（供續編預帶）
     # 可見對象為 (單位, 職位) 配對，以兩個平行陣列傳入（同索引成對）——multipart form 無法表達物件陣列。
-    audience_unit_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
-    audience_role_ids: Annotated[list[int], Form()] = [],  # noqa: B006
-    retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    audience_unit_ids: _TagIdsForm = [],  # noqa: B006 (FastAPI 以此宣告 multipart 多值欄)
+    audience_role_ids: _TagIdsForm = [],  # noqa: B006
+    retrieval_ids: _TagIdsForm = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),
@@ -92,12 +167,12 @@ async def create_document(
 @router.post("/documents/{doc_id}/versions", response_model=VersionResult, status_code=201)
 async def add_version(
     doc_id: str,
-    version_no: Annotated[str, Form()] = "",
-    change_summary: Annotated[str, Form()] = "",
-    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
-    audience_unit_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (單位，與下方同索引成對)
-    audience_role_ids: Annotated[list[int], Form()] = [],  # noqa: B006
-    retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    version_no: _VersionNoForm = "",
+    change_summary: _ChangeSummaryForm = "",
+    assigned_reviewer: _ReviewerIdForm = None,  # 存草稿記住指定審核者（供續編預帶）
+    audience_unit_ids: _TagIdsForm = [],  # noqa: B006 (單位，與下方同索引成對)
+    audience_role_ids: _TagIdsForm = [],  # noqa: B006
+    retrieval_ids: _TagIdsForm = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 存草稿可暫不附檔
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),
@@ -126,14 +201,14 @@ async def add_version(
 async def update_draft_version(
     doc_id: str,
     version_id: int,
-    doc_name: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT（首版草稿）時生效
-    func_code: Annotated[str | None, Form()] = None,  # 僅父文件 DRAFT + 手冊類時生效
-    assigned_reviewer: Annotated[str | None, Form()] = None,  # 存草稿記住指定審核者（供續編預帶）
-    version_no: Annotated[str, Form()] = "",
-    change_summary: Annotated[str, Form()] = "",
-    audience_unit_ids: Annotated[list[int], Form()] = [],  # noqa: B006 (單位，與下方同索引成對)
-    audience_role_ids: Annotated[list[int], Form()] = [],  # noqa: B006
-    retrieval_ids: Annotated[list[int], Form()] = [],  # noqa: B006
+    doc_name: _OptDocNameForm = None,  # 僅父文件 DRAFT（首版草稿）時生效
+    func_code: _OptCodeForm = None,  # 僅父文件 DRAFT + 手冊類時生效
+    assigned_reviewer: _ReviewerIdForm = None,  # 存草稿記住指定審核者（供續編預帶）
+    version_no: _VersionNoForm = "",
+    change_summary: _ChangeSummaryForm = "",
+    audience_unit_ids: _TagIdsForm = [],  # noqa: B006 (單位，與下方同索引成對)
+    audience_role_ids: _TagIdsForm = [],  # noqa: B006
+    retrieval_ids: _TagIdsForm = [],  # noqa: B006
     file: Annotated[UploadFile | None, File()] = None,  # 未附檔則保留既有檔案
     ctx: DmContext = Depends(get_dm_context),
     op: OperatorInfo = Depends(get_operator),

@@ -10,9 +10,20 @@ const FILE_MSG = "附件格式不支援或超過大小上限（比照文件上�
 
 const fileExt = (name: string): string => (name.includes(".") ? name.split(".").pop()!.toLowerCase() : "")
 
+/** 廢止申請原因上限（#697，裁示 2026-10-17）。與後端 `obsolete/router._REASON_MAX` 同值。
+ *
+ * 為何是 500：廢止是 DM 唯一一個「申請時可附單檔」的路徑，長篇理由本來就該以公文附件呈現；
+ * 順帶與退回原因的 500 對齊。
+ */
+export const OBSOLETE_REASON_MAX_LEN = 500
+
 /** 廢止申請表單驗證（對齊後端：reason 必填、reviewer 必填、附件選填但須合格式 / 大小）。 */
 export const ObsoleteRequestSchema = z.object({
-  reason: z.string().trim().min(1, { message: "請填寫廢止原因" }), // DM-MSG-DM07-011
+  reason: z
+    .string()
+    .trim()
+    .min(1, { message: "請填寫廢止原因" }) // DM-MSG-DM07-011
+    .max(OBSOLETE_REASON_MAX_LEN, { message: `廢止原因不可超過 ${OBSOLETE_REASON_MAX_LEN} 字` }),
   reviewer_id: z.string().min(1, { message: "請選擇指定審核者" }), // DM-MSG-DM07-014
   file: z
     .instanceof(File)

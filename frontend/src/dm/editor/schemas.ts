@@ -2,6 +2,15 @@
 
 import { z } from "zod"
 
+// 輸入長度上限（#697）。數值須與後端 `app/dm/editor/router.py` 的 `_*_MAX` 一致——
+// 前端是 UX（瀏覽器直接擋住第 N+1 個字），後端才是權威檢核。
+/** 對齊 `DM_DOC.DOC_NAME` 的 `String(200)`。 */
+export const DOC_NAME_MAX_LEN = 200
+/** 對齊 `DM_DOC_VERSION.VERSION_NO` 的 `String(20)`。 */
+export const VERSION_NO_MAX_LEN = 20
+/** `CHANGE_SUMMARY` 是 `Text`；此上限是因為它整段進入 `DOC_PUBLISH` 信件內文。 */
+export const CHANGE_SUMMARY_MAX_LEN = 1000
+
 /** 表單受控下拉項。 */
 export interface OptionItem {
   code: string // 分類碼 / func_code / 標籤 TAG_ID 字串
@@ -164,13 +173,23 @@ export function makeEditorSchema(opts: {
   const { isNew, isManual, forSubmit, isTraining = false, requireName = false } = opts
   return z
     .object({
-      doc_name:
-        (isNew || requireName) && forSubmit ? z.string().trim().min(1, { message: "請輸入文件名稱" }) : z.string(),
+      // `.max()` 守的是**貼上**（`maxLength` 只擋逐字輸入，貼上超長內容時瀏覽器會截斷，
+      // 但程式化填值不會）；上限本身與後端同值，詳見本檔頂端常數區。
+      doc_name: ((isNew || requireName) && forSubmit
+        ? z.string().trim().min(1, { message: "請輸入文件名稱" })
+        : z.string()
+      ).max(DOC_NAME_MAX_LEN, { message: `文件名稱不可超過 ${DOC_NAME_MAX_LEN} 字元` }),
       // 分類為新增模式之結構必填（DOC_ID 配號用），草稿亦需
       category_code: isNew ? z.string().min(1, { message: "請選擇分類" }) : z.string(),
       func_code: z.string(),
-      version_no: forSubmit ? z.string().trim().min(1, { message: "請輸入版本號" }) : z.string(),
-      change_summary: forSubmit ? z.string().trim().min(1, { message: "請輸入變更摘要" }) : z.string(),
+      version_no: (forSubmit ? z.string().trim().min(1, { message: "請輸入版本號" }) : z.string()).max(
+        VERSION_NO_MAX_LEN,
+        { message: `版本號不可超過 ${VERSION_NO_MAX_LEN} 字元` },
+      ),
+      change_summary: (forSubmit ? z.string().trim().min(1, { message: "請輸入變更摘要" }) : z.string()).max(
+        CHANGE_SUMMARY_MAX_LEN,
+        { message: `摘要不可超過 ${CHANGE_SUMMARY_MAX_LEN} 字` },
+      ),
       // 送簽：配對兩欄皆必填——漏填單位不會變成「不限」，而是一組不生效的配對（後端 visibility 亦然）；
       // 全空白的列同樣擋下（錯誤落在該列欄位上），使用者需填完或刪除該列。
       // 存草稿：放行空白列，否則預設帶的那列會卡住存草稿。

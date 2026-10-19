@@ -4,8 +4,11 @@
 """
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, StringConstraints
+
+from app.core.schema_types import SAFE_MULTILINE_PATTERN
 
 
 class PendingItem(BaseModel):
@@ -65,8 +68,10 @@ class ReviewDetail(BaseModel):
 class RejectReq(BaseModel):
     """退回請求（JSON）。"""
 
-    # 上限 500（Sec M2 輸入邊界）；空白 / 全空白由 service 檢核給 DM_REVIEW_004（保留友善欄位錯誤）
-    reason: str = Field(max_length=500)
+    # 上限 500（Sec M2 輸入邊界）；空白 / 全空白由 service 檢核給 DM_REVIEW_004（保留友善欄位錯誤）。
+    # pattern 只擋 NUL、保留換行——退回原因本來就是多行輸入；而 `Text` 欄位雖不會因長度
+    # 越界，含 NUL 的值仍會讓查詢 / 寫入拋 `CharacterNotInRepertoireError` → 未攔截的 500（#697）。
+    reason: Annotated[str, StringConstraints(max_length=500, pattern=SAFE_MULTILINE_PATTERN)]
 
 
 class ApproveResult(BaseModel):

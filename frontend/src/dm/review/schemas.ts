@@ -2,9 +2,16 @@
 
 import { z } from "zod"
 
-/** 退回原因表單驗證（必填非空；後端另有 max_length 500）。 */
+/** 退回原因上限。與後端 `review/schemas.RejectReq.reason` 的 `max_length=500` 同值。 */
+export const REJECT_REASON_MAX_LEN = 500
+
+/** 退回原因表單驗證（必填非空 + 上限 500，與後端一致）。 */
 export const RejectReqSchema = z.object({
-  reason: z.string().trim().min(1, { message: "請填寫退回原因" }),
+  reason: z
+    .string()
+    .trim()
+    .min(1, { message: "請填寫退回原因" })
+    .max(REJECT_REASON_MAX_LEN, { message: `退回原因不可超過 ${REJECT_REASON_MAX_LEN} 字` }),
 })
 
 export interface PendingItem {

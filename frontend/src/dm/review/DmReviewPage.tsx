@@ -27,7 +27,7 @@ import { useState } from "react"
 import { TRAINING_CATEGORY } from "../editor/schemas"
 import { useSearchParams } from "react-router-dom"
 
-import { RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
+import { REJECT_REASON_MAX_LEN, RejectReqSchema, REVIEW_TYPE_LABELS, reviewStatusLabel } from "./schemas"
 import type { ReviewDetail, VersionMeta } from "./schemas"
 import { downloadObsoleteFile, downloadReviewFile, reviewApi } from "./reviewService"
 import { useCompleted, usePending, useReviewDetail } from "./useReview"
@@ -583,8 +583,9 @@ export function DmReviewPage() {
               setRejectError("")
             }}
             error={!!rejectError}
-            helperText={rejectError}
+            helperText={rejectError || `${rejectReason.length} / ${REJECT_REASON_MAX_LEN}`}
             sx={{ mt: 1 }}
+            slotProps={{ htmlInput: { maxLength: REJECT_REASON_MAX_LEN } }}
           />
         </DialogContent>
         <DialogActions>

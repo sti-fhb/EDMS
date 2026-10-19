@@ -10,7 +10,7 @@ Unicode 特殊字元（如土耳其文 `İ`）之小寫規則可能與 Postgres 
 
 from typing import Annotated
 
-from pydantic import StringConstraints
+from pydantic import BeforeValidator, StringConstraints
 
 # 輕量 email 格式（同 US1/US2 既有 regex；大小寫無關，正規化前後皆適用）
 _EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -56,7 +56,15 @@ LoginEmailStr = Annotated[
 # 公開常數：長度上限不同、但同樣會進入信件內文的欄位需要重用這條 pattern
 # （如 `ET_COURSE.COURSE_NAME`，上限 100——見 `app/et/course/schemas.py`）。
 # `SafeNameStr` 只是「這條 pattern + strip + 長度 50」的組合。
-SAFE_SINGLE_LINE_PATTERN = r"^[^\x00-\x1f\x7f-\x9f\u2028\u2029]+$"
+# ⚠️ 字元類別抽成 `_UNSAFE_LINE_CHARS` 由兩條 pattern 共用（見下方 `*` 版），理由有二：
+# ①兩份手寫會分岔——改了其中一條、另一條悄悄留在舊字元集；
+# ②`\u2028` / `\u2029` 若不慎寫成**字面字元**而非跳脫序列，在編輯器與 diff 裡看起來
+#   就是兩個空白，下一個人「順手清空白」就會靜默拆掉這道防線。本檔 `*` 版初版正是如此
+#   （行為當時仍正確，但原始碼已含隱形字元）。`tests/unit/test_core_schema_types.py`
+#   有一條 `isascii()` 守門盯著它。
+_UNSAFE_LINE_CHARS = r"\x00-\x1f\x7f-\x9f\u2028\u2029"
+
+SAFE_SINGLE_LINE_PATTERN = rf"^[^{_UNSAFE_LINE_CHARS}]+$"
 
 # 姓名進入點（自助註冊 / 本人改姓名 / 管理者代建與維護）：strip + 長度 + 拒控制字元。
 # 長度 50 對齊 `DP_USER.USER_NAME`。管理者輸入的姓名同樣會進邀請信內文，故不因「已認證」而放寬。
@@ -64,3 +72,44 @@ SafeNameStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=SAFE_SINGLE_LINE_PATTERN),
 ]
+
+# ── multipart（`Form()`）欄位專用：允許空值的單行 pattern 與「先 strip」的前置驗證 ──────────
+#
+# 為何需要第二個 pattern：上面的 `SAFE_SINGLE_LINE_PATTERN` 是 `+`（至少一字元）。DM 編輯器的
+# 存草稿路徑**刻意允許空值**——`dm/editor/service.create_document` 的 docstring 明載「存草稿不卡
+# 必填（US5）：名稱 / 版號 / 摘要 / 檔案皆可空，送簽時才完整檢核」。把 `+` 版直接掛上去，
+# 會讓「新增文件按存草稿」一律 422，而且只有實際點過才看得到。
+SAFE_SINGLE_LINE_OR_EMPTY_PATTERN = rf"^[^{_UNSAFE_LINE_CHARS}]*$"
+
+# 多行欄位（摘要 / 理由）用：**只**拒 NUL，換行與 TAB 照常放行。
+#
+# 為何非擋不可：PostgreSQL 的文字型別存不下 `\x00`——實測寫入會拋 asyncpg 的
+# `CharacterNotInRepertoireError`，而 `main.py` 沒有 `DataError` 系列的處理器，於是落到最後的
+# catch-all 冒成 **500**。這與「超過 `String(N)` 回 500」是同一類缺陷，只是觸發的是單一字元。
+#
+# ⚠️ 範圍比「寫入」更廣：實測**純 `SELECT $1::text` 綁定 NUL 就會拋**，不必 INSERT。
+# 也就是任何未檢核的字串只要流進**任何一條查詢**（含「查不到就 422」那種存在性檢核）
+# 就是 500——所以「這個欄位不寫進 DB」不足以當作免檢核的理由。
+#
+# ⚠️ 刻意**不**沿用 `_UNSAFE_LINE_CHARS`：那一組連 LF 都擋，套到摘要 / 退回理由上會把
+# 多行輸入壓成不合法——`SafeNameStr` 的 docstring 已說明「DM 的退回 / 廢止理由就是真的多行
+# 使用者輸入」。
+SAFE_MULTILINE_PATTERN = r"^[^\x00]*$"
+
+
+def _strip_if_str(value: object) -> object:
+    """字串先去頭尾空白，其餘型別原樣放行（供 `BeforeValidator` 使用）。"""
+    return value.strip() if isinstance(value, str) else value
+
+
+#: 先 strip 再驗的前置驗證器。
+#:
+#: `StringConstraints(strip_whitespace=True, ...)` 只適用於 Pydantic 模型欄位；FastAPI 的
+#: `Form()` 繼承自 `Param`，支援 `max_length` / `pattern` 但**沒有** `strip_whitespace`。
+#: 少了它，長度與 pattern 都會驗到「未 strip 的原值」：使用者在文字框尾端多打一個空白，
+#: 剛好滿長度的輸入就被判超限；尾端換行則由「今天被靜默 strip」變成 422。
+#:
+#: 已實測 `BeforeValidator` 先於 `Form()` 的約束執行，故
+#: `Annotated[str, STRIP_BEFORE_VALIDATE, Form(max_length=..., pattern=...)]` 的語意是
+#: 「strip 後再檢查長度與字元」。
+STRIP_BEFORE_VALIDATE = BeforeValidator(_strip_if_str)

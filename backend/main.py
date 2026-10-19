@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import DataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.access_log_redaction import install_access_log_redaction
@@ -264,6 +265,46 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=422,
         content={"error_code": "COMMON_422", "error_message": detail, "fields": fields},
+    )
+
+
+@app.exception_handler(DataError)
+async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
+    """DB 層的值域越界（NUL / 超長 / 數值越界）一律轉 422，而非冒成未攔截的 500。
+
+    ## 為何需要這道兜底
+
+    PostgreSQL 會拒絕兩類「格式上合法、值域上不合法」的輸入：超過 `String(N)` 的字串
+    （`StringDataRightTruncation`）、以及含 `\\x00` 的文字（`CharacterNotInRepertoireError`，
+    **實測連純 `SELECT $1::text` 綁定都會拋**，不必寫入）。兩者都是 `DataError` 的子類。
+
+    這個根因在本庫已被**六份不同的 docstring 各自描述過**（`dm/catalog/adapter.py`、
+    `dm/library/router.py`、`dm/roles/assign_service.py`、`et/material/storage.py` 兩處、
+    `core/client_ip.py`），各自以欄位級 `max_length` / `pattern` 繞過——但沒有人處理它本身。
+    逐欄補的速度追不上新端點的增加速度，而**漏掉的那一欄不會有任何測試變紅**（fail-open，
+    CI 全綠），使用者只會看到「伺服器處理失敗」。本 handler 把這個類別改成 fail-closed。
+
+    ## ⚠️ 這是兜底，不是替代
+
+    欄位級 `max_length` / `pattern` 仍然要寫：本 handler 給不出 `fields`，使用者只知道
+    「某個值超出範圍」而不知道是哪一欄。有欄位級驗證時請求根本走不到 DB，訊息才精確。
+
+    ## ⛔ 刻意只收 `DataError`，不收 `IntegrityError`
+
+    `IntegrityError` 是 `app/dm/editor/service.py` 的並發後盾（DOC_ID 配號的 SAVEPOINT 重試、
+    以及「每人每文件一份進行中版本」的 `DM_DOC_009`）——一併收掉會把那兩處的業務語意吃成
+    通用 422，而且**不會有任何現有測試變紅**。兩者在 SQLAlchemy 是 `DatabaseError` 底下的
+    **兄弟類別**、互不繼承；`tests/unit/test_core_data_error_handler.py` 把這個前提釘住。
+    """
+    logger.warning(
+        "DataError on %s %s\n%s",
+        request.method,
+        request.url.path,
+        format_exception_for_log(exc),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"error_code": "COMMON_422", "error_message": "輸入值超出欄位容許範圍"},
     )
 
 

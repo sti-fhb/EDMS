@@ -5,6 +5,13 @@ import { delay, http, HttpResponse } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DmEditorPage } from "./DmEditorPage"
+import {
+  CHANGE_SUMMARY_MAX_LEN,
+  DOC_NAME_MAX_LEN,
+  EMPTY_EDITOR_FORM,
+  makeEditorSchema,
+  VERSION_NO_MAX_LEN,
+} from "./schemas"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -77,6 +84,75 @@ async function fillNewForm(user: ReturnType<typeof userEvent.setup>, { withAudie
 beforeEach(() => {
   paramsRef.current = {}
   navigateSpy.mockClear()
+})
+
+describe("DmEditorPage 輸入長度上限（#697）", () => {
+  // 瀏覽器端擋住超長輸入，使用者當下就知道打不進去；後端 `editor/router.py` 的
+  // `_*_MAX` 才是權威檢核。三個欄位各一條——漏掉任一個不會有別的測試變紅。
+  it.each([
+    ["文件名稱", /文件名稱/, DOC_NAME_MAX_LEN],
+    ["首版版本號", /首版版本號/, VERSION_NO_MAX_LEN],
+    ["首版摘要", /首版摘要/, CHANGE_SUMMARY_MAX_LEN],
+  ])("%s 貼上超長內容時被截在上限", async (_label, matcher, max) => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    const field = await screen.findByLabelText(matcher)
+
+    await user.click(field)
+    await user.paste("字".repeat(max + 50))
+
+    // 斷言「剛好等於上限」而非「小於等於」：後者在 maxLength 完全沒接上時也會過
+    expect((field as HTMLInputElement).value).toHaveLength(max)
+  })
+
+  it("續編模式的文件名稱是另一個 TextField，同樣要受限", async () => {
+    // 🔴 新增模式與續編模式各有一個「文件名稱」輸入框（`nameEditable` 分支），
+    // 只改其中一個不會有別的測試變紅。
+    paramsRef.current = { docId: "DM-SOP-000050" }
+    server.use(
+      http.get("/api/dm/editor/documents/:docId/draft-meta", () =>
+        HttpResponse.json({
+          doc_id: "DM-SOP-000050",
+          doc_name: "首版草稿A",
+          category_code: "SOP",
+          category_name: "標準作業程序",
+          func_code: null,
+          func_name: null,
+          doc_status: "DRAFT",
+          name_editable: true,
+          draft_version_id: 555,
+          version_no: "1.0",
+          change_summary: "首版摘要草",
+          file_name: "old.pdf",
+          file_size: 100,
+          previewable: true,
+          assigned_reviewer: "rev1",
+        }),
+      ),
+    )
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    const field = await screen.findByLabelText(/文件名稱/)
+
+    await user.clear(field)
+    await user.paste("字".repeat(DOC_NAME_MAX_LEN + 50))
+
+    expect((field as HTMLInputElement).value).toHaveLength(DOC_NAME_MAX_LEN)
+  })
+
+  it("zod 的 .max() 擋得住繞過 maxLength 的程式化填值", () => {
+    // `maxLength` 只在瀏覽器層擋；schema 這層守的是貼上以外的路徑（例如日後改用
+    // 受控元件直接 setState、或測試 / 自動化填值）。兩層都要有。
+    // 用存草稿模式（`forSubmit: false`）隔離出長度這一件事——送簽模式還會卡可見對象 /
+    // 審核者等必填，失敗原因會混在一起，長度上限拿掉了也照樣 false。
+    const schema = makeEditorSchema({ isNew: true, isManual: false, forSubmit: false })
+    const base = { ...EMPTY_EDITOR_FORM, category_code: "SOP" }
+
+    expect(schema.safeParse({ ...base, doc_name: "字".repeat(DOC_NAME_MAX_LEN) }).success).toBe(true)
+    const over = schema.safeParse({ ...base, doc_name: "字".repeat(DOC_NAME_MAX_LEN + 1) })
+    expect(over.success).toBe(false)
+    expect(JSON.stringify(over.error?.issues)).toContain(String(DOC_NAME_MAX_LEN))
+  })
 })
 
 describe("DmEditorPage 文件新增與編輯（DM08）", () => {
