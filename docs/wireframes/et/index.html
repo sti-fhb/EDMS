@@ -980,9 +980,8 @@
       <button class="btn btn-outline-danger btn-sm" id="et02-close-btn" onclick="openCloseCourseModal()" title="僅已發布課程顯示；關閉後可再開課">
         <i class="bi bi-slash-circle me-1"></i>關閉課程
       </button>
-      <button class="btn btn-tsbms btn-sm" id="et02-reopen-btn" onclick="openReopenCourseModal()" style="display:none;" title="僅已關閉課程顯示；須重設一組新的起訖時間">
-        <i class="bi bi-arrow-clockwise me-1"></i>再開課
-      </button>
+      <!-- 2026-10-19 #720：右上的「再開課」鈕移除——再開課改為底部動作列的「更新並重開課」，
+           與該課程的其他編輯同一個出口；原本須先按它進入一個會清空起訖時間的模式。 -->
       <div class="screen-meta ms-2">et/courseEdit.jsp (ET05)</div>
     </div>
   </div>
@@ -994,7 +993,7 @@
 
   <!-- 已關閉 banner（已關閉時顯示；2026-07-02 變更：關閉可逆） -->
   <div id="et02-closed-banner" class="wf-status-msg wf-status-warn mb-3" style="display:none;">
-    <i class="bi bi-slash-circle me-1"></i><strong>本課程已關閉（可再開課）</strong> — 教師端<strong>仍可編輯課程內容</strong>（供準備下次開課）；<strong>學員端</strong>則為<strong>唯讀回看</strong>，不能再累積進度、作答測驗或填寫問卷。點右上「<strong>再開課</strong>」重設起訖時間後即恢復開放（學員進度接續保留）。
+    <i class="bi bi-slash-circle me-1"></i><strong>本課程已關閉（可再開課）</strong> — 教師端<strong>仍可編輯課程內容</strong>（供準備下次開課）；<strong>學員端</strong>則為<strong>唯讀回看</strong>，不能再累積進度、作答測驗或填寫問卷。整理完畢後按底部「<strong>更新並重開課</strong>」即恢復開放（學員進度接續保留）；若開放期間已經過去，請先把<strong>起訖時間改成新的一段</strong>再按。
   </div>
 
   <!-- 基本資料卡（可摺疊） -->
@@ -1213,10 +1212,14 @@
   <!-- Sticky 動作列 -->
   <div class="wf-card" style="position:sticky; bottom:0; box-shadow:0 -2px 10px rgba(0,0,0,0.05);">
     <div class="d-flex justify-content-between align-items-center">
-      <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>最後儲存：2026-05-22 14:35</div>
+      <!-- 2026-10-19 #720：動作列依課程狀態分流。下方示意的是**已關閉 / 視同關閉**那一排；
+           已發布（開放期間內）為「取消｜更新」，草稿維持「取消｜儲存草稿｜儲存並發布」。
+           🔴 已發布與已關閉**沒有「儲存」鈕**——基本資料隨教師按下的生效鈕一起送出。 -->
+      <div class="text-muted small"><i class="bi bi-info-circle me-1"></i>本次的編輯只有你看得到。按「保留編輯」會保留目前的編輯供下次繼續（不是還原點，之後的修改會蓋過去）；按「更新並重開課」才會重跑發布檢核、讓學員重新看得到。</div>
       <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-primary"><i class="bi bi-save me-1"></i>儲存草稿</button>
-        <button class="btn btn-tsbms btn-sm" onclick="showToast('已儲存並發布最新版本')"><i class="bi bi-check2-circle me-1"></i>儲存並發布</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="goScreen('et-courses-admin')">取消</button>
+        <button class="btn btn-outline-primary btn-sm" onclick="showToast('編輯已保留，學員看到的仍是關閉前的內容')"><i class="bi bi-bookmark me-1"></i>保留編輯</button>
+        <button class="btn btn-tsbms btn-sm" onclick="showToast('課程已更新並重新開課')"><i class="bi bi-arrow-clockwise me-1"></i>更新並重開課</button>
       </div>
     </div>
   </div>
@@ -1240,7 +1243,7 @@
     <span style="margin-left:1rem;">• 章節內項目層級：拖動 grip 可在章節內或跨章節移動；每個項目 icon 顯示類型（影片/文件/圖文/測驗）</span><br>
     <span style="margin-left:1rem;">• 新增項目：點下拉選單選類型（教材 / 測驗）→ 開對應 modal；教材 modal 可同時包含說明文字、本地上傳影片、與多份 DM 訓練教材文件（RQET003）</span><br>
     <strong>教材文件來源：</strong>教材所引用的文件（PDF / PPT 等）<strong>統一由 DM 模組提供</strong>（同一 DB）；ET 端下拉清單僅顯示 DM「訓練教材」分類之已發布文件，點選即建立關聯；DM 端發布新版時，教材自動帶最新版<br>
-    <strong>Sticky 動作列：</strong>常用動作（儲存草稿、儲存並發布）固定在頁底，scroll 時不消失；學員管理請從左側 sidebar 進入<br>
+    <strong>Sticky 動作列（2026-10-19 #720 改版）：</strong>固定在頁底、scroll 時不消失，<strong>依課程狀態分流</strong>——草稿為「（刪除草稿）｜取消｜儲存草稿｜儲存並發布」，已發布（開放期間內）為「取消｜<strong>更新</strong>」，已關閉 / 期間已過為「取消｜<strong>保留編輯</strong>｜<strong>更新並重開課</strong>」。<strong>已發布與已關閉沒有「儲存」鈕</strong>：基本資料隨教師按下的生效鈕一起送出，否則會出現「按了儲存、學員當場看到尚未更新的內容」。任一動作成功後回課程列表；<strong>未按生效鈕即離開＝放棄本次編輯</strong>（離開前跳確認；已關閉課程另提示可改按「保留編輯」）。學員管理請從左側 sidebar 進入<br>
     <strong>對應需求：</strong>RQET001（影片本地上傳）、RQET002（拖拉）、RQET003（混合媒材）、RQET004（強制完成，系統內建）
   </details>
 </div>
@@ -2915,7 +2918,6 @@ function applyEt02Mode() {
   var banner = document.getElementById('et02-view-banner');
   var inviteBtn = document.getElementById('et02-invite-btn');
   var closeBtn = document.getElementById('et02-close-btn');
-  var reopenBtn = document.getElementById('et02-reopen-btn');
   var closedBanner = document.getElementById('et02-closed-banner');
   var modeIcon = document.getElementById('et02-mode-icon');
   var modeLabel = document.getElementById('et02-mode-label');
@@ -2936,7 +2938,6 @@ function applyEt02Mode() {
     if (closedBanner) closedBanner.style.display = isClosed ? '' : 'none';
     if (inviteBtn) inviteBtn.style.display = 'none';
     if (closeBtn) closeBtn.style.display = 'none';
-    if (reopenBtn) reopenBtn.style.display = 'none';
     if (modeIcon) modeIcon.className = 'bi bi-eye me-2';
     if (modeLabel) modeLabel.textContent = isClosed ? '課程檢視（已關閉）' : '課程檢視';
     if (editScreen) editScreen.classList.add('et02-readonly');
@@ -2945,7 +2946,7 @@ function applyEt02Mode() {
     if (closedBanner) closedBanner.style.display = '';
     if (inviteBtn) inviteBtn.style.display = 'none';   // 關閉期間邀請碼失效，補件邀請待再開課
     if (closeBtn) closeBtn.style.display = 'none';      // 已關閉不再顯示「關閉課程」
-    if (reopenBtn) reopenBtn.style.display = '';        // 顯示「再開課」
+    // #720：已關閉狀態不再有右上的「再開課」鈕；重開課在底部動作列。
     if (modeIcon) modeIcon.className = 'bi bi-pencil-square me-2';
     if (modeLabel) modeLabel.textContent = '課程編輯（已關閉）';
     if (editScreen) editScreen.classList.remove('et02-readonly');
@@ -2953,7 +2954,6 @@ function applyEt02Mode() {
     // owner + 開放中 — 編輯模式
     if (inviteBtn) inviteBtn.style.display = '';
     if (closeBtn) closeBtn.style.display = '';
-    if (reopenBtn) reopenBtn.style.display = 'none';
     if (modeIcon) modeIcon.className = 'bi bi-pencil-square me-2';
     if (modeLabel) modeLabel.textContent = '課程編輯';
     if (editScreen) editScreen.classList.remove('et02-readonly');
@@ -3219,14 +3219,13 @@ function confirmCloseCourse() {
   applyEt02Mode();
 }
 
-/* ET05 再開課（2026-07-02 新增：重設起訖時間後恢復開放） */
-function openReopenCourseModal() {
-  bootstrap.Modal.getOrCreateInstance(document.getElementById('reopenCourseModal')).show();
-}
+/* ET05 更新並重開課（2026-10-19 #720：由底部動作列執行，不再有專屬 modal）
+   ⚠️ 原本的 openReopenCourseModal / confirmReopenCourse 已移除——它們指向的
+   `reopenCourseModal` 元素在本檔中**從來不存在**，`getElementById` 會回 null，
+   點下去其實是壞的；#428 把對話框改成就地編輯時漏刪了這兩支。 */
 function confirmReopenCourse() {
-  bootstrap.Modal.getInstance(document.getElementById('reopenCourseModal')).hide();
-  showToast('已再開課；狀態回「已發布」，學員進度接續保留');
-  // demo：模擬再開課後 UI 恢復編輯模式
+  showToast('課程已更新並重新開課；學員進度接續保留');
+  // demo：模擬重開課後 UI 恢復編輯模式
   sessionStorage.setItem('et02IsClosed', '0');
   applyEt02Mode();
 }
