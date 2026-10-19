@@ -508,8 +508,18 @@ export function EtCourseEditorPage() {
     if (courseId !== undefined) {
       void qc.invalidateQueries({ queryKey: QUERY_KEYS.etCourses.survey(courseId) })
     }
-    // 問卷不經 `invalidate()`，要另外觸發，問卷的紅框才會補好即消失（#558）
-    refreshLiveCheck()
+    // 🔴 **課程詳細也要刷**，不是只刷問卷。`has_pending_changes` 住在課程詳細裡（#631），
+    // 而「更新」鈕的啟用條件就是它——只刷問卷的話，教師改完問卷看到的是過期的 `false`，
+    // 鈕維持灰色，要離開頁面再進來才按得動（2026-10-19 手測回報）。
+    //
+    // ⚠️ 本行原本是 `refreshLiveCheck()`，附註解「問卷不經 `invalidate()`，要另外觸發，
+    // 問卷的紅框才會補好即消失（#558）」。**那句話在 #558 當時是對的**——彼時還沒有
+    // `has_pending_changes`，課程詳細對問卷編輯確實無事可做。是 #631 加了那個旗標之後
+    // 它才變成缺漏。`invalidate()` 本身就包含 `refreshLiveCheck()`，紅框的行為不變。
+    //
+    // ⭐ 其餘 18 條編輯路徑**全部**都呼叫 `invalidate()`（教材與測驗那兩處還特地加了
+    // 註解說明為何要多叫一次），只有問卷漏掉——所以這是補齊一致性，不是新增例外。
+    invalidate()
   }
 
   /**

@@ -183,6 +183,62 @@ describe("ET05 更新（#631）", () => {
     expect(screen.queryByText(/有尚未更新的變更/)).not.toBeInTheDocument()
   })
 
+  it("🔴 編輯問卷之後「更新」鈕立即由灰轉亮——不需離開頁面再進來", async () => {
+    // 2026-10-19 手測回報：改了問卷，「更新」維持灰色按不下去，要先離開編輯頁再進來。
+    //
+    // 根因是 `invalidateSurvey` 只刷了問卷查詢、沒刷課程詳細，而 `has_pending_changes`
+    // 住在課程詳細裡。後端其實已經翻成 true 了，前端讀的是過期快取。
+    //
+    // ⚠️ 本條的 fixture 必須讓旗標**真的會變**（`pending` 隨 POST 翻成 true），否則不論
+    // 有沒有刷新都讀到同一個值，測試會恆綠——那就驗不到任何東西了。
+    let pending = false
+    server.use(
+      http.get("/api/et/courses/:courseId", () =>
+        HttpResponse.json({
+          course_id: 1,
+          course_name: "採血作業訓練",
+          description: null,
+          status: "PUBLISHED",
+          open_start_at: "2026-09-01T00:00:00Z",
+          open_end_at: "2027-09-30T00:00:00Z",
+          require_approval: false,
+          version: 5,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+          chapters: [],
+          invitation_code: "01234567",
+          has_pending_changes: pending,
+        }),
+      ),
+      http.post("/api/et/courses/:courseId/survey", () => {
+        pending = true // 後端：問卷進了暫存區，旗標翻成 true
+        return HttpResponse.json(
+          { survey_id: -7, survey_name: "訓後滿意度", is_active: true, version: 0, questions: [] },
+          { status: 201 },
+        )
+      }),
+    )
+    const user = userEvent.setup()
+    renderEditor()
+    expect(await screen.findByRole("button", { name: "更新" })).toBeDisabled()
+
+    await user.click(await screen.findByRole("button", { name: "新增問卷" }))
+    await user.type(await screen.findByRole("textbox", { name: /問卷名稱/ }), "訓後滿意度")
+    await user.click(screen.getByRole("button", { name: "建立" }))
+    // ⚠️ 建立成功後問卷視窗會開著，整個背景被 `aria-hidden`——此時查不到「更新」，
+    // 而 `getByRole` 落空會讓 `waitFor` 一路重試到逾時（看起來像功能壞了）。
+    // 關掉視窗是教師本來就會做的下一步，不是為了遷就測試。
+    await user.click(await screen.findByRole("button", { name: "關閉視窗" }))
+
+    // ⚠️ 關閉時問卷還有未存的題目編輯器展開著，頁面會先跳一次確認（SurveyDialog 的
+    // `onClose(dirty)` 契約）。背景同樣被 `aria-hidden`，所以要先把它關掉。
+    await user.click(await screen.findByRole("button", { name: "確定" }))
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "更新" })).toBeEnabled())
+  })
+
   it("🔴 有暫存變更時提示明寫「只有你看得到」——本功能的新風險就在這句話上", async () => {
     // 少了它，教師編完直接離開會以為學員已經看到了，而下一次知道真相的時機是學員反映
     // 「課程沒有更新」。反向斷言（上一條的 queryByText）與這條用同一種查法。
