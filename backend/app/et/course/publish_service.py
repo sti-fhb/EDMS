@@ -57,7 +57,6 @@ from app.et.course.schemas import (
     PublishBlockerRow,
     PublishCheckResult,
     PublishResult,
-    ReopenCourseReq,
 )
 from app.et.course.stage_apply import apply_stage
 from app.et.course.stage_repository import EtCourseStageRepository
@@ -549,10 +548,32 @@ class EtPublishService:
             version=new_version,
         )
 
-    async def reopen(
-        self, db: AsyncSession, course_id: int, req: ReopenCourseReq, *, operator: OperatorInfo
-    ) -> CourseStatusResult:
-        """再開課（US11 AC 8 / FR-ET-US11-09）——重設起訖時間後回 `PUBLISHED`。
+    async def reopen(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> CourseStatusResult:
+        """「更新並重開課」（US11 AC 8 / FR-ET-US11-09）——套用暫存的編輯後回 `PUBLISHED`。
+
+        ## 🔴 #720 把它從「狀態轉換」改成「更新 + 狀態轉換」
+
+        關閉期間的編輯自 #631 起寫**暫存區**，而本方法原本**不套用暫存**、檢核也讀**活表**。
+        兩件事合起來留下一個洞：教師在關閉期間把受訓對象清光（進暫存）、按再開課，檢核
+        看活表還有配對就放行——課程回到 `PUBLISHED` 而它已經不符合發布條件，正是下面
+        那段「不重跑等於把發布檢核變成一次性的」要防的事，只是繞道從暫存區進來。
+        由 `test_關閉期間清空受訓對象後再開課被擋` 當場抓出來。
+
+        ⇒ 順序固定為**檢核（讀暫存）→ 套用暫存 → 轉 `PUBLISHED` → 帶入寄信**，同一個交易。
+        檢核未通過時活表一行都不會動（與 `update_published` 同一條理由）。
+
+        ## 🔴 起訖時間取自暫存，請求**沒有 body**
+
+        起訖時間自 #720 起是基本資料的一部分、進暫存區，所以：
+
+        - `ensure_reopen_schedule` 檢核的是**真正會生效的那一組**。檢核 `req` 的值卻套用
+          暫存的值，就是「檢核通過但生效後不合格」——#720 存在的意義就是消滅那件事
+        - 併發改由**課程行鎖**序列化，比照 `content/apply`。教師手上的樂觀鎖令牌自 #720
+          起是**暫存節點**的 `VERSION`，拿它去對活表的 `ET_COURSE.VERSION` 必然不符
+
+        ⚠️ 沒有暫存區時走活表：此時起訖仍是關閉前那組（已過期），`ensure_reopen_schedule`
+        會以 `ET_COURSE_008` 要教師先重設——那正是 FR-ET-US11-09「強制重新設定一組新的
+        起訖時間」要的行為，只是改在基本資料卡填、不再有專屬的再開課表單。
 
         ## 為何重跑發布六項檢核（#288 SA Q2 裁示 A）
 
@@ -574,18 +595,30 @@ class EtPublishService:
         Raises:
             AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；409 `ET_COURSE_007`
                 課程狀態不允許再開課；422 `ET_COURSE_008` 新訖止時間未晚於當下；
-                422 `ET_PUBLISH_001` 六項檢核未通過（body 另帶 `blockers`）；
-                409 `ET_LOCK_001` 版本不符。
+                422 `ET_PUBLISH_001` 六項檢核未通過（body 另帶 `blockers`）。
         """
         course = await self._require_owned(db, course_id, operator.user_id)
         ensure_reopenable(course.status)
-        # 兩者的必填與「迄 > 起」已由 `ReopenCourseReq._schedule_required` 與繼承來的
-        # `_end_after_start` 保證，走到這裡必定非 `None`。取區域變數只是讓下方的傳遞
-        # 不必一路帶著 `| None` 的型別，不是額外的防禦。
-        start_at, end_at = req.open_start_at, req.open_end_at
-        ensure_reopen_schedule(open_end_at=end_at, now=utcnow())
+        # 先取行鎖再讀暫存樹——同 `update_published`：這整段（讀 → 檢核 → 套用 → 轉狀態）
+        # 必須對同一門課序列化，否則教師雙擊會套用兩次。
+        await self._stage.lock_course(db, course_id)
+        await db.refresh(course)
+        nodes = await self._stage.load_tree(db, course_id)
 
-        blockers = await self._evaluate(db, course)
+        if nodes:
+            # ⚠️ `status` 傳 `COURSE_PUBLISHED`——快照描述的是「套用之後會是什麼樣子」，
+            # 而那一刻課程就是已發布。`evaluate_publish` 目前不讀這個欄位，傳對的值是
+            # 為了日後它開始讀的時候不會拿到 `CLOSED`。
+            snapshot = to_course_snapshot(nodes, status=COURSE_PUBLISHED)
+            start_at, end_at = snapshot.open_start_at, snapshot.open_end_at
+            blockers = evaluate_publish(snapshot, obsolete_doc_ids=await self._obsolete_doc_ids(db, snapshot.doc_ids))
+        else:
+            # 沒開過編輯工作階段：起訖仍是關閉前那組，下面的 `ensure_reopen_schedule`
+            # 會要教師先去基本資料卡重設。
+            start_at, end_at = course.open_start_at, course.open_end_at
+            blockers = await self._evaluate(db, course)
+
+        ensure_reopen_schedule(open_end_at=end_at, now=utcnow())
         if blockers:
             raise AppError(
                 status_code=422,
@@ -596,18 +629,27 @@ class EtPublishService:
                 },
             )
 
+        # 🔴 **套用在轉狀態之前**：轉成 `PUBLISHED` 的那一刻學員就看得到，而此刻活表裡
+        # 必須已經是教師編好的內容。反過來做會有一小段視窗讓學員看到舊內容。
+        if nodes:
+            await apply_stage(db, course=course, nodes=nodes, operator=operator)
+            await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
+
         # 同 `close`：先取下 `CLOSED_AT`，UPDATE 之後 `course` 上的值已被同步。
         closed_at = course.closed_at
+        # ⚠️ 樂觀鎖令牌取**持鎖下重讀的活表版本**，不是教師手上那個——他手上的是暫存
+        # 節點的版本（#720）。併發由上面的行鎖擋，這裡的 `version` 只是沿用 repository
+        # 既有的 `WHERE` 形狀，不是第二道併發檢查。
         new_version = await self._courses.mark_reopened(
             db,
             course_id,
-            req.version,
+            course.version,
             open_start_at=start_at,
             open_end_at=end_at,
             operator=operator,
         )
         ensure_version_matched(rowcount=0 if new_version is None else 1, entity="ET_COURSE")
-        await self._log(db, operator.user_id, course_id, "再開課")
+        await self._log(db, operator.user_id, course_id, "更新並重開課")
 
         # **比照發布，依目前全部受訓對象帶入新符合者並寄邀請信**（#678，2026-10-16 裁示）。
         # 原設計「再開課不是一次新的招生、刻意不帶入」的前提是關閉期間不能改受訓對象；

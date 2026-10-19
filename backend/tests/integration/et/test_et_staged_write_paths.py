@@ -522,7 +522,10 @@ _NOT_CONTENT_WRITES: Final[dict[str, str]] = {
     "DELETE /api/et/courses/{course_id}": "刪除草稿課程，僅草稿可用",
     "POST /api/et/courses/{course_id}/publish": "發布本身就是生效入口",
     "POST /api/et/courses/{course_id}/close": "狀態轉換，不動內容",
-    "POST /api/et/courses/{course_id}/reopen": "狀態轉換，不動內容",
+    # ⚠️ 曾經寫著「狀態轉換，不動內容」——**#720 之後那句話是假的**：再開課會連同暫存的
+    # 內容編輯一起套用（檢核 → 套用 → 轉 PUBLISHED），所以它和 `content/apply` 同類，
+    # 是**生效入口**而不是「不動內容」。分類沒變，理由換了。
+    "POST /api/et/courses/{course_id}/reopen": "「更新並重開課」——**這支就是生效入口**（#720）",
     "POST /api/et/courses/{course_id}/content/apply": "**這支就是生效入口**",
     "DELETE /api/et/courses/{course_id}/content/stage": "放棄暫存——只刪暫存列，活表不動",
     # #720：兩支都只動暫存列的**去留**，連暫存的內容都不改。

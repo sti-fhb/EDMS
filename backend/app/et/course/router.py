@@ -45,7 +45,6 @@ from app.et.course.schemas import (
     OwnerOption,
     PublishCheckResult,
     PublishResult,
-    ReopenCourseReq,
     TagOption,
 )
 from app.et.course.service import EtCourseService
@@ -587,11 +586,10 @@ async def close_course(
 )
 async def reopen_course(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
-    req: ReopenCourseReq,
     operator: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
 ) -> CourseStatusResult:
-    """再開課（US11 / #288）：**強制帶一組新起訖時間**後狀態回「已發布」。
+    """ET05「更新並重開課」（US11 / #288 / #720）：套用暫存的編輯後狀態回「已發布」。
 
     **僅已關閉課程**可再開課（409 `ET_COURSE_007`）。學員進度接續保留、邀請碼沿用原碼
     恢復有效、`URGENT_REMIND_SENT` 歸零。
@@ -599,5 +597,13 @@ async def reopen_course(
     **會重跑發布六項檢核**（#288 SA Q2 裁示 A）——關閉期間教師端仍可編輯內容，故課程
     可能已不符發布條件；不合格回 422 `ET_PUBLISH_001` + `blockers`（與 `publish` 共用
     同碼與同一份缺漏清單形狀）。
+
+    > 🔴 **#720 起沒有 request body。** 新的起訖時間是基本資料的一部分、寫在暫存區，
+    > 由本端點連同其餘編輯一起套用；檢核讀的因此是**真正會生效的那一組**。帶在 body 裡
+    > 檢核一組、套用另一組，正是「檢核通過但生效後不合格」。併發改由課程行鎖序列化，
+    > 比照 `content/apply`——教師手上的樂觀鎖令牌是暫存節點的版本，對不上活表。
+    >
+    > 沒開過編輯工作階段時起訖仍是關閉前那組（已過期），回 422 `ET_COURSE_008` 要教師
+    > 先去基本資料卡重設。
     """
-    return await _publish_service.reopen(db, course_id, req, operator=operator)
+    return await _publish_service.reopen(db, course_id, operator=operator)
