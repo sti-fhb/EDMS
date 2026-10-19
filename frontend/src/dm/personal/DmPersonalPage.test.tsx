@@ -69,6 +69,24 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(screen.getAllByRole("button", { name: "刪除" })).toHaveLength(3)
   })
 
+  it("草稿匣「分類」欄顯示中文名稱、不顯示代碼（#735）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmPersonalPage />)
+    await user.click(await screen.findByRole("tab", { name: "草稿匣" }))
+    await screen.findByText("領血 SOP 草稿")
+
+    // 正向：三筆草稿的分類各自以中文名稱呈現（fixture 為 SOP ×2、OTHER ×1）
+    expect(screen.getAllByText("標準作業程序")).toHaveLength(2)
+    expect(screen.getByText("其他")).toBeInTheDocument()
+
+    // 反向：代碼不得單獨出現。⭐ 與正向用**同一個** `*ByText` 家族——否則「找不到」
+    // 可能只是查詢方式對不上，而不是真的沒顯示（否定斷言最常見的假通過）。
+    // 本頁分類有自己的 `<TableCell>`，所以字串完全比對有效；DM00 公告列是合併字串，
+    // 同樣寫法在那裡會恆真，故該處改用正則（見 `DmOverviewWidget.test.tsx`）。
+    expect(screen.queryByText("SOP")).not.toBeInTheDocument()
+    expect(screen.queryByText("OTHER")).not.toBeInTheDocument()
+  })
+
   it("草稿匣：父文件在廢止待簽核時「繼續編輯」一併灰化，並說明原因（#615）", async () => {
     // #615：PENDING_OBSOLETE 期間入口原本仍可點，使用者進編輯器填完按儲存才被 DM_DOC_008 擋，
     // 而 `update_draft_version` 在 409 前不寫入 ⇒ 當次編輯內容直接遺失。

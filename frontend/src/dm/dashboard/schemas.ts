@@ -14,7 +14,8 @@ export interface DashboardStats {
 export interface AnnouncementItem {
   doc_id: string
   doc_name: string
-  category_code: string
+  category_code: string // 仍由後端回傳，但公告列不顯示（#735）
+  category_name: string // 分類中文名稱，查表取目前值——公告列顯示此欄
   version_no: string
   change_summary: string | null
   published_date: string

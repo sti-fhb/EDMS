@@ -40,6 +40,21 @@ describe("DmOverviewWidget 中性歡迎頁之 DM 文件概況（DM00）", () => 
     expect(screen.getByRole("button", { name: /查看全部文件/ })).toBeInTheDocument()
   })
 
+  it("公告列的分類顯示中文名稱、不顯示代碼（#735）", async () => {
+    renderWithProviders(<DmOverviewWidget />)
+    await screen.findByText("用血回報訓練教材")
+
+    // ⚠️ 分類在 `{日期} ｜ {作者} ｜ {分類}` 的**同一個** Typography 裡，不是獨立元素。
+    // 所以不能用 `getByText("訓練教材")`——那是字串完全比對，改前改後都找不到這一列
+    // （只會命中上方 StatCard 那張同名的卡），否定斷言會恆真。改以正則比對整段 caption。
+    expect(screen.getByText(/林助教 ｜ 訓練教材$/)).toBeInTheDocument()
+    expect(screen.getByText(/陳大華 ｜ 標準作業程序$/)).toBeInTheDocument()
+
+    // 反向：代碼不得出現在 caption 尾端。與正向同為正則比對。
+    expect(screen.queryByText(/｜ TRAINING$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/｜ SOP$/)).not.toBeInTheDocument()
+  })
+
   it("點公告列導向該文件詳細頁", async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<DmOverviewWidget />)

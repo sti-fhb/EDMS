@@ -9,7 +9,8 @@ export interface DraftItem {
   doc_name: string
   version_no: string | null
   change_summary: string | null
-  category_code: string
+  category_code: string // 仍由後端回傳，但畫面不顯示（#735）
+  category_name: string // 分類中文名稱，查表取目前值——「分類」欄顯示此欄
   kind: DraftKind
   updated_date: string | null
   doc_status: string // 父文件狀態；OBSOLETE 時「繼續編輯」灰掉、僅允許刪除

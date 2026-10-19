@@ -325,7 +325,7 @@ function DraftsTab() {
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell>{d.category_code}</TableCell>
+                <TableCell>{d.category_name}</TableCell>
                 <TableCell>
                   <Chip size="small" label={DRAFT_KIND_LABELS[d.kind]} />
                 </TableCell>
