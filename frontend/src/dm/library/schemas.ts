@@ -18,7 +18,7 @@ export interface DocumentListItem {
 export interface ControlledOption {
   code: string
   name: string
-  group_code: string | null // 檢索標籤所屬組（MODULE / NATURE / LEGAL），供前端分組
+  group_code: string | null // 檢索標籤所屬組，供前端分組；組代碼 → 顯示名見 constants/dmTagGroups
 }
 
 /** 文件庫搜尋條件。 */

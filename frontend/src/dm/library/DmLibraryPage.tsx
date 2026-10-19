@@ -27,11 +27,10 @@ import {
 } from "./useLibrary"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
+import { dmTagGroupLabel } from "../../constants/dmTagGroups"
 import { formatDateTaipei, todayTaipei } from "../../utils/date"
 
 const PAGE_SIZE = 20
-// 檢索標籤組代碼 → 分組標題（Autocomplete groupBy）
-const TAG_GROUP_LABELS: Record<string, string> = { MODULE: "適用模組", NATURE: "文件性質", LEGAL: "法規關聯" }
 
 /**
  * 文件庫與檢索（US3 / DM01）：多條件**即時**搜尋已發布目前版本（含廢止待簽核）→ 點列進詳細頁。
@@ -113,7 +112,7 @@ export function DmLibraryPage() {
             onChange={(_, v) => setSelectedTags(v)}
             getOptionLabel={(o) => o.name}
             isOptionEqualToValue={(a, b) => a.code === b.code}
-            groupBy={(o) => TAG_GROUP_LABELS[o.group_code ?? ""] ?? "標籤"}
+            groupBy={(o) => dmTagGroupLabel(o.group_code)}
             renderInput={(params) => <TextField {...params} label="檢索標籤" />}
           />
         </Box>
