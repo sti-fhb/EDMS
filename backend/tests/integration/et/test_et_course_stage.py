@@ -29,11 +29,13 @@ from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEA
 from app.et.course.models import EtChapter, EtCourse, EtCourseContentStage, EtItem
 from app.et.course.publish_repository import EtPublishRepository
 from app.et.course.publish_rules import evaluate_publish
-from app.et.course.stage_apply import _DELETED_WITH_ITEM, _DELETERS, apply_stage
+from app.et.course.stage_apply import _DELETED_WITH_ITEM, _DELETERS, _NEVER_DELETED, apply_stage
 from app.et.course.stage_entities import SPEC_BY_TYPE, payload_fields
 from app.et.course.stage_repository import EtCourseStageRepository
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -57,7 +59,12 @@ from tests.integration.et._tag_pairs import all_units_id
 pytestmark = pytest.mark.integration
 
 _COURSES = "/api/et/courses"
-_ALL_TYPES = {
+#: 🔴 **兩群分開列**（#720）。`COURSE` / `COURSE_TAG` 是「課程本身」，其餘 11 種是
+#: 「課程的內容」——`stage_apply._delete_removed` 對兩群的處置相反（內容可被教師刪、
+#: 課程本體永遠不能），合成一群會讓那條差異在守門層看不見。
+_COURSE_LEVEL_TYPES = {ENTITY_COURSE, ENTITY_COURSE_TAG}
+
+_CONTENT_TYPES = {
     ENTITY_CHAPTER,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
@@ -70,6 +77,8 @@ _ALL_TYPES = {
     ENTITY_SURVEY_QUESTION,
     ENTITY_SURVEY_OPTION,
 }
+
+_ALL_TYPES = _CONTENT_TYPES | _COURSE_LEVEL_TYPES
 
 
 def _operator(user_id: str) -> OperatorInfo:
@@ -282,13 +291,14 @@ class TestSeedFidelity:
 
         course = await db.scalar(select(EtCourse).where(EtCourse.course_id == cid))
         live = await EtPublishRepository().snapshot(db, course)
-        staged = to_course_snapshot(
-            await repo.load_tree(db, cid),
-            status=course.status,
-            open_start_at=course.open_start_at,
-            open_end_at=course.open_end_at,
-            tag_count=live.tag_count,
-        )
+        staged = to_course_snapshot(await repo.load_tree(db, cid), status=course.status)
+
+        # 🔴 #720 之後起訖時間與受訓對象組數**由暫存樹自己帶**，所以本條順勢多驗一件事：
+        # seed 有沒有忠實地把它們抄進暫存。抄錯的症狀是「剛進編輯頁什麼都沒改就按更新，
+        # 卻被檢核擋下」——而那會讓教師以為是自己弄壞了什麼。
+        assert staged.open_start_at == live.open_start_at
+        assert staged.open_end_at == live.open_end_at
+        assert staged.tag_count == live.tag_count
 
         assert staged.chapter_count == live.chapter_count
         assert [c.item_count for c in staged.chapters] == [c.item_count for c in live.chapters]
@@ -839,8 +849,29 @@ class TestForeignKeysSurvive:
 
 class TestDeleterCoverage:
     def test_每一種可刪除的型別都有刪除路徑(self) -> None:
-        """少一個的症狀是套用時 `KeyError`——會爆，但要等到有人真的刪了那種東西。"""
-        assert set(_DELETERS) | _DELETED_WITH_ITEM == _ALL_TYPES
+        """少一個的症狀是套用時 `KeyError`——會爆，但要等到有人真的刪了那種東西。
+
+        ⚠️ `_NEVER_DELETED` 不在母體內：那是**刻意不可刪**的，不是漏寫（見下一條）。
+        """
+        assert set(_DELETERS) | _DELETED_WITH_ITEM | _NEVER_DELETED == _ALL_TYPES
+
+    def test_課程本體永遠不可被刪(self) -> None:
+        """🔴 ⛔ **`_delete_removed` 以「活表有、暫存沒有」判定教師刪了它——而課程不行。**
+
+        刪課程是另一條路徑（`delete_draft`，草稿專用），不經暫存。若課程型別落進
+        `_DELETERS`，任何讓課程節點從暫存樹消失的情形（例如只放棄問卷那支若寫錯範圍）
+        都會把**整門課軟刪**，連帶它底下的一切。
+
+        本條把「不可刪」釘成結構性事實，而不是靠 `_delete_removed` 裡的一行 `continue`
+        ——那一行可能在重構時被順手移除，而這裡會紅。
+        """
+        assert ENTITY_COURSE in _NEVER_DELETED
+        assert ENTITY_COURSE not in _DELETERS
+
+    def test_受訓對象可以被刪(self) -> None:
+        """正向錨點：課程**本體**不可刪，但它底下的受訓對象可以——已關閉課程得自由增刪
+        配對（#586）。少了這條，把整個課程層都列為不可刪也會讓上一條通過。"""
+        assert ENTITY_COURSE_TAG in _DELETERS
 
 
 # ── 「更新」端點 ───────────────────────────────────────────────────────────────
@@ -977,9 +1008,20 @@ class TestUpdateEndpoint:
         repo = EtCourseStageRepository()
         writer = EtCourseStageWriter(repo)
         await repo.seed_from_live(db, cid, _operator(uid))
-        for node in [n for n in await repo.load_tree(db, cid) if n.parent_stage_id is None]:
+        # ⚠️ **只刪內容的根**（章節與問卷），不刪課程本體（#720）。
+        #
+        # 課程節點在暫存樹裡也是 root，但教師在產品上**沒有任何路徑**可以刪它——
+        # 刪課程是草稿專用的另一條路。前置若把它一起刪掉，等於造出一個產品生不出來的
+        # 狀態，而失敗訊息會是「暫存樹缺少課程節點」，與本條要驗的事情無關。
+        content_roots = [
+            n
+            for n in await repo.load_tree(db, cid)
+            if n.parent_stage_id is None and n.entity_type not in _COURSE_LEVEL_TYPES
+        ]
+        for node in content_roots:
             await writer.delete_subtree(db, node.stage_id, _operator(uid))
-        assert await repo.load_tree(db, cid) == (), "前置條件：暫存樹確實空了"
+        remaining = {n.entity_type for n in await repo.load_tree(db, cid)}
+        assert remaining <= _COURSE_LEVEL_TYPES, f"前置條件：內容確實刪光了，剩下的應只有課程層，實際 {remaining}"
 
         r = await client.post(_APPLY.format(cid=cid), headers=_bearer(uid))
 

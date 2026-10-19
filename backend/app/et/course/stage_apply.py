@@ -61,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.catalog.models import EtCourseTag
 from app.et.common.html_sanitize import sanitize_material_html
 from app.et.course.models import EtCourse
 from app.et.course.repository import EtChapterRepository, EtItemRepository
@@ -68,6 +69,8 @@ from app.et.course.stage_entities import APPLY_ORDER, LINK_CHILD_FK, LINK_PARENT
 from app.et.course.stage_live_tree import LiveNode, load_live_tree
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -92,6 +95,18 @@ logger = logging.getLogger(__name__)
 
 #: 隨所屬項目一起刪，不單獨處理（見模組 docstring）。
 _DELETED_WITH_ITEM = frozenset({ENTITY_MATERIAL, ENTITY_QUIZ})
+
+#: 🔴 ⛔ **永遠不刪的型別**（#720）。
+#:
+#: `_delete_removed` 以「活表有、暫存沒有 ⇒ 教師刪了它」判定，而那個推論對**課程本體**
+#: 不成立：刪課程是另一條路徑（`service.delete_draft`，草稿專用），不經暫存區。
+#:
+#: 若課程落進 `_DELETERS`，任何讓課程節點從暫存樹消失的情形——例如「只放棄問卷」那支
+#: 寫錯了範圍、或 seed 漏搬——都會把**整門課軟刪**，連帶它底下的一切。而那是不可逆的。
+#:
+#: ⚠️ 受訓對象**不在**這裡：已關閉課程本來就可以自由增刪配對（#586），它是可刪的。
+#: 由 `test_課程本體永遠不可被刪` 與 `test_受訓對象可以被刪` 成對釘住。
+_NEVER_DELETED = frozenset({ENTITY_COURSE})
 
 
 @dataclass(frozen=True)
@@ -421,7 +436,7 @@ async def _delete_removed(
 
     removed: dict[str, int] = {}
     for spec in reversed(APPLY_ORDER):
-        if spec.entity_type in _DELETED_WITH_ITEM:
+        if spec.entity_type in _DELETED_WITH_ITEM or spec.entity_type in _NEVER_DELETED:
             continue
         staged = staged_sources.get(spec.entity_type, set())
         gone = [live_id for live_id in live_ids.get(spec.entity_type, []) if live_id not in staged]
@@ -473,6 +488,11 @@ _DELETERS: Final[dict[str, Any]] = {
     ENTITY_OPTION: lambda db, ids, op: _delete_options(db, EtOption, SPEC_BY_TYPE[ENTITY_OPTION].pk, ids, op),
     ENTITY_SURVEY_OPTION: lambda db, ids, op: _delete_options(
         db, EtSurveyOption, SPEC_BY_TYPE[ENTITY_SURVEY_OPTION].pk, ids, op
+    ),
+    # 受訓對象（#720）。⚠️ 軟刪即可——`ET_COURSE_TAG` 只是課程與標籤的關聯，
+    # 沒有任何學員資料掛在它下面（學員掛在 `ET_ENROLLMENT`，不隨配對移除而退出）。
+    ENTITY_COURSE_TAG: lambda db, ids, op: _delete_options(
+        db, EtCourseTag, SPEC_BY_TYPE[ENTITY_COURSE_TAG].pk, ids, op
     ),
 }
 
