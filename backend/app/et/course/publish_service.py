@@ -34,6 +34,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.et.audit_target import course_audit_payload
 from app.et.common.dm_client import get_dm_document_client
 from app.et.common.invitation_code import generate_invitation_code
 from app.et.common.optimistic_lock import ensure_version_matched
@@ -647,4 +648,6 @@ class EtPublishService:
             target_id=str(course_id),
             description=description,
             source_ip=get_client_ip(),
+            # 供 DP05 對象欄顯示課程名而非 ID（#717）；取當下值，課程改名不改寫歷史。
+            after_value=await course_audit_payload(db, course_id) or None,
         )

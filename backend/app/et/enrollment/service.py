@@ -21,6 +21,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
+from app.et.audit_target import course_audit_payload
 from app.et.constants import (
     COMPLETION_COMPLETED,
     COMPLETION_IN_PROGRESS,
@@ -201,6 +202,8 @@ class EtEnrollmentService:
             target_id=str(course.course_id),
             description="以邀請碼加入課程",
             source_ip=get_client_ip(),
+            # 供 DP05 對象欄顯示課程名（#717）；用已載入的 course，不另查。
+            after_value={"course_name": course.course_name},
         )
         return _to_result(course, COMPLETION_NOT_STARTED)
 
@@ -245,6 +248,8 @@ class EtEnrollmentService:
             target_id=str(course_id),
             description="已被移除之學員嘗試以邀請碼重新加入課程",
             source_ip=get_client_ip(),
+            # 供 DP05 對象欄顯示課程名（#717）。
+            after_value=await course_audit_payload(db, course_id) or None,
         )
         await db.commit()
         ensure_not_removed(is_removed=True)

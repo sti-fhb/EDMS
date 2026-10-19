@@ -41,6 +41,7 @@ from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.users.account_status import is_account_disabled
+from app.et.audit_target import course_audit_payload
 from app.et.course.rules import ensure_owner
 from app.et.invitation.repository import EtInvitationRepository
 from app.et.invitation.rules import ensure_invitable, parse_emails
@@ -208,6 +209,9 @@ class EtInvitationService:
         `source_ip` 也在迴圈外取一次：同一個請求的來源不會變，逐筆取只是重複工作。
         """
         source_ip = get_client_ip()
+        # 課程名在迴圈**外**取一次：本迴圈刻意把寫稽核集中（見上方 docstring 之鎖競爭說明），
+        # 逐筆查課程只是重複同一次查詢。供 DP05 對象欄顯示課程名（#717）。
+        course_fields = await course_audit_payload(db, course_id) or None
         for recipient in recipients:
             # `description` / `target_id` 只放 `USER_ID`，**不放 Email 或姓名**——
             # 那是個資，而稽核表的保存期比業務資料長（移除路徑同此作法）。
@@ -221,6 +225,9 @@ class EtInvitationService:
                 target_id=f"{course_id}:{recipient.user_id}",
                 description="Email 邀請加入課程",
                 source_ip=source_ip,
+                # ⛔ 只帶課程名，**不帶受邀者姓名或 Email**——同上方註解之個資原則；
+                # 人名由查詢端查 DP_USER 活表（dp/audit/target_resolver）。
+                after_value=course_fields,
             )
 
     async def _deliver(self, db: AsyncSession, *, course, recipient, teacher_name: str) -> bool:

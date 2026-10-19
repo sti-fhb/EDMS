@@ -8,6 +8,7 @@ AC5（無刪改端點）/ AC6（跨模組事件同表可查）/ AC7 interim（�
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import update
 
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
@@ -399,6 +400,111 @@ async def test_target_display_fallback_uses_tag_name_key(db):
     res = await _service.query_logs(db, **_q())
 
     assert res["data"][0].target_display == "ZT受訓對象", "應撈 tag_name，而非 fallback 成 TAG_ID"
+
+
+# --- ET 課程類對象顯示（#717）-------------------------------------------------
+#
+# 裁示（2026-10-19）：**課程名取當時值、人名取現值**。
+#   課程名 ← 稽核列 JSON 的 `course_name`（寫入端存入，不查活表 → 改名不改寫歷史）
+#   人名   ← `DP_USER` 活表（人改名後仍是同一個人；且姓名是個資，不複製進稽核列）
+#
+# ⭐ 以下測試**一律不建課程資料**——這本身就是「實作沒查課程表」的結構性保證：
+#    若日後有人改成查活表，這些測試會因查無課程而紅。
+
+
+async def test_et課程類對象顯示課程名稱(db):
+    """`target_id` 為純課程 ID 時，對象欄顯示稽核列存下的課程名稱。"""
+    await _insert_log(
+        db,
+        module="ET",
+        func_name="ET-COURSE",
+        target_id="12",
+        after_value='{"course_name": "ZT輸血反應處理"}',
+    )
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "ZT輸血反應處理"
+
+
+async def test_et複合鍵顯示課程名與人名(db):
+    """`{course_id}:{user_id}` → 「課程名 / 人名」，兩段來源不同（JSON + 活表）。"""
+    await _seed_user(db, user_id="u_stu", user_name="王小明", email="stu@edms.local")
+    await _insert_log(
+        db,
+        module="ET",
+        func_name="ET-ENROLLMENT",
+        target_id="12:u_stu",
+        after_value='{"course_name": "ZT輸血反應處理"}',
+    )
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "ZT輸血反應處理 / 王小明"
+
+
+async def test_重置作答次數不顯示測驗id(db):
+    """`{course_id}:{user_id}:{quiz_id}` 的第三段**刻意不顯示**。
+
+    一門課的測驗通常不多，帶上它只會讓對象欄更長而無助辨識（2026-10-19 裁示）。
+    """
+    await _seed_user(db, user_id="u_quiz", user_name="李小華", email="quiz@edms.local")
+    await _insert_log(
+        db,
+        module="ET",
+        func_name="ET-QUIZ-RESET",
+        target_id="12:u_quiz:7",
+        after_value='{"course_name": "ZT輸血反應處理"}',
+    )
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "ZT輸血反應處理 / 李小華"
+
+
+async def test_週報匯出全部課程顯示中文(db):
+    """`ET-REPORT` 的全部課程以字串 `ALL` 記錄，不是課程 ID——需譯為人話。"""
+    await _insert_log(db, module="ET", func_name="ET-REPORT", target_id="ALL")
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "全部課程"
+
+
+async def test_舊紀錄無課程名時課程段保持原樣(db):
+    """本次改動**之前**的稽核列沒有 `course_name`，課程段只能 fallback 成 ID。
+
+    ⛔ **刻意不回填舊紀錄**：回填只能拿「現在的課程名」填進「當時的紀錄」，
+    那正好違反「課程名取當時值」的裁示。寧可舊紀錄誠實地只有 ID。
+    人名那半不受影響（查活表，舊紀錄照樣查得到）。
+    """
+    await _seed_user(db, user_id="u_old", user_name="張三", email="old@edms.local")
+    await _insert_log(db, module="ET", func_name="ET-ENROLLMENT", target_id="12:u_old")
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "12 / 張三"
+
+
+async def test_人改名後舊紀錄顯示新姓名(db):
+    """反向探針（B 的核心）：人名取**現值**，與課程名的取當時值相反。
+
+    若有人為了「一致」把人名也改成寫入稽核列，本條會紅——而且那還會把個資複製到
+    第二個地方（見 `et/tracking/service.py` 的 `_log_export` docstring）。
+    """
+    await _seed_user(db, user_id="u_ren", user_name="舊姓名", email="ren@edms.local")
+    await _insert_log(
+        db,
+        module="ET",
+        func_name="ET-ENROLLMENT",
+        target_id="12:u_ren",
+        after_value='{"course_name": "ZT課程"}',
+    )
+    await db.execute(update(DpUser).where(DpUser.user_id == "u_ren").values(user_name="新姓名"))
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "ZT課程 / 新姓名", "人名應取現值"
 
 
 async def test_target_display_resolves_param_name(db):

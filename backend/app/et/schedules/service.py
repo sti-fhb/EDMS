@@ -177,6 +177,9 @@ class EtScheduleService:
             operator_id=_SYSTEM_OPERATOR.user_id,
             target_id=str(course_id),
             description="閱課期間已過，系統自動關閉",
+            # 供 DP05 對象欄顯示課程名而非 ID（#717）。此處直接用已載入的 course 物件，
+            # 不另查——關閉不改名，值與查一次相同。
+            after_value={"course_name": course.course_name},
         )
         return True
 
