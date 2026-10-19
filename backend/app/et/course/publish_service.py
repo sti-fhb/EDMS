@@ -224,15 +224,9 @@ class EtPublishService:
             # 他只剩「取消」一條路，而那會連同刪除一起放棄。
             return ContentUpdateResult(course_id=course_id, applied_count=0)
 
-        snapshot = to_course_snapshot(
-            nodes,
-            status=course.status,
-            open_start_at=course.open_start_at,
-            open_end_at=course.open_end_at,
-            # 受訓對象與起訖時間**不在暫存區**：它們走右下角的「儲存」、不走「更新」，
-            # 故一律取活表的當前值。
-            tag_count=await self._publish.tag_count(db, course_id),
-        )
+        # ⚠️ 起訖時間與受訓對象組數**由暫存樹自己帶**（#720）——它們已經不在活表那一側。
+        # 只有 `status` 仍取活表：狀態轉換不走暫存。理由見 `to_course_snapshot` docstring。
+        snapshot = to_course_snapshot(nodes, status=course.status)
         blockers = evaluate_publish(snapshot, obsolete_doc_ids=await self._obsolete_doc_ids(db, snapshot.doc_ids))
         if blockers:
             raise AppError(

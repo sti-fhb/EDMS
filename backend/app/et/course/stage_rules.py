@@ -30,7 +30,6 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Final
 
 from app.et.course.publish_rules import ChapterSummary, CourseSnapshot, ItemSummary, QuizSummary
@@ -148,26 +147,43 @@ def _survey_question_count(nodes: Sequence[StageNode]) -> int | None:
     return len(_children(nodes, active[0].stage_id, ENTITY_SURVEY_QUESTION))
 
 
-def to_course_snapshot(
-    nodes: Sequence[StageNode],
-    *,
-    status: str,
-    open_start_at: datetime | None,
-    open_end_at: datetime | None,
-    tag_count: int,
-) -> CourseSnapshot:
-    """把暫存內容樹組成發布檢核所需的 `CourseSnapshot`。
+def to_course_snapshot(nodes: Sequence[StageNode], *, status: str) -> CourseSnapshot:
+    """把暫存樹組成發布檢核所需的 `CourseSnapshot`。
+
+    ## 🔴 起訖時間與受訓對象組數**取自暫存**（#720 改訂）
+
+    ⚠️ 本函式的 docstring 原本寫著它們「**取自活表**，不在暫存區（基本資料走『儲存』
+    不走『更新』）」——#720 拿掉了「儲存」鈕、基本資料也進暫存，那句話**整段作廢**。
+    留著會讓下一個人照它推論出相反的結論。
+
+    不換邊的症狀是**檢核通過但生效後不合格**：教師把訖止時間改成已過的時點、按「更新」，
+    檢核讀活表的舊值（合格）而放行，套用之後活表變成不合格——而發布檢核的全部意義
+    就是不讓那件事發生。
+
+    ## ⚠️ `status` 仍由呼叫端給定（取自活表）
+
+    四個參數裡**只換三個**。狀態轉換（發布 / 關閉 / 再開課）不走暫存，課程狀態不是
+    教師在基本資料區編輯的東西——它在 `stage_entities.COURSE_SYSTEM_FIELDS` 就已經被
+    擋在搬運那一層，這裡是第二道。
 
     Args:
         nodes: 該課程暫存區的全部列（扁平，彼此以 `parent_stage_id` 串接）。
-        status: 課程狀態——**取自活表**，不在暫存區（基本資料走「儲存」不走「更新」）。
-        open_start_at: 同上。
-        open_end_at: 同上。
-        tag_count: 受訓對象組數——同樣取自活表（`ET_COURSE_TAG` 不是內容、不版本化）。
+        status: 課程狀態，**取自活表**。
 
     Returns:
         與 `publish_repository.snapshot()` 同形的快照，可直接餵給 `evaluate_publish`。
+
+    Raises:
+        ValueError: 暫存樹沒有課程節點。那代表它是 #720 之前 seed 的舊結構——
+            靜默回 `None` 會讓檢核報「起訖時間未填」，而教師看著畫面上明明填著的時間，
+            那種錯誤訊息比沒有訊息更糟。
     """
+    course = next((n for n in nodes if n.entity_type == ENTITY_COURSE), None)
+    if course is None:
+        raise ValueError("暫存樹缺少課程節點（COURSE）——可能是 #720 之前 seed 的舊結構")
+    open_start_at = course.payload.get("open_start_at")
+    open_end_at = course.payload.get("open_end_at")
+    tag_count = len([n for n in nodes if n.entity_type == ENTITY_COURSE_TAG])
     chapters = _roots(nodes, ENTITY_CHAPTER)
     chapter_summaries = tuple(
         ChapterSummary(chapter_id=c.stage_id, item_count=len(_children(nodes, c.stage_id, ENTITY_ITEM)))
