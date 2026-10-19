@@ -397,6 +397,56 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(updateCalls).toBe(1) // 改走更新同一份草稿，新版本號才帶得進去
   }, 20000)
 
+  it("送簽被擋後改分類 → 重建草稿而非更新（DOC_ID 綁分類）（#734 反向探針）", async () => {
+    // 🔴 四個清除點裡**唯一該保留**的那個。後端 `update_draft_version` 明文不接受改分類
+    //（DOC_ID 內嵌分類碼），若這裡也改走更新，使用者改了分類卻不會生效——**而且沒有
+    // 任何錯誤訊息**，是靜默失效。
+    //
+    // ⚠️ 沒有這條的話，把 `onCategoryChange` 的清除一起拔掉，整組照樣全綠（實測 37/37）。
+    // 程式註解寫了理由，但理由擋不住人。
+    let createCalls = 0
+    let updateCalls = 0
+    let submitCalls = 0
+    server.use(
+      http.post("/api/dm/documents", () => {
+        createCalls += 1
+        return HttpResponse.json(
+          { doc_id: `DM-SOP-00001${createCalls}`, version_id: 920 + createCalls, previewable: true },
+          { status: 201 },
+        )
+      }),
+      http.put("/api/dm/documents/:docId/versions/:versionId", () => {
+        updateCalls += 1
+        return HttpResponse.json({ version_id: 921, previewable: true })
+      }),
+      http.post("/api/dm/documents/:docId/submit", () => {
+        submitCalls += 1
+        if (submitCalls === 1) {
+          return HttpResponse.json(
+            { error_code: "DM_DOC_006", error_message: "版本號與本文件已發布版本重複" },
+            { status: 409 },
+          )
+        }
+        return HttpResponse.json({ review_id: 502, notified: 1 })
+      }),
+    )
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    await fillNewForm(user, { withAudience: true })
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+    expect(await screen.findByText("版本號與本文件已發布版本重複")).toBeInTheDocument()
+
+    // 改分類（標準作業程序 → 其他）後再送
+    await user.click(screen.getByRole("combobox", { name: /分類/ }))
+    await user.click(await screen.findByRole("option", { name: "其他" }))
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+
+    expect(await screen.findByText("已送交簽核")).toBeInTheDocument()
+    expect(createCalls).toBe(2) // 🔴 改分類必須重建：DOC_ID 要跟著換
+    expect(updateCalls).toBe(0) // 走更新的話分類改不掉，而且使用者看不出來
+  }, 20000)
+
   it("選檔視窗限制為後端允許的副檔名（#734）", async () => {
     // 沒有 accept 時，選了 .zip 會先跳「無法線上預覽」確認視窗，存檔或送審才被擋——
     // 使用者多走一段冤路。允許清單取自 useUploadLimits（後端 DM_FILE_TYPES），不另寫死一份。
