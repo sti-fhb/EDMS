@@ -150,3 +150,34 @@ async def test_noop_assign_writes_no_audit(db):
     before = await _audit_count(db, "AS_NOOP")
     await _svc.assign_roles_audiences(db, user_id="AS_NOOP", roles={DM_EDITOR}, audiences=set(), operator_id="ADMIN")
     assert await _audit_count(db, "AS_NOOP") == before
+
+
+async def test_last_modified_reflects_role_revoke(db):
+    """取消角色後，最後異動顯示本次操作者；角色全取消也不得回 None（#743 AC1 / AC3）。
+
+    取消是把該列設 `DELETED=1` 並寫 `UPDATED_*`，但原查詢只讀未刪除的列
+    ⇒ 最後異動停在上一次的新增，角色全取消後甚至回 None（DP02 顯示「—」）。
+    """
+    await _svc.assign_roles_audiences(db, user_id="AS_LM1", roles={DM_EDITOR}, audiences=set(), operator_id="GRANTER")
+    await _svc.assign_roles_audiences(db, user_id="AS_LM1", roles=set(), audiences=set(), operator_id="REVOKER")
+
+    view = (await _svc.get_users_roles_audiences(db, ["AS_LM1"]))["AS_LM1"]
+    assert view.roles == frozenset()  # 正向錨點：角色確實取消了
+    assert view.last_modified_by == "REVOKER"  # 不是停在 GRANTER，也不是 None
+    assert view.last_modified_date is not None
+
+
+async def test_last_modified_reflects_audience_removal(db):
+    """移除配對後，最後異動顯示本次操作者——即使仍有有效角色列（#743 AC2）。
+
+    角色維持不變 ⇒ 差異套用不會碰那一列（其 `UPDATED_*` 仍是 GRANTER），
+    所以這條只可能由「被移除的配對列」釘住，不會被角色列的異動蓋過去。
+    """
+    pair = encode_pair(await _unit_tag_id(db), await _audience_tag_id(db))
+    await _svc.assign_roles_audiences(db, user_id="AS_LM2", roles={DM_EDITOR}, audiences={pair}, operator_id="GRANTER")
+    await _svc.assign_roles_audiences(db, user_id="AS_LM2", roles={DM_EDITOR}, audiences=set(), operator_id="REMOVER")
+
+    view = (await _svc.get_users_roles_audiences(db, ["AS_LM2"]))["AS_LM2"]
+    assert view.roles == frozenset({DM_EDITOR})  # 正向錨點：角色沒被動到
+    assert view.groups == frozenset()
+    assert view.last_modified_by == "REMOVER"

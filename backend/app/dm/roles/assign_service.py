@@ -39,7 +39,11 @@ class AssignService:
         self._audit = audit or AuditLogService()
 
     async def get_users_roles_audiences(self, db: AsyncSession, user_ids: list[str]) -> dict[str, AssignmentView]:
-        """批次載入一頁使用者之 DM 角色 + 可見對象現況（避 N+1）；查無指派回空集合 View。"""
+        """批次載入一頁使用者之 DM 角色 + 可見對象現況（避 N+1）；查無指派回空集合 View。
+
+        ⚠️ `roles` / `groups` 只含**目前有效**的列，但 `last_modified_*` 涵蓋**全部**列
+        （含已取消 / 已移除的 `DELETED=1`）——取消與移除也是異動（#743）。
+        """
         result: dict[str, AssignmentView] = {
             uid: AssignmentView(frozenset(), frozenset(), None, None) for uid in user_ids
         }
@@ -51,17 +55,23 @@ class AssignService:
         last_by: dict[str, str | None] = {uid: None for uid in user_ids}
         last_at: dict[str, datetime | None] = {uid: None for uid in user_ids}
 
-        role_rows = await db.execute(
-            select(DmUserRole).where(DmUserRole.user_id.in_(user_ids), DmUserRole.deleted == 0)
-        )
+        # 🔴 WHERE 刻意**不**過濾 `DELETED`（#743）：同一批列供兩個用途，而兩者要的條件相反——
+        #   「目前有效的角色 / 可見對象」→ 只算未刪除（移到下方逐列判斷）
+        #   「最後異動」                → 必須含**已取消 / 已移除**的列（兩者都是
+        #                                 `DELETED=1` 並寫 UPDATED_*，見 `_set_role` / `_set_audience`）
+        # 把過濾留在 SQL 會讓第二個用途看不到那些列：取消後最後異動停在上一次的新增，
+        # 角色全部取消後更會回 None、DP02 顯示「—」。
+        role_rows = await db.execute(select(DmUserRole).where(DmUserRole.user_id.in_(user_ids)))
         for r in role_rows.scalars():
-            roles[r.user_id].add(r.role_code)
+            if r.deleted == 0:
+                roles[r.user_id].add(r.role_code)
             # 最後異動取 UPDATED_* or CREATED_*（新授予之列尚無 UPDATED_*）
             _track_last(last_by, last_at, r.user_id, r.updated_user or r.created_user, r.updated_date or r.created_date)
 
-        tag_rows = await db.execute(select(DmUserTag).where(DmUserTag.user_id.in_(user_ids), DmUserTag.deleted == 0))
+        tag_rows = await db.execute(select(DmUserTag).where(DmUserTag.user_id.in_(user_ids)))
         for t in tag_rows.scalars():
-            groups[t.user_id].add(encode_pair(t.unit_tag_id, t.tag_id))
+            if t.deleted == 0:
+                groups[t.user_id].add(encode_pair(t.unit_tag_id, t.tag_id))
             _track_last(last_by, last_at, t.user_id, t.updated_user or t.created_user, t.updated_date or t.created_date)
 
         for uid in user_ids:

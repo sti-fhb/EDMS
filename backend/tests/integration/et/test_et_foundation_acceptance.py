@@ -367,6 +367,36 @@ class TestLastModifiedFallback:
         assert view.last_modified_by == "SYSTEM", "應回退至 CREATED_USER，而非空白"
         assert view.last_modified_date is not None
 
+    async def test_取消角色後最後異動為本次操作者(self, db, et_registered) -> None:
+        """#743 AC1 / AC3：取消是 `IS_ACTIVE=False`（列仍在、仍寫 UPDATED_*），
+
+        但原查詢加了 `is_active.is_(True)` ⇒ 最後異動停在上一次的新增，
+        角色全取消後甚至回 None（DP02 顯示「—」）。
+        """
+        provider = module_assign_registry.get("ET")
+        await provider.assign(db, user_id="ET_LM1", roles={ROLE_TEACHER}, groups=set(), operator_id="GRANTER")
+        await provider.assign(db, user_id="ET_LM1", roles=set(), groups=set(), operator_id="REVOKER")
+
+        view = (await provider.get_users_assignments(db, ["ET_LM1"]))["ET_LM1"]
+        assert view.roles == frozenset()  # 正向錨點：角色確實取消了
+        assert view.last_modified_by == "REVOKER"  # 不是停在 GRANTER，也不是 None
+        assert view.last_modified_date is not None
+
+    async def test_移除配對後最後異動為本次操作者(self, db, et_registered) -> None:
+        """#743 AC2：角色維持不變 ⇒ 差異套用不碰那一列（其 UPDATED_* 仍是 GRANTER），
+
+        所以這條只可能由「被移除的配對列」（`DELETED=1`）釘住，不會被角色列的異動蓋過去。
+        """
+        provider = module_assign_registry.get("ET")
+        tid = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "軍人"})
+        await provider.assign(db, user_id="ET_LM2", roles={ROLE_TEACHER}, groups={f":{tid}"}, operator_id="GRANTER")
+        await provider.assign(db, user_id="ET_LM2", roles={ROLE_TEACHER}, groups=set(), operator_id="REMOVER")
+
+        view = (await provider.get_users_assignments(db, ["ET_LM2"]))["ET_LM2"]
+        assert view.roles == frozenset({ROLE_TEACHER})  # 正向錨點：角色沒被動到
+        assert view.groups == frozenset()
+        assert view.last_modified_by == "REMOVER"
+
 
 class TestAc8NoSmtpInEt:
     """AC 8 反向驗證：ET 不得自建 SMTP 連線——寄信一律經平台 NotifyService。"""
