@@ -16,14 +16,29 @@
 ⚠️ 承重點因此從「`json.dumps` 會爆」轉移到「`parse_payload` 會還原」。本檔就是那個
 承重點的測試：少了還原，`evaluate_publish` 會拿字串去跟 `datetime` 比較而 `TypeError`，
 或更糟——`_upsert` 把字串寫進 `TIMESTAMPTZ` 欄位。
+
+## 🔴 序列化有三道門，不是一道
+
+`seed_from_live` 走 `to_payload`（活表列 → JSON）只是其中一道。**從請求寫入**另有兩道：
+`stage_writer.append`（新增節點）與 `update_payload`（改欄位）。#720 之前兩者裸呼叫
+`json.dumps` 完全沒事，因為 11 種內容型別的 payload 全是 JSON 原生型別。
+
+⇒ 只修 `to_payload` 的症狀是：seed 得起來，但教師一改基本資料就 500。
 """
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 
-from app.et.course.stage_entities import SPEC_BY_TYPE, datetime_fields, parse_payload, to_payload_dict
-from app.et.course.stage_rules import ENTITY_CHAPTER, ENTITY_COURSE
+from app.et.course.stage_entities import (
+    SPEC_BY_TYPE,
+    datetime_fields,
+    dumps_payload,
+    parse_payload,
+    to_payload_dict,
+)
+from app.et.course.stage_rules import ENTITY_CHAPTER, ENTITY_COURSE, ENTITY_QUIZ, RETEST_PAYLOAD_KEY
 
 pytestmark = pytest.mark.unit
 
@@ -76,6 +91,55 @@ class TestRoundTrip:
         payload = {"chapter_name": "第一章"}
 
         assert parse_payload(ENTITY_CHAPTER, payload) == payload
+
+
+class TestDumpsPayload:
+    """**三道門共用同一個編碼器**——所以它要能吃「請求送來的 dict」，不只是活表列。"""
+
+    def test_datetime_編成_ISO_字串(self) -> None:
+        raw = json.loads(dumps_payload(ENTITY_COURSE, {"open_start_at": _AWARE}))
+
+        assert raw["open_start_at"] == _AWARE.isoformat()
+
+    def test_與_parse_payload_成對(self) -> None:
+        """🥇 **本組的核心契約：寫進去什麼，讀回來就是什麼。**
+
+        經過真正的 JSON 字串來回（而非只到 dict）——資料庫 `PAYLOAD` 欄位存的就是那個字串。
+        """
+        original = {
+            "course_name": "課程甲",
+            "description": None,
+            "open_start_at": _AWARE,
+            "open_end_at": None,
+            "require_approval": False,
+        }
+
+        back = parse_payload(ENTITY_COURSE, json.loads(dumps_payload(ENTITY_COURSE, original)))
+
+        assert back == original
+
+    def test_沒有時間欄位的型別照原樣編碼(self) -> None:
+        """正向錨點：少了它，把編碼器寫成「只輸出時間欄位」也會讓上面兩條通過。"""
+        assert json.loads(dumps_payload(ENTITY_CHAPTER, {"chapter_name": "第一章"})) == {"chapter_name": "第一章"}
+
+    def test_非欄位的旗標原樣帶過(self) -> None:
+        """⚠️ `update_payload` 會把工作階段旗標併回 payload 再送進編碼器（見其「保留非欄位
+        的旗標」段）。編碼器若只認得 `payload_fields` 就會把它吃掉——那正是 2026-10-18
+        code review HIGH 1 修掉的靜默失效，不要在這一層復活它。
+        """
+        raw = json.loads(dumps_payload(ENTITY_QUIZ, {"quiz_name": "小考", RETEST_PAYLOAD_KEY: True}))
+
+        assert raw[RETEST_PAYLOAD_KEY] is True
+
+    def test_未宣告為時間欄位的_datetime_要當場爆(self) -> None:
+        """⛔ **不要為了讓它過而加 `default=str`。**
+
+        `datetime` 出現在沒宣告成時間欄位的 key 上，代表 `payload_fields` 與實際送的東西
+        對不上。此時靜默轉成字串，`parse_payload` 不會還原它，套用時就把字串寫進活表
+        ——`to_payload` 的擋牌從 #631 起擋的就是這件事。爆掉是正確行為。
+        """
+        with pytest.raises(TypeError):
+            dumps_payload(ENTITY_CHAPTER, {"chapter_name": _AWARE})
 
 
 class _Fake:

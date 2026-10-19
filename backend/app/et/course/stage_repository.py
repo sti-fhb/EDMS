@@ -31,7 +31,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.course.models import EtCourse, EtCourseContentStage
-from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, parse_payload, to_payload_dict
+from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, dumps_payload, parse_payload, to_payload_dict
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
 from app.et.course.stage_rules import (
     ENTITY_SURVEY,
@@ -64,19 +64,19 @@ class _SeedCtx:
 
 
 def to_payload(spec: EntitySpec, row: object) -> str:
-    """把活表列的內容欄位序列化成 `PAYLOAD`。
+    """把活表列的內容欄位序列化成 `PAYLOAD`（seed 一棵樹時用）。
 
-    🔴 `json.dumps` 在遇到不可序列化的型別時會 `TypeError`——**那是刻意不接住的**。
-    內容表若日後加了不可序列化的欄位，推導會自動把它納入 payload，而這裡會當場爆
-    出來；靜默塞個字串進去才是真正的問題（套用時寫回活表會變成錯的型別）。
+    🔴 編碼一律經 `dumps_payload`——它是序列化的**唯一一道門**，另兩道是
+    `stage_writer.append` 與 `update_payload`。不可序列化的型別在那裡會 `TypeError`，
+    **那是刻意不接住的**：內容表日後加了不可序列化的欄位，推導會自動把它納入 payload，
+    當場爆出來才看得見；靜默塞個字串進去才是真正的問題（套用時寫回活表會變成錯的型別）。
 
-    ⚠️ **`datetime` 已於 #720 成為例外**（課程的起訖時間）：由 `to_payload_dict` 轉成
-    ISO 8601、由 `parse_payload` 讀回來時還原成 `datetime`。那是**成對的**轉換，
-    不是「塞個字串」——承重點因此轉移到 `parse_payload`，由
-    `test_et_course_stage_payload_datetime.py` 守住。⛔ 不要為了讓別的型別過而加
-    `default=str`：那會讓上一段講的靜默寫入字串重新變成可能。
+    ⚠️ **`datetime` 已於 #720 成為例外**（課程的起訖時間）：寫出去是 ISO 8601、
+    `parse_payload` 讀回來還原成 `datetime`。那是**成對的**轉換，不是「塞個字串」——
+    承重點因此轉移到 `parse_payload`，由 `test_et_course_stage_payload_datetime.py` 守住。
+    ⛔ 不要為了讓別的型別過而加 `default=str`：那會讓上一段講的靜默寫入字串重新變成可能。
     """
-    return json.dumps(to_payload_dict(spec, row), ensure_ascii=False)
+    return dumps_payload(spec.entity_type, to_payload_dict(spec, row))
 
 
 class EtCourseStageRepository:

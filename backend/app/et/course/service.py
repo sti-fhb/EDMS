@@ -631,15 +631,25 @@ class EtCourseService:
         if is_staged(course):
             # 取課程行鎖後才碰暫存區（理由見 `stage_writer.lock_course`）
             await self._stage_writer.lock_course(db, course_id)
-            # ⚠️ 併發令牌仍是**課程**的 `VERSION`（活表）——課程列不是內容、不在
-            # `load_live_tree` 的範圍內，用它不會讓學員看到任何變化。重排改的是下一層
-            # 的順序，故與草稿路徑同一形狀。
             await self._stage_writer.ensure_seeded(db, course_id, operator)
+            # 🔴 併發令牌是**暫存**課程節點的 `VERSION`，不是活表的。
+            #
+            # #631 當時這裡遞增的是活表 `ET_COURSE.VERSION`，理由寫著「課程列不是內容、
+            # 不在 `load_live_tree` 的範圍內」。**#720 把課程本體搬進暫存樹之後那句話不再
+            # 成立**——課程列現在就在那棵樹裡，遞增活表版本就成了「已發布課程的內容編輯
+            # 動到了學員看得到的那張表」，由 `test_已發布課程的內容編輯不得直接寫活表`
+            # 當場抓出來。
+            #
+            # ⚠️ 語意沒有變：課程層的令牌一樣同時保護基本資料與重排（#720 之前兩者都打在
+            # `ET_COURSE.VERSION` 上，所以兩人同時改一樣會衝突），只是改記在暫存列。
+            course_node = await self._stage_writer.course_node(db, course_id)
+            if course_node is None:  # pragma: no cover - `ensure_seeded` 必定建出課程節點
+                raise ValueError("暫存樹缺少課程節點（COURSE）")
             nodes = await self._stage_writer.children_of(db, course_id, ENTITY_CHAPTER, None)
             by_exposed = {exposed_id(source_id=n.source_id, stage_id=n.stage_id): n.stage_id for n in nodes}
             ensure_reorder_complete(current_ids=set(by_exposed), requested=req.chapter_ids)
-            rowcount = await self._courses.bump_version(db, course_id, req.version, operator)
-            ensure_version_matched(rowcount=rowcount, entity="ET_COURSE")
+            rowcount = await self._stage_writer.bump_version(db, course_node.stage_id, req.version, operator)
+            ensure_version_matched(rowcount=rowcount, entity=_STAGE_ENTITY)
             await self._stage_writer.apply_order(db, [by_exposed[i] for i in req.chapter_ids], operator)
             await self._log(db, "UPDATE", operator.user_id, course_id, "調整章節順序（暫存）")
             return

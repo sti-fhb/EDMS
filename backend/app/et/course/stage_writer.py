@@ -42,8 +42,9 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.constants import COURSE_DRAFT
 from app.et.course.models import EtCourseContentStage
-from app.et.course.stage_entities import SPEC_BY_TYPE, parse_payload, payload_fields
+from app.et.course.stage_entities import SPEC_BY_TYPE, dumps_payload, parse_payload, payload_fields
 from app.et.course.stage_repository import EtCourseStageRepository
+from app.et.course.stage_rules import ENTITY_COURSE
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +222,7 @@ class EtCourseStageWriter:
             source_id=None,
             parent_stage_id=parent_stage_id,
             sort_order=(last or 0) + 1,
-            payload=json.dumps(dict(payload), ensure_ascii=False),
+            payload=dumps_payload(entity_type, payload),
             version=0,
             created_user=operator.user_id,
             created_date=now,
@@ -266,12 +267,17 @@ class EtCourseStageWriter:
         # ⚠️ 判準是「不在 `payload_fields` 裡」而非「以 `__` 開頭」——前者由 model 推導、
         # 不會因為命名慣例改變而失效。
         existing = await self.node_by_stage_id(db, stage_id)
+        if existing is None:
+            # 這列已不在（另一個分頁按了「取消」或「更新」）。下面的 UPDATE 與本次回讀
+            # 的 where 條件相同（`DELETED = 0`），命中列數必為 0，故直接回 0 等價；
+            # ⚠️ 但少了這道短路，`dumps_payload` 會因為拿不到 `entity_type` 而對課程的
+            # `datetime` 爆 `TypeError`——把一個乾淨的 409 變成 500。
+            return 0
         merged = dict(payload)
-        if existing is not None:
-            spec = SPEC_BY_TYPE.get(existing.entity_type)
-            if spec is not None:
-                fields = payload_fields(spec)
-                merged = {k: v for k, v in existing.payload.items() if k not in fields} | merged
+        spec = SPEC_BY_TYPE.get(existing.entity_type)
+        if spec is not None:
+            fields = payload_fields(spec)
+            merged = {k: v for k, v in existing.payload.items() if k not in fields} | merged
 
         result = await db.execute(
             update(EtCourseContentStage)
@@ -281,7 +287,7 @@ class EtCourseStageWriter:
                 EtCourseContentStage.deleted == 0,
             )
             .values(
-                payload=json.dumps(merged, ensure_ascii=False),
+                payload=dumps_payload(existing.entity_type, merged),
                 version=EtCourseContentStage.version + 1,
                 updated_user=operator.user_id,
                 updated_date=utcnow(),
@@ -333,6 +339,23 @@ class EtCourseStageWriter:
         rows = await db.scalars(stmt.order_by(EtCourseContentStage.sort_order, EtCourseContentStage.stage_id))
         return [_view(r) for r in rows.all()]
 
+    async def course_node(self, db: AsyncSession, course_id: int) -> StageNodeView | None:
+        """課程本體的暫存節點（#720）。
+
+        課程是暫存森林的樹根之一（`PARENT_STAGE_ID` 為 `NULL`），所以就是
+        `children_of(..., ENTITY_COURSE, None)` 的唯一一列。
+
+        它同時是**課程層的併發令牌**：基本資料與章節重排都打在這一列的 `VERSION` 上，
+        與 #720 之前兩者都打在 `ET_COURSE.VERSION` 上是同一個語意，只是換了記錄的位置。
+
+        Returns:
+            `None` 代表**暫存區還沒 seed**。此時令牌仍在活表的 `ET_COURSE.VERSION`，
+            而 `seed_from_live` 會原值帶進暫存列，所以前端跨越「第一次編輯」那條界線時
+            手上的版本不會失效。
+        """
+        nodes = await self.children_of(db, course_id, ENTITY_COURSE, None)
+        return nodes[0] if nodes else None
+
     async def has_stage(self, db: AsyncSession, course_id: int) -> bool:
         """該課程是否有編輯工作階段開著。語意見 `stage_repository.has_stage`。"""
         return await self._stage.has_stage(db, course_id)
@@ -382,6 +405,11 @@ class EtCourseStageWriter:
         `payload_fields(spec)` 列出的 key，所以非欄位的旗標會被自動忽略、不會進活表。
         ⛔ 不要用與欄位同名的 key。
 
+        ⚠️ 寫回一律經 `dumps_payload`：這裡是**讀出整份 payload、改一個 key、再寫回去**，
+        而讀出來的 `node.payload` 已由 `parse_payload` 把 ISO 字串還原成 `datetime`。
+        裸 `json.dumps` 會對那些值爆掉——今天只有 QUIZ 用得到旗標所以碰不到，但
+        「讀回來還原、寫回去要編碼」是這張表的通則，不是哪個型別的特例。
+
         Args:
             value: 傳 `None` 代表**清除**該旗標（而非寫入 null）。旗標必須可以取消——
                 #361 的重測後果是「全班作答過的人被退回並收到信」，教師誤勾卻只能放棄
@@ -397,7 +425,7 @@ class EtCourseStageWriter:
             update(EtCourseContentStage)
             .where(EtCourseContentStage.stage_id == stage_id, EtCourseContentStage.deleted == 0)
             .values(
-                payload=json.dumps(payload, ensure_ascii=False),
+                payload=dumps_payload(node.entity_type, payload),
                 updated_user=operator.user_id,
                 updated_date=utcnow(),
             )

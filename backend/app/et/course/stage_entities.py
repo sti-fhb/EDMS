@@ -26,6 +26,7 @@ seed 不會搬它、套用時會把活表那一欄寫回預設值——教師看
 再建項目**（`APPLY_ORDER` 已排好）。
 """
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -191,6 +192,33 @@ def to_payload_dict(spec: EntitySpec, row: object) -> dict[str, Any]:
         f: (v.isoformat() if f in dt and (v := getattr(row, f)) is not None else getattr(row, f))
         for f in payload_fields(spec)
     }
+
+
+def dumps_payload(entity_type: str, payload: Mapping[str, Any]) -> str:
+    """payload（可含 `datetime`）→ 存進 `PAYLOAD` 欄位的 JSON 字串。**與 `parse_payload` 成對。**
+
+    🔴 **序列化只有這一道門。** 三條寫入路徑都走這裡：
+
+    | 路徑 | 時機 |
+    |---|---|
+    | `stage_repository.to_payload` | 從活表 seed 一棵樹 |
+    | `stage_writer.append` | 教師新增一個節點 |
+    | `stage_writer.update_payload` | 教師改一個節點的欄位 |
+
+    #720 之前三者各自裸呼叫 `json.dumps`，而那完全沒問題——當時 11 種內容型別的 payload
+    全是 JSON 原生型別。課程本體帶進兩個 `datetime` 之後，**漏掉任何一道門的症狀都是
+    教師編輯基本資料當場 500**，而 seed 那條路照樣會過，所以單測 seed 看不出來。
+
+    ⛔ **不要加 `default=str`。** 未宣告成時間欄位的 `datetime` 要當場爆：靜默轉字串的話
+    `parse_payload` 不會還原它，套用時就把字串寫進活表——理由全文見 `to_payload_dict`。
+
+    ⚠️ 不在 `payload_fields` 裡的 key **原樣帶過**：`update_payload` 會把工作階段旗標
+    （`__require_retest`）併回同一份 payload 送進來，這裡不能把它濾掉。
+    """
+    spec = SPEC_BY_TYPE.get(entity_type)
+    dt = datetime_fields(spec) if spec is not None else frozenset()
+    encoded = {k: (v.isoformat() if k in dt and isinstance(v, datetime) else v) for k, v in payload.items()}
+    return json.dumps(encoded, ensure_ascii=False)
 
 
 def parse_payload(entity_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
