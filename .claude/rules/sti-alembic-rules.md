@@ -10,12 +10,57 @@ paths:
 
 # Alembic Migration 規範
 
+## 🔴 前提：`models.py` 的 schema 宣告 runtime 不生效
+
+`backend/app/**/models.py` 裡的 `Index(...)` / `UniqueConstraint(...)` **不會建立任何東西**。
+integration 測試的 schema 由 `alembic upgrade head` 子程序建（`tests/integration/conftest.py`），
+正式環境也由 migration 建 —— 那些宣告的實際職責只是「`--autogenerate` 的比對基準」。
+
+⇒ **只改 `models.py` 不寫 migration：測試全綠、CI 全綠、`alembic heads` 單頭，但正式環境沒有那個索引 / 約束。**
+
+| 漏掉的東西 | 正式環境的後果 |
+|---|---|
+| 一般索引 | 效能 |
+| 🔴 唯一索引 / 唯一約束 | **資料完整性** —— 發現時通常已經有髒資料 |
+
+### 三條操作規則
+
+1. **改 schema 一律兩邊都改**（`models.py` + migration）。只動 `models.py` 等於沒做
+2. **驗 schema 行為的變異注入要打在 migration 上**。注入 `models.py` 必定全綠，那不是「測試寫得不好」，是注錯了地方
+3. **不要為此寫 schema 驗收測試** —— 除了本檔末「不撰寫 migration 一次性驗收測試」所禁止之外，
+   那類測試只讀 DB 單側（DB 由 migration 建），**在結構上就偵測不到 `models.py` 與 migration 的不一致**
+
+### `alembic check` 能抓什麼、抓不到什麼
+
+`alembic check` 走 autogenerate 的比對器，**讀兩側**，所以是對的工具；但比對器有覆蓋範圍限制：
+
+| 漂移 | 偵測到？ |
+|---|---|
+| `models.py` 多一個 `UniqueConstraint` / `Index`、DB 沒有 | ✅ FAILED，且逐項點名是哪個 |
+| 既有索引的 `postgresql_where` **predicate 被改** | ❌ `No new upgrade operations detected.`（exit 0） |
+
+⇒ **部分索引的 predicate 改動，只能靠人看。** 本專案 CI **沒有** drift 檢查（只查多頭），
+所以上表第一列目前也沒有自動守門 —— 想自保就在改完 `models.py` 後手動跑一次：
+
+```bash
+cd backend && uv run alembic check
+```
+
+> as-of 2026-10-19 / alembic 1.18.5（實測）。升級 alembic 後請重跑上面兩種情境再更新本表。
+> 發現經過：#738 的變異檢查第 3 輪 —— 只改 `models.py` 的 predicate、不動 migration ⇒ 測試全綠。
+
+---
+
 ## 建立前必做：head 檢查
 
 建立新 migration **之前**，先確認目前只有一個 head：
 
+> ⛔ 用 `python`，**不要寫成 `python3`**。本機的 `python3` 是個 stub，執行後
+> **零輸出、exit 49**——而這支腳本的「沒問題」長相本來就是「只印一行 `Heads (1)`」，
+> 所以靜默失敗會被讀成通過，正好產生它要防的那種假綠。
+
 ```bash
-cd backend && python3 - <<'EOF'
+cd backend && python - <<'EOF'
 import os, re
 d = 'alembic/versions'
 revs = {}
