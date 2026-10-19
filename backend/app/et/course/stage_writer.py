@@ -181,13 +181,44 @@ class EtCourseStageWriter:
         await self._stage.lock_course(db, course_id)
 
     async def ensure_seeded(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
-        """暫存區是空的就先從活表種一棵樹。
+        """暫存區是空的就先從活表種一棵樹；**結構過期的樹整棵換掉**。
 
         ⚠️ 呼叫端須已持有 `lock_course`——否則兩個分頁的「第一次編輯」會雙雙看到
         `has_stage` 為假、各自 seed 一次，第二個撞唯一索引
         `UX_ET_COURSE_CONTENT_STAGE_SOURCE` 而回 500。
+
+        ## 🔴 #720 之前種下的樹沒有 `COURSE` 節點
+
+        那種樹會讓 `course_node()` 回 `None`、`to_course_snapshot` 拋 `ValueError`——
+        也就是部署當下正開著編輯頁的教師，下一個動作直接 500。
+
+        ⇒ 偵測到就**整棵丟掉重種**，而不是寫進部署步驟要人手動 `DELETE`。理由是後者
+        靠的是「下一個人記得」，而漏做的後果是正式環境的 500；自己修好則漏做的後果是
+        沒有後果。代價是那位教師這一輪未生效的編輯會消失——而他本來就會在 #720 的
+        「離開即放棄」下失去它（`discard_unkept` 同樣丟棄無課程節點的樹）。
+
+        ⚠️ 判準是「有沒有課程節點」而非版本號：暫存表沒有結構版本欄位，而這個判準
+        **直接對應那個會爆的前提**，不需要第二個要維護的事實。
+
+        🔴 **問的時候刻意不帶 `DELETED = 0`**，與 `has_stage` 同一個理由。帶了的話，
+        「這棵樹從來沒有課程節點」（舊結構，該重種）會與「課程節點被軟刪了」（不該
+        重種——重種會把教師刪掉的內容整批復活，正是
+        `test_教師刪光章節後不得重新_seed` 要防的事）**無法區分**。
+        正式環境到不了後者（教師沒有刪課程節點的路徑，`_NEVER_DELETED` 亦擋著），
+        但分不出來的判準遲早會在別的地方分錯邊。
         """
         if not await self._stage.has_stage(db, course_id):
+            await self._stage.seed_from_live(db, course_id, operator)
+            return
+        ever_had_course_node = await db.scalar(
+            select(EtCourseContentStage.stage_id).where(
+                EtCourseContentStage.course_id == course_id,
+                EtCourseContentStage.entity_type == ENTITY_COURSE,
+            )
+        )
+        if ever_had_course_node is None:
+            logger.warning("ET 暫存樹缺少課程節點（#720 之前的結構），整棵重種 course_id=%s", course_id)
+            await self._stage.discard(db, course_id)
             await self._stage.seed_from_live(db, course_id, operator)
 
     async def append(

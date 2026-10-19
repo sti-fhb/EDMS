@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
@@ -983,6 +983,68 @@ async def _seed_with_edit(db, course_id: int, uid: str, chapter_name: str) -> No
     await repo.seed_from_live(db, course_id, _operator(uid))
     ch = next(n for n in await repo.load_tree(db, course_id) if n.entity_type == ENTITY_CHAPTER)
     await _set_payload(db, ch.stage_id, {"chapter_name": chapter_name})
+
+
+class TestLegacyStageSelfHeals:
+    """#720 之前種下的暫存樹（沒有 `COURSE` 節點）要能自己修好，而不是 500。
+
+    🔴 **判準是「漏做的後果」。** 寫進部署步驟要人手動 `DELETE FROM ET_COURSE_CONTENT_STAGE`
+    的話，漏做一次的後果是正式環境 500；讓 `ensure_seeded` 自己偵測重種，漏做這件事
+    本身就不存在。
+
+    ⚠️ 代價：部署當下正開著編輯頁的教師，這一輪未生效的編輯會消失。那是可接受的——
+    #720 的「離開即放棄」本來就會讓他失去它（`discard_unkept` 對無課程節點的樹同樣丟棄）。
+    """
+
+    async def test_缺課程節點的舊樹會被整棵重種而非報錯(self, client, db) -> None:
+        uid = await _user(db, "ZT_LG1")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        # 造出 #720 之前的結構：把課程層的兩種節點硬刪掉
+        # ⚠️ **硬刪**（而非軟刪）才造得出「這棵樹從來沒有課程節點」——`ensure_seeded`
+        # 刻意不帶 `DELETED = 0` 去問，好把舊結構與「課程節點被軟刪」分開（見其 docstring）。
+        await db.execute(
+            delete(EtCourseContentStage).where(
+                EtCourseContentStage.course_id == cid,
+                EtCourseContentStage.entity_type.in_(list(_COURSE_LEVEL_TYPES)),
+            )
+        )
+        await db.flush()
+        assert await _course_node_or_none(db, cid) is None, "前置失敗：課程節點還在"
+
+        # 任何一個會 `ensure_seeded` 的編輯動作——這裡用新增章節
+        r = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "新章"}, headers=_bearer(uid))
+
+        assert r.status_code == 201, f"舊結構的暫存樹不得讓教師吃到 500：{r.text}"
+        assert await _course_node_or_none(db, cid) is not None, "重種之後必須有課程節點"
+
+    async def test_結構正常時不會白白重種(self, client, db) -> None:
+        """正向錨點：少了它，把 `ensure_seeded` 寫成「每次都重種」也會讓上一條通過
+        ——而那會把教師這一輪的編輯每次都丟掉。"""
+        uid = await _user(db, "ZT_LG2")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        ch = next(n for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "編輯中的章名"})
+
+        await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "再一章"}, headers=_bearer(uid))
+
+        names = [n.payload["chapter_name"] for n in await repo.load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER]
+        assert "編輯中的章名" in names, "結構正常的樹不得被重種——那會丟掉教師正在編的東西"
+
+
+async def _course_node_or_none(db, course_id: int):
+    return await db.scalar(
+        select(EtCourseContentStage).where(
+            EtCourseContentStage.course_id == course_id,
+            EtCourseContentStage.entity_type == ENTITY_COURSE,
+            EtCourseContentStage.deleted == 0,
+        )
+    )
 
 
 class TestKeepEdits:
