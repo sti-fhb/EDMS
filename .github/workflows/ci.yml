@@ -117,7 +117,7 @@ jobs:
           fetch-depth: 0
 
       - name: 安裝 uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
 
       # 🔴 必須排在 `uv sync` **之前**：`uv sync`（未帶 `--locked`）在偵測到 lock 與
       # pyproject 不一致時會**自行重新解析並改寫 lock**，於是「改了 pyproject 卻忘了跑
@@ -223,7 +223,7 @@ jobs:
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
 
       - name: 安裝 Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: 22
 
