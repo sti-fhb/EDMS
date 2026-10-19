@@ -13,7 +13,7 @@ const authStub: AuthState = {
   token: "t",
   isAuthenticated: true,
   mustChangePwd: false,
-  sessionExpired: false,
+  sessionEndedReason: null,
   login: async () => {},
   logout: async () => {},
   clearMustChangePwd: () => {},

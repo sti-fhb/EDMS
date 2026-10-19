@@ -19,6 +19,20 @@ import { authApi } from "./authService"
 import { useAuth } from "./useAuth"
 import { useCooldown, formatCountdown } from "../hooks/useCooldown"
 import { toApiError } from "../services/http"
+import type { SessionEndReason } from "../services/http"
+
+/**
+ * 被動登出的提示文案（#741）。
+ *
+ * ⚠️ 停用 / 鎖定兩句**逐字沿用登入時後端回的 `error_message`**
+ * （`dp/user/service.py` 的 `DP_AUTH_004` / `DP_AUTH_005`）——同一件事在登入前後看到
+ * 不同說法會讓使用者以為是兩個問題。改這裡要連同後端一起改。
+ */
+const SESSION_END_MESSAGE: Record<SessionEndReason, string> = {
+  IDLE: "閒置逾時已自動登出，請重新登入",
+  DISABLED: "帳號已停用，請洽管理者",
+  LOCKED: "帳號已鎖定，請洽管理者或稍後再試",
+}
 
 /**
  * 登入 overlay（全畫面遮罩）：登入 / 註冊分頁。
@@ -27,7 +41,7 @@ import { toApiError } from "../services/http"
  * 註冊（US2 #56）：RegisterForm，送出後於分頁內顯示「驗證信已寄」（不跳登入，需驗證後才能登入）。
  */
 export function LoginOverlay() {
-  const { login, sessionExpired } = useAuth()
+  const { login, sessionEndedReason } = useAuth()
   // 版號：公開端點（未登入可取），顯示於登入卡「忘記密碼」下方
   const { data: version } = useQuery({ queryKey: ["app", "version"], queryFn: authApi.version })
   const [tab, setTab] = useState<"login" | "register">("login")
@@ -132,9 +146,9 @@ export function LoginOverlay() {
 
             {tab === "login" ? (
               <>
-                {sessionExpired && errorMessage === null && (
-                  <Alert severity="info" sx={{ mb: 2 }}>
-                    閒置逾時已自動登出，請重新登入
+                {sessionEndedReason !== null && errorMessage === null && (
+                  <Alert severity={sessionEndedReason === "IDLE" ? "info" : "warning"} sx={{ mb: 2 }}>
+                    {SESSION_END_MESSAGE[sessionEndedReason]}
                   </Alert>
                 )}
                 {resendNote !== null && (

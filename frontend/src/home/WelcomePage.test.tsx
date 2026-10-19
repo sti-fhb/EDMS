@@ -17,7 +17,7 @@ function makeAuth(isAuthenticated: boolean): AuthState {
     token: isAuthenticated ? "t" : null,
     isAuthenticated,
     mustChangePwd: false,
-    sessionExpired: false,
+    sessionEndedReason: null,
     login: async () => {},
     logout: async () => {},
     clearMustChangePwd: () => {},

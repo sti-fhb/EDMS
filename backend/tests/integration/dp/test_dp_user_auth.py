@@ -57,6 +57,10 @@ async def test_login_success(db):
     result = await AuthService().login(db, email="ok@edms.local", password="Abcd1234")
     assert decode_access_token(result.access_token).sub == "ok"
     assert result.must_change_pwd is False
+    # `expires_in` 與 token 的 exp 同源（#741）：前端據此主動登出，少了它到期不會自己回登入頁。
+    # 用 exp - iat 比對而非寫死 15*60——TTL 取自 DP_PARAM，寫死會變成另一個獨立漂移的數字。
+    claims = decode_access_token(result.access_token)
+    assert result.expires_in == int((claims.exp - claims.iat).total_seconds())
     user = (await db.execute(select(DpUser).where(DpUser.email == "ok@edms.local"))).scalar_one()
     assert user.login_fail_count == 0 and user.last_login_date is not None
     audit = [a for a in await _audit_rows(db) if a.action_type == "LOGIN"]

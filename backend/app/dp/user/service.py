@@ -154,7 +154,10 @@ class AuthService:
         must_change = user.must_change_pwd or is_password_expired(user.pwd_changed_date, expiry_days, now=now)
         await db.flush()
         await self._audit_auth(db, user.user_id, "LOGIN", "SUCCESS", ip, None)
-        return LoginResponse(access_token=token, must_change_pwd=must_change)
+        # `expires_in` 讓前端算得出到期時間，據以主動登出（#741）。刻意回**相對秒數**而非
+        # JWT 的 `exp` 絕對時間：前端換算成自己的 `Date.now() + n * 1000`，使用者電腦時鐘
+        # 設錯也不會提早 / 延後登出——那種客訴查不出原因。
+        return LoginResponse(access_token=token, must_change_pwd=must_change, expires_in=ttl * 60)
 
     async def renew(self, db: AsyncSession, *, payload: JwtPayload) -> TokenResponse:
         """活動換發：沿用原 auth_time 重簽、套用單日換發上限。
@@ -170,7 +173,7 @@ class AuthService:
             raise AppError(status_code=401, detail="已達單次登入時數上限，請重新登入", error_code="DP_AUTH_003")
         ttl = await self._params.get_int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
         token = create_access_token(sub=payload.sub, ttl_minutes=ttl, auth_time=payload.auth_time)
-        return TokenResponse(access_token=token)
+        return TokenResponse(access_token=token, expires_in=ttl * 60)  # 理由同 login（#741）
 
     async def logout(self, db: AsyncSession, *, user_id: str) -> None:
         """登出：寫 LOGOUT 稽核（無狀態 JWT，不做伺服端撤銷）。提交由 get_db 於請求成功時負責。"""
