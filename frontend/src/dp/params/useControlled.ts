@@ -15,16 +15,25 @@ const _SAVED_MSG = "已儲存並即時生效"
  *
  * 兩個計數不對稱：DM 可見對象回文件數 + 使用者數，ET 受訓單位標籤只回使用者數
  * （`affected_docs` 恆為 null——ET 沒有文件概念）。若以 `?? 0` 補零會對 ET 顯示
- * 「至少影響 0 份文件」，是字面上錯誤的資訊。
+ * 「0 組文件可見對象設定」，是字面上錯誤的資訊。
  *
- * 用「至少」：在途草稿之版本層標籤快照未計入（#388），此數字為下限。
+ * 🔴 **數的是配對列數，不是不重複的文件數或人數**（#742）：後端算的是 `DM_DOC_TAG` /
+ * `DM_USER_TAG` / `ET_USER_TAG` 中用到該標籤的列數。一份文件設了「三總＋護理師」
+ * 「三總＋醫檢師」兩組，停用「三總」時會算成 2——所以不能寫「份文件」「位使用者」。
+ *
+ * ⛔ **不要加回「至少」**。原註解寫「在途草稿之版本層標籤快照未計入（#388），此數字為下限」
+ * ——那只看了低估的一半。`DM_DOC_TAG` 僅在核准發布時寫入
+ * （`dm/review/repository.py` 的 `apply_version_tags_to_doc`），所以：
+ *   - 草稿的標籤在 `DM_VERSION_TAG`，**不計入** → 低估
+ *   - 已廢止文件的 `DM_DOC_TAG` 列**留著、計入** → 高估
+ * 兩個方向同時存在，它不是任何一邊的界線。拿掉「至少」後文字與實際計算完全相符。
  */
 function affectedText(docs: number | null, viewers: number | null): string | null {
   const parts = [
-    docs === null ? null : `${docs} 份文件`,
-    viewers === null ? null : `${viewers} 位使用者`,
+    docs === null ? null : `${docs} 組文件可見對象設定`,
+    viewers === null ? null : `${viewers} 組使用者對象設定`,
   ].filter((p): p is string => p !== null)
-  return parts.length > 0 ? `已停用，至少影響 ${parts.join("、")}` : null
+  return parts.length > 0 ? `已停用，影響 ${parts.join("、")}` : null
 }
 
 /**

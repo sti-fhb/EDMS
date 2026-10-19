@@ -500,13 +500,19 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await user.click(screen.getByRole("button", { name: "停用" }))
     await user.click(await screen.findByRole("button", { name: "確定停用" }))
 
-    // 「至少」不可省：在途草稿之版本層標籤快照未計入（#388），此數字為下限
-    expect(await screen.findByText(/至少影響 3 份文件、2 位使用者/)).toBeInTheDocument()
+    // 數的是配對列數、不是不重複的文件數或人數，故不可寫「份文件」「位使用者」（#742）
+    expect(
+      await screen.findByText("已停用，影響 3 組文件可見對象設定、2 組使用者對象設定"),
+    ).toBeInTheDocument()
+    // 📌 「至少」已刻意拿掉（#742）：DM_DOC_TAG 把已廢止文件的設定也算進來（高估），
+    // 原本「此數字為下限」的理由只看了草稿未計入（低估）那一半，兩個方向同時存在。
+    // ⛔ 不要為此再加一條 `queryByText(/至少/)` 的反向探針——變異實測過，
+    // 上面這個精確字串的 findByText 已經擋住加回「至少」，探針不會多紅任何一條。
   })
 
-  it("只回使用者數的模組（ET）不得顯示「0 份文件」", async () => {
+  it("只回使用者數的模組（ET）不得顯示「0 組文件可見對象設定」", async () => {
     // ET 之 set_controlled_enabled 只回 affected_viewers，affected_docs 恆為 null——
-    // 以 `?? 0` 補零會對沒有文件概念的模組顯示字面錯誤的「至少影響 0 份文件」
+    // 以 `?? 0` 補零會對沒有文件概念的模組顯示字面錯誤的「0 組文件可見對象設定」
     server.use(
       http.get("/api/dp/params/controlled", () =>
         HttpResponse.json([
@@ -534,8 +540,8 @@ describe("ParamsPage 模組受控清單（#182）", () => {
     await user.click(screen.getByRole("button", { name: "停用" }))
     await user.click(await screen.findByRole("button", { name: "確定停用" }))
 
-    expect(await screen.findByText("已停用，至少影響 4 位使用者")).toBeInTheDocument()
-    expect(screen.queryByText(/0 份文件/)).not.toBeInTheDocument()
+    expect(await screen.findByText("已停用，影響 4 組使用者對象設定")).toBeInTheDocument()
+    expect(screen.queryByText(/0 組文件可見對象設定/)).not.toBeInTheDocument()
   })
 
   it("新增受控項：有子分組者代碼帶入所屬組，不要求使用者輸入", async () => {
