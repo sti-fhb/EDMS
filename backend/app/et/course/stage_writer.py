@@ -42,7 +42,7 @@ from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.constants import COURSE_DRAFT
 from app.et.course.models import EtCourseContentStage
-from app.et.course.stage_entities import SPEC_BY_TYPE, payload_fields
+from app.et.course.stage_entities import SPEC_BY_TYPE, parse_payload, payload_fields
 from app.et.course.stage_repository import EtCourseStageRepository
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,8 @@ def _view(row: EtCourseContentStage) -> StageNodeView:
         parent_stage_id=row.parent_stage_id,
         sort_order=row.sort_order,
         version=row.version,
-        payload=parsed,
+        # ⚠️ ISO 8601 還原成 `datetime`（#720），同 `stage_repository._payload`。
+        payload=parse_payload(row.entity_type, parsed),
     )
 
 

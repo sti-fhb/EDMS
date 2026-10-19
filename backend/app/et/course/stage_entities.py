@@ -26,8 +26,12 @@ seed 不會搬它、套用時會把活表那一欄寫回預設值——教師看
 再建項目**（`APPLY_ORDER` 已排好）。
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Final
+
+from sqlalchemy import DateTime
 
 from app.et.catalog.models import EtCourseTag
 from app.et.course.models import EtChapter, EtCourse, EtItem
@@ -159,6 +163,52 @@ def _parent_fk_fields_on(model: type[Any]) -> frozenset[str]:
     # 兩者的父層都是項目），但型別上仍是 `str | None`——以區域變數收斂，不用 type: ignore。
     reverse = [s for s in APPLY_ORDER if s.link == LINK_PARENT_FK and s.parent_entity is not None]
     return frozenset(s.fk for s in reverse if SPEC_BY_TYPE[str(s.parent_entity)].model is model)
+
+
+def datetime_fields(spec: EntitySpec) -> frozenset[str]:
+    """該型別 payload 裡屬於 `datetime` 的欄位——**由 model 的欄位型別推導**。
+
+    ⚠️ 手寫清單漏掉一個的症狀：序列化時爆 `TypeError`（看得見，還好）；但若有人為了
+    讓它過而給 `json.dumps` 加上 `default=str`，就會變成**靜默寫入字串**——而那正是
+    `to_payload` 的擋牌要防的事。
+    """
+    return frozenset(f for f in payload_fields(spec) if isinstance(spec.model.__mapper__.columns[f].type, DateTime))
+
+
+def to_payload_dict(spec: EntitySpec, row: object) -> dict[str, Any]:
+    """活表列 → payload 的 dict（`datetime` 轉 ISO 8601 字串）。
+
+    🔴 **型別安全的來回**：`to_payload` 的 docstring 原本預言了「內容表日後加 `datetime`
+    會當場爆」，並明寫「靜默塞個字串進去才是真正的問題（套用時寫回活表會變成錯的型別）」。
+    #720 的課程本體帶來了兩個時間欄位，所以那個「日後」到了。
+
+    ⛔ 擋牌擋的是**目的**（套用時型別不能錯），不是手段。所以這裡成對提供 `parse_payload`
+    把它還原成 `datetime`——承重點從「`json.dumps` 會爆」轉移到「讀回來會還原」，
+    由 `test_et_course_stage_payload_datetime.py` 守住。
+    """
+    dt = datetime_fields(spec)
+    return {
+        f: (v.isoformat() if f in dt and (v := getattr(row, f)) is not None else getattr(row, f))
+        for f in payload_fields(spec)
+    }
+
+
+def parse_payload(entity_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """payload → 可直接使用的值（ISO 8601 字串還原成 `datetime`）。
+
+    ⚠️ 少了這一步，`evaluate_publish` 會拿字串去跟 `datetime` 比較而 `TypeError`，
+    或更糟——`stage_apply._upsert` 把字串寫進 `TIMESTAMPTZ` 欄位。
+
+    ⚠️ 未知的 `entity_type` 原樣回傳：`stage_apply._validate_tree` 才是該報錯的地方，
+    這裡多擋一次只會讓錯誤出現在比較難讀的位置。
+    """
+    spec = SPEC_BY_TYPE.get(entity_type)
+    if spec is None:
+        return dict(payload)
+    dt = datetime_fields(spec)
+    if not dt:
+        return dict(payload)
+    return {k: (datetime.fromisoformat(v) if k in dt and isinstance(v, str) else v) for k, v in payload.items()}
 
 
 def payload_fields(spec: EntitySpec) -> tuple[str, ...]:

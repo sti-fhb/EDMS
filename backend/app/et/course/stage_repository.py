@@ -31,7 +31,7 @@ from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
 from app.et.course.models import EtCourse, EtCourseContentStage
-from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, payload_fields
+from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, parse_payload, to_payload_dict
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
 from app.et.course.stage_rules import (
     ENTITY_SURVEY,
@@ -67,10 +67,16 @@ def to_payload(spec: EntitySpec, row: object) -> str:
     """把活表列的內容欄位序列化成 `PAYLOAD`。
 
     🔴 `json.dumps` 在遇到不可序列化的型別時會 `TypeError`——**那是刻意不接住的**。
-    內容表若日後加了 `datetime` 之類的欄位，推導會自動把它納入 payload，而這裡會
-    當場爆出來；靜默塞個字串進去才是真正的問題（套用時寫回活表會變成錯的型別）。
+    內容表若日後加了不可序列化的欄位，推導會自動把它納入 payload，而這裡會當場爆
+    出來；靜默塞個字串進去才是真正的問題（套用時寫回活表會變成錯的型別）。
+
+    ⚠️ **`datetime` 已於 #720 成為例外**（課程的起訖時間）：由 `to_payload_dict` 轉成
+    ISO 8601、由 `parse_payload` 讀回來時還原成 `datetime`。那是**成對的**轉換，
+    不是「塞個字串」——承重點因此轉移到 `parse_payload`，由
+    `test_et_course_stage_payload_datetime.py` 守住。⛔ 不要為了讓別的型別過而加
+    `default=str`：那會讓上一段講的靜默寫入字串重新變成可能。
     """
-    return json.dumps({f: getattr(row, f) for f in payload_fields(spec)}, ensure_ascii=False)
+    return json.dumps(to_payload_dict(spec, row), ensure_ascii=False)
 
 
 class EtCourseStageRepository:
@@ -106,7 +112,7 @@ class EtCourseStageRepository:
             .order_by(EtCourseContentStage.stage_id)
         )
 
-        def _payload(raw: str) -> dict:
+        def _payload(raw: str, entity_type: str) -> dict:
             """⚠️ `PAYLOAD` 不是 JSON object 時**明確報錯**。
 
             非 dict 的話，下游 `f in node.payload` 會退化成子字串 / 成員測試、
@@ -128,7 +134,9 @@ class EtCourseStageRepository:
                     detail="課程內容暫存資料異常，請重新載入後再試",
                     error_code="ET_STAGE_001",
                 )
-            return parsed
+            # ⚠️ ISO 8601 還原成 `datetime`（#720）。少了它，`evaluate_publish` 會拿字串
+            # 去跟 `datetime` 比較，而 `_upsert` 會把字串寫進 `TIMESTAMPTZ` 欄位。
+            return parse_payload(entity_type, parsed)
 
         return tuple(
             StageNode(
@@ -137,7 +145,7 @@ class EtCourseStageRepository:
                 source_id=r.source_id,
                 parent_stage_id=r.parent_stage_id,
                 sort_order=r.sort_order,
-                payload=_payload(r.payload),
+                payload=_payload(r.payload, r.entity_type),
                 version=r.version,
             )
             for r in rows.all()
