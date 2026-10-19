@@ -122,9 +122,17 @@ describe("AuthProvider 自動登出", () => {
     renderAuth()
     await login()
 
-    // 正向錨點：這個請求**確實**以 403 失敗了。少了它，下方「仍在登入中」會因為
-    // 「根本沒發生 403」而恆真——那是這條測試唯一會假綠的方式。
+    // 正向錨點①：這個請求**確實**以 403 失敗了。少了它，下方「仍在登入中」會因為
+    // 「根本沒發生 403」而恆真。
     await expect(respond403("DP_AUTH_006", "需要模組管理者權限")).rejects.toThrow()
+
+    // 🔴 正向錨點②：沖掉可能發生的狀態更新再斷言。
+    // 變異實測發現的——注入「任何 403 都登出」時，這條原本**照樣綠**：斷言同步跑在
+    // `rejects` 之後，而登出造成的 React 狀態更新還沒沖出來。否定斷言跑得比它要否定的
+    // 那件事還早，於是恆真。這一行是這條測試唯一有效的前提。
+    await act(async () => {
+      await Promise.resolve()
+    })
 
     expect(screen.getByTestId("status")).toHaveTextContent("authed")
     expect(screen.getByTestId("reason")).toHaveTextContent("none")
