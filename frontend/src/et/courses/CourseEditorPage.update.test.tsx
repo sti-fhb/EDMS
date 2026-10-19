@@ -317,11 +317,8 @@ describe("ET05 更新（#631）", () => {
     expect(screen.queryByText("課程內容已更新，學員已可看到")).not.toBeInTheDocument()
   })
 
-  it("🔴 問卷凍結（422 ET_SURVEY_003）走訊息，不被當成缺漏吞掉", async () => {
-    // 缺漏清單裝不下這一條（它不是「少了什麼」而是「不准改」）。若比照 ET_PUBLISH_001
-    // 一起吞進缺漏處理，畫面會是「按了更新、什麼都沒發生」——最難察覺的一種失敗。
-    const user = userEvent.setup()
-    useCourse("PUBLISHED", { pending: true })
+  /** 讓「更新」固定以問卷凍結被擋下。 */
+  function useFrozenSurvey() {
     server.use(
       http.post("/api/et/courses/:courseId/content/apply", () =>
         HttpResponse.json(
@@ -330,13 +327,77 @@ describe("ET05 更新（#631）", () => {
         ),
       ),
     )
+  }
+
+  it("🔴 問卷凍結（422 ET_SURVEY_003）開的是**帶出口的視窗**，不是一則訊息", async () => {
+    // 原本它走 handleError 變成一則 toast——那是告訴教師他卡住了，卻不告訴他怎麼出來。
+    // 而他真的出不來：把題目改回原樣也沒用（選項是全量覆寫、識別碼換新），整門課的
+    // 更新都過不去（#712）。
+    const user = userEvent.setup()
+    useCourse("PUBLISHED", { pending: true })
+    useFrozenSurvey()
     renderEditor()
     await user.click(await screen.findByRole("button", { name: "更新" }))
     await user.click(await screen.findByRole("button", { name: "確認更新" }))
 
-    expect(await screen.findByText("已有學員填答，題目與選項不可修改")).toBeInTheDocument()
-    // 用與上一條**同一種查法**（上一條是它的正向錨點，證明這個名字查得到東西）
+    expect(await screen.findByRole("button", { name: "放棄問卷的編輯" })).toBeInTheDocument()
+    expect(screen.getByText(/把題目改回原樣/)).toBeInTheDocument()
+    // 用與缺漏那條**同一種查法**：凍結不是「少了什麼」，不該混進缺漏清單
     expect(screen.queryByRole("dialog", { name: "更新未生效" })).not.toBeInTheDocument()
+  })
+
+  it("🔴 按「放棄問卷的編輯」只打問卷那支，不打放棄全部那支", async () => {
+    // ⚠️ 兩支端點只差一個路徑段（`/content/stage` vs `/content/stage/survey`），打錯的
+    // 後果是教師**丟掉整門課這一輪的全部編輯**——而畫面上看起來一樣成功。
+    const user = userEvent.setup()
+    const 打過的 : string[] = []
+    useCourse("PUBLISHED", { pending: true })
+    useFrozenSurvey()
+    server.use(
+      http.delete("/api/et/courses/:courseId/content/stage/survey", () => {
+        打過的.push("survey")
+        return new HttpResponse(null, { status: 204 })
+      }),
+      http.delete("/api/et/courses/:courseId/content/stage", () => {
+        打過的.push("all")
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+    await user.click(await screen.findByRole("button", { name: "確認更新" }))
+
+    await user.click(await screen.findByRole("button", { name: "放棄問卷的編輯" }))
+
+    await waitFor(() => expect(打過的).toEqual(["survey"]))
+    expect(await screen.findByText(/其餘編輯仍保留/)).toBeInTheDocument()
+    // 留在原地——教師接下來要做的是再按一次「更新」，不是被導走
+    expect(navigateSpy).not.toHaveBeenCalled()
+  })
+
+  it("凍結視窗按「關閉」什麼都不放棄", async () => {
+    // 🔴 正向錨點：少了它，把「關閉」接到放棄的 mutation 上也會讓上一條通過，
+    // 而那會讓一個只想看清楚狀況的教師丟掉問卷的編輯。
+    const user = userEvent.setup()
+    const 打過的: string[] = []
+    useCourse("PUBLISHED", { pending: true })
+    useFrozenSurvey()
+    server.use(
+      http.delete("/api/et/courses/:courseId/content/stage/survey", () => {
+        打過的.push("survey")
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+    await user.click(await screen.findByRole("button", { name: "確認更新" }))
+
+    await user.click(await screen.findByRole("button", { name: "關閉" }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "放棄問卷的編輯" })).not.toBeInTheDocument(),
+    )
+    expect(打過的).toEqual([])
   })
 
   it("🔴 按「取消」會放棄暫存的編輯——編輯工作階段的第二個出口", async () => {

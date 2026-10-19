@@ -252,6 +252,14 @@ export function EtCourseEditorPage() {
    */
   const [applyBlockers, setApplyBlockers] = useState<PublishBlocker[]>([])
   /**
+   * 「更新」撞上問卷凍結（422 `ET_SURVEY_003`）時開的出口視窗（#712）。
+   *
+   * 🔴 與 `applyBlockers` **刻意分開**：缺漏是「補齊就好」，本視窗是「這一項回不去了，
+   * 要不要放棄它」——兩種處置完全不同，混在同一個清單裡會讓教師以為問卷也是補一補
+   * 就能過。
+   */
+  const [surveyFrozenOpen, setSurveyFrozenOpen] = useState(false)
+  /**
    * 標示模式（#558）：缺漏視窗關閉後，缺漏處以紅框標示，**補好即消失**。
    *
    * 值表示是哪一條流程的缺漏——兩者要框的欄位不同（再開課的起訖時間規則與發布**相反**，
@@ -650,9 +658,12 @@ export function EtCourseEditorPage() {
    * 422 `ET_PUBLISH_001` 於 `mutationFn` 內就地轉成「顯示缺漏」，**不往外拋**——
    * 理由與 `reopenMut` 相同（缺漏不是需要 toast 的失敗，視窗裡已逐條列出）。
    *
-   * ⚠️ 其餘 422 **要往外拋**：`ET_SURVEY_003`（問卷已有填答、題目凍結，SA Q2 ② 裁示）
-   * 與 `ET_COURSE_010`（草稿不得按更新）都是缺漏清單裝不下的狀況，走 `handleError`
-   * 以訊息呈現。把它們一起吞掉會變成「按了更新、什麼都沒發生」。
+   * 🔴 `ET_SURVEY_003`（問卷已有填答、題目凍結）**也不往外拋**，改開一個帶出口的對話框
+   * （#712）。原本它走 `handleError` 變成一則 toast，而那是**告訴教師他卡住了卻不告訴他
+   * 怎麼出來**——他改不回去（選項識別碼回不來），而整門課的更新都過不去。
+   *
+   * ⚠️ `ET_COURSE_010`（草稿不得按更新）仍往外拋：那是前端不該讓他按到的狀態，
+   * 一則訊息即可，沒有「出口」這回事。
    */
   const applyMut = useMutation({
     mutationFn: async () => {
@@ -664,6 +675,10 @@ export function EtCourseEditorPage() {
         if (errorCode === "ET_PUBLISH_001" && returned) {
           seedLiveCheck(returned)
           setApplyBlockers(returned)
+          return undefined
+        }
+        if (errorCode === "ET_SURVEY_003") {
+          setSurveyFrozenOpen(true)
           return undefined
         }
         throw err
@@ -725,6 +740,24 @@ export function EtCourseEditorPage() {
       bypassGuard.current = true
       invalidate()
       navigate("/et/courses")
+    },
+    onError: handleError,
+  })
+
+  /**
+   * 只放棄問卷的編輯——凍結後的出口（#712）。
+   *
+   * ⚠️ 與 `discardMut` 的差別是範圍與去向：那個丟掉整門課這一輪的編輯**並離開頁面**，
+   * 這個只把問卷還原成已生效的那一版、**留在原地**——教師接下來要做的事是再按一次
+   * 「更新」，把其餘的編輯送出去。
+   */
+  const discardSurveyMut = useMutation({
+    mutationFn: () => coursesApi.discardSurveyEdits(courseId as number),
+    onSuccess: () => {
+      setSurveyFrozenOpen(false)
+      invalidate()
+      invalidateSurvey()
+      message.success("已放棄課後問卷的編輯，其餘編輯仍保留")
     },
     onError: handleError,
   })
@@ -1582,6 +1615,43 @@ export function EtCourseEditorPage() {
             setHighlight("publish")
           }}
         />
+      )}
+
+      {/*
+        問卷凍結的出口（#712）。⚠️ **條件渲染**，理由同本檔其他視窗：MUI 的 Dialog 即使
+        `open=false` 也參與 `aria-hidden` 簿記，常駐會讓背景的按鈕查不到。
+
+        🔴 這個視窗存在的理由是**原本只有一則 toast**：它告訴教師「題目與選項不可修改」，
+        卻沒告訴他怎麼出來——而他真的出不來（選項識別碼回不去），整門課的更新都卡著。
+      */}
+      {surveyFrozenOpen && (
+        <Dialog open onClose={() => setSurveyFrozenOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>課後問卷已有學員填答，本次更新未生效</DialogTitle>
+          <DialogContent>
+            <DialogContentText component="div">
+              已經有學員填寫過這份問卷，所以問卷的題目與選項<strong>不能</strong>再更動。本次更新沒有生效，
+              課程內容一個字都沒有改變。
+              <br />
+              <br />
+              ⚠️ 把題目改回原樣<strong>沒有用</strong>——系統比對的不只是文字。要讓更新過得去，
+              請放棄這次對問卷的編輯。
+              <br />
+              <br />
+              按「放棄問卷的編輯」：課後問卷回到學員目前看到的那一版，
+              <strong>其餘的編輯（章節、教材、測驗）全部保留</strong>，接著再按一次「更新」即可。
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSurveyFrozenOpen(false)}>關閉</Button>
+            <Button
+              variant="contained"
+              disabled={discardSurveyMut.isPending}
+              onClick={() => discardSurveyMut.mutate()}
+            >
+              放棄問卷的編輯
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
 
       {/*
