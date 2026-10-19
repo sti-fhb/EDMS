@@ -21,6 +21,7 @@ from app.core.pagination import PaginatedResult, paginate
 from app.core.utils import utcnow
 from app.dp.users.account_status import is_account_disabled
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
+from app.et.audit_target import course_audit_payload
 from app.et.catalog.models import TAG_TYPE_AUDIENCE, TAG_TYPE_UNIT
 from app.et.catalog.pair import Pair
 from app.et.common.optimistic_lock import ensure_version_matched
@@ -934,6 +935,8 @@ class EtCourseService:
                 raise AppError(status_code=422, detail="指定之受訓對象無效或未啟用", error_code="ET_COURSE_004")
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
+        # after_value 只帶 course_name：供 DP05 對象欄顯示課程名而非 ID（#717）。
+        # 取**當下**值存進稽核列，課程日後改名不改寫歷史；⛔ 不得加入學員姓名（個資）。
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -943,6 +946,7 @@ class EtCourseService:
             operator_id=operator_id,
             target_id=str(course_id),
             description=description,
+            after_value=await course_audit_payload(db, course_id) or None,
         )
 
 

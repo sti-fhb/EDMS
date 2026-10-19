@@ -21,7 +21,7 @@ from app.core.utils import format_taipei
 from app.dp.audit.repository import AuditLogRepository, build_audit_conditions
 from app.dp.audit.schemas import AuditLogResponse, AuditOptionItem
 from app.dp.audit.service import AuditLogService
-from app.dp.audit.target_resolver import resolve_target_displays
+from app.dp.audit.target_resolver import ET_COURSE_FUNCS, resolve_target_displays
 
 # func_name → 中文顯示名（保留模組前綴，UI 不另列模組欄）；未知碼原樣回傳。
 #
@@ -106,6 +106,50 @@ _CSV_CODE_LABELS: dict[str, dict[str, str]] = {"action_type": _ACTION_LABELS, "r
 
 def _func_label(func_name: str) -> str:
     return _FUNC_LABELS.get(func_name, func_name)
+
+
+#: `ET-REPORT` 匯出全部課程時的 `target_id`（非課程 ID），與 `et/reports/service.py` 的 `_TARGET_ALL` 同值。
+_ET_TARGET_ALL = "ALL"
+_ET_ALL_LABEL = "全部課程"
+
+
+def _course_name_from_values(before_value: str | None, after_value: str | None) -> str | None:
+    """專取稽核列的 `course_name`——**刻意不走 `_TARGET_NAME_KEYS`**。
+
+    那份清單是「任一鍵有值就用」，順序一改就可能撈到別的欄位；課程名這裡只認一個鍵，
+    與其他欄位互不影響。`after` 優先於 `before`（較貼近結果）。
+    """
+    for raw in (after_value, before_value):
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict) and data.get("course_name"):
+            return str(data["course_name"])
+    return None
+
+
+def _compose_et_target(log, target_map: dict[tuple[str, str], str]) -> str:
+    """ET 課程類的對象欄：**課程名（當時值）+ 人名（現值）**（#717 裁示）。
+
+    與其他功能碼的三層互斥 fallback 不同，本函式**組合**兩個來源：
+
+    - 課程名 ← 稽核列 JSON 的 `course_name`。寫入時存下，故課程日後改名不改寫歷史。
+      舊紀錄（本次改動前）沒有這個鍵，課程段退回課程 ID——**刻意不回填**，
+      回填只能拿現名冒充當時名。
+    - 人名 ← `DP_USER` 活表（`target_resolver._resolve_et_users`）。人改名後仍是同一個人；
+      更關鍵的是**姓名是個資，不複製進稽核列**（見 `et/tracking/service.py` 之 `_log_export`）。
+
+    `{course_id}:{user_id}:{quiz_id}` 的第三段（測驗）**刻意不顯示**：一門課的測驗不多，
+    帶上只會讓對象欄更長而無助辨識。
+    """
+    if log.target_id == _ET_TARGET_ALL:
+        return _ET_ALL_LABEL
+    course = _course_name_from_values(log.before_value, log.after_value) or log.target_id.split(":")[0]
+    person = target_map.get((log.func_name, log.target_id))
+    return f"{course} / {person}" if person else course
 
 
 def _display_from_values(before_value: str | None, after_value: str | None) -> str | None:
@@ -319,12 +363,16 @@ class AuditQueryService:
         log, operator_name, operator_email = row
         target_display = None
         if log.target_id:
-            # 活表解析 → 稽核列自身 JSON（對象已硬刪時仍留痕，如取消邀請）→ 原 target_id
-            target_display = (
-                target_map.get((log.func_name, log.target_id))
-                or _display_from_values(log.before_value, log.after_value)
-                or log.target_id
-            )
+            if log.func_name in ET_COURSE_FUNCS:
+                # ET 課程類要**組合**兩個來源，與下面的三層互斥 fallback 不同——見 _compose_et_target
+                target_display = _compose_et_target(log, target_map)
+            else:
+                # 活表解析 → 稽核列自身 JSON（對象已硬刪時仍留痕，如取消邀請）→ 原 target_id
+                target_display = (
+                    target_map.get((log.func_name, log.target_id))
+                    or _display_from_values(log.before_value, log.after_value)
+                    or log.target_id
+                )
         return AuditLogResponse(
             log_id=log.log_id,
             created_date=log.created_date,

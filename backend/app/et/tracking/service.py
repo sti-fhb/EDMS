@@ -59,6 +59,7 @@ from app.et.attempt.repository import EtAttemptRepository
 from app.et.attempt.rules import round_used_attempts
 from app.et.attempt.schemas import RoundBoundary
 from app.et.attempt.service import in_snapshot_order, to_question_result
+from app.et.audit_target import course_audit_payload
 from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
 from app.et.course.models import EtCourse
 from app.et.course.rules import ensure_owner, ensure_owner_or_admin, is_effectively_closed
@@ -319,6 +320,8 @@ class EtTrackingService:
             operator_id=operator.user_id,
             target_id=f"{course.course_id}:{user_id}:{quiz_id}",
             description="重置學員重考次數",
+            # 供 DP05 對象欄顯示課程名（#717）；用已載入的 course，不另查。
+            after_value={"course_name": course.course_name},
         )
         return RetryResetResult(user_id=user_id, quiz_id=quiz_id, used_attempts=0)
 
@@ -350,6 +353,9 @@ class EtTrackingService:
             operator_id=operator.user_id,
             target_id=f"{course_id}:{user_id}",
             description="移除課程學員",
+            # 課程名供 DP05 對象欄顯示（#717）。⛔ 不得加入學員姓名——那是個資，
+            # 而人名由查詢端查 DP_USER 活表取得（見 dp/audit/target_resolver）。
+            after_value=await course_audit_payload(db, course_id) or None,
         )
 
     async def _require_writable(self, db: AsyncSession, course_id: int, actor_id: str):
@@ -545,6 +551,9 @@ class EtTrackingService:
             operator_id=actor_id,
             target_id=str(course_id),
             description=f"匯出{what} CSV（{count} 筆）",
+            # ⭐ 課程名**不是個資**，與上方 docstring 所禁的「姓名 / 答案文字」不同層次：
+            # 它只說明這次匯出的是哪一門課，不洩漏任何人的資料（#717）。
+            after_value=await course_audit_payload(db, course_id) or None,
         )
 
     async def _all_student_rows(self, db: AsyncSession, course: EtCourse) -> list[StudentRow]:

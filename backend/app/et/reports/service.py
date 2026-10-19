@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip
+from app.et.audit_target import course_audit_payload
 from app.et.constants import COMPLETION_COMPLETED, COMPLETION_IN_PROGRESS, COMPLETION_NOT_STARTED
 from app.et.deps import EtContext
 from app.et.enrollment.repository import EtEnrollmentRepository
@@ -100,6 +101,8 @@ class EtReportsService:
             for row in await self._rows(db, course):
                 writer.writerow(row)
                 exported += 1
+        # 全部課程（_TARGET_ALL）不帶 course_name——對象欄會顯示「全部課程」（#717）。
+        course_fields = await course_audit_payload(db, course_id) if course_id is not None else None
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -110,6 +113,7 @@ class EtReportsService:
             target_id=str(course_id) if course_id is not None else _TARGET_ALL,
             description=f"匯出週報逐學員明細（課程 {len(courses)} 門、{exported} 人次）",
             source_ip=get_client_ip(),
+            after_value=course_fields or None,
         )
         return buf.getvalue()
 

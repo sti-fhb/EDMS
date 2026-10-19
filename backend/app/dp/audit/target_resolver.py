@@ -34,6 +34,25 @@ from app.dp.users.models import DpUser
 # 那樣才留得住「操作當時的名稱」；查活表會讓標籤改名後連舊紀錄一起變。
 _USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER", "DM-ROLES", "ET-ROLES"})
 
+# ET 課程類：`target_id` 為課程 ID，或 `{course_id}:{user_id}`（再接 `:{quiz_id}`）之複合鍵。
+# 本集合的解析**只負責人名那一段**（取現值）；課程名稱由稽核列自帶（取當時值），
+# 兩段於 `query_service` 組合——見該檔 `_compose_et_target`。
+#
+# ⛔ 不要把課程名稱也改成在這裡查活表：課程改名後，舊稽核紀錄會跟著變成新名字，
+# 那是竄改歷史（#717 裁示）。
+ET_COURSE_FUNCS = frozenset(
+    {"ET-COURSE", "ET-ENROLLMENT", "ET-EXPORT", "ET-REPORT", "ET-QUIZ-RESET", "ET-APPROVAL"}
+)
+
+
+def et_user_segment(target_id: str) -> str | None:
+    """取 ET 複合鍵的使用者段；非複合鍵（純課程 ID 或 `ALL`）回 `None`。
+
+    `12:u01` → `u01`、`12:u01:7` → `u01`、`12` → `None`。
+    """
+    parts = target_id.split(":")
+    return parts[1] if len(parts) >= 2 and parts[1] else None
+
 # (func_name, target_id) → 顯示名稱
 _DisplayMap = dict[tuple[str, str], str]
 
@@ -50,6 +69,9 @@ async def resolve_target_displays(db: AsyncSession, pairs: Iterable[tuple[str, s
     user_pairs: list[tuple[str, str]] = []
     param_pairs: list[tuple[str, str]] = []
     template_pairs: list[tuple[str, str]] = []
+    # ET 複合鍵：(func_name, 原 target_id, 使用者段)——map 仍以原 target_id 為鍵，
+    # 呼叫端才對得回去；值是**人名那一段**，不是完整顯示字串。
+    et_triples: list[tuple[str, str, str]] = []
     for func_name, target_id in pairs:
         if not target_id:
             continue
@@ -59,12 +81,32 @@ async def resolve_target_displays(db: AsyncSession, pairs: Iterable[tuple[str, s
             param_pairs.append((func_name, target_id))
         elif func_name == "DP-TEMPLATES":
             template_pairs.append((func_name, target_id))
+        elif func_name in ET_COURSE_FUNCS:
+            seg = et_user_segment(target_id)
+            if seg:
+                et_triples.append((func_name, target_id, seg))
 
     result: _DisplayMap = {}
     result.update(await _resolve_users(db, user_pairs))
     result.update(await _resolve_params(db, param_pairs))
     result.update(await _resolve_templates(db, template_pairs))
+    result.update(await _resolve_et_users(db, et_triples))
     return result
+
+
+async def _resolve_et_users(db: AsyncSession, triples: list[tuple[str, str, str]]) -> _DisplayMap:
+    """ET 複合鍵之使用者段 → 姓名（無姓名退 email）；查無者不放入。
+
+    與 `_resolve_users` 的差別只在「查的 ID 不是整個 target_id，而是其中一段」。
+    """
+    if not triples:
+        return {}
+    ids = {seg for _, _, seg in triples}
+    rows = (
+        await db.execute(select(DpUser.user_id, DpUser.user_name, DpUser.email).where(DpUser.user_id.in_(ids)))
+    ).all()
+    name_by_id = {uid: (user_name or email) for uid, user_name, email in rows}
+    return {(func_name, tid): name_by_id[seg] for func_name, tid, seg in triples if seg in name_by_id}
 
 
 async def _resolve_users(db: AsyncSession, pairs: list[tuple[str, str]]) -> _DisplayMap:

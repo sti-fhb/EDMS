@@ -32,6 +32,7 @@ from app.core.utils import utcnow
 from app.et.approval.repository import EtApprovalRepository
 from app.et.approval.rules import ensure_revoke_reason, is_active_approval
 from app.et.approval.schemas import ApprovalRow, ApproveReq, ApproveResult, RevokeReq, SkippedItem
+from app.et.audit_target import course_audit_payload
 from app.et.constants import APPROVAL_PASS
 from app.et.course.models import EtCourse
 from app.et.course.rules import ensure_owner_or_admin, is_effectively_closed
@@ -187,7 +188,13 @@ class EtApprovalService:
                     # `before` 已是 Pydantic 副本（`rows_by_course` 回的是 `ApprovalRow`），
                     # 不會被後續的 ORM update 就地改掉——`revoke()` 踩過那個坑。
                     "before_value": before.model_dump(mode="json") if before is not None else None,
-                    "after_value": {"result": payload.result, "version": after.version if after else None},
+                    # course_name 供 DP05 對象欄顯示課程名（#717）；⛔ 不帶學員姓名（個資），
+                    # 人名由查詢端查 DP_USER 活表。course 於本方法開頭已載入，不另查。
+                    "after_value": {
+                        "result": payload.result,
+                        "version": after.version if after else None,
+                        "course_name": course.course_name,
+                    },
                 }
             )
             approved += 1
@@ -280,7 +287,12 @@ class EtApprovalService:
             # 由 target_id 對得回來。
             description="撤銷線下核可",
             before_value=before.model_dump(mode="json"),
-            after_value={"is_revoked": True, "version": after.version if after else None},
+            # course_name 供 DP05 對象欄顯示課程名（#717）；⛔ 不帶學員姓名（個資）。
+            after_value={
+                "is_revoked": True,
+                "version": after.version if after else None,
+                **await course_audit_payload(db, course_id),
+            },
             source_ip=get_client_ip(),
         )
 

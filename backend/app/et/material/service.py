@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.audit_target import course_audit_payload
 from app.et.common.dm_client import TRAINING_CATEGORY, get_dm_document_client
 from app.et.common.html_sanitize import sanitize_material_html
 from app.et.common.optimistic_lock import ensure_version_matched
@@ -614,6 +615,8 @@ class EtMaterialService:
         )
 
     async def _log(self, db: AsyncSession, action: str, operator_id: str, course_id: int, description: str) -> None:
+        # after_value 只帶 course_name：供 DP05 對象欄顯示課程名而非 ID（#717）。
+        # 取**當下**值存進稽核列，課程日後改名不改寫歷史；⛔ 不得加入學員姓名（個資）。
         await self._audit.log_action(
             db,
             module=_MODULE,
@@ -623,4 +626,5 @@ class EtMaterialService:
             operator_id=operator_id,
             target_id=str(course_id),
             description=description,
+            after_value=await course_audit_payload(db, course_id) or None,
         )
