@@ -1,6 +1,6 @@
 import { ThemeProvider } from "@mui/material/styles"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http as msw, HttpResponse } from "msw"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -27,6 +27,8 @@ import { muiTheme } from "../styles/muiTheme"
 const EXPIRES_IN_SEC = 900
 /** `AuthProvider` 的到期檢查間隔（毫秒）；推進時間要蓋過它才看得到登出。 */
 const EXPIRY_CHECK_MS = 15 * 1000
+/** `AuthProvider` 的換發計時器間隔（毫秒）；最後一次操作在這個窗內才會換發。 */
+const RENEW_INTERVAL_MS = 4 * 60 * 1000
 
 function Harness() {
   const { isAuthenticated, sessionEndedReason } = useAuth()
@@ -94,6 +96,47 @@ describe("AuthProvider 自動登出", () => {
     expect(screen.getByTestId("status")).toHaveTextContent("anon")
     expect(screen.getByTestId("reason")).toHaveTextContent("IDLE")
     expect(screen.getByText("閒置逾時已自動登出，請重新登入")).toBeInTheDocument()
+  })
+
+  it("有操作者換發後到期時點跟著延後，且延後是有限的", async () => {
+    // AC2「有持續操作者不受影響：換發照常，不會被誤登出」。
+    //
+    // 🔴 **這條必須有兩段，缺一就抓不到一半的失敗**：
+    //   (a) 換發後**沒更新**到期時點 → 活躍使用者在原到期時點被踢（第 1 段抓）
+    //   (b) 換發傳 `undefined`（`applyToken(res.access_token)` 漏第二個參數）
+    //       → `expiresAt` 變 null → **永遠不登出**（第 2 段抓）
+    //
+    // ⚠️ (b) 的外觀**也是「仍在登入中」**，所以只寫第 1 段的話它對 (b) 恆真——
+    // 而 (b) 正好讓整個 #741 修的東西（「永遠不登出」）原樣回來。
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] })
+    renderAuth()
+    await login()
+    const loginAt = Date.now()
+
+    // 在換發窗內製造一次操作，讓下一個換發 tick 會成立。
+    await act(async () => {
+      vi.advanceTimersByTime(100 * 1000)
+    })
+    fireEvent.mouseDown(document.body)
+
+    // 推進到換發 tick（距最後操作 140 秒 < 4 分鐘 ⇒ 換發成立）。
+    await act(async () => {
+      vi.advanceTimersByTime(RENEW_INTERVAL_MS - 100 * 1000)
+    })
+    const renewedAt = Date.now()
+
+    // 第 1 段：越過**原**到期時點，仍應在登入中（換發把它延後了）。
+    await act(async () => {
+      vi.advanceTimersByTime(loginAt + EXPIRES_IN_SEC * 1000 + EXPIRY_CHECK_MS - Date.now())
+    })
+    expect(screen.getByTestId("status")).toHaveTextContent("authed")
+
+    // 第 2 段：此後不再操作，越過**換發後**的到期時點 ⇒ 必須登出。
+    await act(async () => {
+      vi.advanceTimersByTime(renewedAt + EXPIRES_IN_SEC * 1000 + EXPIRY_CHECK_MS - Date.now())
+    })
+    expect(screen.getByTestId("status")).toHaveTextContent("anon")
+    expect(screen.getByTestId("reason")).toHaveTextContent("IDLE")
   })
 
   it("使用中被管理者停用（403 DP_AUTH_004）→ 下一次請求即回登入畫面並提示已停用", async () => {
