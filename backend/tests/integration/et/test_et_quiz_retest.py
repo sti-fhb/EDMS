@@ -1,12 +1,12 @@
-"""測驗變更後要求已通過學員重測（US3 / US6 / #361）。
+"""測驗變更後要求學員重測（US3 / US6 / #361；#709 起不限已通過者）。
 
 此處只驗**需要真 DB 才驗得了**的事：批次同時寫多張表（重置基準、進度）、
-「不刪 attempt」這條只有真資料才驗得到的保證、以及未通過者不受影響。
+「不刪 attempt」這條只有真資料才驗得到的保證、以及對象的範圍（作答過的在籍學員）。
 
 ## 為什麼這條路徑不能重用 `reset_retry`
 
 `tracking/rules.can_reset_retry` 在 `is_passed=True` 時回 `False`（理由：「他已經通過了；
-再考只有機會把成績弄低」）——而本功能的對象**正是已通過的學員**，兩者前提相反。
+再考只有機會把成績弄低」）——而本功能的對象**包含已通過的學員**，兩者前提相反。
 ⛔ 不可為了重用而放寬那個守門，它保護的是教師手動重置（US9 AC 6）。
 """
 
@@ -270,10 +270,12 @@ async def _facts(db, *, uid: str, quiz_id: int, item_id: int) -> tuple[int, int,
     return attempts, resets, bool(done)
 
 
-class TestPassedCount:
+class TestAffectedCount:
     """確認框要寫出受影響人數，否則教師無從判斷該選是或否。"""
 
-    async def test_測驗詳細帶出已通過人數(self, client, db):
+    async def test_測驗詳細帶出受影響人數(self, client, db):
+        # #709：對象是「作答過」的在籍學員，不限已通過；從未作答者本來就是滿額次數、
+        # 也沒有舊成績，不計入。
         teacher = await _user(db, "ZTT010")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
         await _passed_student(db, uid="ZTS010", course_id=cid, item_id=item_id, quiz_id=qid)
@@ -281,11 +283,13 @@ class TestPassedCount:
         failed = await _user(db, "ZTS012", roles=(ROLE_STUDENT,))
         await _enroll(db, failed, cid)
         await _attempt(db, user_id=failed, course_id=cid, quiz_id=qid, no=1, score=30, is_pass=False)
+        never = await _user(db, "ZTS014", roles=(ROLE_STUDENT,))
+        await _enroll(db, never, cid)
         await db.commit()
 
         r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
         assert r.status_code == 200, r.text
-        assert r.json()["passed_count"] == 2, "只算曾及格者，未通過的不計入"
+        assert r.json()["affected_count"] == 3, "已通過 2 位＋未通過 1 位；從未作答者不計入"
 
     async def test_非擁有者看不到人數(self, client, db):
         # 比照同一回應既有的答案遮蔽：非擁有者可讀題目，但看不到這門課的學員統計。
@@ -297,7 +301,7 @@ class TestPassedCount:
 
         r = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(other))
         assert r.status_code == 200, r.text
-        assert r.json()["passed_count"] is None, "非擁有者應拿到 None 而非 0——0 是錯誤資訊"
+        assert r.json()["affected_count"] is None, "非擁有者應拿到 None 而非 0——0 是錯誤資訊"
 
 
 class TestRetestPendingVisibility:
@@ -446,6 +450,9 @@ class TestRequireRetestOnQuizChange:
         for mail in mails:
             uid = mail.recipient.split("@")[0]
             assert f"測試{uid}" in mail.body, f"寄給 {mail.recipient} 的信內文必須是他自己的姓名"
+            # #709：收件人不限已通過者，內文不得再寫「要求已通過的學員」（migration d5a7e3c91f48）
+            assert "教師要求重新測驗" in mail.body
+            assert "已通過的學員" not in mail.body
 
     async def test_新增題目也能要求重測(self, client, db):
         teacher = await _user(db, "ZTT006")
@@ -543,9 +550,9 @@ class TestRequireRetestOnQuizChange:
         assert (resets, done) == (0, True), "排序不是內容變更，不該把全班的通過紀錄清掉"
 
     async def test_重複儲存不會重複重置也不會重複寄信(self, client, db):
-        # 🔴 這條釘住「目前算通過」這個語意（`ATTEMPT_NO > MAX(ATTEMPT_COUNT_AT_RESET)`）。
+        # 🔴 這條釘住「最近一次要求重測之後有作答」這個語意（#709 前為「目前算通過」）。
         #
-        # 若改回單純的「曾及格」（`bool_or(IS_PASS)`），該值重置後不會下降：確認框會
+        # 若改成單純的「曾作答」／「曾及格」，該值重置後不會下降：確認框會
         # 一直跳、教師每按一次就再寄 N 封信、再寫 N 列 append-only 的重置基準。
         # 「手滑連按三次 → 全班收三封」很容易發生。
         teacher = await _user(db, "ZTT030")
@@ -563,7 +570,7 @@ class TestRequireRetestOnQuizChange:
             await _apply(db, cid, teacher)
 
         _, resets, done = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
-        assert resets == 1, "第二次儲存時該學員已不算通過，不應再寫一列基準"
+        assert resets == 1, "第二次儲存時該學員在重測後尚未作答，不應再寫一列基準"
         assert done is False
         pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
         assert pending == 1, "第二次儲存不應再寄一封——他已經被要求重測了"
@@ -609,8 +616,9 @@ class TestRequireRetestOnQuizChange:
         facts = await _facts(db, uid=stu, quiz_id=qid, item_id=item_id)
         assert facts == (1, 0, True), "被擋下時學員狀態必須完全沒動"
 
-    async def test_未通過的學員不受影響(self, client, db):
-        # 未通過者本來就還要重考，寫基準等於白送一輪配額——而畫面上看不出哪裡不對。
+    async def test_未通過的學員也被要求重測(self, client, db):
+        # #709 SA 裁示（推翻 #361 只限已通過者）：要求重測是舊題目有問題、責任在出題方，
+        # 未通過者的次數可能已被錯題耗掉——所有作答過的人都拿到同樣的新一輪與通知。
         teacher = await _user(db, "ZTT004")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
         failed = await _user(db, "ZTS004", roles=(ROLE_STUDENT,))
@@ -623,7 +631,28 @@ class TestRequireRetestOnQuizChange:
         await _save_and_apply(client, db, teacher, cid, r)
 
         attempts, resets, _ = await _facts(db, uid=failed, quiz_id=qid, item_id=item_id)
-        assert (attempts, resets) == (1, 0), "未通過者不應被寫入重置基準"
+        assert (attempts, resets) == (1, 1), "未通過者也要寫入重測起點（次數歸零）"
+        pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
+        assert pending == 1, "未通過者也要收到通知信"
+
+    async def test_從未作答的學員不受影響(self, client, db):
+        # 本來就是滿額次數、也沒有舊成績——寫起點與寄信都沒有意義。
+        teacher = await _user(db, "ZTT009")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS015", course_id=cid, item_id=item_id, quiz_id=qid)
+        never = await _user(db, "ZTS016", roles=(ROLE_STUDENT,))
+        await _enroll(db, never, cid)
+        await db.commit()
+
+        body = await _settings_body(db, qid, pass_score=85, require_retest=True)
+        r = await client.put(f"/api/et/quizzes/{qid}", json=body, headers=_bearer(teacher))
+        await _save_and_apply(client, db, teacher, cid, r)
+
+        # 正向錨點：同一次儲存確實有對作答過的人生效，上面的 0 才有意義
+        assert (await _facts(db, uid="ZTS015", quiz_id=qid, item_id=item_id))[1] == 1
+        assert (await _facts(db, uid=never, quiz_id=qid, item_id=item_id))[1] == 0, "從未作答者不應寫入起點"
+        pending = await db.scalar(select(func.count()).select_from(DpEmailLog).where(DpEmailLog.status == "PENDING"))
+        assert pending == 1, "只寄給作答過的那位"
 
 
 class TestPassedDefinitionAfterRetest:
@@ -632,9 +661,8 @@ class TestPassedDefinitionAfterRetest:
     ## 這不是放寬 `can_reset_retry`
 
     該規則的運算式未變（`has_attempt and not is_passed and used > max_retry`），
-    改的是呼叫端算出來的 `is_passed`——它原本數「所有輪次是否曾及格」，現在對齊
-    `quiz/repository.passed_student_attempt_counts` 已有的定義：
-    **在最近一次重置基準之後**是否仍有及格紀錄。
+    改的是呼叫端算出來的 `is_passed`——它原本數「所有輪次是否曾及格」，現在改為
+    **在最近一次重置基準之後**是否仍有及格紀錄（`tracking/repository` 的 `#610` 段）。
 
     ⛔ 教師仍不可對「目前算通過」的學員按重置（見 `test_未經重置的及格者仍不可重置`
     與 `test_重測又通過後恢復為不可重置` 兩條正向錨點）。
@@ -757,8 +785,8 @@ class TestPassedDefinitionAfterRetest:
         `attempt/repository.score_summary` 的第三個回傳值（其 docstring 自己寫著
         「是否**曾**及格」）。
 
-        ⛔ 分數（`last` / `best`）維持取**所有輪次**——「重測後最高分要不要只算新一輪」
-        是規格疑義、另請 SA，不在本 issue 範圍。
+        📌 #709（2026-10-18 裁示）起最高分只計重測後一輪，重測後尚未重考時 `best_score`
+        為 `None`（見 `test_et_attempt_rounds.py`）；本條只守「不再顯示已及格」。
         """
         teacher = await _user(db, "ZTT610E")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
@@ -773,5 +801,5 @@ class TestPassedDefinitionAfterRetest:
         assert r.status_code == 200, r.text
         payload = r.json()
         assert payload["is_passed"] is False, "要求重測後不得再顯示已及格"
-        # 正向錨點：分數本身仍在（本 issue 不動分數聚合）
-        assert payload["best_score"] is not None
+        # 正向錨點：最近一次成績仍照實顯示（證明確實讀到了舊輪的作答）
+        assert payload["last_score"] is not None

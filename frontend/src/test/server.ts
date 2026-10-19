@@ -1444,6 +1444,7 @@ export const handlers = [
               used_attempts: 2,
               is_passed: false,
               can_reset: true,
+              resets: [],
               attempts: [
                 {
                   attempt_id: 11,
@@ -1470,6 +1471,7 @@ export const handlers = [
               used_attempts: 0,
               is_passed: false,
               can_reset: false,
+              resets: [],
               // 空陣列＝尚未作答；該測驗仍要列出（ET-MSG-ET02-005）
               attempts: [],
             },
@@ -1915,6 +1917,8 @@ export const handlers = [
       in_progress_attempt_id: null,
       last_attempt_id: null,
       course_closed: false,
+      is_preview: false,
+      resets: [],
     }),
   ),
   http.post("/api/et/quizzes/:quizId/attempts", ({ params }) =>

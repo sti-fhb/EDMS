@@ -69,8 +69,21 @@ class EtAttemptRepository:
             or 0
         )
 
+    async def list_resets(self, db: AsyncSession, *, user_id: str, quiz_id: int) -> list[EtQuizRetryReset]:
+        """該學員於該測驗的全部重置紀錄，依起點與寫入順序遞增（#709 輪次分界）。
+
+        以 `(USER_ID, QUIZ_ID)` 過濾，與 `reset_base` 同口徑。
+        """
+        return list(
+            await db.scalars(
+                select(EtQuizRetryReset)
+                .where(EtQuizRetryReset.user_id == user_id, EtQuizRetryReset.quiz_id == quiz_id)
+                .order_by(EtQuizRetryReset.attempt_count_at_reset, EtQuizRetryReset.reset_id)
+            )
+        )
+
     async def score_summary(
-        self, db: AsyncSession, *, user_id: str, quiz_id: int, reset_base: int
+        self, db: AsyncSession, *, user_id: str, quiz_id: int, reset_base: int, retest_base: int = 0
     ) -> tuple[Decimal | None, Decimal | None, bool]:
         """`(最近一次分數, 最高分, 是否**目前**算通過)`——引導頁用。
 
@@ -82,8 +95,12 @@ class EtAttemptRepository:
         教師要求重測後，舊的及格不再算數——否則引導頁的綠色橫幅會顯示「— 已及格」，
         而同一畫面上該項目標示未完成、後面章節鎖著，兩者互相矛盾。
 
-        ⛔ **分數仍取所有輪次**（`last` / `best` 不受 `reset_base` 影響）。「重測後最高分
-        要不要只算新一輪」是規格疑義，#610 明列為不在範圍、另請 SA。
+        ## 最高分只計最近一次「要求重測」之後（#709，2026-10-18 使用者裁示）
+
+        測驗內容已改，舊版的成績不再代表結業成績——`best` 只取 `ATTEMPT_NO > retest_base`；
+        重測後尚未作答則為 `None`。`last` 仍是**最近一次**（不論輪次），照實顯示。
+        ⚠️ `retest_base` 只由 `RETEST` 移動：`RETRY`（重置重考次數）與舊列（原因未知）
+        不影響最高分，見 `rules.retest_base`。
 
         ## 分數為換算後的百分制（#642）
 
@@ -93,6 +110,7 @@ class EtAttemptRepository:
 
         Args:
             reset_base: 最近一次重置基準（`reset_base` 方法的輸出）；無重置紀錄為 0。
+            retest_base: 最近一次「要求重測」的起點（`rules.retest_base`）；無則 0。
         """
         rows = (
             await db.execute(
@@ -111,8 +129,10 @@ class EtAttemptRepository:
             return None, None, False
         points = await self.points_total_by_attempt(db, [r.attempt_id for r in rows])
         scores = [to_percent(r.score, points.get(r.attempt_id, 0)) for r in rows]
-        # 分數取全部輪次、及格旗標只看基準之後——兩者刻意不同，見 docstring。
-        return scores[-1], max(scores), any(r.is_pass for r in rows if r.attempt_no > reset_base)
+        # 最高分只看重測起點之後、及格旗標只看任一重置起點之後——兩者口徑刻意不同，見 docstring。
+        current = [score for row, score in zip(rows, scores, strict=True) if row.attempt_no > retest_base]
+        best = max(current) if current else None
+        return scores[-1], best, any(r.is_pass for r in rows if r.attempt_no > reset_base)
 
     # ── Attempt 生命週期 ────────────────────────────────────────────────────
 

@@ -16,6 +16,7 @@ from typing import Optional
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Identity,
@@ -210,6 +211,10 @@ class EtQuizRetryReset(AuditLogBaseModel):
     __table_args__ = (
         PrimaryKeyConstraint("RESET_ID", name="PK_ET_QUIZ_RETRY_RESET"),
         Index("IX_ET_RETRY_RESET_USER_QUIZ", "USER_ID", "QUIZ_ID"),
+        CheckConstraint(
+            "\"RESET_KIND\" IS NULL OR \"RESET_KIND\" IN ('RETEST', 'RETRY')",
+            name="CK_ET_QUIZ_RETRY_RESET_KIND",
+        ),
     )
 
     reset_id: Mapped[int] = mapped_column("RESET_ID", BigInteger, Identity(), nullable=False)
@@ -223,3 +228,6 @@ class EtQuizRetryReset(AuditLogBaseModel):
     attempt_count_at_reset: Mapped[int] = mapped_column("ATTEMPT_COUNT_AT_RESET", Integer, nullable=False)
     executed_by: Mapped[str] = mapped_column("EXECUTED_BY", String(20), nullable=False)
     executed_at: Mapped[datetime] = mapped_column("EXECUTED_AT", DateTime(timezone=True), nullable=False)
+    #: 重置種類（#709）：`RETEST`（要求重測）／`RETRY`（重置重考次數）；#709 之前的舊列為 `NULL`。
+    #: 決定分段文字與最高分口徑——見 `constants.RESET_KIND_*`。
+    reset_kind: Mapped[Optional[str]] = mapped_column("RESET_KIND", String(10), nullable=True)

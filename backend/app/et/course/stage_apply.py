@@ -160,7 +160,7 @@ async def apply_stage(
 async def _require_retest_for_flagged(
     db: AsyncSession, *, course: EtCourse, nodes: Sequence[StageNode], live_id_by_stage: dict[int, int], operator
 ) -> None:
-    """把編輯期間勾選的「要求已通過學員重測」在**此刻**執行（#361 × #631）。
+    """把編輯期間勾選的「要求重測」在**此刻**執行（#361 × #631）。
 
     教師在編輯中勾選時只是**記下意圖**（`RETEST_PAYLOAD_KEY` 寄在 QUIZ 暫存節點上），
     真正把學員退回未通過延到這裡——2026-10-17 使用者裁示。
@@ -177,7 +177,7 @@ async def _require_retest_for_flagged(
 
     （2026-10-18 security review H-2，刻意不在本 PR 修。）
 
-    一次「更新」可能同時觸發 M 個測驗的重測，每個再對 N 位已通過的學員寫入重置基準、
+    一次「更新」可能同時觸發 M 個測驗的重測，每個再對 N 位作答過的學員（#709 起不限已通過）寫入重置基準、
     清完成旗標、排一封信 ⇒ **N × M 列寫入**全部落在按下「更新」的那一個請求裡。
 
     今天的母體擋得住：教師改測驗要逐支勾選，而一門課的在籍學員是以班為單位。但這裡

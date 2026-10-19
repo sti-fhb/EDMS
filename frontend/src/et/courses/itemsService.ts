@@ -115,7 +115,7 @@ export const quizzesApi = {
       time_limit_min: number | null
       max_retry: number
       version: number
-      /** 是否要求已通過的學員重新測驗（#361）。 */
+      /** 是否要求學員重新測驗（#361；#709 起不限已通過者）。 */
       require_retest: boolean
     },
   ): Promise<void> => {

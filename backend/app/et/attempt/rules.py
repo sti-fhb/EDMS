@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple
 
-from app.et.constants import QUESTION_MULTIPLE
+from app.et.constants import QUESTION_MULTIPLE, RESET_KIND_RETEST
 
 #: `ET_QUIZ_ATTEMPT_D.SCORE` 為 `DECIMAL(5,2)`。
 _CENTS = Decimal("0.01")
@@ -134,6 +134,20 @@ def to_percent(score: Decimal, points_total: int) -> Decimal:
     if points_total <= 0:
         return Decimal(0)
     return (score * 100 / points_total).quantize(_CENTS, rounding=ROUND_HALF_UP)
+
+
+def retest_base(resets: Sequence[tuple[int, str | None]]) -> int:
+    """最近一次「要求重測」的起點；沒有則 0（#709）。
+
+    最高分（結業成績）只計此起點**之後**的作答：測驗內容已改，舊版的成績不再代表結業成績。
+    ⚠️ 與 `reset_base`（任何重置的最大起點，管**次數**）不同——`RETRY`（重置重考次數，
+    同一份測驗多給機會）與 `None`（#709 之前的舊列，原因未知）**不移動**本起點，成績照算
+    所有輪次，故既有資料的成績不變。
+
+    Args:
+        resets: `[(ATTEMPT_COUNT_AT_RESET, RESET_KIND), ...]`。
+    """
+    return max((after for after, kind in resets if kind == RESET_KIND_RETEST), default=0)
 
 
 def round_used_attempts(*, total: int, reset_base: int) -> int:

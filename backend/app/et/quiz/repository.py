@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.constants import RESET_KIND_RETEST
 from app.et.course.models import EtChapter, EtItem
 from app.et.progress.models import EtEnrollment
 from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptD, EtQuizAttemptM, EtQuizRetryReset
@@ -345,44 +346,58 @@ class EtQuizRepository:
             .limit(1)
         )
 
-    async def passed_student_attempt_counts(
+    async def retest_target_attempt_counts(
         self, db: AsyncSession, quiz_id: int, *, course_id: int
     ) -> list[tuple[str, int]]:
-        """該測驗於**指定課程**內**目前算通過**之學員，及其 attempt 總數。
+        """「要求重測」的對象：該測驗於**指定課程**內，**最近一次要求重測之後有作答**的學員，
+        及其 attempt 總數（#709，原 #361 只限已通過者）。
 
-        `attempt_count` 供 `add_retry_reset` 當新基準用——記重置當下的總數，之後
+        `attempt_count` 供 `add_retry_resets` 當新起點用——記重置當下的總數，之後
         `round_used_attempts(total, base)` 算出的本輪已用次數即從 0 起算。
 
-        ## 🔴 是「目前算通過」，不是「曾及格」
+        ## 🔴 為何不只限已通過者（#709 SA 裁示）
 
-        判定條件是「**在最近一次重置基準之後**仍有及格紀錄」，即
-        `IS_PASS AND ATTEMPT_NO > MAX(ATTEMPT_COUNT_AT_RESET)`。
+        要求重測的情境是**舊題目有問題**（出題疏失、內容大改），責任在出題方。未通過的
+        學員反而更吃虧：次數可能已被錯題耗掉、舊版成績也不公平。故所有作答過的人都拿到
+        同樣的新一輪——次數歸零、最高分只計新版、各收一封通知。
 
-        ⚠️ 用「曾及格」（單純 `bool_or(IS_PASS)`）會讓這個值**重置後不會下降**，後果是：
-        確認框永遠會跳（即使剛剛才重置過）、教師每按一次就再寄 N 封信、再寫 N 列
-        `ET_QUIZ_RETRY_RESET`（append-only 只增不減）。「手滑連按三次 → 全班收三封」
-        很容易發生。改用本定義後，重置完該學員自然不在名單內，重複儲存不會重寄。
+        ## 🔴 起點只看 `RETEST`，不看 `RETRY`
 
-        `ATTEMPT_NO > base` 之所以等於「在基準之後」：`attempt_no = total + 1`
+        判定條件是 `ATTEMPT_NO > MAX(ATTEMPT_COUNT_AT_RESET WHERE RESET_KIND='RETEST')`。
+
+        ⚠️ 若改看任一種重置（含 ET02「重置重考次數」），一位「被重置重考次數、之後還沒
+        再考」的學員會被排除——他的舊版成績就繼續算進最高分，正是本功能要排除的東西。
+
+        ⚠️ 也**不能**改成「曾作答」：那會讓這個值重置後不會下降，確認框永遠會跳、教師每按
+        一次就再寄 N 封信、再寫 N 列 append-only 的起點。「手滑連按三次 → 全班收三封」很容易
+        發生。用本定義，重測完該學員的作答都在起點之前，自然不在名單內。
+
+        📌 已知代價：#709 之前（#361 上線期間）寫的重測列 `RESET_KIND` 為 NULL，不被當成
+        起點——那段期間被要求重測、之後沒再考的人，下次要求重測時會**再被納入、多收一封信**
+        （起點與次數不會有實質改變，新起點等於原起點）。⛔ 不改成「NULL 也算 RETEST」：
+        NULL 也可能是 ET02 的重置重考次數，算進來會漏掉上一段那位學員，比多一封信更糟。
+
+        📌 作答中（尚未提交）的 attempt 也算「有作答」：那張考卷是舊版題目，被要求重測後
+        它落在起點之前、不計入最高分，學員要以新版重考——與已提交者一致。計數含它也是
+        必要的，起點要等於 `attempt_total`（`attempt_no = total + 1`）。
+
+        `ATTEMPT_NO > base` 之所以等於「在起點之後」：`attempt_no = total + 1`
         （`attempt/service.py`）且 attempt **永不刪除**，故序號連續無跳號、序號即位置。
 
-        ⚠️ 及格與否用 `IS_PASS` 而非比對分數與當前 `PASS_SCORE`：及格在提交當下就以
-        `PASS_SCORE_SNAPSHOT` 判定並寫入。拿當前及格分數回頭重算，會讓「教師調高及格
-        分數」這個動作本身改變誰算通過過——而那正是本功能要處理的變更。
-
-        ⛔ **排除已被移出課程者**（`ET_ENROLLMENT.IS_REMOVED`）。
+        ⛔ **排除已被移出課程者**（`ET_ENROLLMENT.IS_REMOVED`）；從未作答者本來就是滿額
+        次數、也沒有舊成績，不在名單內。
 
         Returns:
             `[(user_id, attempt_count), ...]`，依 `user_id` 排序使結果可預期。
         """
-        # 每位學員的重置基準（無紀錄者為 NULL → 下方 coalesce 為 0）。
-        # 語意與 `tracking/repository.reset_base_of` 相同，只是一次取整批。
+        # 每位學員最近一次「要求重測」的起點（無紀錄者為 NULL → 下方 coalesce 為 0）。
+        # 口徑同 `attempt/rules.retest_base`，只是一次取整批。
         bases = (
             select(
                 EtQuizRetryReset.user_id.label("user_id"),
                 func.max(EtQuizRetryReset.attempt_count_at_reset).label("base"),
             )
-            .where(EtQuizRetryReset.quiz_id == quiz_id)
+            .where(EtQuizRetryReset.quiz_id == quiz_id, EtQuizRetryReset.reset_kind == RESET_KIND_RETEST)
             .group_by(EtQuizRetryReset.user_id)
             .subquery()
         )
@@ -409,7 +424,7 @@ class EtQuizRepository:
             # `base_col` 每位學員恆為單一值，放進 GROUP BY 不改變分組，只是讓它能
             # 出現在 HAVING 裡（Postgres 不允許 HAVING 直接引用未分組的欄位）。
             .group_by(EtQuizAttemptM.user_id, base_col)
-            .having(func.bool_or(EtQuizAttemptM.is_pass & (EtQuizAttemptM.attempt_no > base_col)))
+            .having(func.bool_or(EtQuizAttemptM.attempt_no > base_col))
             .order_by(EtQuizAttemptM.user_id)
         )
         return [(uid, cnt) for uid, cnt in rows.all()]

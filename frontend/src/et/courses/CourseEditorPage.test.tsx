@@ -906,12 +906,12 @@ describe("ET05 課程編輯頁", () => {
   }, 15000)
 
   /**
-   * #361 的接線：測驗內容有變更、且有人通過過時，儲存前先問教師是否要求重測。
+   * #361 的接線：測驗內容有變更、且有人作答過時（#709 起不限已通過），儲存前先問教師是否要求重測。
    *
    * ⚠️ 元件本身的行為（三顆鈕、ESC、文案）在 `RequireRetestDialog.test.tsx`；
    * 這裡測的是**接線**——何時跳窗、決定之後 API 實際收到什麼。
    */
-  async function openQuizDialog(passedCount: number | null) {
+  async function openQuizDialog(affectedCount: number | null) {
     server.use(
       http.post("/api/et/chapters/:chapterId/items", () =>
         HttpResponse.json(
@@ -931,7 +931,7 @@ describe("ET05 課程編輯頁", () => {
           questions: [],
           points_total: 0,
           answers_visible: true,
-          passed_count: passedCount,
+          affected_count: affectedCount,
         }),
       ),
     )
@@ -943,7 +943,7 @@ describe("ET05 課程編輯頁", () => {
     await screen.findByRole("dialog")
   }
 
-  it("已有人通過時，儲存測驗設定會先問是否要求重測（而不是直接送出）", async () => {
+  it("已有人作答時，儲存測驗設定會先問是否要求重測（而不是直接送出）", async () => {
     const user = userEvent.setup()
     const sent: { body?: { require_retest: boolean } } = {}
     await openQuizDialog(3)
@@ -956,7 +956,7 @@ describe("ET05 課程編輯頁", () => {
 
     await user.click(await screen.findByRole("button", { name: "儲存" }))
 
-    expect(await screen.findByText("是否要求已通過的學員重新測驗？")).toBeInTheDocument()
+    expect(await screen.findByText("是否要求學員重新測驗？")).toBeInTheDocument()
     // 🔴 尚未決定之前不可送出——否則教師還沒選，學員狀態就已經變了。
     expect(sent.body).toBeUndefined()
   })
@@ -978,7 +978,7 @@ describe("ET05 課程編輯頁", () => {
     await waitFor(() => expect(sent.body?.require_retest).toBe(true))
   })
 
-  it("沒有人通過過時不跳窗，直接送出 require_retest: false", async () => {
+  it("沒有人作答過時不跳窗，直接送出 require_retest: false", async () => {
     // 新建測驗的常態。多一個對話框只是噪音。
     const user = userEvent.setup()
     const sent: { body?: { require_retest: boolean } } = {}
@@ -993,7 +993,7 @@ describe("ET05 課程編輯頁", () => {
     await user.click(await screen.findByRole("button", { name: "儲存" }))
 
     await waitFor(() => expect(sent.body?.require_retest).toBe(false))
-    expect(screen.queryByText("是否要求已通過的學員重新測驗？")).not.toBeInTheDocument()
+    expect(screen.queryByText("是否要求學員重新測驗？")).not.toBeInTheDocument()
   })
 
   it("帶 pendingAddItem 進編輯頁時自動建立該項目並開啟視窗（#335 的後半）", async () => {
@@ -2200,7 +2200,7 @@ describe("ET05 發布缺漏：視窗 → 紅框（#558）", () => {
           version: 0,
           points_total: 40,
           answers_visible: true,
-          passed_count: 0,
+          affected_count: 0,
           questions: [
             { question_id: 91, question_type: "SINGLE", stem: "第一題", points: 40, sort_order: 1, version: 0, options: [] },
           ],

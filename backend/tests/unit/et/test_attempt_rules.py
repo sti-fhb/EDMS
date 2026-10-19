@@ -27,6 +27,7 @@ from app.et.attempt.rules import (
     is_timed_out,
     remaining_attempts,
     remaining_seconds,
+    retest_base,
     round_used_attempts,
     score_question,
     shuffled,
@@ -287,3 +288,18 @@ class TestToPercent:
         graded = grade_details(answers, pass_score=Decimal("80"))
         assert graded.is_pass is True
         assert to_percent(graded.total, graded.points_total) >= Decimal("80")
+
+
+class TestRetestBase:
+    """最高分口徑的起點（#709）：只有「要求重測」移動它。"""
+
+    def test_無重置為0(self) -> None:
+        assert retest_base([]) == 0
+
+    def test_取最近一次要求重測的起點(self) -> None:
+        assert retest_base([(1, "RETEST"), (4, "RETEST")]) == 4
+
+    def test_重置重考次數與舊資料不移動起點(self) -> None:
+        """RETRY 是同一份測驗多給機會、NULL 是原因未知——兩者都不得改變既有成績。"""
+        assert retest_base([(1, "RETEST"), (3, "RETRY"), (5, None)]) == 1
+        assert retest_base([(3, "RETRY"), (5, None)]) == 0

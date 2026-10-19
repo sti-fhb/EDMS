@@ -122,3 +122,12 @@ LOOKUP_SETS: Final[dict[str, frozenset[str]]] = {
     "ET_COMPLETION_STATUS": ALL_COMPLETION_STATUSES,
     "ET_APPROVAL_RESULT": ALL_APPROVAL_RESULTS,
 }
+
+# ── 重考次數重置之種類（`ET_QUIZ_RETRY_RESET.RESET_KIND`，#709）────────────────────
+#
+# 兩者都是「新一輪的起點」，但對學員的意義不同，故分段文字與最高分口徑不同：
+# - `RETEST`：教師改了測驗並要求學員重測（#361）——舊輪成績不再代表結業成績
+# - `RETRY`：教師在 ET02 重置重考次數——同一份測驗多給機會，舊輪成績照算
+# 舊列（#709 之前）為 `NULL`＝原因未知，比照 `RETRY`（不改變既有成績）。
+RESET_KIND_RETEST: Final = "RETEST"
+RESET_KIND_RETRY: Final = "RETRY"
