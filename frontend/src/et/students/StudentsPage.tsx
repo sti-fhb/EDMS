@@ -38,12 +38,34 @@ type Pending =
    */
   | { kind: "revokeApproval"; student: StudentRow }
 
-/** 四種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。 */
+/**
+ * 四種確認框的標題。集中於此，新增動作時不會漏掉標題而沿用上一個。
+ *
+ * ⚠️ `revokeApproval` 另由 `dialogTitle()` 依判定結果覆寫（#729）。本表仍保留它的預設值，
+ * 是為了上面那句話繼續成立——新增動作的人在這裡看得到**所有** kind。
+ */
 const DIALOG_TITLE: Record<Pending["kind"], string> = {
   reset: "重置重考次數",
   remove: "移除學員",
   approve: "線下核可",
   revokeApproval: "撤銷核可",
+}
+
+/**
+ * 確認框標題；撤銷依**當初的判定**分流（#729）。
+ *
+ * 本畫面的批次鈕是「批次核可通過」與「批次不通過」**並列**，「核可」因而被讀成通過那一側。
+ * 對一位判定為不通過的學員說「撤銷核可」，讀起來像在撤銷一個不存在的通過。
+ *
+ * ⚠️ 取的是 `approval_status`（`"PASSED"` / `"FAILED"`），**不是** `ApprovalResult`
+ * （`"PASS"` / `"FAIL"`，那是送出用的）。兩組值域相似但不同。
+ */
+function dialogTitle(pending: Pending | null): string {
+  if (pending === null) return ""
+  if (pending.kind === "revokeApproval" && pending.student.approval_status === "FAILED") {
+    return "撤銷不核可"
+  }
+  return DIALOG_TITLE[pending.kind]
 }
 
 /** 三種跳過理由對應的提示。`NOT_COMPLETED` 的文案依筆數分流，故不在此表。 */
@@ -113,8 +135,14 @@ function confirmMessage(pending: Pending | null): string {
       const mail = pending.result === "PASS" ? "核可後系統將寄送通知信給學員。" : "不通過不寄送通知信。"
       return `確定核可${who}為「${verdict}」？${mail}`
     }
-    case "revokeApproval":
-      return `確定撤銷 ${pending.student.user_name ?? "該學員"} 的核可？撤銷後回到「待核可」，之後仍可重新核可。`
+    case "revokeApproval": {
+      // 判定字樣比照 ET-MSG-ET02-301 的體例（「確定核可…為『通過』？」）放進引號（#729）。
+      // 「重新核可」維持通稱——那句講的是撤銷**之後**能再做一次核可動作（可判通過也可判
+      // 不通過），與當初判什麼無關。
+      const verdict = pending.student.approval_status === "FAILED" ? "不通過" : "通過"
+      const who = pending.student.user_name ?? "該學員"
+      return `確定撤銷 ${who} 的「${verdict}」核可？撤銷後回到「待核可」，之後仍可重新核可。`
+    }
     default:
       return removeMessage(pending)
   }
@@ -375,7 +403,7 @@ export function EtStudentsPage() {
       <Dialog open={pending !== null} onClose={() => !busy && closePending()} fullWidth maxWidth="xs">
         {/* `pending` 為 null 是關閉動畫期間——給空字串，不要 fallback 到某個動作的
             標題，否則每次關閉都會閃一下「移除學員」。 */}
-        <DialogTitle>{pending === null ? "" : DIALOG_TITLE[pending.kind]}</DialogTitle>
+        <DialogTitle>{dialogTitle(pending)}</DialogTitle>
         <DialogContent>
           {pending?.kind === "remove" && pending.student.has_in_progress_attempt ? (
             /* ET-MSG-ET02-003 為「警告」型訊息——用 Alert 而非純文字，

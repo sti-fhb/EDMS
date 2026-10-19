@@ -690,6 +690,41 @@ describe("ET02 學員學習狀況追蹤", () => {
     expect(within(row).getByText(/王主任 核可/)).toBeInTheDocument()
   })
 
+  it("撤銷對話框對「不通過」者說撤銷不核可（#729）", async () => {
+    // 本畫面的批次鈕是「批次核可通過」與「批次不通過」**並列**，「核可」因而被讀成
+    // 通過那一側。對一位判定為不通過的學員說「撤銷核可」，讀起來像撤銷一個不存在的通過。
+    withApproval([
+      { ...baseRow, user_id: "s01", user_name: "陳未過", approval_status: "FAILED", approval_version: 1 },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    await user.click(await screen.findByRole("button", { name: "撤銷" }))
+
+    // 先以 role=dialog 取對話框（該查詢會濾掉 aria-hidden，等於確認它真的開著），
+    // 再在其內查文字——避免關閉動畫期間殘留的節點造成誤判。
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("撤銷不核可")).toBeInTheDocument()
+    expect(within(dialog).getByText(/「不通過」核可/)).toBeInTheDocument()
+  })
+
+  it("撤銷對話框對「通過」者維持撤銷核可（#729 反向探針）", async () => {
+    // ⚠️ 只測不通過那條的話，有人把文案寫死成「撤銷不核可」同樣會過。
+    withApproval([
+      { ...baseRow, user_id: "s01", user_name: "陳已過", approval_status: "PASSED", approval_version: 1 },
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+
+    await user.click(await screen.findByRole("button", { name: "撤銷" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("撤銷核可")).toBeInTheDocument()
+    expect(within(dialog).getByText(/「通過」核可/)).toBeInTheDocument()
+  })
+
   it("撤銷原因未填時 inline 擋下且不送出請求", async () => {
     // ET-MSG-ET02-305。錯誤掛在那個輸入框上，不是飄到畫面角落的 Snackbar
     const spy = vi.fn()
