@@ -10,12 +10,13 @@ HTTP 存取閘。
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.dm.catalog.models import DmCategory
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.personal.service import PersonalService
 from app.dm.review.models import DmReview
@@ -128,6 +129,40 @@ async def test_drafts_classified_three_kinds(db):
     assert kinds["DM-SOP-000501"] == "unsubmitted"
     assert kinds["DM-SOP-000502"] == "rejected"
     assert kinds["DM-SOP-000503"] == "withdrawn"
+
+
+async def test_草稿匣回分類中文名稱_而非代碼(db):
+    """草稿匣「分類」欄原本直接顯示代碼（`SOP` / `MANUAL`…），改為中文名稱（#735）。
+
+    對照：DM02 簽核中心、DM01 文件庫早就顯示中文名稱，DM04 與 DM00 是漏掉的兩處。
+    """
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, "DM-SOP-000570", status="DRAFT")
+    await _version(db, "DM-SOP-000570", "1.0", status="DRAFT")
+
+    d = next(x for x in await _svc.list_drafts(db, user_id="ed") if x.doc_id == "DM-SOP-000570")
+
+    assert d.category_name == "標準作業程序"
+    assert d.category_code == "SOP"  # ⛔ 代碼欄位保留不移除——移除是超出範圍的破壞性變更
+
+
+async def test_草稿匣分類名稱取目前值_改名後跟著變(db):
+    """管理者於 DP03 改分類名稱後，草稿匣顯示**新**名稱。
+
+    ⭐ 這條是本次改法唯一真正的業務語意：它證明讀的是 `DM_CATEGORY` 的**目前**名稱，
+    而非發布當下的快照。只驗上一條的話，把 `category_name` 寫死成常數也會通過
+    ——變異 M3 即為此而設。
+    """
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, "DM-SOP-000571", status="DRAFT")
+    await _version(db, "DM-SOP-000571", "1.0", status="DRAFT")
+
+    await db.execute(update(DmCategory).where(DmCategory.category_code == "SOP").values(category_name="作業程序書"))
+    await db.flush()
+
+    d = next(x for x in await _svc.list_drafts(db, user_id="ed") if x.doc_id == "DM-SOP-000571")
+
+    assert d.category_name == "作業程序書"
 
 
 async def test_drafts_last_edited_falls_back_to_created(db):

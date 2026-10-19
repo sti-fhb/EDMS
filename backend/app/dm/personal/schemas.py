@@ -16,7 +16,8 @@ class DraftItem(BaseModel):
     doc_name: str
     version_no: str | None
     change_summary: str | None
-    category_code: str
+    category_code: str  # 仍保留：前端不顯示，但移除屬破壞性變更
+    category_name: str  # 分類中文名稱（查表取目前值，#735）；前端「分類」欄顯示此欄
     kind: DraftKind
     updated_date: datetime | None
     doc_status: str  # 父文件狀態（OBSOLETE 時前端灰掉「繼續編輯」、僅允許刪除）

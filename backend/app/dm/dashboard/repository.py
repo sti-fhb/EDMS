@@ -77,6 +77,9 @@ class DashboardRepository:
                 DmDocVersion.doc_id,
                 DmDocument.doc_name,
                 DmDocument.category_code,
+                # 分類**中文名稱**，查表取目前值——DP03 改名後公告列隨之顯示新名稱（#735）。
+                # inner join 的理由同 `personal/repository.py`：受控主檔 FK，查不到即資料損毀。
+                DmCategory.category_name,
                 DmDocVersion.version_no,
                 DmDocVersion.change_summary,
                 DmDocVersion.published_date,
@@ -84,6 +87,7 @@ class DashboardRepository:
                 review.review_type.label("kind"),
             )
             .join(DmDocument, DmDocVersion.doc_id == DmDocument.doc_id)
+            .join(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(author, DmDocVersion.created_user == author.user_id)
             .outerjoin(
                 review,

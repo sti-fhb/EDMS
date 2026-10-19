@@ -25,7 +25,8 @@ class AnnouncementItem(BaseModel):
 
     doc_id: str
     doc_name: str
-    category_code: str
+    category_code: str  # 仍保留：前端不顯示，但移除屬破壞性變更
+    category_name: str  # 分類中文名稱（查表取目前值，#735）；前端公告列顯示此欄
     version_no: str
     change_summary: str | None
     published_date: datetime

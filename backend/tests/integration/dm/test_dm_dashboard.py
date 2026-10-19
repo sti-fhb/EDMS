@@ -8,11 +8,11 @@
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.utils import utcnow
-from app.dm.catalog.models import DmTag
+from app.dm.catalog.models import DmCategory, DmTag
 from app.dm.dashboard.service import DashboardService
 from app.dm.document.models import DmDocTag, DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
@@ -162,6 +162,32 @@ async def test_announcements_recent_with_badge_and_desc(db):
     assert [i.doc_id for i in items] == ["DM-TRAINING-000010", "DM-SOP-000010"]  # 新者在前
     assert items[0].kind == "NEW" and items[1].kind == "NEW_VERSION"
     assert items[0].author_name == "陳大華" and items[1].version_no == "2.0"
+
+
+async def test_公告回分類中文名稱_而非代碼(db):
+    """最新更新公告列原本直接顯示分類代碼，改為中文名稱（#735 範圍第 3 項掃出）。
+
+    issue 只點名 DM04 草稿匣；這一處是「順手確認 DM 其他畫面」時掃到的同一個缺陷
+    （`DmOverviewWidget.tsx` 的公告列 `｜ {item.category_code}`），修法完全對稱。
+    """
+    await _published_doc(db, "DM-SOP-000020", category="SOP", name="領血SOP")
+
+    i = next(x for x in await _svc.get_announcements(db, **_PRIV) if x.doc_id == "DM-SOP-000020")
+
+    assert i.category_name == "標準作業程序"
+    assert i.category_code == "SOP"  # ⛔ 代碼欄位保留——同檔 StatCard 以它當 React key
+
+
+async def test_公告分類名稱取目前值_改名後跟著變(db):
+    """管理者於 DP03 改分類名稱後，公告列顯示**新**名稱（非發布當下的快照）。"""
+    await _published_doc(db, "DM-SOP-000021", category="SOP", name="領血SOP")
+
+    await db.execute(update(DmCategory).where(DmCategory.category_code == "SOP").values(category_name="作業程序書"))
+    await db.flush()
+
+    i = next(x for x in await _svc.get_announcements(db, **_PRIV) if x.doc_id == "DM-SOP-000021")
+
+    assert i.category_name == "作業程序書"
 
 
 async def test_announcements_excludes_older_than_30d(db):

@@ -109,6 +109,7 @@ class PersonalService:
                 version_no=r.version_no,
                 change_summary=r.change_summary,
                 category_code=r.category_code,
+                category_name=r.category_name,
                 kind=_classify_draft(r.latest_review_status),
                 updated_date=r.updated_date,
                 doc_status=r.doc_status,
