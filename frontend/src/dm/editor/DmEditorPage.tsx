@@ -28,6 +28,7 @@ import {
   makeEditorSchema,
   MANUAL_CATEGORY,
   TRAINING_CATEGORY,
+  toAcceptAttr,
   VERSION_NO_MAX_LEN,
 } from "./schemas"
 import type { AudiencePair, EditorForm, OptionItem } from "./schemas"
@@ -206,7 +207,8 @@ export function DmEditorPage() {
   const setField = <K extends keyof EditorForm>(key: K, value: EditorForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
     setDirty(true)
-    persisted.current = null
+    // ⛔ 不清 `persisted`（#734）：清掉會讓「送簽被擋 → 改版本號再送」重新 createDocument，
+    // 草稿匣多一份；編輯模式則撞 DM_DOC_009。改為由 persistDraft 更新同一份草稿帶入新值。
     lockPrefillFor(key)
     setErrors((prev) => ({ ...prev, [key as string]: "" }))
   }
@@ -229,7 +231,7 @@ export function DmEditorPage() {
   const setAudiencePairs = (updater: (prev: AudiencePair[]) => AudiencePair[]) => {
     setForm((prev) => ({ ...prev, audience_pairs: updater(prev.audience_pairs) }))
     setDirty(true)
-    persisted.current = null
+    // ⛔ 不清 `persisted`，理由同 setField（#734）
     lockPrefillFor("audience_pairs")
     clearAudienceErrors()
   }
@@ -253,13 +255,17 @@ export function DmEditorPage() {
   const onCategoryChange = (value: string) => {
     setForm((prev) => ({ ...prev, category_code: value, func_code: value === MANUAL_CATEGORY ? prev.func_code : "" }))
     setDirty(true)
+    // 🔴 **這一處要清，與其他欄位不同**（#734 刻意保留）：DOC_ID 內嵌分類碼
+    // （`DM-{分類碼}-{流水號}`），後端 `update_draft_version` 因此不接受改分類
+    //（其 docstring：「所有欄位可編、**分類除外綁 DOC_ID**」）。改分類等於要一個新的
+    // DOC_ID，只能重建草稿。首版退回後改分類的正解是刪草稿重建（#378 已裁示不實作改號）。
     persisted.current = null
   }
 
   const onPickFile = (f: File | null) => {
     setFile(f)
     setDirty(true)
-    persisted.current = null
+    // ⛔ 不清 `persisted`（#734）：`updateDraftVersion` 支援換檔（未附則保留既有檔）。
     setErrors((prev) => ({ ...prev, file: "" }))
     if (f && !isPreviewableMime(f.type)) {
       // Office 等非可預覽格式：警示 + 二次確認（DM-MSG-DM08-002）
@@ -289,7 +295,26 @@ export function DmEditorPage() {
 
   /** 建立 / 沿用草稿（新增→createDocument；編輯→addVersion）。檔案可為 null（存草稿允許不附）。 */
   async function persistDraft(): Promise<{ doc_id: string; version_id: number }> {
-    if (persisted.current) return persisted.current
+    if (persisted.current) {
+      // 已建過草稿（通常是前一次送簽被擋）→ **更新同一份**，不再新建（#734）。
+      // 送簽失敗會留在原頁，使用者多半會改草稿內容再送；重建會讓草稿匣多一份（新增模式）
+      // 或撞 DM_DOC_009（編輯模式）。成功後即導航離開，故 `persisted` 不會跨次殘留。
+      //
+      // ⚠️ `doc_name` / `func_code` 只在新增模式建的草稿帶值——那份的父文件是 DRAFT，
+      // 後端允許連身份欄一起改；加新版模式的父文件已發布，後端會忽略這兩欄。
+      const { doc_id, version_id } = persisted.current
+      await editorApi.updateDraftVersion(doc_id, version_id, {
+        doc_name: isNew ? form.doc_name.trim() : null,
+        func_code: isNew && isManual ? form.func_code : null,
+        assigned_reviewer: form.reviewer_id,
+        version_no: form.version_no.trim(),
+        change_summary: form.change_summary.trim(),
+        audience_pairs: isTraining ? [] : form.audience_pairs,
+        retrieval_ids: form.retrieval_ids,
+        file,
+      })
+      return persisted.current
+    }
     let ids: { doc_id: string; version_id: number }
     if (isNew) {
       const r = await editorApi.createDocument({
@@ -810,6 +835,9 @@ export function DmEditorPage() {
                   ref={fileInputRef}
                   type="file"
                   hidden
+                  // 允許清單取自後端 `DM_FILE_TYPES`（#734）；⛔ 不另寫死一份，否則管理者
+                  // 調整參數後兩邊會不一致。比照 detail/DmObsoleteDialog 的作法。
+                  accept={uploadLimits ? toAcceptAttr(uploadLimits.allowed_extensions) : undefined}
                   onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
                 />
                 <CloudUploadOutlinedIcon sx={{ fontSize: 44, color: "action.active", mb: 0.5 }} />
