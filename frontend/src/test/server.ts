@@ -1735,6 +1735,14 @@ export const handlers = [
   ),
   // ET05「取消」：放棄尚未更新的編輯（#631）。活表一行都不會動。
   http.delete("/api/et/courses/:courseId/content/stage", () => new HttpResponse(null, { status: 204 })),
+  // ET05「保留編輯」：把暫存樹標記為要留著，不碰活表、不跑檢核（#720）。
+  http.post("/api/et/courses/:courseId/content/keep", () => new HttpResponse(null, { status: 204 })),
+  // ET05 進入編輯頁時丟掉沒按過「保留編輯」的暫存殘留（#720）。
+  //
+  // ⚠️ **每一條編輯頁測試都會打它**（元件掛載時無條件呼叫），所以它必須在這份共用
+  // handler 裡。少了它，MSW 會對每條測試噴一則 unhandled request，而真正的失敗訊息
+  // 會淹在那堆雜訊裡。
+  http.delete("/api/et/courses/:courseId/content/stage/unkept", () => new HttpResponse(null, { status: 204 })),
   // ET05 關閉與再開課（US11 / #288）。`closed_at` 於再開課後**仍帶值**（FR-ET-US11-10
   // 保留供追溯），fixture 照實反映——若回 null，任何誤用「有沒有值」判斷關閉狀態的
   // 程式碼都會在測試裡剛好通過，而正式環境會錯。

@@ -436,8 +436,21 @@ export function EtCourseEditorPage() {
     refreshLiveCheck()
   }
 
+  /**
+   * `Dayjs` → ISO 字串，**無效值回 `null`**。
+   *
+   * 🔴 `dayjs.toISOString()` 對無效值會拋 `RangeError: Invalid time value`，而下面的
+   * `startChanged` 跑在 **render 期間**——拋出去是整頁白掉，不是一個欄位的錯誤訊息。
+   *
+   * ⚠️ 無效值在正常操作中真的會出現：MUI 的 `DateTimePicker` 逐段接收輸入，使用者打到
+   * 一半的中間狀態可能組不成合法日期。#720 之前已關閉課程一進頁就被再開課模式把兩欄
+   * **清空**，從空白開始打，中間狀態一律是 `null`（`?.` 擋掉了）；拿掉模式之後欄位帶著
+   * 舊值，覆寫過程中就會出現無效值——同一段程式碼，暴露條件變了。
+   */
+  const toIso = (v: typeof startAt) => (v && v.isValid() ? v.toISOString() : null)
+
   /** 起始時間是否被使用者改動——決定送出前要不要驗「不得早於當下」。 */
-  const startChanged = (startAt?.toISOString() ?? null) !== originalStart
+  const startChanged = toIso(startAt) !== originalStart
 
   /**
    * 起始時間可選範圍的下限——**一開始就套用**，過去的時間即為灰底不可選。
@@ -479,8 +492,8 @@ export function EtCourseEditorPage() {
     description: form.description.trim() || null,
     // Dayjs → ISO 8601（含時區）；後端欄位為 TIMESTAMPTZ，送 naive 值會被以連線時區
     // 解讀而靜默位移，使「起始時間前學員不可見」等時間判定算錯。
-    open_start_at: startAt?.toISOString() ?? null,
-    open_end_at: endAt?.toISOString() ?? null,
+    open_start_at: toIso(startAt),
+    open_end_at: toIso(endAt),
     require_approval: form.require_approval,
     // 只送完整配對；不完整 / 重複的列已由 `validateForm` 擋在送出前
     audiences: validateAudiences(form.audiences).payload,
@@ -731,6 +744,9 @@ export function EtCourseEditorPage() {
    * `mutateAsync`）不會產生未處理的 rejection，故不會卡住 `NotificationContext` 的視窗。
    */
   const requestApply = () => {
+    // #720：基本資料也由這顆鈕送出，所以要先驗（理由見 `validateBeforeSubmit`）。
+    // ⛔ 不要移到 `onOk` 裡：教師會先看到一個「確認更新」的視窗、按下去才發現表單有錯。
+    if (!validateBeforeSubmit()) return
     confirm({
       title: "更新課程內容",
       content:
@@ -1018,6 +1034,9 @@ export function EtCourseEditorPage() {
    * 期間已過的課程會被後端以 `ET_COURSE_008` 擋下要他重設（2026-10-20 裁示）。
    */
   const submitReopen = () => {
+    // 時間以外的欄位照本頁的規則驗（理由見 `validateBeforeSubmit`）；時間由下一行的
+    // `validateReopenSchedule` 判，兩者不可混用。
+    if (!validateBeforeSubmit(true)) return
     const next = validateReopenSchedule(startAt, endAt, dayjs())
     const formBlockers: PublishBlocker[] = []
     if (next.start) formBlockers.push({ code: FORM_BLOCKER.start, message: next.start, target_id: null })
@@ -1095,6 +1114,29 @@ export function EtCourseEditorPage() {
     setErrors(next)
     setAudienceErrors(rows)
     return Object.keys(next).length === 0 && Object.keys(rows).length === 0
+  }
+
+  /**
+   * 送出前驗表單——「更新」「更新並重開課」「保留編輯」三顆鈕共用（#720）。
+   *
+   * 🔴 **少了它，不完整 / 重複的受訓對象會被靜默丟掉。** `toPayload()` 送的是
+   * `validateAudiences(form.audiences).payload`，那支**會把壞的列濾掉**；它的註解寫著
+   * 「已由 `validateForm` 擋在送出前」——而 #720 之後非草稿狀態已經沒有「儲存」鈕了，
+   * 那道前提跟著那顆鈕一起消失。症狀是教師看著畫面上那一列還在，按下去卻沒送出去，
+   * 也沒有任何訊息。
+   *
+   * @param skipSchedule 給「更新並重開課」用。再開課的時間規則與本頁**相反**（起始可
+   *   早於當下，見 `submitReopen`），套本頁的規則會擋掉後端允許的合法操作；時間另由
+   *   `validateReopenSchedule` 判，所以這裡只濾掉時間那兩欄、其餘照驗。
+   */
+  const validateBeforeSubmit = (skipSchedule = false): boolean => {
+    const { fieldErrors: next, audienceRowErrors: rows } = checkCourseForm(formInput, { forPublish: false })
+    const fields = skipSchedule
+      ? Object.fromEntries(Object.entries(next).filter(([k]) => k !== "open_start_at" && k !== "open_end_at"))
+      : next
+    setErrors(fields)
+    setAudienceErrors(rows)
+    return Object.keys(fields).length === 0 && Object.keys(rows).length === 0
   }
 
   /**
@@ -2227,7 +2269,16 @@ export function EtCourseEditorPage() {
                 ⚠️ 不跑發布檢核，也**不是還原點**（見 `keepMut`）。
               */}
               {reopening && (
-                <Button size="small" variant="outlined" disabled={keepMut.isPending} onClick={() => keepMut.mutate()}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  // ⚠️ 重開課送出中也要停用：兩顆鈕都會先送一次 `PUT`（`stageBasic`），
+                  // 同時按下去等於兩條路徑搶同一份暫存區。反向亦然（見下一顆）。
+                  disabled={keepMut.isPending || reopenMut.isPending || reopenCheckMut.isPending}
+                  // ⚠️ 「不跑發布檢核」（2026-10-19 裁示）指的是六項發布條件，**不是**
+                  // 表單驗證：重複的受訓對象若不擋，會被 `toPayload()` 靜默濾掉。
+                  onClick={() => validateBeforeSubmit(true) && keepMut.mutate()}
+                >
                   保留編輯
                 </Button>
               )}

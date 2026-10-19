@@ -56,7 +56,17 @@ beforeEach(() => {
  */
 function useCourse(
   status: string,
-  { isOwner = true, pending = false }: { isOwner?: boolean; pending?: boolean } = {},
+  {
+    isOwner = true,
+    pending = false,
+    // ⚠️ 預設由 `status` 推導只是**fixture 的方便**，不代表正式環境可以這樣推。
+    // 期間已過的課程 `status` 仍是 `PUBLISHED` 而 `is_closed` 為真（#720）——要測那種
+    // 課程就明確傳 `{ isClosed: true }`，⛔ 不要改成讓元件自己從 `status` 算。
+    isClosed = status === "CLOSED",
+    // ⚠️ #720 之後起訖**不再被模式清空**，所以「欄位空著」這個狀態只能由 fixture 造
+    // （等同教師自己把它清掉）。
+    schedule = true,
+  }: { isOwner?: boolean; pending?: boolean; isClosed?: boolean; schedule?: boolean } = {},
 ) {
   server.use(
     http.get("/api/et/courses/:courseId", () =>
@@ -65,8 +75,8 @@ function useCourse(
         course_name: "採血作業訓練",
         description: null,
         status,
-        open_start_at: "2026-09-01T00:00:00Z",
-        open_end_at: "2027-09-30T00:00:00Z",
+        open_start_at: schedule ? "2026-09-01T00:00:00Z" : null,
+        open_end_at: schedule ? "2027-09-30T00:00:00Z" : null,
         require_approval: false,
         version: 5,
         owner_id: "U1",
@@ -76,6 +86,7 @@ function useCourse(
         chapters: [],
         invitation_code: isOwner ? "01234567" : null,
         has_pending_changes: pending,
+        is_closed: isClosed,
       }),
     ),
   )
@@ -127,7 +138,11 @@ function useReopenBlocked(code: string, message: string) {
  * 落空而**測試照樣往下跑**。
  */
 async function fillDateTime(label: RegExp, keys: string) {
-  const field = screen.getAllByLabelText(label).find((el) => el.getAttribute("role") === "group")
+  // ⚠️ `findAll` 而非 `getAll`：#720 拿掉再開課模式之後，呼叫端不再需要先點一顆「再開課」
+  // ——而那一下順便扮演了「等課程載入」。少了它，`getAll` 會在資料回來前就落空，測試在
+  // 48ms 當場炸掉、錯誤訊息指向「找不到欄位」而與它要驗的事無關。
+  const fields = await screen.findAllByLabelText(label)
+  const field = fields.find((el) => el.getAttribute("role") === "group")
   if (!field) throw new Error(`找不到日期時間欄位：${label}`)
   const first = field.querySelector<HTMLElement>(".MuiPickersSectionList-section")
   if (!first) throw new Error(`欄位沒有可輸入的區段：${label}`)
@@ -140,7 +155,14 @@ async function fillDateTime(label: RegExp, keys: string) {
 }
 
 /**
- * 「進入再開課模式 → 填兩次 `DateTimePicker` → 送出 / 開關對話框」測試的個別 timeout（#687）。
+ * 「填兩次 `DateTimePicker` → 送出 / 開關對話框」測試的個別 timeout（#687）。
+ *
+ * ⚠️ **#720 之後適用的條數變多了**，而且原因不是負載：拿掉再開課模式之後，欄位帶著
+ * 舊值進場，`fillDateTime` 從「對空欄位打 12 鍵」變成「覆寫既有值 12 鍵」——每一鍵都
+ * 多一次既有 section 的重繪。原本剛好塞得進 5 秒的幾條因此擠不下，典型是
+ * `再開課的時間不合規時擋在前端`（整組跑 5.0s 逾時、單檔跑綠）。
+ *
+ * ⛔ 判準仍是「它和已套用的那幾條做一樣多的事」，不是「它紅了就給」。
  *
  * - **成本來源**：兩個日期時間欄位各 12 鍵（MUI 每鍵重繪一次 section），加上再開課對話框、
  *   發布視窗的開關與切換課程的重新渲染。套用的 5 條單檔、機器閒置（當下無其他測試行程）實測
@@ -174,15 +196,60 @@ describe("ET05 課程關閉與再開課", () => {
     expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
   })
 
-  it("已關閉課程顯示「再開課」，不顯示「關閉課程」與「邀請學員」", async () => {
+  it("已關閉課程的動作列是「取消｜保留編輯｜更新並重開課」（#720）", async () => {
     // AC 5 / FR-ET-US11-07：關閉期間不可邀請學員，故按鈕一併收起（後端另以
-    // ET_INVITE_004 把關）。再開課後 status 回 PUBLISHED，兩顆按鈕自然互換。
+    // ET_INVITE_004 把關）。
+    //
+    // 🔴 #720：再開課不再是標頭上一顆「先進入模式」的鈕，而是底部動作列的
+    // 「更新並重開課」——教師改完起訖直接按它。
     useCourse("CLOSED")
     renderEditor()
 
-    expect(await screen.findByRole("button", { name: "再開課" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "更新並重開課" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "保留編輯" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "邀請學員" })).not.toBeInTheDocument()
+  })
+
+  it("🔴 已關閉課程沒有獨立的「儲存」鈕（#720）", async () => {
+    // 2026-10-19 手測回報的第一個 bug：那顆「儲存」寫的是基本資料、而且**存了就生效**
+    // ——教師以為自己只是存個草稿，學員當場就看到了。基本資料現在隨教師按的那顆鈕
+    // 一起送（`stageBasic`）。⛔ 不要為了「總該有個儲存吧」而加回來。
+    useCourse("CLOSED")
+    renderEditor()
+    await screen.findByRole("button", { name: "更新並重開課" })
+
+    expect(screen.queryByRole("button", { name: "儲存" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "儲存草稿" })).not.toBeInTheDocument()
+  })
+
+  it("🔴 已發布（運作中）課程沒有「保留編輯」（#720）", async () => {
+    // 已發布的內容隨時對學員生效，多一個「留著不發」的狀態會讓教師以為自己已經處理
+    // 完了。後端對運作中的課程回 409 `ET_COURSE_011`，前端也不該顯示這顆。
+    //
+    // 正向錨點：少了這條，把「保留編輯」寫成無條件顯示也會讓上面兩條通過。
+    useCourse("PUBLISHED")
+    renderEditor()
+    await screen.findByRole("button", { name: "更新" })
+
+    expect(screen.queryByRole("button", { name: "保留編輯" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "更新並重開課" })).not.toBeInTheDocument()
+  })
+
+  it("🔴 期間已過（is_closed 為真）的已發布課程走已關閉那一排（#720）", async () => {
+    // 🥇 **判準是 `is_closed` 而非 `status`。**
+    //
+    // 期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬未實作的 ET-16，
+    // 故此為**常態**不是邊角）。前端若自己判 `status`，這門課會拿到一排錯的按鈕：
+    // 教師按下「更新」，而後端走的是另一條路。
+    useCourse("PUBLISHED", { isClosed: true })
+    renderEditor()
+
+    expect(await screen.findByRole("button", { name: "更新並重開課" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "保留編輯" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "更新" })).not.toBeInTheDocument()
   })
 
   it("已關閉提示明確寫出「課程內容仍可編輯」（AC 6）", async () => {
@@ -194,12 +261,13 @@ describe("ET05 課程關閉與再開課", () => {
     expect(screen.getByText(/課程內容仍可編輯/)).toBeInTheDocument()
   })
 
-  it("草稿不顯示關閉 / 再開課（草稿沒有學員也沒有邀請碼，關閉沒有語意）", async () => {
+  it("草稿不顯示關閉 / 重開課（草稿沒有學員也沒有邀請碼，關閉沒有語意）", async () => {
     useCourse("DRAFT")
     renderEditor()
     await screen.findByDisplayValue("採血作業訓練")
     expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "更新並重開課" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "保留編輯" })).not.toBeInTheDocument()
   })
 
   // #698：編輯頁不提供預覽——預覽只從 ET01「全部課程」卡片進入。編輯頁的預覽以「已儲存」
@@ -213,12 +281,12 @@ describe("ET05 課程關閉與再開課", () => {
     expect(screen.queryByRole("button", { name: /預覽課程/ })).not.toBeInTheDocument()
   })
 
-  it("非擁有者（檢視模式）不顯示關閉 / 再開課", async () => {
+  it("非擁有者（檢視模式）不顯示關閉 / 重開課", async () => {
     useCourse("PUBLISHED", { isOwner: false })
     renderEditor()
     await screen.findByText(/檢視模式/)
     expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "再開課" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "更新並重開課" })).not.toBeInTheDocument()
   })
 
   it("關閉前先確認，且確認內容說明學員仍可唯讀回看與可再開課", async () => {
@@ -278,49 +346,30 @@ describe("ET05 課程關閉與再開課", () => {
   })
 
   // #428：再開課改為**就地清空編輯頁的起訖時間**，不再跳對話框。
-  it("按再開課會清空起訖時間，但不動任何資料（#428）", async () => {
-    const user = userEvent.setup()
+  it("🔴 進入已關閉課程不清空起訖時間（#720 推翻 #428 的就地編輯模式）", async () => {
+    // ## 這條是前兩條測試的**反向替身**
+    //
+    // #428 的設計是：按「再開課」進入一個模式，模式會把起訖**清空**並標紅框，逼教師
+    // 重新設定；反悔則按「取消再開課」還原。原本有兩條測試釘住那個行為。
+    //
+    // #720 把模式整個拿掉（2026-10-19 裁示）：起訖就是基本資料卡上那兩格，教師改完
+    // 直接按「更新並重開課」。所以「清空」與「還原」兩條都不再適用，改由本條釘住
+    // **相反的**事：值要原樣留著。
+    //
+    // ⚠️ 少了本條，哪天有人把清空邏輯加回來不會有任何測試變紅——而那會讓教師一進頁
+    // 就看到自己的起訖不見了，卻沒有「取消再開課」可按（那顆鈕也不存在了）。
+    //
+    // ℹ️ 「強制重新設定」改由後端承擔（2026-10-20 裁示）：期間已過時起訖仍是舊值，
+    // 按下去會回 `ET_COURSE_008` 要教師先改。
     useCourse("CLOSED")
     renderEditor()
-    // 進入前欄位有值
-    expect(await screen.findByDisplayValue(FIXTURE_START_SHOWN)).toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: "再開課" }))
-
-    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
-    // 🔴 本設計的核心：清空只發生在畫面上
-    expect(screen.queryByDisplayValue(FIXTURE_START_SHOWN)).not.toBeInTheDocument()
-    expect(screen.getByText(/按「取消再開課」即可還原/)).toBeInTheDocument()
-
-    // 🔴 裁示原文是「清空…並用紅色框起來提醒使用者重新設定時間」——紅框本身就是提醒，
-    // 等按下「確認再開課」才變紅等於少了一次提示。
-    for (const label of [/課程起始時間/, /課程訖止時間/]) {
-      const field = screen.getAllByLabelText(label).find((el) => el.getAttribute("role") === "group")
-      expect(field?.className).toMatch(/Mui-error/)
-    }
-    // ⚠️ 紅框歸紅框：還沒動手的人不該看到錯誤訊息
-    expect(screen.queryByText("請重新設定課程起始時間")).not.toBeInTheDocument()
-    // #592：缺漏改以視窗列出（#509），底部說明不可再說「在上方列出」
-    expect(screen.getByText(/有缺漏時會以視窗列出/)).toBeInTheDocument()
-    expect(screen.queryByText(/會在上方列出缺漏/)).not.toBeInTheDocument()
-  })
-
-  it("取消再開課會把清掉的時間還原（#428）", async () => {
-    // 🔴 「中途反悔」是本設計最容易漏的一塊——對話框有「取消」，就地編輯沒有。
-    // 少了還原，教師反悔後畫面上是一門起訖時間被清掉的課程。
-    const user = userEvent.setup()
-    useCourse("CLOSED")
-    renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await screen.findByRole("button", { name: "確認再開課" })
-
-    await user.click(screen.getByRole("button", { name: "取消再開課" }))
 
     expect(await screen.findByDisplayValue(FIXTURE_START_SHOWN)).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "確認再開課" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "取消再開課" })).not.toBeInTheDocument()
+    expect(screen.queryByText(/按「取消再開課」即可還原/)).not.toBeInTheDocument()
   })
 
-  it("再開課模式未填時間即確認會逐欄標示必填（#428）", async () => {
+  it("起訖留空時按「更新並重開課」會逐欄標示必填（#428 / #720）", async () => {
     let called = 0
     server.use(
       http.post("/api/et/courses/:courseId/reopen", () => {
@@ -329,14 +378,15 @@ describe("ET05 課程關閉與再開課", () => {
       }),
     )
     const user = userEvent.setup()
-    useCourse("CLOSED")
+    // ⚠️ `schedule: false` 造出「欄位空著」。#720 拿掉模式之後沒有任何東西會清空它們，
+    // 所以這個狀態只能由 fixture 造（等同教師自己把兩欄都清掉）。
+    useCourse("CLOSED", { schedule: false })
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
 
-    await user.click(await screen.findByRole("button", { name: "確認再開課" }))
+    await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
 
     // #558：先在視窗列出，關閉後才逐欄出現訊息
-    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    const dialog = await screen.findByRole("dialog", { name: "更新並重開課" })
     expect(within(dialog).getByText("請重新設定課程起始時間")).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: "關閉" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
@@ -361,118 +411,90 @@ describe("ET05 課程關閉與再開課", () => {
     const user = userEvent.setup()
     useCourse("CLOSED")
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "202711010900")
     await fillDateTime(/課程訖止時間/, "202711010800")
 
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
+    await user.click(screen.getByRole("button", { name: "更新並重開課" }))
 
-    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    const dialog = await screen.findByRole("dialog", { name: "更新並重開課" })
     expect(within(dialog).getByText("課程訖止時間須晚於起始時間")).toBeInTheDocument()
     expect(called).toBe(0)
     await user.click(within(dialog).getByRole("button", { name: "關閉" }))
     // 仍停在再開課模式，教師可以就地改；訊息改掛在欄位下
-    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "更新並重開課" })).toBeInTheDocument()
     expect(screen.getByText("課程訖止時間須晚於起始時間")).toBeInTheDocument()
-  })
-
-  it("再開課模式全程不發出一般的課程更新（#428）", async () => {
-    // 🔴 再開課模式下 `startAt` / `endAt` 是**刻意清空的畫面值**。一個帶 `null` 的
-    // `PUT /courses/{id}` 會把課程的開放期間寫成 NULL 而後端不會擋——教師看到「已儲存」，
-    // 學員卻再也進不來。且 `reopen` 是另一支端點（跑 `ensure_reopenable` 與發布檢核），
-    // 走一般更新等於時間寫進去了而**課程仍是關閉的**。
-    //
-    // ⚠️ 斷言「整段流程一次 PUT 都沒有」而非只看按鈕在不在：程式裡另有一道
-    // `if (reopening) return`（security review 的 MEDIUM-1），但它從 UI **到不了**——
-    // 按鈕不顯示就沒有呼叫端。那道 guard 是給日後改動用的，本測試涵蓋不到它。
-    let puts = 0
-    server.use(
-      http.put("/api/et/courses/:courseId", () => {
-        puts += 1
-        return HttpResponse.json({ course_id: 1, version: 6 })
-      }),
-      http.post("/api/et/courses/:courseId/reopen", () => HttpResponse.json(reopened)),
-    )
-    const user = userEvent.setup()
-    useCourse("CLOSED")
-    renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await screen.findByRole("button", { name: "確認再開課" })
-
-    expect(screen.queryByRole("button", { name: "儲存" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "儲存草稿" })).not.toBeInTheDocument()
-
-    // 進出一輪 + 真的送出一次，全程不得有任何一般更新
-    await user.click(screen.getByRole("button", { name: "取消再開課" }))
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "202711010900")
-    await fillDateTime(/課程訖止時間/, "202712311700")
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
-    await screen.findByText("課程已再開課")
-
-    expect(puts).toBe(0)
   }, REOPEN_FLOW_TIMEOUT)
 
-  it("再開課送出的 body 只有後端 ReopenCourseReq 接受的三個欄位", async () => {
-    // 🔴 迴歸測試。後端 `ReopenCourseReq` 原本繼承 `_CourseFields`，連 `course_name` 的
-    // 必填性一起繼承了，而前端從不送它 → 真實操作每次都 422，AC 8 完全不可用。
+  it("🥇 「更新並重開課」先把起訖寫進暫存，再呼叫沒有 body 的 reopen（#720）", async () => {
+    // ## 這條取代了兩條方向相反的舊測試
     //
-    // 這個缺陷躲過三層測試：後端整合測試自己多塞 `course_name`、MSW handler 不驗 body、
-    // 當時的 `ReopenCourseDialog` 測試用假的 `onSubmit`（該元件已於 #428 移除）。
-    // **沒有一層驗過「前端組出的 payload 與後端 schema 相符」**，所以這裡斷言鍵集合。
+    // 舊的是「再開課模式全程**不發出**一般的課程更新」與「再開課送出的 body 只有三個
+    // 欄位」。#720 之後兩者都反過來：
     //
-    // 🔴 #428 改為**走真實 UI**。原本這條直接呼叫 `coursesApi.reopen`，理由寫的是
-    // 「`DateTimePicker` 在 jsdom 無法以 userEvent 填值」——實測為誤（見 `fillDateTime`）。
-    // 直接呼叫 service 的版本驗不到「頁面有沒有多塞欄位」，而那正是本缺陷的形狀。
+    // | | #428（舊）| #720（現在）|
+    // |---|---|---|
+    // | 起訖怎麼送 | reopen 的 request body | `PUT /courses/{id}` → 暫存區 |
+    // | 一般更新 | ⛔ 全程不得發出 | ✅ **必須**發出，它是第一步 |
+    // | reopen 的 body | 三個欄位 | **沒有 body** |
     //
-    // ⚠️ 對應的後端測試是
-    // `test_et_course_close_reopen.py::TestReopen::test_以前端實際送出的欄位再開課`，
-    // 兩者是同一份契約的兩端，改動任一邊請同步。
-    const user = userEvent.setup()
-    let body: Record<string, unknown> | undefined
-    useCourse("CLOSED")
+    // 🔴 **為什麼非這樣不可**：後端的 `ensure_reopen_schedule` 讀的是**暫存值**。前端若
+    // 另把起訖塞進 reopen 的 body，就成了「檢核一組、套用另一組」——而那正是 #720 要
+    // 消滅的「檢核通過但生效後不合格」。
+    //
+    // ⚠️ 對應的後端測試是 `TestReopen::test_夾帶的起訖不得被採信`，兩者是同一份契約的
+    // 兩端，改動任一邊請同步。
+    let putBody: Record<string, unknown> | undefined
+    let reopenBody: unknown = "未呼叫"
     server.use(
+      http.put("/api/et/courses/:courseId", async ({ request }) => {
+        putBody = (await request.json()) as Record<string, unknown>
+        return new HttpResponse(null, { status: 204 })
+      }),
       http.post("/api/et/courses/:courseId/reopen", async ({ request }) => {
-        body = (await request.json()) as Record<string, unknown>
+        reopenBody = await request.text()
         return HttpResponse.json(reopened)
       }),
     )
-    renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await fillDateTime(/課程起始時間/, "202711010900")
-    await fillDateTime(/課程訖止時間/, "202712311700")
-
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
-
-    await waitFor(() => expect(body).toBeDefined())
-    expect(Object.keys(body ?? {}).sort()).toEqual(["open_end_at", "open_start_at", "version"])
-    expect(body?.version).toBe(5)
-    // #564：只改顯示格式，送出的仍是同一個瞬間的 ISO 值。預期值以**本機時區**解讀——測試
-    // 不固定時區（本機台灣、CI 為 UTC），寫死字串會一邊綠一邊紅（#483）
-    expect(body?.open_start_at).toBe(dayjs("2027-11-01T09:00").toISOString())
-    expect(body?.open_end_at).toBe(dayjs("2027-12-31T17:00").toISOString())
-  })
-
-  it("再開課成功後畫面立即顯示新的起訖時間（#428 迴歸）", async () => {
-    // 🔴 使用者 2026-09-24 手測回報：「選完時間後課程的起始時間沒有跟著變，儲存之後
-    // 點回課程卡片才顯示正確的時間」。成因是表單初值的 guard 只在切換到**另一門**課程
-    // 時才重設，`invalidate()` 重抓同一門課不會更新欄位。
     const user = userEvent.setup()
     useCourse("CLOSED")
-    server.use(http.post("/api/et/courses/:courseId/reopen", () => HttpResponse.json(reopened)))
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "202711010900")
     await fillDateTime(/課程訖止時間/, "202712311700")
 
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
+    await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
 
-    expect(await screen.findByText("課程已再開課")).toBeInTheDocument()
-    expect(screen.getByDisplayValue(/2027\/11\/01/)).toBeInTheDocument()
-    expect(screen.getByDisplayValue(/2027\/12\/31/)).toBeInTheDocument()
-    // 退出再開課模式，一般的儲存回來
-    expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument()
-  })
+    await waitFor(() => expect(putBody).toBeDefined())
+    // #564：只改顯示格式，送出的仍是同一個瞬間的 ISO 值。預期值以**本機時區**解讀——測試
+    // 不固定時區（本機台灣、CI 為 UTC），寫死字串會一邊綠一邊紅（#483）
+    expect(putBody?.open_start_at).toBe(dayjs("2027-11-01T09:00").toISOString())
+    expect(putBody?.open_end_at).toBe(dayjs("2027-12-31T17:00").toISOString())
+    // 🔴 空字串 ＝ 真的沒送 body。⛔ 不要放寬成「body 裡沒有 open_end_at」——那會讓
+    // 「送了一個只有 version 的 body」也通過，而那同樣是第二個事實來源。
+    await waitFor(() => expect(reopenBody).toBe(""))
+  }, REOPEN_FLOW_TIMEOUT)
+
+  it("更新並重開課成功後回到課程列表（#720）", async () => {
+    // 🔴 2026-10-19 裁示：**所有成功動作一律回列表**（推翻 #631 的「留原地 + Snackbar」）。
+    // 留在原地的問題是教師分不出「我按過了」與「我還沒按」——頁面長得一模一樣。
+    //
+    // ⚠️ 這條同時取代了舊的「再開課成功後畫面立即顯示新的起訖時間（#428 迴歸）」：
+    // 那條驗的是**留在原地時**欄位有沒有跟著更新，而現在不留在原地了。那個迴歸的成因
+    // （表單初值 guard 只在切換課程時重設）也因此不再有路徑到得了。
+    const user = userEvent.setup()
+    useCourse("CLOSED")
+    server.use(
+      http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
+      http.post("/api/et/courses/:courseId/reopen", () => HttpResponse.json(reopened)),
+    )
+    renderEditor()
+    await fillDateTime(/課程起始時間/, "202711010900")
+    await fillDateTime(/課程訖止時間/, "202712311700")
+
+    await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
+
+    expect(await screen.findByText("課程已更新並重新開課")).toBeInTheDocument()
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+  }, REOPEN_FLOW_TIMEOUT)
 
   it("再開課遇發布檢核缺漏時以對話框列出，關閉後停在再開課模式（#428 / #509）", async () => {
     // 🔴 這條補的是刪掉 `ReopenCourseDialog.test.tsx` 一併失去的覆蓋（#428 AC 5）。缺漏不是
@@ -483,48 +505,55 @@ describe("ET05 課程關閉與再開課", () => {
     useCourse("CLOSED")
     useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "202711010900")
     await fillDateTime(/課程訖止時間/, "202712311700")
 
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
+    await user.click(screen.getByRole("button", { name: "更新並重開課" }))
 
     // AC 1：缺漏在對話框裡
-    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    const dialog = await screen.findByRole("dialog", { name: "更新並重開課" })
     expect(within(dialog).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/課程目前不符發布條件，無法再開課/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/課程目前不符發布條件，無法重新開課/)).toBeInTheDocument()
     // AC 4：只有一顆「關閉」——請求已經失敗，不是再問一次要不要送出
     expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["關閉"])
-    // AC 3：橙色的「請重新設定起訖時間」**不進**對話框（#428 的就地編輯提示）
-    expect(within(dialog).queryByText(/請重新設定開放起訖時間/)).not.toBeInTheDocument()
-    expect(screen.queryByText("課程已再開課")).not.toBeInTheDocument()
+    // AC 3：頁面上的「此課程已關閉」提示**不進**對話框——兩者講的是不同的事
+    expect(within(dialog).queryByText(/此課程已關閉/)).not.toBeInTheDocument()
+    expect(screen.queryByText("課程已更新並重新開課")).not.toBeInTheDocument()
     // ⚠️ 缺漏走 422，但**不可**走成一般的錯誤 toast——對話框裡已逐條列出來了
     expect(screen.queryByText(/操作失敗/)).not.toBeInTheDocument()
 
     await user.click(within(dialog).getByRole("button", { name: "關閉" }))
 
-    // AC 7：關閉後仍停在再開課模式，教師可直接去補內容。⚠️ 要驗**仍可按**——缺漏是
+    // AC 7：關閉後仍停在本頁，教師可直接去補內容。⚠️ 要驗**仍可按**——缺漏是
     // 「補完再送一次」而非終局失敗。關閉後背景要等 aria-hidden 解除，故用 `findByRole`。
-    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeEnabled()
-    expect(screen.getByText(/請重新設定開放起訖時間/)).toBeInTheDocument()
-    // 起訖時間保留剛填的值（不是被清空、也不是回到再開課前的舊值）
+    expect(await screen.findByRole("button", { name: "更新並重開課" })).toBeEnabled()
+    // 🔴 #720：缺漏時**不離開頁面**（成功才回列表）。少了這條，把失敗也寫成導走
+    // 不會有測試紅，而教師會被丟回列表、剛填的時間全沒了。
+    expect(navigateSpy).not.toHaveBeenCalledWith("/et/courses")
+    // 起訖時間保留剛填的值（不是被清空、也不是回到按鈕前的舊值）
     expect(screen.getByDisplayValue(/2027\/11\/01/)).toBeInTheDocument()
     expect(screen.getByDisplayValue(/2027\/12\/31/)).toBeInTheDocument()
     // AC 2：頁面上**不再有**紅色缺漏區塊。與上方「對話框內查得到」用**同一種查法**——
     // 只寫這條反向斷言的話，文案一改它就恆真。
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-    expect(screen.queryByText(/課程目前不符發布條件，無法再開課/)).not.toBeInTheDocument()
+    // ⚠️ 與上方 `within(dialog).getByText(...)` **刻意用同一個字串**：只改其中一邊的話，
+    // 這條否定斷言會變成恆真（文案裡根本沒有那句話），而它正是本測試的 AC 2。
+    expect(screen.queryByText(/課程目前不符發布條件，無法重新開課/)).not.toBeInTheDocument()
     expect(screen.queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
   })
 
-  it("切換到另一門課程時會退出再開課模式（#428）", async () => {
+  it("切換到另一門課程時動作列跟著換（#428 / #720）", async () => {
     // 🔴 `courses/:courseId` 這條路由沒有 `key={courseId}`，React Router 只換參數時**不會
-    // 重新掛載元件**（本檔開頭把 `useParams` 做成可變就是為了模擬這件事）。少了重置，
-    // `reopening` 會跟著使用者從課程 A 帶到課程 B：一門根本不是關閉中的課程顯示著再開課
-    // 模式，一般儲存被擋死，而按「確認再開課」是對**錯的課程**送出請求。
+    // 重新掛載元件**（本檔開頭把 `useParams` 做成可變就是為了模擬這件事）。
+    //
+    // #428 當時防的是 `reopening` 這個**模式旗標**跟著使用者從課程 A 帶到課程 B：一門
+    // 根本不是關閉中的課程顯示著再開課模式，按下去是對**錯的課程**送出請求。
+    //
+    // ⚠️ #720 拿掉了模式（動作列改由 `course.is_closed` 推導），所以那個旗標不存在了
+    // ——但**本條仍然有價值**，它現在驗的是「推導真的跟著資料走」：少了它，哪天有人把
+    // 動作列改回用 state 記憶，同一個缺陷會原封不動回來而沒有測試紅。
     //
     // 上一頁 / 下一頁與直接改網址都會走到這條路徑，不需要回列表頁。
-    const user = userEvent.setup()
     server.use(
       http.get("/api/et/courses/:courseId", ({ params }) => {
         const id = Number(params.courseId)
@@ -543,20 +572,21 @@ describe("ET05 課程關閉與再開課", () => {
           audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
           chapters: [],
           invitation_code: "01234567",
+          has_pending_changes: false,
+          is_closed: id === 1,
         })
       }),
     )
     const { rerender } = renderEditor("1")
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    await screen.findByRole("button", { name: "確認再開課" })
+    await screen.findByRole("button", { name: "更新並重開課" })
 
     paramsRef.current = { courseId: "2" }
     rerender(<EtCourseEditorPage />)
 
     expect(await screen.findByDisplayValue("課程 2")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "確認再開課" })).not.toBeInTheDocument()
-    expect(screen.queryByText(/請重新設定開放起訖時間/)).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "儲存" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "更新並重開課" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "保留編輯" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "更新" })).toBeInTheDocument()
   })
 
   it("再開課送出中停用送出鈕，防連點造出兩次再開課（#428）", async () => {
@@ -574,6 +604,7 @@ describe("ET05 課程關閉與再開課", () => {
     // 斷言中途失敗時 `release()` 不會執行——仍要放行，不留一個永遠等不到回應的請求
     onTestFinished(() => release())
     server.use(
+      http.put("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })),
       http.post("/api/et/courses/:courseId/reopen", async () => {
         calls += 1
         await gate
@@ -583,19 +614,20 @@ describe("ET05 課程關閉與再開課", () => {
     const user = userEvent.setup()
     useCourse("CLOSED")
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "202711010900")
     await fillDateTime(/課程訖止時間/, "202712311700")
 
-    const submit = screen.getByRole("button", { name: "確認再開課" })
+    const submit = screen.getByRole("button", { name: "更新並重開課" })
     await user.click(submit)
     // 請求已抵達後端且尚未回應——下面兩個斷言因此必定落在「送出中」
     await waitFor(() => expect(calls).toBe(1))
 
     expect(submit).toBeDisabled()
-    expect(screen.getByRole("button", { name: "取消再開課" })).toBeDisabled()
+    // 「保留編輯」也要一起停用：它同樣會先送一次 `PUT`（`stageBasic`），在重開課送出中
+    // 按下去會讓兩條路徑搶同一份暫存區（#720）。
+    expect(screen.getByRole("button", { name: "保留編輯" })).toBeDisabled()
     release()
-    await screen.findByText("課程已再開課")
+    await screen.findByText("課程已更新並重新開課")
     expect(calls).toBe(1)
   }, REOPEN_FLOW_TIMEOUT)
 
@@ -607,18 +639,15 @@ describe("ET05 課程關閉與再開課", () => {
     useCourse("CLOSED")
     useReopenBlocked("NO_MATERIAL", "課程至少須有 1 份教材")
     renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
     await fillDateTime(/課程起始時間/, "202711010900")
     await fillDateTime(/課程訖止時間/, "202712311700")
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
-    const dialog = await screen.findByRole("dialog", { name: "再開課" })
+    await user.click(screen.getByRole("button", { name: "更新並重開課" }))
+    const dialog = await screen.findByRole("dialog", { name: "更新並重開課" })
     expect(within(dialog).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
 
     await user.click(within(dialog).getByRole("button", { name: "關閉" }))
-    await user.click(await screen.findByRole("button", { name: "取消再開課" }))
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
 
-    expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "更新並重開課" })).toBeInTheDocument()
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(screen.queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
   }, REOPEN_FLOW_TIMEOUT)
@@ -648,6 +677,8 @@ describe("ET05 課程關閉與再開課", () => {
             audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
             chapters: [],
             invitation_code: id === 1 ? null : "01234567",
+            has_pending_changes: false,
+            is_closed: id !== 1,
           })
         }),
         http.put("/api/et/courses/:courseId", ({ params }) =>
@@ -664,11 +695,10 @@ describe("ET05 課程關閉與再開課", () => {
     }
 
     async function failReopen(user: ReturnType<typeof userEvent.setup>) {
-      await user.click(await screen.findByRole("button", { name: "再開課" }))
-      await fillDateTime(/課程起始時間/, "202711010900")
+        await fillDateTime(/課程起始時間/, "202711010900")
       await fillDateTime(/課程訖止時間/, "202712311700")
-      await user.click(screen.getByRole("button", { name: "確認再開課" }))
-      return screen.findByRole("dialog", { name: "再開課" })
+      await user.click(screen.getByRole("button", { name: "更新並重開課" }))
+      return screen.findByRole("dialog", { name: "更新並重開課" })
     }
 
     it("發布視窗留下的缺漏不出現在再開課的對話框", async () => {
@@ -715,38 +745,17 @@ describe("ET05 課程關閉與再開課", () => {
     }, REOPEN_FLOW_TIMEOUT)
   })
 
-  it("再開課成功後接著按儲存不會被「不可再往前調整」誤擋（#428 迴歸）", async () => {
-    // 🔴 承上，`originalStart` 也必須一併寫回，否則本頁仍以**再開課前**的起始時間當
-    // 下限。教師若把課程補開在更早的日期（後端允許），接著編輯任何欄位按儲存，就會被
-    // 擋在一條指著他剛剛才成功送出的時間的錯誤訊息上。
-    //
-    // ⚠️ 這條是三個寫回中唯一驗得到 `setOriginalStart` 的——起訖時間本來就停在使用者
-    // 輸入的值上，光看畫面分不出有沒有寫回。
-    const user = userEvent.setup()
-    let saved = false
-    useCourse("CLOSED")
-    server.use(
-      http.post("/api/et/courses/:courseId/reopen", () =>
-        HttpResponse.json({ ...reopened, open_start_at: "2026-08-01T01:00:00Z" }),
-      ),
-      http.put("/api/et/courses/:courseId", () => {
-        saved = true
-        return HttpResponse.json({ course_id: 1, version: 7 })
-      }),
-    )
-    renderEditor()
-    await user.click(await screen.findByRole("button", { name: "再開課" }))
-    // 補開一段已經開始的期間：起始 2026-08-01，比再開課前的 2026-09-01 更早
-    await fillDateTime(/課程起始時間/, "202608010900")
-    await fillDateTime(/課程訖止時間/, "202712311700")
-    await user.click(screen.getByRole("button", { name: "確認再開課" }))
-    await screen.findByText("課程已再開課")
-
-    await user.click(screen.getByRole("button", { name: "儲存" }))
-
-    await waitFor(() => expect(saved).toBe(true))
-    expect(screen.queryByText("課程已開課，起始時間不可再往前調整")).not.toBeInTheDocument()
-  })
+  // ⚠️ 這裡原本有一條「再開課成功後接著按儲存不會被『不可再往前調整』誤擋（#428 迴歸）」。
+  //
+  // 它驗的是：教師把課程補開在更早的日期之後**留在本頁**繼續編輯時，起始時間的下限
+  // （`originalStart`）有沒有跟著更新——沒更新的話，再編任何欄位按儲存都會被一條指著
+  // 他剛送出的時間的錯誤訊息擋住。
+  //
+  // #720 之後「更新並重開課」成功就**回課程列表**（2026-10-19 裁示），而且非草稿狀態
+  // 也沒有「儲存」鈕了——「接著按儲存」這個情境從 UI 到不了，留著的測試會驗一條不存在
+  // 的路徑。對應的 `setOriginalStart` 寫回也一併移除，理由寫在 `reopenMut.onSuccess`。
+  //
+  // ⛔ 若日後把「成功後留在原地」改回來，那段寫回**與本測試**都要一起回來。
 
   it("關閉送出的 body 只有 version", async () => {
     let body: Record<string, unknown> | undefined
