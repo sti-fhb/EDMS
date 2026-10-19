@@ -487,6 +487,9 @@ _NOT_CONTENT_WRITES: Final[dict[str, str]] = {
     "POST /api/et/courses/{course_id}/reopen": "狀態轉換，不動內容",
     "POST /api/et/courses/{course_id}/content/apply": "**這支就是生效入口**",
     "DELETE /api/et/courses/{course_id}/content/stage": "放棄暫存——只刪暫存列，活表不動",
+    # ⚠️ 它**會**動暫存列（把問卷子樹從活表重抄一份），但不動活表——學員看到的內容
+    # 在前後完全相同，這正是「放棄」的定義。與上一條同類（#712）。
+    "DELETE /api/et/courses/{course_id}/content/stage/survey": "只放棄問卷的編輯——重抄活表，活表不動",
     "DELETE /api/et/surveys/{survey_id}": "刪問卷**僅草稿課程**可用（#238），已發布只能停用",
     # 學員端與教師的非內容操作
     #

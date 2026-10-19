@@ -481,6 +481,31 @@ async def discard_course_content(
     await _publish_service.discard_content(db, course_id, operator=operator)
 
 
+@router.delete(
+    "/courses/{course_id}/content/stage/survey",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+)
+async def discard_survey_edits(
+    course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
+    operator: OperatorInfo = Depends(get_operator),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """ET05「放棄問卷的編輯」：只丟掉課後問卷的暫存編輯，其餘內容保留（#712）。
+
+    問卷一旦有填答就不可改題。而「更新」會再檢核一次暫存的問卷結構是否與已生效版本
+    相同——**任何一次題目編輯都會讓它永遠不同**（選項是全量覆寫，識別碼換新），所以
+    編輯期間一出現填答，整門課的「更新」就卡死，章節與測驗的編輯一起出不去。
+
+    本端點把問卷還原成已生效的那一版，讓「更新」過得去，而**其餘編輯一個字都不動**。
+
+    > 在它之前唯一的出路是「取消」，那會丟掉整門課這一輪的全部編輯。
+
+    暫存區本來就是空的時一樣回 204（冪等）。⚠️ 草稿課程回 409 `ET_COURSE_010`。
+    """
+    await _publish_service.discard_survey_edits(db, course_id, operator=operator)
+
+
 @router.post(
     "/courses/{course_id}/close",
     response_model=CourseStatusResult,

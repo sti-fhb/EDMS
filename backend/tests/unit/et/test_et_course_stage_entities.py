@@ -16,6 +16,7 @@ from app.et.course.stage_entities import (
     SPEC_BY_TYPE,
     payload_fields,
 )
+from app.et.course.stage_repository import _SURVEY_ENTITY_TYPES
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
     ENTITY_ITEM,
@@ -167,6 +168,27 @@ class TestPayloadFields:
         assert SPEC_BY_TYPE[ENTITY_CHAPTER].parent_entity is None
         assert SPEC_BY_TYPE[ENTITY_CHAPTER].model is EtChapter
         assert SPEC_BY_TYPE[ENTITY_SURVEY].parent_entity is None
+
+
+class TestSurveySubtreeTypes:
+    """`stage_repository._SURVEY_ENTITY_TYPES` 必須涵蓋問卷底下的全部型別（#712）。
+
+    🔴 漏一種的後果不是「少丟一點」，而是**丟了一半**：列在清單裡的被刪掉、沒列的留著，
+    而留著的那批指向已不存在的父節點 ⇒ `stage_apply._validate_tree` 在套用時 500。
+
+    「問卷底下有哪些型別」這件事由 `SPEC_BY_TYPE` 的 `parent_entity` 決定，所以直接拿它
+    推導出答案再比對，而不是人工維護第二份清單。
+    """
+
+    def test_問卷子樹型別清單與對照表一致(self) -> None:
+        derived = {ENTITY_SURVEY}
+        for _ in range(len(APPLY_ORDER)):  # 層數不會超過型別數
+            derived |= {s.entity_type for s in APPLY_ORDER if s.parent_entity in derived}
+
+        assert set(_SURVEY_ENTITY_TYPES) == derived, (
+            "`_SURVEY_ENTITY_TYPES` 與 `SPEC_BY_TYPE` 推導出的問卷子樹不一致 ⇒ "
+            "`reseed_survey` 會只丟一半，留下指向不存在父節點的孤兒"
+        )
 
 
 class TestNonFieldFlags:

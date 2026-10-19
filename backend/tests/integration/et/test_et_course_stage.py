@@ -1483,6 +1483,75 @@ class TestSurveyFreeze:
         live = await db.scalar(select(EtSurveyQuestion).where(EtSurveyQuestion.sq_id == sq.source_id))
         assert live.stem == "改過的題幹"
 
+    async def test_凍結後可只放棄問卷的編輯而保住其餘內容(self, client, db) -> None:
+        """🥇 **#712 的核心**（2026-10-19 使用者裁示 B）：凍結後的出口。
+
+        教師在 T1 改了既有題目（當時無填答，合法）→ 學員在 T2 填答 → T3 按「更新」422。
+        **把題幹一字不差改回去也沒用**——`update_question` 的選項是全量覆寫，識別碼換新，
+        而凍結比對把 `SOURCE_ID` 算進去，結構永遠不會再相等。
+
+        本端點把問卷還原成已生效的那一版，讓「更新」過得去，而**章節的編輯要保住**
+        ——後者是本條與「取消」（丟掉整門課）的唯一差別，少了它兩者就沒有分別了。
+        """
+        uid = await _user(db, "ZT_F9")
+        cid = await _full_course(client, db, uid)
+        survey = await db.scalar(select(EtSurvey).where(EtSurvey.course_id == cid))
+        sq = await db.scalar(select(EtSurveyQuestion).where(EtSurveyQuestion.survey_id == survey.survey_id))
+        兩個選項 = [{"option_text": "滿意"}, {"option_text": "普通"}]
+        補 = await client.put(
+            f"/api/et/survey-questions/{sq.sq_id}",
+            json={"question_type": "SINGLE", "stem": sq.stem, "options": 兩個選項, "version": sq.version},
+            headers=_bearer(uid),
+        )
+        assert 補.status_code == 204, 補.text
+        await _publish(client, db, uid, cid)
+        await db.refresh(sq)
+
+        # T1：改問卷的題目，**同時**改一個章節名稱（後者必須被保住）
+        改題 = await client.put(
+            f"/api/et/survey-questions/{sq.sq_id}",
+            json={"question_type": "SINGLE", "stem": "改過的題幹", "options": 兩個選項, "version": sq.version},
+            headers=_bearer(uid),
+        )
+        assert 改題.status_code == 204, 改題.text
+        ch = next(n for n in await EtCourseStageRepository().load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "編輯中的章名"})
+
+        # T2：學員填答 → T3：更新被擋
+        await self._respond(db, survey.survey_id, uid)
+        with pytest.raises(AppError, match="已有學員填答"):
+            await _apply(db, cid, uid)
+
+        r = await client.delete(f"{_COURSES}/{cid}/content/stage/survey", headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        await _apply(db, cid, uid)  # 問卷回到生效版 ⇒ 更新過得去
+        assert (await _live_chapters(db, cid))[0].chapter_name == "編輯中的章名", (
+            "只放棄問卷，章節的編輯必須保住——否則與「取消」沒有分別"
+        )
+        live_sq = await db.scalar(select(EtSurveyQuestion).where(EtSurveyQuestion.sq_id == sq.sq_id))
+        assert live_sq.stem == sq.stem, "問卷題幹要回到學員原本看到的那一版"
+
+    async def test_放棄問卷編輯時暫存區為空則什麼都不做(self, client, db) -> None:
+        """🔴 **正向錨點兼安全網**：沒有編輯工作階段時逕行重抄，會造出一棵只有問卷的殘樹。
+
+        那棵樹在套用時等於「教師刪光了章節」——`_delete_removed` 會把章節與項目連同
+        學員進度一起軟刪。所以這裡必須是 no-op，而不是「反正重抄一下也沒差」。
+        """
+        uid = await _user(db, "ZT_FA")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        assert await repo.has_stage(db, cid) is False, "前置：還沒有編輯工作階段"
+        before = [c.chapter_name for c in await _live_chapters(db, cid)]
+        assert before, "前置：這門課要有章節，否則下面的斷言驗不到東西"
+
+        r = await client.delete(f"{_COURSES}/{cid}/content/stage/survey", headers=_bearer(uid))
+
+        assert r.status_code == 204, r.text
+        assert await repo.has_stage(db, cid) is False, "⛔ 不得因此建出暫存列——那會變成一棵殘樹"
+        assert [c.chapter_name for c in await _live_chapters(db, cid)] == before, "活表的章節一個都不能少"
+
     async def test_中途出現填答時教師仍刪得掉自己剛新增的題(self, client, db) -> None:
         """🔴 **凍結後的唯一逃生門**（2026-10-18 security review M-2）。
 
