@@ -150,4 +150,18 @@ export const coursesApi = {
   discardContent: async (courseId: number): Promise<void> => {
     await http.delete(`/et/courses/${courseId}/content/stage`)
   },
+
+  /**
+   * ET05「放棄問卷的編輯」：只把課後問卷還原成已生效的那一版（#712）。
+   *
+   * 問卷一旦有填答就不可改題，而「更新」會再檢核一次暫存的問卷結構是否與已生效版本
+   * 相同——**任何一次題目編輯都會讓它永遠不同**（選項是全量覆寫、識別碼換新），所以
+   * 教師就算把題幹一字不差改回去也沒用。
+   *
+   * ⚠️ 與 `discardContent` 的差別就是範圍：這支**只動問卷**，章節、教材、測驗的編輯
+   * 一個字都不留下痕跡地保住。少了它，教師唯一的出路是丟掉整門課這一輪的全部編輯。
+   */
+  discardSurveyEdits: async (courseId: number): Promise<void> => {
+    await http.delete(`/et/courses/${courseId}/content/stage/survey`)
+  },
 }

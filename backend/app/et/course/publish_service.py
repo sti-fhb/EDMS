@@ -329,6 +329,51 @@ class EtPublishService:
             # 編輯中的文字寫進稽核表。
             await self._log(db, operator.user_id, course_id, f"放棄尚未更新的課程內容編輯（{removed} 項）")
 
+    async def discard_survey_edits(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
+        """只放棄**問卷**的編輯，其餘內容的編輯保留（#712，2026-10-19 使用者裁示 B）。
+
+        ## 這支端點存在的唯一理由：凍結後的出口
+
+        問卷一旦有填答就不可改題（`ET_SURVEY_003`）。而 `update_question` 的選項是**全量
+        覆寫**，`_ensure_survey_not_frozen` 的比對又把 `SOURCE_ID` 算進去，於是：
+
+        | 時點 | 事件 |
+        |---|---|
+        | T1 | 教師改了既有題目（當時無填答，合法），暫存的選項全部換成新節點 |
+        | T2 | 學員送出填答 |
+        | T3 | 按「更新」→ 422。**把題幹一字不差改回去也沒用**——選項的識別碼回不來 |
+
+        卡住的不只是問卷：該檢核跑在 `apply_stage` 最前面，所以章節、教材、測驗的編輯
+        一起出不去。在本端點之前，唯一出路是 `discard_content`（丟掉**整門課**的編輯）。
+
+        ## 做法是「重抄」不是「刪除」
+
+        委派 `stage_repository.reseed_survey`：丟掉暫存的問卷子樹，再從活表原樣抄一份回來
+        ——包含 `SOURCE_ID`，所以結構重新等於活表、更新過得去。
+        ⛔ 只刪不抄會讓 `_delete_removed` 把活表的問卷判成「教師刪了它」而軟刪掉。
+
+        ## 暫存區是空的時候什麼都不做
+
+        沒有編輯工作階段就沒有「問卷的編輯」可放棄。此時若逕行重抄，會造出一棵**只有
+        問卷**的暫存樹，而那在套用時等於「教師刪光了章節」——回 204 直接結束才是對的。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；409 `ET_COURSE_010` 草稿。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if course.status == COURSE_DRAFT:
+            raise AppError(
+                status_code=409,
+                detail="草稿課程的編輯直接生效，沒有可放棄的暫存內容",
+                error_code="ET_COURSE_010",
+            )
+        await self._stage.lock_course(db, course_id)
+        if not await self._stage.has_stage(db, course_id):
+            return
+        await self._stage.reseed_survey(db, course_id, operator)
+        # 只記動作、不記內容：暫存列從未對學員生效，寫進稽核沒有價值（同 `discard_content`）。
+        await self._log(db, operator.user_id, course_id, "放棄尚未更新的課後問卷編輯")
+
     async def close(
         self, db: AsyncSession, course_id: int, req: CloseCourseReq, *, operator: OperatorInfo
     ) -> CourseStatusResult:

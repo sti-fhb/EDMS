@@ -22,6 +22,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Final
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,9 +33,21 @@ from app.core.utils import utcnow
 from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, payload_fields
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
-from app.et.course.stage_rules import StageNode
+from app.et.course.stage_rules import (
+    ENTITY_SURVEY,
+    ENTITY_SURVEY_OPTION,
+    ENTITY_SURVEY_QUESTION,
+    StageNode,
+)
 
 logger = logging.getLogger(__name__)
+
+#: 問卷子樹的三種實體型別——`reseed_survey` 的作用範圍。
+#:
+#: ⚠️ 日後若問卷底下多出第四種型別，**這裡不補就會變成「丟了一半」**：舊的那種被刪掉、
+#: 新的那種留著，而留著的那批指向已不存在的父節點 ⇒ `_validate_tree` 在套用時 500。
+#: 由 `test_問卷子樹型別清單與對照表一致` 比對 `SPEC_BY_TYPE`，不靠人記得。
+_SURVEY_ENTITY_TYPES: Final = (ENTITY_SURVEY, ENTITY_SURVEY_QUESTION, ENTITY_SURVEY_OPTION)
 
 
 @dataclass(frozen=True)
@@ -223,6 +236,60 @@ class EtCourseStageRepository:
         result = await db.execute(delete(EtCourseContentStage).where(EtCourseContentStage.course_id == course_id))
         await db.flush()
         return result.rowcount or 0
+
+    async def reseed_survey(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> int:
+        """把暫存區的**問卷子樹**丟掉、從活表重抄一份，回傳重抄了幾列（#712）。
+
+        ## 為什麼需要「只放棄問卷」這個粒度
+
+        `update_question` 的選項是**全量覆寫**（舊節點軟刪、新節點以 `SOURCE_ID = None`
+        新增）。而 `stage_apply._ensure_survey_not_frozen` 的結構比對把 `SOURCE_ID` 算進去，
+        所以**任何一次題目編輯都會讓暫存結構永遠不等於活表**——教師就算把題幹一字不差地
+        改回去也一樣。
+
+        於是只要編輯期間出現填答，整門課的「更新」就卡死（該檢核跑在 `apply_stage` 最前面，
+        章節與測驗一起陪葬），而唯一出路是放棄**全部**編輯。本方法給出一條只丟問卷的路。
+
+        ⛔ **不可以改成「只刪不抄」。** `_delete_removed` 以「活表有、暫存沒有」判定教師刪了
+        它——問卷節點整個消失會讓它把**活表的問卷連同題目、選項一起軟刪**，而那會連帶
+        既有填答的指向。重抄才是正確的「回到原狀」。
+
+        ⚠️ 呼叫端須先確認**暫存區不是空的**。對空的暫存區重抄問卷會造出一棵只有問卷的
+        殘樹，而那在套用時等於「教師刪光了章節」。
+
+        ⚠️ 也須先持有 `lock_course`：同時按下的「更新」可能正在讀這批列。
+
+        Returns:
+            重抄進暫存的列數。活表沒有問卷時回 0（代表那份問卷是本次新建的，丟掉就沒了）。
+        """
+        await db.execute(
+            delete(EtCourseContentStage).where(
+                EtCourseContentStage.course_id == course_id,
+                EtCourseContentStage.entity_type.in_(_SURVEY_ENTITY_TYPES),
+            )
+        )
+        await db.flush()
+
+        nodes = await load_live_tree(db, course_id)
+        root = next((n for n in nodes if n.entity_type == ENTITY_SURVEY), None)
+        if root is None:
+            return 0
+
+        # 問卷子樹只有三層（問卷 → 題目 → 選項），逐層往下收。
+        subtree: dict[LiveKey, object] = {root.key: root}
+        for _ in range(2):
+            subtree.update({n.key: n for n in nodes if n.parent_key in subtree})
+
+        ctx = _SeedCtx(course_id=course_id, operator=operator, now=utcnow())
+        stage_id_by_key: dict[LiveKey, int] = {}
+        # `load_live_tree` 保證父在子之前，子層查父層的 `STAGE_ID` 必定查得到。
+        for node in (n for n in nodes if n.key in subtree):
+            parent_stage_id = None if node.parent_key is None else stage_id_by_key[node.parent_key]
+            stage_id_by_key[node.key] = await self._add(
+                db, ctx, node.entity_type, node.row, parent=parent_stage_id, sort_order=node.sort_order
+            )
+        await db.flush()
+        return len(stage_id_by_key)
 
     async def seed_from_live(self, db: AsyncSession, course_id: int, operator: OperatorInfo) -> None:
         """把活表的內容樹整棵複製進暫存區。
