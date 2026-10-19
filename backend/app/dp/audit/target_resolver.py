@@ -40,9 +40,7 @@ _USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER", "
 #
 # ⛔ 不要把課程名稱也改成在這裡查活表：課程改名後，舊稽核紀錄會跟著變成新名字，
 # 那是竄改歷史（#717 裁示）。
-ET_COURSE_FUNCS = frozenset(
-    {"ET-COURSE", "ET-ENROLLMENT", "ET-EXPORT", "ET-REPORT", "ET-QUIZ-RESET", "ET-APPROVAL"}
-)
+ET_COURSE_FUNCS = frozenset({"ET-COURSE", "ET-ENROLLMENT", "ET-EXPORT", "ET-REPORT", "ET-QUIZ-RESET", "ET-APPROVAL"})
 
 
 def et_user_segment(target_id: str) -> str | None:
@@ -52,6 +50,7 @@ def et_user_segment(target_id: str) -> str | None:
     """
     parts = target_id.split(":")
     return parts[1] if len(parts) >= 2 and parts[1] else None
+
 
 # (func_name, target_id) → 顯示名稱
 _DisplayMap = dict[tuple[str, str], str]
