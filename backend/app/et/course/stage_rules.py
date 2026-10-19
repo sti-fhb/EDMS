@@ -39,6 +39,14 @@ from app.et.course.publish_rules import ChapterSummary, CourseSnapshot, ItemSumm
 #
 # 11 張內容表各一種。⚠️ 新增型別時 `stage_entities.py` 的對照表要一起補，否則該型別
 # 會在 seed 與套用時被靜默略過——那是「教師編了但更新沒生效」，不會有任何錯誤訊息。
+#: 課程本體與受訓對象（#720）。
+#:
+#: 🔴 它們與下面 11 種**不同層**：那 11 種是「課程的內容」，這兩種是「課程本身」。
+#: 差別有實際後果——`stage_apply._delete_removed` 以「活表有、暫存沒有」判定教師刪了它，
+#: 而**課程列永遠不該被刪**（刪課程是另一條路徑，不經暫存）。
+ENTITY_COURSE: Final = "COURSE"
+ENTITY_COURSE_TAG: Final = "COURSE_TAG"
+
 ENTITY_CHAPTER: Final = "CHAPTER"
 ENTITY_ITEM: Final = "ITEM"
 ENTITY_MATERIAL: Final = "MATERIAL"

@@ -29,9 +29,12 @@ seed 不會搬它、套用時會把活表那一欄寫回預設值——教師看
 from dataclasses import dataclass
 from typing import Any, Final
 
-from app.et.course.models import EtChapter, EtItem
+from app.et.catalog.models import EtCourseTag
+from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.stage_rules import (
     ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_ITEM,
     ENTITY_MATERIAL,
     ENTITY_MATERIAL_DOC,
@@ -79,13 +82,58 @@ class EntitySpec:
     parent_entity: str | None
     link: str
     fk: str
+    #: 明確白名單——**只有課程主檔用它**（#720）。`None` ＝ 照常推導。
+    #:
+    #: 🔴 推導的預設是「新欄位自動納入」，那對內容表是對的（新欄位多半是內容），
+    #: 但對 `ET_COURSE` 是**反的**：它 13 個欄位裡只有 5 個是教師編的基本資料，
+    #: 其餘是系統狀態（狀態、擁有者、邀請碼、首次發布、最近關閉、加急提醒旗標）。
+    #: 自動納入會讓新加的系統欄位被當成內容搬進暫存、再寫回活表——最危險的是
+    #: `status`，那等於讓「更新」繞過整條狀態機。
+    #:
+    #: ⚠️ 白名單會過期，所以 `test_課程主檔的每個欄位都要明確分類` 強制
+    #: 「`ET_COURSE` 加欄位時必須二選一」。⛔ 不要為了讓那條變綠而把新欄位
+    #: 隨手丟進 `COURSE_SYSTEM_FIELDS`。
+    only_fields: tuple[str, ...] | None = None
 
 
 #: 🔴 **順序即套用順序**：每一列被建立時，它依賴的對象都已經有活表 id。
 #:
 #: `MATERIAL` / `QUIZ` 排在 `ITEM` 之前，因為項目要填 `MATERIAL_ID` / `QUIZ_ID`
 #: （`LINK_PARENT_FK`）。其餘一律父先於子。
+#: 課程主檔中**不是**教師編輯之基本資料的欄位（#720）。
+#:
+#: 它與 `COURSE_PAYLOAD_FIELDS` 互補、合起來必須涵蓋 `ET_COURSE` 的全部欄位——由
+#: `test_課程主檔的每個欄位都要明確分類` 強制。⚠️ 新增欄位時**必須二選一**，
+#: 沒分類的症狀是教師改了卻不生效，而畫面上沒有任何訊息。
+COURSE_SYSTEM_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "course_id",  # PK
+        "status",  # 🔴 狀態機專屬——搬了會讓「更新」把狀態改回編輯開始那一刻的值
+        "owner_id",  # 建立當下記錄，永久不可變更
+        "invitation_code",  # 發布當下產生，之後沿用
+        "first_published_at",  # 稽核用時間戳
+        "closed_at",  # 最近一次關閉時間
+        "urgent_remind_sent",  # 加急提醒的簿記旗標
+        "version",  # 活表列的樂觀鎖
+        *_AUDIT_FIELDS,
+    }
+)
+
+#: 教師在基本資料區真正編輯的五個欄位。
+COURSE_PAYLOAD_FIELDS: Final[tuple[str, ...]] = (
+    "course_name",
+    "description",
+    "open_start_at",
+    "open_end_at",
+    "require_approval",
+)
+
 APPLY_ORDER: Final[tuple[EntitySpec, ...]] = (
+    # 🔴 課程本體排第一：章節與問卷的 `COURSE_ID` 指向它。今天課程列必然已存在
+    # （暫存只對已發布 / 已關閉開啟），所以這是「更新順序」而非「建立順序」；
+    # 但排錯了會在日後若支援草稿暫存時靜默壞掉。
+    EntitySpec(ENTITY_COURSE, EtCourse, "course_id", None, LINK_CHILD_FK, "course_id", COURSE_PAYLOAD_FIELDS),
+    EntitySpec(ENTITY_COURSE_TAG, EtCourseTag, "course_tag_id", ENTITY_COURSE, LINK_CHILD_FK, "course_id"),
     EntitySpec(ENTITY_CHAPTER, EtChapter, "chapter_id", None, LINK_CHILD_FK, "course_id"),
     EntitySpec(ENTITY_MATERIAL, EtMaterial, "material_id", ENTITY_ITEM, LINK_PARENT_FK, "material_id"),
     EntitySpec(ENTITY_QUIZ, EtQuiz, "quiz_id", ENTITY_ITEM, LINK_PARENT_FK, "quiz_id"),
@@ -119,6 +167,8 @@ def payload_fields(spec: EntitySpec) -> tuple[str, ...]:
     ⚠️ **推導而非手寫**（理由見模組 docstring）。欄位集合＝全部欄位扣掉：
     PK、父子連結欄位、`SORT_ORDER`、`VERSION`、稽核欄位。
     """
+    if spec.only_fields is not None:
+        return spec.only_fields
     excluded = {spec.pk} | _AUDIT_FIELDS | _NEVER_STAGED | _parent_fk_fields_on(spec.model)
     if spec.link == LINK_CHILD_FK:
         excluded.add(spec.fk)
