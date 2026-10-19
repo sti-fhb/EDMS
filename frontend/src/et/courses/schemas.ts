@@ -51,6 +51,17 @@ export interface CourseDetail {
    * ⚠️ 草稿恆為 `false`：草稿的編輯本來就直接寫活表，沒有「尚未更新」這種狀態。
    */
   has_pending_changes: boolean
+  /**
+   * 是否**視同關閉**——「已關閉」或「已發布但閱課期間已過」皆為 `true`（#720）。
+   *
+   * 🔴 編輯頁底部動作列靠它分流：視同關閉是「取消｜保留編輯｜更新並重開課」，
+   * 運作中的已發布是「取消｜更新」。
+   *
+   * ⚠️ **不要自己判 `status`**：期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉
+   * `CLOSED` 屬未實作的 ET-16，故此為常態），自行判定會給那門課一排錯的按鈕。
+   * 與 `CourseCard.is_closed` 同一語意、同一理由。
+   */
+  is_closed: boolean
 }
 
 export interface TagOption {
@@ -178,12 +189,13 @@ export const COURSE_STATUS_LABEL: Record<string, string> = {
   CLOSED: "已關閉",
 }
 
-/** 再開課送出的新起訖時間（US11 / #288）——兩者皆必填，對齊後端 `ReopenCourseReq`。 */
-export interface ReopenPayload {
-  open_start_at: string
-  open_end_at: string
-  version: number
-}
+// ⚠️ `ReopenPayload` 已於 #720 移除——`coursesApi.reopen` **不送 body**。
+//
+// 新的起訖時間是基本資料的一部分，由 `coursesApi.update()` 先寫進暫存區，再由
+// 「更新並重開課」連同其餘編輯一起套用。送在 body 裡會變成「後端檢核暫存那組、
+// 前端送另一組」，而那正是 #720 要消滅的「檢核通過但生效後不合格」。
+//
+// ⛔ 不要為了「再開課應該有自己的表單」而加回來。
 
 /**
  * 關閉 / 再開課之結果（對齊後端 `CourseStatusResult`）。

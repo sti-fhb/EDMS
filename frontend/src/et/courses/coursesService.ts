@@ -13,7 +13,6 @@ import type {
   ContentUpdateResult,
   OwnerFilterParams,
   OwnerOption,
-  ReopenPayload,
   TagOption,
 } from "./schemas"
 
@@ -115,14 +114,47 @@ export const coursesApi = {
   },
 
   /**
-   * 再開課（US11 AC 8 / #288）——**強制帶一組新起訖時間**。
+   * 「更新並重開課」（US11 AC 8 / #288 / #720）——套用暫存的編輯後狀態回「已發布」。
    *
    * 會重跑發布六項檢核（SA Q2 裁示 A）：關閉期間教師端仍可編輯內容，課程可能已不符
    * 發布條件，不合格回 422 `ET_PUBLISH_001` + `blockers`（與 `publish` 同形狀）。
+   *
+   * ⚠️ **無 request body**（#720）。新的起訖時間是基本資料的一部分、先由 `update()`
+   * 寫進暫存區，再由本支連同其餘編輯一起套用。帶在 body 裡會變成「檢核一組、套用
+   * 另一組」——後端檢核讀暫存，前端若另送一組，兩者可以不同。
+   *
+   * ⛔ 不要把 `ReopenPayload` 加回來。
    */
-  reopen: async (courseId: number, payload: ReopenPayload): Promise<CourseStatusResult> => {
-    const { data } = await http.post<CourseStatusResult>(`/et/courses/${courseId}/reopen`, payload)
+  reopen: async (courseId: number): Promise<CourseStatusResult> => {
+    const { data } = await http.post<CourseStatusResult>(`/et/courses/${courseId}/reopen`)
     return data
+  },
+
+  /**
+   * ET05「保留編輯」（已關閉課程）——把這一輪的編輯留著，**不對學員生效**（#720）。
+   *
+   * 🔴 **它標記去留，不是還原點。** 後端設的是旗標、不複製暫存樹，所以按下當下的那一版
+   * 在下一次編輯後就回不去了。鈕名與路徑都刻意避開「草稿」二字（2026-10-20 裁示）——
+   * 那個字承諾一個回得去的版本。
+   *
+   * ⚠️ 只有已關閉 / 視同關閉的課程有這顆鈕；運作中的已發布課程回 409 `ET_COURSE_011`。
+   */
+  keepEdits: async (courseId: number): Promise<void> => {
+    await http.post(`/et/courses/${courseId}/content/keep`)
+  },
+
+  /**
+   * 進入編輯頁時呼叫：丟掉**沒按過「保留編輯」**的暫存殘留（#720）。
+   *
+   * 🔴 「沒按更新就離開 ＝ 放棄本次全部編輯」若只靠前端攔截離開，那個保證是**假的**
+   * ——關分頁、當機、斷線都繞得過去。殘留最糟的不是它存在，而是教師**看不出那是殘留**：
+   * 畫面長得跟自己上次存的一樣，他會以為那就是目前的內容。
+   *
+   * 冪等，且草稿課程後端靜默略過——前端對所有狀態一律呼叫，不自己判斷課程狀態
+   * （那個判斷遲早與後端分岔）。
+   */
+  discardUnkeptStage: async (courseId: number): Promise<void> => {
+    await http.delete(`/et/courses/${courseId}/content/stage/unkept`)
   },
 
   /**

@@ -391,6 +391,10 @@ class EtCourseService:
             owner_name=owner_name,
             owner_is_disabled=owner_is_disabled,
             is_owner=is_owner,
+            # ⚠️ 取**活表**的訖止，不是暫存的（#720，2026-10-19 裁示「排程一律看活表」）：
+            # 這個旗標描述的是「學員此刻進不進得去」，而學員看的是活表。教師把訖止延到
+            # 未來、還沒按「更新」時，課程仍然是視同關閉的。
+            is_closed=is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()),
             audiences=basic.audiences if basic else [AudiencePair(**p._asdict()) for p in pairs],
             # 僅 owner 可見（#247）：學員角色人人都有，對所有人回傳等於讓任何登入者
             # 收集全站邀請碼、自行加入任意課程，繞過 ET-4 的邀請門檻與限流。

@@ -399,6 +399,16 @@ class CourseDetail(BaseModel):
     #: 本旗標則是「人還在、帳號停用了」。混為一談會讓真正的資料問題被當成正常狀態。
     owner_is_disabled: bool = False
     is_owner: bool
+    #: 是否**視同關閉**——「已關閉」或「已發布但閱課期間已過」皆為 `True`（#720）。
+    #:
+    #: 🔴 編輯頁的底部動作列靠它分流：視同關閉的課程是「取消｜保留編輯｜更新並重開課」，
+    #: 運作中的已發布課程是「取消｜更新」。
+    #:
+    #: ⚠️ **前端不可自己判 `status`**：期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉
+    #: `CLOSED` 屬未實作的 ET-16，故此為常態），自行判定會給那門課一排錯的按鈕——教師
+    #: 按下「更新」，後端卻因為課程已視同關閉而走另一條路。`CourseCard.is_closed` 同一
+    #: 語意、同一理由，兩者一起看。
+    is_closed: bool
     audiences: list[AudiencePair]
     chapters: list[ChapterItem]
     #: 課程邀請碼（8 碼純數字）。**僅 owner 可見**——非擁有者一律為 `None`。
