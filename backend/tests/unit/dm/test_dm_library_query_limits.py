@@ -5,6 +5,20 @@
 
 存取閘（`get_dm_context`）與 DB session 以 `dependency_overrides` 換掉：本檔只驗參數驗證，
 422 在 handler 本體執行前就發生，故不需要真 DB，依 `sti-testing.md`「輸入驗證一律寫 unit」。
+
+## 「放行」為何斷言 `== 500` 而不是 `!= 422`（#723）
+
+`_fake_db` 回 `None`，所以通過驗證的請求會走進 handler、在 stub DB 上炸開，再由
+`raise_app_exceptions=False` 轉成 500。**「拿到 500」就是「驗證放行了」的證據**，而且順帶
+釘住「請求確實抵達了 handler」。
+
+初版寫成 `!= 422`：推論正確，但**斷言比推論寬**——401 / 403 / **404** 也都滿足，於是
+`_URL` 打錯一個字、或存取閘 override 失效時，這幾條會假性全綠（實測見 #723）。
+
+⚠️ `== 500` 綁的是「stub DB 為 `None`、service 第一次查詢就炸」這條機制。若日後 service
+改成先做純檢核再查 DB，這幾條會誤紅。屆時改用排除式 `not in (401, 403, 404, 422)`，或比對
+handler 才有的特徵。⛔ **不要退回 `!= 422`，也不要用「body 不是驗證錯誤的形狀」——404 的
+body 是 `{"detail": "Not Found"}`、同樣會通過，那正是本次補掉的洞。**
 """
 
 from collections.abc import AsyncGenerator
@@ -34,7 +48,7 @@ def client():
 
     `raise_app_exceptions=False` 使 handler 內的例外轉成 500 回應而非拋回測試——「參數合法」
     的那幾條靠的正是這點：**請求能走到 handler 並在 stub DB 上炸開，本身就證明驗證放行了**，
-    所以斷言寫成「不是 422」。少了這組，把上限設成 1 也能讓 422 那幾條全過。
+    所以斷言寫成 `== 500`（見檔頭）。少了這組，把上限設成 1 也能讓 422 那幾條全過。
     """
     app.dependency_overrides[get_dm_context] = lambda: DmContext(user_id="u1", roles=frozenset({DM_VIEWER}))
     app.dependency_overrides[get_db] = _fake_db
@@ -60,7 +74,7 @@ async def test_tag_ids_在上限內放行(client):
     async with client as c:
         resp = await c.get(_URL, params={"tag_ids": list(range(1, 51))})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500  # 走進 handler、在 stub DB 上炸開 ＝ 驗證放行（見檔頭）
 
 
 @pytest.mark.parametrize("value", [2**63, 10**30])
@@ -90,7 +104,7 @@ async def test_合法_tag_id_放行(client):
     async with client as c:
         resp = await c.get(_URL, params={"tag_ids": [1, 2**63 - 1]})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500  # 走進 handler、在 stub DB 上炸開 ＝ 驗證放行（見檔頭）
 
 
 @pytest.mark.parametrize("field", ["category", "func_code"])
@@ -107,4 +121,4 @@ async def test_代碼類參數在長度內放行(client, field):
     async with client as c:
         resp = await c.get(_URL, params={field: "X" * 10})
 
-    assert resp.status_code != 422
+    assert resp.status_code == 500  # 走進 handler、在 stub DB 上炸開 ＝ 驗證放行（見檔頭）
