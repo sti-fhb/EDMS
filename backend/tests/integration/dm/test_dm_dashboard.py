@@ -175,7 +175,7 @@ async def test_公告回分類中文名稱_而非代碼(db):
     i = next(x for x in await _svc.get_announcements(db, **_PRIV) if x.doc_id == "DM-SOP-000020")
 
     assert i.category_name == "標準作業程序"
-    assert i.category_code == "SOP"  # ⛔ 代碼欄位保留——同檔 StatCard 以它當 React key
+    assert i.category_code == "SOP"  # 代碼欄位保留（對外相容），不隨本次變更移除
 
 
 async def test_公告分類名稱取目前值_改名後跟著變(db):
@@ -188,6 +188,26 @@ async def test_公告分類名稱取目前值_改名後跟著變(db):
     i = next(x for x in await _svc.get_announcements(db, **_PRIV) if x.doc_id == "DM-SOP-000021")
 
     assert i.category_name == "作業程序書"
+
+
+async def test_分類停用後公告仍列出且仍有名稱(db):
+    """分類於 DP03 停用後，既有公告仍要列出、仍顯示該分類名稱。
+
+    理由同 `test_dm_personal_flow.py` 的同名測試：停用是管理者唯一能做的操作（`DM_CATEGORY`
+    無刪除路徑），所以 inner join **不得**帶 `is_enabled` 條件，否則該文件會整筆從公告消失。
+
+    ⚠️ 公告查詢另有 `LIMIT`，文件被 join 濾掉時會被後面的遞補，畫面看起來「正常」——
+    比草稿匣那側更難從畫面察覺。
+    """
+    await _published_doc(db, "DM-SOP-000022", category="SOP", name="領血SOP")
+
+    await db.execute(update(DmCategory).where(DmCategory.category_code == "SOP").values(is_enabled=False))
+    await db.flush()
+
+    items = await _svc.get_announcements(db, **_PRIV)
+
+    i = next(x for x in items if x.doc_id == "DM-SOP-000022")  # 不得消失
+    assert i.category_name == "標準作業程序"
 
 
 async def test_announcements_excludes_older_than_30d(db):

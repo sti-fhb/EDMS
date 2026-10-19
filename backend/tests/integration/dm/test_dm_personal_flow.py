@@ -143,7 +143,7 @@ async def test_草稿匣回分類中文名稱_而非代碼(db):
     d = next(x for x in await _svc.list_drafts(db, user_id="ed") if x.doc_id == "DM-SOP-000570")
 
     assert d.category_name == "標準作業程序"
-    assert d.category_code == "SOP"  # ⛔ 代碼欄位保留不移除——移除是超出範圍的破壞性變更
+    assert d.category_code == "SOP"  # 代碼欄位保留（對外相容），不隨本次變更移除
 
 
 async def test_草稿匣分類名稱取目前值_改名後跟著變(db):
@@ -163,6 +163,29 @@ async def test_草稿匣分類名稱取目前值_改名後跟著變(db):
     d = next(x for x in await _svc.list_drafts(db, user_id="ed") if x.doc_id == "DM-SOP-000571")
 
     assert d.category_name == "作業程序書"
+
+
+async def test_分類停用後草稿仍列出且仍有名稱(db):
+    """分類於 DP03 停用後，既有草稿仍要列出、仍顯示該分類名稱。
+
+    ⭐ 這是本次改用 **inner join** 之後**唯一現實可達**的退化路徑：`DM_CATEGORY` 沒有刪除路徑
+    （`BaseModelNoDelete`，`CatalogService` 只有 create / rename / set_enabled），管理者能做的
+    只有停用，而停用**不刪列**。所以 join 必須**不帶** `is_enabled` 條件。
+
+    ⚠️ 日後有人為了「只顯示啟用中的分類」順手加上該條件，這份草稿會**整筆消失**
+    （不是少一個名稱），而本檔其餘關於分類的測試不會紅——它們用的都是啟用中的分類。
+    """
+    await _seed_user(db, "ed", "撰寫")
+    await _doc(db, "DM-SOP-000572", status="DRAFT")
+    await _version(db, "DM-SOP-000572", "1.0", status="DRAFT")
+
+    await db.execute(update(DmCategory).where(DmCategory.category_code == "SOP").values(is_enabled=False))
+    await db.flush()
+
+    drafts = await _svc.list_drafts(db, user_id="ed")
+
+    d = next(x for x in drafts if x.doc_id == "DM-SOP-000572")  # 不得消失
+    assert d.category_name == "標準作業程序"
 
 
 async def test_drafts_last_edited_falls_back_to_created(db):
