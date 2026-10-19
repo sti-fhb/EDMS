@@ -1,9 +1,23 @@
 import "@testing-library/jest-dom/vitest"
 
-import { cleanup } from "@testing-library/react"
+import { cleanup, configure } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll } from "vitest"
 
 import { server } from "./server"
+
+// `findBy*` 用的是 **asyncUtilTimeout**，不是 `it(...)` 的 testTimeout（後者 5000ms）。
+// 兩個預算誰小誰綁住，而這個的預設只有 1000ms —— 整組跑時每檔的冷啟動（模組載入 +
+// MSW handler + React 首次 render）量級約 4 秒，所以**各檔第一條測試的第一個等待**
+// 會隨機被這 1000ms 吃掉，症狀是 `Unable to find an element with the text: ...`、
+// 耗時 1~2 秒，看起來像元件壞了而不像假紅（#733）。
+//
+// ⛔ 對這一類加 `it(..., 15000)` 原理上無效 —— testTimeout 從來不是綁住它的那個。
+//
+// ⚠️ 本檔在 #733 之前**沒有**這行，但 `sti-testing.md` 已宣稱有 3000ms——
+// 那個假宣稱讓人不會去查（「我們設過 3 秒了，所以問題不在這」）。改動前實測：
+// `getConfig().asyncUtilTimeout = 1000`、失敗牆鐘 1019ms；改動後 3000 / 3016ms。
+// `setup.test.ts` 會釘住本設定，拿掉這行它就紅。
+configure({ asyncUtilTimeout: 3000 })
 
 // jsdom 的 `Blob` 沒有 `.stream()`。凡是 `responseType: "blob"` 的請求（三處 CSV 匯出
 // 都是），MSW 的 XHR 攔截器會把回應包成 undici `Response`，而那裡會呼叫 `blob.stream()`
