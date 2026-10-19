@@ -55,8 +55,12 @@ cd backend && uv run alembic check
 
 建立新 migration **之前**，先確認目前只有一個 head：
 
+> ⛔ 用 `python`，**不要寫成 `python3`**。本機的 `python3` 是個 stub，執行後
+> **零輸出、exit 49**——而這支腳本的「沒問題」長相本來就是「只印一行 `Heads (1)`」，
+> 所以靜默失敗會被讀成通過，正好產生它要防的那種假綠。
+
 ```bash
-cd backend && python3 - <<'EOF'
+cd backend && python - <<'EOF'
 import os, re
 d = 'alembic/versions'
 revs = {}
