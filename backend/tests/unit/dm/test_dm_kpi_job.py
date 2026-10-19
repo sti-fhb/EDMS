@@ -21,6 +21,16 @@ commit 的位置因此是這支排程的關鍵耦合點，而它**只存在於 w
 症狀是「沒收到週報」，而任何人都會先去查範本、收件人、`DM_ADMIN` 角色——不會想到 wrapper
 的 commit。**這與 #627 是同一個形狀**：排程唯一的對外訊號與實際產出脫鉤，而那次存活了兩個月。
 
+### ⚠️ 本檔守不住的另一半
+
+上述因果鏈成立，靠的是**兩件事**：①wrapper 有 commit（本檔守住）②整條鏈上**沒有別人**
+commit——`dp/notify/repository.add_logs` 只 `flush()`、`NotifyService.send_email` 明載「於
+呼叫方交易內執行（同一 db session、只 flush）」。
+
+本檔**只守得住第①件**。若日後有人在 `add_logs` 或 `run_weekly` 裡加了 `commit()`，
+「信件之所以持久化是因為 wrapper commit」這條性質就變形了，而這 4 條測試**仍然全綠**
+——那正是本檔開頭引用的 #627 形狀。第②件目前只由那兩處的 docstring 約定，沒有測試守著。
+
 ## 為何用「會記事件的 fake」而不是 mock 的 `assert_awaited`
 
 初版用 `MagicMock` + `cm.__aexit__.assert_awaited_once()`。code review 指出那條**沒有被驗證
@@ -80,7 +90,12 @@ class _RecordingSession:
 
 
 def _session_factory(calls: list[str]) -> MagicMock:
-    """模擬 `AsyncSessionLocal`——呼叫它回傳一個 `_RecordingSession`。"""
+    """模擬 `AsyncSessionLocal`——呼叫它回傳一個 `_RecordingSession`。
+
+    ⚠️ 每次呼叫回**同一個**實例。目前 `run()` 只開一個 session 所以沒問題；日後若改成開兩個，
+    兩個 session 的事件會記進同一條 `calls`、看起來像一個交錯的 session，順序斷言可能**靜默
+    讀錯**。屆時要改成每次 `return` 新實例並分開記錄。
+    """
     return MagicMock(return_value=_RecordingSession(calls))
 
 
