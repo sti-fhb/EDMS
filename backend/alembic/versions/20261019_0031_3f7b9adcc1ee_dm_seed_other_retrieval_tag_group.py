@@ -1,8 +1,13 @@
 """dm_seed_other_retrieval_tag_group
 
 Revision ID: 3f7b9adcc1ee
-Revises: c3fcddaa575b
+Revises: d2a9e4c13b57
 Create Date: 2026-10-19 00:31:00.000000
+
+> 本檔原指向 `c3fcddaa575b`（#508）。開 PR 前複查發現 main 已合併 `d2a9e4c13b57`
+> （ET stage add version）且同樣以 `c3fcddaa575b` 為 parent——兩支並列會造成 alembic
+> 多頭、upgrade 被拒。已 re-point 至 `d2a9e4c13b57`。
+> ⚠️ 多頭只在「本分支 + main」合起來才存在，單看任一邊都是單一 head。
 
 新增第四個檢索標籤組 `OTHER`「其他」（#711）。
 
@@ -50,7 +55,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "3f7b9adcc1ee"
-down_revision: Union[str, None] = "c3fcddaa575b"
+down_revision: Union[str, None] = "d2a9e4c13b57"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
