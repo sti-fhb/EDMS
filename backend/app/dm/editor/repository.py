@@ -30,6 +30,10 @@ _PENDING_REVIEW = "PENDING_REVIEW"
 _PENDING = "PENDING"
 _OBSOLETE = "OBSOLETE"
 _PUBLISHED = "PUBLISHED"
+_PENDING_OBSOLETE = "PENDING_OBSOLETE"
+# 手冊唯一性之「已有對應手冊」狀態集合：在架（仍列於 DM01）即算數，不限 PUBLISHED（#738）。
+# ⛔ 不可加入 OBSOLETE：已下架手冊若也算數，換手冊將永遠做不到。
+_MANUAL_LIVE_STATUSES = (_PUBLISHED, _PENDING_OBSOLETE)
 _MANUAL = "MANUAL"
 _AUDIENCE = "AUDIENCE"
 _RETRIEVAL = "RETRIEVAL"
@@ -314,12 +318,23 @@ class EditorRepository:
         return got is not None
 
     async def manual_func_published_elsewhere(self, db: AsyncSession, func_code: str, exclude_doc_id: str) -> bool:
-        """同 func_code 是否已有其他「已發布」系統操作手冊（手冊唯一 DM-MSG-DM08-003；DB 部分唯一索引為後盾）。"""
+        """同 func_code 是否已有其他「在架」系統操作手冊（手冊唯一 DM-MSG-DM08-003；DB 部分唯一索引為後盾）。
+
+        「在架」＝ PUBLISHED 或 PENDING_OBSOLETE：廢止待簽核之手冊仍列於 DM01（#738），
+        若不計入，舊手冊廢止核准前新手冊即可發布，DM01 以該作業項目查詢會出現兩筆。
+
+        Args:
+            func_code: 關聯作業項目代碼。
+            exclude_doc_id: 排除之文件（本文件自身）。
+
+        Returns:
+            True 表示已有其他在架手冊佔用該作業項目。
+        """
         got = await db.scalar(
             select(DmDocument.doc_id).where(
                 DmDocument.func_code == func_code,
                 DmDocument.category_code == _MANUAL,
-                DmDocument.status == _PUBLISHED,
+                DmDocument.status.in_(_MANUAL_LIVE_STATUSES),
                 DmDocument.doc_id != exclude_doc_id,
                 DmDocument.deleted == 0,
             )

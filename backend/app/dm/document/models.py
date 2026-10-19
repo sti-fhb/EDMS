@@ -30,7 +30,8 @@ class DmDocument(BaseModel):
 
     DOC_ID 格式 `DM-{分類碼}-{6位流水號}`（草稿建立時配號）。STATUS：DRAFT / PENDING_REVIEW
     （僅首版送審）/ PUBLISHED（已發布文件之新版本送審期間維持此值）/ PENDING_OBSOLETE / OBSOLETE。
-    **部分唯一索引**：同一 FUNC_CODE 於 CATEGORY='MANUAL' AND STATUS='PUBLISHED' 至多一份（手冊唯一）。
+    **部分唯一索引**：同一 FUNC_CODE 於 CATEGORY='MANUAL' AND STATUS IN ('PUBLISHED',
+    'PENDING_OBSOLETE') 至多一份（手冊唯一，#738）。
     CURRENT_VERSION_ID 為邏輯 FK（首版發布前 null）。CREATED_USER = 撰寫者。
     """
 
@@ -39,12 +40,15 @@ class DmDocument(BaseModel):
         PrimaryKeyConstraint("DOC_ID", name="PK_DM_DOCUMENT"),
         Index("IX_DM_DOCUMENT_CATEGORY", "CATEGORY_CODE"),
         Index("IX_DM_DOCUMENT_STATUS", "STATUS"),
-        # 手冊唯一：同 func_name 至多一份已發布手冊（research §5）
+        # 手冊唯一：同 func_name 至多一份**在架**手冊（research §5；#738 納入 PENDING_OBSOLETE）。
+        # 在架 ＝ DM01 文件庫列得出來者，與 dm/library/repository.py 的 _LIBRARY_STATUSES 同集合；
+        # 廢止待簽核仍對外，不納入則舊手冊下架前新手冊即可發布，同作業項目查出兩筆。
+        # ⛔ 不可納入 OBSOLETE：已下架手冊若仍佔用作業項目，換手冊將永遠做不到。
         Index(
             "UX_DM_DOCUMENT_MANUAL_FUNC",
             "FUNC_CODE",
             unique=True,
-            postgresql_where=text("\"CATEGORY_CODE\" = 'MANUAL' AND \"STATUS\" = 'PUBLISHED'"),
+            postgresql_where=text("\"CATEGORY_CODE\" = 'MANUAL' AND \"STATUS\" IN ('PUBLISHED', 'PENDING_OBSOLETE')"),
         ),
     )
 
