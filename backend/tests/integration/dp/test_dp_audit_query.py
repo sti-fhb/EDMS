@@ -360,6 +360,47 @@ async def test_target_display_resolves_user_name(db):
     assert res["data"][0].target_display == "林小美"
 
 
+async def test_et_roles_target_display_resolves_user_name(db):
+    """ET 角色/受訓對象指派之對象 → 姓名，與 `DM-ROLES` 一致（#716 A1）。
+
+    兩者的 `target_id` 語意相同（皆為被指派者之 `USER_ID`），`DM-ROLES` 早已列入
+    `_USER_FUNCS`、`ET-ROLES` 漏列，畫面因而顯示原始 `USER_ID`。使用者會把 seed 示範
+    帳號的可讀代碼誤認為「姓名被翻成英文」，實際上那是帳號代碼本身。
+
+    ⚠️ `ET-ROLES` 的 `after_value` 只有 `{"roles", "tags"}`、不含 `user_name`，
+    所以 JSON fallback 那層也救不回來——非補 `_USER_FUNCS` 不可。
+    """
+    await _seed_user(db, user_id="u_et", user_name="陳大文", email="et@edms.local")
+    await _insert_log(db, module="ET", func_name="ET-ROLES", target_id="u_et")
+
+    res = await _service.query_logs(db, **_q())
+
+    row = next(r for r in res["data"] if r.func_name == "ET-ROLES")
+    assert row.func_label == "ET-角色/受訓對象指派"
+    assert row.target_display == "陳大文", "應解析為姓名，而非原始 USER_ID"
+
+
+async def test_target_display_fallback_uses_tag_name_key(db):
+    """稽核 JSON 以 `tag_name` 記名稱時也要撈得到（#716 A2）。
+
+    `_TARGET_NAME_KEYS` 原本只有 `("user_name","template_name","param_name","name","email")`。
+    DM 受控清單的 `after` 用鍵 `name`（撈得到）、ET 用 `tag_name`（撈不到）——**同樣是新增
+    標籤，DM 顯示名稱、ET 顯示 TAG_ID，差別只在一個鍵名**。
+    """
+    await _insert_log(
+        db,
+        module="ET",
+        func_name="ET-CATALOG",
+        action_type="CREATE",
+        target_id="4321",
+        after_value='{"tag_name": "ZT受訓對象", "tag_type": "AUDIENCE"}',
+    )
+
+    res = await _service.query_logs(db, **_q())
+
+    assert res["data"][0].target_display == "ZT受訓對象", "應撈 tag_name，而非 fallback 成 TAG_ID"
+
+
 async def test_target_display_resolves_param_name(db):
     """#1：DP-PARAMS 對象（param_id.param_key）→ 解析為 PARAM_NAME 中文。"""
     from app.dp.params.models import DpParamDetail, DpParamMaster

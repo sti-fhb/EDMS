@@ -46,7 +46,11 @@ _FUNC_LABELS: dict[str, str] = {
     "DM-EDITOR": "DM-文件編輯",  # create_document / add_version / update_draft_version
     "DM-REVIEW": "DM-簽核",  # approve / reject / 廢止核准
     "DM-OBSOLETE": "DM-廢止申請",  # initiate
-    "DM-PERSONAL": "DM-個人專區",  # delete_draft / withdraw
+    # ⚠️ 不可命名為「個人專區」——那是**畫面名稱**，會讓人以為記的是個人設定類操作，
+    # 進而質疑「個人操作為什麼要進稽核」。實際涵蓋的兩個動作都會影響他人或不可復原：
+    # 撤回送審會讓審核者的待辦當場消失、草稿刪除不可復原。（#716 更正；同一張表的
+    # ET-ATTEMPT 早有同型註記。）
+    "DM-PERSONAL": "DM-草稿刪除 / 撤回送審",  # delete_draft / withdraw
     # ET（#477 補）：名稱取自 docs/specs/et/spec.md §稽核來源功能碼之「涵蓋動作」，非自行發明
     "ET-ROLES": "ET-角色/受訓對象指派",  # #605：隨 #538 改名；代碼 ET-ROLES 不變
     "ET-CATALOG": "ET-受控清單",
@@ -65,7 +69,11 @@ _FUNC_LABELS: dict[str, str] = {
 FUNC_OPTIONS: list[AuditOptionItem] = [AuditOptionItem(value=c, label=label) for c, label in _FUNC_LABELS.items()]
 
 # 對象解析失敗時，從稽核列自身 before/after JSON 撈可讀名稱之鍵（優先序）。
-_TARGET_NAME_KEYS = ("user_name", "template_name", "param_name", "name", "email")
+# 稽核列 JSON 中可當「對象顯示名」的鍵，依序取第一個有值者。
+# ⚠️ 寫入端各自取名，此處漏收一個鍵的症狀是**該功能的對象欄顯示原始 ID**，不報錯。
+# `tag_name` 於 #716 補上：DM 受控清單用鍵 `name`（撈得到）、ET 用 `tag_name`（原本撈不到），
+# 同樣是新增標籤卻一個顯示名稱、一個顯示 TAG_ID，差別只在鍵名。
+_TARGET_NAME_KEYS = ("user_name", "template_name", "param_name", "name", "tag_name", "email")
 
 # 操作類別 / 執行結果 → 中文（CSV 匯出與畫面共用）；API 收發一律維持英文碼。未知碼原樣輸出。
 # 前端經 /options 端點取得，不再自行維護一份（#477 取消雙寫）。

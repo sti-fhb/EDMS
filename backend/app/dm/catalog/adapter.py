@@ -254,15 +254,27 @@ class CatalogAdapter:
     ) -> SetEnabledResult:
         """啟停（不刪除；停用後既有引用保留）。AUDIENCE 標籤停用採 soft-retire、回傳受影響數。"""
         _ensure_kind(kind)
+        # ⚠️ `name` 不是冗餘：TAG 的 target_id 是 TAG_ID，稽核列若不自帶名稱，DP05 的對象欄
+        # 只剩一個數字（#716）。新增 / 改名一向有帶，啟停原本漏了——同一個標籤因而「新增時
+        # 看得到名字、停用時只剩編號」。名稱取**異動當下**的值，日後改名不影響舊紀錄。
         after = {"kind": kind, "enabled": enabled}
         if kind == "CATEGORY":
             cat = await db.scalar(select(DmCategory).where(DmCategory.category_code == code))
-            before = None if cat is None else {"kind": kind, "enabled": cat.is_enabled}
+            before = None if cat is None else {"kind": kind, "enabled": cat.is_enabled, "name": cat.category_name}
             await self._catalog.set_category_enabled(db, code=code, enabled=enabled, operator=operator_id)
-            await self._log(db, "UPDATE", operator_id, target=code, before=before, after=after)
+            await self._log(
+                db,
+                "UPDATE",
+                operator_id,
+                target=code,
+                before=before,
+                after=after if cat is None else {**after, "name": cat.category_name},
+            )
             return SetEnabledResult()
         obj = await self._require(db, kind, code)
-        before = {"kind": kind, "enabled": obj.is_enabled}  # 同上：須在改值前取
+        name = obj.func_name if kind == "FUNC" else obj.tag_name
+        before = {"kind": kind, "enabled": obj.is_enabled, "name": name}  # 同上：須在改值前取
+        after = {**after, "name": name}
         if kind == "TAG" and not enabled:
             group = await db.scalar(select(DmTagGroup).where(DmTagGroup.tag_group_code == obj.tag_group_code))
             # 可見對象之兩個維度（職位 AUDIENCE / 單位 UNIT）皆採 soft-retire 並回報受影響數（#437）
