@@ -56,6 +56,10 @@ class LibraryRepository:
         if category:
             conds.append(DmDocument.category_code == category)
         if author:
+            # 📌 本行**不需要**隨「作者改取發布版上傳者」而改（#737）：它過濾的是 `DpUser` 這個
+            # join 出來的列，而 join 條件在 `count_documents` / `list_documents` 裡。改掉那兩處的
+            # join，搜尋就自動跟著比對發布版上傳者——**兩個查詢都要改，少一個會讓清單與
+            # `meta.total` 對不上**。
             conds.append(DpUser.user_name.ilike(contains(author), escape=LIKE_ESCAPE_CHAR))
         if func_code:
             conds.append(DmDocument.func_code == func_code)
@@ -87,11 +91,17 @@ class LibraryRepository:
         return conds
 
     async def count_documents(self, db: AsyncSession, conditions: Sequence[ColumnElement[bool]]) -> int:
+        """符合條件之文件數。
+
+        ⚠️ `DpUser` 的 join 條件必須與 `list_documents` **逐字相同**——作者搜尋
+        （`build_conditions` 的 `DpUser.user_name`）兩邊都會套用，不一致會讓 `meta.total`
+        與實際列數對不上（#737）。
+        """
         stmt = (
             select(func.count(DmDocument.doc_id))
             .select_from(DmDocument)
             .join(DmDocVersion, DmDocument.current_version_id == DmDocVersion.version_id)
-            .outerjoin(DpUser, DmDocument.created_user == DpUser.user_id)
+            .outerjoin(DpUser, DmDocVersion.created_user == DpUser.user_id)
             .where(*conditions)
         )
         return await db.scalar(stmt) or 0
@@ -99,7 +109,15 @@ class LibraryRepository:
     async def list_documents(
         self, db: AsyncSession, conditions: Sequence[ColumnElement[bool]], *, offset: int, limit: int
     ) -> list[Row]:
-        """回目前發布版之 enriched 列（含作者姓名 / 分類名 / func 名 / 發布時間），依發布時間 DESC。"""
+        """回目前發布版之 enriched 列（含作者姓名 / 分類名 / func 名 / 發布時間），依發布時間 DESC。
+
+        **作者＝目前發布版本的上傳者**（`DM_DOC_VERSION.CREATED_USER`），不是文件建立者
+        （#737）。由其他編輯者上傳新版並核准後，本頁的作者隨之換人——與 DM03
+        （`obsolete_archive`，末版作者）、DM07（`detail`，目前發布版上傳者）一致；
+        DM01 原本是唯一取 `DM_DOCUMENT.CREATED_USER` 的地方。
+
+        送審中的新版不影響：join 綁在 `current_version_id` 上，未核准的版本不是目前版本。
+        """
         stmt = (
             select(
                 DmDocument.doc_id,
@@ -108,7 +126,9 @@ class LibraryRepository:
                 DmCategory.category_name,
                 DmDocument.func_code,
                 DmFunc.func_name,
-                DmDocument.created_user,
+                # 標上 `author_id`：兩張表的欄位名都是 `CREATED_USER`，不標的話 Row 鍵仍叫
+                # `created_user`，呼叫端會誤讀成文件建立者。DM03 / DM07 亦為此寫法。
+                DmDocVersion.created_user.label("author_id"),
                 DpUser.user_name,
                 DmDocVersion.published_date,
             )
@@ -116,7 +136,7 @@ class LibraryRepository:
             .join(DmDocVersion, DmDocument.current_version_id == DmDocVersion.version_id)
             .join(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .outerjoin(DmFunc, DmDocument.func_code == DmFunc.func_code)
-            .outerjoin(DpUser, DmDocument.created_user == DpUser.user_id)
+            .outerjoin(DpUser, DmDocVersion.created_user == DpUser.user_id)
             .where(*conditions)
             .order_by(DmDocVersion.published_date.desc(), DmDocument.doc_id)
             .offset(offset)
