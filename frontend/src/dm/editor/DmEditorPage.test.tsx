@@ -353,6 +353,65 @@ describe("DmEditorPage 文件新增與編輯（DM08）", () => {
     expect(createCalls).toBe(1) // 關鍵：改審核者不清草稿快取、不重複建立文件
   }, 20000)
 
+  it("送簽被擋後改版本號重試 → 更新同一份草稿，不另建一份（#734）", async () => {
+    // 既有的「改審核者」那條之所以過，是因為 setReviewer 刻意不清 persisted（它只是 submit
+    // 參數、不屬草稿內容）。但使用者實際會改的是**草稿內容本身**（版本號、作業項目），
+    // 那些走 setField → 清掉 persisted → 再按送審就重新 createDocument，草稿匣多一份。
+    let createCalls = 0
+    let updateCalls = 0
+    let submitCalls = 0
+    server.use(
+      http.post("/api/dm/documents", () => {
+        createCalls += 1
+        return HttpResponse.json({ doc_id: "DM-SOP-000010", version_id: 910, previewable: true }, { status: 201 })
+      }),
+      http.put("/api/dm/documents/:docId/versions/:versionId", () => {
+        updateCalls += 1
+        return HttpResponse.json({ version_id: 910, previewable: true })
+      }),
+      http.post("/api/dm/documents/:docId/submit", () => {
+        submitCalls += 1
+        if (submitCalls === 1) {
+          return HttpResponse.json(
+            { error_code: "DM_DOC_006", error_message: "版本號與本文件已發布版本重複" },
+            { status: 409 },
+          )
+        }
+        return HttpResponse.json({ review_id: 501, notified: 1 })
+      }),
+    )
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+    await fillNewForm(user, { withAudience: true })
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+    expect(await screen.findByText("版本號與本文件已發布版本重複")).toBeInTheDocument()
+
+    // 照 DM08 手冊的處置：改一個沒用過的版本號再送
+    await user.clear(screen.getByLabelText(/首版版本號/))
+    await user.type(screen.getByLabelText(/首版版本號/), "1.1")
+    await user.click(screen.getByRole("button", { name: "送交簽核" }))
+
+    expect(await screen.findByText("已送交簽核")).toBeInTheDocument()
+    expect(createCalls).toBe(1) // 🔴 不得再建一份：草稿匣會多出重複的新文件草稿
+    expect(updateCalls).toBe(1) // 改走更新同一份草稿，新版本號才帶得進去
+  }, 20000)
+
+  it("選檔視窗限制為後端允許的副檔名（#734）", async () => {
+    // 沒有 accept 時，選了 .zip 會先跳「無法線上預覽」確認視窗，存檔或送審才被擋——
+    // 使用者多走一段冤路。允許清單取自 useUploadLimits（後端 DM_FILE_TYPES），不另寫死一份。
+    renderWithProviders(<DmEditorPage />)
+    await screen.findByText("新增文件")
+
+    // 用 waitFor：允許清單是非同步取回的（useUploadLimits），未載入前 accept 為 undefined。
+    // ⚠️ 不可只取一次就斷言——那會驗到「還沒載入」的狀態，恆為 null。
+    await waitFor(() => expect(fileInput().getAttribute("accept")).toBeTruthy())
+
+    const accept = fileInput().getAttribute("accept")
+    expect(accept).toContain(".pdf")
+    expect(accept).not.toContain(".zip")
+  })
+
   it("存草稿成功（可見對象非必填）→ toast 已儲存為草稿（DM-MSG-DM08-007）", async () => {
     // 本條同時守著 #476 的連動變更：表單預設帶一列空白配對，存草稿時那列**不得**被
     // 「請選擇單位」擋下（spec_us5 FR-001「存草稿不卡必填」）。若 Zod 在 forSubmit=false
