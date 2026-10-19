@@ -284,6 +284,38 @@ async def test_送審中的新版不改變作者(db):
     assert await _ids(db, author="羅送審") == set()
 
 
+async def test_上傳者查無_DP_USER_時只缺姓名(db):
+    """`DP_USER` 查無對應列（`outerjoin` 未命中）⇒ `author_name` 為 None、`author_id` 仍在。
+
+    `author_id` 不可能是 None（`BaseModel.CREATED_USER` 為 `nullable=False`），所以本條同時
+    釘住「不要把 `outerjoin` 改成 `join`」——改了的話這份文件會**整個消失**，而不是只少一個姓名。
+    """
+    await _seed_doc(db, doc_id="DM-SOP-000735", name="無主文件", author="au_ghost", version_author="au_ghost")
+
+    [item] = (await _search(db, keyword="無主文件"))["data"]
+
+    assert item.author_id == "au_ghost"  # 沒有對應的 DP_USER 列，但 id 仍要在
+    assert item.author_name is None
+
+
+async def test_閱覽者的作者搜尋仍受可見性限制(db):
+    """同一位上傳者的兩份文件，閱覽者只搜得到自己可見的那份。
+
+    守的是「可見性條件與作者條件各自獨立 AND」。若日後有人把可見性併進 `DpUser` 的 join
+    條件（或反過來），作者搜尋就會變成「這份文件存在嗎」的 oracle。security review 指出
+    **目前沒有任何測試釘住這件事**，而它正是那種改動唯一會變紅的地方。
+
+    ⭐ 單一斷言同時含正反兩面：可見的那份**要**出現、不可見的那份**不可**出現。只寫
+    「搜不到」的話，搜尋整個壞掉時這條也會通過。
+    """
+    await _seed_user(db, "au_up", "羅上傳")
+    await _seed_doc(db, doc_id="DM-SOP-000733", name="限護理師", version_author="au_up", audience_tags=["護理師"])
+    await _seed_doc(db, doc_id="DM-SOP-000734", name="給全體", version_author="au_up", audience_tags=["全體"])
+    viewer = DmContext(user_id="v_no_tag", roles=frozenset({DM_VIEWER}))
+
+    assert await _ids(db, ctx=viewer, author="羅上傳") == {"DM-SOP-000734"}
+
+
 async def test_filter_by_retrieval_tags_or(db):
     """多檢索標籤 OR：命中任一標籤即列出（spec_us3 FR-001）；無任一標籤者不列。"""
     t_normal = await _make_retrieval_tag(db, "平時")

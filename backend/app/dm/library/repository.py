@@ -58,8 +58,11 @@ class LibraryRepository:
         if author:
             # 📌 本行**不需要**隨「作者改取發布版上傳者」而改（#737）：它過濾的是 `DpUser` 這個
             # join 出來的列，而 join 條件在 `count_documents` / `list_documents` 裡。改掉那兩處的
-            # join，搜尋就自動跟著比對發布版上傳者——**兩個查詢都要改，少一個會讓清單與
-            # `meta.total` 對不上**。
+            # join，搜尋就自動跟著比對發布版上傳者。
+            #
+            # ⛔ **但兩處都要改。** 漏掉 `count_documents` 不是「只有數字不準」——`service.search`
+            # 在 `total == 0` 時**短路回空清單**（service.py），所以 count 算錯會讓整個查詢結果
+            # 變成空的，而清單那側的 SQL 根本不會被執行。
             conds.append(DpUser.user_name.ilike(contains(author), escape=LIKE_ESCAPE_CHAR))
         if func_code:
             conds.append(DmDocument.func_code == func_code)
@@ -94,8 +97,10 @@ class LibraryRepository:
         """符合條件之文件數。
 
         ⚠️ `DpUser` 的 join 條件必須與 `list_documents` **逐字相同**——作者搜尋
-        （`build_conditions` 的 `DpUser.user_name`）兩邊都會套用，不一致會讓 `meta.total`
-        與實際列數對不上（#737）。
+        （`build_conditions` 的 `DpUser.user_name`）兩邊都會套用（#737）。
+
+        ⛔ 不一致的後果比「`meta.total` 對不上」嚴重：`service.search` 在 `total == 0` 時
+        **短路回空清單**，所以本方法算錯會讓整個查詢結果變空，而 `list_documents` 不會被執行。
         """
         stmt = (
             select(func.count(DmDocument.doc_id))
@@ -112,11 +117,18 @@ class LibraryRepository:
         """回目前發布版之 enriched 列（含作者姓名 / 分類名 / func 名 / 發布時間），依發布時間 DESC。
 
         **作者＝目前發布版本的上傳者**（`DM_DOC_VERSION.CREATED_USER`），不是文件建立者
-        （#737）。由其他編輯者上傳新版並核准後，本頁的作者隨之換人——與 DM03
-        （`obsolete_archive`，末版作者）、DM07（`detail`，目前發布版上傳者）一致；
-        DM01 原本是唯一取 `DM_DOCUMENT.CREATED_USER` 的地方。
+        （#737）。與 DM03（`obsolete_archive`，末版作者）、DM07（`detail`，目前發布版上傳者）
+        一致；DM01 原本是唯一取 `DM_DOCUMENT.CREATED_USER` 的地方。
 
         送審中的新版不影響：join 綁在 `current_version_id` 上，未核准的版本不是目前版本。
+
+        📌 「**由其他編輯者上傳新版並核准後，本頁的作者隨之換人**」這句話由兩段測試接起來，
+        不要以為沒驗過（code review 即如此誤判）：
+
+        | 環節 | 驗在哪 |
+        |---|---|
+        | 核准新版 → `current_version_id` 換成新版 | `tests/integration/dm/test_dm_review.py`「核准新版本」那條 |
+        | `current_version_id` → 作者 | `tests/integration/dm/test_dm_library.py` 的 #737 那組 |
         """
         stmt = (
             select(
