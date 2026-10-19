@@ -21,11 +21,22 @@ commit 的位置因此是這支排程的關鍵耦合點，而它**只存在於 w
 症狀是「沒收到週報」，而任何人都會先去查範本、收件人、`DM_ADMIN` 角色——不會想到 wrapper
 的 commit。**這與 #627 是同一個形狀**：排程唯一的對外訊號與實際產出脫鉤，而那次存活了兩個月。
 
+## 為何用「會記事件的 fake」而不是 mock 的 `assert_awaited`
+
+初版用 `MagicMock` + `cm.__aexit__.assert_awaited_once()`。code review 指出那條**沒有被驗證
+過**：注入「拿掉 `async with`」時 4 條全紅，但訊息是 `TypeError`（`db` 變成 factory 的
+`MagicMock`、`await db.commit()` 直接炸），那兩行斷言根本沒機會執行——**紅得對，但不是因為
+它偵測到**。
+
+改成手寫的 async context manager，把 `enter` / `exit` 與 `run_weekly` / `commit` 記進**同一條
+`calls`**，斷言完整序列。這樣多守住一件原本漏掉的事：**commit 必須發生在 session 之內**
+（有人把 `await db.commit()` 搬出 `with` 區塊，就是對已關閉的 session commit，舊版抓不到）。
+
 ## 為何用 mock 而非真 DB
 
-要驗的是**殼本身的行為**，不是業務邏輯（後者已有整合測試）。用真 DB 反而驗不到「commit
-有沒有被呼叫」——integration 的 fixture 會自己管交易。依 `sti-testing.md`「拿掉真 DB 還驗
-得了嗎」的閘門，驗得了 → 寫 unit。
+要驗的是**殼本身的行為**（session 生命週期、commit 位置、log 欄位），不是業務邏輯（後者已有
+整合測試）。用真 DB 反而驗不到「commit 有沒有被呼叫」——integration 的 fixture 會自己管交易。
+依 `sti-testing.md`「拿掉真 DB 還驗得了嗎」的閘門，驗得了 → 寫 unit。
 
 ## ⛔ 兩條刻意不做的事
 
@@ -46,89 +57,110 @@ from app.dm.kpi.service import WeeklyRunResult
 pytestmark = pytest.mark.unit
 
 
-def _fake_session_factory(db):
-    """模擬 `AsyncSessionLocal()` 的 async context manager。"""
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=db)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    return MagicMock(return_value=cm), cm
+class _RecordingSession:
+    """會把生命週期事件記進共用 `calls` 的假 session（兼 async context manager）。
+
+    刻意不用 `MagicMock`：mock 的 `assert_awaited` 只能證明「被呼叫過」，證明不了**順序**，
+    而本檔要守的正是 commit 相對於 session 開關的位置。
+    """
+
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
+
+    async def __aenter__(self) -> "_RecordingSession":
+        self._calls.append("enter")
+        return self
+
+    async def __aexit__(self, *_exc) -> bool:
+        self._calls.append("exit")
+        return False  # 不吞例外
+
+    async def commit(self) -> None:
+        self._calls.append("commit")
 
 
-@pytest.fixture
-def db():
-    return MagicMock(commit=AsyncMock(), close=AsyncMock())
+def _session_factory(calls: list[str]) -> MagicMock:
+    """模擬 `AsyncSessionLocal`——呼叫它回傳一個 `_RecordingSession`。"""
+    return MagicMock(return_value=_RecordingSession(calls))
 
 
-async def test_commit_在_run_weekly_之後被呼叫(db):
-    """缺了 `commit`（或順序顛倒）⇒ 週報與未讀提醒整批 rollback，而 log 照報成功。
+def _result(docs: int = 1, weekly: int = 1, unread: int = 1) -> WeeklyRunResult:
+    return WeeklyRunResult(total_docs=docs, weekly_queued=weekly, unread_notified=unread)
 
-    `run_weekly` 內部的 `_send_weekly_report` 與 `_send_unread_reminders` **共用同一個
-    session**，所以這一個 commit 同時決定兩批信的命運。
 
-    順序由共用的 `calls` 記錄：只斷言「有呼叫 commit」不夠——commit 跑在 `run_weekly`
-    之前等於 commit 一個空交易，outbox 的列仍會在 session 關閉時消失。
+async def test_session_開關與_commit_的完整順序():
+    """殼的三個職責一次釘住：開 session → 跑批次 → commit → 關 session。
+
+    這條同時守住三件事，少任何一件都會紅：
+
+    1. **commit 有被呼叫**——漏掉的話 outbox 的列在 session 關閉時整批 rollback，
+       而 log 照報成功。
+    2. **commit 在 `run_weekly` 之後**——跑在前面等於 commit 一個空交易。
+    3. **commit 在 session 之內**（`exit` 必須是最後一個）——搬出 `with` 區塊就是對已關閉的
+       session commit。初版只斷言「`__aexit__` 被呼叫過一次」，抓不到這一項。
     """
     calls: list[str] = []
 
     async def _run_weekly(*_a, **_kw):
         calls.append("run_weekly")
-        return WeeklyRunResult(total_docs=1, weekly_queued=1, unread_notified=1)
+        return _result()
 
-    async def _commit():
-        calls.append("commit")
-
-    db.commit = AsyncMock(side_effect=_commit)
-    factory, _cm = _fake_session_factory(db)
     with (
-        patch.object(scheduler, "AsyncSessionLocal", factory),
+        patch.object(scheduler, "AsyncSessionLocal", _session_factory(calls)),
         patch.object(scheduler.KpiService, "run_weekly", AsyncMock(side_effect=_run_weekly)),
     ):
         await scheduler.run()
 
-    assert calls == ["run_weekly", "commit"], f"順序不對：{calls}"
+    assert calls == ["enter", "run_weekly", "commit", "exit"], f"生命週期順序不對：{calls}"
 
 
-async def test_session_以_async_with_關閉(db):
-    """殼的第三個職責：session 要還回去。
+async def test_批次拋例外時不得_commit_但仍要關閉_session():
+    """`async with` 的價值主要在**失敗路徑**。
 
-    `async with` 漏寫（例如改成 `db = AsyncSessionLocal()`）時，連線不會歸還連線池；
-    每週一次、每次洩一條，正式環境要很久才看得出來，而且症狀會長成「DB 連線數滿」
-    而不是「排程壞了」。
+    `run_weekly` 中途炸掉時：
+    - **不得 commit**——否則半套的 outbox（例如週報已排入、未讀提醒還沒）會被寫進去，
+      而下一次執行不知道上次做到哪裡，收件人會收到重複的週報。
+    - **session 仍要關閉**——否則連線不歸還連線池，每週洩一條。
+
+    這條也守住「有人把 commit 改進 `try/finally`」的退化：那會讓失敗路徑也 commit，
+    而現有的順序測試（成功路徑）完全抓不到。
     """
-    factory, cm = _fake_session_factory(db)
+    calls: list[str] = []
+
+    async def _boom(*_a, **_kw):
+        calls.append("run_weekly")
+        raise RuntimeError("KPI 計算中途失敗")
+
     with (
-        patch.object(scheduler, "AsyncSessionLocal", factory),
-        patch.object(
-            scheduler.KpiService,
-            "run_weekly",
-            AsyncMock(return_value=WeeklyRunResult(total_docs=0, weekly_queued=0, unread_notified=0)),
-        ),
+        patch.object(scheduler, "AsyncSessionLocal", _session_factory(calls)),
+        patch.object(scheduler.KpiService, "run_weekly", AsyncMock(side_effect=_boom)),
+        pytest.raises(RuntimeError, match="KPI 計算中途失敗"),
     ):
         await scheduler.run()
 
-    cm.__aenter__.assert_awaited_once()
-    cm.__aexit__.assert_awaited_once()
+    assert "commit" not in calls, f"失敗路徑不該 commit：{calls}"
+    assert calls == ["enter", "run_weekly", "exit"], f"失敗路徑的生命週期不對：{calls}"
 
 
 @pytest.mark.parametrize(
     ("docs", "weekly", "unread"),
     [(7, 3, 11), (23, 5, 2)],
 )
-async def test_log_三個數字各自對應正確欄位(db, caplog, docs, weekly, unread):
+async def test_log_三個數字各自對應正確欄位(caplog, docs, weekly, unread):
     """log 是這支排程**唯一的對外訊號**，數字錯位等於訊號說謊。
 
     ⚠️ 三個值刻意**互不相同**：全填同一個數的話，`logger.info` 的參數順序寫反也照樣通過。
 
     ⚠️ 並以 `parametrize` 跑**兩組不同的值**：單一組值無法分辨「正確取欄位」與「把數字寫死」
-    ——寫死的話第二組一定紅。
+    ——實測把數字寫死成第一組時，**只有第二組會紅**。
     """
-    factory, _cm = _fake_session_factory(db)
+    calls: list[str] = []
     with (
-        patch.object(scheduler, "AsyncSessionLocal", factory),
+        patch.object(scheduler, "AsyncSessionLocal", _session_factory(calls)),
         patch.object(
             scheduler.KpiService,
             "run_weekly",
-            AsyncMock(return_value=WeeklyRunResult(total_docs=docs, weekly_queued=weekly, unread_notified=unread)),
+            AsyncMock(return_value=_result(docs, weekly, unread)),
         ),
         caplog.at_level(logging.INFO, logger="app.dm.kpi.scheduler"),
     ):
