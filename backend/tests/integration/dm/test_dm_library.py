@@ -72,6 +72,7 @@ async def _seed_doc(
     category: str = "SOP",
     func_code: str | None = None,
     author: str = "u_author",
+    version_author: str | None = None,
     status: str = "PUBLISHED",
     published_date=None,
     change_summary: str = "初版摘要",
@@ -81,6 +82,14 @@ async def _seed_doc(
     """建立「目前版本」文件（版本 PUBLISHED + 文件層 status 可指定，供狀態集合測試）。
 
     DM_DOCUMENT 與 DM_DOC_VERSION 互為 FK（循環）：先插文件（current_version_id=None）→ 插版本 → 回填。
+
+    `author` 寫入 `DM_DOCUMENT.CREATED_USER`（文件建立者），`version_author` 寫入
+    `DM_DOC_VERSION.CREATED_USER`（該版上傳者）；**不給就同值**。
+
+    ⚠️ 預設同值是刻意的——既有測試不在乎兩者的差別。但也因此，**只用預設值的測試無法分辨
+    「作者＝文件建立者」與「作者＝發布版上傳者」兩種定義**（#737 的病徵正是如此：
+    `test_filter_by_author_name` 在改版前後都通過）。要驗作者定義的測試**必須**明確給
+    `version_author`，否則它驗不到自己宣稱的事。
     """
     now = utcnow()
     doc = DmDocument(
@@ -105,7 +114,7 @@ async def _seed_doc(
         file_mime="application/pdf",
         status="PUBLISHED",
         published_date=published_date or now,
-        created_user=author,
+        created_user=version_author or author,
         created_date=now,
     )
     db.add(ver)
@@ -142,6 +151,31 @@ def _q(**kw) -> DocumentQuery:
 async def _ids(db, ctx=None, **query_kw) -> set[str]:
     res = await _svc.search(db, query=_q(**query_kw), ctx=ctx or _admin_ctx(), page=1, limit=20)
     return {i.doc_id for i in res["data"]}
+
+
+async def _search(db, ctx=None, **query_kw):
+    """完整結果（含 `meta`）。驗作者搜尋時要連 `meta.total` 一起看——理由見下方 #737 那組測試。"""
+    return await _svc.search(db, query=_q(**query_kw), ctx=ctx or _admin_ctx(), page=1, limit=20)
+
+
+async def _add_version(db, *, doc_id: str, author: str, status: str, version_no: str) -> None:
+    """為既有文件補一個**非目前版本**的版本列（不回填 `current_version_id`）。"""
+    db.add(
+        DmDocVersion(
+            doc_id=doc_id,
+            version_no=version_no,
+            change_summary="新版摘要",
+            file_name="f.pdf",
+            file_path="/x/f.pdf",
+            file_size=1,
+            file_mime="application/pdf",
+            status=status,
+            published_date=None,
+            created_user=author,
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
 
 
 # ── 狀態集合 ───────────────────────────────────────────────
@@ -181,6 +215,105 @@ async def test_filter_by_author_name(db):
     await _seed_doc(db, doc_id="DM-SOP-000030", name="a", author="au_wang")
     await _seed_doc(db, doc_id="DM-SOP-000031", name="b", author="au_chen")
     assert await _ids(db, author="王曉") == {"DM-SOP-000030"}
+
+
+# ── 作者＝目前發布版本的上傳者（#737）──────────────────────
+#
+# 上面那條 `test_filter_by_author_name` **不足以**守這件事：它沒給 `version_author`，
+# 文件建立者與版本上傳者同值，所以「作者取哪一個」改來改去它都會過。下面三條一律明確
+# 讓兩者相異。對齊對象：DM03（`obsolete_archive/repository.py`）與 DM07（`detail/repository.py`）
+# 早就取版本層上傳者，DM01 是唯一的例外。
+
+
+async def test_作者取目前發布版上傳者_而非文件建立者(db):
+    """甲建立文件、乙上傳目前發布版 ⇒ DM01 清單的作者顯示乙。"""
+    await _seed_user(db, "au_jia", "柯建立")
+    await _seed_user(db, "au_yi", "羅上傳")
+    await _seed_doc(db, doc_id="DM-SOP-000730", name="跨人改版文件", author="au_jia", version_author="au_yi")
+
+    [item] = (await _search(db, keyword="跨人改版文件"))["data"]
+
+    assert item.author_id == "au_yi"
+    assert item.author_name == "羅上傳"
+
+
+async def test_作者搜尋比對發布版上傳者_含_total(db):
+    """以上傳者查得到、以建立者查不到。
+
+    ⚠️ `meta.total` 來自 `count_documents`，它有**自己的** `DpUser` join。只改
+    `list_documents` 而漏改 `count_documents` 時，清單看起來正確、`total` 卻對不上
+    ——這行 `total` 斷言就是守那一個，不是湊數。
+    """
+    await _seed_user(db, "au_jia2", "柯建立")
+    await _seed_user(db, "au_yi2", "羅上傳")
+    await _seed_doc(db, doc_id="DM-SOP-000731", name="y", author="au_jia2", version_author="au_yi2")
+
+    hit = await _search(db, author="羅上傳")
+    assert {i.doc_id for i in hit["data"]} == {"DM-SOP-000731"}
+    assert hit["meta"]["total"] == 1
+
+    # 反向：以**文件建立者**的姓名搜尋查不到。上面那組命中即證明搜尋本身有效，
+    # 故這裡的 0 是「真的沒比對建立者」，不是「搜尋整個壞掉」。
+    miss = await _search(db, author="柯建立")
+    assert miss["meta"]["total"] == 0
+
+
+async def test_送審中的新版不改變作者(db):
+    """新版送審期間（未核准、非目前版本）⇒ 作者仍為目前發布版的上傳者。
+
+    **三個人刻意都不同**：文件建立者 / 目前發布版上傳者 / 送審中新版上傳者。初版只讓後兩者
+    不同，結果這條在**修改前就通過**（作者取建立者，而建立者剛好被我設成發布者）——
+    它當時分辨不出任何東西。三者相異後，三種錯法各自對應一個不同的人名：
+
+    | 實作 | `author_id` |
+    |---|---|
+    | 舊的（取文件建立者）| `au_jia3` ← 本條因此會紅 |
+    | ✅ 正確（取目前發布版上傳者）| `au_pub` |
+    | 誤改成「取最新版本」| `au_rev` ← 本條因此會紅 |
+    """
+    await _seed_user(db, "au_jia3", "柯建立")
+    await _seed_user(db, "au_pub", "柯發布")
+    await _seed_user(db, "au_rev", "羅送審")
+    await _seed_doc(db, doc_id="DM-SOP-000732", name="審中文件", author="au_jia3", version_author="au_pub")
+    await _add_version(db, doc_id="DM-SOP-000732", author="au_rev", status="PENDING_REVIEW", version_no="2.0")
+
+    [item] = (await _search(db, keyword="審中文件"))["data"]
+    assert item.author_id == "au_pub"
+
+    assert await _ids(db, author="柯發布") == {"DM-SOP-000732"}  # 正向錨點：搜尋確實找得到這份
+    assert await _ids(db, author="羅送審") == set()
+
+
+async def test_上傳者查無_DP_USER_時只缺姓名(db):
+    """`DP_USER` 查無對應列（`outerjoin` 未命中）⇒ `author_name` 為 None、`author_id` 仍在。
+
+    `author_id` 不可能是 None（`BaseModel.CREATED_USER` 為 `nullable=False`），所以本條同時
+    釘住「不要把 `outerjoin` 改成 `join`」——改了的話這份文件會**整個消失**，而不是只少一個姓名。
+    """
+    await _seed_doc(db, doc_id="DM-SOP-000735", name="無主文件", author="au_ghost", version_author="au_ghost")
+
+    [item] = (await _search(db, keyword="無主文件"))["data"]
+
+    assert item.author_id == "au_ghost"  # 沒有對應的 DP_USER 列，但 id 仍要在
+    assert item.author_name is None
+
+
+async def test_閱覽者的作者搜尋仍受可見性限制(db):
+    """同一位上傳者的兩份文件，閱覽者只搜得到自己可見的那份。
+
+    守的是「可見性條件與作者條件各自獨立 AND」。若日後有人把可見性併進 `DpUser` 的 join
+    條件（或反過來），作者搜尋就會變成「這份文件存在嗎」的 oracle。security review 指出
+    **目前沒有任何測試釘住這件事**，而它正是那種改動唯一會變紅的地方。
+
+    ⭐ 單一斷言同時含正反兩面：可見的那份**要**出現、不可見的那份**不可**出現。只寫
+    「搜不到」的話，搜尋整個壞掉時這條也會通過。
+    """
+    await _seed_user(db, "au_up", "羅上傳")
+    await _seed_doc(db, doc_id="DM-SOP-000733", name="限護理師", version_author="au_up", audience_tags=["護理師"])
+    await _seed_doc(db, doc_id="DM-SOP-000734", name="給全體", version_author="au_up", audience_tags=["全體"])
+    viewer = DmContext(user_id="v_no_tag", roles=frozenset({DM_VIEWER}))
+
+    assert await _ids(db, ctx=viewer, author="羅上傳") == {"DM-SOP-000734"}
 
 
 async def test_filter_by_retrieval_tags_or(db):

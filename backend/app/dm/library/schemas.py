@@ -17,8 +17,10 @@ class DocumentListItem(BaseModel):
     category_code: str
     category_name: str
     published_date: datetime | None
-    author_id: str  # 撰寫者 USER_ID（DM_DOCUMENT.CREATED_USER）
-    author_name: str | None  # 撰寫者姓名（唯讀 join DP_USER；查無 None）
+    # 作者＝**目前發布版本的上傳者**（`DM_DOC_VERSION.CREATED_USER`），非文件建立者（#737）。
+    # 與 DM03 / DM07 同一定義；`author` 搜尋條件比對的也是這個人。
+    author_id: str
+    author_name: str | None  # 作者姓名（唯讀 join DP_USER；查無 None）
     func_code: str | None  # 僅「系統操作手冊」有值
     func_name: str | None
     tags: list[str]  # 檢索標籤名稱（灰字頓號呈現；不含可見對象/權限標籤）

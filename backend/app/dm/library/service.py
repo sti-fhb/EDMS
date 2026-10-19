@@ -47,7 +47,7 @@ class LibraryService:
                 category_code=r.category_code,
                 category_name=r.category_name,
                 published_date=r.published_date,
-                author_id=r.created_user,
+                author_id=r.author_id,
                 author_name=r.user_name,
                 func_code=r.func_code,
                 func_name=r.func_name,
