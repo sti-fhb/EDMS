@@ -6,7 +6,7 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import dayjs from "dayjs"
 import { HttpResponse, http } from "msw"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 
 import { EtCourseEditorPage } from "./CourseEditorPage"
 import { coursesApi } from "./coursesService"
@@ -138,6 +138,22 @@ async function fillDateTime(label: RegExp, keys: string) {
   await typist.click(first)
   await typist.keyboard(keys)
 }
+
+/**
+ * 「進入再開課模式 → 填兩次 `DateTimePicker` → 送出 / 開關對話框」測試的個別 timeout（#687）。
+ *
+ * - **成本來源**：兩個日期時間欄位各 12 鍵（MUI 每鍵重繪一次 section），加上再開課對話框、
+ *   發布視窗的開關與切換課程的重新渲染。套用的 5 條單檔、機器閒置（當下無其他測試行程）實測
+ *   （2026-10-19）：全程不發出一般更新 3735ms、殘留到下一次 3486ms、再開課留下的缺漏 3321ms、
+ *   發布視窗留下的缺漏 2991ms、送出中停用 2666ms——離預設 5 秒只剩 1.3～2.3 秒；整組並行時
+ *   其中 4 條實測 5.2～5.8 秒逾時（#682 驗收）。
+ * - **為何不降成本**：`fillDateTime` 已用 `delay: null`。試過把整條測試的 userEvent 也改成
+ *   `delay: null`，差異落在量測雜訊內——主要成本是元件重繪，不是按鍵之間的等待。
+ * - ⛔ **只給下列幾條，不調全域 `testTimeout`**：全域放寬會讓真正卡住的測試要更久才失敗。
+ * - ⚠️ 這個值只修掉「閒置時就逼近上限」。負載一來照樣可能紅，那是 worker 排不到 CPU，依
+ *   `.claude/rules/sti-testing.md`「前端『假紅』判定」處理，**不要再往上調**。
+ */
+const REOPEN_FLOW_TIMEOUT = 15_000
 
 describe("ET05 課程關閉與再開課", () => {
   it("編輯頁的邀請碼不帶「發布後永久不可變更」的括號說明（#359 第 2 項）", async () => {
@@ -395,7 +411,7 @@ describe("ET05 課程關閉與再開課", () => {
     await screen.findByText("課程已再開課")
 
     expect(puts).toBe(0)
-  })
+  }, REOPEN_FLOW_TIMEOUT)
 
   it("再開課送出的 body 只有後端 ReopenCourseReq 接受的三個欄位", async () => {
     // 🔴 迴歸測試。後端 `ReopenCourseReq` 原本繼承 `_CourseFields`，連 `course_name` 的
@@ -546,11 +562,21 @@ describe("ET05 課程關閉與再開課", () => {
   it("再開課送出中停用送出鈕，防連點造出兩次再開課（#428）", async () => {
     // 🔴 補刪除 `ReopenCourseDialog.test.tsx` 一併失去的覆蓋。後端有樂觀鎖兜底，但第二次
     // 請求仍會白跑一趟並吃掉一格限流（`reopen` 與 publish / close 共用 20 次/分鐘的桶）。
+    //
+    // ⚠️ 請求何時完成由**測試**決定（#687）：handler 停在 `gate` 上，直到下方 `release()`。
+    // 原本是 handler 等 200ms 後回應，機器稍忙時點擊處理完之前那 200ms 就過了、按鈕已恢復，
+    // `toBeDisabled()` 因此失敗——斷言的是「送出中」，卻沒有保證斷言時請求真的還在送。
     let calls = 0
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    // 斷言中途失敗時 `release()` 不會執行——仍要放行，不留一個永遠等不到回應的請求
+    onTestFinished(() => release())
     server.use(
       http.post("/api/et/courses/:courseId/reopen", async () => {
         calls += 1
-        await new Promise((resolve) => setTimeout(resolve, 200))
+        await gate
         return HttpResponse.json(reopened)
       }),
     )
@@ -563,12 +589,15 @@ describe("ET05 課程關閉與再開課", () => {
 
     const submit = screen.getByRole("button", { name: "確認再開課" })
     await user.click(submit)
+    // 請求已抵達後端且尚未回應——下面兩個斷言因此必定落在「送出中」
+    await waitFor(() => expect(calls).toBe(1))
 
     expect(submit).toBeDisabled()
     expect(screen.getByRole("button", { name: "取消再開課" })).toBeDisabled()
+    release()
     await screen.findByText("課程已再開課")
     expect(calls).toBe(1)
-  })
+  }, REOPEN_FLOW_TIMEOUT)
 
   it("上一次再開課的缺漏不會殘留到下一次（#428）", async () => {
     // ⚠️ 現行程式碼刻意把「再開課的缺漏」與「發布的缺漏」分成兩份 state，理由是避免
@@ -592,7 +621,7 @@ describe("ET05 課程關閉與再開課", () => {
     expect(await screen.findByRole("button", { name: "確認再開課" })).toBeInTheDocument()
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(screen.queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
-  })
+  }, REOPEN_FLOW_TIMEOUT)
 
   describe("發布與再開課的缺漏 state 分離（#509 AC 6）", () => {
     // ⛔ #509 只共用**呈現元件**，不共用資料。兩份 state 的理由見 `reopenBlockers` 的宣告。
@@ -658,7 +687,7 @@ describe("ET05 課程關閉與再開課", () => {
 
       expect(within(reopen).getByText(/課程至少須有 1 份教材/)).toBeInTheDocument()
       expect(within(reopen).queryByText(/課程至少須設定 1 組受訓對象/)).not.toBeInTheDocument()
-    })
+    }, REOPEN_FLOW_TIMEOUT)
 
     it("再開課留下的缺漏不出現在發布視窗", async () => {
       // ⚠️ **這條守的是結果，不是「兩份 state 分開」**。2026-10-06 變異檢查：讓再開課
@@ -683,7 +712,7 @@ describe("ET05 課程關閉與再開課", () => {
 
       expect(await within(publish).findByText(/課程至少須設定 1 組受訓對象/)).toBeInTheDocument()
       expect(within(publish).queryByText(/課程至少須有 1 份教材/)).not.toBeInTheDocument()
-    })
+    }, REOPEN_FLOW_TIMEOUT)
   })
 
   it("再開課成功後接著按儲存不會被「不可再往前調整」誤擋（#428 迴歸）", async () => {
