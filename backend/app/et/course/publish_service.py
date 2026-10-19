@@ -35,6 +35,7 @@ from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.et.audit_target import course_audit_payload
+from app.et.catalog.pair import Pair
 from app.et.common.dm_client import get_dm_document_client
 from app.et.common.invitation_code import generate_invitation_code
 from app.et.common.optimistic_lock import ensure_version_matched
@@ -60,7 +61,13 @@ from app.et.course.schemas import (
 )
 from app.et.course.stage_apply import apply_stage
 from app.et.course.stage_repository import EtCourseStageRepository
-from app.et.course.stage_rules import ENTITY_CHAPTER, to_course_snapshot
+from app.et.course.stage_rules import (
+    ENTITY_CHAPTER,
+    ENTITY_COURSE_TAG,
+    KEPT_PAYLOAD_KEY,
+    to_course_snapshot,
+)
+from app.et.course.stage_writer import EtCourseStageWriter
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.notify.course_update import CourseUpdateMailer
@@ -251,6 +258,21 @@ class EtPublishService:
             for n in nodes
             if n.entity_type == ENTITY_CHAPTER and n.source_id is None
         ]
+        # 🔴 受訓對象同理（#720）：**本次新增的配對**也要在套用前認出來。
+        #
+        # 判準同樣是 `source_id is None`——`_stage_basic` 刻意逐筆比對而非砍光重建，
+        # 既有配對的 `SOURCE_ID` 因此保留著，只有真正新加的那幾組是 `None`。
+        # 砍光重建的話這裡會把**全部**對象當成新增，整班重寄一次邀請信。
+        new_pairs = {
+            (n.payload["unit_tag_id"], n.payload["tag_id"])
+            for n in nodes
+            if n.entity_type == ENTITY_COURSE_TAG and n.source_id is None
+        }
+        # ⚠️ 「本次更新是否讓課程復活」要用**套用前**的活表值判定（#301 / #678）：
+        # 套用之後 `course.open_end_at` 已是新值，再問一次只會恆為「沒復活」。
+        was_effectively_closed = is_effectively_closed(
+            status=course.status, open_end_at=course.open_end_at, now=utcnow()
+        )
 
         stats = await apply_stage(db, course=course, nodes=nodes, operator=operator)
         await self._stage.clear(db, course_id, operator, stage_ids=[n.stage_id for n in nodes])
@@ -277,6 +299,32 @@ class EtPublishService:
                 await self._course_update_mailer.send_course_update(
                     db, course=course, new_chapter_name=name, user_ids=user_ids
                 )
+
+        # 🔴 **受訓對象的帶入與邀請信（#720 從 `update_basic` 搬來）。**
+        #
+        # 三條規則原封不動，只有**時機**從「按儲存」改成「按更新」：
+        #
+        # - 期間已過亦視同關閉（#288）：否則「關閉期間不可邀請學員」（FR-ET-US11-07）
+        #   會被整個繞過——Email 邀請已擋（409 `ET_INVITE_002`），但只要改成「幫課程
+        #   加一組配對」，對應的學員就會被帶入並收到邀請信，而他進去什麼都不能做。
+        # - 🔴 **復活時改依全部配對帶入**（#678）：延長期間讓視同關閉的課程復活，與再開課
+        #   是同一件事——期間已過時新增的配對與新貼標的人都沒被帶入過（帶入與貼標追溯
+        #   都排除視同關閉的課程），只補 `new_pairs` 會永久漏掉他們。全部配對已含本次
+        #   新增者，故兩者擇一，不重複執行。
+        # - 草稿不會走到這裡（上面已以 `ET_COURSE_010` 擋下）。
+        #
+        # ⚠️ 兩次 `is_effectively_closed` 的 `now` 都取當下，但讀的是**套用前後不同**的
+        # `open_end_at`：前者在 `apply_stage` 之前算好，後者是套用之後的新值。
+        if was_effectively_closed and not is_effectively_closed(
+            status=course.status, open_end_at=course.open_end_at, now=utcnow()
+        ):
+            await self.enroll_audiences(db, course, operator=operator)
+        elif (
+            new_pairs
+            and course.status == COURSE_PUBLISHED
+            and not is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow())
+        ):
+            await self.backfill_new_tag_members(db, course, new_pairs, operator=operator)
         # 🔴 稽核描述要帶**刪除統計**，不能只有節點數。
         #
         # 這支端點沒有 request body，而它會經由 cascade 軟刪**學員的進度與作答紀錄**。
@@ -323,6 +371,85 @@ class EtPublishService:
             # 只記筆數：暫存列的內容從未對學員生效，記下來沒有稽核價值，且會把教師
             # 編輯中的文字寫進稽核表。
             await self._log(db, operator.user_id, course_id, f"放棄尚未更新的課程內容編輯（{removed} 項）")
+
+    async def keep_draft(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
+        """「儲存草稿」：把暫存樹標記為**要留著**，不碰活表、不跑檢核（#720）。
+
+        ## 它不是「更新」的弱化版
+
+        2026-10-19 裁示：已關閉課程的中間那顆鈕**不跑發布檢核**。理由是教師可能只是把
+        半成品存起來下次再弄——拿六項檢核擋他，等於逼他要嘛一次做完、要嘛整份丟掉。
+        檢核留在「更新並重開課」那一顆，因為那顆才會讓學員看到。
+
+        ⇒ 學員此刻唯讀回看的仍是**關閉前的內容**，一個字都沒變。
+
+        ## 只有已關閉 / 視同關閉的課程有這顆鈕
+
+        已發布課程刻意不設（同日裁示）：它的內容隨時對學員生效，「存著不發」這個狀態
+        會讓教師以為自己已經處理完了。所以已發布的暫存樹恆無 `KEPT_PAYLOAD_KEY`、
+        離開即丟（見 `discard_unkept`）。
+
+        ⚠️ 旗標寫在課程節點上，經 `set_payload_flag`——它**刻意不遞增 `VERSION`**，
+        否則教師按完「儲存草稿」手上的樂觀鎖令牌就過期，下一個動作無故 409。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`；
+                409 `ET_COURSE_011` 課程不是已關閉 / 視同關閉（草稿與運作中的已發布皆擋）。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if not is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=utcnow()):
+            # ⛔ 不共用 `ET_COURSE_010`：那句話是「草稿請直接編輯後發布」，而這裡要說的是
+            # 「這門課還在運作中，編輯請按『更新』」——下一步不同，比照 `006` / `007` 的理由。
+            raise AppError(
+                status_code=409,
+                detail="僅已關閉課程可儲存草稿，運作中的課程請改用「更新」",
+                error_code="ET_COURSE_011",
+            )
+        await self._stage.lock_course(db, course_id)
+        writer = EtCourseStageWriter(self._stage)
+        await writer.ensure_seeded(db, course_id, operator)
+        node = await writer.course_node(db, course_id)
+        if node is None:  # pragma: no cover - `ensure_seeded` 必定建出課程節點
+            raise ValueError("暫存樹缺少課程節點（COURSE）")
+        await writer.set_payload_flag(db, node.stage_id, KEPT_PAYLOAD_KEY, True, operator)
+        await self._log(db, operator.user_id, course_id, "儲存課程內容草稿（未對學員生效）")
+
+    async def discard_unkept(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
+        """進入編輯頁時丟棄**沒被明確保留**的暫存殘留（#720，2026-10-19 裁示 Q1 選項 1）。
+
+        ## 為什麼進頁要丟
+
+        「沒按更新就離開 ＝ 放棄本次全部編輯」若只靠前端的離開攔截，那個保證是**假的**
+        ——關分頁、當機、斷線都繞得過去。留下的殘留最糟的地方不是它存在，而是教師
+        **看不出那是殘留**：畫面長得跟自己上次存的一樣，他會以為那就是目前的內容。
+
+        ## 與「取消」的差別
+
+        `discard_content` 無條件清空（教師明確要丟）；本支只清**沒有 `KEPT_PAYLOAD_KEY`**
+        的，已關閉課程按過「儲存草稿」的那一份留著。
+
+        ## 草稿靜默略過
+
+        草稿沒有暫存表，前端對所有狀態一律呼叫本支（進頁就打一次），所以這裡**不回 409**
+        ——與 `discard_content` 不同：那支是教師按了鈕，誤導到草稿要看得見；這支是前端的
+        例行動作，為它回錯誤只會逼前端去判斷狀態，而那個判斷遲早與後端分岔。
+
+        📌 已知且接受：兩個分頁同時開著同一門已發布課程時，**後開的那個會靜默吃掉先開
+        的編輯**。裁示時已攤開過（選項 1 的代價），反方向的代價是「保證是假的」。
+
+        Raises:
+            AppError: 404 `ET_COURSE_001`；403 `ET_COURSE_002`。
+        """
+        course = await self._require_owned(db, course_id, operator.user_id)
+        if course.status == COURSE_DRAFT:
+            return
+        await self._stage.lock_course(db, course_id)
+        node = await EtCourseStageWriter(self._stage).course_node(db, course_id)
+        if node is not None and node.payload.get(KEPT_PAYLOAD_KEY):
+            return
+        removed = await self._stage.discard(db, course_id)
+        if removed:
+            await self._log(db, operator.user_id, course_id, f"丟棄未保留的課程內容編輯殘留（{removed} 項）")
 
     async def discard_survey_edits(self, db: AsyncSession, course_id: int, *, operator: OperatorInfo) -> None:
         """只放棄**問卷**的編輯，其餘內容的編輯保留（#712，2026-10-19 使用者裁示 B）。
@@ -522,6 +649,39 @@ class EtPublishService:
         return invited_ids
 
     # ── 內部 ────────────────────────────────────────────────────────────────
+
+    async def backfill_new_tag_members(
+        self, db: AsyncSession, course, pairs: set[Pair], *, operator: OperatorInfo
+    ) -> None:
+        """新增配對 → 補帶入該配對人員並寄通知信（FR-ET-US8-04 / #273 / #538）。
+
+        ⚠️ **呼叫點於 #720 從 `update_basic` 移到 `update_published`**（套用暫存之後）。
+        原本教師按「儲存」當下就寄，而暫存模式下那封信寫的是**還沒發生的事**：信裡說
+        「你被加入了某課程」，但那組配對還在暫存區，他點進去什麼都看不到；若教師接著按
+        「取消」，那組配對從頭到尾不曾存在，而信已經寄出去了。
+
+        **只對新增的配對解析人員**（`target_user_ids_for_pairs`）：用全部課程配對會把
+        「發布後才被貼上舊配對的人」也一併帶入，而那條路徑另有出口（貼標追溯於貼標
+        當下觸發），在這裡順手做會讓同一人被兩條路徑各邀請一次。
+
+        草稿課程不走這裡——草稿的配對可自由增刪，帶入與寄信一律等到發布當下
+        （FR-ET-US3-12）；否則教師編輯期間每加一組配對就會寄出一批信。
+
+        既有學員不重複加入由 `bulk_enroll_returning` 的 `ON CONFLICT DO NOTHING` 保證，
+        且它只回傳真正新增者，故寄信對象自然也不含既有學員。
+        """
+        user_ids = await self._tag_invite.target_user_ids_for_pairs(db, course.course_id, list(pairs))
+        invited = await self._tag_invite.bulk_enroll_returning(db, course.course_id, user_ids, operator=operator)
+        if not invited:
+            return
+        await self._log(db, operator.user_id, course.course_id, f"新增受訓對象補帶入 {len(invited)} 位學員")
+        # 重新載入課程（防禦性）：信裡有課程名稱與起訖，`apply_stage` 剛把它們寫回活表。
+        # 那是 ORM-enabled UPDATE、已同步 identity map，現況下手上的物件本來就是新值——
+        # 保留 refresh 是不讓信的內容相依於該寫法（#678 查證）。
+        await db.refresh(course)
+        await self._invite_mailer.send_course_invite(
+            db, course=course, invitation_code=course.invitation_code, user_ids=invited
+        )
 
     async def ensure_revival_publishable(
         self, db: AsyncSession, course, *, new_end_at: datetime | None, now: datetime

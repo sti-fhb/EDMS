@@ -32,7 +32,7 @@ from datetime import timedelta
 from typing import Any, Final
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.operator import OperatorInfo
@@ -107,10 +107,17 @@ async def _user(db, user_id: str) -> str:
     return user_id
 
 
-async def _attach_tag(db, course_id: int) -> None:
+async def _attach_tag(db, course_id: int, suffix: str = "") -> tuple[int, int]:
+    """掛一組受訓對象配對，回傳 `(unit_tag_id, tag_id)`。
+
+    ⚠️ 回傳是 #720 之後才需要的：`PUT /courses/{id}` 是**全量覆寫**，守門要打它就得把
+    既有配對原樣送回去——少送一組，`ensure_tag_change_allowed` 會先以「已發布不可移除
+    受訓對象」擋下，測試就倒在前置而不是倒在它要驗的事情上。
+    """
     now = utcnow()
     tag = EtTag(
-        tag_name=f"標籤{course_id}",
+        #: `suffix` 讓同一門課掛得了第二組——`UQ_ET_TAG_NAME` 是全域唯一。
+        tag_name=f"標籤{course_id}{suffix}",
         is_active=True,
         is_builtin=False,
         created_user="SYSTEM",
@@ -119,9 +126,10 @@ async def _attach_tag(db, course_id: int) -> None:
     )
     db.add(tag)
     await db.flush()
+    unit_tag_id = await all_units_id(db)
     db.add(
         EtCourseTag(
-            unit_tag_id=await all_units_id(db),
+            unit_tag_id=unit_tag_id,
             course_id=course_id,
             tag_id=tag.tag_id,
             created_user="SYSTEM",
@@ -130,6 +138,7 @@ async def _attach_tag(db, course_id: int) -> None:
         )
     )
     await db.flush()
+    return unit_tag_id, tag.tag_id
 
 
 async def _course_with_content(client, db, uid: str) -> dict[str, Any]:
@@ -139,18 +148,20 @@ async def _course_with_content(client, db, uid: str) -> dict[str, Any]:
     測試因為「沒有東西可打」而假性通過。
     """
     now = utcnow().replace(microsecond=0)
+    open_start_at = (now - timedelta(days=1)).isoformat()
+    open_end_at = (now + timedelta(days=30)).isoformat()
     created = await client.post(
         _COURSES,
         json={
             "course_name": "守門測試課程",
-            "open_start_at": (now - timedelta(days=1)).isoformat(),
-            "open_end_at": (now + timedelta(days=30)).isoformat(),
+            "open_start_at": open_start_at,
+            "open_end_at": open_end_at,
         },
         headers=_bearer(uid),
     )
     assert created.status_code == 201, created.text
     cid = created.json()["course_id"]
-    await _attach_tag(db, cid)
+    unit_tag_id, tag_id = await _attach_tag(db, cid)
 
     ch = await client.post(f"{_COURSES}/{cid}/chapters", json={"chapter_name": "第一章"}, headers=_bearer(uid))
     chapter_id = ch.json()["chapter_id"]
@@ -219,6 +230,12 @@ async def _course_with_content(client, db, uid: str) -> dict[str, Any]:
     survey_row = await db.scalar(select(EtSurvey).where(EtSurvey.survey_id == survey_id))
     return {
         "course_id": cid,
+        "unit_tag_id": unit_tag_id,
+        "tag_id": tag_id,
+        # ⚠️ 原樣留著供 `PUT /courses/{id}` 回送：全量覆寫少送訖止就會踩到 #301 的
+        # `ensure_schedule_not_cleared`，測試又會倒在前置。
+        "open_start_at": open_start_at,
+        "open_end_at": open_end_at,
         "chapter_id": chapter_id,
         "chapter2_id": chapter2_id,
         "chapter_version": chapter.version,
@@ -286,6 +303,24 @@ async def _fingerprint(db, course_id: int) -> tuple:
 # ⛔ 新增內容編輯端點時**必須**補進這張表，否則它從此沒有人檢查。
 
 _COURSE_MODULE = [
+    (
+        # #720：基本資料與受訓對象改走暫存。全量覆寫，故既有配對要原樣送回。
+        "PUT /courses/{id}",
+        True,
+        lambda c, u, i: c.put(
+            f"{_COURSES}/{i['course_id']}",
+            json={
+                "course_name": "改過的課名",
+                "description": "改過的描述",
+                "open_start_at": i["open_start_at"],
+                "open_end_at": i["open_end_at"],
+                "require_approval": True,
+                "audiences": [{"unit_tag_id": i["unit_tag_id"], "tag_id": i["tag_id"]}],
+                "version": i["course_version"],
+            },
+            headers=_bearer(u),
+        ),
+    ),
     (
         "POST /courses/{id}/chapters",
         True,
@@ -478,15 +513,21 @@ _ALL = _COURSE_MODULE + _OTHER_MODULES + _CREATE_WRITES
 #: 機器守門退回人工清單，而本檔曾經就是這樣整群漏掉建立類端點的（security review M-5）。
 #: 加之前問：「已發布課程的教師打這支，學員看到的內容會不會變？」會變就該進清單。
 _NOT_CONTENT_WRITES: Final[dict[str, str]] = {
-    # 課程本體與狀態：基本資料不走暫存（刻意），狀態轉換有自己的流程
+    # 課程本體與狀態：狀態轉換有自己的流程
+    #
+    # ⚠️ `PUT /api/et/courses/{course_id}`（基本資料）**曾經列在這裡**，理由是「刻意不走
+    # 暫存」。#720 推翻了那條分界：教師在同一個畫面改名稱、改期間、改受訓對象，按「儲存」
+    # 卻當場就讓學員看到——那正是 2026-10-19 手測回報的第一個 bug。它現在在守門清單裡。
     "POST /api/et/courses": "建立草稿課程——草稿不走暫存",
-    "PUT /api/et/courses/{course_id}": "基本資料，**刻意不走暫存**（見 PR 說明的分界）",
     "DELETE /api/et/courses/{course_id}": "刪除草稿課程，僅草稿可用",
     "POST /api/et/courses/{course_id}/publish": "發布本身就是生效入口",
     "POST /api/et/courses/{course_id}/close": "狀態轉換，不動內容",
     "POST /api/et/courses/{course_id}/reopen": "狀態轉換，不動內容",
     "POST /api/et/courses/{course_id}/content/apply": "**這支就是生效入口**",
     "DELETE /api/et/courses/{course_id}/content/stage": "放棄暫存——只刪暫存列，活表不動",
+    # #720：兩支都只動暫存列的**去留**，連暫存的內容都不改。
+    "POST /api/et/courses/{course_id}/content/draft": "「儲存草稿」只標記暫存樹要留著，活表不動",
+    "DELETE /api/et/courses/{course_id}/content/stage/unkept": "丟棄未保留的殘留——只刪暫存列，活表不動",
     # ⚠️ 它**會**動暫存列（把問卷子樹從活表重抄一份），但不動活表——學員看到的內容
     # 在前後完全相同，這正是「放棄」的定義。與上一條同類（#712）。
     "DELETE /api/et/courses/{course_id}/content/stage/survey": "只放棄問卷的編輯——重抄活表，活表不動",
@@ -625,9 +666,18 @@ async def _staged_negative_ids(client, db, uid: str, ids: dict[str, Any]) -> dic
     return negative
 
 
+#: 沒有負數 id 可打的端點——它們的對象是**課程列本身**，而課程永遠在活表
+#: （理由見 `_staged_negative_ids` 的 docstring）。
+#:
+#: ⚠️ 列在這裡**不等於沒有授權守門**：`PUT /courses/{id}` 的他人守門走 `_require_owned`，
+#: 由 `test_他人不得碰到我的課程內容`（403/404 那一版）覆蓋。⛔ 不要為了讓某支變綠而
+#: 加進來——先問「這支吃得到負數 id 嗎？」吃得到就該留在參數化裡。
+_NO_NEGATIVE_ID: Final[frozenset[str]] = frozenset({"PUT /courses/{id}"})
+
+
 @pytest.mark.parametrize(
     ("label", "call"),
-    [pytest.param(label, call, id=label) for label, _staged, call in _ALL],
+    [pytest.param(label, call, id=label) for label, _staged, call in _ALL if label not in _NO_NEGATIVE_ID],
 )
 async def test_他人不得以負數_id_碰到我的暫存區(label: str, call, client, db) -> None:
     """🔴 **授權的列舉式守門（負數 id 這一半）**（2026-10-18 security review M-4）。
@@ -780,6 +830,7 @@ def _listed_openapi_paths() -> set[str]:
     守門靜默失效——而這張表若與清單不同步，`test_清單涵蓋全部內容寫入端點` 會紅。
     """
     return {
+        "PUT /api/et/courses/{course_id}",
         "POST /api/et/courses/{course_id}/chapters",
         "PUT /api/et/courses/{course_id}/chapters/order",
         "PUT /api/et/chapters/{chapter_id}",
@@ -879,6 +930,25 @@ async def test_暫存模式回傳的_id_可以接著用(client, db) -> None:
     assert item.json()["material_id"] < 0
 
 
+async def _stage_basic_edit(client, db, uid: str, ids: dict, **over) -> None:
+    """打一次 `PUT /courses/{id}`（全量覆寫），預設原樣送回、只改呼叫端指定的欄位。
+
+    ⚠️ 版本每次重讀詳細頁取得：暫存開始之後活表的 `VERSION` 就不再遞增，拿活表的值
+    打第二次必然 409。
+    """
+    detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()
+    body = {
+        "course_name": "守門測試課程",
+        "open_start_at": ids["open_start_at"],
+        "open_end_at": ids["open_end_at"],
+        "audiences": [{"unit_tag_id": ids["unit_tag_id"], "tag_id": ids["tag_id"]}],
+        "version": detail["version"],
+    } | over
+    resp = await client.put(f"{_COURSES}/{ids['course_id']}", json=body, headers=_bearer(uid))
+    assert resp.status_code == 204, resp.text
+    await db.flush()
+
+
 class TestStagedRead:
     """編輯頁讀暫存、他人與學員讀已生效版本（#631 PR 2a）。
 
@@ -917,6 +987,93 @@ class TestStagedRead:
         names = [c["chapter_name"] for c in detail.json()["chapters"]]
         assert "暫存新章" not in names, "他人不得看到尚未生效的內容"
         assert "第一章" in names
+
+    async def test_擁有者看到暫存的基本資料(self, client, db) -> None:
+        """🥇 **寫進暫存就必須讀得回來，否則教師會以為自己的編輯掉了。**
+
+        2026-10-19 手測回報的是反向那一半（寫進活表、學員看得到）；把寫入端改掉而讀取端
+        沒跟上的症狀是：教師改完名稱、重整頁面，看到的還是舊名稱——他會再改一次，
+        而暫存區裡其實已經有了。
+        """
+        uid = await _user(db, "ZT_SB1")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await _stage_basic_edit(client, db, uid, ids, course_name="暫存的課名", require_approval=True)
+
+        detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()
+
+        assert detail["course_name"] == "暫存的課名"
+        assert detail["require_approval"] is True
+
+    async def test_他人看到的是活表的基本資料(self, client, db) -> None:
+        """他人閱覽與學員端一律看已生效版本——與章節同一條規則。"""
+        uid = await _user(db, "ZT_SB2")
+        other = await _user(db, "ZT_SB3")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await _stage_basic_edit(client, db, uid, ids, course_name="暫存的課名")
+
+        detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(other))).json()
+
+        assert detail["course_name"] == "守門測試課程", "他人不得看到尚未生效的課名"
+
+    async def test_受訓對象也讀暫存(self, client, db) -> None:
+        """受訓對象與基本資料在同一張卡、同一次送出，讀取端分岔了就只有一半會更新。"""
+        uid = await _user(db, "ZT_SB4")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        extra_unit, extra_tag = await _attach_tag(db, ids["course_id"], "乙")
+        # 上一行直接寫活表是為了借一組**合法可選**的配對，隨即從活表移除，
+        # 讓它只存在於本次暫存——否則分不出讀到的是暫存還是活表。
+        await db.execute(
+            update(EtCourseTag)
+            .where(EtCourseTag.course_id == ids["course_id"], EtCourseTag.tag_id == extra_tag)
+            .values(deleted=1)
+        )
+        await db.flush()
+        await _stage_basic_edit(
+            client,
+            db,
+            uid,
+            ids,
+            audiences=[
+                {"unit_tag_id": ids["unit_tag_id"], "tag_id": ids["tag_id"]},
+                {"unit_tag_id": extra_unit, "tag_id": extra_tag},
+            ],
+        )
+
+        detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()
+
+        assert {a["tag_id"] for a in detail["audiences"]} == {ids["tag_id"], extra_tag}
+
+    async def test_version_回的是暫存節點的(self, client, db) -> None:
+        """🔴 **前端拿這個數字去打下一次編輯與章節重排。**
+
+        回活表的版本（暫存開始之後它就不再遞增）會讓第二次存檔恆 409，而教師看到的是
+        「版本衝突，請重新整理」——重整之後還是同一個數字，他永遠存不進去。
+        """
+        uid = await _user(db, "ZT_SB5")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        live_before = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()["version"]
+        await _stage_basic_edit(client, db, uid, ids, course_name="改一次")
+
+        after = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()
+
+        assert after["version"] == live_before + 1, "暫存列的版本要接著活表的值往下走"
+        # 正向錨點：少了它，把實作寫成「永遠回 live_before + 1」也會讓上一條通過
+        second = await client.put(
+            f"{_COURSES}/{ids['course_id']}",
+            json={
+                "course_name": "改第二次",
+                "open_start_at": ids["open_start_at"],
+                "open_end_at": ids["open_end_at"],
+                "audiences": [{"unit_tag_id": ids["unit_tag_id"], "tag_id": ids["tag_id"]}],
+                "version": after["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert second.status_code == 204, f"拿詳細頁回的版本必須存得進去：{second.text}"
 
     async def test_既有內容回活表_id_新增的回負數(self, client, db) -> None:
         """⚠️ 前端把哪個數字帶回 PUT，決定後端改到哪一邊——回錯了不報錯，只改到別的東西。"""
