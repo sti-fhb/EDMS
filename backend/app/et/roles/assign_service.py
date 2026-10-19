@@ -100,6 +100,9 @@ class EtAssignService:
         查無指派者回**空集合 View**（非缺 key），供 DP 端一致處理。
         `last_modified_*` 取 `ET_USER_ROLE` / `ET_USER_TAG` 之 `UPDATED_*` 較新者，
         **無 UPDATED_* 時回退至 CREATED_***（比照 DM）——新授予之列尚未被異動過。
+
+        ⚠️ `roles` / `groups` 只含**目前有效**的列，但 `last_modified_*` 涵蓋**全部**列
+        （含已取消 `IS_ACTIVE=False`、已移除 `DELETED=1`）——取消與移除也是異動（#743）。
         """
         result: dict[str, AssignmentView] = {
             uid: AssignmentView(frozenset(), frozenset(), None, None) for uid in user_ids
@@ -118,42 +121,48 @@ class EtAssignService:
             if cur_when is None or when > cur_when:
                 last_by_user[uid] = (who, when)
 
+        # 🔴 WHERE 刻意**不**過濾 `IS_ACTIVE` / `DELETED`（#743）：同一批列供兩個用途，
+        # 而兩者要的條件相反——
+        #   「目前有效的角色」→ 只算 is_active 且未刪除（移到下方逐列判斷）
+        #   「最後異動」      → 必須含**已取消**的列（取消是 `IS_ACTIVE=False` 並寫 UPDATED_*）
+        # 把過濾留在 SQL 會讓第二個用途看不到那些列：取消角色後最後異動停在上一次的新增，
+        # 角色全部取消後更會回 None、DP02 顯示「—」。
         role_rows = await db.execute(
             select(
                 EtUserRole.user_id,
                 EtUserRole.role,
+                EtUserRole.is_active,
+                EtUserRole.deleted,
                 EtUserRole.updated_user,
                 EtUserRole.updated_date,
                 EtUserRole.created_user,
                 EtUserRole.created_date,
-            ).where(
-                EtUserRole.user_id.in_(user_ids),
-                EtUserRole.is_active.is_(True),
-                EtUserRole.deleted == 0,
-            )
+            ).where(EtUserRole.user_id.in_(user_ids))
         )
-        for uid, role, upd_user, upd_date, crt_user, crt_date in role_rows:
-            roles_by_user[uid].add(role)
+        for uid, role, is_active, deleted, upd_user, upd_date, crt_user, crt_date in role_rows:
+            if is_active and deleted == 0:
+                roles_by_user[uid].add(role)
             # 回退至 CREATED_*：新授予而從未再異動之列（如 grant_default_student_role
             # 或 bootstrap seed 所建）無 UPDATED_*，否則 DP 後台「最後異動」欄會空白
             _track(uid, upd_user or crt_user, upd_date or crt_date)
 
+        # 同上（#743）：`ET_USER_TAG` 無 `IS_ACTIVE`，移除配對是 `DELETED=1` 並寫 UPDATED_*，
+        # 過濾一樣移到迴圈，讓最後異動看得到被移除的那一列。
         tag_rows = await db.execute(
             select(
                 EtUserTag.user_id,
                 EtUserTag.unit_tag_id,
                 EtUserTag.tag_id,
+                EtUserTag.deleted,
                 EtUserTag.updated_user,
                 EtUserTag.updated_date,
                 EtUserTag.created_user,
                 EtUserTag.created_date,
-            ).where(
-                EtUserTag.user_id.in_(user_ids),
-                EtUserTag.deleted == 0,
-            )
+            ).where(EtUserTag.user_id.in_(user_ids))
         )
-        for uid, unit_tag_id, tag_id, upd_user, upd_date, crt_user, crt_date in tag_rows:
-            tags_by_user[uid].add(encode_pair(unit_tag_id, tag_id))
+        for uid, unit_tag_id, tag_id, deleted, upd_user, upd_date, crt_user, crt_date in tag_rows:
+            if deleted == 0:
+                tags_by_user[uid].add(encode_pair(unit_tag_id, tag_id))
             _track(uid, upd_user or crt_user, upd_date or crt_date)
 
         for uid in user_ids:
