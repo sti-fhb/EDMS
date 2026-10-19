@@ -45,6 +45,7 @@ class DashboardService:
                 doc_id=r.doc_id,
                 doc_name=r.doc_name,
                 category_code=r.category_code,
+                category_name=r.category_name,
                 version_no=r.version_no,
                 change_summary=r.change_summary,
                 published_date=r.published_date,

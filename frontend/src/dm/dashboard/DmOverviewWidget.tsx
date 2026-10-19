@@ -53,7 +53,7 @@ function AnnouncementRow({ item, onOpen }: { item: AnnouncementItem; onOpen: (do
               {item.change_summary || "（無摘要）"}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {formatDateTaipei(item.published_date)} ｜ {item.author_name ?? "—"} ｜ {item.category_code}
+              {formatDateTaipei(item.published_date)} ｜ {item.author_name ?? "—"} ｜ {item.category_name}
             </Typography>
           </>
         }

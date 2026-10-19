@@ -8,6 +8,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
 
+from app.dm.catalog.models import DmCategory
 from app.dm.document.models import DmDocument, DmDocVersion
 from app.dm.review.models import DmReview
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，同 dm/review、dm/detail）
@@ -63,10 +64,15 @@ class PersonalRepository:
                 func.coalesce(DmDocVersion.updated_date, DmDocVersion.created_date).label("updated_date"),
                 DmDocument.doc_name,
                 DmDocument.category_code,
+                # 分類**中文名稱**，查表取目前值——管理者於 DP03 改名後本頁隨之顯示新名稱，
+                # 不是發布當下的快照（#735）。inner join：`CATEGORY_CODE` 是受控主檔 FK，
+                # 查不到即資料損毀，不該靜默顯示空白（與 `library/repository.py` 同寫法）。
+                DmCategory.category_name,
                 DmDocument.status.label("doc_status"),
                 latest_status.label("latest_review_status"),
             )
             .join(DmDocument, (DmDocVersion.doc_id == DmDocument.doc_id) & (DmDocument.deleted == 0))
+            .join(DmCategory, DmDocument.category_code == DmCategory.category_code)
             .where(
                 DmDocVersion.created_user == user_id,
                 DmDocVersion.status == _DRAFT,

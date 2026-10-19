@@ -25,7 +25,10 @@ class AnnouncementItem(BaseModel):
 
     doc_id: str
     doc_name: str
+    # 保留理由同 `personal/schemas.py` 的 `DraftItem`：對外相容，前端已無消費者。
+    # ⛔ 與同檔 `CategoryStat.category_code`（StatCard 的 React key）不是同一回事，別混。
     category_code: str
+    category_name: str  # 分類中文名稱（查表取目前值，#735）；前端公告列顯示此欄
     version_no: str
     change_summary: str | None
     published_date: datetime

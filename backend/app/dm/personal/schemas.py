@@ -16,7 +16,11 @@ class DraftItem(BaseModel):
     doc_name: str
     version_no: str | None
     change_summary: str | None
+    # 保留 `category_code` 的理由是**對外相容**：本 repo 的前端已無消費者（#735 掃過），
+    # 但它是既有 API 的一部分，移除需確認無外部呼叫端。⛔ 不要寫成「前端某處拿它當 key」
+    # ——那是錯的（`DmOverviewWidget` 的 React key 取自 `CategoryStat`，不是本型別）。
     category_code: str
+    category_name: str  # 分類中文名稱（查表取目前值，#735）；前端「分類」欄顯示此欄
     kind: DraftKind
     updated_date: datetime | None
     doc_status: str  # 父文件狀態（OBSOLETE 時前端灰掉「繼續編輯」、僅允許刪除）
