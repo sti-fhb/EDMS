@@ -119,3 +119,21 @@ def test_功能名稱不再使用受訓單位標籤舊稱() -> None:
     et_labels = [label for code, label in _FUNC_LABELS.items() if code.startswith("ET-")]
     assert et_labels
     assert not [label for label in _FUNC_LABELS.values() if "受訓單位" in label or "標籤指派" in label]
+
+
+def test_dm_personal_功能名稱說得出涵蓋的動作() -> None:
+    """#716：原標為「DM-個人專區」——那是**畫面名稱**，不是這個碼記了什麼。
+
+    使用者看到「個人專區」出現在操作記錄裡，合理的反應是「個人操作為什麼要進稽核」。
+    但它實際涵蓋的 `delete_draft` / `withdraw` 兩個動作都影響他人或不可復原：撤回送審會讓
+    審核者的待辦當場消失、草稿刪除不可復原——該記，只是名字沒說清楚。
+
+    ⭐ 同一張表的 `ET-ATTEMPT` 早有同型註記（「⚠️ 不可命名為『測驗作答』——那會讓人以為
+    每次作答都有紀錄」）。本條把那個只存在於註解裡的約定，變成可執行的斷言。
+
+    正向錨點：`_FUNC_LABELS["DM-PERSONAL"]` 查無即 KeyError，確保不是在空值上恆真。
+    """
+    label = _FUNC_LABELS["DM-PERSONAL"]
+    assert any(k in label for k in ("草稿", "撤回")), (
+        f"「{label}」看不出涵蓋哪些動作；它記的是刪除草稿與撤回送審，不是個人設定類操作"
+    )

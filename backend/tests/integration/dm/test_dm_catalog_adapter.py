@@ -444,3 +444,30 @@ async def test_每個標籤組都有說明文字(db):
     kinds = {k.kind: k for k in await _svc.list_controlled_kinds(db)}
     missing = [g.code for g in kinds["TAG"].groups if not g.description]
     assert not missing, f"這些標籤組缺少說明，請補 _TAG_GROUP_DESCRIPTIONS：{missing}"
+
+
+async def test_啟停之稽核列自帶標籤名稱(db):
+    """啟用 / 停用的 `after` 與 `before` 須含名稱（#716 B1）。
+
+    TAG 的 `target_id` 是 `TAG_ID`，稽核列若不自帶名稱，DP05 的對象欄只剩一個數字——
+    而新增與改名一向有帶，造成**同一個標籤「新增時看得到名字、停用時只剩編號」**。
+    明細對話框的前值 / 後值同樣看不出對象，三個欄位沒有一個說得出停用的是誰。
+
+    ⚠️ 名稱取**異動當下**的值而非查活表：標籤日後改名時，舊紀錄仍應顯示當時的名字。
+    """
+    group = await _audience_group(db)
+    await _svc.create_controlled(db, "TAG", code=group, name="ZT啟停稽核", operator_id="admin")
+    tag_id = await db.scalar(select(DmTag.tag_id).where(DmTag.tag_name == "ZT啟停稽核"))
+
+    await _svc.set_controlled_enabled(db, "TAG", code=str(tag_id), enabled=False, operator_id="admin")
+
+    log = (
+        await db.execute(
+            select(DpAuditLog)
+            .where(DpAuditLog.target_id == str(tag_id), DpAuditLog.action_type == "UPDATE")
+            .order_by(DpAuditLog.log_id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert json.loads(log.after_value)["name"] == "ZT啟停稽核", "after 須帶名稱，否則對象欄只剩 TAG_ID"
+    assert json.loads(log.before_value)["name"] == "ZT啟停稽核", "before 同樣要帶，明細才看得出對象"

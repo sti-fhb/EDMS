@@ -22,9 +22,17 @@ from app.dp.user.models import DpPendingRegistration
 from app.dp.users.models import DpUser
 
 # target_id 指向使用者（USER_ID 或邀請 invite_id）之 func_name。
-# DM-ROLES（角色/可見對象指派）target_id 即被指派之 USER_ID，故一併解析為姓名（對象顯示人名而非原始 ID）。
-# DM-CATALOG target_id 為受控項代碼（分類 / func / TAG_ID），非使用者，不列入。
-_USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER", "DM-ROLES"})
+# DM-ROLES / ET-ROLES（角色與可見對象 / 受訓對象指派）target_id 即被指派之 USER_ID，
+# 故一併解析為姓名（對象顯示人名而非原始 ID）。
+#
+# ⚠️ ET-ROLES 於 #716 補上——漏列的症狀是**畫面顯示原始 USER_ID**：seed 示範帳號的 ID
+# 是可讀代碼，使用者會誤以為「姓名被翻成英文」，而正式帳號的隨機碼則完全無法辨識。
+# 兩者 target_id 語意與 DM-ROLES 完全相同，當時只是漏收。
+#
+# ⛔ DM-CATALOG / ET-CATALOG 的 target_id 為受控項代碼（分類 / func / TAG_ID），非使用者，
+# **不要**列入——它們的名稱改走稽核列自帶（見 query_service 的 _TARGET_NAME_KEYS），
+# 那樣才留得住「操作當時的名稱」；查活表會讓標籤改名後連舊紀錄一起變。
+_USER_FUNCS = frozenset({"DP-USERS", "DP-PROFILE", "DP-FORGOT", "DP-REGISTER", "DM-ROLES", "ET-ROLES"})
 
 # (func_name, target_id) → 顯示名稱
 _DisplayMap = dict[tuple[str, str], str]

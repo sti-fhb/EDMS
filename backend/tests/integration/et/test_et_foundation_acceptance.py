@@ -6,6 +6,7 @@
 2. **跨模組消費驗證**——ET 的通知範本經平台 `NotifyService` 不會靜默失敗（AC 8）。
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -272,6 +273,31 @@ class TestCatalogMaintenance:
         with pytest.raises(AppError) as e:
             await provider.list_controlled(db, "CATEGORY")
         assert e.value.error_code == "ET_TAG_003"
+
+    async def test_啟停之稽核列自帶標籤名稱(self, db, et_registered) -> None:
+        """啟用 / 停用的 `after_value` 須含 `tag_name`（#716 B2）。
+
+        `target_id` 是 `TAG_ID`，稽核列若不自帶名稱，DP05 的對象欄只剩一個數字。新增與
+        改名一向有帶 `tag_name`，啟停原本只寫 `{"is_active": ...}`——造成同一個標籤
+        「新增時看得到名字、停用時只剩編號」。DM 端有完全相同的缺陷，同批修正。
+
+        ⚠️ 名稱取**異動當下**的值而非查活表：標籤日後改名時，舊紀錄仍應顯示當時的名字。
+        """
+        provider = module_assign_registry.get("ET")
+        tid = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "軍人"})
+
+        await provider.set_controlled_enabled(db, "TAG", code=str(tid), enabled=False, operator_id="ET_CAT_OP")
+
+        raw = await db.scalar(
+            text(
+                'SELECT "AFTER_VALUE" FROM "DP_AUDIT_LOG" '
+                'WHERE "FUNC_NAME" = \'ET-CATALOG\' AND "TARGET_ID" = :t '
+                'ORDER BY "LOG_ID" DESC LIMIT 1'
+            ),
+            {"t": str(tid)},
+        )
+        assert raw is not None, "停用應寫一筆 ET-CATALOG 稽核"
+        assert json.loads(raw)["tag_name"] == "軍人", "after 須帶 tag_name，否則對象欄只剩 TAG_ID"
 
     async def test_新增自訂標籤成功且非內建(self, db, et_registered) -> None:
         provider = module_assign_registry.get("ET")
