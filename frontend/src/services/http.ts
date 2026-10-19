@@ -14,11 +14,30 @@ export function setAuthToken(token: string | null): void {
   authToken = token
 }
 
-// 401（憑證無效 / 逾時 / 換發逾限）統一處置回呼：由 AuthProvider 註冊為「清狀態 + 提示重新登入」。
-let onUnauthorized: (() => void) | null = null
+/**
+ * 被動登出的原因——交由 `AuthProvider` 轉成登入畫面的提示文案（#741）。
+ *
+ * `IDLE` 涵蓋 401 的全部情形（憑證無效 / 逾時 / 換發逾限），沿用原本的「閒置逾時」文案。
+ */
+export type SessionEndReason = "IDLE" | "DISABLED" | "LOCKED"
 
-export function setOnUnauthorized(handler: (() => void) | null): void {
-  onUnauthorized = handler
+/**
+ * 🔴 **會觸發自動登出的 403 只有這兩個** —— 它們代表「帳號本身不能再用」，與
+ * 「這個帳號沒有這項權限」不同。其餘 403（如 `DP_AUTH_006` 需模組管理者、各模組的
+ * 無權限）**不得**登出，否則使用者點到一個沒權限的功能就會被踢回登入頁。
+ *
+ * ⛔ 新增成員前先問：這個錯誤碼是不是「整個帳號失效」？是權限不足就不屬於這裡。
+ */
+const ACCOUNT_BLOCKED_CODES: Record<string, SessionEndReason> = {
+  DP_AUTH_004: "DISABLED", // 帳號已停用
+  DP_AUTH_005: "LOCKED", // 帳號已鎖定
+}
+
+// 被動登出統一處置回呼：由 AuthProvider 註冊為「清狀態 + 依原因提示」。
+let onSessionEnded: ((reason: SessionEndReason) => void) | null = null
+
+export function setOnSessionEnded(handler: ((reason: SessionEndReason) => void) | null): void {
+  onSessionEnded = handler
 }
 
 http.interceptors.request.use((config) => {
@@ -31,9 +50,19 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    // 僅在「已持有 token」時對 401 觸發自動登出，避免登入端點回 401（帳密錯誤）被誤判為逾時登出。
-    if (error.response?.status === 401 && authToken && onUnauthorized) {
-      onUnauthorized()
+    // 僅在「已持有 token」時觸發自動登出，避免登入端點的失敗（帳密錯誤 401 / 帳號停用 403）
+    // 被誤判為工作階段結束——那時本來就還沒登入。
+    if (authToken && onSessionEnded) {
+      const status = error.response?.status
+      if (status === 401) {
+        onSessionEnded("IDLE")
+      } else if (status === 403) {
+        // 使用中被管理者停用 / 鎖定：後端每請求查 DP_USER 狀態，下一次請求即回這兩碼（#741）。
+        // 查表未命中（其他 403 = 權限不足）→ 不登出，只讓呼叫端自己顯示錯誤。
+        const code = (error.response?.data as { error_code?: string } | undefined)?.error_code
+        const reason = code === undefined ? undefined : ACCOUNT_BLOCKED_CODES[code]
+        if (reason !== undefined) onSessionEnded(reason)
+      }
     }
     return Promise.reject(error)
   },

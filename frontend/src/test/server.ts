@@ -90,7 +90,7 @@ const ATTEMPT_RESULT = {
 
 export const handlers = [
   http.post("/api/login", () =>
-    HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false }),
+    HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false, expires_in: 900 }),
   ),
   http.post("/api/register", () =>
     HttpResponse.json({ message: "驗證信已寄至您的信箱，請於 30 分鐘內點連結完成驗證" }, { status: 202 }),
@@ -103,7 +103,7 @@ export const handlers = [
     HttpResponse.json({ message: "若該 Email 已註冊，密碼重設信將寄至信箱，請於 30 分鐘內完成重設" }),
   ),
   http.post("/api/reset-password", () => HttpResponse.json({ message: "密碼已更新，請以新密碼登入" })),
-  http.post("/api/dp/user/renew", () => HttpResponse.json({ access_token: "renewed-token" })),
+  http.post("/api/dp/user/renew", () => HttpResponse.json({ access_token: "renewed-token", expires_in: 900 })),
   http.post("/api/dp/user/logout", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/version", () => HttpResponse.json({ version: "1.0.0-test" })),
   // 入口頁 / 側欄模組摘要（預設具 DM 權限；個別測試以 server.use 覆蓋）

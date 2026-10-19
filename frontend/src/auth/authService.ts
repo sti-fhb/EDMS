@@ -8,10 +8,14 @@ export interface LoginRequest {
 export interface LoginResponse {
   access_token: string
   must_change_pwd: boolean
+  /** token 存活秒數（#741）。相對值而非 JWT 的 `exp`，故不受使用者電腦時鐘偏差影響。 */
+  expires_in: number
 }
 
 export interface TokenResponse {
   access_token: string
+  /** 同 `LoginResponse.expires_in`：每次換發都會更新，到期判斷須跟著換。 */
+  expires_in: number
 }
 
 export interface RegisterRequest {

@@ -77,16 +77,18 @@ class ResendVerificationRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """登入回應：JWT access token + 是否需強制變更密碼。"""
+    """登入回應：JWT access token + 是否需強制變更密碼 + token 存活秒數。"""
 
     access_token: str
     must_change_pwd: bool
+    expires_in: int
 
 
 class TokenResponse(BaseModel):
-    """換發回應：僅新 JWT access token（沿用原 auth_time）。"""
+    """換發回應：新 JWT access token（沿用原 auth_time）+ token 存活秒數。"""
 
     access_token: str
+    expires_in: int
 
 
 class ModuleRoleStatus(BaseModel):
