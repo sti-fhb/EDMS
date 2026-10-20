@@ -116,7 +116,7 @@ class EtPublishService:
         讓前端能在按下發布之前就把缺漏標示出來（比照 #203 的逐欄回饋）。
         """
         course = await self._require_owned(db, course_id, actor_id)
-        blockers = await self._evaluate(db, course)
+        blockers = await self._evaluate_for_check(db, course)
         return PublishCheckResult(
             can_publish=not blockers,
             blockers=[PublishBlockerRow(code=b.code, message=b.message, target_id=b.target_id) for b in blockers],
@@ -820,6 +820,31 @@ class EtPublishService:
                 },
             )
         return True
+
+    async def _evaluate_for_check(self, db: AsyncSession, course) -> tuple[PublishBlocker, ...]:
+        """預檢要評估的是**按下去之後會生效的那一份**（#767 ⑧）。
+
+        草稿直寫活表，評估活表即可。已發布 / 已關閉課程的編輯在暫存區：有暫存時必須
+        評估暫存樹，與「更新」「更新並重開課」相同——否則預檢永遠回「沒有缺漏」，教師要
+        到真正送出才被擋，而那時確認視窗已經問過一次了。
+
+        判準用 `has_stage` 而非 `nodes` 是否為空，理由同 `apply_content`：教師把內容
+        全刪光時暫存列仍在、只是全被軟刪，那時要回「沒有章節」而不是活表的結果。
+
+        ⚠️ 不取行鎖：預檢唯讀，送出時「更新」會在鎖內再評估一次，那一次才算數。
+
+        Args:
+            course: 已通過擁有者檢查的課程列。
+
+        Returns:
+            缺漏清單；空 tuple 代表可通過。
+        """
+        if course.status != COURSE_DRAFT:
+            nodes = await self._stage.load_tree(db, course.course_id)
+            if nodes or await self._stage.has_stage(db, course.course_id):
+                snapshot = to_course_snapshot(nodes, status=course.status)
+                return evaluate_publish(snapshot, obsolete_doc_ids=await self._obsolete_doc_ids(db, snapshot.doc_ids))
+        return await self._evaluate(db, course)
 
     async def _evaluate(self, db: AsyncSession, course) -> tuple[PublishBlocker, ...]:
         """組快照 → 問 DM 廢止狀態 → 交給純函式判斷。"""

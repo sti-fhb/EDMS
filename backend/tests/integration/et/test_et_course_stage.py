@@ -1494,6 +1494,30 @@ class TestUpdateEndpoint:
         assert {b["code"] for b in r.json()["blockers"]} == check_codes
 
 
+    async def test_預檢在有暫存時讀暫存樹(self, client, db) -> None:
+        """#767 ⑧：教師按「更新」時前端先預檢，有缺漏直接列出，不先跳確認視窗。
+
+        預檢原本只讀活表——已發布課程的編輯都在暫存區，活表是學員那一版，預檢永遠回
+        「沒有缺漏」，缺漏要到真正送出更新才被擋。本條讓**只有暫存那側**壞掉，活表維持
+        完整（與上一條相反）。
+        """
+        uid = await _user(db, "ZT_U10")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+        await db.flush()
+
+        check = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+
+        assert check.status_code == 200, check.text
+        assert {b["code"] for b in check.json()["blockers"]} == {"QUIZ_NO_QUESTION"}
+        assert check.json()["can_publish"] is False
+
+
 # ── Code review（2026-10-14）指出的四個缺陷，各配一條測試 ──────────────────────
 
 
