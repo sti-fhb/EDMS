@@ -429,6 +429,59 @@ async def _set_course_status(db, course_id: int, status: str) -> None:
     await db.flush()
 
 
+class TestSurveyActivateAuditStaged:
+    """#768 第 13 項的暫存路徑（code review MEDIUM）：已發布課程的問卷更新走暫存節點，
+    「更新前是否啟用」要從暫存節點讀，不是活表。"""
+
+    async def _audit_descriptions(self, db, uid: str) -> list[str]:
+        return list(
+            (
+                await db.scalars(
+                    select(DpAuditLog.description)
+                    .where(DpAuditLog.created_user == uid, DpAuditLog.description.like("%課後問卷%"))
+                    .order_by(DpAuditLog.created_date)
+                )
+            ).all()
+        )
+
+    async def _put(self, client, uid: str, survey_id: int, cid: int, *, active: bool) -> None:
+        current = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
+        r = await client.put(
+            f"/api/et/surveys/{survey_id}",
+            json={"survey_name": current["survey_name"], "is_active": active, "version": current["version"]},
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text
+
+    async def test_已發布課程停用後再啟用_記成啟用暫存(self, client, db) -> None:
+        uid = await _user(db, "t_srv_st1")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        await _set_course_status(db, cid, COURSE_PUBLISHED)
+        await db.commit()
+
+        await self._put(client, uid, survey["survey_id"], cid, active=False)
+        await self._put(client, uid, survey["survey_id"], cid, active=True)
+
+        descriptions = await self._audit_descriptions(db, uid)
+        assert any("停用課後問卷（暫存）" in d for d in descriptions), descriptions
+        assert "啟用課後問卷（暫存）" in descriptions[-1], descriptions
+
+    async def test_本輪新建的問卷改名不被誤判為啟用(self, client, db) -> None:
+        """負數 id：暫存節點建立時寫入 `is_active: True`。預設值讀錯成 False 的話，一次單純
+        的改名（啟用 → 啟用）會被記成「啟用課後問卷」。"""
+        uid = await _user(db, "t_srv_st2")
+        cid = await _course(client, uid)
+        await _set_course_status(db, cid, COURSE_PUBLISHED)
+        await db.commit()
+        survey = await _survey(client, uid, cid)
+        assert survey["survey_id"] < 0, "前置：已發布課程新建的問卷應拿到暫存 id"
+
+        await self._put(client, uid, survey["survey_id"], cid, active=True)
+
+        assert "更新課後問卷（暫存）" in (await self._audit_descriptions(db, uid))[-1]
+
+
 class TestSurveyDelete:
     """問卷刪除（#238 推翻 #204 之裁示 Q1）。"""
 

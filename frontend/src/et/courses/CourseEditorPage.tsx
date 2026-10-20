@@ -887,7 +887,8 @@ export function EtCourseEditorPage() {
       setSurveyFrozenOpen(false)
       invalidate()
       invalidateSurvey()
-      message.success("已放棄課後問卷的編輯，其餘編輯仍保留")
+      // 下一步要講：教師是從「更新」或「更新並重開課」被擋下來的，放棄之後要再按一次（#768 code review）
+      message.success(`已放棄課後問卷的編輯，其餘編輯仍保留。請再按一次「${applyLabel}」`)
     },
     onError: handleError,
   })

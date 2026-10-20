@@ -60,5 +60,12 @@ describe("更新並重開課撞上問卷凍結（#768 第 11 項）", () => {
     const dialog = screen.getByRole("dialog")
     expect(dialog).toHaveTextContent("再按一次「更新並重開課」")
     expect(dialog).not.toHaveTextContent("再按一次「更新」即可")
+
+    // 放棄之後的訊息要講下一步——重開課情境是「更新並重開課」，不是「更新」
+    server.use(
+      http.delete("/api/et/courses/:courseId/content/stage/survey", () => new HttpResponse(null, { status: 204 })),
+    )
+    await user.click(screen.getByRole("button", { name: "放棄問卷的編輯" }))
+    expect(await screen.findByText(/請再按一次「更新並重開課」/)).toBeInTheDocument()
   }, 15000)
 })

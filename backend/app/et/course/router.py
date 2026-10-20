@@ -62,7 +62,10 @@ from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 #: 本 router 同時承載課程 / 章節 / 項目的全部編輯端點。掛在 router 層會把「教師連續
 #: 拖拉重排章節」也算進同一個桶——那是高頻的正常操作，會被誤擋。
 #:
-#: ## 為何五支端點**共用同一個分桶**
+#: ## 為何檢核與狀態轉換端點**共用同一個分桶**
+#:
+#: ⚠️ 實際掛這個桶的不只下面點名的五支（keep / discard 等也在，以 `*_status_rate_limit` 搜尋為準）；
+#: 進編輯頁丟殘留的 `content/stage/unkept` 已於 #768 移出，見 `_STAGE_DISCARD_RATE_MAX`。
 #:
 #: 貴的是**檢核**（彙總查詢 + 逐份 DM 文件循序查詢），而 `publish-check` / `publish` /
 #: `reopen` / `content/apply` 四支都會跑它（前三支走活表的 `snapshot`，`content/apply`
@@ -576,7 +579,7 @@ async def discard_unkept_stage(
 
     冪等：沒有暫存區、或暫存樹已被標記保留時，一樣回 204 而不做任何事。
     草稿課程**靜默略過**（不回 409）——前端對所有狀態一律呼叫本支，為草稿回錯誤只會
-    逼前端去判斷狀態，而那個判斷遲早與後端分岔。
+    逼前端去判斷狀態，而那個判斷遲早與後端分岔。（#768 起前端只對擁有者呼叫；非擁有者照樣回 403。）
     """
     await _publish_service.discard_unkept(db, course_id, operator=operator)
 
