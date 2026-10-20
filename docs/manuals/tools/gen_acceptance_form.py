@@ -30,9 +30,11 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, Cm
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gen_manual import build_front_matter, open_template   # noqa: E402
+from gen_manual import (   # noqa: E402
+    CELL_SPACING, FIRST_LINE_INDENT, build_front_matter, finalize_fields, open_template)
 from manual_config import (   # noqa: E402  專案專屬設定一律自本檔讀取
-    PROJECT_NAME, REPORT_DOC_NAME as DOC_NAME, FORM_TITLE)
+    PROJECT_NAME, REPORT_DOC_NAME as DOC_NAME, FORM_TITLE,
+    REPORT_ENV_NOTICE, REPORT_ENV_NOTICE_TITLE)
 
 FORM_FONT = "標楷體"
 
@@ -40,7 +42,7 @@ FORM_FONT = "標楷體"
 INFO_WIDTHS = (Cm(2.6), Cm(6.4), Cm(3.4), Cm(4.6))
 ITEM_WIDTHS = (Cm(1.6), Cm(11.0), Cm(2.2), Cm(2.2))
 
-OPERATION_RE = re.compile(r"^##\s+(?P<name>\S+\s+.+?)\s*$")   # 「## BS01 血品入庫」
+OPERATION_RE = re.compile(r"^##\s+(?P<name>\S+\s+.+?)\s*$")   # 「## BS01 入庫作業」
 ITEM_SECTION = re.compile(r"^###\s+測試項目清單\s*$")
 TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
 BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -67,8 +69,8 @@ def _set_cell(cell, text: str, *, size: int = 12, bold: bool = False,
     cell.text = ""
     para = cell.paragraphs[0]
     para.alignment = align
-    para.paragraph_format.space_before = Pt(2)
-    para.paragraph_format.space_after = Pt(2)
+    para.paragraph_format.space_before = CELL_SPACING   # 與手冊表格同一值
+    para.paragraph_format.space_after = CELL_SPACING
     _style_run(para.add_run(text), size=size, bold=bold, spacing=spacing)
     return cell
 
@@ -191,6 +193,19 @@ def _add_item_table(doc, items: list[tuple[str, str]]) -> None:
         _set_cell(row.cells[3], "")
 
 
+def _add_env_notice(doc) -> None:
+    """開頭之執行環境警語——目錄之後、第一支作業之前。
+
+    ⚠️ 加在本檔而非 `build_front_matter`：後者為**操作手冊與測試報告共用**，
+    改那裡會讓操作手冊也長出這段（手冊是給正式環境的操作人員看的）。
+    """
+    doc.add_paragraph(REPORT_ENV_NOTICE_TITLE, style="Heading 1")
+    for line in REPORT_ENV_NOTICE.splitlines():
+        para = doc.add_paragraph()
+        para.paragraph_format.first_line_indent = FIRST_LINE_INDENT   # 比照手冊內文首行縮排
+        _style_run(para.add_run(line), size=12)   # ⛔ 不加寬字距：該樣式僅供表頭標題
+
+
 def _add_operation(doc, operation: str, items: list[tuple[str, str]], first: bool) -> None:
     heading = doc.add_paragraph(operation, style="Heading 1")
     if not first:
@@ -203,12 +218,16 @@ def _add_operation(doc, operation: str, items: list[tuple[str, str]], first: boo
 def build_report(module: str, operations: list[tuple[str, list[tuple[str, str]]]],
                  out_path: Path, source: Path) -> None:
     doc, break_p = open_template()
+    # 警語須在全部作業之前；front matter 另以 _move_before 插到第 1 節，不受此順序影響。
+    # ⚠️ 各作業一律 first=False（分頁）——首頁已被警語佔用，原本不分頁的第一支會黏在警語後面
+    _add_env_notice(doc)
     for index, (operation, items) in enumerate(operations):
-        _add_operation(doc, operation, items, first=(index == 0))
+        _add_operation(doc, operation, items, first=False)
     build_front_matter(doc, break_p, module, None, doc_name=DOC_NAME, source=source)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out_path))
+    finalize_fields(out_path)
     detail = "、".join(f"{name} {sum(1 for no, _ in items if no)} 項" for name, items in operations)
     print(f"已產出：{out_path}（{len(operations)} 支作業：{detail}）")
 

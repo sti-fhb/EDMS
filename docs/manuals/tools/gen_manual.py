@@ -32,12 +32,13 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.image.image import Image as DocxImage
 from docx.shared import Pt, Cm, RGBColor
 
 sys.path.insert(0, str(Path(__file__).parent))
 from manual_config import (   # noqa: E402  專案專屬設定一律自本檔讀取
     ORGANISATION, PROJECT_NAME, MANUAL_DOC_NAME as DOC_NAME, AUTHORS,
-    DOC_VERSION, MODULE_NAMES, MODULE_DIRS, MANUAL_NAME_RE,
+    DOC_VERSION, MODULE_NAMES, MODULE_OWNERS, MODULE_DIRS, MANUAL_NAME_RE,
     NON_MANUAL_FILES, NON_MANUAL_DIRS)
 
 # 樣式範本：自院方「需求規格確認書」清空內容而來，只留樣式、分節與頁碼設定。
@@ -45,7 +46,8 @@ from manual_config import (   # noqa: E402  專案專屬設定一律自本檔讀
 TEMPLATE = Path("docs/manuals/tools/樣式範本.docx")
 
 FIRST_LINE_INDENT = Cm(0.85)   # 範本敘述段之首行縮排
-MAX_IMAGE_WIDTH = Cm(15.5)
+MAX_IMAGE_WIDTH = Cm(15.5)      # 全文件最寬之圖對應此寬，其餘依同一比例縮放
+ZOOM_RE = re.compile(r"^x(?P<zoom>\d+(?:\.\d+)?)$")   # 圖片標題「x2」＝該圖放大倍數（字多之小圖用）
 DOC_INFO_WIDTHS = (Cm(3.81), Cm(6.35))                    # 封面之文件資訊表
 HISTORY_WIDTHS = (Cm(2.03), Cm(3.05), Cm(7.62), Cm(3.81))  # 修訂履歷表
 FIRST_RELEASE_NOTE = "初次發行"
@@ -53,6 +55,7 @@ NOTE_INDENT = Cm(0.5)          # 提醒框：左縮排（小於條列，避免�
 MIN_COL_WIDTH = Cm(1.6)        # 欄寬下限：再窄則標題字會被迫逐字斷行
 HALF_CHAR_WIDTH = Pt(6.5)      # 半形字寬（中文字為其兩倍），用於估算欄所需寬度
 CELL_PADDING = Cm(0.4)         # 儲存格左右內距合計
+CELL_SPACING = Pt(3)           # 儲存格內段落之與前／後段距離（範本內文為前 0、後 6，表格內字會偏上）；測試報告亦取用
 CAPTION_SIZE = Pt(10)          # 圖說：小於內文、置中
 CAPTION_COLOR = RGBColor(0x40, 0x40, 0x40)
 
@@ -61,7 +64,7 @@ H2_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "�
                "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八"]
 
 HEADING_RE = re.compile(r"^(?P<level>#{1,4})\s+(?P<text>.+)$")
-IMAGE_RE = re.compile(r"^!\[(?P<alt>.*?)\]\((?P<src>.+?)\)$")
+IMAGE_RE = re.compile(r"^!\[(?P<alt>.*?)\]\((?P<src>[^\s)]+)(?:\s+\"(?P<title>[^\"]*)\")?\)$")
 LIST_RE = re.compile(r"^(?P<indent>\s*)(?P<bullet>[-*]|\d+\.)\s+(?P<text>.+)$")
 TABLE_RE = re.compile(r"^\s*\|(.+)\|\s*$")
 BOLD_ONLY_RE = re.compile(r"^\*\*(?P<text>[^*]+)\*\*$")
@@ -115,6 +118,55 @@ def _enable_field_update(doc: Document) -> None:
         settings.append(el)
 
 
+def _set_field_update_flag(path: Path, enabled: bool) -> None:
+    """於已產出之 docx 設定或移除「開檔時更新功能變數」旗標。"""
+    doc = Document(str(path))
+    settings = doc.settings.element
+    for el in settings.findall(qn("w:updateFields")):
+        settings.remove(el)
+    if enabled:
+        _enable_field_update(doc)
+    doc.save(str(path))
+
+
+def finalize_fields(path: Path) -> None:
+    """產出後由本機 Word 預先更新目錄頁碼並存檔，再移除開檔更新旗標。
+
+    該旗標會使 Word 每次開檔都跳出「此文件的功能變數可能參考其他檔案…要更新嗎？」
+    之確認框。本機有 Word 時預先更新即可免除；無 Word（或更新失敗）時保留旗標，
+    退回由開檔時更新。另開獨立之 Word 執行個體，不影響使用者已開啟之文件。
+    """
+    try:
+        import win32com.client   # pywin32；非 Windows 或未安裝者退回保留旗標
+    except ImportError:
+        return
+    _set_field_update_flag(path, enabled=False)
+    # Word 存檔會把「最後修訂者」改成本機 Windows 使用者；先記下產生器設定之修訂者，存檔後寫回
+    reviser = Document(str(path)).core_properties.last_modified_by
+    word = None
+    try:
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+        document = word.Documents.Open(str(path.resolve()), AddToRecentFiles=False)
+        for toc in document.TablesOfContents:
+            toc.Update()
+        document.Fields.Update()
+        document.Save()
+        document.Close(False)
+    except Exception as exc:   # noqa: BLE001  任何 Word 端失敗皆退回保留旗標
+        print(f"    （未能以 Word 預先更新目錄，改為開檔時更新：{exc}）")
+        _set_field_update_flag(path, enabled=True)
+    finally:
+        if word is not None:
+            word.Quit()
+    if reviser:
+        doc = Document(str(path))
+        if doc.core_properties.last_modified_by != reviser:
+            doc.core_properties.last_modified_by = reviser
+            doc.save(str(path))
+
+
 def _move_before(element, paragraph):
     """把新建的段落／表格搬到第 1 節（分節符之前）。"""
     element.addprevious(paragraph._element if hasattr(paragraph, "_element") else paragraph._p)
@@ -126,13 +178,53 @@ def _move_before(element, paragraph):
 
 # ---- 內容元件 ----------------------------------------------------------
 
+def _join_lines(head: str, tail: str) -> str:
+    """接續行併入同一段（md 之斷行僅為原稿排版，非分段）。
+
+    中文之間不加空白；僅兩側皆為半形英數時補一個空白，避免英文單字黏在一起。
+    """
+    if (head and tail and head[-1].isascii() and head[-1].isalnum()
+            and tail[0].isascii() and tail[0].isalnum()):
+        return f"{head} {tail}"
+    return head + tail
+
+
+def _is_block_start(raw: str) -> bool:
+    """此行是否另起一個區塊（空行、表格、提醒框、標題、圖片、條列、操作子標題、分隔線）。"""
+    text = raw.strip()
+    return (not text
+            or text.startswith(("|", ">", "!["))
+            or bool(HEADING_RE.match(text))
+            or bool(LIST_RE.match(raw))
+            or bool(BOLD_ONLY_RE.match(text))
+            or (set(text) == {"-"} and text.startswith("---")))
+
+
+def _gather(lines: list[str], i: int, text: str) -> tuple[str, int]:
+    """自第 i 行起，將接續行併入 text，回傳併好之文字與下一個未處理之行號。"""
+    while i < len(lines) and not _is_block_start(lines[i]):
+        text = _join_lines(text, lines[i].strip())
+        i += 1
+    return text, i
+
+
 def _add_runs(paragraph, text: str) -> None:
-    """處理 **粗體** 與 `行內程式碼`。字型一律沿用樣式，不逐一指定。"""
+    """處理 **粗體** 與 `行內程式碼`。字型一律沿用樣式，不逐一指定。
+
+    ⚠️ **粗體內可再含行內程式碼**（如 ``**`字型批次安裝.BAT`**``）：`INLINE_RE` 之
+    `**...**` 分支會把整段連同內層反引號一起吃下，若直接 `part[2:-2]` 送進 Word，
+    **反引號會原樣印在交付文件上**。故粗體內文 MUST 再跑一次行內解析。
+    反向（`` `**x**` ``）依 Markdown 語意不解析，維持原樣。
+    """
     for part in INLINE_RE.split(text):
         if not part:
             continue
         if part.startswith("**") and part.endswith("**"):
-            paragraph.add_run(part[2:-2]).bold = True
+            for sub in INLINE_RE.split(part[2:-2]):
+                if not sub:
+                    continue
+                inner = sub[1:-1] if sub.startswith("`") and sub.endswith("`") else sub
+                paragraph.add_run(inner).bold = True
         elif part.startswith("`") and part.endswith("`"):
             paragraph.add_run(part[1:-1])
         else:
@@ -157,20 +249,23 @@ def _ensure_bullet_numbering(doc: Document) -> None:
 
     abstract = OxmlElement("w:abstractNum")
     abstract.set(qn("w:abstractNumId"), str(BULLET_ABSTRACT_ID))
-    lvl = OxmlElement("w:lvl")
-    lvl.set(qn("w:ilvl"), "0")
-    for tag, val in (("w:start", "1"), ("w:numFmt", "bullet"),
-                     ("w:lvlText", "●"), ("w:lvlJc", "left")):
-        el = OxmlElement(tag)
-        el.set(qn("w:val"), val)
-        lvl.append(el)
-    pPr = OxmlElement("w:pPr")
-    ind = OxmlElement("w:ind")
-    ind.set(qn("w:left"), "482")       # 0.85cm
-    ind.set(qn("w:hanging"), "482")
-    pPr.append(ind)
-    lvl.append(pPr)
-    abstract.append(lvl)
+    # 第 0 層：獨立條列（0.85cm）；第 1 層：編號步驟底下之子項目，須縮在步驟文字之下
+    # （範本 decimal 第 0 層文字起於 960），否則子項目縮排淺於步驟、看似跳出清單
+    for ilvl, left, hanging in (("0", "482", "482"), ("1", "1440", "480")):
+        lvl = OxmlElement("w:lvl")
+        lvl.set(qn("w:ilvl"), ilvl)
+        for tag, val in (("w:start", "1"), ("w:numFmt", "bullet"),
+                         ("w:lvlText", "●"), ("w:lvlJc", "left")):
+            el = OxmlElement(tag)
+            el.set(qn("w:val"), val)
+            lvl.append(el)
+        pPr = OxmlElement("w:pPr")
+        ind = OxmlElement("w:ind")
+        ind.set(qn("w:left"), left)
+        ind.set(qn("w:hanging"), hanging)
+        pPr.append(ind)
+        lvl.append(pPr)
+        abstract.append(lvl)
 
     num = OxmlElement("w:num")
     num.set(qn("w:numId"), str(BULLET_NUM_ID))
@@ -187,7 +282,7 @@ def _ensure_bullet_numbering(doc: Document) -> None:
     numbering.append(num)
 
 
-def _apply_numbering(paragraph, num_id: int) -> None:
+def _apply_numbering(paragraph, num_id: int, level: int = 0) -> None:
     """掛上編號定義。
 
     ⚠️ 範本之 List Number 樣式僅承載縮排，**未關聯任何編號定義**——只套樣式而不掛
@@ -196,7 +291,7 @@ def _apply_numbering(paragraph, num_id: int) -> None:
     pPr = paragraph._p.get_or_add_pPr()
     numPr = OxmlElement("w:numPr")
     ilvl = OxmlElement("w:ilvl")
-    ilvl.set(qn("w:val"), "0")
+    ilvl.set(qn("w:val"), str(level))
     num = OxmlElement("w:numId")
     num.set(qn("w:val"), str(num_id))
     numPr.append(ilvl)
@@ -215,7 +310,10 @@ def _add_list_item(doc: Document, bullet: str, text: str, depth: int, num_id: in
     base = "List Number" if ordered else "List Bullet"
     style = base if depth == 0 else f"{base} {min(depth + 1, 3)}"
     para = doc.add_paragraph(style=style)
-    _apply_numbering(para, num_id if ordered and num_id else BULLET_NUM_ID)
+    if ordered and num_id:
+        _apply_numbering(para, num_id)
+    else:
+        _apply_numbering(para, BULLET_NUM_ID, level=1 if depth else 0)
     _add_runs(para, text)
     return para
 
@@ -270,6 +368,17 @@ def _current_account() -> str:
     return result.stdout.strip()
 
 
+def _module_owner(source: Path) -> str | None:
+    """該檔所屬模組之手冊擁有者（manual_config.MODULE_OWNERS）；無設定回 None。
+
+    操作手冊依所在資料夾（bc／tl…）判定，測試報告在 `_tests` 下、依檔名前綴（`BC-…`）判定。
+    """
+    key = source.parent.name
+    if key == "_tests":
+        key = source.stem.split("-", 1)[0].lower()
+    return MODULE_OWNERS.get(key)
+
+
 def _person(source: Path, *, created: bool) -> str:
     """該檔之撰寫人（建檔者）或修訂人（最後修改者），回正式姓名。
 
@@ -294,8 +403,16 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
     修訂人為最後改動者。1.0 版通常相同，其後改版則未必——修訂履歷要記的是這一版
     是誰改的，⛔ 不可一律填原作者。
     """
-    author = _person(source, created=True) if source else ""
-    reviser = _person(source, created=False) if source else ""
+    # 模組有設定手冊擁有者（SA）時，作者與修訂人一律為該人；否則依 git 紀錄判定
+    owner = _module_owner(source) if source else None
+    author = owner or (_person(source, created=True) if source else "")
+    reviser = owner or (_person(source, created=False) if source else "")
+    # Word「檔案 > 資訊」之作者／最後修改者亦改為實際作者：不設定時會沿用樣式範本的建立者，
+    # 交付文件之檔案屬性即印錯人（2026-10-19）。標題同步填入，供檔案總管與 Word 顯示。
+    if source:
+        doc.core_properties.author = author
+        doc.core_properties.last_modified_by = reviser
+        doc.core_properties.title = f"{module} {title}" if module else title
     def cover_line(text: str = "", size: int | None = None):
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -334,6 +451,7 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
         cells[1].text = value
         for cell, width in zip(cells, DOC_INFO_WIDTHS):
             cell.width = width
+    _space_cells(info)
     _move_before(break_p, info)      # 文件資訊表接於封面下方，同頁不分頁
 
     heading = doc.add_paragraph("文件制/修訂履歷", style="Heading 1 No TOC")
@@ -356,6 +474,7 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
         cell.text = text
         if i != 2:                                   # 說明欄靠左，其餘置中
             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _space_cells(history)
     _move_before(break_p, history)
 
     heading = doc.add_paragraph("目錄", style="Heading 1 No TOC")
@@ -428,6 +547,15 @@ def _set_column_widths(table, widths: list[int]) -> None:
             cell.width = width
 
 
+def _space_cells(table) -> None:
+    """儲存格內每段之與前／後段距離一律設為 CELL_SPACING（手冊與測試報告之表格共用同一值）。"""
+    for row in table.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                para.paragraph_format.space_before = CELL_SPACING
+                para.paragraph_format.space_after = CELL_SPACING
+
+
 def _add_table(doc: Document, rows: list[str]) -> None:
     parsed = [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
     header, body = parsed[0], parsed[2:]
@@ -448,13 +576,24 @@ def _add_table(doc: Document, rows: list[str]) -> None:
                 para = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
                 _add_runs(para, line)
 
+    _space_cells(table)
+
     section = doc.sections[-1]
     usable = section.page_width - section.left_margin - section.right_margin
     _set_column_widths(table, _column_widths([header] + body, usable))
 
 
+def _image_scale(md_path: Path, lines: list[str]) -> float:
+    """每像素對應之 EMU：以本文件最寬之圖撐滿 MAX_IMAGE_WIDTH，使全文件圖片比例一致。"""
+    widths = [DocxImage.from_file(str(src)).px_width
+              for line in lines if (m := IMAGE_RE.match(line.strip()))
+              if (src := (md_path.parent / m.group("src")).resolve()).exists()]
+    return MAX_IMAGE_WIDTH / max(widths) if widths else 0.0
+
+
 def convert_body(doc: Document, md_path: Path) -> str:
     lines = md_path.read_text(encoding="utf-8").splitlines()
+    scale = _image_scale(md_path, lines)
     title = md_path.stem
     counters = {1: 0, 2: 0, 3: 0}
     list_num_id = 0          # 清單組序；範本備有多組編號定義可供配發
@@ -477,18 +616,28 @@ def convert_body(doc: Document, md_path: Path) -> str:
             continue
 
         if line.lstrip().startswith(">"):   # 含縮排於條列內之提醒框
-            block = []
+            # 提醒框內之連續行併為一段；「>」空行或條列另起一段
+            block: list[list] = []      # 每段為 [是否條列, 文字]
+            current = None
             while i < len(lines) and lines[i].lstrip().startswith(">"):
                 text = lines[i].lstrip()[1:].strip()
-                if text:
-                    block.append(text)
                 i += 1
-            for text in block:
-                if item := re.match(r"^[-*]\s+(?P<text>.+)$", text):
+                if not text:
+                    current = None
+                elif item := re.match(r"^[-*]\s+(?P<text>.+)$", text):
+                    current = [True, item.group("text")]
+                    block.append(current)
+                elif current is not None:
+                    current[1] = _join_lines(current[1], text)
+                else:
+                    current = [False, text]
+                    block.append(current)
+            for is_item, text in block:
+                if is_item:
                     # 提醒框內之條列：掛項目符號，縮排與提醒框對齊
                     para = doc.add_paragraph()
                     _apply_numbering(para, BULLET_NUM_ID)
-                    _add_runs(para, item.group("text"))
+                    _add_runs(para, text)
                     para.paragraph_format.left_indent = NOTE_INDENT + Cm(0.6)
                     para.paragraph_format.space_before = Pt(0)
                     para.paragraph_format.space_after = Pt(0)
@@ -526,7 +675,10 @@ def convert_body(doc: Document, md_path: Path) -> str:
         if match := IMAGE_RE.match(line):
             src = (md_path.parent / match.group("src")).resolve()
             if src.exists():
-                doc.add_picture(str(src), width=MAX_IMAGE_WIDTH)
+                px = DocxImage.from_file(str(src)).px_width
+                zoom = ZOOM_RE.match((match.group("title") or "").strip())
+                width = int(px * scale * (float(zoom.group("zoom")) if zoom else 1))
+                doc.add_picture(str(src), width=min(width, MAX_IMAGE_WIDTH))
                 picture = doc.paragraphs[-1]
                 picture.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 picture.paragraph_format.space_before = Pt(8)
@@ -548,7 +700,9 @@ def convert_body(doc: Document, md_path: Path) -> str:
             continue
 
         if match := BOLD_ONLY_RE.match(line):   # 整行粗體視為操作子標題
-            doc.add_paragraph(match.group("text"), style="操作子標題")
+            para = doc.add_paragraph(match.group("text"), style="操作子標題")
+            # 範本之該樣式未設與下段同頁（Heading 1～3 已設），於此補上，免子標題留在頁尾、內文落到下一頁
+            para.paragraph_format.keep_with_next = True
             i += 1
             continue
 
@@ -556,16 +710,18 @@ def convert_body(doc: Document, md_path: Path) -> str:
             bullet = match.group("bullet")
             if bullet[0].isdigit() and bullet.startswith("1."):
                 list_num_id += 1        # 自 1. 起算者為新的一組
-            _add_list_item(doc, bullet, match.group("text"),
+            text, i = _gather(lines, i + 1, match.group("text"))
+            _add_list_item(doc, bullet, text,
                            depth=len(match.group("indent")) // 2,
                            num_id=list_num_id if bullet[0].isdigit() else None)
-            i += 1
             continue
 
+        text, i = _gather(lines, i + 1, line.strip())
         para = doc.add_paragraph()
         para.paragraph_format.first_line_indent = FIRST_LINE_INDENT
-        _add_runs(para, line)
-        i += 1
+        _add_runs(para, text)
+        if text.endswith(("：", ":")):          # 帶出下方表格／條列之引言句，免留在頁尾與下文分開
+            para.paragraph_format.keep_with_next = True
 
     return title
 
@@ -602,15 +758,15 @@ def _verify_output(md_path: Path, out_path: Path) -> list[str]:
         elif text.startswith("!["):
             candidates = [re.match(r"!\[(.*?)\]", text).group(1)]
         elif text.startswith("|"):
-            candidates = [c.strip() for c in text.strip("|").split("|")]
+            # 儲存格內之 <br> 於 Word 中為換行，須拆段逐一核對，否則整格必判缺漏
+            candidates = [part.strip() for c in text.strip("|").split("|") for part in c.split("<br>")]
         else:
             # 條列符號後必有空白；⛔ 不可寫成 \s*，否則整行粗體之首個 * 會被當條列符號吃掉
             candidates = [re.sub(r"^(\d+\.|[-*])\s+", "", text)]
 
         for candidate in candidates:
-            candidate = re.sub(r"\*\*(.+?)\*\*", r"\1", candidate)
-            candidate = re.sub(r"`(.+?)`", r"\1", candidate).strip()
-            candidate = candidate.replace("<br>", "\n")  # 表格儲存格之 <br> 產出為段落，cell.text 以換行相接
+            # 粗體／程式碼可能跨行（接續行已併段），故成對與落單之標記一併去除
+            candidate = candidate.replace("**", "").replace("`", "").strip()
             if candidate and candidate not in haystack:
                 missing.append(candidate)
     return missing
@@ -622,6 +778,7 @@ def build_manual(md_path: Path, out_path: Path) -> None:
     build_front_matter(doc, break_p, title, _extract_module(md_path), source=md_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out_path))
+    finalize_fields(out_path)
 
     missing = _verify_output(md_path, out_path)
     if missing:
