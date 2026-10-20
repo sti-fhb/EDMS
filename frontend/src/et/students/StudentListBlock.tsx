@@ -263,12 +263,14 @@ export function StudentListBlock({
                                 label={APPROVAL_LABEL[row.approval_status].text}
                                 sx={{ alignSelf: "flex-start" }}
                               />
-                              {row.approved_by_name !== null && (
+                              {/* 待核可時不顯示核可人／時間／備註：此狀態下若有值，是已撤銷的舊核可
+                                  （撤銷不清這些欄位），顯示出來會像「已核可過」（#767 ②） */}
+                              {row.approval_status !== "PENDING" && row.approved_by_name !== null && (
                                 <Typography variant="caption" color="text.secondary">
                                   {row.approved_by_name} 核可 {formatDateTime(row.approved_at)}
                                 </Typography>
                               )}
-                              {row.approval_note !== null && (
+                              {row.approval_status !== "PENDING" && row.approval_note !== null && (
                                 <Typography variant="caption" color="text.secondary">
                                   {row.approval_note}
                                 </Typography>
