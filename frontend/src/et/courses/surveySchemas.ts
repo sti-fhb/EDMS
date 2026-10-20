@@ -9,12 +9,17 @@ export const SURVEY_OPTION_TEXT_MAX_LEN = 200
 
 /**
  * 每題選項數下限（`data-model` §ET_SURVEY_OPTION）。
- *
- * **無上限**——與測驗題目的 2–6 不同，不可照抄 `itemSchemas.MAX_OPTIONS`。後端只在
- * schema 層設一個寬鬆的請求大小防護（20），那不是業務規則，前端因此不設加入按鈕的
- * 停用條件。
  */
 export const SURVEY_MIN_OPTIONS = 2
+
+/**
+ * 每題選項數上限，對齊後端 `MAX_OPTIONS_PER_QUESTION`（20）。
+ *
+ * 後端那個值原本只是請求大小防護、不是業務規則，前端因此曾刻意不設上限——結果第 21 個
+ * 選項送出後，教師只看到「以下欄位不符規定：options」。2026-10-20 使用者裁示前端照設
+ * （#767 ⑦）。⚠️ 與測驗題目的 2–6（`itemSchemas.MAX_OPTIONS`）無關，不可互相照抄。
+ */
+export const SURVEY_MAX_OPTIONS = 20
 
 /** 問卷題型（對齊後端 `ET_SURVEY_QUESTION_TYPE`）。 */
 export type SurveyQuestionType = "SINGLE" | "TEXT"
@@ -125,6 +130,13 @@ export const SurveyQuestionFormSchema = z
       ctx.addIssue({
         code: "custom",
         message: `每題至少需 ${SURVEY_MIN_OPTIONS} 個選項`,
+        path: ["options"],
+      })
+    }
+    if (value.options.length > SURVEY_MAX_OPTIONS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `每題選項不可超過 ${SURVEY_MAX_OPTIONS} 個`,
         path: ["options"],
       })
     }

@@ -13,6 +13,7 @@ import { useState } from "react"
 
 import {
   SURVEY_ANSWER_MAX_LEN,
+  SURVEY_MAX_OPTIONS,
   SURVEY_MIN_OPTIONS,
   SURVEY_OPTION_TEXT_MAX_LEN,
   SURVEY_QUESTION_TYPE_LABEL,
@@ -120,11 +121,13 @@ export function SurveyQuestionEditor({ initial, saving = false, onSave, onCancel
           <Box>
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                選項（單選；至少 {SURVEY_MIN_OPTIONS} 個）
+                選項（單選；{SURVEY_MIN_OPTIONS}～{SURVEY_MAX_OPTIONS} 個）
               </Typography>
               <Button
                 size="small"
                 startIcon={<AddIcon />}
+                // 上限對齊後端（#767 ⑦）：到頂就停用，不讓教師加完才被擋
+                disabled={draft.options.length >= SURVEY_MAX_OPTIONS}
                 onClick={() => patch({ options: [...draft.options, { option_text: "" }] })}
               >
                 新增選項
