@@ -341,3 +341,15 @@ describe("ET07 測驗資訊面板", () => {
     })
   })
 })
+
+describe("已及格且次數用完（#767 ③）", () => {
+  // 教師對已及格者按不出重置（tracking/rules.py），叫學員去聯繫教師是叫他做一件沒有用的事
+  it("已及格：不顯示「請聯繫教師重置」", async () => {
+    mockIntro({ can_start: false, remaining_attempts: 0, is_passed: true, best_score: "100.00", last_score: "100.00" })
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    // 正向錨點：頁面已載入、按鈕已依 can_start 停用
+    expect(await screen.findByRole("button", { name: /開始作答/ })).toBeDisabled()
+    expect(screen.queryByText("重考次數已用完，請聯繫教師重置")).not.toBeInTheDocument()
+  })
+})
