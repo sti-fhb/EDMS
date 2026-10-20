@@ -9,15 +9,24 @@ import type { InviteRow } from "./usersService"
 
 const DEFAULT_LIMIT = 20
 
-/** 待啟用邀請頁籤狀態與操作（查詢 / 重寄 / 取消）。 */
-export function useInvites(enabled: boolean) {
+/**
+ * 待啟用邀請頁籤狀態與操作（查詢 / 重寄 / 取消）。
+ *
+ * ⛔ **本查詢不受頁籤限制**（#755）。原本是 `useInvites(tab === 1)`、只在該頁籤啟用，
+ * 導致頁籤上的筆數徽章（取自本查詢的 `total`）在未點進去前恆為 0，配上 `showZero={false}`
+ * 整個隱藏——**而徽章的用途正是在不點進去的情況下提醒管理者有待處理的邀請**。
+ *
+ * 多一支請求的代價可接受：`/api/dp/users` 整個 prefix 與帳號清單共用同一道
+ * `require_any_module_admin()`，進得了 DP01 就查得到邀請，不會多吃 403；
+ * 且點進頁籤時資料已在，不再空轉。
+ */
+export function useInvites() {
   const { message, confirm } = useNotification()
   const [query, setQuery] = useState({ q: "", page: 1, limit: DEFAULT_LIMIT })
 
   const { data, isPending, invalidate } = usePagedQuery(
     QUERY_KEYS.users.invites(query),
     () => usersApi.listInvites({ q: query.q || undefined, page: query.page, limit: query.limit }),
-    { enabled },
   )
 
   const search = useCallback((q: string) => setQuery((prev) => ({ ...prev, q, page: 1 })), [])
