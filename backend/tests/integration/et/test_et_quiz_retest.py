@@ -364,6 +364,8 @@ class TestRetestPendingVisibility:
             ],
             "require_retest": True,
         }
+        before = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+        assert before.json()["require_retest_pending"] is False, "前置：還沒勾"
         r = await client.post(f"/api/et/quizzes/{qid}/questions", json=body, headers=_bearer(teacher))
         assert r.status_code in (200, 201), r.text
 
@@ -389,6 +391,7 @@ class TestRetestPendingVisibility:
             ))
         await db.commit()
         detail = (await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))).json()
+        assert detail["require_retest_pending"] is False, "前置：還沒勾"
         question = detail["questions"][0]
         body = {
             "question_type": question["question_type"],

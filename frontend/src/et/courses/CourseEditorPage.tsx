@@ -802,11 +802,18 @@ export function EtCourseEditorPage() {
     mutationFn: async () => {
       // 基本資料送暫存失敗（版本衝突等）照一般錯誤處理——往外拋到 `onError`
       await stageBasic()
+      // 🔴 送暫存會讓暫存節點的版本 +1，而確認後的 `applyMut` 會**再送一次**（按取消後再按
+      // 更新也是）。不重抓的話第二次拿的是舊版本，恆 409（#767 code review CRITICAL）。
+      // ⚠️ 必須 await 到重抓完成，確認視窗開出來之前 `course.version` 就要是新的。
+      await qc.refetchQueries({ queryKey: QUERY_KEYS.etCourses.detail(courseId as number) })
       try {
         return await publishApi.check(courseId as number)
-      } catch {
-        // 預檢本身失敗（網路、限流）不擋：回 `null` 照舊跳確認視窗，由送出那一次把關
-        return null
+      } catch (err) {
+        // 只有「暫時問不到」才不擋（無回應、429）：回 `null` 照舊跳確認視窗，由送出那一次
+        // 把關。其他錯誤（權限、查無課程）送出也一樣會失敗，照一般錯誤處理。
+        const { status } = toApiError(err)
+        if (status === 0 || status === 429) return null
+        throw err
       }
     },
     onSuccess: (result) => {

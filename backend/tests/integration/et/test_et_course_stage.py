@@ -1517,6 +1517,24 @@ class TestUpdateEndpoint:
         assert {b["code"] for b in check.json()["blockers"]} == {"QUIZ_NO_QUESTION"}
         assert check.json()["can_publish"] is False
 
+    async def test_已關閉課程的預檢也讀暫存樹(self, client, db) -> None:
+        """「更新並重開課」與「更新」一樣讀暫存——預檢不能只對已發布課程讀暫存。"""
+        uid = await _user(db, "ZT_U11")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+        await db.flush()
+
+        check = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+
+        assert check.status_code == 200, check.text
+        assert {b["code"] for b in check.json()["blockers"]} == {"QUIZ_NO_QUESTION"}
+
 
 # ── Code review（2026-10-14）指出的四個缺陷，各配一條測試 ──────────────────────
 

@@ -636,6 +636,13 @@ class EtPublishService:
             snapshot = to_course_snapshot(nodes, status=COURSE_PUBLISHED)
             start_at, end_at = snapshot.open_start_at, snapshot.open_end_at
             blockers = evaluate_publish(snapshot, obsolete_doc_ids=await self._obsolete_doc_ids(db, snapshot.doc_ids))
+        elif await self._stage.has_stage(db, course_id):
+            # 🔴 暫存列在、但全被教師刪光（判準同 `update_published` 與 `_evaluate_for_check`）。
+            # 原本落到下面讀活表，於是活表完整就放行、而教師的刪除永遠不生效——預檢卻回
+            # 「沒有章節」，兩邊對同一門課講相反的話（#767 code review MEDIUM）。
+            # 樹是空的、讀不到起訖，沿用活表那組；缺漏清單會先以「沒有章節」擋下。
+            start_at, end_at = course.open_start_at, course.open_end_at
+            blockers = evaluate_publish(to_course_snapshot(nodes, status=COURSE_PUBLISHED), obsolete_doc_ids=frozenset())
         else:
             # 沒開過編輯工作階段：起訖仍是關閉前那組，下面的 `ensure_reopen_schedule`
             # 會要教師先去基本資料卡重設。

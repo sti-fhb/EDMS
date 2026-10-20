@@ -391,6 +391,90 @@ describe("ET05 更新（#631）", () => {
     expect(screen.queryByRole("dialog", { name: "更新未生效" })).not.toBeInTheDocument()
   })
 
+  /**
+   * 有狀態的基本資料端點：版本不符回 409、相符則遞增——比照後端暫存節點的樂觀鎖。
+   *
+   * 🔴 #767 code review CRITICAL：預檢與送出各送一次基本資料，第二次若仍拿舊版本就恆 409。
+   * 無狀態的 MSW 永遠回 204，那個缺陷在這裡看不見。
+   */
+  function useVersionedCourse() {
+    let version = 5
+    const sent: number[] = []
+    server.use(
+      http.get("/api/et/courses/:courseId", () =>
+        HttpResponse.json({
+          course_id: 1,
+          course_name: "採血作業訓練",
+          description: null,
+          status: "PUBLISHED",
+          open_start_at: "2026-09-01T00:00:00Z",
+          open_end_at: "2027-09-30T00:00:00Z",
+          require_approval: false,
+          version,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+          chapters: [],
+          invitation_code: "01234567",
+          has_pending_changes: true,
+          is_closed: false,
+        }),
+      ),
+      http.put("/api/et/courses/:courseId", async ({ request }) => {
+        const body = (await request.json()) as { version: number }
+        sent.push(body.version)
+        if (body.version !== version) {
+          return HttpResponse.json({ error_code: "ET_LOCK_001", error_message: "版本衝突" }, { status: 409 })
+        }
+        version += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+      http.post("/api/et/courses/:courseId/content/apply", () => HttpResponse.json({ course_id: 1, applied_count: 1 })),
+    )
+    return sent
+  }
+
+  it("預檢通過後確認更新：第二次送基本資料用的是新版本，不撞衝突（#767 ⑧）", async () => {
+    const user = userEvent.setup()
+    const sent = useVersionedCourse()
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+    await user.click(await screen.findByRole("button", { name: "確認更新" }))
+
+    expect(await screen.findByText("課程內容已更新，學員已可看到")).toBeInTheDocument()
+    expect(screen.queryByText(/內容已被其他裝置變更/)).not.toBeInTheDocument()
+    expect(sent).toEqual([5, 6])
+  })
+
+  it("確認視窗按取消後再按一次更新：不撞衝突（#767 ⑧）", async () => {
+    const user = userEvent.setup()
+    const sent = useVersionedCourse()
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+    await user.click(await screen.findByRole("button", { name: "取消" , hidden: false }))
+    await waitFor(() => expect(screen.queryByRole("button", { name: "確認更新" })).not.toBeInTheDocument())
+    await user.click(screen.getByRole("button", { name: "更新" }))
+    await user.click(await screen.findByRole("button", { name: "確認更新" }))
+
+    expect(await screen.findByText("課程內容已更新，學員已可看到")).toBeInTheDocument()
+    expect(sent).toEqual([5, 6, 7])
+  })
+
+  it("預檢被限流（429）時不擋：照舊跳確認視窗，由送出那一次把關（#767 ⑧）", async () => {
+    const user = userEvent.setup()
+    useCourse("PUBLISHED", { pending: true })
+    server.use(
+      http.get("/api/et/courses/:courseId/publish-check", () =>
+        HttpResponse.json({ error_code: "COMMON_RATE_001", error_message: "操作過於頻繁" }, { status: 429 }),
+      ),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+
+    expect(await screen.findByRole("button", { name: "確認更新" })).toBeInTheDocument()
+  })
+
   /** 讓「更新」固定以問卷凍結被擋下。 */
   function useFrozenSurvey() {
     server.use(
