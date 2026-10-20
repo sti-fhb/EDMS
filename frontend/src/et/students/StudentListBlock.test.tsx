@@ -89,7 +89,10 @@ describe("撤銷核可後的列（#767 ②）", () => {
   it("待核可（已撤銷）：只顯示狀態，不顯示舊的核可人、時間與備註", async () => {
     mockRow("PENDING")
     renderBlock()
-    expect(await screen.findByText("待核可")).toBeInTheDocument()
+    // 正向錨點：列已渲染（「待核可」字樣在區塊說明列也有，不能拿來當錨點）
+    expect(await screen.findByText("王小明")).toBeInTheDocument()
+    const chips = Array.from(document.querySelectorAll(".MuiChip-label")).map((el) => el.textContent)
+    expect(chips).toContain("待核可")
     expect(screen.queryByText(/林教師 核可/)).not.toBeInTheDocument()
     expect(screen.queryByText("實作未達標準")).not.toBeInTheDocument()
   })
