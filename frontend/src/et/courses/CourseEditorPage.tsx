@@ -2282,6 +2282,15 @@ export function EtCourseEditorPage() {
               ),
           })
         }
+        onActivate={() =>
+          surveyMut.mutate(() =>
+            surveyApi.update(survey!.survey_id, {
+              survey_name: survey!.survey_name,
+              is_active: true,
+              version: survey!.version,
+            }),
+          )
+        }
         onDelete={() =>
           confirm({
             title: "刪除課後問卷",
