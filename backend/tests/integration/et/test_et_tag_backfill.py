@@ -217,8 +217,9 @@ class TestTagBackfill:
         （409 `ET_INVITE_002`），但只要改成「幫課程加一個標籤」、或管理者幫某使用者
         貼標籤，該標籤的學員就會被帶入那門課並收到邀請信——而他進去什麼都不能做。
 
-        到期自動轉 `CLOSED` 屬 `ET-16`（未實作），所以「已發布但期間已過」是常態而非
-        過渡狀態，不能只靠 `STATUS` 判斷。
+        到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，所以「已發布但期間已過」是每門課
+        到期後都必經、且教師可用一次 `PUT` 主動製造的狀態，不能只靠 `STATUS` 判斷
+        （見 `course.rules.is_effectively_closed`）。
         """
         teacher = await _user(db, "bf_t05", ROLE_TEACHER)
         student = await _user(db, "bf_s05")

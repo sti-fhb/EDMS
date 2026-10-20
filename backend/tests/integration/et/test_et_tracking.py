@@ -399,10 +399,10 @@ async def _respond(db, survey_id: int, user_id: str, answers: list[tuple[int, in
 async def _close_course(db, course_id: int, source: str) -> None:
     """讓課程「視同關閉」——兩種來源行為必須相同。
 
-    `status` 走 `STATUS = CLOSED`；`expired` 把 `OPEN_END_AT` 改到過去。後者在本系統是
-    **常態而非過渡狀態**——到期自動轉 `CLOSED` 屬 `ET-16`（未實作），故期間過了而
-    `STATUS` 仍是 `PUBLISHED` 的課程一直存在。只判 `STATUS` 的實作會讓 `expired`
-    那一半變紅。
+    `status` 走 `STATUS = CLOSED`；`expired` 把 `OPEN_END_AT` 改到過去。後者是**每門課
+    到期後都必經的窗口**——到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，故期間過了
+    而 `STATUS` 仍是 `PUBLISHED` 的課程隨時存在（見 `course.rules.is_effectively_closed`）。
+    只判 `STATUS` 的實作會讓 `expired` 那一半變紅。
     """
     now = utcnow()
     values = (
@@ -1048,8 +1048,8 @@ class TestRemoveStudent:
 class TestClosedCourseIsReadOnly:
     """AC 10 / FR-ET-US9-11：課程已關閉時可讀不可寫。
 
-    **兩種來源都驗**——「已發布但期間已過」在本系統是常態（ET-16 未實作），只判
-    `STATUS` 的實作會讓 `expired` 那一半變紅。
+    **兩種來源都驗**——「已發布但期間已過」是每門課到期後都必經的窗口（自動轉 `CLOSED`
+    由 SCHET002 每日 08:00 執行），只判 `STATUS` 的實作會讓 `expired` 那一半變紅。
     """
 
     async def test_已關閉時不可重置(self, client, db, source: str) -> None:

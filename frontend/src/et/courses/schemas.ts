@@ -65,8 +65,10 @@ export interface CourseDetail {
    * 運作中的已發布是「取消｜更新」。
    *
    * ⚠️ **不要自己判 `status`**：期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉
-   * `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課到期後都必經這個窗口），自行判定
-   * 會給那門課一排錯的按鈕。與 `CourseCard.is_closed` 同一語意、同一理由。
+   * `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課到期後都必經這個窗口——至少一天，
+   * 排程停用時無限期，且教師送一次 PUT 把訖止改到過去就能當場製造），自行判定會給那門課
+   * 一排錯的按鈕。完整理由見後端 `course/rules.py` 的 `is_effectively_closed`。
+   * 與 `CourseCard.is_closed` 同一語意、同一理由。
    */
   is_closed: boolean
 }
@@ -306,7 +308,8 @@ export interface CourseCard {
    *
    * ⚠️ 狀態 pill 看這個欄位，**不要自己判 `status`**：期間已過時 `status` 仍是
    * `PUBLISHED`（到期自動轉 `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課到期後都
-   * 必經這個窗口），自行判定會標成「已發布」，而學員其實早已進不去。
+   * 必經這個窗口——至少一天，排程停用時無限期），自行判定會標成「已發布」，而學員其實
+   * 早已進不去。完整理由見後端 `course/rules.py` 的 `is_effectively_closed`。
    */
   is_closed: boolean
 }

@@ -1157,7 +1157,8 @@ class TestKeepEdits:
         """正向錨點：判準是 `is_effectively_closed` 而不是 `status == CLOSED`。
 
         少了它，把守門寫成比對 `status` 也會讓上面兩條通過——而期間已過的課程狀態仍是
-        `PUBLISHED`（到期自動轉 `CLOSED` 屬 ET-16、未實作），那是**常態**不是邊角。
+        `PUBLISHED`（到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行），那是每門課到期後
+        都**必經的窗口**、不是邊角（見 `course.rules.is_effectively_closed`）。
         """
         uid = await _user(db, "ZT_K7")
         cid = await _full_course(client, db, uid)

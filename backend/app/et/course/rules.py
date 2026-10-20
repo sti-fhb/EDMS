@@ -269,16 +269,24 @@ def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: dat
     SCHET002 每日 08:00（#325 / US14 於 2026-09-14 接線並 `IS_ENABLED`）。所以「閱課期間
     已過但 `STATUS` 仍是 `PUBLISHED`」是**到期後、下一次排程執行前的過渡窗口**。
 
-    ⚠️ **窗口短不等於可以忽略**，三個理由：
+    ⚠️ **窗口短不等於可以忽略**，四個理由：
 
-    1. **每一門課到期後都必然經過它**，長達一天。不是罕見邊角，是每門課的必經狀態——
+    1. 🥇 **它可以被教師在任意時刻主動製造，與排程頻率無關。** 一般更新路徑只擋「把訖止
+       清成 `NULL`」（`ensure_schedule_not_cleared`）；擋「訖止須晚於當下」的
+       `ensure_reopen_schedule` **只掛在再開課**。所以送一次 `PUT /courses/{id}` 把
+       `OPEN_END_AT` 改到過去，當場就得到「本函式為真而 `STATUS` 仍是 `PUBLISHED`」，
+       可重複、可隨時觸發。
+       ⇒ **下面三條都是時間論證，都能用「那就把排程調密一點」反駁；這一條不能。**
+    2. **每一門課到期後都必然經過它**，至少一天。不是罕見邊角，是每門課的必經狀態——
        任何讀 `STATUS` 做判定的程式碼，每天都會遇到處於這個窗口的課程。
-    2. **可能不只一天**：`close_expired_courses` 以 `mark_closed` 寫入，遇樂觀鎖版本不符
+    3. **可能不只一天**：`close_expired_courses` 以 `mark_closed` 寫入，遇樂觀鎖版本不符
        回 `None` 且**刻意不重試**（「下一次每日執行會再掃到它」）。有人同時在改那門課就順延。
-    3. **可能無限期**：DP06 排程總覽可停用 SCHET002，停用期間一門都不會轉。
+    4. **可能無限期**：DP06 排程總覽可停用 SCHET002（`ScheduleUpdate.is_enabled` 可編輯），
+       停用期間一門都不會轉。
 
-    ⇒ 判準一律用本函式，⛔ 不要改成 `status == COURSE_CLOSED`。ET / 前端共 20 餘處引用
-    本段為理由，改寫此處請連同它們一起看。
+    ⇒ 判準一律用本函式，⛔ 不要改成 `status == COURSE_CLOSED`。ET 與前端多處引用本段為
+    理由，改寫此處前請先 `grep -rn is_effectively_closed backend/app frontend/src backend/tests`
+    ——⛔ 不要在這裡寫死處數，那個數字會過期（本 issue 修的正是這種東西）。
 
     ## 🔴 為何**只看訖止、不看起始**
 

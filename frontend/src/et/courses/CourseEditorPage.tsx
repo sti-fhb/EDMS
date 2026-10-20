@@ -412,7 +412,9 @@ export function EtCourseEditorPage() {
    * 🔴 底部動作列靠它分流：視同關閉是「取消｜保留編輯｜更新並重開課」，運作中的已發布
    * 是「取消｜更新」。⛔ **不可改成 `status === "CLOSED"`**——期間已過時 `status` 仍是
    * `PUBLISHED`（到期自動轉 `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課到期後都
-   * 必經這個窗口），那門課會拿到一排錯的按鈕：教師按「更新」，而後端走的是另一條路。
+   * 必經這個窗口，至少一天、排程停用時無限期；完整理由見後端 `course/rules.py` 的
+   * `is_effectively_closed`），那門課會拿到一排錯的按鈕：教師按「更新」，而後端走的是
+   * 另一條路。
    *
    * ℹ️ #720 之前這裡是一個**模式**（`reopening`，按「再開課」才進入、會清空起訖欄位）。
    * 拿掉模式之後它變成由狀態推導，所以換課程時不會殘留。
@@ -1711,7 +1713,7 @@ export function EtCourseEditorPage() {
 
               ⛔ 不可改判 `status === "CLOSED"`：期間已過的課程狀態仍是 `PUBLISHED`
               （到期自動轉 `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課必經這個
-              窗口），判準必須與底部動作列**同一個來源**。
+              窗口，至少一天、排程停用時無限期），判準必須與底部動作列**同一個來源**。
             */}
             {status === "PUBLISHED" && !reopening && !readOnly && course !== undefined && (
               <Button variant="contained" size="small" startIcon={<PersonAddIcon />} onClick={() => setInviteOpen(true)}>

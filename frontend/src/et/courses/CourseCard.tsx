@@ -23,7 +23,8 @@ const STATUS_LABEL: Record<CourseCardData["status"], { text: string; color: "def
  * 卡片上的狀態 pill。
  *
  * ⚠️ **不是單純的 `STATUS_LABEL[status]`**：閱課期間已過時 `status` 仍是 `PUBLISHED`
- * （到期自動轉 `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課到期後都必經這個窗口），
+ * （到期自動轉 `CLOSED` 由後端 SCHET002 每日 08:00 執行，每門課到期後都必經這個窗口——
+ * 至少一天，排程停用時無限期；完整理由見後端 `course/rules.py` 的 `is_effectively_closed`），
  * 照著它標會寫成「已發布」，而學員早已進不去。
  * 視同關閉由後端的 `is_closed` 給——前端自行比對 `open_end_at` 等於把規則複製一份到
  * 瀏覽器，而那一份用的是使用者的本機時鐘。

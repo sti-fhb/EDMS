@@ -248,8 +248,9 @@ class EtCourseService:
                 student_count=counts.get(r.course_id, (0, 0))[1],
                 # **由後端判定**——前端自行比對 owner_id 等於把授權語意複製一份到瀏覽器
                 is_owner=r.owner_id == actor_id,
-                # 期間已過者 `status` 仍是 `PUBLISHED`（自動轉 `CLOSED` 屬未實作的
-                # ET-16），前端若自己判 `status` 會把它標成「已發布」
+                # 期間已過者 `status` 仍是 `PUBLISHED`（自動轉 `CLOSED` 由 SCHET002 每日
+                # 08:00 執行，每門課必經這個窗口；見 `rules.is_effectively_closed`），
+                # 前端若自己判 `status` 會把它標成「已發布」
                 is_closed=is_effectively_closed(status=r.status, open_end_at=r.open_end_at, now=now),
             )
             for r in rows
