@@ -11,6 +11,7 @@
 `COVERAGE_PCT` 是快取（`data-model` 明訂），供側欄與統計快速讀取；權威始終是區段表。
 """
 
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy import Integer, delete, func, literal, select, update
@@ -282,6 +283,39 @@ class EtProgressRepository:
         await db.flush()
         if completed:
             await self.stamp_completed_at(db, course_id=course_id, user_ids=user_ids, operator=operator)
+
+    async def reset_material_completion(
+        self, db: AsyncSession, *, course_id: int, material_ids: Sequence[int], operator: OperatorInfo
+    ) -> int:
+        """把這幾份教材所屬項目的完成旗標**全部**退回未完成（#767 ⑨）。
+
+        供「更新」套用時使用：既有教材新增了影片，而新影片沒有任何人看過，依完成規則（每支
+        影片皆達門檻）所有已完成者此刻都不再符合。一律退回，不逐人判定。
+
+        ⚠️ 只清 `IS_COMPLETED`，`COMPLETED_AT` 不動——完課戳記「只寫一次、回退不清除」
+        （見 `stamp_completed_at`），與 #361 重測的回退同一個語意。
+
+        Args:
+            material_ids: 新增了影片的既有教材；空陣列為 no-op。
+
+        Returns:
+            被退回的進度列數（供稽核描述，不含學員識別）。
+        """
+        if not material_ids:
+            return 0
+        item_ids = select(EtItem.item_id).where(EtItem.material_id.in_(material_ids), EtItem.deleted == 0)
+        result = await db.execute(
+            update(EtProgress)
+            .where(
+                EtProgress.course_id == course_id,
+                EtProgress.item_id.in_(item_ids),
+                EtProgress.is_completed.is_(True),
+                EtProgress.deleted == 0,
+            )
+            .values(is_completed=False, updated_user=operator.user_id, updated_date=utcnow())
+        )
+        await db.flush()
+        return result.rowcount or 0
 
     async def stamp_completed_at(
         self, db: AsyncSession, *, course_id: int, user_ids: list[str] | None = None, operator: OperatorInfo

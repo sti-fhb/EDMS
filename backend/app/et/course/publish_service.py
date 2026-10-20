@@ -642,7 +642,9 @@ class EtPublishService:
             # 「沒有章節」，兩邊對同一門課講相反的話（#767 code review MEDIUM）。
             # 樹是空的、讀不到起訖，沿用活表那組；缺漏清單會先以「沒有章節」擋下。
             start_at, end_at = course.open_start_at, course.open_end_at
-            blockers = evaluate_publish(to_course_snapshot(nodes, status=COURSE_PUBLISHED), obsolete_doc_ids=frozenset())
+            blockers = evaluate_publish(
+                to_course_snapshot(nodes, status=COURSE_PUBLISHED), obsolete_doc_ids=frozenset()
+            )
         else:
             # 沒開過編輯工作階段：起訖仍是關閉前那組，下面的 `ensure_reopen_schedule`
             # 會要教師先去基本資料卡重設。

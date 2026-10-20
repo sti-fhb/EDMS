@@ -345,7 +345,6 @@ class TestRetestPendingVisibility:
 
         assert after.json()["require_retest_pending"] is False
 
-
     async def test_改題路徑勾選後詳細頁也回報待生效(self, client, db):
         """#767 A1：使用者實測——改題時選「儲存並要求重測」、不按更新再改另一題，視窗沒有出現
         「已有一筆待生效的重測要求」。上一條只驗了測驗設定那一支。"""
@@ -372,23 +371,36 @@ class TestRetestPendingVisibility:
         after = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
         assert after.json()["require_retest_pending"] is True
 
-
     async def test_修改既有題目勾選後詳細頁也回報待生效(self, client, db):
         teacher = await _user(db, "ZTT033")
         cid, item_id, qid = await _course_with_quiz(db, teacher)
         await _passed_student(db, uid="ZTS033", course_id=cid, item_id=item_id, quiz_id=qid)
         now = utcnow()
         live_q = EtQuestion(
-            quiz_id=qid, question_type="SINGLE", stem="既有題目", points=100, sort_order=1,
-            version=0, created_user=teacher, created_date=now, deleted=0,
+            quiz_id=qid,
+            question_type="SINGLE",
+            stem="既有題目",
+            points=100,
+            sort_order=1,
+            version=0,
+            created_user=teacher,
+            created_date=now,
+            deleted=0,
         )
         db.add(live_q)
         await db.flush()
         for i, (text, ok) in enumerate((("甲", True), ("乙", False)), start=1):
-            db.add(EtOption(
-                question_id=live_q.question_id, option_text=text, is_correct=ok, sort_order=i,
-                created_user=teacher, created_date=now, deleted=0,
-            ))
+            db.add(
+                EtOption(
+                    question_id=live_q.question_id,
+                    option_text=text,
+                    is_correct=ok,
+                    sort_order=i,
+                    created_user=teacher,
+                    created_date=now,
+                    deleted=0,
+                )
+            )
         await db.commit()
         detail = (await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))).json()
         assert detail["require_retest_pending"] is False, "前置：還沒勾"
