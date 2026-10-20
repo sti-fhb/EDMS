@@ -2303,6 +2303,7 @@ export function EtCourseEditorPage() {
           affectedCount={quiz?.affected_count ?? 0}
           // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
           staged={status !== "DRAFT"}
+          closed={course?.is_closed ?? false}
           retestPending={quiz?.require_retest_pending ?? false}
           cancelsPending={retestCancelsPending}
           onCancel={() => setPendingRetestAction(null)}
@@ -2464,7 +2465,7 @@ export function EtCourseEditorPage() {
               sx={{ minWidth: 0 }}
             >
               {status === "DRAFT"
-                ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
+                ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、啟用中的課後問卷至少 1 題、無引用之廢止文件。"
                 : reopening
                   ? // ⚠️ 明寫「保留編輯」**不是還原點**（2026-10-20 裁示）：鈕名已經避開
                     // 「儲存草稿」，這句再說一次它保留的是「目前的編輯」而非一個版本。

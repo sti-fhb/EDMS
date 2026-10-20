@@ -7,7 +7,7 @@ import { renderWithProviders } from "../../test/renderWithProviders"
 
 function setup(
   affectedCount = 3,
-  extra: { staged?: boolean; retestPending?: boolean; cancelsPending?: boolean } = {},
+  extra: { staged?: boolean; closed?: boolean; retestPending?: boolean; cancelsPending?: boolean } = {},
 ) {
   const onCancel = vi.fn()
   const onDecide = vi.fn()
@@ -117,5 +117,20 @@ describe("RequireRetestDialog", () => {
       setup(3, { staged: true, retestPending: false })
       expect(screen.getByRole("dialog")).not.toHaveTextContent(/已有一筆待生效的重測要求/)
     })
+  })
+})
+
+describe("已關閉課程的生效時點說明（#768 第 7 項）", () => {
+  // 已關閉課程沒有「更新」鈕，生效要按「更新並重開課」——寫「更新」會叫教師去找一顆不存在的按鈕
+  it("已關閉：說明按「更新並重開課」才生效", () => {
+    setup(3, { staged: true, closed: true })
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveTextContent("更新並重開課")
+    expect(dialog).not.toHaveTextContent("按下「更新」")
+  })
+
+  it("已發布：照舊說明按「更新」（正向錨點）", () => {
+    setup(3, { staged: true, closed: false })
+    expect(screen.getByRole("dialog")).toHaveTextContent("按下「更新」")
   })
 })

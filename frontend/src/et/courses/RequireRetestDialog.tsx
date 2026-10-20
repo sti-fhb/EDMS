@@ -18,6 +18,11 @@ interface Props {
    */
   staged?: boolean
   /**
+   * 課程是否已關閉（含期間已過）。已關閉課程沒有「更新」鈕，生效要按「更新並重開課」——
+   * 寫「更新」會叫教師去找一顆不存在的按鈕（#768 第 7 項）。
+   */
+  closed?: boolean
+  /**
    * 本次編輯工作階段是否**已有**一筆待生效的重測要求（`QuizDetail.require_retest_pending`）。
    *
    * 🔴 不顯示這件事，「僅儲存，不要求重測」就是一顆會**靜默取消**先前決定的按鈕：
@@ -63,6 +68,7 @@ export function RequireRetestDialog({
   open,
   affectedCount,
   staged = false,
+  closed = false,
   retestPending = false,
   cancelsPending = false,
   onCancel,
@@ -83,7 +89,7 @@ export function RequireRetestDialog({
               <br />
               <br />
               ⚠️ 本課程已發布，編輯會先存在暫存區：重測
-              <strong>不會立刻執行</strong>，而是在您按下「更新」、新內容對學員生效的那一刻才一起發生。
+              <strong>不會立刻執行</strong>，而是在您按下「{closed ? "更新並重開課" : "更新"}」、新內容對學員生效的那一刻才一起發生。
             </>
           )}
           {retestPending && (

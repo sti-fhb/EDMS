@@ -163,9 +163,9 @@ export function SurveySection({
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
               {survey.questions.length} 題
-              {survey.questions.length === 0 && (
+              {survey.questions.length === 0 && survey.is_active && (
                 // 0 題會擋住課程發布（#204 之第七項檢核）；在這裡先講，
-                // 比讓教師按了發布才發現好
+                // 比讓教師按了發布才發現好。停用中的問卷不計入檢核（#611），不提（#768 第 8 項）
                 <Typography component="span" variant="caption" color="warning.main">
                   ——至少須有 1 題才能發布課程
                 </Typography>
