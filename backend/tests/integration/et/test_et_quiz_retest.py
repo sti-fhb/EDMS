@@ -35,7 +35,7 @@ from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.stage_apply import apply_stage
 from app.et.course.stage_repository import EtCourseStageRepository
 from app.et.progress.models import EtEnrollment, EtProgress
-from app.et.quiz.models import EtQuiz, EtQuizAttemptM, EtQuizRetryReset
+from app.et.quiz.models import EtOption, EtQuestion, EtQuiz, EtQuizAttemptM, EtQuizRetryReset
 from app.et.roles.models import EtUserRole
 
 pytestmark = pytest.mark.integration
@@ -344,6 +344,65 @@ class TestRetestPendingVisibility:
         after = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
 
         assert after.json()["require_retest_pending"] is False
+
+
+    async def test_改題路徑勾選後詳細頁也回報待生效(self, client, db):
+        """#767 A1：使用者實測——改題時選「儲存並要求重測」、不按更新再改另一題，視窗沒有出現
+        「已有一筆待生效的重測要求」。上一條只驗了測驗設定那一支。"""
+        teacher = await _user(db, "ZTT032")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS032", course_id=cid, item_id=item_id, quiz_id=qid)
+        await db.commit()
+
+        body = {
+            "question_type": "SINGLE",
+            "stem": "輸血前應核對幾項資訊？",
+            "points": 10,
+            "options": [
+                {"option_text": "兩項", "is_correct": False},
+                {"option_text": "三項", "is_correct": True},
+            ],
+            "require_retest": True,
+        }
+        r = await client.post(f"/api/et/quizzes/{qid}/questions", json=body, headers=_bearer(teacher))
+        assert r.status_code in (200, 201), r.text
+
+        after = await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))
+        assert after.json()["require_retest_pending"] is True
+
+
+    async def test_修改既有題目勾選後詳細頁也回報待生效(self, client, db):
+        teacher = await _user(db, "ZTT033")
+        cid, item_id, qid = await _course_with_quiz(db, teacher)
+        await _passed_student(db, uid="ZTS033", course_id=cid, item_id=item_id, quiz_id=qid)
+        now = utcnow()
+        live_q = EtQuestion(
+            quiz_id=qid, question_type="SINGLE", stem="既有題目", points=100, sort_order=1,
+            version=0, created_user=teacher, created_date=now, deleted=0,
+        )
+        db.add(live_q)
+        await db.flush()
+        for i, (text, ok) in enumerate((("甲", True), ("乙", False)), start=1):
+            db.add(EtOption(
+                question_id=live_q.question_id, option_text=text, is_correct=ok, sort_order=i,
+                created_user=teacher, created_date=now, deleted=0,
+            ))
+        await db.commit()
+        detail = (await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))).json()
+        question = detail["questions"][0]
+        body = {
+            "question_type": question["question_type"],
+            "stem": question["stem"] + "（改）",
+            "points": question["points"],
+            "options": [{"option_text": o["option_text"], "is_correct": o["is_correct"]} for o in question["options"]],
+            "version": question["version"],
+            "require_retest": True,
+        }
+        r = await client.put(f"/api/et/questions/{question['question_id']}", json=body, headers=_bearer(teacher))
+        assert r.status_code in (200, 204), r.text
+
+        after = (await client.get(f"/api/et/quizzes/{qid}", headers=_bearer(teacher))).json()
+        assert after["require_retest_pending"] is True
 
 
 class TestRequireRetestOnQuizChange:
