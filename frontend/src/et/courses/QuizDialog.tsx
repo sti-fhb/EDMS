@@ -146,7 +146,7 @@ export function QuizDialog({
     }
     setErrors({})
     onSaveSettings({
-      quiz_name: name,
+      quiz_name: result.data.quiz_name,
       description: description.trim() || null,
       pass_score: result.data.pass_score,
       time_limit_min: result.data.time_limit_min,

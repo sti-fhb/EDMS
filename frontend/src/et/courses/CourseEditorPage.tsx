@@ -968,7 +968,7 @@ export function EtCourseEditorPage() {
       content: hasPendingChanges ? (
         <>
           <strong>⚠️ 您有尚未按「更新」的編輯，關閉後這些編輯不會保留。</strong>
-          若要保留，請先按「取消」再按「更新」。
+          若要保留，請先關閉此視窗，再按頁面上的「更新」。
           <br />
           <br />
           {closeEffects}

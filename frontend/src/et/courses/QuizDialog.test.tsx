@@ -248,6 +248,12 @@ describe("測驗設定的範圍檢查（#767 ⑤）", () => {
     expect(onSaveSettings).not.toHaveBeenCalled()
   })
 
+  it("及格分數填小數 → 「及格分數須為整數」", async () => {
+    const { onSaveSettings } = await saveWith(/及格分數/, "80.5")
+    expect(await screen.findByText("及格分數須為整數")).toBeInTheDocument()
+    expect(onSaveSettings).not.toHaveBeenCalled()
+  })
+
   it("範圍內的值照常送出（正向錨點：上面的「不送出」不是因為按鈕壞了）", async () => {
     const { onSaveSettings } = await saveWith(/及格分數/, "100")
     expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ pass_score: 100, max_retry: 3 }))

@@ -2,6 +2,7 @@
 //
 // ① 新建項目在第一次按底部「儲存」前，已上傳影片或已存題目——關閉視窗不可把整個項目刪掉
 // ④ 已發布課程有尚未「更新」的編輯時按「關閉課程」——確認視窗要說這些編輯會被放棄
+// ⑥ 停用中的問卷按「啟用問卷」——送出的請求要帶 is_active: true（元件本身見 SurveySection.test）
 //
 // 檔頭的 router mock 與 helper 比照同目錄其他 `CourseEditorPage.*.test.tsx`，各檔各自完整一份。
 
@@ -125,11 +126,11 @@ describe("① 新建項目關閉時不可吃掉已保存的內容（#767）", ()
     expect(await screen.findByText("demo.mp4")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "取消" }))
-    // 取消可能跳確認（若視窗判定有變更）；有的話確定下去，判準只看項目是否被刪
-    const ok = screen.queryByRole("button", { name: "確定" })
-    if (ok) await user.click(ok)
-
+    // 影片已落地、表單沒有改動 ⇒ 直接關閉，不跳「放棄變更」確認
     await waitFor(() => expect(screen.queryByLabelText("選擇影片檔")).not.toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: "確定" })).not.toBeInTheDocument()
+    // 刪除是關閉後才非同步送出——等清單重抓的那一輪也過去，才能說「沒有刪」
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(deleted).toEqual([])
   }, 15000)
 
@@ -208,10 +209,10 @@ describe("① 新建項目關閉時不可吃掉已保存的內容（#767）", ()
     expect(await screen.findByText("題目一")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "關閉視窗" }))
-    const ok = screen.queryByRole("button", { name: "確定" })
-    if (ok) await user.click(ok)
 
     await waitFor(() => expect(screen.queryByRole("tab", { name: /題庫管理/ })).not.toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: "確定" })).not.toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(deleted).toEqual([])
   }, 20000)
 })
@@ -233,6 +234,7 @@ describe("④ 已發布課程有未更新的編輯時關閉課程（#767）", ()
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveTextContent("尚未按「更新」")
     expect(dialog).toHaveTextContent("關閉後這些編輯不會保留")
+    expect(dialog).toHaveTextContent("請先關閉此視窗，再按頁面上的「更新」")
   }, 15000)
 
   it("沒有未更新的編輯：維持原本的確認文字，不提編輯", async () => {
@@ -244,5 +246,38 @@ describe("④ 已發布課程有未更新的編輯時關閉課程（#767）", ()
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveTextContent("關閉後學員無法加入")
     expect(dialog).not.toHaveTextContent("尚未按「更新」")
+  }, 15000)
+})
+
+describe("⑥ 啟用問卷的接線（#767）", () => {
+  it("按「啟用問卷」送出 is_active: true，並帶原名稱與版本", async () => {
+    let sent: unknown = null
+    mockCourse({ status: "PUBLISHED", open_start_at: "2026-01-01T00:00:00Z", open_end_at: "2099-12-31T00:00:00Z" })
+    server.use(
+      http.get("/api/et/courses/:courseId/survey", () =>
+        HttpResponse.json({
+          survey_id: 31,
+          course_id: 1,
+          survey_name: "課後滿意度問卷",
+          is_active: false,
+          version: 4,
+          frozen: false,
+          responded_count: 0,
+          pending_count: 0,
+          questions: [],
+        }),
+      ),
+      http.put("/api/et/surveys/:surveyId", async ({ request }) => {
+        sent = await request.json()
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "啟用問卷" }))
+
+    await waitFor(() =>
+      expect(sent).toEqual({ survey_name: "課後滿意度問卷", is_active: true, version: 4 }),
+    )
   }, 15000)
 })
