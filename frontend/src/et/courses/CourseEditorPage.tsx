@@ -426,6 +426,8 @@ export function EtCourseEditorPage() {
    * 拿掉模式之後它變成由狀態推導，所以換課程時不會殘留。
    */
   const reopening = course?.is_closed ?? false
+  /** 讓編輯生效的那顆鈕的名稱：已關閉（含期間已過）是「更新並重開課」，否則是「更新」。 */
+  const applyLabel = reopening ? "更新並重開課" : "更新"
   /**
    * 是否要把底部那一列講成「待辦」（警示色 + 待更新文案）。
    *
@@ -1120,11 +1122,17 @@ export function EtCourseEditorPage() {
           setReopenBlockers(returned)
           return undefined
         }
+        // 問卷凍結：比照「更新」開帶出口的視窗（#712）。原本往外拋成一則短暫訊息，教師改不回去
+        // （選項識別碼回不來），整門課就重開不了（#768 第 11 項）
+        if (errorCode === "ET_SURVEY_003") {
+          setSurveyFrozenOpen(true)
+          return undefined
+        }
         throw err
       }
     },
     onSuccess: (result) => {
-      // `undefined` = 檢核未通過，缺漏已以對話框顯示（#509），留在頁面上讓教師處理
+      // `undefined` = 檢核未通過或問卷凍結，已以對話框顯示（#509），留在頁面上讓教師處理
       if (result === undefined) return
       setReopenBlockers([])
       setHighlight(null)
@@ -1953,19 +1961,19 @@ export function EtCourseEditorPage() {
       */}
       {surveyFrozenOpen && (
         <Dialog open onClose={() => setSurveyFrozenOpen(false)} maxWidth="xs" fullWidth>
-          <DialogTitle>課後問卷已有學員填答，本次更新未生效</DialogTitle>
+          <DialogTitle>課後問卷已有學員填答，本次{applyLabel}未生效</DialogTitle>
           <DialogContent>
             <DialogContentText component="div">
-              已經有學員填寫過這份問卷，所以問卷的題目與選項<strong>不能</strong>再更動。本次更新沒有生效，
+              已經有學員填寫過這份問卷，所以問卷的題目與選項<strong>不能</strong>再更動。本次{applyLabel}沒有生效，
               課程內容一個字都沒有改變。
               <br />
               <br />
-              ⚠️ 把題目改回原樣<strong>沒有用</strong>——系統比對的不只是文字。要讓更新過得去，
+              ⚠️ 把題目改回原樣<strong>沒有用</strong>——系統比對的不只是文字。要讓{applyLabel}過得去，
               請放棄這次對問卷的編輯。
               <br />
               <br />
               按「放棄問卷的編輯」：課後問卷回到學員目前看到的那一版，
-              <strong>其餘的編輯（章節、教材、測驗）全部保留</strong>，接著再按一次「更新」即可。
+              <strong>其餘的編輯（章節、教材、測驗）全部保留</strong>，接著再按一次「{applyLabel}」即可。
             </DialogContentText>
           </DialogContent>
           <DialogActions>
