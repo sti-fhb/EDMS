@@ -21,7 +21,7 @@ class DashboardStats(BaseModel):
 
 
 class AnnouncementItem(BaseModel):
-    """最新更新公告列（近 30 天已發布之版本）。"""
+    """最新更新公告列（最新 N 筆已發布之版本；不設時間窗，#758）。"""
 
     doc_id: str
     doc_name: str

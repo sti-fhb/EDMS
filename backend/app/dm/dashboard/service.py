@@ -1,18 +1,17 @@
 """系統儀表板（US7 / DM00）服務——各類型文件總數 + 最新更新公告（唯讀）。
 
 - 統計（FR-002）：4 內建分類之「已發布目前版本」數 + 總計；含 PENDING_OBSOLETE（在架）、排除 OBSOLETE/送審/草稿/舊版。
-- 公告（FR-003）：近 30 天已發布版本（新增/新版本兩類），發布時間 DESC；空清單由前端呈現 DM-MSG-DM00-001。
+- 公告（FR-003）：**最新 N 筆**已發布版本（新增/新版本兩類），發布時間 DESC；空清單由前端呈現 DM-MSG-DM00-001。
 """
 
 from collections.abc import Iterable
-from datetime import timedelta
 
-from app.core.utils import utcnow
 from app.dm.dashboard.repository import DashboardRepository
 from app.dm.dashboard.schemas import AnnouncementItem, CategoryStat, DashboardStats
 
-_ANNOUNCE_DAYS = 30
-_ANNOUNCE_LIMIT = 50  # 近 30 天量小；設上限防極端資料量灌爆前端
+# 公告只列最新 N 筆，**不設時間窗**（#758）：首頁是入口不是清單，要看更早的請至 DM01 文件庫
+# （公告區右上即有「查看全部文件 →」）。原為「近 30 天 + 上限 50」，時間窗已移除。
+_ANNOUNCE_LIMIT = 10
 # 內建分類固定呈現順序（對齊 wireframe：SOP / 系統操作手冊 / 訓練教材 / 其他）
 _CATEGORY_ORDER = ("SOP", "MANUAL", "TRAINING", "OTHER")
 _NEW = "NEW"
@@ -35,11 +34,13 @@ class DashboardService:
         return DashboardStats(items=items, total=total)
 
     async def get_announcements(self, db, *, user_id: str, roles: Iterable[str]) -> list[AnnouncementItem]:
-        """近 30 天已發布版本（新增/新版本），發布時間 DESC；無事件回空清單；套可見性。"""
-        cutoff = utcnow() - timedelta(days=_ANNOUNCE_DAYS)
-        rows = await self._repo.recent_announcements(
-            db, cutoff=cutoff, limit=_ANNOUNCE_LIMIT, user_id=user_id, roles=roles
-        )
+        """最新 `_ANNOUNCE_LIMIT` 筆已發布版本（新增/新版本），發布時間 DESC；無資料回空清單；套可見性。
+
+        ⚠️ `limit` 必須交給 repository 放進**同一個查詢**，與可見性條件一起由 DB 執行。
+        ⛔ 不可改成「先取 N 筆再於應用層過濾」——那會讓閱覽者看到少於 N 筆（甚至 0 筆），
+        而系統中其實還有他看得到的文件。`test_十筆上限在閱覽者可見範圍內取` 守這件事。
+        """
+        rows = await self._repo.recent_announcements(db, limit=_ANNOUNCE_LIMIT, user_id=user_id, roles=roles)
         return [
             AnnouncementItem(
                 doc_id=r.doc_id,

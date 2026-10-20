@@ -66,7 +66,7 @@ function AnnouncementRow({ item, onOpen }: { item: AnnouncementItem; onOpen: (do
 /**
  * DM 文件概況 widget（US7 / UCDM02）：中性歡迎頁依權限疊加之 DM 區塊（導覽重構 #89，非獨立落地頁）。
  * 由呼叫端（WelcomePage）於使用者具任一 DM 角色時才渲染（FR-001 最小知悉）。
- * 上方各類型文件總數（4 內建分類 + 總計，純資訊不可點）；下方近 30 天已發布公告（新增 / 新版本），
+ * 上方各類型文件總數（4 內建分類 + 總計，純資訊不可點）；下方**最新 10 筆**已發布公告（新增 / 新版本），
  * 點入詳細頁、「查看全部文件」進文件庫；統計與公告皆由後端套可見性過濾。
  */
 export function DmOverviewWidget() {
@@ -122,7 +122,7 @@ export function DmOverviewWidget() {
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
             最新更新公告{" "}
             <Typography component="span" variant="caption" color="text.secondary">
-              （近一個月發布）
+              （10 筆最新發布文件）
             </Typography>
           </Typography>
           <Link component="button" variant="body2" onClick={() => navigate("/dm/library")}>
@@ -137,7 +137,7 @@ export function DmOverviewWidget() {
         ) : annError ? (
           <Alert severity="error">載入失敗，請稍後再試。</Alert>
         ) : (announcements ?? []).length === 0 ? (
-          <Alert severity="info">近期無新發布文件</Alert>
+          <Alert severity="info">尚無已發布文件</Alert>
         ) : (
           <List disablePadding>
             {(announcements ?? []).map((a) => (
