@@ -200,6 +200,39 @@ describe("PublishDialog：發布成功", () => {
     expect(screen.queryByText(/永久不可變更/)).not.toBeInTheDocument()
   })
 
+  it("🔴 帶入 0 人時說的是「沒有人符合受訓對象」，不是重開課那一句（#763 AC 7）", () => {
+    // ## 這條守的是「不變」
+    //
+    // #763 ③ 把 0 人的說法改由呼叫端給，因為發布與重開課的 0 **意思不同**：
+    //
+    // | 呼叫端 | `invited_count === 0` 的意思 |
+    // |---|---|
+    // | 發布 | 真的沒人符合受訓對象——**設定問題**，要教師去查 |
+    // | 重開課 | 符合的人多半**早就在課程裡**了（只回傳本次新加入者），不必查 |
+    //
+    // 當時只替重開課那一句寫了測試，發布這一句「維持原樣」卻沒有守門——而 AC 寫
+    // 「X 不變」要的正是一條守門斷言，不是範圍宣告。
+    //
+    // 🔴 **少了這條會靜默失效的修法**：日後有人嫌「兩個呼叫端都要傳 `emptyMessage`
+    // 很囉嗦」，把它改回 `EnrolledResultSummary` 內的預設值、且預設抄了重開課那句
+    // ——發布視窗就會叫教師別去查一個**真的存在**的設定問題，而整套測試不會有任何
+    // 一條變紅（`CourseEditorPage.reopen.test.tsx` 驗的是重開課那一側）。
+    //
+    // ⚠️ 不斷言 severity（warning vs info）：MUI 只把它表現成 class，兩者的 role 都是
+    // `alert`，驗它等於抄一遍實作。⇒ 本條守的是**說了什麼**，顏色不在守備範圍。
+    render(<PublishDialog {...BASE_PROPS} result={result} />)
+    expect(screen.getByText(/沒有任何學員符合本課程的受訓對象/)).toBeInTheDocument()
+    expect(screen.queryByText(/本次沒有新的學員被自動帶入/)).not.toBeInTheDocument()
+  })
+
+  it("帶入人數 > 0 時改說帶入幾位（#763 AC 7 正向錨點）", () => {
+    // 少了這條，把 0 人那句改成無條件顯示也會讓上一條通過——而那會讓一門真的帶入了
+    // 30 位學員的課程，在發布成功的當下告訴教師「沒有任何學員符合」。
+    render(<PublishDialog {...BASE_PROPS} result={{ ...result, invited_count: 3 }} />)
+    expect(screen.getByText(/已依受訓對象帶入 3 位學員/)).toBeInTheDocument()
+    expect(screen.queryByText(/沒有任何學員符合本課程的受訓對象/)).not.toBeInTheDocument()
+  })
+
   it("成功後不再顯示發布鈕", () => {
     render(<PublishDialog {...BASE_PROPS} result={result} />)
     expect(screen.queryByRole("button", { name: "確認發布" })).not.toBeInTheDocument()
