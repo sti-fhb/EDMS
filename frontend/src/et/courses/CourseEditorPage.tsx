@@ -958,11 +958,24 @@ export function EtCourseEditorPage() {
    * 兩個視窗會疊在一起。
    */
   const requestClose = () => {
+    // 關閉不碰暫存區，但關閉後的課程沒有「保留編輯」標記，下次進頁就被 `discardUnkeptStage`
+    // 丟掉——教師按下去的當下必須知道（#767 ④）
+    const closeEffects =
+      "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
+      "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。"
     confirm({
       title: "關閉課程",
-      content:
-        "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
-        "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。",
+      content: hasPendingChanges ? (
+        <>
+          <strong>⚠️ 您有尚未按「更新」的編輯，關閉後這些編輯不會保留。</strong>
+          若要保留，請先按「取消」再按「更新」。
+          <br />
+          <br />
+          {closeEffects}
+        </>
+      ) : (
+        closeEffects
+      ),
       // 「確認關閉」而非「關閉課程」：與標題列那顆同名會讓畫面上同時存在兩個同名
       // 按鈕（無障礙名稱重複）。措辭亦與「確認發布」一致。
       okText: "確認關閉",
@@ -1590,6 +1603,9 @@ export function EtCourseEditorPage() {
     await runItemAction(
       () => materialsApi.uploadVideo(openMaterialId, file),
       () => {
+        // 影片已落地，這個項目就不再是「尚未建立」——否則關閉時畫面無變更，會被當成空殼
+        // 連同影片一起刪掉（#767 ①）
+        setUnsavedNewItemId(null)
         invalidateMaterial()
         invalidate()
       },
@@ -2192,7 +2208,11 @@ export function EtCourseEditorPage() {
               }
               const version = quiz?.questions.find((q) => q.question_id === questionId)?.version ?? 0
               return quizzesApi.updateQuestion(questionId, { ...values, version, require_retest: requireRetest })
-            }, invalidateQuiz),
+            }, () => {
+              // 同上傳影片：題目已逐題存檔，項目不再是空殼（#767 ①）
+              setUnsavedNewItemId(null)
+              invalidateQuiz()
+            }),
           )
         }
         onDeleteQuestion={handleDeleteQuestion}
