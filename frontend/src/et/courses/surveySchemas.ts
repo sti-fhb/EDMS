@@ -199,11 +199,15 @@ export const BLOCKER_HINT: Record<string, string> = {
   FORM_AUDIENCE: "請於「基本資料」補選該列的單位與職位，或刪除該列",
 }
 
-/** 缺漏清單出現的情境：發布＝課程為草稿；再開課＝課程已關閉。 */
-export type BlockerContext = "publish" | "reopen"
+/**
+ * 缺漏清單出現的情境：發布＝課程為草稿；再開課＝課程已關閉；更新＝課程已發布（#767 ⑧）。
+ *
+ * 更新跑的是發布那一套檢核，但處置與再開課相同——已發布課程的問卷不能刪、只能停用。
+ */
+export type BlockerContext = "publish" | "reopen" | "update"
 
 /**
- * 再開課情境下改寫的導引（#592）。
+ * 再開課與更新情境下改寫的導引（#592；更新於 #767 ⑧ 補上）。
  *
  * 同一條缺漏在兩個情境的處置相反：草稿課程的問卷只有「刪除」、沒有「停用」；已關閉
  * 課程的問卷只有「停用」、不能刪（`SurveySection` 依 `isDraftCourse` 二選一）。導引寫死
@@ -215,7 +219,7 @@ const REOPEN_HINT_OVERRIDES: Record<string, string> = {
 
 /** 缺漏代碼 → 依情境的「去哪裡修」導引。 */
 export function blockerHint(code: string, context: BlockerContext): string | undefined {
-  return (context === "reopen" ? REOPEN_HINT_OVERRIDES[code] : undefined) ?? BLOCKER_HINT[code]
+  return (context !== "publish" ? REOPEN_HINT_OVERRIDES[code] : undefined) ?? BLOCKER_HINT[code]
 }
 
 /**

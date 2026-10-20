@@ -786,6 +786,43 @@ export function EtCourseEditorPage() {
     // #720：基本資料也由這顆鈕送出，所以要先驗（理由見 `validateBeforeSubmit`）。
     // ⛔ 不要移到 `onOk` 裡：教師會先看到一個「確認更新」的視窗、按下去才發現表單有錯。
     if (!validateBeforeSubmit()) return
+    applyCheckMut.mutate()
+  }
+
+  /**
+   * 「更新」的預檢（#767 ⑧）：有缺漏就直接列出，**不先跳確認視窗**。
+   *
+   * 原本是先確認、送出後才被 422 擋——教師要按兩次才知道問卷少了題目。預檢讀的是暫存樹
+   * （後端 `_evaluate_for_check`），所以要先把基本資料送進暫存，與 `applyMut` 同一個順序。
+   *
+   * ⚠️ 送出時後端會在鎖內再評估一次，那一次才算數；這裡只是讓缺漏提早出現。預檢本身
+   * 失敗（網路、限流）時不擋——照舊跳確認視窗，由送出那一次把關。
+   */
+  const applyCheckMut = useMutation({
+    mutationFn: async () => {
+      // 基本資料送暫存失敗（版本衝突等）照一般錯誤處理——往外拋到 `onError`
+      await stageBasic()
+      try {
+        return await publishApi.check(courseId as number)
+      } catch {
+        // 預檢本身失敗（網路、限流）不擋：回 `null` 照舊跳確認視窗，由送出那一次把關
+        return null
+      }
+    },
+    onSuccess: (result) => {
+      if (result !== null) {
+        seedLiveCheck(result.blockers)
+        if (result.blockers.length > 0) {
+          setApplyBlockers(result.blockers)
+          return
+        }
+      }
+      confirmApply()
+    },
+    onError: handleError,
+  })
+
+  const confirmApply = () => {
     confirm({
       title: "更新課程內容",
       content:
@@ -1174,6 +1211,7 @@ export function EtCourseEditorPage() {
    */
   const actionPending =
     applyMut.isPending ||
+    applyCheckMut.isPending ||
     keepMut.isPending ||
     reopenMut.isPending ||
     reopenCheckMut.isPending ||
@@ -1860,7 +1898,8 @@ export function EtCourseEditorPage() {
         請求**已經被擋下**，這是事後告知，不是再問一次要不要送出。
 
         ⚠️ 傳 `applyBlockers`，**不是** `blockers` / `reopenBlockers`（見其宣告）。
-        `context="publish"` 是因為更新跑的就是發布那十項檢核，處置方式與發布相同。
+        `context="update"`：跑的是發布那十項檢核，但處置與再開課相同——已發布課程的問卷
+        只能停用、不能刪（#767 ⑧，原本借用 "publish" 而導引教師去刪一份刪不掉的問卷）。
 
         🔴 **暫存區不會因為檢核未通過而清掉**：教師補好缺漏後再按一次「更新」即可，
         這次的編輯不必重做。
@@ -1871,7 +1910,7 @@ export function EtCourseEditorPage() {
           // `role="dialog"`，同名會讓「確認視窗沒有變成缺漏視窗」這類斷言查到錯的那個，
           // 且確認視窗的關閉動畫期間仍在 DOM 裡——測試會時綠時紅。
           title="更新未生效"
-          context="publish"
+          context="update"
           message="課程目前不符發布條件，本次更新未生效（編輯仍保留在暫存區）。請先補齊以下項目，再按一次「更新」。"
           blockers={applyBlockers}
           names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}

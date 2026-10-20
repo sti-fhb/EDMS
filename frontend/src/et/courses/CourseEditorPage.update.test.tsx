@@ -352,6 +352,45 @@ describe("ET05 更新（#631）", () => {
     expect(screen.queryByText("課程內容已更新，學員已可看到")).not.toBeInTheDocument()
   })
 
+  it("按「更新」先預檢：有缺漏直接列出，不先跳確認視窗、不送出更新（#767 ⑧）", async () => {
+    // 原本按下更新先問「確認更新」，送出後才被 422 擋——使用者實測問卷 0 題時要按兩次才知道
+    const user = userEvent.setup()
+    let applied = 0
+    useCourse("PUBLISHED", { pending: true })
+    server.use(
+      http.get("/api/et/courses/:courseId/publish-check", () =>
+        HttpResponse.json({
+          can_publish: false,
+          blockers: [{ code: "SURVEY_NO_QUESTION", message: "課後問卷至少須有 1 題", target_id: null }],
+        }),
+      ),
+      http.post("/api/et/courses/:courseId/content/apply", () => {
+        applied += 1
+        return HttpResponse.json({ course_id: 1, applied_count: 1 })
+      }),
+    )
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "更新未生效" })
+    expect(within(dialog).getByText(/課後問卷至少須有 1 題/)).toBeInTheDocument()
+    // 已發布課程的問卷不能刪，導引要指向停用（原 A11）
+    expect(within(dialog).getByText(/或停用該問卷/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/刪除該問卷/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "確認更新" })).not.toBeInTheDocument()
+    expect(applied).toBe(0)
+  })
+
+  it("預檢沒有缺漏時照常跳確認視窗（正向錨點）", async () => {
+    const user = userEvent.setup()
+    useCourse("PUBLISHED", { pending: true })
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "更新" }))
+
+    expect(await screen.findByRole("button", { name: "確認更新" })).toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "更新未生效" })).not.toBeInTheDocument()
+  })
+
   /** 讓「更新」固定以問卷凍結被擋下。 */
   function useFrozenSurvey() {
     server.use(
