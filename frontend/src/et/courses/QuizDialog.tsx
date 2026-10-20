@@ -28,7 +28,9 @@ import {
   QUESTION_TYPE_LABEL,
   QUIZ_DESCRIPTION_MAX_LEN,
   QUIZ_NAME_MAX_LEN,
+  QuizFormSchema,
 } from "./itemSchemas"
+import { getFieldErrors } from "../../utils/zodUtils"
 import type { QuestionDraft, QuestionFormValues, QuestionRow, QuestionType, QuizDetail } from "./itemSchemas"
 
 interface QuizDialogProps {
@@ -87,23 +89,25 @@ export function QuizDialog({
   const [tab, setTab] = useState(0)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
-  const [passScore, setPassScore] = useState(80)
+  // 數字欄以字串保存：存成 number 時清空會變成 0，「沒填」與「填 0」分不出來（#767 ⑤）
+  const [passScore, setPassScore] = useState("80")
   const [timeLimit, setTimeLimit] = useState("")
-  const [maxRetry, setMaxRetry] = useState(3)
+  const [maxRetry, setMaxRetry] = useState("3")
   const [loadedId, setLoadedId] = useState<number | null>(null)
   /** 目前展開編輯的題目 id；`"new"` 表示新增中；`null` 表示沒有展開任何題目。 */
   const [editing, setEditing] = useState<number | "new" | null>(null)
   /** 送出前的驗證結果——逐欄標記，讓使用者知道要補哪一格而非「有東西不對」。 */
-  const [nameError, setNameError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   // render 期間衍生 state——載入新測驗時把表單重設為它的值（不放 useEffect）
   if (quiz && loadedId !== quiz.quiz_id) {
     setLoadedId(quiz.quiz_id)
     setName(quiz.quiz_name)
     setDescription(quiz.description ?? "")
-    setPassScore(quiz.pass_score)
+    setPassScore(String(quiz.pass_score))
     setTimeLimit(quiz.time_limit_min === null ? "" : String(quiz.time_limit_min))
-    setMaxRetry(quiz.max_retry)
+    setMaxRetry(String(quiz.max_retry))
+    setErrors({})
     setEditing(null)
   }
   if (!open && loadedId !== null) setLoadedId(null)
@@ -119,25 +123,40 @@ export function QuizDialog({
     (quiz !== null &&
     (name !== quiz.quiz_name ||
       description !== (quiz.description ?? "") ||
-      passScore !== quiz.pass_score ||
+      passScore !== String(quiz.pass_score) ||
       timeLimit !== (quiz.time_limit_min === null ? "" : String(quiz.time_limit_min)) ||
-      maxRetry !== quiz.max_retry))
+      maxRetry !== String(quiz.max_retry)))
+
+  /** 空字串轉 NaN 而非 0——交給 schema 回「請輸入…」，不要靜默變成 0 分或不准重考。 */
+  const toNumber = (value: string) => (value.trim() === "" ? Number.NaN : Number(value))
 
   const handleSaveSettings = () => {
-    if (!name.trim()) {
-      setNameError("請輸入測驗名稱")
+    const result = QuizFormSchema.safeParse({
+      quiz_name: name,
+      description,
+      pass_score: toNumber(passScore),
+      // 留空 = 不限時（後端之兩態語意：null 或 >= 1，0 不是有效值）
+      time_limit_min: timeLimit.trim() === "" ? null : Number(timeLimit),
+      max_retry: toNumber(maxRetry),
+    })
+    if (!result.success) {
+      setErrors(getFieldErrors(result.error))
       setTab(0) // 從題庫分頁按儲存時，把使用者帶回出問題的那一格
       return
     }
-    setNameError(null)
+    setErrors({})
     onSaveSettings({
       quiz_name: name,
       description: description.trim() || null,
-      pass_score: passScore,
-      // 留空 = 不限時（後端之兩態語意：null 或 >= 1，0 不是有效值）
-      time_limit_min: timeLimit.trim() === "" ? null : Number(timeLimit),
-      max_retry: maxRetry,
+      pass_score: result.data.pass_score,
+      time_limit_min: result.data.time_limit_min,
+      max_retry: result.data.max_retry,
     })
+  }
+
+  /** 邊打邊清掉該欄錯誤——訊息留著不動會讓人以為改了還是不對。 */
+  const clearError = (field: string) => {
+    if (field in errors) setErrors(Object.fromEntries(Object.entries(errors).filter(([key]) => key !== field)))
   }
 
   const handleSaveQuestion = (values: QuestionFormValues) => {
@@ -207,13 +226,12 @@ export function QuizDialog({
                   fullWidth
                   value={name}
                   disabled={readOnly}
-                  error={Boolean(nameError)}
-                  helperText={nameError}
+                  error={Boolean(errors.quiz_name)}
+                  helperText={errors.quiz_name}
                   slotProps={{ htmlInput: { maxLength: QUIZ_NAME_MAX_LEN } }}
                   onChange={(e) => {
                     setName(e.target.value)
-                    // 邊打邊清掉錯誤——訊息留著不動會讓人以為改了還是不對
-                    if (nameError) setNameError(null)
+                    clearError("quiz_name")
                   }}
                 />
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -224,11 +242,16 @@ export function QuizDialog({
                     type="number"
                     value={passScore}
                     disabled={readOnly}
+                    error={Boolean(errors.pass_score)}
+                    helperText={errors.pass_score}
                     slotProps={{
                       htmlInput: { min: 0, max: 100 },
                       input: { endAdornment: <InputAdornment position="end">分</InputAdornment> },
                     }}
-                    onChange={(e) => setPassScore(Number(e.target.value))}
+                    onChange={(e) => {
+                      setPassScore(e.target.value)
+                      clearError("pass_score")
+                    }}
                     sx={{ flex: 1 }}
                   />
                   <TextField
@@ -237,12 +260,16 @@ export function QuizDialog({
                     type="number"
                     value={timeLimit}
                     disabled={readOnly}
-                    helperText="留空 = 不限時"
+                    error={Boolean(errors.time_limit_min)}
+                    helperText={errors.time_limit_min ?? "留空 = 不限時"}
                     slotProps={{
                       htmlInput: { min: 1 },
                       input: { endAdornment: <InputAdornment position="end">分鐘</InputAdornment> },
                     }}
-                    onChange={(e) => setTimeLimit(e.target.value)}
+                    onChange={(e) => {
+                      setTimeLimit(e.target.value)
+                      clearError("time_limit_min")
+                    }}
                     sx={{ flex: 1 }}
                   />
                   <TextField
@@ -252,9 +279,13 @@ export function QuizDialog({
                     type="number"
                     value={maxRetry}
                     disabled={readOnly}
-                    helperText="0 = 不允許重考"
+                    error={Boolean(errors.max_retry)}
+                    helperText={errors.max_retry ?? "0 = 不允許重考"}
                     slotProps={{ htmlInput: { min: 0, max: 999 } }}
-                    onChange={(e) => setMaxRetry(Number(e.target.value))}
+                    onChange={(e) => {
+                      setMaxRetry(e.target.value)
+                      clearError("max_retry")
+                    }}
                     sx={{ flex: 1 }}
                   />
                 </Stack>

@@ -223,3 +223,33 @@ describe("測驗編輯視窗", () => {
     expect(screen.queryByRole("button", { name: /編輯第/ })).not.toBeInTheDocument()
   })
 })
+
+describe("測驗設定的範圍檢查（#767 ⑤）", () => {
+  // 原本只檢查名稱，其餘交給後端——超出範圍時畫面只看得到「以下欄位不符規定：max_retry、pass_score」
+  async function saveWith(label: RegExp, value: string) {
+    const user = userEvent.setup()
+    const handlers = renderDialog()
+    const field = await screen.findByLabelText(label)
+    await user.clear(field)
+    if (value !== "") await user.type(field, value)
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+    return handlers
+  }
+
+  it.each([
+    [/及格分數/, "2000", "及格分數須介於 0 至 100"],
+    [/及格分數/, "", "請輸入及格分數"],
+    [/重考次數上限/, "1000", "重考次數須介於 0 至 999"],
+    [/重考次數上限/, "", "請輸入重考次數上限"],
+    [/作答時間限制/, "0", "時間限制須至少 1 分鐘；留空表示不限時"],
+  ])("%s 填「%s」→ 欄位下顯示「%s」且不送出", async (label, value, message) => {
+    const { onSaveSettings } = await saveWith(label, value)
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    expect(onSaveSettings).not.toHaveBeenCalled()
+  })
+
+  it("範圍內的值照常送出（正向錨點：上面的「不送出」不是因為按鈕壞了）", async () => {
+    const { onSaveSettings } = await saveWith(/及格分數/, "100")
+    expect(onSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ pass_score: 100, max_retry: 3 }))
+  })
+})
