@@ -2079,3 +2079,33 @@ class TestSurveyFreeze:
         await _apply(db, cid, uid)
 
         assert (await _live_chapters(db, cid))[0].chapter_name == "改過的章名"
+
+
+class TestDiscardUnkeptRateLimit:
+    """#768（2026-10-20 使用者裁示）：進編輯頁丟殘留的端點不與發布檢核共用限流桶。
+
+    使用者手測：已關閉課程按「保留編輯」後再進入，跳出「可能有上次未更新的編輯殘留」。
+    那支端點掛在 `_status_rate_limit`（每人每分鐘 20 次，與 publish-check / publish /
+    close / reopen / content/apply 共用），手測一分鐘內多次操作就把桶吃滿、回 429，前端
+    把任何失敗都講成「殘留沒丟掉」。它只是刪暫存列，不跑檢核，沒有理由吃那個桶。
+    """
+
+    async def test_發布檢核的額度用完後仍可丟殘留(self, client, db) -> None:
+        from app.et.course import router as course_router
+
+        uid = await _user(db, "ZT_RL1")
+        cid = await _full_course(client, db, uid)
+        await db.commit()
+        try:
+            # 把狀態轉換那個桶吃滿——正向錨點：確認真的滿了，否則下面的 204 不能證明什麼
+            for _ in range(course_router._STATUS_RATE_MAX):
+                await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+            full = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+            assert full.status_code == 429, full.text
+
+            r = await client.delete(f"{_COURSES}/{cid}/content/stage/unkept", headers=_bearer(uid))
+
+            assert r.status_code == 204, r.text
+        finally:
+            course_router._status_limiter._hits.clear()
+            course_router._status_ip_limiter._hits.clear()

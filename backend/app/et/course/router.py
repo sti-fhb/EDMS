@@ -115,6 +115,33 @@ _chapter_rate_limit: Final = [
     Depends(rate_limit_by_ip(_chapter_ip_limiter, _CHAPTER_SCOPE)),
 ]
 
+#: 進編輯頁丟棄未保留暫存（`content/stage/unkept`）之上限（每分鐘）。**與 `_STATUS_RATE_MAX` 分桶**（#768）。
+#:
+#: 原本掛在 `_status_rate_limit`，與發布檢核、狀態轉換共用每人每分鐘 20 次。但它**每次進
+#: 編輯頁都打一次**，且只刪暫存列、不跑檢核——共用的結果是手測一分鐘內關閉、保留、再進入
+#: 就把桶吃滿，前端把 429 講成「可能有上次未更新的編輯殘留」（2026-10-20 使用者回報）。
+#:
+#: 仍要設上限：每次呼叫會取課程行鎖（`lock_course`）。門檻取 60：一分鐘進出同一個編輯頁
+#: 60 次已不是人的操作。
+_STAGE_DISCARD_RATE_MAX: Final = 60
+
+#: 同一 IP 每分鐘之合計上限，比照其他分桶的 1 : 10。
+_STAGE_DISCARD_IP_RATE_MAX: Final = 600
+
+_stage_discard_limiter = SlidingWindowRateLimiter(
+    max_requests=_STAGE_DISCARD_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS
+)
+_stage_discard_ip_limiter = SlidingWindowRateLimiter(
+    max_requests=_STAGE_DISCARD_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS
+)
+
+_STAGE_DISCARD_SCOPE: Final = "et-course-stage-discard"
+
+_stage_discard_rate_limit: Final = [
+    Depends(rate_limit_by_et_user(_stage_discard_limiter, _STAGE_DISCARD_SCOPE)),
+    Depends(rate_limit_by_ip(_stage_discard_ip_limiter, _STAGE_DISCARD_SCOPE)),
+]
+
 router = APIRouter(prefix="/api/et", tags=["et-course"], dependencies=[Depends(get_et_context)])
 _service = EtCourseService()
 _publish_service = EtPublishService()
@@ -535,7 +562,7 @@ async def keep_course_edits(
 @router.delete(
     "/courses/{course_id}/content/stage/unkept",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_status_rate_limit],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_stage_discard_rate_limit],
 )
 async def discard_unkept_stage(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],

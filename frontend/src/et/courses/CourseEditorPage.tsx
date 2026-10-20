@@ -354,7 +354,11 @@ export function EtCourseEditorPage() {
   const [unkeptDiscarded, setUnkeptDiscarded] = useState(false)
   //: 新增模式沒有 `courseId`、也沒有暫存區可丟——**推導**而非在 effect 裡同步 setState
   //: （那會觸發連鎖 render，ESLint 也擋）。
-  const unkeptCleared = courseId === undefined || unkeptDiscarded
+  //: 課程是否已載入——丟棄要等知道擁有權才打（見下方 effect）。課程一旦載入，重抓期間仍保留
+  //: 舊資料，這個值只會由 false 轉成 true 一次。
+  const courseLoaded = course !== undefined
+  //: 非擁有者不打丟棄（見下方 effect），同樣以推導放行。
+  const unkeptCleared = courseId === undefined || unkeptDiscarded || course?.is_owner === false
   if (course && !courseFetching && unkeptCleared && loadedCourseId !== course.course_id) {
     setLoadedCourseId(course.course_id)
     setForm({
@@ -936,6 +940,12 @@ export function EtCourseEditorPage() {
   useEffect(() => {
     // 新增模式不經這裡（`unkeptCleared` 已由推導放行，見其宣告）。
     if (courseId === undefined) return
+    // 🔴 **只對擁有者打**（#768，2026-10-20 使用者裁示）。非擁有者（他人課程的檢視者、
+    // 管理者）必回 403，而下面的失敗分支會對一個根本不能按「更新」的人說「可能有殘留」。
+    // 因此要等課程載入、知道是不是擁有者才打。⚠️ 判「明確不是擁有者」才跳過，不是
+    // 「`is_owner === true` 才打」：後者在欄位缺漏時會永遠不打，而表單要等丟棄落定才預帶，
+    // 整頁就卡在空白。
+    if (!courseLoaded || course?.is_owner === false) return
     void coursesApi.discardUnkeptStage(courseId).then(
       () => {
         invalidate()
@@ -954,15 +964,17 @@ export function EtCourseEditorPage() {
         setUnkeptDiscarded(true)
       },
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟 courseId 走；帶上 invalidate 會每次 render 重跑
-  }, [courseId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟 courseId 與擁有權走；帶上 invalidate 會每次 render 重跑
+  }, [courseId, courseLoaded])
 
   const leaveBlocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       hasPendingChanges && !bypassGuard.current && currentLocation.pathname !== nextLocation.pathname,
   )
   useEffect(() => {
-    if (leaveBlocker.state !== "blocked") return
+    // 等課程載入才開：文案依 `hasKeptEdits` 分流，載入前讀不到旗標，會先開出「都會放棄」
+    // 那一版。真實操作中載入前不會有未更新的編輯、攔截也不會成立，這裡只是不讓順序決定文案。
+    if (leaveBlocker.state !== "blocked" || !courseLoaded) return
     confirm({
       // 🔴 **文案於 #720 整段改寫**（2026-10-19 裁示）。
       //
@@ -991,7 +1003,7 @@ export function EtCourseEditorPage() {
       onOk: () => leaveBlocker.proceed(),
       onCancel: () => leaveBlocker.reset(),
     })
-  }, [leaveBlocker, confirm, reopening, hasKeptEdits])
+  }, [leaveBlocker, confirm, reopening, hasKeptEdits, courseLoaded])
 
   // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
 
