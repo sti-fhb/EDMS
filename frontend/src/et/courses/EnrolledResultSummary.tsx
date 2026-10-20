@@ -19,21 +19,41 @@ export interface EnrolledResultSummaryProps {
   action: string
   invitedCount: number
   invitationCode: string | null
+  /**
+   * 帶入 0 人時要說的話與語氣。
+   *
+   * 🔴 **這一句不能寫死在元件裡**（#763）：發布與重開課的 0 **意思不同**。
+   *
+   * | 呼叫端 | `invitedCount === 0` 的意思 |
+   * |---|---|
+   * | 發布 | 真的沒人符合受訓對象——**設定問題**，要提醒教師去查 |
+   * | 重開課 | 通常是符合的人**早就在課程裡了**（只回傳本次新加入者）|
+   *
+   * #762 抽出本元件的理由是「兩份各自寫會漂移」，而那對版面成立、對這一句不成立。
+   * ⛔ 不要為了這個差異把元件拆回兩份——拆了之後版面才真的會漂移。
+   */
+  emptyMessage: string
+  /** 0 人時的語氣：`"warning"`（發布，要去查）或 `"info"`（重開課，只是沒有新的人）。 */
+  emptySeverity: "warning" | "info"
 }
 
-export function EnrolledResultSummary({ action, invitedCount, invitationCode }: EnrolledResultSummaryProps) {
+export function EnrolledResultSummary({
+  action,
+  invitedCount,
+  invitationCode,
+  emptyMessage,
+  emptySeverity,
+}: EnrolledResultSummaryProps) {
   return (
     <Stack spacing={2}>
-      {/* 帶入人數要據實顯示（#247）：0 通常代表課程掛的受訓對象沒有任何人符合，
-          那是設定問題——等學員反映「看不到課」才發現就太晚了。 */}
+      {/* 帶入人數要據實顯示（#247）：0 不隱藏、不含糊帶過。但 0 的**意思**由呼叫端說
+          （見 `emptyMessage`）——那是 #763 修掉的事。 */}
       {invitedCount > 0 ? (
         <Alert severity="success">
           課程已{action}，已依受訓對象帶入 {invitedCount} 位學員。
         </Alert>
       ) : (
-        <Alert severity="warning">
-          課程已{action}，但沒有任何學員符合本課程的受訓對象。請確認受訓對象設定，或將下方邀請碼提供給學員。
-        </Alert>
+        <Alert severity={emptySeverity}>{emptyMessage}</Alert>
       )}
       <Box>
         <Typography variant="caption" color="text.secondary">

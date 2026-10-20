@@ -400,6 +400,13 @@ export function EtCourseEditorPage() {
    */
   const hasPendingChanges = course?.has_pending_changes ?? false
   /**
+   * 這份暫存已被按過「保留編輯」（#763）——後端算的，前端不自己推導。
+   *
+   * 🔴 它**只影響離開提示的文案**，不影響任何按鈕的顯示或啟用：已保留與未保留的
+   * 課程做得到的事完全一樣，差別只在「離開之後會怎樣」。
+   */
+  const hasKeptEdits = course?.has_kept_edits ?? false
+  /**
    * **視同關閉**——「已關閉」或「已發布但閱課期間已過」。後端算的（`course.is_closed`）。
    *
    * 🔴 底部動作列靠它分流：視同關閉是「取消｜保留編輯｜更新並重開課」，運作中的已發布
@@ -918,16 +925,25 @@ export function EtCourseEditorPage() {
       // ℹ️ 暫存列不在離開當下刪，而是在**下次進編輯頁時**由 `discardUnkeptStage` 丟掉
       // （見 `useEffect`）。對教師而言兩者等價——他再也看不到那份編輯；而進頁丟棄同時
       // 涵蓋關分頁 / 當機 / 斷線，那些是攔不到的。
-      title: "離開將放棄本次的編輯",
-      content: reopening
-        ? "離開後，自上次更新以來的所有編輯都會放棄。若想留著下次再繼續，請先按「保留編輯」；要讓學員看到，請按「更新並重開課」。"
-        : "離開後，自上次更新以來的所有編輯都會放棄，課程維持學員目前看到的版本。要讓學員看到這些編輯，請先按「更新」。",
-      okText: "放棄並離開",
+      //
+      // 🔴 **已按過「保留編輯」的暫存不適用上面那句**（#763）。旗標一旦設上就留到
+      // 「更新」或「取消」，`discardUnkeptStage` 對它是 no-op——所以對那門課說
+      // 「離開後都會放棄」同樣是假的，只是假在另一個分支。
+      //
+      // ⚠️ 2026-10-20 裁示採**文案分流**而非「後續編輯清掉旗標」：後者會讓教師明明
+      // 按過「保留編輯」，卻在下次關分頁時失去它。
+      title: hasKeptEdits ? "離開後編輯仍會保留" : "離開將放棄本次的編輯",
+      content: hasKeptEdits
+        ? "你先前按過「保留編輯」，這些編輯會留到下次進來。要讓學員看到，請按「更新並重開課」；要整份丟掉，請按「取消」。"
+        : reopening
+          ? "離開後，自上次更新以來的所有編輯都會放棄。若想留著下次再繼續，請先按「保留編輯」；要讓學員看到，請按「更新並重開課」。"
+          : "離開後，自上次更新以來的所有編輯都會放棄，課程維持學員目前看到的版本。要讓學員看到這些編輯，請先按「更新」。",
+      okText: hasKeptEdits ? "離開" : "放棄並離開",
       cancelText: "繼續編輯",
       onOk: () => leaveBlocker.proceed(),
       onCancel: () => leaveBlocker.reset(),
     })
-  }, [leaveBlocker, confirm, reopening])
+  }, [leaveBlocker, confirm, reopening, hasKeptEdits])
 
   // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
 
@@ -1685,16 +1701,30 @@ export function EtCourseEditorPage() {
               `status` 回 PUBLISHED，按鈕自然恢復，不需要額外的「恢復」邏輯。
               非擁有者（檢視模式）一律不顯示。
             */}
-            {status === "PUBLISHED" && !readOnly && course !== undefined && (
+            {/*
+              🔴 **`!reopening` 不是「不在某個模式」，是「尚未視同關閉」**（它由
+              `course.is_closed` 推導，見其宣告）。
+
+              少了它，期間已過的課程會顯示這顆鈕——而關閉期間不可邀請學員
+              （`FR-ET-US11-07`），按下去會被後端以 `ET_INVITE_002 / 004` 擋掉。
+              看得到、按了失敗是最糟的一種 UX（#763）。
+
+              ⛔ 不可改判 `status === "CLOSED"`：期間已過的課程狀態仍是 `PUBLISHED`
+              （ET-16 未實作，此為常態），判準必須與底部動作列**同一個來源**。
+            */}
+            {status === "PUBLISHED" && !reopening && !readOnly && course !== undefined && (
               <Button variant="contained" size="small" startIcon={<PersonAddIcon />} onClick={() => setInviteOpen(true)}>
                 邀請學員
               </Button>
             )}
             {/*
-              關閉 / 再開課（US11 AC 1 / AC 8、#288）。兩者互斥且各只在對應狀態出現——
-              草稿沒有學員也沒有邀請碼，關閉它沒有語意（要移除草稿走既有的刪除）。
+              關閉課程（US11 AC 1、#288）。草稿沒有學員也沒有邀請碼，關閉它沒有語意
+              （要移除草稿走既有的刪除）。
+
+              ⚠️ 同樣帶 `!reopening`（#763）：對一門**已經視同關閉**的課程再按「關閉」
+              語意空洞——它早就關了，教師要的是「更新並重開課」。
             */}
-            {status === "PUBLISHED" && !readOnly && course !== undefined && (
+            {status === "PUBLISHED" && !reopening && !readOnly && course !== undefined && (
               <Button variant="outlined" size="small" color="warning" startIcon={<LockIcon />} onClick={requestClose}>
                 關閉課程
               </Button>
@@ -1768,6 +1798,11 @@ export function EtCourseEditorPage() {
               action="重新開課"
               invitedCount={reopenResult.invited_count}
               invitationCode={reopenResult.invitation_code}
+              // 🔴 重開課的 0 **不是**設定問題（#763）：帶入只回傳「本次新加入者」，
+              // 而符合受訓對象的人多半在關閉前就已經在課程裡了。照抄發布的說法會讓
+              // 教師去查一個不存在的問題。
+              emptySeverity="info"
+              emptyMessage="課程已重新開課。本次沒有新的學員被自動帶入——符合受訓對象的人多半已在課程中。原有學員可直接繼續學習。"
             />
           </DialogContent>
           <DialogActions>
@@ -2319,10 +2354,19 @@ export function EtCourseEditorPage() {
           variant="outlined"
           sx={{ position: "sticky", bottom: 0, mt: 2, p: 1.5, zIndex: 1 }}
         >
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2}>
             {/* 有尚未更新的變更時改用警示色（#631）：這句不再只是說明，而是一個待辦。
-                它與「更新」鈕同處常駐於頁面底部的這一列，教師捲到哪裡都看得到。 */}
-            <Typography variant="caption" color={pendingHint ? "warning.main" : "text.secondary"}>
+                它與「更新」鈕同處常駐於頁面底部的這一列，教師捲到哪裡都看得到。
+
+                ⚠️ `minWidth: 0` 是讓**說明文字**成為被壓縮的那一邊（#763）。Flex 項目
+                的預設 `min-width: auto` 會讓它不肯縮到內容寬度以下，於是壓力轉嫁到右邊
+                的按鈕列——1500px 寬實測「保留編輯」被折成「保留編／輯」。
+                ⛔ 不要改用固定寬度：說明文字的長度隨課程狀態而異。 */}
+            <Typography
+              variant="caption"
+              color={pendingHint ? "warning.main" : "text.secondary"}
+              sx={{ minWidth: 0 }}
+            >
               {status === "DRAFT"
                 ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
                 : reopening
@@ -2349,7 +2393,10 @@ export function EtCourseEditorPage() {
 
               ⛔ 不要為了「總該有個儲存吧」而把它加回來。
             */}
-            <Stack direction="row" spacing={1}>
+            {/* ⚠️ `flexShrink: 0` ＋ `whiteSpace: nowrap`：按鈕列**不參與壓縮**（#763）。
+                少了它，視窗變窄時 MUI 會把按鈕內的文字折行，而「保留編／輯」這種斷法
+                讀起來像另一個功能。配合左側的 `minWidth: 0`，壓縮一律落在說明文字上。 */}
+            <Stack direction="row" spacing={1} sx={{ flexShrink: 0, whiteSpace: "nowrap" }}>
               {/*
                 刪除草稿（#457）。後端與 `coursesApi.remove` 早就有了，缺的一直是這顆。
 

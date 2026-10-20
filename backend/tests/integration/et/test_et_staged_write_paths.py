@@ -40,7 +40,14 @@ from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
-from app.et.constants import ITEM_MATERIAL, ITEM_QUIZ, QUESTION_SINGLE, ROLE_TEACHER, SURVEY_QUESTION_SINGLE
+from app.et.constants import (
+    COURSE_CLOSED,
+    ITEM_MATERIAL,
+    ITEM_QUIZ,
+    QUESTION_SINGLE,
+    ROLE_TEACHER,
+    SURVEY_QUESTION_SINGLE,
+)
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.course.stage_live_tree import load_live_tree
 from app.et.course.stage_repository import EtCourseStageRepository
@@ -950,6 +957,56 @@ async def _stage_basic_edit(client, db, uid: str, ids: dict, **over) -> None:
     resp = await client.put(f"{_COURSES}/{ids['course_id']}", json=body, headers=_bearer(uid))
     assert resp.status_code == 204, resp.text
     await db.flush()
+
+
+class TestKeptEditsFlagInDetail:
+    """詳細頁要回報「這份暫存已被保留」（#763 ②）。
+
+    🔴 前端靠它分流**離開提示的文案**。少了它那句話在已保留的分支是假的：
+    `discard_unkept` 對已保留的樹是 no-op，而提示寫著「離開後…都會放棄」。
+    """
+
+    async def test_按過保留編輯之後為真(self, client, db) -> None:
+        uid = await _user(db, "ZT_KE1")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await db.execute(update(EtCourse).where(EtCourse.course_id == ids["course_id"]).values(status=COURSE_CLOSED))
+        await db.flush()
+        await _stage_basic_edit(client, db, uid, ids, course_name="關閉後改的課名")
+        assert (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()[
+            "has_kept_edits"
+        ] is False, "還沒按過保留編輯"
+
+        kept = await client.post(f"{_COURSES}/{ids['course_id']}/content/keep", headers=_bearer(uid))
+        assert kept.status_code == 204, kept.text
+
+        detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()
+        assert detail["has_kept_edits"] is True
+
+    async def test_沒有暫存區時為假(self, client, db) -> None:
+        """正向錨點：少了它，把欄位寫死成 `True` 也會讓上一條通過。"""
+        uid = await _user(db, "ZT_KE2")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+
+        detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(uid))).json()
+
+        assert detail["has_kept_edits"] is False
+
+    async def test_他人看不到擁有者的保留狀態(self, client, db) -> None:
+        """比照 `has_pending_changes`：暫存區的任何狀態都只對擁有者有意義。"""
+        uid = await _user(db, "ZT_KE3")
+        other = await _user(db, "ZT_KE4")
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await db.execute(update(EtCourse).where(EtCourse.course_id == ids["course_id"]).values(status=COURSE_CLOSED))
+        await db.flush()
+        await _stage_basic_edit(client, db, uid, ids, course_name="關閉後改的課名")
+        await client.post(f"{_COURSES}/{ids['course_id']}/content/keep", headers=_bearer(uid))
+
+        detail = (await client.get(f"{_COURSES}/{ids['course_id']}", headers=_bearer(other))).json()
+
+        assert detail["has_kept_edits"] is False
 
 
 class TestStagedRead:

@@ -73,6 +73,7 @@ from app.et.course.stage_rules import (
     ENTITY_MATERIAL,
     ENTITY_QUESTION,
     ENTITY_QUIZ,
+    KEPT_PAYLOAD_KEY,
 )
 from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
 from app.et.enrollment.repository import EtEnrollmentRepository
@@ -110,6 +111,10 @@ class _StagedBasic:
     require_approval: bool
     version: int
     audiences: list[AudiencePair]
+    #: 教師按過「保留編輯」（#763）。⚠️ 這**不是**基本資料的一部分，而是整個編輯工作
+    #: 階段的去留旗標；放在這裡只是因為它與基本資料同住在課程節點的 payload 上，
+    #: 一次讀取就都拿到了。
+    kept: bool
 
 
 class EtCourseService:
@@ -402,6 +407,10 @@ class EtCourseService:
             # 暫存區有東西 ＝ 有尚未按下「更新」的編輯。`staged_chapters is not None`
             # 正是那個條件（擁有者 + 已發布 + 有暫存），不另外再查一次。
             has_pending_changes=staged_chapters is not None,
+            # 「保留編輯」的旗標寄在課程節點的 payload 上（#720 的 `KEPT_PAYLOAD_KEY`）。
+            # ⚠️ 沿用上面已經取到的 `basic`，不另外再查一次——兩次查詢會在「剛按完保留
+            # 編輯」那一刻分岔，而那正是這個欄位唯一要分辨的時點（#763）。
+            has_kept_edits=bool(basic and basic.kept),
             chapters=staged_chapters
             if staged_chapters is not None
             else [
@@ -569,6 +578,7 @@ class EtCourseService:
             require_approval=node.payload["require_approval"],
             version=node.version,
             audiences=[AudiencePair(**p._asdict()) for p in pairs],
+            kept=bool(node.payload.get(KEPT_PAYLOAD_KEY)),
         )
 
     async def _stage_basic(

@@ -74,6 +74,10 @@ export function PublishDialog({
             action="發布"
             invitedCount={result.invited_count}
             invitationCode={result.invitation_code}
+            // 發布的 0 ＝ 真的沒人符合受訓對象，是**設定問題**：等學員反映「看不到課」
+            // 才發現就太晚了，所以用 warning 並要教師去查（#247）。
+            emptySeverity="warning"
+            emptyMessage="課程已發布，但沒有任何學員符合本課程的受訓對象。請確認受訓對象設定，或將下方邀請碼提供給學員。"
           />
         ) : checking ? (
           <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 2 }}>
