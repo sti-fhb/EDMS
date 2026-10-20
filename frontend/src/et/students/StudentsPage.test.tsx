@@ -316,7 +316,8 @@ describe("ET02 學員學習狀況追蹤", () => {
     await selectCourse(user)
 
     expect(await screen.findByText(/目前為/)).toBeInTheDocument()
-    expect(screen.getByText(/再開課/)).toBeInTheDocument()
+    // #768 第 2 項：按鈕自 #720 起叫「更新並重開課」，不再是「再開課」
+    expect(screen.getByText(/更新並重開課/)).toBeInTheDocument()
     const removeButtons = await screen.findAllByRole("button", { name: /移除/ })
     expect(removeButtons[0]).toBeDisabled()
   })
