@@ -101,7 +101,11 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
     )
   }
   if (error) {
-    return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
+    const api = toApiError(error)
+    // 測驗項目被教師刪除：與教材同一句（ContentPane 的 ET-MSG-ET06-004），不顯示後端的
+    // 「查無此測驗」——同一件事兩種講法，學員會以為是系統錯誤（#768 第 5 項）
+    if (api.errorCode === "ET_ATTEMPT_001") return <Alert severity="info">此內容已刪除</Alert>
+    return <Alert severity="error">{api.errorMessage}</Alert>
   }
 
   const hasLeftover = data.in_progress_attempt_id !== null
