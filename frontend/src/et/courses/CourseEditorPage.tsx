@@ -221,6 +221,8 @@ export function EtCourseEditorPage() {
    * 否則 React 會呼叫它、把回傳值存進 state。
    */
   const [pendingRetestAction, setPendingRetestAction] = useState<((requireRetest: boolean) => void) | null>(null)
+  /** 本次詢問的「僅儲存」是否會取消待生效的重測要求——只有測驗設定那一支會（#767 A1）。 */
+  const [retestCancelsPending, setRetestCancelsPending] = useState(false)
   /**
    * 已選好型別、等待命名的新項目（#414）。
    *
@@ -784,6 +786,50 @@ export function EtCourseEditorPage() {
     // #720：基本資料也由這顆鈕送出，所以要先驗（理由見 `validateBeforeSubmit`）。
     // ⛔ 不要移到 `onOk` 裡：教師會先看到一個「確認更新」的視窗、按下去才發現表單有錯。
     if (!validateBeforeSubmit()) return
+    applyCheckMut.mutate()
+  }
+
+  /**
+   * 「更新」的預檢（#767 ⑧）：有缺漏就直接列出，**不先跳確認視窗**。
+   *
+   * 原本是先確認、送出後才被 422 擋——教師要按兩次才知道問卷少了題目。預檢讀的是暫存樹
+   * （後端 `_evaluate_for_check`），所以要先把基本資料送進暫存，與 `applyMut` 同一個順序。
+   *
+   * ⚠️ 送出時後端會在鎖內再評估一次，那一次才算數；這裡只是讓缺漏提早出現。預檢本身
+   * 失敗（網路、限流）時不擋——照舊跳確認視窗，由送出那一次把關。
+   */
+  const applyCheckMut = useMutation({
+    mutationFn: async () => {
+      // 基本資料送暫存失敗（版本衝突等）照一般錯誤處理——往外拋到 `onError`
+      await stageBasic()
+      // 🔴 送暫存會讓暫存節點的版本 +1，而確認後的 `applyMut` 會**再送一次**（按取消後再按
+      // 更新也是）。不重抓的話第二次拿的是舊版本，恆 409（#767 code review CRITICAL）。
+      // ⚠️ 必須 await 到重抓完成，確認視窗開出來之前 `course.version` 就要是新的。
+      await qc.refetchQueries({ queryKey: QUERY_KEYS.etCourses.detail(courseId as number) })
+      try {
+        return await publishApi.check(courseId as number)
+      } catch (err) {
+        // 只有「暫時問不到」才不擋（無回應、429）：回 `null` 照舊跳確認視窗，由送出那一次
+        // 把關。其他錯誤（權限、查無課程）送出也一樣會失敗，照一般錯誤處理。
+        const { status } = toApiError(err)
+        if (status === 0 || status === 429) return null
+        throw err
+      }
+    },
+    onSuccess: (result) => {
+      if (result !== null) {
+        seedLiveCheck(result.blockers)
+        if (result.blockers.length > 0) {
+          setApplyBlockers(result.blockers)
+          return
+        }
+      }
+      confirmApply()
+    },
+    onError: handleError,
+  })
+
+  const confirmApply = () => {
     confirm({
       title: "更新課程內容",
       content:
@@ -958,11 +1004,24 @@ export function EtCourseEditorPage() {
    * 兩個視窗會疊在一起。
    */
   const requestClose = () => {
+    // 關閉不碰暫存區，但關閉後的課程沒有「保留編輯」標記，下次進頁就被 `discardUnkeptStage`
+    // 丟掉——教師按下去的當下必須知道（#767 ④）
+    const closeEffects =
+      "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
+      "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。"
     confirm({
       title: "關閉課程",
-      content:
-        "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
-        "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。",
+      content: hasPendingChanges ? (
+        <>
+          <strong>⚠️ 您有尚未按「更新」的編輯，關閉後這些編輯不會保留。</strong>
+          若要保留，請先關閉此視窗，再按頁面上的「更新」。
+          <br />
+          <br />
+          {closeEffects}
+        </>
+      ) : (
+        closeEffects
+      ),
       // 「確認關閉」而非「關閉課程」：與標題列那顆同名會讓畫面上同時存在兩個同名
       // 按鈕（無障礙名稱重複）。措辭亦與「確認發布」一致。
       okText: "確認關閉",
@@ -1159,6 +1218,7 @@ export function EtCourseEditorPage() {
    */
   const actionPending =
     applyMut.isPending ||
+    applyCheckMut.isPending ||
     keepMut.isPending ||
     reopenMut.isPending ||
     reopenCheckMut.isPending ||
@@ -1590,6 +1650,9 @@ export function EtCourseEditorPage() {
     await runItemAction(
       () => materialsApi.uploadVideo(openMaterialId, file),
       () => {
+        // 影片已落地，這個項目就不再是「尚未建立」——否則關閉時畫面無變更，會被當成空殼
+        // 連同影片一起刪掉（#767 ①）
+        setUnsavedNewItemId(null)
         invalidateMaterial()
         invalidate()
       },
@@ -1603,8 +1666,9 @@ export function EtCourseEditorPage() {
    *
    * 沒有人作答過（#709 前為「通過過」）就不問——那是新建測驗的常態，多一個對話框只是噪音。
    */
-  const askRetestThen = (run: (requireRetest: boolean) => void) => {
+  const askRetestThen = (run: (requireRetest: boolean) => void, cancelsPending = false) => {
     if ((quiz?.affected_count ?? 0) > 0) {
+      setRetestCancelsPending(cancelsPending)
       setPendingRetestAction(() => run)
       return
     }
@@ -1841,7 +1905,8 @@ export function EtCourseEditorPage() {
         請求**已經被擋下**，這是事後告知，不是再問一次要不要送出。
 
         ⚠️ 傳 `applyBlockers`，**不是** `blockers` / `reopenBlockers`（見其宣告）。
-        `context="publish"` 是因為更新跑的就是發布那十項檢核，處置方式與發布相同。
+        `context="update"`：跑的是發布那十項檢核，但處置與再開課相同——已發布課程的問卷
+        只能停用、不能刪（#767 ⑧，原本借用 "publish" 而導引教師去刪一份刪不掉的問卷）。
 
         🔴 **暫存區不會因為檢核未通過而清掉**：教師補好缺漏後再按一次「更新」即可，
         這次的編輯不必重做。
@@ -1852,7 +1917,7 @@ export function EtCourseEditorPage() {
           // `role="dialog"`，同名會讓「確認視窗沒有變成缺漏視窗」這類斷言查到錯的那個，
           // 且確認視窗的關閉動畫期間仍在 DOM 裡——測試會時綠時紅。
           title="更新未生效"
-          context="publish"
+          context="update"
           message="課程目前不符發布條件，本次更新未生效（編輯仍保留在暫存區）。請先補齊以下項目，再按一次「更新」。"
           blockers={applyBlockers}
           names={{ quiz: quizNames, chapter: chapterNames, itemChapter: itemChapterNames }}
@@ -2182,6 +2247,8 @@ export function EtCourseEditorPage() {
                 closeItemDialog()
               },
             ),
+            // 測驗設定是唯一會依本次選擇覆寫重測旗標的一支（#767 A1）
+            true,
           )
         }
         onSaveQuestion={(questionId: number | null, values: QuestionFormValues) =>
@@ -2192,7 +2259,11 @@ export function EtCourseEditorPage() {
               }
               const version = quiz?.questions.find((q) => q.question_id === questionId)?.version ?? 0
               return quizzesApi.updateQuestion(questionId, { ...values, version, require_retest: requireRetest })
-            }, invalidateQuiz),
+            }, () => {
+              // 同上傳影片：題目已逐題存檔，項目不再是空殼（#767 ①）
+              setUnsavedNewItemId(null)
+              invalidateQuiz()
+            }),
           )
         }
         onDeleteQuestion={handleDeleteQuestion}
@@ -2218,6 +2289,7 @@ export function EtCourseEditorPage() {
           // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
           staged={status !== "DRAFT"}
           retestPending={quiz?.require_retest_pending ?? false}
+          cancelsPending={retestCancelsPending}
           onCancel={() => setPendingRetestAction(null)}
           onDecide={(requireRetest) => {
             const run = pendingRetestAction
@@ -2261,6 +2333,15 @@ export function EtCourseEditorPage() {
                 }),
               ),
           })
+        }
+        onActivate={() =>
+          surveyMut.mutate(() =>
+            surveyApi.update(survey!.survey_id, {
+              survey_name: survey!.survey_name,
+              is_active: true,
+              version: survey!.version,
+            }),
+          )
         }
         onDelete={() =>
           confirm({

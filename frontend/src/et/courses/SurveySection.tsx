@@ -3,6 +3,7 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined"
 import PollOutlinedIcon from "@mui/icons-material/PollOutlined"
 import PauseCircleOutlineIcon from "@mui/icons-material/PauseCircleOutline"
+import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline"
 import Alert from "@mui/material/Alert"
 import Box from "@mui/material/Box"
 import Button from "@mui/material/Button"
@@ -31,6 +32,8 @@ interface SurveySectionProps {
   onCreate: () => void
   onOpen: () => void
   onDeactivate: () => void
+  /** 停用後改回啟用（#767 ⑥）——否則停用在畫面上不可復原，後端其實允許。 */
+  onActivate: () => void
   onDelete: () => void
   /** 發布／再開課缺漏（#558）：有值時問卷列標紅框並顯示此訊息。 */
   blocker?: string | null
@@ -84,6 +87,7 @@ export function SurveySection({
   onCreate,
   onOpen,
   onDeactivate,
+  onActivate,
   onDelete,
 }: SurveySectionProps) {
   const header = (
@@ -207,6 +211,18 @@ export function SurveySection({
               onClick={onDeactivate}
             >
               停用問卷
+            </Button>
+          )}
+          {/* 不限草稿：停用中的問卷不論課程狀態都要有路回來（#767 ⑥） */}
+          {!readOnly && !survey.is_active && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<PlayCircleOutlineIcon />}
+              disabled={saving}
+              onClick={onActivate}
+            >
+              啟用問卷
             </Button>
           )}
           {!readOnly && isDraftCourse && (

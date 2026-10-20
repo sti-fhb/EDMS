@@ -677,6 +677,81 @@ class TestApplyInsertAndUpdate:
         assert await db.scalar(select(EtOption).where(EtOption.question_id == new_q.question_id)) is not None
 
 
+class TestNewVideoRegressesCompletion:
+    """#767 ⑨（2026-10-20 使用者裁示）：既有教材新增影片，按「更新」時已完成該教材的學員**一起**退回未完成。
+
+    原本更新時不碰完成旗標，要等學員重新開啟那份教材才依新影片重新判定——同一門課，
+    有沒有回退取決於學員有沒有再點開它。
+    """
+
+    async def _setup(self, client, db, uid: str, student: str):
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        items = (await db.scalars(select(EtItem).join(EtChapter).where(EtChapter.course_id == cid))).all()
+        material_item = next(i for i in items if i.material_id is not None)
+        quiz_item = next(i for i in items if i.quiz_id is not None)
+        await _user(db, student)
+        now = utcnow()
+        for item in (material_item, quiz_item):
+            db.add(
+                EtProgress(
+                    user_id=student,
+                    course_id=cid,
+                    item_id=item.item_id,
+                    is_completed=True,
+                    created_user=student,
+                    created_date=now,
+                    deleted=0,
+                )
+            )
+        await db.flush()
+        await EtCourseStageRepository().seed_from_live(db, cid, _operator(uid))
+        return cid, material_item, quiz_item
+
+    async def _completed(self, db, student: str, item_id: int) -> bool:
+        return await db.scalar(
+            select(EtProgress.is_completed).where(EtProgress.user_id == student, EtProgress.item_id == item_id)
+        )
+
+    async def test_既有教材新增影片_更新時已完成者退回未完成(self, client, db) -> None:
+        uid, student = await _user(db, "ZT_V1"), "ZT_VS1"
+        cid, material_item, quiz_item = await self._setup(client, db, uid, student)
+        mat_node = next(
+            n
+            for n in await EtCourseStageRepository().load_tree(db, cid)
+            if n.entity_type == ENTITY_MATERIAL and n.source_id == material_item.material_id
+        )
+        await _stage_node(
+            db,
+            cid,
+            ENTITY_MATERIAL_VIDEO,
+            uid,
+            parent=mat_node.stage_id,
+            sort_order=2,
+            file_path="et/v/2.mp4",
+            file_name="2.mp4",
+            duration_sec=60,
+            file_size_bytes=2048,
+        )
+
+        await _apply(db, cid, uid)
+
+        assert await self._completed(db, student, material_item.item_id) is False
+        # 正向錨點：同一位學員的其他項目不受影響——不是整門課的完成旗標全被清掉
+        assert await self._completed(db, student, quiz_item.item_id) is True
+
+    async def test_沒有新增影片時_完成狀態不動(self, client, db) -> None:
+        """反向探針：少了它，「套用時一律清掉教材的完成旗標」也會讓上一條通過。"""
+        uid, student = await _user(db, "ZT_V2"), "ZT_VS2"
+        cid, material_item, _ = await self._setup(client, db, uid, student)
+        ch = next(n for n in await EtCourseStageRepository().load_tree(db, cid) if n.entity_type == ENTITY_CHAPTER)
+        await _set_payload(db, ch.stage_id, {"chapter_name": "改名後的第一章"})
+
+        await _apply(db, cid, uid)
+
+        assert await self._completed(db, student, material_item.item_id) is True
+
+
 class TestApplyOrdering:
     async def test_對調兩個章節的順序不撞唯一鍵(self, client, db) -> None:
         """🔴 部分唯一索引是**非 deferrable**、逐列即時檢核。
@@ -1492,6 +1567,47 @@ class TestUpdateEndpoint:
 
         assert check_codes == {"QUIZ_NO_QUESTION"}, "前置要真的弄壞了活表那側"
         assert {b["code"] for b in r.json()["blockers"]} == check_codes
+
+    async def test_預檢在有暫存時讀暫存樹(self, client, db) -> None:
+        """#767 ⑧：教師按「更新」時前端先預檢，有缺漏直接列出，不先跳確認視窗。
+
+        預檢原本只讀活表——已發布課程的編輯都在暫存區，活表是學員那一版，預檢永遠回
+        「沒有缺漏」，缺漏要到真正送出更新才被擋。本條讓**只有暫存那側**壞掉，活表維持
+        完整（與上一條相反）。
+        """
+        uid = await _user(db, "ZT_U10")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+        await db.flush()
+
+        check = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+
+        assert check.status_code == 200, check.text
+        assert {b["code"] for b in check.json()["blockers"]} == {"QUIZ_NO_QUESTION"}
+        assert check.json()["can_publish"] is False
+
+    async def test_已關閉課程的預檢也讀暫存樹(self, client, db) -> None:
+        """「更新並重開課」與「更新」一樣讀暫存——預檢不能只對已發布課程讀暫存。"""
+        uid = await _user(db, "ZT_U11")
+        cid = await _full_course(client, db, uid)
+        await _publish(client, db, uid, cid)
+        await _close(db, cid)
+        repo = EtCourseStageRepository()
+        await repo.seed_from_live(db, cid, _operator(uid))
+        nodes = await repo.load_tree(db, cid)
+        question = next(n for n in nodes if n.entity_type == ENTITY_QUESTION)
+        await _drop_subtree(db, nodes, question.stage_id)
+        await db.flush()
+
+        check = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+
+        assert check.status_code == 200, check.text
+        assert {b["code"] for b in check.json()["blockers"]} == {"QUIZ_NO_QUESTION"}
 
 
 # ── Code review（2026-10-14）指出的四個缺陷，各配一條測試 ──────────────────────

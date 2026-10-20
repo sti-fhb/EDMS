@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest"
 import { RequireRetestDialog } from "./RequireRetestDialog"
 import { renderWithProviders } from "../../test/renderWithProviders"
 
-function setup(affectedCount = 3, extra: { staged?: boolean; retestPending?: boolean } = {}) {
+function setup(
+  affectedCount = 3,
+  extra: { staged?: boolean; retestPending?: boolean; cancelsPending?: boolean } = {},
+) {
   const onCancel = vi.fn()
   const onDecide = vi.fn()
   renderWithProviders(
@@ -95,9 +98,19 @@ describe("RequireRetestDialog", () => {
 
     it("已有待生效的重測要求時，說明「僅儲存」會把它取消", () => {
       // 🔴 不講這件事，「僅儲存，不要求重測」就是一顆會靜默撤銷十分鐘前決定的按鈕。
-      setup(3, { staged: true, retestPending: true })
+      setup(3, { staged: true, retestPending: true, cancelsPending: true })
       expect(screen.getByRole("dialog")).toHaveTextContent(/已有一筆待生效的重測要求/)
       expect(screen.getByRole("dialog")).toHaveTextContent(/會把它一併取消/)
+    })
+
+    it("改題／刪題路徑：說明「僅儲存」不會取消，要到測驗設定取消（#767 A1）", () => {
+      // 後端只有測驗設定那一支會清旗標（quiz/service.py），改題刪題的「僅儲存」是
+      // 「這次不另外要求」——原文宣稱會取消，教師據此以為撤銷了，按更新後全班照樣被退回。
+      setup(3, { staged: true, retestPending: true, cancelsPending: false })
+      expect(screen.getByRole("dialog")).toHaveTextContent(/已有一筆待生效的重測要求/)
+      expect(screen.getByRole("dialog")).toHaveTextContent(/不會取消它/)
+      expect(screen.getByRole("dialog")).toHaveTextContent(/測驗設定/)
+      expect(screen.getByRole("dialog")).not.toHaveTextContent(/會把它一併取消/)
     })
 
     it("沒有待生效要求時不提——否則每次都在講一件沒發生的事", () => {

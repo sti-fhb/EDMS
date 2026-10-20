@@ -13,6 +13,7 @@ const BASE_PROPS = {
   onCreate: noop,
   onOpen: noop,
   onDeactivate: noop,
+  onActivate: noop,
   onDelete: noop,
 }
 
@@ -228,5 +229,35 @@ describe("SurveySection：唯讀（非擁有者）", () => {
     expect(screen.getByRole("button", { name: "檢視" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "刪除問卷" })).not.toBeInTheDocument()
+  })
+})
+
+describe("SurveySection：停用後可再啟用（#767 ⑥）", () => {
+  // 原本停用後畫面上沒有任何入口改回來（後端允許），等於不可復原
+  it("停用中的問卷：顯示「啟用問卷」，按下呼叫 onActivate；不顯示「停用問卷」", async () => {
+    const onActivate = vi.fn()
+    render(
+      <SurveySection
+        {...BASE_PROPS}
+        survey={makeSurvey({ is_active: false })}
+        isDraftCourse={false}
+        onActivate={onActivate}
+      />,
+    )
+    await userEvent.setup().click(screen.getByRole("button", { name: "啟用問卷" }))
+    expect(onActivate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "停用問卷" })).not.toBeInTheDocument()
+  })
+
+  it("啟用中的問卷：沒有「啟用問卷」（正向錨點：停用鈕在）", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse={false} />)
+    expect(screen.getByRole("button", { name: "停用問卷" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "啟用問卷" })).not.toBeInTheDocument()
+  })
+
+  it("唯讀（非擁有者）：沒有「啟用問卷」", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false })} isDraftCourse={false} readOnly />)
+    expect(screen.getByRole("button", { name: "檢視" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "啟用問卷" })).not.toBeInTheDocument()
   })
 })

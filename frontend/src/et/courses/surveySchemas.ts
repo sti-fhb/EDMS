@@ -9,12 +9,17 @@ export const SURVEY_OPTION_TEXT_MAX_LEN = 200
 
 /**
  * 每題選項數下限（`data-model` §ET_SURVEY_OPTION）。
- *
- * **無上限**——與測驗題目的 2–6 不同，不可照抄 `itemSchemas.MAX_OPTIONS`。後端只在
- * schema 層設一個寬鬆的請求大小防護（20），那不是業務規則，前端因此不設加入按鈕的
- * 停用條件。
  */
 export const SURVEY_MIN_OPTIONS = 2
+
+/**
+ * 每題選項數上限，對齊後端 `MAX_OPTIONS_PER_QUESTION`（20）。
+ *
+ * 後端那個值原本只是請求大小防護、不是業務規則，前端因此曾刻意不設上限——結果第 21 個
+ * 選項送出後，教師只看到「以下欄位不符規定：options」。2026-10-20 使用者裁示前端照設
+ * （#767 ⑦）。⚠️ 與測驗題目的 2–6（`itemSchemas.MAX_OPTIONS`）無關，不可互相照抄。
+ */
+export const SURVEY_MAX_OPTIONS = 20
 
 /** 問卷題型（對齊後端 `ET_SURVEY_QUESTION_TYPE`）。 */
 export type SurveyQuestionType = "SINGLE" | "TEXT"
@@ -128,6 +133,13 @@ export const SurveyQuestionFormSchema = z
         path: ["options"],
       })
     }
+    if (value.options.length > SURVEY_MAX_OPTIONS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `每題選項不可超過 ${SURVEY_MAX_OPTIONS} 個`,
+        path: ["options"],
+      })
+    }
   })
 
 export type SurveyQuestionFormValues = z.infer<typeof SurveyQuestionFormSchema>
@@ -187,11 +199,15 @@ export const BLOCKER_HINT: Record<string, string> = {
   FORM_AUDIENCE: "請於「基本資料」補選該列的單位與職位，或刪除該列",
 }
 
-/** 缺漏清單出現的情境：發布＝課程為草稿；再開課＝課程已關閉。 */
-export type BlockerContext = "publish" | "reopen"
+/**
+ * 缺漏清單出現的情境：發布＝課程為草稿；再開課＝課程已關閉；更新＝課程已發布（#767 ⑧）。
+ *
+ * 更新跑的是發布那一套檢核，但處置與再開課相同——已發布課程的問卷不能刪、只能停用。
+ */
+export type BlockerContext = "publish" | "reopen" | "update"
 
 /**
- * 再開課情境下改寫的導引（#592）。
+ * 再開課與更新情境下改寫的導引（#592；更新於 #767 ⑧ 補上）。
  *
  * 同一條缺漏在兩個情境的處置相反：草稿課程的問卷只有「刪除」、沒有「停用」；已關閉
  * 課程的問卷只有「停用」、不能刪（`SurveySection` 依 `isDraftCourse` 二選一）。導引寫死
@@ -203,7 +219,7 @@ const REOPEN_HINT_OVERRIDES: Record<string, string> = {
 
 /** 缺漏代碼 → 依情境的「去哪裡修」導引。 */
 export function blockerHint(code: string, context: BlockerContext): string | undefined {
-  return (context === "reopen" ? REOPEN_HINT_OVERRIDES[code] : undefined) ?? BLOCKER_HINT[code]
+  return (context !== "publish" ? REOPEN_HINT_OVERRIDES[code] : undefined) ?? BLOCKER_HINT[code]
 }
 
 /**

@@ -159,6 +159,7 @@ async def apply_stage(
     stats = await _delete_removed(db, live=live, staged_sources=staged_sources, operator=operator)
     await _park_sort_orders(db, nodes=nodes, operator=operator)
     live_id_by_stage = await _upsert(db, course=course, nodes=nodes, operator=operator)
+    await _regress_materials_with_new_videos(db, course=course, nodes=nodes, operator=operator)
 
     # 🔴 **完課戳記只在整批套用完成後蓋一次**（`_DELETERS` 一律帶 `stamp=False`）。
     #
@@ -170,6 +171,37 @@ async def apply_stage(
         db, course=course, nodes=nodes, live_id_by_stage=live_id_by_stage, operator=operator
     )
     return stats
+
+
+async def _regress_materials_with_new_videos(
+    db: AsyncSession, *, course: EtCourse, nodes: Sequence[StageNode], operator
+) -> None:
+    """既有教材本次新增了影片 ⇒ 已完成該教材的學員**此刻一起**退回未完成（#767 ⑨）。
+
+    2026-10-20 使用者裁示。原本套用時不碰完成旗標，要等學員重新開啟教材才由
+    `progress.service` 依新影片重判——同一門課有沒有回退，取決於學員有沒有再點開它。
+
+    判準是「影片節點是新的（`source_id` 為 None）且所屬教材是既有的」：教材本身也是新的話，
+    那個項目沒有人完成過，無事可做。
+
+    ⚠️ 排在 `_upsert` 之後、`stamp_completed_at` 之前：戳記要以退回後的狀態判定，
+    否則會替一個此刻其實沒完課的人蓋章。
+    """
+    by_stage = {n.stage_id: n for n in nodes}
+    material_ids = {
+        parent.source_id
+        for n in nodes
+        if n.entity_type == ENTITY_MATERIAL_VIDEO
+        and n.source_id is None
+        and (parent := by_stage.get(n.parent_stage_id)) is not None
+        and parent.entity_type == ENTITY_MATERIAL
+        and parent.source_id is not None
+    }
+    if not material_ids:
+        return
+    await EtProgressRepository().reset_material_completion(
+        db, course_id=course.course_id, material_ids=sorted(material_ids), operator=operator
+    )
 
 
 async def _require_retest_for_flagged(

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   EMPTY_SURVEY_QUESTION,
+  SURVEY_MAX_OPTIONS,
   SURVEY_MIN_OPTIONS,
   SURVEY_OPTION_TEXT_MAX_LEN,
   SURVEY_STEM_MAX_LEN,
@@ -42,9 +43,12 @@ describe("SurveyQuestionFormSchema", () => {
     expect(result.error?.issues[0]?.message).toBe(`每題至少需 ${SURVEY_MIN_OPTIONS} 個選項`)
   })
 
-  it("選項無上限——與測驗題目的 2-6 不同，不可照抄 itemSchemas", () => {
-    const many = Array.from({ length: 30 }, (_, i) => ({ option_text: `選項${i}` }))
-    expect(SurveyQuestionFormSchema.safeParse({ ...valid, options: many }).success).toBe(true)
+  it("選項上限 20 個：20 個通過、21 個被擋（#767 ⑦）", () => {
+    const options = (n: number) => Array.from({ length: n }, (_, i) => ({ option_text: `選項${i}` }))
+    expect(SurveyQuestionFormSchema.safeParse({ ...valid, options: options(SURVEY_MAX_OPTIONS) }).success).toBe(true)
+    const result = SurveyQuestionFormSchema.safeParse({ ...valid, options: options(SURVEY_MAX_OPTIONS + 1) })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]?.message).toBe(`每題選項不可超過 ${SURVEY_MAX_OPTIONS} 個`)
   })
 
   it("選項文字空白被擋", () => {

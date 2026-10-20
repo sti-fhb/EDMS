@@ -25,6 +25,13 @@ interface Props {
    * 不會想到自己正在撤銷十分鐘前的決定。
    */
   retestPending?: boolean
+  /**
+   * 本次儲存選「僅儲存」是否會**取消**待生效的重測要求。
+   *
+   * 只有測驗設定那一支會（`quiz/service.py` 的 `update_settings`）；改題 / 刪題的「僅儲存」
+   * 意思是「這一次不另外要求」，不碰先前的決定。兩者講同一句話，改題時那句就是假的（#767 A1）。
+   */
+  cancelsPending?: boolean
   /** 關閉而不儲存（含 ESC 與點背景）。 */
   onCancel: () => void
   /** `true` = 要求學員重新測驗；`false` = 僅儲存。 */
@@ -57,6 +64,7 @@ export function RequireRetestDialog({
   affectedCount,
   staged = false,
   retestPending = false,
+  cancelsPending = false,
   onCancel,
   onDecide,
 }: Props) {
@@ -82,7 +90,10 @@ export function RequireRetestDialog({
             <>
               <br />
               <br />
-              ℹ️ 本次編輯<strong>已有一筆待生效的重測要求</strong>。選「僅儲存，不要求重測」會把它一併取消。
+              ℹ️ 本次編輯<strong>已有一筆待生效的重測要求</strong>。
+              {cancelsPending
+                ? "選「僅儲存，不要求重測」會把它一併取消。"
+                : "本次選「僅儲存，不要求重測」不會取消它；要取消，請到「測驗設定」分頁存檔並選「僅儲存，不要求重測」。"}
             </>
           )}
           <br />

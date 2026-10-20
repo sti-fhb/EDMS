@@ -193,8 +193,9 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
         (data.course_closed ? (
           /* ET-MSG-ET07-005（#280 裁示 Q3 = B：不輪詢，於此與成績頁事後告知）*/
           <Alert severity="warning">此課程已關閉，無法再開新作答</Alert>
-        ) : (
-          /* ET-MSG-ET07-001 */
+        ) : data.is_passed ? null : (
+          /* ET-MSG-ET07-001。已及格者不顯示：教師對已及格者按不出重置（tracking/rules.py），
+             叫他去聯繫教師是叫他做一件沒有用的事（#767 ③）*/
           <Alert severity="info">重考次數已用完，請聯繫教師重置</Alert>
         ))}
 

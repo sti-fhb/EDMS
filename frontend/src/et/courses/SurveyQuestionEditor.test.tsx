@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { SurveyQuestionEditor } from "./SurveyQuestionEditor"
-import { EMPTY_SURVEY_QUESTION, SURVEY_MIN_OPTIONS } from "./surveySchemas"
+import { EMPTY_SURVEY_QUESTION, SURVEY_MAX_OPTIONS, SURVEY_MIN_OPTIONS } from "./surveySchemas"
 import type { SurveyQuestionDraft } from "./surveySchemas"
 
 const FILLED: SurveyQuestionDraft = {
@@ -52,15 +52,25 @@ describe("問卷題目編輯器：單選題", () => {
     expect(screen.getByRole("button", { name: "刪除選項 1" })).toBeDisabled()
   })
 
-  it("選項無上限——可一直加", async () => {
-    // 與測驗題目的 2–6 不同，`data-model` §ET_SURVEY_OPTION 只訂下限
-    const user = userEvent.setup()
-    renderEditor()
-    const addButton = screen.getByRole("button", { name: "新增選項" })
-    for (let i = 0; i < 6; i += 1) await user.click(addButton)
+  it("選項達上限 20 個時「新增選項」停用（#767 ⑦）", () => {
+    // 原本無上限，第 21 個送出後被後端擋回「以下欄位不符規定：options」
+    renderEditor({
+      ...FILLED,
+      options: Array.from({ length: SURVEY_MAX_OPTIONS }, (_, i) => ({ option_text: `選項${i}` })),
+    })
+    expect(screen.getByRole("button", { name: "新增選項" })).toBeDisabled()
+  })
 
-    expect(screen.getAllByRole("textbox", { name: /選項 \d 文字/ })).toHaveLength(2 + 6)
+  it("未達上限時可繼續新增（正向錨點）", async () => {
+    const user = userEvent.setup()
+    renderEditor({
+      ...FILLED,
+      options: Array.from({ length: SURVEY_MAX_OPTIONS - 1 }, (_, i) => ({ option_text: `選項${i}` })),
+    })
+    const addButton = screen.getByRole("button", { name: "新增選項" })
     expect(addButton).toBeEnabled()
+    await user.click(addButton)
+    expect(addButton).toBeDisabled()
   })
 
   it("新增題目之初始值為單選、兩個空選項", () => {
