@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
+from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
 from app.et.constants import (
     COURSE_CLOSED,
@@ -155,6 +156,33 @@ class TestSurveyLifecycle:
         after = (await client.get(f"{_COURSES}/{cid}/survey", headers=_bearer(uid))).json()
         assert after["is_active"] is False
         assert after["version"] == survey["version"] + 1
+
+    async def test_重新啟用的稽核記成啟用而非更新(self, client, db) -> None:
+        """#768 第 13 項：停用後再啟用，稽核要寫「啟用課後問卷」，不能與改名混成「更新」。"""
+        uid = await _user(db, "t_srv04b")
+        cid = await _course(client, uid)
+        survey = await _survey(client, uid, cid)
+        url = f"/api/et/surveys/{survey['survey_id']}"
+        name, version = survey["survey_name"], survey["version"]
+        r = await client.put(
+            url, json={"survey_name": name, "is_active": False, "version": version}, headers=_bearer(uid)
+        )
+        assert r.status_code == 204, r.text
+        r = await client.put(
+            url, json={"survey_name": name, "is_active": True, "version": version + 1}, headers=_bearer(uid)
+        )
+        assert r.status_code == 204, r.text
+
+        descriptions = (
+            await db.scalars(
+                select(DpAuditLog.description)
+                .where(DpAuditLog.created_user == uid, DpAuditLog.description.like("%課後問卷%"))
+                .order_by(DpAuditLog.created_date)
+            )
+        ).all()
+        # 正向錨點：前一筆停用照常記成「停用」，才能說明最後一筆不是因為整組都沒寫
+        assert any("停用課後問卷" in d for d in descriptions), descriptions
+        assert "啟用課後問卷" in descriptions[-1], descriptions
 
     async def test_非擁有者不可建立(self, client, db) -> None:
         owner = await _user(db, "t_srv05")

@@ -6,6 +6,7 @@ from app.core.exceptions import AppError
 from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED, SURVEY_QUESTION_SINGLE, SURVEY_QUESTION_TEXT
 from app.et.survey.rules import (
     MIN_OPTIONS,
+    basic_update_action,
     ensure_editable,
     ensure_option_count_valid,
     ensure_options_match_type,
@@ -177,3 +178,23 @@ class TestResequenceQuestions:
 
     def test_空陣列回空(self) -> None:
         assert resequence_questions([]) == {}
+
+
+class TestBasicUpdateAction:
+    """#768 第 13 項：稽核要分得出停用、重新啟用與單純改名。
+
+    原本 `"停用課後問卷" if not is_active else "更新課後問卷"`——#767 ⑥ 加了「啟用問卷」之後，
+    重新開放填答會被記成「更新課後問卷」，和改名混在一起，事後查不到是誰把問卷重新打開的。
+    """
+
+    @pytest.mark.parametrize(
+        ("before", "after", "expected"),
+        [
+            (True, False, "停用課後問卷"),
+            (False, True, "啟用課後問卷"),
+            (True, True, "更新課後問卷"),
+            (False, False, "更新課後問卷"),
+        ],
+    )
+    def test_依啟用狀態的變化決定動作(self, before: bool, after: bool, expected: str) -> None:
+        assert basic_update_action(before_active=before, after_active=after) == expected
