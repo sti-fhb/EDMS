@@ -21,7 +21,7 @@ import type { ApprovalResult, ApproveResult, SkipReason, StudentRow, TeacherQuiz
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
-import { toApiError } from "../../services/http"
+import { toApiError, toBlobApiError } from "../../services/http"
 import { coursesApi } from "../courses/coursesService"
 
 /** 待確認的操作——全部需要二次確認，且文案本身就是規格（ET-MSG-ET02-001 / -003 / -301 …）。 */
@@ -326,7 +326,9 @@ export function EtStudentsPage() {
       // 少了這則，教師按下匯出後唯一的回饋是「什麼都沒發生」，於是再按一次。
       notify.message.success("CSV 已匯出")
     } catch (err) {
-      notify.message.error(toApiError(err).errorMessage)
+      // 下載是 blob 請求，錯誤內容也是 blob——`toApiError` 讀不到後端的 error_message，
+      // 只會顯示籠統的伺服器錯誤（#768 第 3 項）。比照 DM 下載用 `toBlobApiError`。
+      notify.message.error((await toBlobApiError(err)).errorMessage)
     } finally {
       setExporting(null)
     }
@@ -372,7 +374,8 @@ export function EtStudentsPage() {
           {readOnly && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               此課程已結束閱課期間，目前為<strong>唯讀</strong>：仍可閱覽三區塊與匯出 CSV，
-              但不可重置重考次數或移除學員。如需管理學員，請先於課程編輯頁執行<strong>再開課</strong>。
+              但不可重置重考次數、移除學員或執行線下核可。如需管理學員，請先於課程編輯頁按
+              <strong>「更新並重開課」</strong>。
             </Alert>
           )}
 

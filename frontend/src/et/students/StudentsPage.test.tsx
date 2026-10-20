@@ -926,3 +926,36 @@ describe("ET02 學員學習狀況追蹤", () => {
     expect(within(actionCell).getByRole("button", { name: "移除" })).toBeInTheDocument()
   })
 })
+
+describe("#768 第 2、3 項", () => {
+  it("唯讀提示列出核可也不可做，並指向「更新並重開課」", async () => {
+    // 原文只寫「不可重置重考次數或移除學員」（核可鈕其實也停用），且叫教師去「執行再開課」，
+    // 但那顆鈕自 #720 起叫「更新並重開課」
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await user.click(await screen.findByLabelText("課程"))
+    await user.click(await screen.findByRole("option", { name: "已關閉的課" }))
+
+    const alert = await screen.findByText(/目前為/, { selector: "div" })
+    expect(alert).toHaveTextContent("線下核可")
+    expect(alert).toHaveTextContent("更新並重開課")
+    expect(alert).not.toHaveTextContent("執行再開課")
+  })
+
+  it("匯出失敗時顯示後端的原因，而不是籠統的連線或伺服器錯誤", async () => {
+    // 下載是 blob 請求，錯誤內容也是 blob——`toApiError` 讀不到 error_message
+    server.use(
+      http.get("/api/et/courses/:courseId/students.csv", () =>
+        HttpResponse.json({ error_code: "ET_COURSE_002", error_message: "僅課程擁有者可執行此操作" }, { status: 403 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<EtStudentsPage />)
+    await selectCourse(user)
+    await screen.findAllByText("王小明")
+
+    await user.click(screen.getAllByRole("button", { name: /匯出 CSV/ })[0])
+
+    expect(await screen.findByText("僅課程擁有者可執行此操作")).toBeInTheDocument()
+  })
+})

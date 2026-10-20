@@ -101,7 +101,11 @@ export function AttemptOverviewBlock({
                       </Typography>
                       {quiz.is_passed && <Chip size="small" color="success" label="已及格" />}
                     </Stack>
-                    <Tooltip title={quiz.can_reset ? "重置後該學員可再作答" : resetDisabledReason(quiz, readOnly)}>
+                    {/* 判斷順序與按鈕的 disabled 一致：唯讀優先。先看 can_reset 的話，符合條件但課程
+                        已關閉時，灰掉的鈕上會寫「重置後該學員可再作答」（#768 第 1 項）*/}
+                    <Tooltip
+                      title={quiz.can_reset && !readOnly ? "重置後該學員可再作答" : resetDisabledReason(quiz, readOnly)}
+                    >
                       {/* span 包住：disabled 的按鈕不觸發事件，Tooltip 會失效 */}
                       <span>
                         <Button
