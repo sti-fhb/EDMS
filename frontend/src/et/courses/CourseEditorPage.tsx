@@ -221,6 +221,8 @@ export function EtCourseEditorPage() {
    * 否則 React 會呼叫它、把回傳值存進 state。
    */
   const [pendingRetestAction, setPendingRetestAction] = useState<((requireRetest: boolean) => void) | null>(null)
+  /** 本次詢問的「僅儲存」是否會取消待生效的重測要求——只有測驗設定那一支會（#767 A1）。 */
+  const [retestCancelsPending, setRetestCancelsPending] = useState(false)
   /**
    * 已選好型別、等待命名的新項目（#414）。
    *
@@ -1619,8 +1621,9 @@ export function EtCourseEditorPage() {
    *
    * 沒有人作答過（#709 前為「通過過」）就不問——那是新建測驗的常態，多一個對話框只是噪音。
    */
-  const askRetestThen = (run: (requireRetest: boolean) => void) => {
+  const askRetestThen = (run: (requireRetest: boolean) => void, cancelsPending = false) => {
     if ((quiz?.affected_count ?? 0) > 0) {
+      setRetestCancelsPending(cancelsPending)
       setPendingRetestAction(() => run)
       return
     }
@@ -2198,6 +2201,8 @@ export function EtCourseEditorPage() {
                 closeItemDialog()
               },
             ),
+            // 測驗設定是唯一會依本次選擇覆寫重測旗標的一支（#767 A1）
+            true,
           )
         }
         onSaveQuestion={(questionId: number | null, values: QuestionFormValues) =>
@@ -2238,6 +2243,7 @@ export function EtCourseEditorPage() {
           // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
           staged={status !== "DRAFT"}
           retestPending={quiz?.require_retest_pending ?? false}
+          cancelsPending={retestCancelsPending}
           onCancel={() => setPendingRetestAction(null)}
           onDecide={(requireRetest) => {
             const run = pendingRetestAction
