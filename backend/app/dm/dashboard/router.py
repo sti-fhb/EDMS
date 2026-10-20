@@ -29,5 +29,5 @@ async def get_announcements(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """最新更新公告：近 30 天已發布（新增/新版本），發布時間 DESC；無事件回空清單（FR-003/004）。"""
+    """最新更新公告：**最新 10 筆**已發布（新增/新版本），發布時間 DESC；無資料回空清單（FR-003/004）。"""
     return await _service.get_announcements(db, user_id=ctx.user_id, roles=ctx.roles)

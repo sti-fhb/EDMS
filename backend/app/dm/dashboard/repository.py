@@ -1,10 +1,9 @@
-"""系統儀表板（US7 / DM00）資料存取——統計計數 + 近 30 天公告（唯讀查詢）。
+"""系統儀表板（US7 / DM00）資料存取——統計計數 + 最新 N 筆公告（唯讀查詢）。
 
 跨子模組（同屬 DM）直接引用 Model；純讀取、不寫入。
 """
 
 from collections.abc import Iterable
-from datetime import datetime
 
 from sqlalchemy import Row, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,9 +51,13 @@ class DashboardRepository:
         return {row[0]: row[1] for row in (await db.execute(stmt)).all()}
 
     async def recent_announcements(
-        self, db: AsyncSession, *, cutoff: datetime, limit: int, user_id: str, roles: Iterable[str]
+        self, db: AsyncSession, *, limit: int, user_id: str, roles: Iterable[str]
     ) -> list[Row]:
-        """近 cutoff 起之已發布版本（含新增/新版本 badge）——發布時間 DESC + doc_id 次要鍵。
+        """**最新 limit 筆**已發布版本（含新增/新版本 badge）——發布時間 DESC + doc_id 次要鍵。
+
+        ⚠️ **不設時間窗**（#758 移除原本的近 30 天）；`limit` 與可見性條件在**同一個查詢**裡，
+        由 DB 先過濾再取 N 筆。⛔ 不可把 `limit` 搬到可見性之前（例如先選出最新 N 筆的子查詢
+        再套可見性）——那會讓閱覽者少看到文件，而且資料量小的時候完全看不出來。
 
         - 套標籤式可見性（閱覽者只見其可見範圍；privileged 不過濾）——不洩漏受限文件之標題/摘要/作者（Sec HIGH-1）。
         - 另限文件在架（`_LIVE_STATUSES`）——US8 廢止上線後不誤列剛廢止文件（Code MED）。
@@ -67,7 +70,6 @@ class DashboardRepository:
             DmDocument.deleted == 0,
             DmDocument.status.in_(_LIVE_STATUSES),
             DmDocVersion.status == _PUBLISHED,
-            DmDocVersion.published_date >= cutoff,
         ]
         visibility = visible_docs_condition(user_id, roles)
         if visibility is not None:

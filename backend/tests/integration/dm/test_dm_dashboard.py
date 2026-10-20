@@ -1,7 +1,7 @@
 """系統儀表板（US7 / DM00）整合測試（真實 DB）。
 
 驗證：統計卡（4 內建分類已發布目前版本數 + 總計；含 PENDING_OBSOLETE、排除 OBSOLETE/草稿/送審；
-固定順序；0 亦顯示）；最新更新公告（近 30 天已發布、NEW/NEW_VERSION badge、DESC、無 review 預設 NEW、
+固定順序；0 亦顯示）；最新更新公告（最新 10 筆已發布、NEW/NEW_VERSION badge、DESC、無 review 預設 NEW、
 空清單）；HTTP 存取閘。
 """
 
@@ -147,7 +147,7 @@ async def test_stats_all_zero_when_no_published(db):
 
 
 async def test_announcements_recent_with_badge_and_desc(db):
-    """近 30 天已發布：NEW/NEW_VERSION badge、發布時間 DESC、撰寫者姓名。"""
+    """已發布版本：NEW/NEW_VERSION badge、發布時間 DESC、撰寫者姓名。"""
     await _seed_user(db, "ed", "陳大華")
     base = utcnow()
     v1 = await _published_doc(
@@ -210,10 +210,73 @@ async def test_分類停用後公告仍列出且仍有名稱(db):
     assert i.category_name == "標準作業程序"
 
 
-async def test_announcements_excludes_older_than_30d(db):
-    await _published_doc(db, "DM-SOP-000011", category="SOP", published=utcnow() - timedelta(days=40))
+async def test_公告最多列十筆_且為最新的十筆(db):
+    """公告區固定列出**最新 10 筆**，多的請至 DM01 文件庫查（#758）。
+
+    12 筆各差一天，斷言「恰好 10 筆」且「正是最新的 10 筆」——只斷言筆數的話，
+    取成最舊的 10 筆也會通過。
+    """
+    base = utcnow()
+    for n in range(12):  # 000050 最新、000061 最舊
+        await _published_doc(
+            db, f"DM-SOP-0000{50 + n}", category="SOP", published=base - timedelta(days=n), name=f"文件{n}"
+        )
+
     items = await _svc.get_announcements(db, **_PRIV)
-    assert items == []
+
+    assert len(items) == 10
+    assert [i.doc_id for i in items] == [f"DM-SOP-0000{50 + n}" for n in range(10)]  # 最新 10 筆、DESC
+
+
+async def test_公告不再限三十天_較早的文件仍列出(db):
+    """移除 30 天時間窗（#758）：近期無發布時，仍列出較早的文件。
+
+    ⚠️ 本條取代舊的 `test_announcements_excludes_older_than_30d`——那條斷言的正是
+    被本次裁示移除的行為（40 天前的文件不列出），**不是壞掉，是契約改變**。
+    """
+    base = utcnow()
+    await _published_doc(db, "DM-SOP-000070", category="SOP", published=base - timedelta(days=40), name="四十天前")
+    await _published_doc(db, "DM-SOP-000071", category="SOP", published=base - timedelta(days=200), name="兩百天前")
+
+    items = await _svc.get_announcements(db, **_PRIV)
+
+    assert [i.doc_id for i in items] == ["DM-SOP-000070", "DM-SOP-000071"]  # 都在，且仍 DESC
+
+
+async def test_十筆上限在閱覽者可見範圍內取(db):
+    """🔴 10 筆是在**該閱覽者可見的文件**裡取最新 10 筆，不是先取 10 筆再過濾。
+
+    資料刻意這樣排：**最新的 10 筆全部是閱覽者看不到的**，他看得到的 5 筆是最舊的。
+
+    | 實作 | 閱覽者看到 |
+    |---|---|
+    | ✅ 正確（可見性與 LIMIT 同一查詢，DB 先濾再取）| **5 筆** |
+    | ❌ 先取最新 10 筆、再於應用層過濾 | **0 筆** |
+
+    既有的 `test_stats_and_announcements_apply_visibility` 只建 2 筆文件，LIMIT 從未生效，
+    分辨不出這兩種實作；本條是為此而加。
+    """
+    await _seed_user(db, "v1", "閱覽者")  # 未授予任何可見對象 → 只看得到「全體」
+    base = utcnow()
+    for n in range(10):  # 最新的 10 筆：僅護理師可見
+        await _published_doc(
+            db, f"DM-SOP-0000{80 + n}", category="SOP", published=base - timedelta(days=n), name=f"限護理師{n}"
+        )
+        await _tag_doc(db, f"DM-SOP-0000{80 + n}", "護理師")
+    for n in range(5):  # 較舊的 5 筆：全體可見
+        await _published_doc(
+            db, f"DM-SOP-0000{90 + n}", category="SOP", published=base - timedelta(days=50 + n), name=f"全體{n}"
+        )
+        await _tag_doc(db, f"DM-SOP-0000{90 + n}", "全體")
+
+    items = await _svc.get_announcements(db, user_id="v1", roles=frozenset({DM_VIEWER}))
+
+    assert [i.doc_id for i in items] == [f"DM-SOP-0000{90 + n}" for n in range(5)]
+
+
+# 📌 原本此處有 `test_announcements_excludes_older_than_30d`（40 天前的文件不列出）。
+# #758 裁示移除 30 天時間窗後，該條斷言的正是**已被取消的行為**，故刪除而非修改；
+# 其位置由上方 `test_公告不再限三十天_較早的文件仍列出` 承接（方向相反的同一件事）。
 
 
 async def test_announcements_kind_defaults_new_without_review(db):

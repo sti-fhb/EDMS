@@ -28,7 +28,7 @@ describe("DmOverviewWidget 中性歡迎頁之 DM 文件概況（DM00）", () => 
     expect(screen.getByText("76")).toBeInTheDocument()
   })
 
-  it("最新更新公告：列出近 30 天發布 + 新增(綠)/新版本(藍) badge", async () => {
+  it("最新更新公告：列出已發布文件 + 新增(綠)/新版本(藍) badge", async () => {
     renderWithProviders(<DmOverviewWidget />)
     expect(await screen.findByText("用血回報訓練教材")).toBeInTheDocument()
     expect(screen.getByText("領血確認標準作業程序")).toBeInTheDocument()
@@ -82,14 +82,29 @@ describe("DmOverviewWidget 中性歡迎頁之 DM 文件概況（DM00）", () => 
     renderWithProviders(<DmOverviewWidget />)
     const errors = await screen.findAllByText("載入失敗，請稍後再試。")
     expect(errors).toHaveLength(2)
-    expect(screen.queryByText("近期無新發布文件")).not.toBeInTheDocument()
+    // ⚠️ 這條否定斷言的文案**必須跟著空狀態一起改**：#758 把它由「近期無新發布文件」改成
+    // 「尚無已發布文件」，若此處沒跟著改，斷言的字串在整個 app 裡都不存在了 ⇒ **恆真**，
+    // 而它要守的「載入失敗不得偽裝成空狀態」就完全沒在驗。
+    expect(screen.queryByText("尚無已發布文件")).not.toBeInTheDocument()
   })
 
-  it("公告空狀態：近 30 天無事件顯示提示（DM-MSG-DM00-001）", async () => {
+  it("公告空狀態：無任何已發布文件時顯示提示（DM-MSG-DM00-001）", async () => {
+    // #758 移除 30 天時間窗後，本條的觸發條件由「近 30 天無事件」變成「一份已發布文件都沒有」，
+    // 文案也隨之由「近期無新發布文件」改為「尚無已發布文件」——「近期」在沒有時間窗後不成立。
     server.use(http.get("/api/dm/dashboard/announcements", () => HttpResponse.json([])))
     renderWithProviders(<DmOverviewWidget />)
     expect(await screen.findByText("SOP")).toBeInTheDocument()
-    expect(await screen.findByText("近期無新發布文件")).toBeInTheDocument()
+    expect(await screen.findByText("尚無已發布文件")).toBeInTheDocument()
+  })
+
+  it("公告區標題標示「10 筆最新發布文件」，不再標時間（#758）", async () => {
+    renderWithProviders(<DmOverviewWidget />)
+    await screen.findByText("用血回報訓練教材")
+
+    expect(screen.getByText("（10 筆最新發布文件）")).toBeInTheDocument()
+    // 反向：舊的時間字樣不得殘留。與正向同為 `*ByText` 完全比對——該 caption 是獨立的
+    // `<Typography component="span">`，不像公告列的分類那樣被併進長字串裡（見 #735 的註解）。
+    expect(screen.queryByText("（近一個月發布）")).not.toBeInTheDocument()
   })
 
   it("統計全 0：卡片仍顯示、總計 0", async () => {

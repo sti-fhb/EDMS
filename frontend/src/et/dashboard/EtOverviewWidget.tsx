@@ -43,7 +43,9 @@ function StatCell({ label, count }: { label: string; count: number }) {
  * + 下方分隔線（2026-10-02 手測裁示）。
  *
  * `note` 走 `component="span"` 掛在同一個 `Typography` 裡而不是另起一行——那正是 DM
- * 「（近一個月發布）」的寫法，標題與註記共用基線才不會看起來像兩層標題。
+ * 公告區標題註記（`DmOverviewWidget` 的「（10 筆最新發布文件）」）的寫法，標題與註記
+ * 共用基線才不會看起來像兩層標題。⚠️ 此處引用的是**排版寫法**，不是那串文字本身；
+ * DM 的文案已於 #758 改過一次，日後再改不影響本處的參照意義。
  *
  * ⚠️ 標題文字另包一層 `<span>`（無任何樣式、不影響外觀）：外層 `Typography` 的
  * `textContent` 是「標題 + 註記」，`getByText("全體訓練概況")` 這種精確查詢會落空。
