@@ -243,6 +243,35 @@ async def test_公告不再限三十天_較早的文件仍列出(db):
     assert [i.doc_id for i in items] == ["DM-SOP-000070", "DM-SOP-000071"]  # 都在，且仍 DESC
 
 
+async def test_沒有發布時間的版本不進公告(db):
+    """`PUBLISHED_DATE` 為 NULL 的已發布版本不得出現在公告（#758）。
+
+    ⭐ 本條守的是「移除 30 天時間窗時**沒有連帶弄丟**它隱含提供的保證」：
+    `published_date >= cutoff` 對 NULL 求值為 NULL ⇒ 原本就排除了這種列。
+
+    不處理會出兩件事，第二件比第一件嚴重：
+    1. `ORDER BY ... DESC` 在 PostgreSQL 預設 **NULLS FIRST** ⇒ 釘在公告第一位
+    2. `AnnouncementItem.published_date` 是 **required 非 Optional** ⇒ Pydantic 拋
+       ValidationError ⇒ **整個端點 500**
+
+    ⚠️ 因此 `.desc().nullslast()` **不足以**取代 WHERE 的 `is_not(None)`——它只改排序，
+    那一列仍會被回傳、仍會 500。
+
+    ⚠️ 不可用 `_published_doc(published=None)` 建資料：它內部是 `published or utcnow()`，
+    `None` 會被換成現在時間，測不到這件事。必須直接呼叫 `_version`。
+    """
+    await _doc(db, "DM-SOP-000100", category="SOP", status="PUBLISHED", name="無發布時間")
+    v = await _version(db, "DM-SOP-000100", "1.0", status="PUBLISHED", published=None)
+    doc = await db.scalar(select(DmDocument).where(DmDocument.doc_id == "DM-SOP-000100"))
+    doc.current_version_id = v.version_id
+    await _published_doc(db, "DM-SOP-000101", category="SOP", name="正常文件")
+    await db.flush()
+
+    items = await _svc.get_announcements(db, **_PRIV)  # 不得拋 ValidationError
+
+    assert [i.doc_id for i in items] == ["DM-SOP-000101"]  # 正常那筆在、NULL 那筆不在
+
+
 async def test_十筆上限在閱覽者可見範圍內取(db):
     """🔴 10 筆是在**該閱覽者可見的文件**裡取最新 10 筆，不是先取 10 筆再過濾。
 
@@ -286,7 +315,7 @@ async def test_announcements_kind_defaults_new_without_review(db):
     assert len(items) == 1 and items[0].kind == "NEW"
 
 
-async def test_announcements_empty_when_no_recent(db):
+async def test_announcements_empty_when_no_published(db):
     items = await _svc.get_announcements(db, **_PRIV)
     assert items == []
 

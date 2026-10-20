@@ -70,6 +70,16 @@ class DashboardRepository:
             DmDocument.deleted == 0,
             DmDocument.status.in_(_LIVE_STATUSES),
             DmDocVersion.status == _PUBLISHED,
+            # 🔴 這條**不是新增的防禦**，是把原本由時間窗隱含提供的保證寫明（#758）：
+            # 被移除的 `published_date >= cutoff` 對 NULL 求值為 NULL ⇒ 原本就排除了無發布時間的列。
+            # 少了它會出兩件事，第二件比第一件嚴重：
+            #   ① `ORDER BY ... DESC` 在 PostgreSQL 預設 **NULLS FIRST** ⇒ 該列釘在公告第一位
+            #   ② `AnnouncementItem.published_date` 是 **required 非 Optional** ⇒ Pydantic 拋
+            #      ValidationError ⇒ **整個端點 500**（變異 M7 實測如此）
+            # ⚠️ 因此 `.desc().nullslast()` **不足以**取代本條——它只改排序，那一列仍會被回傳、仍會 500。
+            # 目前無可達路徑產生這種列（`review/center_service.py` 原子地同時設 status 與
+            # published_date），但該保證此後只存在於那一處，不再有 WHERE 條件兜底。
+            DmDocVersion.published_date.is_not(None),
         ]
         visibility = visible_docs_condition(user_id, roles)
         if visibility is not None:
