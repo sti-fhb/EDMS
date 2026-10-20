@@ -290,6 +290,120 @@ describe("UsersPage 使用者操作流程", { timeout: 15_000 }, () => {
 
     expect(await screen.findByText("已取消邀請")).toBeInTheDocument()
   })
+
+  // ---- 頁籤筆數徽章（#755）----
+  //
+  // ⚠️ **不可用 `queryByText` 判斷徽章有沒有顯示**：MUI Badge 的數字 span **永遠存在於 DOM**，
+  // 隱藏是靠 `MuiBadge-invisible` class（實測 `total=0` 時仍渲染 `<span …invisible…>0</span>`）。
+  // 所以 `queryByText("0")).not.toBeInTheDocument()` 恆為**假**，而 `findByText("2")` 雖然可用，
+  // 卻分辨不出「顯示 2」與「隱藏的 2」。本組一律改以 MUI 的狀態 class 斷言可見性
+  // （同檔 DM00 widget 測試斷言 `MuiChip-colorSuccess` 亦為此法）。
+
+  /** 取該頁籤的徽章元素（數字 span）；找不到就拋錯，不要讓後續斷言對 null 報一個無關的訊息。 */
+  function badgeOf(tab: HTMLElement) {
+    const el = tab.querySelector(".MuiBadge-badge")
+    if (!el) throw new Error("找不到 .MuiBadge-badge——頁籤結構可能改了")
+    return el as HTMLElement
+  }
+
+  it("進入頁面未切頁籤時，待啟用邀請頁籤即顯示筆數", async () => {
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華") // 停在「帳號」頁籤，全程不點「待啟用邀請」
+
+    const inviteTab = screen.getByRole("tab", { name: /待啟用邀請/ })
+    // MSW fixture 的邀請清單為 2 筆（有效中 + 已逾期）
+    await waitFor(() => expect(badgeOf(inviteTab)).toHaveTextContent("2"))
+    expect(badgeOf(inviteTab)).not.toHaveClass("MuiBadge-invisible") // 真的看得到
+
+    // 反向錨點：確認真的沒切頁籤——邀請列的內容不得出現。
+    // 少了這條，無法分辨「徽章對了」與「我不小心切了頁籤」。
+    expect(screen.queryByText("周雅婷")).not.toBeInTheDocument()
+  })
+
+  it("無待啟用邀請時不顯示徽章", async () => {
+    server.use(
+      http.get("/api/dp/users/invites", () =>
+        HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } }),
+      ),
+    )
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    const inviteTab = screen.getByRole("tab", { name: /待啟用邀請/ })
+    // 正向錨點：徽章元素存在且內容為 0（證明查到的是對的元素、查詢也真的跑了）；
+    // 真正要驗的是它被 MUI 判定為不可見。
+    expect(badgeOf(inviteTab)).toHaveTextContent("0")
+    expect(badgeOf(inviteTab)).toHaveClass("MuiBadge-invisible")
+  })
+
+  it("建立邀請後，頁籤徽章的筆數隨之更新（全程停在帳號頁籤）", async () => {
+    // AC 3 的另一半。它與「取消」那條走**不同的失效路徑**，所以兩條都要測：
+    //   建立：`useUsers` 的 `invalidateQueries({ queryKey: ["users"] })` **前綴**命中
+    //         `["users","invites",…]`——沒有任何程式碼直接指名邀請 query
+    //   取消：`useInvites` 的 `invalidate()` 直接失效自己的 key
+    // 日後若有人把前綴改成只失效 `["users","list"]`，只有本條會紅。
+    let created = false
+    server.use(
+      http.post("/api/dp/users", () => {
+        created = true
+        return HttpResponse.json({ message: "邀請信已寄出，使用者需經連結設定密碼後啟用" }, { status: 202 })
+      }),
+      http.get("/api/dp/users/invites", () => {
+        const total = created ? 3 : 2
+        return HttpResponse.json({ data: [], meta: { total, page: 1, limit: 20, total_pages: 1 } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    const inviteTab = screen.getByRole("tab", { name: /待啟用邀請/ })
+    await waitFor(() => expect(badgeOf(inviteTab)).toHaveTextContent("2")) // 初始
+
+    await user.click(screen.getByRole("button", { name: /建立帳號/ }))
+    await user.type(screen.getByLabelText("帳號（Email）"), "new@edms.local")
+    await user.type(screen.getByLabelText("姓名"), "新人")
+    await user.click(screen.getByRole("button", { name: "寄送邀請" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定寄送" }))
+    await screen.findByText(/邀請信已寄出/)
+
+    // 反向錨點：全程沒切頁籤（邀請列不得出現），證明徽章是在「帳號」頁籤上更新的
+    expect(screen.queryByRole("button", { name: "重寄邀請" })).not.toBeInTheDocument()
+    await waitFor(() => expect(badgeOf(inviteTab)).toHaveTextContent("3"))
+  })
+
+  it("取消邀請後，頁籤徽章的筆數隨之更新", async () => {
+    // 取消後少一筆，驗證 invalidate 有讓徽章重新取數（而非停在初始值）
+    const rows = [
+      { invite_id: "inv-a", user_name: "周雅婷", email: "tina@edms.local", created_date: "2026-07-06T10:20:00Z", expires_date: "2099-01-01T00:00:00Z" },
+      { invite_id: "inv-b", user_name: "李國豪", email: "kuo@edms.local", created_date: "2026-07-05T16:02:00Z", expires_date: "2099-01-01T00:00:00Z" },
+    ]
+    let cancelled = false
+    server.use(
+      http.delete("/api/dp/users/invites/:id", () => {
+        cancelled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+      http.get("/api/dp/users/invites", () => {
+        const data = cancelled ? rows.slice(1) : rows
+        return HttpResponse.json({ data, meta: { total: data.length, page: 1, limit: 20, total_pages: 1 } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<UsersPage />)
+    await screen.findByText("陳大華")
+
+    const inviteTab = screen.getByRole("tab", { name: /待啟用邀請/ })
+    await waitFor(() => expect(badgeOf(inviteTab)).toHaveTextContent("2")) // 初始
+
+    await user.click(inviteTab)
+    await user.click((await screen.findAllByRole("button", { name: "取消邀請" }))[0])
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "確定取消" }))
+
+    // 已更新：證明 invalidate 有讓徽章重新取數，而非停在初始值
+    await waitFor(() => expect(badgeOf(inviteTab)).toHaveTextContent("1"))
+  })
 })
 
 describe("UsersPage 自我保護與狀態判定（#603）", { timeout: 15_000 }, () => {

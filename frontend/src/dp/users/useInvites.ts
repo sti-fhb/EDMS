@@ -9,15 +9,34 @@ import type { InviteRow } from "./usersService"
 
 const DEFAULT_LIMIT = 20
 
-/** 待啟用邀請頁籤狀態與操作（查詢 / 重寄 / 取消）。 */
-export function useInvites(enabled: boolean) {
+/**
+ * 待啟用邀請頁籤狀態與操作（查詢 / 重寄 / 取消）。
+ *
+ * ⛔ **本查詢不受頁籤限制**（#755）。原本是 `useInvites(tab === 1)`、只在該頁籤啟用，
+ * 導致頁籤上的筆數徽章（取自本查詢的 `total`）在未點進去前恆為 0，配上 `showZero={false}`
+ * 整個隱藏——**而徽章的用途正是在不點進去的情況下提醒管理者有待處理的邀請**。
+ *
+ * ⚠️ **代價不只「進頁多一支請求」**：`main.tsx` 用的是裸的 `new QueryClient()`
+ * （預設 `staleTime: 0` + `refetchOnWindowFocus: true`），所以本查詢**每次掛載、
+ * 以及每次視窗重新取得焦點**都會再打一次。此處可接受，因為：
+ *
+ * - `/api/dp/users` 整個 prefix 與帳號清單共用同一道 `require_any_module_admin()`，
+ *   進得了 DP01 就查得到邀請，不會多吃 403
+ * - **本 router 沒有任何限流桶**（寫入型的 resend 冷卻只在該 handler 內觸發），
+ *   所以不會發生「多看幾次畫面就吃光自己的寫入配額」——那是 `et/approval/router.py:20`
+ *   明文記載過的危害模式，此處不存在
+ * - 同頁的 `useUsers()` 本來就是同樣的行為，不是新引入的性質
+ * - 附帶好處：點進頁籤時資料已在，不再空轉
+ *
+ * ⛔ 若日後要加 `staleTime`，那是功能決策（取捨「即時性 vs 請求數」），不是安全需求。
+ */
+export function useInvites() {
   const { message, confirm } = useNotification()
   const [query, setQuery] = useState({ q: "", page: 1, limit: DEFAULT_LIMIT })
 
   const { data, isPending, invalidate } = usePagedQuery(
     QUERY_KEYS.users.invites(query),
     () => usersApi.listInvites({ q: query.q || undefined, page: query.page, limit: query.limit }),
-    { enabled },
   )
 
   const search = useCallback((q: string) => setQuery((prev) => ({ ...prev, q, page: 1 })), [])

@@ -70,7 +70,7 @@ function isExpired(row: InviteRow): boolean {
 export function UsersPage() {
   const [tab, setTab] = useState(0)
   const accounts = useUsers()
-  const invites = useInvites(tab === 1)
+  const invites = useInvites() // ⛔ 不帶頁籤條件：徽章需在未點進去前就顯示筆數（#755）
 
   const [keyword, setKeyword] = useState("")
   const [status, setStatus] = useState("")
