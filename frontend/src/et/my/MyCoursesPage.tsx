@@ -45,9 +45,12 @@ import { formatDateTime } from "../../utils/date"
  * 「已關閉」標示在關閉端點上線的當下就是正確的。
  *
  * ⚠️ #288 起「已關閉」不只看 `status === "CLOSED"`——**閱課期間已過亦視同關閉**
- * （`is_effectively_closed`）。該判定在**後端**：`my-courses` 的可見性由
- * `is_listed_in_my_courses` 決定，本頁只呈現後端給的 `status`。故期間已過的課程目前
- * 仍顯示「已發布」而非「已關閉」——`ET-16` 的到期自動轉 `CLOSED` 交付後即一致。
+ * （`is_effectively_closed`）。該判定一律在**後端**：可見性由 `is_listed_in_my_courses`
+ * 決定，而「已關閉」標示由 `my-courses` 回傳算好的 `is_closed` 給（卡片直接用它，見下方
+ * `CourseCard`）。⇒ 期間已過的課程在本頁**當下就標「已關閉」**，不必等 SCHET002 把
+ * `STATUS` 轉成 `CLOSED`。
+ *
+ * ⛔ 不要把這段改回「本頁只呈現後端給的 `status`」——那與下方 `CourseCard` 直接矛盾。
  *
  * ## 沒有「退出課程」
  *
@@ -201,8 +204,10 @@ function StatCard({
 
 function CourseCard({ course, onOpen }: { course: MyCourseRow; onOpen: () => void }) {
   // #288：看後端算好的 `is_closed`，**不要**自己判 `status === "CLOSED"`。期間已過的
-  // 課程 `status` 仍是 `PUBLISHED`（到期自動轉 CLOSED 屬 ET-16、未實作），只看 status
-  // 會讓卡片標「已發布」而點進去 ET06 卻是唯讀的——兩個畫面在使用者眼前互相矛盾。
+  // 課程 `status` 仍是 `PUBLISHED`（到期自動轉 CLOSED 由後端 SCHET002 每日 08:00 執行，
+  // 每門課到期後都必經這個窗口——至少一天，排程停用時無限期；完整理由見後端
+  // `course/rules.py` 的 `is_effectively_closed`），只看 status 會讓卡片標「已發布」
+  // 而點進去 ET06 卻是唯讀的——兩個畫面在使用者眼前互相矛盾。
   const closed = course.is_closed
   // #363：同理看後端算好的 `is_pending_open`，不自己比時間（瀏覽器時鐘可被改）。
   const pendingOpen = course.is_pending_open

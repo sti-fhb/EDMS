@@ -68,8 +68,9 @@ describe("ET01 課程卡片", () => {
   })
 
   it("期間已過的課程標成「已關閉」，不因 status 仍是 PUBLISHED 就標「已發布」", () => {
-    // 到期自動轉 CLOSED 屬未實作的 ET-16，所以期間已過時 status 仍是 PUBLISHED。
-    // 照 status 標會寫成「已發布」，但學員早已進不去——卡片會騙人。
+    // 到期自動轉 CLOSED 由後端 SCHET002 每日 08:00 執行，所以期間已過到排程跑完之間
+    // status 仍是 PUBLISHED，每門課到期後都必經這段時間。照 status 標會寫成「已發布」，
+    // 但學員早已進不去——卡片會騙人。
     renderWithProviders(
       <CourseCard course={makeCourse({ status: "PUBLISHED", is_closed: true })} onOpen={vi.fn()} />,
     )

@@ -368,8 +368,9 @@ class EtAttemptService:
         # 只擋「開新的」——上面的結算分支已先返回，故關閉當下已在作答的 attempt 仍可
         # 交出去計分，那正是場景 27 要保的那條窄縫。**這道守門不可往上移到結算分支之前。**
         #
-        # 「視同關閉」含「已發布但閱課期間已過」（#313）：到期自動轉 `CLOSED` 屬未實作的
-        # ET-16，故期間過了而 `STATUS` 仍是 `PUBLISHED` 在本系統是常態而非過渡狀態。
+        # 「視同關閉」含「已發布但閱課期間已過」（#313）：到期自動轉 `CLOSED` 由 SCHET002
+        # 每日 08:00 執行，故期間過了而 `STATUS` 仍是 `PUBLISHED` 是每門課到期後都必經的
+        # 窗口（理由見 `course.rules.is_effectively_closed`），不能只比對 `STATUS`。
         # #374：起始未到不得開新作答。與關閉同一位置、同一形狀——差別只在訊息，因為
         # 學員的下一步不同（等開放 vs 已經沒機會了）。
         if access.is_pending_open(now=utcnow()):

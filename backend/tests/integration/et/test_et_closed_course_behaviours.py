@@ -18,7 +18,7 @@
 | 來源 | 造法 |
 |---|---|
 | `STATUS = CLOSED` | 走 `POST /courses/{id}/close`（本 issue 交付）|
-| 閱課期間已過 | 把 `OPEN_END_AT` 改到過去（到期自動關閉屬 `ET-16`，未實作，無產品路徑）|
+| 閱課期間已過 | 直寫 DB 把 `OPEN_END_AT` 改到過去（見下方 `_apply_close`）|
 
 兩者的預期行為**完全相同**（spec 用語為「視同關閉」），故每組情境都以 `parametrize`
 跑兩次——那正是 SA Q1 裁示 A 要達成的一致性，也是最容易在日後被改壞的部分：任何一處
@@ -222,9 +222,15 @@ async def _ready(client, db, slug: str, *, with_quiz: bool = False, with_survey:
 async def _apply_close(client, db, ctx: dict, source: str) -> None:
     """以指定來源讓課程「視同關閉」。
 
-    `endpoint` 走本 issue 交付的真實路徑；`expired` 只能改 DB——到期自動轉 `CLOSED`
-    屬 `ET-16`（未實作），沒有產品路徑可走。**這正是 `is_effectively_closed` 存在的
-    理由**：期間過了而 `STATUS` 仍是 `PUBLISHED`，在本系統是常態而非過渡狀態。
+    `endpoint` 走本 issue 交付的真實路徑；`expired` 直寫 DB。
+
+    ⚠️ 直寫 DB 是為了**不依賴別條路徑的檢核**，不是因為沒有產品路徑——教師送一次
+    `PUT /courses/{id}` 把 `OPEN_END_AT` 改到過去就能造出同一個狀態（一般更新路徑只
+    擋「清空訖止」，擋「訖止須晚於當下」的 `ensure_reopen_schedule` 僅掛在再開課）。
+
+    **這正是 `is_effectively_closed` 存在的理由**：期間過了而 `STATUS` 仍是
+    `PUBLISHED`，是每門課到期後都必經、且教師可隨時主動製造的狀態
+    （見 `course.rules.is_effectively_closed` 的正典說明）。
     """
     if source == "endpoint":
         closed = await client.post(

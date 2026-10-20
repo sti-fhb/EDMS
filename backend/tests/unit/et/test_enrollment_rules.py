@@ -266,7 +266,9 @@ class TestOpenWindowExpired:
     """閱課期間已過 = 視同關閉（#288 SA Q1 裁示 A）。
 
     在 #288 之前**全後端沒有任何地方讀 `OPEN_END_AT` 做存取判定**——期間結束後課程
-    依然可加入、依然留在我的課程清單，而且會一直如此（到期自動轉 `CLOSED` 屬 `ET-16`）。
+    依然可加入、依然留在我的課程清單。到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，
+    所以「期間已過而 `STATUS` 仍是 `PUBLISHED`」是每門課必經的窗口
+    （見 `course.rules.is_effectively_closed`）。
     """
 
     def test_期間已過不可加入且與已關閉同碼(self) -> None:

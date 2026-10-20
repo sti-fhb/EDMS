@@ -362,8 +362,9 @@ class EtTrackingService:
         """擁有者 + 課程未視同關閉——所有**管理動作**的共同前置。
 
         ⚠️ 「已關閉」用 `is_effectively_closed` 而非比對 `STATUS`：到期自動轉 `CLOSED`
-        屬未實作的 `ET-16`，故「已發布但 `OPEN_END_AT` 已過」在本系統是**常態**。只判
-        `STATUS` 會讓期間已過的課程仍可被重置 / 移除，與 ET 其餘六處的關閉語意不一致。
+        由 SCHET002 每日 08:00 執行，故「已發布但 `OPEN_END_AT` 已過」是每門課到期後都
+        **必然經過**的窗口（見 `course.rules.is_effectively_closed`）。只判 `STATUS` 會讓
+        期間已過的課程仍可被重置 / 移除，與 ET 其餘六處的關閉語意不一致。
 
         唯讀查詢**不走這支**——AC 10 明訂關閉後三區塊仍可閱覽（#255 裁示 Q2=A
         「讀照舊、寫全停」）。

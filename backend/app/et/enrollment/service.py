@@ -105,7 +105,8 @@ class EtEnrollmentService:
                 course_name=course.course_name,
                 status=course.status,
                 # #288：卡片的「已關閉」標示看這一欄，不看 `status`——期間已過者的
-                # `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 `ET-16`、未實作），
+                # `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 由 SCHET002 每日 08:00
+                # 執行，每門課必經這個窗口；見 `course.rules.is_effectively_closed`），
                 # 只看 `status` 會讓卡片標「已發布」而點進去卻什麼都不能做。
                 is_closed=is_effectively_closed(status=course.status, open_end_at=course.open_end_at, now=now),
                 # #363：與 `is_closed` 對稱的另一端——已加入但閱課起始時間未到。

@@ -39,8 +39,10 @@ export interface MyCourseRow {
    * 對學員**視同關閉**（#288）：`status === "CLOSED"` **或**「已發布但閱課期間已過」。
    *
    * ⚠️ 卡片的「已關閉」標示看本欄，**不要自己判 `status === "CLOSED"`**——期間已過者
-   * 的 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬 `ET-16`、未實作），只看
-   * `status` 會讓卡片標「已發布」而點進去 ET06 卻是唯讀的。與 ET06 的
+   * 的 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 由後端 SCHET002 每日 08:00 執行，
+   * 每門課到期後都必經這個窗口——至少一天，排程停用時無限期；完整理由見後端
+   * `course/rules.py` 的 `is_effectively_closed`），只看 `status` 會讓卡片標「已發布」
+   * 而點進去 ET06 卻是唯讀的。與 ET06 的
    * `LearnStructure.is_closed` 同名同義。
    */
   is_closed: boolean

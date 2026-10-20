@@ -48,7 +48,8 @@ describe("ET03 我的課程", () => {
 
   it("期間已過者即使 status 仍是 PUBLISHED 也顯示「已關閉」（#288）", async () => {
     // 卡片看後端算好的 `is_closed`，不自己判 `status === "CLOSED"`。到期自動轉 CLOSED
-    // 屬 ET-16（未實作），所以「status=PUBLISHED 但 is_closed=true」是常態而非過渡狀態。
+    // 由後端 SCHET002 每日 08:00 執行，所以「status=PUBLISHED 但 is_closed=true」是
+    // 每門課到期後都必經的窗口，不是罕見邊角。
     // 若前端改回判 status，這張卡會標成「已發布」，而學員點進去 ET06 是唯讀的——
     // 兩個畫面在使用者眼前互相矛盾。
     mockMyCourses({

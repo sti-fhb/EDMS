@@ -406,7 +406,8 @@ class CourseDetail(BaseModel):
     #: 運作中的已發布課程是「取消｜更新」。
     #:
     #: ⚠️ **前端不可自己判 `status`**：期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉
-    #: `CLOSED` 屬未實作的 ET-16，故此為常態），自行判定會給那門課一排錯的按鈕——教師
+    #: `CLOSED` 由 SCHET002 每日 08:00 執行，每門課到期後都必經這個窗口，見
+    #: `rules.is_effectively_closed`），自行判定會給那門課一排錯的按鈕——教師
     #: 按下「更新」，後端卻因為課程已視同關閉而走另一條路。`CourseCard.is_closed` 同一
     #: 語意、同一理由，兩者一起看。
     is_closed: bool
@@ -664,7 +665,8 @@ class CourseCard(BaseModel):
     is_owner: bool
     #: 是否**視同關閉**（`rules.is_effectively_closed`）——「已關閉」或「已發布但閱課
     #: 期間已過」皆為 `True`。前端的狀態 pill 看這個欄位，**不要自己判 `status`**：
-    #: 期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 屬未實作的 ET-16），
+    #: 期間已過時 `status` 仍是 `PUBLISHED`（到期自動轉 `CLOSED` 由 SCHET002 每日 08:00
+    #: 執行，每門課到期後都必經這個窗口，見 `rules.is_effectively_closed`），
     #: 自行判定會標成「已發布」，而學員其實早已進不去。
     is_closed: bool
 

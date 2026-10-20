@@ -452,7 +452,8 @@ class TestFilterTags:
 class TestEffectivelyClosed:
     """「`PUBLISHED` 但 `OPEN_END_AT` 已過 = 視同關閉」（#288 SA Q1 裁示 A）。
 
-    到期自動轉 `CLOSED` 屬未實作的 ET-16，故期間已過的課程 `STATUS` 仍是 `PUBLISHED`
+    到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，故期間已過到排程跑完之間 `STATUS`
+    仍是 `PUBLISHED`，每門課到期後都必經這個窗口（見 `course.rules.is_effectively_closed`）
     ——清單若只比對 `STATUS`，會把一門學員早已進不去的課列成「已發布」。
     """
 

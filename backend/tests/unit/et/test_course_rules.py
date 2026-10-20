@@ -254,8 +254,9 @@ class TestEnsureReopenable:
     def test_期間已過的已發布課程可重開課(self) -> None:
         """🥇 **#720 放寬的全部理由**。
 
-        到期自動轉 `CLOSED` 屬未實作的 ET-16，所以「`status` 仍是 `PUBLISHED` 而期間
-        已過」是**常態**。原本的 `status != COURSE_CLOSED` 會把這種課程擋下，而編輯頁
+        到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，所以「`status` 仍是 `PUBLISHED`
+        而期間已過」是**每門課到期後都必經的窗口**（見 `course.rules.is_effectively_closed`
+        的正典說明）。原本的 `status != COURSE_CLOSED` 會把這種課程擋下，而編輯頁
         依 `is_closed` 給它的是「取消｜保留編輯｜更新並重開課」、沒有「更新」——
 
         ⇒ 教師按下去吃 409，又沒有別的鈕可按，**那門課的編輯永遠到不了學員**。

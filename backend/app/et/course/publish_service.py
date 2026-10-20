@@ -786,7 +786,8 @@ class EtPublishService:
 
         #288 讓「再開課」重跑檢核（SA Q2 裁示 A），理由是「不重跑等於把發布檢核變成一次性的」。
         但**期間已過**的課程不必走再開課就能復活——狀態仍是 `PUBLISHED`（到期自動轉 `CLOSED`
-        屬 ET-16、未實作，故此為常態），教師只要把 `OPEN_END_AT` 改到未來或清空即可。
+        由 SCHET002 每日 08:00 執行，每門課到期後都必經這個窗口；見 `rules.is_effectively_closed`），
+        教師只要把 `OPEN_END_AT` 改到未來或清空即可。
 
         六項之一是 `OBSOLETE_DOC`（教材不得引用已廢止的 DM 文件）。該路徑會讓學員繼續讀一份
         已廢止的 SOP 當現行教材，而那正是該項檢核存在的理由；另有 `NO_CHAPTER`（章節被刪光）
