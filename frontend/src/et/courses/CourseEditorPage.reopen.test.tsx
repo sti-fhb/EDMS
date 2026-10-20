@@ -15,12 +15,22 @@ import { server } from "../../test/server"
 
 // useParams 可變（切換新增 / 編輯模式）；比照 DM `DmEditorPage.test.tsx`
 // ——`renderWithProviders` 內建之 MemoryRouter 無法指定 initialEntries。
-const { navigateSpy, paramsRef, locationRef } = vi.hoisted(() => ({
+const { navigateSpy, paramsRef, locationRef, blockerRef } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
   paramsRef: { current: {} as Record<string, string | undefined> },
   // 自動存草稿（#335）跨了元件重新掛載——待開啟的項目由 navigate 的 state 帶過去，
   // 故 useLocation 也須可控。
   locationRef: { current: { pathname: "/et/courses/new", state: null } as { pathname: string; state: unknown } },
+  // 🔴 **離開攔截改成可控**（#763）。原本固定回 `unblocked`，於是那個確認視窗的文案
+  // **從來沒有任何測試覆蓋**——而 #763 的第 ② 條正是「那句文案在某個分支是假的、
+  // 沒人發現」。寫死成永不攔截等於把它放進結構性的盲區。
+  blockerRef: {
+    current: { state: "unblocked", proceed: vi.fn(), reset: vi.fn() } as {
+      state: string
+      proceed: () => void
+      reset: () => void
+    },
+  },
 }))
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
@@ -30,9 +40,11 @@ vi.mock("react-router-dom", async (orig) => {
     useParams: () => paramsRef.current,
     useLocation: () => locationRef.current,
     // 離開攔截（#631）需要 data router，`renderWithProviders` 內建的是 MemoryRouter
-    // ——真的 `useBlocker` 在此會拋錯。以「永不攔截」取代，站內離開的攔截屬 e2e 行為
-    //（比照 DM `DmEditorPage.test.tsx` 與 `QuizAnswerPage.test.tsx`）。
-    useBlocker: () => ({ state: "unblocked", proceed: () => {}, reset: () => {} }),
+    // ——真的 `useBlocker` 在此會拋錯，故以 `blockerRef` 取代。
+    //
+    // ⚠️ 預設仍是 `unblocked`（其餘測試不受影響）；要驗那個確認視窗的測試自己把
+    // `blockerRef.current.state` 設成 `"blocked"`。
+    useBlocker: () => blockerRef.current,
   }
 })
 
@@ -44,6 +56,7 @@ function renderEditor(courseId = "1") {
 
 beforeEach(() => {
   navigateSpy.mockClear()
+  blockerRef.current = { state: "unblocked", proceed: vi.fn(), reset: vi.fn() }
   locationRef.current = { pathname: "/et/courses/new", state: null }
 })
 
@@ -66,7 +79,15 @@ function useCourse(
     // ⚠️ #720 之後起訖**不再被模式清空**，所以「欄位空著」這個狀態只能由 fixture 造
     // （等同教師自己把它清掉）。
     schedule = true,
-  }: { isOwner?: boolean; pending?: boolean; isClosed?: boolean; schedule?: boolean } = {},
+    //: 教師按過「保留編輯」（#763）——只影響離開提示的文案。
+    kept = false,
+  }: {
+    isOwner?: boolean
+    pending?: boolean
+    isClosed?: boolean
+    schedule?: boolean
+    kept?: boolean
+  } = {},
 ) {
   server.use(
     http.get("/api/et/courses/:courseId", () =>
@@ -87,6 +108,7 @@ function useCourse(
         invitation_code: isOwner ? "01234567" : null,
         has_pending_changes: pending,
         is_closed: isClosed,
+        has_kept_edits: kept,
       }),
     ),
   )
@@ -250,6 +272,80 @@ describe("ET05 課程關閉與再開課", () => {
     expect(await screen.findByRole("button", { name: "更新並重開課" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "保留編輯" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "更新" })).not.toBeInTheDocument()
+  })
+
+  it("🔴 期間已過的已發布課程，標題列不顯示「邀請學員」與「關閉課程」（#763）", async () => {
+    // ## 這條是 #720 留下的不一致
+    //
+    // #762 把 `FR-ET-US11-01` 改成「僅於已發布**且尚在開放期間內**時顯示」，但那兩顆鈕
+    // 的程式仍只判 `status === "PUBLISHED"`——而期間已過的課程狀態正是 `PUBLISHED`
+    //（到期自動轉 `CLOSED` 屬未實作的 ET-16，故此為常態）。
+    //
+    // 危害：
+    // - **邀請學員**按下去會被後端以 `ET_INVITE_002 / 004` 擋掉（關閉期間不可邀請）
+    //   ——看得到、按了失敗，是最糟的一種 UX
+    // - **關閉課程**對一門已經視同關閉的課程再按，語意空洞
+    //
+    // ⛔ 判準必須與底部動作列**同一個來源**（`course.is_closed`）。#720 的 🔴 死局
+    // 就是前後端各自判 `status` 造成的，不要在同一頁裡再製造一次。
+    useCourse("PUBLISHED", { isClosed: true })
+    renderEditor()
+    await screen.findByRole("button", { name: "更新並重開課" })
+
+    expect(screen.queryByRole("button", { name: "邀請學員" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "關閉課程" })).not.toBeInTheDocument()
+  })
+
+  it("運作中的已發布課程仍顯示「邀請學員」與「關閉課程」（#763 正向錨點）", async () => {
+    // 少了這條，把那兩顆鈕整個拿掉也會讓上一條通過——而那會讓教師再也邀請不了學員、
+    // 也關不了課。
+    useCourse("PUBLISHED", { isClosed: false })
+    renderEditor()
+
+    expect(await screen.findByRole("button", { name: "邀請學員" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "關閉課程" })).toBeInTheDocument()
+  })
+
+  describe("離開提示的文案（#763 ②）", () => {
+    // ## 為什麼這組測試到現在才有
+    //
+    // 離開攔截原本在本檔被 mock 成「永不攔截」，理由寫著「站內離開的攔截屬 e2e 行為」
+    // ——那對**攔不攔得到**成立，但連帶讓那個視窗的**文案**也沒有任何覆蓋。
+    //
+    // 而 #763 ② 正是文案在某個分支是假的、靠人讀程式才發現。⇒ 攔截行為仍不在單元測試
+    // 的範圍，但「攔到之後說什麼」要有守門。
+
+    // ⚠️ 不在這裡呼叫 `useCourse`：ESLint 的 `rules-of-hooks` 看到 `use` 開頭就當成
+    // React Hook，而具名的一般函式不是元件也不是 Hook——會報 error。fixture 由各條
+    // 測試自己設好再進來。
+    async function blockedLeaveDialog() {
+      blockerRef.current = { state: "blocked", proceed: vi.fn(), reset: vi.fn() }
+      renderEditor()
+      return screen.findByRole("dialog")
+    }
+
+    it("🔴 已按過「保留編輯」時，不得說「離開後都會放棄」", async () => {
+      // 旗標一旦設上就留到「更新」或「取消」，`discardUnkeptStage` 對它是 no-op
+      // ——所以對這門課說「都會放棄」是假的。2026-10-20 裁示採文案分流。
+      useCourse("CLOSED", { pending: true, kept: true })
+      const dialog = await blockedLeaveDialog()
+
+      expect(within(dialog).getByText(/離開後編輯仍會保留/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/會留到下次進來/)).toBeInTheDocument()
+      expect(within(dialog).queryByText(/都會放棄/)).not.toBeInTheDocument()
+      expect(within(dialog).getByRole("button", { name: "離開" })).toBeInTheDocument()
+    })
+
+    it("未按過「保留編輯」時，維持「離開將放棄本次的編輯」（正向錨點）", async () => {
+      // 少了這條，把文案一律改成「會保留」也會讓上一條通過——而那會讓教師放心關掉
+      // 分頁，然後編輯真的不見了。
+      useCourse("CLOSED", { pending: true, kept: false })
+      const dialog = await blockedLeaveDialog()
+
+      expect(within(dialog).getByText(/離開將放棄本次的編輯/)).toBeInTheDocument()
+      expect(within(dialog).getByText(/都會放棄/)).toBeInTheDocument()
+      expect(within(dialog).getByRole("button", { name: "放棄並離開" })).toBeInTheDocument()
+    })
   })
 
   it("已關閉提示明確寫出「課程內容仍可編輯」（AC 6）", async () => {
@@ -510,10 +606,18 @@ describe("ET05 課程關閉與再開課", () => {
     await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
   }, REOPEN_FLOW_TIMEOUT)
 
-  it("帶入 0 人時據實顯示，不假裝成功（#247 同一條理由）", async () => {
-    // 🔴 0 通常代表課程掛的受訓對象沒有任何人符合——那是教師需要**現在**知道的事實。
-    // 等學員反映「看不到課」才發現就太晚了。少了這條，把 0 人寫成一般成功訊息也會讓
-    // 上一條通過（它用的是 3 人）。
+  it("🔴 重開課帶入 0 人時，不得宣稱「沒有任何學員符合受訓對象」（#763）", async () => {
+    // ## 發布與重開課的 0，意思不一樣
+    //
+    // | | `invited_count == 0` 的意思 |
+    // |---|---|
+    // | 發布 | 真的沒人符合受訓對象——設定問題，要提醒教師去查 |
+    // | **重開課** | **通常是符合的人早就在課程裡了**（`bulk_enroll_returning` 只回傳本次新加入者）|
+    //
+    // #762 把結果摘要抽成共用元件，理由是「兩份各自寫會漂移」——**版面共用是對的，
+    // 但這一句的語意本來就不同**。照抄發布的說法，會讓教師去查一個不存在的設定問題。
+    //
+    // ⛔ 修法不是把元件拆回兩份，是讓 0 人的說法由呼叫端給。
     const user = userEvent.setup()
     useCourse("CLOSED")
     server.use(
@@ -529,7 +633,10 @@ describe("ET05 課程關閉與再開課", () => {
     await user.click(await screen.findByRole("button", { name: "更新並重開課" }))
 
     const dialog = await screen.findByRole("dialog", { name: "課程已重新開課" })
-    expect(within(dialog).getByText(/沒有任何學員符合本課程的受訓對象/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/本次沒有新的學員被自動帶入/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/沒有任何學員符合本課程的受訓對象/)).not.toBeInTheDocument()
+    // 邀請碼仍要顯示：0 人時它更重要（教師只能靠它讓人進來）
+    expect(within(dialog).getByText("01234567")).toBeInTheDocument()
   }, REOPEN_FLOW_TIMEOUT)
 
   it("再開課遇發布檢核缺漏時以對話框列出，關閉後停在再開課模式（#428 / #509）", async () => {
