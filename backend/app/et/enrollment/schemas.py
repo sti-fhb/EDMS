@@ -72,7 +72,8 @@ class MyCourseRow(BaseModel):
     #:
     #: 少了這一欄，期間已過的課程會以 `status: "PUBLISHED"` 出現在清單、卡片標「已發布」，
     #: 但學員點進去 ET06 立刻看到「此課程已關閉」的唯讀提示，累積進度 / 填問卷全部 409
-    #: ——**卡片與詳細頁在使用者眼前互相矛盾**。到期自動轉 `CLOSED` 屬 `ET-16`（未實作），
+    #: ——**卡片與詳細頁在使用者眼前互相矛盾**。到期自動轉 `CLOSED` 由 SCHET002 每日 08:00
+    #: 執行，但每門課到期後都必經這個窗口（見 `course.rules.is_effectively_closed`），
     #: 那個矛盾不會自己消失，得由後端把「視同關閉」一起回出來。與 ET06 的
     #: `LearnStructure.is_closed` 同名同義，兩個畫面用同一個判定。
     is_closed: bool

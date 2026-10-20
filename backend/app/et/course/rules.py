@@ -230,7 +230,8 @@ def ensure_reopenable(*, status: str, open_end_at: datetime | None, now: datetim
     ## 🔴 #720 放寬的理由——原本的 `status != COURSE_CLOSED` 造成死局
 
     判準原本是 `status == COURSE_CLOSED`。而**期間已過的課程 `status` 仍是 `PUBLISHED`**
-    （到期自動轉 `CLOSED` 屬未實作的 ET-16，故此為**常態**）。#720 讓編輯頁依
+    （到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，期間已過到排程跑完之間必然經過
+    這個窗口——理由見 `is_effectively_closed`）。#720 讓編輯頁依
     `is_closed`（＝ `is_effectively_closed`）分流動作列之後，那種課程拿到的是
     「取消｜保留編輯｜更新並重開課」——而「更新」鈕不顯示：
 
@@ -258,9 +259,26 @@ def is_effectively_closed(*, status: str, open_end_at: datetime | None, now: dat
     ## 這支函式補上的是一個實際存在的缺口
 
     `spec_us11` 場景 7、FR-ET-US11-03 與 `data-model` §ET_COURSE 業務規則（「`now >
-    OPEN_END_AT` 視同關閉」）三處都要求「應用層即時判定」，但在本 issue 之前**全後端
+    OPEN_END_AT` 視同關閉」）三處都要求「應用層即時判定」，但在 #288 之前**全後端
     沒有任何地方讀 `OPEN_END_AT` 做存取判定**——閱課期間結束後，課程照常可加入、可累積
-    進度、可作答、可填問卷，而且會一直如此（到期自動轉 `CLOSED` 屬 `ET-16`，未實作）。
+    進度、可作答、可填問卷。
+
+    ## 🔴 判準為何不能改成只比對 `STATUS`（本檔的正典說明，#772）
+
+    **到期自動轉 `CLOSED` 已經實作了**：`schedules/service.close_expired_courses`，掛在
+    SCHET002 每日 08:00（#325 / US14 於 2026-09-14 接線並 `IS_ENABLED`）。所以「閱課期間
+    已過但 `STATUS` 仍是 `PUBLISHED`」是**到期後、下一次排程執行前的過渡窗口**。
+
+    ⚠️ **窗口短不等於可以忽略**，三個理由：
+
+    1. **每一門課到期後都必然經過它**，長達一天。不是罕見邊角，是每門課的必經狀態——
+       任何讀 `STATUS` 做判定的程式碼，每天都會遇到處於這個窗口的課程。
+    2. **可能不只一天**：`close_expired_courses` 以 `mark_closed` 寫入，遇樂觀鎖版本不符
+       回 `None` 且**刻意不重試**（「下一次每日執行會再掃到它」）。有人同時在改那門課就順延。
+    3. **可能無限期**：DP06 排程總覽可停用 SCHET002，停用期間一門都不會轉。
+
+    ⇒ 判準一律用本函式，⛔ 不要改成 `status == COURSE_CLOSED`。ET / 前端共 20 餘處引用
+    本段為理由，改寫此處請連同它們一起看。
 
     ## 🔴 為何**只看訖止、不看起始**
 

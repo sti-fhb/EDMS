@@ -108,8 +108,8 @@ class EtTagInviteRepository:
 
         `STATUS='PUBLISHED'` 只涵蓋一半。`CLOSED` 固然被它排除（狀態機為
         `DRAFT → PUBLISHED ⇄ CLOSED`），但**閱課期間已過的課程狀態仍是 `PUBLISHED`**
-        ——到期自動轉 `CLOSED` 屬 `ET-16`、未實作，所以那是常態而非過渡狀態
-        （見 `course.rules.is_effectively_closed`）。
+        ——到期自動轉 `CLOSED` 由 SCHET002 每日 08:00 執行，所以每門課到期後都必然經過
+        這個窗口，不是罕見邊角（見 `course.rules.is_effectively_closed`）。
 
         少了期間條件，FR-ET-US11-07「關閉期間不可邀請學員」會被這條路徑整個繞過：
         教師對期間已過的課程送 Email 邀請會被擋（409 `ET_INVITE_002`），但只要改去
