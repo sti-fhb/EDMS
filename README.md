@@ -147,15 +147,22 @@ Migration 執行完成後，會自動建立以下 seed 資料：
 
 執行 `alembic upgrade head` 後，可使用以下示範帳號登入：
 
-| 帳號（Email）| 密碼 | DM 角色 | ET 角色 | 說明 |
-|------|------|---------|---------|------|
-| `admin@edms.local` | `Edms@Test2026` | `DM_ADMIN` | `ADMIN` | 雙模組管理者，可進 DP 後台 |
-| `editor@edms.local` | `Edms@Test2026` | `DM_EDITOR` | `STUDENT` | 文件編輯者示範帳號 |
-| `reviewer@edms.local` | `Edms@Test2026` | `DM_REVIEWER` | `STUDENT` | 文件審核者示範帳號 |
-| `teacher@edms.local` | `Edms@Test2026` | `DM_VIEWER` | `TEACHER` | 教師示範帳號 |
-| `student@edms.local` | `Edms@Test2026` | `DM_VIEWER` | `STUDENT` | 學員示範帳號 |
+| 帳號（Email）| DM 角色 | ET 角色 | 說明 |
+|------|---------|---------|------|
+| `admin@edms.local` | `DM_ADMIN` | `ADMIN` | 雙模組管理者，可進 DP 後台 |
+| `editor@edms.local` | `DM_EDITOR` | `STUDENT` | 文件編輯者示範帳號 |
+| `reviewer@edms.local` | `DM_REVIEWER` | `STUDENT` | 文件審核者示範帳號 |
+| `teacher@edms.local` | `DM_VIEWER` | `TEACHER` | 教師示範帳號 |
+| `student@edms.local` | `DM_VIEWER` | `STUDENT` | 學員示範帳號 |
 
-> 示範帳號由 seed migration `7b24b5dea3ad_common_seed_demo_accounts` 建立；正式部署時請刪除或更換密碼（`alembic downgrade` 至該版之前即可整批移除）。
+> **密碼請洽系統管理者**，五組共用同一組。
+>
+> ⚠️ **本欄不得寫入明文密碼。** 本 repo 為 public，寫進來即等同公開；而 git 歷史無法當作
+> 已刪除，事後移除也救不回來，只能輪替密碼（`18489e30023b_dp_demo_accounts_rotate_password`
+> 即為一次輪替）。密碼僅以 bcrypt 雜湊存在於 migration 中。
+>
+> 帳號由 `7b24b5dea3ad_common_seed_demo_accounts` 建立，受 `SEED_DEMO_ACCOUNTS`（預設開啟）
+> 控制；不需要示範帳號的環境將該設定設為 `false` 即不會種入。
 
 ---
 
