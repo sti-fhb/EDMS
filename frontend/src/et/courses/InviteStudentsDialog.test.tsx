@@ -238,6 +238,26 @@ describe("名單被擋下時不顯示「將直接加入 N 位」（#784）", () 
     expect(screen.queryByText(/將直接加入 \d+ 位/)).not.toBeInTheDocument()
   })
 
+  it("預覽通過、按「確認寄出」才被擋下時同樣不再說會加入", async () => {
+    // code review MEDIUM：`handleSend` 也會擋下（預覽後到寄出之間，帳號可能被停用）。
+    // 兩條路徑目前共用同一個錯誤處理，但沒有測試的話，之後調整寄出那支的清空順序不會被抓到。
+    const user = userEvent.setup()
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations", () =>
+        HttpResponse.json(
+          { error_code: "ET_INVITE_008", error_message: "名單有已停用的帳號", disabled_emails: ["typo@x.gov.tw"] },
+          { status: 422 },
+        ),
+      ),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+    await submitTwo(user)
+    await user.click(await screen.findByRole("button", { name: "確認寄出" }))
+
+    expect(await screen.findByText(/無法邀請（請確認名單或請管理者先啟用）/)).toBeInTheDocument()
+    expect(screen.queryByText(/將直接加入 \d+ 位/)).not.toBeInTheDocument()
+  })
+
   it("修改名單後擋下狀態解除，說明恢復顯示", async () => {
     const user = userEvent.setup()
     blockWith("ET_INVITE_005", "unknown_emails")
