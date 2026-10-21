@@ -79,6 +79,57 @@ class TestOrphanPaths:
         assert orphan not in _files(root)
         assert result.deleted == 1
 
+    async def _staged_upload(self, client, db, uid: str, root: str) -> tuple[dict, str]:
+        ids = await _course_with_content(client, db, uid)
+        await _publish(client, db, uid, ids["course_id"])
+        await db.commit()
+        before = _files(root)
+        video = await _upload(client, uid, ids["material_id"], "lesson.mp4")
+        (uploaded,) = _files(root) - before
+        return ids | {"video": video}, uploaded
+
+    async def _assert_orphan_then_swept(self, db, root: str, uploaded: str) -> None:
+        assert uploaded in _files(root), "前置：丟棄暫存不刪檔"
+        _age(root, uploaded)
+        await EtOrphanVideoSweeper().run(db, root=root)
+        assert uploaded not in _files(root)
+
+    async def test_路徑B_按取消放棄整輪編輯(self, client, db, root) -> None:
+        uid = await _user(db, "ZT_OV5")
+        ids, uploaded = await self._staged_upload(client, db, uid, root)
+
+        r = await client.delete(f"{_COURSES}/{ids['course_id']}/content/stage", headers=_bearer(uid))
+        assert r.status_code == 204, r.text
+        await db.commit()
+
+        await self._assert_orphan_then_swept(db, root, uploaded)
+
+    async def test_路徑C_暫存區刪掉剛上傳的影片後按更新(self, client, db, root) -> None:
+        """它從沒進過活表；暫存列隨套用清掉後，就沒有任何列指向那支檔。"""
+        uid = await _user(db, "ZT_OV6")
+        ids, uploaded = await self._staged_upload(client, db, uid, root)
+        mid = ids["material_id"]
+        detail = (await client.get(f"/api/et/materials/{mid}", headers=_bearer(uid))).json()
+        keep = [v["video_id"] for v in detail["videos"] if v["video_id"] != ids["video"]["video_id"]]
+        r = await client.put(
+            f"/api/et/materials/{mid}",
+            json={
+                "material_name": detail["material_name"],
+                # 刪掉這支後教材要仍有媒材（ET_MATERIAL_002），補一段說明文字
+                "description_html": detail["description_html"] or "<p>說明</p>",
+                "doc_ids": [d["doc_id"] for d in detail["docs"]],
+                "video_ids": keep,
+                "version": detail["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text
+        r = await client.post(f"{_COURSES}/{ids['course_id']}/content/apply", headers=_bearer(uid))
+        assert r.status_code == 200, r.text
+        await db.commit()
+
+        await self._assert_orphan_then_swept(db, root, uploaded)
+
     async def test_更新後成為活表的影片不被清掉(self, client, db, root) -> None:
         """正向錨點：同一條上傳路徑，按了「更新」就有活表列指向，清理不得碰它。"""
         uid = await _user(db, "ZT_OV2")
