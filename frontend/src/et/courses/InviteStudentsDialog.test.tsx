@@ -271,6 +271,47 @@ describe("名單被擋下時不顯示「將直接加入 N 位」（#784）", () 
   })
 })
 
+describe("寄信失敗後的底部說明（#785，使用者裁示選項 3）", () => {
+  // 那些人已經加入，但底部仍說「將直接加入 N 位」；「確認寄出」照樣可按，再按會對名單上
+  // **全部**的人重寄（後端對已在課程中的人不重複加入、但照樣寄信）。裁示：按鈕保留，
+  // 說明改寫成實際會發生的事。
+  async function failMail(user: ReturnType<typeof userEvent.setup>) {
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations", () =>
+        HttpResponse.json({ joined: 2, mail_failed: ["b@x.gov.tw"] }),
+      ),
+    )
+    await user.type(screen.getByLabelText("學員 Email"), "a@x.gov.tw,b@x.gov.tw")
+    // 正向錨點：寄出之前照常說「將直接加入」
+    expect(screen.getByText("將直接加入 2 位並各寄一封通知信")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+    await user.click(await screen.findByRole("button", { name: "確認寄出" }))
+    await screen.findByText(/通知信寄送失敗/)
+  }
+
+  it("寄信失敗後改說再按會對全部 N 位重寄，不再說「將直接加入」", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+    await failMail(user)
+
+    expect(screen.getByText("再按「確認寄出」會對名單上全部 2 位重寄通知信（已在課程中的人不會重複加入）")).toBeInTheDocument()
+    expect(screen.queryByText(/將直接加入 \d+ 位/)).not.toBeInTheDocument()
+    // 裁示選項 3：按鈕保留可按
+    expect(screen.getByRole("button", { name: "確認寄出" })).toBeEnabled()
+  })
+
+  it("修改名單後回到一般說明", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+    await failMail(user)
+
+    await user.type(screen.getByLabelText("學員 Email"), ",c@x.gov.tw")
+
+    expect(screen.getByText("將直接加入 3 位並各寄一封通知信")).toBeInTheDocument()
+    expect(screen.queryByText(/重寄通知信/)).not.toBeInTheDocument()
+  })
+})
+
 describe("InviteStudentsDialog：邀請碼頁籤", () => {
   afterEach(() => {
     vi.unstubAllEnvs()

@@ -344,7 +344,13 @@ export function InviteStudentsDialog({
       <DialogActions>
         {tab === 0 && !blocked && (
           <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", ml: 1 }}>
-            將直接加入 {recipientCount} 位並各寄一封通知信
+            {/* 寄信失敗後那些人**已經加入**——再說「將直接加入」與上方的 Alert 矛盾。「確認寄出」
+                照樣可按（#785 使用者裁示選項 3），所以說明改寫成再按會發生的事：後端對名單上
+                每一位都先 upsert 再寄信（`invitation/service.py` 的 `send`），不排除已在課程中的人。
+                改名單時 `mailFailures` 會清空，說明隨之回到一般版本。 */}
+            {mailFailures.length > 0
+              ? `再按「確認寄出」會對名單上全部 ${recipientCount} 位重寄通知信（已在課程中的人不會重複加入）`
+              : `將直接加入 ${recipientCount} 位並各寄一封通知信`}
           </Typography>
         )}
         <Button variant="outlined" size="small" onClick={handleClose}>
