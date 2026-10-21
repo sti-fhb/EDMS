@@ -1,8 +1,8 @@
 import { QueryClient } from "@tanstack/react-query"
-import { screen, waitFor } from "@testing-library/react"
+import { act, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtQuizAnswerPage } from "./QuizAnswerPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
@@ -36,7 +36,7 @@ beforeEach(() => {
 function attemptState({
   remainingSec = 600,
   selected = {},
-}: { remainingSec?: number; selected?: Record<number, number[]> } = {}) {
+}: { remainingSec?: number | null; selected?: Record<number, number[]> } = {}) {
   return {
     attempt_id: 800,
     quiz_id: 700,
@@ -359,6 +359,151 @@ describe("ET07 答題頁", () => {
       await user.click(screen.getByLabelText("捐血人身分"))
 
       await waitFor(() => expect(saves).toEqual([{ questionId: 901, selected: [9011] }]))
+    })
+
+    describe("進入最後一分鐘時補送尚未暫存的作答（#791）", () => {
+      // 🔴 假時鐘裝在 render **之前**（倒數與補送的 `setInterval` 都在掛載時建立）；`toFake` 不含
+      // `setTimeout`——MSW 靠它回應，凍住會讓請求永遠等不到（見 `AuthProvider.test.tsx`）。
+      // ⚠️ 本區塊不用 `waitFor`：它以 `setInterval` 輪詢，被假造後只剩 DOM 變動會觸發檢查，
+      // 而暫存送達不改 DOM——改為等 MSW handler 收到請求時解出的 Promise
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] })
+      })
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      const realDelay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+      /** 記下每一筆暫存請求與回應狀態；`next()` 在下一筆送達時解出（須在觸發前呼叫）。 */
+      function saveLog(respond: (questionId: number, n: number) => Response) {
+        const log: { questionId: number; selected: number[]; status: number }[] = []
+        const waiters: (() => void)[] = []
+        server.use(
+          http.put("/api/et/attempts/:attemptId/answers/:questionId", async ({ request, params }) => {
+            const questionId = Number(params.questionId)
+            const { selected_options } = (await request.json()) as { selected_options: number[] }
+            const res = respond(questionId, log.filter((s) => s.questionId === questionId).length + 1)
+            log.push({ questionId, selected: selected_options, status: res.status })
+            waiters.splice(0).forEach((resolve) => resolve())
+            return res
+          }),
+        )
+        const next = () => new Promise<void>((resolve) => waiters.push(resolve))
+        return { log, next }
+      }
+
+      /** 一秒一秒推進假時鐘，直到 `arrived` 解出；超過 `maxSeconds` 仍未解出即失敗。 */
+      async function advanceUntil(arrived: Promise<void>, maxSeconds: number) {
+        let done = false
+        void arrived.then(() => {
+          done = true
+        })
+        for (let i = 0; i < maxSeconds && !done; i += 1) {
+          await act(async () => {
+            vi.advanceTimersByTime(1000)
+          })
+          await realDelay(20)
+        }
+        expect(done).toBe(true)
+      }
+
+      it("最後一分鐘之前選好、停在該題等倒數歸零：補送後自動交卷，該題照常計分", async () => {
+        // 答完停在最後一題檢查是常見習慣。那一題沒切題、沒按提交，點選時也還不在「點選即存」的
+        // 最後一分鐘內——倒數歸零時的補送必被後端以逾時拒絕，該題以「未作答」計分
+        const deadline = Date.now() + 90_000
+        let submitArrived!: () => void
+        const submitted = new Promise<void>((resolve) => {
+          submitArrived = resolve
+        })
+        server.use(
+          http.get("/api/et/attempts/:attemptId", () => HttpResponse.json(attemptState({ remainingSec: 90 }))),
+          http.post("/api/et/attempts/:attemptId/submit", () => {
+            submitArrived()
+            return HttpResponse.json({})
+          }),
+        )
+        // 逾時後送達的照後端行為拒絕（剩餘秒數無條件捨去，最後 1 秒內即逾時）
+        const saves = saveLog(() => (Date.now() > deadline - 1000 ? EXPIRED() : new HttpResponse(null, { status: 204 })))
+        const user = userEvent.setup()
+        renderWithProviders(<EtQuizAnswerPage />)
+        await screen.findByText("採血前應先確認什麼？")
+
+        await user.click(screen.getByLabelText("捐血人身分"))
+        // 前提：還剩 90 秒，點選不立即暫存——否則下面的「有存到」不是補送的功勞
+        await realDelay(50)
+        expect(saves.log).toEqual([])
+
+        await advanceUntil(saves.next(), 35)
+        await advanceUntil(submitted, 65)
+
+        // 只有那一題、只送一次且被收下：Q2 沒動過不送；存好之後每秒一輪的補送不再發請求
+        expect(saves.log).toEqual([{ questionId: 901, selected: [9011], status: 204 }])
+      })
+
+      it("補送失敗時，下一秒再補送一次", async () => {
+        // 歸零時的補送必被拒，補送失敗後若不重試，這份作答就回到 #791 的狀況
+        server.use(http.get("/api/et/attempts/:attemptId", () => HttpResponse.json(attemptState({ remainingSec: 90 }))))
+        const saves = saveLog((_questionId, n) => new HttpResponse(null, { status: n === 1 ? 500 : 204 }))
+        const user = userEvent.setup()
+        renderWithProviders(<EtQuizAnswerPage />)
+        await screen.findByText("採血前應先確認什麼？")
+        await user.click(screen.getByLabelText("捐血人身分"))
+
+        await advanceUntil(saves.next(), 35)
+        await realDelay(50)
+        await advanceUntil(saves.next(), 5)
+
+        expect(saves.log).toEqual([
+          { questionId: 901, selected: [9011], status: 500 },
+          { questionId: 901, selected: [9011], status: 204 },
+        ])
+      })
+
+      it("進入作答頁時已在最後一分鐘、作答與伺服器相同：不發補送請求", async () => {
+        server.use(
+          http.get("/api/et/attempts/:attemptId", () =>
+            HttpResponse.json(attemptState({ remainingSec: 30, selected: { 901: [9011] } })),
+          ),
+        )
+        const saves = saveLog(() => new HttpResponse(null, { status: 204 }))
+        const user = userEvent.setup()
+        renderWithProviders(<EtQuizAnswerPage />)
+        await screen.findByText("採血前應先確認什麼？")
+
+        await act(async () => {
+          vi.advanceTimersByTime(5000)
+        })
+        await realDelay(50)
+        expect(saves.log).toEqual([])
+
+        // 正向錨點：同一個 recorder 收得到請求（最後一分鐘點選即存）
+        const arrived = saves.next()
+        await user.click(screen.getByLabelText("天氣"))
+        await arrived
+        expect(saves.log).toEqual([{ questionId: 901, selected: [9012], status: 204 }])
+      })
+
+      it("不限時的測驗不補送", async () => {
+        server.use(http.get("/api/et/attempts/:attemptId", () => HttpResponse.json(attemptState({ remainingSec: null }))))
+        const saves = saveLog(() => new HttpResponse(null, { status: 204 }))
+        const user = userEvent.setup()
+        renderWithProviders(<EtQuizAnswerPage />)
+        await screen.findByText("採血前應先確認什麼？")
+        await user.click(screen.getByLabelText("捐血人身分"))
+
+        await act(async () => {
+          vi.advanceTimersByTime(3 * 60 * 60 * 1000)
+        })
+        await realDelay(50)
+        expect(saves.log).toEqual([])
+
+        // 正向錨點：切題時照常暫存
+        const arrived = saves.next()
+        await user.click(screen.getByRole("button", { name: /第 2 題/ }))
+        await arrived
+        expect(saves.log).toEqual([{ questionId: 901, selected: [9011], status: 204 }])
+      })
     })
 
     it("對照：時間還多時點選不立即暫存（維持切題 / 提交時才送）", async () => {
