@@ -29,21 +29,24 @@ FRESH = NOW - ORPHAN_GRACE_SECONDS + 60
 
 
 def _name(ext: str = "mp4") -> str:
-    """系統產生的檔名格式：`{uuid hex}.{副檔名}`。"""
+    """系統產生的檔名格式：`{uuid hex}.{副檔名}`。只能在**測試函式內**呼叫。"""
     return f"{uuid.uuid4().hex}.{ext}"
 
 
-A = f"12/{_name()}"
+# ⚠️ 模組層級與 `parametrize` 的值必須**固定**：pytest-xdist 各 worker 各自收集，值若是亂數，
+# 測試名稱在 worker 之間不同，整批以「Different tests were collected」拒跑（2026-10-21 本機 CI）。
+HEX = "0123456789abcdef0123456789abcdef"
+A = f"12/{HEX}.mp4"
 
 
 class TestIsManagedVideoPath:
-    @pytest.mark.parametrize("path", [A, f"{storage.TMP_DIRNAME}/{_name('webm')}"])
+    @pytest.mark.parametrize("path", [A, f"{storage.TMP_DIRNAME}/{HEX}.webm"])
     def test_系統產生的檔名(self, path: str) -> None:
         assert is_managed_video_path(path)
 
     @pytest.mark.parametrize(
         "path",
-        ["12/a.mp4", ".gitkeep", "lost+found/x", f"abc/{_name()}", f"12/sub/{_name()}", f"12/{_name()}.bak"],
+        ["12/a.mp4", ".gitkeep", "lost+found/x", f"abc/{HEX}.mp4", f"12/sub/{HEX}.mp4", f"12/{HEX}.mp4.bak"],
     )
     def test_其他檔一律不是(self, path: str) -> None:
         """根目錄是 bind mount：手放的檔、`lost+found`、誤設 root 時的別人的檔，都不是本作業該碰的。"""
