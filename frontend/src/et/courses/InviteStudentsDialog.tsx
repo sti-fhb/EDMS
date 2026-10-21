@@ -190,6 +190,9 @@ export function InviteStudentsDialog({
   )
 
   const recipientCount = parseEmails(emails).length
+  // 名單被擋下（查無帳號 / 已停用）時整批不寄、無人加入——底部再說「將直接加入 N 位」就與
+  // 上方的擋下訊息矛盾，教師會以為已寄出或即將寄出（#784）。改名單時兩者都會清空，說明隨之恢復。
+  const blocked = unknownEmails.length > 0 || disabledEmails.length > 0
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
@@ -339,7 +342,7 @@ export function InviteStudentsDialog({
       </DialogContent>
 
       <DialogActions>
-        {tab === 0 && (
+        {tab === 0 && !blocked && (
           <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", ml: 1 }}>
             將直接加入 {recipientCount} 位並各寄一封通知信
           </Typography>
