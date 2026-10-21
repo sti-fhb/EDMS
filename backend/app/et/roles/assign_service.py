@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.module_assign import AssignmentView
 from app.core.operator import OperatorInfo
+from app.core.request_context import get_client_ip
 from app.et.catalog.models import TAG_TYPE_AUDIENCE, TAG_TYPE_UNIT, EtTag, EtUserTag
 from app.et.catalog.pair import Pair, decode_pair, encode_pair
 from app.et.constants import ALL_ROLES, ROLE_ADMIN, ROLE_STUDENT
@@ -226,6 +227,7 @@ class EtAssignService:
             target_id=user_id,
             description="變更 ET 角色 / 受訓對象指派",
             after_value={"roles": sorted(roles), "tags": sorted(encode_pair(*p) for p in desired)},
+            source_ip=get_client_ip(),
         )
 
     async def _backfill_tagged_courses(

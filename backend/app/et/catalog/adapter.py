@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.module_assign import ControlledGroupView, ControlledItemView, ControlledKindView, SetEnabledResult
+from app.core.request_context import get_client_ip
 from app.et.catalog.models import TAG_TYPE_AUDIENCE, TAG_TYPE_UNIT, EtTag, EtUserTag
 from app.services import AuditLogService
 
@@ -195,6 +196,7 @@ class EtCatalogAdapter:
             target_id=str(tag.tag_id),
             description="新增受訓對象標籤",
             after_value={"tag_name": name, "tag_type": code},
+            source_ip=get_client_ip(),
         )
 
     async def rename_controlled(
@@ -234,6 +236,7 @@ class EtCatalogAdapter:
             description="受訓對象標籤改名",
             before_value={"tag_name": before},
             after_value={"tag_name": new_name},
+            source_ip=get_client_ip(),
         )
 
     async def set_controlled_enabled(
@@ -283,6 +286,7 @@ class EtCatalogAdapter:
             # ⚠️ `tag_name` 不是冗餘：target_id 是 TAG_ID，稽核列若不自帶名稱，DP05 的對象欄
             # 只剩一個數字（#716）。新增 / 改名一向有帶，啟停原本漏了。名稱取**異動當下**的值。
             after_value={"is_active": enabled, "tag_name": tag.tag_name},
+            source_ip=get_client_ip(),
         )
         return SetEnabledResult(affected_viewers=affected_count)
 
