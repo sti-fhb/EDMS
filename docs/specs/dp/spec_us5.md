@@ -122,7 +122,7 @@
 
 | PARAM_ID | PARAM_KEY | 中文名稱（PARAM_NAME）| 型別 | 值域 | 依據 | 維護層級 |
 |----------|-----------|------------------|------|------|------|----------|
-| `JWT` | `ACCESS_TTL_MIN` | 閒置自動登出（分鐘） | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）| `HIDDEN` |
+| `JWT` | `ACCESS_TTL_MIN` | 閒置自動登出（分鐘） | 正整數（分）| 1–15 | spec 明載（含敏感資料系統 ≤ 15 分）；例外：院內 UAT 資安檢測（ZAP）期間由環境變數 `SCAN_ACCESS_TTL_MIN`（1–720）暫時覆寫，檢測結束即移除（TBMS #4958）| `HIDDEN` |
 | `JWT` | `RENEW_MAX_HOURS` | 單次登入時效上限（小時） | 正整數（時）| 1–24 | 建議（單日上限）| `HIDDEN` |
 | `PWD_POLICY` | `MIN_LEN` | 密碼最小長度（一般使用者） | 正整數 | 8 ≤ 值 ≤ `ADMIN_MIN_LEN` | spec 明載（一般 8）| `ADMIN` |
 | `PWD_POLICY` | `ADMIN_MIN_LEN` | 密碼最小長度（特權帳號） | 正整數 | `MIN_LEN` ≤ 值 ≤ 72（預設 12）| spec 明載（特權 12）；上限 72 由 bcrypt 推得（#528）| `ADMIN` |

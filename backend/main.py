@@ -44,6 +44,7 @@ from app.dp.roles.router import router as dp_roles_router
 from app.dp.schedules.router import router as dp_schedule_router
 from app.dp.schedules.scheduler import shutdown_scheduler, start_scheduler
 from app.dp.user.router import router as dp_user_router
+from app.dp.user.service import warn_if_scan_access_ttl_override
 from app.dp.users.router import router as dp_users_router
 from app.et.approval.router import router as et_approval_router
 from app.et.attempt.router import router as et_attempt_router
@@ -78,6 +79,7 @@ async def lifespan(app: "FastAPI"):
     # 密碼運算後端暖機（#214）：讓 passlib 的惰性初始化在單執行緒下完成，避免多 worker
     # 首呼的競態，並把它已知的版本偵測 traceback 落在啟動階段而非第一個使用者登入時。
     await warm_up_password_backend()
+    warn_if_scan_access_ttl_override()
     stop_event = asyncio.Event()
     task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
     scheduler = await start_scheduler()
