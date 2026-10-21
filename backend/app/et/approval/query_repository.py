@@ -199,11 +199,11 @@ class EtApprovalQueryRepository:
         那一邊會安靜失效。⛔ 但別把「測試綠」讀成「這個參數有在守什麼」——它守的是未來，
         不是現在。本 docstring 的前一版把這件事寫反了（宣稱省略會立刻失效）。
 
-        ⚠️ **`keyword` 與 `course_id` 可以只給一個**（#439），但**不可兩個都不給**——
-        那就是 SA Q2 裁示 A 要擋的「留白查全部」。本層不檢核，由
-        `query_rules.normalize_search_criteria` 在 service 進來之前擋下；這裡只負責
-        「有給就加條件」。⛔ 不要在此補一道「都沒給就回空」的防禦——那會把 422 變成
-        一個看起來正常的空清單。
+        ⚠️ **`keyword` 與 `course_id` 都可以不給**：兩者皆不給即列出全部（#548 裁示 3，
+        原本由 `normalize_search_criteria` 以 422 `ET_APPROVAL_006` 擋下，已退役）。這裡只負責
+        「有給就加條件」；`keyword` 已由 `query_rules.normalize_keyword` 把全空白正規化成
+        `None`。⛔ 不要在此補一道「都沒給就回空」的防禦——留白查全部是合法操作，回空清單
+        會讓教師以為沒有任何紀錄。
 
         Args:
             keyword: 學員姓名或 Email 關鍵字，擇一命中即可；`None` 表不以關鍵字篩。

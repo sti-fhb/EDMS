@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.et.audit_target import course_audit_payload
 from app.et.common.optimistic_lock import ensure_version_matched
@@ -778,4 +779,5 @@ class EtQuizService:
             target_id=str(course_id),
             description=description,
             after_value=await course_audit_payload(db, course_id) or None,
+            source_ip=get_client_ip(),
         )

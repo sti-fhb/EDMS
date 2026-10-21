@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
+from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.users.account_status import is_account_disabled
 from app.dp.users.models import DpUser  # 唯讀 join（報表/查詢例外，已列於 et/spec.md §外模組 table 引用清單）
@@ -1085,6 +1086,7 @@ class EtCourseService:
             target_id=str(course_id),
             description=description,
             after_value=await course_audit_payload(db, course_id) or None,
+            source_ip=get_client_ip(),
         )
 
 

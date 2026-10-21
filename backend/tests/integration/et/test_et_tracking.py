@@ -1638,6 +1638,35 @@ class TestExportAudit:
         )
         assert logged == 1, "匯出是把全班具名資料帶離系統，必須留痕"
 
+    @pytest.mark.parametrize(("csv", "suffix"), [("students.csv", "a"), ("survey-result.csv", "b")])
+    async def test_匯出稽核記下來源_IP(self, client, db, csv: str, suffix: str) -> None:
+        """#790：DP05 中「ET-個資匯出」的來源 IP 一律是「—」。
+
+        個資匯出正是最需要追查來源的那一類紀錄。ET 其他漏帶的稽核由
+        `tests/unit/et/test_et_audit_source_ip.py` 以結構檢查守住。
+        """
+        teacher = await _user(db, f"t_tr69{suffix}")
+        course_id = await _course(db, owner=teacher)
+        if csv == "survey-result.csv":
+            await _survey(db, course_id)  # 沒有問卷時 404，不留匯出紀錄（見下方另一條）
+        student = await _user(db, f"s_tr69{suffix}", roles=(ROLE_STUDENT,), name="王小明")
+        await _enroll(db, student, course_id)
+        await db.commit()
+
+        r = await client.get(f"{_URL}/{course_id}/{csv}", headers=_bearer(teacher))
+
+        assert r.status_code == 200, r.text
+        source_ip = await db.scalar(
+            select(DpAuditLog.source_ip).where(
+                DpAuditLog.func_name == "ET-EXPORT",
+                DpAuditLog.created_user == teacher,
+                DpAuditLog.target_id == str(course_id),
+            )
+        )
+        # 等於測試連線的對端位址（httpx `ASGITransport` 預設 client 為 127.0.0.1，經
+        # `client_ip_middleware` 寫入）——只斷言「有值」的話，任何非空字串都會過
+        assert source_ip == "127.0.0.1", "匯出稽核必須帶來源 IP"
+
     async def test_稽核不寫入姓名或答案內容(self, client, db) -> None:
         """稽核記「誰在何時帶走了多少」，不記內容。
 

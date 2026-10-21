@@ -45,6 +45,7 @@ from app.core.csv_export import sanitize_csv_cell
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.pagination import PaginatedResult, paginate
+from app.core.request_context import get_client_ip
 from app.core.utils import format_taipei, utcnow
 from app.et.approval.repository import EtApprovalRepository
 from app.et.approval.rules import (
@@ -322,6 +323,7 @@ class EtTrackingService:
             description="重置學員重考次數",
             # 供 DP05 對象欄顯示課程名（#717）；用已載入的 course，不另查。
             after_value={"course_name": course.course_name},
+            source_ip=get_client_ip(),
         )
         return RetryResetResult(user_id=user_id, quiz_id=quiz_id, used_attempts=0)
 
@@ -356,6 +358,7 @@ class EtTrackingService:
             # 課程名供 DP05 對象欄顯示（#717）。⛔ 不得加入學員姓名——那是個資，
             # 而人名由查詢端查 DP_USER 活表取得（見 dp/audit/target_resolver）。
             after_value=await course_audit_payload(db, course_id) or None,
+            source_ip=get_client_ip(),
         )
 
     async def _require_writable(self, db: AsyncSession, course_id: int, actor_id: str):
@@ -552,6 +555,8 @@ class EtTrackingService:
             operator_id=actor_id,
             target_id=str(course_id),
             description=f"匯出{what} CSV（{count} 筆）",
+            # 個資匯出正是最需要追查來源的稽核——原本漏帶，DP05 的來源 IP 一律是「—」（#790）
+            source_ip=get_client_ip(),
             # ⭐ 課程名**不是個資**，與上方 docstring 所禁的「姓名 / 答案文字」不同層次：
             # 它只說明這次匯出的是哪一門課，不洩漏任何人的資料（#717）。
             after_value=await course_audit_payload(db, course_id) or None,
