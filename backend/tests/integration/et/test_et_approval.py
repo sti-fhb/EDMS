@@ -692,6 +692,33 @@ class TestRevokeAndReapprove:
 
         assert r.json()["data"][0]["approval_status"] == "PENDING"
 
+    async def test_撤銷後清單不回傳失效的核可人時間與備註(self, client, db) -> None:
+        """#768 第 14 項：撤銷不清活表欄位（ET04 的已撤銷紀錄還要用），但 ET02 清單此時是
+        「待核可」，那三欄是已失效的舊核可——回傳出去，任何使用端都會顯示成「核可過」。
+
+        `approval_version` 照常回傳：重新核可要帶它。
+        """
+        teacher = await _user(db, "t_ap33b")
+        course_id = await _course(db, owner=teacher)
+        item_id = await _item(db, course_id, title="教材")
+        student = await _completed_student(db, course_id, "s_ap33b", item_id)
+        await db.commit()
+        version = await self._approved(client, db, teacher, course_id, student)
+        before = (await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))).json()["data"][0]
+        # 正向錨點：核可當下三欄都有值，下面的 None 才代表「撤銷後被遮掉」
+        assert before["approved_by_name"] is not None and before["approved_at"] is not None
+        await client.post(
+            f"{_URL}/{course_id}/approvals/{student}/revoke",
+            headers=_bearer(teacher),
+            json={"reason": "登錄錯誤", "version": version},
+        )
+
+        row = (await client.get(f"{_URL}/{course_id}/students", headers=_bearer(teacher))).json()["data"][0]
+
+        assert row["approval_status"] == "PENDING"
+        assert (row["approved_by_name"], row["approved_at"], row["approval_note"]) == (None, None, None)
+        assert row["approval_version"] is not None
+
     async def test_撤銷後重核以同一筆更新且清空撤銷欄位(self, client, db) -> None:
         """🔴 AC 7 的兩個要點：**列數仍為 1**，且 `REVOKE_*` 被清空。
 

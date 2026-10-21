@@ -163,3 +163,24 @@ def ensure_survey_deletable(course_status: str) -> None:
             detail="僅草稿課程之問卷可刪除，已發布課程請改用停用",
             error_code="ET_SURVEY_007",
         )
+
+
+def basic_update_action(*, before_active: bool, after_active: bool) -> str:
+    """問卷名稱 / 啟用狀態更新的稽核動作名稱（#768 第 13 項）。
+
+    依啟用狀態的**變化**分成三種：停用、重新啟用、其餘（改名或未變）。原本只分「停用」與
+    「更新」，#767 ⑥ 加了「啟用問卷」之後，重新開放填答會被記成「更新課後問卷」，與改名
+    混在一起，事後查不到是誰把問卷重新打開的。
+
+    Args:
+        before_active: 更新前的啟用狀態。
+        after_active: 本次送來的啟用狀態。
+
+    Returns:
+        稽核描述用的動作名稱。
+    """
+    if before_active and not after_active:
+        return "停用課後問卷"
+    if not before_active and after_active:
+        return "啟用課後問卷"
+    return "更新課後問卷"

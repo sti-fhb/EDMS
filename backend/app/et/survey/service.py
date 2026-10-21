@@ -36,6 +36,7 @@ from app.et.course.stage_rules import ENTITY_SURVEY, ENTITY_SURVEY_OPTION, ENTIT
 from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
 from app.et.survey.repository import EtSurveyRepository
 from app.et.survey.rules import (
+    basic_update_action,
     ensure_editable,
     ensure_options_match_type,
     ensure_question_reorder_complete,
@@ -145,7 +146,15 @@ class EtSurveyService:
         """
         # `editable=False`：名稱與停用**不受凍結限制**（AC 21，見本方法 docstring）
         ref, course_id = await self._staged_survey(db, survey_id, operator.user_id, operator, editable=False)
-        action = "停用課後問卷" if not req.is_active else "更新課後問卷"
+        # 稽核要分得出停用 / 重新啟用 / 改名，得先知道更新前的狀態（#768 第 13 項）。
+        # 暫存模式讀暫存節點（那才是教師畫面上的那一份），否則讀活表。
+        if ref is not None:
+            node = await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_SURVEY)
+            before_active = bool(node.payload.get("is_active", True)) if node is not None else True
+        else:
+            live = await self._surveys.get(db, survey_id)
+            before_active = live.is_active if live is not None else True
+        action = basic_update_action(before_active=before_active, after_active=req.is_active)
         if ref is not None:
             rowcount = await self._stage_writer.update_payload(
                 db,

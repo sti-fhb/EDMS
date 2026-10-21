@@ -353,3 +353,30 @@ describe("已及格且次數用完（#767 ③）", () => {
     expect(screen.queryByText("重考次數已用完，請聯繫教師重置")).not.toBeInTheDocument()
   })
 })
+
+describe("測驗項目被教師刪除（#768 第 5 項）", () => {
+  // 教材被刪時學習頁顯示「此內容已刪除」（ContentPane，ET-MSG-ET06-004），測驗卻顯示後端原文
+  // 「查無此測驗」——同一件事兩種講法，學員會以為是系統錯誤
+  it("查無測驗時顯示「此內容已刪除」，與教材一致", async () => {
+    server.use(
+      http.get("/api/et/quizzes/:quizId/intro", () =>
+        HttpResponse.json({ error_code: "ET_ATTEMPT_001", error_message: "查無此測驗" }, { status: 404 }),
+      ),
+    )
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    expect(await screen.findByText("此內容已刪除")).toBeInTheDocument()
+    expect(screen.queryByText("查無此測驗")).not.toBeInTheDocument()
+  })
+
+  it("其他錯誤照舊顯示後端訊息（正向錨點）", async () => {
+    server.use(
+      http.get("/api/et/quizzes/:quizId/intro", () =>
+        HttpResponse.json({ error_code: "ET_LEARN_001", error_message: "您尚未加入此課程" }, { status: 403 }),
+      ),
+    )
+    renderWithProviders(<QuizIntroPanel quizId={700} />)
+
+    expect(await screen.findByText("您尚未加入此課程")).toBeInTheDocument()
+  })
+})

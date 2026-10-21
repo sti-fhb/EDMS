@@ -354,7 +354,11 @@ export function EtCourseEditorPage() {
   const [unkeptDiscarded, setUnkeptDiscarded] = useState(false)
   //: 新增模式沒有 `courseId`、也沒有暫存區可丟——**推導**而非在 effect 裡同步 setState
   //: （那會觸發連鎖 render，ESLint 也擋）。
-  const unkeptCleared = courseId === undefined || unkeptDiscarded
+  //: 課程是否已載入——丟棄要等知道擁有權才打（見下方 effect）。課程一旦載入，重抓期間仍保留
+  //: 舊資料，這個值只會由 false 轉成 true 一次。
+  const courseLoaded = course !== undefined
+  //: 非擁有者不打丟棄（見下方 effect），同樣以推導放行。
+  const unkeptCleared = courseId === undefined || unkeptDiscarded || course?.is_owner === false
   if (course && !courseFetching && unkeptCleared && loadedCourseId !== course.course_id) {
     setLoadedCourseId(course.course_id)
     setForm({
@@ -422,6 +426,8 @@ export function EtCourseEditorPage() {
    * 拿掉模式之後它變成由狀態推導，所以換課程時不會殘留。
    */
   const reopening = course?.is_closed ?? false
+  /** 讓編輯生效的那顆鈕的名稱：已關閉（含期間已過）是「更新並重開課」，否則是「更新」。 */
+  const applyLabel = reopening ? "更新並重開課" : "更新"
   /**
    * 是否要把底部那一列講成「待辦」（警示色 + 待更新文案）。
    *
@@ -881,7 +887,8 @@ export function EtCourseEditorPage() {
       setSurveyFrozenOpen(false)
       invalidate()
       invalidateSurvey()
-      message.success("已放棄課後問卷的編輯，其餘編輯仍保留")
+      // 下一步要講：教師是從「更新」或「更新並重開課」被擋下來的，放棄之後要再按一次（#768 code review）
+      message.success(`已放棄課後問卷的編輯，其餘編輯仍保留。請再按一次「${applyLabel}」`)
     },
     onError: handleError,
   })
@@ -936,6 +943,12 @@ export function EtCourseEditorPage() {
   useEffect(() => {
     // 新增模式不經這裡（`unkeptCleared` 已由推導放行，見其宣告）。
     if (courseId === undefined) return
+    // 🔴 **只對擁有者打**（#768，2026-10-20 使用者裁示）。非擁有者（他人課程的檢視者、
+    // 管理者）必回 403，而下面的失敗分支會對一個根本不能按「更新」的人說「可能有殘留」。
+    // 因此要等課程載入、知道是不是擁有者才打。⚠️ 判「明確不是擁有者」才跳過，不是
+    // 「`is_owner === true` 才打」：後者在欄位缺漏時會永遠不打，而表單要等丟棄落定才預帶，
+    // 整頁就卡在空白。
+    if (!courseLoaded || course?.is_owner === false) return
     void coursesApi.discardUnkeptStage(courseId).then(
       () => {
         invalidate()
@@ -954,15 +967,17 @@ export function EtCourseEditorPage() {
         setUnkeptDiscarded(true)
       },
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟 courseId 走；帶上 invalidate 會每次 render 重跑
-  }, [courseId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟 courseId 與擁有權走；帶上 invalidate 會每次 render 重跑
+  }, [courseId, courseLoaded])
 
   const leaveBlocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       hasPendingChanges && !bypassGuard.current && currentLocation.pathname !== nextLocation.pathname,
   )
   useEffect(() => {
-    if (leaveBlocker.state !== "blocked") return
+    // 等課程載入才開：文案依 `hasKeptEdits` 分流，載入前讀不到旗標，會先開出「都會放棄」
+    // 那一版。真實操作中載入前不會有未更新的編輯、攔截也不會成立，這裡只是不讓順序決定文案。
+    if (leaveBlocker.state !== "blocked" || !courseLoaded) return
     confirm({
       // 🔴 **文案於 #720 整段改寫**（2026-10-19 裁示）。
       //
@@ -991,7 +1006,7 @@ export function EtCourseEditorPage() {
       onOk: () => leaveBlocker.proceed(),
       onCancel: () => leaveBlocker.reset(),
     })
-  }, [leaveBlocker, confirm, reopening, hasKeptEdits])
+  }, [leaveBlocker, confirm, reopening, hasKeptEdits, courseLoaded])
 
   // ── 關閉 / 再開課（US11 / #288）──────────────────────────────────────────
 
@@ -1108,11 +1123,17 @@ export function EtCourseEditorPage() {
           setReopenBlockers(returned)
           return undefined
         }
+        // 問卷凍結：比照「更新」開帶出口的視窗（#712）。原本往外拋成一則短暫訊息，教師改不回去
+        // （選項識別碼回不來），整門課就重開不了（#768 第 11 項）
+        if (errorCode === "ET_SURVEY_003") {
+          setSurveyFrozenOpen(true)
+          return undefined
+        }
         throw err
       }
     },
     onSuccess: (result) => {
-      // `undefined` = 檢核未通過，缺漏已以對話框顯示（#509），留在頁面上讓教師處理
+      // `undefined` = 檢核未通過或問卷凍結，已以對話框顯示（#509），留在頁面上讓教師處理
       if (result === undefined) return
       setReopenBlockers([])
       setHighlight(null)
@@ -1941,19 +1962,19 @@ export function EtCourseEditorPage() {
       */}
       {surveyFrozenOpen && (
         <Dialog open onClose={() => setSurveyFrozenOpen(false)} maxWidth="xs" fullWidth>
-          <DialogTitle>課後問卷已有學員填答，本次更新未生效</DialogTitle>
+          <DialogTitle>課後問卷已有學員填答，本次{applyLabel}未生效</DialogTitle>
           <DialogContent>
             <DialogContentText component="div">
-              已經有學員填寫過這份問卷，所以問卷的題目與選項<strong>不能</strong>再更動。本次更新沒有生效，
+              已經有學員填寫過這份問卷，所以問卷的題目與選項<strong>不能</strong>再更動。本次{applyLabel}沒有生效，
               課程內容一個字都沒有改變。
               <br />
               <br />
-              ⚠️ 把題目改回原樣<strong>沒有用</strong>——系統比對的不只是文字。要讓更新過得去，
+              ⚠️ 把題目改回原樣<strong>沒有用</strong>——系統比對的不只是文字。要讓{applyLabel}過得去，
               請放棄這次對問卷的編輯。
               <br />
               <br />
               按「放棄問卷的編輯」：課後問卷回到學員目前看到的那一版，
-              <strong>其餘的編輯（章節、教材、測驗）全部保留</strong>，接著再按一次「更新」即可。
+              <strong>其餘的編輯（章節、教材、測驗）全部保留</strong>，接著再按一次「{applyLabel}」即可。
             </DialogContentText>
           </DialogContent>
           <DialogActions>
@@ -2291,6 +2312,7 @@ export function EtCourseEditorPage() {
           affectedCount={quiz?.affected_count ?? 0}
           // 草稿直寫活表、沒有「延到更新」這回事；其餘狀態一律走暫存（`is_staged`）。
           staged={status !== "DRAFT"}
+          closed={course?.is_closed ?? false}
           retestPending={quiz?.require_retest_pending ?? false}
           cancelsPending={retestCancelsPending}
           onCancel={() => setPendingRetestAction(null)}
@@ -2452,7 +2474,7 @@ export function EtCourseEditorPage() {
               sx={{ minWidth: 0 }}
             >
               {status === "DRAFT"
-                ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、無引用之廢止文件。"
+                ? "儲存草稿可隨時繼續編輯。發布檢核：至少 1 章節 + 1 教材、至少 1 組受訓對象、起訖時間已填、各測驗配分總和 = 100 且每測驗至少 1 題、啟用中的課後問卷至少 1 題、無引用之廢止文件。"
                 : reopening
                   ? // ⚠️ 明寫「保留編輯」**不是還原點**（2026-10-20 裁示）：鈕名已經避開
                     // 「儲存草稿」，這句再說一次它保留的是「目前的編輯」而非一個版本。

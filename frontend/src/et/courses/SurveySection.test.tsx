@@ -261,3 +261,17 @@ describe("SurveySection：停用後可再啟用（#767 ⑥）", () => {
     expect(screen.queryByRole("button", { name: "啟用問卷" })).not.toBeInTheDocument()
   })
 })
+
+describe("0 題提示只對啟用中的問卷（#768 第 8 項）", () => {
+  // 停用中的問卷不計入發布檢核（#611），對它說「至少須有 1 題才能發布課程」是假的
+  it("停用中、0 題：不提示會擋發布", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false, questions: [] })} isDraftCourse={false} />)
+    expect(screen.getByText(/0 題/)).toBeInTheDocument()
+    expect(screen.queryByText(/至少須有 1 題才能發布課程/)).not.toBeInTheDocument()
+  })
+
+  it("啟用中、0 題：照舊提示（正向錨點）", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ questions: [] })} isDraftCourse={false} />)
+    expect(screen.getByText(/至少須有 1 題才能發布課程/)).toBeInTheDocument()
+  })
+})

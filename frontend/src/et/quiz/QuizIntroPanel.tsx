@@ -101,7 +101,16 @@ export function QuizIntroPanel({ quizId }: { quizId: number }) {
     )
   }
   if (error) {
-    return <Alert severity="error">{toApiError(error).errorMessage}</Alert>
+    const api = toApiError(error)
+    // 測驗項目被教師刪除：與教材同一句（ContentPane 的 ET-MSG-ET06-004），不顯示後端的
+    // 「查無此測驗」——同一件事兩種講法，學員會以為是系統錯誤（#768 第 5 項）。
+    //
+    // ⚠️ 這個碼**不只**代表已刪除：後端為防列舉，把「無權存取」也回成同一個 404
+    // （`attempt/service._require_access`）。本面板只在 ET06 學習頁出現，而學習頁進頁時已擋掉
+    // 未加入與已移除者，所以實際會誤報的只剩「正在看的當下被移除」。這個取捨是刻意的；要精確
+    // 區分得請後端為「已刪除」另給錯誤碼。
+    if (api.errorCode === "ET_ATTEMPT_001") return <Alert severity="info">此內容已刪除</Alert>
+    return <Alert severity="error">{api.errorMessage}</Alert>
   }
 
   const hasLeftover = data.in_progress_attempt_id !== null

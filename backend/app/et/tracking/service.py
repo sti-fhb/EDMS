@@ -672,6 +672,8 @@ def _to_student_row(
     後者四捨五入，201 個項目完成 200 個時回 100，核可按鈕會在最後一項還沒完成時就出現。
     """
     done, total = counts
+    # 有效的核可紀錄：課程需線下核可、有紀錄、且未撤銷（#768 第 14 項，見下方三欄的說明）
+    live_approval = require_approval and approval is not None and not approval.is_revoked
     return StudentRow(
         user_id=enrollment.user_id,
         user_name=user_name,
@@ -694,9 +696,12 @@ def _to_student_row(
             if require_approval
             else None
         ),
-        approval_note=approval.result_note if require_approval and approval else None,
-        approved_by_name=approver_names.get(approval.approved_by) if require_approval and approval else None,
-        approved_at=approval.approved_at if require_approval and approval else None,
+        # 已撤銷的核可不回傳核可人 / 時間 / 備註（#768 第 14 項）：活表刻意不清這三欄（ET04 的
+        # 已撤銷紀錄要用），但這裡的狀態已回到「待核可」，那是失效的舊核可——回傳出去，任何
+        # 使用端都會把它顯示成「核可過」。`approval_version` 照常回傳，重新核可要帶它。
+        approval_note=approval.result_note if live_approval else None,
+        approved_by_name=approver_names.get(approval.approved_by) if live_approval else None,
+        approved_at=approval.approved_at if live_approval else None,
         approval_version=approval.version if require_approval and approval else None,
     )
 
