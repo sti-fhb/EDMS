@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # 限對稱演算法（EDMS 採簡單對稱 JWT，見 research §2）；收斂為 Literal 使誤設
     # 非對稱 / none 於啟動即被 Pydantic 擋下，杜絕 algorithm confusion 隱患。
     JWT_ALGORITHM: Literal["HS256", "HS384", "HS512"] = "HS256"
+    # 院內資安檢測專用：覆寫 access token TTL（分鐘）。設定時 login / renew 一律採此值、
+    # 略過 DP_PARAM `JWT.ACCESS_TTL_MIN`（後者值域上限 15 分鐘，ZAP 自動化滲透測試以單一
+    # bearer token 連續掃描數小時，必然中途失效而判 INCOMPLETE）；未設定（None）時行為完全不變。
+    # ⚠️ 僅限院內 UAT 資安檢測期間使用：由 TBMS 交付包 `manage.sh scan-mode on` 寫入、
+    # `scan-mode off` 移除還原。**正式環境不得常設**——放寬 token 時效即放大 token 外洩後的可用窗口。
+    # 上限 720（12 小時）：涵蓋 TBMS scan-mode 實際寫入之 600 並留餘裕；再高即近乎「不會過期」，
+    # 誤植（如多打一個 0）應於啟動即擋下而非靜默生效。
+    # 設定時啟動會留 WARNING（見 app.dp.user.service.warn_if_scan_access_ttl_override）。
+    SCAN_ACCESS_TTL_MIN: int | None = Field(default=None, ge=1, le=720)
 
     # 寄信（SMTP）— 由平台發信引擎（#16 T018 起）使用；
     # 未設定時不影響應用啟動，實際寄送於發信 task 接上。

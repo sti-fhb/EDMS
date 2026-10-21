@@ -338,3 +338,45 @@ def test_prod_unc_root_accepted_on_windows() -> None:
         ET_VIDEO_STORAGE_ROOT="\\\\fileserver\\edms\\et_videos",
     )
     assert s.DM_FILE_STORAGE_ROOT == unc_dm
+
+
+# --- SCAN_ACCESS_TTL_MIN（院內資安檢測期間的 access token 時效覆寫）---
+
+
+def _settings_with_scan_ttl(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "DEBUG": True,
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_scan_access_ttl_defaults_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未設定時為 None——代表不覆寫，access token TTL 照舊讀 DP_PARAM。"""
+    monkeypatch.delenv("SCAN_ACCESS_TTL_MIN", raising=False)
+    assert _settings_with_scan_ttl().SCAN_ACCESS_TTL_MIN is None
+
+
+@pytest.mark.parametrize("value", [1, 600, 720])
+def test_scan_access_ttl_accepts_values_in_range(value: int) -> None:
+    """範圍內（1～720 分鐘）的值照收；600 為 TBMS scan-mode 實際寫入值。"""
+    assert _settings_with_scan_ttl(SCAN_ACCESS_TTL_MIN=value).SCAN_ACCESS_TTL_MIN == value
+
+
+@pytest.mark.parametrize("value", [0, -1, 721])
+def test_scan_access_ttl_out_of_range_fails_startup(value: int) -> None:
+    """超出範圍經 _build_settings 轉為啟動失敗，訊息點名欄位。"""
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=True,
+            SCAN_ACCESS_TTL_MIN=value,
+        )
+    message = str(exc_info.value)
+    assert "invalid environment variables" in message
+    assert "SCAN_ACCESS_TTL_MIN" in message

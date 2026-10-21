@@ -2,15 +2,18 @@
 
 帳密驗證（bcrypt）、錯誤分流（查無有效帳號 / 密碼錯誤；前者對四種帳號狀態統一回應，#208 防列舉）、
 失敗計數與自動鎖定、成功核發 JWT（auth_time + 短 TTL）；登入 / 登出 / 鎖定寫稽核（SRVDP003，含來源 IP）。
-門檻值（FAIL_LOCK_COUNT / LOCK_MINUTES / ACCESS_TTL_MIN / EXPIRY_DAYS）讀平台級 DP_PARAM（SRVDP001）。
+門檻值（FAIL_LOCK_COUNT / LOCK_MINUTES / ACCESS_TTL_MIN / EXPIRY_DAYS）讀平台級 DP_PARAM（SRVDP001）；
+ACCESS_TTL_MIN 例外：環境變數 SCAN_ACCESS_TTL_MIN 有設定時改採之（僅院內資安檢測期間）。
 """
 
+import logging
 from datetime import timedelta
 from typing import NoReturn
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import JwtPayload, create_access_token
+from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.log_redaction import mask_email
 from app.core.password_hashing import verify_password_async
@@ -20,6 +23,8 @@ from app.core.utils import utcnow
 from app.dp.user.repository import AuthRepository
 from app.dp.user.schemas import LoginResponse, TokenResponse
 from app.services import AuditLogService, ParamService
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_USER = "SYSTEM"
 # DP_PARAM 讀取失敗的保底值（對齊 T009 種子）
@@ -49,6 +54,20 @@ _DEFAULT_RENEW_MAX_HOURS = 8
 _NO_ACCOUNT_MESSAGE = "帳號或密碼錯誤"
 
 
+def warn_if_scan_access_ttl_override() -> None:
+    """`SCAN_ACCESS_TTL_MIN` 有設定時留 WARNING，讓維運看得出 access token 時效已被放寬。
+
+    於應用啟動（lifespan）呼叫一次；未設定時不留任何紀錄。
+    """
+    if settings.SCAN_ACCESS_TTL_MIN is not None:
+        logger.warning(
+            "SCAN_ACCESS_TTL_MIN=%s 已設定：access token 時效改為 %s 分鐘、略過 DP_PARAM JWT.ACCESS_TTL_MIN；"
+            "僅限院內資安檢測期間使用，檢測結束須以 scan-mode off 移除",
+            settings.SCAN_ACCESS_TTL_MIN,
+            settings.SCAN_ACCESS_TTL_MIN,
+        )
+
+
 class AuthService:
     """SRVDP 認證服務（登入 / 換發 / 登出）。"""
 
@@ -61,6 +80,16 @@ class AuthService:
         self._repo = repository or AuthRepository()
         self._params = params or ParamService()
         self._audit = audit or AuditLogService()
+
+    async def _access_ttl_minutes(self, db: AsyncSession) -> int:
+        """取 access token TTL（分鐘）：`SCAN_ACCESS_TTL_MIN` 有設定即採之，否則讀 DP_PARAM。
+
+        覆寫僅供院內資安檢測期間使用（見 core.config 該欄註解）；login / renew 共用，
+        `expires_in` 隨之一致，前端據以自動登出。
+        """
+        if settings.SCAN_ACCESS_TTL_MIN is not None:
+            return settings.SCAN_ACCESS_TTL_MIN
+        return await self._params.get_int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
 
     async def login(self, db: AsyncSession, *, email: str, password: str) -> LoginResponse:
         """帳密登入：驗證 → 核發 JWT，並寫登入稽核。
@@ -148,7 +177,7 @@ class AuthService:
         user.last_login_date = now
         user.updated_user = _SYSTEM_USER
         user.updated_date = now
-        ttl = await self._params.get_int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
+        ttl = await self._access_ttl_minutes(db)
         token = create_access_token(sub=user.user_id, ttl_minutes=ttl)
         expiry_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_EXPIRY_DAYS)
         must_change = user.must_change_pwd or is_password_expired(user.pwd_changed_date, expiry_days, now=now)
@@ -171,7 +200,7 @@ class AuthService:
         renew_max = await self._params.get_int_param(db, "JWT", "RENEW_MAX_HOURS", _DEFAULT_RENEW_MAX_HOURS)
         if utcnow() - payload.auth_time >= timedelta(hours=renew_max):
             raise AppError(status_code=401, detail="已達單次登入時數上限，請重新登入", error_code="DP_AUTH_003")
-        ttl = await self._params.get_int_param(db, "JWT", "ACCESS_TTL_MIN", _DEFAULT_ACCESS_TTL_MIN)
+        ttl = await self._access_ttl_minutes(db)
         token = create_access_token(sub=payload.sub, ttl_minutes=ttl, auth_time=payload.auth_time)
         return TokenResponse(access_token=token, expires_in=ttl * 60)  # 理由同 login（#741）
 

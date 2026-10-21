@@ -367,7 +367,7 @@ erDiagram
 
 | PARAM_ID | 型態 | 明細（PARAM_KEY＝預設值）|
 |----------|------|--------------------------|
-| `JWT` | VALUE 組 | `ACCESS_TTL_MIN`=15（閒置逾時）、`RENEW_MAX_HOURS`=8（單日換發上限）|
+| `JWT` | VALUE 組 | `ACCESS_TTL_MIN`=15（閒置逾時；院內資安檢測期間可由環境變數 `SCAN_ACCESS_TTL_MIN` 暫時覆寫，見 spec_us5）、`RENEW_MAX_HOURS`=8（單日換發上限）|
 | `PWD_POLICY` | VALUE 組 | `MIN_LEN`=8、`ADMIN_MIN_LEN`=12、`CHAR_TYPES`=3、`HISTORY_COUNT`=3、`EXPIRY_DAYS`=90、`EXPIRY_REMIND_DAYS`=7 |
 | `LOGIN` | VALUE 組 | `FAIL_LOCK_COUNT`=5、`LOCK_MINUTES`=30、`RESET_TOKEN_TTL_MIN`=30、`EMAIL_CHANGE_TTL_MIN`=30、`IDLE_DISABLE_DAYS`=90 |
 | `MAIL` | VALUE 組 | `RETRY_MAX`=5、`RATE_PER_MIN`=60、`RETRY_INTERVAL_MIN`=2（分；部署可再調校）。無失敗告警參數——失敗率由 IT 監控負責（spec 釐清第 2 輪）|
