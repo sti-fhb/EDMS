@@ -204,6 +204,53 @@ describe("InviteStudentsDialog：Email 邀請流程", () => {
   })
 })
 
+describe("名單被擋下時不顯示「將直接加入 N 位」（#784）", () => {
+  // 2026-10-21 GCP 實測：擋下訊息與「將直接加入 2 位並各寄一封通知信」同時出現——整批不寄、
+  // 無人加入，底部卻說會加入，教師會誤以為已寄出或即將寄出。
+  function blockWith(errorCode: "ET_INVITE_005" | "ET_INVITE_008", key: "unknown_emails" | "disabled_emails") {
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations/preview", () =>
+        HttpResponse.json(
+          { error_code: errorCode, error_message: "名單有無法邀請的帳號", [key]: ["typo@x.gov.tw"] },
+          { status: 422 },
+        ),
+      ),
+    )
+  }
+
+  async function submitTwo(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByLabelText("學員 Email"), "typo@x.gov.tw, student@x.gov.tw")
+    // 正向錨點：擋下之前，說明照常顯示人數
+    expect(screen.getByText("將直接加入 2 位並各寄一封通知信")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+  }
+
+  it.each([
+    ["查無帳號（ET_INVITE_005）", "ET_INVITE_005", "unknown_emails", /尚未建立 EDMS 帳號，無法寄送邀請/],
+    ["已停用（ET_INVITE_008）", "ET_INVITE_008", "disabled_emails", /無法邀請（請確認名單或請管理者先啟用）/],
+  ] as const)("%s 被擋下後，底部不再說會加入", async (_label, code, key, blockedText) => {
+    const user = userEvent.setup()
+    blockWith(code, key)
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+    await submitTwo(user)
+
+    expect(await screen.findByText(blockedText)).toBeInTheDocument()
+    expect(screen.queryByText(/將直接加入 \d+ 位/)).not.toBeInTheDocument()
+  })
+
+  it("修改名單後擋下狀態解除，說明恢復顯示", async () => {
+    const user = userEvent.setup()
+    blockWith("ET_INVITE_005", "unknown_emails")
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+    await submitTwo(user)
+    await screen.findByText(/尚未建立 EDMS 帳號，無法寄送邀請/)
+
+    await user.type(screen.getByLabelText("學員 Email"), ", third@x.gov.tw")
+
+    expect(screen.getByText("將直接加入 3 位並各寄一封通知信")).toBeInTheDocument()
+  })
+})
+
 describe("InviteStudentsDialog：邀請碼頁籤", () => {
   afterEach(() => {
     vi.unstubAllEnvs()
