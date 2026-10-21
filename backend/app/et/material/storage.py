@@ -24,6 +24,7 @@ DM 之上傳把整份檔案讀進記憶體（`data: bytes`）。ET 影片單檔�
 
 import logging
 import os
+import stat
 import uuid
 
 from app.core.config import settings
@@ -229,10 +230,14 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
 
 
 def list_stored_files(root: str) -> list[tuple[str, float]]:
-    """列出儲存根目錄下的所有檔案：`(相對路徑, 最後修改時間)`（#775 孤兒清理用）。
+    """列出儲存根目錄下的所有**一般檔案**：`(相對路徑, 最後修改時間)`（#775 孤兒清理用）。
 
-    相對路徑一律以 `/` 分隔，與 `ET_MATERIAL_VIDEO.FILE_PATH` 同格式——兩邊格式不一致的
-    後果是**每一支都被當成孤兒**。含 `.tmp/`：上傳中途當機留下的殘檔也在清理範圍內。
+    相對路徑一律以 `/` 分隔，與 `ET_MATERIAL_VIDEO.FILE_PATH` 同格式。含 `.tmp/`：上傳中途
+    當機留下的殘檔也在清理範圍內。
+
+    ⚠️ **跳過 symlink**（security review L1）：根目錄內一個指向被引用檔的連結，本身不在白名單、
+    又夠舊——若列出它，後續刪除一旦解析了連結，刪掉的是被引用的那支。`os.walk` 預設不跟隨
+    目錄 symlink，檔案層級則在此以 `lstat` 判定。
 
     Args:
         root: 儲存根目錄的絕對路徑（呼叫端傳入，測試因此可指向暫存目錄）。
@@ -242,36 +247,63 @@ def list_stored_files(root: str) -> list[tuple[str, float]]:
     """
     if not os.path.isdir(root):
         return []
+    unreadable: list[OSError] = []
     files: list[tuple[str, float]] = []
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, _dirnames, filenames in os.walk(root, onerror=unreadable.append):
         for name in filenames:
             full = os.path.join(dirpath, name)
             try:
-                mtime = os.path.getmtime(full)
+                st = os.lstat(full)
             except OSError:
                 continue  # 列舉與讀取之間被刪掉——不是孤兒，也不必報錯
-            files.append((os.path.relpath(full, root).replace(os.sep, "/"), mtime))
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            files.append((os.path.relpath(full, root).replace(os.sep, "/"), st.st_mtime))
+    if unreadable:
+        # 讀不到的子目錄只會讓清理「少刪」，方向安全；但要看得出來，否則權限錯了永遠沒人知道
+        logger.warning("ET 影片目錄有 %d 個子目錄無法讀取，其中的檔案未納入清理", len(unreadable))
     return files
 
 
-def remove_stored_file(root: str, rel_path: str) -> bool:
-    """刪除儲存根目錄下的一個檔案（#775 孤兒清理），回是否真的刪掉。
+def path_key(root: str, path: str) -> str:
+    """把一個影片路徑正規化成「根目錄下的實際位置」，供白名單比對（#775）。
 
-    以 `root` 為基準正規化後**必須仍落在 root 內**才刪——`rel_path` 來自目錄列舉，正常
-    不會逃出，但刪檔不可逆，圍籬與讀取端（`_resolved_within_root`）同一個標準。
-    失敗（已不存在、權限）不拋錯：清理是盡力而為，一支刪不掉不該讓整批中止。
+    DB 的 `FILE_PATH` 大多是 `/` 分隔的相對片段（#233），但 migration `676114dc0672` 轉不出來的
+    列**原樣保留絕對路徑**，而讀取端（`_resolved_within_root`）仍接受落在根目錄內的絕對路徑。
+    只比字串的話，那些列指向的檔會被當成孤兒刪掉。兩邊一律以 `os.path.join(root, path)` 解析，
+    再以 `normcase` 抹平 Windows 的大小寫與分隔符。
+
+    ⚠️ 只對**父目錄**做 `realpath`、檔名原樣接回——若檔案本身是連結，不追到它指向的目標
+    （同 `list_stored_files` 的理由）。
+    """
+    joined = os.path.join(root, path)
+    parent = os.path.realpath(os.path.dirname(joined))
+    return os.path.normcase(os.path.join(parent, os.path.basename(joined)))
+
+
+def remove_stored_file(root: str, rel_path: str) -> bool:
+    """刪除儲存根目錄下的一個一般檔案（#775 孤兒清理），回是否真的刪掉。
+
+    圍籬：父目錄以 `realpath` 解析後**必須仍落在 root 內**，且目標必須是一般檔案（不是連結、
+    不是目錄）。⚠️ 刪的是**連結本身的路徑**、不解析檔名——解析的話，一個指向被引用檔的連結
+    會讓被引用的那支被刪掉（security review L1）。失敗（已不存在、權限）不拋錯：清理是盡力
+    而為，一支刪不掉不該讓整批中止。
     """
     real_root = os.path.realpath(root)
-    target = os.path.realpath(os.path.join(real_root, rel_path))
+    joined = os.path.join(real_root, rel_path)
+    parent = os.path.realpath(os.path.dirname(joined))
+    target = os.path.join(parent, os.path.basename(joined))
     try:
-        if os.path.commonpath([real_root, target]) != real_root or target == real_root:
+        if os.path.commonpath([real_root, parent]) != real_root:
             return False
     except ValueError:  # Windows 跨磁碟
         return False
     try:
+        if not stat.S_ISREG(os.lstat(target).st_mode):
+            return False
         os.remove(target)
-    except OSError:
-        logger.warning("ET 孤兒影片檔刪除失敗（不記路徑）")
+    except OSError as exc:
+        logger.warning("ET 孤兒影片檔刪除失敗（不記路徑）：%s", type(exc).__name__)
         return False
     return True
 

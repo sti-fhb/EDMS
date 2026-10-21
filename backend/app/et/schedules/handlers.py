@@ -82,7 +82,11 @@ async def daily_job() -> None:
     try:
         async with AsyncSessionLocal() as db:
             sweep = await EtOrphanVideoSweeper().run(db)
-        swept = f"孤兒影片檔清理 {sweep.deleted} 支（掃描 {sweep.scanned} 支）"
+        swept = (
+            f"孤兒影片檔清理中止（{sweep.aborted}）"
+            if sweep.aborted
+            else f"孤兒影片檔清理 {sweep.deleted} 支（掃描 {sweep.scanned} 支）"
+        )
     except Exception:
         logger.exception("SCHET002 孤兒影片檔清理失敗")
         swept = "孤兒影片檔清理失敗"

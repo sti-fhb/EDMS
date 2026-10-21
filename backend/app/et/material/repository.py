@@ -7,7 +7,7 @@
 
 import json
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, literal, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
@@ -275,8 +275,8 @@ class EtMaterialRepository:
         )
         await db.flush()
 
-    async def referenced_video_paths(self, db: AsyncSession) -> set[str]:
-        """所有被資料列指向的影片檔相對路徑（#775 孤兒清理的「白名單」）。
+    async def referenced_video_paths(self, db: AsyncSession) -> tuple[set[str], int]:
+        """所有被資料列指向的影片檔路徑（#775 孤兒清理的「白名單」），與無法解讀的暫存列數。
 
         🔴 **兩張表、且都不濾 `DELETED`**：
         - 活表 `ET_MATERIAL_VIDEO`：已軟刪的也算——軟刪除的語意是可回復，刪檔就回復不了
@@ -284,24 +284,34 @@ class EtMaterialRepository:
         - 暫存區 `ET_COURSE_CONTENT_STAGE` 的影片節點：編輯中、還沒按「更新」的影片只有這裡
           指向；已軟刪的暫存列同樣保留，教師可能還在同一輪編輯裡。
 
-        漏掉任何一邊，清理就會刪掉一支仍被指向的檔——那是**不可逆**的，與「留著孤兒佔磁碟」
-        不對稱。寧可多留。
+        🔴 **單一語句（`UNION ALL`）**，兩張表在同一個快照裡讀（code review HIGH 1）。分兩條
+        SELECT 的話，PostgreSQL READ COMMITTED 下各自取快照；「更新」若剛好在兩條之間
+        commit（寫活表 + 清暫存在同一交易），那支影片兩邊都讀不到而被刪——學員端 404，且不可逆。
 
         Returns:
-            `/` 分隔的相對路徑集合（與 `FILE_PATH` 同格式）。
+            `(路徑集合, 無法解讀的暫存列數)`。路徑為 DB 原值（多為 `/` 分隔的相對片段，歷史資料
+            可能是絕對路徑）；比對前由呼叫端以 `storage.path_key` 正規化。無法解讀的列數 > 0 時，
+            呼叫端必須中止清理——那一列可能正指向某支檔（code review HIGH 2：寧可多留）。
         """
-        live = set((await db.scalars(select(EtMaterialVideo.file_path))).all())
-        payloads = (
-            await db.scalars(
-                select(EtCourseContentStage.payload).where(EtCourseContentStage.entity_type == ENTITY_MATERIAL_VIDEO)
-            )
-        ).all()
-        staged: set[str] = set()
-        for raw in payloads:
+        live = select(EtMaterialVideo.file_path.label("value"), literal("live").label("source"))
+        staged = select(EtCourseContentStage.payload.label("value"), literal("stage").label("source")).where(
+            EtCourseContentStage.entity_type == ENTITY_MATERIAL_VIDEO
+        )
+        rows = (await db.execute(union_all(live, staged))).all()
+        paths: set[str] = set()
+        unreadable = 0
+        for value, source in rows:
+            if source == "live":
+                if value:
+                    paths.add(value)
+                continue
             try:
-                path = json.loads(raw).get("file_path")
+                path = json.loads(value).get("file_path")
             except (TypeError, ValueError, AttributeError):
+                unreadable += 1
                 continue
             if isinstance(path, str) and path:
-                staged.add(path)
-        return {p.replace("\\", "/") for p in live | staged}
+                paths.add(path)
+            else:
+                unreadable += 1
+        return paths, unreadable
