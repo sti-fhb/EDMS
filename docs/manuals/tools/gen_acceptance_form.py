@@ -45,7 +45,10 @@ ITEM_WIDTHS = (Cm(1.6), Cm(11.0), Cm(2.2), Cm(2.2))
 OPERATION_RE = re.compile(r"^##\s+(?P<name>\S+\s+.+?)\s*$")   # 「## BS01 入庫作業」
 ITEM_SECTION = re.compile(r"^###\s+測試項目清單\s*$")
 TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
+# 粗體與行內程式碼：測試報告為單一 run 之儲存格，只去符號、內文照排（與 gen_manual 之 INLINE_RE 同一組語法）。
+# 分兩次套用：粗體內可再含行內程式碼（如 **先抄下原值 `0 8 * * *`**），單一 alternation 會留下內層反引號
 BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+CODE_RE = re.compile(r"`(.+?)`")
 
 
 def _spacing_element(twips: int):
@@ -128,7 +131,7 @@ def parse_module(md_path: Path) -> tuple[str, list[tuple[str, list[tuple[str, st
             if not no and not content:
                 continue
             # 項次空白之列為分段標題（如「一、教師」），產出時合併整列
-            operations[-1][1].append((no, BOLD_RE.sub(lambda m: m.group(1), content)))
+            operations[-1][1].append((no, CODE_RE.sub(lambda m: m.group(1), BOLD_RE.sub(lambda m: m.group(1), content))))
 
     operations = [(name, items) for name, items in operations if items]
     if not operations:
