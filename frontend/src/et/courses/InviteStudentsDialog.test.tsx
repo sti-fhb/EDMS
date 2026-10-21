@@ -300,6 +300,68 @@ describe("寄信失敗後的底部說明（#785，使用者裁示選項 3）", (
     expect(screen.getByRole("button", { name: "確認寄出" })).toBeEnabled()
   })
 
+  it("再按一次確實送出全部名單：仍失敗時說明維持重寄版；成功時關閉視窗", async () => {
+    // code review MEDIUM：說明寫「對全部 N 位重寄」，得有測試證明送出的真的是全部——
+    // 日後若改成只重送失敗的那幾位，文案就變假，而只斷言文字的測試仍會全綠。
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const sent: string[][] = []
+    let round = 0
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations", async ({ request }) => {
+        sent.push(((await request.json()) as { emails: string }).emails.split(/[,\s]+/).filter(Boolean))
+        round += 1
+        // 第 1、2 次寄信失敗（第 2 次失敗的人不同），第 3 次全部成功
+        if (round === 1) return HttpResponse.json({ joined: 2, mail_failed: ["b@x.gov.tw"] })
+        if (round === 2) return HttpResponse.json({ joined: 2, mail_failed: ["a@x.gov.tw"] })
+        return HttpResponse.json({ joined: 2, mail_failed: [] })
+      }),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} onClose={onClose} />)
+    await user.type(screen.getByLabelText("學員 Email"), "a@x.gov.tw,b@x.gov.tw")
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+    await user.click(await screen.findByRole("button", { name: "確認寄出" }))
+    await screen.findByText(/通知信寄送失敗/)
+
+    await user.click(screen.getByRole("button", { name: "確認寄出" }))
+    await waitFor(() => expect(sent).toHaveLength(2))
+    expect(sent[1].sort()).toEqual(["a@x.gov.tw", "b@x.gov.tw"])
+    const alert = (await screen.findByText(/通知信寄送失敗/)).closest('[role="alert"]')
+    await waitFor(() => expect(alert).toHaveTextContent("a@x.gov.tw"))
+    expect(screen.getByText(/再按「確認寄出」會對名單上全部 2 位重寄通知信/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "確認寄出" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(await screen.findByText("已將 2 位加入課程並寄出通知信")).toBeInTheDocument()
+  })
+
+  it("寄信失敗後再按、這次被擋下：底部說明不顯示（#784 的擋下優先）", async () => {
+    const user = userEvent.setup()
+    let round = 0
+    server.use(
+      http.post("/api/et/courses/:courseId/invitations", () => {
+        round += 1
+        if (round === 1) return HttpResponse.json({ joined: 2, mail_failed: ["b@x.gov.tw"] })
+        return HttpResponse.json(
+          { error_code: "ET_INVITE_008", error_message: "名單有已停用的帳號", disabled_emails: ["b@x.gov.tw"] },
+          { status: 422 },
+        )
+      }),
+    )
+    renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
+    await user.type(screen.getByLabelText("學員 Email"), "a@x.gov.tw,b@x.gov.tw")
+    await user.click(screen.getByRole("button", { name: "下一步" }))
+    await user.click(await screen.findByRole("button", { name: "確認寄出" }))
+    await screen.findByText(/再按「確認寄出」會對名單上全部 2 位重寄通知信/)
+
+    await user.click(screen.getByRole("button", { name: "確認寄出" }))
+
+    // 正向錨點：擋下訊息已出現，下面的「都不在」才不是請求還沒回來的假象
+    expect(await screen.findByText(/無法邀請（請確認名單或請管理者先啟用）/)).toBeInTheDocument()
+    expect(screen.queryByText(/重寄通知信/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/將直接加入 \d+ 位/)).not.toBeInTheDocument()
+  })
+
   it("修改名單後回到一般說明", async () => {
     const user = userEvent.setup()
     renderWithProviders(<InviteStudentsDialog {...BASE_PROPS} />)
