@@ -17,7 +17,7 @@ import Radio from "@mui/material/Radio"
 import Stack from "@mui/material/Stack"
 import Typography from "@mui/material/Typography"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { carryFirstEntry } from "../../hooks/useGoBack"
@@ -49,14 +49,15 @@ import { toApiError } from "../../services/http"
  * 但即使那個計時器被停掉、分頁被凍結，學員也拿不到額外時間。
  */
 /**
- * 倒數剩下多少毫秒內，點選選項就立即暫存（#608）。與倒數轉為警示色的門檻同為 60 秒。
+ * 倒數剩下多少毫秒內，點選選項就立即暫存（#608），並補送尚未暫存的題目（#791）。數值目前
+ * 剛好與倒數轉紅的 `URGENT_SECONDS` 相同，但兩者沒有連動，改一邊不會影響另一邊。
  *
  * ⚠️ 不能完全消除「最後一刻的作答被拒」：後端以 `int()` 捨去剩餘秒數，最後不到 1 秒內的
  * 點選仍會被判逾時。要消除須改後端計時或給寬限——屬規格層級決定，未在此處理。
  */
 const FINAL_SAVE_WINDOW_MS = 60_000
 
-/** 是否已進入「點選即存」的最後一分鐘；不限時（`null`）恆為 false。只在事件處理中呼叫。 */
+/** 是否已進入「點選即存」的最後一分鐘；不限時（`null`）恆為 false。讀 `Date.now()`，只在事件處理與計時器回呼中呼叫，不在 render 中呼叫。 */
 function isInFinalSaveWindow(deadlineMs: number | null): boolean {
   return deadlineMs !== null && deadlineMs - Date.now() <= FINAL_SAVE_WINDOW_MS
 }
@@ -81,6 +82,16 @@ export function EtQuizAnswerPage() {
   const [currentId, setCurrentId] = useState<number | null>(null)
   /** 本地作答（尚未送出暫存的也在內）；key 為 `question_id`。 */
   const [answers, setAnswers] = useState<Record<number, number[]>>({})
+  /**
+   * `answers` 的最新值，供非同步流程在 await 之後讀取（#791）。
+   *
+   * 閉包裡的 `answers` 是呼叫當下的值：`flushAnswer` 等前一筆暫存落地的期間學員又點了同一題，
+   * 讀閉包會把較舊的選擇接在較新的那筆後面送出——伺服器留下舊答案、畫面顯示新答案。
+   */
+  const answersRef = useRef(answers)
+  useEffect(() => {
+    answersRef.current = answers
+  }, [answers])
   /** 已送出暫存的題目——避免切題時重送沒有變動的答案。 */
   const savedRef = useRef<Record<number, string>>({})
   /**
@@ -150,7 +161,8 @@ export function EtQuizAnswerPage() {
       if (questionId === null) return
       // 先等該題排隊中的暫存落地，`savedRef` 才是伺服器上的實際值
       await (saveChainRef.current[questionId] ?? Promise.resolve()).catch(() => undefined)
-      const selected = answers[questionId] ?? []
+      // await 之後讀最新作答，不讀閉包（見 `answersRef`）
+      const selected = answersRef.current[questionId] ?? []
       if (savedRef.current[questionId] === JSON.stringify(selected)) return
       try {
         await saveInOrder(questionId, selected)
@@ -158,8 +170,40 @@ export function EtQuizAnswerPage() {
         if (required) throw err
       }
     },
-    [answers, saveInOrder],
+    [saveInOrder],
   )
+
+  /**
+   * 進入最後一分鐘時，把所有尚未暫存的題目補送一次（#791）。
+   *
+   * 「點選即存」只救得到最後一分鐘**內**才點的作答。之前就選好、之後停在該題檢查到時間到的
+   * 答案（答完停在最後一題是常見習慣），沒有切題也沒按提交，原本只剩倒數歸零時的補送——
+   * 那時後端已判逾時、必被拒，學員看得到自己選的答案，卻以「未作答」計分。
+   *
+   * 門檻沿用 `isInFinalSaveWindow`，與點選即存同一個常數：補送之後的點選由點選即存接手，
+   * 兩者之間沒有縫。⛔ 不要改成跟倒數轉紅的 `URGENT_SECONDS` 走——那兩個門檻不同步時，
+   * 介於兩者之間的點選既不即存、也不在補送範圍內。
+   *
+   * **窗口內每秒補送一輪，直到歸零**，不是只送一次：補送失敗（網路抖動、5xx）時這是那一題
+   * 最後的機會，歸零時的補送必被以逾時拒絕。已存的題目由 `flushAnswer` 比對 `savedRef` 略過、
+   * 不發請求，所以每秒一輪的成本只是本地比對；上一輪還在送時跳過，不疊請求。
+   */
+  const deadlineMs = data?.deadlineMs ?? null
+  const inProgress = data?.status === "IN_PROGRESS"
+  useEffect(() => {
+    if (!inProgress || deadlineMs === null) return undefined
+    let flushing = false
+    const id = setInterval(() => {
+      // 歸零後交給自動交卷；再補送只會收到逾時拒絕
+      if (flushing || !isInFinalSaveWindow(deadlineMs) || Date.now() >= deadlineMs) return
+      flushing = true
+      const pending = Object.keys(answersRef.current).map(Number)
+      void Promise.all(pending.map((questionId) => flushAnswer(questionId))).finally(() => {
+        flushing = false
+      })
+    }, 1000)
+    return () => clearInterval(id)
+  }, [inProgress, deadlineMs, flushAnswer])
 
   /** 本次提交是不是「離開作答視窗」觸發的——結果頁要據此說明為什麼考卷被交出去。 */
   const leftWindowRef = useRef(false)
