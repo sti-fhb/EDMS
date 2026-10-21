@@ -1,7 +1,8 @@
 """ET 排程 handler（US14 / #325）。
 
 `SCHET002`（每日）＝ `daily_job`（`DP_SCHEDULE.HANDLER_REF` 指向本 callable）：
-① 到期自動關閉 ② 結清逾期未提交之作答 ③ 截止前加急提醒。
+① 到期自動關閉 ② 結清逾期未提交之作答 ③ 截止前加急提醒 ④ 引用文件變動通知
+⑤ 孤兒影片檔清理（#775）。
 
 handler 為 async 無參、自管 session（比照 `app.dp.schedules.handlers.daily_platform_job`
 與 `app.dm.review.reminder.run`）。
@@ -35,6 +36,7 @@ import logging
 
 from app.core.db import AsyncSessionLocal
 from app.et.material.doc_change_service import EtDocChangeNotifyService
+from app.et.material.orphan_sweep import EtOrphanVideoSweeper
 from app.et.schedules.service import EtScheduleService
 from app.et.schedules.weekly_service import EtWeeklyReportService
 from app.et.stats.service import EtStatsService
@@ -54,7 +56,7 @@ async def weekly_job() -> None:
 
 
 async def daily_job() -> None:
-    """SCHET002 每日作業：到期關閉 + 結清逾期未提交之作答 + 加急提醒 + 引用文件變動通知。"""
+    """SCHET002 每日作業：到期關閉 + 結清逾期未提交之作答 + 加急提醒 + 引用文件變動通知 + 孤兒影片檔清理。"""
     service = EtScheduleService()
 
     async with AsyncSessionLocal() as db:
@@ -74,9 +76,20 @@ async def daily_job() -> None:
         doc_changes = await EtDocChangeNotifyService().run(db)
         await db.commit()
 
+    # 第 5 批（#775）：刪除沒有任何資料列指向的影片檔。排在最後、自己一個 session：
+    # 它只讀 DB、動檔案系統，失敗不該影響前四批；也同理掛在既有 job（理由見第 4 批）。
+    # ⚠️ 例外要接住：沒接的話整個 job 被 scheduler 記成失敗，而前四批其實都成功了。
+    try:
+        async with AsyncSessionLocal() as db:
+            sweep = await EtOrphanVideoSweeper().run(db)
+        swept = f"孤兒影片檔清理 {sweep.deleted} 支（掃描 {sweep.scanned} 支）"
+    except Exception:
+        logger.exception("SCHET002 孤兒影片檔清理失敗")
+        swept = "孤兒影片檔清理失敗"
+
     logger.info(
         "SCHET002 完成：到期關閉 %d 門、結清逾期作答 %d 筆、加急提醒 %d 封、"
-        "文件變動通知 %d 封（掃描 %d 份、跳過 %d 份、新引用記下基準 %d 組）",
+        "文件變動通知 %d 封（掃描 %d 份、跳過 %d 份、新引用記下基準 %d 組）、%s",
         closed,
         settled,
         urgent,
@@ -86,4 +99,5 @@ async def daily_job() -> None:
         # 新引用只記基準、不寄信（#636）。與通知封數分開印，否則看不出
         # 「今天真的有文件改版」與「今天有教師新引用了文件」的差別。
         doc_changes.baselined,
+        swept,
     )

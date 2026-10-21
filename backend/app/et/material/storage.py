@@ -228,6 +228,54 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
     return final_path, os.path.relpath(final_path, root).replace(os.sep, "/")
 
 
+def list_stored_files(root: str) -> list[tuple[str, float]]:
+    """列出儲存根目錄下的所有檔案：`(相對路徑, 最後修改時間)`（#775 孤兒清理用）。
+
+    相對路徑一律以 `/` 分隔，與 `ET_MATERIAL_VIDEO.FILE_PATH` 同格式——兩邊格式不一致的
+    後果是**每一支都被當成孤兒**。含 `.tmp/`：上傳中途當機留下的殘檔也在清理範圍內。
+
+    Args:
+        root: 儲存根目錄的絕對路徑（呼叫端傳入，測試因此可指向暫存目錄）。
+
+    Returns:
+        根目錄不存在時回空清單（新環境尚未上傳過任何影片）。
+    """
+    if not os.path.isdir(root):
+        return []
+    files: list[tuple[str, float]] = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            try:
+                mtime = os.path.getmtime(full)
+            except OSError:
+                continue  # 列舉與讀取之間被刪掉——不是孤兒，也不必報錯
+            files.append((os.path.relpath(full, root).replace(os.sep, "/"), mtime))
+    return files
+
+
+def remove_stored_file(root: str, rel_path: str) -> bool:
+    """刪除儲存根目錄下的一個檔案（#775 孤兒清理），回是否真的刪掉。
+
+    以 `root` 為基準正規化後**必須仍落在 root 內**才刪——`rel_path` 來自目錄列舉，正常
+    不會逃出，但刪檔不可逆，圍籬與讀取端（`_resolved_within_root`）同一個標準。
+    失敗（已不存在、權限）不拋錯：清理是盡力而為，一支刪不掉不該讓整批中止。
+    """
+    real_root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(real_root, rel_path))
+    try:
+        if os.path.commonpath([real_root, target]) != real_root or target == real_root:
+            return False
+    except ValueError:  # Windows 跨磁碟
+        return False
+    try:
+        os.remove(target)
+    except OSError:
+        logger.warning("ET 孤兒影片檔刪除失敗（不記路徑）")
+        return False
+    return True
+
+
 def discard(path: str) -> None:
     """刪除檔案，失敗不拋錯（清理路徑上的失敗不該蓋掉原本的錯誤）。"""
     try:

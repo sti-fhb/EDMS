@@ -5,11 +5,15 @@
 `ensure_version_matched()` 判定樂觀鎖。
 """
 
+import json
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
+from app.et.course.models import EtCourseContentStage
+from app.et.course.stage_rules import ENTITY_MATERIAL_VIDEO
 from app.et.material.models import EtMaterial, EtMaterialDoc, EtMaterialVideo
 from app.et.progress.models import EtProgressInterval, EtProgressVideo
 
@@ -270,3 +274,34 @@ class EtMaterialRepository:
             update(EtMaterial).where(EtMaterial.material_id.in_(material_ids), EtMaterial.deleted == 0).values(**audit)
         )
         await db.flush()
+
+    async def referenced_video_paths(self, db: AsyncSession) -> set[str]:
+        """所有被資料列指向的影片檔相對路徑（#775 孤兒清理的「白名單」）。
+
+        🔴 **兩張表、且都不濾 `DELETED`**：
+        - 活表 `ET_MATERIAL_VIDEO`：已軟刪的也算——軟刪除的語意是可回復，刪檔就回復不了
+          （`test_et_video.py::test_刪除後保留磁碟檔案`）。
+        - 暫存區 `ET_COURSE_CONTENT_STAGE` 的影片節點：編輯中、還沒按「更新」的影片只有這裡
+          指向；已軟刪的暫存列同樣保留，教師可能還在同一輪編輯裡。
+
+        漏掉任何一邊，清理就會刪掉一支仍被指向的檔——那是**不可逆**的，與「留著孤兒佔磁碟」
+        不對稱。寧可多留。
+
+        Returns:
+            `/` 分隔的相對路徑集合（與 `FILE_PATH` 同格式）。
+        """
+        live = set((await db.scalars(select(EtMaterialVideo.file_path))).all())
+        payloads = (
+            await db.scalars(
+                select(EtCourseContentStage.payload).where(EtCourseContentStage.entity_type == ENTITY_MATERIAL_VIDEO)
+            )
+        ).all()
+        staged: set[str] = set()
+        for raw in payloads:
+            try:
+                path = json.loads(raw).get("file_path")
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if isinstance(path, str) and path:
+                staged.add(path)
+        return {p.replace("\\", "/") for p in live | staged}

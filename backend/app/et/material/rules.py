@@ -6,6 +6,9 @@
 錯誤訊息一律不嵌入動態值（文件編號、教材名稱等），對齊 `sti-error-codes`。
 """
 
+from collections.abc import Iterable
+from typing import Final
+
 from app.core.exceptions import AppError
 
 
@@ -62,3 +65,35 @@ def ensure_material_has_media(*, has_video: bool, has_doc: bool, has_description
             detail="教材須至少提供影片、文件或說明文字其中一項",
             error_code="ET_MATERIAL_002",
         )
+
+
+#: 孤兒影片檔的寬限期（#775）：最後修改超過這麼久、又沒有任何資料列指向，才視為孤兒。
+#:
+#: 上傳流程是「先落檔、後寫列」（見 `storage.promote` 的不對稱說明），而那一列要等請求結束
+#: 才 commit——一支 500 MB 的影片從落檔到 commit 之間可能隔好幾分鐘。寬限期擋的是這段
+#: 空窗：掃描當下剛落地、列還沒提交的檔，不可被當成孤兒。取一天：遠大於任何上傳的耗時，
+#: 且排程每日跑一次，孤兒最多多留一天。
+ORPHAN_GRACE_SECONDS: Final = 24 * 60 * 60
+
+
+def select_orphans(files: Iterable[tuple[str, float]], *, referenced: set[str], now: float) -> list[str]:
+    """從儲存目錄的檔案清單挑出孤兒（#775）。
+
+    Args:
+        files: `(相對於儲存根目錄的路徑, 最後修改時間 epoch 秒)`。
+        referenced: 所有資料列指向的相對路徑（`/` 分隔，與 `ET_MATERIAL_VIDEO.FILE_PATH` 同格式）。
+        now: 現在時刻（epoch 秒）。
+
+    Returns:
+        應刪除的相對路徑（`/` 分隔），依輸入順序。
+    """
+    orphans: list[str] = []
+    for path, mtime in files:
+        # DB 存 `/` 分隔（#233）；列舉端若帶 `\`（Windows）而未正規化，每一支都會被當成孤兒
+        normalized = path.replace("\\", "/")
+        if normalized in referenced:
+            continue
+        if now - mtime <= ORPHAN_GRACE_SECONDS:
+            continue
+        orphans.append(normalized)
+    return orphans
