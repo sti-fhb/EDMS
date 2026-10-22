@@ -444,8 +444,16 @@ export function EtCourseEditorPage() {
    *
    * ⚠️ 「未送出」在兩種狀態下指的是不同的事，但**判定相同**——都是「畫面上的值 ≠ 載入
    * 時的值」：草稿要按「儲存草稿」才寫活表，已發布／已關閉要按生效鈕才 `stageBasic()`。
+   *
+   * 🔴 **必須是函式、⛔ 不可寫成元件層級的推導值。** `serializeBasic` 內含
+   * `JSON.stringify`，寫成 `const basicDirty = …` 會讓它**每一次 render 都跑**——而這個
+   * 頁面在逐欄輸入、增減受訓對象時 render 次數很多。#812 第一版就是那樣寫的，實測讓
+   * `新增一組配對後送出的 body…` 從通過變成 5444ms 逾時；把實作還原成改動前、同一台
+   * 機器同樣負載下該條就通過，確認是本改動造成而非環境雜訊。
+   *
+   * ⇒ 只有按下「取消」時才需要這個答案，所以只在那時算。
    */
-  const basicDirty = loadedBasic !== null && serializeBasic(form, startAt, endAt) !== loadedBasic
+  const isBasicDirty = () => loadedBasic !== null && serializeBasic(form, startAt, endAt) !== loadedBasic
   /**
    * 是否要把底部那一列講成「待辦」（警示色 + 待更新文案）。
    *
@@ -931,7 +939,7 @@ export function EtCourseEditorPage() {
       // 🔴 為什麼新增模式不該跳這個視窗：它的章節放在 `stagedChapters` 這個畫面上的
       // state 裡、要到 `saveMut` 建立課程時才隨 `coursesApi.create` 一起送出，**一個都
       // 沒寫進 DB**。對它說「會即時存入」是假的。
-      if (basicDirty) {
+      if (isBasicDirty()) {
         if (status === "DRAFT" && !isNew) {
           confirm({
             title: "取消不會還原已存入的內容",
