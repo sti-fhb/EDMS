@@ -276,10 +276,21 @@ describe("草稿按「取消」要先講清楚哪一半留著（#804 ①）", ()
     expect(navigateSpy).not.toHaveBeenCalledWith("/et/courses")
   })
 
-  it("已關閉課程的同一個視窗指向「更新並重開課」，不是「更新」（#812）", async () => {
-    // 已關閉課程的生效鈕叫「更新並重開課」。寫死「更新」會把教師指向一顆畫面上
-    // 不存在的按鈕——`applyLabel` 已經在處理這件事，這裡沿用。
-    mockPublishedNoStage({ is_closed: true })
+  // 生效鈕在這兩種課程上叫「更新並重開課」。寫死「更新」會把教師指向一顆畫面上
+  // 不存在的按鈕——`applyLabel` 已經在處理這件事，這裡沿用。
+  //
+  // ℹ️ 兩個案例走的是**同一條程式路徑**：分流只看 `status === "DRAFT"`（兩者皆否）與
+  // `reopening = course.is_closed`（兩者皆真），沒有一行程式碼區分它們。列兩筆是為了
+  // 對上驗收條件的「已關閉／視同關閉」兩半各有正向證據，不是因為它們會分岔。
+  //
+  // 🔴 **「視同關閉」是 `PUBLISHED` + `is_closed: true`**（閱課期間已過），判定全在後端
+  //（`schemas.ts` 的 `is_closed`）。前端不自行比對 `open_end_at`——複製一份規則過來，
+  // 兩邊就會各自漂移。
+  it.each([
+    ["已關閉", { status: "CLOSED", is_closed: true }],
+    ["視同關閉（已發布但閱課期間已過）", { status: "PUBLISHED", is_closed: true }],
+  ])("%s 的同一個視窗指向「更新並重開課」，不是「更新」（#812）", async (_label, overrides) => {
+    mockPublishedNoStage(overrides)
     const user = userEvent.setup()
     renderEditor()
     await user.type(await screen.findByDisplayValue("採血作業訓練"), "X")
