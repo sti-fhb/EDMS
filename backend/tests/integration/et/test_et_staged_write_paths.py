@@ -886,12 +886,17 @@ async def test_已發布課程的內容編輯不得直接寫活表(label: str, c
 
 @pytest.mark.parametrize(
     ("label", "call"),
-    [pytest.param(label, call, id=label) for label, _staged, call in _COURSE_MODULE],
+    [pytest.param(label, call, id=label) for label, _staged, call in _ALL if _staged],
 )
 async def test_草稿課程的內容編輯仍直接寫活表(label: str, call, client, db) -> None:
     """🥇 **正向錨點**——少了它，把那些端點改成「什麼都不做」也會讓上一條通過。
 
     草稿沒有學員、不需版本化，行為必須完全不變。
+
+    ⚠️ **母體是 `_ALL` 而非 `_COURSE_MODULE`**（#804）：原本只涵蓋章節與項目 7 支，
+    教材 / 測驗 / 問卷那 11 支只靠 `is_staged` 的實作成立、沒有正向測試釘住。而 ET05
+    的「取消」確認視窗對教師明寫「章節、教材、測驗與課後問卷…會即時存入」——那句承諾
+    的依據就是本條，母體少一類就等於那句話有一類沒人驗。
     """
     uid = await _user(db, f"ZT_D{_tag(label)}")
     ids = await _course_with_content(client, db, uid)

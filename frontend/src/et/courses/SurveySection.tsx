@@ -170,6 +170,24 @@ export function SurveySection({
                   ——至少須有 1 題才能發布課程
                 </Typography>
               )}
+              {!survey.is_active && (
+                // 🔴 **停用的後果要講出來，不能只掛「已停用」標記**（#804 ②）。
+                //
+                // 2026-10-22 手測：教師對已停用的問卷新增題目、按「更新」，系統回報成功，
+                // 學員端卻完全看不到。三個各自正確的設計疊成一個假的成功——發布檢核把停用
+                // 問卷視同沒有問卷故不擋（#611）、學員端 `survey_active === false` 整個入口
+                // 不出現（`survey_fill.rules.derive_entry_state`）、而這張卡片對停用者連
+                // 0 題提示都刻意不顯示（#768 第 8 項）。
+                //
+                // ⚠️ 右側的「已停用」Chip 不夠——同檔凍結呈現的 2026-09-18 裁示已經判過這
+                // 件事：「標記只講狀態、不講後果」。故句子放在**題數旁**而非 Chip 旁：教師
+                // 的疑問是「我加了題目為什麼學員看不到」，答案要緊貼著題數。
+                //
+                // ⛔ 不可改放進問卷編輯視窗——得點進去才看到就失去意義（同上裁示）。
+                <Typography component="span" variant="caption" color="warning.main">
+                  ——停用中，學員看不到此問卷
+                </Typography>
+              )}
             </Typography>
           </Box>
           {!survey.is_active && <Chip size="small" label="已停用" />}
