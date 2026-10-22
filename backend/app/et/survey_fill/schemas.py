@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 #:
 #: ⚠️ **它擋不住「用超大 body 佔記憶體」**：FastAPI 在解析 dependency 之前就把整個
 #: body 讀進記憶體並 `json()`，本上限是在那之後才生效的。request body 的總量上限屬
-#: 部署層：一般 API 由 nginx `client_max_body_size 10m` 擋（#806，見 `nginx/nginx.conf`）。
+#: 部署層：一般 API 由 nginx `client_max_body_size 2m` 擋（#806，見 `nginx/nginx.conf`）。
 MAX_ANSWERS_PER_REQUEST = 200
 
 #: 文字答案之**請求大小防護**（非業務規則）。

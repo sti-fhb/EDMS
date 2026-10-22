@@ -396,12 +396,15 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 
 | location | `client_max_body_size` | 適用 |
 |---|---|---|
-| 上傳端點的 regex | **501m**（#305 / PR `a203d3d`，2026-09-11） | 收檔案的 5 支端點，清單寫在 `nginx.conf` 該段註解 |
-| `location /api/` | **10m** | 其餘所有 API |
+| DM 上傳的 regex | **51m**（`DM_FILE_MAX_MB` 50 + 信封餘裕） | DM 文件建立／加版／改草稿、廢止附件，共 4 支 |
+| ET 影片上傳的 regex | **501m**（#305 / PR `a203d3d`，2026-09-11） | `POST /api/et/materials/{id}/videos` |
+| `location /api/` | **2m** | 其餘所有 API（最大的單一 JSON 欄位是教材說明 HTML 的 50,000 字元，中文約 150 KB） |
 
-🔴 **新增上傳端點時必須加進上傳端點的 regex**，否則它落到 10m，超過 10 MB 的檔案由 nginx 直接回 HTML 413。CI 與 CD 都不驗 nginx 設定，只會在線上使用者上傳時才發現。
+超過上限時 nginx 回 `COMMON_413` 的 JSON（見 `docs/ref/error-codes.md`），前端照一般錯誤顯示。上傳端點的寫入請求不是 `multipart/form-data` 時回 415。
 
-#806 之前全部 API 共用 501m，連未登入可呼叫的 `POST /api/login` 都收得下 501 MB；而 FastAPI 先把 JSON body 整包讀進記憶體才驗身分，後端又只有 1 個 worker。
+🔴 **新增上傳端點時必須加進上傳端點的 regex**，否則它落到 2m，超過 2 MB 的檔案被 nginx 擋下回 413。CI 與 CD 都不驗 nginx 設定，只會在線上使用者上傳時才發現。
+
+#806 之前全部 API 共用 501m（DM 也是），連未登入可呼叫的 `POST /api/login` 都收得下 501 MB；而 FastAPI 先把 JSON body 整包讀進記憶體才驗身分，後端又只有 1 個 worker。
 
 > 🔴 **本節原本寫 `100m` 並斷言「這是實際生效的上限，瓶頸在這裡」——數字與結論都是錯的**（已於 #360 更正）。數字停在 #305 之前；結論則從未經過實機查證。2026-09-23 實測：對 `https://bms.tbsf.tw/edms/` 送 4 MB body，proxy 鏈先回 `100 Continue`（代表已比對 `Content-Length` 並放行）、最終由 app 回 405，**全線通過**。瓶頸不在 EDMS nginx。
 >
