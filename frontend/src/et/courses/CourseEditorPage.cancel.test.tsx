@@ -298,6 +298,13 @@ describe("草稿按「取消」要先講清楚哪一半留著（#804 ①）", ()
 
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText(/要按「更新並重開課」才會送出/)).toBeInTheDocument()
+    // 🔴 **標題也要驗。** 第一版只有內文用 `applyLabel`、標題寫死「更新」，於是同一個
+    // 視窗自己打架——而當時這條只斷言 `content`，所以它全綠（security review LOW 抓到）。
+    //
+    // ⚠️ 用**完整字串**而非 regex：「尚未按「更新並重開課」的…」本身就含「更新」二字，
+    // 寫成 `/尚未按「更新」/` 會把正確的標題也判成錯的。
+    expect(within(dialog).getByText("尚未按「更新並重開課」的基本資料不會保留")).toBeInTheDocument()
+    expect(within(dialog).queryByText("尚未按「更新」的基本資料不會保留")).not.toBeInTheDocument()
   })
 
   it("已發布、無暫存、基本資料**未**改 → 直接離開，不跳視窗（正向錨點）", async () => {

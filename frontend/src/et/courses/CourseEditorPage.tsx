@@ -973,7 +973,19 @@ export function EtCourseEditorPage() {
         // 已發布 / 已關閉（#812）。
         //
         // ⚠️ 第二句是必要的：教師讀到「不會保留」會擔心章節也沒了。本分支的前提正是
-        // `hasPendingChanges === false`，所以那句話在這裡**恆真**。
+        // `hasPendingChanges === false`，所以那句話在這裡成立。
+        //
+        // ℹ️ 嚴格說成立的是「**快取裡的** `has_pending_changes` 為 false」，有兩個已知的
+        // 過期窗口：跨分頁（見 `discardMut` 一帶標為「已知且接受」的那段），以及章節 /
+        // 教材 / 問卷存檔成功後 `invalidate()` 到 refetch 落地之間的次秒窗口——`actionPending`
+        // 不含 `chapterMut`，「取消」鈕在那段期間仍按得下去。要踩到得「同一秒內剛存過章節
+        // ＋基本資料也是髒的＋立刻按取消」。⛔ 不要為此把鈕停用：**改動前的行為是連問都
+        // 不問就直接離開**，所以這不是退步，只是那句安撫話在極窄窗口內可能講得太滿。
+        //
+        // 🔴 **標題與內文都要用 `applyLabel`，⛔ 不可寫死「更新」。** 已關閉／視同關閉的
+        // 動作列是「取消｜保留編輯｜更新並重開課」，畫面上沒有「更新」那顆鈕。#812 第一版
+        // 只有內文用了 `applyLabel`、標題寫死，於是同一個視窗自己打架（security review LOW）
+        //——而測試當時只斷言 `content`，所以它全綠。
         //
         // ⛔ **不要把欄位逐項列出來。** 初版寫的是「課程名稱、說明、起訖時間與受訓對象」
         //——漏了「本課程需線下核可」（code review LOW）。`serializeBasic` 追蹤 6 個欄位，
@@ -984,7 +996,7 @@ export function EtCourseEditorPage() {
         // 不多不少。`CourseEditorPage.cancel.test.tsx` 的「『基本資料』卡涵蓋快照追蹤的
         // 每一個欄位」釘住這件事——有人把欄位搬出那張卡，那條會紅。
         confirm({
-          title: "尚未按「更新」的基本資料不會保留",
+          title: `尚未按「${applyLabel}」的基本資料不會保留`,
           content:
             `「基本資料」區的修改要按「${applyLabel}」才會送出，離開不會保留。` +
             "章節、教材、測驗與課後問卷目前沒有待生效的編輯。",

@@ -266,6 +266,10 @@ describe("ET05 課程編輯頁", () => {
     expect(screen.getByText("林助教")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "儲存草稿" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "新增章節" })).not.toBeInTheDocument()
+    // 「取消」也在同一道 `!readOnly` 閘裡（#812 security review LOW）。#804 / #812 讓這顆鈕
+    // 開始跳確認視窗、而視窗內文會講出課程處於哪個狀態——那是非擁有者不該從這裡讀到的。
+    // 它本來就守得住，但守住它的是**兄弟按鈕的測試**，沒有一條指著它自己。
+    expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument()
   })
 
   it("版本衝突時以對話框呈現而非 snackbar", async () => {
