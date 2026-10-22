@@ -41,6 +41,7 @@
 | COMMON_003 | 422 | limit 必須 >= 1 |
 | COMMON_004 | 422 | limit 不得超過 100 |
 | COMMON_005 | 400 | 不允許更新的欄位 |
+| COMMON_413 | 413 | 上傳內容超過系統允許的大小上限 |
 | COMMON_422 | 422 | 請求格式驗證失敗 |
 | COMMON_429 | 429 | 操作過於頻繁，請稍後再試 |
 | COMMON_500 | 500 | Internal Server Error |
@@ -49,6 +50,10 @@
 > **`COMMON_503`**：密碼運算（bcrypt）之併發閘負載卸除（#214）。同時進行中的運算達門檻時
 > 立即拒絕，避免請求在等待期間持續佔用 DB 連線。屬**暫時性**錯誤，前端可提示稍後重試；
 > 勿用於一般系統錯誤（那是 `COMMON_500`）。
+
+> **`COMMON_413`**：**由 nginx 產生，不是後端**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）。
+> 請求 body 超過該路徑的 `client_max_body_size`（一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，
+> 後端完全不會收到請求。後端程式碼 grep 不到這個碼是正常的，⛔ 不要當成孤兒刪掉。
 
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
 
