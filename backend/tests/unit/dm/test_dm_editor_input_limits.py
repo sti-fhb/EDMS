@@ -44,6 +44,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from app.core.auth import create_access_token
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.dm.deps import DmContext, get_dm_context
@@ -69,7 +70,10 @@ def client():
     app.dependency_overrides[get_operator] = lambda: OperatorInfo(user_id="u1")
     app.dependency_overrides[get_db] = _fake_db
     transport = ASGITransport(app=app, raise_app_exceptions=False)
-    yield httpx.AsyncClient(transport=transport, base_url="http://t")
+    # 上傳端點讀 body 前會先驗 token 的簽章（#810，`core/upload_auth_precheck`）——覆寫
+    # dependency 管不到 middleware，故仍要帶一張有效的 token；帳號狀態的檢查已由上面的覆寫略過。
+    token = create_access_token(sub="u1", ttl_minutes=15)
+    yield httpx.AsyncClient(transport=transport, base_url="http://t", headers={"Authorization": f"Bearer {token}"})
     for dep in (get_dm_context, get_operator, get_db):
         app.dependency_overrides.pop(dep, None)
 
