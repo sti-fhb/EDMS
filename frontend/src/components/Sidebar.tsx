@@ -8,7 +8,7 @@ import ListItemButton from "@mui/material/ListItemButton"
 import ListItemText from "@mui/material/ListItemText"
 import Typography from "@mui/material/Typography"
 import { useState } from "react"
-import { NavLink } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 
 import { useQuery } from "@tanstack/react-query"
 
@@ -17,6 +17,7 @@ import { useDmAdminAccess } from "../dm/access/useDmAdminAccess"
 import { useDmReviewerAccess } from "../dm/access/useDmReviewerAccess"
 import { usePersonalAccess } from "../dm/personal/usePersonal"
 import { coursesApi } from "../et/courses/coursesService"
+import { resolveActiveNavPath } from "../layouts/activeNav"
 import type { ModuleKey, NavGroup } from "../layouts/navItems"
 import { NAV_GROUPS } from "../layouts/navItems"
 import type { ModuleSummary } from "../layouts/useModuleSummary"
@@ -35,7 +36,7 @@ const SIDEBAR = {
 }
 
 /** 單一模組群組：可收合下拉（MUI Collapse + chevron 旋轉），子項縮排。對齊 TBMS 側欄。 */
-function NavGroupSection({ group }: { group: NavGroup }) {
+function NavGroupSection({ group, activeNavPath }: { group: NavGroup; activeNavPath: string | undefined }) {
   // P1 僅「系統管理者後台」一組，預設展開（登入落在歡迎頁時側欄仍露出功能）；點標題可收合。
   const [expanded, setExpanded] = useState(true)
   return (
@@ -74,8 +75,13 @@ function NavGroupSection({ group }: { group: NavGroup }) {
           {group.items.map((item) => (
             <ListItemButton
               key={item.path}
-              component={NavLink}
+              // 用 `Link` 而非 `NavLink`：高亮一律由 `resolveActiveNavPath` 決定，
+              // NavLink 內建的前綴相符會把子頁亮錯項（ET06 學習頁亮成 ET01），
+              // 且它的 `active` class 與 `aria-current` 兩者一起算，無法只覆寫其一。
+              component={Link}
               to={item.path}
+              className={item.path === activeNavPath ? "active" : undefined}
+              aria-current={item.path === activeNavPath ? "page" : undefined}
               sx={{
                 pl: 5,
                 pr: 1.5,
@@ -140,6 +146,9 @@ function isGroupVisible(group: NavGroup, summary: ModuleSummary | undefined): bo
  * 完全看不到 DM 功能列（最小知悉）。
  */
 export function Sidebar() {
+  const location = useLocation()
+  // 子頁（學習頁 / 文件詳細頁等）沒有自己的側欄項，要指回其入口功能項，見 `activeNav`
+  const activeNavPath = resolveActiveNavPath(location.pathname, location.state)
   const { data: summary } = useModuleSummary()
   // 個人專區入口可見性（US9 FR-004）：具編輯者或審核者才顯示；僅在具任一 DM 角色時查詢（避免非 DM 者 403）。
   const { data: access } = usePersonalAccess(summary?.dm.has_role ?? false)
@@ -177,7 +186,7 @@ export function Sidebar() {
   return (
     <Box component="nav" aria-label="主導覽" sx={{ py: 0.5 }}>
       {visibleGroups.map((group) => (
-        <NavGroupSection key={group.title} group={group} />
+        <NavGroupSection key={group.title} group={group} activeNavPath={activeNavPath} />
       ))}
     </Box>
   )

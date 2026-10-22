@@ -28,6 +28,7 @@ import {
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { dmTagGroupLabel } from "../../constants/dmTagGroups"
+import { navFrom } from "../../layouts/activeNav"
 import { formatDateTaipei, todayTaipei } from "../../utils/date"
 
 const PAGE_SIZE = 20
@@ -201,7 +202,8 @@ export function DmLibraryPage() {
                     key={row.doc_id}
                     hover
                     sx={{ cursor: "pointer" }}
-                    onClick={() => navigate(`/dm/documents/${row.doc_id}`)}
+                    // 帶來源：文件詳細頁的側欄高亮指回入口功能項（同一頁也可自 DM03 進入）
+                    onClick={() => navigate(`/dm/documents/${row.doc_id}`, navFrom("/dm/library"))}
                   >
                     <TableCell>
                       {row.doc_name}

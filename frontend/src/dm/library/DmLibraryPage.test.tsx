@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DmLibraryPage } from "./DmLibraryPage"
+import { navFrom } from "../../layouts/activeNav"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -84,7 +85,8 @@ describe("DmLibraryPage 文件庫", () => {
     const user = userEvent.setup()
     renderWithProviders(<DmLibraryPage />)
     await user.click(await screen.findByText("領血確認標準作業程序"))
-    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000001")
+    // 第二個參數帶來源：詳細頁同時可自 DM03 進入，側欄要高亮回原本那一項
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000001", navFrom("/dm/library"))
   })
 })
 

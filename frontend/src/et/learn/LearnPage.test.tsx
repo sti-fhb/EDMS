@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtLearnPage } from "./LearnPage"
 import type { LearnStructure } from "./learnSchemas"
+import { navFrom } from "../../layouts/activeNav"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -17,6 +18,8 @@ const search = { current: "" }
  * 真實情況下使用者是從某個清單頁點進來的。
  */
 const locationKey = { current: "pushed-from-course-list" }
+/** 目前 location 的 `state`：帶 `__navFrom` 時代表「自哪個側欄功能項進來」（`layouts/activeNav`）。 */
+const locationState = { current: null as unknown }
 vi.mock("react-router-dom", async (orig) => {
   const actual = await orig<typeof import("react-router-dom")>()
   return {
@@ -28,7 +31,7 @@ vi.mock("react-router-dom", async (orig) => {
       pathname: "/et/courses/1/learn",
       search: search.current,
       hash: "",
-      state: null,
+      state: locationState.current,
       key: locationKey.current,
     }),
   }
@@ -38,6 +41,7 @@ beforeEach(() => {
   navigate.mockReset()
   search.current = ""
   locationKey.current = "pushed-from-course-list"
+  locationState.current = null
 })
 
 function mockStructure(overrides: Partial<LearnStructure>) {
@@ -348,7 +352,8 @@ describe("ET06 章節學習頁", () => {
       await user.click(await screen.findByRole("button", { name: "填寫課後問卷" }))
 
       expect(screen.getByText(/具名、一人一次/)).toBeInTheDocument()
-      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey")
+      // 第二個參數把本頁的側欄高亮傳給問卷頁；學員自 ET03 進來，故為「我的課程」
+      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey", navFrom("/et/my-courses"))
     })
 
     it("已送出時改顯示「查看我的填答」與送出時間", async () => {
@@ -390,7 +395,23 @@ describe("ET06 章節學習頁", () => {
       expect(screen.getByText(/預覽模式，不可送出/)).toBeInTheDocument()
       // 預覽不得沿用學員的「具名、一人一次」說明——那暗示他可以填
       expect(screen.queryByText(/具名、一人一次/)).not.toBeInTheDocument()
-      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey")
+      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey", navFrom("/et/my-courses"))
+    })
+
+    it("🔴 教師自 ET01「全部課程」預覽進來時，問卷頁沿用 ET01 的側欄高亮", async () => {
+      // 預覽課後問卷**會離開學習頁**。少了這段傳遞，側欄會從 ET01 掉到 ET03——而純教師
+      // 沒有學員角色、側欄根本沒有 ET03 那一項，變成一項都不亮（正是本次要修掉的症狀）。
+      locationState.current = navFrom("/et/courses").state
+      const user = userEvent.setup()
+      mockStructure({
+        is_preview: true,
+        survey: { survey_id: 5, survey_name: "課後滿意度問卷", state: "PREVIEW", submitted_at: null },
+      })
+      renderWithProviders(<EtLearnPage />)
+
+      await user.click(await screen.findByRole("button", { name: "預覽課後問卷" }))
+
+      expect(navigate).toHaveBeenCalledWith("/et/courses/1/survey", navFrom("/et/courses"))
     })
 
     it("未完課（HIDDEN）時整塊不渲染", async () => {

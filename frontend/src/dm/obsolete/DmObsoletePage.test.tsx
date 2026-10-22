@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DmObsoletePage } from "./DmObsoletePage"
 import { downloadObsoleteCsv } from "./obsoleteService"
+import { navFrom } from "../../layouts/activeNav"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -64,7 +65,8 @@ describe("DmObsoletePage 已廢止文件查詢", () => {
     const user = userEvent.setup()
     renderWithProviders(<DmObsoletePage />)
     await user.click(await screen.findByText("停辦作業SOP"))
-    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000901")
+    // 第二個參數帶來源：詳細頁預設高亮 DM01，自本頁進入者側欄要留在 DM03
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000901", navFrom("/dm/obsolete"))
   })
 
   it("匯出 CSV：點擊觸發下載", async () => {

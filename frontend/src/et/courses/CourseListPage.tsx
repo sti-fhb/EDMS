@@ -27,6 +27,7 @@ import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
+import { navFrom } from "../../layouts/activeNav"
 
 /** 桌機每列三張，四列剛好一頁。 */
 const PAGE_SIZE = 12
@@ -365,7 +366,15 @@ export function EtCourseListPage() {
                   // ⚠️ 判定用 `scope` 而非 `course.is_owner`：自己的已發布課程也會出現在
                   // 「全部課程」，而教師在那裡點它要的同樣是預覽（那正是他預覽自己課程的
                   // 入口）。照 `is_owner` 判會讓他在「全部課程」點自己的課卻跳進編輯頁。
-                  onOpen={(id) => navigate(scope === "all" ? `/et/courses/${id}/learn` : `/et/courses/${id}`)}
+                  //
+                  // 預覽頁（`/learn`）的側欄預設高亮 ET03 我的課程（學員的入口），
+                  // 故自本頁進入時帶來源，教師預覽時側欄仍留在 ET01——否則純教師
+                  // 看不到 ET03，側欄會變成一項都沒亮。
+                  onOpen={(id) =>
+                    scope === "all"
+                      ? navigate(`/et/courses/${id}/learn`, navFrom("/et/courses"))
+                      : navigate(`/et/courses/${id}`)
+                  }
                 />
               </Grid>
             ))}

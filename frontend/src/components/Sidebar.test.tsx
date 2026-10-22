@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 
 import { RolesPage } from "../dp/roles/RolesPage"
+import { navFrom } from "../layouts/activeNav"
 import { NAV_GROUPS } from "../layouts/navItems"
 import { renderWithProviders } from "../test/renderWithProviders"
 import { server } from "../test/server"
@@ -311,5 +312,61 @@ describe("Sidebar", () => {
         )
       }
     }
+  })
+
+  // ── 子頁高亮：無側欄入口的頁面要指回它的入口功能項（見 layouts/activeNav） ──
+  // 高亮的 DOM 契約是 `aria-current="page"`（樣式用的 `.active` class 與它同進同出）。
+
+  it("🔴 ET06 章節學習頁停在「ET03 我的課程」，不是網址前綴的 ET01 課程列表", async () => {
+    renderWithProviders(<Sidebar />, undefined, ["/et/courses/7/learn"])
+    expect(await screen.findByRole("link", { name: "ET03 我的課程" })).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "ET01 課程列表" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("🔴 純學員在 ET06 章節學習頁仍有一項亮著（他看不到 ET01，原本整個側欄都不亮）", async () => {
+    server.use(
+      http.get("/api/et/courses/capabilities", () =>
+        HttpResponse.json({
+          can_create_course: false,
+          can_manage_courses: false,
+          can_track_students: false,
+          can_learn: true,
+        }),
+      ),
+    )
+    renderWithProviders(<Sidebar />, undefined, ["/et/courses/7/learn"])
+    expect(await screen.findByRole("link", { name: "ET03 我的課程" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("ET06 自 ET01「全部課程」預覽進入時停在 ET01（#481 的教師預覽入口不被改掉）", async () => {
+    renderWithProviders(<Sidebar />, undefined, [{ pathname: "/et/courses/7/learn", ...navFrom("/et/courses") }])
+    expect(await screen.findByRole("link", { name: "ET01 課程列表" })).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "ET03 我的課程" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("ET05 課程編輯頁仍停在「ET01 課程列表」（既有的前綴相符行為未被改掉）", async () => {
+    renderWithProviders(<Sidebar />, undefined, ["/et/courses/7"])
+    expect(await screen.findByRole("link", { name: "ET01 課程列表" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("🔴 DM07 文件詳細頁自 DM03 進入時停在「DM03 已廢止文件查詢」", async () => {
+    renderWithProviders(<Sidebar />, undefined, [
+      { pathname: "/dm/documents/DM-TRAINING-000015", ...navFrom("/dm/obsolete") },
+    ])
+    expect(await screen.findByRole("link", { name: "DM03 已廢止文件查詢" })).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "DM01 文件庫" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("🔴 DM07 文件詳細頁自 DM01 進入（或直接貼網址）時停在「DM01 文件庫」", async () => {
+    renderWithProviders(<Sidebar />, undefined, ["/dm/documents/DM-TRAINING-000015"])
+    expect(await screen.findByRole("link", { name: "DM01 文件庫" })).toHaveAttribute("aria-current", "page")
+    // DM03 等 admin-access 解析後才渲染，比 DM01 晚——用 `findBy` 等它出現再斷言
+    expect(await screen.findByRole("link", { name: "DM03 已廢止文件查詢" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("側欄功能項本身仍會亮（高亮改由 activeNav 計算後沒弄丟最基本的情形）", async () => {
+    renderWithProviders(<Sidebar />, undefined, ["/dp/audit"])
+    expect(await screen.findByRole("link", { name: "DP05 操作記錄查詢" })).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "DP01 使用者管理" })).not.toHaveAttribute("aria-current")
   })
 })

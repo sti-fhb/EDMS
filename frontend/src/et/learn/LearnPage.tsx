@@ -20,6 +20,7 @@ import { ScreenHeader } from "../../components/ScreenHeader"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { useGoBack } from "../../hooks/useGoBack"
+import { useNavFromHere } from "../../layouts/activeNav"
 import { toApiError } from "../../services/http"
 
 /**
@@ -51,6 +52,8 @@ export function EtLearnPage() {
     ⚠️ fallback 仍是 ET03——沒有上一頁的人（貼網址 / 重新整理 / 邀請信連結）以學員居多。
   */
   const goBack = useGoBack("/et/my-courses")
+  // 問卷頁沿用本頁的側欄高亮：本頁可能自 ET03（學員）或 ET01（教師預覽）進來，問卷頁看不出
+  const surveyNavOptions = useNavFromHere()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const { message } = useNotification()
@@ -250,7 +253,7 @@ export function EtLearnPage() {
             onSelect={handleSelect}
             showProgress={!data.is_preview}
             survey={data.survey}
-            onSurveyClick={() => navigate(`/et/courses/${courseId}/survey`)}
+            onSurveyClick={() => navigate(`/et/courses/${courseId}/survey`, surveyNavOptions)}
           />
         </Grid>
         <Grid size={{ xs: 12, md: 9 }}>

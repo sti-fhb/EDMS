@@ -23,6 +23,7 @@ import { useDmAdminAccess } from "../access/useDmAdminAccess"
 import { Pagination } from "../../components/Pagination"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
+import { navFrom } from "../../layouts/activeNav"
 import { formatDateTimeTaipei, todayTaipei } from "../../utils/date"
 import { useCategoryOptions } from "../library/useLibrary"
 
@@ -185,7 +186,8 @@ export function DmObsoletePage() {
                     key={row.doc_id}
                     hover
                     sx={{ cursor: "pointer" }}
-                    onClick={() => navigate(`/dm/documents/${row.doc_id}`)}
+                    // 帶來源：文件詳細頁預設高亮 DM01 文件庫，自本頁進入者要留在 DM03
+                    onClick={() => navigate(`/dm/documents/${row.doc_id}`, navFrom("/dm/obsolete"))}
                   >
                     <TableCell>
                       {row.doc_name}
