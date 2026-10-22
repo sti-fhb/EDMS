@@ -49,6 +49,13 @@ describe("resolveActiveNavPath", () => {
     expect(resolveActiveNavPath("/et/courses/7/learn", state)).toBe("/et/courses")
   })
 
+  it("🔴 課後問卷頁同樣認來源：教師預覽時 ET01、學員時 ET03", () => {
+    // 教師按的是「預覽課後問卷」，它會**離開**學習頁；少了這段傳遞，側欄會從 ET01
+    // 掉到他看不見的 ET03（純教師沒有學員角色）。
+    expect(resolveActiveNavPath("/et/courses/7/survey", navFrom("/et/courses").state)).toBe("/et/courses")
+    expect(resolveActiveNavPath("/et/courses/7/survey", navFrom("/et/my-courses").state)).toBe("/et/my-courses")
+  })
+
   it("來源不是側欄功能項時忽略（竄改 / 功能項已改名），退回靜態對應", () => {
     expect(resolveActiveNavPath("/dm/documents/5", { __navFrom: "/dm/not-a-nav-item" })).toBe("/dm/library")
     expect(resolveActiveNavPath("/dm/documents/5", { __navFrom: 123 })).toBe("/dm/library")
