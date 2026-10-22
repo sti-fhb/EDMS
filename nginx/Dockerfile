@@ -40,6 +40,8 @@ COPY nginx/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
 COPY nginx/log-format.conf /etc/nginx/conf.d/00-log-format.conf
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
 COPY nginx/security-headers.conf /etc/nginx/security-headers.conf
+# location 層的共用轉送設定；⚠️ 不可放 conf.d/（會被 http 層自動載入而報錯）
+COPY nginx/api-proxy.conf /etc/nginx/api-proxy.conf
 
 # 建立 nginx cache 目錄並授權給 nginx 使用者
 RUN mkdir -p /var/cache/nginx/client_temp \

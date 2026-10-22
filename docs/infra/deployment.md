@@ -392,13 +392,22 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 
 ## 6. 上傳上限
 
-`nginx/nginx.conf` 的 `location /api/` 設 **`client_max_body_size 501m`**（#305 / PR `a203d3d`，2026-09-11）。
+`nginx/nginx.conf` 分兩段設定（#806，2026-10-22 起）：
+
+| location | `client_max_body_size` | 適用 |
+|---|---|---|
+| 上傳端點的 regex | **501m**（#305 / PR `a203d3d`，2026-09-11） | 收檔案的 5 支端點，清單寫在 `nginx.conf` 該段註解 |
+| `location /api/` | **10m** | 其餘所有 API |
+
+🔴 **新增上傳端點時必須加進上傳端點的 regex**，否則它落到 10m，超過 10 MB 的檔案由 nginx 直接回 HTML 413。CI 與 CD 都不驗 nginx 設定，只會在線上使用者上傳時才發現。
+
+#806 之前全部 API 共用 501m，連未登入可呼叫的 `POST /api/login` 都收得下 501 MB；而 FastAPI 先把 JSON body 整包讀進記憶體才驗身分，後端又只有 1 個 worker。
 
 > 🔴 **本節原本寫 `100m` 並斷言「這是實際生效的上限，瓶頸在這裡」——數字與結論都是錯的**（已於 #360 更正）。數字停在 #305 之前；結論則從未經過實機查證。2026-09-23 實測：對 `https://bms.tbsf.tw/edms/` 送 4 MB body，proxy 鏈先回 `100 Continue`（代表已比對 `Content-Length` 並放行）、最終由 app 回 405，**全線通過**。瓶頸不在 EDMS nginx。
 >
 > ⚠️ 這句話真正的危害不是數字錯，是「**瓶頸在這裡**」會讓讀者停止往下查——#360 的四個假設全繞著 body size 打轉，而真因是**部署映像缺 ffmpeg**，照那個方向查到底也找不到。
 
-⚠️ **`client_max_body_size` 只寫在 `location /api/` 內**，`location /` 與 server 層都沒設，故非 `/api/` 的請求落在 nginx 預設的 **1m**。目前無影響（前端只對 `/api/` 上傳），但日後若新增其他上傳路徑，別假設 501m 是全站生效。
+⚠️ **`client_max_body_size` 只寫在兩個 API location 內**，`location /` 與 server 層都沒設，故非 `/api/` 的請求落在 nginx 預設的 **1m**。目前無影響（前端只對 `/api/` 上傳），但日後若新增其他上傳路徑，別假設 501m 是全站生效。
 
 須依實際需求調整（DM 受控文件、ET 教材含影音），並與 app 端自身的上限一致，否則超量請求會由 nginx 自產 HTML 413 而非結構化錯誤碼。
 
