@@ -2,7 +2,7 @@ import { ThemeProvider } from "@mui/material/styles"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render } from "@testing-library/react"
 import type { RenderOptions } from "@testing-library/react"
-import type { ReactElement, ReactNode } from "react"
+import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { MemoryRouter } from "react-router-dom"
 
 import { NotificationProvider } from "../contexts/NotificationContext"
@@ -15,7 +15,9 @@ import { muiTheme } from "../styles/muiTheme"
 export function renderWithProviders(
   ui: ReactElement,
   options?: Omit<RenderOptions, "wrapper">,
-  initialEntries?: string[], // 需測 query param / 深連結時傳入（如 ["/dm/review?reviewId=801"]）
+  // 需測 query param / 深連結時傳入（如 ["/dm/review?reviewId=801"]）；
+  // 需連 `location.state` 一起給時傳物件（如 [{ pathname: "/dm/documents/5", ...navFrom("/dm/obsolete") }]）
+  initialEntries?: ComponentProps<typeof MemoryRouter>["initialEntries"],
   sharedQueryClient?: QueryClient, // 跨多次 render 共用快取時傳入（測「重進頁面讀到舊快取」這類時序）
 ) {
   const queryClient =
