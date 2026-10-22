@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw"
 import { describe, expect, it, vi } from "vitest"
 
 import { DmDetailPage } from "./DmDetailPage"
+import { navFrom } from "../../layouts/activeNav"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -73,6 +74,23 @@ describe("DmDetailPage 文件詳細頁", () => {
     renderWithProviders(<DmDetailPage />)
     expect(await screen.findByRole("button", { name: "編輯新版本" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "廢止此文件" })).toBeInTheDocument()
+  })
+
+  it("點「編輯新版本」→ 導向編輯模式，並把本頁的側欄高亮一併帶過去（自 DM01 進來）", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmDetailPage />, undefined, ["/dm/documents/DM-SOP-000001"])
+    await user.click(await screen.findByRole("button", { name: "編輯新版本" }))
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000001/edit", navFrom("/dm/library"))
+  })
+
+  it("🔴 自 DM03 進到本頁時，「編輯新版本」把 DM03 傳下去（不是退回預設的 DM01）", async () => {
+    // 編輯頁的網址三條入口都一樣，分不出來源；本頁不往下傳的話側欄會掉回 DM01。
+    const user = userEvent.setup()
+    renderWithProviders(<DmDetailPage />, undefined, [
+      { pathname: "/dm/documents/DM-SOP-000001", ...navFrom("/dm/obsolete") },
+    ])
+    await user.click(await screen.findByRole("button", { name: "編輯新版本" }))
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/DM-SOP-000001/edit", navFrom("/dm/obsolete"))
   })
 
   it("非編輯者（is_editor=false）→ 無編輯/廢止入口", async () => {

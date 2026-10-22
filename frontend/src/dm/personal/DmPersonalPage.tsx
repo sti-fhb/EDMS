@@ -31,6 +31,7 @@ import { useActivity, useDrafts, usePersonalAccess } from "./usePersonal"
 import { FilterCard } from "../../components/FilterCard"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
+import { navFrom } from "../../layouts/activeNav"
 import { formatDateTime } from "../../utils/date"
 import { toApiError } from "../../services/http"
 
@@ -332,7 +333,11 @@ function DraftsTab() {
                 <TableCell>{formatDateTime(d.updated_date)}</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1}>
-                    <ContinueEditButton draft={d} onNavigate={() => navigate(`/dm/documents/${d.doc_id}/edit`)} />
+                    {/* 帶來源：編輯頁預設高亮 DM01 文件庫，自草稿「繼續編輯」進入者要留在 DM04 */}
+                    <ContinueEditButton
+                      draft={d}
+                      onNavigate={() => navigate(`/dm/documents/${d.doc_id}/edit`, navFrom("/dm/me"))}
+                    />
                     <Button
                       size="small"
                       variant="outlined"
