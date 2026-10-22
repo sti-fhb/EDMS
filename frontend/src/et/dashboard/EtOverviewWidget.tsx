@@ -1,10 +1,9 @@
-import ChevronRightIcon from "@mui/icons-material/ChevronRight"
 import Box from "@mui/material/Box"
 import Chip from "@mui/material/Chip"
 import Divider from "@mui/material/Divider"
 import Link from "@mui/material/Link"
 import List from "@mui/material/List"
-import ListItemButton from "@mui/material/ListItemButton"
+import ListItem from "@mui/material/ListItem"
 import ListItemText from "@mui/material/ListItemText"
 import Paper from "@mui/material/Paper"
 import Table from "@mui/material/Table"
@@ -92,6 +91,17 @@ function wholePercent(rate: string): number | null {
   return Number.isFinite(parsed) ? Math.floor(parsed) : null
 }
 
+/**
+ * 表格標題後面的灰色小字。被截斷時寫明「列出幾門 / 共幾門」，否則維持原本的說明。
+ *
+ * 判準用 `>=` 而非 `>`：後端若因某些情形回得比母體還多（不該發生），寫成「最低的
+ * 6 門，共 5 門」只會讓人以為數字壞了，不如退回原註記。
+ */
+function courseNote(card: AdminCard): string {
+  if (card.by_course.length >= card.open_course_count) return "（各課程完成率）"
+  return `（完成率最低的 ${card.by_course.length} 門，開放中共 ${card.open_course_count} 門）`
+}
+
 function PercentText({ rate }: { rate: string }) {
   const whole = wholePercent(rate)
   return <>{whole === null ? "—" : `${whole}%`}</>
@@ -125,11 +135,28 @@ function StudentBlock({ card }: { card: StudentCard }) {
   )
 }
 
+/**
+ * 教師卡「我的課程提醒」。
+ *
+ * ## 為什麼不叫「待辦」（#818）
+ *
+ * 這一塊混了**兩種性質不同**的東西：草稿未發布是「卡在我這」，確實是教師的待辦；
+ * 而即將截止那份清單列的是**學員**沒完課——教師能做的是催辦或延期，不是他自己有
+ * 事情沒做完。叫「待辦」只涵蓋了其中一半，讀者（含本專案的 SA）會把「剩 N 天」
+ * 讀成「還有 N 天才發布」。
+ *
+ * ## 課程列不可點
+ *
+ * 原本整列連到 `/et/courses/:courseId`＝ET05 課程編輯頁，但那門課**沒有要編輯的
+ * 東西**。⛔ 不要改成連去別頁就算了——系統目前沒有「教師手動催辦」的功能，學員收到
+ * 的是 SCHET002 的自動加急信（與本區塊共用同一個門檻參數），所以這裡沒有一個「按了
+ * 就完成某件事」的落點。底部的「前往課程列表」是整塊的出口，保留。
+ */
 function TeacherBlock({ card }: { card: TeacherCard }) {
   const navigate = useNavigate()
   return (
     <Box>
-      <SectionTitle>我的課程待辦</SectionTitle>
+      <SectionTitle>我的課程提醒</SectionTitle>
       {card.draft_count > 0 && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           有 <strong>{card.draft_count}</strong> 門課程尚未發布。
@@ -138,25 +165,29 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
       {card.ending_soon.length > 0 && (
         <List dense disablePadding>
           {card.ending_soon.map((line) => (
-            <ListItemButton key={line.course_id} divider onClick={() => navigate(`/et/courses/${line.course_id}`)}>
+            <ListItem key={line.course_id} divider>
               <ListItemText
                 primary={
                   <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                     <Typography component="span" sx={{ fontWeight: 600 }}>
                       {line.course_name}
                     </Typography>
-                    {/* 剩 0 天＝今天到期，用 error 與其他區分 */}
+                    {/*
+                      剩 0 天＝今天到期，用 error 與其他區分。
+                      ⚠️ 兩顆標籤都要帶受詞（#818）：原本 0 天寫「今天到期」、其餘只寫
+                      「剩 N 天」，一半講明倒數什麼、一半沒講，於是「剩 1 天」會被讀成
+                      「還有 1 天才發布」。
+                    */}
                     <Chip
                       size="small"
                       color={line.days_left === 0 ? "error" : "warning"}
-                      label={line.days_left === 0 ? "今天到期" : `剩 ${line.days_left} 天`}
+                      label={line.days_left === 0 ? "今天到期" : `${line.days_left} 天後截止`}
                     />
                   </Box>
                 }
                 secondary={`尚有 ${line.not_completed} 人未完課`}
               />
-              <ChevronRightIcon color="disabled" />
-            </ListItemButton>
+            </ListItem>
           ))}
         </List>
       )}
@@ -177,19 +208,30 @@ function TeacherBlock({ card }: { card: TeacherCard }) {
  * 「資料全擠在左邊」：改版前上方是一個 `repeat(4, 1fr)` 的 grid 裡只放**一格**
  * （逾期未完成），它佔 1/4、右邊 3/4 整片空白。
  *
- * ⚠️ **目前全列、不截斷。** 課程數成長後這張卡會愈來愈長，屆時若要只列前 N 門，
- * **必須在畫面上寫明**（例如「完成率最低的 5 門」）——否則管理者會以為那就是全部課程，
- * 而那是一個看起來完全正常的誤解。現階段課程少，全列沒問題。
+ * ## 只列最需要關注的幾門（#818）
+ *
+ * 後端已截為最多 5 筆並另回 `open_course_count`（截斷前的母體大小）。被截斷時
+ * **必須在畫面上寫明**——否則管理者會以為那就是全部課程，而那是一個看起來完全正常
+ * 的誤解。⚠️ 反過來，**沒有被截斷時不可照寫**：「完成率最低的 2 門，開放中共 2 門」
+ * 對讀者毫無資訊，只會讓人以為還有別的課沒列出來。
+ *
+ * 母體已排除已關閉與訖止已過的課程，故此處的「開放中共 N 門」與表格同源。
  */
 function AdminBlock({ card }: { card: AdminCard }) {
   return (
     <Box sx={{ mb: 3 }}>
-      <SectionTitle note="（各課程完成率）">全體訓練概況</SectionTitle>
+      <SectionTitle note={courseNote(card)}>全體訓練概況</SectionTitle>
       <TableContainer>
         <Table size="small" aria-label="各課程完成率">
           <TableHead>
-            {/* 表頭加粗、內容不加粗——改版前是課程名加粗而表頭不加粗，等於反過來了 */}
-            <TableRow>
+            {/*
+              表頭加粗、內容不加粗——改版前是課程名加粗而表頭不加粗，等於反過來了。
+              底色對齊 `ui-design-guide` 的表格規範（表頭 #f8f9fa）；用 `grey.50`
+              這個 theme token 而非硬寫色碼（`sti-ui-design.md` 禁止硬編碼色碼），
+              兩者視覺上等同。⚠️ 專案的共用 `AppTable` 目前**也還沒做**這件事，
+              日後若要一起補，應改在 `AppTable` / theme，不是每頁各寫一次。
+            */}
+            <TableRow sx={{ "& th": { bgcolor: "grey.50" } }}>
               <TableCell sx={{ fontWeight: 700 }}>課程</TableCell>
               <TableCell align="right" sx={{ fontWeight: 700 }}>
                 完成人數

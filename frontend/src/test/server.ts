@@ -123,8 +123,8 @@ export const handlers = [
         draft_count: 1,
       },
       admin: {
-        overdue_incomplete: 4,
         completion_rate: "62.50",
+        open_course_count: 2,
         by_course: [
           { course_id: 21, course_name: "感染管制年度訓練", enrolled: 4, completed: 1, completion_rate: "25.00" },
           { course_id: 11, course_name: "採血作業新進人員訓練", enrolled: 4, completed: 3, completion_rate: "75.00" },

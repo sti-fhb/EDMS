@@ -40,8 +40,15 @@ export interface CourseRate {
 
 /** 管理者卡「全體訓練概況」。 */
 export interface AdminCard {
-  overdue_incomplete: number
   completion_rate: string
+  /**
+   * **截斷前**的母體大小——開放中且已有學員的課程門數（#818）。
+   *
+   * 用來寫出「完成率最低的 N 門，開放中共 M 門」。⚠️ `by_course` 已由後端截為最多
+   * 5 筆，所以 `M > by_course.length` 是常態；相等時代表沒有被截斷，此時寫「最低的
+   * N 門」沒有意義，註記要退回原本的「（各課程完成率）」。
+   */
+  open_course_count: number
   by_course: CourseRate[]
 }
 
@@ -78,15 +85,15 @@ export function hasTeacherData(card: TeacherCard | null): card is TeacherCard {
 /**
  * 管理者卡：全站連一門有人的課程都沒有時不渲染。
  *
- * ## 🔴 判定只看 `by_course`——**因為畫面只畫 `by_course`**
+ * ## 🔴 判定只看 `by_course`——**因為畫面只畫 `by_course` 的列**
  *
- * 2026-10-02 起「逾期未完成」不再顯示（手測裁示）。若這裡仍保留
- * `|| card.overdue_incomplete > 0`，「有逾期但一門課都沒有」會渲染出一張**空表格**
- * ——標題與表頭都在、底下一列都沒有。
+ * 歷史：2026-10-02 起「逾期未完成」不再顯示（手測裁示），而該欄當時仍在判定裡，
+ * 於是「有逾期但一門課都沒有」會渲染出一張**空表格**——標題與表頭都在、底下一列
+ * 都沒有。該欄已於 #818 整個移除。
  *
  * ⛔ **渲染條件必須只看實際會被畫出來的欄位。** 判定與畫面各自演進是空卡的來源，
- * 而空卡不會報錯，只是看起來像壞了。`AdminCard.overdue_incomplete` 的 docstring
- * 有對應的提醒，改動任一側時兩邊要一起看。
+ * 而空卡不會報錯，只是看起來像壞了。⚠️ `open_course_count` 同樣**不可**進入判定：
+ * 它只是標題裡的一個數字，`by_course` 為空時那張表仍然是空的。
  */
 export function hasAdminData(card: AdminCard | null): card is AdminCard {
   return card !== null && card.by_course.length > 0

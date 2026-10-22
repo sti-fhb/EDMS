@@ -81,19 +81,23 @@ class AdminCard(BaseModel):
     """管理者卡「全體訓練概況」。
 
     Attributes:
-        overdue_incomplete: 課程已過訖止、學員仍未完課的人次。
-            ⚠️ **2026-10-02 起前端不再顯示它**（手測裁示：版面上一格獨佔四欄 grid、
-            右邊三格全空）。欄位保留是因為指標本身正確且可能再上架；**但前端的
-            `hasAdminData` 已改為只看 `by_course`**——否則「只有逾期、沒有課程」時會
-            渲染出一張空表格。改動任一側時兩邊要一起看。
         completion_rate: 全體完成率。不可行動，保留的理由是「上面會問這個數字」
             （評鑑、報告），故前端放小字、不當主角。
-        by_course: 各課程完成率，**完成率由低到高**——要找的是落後的那一門。前端以表格
-            呈現，排序本身不再寫在畫面上（手測裁示拿掉「（低者在前）」）。
+        open_course_count: **截斷前**的母體大小——開放中且已有學員的課程門數。
+            前端用它寫出「完成率最低的 N 門，開放中共 M 門」。⛔ 不可改回
+            `len(by_course)`：那會寫成「最低的 5 門，共 5 門」，一句自相矛盾卻
+            看不出是錯的話。
+        by_course: 最需要關注的前幾門（上限見 `service._TOP_LAGGING_COURSES`）。
+            排序規則見 `rules.rank_lagging_courses`——⚠️ 其中兩層只在「全站都是 0%」
+            時才生效，而那正是上線當天的狀態。
+
+    📌 #818 移除了 `overdue_incomplete`（課程已過訖止、學員仍未完課的人次）。母體
+    排除已關閉之後，「逾期」的課程正好全被排除，該欄會結構性恆為 0；它自 2026-10-02
+    起前端就不顯示，`hasAdminData` 也只看 `by_course`，移除不影響任何畫面。
     """
 
-    overdue_incomplete: int
     completion_rate: Decimal
+    open_course_count: int
     by_course: list[CourseRate]
 
 

@@ -12,17 +12,17 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import utcnow
-from app.et.constants import COURSE_DRAFT, COURSE_PUBLISHED
+from app.et.constants import COURSE_CLOSED, COURSE_DRAFT, COURSE_PUBLISHED
 from app.et.course.models import EtChapter, EtCourse, EtItem
 from app.et.progress.models import EtEnrollment, EtProgress
 from app.et.stats.models import EtWeeklyStat
-from app.et.stats.rules import CourseStat
+from app.et.stats.rules import CourseCompletion, CourseStat
 
 
 class OpenCourse(NamedTuple):
@@ -202,15 +202,25 @@ class EtStatsRepository:
                 EtEnrollment.is_removed.is_(False),
                 EtEnrollment.deleted == 0,
                 EtCourse.deleted == 0,
-                EtCourse.status != COURSE_DRAFT,
+                # 草稿：學員看不到，計入會被永遠學不了的課稀釋。
+                # 已關閉：發布過、學員看得到過，但管理者對它再也不能做什麼（#818）。
+                EtCourse.status.not_in((COURSE_DRAFT, COURSE_CLOSED)),
+                # ⛔ 上一條不可單獨成立——必須連同訖止一起判，判準與
+                # `course/rules.is_effectively_closed` 同義。到期自動轉 `CLOSED` 由
+                # SCHET002 每日執行，故「訖止已過但 STATUS 仍是 PUBLISHED」是每門課
+                # 到期後的必經窗口；教師也能送一次 `PUT /courses/{id}` 把訖止改到
+                # 過去，當場製造它（該函式的正典說明列了四個理由）。
+                # 訖止為 `NULL`＝沒有期限，**不是**關閉，照常計入。
+                or_(EtCourse.open_end_at.is_(None), EtCourse.open_end_at >= now),
             )
         )
 
-    async def overall_completion(self, db: AsyncSession, now: datetime) -> tuple[int, int, int]:
-        """全站 `(在籍人次, 已完課人次, 逾期未完課人次)`。
+    async def overall_completion(self, db: AsyncSession, now: datetime) -> tuple[int, int]:
+        """全站 `(在籍人次, 已完課人次)`。
 
-        「逾期」＝課程訖止已過（`OPEN_END_AT < now`）且該學員未完課。`OPEN_END_AT` 為
-        `NULL` 者不算逾期——沒有期限就無從逾期，計入會把「永遠開放的課」全數打成逾期。
+        📌 #818 之前還回第三個值「逾期未完課人次」。母體排除已關閉之後，「逾期」
+        （訖止已過）的課程**正好全被排除**，那個數字會結構性恆為 0——一個恆為 0 的
+        欄位比沒有更糟，下一個人會以為那是真的統計，故連同 `AdminCard` 的欄位一起移除。
         """
         base = self._completion_base(now).subquery()
         row = (
@@ -218,29 +228,13 @@ class EtStatsRepository:
                 select(
                     func.count().label("enrolled"),
                     func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
-                    func.coalesce(
-                        func.sum(
-                            case(
-                                (
-                                    and_(
-                                        base.c.open_end_at.is_not(None),
-                                        base.c.open_end_at < now,
-                                        base.c.is_completed == 0,
-                                    ),
-                                    1,
-                                ),
-                                else_=0,
-                            )
-                        ),
-                        0,
-                    ).label("overdue"),
                 ).select_from(base)
             )
         ).one()
-        return int(row.enrolled), int(row.completed), int(row.overdue)
+        return int(row.enrolled), int(row.completed)
 
-    async def course_rates(self, db: AsyncSession, now: datetime) -> list[tuple[int, str, int, int]]:
-        """依**課程**分組之 `(課程 ID, 課程名稱, 在籍人次, 已完課人次)`（#475）。
+    async def course_rates(self, db: AsyncSession, now: datetime) -> list[CourseCompletion]:
+        """依**課程**分組的完課聚合（#475）；排序與截斷由 `rules.rank_lagging_courses` 負責。
 
         ## ⚠️ `course_id` 必須回出去，即使呼叫端只想顯示名稱
 
@@ -271,15 +265,27 @@ class EtStatsRepository:
             select(
                 base.c.course_id,
                 base.c.course_name,
+                base.c.open_end_at,
                 func.count().label("enrolled"),
                 func.coalesce(func.sum(base.c.is_completed), 0).label("completed"),
             )
             .select_from(base)
             # 以 `course_id` 分組而非名稱——同名課程是可能的（不同年度的年度訓練），
             # 用名稱分組會把它們合併成一列，數字偏大且看起來合理。
-            .group_by(base.c.course_id, base.c.course_name)
+            # `open_end_at` 由 `course_id` 決定（同一門課只有一個訖止），放進 GROUP BY
+            # 不會多切出任何一列；它**只供排序**（#818），不進 API 回應。
+            .group_by(base.c.course_id, base.c.course_name, base.c.open_end_at)
         )
-        return [(int(r.course_id), r.course_name, int(r.enrolled), int(r.completed)) for r in rows.all()]
+        return [
+            CourseCompletion(
+                course_id=int(r.course_id),
+                course_name=r.course_name,
+                open_end_at=r.open_end_at,
+                enrolled=int(r.enrolled),
+                completed=int(r.completed),
+            )
+            for r in rows.all()
+        ]
 
     async def previous_avg_progress(self, db: AsyncSession, *, course_id: int, before: date) -> Decimal | None:
         """該課程**在 `before` 之前**最近一次快照的平均進度；沒有則 `None`（AC 5 的「—」）。
