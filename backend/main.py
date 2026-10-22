@@ -22,6 +22,7 @@ from app.core.log_redaction import format_exception_for_log
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
 from app.core.request_context import get_client_ip, set_client_ip
+from app.core.upload_auth_precheck import UploadAuthPrecheckMiddleware
 from app.dm.access.router import router as dm_access_router
 from app.dm.bootstrap import register_dm_module
 from app.dm.change_log.router import router as dm_change_log_router
@@ -128,6 +129,10 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
+
+# 上傳端點讀 body 之前先驗憑證（#810）。⚠️ 須在 CORS **之前** add：後加的 middleware 在外層，
+# 這樣 CORS 包在它外面，401 回應照樣帶 CORS 標頭。
+app.add_middleware(UploadAuthPrecheckMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
