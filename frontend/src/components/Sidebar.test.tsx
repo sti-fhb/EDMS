@@ -364,6 +364,17 @@ describe("Sidebar", () => {
     expect(await screen.findByRole("link", { name: "DM03 已廢止文件查詢" })).not.toHaveAttribute("aria-current")
   })
 
+  it("🔴 DM08 文件編輯頁自 DM04 個人專區的草稿進入時停在「DM04 個人專區」", async () => {
+    renderWithProviders(<Sidebar />, undefined, [{ pathname: "/dm/documents/5/edit", ...navFrom("/dm/me") }])
+    expect(await screen.findByRole("link", { name: "DM04 個人專區" })).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "DM01 文件庫" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("DM08 文件新增頁停在「DM01 文件庫」（唯一入口）", async () => {
+    renderWithProviders(<Sidebar />, undefined, ["/dm/documents/new"])
+    expect(await screen.findByRole("link", { name: "DM01 文件庫" })).toHaveAttribute("aria-current", "page")
+  })
+
   it("側欄功能項本身仍會亮（高亮改由 activeNav 計算後沒弄丟最基本的情形）", async () => {
     renderWithProviders(<Sidebar />, undefined, ["/dp/audit"])
     expect(await screen.findByRole("link", { name: "DP05 操作記錄查詢" })).toHaveAttribute("aria-current", "page")

@@ -1,11 +1,20 @@
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { HttpResponse, http } from "msw"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DmPersonalPage } from "./DmPersonalPage"
+import { navFrom } from "../../layouts/activeNav"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
+
+const { navigateSpy } = vi.hoisted(() => ({ navigateSpy: vi.fn() }))
+vi.mock("react-router-dom", async (orig) => {
+  const actual = await orig<typeof import("react-router-dom")>()
+  return { ...actual, useNavigate: () => navigateSpy }
+})
+
+beforeEach(() => navigateSpy.mockClear())
 
 /** 與 `test/server.ts` 兩筆 resolved + REJECTED 事件的 `reason` 逐字相同（#554）。 */
 const REJECT_REASON = "版本號格式不符，請改為 1.0，並補上變更摘要說明以利審核判斷是否影響既有流程"
@@ -67,6 +76,17 @@ describe("DmPersonalPage 個人專區（DM04）", () => {
     expect(editButtons.filter((b) => (b as HTMLButtonElement).disabled)).toHaveLength(1)
     // 已廢止列可刪除（讓使用者自行清掉）
     expect(screen.getAllByRole("button", { name: "刪除" })).toHaveLength(3)
+  })
+
+  it("🔴 點「繼續編輯」→ 導向編輯模式，並帶來源讓側欄留在 DM04", async () => {
+    // 編輯頁預設高亮 DM01 文件庫（它有三條入口、網址都一樣）；不帶來源的話，
+    // 從個人專區的草稿按下去側欄會跳到 DM01。
+    const user = userEvent.setup()
+    renderWithProviders(<DmPersonalPage />)
+    await user.click(await screen.findByRole("tab", { name: "草稿匣" }))
+    const editButtons = await screen.findAllByRole("button", { name: "繼續編輯" })
+    await user.click(editButtons.find((b) => !(b as HTMLButtonElement).disabled)!)
+    expect(navigateSpy).toHaveBeenCalledWith(expect.stringMatching(/^\/dm\/documents\/.+\/edit$/), navFrom("/dm/me"))
   })
 
   it("草稿匣「分類」欄顯示中文名稱、不顯示代碼（#735）", async () => {

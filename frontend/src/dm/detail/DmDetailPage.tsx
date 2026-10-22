@@ -31,6 +31,7 @@ import type { DetailResponse, VersionItem } from "./schemas"
 import { useDetail, useVersions } from "./useDetail"
 import { ScreenHeader } from "../../components/ScreenHeader"
 import { useNotification } from "../../contexts/NotificationContext"
+import { useNavFromHere } from "../../layouts/activeNav"
 import { formatDateTaipei, formatDateTimeTaipei } from "../../utils/date"
 
 /**
@@ -64,6 +65,8 @@ function fileErrorMessage(err: unknown, action: string): string {
 export function DmDetailPage() {
   const { docId = "" } = useParams()
   const navigate = useNavigate()
+  // 編輯頁沿用本頁的側欄高亮：本頁可能自 DM01 文件庫或 DM03 已廢止文件查詢進來
+  const editorNavOptions = useNavFromHere()
   const { message } = useNotification()
   const queryClient = useQueryClient()
   const { data: detail, isPending, isError } = useDetail(docId)
@@ -200,7 +203,7 @@ export function DmDetailPage() {
                   icon={<EditIcon />}
                   disabled={!detail.can_edit}
                   reason={detail.edit_lock_reason}
-                  onClick={() => navigate(`/dm/documents/${docId}/edit`)}
+                  onClick={() => navigate(`/dm/documents/${docId}/edit`, editorNavOptions)}
                 />
                 {/* 彈性間隔：把「廢止此文件」推到橫幅最右邊（比 ml:auto 更不受 Stack spacing 影響） */}
                 <Box sx={{ flexGrow: 1 }} />

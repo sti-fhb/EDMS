@@ -63,12 +63,23 @@ describe("resolveActiveNavPath", () => {
     expect(resolveActiveNavPath("/dm/documents/5", null)).toBe("/dm/library")
   })
 
+  it("🔴 DM08 文件新增：唯一入口是 DM01 的「新增文件」，故預設即 DM01", () => {
+    expect(resolveActiveNavPath("/dm/documents/new")).toBe("/dm/library")
+    expect(resolveActiveNavPath("/dm/documents/new", navFrom("/dm/library").state)).toBe("/dm/library")
+  })
+
+  it("🔴 DM08 文件編輯認來源：自 DM04 個人專區的草稿進入時停在 DM04", () => {
+    // 編輯頁有三條入口——DM01 → 詳細頁 → 編輯、DM03 → 詳細頁 → 編輯、DM04 草稿「繼續編輯」。
+    // 網址 `/dm/documents/:docId/edit` 三者相同，只能靠來源分。
+    expect(resolveActiveNavPath("/dm/documents/5/edit", navFrom("/dm/me").state)).toBe("/dm/me")
+    expect(resolveActiveNavPath("/dm/documents/5/edit", navFrom("/dm/obsolete").state)).toBe("/dm/obsolete")
+    // 無來源（直接貼網址）退回預設
+    expect(resolveActiveNavPath("/dm/documents/5/edit")).toBe("/dm/library")
+  })
+
   it("無對應功能項的頁面回 undefined（側欄不亮任何一項）", () => {
     expect(resolveActiveNavPath("/")).toBeUndefined()
     expect(resolveActiveNavPath("/profile")).toBeUndefined()
-    // DM08 文件新增 / 編輯：本次未處理，維持既有的「不亮」
-    expect(resolveActiveNavPath("/dm/documents/new")).toBeUndefined()
-    expect(resolveActiveNavPath("/dm/documents/5/edit")).toBeUndefined()
   })
 
   it("子頁對應到的一定是真實存在的側欄功能項（擋住功能項改路徑後對應變成死路徑）", () => {
@@ -77,6 +88,8 @@ describe("resolveActiveNavPath", () => {
       "/et/courses/7/survey",
       "/et/attempts/31",
       "/dm/documents/5",
+      "/dm/documents/new",
+      "/dm/documents/5/edit",
       "/et/courses/new",
     ]
     for (const pathname of subpages) {

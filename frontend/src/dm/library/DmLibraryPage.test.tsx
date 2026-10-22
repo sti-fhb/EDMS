@@ -64,6 +64,13 @@ describe("DmLibraryPage 文件庫", () => {
     expect(await screen.findByRole("button", { name: "新增文件" })).toBeInTheDocument()
   })
 
+  it("點「新增文件」→ 導向新增模式，並帶來源讓側欄留在 DM01", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DmLibraryPage />)
+    await user.click(await screen.findByRole("button", { name: "新增文件" }))
+    expect(navigateSpy).toHaveBeenCalledWith("/dm/documents/new", navFrom("/dm/library"))
+  })
+
   it("新增文件入口：can_create=false 不顯示", async () => {
     server.use(http.get("/api/dm/library/capabilities", () => HttpResponse.json({ can_create: false })))
     renderWithProviders(<DmLibraryPage />)

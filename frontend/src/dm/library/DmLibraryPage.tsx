@@ -170,7 +170,7 @@ export function DmLibraryPage() {
           <Typography variant="subtitle2">搜尋結果{data ? `（共 ${data.meta.total} 筆）` : ""}</Typography>
           {capabilities?.can_create && (
             // 新增文件入口：僅編輯者可見（後端 can_create）；US5 提供新增模式路由
-            <Button size="small" variant="outlined" onClick={() => navigate("/dm/documents/new")}>
+            <Button size="small" variant="outlined" onClick={() => navigate("/dm/documents/new", navFrom("/dm/library"))}>
               新增文件
             </Button>
           )}
