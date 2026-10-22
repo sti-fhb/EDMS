@@ -43,6 +43,7 @@ import { SurveyDialog } from "./SurveyDialog"
 import { SurveySection } from "./SurveySection"
 import { BlockerDialog } from "./BlockerDialog"
 import { coursesApi } from "./coursesService"
+import { serializeBasic } from "./basicSnapshot"
 import { validateReopenSchedule } from "./reopenSchedule"
 import {
   blockerHighlights,
@@ -92,6 +93,7 @@ const EMPTY_FORM = {
   // 新增課程預帶一列空白配對（比照 #476 DM03）：一進畫面就看得到要成對設定，而非一顆「新增」鈕
   audiences: [{ unit_tag_id: null, tag_id: null }] as AudienceDraft[],
 }
+
 
 /**
  * ET05 課程建立與編輯（US3；骨架 #202、教材 / 測驗 #203、問卷與發布 #204）。
@@ -183,6 +185,9 @@ export function EtCourseEditorPage() {
   // 載入時的原值——「起始須 ≥ 當下」只對**使用者這次改動的值**成立（SA 裁示）。
   // 已發布課程的起始必然落在過去，無條件檢核會讓它之後永遠存不了檔。
   const [originalStart, setOriginalStart] = useState<string | null>(null)
+  // 載入時的基本資料快照（#804 ①）——草稿按「取消」前判斷有沒有未存的修改。
+  // ⚠️ 與 `originalStart` 分開：那個是檢核用的單一欄位，這個是整組基本資料的比對基準。
+  const [loadedBasic, setLoadedBasic] = useState<string | null>(null)
   // 新增模式之章節暫存：章節有 COURSE_ID 外鍵、課程不存在時掛不上去，
   // 故先存在畫面上，儲存時連同課程一次送出（後端於同一交易內建立）。
   //
@@ -361,16 +366,22 @@ export function EtCourseEditorPage() {
   const unkeptCleared = courseId === undefined || unkeptDiscarded || course?.is_owner === false
   if (course && !courseFetching && unkeptCleared && loadedCourseId !== course.course_id) {
     setLoadedCourseId(course.course_id)
-    setForm({
+    const loadedForm = {
       course_name: course.course_name,
       description: course.description ?? "",
       require_approval: course.require_approval,
       audiences: course.audiences.map(({ unit_tag_id, tag_id }) => ({ unit_tag_id, tag_id })),
-    })
+    }
+    const loadedStart = course.open_start_at ? dayjs(course.open_start_at) : null
+    const loadedEnd = course.open_end_at ? dayjs(course.open_end_at) : null
+    setForm(loadedForm)
     setAudienceErrors({})
-    setStartAt(course.open_start_at ? dayjs(course.open_start_at) : null)
-    setEndAt(course.open_end_at ? dayjs(course.open_end_at) : null)
+    setStartAt(loadedStart)
+    setEndAt(loadedEnd)
     setOriginalStart(course.open_start_at)
+    // #804 ①：快照與表單在**同一處**設定。⛔ 不要移到另一個 effect——兩者一旦分家，
+    // 任何讓其中一邊先跑的改動都會讓「未改動」被誤判成「已改動」。
+    setLoadedBasic(serializeBasic(loadedForm, loadedStart, loadedEnd))
     // ⚠️ 缺漏清單要跟著換課程清掉（#428 code review 的 HIGH，原文講的是再開課模式）。
     //
     // `courses/:courseId` 這條路由沒有 `key={courseId}`，React Router 只換參數時**不會
@@ -895,6 +906,38 @@ export function EtCourseEditorPage() {
 
   const requestCancel = () => {
     if (!hasPendingChanges) {
+      // 🔴 **草稿的「取消」還原不了已存入的內容**（#804 ①）。#631 只把已發布 / 已關閉
+      // 改成暫存；草稿的章節、教材、測驗、問卷是**即時寫入活表**的，取消撤不回來。
+      // 而尚未按「儲存草稿」的基本資料則會靜默丟掉——兩半的命運相反，按鈕卻只說了
+      //「取消」。2026-10-22 手測原話：「按取消和儲存草稿是一樣的，都會儲存」。
+      //
+      // 2026-10-22 裁示：**按鈕不改名**（已發布那邊的「取消」是真的會放棄，同一個字
+      // 要維持同一個樣子），改為在基本資料有未存修改時先問。
+      //
+      // ℹ️ **`!isNew` 是雙保險，不是唯一那道門**（#804 code review LOW ① 更正）。
+      // 新增模式沒有課程可載入，`loadedBasic` 從頭到尾是 `null`，那一項就已經擋下了；
+      // 目前 `/courses/new` 與 `/courses/:courseId` 是兩個獨立的 route 物件（守衛分別為
+      // `RequireEtCourseCreator` / `RequireEtCourseManager`），切換必定 remount，快照不會
+      // 殘留。留著 `!isNew` 是防「日後兩條路由合併或共用 element」——那時 `loadedBasic`
+      // 會跟著使用者從編輯頁帶進新增模式。
+      //
+      // 🔴 為什麼新增模式不該跳這個視窗：它的章節放在 `stagedChapters` 這個畫面上的
+      // state 裡、要到 `saveMut` 建立課程時才隨 `coursesApi.create` 一起送出，**一個都
+      // 沒寫進 DB**。對它說「會即時存入」是假的。
+      if (status === "DRAFT" && !isNew && loadedBasic !== null && serializeBasic(form, startAt, endAt) !== loadedBasic) {
+        confirm({
+          title: "取消不會還原已存入的內容",
+          // ⚠️ 必須把兩半分開講。⛔ 不可寫成「變更將不會保留」——那對章節那一半是假的，
+          // 正是 #763 ② 修掉的毛病。
+          content:
+            "章節、教材、測驗與課後問卷的編輯在草稿課程會即時存入，「取消」不會還原它們。" +
+            "尚未按「儲存草稿」的基本資料修改則不會保留。",
+          okText: "離開",
+          cancelText: "繼續編輯",
+          onOk: () => navigate("/et/courses"),
+        })
+        return
+      }
       navigate("/et/courses")
       return
     }
@@ -2518,8 +2561,12 @@ export function EtCourseEditorPage() {
                   刪除草稿
                 </Button>
               )}
-              {/* 取消＝放棄本次的編輯並離開（#631 / #720）。沒有暫存變更時就只是離開，
-                  不跳確認——包括全部的草稿課程（它沒有暫存可放棄）。 */}
+              {/* 取消＝放棄本次的編輯並離開（#631 / #720）。沒有暫存變更時通常就只是離開、
+                  不跳確認（草稿沒有暫存可放棄）。
+
+                  ⚠️ **一個例外**（#804 ①）：草稿課程、非新增模式、且基本資料有未按「儲存
+                  草稿」的修改時會先問一次——那裡章節已經存進去了、基本資料卻會丟掉，兩半
+                  的命運相反。見 `requestCancel`。 */}
               <Button size="small" disabled={actionPending} onClick={requestCancel}>
                 取消
               </Button>

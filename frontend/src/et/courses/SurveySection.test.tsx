@@ -275,3 +275,43 @@ describe("0 題提示只對啟用中的問卷（#768 第 8 項）", () => {
     expect(screen.getByText(/至少須有 1 題才能發布課程/)).toBeInTheDocument()
   })
 })
+
+describe("停用的後果要講出來，不只掛標記（#804 ②）", () => {
+  // ## 為什麼「已停用」那顆 Chip 不夠
+  //
+  // 2026-10-22 手測：教師對一門**已停用**的問卷新增題目、按「更新」，系統回報成功，
+  // 學員端卻完全看不到。三個各自正確的設計疊在一起，剛好讓他收不到任何訊號：
+  //
+  // | 層 | 行為 |
+  // |---|---|
+  // | 發布檢核 | 停用的問卷視同沒有問卷，不擋（`_survey_question_count`，#611）|
+  // | 學員端 | `survey_active === false` ⇒ **整個入口不出現**（`derive_entry_state`）|
+  // | 本卡片 | 0 題提示對停用者刻意不顯示（#768 第 8 項），只剩一顆「已停用」Chip |
+  //
+  // 🔴 本專案已經裁示過這個形狀——同檔凍結呈現的 2026-09-18 裁示：
+  // 「**標記只講狀態、不講後果**，教師得按進去、發現題目旁的按鈕不見了才知道改不了。」
+  // 「已停用」正是一個只講狀態的標記，本組測試把該裁示套用到停用這一處。
+  //
+  // ⛔ 句子要放在**卡片**上，不可只放進問卷編輯視窗——教師得點進去才看到就失去意義
+  //（同上裁示的理由）。
+  it("🔴 停用中的問卷說明學員看不到", () => {
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false })} isDraftCourse={false} />)
+    expect(screen.getByText(/停用中，學員看不到此問卷/)).toBeInTheDocument()
+  })
+
+  it("停用中、0 題也說（這正是手測踩到的那一種）", () => {
+    // 0 題 + 停用是最容易誤判的組合：卡片顯示「0 題」「已停用」然後什麼都不說，
+    // 教師看不出這兩件事合起來代表「不論加幾題，學員都看不到」。
+    render(
+      <SurveySection {...BASE_PROPS} survey={makeSurvey({ is_active: false, questions: [] })} isDraftCourse={false} />,
+    )
+    expect(screen.getByText(/停用中，學員看不到此問卷/)).toBeInTheDocument()
+  })
+
+  it("啟用中的問卷不顯示該句（正向錨點）", () => {
+    // 少了這條，把句子改成無條件顯示也會讓上面兩條通過——而那會讓一門正常運作的課程
+    // 告訴教師「學員看不到」。
+    render(<SurveySection {...BASE_PROPS} survey={makeSurvey()} isDraftCourse={false} />)
+    expect(screen.queryByText(/停用中，學員看不到此問卷/)).not.toBeInTheDocument()
+  })
+})
