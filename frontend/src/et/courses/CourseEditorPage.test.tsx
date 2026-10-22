@@ -580,6 +580,38 @@ describe("草稿按「取消」要先講清楚哪一半留著（#804 ①）", ()
     return user
   }
 
+  /**
+   * 已發布（或已關閉）**且暫存區為空**的課程。
+   *
+   * 🔴 `has_pending_changes: false` 是**承重的**（#804 的教訓）：若 mock 成 `true`，
+   * `requestCancel` 會在 `if (!hasPendingChanges)` 就分流走，**根本到不了**要驗的那段
+   * 程式——測試會永遠綠，不管守門被拆成什麼樣。
+   */
+  function mockPublishedNoStage(overrides: Record<string, unknown> = {}) {
+    server.use(
+      http.get("/api/et/courses/:courseId", ({ params }) =>
+        HttpResponse.json({
+          course_id: Number(params.courseId),
+          course_name: "採血作業訓練",
+          description: "課程說明",
+          status: "PUBLISHED",
+          open_start_at: "2099-01-01T00:00:00Z",
+          open_end_at: "2099-12-31T00:00:00Z",
+          require_approval: false,
+          version: 0,
+          owner_id: "U1",
+          owner_name: "王教師",
+          is_owner: true,
+          is_closed: false,
+          has_pending_changes: false,
+          audiences: [{ unit_tag_id: 101, tag_id: 2, label: "護理師" }],
+          chapters: [],
+          ...overrides,
+        }),
+      ),
+    )
+  }
+
   it("🔴 草稿且基本資料有未存修改時，先跳視窗並把兩半分開講", async () => {
     mockScheduledDraft()
     const user = userEvent.setup()
@@ -673,8 +705,63 @@ describe("草稿按「取消」要先講清楚哪一半留著（#804 ①）", ()
     await user.type(await screen.findByDisplayValue("採血作業訓練"), "X")
     await user.click(screen.getByRole("button", { name: "取消" }))
 
+    // ⚠️ #812 之後這個組合**會**跳視窗（只是不是草稿那個）。本條的守備範圍仍是
+    // 「草稿那段文字不可出現在已發布課程」——那句「會即時存入」對暫存區是假的。
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).queryByText(/取消不會還原已存入的內容/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/會即時存入/)).not.toBeInTheDocument()
+  })
+
+  it("🔴 已發布、無暫存、基本資料有改 → 先問，且講明章節那半沒有待處理的編輯（#812）", async () => {
+    // ## #804 只補了草稿那一半
+    //
+    // 已發布／已關閉的各類編輯**進暫存的時機不同**：章節 / 教材 / 測驗 / 問卷是立即
+    // 寫進暫存（`has_pending_changes` 因此為真、走既有的「放棄本次的編輯」），而
+    // **基本資料只在按「更新」時才 `stageBasic()`**——在那之前它只是畫面上的 state。
+    //
+    // ⇒ 教師改完課名按「取消」，什麼都沒問就離開，改動消失。
+    mockPublishedNoStage()
+    const user = userEvent.setup()
+    renderEditor()
+    await user.type(await screen.findByDisplayValue("採血作業訓練"), "X")
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/尚未按「更新」的基本資料不會保留/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/要按「更新」才會送出，離開不會保留/)).toBeInTheDocument()
+    // 🔴 這一句是必要的：教師看到「不會保留」會擔心章節也沒了。此分支的前提就是
+    // `has_pending_changes === false`，所以這句話在這裡恆真。
+    expect(within(dialog).getByText(/目前沒有待生效的編輯/)).toBeInTheDocument()
+    // ⛔ 草稿那段對已發布是假的（那邊的章節在暫存區，不是即時存入）
+    expect(within(dialog).queryByText(/會即時存入/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "離開" })).toBeInTheDocument()
+    expect(navigateSpy).not.toHaveBeenCalledWith("/et/courses")
+  })
+
+  it("已關閉課程的同一個視窗指向「更新並重開課」，不是「更新」（#812）", async () => {
+    // 已關閉課程的生效鈕叫「更新並重開課」。寫死「更新」會把教師指向一顆畫面上
+    // 不存在的按鈕——`applyLabel` 已經在處理這件事，這裡沿用。
+    mockPublishedNoStage({ is_closed: true })
+    const user = userEvent.setup()
+    renderEditor()
+    await user.type(await screen.findByDisplayValue("採血作業訓練"), "X")
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/要按「更新並重開課」才會送出/)).toBeInTheDocument()
+  })
+
+  it("已發布、無暫存、基本資料**未**改 → 直接離開，不跳視窗（正向錨點）", async () => {
+    // 少了這條，把視窗改成「只要不是草稿就跳」也會讓上面兩條通過——而那會讓每一次
+    // 單純的離開都多一道確認。
+    mockPublishedNoStage()
+    const user = userEvent.setup()
+    renderEditor()
+    await screen.findByDisplayValue("採血作業訓練")
+    await user.click(screen.getByRole("button", { name: "取消" }))
+
     await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
-    expect(screen.queryByText(/取消不會還原已存入的內容/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it("已發布課程的「取消」維持原本的放棄視窗，一字不動（正向錨點）", async () => {

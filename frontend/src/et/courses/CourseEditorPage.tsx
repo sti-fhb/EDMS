@@ -440,6 +440,13 @@ export function EtCourseEditorPage() {
   /** 讓編輯生效的那顆鈕的名稱：已關閉（含期間已過）是「更新並重開課」，否則是「更新」。 */
   const applyLabel = reopening ? "更新並重開課" : "更新"
   /**
+   * 基本資料有未送出的修改（#804 草稿、#812 已發布／已關閉共用）。
+   *
+   * ⚠️ 「未送出」在兩種狀態下指的是不同的事，但**判定相同**——都是「畫面上的值 ≠ 載入
+   * 時的值」：草稿要按「儲存草稿」才寫活表，已發布／已關閉要按生效鈕才 `stageBasic()`。
+   */
+  const basicDirty = loadedBasic !== null && serializeBasic(form, startAt, endAt) !== loadedBasic
+  /**
    * 是否要把底部那一列講成「待辦」（警示色 + 待更新文案）。
    *
    * ⚠️ 草稿不必在此排除——`has_pending_changes` 後端對草稿恆回 `false`（草稿的編輯直接
@@ -924,19 +931,43 @@ export function EtCourseEditorPage() {
       // 🔴 為什麼新增模式不該跳這個視窗：它的章節放在 `stagedChapters` 這個畫面上的
       // state 裡、要到 `saveMut` 建立課程時才隨 `coursesApi.create` 一起送出，**一個都
       // 沒寫進 DB**。對它說「會即時存入」是假的。
-      if (status === "DRAFT" && !isNew && loadedBasic !== null && serializeBasic(form, startAt, endAt) !== loadedBasic) {
-        confirm({
-          title: "取消不會還原已存入的內容",
-          // ⚠️ 必須把兩半分開講。⛔ 不可寫成「變更將不會保留」——那對章節那一半是假的，
-          // 正是 #763 ② 修掉的毛病。
-          content:
-            "章節、教材、測驗與課後問卷的編輯在草稿課程會即時存入，「取消」不會還原它們。" +
-            "尚未按「儲存草稿」的基本資料修改則不會保留。",
-          okText: "離開",
-          cancelText: "繼續編輯",
-          onOk: () => navigate("/et/courses"),
-        })
-        return
+      if (basicDirty) {
+        if (status === "DRAFT" && !isNew) {
+          confirm({
+            title: "取消不會還原已存入的內容",
+            // ⚠️ 必須把兩半分開講。⛔ 不可寫成「變更將不會保留」——那對章節那一半是假的，
+            // 正是 #763 ② 修掉的毛病。
+            content:
+              "章節、教材、測驗與課後問卷的編輯在草稿課程會即時存入，「取消」不會還原它們。" +
+              "尚未按「儲存草稿」的基本資料修改則不會保留。",
+            okText: "離開",
+            cancelText: "繼續編輯",
+            onOk: () => navigate("/et/courses"),
+          })
+          return
+        }
+        if (status !== "DRAFT") {
+          // 🔴 **已發布 / 已關閉的另一半**（#812）。這裡的各類編輯進暫存的時機**不同**：
+          // 章節 / 教材 / 測驗 / 問卷立即寫進暫存（於是 `hasPendingChanges` 為真、走上面
+          // 那條既有的「放棄本次的編輯」），而**基本資料只在按生效鈕時才 `stageBasic()`**
+          // ——在那之前它只是畫面上的 state，按「取消」會靜默丟掉。
+          //
+          // ⛔ **不可共用草稿那段文字**：那邊說章節「會即時存入」，而已發布的章節在
+          // 暫存區、按生效鈕才對學員生效。共用等於對教師說一句假話。
+          //
+          // ⚠️ 第二句是必要的：教師讀到「不會保留」會擔心章節也沒了。本分支的前提
+          // 正是 `hasPendingChanges === false`，所以那句話在這裡**恆真**。
+          confirm({
+            title: "尚未按「更新」的基本資料不會保留",
+            content:
+              `課程名稱、說明、起訖時間與受訓對象的修改要按「${applyLabel}」才會送出，離開不會保留。` +
+              "章節、教材、測驗與課後問卷目前沒有待生效的編輯。",
+            okText: "離開",
+            cancelText: "繼續編輯",
+            onOk: () => navigate("/et/courses"),
+          })
+          return
+        }
       }
       navigate("/et/courses")
       return
