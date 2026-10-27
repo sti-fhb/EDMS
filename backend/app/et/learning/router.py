@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_db
+from app.core.db import get_db, release_db_before_streaming
 from app.core.exceptions import AppError
 from app.core.http_cache import NO_STORE_HEADERS
 from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
@@ -120,6 +120,8 @@ async def material_doc_file(
     """
     content = await _service.doc_file(db, material_id, doc_id, user_id=ctx.user_id, roles=ctx.roles)
     _ensure_file_present(content.path)
+    # 送檔期間不佔 DB 連線（#810）；須在實體檔存在檢查之後
+    await release_db_before_streaming(db)
     # 授權由 material_id 那側判定，URL 全使用者相同 → 必須擋快取（#587）
     return FileResponse(content.path, media_type=content.mime, filename=content.name, headers=NO_STORE_HEADERS)
 
@@ -169,6 +171,8 @@ async def video_file(
     verify_video_ticket(t, video_id=video_id)
     path, file_name = await _service.video_file_by_ticket(db, video_id)
     _ensure_file_present(path)
+    # 送檔期間不佔 DB 連線（#810）；須在實體檔存在檢查之後
+    await release_db_before_streaming(db)
     # `inline`：本端點的用途是**串流播放**。Starlette 預設 `attachment`，把這個 URL
     # 貼到網址列會被強制下載而非播放——語意不符，且對「複製連結確認影片能不能開」
     # 這種日常操作很不直覺。

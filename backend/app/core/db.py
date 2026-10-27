@@ -82,6 +82,30 @@ class Base(DeclarativeBase):
     pass
 
 
+async def release_db_before_streaming(db: AsyncSession) -> None:
+    """送檔前結束交易、把連線還給連線池（#810 第 3 項）。**回傳 `FileResponse` 之前一律呼叫。**
+
+    ## 為什麼要提前
+
+    `get_db` 的 commit／close 在 dependency 收尾時才執行，而 FastAPI 0.139 要等 response **整個
+    送完**才收尾。一般 JSON 回應很快送完，差別不大；送檔則不同——nginx 的下載 location 設了
+    `proxy_max_temp_file_size 0`（防慢速客戶端寫滿 nginx 暫存），後端依客戶端讀取速度送出，
+    看一支影片的整段期間都佔住一條 DB 連線，而連線池只有 15 條，正常上課就會塞滿。
+
+    ## 語意與時機
+
+    - 送檔前寫入的紀錄（DM 的閱讀紀錄 `DM_DOC_READ`）在此落地，與客戶端之後是否中途斷線無關
+      ——「開始下載即記為已讀」。
+    - ⚠️ 必須放在**實體檔存在檢查之後**、緊接著 `return FileResponse(...)`。檔案遺失時要拋 404 讓
+      交易回滾，放在檢查之前會留下一筆指向不存在檔案的閱讀紀錄。
+    - 之後 `get_db` 收尾時再 commit 一次是 no-op。
+
+    `tests/unit/test_core_file_response_release.py` 守門：回傳 `FileResponse` 的函式都要先呼叫本函式，
+    且都在 nginx 的下載 location 內。
+    """
+    await db.commit()
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI 依賴注入用的資料庫 session"""
     async with AsyncSessionLocal() as session:
