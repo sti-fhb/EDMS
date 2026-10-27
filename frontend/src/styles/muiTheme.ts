@@ -15,4 +15,24 @@ export const muiTheme = createTheme({
     fontSize: 14,
   },
   shape: { borderRadius: 6 },
+  components: {
+    /**
+     * 表頭灰底（#828）。**設在 theme 而非逐頁寫**——全站 21 張表裡只有 7 張走共用的
+     * `AppTable`，另外 14 張是各頁手拼的 MUI `Table`；改 `AppTable` 涵蓋不到後者，
+     * 逐頁補則要動 13 個不相干的檔，且每新增一張表都得再記得加一次。
+     *
+     * 色值直接寫在此處而非取 `grey.50`（#fafafa）：`#f8f9fa` 是 wireframe
+     * （`docs/wireframes/{dm,dp,et}/index.html` 的 `table.wf-table th`）與
+     * `ui-design-guide` 的規範值，換成相近的內建 token 會讓文件、設計稿與實作三者
+     * 對不起來，而 0.4% 的色差看不出來、沒有人會發現是哪裡偏掉的。
+     *
+     * ⛔ 元件裡不要再寫 `sx={{ "& th": { bgcolor: ... } }}`——`sti-ui-design.md`
+     * 禁止硬編碼色碼的對象是元件，theme 本來就是色值的定義處（palette 已有 #1b5e20 等）。
+     */
+    MuiTableCell: {
+      styleOverrides: {
+        head: { backgroundColor: "#f8f9fa" },
+      },
+    },
+  },
 })

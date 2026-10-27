@@ -99,10 +99,18 @@
 | 屬性 | 值 |
 |------|-----|
 | 字體大小 | `0.88rem`（Mobile: `0.8rem`） |
-| 表頭背景 | `#f8f9fa` |
+| 表頭背景 | `#f8f9fa` — **已由 `muiTheme` 的 `MuiTableCell.head` 全站供應**，見下方說明 |
 | 表頭文字 | `white-space: nowrap` |
 | Hover | 啟用列 hover 高亮 |
 | 響應式 | 外層包 `table-responsive`（MUI: `TableContainer`） |
+
+> ⛔ **表頭底色不要在頁面或元件裡寫**（`sx={{ "& th": { bgcolor: ... } }}` 之類）。
+> 它設在 `frontend/src/styles/muiTheme.ts` 的 `components.MuiTableCell.styleOverrides.head`，
+> 走共用 `AppTable` 與各頁手拼的 MUI `Table` **都會生效**，新增表格不需要任何額外設定。
+>
+> 📌 #828 之前這條規範**從未被實作**——`#f8f9fa` 在整個 `frontend/src` 一次都沒出現過，
+> 全站表頭都是白底。當時 21 張表裡只有 7 張走 `AppTable`，所以「改 `AppTable` 就好」
+> 其實涵蓋不到另外 14 張；這是它改在 theme 的原因。
 
 ### 欄位模式
 

@@ -89,7 +89,7 @@ paths:
 | 元素 | 規範摘要 |
 |------|---------|
 | 卡片 | 白底、`1px solid #dee2e6`、圓角 `8px`、內距 `1rem` |
-| 表格 | 字體 `0.88rem`、表頭 `#f8f9fa`、啟用 hover 高亮 |
+| 表格 | 字體 `0.88rem`、表頭 `#f8f9fa`（⛔ 不要逐頁寫，已由 `muiTheme` 的 `MuiTableCell.head` 全站供應，#828）、啟用 hover 高亮 |
 | 表單 | 卡片內展開（非 Modal）、綠色 2px 邊框、`max-width: 500~600px` |
 | 按鈕 | 主要 = `contained primary`、次要 = `outlined`、危險 = `outlined error` |
 | 按鈕大小 | 一般 `size="small"`，掃碼確認可用預設大小 |
