@@ -242,12 +242,10 @@ function AdminBlock({ card }: { card: AdminCard }) {
           <TableHead>
             {/*
               表頭加粗、內容不加粗——改版前是課程名加粗而表頭不加粗，等於反過來了。
-              底色對齊 `ui-design-guide` 的表格規範（表頭 #f8f9fa）；用 `grey.50`
-              這個 theme token 而非硬寫色碼（`sti-ui-design.md` 禁止硬編碼色碼），
-              兩者視覺上等同。⚠️ 專案的共用 `AppTable` 目前**也還沒做**這件事，
-              日後若要一起補，應改在 `AppTable` / theme，不是每頁各寫一次。
+              ⛔ 表頭底色**不在這裡設**：#828 起由 `muiTheme` 的 `MuiTableCell.head`
+              統一供應（本處原有的 `bgcolor` 覆寫已隨該 issue 移除）。
             */}
-            <TableRow sx={{ "& th": { bgcolor: "grey.50" } }}>
+            <TableRow>
               <TableCell sx={{ fontWeight: 700 }}>課程</TableCell>
               <TableCell align="right" sx={{ fontWeight: 700 }}>
                 完成人數
