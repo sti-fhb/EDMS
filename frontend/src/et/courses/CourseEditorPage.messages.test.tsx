@@ -142,7 +142,9 @@ const SENTENCES = {
     "確定刪除這門草稿課程？其下的章節、教材、測驗與課後問卷會一併移除，且無法復原。",
     "草稿尚未發布，沒有學員受影響。",
   ],
-  A10: ["停用後學員端不再顯示填寫入口，已填寫的內容仍保留。確定停用？"],
+  // 🔴 A10 是 A 區**唯一會改字**的一支（#814 Q1 裁示：與 #804 的卡片提示對齊）。
+  // 後半「已填寫的內容仍保留。確定停用？」不變，前半換成卡片的講法。
+  A10: ["停用後學員看不到此問卷，已填寫的內容仍保留。確定停用？"],
 } as const
 
 const ACTIVE_SURVEY = {
@@ -267,8 +269,20 @@ describe("ET05 視窗訊息內容安全網（#814）", () => {
       return dialogText()
     }
 
-    it.each(SENTENCES.A10)("保留原句：%s", async (sentence) => {
+    it.each(SENTENCES.A10)("改為與卡片對齊的講法：%s", async (sentence) => {
       expect(await openDeactivateDialog()).toContain(sentence)
+    })
+
+    it("🔴 舊的「不再顯示填寫入口」已不再出現（負向錨點）", async () => {
+      // 少了這條，把新句**加在**舊句旁邊也會讓上一條通過——而那是兩種講法並存，
+      // 正是本案要消除的狀態。
+      expect(await openDeactivateDialog()).not.toContain("不再顯示填寫入口")
+    })
+
+    it("⛔ SurveySection 卡片那句不動——方向是視窗向卡片對齊，不是反過來", async () => {
+      // #804 有測試釘住卡片那句；這裡再加一道，避免日後有人為了「統一」而去動它。
+      const { default: surveySource } = await import("./SurveySection.tsx?raw")
+      expect(surveySource).toContain("停用中，學員看不到此問卷")
     })
   })
 
@@ -296,14 +310,16 @@ describe("ET05 視窗訊息內容安全網（#814）", () => {
       expect(source).toContain(literal)
     })
 
-    it("🔴 B2 / B7 是本案**要改**的兩條，改完後舊字串應消失", async () => {
-      // 這條現在是**刻意紅不了**的狀態記錄：階段 A 跑在改版前，舊字串還在。
-      // 階段 B 改完 B2 / B7 後，把下面兩行的 `toContain` 換成 `not.toContain`，
-      // 它就變成「確實改掉了」的守門。⛔ 不要在階段 A 就寫成 `not.toContain`
-      // ——那會讓安全網在改版前就紅，分不出是沒改還是改錯。
+    it("🔴 B2 / B7 已改掉，且舊字串不再殘留", async () => {
       const { default: source } = await import("./CourseEditorPage.tsx?raw")
-      expect(source).toContain('"已自動儲存草稿"') // B2 → 改為「已先將課程存成草稿」
-      expect(source).toContain('"課程已關閉"') // B7 → 改為「課程已關閉，學員已無法加入」
+      expect(source).toContain('"已先將課程存成草稿"') // B2
+      expect(source).toContain('"課程已關閉，學員已無法加入"') // B7
+
+      // 🔴 負向錨點：少了這兩行，**把新字串加在舊的旁邊**也會讓上面通過。
+      // ⚠️ B7 的舊字串是新字串的前綴，所以要連右引號一起比對——寫成
+      // `not.toContain("課程已關閉")` 會把正確的新字串也判成殘留。
+      expect(source).not.toContain('"已自動儲存草稿"')
+      expect(source).not.toContain('"課程已關閉"')
     })
   })
 })

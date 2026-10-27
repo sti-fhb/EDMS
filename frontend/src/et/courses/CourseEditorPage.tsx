@@ -866,13 +866,25 @@ export function EtCourseEditorPage() {
   const confirmApply = () => {
     confirm({
       title: "更新課程內容",
-      content:
-        "更新後，自上次更新以來的所有編輯會同時對學員生效。" +
-        "本次若刪除了章節或項目，學員在其中的學習進度與測驗作答會一併移除，完課狀態隨之重算。" +
-        // 重測延到此刻才執行（2026-10-17 裁示），而教師是在幾分鐘到幾天前的另一個對話框
-        // 裡決定的——不在這裡提一句，寄信與退回完課就成了他沒預期的副作用。
-        "本次若曾選擇「要求重測」，作答過的學員會在此刻重新計算作答次數、退回未完成並各收到一封通知信。" +
-        "系統會重跑一次發布檢核，未通過時不會更新任何內容。",
+      // #814：四件事原本擠成一段約 140 字，無法掃讀。改為「一句結論 + 三條後果」。
+      //
+      // ⛔ **一個字都不刪**——每一句都有被加入的理由，砍掉任一條都會讓某個教師踩到
+      // 沒預期的副作用。本次改的是**排版與主次**，不是內容。
+      // `CourseEditorPage.messages.test.tsx` 逐句釘住，刪字會紅。
+      content: (
+        <>
+          <strong>更新後，自上次更新以來的所有編輯會同時對學員生效。</strong>
+          <Box component="ul" sx={{ mt: 1, mb: 0, pl: 2.5 }}>
+            <li>本次若刪除了章節或項目，學員在其中的學習進度與測驗作答會一併移除，完課狀態隨之重算。</li>
+            {/*
+              重測延到此刻才執行（2026-10-17 裁示），而教師是在幾分鐘到幾天前的另一個
+              對話框裡決定的——不在這裡提一句，寄信與退回完課就成了他沒預期的副作用。
+            */}
+            <li>本次若曾選擇「要求重測」，作答過的學員會在此刻重新計算作答次數、退回未完成並各收到一封通知信。</li>
+            <li>系統會重跑一次發布檢核，未通過時不會更新任何內容。</li>
+          </Box>
+        </>
+      ),
       okText: "確認更新",
       onOk: () => applyMut.mutate(),
     })
@@ -961,9 +973,15 @@ export function EtCourseEditorPage() {
             title: "取消不會還原已存入的內容",
             // ⚠️ 必須把兩半分開講。⛔ 不可寫成「變更將不會保留」——那對章節那一半是假的，
             // 正是 #763 ② 修掉的毛病。
-            content:
-              "章節、教材、測驗與課後問卷的編輯在草稿課程會即時存入，「取消」不會還原它們。" +
-              "尚未按「儲存草稿」的基本資料修改則不會保留。",
+            // #814：兩半是**對照關係**（一半留著、一半丟掉），連寫成一段看不出來。
+            // 排成兩行並把主詞粗體化，⛔ 文字一個字都不刪。
+            content: (
+              <>
+                <strong>章節、教材、測驗與課後問卷</strong>的編輯在草稿課程會即時存入，「取消」不會還原它們。
+                <br />
+                <strong>尚未按「儲存草稿」的基本資料</strong>修改則不會保留。
+              </>
+            ),
             okText: "離開",
             cancelText: "繼續編輯",
             onOk: () => navigate("/et/courses"),
@@ -1011,14 +1029,24 @@ export function EtCourseEditorPage() {
     }
     confirm({
       title: "放棄本次的編輯",
-      content:
-        "取消後，自上次更新以來的所有編輯會全部放棄，課程回到學員目前看到的版本。此動作無法復原。" +
-        // ⚠️ 原本這裡寫著「若只是想先離開、之後再繼續編輯，請直接點選其他頁面——那些
-        // 編輯會保留著」。**#720 之後那句話是假的**：離開就放棄（2026-10-19 裁示），
-        // 關分頁留下的殘留也會在下次進頁時被丟掉。留著它會害教師真的去關分頁。
-        (reopening
-          ? "若只是想先離開、下次再繼續，請改按「保留編輯」。"
-          : "離開本頁同樣會放棄這些編輯；要讓學員看到，請按「更新」。"),
+      // #814：原本「此動作無法復原」埋在長句中間，改為結論／警示／下一步三行。
+      // ⛔ 一個字都不刪，只改視覺層級。
+      content: (
+        <>
+          <strong>取消後，自上次更新以來的所有編輯會全部放棄，課程回到學員目前看到的版本。</strong>
+          <br />
+          此動作無法復原。
+          <br />
+          {/*
+            ⚠️ 原本這裡寫著「若只是想先離開、之後再繼續編輯，請直接點選其他頁面——那些
+            編輯會保留著」。**#720 之後那句話是假的**：離開就放棄（2026-10-19 裁示），
+            關分頁留下的殘留也會在下次進頁時被丟掉。留著它會害教師真的去關分頁。
+          */}
+          {reopening
+            ? "若只是想先離開、下次再繼續，請改按「保留編輯」。"
+            : "離開本頁同樣會放棄這些編輯；要讓學員看到，請按「更新」。"}
+        </>
+      ),
       okText: "放棄並離開",
       cancelText: "繼續編輯",
       onOk: () => discardMut.mutate(),
@@ -1106,12 +1134,28 @@ export function EtCourseEditorPage() {
       //
       // ⚠️ 2026-10-20 裁示採**文案分流**而非「後續編輯清掉旗標」：後者會讓教師明明
       // 按過「保留編輯」，卻在下次關分頁時失去它。
+      // 🔴 **A4 與 A5 是同一支 confirm 的三個分支**（#814 規劃第 10 節）。issue 把它們
+      // 列成「A4 改排版、A5 不動」兩項，但改 A4 的 `content` 必然動到 A5 的渲染結構。
+      //
+      // 2026-10-27 裁示：A5「一字不改」＝**文字逐字相同**，DOM 可隨 A4 一起改為 JSX。
+      // ⛔ A4 有**兩個**分支（`reopening` 二分），「與 A3 統一句型」要套用到兩個。
       title: hasKeptEdits ? "離開後編輯仍會保留" : "離開將放棄本次的編輯",
-      content: hasKeptEdits
-        ? "你先前按過「保留編輯」，這些編輯會留到下次進來。要讓學員看到，請按「更新並重開課」；要整份丟掉，請按「取消」。"
-        : reopening
-          ? "離開後，自上次更新以來的所有編輯都會放棄。若想留著下次再繼續，請先按「保留編輯」；要讓學員看到，請按「更新並重開課」。"
-          : "離開後，自上次更新以來的所有編輯都會放棄，課程維持學員目前看到的版本。要讓學員看到這些編輯，請先按「更新」。",
+      content: hasKeptEdits ? (
+        // A5：文字逐字同原稿，只是包進 JSX。⛔ 不要順手改成三行——它被列為不動。
+        <>你先前按過「保留編輯」，這些編輯會留到下次進來。要讓學員看到，請按「更新並重開課」；要整份丟掉，請按「取消」。</>
+      ) : reopening ? (
+        <>
+          <strong>離開後，自上次更新以來的所有編輯都會放棄。</strong>
+          <br />
+          若想留著下次再繼續，請先按「保留編輯」；要讓學員看到，請按「更新並重開課」。
+        </>
+      ) : (
+        <>
+          <strong>離開後，自上次更新以來的所有編輯都會放棄，課程維持學員目前看到的版本。</strong>
+          <br />
+          要讓學員看到這些編輯，請先按「更新」。
+        </>
+      ),
       okText: hasKeptEdits ? "離開" : "放棄並離開",
       cancelText: "繼續編輯",
       onOk: () => leaveBlocker.proceed(),
@@ -1134,9 +1178,22 @@ export function EtCourseEditorPage() {
   const requestClose = () => {
     // 關閉不碰暫存區，但關閉後的課程沒有「保留編輯」標記，下次進頁就被 `discardUnkeptStage`
     // 丟掉——教師按下去的當下必須知道（#767 ④）
-    const closeEffects =
-      "關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。" +
-      "已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。"
+    // #814：效果說明原本是 ~75 字一段，改為「關閉後不能做什麼／仍然可以做什麼」兩組。
+    //
+    // ⚠️ **它被下面兩個分支共用**（有待更新編輯時夾在警告之後，否則單獨使用），所以
+    // 必須是一段能獨立站住的 JSX，⛔ 不可把外層的 `<>…</>` 結構寫進來。
+    const closeEffects = (
+      <>
+        <strong>關閉後不能做什麼</strong>
+        <Box component="ul" sx={{ mt: 0.5, mb: 1, pl: 2.5 }}>
+          <li>關閉後學員無法加入、累積學習進度、開始新的測驗作答或填寫課後問卷，邀請碼與 Email 邀請一併暫時失效。</li>
+        </Box>
+        <strong>仍然可以做什麼</strong>
+        <Box component="ul" sx={{ mt: 0.5, mb: 0, pl: 2.5 }}>
+          <li>已加入的學員仍可唯讀回看內容與成績，作答中的測驗可完成並計分。課程內容於關閉期間仍可編輯，之後可再開課。</li>
+        </Box>
+      </>
+    )
     confirm({
       title: "關閉課程",
       content: hasPendingChanges ? (
@@ -1156,7 +1213,10 @@ export function EtCourseEditorPage() {
       onOk: async () => {
         try {
           await coursesApi.close(courseId as number, course?.version ?? 0)
-          message.success("課程已關閉")
+          // #814 B7：原本只有「課程已關閉」——**只講物件、不講後果**，與同頁其他成功
+          // 訊息（「課程內容已更新，學員已可看到」「編輯已保留，學員看到的仍是關閉前的
+          // 內容」）不一致。關閉最直接的後果就是學員進不來，補上這一句。
+          message.success("課程已關閉，學員已無法加入")
           // #720（2026-10-19 裁示）：**所有成功動作一律回課程列表**，關閉也不例外。
           // 留在原地會讓教師盯著一頁剛剛才關掉的課程，而他下一步要做的事都在列表上。
           bypassGuard.current = true
@@ -1184,9 +1244,16 @@ export function EtCourseEditorPage() {
   const requestDeleteDraft = () => {
     confirm({
       title: "刪除草稿",
-      content:
-        "確定刪除這門草稿課程？其下的章節、教材、測驗與課後問卷會一併移除，且無法復原。" +
-        "草稿尚未發布，沒有學員受影響。",
+      // #814：前半是**警告**、後半是**安撫**，等重排列稀釋了警告。安撫句降為次要樣式。
+      // ⛔ 文字與語序都不動，只改視覺層級（`title` 是 string 不能放 JSX，故只能在此處理）。
+      content: (
+        <>
+          確定刪除這門草稿課程？其下的章節、教材、測驗與課後問卷會一併移除，且無法復原。
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            草稿尚未發布，沒有學員受影響。
+          </Typography>
+        </>
+      ),
       okText: "確認刪除",
       onOk: async () => {
         try {
@@ -1620,11 +1687,27 @@ export function EtCourseEditorPage() {
     const keepsUploadedVideos = !isUnsavedNew && (material?.videos.length ?? 0) > 0
     confirm({
       title: "放棄變更",
-      content: isUnsavedNew
-        ? "變更內容不會儲存，此項目也不會建立。確定取消？"
-        : keepsUploadedVideos
-          ? "尚未儲存的變更將不會保留。已上傳的影片不在此列——它在選擇檔案時就已保存，取消不會移除。確定關閉？"
-          : "尚未儲存的變更將不會保留，確定關閉？",
+      // #814：⚠️ **三個分支只改中間那支**——影片的例外說明偏長、與主句等重。把它降為
+      // 次要樣式，⛔ 語序不動（`component="span"` + `display: block` 讓它獨立成行而不
+      // 在 `textContent` 插入空白，「確定關閉？」因此仍接在例外說明之後，與原文逐字相同）。
+      content: isUnsavedNew ? (
+        "變更內容不會儲存，此項目也不會建立。確定取消？"
+      ) : keepsUploadedVideos ? (
+        <>
+          尚未儲存的變更將不會保留。
+          <Typography
+            component="span"
+            variant="body2"
+            color="text.secondary"
+            sx={{ display: "block", mt: 1, mb: 1 }}
+          >
+            已上傳的影片不在此列——它在選擇檔案時就已保存，取消不會移除。
+          </Typography>
+          確定關閉？
+        </>
+      ) : (
+        "尚未儲存的變更將不會保留，確定關閉？"
+      ),
       okText: "確定",
       onOk: isUnsavedNew ? discardUnsavedItem : closeItemDialog,
     })
@@ -1753,7 +1836,10 @@ export function EtCourseEditorPage() {
   const autoSaveThenNavigate = async (state: { pendingAddItem: PendingAddItem } | { pendingAddSurvey: PendingAddSurvey }) => {
     try {
       const created = await coursesApi.create({ ...toPayload(), chapters: stagedChapters.map((c) => c.name) })
-      message.success("已自動儲存草稿")
+      // #814 B2：原本是「已自動儲存草稿」，與教師自己按「儲存草稿」得到的
+      //「草稿已儲存」**幾乎同字**，但這一條是**系統代勞**（新增模式下要加項目／問卷，
+      // 得先有課程 id，所以這裡先替他建了一門草稿）。改成不同句型以免兩者混淆。
+      message.success("已先將課程存成草稿")
       navigate(`/et/courses/${created.course_id}`, { replace: true, state })
     } catch (err) {
       handleError(err)
@@ -2458,7 +2544,13 @@ export function EtCourseEditorPage() {
         onDeactivate={() =>
           confirm({
             title: "停用課後問卷",
-            content: "停用後學員端不再顯示填寫入口，已填寫的內容仍保留。確定停用？",
+            // #814 A10（2026-10-27 Q1 裁示）：與 #804 的卡片提示「停用中，學員看不到
+            // 此問卷」用詞對齊——同一件事原本兩種講法。
+            //
+            // 🔴 方向是**視窗改成卡片的講法**，⛔ 不可反過來動卡片那句（#804 有測試
+            // 釘住）。而且「看不到此問卷」描述的是學員端的實際結果（`derive_entry_state`
+            // 讓整個入口不出現），比「不再顯示填寫入口」準確。
+            content: "停用後學員看不到此問卷，已填寫的內容仍保留。確定停用？",
             okText: "停用",
             onOk: () =>
               surveyMut.mutate(() =>
