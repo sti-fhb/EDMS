@@ -19,10 +19,51 @@
 # DB 憑證與 pg_hba 的產生方式見 TBMS repo 的 docs/infra/db-external-access.md §二
 # 網路為 external 的理由：任一套系統的部署都不該因對方未部署而失敗。
 # 詳見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §1.4 與 edge/README.md §1。
+#
+# ── 資源上限（#810 第 4 項）─────────────────────────────────────────────
+# EDMS 與 TBMS（血庫系統）共用 bms-prod-02（4 vCPU / 16 GB）。不設上限的話，EDMS 一次失控
+# （記憶體暴增、查詢塞爆）就能把 TBMS 擠掉；後端只有 1 個 worker，被系統 OOM 砍掉時若挑中的是
+# DB，影響更大。數值照 TBMS repo docs/infra/edms-coexistence-plan.md §6.3 的建議配置。
+#
+# ⚠️ 上限只防失控、不創造容量：正常用量若逼近上限，容器會被砍掉重啟（症狀是網站間歇性斷線），
+#    正解是升級機型或調整配額，不是把上限往下壓。§6.3 也寫明「上線後先觀察一段時間再定案」。
+#    部署後驗證（在 VM 上執行）：
+#      sudo docker inspect edms-backend --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}'
+#        → 應印出 2147483648 1500000000（上限確實生效）
+#      sudo docker inspect -f '{{.Name}} OOM={{.State.OOMKilled}} 重啟={{.RestartCount}}' edms-backend edms-db edms-nginx
+#        → OOM=true 或重啟次數持續增加，代表撞到上限
+#      sudo docker stats --no-stream   → 實際用量與上限的比例
+# ⚠️ Compose v2 非 swarm 模式下 `deploy.resources.limits` 同樣生效（§6.3 有註明）。
+# ⚠️ 首次部署這份設定時，三個容器都會因設定變更被重建一次，DB 重建期間網站短暫中斷。
+# ⚠️ 院內交付版的 compose 在 TBMS repo（scripts/onprem-packaging/），不吃這份設定。
+# ⚠️ **磁碟沒有上限**（#810 第 4 項尚未完成的一半）：後端 `/tmp`（上傳檔案的暫存）與容器可寫層
+#    都在主機磁碟上；若與 TBMS 共用同一顆磁碟，寫滿會波及 TBMS。⛔ 不要直接把 `/tmp` 改成 tmpfs——
+#    tmpfs 算進上面的記憶體上限，4 個並行的 500 MB 影片上傳就會 OOM。另案處理。
+#
+# ── 容器 log 輪替（#810）────────────────────────────────────────────────
+# Docker 把容器的 stdout/stderr（nginx 存取紀錄、後端錯誤 log）存成主機磁碟上的檔案，預設不輪替、
+# 只會一直長大；有人大量發請求時可寫滿磁碟。每個容器最多 5 份 × 50 MB，更早的會被刪除。
+# 稽核紀錄存在 DB，不受影響。VM 的 /etc/docker/daemon.json（TBMS 管理）若已有全域設定，這裡的值優先。
 # ============================================================
 
 services:
   edms-backend:
+    # 記憶體的主要來源（正常負載約數百 MB，離 2g 很遠）：
+    #   - DM 文件上傳（≤ 50 MB）是整份 `read()` 進記憶體，一份約佔 100～150 MB（含拷貝）；
+    #     同時十幾份大檔才會逼近上限，DM 為內部受管制文件，實務上併發很低
+    #   - multipart 的非檔案欄位留在記憶體；檔案部分超過 1 MB 才寫進 `/tmp`（Starlette 的
+    #     SpooledTemporaryFile）——ET 影片因此不吃記憶體，但 `/tmp` 吃的是主機磁碟（見上方）
+    #   - ffprobe 子行程也算在本容器內，只讀 metadata，用量很小
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2g
+    logging: &log-rotation
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     # DM 受控文件與 ET 影音教材存在**檔案系統**上（DM_FILE_STORAGE_ROOT /
     # ET_VIDEO_STORAGE_ROOT）。不掛出來的話會寫進容器可寫層，每次部署重建容器
     # 即全部消失——資料庫裡留著紀錄、檔案卻不見了。
@@ -46,11 +87,26 @@ services:
           create_host_path: false
 
   edms-nginx:
+    # 只做轉發：大檔上傳串流不緩衝、下載不寫暫存（nginx/nginx.conf），記憶體用量小
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+    logging: *log-rotation
     networks:
       - edms-net
       - edms-proxy-net
 
   edms-db:
+    # 目前全吃 PostgreSQL 預設參數（shared_buffers 128 MB、work_mem 4 MB），後端連線最多 15 條，
+    # 正常用量估計數百 MB。⚠️ 日後調大 shared_buffers 等參數時，要一併檢視這裡的 2g 上限。
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2g
+    logging: *log-rotation
     # 對外維護通道。容器內仍是 5432，主機側錯開用 5433（5432 為 tbms-db）。
     # 白名單由兩層把關：GCP firewall 限來源 IP；pg_hba 對外強制
     # hostssl + clientcert=verify-full。edms-backend 走 edms-net 內部網路、
