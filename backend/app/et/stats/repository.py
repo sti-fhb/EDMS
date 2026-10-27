@@ -122,23 +122,6 @@ class EtStatsRepository:
         )
         return [OpenCourse(*row) for row in rows.all()]
 
-    async def draft_count(self, db: AsyncSession, owner_id: str) -> int:
-        """該教師建立但**尚未發布**的課程數（學員完全看不到它們）。
-
-        不含已關閉：那些發布過、學員看得到過，不屬於「卡在我這」。
-        """
-        return (
-            await db.scalar(
-                select(func.count())
-                .select_from(EtCourse)
-                .where(
-                    EtCourse.owner_id == owner_id,
-                    EtCourse.status == COURSE_DRAFT,
-                    EtCourse.deleted == 0,
-                )
-            )
-        ) or 0
-
     def _completion_base(self, now: datetime):
         """全站「每一筆在籍 × 是否完課」的基底查詢（管理者卡專用）。
 

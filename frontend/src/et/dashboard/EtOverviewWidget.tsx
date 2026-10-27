@@ -46,6 +46,10 @@ function StatCell({ label, count }: { label: string; count: number }) {
  * 共用基線才不會看起來像兩層標題。⚠️ 此處引用的是**排版寫法**，不是那串文字本身；
  * DM 的文案已於 #758 改過一次，日後再改不影響本處的參照意義。
  *
+ * `action` 放在同一列的**最右端**（`space-between`），同樣照 DM 公告區——那裡的
+ * 「查看全部文件 →」就是這個位置。出口連結放標題列而不是區塊底部，位置不隨清單長短
+ * 浮動，整塊的「還有更多」也才看得出是對整塊而言。
+ *
  * ⚠️ 標題文字另包一層 `<span>`（無任何樣式、不影響外觀）：外層 `Typography` 的
  * `textContent` 是「標題 + 註記」，`getByText("全體訓練概況")` 這種精確查詢會落空。
  * 包起來之後標題本身有自己的節點，測試與螢幕閱讀器都抓得到。
@@ -53,23 +57,29 @@ function StatCell({ label, count }: { label: string; count: number }) {
 function SectionTitle({
   children,
   note,
+  action,
   divider = true,
 }: {
   children: React.ReactNode
   note?: string
+  action?: React.ReactNode
   divider?: boolean
 }) {
   return (
     <>
-      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-        <Box component="span">{children}</Box>
-        {note !== undefined && (
-          <Typography component="span" variant="caption" color="text.secondary">
-            {" "}
-            {note}
-          </Typography>
-        )}
-      </Typography>
+      {/* `alignItems: baseline` 讓右側連結與標題對齊文字基線而非方塊中線（同 DM） */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 1, mb: 1 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          <Box component="span">{children}</Box>
+          {note !== undefined && (
+            <Typography component="span" variant="caption" color="text.secondary">
+              {" "}
+              {note}
+            </Typography>
+          )}
+        </Typography>
+        {action}
+      </Box>
       {divider && <Divider sx={{ mb: 1.5 }} />}
     </>
   )
@@ -138,62 +148,68 @@ function StudentBlock({ card }: { card: StudentCard }) {
 /**
  * 教師卡「我的課程提醒」。
  *
- * ## 為什麼不叫「待辦」（#818）
+ * ## 為什麼不叫「待辦」，以及為什麼不再列草稿數（#818）
  *
- * 這一塊混了**兩種性質不同**的東西：草稿未發布是「卡在我這」，確實是教師的待辦；
- * 而即將截止那份清單列的是**學員**沒完課——教師能做的是催辦或延期，不是他自己有
- * 事情沒做完。叫「待辦」只涵蓋了其中一半，讀者（含本專案的 SA）會把「剩 N 天」
- * 讀成「還有 N 天才發布」。
+ * 改版前這一塊混了**兩種性質不同**的東西：草稿未發布是「卡在我這」，確實是教師的
+ * 待辦；而即將截止那份清單列的是**學員**沒完課——教師能做的是催辦或延期，不是他
+ * 自己有事情沒做完。叫「待辦」只涵蓋了其中一半，讀者（含本專案的 SA）會把「剩 N
+ * 天」讀成「還有 N 天才發布」。
+ *
+ * 更名為「提醒」之後，草稿數那一行（「有 N 門課程尚未發布。」）就是剩下的那一半，
+ * 與區塊名稱對不上，故一併移除；草稿本來就在 ET01 課程列表看得到。
+ *
+ * 🔴 **移除顯示的同時必須一起改 `hasTeacherData`**——否則只有草稿、沒有即將截止
+ * 課程的教師會拿到一張**空卡**（標題與出口連結都在、底下一列都沒有）。理由見該函式。
  *
  * ## 課程列不可點
  *
  * 原本整列連到 `/et/courses/:courseId`＝ET05 課程編輯頁，但那門課**沒有要編輯的
  * 東西**。⛔ 不要改成連去別頁就算了——系統目前沒有「教師手動催辦」的功能，學員收到
  * 的是 SCHET002 的自動加急信（與本區塊共用同一個門檻參數），所以這裡沒有一個「按了
- * 就完成某件事」的落點。底部的「前往課程列表」是整塊的出口，保留。
+ * 就完成某件事」的落點。標題列右端的「前往課程列表 →」是整塊的出口，保留。
+ *
+ * 清單不做 `length > 0` 判斷：`hasTeacherData` 已保證非空（同 `AdminBlock`）。
  */
 function TeacherBlock({ card }: { card: TeacherCard }) {
   const navigate = useNavigate()
   return (
     <Box>
-      <SectionTitle>我的課程提醒</SectionTitle>
-      {card.draft_count > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          有 <strong>{card.draft_count}</strong> 門課程尚未發布。
-        </Typography>
-      )}
-      {card.ending_soon.length > 0 && (
-        <List dense disablePadding>
-          {card.ending_soon.map((line) => (
-            <ListItem key={line.course_id} divider>
-              <ListItemText
-                primary={
-                  <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                    <Typography component="span" sx={{ fontWeight: 600 }}>
-                      {line.course_name}
-                    </Typography>
-                    {/*
-                      剩 0 天＝今天到期，用 error 與其他區分。
-                      ⚠️ 兩顆標籤都要帶受詞（#818）：原本 0 天寫「今天到期」、其餘只寫
-                      「剩 N 天」，一半講明倒數什麼、一半沒講，於是「剩 1 天」會被讀成
-                      「還有 1 天才發布」。
-                    */}
-                    <Chip
-                      size="small"
-                      color={line.days_left === 0 ? "error" : "warning"}
-                      label={line.days_left === 0 ? "今天到期" : `${line.days_left} 天後截止`}
-                    />
-                  </Box>
-                }
-                secondary={`尚有 ${line.not_completed} 人未完課`}
-              />
-            </ListItem>
-          ))}
-        </List>
-      )}
-      <Link component="button" variant="body2" onClick={() => navigate("/et/courses")} sx={{ mt: 1 }}>
-        前往課程列表
-      </Link>
+      <SectionTitle
+        action={
+          <Link component="button" variant="body2" onClick={() => navigate("/et/courses")}>
+            前往課程列表 →
+          </Link>
+        }
+      >
+        我的課程提醒
+      </SectionTitle>
+      <List dense disablePadding>
+        {card.ending_soon.map((line) => (
+          <ListItem key={line.course_id} divider>
+            <ListItemText
+              primary={
+                <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                  <Typography component="span" sx={{ fontWeight: 600 }}>
+                    {line.course_name}
+                  </Typography>
+                  {/*
+                    剩 0 天＝今天到期，用 error 與其他區分。
+                    ⚠️ 兩顆標籤都要帶受詞（#818）：原本 0 天寫「今天到期」、其餘只寫
+                    「剩 N 天」，一半講明倒數什麼、一半沒講，於是「剩 1 天」會被讀成
+                    「還有 1 天才發布」。
+                  */}
+                  <Chip
+                    size="small"
+                    color={line.days_left === 0 ? "error" : "warning"}
+                    label={line.days_left === 0 ? "今天到期" : `${line.days_left} 天後截止`}
+                  />
+                </Box>
+              }
+              secondary={`尚有 ${line.not_completed} 人未完課`}
+            />
+          </ListItem>
+        ))}
+      </List>
     </Box>
   )
 }
@@ -282,7 +298,7 @@ function AdminBlock({ card }: { card: AdminCard }) {
  * | 卡 | 內容 |
  * |---|---|
  * | 第一張 | 我的學習概況 |
- * | 第二張 | 全體訓練概況 ＋ 我的課程待辦 |
+ * | 第二張 | 全體訓練概況 ＋ 我的課程提醒 |
  *
  * ⚠️ **順序刻意與 #89 決策 3 的建議（管理者 → 教師 → 學員，由廣到窄）相反。** 裁示把
  * 「自己要學什麼」放到最前面。日後若有人依 #89 的留言想調回來，請先確認那是新的決定，

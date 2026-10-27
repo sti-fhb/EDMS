@@ -30,6 +30,11 @@ function mockDashboard(body: Record<string, unknown>) {
 
 const EMPTY_STUDENT = { joined: 0, in_progress: 0, not_started: 0, completed: 0, pending_open: 0 }
 
+/** 教師卡最小可渲染資料：一門即將截止的課。 */
+const TEACHER_ONE_ROW = {
+  ending_soon: [{ course_id: 1, course_name: "快截止的課", days_left: 2, not_completed: 1 }],
+}
+
 /** 兩門課、完成率一低一高；含 `course_id`（同名課程不合併，前端以它當 key）。 */
 const ADMIN = {
   completion_rate: "50.00",
@@ -68,24 +73,16 @@ describe("首頁教育訓練概況", () => {
     expect(screen.queryByText("ET 教育訓練概況")).not.toBeInTheDocument()
   })
 
-  it("教師沒有待辦時不渲染教師卡", async () => {
-    const served = mockDashboard({ teacher: { ending_soon: [], draft_count: 0 } })
+  it("教師沒有要提醒的課時不渲染教師卡", async () => {
+    const served = mockDashboard({ teacher: { ending_soon: [] } })
     renderWithProviders(<EtOverviewWidget enabled />)
 
     await waitFor(() => expect(served.responded).toBe(true))
     expect(screen.queryByText("我的課程提醒")).not.toBeInTheDocument()
   })
 
-  it("只有草稿沒有即將截止也算有待辦——那是「卡在我這」的訊號", async () => {
-    mockDashboard({ teacher: { ending_soon: [], draft_count: 2 } })
-    renderWithProviders(<EtOverviewWidget enabled />)
-
-    expect(await screen.findByText("我的課程提醒")).toBeInTheDocument()
-    expect(screen.getByText(/門課程尚未發布/)).toBeInTheDocument()
-  })
-
   it("三張卡皆無資料時整個 widget 不渲染，不留空標題", async () => {
-    const served = mockDashboard({ student: EMPTY_STUDENT, teacher: { ending_soon: [], draft_count: 0 } })
+    const served = mockDashboard({ student: EMPTY_STUDENT, teacher: { ending_soon: [] } })
     renderWithProviders(<EtOverviewWidget enabled />)
 
     await waitFor(() => expect(served.responded).toBe(true))
@@ -113,7 +110,6 @@ describe("首頁教育訓練概況", () => {
           { course_id: 1, course_name: "今天到期的課", days_left: 0, not_completed: 3 },
           { course_id: 2, course_name: "還有兩天的課", days_left: 2, not_completed: 1 },
         ],
-        draft_count: 0,
       },
     })
     renderWithProviders(<EtOverviewWidget enabled />)
@@ -171,10 +167,10 @@ describe("首頁教育訓練概況", () => {
       expect(sharedCard?.querySelector(".MuiDivider-root")).not.toBeNull()
     })
 
-    it("教師卡有「前往課程列表」連結", async () => {
+    it("教師卡有「前往課程列表 →」連結", async () => {
       renderWithProviders(<EtOverviewWidget enabled />)
 
-      expect(await screen.findByRole("button", { name: "前往課程列表" })).toBeInTheDocument()
+      expect(await screen.findByRole("button", { name: "前往課程列表 →" })).toBeInTheDocument()
     })
 
     it("表格欄位名為「課程 / 完成人數 / 完成率」", async () => {
@@ -290,12 +286,7 @@ describe("首頁教育訓練概況", () => {
 
   describe("教師卡：不是待辦，是提醒（#818）", () => {
     it("🔴 課程列不可點——那門課沒有要編輯的東西", async () => {
-      mockDashboard({
-        teacher: {
-          ending_soon: [{ course_id: 1, course_name: "快截止的課", days_left: 2, not_completed: 1 }],
-          draft_count: 0,
-        },
-      })
+      mockDashboard({ teacher: TEACHER_ONE_ROW })
       renderWithProviders(<EtOverviewWidget enabled />)
 
       // 正向錨點：那一列確實渲染了，否則下面兩句在 t=0 就成立
@@ -304,16 +295,44 @@ describe("首頁教育訓練概況", () => {
       expect(screen.queryByRole("link", { name: /快截止的課/ })).not.toBeInTheDocument()
     })
 
-    it("底部「前往課程列表」仍可按——拿掉的是列連結，不是整塊的出口", async () => {
-      mockDashboard({
-        teacher: {
-          ending_soon: [{ course_id: 1, course_name: "快截止的課", days_left: 2, not_completed: 1 }],
-          draft_count: 0,
-        },
-      })
+    it("「前往課程列表 →」仍可按——拿掉的是列連結，不是整塊的出口", async () => {
+      mockDashboard({ teacher: TEACHER_ONE_ROW })
       renderWithProviders(<EtOverviewWidget enabled />)
 
-      expect(await screen.findByRole("button", { name: "前往課程列表" })).toBeInTheDocument()
+      expect(await screen.findByRole("button", { name: "前往課程列表 →" })).toBeInTheDocument()
+    })
+
+    it("出口連結在標題列——排在課程清單**之前**，不在區塊底部", async () => {
+      // 位置本身才是這次要守的：放底部會隨清單長短浮動，而它是對整塊而言的出口。
+      // 用 DOM 先後順序判定而非樣式值（`sti-testing.md`：CSS／樣式值不寫測試）。
+      mockDashboard({ teacher: TEACHER_ONE_ROW })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      const link = await screen.findByRole("button", { name: "前往課程列表 →" })
+      const row = screen.getByText("快截止的課")
+      expect(link.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it("不再顯示草稿數那一行——即使後端仍回該欄", async () => {
+      // 📌 `draft_count` 已於 #818 自 API 移除。本條守「即使收到（舊版後端 / 快取的
+      // 回應），畫面也不得把它畫出來」——同管理者卡「不再顯示逾期未完成」那條。
+      const served = mockDashboard({ teacher: { ...TEACHER_ONE_ROW, draft_count: 2 } })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await waitFor(() => expect(served.responded).toBe(true))
+      await screen.findByText("我的課程提醒") // 正向錨點：卡片確實渲染了
+      expect(screen.queryByText(/門課程尚未發布/)).not.toBeInTheDocument()
+    })
+
+    it("🔴 只有草稿、沒有即將截止的課時整張教師卡不渲染（不留空卡）", async () => {
+      // 這是移除草稿數那一行的**連帶後果**：`hasTeacherData` 若還看 `draft_count`，
+      // 這種人會拿到一張標題與出口連結都在、底下一列都沒有的空卡。
+      const served = mockDashboard({ teacher: { ending_soon: [], draft_count: 2 } })
+      renderWithProviders(<EtOverviewWidget enabled />)
+
+      await waitFor(() => expect(served.responded).toBe(true))
+      expect(screen.queryByText("我的課程提醒")).not.toBeInTheDocument()
+      expect(screen.queryByText("前往課程列表 →")).not.toBeInTheDocument()
     })
   })
 })

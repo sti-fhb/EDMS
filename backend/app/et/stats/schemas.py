@@ -45,18 +45,21 @@ class TeacherCourseLine(BaseModel):
 
 
 class TeacherCard(BaseModel):
-    """教師卡「我的課程待辦」。
+    """教師卡「我的課程提醒」。
 
     對齊每週寄給教師的 `WEEKLY_REPORT`——那封信是「系統認定教師該知道什麼」的定案，
     本卡是它的**隨時可看版本**，不另立一套指標。
 
     ⛔ 刻意不含「我班級完成率」這種跨課程的單一平均值：教師要知道的是**哪一門**落後，
     而那已在 `ending_soon` 的逐課列表裡。平均值不可行動。
+
+    📌 #818 移除了 `draft_count`（自己建立但尚未發布的課程數）。本卡由「待辦」更名為
+    「提醒」之後，草稿數是唯一一項性質為「卡在我這」的東西，與區塊名稱對不上，前端
+    已不顯示；草稿本來就在 ET01 課程列表看得到。前端的 `hasTeacherData` 亦同步改為
+    只看 `ending_soon`——否則只有草稿的教師會收到一張空卡。
     """
 
     ending_soon: list[TeacherCourseLine]
-    #: 自己建立但尚未發布的課程數——「東西卡在我這」的訊號（學員根本看不到）。
-    draft_count: int
 
 
 class CourseRate(BaseModel):

@@ -127,7 +127,7 @@ class EtStatsService:
         )
 
     async def teacher_card(self, db: AsyncSession, *, owner_id: str, now: datetime | None = None) -> TeacherCard:
-        """教師卡：即將截止且仍有人未完課的課程 + 草稿未發布數。
+        """教師卡：即將截止且仍有人未完課的課程。
 
         `urgent_days` 取自 `ET_URGENT_REMIND_DAYS`（`DP_PARAM`）——與加急提醒信同一個
         門檻，理由見 `EtStatsRepository.courses_ending_soon`。
@@ -154,7 +154,7 @@ class EtStatsService:
                     not_completed=not_completed,
                 )
             )
-        return TeacherCard(ending_soon=lines, draft_count=await self._repo.draft_count(db, owner_id))
+        return TeacherCard(ending_soon=lines)
 
     async def admin_card(self, db: AsyncSession, *, now: datetime | None = None) -> AdminCard:
         """管理者卡：整體完成率 + **最需要關注的前幾門**課程完成率。

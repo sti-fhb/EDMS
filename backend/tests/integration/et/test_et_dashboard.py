@@ -20,7 +20,6 @@ from app.dp.users.models import DpUser
 from app.et.constants import (
     COMPLETION_NOT_STARTED,
     COURSE_CLOSED,
-    COURSE_DRAFT,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ROLE_ADMIN,
@@ -206,7 +205,7 @@ class TestRoleRouting:
 
         body = (await client.get(_DASHBOARD, headers=_bearer(teacher))).json()
 
-        assert body["teacher"] == {"ending_soon": [], "draft_count": 0}
+        assert body["teacher"] == {"ending_soon": []}
 
 
 class TestStudentCard:
@@ -276,16 +275,23 @@ class TestTeacherCard:
         after = (await client.get(_DASHBOARD, headers=_bearer(teacher))).json()["teacher"]
         assert [line["course_name"] for line in after["ending_soon"]] == ["還有 10 天"]
 
-    async def test_草稿數只算自己未發布的(self, client, db) -> None:
+    async def test_不再回草稿數(self, client, db) -> None:
+        """📌 `draft_count` 已於 #818 自 API 移除（本卡更名為「提醒」後與名稱對不上）。
+
+        本條守「回應不得再帶該欄」：前端的 `hasTeacherData` 已改為只看 `ending_soon`，
+        後端若留著它，下一個人會以為那是前端漏畫的欄位而把它加回判定——而加回去的後果
+        是「只有草稿」的教師拿到一張空卡。
+        """
         teacher = await _user(db, "d_tea08", roles=(ROLE_TEACHER,))
-        other = await _user(db, "d_tea09", roles=(ROLE_TEACHER,))
-        await _course(db, owner=teacher, name="我的草稿", status=COURSE_DRAFT)
-        await _course(db, owner=teacher, name="我已發布的", status=COURSE_PUBLISHED)
-        await _course(db, owner=other, name="別人的草稿", status=COURSE_DRAFT)
+        student = await _user(db, "d_stu06", roles=(ROLE_STUDENT,))
+        course_id, _ = await _one_item_course(db, owner=teacher, name="我的課", ends_in_days=1)
+        await _enroll(db, student, course_id)
 
         card = (await client.get(_DASHBOARD, headers=_bearer(teacher))).json()["teacher"]
 
-        assert card["draft_count"] == 1
+        # 正向錨點：卡片確實有內容，否則「沒有該欄」在空回應上也成立
+        assert [line["course_name"] for line in card["ending_soon"]] == ["我的課"]
+        assert "draft_count" not in card
 
 
 class TestAdminCardTraps:

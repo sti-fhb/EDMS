@@ -17,10 +17,14 @@ export interface TeacherCourseLine {
   not_completed: number
 }
 
-/** 教師卡「我的課程待辦」。 */
+/**
+ * 教師卡「我的課程提醒」。
+ *
+ * 📌 #818 移除了 `draft_count`（自己建立但尚未發布的課程數）。區塊更名為「提醒」
+ * 後那一行與名稱對不上，畫面已不顯示；草稿本來就在 ET01 課程列表看得到。
+ */
 export interface TeacherCard {
   ending_soon: TeacherCourseLine[]
-  draft_count: number
 }
 
 /** 管理者卡的一列：一門課程的完成狀況（#475，原為受訓單位）。 */
@@ -77,9 +81,21 @@ export function hasStudentData(card: StudentCard | null): card is StudentCard {
   return card !== null && card.joined > 0
 }
 
-/** 教師卡：沒有即將截止的課、也沒有草稿，就沒有要他做的事。 */
+/**
+ * 教師卡：沒有即將截止的課，就沒有要提醒他的事。
+ *
+ * ## 🔴 判定只看 `ending_soon`——**因為畫面只畫 `ending_soon` 的列**
+ *
+ * #818 之前還看 `draft_count`，而草稿數那一行當時仍畫在卡上，兩者是一致的。該行已於
+ * #818 移除（區塊更名為「提醒」後與名稱對不上），判定若留著 `draft_count`，「只有草稿、
+ * 沒有即將截止的課」的教師會拿到一張**空卡**——標題與「前往課程列表 →」都在、底下一列
+ * 都沒有。這與 `hasAdminData` 踩過的是同一個洞（見其說明）。
+ *
+ * ⛔ **渲染條件必須只看實際會被畫出來的欄位。** 判定與畫面各自演進是空卡的來源，而空卡
+ * 不會報錯，只是看起來像壞了。
+ */
 export function hasTeacherData(card: TeacherCard | null): card is TeacherCard {
-  return card !== null && (card.ending_soon.length > 0 || card.draft_count > 0)
+  return card !== null && card.ending_soon.length > 0
 }
 
 /**

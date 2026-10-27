@@ -120,7 +120,6 @@ export const handlers = [
       student: { joined: 3, in_progress: 1, not_started: 1, completed: 1, pending_open: 0 },
       teacher: {
         ending_soon: [{ course_id: 11, course_name: "採血作業新進人員訓練", days_left: 2, not_completed: 5 }],
-        draft_count: 1,
       },
       admin: {
         completion_rate: "62.50",
