@@ -88,7 +88,9 @@ def do_run_migrations(connection):
 async def run_async_migrations() -> None:
     # 走與正式 / 測試同一個工廠：migration 的回填若用到 `date()` 等伺服端日期運算，
     # 日界才會與應用層一致（#483）。
-    engine = create_app_engine(settings.DATABASE_URL)
+    # 關閉查詢逾時（#810）：工廠預設對每條連線套 `DB_STATEMENT_TIMEOUT_MS`（60 秒），而回填大量資料的
+    # migration 單句可能超過；被中斷的話部署卡在半途。`tests/unit/test_core_db.py` 守門。
+    engine = create_app_engine(settings.DATABASE_URL, connect_args={"server_settings": {"statement_timeout": "0"}})
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()

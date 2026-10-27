@@ -44,6 +44,25 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
     DB_POOL_RECYCLE: int = Field(default=1800, ge=60)
+    # 單一 SQL 查詢的逾時（毫秒；0 = 不限），以 session 的 `statement_timeout` 套用到所有連線（#810）。
+    # 連線池只有 POOL_SIZE + MAX_OVERFLOW 條；一個失控的查詢若無上限，可佔住連線到它跑完為止。nginx
+    # 逾時回 504 之後後端仍會把請求跑完，那層保護不了連線池。
+    #
+    # ⚠️ 涵蓋範圍是「單一查詢」，不是「每個請求」：一個請求跑很多句、或交易開著但閒置（等 I/O），
+    #    都不受此限；它也擋不住有人持續送請求佔滿連線池（攻擊者送得比逾時快）。這是最後一道保險。
+    #
+    # ⚠️ 等鎖的時間也算在內，等滿即失敗（回 503「系統忙碌」），不會無限期等下去。會等鎖的主要來源：
+    #    - 課程「發布／更新」交易：持課程行鎖到 commit（含對大量學員寫入加入紀錄、寄通知），
+    #      同一門課的其他編輯要排隊（`et/course/stage_repository.lock_course`）
+    #    - 稽核鏈的全平台 advisory lock：任何寫稽核的動作（含登入）都排在持鎖交易後面
+    #      （`dp/audit/repository.acquire_chain_lock`，ET 批次核可單一交易最多 100 筆）
+    #    正常情況兩者都在數秒內完成；等到 60 秒代表系統已出問題。2026-10-27 使用者確認此取捨。
+    #    （⛔ 不要引用「上傳影片期間課程被鎖住」當例子：上傳是檔案落地後才取鎖，見 `material/service.upload_video`。）
+    #
+    # 不受此限的連線：migration（`alembic/env.py`）顯式設 0。
+    # ⚠️ 稽核鏈驗證 CLI（`dp/audit/verify.py`）目前**仍受此限**：稽核表大到單句逾時，CLI 回退出碼 2
+    #    「執行錯誤」（不會誤報斷鏈）。屆時再比照 migration 處理。
+    DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
 
     # 認證（簡單 JWT）
     # 各環境獨立產生、不進 git；缺少時 fail-fast（見 _build_settings）。

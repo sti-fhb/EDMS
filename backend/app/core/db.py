@@ -25,7 +25,12 @@ def _build_connect_args(connect_args: Mapping[str, Any] | None) -> dict[str, Any
         合併後的新 dict（不就地修改傳入值）。
     """
     merged: dict[str, Any] = dict(connect_args or {})
-    merged["server_settings"] = {"timezone": _SESSION_TIMEZONE, **merged.get("server_settings", {})}
+    merged["server_settings"] = {
+        "timezone": _SESSION_TIMEZONE,
+        # 單一查詢的逾時（#810，理由見 `config.DB_STATEMENT_TIMEOUT_MS`）；migration 由呼叫端覆寫為 "0"
+        "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
+        **merged.get("server_settings", {}),
+    }
     return merged
 
 
