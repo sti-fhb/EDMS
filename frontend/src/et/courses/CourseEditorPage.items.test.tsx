@@ -433,7 +433,18 @@ describe("ET05 課程編輯頁", () => {
     await user.type(screen.getByRole("textbox", { name: "項目標題" }), "改過的名稱")
     await user.click(screen.getByRole("button", { name: "取消" }))
 
-    expect(await screen.findByText(/已上傳的影片不在此列/)).toBeInTheDocument()
+    // 🔴 **比對整句、含語序**（#814 強化）。
+    //
+    // 原本只有 `/已上傳的影片不在此列/` 這條片段 regex。#814 把影片的例外說明降為
+    // 次要樣式（`component="span"` + `display:block`），而那種改動最容易出的錯是
+    // **把「確定關閉？」一起吞進次要樣式、或把例外說明調到句首**——語序變了，片段
+    // regex 卻照樣通過。
+    //
+    // ⚠️ 用 `dialog.textContent` 而非 `getByText`：改成 JSX 後同一句會跨元素。
+    const dialog = await screen.findByRole("dialog", { name: "放棄變更" })
+    expect(dialog.textContent).toContain(
+      "尚未儲存的變更將不會保留。已上傳的影片不在此列——它在選擇檔案時就已保存，取消不會移除。確定關閉？",
+    )
   }, 15000)
 
   it("既有教材沒有影片時不提影片——那句話對他不成立（#442）", async () => {
@@ -442,8 +453,10 @@ describe("ET05 課程編輯頁", () => {
     await user.type(screen.getByRole("textbox", { name: "項目標題" }), "改過的名稱")
     await user.click(screen.getByRole("button", { name: "取消" }))
 
-    expect(await screen.findByText(/尚未儲存的變更將不會保留/)).toBeInTheDocument()
-    expect(screen.queryByText(/已上傳的影片不在此列/)).not.toBeInTheDocument()
+    // 這一支 #814 不動（三分支只改中間那支），整句比對同時當它的正向錨點。
+    const dialog = await screen.findByRole("dialog", { name: "放棄變更" })
+    expect(dialog.textContent).toContain("尚未儲存的變更將不會保留，確定關閉？")
+    expect(dialog.textContent).not.toContain("已上傳的影片不在此列")
   }, 15000)
 
   /**

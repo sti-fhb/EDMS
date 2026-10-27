@@ -420,7 +420,9 @@ describe("ET05 課程關閉與再開課", () => {
     await user.click(await screen.findByRole("button", { name: "確認關閉" }))
 
     await waitFor(() => expect(body).toEqual({ version: 5 }))
-    expect(await screen.findByText("課程已關閉")).toBeInTheDocument()
+    // #814 B7：原本只有「課程已關閉」——只講物件、不講後果。補成帶後果的版本後，
+    // 這裡的**完全比對**會失效，故一併更新。
+    expect(await screen.findByText("課程已關閉，學員已無法加入")).toBeInTheDocument()
   })
 
   it("關閉遇版本衝突時顯示衝突視窗而非成功訊息", async () => {
@@ -439,7 +441,9 @@ describe("ET05 課程關閉與再開課", () => {
     await user.click(await screen.findByRole("button", { name: "確認關閉" }))
 
     expect(await screen.findByText("內容已被其他裝置變更，請重新整理後再儲存。")).toBeInTheDocument()
-    expect(screen.queryByText("課程已關閉")).not.toBeInTheDocument()
+    // ⚠️ #814 B7 改字後，這個否定斷言若維持 `"課程已關閉"` 會**永遠成立**（畫面上
+    // 根本不存在那個完全相符的字串），變成恆真的假守門。改為比對新字串。
+    expect(screen.queryByText("課程已關閉，學員已無法加入")).not.toBeInTheDocument()
   })
 
   // #428：再開課改為**就地清空編輯頁的起訖時間**，不再跳對話框。

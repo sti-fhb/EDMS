@@ -159,11 +159,16 @@ describe("草稿按「取消」要先講清楚哪一半留著（#804 ①）", ()
 
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText(/取消不會還原已存入的內容/)).toBeInTheDocument()
-    // 🔴 兩半都要講到——只講其中一半就是把另一半的命運藏起來
-    expect(within(dialog).getByText(/會即時存入，「取消」不會還原它們/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/尚未按「儲存草稿」的基本資料修改則不會保留/)).toBeInTheDocument()
+    // 🔴 兩半都要講到——只講其中一半就是把另一半的命運藏起來。
+    //
+    // ⚠️ #814 把這支排成兩行對照、主詞加粗，於是**同一句話被切到不同元素**，
+    // `getByText(整句)` 會查不到。改以整個視窗的文字內容比對——它不受元素切分影響，
+    // 而本條要守的本來就是「這兩句話有沒有講到」，不是它們被放在哪個標籤裡。
+    const text = dialog.textContent ?? ""
+    expect(text).toContain("章節、教材、測驗與課後問卷的編輯在草稿課程會即時存入，「取消」不會還原它們。")
+    expect(text).toContain("尚未按「儲存草稿」的基本資料修改則不會保留。")
     // ⛔ 一概而論的說法對章節那一半是假的（#763 ② 修掉的同一種毛病）
-    expect(within(dialog).queryByText(/變更將不會保留/)).not.toBeInTheDocument()
+    expect(text).not.toContain("變更將不會保留")
     expect(within(dialog).getByRole("button", { name: "離開" })).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "繼續編輯" })).toBeInTheDocument()
     expect(navigateSpy).not.toHaveBeenCalledWith("/et/courses")
