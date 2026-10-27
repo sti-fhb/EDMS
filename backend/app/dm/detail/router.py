@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_db
+from app.core.db import get_db, release_db_before_streaming
 from app.core.exceptions import AppError
 from app.core.http_cache import NO_STORE_HEADERS
 from app.dm.deps import DmContext, get_dm_context
@@ -54,6 +54,8 @@ async def get_version_file(
     # 實體檔缺失（DB↔磁碟不一致）：回統一 404，避免 FileResponse 拋出含落盤路徑的 500（不洩路徑）。
     if not Path(served.path).is_file():
         raise AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
+    # 送檔期間不佔 DB 連線（#810）；須在實體檔存在檢查之後
+    await release_db_before_streaming(db)
     return FileResponse(
         served.path,
         media_type=served.mime,
