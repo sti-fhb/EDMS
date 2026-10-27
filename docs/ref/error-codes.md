@@ -47,9 +47,11 @@
 | COMMON_500 | 500 | Internal Server Error |
 | COMMON_503 | 503 | 系統忙碌中，請稍後再試 |
 
-> **`COMMON_503`**：密碼運算（bcrypt）之併發閘負載卸除（#214）。同時進行中的運算達門檻時
-> 立即拒絕，避免請求在等待期間持續佔用 DB 連線。屬**暫時性**錯誤，前端可提示稍後重試；
-> 勿用於一般系統錯誤（那是 `COMMON_500`）。
+> **`COMMON_503`**：系統暫時忙碌的負載卸除。屬**暫時性**錯誤，前端可提示稍後重試；
+> 勿用於一般系統錯誤（那是 `COMMON_500`）。目前兩個來源：
+> - 密碼運算（bcrypt）之併發閘（#214）：同時進行中的運算達門檻時立即拒絕，避免請求在等待期間持續佔用 DB 連線。
+> - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`（含等鎖時間）被 PostgreSQL 中止（SQLSTATE 57014），
+>   由 `main.py` 的 `query_timeout_response` 轉成本碼。
 
 > **`COMMON_413`**：**由 nginx 產生，不是後端**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）。
 > 請求 body 超過該路徑的 `client_max_body_size`（一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，

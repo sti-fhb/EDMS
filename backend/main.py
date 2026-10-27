@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.exc import DataError
+from sqlalchemy.exc import DataError, DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.access_log_redaction import install_access_log_redaction
@@ -315,6 +315,37 @@ async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
     )
 
 
+#: PostgreSQL 的 query_canceled——`statement_timeout` 到期即以此中止查詢。
+_PG_QUERY_CANCELED = "57014"
+
+
+def query_timeout_response(request: Request, exc: Exception) -> JSONResponse | None:
+    """查詢逾時回 503「系統忙碌」；不是查詢逾時回 None（#810 第 2 項）。
+
+    查詢超過 `DB_STATEMENT_TIMEOUT_MS` 時 PostgreSQL 以 57014 中止它，SQLAlchemy 包成 `DBAPIError`
+    ——不是 `DataError`，會落到 `unhandled_exception_handler`。改前那裡回 500 並以 ERROR 印出堆疊；
+    但逾時是刻意設下的上限、代表系統忙碌，不是程式錯誤，記成 ERROR 會在系統最忙、最需要 log 乾淨
+    的時候刷屏。交易與連線不必在這裡處理：`get_db` 遇例外會 rollback，連線回池後可重用。
+
+    ⛔ **不要改成以 `@app.exception_handler(DBAPIError)` 註冊**：`IntegrityError` 也是 `DBAPIError`
+    的子類，註冊後它會被這裡攔走——`tests/unit/test_core_data_error_handler.py` 的
+    `test_不可攔截_IntegrityError`（#697）明文禁止，理由是它是 `dm/editor/service` 的並發後盾。
+    所以由 catch-all 在最前面呼叫本函式，其餘錯誤照舊。
+    """
+    if not isinstance(exc, DBAPIError) or getattr(exc.orig, "sqlstate", None) != _PG_QUERY_CANCELED:
+        return None
+    logger.warning(
+        "Query canceled by statement_timeout on %s %s\n%s",
+        request.method,
+        request.url.path,
+        format_exception_for_log(exc),
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"error_code": "COMMON_503", "error_message": "系統忙碌中，請稍後再試"},
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """攔截所有未預期例外，記錄去識別化後的例外摘要與堆疊後回傳通用 500。
@@ -324,7 +355,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     ——SQLAlchemy StatementError 的訊息含 SQL 與綁定參數，會把個資寫進 log（#123），
     改由 app/core/log_redaction.format_exception_for_log 去識別化。
     AppError / HTTPException / RequestValidationError 均有專屬 handler，不會走到此處。
+    查詢逾時（SQLSTATE 57014）例外，回 503，見 `query_timeout_response`。
     """
+    timeout = query_timeout_response(request, exc)
+    if timeout is not None:
+        return timeout
     logger.error(
         "Unhandled exception on %s %s\n%s",
         request.method,
