@@ -110,6 +110,33 @@ async function dialogText() {
 }
 
 /**
+ * 去掉註解後的原始碼。
+ *
+ * 🔴 **以 `?raw` 比對原始碼時，註解也算在內**——兩個方向都會出事：
+ *
+ * | 方向 | 失效情形 |
+ * |---|---|
+ * | 正向 | 程式裡的 `message.success("草稿已儲存")` 被刪掉，但某段註解引用了同一句 → 守門被**註解撐住**，無人察覺 |
+ * | 負向 | 「⛔ 不可回退成舊說法」這類斷言，會被**解釋那段歷史的註解**誤判成違規 |
+ *
+ * 後者是實際發生過的：#814 初版替 A9 寫了反向斷言，它紅了——因為
+ * `CourseEditorPage.tsx` 正以註解引用 #202 的原文來說明它為何被 #279 推翻，
+ * 而那段註解恰恰是最該留著的東西。
+ *
+ * ⚠️ 本函式用的是粗略的字面剝除，對「字串內含 `//`」會誤判。本專案的使用者文案
+ * 不含那種片段，故足夠；⛔ 若日後要比對 URL 之類的字串，別用這個。
+ */
+function stripComments(src: string) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[^\n]*?\/\/[^\n]*$/gm, "")
+}
+
+/** 讀 `CourseEditorPage.tsx` 的原始碼，已剝除註解。 */
+async function editorSource() {
+  const { default: source } = await import("./CourseEditorPage.tsx?raw")
+  return stripComments(source)
+}
+
+/**
  * 每支視窗的「必須留著的句子」。
  *
  * ⛔ **刪句子就是刪這裡的一行**——#814 的全部價值在「同樣的資訊更好讀」，改版面時順手
@@ -145,6 +172,10 @@ const SENTENCES = {
   // 🔴 A10 是 A 區**唯一會改字**的一支（#814 Q1 裁示：與 #804 的卡片提示對齊）。
   // 後半「已填寫的內容仍保留。確定停用？」不變，前半換成卡片的講法。
   A10: ["停用後學員看不到此問卷，已填寫的內容仍保留。確定停用？"],
+  // ℹ️ **A11「放棄變更」的安全網不在本檔**——它需要開教材視窗並備妥已上傳影片，
+  // 而 `CourseEditorPage.items.test.tsx` 已有那條觸發路徑（`openExistingMaterial`）。
+  // #814 在那裡把原本的片段 regex 改成**整句比對**，語序一併釘住。
+  // ⛔ 不要在本檔重建一份——兩處各一份會漂移。
 } as const
 
 const ACTIVE_SURVEY = {
@@ -286,6 +317,38 @@ describe("ET05 視窗訊息內容安全網（#814）", () => {
     })
   })
 
+  describe("⛔ A8 / A9——issue 明列「不動」的兩支（正向錨點）", () => {
+    // issue #814 的 A 區有 11 項，其中 A5 / A8 / A9 **不動**（單句本來就清楚）。
+    // A5 的錨點在上面的離開提示那組；A8 / A9 在這裡。
+    //
+    // 🔴 少了這組，改版時順手把它們也「統一成條列」不會有任何測試紅——而那正是
+    // 本案 ⛔ 不該做的事（範圍外的改動一樣是風險）。
+    //
+    // ⚠️ 用**逐字完整比對**，⛔ 不用片段：片段比對會讓「刪掉後半句」照樣通過。
+    const UNTOUCHED_DIALOGS = [
+      "確定刪除此章節？學員於本章節之學習與成績將一併移除，且不再計入完課率。", // A8
+      "確定刪除此題目？此題不再出現於之後的作答；已作答學員的紀錄與成績完整保留、仍可回看。", // A9
+    ]
+
+    it.each(UNTOUCHED_DIALOGS)("原始碼中逐字保留：%s", async (literal) => {
+      const source = await editorSource()
+      expect(source).toContain(literal)
+    })
+
+    it("🔴 A9 ⛔ 不可回退成 #279 已推翻的 #202 說法", async () => {
+      // 規格 `ET-MSG-ET05-007` 原本停在 #202 的行為（「作答紀錄一併移除、不再計分」），
+      // 與實況**語意相反**——#279 裁示 Q2=C 推翻之：`soft_delete_questions` 只軟刪題目
+      // 與選項，作答明細是自給自足的快照、完整保留，成績也不重算。本案已更正規格。
+      //
+      // ⚠️ **必須走 `editorSource()`**（已剝註解）。初版直接比對原始碼時它紅了——
+      // `CourseEditorPage.tsx` 正以註解引用那句歷史原文來說明它為何被推翻，而那段註解
+      // 恰恰是最該留著的。⛔ 不要為了讓這條變綠而去刪那段註解。
+      const source = await editorSource()
+      expect(source).not.toContain("學員於此題之作答紀錄與得分將一併移除")
+      expect(source).not.toContain("學員於本題之作答紀錄將一併移除")
+    })
+  })
+
   describe("B 區訊息——⛔ 不在本案改動範圍者的正向錨點", () => {
     // issue #814 只改 B2、B7 兩條，其餘**一字不改**。少了這組，改版時順手統一語氣
     // 把別條也改掉不會有任何測試紅。
@@ -306,12 +369,19 @@ describe("ET05 視窗訊息內容安全網（#814）", () => {
     ]
 
     it.each(UNCHANGED)("原始碼中逐字保留：%s", async (literal) => {
-      const { default: source } = await import("./CourseEditorPage.tsx?raw")
+      const source = await editorSource()
       expect(source).toContain(literal)
     })
 
+    it("B11 發布／重開課結果視窗不動（#763 剛整理過）", async () => {
+      // B11 不在 `CourseEditorPage.tsx` 裡——它是 `PublishDialog` 的結果態，
+      // 配 `EnrolledResultSummary` 顯示邀請人數與邀請碼。issue 明列不動。
+      const { default: publishSource } = await import("./PublishDialog.tsx?raw")
+      expect(publishSource).toContain('{result ? "課程已發布" : "發布課程"}')
+    })
+
     it("🔴 B2 / B7 已改掉，且舊字串不再殘留", async () => {
-      const { default: source } = await import("./CourseEditorPage.tsx?raw")
+      const source = await editorSource()
       expect(source).toContain('"已先將課程存成草稿"') // B2
       expect(source).toContain('"課程已關閉，學員已無法加入"') // B7
 
