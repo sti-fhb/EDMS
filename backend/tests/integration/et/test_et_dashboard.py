@@ -19,7 +19,7 @@ from app.dp.params.models import DpParamDetail
 from app.dp.users.models import DpUser
 from app.et.constants import (
     COMPLETION_NOT_STARTED,
-    COURSE_DRAFT,
+    COURSE_CLOSED,
     COURSE_PUBLISHED,
     ITEM_MATERIAL,
     ROLE_ADMIN,
@@ -205,7 +205,7 @@ class TestRoleRouting:
 
         body = (await client.get(_DASHBOARD, headers=_bearer(teacher))).json()
 
-        assert body["teacher"] == {"ending_soon": [], "draft_count": 0}
+        assert body["teacher"] == {"ending_soon": []}
 
 
 class TestStudentCard:
@@ -275,16 +275,23 @@ class TestTeacherCard:
         after = (await client.get(_DASHBOARD, headers=_bearer(teacher))).json()["teacher"]
         assert [line["course_name"] for line in after["ending_soon"]] == ["還有 10 天"]
 
-    async def test_草稿數只算自己未發布的(self, client, db) -> None:
+    async def test_不再回草稿數(self, client, db) -> None:
+        """📌 `draft_count` 已於 #818 自 API 移除（本卡更名為「提醒」後與名稱對不上）。
+
+        本條守「回應不得再帶該欄」：前端的 `hasTeacherData` 已改為只看 `ending_soon`，
+        後端若留著它，下一個人會以為那是前端漏畫的欄位而把它加回判定——而加回去的後果
+        是「只有草稿」的教師拿到一張空卡。
+        """
         teacher = await _user(db, "d_tea08", roles=(ROLE_TEACHER,))
-        other = await _user(db, "d_tea09", roles=(ROLE_TEACHER,))
-        await _course(db, owner=teacher, name="我的草稿", status=COURSE_DRAFT)
-        await _course(db, owner=teacher, name="我已發布的", status=COURSE_PUBLISHED)
-        await _course(db, owner=other, name="別人的草稿", status=COURSE_DRAFT)
+        student = await _user(db, "d_stu06", roles=(ROLE_STUDENT,))
+        course_id, _ = await _one_item_course(db, owner=teacher, name="我的課", ends_in_days=1)
+        await _enroll(db, student, course_id)
 
         card = (await client.get(_DASHBOARD, headers=_bearer(teacher))).json()["teacher"]
 
-        assert card["draft_count"] == 1
+        # 正向錨點：卡片確實有內容，否則「沒有該欄」在空回應上也成立
+        assert [line["course_name"] for line in card["ending_soon"]] == ["我的課"]
+        assert "draft_count" not in card
 
 
 class TestAdminCardTraps:
@@ -323,17 +330,80 @@ class TestAdminCardTraps:
     # 程式裡。但下方「完成率不讀死欄位」與「無訖止的課不算逾期」**不受分組方式影響**，
     # 一字未改地保留（前者是整個管理者卡正確性的地基）。
 
-    async def test_無訖止的課不算逾期(self, client, db) -> None:
-        """沒有期限就無從逾期；計入會把「永遠開放的課」全數打成逾期。"""
+    async def test_無訖止的課仍計入(self, client, db) -> None:
+        """📌 原為 `test_無訖止的課不算逾期`（#453）：`overdue_incomplete` 已於 #818 移除
+        ——排除已關閉之後，「逾期」（訖止已過）的課程正好全被排除，那個欄位會結構性恆為 0。
+
+        但「無訖止」這個邊界仍在，**方向相反**：沒有截止日不等於關閉，那門課還開著、
+        必須計入。寫成「沒有訖止就排除」會把「永遠開放的課」整批從概況上抹掉。
+        """
         admin = await _user(db, "d_adm04", roles=(ROLE_ADMIN,))
         teacher = await _user(db, "d_tea13", roles=(ROLE_TEACHER,))
         student = await _user(db, "d_stu09", roles=(ROLE_STUDENT,))
-        course_id, _ = await _one_item_course(db, owner=teacher, name="沒有訖止", ends_in_days=None)
+        course_id, _ = await _one_item_course(db, owner=teacher, name="ZT沒有訖止", ends_in_days=None)
         await _enroll(db, student, course_id)
 
         card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
 
-        assert card["overdue_incomplete"] == 0
+        assert [c["course_name"] for c in card["by_course"] if c["course_name"].startswith("ZT")] == ["ZT沒有訖止"]
+
+    async def test_已關閉課程不計入(self, client, db) -> None:
+        """#818 的主症狀：已關閉的課永遠留在表裡，列數只增不減。
+
+        完成率必須跟著變——兩個數字同源於 `_completion_base`，不可能一個排除了另一個沒有。
+        """
+        admin = await _user(db, "d_adm08", roles=(ROLE_ADMIN,))
+        teacher = await _user(db, "d_tea17", roles=(ROLE_TEACHER,))
+        student = await _user(db, "d_stu13", roles=(ROLE_STUDENT,))
+        live, live_item = await _one_item_course(db, owner=teacher, name="ZT開放中")
+        closed, _ = await _one_item_course(db, owner=teacher, name="ZT已關閉", status=COURSE_CLOSED)
+        await _enroll(db, student, live)
+        await _enroll(db, student, closed)
+        await _complete(db, student, live, live_item)
+
+        card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
+
+        assert [c["course_name"] for c in card["by_course"] if c["course_name"].startswith("ZT")] == ["ZT開放中"]
+        assert Decimal(card["completion_rate"]) == Decimal("100.00"), "已關閉的課仍在母體裡會把完成率拉成 50%"
+
+    async def test_訖止已過但狀態仍是已發布者也不計入(self, client, db) -> None:
+        """⛔ 排除條件不可寫成 `status != CLOSED`。
+
+        到期自動轉 `CLOSED` 由 SCHET002 每日執行，所以「訖止已過但 STATUS 仍是
+        PUBLISHED」是**每門課到期後的必經窗口**；而且教師送一次 `PUT /courses/{id}`
+        把訖止改到過去，當場就能製造它，與排程頻率無關（`course/rules.py` 的正典說明）。
+
+        少了這條，只比對 `status` 的實作會通過全部其他測試。
+        """
+        admin = await _user(db, "d_adm09", roles=(ROLE_ADMIN,))
+        teacher = await _user(db, "d_tea18", roles=(ROLE_TEACHER,))
+        student = await _user(db, "d_stu14", roles=(ROLE_STUDENT,))
+        live, _ = await _one_item_course(db, owner=teacher, name="ZT開放中")
+        expired, _ = await _one_item_course(db, owner=teacher, name="ZT訖止已過", ends_in_days=-1)
+        await _enroll(db, student, live)
+        await _enroll(db, student, expired)
+
+        card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
+
+        assert [c["course_name"] for c in card["by_course"] if c["course_name"].startswith("ZT")] == ["ZT開放中"]
+
+    async def test_超過五門時只回五筆但總數為全部(self, client, db) -> None:
+        """🔴 兩個斷言缺一不可。
+
+        只驗「5 筆」的話，總數欄位回 `len(by_course)` 照樣通過——而畫面會寫成
+        「完成率最低的 5 門，開放中共 5 門」，一句自相矛盾、卻看不出是錯的話。
+        """
+        admin = await _user(db, "d_adm10", roles=(ROLE_ADMIN,))
+        teacher = await _user(db, "d_tea19", roles=(ROLE_TEACHER,))
+        student = await _user(db, "d_stu15", roles=(ROLE_STUDENT,))
+        for i in range(6):
+            course_id, _ = await _one_item_course(db, owner=teacher, name=f"ZT第{i}門", ends_in_days=i + 1)
+            await _enroll(db, student, course_id)
+
+        card = (await client.get(_DASHBOARD, headers=_bearer(admin))).json()["admin"]
+
+        assert len(card["by_course"]) == 5, "表格最多 5 列"
+        assert card["open_course_count"] == 6, "標題要寫的是開放中總門數，不是列出的筆數"
 
     async def test_各課程依完成率由低到高(self, client, db) -> None:
         """管理者要找的是落後的那一門，最好的排最前面等於要他從尾巴讀起。

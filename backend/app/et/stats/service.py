@@ -26,7 +26,7 @@ from app.dp.params.service import ParamService
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.service import EtEnrollmentService
 from app.et.stats.repository import EtStatsRepository
-from app.et.stats.rules import days_left, percent, summarize
+from app.et.stats.rules import CourseCompletion, days_left, percent, rank_lagging_courses, summarize
 from app.et.stats.schemas import AdminCard, CourseRate, StudentCard, TeacherCard, TeacherCourseLine
 from app.et.tracking.repository import EtTrackingRepository
 
@@ -39,6 +39,21 @@ _SYSTEM_OPERATOR: Final = OperatorInfo(user_id="SYSTEM")
 #: 「首頁說要注意了、信還沒寄」或反過來，而兩者都宣稱依據同一條規則。
 _URGENT_PARAM_ID: Final = "ET_URGENT_REMIND_DAYS"
 _URGENT_DAYS_DEFAULT: Final = 3
+
+#: 管理者卡最多列幾門課（#818）。刻意寫死、不做成參數：課程逐年累積而卡片高度固定，
+#: 這是版面容量不是業務規則，沒有任何呼叫端需要別的值。
+_TOP_LAGGING_COURSES: Final = 5
+
+
+def _to_course_rate(row: CourseCompletion) -> CourseRate:
+    """聚合列 → API 回應列。`open_end_at` 只供排序，刻意不帶進回應。"""
+    return CourseRate(
+        course_id=row.course_id,
+        course_name=row.course_name,
+        enrolled=row.enrolled,
+        completed=row.completed,
+        completion_rate=percent(row.completed, row.enrolled),
+    )
 
 
 class EtStatsService:
@@ -112,7 +127,7 @@ class EtStatsService:
         )
 
     async def teacher_card(self, db: AsyncSession, *, owner_id: str, now: datetime | None = None) -> TeacherCard:
-        """教師卡：即將截止且仍有人未完課的課程 + 草稿未發布數。
+        """教師卡：即將截止且仍有人未完課的課程。
 
         `urgent_days` 取自 `ET_URGENT_REMIND_DAYS`（`DP_PARAM`）——與加急提醒信同一個
         門檻，理由見 `EtStatsRepository.courses_ending_soon`。
@@ -139,36 +154,30 @@ class EtStatsService:
                     not_completed=not_completed,
                 )
             )
-        return TeacherCard(ending_soon=lines, draft_count=await self._repo.draft_count(db, owner_id))
+        return TeacherCard(ending_soon=lines)
 
     async def admin_card(self, db: AsyncSession, *, now: datetime | None = None) -> AdminCard:
-        """管理者卡：全站逾期未完課、整體完成率、**各課程**完成率。
+        """管理者卡：整體完成率 + **最需要關注的前幾門**課程完成率。
 
-        兩支查詢共用 `_completion_base`（全站「每筆在籍 × 是否完課」），故整體與分課程
-        的完課定義**不可能分歧**——分開寫兩份推導才是分歧的來源。
+        兩支查詢共用 `_completion_base`（全站「每筆在籍 × 是否完課」，已排除草稿與
+        已關閉），故整體與分課程的母體**不可能分歧**——分開寫兩份推導才是分歧的來源。
 
-        各課程依完成率**由低到高**排序：管理者要找的是落後的那一門，把最好的排在最前
-        面等於要他自己從尾巴讀起。
+        ## 只回前 `_TOP_LAGGING_COURSES` 門，但總數照實回（#818）
+
+        截斷做在後端：課程逐年累積，全列會讓 payload 跟著長，而畫面上永遠只畫得下
+        幾列。`open_course_count` 是**截斷前**的母體大小——前端用它寫出「完成率最低
+        的 N 門，開放中共 M 門」。⛔ 不可回 `len(by_course)`：那會寫成「最低的 5 門，
+        共 5 門」，一句自相矛盾卻看不出是錯的話。
+
+        排序規則（含「全站都是 0%」時才生效的那兩層）見 `rules.rank_lagging_courses`。
         """
         now = now or utcnow()
-        enrolled, completed, overdue = await self._repo.overall_completion(db, now)
-        courses = [
-            CourseRate(
-                course_id=course_id,
-                course_name=name,
-                enrolled=course_enrolled,
-                completed=course_completed,
-                completion_rate=percent(course_completed, course_enrolled),
-            )
-            for course_id, name, course_enrolled, course_completed in await self._repo.course_rates(db, now)
-        ]
-        # 第三鍵 `course_id`：同名且同完成率的兩門課（不同年度的年度訓練都 0%）否則
-        # 順序由 DB 決定，每次查詢可能不同——畫面會「自己動」而沒有人改過任何資料。
-        courses.sort(key=lambda c: (c.completion_rate, c.course_name, c.course_id))
+        enrolled, completed = await self._repo.overall_completion(db, now)
+        rows = await self._repo.course_rates(db, now)
         return AdminCard(
-            overdue_incomplete=overdue,
             completion_rate=percent(completed, enrolled),
-            by_course=courses,
+            open_course_count=len(rows),
+            by_course=[_to_course_rate(row) for row in rank_lagging_courses(rows, limit=_TOP_LAGGING_COURSES)],
         )
 
     async def course_stat(self, db: AsyncSession, course_id: int):

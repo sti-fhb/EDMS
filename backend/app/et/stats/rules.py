@@ -9,8 +9,8 @@
 不會報錯，只會讓全班永遠顯示「未開始」，而且週報照樣寄得出去。
 """
 
-from collections.abc import Mapping
-from datetime import datetime
+from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final, NamedTuple
 
@@ -111,3 +111,58 @@ def days_left(open_end_at: datetime, now: datetime) -> int:
     只會覺得系統在亂講，不會知道是兩套捨去規則。
     """
     return max(0, int((open_end_at - now).total_seconds() // _SECONDS_PER_DAY))
+
+
+#: 無訖止課程排序用的哨兵（比任何真實訖止都晚）。只在排序鍵中出現，不會被顯示。
+_NO_DEADLINE: Final = datetime.max.replace(tzinfo=timezone.utc)
+
+
+class CourseCompletion(NamedTuple):
+    """一門課程的完課聚合（`EtStatsRepository.course_rates` 的一列）。
+
+    `open_end_at` **只供排序**，不進 API 回應——它不是管理者要看的欄位，放進去只會
+    讓前端多一個沒有人用的型別欄位。
+    """
+
+    course_id: int
+    course_name: str
+    open_end_at: datetime | None
+    enrolled: int
+    completed: int
+
+
+def rank_lagging_courses(rows: Iterable[CourseCompletion], *, limit: int) -> list[CourseCompletion]:
+    """挑出管理者最該看的前 `limit` 門課（#818）。
+
+    排序鍵由上而下：
+
+    1. **完成率低者先**——管理者要找的是落後的那一門。
+    2. **截止日近者先**，無訖止者排最後（沒有期限就沒有時間壓力，不該插隊）。
+    3. **在籍人數多者先**——同樣 0%，30 人沒完課比 1 人急。
+    4. `course_id`——純為穩定。
+
+    ## 🔴 第 2、3 層不是裝飾：上線當天只有它們在運作
+
+    全站剛啟用時每一門課都是 0.00%，**第一順位完全失效**。在 #818 之前第二順位是
+    課程名稱（Python 字串比較＝Unicode 碼位序，中文大致落在康熙部首筆畫序上），
+    於是：
+
+    - 選出來的幾門與急迫性毫無關係
+    - 而且**天天都是同一批**（名稱不會變），真正快截止的課永遠排不進來
+
+    這不是邊角情境，是系統上線當下的狀態。
+
+    ⚠️ 本函式**不負責排除已關閉課程**——那是母體的事（見 `_completion_base`），
+    在這裡再濾一次會讓「母體」有兩個定義，而兩處遲早分歧。
+    """
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            percent(row.completed, row.enrolled),
+            row.open_end_at is None,
+            row.open_end_at or _NO_DEADLINE,
+            -row.enrolled,
+            row.course_id,
+        ),
+    )
+    return ordered[:limit]
