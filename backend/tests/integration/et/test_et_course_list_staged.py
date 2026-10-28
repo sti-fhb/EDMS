@@ -288,3 +288,195 @@ class TestQueryCountBaseline:
         n_large = len(count_sql)
 
         assert n_large == n_small, f"查詢次數隨筆數成長（3 門 {n_small} 次 → 9 門 {n_large} 次）＝ N+1"
+
+
+class TestOwnerCardReadsStage:
+    """擁有者的卡片讀暫存版（AC 1、2、4、5）。
+
+    把 `course/service.py` 的 `get` 既有規則延伸到清單：**只有擁有者看得到暫存版本**。
+    """
+
+    async def test_已關閉課程擁有者的卡片顯示暫存版的課名與章節數(self, client, db):
+        owner = await _user(db, "ST1")
+        cid = await _course(db, owner, "關閉前的課名", status=COURSE_CLOSED)
+        await _chapter(db, cid, "活表章節", 1)
+        await _staged_course(db, cid, course_name="編輯後的課名", chapters=3)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        assert res.status_code == 200
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["course_name"] == "編輯後的課名"
+        assert card["chapter_count"] == 3
+
+    async def test_他人的卡片不受暫存影響(self, client, db):
+        """正向錨點（AC 2）。
+
+        ⛔ 管理者**不是**例外——他看到的也該是已生效版本，與詳細頁一致。
+        """
+        owner = await _user(db, "ST2")
+        other = await _user(db, "ST2B")
+        cid = await _course(db, owner, "關閉前的課名", status=COURSE_PUBLISHED, days_from_now=30)
+        await _chapter(db, cid, "活表章節", 1)
+        await _staged_course(db, cid, course_name="編輯後的課名", chapters=5)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "all", "page": 1, "limit": 12}, headers=_bearer(other))
+        assert res.status_code == 200
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["course_name"] == "關閉前的課名", "他人看到的必須是已生效版本"
+        assert card["chapter_count"] == 1
+
+    async def test_已發布課程有暫存時卡片同樣換邊(self, client, db):
+        """AC 4：換邊的條件是「有暫存」，不是「已關閉」。"""
+        owner = await _user(db, "ST3")
+        cid = await _course(db, owner, "發布時的課名", status=COURSE_PUBLISHED, days_from_now=30)
+        await _staged_course(db, cid, course_name="編輯後的課名", chapters=2)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["course_name"] == "編輯後的課名"
+
+    async def test_沒有暫存的課程卡片仍讀活表(self, client, db):
+        """正向錨點（AC 5）。
+
+        ⚠️ 理由**不是**詳細頁那條「暫存列還不存在，而前端要用 VERSION 做樂觀鎖」——
+        `CourseCard` 根本沒有 `version` 欄位（13 個欄位逐一確認過，#813 規劃第 15 節）。
+        真正的理由是**沒有暫存列就沒有東西可讀**，此時活表是唯一且正確的來源。
+        """
+        owner = await _user(db, "ST4")
+        cid = await _course(db, owner, "沒編輯過的課", status=COURSE_CLOSED)
+        await _chapter(db, cid, "活表章節", 1)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["course_name"] == "沒編輯過的課"
+        assert card["chapter_count"] == 1
+
+    async def test_草稿課程不換邊(self, client, db):
+        """草稿直接寫活表（#631 只把已發布／已關閉改成暫存），`is_staged` 為假。"""
+        from app.et.constants import COURSE_DRAFT
+
+        owner = await _user(db, "ST5")
+        cid = await _course(db, owner, "草稿課名", status=COURSE_DRAFT)
+        await _staged_course(db, cid, course_name="不該被讀到", chapters=9)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["course_name"] == "草稿課名"
+
+
+class TestRulingGuards:
+    """兩條 SA 裁示的守門（2026-10-27）。
+
+    🔴 這兩個組合**看起來像 bug**，所以必須有測試釘住——否則日後會被「修掉」。
+    """
+
+    async def test_卡片狀態仍標已關閉但起訖顯示暫存值(self, client, db):
+        """Q1 裁示採 A：`status` / `is_closed` 讀活表，其餘換邊。
+
+        於是一門「已關閉、暫存裡改成遠未來」的課程，卡片會同時顯示「已關閉」與未來的
+        起訖——**兩者都正確**：課程確實還沒重開（要按「更新並重開課」），而那個起訖是
+        **即將生效的**值。編輯頁也是這樣顯示，正是本 issue 要達成的一致。
+        """
+        owner = await _user(db, "RG1")
+        cid = await _course(db, owner, "已關閉的課", status=COURSE_CLOSED)
+        await _staged_course(db, cid, course_name="已關閉的課", chapters=1, open_end_days=400)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["status"] == COURSE_CLOSED, "狀態轉換不走暫存，⛔ 不可換邊"
+        assert card["is_closed"] is True
+        assert card["open_end_at"] is not None and card["open_end_at"] > utcnow().isoformat(), (
+            "起訖應顯示暫存版的未來值"
+        )
+
+    async def test_暫存章節全刪光時卡片顯示零章節(self, client, db):
+        """Q2 裁示採 A。
+
+        🔴 `has_stage` **刻意不濾 `DELETED`**（濾了會讓「章節全刪光 → 暫存樹變空 → 退回讀
+        活表 → 剛刪掉的章節全部復活」），而**章節數要濾**。兩個判準不同是刻意的。
+
+        ⛔ 不可為了「統一」把兩者合併——那會讓卡片顯示「3 章節」、點進去是空的。
+        """
+        owner = await _user(db, "RG2")
+        cid = await _course(db, owner, "刪光章節的課", status=COURSE_CLOSED)
+        for i in range(3):
+            await _chapter(db, cid, f"活表章節{i}", i)
+        await _staged_course(db, cid, course_name="刪光章節的課", chapters=0, deleted_chapters=3)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["chapter_count"] == 0, "暫存裡刪光了就是 0，⛔ 不可退回顯示活表的 3"
+
+
+class TestNoNPlusOne:
+    """🔴 AC 6：清單查詢**不產生 N+1**——以查詢次數斷言，不是只驗結果正確。
+
+    `TestQueryCountBaseline` 量的是**沒有暫存**的情形；本組量的是**每一門都有暫存**的
+    情形——換邊路徑才是本案新增查詢的地方，也才是會寫成 N+1 的地方。
+    """
+
+    async def test_全部課程都有暫存時查詢次數仍不隨筆數成長(self, client, db, count_sql):
+        """⛔ 不斷言「等於某個數字」，理由見檔頭。
+
+        ⚠️ 兩次量測都用**同一個 `limit`**：若讓第二次多回幾筆，`paginate` 自己的成本就
+        混進來了，測到的不再只是換邊路徑。
+        """
+        owner = await _user(db, "NP1")
+        for i in range(3):
+            cid = await _course(db, owner, f"小-{i}", status=COURSE_CLOSED)
+            await _staged_course(db, cid, course_name=f"暫存小-{i}", chapters=2)
+        await db.commit()
+
+        count_sql.clear()
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        assert res.status_code == 200
+        n_small = len(count_sql)
+
+        for i in range(6):
+            cid = await _course(db, owner, f"大-{i}", status=COURSE_CLOSED)
+            await _staged_course(db, cid, course_name=f"暫存大-{i}", chapters=2)
+        await db.commit()
+
+        count_sql.clear()
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert len(data) == 9
+        assert all(c["course_name"].startswith("暫存") for c in data), "前置條件：每門都該換邊"
+        n_large = len(count_sql)
+
+        assert n_large == n_small, (
+            f"查詢次數隨筆數成長（3 門有暫存 {n_small} 次 → 9 門 {n_large} 次）＝ N+1。"
+            "⚠️ 最可能的成因是逐門呼叫 has_stage 或逐門取暫存樹。"
+        )
+
+    async def test_混合有無暫存時同樣不成長(self, client, db, count_sql):
+        """半數有暫存、半數沒有——換邊是逐張卡片判定的，混合情形最接近真實清單。"""
+        owner = await _user(db, "NP2")
+        for i in range(2):
+            cid = await _course(db, owner, f"混小有-{i}", status=COURSE_CLOSED)
+            await _staged_course(db, cid, course_name=f"暫存混小-{i}", chapters=1)
+            await _course(db, owner, f"混小無-{i}", status=COURSE_CLOSED)
+        await db.commit()
+
+        count_sql.clear()
+        await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        n_small = len(count_sql)
+
+        for i in range(3):
+            cid = await _course(db, owner, f"混大有-{i}", status=COURSE_CLOSED)
+            await _staged_course(db, cid, course_name=f"暫存混大-{i}", chapters=1)
+            await _course(db, owner, f"混大無-{i}", status=COURSE_CLOSED)
+        await db.commit()
+
+        count_sql.clear()
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        assert len(res.json()["data"]) == 10
+        assert len(count_sql) == n_small

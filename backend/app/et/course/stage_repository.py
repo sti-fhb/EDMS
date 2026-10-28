@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -34,6 +34,9 @@ from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, dumps_payload, parse_payload, to_payload_dict
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
 from app.et.course.stage_rules import (
+    ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_SURVEY,
     ENTITY_SURVEY_OPTION,
     ENTITY_SURVEY_QUESTION,
@@ -77,6 +80,19 @@ def to_payload(spec: EntitySpec, row: object) -> str:
     ⛔ 不要為了讓別的型別過而加 `default=str`：那會讓上一段講的靜默寫入字串重新變成可能。
     """
     return dumps_payload(spec.entity_type, to_payload_dict(spec, row))
+
+
+@dataclass(frozen=True)
+class StagedCardBasic:
+    """ET01 卡片需要的暫存版基本資料（#813）。
+
+    ⚠️ 刻意**只含卡片用得到的欄位**，不是 `_StagedBasic` 的複製品：清單不回 `version`
+    （`CourseCard` 根本沒有該欄位），也不需要 `description` / `require_approval`。
+    """
+
+    course_name: str
+    open_start_at: datetime | None
+    open_end_at: datetime | None
 
 
 class EtCourseStageRepository:
@@ -350,6 +366,101 @@ class EtCourseStageRepository:
         await db.flush()
         return stage.stage_id
 
+    async def staged_basic_by_course(
+        self, db: AsyncSession, course_ids: Sequence[int]
+    ) -> dict[int, StagedCardBasic]:
+        """`{course_id: 暫存版基本資料}`——ET01 卡片批次換邊用（#813）。
+
+        🔴 **一次查詢同時回答兩件事**：某課程有沒有暫存、暫存的基本資料是什麼。清單的換邊
+        條件因此不必逐門再呼叫 `has_stage`——那就是 N+1，而 AC 明文禁止。
+
+        ⚠️ **不濾 `DELETED`**，與 `has_stage` 同一個判準：課程節點是 `_NEVER_DELETED`
+        （見 `stage_apply`），不會被軟刪；而「這門課有沒有編輯工作階段開著」問的是列在不在，
+        不是樹空不空（理由見 `has_stage` 的 docstring）。
+
+        ⛔ **不可與章節數、配對合併成一次 JOIN**：課程節點是一對一、另兩者是一對多，同一個
+        `GROUP BY` 放兩個一對多會讓計數互相灌水（`counts_by_course` 已為同一件事留過警語）。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseContentStage.course_id, EtCourseContentStage.payload).where(
+                    EtCourseContentStage.course_id.in_(course_ids),
+                    EtCourseContentStage.entity_type == ENTITY_COURSE,
+                )
+            )
+        ).all()
+        out: dict[int, StagedCardBasic] = {}
+        for course_id, raw in rows:
+            # ⚠️ `parse_payload` 吃的是**已解析的 Mapping**、不是 JSON 字串，而且它還負責
+            # 把 ISO 8601 還原成 `datetime`（少了這步，起訖會以字串進 `CourseCard`）。
+            payload = parse_payload(ENTITY_COURSE, json.loads(raw))
+            out[course_id] = StagedCardBasic(
+                course_name=payload["course_name"],
+                open_start_at=payload.get("open_start_at"),
+                open_end_at=payload.get("open_end_at"),
+            )
+        return out
+
+    async def staged_chapter_counts(self, db: AsyncSession, course_ids: Sequence[int]) -> dict[int, int]:
+        """`{course_id: 暫存版章節數}`——一次 grouped query（#813）。
+
+        🔴 **這支要濾 `DELETED = 0`，與 `staged_basic_by_course` 的判準刻意不同。**
+
+        教師在暫存裡刪掉的章節是軟刪（`delete_subtree`），列還在。卡片上的數字問的是
+        「更新之後會有幾章」，所以軟刪的不能算；而「有沒有暫存」問的是列在不在，不能濾。
+
+        ⛔ **不要「順手」把兩者統一。** 兩個判準合併的後果是靜默的：
+        - 都不濾 ⇒ 卡片把刪掉的章節算進去，點進編輯頁卻看不到
+        - 都濾 ⇒ 教師把章節全刪光時暫存樹變空、整張卡片退回讀活表，**剛刪掉的章節全部
+          復活在卡片上**（`has_stage` 的 docstring 記過同一個坑，2026-10-16 code review MEDIUM）
+
+        ⚠️ 章節全刪光時本支回傳**沒有該 `course_id` 的鍵**，呼叫端須視為 0（不是「沒暫存」）。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseContentStage.course_id, func.count())
+                .where(
+                    EtCourseContentStage.course_id.in_(course_ids),
+                    EtCourseContentStage.entity_type == ENTITY_CHAPTER,
+                    EtCourseContentStage.deleted == 0,
+                )
+                .group_by(EtCourseContentStage.course_id)
+            )
+        ).all()
+        return dict(rows)
+
+    async def staged_pairs_by_course(
+        self, db: AsyncSession, course_ids: Sequence[int]
+    ) -> dict[int, list[tuple[int, int]]]:
+        """`{course_id: [(unit_tag_id, tag_id), ...]}`——暫存版的受訓對象配對（#813）。
+
+        ⚠️ 只回**配對本身**，顯示文字仍由 `labels_for_pairs` 從活表 `ET_TAG` 取——標籤主檔
+        不進暫存區，進去的只有「這門課掛了哪些配對」。
+
+        ⚠️ 與章節同樣濾 `DELETED = 0`：教師移除的配對不該出現在卡片上。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseContentStage.course_id, EtCourseContentStage.payload)
+                .where(
+                    EtCourseContentStage.course_id.in_(course_ids),
+                    EtCourseContentStage.entity_type == ENTITY_COURSE_TAG,
+                    EtCourseContentStage.deleted == 0,
+                )
+                .order_by(EtCourseContentStage.sort_order, EtCourseContentStage.stage_id)
+            )
+        ).all()
+        out: dict[int, list[tuple[int, int]]] = {}
+        for course_id, raw in rows:
+            payload = json.loads(raw)
+            out.setdefault(course_id, []).append((payload["unit_tag_id"], payload["tag_id"]))
+        return out
 
 def nodes_by_type(nodes: Sequence[StageNode], entity_type: str) -> list[StageNode]:
     """測試與套用端共用的小工具。"""
