@@ -251,6 +251,10 @@ jobs:
           build-args: |
             VITE_BASE_PATH=/edms/
             VITE_API_BASE_URL=/edms/api
+          # pull + no-cache-filters：nginx/Dockerfile 的 runtime 階段（apk upgrade）每次重跑，
+          # 不沿用 gha 快取中舊的 apk 結果（快取只看父映像與指令字串、不看 Alpine 套件庫）
+          pull: true
+          no-cache-filters: runtime
           cache-from: type=gha,scope=edms-nginx
           cache-to: type=gha,scope=edms-nginx,mode=max
 

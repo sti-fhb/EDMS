@@ -12,6 +12,8 @@ import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import { useEffect } from "react"
 
+import { readCspNonce } from "../../styles/cspNonce"
+
 /**
  * 教材說明文字之 WYSIWYG 編輯器（ET05）。
  *
@@ -63,6 +65,9 @@ export function RichTextEditor({ value, onChange, disabled = false, label = "說
     content: value,
     editable: !disabled,
     onUpdate: ({ editor: instance }) => onChange(instance.getHTML()),
+    // tiptap 自行注入 <style data-tiptap-style>（ProseMirror 基礎樣式），不經 Emotion、
+    // 也不讀全域 nonce：CSP 不放行 'unsafe-inline'，須明確傳入 nonce，否則被瀏覽器擋下
+    injectNonce: readCspNonce(),
   })
 
   // 外部值變更（載入既有教材、切換教材）時同步進編輯器。

@@ -68,7 +68,8 @@ env:
   # ghcr 路徑一律小寫。sti-fhb 本身即小寫，直接寫死比 github.repository_owner 好讀
   NAMESPACE: sti-fhb
   # 一併打包進 tar.gz 的官方映像：本機模擬離線部署時就不需再連 Docker Hub。
-  # nginx:alpine 幾乎不佔額外空間——edms-nginx 本身即 FROM nginx:alpine，layer 共用。
+  # nginx:alpine 幾乎不佔額外空間——edms-nginx 本身即 FROM nginx:alpine，layer 共用
+  #（打包前會先套用 Alpine 安全更新，多出一層 apk upgrade，見「匯出 tar.gz」步驟）。
   # postgres:17 的版本須與 docker-compose.yml 一致。
   BASE_IMAGES: postgres:17 nginx:alpine
   # 關閉 build-push-action 自動上傳的 build record（<owner>~<repo>~XXXXXX.dockerbuild）。
@@ -226,6 +227,11 @@ jobs:
           build-args: |
             VITE_BASE_PATH=/edms/
             VITE_API_BASE_URL=/edms/api
+          # pull + no-cache-filters：nginx/Dockerfile 的 runtime 階段（apk upgrade）每次重跑。
+          # layer 快取（含下方 gha 快取）只看父映像與指令字串、不看 Alpine 套件庫，官方 nginx:alpine
+          # 未重建時會一直沿用舊的 apk 結果；只重跑 runtime 階段，前端建置（builder）仍可用快取。
+          pull: true
+          no-cache-filters: runtime
           cache-from: type=gha,scope=edms-nginx
           cache-to: type=gha,scope=edms-nginx,mode=max
 
@@ -277,6 +283,18 @@ jobs:
         id: tar
         run: |
           for img in $BASE_IMAGES; do docker pull "$img"; done
+          # 官方 nginx:alpine 重建晚於 Alpine 套件修補：打包前先套用 Alpine 已釋出的安全更新，沿用同名 tag。
+          # ⚠️ 部署時若有其他映像包也帶 nginx:alpine，後載入者的 tag 生效 —— 各包都須打包已更新版本。
+          #    --no-cache：layer 快取不看 Alpine 套件庫。本 job 跑在 GitHub 託管 runner，用完即棄，不需還原 tag。
+          # ⚠️ --load：上方 setup-buildx-action 已把 docker-container builder 設為預設，
+          #    不指定時 build 結果只留在 builder 內、不會載回本機，下方 docker save 打包的仍是官方原版，
+          #    且不會有任何錯誤。故 build 後比對映像 ID，沒換成新映像即中止。
+          BEFORE_ID="$(docker image inspect -f '{{.Id}}' nginx:alpine)"
+          printf 'FROM nginx:alpine\nRUN apk upgrade --no-cache\n' \
+            | docker buildx build --load --no-cache -t nginx:alpine -
+          if [ "$(docker image inspect -f '{{.Id}}' nginx:alpine)" = "$BEFORE_ID" ]; then
+            echo "::error::nginx:alpine 未換成已套用安全更新的映像"; exit 1
+          fi
           TAR_NAME="edms-images-${{ steps.rev.outputs.sha }}.tar.gz"
           TAR="${{ runner.temp }}/${TAR_NAME}"
           docker save \
