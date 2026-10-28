@@ -69,7 +69,9 @@ async def _user(db, user_id: str, *, name: str | None = None) -> str:
         )
     )
     db.add(
-        EtUserRole(user_id=user_id, role=ROLE_TEACHER, is_active=True, created_user="SYSTEM", created_date=now, deleted=0)
+        EtUserRole(
+            user_id=user_id, role=ROLE_TEACHER, is_active=True, created_user="SYSTEM", created_date=now, deleted=0
+        )
     )
     await db.flush()
     return user_id
@@ -205,9 +207,7 @@ async def _staged_course(
         await _stage_node(db, course_id, ENTITY_CHAPTER, {"chapter_name": f"暫存章節{i}"}, sort_order=i)
     # 軟刪的章節：教師在暫存裡刪掉的，⛔ 不該計入卡片數字
     for i in range(deleted_chapters):
-        await _stage_node(
-            db, course_id, ENTITY_CHAPTER, {"chapter_name": f"刪掉的{i}"}, sort_order=100 + i, deleted=1
-        )
+        await _stage_node(db, course_id, ENTITY_CHAPTER, {"chapter_name": f"刪掉的{i}"}, sort_order=100 + i, deleted=1)
     for unit_id, tag_id in tag_pairs or []:
         await _stage_node(
             db,
@@ -233,7 +233,7 @@ def count_sql(db):
     bind = db.get_bind()
     target = getattr(bind, "sync_connection", None) or getattr(bind, "sync_engine", None) or bind
 
-    def _on_exec(conn, cursor, statement, params, context, executemany):  # noqa: ANN001
+    def _on_exec(conn, cursor, statement, params, context, executemany):
         stmts.append(statement)
 
     event.listen(target, "before_cursor_execute", _on_exec)
@@ -480,3 +480,73 @@ class TestNoNPlusOne:
         res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
         assert len(res.json()["data"]) == 10
         assert len(count_sql) == n_small
+
+
+class TestStagedAudiences:
+    """受訓對象也要換邊（AC 1 的第三項）。
+
+    🔴 這條是 AC 盤點前自己發現的缺口：前面幾條只驗了課名、起訖與章節數，而 AC 明列
+    四項。少了它，`staged_pairs_by_course` 整支寫錯也不會紅。
+    """
+
+    async def test_擁有者的卡片顯示暫存版的受訓對象(self, client, db):
+        owner = await _user(db, "AU1")
+        unit_id = await all_units_id(db)
+        live_tag = await _tag(db, "活表職位")
+        staged_tag = await _tag(db, "暫存職位")
+        cid = await _course(db, owner, "受訓對象測試", status=COURSE_CLOSED)
+        await _attach_tag(db, cid, live_tag, unit_id)
+        await _staged_course(
+            db, cid, course_name="受訓對象測試", chapters=1, tag_pairs=[(unit_id, staged_tag)]
+        )
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        labels = [a["label"] for a in card["audiences"]]
+        assert any("暫存職位" in s for s in labels), f"應顯示暫存版的配對，實得 {labels}"
+        assert not any("活表職位" in s for s in labels), "活表的配對不該出現"
+
+    async def test_他人看到的仍是活表的受訓對象(self, client, db):
+        """正向錨點——換邊只對擁有者。"""
+        owner = await _user(db, "AU2")
+        other = await _user(db, "AU2B")
+        unit_id = await all_units_id(db)
+        live_tag = await _tag(db, "活表職位B")
+        staged_tag = await _tag(db, "暫存職位B")
+        cid = await _course(db, owner, "受訓對象他人", status=COURSE_PUBLISHED, days_from_now=30)
+        await _attach_tag(db, cid, live_tag, unit_id)
+        await _staged_course(
+            db, cid, course_name="受訓對象他人", chapters=1, tag_pairs=[(unit_id, staged_tag)]
+        )
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "all", "page": 1, "limit": 12}, headers=_bearer(other))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        labels = [a["label"] for a in card["audiences"]]
+        assert any("活表職位B" in s for s in labels), f"他人應看到已生效版本，實得 {labels}"
+        assert not any("暫存職位B" in s for s in labels), "他人不該看到暫存版的配對"
+
+    async def test_暫存裡移除的配對不出現在卡片上(self, client, db):
+        """暫存的配對同樣濾軟刪——教師移除的配對不該還在卡片上。"""
+        owner = await _user(db, "AU3")
+        unit_id = await all_units_id(db)
+        keep_tag = await _tag(db, "留著的")
+        drop_tag = await _tag(db, "移除的")
+        cid = await _course(db, owner, "配對軟刪", status=COURSE_CLOSED)
+        stage_id = await _staged_course(db, cid, course_name="配對軟刪", chapters=1, tag_pairs=[(unit_id, keep_tag)])
+        await _stage_node(
+            db,
+            cid,
+            ENTITY_COURSE_TAG,
+            {"unit_tag_id": unit_id, "tag_id": drop_tag},
+            parent_stage_id=stage_id,
+            deleted=1,
+        )
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        labels = [a["label"] for a in card["audiences"]]
+        assert any("留著的" in s for s in labels), f"實得 {labels}"
+        assert not any("移除的" in s for s in labels), "軟刪的配對不該出現在卡片上"

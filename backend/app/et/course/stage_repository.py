@@ -366,9 +366,7 @@ class EtCourseStageRepository:
         await db.flush()
         return stage.stage_id
 
-    async def staged_basic_by_course(
-        self, db: AsyncSession, course_ids: Sequence[int]
-    ) -> dict[int, StagedCardBasic]:
+    async def staged_basic_by_course(self, db: AsyncSession, course_ids: Sequence[int]) -> dict[int, StagedCardBasic]:
         """`{course_id: 暫存版基本資料}`——ET01 卡片批次換邊用（#813）。
 
         🔴 **一次查詢同時回答兩件事**：某課程有沒有暫存、暫存的基本資料是什麼。清單的換邊
@@ -461,6 +459,7 @@ class EtCourseStageRepository:
             payload = json.loads(raw)
             out.setdefault(course_id, []).append((payload["unit_tag_id"], payload["tag_id"]))
         return out
+
 
 def nodes_by_type(nodes: Sequence[StageNode], entity_type: str) -> list[StageNode]:
     """測試與套用端共用的小工具。"""
