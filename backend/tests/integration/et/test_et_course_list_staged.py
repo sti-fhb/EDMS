@@ -550,3 +550,37 @@ class TestStagedAudiences:
         labels = [a["label"] for a in card["audiences"]]
         assert any("留著的" in s for s in labels), f"實得 {labels}"
         assert not any("移除的" in s for s in labels), "軟刪的配對不該出現在卡片上"
+
+
+class TestStudentSideUntouched:
+    """AC 3：學員端不受影響——反向探針。
+
+    🔴 學員端的隔離是**結構性**的，不是本案小心翼翼維持的：`my-courses` 在 `enrollment`
+    模組、ET03 在 `learning` 模組，兩者對 `stage` 零引用（#631 的設計——活表始終是已生效
+    版本，學員端約 308 處讀取因此一行都不用改）。
+
+    ⇒ 本組不是「測我沒有不小心改到它」，而是**釘住那個結構**：日後有人把暫存讀取搬進
+    學員端的模組時會紅，而那正是 #631 規劃留言明文要求先讀過再做的事。
+    """
+
+    async def test_學員端模組對暫存區零引用(self):
+        """以原始碼比對守住模組邊界。
+
+        ⚠️ 這條刻意不渲染、不打 API——要守的是「**哪個模組碰得到暫存**」這件結構，而不是
+        某一條回應的內容。內容測試擋不住「學員端新增一個讀暫存的端點」。
+        """
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[3] / "app" / "et"
+        offenders: list[str] = []
+        for mod in ("enrollment", "learning", "progress"):
+            for py in (root / mod).rglob("*.py"):
+                text = py.read_text(encoding="utf-8")
+                # 去掉註解再比對：說明「為何不碰暫存」的註解不該讓這條紅
+                code = "\n".join(line.split("#")[0] for line in text.splitlines())
+                if "stage" in code.lower():
+                    offenders.append(f"{mod}/{py.name}")
+        assert not offenders, (
+            f"學員端模組出現暫存區引用：{offenders}。"
+            "⛔ 學員端一律讀已生效版本（#631）——要改請先讀該 issue 的規劃留言。"
+        )
