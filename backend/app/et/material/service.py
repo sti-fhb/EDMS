@@ -342,23 +342,32 @@ class EtMaterialService:
         ## 步驟順序有意義
 
         1. 擁有權 → 2. 讀參數 → 3. 檢檔名長度與副檔名 → 4. **擋同名影片**（落地前）
-        → 5. **串流寫暫存檔**（邊寫邊數大小）→ 6. **`ffprobe` 取長度**（取不到就刪
-        暫存檔、拒收）→ 7. 搬到正式路徑 → 8. 寫 DB 紀錄
+        → **結束交易** → 5. **串流寫暫存檔**（邊寫邊數大小）→ 6. **`ffprobe` 取長度**
+        （取不到就刪暫存檔、拒收）→ 7. 搬到正式路徑 → 8. **取鎖、重新解析與授權**後寫 DB 紀錄
 
         長度探測必須在檔案落地**之後**（ffprobe 要讀檔）、寫 DB **之前**
         （data-model：取不到不得存檔）。搬檔放在寫 DB 之前是刻意的——見
         `storage.promote` 對兩種失敗後果不對稱性的說明。
         """
-        # 🔴 **解析與授權時不取鎖**（2026-10-18 code review HIGH 2）。
+        # 🔴 **分三段，寫檔與 `ffprobe` 期間不持鎖、也不持交易**（#833 A1）。
         #
-        # 串流寫一個 500 MB 的檔加上 `ffprobe` 可以長達數分鐘。把課程行鎖持有那麼久，
-        # 同課程的**所有編輯與「更新」都排隊**——而那還不是最糟的，見 `lock_course`
-        # 對外鍵檢查的說明。鎖延到檔案落地之後、真正要寫暫存列之前才取。
+        # 串流寫一個 500 MB 的檔加上 `ffprobe` 可以長達數分鐘：
+        # - 持課程行鎖那麼久，同課程的**所有編輯與「更新」都排隊**（2026-10-18 code review HIGH 2）
+        # - 只是交易開著也不行：連線一直被佔著（idle in transaction），連線池上限 15 條
+        #   （`DB_POOL_SIZE` 5 + `DB_MAX_OVERFLOW` 10），兩三位教師同時上傳就佔掉一大半；
+        #   查詢逾時（#827）只管單一查詢，管不到閒置的交易
         #
-        # ⚠️ 代價：取鎖前的「同名影片」檢查是在無鎖狀態下做的，兩個分頁同時上傳同名檔
+        # 1. **唯讀**：授權、讀參數、檢檔名、擋同名——⛔ 這一段不可有任何 DB 寫入。第一次上傳
+        #    會把活表複製進暫存區（`ref_for_source` → `ensure_seeded`），那是寫入；放在這裡就會
+        #    在下一步被 commit，之後 `ffprobe` 失敗時留下一份「沒有任何修改的暫存」，編輯頁以
+        #    「暫存區存在」判定有未更新的變更，教師被提示他根本沒做的修改。
+        # 2. **結束交易**、寫檔、`ffprobe`——不持連線
+        # 3. **取鎖後重新解析**再寫 DB：解析（含複製進暫存區）一律在鎖內，與其他寫入路徑一致
+        #
+        # ⚠️ 代價：第 1 段的「同名影片」檢查是在無鎖狀態下做的，兩個分頁同時上傳同名檔
         # 可能都通過。那是**可自行修復**的狀態（教師看得到兩列、可刪掉一列），而持鎖
         # 數分鐘擋住全班學員不是。
-        ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator, lock=False)
+        existing_names = await self._existing_video_names(db, material_id, operator.user_id)
 
         # ⚠️ 限制由 `resolve_video_limits` 解析——**前端的文案與 `accept` 走的是同一支**，
         # 兩邊因此不可能分岔（#455）。
@@ -366,16 +375,11 @@ class EtMaterialService:
         file_name = upload.filename or ""
         storage.ensure_file_name_acceptable(file_name)
         ext = storage.ensure_format_allowed(file_name, list(formats))
-
         # 在寫檔**之前**擋重複——等 500 MB 寫完才發現重複，I/O 與使用者的等待都白費。
-        # ⚠️ 暫存模式要比對**暫存區**的檔名：比活表的話，教師這次剛上傳的同名檔不會被
-        # 擋下，按「更新」時兩列一起進活表，教材就有兩支同名影片。
-        if ref is not None:
-            staged_videos = await self._stage_writer.children_of(db, ref.course_id, ENTITY_MATERIAL_VIDEO, ref.stage_id)
-            existing_names = {str(v.payload.get("file_name") or "") for v in staged_videos}
-        else:
-            existing_names = {v.file_name for v in await self._materials.list_videos(db, material_id)}
         ensure_video_name_unused(existing_names=existing_names, file_name=file_name)
+
+        # 第 1 段只有讀取，這裡結束交易、把連線還給連線池；第 3 段的查詢會自動開新交易
+        await db.commit()
 
         tmp_path, size_bytes = await storage.save_video_stream(
             upload, ext=ext, max_size_bytes=max_size_mb * 1024 * 1024
@@ -389,20 +393,16 @@ class EtMaterialService:
         # DB 記相對片段（可隨 root 搬移，#233）；回滾刪檔須用絕對路徑，兩者不可互換
         final_abs, final_rel = storage.promote(tmp_path, video_id_hint=str(abs(material_id)), ext=ext)
         try:
+            # 🔴 **取鎖後重新解析**：第 1、2 段之間另一個分頁可能按了「更新」把暫存區清掉、
+            # 刪了這份教材，或課程狀態變了。重新解析在鎖內完成授權、必要時重新複製進暫存區，
+            # 教材已不在就拋 404（下方 except 會把檔刪掉）；不重新解析而沿用第 1 段的結果，
+            # 會造出指向已刪父節點的孤兒（`_validate_tree` 之後每一次「更新」都 500）。
+            ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator)
             if ref is not None:
                 # 暫存模式：**檔案照樣落盤**（無從暫存），但列進暫存區，按「更新」才進活表。
                 #
                 # ⚠️ 已知代價：上傳後按「取消」放棄整個工作階段，磁碟上會留一個沒有任何
-                # 列指向的檔。與既有的「上傳後按取消、影片仍在」同一性質，只是從「列還在、
-                # 看得到、可自行刪除」變成「列沒了、看不到」。檔案不影響正確性（學員端讀
-                # 不到沒有列的檔），清理待排 follow-up。
-                #
-                # 🔴 **鎖在這裡才取**（檔案已落地）：見本方法開頭對 HIGH 2 的說明。
-                # 取鎖後要**重新確認父節點仍在**——這段無鎖的期間，另一個分頁可能按了
-                # 「更新」並 `clear` 掉整個暫存區，那時 `ref.stage_id` 已不存在，直接
-                # `append` 會造出指向已刪父節點的孤兒（`_validate_tree` 之後恆 500）。
-                await self._stage_writer.lock_course(db, ref.course_id)
-                ref = await self._reconfirm_staged_material(db, ref, material_id, operator)
+                # 列指向的檔，由每日排程的孤兒影片清理處理（#775）。
                 stage_id = await self._stage_writer.append(
                     db,
                     ref.course_id,
@@ -492,7 +492,7 @@ class EtMaterialService:
         ensure_owner(owner_id=resolved.owner_id, actor_id=actor_id)
         return material, resolved.course_id
 
-    async def _staged_material(self, db: AsyncSession, material_id: int, actor_id: str, operator, *, lock: bool = True):
+    async def _staged_material(self, db: AsyncSession, material_id: int, actor_id: str, operator):
         """教材 id → 暫存節點；回 `(None, course_id)` 代表該走活表路徑（#631 PR 2b）。
 
         形狀與 `course/service._staged_chapter` 完全相同，**刻意不抽成共用函式**：
@@ -501,13 +501,9 @@ class EtMaterialService:
         而把三行包成一層會讓「授權排在取鎖之前」這件事變得不明顯。
 
         🔴 **負數先解析**：負數是本次編輯新增、活表還沒有的教材。
-        🔴 **取鎖排在授權之後、解析之前**（理由見 `stage_writer.lock_course`）。
-
-        Args:
-            lock: 設 `False` 時**不取課程行鎖**。只給 `upload_video` 用——它在解析之後
-                還要串流寫一個最大 500 MB 的檔並跑 `ffprobe`，持鎖那麼久會讓同課程的
-                編輯與「更新」整批排隊。⛔ 其餘呼叫端一律維持 `True`：鎖必須蓋住
-                「解析 → 寫入」整段，否則可插出指向已被清掉的父節點的節點。
+        🔴 **取鎖排在授權之後、解析之前**（理由見 `stage_writer.lock_course`）。鎖必須蓋住
+        「解析 → 寫入」整段，否則可插出指向已被清掉的父節點的節點。`upload_video` 也是在
+        寫檔之後才呼叫本函式，不另外開一條不取鎖的路（#833 A1）。
         """
         ref = await self._stage_writer.resolve_new(db, material_id, ENTITY_MATERIAL)
         if ref is not None:
@@ -515,8 +511,7 @@ class EtMaterialService:
             if course is None:
                 raise _NOT_FOUND
             ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
-            if lock:
-                await self._stage_writer.lock_course(db, ref.course_id)
+            await self._stage_writer.lock_course(db, ref.course_id)
             return ref, ref.course_id
 
         material, resolved = await self._resolve_material(db, material_id)
@@ -524,33 +519,50 @@ class EtMaterialService:
         course = await self._courses.get(db, resolved.course_id)
         if not is_staged(course):
             return None, resolved.course_id
-        if lock:
-            await self._stage_writer.lock_course(db, resolved.course_id)
+        await self._stage_writer.lock_course(db, resolved.course_id)
         ref = await self._stage_writer.ref_for_source(
             db, resolved.course_id, ENTITY_MATERIAL, material_id, operator, gone_error=_NOT_FOUND
         )
         return ref, resolved.course_id
 
-    async def _reconfirm_staged_material(self, db: AsyncSession, ref, material_id: int, operator):
-        """取鎖後重新確認教材的暫存節點仍然存在，回最新的 `ref`。
+    async def _existing_video_names(self, db: AsyncSession, material_id: int, actor_id: str) -> set[str]:
+        """上傳前的**唯讀**檢查：授權，並回傳要比對同名的現有影片檔名（#833 A1）。
 
-        🔴 `upload_video` 在解析與寫入之間有一段**無鎖**的檔案上傳期（見該方法）。那段
-        期間另一個分頁可能按了「更新」：`clear` 會把整個暫存區刪光，`ref.stage_id` 隨之
-        失效。直接 `append` 會造出指向已刪父節點的孤兒，而那種樹會讓此後**每一次**
-        「更新」都 500，且 UI 看不到它、教師自己救不回來。
+        ⛔ **不可有任何 DB 寫入**——`upload_video` 接著就 commit、在不持交易的狀態下寫檔與跑
+        `ffprobe`。所以這裡不呼叫 `_staged_material`：它會取鎖，且第一次編輯時會把活表複製進
+        暫存區（`ref_for_source` → `ensure_seeded`）。
 
-        - 既有教材（正數 id）：重跑 `ref_for_source`。暫存區若已被清空它會重新 seed，
-          拿到的是**新一輪**工作階段裡的節點，語意正確。
-        - 本次新增的教材（負數 id）：活表根本沒有它，重新 seed 也變不出來——只能確認
-          那一列還在，不在就 404（教師的編輯已被自己的另一個分頁套用掉了）。
+        比對的對象與寫入時會用的那一份相同：
+        - 本次新增的教材（負數 id）、或暫存區已有這份教材 → 比暫存區的影片。比活表的話，教師
+          這次剛上傳的同名檔不會被擋下，按「更新」時兩列一起進活表
+        - 暫存區還沒有這份教材（草稿課程，或已發布但還沒開始編輯）→ 比活表；後者第一次寫入時
+          複製進暫存區的就是這份活表，兩者相同
+
+        🔴 **暫存區存在、卻查不到這份教材的節點 ⇒ 它在這次編輯中被刪了，當場 404**。`node_of`
+        只認未刪的列，若把「查不到」一律當成「還沒開始編輯」改比活表就會放行，500 MB 寫完、
+        `ffprobe` 跑完才在第 3 段 404（`ref_for_source` 的「查不到有兩種」）。另一種「查不到」
+        是 seed 漏搬，第 3 段會回 500；這裡一併回 404 是代價——它由 `test_種出的樹涵蓋十一種實體`
+        在上游守著，正常不會發生。
         """
-        if material_id > 0:
-            return await self._stage_writer.ref_for_source(
-                db, ref.course_id, ENTITY_MATERIAL, material_id, operator, gone_error=_NOT_FOUND
-            )
-        if await self._stage_writer.node_by_stage_id(db, ref.stage_id, ENTITY_MATERIAL) is None:
-            raise _NOT_FOUND
-        return ref
+        ref = await self._stage_writer.resolve_new(db, material_id, ENTITY_MATERIAL)
+        if ref is not None:
+            course = await self._courses.get(db, ref.course_id)
+            if course is None:
+                raise _NOT_FOUND
+            ensure_owner(owner_id=course.owner_id, actor_id=actor_id)
+            course_id, stage_id = ref.course_id, ref.stage_id
+        else:
+            _, resolved = await self._resolve_material(db, material_id)
+            ensure_owner(owner_id=resolved.owner_id, actor_id=actor_id)
+            course = await self._courses.get(db, resolved.course_id)
+            if not is_staged(course) or not await self._stage_writer.has_stage(db, resolved.course_id):
+                return {v.file_name for v in await self._materials.list_videos(db, material_id)}
+            node = await self._stage_writer.node_of(db, material_id, ENTITY_MATERIAL)
+            if node is None:
+                raise _NOT_FOUND
+            course_id, stage_id = node.course_id, node.stage_id
+        staged_videos = await self._stage_writer.children_of(db, course_id, ENTITY_MATERIAL_VIDEO, stage_id)
+        return {str(v.payload.get("file_name") or "") for v in staged_videos}
 
     async def _staged_doc_row(self, db: AsyncSession, node) -> DocRow:
         """暫存版的 `_doc_row`——名稱 / 版號 / 廢止狀態一樣即時查 DM，不落地。
