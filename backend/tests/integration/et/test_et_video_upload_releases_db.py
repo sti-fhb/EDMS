@@ -25,6 +25,7 @@ import pytest
 from sqlalchemy import func, select, update
 
 from app.core.config import settings
+from app.et.constants import ITEM_MATERIAL
 from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.material import service as material_service
 from app.et.material.models import EtMaterial, EtMaterialVideo
@@ -106,6 +107,40 @@ async def test_已發布課程上傳失敗不留下暫存區(client, db) -> None
 
     assert r.status_code == 422, r.text
     assert await _stage_rows(db, ids["course_id"]) == 0
+
+
+@pytest.mark.parametrize("new_material", [False, True], ids=["既有教材", "本次新增的教材（負數 id）"])
+async def test_暫存模式第二次上傳同名影片_比對暫存區並在寫檔前擋下(
+    client, db, in_transaction_during_io, new_material
+) -> None:
+    """第 1 段要比對的是**暫存區**的影片：教師這次剛上傳的那支只在暫存區，比活表就擋不到，
+    按「更新」時兩支同名影片一起進活表。
+
+    兩條路徑各一：既有教材（第一次上傳把它複製進暫存區，第二次走 `node_of`）、本次編輯新增
+    的教材（負數 id，走 `resolve_new`）。
+    """
+    uid = await _user(db, "ZT_UPR10" if new_material else "ZT_UPR11")
+    ids = await _course_with_content(client, db, uid)
+    await _publish(client, db, uid, ids["course_id"])
+    material_id = ids["material_id"]
+    if new_material:
+        created = await client.post(
+            f"/api/et/chapters/{ids['chapter_id']}/items",
+            json={"item_type": ITEM_MATERIAL, "title": "暫存教材"},
+            headers=_bearer(uid),
+        )
+        assert created.status_code == 201, created.text
+        material_id = created.json()["material_id"]
+        assert material_id < 0, "前置：已發布課程新增的教材在暫存區、對外是負數 id"
+
+    first = await _upload(client, uid, material_id)
+    assert first.status_code == 201, first.text
+
+    second = await _upload(client, uid, material_id)
+
+    assert second.status_code == 409, second.text
+    assert second.json()["error_code"] == "ET_MATERIAL_005"
+    assert in_transaction_during_io["save"] == [False], "第二次在寫檔前就該擋下，只有第一次寫過檔"
 
 
 # ── 上傳到一半資料被改：第 3 段重新授權 ─────────────────────────────────────
