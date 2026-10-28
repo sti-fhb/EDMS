@@ -234,28 +234,93 @@ class EtCourseService:
         pairs = await self._courses.pairs_by_course(db, course_ids)
         owner_names = await self._owner_names(db, {r.owner_id for r in rows})
 
-        cards = [
-            CourseCard(
+        # 🔴 **擁有者的卡片讀暫存版**（#813）——把 `get` 既有的規則延伸到清單。
+        #
+        # `get` 的註解已定下：「只有擁有者看得到暫存版本。他人閱覽與學員端一律看已生效
+        # 版本——給他們看一份還沒生效的內容會讓『這門課有什麼』出現兩種答案」。當時沒套
+        # 到清單，於是擁有者的卡片顯示關閉前的課名、點進去卻是編輯後的。
+        #
+        # ⚠️ 換邊條件 MUST 與 `get` **同一組**：`is_owner`、`is_staged`、有暫存列。
+        # `get` 的註解寫得很直白——「兩個條件分開寫就會分岔，而分岔的症狀是『章節讀暫存、
+        # 課名讀活表』」。這裡用 `staged.get(course_id)` 一次回答後兩項。
+        #
+        # 🔴 **第三項刻意由批次查詢的回傳判定，⛔ 不逐門呼叫 `has_stage`**——那就是 N+1，
+        # 而本頁是分頁批次查詢。`test_清單查詢次數不隨課程數成長` 釘住這件事。
+        # ⚠️ 三次查詢的**範圍不同**，不是筆誤：
+        #
+        # | 查詢 | 範圍 | 為什麼 |
+        # |---|---|---|
+        # | 第 1 次 | 自己的**全部非草稿**課程 | 此時還不知道誰有暫存——它就是在問這件事 |
+        # | 第 2、3 次 | 只有**真的有暫存**的（`staged` 的鍵）| 沒暫存的不必再查章節與配對 |
+        #
+        # 三次都是固定成本（與筆數無關），合計 3 次。
+        owned_staged_ids = [r.course_id for r in rows if r.owner_id == actor_id and is_staged(r)]
+        staged = await self._stage.staged_basic_by_course(db, owned_staged_ids)
+        staged_chapters = await self._stage.staged_chapter_counts(db, list(staged))
+        staged_pairs = await self._stage.staged_pairs_by_course(db, list(staged))
+        staged_labels = await self._courses.labels_for_pairs(
+            db, {pair for pairs_of_one in staged_pairs.values() for pair in pairs_of_one}
+        )
+
+        def _card(r: CourseRow) -> CourseCard:
+            """組一張卡片。
+
+            ⚠️ 刻意寫成具名函式而非 inline 的 walrus：換邊要讓**四個欄位同時**參考
+            同一個 `s`，而寫在 `CourseCard(...)` 的引數裡會讓後面的欄位依賴前面的求值
+            順序——那是日後重排欄位就會壞掉、而且壞得很安靜的寫法。
+            """
+            s = staged.get(r.course_id)
+            return CourseCard(
                 course_id=r.course_id,
-                course_name=r.course_name,
+                # ⚠️ `status` / `is_closed` **不換邊**（2026-10-27 Q1 裁示）：狀態轉換
+                # （發布 / 關閉 / 再開課）不走暫存。於是一門已關閉、暫存裡改了起訖的課程，
+                # 卡片會同時顯示「已關閉」與未來的起訖——**兩者都正確**，而且與編輯頁一致。
+                # `test_卡片狀態仍標已關閉但起訖顯示暫存值` 釘住它，⛔ 不要當成 bug 修掉。
+                course_name=s.course_name if s else r.course_name,
                 status=r.status,
-                open_start_at=r.open_start_at,
-                open_end_at=r.open_end_at,
+                open_start_at=s.open_start_at if s else r.open_start_at,
+                open_end_at=s.open_end_at if s else r.open_end_at,
                 owner_id=r.owner_id,
                 owner_name=owner_names.get(r.owner_id, (None, False))[0],
                 owner_is_disabled=owner_names.get(r.owner_id, (None, False))[1],
-                audiences=[AudiencePair(**p._asdict()) for p in pairs.get(r.course_id, [])],
-                chapter_count=counts.get(r.course_id, (0, 0))[0],
+                # 🔴 **順序要照 `labels_for_pairs`，⛔ 不是暫存列的建立順序。**
+                #
+                # 初版依 `staged_pairs` 的 `sort_order` 輸出，於是同一門課的配對在卡片上
+                # 的順序與詳細頁、與活表卡片都不同——而 `labels_for_pairs` 的 docstring
+                # 早就寫過：「兩邊的文字或順序若分岔，教師編輯中看到的受訓對象會與按
+                # 『更新』之後長得不一樣，而那種不一致沒有任何錯誤訊息」。
+                #
+                # ⚠️ 本案要修的正是「卡片與詳細頁兩種答案」，排序分岔是同一類毛病——
+                # 修了內容卻在順序上重新製造一次（#813 code review MEDIUM）。
+                #
+                # ⇒ 以 `staged_labels`（已排序：通用值在前、再依 display_order）為序，
+                # 用該課程的配對集合過濾。
+                audiences=(
+                    [
+                        AudiencePair(**p._asdict())
+                        for p in staged_labels
+                        if (p.unit_tag_id, p.tag_id) in set(staged_pairs.get(r.course_id, []))
+                    ]
+                    if s
+                    else [AudiencePair(**p._asdict()) for p in pairs.get(r.course_id, [])]
+                ),
+                # ⚠️ 暫存章節數用 `.get(..., 0)` 而非 fallback 活表：教師把章節**全刪光**時
+                # 這裡沒有鍵，而正確答案是 0、不是活表的數字（2026-10-27 Q2 裁示）。
+                # ⛔ 寫成 `or counts[...]` 會讓剛刪掉的章節復活在卡片上。
+                chapter_count=staged_chapters.get(r.course_id, 0) if s else counts.get(r.course_id, (0, 0))[0],
                 student_count=counts.get(r.course_id, (0, 0))[1],
                 # **由後端判定**——前端自行比對 owner_id 等於把授權語意複製一份到瀏覽器
                 is_owner=r.owner_id == actor_id,
                 # 期間已過者 `status` 仍是 `PUBLISHED`（自動轉 `CLOSED` 由 SCHET002 每日
                 # 08:00 執行，每門課必經這個窗口；見 `rules.is_effectively_closed`），
                 # 前端若自己判 `status` 會把它標成「已發布」
+                # ⚠️ `is_closed` 與 `status` 同樣取**活表**的 `open_end_at`，⛔ 不是上面
+                # 換過邊的那個——「這門課現在對學員開不開」問的是已生效的期間。暫存裡把
+                # 訖止改到 2027 年不會讓一門已關閉的課程變成運作中（那要按「更新並重開課」）。
                 is_closed=is_effectively_closed(status=r.status, open_end_at=r.open_end_at, now=now),
             )
-            for r in rows
-        ]
+
+        cards = [_card(r) for r in rows]
         return {"data": cards, "meta": paged["meta"]}
 
     async def list_filter_owners(
