@@ -32,6 +32,15 @@ function resolveRowKey<T>(row: T, rowKey: keyof T | ((row: T) => string)): strin
 }
 
 /**
+ * loading / 空資料列：退回 theme 的全域列 hover（#832），它們不是一列資料。
+ *
+ * 能用單一個 `&` 蓋過去，是因為 theme 那條**刻意保持在最低 specificity**
+ * （`.MuiTableRow-root:hover`，見 `muiTheme.ts` 的說明）。⛔ 若日後有人把 theme 的
+ * 選擇器寫複雜（例如加 `:not(...)`），這裡會**靜默失效**——畫面上看不出是被誰蓋住。
+ */
+const PLACEHOLDER_ROW = { "&:hover": { backgroundColor: "transparent" } } as const
+
+/**
  * CRUD 列表通用表格。統一 loading（置中轉圈）與空資料呈現，禁止各頁手拼 MUI Table。
  */
 export function AppTable<T>({ columns, data, rowKey, loading = false, emptyText = "查無資料" }: AppTableProps<T>) {
@@ -48,14 +57,17 @@ export function AppTable<T>({ columns, data, rowKey, loading = false, emptyText 
           </TableRow>
         </TableHead>
         <TableBody>
+          {/* `PLACEHOLDER_ROW`：loading / 空資料不是「一列資料」，不該有 hover 高亮。
+              #832 把 hover 設到 theme 的 `MuiTableRow` 之後，這兩列會跟著亮——那是
+              新行為（原本只有資料列帶 `hover` prop），故在此退回。 */}
           {loading ? (
-            <TableRow>
+            <TableRow sx={PLACEHOLDER_ROW}>
               <TableCell colSpan={columns.length} align="center" sx={{ py: 4 }}>
                 <CircularProgress size={28} />
               </TableCell>
             </TableRow>
           ) : data.length === 0 ? (
-            <TableRow>
+            <TableRow sx={PLACEHOLDER_ROW}>
               <TableCell colSpan={columns.length} align="center" sx={{ py: 4 }}>
                 <Box component="span" sx={{ color: "text.secondary" }}>
                   {emptyText}

@@ -98,19 +98,55 @@
 
 | 屬性 | 值 |
 |------|-----|
-| 字體大小 | `0.88rem`（Mobile: `0.8rem`） |
-| 表頭背景 | `#f8f9fa` — **已由 `muiTheme` 的 `MuiTableCell.head` 全站供應**，見下方說明 |
-| 表頭文字 | `white-space: nowrap` |
-| Hover | 啟用列 hover 高亮 |
-| 響應式 | 外層包 `table-responsive`（MUI: `TableContainer`） |
+| 字體大小 | `0.875rem`（14px）— **MUI `body2` 預設即此值，不需設定**；Mobile 刻意不縮，見下方說明 |
+| 表頭背景 | `#f8f9fa` — **由 `muiTheme` 全站供應**，見下方說明 |
+| 表頭文字 | `white-space: nowrap` — **由 `muiTheme` 全站供應** |
+| Hover | 內容列一律 hover 高亮 — **由 `muiTheme` 全站供應**；語意是「游標在這一列」，**不是**「可以點」 |
+| 響應式 | 外層包 `table-responsive`（MUI: `TableContainer`）— ⚠️ 目前 12 張表沒有，見下方說明 |
 
-> ⛔ **表頭底色不要在頁面或元件裡寫**（`sx={{ "& th": { bgcolor: ... } }}` 之類）。
-> 它設在 `frontend/src/styles/muiTheme.ts` 的 `components.MuiTableCell.styleOverrides.head`，
-> 走共用 `AppTable` 與各頁手拼的 MUI `Table` **都會生效**，新增表格不需要任何額外設定。
+> ## ⛔ 以上四項都不要在頁面或元件裡寫
 >
-> 📌 #828 之前這條規範**從未被實作**——`#f8f9fa` 在整個 `frontend/src` 一次都沒出現過，
-> 全站表頭都是白底。當時 21 張表裡只有 7 張走 `AppTable`，所以「改 `AppTable` 就好」
-> 其實涵蓋不到另外 14 張；這是它改在 theme 的原因。
+> 全部設在 `frontend/src/styles/muiTheme.ts` 的 `components`
+> （`MuiTableCell.styleOverrides.head`、`MuiTableRow.styleOverrides.root`），走共用
+> `AppTable` 與各頁手拼的 MUI `Table` **都會生效**，新增表格不需要任何額外設定。
+> 具體而言：不要寫 `sx={{ "& th": { bgcolor: ... } }}`，也**不需要**在 `<TableRow>`
+> 上加 `hover` prop。
+>
+> 📌 這些規範過去**從未被實作**。#828 盤點時 `#f8f9fa` 在整個 `frontend/src` 一次都
+> 沒出現過，全站表頭都是白底；#832 補上 `nowrap` 與列 hover。全站共 **26 張表**，
+> 其中只有 7 張走 `AppTable`、另外 19 張是各頁手拼的——「改 `AppTable` 就好」涵蓋不到
+> 後者，這是改在 theme 的原因。
+> （#828 當時誤記為「21 張 / B 組 14 張」，#832 重數後更正。）
+>
+> ### 字體大小：Desktop 本來就達成，Mobile 刻意不縮
+>
+> MUI `TableCell` 的 root 展開 `theme.typography.body2`，而 `body2` 是 `pxToRem(14)`
+> ＝ **0.875rem**。本表原寫 `0.88rem`（14.08px），兩者差 0.08px，是同一個值的不同寫法
+> ——**不是未落實的規範**，已改寫為實際值以免下一個人去「修」一個沒壞的東西。
+>
+> Mobile `0.8rem`（12.8px）**刻意不做**（2026-10-27 裁示）：本專案的表格欄數多
+> （DM01 文件庫、DP05 操作記錄皆 5 欄以上），縮字只會讓本來就難讀的寬表更難讀，不會讓
+> 它裝得下。手機的解是捲動容器，不是縮字。
+>
+> ### Hover 的語意：「游標在這一列」，不是「可以點」
+>
+> 2026-10-27 裁示。盤點時可點的 6 張表全都有 hover，但**不可點的 20 張裡 9 張有、
+> 11 張沒有**，等於沒有規則；裁定全部補齊。可點與否改由 `cursor: "pointer"` 與
+> `onClick` 表達，不靠 hover 暗示。
+>
+> ⚠️ loading / 空資料的佔位列**不適用**（它們不是一列資料），`AppTable` 已就地退回。
+>
+> ### ⚠️ `nowrap` 的已知取捨
+>
+> 7 張表用 `tableLayout: "fixed"`，窄螢幕下其表頭改為溢出而非折行。刻意不加
+> `textOverflow: "ellipsis"`——截斷會**藏掉字**，折行至少看得到全文。桌機寬度下
+> 全 26 張表的表頭（最長 5 字）本來就不折行，所以看不出變化。
+>
+> ### ⚠️ 尚未補齊：12 張表沒有捲動容器
+>
+> DM 全部 7 張、DP02、ET02 的 1 張等共 12 張表**沒有包在 `TableContainer`（或任何
+> `overflowX: auto` 容器）裡**，窄螢幕會變成整頁橫向捲動。本表「響應式」那條因此
+> 尚未全站成立。⚠️ 這不是 #832 處理的範圍，要做應另開 issue。
 
 ### 欄位模式
 
