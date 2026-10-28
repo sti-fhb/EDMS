@@ -22,7 +22,6 @@ AC 明寫「**以查詢次數斷言，⛔ 不可只驗結果正確**」。專案
 無關查詢時變紅，於是下一個人把數字改大——守門就退化成「記錄現況」，再也擋不住 N+1。
 """
 
-import json
 from datetime import timedelta
 
 import pytest
@@ -36,9 +35,11 @@ from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import (
     COURSE_CLOSED,
     COURSE_PUBLISHED,
+    ROLE_ADMIN,
     ROLE_TEACHER,
 )
 from app.et.course.models import EtChapter, EtCourse, EtCourseContentStage
+from app.et.course.stage_entities import dumps_payload
 from app.et.course.stage_rules import ENTITY_CHAPTER, ENTITY_COURSE, ENTITY_COURSE_TAG
 from app.et.roles.models import EtUserRole
 from tests.integration.et._tag_pairs import all_units_id
@@ -52,7 +53,7 @@ def _bearer(user_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {create_access_token(sub=user_id, ttl_minutes=15)}"}
 
 
-async def _user(db, user_id: str, *, name: str | None = None) -> str:
+async def _user(db, user_id: str, *, name: str | None = None, roles: tuple[str, ...] = (ROLE_TEACHER,)) -> str:
     now = utcnow()
     db.add(
         DpUser(
@@ -68,11 +69,10 @@ async def _user(db, user_id: str, *, name: str | None = None) -> str:
             created_date=now,
         )
     )
-    db.add(
-        EtUserRole(
-            user_id=user_id, role=ROLE_TEACHER, is_active=True, created_user="SYSTEM", created_date=now, deleted=0
+    for role in roles:
+        db.add(
+            EtUserRole(user_id=user_id, role=role, is_active=True, created_user="SYSTEM", created_date=now, deleted=0)
         )
-    )
     await db.flush()
     return user_id
 
@@ -167,7 +167,11 @@ async def _stage_node(
         source_id=source_id,
         parent_stage_id=parent_stage_id,
         sort_order=sort_order,
-        payload=json.dumps(payload, default=str),
+        # 🔴 **用正式環境的序列化路徑**，⛔ 不用 `json.dumps(default=str)`：後者把
+        # datetime 寫成 `"2026-10-28 12:00:00+00:00"`（空格），而 `dumps_payload` 寫的是
+        # ISO 8601（`T`）。兩種 `fromisoformat` 都吃得進，所以**不會紅**——但那表示解析
+        # 路徑從來沒被正式格式驗過（#813 review LOW）。
+        payload=dumps_payload(entity_type, payload),
         version=0,
         deleted=deleted,
         created_user="admin01",
@@ -496,9 +500,7 @@ class TestStagedAudiences:
         staged_tag = await _tag(db, "暫存職位")
         cid = await _course(db, owner, "受訓對象測試", status=COURSE_CLOSED)
         await _attach_tag(db, cid, live_tag, unit_id)
-        await _staged_course(
-            db, cid, course_name="受訓對象測試", chapters=1, tag_pairs=[(unit_id, staged_tag)]
-        )
+        await _staged_course(db, cid, course_name="受訓對象測試", chapters=1, tag_pairs=[(unit_id, staged_tag)])
         await db.commit()
 
         res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
@@ -516,9 +518,7 @@ class TestStagedAudiences:
         staged_tag = await _tag(db, "暫存職位B")
         cid = await _course(db, owner, "受訓對象他人", status=COURSE_PUBLISHED, days_from_now=30)
         await _attach_tag(db, cid, live_tag, unit_id)
-        await _staged_course(
-            db, cid, course_name="受訓對象他人", chapters=1, tag_pairs=[(unit_id, staged_tag)]
-        )
+        await _staged_course(db, cid, course_name="受訓對象他人", chapters=1, tag_pairs=[(unit_id, staged_tag)])
         await db.commit()
 
         res = await client.get(_URL, params={"scope": "all", "page": 1, "limit": 12}, headers=_bearer(other))
@@ -576,11 +576,99 @@ class TestStudentSideUntouched:
         for mod in ("enrollment", "learning", "progress"):
             for py in (root / mod).rglob("*.py"):
                 text = py.read_text(encoding="utf-8")
-                # 去掉註解再比對：說明「為何不碰暫存」的註解不該讓這條紅
-                code = "\n".join(line.split("#")[0] for line in text.splitlines())
+                # 去掉註解再比對：說明「為何不碰暫存」的註解不該讓這條紅。
+                #
+                # ⚠️ 只剝**整行註解**，⛔ 不用 `line.split("#")[0]`——後者會把字串字面值
+                # 裡的 `#` 也當成註解起點而誤截（#813 security review 的觀察）。寧可多留
+                # 一些行內註解進來比對（可能誤報、會被看見），也不要少比對（漏報、靜默失效）。
+                code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
                 if "stage" in code.lower():
                     offenders.append(f"{mod}/{py.name}")
         assert not offenders, (
-            f"學員端模組出現暫存區引用：{offenders}。"
-            "⛔ 學員端一律讀已生效版本（#631）——要改請先讀該 issue 的規劃留言。"
+            f"學員端模組出現暫存區引用：{offenders}。⛔ 學員端一律讀已生效版本（#631）——要改請先讀該 issue 的規劃留言。"
         )
+
+
+class TestReviewGaps:
+    """code review（#813）指出的三個守門缺口。"""
+
+    async def test_管理者看到的也是活表_不是例外(self, client, db):
+        """MEDIUM：spec 與註解都寫「管理者**不是**例外」，但原本的錨點用的是一般教師。
+
+        🔴 程式上換邊只看 `r.owner_id == actor_id`，所以行為本來就對——但「正向錨點」
+        名不符實：日後若有人加了「管理者可看暫存」的捷徑，原本那條不會紅。
+        """
+        owner = await _user(db, "RV1")
+        admin = await _user(db, "RV1A", roles=(ROLE_ADMIN, ROLE_TEACHER))
+        cid = await _course(db, owner, "活表課名", status=COURSE_PUBLISHED, days_from_now=30)
+        await _chapter(db, cid, "活表章節", 1)
+        await _staged_course(db, cid, course_name="暫存課名", chapters=7)
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "all", "page": 1, "limit": 12}, headers=_bearer(admin))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        assert card["course_name"] == "活表課名", "管理者不是例外，⛔ 不可看到暫存內容"
+        assert card["chapter_count"] == 1
+
+    async def test_暫存配對的順序與詳細頁同一份規則(self, client, db):
+        """MEDIUM：原本每條測試只放**一組**配對，守不住排序。
+
+        🔴 初版依暫存列的 `sort_order` 輸出，於是卡片上的順序與詳細頁、活表卡片都不同。
+        `labels_for_pairs` 的 docstring 早就寫過「兩邊的順序若分岔，教師編輯中看到的會與
+        按『更新』之後長得不一樣，而那種不一致沒有任何錯誤訊息」。
+
+        ⇒ 本條以**倒序建立**三組配對，驗證輸出仍照 `labels_for_pairs` 的規則
+        （通用值在前、再依 `display_order`），而不是建立順序。
+        """
+        from tests.integration.et._tag_pairs import all_roles_id
+
+        owner = await _user(db, "RV2")
+        unit_id = await all_units_id(db)
+        all_role = await all_roles_id(db)
+        role_b = await _tag(db, "乙職位")
+        cid = await _course(db, owner, "排序測試", status=COURSE_CLOSED)
+        # ⚠️ 刻意把**通用值放最後**建立：若輸出照建立順序，它會排在最後而非最前
+        await _staged_course(
+            db,
+            cid,
+            course_name="排序測試",
+            chapters=1,
+            tag_pairs=[(unit_id, role_b), (unit_id, all_role)],
+        )
+        await db.commit()
+
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        card = next(c for c in res.json()["data"] if c["course_id"] == cid)
+        labels = [a["label"] for a in card["audiences"]]
+        assert len(labels) == 2, f"兩組配對都該出現，實得 {labels}"
+        assert "全體" in labels[0], f"通用值（全體）MUST 排在前，⛔ 不照暫存列的建立順序。實得 {labels}"
+
+    async def test_有配對時查詢次數仍不隨筆數成長(self, client, db, count_sql):
+        """LOW：原本 N+1 測試的暫存樹都沒放配對。
+
+        `labels_for_pairs` 在集合為空時**提早 return**，所以那條路徑從未被計入——
+        它目前是一次呼叫（非 N+1），但守門沒涵蓋。
+        """
+        owner = await _user(db, "RV3")
+        unit_id = await all_units_id(db)
+        tag_id = await _tag(db, "配對計數職位")
+        for i in range(3):
+            cid = await _course(db, owner, f"配小-{i}", status=COURSE_CLOSED)
+            await _staged_course(db, cid, course_name=f"暫存配小-{i}", chapters=1, tag_pairs=[(unit_id, tag_id)])
+        await db.commit()
+
+        count_sql.clear()
+        await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        n_small = len(count_sql)
+
+        for i in range(6):
+            cid = await _course(db, owner, f"配大-{i}", status=COURSE_CLOSED)
+            await _staged_course(db, cid, course_name=f"暫存配大-{i}", chapters=1, tag_pairs=[(unit_id, tag_id)])
+        await db.commit()
+
+        count_sql.clear()
+        res = await client.get(_URL, params={"scope": "mine", "page": 1, "limit": 12}, headers=_bearer(owner))
+        data = res.json()["data"]
+        assert len(data) == 9
+        assert all(c["audiences"] for c in data), "前置條件：每門都該有配對，否則走的是提早 return"
+        assert len(count_sql) == n_small

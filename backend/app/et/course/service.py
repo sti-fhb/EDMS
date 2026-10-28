@@ -261,7 +261,6 @@ class EtCourseService:
         staged_labels = await self._courses.labels_for_pairs(
             db, {pair for pairs_of_one in staged_pairs.values() for pair in pairs_of_one}
         )
-        labels_by_pair = {(p.unit_tag_id, p.tag_id): p for p in staged_labels}
 
         def _card(r: CourseRow) -> CourseCard:
             """組一張卡片。
@@ -284,11 +283,23 @@ class EtCourseService:
                 owner_id=r.owner_id,
                 owner_name=owner_names.get(r.owner_id, (None, False))[0],
                 owner_is_disabled=owner_names.get(r.owner_id, (None, False))[1],
+                # 🔴 **順序要照 `labels_for_pairs`，⛔ 不是暫存列的建立順序。**
+                #
+                # 初版依 `staged_pairs` 的 `sort_order` 輸出，於是同一門課的配對在卡片上
+                # 的順序與詳細頁、與活表卡片都不同——而 `labels_for_pairs` 的 docstring
+                # 早就寫過：「兩邊的文字或順序若分岔，教師編輯中看到的受訓對象會與按
+                # 『更新』之後長得不一樣，而那種不一致沒有任何錯誤訊息」。
+                #
+                # ⚠️ 本案要修的正是「卡片與詳細頁兩種答案」，排序分岔是同一類毛病——
+                # 修了內容卻在順序上重新製造一次（#813 code review MEDIUM）。
+                #
+                # ⇒ 以 `staged_labels`（已排序：通用值在前、再依 display_order）為序，
+                # 用該課程的配對集合過濾。
                 audiences=(
                     [
-                        AudiencePair(**labels_by_pair[pair]._asdict())
-                        for pair in staged_pairs.get(r.course_id, [])
-                        if pair in labels_by_pair
+                        AudiencePair(**p._asdict())
+                        for p in staged_labels
+                        if (p.unit_tag_id, p.tag_id) in set(staged_pairs.get(r.course_id, []))
                     ]
                     if s
                     else [AudiencePair(**p._asdict()) for p in pairs.get(r.course_id, [])]
