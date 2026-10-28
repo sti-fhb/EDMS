@@ -32,7 +32,13 @@ ENV VITE_BASE_PATH=$VITE_BASE_PATH
 RUN pnpm build
 
 # ── Stage 2：nginx serve 靜態檔案 ──────────────────────────────
-FROM nginx:alpine
+# 階段名稱 runtime 供 build-release-images.yml 以 no-cache-filters 指定重跑本階段
+FROM nginx:alpine AS runtime
+
+# 套用 Alpine 已釋出的安全更新：官方 nginx:alpine 映像重建的時間點晚於 Alpine 套件修補，
+# 不更新會帶著已有修補版的套件出廠。
+# ⚠️ layer 快取不看 Alpine 套件庫：出版用的 build 須重跑本階段（見該 workflow 的 no-cache-filters）。
+RUN apk upgrade --no-cache
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 # 00- 字首確保 limit_req_zone 與 log_format／map（皆為 http 層）早於 default.conf 載入

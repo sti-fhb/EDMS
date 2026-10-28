@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CSP nonce：nginx 以 sub_filter 代換為每次請求的值（見 src/styles/cspNonce.ts） -->
+    <meta name="csp-nonce" content="__CSP_NONCE__" />
     <title>EDMS 教育訓練文件管理系統</title>
   </head>
   <body>

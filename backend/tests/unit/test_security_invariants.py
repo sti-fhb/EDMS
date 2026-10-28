@@ -336,6 +336,18 @@ class TestCSP設定契約:
         for header in ("X-Content-Type-Options", "Referrer-Policy", "Content-Security-Policy"):
             assert header in conf, f"{header} 不在 nginx 設定內——全站來源的前提不成立"
 
+    def test_style_src_以_nonce_放行而非_unsafe_inline(self) -> None:
+        """行內樣式以每次請求的 nonce 放行，不開 `'unsafe-inline'`。
+
+        MUI／Emotion 與 tiptap 都在執行期注入 `<style>`。nonce 由 nginx 的 `$request_id`
+        產生，同一個值以 sub_filter 寫進 index.html 的 `<meta name="csp-nonce">`
+        （見 `Test前端快取設定契約`），前端讀出後交給 Emotion cache 與 tiptap 的 `injectNonce`。
+        """
+        style_src = self._directive("style-src")
+        assert style_src is not None
+        assert "'unsafe-inline'" not in style_src, f"style-src 仍放行 'unsafe-inline'（現值：{style_src}）"
+        assert "'nonce-$request_id'" in style_src, f"style-src 未以請求 nonce 放行（現值：{style_src}）"
+
 
 class Test前端快取設定契約:
     """`nginx/nginx.conf` 的快取指令（#441）。
@@ -422,3 +434,21 @@ class Test前端快取設定契約:
         assert "no-cache" not in value and "no-store" not in value, (
             f"雜湊資產不該關閉快取（#441 的病根在入口 HTML，不在這裡）：{value}"
         )
+
+    def test_index_html_代換_csp_nonce(self) -> None:
+        """SPA 入口把佔位字串換成本次請求的 `$request_id`，與 CSP 標頭的 nonce 為同一個值。
+
+        漏了這行時 meta 仍是佔位字串、前端不帶 nonce，全站 MUI 樣式被 CSP 擋掉——本機
+        dev 走 vite 不經 nginx，只有部署後才看得到。
+        """
+        block = self._location("/")
+        assert "sub_filter '__CSP_NONCE__' '$request_id';" in block, "location / 未代換 CSP nonce 佔位字串"
+        index_html = (self._CONF.parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+        assert '<meta name="csp-nonce" content="__CSP_NONCE__" />' in index_html, (
+            "frontend/index.html 缺少 CSP nonce 佔位 meta"
+        )
+
+    def test_不揭露_nginx_版本(self) -> None:
+        """nginx 自產錯誤頁（404、限流、上游不通）的內文會帶版本字串，並被 front-proxy 原樣轉送。"""
+        text = self._CONF.read_text(encoding="utf-8")
+        assert re.search(r"^\s*server_tokens\s+off;", text, re.MULTILINE), "nginx.conf 未設 server_tokens off"

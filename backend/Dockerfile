@@ -34,6 +34,9 @@ COPY pyproject.toml uv.lock ./
 # 安裝 production 依賴（不含 dev）
 RUN uv sync --frozen --no-dev --no-cache
 
+# 移除基底映像內建的 pip：依賴一律由 uv 安裝進 /app/.venv，執行期不使用系統 pip。
+RUN python -m pip uninstall -y pip
+
 # 複製應用程式碼
 COPY . .
 
