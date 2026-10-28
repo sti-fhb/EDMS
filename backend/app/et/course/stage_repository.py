@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -34,6 +34,9 @@ from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.course.stage_entities import SPEC_BY_TYPE, EntitySpec, dumps_payload, parse_payload, to_payload_dict
 from app.et.course.stage_live_tree import LiveKey, load_live_tree
 from app.et.course.stage_rules import (
+    ENTITY_CHAPTER,
+    ENTITY_COURSE,
+    ENTITY_COURSE_TAG,
     ENTITY_SURVEY,
     ENTITY_SURVEY_OPTION,
     ENTITY_SURVEY_QUESTION,
@@ -77,6 +80,45 @@ def to_payload(spec: EntitySpec, row: object) -> str:
     ⛔ 不要為了讓別的型別過而加 `default=str`：那會讓上一段講的靜默寫入字串重新變成可能。
     """
     return dumps_payload(spec.entity_type, to_payload_dict(spec, row))
+
+
+def parse_stage_payload(raw: str, entity_type: str, *, course_id: int) -> dict:
+    """`PAYLOAD` → 可用的 dict，**含「不是 JSON object」的守門**。
+
+    🔴 **所有讀取暫存列的路徑都要走這裡。** `load_tree` 原本在函式內有一份同樣的守門，
+    其 docstring 寫明理由：「兩支不一致的話，下一個人會照錯的那支抄」——#813 新增三支
+    批次讀取時正是抄了沒有守門的版本（security review L-1）⇒ 提成模組層共用。
+
+    ⚠️ 清單的後果比詳細頁大：詳細頁壞一棵樹 ⇒ 該課程的詳細頁 500；**清單壞一列 ⇒ 整頁
+    ET01 的所有卡片一起 500**，擁有者連別門課都看不到。
+
+    ⚠️ 訊息是**固定文案**、細節只進 log（`AppError.detail` 會原樣成為回應的
+    `error_message`，**含 500**）。
+    """
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        logger.error("ET 暫存列的 PAYLOAD 不是 JSON object：course_id=%s type=%s", course_id, type(parsed).__name__)
+        raise AppError(
+            status_code=500,
+            detail="課程內容暫存資料異常，請重新載入後再試",
+            error_code="ET_STAGE_001",
+        )
+    # ⚠️ ISO 8601 還原成 `datetime`（#720）。少了它，`evaluate_publish` 會拿字串去跟
+    # `datetime` 比較，而 `_upsert` 會把字串寫進 `TIMESTAMPTZ` 欄位。
+    return parse_payload(entity_type, parsed)
+
+
+@dataclass(frozen=True)
+class StagedCardBasic:
+    """ET01 卡片需要的暫存版基本資料（#813）。
+
+    ⚠️ 刻意**只含卡片用得到的欄位**，不是 `_StagedBasic` 的複製品：清單不回 `version`
+    （`CourseCard` 根本沒有該欄位），也不需要 `description` / `require_approval`。
+    """
+
+    course_name: str
+    open_start_at: datetime | None
+    open_end_at: datetime | None
 
 
 class EtCourseStageRepository:
@@ -349,6 +391,128 @@ class EtCourseStageRepository:
         # 不 flush 取不到。
         await db.flush()
         return stage.stage_id
+
+    async def staged_basic_by_course(self, db: AsyncSession, course_ids: Sequence[int]) -> dict[int, StagedCardBasic]:
+        """`{course_id: 暫存版基本資料}`——ET01 卡片批次換邊用（#813）。
+
+        🔴 **本支不做擁有權檢查**：`course_ids` MUST 由呼叫端先過濾成「actor 自己擁有的、
+        非草稿的」。暫存內容**只有擁有者看得到**（見 `service.get` 的 🔴 註解與
+        `spec_us7.md` 的 `FR-ET-US7-03`）——他人閱覽（**含管理者**）與學員端一律讀已生效
+        版本。⛔ 新的呼叫端（管理者清單、匯出、排程報表…）直接把一批 id 丟進來，就是把
+        別人還沒生效的編輯端出去（#813 security review M-2）。
+
+        🔴 **一次查詢同時回答兩件事**：某課程有沒有暫存、暫存的基本資料是什麼。清單的換邊
+        條件因此不必逐門再呼叫 `has_stage`——那就是 N+1，而 AC 明文禁止。
+
+        ⚠️ **不濾 `DELETED`**，與 `has_stage` 同一個判準：課程節點是 `_NEVER_DELETED`
+        （見 `stage_apply`），不會被軟刪；而「這門課有沒有編輯工作階段開著」問的是列在不在，
+        不是樹空不空（理由見 `has_stage` 的 docstring）。
+
+        ⛔ **不可與章節數、配對合併成一次 JOIN**：課程節點是一對一、另兩者是一對多，同一個
+        `GROUP BY` 放兩個一對多會讓計數互相灌水（`counts_by_course` 已為同一件事留過警語）。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseContentStage.course_id, EtCourseContentStage.payload)
+                .where(
+                    EtCourseContentStage.course_id.in_(course_ids),
+                    EtCourseContentStage.entity_type == ENTITY_COURSE,
+                )
+                # ⚠️ 確定性的 tie-break：本支不濾 `DELETED`（判準同 `has_stage`），萬一同一
+                # 課程出現兩列 `ENTITY_COURSE`，沒有 `ORDER BY` 時哪一列勝出**沒有保證**。
+                # 目前由部分唯一索引 + `_NEVER_DELETED` 保證不發生，加這行成本為零（取最新）。
+                .order_by(EtCourseContentStage.stage_id)
+            )
+        ).all()
+        out: dict[int, StagedCardBasic] = {}
+        for course_id, raw in rows:
+            # ⚠️ `parse_payload` 吃的是**已解析的 Mapping**、不是 JSON 字串，而且它還負責
+            # 把 ISO 8601 還原成 `datetime`（少了這步，起訖會以字串進 `CourseCard`）。
+            payload = parse_stage_payload(raw, ENTITY_COURSE, course_id=course_id)
+            out[course_id] = StagedCardBasic(
+                # ⚠️ 三個欄位一律用 `[]`，⛔ 不用 `.get()`——與詳細頁的 `_staged_basic`
+                # 同一個態度：欄位缺漏代表這棵樹是 #720 之前的舊結構，`.get()` 會把那件事
+                # 變成「起訖靜默顯示為空」，`KeyError` 至少指得出是哪一欄（#813 review LOW）。
+                course_name=payload["course_name"],
+                open_start_at=payload["open_start_at"],
+                open_end_at=payload["open_end_at"],
+            )
+        return out
+
+    async def staged_chapter_counts(self, db: AsyncSession, course_ids: Sequence[int]) -> dict[int, int]:
+        """`{course_id: 暫存版章節數}`——一次 grouped query（#813）。
+
+        🔴 **本支不做擁有權檢查**：`course_ids` MUST 由呼叫端先過濾成「actor 自己擁有的、
+        非草稿的」。暫存內容**只有擁有者看得到**（見 `service.get` 的 🔴 註解與
+        `spec_us7.md` 的 `FR-ET-US7-03`）——他人閱覽（**含管理者**）與學員端一律讀已生效
+        版本。⛔ 新的呼叫端（管理者清單、匯出、排程報表…）直接把一批 id 丟進來，就是把
+        別人還沒生效的編輯端出去（#813 security review M-2）。
+
+        🔴 **這支要濾 `DELETED = 0`，與 `staged_basic_by_course` 的判準刻意不同。**
+
+        教師在暫存裡刪掉的章節是軟刪（`delete_subtree`），列還在。卡片上的數字問的是
+        「更新之後會有幾章」，所以軟刪的不能算；而「有沒有暫存」問的是列在不在，不能濾。
+
+        ⛔ **不要「順手」把兩者統一。** 兩個判準合併的後果是靜默的：
+        - 都不濾 ⇒ 卡片把刪掉的章節算進去，點進編輯頁卻看不到
+        - 都濾 ⇒ 教師把章節全刪光時暫存樹變空、整張卡片退回讀活表，**剛刪掉的章節全部
+          復活在卡片上**（`has_stage` 的 docstring 記過同一個坑，2026-10-16 code review MEDIUM）
+
+        ⚠️ 章節全刪光時本支回傳**沒有該 `course_id` 的鍵**，呼叫端須視為 0（不是「沒暫存」）。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseContentStage.course_id, func.count())
+                .where(
+                    EtCourseContentStage.course_id.in_(course_ids),
+                    EtCourseContentStage.entity_type == ENTITY_CHAPTER,
+                    EtCourseContentStage.deleted == 0,
+                )
+                .group_by(EtCourseContentStage.course_id)
+            )
+        ).all()
+        return dict(rows)
+
+    async def staged_pairs_by_course(
+        self, db: AsyncSession, course_ids: Sequence[int]
+    ) -> dict[int, list[tuple[int, int]]]:
+        """`{course_id: [(unit_tag_id, tag_id), ...]}`——暫存版的受訓對象配對（#813）。
+
+        🔴 **本支不做擁有權檢查**：`course_ids` MUST 由呼叫端先過濾成「actor 自己擁有的、
+        非草稿的」。暫存內容**只有擁有者看得到**（見 `service.get` 的 🔴 註解與
+        `spec_us7.md` 的 `FR-ET-US7-03`）——他人閱覽（**含管理者**）與學員端一律讀已生效
+        版本。⛔ 新的呼叫端（管理者清單、匯出、排程報表…）直接把一批 id 丟進來，就是把
+        別人還沒生效的編輯端出去（#813 security review M-2）。
+
+        ⚠️ 只回**配對本身**，顯示文字仍由 `labels_for_pairs` 從活表 `ET_TAG` 取——標籤主檔
+        不進暫存區，進去的只有「這門課掛了哪些配對」。
+
+        ⚠️ 與章節同樣濾 `DELETED = 0`：教師移除的配對不該出現在卡片上。
+
+        ⚠️ **刻意不排序**：卡片上的順序由 `labels_for_pairs` 決定（通用值在前、再依
+        `display_order`），與詳細頁、活表卡片同一份規則。本支若自己排 `sort_order`，
+        那個順序會被呼叫端丟掉——是無效工作，而且會誤導讀者以為順序由這裡決定。
+        """
+        if not course_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(EtCourseContentStage.course_id, EtCourseContentStage.payload).where(
+                    EtCourseContentStage.course_id.in_(course_ids),
+                    EtCourseContentStage.entity_type == ENTITY_COURSE_TAG,
+                    EtCourseContentStage.deleted == 0,
+                )
+            )
+        ).all()
+        out: dict[int, list[tuple[int, int]]] = {}
+        for course_id, raw in rows:
+            payload = parse_stage_payload(raw, ENTITY_COURSE_TAG, course_id=course_id)
+            out.setdefault(course_id, []).append((payload["unit_tag_id"], payload["tag_id"]))
+        return out
 
 
 def nodes_by_type(nodes: Sequence[StageNode], entity_type: str) -> list[StageNode]:
