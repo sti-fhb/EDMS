@@ -246,6 +246,14 @@ class EtCourseService:
         #
         # 🔴 **第三項刻意由批次查詢的回傳判定，⛔ 不逐門呼叫 `has_stage`**——那就是 N+1，
         # 而本頁是分頁批次查詢。`test_清單查詢次數不隨課程數成長` 釘住這件事。
+        # ⚠️ 三次查詢的**範圍不同**，不是筆誤：
+        #
+        # | 查詢 | 範圍 | 為什麼 |
+        # |---|---|---|
+        # | 第 1 次 | 自己的**全部非草稿**課程 | 此時還不知道誰有暫存——它就是在問這件事 |
+        # | 第 2、3 次 | 只有**真的有暫存**的（`staged` 的鍵）| 沒暫存的不必再查章節與配對 |
+        #
+        # 三次都是固定成本（與筆數無關），合計 3 次。
         owned_staged_ids = [r.course_id for r in rows if r.owner_id == actor_id and is_staged(r)]
         staged = await self._stage.staged_basic_by_course(db, owned_staged_ids)
         staged_chapters = await self._stage.staged_chapter_counts(db, list(staged))
