@@ -15,6 +15,7 @@ import Tab from "@mui/material/Tab"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import Tabs from "@mui/material/Tabs"
@@ -174,35 +175,39 @@ function DetailPanel({
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
         {isObsolete ? "廢止檔案" : isNewVersion ? "版本對照" : "新增檔案"}
       </Typography>
-      <Table size="small" sx={{ mb: 1 }}>
-        <TableHead>
-          <TableRow>
-            <TableCell>{isObsolete ? "目前發布版" : isNewVersion ? "版本" : "首版版本"}</TableCell>
-            <TableCell>狀態</TableCell>
-            <TableCell>檔案</TableCell>
-            <TableCell align="right">動作</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {detail.current_version && (
-            <VersionCompareRow
-              meta={detail.current_version}
-              statusLabel="目前發布版"
-              statusColor="success"
-              onDownload={onDownload}
-            />
-          )}
-          {detail.new_version && (
-            <VersionCompareRow
-              meta={detail.new_version}
-              statusLabel={isObsolete ? "廢止待簽核" : isNewVersion ? "待審新版" : "待審首版"}
-              statusColor="warning"
-              highlight
-              onDownload={onDownload}
-            />
-          )}
-        </TableBody>
-      </Table>
+      {/* #835：auto layout 的表格會依內容撐寬並超過容器，窄螢幕下整頁跟著橫向捲動
+          （頁首、側欄一起跑掉）。包 TableContainer 讓捲動留在表格自己身上。 */}
+      <TableContainer sx={{ mb: 1 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>{isObsolete ? "目前發布版" : isNewVersion ? "版本" : "首版版本"}</TableCell>
+              <TableCell>狀態</TableCell>
+              <TableCell>檔案</TableCell>
+              <TableCell align="right">動作</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {detail.current_version && (
+              <VersionCompareRow
+                meta={detail.current_version}
+                statusLabel="目前發布版"
+                statusColor="success"
+                onDownload={onDownload}
+              />
+            )}
+            {detail.new_version && (
+              <VersionCompareRow
+                meta={detail.new_version}
+                statusLabel={isObsolete ? "廢止待簽核" : isNewVersion ? "待審新版" : "待審首版"}
+                statusColor="warning"
+                highlight
+                onDownload={onDownload}
+              />
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
       {isObsolete && detail.obsolete_file_name && (
         <Box sx={{ mb: 2 }}>
@@ -428,50 +433,54 @@ export function DmReviewPage() {
               <Typography variant="caption" color="text.secondary">
                 點擊任一列查看簽核明細
               </Typography>
-              <Table size="small" sx={{ mt: 1 }}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>文件名稱</TableCell>
-                    <TableCell>分類</TableCell>
-                    <TableCell>送審版本</TableCell>
-                    <TableCell>送審者</TableCell>
-                    <TableCell>送審時間</TableCell>
-                    <TableCell>停留天數</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {pendingRows.map((row) => {
-                    const overdue = row.overdue // 由後端依 DM_REMIND_THRESHOLD 判定（#503）
-                    return (
-                      <TableRow
-                        key={row.review_id}
-                        hover
-                        selected={row.review_id === selectedId}
-                        sx={{ cursor: "pointer" }}
-                        onClick={() => setSelectedId(row.review_id)}
-                      >
-                        <TableCell>
-                          {row.doc_name}
-                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                            {REVIEW_TYPE_LABELS[row.review_type] ?? row.review_type}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip size="small" variant="outlined" label={row.category_name || row.category_code} />
-                        </TableCell>
-                        <TableCell>{row.version_no ?? "—"}</TableCell>
-                        <TableCell>{row.submitter_name ?? row.submitter_id}</TableCell>
-                        <TableCell>{formatDateTaipei(row.submit_date)}</TableCell>
-                        <TableCell
-                          sx={{ color: overdue ? "error.main" : undefined, fontWeight: overdue ? 700 : undefined }}
+              {/* #835：auto layout 的表格會依內容撐寬並超過容器，窄螢幕下整頁跟著橫向捲動
+                  （頁首、側欄一起跑掉）。包 TableContainer 讓捲動留在表格自己身上。 */}
+              <TableContainer sx={{ mt: 1 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>文件名稱</TableCell>
+                      <TableCell>分類</TableCell>
+                      <TableCell>送審版本</TableCell>
+                      <TableCell>送審者</TableCell>
+                      <TableCell>送審時間</TableCell>
+                      <TableCell>停留天數</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {pendingRows.map((row) => {
+                      const overdue = row.overdue // 由後端依 DM_REMIND_THRESHOLD 判定（#503）
+                      return (
+                        <TableRow
+                          key={row.review_id}
+                          hover
+                          selected={row.review_id === selectedId}
+                          sx={{ cursor: "pointer" }}
+                          onClick={() => setSelectedId(row.review_id)}
                         >
-                          {row.waiting_days} 天{overdue ? " ⚠" : ""}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+                          <TableCell>
+                            {row.doc_name}
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                              {REVIEW_TYPE_LABELS[row.review_type] ?? row.review_type}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Chip size="small" variant="outlined" label={row.category_name || row.category_code} />
+                          </TableCell>
+                          <TableCell>{row.version_no ?? "—"}</TableCell>
+                          <TableCell>{row.submitter_name ?? row.submitter_id}</TableCell>
+                          <TableCell>{formatDateTaipei(row.submit_date)}</TableCell>
+                          <TableCell
+                            sx={{ color: overdue ? "error.main" : undefined, fontWeight: overdue ? 700 : undefined }}
+                          >
+                            {row.waiting_days} 天{overdue ? " ⚠" : ""}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
               {pending && (
                 <Box sx={{ mt: 2 }}>
                   <Pagination
@@ -512,45 +521,49 @@ export function DmReviewPage() {
             <Alert severity="info">{completedKeyword ? "查無符合搜尋之項目。" : "尚無已完成之簽核。"}</Alert>
           ) : (
             <>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>文件名稱</TableCell>
-                    <TableCell>類型</TableCell>
-                    <TableCell>版本</TableCell>
-                    <TableCell>結果</TableCell>
-                    <TableCell>送審者</TableCell>
-                    <TableCell>退回原因</TableCell>
-                    <TableCell>完成時間</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {completedRows.map((row) => (
-                    <TableRow key={row.review_id}>
-                      <TableCell>{row.doc_name}</TableCell>
-                      <TableCell>{REVIEW_TYPE_LABELS[row.review_type] ?? row.review_type}</TableCell>
-                      <TableCell>{row.version_no ?? "—"}</TableCell>
-                      <TableCell>
-                        <Chip
-                          size="small"
-                          color={row.status === "APPROVED" ? "success" : "warning"}
-                          label={reviewStatusLabel(row.status)}
-                        />
-                      </TableCell>
-                      {/* 送審者：後端取自 `DM_REVIEW.CREATED_USER`（該表無送審者欄位），
-                          無 FK 故以 outerjoin 取姓名，查無帳號時為 null → 顯示「—」。 */}
-                      <TableCell>{row.submitter_name ?? "—"}</TableCell>
-                      {/* 退回原因：後端**僅在 status=REJECTED 時帶值**。`REASON` 一欄兩義，
-                          OBSOLETE 送審時裝的是申請人寫的廢止申請原因，核准列帶出來會是錯資訊。
-                          前端不自行補值、也不依 status 再判一次——單一事實來源在 service 層。 */}
-                      <TableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                        {row.reason ?? "—"}
-                      </TableCell>
-                      <TableCell>{formatDateTaipei(row.complete_date)}</TableCell>
+              {/* #835：auto layout 的表格會依內容撐寬並超過容器，窄螢幕下整頁跟著橫向捲動
+                  （頁首、側欄一起跑掉）。包 TableContainer 讓捲動留在表格自己身上。 */}
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>文件名稱</TableCell>
+                      <TableCell>類型</TableCell>
+                      <TableCell>版本</TableCell>
+                      <TableCell>結果</TableCell>
+                      <TableCell>送審者</TableCell>
+                      <TableCell>退回原因</TableCell>
+                      <TableCell>完成時間</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {completedRows.map((row) => (
+                      <TableRow key={row.review_id}>
+                        <TableCell>{row.doc_name}</TableCell>
+                        <TableCell>{REVIEW_TYPE_LABELS[row.review_type] ?? row.review_type}</TableCell>
+                        <TableCell>{row.version_no ?? "—"}</TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            color={row.status === "APPROVED" ? "success" : "warning"}
+                            label={reviewStatusLabel(row.status)}
+                          />
+                        </TableCell>
+                        {/* 送審者：後端取自 `DM_REVIEW.CREATED_USER`（該表無送審者欄位），
+                            無 FK 故以 outerjoin 取姓名，查無帳號時為 null → 顯示「—」。 */}
+                        <TableCell>{row.submitter_name ?? "—"}</TableCell>
+                        {/* 退回原因：後端**僅在 status=REJECTED 時帶值**。`REASON` 一欄兩義，
+                            OBSOLETE 送審時裝的是申請人寫的廢止申請原因，核准列帶出來會是錯資訊。
+                            前端不自行補值、也不依 status 再判一次——單一事實來源在 service 層。 */}
+                        <TableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                          {row.reason ?? "—"}
+                        </TableCell>
+                        <TableCell>{formatDateTaipei(row.complete_date)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
               {completed && (
                 <Box sx={{ mt: 2 }}>
                   <Pagination

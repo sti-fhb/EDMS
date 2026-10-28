@@ -8,6 +8,7 @@ import Paper from "@mui/material/Paper"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import TextField from "@mui/material/TextField"
@@ -156,47 +157,53 @@ export function DmChangeLogPage() {
           <Alert severity="info">查無符合條件之變更紀錄。</Alert>
         ) : (
           <>
-            <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: "14%" }}>時間</TableCell>
-                  <TableCell sx={{ width: "11%" }}>申請人</TableCell>
-                  <TableCell sx={{ width: "11%" }}>核准人</TableCell>
-                  <TableCell sx={{ width: "8%" }}>操作</TableCell>
-                  <TableCell sx={{ width: "22%" }}>文件</TableCell>
-                  <TableCell sx={{ width: "10%" }}>版本</TableCell>
-                  <TableCell sx={{ width: "24%" }}>備註</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.change_log_id}>
-                    <TableCell>{formatDateTimeTaipei(row.operation_time)}</TableCell>
-                    <TableCell>{row.applicant_name ?? row.applicant_id}</TableCell>
-                    <TableCell>{row.approver_name ?? row.approver_id}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        color={row.operation === "PUBLISH" ? "success" : "error"}
-                        label={row.operation === "PUBLISH" ? "發布" : "廢止"}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {row.doc_name}
-                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                        {row.doc_id}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>{row.version_no ?? "—"}</TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {row.note ?? "—"}
-                      </Typography>
-                    </TableCell>
+            {/* #835：補捲動容器，並把 width:100% 改為 minWidth 780——只補容器不改寬度的話，
+                tableLayout:fixed 會把表格鎖在容器的 100%，窄螢幕下欄位照樣被擠到讀不了，
+                而且看起來像做完了。780 取「每欄容得下自己的表頭」與上限 940 的較小值。
+                ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
+            <TableContainer>
+              <Table size="small" sx={{ tableLayout: "fixed", minWidth: 780 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: "14%" }}>時間</TableCell>
+                    <TableCell sx={{ width: "11%" }}>申請人</TableCell>
+                    <TableCell sx={{ width: "11%" }}>核准人</TableCell>
+                    <TableCell sx={{ width: "8%" }}>操作</TableCell>
+                    <TableCell sx={{ width: "22%" }}>文件</TableCell>
+                    <TableCell sx={{ width: "10%" }}>版本</TableCell>
+                    <TableCell sx={{ width: "24%" }}>備註</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.change_log_id}>
+                      <TableCell>{formatDateTimeTaipei(row.operation_time)}</TableCell>
+                      <TableCell>{row.applicant_name ?? row.applicant_id}</TableCell>
+                      <TableCell>{row.approver_name ?? row.approver_id}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          color={row.operation === "PUBLISH" ? "success" : "error"}
+                          label={row.operation === "PUBLISH" ? "發布" : "廢止"}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {row.doc_name}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                          {row.doc_id}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{row.version_no ?? "—"}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {row.note ?? "—"}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
             {data && (
               <Box sx={{ mt: 2 }}>
                 <Pagination
