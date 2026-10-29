@@ -10,7 +10,23 @@ export const muiTheme = createTheme({
     divider: "#dee2e6",
   },
   typography: {
-    fontFamily: ['"Noto Sans TC"', "system-ui", "Arial", "sans-serif"].join(","),
+    /**
+     * 字型對齊 wireframe（`docs/wireframes/{dm,dp,et}/index.html` 的 `font-family`），
+     * 兩者皆為 Windows 內建、不需載入（#846）。
+     *
+     * 📌 #846 之前這裡宣告的是 `"Noto Sans TC", system-ui, Arial, sans-serif`，但專案
+     * **從未載入**該字型——`index.html` 沒有 font link、全庫沒有 `@font-face`。於是畫面
+     * 用什麼字型**取決於每台客戶端有沒有安裝**：開發機裝了（`C:\Windows\Fonts\
+     * NotoSansTC-VF.ttf`）所以看得到 Noto Sans TC，院內 PC 不保證有。同一個畫面在不同
+     * 機器上字型不同，而兩種都「看起來正常」，沒有人會發現。
+     *
+     * ⛔ **不要改成需要外部載入的字型**（Google Fonts 之類）。CSP
+     * （`nginx/security-headers.conf`）的 `font-src` 與 `style-src` 都只允許 `'self'`，
+     * 外部字型**載不到也不會報錯**，只會默默 fallback——症狀是「改了但沒效」而查不出
+     * 原因。真要換成非內建字型，必須自架於 `'self'` 路徑，並承擔 CJK 字型檔的體積
+     * （Noto Sans TC 可變字型約 10MB+，須做字集子集化）。
+     */
+    fontFamily: ['"Microsoft JhengHei"', '"Segoe UI"', "sans-serif"].join(","),
     // 對齊 TBMS 基準字級 14px（MUI 以此換算 rem）
     fontSize: 14,
   },

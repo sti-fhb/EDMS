@@ -171,9 +171,9 @@
 > | 4 字 | 88px | 9.4% |
 > | 5 字 | 102px | 10.9% |
 >
-> （實測值，非估算：以 `"Noto Sans TC", system-ui, Arial, sans-serif`、14px、`font-weight: 500`
-> 在 Chromium 量得。⚠️ 專案**並未載入** Noto Sans TC——`index.html` 無 font link、全庫無
-> `@font-face`——實際走的是 `system-ui` 之後的 fallback。）
+> （實測值，非估算：14px、`font-weight: 500`，在 Chromium 量得。
+> 📌 **此表與字型無關**——中日韓字一律全形、寬度等於字級，換字型不會變；會變的是拉丁
+> 內容（email、日期、版本號）的寬度。字型本身見 §25。）
 >
 > ⛔ **欄寬不足時不要加大 `minWidth`**：那會讓桌機平白多出捲軸，是用一個回歸去蓋另一個
 > 問題。正確作法是**自同表中最寬鬆的欄位勻**——#841 即如此處理 DM03、DM06 閱讀率明細、
@@ -671,6 +671,37 @@ MUI: `LinearProgress` + 自訂 label overlay
 | 信封（通知） | `bi-envelope` | `Email` |
 | 資訊 | `bi-info-circle` | `Info` |
 | PDF | `bi-filetype-pdf` | `PictureAsPdf` |
+
+---
+
+## 25. 字型
+
+| 項目 | 值 |
+|------|-----|
+| `fontFamily` | `"Microsoft JhengHei", "Segoe UI", sans-serif` |
+| 設定位置 | `frontend/src/styles/muiTheme.ts` 的 `typography.fontFamily` |
+| 基準字級 | 14px（`typography.fontSize`，對齊 TBMS）|
+
+與 wireframe（`docs/wireframes/{dm,dp,et}/index.html` 的 `font-family`）一致，兩者皆為
+Windows 內建、**不需載入**。
+
+### ⛔ 不要改成需要外部載入的字型
+
+CSP（`nginx/security-headers.conf`）的 `font-src` 與 `style-src` 都只允許 `'self'`。
+加一個 Google Fonts `<link>` 會被擋下，而且**載不到不會報錯、只會默默 fallback**——
+症狀是「改了但沒效」而查不出原因。
+
+真要換成非內建字型，必須自架於 `'self'` 路徑，並承擔 CJK 字型檔的體積（Noto Sans TC
+可變字型約 10MB+，須做字集子集化）。
+
+### 📌 #846 之前的狀況：宣告了一個從未載入的字型
+
+`muiTheme` 原本宣告 `"Noto Sans TC", system-ui, Arial, sans-serif`，但專案從未載入它
+（`index.html` 無 font link、全庫無 `@font-face`）。於是畫面用什麼字型**取決於每台
+客戶端有沒有安裝**——開發機裝了就看到 Noto Sans TC，沒裝的退到系統字型。
+
+⚠️ **兩種都「看起來正常」**，差異只在字寬與字重細節，所以不會有人回報。這類缺陷的
+檢查方式是**比對宣告與實際載入**，不是看畫面有沒有壞。
 
 ---
 
