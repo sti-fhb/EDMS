@@ -1,5 +1,4 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
-import ContentCopyIcon from "@mui/icons-material/ContentCopy"
 import LockIcon from "@mui/icons-material/Lock"
 import PersonAddIcon from "@mui/icons-material/PersonAdd"
 import VisibilityIcon from "@mui/icons-material/Visibility"
@@ -2188,27 +2187,11 @@ export function EtCourseEditorPage() {
       )}
 
       {/*
-        邀請碼（#247 補 #204 之缺口）。在此之前它只在發布當下的 `PublishDialog` 出現
-        一次，而發布後**不提供重新產生**——教師關掉視窗就永久拿不回來，那門課再也發不
-        出邀請碼。後端只對 owner 回傳本欄位（非擁有者恆為 null），故此處不必再判 readOnly。
+        ℹ️ #836 拿掉了常駐的邀請碼橫幅。它原是 #247 補 #204 之缺口——當時邀請碼只在發布
+        當下的 `PublishDialog` 出現一次，教師關掉視窗就永久拿不回來。該缺口已由「邀請學員」
+        視窗的「邀請碼」頁籤補上，橫幅成為重複入口；已關閉課程則本就禁止邀請學員（見上方
+        「邀請學員」鈕的 `!reopening` 條件），不需呈現邀請碼。
       */}
-      {course?.invitation_code && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-            <span>課程邀請碼：</span>
-            <Typography component="span" fontFamily="monospace" fontWeight={700} letterSpacing={3}>
-              {course.invitation_code}
-            </Typography>
-            <IconButton
-              size="small"
-              aria-label="複製邀請碼"
-              onClick={() => void navigator.clipboard?.writeText(course.invitation_code ?? "")}
-            >
-              <ContentCopyIcon fontSize="small" />
-            </IconButton>
-          </Stack>
-        </Alert>
-      )}
 
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2 }}>
