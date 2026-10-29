@@ -200,16 +200,10 @@ async function fillDateTime(label: RegExp, keys: string) {
 const REOPEN_FLOW_TIMEOUT = 15_000
 
 describe("ET05 課程關閉與再開課", () => {
-  it("編輯頁的邀請碼不帶「發布後永久不可變更」的括號說明（#359 第 2 項）", async () => {
-    useCourse("PUBLISHED")
-    renderEditor()
-
-    // 邀請碼本身與複製鈕行為不變（AC）
-    expect(await screen.findByText("01234567")).toBeInTheDocument()
-    // 規則改由 ET05 手冊承載（「邀請碼於發布當下產生，之後沿用同一組」）——畫面不寫、
-    // 手冊寫「看不出來的規則」是刻意的分工。
-    expect(screen.queryByText(/永久不可變更/)).not.toBeInTheDocument()
-  })
+  // ℹ️ #836 移除了編輯頁常駐的邀請碼橫幅，原本釘在這裡的 #359 第 2 項守門隨之搬家：
+  // 「編輯頁的邀請碼不帶『發布後永久不可變更』的括號說明」改在
+  // `CourseEditorPage.inviteCodeBanner.test.tsx` 對「邀請學員」視窗驗——邀請碼現在只在
+  // 那裡顯示，會有人補上那句說明的也是那裡。發布當下的結果視窗另有 `PublishDialog.test.tsx`。
 
   it("已發布課程顯示「關閉課程」，不顯示「再開課」", async () => {
     useCourse("PUBLISHED")
