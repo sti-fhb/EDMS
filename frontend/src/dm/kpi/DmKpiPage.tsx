@@ -313,12 +313,16 @@ export function DmKpiPage() {
                   ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
               <TableContainer>
                 <Table size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
+                  {/* #841：「目前版本」4 字需 88px（4×14 ＋ 左右內距 32），原本 9% 在
+                      minWidth 940 下只有 84px。自「文件」勻 1% 過來——那一欄 28% 遠超過
+                      其表頭所需，是本表最寬鬆的。⛔ 不要改用加大 minWidth 解決（#835 的
+                      940 上限是為了不讓桌機新增橫向捲軸）。 */}
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ width: "4%" }} />
-                      <TableCell sx={{ width: "28%" }}>文件</TableCell>
+                      <TableCell sx={{ width: "27%" }}>文件</TableCell>
                       <TableCell sx={{ width: "11%" }}>分類</TableCell>
-                      <TableCell sx={{ width: "9%" }}>目前版本</TableCell>
+                      <TableCell sx={{ width: "10%" }}>目前版本</TableCell>
                       <TableCell sx={{ width: "8%" }} align="right">
                         應看
                       </TableCell>
